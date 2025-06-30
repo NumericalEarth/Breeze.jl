@@ -58,12 +58,8 @@ u_bcs = FieldBoundaryConditions(bottom=FluxBoundaryCondition(u_drag, field_depen
 v_bcs = FieldBoundaryConditions(bottom=FluxBoundaryCondition(v_drag, field_dependencies=(:u, :v), parameters=u★))
 
 coriolis = FPlane(f=3.76e-5)
-uᵍ = Field{Nothing, Nothing, Center}(grid)
-vᵍ = Field{Nothing, Nothing, Center}(grid)
 uᵍ_bomex = AtmosphericProfilesLibrary.Bomex_geostrophic_u(FT)
 vᵍ_bomex = AtmosphericProfilesLibrary.Bomex_geostrophic_v(FT)
-set!(uᵍ, z -> uᵍ_bomex(z))
-set!(vᵍ, z -> vᵍ_bomex(z))
 
 Fu = Field{Nothing, Nothing, Center}(grid)
 Fv = Field{Nothing, Nothing, Center}(grid)
@@ -99,10 +95,16 @@ end
     return - w_dz_Q
 end
 
+# These empty fields are being used in the forcing. Missing a step where we calculate the plane averages of the model fields
 u_avg = Field{Nothing, Nothing, Center}(grid)
 v_avg = Field{Nothing, Nothing, Center}(grid)
 θ_avg = Field{Nothing, Nothing, Center}(grid)
 q_avg = Field{Nothing, Nothing, Center}(grid)
+
+# ## Test only! see what happens if we use the initial condition as the plane-average profile @ all timesteps 
+# set!(u_avg, z -> u_bomex(z))
+# set!(θ_avg, z -> θ_bomex(z))
+# set!(q_avg, z -> q_bomex(z))
 
 wˢ = Field{Nothing, Nothing, Face}(grid)
 w_bomex = AtmosphericProfilesLibrary.Bomex_subsidence(FT)
@@ -126,14 +128,14 @@ dqdt_bomex = AtmosphericProfilesLibrary.Bomex_dqtdt(FT)
 set!(drying, z -> dqdt_bomex(z))
 Fq_drying = Forcing(drying)
 q_forcing = (Fq_precip, Fq_drying, Fq_subsidence)
-#q_forcing = (Fq_drying, Fq_subsidence)
-# q_forcing = Fq_subsidence
+
 
 Fθ_field = Field{Nothing, Nothing, Center}(grid)
 dTdt_bomex = AtmosphericProfilesLibrary.Bomex_dTdt(FT)
 set!(Fθ_field, z -> dTdt_bomex(1, z))
 Fθ_radiation = Forcing(Fθ_field)
 θ_forcing = (Fθ_radiation, Fθ_subsidence)
+
 
 advection = WENO() #(momentum=WENO(), θ=WENO(), q=WENO(bounds=(0, 1)))
 model = NonhydrostaticModel(; grid, advection, buoyancy, coriolis,
@@ -142,12 +144,25 @@ model = NonhydrostaticModel(; grid, advection, buoyancy, coriolis,
                             forcing = (q=q_forcing, u=u_forcing, v=v_forcing, θ=θ_forcing),
                             boundary_conditions = (θ=θ_bcs, q=q_bcs, u=u_bcs))
 
+##
+
+
 θϵ = 20
 qϵ = 1e-2
 θᵢ(x, y, z) = θ_bomex(z) + 1e-2 * θϵ * rand()
 qᵢ(x, y, z) = q_bomex(z) + 1e-2 * qϵ * rand()
 uᵢ(x, y, z) = u_bomex(z)
 set!(model, θ=θᵢ, q=qᵢ, u=uᵢ)
+
+using Oceananigans.Models: ForcingOperation
+θ_forcing_op = ForcingOperation(:θ, model)
+u_forcing_op = ForcingOperation(:u, model)
+using Oceananigans.Models: ForcingField
+θ_forcing_field = ForcingField(:θ, model)
+u_forcing_field = ForcingField(:u, model)
+compute!(u_forcing_field)
+compute!(θ_forcing_field)
+
 
 simulation = Simulation(model, Δt=10, stop_time=6hours)
 conjure_time_step_wizard!(simulation, cfl=0.7)
@@ -195,74 +210,95 @@ add_callback!(simulation, progress, IterationInterval(10))
 # outputs = merge(model.velocities, model.tracers, (; T, qˡ, qᵛ★, Sʳ))
 outputs = merge(model.velocities, model.tracers, (; T, qˡ, qᵛ★))
 
-ow = JLD2Writer(model, outputs,
-                filename = "bomex.jld2",
+# Output slices instead of 3d fields
+ow_yz = JLD2Writer(model, outputs,
+                indices = (1,:,:),
+                filename = "bomex_yz.jld2",
                 schedule = TimeInterval(1minutes),
                 overwrite_existing = true)
 
-simulation.output_writers[:jld2] = ow
 
+ow_xz = JLD2Writer(model, outputs,
+                indices = (:,1,:),
+                filename = "bomex_xz.jld2",
+                schedule = TimeInterval(1minutes),
+                overwrite_existing = true)
+
+# Output some average profiles
+u_avg =  Field(Average(model.velocities.u, dims=(1, 2)))
+v_avg =  Field(Average(model.velocities.u, dims=(1, 2)))
+θ_avg =  Field(Average(model.tracers.θ, dims=(1, 2)))
+q_avg =  Field(Average(model.tracers.q, dims=(1, 2)))
+qˡ_avg =  Field(Average(qˡ, dims=(1, 2)))
+
+ow_profiles = JLD2Writer(model, (; u_avg, v_avg, θ_avg, q_avg, qˡ_avg),
+                filename = "bomex_profiles.jld2",
+                schedule = TimeInterval(1minutes),
+                overwrite_existing = true)
+
+
+push!(simulation.output_writers, ow_xz, ow_yz, ow_profiles)
 run!(simulation)
 
-wt = FieldTimeSeries("bomex.jld2", "w")
-θt = FieldTimeSeries("bomex.jld2", "θ")
-Tt = FieldTimeSeries("bomex.jld2", "T")
-qt = FieldTimeSeries("bomex.jld2", "q")
-qˡt = FieldTimeSeries("bomex.jld2", "qˡ")
-times = qt.times
-Nt = length(θt)
+# wt = FieldTimeSeries("bomex.jld2", "w")
+# θt = FieldTimeSeries("bomex.jld2", "θ")
+# Tt = FieldTimeSeries("bomex.jld2", "T")
+# qt = FieldTimeSeries("bomex.jld2", "q")
+# qˡt = FieldTimeSeries("bomex.jld2", "qˡ")
+# times = qt.times
+# Nt = length(θt)
 
-using GLMakie, Printf
+# using GLMakie, Printf
 
-fig = Figure(size=(1200, 800), fontsize=12)
-axθ = Axis(fig[1, 1], xlabel="x (m)", ylabel="z (m)")
-axq = Axis(fig[1, 2], xlabel="x (m)", ylabel="z (m)")
-axT = Axis(fig[2, 1], xlabel="x (m)", ylabel="z (m)")
-axqˡ = Axis(fig[2, 2], xlabel="x (m)", ylabel="z (m)")
-axw = Axis(fig[3, 1], xlabel="x (m)", ylabel="z (m)")
+# fig = Figure(size=(1200, 800), fontsize=12)
+# axθ = Axis(fig[1, 1], xlabel="x (m)", ylabel="z (m)")
+# axq = Axis(fig[1, 2], xlabel="x (m)", ylabel="z (m)")
+# axT = Axis(fig[2, 1], xlabel="x (m)", ylabel="z (m)")
+# axqˡ = Axis(fig[2, 2], xlabel="x (m)", ylabel="z (m)")
+# axw = Axis(fig[3, 1], xlabel="x (m)", ylabel="z (m)")
 
-Nt = length(θt)
-slider = Slider(fig[4, 1:2], range=1:Nt, startvalue=1)
+# Nt = length(θt)
+# slider = Slider(fig[4, 1:2], range=1:Nt, startvalue=1)
 
-n = slider.value #Observable(length(θt))
-wn = @lift view(wt[$n], :, 1, :)
-θn = @lift view(θt[$n], :, 1, :)
-qn = @lift view(qt[$n], :, 1, :)
-Tn = @lift view(Tt[$n], :, 1, :)
-qˡn = @lift view(qˡt[$n], :, 1, :)
-title = @lift "t = $(prettytime(times[$n]))"
+# n = slider.value #Observable(length(θt))
+# wn = @lift view(wt[$n], :, 1, :)
+# θn = @lift view(θt[$n], :, 1, :)
+# qn = @lift view(qt[$n], :, 1, :)
+# Tn = @lift view(Tt[$n], :, 1, :)
+# qˡn = @lift view(qˡt[$n], :, 1, :)
+# title = @lift "t = $(prettytime(times[$n]))"
 
 
-fig[0, :] = Label(fig, title, fontsize=22, tellwidth=false)
+# fig[0, :] = Label(fig, title, fontsize=22, tellwidth=false)
 
-Tmin = 299 #minimum(Tt)
-Tmax = 301 #maximum(Tt)
-wlim = maximum(abs, wt) / 2
-qlim = maximum(abs, qt)
-qˡlim = maximum(abs, qˡt) / 2 + 1e-6
+# Tmin = 299 #minimum(Tt)
+# Tmax = 301 #maximum(Tt)
+# wlim = maximum(abs, wt) / 2
+# qlim = maximum(abs, qt)
+# qˡlim = maximum(abs, qˡt) / 2 + 1e-6
 
-Tₛ = θ_bomex(0)
-Δθ = θ_bomex(Lz) - θ_bomex(0)
-hmθ = heatmap!(axθ, θn, colorrange=(Tₛ, Tₛ+Δθ))
-hmq = heatmap!(axq, qn, colorrange=(0, qlim), colormap=:magma)
-hmT = heatmap!(axT, Tn, colorrange=(Tmin, Tmax))
-hmqˡ = heatmap!(axqˡ, qˡn, colorrange=(0, qˡlim), colormap=:magma)
-hmw = heatmap!(axw, wn, colorrange=(-wlim, wlim), colormap=:balance)
+# Tₛ = θ_bomex(0)
+# Δθ = θ_bomex(Lz) - θ_bomex(0)
+# hmθ = heatmap!(axθ, θn, colorrange=(Tₛ, Tₛ+Δθ))
+# hmq = heatmap!(axq, qn, colorrange=(0, qlim), colormap=:magma)
+# hmT = heatmap!(axT, Tn, colorrange=(Tmin, Tmax))
+# hmqˡ = heatmap!(axqˡ, qˡn, colorrange=(0, qˡlim), colormap=:magma)
+# hmw = heatmap!(axw, wn, colorrange=(-wlim, wlim), colormap=:balance)
 
-# Label(fig[0, 1], "θ", tellwidth=false)
-# Label(fig[0, 2], "q", tellwidth=false)
-# Label(fig[0, 1], "θ", tellwidth=false)
-# Label(fig[0, 2], "q", tellwidth=false)
+# # Label(fig[0, 1], "θ", tellwidth=false)
+# # Label(fig[0, 2], "q", tellwidth=false)
+# # Label(fig[0, 1], "θ", tellwidth=false)
+# # Label(fig[0, 2], "q", tellwidth=false)
 
-Colorbar(fig[1, 0], hmθ, label = "θ [K]", vertical=true)
-Colorbar(fig[1, 3], hmq, label = "q", vertical=true)
-Colorbar(fig[2, 0], hmT, label = "T [K]", vertical=true)
-Colorbar(fig[2, 3], hmqˡ, label = "qˡ", vertical=true)
-Colorbar(fig[3, 0], hmw, label = "w", vertical=true)
+# Colorbar(fig[1, 0], hmθ, label = "θ [K]", vertical=true)
+# Colorbar(fig[1, 3], hmq, label = "q", vertical=true)
+# Colorbar(fig[2, 0], hmT, label = "T [K]", vertical=true)
+# Colorbar(fig[2, 3], hmqˡ, label = "qˡ", vertical=true)
+# Colorbar(fig[3, 0], hmw, label = "w", vertical=true)
 
-fig
+# fig
 
-record(fig, "bomex.mp4", 1:Nt, framerate=12) do nn
-    @info "Drawing frame $nn of $Nt..."
-    n[] = nn
-end
+# record(fig, "bomex.mp4", 1:Nt, framerate=12) do nn
+#     @info "Drawing frame $nn of $Nt..."
+#     n[] = nn
+# end
