@@ -49,7 +49,7 @@ Fq_precip = Forcing(precipitation, field_dependencies=:q, parameters=microphysic
 
 # See Siebesma et al (2003), appendix B1-B2
 θ_bcs = FieldBoundaryConditions(bottom=FluxBoundaryCondition(8e-3))
-q_bcs = FieldBoundaryConditions(bottom=FluxBoundaryCondition(5.2e-5))
+q_bcs = FieldBoundaryConditions(bottom=FluxBoundaryCondition(1.4e-4))
 
 u★ = 0.28 # m/s
 @inline u_drag(x, y, t, u, v, u★) = - u★^2 * u / sqrt(u^2 + v^2)
@@ -144,7 +144,6 @@ model = NonhydrostaticModel(; grid, advection, buoyancy, coriolis,
                             forcing = (q=q_forcing, u=u_forcing, v=v_forcing, θ=θ_forcing),
                             boundary_conditions = (θ=θ_bcs, q=q_bcs, u=u_bcs))
 
-##
 
 
 θϵ = 20
@@ -154,17 +153,7 @@ qᵢ(x, y, z) = q_bomex(z) + 1e-2 * qϵ * rand()
 uᵢ(x, y, z) = u_bomex(z)
 set!(model, θ=θᵢ, q=qᵢ, u=uᵢ)
 
-using Oceananigans.Models: ForcingOperation
-θ_forcing_op = ForcingOperation(:θ, model)
-u_forcing_op = ForcingOperation(:u, model)
-using Oceananigans.Models: ForcingField
-θ_forcing_field = ForcingField(:θ, model)
-u_forcing_field = ForcingField(:u, model)
-compute!(u_forcing_field)
-compute!(θ_forcing_field)
-
-
-simulation = Simulation(model, Δt=10, stop_time=6hours)
+simulation = Simulation(model, Δt=10, stop_time=1hours)
 conjure_time_step_wizard!(simulation, cfl=0.7)
 
 T = AquaSkyLES.TemperatureField(model)
@@ -205,6 +194,25 @@ end
 
 add_callback!(simulation, progress, IterationInterval(10))
 
+u_avg_op = Field(Average(model.velocities.u, dims =(1,2)))
+
+function compute_averages!(model)
+    u_avg .= u_avg_op
+    return
+end
+
+simulation.callbacks[:update_averages] = Callback(compute_averages!, IterationInterval(1))
+
+# # have a look at the forcing that we're applying
+# using Oceananigans.Models: ForcingOperation
+# using Oceananigans.Models: ForcingField
+# θ_forcing_op = ForcingOperation(:θ, model)
+# u_forcing_op = ForcingOperation(:u, model)
+# θ_forcing_field = ForcingField(:θ, model)
+# u_forcing_field = ForcingField(:u, model)
+# compute!(u_forcing_field)
+# compute!(θ_forcing_field)
+
 # using Oceananigans.Models: ForcingOperation
 # Sʳ = ForcingOperation(:q, model)
 # outputs = merge(model.velocities, model.tracers, (; T, qˡ, qᵛ★, Sʳ))
@@ -225,16 +233,17 @@ ow_xz = JLD2Writer(model, outputs,
                 overwrite_existing = true)
 
 # Output some average profiles
-u_avg =  Field(Average(model.velocities.u, dims=(1, 2)))
-v_avg =  Field(Average(model.velocities.u, dims=(1, 2)))
-θ_avg =  Field(Average(model.tracers.θ, dims=(1, 2)))
-q_avg =  Field(Average(model.tracers.q, dims=(1, 2)))
-qˡ_avg =  Field(Average(qˡ, dims=(1, 2)))
+u_prof =  Field(Average(model.velocities.u, dims=(1, 2)))
+v_prof =  Field(Average(model.velocities.v, dims=(1, 2)))
+θ_prof =  Field(Average(model.tracers.θ, dims=(1, 2)))
+q_prof =  Field(Average(model.tracers.q, dims=(1, 2)))
+qˡ_prof =  Field(Average(qˡ, dims=(1, 2)))
 
-ow_profiles = JLD2Writer(model, (; u_avg, v_avg, θ_avg, q_avg, qˡ_avg),
+ow_profiles = JLD2Writer(model, (; u_prof, v_prof, θ_prof, q_prof, qˡ_prof),
                 filename = "bomex_profiles.jld2",
                 schedule = TimeInterval(1minutes),
                 overwrite_existing = true)
+
 
 
 push!(simulation.output_writers, ow_xz, ow_yz, ow_profiles)
