@@ -154,8 +154,8 @@ conjure_time_step_wizard!(simulation, cfl=0.7)
 # Write a callback to compute *_avg_f
 u_avg = Field(Average(model.velocities.u, dims=(1, 2)))
 v_avg = Field(Average(model.velocities.v, dims=(1, 2)))
-θ_avg = Field(Average(model.velocities.θ, dims=(1, 2)))
-q_avg = Field(Average(model.velocities.q, dims=(1, 2)))
+θ_avg = Field(Average(model.tracers.θ, dims=(1, 2)))
+q_avg = Field(Average(model.tracers.q, dims=(1, 2)))
 
 function compute_averages!(sim)
     compute!(u_avg)
