@@ -10,6 +10,8 @@ using Oceananigans
 using Oceananigans: AbstractModel
 using Oceananigans.Grids: AbstractGrid
 
+using Adapt
+
 import Oceananigans.BuoyancyFormulations: AbstractBuoyancyFormulation,
                                           buoyancy_perturbationᶜᶜᶜ,
                                           required_tracers
@@ -110,6 +112,10 @@ struct SaturationKernel{T, P}
     temperature :: T
 end
 
+Adapt.adapt_structure(to, sk::SaturationKernel) =
+    SaturationKernel(adapt(to, sk.phase_transition),
+                     adapt(to, sk.temperature))
+
 @inline function (kernel::SaturationKernel)(i, j, k, grid, buoyancy)
     T = kernel.temperature
     return saturation_specific_humidity(i, j, k, grid, buoyancy, T, kernel.phase_transition)
@@ -132,6 +138,8 @@ end
 struct CondensateKernel{T}
     temperature :: T
 end
+
+Adapt.adapt_structure(to, ck::CondensateKernel) = CondensateKernel(adapt(to, ck.temperature))
 
 @inline function condensate_specific_humidity(i, j, k, grid, mb::MoistAirBuoyancy, T, q)
     z = Oceananigans.Grids.znode(i, j, k, grid, c, c, c)
