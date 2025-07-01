@@ -27,16 +27,17 @@ import ..Thermodynamics:
     saturation_specific_humidity,
     condensate_specific_humidity
 
-struct MoistAirBuoyancy{FT} <: AbstractBuoyancyFormulation{Nothing}
-    thermodynamics :: AtmosphereThermodynamics{FT}
+struct MoistAirBuoyancy{FT, AT} <: AbstractBuoyancyFormulation{Nothing}
     reference_constants :: ReferenceConstants{FT}
+    thermodynamics :: AT
 end
 
 function MoistAirBuoyancy(FT=Oceananigans.defaults.FloatType;
-                           thermodynamics = AtmosphereThermodynamics(FT),
-                           reference_constants = ReferenceConstants{FT}(101325, 290))
+                          thermodynamics = AtmosphereThermodynamics(FT),
+                          reference_constants = ReferenceConstants{FT}(101325, 290))
 
-    return MoistAirBuoyancy{FT}(thermodynamics, reference_constants)
+    AT = typeof(thermodynamics)
+    return MoistAirBuoyancy{FT, AT}(reference_constants, thermodynamics)
 end
 
 required_tracers(::MoistAirBuoyancy) = (:θ, :q)
