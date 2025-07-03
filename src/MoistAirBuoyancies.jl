@@ -39,7 +39,7 @@ end
                      thermodynamics = AtmosphereThermodynamics(FT),
                      reference_constants = ReferenceConstants{FT}(101325, 290))
 
-Return a MoistAirBuoyancy buoyancy formulation that can be provided as input to an
+Return a MoistAirBuoyancy formulation that can be provided as input to an
 [`AtmosphereModel`](@ref Breeze.AtmosphereModels.AtmosphereModel) or an
 `Oceananigans.NonhydrostaticModel`.
 
