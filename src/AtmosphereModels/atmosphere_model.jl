@@ -85,6 +85,7 @@ Return an AtmosphereModel that uses the anelastic approximation following
 
 Example
 =======
+```jldoctest
 julia> using Breeze, Breeze.AtmosphereModels, Oceananigans
 
 julia> grid = RectilinearGrid(size=(8, 8, 8), extent=(1, 2, 3));
@@ -97,6 +98,7 @@ AtmosphereModel{CPU, RectilinearGrid}(time = 0 seconds, iteration = 0)
 ├── advection scheme: WENO(order=5)
 ├── tracers: ()
 └── coriolis: Nothing
+```
 """
 function AtmosphereModel(grid;
                          clock = Clock(grid),
