@@ -39,7 +39,29 @@ end
                      thermodynamics = AtmosphereThermodynamics(FT),
                      reference_constants = ReferenceConstants{FT}(101325, 290))
 
-Return a MoistAirBuoyancy.
+Return a MoistAirBuoyancy buoyancy formulation that can be provided as input to an
+[`AtmosphereModel`](@ref Breeze.AtmosphereModels.AtmosphereModel) or an
+`Oceananigans.NonhydrostaticModel`.
+
+```jldoctest
+julia> using Breeze, Oceananigans
+
+julia> buoyancy = MoistAirBuoyancy()
+MoistAirBuoyancy
+├── reference_constants: Breeze.Thermodynamics.ReferenceConstants{Float64}
+└── thermodynamics: AtmosphereThermodynamics
+
+julia> model = NonhydrostaticModel(; grid = RectilinearGrid(size=(8, 8, 8), extent=(1, 2, 3)),
+                                     buoyancy, tracers = (:θ, :q))
+NonhydrostaticModel{CPU, RectilinearGrid}(time = 0 seconds, iteration = 0)
+├── grid: 8×8×8 RectilinearGrid{Float64, Periodic, Periodic, Bounded} on CPU with 3×3×3 halo
+├── timestepper: RungeKutta3TimeStepper
+├── advection scheme: Centered(order=2)
+├── tracers: (θ, q)
+├── closure: Nothing
+├── buoyancy: MoistAirBuoyancy with ĝ = NegativeZDirection()
+└── coriolis: Nothing
+```
 """
 function MoistAirBuoyancy(FT=Oceananigans.defaults.FloatType;
                           thermodynamics = AtmosphereThermodynamics(FT),
@@ -47,6 +69,14 @@ function MoistAirBuoyancy(FT=Oceananigans.defaults.FloatType;
 
     AT = typeof(thermodynamics)
     return MoistAirBuoyancy{FT, AT}(reference_constants, thermodynamics)
+end
+
+Base.summary(b::MoistAirBuoyancy) = "MoistAirBuoyancy"
+
+function Base.show(io::IO, b::MoistAirBuoyancy)
+    print(io, summary(b), "\n",
+        "├── reference_constants: ", summary(b.reference_constants), "\n",
+        "└── thermodynamics: ", summary(b.thermodynamics))
 end
 
 required_tracers(::MoistAirBuoyancy) = (:θ, :q)
