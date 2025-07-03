@@ -46,6 +46,9 @@ Return a MoistAirBuoyancy formulation that can be provided as input to an
 !!! note "Required tracers"
     `MoistAirBuoyancy` requires tracers `q` and `θ` to be included in the model.
 
+Example
+=======
+
 ```jldoctest
 julia> using Breeze, Oceananigans
 
