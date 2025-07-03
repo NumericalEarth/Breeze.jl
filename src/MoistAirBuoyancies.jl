@@ -34,6 +34,13 @@ struct MoistAirBuoyancy{FT, AT} <: AbstractBuoyancyFormulation{Nothing}
     thermodynamics :: AT
 end
 
+"""
+    MoistAirBuoyancy(FT=Oceananigans.defaults.FloatType;
+                     thermodynamics = AtmosphereThermodynamics(FT),
+                     reference_constants = ReferenceConstants{FT}(101325, 290))
+
+Return a MoistAirBuoyancy.
+"""
 function MoistAirBuoyancy(FT=Oceananigans.defaults.FloatType;
                           thermodynamics = AtmosphereThermodynamics(FT),
                           reference_constants = ReferenceConstants{FT}(101325, 290))
@@ -47,7 +54,7 @@ reference_density(z, mb::MoistAirBuoyancy) = reference_density(z, mb.reference_c
 base_density(mb::MoistAirBuoyancy) = base_density(mb.reference_constants, mb.thermodynamics)
 
 #####
-##### 
+#####
 #####
 
 const c = Center()
@@ -189,7 +196,7 @@ condensate_specific_humidity(T, state::HeightReferenceThermodynamicState, ref, t
     T₁ = Π * state.θ
     qˡ₁ = condensate_specific_humidity(T₁, state, ref, thermo)
     qˡ₁ <= 0 && return T₁
-    
+
     # If we made it this far, we have condensation
     r₁ = saturation_adjustment_residual(T₁, Π, qˡ₁, state, thermo)
 
@@ -202,7 +209,7 @@ condensate_specific_humidity(T, state::HeightReferenceThermodynamicState, ref, t
     # Saturation adjustment
     R = sqrt(max(T₂, T₁))
     ϵ = convert(FT, 1e-4)
-    δ = ϵ * R 
+    δ = ϵ * R
     iter = 0
 
     while abs(r₂ - r₁) > δ
