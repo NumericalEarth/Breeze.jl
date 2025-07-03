@@ -49,9 +49,8 @@ changes with temperature for a liquid-vapor phase transition:
 
 The Clausius-Clapeyron relation describes the pressure-temperature relationship during phase transitions:
 
-```math
     d/dT log(p_sat) = L / (Rv * T²)
-```
+
 where:
 
 - `p_sat` is the saturation vapor pressure
@@ -126,6 +125,19 @@ struct AtmosphereThermodynamics{FT, S, C, F}
     saturation :: S
     condensation :: C
     deposition :: F
+end
+
+Base.summary(at::AtmosphereThermodynamics) = "AtmosphereThermodynamics"
+
+function Base.show(io::IO, at::AtmosphereThermodynamics)
+    print(io, summary(at), "\n",
+        "├── molar_gas_constant: ", at.molar_gas_constant, "\n",
+        "├── gravitational_acceleration: ", at.gravitational_acceleration, "\n",
+        "├── dry_air: ", at.dry_air, "\n",
+        "├── vapor: ", at.vapor, "\n",
+        "├── saturation: ", at.saturation, "\n",
+        "├── condensation: ", at.condensation, "\n",
+        "└── deposition: ", at.deposition)
 end
 
 Base.eltype(::AtmosphereThermodynamics{FT}) where FT = FT

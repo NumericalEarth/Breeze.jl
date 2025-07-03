@@ -1,3 +1,7 @@
+"""
+Julia package for finite volume GPU and CPU large eddy simulations (LES) of atmospheric flows.
+The abstractions, design, and finite volume engine are based on Oceananigans.
+"""
 module Breeze
 
 export MoistAirBuoyancy, AtmosphereThermodynamics, ReferenceConstants
