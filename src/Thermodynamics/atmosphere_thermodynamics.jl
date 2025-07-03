@@ -49,9 +49,8 @@ changes with temperature for a liquid-vapor phase transition:
 
 The Clausius-Clapeyron relation describes the pressure-temperature relationship during phase transitions:
 
-```math
     d/dT log(p_sat) = L / (Rv * T²)
-```
+
 where:
 
 - `p_sat` is the saturation vapor pressure
