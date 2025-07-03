@@ -1,55 +1,55 @@
 # API Documentation
 
-## Public
-
 ```@autodocs
 Modules = [Breeze]
 Private = false
 ```
 
-## Thermodynamics
+## Public API
+
+### Thermodynamics
 
 ```@autodocs
 Modules = [Breeze.Thermodynamics]
 Private = false
 ```
 
-## MoistAirBuoyancies
+### MoistAirBuoyancies
 
 ```@autodocs
 Modules = [Breeze.MoistAirBuoyancies]
 Private = false
 ```
 
-## AtmosphereModels
+### AtmosphereModels
 
 ```@autodocs
 Modules = [Breeze.AtmosphereModels]
 Private = false
 ```
 
-## Private
+## Private API
 
 ```@autodocs
 Modules = [Breeze]
 Public = false
 ```
 
-## Thermodynamics
+### Thermodynamics
 
 ```@autodocs
 Modules = [Breeze.Thermodynamics]
 Public = false
 ```
 
-## MoistAirBuoyancies
+### MoistAirBuoyancies
 
 ```@autodocs
 Modules = [Breeze.MoistAirBuoyancies]
 Public = false
 ```
 
-## AtmosphereModels
+### AtmosphereModels
 
 ```@autodocs
 Modules = [Breeze.AtmosphereModels]
