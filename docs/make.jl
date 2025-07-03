@@ -1,6 +1,8 @@
 using Breeze
 using Documenter
 
+using Breeze.AtmosphereModels
+
 DocMeta.setdocmeta!(Breeze, :DocTestSetup, :(using Breeze); recursive=true)
 
 makedocs(sitename="Breeze",

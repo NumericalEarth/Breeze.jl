@@ -10,6 +10,8 @@ using Oceananigans
 using Oceananigans: AbstractModel
 using Oceananigans.Grids: AbstractGrid
 
+using Adapt
+
 import Oceananigans.BuoyancyFormulations: AbstractBuoyancyFormulation,
                                           buoyancy_perturbationᶜᶜᶜ,
                                           required_tracers
@@ -27,16 +29,24 @@ import ..Thermodynamics:
     saturation_specific_humidity,
     condensate_specific_humidity
 
-struct MoistAirBuoyancy{FT} <: AbstractBuoyancyFormulation{Nothing}
-    thermodynamics :: AtmosphereThermodynamics{FT}
+struct MoistAirBuoyancy{FT, AT} <: AbstractBuoyancyFormulation{Nothing}
     reference_constants :: ReferenceConstants{FT}
+    thermodynamics :: AT
 end
 
-function MoistAirBuoyancy(FT=Oceananigans.defaults.FloatType;
-                           thermodynamics = AtmosphereThermodynamics(FT),
-                           reference_constants = ReferenceConstants{FT}(101325, 290))
+"""
+    MoistAirBuoyancy(FT=Oceananigans.defaults.FloatType;
+                     thermodynamics = AtmosphereThermodynamics(FT),
+                     reference_constants = ReferenceConstants{FT}(101325, 290))
 
-    return MoistAirBuoyancy{FT}(thermodynamics, reference_constants)
+Return a MoistAirBuoyancy.
+"""
+function MoistAirBuoyancy(FT=Oceananigans.defaults.FloatType;
+                          thermodynamics = AtmosphereThermodynamics(FT),
+                          reference_constants = ReferenceConstants{FT}(101325, 290))
+
+    AT = typeof(thermodynamics)
+    return MoistAirBuoyancy{FT, AT}(reference_constants, thermodynamics)
 end
 
 required_tracers(::MoistAirBuoyancy) = (:θ, :q)
@@ -44,7 +54,7 @@ reference_density(z, mb::MoistAirBuoyancy) = reference_density(z, mb.reference_c
 base_density(mb::MoistAirBuoyancy) = base_density(mb.reference_constants, mb.thermodynamics)
 
 #####
-##### 
+#####
 #####
 
 const c = Center()
@@ -109,6 +119,10 @@ struct SaturationKernel{T, P}
     temperature :: T
 end
 
+Adapt.adapt_structure(to, sk::SaturationKernel) =
+    SaturationKernel(adapt(to, sk.phase_transition),
+                     adapt(to, sk.temperature))
+
 @inline function (kernel::SaturationKernel)(i, j, k, grid, buoyancy)
     T = kernel.temperature
     return saturation_specific_humidity(i, j, k, grid, buoyancy, T, kernel.phase_transition)
@@ -131,6 +145,8 @@ end
 struct CondensateKernel{T}
     temperature :: T
 end
+
+Adapt.adapt_structure(to, ck::CondensateKernel) = CondensateKernel(adapt(to, ck.temperature))
 
 @inline function condensate_specific_humidity(i, j, k, grid, mb::MoistAirBuoyancy, T, q)
     z = Oceananigans.Grids.znode(i, j, k, grid, c, c, c)
@@ -180,7 +196,7 @@ condensate_specific_humidity(T, state::HeightReferenceThermodynamicState, ref, t
     T₁ = Π * state.θ
     qˡ₁ = condensate_specific_humidity(T₁, state, ref, thermo)
     qˡ₁ <= 0 && return T₁
-    
+
     # If we made it this far, we have condensation
     r₁ = saturation_adjustment_residual(T₁, Π, qˡ₁, state, thermo)
 
@@ -193,7 +209,7 @@ condensate_specific_humidity(T, state::HeightReferenceThermodynamicState, ref, t
     # Saturation adjustment
     R = sqrt(max(T₂, T₁))
     ϵ = convert(FT, 1e-4)
-    δ = ϵ * R 
+    δ = ϵ * R
     iter = 0
 
     while abs(r₂ - r₁) > δ

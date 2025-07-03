@@ -11,12 +11,12 @@ Under the hood, Breeze's abstractions, design, and finite volume engine are base
 
 Breeze provides two ways to simulate atmospheric flows:
 
-* A `MoistAirBuoyancy` that can be used with Oceananigans' `NonhydrostaticModel` to simulate atmospheric flows with the Boussinesq approximation.
-* A prototype `AtmosphereModel`, which uses the anelastic approximation following [Pauluis 2008](https://journals.ametsoc.org/view/journals/atsc/65/8/2007jas2475.1.xml).
+* A [`MoistAirBuoyancy`](@ref) that can be used with Oceananigans' `NonhydrostaticModel` to simulate atmospheric flows with the Boussinesq approximation.
+* A prototype [`AtmosphereModel`](@ref Breeze.AtmosphereModels.AtmosphereModel) that uses the anelastic approximation following [Pauluis (2008)](https://journals.ametsoc.org/view/journals/atsc/65/8/200s7jas2475.1.xml).
 
 ## Installation
 
-To use Breeze, install directly from github:
+To use Breeze, install directly from GitHub:
 
 ```julia
 using Pkg
@@ -29,7 +29,7 @@ A basic free convection simulation:
 
 ```@setup intro
 using CairoMakie
-CairoMakie.activate!(type = "png")
+CairoMakie.activate!(type = "svg")
 ```
 
 ```@example intro
@@ -57,7 +57,7 @@ model = NonhydrostaticModel(; grid, advection, buoyancy,
                             tracers = (:θ, :q),
                             boundary_conditions = (θ=θ_bcs, q=q_bcs))
 
-Δθ = 5 # K
+Δθ = 5 # ᵒK
 Tₛ = reference_constants.reference_potential_temperature # K
 θᵢ(x, z) = Tₛ + Δθ * z / grid.Lz + 1e-2 * Δθ * randn()
 qᵢ(x, z) = 0 # 1e-2 + 1e-5 * rand()

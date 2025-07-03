@@ -1,8 +1,27 @@
 # API Documentation
 
+```@autodocs
+Modules = [Breeze]
+Private = false
+```
+
 ## Thermodynamics
 
-```@docs
-Breeze.AtmosphereThermodynamics
-Breeze.Thermodynamics.saturation_vapor_pressure
+```@autodocs
+Modules = [Breeze.Thermodynamics]
+Private = false
+```
+
+## MoistAirBuoyancies
+
+```@autodocs
+Modules = [Breeze.MoistAirBuoyancies]
+Private = false
+```
+
+## AtmosphereModels
+
+```@autodocs
+Modules = [Breeze.AtmosphereModels]
+Private = false
 ```

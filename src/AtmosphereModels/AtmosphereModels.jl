@@ -1,5 +1,7 @@
 module AtmosphereModels
 
+export AtmosphereModel
+
 include("atmosphere_model.jl")
 include("anelastic_formulation.jl")
 include("saturation_adjustment.jl")
