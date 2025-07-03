@@ -66,6 +66,23 @@ function default_formulation(grid, thermo)
     return AnelasticFormulation(grid, constants, thermo)
 end
 
+"""
+    AtmosphereModel(grid;
+                    clock = Clock(grid),
+                    thermodynamics = AtmosphereThermodynamics(eltype(grid)),
+                    formulation = default_formulation(grid, thermodynamics),
+                    absolute_humidity = DefaultValue(),
+                    tracers = tuple(),
+                    coriolis = nothing,
+                    boundary_conditions = NamedTuple(),
+                    forcing = NamedTuple(),
+                    advection = WENO(order=5),
+                    microphysics = WarmPhaseSaturationAdjustment(),
+                    timestepper = :RungeKutta3)
+
+Return an AtmosphereModel that uses the anelastic approximation following
+[Pauluis (2008)](https://journals.ametsoc.org/view/journals/atsc/65/8/200s7jas2475.1.xml).
+"""
 function AtmosphereModel(grid;
                          clock = Clock(grid),
                          thermodynamics = AtmosphereThermodynamics(eltype(grid)),
