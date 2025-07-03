@@ -5,4 +5,4 @@ Oceananigans = "9e8cae18-63c1-5223-a75c-80ca9d6e9a09"
 
 [compat]
 Documenter = "1"
-CairoMakie = "0.13, 0.14, 0.15"
+CairoMakie = "0.13, 0.14"
