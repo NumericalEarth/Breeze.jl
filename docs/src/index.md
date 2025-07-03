@@ -63,7 +63,7 @@ Tₛ = reference_constants.reference_potential_temperature # K
 qᵢ(x, z) = 0 # 1e-2 + 1e-5 * rand()
 set!(model, θ=θᵢ, q=qᵢ)
 
-simulation = Simulation(model, Δt=10, stop_time=20)#hours)
+simulation = Simulation(model, Δt=10, stop_time=2hours)
 conjure_time_step_wizard!(simulation, cfl=0.7)
 
 run!(simulation)
