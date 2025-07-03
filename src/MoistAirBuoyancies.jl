@@ -43,6 +43,9 @@ Return a MoistAirBuoyancy formulation that can be provided as input to an
 [`AtmosphereModel`](@ref Breeze.AtmosphereModels.AtmosphereModel) or an
 `Oceananigans.NonhydrostaticModel`.
 
+!!! note "Required tracers"
+    `MoistAirBuoyancy` requires tracers `q` and `θ` to be included in the model.
+
 ```jldoctest
 julia> using Breeze, Oceananigans
 
