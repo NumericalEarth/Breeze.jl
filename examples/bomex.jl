@@ -4,26 +4,23 @@ using Oceananigans.Units
 using Printf
 using Breeze
 
-arch = CPU()
-
 # Siebesma et al (2003) resolution!
 # DOI: https://doi.org/10.1175/1520-0469(2003)60<1201:ALESIS>2.0.CO;2
-# Nx = Ny = 64
-# Nz = 75
-
-Nx = 128
-Ny = 128
-Nz = 150
+Nx = Ny = 64
+Nz = 75
 
 Lx = 6400
 Ly = 6400
 Lz = 3000
+
+arch = CPU() # trying changing to GPU() 
 
 grid = RectilinearGrid(arch,
                        size = (Nx, Ny, Nz),
                        x = (0, Lx),
                        y = (0, Ly),
                        z = (0, Lz),
+                       halo = (5, 5, 5),
                        topology = (Periodic, Periodic, Bounded))
 
 using AtmosphericProfilesLibrary                       
@@ -132,7 +129,7 @@ set!(Fθ_field, z -> dTdt_bomex(1, z))
 Fθ_radiation = Forcing(Fθ_field)
 θ_forcing = (Fθ_radiation, Fθ_subsidence)
 
-advection = WENO() #(momentum=WENO(), θ=WENO(), q=WENO(bounds=(0, 1)))
+advection = WENO(order=9) #(momentum=WENO(), θ=WENO(), q=WENO(bounds=(0, 1)))
 tracers = (:θ, :q)
 model = NonhydrostaticModel(; grid, advection, buoyancy, coriolis,
                             tracers = (:θ, :q),
