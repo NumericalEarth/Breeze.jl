@@ -33,7 +33,7 @@ const AnelasticModel = AtmosphereModel{<:AnelasticFormulation}
 function Base.summary(formulation::AnelasticFormulation)
     p₀ = formulation.constants.base_pressure
     θᵣ = formulation.constants.reference_potential_temperature
-    return string("AnelasticFormulation(p₀=", prettysummary(p₀), 
+    return string("AnelasticFormulation(p₀=", prettysummary(p₀),
                   ", θᵣ=", prettysummary(θᵣ), ")")
 end
 
@@ -260,7 +260,7 @@ end
 """
 Update the predictor momentum (ρu, ρv, ρw) with the non-hydrostatic pressure via
 
-    `u^{n+1} = u^n - δₓp_{NH} / Δx * Δt`
+    u^{n+1} = u^n - δₓp_{NH} / Δx * Δt
 """
 @kernel function _pressure_correct_momentum!(M, grid, Δt, αʳ_pₙ, ρʳ)
     i, j, k = @index(Global, NTuple)
@@ -268,9 +268,9 @@ Update the predictor momentum (ρu, ρv, ρw) with the non-hydrostatic pressure 
     ρᶠ = ℑzᵃᵃᶠ(i, j, k, grid, ρʳ)
     ρᶜ = @inbounds ρʳ[i, j, k]
 
-    @inbounds M.ρu[i, j, k] -= ρᶜ * Δt * ∂xᶠᶜᶜ(i, j, k, grid, αʳ_pₙ) 
-    @inbounds M.ρv[i, j, k] -= ρᶜ * Δt * ∂yᶜᶠᶜ(i, j, k, grid, αʳ_pₙ) 
-    @inbounds M.ρw[i, j, k] -= ρᶠ * Δt * ∂zᶜᶜᶠ(i, j, k, grid, αʳ_pₙ) 
+    @inbounds M.ρu[i, j, k] -= ρᶜ * Δt * ∂xᶠᶜᶜ(i, j, k, grid, αʳ_pₙ)
+    @inbounds M.ρv[i, j, k] -= ρᶜ * Δt * ∂yᶜᶠᶜ(i, j, k, grid, αʳ_pₙ)
+    @inbounds M.ρw[i, j, k] -= ρᶠ * Δt * ∂zᶜᶜᶠ(i, j, k, grid, αʳ_pₙ)
 end
 
 function make_pressure_correction!(model::AnelasticModel, Δt)
