@@ -98,19 +98,20 @@ end
     return - w_dz_Q
 end
 
-u_avg = Field{Nothing, Nothing, Center}(grid)
-v_avg = Field{Nothing, Nothing, Center}(grid)
-θ_avg = Field{Nothing, Nothing, Center}(grid)
-q_avg = Field{Nothing, Nothing, Center}(grid)
+# f for "forcing"
+u_avg_f = Field{Nothing, Nothing, Center}(grid)
+v_avg_f = Field{Nothing, Nothing, Center}(grid)
+θ_avg_f = Field{Nothing, Nothing, Center}(grid)
+q_avg_f = Field{Nothing, Nothing, Center}(grid)
 
 wˢ = Field{Nothing, Nothing, Face}(grid)
 w_bomex = AtmosphericProfilesLibrary.Bomex_subsidence(FT)
 set!(wˢ, z -> w_bomex(z))
 
-Fu_subsidence = Forcing(u_subsidence, discrete_form=true, parameters=(; wˢ, u_avg))
-Fv_subsidence = Forcing(v_subsidence, discrete_form=true, parameters=(; wˢ, v_avg))
-Fθ_subsidence = Forcing(θ_subsidence, discrete_form=true, parameters=(; wˢ, θ_avg))
-Fq_subsidence = Forcing(q_subsidence, discrete_form=true, parameters=(; wˢ, q_avg))
+Fu_subsidence = Forcing(u_subsidence, discrete_form=true, parameters=(; u_avg=u_avg_f, wˢ))
+Fv_subsidence = Forcing(v_subsidence, discrete_form=true, parameters=(; v_avg=v_avg_f, wˢ))
+Fθ_subsidence = Forcing(θ_subsidence, discrete_form=true, parameters=(; θ_avg=θ_avg_f, wˢ))
+Fq_subsidence = Forcing(q_subsidence, discrete_form=true, parameters=(; q_avg=q_avg_f, wˢ))
 
 set!(Fu, z -> - coriolis.f * vᵍ_bomex(z))
 set!(Fv, z -> + coriolis.f * uᵍ_bomex(z))
@@ -149,6 +150,26 @@ set!(model, θ=θᵢ, q=qᵢ, u=uᵢ)
 
 simulation = Simulation(model, Δt=10, stop_time=6hours)
 conjure_time_step_wizard!(simulation, cfl=0.7)
+
+# Write a callback to compute *_avg_f
+u_avg = Field(Average(model.velocities.u, dims=(1, 2)))
+v_avg = Field(Average(model.velocities.v, dims=(1, 2)))
+θ_avg = Field(Average(model.tracers.θ, dims=(1, 2)))
+q_avg = Field(Average(model.tracers.q, dims=(1, 2)))
+
+function compute_averages!(sim)
+    compute!(u_avg)
+    compute!(v_avg)
+    compute!(θ_avg)
+    compute!(q_avg)
+    parent(u_avg_f) .= parent(u_avg)
+    parent(v_avg_f) .= parent(v_avg)
+    parent(θ_avg_f) .= parent(θ_avg)
+    parent(q_avg_f) .= parent(q_avg)
+    return nothing
+end
+
+add_callback!(simulation, compute_averages!)
 
 T = Breeze.TemperatureField(model)
 qˡ = Breeze.CondensateField(model, T)
