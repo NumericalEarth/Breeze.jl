@@ -82,6 +82,23 @@ end
 
 Return an AtmosphereModel that uses the anelastic approximation following
 [Pauluis (2008)](https://journals.ametsoc.org/view/journals/atsc/65/8/200s7jas2475.1.xml).
+
+Example
+=======
+```jldoctest
+julia> using Breeze, Breeze.AtmosphereModels, Oceananigans
+
+julia> grid = RectilinearGrid(size=(8, 8, 8), extent=(1, 2, 3));
+
+julia> model = AtmosphereModel(grid)
+AtmosphereModel{CPU, RectilinearGrid}(time = 0 seconds, iteration = 0)
+├── grid: 8×8×8 RectilinearGrid{Float64, Periodic, Periodic, Bounded} on CPU with 3×3×3 halo
+├── formulation: AnelasticFormulation(p₀=101325.0, θᵣ=288.0)
+├── timestepper: RungeKutta3TimeStepper
+├── advection scheme: WENO(order=5)
+├── tracers: ()
+└── coriolis: Nothing
+```
 """
 function AtmosphereModel(grid;
                          clock = Clock(grid),
