@@ -136,7 +136,7 @@ model = NonhydrostaticModel(; grid, advection, buoyancy, coriolis,
                             tracers = (:θ, :q),
                             # tracers = (:θ, :q, :qˡ, :qⁱ, :qʳ, :qˢ),
                             forcing = (; q=q_forcing, u=u_forcing, v=v_forcing, θ=θ_forcing),
-                            boundary_conditions = (θ=θ_bcs, q=q_bcs, u=u_bcs))
+                            boundary_conditions = (θ=θ_bcs, q=q_bcs, u=u_bcs, v=v_bcs))
 
 θϵ = 20
 qϵ = 1e-2
