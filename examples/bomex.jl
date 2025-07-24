@@ -13,7 +13,15 @@ Lx = 6400
 Ly = 6400
 Lz = 3000
 
-arch = CPU() # trying changing to GPU() 
+arch = CPU() # try changing to GPU()
+stop_time = 6hours
+testing = false # this is for CI
+
+if testing
+    # We use these values for CI
+    stop_time = 10minutes # 6hours
+    Nx = Ny = 4
+end
 
 grid = RectilinearGrid(arch,
                        size = (Nx, Ny, Nz),
@@ -145,7 +153,7 @@ qᵢ(x, y, z) = q_bomex(z) + 1e-2 * qϵ * rand()
 uᵢ(x, y, z) = u_bomex(z)
 set!(model, θ=θᵢ, q=qᵢ, u=uᵢ)
 
-simulation = Simulation(model, Δt=10, stop_time=6hours)
+simulation = Simulation(model; Δt=10, stop_time)
 conjure_time_step_wizard!(simulation, cfl=0.7)
 
 # Write a callback to compute *_avg_f
@@ -171,12 +179,15 @@ add_callback!(simulation, compute_averages!)
 T = Breeze.TemperatureField(model)
 qˡ = Breeze.CondensateField(model, T)
 qᵛ★ = Breeze.SaturationField(model, T)
+rh = Field(model.tracers.q / qᵛ★) # relative humidity
 δ = Field(model.tracers.q - qᵛ★)
 
 function progress(sim)
     compute!(T)
     compute!(qˡ)
     compute!(δ)
+    compute!(rh)
+
     q = sim.model.tracers.q
     θ = sim.model.tracers.θ
     u, v, w = sim.model.velocities
@@ -187,14 +198,15 @@ function progress(sim)
 
     qmin = minimum(q)
     qmax = maximum(q)
-    qˡmax = maximum(qˡ)
     δmax = maximum(δ)
+    qˡmax = maximum(qˡ)
+    rhmax = maximum(rh)
 
     θmin = minimum(θ)
     θmax = maximum(θ)
 
-    msg = @sprintf("Iter: %d, t: %s, Δt: %s, max|u|: (%.2e, %.2e, %.2e)",
-                    iteration(sim), prettytime(sim), prettytime(sim.Δt), umax, vmax, wmax)
+    msg = @sprintf("Iter: %d, t: %s, Δt: %s, max|u|: (%.2e, %.2e, %.2e), max(rh): %.2f",
+                    iteration(sim), prettytime(sim), prettytime(sim.Δt), umax, vmax, wmax, rhmax)
 
     msg *= @sprintf(", extrema(q): (%.2e, %.2e), max(qˡ): %.2e, max(δ): %.2e, extrema(θ): (%.2e, %.2e)",
                      qmin, qmax, qˡmax, δmax, θmin, θmax)
@@ -220,65 +232,68 @@ simulation.output_writers[:jld2] = ow
 
 run!(simulation)
 
-wt = FieldTimeSeries("bomex.jld2", "w")
-θt = FieldTimeSeries("bomex.jld2", "θ")
-Tt = FieldTimeSeries("bomex.jld2", "T")
-qt = FieldTimeSeries("bomex.jld2", "q")
-qˡt = FieldTimeSeries("bomex.jld2", "qˡ")
-times = qt.times
-Nt = length(θt)
+if !testing
 
-using GLMakie, Printf
+    wt = FieldTimeSeries("bomex.jld2", "w")
+    θt = FieldTimeSeries("bomex.jld2", "θ")
+    Tt = FieldTimeSeries("bomex.jld2", "T")
+    qt = FieldTimeSeries("bomex.jld2", "q")
+    qˡt = FieldTimeSeries("bomex.jld2", "qˡ")
+    times = qt.times
+    Nt = length(θt)
 
-fig = Figure(size=(1200, 800), fontsize=12)
-axθ = Axis(fig[1, 1], xlabel="x (m)", ylabel="z (m)")
-axq = Axis(fig[1, 2], xlabel="x (m)", ylabel="z (m)")
-axT = Axis(fig[2, 1], xlabel="x (m)", ylabel="z (m)")
-axqˡ = Axis(fig[2, 2], xlabel="x (m)", ylabel="z (m)")
-axw = Axis(fig[3, 1], xlabel="x (m)", ylabel="z (m)")
+    using GLMakie, Printf
 
-Nt = length(θt)
-slider = Slider(fig[4, 1:2], range=1:Nt, startvalue=1)
+    fig = Figure(size=(1200, 800), fontsize=12)
+    axθ = Axis(fig[1, 1], xlabel="x (m)", ylabel="z (m)")
+    axq = Axis(fig[1, 2], xlabel="x (m)", ylabel="z (m)")
+    axT = Axis(fig[2, 1], xlabel="x (m)", ylabel="z (m)")
+    axqˡ = Axis(fig[2, 2], xlabel="x (m)", ylabel="z (m)")
+    axw = Axis(fig[3, 1], xlabel="x (m)", ylabel="z (m)")
 
-n = slider.value #Observable(length(θt))
-wn = @lift view(wt[$n], :, 1, :)
-θn = @lift view(θt[$n], :, 1, :)
-qn = @lift view(qt[$n], :, 1, :)
-Tn = @lift view(Tt[$n], :, 1, :)
-qˡn = @lift view(qˡt[$n], :, 1, :)
-title = @lift "t = $(prettytime(times[$n]))"
+    Nt = length(θt)
+    slider = Slider(fig[4, 1:2], range=1:Nt, startvalue=1)
+
+    n = slider.value #Observable(length(θt))
+    wn = @lift view(wt[$n], :, 1, :)
+    θn = @lift view(θt[$n], :, 1, :)
+    qn = @lift view(qt[$n], :, 1, :)
+    Tn = @lift view(Tt[$n], :, 1, :)
+    qˡn = @lift view(qˡt[$n], :, 1, :)
+    title = @lift "t = $(prettytime(times[$n]))"
 
 
-fig[0, :] = Label(fig, title, fontsize=22, tellwidth=false)
+    fig[0, :] = Label(fig, title, fontsize=22, tellwidth=false)
 
-Tmin = minimum(Tt)
-Tmax = maximum(Tt)
-wlim = maximum(abs, wt) / 2
-qlim = maximum(abs, qt)
-qˡlim = maximum(abs, qˡt) / 2
+    Tmin = minimum(Tt)
+    Tmax = maximum(Tt)
+    wlim = maximum(abs, wt) / 2
+    qlim = maximum(abs, qt)
+    qˡlim = maximum(abs, qˡt) / 2
 
-Tₛ = θ_bomex(0)
-Δθ = θ_bomex(Lz) - θ_bomex(0)
-hmθ = heatmap!(axθ, θn, colorrange=(Tₛ, Tₛ+Δθ))
-hmq = heatmap!(axq, qn, colorrange=(0, qlim), colormap=:magma)
-hmT = heatmap!(axT, Tn, colorrange=(Tmin, Tmax))
-hmqˡ = heatmap!(axqˡ, qˡn, colorrange=(0, qˡlim), colormap=:magma)
-hmw = heatmap!(axw, wn, colorrange=(-wlim, wlim), colormap=:balance)
+    Tₛ = θ_bomex(0)
+    Δθ = θ_bomex(Lz) - θ_bomex(0)
+    hmθ = heatmap!(axθ, θn, colorrange=(Tₛ, Tₛ+Δθ))
+    hmq = heatmap!(axq, qn, colorrange=(0, qlim), colormap=:magma)
+    hmT = heatmap!(axT, Tn, colorrange=(Tmin, Tmax))
+    hmqˡ = heatmap!(axqˡ, qˡn, colorrange=(0, qˡlim), colormap=:magma)
+    hmw = heatmap!(axw, wn, colorrange=(-wlim, wlim), colormap=:balance)
 
-# Label(fig[0, 1], "θ", tellwidth=false)
-# Label(fig[0, 2], "q", tellwidth=false)
-# Label(fig[0, 1], "θ", tellwidth=false)
-# Label(fig[0, 2], "q", tellwidth=false)
+    # Label(fig[0, 1], "θ", tellwidth=false)
+    # Label(fig[0, 2], "q", tellwidth=false)
+    # Label(fig[0, 1], "θ", tellwidth=false)
+    # Label(fig[0, 2], "q", tellwidth=false)
 
-Colorbar(fig[1, 0], hmθ, label = "θ [K]", vertical=true)
-Colorbar(fig[1, 3], hmq, label = "q", vertical=true)
-Colorbar(fig[2, 0], hmT, label = "T [K]", vertical=true)
-Colorbar(fig[2, 3], hmqˡ, label = "qˡ", vertical=true)
-Colorbar(fig[3, 0], hmw, label = "w", vertical=true)
+    Colorbar(fig[1, 0], hmθ, label = "θ [K]", vertical=true)
+    Colorbar(fig[1, 3], hmq, label = "q", vertical=true)
+    Colorbar(fig[2, 0], hmT, label = "T [K]", vertical=true)
+    Colorbar(fig[2, 3], hmqˡ, label = "qˡ", vertical=true)
+    Colorbar(fig[3, 0], hmw, label = "w", vertical=true)
 
-fig
+    fig
 
-record(fig, "bomex.mp4", 1:Nt, framerate=12) do nn
-    @info "Drawing frame $nn of $Nt..."
-    n[] = nn
+    record(fig, "bomex.mp4", 1:Nt, framerate=12) do nn
+        @info "Drawing frame $nn of $Nt..."
+        n[] = nn
+    end
 end
