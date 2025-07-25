@@ -1,12 +1,14 @@
 # using Pkg; Pkg.activate(".")
+using Breeze
+using AtmosphericProfilesLibrary                       
 using Oceananigans
 using Oceananigans.Units
 using Printf
-using Breeze
+using GLMakie
 
 # Siebesma et al (2003) resolution!
 # DOI: https://doi.org/10.1175/1520-0469(2003)60<1201:ALESIS>2.0.CO;2
-Nx = Ny = 32
+Nx = Ny = 64
 Nz = 75
 
 Lx = 6400
@@ -31,15 +33,13 @@ grid = RectilinearGrid(arch,
                        halo = (5, 5, 5),
                        topology = (Periodic, Periodic, Bounded))
 
-using AtmosphericProfilesLibrary                       
-
 FT = eltype(grid)
 θ_bomex = AtmosphericProfilesLibrary.Bomex_θ_liq_ice(FT)
 q_bomex = AtmosphericProfilesLibrary.Bomex_q_tot(FT)
 u_bomex = AtmosphericProfilesLibrary.Bomex_u(FT)
 
-p₀ = 101325 # Pa
-θ₀ = θ_bomex(0) # K
+p₀ = 101500 # Pa
+θ₀ = 299.1 # K
 reference_constants = Breeze.Thermodynamics.ReferenceConstants(base_pressure=p₀, potential_temperature=θ₀)
 buoyancy = Breeze.MoistAirBuoyancy(; reference_constants) #, microphysics)
 
@@ -130,7 +130,8 @@ drying = Field{Nothing, Nothing, Center}(grid)
 dqdt_bomex = AtmosphericProfilesLibrary.Bomex_dqtdt(FT)
 set!(drying, z -> dqdt_bomex(z))
 Fq_drying = Forcing(drying)
-q_forcing = (Fq_precip, Fq_drying, Fq_subsidence)
+#q_forcing = (Fq_precip, Fq_drying, Fq_subsidence)
+q_forcing = (Fq_precip, Fq_subsidence)
 
 Fθ_field = Field{Nothing, Nothing, Center}(grid)
 dTdt_bomex = AtmosphericProfilesLibrary.Bomex_dTdt(FT)
@@ -138,18 +139,27 @@ set!(Fθ_field, z -> dTdt_bomex(1, z))
 Fθ_radiation = Forcing(Fθ_field)
 θ_forcing = (Fθ_radiation, Fθ_subsidence)
 
+# Note that most of the models that participated in Siebesma et al 2003
+# use 2nd order advection together with either TKE or Smag-Lilly closure.
 advection = WENO(order=9) #(momentum=WENO(), θ=WENO(), q=WENO(bounds=(0, 1)))
+closure = nothing
+# advection = Centered(order=2)
+# closure = SmagorinskyLilly()
+
 tracers = (:θ, :q)
-model = NonhydrostaticModel(; grid, advection, buoyancy, coriolis,
+
+model = NonhydrostaticModel(; grid, advection, buoyancy, coriolis, closure,
                             tracers = (:θ, :q),
                             # tracers = (:θ, :q, :qˡ, :qⁱ, :qʳ, :qˢ),
                             forcing = (; q=q_forcing, u=u_forcing, v=v_forcing, θ=θ_forcing),
                             boundary_conditions = (θ=θ_bcs, q=q_bcs, u=u_bcs, v=v_bcs))
 
-θϵ = 20
-qϵ = 1e-2
-θᵢ(x, y, z) = θ_bomex(z) + 1e-2 * θϵ * rand()
-qᵢ(x, y, z) = q_bomex(z) + 1e-2 * qϵ * rand()
+# Values for the initial perturbations can be found in Appendix B
+# of Siebesma et al 2003, 3rd paragraph
+θϵ = 0.1
+qϵ = 2.5e-5
+θᵢ(x, y, z) = θ_bomex(z) + θϵ * randn()
+qᵢ(x, y, z) = q_bomex(z) + qϵ * randn()
 uᵢ(x, y, z) = u_bomex(z)
 set!(model, θ=θᵢ, q=qᵢ, u=uᵢ)
 
@@ -180,25 +190,22 @@ T = Breeze.TemperatureField(model)
 qˡ = Breeze.CondensateField(model, T)
 qᵛ★ = Breeze.SaturationField(model, T)
 rh = Field(model.tracers.q / qᵛ★) # relative humidity
-δ = Field(model.tracers.q - qᵛ★)
 
 function progress(sim)
     compute!(T)
     compute!(qˡ)
-    compute!(δ)
     compute!(rh)
 
     q = sim.model.tracers.q
     θ = sim.model.tracers.θ
     u, v, w = sim.model.velocities
 
-    umax = maximum(u)
-    vmax = maximum(v)
-    wmax = maximum(w)
+    umax = maximum(abs, u)
+    vmax = maximum(abs, v)
+    wmax = maximum(abs, w)
 
     qmin = minimum(q)
     qmax = maximum(q)
-    δmax = maximum(δ)
     qˡmax = maximum(qˡ)
     rhmax = maximum(rh)
 
@@ -208,8 +215,8 @@ function progress(sim)
     msg = @sprintf("Iter: %d, t: %s, Δt: %s, max|u|: (%.2e, %.2e, %.2e), max(rh): %.2f",
                     iteration(sim), prettytime(sim), prettytime(sim.Δt), umax, vmax, wmax, rhmax)
 
-    msg *= @sprintf(", extrema(q): (%.2e, %.2e), max(qˡ): %.2e, max(δ): %.2e, extrema(θ): (%.2e, %.2e)",
-                     qmin, qmax, qˡmax, δmax, θmin, θmax)
+    msg *= @sprintf(", extrema(q): (%.2e, %.2e), max(qˡ): %.2e, extrema(θ): (%.2e, %.2e)",
+                     qmin, qmax, qˡmax, θmin, θmax)
 
     @info msg
 
@@ -235,7 +242,6 @@ simulation.output_writers[:jld2] = ow
 run!(simulation)
 
 if !testing
-
     wt = FieldTimeSeries("bomex.jld2", "w")
     θt = FieldTimeSeries("bomex.jld2", "θ")
     Tt = FieldTimeSeries("bomex.jld2", "T")
@@ -299,3 +305,4 @@ if !testing
         n[] = nn
     end
 end
+
