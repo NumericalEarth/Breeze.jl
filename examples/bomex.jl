@@ -25,7 +25,7 @@ stop_time = 6hours
 
 if get(ENV, "CI", "false") == "true" # change values for CI
     stop_time = 10minutes # 6hours
-    Nx = Ny = 4
+    Nx = Ny = 8
 end
 
 grid = RectilinearGrid(arch,
