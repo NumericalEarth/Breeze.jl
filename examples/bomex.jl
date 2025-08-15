@@ -23,7 +23,7 @@ Lz = 3000
 arch = CPU() # try changing to GPU()
 stop_time = 6hours
 
-if get(ENV, "CI", false) # change values for CI
+if get(ENV, "CI", "false") == "true" # change values for CI
     stop_time = 10minutes # 6hours
     Nx = Ny = 4
 end
