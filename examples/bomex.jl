@@ -6,8 +6,7 @@ using Oceananigans.Units
 using AtmosphericProfilesLibrary                       
 using CloudMicrophysics 
 using Printf
-#using CairoMakie # GLMakie
-using GLMakie
+using CairoMakie
 
 using Oceananigans.Operators: ∂zᶜᶜᶠ, ℑzᵃᵃᶜ
 using CloudMicrophysics.Microphysics0M: remove_precipitation
