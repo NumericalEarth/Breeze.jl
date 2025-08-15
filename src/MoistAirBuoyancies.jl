@@ -9,11 +9,13 @@ export SaturationField
 using Oceananigans
 using Oceananigans: AbstractModel
 using Oceananigans.Grids: AbstractGrid
+using Oceananigans.Operators: ∂zᶜᶜᶠ
 
 using Adapt
 
 import Oceananigans.BuoyancyFormulations: AbstractBuoyancyFormulation,
                                           buoyancy_perturbationᶜᶜᶜ,
+                                          ∂z_b,
                                           required_tracers
 
 using ..Thermodynamics:
@@ -110,6 +112,9 @@ const c = Center()
 
     return ρ₀ * g * (α - αʳ)
 end
+
+@inline ∂z_b(i, j, k, grid, mb::MoistAirBuoyancy, tracers) =
+    ∂zᶜᶜᶠ(i, j, k, grid, buoyancy_perturbationᶜᶜᶜ, mb, tracers)
 
 const c = Center()
 

@@ -279,7 +279,7 @@ function ReferenceState(FT = Oceananigans.defaults.FloatType;
 end
 
 """
-    reference_density(ref, thermo)
+    reference_density(z, ref, thermo)
 
 Compute the reference density associated with the reference pressure and potential temperature.
 The reference density is defined as the density of dry air at the reference pressure and temperature.
@@ -319,7 +319,7 @@ end
     cᵖᵐ = mixture_heat_capacity(state.q, thermo)
     inv_ϰᵐ = Rᵐ / cᵖᵐ
     pᵣ = reference_pressure(state.z, ref, thermo)
-    return (pᵣ / ref.p₀)^inv_ϰᵐ
+    return (pᵣ / 1e5)^inv_ϰᵐ
 end
 
 condensate_specific_humidity(T, state, ref, thermo) =
@@ -331,6 +331,6 @@ function condensate_specific_humidity(T, q, z, ref, thermo)
 end
 
 function ice_specific_humidity(T, q, z, ref, thermo)
-    qi★ = saturation_specific_humidity(T, z, ref, thermo, thermo.deposition)
-    return max(0, q - qi★)
+    qⁱ★ = saturation_specific_humidity(T, z, ref, thermo, thermo.deposition)
+    return max(0, q - qⁱ★)
 end

@@ -3,7 +3,7 @@ using ..Thermodynamics:
     mixture_heat_capacity,
     mixture_gas_constant
 
-using Oceananigans.BoundaryConditions: fill_halo_regions!, apply_x_bcs!, apply_y_bcs!, apply_z_bcs!
+using Oceananigans.BoundaryConditions: fill_halo_regions!, compute_x_bcs!, compute_y_bcs!, compute_z_bcs!
 using Oceananigans.ImmersedBoundaries: mask_immersed_field!
 using Oceananigans.Architectures: architecture
 
@@ -143,9 +143,9 @@ function compute_tendencies!(model::AnelasticModel)
     args = (arch, model.clock, fields(model))
     field_indices = 1:length(prognostic_model_fields)
     Gⁿ = model.timestepper.Gⁿ
-    foreach(q -> apply_x_bcs!(Gⁿ[q], prognostic_model_fields[q], args...), field_indices)
-    foreach(q -> apply_y_bcs!(Gⁿ[q], prognostic_model_fields[q], args...), field_indices)
-    foreach(q -> apply_z_bcs!(Gⁿ[q], prognostic_model_fields[q], args...), field_indices)
+    foreach(q -> compute_x_bcs!(Gⁿ[q], prognostic_model_fields[q], args...), field_indices)
+    foreach(q -> compute_y_bcs!(Gⁿ[q], prognostic_model_fields[q], args...), field_indices)
+    foreach(q -> compute_z_bcs!(Gⁿ[q], prognostic_model_fields[q], args...), field_indices)
 
     return nothing
 end

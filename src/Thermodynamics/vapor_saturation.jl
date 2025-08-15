@@ -7,6 +7,12 @@ the Clausius-Clapeyron relation,
 ```math
 dp/dT = ℒᵛ / (Rᵛ T^2)
 ```
+
+which yields
+
+```math
+dp/dT = ℒᵛ / (Rᵛ T^2)
+```
 """
 @inline function saturation_vapor_pressure(T, thermo, phase_transition::PhaseTransition)
     ℒ₀  = phase_transition.latent_heat
