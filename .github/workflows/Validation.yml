@@ -1,0 +1,43 @@
+name: Validation
+
+on:
+  push:
+    branches:
+      - main
+  pull_request:
+  workflow_dispatch:
+
+jobs:
+  validate:
+    name: Validation - Julia ${{ matrix.version }} - ${{ matrix.os }} - ${{ matrix.arch }}
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        version:
+          - '1.10'  # Latest release
+        os:
+          - ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: julia-actions/setup-julia@v1
+        with:
+          version: ${{ matrix.version }}
+          arch: ${{ matrix.arch }}
+
+      - uses: julia-actions/cache@v1
+
+      - name: Add CairoMakie to Project.toml
+        run: |
+          julia --project=. -e '
+            using Pkg
+            Pkg.add("CairoMakie")
+          '
+
+      - name: Run BOMEX example
+        env:
+          VALIDATION: "true"
+        run: |
+          julia --project=. examples/bomex.jl 
