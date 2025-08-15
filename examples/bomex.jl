@@ -122,7 +122,6 @@ set!(vᵍ, z -> vᵍ_bomex(z))
         vᵍ = parameters.vᵍ[1, 1, k]
     end
     return + f * (v_avg - vᵍ)
-    # return + f * (v - vᵍ)
 end
 
 @inline function Fv_geostrophic(i, j, k, grid, clock, fields, parameters)
@@ -132,10 +131,7 @@ end
         u = fields.u[i, j, k]
         uᵍ = parameters.uᵍ[1, 1, k]
     end
-    Fv = - f * (u_avg - uᵍ)
-    @show Fv
-    return Fv
-    # return - f * (u - uᵍ)
+    return - f * (u_avg - uᵍ)
 end
 
 u_geostrophic_forcing = Forcing(Fu_geostrophic, discrete_form=true, parameters=(; v_avg=v_avg_f, f=coriolis.f, vᵍ))
@@ -143,15 +139,12 @@ v_geostrophic_forcing = Forcing(Fv_geostrophic, discrete_form=true, parameters=(
 
 u_forcing = (u_subsidence_forcing, u_geostrophic_forcing)
 v_forcing = (v_subsidence_forcing, v_geostrophic_forcing)
-# u_forcing = u_subsidence_forcing
-# v_forcing = v_subsidence_forcing
 
 drying = Field{Nothing, Nothing, Center}(grid)
 dqdt_bomex = AtmosphericProfilesLibrary.Bomex_dqtdt(FT)
 set!(drying, z -> dqdt_bomex(z))
 q_drying_forcing = Forcing(drying)
-#q_forcing = (q_precip_forcing, q_drying_forcing, q_subsidence_forcing)
-q_forcing = (q_drying_forcing, q_subsidence_forcing)
+q_forcing = (q_precip_forcing, q_drying_forcing, q_subsidence_forcing)
 
 Fθ_field = Field{Nothing, Nothing, Center}(grid)
 dTdt_bomex = AtmosphericProfilesLibrary.Bomex_dTdt(FT)
