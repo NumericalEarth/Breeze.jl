@@ -281,7 +281,7 @@ simulation.output_writers[:jld2] = ow
 @info "Running BOMEX on grid: \n $grid \n and using model: \n $model"
 run!(simulation)
 
-if get(ENV, "CI", false) # change values for CI
+if get(ENV, "CI", "false") == "true" # change values for CI
     wt = FieldTimeSeries("bomex.jld2", "w")
     θt = FieldTimeSeries("bomex.jld2", "θ")
     Tt = FieldTimeSeries("bomex.jld2", "T")
