@@ -13,8 +13,8 @@ using CloudMicrophysics.Microphysics0M: remove_precipitation
 
 # Siebesma et al (2003) resolution!
 # DOI: https://doi.org/10.1175/1520-0469(2003)60<1201:ALESIS>2.0.CO;2
-Nx = Ny = 64
-Nz = 75
+Nx = Ny = 32
+Nz = 40
 
 Lx = 6400
 Ly = 6400
@@ -245,14 +245,23 @@ add_callback!(simulation, progress, IterationInterval(10))
 # Sʳ = ForcingOperation(:q, model)
 # outputs = merge(model.velocities, model.tracers, (; T, qˡ, qᵛ★, Sʳ))
 outputs = merge(model.velocities, model.tracers, (; T, qˡ, qᵛ★))
+averaged_outputs = NamedTuple(name => Average(outputs[name], dims=(1, 2)) for name in keys(outputs))
 
 filename = string("bomex_", Nx, "_", Ny, "_", Nz, ".jld2")
+averages_filename = string("bomex_averages", Nx, "_", Ny, "_", Nz, ".jld2")
 
 ow = JLD2Writer(model, outputs; filename,
                 schedule = TimeInterval(1minutes),
                 overwrite_existing = true)
 
 simulation.output_writers[:jld2] = ow
+
+averages_ow = JLD2Writer(model, averaged_outputs;
+                         filename = averages_filename,
+                     .   schedule = TimeInterval(1minutes),
+                         overwrite_existing = true)
+
+simulation.output_writers[:avg] = averages_ow
 
 @info "Running BOMEX on grid: \n $grid \n and using model: \n $model"
 run!(simulation)
