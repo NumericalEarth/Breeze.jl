@@ -304,9 +304,9 @@ end
 @inline function reference_pressure(z, ref, thermo)
     cᵖᵈ = thermo.dry_air.heat_capacity
     Rᵈ = dry_air_gas_constant(thermo)
-    ϰᵈ⁻¹ = Rᵈ / cᵖᵈ
+    inv_ϰᵈ = Rᵈ / cᵖᵈ
     g = thermo.gravitational_acceleration
-    return ref.p₀ * (1 - g * z / (cᵖᵈ * ref.θ))^ϰᵈ⁻¹
+    return ref.p₀ * (1 - g * z / (cᵖᵈ * ref.θ))^inv_ϰᵈ
 end
 
 @inline function saturation_specific_humidity(T, z, ref::ReferenceState, thermo, phase_transition)
@@ -319,7 +319,9 @@ end
     cᵖᵐ = mixture_heat_capacity(state.q, thermo)
     inv_ϰᵐ = Rᵐ / cᵖᵐ
     pᵣ = reference_pressure(state.z, ref, thermo)
-    return (pᵣ / 1e5)^inv_ϰᵐ
+    FT = eltype(pᵣ)
+    pₑ₀ = convert(FT, 1e5) # hard-coded for now
+    return (pᵣ / pₑ₀)^inv_ϰᵐ
 end
 
 condensate_specific_humidity(T, state, ref, thermo) =
