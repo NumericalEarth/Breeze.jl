@@ -168,7 +168,7 @@ model = NonhydrostaticModel(; grid, advection, buoyancy, coriolis, closure,
 # of Siebesma et al 2003, 3rd paragraph
 θϵ = 0.1
 qϵ = 2.5e-5
-θᵢ(x, y, z) = θ_bomex(z) + θϵ * randn() - 3
+θᵢ(x, y, z) = θ_bomex(z) + θϵ * randn()
 qᵢ(x, y, z) = q_bomex(z) + qϵ * randn()
 uᵢ(x, y, z) = u_bomex(z)
 set!(model, θ=θᵢ, q=qᵢ, u=uᵢ)
