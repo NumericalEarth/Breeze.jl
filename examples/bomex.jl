@@ -13,8 +13,8 @@ using CloudMicrophysics.Microphysics0M: remove_precipitation
 
 # Siebesma et al (2003) resolution!
 # DOI: https://doi.org/10.1175/1520-0469(2003)60<1201:ALESIS>2.0.CO;2
-Nx = Ny = 32 #64
-Nz = 35 #75
+Nx = Ny = 64
+Nz = 75
 
 Lx = 6400
 Ly = 6400
@@ -41,7 +41,7 @@ FT = eltype(grid)
 q_bomex = AtmosphericProfilesLibrary.Bomex_q_tot(FT)
 u_bomex = AtmosphericProfilesLibrary.Bomex_u(FT)
 
-p₀ = 101325 # Pa
+p₀ = 101500 # Pa
 θ₀ = 299.1 # K
 reference_constants = Breeze.Thermodynamics.ReferenceConstants(base_pressure=p₀, potential_temperature=θ₀)
 buoyancy = Breeze.MoistAirBuoyancy(; reference_constants) #, microphysics)
@@ -168,28 +168,10 @@ model = NonhydrostaticModel(; grid, advection, buoyancy, coriolis, closure,
 # of Siebesma et al 2003, 3rd paragraph
 θϵ = 0.1
 qϵ = 2.5e-5
-θᵢ(x, y, z) = θ_bomex(z) + θϵ * randn()
+θᵢ(x, y, z) = θ_bomex(z) + θϵ * randn() - 3
 qᵢ(x, y, z) = q_bomex(z) + qϵ * randn()
 uᵢ(x, y, z) = u_bomex(z)
 set!(model, θ=θᵢ, q=qᵢ, u=uᵢ)
-
-#=
-fig = Figure()
-axθ = Axis(fig[1, 1])
-axq = Axis(fig[1, 2])
-axu = Axis(fig[1, 3])
-θavg = Field(Average(model.tracers.θ, dims=(1, 2)))
-qavg = Field(Average(model.tracers.q, dims=(1, 2)))
-uavg = Field(Average(model.velocities.u, dims=(1, 2)))
-lines!(axθ, θavg)
-lines!(axq, qavg)
-lines!(axu, uavg)
-xlims!(axθ, 298, 310)
-xlims!(axq, 2e-3, 18e-3)
-ylims!(axθ, 0, 2500)
-ylims!(axq, 0, 2500)
-ylims!(axu, 0, 2500)
-=#
 
 simulation = Simulation(model; Δt=10, stop_time)
 conjure_time_step_wizard!(simulation, cfl=0.7)
@@ -253,12 +235,6 @@ function progress(sim)
 
     @info msg
 
-    lines!(axu, u_avg)
-    lines!(axv, v_avg)
-    lines!(axθ, θ_avg)
-    lines!(axq, q_avg)
-    display(fig)
-
     return nothing
 end
 
@@ -281,6 +257,7 @@ simulation.output_writers[:jld2] = ow
 @info "Running BOMEX on grid: \n $grid \n and using model: \n $model"
 run!(simulation)
 
+#=
 if get(ENV, "CI", "false") == "false" # change values for CI
     wt = FieldTimeSeries("bomex.jld2", "w")
     θt = FieldTimeSeries("bomex.jld2", "θ")
@@ -342,4 +319,4 @@ if get(ENV, "CI", "false") == "false" # change values for CI
         n[] = nn
     end
 end
-
+=#
