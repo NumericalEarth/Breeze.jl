@@ -103,14 +103,18 @@ const c = Center()
     q = @inbounds tracers.q[i, j, k]
     𝒰 = HeightReferenceThermodynamicState(θ, q, z)
 
-    ρ₀ = base_density(mb.reference_constants, mb.thermodynamics)
-    αʳ = reference_specific_volume(z, mb.reference_constants, mb.thermodynamics)
-    g = mb.thermodynamics.gravitational_acceleration
-
     # Perform saturation adjustment
     α = specific_volume(𝒰, mb.reference_constants, mb.thermodynamics)
 
-    return ρ₀ * g * (α - αʳ)
+    # Compute reference specific volume
+    αʳ = reference_specific_volume(z, mb.reference_constants, mb.thermodynamics)
+    g = mb.thermodynamics.gravitational_acceleration
+
+    # Formulation in terms of base density:
+    # ρ₀ = base_density(mb.reference_constants, mb.thermodynamics)
+    # return ρ₀ * g * (α - αʳ)
+
+    return g * (α - αʳ) / αʳ
 end
 
 @inline ∂z_b(i, j, k, grid, mb::MoistAirBuoyancy, tracers) =
@@ -289,8 +293,9 @@ end
     cᵖᵐ = mixture_heat_capacity(state.q, thermo)
     inv_ϰᵐ = Rᵐ / cᵖᵐ
     pᵣ = reference_pressure(state.z, ref, thermo)
-    p₀ = ref.base_pressure
-    return (pᵣ / p₀)^inv_ϰᵐ
+    FT = eltype(pᵣ)
+    pₑ₀ = convert(FT, 1e5)
+    return (pᵣ / pₑ₀)^inv_ϰᵐ
 end
 
 #####
