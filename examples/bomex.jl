@@ -13,8 +13,8 @@ using CloudMicrophysics.Microphysics0M: remove_precipitation
 
 # Siebesma et al (2003) resolution!
 # DOI: https://doi.org/10.1175/1520-0469(2003)60<1201:ALESIS>2.0.CO;2
-Nx = Ny = 32 #64
-Nz = 35 #75
+Nx = Ny = 64
+Nz = 75
 
 Lx = 6400
 Ly = 6400
@@ -41,7 +41,7 @@ FT = eltype(grid)
 q_bomex = AtmosphericProfilesLibrary.Bomex_q_tot(FT)
 u_bomex = AtmosphericProfilesLibrary.Bomex_u(FT)
 
-p₀ = 101325 # Pa
+p₀ = 101500 # Pa
 θ₀ = 299.1 # K
 reference_constants = Breeze.Thermodynamics.ReferenceConstants(base_pressure=p₀, potential_temperature=θ₀)
 buoyancy = Breeze.MoistAirBuoyancy(; reference_constants) #, microphysics)
@@ -173,24 +173,6 @@ qᵢ(x, y, z) = q_bomex(z) + qϵ * randn()
 uᵢ(x, y, z) = u_bomex(z)
 set!(model, θ=θᵢ, q=qᵢ, u=uᵢ)
 
-#=
-fig = Figure()
-axθ = Axis(fig[1, 1])
-axq = Axis(fig[1, 2])
-axu = Axis(fig[1, 3])
-θavg = Field(Average(model.tracers.θ, dims=(1, 2)))
-qavg = Field(Average(model.tracers.q, dims=(1, 2)))
-uavg = Field(Average(model.velocities.u, dims=(1, 2)))
-lines!(axθ, θavg)
-lines!(axq, qavg)
-lines!(axu, uavg)
-xlims!(axθ, 298, 310)
-xlims!(axq, 2e-3, 18e-3)
-ylims!(axθ, 0, 2500)
-ylims!(axq, 0, 2500)
-ylims!(axu, 0, 2500)
-=#
-
 simulation = Simulation(model; Δt=10, stop_time)
 conjure_time_step_wizard!(simulation, cfl=0.7)
 
@@ -253,12 +235,6 @@ function progress(sim)
 
     @info msg
 
-    lines!(axu, u_avg)
-    lines!(axv, v_avg)
-    lines!(axθ, θ_avg)
-    lines!(axq, q_avg)
-    display(fig)
-
     return nothing
 end
 
@@ -269,8 +245,10 @@ add_callback!(simulation, progress, IterationInterval(10))
 # Sʳ = ForcingOperation(:q, model)
 # outputs = merge(model.velocities, model.tracers, (; T, qˡ, qᵛ★, Sʳ))
 outputs = merge(model.velocities, model.tracers, (; T, qˡ, qᵛ★))
+averaged_outputs = NamedTuple(name => Average(outputs[name], dims=(1, 2)) for name in keys(outputs))
 
 filename = string("bomex_", Nx, "_", Ny, "_", Nz, ".jld2")
+averages_filename = string("bomex_averages_", Nx, "_", Ny, "_", Nz, ".jld2")
 
 ow = JLD2Writer(model, outputs; filename,
                 schedule = TimeInterval(1minutes),
@@ -278,62 +256,49 @@ ow = JLD2Writer(model, outputs; filename,
 
 simulation.output_writers[:jld2] = ow
 
+averages_ow = JLD2Writer(model, averaged_outputs;
+                         filename = averages_filename,
+                         schedule = TimeInterval(1minutes),
+                         overwrite_existing = true)
+
+simulation.output_writers[:avg] = averages_ow
+
 @info "Running BOMEX on grid: \n $grid \n and using model: \n $model"
 run!(simulation)
 
 if get(ENV, "CI", "false") == "false" # change values for CI
-    wt = FieldTimeSeries("bomex.jld2", "w")
-    θt = FieldTimeSeries("bomex.jld2", "θ")
-    Tt = FieldTimeSeries("bomex.jld2", "T")
-    qt = FieldTimeSeries("bomex.jld2", "q")
-    qˡt = FieldTimeSeries("bomex.jld2", "qˡ")
+
+    θt  = FieldTimeSeries(averages_filename, "θ")
+    Tt  = FieldTimeSeries(averages_filename, "T")
+    qt  = FieldTimeSeries(averages_filename, "q")
+    qˡt = FieldTimeSeries(averages_filename, "qˡ")
     times = qt.times
     Nt = length(θt)
 
     fig = Figure(size=(1200, 800), fontsize=12)
-    axθ = Axis(fig[1, 1], xlabel="x (m)", ylabel="z (m)")
-    axq = Axis(fig[1, 2], xlabel="x (m)", ylabel="z (m)")
-    axT = Axis(fig[2, 1], xlabel="x (m)", ylabel="z (m)")
-    axqˡ = Axis(fig[2, 2], xlabel="x (m)", ylabel="z (m)")
-    axw = Axis(fig[3, 1], xlabel="x (m)", ylabel="z (m)")
+    axθ  = Axis(fig[1, 1], xlabel="θ (K)", ylabel="z (m)")
+    axq  = Axis(fig[1, 2], xlabel="q (kg/kg)", ylabel="z (m)")
+    axT  = Axis(fig[2, 1], xlabel="T (K)", ylabel="z (m)")
+    axqˡ = Axis(fig[2, 2], xlabel="qˡ (kg/kg)", ylabel="z (m)")
 
     Nt = length(θt)
-    slider = Slider(fig[4, 1:2], range=1:Nt, startvalue=1)
+    slider = Slider(fig[3, 1:2], range=1:Nt, startvalue=1)
 
     n = slider.value #Observable(length(θt))
-    wn = @lift view(wt[$n], :, 1, :)
-    θn = @lift view(θt[$n], :, 1, :)
-    qn = @lift view(qt[$n], :, 1, :)
-    Tn = @lift view(Tt[$n], :, 1, :)
-    qˡn = @lift view(qˡt[$n], :, 1, :)
+    θn  = @lift interior(θt[$n], 1, 1, :)
+    qn  = @lift interior(qt[$n], 1, 1, :)
+    Tn  = @lift interior(Tt[$n], 1, 1, :)
+    qˡn = @lift interior(qˡt[$n], 1, 1, :)
+    z = znodes(θt)
     title = @lift "t = $(prettytime(times[$n]))"
 
     fig[0, :] = Label(fig, title, fontsize=22, tellwidth=false)
 
-    Tmin = minimum(Tt)
-    Tmax = maximum(Tt)
-    wlim = maximum(abs, wt) / 2
-    qlim = maximum(abs, qt)
-    qˡlim = maximum(abs, qˡt) / 2
-
-    Tₛ = θ_bomex(0)
-    Δθ = θ_bomex(Lz) - θ_bomex(0)
-    hmθ = heatmap!(axθ, θn, colorrange=(Tₛ, Tₛ+Δθ))
-    hmq = heatmap!(axq, qn, colorrange=(0, qlim), colormap=:magma)
-    hmT = heatmap!(axT, Tn, colorrange=(Tmin, Tmax))
-    hmqˡ = heatmap!(axqˡ, qˡn, colorrange=(0, qˡlim), colormap=:magma)
-    hmw = heatmap!(axw, wn, colorrange=(-wlim, wlim), colormap=:balance)
-
-    # Label(fig[0, 1], "θ", tellwidth=false)
-    # Label(fig[0, 2], "q", tellwidth=false)
-    # Label(fig[0, 1], "θ", tellwidth=false)
-    # Label(fig[0, 2], "q", tellwidth=false)
-
-    Colorbar(fig[1, 0], hmθ, label = "θ [K]", vertical=true)
-    Colorbar(fig[1, 3], hmq, label = "q", vertical=true)
-    Colorbar(fig[2, 0], hmT, label = "T [K]", vertical=true)
-    Colorbar(fig[2, 3], hmqˡ, label = "qˡ", vertical=true)
-    Colorbar(fig[3, 0], hmw, label = "w", vertical=true)
+    hmθ  = lines!(axθ, θn, z)
+    hmq  = lines!(axq, qn, z)
+    hmT  = lines!(axT, Tn, z)
+    hmqˡ = lines!(axqˡ, qˡn, z)
+    xlims!(axqˡ, -1e-4, 1.5e-3)
 
     fig
 
@@ -343,3 +308,64 @@ if get(ENV, "CI", "false") == "false" # change values for CI
     end
 end
 
+#=
+wt  = FieldTimeSeries(filename, "w")
+θt  = FieldTimeSeries(filename, "θ")
+Tt  = FieldTimeSeries(filename, "T")
+qt  = FieldTimeSeries(filename, "q")
+qˡt = FieldTimeSeries(filename, "qˡ")
+times = qt.times
+Nt = length(θt)
+
+fig = Figure(size=(1200, 800), fontsize=12)
+axθ = Axis(fig[1, 1], xlabel="x (m)", ylabel="z (m)")
+axq = Axis(fig[1, 2], xlabel="x (m)", ylabel="z (m)")
+axT = Axis(fig[2, 1], xlabel="x (m)", ylabel="z (m)")
+axqˡ = Axis(fig[2, 2], xlabel="x (m)", ylabel="z (m)")
+axw = Axis(fig[3, 1], xlabel="x (m)", ylabel="z (m)")
+
+Nt = length(θt)
+slider = Slider(fig[4, 1:2], range=1:Nt, startvalue=1)
+
+n = slider.value #Observable(length(θt))
+wn = @lift view(wt[$n], :, 1, :)
+θn = @lift view(θt[$n], :, 1, :)
+qn = @lift view(qt[$n], :, 1, :)
+Tn = @lift view(Tt[$n], :, 1, :)
+qˡn = @lift view(qˡt[$n], :, 1, :)
+title = @lift "t = $(prettytime(times[$n]))"
+
+fig[0, :] = Label(fig, title, fontsize=22, tellwidth=false)
+
+Tmin = minimum(Tt)
+Tmax = maximum(Tt)
+wlim = maximum(abs, wt) / 2
+qlim = maximum(abs, qt)
+qˡlim = maximum(abs, qˡt) / 2
+
+Tₛ = θ_bomex(0)
+Δθ = θ_bomex(Lz) - θ_bomex(0)
+hmθ = heatmap!(axθ, θn, colorrange=(Tₛ, Tₛ+Δθ))
+hmq = heatmap!(axq, qn, colorrange=(0, qlim), colormap=:magma)
+hmT = heatmap!(axT, Tn, colorrange=(Tmin, Tmax))
+hmqˡ = heatmap!(axqˡ, qˡn, colorrange=(0, qˡlim), colormap=:magma)
+hmw = heatmap!(axw, wn, colorrange=(-wlim, wlim), colormap=:balance)
+
+# Label(fig[0, 1], "θ", tellwidth=false)
+# Label(fig[0, 2], "q", tellwidth=false)
+# Label(fig[0, 1], "θ", tellwidth=false)
+# Label(fig[0, 2], "q", tellwidth=false)
+
+Colorbar(fig[1, 0], hmθ, label = "θ [K]", vertical=true)
+Colorbar(fig[1, 3], hmq, label = "q", vertical=true)
+Colorbar(fig[2, 0], hmT, label = "T [K]", vertical=true)
+Colorbar(fig[2, 3], hmqˡ, label = "qˡ", vertical=true)
+Colorbar(fig[3, 0], hmw, label = "w", vertical=true)
+
+fig
+
+CairoMakie.record(fig, "bomex.mp4", 1:Nt, framerate=12) do nn
+    @info "Drawing frame $nn of $Nt..."
+    n[] = nn
+end
+=#

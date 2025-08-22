@@ -52,7 +52,7 @@ end
     g = thermo.gravitational_acceleration
     θᵣ = ref.reference_potential_temperature
     p₀ = ref.base_pressure
-    return p₀ * (1 - g * z / (cᵖᵈ * θᵣ))^(Rᵈ / cᵖᵈ)
+    return p₀ * (1 - g * z / (cᵖᵈ * θᵣ))^(cᵖᵈ / Rᵈ)
 end
 
 @inline function saturation_specific_humidity(T, z, ref::ReferenceConstants, thermo, phase_transition)
