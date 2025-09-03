@@ -28,3 +28,4 @@ Manifest.toml
 *.png
 *.mp4
 *.swp
+*.DS_Store
