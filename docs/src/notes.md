@@ -1,4 +1,4 @@
-# Notes on MABL modelling
+# Notes on Marine Atmospheric Boundery Layer modeling
 
 ## Surface fluxes
 
