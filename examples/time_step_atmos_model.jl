@@ -6,7 +6,7 @@ Lx = 30e3
 Ly = 30e3
 Lz = 30e3
 
-grid = RectilinearGrid(size=(64, 64, 64), x=(0, Lx), y=(0, Ly), z=(0, 25e3))
+grid = RectilinearGrid(size=(64, 1, 64), x=(0, Lx), y=(0, Ly), z=(0, 25e3))
 
 Q₀ = 1000 # heat flux in W / m²
 e_bcs = FieldBoundaryConditions(bottom=FluxBoundaryCondition(Q₀))
@@ -15,9 +15,21 @@ model = AtmosphereModel(grid, advection=WENO(), boundary_conditions=(; e=e_bcs))
 Lz = grid.Lz
 Δθ = 5 # K
 Tₛ = model.formulation.constants.reference_potential_temperature
-θᵢ(x, y, z) = Tₛ + Δθ * z / Lz
+# θᵢ(x, y, z) = Tₛ + Δθ * z / Lz
 qᵢ(x, y, z) = 0
 Ξᵢ(x, y, z) = 1e-6 * randn()
+
+N² = 1e-6        # Brunt-Väisälä frequency squared (s⁻²)
+dθdz = N² * Tₛ / 9.81  # Background potential temperature gradient
+
+# Initial conditions
+function θᵢ(x, y, z)
+    θ̄ = Tₛ + dθdz * z # background stratification
+    r = sqrt((x - x₀)^2 + (z - z₀)^2) # distance from bubble center
+    θ′ = Δθ * max(0, 1 - r / r₀) # bubble
+    return θ̄ + θ′
+end
+
 set!(model, θ=θᵢ, q=qᵢ, u=Ξᵢ, v=Ξᵢ)
 
 ρu, ρv, ρw = model.momentum

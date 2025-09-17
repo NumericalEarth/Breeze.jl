@@ -50,24 +50,14 @@ N² = 1e-6        # Brunt-Väisälä frequency squared (s⁻²)
 dθdz = N² * θ₀ / 9.81  # Background potential temperature gradient
 
 # Initial conditions
-function θ_initial(x, z)
-    # Background stratification
-    θ_bg = θ₀ + dθdz * z
-    
-    # Distance from bubble center
-    r = sqrt((x - x₀)^2 + (z - z₀)^2)
-    
-    # Circular thermal bubble with sharp transition
-    if r <= r₀
-        # Sharp bubble profile using max function
-        θ_bubble = Δθ * max(0, 1 - r / r₀)
-        return θ_bg + θ_bubble
-    else
-        return θ_bg
-    end
+function θᵢ(x, z)
+    θ̄ = θ₀ + dθdz * z # background stratification
+    r = sqrt((x - x₀)^2 + (z - z₀)^2) # distance from bubble center
+    θ′ = Δθ * max(0, 1 - r / r₀) # bubble
+    return θ̄ + θ′
 end
 
-set!(model, θ=θ_initial)
+set!(model, θ=θᵢ)
 
 # Simulation parameters
 stop_time = 30minutes
