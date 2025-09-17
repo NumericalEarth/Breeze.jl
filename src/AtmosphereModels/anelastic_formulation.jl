@@ -39,7 +39,7 @@ end
 
 Base.show(io::IO, formulation::AnelasticFormulation) = print(io, "AnelasticFormulation")
 
-field_names(::AnelasticFormulation, tracer_names) = (:ρu, :ρv, :ρw, :e, :ρq, tracer_names...)
+field_names(::AnelasticFormulation, tracer_names) = (:ρu, :ρv, :ρw, :ρe, :ρq, tracer_names...)
 
 struct AnelasticThermodynamicState{FT}
     potential_temperature :: FT
@@ -111,7 +111,7 @@ function collect_prognostic_fields(::AnelasticFormulation,
                                    condensates,
                                    tracers)
 
-    thermodynamic_variables = (e=energy, ρq=absolute_humidity)
+    thermodynamic_variables = (ρe=energy, ρq=absolute_humidity)
 
     return merge(momentum, thermodynamic_variables, condensates, tracers)
 end

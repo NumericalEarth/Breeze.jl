@@ -1,12 +1,13 @@
 using Breeze.AtmosphereModels: AtmosphereModel
 using Oceananigans
+using Oceananigans.Units
 using Printf
 
-Lx = 30e3
-Ly = 30e3
-Lz = 30e3
+Lx = 10e3
+Ly = 10e3
+Lz = 10e3
 
-grid = RectilinearGrid(size=(64, 1, 64), x=(0, Lx), y=(0, Ly), z=(0, 25e3))
+grid = RectilinearGrid(size=(64, 1, 64), x=(0, Lx), y=(0, Ly), z=(0, Lz))
 
 Q₀ = 1000 # heat flux in W / m²
 e_bcs = FieldBoundaryConditions(bottom=FluxBoundaryCondition(Q₀))
@@ -19,7 +20,11 @@ Tₛ = model.formulation.constants.reference_potential_temperature
 qᵢ(x, y, z) = 0
 Ξᵢ(x, y, z) = 1e-6 * randn()
 
+# Thermal bubble parameters
 N² = 1e-6        # Brunt-Väisälä frequency squared (s⁻²)
+x₀ = Lx / 2      # Center of bubble in x
+z₀ = Lz / 3      # Center of bubble in z
+r₀ = Lz / 6      # Initial radius of bubble
 dθdz = N² * Tₛ / 9.81  # Background potential temperature gradient
 
 # Initial conditions
@@ -36,7 +41,8 @@ set!(model, θ=θᵢ, q=qᵢ, u=Ξᵢ, v=Ξᵢ)
 δ = Field(∂x(ρu) + ∂y(ρv) + ∂z(ρw))
 compute!(δ)
 
-simulation = Simulation(model, Δt=1e-6, stop_iteration=100)
+stop_time = 30minutes
+simulation = Simulation(model, Δt=1; stop_time)
 # conjure_time_step_wizard!(simulation, cfl=0.7)
 
 using Printf
@@ -63,4 +69,79 @@ end
 
 add_callback!(simulation, progress, IterationInterval(10))
 
+# Calculate vorticity using abstract operations (2D: only z-component)
+u, v, w = model.velocities
+ζ = ∂x(w) - ∂z(u)
+
+# Temperature perturbation from background state
+θ_bg_field = Field{Nothing, Nothing, Center}(grid)
+set!(θ_bg_field, z -> Tₛ + dθdz * z)
+
+ρʳ = model.formulation.reference_density
+cᵖᵈ = model.thermodynamics.dry_air.heat_capacity
+e = model.energy
+θ = e / (ρʳ * cᵖᵈ)
+θ′ = θ - θ_bg_field
+
+outputs = merge(model.velocities, model.tracers, (; ζ, θ′))
+
+Nx, Ny, Nz = size(grid)
+filename = "thermal_bubble_$(Nx)x$(Nz).jld2"
+writer = JLD2Writer(model, outputs; filename,
+                    schedule = TimeInterval(30seconds),
+                    overwrite_existing = true)
+
+simulation.output_writers[:jld2] = writer
+
 run!(simulation)
+
+using GLMakie
+
+# Read the output data
+wt = FieldTimeSeries(filename, "w")
+ζt = FieldTimeSeries(filename, "ζ")
+θ′t = FieldTimeSeries(filename, "θ′")
+
+times = wt.times
+Nt = length(wt)
+
+fig = Figure(size=(1500, 1000), fontsize=12)
+
+axθ′ = Axis(fig[1, 1], title="Perturbation potentital temperature θ′ (K)")
+axζ = Axis(fig[1, 2], title="Vorticity ζ (s⁻¹)")
+axw = Axis(fig[1, 3], title="Vertical Velocity w (m/s)")
+
+# Time slider
+slider = Slider(fig[3, 1:3], range=1:Nt, startvalue=1)
+n = slider.value
+
+# Observable fields
+θ′n = @lift interior(θ′t[$n], :, 1, :)
+ζn = @lift interior(ζt[$n], :, 1, :)
+wn = @lift interior(wt[$n], :, 1, :)
+
+# Title with time
+title = @lift "Thermal Bubble - t = $(prettytime(times[$n]))"
+fig[0, :] = Label(fig, title, fontsize=16, tellwidth=false)
+
+# Create heatmaps
+θ′_range = (minimum(θ′t), maximum(θ′t))
+ζ_range = maximum(abs, ζt)
+w_range = maximum(abs, wt)
+
+hmθ′ = heatmap!(axθ′, θ′n, colorrange=θ′_range, colormap=:balance)
+hmζ = heatmap!(axζ, ζn, colorrange=(-ζ_range, ζ_range), colormap=:balance)
+hmw = heatmap!(axw, wn, colorrange=(-w_range, w_range), colormap=:balance)
+
+# Add colorbars
+Colorbar(fig[2, 1], hmθ′, label="θ′ (K)", vertical=false)
+Colorbar(fig[2, 2], hmζ, label="ζ (s⁻¹)", vertical=false)
+Colorbar(fig[2, 3], hmw, label="w (m/s)", vertical=false)
+
+# Create animation
+@info "Creating animation..."
+GLMakie.record(fig, "thermal_bubble.mp4", 1:Nt, framerate=10) do nn
+    @info "Drawing frame $nn of $Nt..."
+    n[] = nn
+end
+@info "Saved animation to thermal_bubble.mp4"

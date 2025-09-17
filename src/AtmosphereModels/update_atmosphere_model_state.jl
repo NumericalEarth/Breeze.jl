@@ -16,7 +16,7 @@ const AnelasticModel = AtmosphereModel{<:AnelasticFormulation}
 compute_flux_bc_tendencies!(::AtmosphereModel) = nothing
 
 function prognostic_fields(model::AnelasticModel)
-    thermodynamic_fields = (e=model.energy, ρq=model.absolute_humidity)
+    thermodynamic_fields = (ρe=model.energy, ρq=model.absolute_humidity)
     return merge(model.momentum, thermodynamic_fields, model.condensates, model.tracers)
 end
 
@@ -129,11 +129,11 @@ function compute_tendencies!(model::AnelasticModel)
     launch!(arch, grid, :xyz, compute_z_momentum_tendency!, Gρw, grid, w_args)
 
     scalar_args = (model.advection, model.velocities, model.clock, fields(model))
-    Ge = model.timestepper.Gⁿ.e
-    e = model.energy
-    Fe = model.forcing.e
-    e_args = tuple(e, Fe, scalar_args...)
-    launch!(arch, grid, :xyz, compute_scalar_tendency!, Ge, grid, e_args)
+    Gρe = model.timestepper.Gⁿ.ρe
+    ρe = model.energy
+    Fρe = model.forcing.ρe
+    ρe_args = tuple(ρe, Fρe, scalar_args...)
+    launch!(arch, grid, :xyz, compute_scalar_tendency!, Gρe, grid, ρe_args)
 
     ρq = model.absolute_humidity
     Gρq = model.timestepper.Gⁿ.ρq

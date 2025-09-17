@@ -44,6 +44,6 @@ function update_hydrostatic_pressure!(model)
     Nx, Ny, Nz = size(grid)
     kernel_parameters = KernelParameters(0:Nx+1, 0:Ny+1)
     launch!(arch, grid, kernel_parameters, _update_hydrostatic_pressure!, pₕ′, grid, formulation, T, q, thermo)
-    # fill_halo_regions!(pₕ′)
+    fill_halo_regions!(pₕ′)
     return nothing
 end

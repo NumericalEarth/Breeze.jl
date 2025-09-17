@@ -39,7 +39,7 @@ advection = WENO(order=5)
 #model = NonhydrostaticModel(; grid, advection, buoyancy, tracers = (:θ, :q))
 model = AtmosphereModel(grid; advection) #, buoyancy, tracers = (:θ, :q))
 
-# Thermal bubble parameters following Ahmad & Lindeman (2007)
+# Thermal bubble parameters
 x₀ = Lx / 2      # Center of bubble in x
 z₀ = 4e3         # Center of bubble in z (2 km height)
 r₀ = 2e3         # Initial radius of bubble (2 km)
