@@ -1,0 +1,22 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(julia:*)",
+      "Bash(CI=true julia --project=. examples/rico_1m.jl)",
+      "Read(/home/user/.julia/packages/**)",
+      "Bash(timeout:*)",
+      "Bash(echo:*)",
+      "Bash(grep:*)",
+      "Bash(nvidia-smi:*)",
+      "Bash(CI=true timeout 120 julia --project=. examples/rico_1m.jl)",
+      "Bash(CI=true timeout 30 julia --project=. examples/rico_1m.jl)",
+      "Bash(CI=true timeout 300 julia --project=. examples/rico_1m.jl)",
+      "Bash(CI=true timeout 120 julia +1.10 --project=. examples/rico_1m.jl)"
+    ],
+    "deny": [],
+    "ask": [],
+    "additionalDirectories": [
+      "/teamspace/studios/this_studio/.julia/packages/CloudMicrophysics"
+    ]
+  }
+}
