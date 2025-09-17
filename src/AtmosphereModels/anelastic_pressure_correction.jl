@@ -68,29 +68,29 @@ import Oceananigans.Models.NonhydrostaticModels: compute_source_term!
 ##### Calculate the right-hand-side of the anelastic pressure Poisson equation.
 #####
 
-@kernel function _fourier_tridiagonal_source_term!(rhs, ::ZDirection, grid, Δt, ρᵣ, ρŨ)
+@kernel function _fourier_tridiagonal_source_term!(rhs, ::ZDirection, grid, ρᵣ, ρŨ)
     i, j, k = @index(Global, NTuple)
     active = !inactive_cell(i, j, k, grid)
     u, v, w = ρŨ
     δ = divᶜᶜᶜ(i, j, k, grid, u, v, w)
     ρᵣᵏ = ρᵣ[i, j, k]
-    @inbounds rhs[i, j, k] = active * Δzᶜᶜᶜ(i, j, k, grid) * δ / (ρᵣᵏ * Δt)
+    @inbounds rhs[i, j, k] = active * Δzᶜᶜᶜ(i, j, k, grid) * δ / ρᵣᵏ
 end
 
-function compute_source_term!(pressure, solver::DistributedFourierTridiagonalPoissonSolver, Δt, ρᵣ, ρŨ)
+function compute_source_term!(solver::DistributedFourierTridiagonalPoissonSolver, ρᵣ, ρŨ)
     rhs = solver.storage.zfield
     arch = architecture(solver)
     grid = solver.local_grid
     tdir = solver.batched_tridiagonal_solver.tridiagonal_direction
-    launch!(arch, grid, :xyz, _fourier_tridiagonal_source_term!, rhs, tdir, grid, Δt, ρᵣ, ρŨ)
+    launch!(arch, grid, :xyz, _fourier_tridiagonal_source_term!, rhs, tdir, grid, ρᵣ, ρŨ)
     return nothing
 end
 
-function compute_source_term!(pressure, solver::FourierTridiagonalPoissonSolver, Δt, ρᵣ, ρŨ)
+function compute_source_term!(solver::FourierTridiagonalPoissonSolver, ρᵣ, ρŨ)
     rhs = solver.source_term
     arch = architecture(solver)
     grid = solver.grid
     tdir = solver.batched_tridiagonal_solver.tridiagonal_direction
-    launch!(arch, grid, :xyz, _fourier_tridiagonal_source_term!, rhs, tdir, grid, Δt, ρᵣ, ρŨ)
+    launch!(arch, grid, :xyz, _fourier_tridiagonal_source_term!, rhs, tdir, grid, ρᵣ, ρŨ)
     return nothing
 end

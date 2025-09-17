@@ -7,10 +7,13 @@ using Oceananigans.BoundaryConditions: fill_halo_regions!, compute_x_bcs!, compu
 using Oceananigans.ImmersedBoundaries: mask_immersed_field!
 using Oceananigans.Architectures: architecture
 
-import Oceananigans.TimeSteppers: update_state!
+import Oceananigans.TimeSteppers: update_state!, compute_flux_bc_tendencies!
 import Oceananigans: fields, prognostic_fields
 
 const AnelasticModel = AtmosphereModel{<:AnelasticFormulation}
+
+# Change this to add fluxes
+compute_flux_bc_tendencies!(::AtmosphereModel) = nothing
 
 function prognostic_fields(model::AnelasticModel)
     thermodynamic_fields = (e=model.energy, ρq=model.absolute_humidity)
@@ -256,3 +259,20 @@ end
              + forcing(i, j, k, grid, clock, model_fields))
 end
 =#
+                                        
+""" Apply boundary conditions by adding flux divergences to the right-hand-side. """
+function compute_flux_bc_tendencies!(model::AtmosphereModel)
+    
+    Gⁿ    = model.timestepper.Gⁿ
+    arch  = model.architecture
+    clock = model.clock
+
+    model_fields = fields(model)
+    prognostic_fields = merge(model.velocities, model.tracers)
+
+    foreach(i -> compute_x_bcs!(Gⁿ[i], prognostic_fields[i], arch, clock, model_fields), 1:length(prognostic_fields))
+    foreach(i -> compute_y_bcs!(Gⁿ[i], prognostic_fields[i], arch, clock, model_fields), 1:length(prognostic_fields))
+    foreach(i -> compute_z_bcs!(Gⁿ[i], prognostic_fields[i], arch, clock, model_fields), 1:length(prognostic_fields))
+
+    return nothing
+end

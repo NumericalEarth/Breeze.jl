@@ -10,7 +10,6 @@ grid = RectilinearGrid(size=(64, 64, 64), x=(0, Lx), y=(0, Ly), z=(0, 25e3))
 
 Q₀ = 1000 # heat flux in W / m²
 e_bcs = FieldBoundaryConditions(bottom=FluxBoundaryCondition(Q₀))
-
 model = AtmosphereModel(grid, advection=WENO(), boundary_conditions=(; e=e_bcs))
 
 Lz = grid.Lz
@@ -25,7 +24,7 @@ set!(model, θ=θᵢ, q=qᵢ, u=Ξᵢ, v=Ξᵢ)
 δ = Field(∂x(ρu) + ∂y(ρv) + ∂z(ρw))
 compute!(δ)
 
-simulation = Simulation(model, Δt=1, stop_iteration=100)
+simulation = Simulation(model, Δt=1e-6, stop_iteration=100)
 # conjure_time_step_wizard!(simulation, cfl=0.7)
 
 using Printf
