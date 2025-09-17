@@ -21,13 +21,15 @@ end
 @kernel function _update_hydrostatic_pressure!(pₕ′, grid, formulation, T, q, thermo)
     i, j = @index(Global, NTuple)
 
-    @inbounds pₕ′[i, j, 0] = 0
-    @inbounds pₕ′[i, j, 1] = 0
+    Nz = grid.Nz
+    bᴺ = ℑzᵃᵃᶠ(i, j, Nz+1, grid, buoyancy, formulation, T, q, thermo)
+    @inbounds pₕ′[i, j, Nz] = - bᴺ * Δzᶜᶜᶠ(i, j, Nz+1, grid)
 
-    @inbounds for k in 2:grid.Nz
-        bₖ = ℑzᵃᵃᶠ(i, j, k, grid, buoyancy, formulation, T, q, thermo)
-        Δp′ = bₖ * Δzᶜᶜᶠ(i, j, k, grid)
-        pₕ′[i, j, k] = pₕ′[i, j, k-1] + Δp′
+    # Integrate downwards
+    @inbounds for k in grid.Nz-1:-1:1
+        b⁺ = ℑzᵃᵃᶠ(i, j, k+1, grid, buoyancy, formulation, T, q, thermo)
+        Δp′ = b⁺ * Δzᶜᶜᶠ(i, j, k+1, grid)
+        pₕ′[i, j, k] = pₕ′[i, j, k+1] - Δp′
     end
 end
 
@@ -42,6 +44,6 @@ function update_hydrostatic_pressure!(model)
     Nx, Ny, Nz = size(grid)
     kernel_parameters = KernelParameters(0:Nx+1, 0:Ny+1)
     launch!(arch, grid, kernel_parameters, _update_hydrostatic_pressure!, pₕ′, grid, formulation, T, q, thermo)
-    fill_halo_regions!(pₕ′)
+    # fill_halo_regions!(pₕ′)
     return nothing
 end
