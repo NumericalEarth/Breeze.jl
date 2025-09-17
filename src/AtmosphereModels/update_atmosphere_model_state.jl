@@ -207,7 +207,7 @@ end
     # Note: independent of y
     ρᵣ = @inbounds reference_density[i, j, k]    
 
-    return ( - div_𝐯v(i, j, k, grid, advection, velocities, momentum.ρu)
+    return ( - div_𝐯v(i, j, k, grid, advection, velocities, momentum.ρv)
              - y_f_cross_U(i, j, k, grid, coriolis, momentum)
              - ρᵣ * hydrostatic_pressure_gradient_y(i, j, k, grid, hydrostatic_pressure_anomaly)
              + forcing(i, j, k, grid, clock, model_fields))
@@ -222,7 +222,7 @@ end
                                      model_fields,
                                      forcing)
 
-    return ( - div_𝐯v(i, j, k, grid, advection, velocities, momentum.ρu)
+    return ( - div_𝐯w(i, j, k, grid, advection, velocities, momentum.ρw)
              - z_f_cross_U(i, j, k, grid, coriolis, momentum)
              + forcing(i, j, k, grid, clock, model_fields))
 end
