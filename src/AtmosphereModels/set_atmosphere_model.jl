@@ -25,7 +25,7 @@ function set!(model::AtmosphereModel; enforce_mass_conservation=true, kw...)
 
             ρʳ = model.formulation.reference_density
             cᵖᵈ = model.thermodynamics.dry_air.heat_capacity
-            ϕ = model.energy # use scratch
+            ϕ = model.energy
             value = ρʳ * cᵖᵈ * θ
         elseif name == :q
             q = model.specific_humidity
