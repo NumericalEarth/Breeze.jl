@@ -1,6 +1,6 @@
 module AtmosphereModels
 
-export AtmosphereModel
+export AtmosphereModel, AnelasticFormulation
 
 include("atmosphere_model.jl")
 include("anelastic_formulation.jl")

@@ -1,6 +1,6 @@
 module Thermodynamics
 
-export AtmosphereThermodynamics
+export AtmosphereThermodynamics, ReferenceStateConstants
 
 include("atmosphere_thermodynamics.jl")
 include("vapor_saturation.jl")
