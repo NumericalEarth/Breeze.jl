@@ -8,6 +8,7 @@ DocMeta.setdocmeta!(Breeze, :DocTestSetup, :(using Breeze); recursive=true)
 makedocs(sitename="Breeze",
     pages=[
         "Home" => "index.md",
+        "Thermodynamics" => "thermodynamics.md",
         "API" => "api.md",
     ]
 )

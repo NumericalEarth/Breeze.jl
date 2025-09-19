@@ -12,9 +12,6 @@ import Oceananigans: fields, prognostic_fields
 
 const AnelasticModel = AtmosphereModel{<:AnelasticFormulation}
 
-# Change this to add fluxes
-compute_flux_bc_tendencies!(::AtmosphereModel) = nothing
-
 function prognostic_fields(model::AnelasticModel)
     thermodynamic_fields = (ρe=model.energy, ρq=model.absolute_humidity)
     return merge(model.momentum, thermodynamic_fields, model.condensates, model.tracers)
@@ -122,7 +119,9 @@ function compute_tendencies!(model::AnelasticModel)
     ρᵣ = model.formulation.reference_density
     u_args = tuple(common_args..., model.forcing.ρu, pₕ′, ρᵣ)
     v_args = tuple(common_args..., model.forcing.ρv, pₕ′, ρᵣ)
-    w_args = tuple(common_args..., model.forcing.ρw)
+    w_args = tuple(common_args..., model.forcing.ρw, ρᵣ,
+                   model.formulation, model.temperature,
+                   model.specific_humidity, model.thermodynamics)
 
     launch!(arch, grid, :xyz, compute_x_momentum_tendency!, Gρu, grid, u_args)
     launch!(arch, grid, :xyz, compute_y_momentum_tendency!, Gρv, grid, v_args)
@@ -140,15 +139,6 @@ function compute_tendencies!(model::AnelasticModel)
     Fρq = model.forcing.ρq
     ρq_args = tuple(ρq, Fρq, scalar_args...)
     launch!(arch, grid, :xyz, compute_scalar_tendency!, Gρq, grid, ρq_args)
-
-    # Compute boundary flux contributions
-    prognostic_model_fields = prognostic_fields(model)
-    args = (arch, model.clock, fields(model))
-    field_indices = 1:length(prognostic_model_fields)
-    Gⁿ = model.timestepper.Gⁿ
-    foreach(q -> compute_x_bcs!(Gⁿ[q], prognostic_model_fields[q], args...), field_indices)
-    foreach(q -> compute_y_bcs!(Gⁿ[q], prognostic_model_fields[q], args...), field_indices)
-    foreach(q -> compute_z_bcs!(Gⁿ[q], prognostic_model_fields[q], args...), field_indices)
 
     return nothing
 end
@@ -192,7 +182,7 @@ end
 
     return ( - div_𝐯u(i, j, k, grid, advection, velocities, momentum.ρu)
              - x_f_cross_U(i, j, k, grid, coriolis, momentum)
-             - ρᵣ * hydrostatic_pressure_gradient_x(i, j, k, grid, hydrostatic_pressure_anomaly)
+             - hydrostatic_pressure_gradient_x(i, j, k, grid, hydrostatic_pressure_anomaly)
              + forcing(i, j, k, grid, clock, model_fields))
 end
 
@@ -212,9 +202,11 @@ end
 
     return ( - div_𝐯v(i, j, k, grid, advection, velocities, momentum.ρv)
              - y_f_cross_U(i, j, k, grid, coriolis, momentum)
-             - ρᵣ * hydrostatic_pressure_gradient_y(i, j, k, grid, hydrostatic_pressure_anomaly)
+             - hydrostatic_pressure_gradient_y(i, j, k, grid, hydrostatic_pressure_anomaly)
              + forcing(i, j, k, grid, clock, model_fields))
 end
+
+@inline ρ_χ(i, j, k, grid, ρ, χ, args...) = @inbounds ρ[i, j, k] * χ(i, j, k, grid, args...)
 
 @inline function z_momentum_tendency(i, j, k, grid,
                                      advection,
@@ -223,10 +215,22 @@ end
                                      coriolis,
                                      clock,
                                      model_fields,
-                                     forcing)
+                                     forcing,
+                                     reference_density,
+                                     formulation,
+                                     temperature,
+                                     specific_humidity,
+                                     thermo)
+
+    ρᵣ_b = ℑzᵃᵃᶠ(i, j, k, grid, ρ_χ, reference_density, buoyancy,
+                 formulation, temperature, specific_humidity, thermo)    
+
+    # ρᵣ_b = ℑzᵃᵃᶠ(i, j, k, grid, buoyancy,
+    #              formulation, temperature, specific_humidity, thermo)    
 
     return ( - div_𝐯w(i, j, k, grid, advection, velocities, momentum.ρw)
              - z_f_cross_U(i, j, k, grid, coriolis, momentum)
+             # - ρᵣ_b
              + forcing(i, j, k, grid, clock, model_fields))
 end
 
@@ -267,12 +271,14 @@ function compute_flux_bc_tendencies!(model::AtmosphereModel)
     arch  = model.architecture
     clock = model.clock
 
-    model_fields = fields(model)
-    prognostic_fields = merge(model.velocities, model.tracers)
-
-    foreach(i -> compute_x_bcs!(Gⁿ[i], prognostic_fields[i], arch, clock, model_fields), 1:length(prognostic_fields))
-    foreach(i -> compute_y_bcs!(Gⁿ[i], prognostic_fields[i], arch, clock, model_fields), 1:length(prognostic_fields))
-    foreach(i -> compute_z_bcs!(Gⁿ[i], prognostic_fields[i], arch, clock, model_fields), 1:length(prognostic_fields))
+    # Compute boundary flux contributions
+    prognostic_model_fields = prognostic_fields(model)
+    args = (arch, model.clock, fields(model))
+    field_indices = 1:length(prognostic_model_fields)
+    Gⁿ = model.timestepper.Gⁿ
+    foreach(q -> compute_x_bcs!(Gⁿ[q], prognostic_model_fields[q], args...), field_indices)
+    foreach(q -> compute_y_bcs!(Gⁿ[q], prognostic_model_fields[q], args...), field_indices)
+    foreach(q -> compute_z_bcs!(Gⁿ[q], prognostic_model_fields[q], args...), field_indices)
 
     return nothing
 end

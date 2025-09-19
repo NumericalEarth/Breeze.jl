@@ -3,9 +3,9 @@ using Oceananigans
 using Oceananigans.Units
 using Printf
 
-Lx = 10e3
-Ly = 10e3
-Lz = 10e3
+Lx = 1e3
+Ly = 1e3
+Lz = 1e3
 
 grid = RectilinearGrid(size=(64, 1, 64), x=(0, Lx), y=(0, Ly), z=(0, Lz))
 
@@ -18,7 +18,7 @@ Lz = grid.Lz
 Tₛ = model.formulation.constants.reference_potential_temperature
 # θᵢ(x, y, z) = Tₛ + Δθ * z / Lz
 qᵢ(x, y, z) = 0
-Ξᵢ(x, y, z) = 1e-6 * randn()
+Ξᵢ(x, y, z) = 1e-2 * randn()
 
 # Thermal bubble parameters
 N² = 1e-6        # Brunt-Väisälä frequency squared (s⁻²)
@@ -41,8 +41,8 @@ set!(model, θ=θᵢ, q=qᵢ, u=Ξᵢ, v=Ξᵢ)
 δ = Field(∂x(ρu) + ∂y(ρv) + ∂z(ρw))
 compute!(δ)
 
-stop_time = 30minutes
-simulation = Simulation(model, Δt=1; stop_time)
+stop_time = 5minutes
+simulation = Simulation(model, Δt=0.1; stop_iteration=1000)
 # conjure_time_step_wizard!(simulation, cfl=0.7)
 
 using Printf
@@ -77,30 +77,36 @@ u, v, w = model.velocities
 θ_bg_field = Field{Nothing, Nothing, Center}(grid)
 set!(θ_bg_field, z -> Tₛ + dθdz * z)
 
+T = model.temperature
 ρʳ = model.formulation.reference_density
 cᵖᵈ = model.thermodynamics.dry_air.heat_capacity
-e = model.energy
-θ = e / (ρʳ * cᵖᵈ)
+ρe = model.energy
+θ = ρe / (ρʳ * cᵖᵈ)
 θ′ = θ - θ_bg_field
 
-outputs = merge(model.velocities, model.tracers, (; ζ, θ′))
+outputs = merge(model.velocities, (; ζ, θ′, T, ρe))
 
 Nx, Ny, Nz = size(grid)
 filename = "thermal_bubble_$(Nx)x$(Nz).jld2"
 writer = JLD2Writer(model, outputs; filename,
-                    schedule = TimeInterval(30seconds),
+                    schedule = IterationInterval(10),
                     overwrite_existing = true)
 
 simulation.output_writers[:jld2] = writer
 
-run!(simulation)
+try
+    run!(simulation)
+catch
+end
 
 using GLMakie
 
 # Read the output data
+et = FieldTimeSeries(filename, "ρe")
 wt = FieldTimeSeries(filename, "w")
 ζt = FieldTimeSeries(filename, "ζ")
 θ′t = FieldTimeSeries(filename, "θ′")
+Tt = FieldTimeSeries(filename, "T")
 
 times = wt.times
 Nt = length(wt)
@@ -108,8 +114,10 @@ Nt = length(wt)
 fig = Figure(size=(1500, 1000), fontsize=12)
 
 axθ′ = Axis(fig[1, 1], title="Perturbation potentital temperature θ′ (K)")
-axζ = Axis(fig[1, 2], title="Vorticity ζ (s⁻¹)")
-axw = Axis(fig[1, 3], title="Vertical Velocity w (m/s)")
+axT = Axis(fig[1, 2], title="Temperature T (K)")
+#axζ = Axis(fig[1, 2], title="Vorticity ζ (s⁻¹)")
+axw = Axis(fig[2, 1], title="Vertical Velocity w (m/s)")
+axe = Axis(fig[2, 2], title="Internal Energy ρe (J/kg)")
 
 # Time slider
 slider = Slider(fig[3, 1:3], range=1:Nt, startvalue=1)
@@ -117,8 +125,10 @@ n = slider.value
 
 # Observable fields
 θ′n = @lift interior(θ′t[$n], :, 1, :)
-ζn = @lift interior(ζt[$n], :, 1, :)
+Tn = @lift interior(Tt[$n], :, 1, :)
+# ζn = @lift interior(ζt[$n], :, 1, :)
 wn = @lift interior(wt[$n], :, 1, :)
+en = @lift interior(et[$n], :, 1, :)
 
 # Title with time
 title = @lift "Thermal Bubble - t = $(prettytime(times[$n]))"
@@ -126,18 +136,27 @@ fig[0, :] = Label(fig, title, fontsize=16, tellwidth=false)
 
 # Create heatmaps
 θ′_range = (minimum(θ′t), maximum(θ′t))
-ζ_range = maximum(abs, ζt)
+T_range = (minimum(Tt), maximum(Tt))
+# ζ_range = maximum(abs, ζt)
 w_range = maximum(abs, wt)
+e_range = maximum(abs, et)
 
 hmθ′ = heatmap!(axθ′, θ′n, colorrange=θ′_range, colormap=:balance)
-hmζ = heatmap!(axζ, ζn, colorrange=(-ζ_range, ζ_range), colormap=:balance)
+hmT = heatmap!(axT, Tn, colorrange=T_range, colormap=:thermal)
+# hmζ = heatmap!(axζ, ζn, colorrange=(-ζ_range, ζ_range), colormap=:balance)
 hmw = heatmap!(axw, wn, colorrange=(-w_range, w_range), colormap=:balance)
+hme = heatmap!(axe, en, colorrange=(-e_range, e_range), colormap=:balance)
 
 # Add colorbars
-Colorbar(fig[2, 1], hmθ′, label="θ′ (K)", vertical=false)
-Colorbar(fig[2, 2], hmζ, label="ζ (s⁻¹)", vertical=false)
-Colorbar(fig[2, 3], hmw, label="w (m/s)", vertical=false)
+Colorbar(fig[1, 0], hmθ′, label="θ′ (K)", vertical=true)
+Colorbar(fig[1, 3], hmT, label="T (K)", vertical=true)
+# Colorbar(fig[1, 3], hmζ, label="ζ (s⁻¹)", vertical=true)
+Colorbar(fig[2, 0], hmw, label="w (m/s)", vertical=true)
+Colorbar(fig[2, 3], hme, label="ρe (J/kg)", vertical=true)
 
+display(fig)
+
+#=
 # Create animation
 @info "Creating animation..."
 GLMakie.record(fig, "thermal_bubble.mp4", 1:Nt, framerate=10) do nn
@@ -145,3 +164,4 @@ GLMakie.record(fig, "thermal_bubble.mp4", 1:Nt, framerate=10) do nn
     n[] = nn
 end
 @info "Saved animation to thermal_bubble.mp4"
+=#

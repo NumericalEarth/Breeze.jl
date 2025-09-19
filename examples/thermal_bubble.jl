@@ -29,7 +29,7 @@ grid = RectilinearGrid(arch,
 # Thermodynamic setup
 p₀ = 101325  # Pa - standard atmospheric pressure
 θ₀ = 300.0   # K - reference potential temperature
-reference_constants = Breeze.Thermodynamics.ReferenceConstants(base_pressure=p₀, potential_temperature=θ₀)
+reference_constants = Breeze.Thermodynamics.ReferenceStateConstants(base_pressure=p₀, potential_temperature=θ₀)
 buoyancy = Breeze.MoistAirBuoyancy(; reference_constants)
 
 # Advection scheme - WENO for high-order accuracy

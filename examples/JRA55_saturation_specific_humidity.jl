@@ -24,7 +24,7 @@ ax4 = Axis(fig[2, 2], title="Liquid specific humidity")
 # Compute cloudiness for instantaneous drop
 θ⁻ = T .- 10
 Ψ = Breeze.ThermodynamicState{Float64}.(θ⁻, q, 0)
-ℛ = Breeze.ReferenceConstants{Float64}(101325, 20)
+ℛ = Breeze.ReferenceStateConstants{Float64}(101325, 20)
 T⁻ = Breeze.temperature.(Ψ, Ref(ℛ), Ref(thermo))
 qᵛ★ = saturation_specific_humidity.(T⁻, 1.2, Ref(thermo))
 qˡ = @. max(0, q - qᵛ★)

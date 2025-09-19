@@ -20,7 +20,7 @@ import Oceananigans.BuoyancyFormulations: AbstractBuoyancyFormulation,
 
 using ..Thermodynamics:
     AtmosphereThermodynamics,
-    ReferenceConstants,
+    ReferenceStateConstants,
     mixture_heat_capacity,
     mixture_gas_constant,
     reference_specific_volume,
@@ -32,14 +32,14 @@ import ..Thermodynamics:
     condensate_specific_humidity
 
 struct MoistAirBuoyancy{FT, AT} <: AbstractBuoyancyFormulation{Nothing}
-    reference_constants :: ReferenceConstants{FT}
+    reference_constants :: ReferenceStateConstants{FT}
     thermodynamics :: AT
 end
 
 """
     MoistAirBuoyancy(FT=Oceananigans.defaults.FloatType;
                      thermodynamics = AtmosphereThermodynamics(FT),
-                     reference_constants = ReferenceConstants{FT}(101325, 290))
+                     reference_constants = ReferenceStateConstants{FT}(101325, 290))
 
 Return a MoistAirBuoyancy formulation that can be provided as input to an
 [`AtmosphereModel`](@ref Breeze.AtmosphereModels.AtmosphereModel) or an
@@ -56,7 +56,7 @@ julia> using Breeze, Oceananigans
 
 julia> buoyancy = MoistAirBuoyancy()
 MoistAirBuoyancy
-├── reference_constants: Breeze.Thermodynamics.ReferenceConstants{Float64}
+├── reference_constants: Breeze.Thermodynamics.ReferenceStateConstants{Float64}
 └── thermodynamics: AtmosphereThermodynamics
 
 julia> model = NonhydrostaticModel(; grid = RectilinearGrid(size=(8, 8, 8), extent=(1, 2, 3)),
@@ -73,7 +73,7 @@ NonhydrostaticModel{CPU, RectilinearGrid}(time = 0 seconds, iteration = 0)
 """
 function MoistAirBuoyancy(FT=Oceananigans.defaults.FloatType;
                           thermodynamics = AtmosphereThermodynamics(FT),
-                          reference_constants = ReferenceConstants{FT}(101325, 290))
+                          reference_constants = ReferenceStateConstants{FT}(101325, 290))
 
     AT = typeof(thermodynamics)
     return MoistAirBuoyancy{FT, AT}(reference_constants, thermodynamics)

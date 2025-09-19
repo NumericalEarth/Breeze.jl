@@ -12,7 +12,7 @@ function set!(model::AtmosphereModel; enforce_mass_conservation=true, kw...)
             set!(ϕ, value)
         elseif name ∈ propertynames(model.tracers)
             ϕ = getproperty(model.tracers, name)
-        elseif name == :e
+        elseif name == :ρe
             ϕ = model.energy
         elseif name == :ρq
             ϕ = model.absolute_humidity

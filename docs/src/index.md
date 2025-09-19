@@ -43,7 +43,7 @@ Nx = Nz = 64
 Lz = 4 * 1024
 grid = RectilinearGrid(CPU(), size=(Nx, Nz), x=(0, 2Lz), z=(0, Lz), topology=(Periodic, Flat, Bounded))
 
-reference_constants = Breeze.Thermodynamics.ReferenceConstants(base_pressure=1e5, potential_temperature=288)
+reference_constants = Breeze.Thermodynamics.ReferenceStateConstants(base_pressure=1e5, potential_temperature=288)
 buoyancy = Breeze.MoistAirBuoyancy(; reference_constants)
 
 Q₀ = 1000 # heat flux in W / m²
