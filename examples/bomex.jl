@@ -258,7 +258,6 @@ simulation.output_writers[:avg] = averages_ow
 @info "Running BOMEX on grid: \n $grid \n and using model: \n $model"
 run!(simulation)
 
-#=
 using CairoMakie
 
 θt  = FieldTimeSeries(averages_filename, "θ")
@@ -299,4 +298,3 @@ CairoMakie.record(fig, "bomex.mp4", 1:Nt, framerate=12) do nn
     @info "Drawing frame $nn of $Nt..."
     n[] = nn
 end
-=#
