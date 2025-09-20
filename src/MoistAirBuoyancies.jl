@@ -4,7 +4,7 @@ export MoistAirBuoyancy
 export UnsaturatedMoistAirBuoyancy
 export TemperatureField
 export CondensateField
-export PhaseTransitionConstantsField
+export SaturationField
 
 using Oceananigans
 using Oceananigans: AbstractModel
@@ -173,7 +173,7 @@ Adapt.adapt_structure(to, sk::PhaseTransitionConstantsKernel) =
     return saturation_specific_humidity(i, j, k, grid, buoyancy, T, kernel.condensed_phase)
 end
 
-function PhaseTransitionConstantsField(model,
+function SaturationField(model,
                          T = TemperatureField(model);
                          condensed_phase = model.buoyancy.formulation.thermodynamics.liquid)
     func = PhaseTransitionConstantsKernel(condensed_phase, T)

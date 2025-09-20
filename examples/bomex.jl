@@ -198,7 +198,7 @@ add_callback!(simulation, compute_averages!)
 
 T = Breeze.TemperatureField(model)
 qˡ = Breeze.CondensateField(model, T)
-qᵛ★ = Breeze.PhaseTransitionConstantsField(model, T)
+qᵛ★ = Breeze.SaturationField(model, T)
 rh = Field(model.tracers.q / qᵛ★) # relative humidity
 
 function progress(sim)
