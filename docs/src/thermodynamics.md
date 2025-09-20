@@ -136,7 +136,7 @@ p₀ = constants.base_pressure
 g = thermo.gravitational_acceleration
 
 # Verify that Tᵣ = θ₀ (1 - g z / (cᵖᵈ θ₀))
-z = znodes(grid, Center())
+z = KernelFunctionOperation{Center, Center, Center}(grid, znode)
 Tᵣ₁ = Field(θ₀ * (pᵣ / p₀)^(Rᵈ / cᵖᵈ))
 Tᵣ₂ = Field(θ₀ * (1 - g * z / (cᵖᵈ * θ₀)))
 

@@ -25,6 +25,7 @@ export
     Center, Face, Periodic, Bounded, Flat,
     RectilinearGrid,
     nodes, xnodes, ynodes, znodes,
+    xnode, ynode, znode,
     xspacings, yspacings, zspacings,
     minimum_xspacing, minimum_yspacing, minimum_zspacing,
     ImmersedBoundaryGrid, GridFittedBottom, PartialCellBottom, ImmersedBoundaryCondition,
