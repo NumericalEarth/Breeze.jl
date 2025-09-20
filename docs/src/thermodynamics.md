@@ -133,6 +133,7 @@ Rᵈ = Breeze.Thermodynamics.dry_air_gas_constant(thermo)
 cᵖᵈ = thermo.dry_air.heat_capacity
 p₀ = constants.base_pressure
 θ₀ = constants.reference_potential_temperature
+g = thermo.gravitational_acceleration
 
 # Verify that Tᵣ = θ₀ (1 - g z / (cᵖᵈ θ₀))
 z = znodes(grid, Center())
