@@ -19,7 +19,7 @@ AtmosphericProfilesLibrary = "0.1.7"
 CloudMicrophysics = "0.22.13"
 JLD2 = "0.5.13"
 Oceananigans = "0.99"
-Printf = "1.11.0"
+Printf = "1"
 RootSolvers = "0.4.4"
 
 [extras]
