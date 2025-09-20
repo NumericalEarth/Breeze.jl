@@ -48,14 +48,14 @@ using Oceananigans
     end
 
     @testset "NonhydrostaticModel with MoistAirBuoyancy" begin
-        reference_constants = ReferenceStateConstants(potential_temperature=300.0)
+        reference_constants = ReferenceStateConstants(potential_temperature=300)
         buoyancy = MoistAirBuoyancy(; reference_constants)
 
         grid = RectilinearGrid(size=(8, 8, 8), x=(0, 400), y=(0, 400), z=(0, 400))
         model = NonhydrostaticModel(; grid, buoyancy, tracers = (:θ, :q))
 
         θ₀ = reference_constants.reference_potential_temperature
-        Δθ = 2.0
+        Δθ = 2
         Lz = grid.Lz
 
         θᵢ(x, y, z) = θ₀ + Δθ * z / Lz
@@ -69,13 +69,12 @@ using Oceananigans
 
         Rᵐ = Breeze.Thermodynamics.mixture_gas_constant(0.0, buoyancy.thermodynamics)
         cᵖᵐ = Breeze.Thermodynamics.mixture_heat_capacity(0.0, buoyancy.thermodynamics)
-        p_ref = 1e5
-        c_loc = Oceananigans.Grids.Center()
+        p₀ = 1e5
 
         for k in axes(T_data, 3)
-            z = Oceananigans.Grids.znode(1, 1, k, grid, c_loc, c_loc, c_loc)
+            z = Oceananigans.Grids.znode(1, 1, k, grid, Center(), Center(), Center())
             pᵣ = Breeze.Thermodynamics.reference_pressure(z, reference_constants, buoyancy.thermodynamics)
-            Π = (pᵣ / p_ref)^(Rᵐ / cᵖᵐ)
+            Π = (pᵣ / p₀)^(Rᵐ / cᵖᵐ)
             expected = Π .* θ_data[:, :, k]
             @test isapprox(T_data[:, :, k], expected; atol=1e-6, rtol=1e-6)
         end

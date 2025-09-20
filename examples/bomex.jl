@@ -259,8 +259,9 @@ simulation.output_writers[:avg] = averages_ow
 @info "Running BOMEX on grid: \n $grid \n and using model: \n $model"
 run!(simulation)
 
-if get(ENV, "CI", "false") == "false" # change values for CI
+@show get(ENV, "CI", "false")
 
+if get(ENV, "CI", "false") == "false" # change values for CI
     θt  = FieldTimeSeries(averages_filename, "θ")
     Tt  = FieldTimeSeries(averages_filename, "T")
     qt  = FieldTimeSeries(averages_filename, "q")
