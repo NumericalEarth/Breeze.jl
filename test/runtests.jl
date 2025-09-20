@@ -62,11 +62,13 @@ using Oceananigans
         set!(model; θ = θᵢ, q = 0)
 
         # Can time-step
-        @test try
+        success = try
             time_step!(model, 1e-2))
             true
         catch
             false
         end
+
+        @test success
     end
 end
