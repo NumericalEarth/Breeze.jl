@@ -57,7 +57,7 @@ using Oceananigans
 
         # Can time-step
         success = try
-            time_step!(model, 1e-2))
+            time_step!(model, 1e-2)
             true
         catch
             false
