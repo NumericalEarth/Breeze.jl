@@ -6,7 +6,6 @@ using Oceananigans.Units
 using AtmosphericProfilesLibrary                       
 using CloudMicrophysics 
 using Printf
-# using CairoMakie
 
 using Oceananigans.Operators: ∂zᶜᶜᶠ, ℑzᵃᵃᶜ
 using CloudMicrophysics.Microphysics0M: remove_precipitation
@@ -259,45 +258,45 @@ simulation.output_writers[:avg] = averages_ow
 @info "Running BOMEX on grid: \n $grid \n and using model: \n $model"
 run!(simulation)
 
-@show get(ENV, "CI", "false")
+#=
+using CairoMakie
 
-if get(ENV, "CI", "false") == "false" # change values for CI
-    θt  = FieldTimeSeries(averages_filename, "θ")
-    Tt  = FieldTimeSeries(averages_filename, "T")
-    qt  = FieldTimeSeries(averages_filename, "q")
-    qˡt = FieldTimeSeries(averages_filename, "qˡ")
-    times = qt.times
-    Nt = length(θt)
+θt  = FieldTimeSeries(averages_filename, "θ")
+Tt  = FieldTimeSeries(averages_filename, "T")
+qt  = FieldTimeSeries(averages_filename, "q")
+qˡt = FieldTimeSeries(averages_filename, "qˡ")
+times = qt.times
+Nt = length(θt)
 
-    fig = Figure(size=(1200, 800), fontsize=12)
-    axθ  = Axis(fig[1, 1], xlabel="θ (K)", ylabel="z (m)")
-    axq  = Axis(fig[1, 2], xlabel="q (kg/kg)", ylabel="z (m)")
-    axT  = Axis(fig[2, 1], xlabel="T (K)", ylabel="z (m)")
-    axqˡ = Axis(fig[2, 2], xlabel="qˡ (kg/kg)", ylabel="z (m)")
+fig = Figure(size=(1200, 800), fontsize=12)
+axθ  = Axis(fig[1, 1], xlabel="θ (K)", ylabel="z (m)")
+axq  = Axis(fig[1, 2], xlabel="q (kg/kg)", ylabel="z (m)")
+axT  = Axis(fig[2, 1], xlabel="T (K)", ylabel="z (m)")
+axqˡ = Axis(fig[2, 2], xlabel="qˡ (kg/kg)", ylabel="z (m)")
 
-    Nt = length(θt)
-    slider = Slider(fig[3, 1:2], range=1:Nt, startvalue=1)
+Nt = length(θt)
+slider = Slider(fig[3, 1:2], range=1:Nt, startvalue=1)
 
-    n = slider.value #Observable(length(θt))
-    θn  = @lift interior(θt[$n], 1, 1, :)
-    qn  = @lift interior(qt[$n], 1, 1, :)
-    Tn  = @lift interior(Tt[$n], 1, 1, :)
-    qˡn = @lift interior(qˡt[$n], 1, 1, :)
-    z = znodes(θt)
-    title = @lift "t = $(prettytime(times[$n]))"
+n = slider.value #Observable(length(θt))
+θn  = @lift interior(θt[$n], 1, 1, :)
+qn  = @lift interior(qt[$n], 1, 1, :)
+Tn  = @lift interior(Tt[$n], 1, 1, :)
+qˡn = @lift interior(qˡt[$n], 1, 1, :)
+z = znodes(θt)
+title = @lift "t = $(prettytime(times[$n]))"
 
-    fig[0, :] = Label(fig, title, fontsize=22, tellwidth=false)
+fig[0, :] = Label(fig, title, fontsize=22, tellwidth=false)
 
-    hmθ  = lines!(axθ, θn, z)
-    hmq  = lines!(axq, qn, z)
-    hmT  = lines!(axT, Tn, z)
-    hmqˡ = lines!(axqˡ, qˡn, z)
-    xlims!(axqˡ, -1e-4, 1.5e-3)
+hmθ  = lines!(axθ, θn, z)
+hmq  = lines!(axq, qn, z)
+hmT  = lines!(axT, Tn, z)
+hmqˡ = lines!(axqˡ, qˡn, z)
+xlims!(axqˡ, -1e-4, 1.5e-3)
 
-    fig
+fig
 
-    CairoMakie.record(fig, "bomex.mp4", 1:Nt, framerate=12) do nn
-        @info "Drawing frame $nn of $Nt..."
-        n[] = nn
-    end
+CairoMakie.record(fig, "bomex.mp4", 1:Nt, framerate=12) do nn
+    @info "Drawing frame $nn of $Nt..."
+    n[] = nn
 end
+=#
