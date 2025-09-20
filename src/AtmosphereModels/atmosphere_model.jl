@@ -1,6 +1,6 @@
 using ..Thermodynamics:
     AtmosphereThermodynamics,
-    ReferenceConstants,
+    ReferenceStateConstants,
     reference_pressure,
     reference_density,
     mixture_gas_constant,
@@ -62,7 +62,7 @@ function default_formulation(grid, thermo)
     FT = eltype(grid)
     base_pressure = convert(FT, 101325)
     potential_temperature = convert(FT, 288)
-    constants = ReferenceConstants(base_pressure, potential_temperature)
+    constants = ReferenceStateConstants(base_pressure, potential_temperature)
     return AnelasticFormulation(grid, constants, thermo)
 end
 
@@ -137,8 +137,8 @@ function AtmosphereModel(grid;
         absolute_humidity = CenterField(grid, boundary_conditions=boundary_conditions.ρq)
     end
 
-    energy = CenterField(grid, boundary_conditions=boundary_conditions.e)
-    specific_humidity = CenterField(grid)
+    energy = CenterField(grid, boundary_conditions=boundary_conditions.ρe)
+    specific_humidity = CenterField(grid, boundary_conditions=boundary_conditions.ρq)
     temperature = CenterField(grid)
 
     prognostic_fields = collect_prognostic_fields(formulation,

@@ -18,7 +18,7 @@
     # If we made it this far, we have condensation
     r₁ = saturation_adjustment_residual(T₁, Π, qˡ₁, state, thermo)
 
-    ℒ = thermo.condensation.latent_heat
+    ℒ = thermo.liquid.latent_heat
     cᵖᵐ = mixture_heat_capacity(state.q, thermo)
     T₂ = (T₁ + sqrt(T₁^2 + 4 * ℒ * qˡ₁ / cᵖᵐ)) / 2
     qˡ₂ = condensate_specific_humidity(T₂, state, ref, thermo)
@@ -49,7 +49,7 @@
 end
 
 @inline function saturation_adjustment_residual(T, Π, qˡ, state, thermo)
-    ℒᵛ = thermo.condensation.latent_heat
+    ℒᵛ = thermo.liquid.latent_heat
     cᵖᵐ = mixture_heat_capacity(state.q, thermo)
     return T^2 - ℒᵛ * qˡ / cᵖᵐ - Π * state.θ * T
 end

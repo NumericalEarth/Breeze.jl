@@ -12,7 +12,7 @@ function set!(model::AtmosphereModel; enforce_mass_conservation=true, kw...)
             set!(ϕ, value)
         elseif name ∈ propertynames(model.tracers)
             ϕ = getproperty(model.tracers, name)
-        elseif name == :e
+        elseif name == :ρe
             ϕ = model.energy
         elseif name == :ρq
             ϕ = model.absolute_humidity
@@ -25,7 +25,7 @@ function set!(model::AtmosphereModel; enforce_mass_conservation=true, kw...)
 
             ρʳ = model.formulation.reference_density
             cᵖᵈ = model.thermodynamics.dry_air.heat_capacity
-            ϕ = model.energy # use scratch
+            ϕ = model.energy
             value = ρʳ * cᵖᵈ * θ
         elseif name == :q
             q = model.specific_humidity

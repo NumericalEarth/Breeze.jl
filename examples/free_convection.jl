@@ -11,7 +11,7 @@ grid = RectilinearGrid(arch, size=(Nx, Nz), x=(0, 2Lz), z=(0, Lz), topology=(Per
 
 p₀ = 101325 # Pa
 θ₀ = 288 # K
-reference_constants = Breeze.Thermodynamics.ReferenceConstants(base_pressure=p₀, potential_temperature=θ₀)
+reference_constants = Breeze.Thermodynamics.ReferenceStateConstants(base_pressure=p₀, potential_temperature=θ₀)
 buoyancy = Breeze.MoistAirBuoyancy(; reference_constants)
 
 # Simple precipitation scheme from CloudMicrophysics

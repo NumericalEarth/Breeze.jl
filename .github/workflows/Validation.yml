@@ -38,5 +38,6 @@ jobs:
       - name: Run BOMEX example
         env:
           VALIDATION: "true"
+          CI: "true"
         run: |
           julia --project=. examples/bomex.jl 

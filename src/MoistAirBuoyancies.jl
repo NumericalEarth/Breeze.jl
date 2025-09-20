@@ -20,7 +20,7 @@ import Oceananigans.BuoyancyFormulations: AbstractBuoyancyFormulation,
 
 using ..Thermodynamics:
     AtmosphereThermodynamics,
-    ReferenceConstants,
+    ReferenceStateConstants,
     mixture_heat_capacity,
     mixture_gas_constant,
     reference_specific_volume,
@@ -32,14 +32,14 @@ import ..Thermodynamics:
     condensate_specific_humidity
 
 struct MoistAirBuoyancy{FT, AT} <: AbstractBuoyancyFormulation{Nothing}
-    reference_constants :: ReferenceConstants{FT}
+    reference_constants :: ReferenceStateConstants{FT}
     thermodynamics :: AT
 end
 
 """
     MoistAirBuoyancy(FT=Oceananigans.defaults.FloatType;
                      thermodynamics = AtmosphereThermodynamics(FT),
-                     reference_constants = ReferenceConstants{FT}(101325, 290))
+                     reference_constants = ReferenceStateConstants{FT}(101325, 290))
 
 Return a MoistAirBuoyancy formulation that can be provided as input to an
 [`AtmosphereModel`](@ref Breeze.AtmosphereModels.AtmosphereModel) or an
@@ -56,7 +56,7 @@ julia> using Breeze, Oceananigans
 
 julia> buoyancy = MoistAirBuoyancy()
 MoistAirBuoyancy
-├── reference_constants: Breeze.Thermodynamics.ReferenceConstants{Float64}
+├── reference_constants: Breeze.Thermodynamics.ReferenceStateConstants{Float64}
 └── thermodynamics: AtmosphereThermodynamics
 
 julia> model = NonhydrostaticModel(; grid = RectilinearGrid(size=(8, 8, 8), extent=(1, 2, 3)),
@@ -73,7 +73,7 @@ NonhydrostaticModel{CPU, RectilinearGrid}(time = 0 seconds, iteration = 0)
 """
 function MoistAirBuoyancy(FT=Oceananigans.defaults.FloatType;
                           thermodynamics = AtmosphereThermodynamics(FT),
-                          reference_constants = ReferenceConstants{FT}(101325, 290))
+                          reference_constants = ReferenceStateConstants{FT}(101325, 290))
 
     AT = typeof(thermodynamics)
     return MoistAirBuoyancy{FT, AT}(reference_constants, thermodynamics)
@@ -103,7 +103,7 @@ const c = Center()
     q = @inbounds tracers.q[i, j, k]
     𝒰 = HeightReferenceThermodynamicState(θ, q, z)
 
-    # Perform saturation adjustment
+    # Perform Saturation adjustment
     α = specific_volume(𝒰, mb.reference_constants, mb.thermodynamics)
 
     # Compute reference specific volume
@@ -153,30 +153,30 @@ end
 ##### Saturation specific humidity
 #####
 
-@inline function saturation_specific_humidity(i, j, k, grid, mb::MoistAirBuoyancy, T, phase_transition)
+@inline function saturation_specific_humidity(i, j, k, grid, mb::MoistAirBuoyancy, T, condensed_phase)
     z = Oceananigans.Grids.znode(i, j, k, grid, c, c, c)
     Ti = @inbounds T[i, j, k]
-    return saturation_specific_humidity(Ti, z, mb.reference_constants, mb.thermodynamics, phase_transition)
+    return saturation_specific_humidity(Ti, z, mb.reference_constants, mb.thermodynamics, condensed_phase)
 end
 
-struct SaturationKernel{T, P}
-    phase_transition :: P
+struct PhaseTransitionConstantsKernel{T, P}
+    condensed_phase :: P
     temperature :: T
 end
 
-Adapt.adapt_structure(to, sk::SaturationKernel) =
-    SaturationKernel(adapt(to, sk.phase_transition),
+Adapt.adapt_structure(to, sk::PhaseTransitionConstantsKernel) =
+    PhaseTransitionConstantsKernel(adapt(to, sk.condensed_phase),
                      adapt(to, sk.temperature))
 
-@inline function (kernel::SaturationKernel)(i, j, k, grid, buoyancy)
+@inline function (kernel::PhaseTransitionConstantsKernel)(i, j, k, grid, buoyancy)
     T = kernel.temperature
-    return saturation_specific_humidity(i, j, k, grid, buoyancy, T, kernel.phase_transition)
+    return saturation_specific_humidity(i, j, k, grid, buoyancy, T, kernel.condensed_phase)
 end
 
 function SaturationField(model,
                          T = TemperatureField(model);
-                         phase_transition = model.buoyancy.formulation.thermodynamics.condensation)
-    func = SaturationKernel(phase_transition, T)
+                         condensed_phase = model.buoyancy.formulation.thermodynamics.liquid)
+    func = PhaseTransitionConstantsKernel(condensed_phase, T)
     grid = model.grid
     buoyancy = model.buoyancy.formulation
     op = KernelFunctionOperation{Center, Center, Center}(func, grid, buoyancy)
@@ -245,7 +245,7 @@ condensate_specific_humidity(T, state::HeightReferenceThermodynamicState, ref, t
     # If we made it this far, we have condensation
     r₁ = saturation_adjustment_residual(T₁, Π, qˡ₁, state, thermo)
 
-    ℒ = thermo.condensation.latent_heat
+    ℒ = thermo.liquid.latent_heat
     cᵖᵐ = mixture_heat_capacity(state.q, thermo)
     T₂ = (T₁ + sqrt(T₁^2 + 4 * ℒ * qˡ₁ / cᵖᵐ)) / 2
     qˡ₂ = condensate_specific_humidity(T₂, state, ref, thermo)
@@ -276,7 +276,7 @@ condensate_specific_humidity(T, state::HeightReferenceThermodynamicState, ref, t
 end
 
 @inline function saturation_adjustment_residual(T, Π, qˡ, state::HeightReferenceThermodynamicState, thermo)
-    ℒᵛ = thermo.condensation.latent_heat
+    ℒᵛ = thermo.liquid.latent_heat
     cᵖᵐ = mixture_heat_capacity(state.q, thermo)
     return T^2 - ℒᵛ * qˡ / cᵖᵐ - Π * state.θ * T
 end

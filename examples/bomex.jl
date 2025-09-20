@@ -6,7 +6,6 @@ using Oceananigans.Units
 using AtmosphericProfilesLibrary                       
 using CloudMicrophysics 
 using Printf
-using CairoMakie
 
 using Oceananigans.Operators: ∂zᶜᶜᶠ, ℑzᵃᵃᶜ
 using CloudMicrophysics.Microphysics0M: remove_precipitation
@@ -24,7 +23,7 @@ arch = CPU() # try changing to GPU()
 stop_time = 6hours
 
 if get(ENV, "CI", "false") == "true" # change values for CI
-    stop_time = 10minutes # 6hours
+    stop_time = 1minutes # 6hours
     Nx = Ny = 8
 end
 
@@ -43,7 +42,7 @@ u_bomex = AtmosphericProfilesLibrary.Bomex_u(FT)
 
 p₀ = 101500 # Pa
 θ₀ = 299.1 # K
-reference_constants = Breeze.Thermodynamics.ReferenceConstants(base_pressure=p₀, potential_temperature=θ₀)
+reference_constants = Breeze.Thermodynamics.ReferenceStateConstants(base_pressure=p₀, potential_temperature=θ₀)
 buoyancy = Breeze.MoistAirBuoyancy(; reference_constants) #, microphysics)
 
 # Simple precipitation scheme from CloudMicrophysics    
@@ -201,29 +200,22 @@ qˡ = Breeze.CondensateField(model, T)
 qᵛ★ = Breeze.SaturationField(model, T)
 rh = Field(model.tracers.q / qᵛ★) # relative humidity
 
-fig = Figure()
-axu = Axis(fig[1, 1])
-axv = Axis(fig[1, 2])
-axθ = Axis(fig[1, 3])
-axq = Axis(fig[1, 4])
-
 function progress(sim)
     compute!(T)
     compute!(qˡ)
-    compute!(rh)
+    qˡmax = maximum(qˡ)
 
-    q = sim.model.tracers.q
-    θ = sim.model.tracers.θ
-    u, v, w = sim.model.velocities
+    compute!(rh)
+    rhmax = maximum(rh)
 
     umax = maximum(abs, u_avg)
     vmax = maximum(abs, v_avg)
 
+    q = sim.model.tracers.q
     qmin = minimum(q)
     qmax = maximum(q)
-    qˡmax = maximum(qˡ)
-    rhmax = maximum(rh)
 
+    θ = sim.model.tracers.θ
     θmin = minimum(θ)
     θmax = maximum(θ)
 
@@ -266,8 +258,9 @@ simulation.output_writers[:avg] = averages_ow
 @info "Running BOMEX on grid: \n $grid \n and using model: \n $model"
 run!(simulation)
 
-if get(ENV, "CI", "false") == "false" # change values for CI
+using CairoMakie
 
+if get(ENV, "CI", "false") == "false"
     θt  = FieldTimeSeries(averages_filename, "θ")
     Tt  = FieldTimeSeries(averages_filename, "T")
     qt  = FieldTimeSeries(averages_filename, "q")
@@ -307,65 +300,3 @@ if get(ENV, "CI", "false") == "false" # change values for CI
         n[] = nn
     end
 end
-
-#=
-wt  = FieldTimeSeries(filename, "w")
-θt  = FieldTimeSeries(filename, "θ")
-Tt  = FieldTimeSeries(filename, "T")
-qt  = FieldTimeSeries(filename, "q")
-qˡt = FieldTimeSeries(filename, "qˡ")
-times = qt.times
-Nt = length(θt)
-
-fig = Figure(size=(1200, 800), fontsize=12)
-axθ = Axis(fig[1, 1], xlabel="x (m)", ylabel="z (m)")
-axq = Axis(fig[1, 2], xlabel="x (m)", ylabel="z (m)")
-axT = Axis(fig[2, 1], xlabel="x (m)", ylabel="z (m)")
-axqˡ = Axis(fig[2, 2], xlabel="x (m)", ylabel="z (m)")
-axw = Axis(fig[3, 1], xlabel="x (m)", ylabel="z (m)")
-
-Nt = length(θt)
-slider = Slider(fig[4, 1:2], range=1:Nt, startvalue=1)
-
-n = slider.value #Observable(length(θt))
-wn = @lift view(wt[$n], :, 1, :)
-θn = @lift view(θt[$n], :, 1, :)
-qn = @lift view(qt[$n], :, 1, :)
-Tn = @lift view(Tt[$n], :, 1, :)
-qˡn = @lift view(qˡt[$n], :, 1, :)
-title = @lift "t = $(prettytime(times[$n]))"
-
-fig[0, :] = Label(fig, title, fontsize=22, tellwidth=false)
-
-Tmin = minimum(Tt)
-Tmax = maximum(Tt)
-wlim = maximum(abs, wt) / 2
-qlim = maximum(abs, qt)
-qˡlim = maximum(abs, qˡt) / 2
-
-Tₛ = θ_bomex(0)
-Δθ = θ_bomex(Lz) - θ_bomex(0)
-hmθ = heatmap!(axθ, θn, colorrange=(Tₛ, Tₛ+Δθ))
-hmq = heatmap!(axq, qn, colorrange=(0, qlim), colormap=:magma)
-hmT = heatmap!(axT, Tn, colorrange=(Tmin, Tmax))
-hmqˡ = heatmap!(axqˡ, qˡn, colorrange=(0, qˡlim), colormap=:magma)
-hmw = heatmap!(axw, wn, colorrange=(-wlim, wlim), colormap=:balance)
-
-# Label(fig[0, 1], "θ", tellwidth=false)
-# Label(fig[0, 2], "q", tellwidth=false)
-# Label(fig[0, 1], "θ", tellwidth=false)
-# Label(fig[0, 2], "q", tellwidth=false)
-
-Colorbar(fig[1, 0], hmθ, label = "θ [K]", vertical=true)
-Colorbar(fig[1, 3], hmq, label = "q", vertical=true)
-Colorbar(fig[2, 0], hmT, label = "T [K]", vertical=true)
-Colorbar(fig[2, 3], hmqˡ, label = "qˡ", vertical=true)
-Colorbar(fig[3, 0], hmw, label = "w", vertical=true)
-
-fig
-
-CairoMakie.record(fig, "bomex.mp4", 1:Nt, framerate=12) do nn
-    @info "Drawing frame $nn of $Nt..."
-    n[] = nn
-end
-=#
