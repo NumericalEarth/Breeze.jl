@@ -6,7 +6,7 @@ using Oceananigans.Solvers: solve!
 
 using ..Thermodynamics:
     AtmosphereThermodynamics,
-    ReferenceConstants,
+    ReferenceStateConstants,
     reference_pressure,
     reference_density,
     mixture_gas_constant,
@@ -23,7 +23,7 @@ import Oceananigans.TimeSteppers: compute_pressure_correction!, make_pressure_co
 #####
 
 struct AnelasticFormulation{FT, F}
-    constants :: ReferenceConstants{FT}
+    constants :: ReferenceStateConstants{FT}
     reference_pressure :: F
     reference_density :: F
 end
@@ -39,7 +39,7 @@ end
 
 Base.show(io::IO, formulation::AnelasticFormulation) = print(io, "AnelasticFormulation")
 
-field_names(::AnelasticFormulation, tracer_names) = (:ρu, :ρv, :ρw, :e, :ρq, tracer_names...)
+field_names(::AnelasticFormulation, tracer_names) = (:ρu, :ρv, :ρw, :ρe, :ρq, tracer_names...)
 
 struct AnelasticThermodynamicState{FT}
     potential_temperature :: FT
@@ -111,7 +111,7 @@ function collect_prognostic_fields(::AnelasticFormulation,
                                    condensates,
                                    tracers)
 
-    thermodynamic_variables = (e=energy, ρq=absolute_humidity)
+    thermodynamic_variables = (ρe=energy, ρq=absolute_humidity)
 
     return merge(momentum, thermodynamic_variables, condensates, tracers)
 end
@@ -199,11 +199,6 @@ end
     end
 end
 
-"""
-    compute_pressure_correction!(model::NonhydrostaticModel, Δt)
-
-Calculate the (nonhydrostatic) pressure correction associated `tendencies`, `velocities`, and step size `Δt`.
-"""
 function compute_pressure_correction!(model::AnelasticModel, Δt)
     # Mask immersed velocities
     foreach(mask_immersed_field!, model.momentum)

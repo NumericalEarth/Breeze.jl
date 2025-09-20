@@ -1,10 +1,35 @@
 using Adapt
+using Oceananigans.Utils: prettysummary
 
+"""
+    IdealGas{FT}
+
+A struct representing an ideal gas with molar mass and specific heat capacity.
+
+# Fields
+- `molar_mass`: Molar mass of the gas in kg/mol
+- `heat_capacity`: Specific heat capacity at constant pressure in J/(kg·K)
+
+# Examples
+```jldoctest
+dry_air = IdealGas(molar_mass=0.02897, heat_capacity=1005)
+
+# output
+"IdealGas{Float64}(molar_mass=0.02897, heat_capacity=1005)"
+```
+"""
 struct IdealGas{FT}
     molar_mass :: FT
     heat_capacity :: FT # specific heat capacity at constant pressure
 end
 
+function Base.summary(gas::IdealGas{FT}) where FT
+    return string("IdealGas{", FT, "}(",
+                  "molar_mass=", prettysummary(gas.molar_mass), ", ",
+                  "heat_capacity=", prettysummary(gas.heat_capacity), ")")
+end
+
+Base.show(io::IO, gas::IdealGas) = print(io, summary(gas))
 Base.eltype(::IdealGas{FT}) where FT = FT
 
 function Adapt.adapt_structure(to, gas::IdealGas)
@@ -22,83 +47,31 @@ function IdealGas(FT = Oceananigans.defaults.FloatType;
                         convert(FT, heat_capacity))
 end
 
-struct Saturation{FT}
-    energy_reference_temperature :: FT
-    triple_point_temperature :: FT
-    triple_point_pressure :: FT
-end
-
-function Adapt.adapt_structure(to, sat::Saturation)
-    T₁ = adapt(to, sat.energy_reference_temperature)
-    T₂ = adapt(to, sat.triple_point_temperature)
-    p₃ = adapt(to, sat.triple_point_pressure)
-    return Saturation(T₁, T₂, p₃)
-end
-
-"""
-    Saturation(FT = Oceananigans.defaults.FloatType;
-               energy_reference_temperature,
-               triple_point_temperature,
-               triple_point_pressure)
-
-Return `Saturation` with specified parameters converted to `FT`.
-
-The `Saturation` struct contains reference values used in the Clausius-Clapeyron relation to calculate
-saturation vapor pressure. The Clausius-Clapeyron equation describes how the saturation vapor pressure
-changes with temperature for a liquid-vapor phase transition:
-
-The Clausius-Clapeyron relation describes the pressure-temperature relationship during phase transitions:
-
-    d/dT log(p_sat) = L / (Rv * T²)
-
-where:
-
-- `p_sat` is the saturation vapor pressure
-- `T` is temperature
-- `L` is the latent heat of vaporization
-- `R_v` is the gas constant for water vapor
-
-For water vapor, this integrates to:
-
-    ln(p_sat / p_triple) = (L / Rv) * (1 / T_triple - 1 / T)
-
-or equivalently:
-
-    p_sat = p_triple * exp((L/R_v) * (1 / T_triple - 1 / T))
-
-where:
-- `p_triple` is the triple point pressure
-- `T_triple` is the triple point temperature
-
-This relation is used to calculate saturation vapor pressure, which determines the maximum possible
-water vapor content of air at a given temperature and pressure.
-"""
-function Saturation(FT = Oceananigans.defaults.FloatType;
-                    energy_reference_temperature = 273.16,
-                    triple_point_temperature = 273.16,
-                    triple_point_pressure = 611.657)
-
-    return Saturation{FT}(convert(FT, energy_reference_temperature),
-                          convert(FT, triple_point_temperature),
-                          convert(FT, triple_point_pressure))
-end
-
-struct PhaseTransition{FT}
+struct CondensedPhase{FT}
     latent_heat :: FT
     heat_capacity :: FT
 end
 
-Adapt.adapt_structure(to, pt::PhaseTransition) =
-    PhaseTransition(adapt(to, pt.latent_heat),
-                    adapt(to, pt.heat_capacity))
+function Base.summary(ph::CondensedPhase{FT}) where FT
+    return string("CondensedPhase{", FT, "}(",
+                  "latent_heat=", prettysummary(ph.latent_heat), ", ",
+                  "heat_capacity=", prettysummary(ph.heat_capacity), ")")
+end
+
+Base.show(io::IO, ph::CondensedPhase) = print(io, summary(ph))
+
+Adapt.adapt_structure(to, pt::CondensedPhase) =
+    CondensedPhase(adapt(to, pt.latent_heat),
+                   adapt(to, pt.heat_capacity))
 
 """
-    PhaseTransition(FT = Oceananigans.defaults.FloatType; latent_heat, heat_capacity)
+    CondensedPhase(FT = Oceananigans.defaults.FloatType; latent_heat, heat_capacity)
 
-Returns `PhaseTransition` with specified parameters converted to `FT`.
+Returns `CondensedPhase` with specified parameters converted to `FT`.
 
-Two examples of `PhaseTransition` are condensation and deposition.
-During condensation, water molecules in the gas phase cluster together and slow down to form liquid with `heat_capacity`,
+Two examples of `CondensedPhase` are liquid and solid.
+When matter is converted from vapor to liquid, water molecules in the
+gas phase cluster together and slow down to form liquid with `heat_capacity`,
 The lost of molecular kinetic energy is called the `latent_heat`.
 
 Likewise, during deposition, water molecules in the gas phase cluster into ice crystals.
@@ -106,38 +79,42 @@ Likewise, during deposition, water molecules in the gas phase cluster into ice c
 Arguments
 =========
 - `FT`: Float type to use (defaults to Oceananigans.defaults.FloatType)
-- `latent_heat`: Latent heat lost during phase transition from the gaseous state.
-- `heat_capacity`: Heat capacity of the transitional phase.
+- `latent_heat`: Difference between the internal energy of the gaseous phase at the energy_reference_temperature.
+- `heat_capacity`: Heat capacity of the phase of matter.
 """
-function PhaseTransition(FT = Oceananigans.defaults.FloatType; latent_heat, heat_capacity)
-    return PhaseTransition{FT}(convert(FT, latent_heat),
-                               convert(FT, heat_capacity))
+function CondensedPhase(FT = Oceananigans.defaults.FloatType; latent_heat, heat_capacity)
+    return CondensedPhase{FT}(convert(FT, latent_heat),
+                              convert(FT, heat_capacity))
 end
 
-water_condensation(FT) = PhaseTransition(FT; latent_heat=2500800, heat_capacity=4181)
-water_deposition(FT)   = PhaseTransition(FT; latent_heat=2834000, heat_capacity=2108)
+liquid_water(FT) = CondensedPhase(FT; latent_heat=2500800, heat_capacity=4181)
+water_ice(FT)    = CondensedPhase(FT; latent_heat=2834000, heat_capacity=2108)
 
-struct AtmosphereThermodynamics{FT, S, C, F}
+struct AtmosphereThermodynamics{FT, C, S}
     molar_gas_constant :: FT
     gravitational_acceleration :: FT
+    energy_reference_temperature :: FT
+    triple_point_temperature :: FT
+    triple_point_pressure :: FT
     dry_air :: IdealGas{FT}
     vapor :: IdealGas{FT}
-    saturation :: S
-    condensation :: C
-    deposition :: F
+    liquid :: C
+    solid :: S
 end
 
-Base.summary(at::AtmosphereThermodynamics) = "AtmosphereThermodynamics"
+Base.summary(at::AtmosphereThermodynamics{FT}) where FT = "AtmosphereThermodynamics{$FT}"
 
 function Base.show(io::IO, at::AtmosphereThermodynamics)
-    print(io, summary(at), "\n",
+    print(io, summary(at), ":", '\n',
         "├── molar_gas_constant: ", at.molar_gas_constant, "\n",
         "├── gravitational_acceleration: ", at.gravitational_acceleration, "\n",
+        "├── energy_reference_temperature: ", at.energy_reference_temperature, "\n",
+        "├── triple_point_temperature: ", at.triple_point_temperature, "\n",
+        "├── triple_point_pressure: ", at.triple_point_pressure, "\n",
         "├── dry_air: ", at.dry_air, "\n",
         "├── vapor: ", at.vapor, "\n",
-        "├── saturation: ", at.saturation, "\n",
-        "├── condensation: ", at.condensation, "\n",
-        "└── deposition: ", at.deposition)
+        "├── liquid: ", at.liquid, "\n",
+        "└── solid: ", at.solid)
 end
 
 Base.eltype(::AtmosphereThermodynamics{FT}) where FT = FT
@@ -147,48 +124,87 @@ function Adapt.adapt_structure(to, thermo::AtmosphereThermodynamics)
     gravitational_acceleration = adapt(to, thermo.gravitational_acceleration)
     dry_air = adapt(to, thermo.dry_air)
     vapor = adapt(to, thermo.vapor)
-    saturation = adapt(to, thermo.saturation)
-    condensation = adapt(to, thermo.condensation)
-    deposition = adapt(to, thermo.deposition)
+    energy_reference_temperature = adapt(to, thermo.energy_reference_temperature)
+    triple_point_temperature = adapt(to, thermo.triple_point_temperature)
+    triple_point_pressure = adapt(to, thermo.triple_point_pressure)
+    liquid = adapt(to, thermo.liquid)
+    solid = adapt(to, thermo.solid)
     FT = typeof(molar_gas_constant)
-    S = typeof(saturation)
-    C = typeof(condensation)
-    F = typeof(deposition)
-    return AtmosphereThermodynamics{FT, S, C, F}(molar_gas_constant,
-                                                 gravitational_acceleration,
-                                                 dry_air,
-                                                 vapor,
-                                                 saturation,
-                                                 condensation,
-                                                 deposition)
+    C = typeof(liquid)
+    S = typeof(solid)
+    return AtmosphereThermodynamics{FT, C, S}(molar_gas_constant,
+                                              gravitational_acceleration,
+                                              energy_reference_temperature,
+                                              triple_point_temperature,
+                                              triple_point_pressure,
+                                              dry_air,
+                                              vapor,
+                                              liquid,
+                                              solid)
 end
 
 """
     AtmosphereThermodynamics(FT = Oceananigans.defaults.FloatType;
                              gravitational_acceleration = 9.81,
                              molar_gas_constant = 8.314462618,
+                             energy_reference_temperature = 273.16,
+                             triple_point_temperature = 273.16,
+                             triple_point_pressure = 611.657,
                              dry_air_molar_mass = 0.02897,
                              dry_air_heat_capacity = 1005,
                              vapor_molar_mass = 0.018015,
                              vapor_heat_capacity = 1850,
-                             saturation = Saturation(FT),
-                             condensation = water_condensation(FT),
-                             deposition = water_deposition(FT))
+                             liquid = liquid_water(FT),
+                             solid = water_ice(FT),
+                             condensed_phases = nothing)
 
-Create `AtmosphereThermodynamics` with parameters that correpsond to the composition of dry air
-in Earth's atmosphere and water vapor. The default `isnothing(condensation)` implies thermodynamics
-appropriate for unsaturated and therefore non-condensing air.
+Create `AtmosphereThermodynamics` with parameters that represent gaseous mixture of dry "air"
+and vapor, as well as condensed liquid and solid phases.
+The `triple_point_temperature` and `triple_point_pressure` may be combined with 
+internal energy parameters for condensed phases to compute the vapor pressure
+at the boundary between vapor and a homogeneous sample of the condensed phase.
+The `gravitational_acceleration` parameter is included to compute reference_state
+quantities associated with hydrostatic balance.
+
+The Clausius-Clapeyron relation describes the pressure-temperature relationship during phase transitions:
+
+    d/dT log(pⁱ⁺) = ℒⁱ / (Rⁱ * T²)
+
+where:
+
+- `pⁱ⁺` is the saturation vapor pressure for a transition between vapor and the `ⁱ`th phase
+- `T` is temperature
+- `ℒⁱ` is the latent heat of vaporization
+- `Rⁱ` is the specific gas constant for the `ⁱ`th phase
+
+For water vapor, this integrates to:
+
+```math
+    pⁱ⁺ = pᵗʳ * exp( ℒⁱ (1/Tᵗʳ - 1/T) / Rⁱ )
+```
+
+where
+
+- ``pᵗʳ`` is the triple point pressure
+- ``Tᵗʳ`` is the triple point temperature
+
+Note: any reference values for pressure and temperature can be used in principle.
+The advantage of using reference values at the triple point is that the same values
+can then be used for both condensation (vapor → liquid) and deposition (vapor → ice).
+
 """
 function AtmosphereThermodynamics(FT = Oceananigans.defaults.FloatType;
-                                  gravitational_acceleration = 9.81,
                                   molar_gas_constant = 8.314462618,
+                                  gravitational_acceleration = 9.81,
+                                  energy_reference_temperature = 273.16,
+                                  triple_point_temperature = 273.16,
+                                  triple_point_pressure = 611.657,
                                   dry_air_molar_mass = 0.02897,
                                   dry_air_heat_capacity = 1005,
                                   vapor_molar_mass = 0.018015,
                                   vapor_heat_capacity = 1850,
-                                  saturation = Saturation(FT),
-                                  condensation = water_condensation(FT),
-                                  deposition = water_deposition(FT))
+                                  liquid = liquid_water(FT),
+                                  solid = water_ice(FT))
 
     dry_air = IdealGas(FT; molar_mass = dry_air_molar_mass,
                            heat_capacity = dry_air_heat_capacity)
@@ -197,8 +213,14 @@ function AtmosphereThermodynamics(FT = Oceananigans.defaults.FloatType;
                          heat_capacity = vapor_heat_capacity)
 
     return AtmosphereThermodynamics(convert(FT, molar_gas_constant),
-                                        convert(FT, gravitational_acceleration),
-                                        dry_air, vapor, saturation, condensation, deposition)
+                                    convert(FT, gravitational_acceleration),
+                                    convert(FT, energy_reference_temperature),
+                                    convert(FT, triple_point_temperature),
+                                    convert(FT, triple_point_pressure),
+                                    dry_air,
+                                    vapor,
+                                    liquid,
+                                    solid)
 end
 
 const AT = AtmosphereThermodynamics
@@ -207,8 +229,33 @@ const IG = IdealGas
 @inline vapor_gas_constant(thermo::AT)   = thermo.molar_gas_constant / thermo.vapor.molar_mass
 @inline dry_air_gas_constant(thermo::AT) = thermo.molar_gas_constant / thermo.dry_air.molar_mass
 
-const NonCondensingAtmosphereThermodynamics{FT} = AtmosphereThermodynamics{FT, Nothing}
+const NonCondensingAtmosphereThermodynamics{FT} = AtmosphereThermodynamics{FT, Nothing, Nothing}
 
+"""
+    mixture_gas_constant(q, thermo)
+
+Compute the gas constant of moist air given the specific humidity `q` and 
+thermodynamic parameters `thermo`.
+
+The mixture gas constant is calculated as a weighted average of the dry air
+and water vapor gas constants:
+
+```math
+R_m = R_d (1 - q) + R_v q
+```
+
+where:
+- `R_d` is the dry air gas constant
+- `R_v` is the water vapor gas constant  
+- `q` is the specific humidity (mass fraction of water vapor)
+
+# Arguments
+- `q`: Specific humidity (dimensionless)
+- `thermo`: `AtmosphereThermodynamics` instance containing gas constants
+
+# Returns
+- Gas constant of the moist air mixture in J/(kg·K)
+"""
 @inline function mixture_gas_constant(q, thermo::AT)
     Rᵈ = dry_air_gas_constant(thermo)
     Rᵛ = vapor_gas_constant(thermo)
@@ -227,28 +274,6 @@ liquid condensate.
     cᵖᵛ = thermo.vapor.heat_capacity
     return cᵖᵈ * (1 - q) + cᵖᵛ * q
 end
-
-#=
-For example, if we would like to account for the mass of condensate consistently:
-struct WarmCondensate{FT}
-    vapor :: FT
-    liquid :: FT
-    total :: FT
-end
-
-# Then more correctly:
-@inline function mixture_heat_capacity(q::WarmCondensate, thermo::AT)
-    cᵖᵈ = dry_air_heat_capacity(thermo)
-    cᵖᵛ = vapor_heat_capacity(thermo)
-    cᵖˡ = thermo.condensation.liquid_heat_capacity
-    qᵗ = q.total
-    qᵛ = q.vapor
-    qˡ = q.liquid
-    return cᵖᵈ * (1 - qᵗ) + cᵖᵛ * qᵛ + cᵖˡ * qˡ
-end
-
-@inline function mixture_gas_constant(q::WarmCondensate, thermo::AT)
-=#
 
 #####
 ##### state thermodynamics for a Boussinesq model
@@ -309,9 +334,9 @@ end
     return ref.p₀ * (1 - g * z / (cᵖᵈ * ref.θ))^inv_ϰᵈ
 end
 
-@inline function saturation_specific_humidity(T, z, ref::ReferenceState, thermo, phase_transition)
+@inline function saturation_specific_humidity(T, z, ref::ReferenceState, thermo, condensed_phase)
     ρ = reference_density(z, ref, thermo)
-    return saturation_specific_humidity(T, ρ, thermo, phase_transition)
+    return saturation_specific_humidity(T, ρ, thermo, condensed_phase)
 end
 
 @inline function exner_function(state, ref, thermo)
@@ -327,11 +352,6 @@ condensate_specific_humidity(T, state, ref, thermo) =
     condensate_specific_humidity(T, state.q, state.z, ref, thermo)
 
 function condensate_specific_humidity(T, q, z, ref, thermo)
-    qᵛ★ = saturation_specific_humidity(T, z, ref, thermo, thermo.condensation)
+    qᵛ★ = saturation_specific_humidity(T, z, ref, thermo, thermo.liquid)
     return max(0, q - qᵛ★)
-end
-
-function ice_specific_humidity(T, q, z, ref, thermo)
-    qⁱ★ = saturation_specific_humidity(T, z, ref, thermo, thermo.deposition)
-    return max(0, q - qⁱ★)
 end

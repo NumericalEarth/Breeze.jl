@@ -7,13 +7,13 @@ using Oceananigans.BoundaryConditions: fill_halo_regions!, compute_x_bcs!, compu
 using Oceananigans.ImmersedBoundaries: mask_immersed_field!
 using Oceananigans.Architectures: architecture
 
-import Oceananigans.TimeSteppers: update_state!
+import Oceananigans.TimeSteppers: update_state!, compute_flux_bc_tendencies!
 import Oceananigans: fields, prognostic_fields
 
 const AnelasticModel = AtmosphereModel{<:AnelasticFormulation}
 
 function prognostic_fields(model::AnelasticModel)
-    thermodynamic_fields = (e=model.energy, ρq=model.absolute_humidity)
+    thermodynamic_fields = (ρe=model.energy, ρq=model.absolute_humidity)
     return merge(model.momentum, thermodynamic_fields, model.condensates, model.tracers)
 end
 
@@ -119,33 +119,26 @@ function compute_tendencies!(model::AnelasticModel)
     ρᵣ = model.formulation.reference_density
     u_args = tuple(common_args..., model.forcing.ρu, pₕ′, ρᵣ)
     v_args = tuple(common_args..., model.forcing.ρv, pₕ′, ρᵣ)
-    w_args = tuple(common_args..., model.forcing.ρw)
+    w_args = tuple(common_args..., model.forcing.ρw, ρᵣ,
+                   model.formulation, model.temperature,
+                   model.specific_humidity, model.thermodynamics)
 
     launch!(arch, grid, :xyz, compute_x_momentum_tendency!, Gρu, grid, u_args)
     launch!(arch, grid, :xyz, compute_y_momentum_tendency!, Gρv, grid, v_args)
     launch!(arch, grid, :xyz, compute_z_momentum_tendency!, Gρw, grid, w_args)
 
     scalar_args = (model.advection, model.velocities, model.clock, fields(model))
-    Ge = model.timestepper.Gⁿ.e
-    e = model.energy
-    Fe = model.forcing.e
-    e_args = tuple(e, Fe, scalar_args...)
-    launch!(arch, grid, :xyz, compute_scalar_tendency!, Ge, grid, e_args)
+    Gρe = model.timestepper.Gⁿ.ρe
+    ρe = model.energy
+    Fρe = model.forcing.ρe
+    ρe_args = tuple(ρe, Fρe, scalar_args...)
+    launch!(arch, grid, :xyz, compute_scalar_tendency!, Gρe, grid, ρe_args)
 
     ρq = model.absolute_humidity
     Gρq = model.timestepper.Gⁿ.ρq
     Fρq = model.forcing.ρq
     ρq_args = tuple(ρq, Fρq, scalar_args...)
     launch!(arch, grid, :xyz, compute_scalar_tendency!, Gρq, grid, ρq_args)
-
-    # Compute boundary flux contributions
-    prognostic_model_fields = prognostic_fields(model)
-    args = (arch, model.clock, fields(model))
-    field_indices = 1:length(prognostic_model_fields)
-    Gⁿ = model.timestepper.Gⁿ
-    foreach(q -> compute_x_bcs!(Gⁿ[q], prognostic_model_fields[q], args...), field_indices)
-    foreach(q -> compute_y_bcs!(Gⁿ[q], prognostic_model_fields[q], args...), field_indices)
-    foreach(q -> compute_z_bcs!(Gⁿ[q], prognostic_model_fields[q], args...), field_indices)
 
     return nothing
 end
@@ -189,7 +182,7 @@ end
 
     return ( - div_𝐯u(i, j, k, grid, advection, velocities, momentum.ρu)
              - x_f_cross_U(i, j, k, grid, coriolis, momentum)
-             - ρᵣ * hydrostatic_pressure_gradient_x(i, j, k, grid, hydrostatic_pressure_anomaly)
+             # - hydrostatic_pressure_gradient_x(i, j, k, grid, hydrostatic_pressure_anomaly)
              + forcing(i, j, k, grid, clock, model_fields))
 end
 
@@ -209,7 +202,7 @@ end
 
     return ( - div_𝐯v(i, j, k, grid, advection, velocities, momentum.ρv)
              - y_f_cross_U(i, j, k, grid, coriolis, momentum)
-             - ρᵣ * hydrostatic_pressure_gradient_y(i, j, k, grid, hydrostatic_pressure_anomaly)
+             # - hydrostatic_pressure_gradient_y(i, j, k, grid, hydrostatic_pressure_anomaly)
              + forcing(i, j, k, grid, clock, model_fields))
 end
 
@@ -220,10 +213,20 @@ end
                                      coriolis,
                                      clock,
                                      model_fields,
-                                     forcing)
+                                     forcing,
+                                     reference_density,
+                                     formulation,
+                                     temperature,
+                                     specific_humidity,
+                                     thermo)
+
+    ρᵣᶜᶜᶠ = ℑzᵃᵃᶠ(i, j, k, grid, reference_density)
+    bᶜᶜᶠ = ℑzᵃᵃᶠ(i, j, k, grid, buoyancy,
+                 formulation, temperature, specific_humidity, thermo)    
 
     return ( - div_𝐯w(i, j, k, grid, advection, velocities, momentum.ρw)
              - z_f_cross_U(i, j, k, grid, coriolis, momentum)
+             + ρᵣᶜᶜᶠ * bᶜᶜᶠ
              + forcing(i, j, k, grid, clock, model_fields))
 end
 
@@ -256,3 +259,22 @@ end
              + forcing(i, j, k, grid, clock, model_fields))
 end
 =#
+                                        
+""" Apply boundary conditions by adding flux divergences to the right-hand-side. """
+function compute_flux_bc_tendencies!(model::AtmosphereModel)
+    
+    Gⁿ    = model.timestepper.Gⁿ
+    arch  = model.architecture
+    clock = model.clock
+
+    # Compute boundary flux contributions
+    prognostic_model_fields = prognostic_fields(model)
+    args = (arch, model.clock, fields(model))
+    field_indices = 1:length(prognostic_model_fields)
+    Gⁿ = model.timestepper.Gⁿ
+    foreach(q -> compute_x_bcs!(Gⁿ[q], prognostic_model_fields[q], args...), field_indices)
+    foreach(q -> compute_y_bcs!(Gⁿ[q], prognostic_model_fields[q], args...), field_indices)
+    foreach(q -> compute_z_bcs!(Gⁿ[q], prognostic_model_fields[q], args...), field_indices)
+
+    return nothing
+end

@@ -1,15 +1,13 @@
 # Breeze.jl
 
-Documentation for Breeze.jl
+Fast, friendly atmosphere simulations on CPUs and GPUs.
 
-## Overview
-
-Breeze.jl is a Julia package for finite volume GPU and CPU large eddy simulations (LES) of atmospheric flows.
-Under the hood, Breeze's abstractions, design, and finite volume engine are based on [Oceananigans](https://github.com/CliMA/Oceananigans.jl).
+Breeze provides software for flexible software package for finite volume atmosphere simulations on CPUs and GPUs, based on [Oceananigans](https://github.com/CliMA/Oceananigans.jl).
+Like Oceanaingans, it provides a radically productive user interface that makes simple simulations easy, and complex, creative simulations possible.
 
 ## Features
 
-Breeze provides two ways to simulate atmospheric flows:
+Breeze provides two ways to simulate moist atmospheres:
 
 * A [`MoistAirBuoyancy`](@ref) that can be used with [Oceananigans](https://clima.github.io/OceananigansDocumentation/stable/)' [`NonhydrostaticModel`](https://clima.github.io/OceananigansDocumentation/stable/appendix/library/#Oceananigans.Models.NonhydrostaticModels.NonhydrostaticModel-Tuple{}) to simulate atmospheric flows with the Boussinesq approximation.
 
@@ -43,7 +41,7 @@ Nx = Nz = 64
 Lz = 4 * 1024
 grid = RectilinearGrid(CPU(), size=(Nx, Nz), x=(0, 2Lz), z=(0, Lz), topology=(Periodic, Flat, Bounded))
 
-reference_constants = Breeze.Thermodynamics.ReferenceConstants(base_pressure=1e5, potential_temperature=288)
+reference_constants = Breeze.Thermodynamics.ReferenceStateConstants(base_pressure=1e5, potential_temperature=288)
 buoyancy = Breeze.MoistAirBuoyancy(; reference_constants)
 
 Q₀ = 1000 # heat flux in W / m²
@@ -58,7 +56,7 @@ model = NonhydrostaticModel(; grid, advection, buoyancy,
                             tracers = (:θ, :q),
                             boundary_conditions = (θ=θ_bcs, q=q_bcs))
 
-Δθ = 5 # ᵒK
+Δθ = 2 # ᵒK
 Tₛ = reference_constants.reference_potential_temperature # K
 θᵢ(x, z) = Tₛ + Δθ * z / grid.Lz + 1e-2 * Δθ * randn()
 qᵢ(x, z) = 0 # 1e-2 + 1e-5 * rand()
