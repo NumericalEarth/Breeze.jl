@@ -19,6 +19,7 @@ export
     mixture_heat_capacity
 
 using Oceananigans
+using Oceananigans.Grids: znode
 
 export
     CPU, GPU,
