@@ -22,7 +22,7 @@ using KernelAbstractions: @kernel, @index
 materialize_condenstates(microphysics, grid) = NamedTuple() #(; qˡ=CenterField(grid), qᵛ=CenterField(grid))
 materialize_density(formulation, grid) = CenterField(grid)
 
-struct WarmPhasePhaseTransitionConstantsAdjustment end
+struct WarmPhaseSaturationAdjustment end
 struct DefaultValue end
 
 tupleit(t::Tuple) = t
@@ -77,7 +77,7 @@ end
                     boundary_conditions = NamedTuple(),
                     forcing = NamedTuple(),
                     advection = WENO(order=5),
-                    microphysics = WarmPhasePhaseTransitionConstantsAdjustment(),
+                    microphysics = WarmPhaseSaturationAdjustment(),
                     timestepper = :RungeKutta3)
 
 Return an AtmosphereModel that uses the anelastic approximation following
@@ -110,7 +110,7 @@ function AtmosphereModel(grid;
                          boundary_conditions = NamedTuple(),
                          forcing = NamedTuple(),
                          advection = WENO(order=5),
-                         microphysics = WarmPhasePhaseTransitionConstantsAdjustment(),
+                         microphysics = WarmPhaseSaturationAdjustment(),
                          timestepper = :RungeKutta3)
 
     arch = grid.architecture

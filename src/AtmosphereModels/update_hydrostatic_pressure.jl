@@ -15,8 +15,7 @@ const f = Face()
     α = specific_volume(i, j, k, grid, formulation, temperature, specific_humidity, thermo)
     αʳ = reference_specific_volume(i, j, k, grid, formulation, thermo)
     g = thermo.gravitational_acceleration
-    # return g * (α - αʳ) / αʳ
-    return g * (α - αʳ) / αʳ^2
+    return g * (α - αʳ) / αʳ
 end
 
 @kernel function _update_hydrostatic_pressure!(pₕ′, grid, formulation, T, q, thermo)

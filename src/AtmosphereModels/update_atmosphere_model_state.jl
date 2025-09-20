@@ -182,7 +182,7 @@ end
 
     return ( - div_𝐯u(i, j, k, grid, advection, velocities, momentum.ρu)
              - x_f_cross_U(i, j, k, grid, coriolis, momentum)
-             - hydrostatic_pressure_gradient_x(i, j, k, grid, hydrostatic_pressure_anomaly)
+             # - hydrostatic_pressure_gradient_x(i, j, k, grid, hydrostatic_pressure_anomaly)
              + forcing(i, j, k, grid, clock, model_fields))
 end
 
@@ -202,11 +202,9 @@ end
 
     return ( - div_𝐯v(i, j, k, grid, advection, velocities, momentum.ρv)
              - y_f_cross_U(i, j, k, grid, coriolis, momentum)
-             - hydrostatic_pressure_gradient_y(i, j, k, grid, hydrostatic_pressure_anomaly)
+             # - hydrostatic_pressure_gradient_y(i, j, k, grid, hydrostatic_pressure_anomaly)
              + forcing(i, j, k, grid, clock, model_fields))
 end
-
-@inline ρ_χ(i, j, k, grid, ρ, χ, args...) = @inbounds ρ[i, j, k] * χ(i, j, k, grid, args...)
 
 @inline function z_momentum_tendency(i, j, k, grid,
                                      advection,
@@ -222,15 +220,13 @@ end
                                      specific_humidity,
                                      thermo)
 
-    ρᵣ_b = ℑzᵃᵃᶠ(i, j, k, grid, ρ_χ, reference_density, buoyancy,
+    ρᵣᶜᶜᶠ = ℑzᵃᵃᶠ(i, j, k, grid, reference_density)
+    bᶜᶜᶠ = ℑzᵃᵃᶠ(i, j, k, grid, buoyancy,
                  formulation, temperature, specific_humidity, thermo)    
-
-    # ρᵣ_b = ℑzᵃᵃᶠ(i, j, k, grid, buoyancy,
-    #              formulation, temperature, specific_humidity, thermo)    
 
     return ( - div_𝐯w(i, j, k, grid, advection, velocities, momentum.ρw)
              - z_f_cross_U(i, j, k, grid, coriolis, momentum)
-             # - ρᵣ_b
+             + ρᵣᶜᶜᶠ * bᶜᶜᶠ
              + forcing(i, j, k, grid, clock, model_fields))
 end
 
