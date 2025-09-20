@@ -275,28 +275,6 @@ liquid condensate.
     return cᵖᵈ * (1 - q) + cᵖᵛ * q
 end
 
-#=
-For example, if we would like to account for the mass of condensate consistently:
-struct WarmCondensate{FT}
-    vapor :: FT
-    liquid :: FT
-    total :: FT
-end
-
-# Then more correctly:
-@inline function mixture_heat_capacity(q::WarmCondensate, thermo::AT)
-    cᵖᵈ = dry_air_heat_capacity(thermo)
-    cᵖᵛ = vapor_heat_capacity(thermo)
-    cᵖˡ = thermo.liquid.heat_capacity
-    qᵗ = q.total
-    qᵛ = q.vapor
-    qˡ = q.liquid
-    return cᵖᵈ * (1 - qᵗ) + cᵖᵛ * qᵛ + cᵖˡ * qˡ
-end
-
-@inline function mixture_gas_constant(q::WarmCondensate, thermo::AT)
-=#
-
 #####
 ##### state thermodynamics for a Boussinesq model
 #####
@@ -379,9 +357,4 @@ condensate_specific_humidity(T, state, ref, thermo) =
 function condensate_specific_humidity(T, q, z, ref, thermo)
     qᵛ★ = saturation_specific_humidity(T, z, ref, thermo, thermo.liquid)
     return max(0, q - qᵛ★)
-end
-
-function ice_specific_humidity(T, q, z, ref, thermo)
-    qⁱ★ = saturation_specific_humidity(T, z, ref, thermo, thermo.solid)
-    return max(0, q - qⁱ★)
 end
