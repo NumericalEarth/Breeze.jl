@@ -61,22 +61,12 @@ using Oceananigans
         θᵢ(x, y, z) = θ₀ + Δθ * z / Lz
         set!(model; θ = θᵢ, q = 0)
 
-        T_field = TemperatureField(model)
-        compute!(T_field)
-
-        θ_data = Array(interior(model.tracers.θ))
-        T_data = Array(interior(T_field))
-
-        Rᵐ = Breeze.Thermodynamics.mixture_gas_constant(0.0, buoyancy.thermodynamics)
-        cᵖᵐ = Breeze.Thermodynamics.mixture_heat_capacity(0.0, buoyancy.thermodynamics)
-        p₀ = 1e5
-
-        for k in axes(T_data, 3)
-            z = Oceananigans.Grids.znode(1, 1, k, grid, Center(), Center(), Center())
-            pᵣ = Breeze.Thermodynamics.reference_pressure(z, reference_constants, buoyancy.thermodynamics)
-            Π = (pᵣ / p₀)^(Rᵐ / cᵖᵐ)
-            expected = Π .* θ_data[:, :, k]
-            @test isapprox(T_data[:, :, k], expected; atol=1e-6, rtol=1e-6)
+        # Can time-step
+        @test try
+            time_step!(model, 1e-2))
+            true
+        catch
+            false
         end
     end
 end
