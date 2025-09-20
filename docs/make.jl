@@ -1,8 +1,6 @@
 using Breeze
 using Documenter
 
-using Breeze.AtmosphereModels
-
 DocMeta.setdocmeta!(Breeze, :DocTestSetup, :(using Breeze); recursive=true)
 
 makedocs(sitename="Breeze",
@@ -14,8 +12,8 @@ makedocs(sitename="Breeze",
 )
 
 deploydocs(;
-    repo="github.com/NumericalEarth/Breeze.jl",
-    devbranch="main",
-    push_preview=true,
-    forcepush=true
+    repo = "github.com/NumericalEarth/Breeze.jl",
+    devbranch = "main",
+    push_preview = true,
+    forcepush = true
 )
