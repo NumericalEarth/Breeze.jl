@@ -155,7 +155,7 @@ conjure_time_step_wizard!(simulation, cfl=0.7)
 
 T = Breeze.TemperatureField(model)
 qˡ = Breeze.CondensateField(model, T)
-qᵛ★ = Breeze.SaturationField(model, T)
+qᵛ★ = Breeze.PhaseTransitionConstantsField(model, T)
 δ = Field(model.tracers.q - qᵛ★)
 
 function progress(sim)

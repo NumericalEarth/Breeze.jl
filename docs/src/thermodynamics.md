@@ -1,46 +1,259 @@
-# Thermodynamics
+# Atmosphere Thermodynamics
 
-The thermodynamic utilities in Breeze collect the physical constants and closures
-the atmospheric models rely on to convert between prognostic variables and
-states such as temperature, specific humidity, and buoyancy. This section walks
-through the key types and how they fit together.
+```@setup thermo
+using Breeze
+thermo = AtmosphereThermodynamics()
+```
 
-## `AtmosphereThermodynamics`
+Breeze implements thermodynamic relations for moist atmospheres ---
+fluids that can be described as a binary mixture of _(i)_ "dry" air, and _(ii)_ vapor,
+as well as liquid and solid condensates of the vapor component of various shapes and sizes.
 
-`AtmosphereThermodynamics` bundles the constants that describe a moist
-atmosphere composed of dry air and water vapour. It is used throughout the
-anelastic model to compute derived quantities such as mixture gas constants,
-heat capacities, and reference density profiles.
+On Earth, dry air is itself a mixture of gases, the vapor component is ``\mathrm{H_2 O}``, 
+and the condensates comprise clouds and precipitation such as rain, snow, hail, and grapuel.
+Breeze models dry air as having a fixed composition with
+constant [molar mass](https://en.wikipedia.org/wiki/Molar_mass).
+Dry air on Earth's is mostly nitrogen, oxygen, and argon.
 
-The struct stores
+## Two laws for ideal gases
 
-- `molar_gas_constant`: The universal molar gas constant *R* (default
-  8.314462618 J mol⁻¹ K⁻¹). Keeping this value explicit lets the code switch
-  float precision while retaining the same physical constant.
-- `gravitational_acceleration`: The local gravitational acceleration *g* used in
-  hydrostatic balance and buoyancy calculations. The default is 9.81 m s⁻².
-- `dry_air` and `vapor`: Each is an [`IdealGas`](@ref) storing the molar mass and
-  specific heat capacity of dry air and water vapour. They determine the
-  component-specific gas constants (`Rᵈ`, `Rᵛ`).
-- `saturation`: A [`Saturation`](@ref) reference state for the
-  Clausius–Clapeyron relation. It supplies the triple-point pressure and
-  temperature used to evaluate saturation vapour pressure.
-- `condensation` and `deposition`: [`PhaseTransition`](@ref) descriptors for
-  liquid and ice formation. They provide latent heats and heat capacities that
-  feed into saturation adjustment.
+Both dry air and vapor are modeled as ideal gases, which means that
+the [ideal gas law](https://en.wikipedia.org/wiki/Ideal_gas_law) relates
+pressure ``p``, temperature ``T``, and density ``ρ``,
 
-Together these fields provide the data needed for helper functions like
-[`mixture_gas_constant`](@ref) and [`mixture_heat_capacity`](@ref), as well as
-saturation adjustment routines. When you construct an
-`AtmosphereThermodynamics` instance you can override any of the defaults to
-model alternative planetary atmospheres or microphysical closures.
+```math
+p = ρ R T .
+```
 
-### Usage inside the model
+Above, ``R = ℛ / m`` is the specific gas constant given the
+[molar gas constant](https://en.wikipedia.org/wiki/Gas_constant)
+``ℛ ≈ 8.31 J / K / \mathrm{mol}`` and molar mass ``m`` of the gas species under consideration.
 
-The anelastic formulation stores a single `AtmosphereThermodynamics` instance on
-each `AtmosphereModel`. Functions such as `thermodynamic_state` use it to derive
-potential temperature, specific humidity, and the Exner function from the
-prognostic energy and moisture variables. These diagnostics in turn drive
-buoyancy, pressure, and microphysical tendencies. Understanding the content of
-`AtmosphereThermodynamics` is therefore the first step in auditing the
-thermodynamic pathways of the model.
+The [first law of thermodynamics](https://en.wikipedia.org/wiki/First_law_of_thermodynamics) applied to dry air,
+a.k.a. "conservation of energy", states that infinitesimal changes
+in internal energy ``\mathrm{d} ê`` are related to infinestimal changes 
+in temperature ``\mathrm{d} T`` and pressure ``\mathrm{d} p`` according to
+
+```math
+\mathrm{d} ê = cᵖᵈ \mathrm{d} T - \frac{\mathrm{d} p}{\rho}
+```
+
+where ``cᵖᵈ`` is the specific heat capacity of dry air at constant pressure.
+
+For example, to represent dry air typical for Earth, with ``m = 0.029`` and ``c^p = 1005``,
+we write
+
+```@example thermo
+using Breeze.Thermodynamics: IdealGas
+dry_air = IdealGas(molar_mass=0.029, heat_capacity=1005)
+```
+
+### Adiabatic transformations and potential temperature, ``θ``
+
+Within adiabatic transformations, ``\mathrm{d} ê = 0``.
+Combining the ideal gas law with conservation of energy then yields
+
+```math
+\frac{\mathrm{d} p}{\mathrm{d} T} = ρ cᵖᵈ = \frac{p}{R T} cᵖ \qquad \text{which implies} \qquad T ∼ \left ( \frac{p}{p₀} \right )^{R / cᵖ} .
+```
+
+where ``p₀`` is some reference pressure. As a result, the _potential temperature_ 
+
+```math
+θ ≡ T \left ( \frac{p₀}{p} \right )^{Rᵈ / cᵖᵈ} ,
+```
+
+is constant under adiabatic transformations, defined such that ``θ(z=0) = T(z=0)``.
+
+### Hydrostatic balance
+
+Next we consider a reference state with constant internal energy and thus constant potential temperature
+
+```math
+θ₀ = Tᵣ \left ( \frac{p₀}{pᵣ} \right )^{Rᵈ / cᵖᵈ}
+```
+
+!!! note "About subscripts"
+    Subscripts ``0`` typically indicate evaluated values.
+    For example, in the above formula, ``p₀ ≡ pᵣ(z=0)``.
+    Subscripts ``r`` indicate _reference_ states, which typically are
+    functions of ``z``. This differs from the usual notation in which
+    the subscripts ``0`` indicate "reference" (why?) and the "very referencey" ``00`` (lol) applies to ``z=0``.
+    
+
+Hydrostatic balance requires
+
+```math
+∂_z pᵣ = - ρᵣ g
+```
+
+we get
+
+```math
+\frac{pᵣ}{p₀} = \left (1 - \frac{g z}{cᵖ θ₀} \right )^(cᵖᵈ / Rᵈ)
+```
+
+Thus
+
+```math
+Tᵣ(z) = θ₀ \left ( \frac{pᵣ}{p₀} \right )^{Rᵈ / cᵖ} = θ₀ \left ( 1 - \frac{g z}{cᵖᵈ θ₀} \right )
+```
+
+and
+
+```math
+ρᵣ(z) = \frac{p₀}{R θ₀} \left ( 1 - \frac{g z}{cᵖ θ₀} \right )^{cᵖᵈ / Rᵈ - 1}
+```
+
+```@example thermo
+thermo = AtmosphereThermodynamics()
+```
+
+We can visualise the hydrostatic reference column implied by `thermo` by
+evaluating Breeze's reference-state utilities on a one-dimensional
+`RectilinearGrid`. Using Oceananigans `Field`s highlights how Breeze stores and
+accesses these background diagnostics.
+
+```@example reference_state
+using Breeze
+using Breeze.Thermodynamics: reference_pressure, reference_density
+using CairoMakie
+
+thermo = AtmosphereThermodynamics()
+constants = ReferenceStateConstants(base_pressure=101325, potential_temperature=288)
+grid = RectilinearGrid(size=160, z=(1, 12_000), topology=(Flat, Flat, Bounded))
+
+pᵣ = CenterField(grid)
+ρᵣ = CenterField(grid)
+
+set!(pᵣ, z -> reference_pressure(z, constants, thermo))
+set!(ρᵣ, z -> reference_density(z, constants, thermo))
+
+Rᵈ = Breeze.Thermodynamics.dry_air_gas_constant(thermo)
+cᵖᵈ = thermo.dry_air.heat_capacity
+p₀ = constants.base_pressure
+θ₀ = constants.reference_potential_temperature
+
+# Verify that Tᵣ = θ₀ (1 - g z / (cᵖᵈ θ₀))
+z = znodes(grid, Center())
+Tᵣ₁ = Field(θ₀ * (pᵣ / p₀)^(Rᵈ / cᵖᵈ))
+Tᵣ₂ = Field(θ₀ * (1 - g * z / (cᵖᵈ * θ₀)))
+
+fig = Figure(resolution = (900, 300))
+axT = Axis(fig[1, 1]; xlabel = "Temperature (K)", ylabel = "Height (m)")
+lines!(axT, Tᵣ₁)
+lines!(axT, Tᵣ₂)
+
+axp = Axis(fig[1, 2]; xlabel = "Pressure (Pa)", ylabel = "")
+lines!(axp, pᵣ)
+
+axρ = Axis(fig[1, 3]; xlabel = "Density (kg m⁻³)", ylabel = "")
+lines!(axρ, ρᵣ)
+
+fig
+```
+
+## Thermodynamic relations for gaseous mixtures
+
+of gaseous dry air, water vapor, and liquid and solid condensates of various shapes and sizes.
+We assume that the volume of the condensates is negligible, which means that the total
+pressure is the sum of partial pressures of vapor and dry air,
+
+```math
+p = pᵈ + pᵛ .
+```
+
+The partial pressure of the dry air and vapor components are related to the component densities
+``ρᵈ`` and ``ρᵛ`` through the ideal gas law,
+
+```math
+pᵈ = ρᵈ Rᵈ T \qquad \text{and} \qquad pᵛ = ρᵛ Rᵛ T
+```
+
+where ``T`` is temperature, ``Rⁱ = ℛ / m^β`` is the specific gas constant for component ``β``,
+``ℛ``  is the [molar or "universal" gas constant](https://en.wikipedia.org/wiki/Gas_constant),
+and ``m^β`` is the molar mass of component ``β``.
+
+Central to Breeze's implementation of moist thermodynamics is a struct that
+holds parameters like the molar gas constant and molar masses,
+
+```@example thermo
+thermo = AtmosphereThermodynamics()
+```
+
+The default parameter evince basic facts about water vapor air typical to Earth's atmosphere:
+for example, the molar masses of dry air (itself a mixture of mostly nitrogen, oxygen, and argon),
+and water vapor are ``mᵈ = 0.029`` kg/mol and ``mᵛ = 0.018`` kg/mol.
+
+To write the effective gas law for moist air, we introduce the mass ratios
+
+```math
+qᵈ \equiv \frac{ρᵈ}{ρ} \qquad \text{and \qquad qᵛ \equiv \frac{ρᵛ}{ρ}
+```
+
+where ``ρ`` is total density of the fluid including dry air, vapor, and condensates,
+``ρᵈ`` is the density of dry air, and ``ρᵛ`` is the density of vapor.
+It's then convenient to introduce the "mixture" gas constant ``Rᵐ(qᵛ)`` such that
+
+```math
+p = ρ Rᵐ T \qquad \mathrm{where} \qquad Rᵐ ≡ qᵈ Rᵈ + qᵛ Rᵛ .
+```
+
+In "clear" (not cloudy) air, we have that ``qᵈ = 1 - qᵛ``.
+More generally, ``qᵈ = 1 - qᵛ - qᶜ``, where ``qᶜ`` is the total mass
+ratio of condensed species. In most situations on Earth, ``qᶜ ≪ qᵛ``.
+
+```@example thermo
+# Compute mixture properties for air with 0.01 specific humidity
+qᵛ = 0.01 # 1% water vapor by mass
+Rᵐ = mixture_gas_constant(qᵛ, thermo)
+```
+
+We likewise define a mixture heat capacity via ``cᵖᵐ = qᵈ cᵖᵈ + qᵛ cᵖᵛ``,
+
+
+```@example thermo
+q = 0.01 # 1% water vapor by mass
+cᵖᵐ = mixture_heat_capacity(qᵛ, thermo)
+```
+
+## The Clasuius-Claperyon relation and saturation specific humidity
+
+The [Clausius-Claperyon relation](https://en.wikipedia.org/wiki/Clausius%E2%80%93Clapeyron_relation)
+for an ideal gas
+
+```math
+\frac{\mathrm{d} pᵛ}{\mathrm{d} T} = \frac{pᵛ ℒ^β(T)}{Rᵛ T^2}
+```
+
+where ``pᵛ`` is vapor pressure, ``T`` is temperature, ``Rᵛ`` is the specific gas constant for vapor,
+``ℒ^β(T)`` is the latent heat of the transition from vapor to the
+``β`` phase (e.g. ``l ≡ β`` for vapor → liquid and ``i ≡ β`` for vapor to ice).
+
+For a thermodynamic formulation that uses constant (i.e. temperature-independent) specific heats,
+the latent heat of a phase transition is linear in temperature.
+For example, for phase change from vapor to liquid,
+
+```math
+ℒˡ(T) = ℒˡ₀ + \big ( \underbrace{cᵖᵛ - cˡ}{≡Δcˡ} \big ) T
+```
+
+where ``ℒˡ₀`` is the latent heat at ``T = 0``, with ``T`` in Kelvin.
+Integrate that to get
+
+```math
+pᵛ^\dagger(T) = pᵗʳ \left ( \frac{T}{Tᵗʳ} \right )^{Δcˡ / Rᵛ} \exp \left \{ \frac{ℒˡ₀}{Rᵛ} \left (\frac{1}{Tᵗʳ} - \frac{1}{T} \right ) \right \}
+```
+
+Consider parameters for liquid water,
+
+```@example thermo
+using Breeze.Thermodynamics: CondensedPhase
+liquid_water = CondensedPhase(latent_heat=2500800, heat_capacity=4181)
+```
+
+or water ice,
+
+```@example thermo
+water_ice = CondensedPhase(latent_heat=2834000, heat_capacity=2108)
+```

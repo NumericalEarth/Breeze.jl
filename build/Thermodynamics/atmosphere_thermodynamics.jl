@@ -87,8 +87,8 @@ function CondensedPhase(FT = Oceananigans.defaults.FloatType; latent_heat, heat_
                               convert(FT, heat_capacity))
 end
 
-liquid_water(FT) = CondensedPhase(FT; latent_heat=2500800, heat_capacity=4181)
-water_ice(FT)    = CondensedPhase(FT; latent_heat=2834000, heat_capacity=2108)
+water_condensation(FT) = CondensedPhase(FT; latent_heat=2500800, heat_capacity=4181)
+water_deposition(FT)   = CondensedPhase(FT; latent_heat=2834000, heat_capacity=2108)
 
 struct AtmosphereThermodynamics{FT, C, S}
     molar_gas_constant :: FT
@@ -154,8 +154,8 @@ end
                              dry_air_heat_capacity = 1005,
                              vapor_molar_mass = 0.018015,
                              vapor_heat_capacity = 1850,
-                             liquid = liquid_water(FT),
-                             solid = water_ice(FT),
+                             liquid = water_condensation(FT),
+                             solid = water_deposition(FT),
                              condensed_phases = nothing)
 
 Create `AtmosphereThermodynamics` with parameters that represent gaseous mixture of dry "air"
@@ -203,8 +203,8 @@ function AtmosphereThermodynamics(FT = Oceananigans.defaults.FloatType;
                                   dry_air_heat_capacity = 1005,
                                   vapor_molar_mass = 0.018015,
                                   vapor_heat_capacity = 1850,
-                                  liquid = liquid_water(FT),
-                                  solid = water_ice(FT))
+                                  liquid = water_condensation(FT),
+                                  solid = water_deposition(FT))
 
     dry_air = IdealGas(FT; molar_mass = dry_air_molar_mass,
                            heat_capacity = dry_air_heat_capacity)
