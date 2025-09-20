@@ -343,12 +343,9 @@ end
     Rᵐ = mixture_gas_constant(state.q, thermo)
     cᵖᵐ = mixture_heat_capacity(state.q, thermo)
     inv_ϰᵐ = Rᵐ / cᵖᵐ
-
     pᵣ = reference_pressure(state.z, ref, thermo)
-    FT = eltype(pᵣ)
-    pₑ₀ = convert(FT, 1e5) # "exner surface reference pressure" -- hard-coded for now
-
-    return (pᵣ / pₑ₀)^inv_ϰᵐ
+    p₀ = ref.base_pressure
+    return (pᵣ / p₀)^inv_ϰᵐ
 end
 
 condensate_specific_humidity(T, state, ref, thermo) =
