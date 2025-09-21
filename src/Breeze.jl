@@ -16,6 +16,7 @@ export
     PhaseTransitionConstants,
     CondensedPhase,
     mixture_gas_constant,
+    prognostic_fields,
     mixture_heat_capacity
 
 using Oceananigans

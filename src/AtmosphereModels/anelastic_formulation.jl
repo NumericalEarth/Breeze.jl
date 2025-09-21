@@ -146,6 +146,7 @@ function formulation_pressure_solver(anelastic_formulation::AnelasticFormulation
     reference_density = anelastic_formulation.reference_density
     tridiagonal_formulation = AnelasticTridiagonalSolverFormulation(reference_density)
     solver = FourierTridiagonalPoissonSolver(grid; tridiagonal_formulation)
+    # solver = FourierTridiagonalPoissonSolver(grid) #; tridiagonal_formulation)
     return solver
 end
 

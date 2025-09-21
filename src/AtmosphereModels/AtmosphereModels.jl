@@ -1,6 +1,6 @@
 module AtmosphereModels
 
-export AtmosphereModel, AnelasticFormulation
+export AtmosphereModel, AnelasticFormulation, prognostic_fields   
 
 include("atmosphere_model.jl")
 include("anelastic_formulation.jl")

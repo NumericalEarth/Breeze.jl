@@ -48,7 +48,7 @@ function set!(model::AtmosphereModel; enforce_mass_conservation=true, kw...)
     end
 
     # Apply a mask
-    # foreach(mask_immersed_field!, prognostic_fields(model))
+    foreach(mask_immersed_field!, prognostic_fields(model))
     update_state!(model, compute_tendencies=false)
     
     if enforce_mass_conservation

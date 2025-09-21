@@ -2,83 +2,86 @@ include(joinpath(@__DIR__, "runtests_setup.jl"))
 
 using Test
 using Breeze
-using Breeze.AtmosphereModels: AtmosphereModel, AnelasticFormulation, solve_for_anelastic_pressure!
-using Breeze.Thermodynamics: AtmosphereThermodynamics, ReferenceStateConstants
 using Oceananigans
-using Oceananigans.Grids: RectilinearGrid, Center, znodes
-using Oceananigans.Fields: fill_halo_regions!, interior
-using Oceananigans.Models.NonhydrostaticModels: NonhydrostaticModel, solve_for_pressure!
+using Oceananigans.Fields: fill_halo_regions!
 
-@testset "Matches NonhydrostaticModel when rho_ref == 1" begin
-    FT = Float64
-    grid = RectilinearGrid(FT; size=(4, 4, 4), x=(0, 1), y=(0, 1), z=(0, 1))
-    thermo = AtmosphereThermodynamics(FT)
-    constants = ReferenceStateConstants(FT; base_pressure=101325.0, potential_temperature=288.0)
+for FT in (Float32, Float64)
+    @testset "Pressure solver matches NonhydrostaticModel with ρᵣ == 1 [$FT]" begin
+        @info "Testing the anelastic pressure solver against NonhydrostaticModel [$FT]..."
+        Nx = Ny = Nz = 32
+        z = 0:(1/Nz):1
+        grid = RectilinearGrid(FT; size=(Nx, Ny, Nz), x=(0, 1), y=(0, 1), z)
+        thermo = AtmosphereThermodynamics(FT)
+        constants = ReferenceStateConstants(FT; base_pressure=101325, potential_temperature=288)
 
-    formulation = AnelasticFormulation(grid, constants, thermo)
-    set!(formulation.reference_density, FT(1))
-    fill_halo_regions!(formulation.reference_density)
+        formulation = AnelasticFormulation(grid, constants, thermo)
+        parent(formulation.reference_density) .= 1
 
-    atmos = AtmosphereModel(grid; thermodynamics=thermo, formulation=formulation, tracers=())
-    nonhydro = NonhydrostaticModel(; grid, tracers=())
+        anelastic = AtmosphereModel(grid; thermodynamics=thermo, formulation)
+        boussinesq = NonhydrostaticModel(; grid)
 
-    rho_u = atmos.momentum.ρu
-    rho_v = atmos.momentum.ρv
-    rho_w = atmos.momentum.ρw
-    u = nonhydro.velocities.u
-    v = nonhydro.velocities.v
-    w = nonhydro.velocities.w
+        uᵢ = rand(size(grid)...)
+        vᵢ = rand(size(grid)...)
+        wᵢ = rand(size(grid)...)
 
-    f1(x, y, z) = sinpi(x) * cospi(z)
-    f2(x, y, z) = cospi(y) * sinpi(z)
-    f3(x, y, z) = sinpi(x) * sinpi(y)
+        set!(anelastic, ρu=uᵢ, ρv=vᵢ, ρw=wᵢ)
+        set!(boussinesq, u=uᵢ, v=vᵢ, w=wᵢ)
 
-    set!(rho_u, f1); set!(u, f1)
-    set!(rho_v, f2); set!(v, f2)
-    set!(rho_w, f3); set!(w, f3)
+        ρu = anelastic.momentum.ρu
+        ρv = anelastic.momentum.ρv
+        ρw = anelastic.momentum.ρw
+        δᵃ = Field(∂x(ρu) + ∂y(ρv) + ∂z(ρw))
 
-    fill_halo_regions!(rho_u); fill_halo_regions!(rho_v); fill_halo_regions!(rho_w)
-    fill_halo_regions!(u); fill_halo_regions!(v); fill_halo_regions!(w)
+        u = boussinesq.velocities.u
+        v = boussinesq.velocities.v
+        w = boussinesq.velocities.w
+        δᵇ = Field(∂x(u) + ∂y(v) + ∂z(w))
 
-    delta_t = FT(0.1)
-    solve_for_anelastic_pressure!(atmos.nonhydrostatic_pressure, atmos.pressure_solver, atmos.momentum, delta_t)
-    solve_for_pressure!(nonhydro.pressures.pNHS, nonhydro.pressure_solver, delta_t, nonhydro.velocities)
+        boussinesq_solver = boussinesq.pressure_solver
+        anelastic_solver = anelastic.pressure_solver
+        @test anelastic_solver.batched_tridiagonal_solver.a == boussinesq_solver.batched_tridiagonal_solver.a
+        @test anelastic_solver.batched_tridiagonal_solver.b == boussinesq_solver.batched_tridiagonal_solver.b
+        @test anelastic_solver.batched_tridiagonal_solver.c == boussinesq_solver.batched_tridiagonal_solver.c
+        @test anelastic_solver.source_term == boussinesq_solver.source_term
 
-    p_anelastic = interior(atmos.nonhydrostatic_pressure)
-    p_nonhydro = interior(nonhydro.pressures.pNHS)
+        @test maximum(abs, δᵃ) < prod(size(grid)) * eps(FT)
+        @test maximum(abs, δᵇ) < prod(size(grid)) * eps(FT)
+        @test anelastic.nonhydrostatic_pressure == boussinesq.pressures.pNHS
+    end
 
-    difference = maximum(abs.(p_anelastic .- p_nonhydro ./ delta_t))
-    @test difference < 1e-11
-end
+    @testset "Anelastic pressure solver recovers analytic solution [$FT]" begin
+        @info "Test that anelastic pressure solver recovers analytic solution [$FT]..."
+        grid = RectilinearGrid(FT; size=48, z=(0, 1), topology=(Flat, Flat, Bounded))
+        thermo = AtmosphereThermodynamics(FT)
+        constants = ReferenceStateConstants(FT; base_pressure=101325.0, potential_temperature=288.0)
+        formulation = AnelasticFormulation(grid, constants, thermo)
 
-@testset "Recovers analytic 1D solution with variable rho_ref" begin
-    FT = Float64
-    grid = RectilinearGrid(FT; size=(1, 1, 48), x=(0, 1), y=(0, 1), z=(0, 1))
-    thermo = AtmosphereThermodynamics(FT)
-    constants = ReferenceStateConstants(FT; base_pressure=101325.0, potential_temperature=288.0)
+        #=
+        ρᵣ = 2 + cos(π z / 2)
+        ∂z ρᵣ ∂z ϕ = ?
 
-    formulation = AnelasticFormulation(grid, constants, thermo)
-    rho_ref(z) = 1 + 0.5 * cospi(z)
-    set!(formulation.reference_density, z -> rho_ref(z))
-    fill_halo_regions!(formulation.reference_density)
+        ϕ = cos(π z)
+        ⟹ ∂z ϕ = -π sin(π z)
+        ⟹ (2 + cos(π z)) ∂z ϕ = -π (2 sin(π z) + cos(π z) sin(π z))
+        ⟹ ∂z (1 + cos(π z / 2)) ∂z ϕ = -π² (2 cos(π z) + 2 cos²(π z) - 1)
 
-    model = AtmosphereModel(grid; thermodynamics=thermo, formulation=formulation, tracers=())
+        ϕ = z² / 2 - z³ / 3 = z² (1/2 - z/3)
+        ∂z ϕ = z (1 - z) = z - z²
+        ∂z² ϕ = 1 - 2z
+        ⟹ z ∂z ϕ = z² - z³
+        ⟹ ∂z (z ∂z ϕ) = 2 z - 3 z²
 
-    set!(model.momentum.ρu, FT(0))
-    set!(model.momentum.ρv, FT(0))
+        R = ∂z ρw = 2 z - 3 z²
+        ⟹ ρw = z² - z³
+        =#
 
-    phi(z) = cospi(z)
-    dphidz(z) = -pi * sinpi(z)
-    set!(model.momentum.ρw, (x, y, z) -> rho_ref(z) * dphidz(z))
-    fill_halo_regions!(model.momentum.ρw)
+        set!(formulation.reference_density, z -> z)
+        fill_halo_regions!(formulation.reference_density)
+        model = AtmosphereModel(grid; thermodynamics=thermo, formulation)
+        set!(model, ρw = z -> z^2 - z^3)
 
-    delta_t = FT(1)
-    solve_for_anelastic_pressure!(model.nonhydrostatic_pressure, model.pressure_solver, model.momentum, delta_t)
-
-    zs = collect(znodes(grid, Center(), Center(), Center()))
-    phi_exact = phi.(zs)
-    phi_numeric = vec(interior(model.nonhydrostatic_pressure))
-
-    error = maximum(abs.(phi_numeric .- phi_exact))
-    @test error < 5e-4
+        ϕ_exact = CenterField(grid)
+        set!(ϕ_exact, z -> z^2 / 2 - z^3 / 3 - 1 / 12)
+        @test isapprox(ϕ_exact, model.nonhydrostatic_pressure, rtol=1e-3)
+    end
 end

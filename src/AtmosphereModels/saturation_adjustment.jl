@@ -15,6 +15,8 @@ end
     # Generate guess for unsaturated conditions
     Π = state.exner_function
     T₁ = Π * θ
+    return T₁
+
     qˡ₁ = condensate_specific_humidity(T₁, state, thermo)
     qˡ₁ <= 0 && return T₁
     
