@@ -181,7 +181,9 @@ function AtmosphereModel(grid;
                             closure,
                             diffusivity_fields)
 
-    update_state!(model)
+    # Provide a sensible default initial state (assumes anelastic formulation)
+    Tₛ = formulation.constants.reference_potential_temperature # K
+    set!(model, θ=Tₛ) # consistent resting state
 
     return model
 end

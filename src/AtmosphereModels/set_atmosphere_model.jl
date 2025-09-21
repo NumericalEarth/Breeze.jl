@@ -1,7 +1,10 @@
 import Oceananigans.Fields: set!
+using Oceananigans.Grids: znode, Center
 using Oceananigans.TimeSteppers: update_state!
 using Oceananigans.BoundaryConditions: fill_halo_regions!
 using Oceananigans.Models.NonhydrostaticModels: compute_pressure_correction!, make_pressure_correction!
+
+const c = Center()
 
 function set!(model::AtmosphereModel; enforce_mass_conservation=true, kw...)
     for (name, value) in kw
@@ -18,6 +21,7 @@ function set!(model::AtmosphereModel; enforce_mass_conservation=true, kw...)
             ϕ = model.absolute_humidity
         end
 
+
         # Setting diagnostic variables
         if name == :θ
             θ = model.temperature # use scratch
@@ -25,8 +29,10 @@ function set!(model::AtmosphereModel; enforce_mass_conservation=true, kw...)
 
             ρʳ = model.formulation.reference_density
             cᵖᵈ = model.thermodynamics.dry_air.heat_capacity
+            g = model.thermodynamics.gravitational_acceleration
+            z = KernelFunctionOperation{Center, Center, Center}(znode, model.grid, c, c, c)
             ϕ = model.energy
-            value = ρʳ * cᵖᵈ * θ
+            value = ρʳ * cᵖᵈ * θ + g * z
         elseif name == :q
             q = model.specific_humidity
             set!(q, value)

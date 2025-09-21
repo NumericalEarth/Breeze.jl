@@ -7,15 +7,17 @@ Nx = Nz = 128
 Lz = 4 * 1024
 grid = RectilinearGrid(arch, size=(Nx, Nz), x=(0, 2Lz), z=(0, Lz), topology=(Periodic, Flat, Bounded))
 
-ρe_bcs = FieldBoundaryConditions(bottom=FluxBoundaryCondition(100))
+#ρe_bcs = FieldBoundaryConditions(bottom=FluxBoundaryCondition(100))
+ρe_bcs = FieldBoundaryConditions(bottom=FluxBoundaryCondition(0))
 advection = WENO() #(momentum=WENO(), θ=WENO(), q=WENO(bounds=(0, 1)))
 model = AtmosphereModel(grid; advection, boundary_conditions=(; ρe=ρe_bcs))
 
 Lz = grid.Lz
-Δθ = 1 # K
+Δθ = 5 # K
 Tₛ = model.formulation.constants.reference_potential_temperature # K
 θᵢ(x, z) = Tₛ + Δθ * z / Lz + 1e-2 * Δθ * randn()
-set!(model, θ=θᵢ)
+Ξ(x, z) = 1e-2 * randn()
+set!(model, θ=θᵢ, ρu=Ξ, ρv=Ξ, ρw=Ξ)
 
 simulation = Simulation(model, Δt=2, stop_iteration=4000) #0stop_time=4hours)
 # conjure_time_step_wizard!(simulation, cfl=0.7)
