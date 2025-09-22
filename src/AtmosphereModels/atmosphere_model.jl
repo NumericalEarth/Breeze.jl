@@ -183,13 +183,6 @@ function AtmosphereModel(grid;
                             closure,
                             diffusivity_fields)
 
-    if model.absolute_humidity isa DefaultValue
-        model.absolute_humidity = CenterField(grid, boundary_conditions=boundary_conditions.ρq)
-    end
-
-    if model.pressure_solver === nothing
-        model.pressure_solver = formulation_pressure_solver(formulation, grid)
-    end
 
     # Provide a sensible default initial state (assumes anelastic formulation)
     Tₛ = formulation.constants.reference_potential_temperature # K
