@@ -21,6 +21,7 @@ import Oceananigans.BuoyancyFormulations: AbstractBuoyancyFormulation,
 using ..Thermodynamics:
     AtmosphereThermodynamics,
     ReferenceStateConstants,
+    BoussinesqThermodynamicState,
     reference_specific_volume
 
 import ..Thermodynamics:
@@ -77,10 +78,12 @@ NonhydrostaticModel{CPU, RectilinearGrid}(time = 0 seconds, iteration = 0)
 """
 function MoistAirBuoyancy(FT=Oceananigans.defaults.FloatType;
                           thermodynamics = AtmosphereThermodynamics(FT),
-                          reference_constants = ReferenceStateConstants{FT}(101325, 290))
+                          reference_constants = ReferenceStateConstants{FT}(101325, 290),
+                          microphysics = nothing)
 
     AT = typeof(thermodynamics)
-    return MoistAirBuoyancy{FT, AT}(reference_constants, thermodynamics)
+    MT = typeof(microphysics)
+    return MoistAirBuoyancy{FT, AT, MT}(reference_constants, thermodynamics, microphysics)
 end
 
 Base.summary(b::MoistAirBuoyancy) = "MoistAirBuoyancy"

@@ -4,15 +4,15 @@ using Printf
 
 arch = CPU()
 Nx = Nz = 128
-Lz = 4 * 1024
+Lz = 10e3
 grid = RectilinearGrid(arch, size=(Nx, Nz), x=(0, 2Lz), z=(0, Lz), topology=(Periodic, Flat, Bounded))
 
-ρe_bcs = FieldBoundaryConditions(bottom=FluxBoundaryCondition(200))
+ρe_bcs = FieldBoundaryConditions(bottom=FluxBoundaryCondition(1000))
 advection = WENO()
 model = AtmosphereModel(grid; advection, boundary_conditions=(; ρe=ρe_bcs))
 
 Lz = grid.Lz
-Δθ = 5 # K
+Δθ = 2 # K
 Tₛ = model.formulation.constants.reference_potential_temperature # K
 θᵢ(x, z) = Tₛ + Δθ * z / Lz + 1e-2 * Δθ * randn()
 Ξ(x, z) = 1e-2 * randn()

@@ -52,9 +52,7 @@ export
 
 include("Thermodynamics/Thermodynamics.jl")
 using .Thermodynamics
-
-include("DynamicsFormulations/DynamicsFormulations.jl")
-using .DynamicsFormulations
+import .Thermodynamics: AnelasticFormulation
 
 include("Microphysics/Microphysics.jl")
 using .Microphysics

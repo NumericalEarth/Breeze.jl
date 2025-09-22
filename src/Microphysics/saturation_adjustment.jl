@@ -108,14 +108,6 @@ end
     return T₂
 end
 
-@inline function saturation_adjustment_residual(T, Π, qˡ, state, thermo)
-    ℒᵛ = thermo.liquid.latent_heat
-    qᵛ = state.q
-    qᵈ = one(qᵛ) - qᵛ
-    cᵖᵐ = mixture_heat_capacity(qᵈ, qᵛ, thermo)
-    return T^2 - ℒᵛ * qˡ / cᵖᵐ - Π * state.θ * T
-end
-
 @inline function specific_volume(state, ref, thermo)
     T = temperature(state, ref, thermo)
     qᵛ = state.q
@@ -124,3 +116,5 @@ end
     pᵣ = reference_pressure(state.z, ref, thermo)
     return Rᵐ * T / pᵣ
 end
+
+@inline specific_volume(state, ::Nothing, ref, thermo) = specific_volume(state, ref, thermo)

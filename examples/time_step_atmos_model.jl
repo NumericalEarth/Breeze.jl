@@ -42,7 +42,7 @@ set!(model, θ=θᵢ, q=qᵢ, u=Ξᵢ, v=Ξᵢ)
 compute!(δ)
 
 stop_time = 5minutes
-simulation = Simulation(model, Δt=0.1; stop_iteration=1000)
+simulation = Simulation(model, Δt=0.1, stop_iteration=10)
 # conjure_time_step_wizard!(simulation, cfl=0.7)
 
 using Printf
@@ -94,10 +94,7 @@ writer = JLD2Writer(model, outputs; filename,
 
 simulation.output_writers[:jld2] = writer
 
-try
-    run!(simulation)
-catch
-end
+run!(simulation)
 
 using GLMakie
 

@@ -1,8 +1,10 @@
 using Oceananigans.Architectures: architecture
-using Oceananigans.Grids: inactive_cell
-using Oceananigans.Utils: prettysummary
-using Oceananigans.Operators: Δzᵃᵃᶜ, Δzᵃᵃᶠ, divᶜᶜᶜ
-using Oceananigans.Solvers: solve!
+using Oceananigans.Grids: inactive_cell, Center, znode, ZDirection
+using Oceananigans.Utils: prettysummary, launch!
+using Oceananigans.Operators: Δzᵃᵃᶜ, Δzᵃᵃᶠ, Δzᶜᶜᶜ, ℑzᵃᵃᶠ, ∂xᶠᶜᶜ, ∂yᶜᶠᶜ, ∂zᶜᶜᶠ, divᶜᶜᶜ
+using Oceananigans.Solvers: solve!, FourierTridiagonalPoissonSolver
+using Oceananigans.Fields: Field, XFaceField, YFaceField, ZFaceField, set!
+using Oceananigans.BoundaryConditions: fill_halo_regions!, FieldBoundaryConditions, regularize_field_boundary_conditions
 
 using ..Thermodynamics:
     AtmosphereThermodynamics,
@@ -16,7 +18,6 @@ using ..Thermodynamics:
 using KernelAbstractions: @kernel, @index
 
 import Oceananigans.Solvers: tridiagonal_direction, compute_main_diagonal!, compute_lower_diagonal!
-import Oceananigans.TimeSteppers: compute_pressure_correction!, make_pressure_correction!
 
 #####
 ##### Formulation definition
@@ -27,8 +28,6 @@ struct AnelasticFormulation{FT, F}
     reference_pressure :: F
     reference_density :: F
 end
-
-const AnelasticModel = AtmosphereModel{<:AnelasticFormulation}
 
 function Base.summary(formulation::AnelasticFormulation)
     p₀ = formulation.constants.base_pressure
@@ -199,22 +198,6 @@ end
     end
 end
 
-function compute_pressure_correction!(model::AnelasticModel, Δt)
-    # Mask immersed velocities
-    foreach(mask_immersed_field!, model.momentum)
-    fill_halo_regions!(model.momentum, model.clock, fields(model))
-
-    ρʳ = model.formulation.reference_density
-    ρŨ = model.momentum
-    solver = model.pressure_solver
-    pₙ = model.nonhydrostatic_pressure
-    solve_for_anelastic_pressure!(pₙ, solver, ρŨ, Δt)
-
-    fill_halo_regions!(pₙ)
-
-    return nothing
-end
-
 function solve_for_anelastic_pressure!(pₙ, solver, ρŨ, Δt)
     compute_anelastic_source_term!(solver, ρŨ, Δt)
     solve!(pₙ, solver)
@@ -255,17 +238,4 @@ Update the predictor momentum (ρu, ρv, ρw) with the non-hydrostatic pressure 
     @inbounds M.ρu[i, j, k] -= ρᶜ * Δt * ∂xᶠᶜᶜ(i, j, k, grid, αʳ_pₙ)
     @inbounds M.ρv[i, j, k] -= ρᶜ * Δt * ∂yᶜᶠᶜ(i, j, k, grid, αʳ_pₙ)
     @inbounds M.ρw[i, j, k] -= ρᶠ * Δt * ∂zᶜᶜᶠ(i, j, k, grid, αʳ_pₙ)
-end
-
-function make_pressure_correction!(model::AnelasticModel, Δt)
-
-    launch!(model.architecture, model.grid, :xyz,
-            _pressure_correct_momentum!,
-            model.momentum,
-            model.grid,
-            Δt,
-            model.nonhydrostatic_pressure,
-            model.formulation.reference_density)
-
-    return nothing
 end

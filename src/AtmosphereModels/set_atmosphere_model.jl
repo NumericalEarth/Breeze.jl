@@ -11,7 +11,7 @@ move_to_front(names, name) = tuple(name, filter(n -> n != name, names)...)
 function prioritize_names(names)
     for n in (:w, :ρw, :v, :ρv, :u, :ρu, :qᵗ, :ρqᵗ)
         if n ∈ names
-            names = move_to_front(names, n))
+            names = move_to_front(names, n)
         end
     end
 
@@ -21,6 +21,8 @@ end
 function set!(model::AtmosphereModel; enforce_mass_conservation=true, kw...)
     names = collect(keys(kw))
     prioritized = prioritize_names(names)
+
+    energy_snapshot = nothing
 
     for name in prioritized
         value = kw[name]
@@ -34,6 +36,7 @@ function set!(model::AtmosphereModel; enforce_mass_conservation=true, kw...)
             set!(c, value)
         elseif name == :ρe
             set!(model.energy, value)
+            energy_snapshot = deepcopy(parent(model.energy))
         elseif name == :ρqᵗ
             set!(model.absolute_humidity, value)
         end
@@ -49,7 +52,7 @@ function set!(model::AtmosphereModel; enforce_mass_conservation=true, kw...)
             formulation = model.formulation
             energy = model.energy
             specific_humidity = model.specific_humidity
-            launch!(arch, grid, :xyz, _energy_from_potential_temperature, energy, grid,
+            launch!(arch, grid, :xyz, _energy_from_potential_temperature!, energy, grid,
                     θ, specific_humidity, formulation, thermo)
         elseif name == :qᵗ
             qᵗ = model.specific_humidity
@@ -80,6 +83,11 @@ function set!(model::AtmosphereModel; enforce_mass_conservation=true, kw...)
         update_state!(model, compute_tendencies=false)
     end
 
+    if energy_snapshot !== nothing
+        parent(model.energy) .= energy_snapshot
+        fill_halo_regions!(model.energy)
+    end
+
     return nothing
 end
 
@@ -98,17 +106,6 @@ end
         θ = potential_temperature[i, j, k]
     end
 
-    Rᵐ = mixture_gas_constant(qᵈ, qᵛ, thermo)
-    cᵖᵐ = mixture_heat_capacity(qᵈ, qᵛ, thermo)
-    p₀ = formulation.constants.base_pressure
-    Π = (pᵣ / p₀)^(Rᵐ / cᵖᵐ)
-    T = θ * Π
-
-    g = thermo.gravitational_acceleration
-    z = znode(i, j, k, grid, c, c, c)
-
-    # Assuming an unsaturated state so qˡ = qˢ = 0?
-    @inbounds moist_static_energy[i, j, k] = ρʳ * (cᵖᵐ * T + g * z)
-
-    return nothing
+    cᵖᵈ = thermo.dry_air.heat_capacity
+    @inbounds moist_static_energy[i, j, k] = ρʳ * cᵖᵈ * θ
 end

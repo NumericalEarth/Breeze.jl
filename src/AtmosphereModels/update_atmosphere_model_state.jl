@@ -1,17 +1,40 @@
 using ..Thermodynamics:
     saturation_specific_humidity,
     mixture_heat_capacity,
-    mixture_gas_constant
+    mixture_gas_constant,
+    AnelasticFormulation,
+    thermodynamic_state,
+    solve_for_anelastic_pressure!,
+    formulation_pressure_solver,
+    _pressure_correct_momentum!
 
 using Oceananigans.BoundaryConditions: fill_halo_regions!, compute_x_bcs!, compute_y_bcs!, compute_z_bcs!
 using Oceananigans.ImmersedBoundaries: mask_immersed_field!
 using Oceananigans.Architectures: architecture
 using Oceananigans.Operators: ℑzᵃᵃᶠ, ℑzᵃᵃᶜ
 
-import Oceananigans.TimeSteppers: update_state!, compute_flux_bc_tendencies!
+import Oceananigans.TimeSteppers: update_state!, compute_flux_bc_tendencies!, compute_pressure_correction!, make_pressure_correction!
 import Oceananigans: fields, prognostic_fields
 
 const AnelasticModel = AtmosphereModel{<:AnelasticFormulation}
+
+function compute_pressure_correction!(model::AnelasticModel, Δt)
+    foreach(mask_immersed_field!, model.momentum)
+    fill_halo_regions!(model.momentum, model.clock, fields(model))
+
+    ρŨ = model.momentum
+    solver = model.pressure_solver
+    if solver === nothing
+        solver = formulation_pressure_solver(model.formulation, model.grid)
+        model.pressure_solver = solver
+    end
+    pₙ = model.nonhydrostatic_pressure
+    solve_for_anelastic_pressure!(pₙ, solver, ρŨ, Δt)
+
+    fill_halo_regions!(pₙ)
+
+    return nothing
+end
 
 function prognostic_fields(model::AnelasticModel)
     thermodynamic_fields = (ρe=model.energy, ρq=model.absolute_humidity)
@@ -25,6 +48,18 @@ function update_state!(model::AnelasticModel, callbacks=[]; compute_tendencies=t
     compute_auxiliary_variables!(model)
     update_hydrostatic_pressure!(model)
     compute_tendencies && compute_tendencies!(model)
+    return nothing
+end
+
+function make_pressure_correction!(model::AnelasticModel, Δt)
+    launch!(model.architecture, model.grid, :xyz,
+            _pressure_correct_momentum!,
+            model.momentum,
+            model.grid,
+            Δt,
+            model.nonhydrostatic_pressure,
+            model.formulation.reference_density)
+
     return nothing
 end
 

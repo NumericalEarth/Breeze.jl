@@ -5,7 +5,11 @@ using ..Thermodynamics:
     reference_density,
     mixture_gas_constant,
     mixture_heat_capacity,
-    dry_air_gas_constant
+    dry_air_gas_constant,
+    field_names,
+    materialize_momentum_and_velocities,
+    collect_prognostic_fields,
+    formulation_pressure_solver
 
 using Oceananigans
 using Oceananigans.Advection: Centered, adapt_advection_order
@@ -27,8 +31,6 @@ struct DefaultValue end
 
 tupleit(t::Tuple) = t
 tupleit(t) = tuple(t)
-
-formulation_pressure_solver(formulation, grid) = nothing
 
 mutable struct AtmosphereModel{Frm, Arc, Tst, Grd, Clk, Thm, Den, Mom, Eng, Wat, Hum,
                                Tmp, Prs, Ppa, Sol, Vel, Trc, Adv, Cor, Frc, Mic, Cnd, Cls, Dif} <: AbstractModel{Tst, Arc}
@@ -77,7 +79,7 @@ end
                     boundary_conditions = NamedTuple(),
                     forcing = NamedTuple(),
                     advection = WENO(order=5),
-                    microphysics = WarmPhaseSaturationAdjustment(),
+                    microphysics = nothing,
                     timestepper = :RungeKutta3)
 
 Return an AtmosphereModel that uses the anelastic approximation following
@@ -110,7 +112,7 @@ function AtmosphereModel(grid;
                          boundary_conditions = NamedTuple(),
                          forcing = NamedTuple(),
                          advection = WENO(order=5),
-                         microphysics = WarmPhaseSaturationAdjustment(),
+                         microphysics = nothing,
                          timestepper = :RungeKutta3)
 
     arch = grid.architecture
@@ -181,9 +183,17 @@ function AtmosphereModel(grid;
                             closure,
                             diffusivity_fields)
 
+    if model.absolute_humidity isa DefaultValue
+        model.absolute_humidity = CenterField(grid, boundary_conditions=boundary_conditions.ρq)
+    end
+
+    if model.pressure_solver === nothing
+        model.pressure_solver = formulation_pressure_solver(formulation, grid)
+    end
+
     # Provide a sensible default initial state (assumes anelastic formulation)
     Tₛ = formulation.constants.reference_potential_temperature # K
-    set!(model, θ=Tₛ) # consistent resting state
+    set!(model, θ=Tₛ, enforce_mass_conservation=false) # consistent resting state
 
     return model
 end
