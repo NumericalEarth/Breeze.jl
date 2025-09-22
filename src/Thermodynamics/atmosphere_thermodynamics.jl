@@ -229,10 +229,8 @@ const IG = IdealGas
 @inline vapor_gas_constant(thermo::AT)   = thermo.molar_gas_constant / thermo.vapor.molar_mass
 @inline dry_air_gas_constant(thermo::AT) = thermo.molar_gas_constant / thermo.dry_air.molar_mass
 
-const NonCondensingAtmosphereThermodynamics{FT} = AtmosphereThermodynamics{FT, Nothing, Nothing}
-
 """
-    mixture_gas_constant(q, thermo)
+    mixture_gas_constant(qᵈ, qᵛ, thermo)
 
 Compute the gas constant of moist air given the specific humidity `q` and 
 thermodynamic parameters `thermo`.
@@ -241,38 +239,40 @@ The mixture gas constant is calculated as a weighted average of the dry air
 and water vapor gas constants:
 
 ```math
-R_m = R_d (1 - q) + R_v q
+Rᵐ = qᵈ * Rᵈ + qᵛ * Rᵛ
 ```
 
 where:
-- `R_d` is the dry air gas constant
-- `R_v` is the water vapor gas constant  
-- `q` is the specific humidity (mass fraction of water vapor)
+- `Rᵈ` is the dry air gas constant
+- `Rᵛ` is the water vapor gas constant  
+- `qᵈ` is the mass fraction of dry air
+- `qᵛ` is the mass fraction of water vapor
 
 # Arguments
-- `q`: Specific humidity (dimensionless)
+- `qᵈ`: Mass fraction of dry air (dimensionless)
+- `qᵛ`: Mass fraction of water vapor (dimensionless)
 - `thermo`: `AtmosphereThermodynamics` instance containing gas constants
 
 # Returns
 - Gas constant of the moist air mixture in J/(kg·K)
 """
-@inline function mixture_gas_constant(q, thermo::AT)
+@inline function mixture_gas_constant(qᵈ, qᵛ, thermo::AT)
     Rᵈ = dry_air_gas_constant(thermo)
     Rᵛ = vapor_gas_constant(thermo)
-    return Rᵈ * (1 - q) + Rᵛ * q
+    return qᵈ * Rᵈ + qᵛ * Rᵛ
 end
 
 """
-    mixture_heat_capacity(q, thermo)
+    mixture_heat_capacity(qᵈ, qᵛ, thermo)
 
 Compute the heat capacity of state air given the total specific humidity q
 and assuming that condensate mass ratio qᶜ ≪ q, where qℓ is the mass ratio of
 liquid condensate.
 """
-@inline function mixture_heat_capacity(q, thermo::AT)
+@inline function mixture_heat_capacity(qᵈ, qᵛ, thermo::AT)
     cᵖᵈ = thermo.dry_air.heat_capacity
     cᵖᵛ = thermo.vapor.heat_capacity
-    return cᵖᵈ * (1 - q) + cᵖᵛ * q
+    return qᵈ * cᵖᵈ + qᵛ * cᵖᵛ
 end
 
 #####
@@ -340,8 +340,10 @@ end
 end
 
 @inline function exner_function(state, ref, thermo)
-    Rᵐ = mixture_gas_constant(state.q, thermo)
-    cᵖᵐ = mixture_heat_capacity(state.q, thermo)
+    qᵛ = state.q
+    qᵈ = 1 - qᵛ
+    Rᵐ = mixture_gas_constant(qᵈ, qᵛ, thermo)
+    cᵖᵐ = mixture_heat_capacity(qᵈ, qᵛ, thermo)
     inv_ϰᵐ = Rᵐ / cᵖᵐ
     pᵣ = reference_pressure(state.z, ref, thermo)
     p₀ = ref.base_pressure

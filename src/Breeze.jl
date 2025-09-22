@@ -53,6 +53,12 @@ export
 include("Thermodynamics/Thermodynamics.jl")
 using .Thermodynamics
 
+include("DynamicsFormulations/DynamicsFormulations.jl")
+using .DynamicsFormulations
+
+include("Microphysics/Microphysics.jl")
+using .Microphysics
+
 include("MoistAirBuoyancies.jl")
 using .MoistAirBuoyancies
 

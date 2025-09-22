@@ -44,6 +44,7 @@ function compute_auxiliary_variables!(model)
             model.temperature,
             model.specific_humidity,
             grid,
+            model.microphysics,
             model.thermodynamics,
             formulation,
             model.energy,
@@ -74,6 +75,7 @@ end
 @kernel function _compute_auxiliary_thermodynamic_variables!(temperature,
                                                              specific_humidity,
                                                              grid,
+                                                             microphysics,
                                                              thermo,
                                                              formulation,
                                                              energy,
@@ -84,18 +86,9 @@ end
     @inbounds specific_humidity[i, j, k] = 𝒰.specific_humidity
 
     # Saturation adjustment
-    T = compute_temperature(𝒰, thermo)
+    T = compute_temperature(microphysics, thermo, 𝒰)
     @inbounds temperature[i, j, k] = T
 end
-
-#=
-@inline function specific_volume(state, ref, thermo)
-    T = temperature(state, ref, thermo)
-    Rᵐ = mixture_gas_constant(state.q, thermo)
-    pᵣ = reference_pressure(state.z, ref, thermo)
-    return Rᵐ * T / pᵣ
-end
-=#
 
 using Oceananigans.Advection: div_𝐯u, div_𝐯v, div_𝐯w, div_Uc
 using Oceananigans.Coriolis: x_f_cross_U, y_f_cross_U, z_f_cross_U

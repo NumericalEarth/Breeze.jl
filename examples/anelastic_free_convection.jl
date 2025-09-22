@@ -7,9 +7,8 @@ Nx = Nz = 128
 Lz = 4 * 1024
 grid = RectilinearGrid(arch, size=(Nx, Nz), x=(0, 2Lz), z=(0, Lz), topology=(Periodic, Flat, Bounded))
 
-#ρe_bcs = FieldBoundaryConditions(bottom=FluxBoundaryCondition(100))
-ρe_bcs = FieldBoundaryConditions(bottom=FluxBoundaryCondition(0))
-advection = WENO() #(momentum=WENO(), θ=WENO(), q=WENO(bounds=(0, 1)))
+ρe_bcs = FieldBoundaryConditions(bottom=FluxBoundaryCondition(200))
+advection = WENO()
 model = AtmosphereModel(grid; advection, boundary_conditions=(; ρe=ρe_bcs))
 
 Lz = grid.Lz
@@ -19,7 +18,9 @@ Tₛ = model.formulation.constants.reference_potential_temperature # K
 Ξ(x, z) = 1e-2 * randn()
 set!(model, θ=θᵢ, ρu=Ξ, ρv=Ξ, ρw=Ξ)
 
-simulation = Simulation(model, Δt=2, stop_iteration=4000) #0stop_time=4hours)
+simulation = Simulation(model, Δt=10, stop_iteration=1000) #0stop_time=4hours)
+
+# TODO make this work
 # conjure_time_step_wizard!(simulation, cfl=0.7)
 
 ρu, ρv, ρw = model.momentum
@@ -62,7 +63,7 @@ Nt = length(ρet)
 
 using GLMakie, Printf
 
-fig = Figure(size=(1200, 800), fontsize=12)
+fig = Figure(size=(1200, 600), fontsize=12)
 axw = Axis(fig[1, 1], xlabel="x (m)", ylabel="z (m)")
 axe = Axis(fig[1, 2], xlabel="x (m)", ylabel="z (m)")
 slider = Slider(fig[2, 1:2], range=1:Nt, startvalue=1)
@@ -86,12 +87,12 @@ hme = heatmap!(axe, ρen, colorrange=(Tmin, Tmax), colormap=:balance)
 # Label(fig[0, 1], "θ", tellwidth=false)
 # Label(fig[0, 2], "q", tellwidth=false)
 
-Colorbar(fig[1, 0], hmw, label = "w", vertical=true)
+Colorbar(fig[1, 0], hmw, label = "w", vertical=true, flipaxis=true)
 Colorbar(fig[1, 3], hme, label = "ρe", vertical=true)
 
 fig
 
-# record(fig, "free_convection.mp4", 1:Nt, framerate=12) do nn
-#     @info "Drawing frame $nn of $Nt..."
-#     n[] = nn
-# end
+record(fig, "free_convection.mp4", 1:Nt, framerate=12) do nn
+    @info "Drawing frame $nn of $Nt..."
+    n[] = nn
+end

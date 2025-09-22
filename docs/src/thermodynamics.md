@@ -207,15 +207,17 @@ ratio of condensed species. In most situations on Earth, ``qᶜ ≪ qᵛ``.
 ```@example thermo
 # Compute mixture properties for air with 0.01 specific humidity
 qᵛ = 0.01 # 1% water vapor by mass
-Rᵐ = mixture_gas_constant(qᵛ, thermo)
+qᵈ = 1 - qᵛ
+Rᵐ = mixture_gas_constant(qᵈ, qᵛ, thermo)
 ```
 
 We likewise define a mixture heat capacity via ``cᵖᵐ = qᵈ cᵖᵈ + qᵛ cᵖᵛ``,
 
 
 ```@example thermo
-q = 0.01 # 1% water vapor by mass
-cᵖᵐ = mixture_heat_capacity(qᵛ, thermo)
+qᵛ = 0.01 # 1% water vapor by mass
+qᵈ = 1 - qᵛ
+cᵖᵐ = mixture_heat_capacity(qᵈ, qᵛ, thermo)
 ```
 
 ## The Clasuius-Claperyon relation and saturation specific humidity

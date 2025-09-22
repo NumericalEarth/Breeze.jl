@@ -41,14 +41,6 @@ Base.show(io::IO, formulation::AnelasticFormulation) = print(io, "AnelasticFormu
 
 field_names(::AnelasticFormulation, tracer_names) = (:ρu, :ρv, :ρw, :ρe, :ρq, tracer_names...)
 
-struct AnelasticThermodynamicState{FT}
-    potential_temperature :: FT
-    specific_humidity :: FT
-    reference_density :: FT
-    reference_pressure :: FT
-    exner_function :: FT
-end
-
 function AnelasticFormulation(grid, state_constants, thermo)
     pᵣ = Field{Nothing, Nothing, Center}(grid)
     ρᵣ = Field{Nothing, Nothing, Center}(grid)
@@ -63,25 +55,30 @@ end
 ##### Thermodynamic state
 #####
 
-function thermodynamic_state(i, j, k, grid, formulation::AnelasticFormulation, thermo, energy, absolute_humidity)
+struct AnelasticThermodynamicState{FT}
+    moist_static_energy :: FT
+    specific_humidity :: FT
+    height :: FT
+end
+
+const c = Center()
+
+function thermodynamic_state(i, j, k, grid,
+                             formulation::AnelasticFormulation,
+                             thermo,
+                             energy,
+                             absolute_humidity)
     @inbounds begin
         e = energy[i, j, k]
-        pᵣ = formulation.reference_pressure[i, j, k]
         ρᵣ = formulation.reference_density[i, j, k]
-        ρq = absolute_humidity[i, j, k]
+        ρqᵗ = absolute_humidity[i, j, k]
     end
 
     cᵖᵈ = thermo.dry_air.heat_capacity
-    θ = e / (cᵖᵈ * ρᵣ)
-
-    q = ρq / ρᵣ
-    Rᵐ = mixture_gas_constant(q, thermo)
-    cᵖᵐ = mixture_heat_capacity(q, thermo)
-
-    p₀ = formulation.constants.base_pressure
-    Π = (pᵣ / p₀)^(Rᵐ / cᵖᵐ)
-
-    return AnelasticThermodynamicState(θ, q, ρᵣ, pᵣ, Π)
+    qᵗ = ρqᵗ / ρᵣ
+    z = znode(i, j, k, grid, c, c, c)
+    
+    return AnelasticThermodynamicState(e, qᵗ, z)
 end
 
 @inline function specific_volume(i, j, k, grid, formulation, temperature, specific_humidity, thermo)
@@ -91,7 +88,9 @@ end
         T = temperature[i, j, k]
     end
 
-    Rᵐ = mixture_gas_constant(q, thermo)
+    qᵛ = q
+    qᵈ = one(qᵛ) - qᵛ
+    Rᵐ = mixture_gas_constant(qᵈ, qᵛ, thermo)
 
     return Rᵐ * T / pᵣ
 end
@@ -237,17 +236,6 @@ end
     δ = divᶜᶜᶜ(i, j, k, grid, ρu, ρv, ρw)
     @inbounds rhs[i, j, k] = active * Δzᶜᶜᶜ(i, j, k, grid) * δ / Δt
 end
-
-#=
-function compute_source_term!(solver::DistributedFourierTridiagonalPoissonSolver, Ũ)
-    rhs = solver.storage.zfield
-    arch = architecture(solver)
-    grid = solver.local_grid
-    tdir = solver.batched_tridiagonal_solver.tridiagonal_direction
-    launch!(arch, grid, :xyz, _fourier_tridiagonal_source_term!, rhs, tdir, grid, Ũ)
-    return nothing
-end
-=#
 
 #####
 ##### Fractional and time stepping

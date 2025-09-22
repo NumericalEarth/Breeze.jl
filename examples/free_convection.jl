@@ -14,15 +14,6 @@ p₀ = 101325 # Pa
 reference_constants = Breeze.Thermodynamics.ReferenceStateConstants(base_pressure=p₀, potential_temperature=θ₀)
 buoyancy = Breeze.MoistAirBuoyancy(; reference_constants)
 
-# Simple precipitation scheme from CloudMicrophysics
-using CloudMicrophysics
-using CloudMicrophysics.Microphysics0M: remove_precipitation
-
-FT = eltype(grid)
-microphysics = CloudMicrophysics.Parameters.Parameters0M{FT}(τ_precip=600, S_0=0, qc_0=0.02)
-@inline precipitation(x, z, t, q, params) = remove_precipitation(params, q, 0)
-q_forcing = Forcing(precipitation, field_dependencies=:q, parameters=microphysics)
-
 ρ₀ = Breeze.MoistAirBuoyancies.base_density(buoyancy) # air density at z=0
 cₚ = buoyancy.thermodynamics.dry_air.heat_capacity
 Q₀ = 1000 # heat flux in W / m²
