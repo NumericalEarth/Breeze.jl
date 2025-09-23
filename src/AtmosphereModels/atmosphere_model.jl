@@ -1,6 +1,6 @@
 using ..Thermodynamics:
-    AtmosphereThermodynamics,
-    ReferenceStateConstants,
+    ThermodynamicConstants,
+    ReferenceState,
     reference_pressure,
     reference_density,
     mixture_gas_constant,
@@ -60,18 +60,19 @@ mutable struct AtmosphereModel{Frm, Arc, Tst, Grd, Clk, Thm, Den, Mom, Eng, Wat,
     diffusivity_fields :: Dif
 end
 
-function default_formulation(grid, thermo)
+function default_formulation(grid, thermodynamics)
     FT = eltype(grid)
     base_pressure = convert(FT, 101325)
     potential_temperature = convert(FT, 288)
-    constants = ReferenceStateConstants(base_pressure, potential_temperature)
-    return AnelasticFormulation(grid, constants, thermo)
+    reference_state = ReferenceState(base_pressure=base_pressure,
+                                               potential_temperature=potential_temperature)
+    return AnelasticFormulation(grid, reference_state, thermodynamics)
 end
 
 """
     AtmosphereModel(grid;
                     clock = Clock(grid),
-                    thermodynamics = AtmosphereThermodynamics(eltype(grid)),
+                    thermodynamics = ThermodynamicConstants(eltype(grid)),
                     formulation = default_formulation(grid, thermodynamics),
                     absolute_humidity = DefaultValue(),
                     tracers = tuple(),
@@ -104,7 +105,7 @@ AtmosphereModel{CPU, RectilinearGrid}(time = 0 seconds, iteration = 0)
 """
 function AtmosphereModel(grid;
                          clock = Clock(grid),
-                         thermodynamics = AtmosphereThermodynamics(eltype(grid)),
+                         thermodynamics = ThermodynamicConstants(eltype(grid)),
                          formulation = default_formulation(grid, thermodynamics),
                          absolute_humidity = DefaultValue(),
                          tracers = tuple(),
@@ -131,7 +132,7 @@ function AtmosphereModel(grid;
 
     density = materialize_density(formulation, grid)
     velocities, momentum = materialize_momentum_and_velocities(formulation, grid, boundary_conditions)
-    tracers = NamedTuple(n => CenterField(grid, boundary_conditions=boundary_conditions[n]) for name in tracers)
+    tracers = NamedTuple(name => CenterField(grid, boundary_conditions=boundary_conditions[name]) for name in tracers)
     condensates = materialize_condenstates(microphysics, grid)
     advection = adapt_advection_order(advection, grid)
 
@@ -185,7 +186,7 @@ function AtmosphereModel(grid;
 
 
     # Provide a sensible default initial state (assumes anelastic formulation)
-    Tₛ = formulation.constants.reference_potential_temperature # K
+    Tₛ = formulation.reference_state_constants.potential_temperature # K
     set!(model, θ=Tₛ, enforce_mass_conservation=false) # consistent resting state
 
     return model

@@ -7,8 +7,8 @@ using Oceananigans.Fields: Field, XFaceField, YFaceField, ZFaceField, set!
 using Oceananigans.BoundaryConditions: fill_halo_regions!, FieldBoundaryConditions, regularize_field_boundary_conditions
 
 using ..Thermodynamics:
-    AtmosphereThermodynamics,
-    ReferenceStateConstants,
+    ThermodynamicConstants,
+    ReferenceState,
     reference_pressure,
     reference_density,
     mixture_gas_constant,
@@ -24,30 +24,26 @@ import Oceananigans.Solvers: tridiagonal_direction, compute_main_diagonal!, comp
 #####
 
 struct AnelasticFormulation{FT, F}
-    constants :: ReferenceStateConstants{FT}
+    reference_state_constants :: ReferenceState{FT}
     reference_pressure :: F
     reference_density :: F
 end
 
-function Base.summary(formulation::AnelasticFormulation)
-    p₀ = formulation.constants.base_pressure
-    θᵣ = formulation.constants.reference_potential_temperature
-    return string("AnelasticFormulation(p₀=", prettysummary(p₀),
-                  ", θᵣ=", prettysummary(θᵣ), ")")
-end
+Base.summary(formulation::AnelasticFormulation) =
+    string("AnelasticFormulation with ", summary(formulation.reference_state_constants))
 
 Base.show(io::IO, formulation::AnelasticFormulation) = print(io, "AnelasticFormulation")
 
 field_names(::AnelasticFormulation, tracer_names) = (:ρu, :ρv, :ρw, :ρe, :ρq, tracer_names...)
 
-function AnelasticFormulation(grid, state_constants, thermo)
+function AnelasticFormulation(grid, ref, thermo)
     pᵣ = Field{Nothing, Nothing, Center}(grid)
     ρᵣ = Field{Nothing, Nothing, Center}(grid)
-    set!(pᵣ, z -> reference_pressure(z, state_constants, thermo))
-    set!(ρᵣ, z -> reference_density(z, state_constants, thermo))
+    set!(pᵣ, z -> reference_pressure(z, ref, thermo))
+    set!(ρᵣ, z -> reference_density(z, ref, thermo))
     fill_halo_regions!(pᵣ)
     fill_halo_regions!(ρᵣ)
-    return AnelasticFormulation(state_constants, pᵣ, ρᵣ)
+    return AnelasticFormulation(ref, pᵣ, ρᵣ)
 end
 
 #####
@@ -64,7 +60,6 @@ const c = Center()
 
 function thermodynamic_state(i, j, k, grid,
                              formulation::AnelasticFormulation,
-                             thermo,
                              energy,
                              absolute_humidity)
     @inbounds begin
@@ -73,12 +68,13 @@ function thermodynamic_state(i, j, k, grid,
         ρqᵗ = absolute_humidity[i, j, k]
     end
 
-    cᵖᵈ = thermo.dry_air.heat_capacity
-    qᵗ = ρqᵗ / ρᵣ
     e = ρe / ρᵣ
     z = znode(i, j, k, grid, c, c, c)
+
+    qᵗ = ρqᵗ / ρᵣ
+    q = SpecificHumidities(qᵗ, zero(qᵗ), zero(qᵗ))
     
-    return AnelasticThermodynamicState(e, qᵗ, z)
+    return MoistStaticEnergyState(e, q, z)
 end
 
 @inline function specific_volume(i, j, k, grid, formulation, temperature, specific_humidity, thermo)
@@ -98,7 +94,7 @@ end
 @inline function reference_specific_volume(i, j, k, grid, formulation, thermo)
     Rᵈ = dry_air_gas_constant(thermo)
     pᵣ = @inbounds formulation.reference_pressure[i, j, k]
-    θᵣ = formulation.constants.reference_potential_temperature
+    θᵣ = formulation.thermo.potential_temperature
     return Rᵈ * θᵣ / pᵣ
 end
 

@@ -2,7 +2,8 @@ using Oceananigans.Grids: znode, Center
 using Oceananigans.TimeSteppers: update_state!
 using Oceananigans.BoundaryConditions: fill_halo_regions!
 using Oceananigans.Models.NonhydrostaticModels: compute_pressure_correction!, make_pressure_correction!
-using ..Thermodynamics: ThermodynamicState, exner_function
+
+using ..Thermodynamics: exner_function, SpecificHumidities, mixture_heat_capacity, PotentialTemperatureState, temperature
 
 import Oceananigans.Fields: set!
 
@@ -99,19 +100,18 @@ end
     @inbounds begin
         ρʳ = formulation.reference_density[i, j, k]
         qᵗ = specific_humidity[i, j, k]
-        qᵈ = 1 - qᵗ
-        pᵣ = formulation.reference_pressure[i, j, k]
         θ = potential_temperature[i, j, k]
         z = znode(i, j, k, grid, c, c, c)
     end
 
-    𝒰 = ThermodynamicState(θ, qᵗ, z)
-    Π = exner_function(𝒰, formulation.constants, thermo)
-    T = Π * θ
+    # Assume non-condensed state
+    # TODO: relax this assumption
+    q = SpecificHumidities(qᵗ, zero(qᵗ), zero(qᵗ))
+    ref = formulation.reference_state_constants
+    𝒰 = PotentialTemperatureState(θ, q, z, ref)
+    T = temperature(𝒰, thermo)
     ℒ₀ = thermo.liquid.latent_heat
     g = thermo.gravitational_acceleration
-    qᵈ = 1 - qᵗ
-    qᵛ = qᵗ
-    cᵖᵐ = mixture_heat_capacity(qᵈ, qᵛ, thermo)
+    cᵖᵐ = mixture_heat_capacity(q, thermo)
     @inbounds moist_static_energy[i, j, k] = ρʳ * (cᵖᵐ * T + g * z + qᵗ * ℒ₀)
 end

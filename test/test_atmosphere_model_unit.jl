@@ -3,12 +3,13 @@ include(joinpath(@__DIR__, "runtests_setup.jl"))
 @testset "AtmosphereModel" begin
     for FT in (Float32, Float64)
         grid = RectilinearGrid(FT, size=(8, 8, 8), x=(0, 1_000), y=(0, 1_000), z=(0, 1_000))
-        thermo = AtmosphereThermodynamics(FT)
+        thermodynamics = ThermodynamicConstants(FT)
 
         for p₀ in (101325, 100000)
             for θ₀ in (288, 300)
-                constants = Breeze.Thermodynamics.ReferenceStateConstants(p₀, θ₀)
-                formulation = AnelasticFormulation(grid, constants, thermo)
+                reference_state = Breeze.Thermodynamics.ReferenceState(base_pressure=p₀,
+                                                                                potential_temperature=θ₀)
+                formulation = AnelasticFormulation(grid, reference_state, thermodynamics)
                 model = AtmosphereModel(grid; formulation)
 
                 ρᵣ = model.formulation.reference_density

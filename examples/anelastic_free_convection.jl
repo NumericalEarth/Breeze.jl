@@ -13,7 +13,7 @@ model = AtmosphereModel(grid; advection, boundary_conditions=(; ρe=ρe_bcs))
 
 Lz = grid.Lz
 Δθ = 2 # K
-Tₛ = model.formulation.constants.reference_potential_temperature # K
+Tₛ = model.formulation.thermo.potential_temperature # K
 θᵢ(x, z) = Tₛ + Δθ * z / Lz + 1e-2 * Δθ * randn()
 Ξ(x, z) = 1e-2 * randn()
 set!(model, θ=θᵢ, ρu=Ξ, ρv=Ξ, ρw=Ξ)

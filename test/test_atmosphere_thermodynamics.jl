@@ -1,7 +1,7 @@
 include(joinpath(@__DIR__, "runtests_setup.jl"))
 
 @testset "Thermodynamics" begin
-    thermo = AtmosphereThermodynamics()
+    thermo = ThermodynamicConstants()
 
     T = 293.15  # 20°C
     ρ = 1.2     # kg/m³

@@ -41,8 +41,8 @@ Nx = Nz = 64
 Lz = 4 * 1024
 grid = RectilinearGrid(CPU(), size=(Nx, Nz), x=(0, 2Lz), z=(0, Lz), topology=(Periodic, Flat, Bounded))
 
-reference_constants = Breeze.Thermodynamics.ReferenceStateConstants(base_pressure=1e5, potential_temperature=288)
-buoyancy = Breeze.MoistAirBuoyancy(; reference_constants)
+reference_state = Breeze.Thermodynamics.ReferenceState(base_pressure=1e5, potential_temperature=288)
+buoyancy = Breeze.MoistAirBuoyancy(; reference_state)
 
 Q₀ = 1000 # heat flux in W / m²
 ρ₀ = Breeze.MoistAirBuoyancies.base_density(buoyancy) # air density at z=0
@@ -57,7 +57,7 @@ model = NonhydrostaticModel(; grid, advection, buoyancy,
                             boundary_conditions = (θ=θ_bcs, q=q_bcs))
 
 Δθ = 2 # ᵒK
-Tₛ = reference_constants.reference_potential_temperature # K
+Tₛ = reference_state.potential_temperature # K
 θᵢ(x, z) = Tₛ + Δθ * z / grid.Lz + 1e-2 * Δθ * randn()
 qᵢ(x, z) = 0 # 1e-2 + 1e-5 * rand()
 set!(model, θ=θᵢ, q=qᵢ)

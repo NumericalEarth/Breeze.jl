@@ -1,3 +1,5 @@
+
+
 #####
 ##### Microphysics saturation adjustment utilities
 #####
@@ -48,11 +50,6 @@ end
     qᵈ = one(qᵛ) - qᵛ
     cᵖᵐ = mixture_heat_capacity(qᵈ, qᵛ, thermo)
     return T^2 - ℒᵛ * qˡ / cᵖᵐ - Π * state.θ * T
-end
-
-
-@inline function condensate_specific_humidity(T, state::HeightReferenceThermodynamicState, ref, thermo)
-    return condensate_specific_humidity(T, state.q, state.z, ref, thermo)
 end
 
 #####
@@ -116,5 +113,3 @@ end
     pᵣ = reference_pressure(state.z, ref, thermo)
     return Rᵐ * T / pᵣ
 end
-
-@inline specific_volume(state, ::Nothing, ref, thermo) = specific_volume(state, ref, thermo)

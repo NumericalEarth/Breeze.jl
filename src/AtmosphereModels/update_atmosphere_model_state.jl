@@ -6,6 +6,7 @@ using ..Thermodynamics:
     thermodynamic_state,
     solve_for_anelastic_pressure!,
     formulation_pressure_solver,
+    total_specific_humidity,
     _pressure_correct_momentum!
 
 using Oceananigans.BoundaryConditions: fill_halo_regions!, compute_x_bcs!, compute_y_bcs!, compute_z_bcs!
@@ -46,7 +47,6 @@ fields(model::AnelasticModel) = prognostic_fields(model)
 function update_state!(model::AnelasticModel, callbacks=[]; compute_tendencies=true)
     fill_halo_regions!(prognostic_fields(model), model.clock, fields(model), async=true)
     compute_auxiliary_variables!(model)
-    update_hydrostatic_pressure!(model)
     compute_tendencies && compute_tendencies!(model)
     return nothing
 end
@@ -107,7 +107,7 @@ end
     end
 end
 
-@kernel function _compute_auxiliary_thermodynamic_variables!(temperature,
+@kernel function _compute_auxiliary_thermodynamic_variables!(temperature_field,
                                                              specific_humidity,
                                                              grid,
                                                              microphysics,
@@ -117,12 +117,11 @@ end
                                                              absolute_humidity)
     i, j, k = @index(Global, NTuple)
 
-    𝒰 = thermodynamic_state(i, j, k, grid, formulation, thermo, energy, absolute_humidity)
-    @inbounds specific_humidity[i, j, k] = 𝒰.specific_humidity
+    𝒰 = thermodynamic_state(i, j, k, grid, formulation, energy, absolute_humidity)
+    @inbounds specific_humidity[i, j, k] = total_specific_humidity(𝒰)
 
-    # Saturation adjustment
-    T = compute_temperature(microphysics, thermo, 𝒰)
-    @inbounds temperature[i, j, k] = T
+    T = temperature(𝒰, thermo)
+    @inbounds temperature_field[i, j, k] = T
 end
 
 using Oceananigans.Advection: div_𝐯u, div_𝐯v, div_𝐯w, div_Uc
