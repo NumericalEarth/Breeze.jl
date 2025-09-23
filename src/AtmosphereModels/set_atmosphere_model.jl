@@ -1,8 +1,10 @@
-import Oceananigans.Fields: set!
 using Oceananigans.Grids: znode, Center
 using Oceananigans.TimeSteppers: update_state!
 using Oceananigans.BoundaryConditions: fill_halo_regions!
 using Oceananigans.Models.NonhydrostaticModels: compute_pressure_correction!, make_pressure_correction!
+using ..Thermodynamics: ThermodynamicState, exner_function
+
+import Oceananigans.Fields: set!
 
 const c = Center()
 
@@ -22,8 +24,6 @@ function set!(model::AtmosphereModel; enforce_mass_conservation=true, kw...)
     names = collect(keys(kw))
     prioritized = prioritize_names(names)
 
-    energy_snapshot = nothing
-
     for name in prioritized
         value = kw[name]
 
@@ -36,7 +36,6 @@ function set!(model::AtmosphereModel; enforce_mass_conservation=true, kw...)
             set!(c, value)
         elseif name == :ρe
             set!(model.energy, value)
-            energy_snapshot = deepcopy(parent(model.energy))
         elseif name == :ρqᵗ
             set!(model.absolute_humidity, value)
         end
@@ -54,12 +53,14 @@ function set!(model::AtmosphereModel; enforce_mass_conservation=true, kw...)
             specific_humidity = model.specific_humidity
             launch!(arch, grid, :xyz, _energy_from_potential_temperature!, energy, grid,
                     θ, specific_humidity, formulation, thermo)
+
         elseif name == :qᵗ
             qᵗ = model.specific_humidity
             set!(qᵗ, value)
             ρʳ = model.formulation.reference_density
             ρqᵗ = model.absolute_humidity
             set!(ρqᵗ, ρʳ * qᵗ)                
+
         elseif name ∈ (:u, :v, :w)
             u = model.velocities[name]
             set!(u, value)
@@ -83,10 +84,7 @@ function set!(model::AtmosphereModel; enforce_mass_conservation=true, kw...)
         update_state!(model, compute_tendencies=false)
     end
 
-    if energy_snapshot !== nothing
-        parent(model.energy) .= energy_snapshot
-        fill_halo_regions!(model.energy)
-    end
+    fill_halo_regions!(model.energy)
 
     return nothing
 end
@@ -100,12 +98,20 @@ end
 
     @inbounds begin
         ρʳ = formulation.reference_density[i, j, k]
-        qᵛ = specific_humidity[i, j, k]
-        qᵈ = 1 - qᵛ
+        qᵗ = specific_humidity[i, j, k]
+        qᵈ = 1 - qᵗ
         pᵣ = formulation.reference_pressure[i, j, k]
         θ = potential_temperature[i, j, k]
+        z = znode(i, j, k, grid, c, c, c)
     end
 
-    cᵖᵈ = thermo.dry_air.heat_capacity
-    @inbounds moist_static_energy[i, j, k] = ρʳ * cᵖᵈ * θ
+    𝒰 = ThermodynamicState(θ, qᵗ, z)
+    Π = exner_function(𝒰, formulation.constants, thermo)
+    T = Π * θ
+    ℒ₀ = thermo.liquid.latent_heat
+    g = thermo.gravitational_acceleration
+    qᵈ = 1 - qᵗ
+    qᵛ = qᵗ
+    cᵖᵐ = mixture_heat_capacity(qᵈ, qᵛ, thermo)
+    @inbounds moist_static_energy[i, j, k] = ρʳ * (cᵖᵐ * T + g * z + qᵗ * ℒ₀)
 end

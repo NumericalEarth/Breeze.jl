@@ -55,7 +55,7 @@ end
 #####
 
 struct AnelasticThermodynamicState{FT}
-    moist_static_energy :: FT
+    specific_moist_static_energy :: FT
     specific_humidity :: FT
     height :: FT
 end
@@ -68,13 +68,14 @@ function thermodynamic_state(i, j, k, grid,
                              energy,
                              absolute_humidity)
     @inbounds begin
-        e = energy[i, j, k]
+        ρe = energy[i, j, k]
         ρᵣ = formulation.reference_density[i, j, k]
         ρqᵗ = absolute_humidity[i, j, k]
     end
 
     cᵖᵈ = thermo.dry_air.heat_capacity
     qᵗ = ρqᵗ / ρᵣ
+    e = ρe / ρᵣ
     z = znode(i, j, k, grid, c, c, c)
     
     return AnelasticThermodynamicState(e, qᵗ, z)

@@ -18,7 +18,7 @@ Tₛ = model.formulation.constants.reference_potential_temperature # K
 Ξ(x, z) = 1e-2 * randn()
 set!(model, θ=θᵢ, ρu=Ξ, ρv=Ξ, ρw=Ξ)
 
-simulation = Simulation(model, Δt=10, stop_iteration=1000) #0stop_time=4hours)
+simulation = Simulation(model, Δt=5, stop_iteration=1000) #0stop_time=4hours)
 
 # TODO make this work
 # conjure_time_step_wizard!(simulation, cfl=0.7)
