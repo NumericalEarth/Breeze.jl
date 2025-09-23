@@ -2,7 +2,7 @@
 
 ```@setup thermo
 using Breeze
-thermo = AtmosphereThermodynamics()
+thermo = ThermodynamicConstants()
 ```
 
 Breeze implements thermodynamic relations for moist atmospheres ---
@@ -106,7 +106,7 @@ and
 ```
 
 ```@example thermo
-thermo = AtmosphereThermodynamics()
+thermo = ThermodynamicConstants()
 ```
 
 We can visualise the hydrostatic reference column implied by `thermo` by
@@ -119,20 +119,20 @@ using Breeze
 using Breeze.Thermodynamics: reference_pressure, reference_density
 using CairoMakie
 
-thermo = AtmosphereThermodynamics()
-constants = ReferenceStateConstants(base_pressure=101325, potential_temperature=288)
+thermo = ThermodynamicConstants()
+thermo = ReferenceState(base_pressure=101325, potential_temperature=288)
 grid = RectilinearGrid(size=160, z=(1, 12_000), topology=(Flat, Flat, Bounded))
 
 pᵣ = CenterField(grid)
 ρᵣ = CenterField(grid)
 
-set!(pᵣ, z -> reference_pressure(z, constants, thermo))
-set!(ρᵣ, z -> reference_density(z, constants, thermo))
+set!(pᵣ, z -> reference_pressure(z, thermo, thermo))
+set!(ρᵣ, z -> reference_density(z, thermo, thermo))
 
 Rᵈ = Breeze.Thermodynamics.dry_air_gas_constant(thermo)
 cᵖᵈ = thermo.dry_air.heat_capacity
-p₀ = constants.base_pressure
-θ₀ = constants.reference_potential_temperature
+p₀ = thermo.base_pressure
+θ₀ = thermo.potential_temperature
 g = thermo.gravitational_acceleration
 
 # Verify that Tᵣ = θ₀ (1 - g z / (cᵖᵈ θ₀))
@@ -179,7 +179,7 @@ Central to Breeze's implementation of moist thermodynamics is a struct that
 holds parameters like the molar gas constant and molar masses,
 
 ```@example thermo
-thermo = AtmosphereThermodynamics()
+thermo = ThermodynamicConstants()
 ```
 
 The default parameter evince basic facts about water vapor air typical to Earth's atmosphere:
@@ -207,15 +207,17 @@ ratio of condensed species. In most situations on Earth, ``qᶜ ≪ qᵛ``.
 ```@example thermo
 # Compute mixture properties for air with 0.01 specific humidity
 qᵛ = 0.01 # 1% water vapor by mass
-Rᵐ = mixture_gas_constant(qᵛ, thermo)
+qᵈ = 1 - qᵛ
+Rᵐ = mixture_gas_constant(qᵈ, qᵛ, thermo)
 ```
 
 We likewise define a mixture heat capacity via ``cᵖᵐ = qᵈ cᵖᵈ + qᵛ cᵖᵛ``,
 
 
 ```@example thermo
-q = 0.01 # 1% water vapor by mass
-cᵖᵐ = mixture_heat_capacity(qᵛ, thermo)
+qᵛ = 0.01 # 1% water vapor by mass
+qᵈ = 1 - qᵛ
+cᵖᵐ = mixture_heat_capacity(qᵈ, qᵛ, thermo)
 ```
 
 ## The Clasuius-Claperyon relation and saturation specific humidity

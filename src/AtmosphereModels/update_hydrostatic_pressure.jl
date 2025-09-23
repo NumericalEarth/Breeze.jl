@@ -7,6 +7,9 @@ using Oceananigans.ImmersedBoundaries: PartialCellBottom, ImmersedBoundaryGrid
 using Oceananigans.Grids: topology
 using Oceananigans.Grids: XFlatGrid, YFlatGrid
 using Oceananigans.Utils: KernelParameters
+using Oceananigans.BoundaryConditions: fill_halo_regions!
+
+using ..Thermodynamics: specific_volume, reference_specific_volume
 
 const c = Center()
 const f = Face()
