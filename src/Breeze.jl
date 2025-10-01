@@ -58,4 +58,14 @@ using .MoistAirBuoyancies
 include("AtmosphereModels/AtmosphereModels.jl")
 using .AtmosphereModels
 
+include("Radiation/Radiation.jl")
+using .Radiation
+
+export
+    AbstractRadiationModel,
+    RRTMGPModel,
+    initialize_rrtmgp_model,
+    compute_vertical_fluxes!,
+    flux_results
+
 end # module Breeze
