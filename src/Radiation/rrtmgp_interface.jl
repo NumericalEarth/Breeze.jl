@@ -95,15 +95,16 @@ function RRTMGP.RTE.TwoStreamLWRTE(
     FT = eltype(grid)
     Nx, Ny = grid.Nx, grid.Ny
     Ncols = Nx * Ny
+    Nbnd = size(sfc_emission, 1)
     grid_params = RRTMGPGridParams(grid)
     params = RRTMGPParameters(eltype(grid))
     (; context) = grid_params
     op = TwoStream(grid_params)
     src = SourceLW2Str(grid_params; params)
-    if lw_inc_flux !== nothing
-        lw_inc_flux = reshape(lw_inc_flux, 1, Ncols)
-    end
-    bcs = LwBCs(reshape(sfc_emission, 1, Ncols), lw_inc_flux)
+    bcs = LwBCs(
+        reshape(sfc_emission, Nbnd, Ncols), 
+        lw_inc_flux isa Nothing ? nothing : reshape(lw_inc_flux, 1, Ncols)
+    )
     fluxb = FluxLW(grid_params)
     flux = FluxLW(grid_params)
     return TwoStreamLWRTE(context, op, src, bcs, fluxb, flux)
@@ -134,11 +135,20 @@ function RRTMGP.RTE.TwoStreamSWRTE(
     inc_flux_diffuse,
     sfc_alb_diffuse,
 )
+    Nx, Ny = grid.Nx, grid.Ny
+    Ncols = Nx * Ny
+    Nbnd = size(sfc_alb_direct, 1)
     grid_params = RRTMGPGridParams(grid)
     (; context) = grid_params
     op = TwoStream(grid_params)
     src = SourceSW2Str(grid_params)
-    bcs = SwBCs(cos_zenith, toa_flux, sfc_alb_direct, inc_flux_diffuse, sfc_alb_diffuse)
+    bcs = SwBCs(
+        reshape(cos_zenith, Ncols),
+        reshape(toa_flux, Ncols),
+        reshape(sfc_alb_direct, Nbnd, Ncols), 
+        inc_flux_diffuse isa Nothing ? nothing : reshape(inc_flux_diffuse, Nbnd, Ncols), 
+        reshape(sfc_alb_diffuse, Nbnd, Ncols),
+    )
     fluxb = FluxSW(grid_params)
     flux = FluxSW(grid_params)
     return TwoStreamSWRTE(context, op, src, bcs, fluxb, flux)
