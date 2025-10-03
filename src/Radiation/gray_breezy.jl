@@ -31,12 +31,6 @@ p_surface = 100_000 # surface pressure (Pa)
 p_top = 9_000 # top of atmosphere pressure / emission level (Pa)
 lat_center = 0
 optical_properties = GrayOpticalThicknessSchneider2004(FT)
-#     cos_zenith .= cos(deg2rad * 52.95) # corresponding to ~52.95 deg zenith angle    
-#     toa_flux .= FT(1407.679)
-#     sfc_alb_direct .= FT(0.1)
-#     sfc_alb_diffuse .= FT(0.1)
-#     inc_flux_diffuse = nothing
-# Grid setup, we also need to say where on the planet our box is located
 grid = RectilinearGrid(
     architecture,
     FT,

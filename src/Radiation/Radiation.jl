@@ -2,12 +2,12 @@ module Radiation
 
 export
     AbstractRadiationModel,
-    RRTMGPModel,
-    initialize_rrtmgp_model,
-    compute_vertical_fluxes!,
-    flux_results
+    GrayRadiationModel,
+    update_radative_fluxes!
 
-include("rrtmgp_backend.jl")
+include("rrtmgp_interface.jl")
 include("radiation_model.jl")
+include("radiation_model_utils.jl")
+include("radiation_model_gray.jl")
 
 end
