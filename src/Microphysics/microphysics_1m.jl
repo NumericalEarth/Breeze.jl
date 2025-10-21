@@ -34,60 +34,28 @@ Base.eltype(p::Microphysics1MParameters) = eltype(p.cloud)
 Architecture-aware scratch space used by `Microphysics1M` to stage intermediate
 arrays.
 """
-struct Microphysics1MCache{FT,
-                           Arc <: AbstractArchitecture,
-                           VelocityArray,
-                           TendenciesTuple,
-                           DiagnosticsTuple,
-                           ScalarRef,
-                           UpdatedArray}
-    rain_velocity :: VelocityArray
-    snow_velocity :: VelocityArray
-    tendencies :: TendenciesTuple
-    diagnostics :: DiagnosticsTuple
-    surface_precipitation_flux :: ScalarRef
-    column_is_updated :: UpdatedArray
+struct Microphysics1MCache{RV,
+                           SV,
+                           TND,}
+    rain_velocity :: RV
+    snow_velocity :: SV
+    tendencies :: TND
 end
 
-function Microphysics1MCache(arch::Arc, ::Type{FT}, grid::AbstractGrid; workspace = NamedTuple()) where {FT, Arc <: AbstractArchitecture}
-    rain_velocity = on_architecture(arch, zeros(FT, grid.Nx, grid.Ny, grid.Nz + 1))
-    snow_velocity = on_architecture(arch, zeros(FT, grid.Nx, grid.Ny, grid.Nz + 1))
-    center_shape = (grid.Nx, grid.Ny, grid.Nz)
-    center_array() = on_architecture(arch, zeros(FT, center_shape...))
-
+function Microphysics1MCache(grid::AbstractGrid; workspace = NamedTuple())
+    rain_velocity = ZFaceField(grid)
+    snow_velocity = ZFaceField(grid)
     tendencies = (
-        ρq_liq = center_array(),
-        ρq_ice = center_array(),
-        ρq_rai = center_array(),
-        ρq_sno = center_array(),
-        ρe_tot = center_array(),
-        ρq_tot = center_array(),
+        ρq_liq = CenterField(grid),
+        ρq_ice = CenterField(grid),
+        ρq_rai = CenterField(grid),
+        ρq_sno = CenterField(grid),
+        ρe_tot = CenterField(grid),
     )
-
-    diagnostics = (
-        latent_condensation = center_array(),
-        latent_deposition = center_array(),
-        latent_freezing = center_array(),
-        latent_melting = center_array(),
-        latent_evaporation = center_array(),
-        water_residual = center_array(),
-    )
-
-    surface_precipitation_flux = Ref(zero(FT))
-    updated = on_architecture(arch, fill(false, center_shape...))
-
-    return Microphysics1MCache{FT,
-                               Arc,
-                               typeof(rain_velocity),
-                               typeof(tendencies),
-                               typeof(diagnostics),
-                               typeof(surface_precipitation_flux),
-                               typeof(updated)}(rain_velocity,
-                                                snow_velocity,
-                                                tendencies,
-                                                diagnostics,
-                                                surface_precipitation_flux,
-                                                updated)
+    
+    return Microphysics1MCache(rain_velocity,
+                               snow_velocity,
+                               tendencies)
 end
 
 """
@@ -107,16 +75,11 @@ microphysics scheme provided by `CloudMicrophysics.jl`.
 - `cache_builder`: callable returning a `Microphysics1MCache` when provided with
   `(architecture, FT)`. Override this to supply custom scratch buffers.
 """
-struct Microphysics1M{FT, ParamType, ThermoType, RefType, GridType, ArcType, CacheType} <: AbstractMicrophysics
-    parameters :: ParamType
-    thermodynamics :: ThermoType
-    reference_state :: RefType
-    grid :: GridType
-    cache :: CacheType
-    architecture :: ArcType
+struct Microphysics1M{PS, TH, RS} <: AbstractMicrophysics
+    parameters :: PS
+    thermodynamics :: TH
+    reference_state :: RS
 end
-
-Base.eltype(::Microphysics1M{FT}) where {FT} = FT
 
 function Microphysics1M(; thermodynamics::AtmosphereThermodynamics{FT},
                          reference_state::ReferenceStateConstants,
@@ -130,378 +93,8 @@ function Microphysics1M(; thermodynamics::AtmosphereThermodynamics{FT},
 
     mp = Microphysics1MParameters(parameters)
     ref = _promote_reference_state(reference_state, FT)
-    cache = cache_builder(architecture, FT, grid)
 
-    return Microphysics1M{FT,
-                          typeof(mp),
-                          typeof(thermodynamics),
-                          typeof(ref),
-                          typeof(grid),
-                          typeof(architecture),
-                          typeof(cache)}(mp,
-                                         thermodynamics,
-                                         ref,
-                                         grid,
-                                         cache,
-                                         architecture)
-end
-
-## (Removed) constants for legacy helper APIs
-
-## (Removed) Column structs: we compute pointwise and write directly to caches
-
-@inline _field_data(x) = interior(x)
-@inline _field_data(x::AbstractArray) = x
-
-@inline function reset_microphysics_cache!(cache)
-    for array in values(cache.tendencies)
-        fill!(array, zero(eltype(array)))
-    end
-    for array in values(cache.diagnostics)
-        fill!(array, zero(eltype(array)))
-    end
-    fill!(cache.column_is_updated, false)
-    cache.surface_precipitation_flux[] = zero(typeof(cache.surface_precipitation_flux[]))
-    return nothing
-end
-
-@inline latent_constants(mp::Microphysics1M{FT}) where {FT} =
-    (convert(FT, mp.thermodynamics.liquid.latent_heat),
-     convert(FT, mp.thermodynamics.solid.latent_heat),
-     convert(FT, latent_heat_fusion(mp.thermodynamics)))
-
-# ------------------------------------------------------------------
-# Helper utilities
-# ------------------------------------------------------------------
-
-@inline clip(q::FT) where {FT<:Real} = ifelse(q > zero(FT), q, zero(FT))
-
-@inline function limit_available(q::FT, dt, n::Int) where {FT<:Real}
-    q_pos = clip(q)
-    dt_ft = convert(FT, dt)
-    denom = dt_ft * FT(n)
-    return denom == zero(FT) ? zero(FT) : q_pos / denom
-end
-
-@inline function triangle_inequality_limiter(force, limit)
-    f, ℓ = promote(force, limit)
-    f = max(zero(f), f)
-    ℓ = max(zero(ℓ), ℓ)
-    return f == zero(f) ? zero(f) : f + ℓ - sqrt(f * f + ℓ * ℓ)
-end
-
-@inline q_vapor(q_tot, q_liq, q_ice, q_rain, q_snow) =
-    q_tot - q_liq - q_ice - q_rain - q_snow
-
-@inline liquid_heat_capacity(thermo::AtmosphereThermodynamics) =
-    thermo.liquid.heat_capacity
-
-@inline latent_heat_fusion(thermo::AtmosphereThermodynamics) =
-    thermo.solid.latent_heat - thermo.liquid.latent_heat
-
-@inline function fusion_factor(mp::Microphysics1M{FT}, T::FT) where {FT}
-    cv_l = convert(FT, liquid_heat_capacity(mp.thermodynamics))
-    L_f = convert(FT, latent_heat_fusion(mp.thermodynamics))
-    return (L_f == zero(FT)) ? zero(FT) : cv_l / L_f * (T - mp.parameters.ps.T_freeze)
-end
-
-# ------------------------------------------------------------------
-# Microphysical process rates
-# ------------------------------------------------------------------
-
-"""
-    cloud_liquid_condensation_rate(mp, q_tot, q_liq, q_ice, q_rain, q_snow, ρ, T, dt)
-
-Return the net tendency (kg kg⁻¹ s⁻¹) for cloud liquid water produced by
-supersaturation-driven condensation/evaporation. Positive values indicate vapor
-condensing into cloud droplets; negative values correspond to evaporation.
-"""
-@inline function cloud_liquid_condensation_rate(
-    mp::Microphysics1M{FT},
-    q_tot::FT,
-    q_liq::FT,
-    q_ice::FT,
-    q_rain::FT,
-    q_snow::FT,
-    ρ::FT,
-    T::FT,
-    dt::FT,
-) where {FT}
-
-    qv = q_vapor(q_tot, q_liq, q_ice, q_rain, q_snow)
-    q_sat = convert(FT, saturation_specific_humidity(T, ρ, mp.thermodynamics, mp.thermodynamics.liquid))
-
-    raw = qv + q_liq > FT(0) ?
-        CMNe.conv_q_vap_to_q_liq_ice_MM2015(
-            mp.parameters.cl,
-            mp.thermodynamics,
-            q_tot,
-            q_liq,
-            q_ice,
-            q_rain,
-            q_snow,
-            ρ,
-            T,
-        ) :
-        FT(0)
-
-    return raw > FT(0) ?
-        triangle_inequality_limiter(raw, limit_available(qv - q_sat, dt, 2)) :
-        -triangle_inequality_limiter(-raw, limit_available(q_liq, dt, 2))
-end
-
-"""
-    cloud_ice_condensation_rate(mp, q_tot, q_liq, q_ice, q_rain, q_snow, ρ, T, dt)
-
-Return the net tendency (kg kg⁻¹ s⁻¹) for cloud ice resulting from deposition
-or sublimation. Supersaturation relative to ice yields positive tendencies;
-evaporation produces negative values. Ice formation is suppressed above the
-snow freezing temperature.
-"""
-@inline function cloud_ice_condensation_rate(
-    mp::Microphysics1M{FT},
-    q_tot::FT,
-    q_liq::FT,
-    q_ice::FT,
-    q_rain::FT,
-    q_snow::FT,
-    ρ::FT,
-    T::FT,
-    dt::FT,
-) where {FT}
-
-    qv = q_vapor(q_tot, q_liq, q_ice, q_rain, q_snow)
-    q_sat = convert(FT, saturation_specific_humidity(T, ρ, mp.thermodynamics, mp.thermodynamics.solid))
-
-    raw = qv + q_ice > FT(0) ?
-        CMNe.conv_q_vap_to_q_liq_ice_MM2015(
-            mp.parameters.ci,
-            mp.thermodynamics,
-            q_tot,
-            q_liq,
-            q_ice,
-            q_rain,
-            q_snow,
-            ρ,
-            T,
-        ) :
-        FT(0)
-
-    if T > mp.parameters.ps.T_freeze && raw > FT(0)
-        raw = FT(0)
-    end
-
-    return raw > FT(0) ?
-        triangle_inequality_limiter(raw, limit_available(qv - q_sat, dt, 2)) :
-        -triangle_inequality_limiter(-raw, limit_available(q_ice, dt, 2))
-end
-
-"""
-    autoconversion_liquid_to_rain_rate(mp, q_liq, ρ, dt)
-
-One-moment warm-rain autoconversion mass flux transferring cloud liquid water
-into rain water. Returns a `NamedTuple(liq=-S, rain=S)` suitable for direct
-accumulation into tracer tendencies.
-"""
-@inline function autoconversion_liquid_to_rain_rate(
-    mp::Microphysics1M{FT},
-    q_liq::FT,
-    ρ::FT,
-    dt::FT,
-) where {FT}
-
-    raw = mp.parameters.Ndp <= FT(0) ?
-        CM1.conv_q_liq_to_q_rai(mp.parameters.pr.acnv1M, q_liq, true) :
-        CM2.conv_q_liq_to_q_rai(mp.parameters.var, q_liq, ρ, mp.parameters.Ndp)
-
-    rate = triangle_inequality_limiter(clip(raw), limit_available(q_liq, dt, 5))
-    return (liq = -rate, rain = rate)
-end
-
-"""
-    autoconversion_ice_to_snow_rate(mp, q_ice, dt)
-
-Cold-phase autoconversion mapping cloud ice onto the snow category. Returns
-`NamedTuple(ice=-S, snow=S)`.
-"""
-@inline function autoconversion_ice_to_snow_rate(
-    mp::Microphysics1M{FT},
-    q_ice::FT,
-    dt::FT,
-) where {FT}
-
-    raw = CM1.conv_q_ice_to_q_sno_no_supersat(mp.parameters.ps.acnv1M, q_ice, true)
-    rate = triangle_inequality_limiter(clip(raw), limit_available(q_ice, dt, 5))
-    return (ice = -rate, snow = rate)
-end
-
-@inline function accretion_cloud_rain_rate(
-    mp::Microphysics1M{FT},
-    q_liq::FT,
-    q_rain::FT,
-    ρ::FT,
-    dt::FT,
-) where {FT}
-
-    raw = CM1.accretion(mp.parameters.cl, mp.parameters.pr, mp.parameters.tv.rain, mp.parameters.ce, q_liq, q_rain, ρ)
-    rate = triangle_inequality_limiter(clip(raw), limit_available(q_liq, dt, 5))
-    return (liq = -rate, rain = rate)
-end
-
-@inline function accretion_ice_snow_rate(
-    mp::Microphysics1M{FT},
-    q_ice::FT,
-    q_snow::FT,
-    ρ::FT,
-    dt::FT,
-) where {FT}
-
-    raw = CM1.accretion(mp.parameters.ci, mp.parameters.ps, mp.parameters.tv.snow, mp.parameters.ce, q_ice, q_snow, ρ)
-    rate = triangle_inequality_limiter(clip(raw), limit_available(q_ice, dt, 5))
-    return (ice = -rate, snow = rate)
-end
-
-@inline function accretion_cloud_snow_rate(
-    mp::Microphysics1M{FT},
-    q_liq::FT,
-    q_snow::FT,
-    ρ::FT,
-    T::FT,
-    dt::FT,
-) where {FT}
-
-    raw = CM1.accretion(mp.parameters.cl, mp.parameters.ps, mp.parameters.tv.snow, mp.parameters.ce, q_liq, q_snow, ρ)
-    rate = triangle_inequality_limiter(clip(raw), limit_available(q_liq, dt, 5))
-
-    if T < mp.parameters.ps.T_freeze
-        snow_rate = rate
-        rain_rate = zero(FT)
-    else
-        α = max(zero(FT), fusion_factor(mp, T))
-        snow_rate = -triangle_inequality_limiter(rate * α, limit_available(q_snow, dt, 5))
-        rain_rate = rate - snow_rate
-    end
-
-    return (liq = -rate, snow = snow_rate, rain = rain_rate)
-end
-
-@inline function accretion_ice_rain_to_snow_rate(
-    mp::Microphysics1M{FT},
-    q_ice::FT,
-    q_rain::FT,
-    ρ::FT,
-    dt::FT,
-) where {FT}
-
-    raw = CM1.accretion(mp.parameters.ci, mp.parameters.pr, mp.parameters.tv.rain, mp.parameters.ce, q_ice, q_rain, ρ)
-    rate = triangle_inequality_limiter(clip(raw), limit_available(q_ice, dt, 5))
-    return (ice = -rate, snow = rate)
-end
-
-@inline function rain_sink_from_ice_rate(
-    mp::Microphysics1M{FT},
-    q_ice::FT,
-    q_rain::FT,
-    ρ::FT,
-    dt::FT,
-) where {FT}
-
-    raw = CM1.accretion_rain_sink(mp.parameters.pr, mp.parameters.ci, mp.parameters.tv.rain, mp.parameters.ce, q_ice, q_rain, ρ)
-    rate = triangle_inequality_limiter(clip(raw), limit_available(q_rain, dt, 5))
-    return (rain = -rate, snow = rate)
-end
-
-@inline function accretion_snow_rain_rate(
-    mp::Microphysics1M{FT},
-    q_rain::FT,
-    q_snow::FT,
-    ρ::FT,
-    T::FT,
-    dt::FT,
-) where {FT}
-
-    if T < mp.parameters.ps.T_freeze
-        raw = CM1.accretion_snow_rain(
-            mp.parameters.ps,
-            mp.parameters.pr,
-            mp.parameters.tv.rain,
-            mp.parameters.tv.snow,
-            mp.parameters.ce,
-            q_snow,
-            q_rain,
-            ρ,
-        )
-        rate = triangle_inequality_limiter(clip(raw), limit_available(q_rain, dt, 5))
-    else
-        raw = CM1.accretion_snow_rain(
-            mp.parameters.pr,
-            mp.parameters.ps,
-            mp.parameters.tv.snow,
-            mp.parameters.tv.rain,
-            mp.parameters.ce,
-            q_rain,
-            q_snow,
-            ρ,
-        )
-        rate = -triangle_inequality_limiter(clip(raw), limit_available(q_snow, dt, 5))
-    end
-
-    return (snow = rate, rain = -rate)
-end
-
-@inline function rain_evaporation_rate(
-    mp::Microphysics1M{FT},
-    q_tot::FT,
-    q_liq::FT,
-    q_ice::FT,
-    q_rain::FT,
-    q_snow::FT,
-    ρ::FT,
-    T::FT,
-    dt::FT,
-) where {FT}
-
-    rps = (mp.parameters.pr, mp.parameters.tv.rain, mp.parameters.aps, mp.thermodynamics)
-    raw = CM1.evaporation_sublimation(rps..., q_tot, q_liq, q_ice, q_rain, q_snow, ρ, T)
-    rate = -triangle_inequality_limiter(-raw, limit_available(q_rain, dt, 5))
-    return (rain = rate)
-end
-
-@inline function snow_melt_rate(
-    mp::Microphysics1M{FT},
-    q_snow::FT,
-    ρ::FT,
-    T::FT,
-    dt::FT,
-) where {FT}
-
-    raw = CM1.snow_melt(mp.parameters.ps, mp.parameters.tv.snow, mp.parameters.aps, mp.thermodynamics, q_snow, ρ, T)
-    rate = triangle_inequality_limiter(clip(raw), limit_available(q_snow, dt, 5))
-    return (snow = -rate, rain = rate)
-end
-
-@inline function snow_deposition_rate(
-    mp::Microphysics1M{FT},
-    q_tot::FT,
-    q_liq::FT,
-    q_ice::FT,
-    q_rain::FT,
-    q_snow::FT,
-    ρ::FT,
-    T::FT,
-    dt::FT,
-) where {FT}
-
-    sps = (mp.parameters.ps, mp.parameters.tv.snow, mp.parameters.aps, mp.thermodynamics)
-    raw = CM1.evaporation_sublimation(sps..., q_tot, q_liq, q_ice, q_rain, q_snow, ρ, T)
-
-    if raw > FT(0)
-        rate = triangle_inequality_limiter(raw, limit_available(q_vapor(q_tot, q_liq, q_ice, q_rain, q_snow), dt, 5))
-    else
-        rate = -triangle_inequality_limiter(-raw, limit_available(q_snow, dt, 5))
-    end
-
-    return (snow = rate)
+    return Microphysics1M(mp, thermodynamics, ref)
 end
 
 # ------------------------------------------------------------------
@@ -611,19 +204,20 @@ function update_microphysics_state!(microphysics::Microphysics1M, model)
     grid = model.grid
     clock = model.clock
     model_fields = fields(model)
-    FT = eltype(microphysics)
+    FT = eltype(grid)
     cache = microphysics.cache
 
     reset_microphysics_cache!(cache)
 
+    # tracer fields
     state_arrays = (
-        density = _field_data(getproperty(model_fields, :density)),
+        ρ = _field_data(getproperty(model_fields, :ρ)),
         ρq_tot = _field_data(getproperty(model_fields, :ρq_tot)),
         ρq_liq = _field_data(getproperty(model_fields, :ρq_liq)),
         ρq_ice = _field_data(getproperty(model_fields, :ρq_ice)),
         ρq_rai = _field_data(getproperty(model_fields, :ρq_rai)),
         ρq_sno = _field_data(getproperty(model_fields, :ρq_sno)),
-        temperature = _field_data(getproperty(model_fields, :temperature)),
+        T = _field_data(getproperty(model_fields, :temperature)),
     )
 
     Lv, Ls, Lf = latent_constants(microphysics)
@@ -775,26 +369,6 @@ function microphysics_auxiliary_fields(microphysics::Microphysics1M)
     )
 end
 
-## (Removed) _column_result helper
-
-@inline (microphysics::Microphysics1M)(::Val{:ρq_liq}, args...) = throw(ArgumentError("Functor-style API is not supported; use microphysics_transition and update_microphysics_state!"))
-@inline (microphysics::Microphysics1M)(::Val{:ρq_ice}, args...) = throw(ArgumentError("Functor-style API is not supported; use microphysics_transition and update_microphysics_state!"))
-@inline (microphysics::Microphysics1M)(::Val{:ρq_rai}, args...) = throw(ArgumentError("Functor-style API is not supported; use microphysics_transition and update_microphysics_state!"))
-@inline (microphysics::Microphysics1M)(::Val{:ρq_sno}, args...) = throw(ArgumentError("Functor-style API is not supported; use microphysics_transition and update_microphysics_state!"))
-@inline (microphysics::Microphysics1M)(::Val{:ρq_tot}, args...) = throw(ArgumentError("Functor-style API is not supported; use microphysics_transition and update_microphysics_state!"))
-@inline (microphysics::Microphysics1M)(::Val{:ρe_tot}, args...) = throw(ArgumentError("Functor-style API is not supported; use microphysics_transition and update_microphysics_state!"))
-
-Base.summary(m::Microphysics1M{FT}) where {FT} =
-    "Microphysics1M{$FT}(architecture = $(nameof(typeof(m.architecture))))"
-
-function Base.show(io::IO, m::Microphysics1M)
-    print(io, summary(m), ":\n",
-          "├── parameters: ", nameof(typeof(m.parameters)), "\n",
-          "├── thermodynamics: ", summary(m.thermodynamics), "\n",
-          "├── reference_state: ReferenceStateConstants\n",
-          "├── grid: ", nameof(typeof(m.grid)), "\n",
-          "└── cache: ", nameof(typeof(m.cache)))
-end
 
 _promote_reference_state(reference_state::ReferenceStateConstants{FT}, ::Type{FT}) where {FT} = reference_state
 
