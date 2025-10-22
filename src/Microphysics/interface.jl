@@ -2,7 +2,7 @@
 ##### Generic fallbacks for microphysics
 #####
 
-@inline micrphysics_rhs(i, j, k, grid, ::Nothing, val_tracer_name, clock, fields) = zero(grid)
+@inline microphysics_rhs(i, j, k, grid, ::Nothing, val_tracer_name, clock, fields) = zero(grid)
 
 """
     update_tendencies!(mp, model)

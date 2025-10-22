@@ -329,7 +329,6 @@ function update_microphysics_state!(microphysics::Microphysics1M, model)
         cache.diagnostics.water_residual[i, j, k] = water_residual
 
         # no column totals
-
         cache.column_is_updated[i, j, k] = true
     end
 
