@@ -7,7 +7,7 @@ using Printf
 using CairoMakie
 
 # Architecture and grid setup
-arch = CPU() # Change to GPU() for GPU acceleration
+arch = CPU() # if changing to GPU() add `using CUDA` above
 
 # Domain size - following typical thermal bubble studies
 Lx = 20e3  # 20 km horizontal domain
