@@ -19,7 +19,7 @@ Lx = 6400
 Ly = 6400
 Lz = 3000
 
-arch = CPU() # try changing to GPU()
+arch = CPU() # if changing to GPU() add `using CUDA` above
 stop_time = 6hours
 
 if get(ENV, "CI", "false") == "true" # change values for CI
