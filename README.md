@@ -1,12 +1,30 @@
-# Breeze.jl
+<!-- Title -->
+<h1 align="center">
+  Breeze.jl
+</h1>
 
+<!-- description -->
+<p align="center">
+  <strong>⛈️ Fast and friendly Julia software for simulating atmospheric fluid dynamics using the anelastic approximation in Cartesian and domains on CPUs and GPUs. https://numericalearth.github.io/Breeze.jl/stable/</strong>
+</p>
 
-<a href="https://numericalearth.github.io/Breeze.jl/dev/">
-  <img alt="Development documentation" src="https://img.shields.io/badge/documentation-in%20development-orange?style=flat-square">
-</a>
+<p align="center">
+    <a href="https://numericalearth.github.io/Breeze.jl/dev/">
+    <img alt="Documentation" src="https://img.shields.io/badge/documentation-in%20development-orange?style=flat-square">
+    </a>
+    <a href="https://github.com/NumericalEarth/Breeze.jl/discussions">
+    <img alt="Ask us anything" src="https://img.shields.io/badge/Ask%20us-anything-1abc9c.svg?style=flat-square">
+  </a>
+  <a href="https://github.com/SciML/ColPrac">
+    <img alt="ColPrac: Contributor's Guide on Collaborative Practices for Community Packages" src="https://img.shields.io/badge/ColPrac-Contributor's%20Guide-blueviolet?style=flat-square">
+  </a>
+</p>
 
+Breeze is a software package for finite volume simulations of compressible atmospheres in Cartesian domains based on the anelastic approximation.
+It's basis and power are derived from [Oceananigans](https://github.com/CliMA/Oceananigans.jl), which provide grids, fields, solvers, advection schemes, and more.
+Watch this space for the crystallization of Breeze's roadmap and direction.
 
-### Instructions
+### Installing and using Breeze
 
 First [install Julia](https://julialang.org/downloads/); suggested version 1.10. See [juliaup](https://github.com/JuliaLang/juliaup) README for how to install 1.10 and make that version the default.
 
