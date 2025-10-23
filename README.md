@@ -5,7 +5,7 @@
 
 <!-- description -->
 <p align="center">
-  <strong>⛈️ Fast and friendly Julia software for simulating atmospheric fluid dynamics using the anelastic approximation in Cartesian and domains on CPUs and GPUs. https://numericalearth.github.io/Breeze.jl/stable/</strong>
+  <strong>⛈️ Fast and friendly Julia software for atmosphere simulations on CPUs and GPUs. https://numericalearth.github.io/Breeze.jl/stable/</strong>
 </p>
 
 <p align="center">
@@ -20,9 +20,10 @@
   </a>
 </p>
 
-Breeze is a software package for finite volume simulations of compressible atmospheres in Cartesian domains based on the anelastic approximation.
+Breeze is a software package for atmosphere simulations using finite volume methods on CPUs and GPUs.
+Breeze currently supports simulations based on the Boussinesq and anelastic approximations in Cartesian domains.
 It's basis and power are derived from [Oceananigans](https://github.com/CliMA/Oceananigans.jl), which provide grids, fields, solvers, advection schemes, and more.
-Watch this space for the crystallization of Breeze's roadmap and direction.
+Watch this space for the crystallization of Breeze's roadmap.
 
 ### Installing and using Breeze
 
