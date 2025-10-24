@@ -14,8 +14,8 @@ const CMP = CloudMicrophysics.Parameters
 export AbstractMicrophysics,
        
 include("interface.jl")
-include("interface_sedimentation_velocities.jl")
-include("microphysics_1m_rates.jl")
+include("process_rates.jl")
+include("sedimentation_velocities.jl")
 include("microphysics_1m.jl")
 
 end # module

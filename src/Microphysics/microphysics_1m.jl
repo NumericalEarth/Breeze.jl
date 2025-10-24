@@ -1,22 +1,21 @@
-struct Microphysics1M{FT, TH, SV} <: AbstractMicrophysics
+struct Microphysics1M{TH, SV, PAR} <: AbstractMicrophysics
     thermodynamics::TH
-    dt::FT # Required for numerical stability
-    sinking_velocities:: SV
+    sedimentation_velocities:: SV
+    parameters:: PAR
 end
 
-function Microphysics1M(grid; thermodynamics)
-    sinking_velocities = setup_velocity_fields(sedimentation_speeds, grid, true)
-    Microphysics1M(thermodynamics, grid.dt, sinking_velocities)
+function Microphysics1M(grid; thermodynamics, parameters)
+    sedimentation_velocities = (; ρq_rai = ZFaceField(grid), ρq_sno = ZFaceField(grid))
+    Microphysics1M(thermodynamics, sedimentation_velocities, parameters)
 end
 
 required_microphysics_tracers(::Microphysics1M) = (:ρq_tot, :ρq_liq, :ρq_ice, :ρq_rai, :ρq_sno, :ρe_tot)
 required_microphysics_auxiliary_fields(::Microphysics1M) = (:rho, :PAR)
 
-@inline ρq_vapor(ρq_tot, ρq_liq, ρq_ice, ρq_rai, ρq_sno) = ρq_tot - ρq_liq - ρq_ice - ρq_rai - ρq_sno
 @inline specific(ρ, values...) = (value/ρ for value in values)
 
 @inline function (mp::Microphysics1M)(::Val{:ρq_liq}, x, y, z, t, ρ, ρq_tot, ρq_liq, ρq_ice, ρq_rai, ρq_sno, ρe_tot, PAR)
-    dt = mp.dt
+    dt = PAR.dt
     q_tot, q_liq, q_ice, q_rain, q_snow = specific(ρ, ρq_tot, ρq_liq, ρq_ice, ρq_rai, ρq_sno)
     T = air_temperature(mp.thermodynamics, ρe_tot, ρq_liq, ρq_ice, ρq_rai, ρq_sno)
     
@@ -29,7 +28,7 @@ required_microphysics_auxiliary_fields(::Microphysics1M) = (:rho, :PAR)
 end
 
 @inline function (mp::Microphysics1M)(::Val{:ρq_ice}, x, y, z, t, ρ, ρq_tot, ρq_liq, ρq_ice, ρq_rai, ρq_sno, ρe_tot, PAR)
-    dt = mp.dt
+    dt = PAR.dt
     q_tot, q_liq, q_ice, q_rain, q_snow = specific(ρ, ρq_tot, ρq_liq, ρq_ice, ρq_rai, ρq_sno)
     T = air_temperature(mp.thermodynamics, ρe_tot, ρq_liq, ρq_ice, ρq_rai, ρq_sno)
 
@@ -42,7 +41,7 @@ end
 end
 
 @inline function (mp::Microphysics1M)(::Val{:ρq_rai}, x, y, z, t, ρ, ρq_tot, ρq_liq, ρq_ice, ρq_rai, ρq_sno, ρe_tot, PAR)
-    dt = mp.dt
+    dt = PAR.dt
     q_tot, q_liq, q_ice, q_rain, q_snow = specific(ρ, ρq_tot, ρq_liq, ρq_ice, ρq_rai, ρq_sno)
     T = air_temperature(mp.thermodynamics, ρe_tot, ρq_liq, ρq_ice, ρq_rai, ρq_sno)
 
@@ -58,7 +57,7 @@ end
 end
 
 @inline function (mp::Microphysics1M)(::Val{:ρq_sno}, x, y, z, t, ρ, ρq_tot, ρq_liq, ρq_ice, ρq_rai, ρq_sno, ρe_tot, PAR) 
-    dt = mp.dt
+    dt = PAR.dt
     q_tot, q_liq, q_ice, q_rain, q_snow = specific(ρ, ρq_tot, ρq_liq, ρq_ice, ρq_rai, ρq_sno)
     T = air_temperature(mp.thermodynamics, ρe_tot, ρq_liq, ρq_ice, ρq_rai, ρq_sno)
 
@@ -82,7 +81,7 @@ end
 end
 
 @inline function (mp::Microphysics1M)(::Val{:ρe_tot}, x, y, z, t, ρ, ρq_tot, ρq_liq, ρq_ice, ρq_rai, ρq_sno, ρe_tot, PAR)
-    dt = mp.dt
+    dt = PAR.dt
     q_tot, q_liq, q_ice, q_rain, q_snow = specific(ρ, ρq_tot, ρq_liq, ρq_ice, ρq_rai, ρq_sno)
     T = air_temperature(mp.thermodynamics, ρe_tot, ρq_liq, ρq_ice, ρq_rai, ρq_sno)
     Lv = latent_heat_vapor(mp.thermodynamics, T)
@@ -110,33 +109,47 @@ end
     return ρ * (l_vapor_liquid + l_cond_ice + l_acc_cloud_snow + l_rain_sink_ice + l_acc_snow_rain + l_rain_evap + l_snow_melt + l_snow_dep)
 end
 
-function update_microphysics_state!(mp::Microphysics1M, model)
+@inline microphysics_sedimentation_velocity(mp::Microphysics1M, ::Val{:ρq_rai}) =
+    (; u = ZeroField(), v = ZeroField(), w = mp.sedimentation_velocities.ρq_rai)
 
+@inline microphysics_sedimentation_velocity(mp::Microphysics1M, ::Val{:ρq_sno}) =
+    (; u = ZeroField(), v = ZeroField(), w = mp.sedimentation_velocities.ρq_sno)
+
+function update_microphysics_state!(mp::Microphysics1M, model, kernel_parameters; active_cells_map = nothing)
+    w_velocities             = mp.sedimentation_velocities
+    arch                     = architecture(model.grid)
+    grid                     = model.grid
+    density                  = model.density
+    parameters               = mp.parameters
+
+    exclude_periphery = true
+    for tracer_name in sedimenting_tracers(mp)
+        tracer_field = model.tracers[tracer_name]
+        #tracer_w_velocity_bc = mp.sedimentation_velocities[tracer_name].boundary_conditions.immersed
+        w_kernel_args = tuple(Val(tracer_name), density, tracer_field, parameters)
+        #w_kernel_args = tuple(Val(tracer_name), density, tracer_field, parameters, tracer_w_velocity_bc)
+        launch!(arch, grid, kernel_parameters, compute_sedimentation_velocity!, 
+                w_velocities[tracer_name], grid, w_kernel_args;
+                active_cells_map, exclude_periphery)
+        fill_halo_regions!(w_velocities[tracer_name])
+    end
+
+    return nothing
 end
 
-function update_tendencies!(mp::Microphysics1M, model)
-
+@kernel function compute_sedimentation_velocity!(w_sed, grid, args) 
+    i, j, k = @index(Global, NTuple)
+    @inbounds w_sed[i, j, k] = w_sedimentation_velocity(i, j, k, grid, args...)
 end
 
-function update_microphysics_drift_velocity!(microphysics::Microphysics1M, state)
-    # extract the fields from the state
-
-    # interpolate relevant fields to the faces
-
-    # compute the sinking velocities
-    # kernel launch here with all the necessary arguments i, j, k, etc. SUCKS
-
-
+@inline function w_sedimentation_velocity(i, j, k, grid, microphysics::Microphysics1M, ::Val{:ρq_rai}, ρ, ρq_rai)
+    ρᶜᶜᶠ = ℑzᵃᵃᶠ(i, j, k, grid, ρ)
+    ρq_raiᶜᶜᶠ = ℑzᵃᵃᶠ(i, j, k, grid, ρq_rai)
+    return CM1.terminal_velocity(microphysics.parameters.pr, microphysics.parameters.tv.rain, ρᶜᶜᶠ, ρq_raiᶜᶜᶠ/ ρᶜᶜᶠ)
 end
 
-function update_drift_velocity_kernel!()
-
-end
-
-function compute_drift_velocity_kernel!(:Val{:ρq_rai}, x, y, z, t, ρ, ρq_tot, ρq_liq, ρq_ice, ρq_rai, ρq_sno, ρe_tot, PAR)
-
-end
-
-function compute_drift_velocity_kernel!(:Val{:ρq_sno}, x, y, z, t, ρ, ρq_tot, ρq_liq, ρq_ice, ρq_rai, ρq_sno, ρe_tot, PAR)
-
+@inline function w_sedimentation_velocity(i, j, k, grid, microphysics::Microphysics1M, ::Val{:ρq_sno}, ρ, ρq_sno)
+    ρᶜᶜᶠ = ℑzᵃᵃᶠ(i, j, k, grid, ρ)
+    ρq_snoᶜᶜᶠ = ℑzᵃᵃᶠ(i, j, k, grid, ρq_sno)
+    return CM1.terminal_velocity(microphysics.parameters.ps, microphysics.parameters.tv.snow, ρᶜᶜᶠ, ρq_snoᶜᶜᶠ/ ρᶜᶜᶠ)
 end
