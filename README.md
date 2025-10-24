@@ -25,7 +25,7 @@
 
 Breeze is a software package for atmosphere simulations using finite volume methods on CPUs and GPUs.
 Breeze currently supports simulations based on the Boussinesq and anelastic approximations in Cartesian domains.
-It's basis and power are derived from [Oceananigans](https://github.com/CliMA/Oceananigans.jl), which provide grids, fields, solvers, advection schemes, and more.
+It draws its power from [Oceananigans](https://github.com/CliMA/Oceananigans.jl), which provides a user interface design, grids, fields, solvers, advection schemes, and more.
 Watch this space for the crystallization of Breeze's roadmap.
 
 ### Installing and using Breeze
