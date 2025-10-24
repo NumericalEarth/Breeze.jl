@@ -1,11 +1,11 @@
 using JLD2
 using Breeze
-using Breeze: saturation_specific_humidity, AtmosphereThermodynamics
+using Breeze: saturation_specific_humidity, ThermodynamicConstants
 using GLMakie
 
 @load "JRA55_atmospheric_state_Jan_1_1991.jld2" q T p
 
-thermo = AtmosphereThermodynamics()
+thermo = ThermodynamicConstants()
 
 ρ = 1.2
 qᵛ★ = saturation_specific_humidity.(T, 1.2, Ref(thermo))
@@ -24,7 +24,7 @@ ax4 = Axis(fig[2, 2], title="Liquid specific humidity")
 # Compute cloudiness for instantaneous drop
 θ⁻ = T .- 10
 Ψ = Breeze.ThermodynamicState{Float64}.(θ⁻, q, 0)
-ℛ = Breeze.ReferenceStateConstants{Float64}(101325, 20)
+ℛ = Breeze.ReferenceState{Float64}(101325, 20)
 T⁻ = Breeze.temperature.(Ψ, Ref(ℛ), Ref(thermo))
 qᵛ★ = saturation_specific_humidity.(T⁻, 1.2, Ref(thermo))
 qˡ = @. max(0, q - qᵛ★)

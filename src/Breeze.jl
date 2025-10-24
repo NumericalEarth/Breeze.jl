@@ -7,8 +7,8 @@ module Breeze
 
 export
     MoistAirBuoyancy,
-    AtmosphereThermodynamics,
-    ReferenceStateConstants,
+    ThermodynamicConstants,
+    ReferenceState,
     AnelasticFormulation,
     AtmosphereModel,
     TemperatureField,
@@ -16,6 +16,7 @@ export
     PhaseTransitionConstants,
     CondensedPhase,
     mixture_gas_constant,
+    prognostic_fields,
     mixture_heat_capacity
 
 using Oceananigans
@@ -51,6 +52,10 @@ export
 
 include("Thermodynamics/Thermodynamics.jl")
 using .Thermodynamics
+import .Thermodynamics: AnelasticFormulation
+
+include("Microphysics/Microphysics.jl")
+using .Microphysics
 
 include("MoistAirBuoyancies.jl")
 using .MoistAirBuoyancies
