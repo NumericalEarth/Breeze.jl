@@ -18,6 +18,9 @@
   <a href="https://github.com/SciML/ColPrac">
     <img alt="ColPrac: Contributor's Guide on Collaborative Practices for Community Packages" src="https://img.shields.io/badge/ColPrac-Contributor's%20Guide-blueviolet?style=flat-square">
   </a>
+  <a href="https://codecov.io/gh/NumericalEarth/Breeze.jl" >
+    <img src="https://codecov.io/gh/NumericalEarth/Breeze.jl/graph/badge.svg?token=09TZGWKUPV"/>
+  </a>
 </p>
 
 Breeze is a software package for atmosphere simulations using finite volume methods on CPUs and GPUs.
