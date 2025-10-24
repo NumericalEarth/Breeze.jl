@@ -4,8 +4,28 @@ on:
   push:
     branches:
       - main
-    tags: '*'
+    tags: "*"
+    paths:
+      - ".github/workflows/Documention.yml"
+      - "docs/**"
+      - "src/**"
+      - "Project.toml"
+      - "CHANGELOG.md"
   pull_request:
+    paths:
+      - ".github/workflows/Documention.yml"
+      - "docs/**"
+      - "src/**"
+      - "Project.toml"
+      - "CHANGELOG.md"
+  release:
+
+concurrency:
+  # Same group concurrency as the `DocPreviewsCleanup.yml` workflow, because they both
+  # git-push to the same branch, so we want to avoid clashes.  NOTE: this is
+  # different from the concurrency group below, which is to cancel successive
+  # jobs from within the PR.
+  group: docs-pushing
 
 jobs:
   build:
@@ -15,20 +35,28 @@ jobs:
       pull-requests: read
       statuses: write
     runs-on: ubuntu-latest
+    timeout-minutes: 20
+    concurrency:
+      # Skip intermediate builds: always.
+      # Cancel intermediate builds: only if it is a pull request build.
+      group: ${{ github.workflow }}-${{ github.ref }}
+      cancel-in-progress: ${{ startsWith(github.ref, 'refs/pull/') }}
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
       - uses: julia-actions/setup-julia@v2
         with:
-          version: '1.10'
+          version: "min"
       - uses: julia-actions/cache@v2
-      - name: Install dependencies
-        run: |
-          julia --project=docs -e '
-            using Pkg
-            Pkg.develop(PackageSpec(path=pwd()))
-            Pkg.instantiate()'
-      - name: Build and deploy
-        run: julia --project=docs docs/make.jl 
+        id: julia-cache
+      - uses: julia-actions/julia-docdeploy@v1
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           DOCUMENTER_KEY: ${{ secrets.DOCUMENTER_KEY }}
+      - name: Save Julia depot cache on cancel or failure
+        id: julia-cache-save
+        if: cancelled() || failure()
+        uses: actions/cache/save@v4
+        with:
+          path: |
+            ${{ steps.julia-cache.outputs.cache-paths }}
+          key: ${{ steps.julia-cache.outputs.cache-key }}
