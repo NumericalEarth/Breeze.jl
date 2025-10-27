@@ -3,39 +3,73 @@ name: CI
 on:
   push:
     branches:
-      - main
-      - master
+      - "main"
+    paths:
+      - ".github/workflows/CI.yml"
+      - "ext/**"
+      - "src/**"
+      - "test/**"
+      - "Project.toml"
   pull_request:
+    paths:
+      - ".github/workflows/CI.yml"
+      - "ext/**"
+      - "src/**"
+      - "test/**"
+      - "Project.toml"
+  release:
   workflow_dispatch:
+
+concurrency:
+  # Skip intermediate builds: always.
+  # Cancel intermediate builds: always.
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+# needed to allow julia-actions/cache to delete old caches that it has created
+permissions:
+  actions: write
+  contents: read
 
 jobs:
   test:
     name: Julia ${{ matrix.version }} - ${{ matrix.os }} - ${{ matrix.arch }} - ${{ github.event_name }}
     runs-on: ${{ matrix.os }}
+    timeout-minutes: 30
     strategy:
       fail-fast: false
       matrix:
         version:
-          - '1.10'  # Latest release
+          - "min"
+          - "1"
         os:
           - ubuntu-latest
           - macOS-latest
           - windows-latest
         arch:
-          - x64
-
+          - "default"
     steps:
-      - uses: actions/checkout@v4
-
-      - uses: julia-actions/setup-julia@v1
+      - uses: actions/checkout@v5
+      - uses: julia-actions/setup-julia@v2
         with:
           version: ${{ matrix.version }}
           arch: ${{ matrix.arch }}
-
-      - uses: julia-actions/cache@v1
-
-      - uses: julia-actions/julia-buildpkg@v1
-
+      - uses: julia-actions/cache@v2
+        id: julia-cache
       - uses: julia-actions/julia-runtest@v1
         with:
           coverage: true
+      - uses: julia-actions/julia-processcoverage@v1
+      - uses: codecov/codecov-action@v5
+        with:
+          token: ${{ secrets.CODECOV_TOKEN }}
+          files: lcov.info
+        continue-on-error: true
+      - name: Save Julia depot cache on cancel or failure
+        id: julia-cache-save
+        if: cancelled() || failure()
+        uses: actions/cache/save@v4
+        with:
+          path: |
+            ${{ steps.julia-cache.outputs.cache-paths }}
+          key: ${{ steps.julia-cache.outputs.cache-key }}
