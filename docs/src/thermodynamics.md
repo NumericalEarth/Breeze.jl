@@ -224,10 +224,10 @@ The [Clausius-Claperyon relation](https://en.wikipedia.org/wiki/Clausius%E2%80%9
 for an ideal gas
 
 ```math
-\frac{\mathrm{d} pᵛ}{\mathrm{d} T} = \frac{pᵛ ℒ^β(T)}{Rᵛ T^2}
+\frac{\mathrm{d} pᵛ⁺}{\mathrm{d} T} = \frac{pᵛ⁺ ℒ^β(T)}{Rᵛ T^2}
 ```
 
-where ``pᵛ`` is vapor pressure, ``T`` is temperature, ``Rᵛ`` is the specific gas constant for vapor,
+where ``pᵛ⁺`` is saturation vapor pressure, ``T`` is temperature, ``Rᵛ`` is the specific gas constant for vapor,
 ``ℒ^β(T)`` is the latent heat of the transition from vapor to the
 ``β`` phase (e.g. ``l ≡ β`` for vapor → liquid and ``i ≡ β`` for vapor to ice).
 
@@ -236,14 +236,14 @@ the latent heat of a phase transition is linear in temperature.
 For example, for phase change from vapor to liquid,
 
 ```math
-ℒˡ(T) = ℒˡ₀ + \big ( \underbrace{cᵖᵛ - cˡ}{≡Δcˡ} \big ) T
+ℒˡ(T) = ℒˡ₀ + \big ( \underbrace{cᵖᵛ - cᵖˡ}_{≡Δcˡ} \big ) T
 ```
 
 where ``ℒˡ₀`` is the latent heat at ``T = 0``, with ``T`` in Kelvin.
 Integrate that to get
 
 ```math
-pᵛ^\dagger(T) = pᵗʳ \left ( \frac{T}{Tᵗʳ} \right )^{Δcˡ / Rᵛ} \exp \left \{ \frac{ℒˡ₀}{Rᵛ} \left (\frac{1}{Tᵗʳ} - \frac{1}{T} \right ) \right \}
+pᵛ⁺(T) = pᵗʳ \left ( \frac{T}{Tᵗʳ} \right )^{Δcˡ / Rᵛ} \exp \left \{ \frac{ℒˡ₀}{Rᵛ} \left (\frac{1}{Tᵗʳ} - \frac{1}{T} \right ) \right \}
 ```
 
 Consider parameters for liquid water,
@@ -258,3 +258,30 @@ or water ice,
 ```@example thermo
 water_ice = CondensedPhase(latent_heat=2834000, heat_capacity=2108)
 ```
+
+The saturation specific humidity is
+
+```math
+qᵛ⁺ ≡ \frac{ρᵛ⁺}{ρ} = \frac{pᵛ⁺}{Rᵐ T}
+```
+
+This is what it looks like:
+
+```@example
+using Breeze
+using Breeze.MoistAirBuoyancies: saturation_specific_humidity
+using CairoMakie
+
+thermo = AtmosphereThermodynamics()
+ref = ReferenceStateConstants(base_pressure=101325, potential_temperature=288)
+
+z = 0
+T = collect(273.2:0.1:313.2)
+qᵛ⁺ = [saturation_specific_humidity(Tⁱ, z, ref, thermo, thermo.liquid) for Tⁱ in T]
+
+fig = Figure()
+ax = Axis(fig[1, 1], xlabel="Temperature (K)", ylabel="Saturation specific humidity qᵛ⁺ (kg kg⁻¹)")
+lines!(ax, T, qᵛ⁺)
+fig
+```
+
