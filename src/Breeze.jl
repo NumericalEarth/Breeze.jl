@@ -20,8 +20,11 @@ export
 
 using Oceananigans
 using Oceananigans.Grids: znode
+using Oceananigans.Architectures: array_type, CPU, GPU
+using Oceananigans: field
 
 export
+    array_type,
     CPU, GPU,
     Center, Face, Periodic, Bounded, Flat,
     RectilinearGrid,
@@ -35,6 +38,7 @@ export
     FluxBoundaryCondition, ValueBoundaryCondition, GradientBoundaryCondition,
     OpenBoundaryCondition, PerturbationAdvection, FieldBoundaryConditions,
     Field, CenterField, XFaceField, YFaceField, ZFaceField,
+    field,
     Average, Integral,
     BackgroundField, interior, set!, compute!, regrid!,
     Forcing,
@@ -49,6 +53,10 @@ export
     ∂x, ∂y, ∂z, @at, KernelFunctionOperation,
     prettytime
 
+include("utils_grid.jl")
+export 
+    ncols
+
 include("Thermodynamics/Thermodynamics.jl")
 using .Thermodynamics
 
@@ -57,5 +65,15 @@ using .MoistAirBuoyancies
 
 include("AtmosphereModels/AtmosphereModels.jl")
 using .AtmosphereModels
+
+include("Radiation/Radiation.jl")
+using .Radiation
+
+export
+    AbstractRadiationModel,
+    RRTMGPModel,
+    initialize_rrtmgp_model,
+    compute_vertical_fluxes!,
+    flux_results
 
 end # module Breeze
