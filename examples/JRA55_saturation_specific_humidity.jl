@@ -8,7 +8,7 @@ using GLMakie
 thermo = ThermodynamicConstants()
 
 ρ = 1.2
-qᵛ★ = saturation_specific_humidity.(T, 1.2, Ref(thermo))
+qᵛ⁺ = saturation_specific_humidity.(T, 1.2, Ref(thermo))
 qˡ = @. max(0, q - q★)
 
 fig = Figure(size=(1200, 600))
@@ -17,7 +17,7 @@ ax2 = Axis(fig[2, 1], title="Saturation specific humidity")
 ax3 = Axis(fig[1, 1], title="Total specific humidity")
 ax4 = Axis(fig[2, 2], title="Liquid specific humidity")
 # heatmap!(ax1, T, colormap=:magma)
-# heatmap!(ax2, qᵛ★)
+# heatmap!(ax2, qᵛ⁺)
 # heatmap!(ax3, q, colormap=:grays)
 # heatmap!(ax4, qˡ, colormap=:grays, colorrange=(0, 0.001))
 
@@ -26,14 +26,14 @@ ax4 = Axis(fig[2, 2], title="Liquid specific humidity")
 Ψ = Breeze.ThermodynamicState{Float64}.(θ⁻, q, 0)
 ℛ = Breeze.ReferenceState{Float64}(101325, 20)
 T⁻ = Breeze.temperature.(Ψ, Ref(ℛ), Ref(thermo))
-qᵛ★ = saturation_specific_humidity.(T⁻, 1.2, Ref(thermo))
-qˡ = @. max(0, q - qᵛ★)
+qᵛ⁺ = saturation_specific_humidity.(T⁻, 1.2, Ref(thermo))
+qˡ = @. max(0, q - qᵛ⁺)
 Π = Breeze.exner_function.(Ψ, Ref(ℛ), Ref(thermo))
 Tu = @. Π * θ⁻
 ΔT = T⁻ - Tu
 
 heatmap!(ax1, ΔT, colormap=:magma)
-heatmap!(ax2, qᵛ★)
+heatmap!(ax2, qᵛ⁺)
 heatmap!(ax3, q, colormap=:grays)
 heatmap!(ax4, qˡ, colormap=:grays, colorrange=(0, 0.01))
 display(fig)

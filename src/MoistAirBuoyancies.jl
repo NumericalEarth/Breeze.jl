@@ -25,14 +25,18 @@ using ..Thermodynamics:
     reference_specific_volume,
     PotentialTemperatureState
 
+using ..Microphysics:
+    SaturationAdjustmentMicrophysics,
+    adjust_temperature_and_humidities
+
 import ..Thermodynamics:
     base_density,
-    saturation_specific_humidity,
-    condensate_specific_humidity
+    saturation_specific_humidity
 
 import ..Microphysics:
     temperature,
-    specific_volume
+    specific_volume,
+    adjusted_condensate_specific_humidity
 
 struct MoistAirBuoyancy{FT, AT, M} <: AbstractBuoyancyFormulation{Nothing}
     reference_state :: ReferenceState{FT}
@@ -79,7 +83,7 @@ NonhydrostaticModel{CPU, RectilinearGrid}(time = 0 seconds, iteration = 0)
 function MoistAirBuoyancy(FT=Oceananigans.defaults.FloatType;
                           thermodynamics = ThermodynamicConstants(FT),
                           reference_state = ReferenceState{FT}(101325, 290),
-                          microphysics = nothing)
+                          microphysics = SaturationAdjustmentMicrophysics())
 
     AT = typeof(thermodynamics)
     MT = typeof(microphysics)
@@ -91,7 +95,8 @@ Base.summary(b::MoistAirBuoyancy) = "MoistAirBuoyancy"
 function Base.show(io::IO, b::MoistAirBuoyancy)
     print(io, summary(b), "\n",
         "├── reference_state: ", summary(b.reference_state), "\n",
-        "└── thermodynamics: ", summary(b.thermodynamics))
+        "├── thermodynamics: ", summary(b.thermodynamics), "\n",
+        "└── microphysics: ", summary(b.microphysics))
 end
 
 required_tracers(::MoistAirBuoyancy) = (:θ, :q)
@@ -104,15 +109,27 @@ base_density(mb::MoistAirBuoyancy) = base_density(mb.reference_state, mb.thermod
 
 const c = Center()
 
+# Nothing microphysics: no condensates
+function compute_temperature_and_humidities(::Nothing, θ, qᵗ, z, mb)
+    q = SpecificHumidities(qᵗ, zero(qᵗ), zero(qᵗ))
+    𝒰 = PotentialTemperatureState(θ, q, z, mb.reference_state)
+    T = temperature(𝒰, mb.thermodynamics)
+    return T, q
+end
+
+function compute_temperature_and_humidities(::SaturationAdjustmentMicrophysics, θ, qᵗ, z, mb)
+    q = SpecificHumidities(qᵗ, zero(qᵗ), zero(qᵗ))
+    𝒰 = PotentialTemperatureState(θ, q, z, mb.reference_state)
+    T, q = adjust_temperature_and_humidities(𝒰, mb.thermodynamics)
+    return T, q
+end
+
 @inline function buoyancy_perturbationᶜᶜᶜ(i, j, k, grid, mb::MoistAirBuoyancy, tracers)
     z = Oceananigans.Grids.znode(i, j, k, grid, c, c, c)
     θ = @inbounds tracers.θ[i, j, k]
     qᵗ = @inbounds tracers.q[i, j, k]
 
-    # Compute temperature assuming no condensate:
-    q = SpecificHumidities(qᵗ, zero(qᵗ), zero(qᵗ))
-    𝒰 = PotentialTemperatureState(θ, q, z, mb.reference_state)
-    T = temperature(𝒰, mb.thermodynamics)
+    T, q = compute_temperature_and_humidities(mb.microphysics, θ, qᵗ, z, mb)
     α = specific_volume(T, q, z, mb.reference_state, mb.thermodynamics)
 
     # Compute buoyancy
@@ -134,7 +151,8 @@ function temperature(i, j, k, grid::AbstractGrid, mb::MoistAirBuoyancy, θ, q)
     θi = @inbounds θ[i, j, k]
     qi = @inbounds q[i, j, k]
     q = SpecificHumidities(qi, zero(qi), zero(qi))
-    return temperature(θi, q, z, mb.reference_state, mb.thermodynamics)
+    𝒰 = PotentialTemperatureState(θi, q, z, mb.reference_state)    
+    return temperature(𝒰, mb.thermodynamics)
 end
 
 struct TemperatureKernelFunction end
@@ -200,8 +218,8 @@ Adapt.adapt_structure(to, ck::CondensateKernel) = CondensateKernel(adapt(to, ck.
 @inline function condensate_specific_humidity(i, j, k, grid, mb::MoistAirBuoyancy, T, q)
     z = Oceananigans.Grids.znode(i, j, k, grid, c, c, c)
     Ti = @inbounds T[i, j, k]
-    qi = @inbounds q[i, j, k]
-    qˡ = condensate_specific_humidity(Ti, qi, z, mb.reference_state, mb.thermodynamics)
+    qᵗ = @inbounds q[i, j, k]
+    qˡ = adjusted_condensate_specific_humidity(Ti, qᵗ, z, mb.reference_state, mb.thermodynamics)
     return qˡ
 end
 

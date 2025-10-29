@@ -76,13 +76,3 @@ end
     ρ = reference_density(z, ref, thermo)
     return saturation_specific_humidity(T, ρ, thermo, condensed_phase)
 end
-
-function condensate_specific_humidity(T, q, z, ref::ReferenceState, thermo)
-    qᵛ★ = saturation_specific_humidity(T, z, ref, thermo, thermo.liquid)
-    return max(0, q - qᵛ★)
-end
-
-function ice_specific_humidity(T, q, z, ref::ReferenceState, thermo)
-    qi★ = saturation_specific_humidity(T, z, ref, thermo, thermo.solid)
-    return max(0, q - qi★)
-end

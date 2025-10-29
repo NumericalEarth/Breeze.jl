@@ -155,8 +155,8 @@ conjure_time_step_wizard!(simulation, cfl=0.7)
 
 T = Breeze.TemperatureField(model)
 qˡ = Breeze.CondensateField(model, T)
-qᵛ★ = Breeze.SaturationField(model, T)
-δ = Field(model.tracers.q - qᵛ★)
+qᵛ⁺ = Breeze.SaturationField(model, T)
+δ = Field(model.tracers.q - qᵛ⁺)
 
 function progress(sim)
     compute!(T)
@@ -193,8 +193,8 @@ add_callback!(simulation, progress, IterationInterval(10))
 
 # using Oceananigans.Models: ForcingOperation
 # Sʳ = ForcingOperation(:q, model)
-# outputs = merge(model.velocities, model.tracers, (; T, qˡ, qᵛ★, Sʳ))
-outputs = merge(model.velocities, model.tracers, (; T, qˡ, qᵛ★))
+# outputs = merge(model.velocities, model.tracers, (; T, qˡ, qᵛ⁺, Sʳ))
+outputs = merge(model.velocities, model.tracers, (; T, qˡ, qᵛ⁺))
 
 ow = JLD2Writer(model, outputs,
                 filename = "bomex.jld2",

@@ -213,14 +213,14 @@ function ThermodynamicConstants(FT = Oceananigans.defaults.FloatType;
                          heat_capacity = vapor_heat_capacity)
 
     return ThermodynamicConstants(convert(FT, molar_gas_constant),
-                                    convert(FT, gravitational_acceleration),
-                                    convert(FT, energy_reference_temperature),
-                                    convert(FT, triple_point_temperature),
-                                    convert(FT, triple_point_pressure),
-                                    dry_air,
-                                    vapor,
-                                    liquid,
-                                    solid)
+                                  convert(FT, gravitational_acceleration),
+                                  convert(FT, energy_reference_temperature),
+                                  convert(FT, triple_point_temperature),
+                                  convert(FT, triple_point_pressure),
+                                  dry_air,
+                                  vapor,
+                                  liquid,
+                                  solid)
 end
 
 const AT = ThermodynamicConstants

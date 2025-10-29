@@ -1,7 +1,6 @@
 module Microphysics
 
-export temperature,
-       specific_volume
+export temperature, specific_volume
 
 using ..Thermodynamics:
     mixture_heat_capacity,
@@ -12,6 +11,6 @@ using ..Thermodynamics:
 import ..Thermodynamics: condensate_specific_humidity, temperature
 
 include("nothing_microphysics.jl")
-#include("saturation_adjustment.jl")
+include("saturation_adjustment.jl")
 
 end # module

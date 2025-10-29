@@ -5,6 +5,13 @@ struct PotentialTemperatureState{FT, H, R}
     reference_state :: R
 end
 
+@inline function exner_function(𝒰::PotentialTemperatureState, thermo::ThermodynamicConstants)
+    q = 𝒰.humidities
+    z = 𝒰.height
+    ref = 𝒰.reference_state
+    return exner_function(q, z, ref, thermo)
+end
+
 @inline total_specific_humidity(state::PotentialTemperatureState) =
     total_specific_humidity(state.humidities)
 

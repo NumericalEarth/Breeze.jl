@@ -197,8 +197,8 @@ add_callback!(simulation, compute_averages!)
 
 T = Breeze.TemperatureField(model)
 qˡ = Breeze.CondensateField(model, T)
-qᵛ★ = Breeze.SaturationField(model, T)
-rh = Field(model.tracers.q / qᵛ★) # relative humidity
+qᵛ⁺ = Breeze.SaturationField(model, T)
+rh = Field(model.tracers.q / qᵛ⁺) # relative humidity
 
 function progress(sim)
     compute!(T)
@@ -235,8 +235,8 @@ add_callback!(simulation, progress, IterationInterval(10))
 # The commented out lines below diagnose the forcing applied to model.tracers.q
 # using Oceananigans.Models: ForcingOperation
 # Sʳ = ForcingOperation(:q, model)
-# outputs = merge(model.velocities, model.tracers, (; T, qˡ, qᵛ★, Sʳ))
-outputs = merge(model.velocities, model.tracers, (; T, qˡ, qᵛ★))
+# outputs = merge(model.velocities, model.tracers, (; T, qˡ, qᵛ⁺, Sʳ))
+outputs = merge(model.velocities, model.tracers, (; T, qˡ, qᵛ⁺))
 averaged_outputs = NamedTuple(name => Average(outputs[name], dims=(1, 2)) for name in keys(outputs))
 
 filename = string("bomex_", Nx, "_", Ny, "_", Nz, ".jld2")
