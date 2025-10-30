@@ -272,8 +272,6 @@ condensate_specific_humidity(T, state::HeightReferenceThermodynamicState, ref, t
         iter += 1
     end
 
-    @show r₂ iter
-
     return T₂
 end
 
