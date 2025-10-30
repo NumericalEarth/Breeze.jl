@@ -1,4 +1,4 @@
-# Warm-phase saturation adjustment {#microphysics-saturation-adjustment}
+# Warm-phase saturation adjustment
 
 ```@setup microphysics
 using CairoMakie
@@ -16,7 +16,7 @@ Saturation adjustment may be formulated as a nonlinear algebraic equation that r
 where ``Π`` is the Exner function, ``θ`` is potential temperature, ``T`` is temperature,
 ``ℒᵥ₀`` is the reference latent heat of vaporization, ``qᵛ⁺`` is the saturation specific humidity,
 ``qˡ`` is the liquid water specific humidity, and ``cᵖᵐ`` is the moist air specific heat.
-``Π`` and ``cᵖᵐ`` depend on the dry and vapor mass fraction, and ``ℒᵥ`` and ``qᵛ⁺`` depend
+``Π`` and ``cᵖᵐ`` depend on the dry and vapor mass fraction, and ``ℒᵥ₀`` and ``qᵛ⁺`` depend
 on temperature ``T``.
 Rewriting the potential temperature relation, saturation adjustment requires solving ``r(T) = 0``,
 
@@ -25,7 +25,7 @@ r(T) = T - θ Π - \frac{ℒᵥ₀ qˡ}{cᵖᵐ T}
 ```
 
 We use a secant method.
-As an example, we consider an air parcel at sea-level and with potential temperature of ``θ = 290ᵒ``K, within a reference state with base pressure of 101325 Pa and a reference potential temperature ``288ᵒ``K.
+As an example, we consider an air parcel at sea-level and with potential temperature of ``θ = 290\^circ``K, within a reference state with base pressure of 101325 Pa and a reference potential temperature ``288\^circ``K.
 The saturation specific humidity is then
 
 ```@example microphysics
