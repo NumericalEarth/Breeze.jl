@@ -5,5 +5,4 @@ More generally, "microphysics" encompasses panolpy of physical processes associa
 For example: microphysical processes include droplet nucleation on aerosol particles; liquid freezing and vapor solidification; chemical and humidity-based transformations of aerosol particles; the agglomeration of ice particles into snowflakes; collisions and breakup of falling droplets (rain); collision between ice particles and droplets or wholesale freezing of droplets to form hail (e.g. [Straka 2009](https://www.cambridge.org/core/books/cloud-and-precipitation-microphysics/C17826FDB91280DF66B103F8ED99F5F7)). 
 
 Breeze microphysics is nascent and under active development.
-Breeze aims to eventually provide a wide range of microphysical models, ranging from simple warm-phase saturation adjustment to spectral bin schemes that include a spectrum of droplet sizes, ice particle shapes and aerosol types.
-Currently, we support only warm-phase saturation adjustment.
+Breeze aims to eventually provide a wide range of microphysical models, ranging from simple warm-phase saturation adjustment, to the bulk schemes provided by the Climate Modeling Alliance's [CloudMicrophysics.jl](https://github.com/CliMA/CloudMicrophysics.jl), to superdroplet schemes, to spectral bin schemes that include a spectrum of droplet sizes, ice particle shapes and aerosol types.
