@@ -212,7 +212,8 @@ axu = Axis(fig[2, 1], xlabel="u, v (m/s)", ylabel="z (m)")
 axq = Axis(fig[2, 2], xlabel="q (kg/kg)", ylabel="z (m)")
 axθ = Axis(fig[2, 3], xlabel="θ (K)", ylabel="z (m)")
 
-compute!(T_avg)
+function update_plots!(sim)
+    compute!(T_avg)
     compute!(qˡ_avg)
     compute!(qᵛ⁺_avg)
     compute!(rh_avg)
@@ -230,10 +231,12 @@ compute!(T_avg)
     lines!(axq, qᵛ⁺_avg)
     lines!(axθ, θ_avg)
     display(fig)
+    return nothing
+end
 
+add_callback!(simulation, update_plots!, IterationInterval(100))
 
 function progress(sim)
-    
     compute!(T)
     compute!(qˡ)
     qˡmax = maximum(qˡ)
