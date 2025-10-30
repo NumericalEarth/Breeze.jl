@@ -1,11 +1,15 @@
 using ..Thermodynamics:
-    AtmosphereThermodynamics,
-    ReferenceStateConstants,
+    ThermodynamicConstants,
+    ReferenceState,
     reference_pressure,
     reference_density,
     mixture_gas_constant,
     mixture_heat_capacity,
-    dry_air_gas_constant
+    dry_air_gas_constant,
+    field_names,
+    materialize_momentum_and_velocities,
+    collect_prognostic_fields,
+    formulation_pressure_solver
 
 using Oceananigans
 using Oceananigans.Advection: Centered, adapt_advection_order
@@ -27,8 +31,6 @@ struct DefaultValue end
 
 tupleit(t::Tuple) = t
 tupleit(t) = tuple(t)
-
-formulation_pressure_solver(formulation, grid) = nothing
 
 mutable struct AtmosphereModel{Frm, Arc, Tst, Grd, Clk, Thm, Den, Mom, Eng, Wat, Hum,
                                Tmp, Prs, Ppa, Sol, Vel, Trc, Adv, Cor, Frc, Mic, Cnd, Cls, Dif} <: AbstractModel{Tst, Arc}
@@ -58,18 +60,19 @@ mutable struct AtmosphereModel{Frm, Arc, Tst, Grd, Clk, Thm, Den, Mom, Eng, Wat,
     diffusivity_fields :: Dif
 end
 
-function default_formulation(grid, thermo)
+function default_formulation(grid, thermodynamics)
     FT = eltype(grid)
     base_pressure = convert(FT, 101325)
     potential_temperature = convert(FT, 288)
-    constants = ReferenceStateConstants(base_pressure, potential_temperature)
-    return AnelasticFormulation(grid, constants, thermo)
+    reference_state = ReferenceState(base_pressure=base_pressure,
+                                               potential_temperature=potential_temperature)
+    return AnelasticFormulation(grid, reference_state, thermodynamics)
 end
 
 """
     AtmosphereModel(grid;
                     clock = Clock(grid),
-                    thermodynamics = AtmosphereThermodynamics(eltype(grid)),
+                    thermodynamics = ThermodynamicConstants(eltype(grid)),
                     formulation = default_formulation(grid, thermodynamics),
                     absolute_humidity = DefaultValue(),
                     tracers = tuple(),
@@ -77,7 +80,7 @@ end
                     boundary_conditions = NamedTuple(),
                     forcing = NamedTuple(),
                     advection = WENO(order=5),
-                    microphysics = WarmPhaseSaturationAdjustment(),
+                    microphysics = nothing,
                     timestepper = :RungeKutta3)
 
 Return an AtmosphereModel that uses the anelastic approximation following
@@ -102,7 +105,7 @@ AtmosphereModel{CPU, RectilinearGrid}(time = 0 seconds, iteration = 0)
 """
 function AtmosphereModel(grid;
                          clock = Clock(grid),
-                         thermodynamics = AtmosphereThermodynamics(eltype(grid)),
+                         thermodynamics = ThermodynamicConstants(eltype(grid)),
                          formulation = default_formulation(grid, thermodynamics),
                          absolute_humidity = DefaultValue(),
                          tracers = tuple(),
@@ -110,7 +113,7 @@ function AtmosphereModel(grid;
                          boundary_conditions = NamedTuple(),
                          forcing = NamedTuple(),
                          advection = WENO(order=5),
-                         microphysics = WarmPhaseSaturationAdjustment(),
+                         microphysics = nothing,
                          timestepper = :RungeKutta3)
 
     arch = grid.architecture
@@ -129,7 +132,7 @@ function AtmosphereModel(grid;
 
     density = materialize_density(formulation, grid)
     velocities, momentum = materialize_momentum_and_velocities(formulation, grid, boundary_conditions)
-    tracers = NamedTuple(n => CenterField(grid, boundary_conditions=boundary_conditions[n]) for name in tracers)
+    tracers = NamedTuple(name => CenterField(grid, boundary_conditions=boundary_conditions[name]) for name in tracers)
     condensates = materialize_condenstates(microphysics, grid)
     advection = adapt_advection_order(advection, grid)
 
@@ -181,7 +184,10 @@ function AtmosphereModel(grid;
                             closure,
                             diffusivity_fields)
 
-    update_state!(model)
+
+    # Provide a sensible default initial state (assumes anelastic formulation)
+    Tₛ = formulation.reference_state_constants.potential_temperature # K
+    set!(model, θ=Tₛ, enforce_mass_conservation=false) # consistent resting state
 
     return model
 end

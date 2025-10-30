@@ -11,17 +11,8 @@ grid = RectilinearGrid(arch, size=(Nx, Nz), x=(0, 2Lz), z=(0, Lz), topology=(Per
 
 p₀ = 101325 # Pa
 θ₀ = 288 # K
-reference_constants = Breeze.Thermodynamics.ReferenceStateConstants(base_pressure=p₀, potential_temperature=θ₀)
-buoyancy = Breeze.MoistAirBuoyancy(; reference_constants)
-
-# Simple precipitation scheme from CloudMicrophysics
-using CloudMicrophysics
-using CloudMicrophysics.Microphysics0M: remove_precipitation
-
-FT = eltype(grid)
-microphysics = CloudMicrophysics.Parameters.Parameters0M{FT}(τ_precip=600, S_0=0, qc_0=0.02)
-@inline precipitation(x, z, t, q, params) = remove_precipitation(params, q, 0)
-q_forcing = Forcing(precipitation, field_dependencies=:q, parameters=microphysics)
+reference_state = Breeze.Thermodynamics.ReferenceState(base_pressure=p₀, potential_temperature=θ₀)
+buoyancy = Breeze.MoistAirBuoyancy(; reference_state)
 
 ρ₀ = Breeze.MoistAirBuoyancies.base_density(buoyancy) # air density at z=0
 cₚ = buoyancy.thermodynamics.dry_air.heat_capacity
@@ -41,7 +32,7 @@ model = NonhydrostaticModel(; grid, advection, buoyancy,
 
 Lz = grid.Lz
 Δθ = 5 # K
-Tₛ = reference_constants.reference_potential_temperature # K
+Tₛ = reference_state.potential_temperature # K
 θᵢ(x, z) = Tₛ + Δθ * z / Lz + 1e-2 * Δθ * randn()
 qᵢ(x, z) = 0 # 1e-2 + 1e-5 * rand()
 set!(model, θ=θᵢ, q=qᵢ)
@@ -51,8 +42,8 @@ conjure_time_step_wizard!(simulation, cfl=0.7)
 
 T = Breeze.TemperatureField(model)
 qˡ = Breeze.CondensateField(model, T)
-qᵛ★ = Breeze.SaturationField(model, T)
-δ = Field(model.tracers.q - qᵛ★)
+qᵛ⁺ = Breeze.SaturationField(model, T)
+δ = Field(model.tracers.q - qᵛ⁺)
 
 function progress(sim)
     compute!(T)
@@ -89,7 +80,7 @@ add_callback!(simulation, progress, IterationInterval(10))
 
 using Oceananigans.Models: ForcingOperation
 Sʳ = ForcingOperation(:q, model)
-outputs = merge(model.velocities, model.tracers, (; T, qˡ, qᵛ★, Sʳ))
+outputs = merge(model.velocities, model.tracers, (; T, qˡ, qᵛ⁺, Sʳ))
 
 ow = JLD2Writer(model, outputs,
                 filename = "free_convection.jld2",
