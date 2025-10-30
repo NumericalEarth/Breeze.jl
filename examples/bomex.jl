@@ -116,21 +116,17 @@ set!(vᵍ, z -> vᵍ_bomex(z))
 @inline function Fu_geostrophic(i, j, k, grid, clock, fields, parameters)
     f = parameters.f
     @inbounds begin
-        v_avg = parameters.v_avg[1, 1, k]
-        v = fields.v[i, j, k]
         vᵍ = parameters.vᵍ[1, 1, k]
     end
-    return + f * (v_avg - vᵍ)
+    return - f * vᵍ
 end
 
 @inline function Fv_geostrophic(i, j, k, grid, clock, fields, parameters)
     f = parameters.f
     @inbounds begin
-        u_avg = parameters.u_avg[1, 1, k]
-        u = fields.u[i, j, k]
         uᵍ = parameters.uᵍ[1, 1, k]
     end
-    return - f * (u_avg - uᵍ)
+    return + f * uᵍ
 end
 
 u_geostrophic_forcing = Forcing(Fu_geostrophic, discrete_form=true, parameters=(; v_avg=v_avg_f, f=coriolis.f, vᵍ))
@@ -197,10 +193,47 @@ add_callback!(simulation, compute_averages!)
 
 T = Breeze.TemperatureField(model)
 qˡ = Breeze.CondensateField(model, T)
-qᵛ★ = Breeze.SaturationField(model, T)
-rh = Field(model.tracers.q / qᵛ★) # relative humidity
+qᵛ⁺ = Breeze.SaturationField(model, T)
+qᵛ = model.tracers.q - qˡ
+rh = Field(qᵛ / qᵛ⁺) # relative humidity
+
+T_avg = Field(Average(T, dims=(1, 2)))
+qˡ_avg = Field(Average(qˡ, dims=(1, 2)))
+qᵛ⁺_avg = Field(Average(qᵛ⁺, dims=(1, 2)))
+rh_avg = Field(Average(rh, dims=(1, 2)))
+
+using GLMakie
+
+fig = Figure(size=(1200, 800), fontsize=12)
+axT = Axis(fig[1, 1], xlabel="T (K)", ylabel="z (m)")
+axqˡ = Axis(fig[1, 2], xlabel="qˡ (kg/kg)", ylabel="z (m)")
+axrh = Axis(fig[1, 3], xlabel="rh (%)", ylabel="z (m)")
+axu = Axis(fig[2, 1], xlabel="u, v (m/s)", ylabel="z (m)")
+axq = Axis(fig[2, 2], xlabel="q (kg/kg)", ylabel="z (m)")
+axθ = Axis(fig[2, 3], xlabel="θ (K)", ylabel="z (m)")
+
+compute!(T_avg)
+    compute!(qˡ_avg)
+    compute!(qᵛ⁺_avg)
+    compute!(rh_avg)
+    compute!(q_avg)
+    compute!(θ_avg)
+    compute!(u_avg)
+    compute!(v_avg)
+
+    lines!(axT, T_avg)
+    lines!(axqˡ, qˡ_avg)
+    lines!(axrh, rh_avg)
+    lines!(axu, u_avg)
+    lines!(axu, v_avg)
+    lines!(axq, q_avg)
+    lines!(axq, qᵛ⁺_avg)
+    lines!(axθ, θ_avg)
+    display(fig)
+
 
 function progress(sim)
+    
     compute!(T)
     compute!(qˡ)
     qˡmax = maximum(qˡ)
@@ -212,7 +245,6 @@ function progress(sim)
     vmax = maximum(abs, v_avg)
 
     q = sim.model.tracers.q
-    qmin = minimum(q)
     qmax = maximum(q)
 
     θ = sim.model.tracers.θ
