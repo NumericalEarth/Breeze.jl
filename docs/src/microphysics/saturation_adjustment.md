@@ -1,6 +1,6 @@
 # Warm-phase saturation adjustment {#microphysics-saturation-adjustment}
 
-```@setup microphysics_sat
+```@setup microphysics
 using CairoMakie
 CairoMakie.activate!(type = "svg")
 ```
@@ -55,7 +55,7 @@ This performed saturation adjustment.
 Finally, we recover the amount of liquid condensate by subtracting the saturation
 specific humidity from the total:
 
-```@example microphysics_set
+```@example microphysics
 qᵛ⁺ = saturation_specific_humidity(T, z, ref, thermo, thermo.liquid)
 qˡ = qᵗ - qᵛ⁺
 ```
@@ -83,7 +83,7 @@ fig
 For a third example, we consider a state with constant potential temperature and total specific humidity,
 but at varying heights:
 
-```@example microphysics_set
+```@example microphysics
 using CairoMakie
 
 qᵗ = 0.005
