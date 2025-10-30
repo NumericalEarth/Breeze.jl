@@ -115,22 +115,14 @@ set!(vᵍ, z -> vᵍ_bomex(z))
 
 @inline function Fu_geostrophic(i, j, k, grid, clock, fields, parameters)
     f = parameters.f
-    @inbounds begin
-        v_avg = parameters.v_avg[1, 1, k]
-        v = fields.v[i, j, k]
-        vᵍ = parameters.vᵍ[1, 1, k]
-    end
-    return + f * (v_avg - vᵍ)
+    @inbounds vᵍ = parameters.vᵍ[1, 1, k]
+    return - f * vᵍ
 end
 
 @inline function Fv_geostrophic(i, j, k, grid, clock, fields, parameters)
     f = parameters.f
-    @inbounds begin
-        u_avg = parameters.u_avg[1, 1, k]
-        u = fields.u[i, j, k]
-        uᵍ = parameters.uᵍ[1, 1, k]
-    end
-    return - f * (u_avg - uᵍ)
+    @inbounds uᵍ = parameters.uᵍ[1, 1, k]
+    return + f * uᵍ
 end
 
 u_geostrophic_forcing = Forcing(Fu_geostrophic, discrete_form=true, parameters=(; v_avg=v_avg_f, f=coriolis.f, vᵍ))
