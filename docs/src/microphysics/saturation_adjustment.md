@@ -5,7 +5,8 @@ using CairoMakie
 CairoMakie.activate!(type = "svg")
 ```
 
-Warm-phase saturation adjustment (e.g. [Tao et al 1989](https://journals.ametsoc.org/view/journals/mwre/117/1/1520-0493_1989_117_0231_aiwsa_2_0_co_2.xml)) is a model for droplet nucleation that assumes that water vapor in excess of the saturation specific humidity is instantaneously converted to liquid water.
+Warm-phase saturation adjustment is a model for water droplet nucleation that assumes that water vapor in excess of the saturation specific humidity is instantaneously converted to liquid water.
+Mixed-phase saturation adjustment is described by [Tao et al 1989](https://journals.ametsoc.org/view/journals/mwre/117/1/1520-0493_1989_117_0231_aiwsa_2_0_co_2.xml))
 Saturation adjustment may be formulated as a nonlinear algebraic equation that relates temperature, potential temperature, and total specific humidity, derived from the definition of liquid potential temperature,
 
 ```math
@@ -17,7 +18,7 @@ where ``Π`` is the Exner function, ``θ`` is potential temperature, ``T`` is te
 ``qˡ`` is the liquid water specific humidity, and ``cᵖᵐ`` is the moist air specific heat.
 ``Π`` and ``cᵖᵐ`` depend on the dry and vapor mass fraction, and ``ℒᵥ`` and ``qᵛ⁺`` depend
 on temperature ``T``.
-Rewriting the potential temperature relation, saturation adjustment requires solving ``r(T) = 0`,
+Rewriting the potential temperature relation, saturation adjustment requires solving ``r(T) = 0``,
 
 ```math
 r(T) = T - θ Π - \frac{ℒᵥ₀ qˡ}{cᵖᵐ T}
