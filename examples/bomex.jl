@@ -12,8 +12,8 @@ using CloudMicrophysics.Microphysics0M: remove_precipitation
 
 # Siebesma et al (2003) resolution!
 # DOI: https://doi.org/10.1175/1520-0469(2003)60<1201:ALESIS>2.0.CO;2
-Nx = Ny = 64
-Nz = 75
+Nx = Ny = 32 # 64
+Nz = 37 # 75
 
 Lx = 6400
 Ly = 6400
@@ -168,7 +168,7 @@ qᵢ(x, y, z) = q_bomex(z) + qϵ * randn()
 uᵢ(x, y, z) = u_bomex(z)
 set!(model, θ=θᵢ, q=qᵢ, u=uᵢ)
 
-simulation = Simulation(model; Δt=10, stop_time)
+simulation = Simulation(model; Δt=1, stop_time)
 conjure_time_step_wizard!(simulation, cfl=0.7)
 
 # Write a callback to compute *_avg_f
@@ -236,7 +236,7 @@ function update_plots!(sim)
     return nothing
 end
 
-add_callback!(simulation, update_plots!, IterationInterval(100))
+add_callback!(simulation, update_plots!, TimeInterval(20minutes))
 =#
 
 function progress(sim)
