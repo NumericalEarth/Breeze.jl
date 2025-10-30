@@ -10,7 +10,7 @@ Mixed-phase saturation adjustment is described by [Chammas et al 2023](https://a
 Saturation adjustment may be formulated as a nonlinear algebraic equation that relates temperature, potential temperature, and total specific humidity, derived from the definition of liquid potential temperature,
 
 ```math
-θ = \frac{T}{Π} \left (1 - \frac{ℒᵥ₀ qˡ}{cᵖᵐ T} \right ) ,
+θ = \frac{T}{Π} \left (1 - \frac{ℒᵥ₀}{cᵖᵐ T} qˡ \right ) ,
 ```
 
 where ``Π`` is the Exner function, ``θ`` is potential temperature, ``T`` is temperature,
@@ -21,7 +21,7 @@ on temperature ``T``.
 Rewriting the potential temperature relation, saturation adjustment requires solving ``r(T) = 0``,
 
 ```math
-r(T) = T - θ Π - \frac{ℒᵥ₀ qˡ}{cᵖᵐ T}
+r(T) = T - θ Π - \frac{ℒᵥ₀}{cᵖᵐ T} q^l
 ```
 
 We use a secant method.

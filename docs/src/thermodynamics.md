@@ -29,16 +29,16 @@ Above, ``R = ℛ / m`` is the specific gas constant given the
 [molar gas constant](https://en.wikipedia.org/wiki/Gas_constant)
 ``ℛ ≈ 8.31 J / K / \mathrm{mol}`` and molar mass ``m`` of the gas species under consideration.
 
-The [first law of thermodynamics](https://en.wikipedia.org/wiki/First_law_of_thermodynamics) applied to dry air,
+The [first law of thermodynamics](https://en.wikipedia.org/wiki/First_law_of_thermodynamics),
 a.k.a. "conservation of energy", states that infinitesimal changes
 in internal energy ``\mathrm{d} ê`` are related to infinestimal changes 
 in temperature ``\mathrm{d} T`` and pressure ``\mathrm{d} p`` according to
 
 ```math
-\mathrm{d} ê = cᵖᵈ \mathrm{d} T - \frac{\mathrm{d} p}{\rho}
+\mathrm{d} ê = cᵖ \mathrm{d} T - \frac{\mathrm{d} p}{\rho}
 ```
 
-where ``cᵖᵈ`` is the specific heat capacity of dry air at constant pressure.
+where ``cᵖᵈ`` is the specific heat capacity.
 
 For example, to represent dry air typical for Earth, with ``m = 0.029`` and ``c^p = 1005``,
 we write
@@ -54,13 +54,13 @@ Within adiabatic transformations, ``\mathrm{d} ê = 0``.
 Combining the ideal gas law with conservation of energy then yields
 
 ```math
-\frac{\mathrm{d} p}{\mathrm{d} T} = ρ cᵖᵈ = \frac{p}{R T} cᵖ \qquad \text{which implies} \qquad T ∼ \left ( \frac{p}{p₀} \right )^{R / cᵖ} .
+\frac{\mathrm{d} p}{\mathrm{d} T} = ρ cᵖ = \frac{p}{R T} cᵖ \qquad \text{which implies} \qquad T ∼ \left ( \frac{p}{p₀} \right )^{R / cᵖ} .
 ```
 
 where ``p₀`` is some reference pressure. As a result, the _potential temperature_ 
 
 ```math
-θ ≡ T \left ( \frac{p₀}{p} \right )^{Rᵈ / cᵖᵈ} ,
+θ ≡ T \left ( \frac{p₀}{p} \right )^{Rᵈ / cᵖ} ≡ \frac{T}{Π}, \quad where \quad Π ≡ \left ( \frac{p}{p₀} \right )^{Rᵈ / cᵖ} ,
 ```
 
 is constant under adiabatic transformations, defined such that ``θ(z=0) = T(z=0)``.
@@ -70,7 +70,7 @@ is constant under adiabatic transformations, defined such that ``θ(z=0) = T(z=0
 Next we consider a reference state with constant internal energy and thus constant potential temperature
 
 ```math
-θ₀ = Tᵣ \left ( \frac{p₀}{pᵣ} \right )^{Rᵈ / cᵖᵈ}
+θ₀ = Tᵣ \left ( \frac{p₀}{pᵣ} \right )^{Rᵈ / cᵖ}
 ```
 
 !!! note "About subscripts"
@@ -78,7 +78,7 @@ Next we consider a reference state with constant internal energy and thus consta
     For example, in the above formula, ``p₀ ≡ pᵣ(z=0)``.
     Subscripts ``r`` indicate _reference_ states, which typically are
     functions of ``z``. This differs from the usual notation in which
-    the subscripts ``0`` indicate "reference" (why?) and the "very referencey" ``00`` (lol) applies to ``z=0``.
+    the subscripts ``0`` indicate "reference" and "00" means ``z=0``.
     
 
 Hydrostatic balance requires
@@ -90,29 +90,26 @@ Hydrostatic balance requires
 we get
 
 ```math
-\frac{pᵣ}{p₀} = \left (1 - \frac{g z}{cᵖ θ₀} \right )^(cᵖᵈ / Rᵈ)
+\frac{pᵣ}{p₀} = \left (1 - \frac{g z}{cᵖ θ₀} \right )^{cᵖ / Rᵈ}
 ```
 
 Thus
 
 ```math
-Tᵣ(z) = θ₀ \left ( \frac{pᵣ}{p₀} \right )^{Rᵈ / cᵖ} = θ₀ \left ( 1 - \frac{g z}{cᵖᵈ θ₀} \right )
+Tᵣ(z) = θ₀ \left ( \frac{pᵣ}{p₀} \right )^{Rᵈ / cᵖ} = θ₀ \left ( 1 - \frac{g z}{cᵖ θ₀} \right )
 ```
 
 and
 
 ```math
-ρᵣ(z) = \frac{p₀}{R θ₀} \left ( 1 - \frac{g z}{cᵖ θ₀} \right )^{cᵖᵈ / Rᵈ - 1}
+ρᵣ(z) = \frac{p₀}{R θ₀} \left ( 1 - \frac{g z}{cᵖ θ₀} \right )^{cᵖ / Rᵈ - 1}
 ```
 
-```@example thermo
-thermo = AtmosphereThermodynamics()
-```
+## An example of a dry reference state in Breeze
 
-We can visualise the hydrostatic reference column implied by `thermo` by
-evaluating Breeze's reference-state utilities on a one-dimensional
-`RectilinearGrid`. Using Oceananigans `Field`s highlights how Breeze stores and
-accesses these background diagnostics.
+We can visualise a hydrostatic reference profile
+evaluating Breeze's reference-state utilities (which assume a dry reference state)
+on a one-dimensional `RectilinearGrid`:
 
 ```@example reference_state
 using Breeze
@@ -156,8 +153,8 @@ fig
 
 ## Thermodynamic relations for gaseous mixtures
 
-of gaseous dry air, water vapor, and liquid and solid condensates of various shapes and sizes.
-We assume that the volume of the condensates is negligible, which means that the total
+"Moist air" is conceived to be a mixture of two gas phases: "dry air" (itself a mixture of gases) and water vapor, as well as a collection of liquid droplet and solid ice particle "condensates".
+We assume that the volume of the condensates is negligible, such that the total
 pressure is the sum of partial pressures of vapor and dry air,
 
 ```math
@@ -189,7 +186,7 @@ and water vapor are ``mᵈ = 0.029`` kg/mol and ``mᵛ = 0.018`` kg/mol.
 To write the effective gas law for moist air, we introduce the mass ratios
 
 ```math
-qᵈ \equiv \frac{ρᵈ}{ρ} \qquad \text{and \qquad qᵛ \equiv \frac{ρᵛ}{ρ}
+qᵈ \equiv \frac{ρᵈ}{ρ} \qquad \text{and} \qquad qᵛ \equiv \frac{ρᵛ}{ρ}
 ```
 
 where ``ρ`` is total density of the fluid including dry air, vapor, and condensates,
