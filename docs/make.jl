@@ -9,7 +9,7 @@ makedocs(sitename="Breeze",
         "Thermodynamics" => "thermodynamics.md",
         "Microphysics" => Any[
             "Overview" => "microphysics/microphysics_overview.md",
-            "Saturation Adjustment" => "microphysics/saturation_adjustment.md",
+            "Warm phase saturation adjustment" => "microphysics/saturation_adjustment.md",
         ],
         "API" => "api.md",
     ]
