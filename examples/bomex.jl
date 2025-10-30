@@ -202,6 +202,8 @@ qˡ_avg = Field(Average(qˡ, dims=(1, 2)))
 qᵛ⁺_avg = Field(Average(qᵛ⁺, dims=(1, 2)))
 rh_avg = Field(Average(rh, dims=(1, 2)))
 
+# Uncomment to make plots
+#=
 using GLMakie
 
 fig = Figure(size=(1200, 800), fontsize=12)
@@ -235,6 +237,7 @@ function update_plots!(sim)
 end
 
 add_callback!(simulation, update_plots!, IterationInterval(100))
+=#
 
 function progress(sim)
     compute!(T)
@@ -270,8 +273,7 @@ add_callback!(simulation, progress, IterationInterval(10))
 # The commented out lines below diagnose the forcing applied to model.tracers.q
 # using Oceananigans.Models: ForcingOperation
 # Sʳ = ForcingOperation(:q, model)
-# outputs = merge(model.velocities, model.tracers, (; T, qˡ, qᵛ★, Sʳ))
-outputs = merge(model.velocities, model.tracers, (; T, qˡ, qᵛ★))
+outputs = merge(model.velocities, model.tracers, (; T, qˡ, qᵛ⁺))
 averaged_outputs = NamedTuple(name => Average(outputs[name], dims=(1, 2)) for name in keys(outputs))
 
 filename = string("bomex_", Nx, "_", Ny, "_", Nz, ".jld2")
