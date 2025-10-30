@@ -12,8 +12,8 @@ using CloudMicrophysics.Microphysics0M: remove_precipitation
 
 # Siebesma et al (2003) resolution!
 # DOI: https://doi.org/10.1175/1520-0469(2003)60<1201:ALESIS>2.0.CO;2
-Nx = Ny = 32 # 64
-Nz = 37 # 75
+Nx = Ny = 64
+Nz = 75
 
 Lx = 6400
 Ly = 6400
