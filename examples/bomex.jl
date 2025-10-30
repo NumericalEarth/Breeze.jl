@@ -115,17 +115,13 @@ set!(vᵍ, z -> vᵍ_bomex(z))
 
 @inline function Fu_geostrophic(i, j, k, grid, clock, fields, parameters)
     f = parameters.f
-    @inbounds begin
-        vᵍ = parameters.vᵍ[1, 1, k]
-    end
+    @inbounds vᵍ = parameters.vᵍ[1, 1, k]
     return - f * vᵍ
 end
 
 @inline function Fv_geostrophic(i, j, k, grid, clock, fields, parameters)
     f = parameters.f
-    @inbounds begin
-        uᵍ = parameters.uᵍ[1, 1, k]
-    end
+    @inbounds uᵍ = parameters.uᵍ[1, 1, k]
     return + f * uᵍ
 end
 
