@@ -30,7 +30,7 @@ Above, ``R = ℛ / m`` is the specific gas constant given the
 ``ℛ ≈ 8.31 J / K / \mathrm{mol}`` and molar mass ``m`` of the gas species under consideration.
 
 The [first law of thermodynamics](https://en.wikipedia.org/wiki/First_law_of_thermodynamics),
-a.k.a. "conservation of energy", states that infinitesimal changes
+aka "conservation of energy", states that infinitesimal changes
 in internal energy ``\mathrm{d} ê`` are related to infinestimal changes 
 in temperature ``\mathrm{d} T`` and pressure ``\mathrm{d} p`` according to
 
@@ -38,9 +38,9 @@ in temperature ``\mathrm{d} T`` and pressure ``\mathrm{d} p`` according to
 \mathrm{d} ê = cᵖ \mathrm{d} T - \frac{\mathrm{d} p}{\rho}
 ```
 
-where ``cᵖᵈ`` is the specific heat capacity.
+where ``cᵖ`` is the specific heat capacity of the gas in question.
 
-For example, to represent dry air typical for Earth, with ``m = 0.029`` and ``c^p = 1005``,
+For example, to represent dry air typical for Earth, with molar mass ``m = 0.029`` and heat capacity ``c^p = 1005``,
 we write
 
 ```@example thermo
