@@ -10,27 +10,28 @@ Mixed-phase saturation adjustment is described by [Chammas et al 2023](https://a
 Saturation adjustment may be formulated as a nonlinear algebraic equation that relates temperature, potential temperature, and total specific humidity, derived from the definition of liquid potential temperature,
 
 ```math
-θ = \frac{T}{Π} \left \{1 - \frac{ℒᵥ₀}{cᵖᵐ T} max \left [0, qᵗ - qᵛ⁺(T) \right ] \right \} ,
+θ = \frac{T}{Π} \left \{1 - \frac{ℒᵥ₀}{cᵖᵐ T} \max \left [0, qᵗ - qᵛ⁺(T) \right ] \right \} ,
 ```
 
 where ``Π`` is the Exner function, ``θ`` is potential temperature, ``T`` is temperature,
 ``ℒᵥ₀`` is the reference latent heat of vaporization, ``qᵗ`` is the total specific humidity,
 ``qᵛ⁺`` is the saturation specific humidity, and ``cᵖᵐ`` is the moist air specific heat.
-The condensate specific humidity is ``qˡ = max(0, qᵗ - qᵛ⁺)``: ``qˡ = 0`` if the air is undersaturated
+The condensate specific humidity is ``qˡ = \max(0, qᵗ - qᵛ⁺)``: ``qˡ = 0`` if the air is undersaturated
 with ``qᵗ < qᵛ⁺``.
 ``Π`` and ``cᵖᵐ`` depend on the dry and vapor mass fractions ``qᵈ = 1 - qᵗ`` and
 ``qᵛ = qᵗ - qˡ``, and ``qᵛ⁺`` is an increasing function of temperature ``T``.
 Rewriting the potential temperature relation, saturation adjustment requires solving ``r(T) = 0``,
 
 ```math
-r(T) = T - θ Π - \frac{ℒᵥ₀}{cᵖᵐ} max[0, qᵗ - qᵛ⁺(T)] .
+r(T) = T - θ Π - \frac{ℒᵥ₀}{cᵖᵐ} \max[0, qᵗ - qᵛ⁺(T)] .
 ```
 
 We use a secant method after checking for ``θ = 0`` and ``qˡ = 0`` given the guess ``T₁ = θ Π(qᵗ)``.
 If ``qᵗ > qᵛ⁺(T₁)``, then we are guaranteed that ``T > T₁`` because ``qᵛ⁺`` is an increasing function of ``T``.
 We initialize the secant iteration with a second guess ``T₂ = Θ Π - [qᵗ - qᵛ⁺(T₁)] ℒᵥ₀ / cᵖᵐ``.
 
-As an example, we consider an air parcel at sea-level and with potential temperature of ``θ = 290^\circ``K, within a reference state with base pressure of 101325 Pa and a reference potential temperature ``288^\circ``K.
+
+As an example, we consider an air parcel at sea-level and with potential temperature of ``θ = 290``ᵒK, within a reference state with base pressure of 101325 Pa and a reference potential temperature ``288``ᵒK.
 The saturation specific humidity is then
 
 ```@example microphysics
@@ -53,7 +54,7 @@ given a total specific humidity slightly above saturation:
 ```@example microphysics
 using Breeze.MoistAirBuoyancies: temperature
 
-qᵗ = 0.012   # [kg kg⁻¹] total specific humidity 
+qᵗ = 0.012   # [kg kg⁻¹] total specific humidity
 U = HeightReferenceThermodynamicState(θ, qᵗ, z)
 T = temperature(U, ref, thermo)
 ```
@@ -74,7 +75,7 @@ when the potential temperature is constant:
 ```@example microphysics
 using CairoMakie
 
-qᵗ = collect(0:1e-4:0.02) # [kg kg⁻¹] total specific humidity 
+qᵗ = collect(0:1e-4:0.02) # [kg kg⁻¹] total specific humidity
 U = [HeightReferenceThermodynamicState(θ, qᵗⁱ, z) for qᵗⁱ in qᵗ]
 T = [temperature(Uⁱ, ref, thermo) for Uⁱ in U]
 
@@ -87,7 +88,7 @@ fig = Figure()
 ax = Axis(fig[1, 1], xlabel="Total specific humidity (kg kg⁻¹)", ylabel="Temperature (K)")
 lines!(ax, qᵗ, T, label="Temperature from saturation adjustment")
 lines!(ax, qᵗ, T̃, label="Temperature from linearized formula")
-axislegned(ax)
+axislegend(ax)
 fig
 ```
 
