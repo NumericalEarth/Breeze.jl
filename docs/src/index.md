@@ -2,8 +2,8 @@
 
 Fast, friendly atmosphere simulations on CPUs and GPUs.
 
-Breeze provides software for flexible software package for finite volume atmosphere simulations on CPUs and GPUs, based on [Oceananigans](https://github.com/CliMA/Oceananigans.jl).
-Like Oceanaingans, it provides a radically productive user interface that makes simple simulations easy, and complex, creative simulations possible.
+Breeze provides software for flexible software package for finite-volume atmosphere simulations on CPUs and GPUs, based on [Oceananigans](https://github.com/CliMA/Oceananigans.jl).
+Like Oceananigans, it provides a radically productive user interface that makes simple simulations easy, and complex, creative simulations possible.
 
 ## Features
 

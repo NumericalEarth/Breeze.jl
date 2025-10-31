@@ -6,7 +6,7 @@ CairoMakie.activate!(type = "svg")
 ```
 
 Warm-phase saturation adjustment is a model for water droplet nucleation that assumes that water vapor in excess of the saturation specific humidity is instantaneously converted to liquid water.
-Mixed-phase saturation adjustment is described by [Chammas et al 2023](https://agupubs.onlinelibrary.wiley.com/doi/full/10.1029/2023MS003619).
+Mixed-phase saturation adjustment is described by [Chammas2023](@citet).
 Saturation adjustment may be formulated as a nonlinear algebraic equation that relates temperature, potential temperature, and total specific humidity, derived from the definition of liquid potential temperature,
 
 ```math
@@ -17,7 +17,7 @@ where ``Π`` is the Exner function, ``θ`` is potential temperature, ``T`` is te
 ``ℒᵥ₀`` is the reference latent heat of vaporization, ``qᵗ`` is the total specific humidity,
 ``qᵛ⁺`` is the saturation specific humidity, and ``cᵖᵐ`` is the moist air specific heat.
 The condensate specific humidity is ``qˡ = \max(0, qᵗ - qᵛ⁺)``: ``qˡ = 0`` if the air is undersaturated with ``qᵗ < qᵛ⁺``.
-``Π`` and ``cᵖᵐ`` depend on the dry and vapor mass fractions ``qᵈ = 1 - qᵗ`` and
+Both ``Π`` and ``cᵖᵐ`` depend on the dry and vapor mass fractions ``qᵈ = 1 - qᵗ`` and
 ``qᵛ = qᵗ - qˡ``, and ``qᵛ⁺`` is an increasing function of temperature ``T``.
 Rewriting the potential temperature relation, saturation adjustment requires solving ``r(T) = 0``,
 
@@ -72,9 +72,7 @@ As a second example, we examine the dependence of temperature on total specific 
 when the potential temperature is constant:
 
 ```@example microphysics
-using CairoMakie
-
-qᵗ = collect(0:1e-4:0.02) # [kg kg⁻¹] total specific humidity
+qᵗ = 0:1e-4:0.02 # [kg kg⁻¹] total specific humidity
 U = [HeightReferenceThermodynamicState(θ, qᵗⁱ, z) for qᵗⁱ in qᵗ]
 T = [temperature(Uⁱ, ref, thermo) for Uⁱ in U]
 
@@ -83,8 +81,10 @@ T = [temperature(Uⁱ, ref, thermo) for Uⁱ in U]
 cᵖᵈ = thermo.dry_air.heat_capacity
 T̃ = [290 + ℒᵥ₀ / cᵖᵈ * max(0, qᵗⁱ - qᵛ⁺₀) for qᵗⁱ in qᵗ]
 
+using CairoMakie
+
 fig = Figure()
-ax = Axis(fig[1, 1], xlabel="Total specific humidity (kg kg⁻¹)", ylabel="Temperature (K)")
+ax = Axis(fig[1, 1], xlabel="Total specific humidity (kg kg⁻¹)", ylabel="Temperature (ᵒK)")
 lines!(ax, qᵗ, T, label="Temperature from saturation adjustment")
 lines!(ax, qᵗ, T̃, label="Temperature from linearized formula")
 axislegend(ax)
@@ -97,21 +97,20 @@ For a third example, we consider a state with constant potential temperature and
 but at varying heights:
 
 ```@example microphysics
-using CairoMakie
-
 qᵗ = 0.005
-z = collect(0:100:10e3)
+z = 0:100:10e3
 T = [temperature(HeightReferenceThermodynamicState(θ, qᵗ, zᵏ), ref, thermo) for zᵏ in z]
 qᵛ⁺ = [saturation_specific_humidity(T[k], z[k], ref, thermo, thermo.liquid) for k = 1:length(z)]
 qˡ = [max(0, qᵗ - qᵛ⁺ᵏ) for qᵛ⁺ᵏ in qᵛ⁺]
 
 fig = Figure()
 
-yticks = 0:2e3:1e4
-
-axT = Axis(fig[1, 1]; xlabel="Temperature (K)", yticks, ylabel="Height (m)")
-axq⁺ = Axis(fig[1, 2]; xlabel="Saturation \n specific humidity \n (kg kg⁻¹)", yticks, yticklabelsvisible=false)
-axqˡ = Axis(fig[1, 3]; xlabel="Liquid \n specific humidity \n (kg kg⁻¹)", yticks, yticklabelsvisible=false)
+yticks = 0:2e3:10e3
+axT = Axis(fig[1, 1]; xlabel="Temperature (ᵒK)", ylabel="Height (m)", yticks)
+axq⁺ = Axis(fig[1, 2]; xlabel="Saturation \n specific humidity \n (kg kg⁻¹)",
+                       yticks, yticklabelsvisible=false)
+axqˡ = Axis(fig[1, 3]; xlabel="Liquid \n specific humidity \n (kg kg⁻¹)",
+                       yticks, yticklabelsvisible=false)
 
 lines!(axT, T, z)
 lines!(axq⁺, qᵛ⁺, z)

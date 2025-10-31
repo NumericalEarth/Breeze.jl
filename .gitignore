@@ -27,5 +27,8 @@ Manifest.toml
 *.jld2
 *.png
 *.mp4
+
+# other files we don't want
 *.swp
 *.DS_Store
+*.vscode
