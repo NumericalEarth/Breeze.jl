@@ -164,7 +164,7 @@ qᵢ(x, y, z) = q_bomex(z) + qϵ * randn()
 uᵢ(x, y, z) = u_bomex(z)
 set!(model, θ=θᵢ, q=qᵢ, u=uᵢ)
 
-simulation = Simulation(model; Δt=10, stop_time)
+simulation = Simulation(model; Δt=1, stop_time)
 conjure_time_step_wizard!(simulation, cfl=0.7)
 
 # Write a callback to compute *_avg_f
@@ -189,8 +189,51 @@ add_callback!(simulation, compute_averages!)
 
 T = Breeze.TemperatureField(model)
 qˡ = Breeze.CondensateField(model, T)
-qᵛ★ = Breeze.SaturationField(model, T)
-rh = Field(model.tracers.q / qᵛ★) # relative humidity
+qᵛ⁺ = Breeze.SaturationField(model, T)
+qᵛ = model.tracers.q - qˡ
+rh = Field(qᵛ / qᵛ⁺) # relative humidity
+
+T_avg = Field(Average(T, dims=(1, 2)))
+qˡ_avg = Field(Average(qˡ, dims=(1, 2)))
+qᵛ⁺_avg = Field(Average(qᵛ⁺, dims=(1, 2)))
+rh_avg = Field(Average(rh, dims=(1, 2)))
+
+# Uncomment to make plots
+#=
+using GLMakie
+
+fig = Figure(size=(1200, 800), fontsize=12)
+axT = Axis(fig[1, 1], xlabel="T (K)", ylabel="z (m)")
+axqˡ = Axis(fig[1, 2], xlabel="qˡ (kg/kg)", ylabel="z (m)")
+axrh = Axis(fig[1, 3], xlabel="rh (%)", ylabel="z (m)")
+axu = Axis(fig[2, 1], xlabel="u, v (m/s)", ylabel="z (m)")
+axq = Axis(fig[2, 2], xlabel="q (kg/kg)", ylabel="z (m)")
+axθ = Axis(fig[2, 3], xlabel="θ (K)", ylabel="z (m)")
+
+function update_plots!(sim)
+    compute!(T_avg)
+    compute!(qˡ_avg)
+    compute!(qᵛ⁺_avg)
+    compute!(rh_avg)
+    compute!(q_avg)
+    compute!(θ_avg)
+    compute!(u_avg)
+    compute!(v_avg)
+
+    lines!(axT, T_avg)
+    lines!(axqˡ, qˡ_avg)
+    lines!(axrh, rh_avg)
+    lines!(axu, u_avg)
+    lines!(axu, v_avg)
+    lines!(axq, q_avg)
+    lines!(axq, qᵛ⁺_avg)
+    lines!(axθ, θ_avg)
+    display(fig)
+    return nothing
+end
+
+add_callback!(simulation, update_plots!, TimeInterval(20minutes))
+=#
 
 function progress(sim)
     compute!(T)
@@ -204,7 +247,6 @@ function progress(sim)
     vmax = maximum(abs, v_avg)
 
     q = sim.model.tracers.q
-    qmin = minimum(q)
     qmax = maximum(q)
 
     θ = sim.model.tracers.θ
@@ -227,8 +269,7 @@ add_callback!(simulation, progress, IterationInterval(10))
 # The commented out lines below diagnose the forcing applied to model.tracers.q
 # using Oceananigans.Models: ForcingOperation
 # Sʳ = ForcingOperation(:q, model)
-# outputs = merge(model.velocities, model.tracers, (; T, qˡ, qᵛ★, Sʳ))
-outputs = merge(model.velocities, model.tracers, (; T, qˡ, qᵛ★))
+outputs = merge(model.velocities, model.tracers, (; T, qˡ, qᵛ⁺))
 averaged_outputs = NamedTuple(name => Average(outputs[name], dims=(1, 2)) for name in keys(outputs))
 
 filename = string("bomex_", Nx, "_", Ny, "_", Nz, ".jld2")

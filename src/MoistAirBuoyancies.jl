@@ -232,7 +232,7 @@ condensate_specific_humidity(T, state::HeightReferenceThermodynamicState, ref, t
 # Solve
 # θ = T/Π ( 1 - ℒ qˡ / (cᵖᵐ T))
 # for temperature T with qˡ = max(0, q - qᵛ★).
-# root of: f(T) = T² - Π θ T - ℒ qˡ / cᵖᵐ
+# root of: f(T) = T - Π θ - ℒ qˡ / cᵖᵐ
 @inline function temperature(state::HeightReferenceThermodynamicState{FT}, ref, thermo) where FT
     state.θ == 0 && return zero(FT)
 
@@ -245,15 +245,15 @@ condensate_specific_humidity(T, state::HeightReferenceThermodynamicState, ref, t
     # If we made it this far, we have condensation
     r₁ = saturation_adjustment_residual(T₁, Π, qˡ₁, state, thermo)
 
-    ℒ = thermo.liquid.latent_heat
+    ℒᵛ = thermo.liquid.latent_heat
     cᵖᵐ = mixture_heat_capacity(state.q, thermo)
-    T₂ = (T₁ + sqrt(T₁^2 + 4 * ℒ * qˡ₁ / cᵖᵐ)) / 2
+    T₂ = T₁ + ℒᵛ * qˡ₁ / cᵖᵐ
     qˡ₂ = condensate_specific_humidity(T₂, state, ref, thermo)
     r₂ = saturation_adjustment_residual(T₂, Π, qˡ₂, state, thermo)
 
     # Saturation adjustment
     R = sqrt(max(T₂, T₁))
-    ϵ = convert(FT, 1e-4)
+    ϵ = convert(FT, 1e-9)
     δ = ϵ * R
     iter = 0
 
@@ -278,7 +278,7 @@ end
 @inline function saturation_adjustment_residual(T, Π, qˡ, state::HeightReferenceThermodynamicState, thermo)
     ℒᵛ = thermo.liquid.latent_heat
     cᵖᵐ = mixture_heat_capacity(state.q, thermo)
-    return T^2 - ℒᵛ * qˡ / cᵖᵐ - Π * state.θ * T
+    return T - ℒᵛ * qˡ / cᵖᵐ - Π * state.θ
 end
 
 @inline function specific_volume(state::HeightReferenceThermodynamicState, ref, thermo)
