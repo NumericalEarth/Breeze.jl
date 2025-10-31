@@ -9,7 +9,7 @@ Breeze implements thermodynamic relations for moist atmospheres ---
 fluids that can be described as a binary mixture of _(i)_ "dry" air, and _(ii)_ vapor,
 as well as liquid and solid condensates of the vapor component of various shapes and sizes.
 
-On Earth, dry air is itself a mixture of gases, the vapor component is ``\mathrm{H_2 O}``, 
+On Earth, dry air is itself a mixture of gases, the vapor component is ``\mathrm{H_2 O}``,
 and the condensates comprise clouds and precipitation such as rain, snow, hail, and grapuel.
 Breeze models dry air as having a fixed composition with
 constant [molar mass](https://en.wikipedia.org/wiki/Molar_mass).
@@ -31,7 +31,7 @@ Above, ``R = ℛ / m`` is the specific gas constant given the
 
 The [first law of thermodynamics](https://en.wikipedia.org/wiki/First_law_of_thermodynamics),
 aka "conservation of energy", states that infinitesimal changes
-in internal energy ``\mathrm{d} ê`` are related to infinestimal changes 
+in internal energy ``\mathrm{d} ê`` are related to infinestimal changes
 in temperature ``\mathrm{d} T`` and pressure ``\mathrm{d} p`` according to
 
 ```math
@@ -57,7 +57,7 @@ Combining the ideal gas law with conservation of energy then yields
 \frac{\mathrm{d} p}{\mathrm{d} T} = ρ cᵖ = \frac{p}{R T} cᵖ \qquad \text{which implies} \qquad T ∼ \left ( \frac{p}{p₀} \right )^{R / cᵖ} .
 ```
 
-where ``p₀`` is some reference pressure. As a result, the _potential temperature_ 
+where ``p₀`` is some reference pressure. As a result, the _potential temperature_
 
 ```math
 θ ≡ T \left ( \frac{p₀}{p} \right )^{Rᵈ / cᵖ} ≡ \frac{T}{Π}, \quad where \quad Π ≡ \left ( \frac{p}{p₀} \right )^{Rᵈ / cᵖ} ,
@@ -79,7 +79,7 @@ Next we consider a reference state with constant internal energy and thus consta
     Subscripts ``r`` indicate _reference_ states, which typically are
     functions of ``z``. This differs from the usual notation in which
     the subscripts ``0`` indicate "reference" and "00" means ``z=0``.
-    
+
 
 Hydrostatic balance requires
 
@@ -138,7 +138,7 @@ Tᵣ₁ = Field(θ₀ * (pᵣ / p₀)^(Rᵈ / cᵖᵈ))
 Tᵣ₂ = Field(θ₀ * (1 - g * z / (cᵖᵈ * θ₀)))
 
 fig = Figure(resolution = (900, 300))
-axT = Axis(fig[1, 1]; xlabel = "Temperature (K)", ylabel = "Height (m)")
+axT = Axis(fig[1, 1]; xlabel = "Temperature (ᵒK)", ylabel = "Height (m)")
 lines!(axT, Tᵣ₁)
 lines!(axT, Tᵣ₂)
 
@@ -215,7 +215,7 @@ q = 0.01 # 1% water vapor by mass
 cᵖᵐ = mixture_heat_capacity(qᵛ, thermo)
 ```
 
-## The Clasuius-Claperyon relation and saturation specific humidity
+## The Clausius-Claperyon relation and saturation specific humidity
 
 The [Clausius-Claperyon relation](https://en.wikipedia.org/wiki/Clausius%E2%80%93Clapeyron_relation)
 for an ideal gas
@@ -277,8 +277,7 @@ T = collect(273.2:0.1:313.2)
 qᵛ⁺ = [saturation_specific_humidity(Tⁱ, z, ref, thermo, thermo.liquid) for Tⁱ in T]
 
 fig = Figure()
-ax = Axis(fig[1, 1], xlabel="Temperature (K)", ylabel="Saturation specific humidity qᵛ⁺ (kg kg⁻¹)")
+ax = Axis(fig[1, 1], xlabel="Temperature (ᵒK)", ylabel="Saturation specific humidity qᵛ⁺ (kg kg⁻¹)")
 lines!(ax, T, qᵛ⁺)
 fig
 ```
-

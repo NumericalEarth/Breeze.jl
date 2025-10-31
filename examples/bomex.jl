@@ -3,8 +3,8 @@ using Breeze
 using Oceananigans
 using Oceananigans.Units
 
-using AtmosphericProfilesLibrary                       
-using CloudMicrophysics 
+using AtmosphericProfilesLibrary
+using CloudMicrophysics
 using Printf
 
 using Oceananigans.Operators: ∂zᶜᶜᶠ, ℑzᵃᵃᶜ
@@ -45,7 +45,7 @@ p₀ = 101500 # Pa
 reference_constants = Breeze.Thermodynamics.ReferenceStateConstants(base_pressure=p₀, potential_temperature=θ₀)
 buoyancy = Breeze.MoistAirBuoyancy(; reference_constants) #, microphysics)
 
-# Simple precipitation scheme from CloudMicrophysics    
+# Simple precipitation scheme from CloudMicrophysics
 FT = eltype(grid)
 microphysics = CloudMicrophysics.Parameters.Parameters0M{FT}(τ_precip=600, S_0=0, qc_0=0.02)
 @inline precipitation(x, y, z, t, q, params) = remove_precipitation(params, q, 0)
@@ -203,12 +203,12 @@ rh_avg = Field(Average(rh, dims=(1, 2)))
 using GLMakie
 
 fig = Figure(size=(1200, 800), fontsize=12)
-axT = Axis(fig[1, 1], xlabel="T (K)", ylabel="z (m)")
+axT = Axis(fig[1, 1], xlabel="T (ᵒK)", ylabel="z (m)")
 axqˡ = Axis(fig[1, 2], xlabel="qˡ (kg/kg)", ylabel="z (m)")
 axrh = Axis(fig[1, 3], xlabel="rh (%)", ylabel="z (m)")
 axu = Axis(fig[2, 1], xlabel="u, v (m/s)", ylabel="z (m)")
 axq = Axis(fig[2, 2], xlabel="q (kg/kg)", ylabel="z (m)")
-axθ = Axis(fig[2, 3], xlabel="θ (K)", ylabel="z (m)")
+axθ = Axis(fig[2, 3], xlabel="θ (ᵒK)", ylabel="z (m)")
 
 function update_plots!(sim)
     compute!(T_avg)
@@ -302,9 +302,9 @@ if get(ENV, "CI", "false") == "false"
     Nt = length(θt)
 
     fig = Figure(size=(1200, 800), fontsize=12)
-    axθ  = Axis(fig[1, 1], xlabel="θ (K)", ylabel="z (m)")
+    axθ  = Axis(fig[1, 1], xlabel="θ (ᵒK)", ylabel="z (m)")
     axq  = Axis(fig[1, 2], xlabel="q (kg/kg)", ylabel="z (m)")
-    axT  = Axis(fig[2, 1], xlabel="T (K)", ylabel="z (m)")
+    axT  = Axis(fig[2, 1], xlabel="T (ᵒK)", ylabel="z (m)")
     axqˡ = Axis(fig[2, 2], xlabel="qˡ (kg/kg)", ylabel="z (m)")
 
     Nt = length(θt)

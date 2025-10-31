@@ -42,7 +42,7 @@ model = AtmosphereModel(grid; advection) #, buoyancy, tracers = (:θ, :q))
 x₀ = Lx / 2      # Center of bubble in x
 z₀ = 4e3         # Center of bubble in z (2 km height)
 r₀ = 2e3         # Initial radius of bubble (2 km)
-Δθ = 2           # Potential temperature perturbation (K)
+Δθ = 2           # Potential temperature perturbation (ᵒK)
 
 # Background stratification
 N² = 1e-6        # Brunt-Väisälä frequency squared (s⁻²)
@@ -69,15 +69,15 @@ conjure_time_step_wizard!(simulation, cfl=0.7)
 function progress(sim)
     θ = sim.model.tracers.θ
     u, w = sim.model.velocities
-    
+
     θ_max = maximum(θ)
     θ_min = minimum(θ)
     u_max = maximum(abs, u)
     w_max = maximum(abs, w)
-    
+
     msg = @sprintf("Iter: %d, t: %s, Δt: %s, extrema(θ): (%.2f, %.2f) K, max|u|: %.2f m/s, max|w|: %.2f m/s",
                    iteration(sim), prettytime(sim), prettytime(sim.Δt), θ_min, θ_max, u_max, w_max)
-    
+
     @info msg
     return nothing
 end
@@ -115,7 +115,7 @@ run!(simulation)
 # Post-processing and visualization
 if get(ENV, "CI", "false") == "false"
     @info "Creating visualization..."
-    
+
     # Read the output data
     θt = FieldTimeSeries(filename, "θ")
     Tt = FieldTimeSeries(filename, "T")
@@ -123,25 +123,25 @@ if get(ENV, "CI", "false") == "false"
     wt = FieldTimeSeries(filename, "w")
     ζt = FieldTimeSeries(filename, "ζ")
     θ′t = FieldTimeSeries(filename, "θ′")
-    
+
     times = θt.times
     Nt = length(θt)
-    
+
     # Create visualization - expanded to 6 panels
     fig = Figure(size=(1500, 1000), fontsize=12)
-    
+
     # Subplot layout - 3 rows, 2 columns
-    axθ = Axis(fig[1, 1], xlabel="x (km)", ylabel="z (km)", title="Potential Temperature θ (K)")
-    axθ′ = Axis(fig[1, 2], xlabel="x (km)", ylabel="z (km)", title="Temperature Perturbation θ′ (K)")
-    axT = Axis(fig[2, 1], xlabel="x (km)", ylabel="z (km)", title="Temperature T (K)")
+    axθ = Axis(fig[1, 1], xlabel="x (km)", ylabel="z (km)", title="Potential Temperature θ (ᵒK)")
+    axθ′ = Axis(fig[1, 2], xlabel="x (km)", ylabel="z (km)", title="Temperature Perturbation θ′ (ᵒK)")
+    axT = Axis(fig[2, 1], xlabel="x (km)", ylabel="z (km)", title="Temperature T (ᵒK)")
     axζ = Axis(fig[2, 2], xlabel="x (km)", ylabel="z (km)", title="Vorticity ζ (s⁻¹)")
     axu = Axis(fig[3, 1], xlabel="x (km)", ylabel="z (km)", title="Horizontal Velocity u (m/s)")
     axw = Axis(fig[3, 2], xlabel="x (km)", ylabel="z (km)", title="Vertical Velocity w (m/s)")
-    
+
     # Time slider
     slider = Slider(fig[4, 1:2], range=1:Nt, startvalue=1)
     n = slider.value
-    
+
     # Observable fields
     θn = @lift interior(θt[$n], :, 1, :)
     θ′n = @lift interior(θ′t[$n], :, 1, :)
@@ -149,15 +149,15 @@ if get(ENV, "CI", "false") == "false"
     ζn = @lift interior(ζt[$n], :, 1, :)
     un = @lift interior(ut[$n], :, 1, :)
     wn = @lift interior(wt[$n], :, 1, :)
-    
+
     # Grid coordinates
     x = xnodes(θt) ./ 1000  # Convert to km
     z = znodes(θt) ./ 1000  # Convert to km
-    
+
     # Title with time
     title = @lift "Thermal Bubble Evolution - t = $(prettytime(times[$n]))"
     fig[0, :] = Label(fig, title, fontsize=16, tellwidth=false)
-    
+
     # Create heatmaps
     θ_range = (minimum(θt), maximum(θt))
     θ′_range = (minimum(θ′t), maximum(θ′t))
@@ -165,32 +165,32 @@ if get(ENV, "CI", "false") == "false"
     ζ_range = maximum(abs, ζt)
     u_range = maximum(abs, ut)
     w_range = maximum(abs, wt)
-    
+
     hmθ = heatmap!(axθ, x, z, θn, colorrange=θ_range, colormap=:thermal)
     hmθ′ = heatmap!(axθ′, x, z, θ′n, colorrange=θ′_range, colormap=:balance)
     hmT = heatmap!(axT, x, z, Tn, colorrange=T_range, colormap=:thermal)
     hmζ = heatmap!(axζ, x, z, ζn, colorrange=(-ζ_range, ζ_range), colormap=:balance)
     hmu = heatmap!(axu, x, z, un, colorrange=(-u_range, u_range), colormap=:balance)
     hmw = heatmap!(axw, x, z, wn, colorrange=(-w_range, w_range), colormap=:balance)
-    
+
     # Add colorbars
-    Colorbar(fig[1, 3], hmθ, label="θ (K)", vertical=true)
-    Colorbar(fig[1, 4], hmθ′, label="θ′ (K)", vertical=true)
-    Colorbar(fig[2, 3], hmT, label="T (K)", vertical=true)
+    Colorbar(fig[1, 3], hmθ, label="θ (ᵒK)", vertical=true)
+    Colorbar(fig[1, 4], hmθ′, label="θ′ (ᵒK)", vertical=true)
+    Colorbar(fig[2, 3], hmT, label="T (ᵒK)", vertical=true)
     Colorbar(fig[2, 4], hmζ, label="ζ (s⁻¹)", vertical=true)
     Colorbar(fig[3, 3], hmu, label="u (m/s)", vertical=true)
     Colorbar(fig[3, 4], hmw, label="w (m/s)", vertical=true)
-    
+
     # Set axis limits
     for ax in [axθ, axθ′, axT, axζ, axu, axw]
         xlims!(ax, 0, Lx/1000)
         ylims!(ax, 0, Lz/1000)
     end
-    
+
     # Save the figure
     save("thermal_bubble_evolution.png", fig)
     @info "Saved visualization to thermal_bubble_evolution.png"
-    
+
     # Create animation
     @info "Creating animation..."
     CairoMakie.record(fig, "thermal_bubble.mp4", 1:Nt, framerate=10) do nn
