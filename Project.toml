@@ -1,7 +1,7 @@
 name = "Breeze"
 uuid = "660aa2fb-d4c8-4359-a52c-9c057bc511da"
 authors = ["Navid C. Constantinou <navidcy@users.noreply.github.com>, Gregory L. Wagner, Madi, Marty, Callum, and Paul"]
-version = "0.1.0"
+version = "0.1.2"
 
 [deps]
 Adapt = "79e6a3ab-5dfb-504d-930d-738a2a938a0e"
