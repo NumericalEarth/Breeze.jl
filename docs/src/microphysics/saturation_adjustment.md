@@ -16,8 +16,7 @@ Saturation adjustment may be formulated as a nonlinear algebraic equation that r
 where ``Π`` is the Exner function, ``θ`` is potential temperature, ``T`` is temperature,
 ``ℒᵥ₀`` is the reference latent heat of vaporization, ``qᵗ`` is the total specific humidity,
 ``qᵛ⁺`` is the saturation specific humidity, and ``cᵖᵐ`` is the moist air specific heat.
-The condensate specific humidity is ``qˡ = \max(0, qᵗ - qᵛ⁺)``: ``qˡ = 0`` if the air is undersaturated
-with ``qᵗ < qᵛ⁺``.
+The condensate specific humidity is ``qˡ = \max(0, qᵗ - qᵛ⁺)``: ``qˡ = 0`` if the air is undersaturated with ``qᵗ < qᵛ⁺``.
 ``Π`` and ``cᵖᵐ`` depend on the dry and vapor mass fractions ``qᵈ = 1 - qᵗ`` and
 ``qᵛ = qᵗ - qˡ``, and ``qᵛ⁺`` is an increasing function of temperature ``T``.
 Rewriting the potential temperature relation, saturation adjustment requires solving ``r(T) = 0``,
@@ -108,9 +107,11 @@ qˡ = [max(0, qᵗ - qᵛ⁺ᵏ) for qᵛ⁺ᵏ in qᵛ⁺]
 
 fig = Figure()
 
-axT = Axis(fig[1, 1], xlabel="Temperature (K)", ylabel="Height (m)")
-axq⁺ = Axis(fig[1, 2], xlabel="Saturation \n specific humidity \n (kg kg⁻¹)", ylabel="Height (m)")
-axqˡ = Axis(fig[1, 3], xlabel="Liquid \n specific humidity \n (kg kg⁻¹)", ylabel="Height (m)")
+yticks = 0:2e3:1e4
+
+axT = Axis(fig[1, 1]; xlabel="Temperature (K)", yticks, ylabel="Height (m)")
+axq⁺ = Axis(fig[1, 2]; xlabel="Saturation \n specific humidity \n (kg kg⁻¹)", yticks, yticklabelsvisible=false)
+axqˡ = Axis(fig[1, 3]; xlabel="Liquid \n specific humidity \n (kg kg⁻¹)", yticks, yticklabelsvisible=false)
 
 lines!(axT, T, z)
 lines!(axq⁺, qᵛ⁺, z)
