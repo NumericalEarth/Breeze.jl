@@ -5,7 +5,7 @@
 
 <!-- description -->
 <p align="center">
-  <strong>🌬️ Fast and friendly Julia software for atmosphere simulations on CPUs and GPUs. https://numericalearth.github.io/Breeze.jl/dev/</strong>
+  <strong>🌪 Fast and friendly Julia software for atmosphere simulations on CPUs and GPUs. https://numericalearth.github.io/Breeze.jl/dev/</strong>
 </p>
 
 <p align="center">
