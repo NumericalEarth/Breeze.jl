@@ -119,7 +119,7 @@ using CairoMakie
 
 thermo = AtmosphereThermodynamics()
 constants = ReferenceStateConstants(base_pressure=101325, potential_temperature=288)
-grid = RectilinearGrid(size=160, z=(1, 12_000), topology=(Flat, Flat, Bounded))
+grid = RectilinearGrid(size=160, z=(0, 12_000), topology=(Flat, Flat, Bounded))
 
 pᵣ = CenterField(grid)
 ρᵣ = CenterField(grid)
