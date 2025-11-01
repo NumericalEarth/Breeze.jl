@@ -139,14 +139,15 @@ Tᵣ₁ = Field(θ₀ * (pᵣ / p₀)^(Rᵈ / cᵖᵈ))
 Tᵣ₂ = Field(θ₀ * (1 - g * z / (cᵖᵈ * θ₀)))
 
 fig = Figure(resolution = (900, 300))
+
 axT = Axis(fig[1, 1]; xlabel = "Temperature (ᵒK)", ylabel = "Height (m)")
 lines!(axT, Tᵣ₁)
 lines!(axT, Tᵣ₂, linestyle=:dash, color = :orange, linewidth=2)
 
-axp = Axis(fig[1, 2]; xlabel = "Pressure (Pa)", ylabel = "")
-lines!(axp, pᵣ)
+axp = Axis(fig[1, 2]; xlabel = "Pressure (10⁵ Pa)")
+lines!(axp, pᵣ / 1e5)
 
-axρ = Axis(fig[1, 3]; xlabel = "Density (kg m⁻³)", ylabel = "")
+axρ = Axis(fig[1, 3]; xlabel = "Density (kg m⁻³)")
 lines!(axρ, ρᵣ)
 
 fig
