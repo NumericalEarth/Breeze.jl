@@ -267,7 +267,6 @@ This is what it looks like:
 ```@example
 using Breeze
 using Breeze.MoistAirBuoyancies: saturation_specific_humidity
-using CairoMakie
 
 thermo = AtmosphereThermodynamics()
 ref = ReferenceStateConstants(base_pressure=101325, potential_temperature=288)
@@ -275,6 +274,8 @@ ref = ReferenceStateConstants(base_pressure=101325, potential_temperature=288)
 z = 0
 T = collect(273.2:0.1:313.2)
 qᵛ⁺ = [saturation_specific_humidity(Tⁱ, z, ref, thermo, thermo.liquid) for Tⁱ in T]
+
+using CairoMakie
 
 fig = Figure()
 ax = Axis(fig[1, 1], xlabel="Temperature (ᵒK)", ylabel="Saturation specific humidity qᵛ⁺ (kg kg⁻¹)")

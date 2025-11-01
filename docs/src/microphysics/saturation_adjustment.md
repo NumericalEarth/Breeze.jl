@@ -1,10 +1,5 @@
 # Warm-phase saturation adjustment
 
-```@setup microphysics
-using CairoMakie
-CairoMakie.activate!(type = "svg")
-```
-
 Warm-phase saturation adjustment is a model for water droplet nucleation that assumes that water vapor in excess of the saturation specific humidity is instantaneously converted to liquid water.
 Mixed-phase saturation adjustment is described by [Chammas2023](@citet).
 Saturation adjustment may be formulated as a nonlinear algebraic equation that relates temperature, potential temperature, and total specific humidity, derived from the definition of liquid potential temperature,
@@ -103,9 +98,11 @@ T = [temperature(HeightReferenceThermodynamicState(θ, qᵗ, zᵏ), ref, thermo)
 qᵛ⁺ = [saturation_specific_humidity(T[k], z[k], ref, thermo, thermo.liquid) for k = 1:length(z)]
 qˡ = [max(0, qᵗ - qᵛ⁺ᵏ) for qᵛ⁺ᵏ in qᵛ⁺]
 
+Γᵈ = thermo.gravitational_acceleration / thermo.dry_air.heat_capacity # dry adiabatic lapse rate
+
 fig = Figure()
 
-yticks = 0:2e3:10e3
+yticks = 0:2e3:20e3
 axT = Axis(fig[1, 1]; xlabel="Temperature (ᵒK)", ylabel="Height (m)", yticks)
 axq⁺ = Axis(fig[1, 2]; xlabel="Saturation \n specific humidity \n (kg kg⁻¹)",
                        yticks, yticklabelsvisible=false)
@@ -113,6 +110,7 @@ axqˡ = Axis(fig[1, 3]; xlabel="Liquid \n specific humidity \n (kg kg⁻¹)",
                        yticks, yticklabelsvisible=false)
 
 lines!(axT, T, z)
+lines!(axT, T[1] .- Γᵈ*z, z, linestyle=:dash, color = :grey, linewidth=2)
 lines!(axq⁺, qᵛ⁺, z)
 lines!(axqˡ, qˡ, z)
 

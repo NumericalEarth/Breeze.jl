@@ -2,6 +2,10 @@ using Breeze
 using Documenter
 using DocumenterCitations
 
+using CairoMakie
+CairoMakie.activate!(type = "svg")
+set_theme!(Theme(linewidth = 3))
+
 DocMeta.setdocmeta!(Breeze, :DocTestSetup, :(using Breeze); recursive=true)
 
 bib_filepath = joinpath(dirname(@__FILE__), "src", "breeze.bib")
