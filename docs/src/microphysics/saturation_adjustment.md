@@ -27,7 +27,7 @@ r(T) = T - θ Π - \frac{ℒᵥ₀}{cᵖᵐ} \max[0, qᵗ - qᵛ⁺(T)] .
 
 We use a secant method after checking for ``θ = 0`` and ``qˡ = 0`` given the guess ``T₁ = θ Π(qᵗ)``.
 If ``qᵗ > qᵛ⁺(T₁)``, then we are guaranteed that ``T > T₁`` because ``qᵛ⁺`` is an increasing function of ``T``.
-We initialize the secant iteration with a second guess ``T₂ = Θ Π - [qᵗ - qᵛ⁺(T₁)] ℒᵥ₀ / cᵖᵐ``.
+We initialize the secant iteration with a second guess ``T₂ = θ Π - [qᵗ - qᵛ⁺(T₁)] ℒᵥ₀ / cᵖᵐ``.
 
 
 As an example, we consider an air parcel at sea-level and with potential temperature of ``θ = 290``ᵒK, within a reference state with base pressure of 101325 Pa and a reference potential temperature ``288``ᵒK.
