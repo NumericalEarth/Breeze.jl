@@ -102,7 +102,7 @@ qˡ = [max(0, qᵗ - qᵛ⁺ᵏ) for qᵛ⁺ᵏ in qᵛ⁺]
 
 fig = Figure()
 
-yticks = 0:2e3:20e3
+yticks = 0:2e3:10e3
 axT = Axis(fig[1, 1]; xlabel="Temperature (ᵒK)", ylabel="Height (m)", yticks)
 axq⁺ = Axis(fig[1, 2]; xlabel="Saturation \n specific humidity \n (kg kg⁻¹)",
                        yticks, yticklabelsvisible=false)
