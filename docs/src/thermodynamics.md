@@ -27,20 +27,20 @@ p = ρ R T .
 
 Above, ``R = ℛ / m`` is the specific gas constant given the
 [molar gas constant](https://en.wikipedia.org/wiki/Gas_constant)
-``ℛ ≈ 8.31 J / K / \mathrm{mol}`` and molar mass ``m`` of the gas species under consideration.
+``ℛ ≈ 8.31\;\mathrm{J} \, \mathrm{K}^{-1} \, \mathrm{mol}^{-1}`` and molar mass ``m`` of the gas species under consideration.
 
 The [first law of thermodynamics](https://en.wikipedia.org/wiki/First_law_of_thermodynamics),
 aka "conservation of energy", states that infinitesimal changes
-in internal energy ``\mathrm{d} ê`` are related to infinestimal changes
+in internal energy ``\mathrm{d} ê`` are related to infinitesimal changes
 in temperature ``\mathrm{d} T`` and pressure ``\mathrm{d} p`` according to
 
 ```math
 \mathrm{d} ê = cᵖ \mathrm{d} T - \frac{\mathrm{d} p}{\rho}
 ```
 
-where ``cᵖ`` is the specific heat capacity of the gas in question.
+where ``cᵖ`` is the specific heat capacity at constant pressure of the gas in question.
 
-For example, to represent dry air typical for Earth, with molar mass ``m = 0.029`` and heat capacity ``c^p = 1005``,
+For example, to represent dry air typical for Earth, with molar mass ``m = 0.029 \; \mathrm{kg} \, \mathrm{mol}^{-1}`` and heat capacity ``c^p = 1005 \; \mathrm{J} \, \mathrm{kg}^{-1} \, \mathrm{K}^{-1}``,
 we write
 
 ```@example thermo
@@ -48,22 +48,23 @@ using Breeze.Thermodynamics: IdealGas
 dry_air = IdealGas(molar_mass=0.029, heat_capacity=1005)
 ```
 
-### Adiabatic transformations and potential temperature, ``θ``
+### Adiabatic transformations and potential temperature
 
 Within adiabatic transformations, ``\mathrm{d} ê = 0``.
 Combining the ideal gas law with conservation of energy then yields
 
 ```math
-\frac{\mathrm{d} p}{\mathrm{d} T} = ρ cᵖ = \frac{p}{R T} cᵖ \qquad \text{which implies} \qquad T ∼ \left ( \frac{p}{p₀} \right )^{R / cᵖ} .
+\frac{\mathrm{d} p}{\mathrm{d} T} = ρ cᵖ = \frac{p}{R T} cᵖ, \qquad \text{which implies} \qquad T ∼ \left ( \frac{p}{p₀} \right )^{R / cᵖ} .
 ```
 
-where ``p₀`` is some reference pressure. As a result, the _potential temperature_
+where ``p₀`` is some reference pressure. As a result, the _potential temperature_, ``\theta``
 
 ```math
-θ ≡ T \left ( \frac{p₀}{p} \right )^{Rᵈ / cᵖ} ≡ \frac{T}{Π}, \quad where \quad Π ≡ \left ( \frac{p}{p₀} \right )^{Rᵈ / cᵖ} ,
+θ ≡ T \left ( \frac{p₀}{p} \right )^{Rᵈ / cᵖ} ≡ \frac{T}{Π}, \quad \text{where} \quad Π ≡ \left ( \frac{p}{p₀} \right )^{Rᵈ / cᵖ} ,
 ```
 
 is constant under adiabatic transformations, defined such that ``θ(z=0) = T(z=0)``.
+Above, we have also defined the Exner function, ``Π``,
 
 ### Hydrostatic balance
 
@@ -118,7 +119,7 @@ using CairoMakie
 
 thermo = AtmosphereThermodynamics()
 constants = ReferenceStateConstants(base_pressure=101325, potential_temperature=288)
-grid = RectilinearGrid(size=160, z=(1, 12_000), topology=(Flat, Flat, Bounded))
+grid = RectilinearGrid(size=160, z=(0, 12_000), topology=(Flat, Flat, Bounded))
 
 pᵣ = CenterField(grid)
 ρᵣ = CenterField(grid)
@@ -138,14 +139,15 @@ Tᵣ₁ = Field(θ₀ * (pᵣ / p₀)^(Rᵈ / cᵖᵈ))
 Tᵣ₂ = Field(θ₀ * (1 - g * z / (cᵖᵈ * θ₀)))
 
 fig = Figure(resolution = (900, 300))
+
 axT = Axis(fig[1, 1]; xlabel = "Temperature (ᵒK)", ylabel = "Height (m)")
 lines!(axT, Tᵣ₁)
-lines!(axT, Tᵣ₂)
+lines!(axT, Tᵣ₂, linestyle=:dash, color = :orange, linewidth=2)
 
-axp = Axis(fig[1, 2]; xlabel = "Pressure (Pa)", ylabel = "")
-lines!(axp, pᵣ)
+axp = Axis(fig[1, 2]; xlabel = "Pressure (10⁵ Pa)")
+lines!(axp, pᵣ / 1e5)
 
-axρ = Axis(fig[1, 3]; xlabel = "Density (kg m⁻³)", ylabel = "")
+axρ = Axis(fig[1, 3]; xlabel = "Density (kg m⁻³)")
 lines!(axρ, ρᵣ)
 
 fig
@@ -194,7 +196,7 @@ where ``ρ`` is total density of the fluid including dry air, vapor, and condens
 It's then convenient to introduce the "mixture" gas constant ``Rᵐ(qᵛ)`` such that
 
 ```math
-p = ρ Rᵐ T \qquad \mathrm{where} \qquad Rᵐ ≡ qᵈ Rᵈ + qᵛ Rᵛ .
+p = ρ Rᵐ T, \qquad \text{where} \qquad Rᵐ ≡ qᵈ Rᵈ + qᵛ Rᵛ .
 ```
 
 In "clear" (not cloudy) air, we have that ``qᵈ = 1 - qᵛ``.
@@ -267,7 +269,6 @@ This is what it looks like:
 ```@example
 using Breeze
 using Breeze.MoistAirBuoyancies: saturation_specific_humidity
-using CairoMakie
 
 thermo = AtmosphereThermodynamics()
 ref = ReferenceStateConstants(base_pressure=101325, potential_temperature=288)
@@ -275,6 +276,8 @@ ref = ReferenceStateConstants(base_pressure=101325, potential_temperature=288)
 z = 0
 T = collect(273.2:0.1:313.2)
 qᵛ⁺ = [saturation_specific_humidity(Tⁱ, z, ref, thermo, thermo.liquid) for Tⁱ in T]
+
+using CairoMakie
 
 fig = Figure()
 ax = Axis(fig[1, 1], xlabel="Temperature (ᵒK)", ylabel="Saturation specific humidity qᵛ⁺ (kg kg⁻¹)")
