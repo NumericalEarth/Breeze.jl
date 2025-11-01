@@ -26,11 +26,6 @@ Pkg.add("https://github.com/NumericalEarth/Breeze.jl.git")
 
 A basic free convection simulation:
 
-```@setup intro
-using CairoMakie
-CairoMakie.activate!(type = "svg")
-```
-
 ```@example intro
 using Oceananigans
 using Oceananigans.Units
