@@ -1,7 +1,7 @@
 name = "Breeze"
 uuid = "660aa2fb-d4c8-4359-a52c-9c057bc511da"
-authors = ["Navid C. Constantinou <navidcy@users.noreply.github.com>, Gregory L. Wagner, Madi, Marty, Callum, and Paul"]
 version = "0.1.2"
+authors = ["Navid C. Constantinou <navidcy@users.noreply.github.com>, Gregory L. Wagner, Madi, Marty, Callum, and Paul"]
 
 [deps]
 Adapt = "79e6a3ab-5dfb-504d-930d-738a2a938a0e"
@@ -17,7 +17,7 @@ RootSolvers = "7181ea78-2dcb-4de3-ab41-2b8ab5a31e74"
 Adapt = "4.3.0"
 AtmosphericProfilesLibrary = "0.1.7"
 CloudMicrophysics = "0.22.13"
-JLD2 = "0.5.13"
+JLD2 = "0.5.13, 0.6"
 Oceananigans = "0.100"
 Printf = "1"
 RootSolvers = "0.4.4"
