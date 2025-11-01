@@ -95,9 +95,10 @@ AtmosphereModel{CPU, RectilinearGrid}(time = 0 seconds, iteration = 0)
 ├── grid: 8×8×8 RectilinearGrid{Float64, Periodic, Periodic, Bounded} on CPU with 3×3×3 halo
 ├── formulation: AnelasticFormulation(p₀=101325.0, θᵣ=288.0)
 ├── timestepper: RungeKutta3TimeStepper
-├── advection scheme: WENO(order=5)
+├── advection scheme: WENO{3, Float64, Float32}(order=5)
 ├── tracers: ()
-└── coriolis: Nothing
+├── coriolis: Nothing
+└── microphysics: WarmPhaseSaturationAdjustment
 ```
 """
 function AtmosphereModel(grid;
@@ -198,6 +199,7 @@ end
 
 function Base.show(io::IO, model::AtmosphereModel)
     TS = nameof(typeof(model.timestepper))
+    Mic = nameof(typeof(model.microphysics))
     tracernames = prettykeys(model.tracers)
 
     print(io, summary(model), "\n",
@@ -206,5 +208,6 @@ function Base.show(io::IO, model::AtmosphereModel)
         "├── timestepper: ", TS, "\n",
         "├── advection scheme: ", summary(model.advection), "\n",
         "├── tracers: ", tracernames, "\n",
-        "└── coriolis: ", summary(model.coriolis))
+        "├── coriolis: ", summary(model.coriolis), "\n",
+        "└── microphysics: ", Mic)
 end
