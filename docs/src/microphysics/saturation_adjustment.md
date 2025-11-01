@@ -98,7 +98,8 @@ T = [temperature(HeightReferenceThermodynamicState(θ, qᵗ, zᵏ), ref, thermo)
 qᵛ⁺ = [saturation_specific_humidity(T[k], z[k], ref, thermo, thermo.liquid) for k = 1:length(z)]
 qˡ = [max(0, qᵗ - qᵛ⁺ᵏ) for qᵛ⁺ᵏ in qᵛ⁺]
 
-Γᵈ = thermo.gravitational_acceleration / thermo.dry_air.heat_capacity # dry adiabatic lapse rate
+cᵖᵈ = thermo.dry_air.heat_capacity
+g = thermo.gravitational_acceleration
 
 fig = Figure()
 
@@ -110,7 +111,7 @@ axqˡ = Axis(fig[1, 3]; xlabel="Liquid \n specific humidity \n (kg kg⁻¹)",
                        yticks, yticklabelsvisible=false)
 
 lines!(axT, T, z)
-lines!(axT, T[1] .- Γᵈ*z, z, linestyle=:dash, color = :grey, linewidth=2)
+lines!(axT, T[1] .- g * z / cᵖᵈ, z, linestyle=:dash, color=:orange, linewidth=2)
 lines!(axq⁺, qᵛ⁺, z)
 lines!(axqˡ, qˡ, z)
 
