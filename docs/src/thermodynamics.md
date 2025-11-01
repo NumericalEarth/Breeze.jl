@@ -54,13 +54,13 @@ Within adiabatic transformations, ``\mathrm{d} ê = 0``.
 Combining the ideal gas law with conservation of energy then yields
 
 ```math
-\frac{\mathrm{d} p}{\mathrm{d} T} = ρ cᵖ = \frac{p}{R T} cᵖ \qquad \text{which implies} \qquad T ∼ \left ( \frac{p}{p₀} \right )^{R / cᵖ} .
+\frac{\mathrm{d} p}{\mathrm{d} T} = ρ cᵖ = \frac{p}{R T} cᵖ, \qquad \text{which implies} \qquad T ∼ \left ( \frac{p}{p₀} \right )^{R / cᵖ} .
 ```
 
 where ``p₀`` is some reference pressure. As a result, the _potential temperature_
 
 ```math
-θ ≡ T \left ( \frac{p₀}{p} \right )^{Rᵈ / cᵖ} ≡ \frac{T}{Π}, \quad where \quad Π ≡ \left ( \frac{p}{p₀} \right )^{Rᵈ / cᵖ} ,
+θ ≡ T \left ( \frac{p₀}{p} \right )^{Rᵈ / cᵖ} ≡ \frac{T}{Π}, \quad \text{where} \quad Π ≡ \left ( \frac{p}{p₀} \right )^{Rᵈ / cᵖ} ,
 ```
 
 is constant under adiabatic transformations, defined such that ``θ(z=0) = T(z=0)``.
@@ -194,7 +194,7 @@ where ``ρ`` is total density of the fluid including dry air, vapor, and condens
 It's then convenient to introduce the "mixture" gas constant ``Rᵐ(qᵛ)`` such that
 
 ```math
-p = ρ Rᵐ T \qquad \mathrm{where} \qquad Rᵐ ≡ qᵈ Rᵈ + qᵛ Rᵛ .
+p = ρ Rᵐ T, \qquad \text{where} \qquad Rᵐ ≡ qᵈ Rᵈ + qᵛ Rᵛ .
 ```
 
 In "clear" (not cloudy) air, we have that ``qᵈ = 1 - qᵛ``.
