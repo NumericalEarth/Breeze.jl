@@ -3,12 +3,12 @@ using ..Thermodynamics:
     mixture_heat_capacity,
     mixture_gas_constant
 
+using Oceananigans.Architectures: architecture
 using Oceananigans.BoundaryConditions: fill_halo_regions!, compute_x_bcs!, compute_y_bcs!, compute_z_bcs!
 using Oceananigans.ImmersedBoundaries: mask_immersed_field!
-using Oceananigans.Architectures: architecture
 
-import Oceananigans.TimeSteppers: update_state!, compute_flux_bc_tendencies!
 import Oceananigans: fields, prognostic_fields
+import Oceananigans.TimeSteppers: update_state!, compute_flux_bc_tendencies!
 
 const AnelasticModel = AtmosphereModel{<:AnelasticFormulation}
 
@@ -113,7 +113,7 @@ function compute_tendencies!(model::AnelasticModel)
                    model.momentum,
                    model.coriolis,
                    model.clock,
-                   fields(model))    
+                   fields(model))
 
     pₕ′ = model.hydrostatic_pressure_anomaly
     ρᵣ = model.formulation.reference_density
@@ -178,7 +178,7 @@ end
                                      hydrostatic_pressure_anomaly)
 
     # Note: independent of x
-    ρᵣ = @inbounds reference_density[i, j, k]    
+    ρᵣ = @inbounds reference_density[i, j, k]
 
     return ( - div_𝐯u(i, j, k, grid, advection, velocities, momentum.ρu)
              - x_f_cross_U(i, j, k, grid, coriolis, momentum)
@@ -198,7 +198,7 @@ end
                                      hydrostatic_pressure_anomaly)
 
     # Note: independent of y
-    ρᵣ = @inbounds reference_density[i, j, k]    
+    ρᵣ = @inbounds reference_density[i, j, k]
 
     return ( - div_𝐯v(i, j, k, grid, advection, velocities, momentum.ρv)
              - y_f_cross_U(i, j, k, grid, coriolis, momentum)
@@ -222,7 +222,7 @@ end
 
     ρᵣᶜᶜᶠ = ℑzᵃᵃᶠ(i, j, k, grid, reference_density)
     bᶜᶜᶠ = ℑzᵃᵃᶠ(i, j, k, grid, buoyancy,
-                 formulation, temperature, specific_humidity, thermo)    
+                 formulation, temperature, specific_humidity, thermo)
 
     return ( - div_𝐯w(i, j, k, grid, advection, velocities, momentum.ρw)
              - z_f_cross_U(i, j, k, grid, coriolis, momentum)
@@ -259,10 +259,10 @@ end
              + forcing(i, j, k, grid, clock, model_fields))
 end
 =#
-                                        
+
 """ Apply boundary conditions by adding flux divergences to the right-hand-side. """
 function compute_flux_bc_tendencies!(model::AtmosphereModel)
-    
+
     Gⁿ    = model.timestepper.Gⁿ
     arch  = model.architecture
     clock = model.clock

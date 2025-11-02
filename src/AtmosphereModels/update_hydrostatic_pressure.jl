@@ -2,10 +2,9 @@
 ##### update pressure
 #####
 
-using Oceananigans.Operators: Δzᶜᶜᶜ, Δzᶜᶜᶠ, ℑzᵃᵃᶠ
+using Oceananigans.Grids: topology, XFlatGrid, YFlatGrid
 using Oceananigans.ImmersedBoundaries: PartialCellBottom, ImmersedBoundaryGrid
-using Oceananigans.Grids: topology
-using Oceananigans.Grids: XFlatGrid, YFlatGrid
+using Oceananigans.Operators: Δzᶜᶜᶜ, Δzᶜᶜᶠ, ℑzᵃᵃᶠ
 using Oceananigans.Utils: KernelParameters
 
 const c = Center()

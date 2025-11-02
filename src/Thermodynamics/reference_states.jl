@@ -18,10 +18,11 @@ function ReferenceStateConstants(FT = Oceananigans.defaults.FloatType;
 end
 
 """
-    reference_density(ref, thermo)
+    reference_density(z, ref::ReferenceStateConstants, thermo)
 
-Compute the reference density associated with the reference pressure and potential temperature.
-The reference density is defined as the density of dry air at the reference pressure and temperature.
+Compute the reference density at height `z` that associated with the reference pressure and
+potential temperature. The reference density is defined as the density of dry air at the
+reference pressure and temperature.
 """
 @inline function reference_density(z, ref::ReferenceStateConstants, thermo)
     Rᵈ = dry_air_gas_constant(thermo)

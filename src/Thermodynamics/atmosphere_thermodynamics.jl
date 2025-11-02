@@ -160,7 +160,7 @@ end
 
 Create `AtmosphereThermodynamics` with parameters that represent gaseous mixture of dry "air"
 and vapor, as well as condensed liquid and solid phases.
-The `triple_point_temperature` and `triple_point_pressure` may be combined with 
+The `triple_point_temperature` and `triple_point_pressure` may be combined with
 internal energy parameters for condensed phases to compute the vapor pressure
 at the boundary between vapor and a homogeneous sample of the condensed phase.
 The `gravitational_acceleration` parameter is included to compute reference_state
@@ -234,7 +234,7 @@ const NonCondensingAtmosphereThermodynamics{FT} = AtmosphereThermodynamics{FT, N
 """
     mixture_gas_constant(q, thermo)
 
-Compute the gas constant of moist air given the specific humidity `q` and 
+Compute the gas constant of moist air given the specific humidity `q` and
 thermodynamic parameters `thermo`.
 
 The mixture gas constant is calculated as a weighted average of the dry air
@@ -246,7 +246,7 @@ R_m = R_d (1 - q) + R_v q
 
 where:
 - `R_d` is the dry air gas constant
-- `R_v` is the water vapor gas constant  
+- `R_v` is the water vapor gas constant
 - `q` is the specific humidity (mass fraction of water vapor)
 
 # Arguments

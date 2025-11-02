@@ -1,5 +1,5 @@
 """
-    saturation_vapor_pressure(T, thermo)
+    saturation_vapor_pressure(T, thermo, phase::CondensedPhase)
 
 Compute the Saturation vapor pressure over a liquid surface by integrating
 the Clausius-Clapeyron relation,
