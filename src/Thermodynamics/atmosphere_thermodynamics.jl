@@ -166,10 +166,11 @@ at the boundary between vapor and a homogeneous sample of the condensed phase.
 The `gravitational_acceleration` parameter is included to compute reference_state
 quantities associated with hydrostatic balance.
 
-The Clausius-Clapeyron relation describes the pressure-temperature relationship during phase transitions:
+The Clausius-Clapeyron relation describes the pressure-temperature relationship during phase
+transitions:
 
-```
-    d[log(pⁱ⁺)]/dT = ℒⁱ / (Rⁱ T²)
+```math
+d[log(pⁱ⁺)]/dT = ℒⁱ / (Rⁱ T²)
 ```
 
 where:
