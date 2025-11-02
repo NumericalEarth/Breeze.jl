@@ -39,26 +39,26 @@ in temperature ``\mathrm{d} T`` and pressure ``\mathrm{d} p`` according to[^1]
 ```
 
 [^1]: The conservation of energy states that any external energy added to a gas must be equal to the
-      change of its internal energy and the work done to it by pressure forces ``p \mathrm{d}V``.
+      change of its internal energy and the work done to it by pressure forces ``p \, \mathrm{d}V``.
       For atmospheric flows it's more convenient to express everything per unit mass.
       Assuming the mass of the fluid is conserved, we have that the work done by pressure forces per
-      unit mass is ``p \mathrm{d}(\rho^{-1})`` and the internal energy per unit mass is
+      unit mass is ``p \, \mathrm{d}(\rho^{-1})`` and the internal energy per unit mass is
       ``cᵛ \mathrm{d}T``. Therefore, if we denote ``\mathrm{d}Q`` the changes in external energy
       per unit mass, we have that:
 
     ```math
-    \mathrm{d}Q = cᵛ \mathrm{d}T + p \mathrm{d}(ρ^{-1})
+    \mathrm{d}Q = cᵛ \mathrm{d}T + p \, \mathrm{d}(ρ^{-1})
     ```
 
-      By using ``\mathrm{d}(p / ρ) = p \mathrm{d}(ρ^{-1}) + ρ^{-1} \mathrm{d}p`` and the ideal
-      gass law, we can rewrite the conservation law above as:
+      By utilising ``\mathrm{d}(p / ρ) = p \, \mathrm{d}(ρ^{-1}) + ρ^{-1} \mathrm{d}p`` and using
+      the ideal gas, we can rewrite the above conservation law as:
 
     ```math
     \mathrm{d}Q = (cᵛ + R) \mathrm{d}T - ρ^{-1} \mathrm{d}p
     ```
 
-      which is the expression we used above after noting that the specific heat capacities under
-      constant pressure and under constant volume are related by ``cᵖ \equiv cᵛ + R``.
+      which is the expression in the main text after noting that the specific heat capacities under
+      constant pressure and under constant volume are related via ``cᵖ \equiv cᵛ + R``.
 
 
 where ``cᵖ`` is the specific heat capacity at constant pressure of the gas in question.
