@@ -170,15 +170,15 @@ The Clausius-Clapeyron relation describes the pressure-temperature relationship 
 transitions:
 
 ```math
-d[log(pⁱ⁺)]/dT = ℒⁱ / (Rⁱ T²)
+d[\\log(pⁱ⁺)] / dT = ℒⁱ / (Rⁱ T²)
 ```
 
 where:
 
-- `pⁱ⁺` is the saturation vapor pressure for a transition between vapor and the `ⁱ`th phase
-- `T` is temperature
-- `ℒⁱ` is the latent heat of vaporization
-- `Rⁱ` is the specific gas constant for the `ⁱ`th phase
+- ``pⁱ⁺`` is the saturation vapor pressure for a transition between vapor and the ``i``-th phase
+- ``T`` is temperature
+- ``ℒⁱ`` is the latent heat of vaporization
+- ``Rⁱ`` is the specific gas constant for the ``i``-th phase
 
 For water vapor, this integrates to:
 
@@ -194,7 +194,6 @@ where
 Note: any reference values for pressure and temperature can be used in principle.
 The advantage of using reference values at the triple point is that the same values
 can then be used for both condensation (vapor → liquid) and deposition (vapor → ice).
-
 """
 function AtmosphereThermodynamics(FT = Oceananigans.defaults.FloatType;
                                   molar_gas_constant = 8.314462618,

@@ -11,7 +11,14 @@ dp/dT = ℒᵛ / (Rᵛ T^2)
 which integrates to the expression
 
 ```math
-p(T) = pᵗʳ \\left ( \\frac{T}{Tᵗʳ} \\right )^{aᵛ} \\exp \\left [ ℒᵛ (1/Tᵗʳ - 1/T) \\right ]
+p(T) = pᵗʳ \\left ( \\frac{T}{Tᵗʳ} \\right )^{aᵛ} \\exp \\left [ bᵛ (1/Tᵗʳ - 1/T) \\right ]
+```
+
+where
+
+```math
+aᵛ ≡ (cᵖᵛ - cᵖˡ) / Rᵛ \\\\
+bᵛ ≡ ℒ₀ / Rᵛ - aᵛ T₀
 ```
 """
 @inline function saturation_vapor_pressure(T, thermo, phase::CondensedPhase)
