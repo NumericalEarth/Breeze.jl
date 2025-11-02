@@ -9,12 +9,12 @@ using ..Thermodynamics:
 
 using Oceananigans
 using Oceananigans.Advection: Centered, adapt_advection_order
+using Oceananigans.Architectures: AbstractArchitecture
+using Oceananigans.BoundaryConditions: FieldBoundaryConditions, regularize_field_boundary_conditions
 using Oceananigans.Grids: ZDirection
 using Oceananigans.Models: AbstractModel
-using Oceananigans.Architectures: AbstractArchitecture
-using Oceananigans.TimeSteppers: TimeStepper
-using Oceananigans.BoundaryConditions: FieldBoundaryConditions, regularize_field_boundary_conditions
 using Oceananigans.Solvers: FourierTridiagonalPoissonSolver, HomogeneousNeumannFormulation
+using Oceananigans.TimeSteppers: TimeStepper
 using Oceananigans.Utils: launch!
 
 using KernelAbstractions: @kernel, @index
@@ -81,10 +81,11 @@ end
                     timestepper = :RungeKutta3)
 
 Return an AtmosphereModel that uses the anelastic approximation following
-[Pauluis (2008)](https://journals.ametsoc.org/view/journals/atsc/65/8/200s7jas2475.1.xml).
+[Pauluis2008](@citet).
 
 Example
 =======
+
 ```jldoctest
 julia> using Breeze, Breeze.AtmosphereModels, Oceananigans
 
@@ -100,6 +101,11 @@ AtmosphereModel{CPU, RectilinearGrid}(time = 0 seconds, iteration = 0)
 ├── coriolis: Nothing
 └── microphysics: WarmPhaseSaturationAdjustment
 ```
+
+References
+==========
+Pauluis, O. (2008). Thermodynamic consistency of the anelastic approximation for a moist atmosphere.
+  Journal of the Atmospheric Sciences 65, 2719–2729.
 """
 function AtmosphereModel(grid;
                          clock = Clock(grid),
