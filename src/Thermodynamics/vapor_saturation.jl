@@ -1,19 +1,20 @@
 """
     saturation_vapor_pressure(T, thermo, phase::CondensedPhase)
 
-Compute the saturation vapor pressure over a liquid surface by integrating
+Compute the saturation vapor pressure ``pᵛ⁺`` over a liquid surface by integrating
 the Clausius-Clapeyron relation,
 
 ```math
-dp / dT = ℒᵛ(T) / (Rᵛ T^2)
+dpᵛ⁺ / dT = pᵛ⁺ ℒᵛ(T) / (Rᵛ T^2)
 ```
 
 where ``ℒᵛ(T) = ℒᵛ(T=0) + Δcᵖ T``, with ``Δcᵖ ≡ (cᵖᵛ - cᵖˡ)``.
 
-We can integrate the above from the triple point, i.e., ``p(Tᵗʳ) = pᵗʳ`` to get
+The saturation vapor pressure ``pᵛ⁺`` is obtained after integrating the above from
+the triple point, i.e., ``p(Tᵗʳ) = pᵗʳ`` to get
 
 ```math
-p(T) = pᵗʳ \\left ( \\frac{T}{Tᵗʳ} \\right )^{Δcᵖ / Rᵛ} \\exp \\left [ (1/Tᵗʳ - 1/T) ℒᵛ(T=0) / Rᵛ \\right ]
+pᵛ⁺(T) = pᵗʳ \\left ( \\frac{T}{Tᵗʳ} \\right )^{Δcᵖ / Rᵛ} \\exp \\left [ (1/Tᵗʳ - 1/T) ℒᵛ(T=0) / Rᵛ \\right ]
 ```
 """
 @inline function saturation_vapor_pressure(T, thermo, phase::CondensedPhase)
