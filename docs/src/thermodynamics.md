@@ -31,20 +31,21 @@ Above, ``R ≡ ℛ / m`` is the specific gas constant given the
 
 The [first law of thermodynamics](https://en.wikipedia.org/wiki/First_law_of_thermodynamics),
 aka "conservation of energy", states that an infinitesimal change in the
-external energy ``\mathrm{d} \mathcal{Q}`` are related to infinitesimal changes
+external heat changes ``\mathrm{d} \mathcal{Q}`` are related to infinitesimal changes
 in temperature ``\mathrm{d} T`` and pressure ``\mathrm{d} p`` according to:[^1]
 
 ```math
 \mathrm{d} \mathcal{Q} = cᵖ \mathrm{d} T - \frac{\mathrm{d} p}{\rho} ,
 ```
 
-[^1]: The conservation of energy states that any external energy changes to a gas must equal the sum
+[^1]: The conservation of energy states that any external heat input into the gas must equal the sum
       of the change of the gas's internal energy and the work done to the gas by pressure forces,
-      ``p \, \mathrm{d}V``.
+      ``p \, \mathrm{d} V``.
       For atmospheric flows it's convenient to express everything per unit mass. Assuming the mass of
       the fluid is conserved, we have that the work done by pressure forces per unit mass is
-      ``p \, \mathrm{d}(\rho^{-1})`` and the internal energy per unit mass is ``cᵛ \mathrm{d}T``.
-      Therefore, if we denote ``\mathrm{d} \mathcal{Q}`` the changes in external energy per unit mass, we have:
+      ``p \, \mathrm{d}(\rho^{-1})`` and the internal energy per unit mass is ``cᵛ \mathrm{d} T``.
+      Therefore, if we denote ``\mathrm{d} \mathcal{Q}`` the external heat change per unit mass,
+      we have:
 
     ```math
     \mathrm{d} \mathcal{Q} = cᵛ \mathrm{d}T + p \, \mathrm{d}(ρ^{-1}) .
