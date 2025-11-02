@@ -31,11 +31,11 @@ Above, ``R ≡ ℛ / m`` is the specific gas constant given the
 
 The [first law of thermodynamics](https://en.wikipedia.org/wiki/First_law_of_thermodynamics),
 aka "conservation of energy", states that an infinitesimal change in the
-external energy ``\mathrm{d} Q`` are related to infinitesimal changes
+external energy ``\mathrm{d} \mathcal{Q}`` are related to infinitesimal changes
 in temperature ``\mathrm{d} T`` and pressure ``\mathrm{d} p`` according to:[^1]
 
 ```math
-\mathrm{d} Q = cᵖ \mathrm{d} T - \frac{\mathrm{d} p}{\rho} ,
+\mathrm{d} \mathcal{Q} = cᵖ \mathrm{d} T - \frac{\mathrm{d} p}{\rho} ,
 ```
 
 [^1]: The conservation of energy states that any external energy changes to a gas must equal the sum
@@ -44,17 +44,17 @@ in temperature ``\mathrm{d} T`` and pressure ``\mathrm{d} p`` according to:[^1]
       For atmospheric flows it's convenient to express everything per unit mass. Assuming the mass of
       the fluid is conserved, we have that the work done by pressure forces per unit mass is
       ``p \, \mathrm{d}(\rho^{-1})`` and the internal energy per unit mass is ``cᵛ \mathrm{d}T``.
-      Therefore, if we denote ``\mathrm{d}Q`` the changes in external energy per unit mass, we have:
+      Therefore, if we denote ``\mathrm{d} \mathcal{Q}`` the changes in external energy per unit mass, we have:
 
     ```math
-    \mathrm{d}Q = cᵛ \mathrm{d}T + p \, \mathrm{d}(ρ^{-1}) .
+    \mathrm{d} \mathcal{Q} = cᵛ \mathrm{d}T + p \, \mathrm{d}(ρ^{-1}) .
     ```
 
       By utilising the identity ``\mathrm{d}(p / ρ) = p \, \mathrm{d}(ρ^{-1}) + ρ^{-1} \mathrm{d}p`` and using
       the ideal gas, we can rewrite the above conservation law as:
 
     ```math
-    \mathrm{d}Q = (cᵛ + R) \mathrm{d}T - ρ^{-1} \mathrm{d}p ,
+    \mathrm{d} \mathcal{Q} = (cᵛ + R) \mathrm{d}T - ρ^{-1} \mathrm{d}p ,
     ```
 
       which is the expression in the main text after noting that the specific heat capacities under
@@ -73,7 +73,7 @@ dry_air = IdealGas(molar_mass=0.029, heat_capacity=1005)
 
 ### Adiabatic transformations and potential temperature
 
-Within adiabatic transformations, ``\mathrm{d} Q = 0``.
+Within adiabatic transformations, ``\mathrm{d} \mathcal{Q} = 0``.
 Then, combining the ideal gas law with conservation of energy yields
 
 ```math
@@ -97,7 +97,7 @@ This implies that the potential temperature under adiabatic transformation is ``
 ### Hydrostatic balance
 
 Next we consider a reference state that does not exchange energy with its environment
-(i.e., ``\mathrm{d}Q = 0``) and thus has constant potential temperature
+(i.e., ``\mathrm{d} \mathcal{Q} = 0``) and thus has constant potential temperature
 
 ```math
 θ₀ = Tᵣ \left ( \frac{p₀}{pᵣ} \right )^{Rᵈ / cᵖ} .
