@@ -194,7 +194,7 @@ The partial pressure of the dry air and vapor components are related to the comp
 ``ρᵈ`` and ``ρᵛ`` through the ideal gas law,
 
 ```math
-pᵈ = ρᵈ Rᵈ T \qquad \text{and} \qquad pᵛ = ρᵛ Rᵛ T
+pᵈ = ρᵈ Rᵈ T \qquad \text{and} \qquad pᵛ = ρᵛ Rᵛ T ,
 ```
 
 where ``T`` is temperature, ``Rⁱ = ℛ / m^β`` is the specific gas constant for component ``β``,
@@ -215,7 +215,7 @@ and water vapor are ``mᵈ = 0.029`` kg/mol and ``mᵛ = 0.018`` kg/mol.
 To write the effective gas law for moist air, we introduce the mass ratios
 
 ```math
-qᵈ ≡ \frac{ρᵈ}{ρ} \qquad \text{and} \qquad qᵛ ≡ \frac{ρᵛ}{ρ}
+qᵈ ≡ \frac{ρᵈ}{ρ} \qquad \text{and} \qquad qᵛ ≡ \frac{ρᵛ}{ρ} ,
 ```
 
 where ``ρ`` is total density of the fluid including dry air, vapor, and condensates,
@@ -250,7 +250,7 @@ The [Clausius-Claperyon relation](https://en.wikipedia.org/wiki/Clausius%E2%80%9
 for an ideal gas
 
 ```math
-\frac{\mathrm{d} pᵛ⁺}{\mathrm{d} T} = \frac{pᵛ⁺ ℒ^β(T)}{Rᵛ T^2}
+\frac{\mathrm{d} pᵛ⁺}{\mathrm{d} T} = \frac{pᵛ⁺ ℒ^β(T)}{Rᵛ T^2} ,
 ```
 
 where ``pᵛ⁺`` is saturation vapor pressure, ``T`` is temperature, ``Rᵛ`` is the specific gas constant for vapor,
