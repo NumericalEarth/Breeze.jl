@@ -191,6 +191,8 @@ where
 - ``pᵗʳ`` is the triple point pressure
 - ``Tᵗʳ`` is the triple point temperature
 
+and it is calculated via [`saturation_vapor_pressure`](@ref Breeze.Thermodynamics.saturation_vapor_pressure).
+
 Note: any reference values for pressure and temperature can be used in principle.
 The advantage of using reference values at the triple point is that the same values
 can then be used for both condensation (vapor → liquid) and deposition (vapor → ice).
