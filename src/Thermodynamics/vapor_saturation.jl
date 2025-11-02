@@ -5,24 +5,25 @@ Compute the saturation vapor pressure over a liquid surface by integrating
 the Clausius-Clapeyron relation,
 
 ```math
-dp/dT = ℒᵛ / (Rᵛ T^2)
+dp / dT = ℒᵛ(T) / (Rᵛ T^2)
 ```
 
-which integrates to the expression
+where ``ℒᵛ(T) = ℒᵛ(T=0) + Δcᵖ T``, with ``Δcᵖ ≡ (cᵖᵛ - cᵖˡ)``.
+
+We can integrate the above from the triple point, i.e., ``p(Tᵗʳ) = pᵗʳ`` to get
 
 ```math
-p(T) = pᵗʳ \\left ( \\frac{T}{Tᵗʳ} \\right )^{aᵛ} \\exp \\left [ bᵛ (1/Tᵗʳ - 1/T) \\right ]
+p(T) = pᵗʳ \\left ( \\frac{T}{Tᵗʳ} \\right )^{Δcᵖ / Rᵛ} \\exp \\left [ bᵛ (1/Tᵗʳ - 1/T) \\right ]
 ```
 
 where
 
 ```math
-aᵛ ≡ (cᵖᵛ - cᵖˡ) / Rᵛ \\\\
-bᵛ ≡ ℒ₀ / Rᵛ - aᵛ T₀
+bᵛ ≡ ℒᵛ(T=0) / Rᵛ
 ```
 """
 @inline function saturation_vapor_pressure(T, thermo, phase::CondensedPhase)
-    ℒ₀ = phase.latent_heat
+    ℒ₀ = phase.latent_heat # at thermo.energy_reference_temperature
     cᵖˡ = phase.heat_capacity
     T₀ = thermo.energy_reference_temperature
     Tᵗʳ = thermo.triple_point_temperature
@@ -30,10 +31,11 @@ bᵛ ≡ ℒ₀ / Rᵛ - aᵛ T₀
     cᵖᵛ = thermo.vapor.heat_capacity
     Rᵛ = vapor_gas_constant(thermo)
 
-    aᵛ = (cᵖᵛ - cᵖˡ) / Rᵛ
-    bᵛ = ℒ₀ / Rᵛ - aᵛ * T₀
+    # latent heat at T = 0 ᵒK temperature-independent specific heats
+    Δcᵖ = cᵖᵛ - cᵖˡ
+    ℒ₀ₖ = ℒ₀ - Δcᵖ * T₀
 
-    return pᵗʳ * (T / Tᵗʳ)^aᵛ * exp(bᵛ * (1/Tᵗʳ - 1/T))
+    return pᵗʳ * (T / Tᵗʳ)^(Δcᵖ / Rᵛ) * exp(ℒ₀ₖ / Rᵛ * (1/Tᵗʳ - 1/T))
 end
 
 # Over a liquid surface
