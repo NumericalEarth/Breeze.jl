@@ -58,7 +58,7 @@ in temperature ``\mathrm{d} T`` and pressure ``\mathrm{d} p`` according to:[^1]
     ```
 
       which is the expression in the main text after noting that the specific heat capacities under
-      constant pressure and under constant volume are related via ``cᵖ \equiv cᵛ + R``.
+      constant pressure and under constant volume are related via ``cᵖ ≡ cᵛ + R``.
 
 
 where ``cᵖ`` is the specific heat capacity at constant pressure of the gas in question.
@@ -89,8 +89,9 @@ As a result, the _potential temperature_, ``θ``, defined as
 θ ≡ T \big / \left ( \frac{p}{p₀} \right )^{Rᵈ / cᵖ} = \frac{T}{Π} ,
 ```
 
-remains constant under adiabatic transformations for which ``θ(z=0) = T(z=0)``.
-Above, we also defined the Exner function, ``Π ≡ ( p / p₀ )^{Rᵈ / cᵖ}``.
+remains constant under adiabatic transformations.
+Notice that above, we also defined the Exner function, ``Π ≡ ( p / p₀ )^{Rᵈ / cᵖ}``.
+By convention, we tend to use as reference values those at the surface, ``θ(z=0) = T(z=0)``.
 
 ### Hydrostatic balance
 
@@ -214,7 +215,7 @@ and water vapor are ``mᵈ = 0.029`` kg/mol and ``mᵛ = 0.018`` kg/mol.
 To write the effective gas law for moist air, we introduce the mass ratios
 
 ```math
-qᵈ \equiv \frac{ρᵈ}{ρ} \qquad \text{and} \qquad qᵛ \equiv \frac{ρᵛ}{ρ}
+qᵈ ≡ \frac{ρᵈ}{ρ} \qquad \text{and} \qquad qᵛ ≡ \frac{ρᵛ}{ρ}
 ```
 
 where ``ρ`` is total density of the fluid including dry air, vapor, and condensates,
