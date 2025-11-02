@@ -30,13 +30,36 @@ Above, ``R = ℛ / m`` is the specific gas constant given the
 ``ℛ ≈ 8.31\;\mathrm{J} \, \mathrm{K}^{-1} \, \mathrm{mol}^{-1}`` and molar mass ``m`` of the gas species under consideration.
 
 The [first law of thermodynamics](https://en.wikipedia.org/wiki/First_law_of_thermodynamics),
-aka "conservation of energy", states that infinitesimal changes
-in internal energy ``\mathrm{d} ê`` are related to infinitesimal changes
-in temperature ``\mathrm{d} T`` and pressure ``\mathrm{d} p`` according to
+aka "conservation of energy", states that an infinitesimal change in the
+external energy ``\mathrm{d} Q`` are related to infinitesimal changes
+in temperature ``\mathrm{d} T`` and pressure ``\mathrm{d} p`` according to[^1]
 
 ```math
-\mathrm{d} ê = cᵖ \mathrm{d} T - \frac{\mathrm{d} p}{\rho}
+\mathrm{d} Q = cᵖ \mathrm{d} T - \frac{\mathrm{d} p}{\rho} ,
 ```
+
+[^1]: The conservation of energy states that any external energy added to a gas must be equal to the
+      change of its internal energy and the work done to it by pressure forces ``p \mathrm{d}V``.
+      For atmospheric flows it's more convenient to express everything per unit mass.
+      Assuming the mass of the fluid is conserved, we have that the work done by pressure forces per
+      unit mass is ``p \mathrm{d}(\rho^{-1})`` and the internal energy per unit mass is
+      ``cᵛ \mathrm{d}T``. Therefore, if we denote ``\mathrm{d}Q`` the changes in external energy
+      per unit mass, we have that:
+
+    ```math
+    \mathrm{d}Q = cᵛ \mathrm{d}T + p \mathrm{d}(ρ^{-1})
+    ```
+
+      By using ``\mathrm{d}(p / ρ) = p \mathrm{d}(ρ^{-1}) + ρ^{-1} \mathrm{d}p`` and the ideal
+      gass law, we can rewrite the conservation law above as:
+
+    ```math
+    \mathrm{d}Q = (cᵛ + R) \mathrm{d}T - ρ^{-1} \mathrm{d}p
+    ```
+
+      which is the expression we used above after noting that the specific heat capacities under
+      constant pressure and under constant volume are related by ``cᵖ \equiv cᵛ + R``.
+
 
 where ``cᵖ`` is the specific heat capacity at constant pressure of the gas in question.
 
@@ -50,21 +73,24 @@ dry_air = IdealGas(molar_mass=0.029, heat_capacity=1005)
 
 ### Adiabatic transformations and potential temperature
 
-Within adiabatic transformations, ``\mathrm{d} ê = 0``.
+Within adiabatic transformations, ``\mathrm{d} Q = 0``.
 Combining the ideal gas law with conservation of energy then yields
 
 ```math
-\frac{\mathrm{d} p}{\mathrm{d} T} = ρ cᵖ = \frac{p}{R T} cᵖ, \qquad \text{which implies} \qquad T ∼ \left ( \frac{p}{p₀} \right )^{R / cᵖ} .
+\frac{\mathrm{d} T}{\mathrm{d} p} = \frac{1}{ρ cᵖ} = \frac{R T}{cᵖ p} ,
 ```
 
-where ``p₀`` is some reference pressure. As a result, the _potential temperature_, ``\theta``
+which implies that ``T ∼ \left ( \frac{p}{p₀} \right )^{R / cᵖ}``,
+where ``p₀`` is some reference pressure value.
+
+As a result, the _potential temperature_, ``θ``, defined as
 
 ```math
-θ ≡ T \left ( \frac{p₀}{p} \right )^{Rᵈ / cᵖ} ≡ \frac{T}{Π}, \quad \text{where} \quad Π ≡ \left ( \frac{p}{p₀} \right )^{Rᵈ / cᵖ} ,
+θ ≡ T \big / \left ( \frac{p}{p₀} \right )^{Rᵈ / cᵖ} = \frac{T}{Π} ,
 ```
 
-is constant under adiabatic transformations, defined such that ``θ(z=0) = T(z=0)``.
-Above, we have also defined the Exner function, ``Π``,
+remains constant under adiabatic transformations for which ``θ(z=0) = T(z=0)``.
+Above, we also defined the Exner function, ``Π ≡ ( p / p₀ )^{Rᵈ / cᵖ}``.
 
 ### Hydrostatic balance
 
@@ -85,25 +111,25 @@ Next we consider a reference state with constant internal energy and thus consta
 Hydrostatic balance requires
 
 ```math
-∂_z pᵣ = - ρᵣ g
+∂_z pᵣ = - ρᵣ g .
 ```
 
-we get
+By combining that above with the ideal gas law and the definition of potential temperature we get
 
 ```math
-\frac{pᵣ}{p₀} = \left (1 - \frac{g z}{cᵖ θ₀} \right )^{cᵖ / Rᵈ}
+\frac{pᵣ}{p₀} = \left (1 - \frac{g z}{cᵖ θ₀} \right )^{cᵖ / Rᵈ} .
 ```
 
 Thus
 
 ```math
-Tᵣ(z) = θ₀ \left ( \frac{pᵣ}{p₀} \right )^{Rᵈ / cᵖ} = θ₀ \left ( 1 - \frac{g z}{cᵖ θ₀} \right )
+Tᵣ(z) = θ₀ \left ( \frac{pᵣ}{p₀} \right )^{Rᵈ / cᵖ} = θ₀ \left ( 1 - \frac{g z}{cᵖ θ₀} \right ) ,
 ```
 
 and
 
 ```math
-ρᵣ(z) = \frac{p₀}{R θ₀} \left ( 1 - \frac{g z}{cᵖ θ₀} \right )^{cᵖ / Rᵈ - 1}
+ρᵣ(z) = \frac{p₀}{R θ₀} \left ( 1 - \frac{g z}{cᵖ θ₀} \right )^{cᵖ / Rᵈ - 1} .
 ```
 
 ## An example of a dry reference state in Breeze
