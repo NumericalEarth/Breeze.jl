@@ -273,7 +273,7 @@ For example, for phase change from vapor to liquid,
 ```
 
 where ``ℒˡ₀ₖ`` is the latent heat at ``T = 0 \; ᵒ\mathrm{K}``.
-Integrate that to get
+By integrating from the triple-point temperature ``Tᵗʳ`` for which ``p(Tᵗʳ) = pᵗʳ``, we get
 
 ```math
 pᵛ⁺(T) = pᵗʳ \left ( \frac{T}{Tᵗʳ} \right )^{Δcˡ / Rᵛ} \exp \left [ \frac{ℒˡ₀ₖ}{Rᵛ} \left (\frac{1}{Tᵗʳ} - \frac{1}{T} \right ) \right ] .
