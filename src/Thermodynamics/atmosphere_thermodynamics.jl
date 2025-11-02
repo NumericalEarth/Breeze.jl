@@ -168,7 +168,9 @@ quantities associated with hydrostatic balance.
 
 The Clausius-Clapeyron relation describes the pressure-temperature relationship during phase transitions:
 
-    d/dT log(pⁱ⁺) = ℒⁱ / (Rⁱ * T²)
+```
+    d[log(pⁱ⁺)]/dT = ℒⁱ / (Rⁱ T²)
+```
 
 where:
 
@@ -180,7 +182,7 @@ where:
 For water vapor, this integrates to:
 
 ```math
-    pⁱ⁺ = pᵗʳ * exp( ℒⁱ (1/Tᵗʳ - 1/T) / Rⁱ )
+pⁱ⁺ = pᵗʳ \\exp[ ℒⁱ (1/Tᵗʳ - 1/T) / Rⁱ ]
 ```
 
 where
