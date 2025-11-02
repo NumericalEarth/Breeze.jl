@@ -272,7 +272,7 @@ For example, for phase change from vapor to liquid,
 ℒˡ(T) = ℒˡ_{0K} + \big ( \underbrace{cᵖᵛ - cᵖˡ}_{≡Δcˡ} \big ) T ,
 ```
 
-where ``ℒˡ_{0K}`` is the latent heat at absolute zero ``T = 0 \; \mathrm{K}``.
+where ``ℒˡ_{0K}`` is the latent heat at absolute zero, ``T = 0 \; \mathrm{K}``.
 By integrating from the triple-point temperature ``Tᵗʳ`` for which ``p(Tᵗʳ) = pᵗʳ``, we get
 
 ```math
