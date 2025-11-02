@@ -269,14 +269,14 @@ heats, the latent heat of a phase transition is linear in temperature.
 For example, for phase change from vapor to liquid,
 
 ```math
-ℒˡ(T) = ℒˡ₀ + \big ( \underbrace{cᵖᵛ - cᵖˡ}_{≡Δcˡ} \big ) T ,
+ℒˡ(T) = ℒˡ₀ₖ + \big ( \underbrace{cᵖᵛ - cᵖˡ}_{≡Δcˡ} \big ) T ,
 ```
 
-where ``ℒˡ₀`` is the latent heat at ``T = 0``, with ``T`` in Kelvin.
+where ``ℒˡ₀ₖ`` is the latent heat at ``T = 0 \; ᵒ\mathrm{K}``.
 Integrate that to get
 
 ```math
-pᵛ⁺(T) = pᵗʳ \left ( \frac{T}{Tᵗʳ} \right )^{Δcˡ / Rᵛ} \exp \left [ \frac{ℒˡ₀}{Rᵛ} \left (\frac{1}{Tᵗʳ} - \frac{1}{T} \right ) \right ] .
+pᵛ⁺(T) = pᵗʳ \left ( \frac{T}{Tᵗʳ} \right )^{Δcˡ / Rᵛ} \exp \left [ \frac{ℒˡ₀ₖ}{Rᵛ} \left (\frac{1}{Tᵗʳ} - \frac{1}{T} \right ) \right ] .
 ```
 
 Consider parameters for liquid water,
