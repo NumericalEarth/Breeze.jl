@@ -74,13 +74,13 @@ dry_air = IdealGas(molar_mass=0.029, heat_capacity=1005)
 ### Adiabatic transformations and potential temperature
 
 Within adiabatic transformations, ``\mathrm{d} Q = 0``.
-Combining the ideal gas law with conservation of energy then yields
+Then, combining the ideal gas law with conservation of energy yields
 
 ```math
-\frac{\mathrm{d} T}{\mathrm{d} p} = \frac{1}{ρ cᵖ} = \frac{R T}{cᵖ p} ,
+\frac{\mathrm{d} T}{T} = \frac{R}{cᵖ} \frac{\mathrm{d} p}{p} ,
 ```
 
-which implies that ``T ∼ \left ( \frac{p}{p₀} \right )^{R / cᵖ}``,
+which implies that ``T ∼ ( p / p₀ )^{R / cᵖ}``,
 where ``p₀`` is some reference pressure value.
 
 As a result, the _potential temperature_, ``θ``, defined as
@@ -91,14 +91,16 @@ As a result, the _potential temperature_, ``θ``, defined as
 
 remains constant under adiabatic transformations.
 Notice that above, we also defined the Exner function, ``Π ≡ ( p / p₀ )^{Rᵈ / cᵖ}``.
-By convention, we tend to use as reference values those at the surface, ``θ(z=0) = T(z=0)``.
+By convention, we tend to use as reference values those at the surface ``z=0``, i.e., ``p₀ = p(z=0)``, ``T₀ = T(z=0)``, etc.
+This implies that the potential temperature under adiabatic transformation is ``θ(z) = θ₀ = T₀``.
 
 ### Hydrostatic balance
 
-Next we consider a reference state with constant internal energy and thus constant potential temperature
+Next we consider a reference state that does not exchange energy with its environment
+(i.e., ``\mathrm{d}Q = 0``) and thus has constant potential temperature
 
 ```math
-θ₀ = Tᵣ \left ( \frac{p₀}{pᵣ} \right )^{Rᵈ / cᵖ}
+θ₀ = Tᵣ \left ( \frac{p₀}{pᵣ} \right )^{Rᵈ / cᵖ} .
 ```
 
 !!! note "About subscripts"
@@ -115,7 +117,8 @@ Hydrostatic balance requires
 ∂_z pᵣ = - ρᵣ g .
 ```
 
-By combining that above with the ideal gas law and the definition of potential temperature we get
+By combining the hydrostatic balance with the ideal gas law and the definition of potential
+temperature we get
 
 ```math
 \frac{pᵣ}{p₀} = \left (1 - \frac{g z}{cᵖ θ₀} \right )^{cᵖ / Rᵈ} .
@@ -135,9 +138,8 @@ and
 
 ## An example of a dry reference state in Breeze
 
-We can visualise a hydrostatic reference profile
-evaluating Breeze's reference-state utilities (which assume a dry reference state)
-on a one-dimensional `RectilinearGrid`:
+We can visualise a hydrostatic reference profile evaluating Breeze's reference-state
+utilities (which assume a dry reference state) on a one-dimensional `RectilinearGrid`:
 
 ```@example reference_state
 using Breeze
@@ -165,16 +167,16 @@ z = KernelFunctionOperation{Center, Center, Center}(znode, grid, Center(), Cente
 Tᵣ₁ = Field(θ₀ * (pᵣ / p₀)^(Rᵈ / cᵖᵈ))
 Tᵣ₂ = Field(θ₀ * (1 - g * z / (cᵖᵈ * θ₀)))
 
-fig = Figure(resolution = (900, 300))
+fig = Figure()
 
 axT = Axis(fig[1, 1]; xlabel = "Temperature (ᵒK)", ylabel = "Height (m)")
 lines!(axT, Tᵣ₁)
-lines!(axT, Tᵣ₂, linestyle=:dash, color = :orange, linewidth=2)
+lines!(axT, Tᵣ₂, linestyle = :dash, color = :orange, linewidth = 2)
 
-axp = Axis(fig[1, 2]; xlabel = "Pressure (10⁵ Pa)")
+axp = Axis(fig[1, 2]; xlabel = "Pressure (10⁵ Pa)", yticklabelsvisible = false)
 lines!(axp, pᵣ / 1e5)
 
-axρ = Axis(fig[1, 3]; xlabel = "Density (kg m⁻³)")
+axρ = Axis(fig[1, 3]; xlabel = "Density (kg m⁻³)", yticklabelsvisible = false)
 lines!(axρ, ρᵣ)
 
 fig
