@@ -5,7 +5,7 @@ using Breeze
 thermo = AtmosphereThermodynamics()
 ```
 
-Breeze implements thermodynamic relations for moist atmospheres ---
+Breeze implements thermodynamic relations for moist atmospheres --
 fluids that can be described as a binary mixture of _(i)_ "dry" air, and _(ii)_ vapor,
 as well as liquid and solid condensates of the vapor component of various shapes and sizes.
 
