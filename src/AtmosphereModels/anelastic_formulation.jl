@@ -1,9 +1,3 @@
-using Oceananigans.Architectures: architecture
-using Oceananigans.Grids: inactive_cell
-using Oceananigans.Utils: prettysummary
-using Oceananigans.Operators: Δzᵃᵃᶜ, Δzᵃᵃᶠ, divᶜᶜᶜ
-using Oceananigans.Solvers: solve!
-
 using ..Thermodynamics:
     AtmosphereThermodynamics,
     ReferenceStateConstants,
@@ -12,6 +6,12 @@ using ..Thermodynamics:
     mixture_gas_constant,
     mixture_heat_capacity,
     dry_air_gas_constant
+
+using Oceananigans.Architectures: architecture
+using Oceananigans.Grids: inactive_cell
+using Oceananigans.Operators: Δzᵃᵃᶜ, Δzᵃᵃᶠ, divᶜᶜᶜ
+using Oceananigans.Solvers: solve!
+using Oceananigans.Utils: prettysummary
 
 using KernelAbstractions: @kernel, @index
 

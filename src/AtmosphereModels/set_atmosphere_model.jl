@@ -1,7 +1,8 @@
-import Oceananigans.Fields: set!
-using Oceananigans.TimeSteppers: update_state!
 using Oceananigans.BoundaryConditions: fill_halo_regions!
 using Oceananigans.Models.NonhydrostaticModels: compute_pressure_correction!, make_pressure_correction!
+using Oceananigans.TimeSteppers: update_state!
+
+import Oceananigans.Fields: set!
 
 function set!(model::AtmosphereModel; enforce_mass_conservation=true, kw...)
     for (name, value) in kw
@@ -43,14 +44,14 @@ function set!(model::AtmosphereModel; enforce_mass_conservation=true, kw...)
             value = ρʳ * u
         end
 
-        set!(ϕ, value)                
+        set!(ϕ, value)
         fill_halo_regions!(ϕ, model.clock, fields(model))
     end
 
     # Apply a mask
     # foreach(mask_immersed_field!, prognostic_fields(model))
     update_state!(model, compute_tendencies=false)
-    
+
     if enforce_mass_conservation
         FT = eltype(model.grid)
         Δt = one(FT)

@@ -160,27 +160,30 @@ end
 
 Create `AtmosphereThermodynamics` with parameters that represent gaseous mixture of dry "air"
 and vapor, as well as condensed liquid and solid phases.
-The `triple_point_temperature` and `triple_point_pressure` may be combined with 
+The `triple_point_temperature` and `triple_point_pressure` may be combined with
 internal energy parameters for condensed phases to compute the vapor pressure
 at the boundary between vapor and a homogeneous sample of the condensed phase.
 The `gravitational_acceleration` parameter is included to compute reference_state
 quantities associated with hydrostatic balance.
 
-The Clausius-Clapeyron relation describes the pressure-temperature relationship during phase transitions:
+The Clausius-Clapeyron relation describes the pressure-temperature relationship during phase
+transitions:
 
-    d/dT log(pⁱ⁺) = ℒⁱ / (Rⁱ * T²)
+```math
+d[\\log(pⁱ⁺)] / dT = ℒⁱ / (Rⁱ T²)
+```
 
 where:
 
-- `pⁱ⁺` is the saturation vapor pressure for a transition between vapor and the `ⁱ`th phase
-- `T` is temperature
-- `ℒⁱ` is the latent heat of vaporization
-- `Rⁱ` is the specific gas constant for the `ⁱ`th phase
+- ``pⁱ⁺`` is the saturation vapor pressure for a transition between vapor and the ``i``-th phase
+- ``T`` is temperature
+- ``ℒⁱ`` is the latent heat of vaporization
+- ``Rⁱ`` is the specific gas constant for the ``i``-th phase
 
 For water vapor, this integrates to:
 
 ```math
-    pⁱ⁺ = pᵗʳ * exp( ℒⁱ (1/Tᵗʳ - 1/T) / Rⁱ )
+pⁱ⁺ = pᵗʳ \\exp[ ℒⁱ (1/Tᵗʳ - 1/T) / Rⁱ ]
 ```
 
 where
@@ -191,7 +194,6 @@ where
 Note: any reference values for pressure and temperature can be used in principle.
 The advantage of using reference values at the triple point is that the same values
 can then be used for both condensation (vapor → liquid) and deposition (vapor → ice).
-
 """
 function AtmosphereThermodynamics(FT = Oceananigans.defaults.FloatType;
                                   molar_gas_constant = 8.314462618,
@@ -234,7 +236,7 @@ const NonCondensingAtmosphereThermodynamics{FT} = AtmosphereThermodynamics{FT, N
 """
     mixture_gas_constant(q, thermo)
 
-Compute the gas constant of moist air given the specific humidity `q` and 
+Compute the gas constant of moist air given the specific humidity `q` and
 thermodynamic parameters `thermo`.
 
 The mixture gas constant is calculated as a weighted average of the dry air
@@ -246,7 +248,7 @@ R_m = R_d (1 - q) + R_v q
 
 where:
 - `R_d` is the dry air gas constant
-- `R_v` is the water vapor gas constant  
+- `R_v` is the water vapor gas constant
 - `q` is the specific humidity (mass fraction of water vapor)
 
 # Arguments
