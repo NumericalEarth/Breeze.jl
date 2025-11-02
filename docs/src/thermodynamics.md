@@ -39,11 +39,10 @@ in temperature ``\mathrm{d} T`` and pressure ``\mathrm{d} p`` according to:[^1]
 ```
 
 [^1]: The conservation of energy states that any external heat input into the gas must equal the sum
-      of the change of the gas's internal energy and the work done to the gas by pressure forces,
-      ``p \, \mathrm{d} V``.
+      of the change of the gas's internal energy and the work done by the gas, ``p \, \mathrm{d} V``.
       For atmospheric flows it's convenient to express everything per unit mass. Assuming the mass of
-      the fluid is conserved, we have that the work done by pressure forces per unit mass is
-      ``p \, \mathrm{d}(\rho^{-1})`` and the internal energy per unit mass is ``cᵛ \mathrm{d} T``.
+      the fluid is conserved, we have that the work done per unit mass is ``p \, \mathrm{d}(\rho^{-1})``
+      and the internal energy per unit mass is ``cᵛ \mathrm{d} T``.
       Therefore, if we denote ``\mathrm{d} \mathcal{Q}`` the external heat change per unit mass,
       we have:
 
