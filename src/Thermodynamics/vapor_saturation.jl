@@ -13,13 +13,7 @@ where ``ℒᵛ(T) = ℒᵛ(T=0) + Δcᵖ T``, with ``Δcᵖ ≡ (cᵖᵛ - cᵖ�
 We can integrate the above from the triple point, i.e., ``p(Tᵗʳ) = pᵗʳ`` to get
 
 ```math
-p(T) = pᵗʳ \\left ( \\frac{T}{Tᵗʳ} \\right )^{Δcᵖ / Rᵛ} \\exp \\left [ bᵛ (1/Tᵗʳ - 1/T) \\right ]
-```
-
-where
-
-```math
-bᵛ ≡ ℒᵛ(T=0) / Rᵛ
+p(T) = pᵗʳ \\left ( \\frac{T}{Tᵗʳ} \\right )^{Δcᵖ / Rᵛ} \\exp \\left [ (1/Tᵗʳ - 1/T) ℒᵛ(T=0) / Rᵛ \\right ]
 ```
 """
 @inline function saturation_vapor_pressure(T, thermo, phase::CondensedPhase)
@@ -36,7 +30,7 @@ bᵛ ≡ ℒᵛ(T=0) / Rᵛ
     # latent heat at T = 0 ᵒK assuming temperature-independent specific heats
     ℒ₀ₖ = ℒ₀ - Δcᵖ * T₀
 
-    return pᵗʳ * (T / Tᵗʳ)^(Δcᵖ / Rᵛ) * exp(ℒ₀ₖ / Rᵛ * (1/Tᵗʳ - 1/T))
+    return pᵗʳ * (T / Tᵗʳ)^(Δcᵖ / Rᵛ) * exp((1/Tᵗʳ - 1/T) * ℒ₀ₖ / Rᵛ)
 end
 
 # Over a liquid surface
