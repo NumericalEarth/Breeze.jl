@@ -26,7 +26,7 @@ p = ρ R T .
 ```
 
 Above, ``R ≡ ℛ / m`` is the specific gas constant given the
-[molar gas constant](https://en.wikipedia.org/wiki/Gas_constant)
+[molar or "universal" gas constant](https://en.wikipedia.org/wiki/Gas_constant)
 ``ℛ ≈ 8.31 \; \mathrm{J} \, \mathrm{K}^{-1} \, \mathrm{mol}^{-1}`` and molar mass ``m`` of the gas species under consideration.
 
 The [first law of thermodynamics](https://en.wikipedia.org/wiki/First_law_of_thermodynamics),
@@ -86,13 +86,15 @@ where ``p₀`` is some reference pressure value.
 As a result, the _potential temperature_, ``θ``, defined as
 
 ```math
-θ ≡ T \big / \left ( \frac{p}{p₀} \right )^{Rᵈ / cᵖ} = \frac{T}{Π} ,
+θ ≡ T \big / \left ( \frac{p}{p₀} \right )^{R / cᵖ} = \frac{T}{Π} ,
 ```
 
 remains constant under adiabatic transformations.
-Notice that above, we also defined the Exner function, ``Π ≡ ( p / p₀ )^{Rᵈ / cᵖ}``.
+Notice that above, we also defined the Exner function, ``Π ≡ ( p / p₀ )^{R / cᵖ}``.
 By convention, we tend to use as reference values those at the surface ``z=0``, i.e., ``p₀ = p(z=0)``, ``T₀ = T(z=0)``, etc.
 This implies that the potential temperature under adiabatic transformation is ``θ(z) = θ₀ = T₀``.
+
+(Superscript ``d`` denotes dry air, e.g., ``Rᵈ = 286.71 \; \mathrm{J} \, \mathrm{K}^{-1}``.)
 
 ### Hydrostatic balance
 
@@ -100,7 +102,7 @@ Next we consider a reference state that does not exchange energy with its enviro
 (i.e., ``\mathrm{d} \mathcal{Q} = 0``) and thus has constant potential temperature
 
 ```math
-θ₀ = Tᵣ \left ( \frac{p₀}{pᵣ} \right )^{Rᵈ / cᵖ} .
+θ₀ = Tᵣ \left ( \frac{p₀}{pᵣ} \right )^{Rᵈ / cᵖᵈ} .
 ```
 
 !!! note "About subscripts"
@@ -121,19 +123,19 @@ By combining the hydrostatic balance with the ideal gas law and the definition o
 temperature we get
 
 ```math
-\frac{pᵣ}{p₀} = \left (1 - \frac{g z}{cᵖ θ₀} \right )^{cᵖ / Rᵈ} .
+\frac{pᵣ}{p₀} = \left (1 - \frac{g z}{cᵖᵈ θ₀} \right )^{cᵖᵈ / Rᵈ} .
 ```
 
 Thus
 
 ```math
-Tᵣ(z) = θ₀ \left ( \frac{pᵣ}{p₀} \right )^{Rᵈ / cᵖ} = θ₀ \left ( 1 - \frac{g z}{cᵖ θ₀} \right ) ,
+Tᵣ(z) = θ₀ \left ( \frac{pᵣ}{p₀} \right )^{Rᵈ / cᵖᵈ} = θ₀ \left ( 1 - \frac{g z}{cᵖᵈ θ₀} \right ) ,
 ```
 
 and
 
 ```math
-ρᵣ(z) = \frac{p₀}{R θ₀} \left ( 1 - \frac{g z}{cᵖ θ₀} \right )^{cᵖ / Rᵈ - 1} .
+ρᵣ(z) = \frac{p₀}{Rᵈ θ₀} \left ( 1 - \frac{g z}{cᵖᵈ θ₀} \right )^{cᵖᵈ / Rᵈ - 1} .
 ```
 
 ## An example of a dry reference state in Breeze
@@ -184,13 +186,16 @@ fig
 
 ## Thermodynamic relations for gaseous mixtures
 
-"Moist air" is conceived to be a mixture of two gas phases: "dry air" (itself a mixture of gases) and water vapor, as well as a collection of liquid droplet and solid ice particle "condensates".
+"Moist air" is conceived to be a mixture of two gas phases: "dry air" (itself a mixture of gases)
+and water vapor, as well as a collection of liquid droplet and solid ice particle "condensates".
 We assume that the volume of the condensates is negligible, such that the total
 pressure is the sum of partial pressures of vapor and dry air,
 
 ```math
 p = pᵈ + pᵛ .
 ```
+
+(Superscripts ``d`` and ``v`` denote dry air and vapor respectively.)
 
 The partial pressure of the dry air and vapor components are related to the component densities
 ``ρᵈ`` and ``ρᵛ`` through the ideal gas law,
@@ -212,7 +217,7 @@ thermo = AtmosphereThermodynamics()
 
 The default parameter evince basic facts about water vapor air typical to Earth's atmosphere:
 for example, the molar masses of dry air (itself a mixture of mostly nitrogen, oxygen, and argon),
-and water vapor are ``mᵈ = 0.029`` kg/mol and ``mᵛ = 0.018`` kg/mol.
+and water vapor are ``mᵈ = 0.029 \; \mathrm{kg} \, \mathrm{mol}^{-1}`` and ``mᵛ = 0.018 \; \mathrm{kg} \, \mathrm{mol}^{-1}``.
 
 To write the effective gas law for moist air, we introduce the mass ratios
 
@@ -255,12 +260,12 @@ for an ideal gas
 \frac{\mathrm{d} pᵛ⁺}{\mathrm{d} T} = \frac{pᵛ⁺ ℒ^β(T)}{Rᵛ T^2} ,
 ```
 
-where ``pᵛ⁺`` is saturation vapor pressure, ``T`` is temperature, ``Rᵛ`` is the specific gas constant for vapor,
-``ℒ^β(T)`` is the latent heat of the transition from vapor to the
+where ``pᵛ⁺`` is saturation vapor pressure, ``T`` is temperature, ``Rᵛ`` is the specific
+gas constant for vapor, ``ℒ^β(T)`` is the latent heat of the transition from vapor to the
 ``β`` phase (e.g. ``l ≡ β`` for vapor → liquid and ``i ≡ β`` for vapor to ice).
 
-For a thermodynamic formulation that uses constant (i.e. temperature-independent) specific heats,
-the latent heat of a phase transition is linear in temperature.
+For a thermodynamic formulation that uses constant (i.e. temperature-independent) specific
+heats, the latent heat of a phase transition is linear in temperature.
 For example, for phase change from vapor to liquid,
 
 ```math
