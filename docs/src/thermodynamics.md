@@ -25,9 +25,9 @@ pressure ``p``, temperature ``T``, and density ``ρ``,
 p = ρ R T .
 ```
 
-Above, ``R = ℛ / m`` is the specific gas constant given the
+Above, ``R ≡ ℛ / m`` is the specific gas constant given the
 [molar gas constant](https://en.wikipedia.org/wiki/Gas_constant)
-``ℛ ≈ 8.31\;\mathrm{J} \, \mathrm{K}^{-1} \, \mathrm{mol}^{-1}`` and molar mass ``m`` of the gas species under consideration.
+``ℛ ≈ 8.31 \; \mathrm{J} \, \mathrm{K}^{-1} \, \mathrm{mol}^{-1}`` and molar mass ``m`` of the gas species under consideration.
 
 The [first law of thermodynamics](https://en.wikipedia.org/wiki/First_law_of_thermodynamics),
 aka "conservation of energy", states that an infinitesimal change in the
