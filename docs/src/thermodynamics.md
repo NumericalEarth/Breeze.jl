@@ -25,18 +25,41 @@ pressure ``p``, temperature ``T``, and density ``ρ``,
 p = ρ R T .
 ```
 
-Above, ``R = ℛ / m`` is the specific gas constant given the
+Above, ``R ≡ ℛ / m`` is the specific gas constant given the
 [molar gas constant](https://en.wikipedia.org/wiki/Gas_constant)
-``ℛ ≈ 8.31\;\mathrm{J} \, \mathrm{K}^{-1} \, \mathrm{mol}^{-1}`` and molar mass ``m`` of the gas species under consideration.
+``ℛ ≈ 8.31 \; \mathrm{J} \, \mathrm{K}^{-1} \, \mathrm{mol}^{-1}`` and molar mass ``m`` of the gas species under consideration.
 
 The [first law of thermodynamics](https://en.wikipedia.org/wiki/First_law_of_thermodynamics),
-aka "conservation of energy", states that infinitesimal changes
-in internal energy ``\mathrm{d} ê`` are related to infinitesimal changes
-in temperature ``\mathrm{d} T`` and pressure ``\mathrm{d} p`` according to
+aka "conservation of energy", states that an infinitesimal change in the
+external heat changes ``\mathrm{d} \mathcal{Q}`` are related to infinitesimal changes
+in temperature ``\mathrm{d} T`` and pressure ``\mathrm{d} p`` according to:[^1]
 
 ```math
-\mathrm{d} ê = cᵖ \mathrm{d} T - \frac{\mathrm{d} p}{\rho}
+\mathrm{d} \mathcal{Q} = cᵖ \mathrm{d} T - \frac{\mathrm{d} p}{\rho} ,
 ```
+
+[^1]: The conservation of energy states that any external heat input into the gas must equal the sum
+      of the change of the gas's internal energy and the work done by the gas, ``p \, \mathrm{d} V``.
+      For atmospheric flows it's convenient to express everything per unit mass. Assuming the mass of
+      the fluid is conserved, we have that the work done per unit mass is ``p \, \mathrm{d}(\rho^{-1})``
+      and the internal energy per unit mass is ``cᵛ \mathrm{d} T``.
+      Therefore, if ``\mathrm{d} \mathcal{Q}`` is the external heat change per unit mass,
+      we have:
+
+    ```math
+    \mathrm{d} \mathcal{Q} = cᵛ \mathrm{d}T + p \, \mathrm{d}(ρ^{-1}) .
+    ```
+
+      By utilising the identity ``\mathrm{d}(p / ρ) = p \, \mathrm{d}(ρ^{-1}) + ρ^{-1} \mathrm{d}p`` and using
+      the ideal gas, we can rewrite the above conservation law as:
+
+    ```math
+    \mathrm{d} \mathcal{Q} = (cᵛ + R) \mathrm{d}T - ρ^{-1} \mathrm{d}p ,
+    ```
+
+      which is the expression in the main text after noting that the specific heat capacities under
+      constant pressure and under constant volume are related via ``cᵖ ≡ cᵛ + R``.
+
 
 where ``cᵖ`` is the specific heat capacity at constant pressure of the gas in question.
 
@@ -50,28 +73,34 @@ dry_air = IdealGas(molar_mass=0.029, heat_capacity=1005)
 
 ### Adiabatic transformations and potential temperature
 
-Within adiabatic transformations, ``\mathrm{d} ê = 0``.
-Combining the ideal gas law with conservation of energy then yields
+Within adiabatic transformations, ``\mathrm{d} \mathcal{Q} = 0``.
+Then, combining the ideal gas law with conservation of energy yields
 
 ```math
-\frac{\mathrm{d} p}{\mathrm{d} T} = ρ cᵖ = \frac{p}{R T} cᵖ, \qquad \text{which implies} \qquad T ∼ \left ( \frac{p}{p₀} \right )^{R / cᵖ} .
+\frac{\mathrm{d} T}{T} = \frac{R}{cᵖ} \frac{\mathrm{d} p}{p} ,
 ```
 
-where ``p₀`` is some reference pressure. As a result, the _potential temperature_, ``\theta``
+which implies that ``T ∼ ( p / p₀ )^{R / cᵖ}``,
+where ``p₀`` is some reference pressure value.
+
+As a result, the _potential temperature_, ``θ``, defined as
 
 ```math
-θ ≡ T \left ( \frac{p₀}{p} \right )^{Rᵈ / cᵖ} ≡ \frac{T}{Π}, \quad \text{where} \quad Π ≡ \left ( \frac{p}{p₀} \right )^{Rᵈ / cᵖ} ,
+θ ≡ T \big / \left ( \frac{p}{p₀} \right )^{Rᵈ / cᵖ} = \frac{T}{Π} ,
 ```
 
-is constant under adiabatic transformations, defined such that ``θ(z=0) = T(z=0)``.
-Above, we have also defined the Exner function, ``Π``,
+remains constant under adiabatic transformations.
+Notice that above, we also defined the Exner function, ``Π ≡ ( p / p₀ )^{Rᵈ / cᵖ}``.
+By convention, we tend to use as reference values those at the surface ``z=0``, i.e., ``p₀ = p(z=0)``, ``T₀ = T(z=0)``, etc.
+This implies that the potential temperature under adiabatic transformation is ``θ(z) = θ₀ = T₀``.
 
 ### Hydrostatic balance
 
-Next we consider a reference state with constant internal energy and thus constant potential temperature
+Next we consider a reference state that does not exchange energy with its environment
+(i.e., ``\mathrm{d} \mathcal{Q} = 0``) and thus has constant potential temperature
 
 ```math
-θ₀ = Tᵣ \left ( \frac{p₀}{pᵣ} \right )^{Rᵈ / cᵖ}
+θ₀ = Tᵣ \left ( \frac{p₀}{pᵣ} \right )^{Rᵈ / cᵖ} .
 ```
 
 !!! note "About subscripts"
@@ -85,32 +114,32 @@ Next we consider a reference state with constant internal energy and thus consta
 Hydrostatic balance requires
 
 ```math
-∂_z pᵣ = - ρᵣ g
+∂_z pᵣ = - ρᵣ g .
 ```
 
-we get
+By combining the hydrostatic balance with the ideal gas law and the definition of potential
+temperature we get
 
 ```math
-\frac{pᵣ}{p₀} = \left (1 - \frac{g z}{cᵖ θ₀} \right )^{cᵖ / Rᵈ}
+\frac{pᵣ}{p₀} = \left (1 - \frac{g z}{cᵖ θ₀} \right )^{cᵖ / Rᵈ} .
 ```
 
 Thus
 
 ```math
-Tᵣ(z) = θ₀ \left ( \frac{pᵣ}{p₀} \right )^{Rᵈ / cᵖ} = θ₀ \left ( 1 - \frac{g z}{cᵖ θ₀} \right )
+Tᵣ(z) = θ₀ \left ( \frac{pᵣ}{p₀} \right )^{Rᵈ / cᵖ} = θ₀ \left ( 1 - \frac{g z}{cᵖ θ₀} \right ) ,
 ```
 
 and
 
 ```math
-ρᵣ(z) = \frac{p₀}{R θ₀} \left ( 1 - \frac{g z}{cᵖ θ₀} \right )^{cᵖ / Rᵈ - 1}
+ρᵣ(z) = \frac{p₀}{R θ₀} \left ( 1 - \frac{g z}{cᵖ θ₀} \right )^{cᵖ / Rᵈ - 1} .
 ```
 
 ## An example of a dry reference state in Breeze
 
-We can visualise a hydrostatic reference profile
-evaluating Breeze's reference-state utilities (which assume a dry reference state)
-on a one-dimensional `RectilinearGrid`:
+We can visualise a hydrostatic reference profile evaluating Breeze's reference-state
+utilities (which assume a dry reference state) on a one-dimensional `RectilinearGrid`:
 
 ```@example reference_state
 using Breeze
@@ -138,16 +167,16 @@ z = KernelFunctionOperation{Center, Center, Center}(znode, grid, Center(), Cente
 Tᵣ₁ = Field(θ₀ * (pᵣ / p₀)^(Rᵈ / cᵖᵈ))
 Tᵣ₂ = Field(θ₀ * (1 - g * z / (cᵖᵈ * θ₀)))
 
-fig = Figure(resolution = (900, 300))
+fig = Figure()
 
 axT = Axis(fig[1, 1]; xlabel = "Temperature (ᵒK)", ylabel = "Height (m)")
 lines!(axT, Tᵣ₁)
-lines!(axT, Tᵣ₂, linestyle=:dash, color = :orange, linewidth=2)
+lines!(axT, Tᵣ₂, linestyle = :dash, color = :orange, linewidth = 2)
 
-axp = Axis(fig[1, 2]; xlabel = "Pressure (10⁵ Pa)")
+axp = Axis(fig[1, 2]; xlabel = "Pressure (10⁵ Pa)", yticklabelsvisible = false)
 lines!(axp, pᵣ / 1e5)
 
-axρ = Axis(fig[1, 3]; xlabel = "Density (kg m⁻³)")
+axρ = Axis(fig[1, 3]; xlabel = "Density (kg m⁻³)", yticklabelsvisible = false)
 lines!(axρ, ρᵣ)
 
 fig
@@ -167,7 +196,7 @@ The partial pressure of the dry air and vapor components are related to the comp
 ``ρᵈ`` and ``ρᵛ`` through the ideal gas law,
 
 ```math
-pᵈ = ρᵈ Rᵈ T \qquad \text{and} \qquad pᵛ = ρᵛ Rᵛ T
+pᵈ = ρᵈ Rᵈ T \qquad \text{and} \qquad pᵛ = ρᵛ Rᵛ T ,
 ```
 
 where ``T`` is temperature, ``Rⁱ = ℛ / m^β`` is the specific gas constant for component ``β``,
@@ -188,7 +217,7 @@ and water vapor are ``mᵈ = 0.029`` kg/mol and ``mᵛ = 0.018`` kg/mol.
 To write the effective gas law for moist air, we introduce the mass ratios
 
 ```math
-qᵈ \equiv \frac{ρᵈ}{ρ} \qquad \text{and} \qquad qᵛ \equiv \frac{ρᵛ}{ρ}
+qᵈ ≡ \frac{ρᵈ}{ρ} \qquad \text{and} \qquad qᵛ ≡ \frac{ρᵛ}{ρ} ,
 ```
 
 where ``ρ`` is total density of the fluid including dry air, vapor, and condensates,
@@ -217,13 +246,13 @@ q = 0.01 # 1% water vapor by mass
 cᵖᵐ = mixture_heat_capacity(qᵛ, thermo)
 ```
 
-## The Clausius-Claperyon relation and saturation specific humidity
+## The Clausius--Clapeyron relation and saturation specific humidity
 
-The [Clausius-Claperyon relation](https://en.wikipedia.org/wiki/Clausius%E2%80%93Clapeyron_relation)
+The [Clausius--Clapeyron relation](https://en.wikipedia.org/wiki/Clausius%E2%80%93Clapeyron_relation)
 for an ideal gas
 
 ```math
-\frac{\mathrm{d} pᵛ⁺}{\mathrm{d} T} = \frac{pᵛ⁺ ℒ^β(T)}{Rᵛ T^2}
+\frac{\mathrm{d} pᵛ⁺}{\mathrm{d} T} = \frac{pᵛ⁺ ℒ^β(T)}{Rᵛ T^2} ,
 ```
 
 where ``pᵛ⁺`` is saturation vapor pressure, ``T`` is temperature, ``Rᵛ`` is the specific gas constant for vapor,
@@ -235,14 +264,14 @@ the latent heat of a phase transition is linear in temperature.
 For example, for phase change from vapor to liquid,
 
 ```math
-ℒˡ(T) = ℒˡ₀ + \big ( \underbrace{cᵖᵛ - cᵖˡ}_{≡Δcˡ} \big ) T
+ℒˡ(T) = ℒˡ₀ + \big ( \underbrace{cᵖᵛ - cᵖˡ}_{≡Δcˡ} \big ) T ,
 ```
 
 where ``ℒˡ₀`` is the latent heat at ``T = 0``, with ``T`` in Kelvin.
 Integrate that to get
 
 ```math
-pᵛ⁺(T) = pᵗʳ \left ( \frac{T}{Tᵗʳ} \right )^{Δcˡ / Rᵛ} \exp \left \{ \frac{ℒˡ₀}{Rᵛ} \left (\frac{1}{Tᵗʳ} - \frac{1}{T} \right ) \right \}
+pᵛ⁺(T) = pᵗʳ \left ( \frac{T}{Tᵗʳ} \right )^{Δcˡ / Rᵛ} \exp \left [ \frac{ℒˡ₀}{Rᵛ} \left (\frac{1}{Tᵗʳ} - \frac{1}{T} \right ) \right ] .
 ```
 
 Consider parameters for liquid water,
@@ -261,7 +290,7 @@ water_ice = CondensedPhase(latent_heat=2834000, heat_capacity=2108)
 The saturation specific humidity is
 
 ```math
-qᵛ⁺ ≡ \frac{ρᵛ⁺}{ρ} = \frac{pᵛ⁺}{Rᵐ T}
+qᵛ⁺ ≡ \frac{ρᵛ⁺}{ρ} = \frac{pᵛ⁺}{Rᵐ T} .
 ```
 
 This is what it looks like:

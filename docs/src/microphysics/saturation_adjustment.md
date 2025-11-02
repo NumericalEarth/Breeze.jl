@@ -104,14 +104,14 @@ g = thermo.gravitational_acceleration
 fig = Figure()
 
 yticks = 0:2e3:10e3
-axT = Axis(fig[1, 1]; xlabel="Temperature (ᵒK)", ylabel="Height (m)", yticks)
-axq⁺ = Axis(fig[1, 2]; xlabel="Saturation \n specific humidity \n (kg kg⁻¹)",
-                       yticks, yticklabelsvisible=false)
-axqˡ = Axis(fig[1, 3]; xlabel="Liquid \n specific humidity \n (kg kg⁻¹)",
-                       yticks, yticklabelsvisible=false)
+axT = Axis(fig[1, 1]; xlabel = "Temperature (ᵒK)", ylabel = "Height (m)", yticks)
+axq⁺ = Axis(fig[1, 2]; xlabel = "Saturation \n specific humidity \n (kg kg⁻¹)",
+                       yticks, yticklabelsvisible = false)
+axqˡ = Axis(fig[1, 3]; xlabel = "Liquid \n specific humidity \n (kg kg⁻¹)",
+                       yticks, yticklabelsvisible = false)
 
 lines!(axT, T, z)
-lines!(axT, T[1] .- g * z / cᵖᵈ, z, linestyle=:dash, color=:orange, linewidth=2)
+lines!(axT, T[1] .- g * z / cᵖᵈ, z, linestyle = :dash, color = :orange, linewidth = 2)
 lines!(axq⁺, qᵛ⁺, z)
 lines!(axqˡ, qˡ, z)
 
