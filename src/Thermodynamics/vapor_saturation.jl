@@ -31,8 +31,9 @@ bᵛ ≡ ℒᵛ(T=0) / Rᵛ
     cᵖᵛ = thermo.vapor.heat_capacity
     Rᵛ = vapor_gas_constant(thermo)
 
-    # latent heat at T = 0 ᵒK temperature-independent specific heats
     Δcᵖ = cᵖᵛ - cᵖˡ
+
+    # latent heat at T = 0 ᵒK assuming temperature-independent specific heats
     ℒ₀ₖ = ℒ₀ - Δcᵖ * T₀
 
     return pᵗʳ * (T / Tᵗʳ)^(Δcᵖ / Rᵛ) * exp(ℒ₀ₖ / Rᵛ * (1/Tᵗʳ - 1/T))
