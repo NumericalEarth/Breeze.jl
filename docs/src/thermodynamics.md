@@ -219,7 +219,7 @@ The default parameter evince basic facts about water vapor air typical to Earth'
 for example, the molar masses of dry air (itself a mixture of mostly nitrogen, oxygen, and argon),
 and water vapor are ``mᵈ = 0.029 \; \mathrm{kg} \, \mathrm{mol}^{-1}`` and ``mᵛ = 0.018 \; \mathrm{kg} \, \mathrm{mol}^{-1}``.
 
-To write the effective gas law for moist air, we introduce the mass ratios, e.g., specific humidity and specific hydrometeor contents
+To write the effective gas law for moist air, we introduce the mass ratios, e.g., specific humidity and specific hydrometeor contents,
 
 ```math
 qᵈ ≡ \frac{ρᵈ}{ρ} \qquad \text{and} \qquad qᵛ ≡ \frac{ρᵛ}{ρ} ,
