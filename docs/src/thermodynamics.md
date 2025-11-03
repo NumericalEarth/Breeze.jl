@@ -292,6 +292,29 @@ or water ice,
 water_ice = CondensedPhase(latent_heat=2834000, heat_capacity=2108)
 ```
 
+The saturation vapor pressure is
+
+```@example
+using Breeze
+using Breeze.Thermodynamics: saturation_vapor_pressure
+
+thermo = AtmosphereThermodynamics()
+
+T = collect(200:0.1:320)
+pᵛˡ⁺ = [saturation_vapor_pressure(Tⁱ, thermo, thermo.liquid) for Tⁱ in T]
+pᵛⁱ⁺ = [saturation_vapor_pressure(Tⁱ, thermo, thermo.solid) for Tⁱ in T]
+pᵛⁱ⁺[T .> thermo.triple_point_temperature] .= NaN
+
+using CairoMakie
+
+fig = Figure()
+ax = Axis(fig[1, 1], xlabel="Temperature (ᵒK)", ylabel="Saturation vapor pressure pᵛ⁺ (Pa)", yscale = log10, xticks=200:20:320)
+lines!(ax, T, pᵛˡ⁺, label="vapor pressure over liquid")
+lines!(ax, T, pᵛⁱ⁺, linestyle=:dash, label="vapor pressure over ice")
+axislegend(ax, position=:rb)
+fig
+```
+
 The saturation specific humidity is
 
 ```math
