@@ -7,9 +7,8 @@ include(joinpath(@__DIR__, "runtests_setup.jl"))
 
         for p₀ in (101325, 100000)
             for θ₀ in (288, 300)
-                reference_state = Breeze.Thermodynamics.ReferenceState(base_pressure=p₀,
-                                                                                potential_temperature=θ₀)
-                formulation = AnelasticFormulation(grid, reference_state, thermodynamics)
+                reference_constants = ReferenceStateConstants(FT, base_pressure=p₀, potential_temperature=θ₀)
+                formulation = AnelasticFormulation(grid, reference_constants, thermodynamics)
                 model = AtmosphereModel(grid; formulation)
 
                 ρᵣ = model.formulation.reference_density
@@ -20,7 +19,7 @@ include(joinpath(@__DIR__, "runtests_setup.jl"))
                 ρe₁ = deepcopy(model.energy)
 
                 set!(model; ρe = ρeᵢ)
-                @test_broken model.energy == ρe₁
+                @test model.energy == ρe₁
             end
         end
     end
