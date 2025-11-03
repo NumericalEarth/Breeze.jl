@@ -91,7 +91,7 @@ end
 liquid_water(FT) = CondensedPhase(FT; latent_heat=2500800, heat_capacity=4181)
 water_ice(FT)    = CondensedPhase(FT; latent_heat=2834000, heat_capacity=2108)
 
-struct AtmosphereThermodynamics{FT, C, S}
+struct ThermodynamicConstants{FT, C, S}
     molar_gas_constant :: FT
     gravitational_acceleration :: FT
     energy_reference_temperature :: FT
@@ -103,9 +103,9 @@ struct AtmosphereThermodynamics{FT, C, S}
     solid :: S
 end
 
-Base.summary(at::AtmosphereThermodynamics{FT}) where FT = "AtmosphereThermodynamics{$FT}"
+Base.summary(at::ThermodynamicConstants{FT}) where FT = "ThermodynamicConstants{$FT}"
 
-function Base.show(io::IO, at::AtmosphereThermodynamics)
+function Base.show(io::IO, at::ThermodynamicConstants)
     print(io, summary(at), ":", '\n',
         "├── molar_gas_constant: ", at.molar_gas_constant, "\n",
         "├── gravitational_acceleration: ", at.gravitational_acceleration, "\n",
@@ -118,9 +118,9 @@ function Base.show(io::IO, at::AtmosphereThermodynamics)
         "└── solid: ", at.solid)
 end
 
-Base.eltype(::AtmosphereThermodynamics{FT}) where FT = FT
+Base.eltype(::ThermodynamicConstants{FT}) where FT = FT
 
-function Adapt.adapt_structure(to, thermo::AtmosphereThermodynamics)
+function Adapt.adapt_structure(to, thermo::ThermodynamicConstants)
     molar_gas_constant = adapt(to, thermo.molar_gas_constant)
     gravitational_acceleration = adapt(to, thermo.gravitational_acceleration)
     dry_air = adapt(to, thermo.dry_air)
@@ -133,38 +133,37 @@ function Adapt.adapt_structure(to, thermo::AtmosphereThermodynamics)
     FT = typeof(molar_gas_constant)
     C = typeof(liquid)
     S = typeof(solid)
-    return AtmosphereThermodynamics{FT, C, S}(molar_gas_constant,
-                                              gravitational_acceleration,
-                                              energy_reference_temperature,
-                                              triple_point_temperature,
-                                              triple_point_pressure,
-                                              dry_air,
-                                              vapor,
-                                              liquid,
-                                              solid)
+    return ThermodynamicConstants{FT, C, S}(molar_gas_constant,
+                                            gravitational_acceleration,
+                                            energy_reference_temperature,
+                                            triple_point_temperature,
+                                            triple_point_pressure,
+                                            dry_air,
+                                            vapor,
+                                            liquid,
+                                            solid)
 end
 
 """
-    AtmosphereThermodynamics(FT = Oceananigans.defaults.FloatType;
-                             gravitational_acceleration = 9.81,
-                             molar_gas_constant = 8.314462618,
-                             energy_reference_temperature = 273.16,
-                             triple_point_temperature = 273.16,
-                             triple_point_pressure = 611.657,
-                             dry_air_molar_mass = 0.02897,
-                             dry_air_heat_capacity = 1005,
-                             vapor_molar_mass = 0.018015,
-                             vapor_heat_capacity = 1850,
-                             liquid = liquid_water(FT),
-                             solid = water_ice(FT),
-                             condensed_phases = nothing)
+    ThermodynamicConstants(FT = Oceananigans.defaults.FloatType;
+                           molar_gas_constant = 8.314462618,
+                           gravitational_acceleration = 9.81,
+                           energy_reference_temperature = 273.16,
+                           triple_point_temperature = 273.16,
+                           triple_point_pressure = 611.657,
+                           dry_air_molar_mass = 0.02897,
+                           dry_air_heat_capacity = 1005,
+                           vapor_molar_mass = 0.018015,
+                           vapor_heat_capacity = 1850,
+                           liquid = liquid_water(FT),
+                           solid = water_ice(FT))
 
-Create `AtmosphereThermodynamics` with parameters that represent gaseous mixture of dry "air"
+Create `ThermodynamicConstants` with parameters that represent gaseous mixture of dry "air"
 and vapor, as well as condensed liquid and solid phases.
 The `triple_point_temperature` and `triple_point_pressure` may be combined with
 internal energy parameters for condensed phases to compute the vapor pressure
 at the boundary between vapor and a homogeneous sample of the condensed phase.
-The `gravitational_acceleration` parameter is included to compute reference_state
+The `gravitational_acceleration` parameter is included to compute `reference_state`
 quantities associated with hydrostatic balance.
 
 The Clausius-Clapeyron relation describes the pressure-temperature relationship during phase
@@ -198,18 +197,18 @@ Note: any reference values for pressure and temperature can be used in principle
 The advantage of using reference values at the triple point is that the same values
 can then be used for both condensation (vapor → liquid) and deposition (vapor → ice).
 """
-function AtmosphereThermodynamics(FT = Oceananigans.defaults.FloatType;
-                                  molar_gas_constant = 8.314462618,
-                                  gravitational_acceleration = 9.81,
-                                  energy_reference_temperature = 273.16,
-                                  triple_point_temperature = 273.16,
-                                  triple_point_pressure = 611.657,
-                                  dry_air_molar_mass = 0.02897,
-                                  dry_air_heat_capacity = 1005,
-                                  vapor_molar_mass = 0.018015,
-                                  vapor_heat_capacity = 1850,
-                                  liquid = liquid_water(FT),
-                                  solid = water_ice(FT))
+function ThermodynamicConstants(FT = Oceananigans.defaults.FloatType;
+                                molar_gas_constant = 8.314462618,
+                                gravitational_acceleration = 9.81,
+                                energy_reference_temperature = 273.16,
+                                triple_point_temperature = 273.16,
+                                triple_point_pressure = 611.657,
+                                dry_air_molar_mass = 0.02897,
+                                dry_air_heat_capacity = 1005,
+                                vapor_molar_mass = 0.018015,
+                                vapor_heat_capacity = 1850,
+                                liquid = liquid_water(FT),
+                                solid = water_ice(FT))
 
     dry_air = IdealGas(FT; molar_mass = dry_air_molar_mass,
                            heat_capacity = dry_air_heat_capacity)
@@ -217,24 +216,24 @@ function AtmosphereThermodynamics(FT = Oceananigans.defaults.FloatType;
     vapor = IdealGas(FT; molar_mass = vapor_molar_mass,
                          heat_capacity = vapor_heat_capacity)
 
-    return AtmosphereThermodynamics(convert(FT, molar_gas_constant),
-                                    convert(FT, gravitational_acceleration),
-                                    convert(FT, energy_reference_temperature),
-                                    convert(FT, triple_point_temperature),
-                                    convert(FT, triple_point_pressure),
-                                    dry_air,
-                                    vapor,
-                                    liquid,
-                                    solid)
+    return ThermodynamicConstants(convert(FT, molar_gas_constant),
+                                  convert(FT, gravitational_acceleration),
+                                  convert(FT, energy_reference_temperature),
+                                  convert(FT, triple_point_temperature),
+                                  convert(FT, triple_point_pressure),
+                                  dry_air,
+                                  vapor,
+                                  liquid,
+                                  solid)
 end
 
-const AT = AtmosphereThermodynamics
+const TC = ThermodynamicConstants
 const IG = IdealGas
 
-@inline vapor_gas_constant(thermo::AT)   = thermo.molar_gas_constant / thermo.vapor.molar_mass
-@inline dry_air_gas_constant(thermo::AT) = thermo.molar_gas_constant / thermo.dry_air.molar_mass
+@inline vapor_gas_constant(thermo::TC)   = thermo.molar_gas_constant / thermo.vapor.molar_mass
+@inline dry_air_gas_constant(thermo::TC) = thermo.molar_gas_constant / thermo.dry_air.molar_mass
 
-const NonCondensingAtmosphereThermodynamics{FT} = AtmosphereThermodynamics{FT, Nothing, Nothing}
+const NonCondensingThermodynamicConstants{FT} = ThermodynamicConstants{FT, Nothing, Nothing}
 
 """
     mixture_gas_constant(q, thermo)
@@ -256,12 +255,12 @@ where:
 
 # Arguments
 - `q`: Specific humidity (dimensionless)
-- `thermo`: `AtmosphereThermodynamics` instance containing gas constants
+- `thermo`: `ThermodynamicConstants` instance containing gas constants
 
 # Returns
 - Gas constant of the moist air mixture in J/(kg·K)
 """
-@inline function mixture_gas_constant(q, thermo::AT)
+@inline function mixture_gas_constant(q, thermo::TC)
     Rᵈ = dry_air_gas_constant(thermo)
     Rᵛ = vapor_gas_constant(thermo)
     return Rᵈ * (1 - q) + Rᵛ * q
@@ -274,7 +273,7 @@ Compute the heat capacity of state air given the total specific humidity q
 and assuming that condensate mass ratio qᶜ ≪ q, where qℓ is the mass ratio of
 liquid condensate.
 """
-@inline function mixture_heat_capacity(q, thermo::AT)
+@inline function mixture_heat_capacity(q, thermo::TC)
     cᵖᵈ = thermo.dry_air.heat_capacity
     cᵖᵛ = thermo.vapor.heat_capacity
     return cᵖᵈ * (1 - q) + cᵖᵛ * q

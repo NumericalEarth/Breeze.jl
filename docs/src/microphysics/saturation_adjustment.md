@@ -34,7 +34,7 @@ The saturation specific humidity is then
 using Breeze
 using Breeze.MoistAirBuoyancies: saturation_specific_humidity, HeightReferenceThermodynamicState
 
-thermo = AtmosphereThermodynamics()
+thermo = ThermodynamicConstants()
 ref = ReferenceStateConstants(base_pressure=101325, potential_temperature=288)
 
 z = 0.0    # [m] height

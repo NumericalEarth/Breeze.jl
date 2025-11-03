@@ -1,11 +1,11 @@
 using JLD2
 using Breeze
-using Breeze: saturation_specific_humidity, AtmosphereThermodynamics
+using Breeze: saturation_specific_humidity, ThermodynamicConstants
 using GLMakie
 
 @load "JRA55_atmospheric_state_Jan_1_1991.jld2" q T p
 
-thermo = AtmosphereThermodynamics()
+thermo = ThermodynamicConstants()
 
 ρ = 1.2
 qᵛ★ = saturation_specific_humidity.(T, 1.2, Ref(thermo))
