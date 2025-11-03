@@ -225,6 +225,15 @@ struct HeightReferenceThermodynamicState{FT}
     z :: FT
 end
 
+Base.summary(at::HeightReferenceThermodynamicState{FT}) where FT = "HeightReferenceThermodynamicState{$FT}"
+
+function Base.show(io::IO, hrts::HeightReferenceThermodynamicState)
+    print(io, summary(hrts), ":", '\n',
+        "├── θ: ", hrts.θ, "\n",
+        "├── q: ", hrts.q, "\n",
+        "└── z: ", hrts.z)
+end
+
 condensate_specific_humidity(T, state::HeightReferenceThermodynamicState, ref, thermo) =
     condensate_specific_humidity(T, state.q, state.z, ref, thermo)
 
