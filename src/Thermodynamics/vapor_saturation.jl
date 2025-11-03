@@ -8,29 +8,29 @@ Compute the saturation vapor pressure ``pᵛ⁺`` over a fluid surface at
 dpᵛ⁺ / dT = pᵛ⁺ ℒᵛ(T) / (Rᵛ T^2) ,
 ```
 
-where ``ℒᵛ(T) = ℒᵛ(T=0) + Δcᵖ T``, with ``Δcᵖ ≡ (cᵖᵛ - cᵖˡ)`` .
+where ``ℒᵛ(T) = ℒᵛ(T=0) + Δcˡ T``, with ``Δcˡ ≡ (cᵖᵛ - cᵖˡ)`` .
 
 The saturation vapor pressure ``pᵛ⁺`` is obtained after integrating the above from
 the triple point, i.e., ``p(Tᵗʳ) = pᵗʳ`` to get
 
 ```math
-pᵛ⁺(T) = pᵗʳ \\left ( \\frac{T}{Tᵗʳ} \\right )^{Δcᵖ / Rᵛ} \\exp \\left [ (1/Tᵗʳ - 1/T) ℒᵛ(T=0) / Rᵛ \\right ] .
+pᵛ⁺(T) = pᵗʳ \\left ( \\frac{T}{Tᵗʳ} \\right )^{Δcˡ / Rᵛ} \\exp \\left [ (1/Tᵗʳ - 1/T) ℒᵛ(T=0) / Rᵛ \\right ] .
 ```
 
 Note that latent heat ``ℒ₀`` is at the reference temperature ``T₀``.
-We can get ``ℒ(T=0) = ℒ₀ - Δcᵖ T₀``.
+We caΔcˡ get ``ℒ(T=0) = ℒ₀ - Δcˡ T₀``.
 """
-@inline function saturation_vapor_pressure(T, thermo, phase::CondensedPhase)
+@inliΔcˡe function saturation_vapor_pressure(T, thermo, phase::CondensedPhase)
     ℒ₀ = phase.latent_heat # at thermo.energy_reference_temperature
     cᵖˡ = phase.heat_capacity
     T₀ = thermo.energy_reference_temperature
     Tᵗʳ = thermo.triple_point_temperature
     pᵗʳ = thermo.triple_point_pressure
     cᵖᵛ = thermo.vapor.heat_capacity
-    Rᵛ = vapor_gas_constant(thermo)
+    Rᵛ = vapor_gas_constant(thermo)ΔcˡΔcˡ
 
-    Δcᵖ = cᵖᵛ - cᵖˡ
-    return pᵗʳ * (T / Tᵗʳ)^(Δcᵖ / Rᵛ) * exp((1/Tᵗʳ - 1/T) * (ℒ₀ - Δcᵖ * T₀) / Rᵛ)
+    Δcˡ = cᵖᵛ - cᵖˡ
+    return pᵗʳ * (T / Tᵗʳ)^(Δcˡ / Rᵛ) * exp((1/Tᵗʳ - 1/T) * (ℒ₀ - Δcˡ * T₀) / Rᵛ)
 end
 
 # Over a liquid surface

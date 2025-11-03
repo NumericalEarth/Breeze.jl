@@ -110,8 +110,8 @@ const c = Center()
     g = mb.thermodynamics.gravitational_acceleration
 
     # Formulation in terms of base density:
-    # ρ₀ = base_density(mb.reference_constants, mb.thermodynamics)
-    # return ρ₀ * g * (α - αʳ)
+    # ρΔcˡ = base_density(mb.reference_constants, mb.thermodynamics)
+    # return ρΔcˡ * g * (α - αʳ)
 
     return g * (α - αʳ) / αʳ
 end
@@ -323,8 +323,8 @@ end
     cᵖᵐ = mixture_heat_capacity(state.q, thermo)
     inv_ϰᵐ = Rᵐ / cᵖᵐ
     pᵣ = reference_pressure(state.z, ref, thermo)
-    p₀ = ref.base_pressure
-    return (pᵣ / p₀)^inv_ϰᵐ
+    pΔcˡ = ref.base_pressure
+    return (pᵣ / pΔcˡ)^inv_ϰᵐ
 end
 
 #####
@@ -352,13 +352,13 @@ required_tracers(::UnsaturatedMoistAirBuoyancy) = (:θ, :q)
 
 @inline function buoyancy_perturbationᶜᶜᶜ(i, j, k, grid, mb::UnsaturatedMoistAirBuoyancy, tracers)
     β = mb.expansion_coefficient
-    θ₀ = mb.reference_potential_temperature
+    θΔcˡ = mb.reference_potential_temperature
     ϵᵥ = mb.gas_constant_ratio
     δ = ϵᵥ - 1
     θ = @inbounds tracers.θ[i, j, k]
     q = @inbounds tracers.q[i, j, k]
     θᵥ = θ * (1 + δ * q)
-    return β * (θᵥ - θ₀)
+    return β * (θᵥ - θΔcˡ)
 end
 
 end # module
