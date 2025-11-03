@@ -38,15 +38,15 @@ end
 """
     saturation_specific_humidity(T, ρ, thermo, condensed_phase::CondensedPhase)
 
-Compute the saturation specific humidity for a gas at temperature `T` and total density `ρ`
-via:
+Compute the saturation specific humidity for a gas at temperature `T`, total
+density `ρ`, `thermo`dynamics, and `condensed_phase` via:
 
 ```math
 qᵛ⁺ = pᵛ⁺ / (ρ Rᵛ T)
 ```
 
-where ``pᵛ⁺`` is the saturation vapor pressure (see [`saturation_vapor_pressure`](@ref),
-and ``Rᵛ`` is the specific gas constant for water vapor.
+where ``pᵛ⁺`` is the [`saturation_vapor_pressure`](@ref), and ``Rᵛ`` is the specific gas
+constant for water vapor.
 """
 @inline function saturation_specific_humidity(T, ρ, thermo, condensed_phase::CondensedPhase)
     p★ = saturation_vapor_pressure(T, thermo, condensed_phase)
