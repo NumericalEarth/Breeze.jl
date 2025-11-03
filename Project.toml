@@ -16,7 +16,7 @@ RootSolvers = "7181ea78-2dcb-4de3-ab41-2b8ab5a31e74"
 [compat]
 Adapt = "4.3.0"
 AtmosphericProfilesLibrary = "0.1.7"
-CloudMicrophysics = "0.22.13"
+CloudMicrophysics = "0.22.13, 0.29"
 JLD2 = "0.5.13, 0.6"
 KernelAbstractions = "0.9"
 Oceananigans = "0.100"
