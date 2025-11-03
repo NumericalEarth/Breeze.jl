@@ -318,10 +318,10 @@ fig
 The saturation specific humidity is
 
 ```math
-qᵛ⁺ ≡ \frac{ρᵛ⁺}{ρ} = \frac{pᵛ⁺}{Rᵐ T} .
+qᵛ⁺ ≡ \frac{ρᵛ⁺}{ρ} = \frac{pᵛ⁺}{ρ Rᵐ T} .
 ```
 
-This is what it looks like:
+and this is what it looks like:
 
 ```@example
 using Breeze
