@@ -1,5 +1,5 @@
 using ..Thermodynamics:
-    AtmosphereThermodynamics,
+    ThermodynamicConstants,
     ReferenceStateConstants,
     reference_pressure,
     reference_density,
@@ -69,7 +69,7 @@ end
 """
     AtmosphereModel(grid;
                     clock = Clock(grid),
-                    thermodynamics = AtmosphereThermodynamics(eltype(grid)),
+                    thermodynamics = ThermodynamicConstants(eltype(grid)),
                     formulation = default_formulation(grid, thermodynamics),
                     absolute_humidity = DefaultValue(),
                     tracers = tuple(),
@@ -109,7 +109,7 @@ Pauluis, O. (2008). Thermodynamic consistency of the anelastic approximation for
 """
 function AtmosphereModel(grid;
                          clock = Clock(grid),
-                         thermodynamics = AtmosphereThermodynamics(eltype(grid)),
+                         thermodynamics = ThermodynamicConstants(eltype(grid)),
                          formulation = default_formulation(grid, thermodynamics),
                          absolute_humidity = DefaultValue(),
                          tracers = tuple(),

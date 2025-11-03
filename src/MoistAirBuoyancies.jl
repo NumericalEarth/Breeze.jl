@@ -19,7 +19,7 @@ import Oceananigans.BuoyancyFormulations: AbstractBuoyancyFormulation,
                                           required_tracers
 
 using ..Thermodynamics:
-    AtmosphereThermodynamics,
+    ThermodynamicConstants,
     ReferenceStateConstants,
     mixture_heat_capacity,
     mixture_gas_constant,
@@ -38,7 +38,7 @@ end
 
 """
     MoistAirBuoyancy(FT=Oceananigans.defaults.FloatType;
-                     thermodynamics = AtmosphereThermodynamics(FT),
+                     thermodynamics = ThermodynamicConstants(FT),
                      reference_constants = ReferenceStateConstants{FT}(101325, 290))
 
 Return a MoistAirBuoyancy formulation that can be provided as input to an `AtmosphereModel`
@@ -56,7 +56,7 @@ julia> using Breeze, Oceananigans
 julia> buoyancy = MoistAirBuoyancy()
 MoistAirBuoyancy
 ├── reference_constants: Breeze.Thermodynamics.ReferenceStateConstants{Float64}
-└── thermodynamics: AtmosphereThermodynamics
+└── thermodynamics: ThermodynamicConstants
 
 julia> model = NonhydrostaticModel(; grid = RectilinearGrid(size=(8, 8, 8), extent=(1, 2, 3)),
                                      buoyancy, tracers = (:θ, :q))
@@ -71,7 +71,7 @@ NonhydrostaticModel{CPU, RectilinearGrid}(time = 0 seconds, iteration = 0)
 ```
 """
 function MoistAirBuoyancy(FT=Oceananigans.defaults.FloatType;
-                          thermodynamics = AtmosphereThermodynamics(FT),
+                          thermodynamics = ThermodynamicConstants(FT),
                           reference_constants = ReferenceStateConstants{FT}(101325, 290))
 
     AT = typeof(thermodynamics)

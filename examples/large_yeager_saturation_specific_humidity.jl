@@ -1,7 +1,7 @@
 using GLMakie
 using Breeze
 
-thermo = Breeze.AtmosphereThermodynamics()
+thermo = Breeze.ThermodynamicConstants()
 
 saturation_specific_humidity_large_yeager(T, ρ) = 640380 * exp(-5107.4 / T) / ρ
 

@@ -1,6 +1,6 @@
 module Thermodynamics
 
-export AtmosphereThermodynamics, ReferenceStateConstants, IdealGas,
+export ThermodynamicConstants, ReferenceStateConstants, IdealGas,
        PhaseTransitionConstants, CondensedPhase,
        mixture_gas_constant, mixture_heat_capacity
 

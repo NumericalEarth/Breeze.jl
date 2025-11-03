@@ -2,7 +2,7 @@
 
 ```@setup thermo
 using Breeze
-thermo = AtmosphereThermodynamics()
+thermo = ThermodynamicConstants()
 ```
 
 Breeze implements thermodynamic relations for moist atmospheres --
@@ -148,7 +148,7 @@ using Breeze
 using Breeze.Thermodynamics: reference_pressure, reference_density
 using CairoMakie
 
-thermo = AtmosphereThermodynamics()
+thermo = ThermodynamicConstants()
 constants = ReferenceStateConstants(base_pressure=101325, potential_temperature=288)
 grid = RectilinearGrid(size=160, z=(0, 12_000), topology=(Flat, Flat, Bounded))
 
@@ -212,7 +212,7 @@ Central to Breeze's implementation of moist thermodynamics is a struct that
 holds parameters like the molar gas constant and molar masses,
 
 ```@example thermo
-thermo = AtmosphereThermodynamics()
+thermo = ThermodynamicConstants()
 ```
 
 The default parameter evince basic facts about water vapor air typical to Earth's atmosphere:
@@ -298,7 +298,7 @@ The saturation vapor pressure is
 using Breeze
 using Breeze.Thermodynamics: saturation_vapor_pressure
 
-thermo = AtmosphereThermodynamics()
+thermo = ThermodynamicConstants()
 
 T = collect(200:0.1:320)
 pᵛˡ⁺ = [saturation_vapor_pressure(Tⁱ, thermo, thermo.liquid) for Tⁱ in T]
@@ -327,7 +327,7 @@ and this is what it looks like:
 using Breeze
 using Breeze.MoistAirBuoyancies: saturation_specific_humidity
 
-thermo = AtmosphereThermodynamics()
+thermo = ThermodynamicConstants()
 ref = ReferenceStateConstants(base_pressure=101325, potential_temperature=288)
 
 z = 0
