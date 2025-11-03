@@ -269,14 +269,14 @@ heats, the latent heat of a phase transition is linear in temperature.
 For example, for phase change from vapor to liquid,
 
 ```math
-ℒˡ(T) = ℒˡ₀ + \big ( \underbrace{cᵖᵛ - cᵖˡ}_{≡Δcˡ} \big ) T ,
+ℒˡ(T) = ℒˡ_{0K} + \big ( \underbrace{cᵖᵛ - cᵖˡ}_{≡Δcˡ} \big ) T ,
 ```
 
-where ``ℒˡ₀`` is the latent heat at ``T = 0``, with ``T`` in Kelvin.
-Integrate that to get
+where ``ℒˡ_{0K}`` is the latent heat at absolute zero, ``T = 0 \; \mathrm{K}``.
+By integrating from the triple-point temperature ``Tᵗʳ`` for which ``p(Tᵗʳ) = pᵗʳ``, we get
 
 ```math
-pᵛ⁺(T) = pᵗʳ \left ( \frac{T}{Tᵗʳ} \right )^{Δcˡ / Rᵛ} \exp \left [ \frac{ℒˡ₀}{Rᵛ} \left (\frac{1}{Tᵗʳ} - \frac{1}{T} \right ) \right ] .
+pᵛ⁺(T) = pᵗʳ \left ( \frac{T}{Tᵗʳ} \right )^{Δcˡ / Rᵛ} \exp \left [ \frac{ℒˡ_{0K}}{Rᵛ} \left (\frac{1}{Tᵗʳ} - \frac{1}{T} \right ) \right ] .
 ```
 
 Consider parameters for liquid water,
@@ -290,6 +290,29 @@ or water ice,
 
 ```@example thermo
 water_ice = CondensedPhase(latent_heat=2834000, heat_capacity=2108)
+```
+
+The saturation vapor pressure is
+
+```@example
+using Breeze
+using Breeze.Thermodynamics: saturation_vapor_pressure
+
+thermo = AtmosphereThermodynamics()
+
+T = collect(200:0.1:320)
+pᵛˡ⁺ = [saturation_vapor_pressure(Tⁱ, thermo, thermo.liquid) for Tⁱ in T]
+pᵛⁱ⁺ = [saturation_vapor_pressure(Tⁱ, thermo, thermo.solid) for Tⁱ in T]
+pᵛⁱ⁺[T .> thermo.triple_point_temperature] .= NaN
+
+using CairoMakie
+
+fig = Figure()
+ax = Axis(fig[1, 1], xlabel="Temperature (ᵒK)", ylabel="Saturation vapor pressure pᵛ⁺ (Pa)", yscale = log10, xticks=200:20:320)
+lines!(ax, T, pᵛˡ⁺, label="vapor pressure over liquid")
+lines!(ax, T, pᵛⁱ⁺, linestyle=:dash, label="vapor pressure over ice")
+axislegend(ax, position=:rb)
+fig
 ```
 
 The saturation specific humidity is

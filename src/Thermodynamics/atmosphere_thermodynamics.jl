@@ -79,7 +79,8 @@ Likewise, during deposition, water molecules in the gas phase cluster into ice c
 Arguments
 =========
 - `FT`: Float type to use (defaults to Oceananigans.defaults.FloatType)
-- `latent_heat`: Difference between the internal energy of the gaseous phase at the energy_reference_temperature.
+- `latent_heat`: Difference between the internal energy of the gaseous phase at
+  the `energy_reference_temperature`.
 - `heat_capacity`: Heat capacity of the phase of matter.
 """
 function CondensedPhase(FT = Oceananigans.defaults.FloatType; latent_heat, heat_capacity)
