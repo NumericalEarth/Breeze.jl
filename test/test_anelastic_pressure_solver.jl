@@ -12,9 +12,9 @@ for FT in (Float32, Float64)
         z = 0:(1/Nz):1
         grid = RectilinearGrid(FT; size=(Nx, Ny, Nz), x=(0, 1), y=(0, 1), z)
         thermodynamics = ThermodynamicConstants(FT)
-        reference_state = ReferenceState(FT; base_pressure=101325, potential_temperature=288)
+        reference_constants = ReferenceStateConstants(FT; base_pressure=101325, potential_temperature=288)
 
-        formulation = AnelasticFormulation(grid, reference_state, thermodynamics)
+        formulation = AnelasticFormulation(grid, reference_constants, thermodynamics)
         parent(formulation.reference_density) .= 1
 
         anelastic = AtmosphereModel(grid; thermodynamics=thermodynamics, formulation)
@@ -53,8 +53,8 @@ for FT in (Float32, Float64)
         @info "Test that anelastic pressure solver recovers analytic solution [$FT]..."
         grid = RectilinearGrid(FT; size=48, z=(0, 1), topology=(Flat, Flat, Bounded))
         thermodynamics = ThermodynamicConstants(FT)
-        reference_state = ReferenceState(FT; base_pressure=101325.0, potential_temperature=288.0)
-        formulation = AnelasticFormulation(grid, reference_state, thermodynamics)
+        reference_constants = ReferenceStateConstants(FT; base_pressure=101325.0, potential_temperature=288.0)
+        formulation = AnelasticFormulation(grid, reference_constants, thermodynamics)
 
         #=
         ρᵣ = 2 + cos(π z / 2)
@@ -77,7 +77,7 @@ for FT in (Float32, Float64)
 
         set!(formulation.reference_density, z -> z)
         fill_halo_regions!(formulation.reference_density)
-        model = AtmosphereModel(grid; thermodynamics=thermodynamics, formulation)
+        model = AtmosphereModel(grid; thermodynamics, formulation)
         set!(model, ρw = z -> z^2 - z^3)
 
         ϕ_exact = CenterField(grid)
