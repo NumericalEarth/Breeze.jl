@@ -42,7 +42,7 @@ buoyancy = Breeze.MoistAirBuoyancy(; reference_constants)
 Q₀ = 1000 # heat flux in W / m²
 ρ₀ = Breeze.MoistAirBuoyancies.base_density(buoyancy) # air density at z=0
 cₚ = buoyancy.thermodynamics.dry_air.heat_capacity
-θ_bcs = FieldBoundaryConditions(bottom=FluxBoundaryCondition(QΔcˡ / (ρΔcˡ * cₚ)))
+θ_bcs = FieldBoundaryConditions(bottom=FluxBoundaryCondition(Q₀ / (ρ₀ * cₚ)))
 q_bcs = FieldBoundaryConditions(bottom=FluxBoundaryCondition(1e-2))
 
 advection = WENO()
