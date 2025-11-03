@@ -225,13 +225,44 @@ struct HeightReferenceThermodynamicState{FT}
     z :: FT
 end
 
+Base.summary(::HeightReferenceThermodynamicState{FT}) where FT = "HeightReferenceThermodynamicState{$FT}"
+
+function Base.show(io::IO, hrts::HeightReferenceThermodynamicState)
+    print(io, summary(hrts), ":", '\n',
+        "├── θ: ", hrts.θ, "\n",
+        "├── q: ", hrts.q, "\n",
+        "└── z: ", hrts.z)
+end
+
 condensate_specific_humidity(T, state::HeightReferenceThermodynamicState, ref, thermo) =
     condensate_specific_humidity(T, state.q, state.z, ref, thermo)
+
 
 # Solve
 # θ = T/Π ( 1 - ℒ qˡ / (cᵖᵐ T))
 # for temperature T with qˡ = max(0, q - qᵛ★).
 # root of: f(T) = T - Π θ - ℒ qˡ / cᵖᵐ
+
+"""
+    temperature(state::HeightReferenceThermodynamicState, ref, thermo)
+
+Return the temperature ``T`` that satisfies saturation adjustment, that is, the
+temperature for which
+
+```math
+θ = [1 - ℒ qˡ / (cᵖᵐ T)] T / Π ,
+```
+
+with ``qˡ = \\max(0, qᵗ - qᵛ⁺)`` the condensate specific humidity, where ``qᵗ`` is the
+total specific humidity, ``qᵛ⁺`` is the saturation specific humidity.
+
+The saturation adjustment temperature is obtained by solving ``r(T)``, where
+```math
+r(T) ≡ T - θ Π - ℒ qˡ / (cᵖᵐ T) .
+```
+
+Solution of ``r(T) = 0`` is found via the [secant method](https://en.wikipedia.org/wiki/Secant_method).
+"""
 @inline function temperature(state::HeightReferenceThermodynamicState{FT}, ref, thermo) where FT
     state.θ == 0 && return zero(FT)
 
