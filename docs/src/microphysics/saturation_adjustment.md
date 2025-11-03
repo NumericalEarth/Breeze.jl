@@ -13,19 +13,21 @@ where ``Π`` is the Exner function, ``θ`` is potential temperature, ``T`` is te
 ``qᵛ⁺`` is the saturation specific humidity, and ``cᵖᵐ`` is the moist air specific heat.
 The condensate specific humidity is ``qˡ = \max(0, qᵗ - qᵛ⁺)``: ``qˡ = 0`` if the air is undersaturated with ``qᵗ < qᵛ⁺``.
 Both ``Π`` and ``cᵖᵐ`` depend on the dry and vapor mass fractions ``qᵈ = 1 - qᵗ`` and
-``qᵛ = qᵗ - qˡ``, and ``qᵛ⁺`` is an increasing function of temperature ``T``.
-Rewriting the potential temperature relation, saturation adjustment requires solving ``r(T) = 0``,
+``qᵛ = qᵗ - qˡ``, and the saturation specific humidity``qᵛ⁺`` is an increasing function of temperature ``T``.
+
+Rewriting the potential temperature relation above, saturation adjustment requires solving ``r(T) = 0``, where
 
 ```math
-r(T) = T - θ Π - \frac{ℒᵥ₀}{cᵖᵐ} \max[0, qᵗ - qᵛ⁺(T)] .
+r(T) ≡ T - θ Π - \frac{ℒᵥ₀}{cᵖᵐ} \max[0, qᵗ - qᵛ⁺(T)] .
 ```
 
 We use a secant method after checking for ``θ = 0`` and ``qˡ = 0`` given the guess ``T₁ = θ Π(qᵗ)``.
 If ``qᵗ > qᵛ⁺(T₁)``, then we are guaranteed that ``T > T₁`` because ``qᵛ⁺`` is an increasing function of ``T``.
 We initialize the secant iteration with a second guess ``T₂ = θ Π - [qᵗ - qᵛ⁺(T₁)] ℒᵥ₀ / cᵖᵐ``.
+See [`temperature`](@ref Breeze.MoistAirBuoyancies.temperature) for more details.
 
-
-As an example, we consider an air parcel at sea-level and with potential temperature of ``θ = 290``ᵒK, within a reference state with base pressure of 101325 Pa and a reference potential temperature ``288``ᵒK.
+As an example, we consider an air parcel at sea-level and with potential temperature of ``θ = 290``ᵒK,
+within a reference state with base pressure of 101325 Pa and a reference potential temperature ``288``ᵒK.
 The saturation specific humidity is then
 
 ```@example microphysics
@@ -67,7 +69,7 @@ As a second example, we examine the dependence of temperature on total specific 
 when the potential temperature is constant:
 
 ```@example microphysics
-qᵗ = 0:1e-4:0.02 # [kg kg⁻¹] total specific humidity
+qᵗ = 0:1e-4:0.04 # [kg kg⁻¹] total specific humidity
 U = [HeightReferenceThermodynamicState(θ, qᵗⁱ, z) for qᵗⁱ in qᵗ]
 T = [temperature(Uⁱ, ref, thermo) for Uⁱ in U]
 
@@ -81,8 +83,8 @@ using CairoMakie
 fig = Figure()
 ax = Axis(fig[1, 1], xlabel="Total specific humidity (kg kg⁻¹)", ylabel="Temperature (ᵒK)")
 lines!(ax, qᵗ, T, label="Temperature from saturation adjustment")
-lines!(ax, qᵗ, T̃, label="Temperature from linearized formula")
-axislegend(ax)
+lines!(ax, qᵗ, T̃, label="Temperature from linearized formula", linewidth=2)
+axislegend(ax, position=:lt)
 fig
 ```
 
@@ -94,26 +96,34 @@ but at varying heights:
 ```@example microphysics
 qᵗ = 0.005
 z = 0:100:10e3
+
 T = [temperature(HeightReferenceThermodynamicState(θ, qᵗ, zᵏ), ref, thermo) for zᵏ in z]
 qᵛ⁺ = [saturation_specific_humidity(T[k], z[k], ref, thermo, thermo.liquid) for k = 1:length(z)]
 qˡ = [max(0, qᵗ - qᵛ⁺ᵏ) for qᵛ⁺ᵏ in qᵛ⁺]
+rh = [100 * min(qᵗ, qᵛ⁺ᵏ) / qᵛ⁺ᵏ for qᵛ⁺ᵏ in qᵛ⁺]
 
 cᵖᵈ = thermo.dry_air.heat_capacity
 g = thermo.gravitational_acceleration
 
-fig = Figure()
+fig = Figure(size=(700, 350))
 
 yticks = 0:2e3:10e3
-axT = Axis(fig[1, 1]; xlabel = "Temperature (ᵒK)", ylabel = "Height (m)", yticks)
-axq⁺ = Axis(fig[1, 2]; xlabel = "Saturation \n specific humidity \n (kg kg⁻¹)",
+
+axT = Axis(fig[1, 1:2]; xlabel = "Temperature (ᵒK)", ylabel = "Height (m)", yticks)
+axq⁺ = Axis(fig[1, 3]; xlabel = "Saturation\n specific humidity\n (kg kg⁻¹)",
                        yticks, yticklabelsvisible = false)
-axqˡ = Axis(fig[1, 3]; xlabel = "Liquid \n specific humidity \n (kg kg⁻¹)",
+axqˡ = Axis(fig[1, 4]; xlabel = "Liquid\n specific humidity\n (kg kg⁻¹)",
+                       yticks, yticklabelsvisible = false)
+
+axrh = Axis(fig[1, 5]; xlabel = "Relative\n humidity (%)",
+                       xticks = 0:20:100,
                        yticks, yticklabelsvisible = false)
 
 lines!(axT, T, z)
 lines!(axT, T[1] .- g * z / cᵖᵈ, z, linestyle = :dash, color = :orange, linewidth = 2)
 lines!(axq⁺, qᵛ⁺, z)
 lines!(axqˡ, qˡ, z)
+lines!(axrh, rh, z)
 
 fig
 ```
