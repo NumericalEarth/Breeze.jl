@@ -27,11 +27,7 @@ pᵛ⁺(T) = pᵗʳ \\left ( \\frac{T}{Tᵗʳ} \\right )^{Δcᵖ / Rᵛ} \\exp \
     Rᵛ = vapor_gas_constant(thermo)
 
     Δcᵖ = cᵖᵛ - cᵖˡ
-
-    # latent heat at T = 0 ᵒK assuming temperature-independent specific heats
-    ℒ₀ₖ = ℒ₀ - Δcᵖ * T₀
-
-    return pᵗʳ * (T / Tᵗʳ)^(Δcᵖ / Rᵛ) * exp((1/Tᵗʳ - 1/T) * ℒ₀ₖ / Rᵛ)
+    return pᵗʳ * (T / Tᵗʳ)^(Δcᵖ / Rᵛ) * exp((1/Tᵗʳ - 1/T) * (ℒ₀ - Δcᵖ * T₀) / Rᵛ)
 end
 
 # Over a liquid surface
