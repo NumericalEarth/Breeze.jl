@@ -18,16 +18,16 @@ pᵛ⁺(T) = pᵗʳ \\left ( \\frac{T}{Tᵗʳ} \\right )^{Δcˡ / Rᵛ} \\exp \\
 ```
 
 Note that latent heat ``ℒ₀`` is at the reference temperature ``T₀``.
-We caΔcˡ get ``ℒ(T=0) = ℒ₀ - Δcˡ T₀``.
+We can get ``ℒ(T=0) = ℒ₀ - Δcˡ T₀``.
 """
-@inliΔcˡe function saturation_vapor_pressure(T, thermo, phase::CondensedPhase)
+@inline function saturation_vapor_pressure(T, thermo, phase::CondensedPhase)
     ℒ₀ = phase.latent_heat # at thermo.energy_reference_temperature
     cᵖˡ = phase.heat_capacity
     T₀ = thermo.energy_reference_temperature
     Tᵗʳ = thermo.triple_point_temperature
     pᵗʳ = thermo.triple_point_pressure
     cᵖᵛ = thermo.vapor.heat_capacity
-    Rᵛ = vapor_gas_constant(thermo)ΔcˡΔcˡ
+    Rᵛ = vapor_gas_constant(thermo)
 
     Δcˡ = cᵖᵛ - cᵖˡ
     return pᵗʳ * (T / Tᵗʳ)^(Δcˡ / Rᵛ) * exp((1/Tᵗʳ - 1/T) * (ℒ₀ - Δcˡ * T₀) / Rᵛ)

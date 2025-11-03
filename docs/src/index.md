@@ -39,8 +39,8 @@ grid = RectilinearGrid(CPU(), size=(Nx, Nz), x=(0, 2Lz), z=(0, Lz), topology=(Pe
 reference_constants = Breeze.Thermodynamics.ReferenceStateConstants(base_pressure=1e5, potential_temperature=288)
 buoyancy = Breeze.MoistAirBuoyancy(; reference_constants)
 
-QΔcˡ = 1000 # heat flux in W / m²
-ρΔcˡ = Breeze.MoistAirBuoyancies.base_density(buoyancy) # air density at z=0
+Q₀ = 1000 # heat flux in W / m²
+ρ₀ = Breeze.MoistAirBuoyancies.base_density(buoyancy) # air density at z=0
 cₚ = buoyancy.thermodynamics.dry_air.heat_capacity
 θ_bcs = FieldBoundaryConditions(bottom=FluxBoundaryCondition(QΔcˡ / (ρΔcˡ * cₚ)))
 q_bcs = FieldBoundaryConditions(bottom=FluxBoundaryCondition(1e-2))

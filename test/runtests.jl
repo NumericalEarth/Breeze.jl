@@ -18,18 +18,18 @@ using Oceananigans
             grid = RectilinearGrid(FT, size=(8, 8, 8), x=(0, 1_000), y=(0, 1_000), z=(0, 1_000))
             thermo = AtmosphereThermodynamics(FT)
 
-            for pΔcˡ in (101325, 100000)
-                for θΔcˡ in (288, 300)
-                    constants = Breeze.Thermodynamics.ReferenceStateConstants(pΔcˡ, θΔcˡ)
+            for p₀ in (101325, 100000)
+                for θ₀ in (288, 300)
+                    constants = Breeze.Thermodynamics.ReferenceStateConstants(p₀, θ₀)
                     formulation = AnelasticFormulation(grid, constants, thermo)
                     model = AtmosphereModel(grid; formulation)
 
                     # test set!
                     ρᵣ = model.formulation.reference_density
                     cᵖᵈ = model.thermodynamics.dry_air.heat_capacity
-                    ρeᵢ = ρᵣ * cᵖᵈ * θΔcˡ
+                    ρeᵢ = ρᵣ * cᵖᵈ * θ₀
 
-                    set!(model; θ = θΔcˡ)
+                    set!(model; θ = θ₀)
                     ρe₁ = deepcopy(model.energy)
 
                     set!(model; ρe = ρeᵢ)
@@ -46,11 +46,11 @@ using Oceananigans
         grid = RectilinearGrid(size=(8, 8, 8), x=(0, 400), y=(0, 400), z=(0, 400))
         model = NonhydrostaticModel(; grid, buoyancy, tracers = (:θ, :q))
 
-        θΔcˡ = reference_constants.reference_potential_temperature
+        θ₀ = reference_constants.reference_potential_temperature
         Δθ = 2
         Lz = grid.Lz
 
-        θᵢ(x, y, z) = θΔcˡ + Δθ * z / Lz
+        θᵢ(x, y, z) = θ₀ + Δθ * z / Lz
         set!(model; θ = θᵢ, q = 0)
 
         # Can time-step
