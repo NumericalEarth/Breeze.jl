@@ -5,16 +5,16 @@ Compute the saturation vapor pressure ``pᵛ⁺`` over a fluid surface at
 `phase` (i.e., liquid or solid) from the Clausius-Clapeyron relation,
 
 ```math
-dpᵛ⁺ / dT = pᵛ⁺ ℒᵛ(T) / (Rᵛ T^2)
+dpᵛ⁺ / dT = pᵛ⁺ ℒᵛ(T) / (Rᵛ T^2) ,
 ```
 
-where ``ℒᵛ(T) = ℒᵛ(T=0) + Δcᵖ T``, with ``Δcᵖ ≡ (cᵖᵛ - cᵖˡ)``.
+where ``ℒᵛ(T) = ℒᵛ(T=0) + Δcᵖ T``, with ``Δcᵖ ≡ (cᵖᵛ - cᵖˡ)`` .
 
 The saturation vapor pressure ``pᵛ⁺`` is obtained after integrating the above from
 the triple point, i.e., ``p(Tᵗʳ) = pᵗʳ`` to get
 
 ```math
-pᵛ⁺(T) = pᵗʳ \\left ( \\frac{T}{Tᵗʳ} \\right )^{Δcᵖ / Rᵛ} \\exp \\left [ (1/Tᵗʳ - 1/T) ℒᵛ(T=0) / Rᵛ \\right ]
+pᵛ⁺(T) = pᵗʳ \\left ( \\frac{T}{Tᵗʳ} \\right )^{Δcᵖ / Rᵛ} \\exp \\left [ (1/Tᵗʳ - 1/T) ℒᵛ(T=0) / Rᵛ \\right ] .
 ```
 """
 @inline function saturation_vapor_pressure(T, thermo, phase::CondensedPhase)
@@ -42,7 +42,7 @@ Compute the saturation specific humidity for a gas at temperature `T`, total
 density `ρ`, `thermo`dynamics, and `condensed_phase` via:
 
 ```math
-qᵛ⁺ = pᵛ⁺ / (ρ Rᵛ T)
+qᵛ⁺ = pᵛ⁺ / (ρ Rᵛ T) ,
 ```
 
 where ``pᵛ⁺`` is the [`saturation_vapor_pressure`](@ref), and ``Rᵛ`` is the specific gas
