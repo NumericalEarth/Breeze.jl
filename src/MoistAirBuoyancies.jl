@@ -225,7 +225,7 @@ struct HeightReferenceThermodynamicState{FT}
     z :: FT
 end
 
-Base.summary(at::HeightReferenceThermodynamicState{FT}) where FT = "HeightReferenceThermodynamicState{$FT}"
+Base.summary(::HeightReferenceThermodynamicState{FT}) where FT = "HeightReferenceThermodynamicState{$FT}"
 
 function Base.show(io::IO, hrts::HeightReferenceThermodynamicState)
     print(io, summary(hrts), ":", '\n',
