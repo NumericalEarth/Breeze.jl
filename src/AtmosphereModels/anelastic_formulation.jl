@@ -1,5 +1,5 @@
 using ..Thermodynamics:
-    AtmosphereThermodynamics,
+    ThermodynamicConstants,
     ReferenceStateConstants,
     reference_pressure,
     reference_density,
