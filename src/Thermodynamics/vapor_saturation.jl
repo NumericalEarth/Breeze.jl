@@ -8,17 +8,17 @@ Compute the saturation vapor pressure ``pᵛ⁺`` over a fluid surface at
 dpᵛ⁺ / dT = pᵛ⁺ ℒᵛ(T) / (Rᵛ T^2) ,
 ```
 
-where ``ℒᵛ(T) = ℒᵛ(T=0) + Δcˡ T``, with ``Δcˡ ≡ (cᵖᵛ - cᵖˡ)`` .
+where ``ℒˡ(T) = ℒˡ(T=0) + Δcˡ T``, with ``Δcˡ ≡ (cᵖᵛ - cᵖˡ)`` .
 
 The saturation vapor pressure ``pᵛ⁺`` is obtained after integrating the above from
 the triple point, i.e., ``p(Tᵗʳ) = pᵗʳ`` to get
 
 ```math
-pᵛ⁺(T) = pᵗʳ \\left ( \\frac{T}{Tᵗʳ} \\right )^{Δcˡ / Rᵛ} \\exp \\left [ (1/Tᵗʳ - 1/T) ℒᵛ(T=0) / Rᵛ \\right ] .
+pᵛ⁺(T) = pᵗʳ \\left ( \\frac{T}{Tᵗʳ} \\right )^{Δcˡ / Rᵛ} \\exp \\left [ (1/Tᵗʳ - 1/T) ℒˡ(T=0) / Rᵛ \\right ] .
 ```
 
-Note that latent heat ``ℒ₀`` is at the reference temperature ``T₀``.
-We can get ``ℒ(T=0) = ℒ₀ - Δcˡ T₀``.
+Note that latent heat ``ℒ₀`` is at the reference temperature ``T₀``
+and that ``ℒ(T=0) = ℒ₀ - Δcˡ T₀``.
 """
 @inline function saturation_vapor_pressure(T, thermo, phase::CondensedPhase)
     ℒ₀ = phase.latent_heat # at thermo.energy_reference_temperature
