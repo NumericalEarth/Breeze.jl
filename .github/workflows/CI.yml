@@ -41,7 +41,6 @@ jobs:
       matrix:
         version:
           - "min"
-          - "1.11"
           - "1.12"
         os:
           - ubuntu-latest
