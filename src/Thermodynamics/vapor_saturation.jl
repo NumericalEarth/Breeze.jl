@@ -16,6 +16,9 @@ the triple point, i.e., ``p(Tᵗʳ) = pᵗʳ`` to get
 ```math
 pᵛ⁺(T) = pᵗʳ \\left ( \\frac{T}{Tᵗʳ} \\right )^{Δcᵖ / Rᵛ} \\exp \\left [ (1/Tᵗʳ - 1/T) ℒᵛ(T=0) / Rᵛ \\right ] .
 ```
+
+Note that latent heat ``ℒ₀`` is at the reference temperature ``T₀``.
+We can get ``ℒ(T=0) = ℒ₀ - Δcᵖ T₀``.
 """
 @inline function saturation_vapor_pressure(T, thermo, phase::CondensedPhase)
     ℒ₀ = phase.latent_heat # at thermo.energy_reference_temperature
