@@ -25,11 +25,9 @@ dθdz = N² * θ₀ / g  # Background potential temperature gradient
 Uᵢ = 1
 set!(model, θ=θᵢ, u=Uᵢ)
 
-Δt = 5minutes
-stop_time = 4days
-simulation = Simulation(model; Δt, stop_time)
-
-# We add a callback to print a message about how the simulation is going,
+Δt = 10 # seconds
+stop_iteration = 1000
+simulation = Simulation(model; Δt, stop_iteration)
 
 using Printf
 
