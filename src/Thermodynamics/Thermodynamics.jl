@@ -1,7 +1,7 @@
 module Thermodynamics
 
 export ThermodynamicConstants, ReferenceStateConstants, IdealGas,
-       PhaseTransitionConstants, CondensedPhase,
+       CondensedPhase,
        mixture_gas_constant, mixture_heat_capacity
 
 include("atmosphere_thermodynamics.jl")

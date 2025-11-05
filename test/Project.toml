@@ -1,0 +1,9 @@
+[deps]
+Aqua = "4c88cf16-eb10-579e-8560-4a9242c79595"
+Oceananigans = "9e8cae18-63c1-5223-a75c-80ca9d6e9a09"
+Test = "8dfed614-e22c-5e08-85e1-65c5234f0b40"
+
+[compat]
+Aqua = "0.8"
+Oceananigans = "0.100"
+Test = "<0.0.1, 1"
