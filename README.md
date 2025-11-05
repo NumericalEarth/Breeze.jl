@@ -20,6 +20,9 @@
   </a>
   <a href="https://codecov.io/gh/NumericalEarth/Breeze.jl" >
     <img src="https://codecov.io/gh/NumericalEarth/Breeze.jl/graph/badge.svg?token=09TZGWKUPV"/>
+  </a>  
+  <a href="[https://codecov.io/gh/NumericalEarth/Breeze.jl](https://github.com/JuliaTesting/Aqua.jl)" >
+    <img src="https://raw.githubusercontent.com/JuliaTesting/Aqua.jl/master/badge.svg"/>
   </a>
 </p>
 
