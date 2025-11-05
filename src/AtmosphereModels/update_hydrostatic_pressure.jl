@@ -40,9 +40,14 @@ function update_hydrostatic_pressure!(model)
     T = model.temperature
     q = model.specific_humidity
     thermo = model.thermodynamics
+
     Nx, Ny, Nz = size(grid)
-    kernel_parameters = KernelParameters(0:Nx+1, 0:Ny+1)
+    TX, TY, TZ = topology(grid)
+    ii = TX == Flat ? 1 : 0:Nx+1
+    jj = TY == Flat ? 1 : 0:Ny+1
+    kernel_parameters = KernelParameters(ii, jj)
+
     launch!(arch, grid, kernel_parameters, _update_hydrostatic_pressure!, pₕ′, grid, formulation, T, q, thermo)
-    fill_halo_regions!(pₕ′)
+
     return nothing
 end
