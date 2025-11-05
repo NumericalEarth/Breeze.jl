@@ -67,16 +67,16 @@ conjure_time_step_wizard!(simulation, cfl=0.7)
 
 # Progress monitoring
 function progress(sim)
-    θ = sim.model.tracers.θ
+    T = sim.model.temperature
     u, w = sim.model.velocities
 
-    θ_max = maximum(θ)
-    θ_min = minimum(θ)
+    T_max = maximum(T)
+    T_min = minimum(T)
     u_max = maximum(abs, u)
     w_max = maximum(abs, w)
 
     msg = @sprintf("Iter: %d, t: %s, Δt: %s, extrema(θ): (%.2f, %.2f) K, max|u|: %.2f m/s, max|w|: %.2f m/s",
-                   iteration(sim), prettytime(sim), prettytime(sim.Δt), θ_min, θ_max, u_max, w_max)
+                   iteration(sim), prettytime(sim), prettytime(sim.Δt), T_min, T_max, u_max, w_max)
 
     @info msg
     return nothing
@@ -91,17 +91,16 @@ add_callback!(simulation, progress, IterationInterval(50))
 u, v, w = model.velocities
 ζ = ∂x(w) - ∂z(u)
 
-# Temperature perturbation from background state
-θ_bg_field = Field{Nothing, Nothing, Center}(grid)
-set!(θ_bg_field, z -> θ₀ + dθdz * z)
-θ′ = model.tracers.θ - θ_bg_field
+E = Field{Nothing, Nothing, Center}(grid)
+set!(E, Field(Average(model.energy, dims=(1, 2))))
+e′ = model.energy - E
 
 #outputs = merge(model.velocities, model.tracers, (; T, ζ, θ′))
-outputs = merge(model.velocities, model.tracers, (; ζ, θ′))
+outputs = merge(model.velocities, (; ζ, e′, T=model.temperature, e=model.energy))
 
 filename = "thermal_bubble_$(Nx)x$(Nz).jld2"
 writer = JLD2Writer(model, outputs; filename,
-                    schedule = TimeInterval(30seconds),
+                    schedule = IterationInterval(10),
                     overwrite_existing = true)
 
 simulation.output_writers[:jld2] = writer
@@ -117,22 +116,22 @@ if get(ENV, "CI", "false") == "false"
     @info "Creating visualization..."
 
     # Read the output data
-    θt = FieldTimeSeries(filename, "θ")
+    et = FieldTimeSeries(filename, "e")
     Tt = FieldTimeSeries(filename, "T")
     ut = FieldTimeSeries(filename, "u")
     wt = FieldTimeSeries(filename, "w")
     ζt = FieldTimeSeries(filename, "ζ")
-    θ′t = FieldTimeSeries(filename, "θ′")
+    e′t = FieldTimeSeries(filename, "e′")
 
-    times = θt.times
-    Nt = length(θt)
+    times = et.times
+    Nt = length(et)
 
     # Create visualization - expanded to 6 panels
     fig = Figure(size=(1500, 1000), fontsize=12)
 
     # Subplot layout - 3 rows, 2 columns
-    axθ = Axis(fig[1, 1], xlabel="x (km)", ylabel="z (km)", title="Potential Temperature θ (ᵒK)")
-    axθ′ = Axis(fig[1, 2], xlabel="x (km)", ylabel="z (km)", title="Temperature Perturbation θ′ (ᵒK)")
+    axe = Axis(fig[1, 1], xlabel="x (km)", ylabel="z (km)", title="Potential Temperature θ (ᵒK)")
+    axe′ = Axis(fig[1, 2], xlabel="x (km)", ylabel="z (km)", title="Temperature Perturbation θ′ (ᵒK)")
     axT = Axis(fig[2, 1], xlabel="x (km)", ylabel="z (km)", title="Temperature T (ᵒK)")
     axζ = Axis(fig[2, 2], xlabel="x (km)", ylabel="z (km)", title="Vorticity ζ (s⁻¹)")
     axu = Axis(fig[3, 1], xlabel="x (km)", ylabel="z (km)", title="Horizontal Velocity u (m/s)")
@@ -143,46 +142,45 @@ if get(ENV, "CI", "false") == "false"
     n = slider.value
 
     # Observable fields
-    θn = @lift interior(θt[$n], :, 1, :)
-    θ′n = @lift interior(θ′t[$n], :, 1, :)
+    en = @lift interior(et[$n], :, 1, :)
     Tn = @lift interior(Tt[$n], :, 1, :)
+    e′n = @lift interior(e′t[$n], :, 1, :)
     ζn = @lift interior(ζt[$n], :, 1, :)
     un = @lift interior(ut[$n], :, 1, :)
     wn = @lift interior(wt[$n], :, 1, :)
-
     # Grid coordinates
-    x = xnodes(θt) ./ 1000  # Convert to km
-    z = znodes(θt) ./ 1000  # Convert to km
+    x = xnodes(et) ./ 1000  # Convert to km
+    z = znodes(et) ./ 1000  # Convert to km
 
     # Title with time
     title = @lift "Thermal Bubble Evolution - t = $(prettytime(times[$n]))"
     fig[0, :] = Label(fig, title, fontsize=16, tellwidth=false)
 
     # Create heatmaps
-    θ_range = (minimum(θt), maximum(θt))
-    θ′_range = (minimum(θ′t), maximum(θ′t))
+    e_range = (minimum(et), maximum(et))
+    e′_range = (minimum(e′t), maximum(e′t))
     T_range = (minimum(Tt), maximum(Tt))
     ζ_range = maximum(abs, ζt)
     u_range = maximum(abs, ut)
     w_range = maximum(abs, wt)
 
-    hmθ = heatmap!(axθ, x, z, θn, colorrange=θ_range, colormap=:thermal)
-    hmθ′ = heatmap!(axθ′, x, z, θ′n, colorrange=θ′_range, colormap=:balance)
+    hme = heatmap!(axe, x, z, en, colorrange=e_range, colormap=:thermal)
+    hme′ = heatmap!(axe′, x, z, e′n, colorrange=e′_range, colormap=:balance)
     hmT = heatmap!(axT, x, z, Tn, colorrange=T_range, colormap=:thermal)
     hmζ = heatmap!(axζ, x, z, ζn, colorrange=(-ζ_range, ζ_range), colormap=:balance)
     hmu = heatmap!(axu, x, z, un, colorrange=(-u_range, u_range), colormap=:balance)
     hmw = heatmap!(axw, x, z, wn, colorrange=(-w_range, w_range), colormap=:balance)
 
     # Add colorbars
-    Colorbar(fig[1, 3], hmθ, label="θ (ᵒK)", vertical=true)
-    Colorbar(fig[1, 4], hmθ′, label="θ′ (ᵒK)", vertical=true)
+    Colorbar(fig[1, 3], hme, label="e (J/kg)", vertical=true)
+    Colorbar(fig[1, 4], hme′, label="e′ (J/kg)", vertical=true)
     Colorbar(fig[2, 3], hmT, label="T (ᵒK)", vertical=true)
     Colorbar(fig[2, 4], hmζ, label="ζ (s⁻¹)", vertical=true)
     Colorbar(fig[3, 3], hmu, label="u (m/s)", vertical=true)
     Colorbar(fig[3, 4], hmw, label="w (m/s)", vertical=true)
 
     # Set axis limits
-    for ax in [axθ, axθ′, axT, axζ, axu, axw]
+    for ax in [axe, axe′, axT, axζ, axu, axw]
         xlims!(ax, 0, Lx/1000)
         ylims!(ax, 0, Lz/1000)
     end
