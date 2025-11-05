@@ -262,7 +262,7 @@ for an ideal gas
 
 where ``pᵛ⁺`` is saturation vapor pressure, ``T`` is temperature, ``Rᵛ`` is the specific
 gas constant for vapor, ``ℒ^β(T)`` is the latent heat of the transition from vapor to the
-``β`` phase (e.g. ``l ≡ β`` for vapor → liquid and ``i ≡ β`` for vapor to ice).
+``β`` phase (e.g., ``β = l`` for vapor → liquid and ``β = i`` for vapor to ice).
 
 For a thermodynamic formulation that uses constant (i.e. temperature-independent) specific
 heats, the latent heat of a phase transition is linear in temperature.
