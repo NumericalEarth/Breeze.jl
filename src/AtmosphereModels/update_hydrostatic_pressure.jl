@@ -43,8 +43,8 @@ function update_hydrostatic_pressure!(model)
 
     Nx, Ny, Nz = size(grid)
     TX, TY, TZ = topology(grid)
-    ii = TX == Flat ? 1 : 0:Nx+1
-    jj = TY == Flat ? 1 : 0:Ny+1
+    ii = TX == Flat ? 1:Nx : 0:Nx+1
+    jj = TY == Flat ? 1:Ny : 0:Ny+1
     kernel_parameters = KernelParameters(ii, jj)
 
     launch!(arch, grid, kernel_parameters, _update_hydrostatic_pressure!, pₕ′, grid, formulation, T, q, thermo)
