@@ -2,7 +2,7 @@ using Breeze
 using Oceananigans.Units
 
 Nx, Nz = 256, 128
-H, L = 2kilometers, 1000kilometers
+H, L = 20kilometers, 200kilometers
 
 underlying_grid = RectilinearGrid(size = (Nx, Nz), halo = (4, 4),
                                   x = (-L, L), z = (0, H),
