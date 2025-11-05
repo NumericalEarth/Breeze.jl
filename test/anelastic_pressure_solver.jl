@@ -1,5 +1,3 @@
-include(joinpath(@__DIR__, "runtests_setup.jl"))
-
 using Test
 using Breeze
 using Oceananigans

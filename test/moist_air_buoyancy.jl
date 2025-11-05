@@ -1,4 +1,6 @@
-include(joinpath(@__DIR__, "runtests_setup.jl"))
+using Breeze
+using Oceananigans
+using Test
 
 @testset "NonhydrostaticModel with MoistAirBuoyancy" begin
     reference_constants = ReferenceStateConstants(potential_temperature=300)
@@ -14,6 +16,7 @@ include(joinpath(@__DIR__, "runtests_setup.jl"))
     θᵢ(x, y, z) = θ₀ + Δθ * z / Lz
     set!(model; θ = θᵢ, q = 0)
 
+    # Can time-step
     success = try
         time_step!(model, 1e-2)
         true
