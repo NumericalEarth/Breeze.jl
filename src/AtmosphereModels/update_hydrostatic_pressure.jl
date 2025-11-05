@@ -41,8 +41,8 @@ function update_hydrostatic_pressure!(model)
     q = model.specific_humidity
     thermo = model.thermodynamics
 
-    Nx, Ny, Nz = size(grid)
-    TX, TY, TZ = topology(grid)
+    Nx, Ny, _ = size(grid)
+    TX, TY, _ = topology(grid)
     ii = TX == Flat ? (1:Nx) : (0:Nx+1)
     jj = TY == Flat ? (1:Ny) : (0:Ny+1)
     kernel_parameters = KernelParameters(ii, jj)
