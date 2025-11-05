@@ -2,6 +2,8 @@ using Test
 using Breeze
 using Oceananigans
 
+include("aqua.jl")
+
 @testset "Breeze.jl" begin
     @testset "Thermodynamics" begin
         thermo = ThermodynamicConstants()
