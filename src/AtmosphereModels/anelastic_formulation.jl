@@ -66,8 +66,8 @@ end
 function thermodynamic_state(i, j, k, grid, formulation::AnelasticFormulation, thermo, energy, absolute_humidity)
     @inbounds begin
         e = energy[i, j, k]
-        pᵣ = formulation.reference_pressure[i, j, k]
-        ρᵣ = formulation.reference_density[i, j, k]
+        pᵣ = formulation.reference_pressure[1, 1, k]
+        ρᵣ = formulation.reference_density[1, 1, k]
         ρq = absolute_humidity[i, j, k]
     end
 
@@ -87,7 +87,7 @@ end
 @inline function specific_volume(i, j, k, grid, formulation, temperature, specific_humidity, thermo)
     @inbounds begin
         q  = specific_humidity[i, j, k]
-        pᵣ = formulation.reference_pressure[i, j, k]
+        pᵣ = formulation.reference_pressure[1, 1, k]
         T = temperature[i, j, k]
     end
 
@@ -98,7 +98,7 @@ end
 
 @inline function reference_specific_volume(i, j, k, grid, formulation, thermo)
     Rᵈ = dry_air_gas_constant(thermo)
-    pᵣ = @inbounds formulation.reference_pressure[i, j, k]
+    pᵣ = @inbounds formulation.reference_pressure[1, 1, k]
     θᵣ = formulation.constants.reference_potential_temperature
     return Rᵈ * θᵣ / pᵣ
 end
@@ -165,8 +165,8 @@ end
 
     # Using a homogeneous Neumann (zero Gradient) boundary condition:
     @inbounds begin
-        ρ¹ = ρʳ[i, j, 1]
-        ρᴺ = ρʳ[i, j, Nz]
+        ρ¹ = ρʳ[1, 1, 1]
+        ρᴺ = ρʳ[1, 1, Nz]
         ρ̄² = ℑzᵃᵃᶠ(i, j, 2, grid, ρʳ)
         ρ̄ᴺ = ℑzᵃᵃᶠ(i, j, Nz, grid, ρʳ)
 
@@ -174,7 +174,7 @@ end
         D[i, j, Nz] = - ρ̄ᴺ / Δzᵃᵃᶠ(i, j, Nz, grid) - ρᴺ * Δzᵃᵃᶜ(i, j, Nz, grid) * (λx[i] + λy[j])
 
         for k in 2:Nz-1
-            ρᵏ = ρʳ[i, j, k]
+            ρᵏ = ρʳ[1, 1, k]
             ρ̄⁺ = ℑzᵃᵃᶠ(i, j, k+1, grid, ρʳ)
             ρ̄ᵏ = ℑzᵃᵃᶠ(i, j, k, grid, ρʳ)
 
