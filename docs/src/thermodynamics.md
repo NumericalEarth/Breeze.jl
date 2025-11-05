@@ -262,21 +262,21 @@ for an ideal gas
 
 where ``pᵛ⁺`` is saturation vapor pressure, ``T`` is temperature, ``Rᵛ`` is the specific
 gas constant for vapor, ``ℒ^β(T)`` is the latent heat of the transition from vapor to the
-``β`` phase (e.g. ``l ≡ β`` for vapor → liquid and ``i ≡ β`` for vapor to ice).
+``β`` phase (e.g., ``β = l`` for vapor → liquid and ``β = i`` for vapor to ice).
 
 For a thermodynamic formulation that uses constant (i.e. temperature-independent) specific
 heats, the latent heat of a phase transition is linear in temperature.
 For example, for phase change from vapor to liquid,
 
 ```math
-ℒˡ(T) = ℒˡ_{0K} + \big ( \underbrace{cᵖᵛ - cᵖˡ}_{≡Δcˡ} \big ) T ,
+ℒˡ(T) = ℒˡ(T=0) + \big ( \underbrace{cᵖᵛ - cᵖˡ}_{≡Δcˡ} \big ) T ,
 ```
 
-where ``ℒˡ_{0K}`` is the latent heat at absolute zero, ``T = 0 \; \mathrm{K}``.
+where ``ℒˡ(T=0)`` is the latent heat at absolute zero, ``T = 0 \; \mathrm{K}``.
 By integrating from the triple-point temperature ``Tᵗʳ`` for which ``p(Tᵗʳ) = pᵗʳ``, we get
 
 ```math
-pᵛ⁺(T) = pᵗʳ \left ( \frac{T}{Tᵗʳ} \right )^{Δcˡ / Rᵛ} \exp \left [ \frac{ℒˡ_{0K}}{Rᵛ} \left (\frac{1}{Tᵗʳ} - \frac{1}{T} \right ) \right ] .
+pᵛ⁺(T) = pᵗʳ \left ( \frac{T}{Tᵗʳ} \right )^{Δcˡ / Rᵛ} \exp \left [ \frac{ℒˡ(T=0)}{Rᵛ} \left (\frac{1}{Tᵗʳ} - \frac{1}{T} \right ) \right ] .
 ```
 
 Consider parameters for liquid water,
