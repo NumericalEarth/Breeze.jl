@@ -48,6 +48,9 @@ jobs:
           - windows-latest
         arch:
           - "default"
+      exclude:
+        - version: "min"
+          os: windows-latest
     steps:
       - uses: actions/checkout@v5
       - uses: julia-actions/setup-julia@v2
