@@ -25,7 +25,7 @@ dθdz = N² * θ₀ / g  # Background potential temperature gradient
 Uᵢ = 1
 set!(model, θ=θᵢ, u=Uᵢ)
 
-Δt = 10 # seconds
+Δt = 2 # seconds
 stop_iteration = 1000
 simulation = Simulation(model; Δt, stop_iteration)
 
@@ -51,7 +51,7 @@ add_callback!(simulation, progress, name=:progress, IterationInterval(200))
 
 filename = "mountain_waves"
 simulation.output_writers[:fields] = JLD2Writer(model, model.velocities; filename,
-                                                schedule = TimeInterval(save_fields_interval),
+                                                schedule = IterationInterval(10),
                                                 overwrite_existing = true)
 
 run!(simulation)
