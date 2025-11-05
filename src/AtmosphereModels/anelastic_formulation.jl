@@ -145,7 +145,14 @@ tridiagonal_direction(formulation::AnelasticTridiagonalSolverFormulation) = ZDir
 function formulation_pressure_solver(anelastic_formulation::AnelasticFormulation, grid)
     reference_density = anelastic_formulation.reference_density
     tridiagonal_formulation = AnelasticTridiagonalSolverFormulation(reference_density)
+
+    # Simple way to handle topography for now:
+    if grid isa ImmersedBoundaryGrid
+        grid = grid.underlying_grid
+    end
+
     solver = FourierTridiagonalPoissonSolver(grid; tridiagonal_formulation)
+
     return solver
 end
 
