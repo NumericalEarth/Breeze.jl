@@ -12,17 +12,8 @@ Printf = "de0858da-6303-5e67-8744-51eddeeeb8d7"
 
 [compat]
 Adapt = "4.3.0"
-Aqua = "0.8"
 JLD2 = "0.5.13, 0.6"
 KernelAbstractions = "0.9"
 Oceananigans = "0.100"
 Printf = "1"
-Test = "<0.0.1, 1"
 julia = "1.10.10"
-
-[extras]
-Aqua = "4c88cf16-eb10-579e-8560-4a9242c79595"
-Test = "8dfed614-e22c-5e08-85e1-65c5234f0b40"
-
-[targets]
-test = ["Aqua", "Test"]
