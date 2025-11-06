@@ -118,7 +118,7 @@ function AtmosphereModel(grid;
                          boundary_conditions = NamedTuple(),
                          forcing = NamedTuple(),
                          advection = WENO(order=5),
-                         microphysics = WarmPhaseSaturationAdjustment(),
+                         microphysics = nothing, # WarmPhaseSaturationAdjustment(),
                          timestepper = :RungeKutta3)
 
     arch = grid.architecture

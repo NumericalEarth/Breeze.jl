@@ -46,6 +46,7 @@ function compute_auxiliary_variables!(model)
             grid,
             model.thermodynamics,
             formulation,
+            model.microphysics,
             model.energy,
             model.absolute_humidity)
 
@@ -76,6 +77,7 @@ end
                                                              grid,
                                                              thermo,
                                                              formulation,
+                                                             microphysics,
                                                              energy,
                                                              absolute_humidity)
     i, j, k = @index(Global, NTuple)
@@ -84,7 +86,15 @@ end
     @inbounds specific_humidity[i, j, k] = 𝒰.specific_humidity
 
     # Possibly perform saturation adjustment
-    T = compute_temperature(𝒰, thermo)
+    # Note, we will make this much prettier in the future
+    T = if isnothing(microphysics)
+        Π = 𝒰.exner_function
+        θ = 𝒰.potential_temperature
+        Π * θ
+    else
+        compute_temperature(𝒰, microphysics)
+    end
+
     @inbounds temperature[i, j, k] = T
 end
 
