@@ -29,8 +29,10 @@ makedocs(sitename="Breeze",
     ]
 )
 
-deploydocs(;
+deploydocs(
+    ;
     repo = "github.com/NumericalEarth/Breeze.jl",
+    deploy_repo = "github.com/NumericalEarth/BreezeDocumentation",
     devbranch = "main",
     push_preview = true,
     forcepush = true
