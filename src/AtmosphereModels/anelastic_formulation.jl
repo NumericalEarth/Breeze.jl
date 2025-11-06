@@ -9,7 +9,7 @@ using ..Thermodynamics:
 
 using Oceananigans.Architectures: architecture
 using Oceananigans.Grids: inactive_cell, prettysummary
-using Oceananigans.Operators: Δzᵃᵃᶜ, Δzᵃᵃᶠ, divᶜᶜᶜ
+using Oceananigans.Operators: Δzᵃᵃᶜ, Δzᵃᵃᶠ, divᶜᶜᶜ, Δzᶜᶜᶜ
 using Oceananigans.Solvers: solve!
 
 using KernelAbstractions: @kernel, @index

@@ -23,7 +23,7 @@ fields(model::AnelasticModel) = prognostic_fields(model)
 function update_state!(model::AnelasticModel, callbacks=[]; compute_tendencies=true)
     fill_halo_regions!(prognostic_fields(model), model.clock, fields(model), async=true)
     compute_auxiliary_variables!(model)
-    update_hydrostatic_pressure!(model)
+    # update_hydrostatic_pressure!(model)
     compute_tendencies && compute_tendencies!(model)
     return nothing
 end
