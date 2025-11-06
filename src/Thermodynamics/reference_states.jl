@@ -62,11 +62,11 @@ end
 end
 
 function condensate_specific_humidity(T, q, z, ref::ReferenceStateConstants, thermo)
-    qᵛ★ = saturation_specific_humidity(T, z, ref, thermo, thermo.liquid)
-    return max(0, q - qᵛ★)
+    qᵛ⁺ = saturation_specific_humidity(T, z, ref, thermo, thermo.liquid)
+    return max(0, q - qᵛ⁺)
 end
 
 function ice_specific_humidity(T, q, z, ref::ReferenceStateConstants, thermo)
-    qi★ = saturation_specific_humidity(T, z, ref, thermo, thermo.solid)
-    return max(0, q - qi★)
+    qi⁺ = saturation_specific_humidity(T, z, ref, thermo, thermo.solid)
+    return max(0, q - qi⁺)
 end

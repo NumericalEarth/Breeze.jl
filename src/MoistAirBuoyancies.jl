@@ -105,14 +105,14 @@ const c = Center()
     α = specific_volume(𝒰, mb.reference_constants, mb.thermodynamics)
 
     # Compute reference specific volume
-    αʳ = reference_specific_volume(z, mb.reference_constants, mb.thermodynamics)
+    αᵣ = reference_specific_volume(z, mb.reference_constants, mb.thermodynamics)
     g = mb.thermodynamics.gravitational_acceleration
 
     # Formulation in terms of base density:
     # ρ₀ = base_density(mb.reference_constants, mb.thermodynamics)
-    # return ρ₀ * g * (α - αʳ)
+    # return ρ₀ * g * (α - αᵣ)
 
-    return g * (α - αʳ) / αʳ
+    return g * (α - αᵣ) / αᵣ
 end
 
 @inline ∂z_b(i, j, k, grid, mb::MoistAirBuoyancy, tracers) =
@@ -239,7 +239,7 @@ condensate_specific_humidity(T, state::HeightReferenceThermodynamicState, ref, t
 
 # Solve
 # θ = T/Π ( 1 - ℒ qˡ / (cᵖᵐ T))
-# for temperature T with qˡ = max(0, q - qᵛ★).
+# for temperature T with qˡ = max(0, q - qᵛ⁺).
 # root of: f(T) = T - Π θ - ℒ qˡ / cᵖᵐ
 
 """

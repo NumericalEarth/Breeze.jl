@@ -8,9 +8,9 @@ using Oceananigans.Operators: ∂xᶠᶜᶜ, ∂yᶜᶠᶜ, ∂zᶜᶜᶠ, ℑz�
 
 @inline function buoyancy(i, j, k, grid, formulation, temperature, specific_humidity, thermo)
     α = specific_volume(i, j, k, grid, formulation, temperature, specific_humidity, thermo)
-    αʳ = reference_specific_volume(i, j, k, grid, formulation, thermo)
+    αᵣ = reference_specific_volume(i, j, k, grid, formulation, thermo)
     g = thermo.gravitational_acceleration
-    return g * (α - αʳ) / αʳ
+    return g * (α - αᵣ) / αᵣ
 end
 
 @inline function ρ_bᶜᶜᶠ(i, j, k, grid, ρ, T, q, formulation, thermo)
