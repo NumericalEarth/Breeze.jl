@@ -23,24 +23,24 @@ function set!(model::AtmosphereModel; enforce_mass_conservation=true, kw...)
             θ = model.temperature # use scratch
             set!(θ, value)
 
-            ρʳ = model.formulation.reference_density
+            ρᵣ = model.formulation.reference_density
             cᵖᵈ = model.thermodynamics.dry_air.heat_capacity
             ϕ = model.energy
-            value = ρʳ * cᵖᵈ * θ
+            value = ρᵣ * cᵖᵈ * θ
         elseif name == :q
             q = model.specific_humidity
             set!(q, value)
 
-            ρʳ = model.formulation.reference_density
+            ρᵣ = model.formulation.reference_density
             ϕ = model.absolute_humidity
-            value = ρʳ * q
+            value = ρᵣ * q
         elseif name ∈ (:u, :v, :w)
             u = model.velocities[name]
             set!(u, value)
 
-            ρʳ = model.formulation.reference_density
+            ρᵣ = model.formulation.reference_density
             ϕ = model.momentum[Symbol(:ρ, name)]
-            value = ρʳ * u
+            value = ρᵣ * u
         end
 
         set!(ϕ, value)

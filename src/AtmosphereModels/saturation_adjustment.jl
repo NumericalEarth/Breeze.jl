@@ -3,9 +3,9 @@
 #####
 
 function condensate_specific_humidity(T, state::AnelasticThermodynamicState, thermo)
-    qᵛ★ = saturation_specific_humidity(T, state.reference_density, thermo, thermo.liquid)
+    qᵛ⁺ = saturation_specific_humidity(T, state.reference_density, thermo, thermo.liquid)
     q = state.specific_humidity
-    return max(0, q - qᵛ★)
+    return max(0, q - qᵛ⁺)
 end
 
 @inline function compute_temperature(state::AnelasticThermodynamicState{FT}, thermo) where FT

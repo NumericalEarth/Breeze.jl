@@ -20,6 +20,10 @@ makedocs(sitename="Breeze",
             "Overview" => "microphysics/microphysics_overview.md",
             "Warm phase saturation adjustment" => "microphysics/saturation_adjustment.md",
         ],
+        "Dycore equations and algorithms" => "dynamics.md",
+        "Appendix" => Any[
+            "Notation" => "appendix/notation.md",
+        ],
         "References" => "references.md",
         "API" => "api.md",
     ]

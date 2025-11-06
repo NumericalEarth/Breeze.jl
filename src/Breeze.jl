@@ -38,6 +38,7 @@ using Oceananigans: Oceananigans, @at, AnisotropicMinimumDissipation, Average,
                     minimum_zspacing, nodes, prettytime, regrid!, run!, set!,
                     time_step!, xnodes, xspacings, ynodes, yspacings, znodes,
                     zspacings, ∂x, ∂y, ∂z
+
 using Oceananigans.Grids: znode
 
 export

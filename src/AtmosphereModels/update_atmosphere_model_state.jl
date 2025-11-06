@@ -6,6 +6,7 @@ using ..Thermodynamics:
 using Oceananigans.Architectures: architecture
 using Oceananigans.BoundaryConditions: fill_halo_regions!, compute_x_bcs!, compute_y_bcs!, compute_z_bcs!
 using Oceananigans.ImmersedBoundaries: mask_immersed_field!
+using Oceananigans.Utils: launch!
 
 import Oceananigans: fields, prognostic_fields
 import Oceananigans.TimeSteppers: update_state!, compute_flux_bc_tendencies!
@@ -13,7 +14,7 @@ import Oceananigans.TimeSteppers: update_state!, compute_flux_bc_tendencies!
 const AnelasticModel = AtmosphereModel{<:AnelasticFormulation}
 
 function prognostic_fields(model::AnelasticModel)
-    thermodynamic_fields = (ρe=model.energy, ρq=model.absolute_humidity)
+    thermodynamic_fields = (ρe=model.energy, ρqᵗ=model.absolute_humidity)
     return merge(model.momentum, thermodynamic_fields, model.condensates, model.tracers)
 end
 
@@ -22,7 +23,7 @@ fields(model::AnelasticModel) = prognostic_fields(model)
 function update_state!(model::AnelasticModel, callbacks=[]; compute_tendencies=true)
     fill_halo_regions!(prognostic_fields(model), model.clock, fields(model), async=true)
     compute_auxiliary_variables!(model)
-    update_hydrostatic_pressure!(model)
+    # update_hydrostatic_pressure!(model)
     compute_tendencies && compute_tendencies!(model)
     return nothing
 end
@@ -45,6 +46,7 @@ function compute_auxiliary_variables!(model)
             grid,
             model.thermodynamics,
             formulation,
+            model.microphysics,
             model.energy,
             model.absolute_humidity)
 
@@ -75,6 +77,7 @@ end
                                                              grid,
                                                              thermo,
                                                              formulation,
+                                                             microphysics,
                                                              energy,
                                                              absolute_humidity)
     i, j, k = @index(Global, NTuple)
@@ -82,24 +85,18 @@ end
     𝒰 = thermodynamic_state(i, j, k, grid, formulation, thermo, energy, absolute_humidity)
     @inbounds specific_humidity[i, j, k] = 𝒰.specific_humidity
 
-    # Saturation adjustment
-    T = compute_temperature(𝒰, thermo)
+    # Possibly perform saturation adjustment
+    # Note, we will make this much prettier in the future
+    T = if isnothing(microphysics)
+        Π = 𝒰.exner_function
+        θ = 𝒰.potential_temperature
+        Π * θ
+    else
+        compute_temperature(𝒰, microphysics)
+    end
+
     @inbounds temperature[i, j, k] = T
 end
-
-#=
-@inline function specific_volume(state, ref, thermo)
-    T = temperature(state, ref, thermo)
-    Rᵐ = mixture_gas_constant(state.q, thermo)
-    pᵣ = reference_pressure(state.z, ref, thermo)
-    return Rᵐ * T / pᵣ
-end
-=#
-
-using Oceananigans.Advection: div_𝐯u, div_𝐯v, div_𝐯w, div_Uc
-using Oceananigans.Coriolis: x_f_cross_U, y_f_cross_U, z_f_cross_U
-using Oceananigans.Operators: ∂xᶠᶜᶜ, ∂yᶜᶠᶜ, ∂zᶜᶜᶠ
-using Oceananigans.Utils: launch!
 
 function compute_tendencies!(model::AnelasticModel)
     grid = model.grid
@@ -131,24 +128,29 @@ function compute_tendencies!(model::AnelasticModel)
     Gρe = model.timestepper.Gⁿ.ρe
     ρe = model.energy
     Fρe = model.forcing.ρe
-    ρe_args = tuple(ρe, Fρe, scalar_args...)
-    launch!(arch, grid, :xyz, compute_scalar_tendency!, Gρe, grid, ρe_args)
+    ρe_args = tuple(ρe, Fρe, scalar_args..., ρᵣ,
+                    model.formulation, model.temperature,
+                    model.specific_humidity, model.thermodynamics, model.condensates, model.microphysics)
+    launch!(arch, grid, :xyz, compute_moist_static_energy_tendency!, Gρe, grid, ρe_args)
 
     ρq = model.absolute_humidity
-    Gρq = model.timestepper.Gⁿ.ρq
-    Fρq = model.forcing.ρq
-    ρq_args = tuple(ρq, Fρq, scalar_args...)
-    launch!(arch, grid, :xyz, compute_scalar_tendency!, Gρq, grid, ρq_args)
+    Gρqᵗ = model.timestepper.Gⁿ.ρqᵗ
+    Fρqᵗ = model.forcing.ρqᵗ
+    ρq_args = tuple(ρq, Fρqᵗ, scalar_args...)
+    launch!(arch, grid, :xyz, compute_scalar_tendency!, Gρqᵗ, grid, ρq_args)
 
     return nothing
 end
 
-hydrostatic_pressure_gradient_x(i, j, k, grid, pₕ′) = ∂xᶠᶜᶜ(i, j, k, grid, pₕ′)
-hydrostatic_pressure_gradient_y(i, j, k, grid, pₕ′) = ∂yᶜᶠᶜ(i, j, k, grid, pₕ′)
-
+# See dynamics_kernel_functions.jl
 @kernel function compute_scalar_tendency!(Gc, grid, args)
     i, j, k = @index(Global, NTuple)
     @inbounds Gc[i, j, k] = scalar_tendency(i, j, k, grid, args...)
+end
+
+@kernel function compute_moist_static_energy_tendency!(Gρe, grid, args)
+    i, j, k = @index(Global, NTuple)
+    @inbounds Gρe[i, j, k] = moist_static_energy_tendency(i, j, k, grid, args...)
 end
 
 @kernel function compute_x_momentum_tendency!(Gρu, grid, args)
@@ -166,106 +168,11 @@ end
     @inbounds Gρw[i, j, k] = z_momentum_tendency(i, j, k, grid, args...)
 end
 
-@inline function x_momentum_tendency(i, j, k, grid,
-                                     advection,
-                                     velocities,
-                                     momentum,
-                                     coriolis,
-                                     clock,
-                                     model_fields,
-                                     forcing,
-                                     reference_density,
-                                     hydrostatic_pressure_anomaly)
-
-    # Note: independent of x
-    ρᵣ = @inbounds reference_density[i, j, k]
-
-    return ( - div_𝐯u(i, j, k, grid, advection, velocities, momentum.ρu)
-             - x_f_cross_U(i, j, k, grid, coriolis, momentum)
-             # - hydrostatic_pressure_gradient_x(i, j, k, grid, hydrostatic_pressure_anomaly)
-             + forcing(i, j, k, grid, clock, model_fields))
-end
-
-@inline function y_momentum_tendency(i, j, k, grid,
-                                     advection,
-                                     velocities,
-                                     momentum,
-                                     coriolis,
-                                     clock,
-                                     model_fields,
-                                     forcing,
-                                     reference_density,
-                                     hydrostatic_pressure_anomaly)
-
-    # Note: independent of y
-    ρᵣ = @inbounds reference_density[i, j, k]
-
-    return ( - div_𝐯v(i, j, k, grid, advection, velocities, momentum.ρv)
-             - y_f_cross_U(i, j, k, grid, coriolis, momentum)
-             # - hydrostatic_pressure_gradient_y(i, j, k, grid, hydrostatic_pressure_anomaly)
-             + forcing(i, j, k, grid, clock, model_fields))
-end
-
-@inline function z_momentum_tendency(i, j, k, grid,
-                                     advection,
-                                     velocities,
-                                     momentum,
-                                     coriolis,
-                                     clock,
-                                     model_fields,
-                                     forcing,
-                                     reference_density,
-                                     formulation,
-                                     temperature,
-                                     specific_humidity,
-                                     thermo)
-
-    ρᵣᶜᶜᶠ = ℑzᵃᵃᶠ(i, j, k, grid, reference_density)
-    bᶜᶜᶠ = ℑzᵃᵃᶠ(i, j, k, grid, buoyancy,
-                 formulation, temperature, specific_humidity, thermo)
-
-    return ( - div_𝐯w(i, j, k, grid, advection, velocities, momentum.ρw)
-             - z_f_cross_U(i, j, k, grid, coriolis, momentum)
-             + ρᵣᶜᶜᶠ * bᶜᶜᶠ
-             + forcing(i, j, k, grid, clock, model_fields))
-end
-
-@inline function scalar_tendency(i, j, k, grid,
-                                 scalar,
-                                 forcing,
-                                 advection,
-                                 velocities,
-                                 clock,
-                                 model_fields)
-
-    return ( - div_Uc(i, j, k, grid, advection, velocities, scalar)
-             + forcing(i, j, k, grid, clock, model_fields))
-end
-
-#=
-@inline function energy_tendency(i, j, k, grid,
-                                 formulation,
-                                 energy,
-                                 forcing,
-                                 advection,
-                                 velocities,
-                                 condensates,
-                                 microphysics
-                                 clock,
-                                 model_fields)
-
-    return ( - div_Uc(i, j, k, grid, advection, velocities, energy)
-             + microphysical_energy_tendency(i, j, k, grid, formulation, microphysics, condensates)
-             + forcing(i, j, k, grid, clock, model_fields))
-end
-=#
-
 """ Apply boundary conditions by adding flux divergences to the right-hand-side. """
 function compute_flux_bc_tendencies!(model::AtmosphereModel)
 
     Gⁿ    = model.timestepper.Gⁿ
     arch  = model.architecture
-    clock = model.clock
 
     # Compute boundary flux contributions
     prognostic_model_fields = prognostic_fields(model)

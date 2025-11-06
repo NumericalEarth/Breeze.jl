@@ -7,14 +7,16 @@ using ..Thermodynamics:
     mixture_heat_capacity,
     dry_air_gas_constant
 
-using Oceananigans: Oceananigans, AbstractModel, Center, CenterField, Clock, Face, Field, Flat,
-    WENO, XFaceField, YFaceField, ZFaceField
+using Oceananigans: AbstractModel, Center, CenterField, Clock, Field
+using Oceananigans: WENO, XFaceField, YFaceField, ZFaceField
 using Oceananigans.Advection: adapt_advection_order
 using Oceananigans.BoundaryConditions: FieldBoundaryConditions, regularize_field_boundary_conditions
 using Oceananigans.Grids: ZDirection
 using Oceananigans.Solvers: FourierTridiagonalPoissonSolver
 using Oceananigans.TimeSteppers: TimeStepper
-using Oceananigans.Utils: launch!
+using Oceananigans.Utils: launch!, prettytime, prettykeys
+
+import Oceananigans.Advection: cell_advection_timescale
 
 using KernelAbstractions: @kernel, @index
 
@@ -116,7 +118,7 @@ function AtmosphereModel(grid;
                          boundary_conditions = NamedTuple(),
                          forcing = NamedTuple(),
                          advection = WENO(order=5),
-                         microphysics = WarmPhaseSaturationAdjustment(),
+                         microphysics = nothing, # WarmPhaseSaturationAdjustment(),
                          timestepper = :RungeKutta3)
 
     arch = grid.architecture
@@ -140,11 +142,11 @@ function AtmosphereModel(grid;
     advection = adapt_advection_order(advection, grid)
 
     if absolute_humidity isa DefaultValue
-        absolute_humidity = CenterField(grid, boundary_conditions=boundary_conditions.ρq)
+        absolute_humidity = CenterField(grid, boundary_conditions=boundary_conditions.ρqᵗ)
     end
 
     energy = CenterField(grid, boundary_conditions=boundary_conditions.ρe)
-    specific_humidity = CenterField(grid, boundary_conditions=boundary_conditions.ρq)
+    specific_humidity = CenterField(grid, boundary_conditions=boundary_conditions.ρqᵗ)
     temperature = CenterField(grid)
 
     prognostic_fields = collect_prognostic_fields(formulation,
@@ -192,8 +194,6 @@ function AtmosphereModel(grid;
     return model
 end
 
-using Oceananigans.Utils: prettytime, prettykeys
-
 function Base.summary(model::AtmosphereModel)
     A = nameof(typeof(model.grid.architecture))
     G = nameof(typeof(model.grid))
@@ -215,3 +215,5 @@ function Base.show(io::IO, model::AtmosphereModel)
         "├── coriolis: ", summary(model.coriolis), "\n",
         "└── microphysics: ", Mic)
 end
+
+cell_advection_timescale(model::AtmosphereModel) = cell_advection_timescale(model.grid, model.velocities)

@@ -4,7 +4,7 @@
 
 # Solve
 # θ = T/Π ( 1 - ℒ qˡ / (cᵖᵐ T))
-# for temperature T with qˡ = max(0, q - qᵛ★).
+# for temperature T with qˡ = max(0, q - qᵛ⁺).
 # root of: f(T) = T² - Π θ T - ℒ qˡ / cᵖᵐ
 @inline function temperature(state::ThermodynamicState{FT}, ref, thermo) where FT
     state.θ == 0 && return zero(FT)
