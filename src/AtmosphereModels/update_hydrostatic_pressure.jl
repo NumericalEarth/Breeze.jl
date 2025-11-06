@@ -9,13 +9,6 @@ using Oceananigans.Utils: KernelParameters
 const c = Center()
 const f = Face()
 
-@inline function buoyancy(i, j, k, grid, formulation, temperature, specific_humidity, thermo)
-    α = specific_volume(i, j, k, grid, formulation, temperature, specific_humidity, thermo)
-    αʳ = reference_specific_volume(i, j, k, grid, formulation, thermo)
-    g = thermo.gravitational_acceleration
-    return g * (α - αʳ) / αʳ
-end
-
 @kernel function _update_hydrostatic_pressure!(pₕ′, grid, formulation, T, q, thermo)
     i, j = @index(Global, NTuple)
 
