@@ -1,5 +1,6 @@
 using ..Thermodynamics:
     saturation_specific_humidity,
+    total_specific_humidity,
     mixture_heat_capacity,
     mixture_gas_constant
 
@@ -80,7 +81,7 @@ end
     i, j, k = @index(Global, NTuple)
 
     𝒰 = thermodynamic_state(i, j, k, grid, formulation, thermo, energy, absolute_humidity)
-    @inbounds specific_humidity[i, j, k] = 𝒰.specific_humidity
+    @inbounds specific_humidity[i, j, k] = total_specific_humidity(𝒰)
 
     # Saturation adjustment
     T = compute_temperature(𝒰, thermo)

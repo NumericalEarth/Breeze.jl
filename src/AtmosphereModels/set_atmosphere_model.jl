@@ -104,12 +104,13 @@ end
         z = znode(i, j, k, grid, c, c, c)
     end
 
-    # Assume non-condensed state
-    # TODO: relax this assumption
+    # Assuming a state with no condensate?
     q = SpecificHumidities(qᵗ, zero(qᵗ), zero(qᵗ))
-    ref = formulation.reference_state_constants
+    ref = formulation.constants
     𝒰 = PotentialTemperatureState(θ, q, z, ref)
-    T = temperature(𝒰, thermo)
+    Π = exner_function(𝒰, thermo)
+    T = Π * θ
+
     ℒ₀ = thermo.liquid.latent_heat
     g = thermo.gravitational_acceleration
     cᵖᵐ = mixture_heat_capacity(q, thermo)

@@ -1,6 +1,8 @@
 using ..Thermodynamics:
+    SpecificHumidities,
     ThermodynamicConstants,
     ReferenceStateConstants,
+    AnelasticThermodynamicState,
     reference_pressure,
     reference_density,
     mixture_gas_constant,
@@ -41,14 +43,6 @@ Base.show(io::IO, formulation::AnelasticFormulation) = print(io, "AnelasticFormu
 
 field_names(::AnelasticFormulation, tracer_names) = (:ρu, :ρv, :ρw, :ρe, :ρq, tracer_names...)
 
-struct AnelasticThermodynamicState{FT}
-    potential_temperature :: FT
-    specific_humidity :: FT
-    reference_density :: FT
-    reference_pressure :: FT
-    exner_function :: FT
-end
-
 function AnelasticFormulation(grid, state_constants, thermo)
     pᵣ = Field{Nothing, Nothing, Center}(grid)
     ρᵣ = Field{Nothing, Nothing, Center}(grid)
@@ -68,13 +62,14 @@ function thermodynamic_state(i, j, k, grid, formulation::AnelasticFormulation, t
         e = energy[i, j, k]
         pᵣ = formulation.reference_pressure[1, 1, k]
         ρᵣ = formulation.reference_density[1, 1, k]
-        ρq = absolute_humidity[i, j, k]
+        ρqᵗ = absolute_humidity[i, j, k]
     end
 
     cᵖᵈ = thermo.dry_air.heat_capacity
     θ = e / (cᵖᵈ * ρᵣ)
 
-    q = ρq / ρᵣ
+    qᵗ = ρqᵗ / ρᵣ
+    q = SpecificHumidities(qᵗ, zero(qᵗ), zero(qᵗ)) # assuming non-condensed state
     Rᵐ = mixture_gas_constant(q, thermo)
     cᵖᵐ = mixture_heat_capacity(q, thermo)
 

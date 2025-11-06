@@ -1,5 +1,5 @@
 # Thermal Bubble Simulation following Ahmad & Lindeman (2007) and Sridhar et al (2022)
-# This simulates a circular potential temperature perturbation in 2D
+# This simulates a circular moist static energy perturbation in 2D
 
 using Breeze
 using Oceananigans.Units
@@ -35,28 +35,35 @@ buoyancy = MoistAirBuoyancy(; reference_constants)
 advection = WENO(order=5)
 
 # Create the model
-#model = NonhydrostaticModel(; grid, advection, buoyancy, tracers = (:θ, :q))
-model = AtmosphereModel(grid; advection) #, buoyancy, tracers = (:θ, :q))
+model = AtmosphereModel(grid; advection)
 
-# Thermal bubble parameters
+# Thermal bubble parameters (moist static energy)
 x₀ = Lx / 2      # Center of bubble in x
 z₀ = 4e3         # Center of bubble in z (2 km height)
 r₀ = 2e3         # Initial radius of bubble (2 km)
-Δθ = 2           # Potential temperature perturbation (ᵒK)
+Δe = 2 * 1004.0  # Moist static energy perturbation scale (J/m³) ≈ 2 K × ρᵣ × cᵖᵈ at low levels
 
-# Background stratification
+# Background stratification (used to construct a gently increasing MSE with height via θ)
 N² = 1e-6        # Brunt-Väisälä frequency squared (s⁻²)
-dθdz = N² * θ₀ / 9.81  # Background potential temperature gradient
+dθdz = N² * θ₀ / 9.81  # Background potential temperature gradient used to build MSE
 
-# Initial conditions
-function θᵢ(x, z)
-    θ̄ = θ₀ + dθdz * z # background stratification
+# Initial conditions (set moist static energy directly)
+# We form MSE ρe ≈ ρᵣ cᵖᵈ θ with a localized perturbation.
+ρʳ = model.formulation.reference_density
+cᵖᵈ = model.thermodynamics.dry_air.heat_capacity
+
+function eᵢ(x, z)
+    θ̄ = θ₀ + dθdz * z # background potential temperature used to build MSE
     r = sqrt((x - x₀)^2 + (z - z₀)^2) # distance from bubble center
-    θ′ = Δθ * max(0, 1 - r / r₀) # bubble
-    return θ̄ + θ′
+    w = max(0, 1 - r / r₀)             # bubble weight (cone)
+    ρ = @inbounds ρʳ[1, 1, max(1, min(size(ρʳ, 3), Int(clamp(round(z / (Lz / Nz)) + 1, 1, Nz))))]
+    # Background + perturbation in ρe
+    ē = ρ * cᵖᵈ * θ̄
+    e′ = Δe * w
+    return ē + e′
 end
 
-set!(model, θ=θᵢ)
+set!(model, ρe=eᵢ)
 
 # Simulation parameters
 stop_time = 30minutes
@@ -67,16 +74,16 @@ conjure_time_step_wizard!(simulation, cfl=0.7)
 
 # Progress monitoring
 function progress(sim)
-    θ = sim.model.tracers.θ
+    e = sim.model.energy
     u, w = sim.model.velocities
 
-    θ_max = maximum(θ)
-    θ_min = minimum(θ)
+    e_max = maximum(e)
+    e_min = minimum(e)
     u_max = maximum(abs, u)
     w_max = maximum(abs, w)
 
-    msg = @sprintf("Iter: %d, t: %s, Δt: %s, extrema(θ): (%.2f, %.2f) K, max|u|: %.2f m/s, max|w|: %.2f m/s",
-                   iteration(sim), prettytime(sim), prettytime(sim.Δt), θ_min, θ_max, u_max, w_max)
+    msg = @sprintf("Iter: %d, t: %s, Δt: %s, extrema(ρe): (%.2f, %.2f) J/m³, max|u|: %.2f m/s, max|w|: %.2f m/s",
+                   iteration(sim), prettytime(sim), prettytime(sim.Δt), e_min, e_max, u_max, w_max)
 
     @info msg
     return nothing
@@ -91,13 +98,12 @@ add_callback!(simulation, progress, IterationInterval(50))
 u, v, w = model.velocities
 ζ = ∂x(w) - ∂z(u)
 
-# Temperature perturbation from background state
-θ_bg_field = Field{Nothing, Nothing, Center}(grid)
-set!(θ_bg_field, z -> θ₀ + dθdz * z)
-θ′ = model.tracers.θ - θ_bg_field
+# Moist static energy perturbation from background state
+E = Field{Nothing, Nothing, Center}(grid)
+set!(E, Field(Average(model.energy, dims=(1, 2))))
+e′ = model.energy - E
 
-#outputs = merge(model.velocities, model.tracers, (; T, ζ, θ′))
-outputs = merge(model.velocities, model.tracers, (; ζ, θ′))
+outputs = merge(model.velocities, (; ζ, ρe=model.energy, e′))
 
 filename = "thermal_bubble_$(Nx)x$(Nz).jld2"
 writer = JLD2Writer(model, outputs; filename,
@@ -107,7 +113,7 @@ writer = JLD2Writer(model, outputs; filename,
 simulation.output_writers[:jld2] = writer
 
 @info "Running thermal bubble simulation on grid: $grid"
-@info "Bubble parameters: center=($x₀, $z₀), radius=$r₀, Δθ=$Δθ K"
+@info "Bubble parameters: center=($x₀, $z₀), radius=$r₀, Δe=$Δe J/m³"
 @info "Domain: $(Lx/1000) km × $(Lz/1000) km, resolution: $Nx × $Nz"
 
 run!(simulation)
@@ -117,72 +123,61 @@ if get(ENV, "CI", "false") == "false"
     @info "Creating visualization..."
 
     # Read the output data
-    θt = FieldTimeSeries(filename, "θ")
-    Tt = FieldTimeSeries(filename, "T")
+    et = FieldTimeSeries(filename, "ρe")
     ut = FieldTimeSeries(filename, "u")
     wt = FieldTimeSeries(filename, "w")
     ζt = FieldTimeSeries(filename, "ζ")
-    θ′t = FieldTimeSeries(filename, "θ′")
+    e′t = FieldTimeSeries(filename, "e′")
 
-    times = θt.times
-    Nt = length(θt)
+    times = et.times
+    Nt = length(et)
 
-    # Create visualization - expanded to 6 panels
+    # Create visualization - 4 panels
     fig = Figure(size=(1500, 1000), fontsize=12)
 
-    # Subplot layout - 3 rows, 2 columns
-    axθ = Axis(fig[1, 1], xlabel="x (km)", ylabel="z (km)", title="Potential Temperature θ (ᵒK)")
-    axθ′ = Axis(fig[1, 2], xlabel="x (km)", ylabel="z (km)", title="Temperature Perturbation θ′ (ᵒK)")
-    axT = Axis(fig[2, 1], xlabel="x (km)", ylabel="z (km)", title="Temperature T (ᵒK)")
-    axζ = Axis(fig[2, 2], xlabel="x (km)", ylabel="z (km)", title="Vorticity ζ (s⁻¹)")
-    axu = Axis(fig[3, 1], xlabel="x (km)", ylabel="z (km)", title="Horizontal Velocity u (m/s)")
-    axw = Axis(fig[3, 2], xlabel="x (km)", ylabel="z (km)", title="Vertical Velocity w (m/s)")
+    # Subplot layout - 2 rows, 2 columns
+    axe = Axis(fig[1, 1], xlabel="x (km)", ylabel="z (km)", title="Moist Static Energy ρe (J/m³)")
+    axe′ = Axis(fig[1, 2], xlabel="x (km)", ylabel="z (km)", title="MSE Perturbation e′ (J/m³)")
+    axζ = Axis(fig[2, 1], xlabel="x (km)", ylabel="z (km)", title="Vorticity ζ (s⁻¹)")
+    axw = Axis(fig[2, 2], xlabel="x (km)", ylabel="z (km)", title="Vertical Velocity w (m/s)")
 
     # Time slider
-    slider = Slider(fig[4, 1:2], range=1:Nt, startvalue=1)
+    slider = Slider(fig[3, 1:2], range=1:Nt, startvalue=1)
     n = slider.value
 
     # Observable fields
-    θn = @lift interior(θt[$n], :, 1, :)
-    θ′n = @lift interior(θ′t[$n], :, 1, :)
-    Tn = @lift interior(Tt[$n], :, 1, :)
+    en = @lift interior(et[$n], :, 1, :)
+    e′n = @lift interior(e′t[$n], :, 1, :)
     ζn = @lift interior(ζt[$n], :, 1, :)
-    un = @lift interior(ut[$n], :, 1, :)
     wn = @lift interior(wt[$n], :, 1, :)
 
     # Grid coordinates
-    x = xnodes(θt) ./ 1000  # Convert to km
-    z = znodes(θt) ./ 1000  # Convert to km
+    x = xnodes(et) ./ 1000  # Convert to km
+    z = znodes(et) ./ 1000  # Convert to km
 
     # Title with time
     title = @lift "Thermal Bubble Evolution - t = $(prettytime(times[$n]))"
     fig[0, :] = Label(fig, title, fontsize=16, tellwidth=false)
 
     # Create heatmaps
-    θ_range = (minimum(θt), maximum(θt))
-    θ′_range = (minimum(θ′t), maximum(θ′t))
-    T_range = (minimum(Tt), maximum(Tt))
+    e_range = (minimum(et), maximum(et))
+    e′_range = maximum(abs, e′t)
     ζ_range = maximum(abs, ζt)
-    u_range = maximum(abs, ut)
     w_range = maximum(abs, wt)
 
-    hmθ = heatmap!(axθ, x, z, θn, colorrange=θ_range, colormap=:thermal)
-    hmθ′ = heatmap!(axθ′, x, z, θ′n, colorrange=θ′_range, colormap=:balance)
-    hmT = heatmap!(axT, x, z, Tn, colorrange=T_range, colormap=:thermal)
+    hme = heatmap!(axe, x, z, en, colorrange=e_range, colormap=:thermal)
+    hme′ = heatmap!(axe′, x, z, e′n, colorrange=(-e′_range, e′_range), colormap=:balance)
     hmζ = heatmap!(axζ, x, z, ζn, colorrange=(-ζ_range, ζ_range), colormap=:balance)
-    hmu = heatmap!(axu, x, z, un, colorrange=(-u_range, u_range), colormap=:balance)
     hmw = heatmap!(axw, x, z, wn, colorrange=(-w_range, w_range), colormap=:balance)
 
     # Add colorbars
-    Colorbar(fig[1, 3], hmθ, label="θ (ᵒK)", vertical=true)
-    Colorbar(fig[1, 4], hmθ′, label="θ′ (ᵒK)", vertical=true)
-    Colorbar(fig[2, 3], hmT, label="T (ᵒK)", vertical=true)
-    Colorbar(fig[2, 4], hmζ, label="ζ (s⁻¹)", vertical=true)
-    Colorbar(fig[3, 3], hmu, label="u (m/s)", vertical=true)
-    Colorbar(fig[3, 4], hmw, label="w (m/s)", vertical=true)
+    Colorbar(fig[1, 3], hme, label="ρe (J/m³)", vertical=true)
+    Colorbar(fig[1, 4], hme′, label="e′ (J/m³)", vertical=true)
+    Colorbar(fig[2, 3], hmζ, label="ζ (s⁻¹)", vertical=true)
+    Colorbar(fig[2, 4], hmw, label="w (m/s)", vertical=true)
 
     # Set axis limits
-    for ax in [axθ, axθ′, axT, axζ, axu, axw]
+    for ax in [axe, axe′, axζ, axw]
         xlims!(ax, 0, Lx/1000)
         ylims!(ax, 0, Lz/1000)
     end
