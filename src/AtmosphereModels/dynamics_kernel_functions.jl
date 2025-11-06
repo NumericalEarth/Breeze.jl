@@ -118,21 +118,3 @@ end
              # + microphysical_energy_tendency(i, j, k, grid, formulation, microphysics, condensates)
              + forcing(i, j, k, grid, clock, model_fields))
 end
-
-""" Apply boundary conditions by adding flux divergences to the right-hand-side. """
-function compute_flux_bc_tendencies!(model::AtmosphereModel)
-
-    Gⁿ    = model.timestepper.Gⁿ
-    arch  = model.architecture
-
-    # Compute boundary flux contributions
-    prognostic_model_fields = prognostic_fields(model)
-    args = (arch, model.clock, fields(model))
-    field_indices = 1:length(prognostic_model_fields)
-    Gⁿ = model.timestepper.Gⁿ
-    foreach(q -> compute_x_bcs!(Gⁿ[q], prognostic_model_fields[q], args...), field_indices)
-    foreach(q -> compute_y_bcs!(Gⁿ[q], prognostic_model_fields[q], args...), field_indices)
-    foreach(q -> compute_z_bcs!(Gⁿ[q], prognostic_model_fields[q], args...), field_indices)
-
-    return nothing
-end
