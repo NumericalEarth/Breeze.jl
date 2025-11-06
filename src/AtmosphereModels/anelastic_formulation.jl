@@ -8,7 +8,7 @@ using ..Thermodynamics:
     dry_air_gas_constant
 
 using Oceananigans.Architectures: architecture
-using Oceananigans.Grids: inactive_cell, prettysummary
+using Oceananigans.Grids: inactive_cell, prettysummary, ImmersedBoundaryGrid
 using Oceananigans.Operators: Δzᵃᵃᶜ, Δzᵃᵃᶠ, divᶜᶜᶜ, Δzᶜᶜᶜ
 using Oceananigans.Solvers: solve!
 
