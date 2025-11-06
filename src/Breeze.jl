@@ -17,7 +17,27 @@ export
     mixture_gas_constant,
     mixture_heat_capacity
 
-using Oceananigans
+using Oceananigans: Oceananigans, @at, AnisotropicMinimumDissipation, Average,
+                    AveragedTimeInterval, BackgroundField, BetaPlane, Bounded,
+                    CPU, Callback, Center, CenterField, Centered, Checkpointer,
+                    ConstantCartesianCoriolis, Distributed, FPlane, Face,
+                    Field, FieldBoundaryConditions, FieldDataset,
+                    FieldTimeSeries, Flat, FluxBoundaryCondition, Forcing, GPU,
+                    GradientBoundaryCondition, GridFittedBottom,
+                    ImmersedBoundaryCondition, ImmersedBoundaryGrid, InMemory,
+                    Integral, IterationInterval, JLD2Writer,
+                    KernelFunctionOperation, LagrangianParticles, NetCDFWriter,
+                    NonTraditionalBetaPlane, OnDisk, OpenBoundaryCondition,
+                    PartialCellBottom, Partition, Periodic,
+                    PerturbationAdvection, RectilinearGrid, Simulation,
+                    SmagorinskyLilly, SpecifiedTimes, TimeInterval,
+                    UpwindBiased, ValueBoundaryCondition, WENO,
+                    WallTimeInterval, XFaceField, YFaceField, ZFaceField,
+                    add_callback!, compute!, conjure_time_step_wizard!,
+                    interior, iteration, minimum_xspacing, minimum_yspacing,
+                    minimum_zspacing, nodes, prettytime, regrid!, run!, set!,
+                    time_step!, xnodes, xspacings, ynodes, yspacings, znodes,
+                    zspacings, ∂x, ∂y, ∂z
 using Oceananigans.Grids: znode
 
 export

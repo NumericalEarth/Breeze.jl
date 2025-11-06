@@ -6,12 +6,11 @@ export TemperatureField
 export CondensateField
 export SaturationField
 
-using Oceananigans
-using Oceananigans: AbstractModel
+using Oceananigans: Oceananigans, Center, Field, KernelFunctionOperation
 using Oceananigans.Grids: AbstractGrid
 using Oceananigans.Operators: ∂zᶜᶜᶠ
 
-using Adapt
+using Adapt: Adapt, adapt
 
 import Oceananigans.BuoyancyFormulations: AbstractBuoyancyFormulation,
                                           buoyancy_perturbationᶜᶜᶜ,

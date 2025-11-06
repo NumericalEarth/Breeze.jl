@@ -1,6 +1,5 @@
 using Oceananigans.BoundaryConditions: fill_halo_regions!
-using Oceananigans.Models.NonhydrostaticModels: compute_pressure_correction!, make_pressure_correction!
-using Oceananigans.TimeSteppers: update_state!
+using Oceananigans.TimeSteppers: compute_pressure_correction!, make_pressure_correction!, update_state!
 
 import Oceananigans.Fields: set!
 
