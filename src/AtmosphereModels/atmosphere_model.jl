@@ -142,11 +142,11 @@ function AtmosphereModel(grid;
     advection = adapt_advection_order(advection, grid)
 
     if absolute_humidity isa DefaultValue
-        absolute_humidity = CenterField(grid, boundary_conditions=boundary_conditions.ρq)
+        absolute_humidity = CenterField(grid, boundary_conditions=boundary_conditions.ρqᵗ)
     end
 
     energy = CenterField(grid, boundary_conditions=boundary_conditions.ρe)
-    specific_humidity = CenterField(grid, boundary_conditions=boundary_conditions.ρq)
+    specific_humidity = CenterField(grid, boundary_conditions=boundary_conditions.ρqᵗ)
     temperature = CenterField(grid)
 
     prognostic_fields = collect_prognostic_fields(formulation,

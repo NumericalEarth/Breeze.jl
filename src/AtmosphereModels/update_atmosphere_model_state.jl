@@ -137,10 +137,10 @@ function compute_tendencies!(model::AnelasticModel)
     launch!(arch, grid, :xyz, compute_energy_tendency!, Gρe, grid, ρe_args)
 
     ρq = model.absolute_humidity
-    Gρq = model.timestepper.Gⁿ.ρq
-    Fρq = model.forcing.ρq
-    ρq_args = tuple(ρq, Fρq, scalar_args...)
-    launch!(arch, grid, :xyz, compute_scalar_tendency!, Gρq, grid, ρq_args)
+    Gρqᵗ = model.timestepper.Gⁿ.ρqᵗ
+    Fρqᵗ = model.forcing.ρqᵗ
+    ρq_args = tuple(ρq, Fρqᵗ, scalar_args...)
+    launch!(arch, grid, :xyz, compute_scalar_tendency!, Gρqᵗ, grid, ρq_args)
 
     return nothing
 end
