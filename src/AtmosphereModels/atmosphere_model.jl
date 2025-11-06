@@ -7,13 +7,12 @@ using ..Thermodynamics:
     mixture_heat_capacity,
     dry_air_gas_constant
 
-using Oceananigans
-using Oceananigans.Advection: Centered, adapt_advection_order
-using Oceananigans.Architectures: AbstractArchitecture
+using Oceananigans: Oceananigans, AbstractModel, Center, CenterField, Clock, Face, Field, Flat,
+    WENO, XFaceField, YFaceField, ZFaceField
+using Oceananigans.Advection: adapt_advection_order
 using Oceananigans.BoundaryConditions: FieldBoundaryConditions, regularize_field_boundary_conditions
 using Oceananigans.Grids: ZDirection
-using Oceananigans.Models: AbstractModel
-using Oceananigans.Solvers: FourierTridiagonalPoissonSolver, HomogeneousNeumannFormulation
+using Oceananigans.Solvers: FourierTridiagonalPoissonSolver
 using Oceananigans.TimeSteppers: TimeStepper
 using Oceananigans.Utils: launch!
 
@@ -195,8 +194,7 @@ function AtmosphereModel(grid;
     return model
 end
 
-using Oceananigans.Utils: prettytime, ordered_dict_show, prettykeys
-using Oceananigans.TurbulenceClosures: closure_summary
+using Oceananigans.Utils: prettytime, prettykeys
 
 function Base.summary(model::AtmosphereModel)
     A = nameof(typeof(model.grid.architecture))

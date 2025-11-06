@@ -1,9 +1,7 @@
 using Oceananigans.Grids: znode, Center
 using Oceananigans.TimeSteppers: update_state!
 using Oceananigans.BoundaryConditions: fill_halo_regions!
-using Oceananigans.Models.NonhydrostaticModels: compute_pressure_correction!, make_pressure_correction!
-
-using ..Thermodynamics: exner_function, SpecificHumidities, mixture_heat_capacity, PotentialTemperatureState, temperature
+using Oceananigans.TimeSteppers: compute_pressure_correction!, make_pressure_correction!, update_state!
 
 import Oceananigans.Fields: set!
 

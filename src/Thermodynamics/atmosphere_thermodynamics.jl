@@ -1,5 +1,5 @@
-using Adapt
-using Oceananigans.Utils: prettysummary
+using Adapt: Adapt, adapt
+using Oceananigans.Grids: prettysummary
 
 """
     IdealGas{FT}

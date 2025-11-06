@@ -10,10 +10,9 @@ using ..Thermodynamics:
     dry_air_gas_constant
 
 using Oceananigans.Architectures: architecture
-using Oceananigans.Grids: inactive_cell
+using Oceananigans.Grids: inactive_cell, prettysummary
 using Oceananigans.Operators: Δzᵃᵃᶜ, Δzᵃᵃᶠ, divᶜᶜᶜ
 using Oceananigans.Solvers: solve!
-using Oceananigans.Utils: prettysummary
 
 using KernelAbstractions: @kernel, @index
 
