@@ -1,0 +1,30 @@
+name: GPU quick check
+on: { workflow_dispatch: {} }
+
+jobs:
+  gpu-check:
+    # EITHER: if you added the label directly (no group needed)
+    # runs-on: [self-hosted, linux, ubuntu-latest-m]
+
+    # OR: if you want to restrict to your runner group as well
+    runs-on: nvidia-gpu-t4
+
+    steps:
+      - name: Show where we landed
+        run: |
+          echo "Runner: ${{ runner.name }} (OS=${{ runner.os }})"
+          echo "Labels: $RUNNER_LABELS"
+        env:
+          RUNNER_LABELS: ${{ toJson(runner.labels) }}  # for easy debugging
+
+      - name: Check NVIDIA driver & GPUs
+        run: |
+          if ! command -v nvidia-smi >/dev/null 2>&1; then
+            echo "::error::nvidia-smi not found. Install NVIDIA drivers (and nvidia-container-toolkit if you run Docker)."
+            exit 1
+          fi
+          echo "=== nvidia-smi ==="
+          nvidia-smi
+          echo
+          echo "=== GPU count ==="
+          nvidia-smi --query-gpu=name --format=csv,noheader | wc -l
