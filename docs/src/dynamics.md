@@ -25,7 +25,7 @@ For moist flows we also track total water (vapor + condensates) via
 where ``q^t`` is total specific humidity and ``S_q`` accounts for sources/sinks from microphysics and boundary fluxes.
 
 Thermodynamic relations (mixture gas constant ``R^{m}``, heat capacity ``c^{pm}``, Exner function, etc.)
-are summarized on the [Thermodynamics](@ref Thermodynamics-section) section.
+are summarized in the [Thermodynamics](@ref Thermodynamics-section) section.
 
 ## Anelastic approximation
 
