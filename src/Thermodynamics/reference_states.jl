@@ -1,4 +1,4 @@
-using Oceananigans
+using Oceananigans: Oceananigans
 
 #####
 ##### Reference state computations for Boussinesq and Anelastic models
