@@ -7,6 +7,7 @@ using ..Thermodynamics:
     mixture_heat_capacity,
     dry_air_gas_constant
 
+using Oceananigans: Oceananigans
 using Oceananigans.Architectures: architecture
 using Oceananigans.Grids: inactive_cell, prettysummary
 using Oceananigans.Operators: Δzᵃᵃᶜ, Δzᵃᵃᶠ, divᶜᶜᶜ, Δzᶜᶜᶜ
