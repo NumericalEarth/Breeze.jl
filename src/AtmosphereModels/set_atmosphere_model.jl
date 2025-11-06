@@ -56,18 +56,18 @@ function set!(model::AtmosphereModel; enforce_mass_conservation=true, kw...)
         elseif name == :qᵗ
             qᵗ = model.specific_humidity
             set!(qᵗ, value)
-            ρʳ = model.formulation.reference_density
+            ρᵣ = model.formulation.reference_density
             ρqᵗ = model.absolute_humidity
-            set!(ρqᵗ, ρʳ * qᵗ)                
+            set!(ρqᵗ, ρᵣ * qᵗ)                
 
         elseif name ∈ (:u, :v, :w)
             u = model.velocities[name]
             set!(u, value)
 
-            ρʳ = model.formulation.reference_density
+            ρᵣ = model.formulation.reference_density
             ϕ = model.momentum[Symbol(:ρ, name)]
-            value = ρʳ * u
-            set!(ϕ, value)                
+            value = ρᵣ * u
+            set!(ϕ, value)    
         end
     end
 
