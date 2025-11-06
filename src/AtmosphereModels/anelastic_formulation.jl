@@ -146,7 +146,7 @@ function formulation_pressure_solver(anelastic_formulation::AnelasticFormulation
     reference_density = anelastic_formulation.reference_density
     tridiagonal_formulation = AnelasticTridiagonalSolverFormulation(reference_density)
 
-    solver = if grid isa Oceananigans.Grids.ImmersedBoundaryGrid
+    solver = if grid isa Oceananigans.ImmersedBoundaries.ImmersedBoundaryGrid
         # With this method, we are using an approximate solver that
         # will produce a divergent velocity field near terrain.
         FourierTridiagonalPoissonSolver(grid.underlying_grid; tridiagonal_formulation)
