@@ -1,5 +1,6 @@
 name: GPU quick check
-on: { workflow_dispatch: {} }
+on:
+  pull_request:
 
 jobs:
   gpu-check:
