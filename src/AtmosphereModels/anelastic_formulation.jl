@@ -110,7 +110,7 @@ function collect_prognostic_fields(::AnelasticFormulation,
                                    condensates,
                                    tracers)
 
-    thermodynamic_variables = (ρe=energy, ρq=absolute_humidity)
+    thermodynamic_variables = (ρe=energy, ρqᵗ=absolute_humidity)
 
     return merge(momentum, thermodynamic_variables, condensates, tracers)
 end

@@ -13,7 +13,7 @@ import Oceananigans.TimeSteppers: update_state!, compute_flux_bc_tendencies!
 const AnelasticModel = AtmosphereModel{<:AnelasticFormulation}
 
 function prognostic_fields(model::AnelasticModel)
-    thermodynamic_fields = (ρe=model.energy, ρq=model.absolute_humidity)
+    thermodynamic_fields = (ρe=model.energy, ρqᵗ=model.absolute_humidity)
     return merge(model.momentum, thermodynamic_fields, model.condensates, model.tracers)
 end
 
@@ -98,7 +98,7 @@ end
 
 using Oceananigans.Advection: div_𝐯u, div_𝐯v, div_𝐯w, div_Uc
 using Oceananigans.Coriolis: x_f_cross_U, y_f_cross_U, z_f_cross_U
-using Oceananigans.Operators: ∂xᶠᶜᶜ, ∂yᶜᶠᶜ, ∂zᶜᶜᶠ
+using Oceananigans.Operators: ∂xᶠᶜᶜ, ∂yᶜᶠᶜ, ∂zᶜᶜᶠ, ℑzᵃᵃᶜ, ℑzᵃᵃᶠ
 using Oceananigans.Utils: launch!
 
 function compute_tendencies!(model::AnelasticModel)

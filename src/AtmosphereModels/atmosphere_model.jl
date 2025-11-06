@@ -16,6 +16,8 @@ using Oceananigans.Solvers: FourierTridiagonalPoissonSolver
 using Oceananigans.TimeSteppers: TimeStepper
 using Oceananigans.Utils: launch!
 
+import Oceananigans.Advection: cell_advection_timescale
+
 using KernelAbstractions: @kernel, @index
 
 materialize_condenstates(microphysics, grid) = NamedTuple() #(; qˡ=CenterField(grid), qᵛ=CenterField(grid))
@@ -215,3 +217,5 @@ function Base.show(io::IO, model::AtmosphereModel)
         "├── coriolis: ", summary(model.coriolis), "\n",
         "└── microphysics: ", Mic)
 end
+
+cell_advection_timescale(model::AtmosphereModel) = cell_advection_timescale(model.grid, model.velocities)
