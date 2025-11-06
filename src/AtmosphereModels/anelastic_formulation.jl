@@ -144,7 +144,15 @@ tridiagonal_direction(formulation::AnelasticTridiagonalSolverFormulation) = ZDir
 function formulation_pressure_solver(anelastic_formulation::AnelasticFormulation, grid)
     reference_density = anelastic_formulation.reference_density
     tridiagonal_formulation = AnelasticTridiagonalSolverFormulation(reference_density)
-    solver = FourierTridiagonalPoissonSolver(grid; tridiagonal_formulation)
+
+    solver = if grid isa ImmersedBoundaryGrid
+        # With this method, we are using an approximate solver that
+        # will produce a divergent velocity field near terrain.
+        FourierTridiagonalPoissonSolver(grid.underlying_grid; tridiagonal_formulation)
+    else # the solver is exact
+        FourierTridiagonalPoissonSolver(grid; tridiagonal_formulation)
+    end
+
     return solver
 end
 
@@ -160,22 +168,22 @@ end
 @kernel function _compute_anelastic_main_diagonal!(D, grid, λx, λy, reference_density)
     i, j = @index(Global, NTuple)
     Nz = size(grid, 3)
-    ρʳ = reference_density
+    ρᵣ = reference_density
 
     # Using a homogeneous Neumann (zero Gradient) boundary condition:
     @inbounds begin
-        ρ¹ = ρʳ[1, 1, 1]
-        ρᴺ = ρʳ[1, 1, Nz]
-        ρ̄² = ℑzᵃᵃᶠ(i, j, 2, grid, ρʳ)
-        ρ̄ᴺ = ℑzᵃᵃᶠ(i, j, Nz, grid, ρʳ)
+        ρ¹ = ρᵣ[1, 1, 1]
+        ρᴺ = ρᵣ[1, 1, Nz]
+        ρ̄² = ℑzᵃᵃᶠ(i, j, 2, grid, ρᵣ)
+        ρ̄ᴺ = ℑzᵃᵃᶠ(i, j, Nz, grid, ρᵣ)
 
         D[i, j, 1]  = - ρ̄² / Δzᵃᵃᶠ(i, j,  2, grid) - ρ¹ * Δzᵃᵃᶜ(i, j,  1, grid) * (λx[i] + λy[j])
         D[i, j, Nz] = - ρ̄ᴺ / Δzᵃᵃᶠ(i, j, Nz, grid) - ρᴺ * Δzᵃᵃᶜ(i, j, Nz, grid) * (λx[i] + λy[j])
 
         for k in 2:Nz-1
-            ρᵏ = ρʳ[1, 1, k]
-            ρ̄⁺ = ℑzᵃᵃᶠ(i, j, k+1, grid, ρʳ)
-            ρ̄ᵏ = ℑzᵃᵃᶠ(i, j, k, grid, ρʳ)
+            ρᵏ = ρᵣ[1, 1, k]
+            ρ̄⁺ = ℑzᵃᵃᶠ(i, j, k+1, grid, ρᵣ)
+            ρ̄ᵏ = ℑzᵃᵃᶠ(i, j, k, grid, ρᵣ)
 
             D[i, j, k] = - (ρ̄⁺ / Δzᵃᵃᶠ(i, j, k+1, grid) + ρ̄ᵏ / Δzᵃᵃᶠ(i, j, k, grid)) - ρᵏ * Δzᵃᵃᶜ(i, j, k, grid) * (λx[i] + λy[j])
         end
@@ -203,7 +211,7 @@ function compute_pressure_correction!(model::AnelasticModel, Δt)
     foreach(mask_immersed_field!, model.momentum)
     fill_halo_regions!(model.momentum, model.clock, fields(model))
 
-    ρʳ = model.formulation.reference_density
+    ρᵣ = model.formulation.reference_density
     ρŨ = model.momentum
     solver = model.pressure_solver
     pₙ = model.nonhydrostatic_pressure
@@ -256,15 +264,15 @@ Update the predictor momentum (ρu, ρv, ρw) with the non-hydrostatic pressure 
 
     u^{n+1} = u^n - δₓp_{NH} / Δx * Δt
 """
-@kernel function _pressure_correct_momentum!(M, grid, Δt, αʳ_pₙ, ρʳ)
+@kernel function _pressure_correct_momentum!(M, grid, Δt, αᵣ_pₙ, ρᵣ)
     i, j, k = @index(Global, NTuple)
 
-    ρᶠ = ℑzᵃᵃᶠ(i, j, k, grid, ρʳ)
-    ρᶜ = @inbounds ρʳ[i, j, k]
+    ρᶠ = ℑzᵃᵃᶠ(i, j, k, grid, ρᵣ)
+    ρᶜ = @inbounds ρᵣ[i, j, k]
 
-    @inbounds M.ρu[i, j, k] -= ρᶜ * Δt * ∂xᶠᶜᶜ(i, j, k, grid, αʳ_pₙ)
-    @inbounds M.ρv[i, j, k] -= ρᶜ * Δt * ∂yᶜᶠᶜ(i, j, k, grid, αʳ_pₙ)
-    @inbounds M.ρw[i, j, k] -= ρᶠ * Δt * ∂zᶜᶜᶠ(i, j, k, grid, αʳ_pₙ)
+    @inbounds M.ρu[i, j, k] -= ρᶜ * Δt * ∂xᶠᶜᶜ(i, j, k, grid, αᵣ_pₙ)
+    @inbounds M.ρv[i, j, k] -= ρᶜ * Δt * ∂yᶜᶠᶜ(i, j, k, grid, αᵣ_pₙ)
+    @inbounds M.ρw[i, j, k] -= ρᶠ * Δt * ∂zᶜᶜᶠ(i, j, k, grid, αᵣ_pₙ)
 end
 
 function make_pressure_correction!(model::AnelasticModel, Δt)
