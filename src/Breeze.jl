@@ -8,7 +8,7 @@ module Breeze
 export
     MoistAirBuoyancy,
     ThermodynamicConstants,
-    ReferenceStateConstants,
+    ReferenceState,
     AnelasticFormulation,
     AtmosphereModel,
     TemperatureField,

@@ -9,7 +9,7 @@ using Test
 
         for p₀ in (101325, 100000)
             for θ₀ in (288, 300)
-                constants = Breeze.Thermodynamics.ReferenceStateConstants(p₀, θ₀)
+                constants = Breeze.Thermodynamics.ReferenceState(p₀, θ₀)
                 formulation = AnelasticFormulation(grid, constants, thermo)
                 model = AtmosphereModel(grid; formulation)
 

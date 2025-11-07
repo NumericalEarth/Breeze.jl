@@ -25,16 +25,7 @@ grid = RectilinearGrid(arch,
                        halo = (5, 5),
                        topology = (Periodic, Flat, Bounded))
 
-# Thermodynamic setup
-p₀ = 101325  # Pa - standard atmospheric pressure
-θ₀ = 300.0   # K - reference potential temperature
-reference_constants = ReferenceStateConstants(base_pressure=p₀, potential_temperature=θ₀)
-buoyancy = MoistAirBuoyancy(; reference_constants)
-
-# Advection scheme - WENO for high-order accuracy
 advection = WENO(order=5)
-
-# Create the model
 model = AtmosphereModel(grid; advection)
 
 # Thermal bubble parameters (moist static energy)

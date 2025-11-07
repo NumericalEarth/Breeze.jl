@@ -1,18 +1,19 @@
-struct PotentialTemperatureState{FT, H, R}
+struct PotentialTemperatureState{FT}
     potential_temperature :: FT
-    moisture_fractions :: H
+    moisture_fractions :: MoistureMassFractions{FT}
     height :: FT
-    reference_state :: R
+    base_pressure :: FT
+    reference_pressure :: FT
+    reference_density :: FT
 end
 
 @inline function exner_function(𝒰::PotentialTemperatureState, thermo::ThermodynamicConstants)
     q = 𝒰.moisture_fractions
     z = 𝒰.height
-    ref = 𝒰.reference_state
     Rᵐ = mixture_gas_constant(q, thermo)
     cᵖᵐ = mixture_heat_capacity(q, thermo)
-    pᵣ = reference_pressure(z, ref, thermo)
-    p₀ = ref.base_pressure
+    pᵣ = 𝒰.reference_pressure
+    p₀ = 𝒰.base_pressure
     return (pᵣ / p₀)^(Rᵐ / cᵖᵐ)
 end
 
@@ -20,7 +21,7 @@ end
     total_specific_humidity(state.moisture_fractions)
 
 @inline function specific_volume(state::PotentialTemperatureState, ref, thermo)
-    pᵣ = reference_pressure(state.height, ref, thermo)
+    pᵣ = state.reference_pressure
     Rᵐ = mixture_gas_constant(state.moisture_fractions, thermo)
     T = state.potential_temperature
     return Rᵐ * T / pᵣ
@@ -31,8 +32,7 @@ end
                                               thermo::ThermodynamicConstants,
                                               phase::CondensedPhase)
     z = state.height
-    ref = state.reference_state
-    ρ = reference_density(z, ref, thermo)
+    ρ = state.reference_density
     return saturation_specific_humidity(T, ρ, thermo, phase)
 end
 

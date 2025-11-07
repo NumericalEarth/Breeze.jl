@@ -11,7 +11,7 @@ grid = RectilinearGrid(size=(Nx, Nz), x=(0, Lx), z=(0, Lz), topology=(Periodic, 
 ρe_bcs = FieldBoundaryConditions(bottom=FluxBoundaryCondition(1000))
 model = AtmosphereModel(grid, advection=WENO(), boundary_conditions=(; ρe=ρe_bcs))
 
-Tₛ = model.formulation.constants.reference_potential_temperature
+Tₛ = model.formulation.constants.potential_temperature
 g = model.thermodynamics.gravitational_acceleration
 N² = 1e-6
 dθdz = N² * Tₛ / g  # Background potential temperature gradient

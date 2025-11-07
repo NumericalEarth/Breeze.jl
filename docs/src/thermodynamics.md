@@ -191,7 +191,7 @@ using Breeze.Thermodynamics: reference_pressure, reference_density
 using CairoMakie
 
 thermo = ThermodynamicConstants()
-constants = ReferenceStateConstants(base_pressure=101325, potential_temperature=288)
+constants = ReferenceState(base_pressure=101325, potential_temperature=288)
 grid = RectilinearGrid(size=160, z=(0, 12_000), topology=(Flat, Flat, Bounded))
 
 pᵣ = CenterField(grid)
@@ -203,7 +203,7 @@ set!(ρᵣ, z -> reference_density(z, constants, thermo))
 Rᵈ = Breeze.Thermodynamics.dry_air_gas_constant(thermo)
 cᵖᵈ = thermo.dry_air.heat_capacity
 p₀ = constants.base_pressure
-θ₀ = constants.reference_potential_temperature
+θ₀ = constants.potential_temperature
 g = thermo.gravitational_acceleration
 
 # Verify that Tᵣ = θ₀ (1 - g z / (cᵖᵈ θ₀))
@@ -371,7 +371,7 @@ using Breeze
 using Breeze.MoistAirBuoyancies: saturation_specific_humidity
 
 thermo = ThermodynamicConstants()
-ref = ReferenceStateConstants(base_pressure=101325, potential_temperature=288)
+ref = ReferenceState(base_pressure=101325, potential_temperature=288)
 
 z = 0
 T = collect(273.2:0.1:313.2)

@@ -35,7 +35,7 @@ using Breeze
 using Breeze.MoistAirBuoyancies: saturation_specific_humidity, HeightReferenceThermodynamicState
 
 thermo = ThermodynamicConstants()
-ref = ReferenceStateConstants(base_pressure=101325, potential_temperature=288)
+ref = ReferenceState(base_pressure=101325, potential_temperature=288)
 
 z = 0.0    # [m] height
 θ = 290.0  # [ᵒK] potential temperature

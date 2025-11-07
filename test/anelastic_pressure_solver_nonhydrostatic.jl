@@ -7,7 +7,7 @@ using Oceananigans
     z = 0:(1/Nz):1
     grid = RectilinearGrid(FT; size=(Nx, Ny, Nz), x=(0, 1), y=(0, 1), z)
     thermodynamics = ThermodynamicConstants(FT)
-    reference_constants = ReferenceStateConstants(FT; base_pressure=101325, potential_temperature=288)
+    reference_constants = ReferenceState(FT; base_pressure=101325, potential_temperature=288)
 
     formulation = AnelasticFormulation(grid, reference_constants, thermodynamics)
     parent(formulation.reference_density) .= 1

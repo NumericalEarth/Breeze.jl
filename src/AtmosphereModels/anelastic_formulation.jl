@@ -1,7 +1,7 @@
 using ..Thermodynamics:
     MoistureMassFractions,
     ThermodynamicConstants,
-    ReferenceStateConstants,
+    ReferenceState,
     AnelasticThermodynamicState,
     reference_pressure,
     reference_density,
@@ -25,7 +25,7 @@ import Oceananigans.TimeSteppers: compute_pressure_correction!, make_pressure_co
 #####
 
 struct AnelasticFormulation{FT, F}
-    constants :: ReferenceStateConstants{FT}
+    constants :: ReferenceState{FT}
     reference_pressure :: F
     reference_density :: F
 end
@@ -34,7 +34,7 @@ const AnelasticModel = AtmosphereModel{<:AnelasticFormulation}
 
 function Base.summary(formulation::AnelasticFormulation)
     p₀ = formulation.constants.base_pressure
-    θᵣ = formulation.constants.reference_potential_temperature
+    θᵣ = formulation.constants.potential_temperature
     return string("AnelasticFormulation(p₀=", prettysummary(p₀),
                   ", θᵣ=", prettysummary(θᵣ), ")")
 end
@@ -96,7 +96,7 @@ end
 @inline function reference_specific_volume(i, j, k, grid, formulation, thermo)
     Rᵈ = dry_air_gas_constant(thermo)
     pᵣ = @inbounds formulation.reference_pressure[1, 1, k]
-    θᵣ = formulation.constants.reference_potential_temperature
+    θᵣ = formulation.constants.potential_temperature
     return Rᵈ * θᵣ / pᵣ
 end
 

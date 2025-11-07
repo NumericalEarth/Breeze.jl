@@ -1,12 +1,12 @@
 module MoistAirBuoyancies
 
-using ..Thermodynamics: PotentialTemperatureState, MoistureMassFractions, exner_function, reference_density
+export
+    MoistAirBuoyancy,
+    TemperatureField,
+    CondensateField,
+    SaturationField
 
-export MoistAirBuoyancy
-export UnsaturatedMoistAirBuoyancy
-export TemperatureField
-export CondensateField
-export SaturationField
+using ..Thermodynamics: PotentialTemperatureState, MoistureMassFractions, exner_function
 
 using Oceananigans: Oceananigans, Center, Field, KernelFunctionOperation
 using Oceananigans.Grids: AbstractGrid
@@ -19,104 +19,112 @@ import Oceananigans.BuoyancyFormulations: AbstractBuoyancyFormulation, buoyancy_
 
 using ..Thermodynamics:
     ThermodynamicConstants,
-    ReferenceStateConstants,
-    reference_specific_volume,
+    ReferenceState,
     mixture_heat_capacity,
-    mixture_gas_constant,
-    reference_pressure
+    mixture_gas_constant
 
 import ..Thermodynamics:
     base_density,
     saturation_specific_humidity,
     condensate_specific_humidity
 
-struct MoistAirBuoyancy{FT, AT} <: AbstractBuoyancyFormulation{Nothing}
-    reference_constants :: ReferenceStateConstants{FT}
+struct MoistAirBuoyancy{RS, AT} <: AbstractBuoyancyFormulation{Nothing}
+    reference_state :: RS
     thermodynamics :: AT
 end
 
 """
-    MoistAirBuoyancy(FT=Oceananigans.defaults.FloatType;
-                     thermodynamics = ThermodynamicConstants(FT),
-                     reference_constants = ReferenceStateConstants{FT}(101325, 290))
+    MoistAirBuoyancy(grid;
+                     base_pressure = 101325,
+                     reference_potential_temperature = 288,
+                     thermodynamics = ThermodynamicConstants(FT))
 
-Return a MoistAirBuoyancy formulation that can be provided as input to an `AtmosphereModel`
-or an `Oceananigans.NonhydrostaticModel`.
+Return a MoistAirBuoyancy formulation that can be provided as input to an
+`Oceananigans.NonhydrostaticModel`.
 
 !!! note "Required tracers"
-    `MoistAirBuoyancy` requires tracers `q` and `θ` to be included in the model.
+    `MoistAirBuoyancy` requires tracers `θ` and `qᵗ`.
 
 Example
 =======
 
-```jldoctest
-julia> using Breeze, Oceananigans
+```jldoctest mab
+using Breeze, Oceananigans
 
-julia> buoyancy = MoistAirBuoyancy()
-MoistAirBuoyancy
-├── reference_constants: Breeze.Thermodynamics.ReferenceStateConstants{Float64}
-└── thermodynamics: ThermodynamicConstants
+grid = RectilinearGrid(size=(1, 1, 8), extent=(1, 1, 3e3))
+buoyancy = MoistAirBuoyancy(grid)
 
-julia> model = NonhydrostaticModel(; grid = RectilinearGrid(size=(8, 8, 8), extent=(1, 2, 3)),
-                                     buoyancy, tracers = (:θ, :q))
+# output
+MoistAirBuoyancy:
+├── reference_state: ReferenceState{Float64}(p₀=101325.0, θᵣ=288.0)
+└── thermodynamics: ThermodynamicConstants{Float64}
+```
+
+To build a model with MoistAirBuoyancy, we include potential temperature and total specific humidity
+tracers `θ` and `qᵗ` to the model.
+
+```jldoctest mab
+model = NonhydrostaticModel(; grid, buoyancy, tracers = (:θ, :qᵗ))
+                                     
+# output
 NonhydrostaticModel{CPU, RectilinearGrid}(time = 0 seconds, iteration = 0)
-├── grid: 8×8×8 RectilinearGrid{Float64, Periodic, Periodic, Bounded} on CPU with 3×3×3 halo
+├── grid: 1×1×8 RectilinearGrid{Float64, Periodic, Periodic, Bounded} on CPU with 1×1×3 halo
 ├── timestepper: RungeKutta3TimeStepper
 ├── advection scheme: Centered(order=2)
-├── tracers: (θ, q)
+├── tracers: (θ, qᵗ)
 ├── closure: Nothing
 ├── buoyancy: MoistAirBuoyancy with ĝ = NegativeZDirection()
 └── coriolis: Nothing
 ```
 """
-function MoistAirBuoyancy(FT=Oceananigans.defaults.FloatType;
-                          thermodynamics = ThermodynamicConstants(FT),
-                          reference_constants = ReferenceStateConstants{FT}(101325, 290))
+function MoistAirBuoyancy(grid;
+                          base_pressure = 101325,
+                          reference_potential_temperature = 288,
+                          thermodynamics = ThermodynamicConstants(eltype(grid)))
 
-    AT = typeof(thermodynamics)
-    return MoistAirBuoyancy{FT, AT}(reference_constants, thermodynamics)
+    reference_state = ReferenceState(grid, thermodynamics;
+                                     base_pressure,
+                                     potential_temperature = reference_potential_temperature)
+                          
+    return MoistAirBuoyancy(reference_state, thermodynamics)
 end
 
 Base.summary(b::MoistAirBuoyancy) = "MoistAirBuoyancy"
 
 function Base.show(io::IO, b::MoistAirBuoyancy)
-    print(io, summary(b), "\n",
-        "├── reference_constants: ", summary(b.reference_constants), "\n",
+    print(io, summary(b), ":\n",
+        "├── reference_state: ", summary(b.reference_state), "\n",
         "└── thermodynamics: ", summary(b.thermodynamics))
 end
 
-required_tracers(::MoistAirBuoyancy) = (:θ, :q)
-
-#####
-#####
-#####
+required_tracers(::MoistAirBuoyancy) = (:θ, :qᵗ)
 
 const c = Center()
 
 @inline function buoyancy_perturbationᶜᶜᶜ(i, j, k, grid, mb::MoistAirBuoyancy, tracers)
+    @inbounds begin
+        pᵣ = mb.reference_state.pressure[i, j, k]
+        ρᵣ = mb.reference_state.density[i, j, k]
+        θ = tracers.θ[i, j, k]
+        qᵗ = tracers.qᵗ[i, j, k]
+    end
+
     z = Oceananigans.Grids.znode(i, j, k, grid, c, c, c)
-    θ = @inbounds tracers.θ[i, j, k]
-    qᵗ = @inbounds tracers.q[i, j, k]
+    p₀ = mb.reference_state.base_pressure
     q = MoistureMassFractions(qᵗ, zero(qᵗ), zero(qᵗ))
-    𝒰 = PotentialTemperatureState(θ, q, z, mb.reference_constants)
+    𝒰 = PotentialTemperatureState(θ, q, z, p₀, pᵣ, ρᵣ)
 
     # Perform saturation adjustment
     T = temperature(𝒰, mb.thermodynamics)
 
     # Compute specific volume
-    pᵣ = reference_pressure(z, mb.reference_constants, mb.thermodynamics)
     Rᵐ = mixture_gas_constant(q, mb.thermodynamics)
     α = Rᵐ * T / pᵣ
 
-    # Compute reference specific volume
-    αᵣ = reference_specific_volume(z, mb.reference_constants, mb.thermodynamics)
     g = mb.thermodynamics.gravitational_acceleration
 
-    # Formulation in terms of base density:
-    # ρ₀ = base_density(mb.reference_constants, mb.thermodynamics)
-    # return ρ₀ * g * (α - αᵣ)
-
-    return g * (α - αᵣ) / αᵣ
+    # b = g * (α - αᵣ) / αᵣ
+    return g * (ρᵣ * α - 1)
 end
 
 @inline ∂z_b(i, j, k, grid, mb::MoistAirBuoyancy, tracers) =
@@ -247,7 +255,7 @@ end
 
 Adapt.adapt_structure(to, sk::PhaseTransitionConstantsKernel) =
     PhaseTransitionConstantsKernel(adapt(to, sk.condensed_phase),
-                     adapt(to, sk.temperature))
+                                   adapt(to, sk.temperature))
 
 @inline function (kernel::PhaseTransitionConstantsKernel)(i, j, k, grid, buoyancy)
     T = kernel.temperature
@@ -271,27 +279,27 @@ end
 
 Adapt.adapt_structure(to, ck::CondensateKernel) = CondensateKernel(adapt(to, ck.temperature))
 
-@inline function condensate_specific_humidity(i, j, k, grid, mb::MoistAirBuoyancy, T, q)
+@inline function condensate_specific_humidity(i, j, k, grid, mb::MoistAirBuoyancy, T, qᵗ)
     z = Oceananigans.Grids.znode(i, j, k, grid, c, c, c)
     Ti = @inbounds T[i, j, k]
-    qᵗ = @inbounds q[i, j, k]
+    qᵗ = @inbounds qᵗ[i, j, k]
     q = MoistureMassFractions(qᵗ, zero(qᵗ), zero(qᵗ))
     𝒰 = PotentialTemperatureState(Ti, q, z, mb.reference_constants)
     qˡ = condensate_specific_humidity(Ti, 𝒰, mb.thermodynamics)
     return qˡ
 end
 
-@inline function (kernel::CondensateKernel)(i, j, k, grid, buoyancy, q)
+@inline function (kernel::CondensateKernel)(i, j, k, grid, buoyancy, qᵗ)
     T = kernel.temperature
-    return condensate_specific_humidity(i, j, k, grid, buoyancy, T, q)
+    return condensate_specific_humidity(i, j, k, grid, buoyancy, T, qᵗ)
 end
 
 function CondensateField(model, T=TemperatureField(model))
     func = CondensateKernel(T)
     grid = model.grid
     buoyancy = model.buoyancy.formulation
-    q = model.tracers.q
-    op = KernelFunctionOperation{Center, Center, Center}(func, grid, buoyancy, q)
+    qᵗ = model.tracers.qᵗ
+    op = KernelFunctionOperation{Center, Center, Center}(func, grid, buoyancy, qᵗ)
     return Field(op)
 end
 
