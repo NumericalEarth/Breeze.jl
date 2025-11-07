@@ -24,7 +24,6 @@ using ..Thermodynamics:
     mixture_gas_constant
 
 import ..Thermodynamics:
-    base_density,
     saturation_specific_humidity,
     condensate_specific_humidity
 
