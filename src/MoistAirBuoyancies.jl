@@ -26,6 +26,8 @@ using Adapt: Adapt, adapt
 import Oceananigans.BuoyancyFormulations: AbstractBuoyancyFormulation, buoyancy_perturbationᶜᶜᶜ,
                                           ∂z_b, required_tracers
 
+import ..Thermodynamics: saturation_specific_humidity
+
 using ..Thermodynamics:
     ThermodynamicConstants,
     ReferenceState,
@@ -326,7 +328,7 @@ end
 
 Adapt.adapt_structure(to, ck::CondensateKernel) = CondensateKernel(adapt(to, ck.temperature))
 
-@inline function condensate_specific_humidity(i, j, k, grid, mb::MoistAirBuoyancy, T, qᵗ)
+@inline function liquid_mass_fraction(i, j, k, grid, mb::MoistAirBuoyancy, T, qᵗ)
     @inbounds begin
         Ti = T[i, j, k]
         qᵗi = qᵗ[i, j, k]
@@ -342,7 +344,7 @@ end
 
 @inline function (kernel::CondensateKernel)(i, j, k, grid, buoyancy, qᵗ)
     T = kernel.temperature
-    return condensate_specific_humidity(i, j, k, grid, buoyancy, T, qᵗ)
+    return liquid_mass_fraction(i, j, k, grid, buoyancy, T, qᵗ)
 end
 
 function CondensateField(model, T=TemperatureField(model))
