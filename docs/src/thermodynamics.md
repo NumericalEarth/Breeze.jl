@@ -370,13 +370,16 @@ using Breeze
 using Breeze.Thermodynamics: saturation_specific_humidity
 
 thermo = ThermodynamicConstants()
-p₀ = 101325
-T₀ = 288
-Rᵈ = Breeze.Thermodynamics.dry_air_gas_constant(thermo)
-ρ₀ = p₀ / (Rᵈ * T₀)
 
+p₀ = 101325
+Rᵈ = Breeze.Thermodynamics.dry_air_gas_constant(thermo)
 T = collect(273.2:0.1:313.2)
-qᵛ⁺ = [saturation_specific_humidity(Tⁱ, ρ₀, thermo, thermo.liquid) for Tⁱ in T]
+qᵛ⁺ = zeros(length(T))
+
+for i = 1:length(T)
+    ρ = p₀ / (Rᵈ * Tⁱ)
+    qᵛ⁺[i] = saturation_specific_humidity(T[i], ρ, thermo, thermo.liquid)
+end
 
 using CairoMakie
 
