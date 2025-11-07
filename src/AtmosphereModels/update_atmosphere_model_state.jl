@@ -65,8 +65,8 @@ end
         ρv = momentum.ρv[i, j, k]
         ρw = momentum.ρw[i, j, k]
 
-        ρᵣᵃᵃᶜ = formulation.reference_density[i, j, k]
-        ρᵣᵃᵃᶠ = ℑzᵃᵃᶠ(i, j, k, grid, formulation.reference_density)
+        ρᵣᵃᵃᶜ = formulation.reference_state.density[i, j, k]
+        ρᵣᵃᵃᶠ = ℑzᵃᵃᶠ(i, j, k, grid, formulation.reference_state.density)
         velocities.u[i, j, k] = ρu / ρᵣᵃᵃᶜ
         velocities.v[i, j, k] = ρv / ρᵣᵃᵃᶜ
         velocities.w[i, j, k] = ρw / ρᵣᵃᵃᶠ
@@ -114,7 +114,7 @@ function compute_tendencies!(model::AnelasticModel)
                    fields(model))
 
     pₕ′ = model.hydrostatic_pressure_anomaly
-    ρᵣ = model.formulation.reference_density
+    ρᵣ = model.formulation.reference_state.density
     u_args = tuple(common_args..., model.forcing.ρu, pₕ′, ρᵣ)
     v_args = tuple(common_args..., model.forcing.ρv, pₕ′, ρᵣ)
     w_args = tuple(common_args..., model.forcing.ρw, ρᵣ,
@@ -134,10 +134,10 @@ function compute_tendencies!(model::AnelasticModel)
                     model.specific_humidity, model.thermodynamics, model.condensates, model.microphysics)
     launch!(arch, grid, :xyz, compute_moist_static_energy_tendency!, Gρe, grid, ρe_args)
 
-    ρq = model.absolute_humidity
+    ρqᵗ = model.absolute_humidity
     Gρqᵗ = model.timestepper.Gⁿ.ρqᵗ
     Fρqᵗ = model.forcing.ρqᵗ
-    ρq_args = tuple(ρq, Fρqᵗ, scalar_args...)
+    ρq_args = tuple(ρqᵗ, Fρqᵗ, scalar_args...)
     launch!(arch, grid, :xyz, compute_scalar_tendency!, Gρqᵗ, grid, ρq_args)
 
     return nothing

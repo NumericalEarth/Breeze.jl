@@ -36,11 +36,12 @@ r₀ = 2e3         # Initial radius of bubble (2 km)
 
 # Background stratification (used to construct a gently increasing MSE with height via θ)
 N² = 1e-6        # Brunt-Väisälä frequency squared (s⁻²)
+θ₀ = model.formulation.reference_state.potential_temperature
 dθdz = N² * θ₀ / 9.81  # Background potential temperature gradient used to build MSE
 
 # Initial conditions (set moist static energy directly)
 # We form MSE ρe ≈ ρᵣ cᵖᵈ θ with a localized perturbation.
-ρʳ = model.formulation.reference_density
+ρʳ = model.formulation.reference_state.density
 cᵖᵈ = model.thermodynamics.dry_air.heat_capacity
 
 function eᵢ(x, z)
@@ -91,7 +92,7 @@ u, v, w = model.velocities
 
 # Temperature perturbation from background state
 ρE = Field{Nothing, Nothing, Center}(grid)
-set!(E, Field(Average(model.energy, dims=(1, 2))))
+set!(ρE, Field(Average(model.energy, dims=(1, 2))))
 ρe′ = model.energy - ρE
 ρe = model.energy
 T = model.temperature
@@ -146,6 +147,7 @@ if get(ENV, "CI", "false") == "false"
     ρe′n = @lift interior(ρe′t[$n], :, 1, :)
     Tn = @lift interior(Tt[$n], :, 1, :)
     ζn = @lift interior(ζt[$n], :, 1, :)
+    un = @lift interior(ut[$n], :, 1, :)
     wn = @lift interior(wt[$n], :, 1, :)
 
     # Grid coordinates
@@ -167,6 +169,7 @@ if get(ENV, "CI", "false") == "false"
     hme′ = heatmap!(axe′, x, z, ρe′n, colorrange=ρe′_range, colormap=:balance)
     hmT = heatmap!(axT, x, z, Tn, colorrange=T_range, colormap=:thermal)
     hmζ = heatmap!(axζ, x, z, ζn, colorrange=(-ζ_range, ζ_range), colormap=:balance)
+    hmu = heatmap!(axu, x, z, un, colorrange=(-w_range, w_range), colormap=:balance)
     hmw = heatmap!(axw, x, z, wn, colorrange=(-w_range, w_range), colormap=:balance)
 
     # Add colorbars
