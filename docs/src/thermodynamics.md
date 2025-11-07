@@ -1,4 +1,4 @@
-# Atmosphere Thermodynamics
+# [Atmosphere Thermodynamics](@id Thermodynamics-section)
 
 ```@setup thermo
 using Breeze
