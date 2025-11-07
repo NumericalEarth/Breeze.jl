@@ -32,7 +32,7 @@ model = AtmosphereModel(grid; advection)
 x₀ = Lx / 2      # Center of bubble in x
 z₀ = 4e3         # Center of bubble in z (2 km height)
 r₀ = 2e3         # Initial radius of bubble (2 km)
-Δe = 2 * 1004.0  # Moist static energy perturbation scale (J/m³) ≈ 2 K × ρᵣ × cᵖᵈ at low levels
+Δθ = 10 # K
 
 # Background stratification (used to construct a gently increasing MSE with height via θ)
 N² = 1e-6        # Brunt-Väisälä frequency squared (s⁻²)
@@ -44,18 +44,14 @@ dθdz = N² * θ₀ / 9.81  # Background potential temperature gradient used to 
 ρʳ = model.formulation.reference_state.density
 cᵖᵈ = model.thermodynamics.dry_air.heat_capacity
 
-function eᵢ(x, z)
+function θᵢ(x, z)
     θ̄ = θ₀ + dθdz * z # background potential temperature used to build MSE
     r = sqrt((x - x₀)^2 + (z - z₀)^2) # distance from bubble center
-    w = max(0, 1 - r / r₀)             # bubble weight (cone)
-    ρ = @inbounds ρʳ[1, 1, max(1, min(size(ρʳ, 3), Int(clamp(round(z / (Lz / Nz)) + 1, 1, Nz))))]
-    # Background + perturbation in ρe
-    ē = ρ * cᵖᵈ * θ̄
-    e′ = Δe * w
-    return ē + e′
+    θ′ = Δθ * max(0, 1 - r / r₀)
+    return θ̄ + θ′
 end
 
-set!(model, ρe=eᵢ)
+set!(model, θ=θᵢ)
 
 # Simulation parameters
 stop_time = 30minutes
@@ -67,7 +63,7 @@ conjure_time_step_wizard!(simulation, cfl=0.7)
 # Progress monitoring
 function progress(sim)
     ρe = sim.model.energy
-    u, w = sim.model.velocities
+    u, v, w = sim.model.velocities
 
     ρe_max = maximum(ρe)
     ρe_min = minimum(ρe)

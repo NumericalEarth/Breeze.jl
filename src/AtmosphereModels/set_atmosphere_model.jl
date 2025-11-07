@@ -61,7 +61,7 @@ function set!(model::AtmosphereModel; enforce_mass_conservation=true, kw...)
         elseif name == :qᵗ
             qᵗ = model.specific_humidity
             set!(qᵗ, value)
-            ρᵣ = model.formulation.reference_density
+            ρᵣ = model.formulation.reference_state.density
             ρqᵗ = model.absolute_humidity
             set!(ρqᵗ, ρᵣ * qᵗ)                
 
@@ -69,7 +69,7 @@ function set!(model::AtmosphereModel; enforce_mass_conservation=true, kw...)
             u = model.velocities[name]
             set!(u, value)
 
-            ρᵣ = model.formulation.reference_density
+            ρᵣ = model.formulation.reference_state.density
             ϕ = model.momentum[Symbol(:ρ, name)]
             value = ρᵣ * u
             set!(ϕ, value)    
@@ -101,21 +101,25 @@ end
     i, j, k = @index(Global, NTuple)
 
     @inbounds begin
-        ρʳ = formulation.reference_density[i, j, k]
+        ρᵣ = formulation.reference_state.density[i, j, k]
         qᵗ = specific_humidity[i, j, k]
+        pᵣ = formulation.reference_state.pressure[i, j, k]
         θ = potential_temperature[i, j, k]
-        z = znode(i, j, k, grid, c, c, c)
     end
+
+    p₀ = formulation.reference_state.base_pressure
+    z = znode(i, j, k, grid, c, c, c)
 
     # Assuming a state with no condensate?
     q = MoistureMassFractions(qᵗ, zero(qᵗ), zero(qᵗ))
-    ref = formulation.constants
-    𝒰 = PotentialTemperatureState(θ, q, z, ref)
+
+    𝒰 = PotentialTemperatureState(θ, q, z, p₀, pᵣ, ρᵣ)
     Π = exner_function(𝒰, thermo)
     T = Π * θ
 
     ℒ₀ = thermo.liquid.reference_latent_heat
     g = thermo.gravitational_acceleration
     cᵖᵐ = mixture_heat_capacity(q, thermo)
-    @inbounds moist_static_energy[i, j, k] = ρʳ * (cᵖᵐ * T + g * z + qᵗ * ℒ₀)
+
+    @inbounds moist_static_energy[i, j, k] = ρᵣ * (cᵖᵐ * T + g * z + qᵗ * ℒ₀)
 end
