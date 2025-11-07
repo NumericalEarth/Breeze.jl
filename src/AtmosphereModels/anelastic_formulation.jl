@@ -1,5 +1,5 @@
 using ..Thermodynamics:
-    MassRatios,
+    SpecificMoistureContent,
     ThermodynamicConstants,
     ReferenceStateConstants,
     AnelasticThermodynamicState,
@@ -69,7 +69,7 @@ function thermodynamic_state(i, j, k, grid, formulation::AnelasticFormulation, t
     θ = e / (cᵖᵈ * ρᵣ)
 
     qᵗ = ρqᵗ / ρᵣ
-    q = MassRatios(qᵗ, zero(qᵗ), zero(qᵗ)) # assuming non-condensed state
+    q = SpecificMoistureContent(qᵗ, zero(qᵗ), zero(qᵗ)) # assuming non-condensed state
     Rᵐ = mixture_gas_constant(q, thermo)
     cᵖᵐ = mixture_heat_capacity(q, thermo)
 

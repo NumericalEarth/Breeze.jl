@@ -5,7 +5,7 @@ export ThermodynamicConstants, ReferenceStateConstants, IdealGas,
        mixture_gas_constant, mixture_heat_capacity
 
 include("atmosphere_thermodynamics.jl")
-include("specific_mass_ratios.jl")
+include("specific_moisture_content.jl")
 include("vapor_saturation.jl")
 include("reference_states.jl")
 include("dynamic_states.jl")

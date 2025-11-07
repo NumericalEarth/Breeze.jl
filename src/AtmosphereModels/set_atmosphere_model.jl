@@ -108,7 +108,7 @@ end
     end
 
     # Assuming a state with no condensate?
-    q = MassRatios(qᵗ, zero(qᵗ), zero(qᵗ))
+    q = SpecificMoistureContent(qᵗ, zero(qᵗ), zero(qᵗ))
     ref = formulation.constants
     𝒰 = PotentialTemperatureState(θ, q, z, ref)
     Π = exner_function(𝒰, thermo)
