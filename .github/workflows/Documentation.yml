@@ -48,15 +48,9 @@ jobs:
           version: "min"
       - uses: julia-actions/cache@v2
         id: julia-cache
-      - uses: actions/create-github-app-token@v2
-        id: generate_token
-        if: ${{ ! github.event.pull_request.head.repo.fork }}
-        with:
-          app-id: "${{ secrets.NUMTERRA_BOT_ID }}"
-          private-key: "${{ secrets.NUMTERRA_BOT_PRIVATE_KEY }}"
       - uses: julia-actions/julia-docdeploy@v1
         env:
-          GITHUB_TOKEN: ${{ steps.generate_token.outputs.token }}
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           DOCUMENTER_KEY: ${{ secrets.BREEZEDOCUMENTATION_DOCUMENTER_KEY }}
       - name: Save Julia depot cache on cancel or failure
         id: julia-cache-save
