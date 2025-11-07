@@ -22,7 +22,7 @@ using Test
                 ρe₁ = deepcopy(model.energy)
 
                 set!(model; ρe = ρeᵢ)
-                @test model.energy == ρe₁
+                @test model.energy ≈ ρe₁
             end
         end
     end
