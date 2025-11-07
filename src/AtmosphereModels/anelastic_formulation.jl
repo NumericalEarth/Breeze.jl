@@ -3,8 +3,6 @@ using ..Thermodynamics:
     ThermodynamicConstants,
     ReferenceState,
     AnelasticThermodynamicState,
-    reference_pressure,
-    reference_density,
     mixture_gas_constant,
     mixture_heat_capacity,
     dry_air_gas_constant
@@ -24,10 +22,8 @@ import Oceananigans.TimeSteppers: compute_pressure_correction!, make_pressure_co
 ##### Formulation definition
 #####
 
-struct AnelasticFormulation{FT, F}
-    constants :: ReferenceState{FT}
-    reference_pressure :: F
-    reference_density :: F
+struct AnelasticFormulation{R}
+    reference_state :: R
 end
 
 const AnelasticModel = AtmosphereModel{<:AnelasticFormulation}

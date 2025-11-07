@@ -216,36 +216,43 @@ end
 const c = Center()
 
 # Temperature
-@inline function temperature(i, j, k, grid::AbstractGrid, mb::MoistAirBuoyancy, θ, q)
+@inline function temperature(i, j, k, grid::AbstractGrid, mb::MoistAirBuoyancy, θ, qᵗ)
+    @inbounds begin
+        θi = θ[i, j, k]
+        qᵗi = qᵗ[i, j, k]
+        pᵣ = mb.reference_state.pressure[i, j, k]
+        ρᵣ = mb.reference_state.density[i, j, k]
+    end
     z = Oceananigans.Grids.znode(i, j, k, grid, c, c, c)
-    θi = @inbounds θ[i, j, k]
-    qᵗ = @inbounds q[i, j, k]
-    q = MoistureMassFractions(qᵗ, zero(qᵗ), zero(qᵗ))
-    𝒰 = PotentialTemperatureState(θi, q, z, mb.reference_constants)
+    p₀ = mb.reference_state.base_pressure
+    q = MoistureMassFractions(qᵗi, zero(qᵗi), zero(qᵗi))
+    𝒰 = PotentialTemperatureState(θi, q, z, p₀, pᵣ, ρᵣ)
     return temperature(𝒰, mb.thermodynamics)
 end
 
 struct TemperatureKernelFunction end
 
-@inline (::TemperatureKernelFunction)(i, j, k, grid, buoyancy, θ, q) =
-    temperature(i, j, k, grid, buoyancy, θ, q)
+@inline (::TemperatureKernelFunction)(i, j, k, grid, buoyancy, θ, qᵗ) =
+    temperature(i, j, k, grid, buoyancy, θ, qᵗ)
 
 function TemperatureField(model)
     func = TemperatureKernelFunction()
     grid = model.grid
     buoyancy = model.buoyancy.formulation
     θ = model.tracers.θ
-    q = model.tracers.q
-    op = KernelFunctionOperation{Center, Center, Center}(func, grid, buoyancy, θ, q)
+    qᵗ = model.tracers.qᵗ
+    op = KernelFunctionOperation{Center, Center, Center}(func, grid, buoyancy, θ, qᵗ)
     return Field(op)
 end
 
 # Saturation specific humidity
 @inline function saturation_specific_humidity(i, j, k, grid, mb::MoistAirBuoyancy, T, phase)
     z = Oceananigans.Grids.znode(i, j, k, grid, c, c, c)
-    Ti = @inbounds T[i, j, k]
-    ρ = reference_density(z, mb.reference_constants, mb.thermodynamics)
-    return saturation_specific_humidity(Ti, ρ, mb.thermodynamics, phase)
+    @inbounds begin
+        Ti = T[i, j, k]
+        ρᵣ = mb.reference_state.density[i, j, k]
+    end
+    return saturation_specific_humidity(Ti, ρᵣ, mb.thermodynamics, phase)
 end
 
 struct PhaseTransitionConstantsKernel{T, P}
@@ -280,11 +287,16 @@ end
 Adapt.adapt_structure(to, ck::CondensateKernel) = CondensateKernel(adapt(to, ck.temperature))
 
 @inline function condensate_specific_humidity(i, j, k, grid, mb::MoistAirBuoyancy, T, qᵗ)
+    @inbounds begin
+        Ti = T[i, j, k]
+        qᵗi = qᵗ[i, j, k]
+        pᵣ = mb.reference_state.pressure[i, j, k]
+        ρᵣ = mb.reference_state.density[i, j, k]
+    end
+    q = MoistureMassFractions(qᵗi, zero(qᵗi), zero(qᵗi))
     z = Oceananigans.Grids.znode(i, j, k, grid, c, c, c)
-    Ti = @inbounds T[i, j, k]
-    qᵗ = @inbounds qᵗ[i, j, k]
-    q = MoistureMassFractions(qᵗ, zero(qᵗ), zero(qᵗ))
-    𝒰 = PotentialTemperatureState(Ti, q, z, mb.reference_constants)
+    p₀ = mb.reference_state.base_pressure
+    𝒰 = PotentialTemperatureState(Ti, q, z, p₀, pᵣ, ρᵣ)
     qˡ = condensate_specific_humidity(Ti, 𝒰, mb.thermodynamics)
     return qˡ
 end

@@ -53,11 +53,8 @@ mutable struct AtmosphereModel{Frm, Arc, Tst, Grd, Clk, Thm, Den, Mom, Eng, Wat,
 end
 
 function default_formulation(grid, thermo)
-    FT = eltype(grid)
-    base_pressure = convert(FT, 101325)
-    potential_temperature = convert(FT, 288)
-    constants = ReferenceState(base_pressure, potential_temperature)
-    return AnelasticFormulation(grid, constants, thermo)
+    reference_state = ReferenceState(grid, thermo)
+    return AnelasticFormulation(reference_state)
 end
 
 """
