@@ -23,8 +23,11 @@ using Oceananigans.Operators: ∂zᶜᶜᶠ
 
 using Adapt: Adapt, adapt
 
-import Oceananigans.BuoyancyFormulations: AbstractBuoyancyFormulation, buoyancy_perturbationᶜᶜᶜ,
-                                          ∂z_b, required_tracers
+import Oceananigans.BuoyancyFormulations:
+    AbstractBuoyancyFormulation,
+    buoyancy_perturbationᶜᶜᶜ,
+    ∂z_b,
+    required_tracers
 
 import ..Thermodynamics: saturation_specific_humidity
 
