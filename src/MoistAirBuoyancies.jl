@@ -100,7 +100,7 @@ const c = Center()
     q = SpecificHumidities(qᵗ, zero(qᵗ), zero(qᵗ))
     𝒰 = PotentialTemperatureState(θ, q, z, mb.reference_constants)
 
-    # Perform Saturation adjustment
+    # Perform saturation adjustment
     T = temperature(𝒰, mb.thermodynamics)
 
     # Compute specific volume

@@ -281,16 +281,15 @@ ratio of condensed species. In most situations on Earth, ``qᶜ ≪ qᵛ``.
 
 ```@example thermo
 # Compute mixture properties for air with 0.01 specific humidity
-qᵛ = 0.01 # 1% water vapor by mass
-Rᵐ = mixture_gas_constant(qᵛ, thermo)
+qᵗ = 0.01 # 1% water vapor by mass
+q = SpecificHumidities(qᵗ, zero(qᵗ), zero(qᵗ))
+Rᵐ = mixture_gas_constant(q, thermo)
 ```
 
 We likewise define a mixture heat capacity via ``cᵖᵐ = qᵈ cᵖᵈ + qᵛ cᵖᵛ``,
 
-
 ```@example thermo
-q = 0.01 # 1% water vapor by mass
-cᵖᵐ = mixture_heat_capacity(qᵛ, thermo)
+cᵖᵐ = mixture_heat_capacity(q, thermo)
 ```
 
 ## Liquid-ice potential temperature
@@ -313,7 +312,7 @@ heats, the latent heat of a phase transition is linear in temperature.
 For example, for phase change from vapor to liquid,
 
 ```math
-ℒˡ(T) = ℒˡ(T=0) + \big ( \underbrace{cᵖᵛ - cᵖˡ}_{≡Δcˡ} \big ) T ,
+ℒˡ(T) = ℒˡ(T=0) + \big ( \underbrace{cᵖᵛ - cˡ}_{≡Δcˡ} \big ) T ,
 ```
 
 where ``ℒˡ(T=0)`` is the latent heat at absolute zero, ``T = 0 \; \mathrm{K}``.

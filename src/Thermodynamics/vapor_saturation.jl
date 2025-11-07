@@ -50,7 +50,7 @@ where ``pᵛ⁺`` is the [`saturation_vapor_pressure`](@ref), and ``Rᵛ`` is th
 constant for water vapor.
 """
 @inline function saturation_specific_humidity(T, ρ, thermo::ThermodynamicConstants, condensed_phase::CondensedPhase)
-    p★ = saturation_vapor_pressure(T, thermo, condensed_phase)
+    pᵛ⁺ = saturation_vapor_pressure(T, thermo, condensed_phase)
     Rᵛ = vapor_gas_constant(thermo)
-    return p★ / (ρ * Rᵛ * T)
+    return pᵛ⁺ / (ρ * Rᵛ * T)
 end
