@@ -6,8 +6,8 @@ using Oceananigans.Fields: fill_halo_regions!
 @testset "Anelastic pressure solver recovers analytic solution [$FT]" for FT in (Float32, Float64)
     grid = RectilinearGrid(FT; size=48, z=(0, 1), topology=(Flat, Flat, Bounded))
     thermodynamics = ThermodynamicConstants(FT)
-    reference_constants = ReferenceState(FT; base_pressure=101325.0, potential_temperature=288.0)
-    formulation = AnelasticFormulation(grid, reference_constants, thermodynamics)
+    reference_constants = ReferenceState(grid, thermodynamics, base_pressure=101325, potential_temperature=288)
+    formulation = AnelasticFormulation(reference_state)
 
     #=
     ρᵣ = 2 + cos(π z / 2)
@@ -28,8 +28,8 @@ using Oceananigans.Fields: fill_halo_regions!
     ⟹ ρw = z² - z³
     =#
 
-    set!(formulation.reference_density, z -> z)
-    fill_halo_regions!(formulation.reference_density)
+    set!(formulation.reference_state.density, z -> z)
+    fill_halo_regions!(formulation.reference_state.density)
     model = AtmosphereModel(grid; thermodynamics, formulation)
     set!(model, ρw = z -> z^2 - z^3)
 
