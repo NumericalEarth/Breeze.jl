@@ -164,7 +164,7 @@ Solution of ``r(T) = 0`` is found via the [secant method](https://en.wikipedia.o
 
     # Generate guess for unsaturated conditions
     Π = exner_function(state, thermo)
-    T₁ = Π * state.potential_temperature
+    T₁ = Π * θ
     qˡ₁ = condensate_specific_humidity(T₁, state, thermo)
     qˡ₁ <= 0 && return T₁
 
@@ -179,7 +179,7 @@ Solution of ``r(T) = 0`` is found via the [secant method](https://en.wikipedia.o
 
     # Saturation adjustment
     R = sqrt(max(T₂, T₁))
-    ϵ = convert(FT, 1e-9)
+    ϵ = convert(FT, 1e-6)
     δ = ϵ * R
     iter = 0
 

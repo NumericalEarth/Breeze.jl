@@ -34,28 +34,27 @@ using Breeze
 
 Nx = Nz = 64
 Lz = 4 * 1024
-grid = RectilinearGrid(CPU(), size=(Nx, Nz), x=(0, 2Lz), z=(0, Lz), topology=(Periodic, Flat, Bounded))
+grid = RectilinearGrid(size=(Nx, Nz), x=(0, 2Lz), z=(0, Lz), topology=(Periodic, Flat, Bounded))
 
-reference_state = Breeze.Thermodynamics.ReferenceState(grid, base_pressure=1e5, reference_potential_temperature=288)
-buoyancy = Breeze.MoistAirBuoyancy(; reference_state)
+p₀, θᵣ = 1e5, 288 # reference state parameters
+buoyancy = Breeze.MoistAirBuoyancy(grid, base_pressure=p₀, reference_potential_temperature=θᵣ)
 
-Q₀ = 1000 # heat flux in W / m²
-ρ₀ = Breeze.MoistAirBuoyancies.base_density(buoyancy) # air density at z=0
+thermo = buoyancy.thermodynamics
+ρ₀ = Breeze.Thermodynamics.base_density(p₀, θᵣ, thermo)
 cₚ = buoyancy.thermodynamics.dry_air.heat_capacity
+Q₀ = 1000 # heat flux in W / m²
 θ_bcs = FieldBoundaryConditions(bottom=FluxBoundaryCondition(Q₀ / (ρ₀ * cₚ)))
-q_bcs = FieldBoundaryConditions(bottom=FluxBoundaryCondition(1e-2))
+qᵗ_bcs = FieldBoundaryConditions(bottom=FluxBoundaryCondition(1e-2))
 
 advection = WENO()
-tracers = (:θ, :q)
 model = NonhydrostaticModel(; grid, advection, buoyancy,
-                            tracers = (:θ, :q),
-                            boundary_conditions = (θ=θ_bcs, q=q_bcs))
+                            tracers = (:θ, :qᵗ),
+                            boundary_conditions = (θ=θ_bcs, qᵗ=qᵗ_bcs))
 
 Δθ = 2 # ᵒK
-Tₛ = reference_state.potential_temperature # K
+Tₛ = buoyancy.reference_state.potential_temperature # K
 θᵢ(x, z) = Tₛ + Δθ * z / grid.Lz + 1e-2 * Δθ * randn()
-qᵢ(x, z) = 0 # 1e-2 + 1e-5 * rand()
-set!(model, θ=θᵢ, q=qᵢ)
+set!(model, θ=θᵢ)
 
 simulation = Simulation(model, Δt=10, stop_time=2hours)
 conjure_time_step_wizard!(simulation, cfl=0.7)

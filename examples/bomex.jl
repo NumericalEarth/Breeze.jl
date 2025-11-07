@@ -142,14 +142,8 @@ set!(Fθ_field, z -> dTdt_bomex(1, z))
 θ_radiation_forcing = Forcing(Fθ_field)
 θ_forcing = (θ_radiation_forcing, θ_subsidence_forcing)
 
-# Note that most of the models that participated in Siebesma et al 2003
-# use 2nd order advection together with either TKE or Smag-Lilly closure.
-advection = WENO(order=9)
-closure = nothing
-# advection = Centered(order=2)
-# closure = SmagorinskyLilly()
-
-model = NonhydrostaticModel(; grid, advection, buoyancy, coriolis, closure,
+model = NonhydrostaticModel(; grid, buoyancy, coriolis,
+                            advection = WENO(order=5), 
                             tracers = (:θ, :qᵗ),
                             forcing = (; q=q_forcing, u=u_forcing, v=v_forcing, θ=θ_forcing),
                             boundary_conditions = (θ=θ_bcs, qᵗ=q_bcs, u=u_bcs, v=v_bcs))
@@ -295,14 +289,14 @@ using CairoMakie
 if get(ENV, "CI", "false") == "false"
     θt  = FieldTimeSeries(averages_filename, "θ")
     Tt  = FieldTimeSeries(averages_filename, "T")
-    qt  = FieldTimeSeries(averages_filename, "q")
+    qᵗt  = FieldTimeSeries(averages_filename, "qᵗ")
     qˡt = FieldTimeSeries(averages_filename, "qˡ")
-    times = qt.times
+    times = qᵗt.times
     Nt = length(θt)
 
     fig = Figure(size=(1200, 800), fontsize=12)
     axθ  = Axis(fig[1, 1], xlabel="θ (ᵒK)", ylabel="z (m)")
-    axq  = Axis(fig[1, 2], xlabel="q (kg/kg)", ylabel="z (m)")
+    axqᵗ = Axis(fig[1, 2], xlabel="qᵗ (kg/kg)", ylabel="z (m)")
     axT  = Axis(fig[2, 1], xlabel="T (ᵒK)", ylabel="z (m)")
     axqˡ = Axis(fig[2, 2], xlabel="qˡ (kg/kg)", ylabel="z (m)")
 
@@ -311,8 +305,8 @@ if get(ENV, "CI", "false") == "false"
 
     n = slider.value #Observable(length(θt))
     θn  = @lift interior(θt[$n], 1, 1, :)
-    qn  = @lift interior(qt[$n], 1, 1, :)
     Tn  = @lift interior(Tt[$n], 1, 1, :)
+    qᵗn = @lift interior(qᵗt[$n], 1, 1, :)
     qˡn = @lift interior(qˡt[$n], 1, 1, :)
     z = znodes(θt)
     title = @lift "t = $(prettytime(times[$n]))"
@@ -320,8 +314,8 @@ if get(ENV, "CI", "false") == "false"
     fig[0, :] = Label(fig, title, fontsize=22, tellwidth=false)
 
     hmθ  = lines!(axθ, θn, z)
-    hmq  = lines!(axq, qn, z)
     hmT  = lines!(axT, Tn, z)
+    hmqᵗ = lines!(axqᵗ, qᵗn, z)
     hmqˡ = lines!(axqˡ, qˡn, z)
     xlims!(axqˡ, -1e-4, 1.5e-3)
 

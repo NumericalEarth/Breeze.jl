@@ -32,14 +32,15 @@ The saturation specific humidity is then
 
 ```@example microphysics
 using Breeze
-using Breeze.MoistAirBuoyancies: saturation_specific_humidity, HeightReferenceThermodynamicState
+using Breeze.Thermodynamics: saturation_specific_humidity
 
 thermo = ThermodynamicConstants()
-ref = ReferenceState(base_pressure=101325, potential_temperature=288)
 
-z = 0.0    # [m] height
-θ = 290.0  # [ᵒK] potential temperature
-qᵛ⁺₀ = saturation_specific_humidity(θ, z, ref, thermo, thermo.liquid)
+p₀ = 101325.0
+θ₀ = 288.0
+Rᵈ = Breeze.Thermodynamics.dry_air_gas_constant(thermo)
+ρ₀ = p₀ / (Rᵈ * θ₀)
+qᵛ⁺₀ = saturation_specific_humidity(θ₀, ρ₀, thermo, thermo.liquid)
 ```
 
 Recall that the specific humidity is unitless, or has units "``kg / kg``": kg of water vapor
@@ -49,17 +50,20 @@ given a total specific humidity slightly above saturation:
 
 ```@example microphysics
 using Breeze.MoistAirBuoyancies: temperature
+using Breeze.Thermodynamics: PotentialTemperatureState, MoistureMassFractions
 
+z = 0.0
 qᵗ = 0.012   # [kg kg⁻¹] total specific humidity
-U = HeightReferenceThermodynamicState(θ, qᵗ, z)
-T = temperature(U, ref, thermo)
+q = MoistureMassFractions(qᵗ, zero(qᵗ), zero(qᵗ))
+U = PotentialTemperatureState(θ₀, q, z, p₀, p₀, ρ₀)
+T = temperature(U, thermo)
 ```
 
 Finally, we recover the amount of liquid condensate by subtracting the saturation
 specific humidity from the total:
 
 ```@example microphysics
-qᵛ⁺ = saturation_specific_humidity(T, z, ref, thermo, thermo.liquid)
+qᵛ⁺ = saturation_specific_humidity(T, ρ₀, thermo, thermo.liquid)
 qˡ = qᵗ - qᵛ⁺
 ```
 
@@ -70,8 +74,9 @@ when the potential temperature is constant:
 
 ```@example microphysics
 qᵗ = 0:1e-4:0.04 # [kg kg⁻¹] total specific humidity
-U = [HeightReferenceThermodynamicState(θ, qᵗⁱ, z) for qᵗⁱ in qᵗ]
-T = [temperature(Uⁱ, ref, thermo) for Uⁱ in U]
+q = [MoistureMassFractions(qᵗⁱ, 0.0, 0.0) for qᵗⁱ in qᵗ]
+U = [PotentialTemperatureState(θ₀, qⁱ, z, p₀, p₀, ρ₀) for qⁱ in q]
+T = [temperature(Uⁱ, thermo) for Uⁱ in U]
 
 ## Compare with a simple piecewise linear model
 ℒᵥ₀ = thermo.liquid.reference_latent_heat
@@ -94,13 +99,32 @@ For a third example, we consider a state with constant potential temperature and
 but at varying heights:
 
 ```@example microphysics
-qᵗ = 0.005
-z = 0:100:10e3
+grid = RectilinearGrid(size=100, z=(0, 1e4), topology=(Flat, Flat, Bounded))
+thermo = ThermodynamicConstants()
+reference_state = ReferenceState(grid, thermo)
 
-T = [temperature(HeightReferenceThermodynamicState(θ, qᵗ, zᵏ), ref, thermo) for zᵏ in z]
-qᵛ⁺ = [saturation_specific_humidity(T[k], z[k], ref, thermo, thermo.liquid) for k = 1:length(z)]
-qˡ = [max(0, qᵗ - qᵛ⁺ᵏ) for qᵛ⁺ᵏ in qᵛ⁺]
-rh = [100 * min(qᵗ, qᵛ⁺ᵏ) / qᵛ⁺ᵏ for qᵛ⁺ᵏ in qᵛ⁺]
+θᵣ = reference_state.potential_temperature
+p₀ = reference_state.base_pressure
+qᵗ = 0.005
+q = MoistureMassFractions(qᵗ, 0.0, 0.0)
+
+z = znodes(grid, Center())
+T = zeros(grid.Nz)
+qᵛ⁺ = zeros(grid.Nz)
+qˡ = zeros(grid.Nz)
+rh = zeros(grid.Nz)
+
+for k = 1:grid.Nz
+    ρᵣ = reference_state.density[1, 1, k]
+    pᵣ = reference_state.pressure[1, 1, k]
+
+    U = PotentialTemperatureState(θᵣ, q, z[k], p₀, pᵣ, ρᵣ)
+    T[k] = temperature(U, thermo)
+
+    qᵛ⁺[k] = saturation_specific_humidity(T[k], ρᵣ, thermo, thermo.liquid)
+    qˡ[k] = max(0, qᵗ - qᵛ⁺[k])
+    rh[k] = 100 * min(qᵗ, qᵛ⁺[k]) / qᵛ⁺[k]
+end
 
 cᵖᵈ = thermo.dry_air.heat_capacity
 g = thermo.gravitational_acceleration
