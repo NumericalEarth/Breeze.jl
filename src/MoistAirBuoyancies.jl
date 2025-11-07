@@ -1,6 +1,6 @@
 module MoistAirBuoyancies
 
-using ..Thermodynamics: PotentialTemperatureState, SpecificMoistureContent, exner_function, reference_density
+using ..Thermodynamics: PotentialTemperatureState, MoistureMassFractions, exner_function, reference_density
 
 export MoistAirBuoyancy
 export UnsaturatedMoistAirBuoyancy
@@ -97,7 +97,7 @@ const c = Center()
     z = Oceananigans.Grids.znode(i, j, k, grid, c, c, c)
     θ = @inbounds tracers.θ[i, j, k]
     qᵗ = @inbounds tracers.q[i, j, k]
-    q = SpecificMoistureContent(qᵗ, zero(qᵗ), zero(qᵗ))
+    q = MoistureMassFractions(qᵗ, zero(qᵗ), zero(qᵗ))
     𝒰 = PotentialTemperatureState(θ, q, z, mb.reference_constants)
 
     # Perform saturation adjustment
@@ -165,7 +165,7 @@ Solution of ``r(T) = 0`` is found via the [secant method](https://en.wikipedia.o
     r₁ = saturation_adjustment_residual(T₁, Π, qˡ₁, state, thermo)
 
     ℒᵛ = thermo.liquid.latent_heat
-    cᵖᵐ = mixture_heat_capacity(state.moisture_content, thermo)
+    cᵖᵐ = mixture_heat_capacity(state.moisture_fractions, thermo)
     T₂ = T₁ + ℒᵛ * qˡ₁ / cᵖᵐ
     qˡ₂ = condensate_specific_humidity(T₂, state, thermo)
     r₂ = saturation_adjustment_residual(T₂, Π, qˡ₂, state, thermo)
@@ -196,7 +196,7 @@ end
 
 @inline function saturation_adjustment_residual(T, Π, qˡ, state::PotentialTemperatureState, thermo)
     ℒᵛ₀ = thermo.liquid.latent_heat
-    cᵖᵐ = mixture_heat_capacity(state.moisture_content, thermo)
+    cᵖᵐ = mixture_heat_capacity(state.moisture_fractions, thermo)
     θ = state.potential_temperature
     return T^2 - ℒᵛ₀ * qˡ / cᵖᵐ - Π * θ * T
 end
@@ -212,7 +212,7 @@ const c = Center()
     z = Oceananigans.Grids.znode(i, j, k, grid, c, c, c)
     θi = @inbounds θ[i, j, k]
     qᵗ = @inbounds q[i, j, k]
-    q = SpecificMoistureContent(qᵗ, zero(qᵗ), zero(qᵗ))
+    q = MoistureMassFractions(qᵗ, zero(qᵗ), zero(qᵗ))
     𝒰 = PotentialTemperatureState(θi, q, z, mb.reference_constants)
     return temperature(𝒰, mb.thermodynamics)
 end
@@ -275,7 +275,7 @@ Adapt.adapt_structure(to, ck::CondensateKernel) = CondensateKernel(adapt(to, ck.
     z = Oceananigans.Grids.znode(i, j, k, grid, c, c, c)
     Ti = @inbounds T[i, j, k]
     qᵗ = @inbounds q[i, j, k]
-    q = SpecificMoistureContent(qᵗ, zero(qᵗ), zero(qᵗ))
+    q = MoistureMassFractions(qᵗ, zero(qᵗ), zero(qᵗ))
     𝒰 = PotentialTemperatureState(Ti, q, z, mb.reference_constants)
     qˡ = condensate_specific_humidity(Ti, 𝒰, mb.thermodynamics)
     return qˡ

@@ -282,7 +282,7 @@ ratio of condensed species. In most situations on Earth, ``qᶜ ≪ qᵛ``.
 ```@example thermo
 # Compute mixture properties for air with 0.01 specific humidity
 qᵗ = 0.01 # 1% water vapor by mass
-q = SpecificMoistureContent(qᵗ, zero(qᵗ), zero(qᵗ))
+q = MoistureMassFractions(qᵗ, zero(qᵗ), zero(qᵗ))
 Rᵐ = mixture_gas_constant(q, thermo)
 ```
 
