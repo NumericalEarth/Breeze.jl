@@ -6,7 +6,7 @@ using Oceananigans.Fields: fill_halo_regions!
 @testset "Anelastic pressure solver recovers analytic solution [$FT]" for FT in (Float32, Float64)
     grid = RectilinearGrid(FT; size=48, z=(0, 1), topology=(Flat, Flat, Bounded))
     thermodynamics = ThermodynamicConstants(FT)
-    reference_constants = ReferenceState(grid, thermodynamics, base_pressure=101325, potential_temperature=288)
+    reference_state = ReferenceState(grid, thermodynamics, base_pressure=101325, potential_temperature=288)
     formulation = AnelasticFormulation(reference_state)
 
     #=

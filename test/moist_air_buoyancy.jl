@@ -7,12 +7,12 @@ using Test
     buoyancy = MoistAirBuoyancy(grid; reference_potential_temperature=300)
     model = NonhydrostaticModel(; grid, buoyancy, tracers = (:θ, :qᵗ))
 
-    θ₀ = reference_constants.potential_temperature
+    θ₀ = buoyancy.reference_state.potential_temperature
     Δθ = 2
     Lz = grid.Lz
 
     θᵢ(x, y, z) = θ₀ + Δθ * z / Lz
-    set!(model; θ = θᵢ, q = 0)
+    set!(model; θ = θᵢ, qᵗ = 0)
 
     # Can time-step
     success = try
