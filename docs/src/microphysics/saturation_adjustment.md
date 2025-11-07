@@ -74,7 +74,7 @@ U = [HeightReferenceThermodynamicState(θ, qᵗⁱ, z) for qᵗⁱ in qᵗ]
 T = [temperature(Uⁱ, ref, thermo) for Uⁱ in U]
 
 ## Compare with a simple piecewise linear model
-ℒᵥ₀ = thermo.liquid.latent_heat
+ℒᵥ₀ = thermo.liquid.reference_latent_heat
 cᵖᵈ = thermo.dry_air.heat_capacity
 T̃ = [290 + ℒᵥ₀ / cᵖᵈ * max(0, qᵗⁱ - qᵛ⁺₀) for qᵗⁱ in qᵗ]
 

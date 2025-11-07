@@ -164,7 +164,7 @@ Solution of ``r(T) = 0`` is found via the [secant method](https://en.wikipedia.o
     # If we made it this far, we have condensation
     r₁ = saturation_adjustment_residual(T₁, Π, qˡ₁, state, thermo)
 
-    ℒᵛ = thermo.liquid.latent_heat
+    ℒᵛ = thermo.liquid.reference_latent_heat
     cᵖᵐ = mixture_heat_capacity(state.moisture_fractions, thermo)
     T₂ = T₁ + ℒᵛ * qˡ₁ / cᵖᵐ
     qˡ₂ = condensate_specific_humidity(T₂, state, thermo)
@@ -195,7 +195,7 @@ Solution of ``r(T) = 0`` is found via the [secant method](https://en.wikipedia.o
 end
 
 @inline function saturation_adjustment_residual(T, Π, qˡ, state::PotentialTemperatureState, thermo)
-    ℒᵛ₀ = thermo.liquid.latent_heat
+    ℒᵛ₀ = thermo.liquid.reference_latent_heat
     cᵖᵐ = mixture_heat_capacity(state.moisture_fractions, thermo)
     θ = state.potential_temperature
     return T^2 - ℒᵛ₀ * qˡ / cᵖᵐ - Π * θ * T

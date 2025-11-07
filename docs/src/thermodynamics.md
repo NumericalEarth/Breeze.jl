@@ -326,13 +326,13 @@ Consider parameters for liquid water,
 
 ```@example thermo
 using Breeze.Thermodynamics: CondensedPhase
-liquid_water = CondensedPhase(latent_heat=2500800, heat_capacity=4181)
+liquid_water = CondensedPhase(reference_latent_heat=2500800, heat_capacity=4181)
 ```
 
 or water ice,
 
 ```@example thermo
-water_ice = CondensedPhase(latent_heat=2834000, heat_capacity=2108)
+water_ice = CondensedPhase(reference_latent_heat=2834000, heat_capacity=2108)
 ```
 
 The saturation vapor pressure is

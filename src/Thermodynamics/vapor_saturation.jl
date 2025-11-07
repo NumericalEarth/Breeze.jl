@@ -21,7 +21,7 @@ Note that latent heat ``ℒ₀`` is at the reference temperature ``T₀``
 and that ``ℒ(T=0) = ℒ₀ - Δcˡ T₀``.
 """
 @inline function saturation_vapor_pressure(T, thermo, phase::CondensedPhase)
-    ℒᵣ = phase.latent_heat # at thermo.energy_reference_temperature
+    ℒᵣ = phase.reference_latent_heat # at thermo.energy_reference_temperature
     Tᵣ = thermo.energy_reference_temperature
 
     Tᵗʳ = thermo.triple_point_temperature

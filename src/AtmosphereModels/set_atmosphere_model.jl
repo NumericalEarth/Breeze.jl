@@ -114,7 +114,7 @@ end
     Π = exner_function(𝒰, thermo)
     T = Π * θ
 
-    ℒ₀ = thermo.liquid.latent_heat
+    ℒ₀ = thermo.liquid.reference_latent_heat
     g = thermo.gravitational_acceleration
     cᵖᵐ = mixture_heat_capacity(q, thermo)
     @inbounds moist_static_energy[i, j, k] = ρʳ * (cᵖᵐ * T + g * z + qᵗ * ℒ₀)

@@ -22,7 +22,7 @@ end
     r₁ = saturation_adjustment_residual(T₁, qˡ₁, state, thermo)
 
     q = state.specific_humidity
-    ℒ = thermo.liquid.latent_heat
+    ℒ = thermo.liquid.reference_latent_heat
     cᵖᵐ = mixture_heat_capacity(q, thermo)
     T₂ = (T₁ + sqrt(T₁^2 + 4 * ℒ * qˡ₁ / cᵖᵐ)) / 2
     qˡ₂ = condensate_specific_humidity(T₂, state, thermo)
@@ -53,7 +53,7 @@ end
 end
 
 @inline function saturation_adjustment_residual(T, qˡ, state, thermo)
-    ℒᵛ = thermo.liquid.latent_heat
+    ℒᵛ = thermo.liquid.reference_latent_heat
     q = state.specific_humidity
     θ = state.potential_temperature
     Π = state.exner_function

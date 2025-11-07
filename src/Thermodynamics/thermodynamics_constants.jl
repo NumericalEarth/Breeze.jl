@@ -48,48 +48,48 @@ function IdealGas(FT = Oceananigans.defaults.FloatType;
 end
 
 struct CondensedPhase{FT}
-    latent_heat :: FT
+    reference_latent_heat :: FT
     heat_capacity :: FT
 end
 
 function Base.summary(ph::CondensedPhase{FT}) where FT
     return string("CondensedPhase{", FT, "}(",
-                  "latent_heat=", prettysummary(ph.latent_heat), ", ",
+                  "reference_latent_heat=", prettysummary(ph.reference_latent_heat), ", ",
                   "heat_capacity=", prettysummary(ph.heat_capacity), ")")
 end
 
 Base.show(io::IO, ph::CondensedPhase) = print(io, summary(ph))
 
 Adapt.adapt_structure(to, pt::CondensedPhase) =
-    CondensedPhase(adapt(to, pt.latent_heat),
+    CondensedPhase(adapt(to, pt.reference_latent_heat),
                    adapt(to, pt.heat_capacity))
 
 """
-    CondensedPhase(FT = Oceananigans.defaults.FloatType; latent_heat, heat_capacity)
+    CondensedPhase(FT = Oceananigans.defaults.FloatType; reference_latent_heat, heat_capacity)
 
 Returns `CondensedPhase` with specified parameters converted to `FT`.
 
 Two examples of `CondensedPhase` are liquid and solid.
 When matter is converted from vapor to liquid, water molecules in the
 gas phase cluster together and slow down to form liquid with `heat_capacity`,
-The lost of molecular kinetic energy is called the `latent_heat`.
+The lost of molecular kinetic energy is called the `reference_latent_heat`.
 
 Likewise, during deposition, water molecules in the gas phase cluster into ice crystals.
 
 Arguments
 =========
 - `FT`: Float type to use (defaults to Oceananigans.defaults.FloatType)
-- `latent_heat`: Difference between the internal energy of the gaseous phase at
+- `reference_latent_heat`: Difference between the internal energy of the gaseous phase at
   the `energy_reference_temperature`.
 - `heat_capacity`: Heat capacity of the phase of matter.
 """
-function CondensedPhase(FT = Oceananigans.defaults.FloatType; latent_heat, heat_capacity)
-    return CondensedPhase{FT}(convert(FT, latent_heat),
+function CondensedPhase(FT = Oceananigans.defaults.FloatType; reference_latent_heat, heat_capacity)
+    return CondensedPhase{FT}(convert(FT, reference_latent_heat),
                               convert(FT, heat_capacity))
 end
 
-liquid_water(FT) = CondensedPhase(FT; latent_heat=2500800, heat_capacity=4181)
-water_ice(FT)    = CondensedPhase(FT; latent_heat=2834000, heat_capacity=2108)
+liquid_water(FT) = CondensedPhase(FT; reference_latent_heat=2500800, heat_capacity=4181)
+water_ice(FT)    = CondensedPhase(FT; reference_latent_heat=2834000, heat_capacity=2108)
 
 struct ThermodynamicConstants{FT, C, S}
     molar_gas_constant :: FT
