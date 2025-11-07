@@ -51,7 +51,7 @@ jobs:
       - uses: julia-actions/julia-docdeploy@v1
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          DOCUMENTER_KEY: ${{ secrets.DOCUMENTER_KEY }}
+          DOCUMENTER_KEY: ${{ secrets.BREEZEDOCUMENTATION_DOCUMENTER_KEY }}
       - name: Save Julia depot cache on cancel or failure
         id: julia-cache-save
         if: cancelled() || failure()
@@ -60,3 +60,8 @@ jobs:
           path: |
             ${{ steps.julia-cache.outputs.cache-paths }}
           key: ${{ steps.julia-cache.outputs.cache-key }}
+      - uses: actions/upload-artifact@v4
+        with:
+          name: documentation-build
+          path: docs/build
+          retention-days: 7
