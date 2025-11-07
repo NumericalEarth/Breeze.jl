@@ -5,7 +5,6 @@ struct PotentialTemperatureState{FT, H, R}
     reference_state :: R
 end
 
-
 @inline function exner_function(𝒰::PotentialTemperatureState, thermo::ThermodynamicConstants)
     q = 𝒰.humidities
     z = 𝒰.height
@@ -17,17 +16,31 @@ end
     return (pᵣ / p₀)^(Rᵐ / cᵖᵐ)
 end
 
-@inline function reference_pressure(z, ref::ReferenceStateConstants, thermo)
-    cᵖᵈ = thermo.dry_air.heat_capacity
-    Rᵈ = dry_air_gas_constant(thermo)
-    g = thermo.gravitational_acceleration
-    θᵣ = ref.reference_potential_temperature
-    p₀ = ref.base_pressure
-    return p₀ * (1 - g * z / (cᵖᵈ * θᵣ))^(Rᵈ / cᵖᵈ)
-end
-
 @inline total_specific_humidity(state::PotentialTemperatureState) =
     total_specific_humidity(state.humidities)
+
+@inline function specific_volume(state::PotentialTemperatureState, ref, thermo)
+    pᵣ = reference_pressure(state.height, ref, thermo)
+    Rᵐ = mixture_gas_constant(state.humidities, thermo)
+    T = state.potential_temperature
+    return Rᵐ * T / pᵣ
+end
+
+@inline function saturation_specific_humidity(T,
+                                              state::PotentialTemperatureState,
+                                              thermo::ThermodynamicConstants,
+                                              phase::CondensedPhase)
+    z = state.height
+    ref = state.reference_state
+    ρ = reference_density(z, ref, thermo)
+    return saturation_specific_humidity(T, ρ, thermo, phase)
+end
+
+function condensate_specific_humidity(T, state::PotentialTemperatureState, thermo)
+    qᵗ = total_specific_humidity(state)
+    qᵛ⁺ = saturation_specific_humidity(T, state, thermo, thermo.liquid)
+    return max(0, qᵗ - qᵛ⁺)
+end
 
 #=
 @inline function temperature(𝒰::PotentialTemperatureState, thermo::ThermodynamicConstants)

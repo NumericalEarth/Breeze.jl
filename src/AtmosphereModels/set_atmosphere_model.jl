@@ -3,6 +3,11 @@ using Oceananigans.TimeSteppers: update_state!
 using Oceananigans.BoundaryConditions: fill_halo_regions!
 using Oceananigans.TimeSteppers: compute_pressure_correction!, make_pressure_correction!, update_state!
 
+using ..Thermodynamics:
+    PotentialTemperatureState,
+    exner_function,
+    mixture_heat_capacity
+
 import Oceananigans.Fields: set!
 
 const c = Center()

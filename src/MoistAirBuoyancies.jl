@@ -1,5 +1,7 @@
 module MoistAirBuoyancies
 
+using ..Thermodynamics: PotentialTemperatureState, SpecificHumidities, exner_function, reference_density
+
 export MoistAirBuoyancy
 export UnsaturatedMoistAirBuoyancy
 export TemperatureField
@@ -12,17 +14,15 @@ using Oceananigans.Operators: ∂zᶜᶜᶠ
 
 using Adapt: Adapt, adapt
 
-import Oceananigans.BuoyancyFormulations: AbstractBuoyancyFormulation,
-                                          buoyancy_perturbationᶜᶜᶜ,
-                                          ∂z_b,
-                                          required_tracers
+import Oceananigans.BuoyancyFormulations: AbstractBuoyancyFormulation, buoyancy_perturbationᶜᶜᶜ,
+                                          ∂z_b, required_tracers
 
 using ..Thermodynamics:
     ThermodynamicConstants,
     ReferenceStateConstants,
+    reference_specific_volume,
     mixture_heat_capacity,
     mixture_gas_constant,
-    reference_specific_volume,
     reference_pressure
 
 import ..Thermodynamics:
@@ -86,8 +86,6 @@ function Base.show(io::IO, b::MoistAirBuoyancy)
 end
 
 required_tracers(::MoistAirBuoyancy) = (:θ, :q)
-reference_density(z, mb::MoistAirBuoyancy) = reference_density(z, mb.reference_constants, mb.thermodynamics)
-base_density(mb::MoistAirBuoyancy) = base_density(mb.reference_constants, mb.thermodynamics)
 
 #####
 #####
@@ -98,11 +96,17 @@ const c = Center()
 @inline function buoyancy_perturbationᶜᶜᶜ(i, j, k, grid, mb::MoistAirBuoyancy, tracers)
     z = Oceananigans.Grids.znode(i, j, k, grid, c, c, c)
     θ = @inbounds tracers.θ[i, j, k]
-    q = @inbounds tracers.q[i, j, k]
-    𝒰 = HeightReferenceThermodynamicState(θ, q, z)
+    qᵗ = @inbounds tracers.q[i, j, k]
+    q = SpecificHumidities(qᵗ, zero(qᵗ), zero(qᵗ))
+    𝒰 = PotentialTemperatureState(θ, q, z, mb.reference_constants)
 
     # Perform Saturation adjustment
-    α = specific_volume(𝒰, mb.reference_constants, mb.thermodynamics)
+    T = temperature(𝒰, mb.thermodynamics)
+
+    # Compute specific volume
+    pᵣ = reference_pressure(z, mb.reference_constants, mb.thermodynamics)
+    Rᵐ = mixture_gas_constant(q, mb.thermodynamics)
+    α = Rᵐ * T / pᵣ
 
     # Compute reference specific volume
     αᵣ = reference_specific_volume(z, mb.reference_constants, mb.thermodynamics)
@@ -118,18 +122,99 @@ end
 @inline ∂z_b(i, j, k, grid, mb::MoistAirBuoyancy, tracers) =
     ∂zᶜᶜᶠ(i, j, k, grid, buoyancy_perturbationᶜᶜᶜ, mb, tracers)
 
+#####
+##### Saturation adjustment
+#####
+
+# Solve
+# θ = T/Π ( 1 - ℒ qˡ / (cᵖᵐ T))
+# for temperature T with qˡ = max(0, q - qᵛ⁺).
+# root of: f(T) = T - Π θ - ℒ qˡ / cᵖᵐ
+
+"""
+    temperature(state::PotentialTemperatureState, ref, thermo)
+
+Return the temperature ``T`` that satisfies saturation adjustment, that is, the
+temperature for which
+
+```math
+θ = [1 - ℒ qˡ / (cᵖᵐ T)] T / Π ,
+```
+
+with ``qˡ = \\max(0, qᵗ - qᵛ⁺)`` the condensate specific humidity, where ``qᵗ`` is the
+total specific humidity, ``qᵛ⁺`` is the saturation specific humidity.
+
+The saturation adjustment temperature is obtained by solving ``r(T)``, where
+```math
+r(T) ≡ T - θ Π - ℒ qˡ / (cᵖᵐ T) .
+```
+
+Solution of ``r(T) = 0`` is found via the [secant method](https://en.wikipedia.org/wiki/Secant_method).
+"""
+@inline function temperature(state::PotentialTemperatureState{FT}, thermo) where FT
+    θ = state.potential_temperature
+    θ == 0 && return zero(FT)
+
+    # Generate guess for unsaturated conditions
+    Π = exner_function(state, thermo)
+    T₁ = Π * state.potential_temperature
+    qˡ₁ = condensate_specific_humidity(T₁, state, thermo)
+    qˡ₁ <= 0 && return T₁
+
+    # If we made it this far, we have condensation
+    r₁ = saturation_adjustment_residual(T₁, Π, qˡ₁, state, thermo)
+
+    ℒᵛ = thermo.liquid.latent_heat
+    cᵖᵐ = mixture_heat_capacity(state.humidities, thermo)
+    T₂ = T₁ + ℒᵛ * qˡ₁ / cᵖᵐ
+    qˡ₂ = condensate_specific_humidity(T₂, state, thermo)
+    r₂ = saturation_adjustment_residual(T₂, Π, qˡ₂, state, thermo)
+
+    # Saturation adjustment
+    R = sqrt(max(T₂, T₁))
+    ϵ = convert(FT, 1e-9)
+    δ = ϵ * R
+    iter = 0
+
+    while abs(r₂ - r₁) > δ
+        # Compute slope
+        ΔTΔr = (T₂ - T₁) / (r₂ - r₁)
+
+        # Store previous values
+        r₁ = r₂
+        T₁ = T₂
+
+        # Update
+        T₂ -= r₂ * ΔTΔr
+        qˡ₂ = condensate_specific_humidity(T₂, state, thermo)
+        r₂ = saturation_adjustment_residual(T₂, Π, qˡ₂, state, thermo)
+        iter += 1
+    end
+
+    return T₂
+end
+
+@inline function saturation_adjustment_residual(T, Π, qˡ, state::PotentialTemperatureState, thermo)
+    ℒᵛ₀ = thermo.liquid.latent_heat
+    cᵖᵐ = mixture_heat_capacity(state.humidities, thermo)
+    θ = state.potential_temperature
+    return T^2 - ℒᵛ₀ * qˡ / cᵖᵐ - Π * θ * T
+end
+
+#####
+##### Diagnostics
+#####
+
 const c = Center()
 
-#####
-##### Temperature
-#####
-
-function temperature(i, j, k, grid::AbstractGrid, mb::MoistAirBuoyancy, θ, q)
+# Temperature
+@inline function temperature(i, j, k, grid::AbstractGrid, mb::MoistAirBuoyancy, θ, q)
     z = Oceananigans.Grids.znode(i, j, k, grid, c, c, c)
     θi = @inbounds θ[i, j, k]
-    qi = @inbounds q[i, j, k]
-    𝒰 = HeightReferenceThermodynamicState(θi, qi, z)
-    return temperature(𝒰, mb.reference_constants, mb.thermodynamics)
+    qᵗ = @inbounds q[i, j, k]
+    q = SpecificHumidities(qᵗ, zero(qᵗ), zero(qᵗ))
+    𝒰 = PotentialTemperatureState(θi, q, z, mb.reference_constants)
+    return temperature(𝒰, mb.thermodynamics)
 end
 
 struct TemperatureKernelFunction end
@@ -147,14 +232,12 @@ function TemperatureField(model)
     return Field(op)
 end
 
-#####
-##### Saturation specific humidity
-#####
-
-@inline function saturation_specific_humidity(i, j, k, grid, mb::MoistAirBuoyancy, T, condensed_phase)
+# Saturation specific humidity
+@inline function saturation_specific_humidity(i, j, k, grid, mb::MoistAirBuoyancy, T, phase)
     z = Oceananigans.Grids.znode(i, j, k, grid, c, c, c)
     Ti = @inbounds T[i, j, k]
-    return saturation_specific_humidity(Ti, z, mb.reference_constants, mb.thermodynamics, condensed_phase)
+    ρ = reference_density(z, mb.reference_constants, mb.thermodynamics)
+    return saturation_specific_humidity(Ti, ρ, mb.thermodynamics, phase)
 end
 
 struct PhaseTransitionConstantsKernel{T, P}
@@ -181,10 +264,7 @@ function SaturationField(model,
     return Field(op)
 end
 
-#####
-##### Condensate
-#####
-
+# Condensate
 struct CondensateKernel{T}
     temperature :: T
 end
@@ -194,8 +274,10 @@ Adapt.adapt_structure(to, ck::CondensateKernel) = CondensateKernel(adapt(to, ck.
 @inline function condensate_specific_humidity(i, j, k, grid, mb::MoistAirBuoyancy, T, q)
     z = Oceananigans.Grids.znode(i, j, k, grid, c, c, c)
     Ti = @inbounds T[i, j, k]
-    qi = @inbounds q[i, j, k]
-    qˡ = condensate_specific_humidity(Ti, qi, z, mb.reference_constants, mb.thermodynamics)
+    qᵗ = @inbounds q[i, j, k]
+    q = SpecificHumidities(qᵗ, zero(qᵗ), zero(qᵗ))
+    𝒰 = PotentialTemperatureState(Ti, q, z, mb.reference_constants)
+    qˡ = condensate_specific_humidity(Ti, 𝒰, mb.thermodynamics)
     return qˡ
 end
 
@@ -211,153 +293,6 @@ function CondensateField(model, T=TemperatureField(model))
     q = model.tracers.q
     op = KernelFunctionOperation{Center, Center, Center}(func, grid, buoyancy, q)
     return Field(op)
-end
-
-#####
-##### Saturation adjustment
-#####
-
-# Organizing information about the state is a WIP
-struct HeightReferenceThermodynamicState{FT}
-    θ :: FT
-    q :: FT
-    z :: FT
-end
-
-Base.summary(::HeightReferenceThermodynamicState{FT}) where FT = "HeightReferenceThermodynamicState{$FT}"
-
-function Base.show(io::IO, hrts::HeightReferenceThermodynamicState)
-    print(io, summary(hrts), ":", '\n',
-        "├── θ: ", hrts.θ, "\n",
-        "├── q: ", hrts.q, "\n",
-        "└── z: ", hrts.z)
-end
-
-condensate_specific_humidity(T, state::HeightReferenceThermodynamicState, ref, thermo) =
-    condensate_specific_humidity(T, state.q, state.z, ref, thermo)
-
-
-# Solve
-# θ = T/Π ( 1 - ℒ qˡ / (cᵖᵐ T))
-# for temperature T with qˡ = max(0, q - qᵛ⁺).
-# root of: f(T) = T - Π θ - ℒ qˡ / cᵖᵐ
-
-"""
-    temperature(state::HeightReferenceThermodynamicState, ref, thermo)
-
-Return the temperature ``T`` that satisfies saturation adjustment, that is, the
-temperature for which
-
-```math
-θ = [1 - ℒ qˡ / (cᵖᵐ T)] T / Π ,
-```
-
-with ``qˡ = \\max(0, qᵗ - qᵛ⁺)`` the condensate specific humidity, where ``qᵗ`` is the
-total specific humidity, ``qᵛ⁺`` is the saturation specific humidity.
-
-The saturation adjustment temperature is obtained by solving ``r(T)``, where
-```math
-r(T) ≡ T - θ Π - ℒ qˡ / (cᵖᵐ T) .
-```
-
-Solution of ``r(T) = 0`` is found via the [secant method](https://en.wikipedia.org/wiki/Secant_method).
-"""
-@inline function temperature(state::HeightReferenceThermodynamicState{FT}, ref, thermo) where FT
-    state.θ == 0 && return zero(FT)
-
-    # Generate guess for unsaturated conditions
-    Π = exner_function(state, ref, thermo)
-    T₁ = Π * state.θ
-    qˡ₁ = condensate_specific_humidity(T₁, state, ref, thermo)
-    qˡ₁ <= 0 && return T₁
-
-    # If we made it this far, we have condensation
-    r₁ = saturation_adjustment_residual(T₁, Π, qˡ₁, state, thermo)
-
-    ℒᵛ = thermo.liquid.latent_heat
-    cᵖᵐ = mixture_heat_capacity(state.q, thermo)
-    T₂ = T₁ + ℒᵛ * qˡ₁ / cᵖᵐ
-    qˡ₂ = condensate_specific_humidity(T₂, state, ref, thermo)
-    r₂ = saturation_adjustment_residual(T₂, Π, qˡ₂, state, thermo)
-
-    # Saturation adjustment
-    R = sqrt(max(T₂, T₁))
-    ϵ = convert(FT, 1e-9)
-    δ = ϵ * R
-    iter = 0
-
-    while abs(r₂ - r₁) > δ
-        # Compute slope
-        ΔTΔr = (T₂ - T₁) / (r₂ - r₁)
-
-        # Store previous values
-        r₁ = r₂
-        T₁ = T₂
-
-        # Update
-        T₂ -= r₂ * ΔTΔr
-        qˡ₂ = condensate_specific_humidity(T₂, state, ref, thermo)
-        r₂ = saturation_adjustment_residual(T₂, Π, qˡ₂, state, thermo)
-        iter += 1
-    end
-
-    return T₂
-end
-
-@inline function saturation_adjustment_residual(T, Π, qˡ, state::HeightReferenceThermodynamicState, thermo)
-    ℒᵛ = thermo.liquid.latent_heat
-    cᵖᵐ = mixture_heat_capacity(state.q, thermo)
-    return T - ℒᵛ * qˡ / cᵖᵐ - Π * state.θ
-end
-
-@inline function specific_volume(state::HeightReferenceThermodynamicState, ref, thermo)
-    T = temperature(state, ref, thermo)
-    Rᵐ = mixture_gas_constant(state.q, thermo)
-    pᵣ = reference_pressure(state.z, ref, thermo)
-    return Rᵐ * T / pᵣ
-end
-
-@inline function exner_function(state::HeightReferenceThermodynamicState, ref, thermo)
-    Rᵐ = mixture_gas_constant(state.q, thermo)
-    cᵖᵐ = mixture_heat_capacity(state.q, thermo)
-    inv_ϰᵐ = Rᵐ / cᵖᵐ
-    pᵣ = reference_pressure(state.z, ref, thermo)
-    p₀ = ref.base_pressure
-    return (pᵣ / p₀)^inv_ϰᵐ
-end
-
-#####
-##### Reference implementation of an "unsaturated" moist air buoyancy model,
-##### which assumes unsaturated air
-#####
-
-struct UnsaturatedMoistAirBuoyancy{FT} <: AbstractBuoyancyFormulation{Nothing}
-    expansion_coefficient :: FT
-    reference_potential_temperature :: FT
-    gas_constant_ratio :: FT
-end
-
-function UnsaturatedMoistAirBuoyancy(FT=Oceananigans.defaults.FloatType;
-                                     expansion_coefficient = 3.27e-2,
-                                     reference_potential_temperature = 0,
-                                     gas_constant_ratio = 1.61)
-
-    return UnsaturatedMoistAirBuoyancy{FT}(expansion_coefficient,
-                                           reference_potential_temperature,
-                                           gas_constant_ratio)
-end
-
-required_tracers(::UnsaturatedMoistAirBuoyancy) = (:θ, :q)
-
-@inline function buoyancy_perturbationᶜᶜᶜ(i, j, k, grid, mb::UnsaturatedMoistAirBuoyancy, tracers)
-    β = mb.expansion_coefficient
-    θ₀ = mb.reference_potential_temperature
-    ϵᵥ = mb.gas_constant_ratio
-    δ = ϵᵥ - 1
-    θ = @inbounds tracers.θ[i, j, k]
-    q = @inbounds tracers.q[i, j, k]
-    θᵥ = θ * (1 + δ * q)
-    return β * (θᵥ - θ₀)
 end
 
 end # module
