@@ -20,18 +20,29 @@ end
 @inline total_specific_humidity(state::PotentialTemperatureState) =
     total_specific_humidity(state.moisture_fractions)
 
+@inline function with_moisture(𝒰::PotentialTemperatureState, q::MoistureMassFractions)
+    return PotentialTemperatureState(𝒰.potential_temperature,
+                                     q,
+                                     𝒰.height,
+                                     𝒰.base_pressure,
+                                     𝒰.reference_pressure,
+                                     𝒰.reference_density)
+end
+
+#=
 @inline function specific_volume(state::PotentialTemperatureState, ref, thermo)
     pᵣ = state.reference_pressure
     Rᵐ = mixture_gas_constant(state.moisture_fractions, thermo)
     T = state.potential_temperature
     return Rᵐ * T / pᵣ
 end
+=#
 
+#=
 @inline function saturation_specific_humidity(T,
                                               state::PotentialTemperatureState,
                                               thermo::ThermodynamicConstants,
                                               phase::CondensedPhase)
-    z = state.height
     ρ = state.reference_density
     return saturation_specific_humidity(T, ρ, thermo, phase)
 end
@@ -41,6 +52,7 @@ function condensate_specific_humidity(T, state::PotentialTemperatureState, therm
     qᵛ⁺ = saturation_specific_humidity(T, state, thermo, thermo.liquid)
     return max(0, qᵗ - qᵛ⁺)
 end
+=#
 
 #=
 @inline function temperature(𝒰::PotentialTemperatureState, thermo::ThermodynamicConstants)

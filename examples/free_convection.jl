@@ -5,7 +5,7 @@ using Breeze
 
 arch = CPU()
 
-Nx = Nz = 128
+Nx = Nz = 64
 Lz = 4 * 1024
 grid = RectilinearGrid(arch, size=(Nx, Nz), x=(0, 2Lz), z=(0, Lz), topology=(Periodic, Flat, Bounded))
 
@@ -35,16 +35,16 @@ Lz = grid.Lz
 Δθ = 5 # K
 Tₛ = buoyancy.reference_state.potential_temperature # K
 θᵢ(x, z) = Tₛ + Δθ * z / Lz + 1e-2 * Δθ * randn()
-qᵢ(x, z) = 0 # 1e-2 + 1e-5 * rand()
-set!(model, θ=θᵢ, qᵗ=qᵢ)
+qᵗᵢ(x, z) = 0 # 1e-2 + 1e-5 * rand()
+set!(model, θ=θᵢ, qᵗ=qᵗᵢ)
 
-simulation = Simulation(model, Δt=10, stop_time=4hours)
+simulation = Simulation(model, Δt=10, stop_iteration=1000) #stop_time=4hours)
 conjure_time_step_wizard!(simulation, cfl=0.7)
 
 T = Breeze.TemperatureField(model)
 qˡ = Breeze.CondensateField(model, T)
-qᵛ★ = Breeze.SaturationField(model, T)
-δ = Field(model.tracers.qᵗ - qᵛ★)
+qᵛ⁺ = Breeze.SaturationField(model, T)
+δ = Field(model.tracers.qᵗ - qᵛ⁺)
 
 function progress(sim)
     compute!(T)
@@ -69,7 +69,7 @@ function progress(sim)
     msg = @sprintf("Iter: %d, t: %s, Δt: %s, max|u|: (%.2e, %.2e, %.2e)",
                     iteration(sim), prettytime(sim), prettytime(sim.Δt), umax, vmax, wmax)
 
-    msg *= @sprintf(", extrema(q): (%.2e, %.2e), max(qˡ): %.2e, min(δ): %.2e, extrema(θ): (%.2e, %.2e)",
+    msg *= @sprintf(", max(qˡ): %.2e, min(δ): %.2e, extrema(θ): (%.2e, %.2e)",
                      qᵗmin, qᵗmax, qˡmax, δmax, θmin, θmax)
 
     @info msg
@@ -81,7 +81,7 @@ add_callback!(simulation, progress, IterationInterval(10))
 
 using Oceananigans.Models: ForcingOperation
 Sʳ = ForcingOperation(:qᵗ, model)
-outputs = merge(model.velocities, model.tracers, (; T, qˡ, qᵛ★, Sʳ))
+outputs = merge(model.velocities, model.tracers, (; T, qˡ, qᵛ⁺, Sʳ))
 
 ow = JLD2Writer(model, outputs,
                 filename = "free_convection.jld2",

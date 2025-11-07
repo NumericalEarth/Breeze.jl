@@ -89,6 +89,13 @@ end
     return Rᵐ * T / pᵣ
 end
 
+@inline function buoyancy(i, j, k, grid, formulation, T, qᵗ, thermo)
+    α = specific_volume(i, j, k, grid, formulation, T, qᵗ, thermo)
+    αᵣ = reference_specific_volume(i, j, k, grid, formulation, thermo)
+    g = thermo.gravitational_acceleration
+    return g * (α - αᵣ) / αᵣ
+end
+
 @inline function reference_specific_volume(i, j, k, grid, formulation, thermo)
     Rᵈ = dry_air_gas_constant(thermo)
     pᵣ = @inbounds formulation.reference_state.pressure[i, j, k]

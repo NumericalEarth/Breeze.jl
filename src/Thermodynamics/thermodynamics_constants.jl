@@ -242,8 +242,10 @@ struct MoistureMassFractions{FT}
     ice :: FT
 end
 
-@inline total_specific_humidity(q::MoistureMassFractions) = q.vapor + q.liquid + q.ice
-@inline dry_air_mass_fraction(q::MoistureMassFractions) = 1 - total_specific_humidity(q)
+const MMF = MoistureMassFractions
+
+@inline total_specific_humidity(q::MMF) = q.vapor + q.liquid + q.ice
+@inline dry_air_mass_fraction(q::MMF) = 1 - total_specific_humidity(q)
 
 """
     mixture_gas_constant(q::MoistureMassFractions, thermo)
@@ -272,7 +274,7 @@ where:
 # Returns
 - Gas constant of the moist air mixture in J/(kg·K)
 """
-@inline function mixture_gas_constant(q::MoistureMassFractions, thermo::TC)
+@inline function mixture_gas_constant(q::MMF, thermo::TC)
     qᵈ = dry_air_mass_fraction(q)
     qᵛ = q.vapor
     Rᵈ = dry_air_gas_constant(thermo)
@@ -287,10 +289,24 @@ Compute the heat capacity of state air given the total specific humidity q
 and assuming that condensate mass ratio qᶜ ≪ q, where qℓ is the mass ratio of
 liquid condensate.
 """
-@inline function mixture_heat_capacity(q::MoistureMassFractions, thermo::TC)
+@inline function mixture_heat_capacity(q::MMF, thermo::TC)
     qᵈ = dry_air_mass_fraction(q)
     qᵛ = q.vapor
     cᵖᵈ = thermo.dry_air.heat_capacity
     cᵖᵛ = thermo.vapor.heat_capacity
     return qᵈ * cᵖᵈ + qᵛ * cᵖᵛ
+end
+
+#####
+##### Equation of state
+#####
+
+@inline function density(p, T, q::MMF, thermo::TC)
+    Rᵐ = mixture_gas_constant(q, thermo)
+    return p / (Rᵐ * T)
+end
+
+@inline function specific_volume(p, T, q::MMF, thermo::TC)
+    Rᵐ = mixture_gas_constant(q, mb.thermodynamics)
+    return Rᵐ * T / p
 end
