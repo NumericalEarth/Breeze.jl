@@ -50,7 +50,7 @@ jobs:
         id: julia-cache
       - uses: actions/create-github-app-token@v2
         id: generate_token
-        # if: ${{ ! github.event.pull_request.head.repo.fork }}
+        if: ${{ ! github.event.pull_request.head.repo.fork }}
         with:
           app-id: "${{ secrets.NUMTERRA_BOT_ID }}"
           private-key: "${{ secrets.NUMTERRA_BOT_PRIVATE_KEY }}"
