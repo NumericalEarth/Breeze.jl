@@ -1,12 +1,12 @@
 struct PotentialTemperatureState{FT, H, R}
     potential_temperature :: FT
-    humidities :: H
+    mass_ratios :: H
     height :: FT
     reference_state :: R
 end
 
 @inline function exner_function(𝒰::PotentialTemperatureState, thermo::ThermodynamicConstants)
-    q = 𝒰.humidities
+    q = 𝒰.mass_ratios
     z = 𝒰.height
     ref = 𝒰.reference_state
     Rᵐ = mixture_gas_constant(q, thermo)
@@ -17,11 +17,11 @@ end
 end
 
 @inline total_specific_humidity(state::PotentialTemperatureState) =
-    total_specific_humidity(state.humidities)
+    total_specific_humidity(state.mass_ratios)
 
 @inline function specific_volume(state::PotentialTemperatureState, ref, thermo)
     pᵣ = reference_pressure(state.height, ref, thermo)
-    Rᵐ = mixture_gas_constant(state.humidities, thermo)
+    Rᵐ = mixture_gas_constant(state.mass_ratios, thermo)
     T = state.potential_temperature
     return Rᵐ * T / pᵣ
 end
@@ -53,10 +53,10 @@ end
 # TODO: deprecate this
 struct AnelasticThermodynamicState{FT}
     potential_temperature :: FT
-    humidities :: MassRatios{FT}
+    mass_ratios :: MassRatios{FT}
     reference_density :: FT
     reference_pressure :: FT
     exner_function :: FT
 end
 
-@inline total_specific_humidity(state::AnelasticThermodynamicState) = total_specific_humidity(state.humidities)
+@inline total_specific_humidity(state::AnelasticThermodynamicState) = total_specific_humidity(state.mass_ratios)
