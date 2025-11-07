@@ -32,10 +32,6 @@ using ..Thermodynamics:
     mixture_heat_capacity,
     mixture_gas_constant
 
-import ..Thermodynamics:
-    saturation_specific_humidity,
-    condensate_specific_humidity
-
 struct MoistAirBuoyancy{RS, AT} <: AbstractBuoyancyFormulation{Nothing}
     reference_state :: RS
     thermodynamics :: AT
