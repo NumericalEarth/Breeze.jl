@@ -53,7 +53,7 @@ end
 # TODO: deprecate this
 struct AnelasticThermodynamicState{FT}
     potential_temperature :: FT
-    humidities :: SpecificHumidities{FT}
+    humidities :: MassRatios{FT}
     reference_density :: FT
     reference_pressure :: FT
     exner_function :: FT

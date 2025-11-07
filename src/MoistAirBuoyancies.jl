@@ -1,6 +1,6 @@
 module MoistAirBuoyancies
 
-using ..Thermodynamics: PotentialTemperatureState, SpecificHumidities, exner_function, reference_density
+using ..Thermodynamics: PotentialTemperatureState, MassRatios, exner_function, reference_density
 
 export MoistAirBuoyancy
 export UnsaturatedMoistAirBuoyancy
@@ -97,7 +97,7 @@ const c = Center()
     z = Oceananigans.Grids.znode(i, j, k, grid, c, c, c)
     θ = @inbounds tracers.θ[i, j, k]
     qᵗ = @inbounds tracers.q[i, j, k]
-    q = SpecificHumidities(qᵗ, zero(qᵗ), zero(qᵗ))
+    q = MassRatios(qᵗ, zero(qᵗ), zero(qᵗ))
     𝒰 = PotentialTemperatureState(θ, q, z, mb.reference_constants)
 
     # Perform saturation adjustment
@@ -212,7 +212,7 @@ const c = Center()
     z = Oceananigans.Grids.znode(i, j, k, grid, c, c, c)
     θi = @inbounds θ[i, j, k]
     qᵗ = @inbounds q[i, j, k]
-    q = SpecificHumidities(qᵗ, zero(qᵗ), zero(qᵗ))
+    q = MassRatios(qᵗ, zero(qᵗ), zero(qᵗ))
     𝒰 = PotentialTemperatureState(θi, q, z, mb.reference_constants)
     return temperature(𝒰, mb.thermodynamics)
 end
@@ -275,7 +275,7 @@ Adapt.adapt_structure(to, ck::CondensateKernel) = CondensateKernel(adapt(to, ck.
     z = Oceananigans.Grids.znode(i, j, k, grid, c, c, c)
     Ti = @inbounds T[i, j, k]
     qᵗ = @inbounds q[i, j, k]
-    q = SpecificHumidities(qᵗ, zero(qᵗ), zero(qᵗ))
+    q = MassRatios(qᵗ, zero(qᵗ), zero(qᵗ))
     𝒰 = PotentialTemperatureState(Ti, q, z, mb.reference_constants)
     qˡ = condensate_specific_humidity(Ti, 𝒰, mb.thermodynamics)
     return qˡ
