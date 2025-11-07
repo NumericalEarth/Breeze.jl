@@ -1,19 +1,13 @@
 # Dynamics
 
-This section summarizes the governing equations behind Breeze’s atmospheric dynamics and the
-anelastic formulation used by [`AtmosphereModel`](@ref), following the thermodynamically consistent
-framework of [Pauluis2008](@citet).
+This section summarizes the governing equations behind Breeze’s atmospheric dynamics and the anelastic formulation used by [`AtmosphereModel`](@ref), following the thermodynamically consistent framework of [Pauluis2008](@citet).
 
-We begin with the compressible Navier-Stokes momentum equations and reduce them to an anelastic,
-conservative form.
-We then introduce the moist static energy equation and outline the time-discretized pressure
-correction used to enforce the anelastic constraint.
+We begin with the compressible Navier-Stokes momentum equations and reduce them to an anelastic, conservative form.
+We then introduce the moist static energy equation and outline the time-discretized pressure correction used to enforce the anelastic constraint.
 
 ## Compressible momentum equations
 
-Let ``ρ`` denote density, ``\boldsymbol{u}`` velocity, ``p`` pressure, ``\boldsymbol{f}`` non-pressure
-body forces (e.g., Coriolis), and ``\boldsymbol{\tau}`` subgrid/viscous stresses.
-With gravity ``- g \hat{\boldsymbol{z}}``, the inviscid compressible equations in flux form are
+Let ``ρ`` denote density, ``\boldsymbol{u}`` velocity, ``p`` pressure, ``\boldsymbol{f}`` non-pressure body forces (e.g., Coriolis), and ``\boldsymbol{\tau}`` subgrid/viscous stresses. With gravity ``- g \hat{\boldsymbol{z}}``, the inviscid compressible equations in flux form are
 
 ```math
 \begin{aligned}
