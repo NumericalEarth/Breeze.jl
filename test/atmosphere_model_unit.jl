@@ -10,8 +10,8 @@ using Test
         for p₀ in (101325, 100000)
             for θ₀ in (288, 300)
                 reference_state = ReferenceState(grid, thermo, base_pressure=p₀, potential_temperature=θ₀)
-                formulation = AnelasticFormulation(grid, constants, thermo)
-                model = AtmosphereModel(grid; formulation)
+                formulation = AnelasticFormulation(reference_state)
+                model = AtmosphereModel(grid; thermodynamics=thermo, formulation)
 
                 # test set!
                 ρᵣ = model.formulation.reference_state.density
