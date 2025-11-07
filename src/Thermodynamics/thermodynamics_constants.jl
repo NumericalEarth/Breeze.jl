@@ -148,7 +148,7 @@ end
     ThermodynamicConstants(FT = Oceananigans.defaults.FloatType;
                            molar_gas_constant = 8.314462618,
                            gravitational_acceleration = 9.81,
-                           energy_reference_temperature = 273.16,
+                           energy_reference_temperature = 273.15,
                            triple_point_temperature = 273.16,
                            triple_point_pressure = 611.657,
                            dry_air_molar_mass = 0.02897,
@@ -200,7 +200,7 @@ can then be used for both condensation (vapor → liquid) and deposition (vapor 
 function ThermodynamicConstants(FT = Oceananigans.defaults.FloatType;
                                 molar_gas_constant = 8.314462618,
                                 gravitational_acceleration = 9.81,
-                                energy_reference_temperature = 273.16,
+                                energy_reference_temperature = 273.15,
                                 triple_point_temperature = 273.16,
                                 triple_point_pressure = 611.657,
                                 dry_air_molar_mass = 0.02897,
@@ -294,49 +294,3 @@ liquid condensate.
     cᵖᵛ = thermo.vapor.heat_capacity
     return qᵈ * cᵖᵈ + qᵛ * cᵖᵛ
 end
-
-# TODO: deprecate these
-"""
-    mixture_gas_constant(q, thermo)
-
-Compute the gas constant of moist air given the specific humidity `q` and
-thermodynamic parameters `thermo`.
-
-The mixture gas constant is calculated as a weighted average of the dry air
-and water vapor gas constants:
-
-```math
-R_m = R_d (1 - q) + R_v q
-```
-
-where:
-- `R_d` is the dry air gas constant
-- `R_v` is the water vapor gas constant
-- `q` is the specific humidity (mass fraction of water vapor)
-
-# Arguments
-- `q`: Specific humidity (dimensionless)
-- `thermo`: `ThermodynamicConstants` instance containing gas constants
-
-# Returns
-- Gas constant of the moist air mixture in J/(kg·K)
-"""
-@inline function mixture_gas_constant(q, thermo::TC)
-    Rᵈ = dry_air_gas_constant(thermo)
-    Rᵛ = vapor_gas_constant(thermo)
-    return Rᵈ * (1 - q) + Rᵛ * q
-end
-
-"""
-    mixture_heat_capacity(q, thermo)
-
-Compute the heat capacity of state air given the total specific humidity q
-and assuming that condensate mass ratio qᶜ ≪ q, where qℓ is the mass ratio of
-liquid condensate.
-"""
-@inline function mixture_heat_capacity(q, thermo::TC)
-    cᵖᵈ = thermo.dry_air.heat_capacity
-    cᵖᵛ = thermo.vapor.heat_capacity
-    return cᵖᵈ * (1 - q) + cᵖᵛ * q
-end
-

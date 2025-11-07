@@ -81,11 +81,13 @@ end
 
 @inline function specific_volume(i, j, k, grid, formulation, temperature, specific_humidity, thermo)
     @inbounds begin
-        q  = specific_humidity[i, j, k]
+        qᵗ = specific_humidity[i, j, k]
         pᵣ = formulation.reference_pressure[1, 1, k]
         T = temperature[i, j, k]
     end
 
+    # TODO: fix this assumption of non-condensed state
+    q = MoistureMassFractions(qᵗ, zero(qᵗ), zero(qᵗ))
     Rᵐ = mixture_gas_constant(q, thermo)
 
     return Rᵐ * T / pᵣ
