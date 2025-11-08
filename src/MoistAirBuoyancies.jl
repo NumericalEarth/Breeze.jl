@@ -231,8 +231,6 @@ Solution of ``r(T) = 0`` is found via the [secant method](https://en.wikipedia.o
         iter += 1
     end
     
-    @show iter r₂
-
     return T₂
 end
 
