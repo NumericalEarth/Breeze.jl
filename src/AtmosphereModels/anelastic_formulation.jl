@@ -29,8 +29,8 @@ end
 const AnelasticModel = AtmosphereModel{<:AnelasticFormulation}
 
 function Base.summary(formulation::AnelasticFormulation)
-    p₀ = formulation.constants.base_pressure
-    θᵣ = formulation.constants.potential_temperature
+    p₀ = formulation.reference_state.base_pressure
+    θᵣ = formulation.reference_state.potential_temperature
     return string("AnelasticFormulation(p₀=", prettysummary(p₀),
                   ", θᵣ=", prettysummary(θᵣ), ")")
 end

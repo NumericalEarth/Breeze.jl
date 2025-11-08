@@ -44,6 +44,13 @@ import Pkg
 Pkg.test("Breeze"; test_args=`--verbose --jobs 2 moist_air atmosphere`)
 ```
 
+Similarly, to run only the doctests, you can use the command
+
+```julia
+import Pkg
+Pkg.test("Breeze"; test_args=`doctests`)
+```
+
 !!! note "List of tests"
 
     The names of the test jobs are the file names under the `test` directory, without the `.jl` extension, excluding the `runtests.jl` file.
