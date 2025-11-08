@@ -15,7 +15,7 @@ A struct representing an ideal gas with molar mass and specific heat capacity.
 dry_air = IdealGas(molar_mass=0.02897, heat_capacity=1005)
 
 # output
-"IdealGas{Float64}(molar_mass=0.02897, heat_capacity=1005)"
+IdealGas{Float64}(molar_mass=0.02897, heat_capacity=1005.0)
 ```
 """
 struct IdealGas{FT}
