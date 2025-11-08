@@ -68,7 +68,7 @@ function progress(sim)
                     iteration(sim), prettytime(sim), prettytime(sim.Δt), umax, vmax, wmax)
 
     msg *= @sprintf(", max(qˡ): %.2e, min(δ): %.2e, extrema(θ): (%.2e, %.2e)",
-                     qᵗmin, qᵗmax, qˡmax, δmax, θmin, θmax)
+                     qˡmax, δmax, θmin, θmax)
 
     @info msg
 
