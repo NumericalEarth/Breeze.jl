@@ -53,7 +53,7 @@ model = NonhydrostaticModel(; grid, advection, buoyancy,
 
 Δθ = 2 # ᵒK
 Tₛ = buoyancy.reference_state.potential_temperature # K
-θᵢ(x, z) = Tₛ + Δθ * z / grid.Lz + 1e-2 * Δθ * randn()
+θᵢ(x, z) = Tₛ + Δθ * z / grid.Lz + 1e-2 * Δθ * rand()
 set!(model, θ=θᵢ)
 
 simulation = Simulation(model, Δt=10, stop_time=2hours)
