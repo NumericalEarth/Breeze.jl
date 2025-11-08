@@ -46,12 +46,15 @@ jobs:
           - ubuntu-latest
           - macOS-latest
           - windows-latest
-          - nvidia-gpu-t4
         arch:
           - "default"
         exclude:
           - version: "min"
             os: windows-latest
+        include:
+          - version: "min"
+            os: nvidia-gpu-t4
+            arch: "default"
     steps:
       - uses: actions/checkout@v5
       - uses: julia-actions/setup-julia@v2
