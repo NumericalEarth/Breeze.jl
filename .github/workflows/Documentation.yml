@@ -50,6 +50,8 @@ jobs:
       - name: Build documentation
         run:
           julia --color=yes --project=docs docs/make.jl
+        env:
+          JULIA_NUM_THREADS: 4
       - name: Save Julia depot cache on cancel or failure
         id: julia-cache-save
         if: cancelled() || failure()
