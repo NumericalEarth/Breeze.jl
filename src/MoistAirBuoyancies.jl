@@ -156,15 +156,17 @@ Return the temperature ``T`` that satisfies saturation adjustment, that is, the
 temperature for which
 
 ```math
-θ = [1 - ℒ qˡ / (cᵖᵐ T)] T / Π ,
+θ = [1 - ℒˡᵣ qˡ / (cᵖᵐ T)] T / Π ,
 ```
 
-with ``qˡ = \\max(0, qᵗ - qᵛ⁺)`` the condensate specific humidity, where ``qᵗ`` is the
+with ``ℒˡᵣ`` the latent heat at the reference temperature ``Tᵣ``, ``cᵖᵐ`` the mixture
+specific heat, ``Π`` the Exner function, ``qˡ = \\max(0, qᵗ - qᵛ⁺)``
+the condensate specific humidity, ``qᵗ`` is the
 total specific humidity, ``qᵛ⁺`` is the saturation specific humidity.
 
 The saturation adjustment temperature is obtained by solving ``r(T)``, where
 ```math
-r(T) ≡ T - θ Π - ℒ qˡ / cᵖᵐ .
+r(T) ≡ T - θ Π - ℒˡᵣ qˡ / cᵖᵐ .
 ```
 
 Solution of ``r(T) = 0`` is found via the [secant method](https://en.wikipedia.org/wiki/Secant_method).
@@ -189,9 +191,11 @@ Solution of ``r(T) = 0`` is found via the [secant method](https://en.wikipedia.o
     # T₁ then provides a lower bound.
     # We generate a second guess using the liquid fraction
     # associated with T₁, which should also represent an underestimate.
+    q₁ = MoistureMassFractions(qᵛ⁺₁, qᵗ - qᵛ⁺₁, zero(qᵗ))
+    𝒰₁ = with_moisture(𝒰₀, q₁)
     ℒˡ = thermo.liquid.reference_latent_heat
-    q₁ = 𝒰₁.moisture_fractions
     cᵖᵐ = mixture_heat_capacity(q₁, thermo)
+    # @show q₁.liquid
     T₂ = T₁ + ℒˡ * q₁.liquid / cᵖᵐ
     𝒰₂ = adjust_state(𝒰₁, T₂, thermo)
 
@@ -215,6 +219,10 @@ Solution of ``r(T) = 0`` is found via the [secant method](https://en.wikipedia.o
         T₂ -= r₂ * ΔTΔr
         𝒰₂ = adjust_state(𝒰₂, T₂, thermo)
         r₂ = saturation_adjustment_residual(T₂, 𝒰₂, thermo)
+
+        # if iter > 3
+        #     @show iter r₂
+        # end
 
         iter += 1
     end
@@ -251,7 +259,7 @@ end
     cᵖᵐ = mixture_heat_capacity(q, thermo)
     qˡ = q.liquid
     θ = 𝒰.potential_temperature
-    return T - ℒˡᵣ * qˡ / cᵖᵐ - Π * θ
+    return T - Π * θ - ℒˡᵣ * qˡ / cᵖᵐ 
 end
 
 #####
