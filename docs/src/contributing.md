@@ -42,9 +42,10 @@ Pkg.test("Breeze"; test_args=`--verbose --jobs 2 moist_air atmosphere`)
 
 !!! note "List of tests"
 
+    The names of the test jobs are the file names under the `test` directory, without the `.jl` extension, excluding the `runtests.jl` file.
     Filtering test names is done by matching the provided arguments with [`startswith`](https://docs.julialang.org/en/v1/base/strings/#Base.startswith), so you can use the first few letters of the test names.
-	Be sure not to catch also other tests you want to skip.
-	To see the full list of available tests you can use the `--list` option:
+    Be sure not to catch also other tests you want to skip.
+    To see the full list of available tests you can use the `--list` option:
 
     ```julia
     import Pkg
