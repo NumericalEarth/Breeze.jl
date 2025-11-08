@@ -2,6 +2,7 @@ using Oceananigans
 using Oceananigans.Units
 using Printf
 using Breeze
+using CUDA
 
 arch = GPU()
 Nx = Nz = 128
