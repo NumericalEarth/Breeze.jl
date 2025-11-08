@@ -197,25 +197,33 @@ Solution of ``r(T) = 0`` is found via the [secant method](https://en.wikipedia.o
     q₁ = MoistureMassFractions(qᵛ⁺₁, qˡ₁, zero(qˡ₁))
     𝒰₁ = with_moisture(𝒰₀, q₁)
 
-    # We generate a second guess to start a secant iteration
+    # We generate a second guess simply by adding 1 K to T₁...
+
+    # NOTE: We could also generate a second guess to start a secant iteration
     # by applying the potential temperature assuming a liquid fraction
     # associated with T₁. This should represent an _overestimate_,
     # since ``qᵛ⁺₁(T₁)`` underestimates the saturation specific humidity,
-    # and therefore qˡ₁ is overestimated
+    # and therefore qˡ₁ is overestimated. This is similar to an approach
+    # used in Pressel et al 2015. However, it doesn't work for large liquid fractions.
+    T₂ = T₁ + 1 
+
+    #=
     ℒˡᵣ = thermo.liquid.reference_latent_heat
     cᵖᵐ = mixture_heat_capacity(q₁, thermo)
     T₂ = T₁ + ℒˡᵣ * qˡ₁ / cᵖᵐ
+    =#
+
     𝒰₂ = adjust_state(𝒰₁, T₂, thermo)
 
     # Initialize saturation adjustment
     r₁ = saturation_adjustment_residual(T₁, 𝒰₁, thermo)
     r₂ = saturation_adjustment_residual(T₂, 𝒰₂, thermo)
-    R = sqrt(max(T₂, T₁))
-    ϵ = convert(FT, 1e-9)
-    δ = ϵ * R
+    δ = convert(FT, 1e-3)
     iter = 0
 
-    while abs(r₂) > δ
+    while abs(T₂ - T₁) > δ
+        @show iter T₁ T₂ r₁ r₂
+
         # Compute slope
         ΔTΔr = (T₂ - T₁) / (r₂ - r₁)
 
@@ -230,7 +238,7 @@ Solution of ``r(T) = 0`` is found via the [secant method](https://en.wikipedia.o
 
         iter += 1
     end
-    
+
     return T₂
 end
 
@@ -241,7 +249,7 @@ end
 # This consideration culminates in a new expression for saturation specific humidity
 # used below, and also written in Pressel et al 2015, equation 37.
 # (There is an error in the description below it, but the equation 37 is correct.)
-function adjustment_saturation_specific_humidity(T, 𝒰, thermo)
+@inline function adjustment_saturation_specific_humidity(T, 𝒰, thermo)
     pᵛ⁺ = saturation_vapor_pressure(T, thermo, thermo.liquid)
     pᵣ = 𝒰.reference_pressure
     qᵗ = total_specific_humidity(𝒰)

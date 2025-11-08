@@ -29,39 +29,6 @@ end
                                      𝒰.reference_density)
 end
 
-#=
-@inline function specific_volume(state::PotentialTemperatureState, ref, thermo)
-    pᵣ = state.reference_pressure
-    Rᵐ = mixture_gas_constant(state.moisture_fractions, thermo)
-    T = state.potential_temperature
-    return Rᵐ * T / pᵣ
-end
-=#
-
-#=
-@inline function saturation_specific_humidity(T,
-                                              state::PotentialTemperatureState,
-                                              thermo::ThermodynamicConstants,
-                                              phase::CondensedPhase)
-    ρ = state.reference_density
-    return saturation_specific_humidity(T, ρ, thermo, phase)
-end
-
-function condensate_specific_humidity(T, state::PotentialTemperatureState, thermo)
-    qᵗ = total_specific_humidity(state)
-    qᵛ⁺ = saturation_specific_humidity(T, state, thermo, thermo.liquid)
-    return max(0, qᵗ - qᵛ⁺)
-end
-=#
-
-#=
-@inline function temperature(𝒰::PotentialTemperatureState, thermo::ThermodynamicConstants)
-    θ = 𝒰.potential_temperature
-    Π = exner_function(𝒰, thermo)
-    return Π * θ
-end
-=#
-
 # TODO: deprecate this
 struct AnelasticThermodynamicState{FT}
     potential_temperature :: FT
