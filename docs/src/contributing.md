@@ -81,7 +81,7 @@ julia --project=docs/ docs/make.jl
 ```
 
 to build the documentation.
-If you want to quickly build a draft copy of the documentation (i.e. without running all the examples or running the doctests), modify the [call to the `makedocs`](https://github.com/NumericalEarth/Breeze.jl/blob/073f16e7819b310f0ef68e1f41187965323fc1a0/docs/make.jl#L14-L30) function in `docs/make.jl` to add the keyword argument `draft=true` and run again the `docs/make.jl` script.
+If you want to quickly build a draft copy of the documentation (i.e. without running all the examples or running the doctests), modify the [call to the `makedocs`](https://github.com/NumericalEarth/Breeze.jl/blob/cdf8bd25c83f24cbd4f26c8c600d20ef9740e9c7/docs/make.jl#L14-L34) function in `docs/make.jl` to set the keyword argument `draft=true` and run again the `docs/make.jl` script.
 When you submit a pull request to `Breeze.jl`, if the documentation building job is successfull a copy of the build will be uploaded as an artifact, which you can retrieve by looking at the summary page of the documentation job.
 
 To view the documentation you can open the generated HTML files in the `docs/build` directory, but you need an HTTP server to be able to move around the website and follow internal links.
@@ -90,7 +90,7 @@ The [`LiveServer`](https://github.com/JuliaDocs/LiveServer.jl) package provides 
 ```julia
 import Pkg
 Pkg.activate("live-server"; shared=true)
-Pkg.add("LiveServer") # this is necessary only the first time, to install
+Pkg.add("LiveServer") # this is necessary only the first time, to install LiveServer
 using LiveSever: serve
 serve(; dir="docs/build")
 ```

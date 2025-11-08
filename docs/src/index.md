@@ -57,9 +57,10 @@ model = NonhydrostaticModel(; grid, advection, buoyancy,
                             boundary_conditions = (θ=θ_bcs, qᵗ=qᵗ_bcs))
 
 Δθ = 2 # ᵒK
-Tₛ = buoyancy.reference_state.potential_temperature # K
-θᵢ(x, z) = Tₛ + Δθ * z / grid.Lz + 1e-2 * Δθ * rand()
-set!(model, θ=θᵢ)
+Tₛ = reference_constants.reference_potential_temperature # K
+θᵢ(x, z) = Tₛ + Δθ * z / grid.Lz + 2e-2 * Δθ * (rand() - 0.5)
+qᵢ(x, z) = 0 # 1e-2 + 1e-5 * rand()
+set!(model, θ=θᵢ, q=qᵢ)
 
 simulation = Simulation(model, Δt=10, stop_time=2hours)
 conjure_time_step_wizard!(simulation, cfl=0.7)
