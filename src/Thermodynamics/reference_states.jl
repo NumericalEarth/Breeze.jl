@@ -1,72 +1,78 @@
-using Oceananigans: Oceananigans
-
+using Oceananigans: Oceananigans, Center, Field, set!, fill_halo_regions!
+                   
 #####
 ##### Reference state computations for Boussinesq and Anelastic models
 #####
 
-struct ReferenceStateConstants{FT}
+struct ReferenceState{FT, F}
     base_pressure :: FT # base pressure: reference pressure at z=0
-    reference_potential_temperature :: FT  # constant reference potential temperature
+    potential_temperature :: FT  # constant reference potential temperature
+    pressure :: F
+    density :: F
 end
 
-function ReferenceStateConstants(FT = Oceananigans.defaults.FloatType;
-                            base_pressure = 101325,
-                            potential_temperature = 288)
+Base.eltype(::ReferenceState{FT}) where FT = FT
 
-    return ReferenceStateConstants{FT}(convert(FT, base_pressure),
-                                  convert(FT, potential_temperature))
+function Base.summary(ref::ReferenceState)
+    FT = eltype(ref)
+    return string("ReferenceState{$FT}(p₀=", prettysummary(ref.base_pressure),
+                  ", θᵣ=", prettysummary(ref.potential_temperature), ")")
+end
+
+Base.show(io::IO, ref::ReferenceState) = print(io, summary(ref))
+
+#####
+##### How to compute the reference state
+#####
+
+@inline function base_density(p₀, θᵣ, thermo)
+    Rᵈ = dry_air_gas_constant(thermo)
+    return p₀ / (Rᵈ * θᵣ)
 end
 
 """
-    reference_density(z, ref::ReferenceStateConstants, thermo)
+    adiabatic_hydrostatic_pressure(z, p₀, θᵣ, thermo)
+
+Compute the reference pressure at height `z` that associated with the reference pressure and
+potential temperature. The reference pressure is defined as the pressure of dry air at the
+reference pressure and temperature.
+"""
+@inline function adiabatic_hydrostatic_pressure(z, p₀, θᵣ, thermo)
+    cᵖᵈ = thermo.dry_air.heat_capacity
+    Rᵈ = dry_air_gas_constant(thermo)
+    g = thermo.gravitational_acceleration
+    return p₀ * (1 - g * z / (cᵖᵈ * θᵣ))^(cᵖᵈ / Rᵈ)
+end
+
+"""
+    adiabatic_hydrostatic_density(z, p₀, θᵣ, thermo)
 
 Compute the reference density at height `z` that associated with the reference pressure and
 potential temperature. The reference density is defined as the density of dry air at the
 reference pressure and temperature.
 """
-@inline function reference_density(z, ref::ReferenceStateConstants, thermo)
+@inline function adiabatic_hydrostatic_density(z, p₀, θᵣ, thermo)
     Rᵈ = dry_air_gas_constant(thermo)
     cᵖᵈ = thermo.dry_air.heat_capacity
-    pᵣ = reference_pressure(z, ref, thermo)
-    ρ₀ = base_density(ref, thermo)
-    p₀ = ref.base_pressure
+    pᵣ = adiabatic_hydrostatic_pressure(z, p₀, θᵣ, thermo)
+    ρ₀ = base_density(p₀, θᵣ, thermo)
     return ρ₀ * (pᵣ / p₀)^(1 - Rᵈ / cᵖᵈ)
 end
 
-@inline function base_density(ref::ReferenceStateConstants, thermo)
-    Rᵈ = dry_air_gas_constant(thermo)
-    p₀ = ref.base_pressure
-    θᵣ = ref.reference_potential_temperature
-    return p₀ / (Rᵈ * θᵣ)
-end
+function ReferenceState(grid, thermo;
+                        base_pressure = 101325,
+                        potential_temperature = 288)
 
-@inline function reference_specific_volume(z, ref::ReferenceStateConstants, thermo)
-    Rᵈ = dry_air_gas_constant(thermo)
-    pᵣ = reference_pressure(z, ref, thermo)
-    θᵣ = ref.reference_potential_temperature
-    return Rᵈ * θᵣ / pᵣ
-end
+    FT = eltype(grid)
+    p₀ = convert(FT, base_pressure)
+    θᵣ = convert(FT, potential_temperature)
 
-@inline function reference_pressure(z, ref::ReferenceStateConstants, thermo)
-    cᵖᵈ = thermo.dry_air.heat_capacity
-    Rᵈ = dry_air_gas_constant(thermo)
-    g = thermo.gravitational_acceleration
-    θᵣ = ref.reference_potential_temperature
-    p₀ = ref.base_pressure
-    return p₀ * (1 - g * z / (cᵖᵈ * θᵣ))^(cᵖᵈ / Rᵈ)
-end
+    pᵣ = Field{Nothing, Nothing, Center}(grid)
+    ρᵣ = Field{Nothing, Nothing, Center}(grid)
+    set!(pᵣ, z -> adiabatic_hydrostatic_pressure(z, p₀, θᵣ, thermo))
+    set!(ρᵣ, z -> adiabatic_hydrostatic_density(z, p₀, θᵣ, thermo))
+    fill_halo_regions!(pᵣ)
+    fill_halo_regions!(ρᵣ)
 
-@inline function saturation_specific_humidity(T, z, ref::ReferenceStateConstants, thermo, condensed_phase)
-    ρ = reference_density(z, ref, thermo)
-    return saturation_specific_humidity(T, ρ, thermo, condensed_phase)
-end
-
-function condensate_specific_humidity(T, q, z, ref::ReferenceStateConstants, thermo)
-    qᵛ⁺ = saturation_specific_humidity(T, z, ref, thermo, thermo.liquid)
-    return max(0, q - qᵛ⁺)
-end
-
-function ice_specific_humidity(T, q, z, ref::ReferenceStateConstants, thermo)
-    qi⁺ = saturation_specific_humidity(T, z, ref, thermo, thermo.solid)
-    return max(0, q - qi⁺)
+    return ReferenceState(p₀, θᵣ, pᵣ, ρᵣ)
 end

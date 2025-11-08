@@ -1,8 +1,8 @@
 using ..Thermodynamics:
+    MoistureMassFractions,
     ThermodynamicConstants,
-    ReferenceStateConstants,
-    reference_pressure,
-    reference_density,
+    ReferenceState,
+    AnelasticThermodynamicState,
     mixture_gas_constant,
     mixture_heat_capacity,
     dry_air_gas_constant
@@ -22,17 +22,15 @@ import Oceananigans.TimeSteppers: compute_pressure_correction!, make_pressure_co
 ##### Formulation definition
 #####
 
-struct AnelasticFormulation{FT, F}
-    constants :: ReferenceStateConstants{FT}
-    reference_pressure :: F
-    reference_density :: F
+struct AnelasticFormulation{R}
+    reference_state :: R
 end
 
 const AnelasticModel = AtmosphereModel{<:AnelasticFormulation}
 
 function Base.summary(formulation::AnelasticFormulation)
     p₀ = formulation.constants.base_pressure
-    θᵣ = formulation.constants.reference_potential_temperature
+    θᵣ = formulation.constants.potential_temperature
     return string("AnelasticFormulation(p₀=", prettysummary(p₀),
                   ", θᵣ=", prettysummary(θᵣ), ")")
 end
@@ -40,14 +38,6 @@ end
 Base.show(io::IO, formulation::AnelasticFormulation) = print(io, "AnelasticFormulation")
 
 field_names(::AnelasticFormulation, tracer_names) = (:ρu, :ρv, :ρw, :ρe, :ρqᵗ, tracer_names...)
-
-struct AnelasticThermodynamicState{FT}
-    potential_temperature :: FT
-    specific_humidity :: FT
-    reference_density :: FT
-    reference_pressure :: FT
-    exner_function :: FT
-end
 
 function AnelasticFormulation(grid, state_constants, thermo)
     pᵣ = Field{Nothing, Nothing, Center}(grid)
@@ -66,19 +56,20 @@ end
 function thermodynamic_state(i, j, k, grid, formulation::AnelasticFormulation, thermo, energy, absolute_humidity)
     @inbounds begin
         e = energy[i, j, k]
-        pᵣ = formulation.reference_pressure[1, 1, k]
-        ρᵣ = formulation.reference_density[1, 1, k]
-        ρq = absolute_humidity[i, j, k]
+        pᵣ = formulation.reference_state.pressure[i, j, k]
+        ρᵣ = formulation.reference_state.density[i, j, k]
+        ρqᵗ = absolute_humidity[i, j, k]
     end
 
     cᵖᵈ = thermo.dry_air.heat_capacity
     θ = e / (cᵖᵈ * ρᵣ)
 
-    q = ρq / ρᵣ
+    qᵗ = ρqᵗ / ρᵣ
+    q = MoistureMassFractions(qᵗ, zero(qᵗ), zero(qᵗ)) # assuming non-condensed state
     Rᵐ = mixture_gas_constant(q, thermo)
     cᵖᵐ = mixture_heat_capacity(q, thermo)
 
-    p₀ = formulation.constants.base_pressure
+    p₀ = formulation.reference_state.base_pressure
     Π = (pᵣ / p₀)^(Rᵐ / cᵖᵐ)
 
     return AnelasticThermodynamicState(θ, q, ρᵣ, pᵣ, Π)
@@ -86,20 +77,29 @@ end
 
 @inline function specific_volume(i, j, k, grid, formulation, temperature, specific_humidity, thermo)
     @inbounds begin
-        q  = specific_humidity[i, j, k]
-        pᵣ = formulation.reference_pressure[1, 1, k]
+        qᵗ = specific_humidity[i, j, k]
+        pᵣ = formulation.reference_state.pressure[i, j, k]
         T = temperature[i, j, k]
     end
 
+    # TODO: fix this assumption of non-condensed state
+    q = MoistureMassFractions(qᵗ, zero(qᵗ), zero(qᵗ))
     Rᵐ = mixture_gas_constant(q, thermo)
 
     return Rᵐ * T / pᵣ
 end
 
+@inline function buoyancy(i, j, k, grid, formulation, T, qᵗ, thermo)
+    α = specific_volume(i, j, k, grid, formulation, T, qᵗ, thermo)
+    αᵣ = reference_specific_volume(i, j, k, grid, formulation, thermo)
+    g = thermo.gravitational_acceleration
+    return g * (α - αᵣ) / αᵣ
+end
+
 @inline function reference_specific_volume(i, j, k, grid, formulation, thermo)
     Rᵈ = dry_air_gas_constant(thermo)
-    pᵣ = @inbounds formulation.reference_pressure[1, 1, k]
-    θᵣ = formulation.constants.reference_potential_temperature
+    pᵣ = @inbounds formulation.reference_state.pressure[i, j, k]
+    θᵣ = formulation.reference_state.potential_temperature
     return Rᵈ * θᵣ / pᵣ
 end
 
@@ -143,7 +143,7 @@ end
 tridiagonal_direction(formulation::AnelasticTridiagonalSolverFormulation) = ZDirection()
 
 function formulation_pressure_solver(anelastic_formulation::AnelasticFormulation, grid)
-    reference_density = anelastic_formulation.reference_density
+    reference_density = anelastic_formulation.reference_state.density
     tridiagonal_formulation = AnelasticTridiagonalSolverFormulation(reference_density)
 
     solver = if grid isa Oceananigans.ImmersedBoundaries.ImmersedBoundaryGrid
@@ -212,7 +212,7 @@ function compute_pressure_correction!(model::AnelasticModel, Δt)
     foreach(mask_immersed_field!, model.momentum)
     fill_halo_regions!(model.momentum, model.clock, fields(model))
 
-    ρᵣ = model.formulation.reference_density
+    ρᵣ = model.formulation.reference_state.density
     ρŨ = model.momentum
     solver = model.pressure_solver
     pₙ = model.nonhydrostatic_pressure
@@ -284,7 +284,7 @@ function make_pressure_correction!(model::AnelasticModel, Δt)
             model.grid,
             Δt,
             model.nonhydrostatic_pressure,
-            model.formulation.reference_density)
+            model.formulation.reference_state.density)
 
     return nothing
 end

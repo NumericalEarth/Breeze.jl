@@ -1,11 +1,4 @@
-using ..Thermodynamics:
-    ThermodynamicConstants,
-    ReferenceStateConstants,
-    reference_pressure,
-    reference_density,
-    mixture_gas_constant,
-    mixture_heat_capacity,
-    dry_air_gas_constant
+using ..Thermodynamics: ThermodynamicConstants, ReferenceState
 
 using Oceananigans: AbstractModel, Center, CenterField, Clock, Field
 using Oceananigans: WENO, XFaceField, YFaceField, ZFaceField
@@ -60,11 +53,8 @@ mutable struct AtmosphereModel{Frm, Arc, Tst, Grd, Clk, Thm, Den, Mom, Eng, Wat,
 end
 
 function default_formulation(grid, thermo)
-    FT = eltype(grid)
-    base_pressure = convert(FT, 101325)
-    potential_temperature = convert(FT, 288)
-    constants = ReferenceStateConstants(base_pressure, potential_temperature)
-    return AnelasticFormulation(grid, constants, thermo)
+    reference_state = ReferenceState(grid, thermo)
+    return AnelasticFormulation(reference_state)
 end
 
 """

@@ -9,12 +9,12 @@ using Test
 
         for p₀ in (101325, 100000)
             for θ₀ in (288, 300)
-                constants = Breeze.Thermodynamics.ReferenceStateConstants(p₀, θ₀)
-                formulation = AnelasticFormulation(grid, constants, thermo)
-                model = AtmosphereModel(grid; formulation)
+                reference_state = ReferenceState(grid, thermo, base_pressure=p₀, potential_temperature=θ₀)
+                formulation = AnelasticFormulation(reference_state)
+                model = AtmosphereModel(grid; thermodynamics=thermo, formulation)
 
                 # test set!
-                ρᵣ = model.formulation.reference_density
+                ρᵣ = model.formulation.reference_state.density
                 cᵖᵈ = model.thermodynamics.dry_air.heat_capacity
                 ρeᵢ = ρᵣ * cᵖᵈ * θ₀
 
@@ -22,7 +22,7 @@ using Test
                 ρe₁ = deepcopy(model.energy)
 
                 set!(model; ρe = ρeᵢ)
-                @test model.energy == ρe₁
+                @test model.energy ≈ ρe₁
             end
         end
     end

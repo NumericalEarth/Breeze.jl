@@ -6,13 +6,6 @@ using Oceananigans.Operators: ∂xᶠᶜᶜ, ∂yᶜᶠᶜ, ∂zᶜᶜᶠ, ℑz�
 ##### Some key functions
 #####
 
-@inline function buoyancy(i, j, k, grid, formulation, temperature, specific_humidity, thermo)
-    α = specific_volume(i, j, k, grid, formulation, temperature, specific_humidity, thermo)
-    αᵣ = reference_specific_volume(i, j, k, grid, formulation, thermo)
-    g = thermo.gravitational_acceleration
-    return g * (α - αᵣ) / αᵣ
-end
-
 @inline function ρ_bᶜᶜᶠ(i, j, k, grid, ρ, T, q, formulation, thermo)
     ρᶜᶜᶠ = ℑzᵃᵃᶠ(i, j, k, grid, ρ)
     bᶜᶜᶠ = ℑzᵃᵃᶠ(i, j, k, grid, buoyancy, formulation, T, q, thermo)

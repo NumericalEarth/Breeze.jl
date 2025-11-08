@@ -1,5 +1,5 @@
 # Thermal Bubble Simulation following Ahmad & Lindeman (2007) and Sridhar et al (2022)
-# This simulates a circular potential temperature perturbation in 2D
+# This simulates a circular moist static energy perturbation in 2D
 
 using Breeze
 using Oceananigans.Units
@@ -25,33 +25,29 @@ grid = RectilinearGrid(arch,
                        halo = (5, 5),
                        topology = (Periodic, Flat, Bounded))
 
-# Thermodynamic setup
-p₀ = 101325  # Pa - standard atmospheric pressure
-θ₀ = 300.0   # K - reference potential temperature
-reference_constants = ReferenceStateConstants(base_pressure=p₀, potential_temperature=θ₀)
-buoyancy = MoistAirBuoyancy(; reference_constants)
-
-# Advection scheme - WENO for high-order accuracy
 advection = WENO(order=5)
-
-# Create the model
 model = AtmosphereModel(grid; advection)
 
-# Thermal bubble parameters
+# Thermal bubble parameters (moist static energy)
 x₀ = Lx / 2      # Center of bubble in x
 z₀ = 4e3         # Center of bubble in z (2 km height)
 r₀ = 2e3         # Initial radius of bubble (2 km)
-Δθ = 2           # Potential temperature perturbation (ᵒK)
+Δθ = 10 # K
 
-# Background stratification
-N² = 1e-8        # Brunt-Väisälä frequency squared (s⁻²)
-dθdz = N² * θ₀ / 9.81  # Background potential temperature gradient
+# Background stratification (used to construct a gently increasing MSE with height via θ)
+N² = 1e-6        # Brunt-Väisälä frequency squared (s⁻²)
+θ₀ = model.formulation.reference_state.potential_temperature
+dθdz = N² * θ₀ / 9.81  # Background potential temperature gradient used to build MSE
 
-# Initial conditions
+# Initial conditions (set moist static energy directly)
+# We form MSE ρe ≈ ρᵣ cᵖᵈ θ with a localized perturbation.
+ρʳ = model.formulation.reference_state.density
+cᵖᵈ = model.thermodynamics.dry_air.heat_capacity
+
 function θᵢ(x, z)
-    θ̄ = θ₀ + dθdz * z # background stratification
+    θ̄ = θ₀ + dθdz * z # background potential temperature used to build MSE
     r = sqrt((x - x₀)^2 + (z - z₀)^2) # distance from bubble center
-    θ′ = Δθ * max(0, 1 - r / r₀) # bubble
+    θ′ = Δθ * max(0, 1 - r / r₀)
     return θ̄ + θ′
 end
 
@@ -67,7 +63,7 @@ conjure_time_step_wizard!(simulation, cfl=0.7)
 # Progress monitoring
 function progress(sim)
     ρe = sim.model.energy
-    u, w = sim.model.velocities
+    u, v, w = sim.model.velocities
 
     ρe_max = maximum(ρe)
     ρe_min = minimum(ρe)
@@ -92,7 +88,7 @@ u, v, w = model.velocities
 
 # Temperature perturbation from background state
 ρE = Field{Nothing, Nothing, Center}(grid)
-set!(E, Field(Average(model.energy, dims=(1, 2))))
+set!(ρE, Field(Average(model.energy, dims=(1, 2))))
 ρe′ = model.energy - ρE
 ρe = model.energy
 T = model.temperature
@@ -107,7 +103,7 @@ writer = JLD2Writer(model, outputs; filename,
 simulation.output_writers[:jld2] = writer
 
 @info "Running thermal bubble simulation on grid: $grid"
-@info "Bubble parameters: center=($x₀, $z₀), radius=$r₀, Δθ=$Δθ K"
+@info "Bubble parameters: center=($x₀, $z₀), radius=$r₀, Δe=$Δe J/m³"
 @info "Domain: $(Lx/1000) km × $(Lz/1000) km, resolution: $Nx × $Nz"
 
 run!(simulation)
@@ -127,7 +123,7 @@ if get(ENV, "CI", "false") == "false"
     times = ρet.times
     Nt = length(ρet)
 
-    # Create visualization - expanded to 6 panels
+    # Create visualization - 4 panels
     fig = Figure(size=(1500, 1000), fontsize=12)
 
     # Subplot layout - 3 rows, 2 columns
@@ -139,7 +135,7 @@ if get(ENV, "CI", "false") == "false"
     axw = Axis(fig[3, 2], xlabel="x (km)", ylabel="z (km)", title="Vertical Velocity w (m/s)")
 
     # Time slider
-    slider = Slider(fig[4, 1:2], range=1:Nt, startvalue=1)
+    slider = Slider(fig[3, 1:2], range=1:Nt, startvalue=1)
     n = slider.value
 
     # Observable fields
@@ -163,14 +159,13 @@ if get(ENV, "CI", "false") == "false"
     ρe′_range = (minimum(ρe′t), maximum(ρe′t))
     T_range = (minimum(Tt), maximum(Tt))
     ζ_range = maximum(abs, ζt)
-    u_range = maximum(abs, ut)
     w_range = maximum(abs, wt)
 
     hme = heatmap!(axe, x, z, ρen, colorrange=ρe_range, colormap=:thermal)
     hme′ = heatmap!(axe′, x, z, ρe′n, colorrange=ρe′_range, colormap=:balance)
     hmT = heatmap!(axT, x, z, Tn, colorrange=T_range, colormap=:thermal)
     hmζ = heatmap!(axζ, x, z, ζn, colorrange=(-ζ_range, ζ_range), colormap=:balance)
-    hmu = heatmap!(axu, x, z, un, colorrange=(-u_range, u_range), colormap=:balance)
+    hmu = heatmap!(axu, x, z, un, colorrange=(-w_range, w_range), colormap=:balance)
     hmw = heatmap!(axw, x, z, wn, colorrange=(-w_range, w_range), colormap=:balance)
 
     # Add colorbars

@@ -42,14 +42,13 @@ u_bomex = AtmosphericProfilesLibrary.Bomex_u(FT)
 
 p₀ = 101500 # Pa
 θ₀ = 299.1 # K
-reference_constants = Breeze.Thermodynamics.ReferenceStateConstants(base_pressure=p₀, potential_temperature=θ₀)
-buoyancy = Breeze.MoistAirBuoyancy(; reference_constants) #, microphysics)
+buoyancy = Breeze.MoistAirBuoyancy(grid, base_pressure=p₀, reference_potential_temperature=θ₀)
 
 # Simple precipitation scheme from CloudMicrophysics
 FT = eltype(grid)
 microphysics = CloudMicrophysics.Parameters.Parameters0M{FT}(τ_precip=600, S_0=0, qc_0=0.02)
-@inline precipitation(x, y, z, t, q, params) = remove_precipitation(params, q, 0)
-q_precip_forcing = Forcing(precipitation, field_dependencies=:q, parameters=microphysics)
+@inline precipitation(x, y, z, t, qᵗ, params) = remove_precipitation(params, qᵗ, 0)
+q_precip_forcing = Forcing(precipitation, field_dependencies=:qᵗ, parameters=microphysics)
 
 θ_bcs = FieldBoundaryConditions(bottom=FluxBoundaryCondition(8e-3))
 q_bcs = FieldBoundaryConditions(bottom=FluxBoundaryCondition(5.2e-5))
@@ -143,17 +142,11 @@ set!(Fθ_field, z -> dTdt_bomex(1, z))
 θ_radiation_forcing = Forcing(Fθ_field)
 θ_forcing = (θ_radiation_forcing, θ_subsidence_forcing)
 
-# Note that most of the models that participated in Siebesma et al 2003
-# use 2nd order advection together with either TKE or Smag-Lilly closure.
-advection = WENO(order=9)
-closure = nothing
-# advection = Centered(order=2)
-# closure = SmagorinskyLilly()
-
-model = NonhydrostaticModel(; grid, advection, buoyancy, coriolis, closure,
-                            tracers = (:θ, :q),
+model = NonhydrostaticModel(; grid, buoyancy, coriolis,
+                            advection = WENO(order=5), 
+                            tracers = (:θ, :qᵗ),
                             forcing = (; q=q_forcing, u=u_forcing, v=v_forcing, θ=θ_forcing),
-                            boundary_conditions = (θ=θ_bcs, q=q_bcs, u=u_bcs, v=v_bcs))
+                            boundary_conditions = (θ=θ_bcs, qᵗ=q_bcs, u=u_bcs, v=v_bcs))
 
 # Values for the initial perturbations can be found in Appendix B
 # of Siebesma et al 2003, 3rd paragraph
@@ -162,7 +155,7 @@ qϵ = 2.5e-5
 θᵢ(x, y, z) = θ_bomex(z) + θϵ * randn()
 qᵢ(x, y, z) = q_bomex(z) + qϵ * randn()
 uᵢ(x, y, z) = u_bomex(z)
-set!(model, θ=θᵢ, q=qᵢ, u=uᵢ)
+set!(model, θ=θᵢ, qᵗ=qᵢ, u=uᵢ)
 
 simulation = Simulation(model; Δt=1, stop_time)
 conjure_time_step_wizard!(simulation, cfl=0.7)
@@ -171,7 +164,7 @@ conjure_time_step_wizard!(simulation, cfl=0.7)
 u_avg = Field(Average(model.velocities.u, dims=(1, 2)))
 v_avg = Field(Average(model.velocities.v, dims=(1, 2)))
 θ_avg = Field(Average(model.tracers.θ, dims=(1, 2)))
-q_avg = Field(Average(model.tracers.q, dims=(1, 2)))
+q_avg = Field(Average(model.tracers.qᵗ, dims=(1, 2)))
 
 function compute_averages!(sim)
     compute!(u_avg)
@@ -190,7 +183,7 @@ add_callback!(simulation, compute_averages!)
 T = Breeze.TemperatureField(model)
 qˡ = Breeze.CondensateField(model, T)
 qᵛ⁺ = Breeze.SaturationField(model, T)
-qᵛ = model.tracers.q - qˡ
+qᵛ = model.tracers.qᵗ - qˡ
 rh = Field(qᵛ / qᵛ⁺) # relative humidity
 
 T_avg = Field(Average(T, dims=(1, 2)))
@@ -246,8 +239,8 @@ function progress(sim)
     umax = maximum(abs, u_avg)
     vmax = maximum(abs, v_avg)
 
-    q = sim.model.tracers.q
-    qmax = maximum(q)
+    qᵗ = sim.model.tracers.qᵗ
+    qᵗmax = maximum(qᵗ)
 
     θ = sim.model.tracers.θ
     θmin = minimum(θ)
@@ -256,8 +249,8 @@ function progress(sim)
     msg = @sprintf("Iter: %d, t: %s, Δt: %s, max|ū|: (%.2e, %.2e), max(rh): %.2f",
                     iteration(sim), prettytime(sim), prettytime(sim.Δt), umax, vmax, rhmax)
 
-    msg *= @sprintf(", max(q): %.2e, max(qˡ): %.2e, extrema(θ): (%.3e, %.3e)",
-                     qmax, qˡmax, θmin, θmax)
+    msg *= @sprintf(", max(qᵗ): %.2e, max(qˡ): %.2e, extrema(θ): (%.3e, %.3e)",
+                     qᵗmax, qˡmax, θmin, θmax)
 
     @info msg
 
@@ -296,14 +289,14 @@ using CairoMakie
 if get(ENV, "CI", "false") == "false"
     θt  = FieldTimeSeries(averages_filename, "θ")
     Tt  = FieldTimeSeries(averages_filename, "T")
-    qt  = FieldTimeSeries(averages_filename, "q")
+    qᵗt  = FieldTimeSeries(averages_filename, "qᵗ")
     qˡt = FieldTimeSeries(averages_filename, "qˡ")
-    times = qt.times
+    times = qᵗt.times
     Nt = length(θt)
 
     fig = Figure(size=(1200, 800), fontsize=12)
     axθ  = Axis(fig[1, 1], xlabel="θ (ᵒK)", ylabel="z (m)")
-    axq  = Axis(fig[1, 2], xlabel="q (kg/kg)", ylabel="z (m)")
+    axqᵗ = Axis(fig[1, 2], xlabel="qᵗ (kg/kg)", ylabel="z (m)")
     axT  = Axis(fig[2, 1], xlabel="T (ᵒK)", ylabel="z (m)")
     axqˡ = Axis(fig[2, 2], xlabel="qˡ (kg/kg)", ylabel="z (m)")
 
@@ -312,8 +305,8 @@ if get(ENV, "CI", "false") == "false"
 
     n = slider.value #Observable(length(θt))
     θn  = @lift interior(θt[$n], 1, 1, :)
-    qn  = @lift interior(qt[$n], 1, 1, :)
     Tn  = @lift interior(Tt[$n], 1, 1, :)
+    qᵗn = @lift interior(qᵗt[$n], 1, 1, :)
     qˡn = @lift interior(qˡt[$n], 1, 1, :)
     z = znodes(θt)
     title = @lift "t = $(prettytime(times[$n]))"
@@ -321,8 +314,8 @@ if get(ENV, "CI", "false") == "false"
     fig[0, :] = Label(fig, title, fontsize=22, tellwidth=false)
 
     hmθ  = lines!(axθ, θn, z)
-    hmq  = lines!(axq, qn, z)
     hmT  = lines!(axT, Tn, z)
+    hmqᵗ = lines!(axqᵗ, qᵗn, z)
     hmqˡ = lines!(axqˡ, qˡn, z)
     xlims!(axqˡ, -1e-4, 1.5e-3)
 

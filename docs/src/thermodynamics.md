@@ -187,23 +187,19 @@ with ``Rᵈ = 286.71 \; \mathrm{J} \, \mathrm{K}^{-1}``:
 
 ```@example reference_state
 using Breeze
-using Breeze.Thermodynamics: reference_pressure, reference_density
 using CairoMakie
 
-thermo = ThermodynamicConstants()
-constants = ReferenceStateConstants(base_pressure=101325, potential_temperature=288)
 grid = RectilinearGrid(size=160, z=(0, 12_000), topology=(Flat, Flat, Bounded))
+thermo = ThermodynamicConstants()
+reference_state = ReferenceState(grid, thermo, base_pressure=101325, potential_temperature=288)
 
-pᵣ = CenterField(grid)
-ρᵣ = CenterField(grid)
-
-set!(pᵣ, z -> reference_pressure(z, constants, thermo))
-set!(ρᵣ, z -> reference_density(z, constants, thermo))
+pᵣ = reference_state.pressure
+ρᵣ = reference_state.density
 
 Rᵈ = Breeze.Thermodynamics.dry_air_gas_constant(thermo)
 cᵖᵈ = thermo.dry_air.heat_capacity
-p₀ = constants.base_pressure
-θ₀ = constants.reference_potential_temperature
+p₀ = reference_state.base_pressure
+θ₀ = reference_state.potential_temperature
 g = thermo.gravitational_acceleration
 
 # Verify that Tᵣ = θ₀ (1 - g z / (cᵖᵈ θ₀))
@@ -280,17 +276,18 @@ More generally, ``qᵈ = 1 - qᵛ - qᶜ``, where ``qᶜ`` is the total mass
 ratio of condensed species. In most situations on Earth, ``qᶜ ≪ qᵛ``.
 
 ```@example thermo
+using Breeze.Thermodynamics: MoistureMassFractions
+
 # Compute mixture properties for air with 0.01 specific humidity
-qᵛ = 0.01 # 1% water vapor by mass
-Rᵐ = mixture_gas_constant(qᵛ, thermo)
+qᵗ = 0.01 # 1% water vapor by mass
+q = MoistureMassFractions(qᵗ, zero(qᵗ), zero(qᵗ))
+Rᵐ = mixture_gas_constant(q, thermo)
 ```
 
 We likewise define a mixture heat capacity via ``cᵖᵐ = qᵈ cᵖᵈ + qᵛ cᵖᵛ``,
 
-
 ```@example thermo
-q = 0.01 # 1% water vapor by mass
-cᵖᵐ = mixture_heat_capacity(qᵛ, thermo)
+cᵖᵐ = mixture_heat_capacity(q, thermo)
 ```
 
 ## Liquid-ice potential temperature
@@ -313,7 +310,7 @@ heats, the latent heat of a phase transition is linear in temperature.
 For example, for phase change from vapor to liquid,
 
 ```math
-ℒˡ(T) = ℒˡ(T=0) + \big ( \underbrace{cᵖᵛ - cᵖˡ}_{≡Δcˡ} \big ) T ,
+ℒˡ(T) = ℒˡ(T=0) + \big ( \underbrace{cᵖᵛ - cˡ}_{≡Δcˡ} \big ) T ,
 ```
 
 where ``ℒˡ(T=0)`` is the latent heat at absolute zero, ``T = 0 \; \mathrm{K}``.
@@ -327,13 +324,13 @@ Consider parameters for liquid water,
 
 ```@example thermo
 using Breeze.Thermodynamics: CondensedPhase
-liquid_water = CondensedPhase(latent_heat=2500800, heat_capacity=4181)
+liquid_water = CondensedPhase(reference_latent_heat=2500800, heat_capacity=4181)
 ```
 
 or water ice,
 
 ```@example thermo
-water_ice = CondensedPhase(latent_heat=2834000, heat_capacity=2108)
+water_ice = CondensedPhase(reference_latent_heat=2834000, heat_capacity=2108)
 ```
 
 The saturation vapor pressure is
@@ -369,14 +366,19 @@ and this is what it looks like:
 
 ```@example
 using Breeze
-using Breeze.MoistAirBuoyancies: saturation_specific_humidity
+using Breeze.Thermodynamics: saturation_specific_humidity
 
 thermo = ThermodynamicConstants()
-ref = ReferenceStateConstants(base_pressure=101325, potential_temperature=288)
 
-z = 0
+p₀ = 101325
+Rᵈ = Breeze.Thermodynamics.dry_air_gas_constant(thermo)
 T = collect(273.2:0.1:313.2)
-qᵛ⁺ = [saturation_specific_humidity(Tⁱ, z, ref, thermo, thermo.liquid) for Tⁱ in T]
+qᵛ⁺ = zeros(length(T))
+
+for i = 1:length(T)
+    ρ = p₀ / (Rᵈ * T[i])
+    qᵛ⁺[i] = saturation_specific_humidity(T[i], ρ, thermo, thermo.liquid)
+end
 
 using CairoMakie
 
