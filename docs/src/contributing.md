@@ -2,18 +2,22 @@
 
 ## Developing `Breeze.jl` locally
 
-The easiest way to develop `Breeze.jl` locally is to run the following command in the Julia REPL:
+To develop `Breeze.jl` locally, git clone the repo:
 
-```julia
-import Pkg
-Pkg.dev("https://github.com/NumericalEarth/Breeze.jl")
+```sh
+git clone https://github.com/NumericalEarth/Breeze.jl
 ```
-
-This will automatically clone the repository to `~/.julia/dev/Breeze`, where you can then hack its source code.
 
 ## [Running the tests](@id running-tests)
 
-To run the tests of `Breeze.jl`, in an interactive Julia REPL, after having activated the environment in you which you installed `Breeze.jl`, you can type `]` to enter the Pkg mode and then run
+After entering the top-level directory of your local clone of `Breeze.jl` (`cd Breeze.jl`), start Julia with
+
+```sh
+julia --project=.
+```
+
+to activate the environment of the package.
+Then, in an interactive Julia REPL you just started, you can run the tests by typing `]` to enter the Pkg mode and then run
 
 ```
 test Breeze
@@ -67,7 +71,7 @@ You can preview how the documentation will look like with your changes by buildi
 From the top-level directory of your local repository run
 
 ```sh
-julia --project=docs/ -e 'using Pkg; Pkg.develop(PackageSpec(path=pwd())); Pkg.instantiate()'
+julia --project=docs/ -e 'using Pkg; Pkg.instantiate()'
 ```
 
 to instantiate the documentation environment and then
@@ -79,3 +83,14 @@ julia --project=docs/ docs/make.jl
 to build the documentation.
 If you want to quickly build a draft copy of the documentation (i.e. without running all the examples or running the doctests), modify the [call to the `makedocs`](https://github.com/NumericalEarth/Breeze.jl/blob/073f16e7819b310f0ef68e1f41187965323fc1a0/docs/make.jl#L14-L30) function in `docs/make.jl` to add the keyword argument `draft=true` and run again the `docs/make.jl` script.
 When you submit a pull request to `Breeze.jl`, if the documentation building job is successfull a copy of the build will be uploaded as an artifact, which you can retrieve by looking at the summary page of the documentation job.
+
+To view the documentation you can open the generated HTML files in the `docs/build` directory, but you need an HTTP server to be able to move around the website and follow internal links.
+The [`LiveServer`](https://github.com/JuliaDocs/LiveServer.jl) package provides a simple HTTP server implementation, which also automatically reloads the pages when they are modified on disk:
+
+```julia
+import Pkg
+Pkg.activate("live-server"; shared=true)
+Pkg.add("LiveServer") # this is necessary only the first time, to install
+using LiveSever: serve
+serve(; dir="docs/build")
+```
