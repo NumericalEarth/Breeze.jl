@@ -1,11 +1,11 @@
 # Warm-phase saturation adjustment
 
 Warm-phase saturation adjustment is a model for water droplet nucleation that assumes that water vapor in excess of the saturation specific humidity is instantaneously converted to liquid water.
-Mixed-phase saturation adjustment is described by [Chammas2023](@citet).
+Mixed-phase saturation adjustment is described by [Pressel2015](@citet).
 Saturation adjustment may be formulated as a nonlinear algebraic equation that relates temperature, potential temperature, and total specific humidity, derived from the definition of liquid potential temperature,
 
 ```math
-θ = \frac{T}{Π} \left \{1 - \frac{ℒᵥ₀}{cᵖᵐ T} \max \left [0, qᵗ - qᵛ⁺(T) \right ] \right \} ,
+θ = \frac{1}{Π} \left \{T - \frac{ℒᵥ₀}{cᵖᵐ} \max \left [0, qᵗ - qᵛ⁺(T) \right ] \right \} ,
 ```
 
 where ``Π`` is the Exner function, ``θ`` is potential temperature, ``T`` is temperature,
