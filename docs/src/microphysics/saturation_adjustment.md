@@ -73,7 +73,7 @@ As a second example, we examine the dependence of temperature on total specific 
 when the potential temperature is constant:
 
 ```@example microphysics
-qᵗ = 0:1e-4:0.04 # [kg kg⁻¹] total specific humidity
+qᵗ = 0:1e-4:0.035 # [kg kg⁻¹] total specific humidity
 q = [MoistureMassFractions(qᵗⁱ, 0.0, 0.0) for qᵗⁱ in qᵗ]
 U = [PotentialTemperatureState(θ₀, qⁱ, z, p₀, p₀, ρ₀) for qⁱ in q]
 T = [temperature(Uⁱ, thermo) for Uⁱ in U]
@@ -81,7 +81,7 @@ T = [temperature(Uⁱ, thermo) for Uⁱ in U]
 ## Compare with a simple piecewise linear model
 ℒᵥ₀ = thermo.liquid.reference_latent_heat
 cᵖᵈ = thermo.dry_air.heat_capacity
-T̃ = [290 + ℒᵥ₀ / cᵖᵈ * max(0, qᵗⁱ - qᵛ⁺₀) for qᵗⁱ in qᵗ]
+T̃ = [288 + ℒᵥ₀ / cᵖᵈ * max(0, qᵗⁱ - qᵛ⁺₀) for qᵗⁱ in qᵗ]
 
 using CairoMakie
 
