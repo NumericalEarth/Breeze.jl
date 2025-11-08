@@ -31,6 +31,11 @@ using Oceananigans
 using Oceananigans.Units
 using CairoMakie
 using Breeze
+using Random: seed!
+
+# Fix the seed to generate the noise, for reproducible simulations.
+# You can try different seeds to explore different noise patterns.
+seed!(491)
 
 Nx = Nz = 64
 Lz = 4 * 1024
