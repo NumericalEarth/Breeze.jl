@@ -46,6 +46,7 @@ jobs:
           - ubuntu-latest
           - macOS-latest
           - windows-latest
+          - nvidia-gpu-t4
         arch:
           - "default"
         exclude:
