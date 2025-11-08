@@ -187,7 +187,6 @@ with ``Rᵈ = 286.71 \; \mathrm{J} \, \mathrm{K}^{-1}``:
 
 ```@example reference_state
 using Breeze
-using Breeze.Thermodynamics: reference_pressure, reference_density
 using CairoMakie
 
 grid = RectilinearGrid(size=160, z=(0, 12_000), topology=(Flat, Flat, Bounded))
@@ -377,7 +376,7 @@ T = collect(273.2:0.1:313.2)
 qᵛ⁺ = zeros(length(T))
 
 for i = 1:length(T)
-    ρ = p₀ / (Rᵈ * Tⁱ)
+    ρ = p₀ / (Rᵈ * T[i])
     qᵛ⁺[i] = saturation_specific_humidity(T[i], ρ, thermo, thermo.liquid)
 end
 
