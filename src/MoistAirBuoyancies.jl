@@ -188,15 +188,23 @@ Solution of ``r(T) = 0`` is found via the [secant method](https://en.wikipedia.o
     qᵗ <= qᵛ⁺₁ && return T₁
 
     # If we made it this far, the state is saturated.
-    # T₁ then provides a lower bound.
-    # We generate a second guess using the liquid fraction
-    # associated with T₁, which should also represent an underestimate.
-    q₁ = MoistureMassFractions(qᵛ⁺₁, qᵗ - qᵛ⁺₁, zero(qᵗ))
+    # T₁ then provides a lower bound, and our state 𝒰₁
+    # has to be modified to consistently include the liquid mass fraction.
+    # Subsequent computations will assume that the specific humidity
+    # is given by the saturation specific humidity, eg ``qᵛ = qᵛ⁺``.
+    qᵛ⁺₁ = adjustment_saturation_specific_humidity(T₁, 𝒰₁, thermo)
+    qˡ₁ = qᵗ - qᵛ⁺₁
+    q₁ = MoistureMassFractions(qᵛ⁺₁, qˡ₁, zero(qˡ₁))
     𝒰₁ = with_moisture(𝒰₀, q₁)
-    ℒˡ = thermo.liquid.reference_latent_heat
+
+    # We generate a second guess to start a secant iteration
+    # by applying the potential temperature assuming a liquid fraction
+    # associated with T₁. This should represent an _overestimate_,
+    # since ``qᵛ⁺₁(T₁)`` underestimates the saturation specific humidity,
+    # and therefore qˡ₁ is overestimated
+    ℒˡᵣ = thermo.liquid.reference_latent_heat
     cᵖᵐ = mixture_heat_capacity(q₁, thermo)
-    # @show q₁.liquid
-    T₂ = T₁ + ℒˡ * q₁.liquid / cᵖᵐ
+    T₂ = T₁ + ℒˡᵣ * qˡ₁ / cᵖᵐ
     𝒰₂ = adjust_state(𝒰₁, T₂, thermo)
 
     # Initialize saturation adjustment
@@ -207,7 +215,7 @@ Solution of ``r(T) = 0`` is found via the [secant method](https://en.wikipedia.o
     δ = ϵ * R
     iter = 0
 
-    while abs(r₂ - r₁) > δ
+    while abs(r₂) > δ
         # Compute slope
         ΔTΔr = (T₂ - T₁) / (r₂ - r₁)
 
@@ -220,27 +228,29 @@ Solution of ``r(T) = 0`` is found via the [secant method](https://en.wikipedia.o
         𝒰₂ = adjust_state(𝒰₂, T₂, thermo)
         r₂ = saturation_adjustment_residual(T₂, 𝒰₂, thermo)
 
-        # if iter > 3
-        #     @show iter r₂
-        # end
-
         iter += 1
     end
+    
+    @show iter r₂
 
     return T₂
 end
 
 # This estimate assumes that the specific humidity is itself the saturation
-# specific humidity, which is needed to compute density.
-# See Pressel et al 2015, equation 37
+# specific humidity, eg ``qᵛ = qᵛ⁺``. Knowledge of the specific humidity
+# is needed to compute the mixture gas constant, and thus density, 
+# which in turn is needed to compute the _saturation_ specific humidity.
+# This consideration culminates in a new expression for saturation specific humidity
+# used below, and also written in Pressel et al 2015, equation 37.
+# (There is an error in the description below it, but the equation 37 is correct.)
 function adjustment_saturation_specific_humidity(T, 𝒰, thermo)
     pᵛ⁺ = saturation_vapor_pressure(T, thermo, thermo.liquid)
     pᵣ = 𝒰.reference_pressure
     qᵗ = total_specific_humidity(𝒰)
     Rᵈ = dry_air_gas_constant(thermo)
     Rᵛ = vapor_gas_constant(thermo)
-    ϵ = Rᵈ / Rᵛ
-    return ϵ * (1 - qᵗ) * pᵛ⁺ / (pᵣ - pᵛ⁺)
+    ϵᵈᵛ = Rᵈ / Rᵛ
+    return ϵᵈᵛ * (1 - qᵗ) * pᵛ⁺ / (pᵣ - pᵛ⁺)
 end
 
 @inline function adjust_state(𝒰₀, T, thermo)
