@@ -31,6 +31,11 @@ using Oceananigans
 using Oceananigans.Units
 using CairoMakie
 using Breeze
+using Random: seed!
+
+# Fix the seed to generate the noise, for reproducible simulations.
+# You can try different seeds to explore different noise patterns.
+seed!(42)
 
 Nx = Nz = 64
 Lz = 4 * 1024
@@ -53,7 +58,7 @@ model = NonhydrostaticModel(; grid, advection, buoyancy,
 
 Δθ = 2 # ᵒK
 Tₛ = reference_constants.reference_potential_temperature # K
-θᵢ(x, z) = Tₛ + Δθ * z / grid.Lz + 1e-2 * Δθ * randn()
+θᵢ(x, z) = Tₛ + Δθ * z / grid.Lz + 2e-2 * Δθ * (rand() - 0.5)
 qᵢ(x, z) = 0 # 1e-2 + 1e-5 * rand()
 set!(model, θ=θᵢ, q=qᵢ)
 

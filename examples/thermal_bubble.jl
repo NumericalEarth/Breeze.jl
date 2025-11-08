@@ -35,8 +35,7 @@ buoyancy = MoistAirBuoyancy(; reference_constants)
 advection = WENO(order=5)
 
 # Create the model
-#model = NonhydrostaticModel(; grid, advection, buoyancy, tracers = (:θ, :q))
-model = AtmosphereModel(grid; advection) #, buoyancy, tracers = (:θ, :q))
+model = AtmosphereModel(grid; advection)
 
 # Thermal bubble parameters
 x₀ = Lx / 2      # Center of bubble in x
@@ -45,7 +44,7 @@ r₀ = 2e3         # Initial radius of bubble (2 km)
 Δθ = 2           # Potential temperature perturbation (ᵒK)
 
 # Background stratification
-N² = 1e-6        # Brunt-Väisälä frequency squared (s⁻²)
+N² = 1e-8        # Brunt-Väisälä frequency squared (s⁻²)
 dθdz = N² * θ₀ / 9.81  # Background potential temperature gradient
 
 # Initial conditions
@@ -67,16 +66,16 @@ conjure_time_step_wizard!(simulation, cfl=0.7)
 
 # Progress monitoring
 function progress(sim)
-    θ = sim.model.tracers.θ
+    ρe = sim.model.energy
     u, w = sim.model.velocities
 
-    θ_max = maximum(θ)
-    θ_min = minimum(θ)
+    ρe_max = maximum(ρe)
+    ρe_min = minimum(ρe)
     u_max = maximum(abs, u)
     w_max = maximum(abs, w)
 
-    msg = @sprintf("Iter: %d, t: %s, Δt: %s, extrema(θ): (%.2f, %.2f) K, max|u|: %.2f m/s, max|w|: %.2f m/s",
-                   iteration(sim), prettytime(sim), prettytime(sim.Δt), θ_min, θ_max, u_max, w_max)
+    msg = @sprintf("Iter: %d, t: %s, Δt: %s, extrema(ρe): (%.2f, %.2f) J/kg, max|u|: %.2f m/s, max|w|: %.2f m/s",
+                   iteration(sim), prettytime(sim), prettytime(sim.Δt), ρe_min, ρe_max, u_max, w_max)
 
     @info msg
     return nothing
@@ -92,12 +91,13 @@ u, v, w = model.velocities
 ζ = ∂x(w) - ∂z(u)
 
 # Temperature perturbation from background state
-θ_bg_field = Field{Nothing, Nothing, Center}(grid)
-set!(θ_bg_field, z -> θ₀ + dθdz * z)
-θ′ = model.tracers.θ - θ_bg_field
+ρE = Field{Nothing, Nothing, Center}(grid)
+set!(E, Field(Average(model.energy, dims=(1, 2))))
+ρe′ = model.energy - ρE
+ρe = model.energy
+T = model.temperature
 
-#outputs = merge(model.velocities, model.tracers, (; T, ζ, θ′))
-outputs = merge(model.velocities, model.tracers, (; ζ, θ′))
+outputs = merge(model.velocities, model.tracers, (; ζ, ρe′, ρe, T))
 
 filename = "thermal_bubble_$(Nx)x$(Nz).jld2"
 writer = JLD2Writer(model, outputs; filename,
@@ -117,22 +117,22 @@ if get(ENV, "CI", "false") == "false"
     @info "Creating visualization..."
 
     # Read the output data
-    θt = FieldTimeSeries(filename, "θ")
+    ρet = FieldTimeSeries(filename, "ρe")
     Tt = FieldTimeSeries(filename, "T")
     ut = FieldTimeSeries(filename, "u")
     wt = FieldTimeSeries(filename, "w")
     ζt = FieldTimeSeries(filename, "ζ")
-    θ′t = FieldTimeSeries(filename, "θ′")
+    ρe′t = FieldTimeSeries(filename, "ρe′")
 
-    times = θt.times
-    Nt = length(θt)
+    times = ρet.times
+    Nt = length(ρet)
 
     # Create visualization - expanded to 6 panels
     fig = Figure(size=(1500, 1000), fontsize=12)
 
     # Subplot layout - 3 rows, 2 columns
-    axθ = Axis(fig[1, 1], xlabel="x (km)", ylabel="z (km)", title="Potential Temperature θ (ᵒK)")
-    axθ′ = Axis(fig[1, 2], xlabel="x (km)", ylabel="z (km)", title="Temperature Perturbation θ′ (ᵒK)")
+    axe = Axis(fig[1, 1], xlabel="x (km)", ylabel="z (km)", title="Energy ρe (J / kg)")
+    axe′ = Axis(fig[1, 2], xlabel="x (km)", ylabel="z (km)", title="Energy Perturbation ρe′ (J / kg)")
     axT = Axis(fig[2, 1], xlabel="x (km)", ylabel="z (km)", title="Temperature T (ᵒK)")
     axζ = Axis(fig[2, 2], xlabel="x (km)", ylabel="z (km)", title="Vorticity ζ (s⁻¹)")
     axu = Axis(fig[3, 1], xlabel="x (km)", ylabel="z (km)", title="Horizontal Velocity u (m/s)")
@@ -143,46 +143,46 @@ if get(ENV, "CI", "false") == "false"
     n = slider.value
 
     # Observable fields
-    θn = @lift interior(θt[$n], :, 1, :)
-    θ′n = @lift interior(θ′t[$n], :, 1, :)
+    ρen = @lift interior(ρet[$n], :, 1, :)
+    ρe′n = @lift interior(ρe′t[$n], :, 1, :)
     Tn = @lift interior(Tt[$n], :, 1, :)
     ζn = @lift interior(ζt[$n], :, 1, :)
     un = @lift interior(ut[$n], :, 1, :)
     wn = @lift interior(wt[$n], :, 1, :)
 
     # Grid coordinates
-    x = xnodes(θt) ./ 1000  # Convert to km
-    z = znodes(θt) ./ 1000  # Convert to km
+    x = xnodes(ρet) ./ 1000  # Convert to km
+    z = znodes(ρet) ./ 1000  # Convert to km
 
     # Title with time
     title = @lift "Thermal Bubble Evolution - t = $(prettytime(times[$n]))"
     fig[0, :] = Label(fig, title, fontsize=16, tellwidth=false)
 
     # Create heatmaps
-    θ_range = (minimum(θt), maximum(θt))
-    θ′_range = (minimum(θ′t), maximum(θ′t))
+    ρe_range = (minimum(ρet), maximum(ρet))
+    ρe′_range = (minimum(ρe′t), maximum(ρe′t))
     T_range = (minimum(Tt), maximum(Tt))
     ζ_range = maximum(abs, ζt)
     u_range = maximum(abs, ut)
     w_range = maximum(abs, wt)
 
-    hmθ = heatmap!(axθ, x, z, θn, colorrange=θ_range, colormap=:thermal)
-    hmθ′ = heatmap!(axθ′, x, z, θ′n, colorrange=θ′_range, colormap=:balance)
+    hme = heatmap!(axe, x, z, ρen, colorrange=ρe_range, colormap=:thermal)
+    hme′ = heatmap!(axe′, x, z, ρe′n, colorrange=ρe′_range, colormap=:balance)
     hmT = heatmap!(axT, x, z, Tn, colorrange=T_range, colormap=:thermal)
     hmζ = heatmap!(axζ, x, z, ζn, colorrange=(-ζ_range, ζ_range), colormap=:balance)
     hmu = heatmap!(axu, x, z, un, colorrange=(-u_range, u_range), colormap=:balance)
     hmw = heatmap!(axw, x, z, wn, colorrange=(-w_range, w_range), colormap=:balance)
 
     # Add colorbars
-    Colorbar(fig[1, 3], hmθ, label="θ (ᵒK)", vertical=true)
-    Colorbar(fig[1, 4], hmθ′, label="θ′ (ᵒK)", vertical=true)
+    Colorbar(fig[1, 3], hme, label="ρe (J/kg)", vertical=true)
+    Colorbar(fig[1, 4], hme′, label="ρe′ (J/kg)", vertical=true)
     Colorbar(fig[2, 3], hmT, label="T (ᵒK)", vertical=true)
     Colorbar(fig[2, 4], hmζ, label="ζ (s⁻¹)", vertical=true)
     Colorbar(fig[3, 3], hmu, label="u (m/s)", vertical=true)
     Colorbar(fig[3, 4], hmw, label="w (m/s)", vertical=true)
 
     # Set axis limits
-    for ax in [axθ, axθ′, axT, axζ, axu, axw]
+    for ax in [axe, axe′, axT, axζ, axu, axw]
         xlims!(ax, 0, Lx/1000)
         ylims!(ax, 0, Lz/1000)
     end
@@ -197,6 +197,7 @@ if get(ENV, "CI", "false") == "false"
         @info "Drawing frame $nn of $Nt..."
         n[] = nn
     end
+
     @info "Saved animation to thermal_bubble.mp4"
 end
 

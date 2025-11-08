@@ -6,6 +6,8 @@ on:
       - "main"
     paths:
       - ".github/workflows/Validation.yml"
+      - "examples/Project.jl"
+      - "examples/bomex.jl"
       - "ext/**"
       - "src/**"
       - "test/**"
@@ -13,6 +15,8 @@ on:
   pull_request:
     paths:
       - ".github/workflows/Validation.yml"
+      - "examples/Project.jl"
+      - "examples/bomex.jl"
       - "ext/**"
       - "src/**"
       - "test/**"
@@ -40,7 +44,7 @@ jobs:
       fail-fast: false
       matrix:
         version:
-          - "min"
+          - "1.12"
         os:
           - ubuntu-latest
     steps:
@@ -50,17 +54,17 @@ jobs:
           version: ${{ matrix.version }}
       - uses: julia-actions/cache@v2
         id: julia-cache
-      - name: Add CairoMakie to Project.toml
-        shell: julia --color=yes --project {0}
+      - name: Instantiate examples environment
+        shell: julia --color=yes --project=examples {0}
         run: |
           using Pkg
-          Pkg.add("CairoMakie")
+          Pkg.instantiate()
       - name: Run BOMEX example
         env:
           VALIDATION: "true"
           CI: "true"
         run: |
-          julia --color=yes --project=. examples/bomex.jl
+          julia --color=yes --project=examples examples/bomex.jl
       - name: Save Julia depot cache on cancel or failure
         id: julia-cache-save
         if: cancelled() || failure()

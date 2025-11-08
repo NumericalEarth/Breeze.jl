@@ -1,19 +1,39 @@
-# Atmosphere Thermodynamics
+# [Atmosphere Thermodynamics](@id Thermodynamics-section)
 
 ```@setup thermo
 using Breeze
 thermo = ThermodynamicConstants()
 ```
 
-Breeze implements thermodynamic relations for moist atmospheres --
-fluids that can be described as a binary mixture of _(i)_ "dry" air, and _(ii)_ vapor,
-as well as liquid and solid condensates of the vapor component of various shapes and sizes.
+Breeze implements thermodynamic relations for moist atmospheres.
+By "moist", we mean that the atmosphere is a binary mixture
+of _(i)_ "dry" air, and _(ii)_ "vapor".
+The presence of moisture makes life interesting, because vapor can _condense_ or _solidify_
+(and liquid can _freeze_) into droplets and particles of so many shapes and sizes.
 
 On Earth, dry air is itself a mixture of gases, the vapor component is ``\mathrm{H_2 O}``,
-and the condensates comprise clouds and precipitation such as rain, snow, hail, and grapuel.
+also known as "water".
+Liquid droplets, which include almost-suspended tiny droplets as well as big raindrops,
+and ice particles such as snow, graupel, and hail, are called "condensates".
 Breeze models dry air as having a fixed composition with
 constant [molar mass](https://en.wikipedia.org/wiki/Molar_mass).
-Dry air on Earth's is mostly nitrogen, oxygen, and argon.
+Dry air on Earth's is mostly nitrogen, oxygen, and argon, whose combination produces the typical
+(and Breeze's default) dry air molar mass
+
+```@example thermo
+using Breeze
+thermo = ThermodynamicConstants()
+thermo.dry_air.molar_mass
+```
+
+Water vapor, which in Breeze has the default molar mass
+
+```@example thermo
+thermo.vapor.molar_mass
+```
+
+is lighter than dry air.
+As a result, moist, humid air is _lighter_ than dry air.
 
 ## Two laws for ideal gases
 
@@ -30,40 +50,42 @@ Above, ``R ≡ ℛ / m`` is the specific gas constant given the
 ``ℛ ≈ 8.31 \; \mathrm{J} \, \mathrm{K}^{-1} \, \mathrm{mol}^{-1}`` and molar mass ``m`` of the gas species under consideration.
 
 The [first law of thermodynamics](https://en.wikipedia.org/wiki/First_law_of_thermodynamics),
-aka "conservation of energy", states that an infinitesimal change in the
-external heat changes ``\mathrm{d} \mathcal{Q}`` are related to infinitesimal changes
-in temperature ``\mathrm{d} T`` and pressure ``\mathrm{d} p`` according to:[^1]
+aka "conservation of energy", states that infinitesimal changes in
+"heat content"[^1] ``\mathrm{d} \mathcal{H}`` are related to infinitesimal changes
+in temperature ``\mathrm{d} T`` and pressure ``\mathrm{d} p`` according to:[^2]
 
 ```math
-\mathrm{d} \mathcal{Q} = cᵖ \mathrm{d} T - \frac{\mathrm{d} p}{\rho} ,
+\mathrm{d} \mathcal{H} = cᵖ \mathrm{d} T - \frac{\mathrm{d} p}{ρ} ,
 ```
 
-[^1]: The conservation of energy states that any external heat input into the gas must equal the sum
+[^1]: ``\mathcal{H}`` is called [_enthalpy_](https://en.wikipedia.org/wiki/Enthalpy)
+
+[^2]: The conservation of energy states that any external heat input into the gas must equal the sum
       of the change of the gas's internal energy and the work done by the gas, ``p \, \mathrm{d} V``.
       For atmospheric flows it's convenient to express everything per unit mass. Assuming the mass of
       the fluid is conserved, we have that the work done per unit mass is ``p \, \mathrm{d}(\rho^{-1})``
-      and the internal energy per unit mass is ``cᵛ \mathrm{d} T``.
-      Therefore, if ``\mathrm{d} \mathcal{Q}`` is the external heat change per unit mass,
+      and the internal energy per unit mass is ``\mathcal{I} ≡ cᵛ \mathrm{d} T``.
+      Therefore, if ``\mathrm{d} \mathcal{H}`` is the change in heat content per unit mass,
       we have:
 
     ```math
-    \mathrm{d} \mathcal{Q} = cᵛ \mathrm{d}T + p \, \mathrm{d}(ρ^{-1}) .
+    \mathrm{d} \mathcal{H} = cᵛ \mathrm{d} T + p \, \mathrm{d}(ρ^{-1}) .
     ```
 
-      By utilising the identity ``\mathrm{d}(p / ρ) = p \, \mathrm{d}(ρ^{-1}) + ρ^{-1} \mathrm{d}p`` and using
-      the ideal gas, we can rewrite the above conservation law as:
+    By utilizing the identity ``\mathrm{d}(p / ρ) = p \, \mathrm{d}(ρ^{-1}) + ρ^{-1} \mathrm{d}p`` and using
+    the ideal gas, we can rewrite the above conservation law as:
 
     ```math
-    \mathrm{d} \mathcal{Q} = (cᵛ + R) \mathrm{d}T - ρ^{-1} \mathrm{d}p ,
+    \mathrm{d} \mathcal{H} = (cᵛ + R) \mathrm{d} T - ρ^{-1} \mathrm{d}p ,
     ```
 
-      which is the expression in the main text after noting that the specific heat capacities under
-      constant pressure and under constant volume are related via ``cᵖ ≡ cᵛ + R``.
+    which is the expression in the main text after noting that the specific heat capacities under
+    constant pressure and under constant volume are related via ``cᵖ ≡ cᵛ + R``.
 
 
 where ``cᵖ`` is the specific heat capacity at constant pressure of the gas in question.
 
-For example, to represent dry air typical for Earth, with molar mass ``m = 0.029 \; \mathrm{kg} \, \mathrm{mol}^{-1}`` and heat capacity ``c^p = 1005 \; \mathrm{J} \, \mathrm{kg}^{-1} \, \mathrm{K}^{-1}``,
+For example, to represent dry air typical for Earth, with molar mass ``m = 0.029 \; \mathrm{kg} \, \mathrm{mol}^{-1}`` and constant-pressure heat capacity ``c^p = 1005 \; \mathrm{J} \, \mathrm{kg}^{-1} \, \mathrm{K}^{-1}``,
 we write
 
 ```@example thermo
@@ -71,9 +93,17 @@ using Breeze.Thermodynamics: IdealGas
 dry_air = IdealGas(molar_mass=0.029, heat_capacity=1005)
 ```
 
-### Adiabatic transformations and potential temperature
+We can also change the properties of dry air by specifying new values
+when constructing `ThermodynamicConstants`,
 
-Within adiabatic transformations, ``\mathrm{d} \mathcal{Q} = 0``.
+```@example thermo
+weird_thermo = ThermodynamicConstants(dry_air_molar_mass=0.042, dry_air_heat_capacity=420)
+weird_thermo.dry_air
+```
+
+### Potential temperature and "adiabatic" transformations
+
+Within adiabatic transformations, ``\mathrm{d} \mathcal{H} = 0``.
 Then, combining the ideal gas law with conservation of energy yields
 
 ```math
@@ -91,57 +121,69 @@ As a result, the _potential temperature_, ``θ``, defined as
 
 remains constant under adiabatic transformations.
 Notice that above, we also defined the Exner function, ``Π ≡ ( p / p₀ )^{R / cᵖ}``.
-By convention, we tend to use as reference values those at the surface ``z=0``, i.e., ``p₀ = p(z=0)``, ``T₀ = T(z=0)``, etc.
-This implies that the potential temperature under adiabatic transformation is ``θ(z) = θ₀ = T₀``.
 
-(Superscript ``d`` denotes dry air, e.g., ``Rᵈ = 286.71 \; \mathrm{J} \, \mathrm{K}^{-1}``.)
+!!! note "About subscripts"
+    The subscript "0" typically indicates some quantity evaluated at the surface ``z=0``.
+    By convention, we tend to invoke constants that represent profiles evaluated at ``z=0``: i.e., ``p₀ = p(z=0)``, ``T₀ = T(z=0)``, etc.
+    This implies that the potential temperature under adiabatic transformation is ``θ(z) = θ₀ = T₀``.
 
 ### Hydrostatic balance
 
 Next we consider a reference state that does not exchange energy with its environment
-(i.e., ``\mathrm{d} \mathcal{Q} = 0``) and thus has constant potential temperature
+(i.e., ``\mathrm{d} \mathcal{H} = 0``) and thus has constant potential temperature
 
 ```math
-θ₀ = Tᵣ \left ( \frac{p₀}{pᵣ} \right )^{Rᵈ / cᵖᵈ} .
+θ₀ = Tᵣ \left ( \frac{p₀}{pᵣ} \right )^{R / cᵖ} .
 ```
 
-!!! note "About subscripts"
-    Subscripts ``0`` typically indicate evaluated values.
-    For example, in the above formula, ``p₀ ≡ pᵣ(z=0)``.
-    Subscripts ``r`` indicate _reference_ states, which typically are
-    functions of ``z``. This differs from the usual notation in which
-    the subscripts ``0`` indicate "reference" and "00" means ``z=0``.
-
+!!! note "Reference states"
+    Subscripts ``r`` indicate a _reference_ state.
+    The adiabatic, hydrostatically-balanced reference state in the process
+    of elucidation presently has a ``z`` dependent reference pressure ``pᵣ(z)``,
+    density ``ρᵣ(z)``, and temperature ``Tᵣ(z)``.
+    This reference state also has a _constant_ potential temperature
+    ``θᵣ``, which we attempt to clarify by writing ``θ₀`` (since it's constant,
+    it has the same value at ``z=0`` as at any height).
+    We apologize that our notation differs from the usual in which
+    ``0`` subscripts indicate "reference" (🤔) and ``00`` (🫣) means ``z=0``.
 
 Hydrostatic balance requires
 
 ```math
-∂_z pᵣ = - ρᵣ g .
+∂_z pᵣ = - ρᵣ g ,
+```
+
+where ``g`` is gravitational acceleration, naturally by default
+
+```@example thermo
+thermo.gravitational_acceleration
 ```
 
 By combining the hydrostatic balance with the ideal gas law and the definition of potential
 temperature we get
 
 ```math
-\frac{pᵣ}{p₀} = \left (1 - \frac{g z}{cᵖᵈ θ₀} \right )^{cᵖᵈ / Rᵈ} .
+\frac{pᵣ}{p₀} = \left (1 - \frac{g z}{cᵖ θ₀} \right )^{cᵖ / R} .
 ```
 
 Thus
 
 ```math
-Tᵣ(z) = θ₀ \left ( \frac{pᵣ}{p₀} \right )^{Rᵈ / cᵖᵈ} = θ₀ \left ( 1 - \frac{g z}{cᵖᵈ θ₀} \right ) ,
+Tᵣ(z) = θ₀ \left ( \frac{pᵣ}{p₀} \right )^{R / cᵖ} = θ₀ \left ( 1 - \frac{g z}{cᵖ θ₀} \right ) ,
 ```
 
 and
 
 ```math
-ρᵣ(z) = \frac{p₀}{Rᵈ θ₀} \left ( 1 - \frac{g z}{cᵖᵈ θ₀} \right )^{cᵖᵈ / Rᵈ - 1} .
+ρᵣ(z) = \frac{p₀}{Rᵈ θ₀} \left ( 1 - \frac{g z}{cᵖ θ₀} \right )^{cᵖ / R - 1} .
 ```
 
 ## An example of a dry reference state in Breeze
 
 We can visualise a hydrostatic reference profile evaluating Breeze's reference-state
-utilities (which assume a dry reference state) on a one-dimensional `RectilinearGrid`:
+utilities (which assume a dry reference state) on a one-dimensional `RectilinearGrid`.
+In the following code, the superscript ``d`` denotes dry air, e.g., an ideal gas
+with ``Rᵈ = 286.71 \; \mathrm{J} \, \mathrm{K}^{-1}``:
 
 ```@example reference_state
 using Breeze
@@ -251,6 +293,8 @@ q = 0.01 # 1% water vapor by mass
 cᵖᵐ = mixture_heat_capacity(qᵛ, thermo)
 ```
 
+## Liquid-ice potential temperature
+
 ## The Clausius--Clapeyron relation and saturation specific humidity
 
 The [Clausius--Clapeyron relation](https://en.wikipedia.org/wiki/Clausius%E2%80%93Clapeyron_relation)
@@ -262,21 +306,21 @@ for an ideal gas
 
 where ``pᵛ⁺`` is saturation vapor pressure, ``T`` is temperature, ``Rᵛ`` is the specific
 gas constant for vapor, ``ℒ^β(T)`` is the latent heat of the transition from vapor to the
-``β`` phase (e.g. ``l ≡ β`` for vapor → liquid and ``i ≡ β`` for vapor to ice).
+``β`` phase (e.g., ``β = l`` for vapor → liquid and ``β = i`` for vapor to ice).
 
 For a thermodynamic formulation that uses constant (i.e. temperature-independent) specific
 heats, the latent heat of a phase transition is linear in temperature.
 For example, for phase change from vapor to liquid,
 
 ```math
-ℒˡ(T) = ℒˡ_{0K} + \big ( \underbrace{cᵖᵛ - cᵖˡ}_{≡Δcˡ} \big ) T ,
+ℒˡ(T) = ℒˡ(T=0) + \big ( \underbrace{cᵖᵛ - cᵖˡ}_{≡Δcˡ} \big ) T ,
 ```
 
-where ``ℒˡ_{0K}`` is the latent heat at absolute zero, ``T = 0 \; \mathrm{K}``.
+where ``ℒˡ(T=0)`` is the latent heat at absolute zero, ``T = 0 \; \mathrm{K}``.
 By integrating from the triple-point temperature ``Tᵗʳ`` for which ``p(Tᵗʳ) = pᵗʳ``, we get
 
 ```math
-pᵛ⁺(T) = pᵗʳ \left ( \frac{T}{Tᵗʳ} \right )^{Δcˡ / Rᵛ} \exp \left [ \frac{ℒˡ_{0K}}{Rᵛ} \left (\frac{1}{Tᵗʳ} - \frac{1}{T} \right ) \right ] .
+pᵛ⁺(T) = pᵗʳ \left ( \frac{T}{Tᵗʳ} \right )^{Δcˡ / Rᵛ} \exp \left [ \frac{ℒˡ(T=0)}{Rᵛ} \left (\frac{1}{Tᵗʳ} - \frac{1}{T} \right ) \right ] .
 ```
 
 Consider parameters for liquid water,

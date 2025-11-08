@@ -1,0 +1,16 @@
+[deps]
+AtmosphericProfilesLibrary = "86bc3604-9858-485a-bdbe-831ec50de11d"
+Breeze = "660aa2fb-d4c8-4359-a52c-9c057bc511da"
+CairoMakie = "13f3f980-e62b-5c42-98c6-ff1f3baf88f0"
+CloudMicrophysics = "6a9e3e04-43cd-43ba-94b9-e8782df3c71b"
+GLMakie = "e9467ef8-e4e7-5192-8a1a-b1aee30e663a"
+JLD2 = "033835bb-8acc-5ee8-8aae-3f567f8a3819"
+Oceananigans = "9e8cae18-63c1-5223-a75c-80ca9d6e9a09"
+Printf = "de0858da-6303-5e67-8744-51eddeeeb8d7"
+
+[sources]
+Breeze = {path = ".."}
+
+[compat]
+AtmosphericProfilesLibrary = "0.1.7"
+CloudMicrophysics = "0.22.13, 0.29"

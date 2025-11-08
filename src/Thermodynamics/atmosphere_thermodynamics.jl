@@ -1,5 +1,5 @@
-using Adapt
-using Oceananigans.Utils: prettysummary
+using Adapt: Adapt, adapt
+using Oceananigans.Grids: prettysummary
 
 """
     IdealGas{FT}
@@ -356,6 +356,6 @@ condensate_specific_humidity(T, state, ref, thermo) =
     condensate_specific_humidity(T, state.q, state.z, ref, thermo)
 
 function condensate_specific_humidity(T, q, z, ref, thermo)
-    qᵛ★ = saturation_specific_humidity(T, z, ref, thermo, thermo.liquid)
-    return max(0, q - qᵛ★)
+    qᵛ⁺ = saturation_specific_humidity(T, z, ref, thermo, thermo.liquid)
+    return max(0, q - qᵛ⁺)
 end

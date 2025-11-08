@@ -5,11 +5,11 @@
 
 <!-- description -->
 <p align="center">
-  <strong>🌪 Fast and friendly Julia software for atmosphere simulations on CPUs and GPUs. https://numericalearth.github.io/Breeze.jl/dev/</strong>
+  <strong>🌪 Fast and friendly Julia software for atmosphere simulations on CPUs and GPUs. https://numericalearth.github.io/BreezeDocumentation/dev/</strong>
 </p>
 
 <p align="center">
-    <a href="https://numericalearth.github.io/Breeze.jl/dev/">
+    <a href="https://numericalearth.github.io/BreezeDocumentation/dev/">
     <img alt="Documentation" src="https://img.shields.io/badge/documentation-in%20development-orange?style=flat-square">
     </a>
     <a href="https://github.com/NumericalEarth/Breeze.jl/discussions">
@@ -20,6 +20,9 @@
   </a>
   <a href="https://codecov.io/gh/NumericalEarth/Breeze.jl" >
     <img src="https://codecov.io/gh/NumericalEarth/Breeze.jl/graph/badge.svg?token=09TZGWKUPV"/>
+  </a>  
+  <a href="[https://codecov.io/gh/NumericalEarth/Breeze.jl](https://github.com/JuliaTesting/Aqua.jl)" >
+    <img src="https://raw.githubusercontent.com/JuliaTesting/Aqua.jl/master/badge.svg"/>
   </a>
 </p>
 
