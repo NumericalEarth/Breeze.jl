@@ -46,7 +46,7 @@ Open Julia from within the local directory of the repo via:
 
 ```bash
 julia --project
-```****
+```
 
 The first time, you need to install any dependencies:
 
