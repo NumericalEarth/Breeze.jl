@@ -3,9 +3,8 @@ using Oceananigans.Units
 using Printf
 using Breeze
 
-arch = CPU()
-
-Nx = Nz = 64
+arch = GPU()
+Nx = Nz = 128
 Lz = 4 * 1024
 grid = RectilinearGrid(arch, size=(Nx, Nz), x=(0, 2Lz), z=(0, Lz), topology=(Periodic, Flat, Bounded))
 
@@ -26,17 +25,15 @@ vapor_flux = FluxBoundaryCondition(1e-2)
 qᵗ_bcs = FieldBoundaryConditions(bottom=vapor_flux)
 
 advection = WENO() #(momentum=WENO(), θ=WENO(), q=WENO(bounds=(0, 1)))
-tracers = (:θ, :q)
 model = NonhydrostaticModel(; grid, advection, buoyancy,
                             tracers = (:θ, :qᵗ),
                             boundary_conditions = (θ=θ_bcs, qᵗ=qᵗ_bcs))
 
 Lz = grid.Lz
-Δθ = 5 # K
+Δθ = 2 # K
 Tₛ = buoyancy.reference_state.potential_temperature # K
-θᵢ(x, z) = Tₛ + Δθ * z / Lz + 1e-2 * Δθ * randn()
-qᵗᵢ(x, z) = 0 # 1e-2 + 1e-5 * rand()
-set!(model, θ=θᵢ, qᵗ=qᵗᵢ)
+θᵢ(x, z) = Tₛ + Δθ * z / Lz + 1e-2 * Δθ * rand()
+set!(model, θ=θᵢ)
 
 simulation = Simulation(model, Δt=10, stop_iteration=1000) #stop_time=4hours)
 conjure_time_step_wizard!(simulation, cfl=0.7)
@@ -92,6 +89,7 @@ simulation.output_writers[:jld2] = ow
 
 run!(simulation)
 
+#=
 wt = FieldTimeSeries("free_convection.jld2", "θ")
 θt = FieldTimeSeries("free_convection.jld2", "θ")
 Tt = FieldTimeSeries("free_convection.jld2", "T")
@@ -154,3 +152,4 @@ record(fig, "free_convection.mp4", 1:Nt, framerate=12) do nn
     @info "Drawing frame $nn of $Nt..."
     n[] = nn
 end
+=#

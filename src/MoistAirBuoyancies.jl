@@ -42,6 +42,10 @@ struct MoistAirBuoyancy{RS, AT} <: AbstractBuoyancyFormulation{Nothing}
     thermodynamics :: AT
 end
 
+Adapt.adapt_structure(to, mb::MoistAirBuoyancy) =
+    MoistAirBuoyancy(adapt(to, mb.reference_state),
+                     adapt(to, mb.thermodynamics))
+
 """
     MoistAirBuoyancy(grid;
                      base_pressure = 101325,
