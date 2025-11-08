@@ -74,14 +74,13 @@ using Breeze.MoistAirBuoyancies: temperature
         qᵛ⁺ = Breeze.MoistAirBuoyancies.adjustment_saturation_specific_humidity(T₃, 𝒰, thermo)
         @test qᵗ > qᵛ⁺ # otherwise the test is wrong
 
-        @show qˡ = qᵗ - qᵛ⁺
+        qˡ = qᵗ - qᵛ⁺
         q₃ = MoistureMassFractions(qᵛ⁺, qˡ, zero(FT))
         𝒰₃ = with_moisture(𝒰, q₃)
-        @show Π₃ = exner_function(𝒰₃, thermo)
+        Π₃ = exner_function(𝒰₃, thermo)
         cᵖᵐ = mixture_heat_capacity(q₃, thermo)
         ℒˡᵣ = thermo.liquid.reference_latent_heat
         θ₃ = (T₃ - ℒˡᵣ / cᵖᵐ * qˡ) / Π₃
-        @show θ₃
         𝒰₃ = PotentialTemperatureState(θ₃, q₃, z, p₀, pᵣ, ρᵣ)
 
         T₃_solve = temperature(𝒰₃, thermo)

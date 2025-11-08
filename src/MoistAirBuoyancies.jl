@@ -222,8 +222,6 @@ Solution of ``r(T) = 0`` is found via the [secant method](https://en.wikipedia.o
     iter = 0
 
     while abs(T₂ - T₁) > δ
-        @show iter T₁ T₂ r₁ r₂
-
         # Compute slope
         ΔTΔr = (T₂ - T₁) / (r₂ - r₁)
 
