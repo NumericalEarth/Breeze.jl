@@ -60,11 +60,18 @@ jobs:
           arch: ${{ matrix.arch }}
       - uses: julia-actions/cache@v2
         id: julia-cache
-      - name: "Set test arguments"
+      - name: "Set test arguments and other environment variables"
         shell: bash
         run: |
           # Run tests in verbose mode
           TEST_ARGS=(--verbose)
+
+          if [[ ${{ matrix.os }} == "nvidia-gpu-t4" ]]; then
+              # When running the tests on a GPU node we always want to make sure
+              # CUDA is functional.
+              echo "BREEZE_ENSURE_CUDA_FUNCTIONAL=true" >> "${GITHUB_ENV}"
+          fi
+
           if [[ ${{ runner.os }} == "macOS" ]]; then
               # Encourage ParallelTestRunner to use two jobs on macOS, rather
               # than the single one it'd use by default.

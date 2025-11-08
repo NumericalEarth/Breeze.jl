@@ -4,7 +4,7 @@ using Test
 
 @testset "AtmosphereModel" begin
     for FT in (Float32, Float64)
-        grid = RectilinearGrid(FT, size=(8, 8, 8), x=(0, 1_000), y=(0, 1_000), z=(0, 1_000))
+        grid = RectilinearGrid(default_arch, FT; size=(8, 8, 8), x=(0, 1_000), y=(0, 1_000), z=(0, 1_000))
         thermo = ThermodynamicConstants(FT)
 
         for p₀ in (101325, 100000)
