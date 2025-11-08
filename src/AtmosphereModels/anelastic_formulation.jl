@@ -14,6 +14,7 @@ using Oceananigans.Operators: Δzᵃᵃᶜ, Δzᵃᵃᶠ, divᶜᶜᶜ, Δzᶜ�
 using Oceananigans.Solvers: solve!
 
 using KernelAbstractions: @kernel, @index
+using Adapt: Adapt, adapt
 
 import Oceananigans.Solvers: tridiagonal_direction, compute_main_diagonal!, compute_lower_diagonal!
 import Oceananigans.TimeSteppers: compute_pressure_correction!, make_pressure_correction!
@@ -25,6 +26,9 @@ import Oceananigans.TimeSteppers: compute_pressure_correction!, make_pressure_co
 struct AnelasticFormulation{R}
     reference_state :: R
 end
+
+Adapt.adapt_structure(to, formulation::AnelasticFormulation) =
+    AnelasticFormulation(adapt(to, formulation.reference_state))
 
 const AnelasticModel = AtmosphereModel{<:AnelasticFormulation}
 

@@ -1,4 +1,5 @@
 using Oceananigans: Oceananigans, Center, Field, set!, fill_halo_regions!
+using Adapt: Adapt, adapt
                    
 #####
 ##### Reference state computations for Boussinesq and Anelastic models
@@ -10,6 +11,12 @@ struct ReferenceState{FT, F}
     pressure :: F
     density :: F
 end
+
+Adapt.adapt_structure(to, ref::ReferenceState) =
+    ReferenceState(adapt(to, ref.base_pressure),
+                   adapt(to, ref.potential_temperature),
+                   adapt(to, ref.pressure),
+                   adapt(to, ref.density))
 
 Base.eltype(::ReferenceState{FT}) where FT = FT
 
