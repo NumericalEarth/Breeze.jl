@@ -11,7 +11,9 @@ DocMeta.setdocmeta!(Breeze, :DocTestSetup, :(using Breeze); recursive=true)
 bib_filepath = joinpath(dirname(@__FILE__), "src", "breeze.bib")
 bib = CitationBibliography(bib_filepath, style=:authoryear)
 
-makedocs(sitename="Breeze",
+makedocs(
+    ;
+    sitename = "Breeze",
     plugins = [bib],
     pages=[
         "Home" => "index.md",
@@ -26,7 +28,9 @@ makedocs(sitename="Breeze",
         ],
         "References" => "references.md",
         "API" => "api.md",
-    ]
+        "Contributors guide" => "contributing.md",
+    ],
+    draft = false,
 )
 
 deploydocs(
