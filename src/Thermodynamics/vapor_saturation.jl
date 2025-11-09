@@ -20,11 +20,12 @@ pᵛ⁺(T) = pᵗʳ \\left ( \\frac{T}{Tᵗʳ} \\right )^{Δcᵝ / Rᵛ} \\exp \
 
 Note that latent heat ``ℒᵝ(T=0)`` is the difference between the enthalpy of water vapor
 and the phase ``β`` when the temperature is ``T = 0``K, or absolute zero.
+
 We define the latent heat using its value ``ℒᵝᵣ = ℒᵝ(T=Tᵣ)`` at the "energy reference temperature"
 ``T = Tᵣ`` (usually ``Tᵣ ≡ 273.15``K ``= 0^∘``C), such that
 
 ```math
-ℒᵝ(T) = ℒᵝᵣ + Δcᵝ (T - Tᵣ), \\quad \text{and} \\quad ℒᵝ(T=0) = ℒᵝᵣ - Δcᵝ Tᵣ`` .
+ℒᵝ(T) = ℒᵝᵣ + Δcᵝ (T - Tᵣ), \\quad \\text{and} \\quad ℒᵝ(T=0) = ℒᵝᵣ - Δcᵝ Tᵣ``.
 ```
 """
 @inline function saturation_vapor_pressure(T, thermo, phase::CondensedPhase)
