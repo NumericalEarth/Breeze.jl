@@ -13,6 +13,13 @@ updates:
     schedule:
       interval: "weekly"
   - package-ecosystem: "julia" # See documentation for possible values
-    directory: "/" # Location of package manifests
+    # Location of Julia projects
+    directories:
+      - "/"
+      - "/docs"
+      - "/test"
     schedule:
       interval: "weekly"
+    ignore:
+      # Ignore package itself
+      - dependency-name: "Breeze"
