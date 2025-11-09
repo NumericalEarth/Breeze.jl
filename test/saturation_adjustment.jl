@@ -6,12 +6,48 @@ using Test
 using Breeze.Thermodynamics:
     MoistureMassFractions,
     PotentialTemperatureState,
+    MoistStaticEnergyState,
     exner_function,
     density,
     with_moisture,
-    saturation_specific_humidity
+    saturation_specific_humidity,
+    mixture_heat_capacity
 
 using Breeze.MoistAirBuoyancies: temperature
+using Breeze.Microphysics: WarmPhaseSaturationAdjustment, compute_temperature
+
+@testset "Saturation adjustment (Microphysics + MoistStaticEnergyState)" begin
+    for FT in (Float32, Float64)
+        grid = RectilinearGrid(default_arch, FT; size=(1, 1, 1), x=(0, 1), y=(0, 1), z=(0, 1))
+        thermo = ThermodynamicConstants(FT)
+        reference_state = ReferenceState(grid, thermo; base_pressure=101325, potential_temperature=288)
+        mp = WarmPhaseSaturationAdjustment(reference_state, thermo)
+
+        # Sample a single cell
+        pᵣ = @allowscalar reference_state.pressure[1, 1, 1]
+        z = FT(0.5)
+
+        # Target dry state: choose T, pick qᵗ well below saturation
+        T⋆ = FT(300)
+        q₀ = MoistureMassFractions(zero(FT), zero(FT), zero(FT))
+        ρ = density(pᵣ, T⋆, q₀, thermo)
+        qᵛ⁺ = saturation_specific_humidity(T⋆, ρ, thermo, thermo.liquid)
+        qᵗ = qᵛ⁺ / 4 # comfortably unsaturated
+        q = MoistureMassFractions(qᵗ, zero(FT), zero(FT))
+
+        # Build moist static energy consistent with the target
+        cᵖᵐ = mixture_heat_capacity(q, thermo)
+        ℒ₀ = thermo.liquid.reference_latent_heat
+        g = thermo.gravitational_acceleration
+        h = cᵖᵐ * T⋆ + g * z + ℒ₀ * qᵗ
+
+        𝒰₀ = MoistStaticEnergyState(h, q, z)
+        T = compute_temperature(𝒰₀, mp)
+
+        atol_T = FT === Float64 ? 1e-6 : FT(1e-3)
+        @test isapprox(T, T⋆; atol=atol_T)
+    end
+end
 
 @testset "Saturation adjustment (MoistAirBuoyancies)" begin
     for FT in (Float32, Float64)

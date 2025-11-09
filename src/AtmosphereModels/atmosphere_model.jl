@@ -13,10 +13,9 @@ import Oceananigans.Advection: cell_advection_timescale
 
 using KernelAbstractions: @kernel, @index
 
-materialize_condenstates(microphysics, grid) = NamedTuple() #(; qˡ=CenterField(grid), qᵛ=CenterField(grid))
+ 
 materialize_density(formulation, grid) = CenterField(grid)
 
-struct WarmPhaseSaturationAdjustment end
 struct DefaultValue end
 
 tupleit(t::Tuple) = t

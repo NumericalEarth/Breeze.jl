@@ -86,15 +86,8 @@ end
     𝒰 = thermodynamic_state(i, j, k, grid, formulation, thermo, energy_density, moisture_density)
     @inbounds moisture_fraction[i, j, k] = total_specific_humidity(𝒰)
 
-    # Possibly perform saturation adjustment
-    # Note, we will make this much prettier in the future
-    T = if isnothing(microphysics)
-        Π = 𝒰.exner_function
-        θ = 𝒰.potential_temperature
-        Π * θ
-    else
-        compute_temperature(𝒰, microphysics)
-    end
+    # Compute temperature via microphysics interface (falls back to dry if nothing)
+    T = compute_temperature(𝒰, microphysics)
 
     @inbounds temperature[i, j, k] = T
 end

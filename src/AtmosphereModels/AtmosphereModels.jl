@@ -4,6 +4,7 @@ export AtmosphereModel, AnelasticFormulation
 
 include("atmosphere_model.jl")
 include("anelastic_formulation.jl")
+include("microphysics_interface.jl")
 include("saturation_adjustment.jl")
 # include("update_hydrostatic_pressure.jl")
 include("dynamics_kernel_functions.jl")

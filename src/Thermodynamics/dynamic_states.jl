@@ -39,3 +39,19 @@ struct AnelasticThermodynamicState{FT}
 end
 
 @inline total_specific_humidity(state::AnelasticThermodynamicState) = total_specific_humidity(state.moisture_fractions)
+
+#####
+##### Moist static energy state (for microphysics interfaces)
+#####
+
+struct MoistStaticEnergyState{FT}
+    moist_static_energy :: FT
+    moisture_fractions :: MoistureMassFractions{FT}
+    height :: FT
+end
+
+@inline total_specific_humidity(state::MoistStaticEnergyState) = total_specific_humidity(state.moisture_fractions)
+
+@inline function with_moisture(𝒰::MoistStaticEnergyState, q::MoistureMassFractions)
+    return MoistStaticEnergyState(𝒰.moist_static_energy, q, 𝒰.height)
+end
