@@ -69,7 +69,7 @@ Adapt.adapt_structure(to, pt::CondensedPhase) =
 
 Returns `CondensedPhase` with specified parameters converted to `FT`.
 
-Two examples of `CondensedPhase` are liquid and solid.
+Two examples of `CondensedPhase` are liquid and ice.
 When matter is converted from vapor to liquid, water molecules in the
 gas phase cluster together and slow down to form liquid with `heat_capacity`,
 The lost of molecular kinetic energy is called the `reference_latent_heat`.
@@ -100,7 +100,7 @@ struct ThermodynamicConstants{FT, C, S}
     dry_air :: IdealGas{FT}
     vapor :: IdealGas{FT}
     liquid :: C
-    solid :: S
+    ice :: I
 end
 
 Base.summary(at::ThermodynamicConstants{FT}) where FT = "ThermodynamicConstants{$FT}"
@@ -115,7 +115,7 @@ function Base.show(io::IO, at::ThermodynamicConstants)
         "├── dry_air: ", at.dry_air, "\n",
         "├── vapor: ", at.vapor, "\n",
         "├── liquid: ", at.liquid, "\n",
-        "└── solid: ", at.solid)
+        "└── ice: ", at.ice)
 end
 
 Base.eltype(::ThermodynamicConstants{FT}) where FT = FT
@@ -129,11 +129,11 @@ function Adapt.adapt_structure(to, thermo::ThermodynamicConstants)
     triple_point_temperature = adapt(to, thermo.triple_point_temperature)
     triple_point_pressure = adapt(to, thermo.triple_point_pressure)
     liquid = adapt(to, thermo.liquid)
-    solid = adapt(to, thermo.solid)
+    ice = adapt(to, thermo.ice)
     FT = typeof(molar_gas_constant)
     C = typeof(liquid)
-    S = typeof(solid)
-    return ThermodynamicConstants{FT, C, S}(molar_gas_constant,
+    I = typeof(ice)
+    return ThermodynamicConstants{FT, C, I}(molar_gas_constant,
                                             gravitational_acceleration,
                                             energy_reference_temperature,
                                             triple_point_temperature,
@@ -141,7 +141,7 @@ function Adapt.adapt_structure(to, thermo::ThermodynamicConstants)
                                             dry_air,
                                             vapor,
                                             liquid,
-                                            solid)
+                                            ice)
 end
 
 """
@@ -156,10 +156,10 @@ end
                            vapor_molar_mass = 0.018015,
                            vapor_heat_capacity = 1850,
                            liquid = liquid_water(FT),
-                           solid = water_ice(FT))
+                           ice = water_ice(FT))
 
 Create `ThermodynamicConstants` with parameters that represent gaseous mixture of dry "air"
-and vapor, as well as condensed liquid and solid phases.
+and vapor, as well as condensed liquid and ice phases.
 The `triple_point_temperature` and `triple_point_pressure` may be combined with
 internal energy parameters for condensed phases to compute the vapor pressure
 at the boundary between vapor and a homogeneous sample of the condensed phase.
@@ -208,7 +208,7 @@ function ThermodynamicConstants(FT = Oceananigans.defaults.FloatType;
                                 vapor_molar_mass = 0.018015,
                                 vapor_heat_capacity = 1850,
                                 liquid = liquid_water(FT),
-                                solid = water_ice(FT))
+                                ice = water_ice(FT))
 
     dry_air = IdealGas(FT; molar_mass = dry_air_molar_mass,
                            heat_capacity = dry_air_heat_capacity)
@@ -224,7 +224,7 @@ function ThermodynamicConstants(FT = Oceananigans.defaults.FloatType;
                                   dry_air,
                                   vapor,
                                   liquid,
-                                  solid)
+                                  ice)
 end
 
 const TC = ThermodynamicConstants
@@ -289,9 +289,13 @@ liquid condensate.
 @inline function mixture_heat_capacity(q::MMF, thermo::TC)
     qᵈ = dry_air_mass_fraction(q)
     qᵛ = q.vapor
+    qˡ = q.liquid
+    qⁱ = q.ice
     cᵖᵈ = thermo.dry_air.heat_capacity
     cᵖᵛ = thermo.vapor.heat_capacity
-    return qᵈ * cᵖᵈ + qᵛ * cᵖᵛ
+    cˡ = thermo.liquid.heat_capacity
+    cⁱ = thermo.ice.heat_capacity
+    return qᵈ * cᵖᵈ + qᵛ * cᵖᵛ + qˡ * cˡ + qⁱ * cⁱ
 end
 
 #####
