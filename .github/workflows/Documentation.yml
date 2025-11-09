@@ -85,7 +85,7 @@ jobs:
           version: "1.12"
       - uses: julia-actions/cache@v2
         id: julia-cache
-      - uses: actions/download-artifact@v5
+      - uses: actions/download-artifact@v6
         with:
           name: documentation-build
           path: docs/build
