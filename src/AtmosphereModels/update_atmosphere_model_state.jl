@@ -169,7 +169,11 @@ end
     @inbounds Gρw[i, j, k] = z_momentum_tendency(i, j, k, grid, args...)
 end
 
-""" Apply boundary conditions by adding flux divergences to the right-hand-side. """
+"""
+$(TYPEDSIGNATURES)
+
+Apply boundary conditions by adding flux divergences to the right-hand-side.
+"""
 function compute_flux_bc_tendencies!(model::AtmosphereModel)
 
     Gⁿ    = model.timestepper.Gⁿ

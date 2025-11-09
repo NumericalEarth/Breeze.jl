@@ -265,9 +265,13 @@ end
 #####
 
 """
+$(TYPEDSIGNATURES)
+
 Update the predictor momentum (ρu, ρv, ρw) with the non-hydrostatic pressure via
 
-    u^{n+1} = u^n - δₓp_{NH} / Δx * Δt
+```math
+u^{n+1} = u^n - δₓp_{NH} / Δx * Δt
+```
 """
 @kernel function _pressure_correct_momentum!(M, grid, Δt, αᵣ_pₙ, ρᵣ)
     i, j, k = @index(Global, NTuple)

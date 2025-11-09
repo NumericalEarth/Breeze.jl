@@ -17,6 +17,8 @@ using ..Thermodynamics:
     density,
     exner_function
 
+using DocStringExtensions: TYPEDSIGNATURES
+
 using Oceananigans: Oceananigans, Center, Field, KernelFunctionOperation
 using Oceananigans.Grids: AbstractGrid
 using Oceananigans.Operators: ∂zᶜᶜᶠ
@@ -47,10 +49,7 @@ Adapt.adapt_structure(to, mb::MoistAirBuoyancy) =
                      adapt(to, mb.thermodynamics))
 
 """
-    MoistAirBuoyancy(grid;
-                     base_pressure = 101325,
-                     reference_potential_temperature = 288,
-                     thermodynamics = ThermodynamicConstants(FT))
+$(TYPEDSIGNATURES)
 
 Return a MoistAirBuoyancy formulation that can be provided as input to an
 `Oceananigans.NonhydrostaticModel`.
@@ -154,7 +153,7 @@ end
 # root of: f(T) = T - Π θ - ℒ qˡ / cᵖᵐ
 
 """
-    temperature(state::PotentialTemperatureState, ref, thermo)
+$(TYPEDSIGNATURES)
 
 Return the temperature ``T`` that satisfies saturation adjustment, that is, the
 temperature for which
