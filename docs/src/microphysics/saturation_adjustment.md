@@ -3,18 +3,17 @@
 Warm-phase saturation adjustment is a model for water droplet nucleation that assumes that water vapor in excess of the saturation specific humidity is instantaneously converted to liquid water.
 Mixed-phase saturation adjustment is described by [Pressel2015](@citet).
 
-In Breeze, it is convenient to express the adjustment in terms of a moist static energy variable rather than potential temperature. We use the warm‑phase definition
+In Breeze, it is convenient to express the adjustment in terms of a moist static energy variable rather than potential temperature. Following the anelastic formulation of [Pauluis2008](@citet) used elsewhere in the docs, we define the energy variable
 
 ```math
-e \equiv c^{p m}(q) \, T + g z - \mathcal{L}^{l}_{r} \, q^{l} ,
+e \equiv c^{p m} \, T + g z - ℒˡᵣ qˡ ,
 ```
 
-where ``c^{p m}(q)`` is the mixture heat capacity, ``g`` is gravitational acceleration, ``z`` is height, and ``\mathcal{L}^{l}_{r}`` is a reference latent heat of vaporization. The condensate specific humidity is ``q^{l} = \max(0, q^{t} - q^{v+})``.
-
-During saturation adjustment, temperature is obtained by solving the nonlinear scalar equation
+where ``cᵖᵐ`` is the mixture heat capacity, ``T`` is temperature, ``g`` is gravitational acceleration,
+``z`` is height, ``ℒˡᵣ`` is the latent heat at the energy reference temperature, and ``qˡ`` is the liquid mass fraction.
 
 ```math
-r(T) \equiv T - \frac{e - g z + \mathcal{L}^{l}_{r} \, \max\big(0, q^{t} - q^{v+}(T)\big)}{c^{p m}(q)} = 0 ,
+r(T) \equiv T - \left ( e - g z + ℒˡᵣ qˡ \right ) / cᵖᵐ ,
 ```
 
 with ``q^{v+}(T)`` the saturation specific humidity. We use a secant method, typically starting from the clear‑air guess ``T_1 = (e - g z)/c^{p m}`` and adjusting toward saturation when ``q^{t} > q^{v+}(T_1)``.
