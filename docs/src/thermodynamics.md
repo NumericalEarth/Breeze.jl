@@ -142,7 +142,7 @@ Next we consider a reference state that does not exchange energy with its enviro
     of elucidation presently has a ``z`` dependent reference pressure ``pᵣ(z)``,
     density ``ρᵣ(z)``, and temperature ``Tᵣ(z)``.
     This reference state also has a _constant_ potential temperature
-    ``θᵣ``, which we attempt to clarify by writing ``θ₀`` (since it's constant,
+    ``θ₀``, which we attempt to clarify by writing ``θ₀`` (since it's constant,
     it has the same value at ``z=0`` as at any height).
     We apologize that our notation differs from the usual in which
     ``0`` subscripts indicate "reference" (🤔) and ``00`` (🫣) means ``z=0``.

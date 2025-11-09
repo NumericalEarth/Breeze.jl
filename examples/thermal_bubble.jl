@@ -37,7 +37,8 @@ end
 
 set!(model, θ = θᵢ)
 
-ρE = Field(Average(model.energy, dims=1))
+ρe = model.energy_density
+ρE = Field(Average(ρe, dims=1))
 ρe′ = Field(model.energy - ρE)
 
 # ## Initial energy perturbation visualization
@@ -54,8 +55,8 @@ simulation = Simulation(model; Δt=2, stop_iteration=200)
 conjure_time_step_wizard!(simulation, cfl=0.7)
 
 function progress(sim)
-    ρe = sim.model.energy
-    u, _, w = sim.model.velocities
+    ρe = sim.model.energy_density
+    u, v, w = sim.model.velocities
 
     msg = @sprintf("Iter: %d, t: %s, Δt: %s, extrema(ρe): (%.2f, %.2f) J/kg, max|u|: %.2f m/s, max|w|: %.2f m/s",
                    iteration(sim), prettytime(sim), prettytime(sim.Δt),
@@ -70,8 +71,6 @@ add_callback!(simulation, progress, IterationInterval(40))
 
 u, v, w = model.velocities
 ζ = ∂x(w) - ∂z(u)
-
-ρe = model.energy
 T = model.temperature
 
 outputs = merge(model.velocities, model.tracers, (; ζ, ρe′, ρe, T))
