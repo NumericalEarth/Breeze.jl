@@ -22,7 +22,7 @@ using Test
             ρe₁ = deepcopy(model.energy_density)
 
             set!(model; ρe = ρeᵢ)
-            @test model.energy_density ≈ ρe₁
+            @test @allowscalar model.energy_density ≈ ρe₁
         end
     end
 end
