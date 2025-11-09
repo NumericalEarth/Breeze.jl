@@ -1,4 +1,5 @@
 using Breeze
+using GPUArraysCore: @allowscalar
 using Oceananigans
 using Test
 
@@ -16,13 +17,13 @@ using Breeze.MoistAirBuoyancies: temperature
     for FT in (Float32, Float64)
         # Minimal grid and reference state
         # grid = RectilinearGrid(FT, size=(), topology=(Flat, Flat, Flat))
-        grid = RectilinearGrid(FT, size=(1, 1, 1), x=(0, 1), y=(0, 1), z=(0, 1))
+        grid = RectilinearGrid(default_arch, FT; size=(1, 1, 1), x=(0, 1), y=(0, 1), z=(0, 1))
         thermo = ThermodynamicConstants(FT)
         reference_state = ReferenceState(grid, thermo; base_pressure=101325, potential_temperature=288)
 
         # Sample a single cell
-        pᵣ = reference_state.pressure[1, 1, 1]
-        ρᵣ = reference_state.density[1, 1, 1]
+        pᵣ = @allowscalar reference_state.pressure[1, 1, 1]
+        ρᵣ = @allowscalar reference_state.density[1, 1, 1]
         p₀ = reference_state.base_pressure
         z = FT(0.5)
 
