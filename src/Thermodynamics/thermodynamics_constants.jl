@@ -295,7 +295,7 @@ the mass fractions of vapor, liquid, and ice constituents, respectively,
 and `qᵈ = 1 - qᵛ - qˡ - qⁱ` is the mass fraction of dry air.
 The heat capacities `cᵖᵈ`, `cᵖᵛ`, `cˡ`, `cⁱ` are the heat capacities
 of dry air, vapor, liquid, and ice at constant pressure, respectively.
-liquid and ice phases are assumed to be incompressible.
+The liquid and ice phases are assumed to be incompressible.
 """
 @inline function mixture_heat_capacity(q::MMF, thermo::TC)
     qᵈ = dry_air_mass_fraction(q)
