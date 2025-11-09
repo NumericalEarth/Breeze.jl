@@ -53,12 +53,12 @@ end
 ##### Thermodynamic state
 #####
 
-function thermodynamic_state(i, j, k, grid, formulation::AnelasticFormulation, thermo, energy, absolute_humidity)
+function thermodynamic_state(i, j, k, grid, formulation::AnelasticFormulation, thermo, energy_density, moisture_density)
     @inbounds begin
-        e = energy[i, j, k]
+        e = energy_density[i, j, k]
         pᵣ = formulation.reference_state.pressure[i, j, k]
         ρᵣ = formulation.reference_state.density[i, j, k]
-        ρqᵗ = absolute_humidity[i, j, k]
+        ρqᵗ = moisture_density[i, j, k]
     end
 
     cᵖᵈ = thermo.dry_air.heat_capacity
@@ -75,9 +75,9 @@ function thermodynamic_state(i, j, k, grid, formulation::AnelasticFormulation, t
     return AnelasticThermodynamicState(θ, q, ρᵣ, pᵣ, Π)
 end
 
-@inline function specific_volume(i, j, k, grid, formulation, temperature, specific_humidity, thermo)
+@inline function specific_volume(i, j, k, grid, formulation, temperature, moisture_fraction, thermo)
     @inbounds begin
-        qᵗ = specific_humidity[i, j, k]
+        qᵗ = moisture_fraction[i, j, k]
         pᵣ = formulation.reference_state.pressure[i, j, k]
         T = temperature[i, j, k]
     end
@@ -106,12 +106,12 @@ end
 function collect_prognostic_fields(::AnelasticFormulation,
                                    density,
                                    momentum,
-                                   energy,
-                                   absolute_humidity,
+                                   energy_density,
+                                   moisture_density,
                                    condensates,
                                    tracers)
 
-    thermodynamic_variables = (ρe=energy, ρqᵗ=absolute_humidity)
+    thermodynamic_variables = (ρe=energy_density, ρqᵗ=moisture_density)
 
     return merge(momentum, thermodynamic_variables, condensates, tracers)
 end
