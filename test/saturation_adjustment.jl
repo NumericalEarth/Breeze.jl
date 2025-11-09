@@ -21,7 +21,7 @@ using Breeze.Microphysics: WarmPhaseSaturationAdjustment, compute_temperature
         grid = RectilinearGrid(default_arch, FT; size=(1, 1, 1), x=(0, 1), y=(0, 1), z=(0, 1))
         thermo = ThermodynamicConstants(FT)
         reference_state = ReferenceState(grid, thermo; base_pressure=101325, potential_temperature=288)
-        mp = WarmPhaseSaturationAdjustment(reference_state, thermo)
+        mp = WarmPhaseSaturationAdjustment(1e-3)
 
         # Sample a single cell
         pᵣ = @allowscalar reference_state.pressure[1, 1, 1]
