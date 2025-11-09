@@ -1,6 +1,6 @@
 using ..Thermodynamics:
     saturation_specific_humidity,
-    total_specific_humidity,
+    total_moisture_fraction,
     mixture_heat_capacity,
     mixture_gas_constant
 
@@ -84,10 +84,10 @@ end
     i, j, k = @index(Global, NTuple)
 
     𝒰 = thermodynamic_state(i, j, k, grid, formulation, thermo, energy_density, moisture_density)
-    @inbounds moisture_fraction[i, j, k] = total_specific_humidity(𝒰)
+    @inbounds moisture_fraction[i, j, k] = total_moisture_fraction(𝒰)
 
     # Compute temperature via microphysics interface (falls back to dry if nothing)
-    T = compute_temperature(𝒰, microphysics)
+    T = compute_temperature(𝒰, microphysics, thermo)
 
     @inbounds temperature[i, j, k] = T
 end

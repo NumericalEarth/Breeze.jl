@@ -41,7 +41,7 @@ using Breeze.Microphysics: WarmPhaseSaturationAdjustment, compute_temperature
         g = thermo.gravitational_acceleration
         h = cᵖᵐ * T⋆ + g * z + ℒ₀ * qᵗ
 
-        𝒰₀ = MoistStaticEnergyState(h, q, z)
+        𝒰₀ = MoistStaticEnergyState(h, q, z, pᵣ)
         T = compute_temperature(𝒰₀, mp)
 
         atol_T = FT === Float64 ? 1e-6 : FT(1e-3)

@@ -9,7 +9,7 @@ export
 using ..Thermodynamics:
     PotentialTemperatureState,
     MoistureMassFractions,
-    total_specific_humidity,
+    total_moisture_fraction,
     dry_air_gas_constant,
     vapor_gas_constant,
     with_moisture,
@@ -180,7 +180,7 @@ Solution of ``r(T) = 0`` is found via the [secant method](https://en.wikipedia.o
     θ == 0 && return zero(FT)
 
     # Generate guess for unsaturated conditions; if dry, return T₁
-    qᵗ = total_specific_humidity(𝒰₀)
+    qᵗ = total_moisture_fraction(𝒰₀)
     q₁ = MoistureMassFractions(qᵗ, zero(qᵗ), zero(qᵗ))
     𝒰₁ = with_moisture(𝒰₀, q₁)
     Π₁ = exner_function(𝒰₀, thermo)
@@ -254,7 +254,7 @@ end
 @inline function adjustment_saturation_specific_humidity(T, 𝒰, thermo)
     pᵛ⁺ = saturation_vapor_pressure(T, thermo, thermo.liquid)
     pᵣ = 𝒰.reference_pressure
-    qᵗ = total_specific_humidity(𝒰)
+    qᵗ = total_moisture_fraction(𝒰)
     Rᵈ = dry_air_gas_constant(thermo)
     Rᵛ = vapor_gas_constant(thermo)
     ϵᵈᵛ = Rᵈ / Rᵛ
@@ -263,7 +263,7 @@ end
 
 @inline function adjust_state(𝒰₀, T, thermo)
     qᵛ⁺ = adjustment_saturation_specific_humidity(T, 𝒰₀, thermo)
-    qᵗ = total_specific_humidity(𝒰₀)
+    qᵗ = total_moisture_fraction(𝒰₀)
     qˡ = max(0, qᵗ - qᵛ⁺)
     q₁ = MoistureMassFractions(qᵛ⁺, qˡ, zero(qˡ))
     return with_moisture(𝒰₀, q₁)

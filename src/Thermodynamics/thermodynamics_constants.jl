@@ -244,8 +244,8 @@ end
 
 const MMF = MoistureMassFractions
 
-@inline total_specific_humidity(q::MMF) = q.vapor + q.liquid + q.ice
-@inline dry_air_mass_fraction(q::MMF) = 1 - total_specific_humidity(q)
+@inline total_moisture_fraction(q::MMF) = q.vapor + q.liquid + q.ice
+@inline dry_air_mass_fraction(q::MMF) = 1 - total_moisture_fraction(q)
 
 
 """
