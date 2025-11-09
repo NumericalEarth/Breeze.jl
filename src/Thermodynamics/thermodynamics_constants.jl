@@ -69,7 +69,7 @@ Adapt.adapt_structure(to, pt::CondensedPhase) =
 
 Returns `CondensedPhase` with specified parameters converted to `FT`.
 
-Two examples of `CondensedPhase` are liquid and solid.
+Two examples of `CondensedPhase` are liquid and ice.
 When matter is converted from vapor to liquid, water molecules in the
 gas phase cluster together and slow down to form liquid with `heat_capacity`,
 The lost of molecular kinetic energy is called the `reference_latent_heat`.
@@ -91,7 +91,7 @@ end
 liquid_water(FT) = CondensedPhase(FT; reference_latent_heat=2500800, heat_capacity=4181)
 water_ice(FT)    = CondensedPhase(FT; reference_latent_heat=2834000, heat_capacity=2108)
 
-struct ThermodynamicConstants{FT, C, S}
+struct ThermodynamicConstants{FT, C, I}
     molar_gas_constant :: FT
     gravitational_acceleration :: FT
     energy_reference_temperature :: FT
@@ -100,7 +100,7 @@ struct ThermodynamicConstants{FT, C, S}
     dry_air :: IdealGas{FT}
     vapor :: IdealGas{FT}
     liquid :: C
-    solid :: S
+    ice :: I
 end
 
 Base.summary(at::ThermodynamicConstants{FT}) where FT = "ThermodynamicConstants{$FT}"
@@ -115,7 +115,7 @@ function Base.show(io::IO, at::ThermodynamicConstants)
         "├── dry_air: ", at.dry_air, "\n",
         "├── vapor: ", at.vapor, "\n",
         "├── liquid: ", at.liquid, "\n",
-        "└── solid: ", at.solid)
+        "└── ice: ", at.ice)
 end
 
 Base.eltype(::ThermodynamicConstants{FT}) where FT = FT
@@ -129,11 +129,11 @@ function Adapt.adapt_structure(to, thermo::ThermodynamicConstants)
     triple_point_temperature = adapt(to, thermo.triple_point_temperature)
     triple_point_pressure = adapt(to, thermo.triple_point_pressure)
     liquid = adapt(to, thermo.liquid)
-    solid = adapt(to, thermo.solid)
+    ice = adapt(to, thermo.ice)
     FT = typeof(molar_gas_constant)
     C = typeof(liquid)
-    S = typeof(solid)
-    return ThermodynamicConstants{FT, C, S}(molar_gas_constant,
+    I = typeof(ice)
+    return ThermodynamicConstants{FT, C, I}(molar_gas_constant,
                                             gravitational_acceleration,
                                             energy_reference_temperature,
                                             triple_point_temperature,
@@ -141,7 +141,7 @@ function Adapt.adapt_structure(to, thermo::ThermodynamicConstants)
                                             dry_air,
                                             vapor,
                                             liquid,
-                                            solid)
+                                            ice)
 end
 
 """
@@ -156,10 +156,10 @@ end
                            vapor_molar_mass = 0.018015,
                            vapor_heat_capacity = 1850,
                            liquid = liquid_water(FT),
-                           solid = water_ice(FT))
+                           ice = water_ice(FT))
 
 Create `ThermodynamicConstants` with parameters that represent gaseous mixture of dry "air"
-and vapor, as well as condensed liquid and solid phases.
+and vapor, as well as condensed liquid and ice phases.
 The `triple_point_temperature` and `triple_point_pressure` may be combined with
 internal energy parameters for condensed phases to compute the vapor pressure
 at the boundary between vapor and a homogeneous sample of the condensed phase.
@@ -208,7 +208,7 @@ function ThermodynamicConstants(FT = Oceananigans.defaults.FloatType;
                                 vapor_molar_mass = 0.018015,
                                 vapor_heat_capacity = 1850,
                                 liquid = liquid_water(FT),
-                                solid = water_ice(FT))
+                                ice = water_ice(FT))
 
     dry_air = IdealGas(FT; molar_mass = dry_air_molar_mass,
                            heat_capacity = dry_air_heat_capacity)
@@ -224,7 +224,7 @@ function ThermodynamicConstants(FT = Oceananigans.defaults.FloatType;
                                   dry_air,
                                   vapor,
                                   liquid,
-                                  solid)
+                                  ice)
 end
 
 const TC = ThermodynamicConstants
@@ -247,32 +247,29 @@ const MMF = MoistureMassFractions
 @inline total_specific_humidity(q::MMF) = q.vapor + q.liquid + q.ice
 @inline dry_air_mass_fraction(q::MMF) = 1 - total_specific_humidity(q)
 
-"""
-    mixture_gas_constant(q::MoistureMassFractions, thermo)
 
-Compute the gas constant of moist air given the specific humidity `q` and 
-thermodynamic parameters `thermo`.
+"""
+    mixture_gas_constant(q::MoistureMassFractions, thermo::ThermodynamicConstants)
+
+Return the gas constant of moist air mixture [in J/(kg K)] given the specific humidity
+`q` and thermodynamic parameters `thermo`.
 
 The mixture gas constant is calculated as a weighted average of the dry air
 and water vapor gas thermo:
 
 ```math
-Rᵐ = qᵈ * Rᵈ + qᵛ * Rᵛ
+Rᵐ = qᵈ Rᵈ + qᵛ Rᵛ
 ```
 
 where:
 - `Rᵈ` is the dry air gas constant
-- `Rᵛ` is the water vapor gas constant  
+- `Rᵛ` is the water vapor gas constant
 - `qᵈ` is the mass fraction of dry air
 - `qᵛ` is the mass fraction of water vapor
 
 # Arguments
-- `qᵈ`: Mass fraction of dry air (dimensionless)
-- `qᵛ`: Mass fraction of water vapor (dimensionless)
+- `q`: the moisture mass fractions (vapor, liquid, and ice)
 - `thermo`: `ThermodynamicConstants` instance containing gas thermo
-
-# Returns
-- Gas constant of the moist air mixture in J/(kg·K)
 """
 @inline function mixture_gas_constant(q::MMF, thermo::TC)
     qᵈ = dry_air_mass_fraction(q)
@@ -283,18 +280,33 @@ where:
 end
 
 """
-    mixture_heat_capacity(qᵈ, qᵛ, thermo)
+    mixture_heat_capacity(q::MoistureMassFractions, thermo::ThermodynamicConstants)
 
-Compute the heat capacity of state air given the total specific humidity q
-and assuming that condensate mass ratio qᶜ ≪ q, where qℓ is the mass ratio of
-liquid condensate.
+Compute the heat capacity of a mixture of dry air, vapor, liquid, and ice, where
+the mass fractions of vapor, liquid, and ice are given by `q`.
+The heat capacity of moist air is the weighted sum of its constituents: 
+
+```math
+cᵖᵐ = qᵈ cᵖᵈ + qᵛ cᵖᵛ + qˡ cˡ + qⁱ cⁱ
+```
+
+where `qᵛ = q.vapor`, `qˡ = q.liquid`, `qⁱ = q.ice` are
+the mass fractions of vapor, liquid, and ice constituents, respectively,
+and `qᵈ = 1 - qᵛ - qˡ - qⁱ` is the mass fraction of dry air.
+The heat capacities `cᵖᵈ`, `cᵖᵛ`, `cˡ`, `cⁱ` are the heat capacities
+of dry air, vapor, liquid, and ice at constant pressure, respectively.
+The liquid and ice phases are assumed to be incompressible.
 """
 @inline function mixture_heat_capacity(q::MMF, thermo::TC)
     qᵈ = dry_air_mass_fraction(q)
     qᵛ = q.vapor
+    qˡ = q.liquid
+    qⁱ = q.ice
     cᵖᵈ = thermo.dry_air.heat_capacity
     cᵖᵛ = thermo.vapor.heat_capacity
-    return qᵈ * cᵖᵈ + qᵛ * cᵖᵛ
+    cˡ = thermo.liquid.heat_capacity
+    cⁱ = thermo.ice.heat_capacity
+    return qᵈ * cᵖᵈ + qᵛ * cᵖᵛ + qˡ * cˡ + qⁱ * cⁱ
 end
 
 #####
