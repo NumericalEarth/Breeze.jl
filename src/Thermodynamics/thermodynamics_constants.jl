@@ -182,7 +182,7 @@ phase ``β``, which is assumed incompressible, and ``ℒᵝ(T=0)`` is the latent
 We therefore find that
 
 ```math
-pᵝ⁺ = pᵗʳ \\exp[ ℒᵝ(T=0) (1/Tᵗʳ - 1/T) / Rᵛ ]
+pᵛ⁺ᵝ = pᵗʳ \\exp[ ℒᵝ(T=0) (1/Tᵗʳ - 1/T) / Rᵛ ]
 ```
 
 where
