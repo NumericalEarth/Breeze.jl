@@ -24,7 +24,7 @@ tupleit(t) = tuple(t)
 
 formulation_pressure_solver(formulation, grid) = nothing
 
-mutable struct AtmosphereModel{Frm, Arc, Tst, Grd, Clk, Thm, Den, Mom, Eng, Wat, Hum,
+mutable struct AtmosphereModel{Frm, Arc, Tst, Grd, Clk, Thm, Den, Mom, Eng, Moi, Mfr,
                                Tmp, Prs, Ppa, Sol, Vel, Trc, Adv, Cor, Frc, Mic, Cnd, Cls, Dif} <: AbstractModel{Tst, Arc}
     architecture :: Arc
     grid :: Grd
@@ -33,9 +33,9 @@ mutable struct AtmosphereModel{Frm, Arc, Tst, Grd, Clk, Thm, Den, Mom, Eng, Wat,
     thermodynamics :: Thm
     density :: Den
     momentum :: Mom
-    energy :: Eng
-    absolute_humidity :: Wat
-    specific_humidity :: Hum
+    energy_density :: Eng
+    moisture_density :: Moi
+    moisture_fraction :: Mfr
     temperature :: Tmp
     nonhydrostatic_pressure :: Prs
     hydrostatic_pressure_anomaly :: Ppa
@@ -74,7 +74,7 @@ julia> grid = RectilinearGrid(size=(8, 8, 8), extent=(1, 2, 3));
 julia> model = AtmosphereModel(grid)
 AtmosphereModel{CPU, RectilinearGrid}(time = 0 seconds, iteration = 0)
 ├── grid: 8×8×8 RectilinearGrid{Float64, Periodic, Periodic, Bounded} on CPU with 3×3×3 halo
-├── formulation: AnelasticFormulation(p₀=101325.0, θᵣ=288.0)
+├── formulation: AnelasticFormulation(p₀=101325.0, θ₀=288.0)
 ├── timestepper: RungeKutta3TimeStepper
 ├── advection scheme: WENO{3, Float64, Float32}(order=5)
 ├── tracers: ()
@@ -91,7 +91,7 @@ function AtmosphereModel(grid;
                          clock = Clock(grid),
                          thermodynamics = ThermodynamicConstants(eltype(grid)),
                          formulation = default_formulation(grid, thermodynamics),
-                         absolute_humidity = DefaultValue(),
+                         moisture_density = DefaultValue(),
                          tracers = tuple(),
                          coriolis = nothing,
                          boundary_conditions = NamedTuple(),
@@ -120,19 +120,19 @@ function AtmosphereModel(grid;
     condensates = materialize_condenstates(microphysics, grid)
     advection = adapt_advection_order(advection, grid)
 
-    if absolute_humidity isa DefaultValue
-        absolute_humidity = CenterField(grid, boundary_conditions=boundary_conditions.ρqᵗ)
+    if moisture_density isa DefaultValue
+        moisture_density = CenterField(grid, boundary_conditions=boundary_conditions.ρqᵗ)
     end
 
-    energy = CenterField(grid, boundary_conditions=boundary_conditions.ρe)
-    specific_humidity = CenterField(grid, boundary_conditions=boundary_conditions.ρqᵗ)
+    energy_density = CenterField(grid, boundary_conditions=boundary_conditions.ρe)
+    moisture_fraction = CenterField(grid, boundary_conditions=boundary_conditions.ρqᵗ)
     temperature = CenterField(grid)
 
     prognostic_fields = collect_prognostic_fields(formulation,
                                                   density,
                                                   momentum,
-                                                  energy,
-                                                  absolute_humidity,
+                                                  energy_density,
+                                                  moisture_density,
                                                   condensates,
                                                   tracers)
 
@@ -150,9 +150,9 @@ function AtmosphereModel(grid;
                             thermodynamics,
                             density,
                             momentum,
-                            energy,
-                            absolute_humidity,
-                            specific_humidity,
+                            energy_density,
+                            moisture_density,
+                            moisture_fraction,
                             temperature,
                             nonhydrostatic_pressure,
                             hydrostatic_pressure_anomaly,

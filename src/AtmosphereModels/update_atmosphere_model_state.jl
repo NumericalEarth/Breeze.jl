@@ -15,7 +15,7 @@ import Oceananigans.TimeSteppers: update_state!, compute_flux_bc_tendencies!
 const AnelasticModel = AtmosphereModel{<:AnelasticFormulation}
 
 function prognostic_fields(model::AnelasticModel)
-    thermodynamic_fields = (ρe=model.energy, ρqᵗ=model.absolute_humidity)
+    thermodynamic_fields = (ρe=model.energy_density, ρqᵗ=model.moisture_density)
     return merge(model.momentum, thermodynamic_fields, model.condensates, model.tracers)
 end
 
@@ -43,16 +43,16 @@ function compute_auxiliary_variables!(model)
     launch!(arch, grid, :xyz,
             _compute_auxiliary_thermodynamic_variables!,
             model.temperature,
-            model.specific_humidity,
+            model.moisture_fraction,
             grid,
             model.thermodynamics,
             formulation,
             model.microphysics,
-            model.energy,
-            model.absolute_humidity)
+            model.energy_density,
+            model.moisture_density)
 
     fill_halo_regions!(model.temperature)
-    fill_halo_regions!(model.specific_humidity)
+    fill_halo_regions!(model.moisture_fraction)
 
     return nothing
 end
@@ -74,17 +74,17 @@ end
 end
 
 @kernel function _compute_auxiliary_thermodynamic_variables!(temperature,
-                                                             specific_humidity,
+                                                             moisture_fraction,
                                                              grid,
                                                              thermo,
                                                              formulation,
                                                              microphysics,
-                                                             energy,
-                                                             absolute_humidity)
+                                                             energy_density,
+                                                             moisture_density)
     i, j, k = @index(Global, NTuple)
 
-    𝒰 = thermodynamic_state(i, j, k, grid, formulation, thermo, energy, absolute_humidity)
-    @inbounds specific_humidity[i, j, k] = total_specific_humidity(𝒰)
+    𝒰 = thermodynamic_state(i, j, k, grid, formulation, thermo, energy_density, moisture_density)
+    @inbounds moisture_fraction[i, j, k] = total_specific_humidity(𝒰)
 
     # Possibly perform saturation adjustment
     # Note, we will make this much prettier in the future
@@ -119,7 +119,7 @@ function compute_tendencies!(model::AnelasticModel)
     v_args = tuple(common_args..., model.forcing.ρv, pₕ′, ρᵣ)
     w_args = tuple(common_args..., model.forcing.ρw, ρᵣ,
                    model.formulation, model.temperature,
-                   model.specific_humidity, model.thermodynamics)
+                   model.moisture_fraction, model.thermodynamics)
 
     launch!(arch, grid, :xyz, compute_x_momentum_tendency!, Gρu, grid, u_args)
     launch!(arch, grid, :xyz, compute_y_momentum_tendency!, Gρv, grid, v_args)
@@ -127,14 +127,14 @@ function compute_tendencies!(model::AnelasticModel)
 
     scalar_args = (model.advection, model.velocities, model.clock, fields(model))
     Gρe = model.timestepper.Gⁿ.ρe
-    ρe = model.energy
+    ρe = model.energy_density
     Fρe = model.forcing.ρe
     ρe_args = tuple(ρe, Fρe, scalar_args..., ρᵣ,
                     model.formulation, model.temperature,
-                    model.specific_humidity, model.thermodynamics, model.condensates, model.microphysics)
+                    model.moisture_fraction, model.thermodynamics, model.condensates, model.microphysics)
     launch!(arch, grid, :xyz, compute_moist_static_energy_tendency!, Gρe, grid, ρe_args)
 
-    ρqᵗ = model.absolute_humidity
+    ρqᵗ = model.moisture_density
     Gρqᵗ = model.timestepper.Gⁿ.ρqᵗ
     Fρqᵗ = model.forcing.ρqᵗ
     ρq_args = tuple(ρqᵗ, Fρqᵗ, scalar_args...)

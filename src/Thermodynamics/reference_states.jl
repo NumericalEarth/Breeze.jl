@@ -23,7 +23,7 @@ Base.eltype(::ReferenceState{FT}) where FT = FT
 function Base.summary(ref::ReferenceState)
     FT = eltype(ref)
     return string("ReferenceState{$FT}(p₀=", prettysummary(ref.base_pressure),
-                  ", θᵣ=", prettysummary(ref.potential_temperature), ")")
+                  ", θ₀=", prettysummary(ref.potential_temperature), ")")
 end
 
 Base.show(io::IO, ref::ReferenceState) = print(io, summary(ref))
@@ -32,9 +32,9 @@ Base.show(io::IO, ref::ReferenceState) = print(io, summary(ref))
 ##### How to compute the reference state
 #####
 
-@inline function base_density(p₀, θᵣ, thermo)
+@inline function base_density(p₀, θ₀, thermo)
     Rᵈ = dry_air_gas_constant(thermo)
-    return p₀ / (Rᵈ * θᵣ)
+    return p₀ / (Rᵈ * θ₀)
 end
 
 """
@@ -44,11 +44,11 @@ Compute the reference pressure at height `z` that associated with the reference 
 potential temperature. The reference pressure is defined as the pressure of dry air at the
 reference pressure and temperature.
 """
-@inline function adiabatic_hydrostatic_pressure(z, p₀, θᵣ, thermo)
+@inline function adiabatic_hydrostatic_pressure(z, p₀, θ₀, thermo)
     cᵖᵈ = thermo.dry_air.heat_capacity
     Rᵈ = dry_air_gas_constant(thermo)
     g = thermo.gravitational_acceleration
-    return p₀ * (1 - g * z / (cᵖᵈ * θᵣ))^(cᵖᵈ / Rᵈ)
+    return p₀ * (1 - g * z / (cᵖᵈ * θ₀))^(cᵖᵈ / Rᵈ)
 end
 
 """
@@ -58,11 +58,11 @@ Compute the reference density at height `z` that associated with the reference p
 potential temperature. The reference density is defined as the density of dry air at the
 reference pressure and temperature.
 """
-@inline function adiabatic_hydrostatic_density(z, p₀, θᵣ, thermo)
+@inline function adiabatic_hydrostatic_density(z, p₀, θ₀, thermo)
     Rᵈ = dry_air_gas_constant(thermo)
     cᵖᵈ = thermo.dry_air.heat_capacity
-    pᵣ = adiabatic_hydrostatic_pressure(z, p₀, θᵣ, thermo)
-    ρ₀ = base_density(p₀, θᵣ, thermo)
+    pᵣ = adiabatic_hydrostatic_pressure(z, p₀, θ₀, thermo)
+    ρ₀ = base_density(p₀, θ₀, thermo)
     return ρ₀ * (pᵣ / p₀)^(1 - Rᵈ / cᵖᵈ)
 end
 
@@ -72,14 +72,14 @@ function ReferenceState(grid, thermo;
 
     FT = eltype(grid)
     p₀ = convert(FT, base_pressure)
-    θᵣ = convert(FT, potential_temperature)
+    θ₀ = convert(FT, potential_temperature)
 
     pᵣ = Field{Nothing, Nothing, Center}(grid)
     ρᵣ = Field{Nothing, Nothing, Center}(grid)
-    set!(pᵣ, z -> adiabatic_hydrostatic_pressure(z, p₀, θᵣ, thermo))
-    set!(ρᵣ, z -> adiabatic_hydrostatic_density(z, p₀, θᵣ, thermo))
+    set!(pᵣ, z -> adiabatic_hydrostatic_pressure(z, p₀, θ₀, thermo))
+    set!(ρᵣ, z -> adiabatic_hydrostatic_density(z, p₀, θ₀, thermo))
     fill_halo_regions!(pᵣ)
     fill_halo_regions!(ρᵣ)
 
-    return ReferenceState(p₀, θᵣ, pᵣ, ρᵣ)
+    return ReferenceState(p₀, θ₀, pᵣ, ρᵣ)
 end

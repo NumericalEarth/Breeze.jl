@@ -68,7 +68,7 @@ buoyancy = MoistAirBuoyancy(grid)
 
 # output
 MoistAirBuoyancy:
-├── reference_state: ReferenceState{Float64}(p₀=101325.0, θᵣ=288.0)
+├── reference_state: ReferenceState{Float64}(p₀=101325.0, θ₀=288.0)
 └── thermodynamics: ThermodynamicConstants{Float64}
 ```
 
