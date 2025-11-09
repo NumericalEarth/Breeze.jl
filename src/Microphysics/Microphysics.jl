@@ -35,7 +35,7 @@ struct WarmPhaseSaturationAdjustment{FT}
     tolerance :: FT
 end
 
-function WarmPhaseSaturationAdjustment(FT::DataType=Oceananigans.defaults.FloatType; tolerance = 1e-3)
+function WarmPhaseSaturationAdjustment(FT::DataType=Oceananigans.defaults.FloatType; tolerance=1e-3)
     tolerance = convert(FT, tolerance)
     return WarmPhaseSaturationAdjustment(tolerance)
 end
@@ -97,7 +97,7 @@ that used in MoistAirBuoyancy, adapted to MoistStaticEnergyState.
     qᵗ = total_moisture_mass_fraction(𝒰₀)
     q₁ = MoistureMassFractions(qᵗ, zero(qᵗ), zero(qᵗ))
     cᵖᵐ = mixture_heat_capacity(q₁, thermo)
-    T₁ = e / cᵖᵐ
+    T₁ = (e - g * z) / cᵖᵐ
 
     pᵣ = 𝒰₀.reference_pressure
     ρ₁ = density(pᵣ, T₁, q₁, thermo)
