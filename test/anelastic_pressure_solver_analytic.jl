@@ -1,10 +1,11 @@
 using Test
 using Breeze
+using GPUArraysCore: @allowscalar
 using Oceananigans
 using Oceananigans.Fields: fill_halo_regions!
 
 @testset "Anelastic pressure solver recovers analytic solution [$FT]" for FT in (Float32, Float64)
-    grid = RectilinearGrid(FT; size=48, z=(0, 1), topology=(Flat, Flat, Bounded))
+    grid = RectilinearGrid(default_arch, FT; size=48, z=(0, 1), topology=(Flat, Flat, Bounded))
     thermodynamics = ThermodynamicConstants(FT)
     reference_state = ReferenceState(grid, thermodynamics, base_pressure=101325, potential_temperature=288)
     formulation = AnelasticFormulation(reference_state)
@@ -35,5 +36,5 @@ using Oceananigans.Fields: fill_halo_regions!
 
     ϕ_exact = CenterField(grid)
     set!(ϕ_exact, z -> z^2 / 2 - z^3 / 3 - 1 / 12)
-    @test isapprox(ϕ_exact, model.nonhydrostatic_pressure, rtol=1e-3)
+    @test @allowscalar isapprox(ϕ_exact, model.nonhydrostatic_pressure; rtol=1e-3)
 end
