@@ -201,6 +201,7 @@ Solution of ``r(T) = 0`` is found via the [secant method](https://en.wikipedia.o
     q₁ = MoistureMassFractions(qᵛ⁺₁, qˡ₁, zero(qˡ₁))
     𝒰₁ = with_moisture(𝒰₀, q₁)
 
+    #=
     # We generate a second guess simply by adding 1 K to T₁...
 
     # NOTE: We could also generate a second guess to start a secant iteration
@@ -210,12 +211,11 @@ Solution of ``r(T) = 0`` is found via the [secant method](https://en.wikipedia.o
     # and therefore qˡ₁ is overestimated. This is similar to an approach
     # used in Pressel et al 2015. However, it doesn't work for large liquid fractions.
     T₂ = T₁ + 1 
+    =#
 
-    #=
     ℒˡᵣ = thermo.liquid.reference_latent_heat
     cᵖᵐ = mixture_heat_capacity(q₁, thermo)
     T₂ = T₁ + ℒˡᵣ * qˡ₁ / cᵖᵐ
-    =#
 
     𝒰₂ = adjust_state(𝒰₁, T₂, thermo)
 
