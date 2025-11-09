@@ -17,7 +17,7 @@ literated_dir = joinpath(@__DIR__, "src", "literated")
 mkpath(literated_dir)
 
 example_scripts = [
-    ("Thermal bubble", joinpath(examples_src_dir, "thermal_bubble.jl")),
+    "thermal_bubble.jl",
 ]
 
 for (_, script) in example_scripts
