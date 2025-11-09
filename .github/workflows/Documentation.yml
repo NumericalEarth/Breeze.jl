@@ -88,6 +88,7 @@ jobs:
       - uses: actions/download-artifact@v5
         with:
           name: documentation-build
+          path: docs/build
       - name: Instantiate docs environment
         shell: julia --color=yes {0}
         run: |
@@ -95,7 +96,7 @@ jobs:
           # reinstall the world all over again.
           using Pkg
           Pkg.add(; name="Documenter", version="1")
-      - name: Build documentation
+      - name: Deploy documentation
         run:
           julia --color=yes docs/deploy.jl
         env:
