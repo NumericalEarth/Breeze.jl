@@ -343,7 +343,7 @@ thermo = ThermodynamicConstants()
 
 T = collect(200:0.1:320)
 pᵛˡ⁺ = [saturation_vapor_pressure(Tⁱ, thermo, thermo.liquid) for Tⁱ in T]
-pᵛⁱ⁺ = [saturation_vapor_pressure(Tⁱ, thermo, thermo.solid) for Tⁱ in T]
+pᵛⁱ⁺ = [saturation_vapor_pressure(Tⁱ, thermo, thermo.ice) for Tⁱ in T]
 pᵛⁱ⁺[T .> thermo.triple_point_temperature] .= NaN
 
 using CairoMakie
