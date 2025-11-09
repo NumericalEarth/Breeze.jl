@@ -17,6 +17,8 @@ using ..Thermodynamics:
     density,
     exner_function
 
+using DocStringExtensions: TYPEDSIGNATURES
+
 using Oceananigans: Oceananigans, Center, Field, KernelFunctionOperation
 using Oceananigans.Grids: AbstractGrid
 using Oceananigans.Operators: ∂zᶜᶜᶠ
@@ -47,10 +49,7 @@ Adapt.adapt_structure(to, mb::MoistAirBuoyancy) =
                      adapt(to, mb.thermodynamics))
 
 """
-    MoistAirBuoyancy(grid;
-                     base_pressure = 101325,
-                     reference_potential_temperature = 288,
-                     thermodynamics = ThermodynamicConstants(FT))
+$(TYPEDSIGNATURES)
 
 Return a MoistAirBuoyancy formulation that can be provided as input to an
 `Oceananigans.NonhydrostaticModel`.
@@ -154,10 +153,14 @@ end
 # root of: f(T) = T - Π θ - ℒ qˡ / cᵖᵐ
 
 """
-    compute_boussinesq_adjustment_temperature(state::PotentialTemperatureState, ref, thermo)
+$(TYPEDSIGNATURES)
 
-Return the temperature ``T`` that satisfies saturation adjustment, that is, the
-temperature for which
+Return the temperature ``T`` corresponding to thermodynamic equilibrium between the
+specific humidity and liquid mass fractions of the input thermodynamic state `𝒰₀`,
+wherein the specific humidity is equal to or less than the saturation specific humidity
+at the given conditions and affiliated with theromdynamic constants `thermo`.
+
+The saturation equilibrium temperature satisfies the nonlinear relation
 
 ```math
 θ = [1 - ℒˡᵣ qˡ / (cᵖᵐ T)] T / Π ,
@@ -168,7 +171,7 @@ specific heat, ``Π`` the Exner function, ``qˡ = \\max(0, qᵗ - qᵛ⁺)``
 the condensate specific humidity, ``qᵗ`` is the
 total specific humidity, ``qᵛ⁺`` is the saturation specific humidity.
 
-The saturation adjustment temperature is obtained by solving ``r(T)``, where
+The saturation equilibrium temperature is thus obtained by solving ``r(T)``, where
 ```math
 r(T) ≡ T - θ Π - ℒˡᵣ qˡ / cᵖᵐ .
 ```
