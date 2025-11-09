@@ -65,6 +65,8 @@ jobs:
           retention-days: 10
 
   deploy-docs:
+    # Deploy docs only if triggers is not a PR, or a PR not from a fork.
+    if: ${{ (github.event_name != 'pull_request') || (! github.event.pull_request.head.repo.fork) }}
     needs: build-docs
     permissions:
       actions: write
