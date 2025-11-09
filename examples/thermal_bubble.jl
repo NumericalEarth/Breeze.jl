@@ -46,8 +46,11 @@ set!(model, θ = θᵢ)
 # Plot the initial moist static energy perturbation to ensure the bubble looks
 # as expected.
 
-hm = heatmap(ρe′)
-# Colorbar(hm, label = "ρe′ (J/kg)")
+fig = Figure()
+ax = Axis(fig[1, 1], aspect=2, xlabel="x (m)", ylabel="z (m)", title="Initial energy perturbation ρe′ (J / kg)")
+hm = heatmap!(ax, ρe′)
+Colorbar(fig[1, 2], hm, label = "ρe′ (J/kg)")
+fig
 
 # ## Simulation rising
 
