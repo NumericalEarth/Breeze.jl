@@ -85,7 +85,7 @@ julia> grid = RectilinearGrid(size=(8, 8, 8), extent=(1, 2, 3));
 julia> model = AtmosphereModel(grid)
 AtmosphereModel{CPU, RectilinearGrid}(time = 0 seconds, iteration = 0)
 ├── grid: 8×8×8 RectilinearGrid{Float64, Periodic, Periodic, Bounded} on CPU with 3×3×3 halo
-├── formulation: AnelasticFormulation(p₀=101325.0, θᵣ=288.0)
+├── formulation: AnelasticFormulation(p₀=101325.0, θ₀=288.0)
 ├── timestepper: RungeKutta3TimeStepper
 ├── advection scheme: WENO{3, Float64, Float32}(order=5)
 ├── tracers: ()

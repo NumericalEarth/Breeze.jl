@@ -34,9 +34,9 @@ const AnelasticModel = AtmosphereModel{<:AnelasticFormulation}
 
 function Base.summary(formulation::AnelasticFormulation)
     p₀ = formulation.reference_state.base_pressure
-    θᵣ = formulation.reference_state.potential_temperature
+    θ₀ = formulation.reference_state.potential_temperature
     return string("AnelasticFormulation(p₀=", prettysummary(p₀),
-                  ", θᵣ=", prettysummary(θᵣ), ")")
+                  ", θ₀=", prettysummary(θ₀), ")")
 end
 
 Base.show(io::IO, formulation::AnelasticFormulation) = print(io, "AnelasticFormulation")
@@ -103,8 +103,8 @@ end
 @inline function reference_specific_volume(i, j, k, grid, formulation, thermo)
     Rᵈ = dry_air_gas_constant(thermo)
     pᵣ = @inbounds formulation.reference_state.pressure[i, j, k]
-    θᵣ = formulation.reference_state.potential_temperature
-    return Rᵈ * θᵣ / pᵣ
+    θ₀ = formulation.reference_state.potential_temperature
+    return Rᵈ * θ₀ / pᵣ
 end
 
 function collect_prognostic_fields(::AnelasticFormulation,
