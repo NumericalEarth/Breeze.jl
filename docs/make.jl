@@ -12,8 +12,6 @@ DocMeta.setdocmeta!(Breeze, :DocTestSetup, :(using Breeze); recursive=true)
 bib_filepath = joinpath(dirname(@__FILE__), "src", "breeze.bib")
 bib = CitationBibliography(bib_filepath, style=:authoryear)
 
-ENV["BREEZE_FAST_EXAMPLES"] = get(ENV, "BREEZE_FAST_EXAMPLES", "true")
-
 examples_src_dir = joinpath(@__DIR__, "..", "examples")
 literated_dir = joinpath(@__DIR__, "src", "literated")
 mkpath(literated_dir)
