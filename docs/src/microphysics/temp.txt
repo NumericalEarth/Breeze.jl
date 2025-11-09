@@ -1,4 +1,5 @@
 
+<!--
 Finally, we recover the amount of liquid condensate by subtracting the saturation
 specific humidity from the total:
 
@@ -57,7 +58,9 @@ For a third example, we consider a state with constant moist static energy and t
 but at varying heights:
 
 ```@example microphysics
+using Breeze
 using Breeze.AtmosphereModels: compute_temperature
+
 grid = RectilinearGrid(size=100, z=(0, 1e4), topology=(Flat, Flat, Bounded))
 thermo = ThermodynamicConstants()
 reference_state = ReferenceState(grid, thermo)
@@ -118,3 +121,4 @@ lines!(axrh, rh, z)
 
 fig
 ```
+-->

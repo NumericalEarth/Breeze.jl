@@ -70,13 +70,16 @@ end
 end
 
 @inline function saturation_adjustment_residual(T, 𝒰::MoistStaticEnergyState, thermo)
-    q = 𝒰.moisture_mass_fractions
     e = 𝒰.moist_static_energy
     g = thermo.gravitational_acceleration
     z = 𝒰.height
     ℒˡᵣ = thermo.liquid.reference_latent_heat
+    qᵗ = total_moisture_mass_fraction(𝒰)
+    pᵣ = 𝒰.reference_pressure
+    qᵛ⁺ = adjustment_saturation_specific_humidity(T, pᵣ, qᵗ, thermo)
+    qˡ = max(0, qᵗ - qᵛ⁺)
+    q = MoistureMassFractions(qᵛ⁺, qˡ, zero(qˡ))
     cᵖᵐ = mixture_heat_capacity(q, thermo)
-    qˡ = q.liquid
 
     # e = cᵖᵐ * T + g * z - ℒˡᵣ * qˡ
     return T - (e - g * z + ℒˡᵣ * qˡ) / cᵖᵐ
@@ -97,6 +100,8 @@ that used in MoistAirBuoyancy, adapted to MoistStaticEnergyState.
     qᵗ = total_moisture_mass_fraction(𝒰₀)
     q₁ = MoistureMassFractions(qᵗ, zero(qᵗ), zero(qᵗ))
     cᵖᵐ = mixture_heat_capacity(q₁, thermo)
+    g = thermo.gravitational_acceleration
+    z = 𝒰₀.height
     T₁ = (e - g * z) / cᵖᵐ
 
     pᵣ = 𝒰₀.reference_pressure
@@ -114,13 +119,15 @@ that used in MoistAirBuoyancy, adapted to MoistStaticEnergyState.
     # Generate a second guess
     ℒˡᵣ = thermo.liquid.reference_latent_heat
     cᵖᵐ = mixture_heat_capacity(q₁, thermo)
-    T₂ = T₁ + 1e-2 #ℒˡᵣ * qˡ₁ / cᵖᵐ
+    ΔT = ℒˡᵣ * qˡ₁ / cᵖᵐ
+    T₂ = T₁ + ΔT / 2
     𝒰₂ = adjust_state(𝒰₁, T₂, thermo)
 
     # Initialize secant iteration
     r₁ = saturation_adjustment_residual(T₁, 𝒰₁, thermo)
     r₂ = saturation_adjustment_residual(T₂, 𝒰₂, thermo)
     δ = microphysics.tolerance
+    iter = 0
 
     while abs(T₂ - T₁) > δ
         # Compute slope
@@ -135,9 +142,10 @@ that used in MoistAirBuoyancy, adapted to MoistStaticEnergyState.
         T₂ -= r₂ * ΔTΔr
         𝒰₂ = adjust_state(𝒰₂, T₂, thermo)
         r₂ = saturation_adjustment_residual(T₂, 𝒰₂, thermo)
+        iter += 1
     end
 
-    return T₂
+    return T₂ #, iter
 end
 
 end # module Microphysics

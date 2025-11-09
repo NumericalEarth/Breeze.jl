@@ -312,7 +312,7 @@ In the anelastic formulation used by Breeze, it is also convenient to use the dr
 e \equiv c^{p d} \, \theta ,
 ```
 
-which is materially conserved in the absence of diabatic sources and appears naturally in the conservative anelastic energy equation; see the [Dynamics](@ref) page. In clear air, ``T = Π \, e / c^{p d}``, while during saturation adjustment with condensate ``q^{l}`` present the temperature satisfies
+which is materially conserved in the absence of diabatic sources and appears naturally in the conservative anelastic energy equation; see the Dynamics page. In clear air, ``T = Π \, e / c^{p d}``, while during saturation adjustment with condensate ``q^{l}`` present the temperature satisfies
 
 ```math
 T = \frac{Π \, e}{c^{p d}} + \frac{\mathcal{L}^{l}_{r}}{c^{p m}(q)} \, q^{l} ,
