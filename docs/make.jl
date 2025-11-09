@@ -1,6 +1,7 @@
 using Breeze
 using Documenter
 using DocumenterCitations
+using Literate
 
 using CairoMakie
 CairoMakie.activate!(type = "svg")
@@ -11,12 +12,33 @@ DocMeta.setdocmeta!(Breeze, :DocTestSetup, :(using Breeze); recursive=true)
 bib_filepath = joinpath(dirname(@__FILE__), "src", "breeze.bib")
 bib = CitationBibliography(bib_filepath, style=:authoryear)
 
+ENV["BREEZE_FAST_EXAMPLES"] = get(ENV, "BREEZE_FAST_EXAMPLES", "true")
+
+examples_src_dir = joinpath(@__DIR__, "..", "examples")
+literated_dir = joinpath(@__DIR__, "src", "literated")
+mkpath(literated_dir)
+
+example_scripts = [
+    ("Thermal bubble", joinpath(examples_src_dir, "thermal_bubble.jl")),
+]
+
+for (_, script) in example_scripts
+    Literate.markdown(script, literated_dir;
+                      flavor = Literate.DocumenterFlavor(),
+                      execute = true)
+end
+
+example_pages = Any[
+    "Thermal bubble" => "literated/thermal_bubble.md",
+]
+
 makedocs(
     ;
     sitename = "Breeze",
     plugins = [bib],
     pages=[
         "Home" => "index.md",
+        "Examples" => example_pages,
         "Thermodynamics" => "thermodynamics.md",
         "Microphysics" => Any[
             "Overview" => "microphysics/microphysics_overview.md",
