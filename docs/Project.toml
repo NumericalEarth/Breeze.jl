@@ -3,6 +3,7 @@ Breeze = "660aa2fb-d4c8-4359-a52c-9c057bc511da"
 CairoMakie = "13f3f980-e62b-5c42-98c6-ff1f3baf88f0"
 Documenter = "e30172f5-a6a5-5a46-863b-614d45cd2de4"
 DocumenterCitations = "daee34ce-89f3-4625-b898-19384cb65244"
+Literate = "98b081ad-f1c9-55d3-8b20-4c87d4299306"
 Oceananigans = "9e8cae18-63c1-5223-a75c-80ca9d6e9a09"
 Random = "9a3f8284-a2c9-5f02-9a11-845980a1fd5c"
 
@@ -13,4 +14,5 @@ Breeze = {path = ".."}
 CairoMakie = "0.13, 0.14"
 Documenter = "1"
 DocumenterCitations = "1.4"
+Literate = "2"
 Random = "<0.0.1, 1"
