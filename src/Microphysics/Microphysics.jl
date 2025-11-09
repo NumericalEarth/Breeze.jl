@@ -49,32 +49,31 @@ prognostic_field_names(::WarmPhaseSaturationAdjustment) = tuple()
 ##### Saturation adjustment utilities (copy-adapted from MoistAirBuoyancy)
 #####
 
-@inline function adjustment_saturation_specific_humidity(T, 𝒰::MoistStaticEnergyState, thermo)
+@inline function adjustment_saturation_specific_humidity(T, pᵣ, qᵗ, thermo)
     pᵛ⁺ = saturation_vapor_pressure(T, thermo, thermo.liquid)
-    pᵣ = 𝒰.reference_pressure
-    qᵗ = total_moisture_mass_fraction(𝒰)
     Rᵈ = dry_air_gas_constant(thermo)
     Rᵛ = vapor_gas_constant(thermo)
     ϵᵈᵛ = Rᵈ / Rᵛ
     return ϵᵈᵛ * (1 - qᵗ) * pᵛ⁺ / (pᵣ - pᵛ⁺)
 end
 
-@inline function adjust_state(𝒰₀::MoistStaticEnergyState, T, m::WarmPhaseSaturationAdjustment)
-    qᵛ⁺ = adjustment_saturation_specific_humidity(T, 𝒰₀, m)
+@inline function adjust_state(𝒰₀::MoistStaticEnergyState, T, thermo)
+    pᵣ = 𝒰₀.reference_pressure
     qᵗ = total_moisture_mass_fraction(𝒰₀)
+    qᵛ⁺ = adjustment_saturation_specific_humidity(T, pᵣ, qᵗ, thermo)
     qˡ = max(0, qᵗ - qᵛ⁺)
     q₁ = MoistureMassFractions(qᵛ⁺, qˡ, zero(qˡ))
     return with_moisture(𝒰₀, q₁)
 end
 
-@inline function saturation_adjustment_residual(T, 𝒰::MoistStaticEnergyState, m::WarmPhaseSaturationAdjustment)
-    Π = exner(𝒰, m)
+@inline function saturation_adjustment_residual(T, 𝒰::MoistStaticEnergyState, thermo)
     q = 𝒰.moisture_mass_fractions
-    θ = 𝒰.potential_temperature
+    e = 𝒰.moist_static_energy
+    g = thermo.gravitational_acceleration
+    z = 𝒰.height
     ℒˡᵣ = m.thermodynamics.liquid.reference_latent_heat
-    cᵖᵐ = mixture_heat_capacity(q, m.thermodynamics)
-    qˡ = q.liquid
-    return T - Π * θ - ℒˡᵣ * qˡ / cᵖᵐ
+    cᵖᵐ = mixture_heat_capacity(q, thermo)
+    return T - (e - g * z - ℒˡᵣ * qˡ) / cᵖᵐ
 end
 
 """
@@ -89,24 +88,33 @@ that used in MoistAirBuoyancy, adapted to MoistStaticEnergyState.
     e == 0 && return zero(FT)
 
     # Unsaturated initial guess
-    q = 𝒰₀.moisture_mass_fractions
-    cᵖᵐ = mixture_heat_capacity(q, thermo)
+    qᵗ = total_moisture_mass_fraction(𝒰₀)
+    q₁ = MoistureMassFractions(qᵗ, zero(qᵗ), zero(qᵗ))
+    cᵖᵐ = mixture_heat_capacity(q₁, thermo)
     T₁ = e / cᵖᵐ
 
-    # If saturated, modify state to include qˡ
-    qᵛ⁺₁ = adjustment_saturation_specific_humidity(T₁, 𝒰₀, thermo)
-    qˡ₁ = qᵗ - qᵛ⁺₁
-    q₁ = MoistureMassFractions(qᵛ⁺₁, qˡ₁, zero(qˡ₁))
-    𝒰₁ = MoistStaticEnergyState(e, q₁, 𝒰₀.height)
+    pᵣ = 𝒰₀.reference_pressure
+    ρ₁ = density(pᵣ, T₁, q₁, thermo)
+    qᵛ⁺₁ = saturation_specific_humidity(T₁, ρ₁, thermo, thermo.liquid)
+    qᵗ <= qᵛ⁺₁ && return T₁
 
-    # Second guess
-    T₂ = T₁ + one(FT)
-    𝒰₂ = adjust_state(𝒰₁, T₂, m)
+    # Re-initialize first guess assuming saturation
+    𝒰₁ = with_moisture(𝒰₀, q₁)
+    qᵛ⁺₁ = adjustment_saturation_specific_humidity(T₁, pᵣ, qᵗ, thermo)
+    qˡ₁ = max(0, qᵗ - qᵛ⁺₁)
+    q₁ = MoistureMassFractions(qᵛ⁺₁, qˡ₁, zero(qˡ₁))
+    𝒰₁ = with_moisture(𝒰₀, q₁)
+
+    # Generate a second guess
+    ℒˡᵣ = thermo.liquid.reference_latent_heat
+    cᵖᵐ = mixture_heat_capacity(q₁, thermo)
+    T₂ = T₁ + ℒˡᵣ * qˡ₁ / cᵖᵐ
+    𝒰₂ = adjust_state(𝒰₁, T₂, thermo)
 
     # Initialize secant iteration
-    r₁ = saturation_adjustment_residual(T₁, 𝒰₁, m)
-    r₂ = saturation_adjustment_residual(T₂, 𝒰₂, m)
-    δ = convert(FT, 1e-3)
+    r₁ = saturation_adjustment_residual(T₁, 𝒰₁, thermo)
+    r₂ = saturation_adjustment_residual(T₂, 𝒰₂, thermo)
+    δ = microphysics.tolerance
 
     while abs(T₂ - T₁) > δ
         # Compute slope
