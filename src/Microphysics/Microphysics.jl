@@ -11,13 +11,18 @@ using ..Thermodynamics:
     dry_air_gas_constant,
     vapor_gas_constant,
     saturation_vapor_pressure,
+    saturation_specific_humidity,
     density,
-    total_moisture_fraction,
+    total_moisture_mass_fraction,
     MoistStaticEnergyState,
     adiabatic_hydrostatic_pressure
 
-import ..Thermodynamics: saturation_specific_humidity
-import ..AtmosphereModels: compute_temperature
+using Oceananigans: CenterField
+
+import ..AtmosphereModels:
+    compute_temperature,
+    prognostic_field_names,
+    materialize_microphysical_fields
 
 using Adapt: Adapt, adapt
 
@@ -32,6 +37,14 @@ struct WarmPhaseSaturationAdjustment{FT}
     tolerance :: FT
 end
 
+function materialize_microphysical_fields(microphysics::WarmPhaseSaturationAdjustment, grid, boundary_conditions)
+    liquid_density = CenterField(grid)
+    vapor_density = CenterField(grid)
+    return (; liquid_density, vapor_density)
+end
+
+prognostic_field_names(::WarmPhaseSaturationAdjustment) = tuple()
+
 #####
 ##### Saturation adjustment utilities (copy-adapted from MoistAirBuoyancy)
 #####
@@ -39,7 +52,7 @@ end
 @inline function adjustment_saturation_specific_humidity(T, 𝒰::MoistStaticEnergyState, thermo)
     pᵛ⁺ = saturation_vapor_pressure(T, thermo, thermo.liquid)
     pᵣ = 𝒰.reference_pressure
-    qᵗ = total_moisture_fraction(𝒰)
+    qᵗ = total_moisture_mass_fraction(𝒰)
     Rᵈ = dry_air_gas_constant(thermo)
     Rᵛ = vapor_gas_constant(thermo)
     ϵᵈᵛ = Rᵈ / Rᵛ
@@ -48,7 +61,7 @@ end
 
 @inline function adjust_state(𝒰₀::MoistStaticEnergyState, T, m::WarmPhaseSaturationAdjustment)
     qᵛ⁺ = adjustment_saturation_specific_humidity(T, 𝒰₀, m)
-    qᵗ = total_moisture_fraction(𝒰₀)
+    qᵗ = total_moisture_mass_fraction(𝒰₀)
     qˡ = max(0, qᵗ - qᵛ⁺)
     q₁ = MoistureMassFractions(qᵛ⁺, qˡ, zero(qˡ))
     return with_moisture(𝒰₀, q₁)
@@ -56,7 +69,7 @@ end
 
 @inline function saturation_adjustment_residual(T, 𝒰::MoistStaticEnergyState, m::WarmPhaseSaturationAdjustment)
     Π = exner(𝒰, m)
-    q = 𝒰.moisture_fractions
+    q = 𝒰.moisture_mass_fractions
     θ = 𝒰.potential_temperature
     ℒˡᵣ = m.thermodynamics.liquid.reference_latent_heat
     cᵖᵐ = mixture_heat_capacity(q, m.thermodynamics)
@@ -76,7 +89,7 @@ that used in MoistAirBuoyancy, adapted to MoistStaticEnergyState.
     e == 0 && return zero(FT)
 
     # Unsaturated initial guess
-    q = 𝒰₀.moisture_fractions
+    q = 𝒰₀.moisture_mass_fractions
     cᵖᵐ = mixture_heat_capacity(q, thermo)
     T₁ = e / cᵖᵐ
 

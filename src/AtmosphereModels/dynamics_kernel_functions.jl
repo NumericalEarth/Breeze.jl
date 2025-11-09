@@ -66,12 +66,12 @@ end
                                      reference_density,
                                      formulation,
                                      temperature,
-                                     moisture_fraction,
+                                     moisture_mass_fraction,
                                      thermo)
 
     return ( - div_𝐯w(i, j, k, grid, advection, velocities, momentum.ρw)
              - z_f_cross_U(i, j, k, grid, coriolis, momentum)
-             + ρ_bᶜᶜᶠ(i, j, k, grid, reference_density, temperature, moisture_fraction, formulation, thermo)
+             + ρ_bᶜᶜᶠ(i, j, k, grid, reference_density, temperature, moisture_mass_fraction, formulation, thermo)
              + forcing(i, j, k, grid, clock, model_fields))
 end
 
@@ -97,17 +97,17 @@ end
                                               reference_density,
                                               formulation,
                                               temperature,
-                                              moisture_fraction,
+                                              moisture_mass_fraction,
                                               thermo,
-                                              condensates,
+                                              microphysical_fields,
                                               microphysics)
 
     # Compute the buoyancy flux term, ρᵣ w b
     buoyancy_flux = ℑzᵃᵃᶜ(i, j, k, grid, ρ_w_bᶜᶜᶠ, velocities.w, reference_density,
-                          temperature, moisture_fraction, formulation, thermo)
+                          temperature, moisture_mass_fraction, formulation, thermo)
 
     return ( - div_Uc(i, j, k, grid, advection, velocities, moist_static_energy)
              + buoyancy_flux
-             # + microphysical_energy_tendency(i, j, k, grid, formulation, microphysics, condensates)
+             # + microphysical_energy_tendency(i, j, k, grid, formulation, microphysics, microphysical_fields)
              + forcing(i, j, k, grid, clock, model_fields))
 end

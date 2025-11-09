@@ -40,8 +40,6 @@ end
 
 Base.show(io::IO, formulation::AnelasticFormulation) = print(io, "AnelasticFormulation")
 
-field_names(::AnelasticFormulation, tracer_names) = (:ρu, :ρv, :ρw, :ρe, :ρqᵗ, tracer_names...)
-
 function AnelasticFormulation(grid, state_constants, thermo)
     pᵣ = Field{Nothing, Nothing, Center}(grid)
     ρᵣ = Field{Nothing, Nothing, Center}(grid)
@@ -72,9 +70,9 @@ function thermodynamic_state(i, j, k, grid, formulation::AnelasticFormulation, t
     return MoistStaticEnergyState(e, q, z, pᵣ)
 end
 
-@inline function specific_volume(i, j, k, grid, formulation, temperature, moisture_fraction, thermo)
+@inline function specific_volume(i, j, k, grid, formulation, temperature, moisture_mass_fraction, thermo)
     @inbounds begin
-        qᵗ = moisture_fraction[i, j, k]
+        qᵗ = moisture_mass_fraction[i, j, k]
         pᵣ = formulation.reference_state.pressure[i, j, k]
         T = temperature[i, j, k]
     end
@@ -105,12 +103,12 @@ function collect_prognostic_fields(::AnelasticFormulation,
                                    momentum,
                                    energy_density,
                                    moisture_density,
-                                   condensates,
+                                   microphysical_fields,
                                    tracers)
 
     thermodynamic_variables = (ρe=energy_density, ρqᵗ=moisture_density)
 
-    return merge(momentum, thermodynamic_variables, condensates, tracers)
+    return merge(momentum, thermodynamic_variables, microphysical_fields, tracers)
 end
 
 function materialize_momentum_and_velocities(formulation::AnelasticFormulation, grid, boundary_conditions)
