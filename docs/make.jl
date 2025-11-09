@@ -20,8 +20,9 @@ example_scripts = [
     "thermal_bubble.jl",
 ]
 
-for (_, script) in example_scripts
-    Literate.markdown(script, literated_dir;
+for script_file in example_scripts
+    script_path = joinpath(examples_src_dir, script_file)
+    Literate.markdown(script_path, literated_dir;
                       flavor = Literate.DocumenterFlavor(),
                       execute = true)
 end
