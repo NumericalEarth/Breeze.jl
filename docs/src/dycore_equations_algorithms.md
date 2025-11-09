@@ -1,4 +1,4 @@
-# Dynamics
+# [Dycore equations and algorithms](@id Dycore-section)
 
 This section summarizes the governing equations behind Breeze’s atmospheric dynamics and the anelastic formulation used by [`AtmosphereModel`](@ref), following the thermodynamically consistent framework of [Pauluis2008](@citet).
 
