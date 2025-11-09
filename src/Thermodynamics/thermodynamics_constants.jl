@@ -159,7 +159,7 @@ The Clausius-Clapeyron relation describes the pressure-temperature relationship 
 transitions from vapor to liquid or vapor to ice,
 
 ```math
-d[\\log(pᵝ⁺)] / dT = ℒᵝ / (Rᵝ T²)
+d[\\log(pᵛ⁺ᵝ)] / dT = ℒᵝ / (Rᵛ T²)
 ```
 
 where:
