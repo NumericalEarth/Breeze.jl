@@ -4,10 +4,7 @@ export WarmPhaseSaturationAdjustment
 
 using ..Thermodynamics:
     MoistureMassFractions,
-    ThermodynamicConstants,
-    ReferenceState,
     mixture_heat_capacity,
-    mixture_gas_constant,
     dry_air_gas_constant,
     vapor_gas_constant,
     saturation_vapor_pressure,
@@ -15,8 +12,7 @@ using ..Thermodynamics:
     density,
     with_moisture,
     total_moisture_mass_fraction,
-    MoistStaticEnergyState,
-    adiabatic_hydrostatic_pressure
+    MoistStaticEnergyState
 
 using Oceananigans: CenterField
 

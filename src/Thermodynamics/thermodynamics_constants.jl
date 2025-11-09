@@ -2,7 +2,7 @@ using Adapt: Adapt, adapt
 using Oceananigans.Grids: prettysummary
 
 """
-    IdealGas{FT}
+$(TYPEDEF)
 
 A struct representing an ideal gas with molar mass and specific heat capacity.
 
@@ -65,7 +65,7 @@ Adapt.adapt_structure(to, pt::CondensedPhase) =
                    adapt(to, pt.heat_capacity))
 
 """
-    CondensedPhase(FT = Oceananigans.defaults.FloatType; reference_latent_heat, heat_capacity)
+$(TYPEDSIGNATURES)
 
 Returns `CondensedPhase` with specified parameters converted to `FT`.
 
@@ -145,18 +145,7 @@ function Adapt.adapt_structure(to, thermo::ThermodynamicConstants)
 end
 
 """
-    ThermodynamicConstants(FT = Oceananigans.defaults.FloatType;
-                           molar_gas_constant = 8.314462618,
-                           gravitational_acceleration = 9.81,
-                           energy_reference_temperature = 273.15,
-                           triple_point_temperature = 273.16,
-                           triple_point_pressure = 611.657,
-                           dry_air_molar_mass = 0.02897,
-                           dry_air_heat_capacity = 1005,
-                           vapor_molar_mass = 0.018015,
-                           vapor_heat_capacity = 1850,
-                           liquid = liquid_water(FT),
-                           ice = water_ice(FT))
+$(TYPEDSIGNATURES)
 
 Create `ThermodynamicConstants` with parameters that represent gaseous mixture of dry "air"
 and vapor, as well as condensed liquid and ice phases.
@@ -249,7 +238,7 @@ const MMF = MoistureMassFractions
 
 
 """
-    mixture_gas_constant(q::MoistureMassFractions, thermo::ThermodynamicConstants)
+$(TYPEDSIGNATURES)
 
 Return the gas constant of moist air mixture [in J/(kg K)] given the specific humidity
 `q` and thermodynamic parameters `thermo`.
@@ -280,7 +269,7 @@ where:
 end
 
 """
-    mixture_heat_capacity(q::MoistureMassFractions, thermo::ThermodynamicConstants)
+$(TYPEDSIGNATURES)
 
 Compute the heat capacity of a mixture of dry air, vapor, liquid, and ice, where
 the mass fractions of vapor, liquid, and ice are given by `q`.
