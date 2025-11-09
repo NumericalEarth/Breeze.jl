@@ -39,7 +39,7 @@ set!(model, θ = θᵢ)
 
 ρe = model.energy_density
 ρE = Field(Average(ρe, dims=1))
-ρe′ = Field(model.energy - ρE)
+ρe′ = Field(ρe - ρE)
 
 # ## Initial energy perturbation visualization
 #
