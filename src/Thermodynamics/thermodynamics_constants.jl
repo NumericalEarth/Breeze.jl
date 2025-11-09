@@ -169,7 +169,7 @@ where:
 - ``T`` is temperature
 - ``ℒᵝ`` is the latent heat of the transition
   (the difference between the enthalpy of the vapor and transitioned state at a given temperature)
-- ``Rᵝ`` is the specific gas constant for the ``β``-th phase
+- ``Rᵛ`` is the specific gas constant for vapor
 
 For a thermodynamic model with constant specific heats, the latent heat may be written
 
