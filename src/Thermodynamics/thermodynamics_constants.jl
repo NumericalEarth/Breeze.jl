@@ -164,7 +164,7 @@ d[\\log(pᵛ⁺ᵝ)] / dT = ℒᵝ / (Rᵛ T²)
 
 where:
 
-- ``pᵝ⁺`` is the saturation vapor pressure for a transition between vapor and the ``β``-th phase
+- ``pᵛ⁺ᵝ`` is the saturation vapor pressure for a transition between vapor and the ``β``-th phase
   For example ``β = l`` for liquid and ``β = i`` for ice.
 - ``T`` is temperature
 - ``ℒᵝ`` is the latent heat of the transition
