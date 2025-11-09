@@ -270,7 +270,7 @@ $(TYPEDSIGNATURES)
 Update the predictor momentum (ρu, ρv, ρw) with the non-hydrostatic pressure via
 
 ```math
-u^{n+1} = u^n - δₓp_{NH} / Δx * Δt
+\boldsymbol{\rho u}^{n+1} = \boldsymbol{\rho u}^n - \Delta t \rho_r \nabla \left ( \alpha_r p_{nh} \right )
 ```
 """
 @kernel function _pressure_correct_momentum!(M, grid, Δt, αᵣ_pₙ, ρᵣ)
