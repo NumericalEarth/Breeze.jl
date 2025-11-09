@@ -33,6 +33,7 @@ example_pages = Any[
 
 makedocs(
     ;
+    modules = [Breeze],
     sitename = "Breeze",
     plugins = [bib],
     pages=[
