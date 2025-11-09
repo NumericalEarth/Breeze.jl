@@ -91,7 +91,7 @@ end
 liquid_water(FT) = CondensedPhase(FT; reference_latent_heat=2500800, heat_capacity=4181)
 water_ice(FT)    = CondensedPhase(FT; reference_latent_heat=2834000, heat_capacity=2108)
 
-struct ThermodynamicConstants{FT, C, S}
+struct ThermodynamicConstants{FT, C, I}
     molar_gas_constant :: FT
     gravitational_acceleration :: FT
     energy_reference_temperature :: FT
