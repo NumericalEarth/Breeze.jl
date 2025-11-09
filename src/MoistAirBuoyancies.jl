@@ -129,7 +129,7 @@ const c = Center()
     𝒰 = PotentialTemperatureState(θ, q, z, p₀, pᵣ, ρᵣ)
 
     # Perform saturation adjustment
-    T = temperature(𝒰, mb.thermodynamics)
+    T = compute_boussinesq_adjustment_temperature(𝒰, mb.thermodynamics)
 
     # Compute specific volume
     Rᵐ = mixture_gas_constant(q, mb.thermodynamics)
@@ -154,7 +154,7 @@ end
 # root of: f(T) = T - Π θ - ℒ qˡ / cᵖᵐ
 
 """
-    temperature(state::PotentialTemperatureState, ref, thermo)
+    compute_boussinesq_adjustment_temperature(state::PotentialTemperatureState, ref, thermo)
 
 Return the temperature ``T`` that satisfies saturation adjustment, that is, the
 temperature for which
@@ -175,7 +175,7 @@ r(T) ≡ T - θ Π - ℒˡᵣ qˡ / cᵖᵐ .
 
 Solution of ``r(T) = 0`` is found via the [secant method](https://en.wikipedia.org/wiki/Secant_method).
 """
-@inline function temperature(𝒰₀::PotentialTemperatureState{FT}, thermo) where FT
+@inline function compute_boussinesq_adjustment_temperature(𝒰₀::PotentialTemperatureState{FT}, thermo) where FT
     θ = 𝒰₀.potential_temperature
     θ == 0 && return zero(FT)
 
@@ -298,7 +298,7 @@ const c = Center()
     p₀ = mb.reference_state.base_pressure
     q = MoistureMassFractions(qᵗᵢ, zero(qᵗᵢ), zero(qᵗᵢ))
     𝒰 = PotentialTemperatureState(θᵢ, q, z, p₀, pᵣ, ρᵣ)
-    return temperature(𝒰, mb.thermodynamics)
+    return compute_boussinesq_adjustment_temperature(𝒰, mb.thermodynamics)
 end
 
 struct TemperatureKernelFunction end
