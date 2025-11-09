@@ -1,5 +1,5 @@
 """
-    saturation_vapor_pressure(T, thermo, phase::CondensedPhase)
+$(TYPEDSIGNATURES)
 
 Compute the saturation vapor pressure ``pᵛ⁺`` over a planar surface
 composed of the "``β``-phase" (liquid, or ice)
@@ -43,7 +43,7 @@ We define the latent heat using its value ``ℒᵝᵣ = ℒᵝ(T=Tᵣ)`` at the 
 end
 
 """
-    saturation_specific_humidity(T, ρ, thermo, phase::CondensedPhase)
+$(TYPEDSIGNATURES)
 
 Compute the saturation specific humidity for a gas at temperature `T`, total
 density `ρ`, `thermo`dynamics, and `phase` via:

@@ -5,6 +5,7 @@ authors = ["Navid C. Constantinou <navidcy@users.noreply.github.com>, Gregory L.
 
 [deps]
 Adapt = "79e6a3ab-5dfb-504d-930d-738a2a938a0e"
+DocStringExtensions = "ffbed154-4ef7-542d-bbb7-c09d3a79fcae"
 JLD2 = "033835bb-8acc-5ee8-8aae-3f567f8a3819"
 KernelAbstractions = "63c18a36-062a-441e-b654-da1e3ab1ce7c"
 Oceananigans = "9e8cae18-63c1-5223-a75c-80ca9d6e9a09"
@@ -12,6 +13,7 @@ Printf = "de0858da-6303-5e67-8744-51eddeeeb8d7"
 
 [compat]
 Adapt = "4.3.0"
+DocStringExtensions = "0.9.5"
 JLD2 = "0.5.13, 0.6"
 KernelAbstractions = "0.9"
 Oceananigans = "0.100"
