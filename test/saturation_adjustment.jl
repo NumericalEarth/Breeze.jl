@@ -13,39 +13,74 @@ using Breeze.Thermodynamics:
     saturation_specific_humidity,
     mixture_heat_capacity
 
-using Breeze.MoistAirBuoyancies: temperature
-using Breeze.Microphysics: WarmPhaseSaturationAdjustment, compute_temperature
+using Breeze.MoistAirBuoyancies: compute_boussinesq_adjustment_temperature
+using Breeze.Microphysics:
+    WarmPhaseSaturationAdjustment,
+    compute_temperature,
+    adjustment_saturation_specific_humidity
 
 @testset "Saturation adjustment (Microphysics + MoistStaticEnergyState)" begin
     for FT in (Float32, Float64)
+        @info "Testing saturation adjustment for $FT..."
         grid = RectilinearGrid(default_arch, FT; size=(1, 1, 1), x=(0, 1), y=(0, 1), z=(0, 1))
         thermo = ThermodynamicConstants(FT)
         reference_state = ReferenceState(grid, thermo; base_pressure=101325, potential_temperature=288)
-        mp = WarmPhaseSaturationAdjustment(1e-3)
+
+        tol = FT(1e-3)
+        microphysics = WarmPhaseSaturationAdjustment(tolerance=tol)
 
         # Sample a single cell
-        pᵣ = @allowscalar reference_state.pressure[1, 1, 1]
-        z = FT(0.5)
-
-        # Target dry state: choose T, pick qᵗ well below saturation
-        T★ = FT(300)
-        q₀ = MoistureMassFractions(zero(FT), zero(FT), zero(FT))
-        ρ = density(pᵣ, T★, q₀, thermo)
-        qᵛ⁺ = saturation_specific_humidity(T★, ρ, thermo, thermo.liquid)
-        qᵗ = qᵛ⁺ / 4 # comfortably unsaturated
-        q = MoistureMassFractions(qᵗ, zero(FT), zero(FT))
-
-        # Build moist static energy consistent with the target
-        cᵖᵐ = mixture_heat_capacity(q, thermo)
-        ℒ₀ = thermo.liquid.reference_latent_heat
+        pᵣ = @allowscalar first(reference_state.pressure)
         g = thermo.gravitational_acceleration
-        e = cᵖᵐ * T★ + g * z + ℒ₀ * qᵗ
+        z = FT(1/2)
 
-        𝒰₀ = MoistStaticEnergyState(e, q, z, pᵣ)
-        T = compute_temperature(𝒰₀, mp, thermo)
+        # First test: absolute zero
+        q₀ = MoistureMassFractions(zero(FT), zero(FT), zero(FT))
+        𝒰₀ = MoistStaticEnergyState(zero(FT), q₀, z, pᵣ)
+        @test compute_temperature(𝒰₀, microphysics, thermo) == 0
 
-        atol_T = FT === Float64 ? 1e-6 : FT(1e-3)
-        @test isapprox(T, T★; atol=atol_T)
+        # Second unsaturated test: choose T, pick qᵗ well below saturation
+        T₁ = FT(300)
+        ρ₁ = density(pᵣ, T₁, q₀, thermo)
+        qᵛ⁺ = saturation_specific_humidity(T₁, ρ₁, thermo, thermo.liquid)
+        qᵗ = qᵛ⁺ / 2 # comfortably unsaturated
+
+        q₁ = MoistureMassFractions(qᵗ, zero(FT), zero(FT))
+        cᵖᵐ = mixture_heat_capacity(q₁, thermo)
+        e₁ = cᵖᵐ * T₁ + g * z #  + ℒ₀ * qᵗ
+        𝒰₁ = MoistStaticEnergyState(e₁, q₁, z, pᵣ)
+
+        @test compute_temperature(𝒰₁, microphysics, thermo) ≈ T₁ atol=sqrt(tol)
+        @test compute_temperature(𝒰₁, nothing, thermo) ≈ T₁ atol=sqrt(tol)
+
+        # Third saturated test: choose T, pick qᵗ well above saturation
+        for T₂ in 270:1:320
+            for qᵗ₂ in 1e-2:1e-3:5e-2
+                T₂ = convert(FT, T₂)
+                qᵗ₂ = convert(FT, qᵗ₂)
+
+                qᵛ⁺₂ = adjustment_saturation_specific_humidity(T₂, pᵣ, qᵗ₂, thermo)
+
+                if qᵗ₂ > qᵛ⁺₂ # saturated conditions
+                    qˡ₂ = qᵗ₂ - qᵛ⁺₂
+                    q₂ = MoistureMassFractions(qᵛ⁺₂, qˡ₂, zero(FT))
+                    cᵖᵐ = mixture_heat_capacity(q₂, thermo)
+                    ℒˡᵣ = thermo.liquid.reference_latent_heat
+                    e₂ = cᵖᵐ * T₂ + g * z - ℒˡᵣ * qˡ₂
+
+                    𝒰₂ = MoistStaticEnergyState(e₂, q₂, z, pᵣ)
+                    @test compute_temperature(𝒰₂, microphysics, thermo) ≈ T₂ atol=sqrt(tol)
+
+                else # unsaturated conditions
+                    q₂ = MoistureMassFractions(qᵗ₂, zero(FT), zero(FT))
+                    cᵖᵐ = mixture_heat_capacity(q₂, thermo)
+                    e₂ = cᵖᵐ * T₂ + g * z
+                    𝒰₂ = MoistStaticEnergyState(e₂, q₂, z, pᵣ)
+                    @test compute_temperature(𝒰₂, microphysics, thermo) ≈ T₂ atol=sqrt(tol)
+                    @test compute_temperature(𝒰₂, nothing, thermo) ≈ T₂ atol=sqrt(tol)
+                end
+            end
+        end
     end
 end
 
@@ -67,7 +102,7 @@ end
         θ₀ = zero(FT)
         q₀ = MoistureMassFractions(zero(FT), zero(FT), zero(FT))
         𝒰₀ = PotentialTemperatureState(θ₀, q₀, z, p₀, pᵣ, ρᵣ)
-        T₀ = temperature(𝒰₀, thermo)
+        T₀ = compute_boussinesq_adjustment_temperature(𝒰₀, thermo)
         @test T₀ == 0
 
         # Helper for tolerances
@@ -81,7 +116,7 @@ end
         Π₁ = exner_function(𝒰₁, thermo)
         T_dry₁ = Π₁ * θ₁
 
-        T₁ = temperature(𝒰₁, thermo)
+        T₁ = compute_boussinesq_adjustment_temperature(𝒰₁, thermo)
         @test isapprox(T₁, T_dry₁; atol=atol_T)
 
         # Case 2: Unsaturated, humid but below saturation at dry temperature
@@ -98,7 +133,7 @@ end
         q₂ = MoistureMassFractions(qᵗ₂, zero(FT), zero(FT))
         𝒰₂ = with_moisture(𝒰₂, q₂)
 
-        T₂ = temperature(𝒰₂, thermo)
+        T₂ = compute_boussinesq_adjustment_temperature(𝒰₂, thermo)
         Π₂ = exner_function(𝒰₂, thermo)
         T_dry₂ = Π₂ * θ₂
         @test isapprox(T₂, T_dry₂; atol=atol_T)
@@ -120,7 +155,7 @@ end
         θ₃ = (T₃ - ℒˡᵣ / cᵖᵐ * qˡ) / Π₃
         𝒰₃ = PotentialTemperatureState(θ₃, q₃, z, p₀, pᵣ, ρᵣ)
 
-        T₃_solve = temperature(𝒰₃, thermo)
+        T₃_solve = compute_boussinesq_adjustment_temperature(𝒰₃, thermo)
         @test isapprox(T₃_solve, T₃; atol=atol_T)
     end
 end

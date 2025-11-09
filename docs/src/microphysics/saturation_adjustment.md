@@ -1,33 +1,25 @@
-# Warm-phase saturation adjustment
+# [Warm-phase saturation adjustment](@id saturation_adjustment-section)
 
 Warm-phase saturation adjustment is a model for water droplet nucleation that assumes that water vapor in excess of the saturation specific humidity is instantaneously converted to liquid water.
 Mixed-phase saturation adjustment is described by [Pressel2015](@citet).
-Saturation adjustment may be formulated as a nonlinear algebraic equation that relates temperature, potential temperature, and total specific humidity, derived from the definition of liquid potential temperature,
+
+In Breeze, it is convenient to express the adjustment in terms of a moist static energy variable rather than potential temperature. We use the warm‑phase definition
 
 ```math
-θ = \frac{1}{Π} \left \{T - \frac{ℒᵥ₀}{cᵖᵐ} \max \left [0, qᵗ - qᵛ⁺(T) \right ] \right \} ,
+e \equiv c^{p m}(q) \, T + g z - \mathcal{L}^{l}_{r} \, q^{l} ,
 ```
 
-where ``Π`` is the Exner function, ``θ`` is potential temperature, ``T`` is temperature,
-``ℒᵥ₀`` is the reference latent heat of vaporization, ``qᵗ`` is the total specific humidity,
-``qᵛ⁺`` is the saturation specific humidity, and ``cᵖᵐ`` is the moist air specific heat.
-The condensate specific humidity is ``qˡ = \max(0, qᵗ - qᵛ⁺)``: ``qˡ = 0`` if the air is undersaturated with ``qᵗ < qᵛ⁺``.
-Both ``Π`` and ``cᵖᵐ`` depend on the dry and vapor mass fractions ``qᵈ = 1 - qᵗ`` and
-``qᵛ = qᵗ - qˡ``, and the saturation specific humidity``qᵛ⁺`` is an increasing function of temperature ``T``.
+where ``c^{p m}(q)`` is the mixture heat capacity, ``g`` is gravitational acceleration, ``z`` is height, and ``\mathcal{L}^{l}_{r}`` is a reference latent heat of vaporization. The condensate specific humidity is ``q^{l} = \max(0, q^{t} - q^{v+})``.
 
-Rewriting the potential temperature relation above, saturation adjustment requires solving ``r(T) = 0``, where
+During saturation adjustment, temperature is obtained by solving the nonlinear scalar equation
 
 ```math
-r(T) ≡ T - θ Π - \frac{ℒᵥ₀}{cᵖᵐ} \max[0, qᵗ - qᵛ⁺(T)] .
+r(T) \equiv T - \frac{e - g z + \mathcal{L}^{l}_{r} \, \max\big(0, q^{t} - q^{v+}(T)\big)}{c^{p m}(q)} = 0 ,
 ```
 
-We use a secant method after checking for ``θ = 0`` and ``qˡ = 0`` given the guess ``T₁ = θ Π(qᵗ)``.
-If ``qᵗ > qᵛ⁺(T₁)``, then we are guaranteed that ``T > T₁`` because ``qᵛ⁺`` is an increasing function of ``T``.
-We initialize the secant iteration with a second guess ``T₂ = θ Π - [qᵗ - qᵛ⁺(T₁)] ℒᵥ₀ / cᵖᵐ``.
-See [`temperature`](@ref Breeze.MoistAirBuoyancies.temperature) for more details.
+with ``q^{v+}(T)`` the saturation specific humidity. We use a secant method, typically starting from the clear‑air guess ``T_1 = (e - g z)/c^{p m}`` and adjusting toward saturation when ``q^{t} > q^{v+}(T_1)``.
 
-As an example, we consider an air parcel at sea-level and with potential temperature of ``θ = 290``ᵒK,
-within a reference state with base pressure of 101325 Pa and a reference potential temperature ``288``ᵒK.
+As an example, we consider an air parcel at sea level within a reference state with base pressure of 101325 Pa and a surface temperature ``T₀ = 288``ᵒK.
 The saturation specific humidity is then
 
 ```@example microphysics
@@ -37,10 +29,10 @@ using Breeze.Thermodynamics: saturation_specific_humidity
 thermo = ThermodynamicConstants()
 
 p₀ = 101325.0
-θ₀ = 288.0
+T₀ = 288.0
 Rᵈ = Breeze.Thermodynamics.dry_air_gas_constant(thermo)
-ρ₀ = p₀ / (Rᵈ * θ₀)
-qᵛ⁺₀ = saturation_specific_humidity(θ₀, ρ₀, thermo, thermo.liquid)
+ρ₀ = p₀ / (Rᵈ * T₀)
+qᵛ⁺₀ = saturation_specific_humidity(T₀, ρ₀, thermo, thermo.liquid)
 ```
 
 Recall that the specific humidity is unitless, or has units "``kg / kg``": kg of water vapor
@@ -49,39 +41,66 @@ We then perform a non-trivial saturation adjustment by computing temperature
 given a total specific humidity slightly above saturation:
 
 ```@example microphysics
-using Breeze.MoistAirBuoyancies: temperature
-using Breeze.Thermodynamics: PotentialTemperatureState, MoistureMassFractions
+using Breeze.Thermodynamics: MoistureMassFractions, mixture_heat_capacity, saturation_vapor_pressure
+using Breeze.Thermodynamics: MoistStaticEnergyState
+using Breeze.AtmosphereModels: compute_temperature
+using Breeze.Microphysics: WarmPhaseSaturationAdjustment
 
 z = 0.0
 qᵗ = 0.012   # [kg kg⁻¹] total specific humidity
 q = MoistureMassFractions(qᵗ, zero(qᵗ), zero(qᵗ))
-U = PotentialTemperatureState(θ₀, q, z, p₀, p₀, ρ₀)
-T = temperature(U, thermo)
+
+# e = cᵖᵐ T + g z − ℒᵥ₀ qˡ with T ≈ T₀ and qˡ = 0 at the surface
+cᵖᵐ = mixture_heat_capacity(q, thermo)
+g = thermo.gravitational_acceleration
+ℒᵥ₀ = thermo.liquid.reference_latent_heat
+e = cᵖᵐ * T₀ + g * z - ℒᵥ₀ * 0
+
+U = MoistStaticEnergyState(e, q, z, p₀)
+μ = WarmPhaseSaturationAdjustment()
+T = compute_temperature(U, μ, thermo)
 ```
 
 Finally, we recover the amount of liquid condensate by subtracting the saturation
 specific humidity from the total:
 
 ```@example microphysics
-qᵛ⁺ = saturation_specific_humidity(T, ρ₀, thermo, thermo.liquid)
+# Compute qᵛ⁺ from T and p₀ using the microphysics adjustment formula
+pᵛ⁺ = saturation_vapor_pressure(T, thermo, thermo.liquid)
+ϵᵈᵛ = Breeze.Thermodynamics.dry_air_gas_constant(thermo) / Breeze.Thermodynamics.vapor_gas_constant(thermo)
+qᵛ⁺ = ϵᵈᵛ * (1 - qᵗ) * pᵛ⁺ / (p₀ - pᵛ⁺)
 qˡ = qᵗ - qᵛ⁺
 ```
 
 ### Saturation adjustment with varying total specific humidity
 
 As a second example, we examine the dependence of temperature on total specific humidity
-when the potential temperature is constant:
+when the moist static energy is held fixed (equivalently, ``θ`` is held fixed for this reference state):
 
 ```@example microphysics
-qᵗ = 0:1e-4:0.035 # [kg kg⁻¹] total specific humidity
-q = [MoistureMassFractions(qᵗⁱ, 0.0, 0.0) for qᵗⁱ in qᵗ]
-U = [PotentialTemperatureState(θ₀, qⁱ, z, p₀, p₀, ρ₀) for qⁱ in q]
-T = [temperature(Uⁱ, thermo) for Uⁱ in U]
+using Breeze.Thermodynamics: MoistureMassFractions, MoistStaticEnergyState, mixture_heat_capacity
+using Breeze.Microphysics: WarmPhaseSaturationAdjustment
+using Breeze.AtmosphereModels: compute_temperature
 
-## Compare with a simple piecewise linear model
+qᵗ = 0:1e-4:0.035 # [kg kg⁻¹] total specific humidity
+z = 0.0
+
+# Hold e approximately constant by fixing it at a baseline value
+q_base = MoistureMassFractions(qᵛ⁺₀, 0.0, 0.0)
+e₀ = mixture_heat_capacity(q_base, thermo) * T₀
+
+T = similar(collect(qᵗ))
+μ = WarmPhaseSaturationAdjustment()
+for (i, qᵗⁱ) in enumerate(qᵗ)
+    qⁱ = MoistureMassFractions(qᵗⁱ, 0.0, 0.0)
+    Uⁱ = MoistStaticEnergyState(e₀, qⁱ, z, p₀)
+    T[i] = compute_temperature(Uⁱ, μ, thermo)
+end
+
+## Compare with a simple piecewise linear model (approximation)
 ℒᵥ₀ = thermo.liquid.reference_latent_heat
 cᵖᵈ = thermo.dry_air.heat_capacity
-T̃ = [288 + ℒᵥ₀ / cᵖᵈ * max(0, qᵗⁱ - qᵛ⁺₀) for qᵗⁱ in qᵗ]
+T̃ = [T₀ + ℒᵥ₀ / cᵖᵈ * max(0, qᵗⁱ - qᵛ⁺₀) for qᵗⁱ in qᵗ]
 
 using CairoMakie
 
@@ -95,10 +114,12 @@ fig
 
 ### Saturation adjustment with varying height
 
-For a third example, we consider a state with constant potential temperature and total specific humidity,
+For a third example, we consider a state with constant moist static energy and total specific humidity
+(equivalently, a constant ``θ`` in this reference state),
 but at varying heights:
 
 ```@example microphysics
+using Breeze.AtmosphereModels: compute_temperature
 grid = RectilinearGrid(size=100, z=(0, 1e4), topology=(Flat, Flat, Bounded))
 thermo = ThermodynamicConstants()
 reference_state = ReferenceState(grid, thermo)
@@ -114,14 +135,22 @@ qᵛ⁺ = zeros(grid.Nz)
 qˡ = zeros(grid.Nz)
 rh = zeros(grid.Nz)
 
+# Set a constant moist static energy referenced to z = 0, clear air
+cᵖᵐ = mixture_heat_capacity(q, thermo)
+g = thermo.gravitational_acceleration
+ℒᵥ₀ = thermo.liquid.reference_latent_heat
+e₀ = cᵖᵐ * θ₀ + g * 0.0 - ℒᵥ₀ * 0.0
+
+μ = WarmPhaseSaturationAdjustment()
 for k = 1:grid.Nz
-    ρᵣ = reference_state.density[1, 1, k]
     pᵣ = reference_state.pressure[1, 1, k]
+    U = MoistStaticEnergyState(e₀, q, z[k], pᵣ)
+    T[k] = compute_temperature(U, μ, thermo)
 
-    U = PotentialTemperatureState(θ₀, q, z[k], p₀, pᵣ, ρᵣ)
-    T[k] = temperature(U, thermo)
-
-    qᵛ⁺[k] = saturation_specific_humidity(T[k], ρᵣ, thermo, thermo.liquid)
+    # Saturation specific humidity via adjustment formula using T[k], pᵣ, and qᵗ
+    pᵛ⁺ = saturation_vapor_pressure(T[k], thermo, thermo.liquid)
+    ϵᵈᵛ = Breeze.Thermodynamics.dry_air_gas_constant(thermo) / Breeze.Thermodynamics.vapor_gas_constant(thermo)
+    qᵛ⁺[k] = ϵᵈᵛ * (1 - qᵗ) * pᵛ⁺ / (pᵣ - pᵛ⁺)
     qˡ[k] = max(0, qᵗ - qᵛ⁺[k])
     rh[k] = 100 * min(qᵗ, qᵛ⁺[k]) / qᵛ⁺[k]
 end

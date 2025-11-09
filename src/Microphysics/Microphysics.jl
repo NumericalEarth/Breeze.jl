@@ -13,6 +13,7 @@ using ..Thermodynamics:
     saturation_vapor_pressure,
     saturation_specific_humidity,
     density,
+    with_moisture,
     total_moisture_mass_fraction,
     MoistStaticEnergyState,
     adiabatic_hydrostatic_pressure
@@ -25,6 +26,7 @@ import ..AtmosphereModels:
     materialize_microphysical_fields
 
 using Adapt: Adapt, adapt
+using Oceananigans: Oceananigans
 
 """
     WarmPhaseSaturationAdjustment(reference_state, thermodynamics)
@@ -35,6 +37,11 @@ anelastic thermodynamic state used in AtmosphereModel.
 """
 struct WarmPhaseSaturationAdjustment{FT}
     tolerance :: FT
+end
+
+function WarmPhaseSaturationAdjustment(FT::DataType=Oceananigans.defaults.FloatType; tolerance = 1e-3)
+    tolerance = convert(FT, tolerance)
+    return WarmPhaseSaturationAdjustment(tolerance)
 end
 
 function materialize_microphysical_fields(microphysics::WarmPhaseSaturationAdjustment, grid, boundary_conditions)
@@ -71,9 +78,12 @@ end
     e = 𝒰.moist_static_energy
     g = thermo.gravitational_acceleration
     z = 𝒰.height
-    ℒˡᵣ = m.thermodynamics.liquid.reference_latent_heat
+    ℒˡᵣ = thermo.liquid.reference_latent_heat
     cᵖᵐ = mixture_heat_capacity(q, thermo)
-    return T - (e - g * z - ℒˡᵣ * qˡ) / cᵖᵐ
+    qˡ = q.liquid
+
+    # e = cᵖᵐ * T + g * z - ℒˡᵣ * qˡ
+    return T - (e - g * z + ℒˡᵣ * qˡ) / cᵖᵐ
 end
 
 """
@@ -101,14 +111,14 @@ that used in MoistAirBuoyancy, adapted to MoistStaticEnergyState.
     # Re-initialize first guess assuming saturation
     𝒰₁ = with_moisture(𝒰₀, q₁)
     qᵛ⁺₁ = adjustment_saturation_specific_humidity(T₁, pᵣ, qᵗ, thermo)
-    qˡ₁ = max(0, qᵗ - qᵛ⁺₁)
+    qˡ₁ = qᵗ - qᵛ⁺₁
     q₁ = MoistureMassFractions(qᵛ⁺₁, qˡ₁, zero(qˡ₁))
     𝒰₁ = with_moisture(𝒰₀, q₁)
 
     # Generate a second guess
     ℒˡᵣ = thermo.liquid.reference_latent_heat
     cᵖᵐ = mixture_heat_capacity(q₁, thermo)
-    T₂ = T₁ + ℒˡᵣ * qˡ₁ / cᵖᵐ
+    T₂ = T₁ + 1e-2 #ℒˡᵣ * qˡ₁ / cᵖᵐ
     𝒰₂ = adjust_state(𝒰₁, T₂, thermo)
 
     # Initialize secant iteration
@@ -127,8 +137,8 @@ that used in MoistAirBuoyancy, adapted to MoistStaticEnergyState.
 
         # Update
         T₂ -= r₂ * ΔTΔr
-        𝒰₂ = adjust_state(𝒰₂, T₂, m)
-        r₂ = saturation_adjustment_residual(T₂, 𝒰₂, m)
+        𝒰₂ = adjust_state(𝒰₂, T₂, thermo)
+        r₂ = saturation_adjustment_residual(T₂, 𝒰₂, thermo)
     end
 
     return T₂
