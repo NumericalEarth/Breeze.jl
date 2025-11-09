@@ -103,7 +103,7 @@ grid = RectilinearGrid(size=100, z=(0, 1e4), topology=(Flat, Flat, Bounded))
 thermo = ThermodynamicConstants()
 reference_state = ReferenceState(grid, thermo)
 
-θᵣ = reference_state.potential_temperature
+θ₀ = reference_state.potential_temperature
 p₀ = reference_state.base_pressure
 qᵗ = 0.005
 q = MoistureMassFractions(qᵗ, 0.0, 0.0)
@@ -118,7 +118,7 @@ for k = 1:grid.Nz
     ρᵣ = reference_state.density[1, 1, k]
     pᵣ = reference_state.pressure[1, 1, k]
 
-    U = PotentialTemperatureState(θᵣ, q, z[k], p₀, pᵣ, ρᵣ)
+    U = PotentialTemperatureState(θ₀, q, z[k], p₀, pᵣ, ρᵣ)
     T[k] = temperature(U, thermo)
 
     qᵛ⁺[k] = saturation_specific_humidity(T[k], ρᵣ, thermo, thermo.liquid)

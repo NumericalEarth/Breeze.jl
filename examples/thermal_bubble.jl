@@ -62,7 +62,7 @@ conjure_time_step_wizard!(simulation, cfl=0.7)
 
 # Progress monitoring
 function progress(sim)
-    ρe = sim.model.energy
+    ρe = sim.model.energy_density
     u, v, w = sim.model.velocities
 
     ρe_max = maximum(ρe)
@@ -88,9 +88,9 @@ u, v, w = model.velocities
 
 # Temperature perturbation from background state
 ρE = Field{Nothing, Nothing, Center}(grid)
-set!(ρE, Field(Average(model.energy, dims=(1, 2))))
-ρe′ = model.energy - ρE
-ρe = model.energy
+set!(ρE, Field(Average(model.energy_density, dims=(1, 2))))
+ρe′ = model.energy_density - ρE
+ρe = model.energy_density
 T = model.temperature
 
 outputs = merge(model.velocities, model.tracers, (; ζ, ρe′, ρe, T))
