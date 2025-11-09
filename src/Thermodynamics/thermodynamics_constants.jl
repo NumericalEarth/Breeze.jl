@@ -247,32 +247,29 @@ const MMF = MoistureMassFractions
 @inline total_specific_humidity(q::MMF) = q.vapor + q.liquid + q.ice
 @inline dry_air_mass_fraction(q::MMF) = 1 - total_specific_humidity(q)
 
-"""
-    mixture_gas_constant(q::MoistureMassFractions, thermo)
 
-Compute the gas constant of moist air given the specific humidity `q` and 
-thermodynamic parameters `thermo`.
+"""
+    mixture_gas_constant(q::MoistureMassFractions, thermo::ThermodynamicConstants)
+
+Return the gas constant of moist air mixture [in J/(kg K)] given the specific humidity
+`q` and thermodynamic parameters `thermo`.
 
 The mixture gas constant is calculated as a weighted average of the dry air
 and water vapor gas thermo:
 
 ```math
-Rᵐ = qᵈ * Rᵈ + qᵛ * Rᵛ
+Rᵐ = qᵈ Rᵈ + qᵛ Rᵛ
 ```
 
 where:
 - `Rᵈ` is the dry air gas constant
-- `Rᵛ` is the water vapor gas constant  
+- `Rᵛ` is the water vapor gas constant
 - `qᵈ` is the mass fraction of dry air
 - `qᵛ` is the mass fraction of water vapor
 
 # Arguments
-- `qᵈ`: Mass fraction of dry air (dimensionless)
-- `qᵛ`: Mass fraction of water vapor (dimensionless)
+- `q`: the moisture mass fractions (vapor, liquid, and ice)
 - `thermo`: `ThermodynamicConstants` instance containing gas thermo
-
-# Returns
-- Gas constant of the moist air mixture in J/(kg·K)
 """
 @inline function mixture_gas_constant(q::MMF, thermo::TC)
     qᵈ = dry_air_mass_fraction(q)
@@ -283,7 +280,7 @@ where:
 end
 
 """
-    mixture_heat_capacity(qᵈ, qᵛ, thermo)
+    mixture_heat_capacity(q::MoistureMassFractions, thermo::ThermodynamicConstants)
 
 Compute the heat capacity of state air given the total specific humidity q
 and assuming that condensate mass ratio qᶜ ≪ q, where qℓ is the mass ratio of
