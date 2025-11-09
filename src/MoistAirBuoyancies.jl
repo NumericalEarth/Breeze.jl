@@ -197,7 +197,7 @@ Solution of ``r(T) = 0`` is found via the [secant method](https://en.wikipedia.o
     # Subsequent computations will assume that the specific humidity
     # is given by the saturation specific humidity, eg ``qᵛ = qᵛ⁺``.
     qᵛ⁺₁ = adjustment_saturation_specific_humidity(T₁, 𝒰₁, thermo)
-    qˡ₁ = qᵗ - qᵛ⁺₁
+    qˡ₁ = max(0, qᵗ - qᵛ⁺₁) # paranoia?
     q₁ = MoistureMassFractions(qᵛ⁺₁, qˡ₁, zero(qˡ₁))
     𝒰₁ = with_moisture(𝒰₀, q₁)
 
@@ -215,8 +215,10 @@ Solution of ``r(T) = 0`` is found via the [secant method](https://en.wikipedia.o
 
     ℒˡᵣ = thermo.liquid.reference_latent_heat
     cᵖᵐ = mixture_heat_capacity(q₁, thermo)
-    T₂ = T₁ + ℒˡᵣ * qˡ₁ / cᵖᵐ
-
+    # T₂ = T₁ + ℒˡᵣ * qˡ₁ / cᵖᵐ
+    ss = ℒˡᵣ * qˡ₁ / cᵖᵐ # super saturation
+    T₂ = T₁ + ss / 2 # intermediate guess
+    
     𝒰₂ = adjust_state(𝒰₁, T₂, thermo)
 
     # Initialize saturation adjustment
