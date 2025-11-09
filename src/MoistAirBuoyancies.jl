@@ -155,8 +155,12 @@ end
 """
 $(TYPEDSIGNATURES)
 
-Return the temperature ``T`` that satisfies saturation adjustment, that is, the
-temperature for which
+Return the temperature ``T`` corresponding to thermodynamic equilibrium between the
+specific humidity and liquid mass fractions of the input thermodynamic state `𝒰₀`,
+wherein the specific humidity is equal to or less than the saturation specific humidity
+at the given conditions and affiliated with theromdynamic constants `thermo`.
+
+The saturation equilibrium temperature satisfies the nonlinear relation
 
 ```math
 θ = [1 - ℒˡᵣ qˡ / (cᵖᵐ T)] T / Π ,
@@ -167,7 +171,7 @@ specific heat, ``Π`` the Exner function, ``qˡ = \\max(0, qᵗ - qᵛ⁺)``
 the condensate specific humidity, ``qᵗ`` is the
 total specific humidity, ``qᵛ⁺`` is the saturation specific humidity.
 
-The saturation adjustment temperature is obtained by solving ``r(T)``, where
+The saturation equilibrium temperature is thus obtained by solving ``r(T)``, where
 ```math
 r(T) ≡ T - θ Π - ℒˡᵣ qˡ / cᵖᵐ .
 ```
