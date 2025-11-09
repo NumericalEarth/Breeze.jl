@@ -1,5 +1,4 @@
 using ..Thermodynamics:
-    saturation_specific_humidity,
     total_moisture_mass_fraction,
     mixture_heat_capacity,
     mixture_gas_constant
