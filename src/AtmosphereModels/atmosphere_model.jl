@@ -24,7 +24,7 @@ tupleit(t) = tuple(t)
 
 formulation_pressure_solver(formulation, grid) = nothing
 
-mutable struct AtmosphereModel{Frm, Arc, Tst, Grd, Clk, Thm, Den, Mom, Eng, Wat, Hum,
+mutable struct AtmosphereModel{Frm, Arc, Tst, Grd, Clk, Thm, Den, Mom, Eng, Moi, Mfr,
                                Tmp, Prs, Ppa, Sol, Vel, Trc, Adv, Cor, Frc, Mic, Cnd, Cls, Dif} <: AbstractModel{Tst, Arc}
     architecture :: Arc
     grid :: Grd
@@ -34,8 +34,8 @@ mutable struct AtmosphereModel{Frm, Arc, Tst, Grd, Clk, Thm, Den, Mom, Eng, Wat,
     density :: Den
     momentum :: Mom
     energy_density :: Eng
-    moisture_density :: Wat
-    moisture_fraction :: Hum
+    moisture_density :: Moi
+    moisture_fraction :: Mfr
     temperature :: Tmp
     nonhydrostatic_pressure :: Prs
     hydrostatic_pressure_anomaly :: Ppa
