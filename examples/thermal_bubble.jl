@@ -122,3 +122,6 @@ Colorbar(fig[2, 2], hmw, label = "w (m/s)", vertical = true)
 CairoMakie.record(fig, "thermal_bubble.mp4", 1:Nt, framerate = 10) do nn
     n[] = nn
 end
+nothing #hide
+
+# ![](thermal_bubble.mp4)
