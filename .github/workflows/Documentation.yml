@@ -21,14 +21,13 @@ on:
   release:
 
 concurrency:
-  # Same group concurrency as the `DocPreviewsCleanup.yml` workflow, because they both
-  # git-push to the same branch, so we want to avoid clashes.  NOTE: this is
-  # different from the concurrency group below, which is to cancel successive
-  # jobs from within the PR.
-  group: docs-pushing
+  # Skip intermediate builds: always.
+  # Cancel intermediate builds: always.
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
 
 jobs:
-  build:
+  build-docs:
     permissions:
       actions: write
       contents: write
@@ -36,11 +35,6 @@ jobs:
       statuses: write
     runs-on: ubuntu-latest
     timeout-minutes: 30
-    concurrency:
-      # Skip intermediate builds: always.
-      # Cancel intermediate builds: only if it is a pull request build.
-      group: ${{ github.workflow }}-${{ github.ref }}
-      cancel-in-progress: ${{ startsWith(github.ref, 'refs/pull/') }}
     steps:
       - uses: actions/checkout@v5
       - uses: julia-actions/setup-julia@v2
@@ -48,10 +42,14 @@ jobs:
           version: "1.12"
       - uses: julia-actions/cache@v2
         id: julia-cache
-      - uses: julia-actions/julia-docdeploy@v1
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          DOCUMENTER_KEY: ${{ secrets.BREEZEDOCUMENTATION_DOCUMENTER_KEY }}
+      - name: Instantiate docs environment
+        shell: julia --color=yes --project=docs {0}
+        run: |
+          using Pkg
+          Pkg.instantiate()
+      - name: Build documentation
+        run:
+          julia --color=yes --project=docs docs/make.jl
       - name: Save Julia depot cache on cancel or failure
         id: julia-cache-save
         if: cancelled() || failure()
@@ -64,4 +62,48 @@ jobs:
         with:
           name: documentation-build
           path: docs/build
-          retention-days: 7
+          retention-days: 10
+
+  deploy-docs:
+    needs: build-docs
+    permissions:
+      actions: write
+      contents: write
+      pull-requests: read
+      statuses: write
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    concurrency:
+      # Have only one job pushing the docs at a time.
+      group: docs-pushing
+    steps:
+      - uses: actions/checkout@v5
+      - uses: julia-actions/setup-julia@v2
+        with:
+          version: "1.12"
+      - uses: julia-actions/cache@v2
+        id: julia-cache
+      - uses: actions/download-artifact@v5
+        with:
+          name: documentation-build
+      - name: Instantiate docs environment
+        shell: julia --color=yes {0}
+        run: |
+          # We only need `Documenter` for publishing the docs, let's not
+          # reinstall the world all over again.
+          using Pkg
+          Pkg.add(; name="Documenter", version="1")
+      - name: Build documentation
+        run:
+          julia --color=yes docs/deploy.jl
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          DOCUMENTER_KEY: ${{ secrets.BREEZEDOCUMENTATION_DOCUMENTER_KEY }}
+      - name: Save Julia depot cache on cancel or failure
+        id: julia-cache-save
+        if: cancelled() || failure()
+        uses: actions/cache/save@v4
+        with:
+          path: |
+            ${{ steps.julia-cache.outputs.cache-paths }}
+          key: ${{ steps.julia-cache.outputs.cache-key }}
