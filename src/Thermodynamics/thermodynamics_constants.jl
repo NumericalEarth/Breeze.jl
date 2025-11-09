@@ -156,23 +156,33 @@ The `gravitational_acceleration` parameter is included to compute `reference_sta
 quantities associated with hydrostatic balance.
 
 The Clausius-Clapeyron relation describes the pressure-temperature relationship during phase
-transitions:
+transitions from vapor to liquid or vapor to ice,
 
 ```math
-d[\\log(pⁱ⁺)] / dT = ℒⁱ / (Rⁱ T²)
+d[\\log(pᵝ⁺)] / dT = ℒᵝ / (Rᵝ T²)
 ```
 
 where:
 
-- ``pⁱ⁺`` is the saturation vapor pressure for a transition between vapor and the ``i``-th phase
+- ``pᵝ⁺`` is the saturation vapor pressure for a transition between vapor and the ``β``-th phase
+  For example ``β = l`` for liquid and ``β = i`` for ice.
 - ``T`` is temperature
-- ``ℒⁱ`` is the latent heat of vaporization
-- ``Rⁱ`` is the specific gas constant for the ``i``-th phase
+- ``ℒᵝ`` is the latent heat of the transition
+  (the difference between the enthalpy of the vapor and transitioned state at a given temperature)
+- ``Rᵝ`` is the specific gas constant for the ``β``-th phase
 
-For water vapor, this integrates to:
+For a thermodynamic model with constant specific heats, the latent heat may be written
 
 ```math
-pⁱ⁺ = pᵗʳ \\exp[ ℒⁱ (1/Tᵗʳ - 1/T) / Rⁱ ]
+ℒᵝ(T) = ℒᵝ(T=0) + (cᵖᵛ - cᵝ) T,
+```
+
+where ``cᵖᵛ`` is the vapor specific heat at constant pressure, ``cᵝ`` is the specific heat of
+phase ``β``, which is assumed incompressible, and ``ℒᵝ(T=0)`` is the latent heat at ``T=0``K.
+We therefore find that
+
+```math
+pᵝ⁺ = pᵗʳ \\exp[ ℒᵝ(T=0) (1/Tᵗʳ - 1/T) / Rᵝ ]
 ```
 
 where
@@ -180,7 +190,7 @@ where
 - ``pᵗʳ`` is the triple point pressure
 - ``Tᵗʳ`` is the triple point temperature
 
-and it is calculated via [`saturation_vapor_pressure`](@ref).
+See also [`saturation_vapor_pressure`](@ref).
 
 Note: any reference values for pressure and temperature can be used in principle.
 The advantage of using reference values at the triple point is that the same values
