@@ -26,7 +26,7 @@ r₀ = 2e3
 Δθ = 10 # K
 N² = 1e-6
 θ₀ = model.formulation.reference_state.potential_temperature
-g = model.formulation.constants.gravitational_acceleration
+g = model.thermodynamics.gravitational_acceleration
 dθdz = N² * θ₀ / g
 
 function θᵢ(x, z)
@@ -38,9 +38,8 @@ end
 
 set!(model, θ = θᵢ)
 
-ρE = Field{Nothing, Nothing, Center}(grid)
-set!(ρE, Field(Average(model.energy, dims = (1, 2))))
-ρe′ = model.energy - ρE
+ρE = Field(Average(model.energy, dims=1))
+ρe′ = Field(model.energy - ρE)
 
 # ## Initial energy perturbation visualization
 #
@@ -48,12 +47,11 @@ set!(ρE, Field(Average(model.energy, dims = (1, 2))))
 # as expected.
 
 hm = heatmap(ρe′)
-Colorbar(hm, label = "ρe′ (J/kg)")
+# Colorbar(hm, label = "ρe′ (J/kg)")
 
 # ## Simulation rising
 
-stop_time = 30minutes
-simulation = Simulation(model; Δt=1, stop_time)
+simulation = Simulation(model; Δt=1, stop_iteration=1000)
 conjure_time_step_wizard!(simulation, cfl=0.7)
 
 function progress(sim)
@@ -79,9 +77,9 @@ T = model.temperature
 
 outputs = merge(model.velocities, model.tracers, (; ζ, ρe′, ρe, T))
 
-filename = "thermal_bubble_$(Nx)x$(Nz).jld2"
+filename = "thermal_bubble.jld2"
 writer = JLD2Writer(model, outputs; filename,
-                    schedule = TimeInterval(30seconds),
+                    schedule = IterationInterval(100),
                     overwrite_existing = true)
 
 simulation.output_writers[:jld2] = writer
@@ -123,6 +121,6 @@ hmw = heatmap!(axw, wn, colorrange = (-w_range, w_range), colormap = :balance)
 Colorbar(fig[1, 2], hmρ, label = "ρe′ (J/kg)", vertical = true)
 Colorbar(fig[2, 2], hmw, label = "w (m/s)", vertical = true)
 
-CairoMakie.record(fig, joinpath(output_dir, "thermal_bubble.mp4"), 1:Nt, framerate = 10) do nn
+CairoMakie.record(fig, "thermal_bubble.mp4", 1:Nt, framerate = 10) do nn
     n[] = nn
 end
