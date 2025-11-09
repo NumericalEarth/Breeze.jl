@@ -11,7 +11,8 @@ using Breeze.Thermodynamics:
     density,
     with_moisture,
     saturation_specific_humidity,
-    mixture_heat_capacity
+    mixture_heat_capacity,
+    compute_boussinesq_adjustment_temperature
 
 using Breeze.MoistAirBuoyancies: temperature
 using Breeze.Microphysics: WarmPhaseSaturationAdjustment, compute_temperature
