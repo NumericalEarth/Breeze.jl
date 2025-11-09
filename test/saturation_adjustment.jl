@@ -28,10 +28,10 @@ using Breeze.Microphysics: WarmPhaseSaturationAdjustment, compute_temperature
         z = FT(0.5)
 
         # Target dry state: choose T, pick qᵗ well below saturation
-        T⋆ = FT(300)
+        T★ = FT(300)
         q₀ = MoistureMassFractions(zero(FT), zero(FT), zero(FT))
-        ρ = density(pᵣ, T⋆, q₀, thermo)
-        qᵛ⁺ = saturation_specific_humidity(T⋆, ρ, thermo, thermo.liquid)
+        ρ = density(pᵣ, T★, q₀, thermo)
+        qᵛ⁺ = saturation_specific_humidity(T★, ρ, thermo, thermo.liquid)
         qᵗ = qᵛ⁺ / 4 # comfortably unsaturated
         q = MoistureMassFractions(qᵗ, zero(FT), zero(FT))
 
@@ -39,13 +39,13 @@ using Breeze.Microphysics: WarmPhaseSaturationAdjustment, compute_temperature
         cᵖᵐ = mixture_heat_capacity(q, thermo)
         ℒ₀ = thermo.liquid.reference_latent_heat
         g = thermo.gravitational_acceleration
-        h = cᵖᵐ * T⋆ + g * z + ℒ₀ * qᵗ
+        e = cᵖᵐ * T★ + g * z + ℒ₀ * qᵗ
 
-        𝒰₀ = MoistStaticEnergyState(h, q, z, pᵣ)
-        T = compute_temperature(𝒰₀, mp)
+        𝒰₀ = MoistStaticEnergyState(e, q, z, pᵣ)
+        T = compute_temperature(𝒰₀, mp, thermo)
 
         atol_T = FT === Float64 ? 1e-6 : FT(1e-3)
-        @test isapprox(T, T⋆; atol=atol_T)
+        @test isapprox(T, T★; atol=atol_T)
     end
 end
 
