@@ -282,9 +282,20 @@ end
 """
     mixture_heat_capacity(q::MoistureMassFractions, thermo::ThermodynamicConstants)
 
-Compute the heat capacity of state air given the total specific humidity q
-and assuming that condensate mass ratio qᶜ ≪ q, where qℓ is the mass ratio of
-liquid condensate.
+Compute the heat capacity of a mixture of dry air, vapor, liquid, and ice, where
+the mass fractions of vapor, liquid, and ice are given by `q`.
+The heat capacity of moist air is the weighted sum of its constituents: 
+
+```math
+cᵖᵐ = qᵈ cᵖᵈ + qᵛ cᵖᵛ + qˡ cˡ + qⁱ cⁱ
+```
+
+where `qᵛ = q.vapor`, `qˡ = q.liquid`, `qⁱ = q.ice` are
+the mass fractions of vapor, liquid, and ice constituents, respectively,
+and `qᵈ = 1 - qᵛ - qˡ - qⁱ` is the mass fraction of dry air.
+The heat capacities `cᵖᵈ`, `cᵖᵛ`, `cˡ`, `cⁱ` are the heat capacities
+of dry air, vapor, liquid, and ice at constant pressure, respectively.
+liquid and ice phases are assumed to be incompressible.
 """
 @inline function mixture_heat_capacity(q::MMF, thermo::TC)
     qᵈ = dry_air_mass_fraction(q)
