@@ -34,9 +34,9 @@ const AnelasticModel = AtmosphereModel{<:AnelasticFormulation}
 
 function Base.summary(formulation::AnelasticFormulation)
     p₀ = formulation.reference_state.base_pressure
-    θᵣ = formulation.reference_state.potential_temperature
+    θ₀ = formulation.reference_state.potential_temperature
     return string("AnelasticFormulation(p₀=", prettysummary(p₀),
-                  ", θᵣ=", prettysummary(θᵣ), ")")
+                  ", θ₀=", prettysummary(θ₀), ")")
 end
 
 Base.show(io::IO, formulation::AnelasticFormulation) = print(io, "AnelasticFormulation")
@@ -57,12 +57,12 @@ end
 ##### Thermodynamic state
 #####
 
-function thermodynamic_state(i, j, k, grid, formulation::AnelasticFormulation, thermo, energy, absolute_humidity)
+function thermodynamic_state(i, j, k, grid, formulation::AnelasticFormulation, thermo, energy_density, moisture_density)
     @inbounds begin
-        e = energy[i, j, k]
+        e = energy_density[i, j, k]
         pᵣ = formulation.reference_state.pressure[i, j, k]
         ρᵣ = formulation.reference_state.density[i, j, k]
-        ρqᵗ = absolute_humidity[i, j, k]
+        ρqᵗ = moisture_density[i, j, k]
     end
 
     cᵖᵈ = thermo.dry_air.heat_capacity
@@ -79,9 +79,9 @@ function thermodynamic_state(i, j, k, grid, formulation::AnelasticFormulation, t
     return AnelasticThermodynamicState(θ, q, ρᵣ, pᵣ, Π)
 end
 
-@inline function specific_volume(i, j, k, grid, formulation, temperature, specific_humidity, thermo)
+@inline function specific_volume(i, j, k, grid, formulation, temperature, moisture_fraction, thermo)
     @inbounds begin
-        qᵗ = specific_humidity[i, j, k]
+        qᵗ = moisture_fraction[i, j, k]
         pᵣ = formulation.reference_state.pressure[i, j, k]
         T = temperature[i, j, k]
     end
@@ -103,19 +103,19 @@ end
 @inline function reference_specific_volume(i, j, k, grid, formulation, thermo)
     Rᵈ = dry_air_gas_constant(thermo)
     pᵣ = @inbounds formulation.reference_state.pressure[i, j, k]
-    θᵣ = formulation.reference_state.potential_temperature
-    return Rᵈ * θᵣ / pᵣ
+    θ₀ = formulation.reference_state.potential_temperature
+    return Rᵈ * θ₀ / pᵣ
 end
 
 function collect_prognostic_fields(::AnelasticFormulation,
                                    density,
                                    momentum,
-                                   energy,
-                                   absolute_humidity,
+                                   energy_density,
+                                   moisture_density,
                                    condensates,
                                    tracers)
 
-    thermodynamic_variables = (ρe=energy, ρqᵗ=absolute_humidity)
+    thermodynamic_variables = (ρe=energy_density, ρqᵗ=moisture_density)
 
     return merge(momentum, thermodynamic_variables, condensates, tracers)
 end
@@ -265,9 +265,13 @@ end
 #####
 
 """
+$(TYPEDSIGNATURES)
+
 Update the predictor momentum (ρu, ρv, ρw) with the non-hydrostatic pressure via
 
-    u^{n+1} = u^n - δₓp_{NH} / Δx * Δt
+```math
+\\boldsymbol{\\rho u}^{n+1} = \\boldsymbol{\\rho u}^n - \\Delta t \\rho_r \\nabla \\left( \\alpha_r p_{nh} \\right)
+```
 """
 @kernel function _pressure_correct_momentum!(M, grid, Δt, αᵣ_pₙ, ρᵣ)
     i, j, k = @index(Global, NTuple)
