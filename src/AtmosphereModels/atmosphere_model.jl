@@ -90,7 +90,7 @@ AtmosphereModel{CPU, RectilinearGrid}(time = 0 seconds, iteration = 0)
 ├── advection scheme: WENO{3, Float64, Float32}(order=5)
 ├── tracers: ()
 ├── coriolis: Nothing
-└── microphysics: WarmPhaseSaturationAdjustment
+└── microphysics: Nothing
 ```
 
 References
