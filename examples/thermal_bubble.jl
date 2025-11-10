@@ -5,8 +5,9 @@
 
 using Breeze
 using Oceananigans.Units
-using CairoMakie
+using Statistics
 using Printf
+using CairoMakie
 
 # ## A simple model on a RectilinearGrid
 
