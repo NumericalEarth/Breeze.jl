@@ -89,8 +89,8 @@ run!(simulation)
 
 # ## Visualization
 #
-# Visualize the moist static energy perturbation and vertical velocity through
-# time, plus a final animation.
+# Visualize the moist static energy perturbation and the vertical velocity through
+# time and create an animation.
 
 @info "Creating visualization..."
 
@@ -104,8 +104,7 @@ fig = Figure(size = (800, 800), fontsize = 12)
 axρ = Axis(fig[1, 1], aspect=2, xlabel="x (m)", ylabel="z (m)", title="Energy perturbation ρe′ (J / kg)")
 axw = Axis(fig[2, 1], aspect=2, xlabel="x (m)", ylabel="z (m)", title="Vertical velocity w (m / s)")
 
-slider = Slider(fig[3, 1], range = 1:Nt, startvalue = 1)
-n = slider.value
+n = Observable(Nt)
 
 ρe′n = @lift ρe′t[$n]
 wn = @lift wt[$n]
