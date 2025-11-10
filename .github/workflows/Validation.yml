@@ -7,7 +7,7 @@ on:
     paths:
       - ".github/workflows/Validation.yml"
       - "examples/Project.jl"
-      - "examples/bomex.jl"
+      - "examples/boussinesq_bomex.jl"
       - "ext/**"
       - "src/**"
       - "test/**"
@@ -16,7 +16,7 @@ on:
     paths:
       - ".github/workflows/Validation.yml"
       - "examples/Project.jl"
-      - "examples/bomex.jl"
+      - "examples/boussinesq_bomex.jl"
       - "ext/**"
       - "src/**"
       - "test/**"
