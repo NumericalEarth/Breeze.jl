@@ -182,7 +182,7 @@ and
 ```
 
 The quantity ``g / cᵖ ≈ 9.76 \;\mathrm{K}\,\mathrm{km}^{-1}`` that appears above is also referred to as
-the "dry adiabatic lapse rate".
+the "[dry adiabatic lapse rate](https://en.wikipedia.org/wiki/Lapse_rate)".
 
 ## An example of a dry reference state in Breeze
 
