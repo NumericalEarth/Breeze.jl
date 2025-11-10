@@ -29,8 +29,8 @@ and ``ℒˡᵣ`` is the latent heat at the energy reference temperature.
 
 Saturation adjustment microphysics assumes that temperature and the moisture mass fractions
 instantaneously adjust to an equilibrium in which the specific humidity is equal to
-or less than the saturation specific humidity. This condition implies that the 
-liquid mass fraction ``qˡ`` is
+or less than the saturation specific humidity. This equilibrium condition implies that
+the liquid mass fraction ``qˡ`` is given by
 
 ```math
 qˡ = \max(0, qᵗ - qᵛ⁺)
@@ -54,7 +54,7 @@ on the specific humidity, since according to the ideal gas law,
 
 where ``qᵈ = 1 - qᵗ`` is the dry air mass fraction, ``qᵛ`` is the specific humidity,
 ``Rᵈ`` is the dry air gas constant, and ``Rᵛ`` is the vapor gas constant.
-The density is expressed in terms of ``pᵣ`` under the anelastic approximation.
+The density ``ρ`` is expressed in terms of ``pᵣ`` under the anelastic approximation.
 
 In saturated conditions, we have ``qᵛ ≡ qᵛ⁺`` by definition, which leads to the expression 
 
@@ -69,7 +69,9 @@ _valid only in saturated conditions and under the assumptions of saturation adju
 qᵛ⁺ = \frac{Rᵈ}{Rᵛ} \left ( 1 - qᵗ \right ) \frac{pᵛ⁺}{pᵣ - pᵛ⁺} .
 ```
 
-## Saturation adjustment algorithm
+This expression can also be found in [Pressel2015](@citet), equation 37.
+
+## The saturation adjustment algorithm
 
 We compute the saturation adjustment temperature by solving the nonlinear algebraic equation
 
@@ -89,7 +91,7 @@ using Breeze.Thermodynamics: saturation_specific_humidity
 thermo = ThermodynamicConstants()
 
 p = 101325.0
-T = 314.0
+T = 288.0
 Rᵈ = Breeze.Thermodynamics.dry_air_gas_constant(thermo)
 ρ = p / (Rᵈ * T)
 qᵛ⁺₀ = saturation_specific_humidity(T, ρ, thermo, thermo.liquid)
@@ -101,14 +103,15 @@ a carefully chosen moist air mass fraction,
 ```@example microphysics
 using Breeze.Microphysics: adjustment_saturation_specific_humidity
 
-# qᵗ = 0.012   # [kg kg⁻¹] total specific humidity
-qᵗ = 0.05   # [kg kg⁻¹] total specific humidity
+qᵗ = 0.012   # [kg kg⁻¹] total specific humidity
 qᵛ⁺ = Breeze.Microphysics.adjustment_saturation_specific_humidity(T, p, qᵗ, thermo)
 ```
 
-We have thus identified a situation in which ``qᵗ > qᵛ⁺``. Note that the saturation specific humidity
-in moist air is higher than in dry air at the same temperature and pressure. This is because moist air
-is less dense than dry air.
+There are two facts of note. First is that we have identified a situation in which ``qᵗ > qᵛ⁺``,
+since ``qᵗ = 0.012`` and ``qᵛ⁺ = 0.0104``. Second, note that the saturation specific humidity
+is _higher_ if we assume a saturated state, versus the unsaturated result given by ``qᵛ⁺₀`` above.
+This is because moist air is less dense than dry air, so the denominator ``ρ`` is smaller
+under the assumption of a saturated state.
 
 In equilibrium (and thus under the assumptions of saturation adjustment), the specific humidity is
 ``qᵛ = qᵛ⁺``, while the liquid mass fraction is
@@ -117,7 +120,8 @@ In equilibrium (and thus under the assumptions of saturation adjustment), the sp
 qˡ = qᵗ - qᵛ⁺ 
 ```
 
-We can then compute moist static energy,
+It is small but greater than zero → the typical situation in clouds on Earth.
+We are now ready to compute moist static energy,
 
 ```@example microphysics
 using Breeze.Thermodynamics: MoistureMassFractions
@@ -130,8 +134,9 @@ z = 0.0
 e = cᵖᵐ * T + g * z - ℒˡᵣ * qˡ
 ```
 
-We can use the saturation adjustment solver to recover the input temperature,
-passing it an "unadjusted" moisture mass fraction,
+Moist static energy has units ``\mathrm{m^2 / s^2}``, or ``\mathrm{J}{kg}``.
+Next we show that the saturation adjustment solver recovers the input temperature
+by passing it an "unadjusted" moisture mass fraction into `compute_temperature`,
 
 ```@example microphysics
 using Breeze.Microphysics: WarmPhaseSaturationAdjustment, compute_temperature
@@ -139,16 +144,10 @@ microphysics = WarmPhaseSaturationAdjustment()
 
 q₀ = MoistureMassFractions(qᵗ, zero(qᵗ), zero(qᵗ))
 𝒰 = Breeze.Thermodynamics.MoistStaticEnergyState(e, q₀, z, p)
-T★, r₂ = compute_temperature(𝒰, microphysics, thermo)
-```
-
-```@example microphysics
-using Breeze.Microphysics: saturation_adjustment_residual
 T★ = compute_temperature(𝒰, microphysics, thermo)
-saturation_adjustment_residual(T★, 𝒰, thermo)
 ```
 
-The saturation adjustment solver is initialized with a guess corresponding
+Finally, we note that the saturation adjustment solver is initialized with a guess corresponding
 to the temperature in unsaturated conditions,
 
 ```@example microphysics
@@ -186,9 +185,7 @@ The residual looks like
 using Breeze.Microphysics: saturation_adjustment_residual
 using CairoMakie
 
-# T = 230:0.5:320
-#T = 280:0.01:330
-T = 310:0.01:320
+T = 230:0.5:320
 r = [saturation_adjustment_residual(Tʲ, 𝒰, thermo) for Tʲ in T]
 qᵛ⁺ = [adjustment_saturation_specific_humidity(Tʲ, p, qᵗ, thermo) for Tʲ in T]
 
@@ -196,8 +193,7 @@ fig = Figure()
 axr = Axis(fig[1, 1], xlabel="Temperature (K)", ylabel="Saturation adjustment residual (K)")
 axq = Axis(fig[2, 1], xlabel="Temperature (K)", ylabel="Estimated liquid fraction")
 lines!(axr, T, r)
-# scatter!(axr, 288, 0, marker=:star5, markersize=30, color=:tomato)
-scatter!(axr, 314, 0, marker=:star5, markersize=30, color=:tomato)
+scatter!(axr, 288, 0, marker=:star5, markersize=30, color=:tomato)
 
 lines!(axq, T, max.(0, qᵗ .- qᵛ⁺))
 
@@ -205,3 +201,126 @@ fig
 ```
 
 There is a kink at the temperature wherein the estimated liquid mass fraction bottoms out.
+
+### Equilibrium states with varying total specific humidity
+
+As a second example, we examine the dependence of temperature on total specific humidity
+when the moist static energy is held fixed.
+
+```@example microphysics
+using Breeze.Thermodynamics: MoistStaticEnergyState
+
+T₀ = 288
+cᵖᵈ = thermo.dry_air.heat_capacity
+e₀ = cᵖᵈ * T₀ # representative value
+z = 0.0
+p = 101325.0
+
+# Vary the total moisture mass fraction:
+qᵗ = 0:1e-4:0.035 # [kg kg⁻¹]
+
+T = zeros(length(qᵗ))
+qˡ = zeros(length(qᵗ))
+
+for (i, qᵗⁱ) in enumerate(qᵗ)
+    q = MoistureMassFractions(qᵗⁱ, 0.0, 0.0)
+    𝒰 = MoistStaticEnergyState(e₀, q, z, p)
+    T[i] = compute_temperature(𝒰, microphysics, thermo)
+    qᵛ⁺ = Breeze.Microphysics.adjustment_saturation_specific_humidity(T[i], p, qᵗⁱ, thermo)
+    qˡ[i] = max(0, qᵗⁱ - qᵛ⁺)
+end
+
+using CairoMakie
+
+# Hard code the transition index here, e.g. 105 (adjust to your needs)
+transition_idx = 105
+
+fig = Figure()
+axT = Axis(fig[1, 1], xlabel="Total specific humidity (kg kg⁻¹)", ylabel="Temperature (ᵒK)")
+axq = Axis(fig[2, 1], xlabel="Total specific humidity (kg kg⁻¹)", ylabel="Liquid mass fraction")
+
+lines!(axT, qᵗ, T)
+lines!(axq, qᵗ, qˡ)
+
+idx = searchsortedfirst(qˡ, 1e-4)
+vlines!(axT, qᵗ[idx], color=:gray, linestyle=:dash, linewidth=2)
+vlines!(axq, qᵗ[idx], color=:gray, linestyle=:dash, linewidth=2)
+
+text!(axq, "unsaturated, clear", position=(qᵗ[idx-5], 4e-3), align=(:right, :top))
+text!(axq, "saturated and cloudy →", position=(qᵗ[idx+5], 8e-3), align=(:left, :top))
+
+fig
+```
+
+
+### Saturation adjustment with varying height
+
+For a third example, we consider a state with constant moist static energy and total specific humidity
+(equivalently, a constant ``θ`` in this reference state),
+but at varying heights:
+
+```@example microphysics
+using Breeze
+using Breeze.AtmosphereModels: compute_temperature
+
+grid = RectilinearGrid(size=100, z=(0, 1e4), topology=(Flat, Flat, Bounded))
+thermo = ThermodynamicConstants()
+
+θ₀ = 288
+p₀ = 101325
+reference_state = ReferenceState(grid, thermo;
+                                 base_pressure = p₀,
+                                 potential_temperature = θ₀)
+
+qᵗ = 0.005
+q = MoistureMassFractions(qᵗ, 0.0, 0.0)
+
+z = znodes(grid, Center())
+T = zeros(grid.Nz)
+qᵛ⁺ = zeros(grid.Nz)
+qˡ = zeros(grid.Nz)
+rh = zeros(grid.Nz)
+
+# Set a constant moist static energy referenced to z = 0, clear air
+cᵖᵐ = mixture_heat_capacity(q, thermo)
+Rᵈ = Breeze.Thermodynamics.dry_air_gas_constant(thermo)
+g = thermo.gravitational_acceleration
+
+for k = 1:grid.Nz
+    pᵣ = reference_state.pressure[1, 1, k]
+    Tᵣ = θ₀ * (pᵣ / p₀)^(Rᵈ / cᵖᵈ)
+    e₀ = cᵖᵐ * Tᵣ + g * z[k]
+    𝒰 = MoistStaticEnergyState(e₀, q, z[k], pᵣ)
+    T[k] = compute_temperature(𝒰, microphysics, thermo)
+
+    # Saturation specific humidity via adjustment formula using T[k], pᵣ, and qᵗ
+    qᵛ⁺[k] = Breeze.Microphysics.adjustment_saturation_specific_humidity(T[k], pᵣ, qᵗ, thermo)
+    qˡ[k] = max(0, qᵗ - qᵛ⁺[k])
+    rh[k] = 100 * min(qᵗ, qᵛ⁺[k]) / qᵛ⁺[k]
+end
+
+cᵖᵈ = thermo.dry_air.heat_capacity
+g = thermo.gravitational_acceleration
+
+fig = Figure(size=(700, 350))
+
+yticks = 0:2e3:10e3
+
+axT = Axis(fig[1, 1:2]; xlabel = "Temperature (ᵒK)", ylabel = "Height (m)", yticks)
+axq⁺ = Axis(fig[1, 3]; xlabel = "Saturation\n specific humidity\n (kg kg⁻¹)",
+                       yticks, yticklabelsvisible = false)
+axqˡ = Axis(fig[1, 4]; xlabel = "Liquid\n specific humidity\n (kg kg⁻¹)",
+                       yticks, yticklabelsvisible = false)
+
+axrh = Axis(fig[1, 5]; xlabel = "Relative\n humidity (%)",
+                       xticks = 0:20:100,
+                       yticks, yticklabelsvisible = false)
+
+lines!(axT, T, z)
+lines!(axT, T[1] .- g * z / cᵖᵈ, z, linestyle = :dash, color = :orange, linewidth = 2)
+lines!(axq⁺, qᵛ⁺, z)
+lines!(axqˡ, qˡ, z)
+lines!(axrh, rh, z)
+
+fig
+```
