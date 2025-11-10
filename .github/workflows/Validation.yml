@@ -64,7 +64,7 @@ jobs:
           VALIDATION: "true"
           CI: "true"
         run: |
-          julia --color=yes --project=examples examples/bomex.jl
+          julia --color=yes --project=examples examples/boussinesq_bomex.jl
       - name: Save Julia depot cache on cancel or failure
         id: julia-cache-save
         if: cancelled() || failure()
