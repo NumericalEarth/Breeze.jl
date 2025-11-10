@@ -9,9 +9,15 @@ Like Oceananigans, it provides a radically productive user interface that makes 
 
 Breeze provides two ways to simulate moist atmospheres:
 
-* A [`MoistAirBuoyancy`](@ref) that can be used with [Oceananigans](https://clima.github.io/OceananigansDocumentation/stable/)' [`NonhydrostaticModel`](https://clima.github.io/OceananigansDocumentation/stable/appendix/library/#Oceananigans.Models.NonhydrostaticModels.NonhydrostaticModel-Tuple{}) to simulate atmospheric flows with the Boussinesq approximation.
+1. An [`AtmosphereModel`](@ref Breeze.AtmosphereModels.AtmosphereModel) which currently supports anelastic approximation following [Pauluis2008](@citet):
+    * `AtmosphereModel` has simple warm-phase saturation adjustment microphysics
+    * `AtmosphereModel` is being rapidly developed and changes day-to-day!
+    * A roadmap is coming soon, and will include radiation, bulk, bin, and superdroplet microphysics, a fully compressible formulation, and more 
 
-* A prototype [`AtmosphereModel`](@ref Breeze.AtmosphereModels.AtmosphereModel) that uses the anelastic approximation following [Pauluis2008](@citet).
+2. A [`MoistAirBuoyancy`](@ref) buoyancy implementation that can be used with [Oceananigans](https://clima.github.io/OceananigansDocumentation/stable/)' [`NonhydrostaticModel`](https://clima.github.io/OceananigansDocumentation/stable/appendix/library/#Oceananigans.Models.NonhydrostaticModels.NonhydrostaticModel-Tuple{}) to simulate atmospheric flows with the [Boussinesq approximation](https://en.wikipedia.org/wiki/Boussinesq_approximation_(buoyancy)):
+    * `MoistAirBuoyancy` includes a warm-phase saturation adjustment implementation
+    * Note that our attention is focused on `AtmosphereModel`!
+
 
 ## Installation
 
@@ -42,22 +48,18 @@ Lz = 4 * 1024
 grid = RectilinearGrid(size=(Nx, Nz), x=(0, 2Lz), z=(0, Lz), topology=(Periodic, Flat, Bounded))
 
 p₀, θ₀ = 1e5, 288 # reference state parameters
-buoyancy = Breeze.MoistAirBuoyancy(grid, base_pressure=p₀, reference_potential_temperature=θ₀)
+reference_state = ReferenceState(grid, base_pressure=p₀, potential_temperature=θ₀)
+formulation = AnelasticFormulation(reference_state)
 
-thermo = buoyancy.thermodynamics
-ρ₀ = Breeze.Thermodynamics.base_density(p₀, θ₀, thermo)
-cₚ = buoyancy.thermodynamics.dry_air.heat_capacity
 Q₀ = 1000 # heat flux in W / m²
-θ_bcs = FieldBoundaryConditions(bottom=FluxBoundaryCondition(Q₀ / (ρ₀ * cₚ)))
-qᵗ_bcs = FieldBoundaryConditions(bottom=FluxBoundaryCondition(1e-2))
+ρe_bcs = FieldBoundaryConditions(bottom=FluxBoundaryCondition(Q₀))
+ρqᵗ_bcs = FieldBoundaryConditions(bottom=FluxBoundaryCondition(1e-2))
 
 advection = WENO()
-model = NonhydrostaticModel(; grid, advection, buoyancy,
-                            tracers = (:θ, :qᵗ),
-                            boundary_conditions = (θ=θ_bcs, qᵗ=qᵗ_bcs))
+model = AtmosphereModel(; grid, advection, formulation)
 
 Δθ = 2 # ᵒK
-Tₛ = buoyancy.reference_state.potential_temperature # K
+Tₛ = reference_state.potential_temperature # K
 θᵢ(x, z) = Tₛ + Δθ * z / grid.Lz + 2e-2 * Δθ * (rand() - 0.5)
 set!(model, θ=θᵢ)
 
@@ -66,6 +68,5 @@ conjure_time_step_wizard!(simulation, cfl=0.7)
 
 run!(simulation)
 
-T = Breeze.TemperatureField(model)
-heatmap(T)
+heatmap(model.temperature)
 ```
