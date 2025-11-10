@@ -15,7 +15,7 @@ grid = RectilinearGrid(CPU(); size = (128, 128), halo = (5, 5),
                        x = (-10e3, 10e3), z = (0, 10e3),
                        topology = (Periodic, Flat, Bounded))
 
-advection = WENO(order=9)
+advection = WENO(order=3)
 model = AtmosphereModel(grid; advection)
 
 # ## Moist static energy perturbation
@@ -37,7 +37,7 @@ function θᵢ(x, z; x₀=mean(xnodes(grid, Center())), z₀=0.3*grid.Lz)
     return θ̄ + θ′
 end
 
-set!(model, θ = θᵢ)
+set!(model, θ = θᵢ, u = 20)
 
 ρe = model.energy_density
 ρE = Field(Average(ρe, dims=1))
@@ -56,7 +56,7 @@ fig
 
 # ## Simulation rising
 
-simulation = Simulation(model; Δt=2, stop_time=15minutes)
+simulation = Simulation(model; Δt=2, stop_time=1000)
 conjure_time_step_wizard!(simulation, cfl=0.7)
 
 function progress(sim)
