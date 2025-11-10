@@ -59,7 +59,7 @@ Now you are ready to run any of the examples!
 For instance, if you run
 
 ```julia
-julia> include("examples/free_convection.jl")
+julia> include("examples/thermal_bubble.jl")
 ```
 
 but after you tweak the spatial resolution of the grid to `size = (512, 512)`, you'll get
