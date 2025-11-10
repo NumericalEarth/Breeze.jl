@@ -67,5 +67,5 @@ conjure_time_step_wizard!(simulation, cfl=0.7)
 
 run!(simulation)
 
-heatmap(model.temperature)
+heatmap(model.temperature, colormap=:thermal)
 ```
