@@ -9,7 +9,7 @@ set_theme!(Theme(linewidth = 3))
 
 DocMeta.setdocmeta!(Breeze, :DocTestSetup, :(using Breeze); recursive=true)
 
-bib_filepath = joinpath(dirname(@__FILE__), "src", "breeze.bib")
+bib_filepath = joinpath(@__DIR__, "src", "breeze.bib")
 bib = CitationBibliography(bib_filepath, style=:authoryear)
 
 examples_src_dir = joinpath(@__DIR__, "..", "examples")
@@ -33,6 +33,7 @@ example_pages = Any[
 
 makedocs(
     ;
+    modules = [Breeze],
     sitename = "Breeze",
     plugins = [bib],
     pages=[
