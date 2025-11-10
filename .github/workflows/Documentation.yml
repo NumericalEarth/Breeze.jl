@@ -8,6 +8,7 @@ on:
     paths:
       - ".github/workflows/Documentation.yml"
       - "docs/**"
+      - "examples/**"
       - "src/**"
       - "Project.toml"
       - "CHANGELOG.md"
@@ -15,6 +16,7 @@ on:
     paths:
       - ".github/workflows/Documentation.yml"
       - "docs/**"
+      - "examples/**"
       - "src/**"
       - "Project.toml"
       - "CHANGELOG.md"
