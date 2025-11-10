@@ -1,7 +1,7 @@
 # # Tropical cyclone world (Cronin & Chavas, 2019)
 #
 # This example follows the "tropical cyclone world" radiative–convective equilibrium
-# experiment described by [Cronin & Chavas (2019)](https://doi.org/10.1175/JAS-D-18-0357.1),
+# experiment described by [Cronin & Chavas (2019)](@citet Cronin2019),
 # but implemented with `Breeze.AtmosphereModel`.  The goal is to couple a simple
 # surface-layer bulk scheme (wind stress, sensible, and latent heat fluxes) to an
 # anelastic atmosphere, apply a horizontally-uniform radiative cooling, and allow the
