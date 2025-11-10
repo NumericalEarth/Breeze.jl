@@ -66,7 +66,13 @@ reference pressure and temperature.
     return ρ₀ * (pᵣ / p₀)^(1 - Rᵈ / cᵖᵈ)
 end
 
-function ReferenceState(grid, thermo;
+"""
+$(TYPEDSIGNATURES)
+
+Return a `ReferenceState` computed on `grid` with `thermo`dynamic constants,
+a `base_pressure` (reference pressure at ``z=0``, ``p_r(z=0)``), and constant `potential_temperature`.
+"""
+function ReferenceState(grid, thermo = ThermodynamicConstants();
                         base_pressure = 101325,
                         potential_temperature = 288)
 
