@@ -54,12 +54,12 @@ function set!(model::AtmosphereModel; enforce_mass_conservation=true, kw...)
             thermo = model.thermodynamics
             formulation = model.formulation
             energy_density = model.energy_density
-            moisture_fraction = model.moisture_fraction
+            moisture_mass_fraction = model.moisture_mass_fraction
             launch!(arch, grid, :xyz, _energy_from_potential_temperature!, energy_density, grid,
-                    θ, moisture_fraction, formulation, thermo)
+                    θ, moisture_mass_fraction, formulation, thermo)
 
         elseif name == :qᵗ
-            qᵗ = model.moisture_fraction
+            qᵗ = model.moisture_mass_fraction
             set!(qᵗ, value)
             ρᵣ = model.formulation.reference_state.density
             ρqᵗ = model.moisture_density
@@ -95,14 +95,14 @@ end
 
 @kernel function _energy_from_potential_temperature!(moist_static_energy, grid,
                                                      potential_temperature,
-                                                     moisture_fraction,
+                                                     moisture_mass_fraction,
                                                      formulation,
                                                      thermo)
     i, j, k = @index(Global, NTuple)
 
     @inbounds begin
         ρᵣ = formulation.reference_state.density[i, j, k]
-        qᵗ = moisture_fraction[i, j, k]
+        qᵗ = moisture_mass_fraction[i, j, k]
         pᵣ = formulation.reference_state.pressure[i, j, k]
         θ = potential_temperature[i, j, k]
     end

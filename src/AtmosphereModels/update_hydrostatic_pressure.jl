@@ -30,7 +30,7 @@ function update_hydrostatic_pressure!(model)
     pₕ′ = model.hydrostatic_pressure_anomaly
     formulation = model.formulation
     T = model.temperature
-    q = model.moisture_fraction
+    q = model.moisture_mass_fraction
     thermo = model.thermodynamics
 
     Nx, Ny, _ = size(grid)

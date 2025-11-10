@@ -1,6 +1,5 @@
 using ..Thermodynamics:
-    saturation_specific_humidity,
-    total_specific_humidity,
+    total_moisture_mass_fraction,
     mixture_heat_capacity,
     mixture_gas_constant
 
@@ -16,7 +15,7 @@ const AnelasticModel = AtmosphereModel{<:AnelasticFormulation}
 
 function prognostic_fields(model::AnelasticModel)
     thermodynamic_fields = (ρe=model.energy_density, ρqᵗ=model.moisture_density)
-    return merge(model.momentum, thermodynamic_fields, model.condensates, model.tracers)
+    return merge(model.momentum, thermodynamic_fields, model.microphysical_fields, model.tracers)
 end
 
 fields(model::AnelasticModel) = prognostic_fields(model)
@@ -43,7 +42,7 @@ function compute_auxiliary_variables!(model)
     launch!(arch, grid, :xyz,
             _compute_auxiliary_thermodynamic_variables!,
             model.temperature,
-            model.moisture_fraction,
+            model.moisture_mass_fraction,
             grid,
             model.thermodynamics,
             formulation,
@@ -52,7 +51,7 @@ function compute_auxiliary_variables!(model)
             model.moisture_density)
 
     fill_halo_regions!(model.temperature)
-    fill_halo_regions!(model.moisture_fraction)
+    fill_halo_regions!(model.moisture_mass_fraction)
 
     return nothing
 end
@@ -74,7 +73,7 @@ end
 end
 
 @kernel function _compute_auxiliary_thermodynamic_variables!(temperature,
-                                                             moisture_fraction,
+                                                             moisture_mass_fraction,
                                                              grid,
                                                              thermo,
                                                              formulation,
@@ -84,17 +83,10 @@ end
     i, j, k = @index(Global, NTuple)
 
     𝒰 = thermodynamic_state(i, j, k, grid, formulation, thermo, energy_density, moisture_density)
-    @inbounds moisture_fraction[i, j, k] = total_specific_humidity(𝒰)
+    @inbounds moisture_mass_fraction[i, j, k] = total_moisture_mass_fraction(𝒰)
 
-    # Possibly perform saturation adjustment
-    # Note, we will make this much prettier in the future
-    T = if isnothing(microphysics)
-        Π = 𝒰.exner_function
-        θ = 𝒰.potential_temperature
-        Π * θ
-    else
-        compute_temperature(𝒰, microphysics)
-    end
+    # Compute temperature via microphysics interface (falls back to dry if nothing)
+    T = compute_temperature(𝒰, microphysics, thermo)
 
     @inbounds temperature[i, j, k] = T
 end
@@ -119,7 +111,7 @@ function compute_tendencies!(model::AnelasticModel)
     v_args = tuple(common_args..., model.forcing.ρv, pₕ′, ρᵣ)
     w_args = tuple(common_args..., model.forcing.ρw, ρᵣ,
                    model.formulation, model.temperature,
-                   model.moisture_fraction, model.thermodynamics)
+                   model.moisture_mass_fraction, model.thermodynamics)
 
     launch!(arch, grid, :xyz, compute_x_momentum_tendency!, Gρu, grid, u_args)
     launch!(arch, grid, :xyz, compute_y_momentum_tendency!, Gρv, grid, v_args)
@@ -131,7 +123,7 @@ function compute_tendencies!(model::AnelasticModel)
     Fρe = model.forcing.ρe
     ρe_args = tuple(ρe, Fρe, scalar_args..., ρᵣ,
                     model.formulation, model.temperature,
-                    model.moisture_fraction, model.thermodynamics, model.condensates, model.microphysics)
+                    model.moisture_mass_fraction, model.thermodynamics, model.microphysical_fields, model.microphysics)
     launch!(arch, grid, :xyz, compute_moist_static_energy_tendency!, Gρe, grid, ρe_args)
 
     ρqᵗ = model.moisture_density

@@ -13,10 +13,9 @@ import Oceananigans.Advection: cell_advection_timescale
 
 using KernelAbstractions: @kernel, @index
 
-materialize_condenstates(microphysics, grid) = NamedTuple() #(; qˡ=CenterField(grid), qᵛ=CenterField(grid))
+ 
 materialize_density(formulation, grid) = CenterField(grid)
 
-struct WarmPhaseSaturationAdjustment end
 struct DefaultValue end
 
 tupleit(t::Tuple) = t
@@ -35,7 +34,7 @@ mutable struct AtmosphereModel{Frm, Arc, Tst, Grd, Clk, Thm, Den, Mom, Eng, Moi,
     momentum :: Mom
     energy_density :: Eng
     moisture_density :: Moi
-    moisture_fraction :: Mfr
+    moisture_mass_fraction :: Mfr
     temperature :: Tmp
     nonhydrostatic_pressure :: Prs
     hydrostatic_pressure_anomaly :: Ppa
@@ -46,7 +45,7 @@ mutable struct AtmosphereModel{Frm, Arc, Tst, Grd, Clk, Thm, Den, Mom, Eng, Moi,
     coriolis :: Cor
     forcing :: Frc
     microphysics :: Mic
-    condensates :: Cnd
+    microphysical_fields :: Cnd
     timestepper :: Tst
     closure :: Cls
     diffusivity_fields :: Dif
@@ -107,7 +106,7 @@ function AtmosphereModel(grid;
     nonhydrostatic_pressure = CenterField(grid)
 
     # Next, we form a list of default boundary conditions:
-    names = field_names(formulation, tracers)
+    names = prognostic_field_names(formulation, microphysics, tracers)
     FT = eltype(grid)
     forcing = NamedTuple{names}(Returns(zero(FT)) for _ in names)
     default_boundary_conditions = NamedTuple{names}(FieldBoundaryConditions() for _ in names)
@@ -117,7 +116,7 @@ function AtmosphereModel(grid;
     density = materialize_density(formulation, grid)
     velocities, momentum = materialize_momentum_and_velocities(formulation, grid, boundary_conditions)
     tracers = NamedTuple(n => CenterField(grid, boundary_conditions=boundary_conditions[n]) for name in tracers)
-    condensates = materialize_condenstates(microphysics, grid)
+    microphysical_fields = materialize_microphysical_fields(microphysics, grid, boundary_conditions)
     advection = adapt_advection_order(advection, grid)
 
     if moisture_density isa DefaultValue
@@ -125,15 +124,16 @@ function AtmosphereModel(grid;
     end
 
     energy_density = CenterField(grid, boundary_conditions=boundary_conditions.ρe)
-    moisture_fraction = CenterField(grid, boundary_conditions=boundary_conditions.ρqᵗ)
+    moisture_mass_fraction = CenterField(grid, boundary_conditions=boundary_conditions.ρqᵗ)
     temperature = CenterField(grid)
 
+    prognostic_microphysical_fields = NamedTuple(microphysics_fields[name] for name in prognostic_field_names(microphysics))
     prognostic_fields = collect_prognostic_fields(formulation,
                                                   density,
                                                   momentum,
                                                   energy_density,
                                                   moisture_density,
-                                                  condensates,
+                                                  prognostic_microphysical_fields,
                                                   tracers)
 
     timestepper = TimeStepper(timestepper, grid, prognostic_fields)
@@ -152,7 +152,7 @@ function AtmosphereModel(grid;
                             momentum,
                             energy_density,
                             moisture_density,
-                            moisture_fraction,
+                            moisture_mass_fraction,
                             temperature,
                             nonhydrostatic_pressure,
                             hydrostatic_pressure_anomaly,
@@ -163,7 +163,7 @@ function AtmosphereModel(grid;
                             coriolis,
                             forcing,
                             microphysics,
-                            condensates,
+                            microphysical_fields,
                             timestepper,
                             closure,
                             diffusivity_fields)
@@ -196,3 +196,9 @@ function Base.show(io::IO, model::AtmosphereModel)
 end
 
 cell_advection_timescale(model::AtmosphereModel) = cell_advection_timescale(model.grid, model.velocities)
+
+function prognostic_field_names(formulation, microphysics, tracer_names)
+    default_names = (:ρu, :ρv, :ρw, :ρe, :ρqᵗ)
+    microphysical_names = prognostic_field_names(microphysics)
+    return tuple(default_names..., microphysical_names..., tracer_names...)
+end

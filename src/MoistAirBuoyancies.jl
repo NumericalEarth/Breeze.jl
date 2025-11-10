@@ -9,7 +9,7 @@ export
 using ..Thermodynamics:
     PotentialTemperatureState,
     MoistureMassFractions,
-    total_specific_humidity,
+    total_moisture_mass_fraction,
     dry_air_gas_constant,
     vapor_gas_constant,
     with_moisture,
@@ -128,7 +128,7 @@ const c = Center()
     𝒰 = PotentialTemperatureState(θ, q, z, p₀, pᵣ, ρᵣ)
 
     # Perform saturation adjustment
-    T = temperature(𝒰, mb.thermodynamics)
+    T = compute_boussinesq_adjustment_temperature(𝒰, mb.thermodynamics)
 
     # Compute specific volume
     Rᵐ = mixture_gas_constant(q, mb.thermodynamics)
@@ -178,12 +178,12 @@ r(T) ≡ T - θ Π - ℒˡᵣ qˡ / cᵖᵐ .
 
 Solution of ``r(T) = 0`` is found via the [secant method](https://en.wikipedia.org/wiki/Secant_method).
 """
-@inline function temperature(𝒰₀::PotentialTemperatureState{FT}, thermo) where FT
+@inline function compute_boussinesq_adjustment_temperature(𝒰₀::PotentialTemperatureState{FT}, thermo) where FT
     θ = 𝒰₀.potential_temperature
     θ == 0 && return zero(FT)
 
     # Generate guess for unsaturated conditions; if dry, return T₁
-    qᵗ = total_specific_humidity(𝒰₀)
+    qᵗ = total_moisture_mass_fraction(𝒰₀)
     q₁ = MoistureMassFractions(qᵗ, zero(qᵗ), zero(qᵗ))
     𝒰₁ = with_moisture(𝒰₀, q₁)
     Π₁ = exner_function(𝒰₀, thermo)
@@ -257,7 +257,7 @@ end
 @inline function adjustment_saturation_specific_humidity(T, 𝒰, thermo)
     pᵛ⁺ = saturation_vapor_pressure(T, thermo, thermo.liquid)
     pᵣ = 𝒰.reference_pressure
-    qᵗ = total_specific_humidity(𝒰)
+    qᵗ = total_moisture_mass_fraction(𝒰)
     Rᵈ = dry_air_gas_constant(thermo)
     Rᵛ = vapor_gas_constant(thermo)
     ϵᵈᵛ = Rᵈ / Rᵛ
@@ -266,7 +266,7 @@ end
 
 @inline function adjust_state(𝒰₀, T, thermo)
     qᵛ⁺ = adjustment_saturation_specific_humidity(T, 𝒰₀, thermo)
-    qᵗ = total_specific_humidity(𝒰₀)
+    qᵗ = total_moisture_mass_fraction(𝒰₀)
     qˡ = max(0, qᵗ - qᵛ⁺)
     q₁ = MoistureMassFractions(qᵛ⁺, qˡ, zero(qˡ))
     return with_moisture(𝒰₀, q₁)
@@ -274,7 +274,7 @@ end
 
 @inline function saturation_adjustment_residual(T, 𝒰, thermo)
     Π = exner_function(𝒰, thermo)
-    q = 𝒰.moisture_fractions
+    q = 𝒰.moisture_mass_fractions
     θ = 𝒰.potential_temperature
     ℒˡᵣ = thermo.liquid.reference_latent_heat
     cᵖᵐ = mixture_heat_capacity(q, thermo)
@@ -301,7 +301,7 @@ const c = Center()
     p₀ = mb.reference_state.base_pressure
     q = MoistureMassFractions(qᵗᵢ, zero(qᵗᵢ), zero(qᵗᵢ))
     𝒰 = PotentialTemperatureState(θᵢ, q, z, p₀, pᵣ, ρᵣ)
-    return temperature(𝒰, mb.thermodynamics)
+    return compute_boussinesq_adjustment_temperature(𝒰, mb.thermodynamics)
 end
 
 struct TemperatureKernelFunction end

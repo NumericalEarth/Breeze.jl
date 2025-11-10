@@ -296,6 +296,36 @@ We likewise define a mixture heat capacity via ``cᵖᵐ = qᵈ cᵖᵈ + qᵛ c
 cᵖᵐ = mixture_heat_capacity(q, thermo)
 ```
 
+## Moist static energy
+
+For moist air, a convenient thermodynamic invariant that couples temperature, composition, and height is the moist static energy (MSE). In the warm-phase case (vapor + liquid), assuming temperature‑independent specific heats, a common approximation is
+
+```math
+m \equiv c^{p m}(q) \, T + g z + \mathcal{L}^{l}_{r} \, q^{v} ,
+```
+
+where ``c^{p m}(q) = q^{d} c^{p d} + q^{v} c^{p v}`` is the mixture heat capacity, ``g`` is gravitational acceleration, ``z`` is height, and ``\mathcal{L}^{l}_{r}`` is a reference latent heat of vaporization. Using total water ``q^{t} = q^{v} + q^{l}``, an equivalent form is
+
+```math
+m = c^{p m}(q) \, T + g z + \mathcal{L}^{l}_{r} \, (q^{t} - q^{l}) .
+```
+
+At fixed ``q^{t}`` and in the absence of external sources/sinks (precipitation, radiation, surface fluxes), warm‑phase phase changes redistribute water between vapor and liquid while approximately conserving ``m``. This relation is the basis for the saturation‑adjustment temperature solve used in Breeze’s microphysics; see [Warm‑phase saturation adjustment](@ref saturation_adjustment-section) for details.
+
+In the anelastic formulation used by Breeze, it is also convenient to use the dry‑air energy variable
+
+```math
+e \equiv c^{p d} \, \theta ,
+```
+
+which is materially conserved in the absence of diabatic sources and appears naturally in the conservative anelastic energy equation; see the Dynamics page. In clear air, ``T = Π \, e / c^{p d}``, while during saturation adjustment with condensate ``q^{l}`` present the temperature satisfies
+
+```math
+T = \frac{Π \, e}{c^{p d}} + \frac{\mathcal{L}^{l}_{r}}{c^{p m}(q)} \, q^{l} ,
+```
+
+with ``q^{l} = \max(0, q^{t} - q^{v+}(T))`` and the saturation specific humidity ``q^{v+}(T)`` determined by Clausius–Clapeyron (see below). This expression is the basis of the residual solved for saturation adjustment in Breeze.
+
 ## Liquid-ice potential temperature
 
 ## The Clausius--Clapeyron relation and saturation specific humidity

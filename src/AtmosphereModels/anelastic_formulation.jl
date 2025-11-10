@@ -2,7 +2,6 @@ using ..Thermodynamics:
     MoistureMassFractions,
     ThermodynamicConstants,
     ReferenceState,
-    AnelasticThermodynamicState,
     mixture_gas_constant,
     mixture_heat_capacity,
     dry_air_gas_constant
@@ -41,8 +40,6 @@ end
 
 Base.show(io::IO, formulation::AnelasticFormulation) = print(io, "AnelasticFormulation")
 
-field_names(::AnelasticFormulation, tracer_names) = (:ρu, :ρv, :ρw, :ρe, :ρqᵗ, tracer_names...)
-
 function AnelasticFormulation(grid, state_constants, thermo)
     pᵣ = Field{Nothing, Nothing, Center}(grid)
     ρᵣ = Field{Nothing, Nothing, Center}(grid)
@@ -59,29 +56,23 @@ end
 
 function thermodynamic_state(i, j, k, grid, formulation::AnelasticFormulation, thermo, energy_density, moisture_density)
     @inbounds begin
-        e = energy_density[i, j, k]
-        pᵣ = formulation.reference_state.pressure[i, j, k]
+        ρe = energy_density[i, j, k]
         ρᵣ = formulation.reference_state.density[i, j, k]
+        pᵣ = formulation.reference_state.pressure[i, j, k]
         ρqᵗ = moisture_density[i, j, k]
     end
 
-    cᵖᵈ = thermo.dry_air.heat_capacity
-    θ = e / (cᵖᵈ * ρᵣ)
-
+    e = ρe / ρᵣ
     qᵗ = ρqᵗ / ρᵣ
     q = MoistureMassFractions(qᵗ, zero(qᵗ), zero(qᵗ)) # assuming non-condensed state
-    Rᵐ = mixture_gas_constant(q, thermo)
-    cᵖᵐ = mixture_heat_capacity(q, thermo)
+    z = znode(i, j, k, grid, c, c, c)
 
-    p₀ = formulation.reference_state.base_pressure
-    Π = (pᵣ / p₀)^(Rᵐ / cᵖᵐ)
-
-    return AnelasticThermodynamicState(θ, q, ρᵣ, pᵣ, Π)
+    return MoistStaticEnergyState(e, q, z, pᵣ)
 end
 
-@inline function specific_volume(i, j, k, grid, formulation, temperature, moisture_fraction, thermo)
+@inline function specific_volume(i, j, k, grid, formulation, temperature, moisture_mass_fraction, thermo)
     @inbounds begin
-        qᵗ = moisture_fraction[i, j, k]
+        qᵗ = moisture_mass_fraction[i, j, k]
         pᵣ = formulation.reference_state.pressure[i, j, k]
         T = temperature[i, j, k]
     end
@@ -112,12 +103,12 @@ function collect_prognostic_fields(::AnelasticFormulation,
                                    momentum,
                                    energy_density,
                                    moisture_density,
-                                   condensates,
+                                   microphysical_fields,
                                    tracers)
 
     thermodynamic_variables = (ρe=energy_density, ρqᵗ=moisture_density)
 
-    return merge(momentum, thermodynamic_variables, condensates, tracers)
+    return merge(momentum, thermodynamic_variables, microphysical_fields, tracers)
 end
 
 function materialize_momentum_and_velocities(formulation::AnelasticFormulation, grid, boundary_conditions)
