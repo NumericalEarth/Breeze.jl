@@ -3,8 +3,8 @@
 #####
 
 using ..Thermodynamics:
-    MoistStaticEnergyState,
-    mixture_heat_capacity
+    AbstractThermodynamicState,
+    temperature
 
 prognostic_field_names(::Nothing) = tuple()
 materialize_microphysical_fields(microphysics, grid, bcs) = NamedTuple()
@@ -18,11 +18,9 @@ Return the temperature associated with the thermodynamic `state`,
 """
 function compute_temperature(state, microphysics, thermo) end
 
-@inline compute_thermodynamic_state(state::Union{MoistStaticEnergyState, PotentialTemperatureState},
-                                    ::Nothing, thermo) = state
+@inline compute_thermodynamic_state(state::AbstractThermodynamicState, ::Nothing, thermo) = state
 
-@inline function compute_temperature(𝒰₀::Union{MoistStaticEnergyState, PotentialTemperatureState},
-                                     microphysics, thermo)
+@inline function compute_temperature(𝒰₀::AbstractThermodynamicState, microphysics, thermo)
     𝒰₁ = compute_thermodynamic_state(𝒰₀, microphysics, thermo)
     return temperature(𝒰₁, thermo)
 end

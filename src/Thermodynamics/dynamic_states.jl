@@ -1,4 +1,6 @@
-struct PotentialTemperatureState{FT}
+abstract type AbstractThermodynamicState{FT} end
+
+struct PotentialTemperatureState{FT} <: AbstractThermodynamicState{FT}
     potential_temperature :: FT
     moisture_mass_fractions :: MoistureMassFractions{FT}
     height :: FT
@@ -6,6 +8,8 @@ struct PotentialTemperatureState{FT}
     reference_pressure :: FT
     reference_density :: FT
 end
+
+@inline is_absolute_zero(𝒰::PotentialTemperatureState) = 𝒰.potential_temperature == 0
 
 @inline function exner_function(𝒰::PotentialTemperatureState, thermo::ThermodynamicConstants)
     q = 𝒰.moisture_mass_fractions
@@ -47,7 +51,7 @@ end
 ##### Moist static energy state (for microphysics interfaces)
 #####
 
-struct MoistStaticEnergyState{FT}
+struct MoistStaticEnergyState{FT} <: AbstractThermodynamicState{FT}
     moist_static_energy :: FT
     moisture_mass_fractions :: MoistureMassFractions{FT}
     height :: FT
@@ -56,6 +60,7 @@ end
 
 @inline Base.eltype(::MoistStaticEnergyState{FT}) where FT = FT
 @inline total_moisture_mass_fraction(state::MoistStaticEnergyState) = total_moisture_mass_fraction(state.moisture_mass_fractions)
+@inline is_absolute_zero(𝒰::MoistStaticEnergyState) = 𝒰.moist_static_energy == 0
 
 @inline function with_moisture(𝒰::MoistStaticEnergyState, q::MoistureMassFractions)
     return MoistStaticEnergyState(𝒰.moist_static_energy, q, 𝒰.height, 𝒰.reference_pressure)

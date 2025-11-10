@@ -13,8 +13,7 @@ using ..Thermodynamics:
     temperature,
     with_moisture,
     total_moisture_mass_fraction,
-    MoistStaticEnergyState,
-    PotentialTemperatureState
+    AbstractThermodynamicState
 
 using Oceananigans: Oceananigans, CenterField
 using DocStringExtensions: TYPEDSIGNATURES
@@ -29,8 +28,7 @@ import ..AtmosphereModels:
     WarmPhaseSaturationAdjustment(reference_state, thermodynamics)
 
 Simple warm-phase saturation adjustment microphysics that computes temperature
-via a saturation adjustment similar to MoistAirBuoyancy, adapted for the
-anelastic thermodynamic state used in AtmosphereModel.
+via a saturation adjustment.
 """
 struct WarmPhaseSaturationAdjustment{FT}
     tolerance :: FT
@@ -60,7 +58,7 @@ end
 end
 
 #####
-##### Saturation adjustment utilities (copy-adapted from MoistAirBuoyancy)
+##### Saturation adjustment utilities
 #####
 
 @inline function adjustment_saturation_specific_humidity(T, pᵣ, qᵗ, thermo)
@@ -81,44 +79,26 @@ end
     return with_moisture(𝒰₀, q₁)
 end
 
-@inline function saturation_adjustment_residual(T, 𝒰::MoistStaticEnergyState, thermo)
-    e = 𝒰.moist_static_energy
-    g = thermo.gravitational_acceleration
-    z = 𝒰.height
-    ℒˡᵣ = thermo.liquid.reference_latent_heat
-    qᵗ = total_moisture_mass_fraction(𝒰)
-    pᵣ = 𝒰.reference_pressure
+@inline function saturation_adjustment_residual(T, 𝒰₀, thermo)
+    qᵗ = total_moisture_mass_fraction(𝒰₀)
+    pᵣ = 𝒰₀.reference_pressure
+
+    # Adjust the moisture and compute a new temperature
     qᵛ⁺ = adjustment_saturation_specific_humidity(T, pᵣ, qᵗ, thermo)
     qˡ = max(0, qᵗ - qᵛ⁺)
     q = MoistureMassFractions(qᵛ⁺, qˡ, zero(qˡ))
-    cᵖᵐ = mixture_heat_capacity(q, thermo)
+    𝒰₁ = with_moisture(𝒰₀, q)
+    T₁ = temperature(𝒰₁, thermo)
 
-    # e = cᵖᵐ * T + g * z - ℒˡᵣ * qˡ
-    return T - (e - g * z + ℒˡᵣ * qˡ) / cᵖᵐ
+    return T - T₁
 end
-
-@inline function saturation_adjustment_residual(T, 𝒰::PotentialTemperatureState, thermo)
-    Π = exner_function(𝒰, thermo)
-    q = 𝒰.moisture_mass_fractions
-    θ = 𝒰.potential_temperature
-    ℒˡᵣ = thermo.liquid.reference_latent_heat
-    cᵖᵐ = mixture_heat_capacity(q, thermo)
-    qˡ = q.liquid
-    θ = 𝒰.potential_temperature
-    return T - Π * θ - ℒˡᵣ * qˡ / cᵖᵐ 
-end
-
-is_absolute_zero(𝒰::MoistStaticEnergyState) = 𝒰.moist_static_energy == 0
-is_absolute_zero(𝒰::PotentialTemperatureState) = 𝒰.potential_temperature == 0
 
 """
 $(TYPEDSIGNATURES)
 
-Return the saturation-adjusted thermodynamic state using a secant iteration identical to
-that used in MoistAirBuoyancy, adapted to MoistStaticEnergyState.
+Return the saturation-adjusted thermodynamic state using a secant iteration.
 """
-@inline function compute_thermodynamic_state(𝒰₀::Union{MoistStaticEnergyState, PotentialTemperatureState},
-                                             microphysics::WarmPhaseSaturationAdjustment, thermo)
+@inline function compute_thermodynamic_state(𝒰₀::AbstractThermodynamicState, microphysics::WarmPhaseSaturationAdjustment, thermo)
     FT = eltype(𝒰₀)
     is_absolute_zero(𝒰₀) && return 𝒰₀
 
