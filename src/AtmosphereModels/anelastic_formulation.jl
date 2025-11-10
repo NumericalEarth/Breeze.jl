@@ -255,15 +255,6 @@ end
 ##### Fractional and time stepping
 #####
 
-"""
-$(TYPEDSIGNATURES)
-
-Update the predictor momentum (ρu, ρv, ρw) with the non-hydrostatic pressure via
-
-```math
-\\boldsymbol{\\rho u}^{n+1} = \\boldsymbol{\\rho u}^n - \\Delta t \\rho_r \\nabla \\left( \\alpha_r p_{nh} \\right)
-```
-"""
 @kernel function _pressure_correct_momentum!(M, grid, Δt, αᵣ_pₙ, ρᵣ)
     i, j, k = @index(Global, NTuple)
 
@@ -275,6 +266,15 @@ Update the predictor momentum (ρu, ρv, ρw) with the non-hydrostatic pressure 
     @inbounds M.ρw[i, j, k] -= ρᶠ * Δt * ∂zᶜᶜᶠ(i, j, k, grid, αᵣ_pₙ)
 end
 
+"""
+$(TYPEDSIGNATURES)
+
+Update the predictor momentum ``(ρu, ρv, ρw)`` with the non-hydrostatic pressure via
+
+```math
+(\\rho\\boldsymbol{u})^{n+1} = (\\rho\\boldsymbol{u})^n - \\Delta t \\rho_r \\boldsymbol{\\nabla} \\left( \\alpha_r p_{nh} \\right)
+```
+"""
 function make_pressure_correction!(model::AnelasticModel, Δt)
 
     launch!(model.architecture, model.grid, :xyz,
