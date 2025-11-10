@@ -134,6 +134,7 @@ drying = Field{Nothing, Nothing, Center}(grid)
 dqdt_bomex = AtmosphericProfilesLibrary.Bomex_dqtdt(FT)
 set!(drying, z -> dqdt_bomex(z))
 q_drying_forcing = Forcing(drying)
+# q_forcing = (q_drying_forcing, q_subsidence_forcing)
 q_forcing = (q_precip_forcing, q_drying_forcing, q_subsidence_forcing)
 
 Fθ_field = Field{Nothing, Nothing, Center}(grid)
@@ -142,11 +143,16 @@ set!(Fθ_field, z -> dTdt_bomex(1, z))
 θ_radiation_forcing = Forcing(Fθ_field)
 θ_forcing = (θ_radiation_forcing, θ_subsidence_forcing)
 
+model = AtmosphereModel(; grid, advection = WENO(order=5), coriolis)
+                        # forcing = (; q=q_forcing, u=u_forcing, v=v_forcing, θ=θ_forcing),
+                        #boundary_conditions = (θ=θ_bcs, qᵗ=qᵗ_bcs, u=u_bcs, v=v_bcs))
+#=
 model = NonhydrostaticModel(; grid, buoyancy, coriolis,
                             advection = WENO(order=5), 
                             tracers = (:θ, :qᵗ),
                             forcing = (; q=q_forcing, u=u_forcing, v=v_forcing, θ=θ_forcing),
                             boundary_conditions = (θ=θ_bcs, qᵗ=q_bcs, u=u_bcs, v=v_bcs))
+=#
 
 # Values for the initial perturbations can be found in Appendix B
 # of Siebesma et al 2003, 3rd paragraph
