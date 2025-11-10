@@ -1,5 +1,6 @@
 using ..Thermodynamics:
     MoistureMassFractions,
+    MoistStaticEnergyState,
     ThermodynamicConstants,
     ReferenceState,
     mixture_gas_constant,
