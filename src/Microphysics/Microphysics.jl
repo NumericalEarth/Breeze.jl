@@ -71,7 +71,7 @@ end
     return ϵᵈᵛ * (1 - qᵗ) * pᵛ⁺ / (pᵣ - pᵛ⁺)
 end
 
-@inline function adjust_state(𝒰₀::MoistStaticEnergyState, T, thermo)
+@inline function adjust_state(𝒰₀, T, thermo)
     pᵣ = 𝒰₀.reference_pressure
     qᵗ = total_moisture_mass_fraction(𝒰₀)
     qᵛ⁺ = adjustment_saturation_specific_humidity(T, pᵣ, qᵗ, thermo)
