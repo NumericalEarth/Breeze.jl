@@ -27,7 +27,6 @@ N² = g^2/(cᵖᵈ*T₀)           # Brunt–Väisälä frequency squared
 N  = sqrt(N²)
 β  = g/(Rᵈ*T₀)              # density scale parameter
 
-
 # Schär mountain parameters
 h₀ = 250                    # m   (use 25 m for strict linearity; 250 m for full case)
 a  = 5000                   # m   (Gaussian half-width parameter)
@@ -35,20 +34,66 @@ a  = 5000                   # m   (Gaussian half-width parameter)
 K  = 2*π/λ                  # rad m^-1
 
 #  grid configuration
-Nx, Nz = 200, 800
-L, H = 100kilometers, 20kilometers
+Nx, Nz = 200, 200
+L, H = 100kilometers, 29kilometers
 
+# Vertical grid stretching parameters, constant spacing (500 m) above 3 km
+z_transition = 3000.0  # m - transition height
+dz_top = 250.0  # m - constant spacing above 3 km
+
+# Calculate number of cells needed above transition
+Nz_top = ceil(Int, (H - z_transition) / dz_top)
+
+# Remaining cells for stretched region
+Nz_bottom = Nz - Nz_top
+
+# Geometric refinement up to z_transition,
+function stretched_bottom(nz::Int, H::Real, dz_top::Real)
+    nz == 0 && return [0.0, H]
+    if isapprox(H, nz * dz_top; atol=1e-12, rtol=1e-12)
+        dz = fill(H / nz, nz)
+    else
+        S(r) = dz_top * (1 - r^(-nz)) / (1 - r^(-1))      # total height for ratio r
+        lo, hi = 1.0, 2.0
+        while S(hi) > H
+            hi *= 2
+        end
+        for _ in 1:60
+            mid = (lo + hi) / 2
+            S(mid) > H ? (lo = mid) : (hi = mid)
+        end
+        r = (lo + hi) / 2
+        dz0 = dz_top / r^(nz - 1)
+        dz = [dz0 * r^(k - 1) for k in 1:nz]
+    end
+    z = Vector{Float64}(undef, nz + 1)
+    z[1] = 0.0
+    @inbounds for k in 1:nz
+        z[k + 1] = z[k] + dz[k]
+    end
+    return z
+end
+
+# Build stretched part below transition
+z_stretched = stretched_bottom(Nz_bottom, z_transition, dz_top)
+
+# Uniform part above transition
+z_uniform = collect(range(z_transition, H; length=Nz_top + 1))
+
+# Combine (avoid duplicate at transition)
+z_faces = vcat(z_stretched[1:end-1], z_uniform)
+
+# Set up the simulation doamin
 underlying_grid = RectilinearGrid(CPU(), size = (Nx, Nz), halo = (4, 4),
-                                  x = (-L, L), z = (0, H),
+                                  x = (-L, L), z = z_faces,
                                   topology = (Periodic, Flat, Bounded))
 
 # Define the mountain profile and immersed boundary grid
 hill(x) = h₀ * exp(-(x / a)^2) * cos(π * x / λ)^2
 grid = ImmersedBoundaryGrid(underlying_grid, PartialCellBottom(hill))
 
-
 # Rayleigh damping layer at the top of the domain
-damping_rate = 1/10 # relax fields on a 10 second time-scale
+damping_rate = 1/1 # relax fields on a 10 second time-scale
 top_mask = GaussianMask{:z}(center=grid.Lz, width=grid.Lz/2)
 sponge = Relaxation(rate=damping_rate, mask=top_mask)
 
@@ -61,7 +106,7 @@ set!(model, θ=θᵢ, u=U)
 
 # Time-stepping and simulation setup
 Δt = 6.0 # seconds
-stop_iteration = 600
+stop_iteration = 1800
 simulation = Simulation(model; Δt, stop_iteration, align_time_step=false)
 
 using Printf
@@ -147,26 +192,26 @@ end
 
 # Visualization
 using CairoMakie
-fig = Figure(size = (1600, 1200))
+fig = Figure()
 gb = fig[1, 1]
 
 xs = LinRange(-L, L, Nx)
-zs = LinRange(0, H, Nz+1)
+zs = z_faces#LinRange(0, H, Nz+1)
 
 ax1, hm = heatmap(gb[1,1], xs, zs, interior(model.velocities.w, :,1,:), colormap = :bwr, colorrange = (-1.0, 1.0))
 ax1.xlabel = "x [m]"
 ax1.ylabel = "z [m]"
-ax1.title = "Simulated w [m s⁻¹]"
+ax1.title = "Simulated w at 3-hr"
 ax1.limits = ((-30000., 30000.), (0, 10000.))
 
 
-xs = range(-30e3, 30e3; length=60)   # x ∈ [-30, 60] km
-zs = range(0.0, 10e3; length=100)     # z ∈ [0, 12] km
+xs = range(-30e3, 30e3; length=60)   # x ∈ [-30, 30] km
+zs = range(0.0, 10e3; length=40)     # z ∈ [0, 10] km
 w_analytical   = [w_linear(x, z) for z in zs, x in xs]
 ax2, hm2 = heatmap(gb[2,1], xs, zs, w_analytical', colormap = :bwr, colorrange = (-1.0, 1.0))
 ax2.xlabel = "x [m]"
 ax2.ylabel = "z [m]"
-ax2.title = "Linear Analytical w [m s⁻¹]"
+ax2.title = "Linear Analytical w"
 ax2.limits = ((-30000., 30000.), (0, 10000.))
 
 cb = Colorbar(gb[1:2, 2], hm, label = "w [m s⁻¹]")
