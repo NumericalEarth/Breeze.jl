@@ -63,7 +63,7 @@ qˡ ≡ \frac{ρˡ}{ρ} \qquad \text{and} \qquad qⁱ ≡ \frac{ρⁱ}{ρ} .
     A fifth super script ``t`` is used to denote "total".
     For example, ``qᵈ`` is the mass fraction of dry air, ``qᵛ`` is the mass fraction of vapor,
     ``qˡ`` is the mass fraction of liquid, ``qⁱ`` is the mass fraction of ice,
-    and 
+    and
 
     ```math
     qᵗ = qᵛ + qˡ + qⁱ
@@ -355,7 +355,7 @@ It's then convenient to introduce the "mixture" gas constant ``Rᵐ(qᵛ)`` such
 p = ρ Rᵐ T, \qquad \text{where} \qquad Rᵐ ≡ qᵈ Rᵈ + qᵛ Rᵛ .
 ```
 
-To illustrate, let's compute the mixture gas constant ``Rᵐ`` for air with a small amount of water vapor. 
+To illustrate, let's compute the mixture gas constant ``Rᵐ`` for air with a small amount of water vapor.
 The contribution of vapor increases ``Rᵐ`` above the dry air value:
 
 ```@example thermo
@@ -493,18 +493,18 @@ fig
 For moist air, a convenient thermodynamic invariant that couples temperature, composition, and height is the moist static energy (MSE),
 
 ```math
-e \equiv cᵖᵐ \, T + g z - Lˡᵣ \, qᵛ - Lⁱᵣ qⁱ,
+e ≡ cᵖᵐ \, T + g z - Lˡᵣ \, qᵛ - Lⁱᵣ qⁱ,
 ```
 
 !!! note "The alternative 'frozen moist static energy' variable"
 
-    An alternative, physically equivalent, definition of moist static energy used in atmospheric models such as the [Global System for Atmospheric Modeling (GSAM); see Neale et al., 2020, *JAMES*, 12, e2019MS002025](https://doi.org/10.1029/2019MS002025) is
+    An alternative, physically equivalent, definition of moist static energy used in atmospheric models such as the Global System for Atmospheric Modeling (GSAM) [Maxwell2020](@cite) is
 
     ```math
-    ẽ \equiv cᵖᵐ \, T + g z + Lˡᵣ \, qᵗ - Lᶠᵣ qⁱ
+    ẽ ≡ cᵖᵐ \, T + g z + Lˡᵣ \, qᵗ - Lᶠᵣ qⁱ
     ```
 
     ``e`` and ``ẽ`` are not the same, but they obey the same conservation equation provided that total moisture fraction is conserved,
-    or that ``D/Dt qᵗ = 0``.
+    or that ``\mathrm{D}qᵗ / \mathrm{D}t = 0``.
 
 ## Liquid-ice potential temperature
