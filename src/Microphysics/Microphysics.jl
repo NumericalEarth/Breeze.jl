@@ -64,7 +64,8 @@ end
     qᵗ = total_moisture_mass_fraction(𝒰₀)
     qᵛ⁺ = adjustment_saturation_specific_humidity(T, pᵣ, qᵗ, thermo)
     qˡ = max(0, qᵗ - qᵛ⁺)
-    q₁ = MoistureMassFractions(qᵛ⁺, qˡ, zero(qˡ))
+    qᵛ = qᵗ - qˡ
+    q₁ = MoistureMassFractions(qᵛ, qˡ, zero(qˡ))
     return with_moisture(𝒰₀, q₁)
 end
 
@@ -128,7 +129,7 @@ that used in MoistAirBuoyancy, adapted to MoistStaticEnergyState.
     δ = microphysics.tolerance
     iter = 0
 
-    while abs(T₂ - T₁) > δ
+    while abs(r₂) > δ
         # Compute slope
         ΔTΔr = (T₂ - T₁) / (r₂ - r₁)
 
@@ -144,7 +145,7 @@ that used in MoistAirBuoyancy, adapted to MoistStaticEnergyState.
         iter += 1
     end
 
-    return T₂ #, iter
+    return T₂
 end
 
 end # module Microphysics

@@ -1,19 +1,31 @@
 # [Warm-phase saturation adjustment](@id saturation_adjustment-section)
 
-Warm-phase saturation adjustment is a model for water droplet nucleation that assumes that water vapor in excess of the saturation specific humidity is instantaneously converted to liquid water.
+Warm-phase saturation adjustment is a model for water droplet nucleation that assumes that water vapor
+in excess of the saturation specific humidity is instantaneously converted to liquid water.
 Mixed-phase saturation adjustment is described by [Pressel2015](@citet).
 
-## Equilibrium expressions for moist static energy and saturation specific humidity
+## Moist static energy and total moisture mass fraction
 
-`Breeze.AtmosphereModel` uses moist static energy density ``ρ e`` as a prognostic variable.
-With warm-phase microphysics, the moist static energy ``e`` is defined
+The saturation adjustment solver (specific to our anelastic formulation) takes four inputs:
+    * moist static energy ``e``
+    * total moisture mass fraction ``qᵗ``
+    * height ``z``
+    * reference pressure ``pᵣ``
+
+Note that moist static energy density ``ρᵣ e`` and moisture density ``ρᵣ qᵗ``
+are prognostic variables for `Breeze.AtmosphereModel` when using `AnelasticFormulation`,
+where ``ρᵣ`` is the reference density.
+With warm-phase microphysics, the moist static energy ``e`` is related to temperature ``T``,
+height ``z``, and liquid mass fraction ``qˡ`` by
 
 ```math
 e \equiv cᵖᵐ \, T + g z - ℒˡᵣ qˡ ,
 ```
 
-where ``cᵖᵐ`` is the mixture heat capacity, ``T`` is temperature, ``g`` is gravitational acceleration,
-``z`` is height, ``ℒˡᵣ`` is the latent heat at the energy reference temperature, and ``qˡ`` is the liquid mass fraction.
+where ``cᵖᵐ`` is the mixture heat capacity, ``g`` is gravitational acceleration,
+and ``ℒˡᵣ`` is the latent heat at the energy reference temperature.
+
+## Equilibrium expressions for moist static energy and saturation specific humidity
 
 Saturation adjustment microphysics assumes that temperature and the moisture mass fractions
 instantaneously adjust to an equilibrium in which the specific humidity is equal to
@@ -77,7 +89,7 @@ using Breeze.Thermodynamics: saturation_specific_humidity
 thermo = ThermodynamicConstants()
 
 p = 101325.0
-T = 288.0
+T = 314.0
 Rᵈ = Breeze.Thermodynamics.dry_air_gas_constant(thermo)
 ρ = p / (Rᵈ * T)
 qᵛ⁺₀ = saturation_specific_humidity(T, ρ, thermo, thermo.liquid)
@@ -89,7 +101,8 @@ a carefully chosen moist air mass fraction,
 ```@example microphysics
 using Breeze.Microphysics: adjustment_saturation_specific_humidity
 
-qᵗ = 0.012   # [kg kg⁻¹] total specific humidity
+# qᵗ = 0.012   # [kg kg⁻¹] total specific humidity
+qᵗ = 0.05   # [kg kg⁻¹] total specific humidity
 qᵛ⁺ = Breeze.Microphysics.adjustment_saturation_specific_humidity(T, p, qᵗ, thermo)
 ```
 
@@ -126,7 +139,13 @@ microphysics = WarmPhaseSaturationAdjustment()
 
 q₀ = MoistureMassFractions(qᵗ, zero(qᵗ), zero(qᵗ))
 𝒰 = Breeze.Thermodynamics.MoistStaticEnergyState(e, q₀, z, p)
+T★, r₂ = compute_temperature(𝒰, microphysics, thermo)
+```
+
+```@example microphysics
+using Breeze.Microphysics: saturation_adjustment_residual
 T★ = compute_temperature(𝒰, microphysics, thermo)
+saturation_adjustment_residual(T★, 𝒰, thermo)
 ```
 
 The saturation adjustment solver is initialized with a guess corresponding
@@ -168,7 +187,8 @@ using Breeze.Microphysics: saturation_adjustment_residual
 using CairoMakie
 
 # T = 230:0.5:320
-T = 280:0.01:300
+#T = 280:0.01:330
+T = 310:0.01:320
 r = [saturation_adjustment_residual(Tʲ, 𝒰, thermo) for Tʲ in T]
 qᵛ⁺ = [adjustment_saturation_specific_humidity(Tʲ, p, qᵗ, thermo) for Tʲ in T]
 
@@ -176,7 +196,8 @@ fig = Figure()
 axr = Axis(fig[1, 1], xlabel="Temperature (K)", ylabel="Saturation adjustment residual (K)")
 axq = Axis(fig[2, 1], xlabel="Temperature (K)", ylabel="Estimated liquid fraction")
 lines!(axr, T, r)
-scatter!(axr, 288, 0, marker=:star5, markersize=30, color=:tomato)
+# scatter!(axr, 288, 0, marker=:star5, markersize=30, color=:tomato)
+scatter!(axr, 314, 0, marker=:star5, markersize=30, color=:tomato)
 
 lines!(axq, T, max.(0, qᵗ .- qᵛ⁺))
 
