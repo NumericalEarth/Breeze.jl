@@ -88,7 +88,7 @@ Pauluis, O. (2008). Thermodynamic consistency of the anelastic approximation for
 """
 function AtmosphereModel(grid;
                          clock = Clock(grid),
-                         thermodynamics = ThermodynamicConstants(eltype(grid)),
+                         thermodynamics = nothing,
                          formulation = default_formulation(grid, thermodynamics),
                          moisture_density = DefaultValue(),
                          tracers = tuple(),
@@ -101,6 +101,10 @@ function AtmosphereModel(grid;
 
     arch = grid.architecture
     tracers = tupleit(tracers) # supports tracers=:c keyword argument (for example)
+
+    if isnothing(thermodynamics)
+        thermodynamics = thermodyanmic_constants(formulation)
+    end
 
     hydrostatic_pressure_anomaly = CenterField(grid)
     nonhydrostatic_pressure = CenterField(grid)
