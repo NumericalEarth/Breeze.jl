@@ -56,22 +56,12 @@ julia> using Pkg; Pkg.instantiate()
 
 Now you are ready to run any of the examples!
 
-For instance,
+For instance, if you run
 
 ```julia
 julia> include("examples/free_convection.jl")
 ```
 
-produces
-
-https://github.com/user-attachments/assets/dc45d188-6c61-4eb5-95fb-9a51c6f99013
-
-If you run
-
-```julia
-julia> include("examples/thermal_bubble.jl")
-```
-
-but with 4x the spatial resolution you'll see:
+but after you tweak the spatial resolution of the grid to `size = (512, 512)`, you'll get
 
 https://github.com/user-attachments/assets/ef5eba54-9b36-4f22-a5ee-c0b6dc69a2d5
