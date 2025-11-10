@@ -49,8 +49,8 @@ where ``ρᵈ``, ``ρᵛ``, ``ρˡ``, and ``ρⁱ`` denote the density of dry ai
 We likewise define the _mass fractions_ of each component,
 
 ```math
-qᵈ ≡ \frac{ρᵈ}{ρ} \qquad \text{and} \qquad qᵛ ≡ \frac{ρᵛ}{ρ} \qquad \text{and} \qquad
-qˡ ≡ \frac{ρˡ}{ρ} \qquad \text{and} \qquad qⁱ ≡ \frac{ρⁱ}{ρ} .
+qᵈ ≡ \frac{ρᵈ}{ρ} , \qquad qᵛ ≡ \frac{ρᵛ}{ρ} , \qquad
+qˡ ≡ \frac{ρˡ}{ρ} , \qquad \text{and} \qquad qⁱ ≡ \frac{ρⁱ}{ρ} .
 ```
 
 !!! note "The significance of certain superscripts"
@@ -493,18 +493,19 @@ fig
 For moist air, a convenient thermodynamic invariant that couples temperature, composition, and height is the moist static energy (MSE),
 
 ```math
-e ≡ cᵖᵐ \, T + g z - Lˡᵣ \, qᵛ - Lⁱᵣ qⁱ,
+e ≡ cᵖᵐ \, T + g z - Lˡᵣ \, qᵛ - Lⁱᵣ qⁱ .
 ```
 
 !!! note "The alternative 'frozen moist static energy' variable"
 
-    An alternative, physically equivalent, definition of moist static energy used in atmospheric models such as the Global System for Atmospheric Modeling (GSAM) [Maxwell2020](@cite) is
+    An alternative, physically equivalent, definition of moist static energy used in atmospheric
+    models such as the Global System for Atmospheric Modeling (GSAM) [Maxwell2020](@cite) is
 
     ```math
-    ẽ ≡ cᵖᵐ \, T + g z + Lˡᵣ \, qᵗ - Lᶠᵣ qⁱ
+    ẽ ≡ cᵖᵐ \, T + g z + Lˡᵣ \, qᵗ - Lᶠᵣ qⁱ .
     ```
 
-    ``e`` and ``ẽ`` are not the same, but they obey the same conservation equation provided that total moisture fraction is conserved,
-    or that ``\mathrm{D}qᵗ / \mathrm{D}t = 0``.
+    ``e`` and ``ẽ`` are not the same, but they obey the same conservation equation provided
+    that total moisture fraction is conserved, or that ``\mathrm{D}qᵗ / \mathrm{D}t = 0``.
 
 ## Liquid-ice potential temperature
