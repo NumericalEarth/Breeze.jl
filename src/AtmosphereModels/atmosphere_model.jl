@@ -13,7 +13,6 @@ import Oceananigans.Advection: cell_advection_timescale
 
 using KernelAbstractions: @kernel, @index
 
- 
 materialize_density(formulation, grid) = CenterField(grid)
 
 struct DefaultValue end
@@ -50,6 +49,8 @@ mutable struct AtmosphereModel{Frm, Arc, Tst, Grd, Clk, Thm, Den, Mom, Eng, Moi,
     closure :: Cls
     diffusivity_fields :: Dif
 end
+
+default_formulation(grid, ::Nothing) = default_formulation(grid, ThermodynamicConstants())
 
 function default_formulation(grid, thermo)
     reference_state = ReferenceState(grid, thermo)
