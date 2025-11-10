@@ -32,7 +32,7 @@ Pkg.add("https://github.com/NumericalEarth/Breeze.jl.git")
 
 A basic free convection simulation with `AtmosphereModel`:
 
-```julia
+```@example intro
 using Breeze
 using Oceananigans.Units
 using CairoMakie
