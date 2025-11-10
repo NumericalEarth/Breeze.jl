@@ -29,6 +29,20 @@ end
                                      𝒰.reference_density)
 end
 
+@inline function temperature(𝒰::PotentialTemperatureState, thermo::ThermodynamicConstants)
+    θ = 𝒰.potential_temperature
+    Π = exner_function(𝒰, thermo)
+
+    q = 𝒰.moisture_mass_fractions
+    cᵖᵐ = mixture_heat_capacity(q, thermo)
+    ℒˡᵣ = thermo.liquid.reference_latent_heat
+    ℒⁱᵣ = thermo.ice.reference_latent_heat
+    qˡ = q.liquid
+    qⁱ = q.ice
+
+    return Π * θ + (ℒˡᵣ * qˡ + ℒⁱᵣ * qⁱ) / cᵖᵐ 
+end
+
 #####
 ##### Moist static energy state (for microphysics interfaces)
 #####
@@ -45,4 +59,21 @@ end
 
 @inline function with_moisture(𝒰::MoistStaticEnergyState, q::MoistureMassFractions)
     return MoistStaticEnergyState(𝒰.moist_static_energy, q, 𝒰.height, 𝒰.reference_pressure)
+end
+
+@inline function temperature(𝒰::MoistStaticEnergyState, thermo::ThermodynamicConstants)
+    e = 𝒰.moist_static_energy
+    q = 𝒰.moisture_mass_fractions
+    cᵖᵐ = mixture_heat_capacity(q, thermo)
+
+    g = thermo.gravitational_acceleration
+    z = 𝒰.height
+
+    ℒˡᵣ = thermo.liquid.reference_latent_heat
+    ℒⁱᵣ = thermo.ice.reference_latent_heat
+    qˡ = q.liquid
+    qⁱ = q.ice
+
+    # e = cᵖᵐ * T + g * z - ℒˡᵣ * qˡ - ℒⁱᵣ * qⁱ
+    return (e - g * z + ℒˡᵣ * qˡ + ℒⁱᵣ * qⁱ) / cᵖᵐ
 end

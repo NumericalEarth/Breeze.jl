@@ -6,8 +6,9 @@ using ..Thermodynamics:
     MoistStaticEnergyState,
     mixture_heat_capacity
 
-materialize_microphysical_fields(microphysics, grid, bcs) = NamedTuple()
 prognostic_field_names(::Nothing) = tuple()
+materialize_microphysical_fields(microphysics, grid, bcs) = NamedTuple()
+@inline update_microphysical_fields(microphysical_fields, ::Nothing, i, j, k, grid, 𝒰₁, thermo) = nothing
 
 """
 $(TYPEDSIGNATURES)
@@ -17,8 +18,9 @@ Return the temperature associated with the thermodynamic `state`,
 """
 function compute_temperature(state, microphysics, thermo) end
 
-@inline function compute_temperature(state::MoistStaticEnergyState, ::Nothing, thermo)
-    cᵖᵐ = mixture_heat_capacity(state.moisture_mass_fractions, thermo)
-    e = state.moist_static_energy
-    return e / cᵖᵐ
+@inline compute_thermodynamic_state(state::MoistStaticEnergyState, ::Nothing, thermo) = state
+
+@inline function compute_temperature(𝒰₀::MoistStaticEnergyState, microphysics, thermo)
+    𝒰₁ = compute_thermodynamic_state(𝒰₀, microphysics, thermo)
+    return temperature(𝒰₁, thermo)
 end

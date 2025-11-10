@@ -10,18 +10,20 @@ using ..Thermodynamics:
     saturation_vapor_pressure,
     saturation_specific_humidity,
     density,
+    temperature,
     with_moisture,
     total_moisture_mass_fraction,
-    MoistStaticEnergyState
+    MoistStaticEnergyState,
+    PotentialTemperatureState
 
-using Oceananigans: CenterField
+using Oceananigans: Oceananigans, CenterField
+using DocStringExtensions: TYPEDSIGNATURES
 
 import ..AtmosphereModels:
-    compute_temperature,
+    compute_thermodynamic_state,
+    update_microphysical_fields,
     prognostic_field_names,
     materialize_microphysical_fields
-
-using Oceananigans: Oceananigans
 
 """
     WarmPhaseSaturationAdjustment(reference_state, thermodynamics)
@@ -39,13 +41,23 @@ function WarmPhaseSaturationAdjustment(FT::DataType=Oceananigans.defaults.FloatT
     return WarmPhaseSaturationAdjustment(tolerance)
 end
 
+prognostic_field_names(::WarmPhaseSaturationAdjustment) = tuple()
+
 function materialize_microphysical_fields(microphysics::WarmPhaseSaturationAdjustment, grid, boundary_conditions)
-    liquid_density = CenterField(grid)
-    vapor_density = CenterField(grid)
-    return (; liquid_density, vapor_density)
+    liquid_mass_fraction = CenterField(grid)
+    specific_humidity = CenterField(grid)
+    return (; liquid_mass_fraction, specific_humidity)
 end
 
-prognostic_field_names(::WarmPhaseSaturationAdjustment) = tuple()
+@inline function update_microphysical_fields(microphysical_fields, ::WarmPhaseSaturationAdjustment, i, j, k, grid, 𝒰, thermo)
+    qˡ = microphysical_fields.liquid_mass_fraction
+    qᵛ = microphysical_fields.specific_humidity
+    @inbounds begin
+        qˡ[i, j, k] = 𝒰.moisture_mass_fractions.liquid
+        qᵛ[i, j, k] = 𝒰.moisture_mass_fractions.vapor
+    end
+    return nothing
+end
 
 #####
 ##### Saturation adjustment utilities (copy-adapted from MoistAirBuoyancy)
@@ -85,29 +97,41 @@ end
     return T - (e - g * z + ℒˡᵣ * qˡ) / cᵖᵐ
 end
 
-"""
-    compute_temperature(state::MoistStaticEnergyState, microphysics::WarmPhaseSaturationAdjustment)
+@inline function saturation_adjustment_residual(T, 𝒰::PotentialTemperatureState, thermo)
+    Π = exner_function(𝒰, thermo)
+    q = 𝒰.moisture_mass_fractions
+    θ = 𝒰.potential_temperature
+    ℒˡᵣ = thermo.liquid.reference_latent_heat
+    cᵖᵐ = mixture_heat_capacity(q, thermo)
+    qˡ = q.liquid
+    θ = 𝒰.potential_temperature
+    return T - Π * θ - ℒˡᵣ * qˡ / cᵖᵐ 
+end
 
-Return the saturation-adjusted temperature using a secant iteration identical to
+is_absolute_zero(𝒰::MoistStaticEnergyState) = 𝒰.moist_static_energy == 0
+is_absolute_zero(𝒰::PotentialTemperatureState) = 𝒰.potential_temperature == 0
+
+"""
+$(TYPEDSIGNATURES)
+
+Return the saturation-adjusted thermodynamic state using a secant iteration identical to
 that used in MoistAirBuoyancy, adapted to MoistStaticEnergyState.
 """
-@inline function compute_temperature(𝒰₀::MoistStaticEnergyState, microphysics::WarmPhaseSaturationAdjustment, thermo)
+@inline function compute_thermodynamic_state(𝒰₀::Union{MoistStaticEnergyState, PotentialTemperatureState},
+                                             microphysics::WarmPhaseSaturationAdjustment, thermo)
     FT = eltype(𝒰₀)
-    e = 𝒰₀.moist_static_energy
-    e == 0 && return zero(FT)
+    is_absolute_zero(𝒰₀) && return 𝒰₀
 
     # Unsaturated initial guess
     qᵗ = total_moisture_mass_fraction(𝒰₀)
     q₁ = MoistureMassFractions(qᵗ, zero(qᵗ), zero(qᵗ))
-    cᵖᵐ = mixture_heat_capacity(q₁, thermo)
-    g = thermo.gravitational_acceleration
-    z = 𝒰₀.height
-    T₁ = (e - g * z) / cᵖᵐ
+    𝒰₁ = with_moisture(𝒰₀, q₁)
+    T₁ = temperature(𝒰₁, thermo)
 
     pᵣ = 𝒰₀.reference_pressure
     ρ₁ = density(pᵣ, T₁, q₁, thermo)
     qᵛ⁺₁ = saturation_specific_humidity(T₁, ρ₁, thermo, thermo.liquid)
-    qᵗ <= qᵛ⁺₁ && return T₁
+    qᵗ <= qᵛ⁺₁ && return 𝒰₁
 
     # Re-initialize first guess assuming saturation
     𝒰₁ = with_moisture(𝒰₀, q₁)
@@ -145,7 +169,7 @@ that used in MoistAirBuoyancy, adapted to MoistStaticEnergyState.
         iter += 1
     end
 
-    return T₂
+    return 𝒰₂
 end
 
 end # module Microphysics
