@@ -30,13 +30,12 @@ Pkg.add("https://github.com/NumericalEarth/Breeze.jl.git")
 
 ## Quick Start
 
-A basic free convection simulation:
+A basic free convection simulation with `AtmosphereModel`:
 
 ```julia
-using Oceananigans
+using Breeze
 using Oceananigans.Units
 using CairoMakie
-using Breeze
 using Random: seed!
 
 # Fix the seed to generate the noise, for reproducible simulations.
