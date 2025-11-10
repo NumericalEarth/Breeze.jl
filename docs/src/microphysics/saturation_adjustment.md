@@ -139,7 +139,9 @@ Next we show that the saturation adjustment solver recovers the input temperatur
 by passing it an "unadjusted" moisture mass fraction into `compute_temperature`,
 
 ```@example microphysics
-using Breeze.Microphysics: WarmPhaseSaturationAdjustment, compute_temperature
+using Breeze.AtmosphereModels: compute_temperature
+using Breeze.Microphysics: WarmPhaseSaturationAdjustment
+
 microphysics = WarmPhaseSaturationAdjustment()
 
 q₀ = MoistureMassFractions(qᵗ, zero(qᵗ), zero(qᵗ))
@@ -261,7 +263,6 @@ but at varying heights:
 
 ```@example microphysics
 using Breeze
-using Breeze.AtmosphereModels: compute_temperature
 
 grid = RectilinearGrid(size=100, z=(0, 1e4), topology=(Flat, Flat, Bounded))
 thermo = ThermodynamicConstants()
