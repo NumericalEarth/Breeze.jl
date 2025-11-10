@@ -50,8 +50,6 @@ mutable struct AtmosphereModel{Frm, Arc, Tst, Grd, Clk, Thm, Den, Mom, Eng, Moi,
     diffusivity_fields :: Dif
 end
 
-default_formulation(grid, ::Nothing) = default_formulation(grid, ThermodynamicConstants())
-
 function default_formulation(grid, thermo)
     reference_state = ReferenceState(grid, thermo)
     return AnelasticFormulation(reference_state)
@@ -89,7 +87,7 @@ Pauluis, O. (2008). Thermodynamic consistency of the anelastic approximation for
 """
 function AtmosphereModel(grid;
                          clock = Clock(grid),
-                         thermodynamics = nothing,
+                         thermodynamics = ThermodynamicConstants(eltype(grid)),
                          formulation = default_formulation(grid, thermodynamics),
                          moisture_density = DefaultValue(),
                          tracers = tuple(),
@@ -102,10 +100,6 @@ function AtmosphereModel(grid;
 
     arch = grid.architecture
     tracers = tupleit(tracers) # supports tracers=:c keyword argument (for example)
-
-    if isnothing(thermodynamics)
-        thermodynamics = thermodyanmic_constants(formulation)
-    end
 
     hydrostatic_pressure_anomaly = CenterField(grid)
     nonhydrostatic_pressure = CenterField(grid)
