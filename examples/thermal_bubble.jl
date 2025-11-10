@@ -4,13 +4,15 @@
 # region of warm air) rising through a stably-stratified background.
 
 using Breeze
-using CairoMakie
+using Oceananigans.Units
+using Statistics
 using Printf
+using CairoMakie
 
 # ## A simple model on a RectilinearGrid
 
 grid = RectilinearGrid(CPU(); size = (128, 128), halo = (5, 5),
-                       x = (-10e3, 10e3), z = (-5e3, 5e3),
+                       x = (-10e3, 10e3), z = (0, 10e3),
                        topology = (Periodic, Flat, Bounded))
 
 advection = WENO(order=9)
@@ -28,9 +30,9 @@ N² = 1e-6
 g = model.thermodynamics.gravitational_acceleration
 dθdz = N² * θ₀ / g
 
-function θᵢ(x, z)
+function θᵢ(x, z; x₀=mean(xnodes(grid, Center())), z₀=0.3*grid.Lz)
     θ̄ = θ₀ + dθdz * z
-    r = sqrt(x^2 + z^2)
+    r = sqrt((x - x₀)^2 + (z - z₀)^2)
     θ′ = Δθ * max(0, 1 - r / r₀)
     return θ̄ + θ′
 end
@@ -54,7 +56,7 @@ fig
 
 # ## Simulation rising
 
-simulation = Simulation(model; Δt=2, stop_iteration=200)
+simulation = Simulation(model; Δt=2, stop_time=15minutes)
 conjure_time_step_wizard!(simulation, cfl=0.7)
 
 function progress(sim)
@@ -70,17 +72,16 @@ function progress(sim)
     return nothing
 end
 
-add_callback!(simulation, progress, IterationInterval(40))
+add_callback!(simulation, progress, TimeInterval(1minute))
 
 u, v, w = model.velocities
-ζ = ∂x(w) - ∂z(u)
 T = model.temperature
 
-outputs = merge(model.velocities, model.tracers, (; ζ, ρe′, ρe, T))
+outputs = merge(model.velocities, model.tracers, (; ρe′, ρe, T))
 
 filename = "thermal_bubble.jld2"
 writer = JLD2Writer(model, outputs; filename,
-                    schedule = IterationInterval(10),
+                    schedule = TimeInterval(10seconds),
                     overwrite_existing = true)
 
 simulation.output_writers[:jld2] = writer
@@ -89,8 +90,8 @@ run!(simulation)
 
 # ## Visualization
 #
-# Visualize the moist static energy perturbation and vertical velocity through
-# time, plus a final animation.
+# Visualize the moist static energy perturbation and the vertical velocity through
+# time and create an animation.
 
 @info "Creating visualization..."
 
@@ -104,8 +105,7 @@ fig = Figure(size = (800, 800), fontsize = 12)
 axρ = Axis(fig[1, 1], aspect=2, xlabel="x (m)", ylabel="z (m)", title="Energy perturbation ρe′ (J / kg)")
 axw = Axis(fig[2, 1], aspect=2, xlabel="x (m)", ylabel="z (m)", title="Vertical velocity w (m / s)")
 
-slider = Slider(fig[3, 1], range = 1:Nt, startvalue = 1)
-n = slider.value
+n = Observable(Nt)
 
 ρe′n = @lift ρe′t[$n]
 wn = @lift wt[$n]
@@ -122,7 +122,7 @@ hmw = heatmap!(axw, wn, colorrange = (-w_range, w_range), colormap = :balance)
 Colorbar(fig[1, 2], hmρ, label = "ρe′ (J/kg)", vertical = true)
 Colorbar(fig[2, 2], hmw, label = "w (m/s)", vertical = true)
 
-CairoMakie.record(fig, "thermal_bubble.mp4", 1:Nt, framerate = 10) do nn
+CairoMakie.record(fig, "thermal_bubble.mp4", 1:Nt, framerate = 12) do nn
     n[] = nn
 end
 nothing #hide
