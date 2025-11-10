@@ -18,6 +18,12 @@ Return the temperature associated with the thermodynamic `state`,
 """
 function compute_temperature(state, microphysics, thermo) end
 
+"""
+$(TYPEDSIGNATURES)
+
+Return a possibly adjusted thermodynamic state associated with the
+`microphysics` scheme and `thermo`dynamic constants.
+"""
 @inline compute_thermodynamic_state(state::AbstractThermodynamicState, ::Nothing, thermo) = state
 
 @inline function compute_temperature(𝒰₀::AbstractThermodynamicState, microphysics, thermo)
