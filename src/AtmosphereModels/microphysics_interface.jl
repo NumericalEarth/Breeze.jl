@@ -18,9 +18,11 @@ Return the temperature associated with the thermodynamic `state`,
 """
 function compute_temperature(state, microphysics, thermo) end
 
-@inline compute_thermodynamic_state(state::MoistStaticEnergyState, ::Nothing, thermo) = state
+@inline compute_thermodynamic_state(state::Union{MoistStaticEnergyState, PotentialTemperatureState},
+                                    ::Nothing, thermo) = state
 
-@inline function compute_temperature(𝒰₀::MoistStaticEnergyState, microphysics, thermo)
+@inline function compute_temperature(𝒰₀::Union{MoistStaticEnergyState, PotentialTemperatureState},
+                                     microphysics, thermo)
     𝒰₁ = compute_thermodynamic_state(𝒰₀, microphysics, thermo)
     return temperature(𝒰₁, thermo)
 end
