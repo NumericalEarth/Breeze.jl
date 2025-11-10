@@ -11,6 +11,7 @@ using ..Thermodynamics:
     saturation_specific_humidity,
     density,
     temperature,
+    is_absolute_zero,
     with_moisture,
     total_moisture_mass_fraction,
     AbstractThermodynamicState
