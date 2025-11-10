@@ -29,7 +29,7 @@ N² = 1e-6
 g = model.thermodynamics.gravitational_acceleration
 dθdz = N² * θ₀ / g
 
-function θᵢ(x, z; x₀=0, z₀=3e3)
+function θᵢ(x, z; x₀=mean(xnodes(grid, Center())), z₀=0.3*grid.Lz)
     θ̄ = θ₀ + dθdz * z
     r = sqrt((x - x₀)^2 + (z - z₀)^2)
     θ′ = Δθ * max(0, 1 - r / r₀)
