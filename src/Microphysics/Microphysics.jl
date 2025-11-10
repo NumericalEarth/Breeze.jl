@@ -21,7 +21,6 @@ import ..AtmosphereModels:
     prognostic_field_names,
     materialize_microphysical_fields
 
-using Adapt: Adapt, adapt
 using Oceananigans: Oceananigans
 
 """
