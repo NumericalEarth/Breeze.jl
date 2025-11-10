@@ -55,7 +55,7 @@ Q₀ = 1000 # heat flux in W / m²
 ρqᵗ_bcs = FieldBoundaryConditions(bottom=FluxBoundaryCondition(1e-2))
 
 advection = WENO()
-model = AtmosphereModel(; grid, advection, formulation, boundary_conditions = (ρe=ρe_bcs, ρqᵗ=ρqᵗ_bcs)))
+model = AtmosphereModel(; grid, advection, formulation, boundary_conditions = (ρe=ρe_bcs, ρqᵗ=ρqᵗ_bcs))
 
 Δθ = 2 # ᵒK
 Tₛ = reference_state.potential_temperature # K
