@@ -39,9 +39,9 @@ function set!(model::AtmosphereModel; enforce_mass_conservation=true, kw...)
             c = getproperty(model.tracers, name)
             set!(c, value)
         elseif name == :ρe
-            set!(model.energy, value)
+            set!(model.energy_density, value)
         elseif name == :ρqᵗ
-            set!(model.absolute_humidity, value)
+            set!(model.moisture_density, value)
         end
 
         # Setting diagnostic variables
@@ -53,16 +53,16 @@ function set!(model::AtmosphereModel; enforce_mass_conservation=true, kw...)
             arch = grid.architecture
             thermo = model.thermodynamics
             formulation = model.formulation
-            energy = model.energy
-            specific_humidity = model.specific_humidity
-            launch!(arch, grid, :xyz, _energy_from_potential_temperature!, energy, grid,
-                    θ, specific_humidity, formulation, thermo)
+            energy_density = model.energy_density
+            moisture_fraction = model.moisture_fraction
+            launch!(arch, grid, :xyz, _energy_from_potential_temperature!, energy_density, grid,
+                    θ, moisture_fraction, formulation, thermo)
 
         elseif name == :qᵗ
-            qᵗ = model.specific_humidity
+            qᵗ = model.moisture_fraction
             set!(qᵗ, value)
             ρᵣ = model.formulation.reference_state.density
-            ρqᵗ = model.absolute_humidity
+            ρqᵗ = model.moisture_density
             set!(ρqᵗ, ρᵣ * qᵗ)                
 
         elseif name ∈ (:u, :v, :w)
@@ -88,21 +88,21 @@ function set!(model::AtmosphereModel; enforce_mass_conservation=true, kw...)
         update_state!(model, compute_tendencies=false)
     end
 
-    fill_halo_regions!(model.energy)
+    fill_halo_regions!(model.energy_density)
 
     return nothing
 end
 
 @kernel function _energy_from_potential_temperature!(moist_static_energy, grid,
                                                      potential_temperature,
-                                                     specific_humidity,
+                                                     moisture_fraction,
                                                      formulation,
                                                      thermo)
     i, j, k = @index(Global, NTuple)
 
     @inbounds begin
         ρᵣ = formulation.reference_state.density[i, j, k]
-        qᵗ = specific_humidity[i, j, k]
+        qᵗ = moisture_fraction[i, j, k]
         pᵣ = formulation.reference_state.pressure[i, j, k]
         θ = potential_temperature[i, j, k]
     end

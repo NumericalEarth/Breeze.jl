@@ -142,7 +142,7 @@ Next we consider a reference state that does not exchange energy with its enviro
     of elucidation presently has a ``z`` dependent reference pressure ``pᵣ(z)``,
     density ``ρᵣ(z)``, and temperature ``Tᵣ(z)``.
     This reference state also has a _constant_ potential temperature
-    ``θᵣ``, which we attempt to clarify by writing ``θ₀`` (since it's constant,
+    ``θ₀``, which we attempt to clarify by writing ``θ₀`` (since it's constant,
     it has the same value at ``z=0`` as at any height).
     We apologize that our notation differs from the usual in which
     ``0`` subscripts indicate "reference" (🤔) and ``00`` (🫣) means ``z=0``.
@@ -169,7 +169,10 @@ temperature we get
 Thus
 
 ```math
-Tᵣ(z) = θ₀ \left ( \frac{pᵣ}{p₀} \right )^{R / cᵖ} = θ₀ \left ( 1 - \frac{g z}{cᵖ θ₀} \right ) ,
+\begin{align*}
+Tᵣ(z) & = θ₀ \left ( \frac{pᵣ}{p₀} \right )^{R / cᵖ} \\
+      & = θ₀ - \frac{g}{cᵖ} z,
+\end{align*}
 ```
 
 and
@@ -177,6 +180,9 @@ and
 ```math
 ρᵣ(z) = \frac{p₀}{Rᵈ θ₀} \left ( 1 - \frac{g z}{cᵖ θ₀} \right )^{cᵖ / R - 1} .
 ```
+
+The quantity ``g / cᵖ ≈ 9.76 \;\mathrm{K}\,\mathrm{km}^{-1}`` that appears above is also referred to as
+the "[dry adiabatic lapse rate](https://en.wikipedia.org/wiki/Lapse_rate)".
 
 ## An example of a dry reference state in Breeze
 
@@ -202,10 +208,10 @@ p₀ = reference_state.base_pressure
 θ₀ = reference_state.potential_temperature
 g = thermo.gravitational_acceleration
 
-# Verify that Tᵣ = θ₀ (1 - g z / (cᵖᵈ θ₀))
+# Verify that Tᵣ = θ₀ - (g / cᵖᵈ) * z
 z = KernelFunctionOperation{Center, Center, Center}(znode, grid, Center(), Center(), Center())
 Tᵣ₁ = Field(θ₀ * (pᵣ / p₀)^(Rᵈ / cᵖᵈ))
-Tᵣ₂ = Field(θ₀ * (1 - g * z / (cᵖᵈ * θ₀)))
+Tᵣ₂ = Field(θ₀ - (g / cᵖᵈ) * z)
 
 fig = Figure()
 
@@ -343,7 +349,7 @@ thermo = ThermodynamicConstants()
 
 T = collect(200:0.1:320)
 pᵛˡ⁺ = [saturation_vapor_pressure(Tⁱ, thermo, thermo.liquid) for Tⁱ in T]
-pᵛⁱ⁺ = [saturation_vapor_pressure(Tⁱ, thermo, thermo.solid) for Tⁱ in T]
+pᵛⁱ⁺ = [saturation_vapor_pressure(Tⁱ, thermo, thermo.ice) for Tⁱ in T]
 pᵛⁱ⁺[T .> thermo.triple_point_temperature] .= NaN
 
 using CairoMakie

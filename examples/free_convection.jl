@@ -13,10 +13,10 @@ p₀ = 101325 # Pa
 θ₀ = 288 # K
 buoyancy = Breeze.MoistAirBuoyancy(grid, base_pressure=p₀, reference_potential_temperature=θ₀)
 
-θᵣ = buoyancy.reference_state.potential_temperature
+θ₀ = buoyancy.reference_state.potential_temperature
 p₀ = buoyancy.reference_state.base_pressure
 Rᵈ = Breeze.Thermodynamics.dry_air_gas_constant(buoyancy.thermodynamics)
-ρ₀ = p₀ / (Rᵈ * θᵣ) # air density at z=0
+ρ₀ = p₀ / (Rᵈ * θ₀) # air density at z=0
 cₚ = buoyancy.thermodynamics.dry_air.heat_capacity
 Q₀ = 1000 # heat flux in W / m²
 Jθ = Q₀ / (ρ₀ * cₚ) # temperature flux

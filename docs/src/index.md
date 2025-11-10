@@ -41,11 +41,11 @@ Nx = Nz = 64
 Lz = 4 * 1024
 grid = RectilinearGrid(size=(Nx, Nz), x=(0, 2Lz), z=(0, Lz), topology=(Periodic, Flat, Bounded))
 
-p₀, θᵣ = 1e5, 288 # reference state parameters
-buoyancy = Breeze.MoistAirBuoyancy(grid, base_pressure=p₀, reference_potential_temperature=θᵣ)
+p₀, θ₀ = 1e5, 288 # reference state parameters
+buoyancy = Breeze.MoistAirBuoyancy(grid, base_pressure=p₀, reference_potential_temperature=θ₀)
 
 thermo = buoyancy.thermodynamics
-ρ₀ = Breeze.Thermodynamics.base_density(p₀, θᵣ, thermo)
+ρ₀ = Breeze.Thermodynamics.base_density(p₀, θ₀, thermo)
 cₚ = buoyancy.thermodynamics.dry_air.heat_capacity
 Q₀ = 1000 # heat flux in W / m²
 θ_bcs = FieldBoundaryConditions(bottom=FluxBoundaryCondition(Q₀ / (ρ₀ * cₚ)))
