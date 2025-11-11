@@ -7,8 +7,8 @@ using Test
     grid = RectilinearGrid(default_arch, FT; size=(8, 8, 8), x=(0, 1_000), y=(0, 1_000), z=(0, 1_000))
     thermo = ThermodynamicConstants(FT)
 
-    for p₀ in (101325, 100000)
-        for θ₀ in (288, 300)
+    for p₀ in (101325, 100000), θ₀ in (288, 300)
+        @testset let p₀ = p₀, θ₀ = θ₀
             reference_state = ReferenceState(grid, thermo, base_pressure=p₀, potential_temperature=θ₀)
             formulation = AnelasticFormulation(reference_state)
             model = AtmosphereModel(grid; thermodynamics=thermo, formulation)
