@@ -42,6 +42,7 @@ function compute_auxiliary_variables!(model)
     launch!(arch, grid, :xyz,
             _compute_auxiliary_thermodynamic_variables!,
             model.temperature,
+            model.moist_static_energy,
             model.moisture_mass_fraction,
             grid,
             model.thermodynamics,
@@ -73,6 +74,7 @@ end
 end
 
 @kernel function _compute_auxiliary_thermodynamic_variables!(temperature,
+                                                             moist_static_energy,
                                                              moisture_mass_fraction,
                                                              grid,
                                                              thermo,
@@ -83,12 +85,15 @@ end
     i, j, k = @index(Global, NTuple)
 
     𝒰 = thermodynamic_state(i, j, k, grid, formulation, thermo, energy_density, moisture_density)
-    @inbounds moisture_mass_fraction[i, j, k] = total_moisture_mass_fraction(𝒰)
-
-    # Compute temperature via microphysics interface (falls back to dry if nothing)
     T = compute_temperature(𝒰, microphysics, thermo)
 
-    @inbounds temperature[i, j, k] = T
+    @inbounds begin
+        temperature[i, j, k] = T
+        moisture_mass_fraction[i, j, k] = total_moisture_mass_fraction(𝒰)
+        ρe = energy_density[i, j, k]
+        ρᵣ = @inbounds formulation.reference_state.density[i, j, k]
+        moist_static_energy[i, j, k] = ρe / ρᵣ
+    end
 end
 
 function compute_tendencies!(model::AnelasticModel)
@@ -98,12 +103,17 @@ function compute_tendencies!(model::AnelasticModel)
     Gρv = model.timestepper.Gⁿ.ρv
     Gρw = model.timestepper.Gⁿ.ρw
 
+    model_fields = merge(fields(model), model.velocities, model.microphysical_fields,
+                         (e = model.moist_static_energy, qᵗ = model.moisture_mass_fraction)) 
+
     common_args = (model.advection,
                    model.velocities,
+                   model.closure,
+                   model.diffusivity_fields,
                    model.momentum,
                    model.coriolis,
                    model.clock,
-                   fields(model))
+                   model_fields)
 
     pₕ′ = model.hydrostatic_pressure_anomaly
     ρᵣ = model.formulation.reference_state.density
@@ -117,11 +127,12 @@ function compute_tendencies!(model::AnelasticModel)
     launch!(arch, grid, :xyz, compute_y_momentum_tendency!, Gρv, grid, v_args)
     launch!(arch, grid, :xyz, compute_z_momentum_tendency!, Gρw, grid, w_args)
 
-    scalar_args = (model.advection, model.velocities, model.clock, fields(model))
+    scalar_args = (ρᵣ, model.advection, model.velocities, model.closure, model.diffusivity_fields, model.clock, model_fields)
     Gρe = model.timestepper.Gⁿ.ρe
     ρe = model.energy_density
+    e = model.moist_static_energy
     Fρe = model.forcing.ρe
-    ρe_args = tuple(ρe, Fρe, scalar_args..., ρᵣ,
+    ρe_args = tuple(ρe, e, Fρe, scalar_args...,
                     model.formulation, model.temperature,
                     model.moisture_mass_fraction, model.thermodynamics, model.microphysical_fields, model.microphysics)
     launch!(arch, grid, :xyz, compute_moist_static_energy_tendency!, Gρe, grid, ρe_args)

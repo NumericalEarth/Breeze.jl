@@ -44,6 +44,9 @@ inline math, while the Unicode column shows the exact glyphs used in code.
 | ``p_n``                       | `pₙ`          | Nonhydrostatic pressure (projection/correction potential) |
 | ``\Delta t``                  | `Δt`          | Time step |
 | ``\Delta z``                  | `Δz`          | Vertical grid spacing |
+| ``\boldsymbol{\tau}``         | `τ`           | Kinematic subgrid/viscous stress tensor (per unit mass) |
+| ``\boldsymbol{\mathcal{T}}``  | `𝒯`           | Dynamic stress tensor used in anelastic momentum, ``\mathcal{T} = ρᵣ \, \tau`` |
+| ``\boldsymbol{J}``            | `J`           | Dynamic diffusive flux for scalars, ``\boldsymbol{J} = ρᵣ \, \boldsymbol{\tau}`` |
 
 Notes:
 - Reference-state quantities use a subscript ``r`` (e.g., ``p_r``, ``\rho_r``), following the Thermodynamics docs and code.

@@ -23,8 +23,8 @@ tupleit(t) = tuple(t)
 
 formulation_pressure_solver(formulation, grid) = nothing
 
-mutable struct AtmosphereModel{Frm, Arc, Tst, Grd, Clk, Thm, Den, Mom, Eng, Moi, Mfr,
-                               Tmp, Prs, Ppa, Sol, Vel, Trc, Adv, Cor, Frc, Mic, Cnd, Cls, Dif} <: AbstractModel{Tst, Arc}
+mutable struct AtmosphereModel{Frm, Arc, Tst, Grd, Clk, Thm, Den, Mom, Eng, Mse, Moi, Mfr,
+                               Tmp, Prs, Ppa, Sol, Vel, Trc, Adv, Cor, Frc, Mic, Cnd, Cls, Cfs} <: AbstractModel{Tst, Arc}
     architecture :: Arc
     grid :: Grd
     clock :: Clk
@@ -33,6 +33,7 @@ mutable struct AtmosphereModel{Frm, Arc, Tst, Grd, Clk, Thm, Den, Mom, Eng, Moi,
     density :: Den
     momentum :: Mom
     energy_density :: Eng
+    moist_static_energy :: Mse
     moisture_density :: Moi
     moisture_mass_fraction :: Mfr
     temperature :: Tmp
@@ -48,7 +49,7 @@ mutable struct AtmosphereModel{Frm, Arc, Tst, Grd, Clk, Thm, Den, Mom, Eng, Moi,
     microphysical_fields :: Cnd
     timestepper :: Tst
     closure :: Cls
-    diffusivity_fields :: Dif
+    diffusivity_fields :: Cfs
 end
 
 function default_formulation(grid, thermo)
@@ -96,6 +97,7 @@ function AtmosphereModel(grid;
                          boundary_conditions = NamedTuple(),
                          forcing = NamedTuple(),
                          advection = WENO(order=5),
+                         closure = nothing,
                          microphysics = nothing, # WarmPhaseSaturationAdjustment(),
                          timestepper = :RungeKutta3)
 
@@ -115,7 +117,7 @@ function AtmosphereModel(grid;
 
     density = materialize_density(formulation, grid)
     velocities, momentum = materialize_momentum_and_velocities(formulation, grid, boundary_conditions)
-    tracers = NamedTuple(n => CenterField(grid, boundary_conditions=boundary_conditions[n]) for name in tracers)
+    tracers = NamedTuple(n => CenterField(grid, boundary_conditions=boundary_conditions[n]) for n in tracers)
     microphysical_fields = materialize_microphysical_fields(microphysics, grid, boundary_conditions)
     advection = adapt_advection_order(advection, grid)
 
@@ -124,10 +126,11 @@ function AtmosphereModel(grid;
     end
 
     energy_density = CenterField(grid, boundary_conditions=boundary_conditions.ρe)
+    moist_static_energy = CenterField(grid) # e = ρe / ρᵣ (diagnostic per-mass energy)
     moisture_mass_fraction = CenterField(grid, boundary_conditions=boundary_conditions.ρqᵗ)
     temperature = CenterField(grid)
 
-    prognostic_microphysical_fields = NamedTuple(microphysics_fields[name] for name in prognostic_field_names(microphysics))
+    prognostic_microphysical_fields = NamedTuple(microphysical_fields[name] for name in prognostic_field_names(microphysics))
     prognostic_fields = collect_prognostic_fields(formulation,
                                                   density,
                                                   momentum,
@@ -140,7 +143,6 @@ function AtmosphereModel(grid;
     pressure_solver = formulation_pressure_solver(formulation, grid)
 
     # TODO: support these
-    closure = nothing
     diffusivity_fields = nothing
 
     model = AtmosphereModel(arch,
@@ -151,6 +153,7 @@ function AtmosphereModel(grid;
                             density,
                             momentum,
                             energy_density,
+                            moist_static_energy,
                             moisture_density,
                             moisture_mass_fraction,
                             temperature,
