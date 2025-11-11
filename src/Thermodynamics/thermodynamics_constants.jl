@@ -251,6 +251,8 @@ struct MoistureMassFractions{FT}
     ice :: FT
 end
 
+Base.zero(::Type{MoistureMassFractions{FT}}) where FT = MoistureMassFractions(zero(FT), zero(FT), zero(FT))
+
 function Base.summary(q::MoistureMassFractions{FT}) where FT
     return string("MoistureMassFractions{$FT}(vapor=", prettysummary(q.vapor),
                   ", liquid=", prettysummary(q.liquid), ", ice=", prettysummary(q.ice), ")")
