@@ -1,12 +1,12 @@
 """
-$(TYPEDSIGNATURES)
+    saturation_vapor_pressure(T, thermo, phase::CondensedPhase)
 
 Compute the [saturation vapor pressure](https://en.wikipedia.org/wiki/Vapor_pressure)
 ``pᵛ⁺`` over a surface labeled ``β`` (for example, a planar liquid surface, or curved ice surface)
 using the Clausius-Clapeyron relation,
 
 ```math
-dpᵛ⁺ / dT = pᵛ⁺ ℒᵝ(T) / (Rᵛ T^2) ,
+𝖽pᵛ⁺ / 𝖽T = pᵛ⁺ ℒᵝ(T) / (Rᵛ T^2) ,
 ```
 
 where the temperature-dependent latent heat of the surfaceis ``ℒᵝ(T)``.
@@ -97,7 +97,7 @@ end
 end
 
 """
-$(TYPEDSIGNATURES)
+    saturation_specific_humidity(T, ρ, thermo, phase::CondensedPhase)
 
 Compute the saturation specific humidity for a gas at temperature `T`, total
 density `ρ`, `thermo`dynamics, and over `surface` via:
