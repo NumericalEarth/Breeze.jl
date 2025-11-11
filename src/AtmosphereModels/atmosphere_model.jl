@@ -215,18 +215,12 @@ function atmosphere_model_forcing(prognostic_fields, model_fields; user_forcings
 
     model_field_names = keys(model_fields)
 
-    materialized = []
-    for (name, field) in pairs(prognostic_fields)
-        if name in keys(user_forcings)
-            forcing = regularize_forcing(user_forcings[name], field, name, model_field_names)
-        else
-            forcing = Returns(zero(eltype(field)))
-        end
-        push!(materialized, forcing)
-    end
+    materialized = Tuple(
+        name in keys(user_forcings) ? regularize_forcing(user_forcings[name], field, name, model_field_names) : Returns(zero(eltype(field))) for (name, field) in pairs(prognostic_fields)
+    )
 
     prognostic_names = keys(prognostic_fields)
-    forcings = NamedTuple{prognostic_names}(Tuple(materialized))
+    forcings = NamedTuple{prognostic_names}(materialized)
 
     return forcings
 end
