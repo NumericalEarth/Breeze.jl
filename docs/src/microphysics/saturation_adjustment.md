@@ -19,7 +19,7 @@ With warm-phase microphysics, the moist static energy ``e`` is related to temper
 height ``z``, and liquid mass fraction ``qˡ`` by
 
 ```math
-e \equiv cᵖᵐ \, T + g z - ℒˡᵣ qˡ ,
+e ≡ cᵖᵐ \, T + g z - ℒˡᵣ qˡ ,
 ```
 
 where ``cᵖᵐ`` is the mixture heat capacity, ``g`` is gravitational acceleration,
@@ -76,7 +76,7 @@ This expression can also be found in paper by [Pressel2015](@citet), equation (3
 We compute the saturation adjustment temperature by solving the nonlinear algebraic equation
 
 ```math
-0 = r(T) \equiv T - \frac{1}{cᵖᵐ} \left [ e - g z + ℒˡᵣ \max(0, qᵗ - qᵛ⁺) \right ] \,
+0 = r(T) ≡ T - \frac{1}{cᵖᵐ} \left [ e - g z + ℒˡᵣ \max(0, qᵗ - qᵛ⁺) \right ] \,
 ```
 
 where ``r`` is the "residual", using a secant method.
