@@ -235,17 +235,38 @@ const TC = ThermodynamicConstants
 ##### Mixtures of dry air with vapor, liquid, and ice
 #####
 
+"""
+$(TYPEDEF)
+
+A struct representing the moisture mass fractions of a moist air parcel.
+
+# Fields
+- `vapor`: the mass fraction of vapor
+- `liquid`: the mass fraction of liquid
+- `ice`: the mass fraction of ice
+"""
 struct MoistureMassFractions{FT}
     vapor :: FT
     liquid :: FT
     ice :: FT
 end
 
+function Base.summary(q::MoistureMassFractions{FT}) where FT
+    return string("MoistureMassFractions{$FT}(vapor=", prettysummary(q.vapor),
+                  ", liquid=", prettysummary(q.liquid), ", ice=", prettysummary(q.ice), ")")
+end
+
+function Base.show(io::IO, q::MoistureMassFractions{FT}) where FT
+    println(io, "MoistureMassFractions{$FT}: \n",
+                "├── vapor:  ", prettysummary(q.vapor), "\n",
+                "├── liquid: ", prettysummary(q.liquid), "\n",
+                "└── ice:    ", prettysummary(q.ice))
+end
+
 const MMF = MoistureMassFractions
 
 @inline total_moisture_mass_fraction(q::MMF) = q.vapor + q.liquid + q.ice
 @inline dry_air_mass_fraction(q::MMF) = 1 - total_moisture_mass_fraction(q)
-
 
 """
 $(TYPEDSIGNATURES)
