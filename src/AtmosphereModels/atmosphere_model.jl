@@ -1,4 +1,4 @@
-using ..Thermodynamics: ThermodynamicConstants, ReferenceState
+using ..Thermodynamics: Thermodynamics, ThermodynamicConstants, ReferenceState
 
 using Oceananigans: AbstractModel, Center, CenterField, Clock, Field
 using Oceananigans: WENO, XFaceField, YFaceField, ZFaceField
@@ -10,8 +10,6 @@ using Oceananigans.TimeSteppers: TimeStepper
 using Oceananigans.Utils: launch!, prettytime, prettykeys
 
 import Oceananigans.Advection: cell_advection_timescale
-
-using KernelAbstractions: @kernel, @index
 
 materialize_density(formulation, grid) = CenterField(grid)
 
