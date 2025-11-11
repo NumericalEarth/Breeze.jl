@@ -204,6 +204,15 @@ end
 
 function atmosphere_model_forcing(prognostic_fields, model_fields; user_forcings...)
 
+    user_forcing_names = keys(user_forcings)
+    for name in user_forcing_names
+        if name ∉ keys(prognostic_fields)
+            msg = string("Invalid forcing: forcing contains an entry for $name, but $name is not a prognostic field!", '\n',
+                         "The prognostic fields are ", keys(prognostic_fields))
+            throw(ArgumentError(msg))   
+        end
+    end
+
     model_field_names = keys(model_fields)
 
     materialized = []
@@ -215,7 +224,7 @@ function atmosphere_model_forcing(prognostic_fields, model_fields; user_forcings
         end
         push!(materialized, forcing)
     end
-        
+
     prognostic_names = keys(prognostic_fields)
     forcings = NamedTuple{prognostic_names}(Tuple(materialized))
 
