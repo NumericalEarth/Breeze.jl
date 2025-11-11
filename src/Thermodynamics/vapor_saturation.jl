@@ -1,5 +1,5 @@
 """
-    saturation_vapor_pressure(T, thermo, phase::CondensedPhase)
+$(TYPEDSIGNATURES)
 
 Compute the [saturation vapor pressure](https://en.wikipedia.org/wiki/Vapor_pressure)
 ``pᵛ⁺`` over a surface labeled ``β`` (for example, a planar liquid surface, or curved ice surface)
@@ -97,7 +97,7 @@ end
 end
 
 """
-    saturation_specific_humidity(T, ρ, thermo, phase::CondensedPhase)
+$(TYPEDSIGNATURES)
 
 Compute the saturation specific humidity for a gas at temperature `T`, total
 density `ρ`, `thermo`dynamics, and over `surface` via:
