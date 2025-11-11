@@ -45,7 +45,8 @@ can be expressed as the sum of the masses of the individual components over the 
 ρ = \frac{M}{V} = \frac{mᵈ + mᵛ + mˡ + mⁱ}{V} = ρᵈ + ρᵛ + ρˡ + ρⁱ
 ```
 
-where ``mᵈ``, ``mᵛ``, ``mˡ``, and ``mⁱ`` are the masses of dry air, vapor, liquid, and ice, respectively, while ``ρᵈ``, ``ρᵛ``, ``ρˡ``, and ``ρⁱ`` denote their _fractional densities_, which are the specific densities of the air components weighted by their respective _mass fractions_
+where ``mᵈ``, ``mᵛ``, ``mˡ``, and ``mⁱ`` are the masses of dry air, vapor, liquid, and ice, respectively, while ``ρᵈ``, ``ρᵛ``, ``ρˡ``, and ``ρⁱ`` denote their _fractional densities_.
+We likewise define the _mass fractions_ of each component,
 
 ```math
 qᵈ ≡ \frac{mᵈ}{M} = \frac{ρᵈ}{ρ} , \qquad qᵛ ≡ \frac{mᵛ}{M} = \frac{ρᵛ}{ρ} , \qquad
