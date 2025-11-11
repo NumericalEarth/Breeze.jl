@@ -113,7 +113,6 @@ required_tracers(::MoistAirBuoyancy) = (:θ, :qᵗ)
 
 const c = Center()
 
-
 @inline function buoyancy_perturbationᶜᶜᶜ(i, j, k, grid, mb::MoistAirBuoyancy, tracers)
     @inbounds begin
         pᵣ = mb.reference_state.pressure[i, j, k]
@@ -305,6 +304,8 @@ const c = Center()
 end
 
 struct TemperatureKernelFunction end
+const TemperatureOperation = KernelFunctionOperation{Center, Center, Center, <:Any, <:Any, <:TemperatureKernelFunction}
+const TemperatureField = Field{Center, Center, Center, <:TemperatureOperation}
 
 @inline (::TemperatureKernelFunction)(i, j, k, grid, buoyancy, θ, qᵗ) =
     temperature(i, j, k, grid, buoyancy, θ, qᵗ)

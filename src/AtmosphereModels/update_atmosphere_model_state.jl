@@ -1,4 +1,5 @@
 using ..Thermodynamics:
+    Thermodynamics,
     total_moisture_mass_fraction,
     mixture_heat_capacity,
     mixture_gas_constant
@@ -15,7 +16,10 @@ const AnelasticModel = AtmosphereModel{<:AnelasticFormulation}
 
 function prognostic_fields(model::AnelasticModel)
     thermodynamic_fields = (ρe=model.energy_density, ρqᵗ=model.moisture_density)
-    return merge(model.momentum, thermodynamic_fields, model.microphysical_fields, model.tracers)
+    μphys = model.microphysics
+    μfields = model.microphysical_fields
+    prognostic_microphysical_fields = NamedTuple(μfields[name] for name in prognostic_field_names(μphys))
+    return merge(model.momentum, thermodynamic_fields, prognostic_microphysical_fields, model.tracers)
 end
 
 fields(model::AnelasticModel) = prognostic_fields(model)
@@ -47,6 +51,7 @@ function compute_auxiliary_variables!(model)
             model.thermodynamics,
             formulation,
             model.microphysics,
+            model.microphysical_fields,
             model.energy_density,
             model.moisture_density)
 
@@ -78,17 +83,18 @@ end
                                                              thermo,
                                                              formulation,
                                                              microphysics,
+                                                             microphysical_fields,
                                                              energy_density,
                                                              moisture_density)
     i, j, k = @index(Global, NTuple)
 
-    𝒰 = thermodynamic_state(i, j, k, grid, formulation, thermo, energy_density, moisture_density)
-    @inbounds moisture_mass_fraction[i, j, k] = total_moisture_mass_fraction(𝒰)
+    𝒰₀ = diagnose_thermodynamic_state(i, j, k, grid, formulation, thermo, energy_density, moisture_density)
+    @inbounds moisture_mass_fraction[i, j, k] = total_moisture_mass_fraction(𝒰₀)
 
     # Compute temperature via microphysics interface (falls back to dry if nothing)
-    T = compute_temperature(𝒰, microphysics, thermo)
-
-    @inbounds temperature[i, j, k] = T
+    𝒰₁ = compute_thermodynamic_state(𝒰₀, microphysics, thermo)
+    @inbounds temperature[i, j, k] = Thermodynamics.temperature(𝒰₁, thermo)
+    update_microphysical_fields!(microphysical_fields, microphysics, i, j, k, grid, 𝒰₁, thermo)
 end
 
 function compute_tendencies!(model::AnelasticModel)
@@ -168,7 +174,7 @@ Apply boundary conditions by adding flux divergences to the right-hand-side.
 """
 function compute_flux_bc_tendencies!(model::AtmosphereModel)
 
-    Gⁿ    = model.timestepper.Gⁿ
+    Gⁿ = model.timestepper.Gⁿ
     arch  = model.architecture
 
     # Compute boundary flux contributions
@@ -176,6 +182,7 @@ function compute_flux_bc_tendencies!(model::AtmosphereModel)
     args = (arch, model.clock, fields(model))
     field_indices = 1:length(prognostic_model_fields)
     Gⁿ = model.timestepper.Gⁿ
+
     foreach(q -> compute_x_bcs!(Gⁿ[q], prognostic_model_fields[q], args...), field_indices)
     foreach(q -> compute_y_bcs!(Gⁿ[q], prognostic_model_fields[q], args...), field_indices)
     foreach(q -> compute_z_bcs!(Gⁿ[q], prognostic_model_fields[q], args...), field_indices)
