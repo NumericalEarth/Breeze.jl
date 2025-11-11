@@ -499,7 +499,7 @@ e ≡ cᵖᵐ \, T + g z - Lˡᵣ \, qᵛ - Lⁱᵣ qⁱ .
 !!! note "The alternative 'frozen moist static energy' variable"
 
     An alternative, physically equivalent, definition of moist static energy used in atmospheric
-    models such as the Global System for Atmospheric Modeling (GSAM) [Maxwell2020](@cite) is
+    models such as the Global System for Atmospheric Modeling (GSAM) [Khairoutdinov2022](@cite) is
 
     ```math
     ẽ ≡ cᵖᵐ \, T + g z + Lˡᵣ \, qᵗ - Lᶠᵣ qⁱ .
