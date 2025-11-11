@@ -76,10 +76,11 @@ struct PlanarMixedPhaseSurface{FT}
     liquid_fraction :: FT
 end
 
-@inline specific_heat_difference(thermo, ::PlanarIceSurface) = specific_heat_difference(thermo, thermo.ice)
-@inline absolute_zero_latent_heat(thermo, ::PlanarIceSurface) = absolute_zero_latent_heat(thermo, thermo.ice)
-@inline absolute_zero_latent_heat(thermo, ::PlanarLiquidSurface) = absolute_zero_latent_heat(thermo, thermo.liquid)
 @inline specific_heat_difference(thermo, ::PlanarLiquidSurface) = specific_heat_difference(thermo, thermo.liquid)
+@inline specific_heat_difference(thermo, ::PlanarIceSurface) = specific_heat_difference(thermo, thermo.ice)
+@inline absolute_zero_latent_heat(thermo, ::PlanarLiquidSurface) = absolute_zero_latent_heat(thermo, thermo.liquid)
+@inline absolute_zero_latent_heat(thermo, ::PlanarIceSurface) = absolute_zero_latent_heat(thermo, thermo.ice)
+
 
 @inline function specific_heat_difference(thermo, surf::PlanarMixedPhaseSurface)
     Δcˡ = specific_heat_difference(thermo, thermo.liquid)
