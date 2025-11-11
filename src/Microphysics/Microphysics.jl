@@ -10,25 +10,27 @@ using ..Thermodynamics:
     saturation_vapor_pressure,
     saturation_specific_humidity,
     density,
+    temperature,
+    is_absolute_zero,
     with_moisture,
     total_moisture_mass_fraction,
-    MoistStaticEnergyState
+    AbstractThermodynamicState
 
-using Oceananigans: CenterField
+using Oceananigans: Oceananigans, CenterField
+using DocStringExtensions: TYPEDSIGNATURES
 
 import ..AtmosphereModels:
-    compute_temperature,
+    compute_thermodynamic_state,
+    update_microphysical_fields!,
     prognostic_field_names,
-    materialize_microphysical_fields
-
-using Oceananigans: Oceananigans
+    materialize_microphysical_fields,
+    moisture_mass_fractions
 
 """
     WarmPhaseSaturationAdjustment(reference_state, thermodynamics)
 
 Simple warm-phase saturation adjustment microphysics that computes temperature
-via a saturation adjustment similar to MoistAirBuoyancy, adapted for the
-anelastic thermodynamic state used in AtmosphereModel.
+via a saturation adjustment.
 """
 struct WarmPhaseSaturationAdjustment{FT}
     tolerance :: FT
@@ -39,16 +41,26 @@ function WarmPhaseSaturationAdjustment(FT::DataType=Oceananigans.defaults.FloatT
     return WarmPhaseSaturationAdjustment(tolerance)
 end
 
-function materialize_microphysical_fields(microphysics::WarmPhaseSaturationAdjustment, grid, boundary_conditions)
-    liquid_density = CenterField(grid)
-    vapor_density = CenterField(grid)
-    return (; liquid_density, vapor_density)
-end
-
 prognostic_field_names(::WarmPhaseSaturationAdjustment) = tuple()
 
+function materialize_microphysical_fields(microphysics::WarmPhaseSaturationAdjustment, grid, boundary_conditions)
+    liquid_mass_fraction = CenterField(grid)
+    specific_humidity = CenterField(grid)
+    return (; liquid_mass_fraction, specific_humidity)
+end
+
+@inline function update_microphysical_fields!(microphysical_fields, ::WarmPhaseSaturationAdjustment, i, j, k, grid, 𝒰, thermo)
+    qˡ = microphysical_fields.liquid_mass_fraction
+    qᵛ = microphysical_fields.specific_humidity
+    @inbounds begin
+        qˡ[i, j, k] = 𝒰.moisture_mass_fractions.liquid
+        qᵛ[i, j, k] = 𝒰.moisture_mass_fractions.vapor
+    end
+    return nothing
+end
+
 #####
-##### Saturation adjustment utilities (copy-adapted from MoistAirBuoyancy)
+##### Saturation adjustment utilities
 #####
 
 @inline function adjustment_saturation_specific_humidity(T, pᵣ, qᵗ, thermo)
@@ -59,7 +71,7 @@ prognostic_field_names(::WarmPhaseSaturationAdjustment) = tuple()
     return ϵᵈᵛ * (1 - qᵗ) * pᵛ⁺ / (pᵣ - pᵛ⁺)
 end
 
-@inline function adjust_state(𝒰₀::MoistStaticEnergyState, T, thermo)
+@inline function adjust_state(𝒰₀, T, thermo)
     pᵣ = 𝒰₀.reference_pressure
     qᵗ = total_moisture_mass_fraction(𝒰₀)
     qᵛ⁺ = adjustment_saturation_specific_humidity(T, pᵣ, qᵗ, thermo)
@@ -69,45 +81,39 @@ end
     return with_moisture(𝒰₀, q₁)
 end
 
-@inline function saturation_adjustment_residual(T, 𝒰::MoistStaticEnergyState, thermo)
-    e = 𝒰.moist_static_energy
-    g = thermo.gravitational_acceleration
-    z = 𝒰.height
-    ℒˡᵣ = thermo.liquid.reference_latent_heat
-    qᵗ = total_moisture_mass_fraction(𝒰)
-    pᵣ = 𝒰.reference_pressure
+@inline function saturation_adjustment_residual(T, 𝒰₀, thermo)
+    qᵗ = total_moisture_mass_fraction(𝒰₀)
+    pᵣ = 𝒰₀.reference_pressure
+
+    # Adjust the moisture and compute a new temperature
     qᵛ⁺ = adjustment_saturation_specific_humidity(T, pᵣ, qᵗ, thermo)
     qˡ = max(0, qᵗ - qᵛ⁺)
     q = MoistureMassFractions(qᵛ⁺, qˡ, zero(qˡ))
-    cᵖᵐ = mixture_heat_capacity(q, thermo)
+    𝒰₁ = with_moisture(𝒰₀, q)
+    T₁ = temperature(𝒰₁, thermo)
 
-    # e = cᵖᵐ * T + g * z - ℒˡᵣ * qˡ
-    return T - (e - g * z + ℒˡᵣ * qˡ) / cᵖᵐ
+    return T - T₁
 end
 
 """
-    compute_temperature(state::MoistStaticEnergyState, microphysics::WarmPhaseSaturationAdjustment)
+$(TYPEDSIGNATURES)
 
-Return the saturation-adjusted temperature using a secant iteration identical to
-that used in MoistAirBuoyancy, adapted to MoistStaticEnergyState.
+Return the saturation-adjusted thermodynamic state using a secant iteration.
 """
-@inline function compute_temperature(𝒰₀::MoistStaticEnergyState, microphysics::WarmPhaseSaturationAdjustment, thermo)
+@inline function compute_thermodynamic_state(𝒰₀::AbstractThermodynamicState, microphysics::WarmPhaseSaturationAdjustment, thermo)
     FT = eltype(𝒰₀)
-    e = 𝒰₀.moist_static_energy
-    e == 0 && return zero(FT)
+    is_absolute_zero(𝒰₀) && return 𝒰₀
 
     # Unsaturated initial guess
     qᵗ = total_moisture_mass_fraction(𝒰₀)
     q₁ = MoistureMassFractions(qᵗ, zero(qᵗ), zero(qᵗ))
-    cᵖᵐ = mixture_heat_capacity(q₁, thermo)
-    g = thermo.gravitational_acceleration
-    z = 𝒰₀.height
-    T₁ = (e - g * z) / cᵖᵐ
+    𝒰₁ = with_moisture(𝒰₀, q₁)
+    T₁ = temperature(𝒰₁, thermo)
 
     pᵣ = 𝒰₀.reference_pressure
     ρ₁ = density(pᵣ, T₁, q₁, thermo)
     qᵛ⁺₁ = saturation_specific_humidity(T₁, ρ₁, thermo, thermo.liquid)
-    qᵗ <= qᵛ⁺₁ && return T₁
+    qᵗ <= qᵛ⁺₁ && return 𝒰₁
 
     # Re-initialize first guess assuming saturation
     𝒰₁ = with_moisture(𝒰₀, q₁)
@@ -145,7 +151,18 @@ that used in MoistAirBuoyancy, adapted to MoistStaticEnergyState.
         iter += 1
     end
 
-    return T₂
+    return 𝒰₂
+end
+
+@inline function moisture_mass_fractions(i, j, k, grid,
+                                         ::WarmPhaseSaturationAdjustment,
+                                         microphysical_fields,
+                                         moisture_mass_fraction)
+    @inbounds begin
+        qᵛ = microphysical_fields.specific_humidity[i, j, k]
+        qˡ = microphysical_fields.liquid_mass_fraction[i, j, k]
+    end
+    return MoistureMassFractions(qᵛ, qˡ, zero(qᵛ))
 end
 
 end # module Microphysics

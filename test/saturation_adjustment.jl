@@ -14,9 +14,10 @@ using Breeze.Thermodynamics:
     mixture_heat_capacity
 
 using Breeze.MoistAirBuoyancies: compute_boussinesq_adjustment_temperature
+using Breeze.AtmosphereModels: compute_temperature
+
 using Breeze.Microphysics:
     WarmPhaseSaturationAdjustment,
-    compute_temperature,
     adjustment_saturation_specific_humidity
 
 @testset "Saturation adjustment (AtmosphereModel) [$(FT)]" for FT in (Float32, Float64)
@@ -30,7 +31,7 @@ using Breeze.Microphysics:
     # Sample a single cell
     pᵣ = @allowscalar first(reference_state.pressure)
     g = thermo.gravitational_acceleration
-    z = FT(1/2)
+    z = zero(FT)
 
     # First test: absolute zero
     q₀ = MoistureMassFractions(zero(FT), zero(FT), zero(FT))

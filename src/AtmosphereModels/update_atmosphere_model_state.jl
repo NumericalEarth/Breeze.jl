@@ -1,4 +1,5 @@
 using ..Thermodynamics:
+    Thermodynamics,
     total_moisture_mass_fraction,
     mixture_heat_capacity,
     mixture_gas_constant
@@ -15,7 +16,10 @@ const AnelasticModel = AtmosphereModel{<:AnelasticFormulation}
 
 function prognostic_fields(model::AnelasticModel)
     thermodynamic_fields = (ρe=model.energy_density, ρqᵗ=model.moisture_density)
-    return merge(model.momentum, thermodynamic_fields, model.microphysical_fields, model.tracers)
+    μphys = model.microphysics
+    μfields = model.microphysical_fields
+    prognostic_microphysical_fields = NamedTuple(μfields[name] for name in prognostic_field_names(μphys))
+    return merge(model.momentum, thermodynamic_fields, prognostic_microphysical_fields, model.tracers)
 end
 
 fields(model::AnelasticModel) = prognostic_fields(model)
@@ -48,6 +52,7 @@ function compute_auxiliary_variables!(model)
             model.thermodynamics,
             formulation,
             model.microphysics,
+            model.microphysical_fields,
             model.energy_density,
             model.moisture_density)
 
@@ -80,6 +85,7 @@ end
                                                              thermo,
                                                              formulation,
                                                              microphysics,
+                                                             microphysical_fields,
                                                              energy_density,
                                                              moisture_density)
     i, j, k = @index(Global, NTuple)
@@ -94,6 +100,8 @@ end
         ρᵣ = @inbounds formulation.reference_state.density[i, j, k]
         moist_static_energy[i, j, k] = ρe / ρᵣ
     end
+  
+    update_microphysical_fields!(microphysical_fields, microphysics, i, j, k, grid, 𝒰, thermo)
 end
 
 function compute_tendencies!(model::AnelasticModel)
@@ -179,7 +187,7 @@ Apply boundary conditions by adding flux divergences to the right-hand-side.
 """
 function compute_flux_bc_tendencies!(model::AtmosphereModel)
 
-    Gⁿ    = model.timestepper.Gⁿ
+    Gⁿ = model.timestepper.Gⁿ
     arch  = model.architecture
 
     # Compute boundary flux contributions
@@ -187,6 +195,7 @@ function compute_flux_bc_tendencies!(model::AtmosphereModel)
     args = (arch, model.clock, fields(model))
     field_indices = 1:length(prognostic_model_fields)
     Gⁿ = model.timestepper.Gⁿ
+
     foreach(q -> compute_x_bcs!(Gⁿ[q], prognostic_model_fields[q], args...), field_indices)
     foreach(q -> compute_y_bcs!(Gⁿ[q], prognostic_model_fields[q], args...), field_indices)
     foreach(q -> compute_z_bcs!(Gⁿ[q], prognostic_model_fields[q], args...), field_indices)

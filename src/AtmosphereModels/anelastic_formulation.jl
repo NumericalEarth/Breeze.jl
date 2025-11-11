@@ -1,5 +1,6 @@
 using ..Thermodynamics:
     MoistureMassFractions,
+    MoistStaticEnergyState,
     ThermodynamicConstants,
     ReferenceState,
     mixture_gas_constant,
@@ -54,7 +55,7 @@ end
 ##### Thermodynamic state
 #####
 
-function thermodynamic_state(i, j, k, grid, formulation::AnelasticFormulation, thermo, energy_density, moisture_density)
+function diagnose_thermodynamic_state(i, j, k, grid, formulation::AnelasticFormulation, thermo, energy_density, moisture_density)
     @inbounds begin
         ρe = energy_density[i, j, k]
         ρᵣ = formulation.reference_state.density[i, j, k]
@@ -107,7 +108,6 @@ function collect_prognostic_fields(::AnelasticFormulation,
                                    tracers)
 
     thermodynamic_variables = (ρe=energy_density, ρqᵗ=moisture_density)
-
     return merge(momentum, thermodynamic_variables, microphysical_fields, tracers)
 end
 
