@@ -12,8 +12,8 @@ using CloudMicrophysics.Microphysics0M: remove_precipitation
 
 # Siebesma et al (2003) resolution!
 # DOI: https://doi.org/10.1175/1520-0469(2003)60<1201:ALESIS>2.0.CO;2
-Nx = Ny = 16 #64
-Nz = 32 #75
+Nx = Ny = 64
+Nz = 75
 
 Lx = 6400
 Ly = 6400
@@ -50,8 +50,9 @@ q_precip_forcing = Forcing(precipitation, field_dependencies=:qᵗ, parameters=m
 FT = eltype(grid)
 q₀ = Breeze.Thermodynamics.MoistureMassFractions(zero(FT), zero(FT), zero(FT))
 ρ₀ = Breeze.Thermodynamics.density(p₀, θ₀, q₀, thermo)
-ρe_bcs = FieldBoundaryConditions(bottom=FluxBoundaryCondition(8e-3 * ρ₀))
-ρqᵗ_bcs = FieldBoundaryConditions(bottom=FluxBoundaryCondition(5.2e-5 * ρ₀))
+cᵖᵈ = thermo.dry_air.heat_capacity
+ρe_bcs = FieldBoundaryConditions(bottom=FluxBoundaryCondition(ρ₀ * cᵖᵈ * 8e-3))
+ρqᵗ_bcs = FieldBoundaryConditions(bottom=FluxBoundaryCondition(ρ₀ * 5.2e-5))
 
 u★ = 0.28 # m/s
 @inline ρu_drag(x, y, t, ρu, ρv, u★) = - u★^2 * ρu / sqrt(ρu^2 + ρv^2)
@@ -64,7 +65,7 @@ u★ = 0.28 # m/s
 @inline function Fρu_subsidence(i, j, k, grid, clock, fields, parameters)
     wˢ = parameters.wˢ
     u_avg = parameters.u_avg
-    w_dz_U = ℑzᵃᵃᶜ(i, j, k, grid, w_dz_ϕ, wˢ, ρu_avg)
+    w_dz_U = ℑzᵃᵃᶜ(i, j, k, grid, w_dz_ϕ, wˢ, u_avg)
     ρᵣ = @inbounds parameters.ρᵣ[i, j, k]
     return - ρᵣ * w_dz_U
 end
@@ -231,17 +232,15 @@ function update_plots!(sim)
     lines!(axu, u_avg)
     lines!(axu, v_avg)
     lines!(axq, qᵗ_avg)
-    lines!(axq, qᵛ⁺_avg)
+    # lines!(axq, qᵛ⁺_avg)
     lines!(axθ, e_avg)
     display(fig)
     return nothing
 end
 
-update_plots!(simulation)
+# update_plots!(simulation)
+# display(fig)
 
-display(fig)
-
-#=
 add_callback!(simulation, update_plots!, TimeInterval(20minutes))
 
 function progress(sim)
@@ -299,7 +298,6 @@ simulation.output_writers[:avg] = averages_ow
 
 @info "Running BOMEX on grid: \n $grid \n and using model: \n $model"
 run!(simulation)
-=#
 
 #=
 using CairoMakie
@@ -344,5 +342,4 @@ if get(ENV, "CI", "false") == "false"
         n[] = nn
     end
 end
-
 =#
