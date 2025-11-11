@@ -40,12 +40,10 @@ hydrostatic_pressure_gradient_y(i, j, k, grid, pₕ′) = ∂yᶜᶠᶜ(i, j, k,
                                      hydrostatic_pressure_anomaly)
 
     buoyancy = nothing
-    visc = closure === nothing ? zero(@inbounds momentum.ρu[i, j, k]) :
-           ∂ⱼ_𝒯₁ⱼ(i, j, k, grid, reference_density, closure, diffusivity_fields, clock, model_fields, buoyancy)
 
     return ( - div_𝐯u(i, j, k, grid, advection, velocities, momentum.ρu)
              - x_f_cross_U(i, j, k, grid, coriolis, momentum)
-             - visc
+             - ∂ⱼ_𝒯₁ⱼ(i, j, k, grid, reference_density, closure, diffusivity_fields, clock, model_fields, buoyancy)
              # - hydrostatic_pressure_gradient_x(i, j, k, grid, hydrostatic_pressure_anomaly)
              + forcing(i, j, k, grid, clock, model_fields))
 end
@@ -64,12 +62,10 @@ end
                                      hydrostatic_pressure_anomaly)
 
     buoyancy = nothing
-    visc = closure === nothing ? zero(@inbounds momentum.ρv[i, j, k]) :
-           ∂ⱼ_𝒯₂ⱼ(i, j, k, grid, reference_density, closure, diffusivity_fields, clock, model_fields, buoyancy)
 
     return ( - div_𝐯v(i, j, k, grid, advection, velocities, momentum.ρv)
              - y_f_cross_U(i, j, k, grid, coriolis, momentum)
-             - visc
+             - ∂ⱼ_𝒯₂ⱼ(i, j, k, grid, reference_density, closure, diffusivity_fields, clock, model_fields, buoyancy)
              # - hydrostatic_pressure_gradient_y(i, j, k, grid, hydrostatic_pressure_anomaly)
              + forcing(i, j, k, grid, clock, model_fields))
 end
@@ -114,11 +110,9 @@ end
 
     id = Val(1) # TODO: figure this out
     buoyancy = nothing
-    diff = closure === nothing ? zero(@inbounds scalar[i, j, k]) :
-           ∇_dot_Jᶜ(i, j, k, grid, reference_density, closure, diffusivity_fields, id, scalar, clock, model_fields, buoyancy)
 
     return ( - div_Uc(i, j, k, grid, advection, velocities, scalar)
-             - diff
+             - ∇_dot_Jᶜ(i, j, k, grid, reference_density, closure, diffusivity_fields, id, scalar, clock, model_fields, buoyancy)
              + forcing(i, j, k, grid, clock, model_fields))
 end
 
@@ -144,12 +138,9 @@ end
     buoyancy_flux = ℑzᵃᵃᶜ(i, j, k, grid, ρ_w_bᶜᶜᶠ, velocities.w, reference_density,
                           temperature, moisture_mass_fraction, formulation, thermo)
 
-    diff = closure === nothing ? zero(@inbounds energy_density[i, j, k]) :
-           ∇_dot_Jᶜ(i, j, k, grid, reference_density, closure, diffusivity_fields, Val(1), moist_static_energy, clock, model_fields, buoyancy)
-
     return ( - div_Uc(i, j, k, grid, advection, velocities, energy_density)
              + buoyancy_flux
-             - diff
+             - ∇_dot_Jᶜ(i, j, k, grid, reference_density, closure, diffusivity_fields, Val(1), moist_static_energy, clock, model_fields, buoyancy)
              # + microphysical_energy_tendency(i, j, k, grid, formulation, microphysics, microphysical_fields)
              + forcing(i, j, k, grid, clock, model_fields))
 end
