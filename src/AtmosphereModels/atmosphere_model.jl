@@ -10,6 +10,7 @@ using Oceananigans.Solvers: FourierTridiagonalPoissonSolver
 using Oceananigans.TimeSteppers: TimeStepper
 using Oceananigans.Utils: launch!, prettytime, prettykeys
 
+import Oceananigans: fields, prognostic_fields
 import Oceananigans.Advection: cell_advection_timescale
 
 materialize_density(formulation, grid) = CenterField(grid)
@@ -226,4 +227,18 @@ function atmosphere_model_forcing(prognostic_fields, model_fields; user_forcings
     forcings = NamedTuple{prognostic_names}(materialized)
 
     return forcings
+end
+
+function fields(model::AtmosphereModel)
+    additional_fields = (; T=model.temperature, qᵗ=model.moisture_mass_fraction)
+    return merge(prognostic_fields(model), model.velocities, additional_fields)
+end
+
+function prognostic_fields(model::AtmosphereModel)
+    thermodynamic_fields = (ρe=model.energy_density, ρqᵗ=model.moisture_density)
+    microphysical_names = prognostic_field_names(model.microphysics)
+    prognostic_microphysical_fields = NamedTuple{microphysical_names}(
+        model.microphysical_fields[name] for name in microphysical_names)
+
+    return merge(model.momentum, thermodynamic_fields, prognostic_microphysical_fields, model.tracers)
 end

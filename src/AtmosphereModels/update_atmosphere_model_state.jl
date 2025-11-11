@@ -9,20 +9,9 @@ using Oceananigans.BoundaryConditions: fill_halo_regions!, compute_x_bcs!, compu
 using Oceananigans.ImmersedBoundaries: mask_immersed_field!
 using Oceananigans.Utils: launch!
 
-import Oceananigans: fields, prognostic_fields
 import Oceananigans.TimeSteppers: update_state!, compute_flux_bc_tendencies!
 
 const AnelasticModel = AtmosphereModel{<:AnelasticFormulation}
-
-function prognostic_fields(model::AnelasticModel)
-    thermodynamic_fields = (ρe=model.energy_density, ρqᵗ=model.moisture_density)
-    μphys = model.microphysics
-    μfields = model.microphysical_fields
-    prognostic_microphysical_fields = NamedTuple(μfields[name] for name in prognostic_field_names(μphys))
-    return merge(model.momentum, thermodynamic_fields, prognostic_microphysical_fields, model.tracers)
-end
-
-fields(model::AnelasticModel) = prognostic_fields(model)
 
 function update_state!(model::AnelasticModel, callbacks=[]; compute_tendencies=true)
     fill_halo_regions!(prognostic_fields(model), model.clock, fields(model), async=true)
