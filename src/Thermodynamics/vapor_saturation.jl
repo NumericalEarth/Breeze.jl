@@ -131,7 +131,7 @@ qᵛ⁺ˡ = Breeze.Thermodynamics.saturation_specific_humidity(T, ρ, thermo, Pl
 Note, this is slightly smaller than the saturation specific humidity over an ice surface:
 
 ```jldoctest saturation
-qᵛ⁺ˡ = Breeze.Thermodynamics.saturation_specific_humidity(T, ρ, thermo, PlanarIceSurface())
+julia> qᵛ⁺ˡ = Breeze.Thermodynamics.saturation_specific_humidity(T, ρ, thermo, PlanarIceSurface())
 0.011945100768555072
 ```
 
