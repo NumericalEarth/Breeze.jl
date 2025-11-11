@@ -4,9 +4,8 @@ using Oceananigans: interior
 using Test
 using Base: Returns
 
-function setup_forcing_model(FT)
-    grid = RectilinearGrid(default_arch, FT; size=(4, 4, 4), x=(0, 100), y=(0, 100), z=(0, 100))
-    model = AtmosphereModel(grid)
+function setup_forcing_model(grid, forcing)
+    model = AtmosphereModel(grid; tracers=:ρc, forcing)
     θ₀ = model.formulation.reference_state.potential_temperature
     set!(model; θ=θ₀)
     return model
@@ -15,92 +14,81 @@ end
 increment_tolerance(::Type{Float32}) = 1f-5
 increment_tolerance(::Type{Float64}) = 1e-10
 
-@testset "AtmosphereModel forcing increments prognostic fields" begin
-    for FT in (Float32, Float64)
-        Δt = 3
-        forcing = Returns(one(FT))
+@testset "AtmosphereModel forcing increments prognostic fields [$(FT)]" for FT in (Float32, Float64)
+    grid = RectilinearGrid(default_arch, FT; size=(4, 4, 4), x=(0, 100), y=(0, 100), z=(0, 100))
 
-        @testset "Energy forcing ($FT)" begin
-            model = setup_forcing_model(FT)
-            model.forcing = merge(model.forcing, (; ρe=forcing))
+    forcings = [
+        Returns(one(FT)),
+        Forcing(Returns(one(FT)), discrete_form=true),
+        Forcing(Returns(one(FT)), field_dependencies=:ρu, discrete_form=true),
+        Forcing(Returns(one(FT)), field_dependencies=(:ρe, :ρqᵗ, :ρu), discrete_form=true),
+        1,
+    ]
 
-            ρe_before = deepcopy(model.energy_density)
-            time_step!(model, Δt)
-            ρe_after = deepcopy(model.energy_density)
+    Δt = 3
 
-            expected = ρe_before + Δt
-            diff = maximum(abs, ρe_after - expected)
-            @test diff ≤ increment_tolerance(FT)
-        end
+    @testset "Momentum forcing ($FT, $(typeof(forcing)))" for forcing in forcings
+        # x-momentum (ρu)
+        u_forcing = (; ρu=forcing)
+        model = setup_forcing_model(grid, u_forcing)
+        ρu_before = deepcopy(model.momentum.ρu)
+        time_step!(model, Δt)
 
-        @testset "Momentum forcing ($FT)" begin
-            # x-momentum (ρu)
-            model = setup_forcing_model(FT)
-            model.forcing = merge(model.forcing, (; ρu=forcing))
+        expected_ρu = ρu_before + Δt
+        diff_ρu = maximum(abs, model.momentum.ρu - expected_ρu)
+        @test diff_ρu ≤ increment_tolerance(FT)
 
-            ρu_before = deepcopy(model.momentum.ρu)
-            time_step!(model, Δt)
-            ρu_after = deepcopy(model.momentum.ρu)
+        # y-momentum (ρv)
+        v_forcing = (; ρv=forcing)
+        model = setup_forcing_model(grid, v_forcing)
+        ρv_before = deepcopy(model.momentum.ρv)
+        time_step!(model, Δt)
 
-            expected_ρu = ρu_before + Δt
-            diff_ρu = maximum(abs, ρu_after - expected_ρu)
-            @test diff_ρu ≤ increment_tolerance(FT)
+        expected_ρv = ρv_before + Δt
+        diff_ρv = maximum(abs, model.momentum.ρv - expected_ρv)
+        @test diff_ρv ≤ increment_tolerance(FT)
 
-            # y-momentum (ρv)
-            model = setup_forcing_model(FT)
-            model.forcing = merge(model.forcing, (; ρv=forcing))
+        # z-momentum (ρw)
+        w_forcing = (; ρw=forcing)
+        model = setup_forcing_model(grid, w_forcing)
+        ρw_before = deepcopy(model.momentum.ρw)
+        time_step!(model, Δt)
 
-            ρv_before = deepcopy(model.momentum.ρv)
-            time_step!(model, Δt)
-            ρv_after = deepcopy(model.momentum.ρv)
+        expected_ρw = ρw_before + Δt
+        diff_ρw = maximum(abs, model.momentum.ρw - expected_ρw)
+        @test diff_ρw ≤ increment_tolerance(FT)
+    end
 
-            expected_ρv = ρv_before + Δt
-            diff_ρv = maximum(abs, ρv_after - expected_ρv)
-            @test diff_ρv ≤ increment_tolerance(FT)
+    @testset "Energy forcing ($FT, $(typeof(forcing)))" for forcing in forcings
+        e_forcing = (; ρe=forcing)
+        model = setup_forcing_model(grid, e_forcing)
+        ρe_before = deepcopy(model.energy_density)
+        time_step!(model, Δt)
 
-            # z-momentum (ρw)
-            model = setup_forcing_model(FT)
-            model.forcing = merge(model.forcing, (; ρw=forcing))
+        expected_ρe = ρe_before + Δt
+        diff_ρe = maximum(abs, model.energy_density - expected_ρe)
+        @test diff_ρe ≤ increment_tolerance(FT)
+    end
 
-            ρw_before = deepcopy(model.momentum.ρw)
-            time_step!(model, Δt)
-            ρw_after = deepcopy(model.momentum.ρw)
+    @testset "Moisture forcing ($FT, $(typeof(forcing)))" for forcing in forcings
+        q_forcing = (; ρqᵗ=forcing)
+        model = setup_forcing_model(grid, q_forcing)
+        ρq_before = deepcopy(model.moisture_density)
+        time_step!(model, Δt)
 
-            expected_ρw = ρw_before + Δt
-            diff_ρw = maximum(abs, ρw_after - expected_ρw)
-            @test diff_ρw ≤ increment_tolerance(FT)
-        end
+        expected = ρq_before + Δt
+        diff = maximum(abs, model.moisture_density - expected)
+        @test diff ≤ increment_tolerance(FT)
+    end
 
-        @testset "Moisture forcing ($FT)" begin
-            model = setup_forcing_model(FT)
-            model.forcing = merge(model.forcing, (; ρqᵗ=forcing))
+    @testset "Scalar forcing ($FT, $(typeof(forcing)))" for forcing in forcings
+        c_forcing = (; ρc=forcing)
+        model = setup_forcing_model(grid, c_forcing)
+        ρc_before = deepcopy(model.tracers.ρc)
+        time_step!(model, Δt)
 
-            ρq_before = deepcopy(model.moisture_density)
-            time_step!(model, Δt)
-            ρq_after = deepcopy(model.moisture_density)
-
-            expected = ρq_before + Δt
-            diff = maximum(abs, ρq_after - expected)
-            @test diff ≤ increment_tolerance(FT)
-        end
-
-        @testset "Scalar forcing ($FT)" begin
-            # Build a model with a single scalar tracer `c`
-            grid = RectilinearGrid(default_arch, FT; size=(4, 4, 4), x=(0, 100), y=(0, 100), z=(0, 100))
-            model = AtmosphereModel(grid; tracers=(:c,))
-            θ₀ = model.formulation.reference_state.potential_temperature
-            set!(model; θ=θ₀)
-
-            # Apply constant forcing to the scalar tracer
-            model.forcing = merge(model.forcing, (; c=forcing))
-
-            c_before = deepcopy(model.tracers.c)
-            time_step!(model, Δt)
-            c_after = deepcopy(model.tracers.c)
-
-            expected_c = c_before + Δt
-            diff_c = maximum(abs, c_after - expected_c)
-            @test diff_c ≤ increment_tolerance(FT)
-        end
+        expected_ρc = ρc_before + Δt
+        diff_ρc = maximum(abs, model.tracers.ρc - expected_ρc)
+        @test diff_ρc ≤ increment_tolerance(FT)
     end
 end
