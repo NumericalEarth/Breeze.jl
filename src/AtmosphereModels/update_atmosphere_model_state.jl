@@ -150,6 +150,15 @@ function compute_tendencies!(model::AnelasticModel)
     ρq_args = tuple(ρqᵗ, Fρqᵗ, scalar_args...)
     launch!(arch, grid, :xyz, compute_scalar_tendency!, Gρqᵗ, grid, ρq_args)
 
+    # Generic tracer tendencies (if any)
+    for name in keys(model.tracers)
+        c = getproperty(model.tracers, name)
+        Gc = getproperty(model.timestepper.Gⁿ, name)
+        Fc = getproperty(model.forcing, name)
+        args = tuple(c, Fc, scalar_args...)
+        launch!(arch, grid, :xyz, compute_scalar_tendency!, Gc, grid, args)
+    end
+
     return nothing
 end
 

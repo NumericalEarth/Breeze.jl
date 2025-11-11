@@ -24,6 +24,11 @@ using Oceananigans.TurbulenceClosures:
 
 import ..AtmosphereModels: ∂ⱼ_𝒯₁ⱼ, ∂ⱼ_𝒯₂ⱼ, ∂ⱼ_𝒯₃ⱼ, ∇_dot_Jᶜ
 
+@inline ∂ⱼ_𝒯₁ⱼ(i, j, k, grid, ρᵣ, ::Nothing, args...) = zero(grid)
+@inline ∂ⱼ_𝒯₂ⱼ(i, j, k, grid, ρᵣ, ::Nothing, args...) = zero(grid)
+@inline ∂ⱼ_𝒯₃ⱼ(i, j, k, grid, ρᵣ, ::Nothing, args...) = zero(grid)
+@inline ∇_dot_Jᶜ(i, j, k, grid, ρᵣ, ::Nothing, args...) = zero(grid)
+
 #####
 ##### Scalar (tracer) dynamic fluxes: J = ρᵣ τ
 #####
