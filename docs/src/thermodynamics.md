@@ -6,16 +6,12 @@ thermo = ThermodynamicConstants()
 ```
 
 Breeze implements thermodynamic relations for moist atmospheres.
-By "moist", we mean that the atmosphere is a binary mixture
-of _(i)_ "dry" air, and _(ii)_ "vapor".
-The presence of moisture makes life interesting, because vapor can _condense_ or _solidify_
-(and liquid can _freeze_) into droplets and particles of so many shapes and sizes.
+By "moist", we mean that the atmosphere is a mixture of four components:
+two gas phases _(i)_ "dry" air and _(ii)_ "vapor", and two "condensed" phases _(iii)_ "liquid", and _(iv)_ "ice".
+Moisture makes _life_ interesting, because vapor can _condense_ or _solidify_
+(and liquid can _freeze_) into liquid droplets and ice particles - with major consequences.
 
-On Earth, dry air is itself a mixture of gases, the vapor component is ``\mathrm{H_2 O}``,
-also known as "water".
-Liquid droplets, which include almost-suspended tiny droplets as well as big raindrops,
-and ice particles such as snow, graupel, and hail, are called "condensates".
-Breeze models dry air as having a fixed composition with
+On Earth, dry air is itself a mixture of gases with fixed composition
 constant [molar mass](https://en.wikipedia.org/wiki/Molar_mass).
 Dry air on Earth's is mostly nitrogen, oxygen, and argon, whose combination produces the typical
 (and Breeze's default) dry air molar mass
@@ -26,14 +22,91 @@ thermo = ThermodynamicConstants()
 thermo.dry_air.molar_mass
 ```
 
+The vapor, liquid, and ice components are ``\mathrm{H_2 O}``, also known as "water".
 Water vapor, which in Breeze has the default molar mass
 
 ```@example thermo
 thermo.vapor.molar_mass
 ```
 
-is lighter than dry air.
-As a result, moist, humid air is _lighter_ than dry air.
+is lighter than dry air. As a result, moist, humid air is _lighter_ than dry air.
+
+Liquid in Earth's atmosphere consists of falling droplets that range from tiny, nearly-suspended mist particles
+to careening fat rain drops.
+Ice in Earth's atmosphere consists of crystals, graupel, sleet, hail and, snow.
+
+## "Moist" thermodynamic relations for a four-component mixture
+
+What does it mean that moist air is a mixture of four components?
+It means that the total mass of air per volume or _density_, ``ρ``,
+can be expressed as the sum of four masses per volume,
+
+```math
+ρ = ρᵈ + ρᵛ + ρˡ + ρⁱ,
+```
+
+where ``ρᵈ``, ``ρᵛ``, ``ρˡ``, and ``ρⁱ`` denote the density of dry air, vapor, liquid, and ice.
+We likewise define the _mass fractions_ of each component,
+
+```math
+qᵈ ≡ \frac{ρᵈ}{ρ} \qquad \text{and} \qquad qᵛ ≡ \frac{ρᵛ}{ρ} \qquad \text{and} \qquad
+qˡ ≡ \frac{ρˡ}{ρ} \qquad \text{and} \qquad qⁱ ≡ \frac{ρⁱ}{ρ} .
+```
+
+!!! note "The significance of certain superscripts"
+    Throughout this documentation, superscripts are used to distinguish the components of moist air:
+    - ``d`` denotes "dry air"
+    - ``v`` denotes "vapor"
+    - ``l`` denotes "liquid"
+    - ``i`` denotes "ice"
+
+    A fifth super script ``t`` is used to denote "total".
+    For example, ``qᵈ`` is the mass fraction of dry air, ``qᵛ`` is the mass fraction of vapor,
+    ``qˡ`` is the mass fraction of liquid, ``qⁱ`` is the mass fraction of ice,
+    and
+
+    ```math
+    qᵗ = qᵛ + qˡ + qⁱ
+    ```
+
+    is the "total" mass fraction of the moisture components.
+
+The liquid and ice components are not always present.
+For example, a model with warm-phase microphysics does not have ice.
+With no microphysics at all, there is no liquid _or_ ice.
+
+By definition, all of the mass fractions sum up to unity,
+
+```math
+1 = qᵈ + qᵛ + qˡ + qⁱ ,
+```
+
+so that, using ``qᵗ = qᵛ + qˡ + qⁱ``, the dry air mass fraction can be diagnosed with ``qᵈ = 1 - qᵗ``.
+The sometimes tedious bookkeeping required to correctly diagnose the effective mixture properties
+of moist air are facilitated by Breeze's handy `MoistureMassFractions` abstraction.
+For example,
+
+```@example thermo
+q = Breeze.Thermodynamics.MoistureMassFractions(0.01, 0.002, 1e-5)
+```
+
+from which we can compute the total moisture mass fraction,
+
+```@example thermo
+qᵗ = Breeze.Thermodynamics.total_moisture_mass_fraction(q)
+```
+
+And the dry as well,
+
+```@example thermo
+qᵈ = Breeze.Thermodynamics.dry_air_mass_fraction(q)
+```
+
+To be sure,
+
+```@example thermo
+qᵈ + qᵗ
+```
 
 ## Two laws for ideal gases
 
@@ -184,7 +257,7 @@ and
 The quantity ``g / cᵖ ≈ 9.76 \;\mathrm{K}\,\mathrm{km}^{-1}`` that appears above is also referred to as
 the "[dry adiabatic lapse rate](https://en.wikipedia.org/wiki/Lapse_rate)".
 
-## An example of a dry reference state in Breeze
+### An example of a dry reference state in Breeze
 
 We can visualise a hydrostatic reference profile evaluating Breeze's reference-state
 utilities (which assume a dry reference state) on a one-dimensional `RectilinearGrid`.
@@ -228,105 +301,96 @@ lines!(axρ, ρᵣ)
 fig
 ```
 
-## Thermodynamic relations for gaseous mixtures
+## The gaseous nature of moist air
 
-"Moist air" is conceived to be a mixture of two gas phases: "dry air" (itself a mixture of gases)
-and water vapor, as well as a collection of liquid droplet and solid ice particle "condensates".
-We assume that the volume of the condensates is negligible, such that the total
-pressure is the sum of partial pressures of vapor and dry air,
+To define the gaseous nature of moist air - that is, the equation of state relating density and pressure,
+we assume that the _volume_ of liquid and ice components are negligible.
+As a result, moist air pressure is the sum of partial pressures of vapor and dry air with no
+contribution from liquid or ice phases,
 
 ```math
 p = pᵈ + pᵛ .
 ```
 
-(Superscripts ``d`` and ``v`` denote dry air and vapor respectively.)
-
-The partial pressure of the dry air and vapor components are related to the component densities
-``ρᵈ`` and ``ρᵛ`` through the ideal gas law,
+Because the dry air and vapor components are ideal gases, their densities are related to pressure through the
+ideal gas law,
 
 ```math
 pᵈ = ρᵈ Rᵈ T \qquad \text{and} \qquad pᵛ = ρᵛ Rᵛ T ,
 ```
 
 where ``T`` is temperature, ``Rⁱ = ℛ / m^β`` is the specific gas constant for component ``β``,
+``m^β`` is the molar mass of component ``β``, and
 ``ℛ``  is the [molar or "universal" gas constant](https://en.wikipedia.org/wiki/Gas_constant),
-and ``m^β`` is the molar mass of component ``β``.
-
-Central to Breeze's implementation of moist thermodynamics is a struct that
-holds parameters like the molar gas constant and molar masses,
 
 ```@example thermo
 thermo = ThermodynamicConstants()
+thermo.molar_gas_constant
 ```
 
-The default parameter evince basic facts about water vapor air typical to Earth's atmosphere:
+`ThermodynamicConstants`, which is central to Breeze's implementation of moist thermodynamics.
+holds constants like the molar gas constant and molar masses, latent heats, gravitational acceleration, and more,
+
+```@example thermo
+thermo
+```
+
+These default values evince basic facts about water vapor air typical to Earth's atmosphere:
 for example, the molar masses of dry air (itself a mixture of mostly nitrogen, oxygen, and argon),
 and water vapor are ``mᵈ = 0.029 \; \mathrm{kg} \, \mathrm{mol}^{-1}`` and ``mᵛ = 0.018 \; \mathrm{kg} \, \mathrm{mol}^{-1}``.
+And even more interesting, the triple point temperature and pressure of water vapor are
 
-To write the effective gas law for moist air, we introduce the mass ratios, e.g., specific humidity and specific hydrometeor contents,
-
-```math
-qᵈ ≡ \frac{ρᵈ}{ρ} \qquad \text{and} \qquad qᵛ ≡ \frac{ρᵛ}{ρ} ,
+```@example thermo
+thermo.triple_point_temperature, thermo.triple_point_pressure
 ```
 
-where ``ρ`` is total density of the fluid including dry air, vapor, and condensates,
-``ρᵈ`` is the density of dry air, and ``ρᵛ`` is the density of vapor.
+not so far from the typical conditions we experience on Earth's surface - one of the reasons that things are
+so interesting down here. Also, that temperature is not a typo: the triple point temperature really is just
+``+0.01^\circ``C.
+
+
 It's then convenient to introduce the "mixture" gas constant ``Rᵐ(qᵛ)`` such that
 
 ```math
 p = ρ Rᵐ T, \qquad \text{where} \qquad Rᵐ ≡ qᵈ Rᵈ + qᵛ Rᵛ .
 ```
 
-In "clear" (not cloudy) air, we have that ``qᵈ = 1 - qᵛ``.
-More generally, ``qᵈ = 1 - qᵛ - qᶜ``, where ``qᶜ`` is the total mass
-ratio of condensed species. In most situations on Earth, ``qᶜ ≪ qᵛ``.
+To illustrate, let's compute the mixture gas constant ``Rᵐ`` for air with a small amount of water vapor.
+The contribution of vapor increases ``Rᵐ`` above the dry air value:
 
 ```@example thermo
-using Breeze.Thermodynamics: MoistureMassFractions
-
-# Compute mixture properties for air with 0.01 specific humidity
-qᵗ = 0.01 # 1% water vapor by mass
-q = MoistureMassFractions(qᵗ, zero(qᵗ), zero(qᵗ))
-Rᵐ = mixture_gas_constant(q, thermo)
+q = Breeze.Thermodynamics.MoistureMassFractions(0.01, 0.0, 0.0) # 1% vapor by mass
+Rᵈ = Breeze.Thermodynamics.dry_air_gas_constant(thermo)
+Rᵐ = Breeze.Thermodynamics.mixture_gas_constant(q, thermo)
+Rᵐ - Rᵈ # shows the uplift from the vapor component
 ```
 
-We likewise define a mixture heat capacity via ``cᵖᵐ = qᵈ cᵖᵈ + qᵛ cᵖᵛ``,
+A small increase in specific humidity increases the effective gas constant of air.
+
+## The thermal properties of moist air
+
+Though we neglect the volume of liquid and ice, we do not neglect their _mass_ or _energy_.
+The heat capacity of moist air thus includes contributions from all four components,
+
+```math
+cᵖᵐ = qᵈ cᵖᵈ + qᵛ cᵖᵛ + qˡ cˡ + qⁱ cⁱ,
+```
+
+where the ``cᵖᵝ`` denote the specific heat capacity at constant pressure of
+constituent ``β``, and we have neglected the superscript ``p`` for liquid
+and ice because they are assumed incompressible (their specific heats and constant
+pressure or volume are the same).
+We call ``cᵖᵐ`` the "mixture heat capacity", and because with default parameters the
+heat capacity of dry air is the smallest of either vapor, liquid, or ice,
+any moisture at all tends to increase the mixture heat capacity,
 
 ```@example thermo
-cᵖᵐ = mixture_heat_capacity(q, thermo)
+q = Breeze.Thermodynamics.MoistureMassFractions(0.01, 0.0, 0.0)
+cᵖᵈ = thermo.dry_air.heat_capacity
+cᵖᵐ = Breeze.Thermodynamics.mixture_heat_capacity(q, thermo)
+cᵖᵐ - cᵖᵈ
 ```
 
-## Moist static energy
-
-For moist air, a convenient thermodynamic invariant that couples temperature, composition, and height is the moist static energy (MSE). In the warm-phase case (vapor + liquid), assuming temperature‑independent specific heats, a common approximation is
-
-```math
-m \equiv c^{p m}(q) \, T + g z + \mathcal{L}^{l}_{r} \, q^{v} ,
-```
-
-where ``c^{p m}(q) = q^{d} c^{p d} + q^{v} c^{p v}`` is the mixture heat capacity, ``g`` is gravitational acceleration, ``z`` is height, and ``\mathcal{L}^{l}_{r}`` is a reference latent heat of vaporization. Using total water ``q^{t} = q^{v} + q^{l}``, an equivalent form is
-
-```math
-m = c^{p m}(q) \, T + g z + \mathcal{L}^{l}_{r} \, (q^{t} - q^{l}) .
-```
-
-At fixed ``q^{t}`` and in the absence of external sources/sinks (precipitation, radiation, surface fluxes), warm‑phase phase changes redistribute water between vapor and liquid while approximately conserving ``m``. This relation is the basis for the saturation‑adjustment temperature solve used in Breeze’s microphysics; see [Warm‑phase saturation adjustment](@ref saturation_adjustment-section) for details.
-
-In the anelastic formulation used by Breeze, it is also convenient to use the dry‑air energy variable
-
-```math
-e \equiv c^{p d} \, \theta ,
-```
-
-which is materially conserved in the absence of diabatic sources and appears naturally in the conservative anelastic energy equation; see the Dynamics page. In clear air, ``T = Π \, e / c^{p d}``, while during saturation adjustment with condensate ``q^{l}`` present the temperature satisfies
-
-```math
-T = \frac{Π \, e}{c^{p d}} + \frac{\mathcal{L}^{l}_{r}}{c^{p m}(q)} \, q^{l} ,
-```
-
-with ``q^{l} = \max(0, q^{t} - q^{v+}(T))`` and the saturation specific humidity ``q^{v+}(T)`` determined by Clausius–Clapeyron (see below). This expression is the basis of the residual solved for saturation adjustment in Breeze.
-
-## Liquid-ice potential temperature
 
 ## The Clausius--Clapeyron relation and saturation specific humidity
 
@@ -423,3 +487,24 @@ ax = Axis(fig[1, 1], xlabel="Temperature (ᵒK)", ylabel="Saturation specific hu
 lines!(ax, T, qᵛ⁺)
 fig
 ```
+
+## Moist static energy
+
+For moist air, a convenient thermodynamic invariant that couples temperature, composition, and height is the moist static energy (MSE),
+
+```math
+e ≡ cᵖᵐ \, T + g z - Lˡᵣ \, qᵛ - Lⁱᵣ qⁱ,
+```
+
+!!! note "The alternative 'frozen moist static energy' variable"
+
+    An alternative, physically equivalent, definition of moist static energy used in atmospheric models such as the Global System for Atmospheric Modeling (GSAM) [Maxwell2020](@cite) is
+
+    ```math
+    ẽ ≡ cᵖᵐ \, T + g z + Lˡᵣ \, qᵗ - Lᶠᵣ qⁱ
+    ```
+
+    ``e`` and ``ẽ`` are not the same, but they obey the same conservation equation provided that total moisture fraction is conserved,
+    or that ``\mathrm{D}qᵗ / \mathrm{D}t = 0``.
+
+## Liquid-ice potential temperature
