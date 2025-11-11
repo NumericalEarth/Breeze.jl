@@ -134,7 +134,7 @@ z = 0.0
 e = cᵖᵐ * T + g * z - ℒˡᵣ * qˡ
 ```
 
-Moist static energy has units ``\mathrm{m^2 / s^2}``, or ``\mathrm{J}/\mathrm{kg}``.
+Moist static energy has units ``\mathrm{m^2 / s^2}``, or ``\mathrm{J} / \mathrm{kg}``.
 Next we show that the saturation adjustment solver recovers the input temperature
 by passing it an "unadjusted" moisture mass fraction into [`Breeze.AtmosphereModels.compute_temperature`](@ref),
 
