@@ -49,22 +49,6 @@ end
 
 Base.show(io::IO, formulation::AnelasticFormulation) = print(io, "AnelasticFormulation")
 
-"""
-$(TYPEDSIGNATURES)
-
-Return an `AnelasticFormulation` on a given `grid`, for `state_constants`,
-and for `thermo`dynamics.
-"""
-function AnelasticFormulation(grid, state_constants, thermo)
-    pᵣ = Field{Nothing, Nothing, Center}(grid)
-    ρᵣ = Field{Nothing, Nothing, Center}(grid)
-    set!(pᵣ, z -> reference_pressure(z, state_constants, thermo))
-    set!(ρᵣ, z -> reference_density(z, state_constants, thermo))
-    fill_halo_regions!(pᵣ)
-    fill_halo_regions!(ρᵣ)
-    return AnelasticFormulation(state_constants, pᵣ, ρᵣ)
-end
-
 #####
 ##### Thermodynamic state
 #####
