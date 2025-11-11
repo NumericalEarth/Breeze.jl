@@ -27,7 +27,7 @@ the latent heat is written
  
 ```math
 ℒᵝ = ℒᵝᵣ + Δcᵝ (T - Tᵣ),
-\qquad \text{and} \qquad
+\\qquad \\text{and} \\qquad
 ℒᵝ₀ = ℒᵝᵣ - Δcᵝ Tᵣ .
 ```
 
@@ -48,18 +48,13 @@ pᵛ⁺(T) = pᵗʳ \\left ( \\frac{T}{Tᵗʳ} \\right )^{Δcᵝ / Rᵛ} \\exp \
 """
 @inline function saturation_vapor_pressure(T, thermo, surface)
     ℒ₀ = absolute_zero_latent_heat(thermo, surface)
-    Tᵣ = thermo.energy_reference_temperature
+    Δcᵝ = specific_heat_difference(thermo, surface)
 
     Tᵗʳ = thermo.triple_point_temperature
     pᵗʳ = thermo.triple_point_pressure
     Rᵛ = vapor_gas_constant(thermo)
 
-
-    cᵖᵛ = thermo.vapor.heat_capacity
-    cᵝ = phase.heat_capacity
-    Δcᵝ = cᵖᵛ - cᵝ
-
-    return pᵗʳ * (T / Tᵗʳ)^(Δcᵝ / Rᵛ) * exp((1/Tᵗʳ - 1/T) * (ℒᵣ - Δcᵝ * Tᵣ) / Rᵛ)
+    return pᵗʳ * (T / Tᵗʳ)^(Δcᵝ / Rᵛ) * exp((1/Tᵗʳ - 1/T) * ℒ₀ / Rᵛ)
 end
 
 @inline function specific_heat_difference(thermo, phase::CondensedPhase)
@@ -71,6 +66,7 @@ end
 @inline function absolute_zero_latent_heat(thermo, phase::CondensedPhase)
     ℒᵣ = phase.reference_latent_heat # at thermo.energy_reference_temperature
     Δcᵝ = specific_heat_difference(thermo, phase)
+    Tᵣ = thermo.energy_reference_temperature
     return ℒᵣ - Δcᵝ * Tᵣ
 end
 
