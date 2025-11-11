@@ -33,6 +33,44 @@ increment_tolerance(::Type{Float64}) = 1e-10
             @test diff ≤ increment_tolerance(FT)
         end
 
+        @testset "Momentum forcing ($FT)" begin
+            # x-momentum (ρu)
+            model = setup_forcing_model(FT)
+            model.forcing = merge(model.forcing, (; ρu=forcing))
+
+            ρu_before = deepcopy(model.momentum.ρu)
+            time_step!(model, Δt)
+            ρu_after = deepcopy(model.momentum.ρu)
+
+            expected_ρu = ρu_before + Δt
+            diff_ρu = maximum(abs, ρu_after - expected_ρu)
+            @test diff_ρu ≤ increment_tolerance(FT)
+
+            # y-momentum (ρv)
+            model = setup_forcing_model(FT)
+            model.forcing = merge(model.forcing, (; ρv=forcing))
+
+            ρv_before = deepcopy(model.momentum.ρv)
+            time_step!(model, Δt)
+            ρv_after = deepcopy(model.momentum.ρv)
+
+            expected_ρv = ρv_before + Δt
+            diff_ρv = maximum(abs, ρv_after - expected_ρv)
+            @test diff_ρv ≤ increment_tolerance(FT)
+
+            # z-momentum (ρw)
+            model = setup_forcing_model(FT)
+            model.forcing = merge(model.forcing, (; ρw=forcing))
+
+            ρw_before = deepcopy(model.momentum.ρw)
+            time_step!(model, Δt)
+            ρw_after = deepcopy(model.momentum.ρw)
+
+            expected_ρw = ρw_before + Δt
+            diff_ρw = maximum(abs, ρw_after - expected_ρw)
+            @test diff_ρw ≤ increment_tolerance(FT)
+        end
+
         @testset "Moisture forcing ($FT)" begin
             model = setup_forcing_model(FT)
             model.forcing = merge(model.forcing, (; ρqᵗ=forcing))
