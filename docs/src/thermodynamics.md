@@ -535,7 +535,7 @@ pᵛᵐ⁺ = [saturation_vapor_pressure(Tⁱ, thermo, mixed_surface) for Tⁱ in
 using CairoMakie
 
 fig = Figure()
-ax = Axis(fig[1, 1], xlabel="Temperature (ᵒK)", ylabel="Saturation vapor pressure pᵛ⁺ (Pa)", 
+ax = Axis(fig[1, 1], xlabel="Temperature (ᵒK)", ylabel="Saturation vapor pressure pᵛ⁺ (Pa)",
           yscale = log10, xticks=200:20:320)
 lines!(ax, T, pᵛˡ⁺, label="liquid", linewidth=2)
 lines!(ax, T, pᵛⁱ⁺, label="ice", linestyle=:dash, linewidth=2)
@@ -588,7 +588,7 @@ using CairoMakie
 fig = Figure(size=(1000, 400))
 
 # Panel 1: Saturation vapor pressure
-ax1 = Axis(fig[1, 1], xlabel="Temperature (K)", ylabel="Saturation vapor pressure (Pa)", 
+ax1 = Axis(fig[1, 1], xlabel="Temperature (K)", ylabel="Saturation vapor pressure (Pa)",
            yscale=log10, title="Saturation vapor pressure")
 
 for (i, λ) in enumerate(λ_values)
@@ -600,7 +600,7 @@ end
 axislegend(ax1, position=:lt)
 
 # Panel 2: Saturation specific humidity
-ax2 = Axis(fig[1, 2], xlabel="Temperature (K)", ylabel="Saturation specific humidity (kg/kg)", 
+ax2 = Axis(fig[1, 2], xlabel="Temperature (K)", ylabel="Saturation specific humidity (kg/kg)",
            title="Saturation specific humidity")
 
 for (i, λ) in enumerate(λ_values)

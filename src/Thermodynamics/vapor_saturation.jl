@@ -24,7 +24,7 @@ and the specific heat of phase ``β``.
 Note that we typically parameterize the latent heat interms of a reference
 temperature ``T = Tᵣ`` that is well above absolute zero. In that case,
 the latent heat is written
- 
+
 ```math
 ℒᵝ = ℒᵝᵣ + Δcᵝ (T - Tᵣ),
 \\qquad \\text{and} \\qquad
