@@ -12,7 +12,7 @@ const TC = Breeze.TurbulenceClosures
     # Try two closures from Oceananigans
     for closure in (SmagorinskyLilly(), AnisotropicMinimumDissipation())
         @testset let closure=closure
-            model = AtmosphereModel(grid; closure=closure)
+            model = AtmosphereModel(grid; closure)
             @test try
                 time_step!(model, 1)
                 true

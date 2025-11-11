@@ -141,9 +141,9 @@ function AtmosphereModel(grid;
 
     # May need to use more names in `tracers` for this to work
     closure_names = tuple(:ρe, :ρqᵗ, tracers...)
-    closure = Oceananigans.Utils.with_tracers(tracers, closure)
+    closure = Oceananigans.Utils.with_tracers(closure_names, closure)
     diffusivity_fields =
-        Oceananigans.TurbulenceClosures.build_diffusivity_fields(grid, clock, tracers, boundary_conditions, closure)
+        Oceananigans.TurbulenceClosures.build_diffusivity_fields(grid, clock, closure_names, boundary_conditions, closure)
 
     model = AtmosphereModel(arch,
                             grid,
