@@ -4,7 +4,7 @@ using Test
 using GPUArraysCore: @allowscalar
 
 """
-    thermal_bubble_model(grid; uᵢ=0, vᵢ=0, wᵢ=0)
+    thermal_bubble_model(grid; Δθ=10, uᵢ=0, vᵢ=0, wᵢ=0)
 
 Set up a thermal bubble initial condition for an `AtmosphereModel` on the provided grid.
 
@@ -18,11 +18,9 @@ The background state has a stable stratification with Brunt-Väisälä frequency
 - `wᵢ`: Optional initial z-velocity (default: 0).
 ```
 """
-function thermal_bubble_model(grid; uᵢ=0, vᵢ=0, wᵢ=0, qᵗ=0, microphysics=nothing)
+function thermal_bubble_model(grid; Δθ=10, N²=1e-6, uᵢ=0, vᵢ=0, wᵢ=0, qᵗ=0, microphysics=nothing)
     model = AtmosphereModel(grid; advection=WENO(), microphysics)
-    N² = 1e-6
     r₀ = 2e3
-    Δθ = 10  # K
     θ₀ = model.formulation.reference_state.potential_temperature
     g = model.thermodynamics.gravitational_acceleration
     dθdz = N² * θ₀ / g
@@ -41,13 +39,13 @@ end
 
 @testset "Energy conservation with thermal bubble [$(FT)]" for FT in (Float32, Float64)
     Oceananigans.defaults.FloatType = FT
-    grid = RectilinearGrid(default_arch, FT; 
+    grid = RectilinearGrid(default_arch;
                            size = (32, 1, 32), 
                            x = (-10e3, 10e3), 
                            y = (-10e3, 10e3), 
                            z = (-3e3, 7e3),
                            topology = (Periodic, Periodic, Bounded),
-                           halo = (5, 5, 5))
+                           halo = (5, 1, 5))
     
     for microphysics in (nothing, WarmPhaseMicrophysics())
         @testset let microphysics=microphysics
@@ -72,26 +70,26 @@ end
     end
 end
 
-
-@testset "Momentum conservation with spherical thermal bubble [$(FT)]" for FT in (Float32, Float64)
-    grid = RectilinearGrid(default_arch, FT; 
-                           size=(16, 16, 16), 
-                           x=(-10e3, 10e3),
-                           y=(-10e3, 10e3),
-                           z=(-3e3, 7e3),
-                           topology=(Periodic, Periodic, Bounded),
-                           halo=(5, 5, 5))
+@testset "Horizontal momentum conservation with spherical thermal bubble [$(FT)]" for FT in (Float32, Float64)
+    Oceananigans.defaults.FloatType = FT
+    grid = RectilinearGrid(default_arch;
+                           size = (16, 16, 16), 
+                           x = (-10e3, 10e3),
+                           y = (-10e3, 10e3),
+                           z = (-3e3, 7e3),
+                           topology = (Periodic, Periodic, Bounded),
+                           halo = (5, 5, 5))
     
-    # Set spherical thermal bubble initial condition with u velocity only
-    model = thermal_bubble_model(grid, uᵢ=5, vᵢ=3, wᵢ=1)
+    # Set spherical thermal bubble initial condition with sheared horizontal velocities
+    uᵢ(x, y, z) = 5 * (z + 3e3) / 10e3
+    vᵢ(x, y, z) = 3 * (z + 3e3) / 10e3
+    model = thermal_bubble_model(grid; uᵢ, vᵢ)
     
     # Compute initial total u-momentum
     ∫ρu = Field(Integral(model.momentum.ρu))
     ∫ρv = Field(Integral(model.momentum.ρv))
-    ∫ρw = Field(Integral(model.momentum.ρw))
     Px₀ = @allowscalar first(∫ρu)
     Py₀ = @allowscalar first(∫ρv)
-    Pz₀ = @allowscalar first(∫ρw)
     
     # Time step the model
     Nt = 10
@@ -100,12 +98,43 @@ end
         time_step!(model, 1)
         compute!(∫ρu)
         compute!(∫ρv)
-        compute!(∫ρw)
         Px = @allowscalar first(∫ρu)
         Py = @allowscalar first(∫ρv)
-        Pz = @allowscalar first(∫ρw)
         @test Px ≈ Px₀
         @test Py ≈ Py₀
+    end
+end
+
+@testset "Vertical momentum conservation for neutral initial condition [$(FT)]" for FT in (Float32, Float64)
+    Oceananigans.defaults.FloatType = FT
+    grid = RectilinearGrid(default_arch;
+                           size = (16, 1, 16), 
+                           x = (-10e3, 10e3),
+                           y = (-10e3, 10e3),
+                           z = (-5e3, 5e3),
+                           topology = (Bounded, Periodic, Bounded),
+                           halo = (5, 1, 5))
+    
+    # Set spherical thermal bubble initial condition with u velocity only
+    wᵢ(x, y, z) = 2 * x / 20e3 * exp(-z^2 / (2 * 1e3^2))
+    model = thermal_bubble_model(grid; wᵢ, Δθ=0, N²=0)
+    
+    # Compute initial total u-momentum
+    ∫ρu = Field(Integral(model.momentum.ρu))
+    ∫ρw = Field(Integral(model.momentum.ρw))
+    Px₀ = @allowscalar first(∫ρu)
+    Pz₀ = @allowscalar first(∫ρz)
+    
+    # Time step the model
+    Nt = 10
+    
+    for step in 1:Nt
+        time_step!(model, 1)
+        compute!(∫ρu)
+        compute!(∫ρv)
+        Px = @allowscalar first(∫ρw)
+        Pz = @allowscalar first(∫ρz)
+        @test Px ≈ Px₀
         @test Pz ≈ Pz₀
     end
 end
