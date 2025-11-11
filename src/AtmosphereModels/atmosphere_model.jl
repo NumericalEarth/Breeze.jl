@@ -115,7 +115,7 @@ function AtmosphereModel(grid;
 
     density = materialize_density(formulation, grid)
     velocities, momentum = materialize_momentum_and_velocities(formulation, grid, boundary_conditions)
-    tracers = NamedTuple(n => CenterField(grid, boundary_conditions=boundary_conditions[n]) for name in tracers)
+    tracers = NamedTuple(name => CenterField(grid, boundary_conditions=boundary_conditions[name]) for name in tracers)
     microphysical_fields = materialize_microphysical_fields(microphysics, grid, boundary_conditions)
     advection = adapt_advection_order(advection, grid)
 
