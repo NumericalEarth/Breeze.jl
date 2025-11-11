@@ -63,7 +63,7 @@ Pkg.test("Breeze"; test_args=`doctests`)
     Pkg.test("Breeze"; test_args=`--list`)
     ```
 
-### GPU tests
+### Tests on GPU
 
 When running the tests, if a CUDA GPU is detected, they automatically use the [`GPU` Oceananigans architecture](https://clima.github.io/OceananigansDocumentation/stable/appendix/library/#Oceananigans.Architectures.GPU), otherwise they run on [`CPU`](https://clima.github.io/OceananigansDocumentation/stable/appendix/library/#Oceananigans.Architectures.CPU).
 To temporarily disable the automatic detection of the GPU and forcibly run the tests on CPU you can set the environment variable `CUDA_VISIBLE_DEVICES=-1`.
@@ -104,8 +104,10 @@ julia --project=docs/ docs/make.jl
 ```
 
 to build the documentation.
-If you want to quickly build a draft copy of the documentation (i.e. without running all the examples or running the doctests), modify the [call to the `makedocs`](https://github.com/NumericalEarth/Breeze.jl/blob/cdf8bd25c83f24cbd4f26c8c600d20ef9740e9c7/docs/make.jl#L14-L34) function in `docs/make.jl` to set the keyword argument `draft=true` and run again the `docs/make.jl` script.
-When you submit a pull request to `Breeze.jl`, if the documentation building job is successfull a copy of the build will be uploaded as an artifact, which you can retrieve by looking at the summary page of the documentation job.
+
+When you submit a pull request to `Breeze.jl`, if the documentation building job is successfull a copy of the build will be uploaded as an artifact, which you can retrieve from the summary page of the documentation job.
+
+### Displaying the documentation
 
 To view the documentation you can open the generated HTML files in the `docs/build` directory, but you need an HTTP server to be able to move around the website and follow internal links.
 The [`LiveServer`](https://github.com/JuliaDocs/LiveServer.jl) package provides a simple HTTP server implementation, which also automatically reloads the pages when they are modified on disk:
@@ -116,4 +118,26 @@ Pkg.activate("live-server"; shared=true)
 Pkg.add("LiveServer") # this is necessary only the first time, to install LiveServer
 using LiveSever: serve
 serve(; dir="docs/build")
+```
+
+### Draft documentation
+
+If you want to quickly build a draft copy of the documentation (i.e. without running the doctests or all the examples, which can be very time-consuming), set the environment variable `BREEZE_DOCS_DRAFT=true` and run again the `docs/make.jl` script:
+
+```sh
+export BREEZE_DOCS_DRAFT=true
+julia --project=docs/ docs/make.jl
+```
+
+or start julia with
+
+```
+julia --project=docs/
+```
+
+and then inside it
+
+```julia
+ENV["BREEZE_DOCS_DRAFT"] = "true"
+include("docs/make.jl")
 ```
