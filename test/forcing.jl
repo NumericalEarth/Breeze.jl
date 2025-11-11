@@ -23,7 +23,7 @@ increment_tolerance(::Type{Float64}) = 1e-10
 
     Δt = convert(FT, 1e-6)
 
-    @testset "Forcing forcing ($FT, $(typeof(forcing)))" for forcing in forcings
+    @testset "Forcing increments prognostic fields ($FT, $(typeof(forcing)))" for forcing in forcings
         # x-momentum (ρu)
         u_forcing = (; ρu=forcing)
         model = setup_forcing_model(grid, u_forcing)
