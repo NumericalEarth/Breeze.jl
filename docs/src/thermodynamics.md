@@ -38,19 +38,19 @@ Ice in Earth's atmosphere consists of crystals, graupel, sleet, hail and, snow.
 ## "Moist" thermodynamic relations for a four-component mixture
 
 What does it mean that moist air is a mixture of four components?
-It means that the total mass of air per volume or _density_, ``ρ``,
-can be expressed as the sum of four masses per volume,
+It means that the total mass ``\mathcal{M}`` of air per volume, or _density_, ``ρ``,
+can be expressed as the sum of the masses of the individual components over the total volume ``V``,
 
 ```math
-ρ = ρᵈ + ρᵛ + ρˡ + ρⁱ,
+ρ = \frac{\mathcal{M}}{V} = \frac{\mathcal{M}ᵈ + \mathcal{M}ᵛ + \mathcal{M}ˡ + \mathcal{M}ⁱ}{V} = ρᵈ + ρᵛ + ρˡ + ρⁱ
 ```
 
-where ``ρᵈ``, ``ρᵛ``, ``ρˡ``, and ``ρⁱ`` denote the density of dry air, vapor, liquid, and ice.
+where ``\mathcal{M}ᵈ``, ``\mathcal{M}ᵛ``, ``\mathcal{M}ˡ``, and ``\mathcal{M}ⁱ`` are the masses of dry air, vapor, liquid, and ice, respectively, while ``ρᵈ``, ``ρᵛ``, ``ρˡ``, and ``ρⁱ`` denote their _fractional densities_.
 We likewise define the _mass fractions_ of each component,
 
 ```math
-qᵈ ≡ \frac{ρᵈ}{ρ} , \qquad qᵛ ≡ \frac{ρᵛ}{ρ} , \qquad
-qˡ ≡ \frac{ρˡ}{ρ} , \qquad \text{and} \qquad qⁱ ≡ \frac{ρⁱ}{ρ} .
+qᵈ ≡ \frac{\mathcal{M}ᵈ}{\mathcal{M}} = \frac{ρᵈ}{ρ} , \qquad qᵛ ≡ \frac{\mathcal{M}ᵛ}{\mathcal{M}} = \frac{ρᵛ}{ρ} , \qquad
+qˡ ≡ \frac{\mathcal{M}ˡ}{\mathcal{M}} = \frac{ρˡ}{ρ}, \qquad \text{and} \qquad qⁱ ≡ \frac{ρⁱ}{ρ} = \frac{\mathcal{M}ⁱ}{\mathcal{M}} .
 ```
 
 !!! note "The significance of certain superscripts"
