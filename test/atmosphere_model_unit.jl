@@ -39,7 +39,7 @@ end
 
     # Initialize with potential temperature and dry air
     θᵢ = CenterField(grid)
-    set!(θᵢ, (x, y, z) -> randn())
+    set!(θᵢ, (x, y, z) -> θ₀ + rand())
     set!(model; θ=θᵢ)
 
     θ_model = Breeze.AtmosphereModels.PotentialTemperatureField(model)
