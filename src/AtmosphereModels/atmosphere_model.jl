@@ -73,7 +73,7 @@ AtmosphereModel{CPU, RectilinearGrid}(time = 0 seconds, iteration = 0)
 ├── grid: 8×8×8 RectilinearGrid{Float64, Periodic, Periodic, Bounded} on CPU with 3×3×3 halo
 ├── formulation: AnelasticFormulation(p₀=101325.0, θ₀=288.0)
 ├── timestepper: RungeKutta3TimeStepper
-├── advection scheme: Centered{1, Float64}(order=2)
+├── advection scheme: Centered(order=2)
 ├── tracers: ()
 ├── coriolis: Nothing
 └── microphysics: Nothing
@@ -140,6 +140,8 @@ function AtmosphereModel(grid;
     pressure_solver = formulation_pressure_solver(formulation, grid)
 
     # May need to use more names in `tracers` for this to work
+    closure_names = tuple(:ρe, :ρqᵗ, tracers...)
+    closure = with_tracers(tracers, closure)
     diffusivity_fields =
         Oceananigans.TurbulenceClosures.build_diffusivity_fields(grid, clock, tracers, boundary_conditions, closure)
 

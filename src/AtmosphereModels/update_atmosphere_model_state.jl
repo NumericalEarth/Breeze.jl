@@ -139,7 +139,7 @@ function compute_tendencies!(model::AnelasticModel)
     ρe = model.energy_density
     e = model.moist_static_energy
     Fρe = model.forcing.ρe
-    ρe_args = tuple(ρe, e, Fρe, scalar_args...,
+    ρe_args = tuple(ρe, Val(1), e, Fρe, scalar_args...,
                     model.formulation, model.temperature,
                     model.moisture_mass_fraction, model.thermodynamics, model.microphysical_fields, model.microphysics)
     launch!(arch, grid, :xyz, compute_moist_static_energy_tendency!, Gρe, grid, ρe_args)
@@ -147,15 +147,16 @@ function compute_tendencies!(model::AnelasticModel)
     ρqᵗ = model.moisture_density
     Gρqᵗ = model.timestepper.Gⁿ.ρqᵗ
     Fρqᵗ = model.forcing.ρqᵗ
-    ρq_args = tuple(ρqᵗ, Fρqᵗ, scalar_args...)
+    ρq_args = tuple(ρqᵗ, Val(2), Fρqᵗ, scalar_args...)
     launch!(arch, grid, :xyz, compute_scalar_tendency!, Gρqᵗ, grid, ρq_args)
 
     # Generic tracer tendencies (if any)
-    for name in keys(model.tracers)
+    for (i, name) in enumerate(keys(model.tracers))
+        id = Val(i + 2)
         c = getproperty(model.tracers, name)
         Gc = getproperty(model.timestepper.Gⁿ, name)
         Fc = getproperty(model.forcing, name)
-        args = tuple(c, Fc, scalar_args...)
+        args = tuple(c, id, Fc, scalar_args...)
         launch!(arch, grid, :xyz, compute_scalar_tendency!, Gc, grid, args)
     end
 

@@ -88,17 +88,17 @@ end
 
     buoyancy = nothing
     visc = closure === nothing ? zero(@inbounds momentum.ρw[i, j, k]) :
-           ∂ⱼ_𝒯₃ⱼ(i, j, k, grid, reference_density, closure, diffusivity_fields, clock, model_fields, buoyancy)
 
     return ( - div_𝐯w(i, j, k, grid, advection, velocities, momentum.ρw)
-             - z_f_cross_U(i, j, k, grid, coriolis, momentum)
              + ρ_bᶜᶜᶠ(i, j, k, grid, reference_density, temperature, moisture_mass_fraction, formulation, thermo)
-             - visc
+             - z_f_cross_U(i, j, k, grid, coriolis, momentum)
+             - ∂ⱼ_𝒯₃ⱼ(i, j, k, grid, reference_density, closure, diffusivity_fields, clock, model_fields, buoyancy)
              + forcing(i, j, k, grid, clock, model_fields))
 end
 
 @inline function scalar_tendency(i, j, k, grid,
                                  scalar,
+                                 scalar_id,
                                  forcing,
                                  reference_density,
                                  advection,
@@ -108,17 +108,17 @@ end
                                  clock,
                                  model_fields)
 
-    id = Val(1) # TODO: figure this out
     buoyancy = nothing
 
     return ( - div_Uc(i, j, k, grid, advection, velocities, scalar)
-             - ∇_dot_Jᶜ(i, j, k, grid, reference_density, closure, diffusivity_fields, id, scalar, clock, model_fields, buoyancy)
+             - ∇_dot_Jᶜ(i, j, k, grid, reference_density, closure, diffusivity_fields, scalar_id, scalar, clock, model_fields, buoyancy)
              + forcing(i, j, k, grid, clock, model_fields))
 end
 
 @inline function moist_static_energy_tendency(i, j, k, grid,
                                               energy_density,
-                                              moist_static_energy,
+                                              energy_id,
+                                              energy,
                                               forcing,
                                               reference_density,
                                               advection,
@@ -138,9 +138,11 @@ end
     buoyancy_flux = ℑzᵃᵃᶜ(i, j, k, grid, ρ_w_bᶜᶜᶠ, velocities.w, reference_density,
                           temperature, moisture_mass_fraction, formulation, thermo)
 
+    buoyancy = nothing
+
     return ( - div_Uc(i, j, k, grid, advection, velocities, energy_density)
              + buoyancy_flux
-             - ∇_dot_Jᶜ(i, j, k, grid, reference_density, closure, diffusivity_fields, Val(1), moist_static_energy, clock, model_fields, buoyancy)
+             - ∇_dot_Jᶜ(i, j, k, grid, reference_density, closure, diffusivity_fields, energy_id, energy, clock, model_fields, buoyancy)
              # + microphysical_energy_tendency(i, j, k, grid, formulation, microphysics, microphysical_fields)
              + forcing(i, j, k, grid, clock, model_fields))
 end
