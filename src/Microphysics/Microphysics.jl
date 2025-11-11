@@ -21,7 +21,7 @@ using DocStringExtensions: TYPEDSIGNATURES
 
 import ..AtmosphereModels:
     compute_thermodynamic_state,
-    update_microphysical_fields,
+    update_microphysical_fields!,
     prognostic_field_names,
     materialize_microphysical_fields,
     moisture_mass_fractions
@@ -49,7 +49,7 @@ function materialize_microphysical_fields(microphysics::WarmPhaseSaturationAdjus
     return (; liquid_mass_fraction, specific_humidity)
 end
 
-@inline function update_microphysical_fields(microphysical_fields, ::WarmPhaseSaturationAdjustment, i, j, k, grid, 𝒰, thermo)
+@inline function update_microphysical_fields!(microphysical_fields, ::WarmPhaseSaturationAdjustment, i, j, k, grid, 𝒰, thermo)
     qˡ = microphysical_fields.liquid_mass_fraction
     qᵛ = microphysical_fields.specific_humidity
     @inbounds begin

@@ -94,7 +94,7 @@ end
     # Compute temperature via microphysics interface (falls back to dry if nothing)
     𝒰₁ = compute_thermodynamic_state(𝒰₀, microphysics, thermo)
     @inbounds temperature[i, j, k] = Thermodynamics.temperature(𝒰₁, thermo)
-    update_microphysical_fields(microphysical_fields, microphysics, i, j, k, grid, 𝒰₁, thermo)
+    update_microphysical_fields!(microphysical_fields, microphysics, i, j, k, grid, 𝒰₁, thermo)
 end
 
 function compute_tendencies!(model::AnelasticModel)

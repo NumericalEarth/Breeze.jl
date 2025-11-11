@@ -62,7 +62,7 @@ function set!(model::AtmosphereModel; enforce_mass_conservation=true, kw...)
             value = ρᵣ * u
             set!(ϕ, value)    
 
-        if name == :θ
+        elseif name == :θ
             θ = model.temperature # use scratch
             set!(θ, value)
 
@@ -78,8 +78,6 @@ function set!(model::AtmosphereModel; enforce_mass_conservation=true, kw...)
                     model.formulation,
                     model.microphysics,
                     model.thermodynamics)
-
-            end
         end
     end
 
@@ -102,7 +100,7 @@ end
 
 @kernel function _energy_density_from_potential_temperature!(energy_density, grid,
                                                              potential_temperature,
-                                                             moisture_mass_fraction,
+                                                             moisture_density,
                                                              formulation::AnelasticFormulation,
                                                              microphysics,
                                                              thermo)

@@ -10,11 +10,12 @@ A callable object for diagnosing the saturation specific humidity field,
 given a temperature field, designed for use as a `KernelFunctionOperation`
 in Oceananigans. Parameters are captured within the kernel struct for GPU friendliness.
 """
-struct SaturationSpecificHumidityKernelFunction{R, T, μ, M, TH}
+struct SaturationSpecificHumidityKernelFunction{R, T, μ, M, MF, TH}
     reference_state :: R
     temperature :: T
     microphysics :: μ
     microphysical_fields :: M
+    moisture_mass_fraction :: MF
     thermodynamics :: TH
 end
 
@@ -23,6 +24,7 @@ Adapt.adapt_structure(to, k::SaturationSpecificHumidityKernelFunction) =
                                              adapt(to, k.temperature),
                                              adapt(to, k.microphysics),
                                              adapt(to, k.microphysical_fields),
+                                             adapt(to, k.moisture_mass_fraction),
                                              adapt(to, k.thermodynamics))
 
 const C = Center
@@ -30,15 +32,21 @@ const C = Center
 const SaturationSpecificHumidityOperation = KernelFunctionOperation{C, C, C, <:Any, <:Any, <:SaturationSpecificHumidityKernelFunction}
 const SaturationSpecificHumidityField = Field{C, C, C, <:SaturationSpecificHumidityOperation}
 
+"""
+$(TYPEDSIGNATURES)
+
+Return a field for the saturation specific humidity.
+"""
 function SaturationSpecificHumidityField(model)
-    grid = model.grid
     func = SaturationSpecificHumidityKernelFunction(model.formulation.reference_state,
                                                     model.temperature,
                                                     model.microphysics,
                                                     model.microphysical_fields,
+                                                    model.moisture_mass_fraction,
                                                     model.thermodynamics)
 
-    op = KernelFunctionOperation{Center, Center, Center}(func, grid)
+    op = KernelFunctionOperation{Center, Center, Center}(func, model.grid)
+
     return Field(op)
 end
 
@@ -46,10 +54,8 @@ function (d::SaturationSpecificHumidityKernelFunction)(i, j, k, grid)
     @inbounds begin
         pᵣ = d.reference_state.pressure[i, j, k]
         T = d.temperature[i, j, k]
-        qᵛ = d.microphysical_fields.specific_humidity[i, j, k]
-        qˡ = d.microphysical_fields.liquid_mass_fraction[i, j, k]
     end
-    q = Thermodynamics.MoistureMassFractions(qᵛ, qˡ, zero(qᵛ))
+    q = moisture_mass_fractions(i, j, k, grid, d.microphysics, d.microphysical_fields, d.moisture_mass_fraction)
     ρ = Thermodynamics.density(pᵣ, T, q, d.thermodynamics)
     return Thermodynamics.saturation_specific_humidity(T, ρ, d.thermodynamics, d.thermodynamics.liquid)
 end

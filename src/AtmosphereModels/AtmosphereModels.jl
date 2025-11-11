@@ -5,7 +5,7 @@ export AtmosphereModel, AnelasticFormulation
 using DocStringExtensions: TYPEDSIGNATURES
 
 include("atmosphere_model.jl")
-include("atmosphere_diagnostics.jl")
+include("diagnostic_fields.jl")
 include("anelastic_formulation.jl")
 include("microphysics_interface.jl")
 # include("update_hydrostatic_pressure.jl")

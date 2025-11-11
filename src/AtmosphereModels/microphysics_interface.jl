@@ -9,7 +9,7 @@ using ..Thermodynamics:
 
 prognostic_field_names(::Nothing) = tuple()
 materialize_microphysical_fields(microphysics, grid, bcs) = NamedTuple()
-@inline update_microphysical_fields(microphysical_fields, ::Nothing, i, j, k, grid, 𝒰₁, thermo) = nothing
+@inline update_microphysical_fields!(microphysical_fields, ::Nothing, i, j, k, grid, 𝒰₁, thermo) = nothing
 
 """
 $(TYPEDSIGNATURES)
