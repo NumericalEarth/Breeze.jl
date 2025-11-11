@@ -7,13 +7,13 @@ Mixed-phase saturation adjustment is described by [Pressel2015](@citet).
 ## Moist static energy and total moisture mass fraction
 
 The saturation adjustment solver (specific to our anelastic formulation) takes four inputs:
-    * moist static energy ``e``
-    * total moisture mass fraction ``qᵗ``
-    * height ``z``
-    * reference pressure ``pᵣ``
+* moist static energy ``e``,
+* total moisture mass fraction ``qᵗ``,
+* height ``z``, and
+* reference pressure ``pᵣ``.
 
 Note that moist static energy density ``ρᵣ e`` and moisture density ``ρᵣ qᵗ``
-are prognostic variables for [`Breeze.AtmosphereModel`](@ref) when using [`AnelasticFormulation`](@ref),
+are prognostic variables for [`AtmosphereModel`](@ref) when using [`AnelasticFormulation`](@ref),
 where ``ρᵣ`` is the reference density.
 With warm-phase microphysics, the moist static energy ``e`` is related to temperature ``T``,
 height ``z``, and liquid mass fraction ``qˡ`` by
@@ -56,7 +56,7 @@ where ``qᵈ = 1 - qᵗ`` is the dry air mass fraction, ``qᵛ`` is the specific
 ``Rᵈ`` is the dry air gas constant, and ``Rᵛ`` is the vapor gas constant.
 The density ``ρ`` is expressed in terms of ``pᵣ`` under the anelastic approximation.
 
-In saturated conditions, we have ``qᵛ ≡ qᵛ⁺`` by definition, which leads to the expression 
+In saturated conditions, we have ``qᵛ ≡ qᵛ⁺`` by definition, which leads to the expression
 
 ```math
 qᵛ⁺ = \frac{ρᵛ⁺}{ρ} = \frac{Rᵐ}{Rᵛ} \frac{pᵛ⁺}{pᵣ} = \frac{Rᵈ}{Rᵛ} \left ( 1 - qᵗ \right ) \frac{pᵛ⁺}{pᵣ} + qᵛ⁺ \frac{pᵛ⁺}{pᵣ} .
@@ -69,7 +69,7 @@ _valid only in saturated conditions and under the assumptions of saturation adju
 qᵛ⁺ = \frac{Rᵈ}{Rᵛ} \left ( 1 - qᵗ \right ) \frac{pᵛ⁺}{pᵣ - pᵛ⁺} .
 ```
 
-This expression can also be found in [Pressel2015](@citet), equation 37.
+This expression can also be found in paper by [Pressel2015](@citet), equation (37).
 
 ## The saturation adjustment algorithm
 
@@ -117,7 +117,7 @@ In equilibrium (and thus under the assumptions of saturation adjustment), the sp
 ``qᵛ = qᵛ⁺``, while the liquid mass fraction is
 
 ```@example microphysics
-qˡ = qᵗ - qᵛ⁺ 
+qˡ = qᵗ - qᵛ⁺
 ```
 
 It is small but greater than zero → the typical situation in clouds on Earth.
