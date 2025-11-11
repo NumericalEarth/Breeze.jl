@@ -3,6 +3,7 @@ using ..Thermodynamics: Thermodynamics, ThermodynamicConstants, ReferenceState
 using Oceananigans: AbstractModel, Center, CenterField, Clock, Field
 using Oceananigans: WENO, XFaceField, YFaceField, ZFaceField
 using Oceananigans.Advection: adapt_advection_order
+using Oceananigans.Forcings: regularize_forcing
 using Oceananigans.BoundaryConditions: FieldBoundaryConditions, regularize_field_boundary_conditions
 using Oceananigans.Grids: ZDirection
 using Oceananigans.Solvers: FourierTridiagonalPoissonSolver
@@ -105,7 +106,6 @@ function AtmosphereModel(grid;
     # Next, we form a list of default boundary conditions:
     names = prognostic_field_names(formulation, microphysics, tracers)
     FT = eltype(grid)
-    forcing = NamedTuple{names}(Returns(zero(FT)) for _ in names)
     default_boundary_conditions = NamedTuple{names}(FieldBoundaryConditions() for _ in names)
     boundary_conditions = merge(default_boundary_conditions, boundary_conditions)
     boundary_conditions = regularize_field_boundary_conditions(boundary_conditions, grid, names)
@@ -133,6 +133,8 @@ function AtmosphereModel(grid;
                                                   prognostic_microphysical_fields,
                                                   tracers)
 
+    model_fields = merge(prognostic_fields, velocities, (; T=temperature, qᵗ=moisture_mass_fraction))
+    forcing = atmosphere_model_forcing(prognostic_fields, model_fields; forcing...)
     timestepper = TimeStepper(timestepper, grid, prognostic_fields)
     pressure_solver = formulation_pressure_solver(formulation, grid)
 
@@ -198,4 +200,24 @@ function prognostic_field_names(formulation, microphysics, tracer_names)
     default_names = (:ρu, :ρv, :ρw, :ρe, :ρqᵗ)
     microphysical_names = prognostic_field_names(microphysics)
     return tuple(default_names..., microphysical_names..., tracer_names...)
+end
+
+function atmosphere_model_forcing(prognostic_fields, model_fields; user_forcings...)
+
+    model_field_names = keys(model_fields)
+
+    materialized = []
+    for (name, field) in pairs(prognostic_fields)
+        if name in keys(user_forcings)
+            forcing = regularize_forcing(user_forcings[name], field, name, model_field_names)
+        else
+            forcing = Returns(zero(eltype(field)))
+        end
+        push!(materialized, forcing)
+    end
+        
+    prognostic_names = keys(prognostic_fields)
+    forcings = NamedTuple{prognostic_names}(Tuple(materialized))
+
+    return forcings
 end
