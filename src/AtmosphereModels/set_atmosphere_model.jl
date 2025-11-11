@@ -46,24 +46,7 @@ function set!(model::AtmosphereModel; enforce_mass_conservation=true, kw...)
         end
 
         # Setting diagnostic variables
-        if name == :θ
-            θ = model.temperature # use scratch
-            set!(θ, value)
-
-            grid = model.grid
-            arch = grid.architecture
-
-            launch!(arch, grid, :xyz,
-                    _energy_density_from_potential_temperature!,
-                    model.energy_density,
-                    grid,
-                    θ,
-                    model.moisture_mass_fraction,
-                    model.formulation,
-                    model.microphysics,
-                    model.thermodynamics)
-
-        elseif name == :qᵗ
+        if name == :qᵗ
             qᵗ = model.moisture_mass_fraction
             set!(qᵗ, value)
             ρᵣ = model.formulation.reference_state.density
@@ -78,6 +61,25 @@ function set!(model::AtmosphereModel; enforce_mass_conservation=true, kw...)
             ϕ = model.momentum[Symbol(:ρ, name)]
             value = ρᵣ * u
             set!(ϕ, value)    
+
+        if name == :θ
+            θ = model.temperature # use scratch
+            set!(θ, value)
+
+            grid = model.grid
+            arch = grid.architecture
+
+            launch!(arch, grid, :xyz,
+                    _energy_density_from_potential_temperature!,
+                    model.energy_density,
+                    grid,
+                    θ,
+                    model.moisture_density,
+                    model.formulation,
+                    model.microphysics,
+                    model.thermodynamics)
+
+            end
         end
     end
 
@@ -110,7 +112,7 @@ end
         pᵣ = formulation.reference_state.pressure[i, j, k]
         ρᵣ = formulation.reference_state.density[i, j, k]
         θ = potential_temperature[i, j, k]
-        qᵗ = moisture_mass_fraction[i, j, k] / ρᵣ
+        qᵗ = moisture_density[i, j, k] / ρᵣ
     end
 
     g = thermo.gravitational_acceleration
