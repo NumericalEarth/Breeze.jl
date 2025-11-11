@@ -1,46 +1,103 @@
 """
 $(TYPEDSIGNATURES)
 
-Compute the saturation vapor pressure ``pᵛ⁺`` over a planar surface
-composed of the "``β``-phase" (liquid, or ice)
+Compute the [saturation vapor pressure](https://en.wikipedia.org/wiki/Vapor_pressure)
+``pᵛ⁺`` over a surface labeled ``β`` (for example, a planar liquid surface, or curved ice surface)
 using the Clausius-Clapeyron relation,
 
 ```math
 dpᵛ⁺ / dT = pᵛ⁺ ℒᵝ(T) / (Rᵛ T^2) ,
 ```
 
-where the latent heat is ``ℒᵝ(T) = ℒᵝ(T=0) + Δcᵝ T``, with ``Δcᵝ ≡ (cᵖᵛ - cᵝ)`` .
+where the temperature-dependent latent heat of the surfaceis ``ℒᵝ(T)``.
 
-The saturation vapor pressure ``pᵛ⁺`` is obtained after integrating the above from
-the triple point, i.e., ``p(Tᵗʳ) = pᵗʳ`` to get
-
-```math
-pᵛ⁺(T) = pᵗʳ \\left ( \\frac{T}{Tᵗʳ} \\right )^{Δcᵝ / Rᵛ} \\exp \\left [ (1/Tᵗʳ - 1/T) ℒᵝ(T=0) / Rᵛ \\right ] .
-```
-
-Note that latent heat ``ℒᵝ(T=0)`` is the difference between the enthalpy of water vapor
-and the phase ``β`` when the temperature is ``T = 0``K, or absolute zero.
-
-We define the latent heat using its value ``ℒᵝᵣ = ℒᵝ(T=Tᵣ)`` at the "energy reference temperature"
-``T = Tᵣ`` (usually ``Tᵣ ≡ 273.15``K ``= 0^∘``C), such that
+Using a model for the latent heat that is linear in temperature, eg
 
 ```math
-ℒᵝ(T) = ℒᵝᵣ + Δcᵝ (T - Tᵣ), \\quad \\text{and} \\quad ℒᵝ(T=0) = ℒᵝᵣ - Δcᵝ Tᵣ``.
+ℒᵝ = ℒᵝ₀ + Δcᵝ T,
 ```
+
+where ``ℒᵝ₀ ≡ ℒᵝ(T=0)`` is the latent heat at absolute zero and
+``Δcᵝ ≡ (cᵖᵛ - cᵝ)``  is the constant difference between the vapor specific heat
+and the specific heat of phase ``β``.
+
+Note that we typically parameterize the latent heat interms of a reference
+temperature ``T = Tᵣ`` that is well above absolute zero. In that case,
+the latent heat is written
+ 
+```math
+ℒᵝ = ℒᵝᵣ + Δcᵝ (T - Tᵣ),
+\qquad \text{and} \qquad
+ℒᵝ₀ = ℒᵝᵣ - Δcᵝ Tᵣ .
+```
+
+Integrating the Clausius-Clapeyron relation with a temperature-linear latent heat model,
+from the triple point pressure and temperature ``(pᵗʳ, Tᵗʳ)`` to pressure ``pᵛ⁺``
+and temperature ``T``, we obtain
+
+```math
+log(pᵛ⁺ / pᵗʳ) = - ℒᵝ₀ / (Rᵛ T) + ℒᵝ₀ / (Rᵛ Tᵗʳ) + log(Δcᵝ / Rᵛ * T / Tᵗʳ)
+```
+
+Which then becomes
+
+```math
+pᵛ⁺(T) = pᵗʳ \\left ( \\frac{T}{Tᵗʳ} \\right )^{Δcᵝ / Rᵛ} \\exp \\left [ (1/Tᵗʳ - 1/T) ℒᵝ₀ / Rᵛ \\right ] .
+```
+
 """
-@inline function saturation_vapor_pressure(T, thermo, phase::CondensedPhase)
-    ℒᵣ = phase.reference_latent_heat # at thermo.energy_reference_temperature
+@inline function saturation_vapor_pressure(T, thermo, surface)
+    ℒ₀ = absolute_zero_latent_heat(thermo, surface)
     Tᵣ = thermo.energy_reference_temperature
 
     Tᵗʳ = thermo.triple_point_temperature
     pᵗʳ = thermo.triple_point_pressure
     Rᵛ = vapor_gas_constant(thermo)
 
+
     cᵖᵛ = thermo.vapor.heat_capacity
     cᵝ = phase.heat_capacity
     Δcᵝ = cᵖᵛ - cᵝ
 
     return pᵗʳ * (T / Tᵗʳ)^(Δcᵝ / Rᵛ) * exp((1/Tᵗʳ - 1/T) * (ℒᵣ - Δcᵝ * Tᵣ) / Rᵛ)
+end
+
+@inline function specific_heat_difference(thermo, phase::CondensedPhase)
+    cᵖᵛ = thermo.vapor.heat_capacity
+    cᵝ = phase.heat_capacity
+    return cᵖᵛ - cᵝ
+end
+
+@inline function absolute_zero_latent_heat(thermo, phase::CondensedPhase)
+    ℒᵣ = phase.reference_latent_heat # at thermo.energy_reference_temperature
+    Δcᵝ = specific_heat_difference(thermo, phase)
+    return ℒᵣ - Δcᵝ * Tᵣ
+end
+
+struct PlanarLiquidSurface end
+struct PlanarIceSurface end
+
+struct PlanarMixedPhaseSurface{FT}
+    liquid_fraction :: FT
+end
+
+@inline specific_heat_difference(thermo, ::PlanarIceSurface) = specific_heat_difference(thermo, thermo.ice)
+@inline absolute_zero_latent_heat(thermo, ::PlanarIceSurface) = absolute_zero_latent_heat(thermo, thermo.ice)
+@inline absolute_zero_latent_heat(thermo, ::PlanarLiquidSurface) = absolute_zero_latent_heat(thermo, thermo.liquid)
+@inline specific_heat_difference(thermo, ::PlanarLiquidSurface) = specific_heat_difference(thermo, thermo.liquid)
+
+@inline function specific_heat_difference(thermo, surf::PlanarMixedPhaseSurface)
+    Δcˡ = specific_heat_difference(thermo, thermo.liquid)
+    Δcⁱ = specific_heat_difference(thermo, thermo.ice)
+    λ = surf.liquid_fraction
+    return λ * Δcˡ + (1 - λ) * Δcⁱ
+end
+
+@inline function absolute_zero_latent_heat(thermo, surf::PlanarMixedPhaseSurface)
+    ℒˡ₀ = absolute_zero_latent_heat(thermo, thermo.liquid)
+    ℒⁱ₀ = absolute_zero_latent_heat(thermo, thermo.ice)
+    λ = surf.liquid_fraction
+    return λ * ℒˡ₀ + (1 - λ) * ℒⁱ₀
 end
 
 """
