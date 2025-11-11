@@ -83,7 +83,7 @@ By definition, all of the mass fractions sum up to unity,
 
 so that, using ``qᵗ = qᵛ + qˡ + qⁱ``, the dry air mass fraction can be diagnosed with ``qᵈ = 1 - qᵗ``.
 The sometimes tedious bookkeeping required to correctly diagnose the effective mixture properties
-of moist air are facilitated by Breeze's handy `MoistureMassFractions` abstraction.
+of moist air are facilitated by Breeze's handy [`MoistureMassFractions`](@ref Breeze.Thermodynamics.MoistureMassFractions) abstraction.
 For example,
 
 ```@example thermo
@@ -328,7 +328,7 @@ thermo = ThermodynamicConstants()
 thermo.molar_gas_constant
 ```
 
-`ThermodynamicConstants`, which is central to Breeze's implementation of moist thermodynamics.
+[`ThermodynamicConstants`](@ref), which is central to Breeze's implementation of moist thermodynamics.
 holds constants like the molar gas constant and molar masses, latent heats, gravitational acceleration, and more,
 
 ```@example thermo

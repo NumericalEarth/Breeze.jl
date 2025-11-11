@@ -13,7 +13,7 @@ The saturation adjustment solver (specific to our anelastic formulation) takes f
     * reference pressure ``pᵣ``
 
 Note that moist static energy density ``ρᵣ e`` and moisture density ``ρᵣ qᵗ``
-are prognostic variables for `Breeze.AtmosphereModel` when using `AnelasticFormulation`,
+are prognostic variables for [`Breeze.AtmosphereModel`](@ref) when using [`AnelasticFormulation`](@ref),
 where ``ρᵣ`` is the reference density.
 With warm-phase microphysics, the moist static energy ``e`` is related to temperature ``T``,
 height ``z``, and liquid mass fraction ``qˡ`` by
@@ -134,9 +134,9 @@ z = 0.0
 e = cᵖᵐ * T + g * z - ℒˡᵣ * qˡ
 ```
 
-Moist static energy has units ``\mathrm{m^2 / s^2}``, or ``\mathrm{J}{kg}``.
+Moist static energy has units ``\mathrm{m^2 / s^2}``, or ``\mathrm{J}/\mathrm{kg}``.
 Next we show that the saturation adjustment solver recovers the input temperature
-by passing it an "unadjusted" moisture mass fraction into `compute_temperature`,
+by passing it an "unadjusted" moisture mass fraction into [`Breeze.AtmosphereModels.compute_temperature`](@ref),
 
 ```@example microphysics
 using Breeze.AtmosphereModels: compute_temperature

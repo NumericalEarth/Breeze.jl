@@ -51,7 +51,7 @@ Adapt.adapt_structure(to, mb::MoistAirBuoyancy) =
 """
 $(TYPEDSIGNATURES)
 
-Return a MoistAirBuoyancy formulation that can be provided as input to an
+Return a `MoistAirBuoyancy` formulation that can be provided as input to an
 `Oceananigans.NonhydrostaticModel`.
 
 !!! note "Required tracers"
@@ -72,7 +72,7 @@ MoistAirBuoyancy:
 └── thermodynamics: ThermodynamicConstants{Float64}
 ```
 
-To build a model with MoistAirBuoyancy, we include potential temperature and total specific humidity
+To build a model with `MoistAirBuoyancy`, we include potential temperature and total specific humidity
 tracers `θ` and `qᵗ` to the model.
 
 ```jldoctest mab
