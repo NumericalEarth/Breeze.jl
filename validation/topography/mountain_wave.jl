@@ -1,7 +1,7 @@
 using Breeze
 using Oceananigans.Units
 using Oceananigans.Forcings
-using LinearAlgebra
+using Oceananigans.Grids: ExponentialDiscretization
 
 # Schär mountain wave test case
 # References: 
@@ -48,34 +48,7 @@ Nz_top = ceil(Int, (H - z_transition) / dz_top)
 Nz_bottom = Nz - Nz_top
 
 # Geometric refinement up to z_transition,
-function stretched_bottom(nz::Int, H::Real, dz_top::Real)
-    nz == 0 && return [0.0, H]
-    if isapprox(H, nz * dz_top; atol=1e-12, rtol=1e-12)
-        dz = fill(H / nz, nz)
-    else
-        S(r) = dz_top * (1 - r^(-nz)) / (1 - r^(-1))      # total height for ratio r
-        lo, hi = 1.0, 2.0
-        while S(hi) > H
-            hi *= 2
-        end
-        for _ in 1:60
-            mid = (lo + hi) / 2
-            S(mid) > H ? (lo = mid) : (hi = mid)
-        end
-        r = (lo + hi) / 2
-        dz0 = dz_top / r^(nz - 1)
-        dz = [dz0 * r^(k - 1) for k in 1:nz]
-    end
-    z = Vector{Float64}(undef, nz + 1)
-    z[1] = 0.0
-    @inbounds for k in 1:nz
-        z[k + 1] = z[k] + dz[k]
-    end
-    return z
-end
-
-# Build stretched part below transition
-z_stretched = stretched_bottom(Nz_bottom, z_transition, dz_top)
+z_stretched = ExponentialDiscretization(Nz_bottom, 0, z_transition ,scale = z_transition / 8, bias=:left).faces
 
 # Uniform part above transition
 z_uniform = collect(range(z_transition, H; length=Nz_top + 1))
