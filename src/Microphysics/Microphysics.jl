@@ -23,7 +23,8 @@ import ..AtmosphereModels:
     compute_thermodynamic_state,
     update_microphysical_fields,
     prognostic_field_names,
-    materialize_microphysical_fields
+    materialize_microphysical_fields,
+    moisture_mass_fractions
 
 """
     WarmPhaseSaturationAdjustment(reference_state, thermodynamics)
@@ -151,6 +152,17 @@ Return the saturation-adjusted thermodynamic state using a secant iteration.
     end
 
     return 𝒰₂
+end
+
+@inline function moisture_mass_fractions(i, j, k, grid,
+                                         ::WarmPhaseSaturationAdjustment,
+                                         microphysical_fields,
+                                         moisture_mass_fraction)
+    @inbounds begin
+        qᵛ = microphysical_fields.specific_humidity[i, j, k]
+        qˡ = microphysical_fields.liquid_mass_fraction[i, j, k]
+    end
+    return MoistureMassFractions(qᵛ, qˡ, zero(qᵛ))
 end
 
 end # module Microphysics
