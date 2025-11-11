@@ -83,5 +83,24 @@ increment_tolerance(::Type{Float64}) = 1e-10
             diff = maximum(abs, ρq_after - expected)
             @test diff ≤ increment_tolerance(FT)
         end
+
+        @testset "Scalar forcing ($FT)" begin
+            # Build a model with a single scalar tracer `c`
+            grid = RectilinearGrid(default_arch, FT; size=(4, 4, 4), x=(0, 100), y=(0, 100), z=(0, 100))
+            model = AtmosphereModel(grid; tracers=(:c,))
+            θ₀ = model.formulation.reference_state.potential_temperature
+            set!(model; θ=θ₀)
+
+            # Apply constant forcing to the scalar tracer
+            model.forcing = merge(model.forcing, (; c=forcing))
+
+            c_before = deepcopy(model.tracers.c)
+            time_step!(model, Δt)
+            c_after = deepcopy(model.tracers.c)
+
+            expected_c = c_before + Δt
+            diff_c = maximum(abs, c_after - expected_c)
+            @test diff_c ≤ increment_tolerance(FT)
+        end
     end
 end
