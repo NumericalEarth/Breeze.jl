@@ -66,12 +66,12 @@ hill(x) = h₀ * exp(-(x / a)^2) * cos(π * x / λ)^2
 grid = ImmersedBoundaryGrid(underlying_grid, PartialCellBottom(hill))
 
 # Rayleigh damping layer at the top of the domain
-damping_rate = 1/1 # relax fields on a 10 second time-scale
+damping_rate = 1/60 # relax fields on a 60 second time-scale
 top_mask = GaussianMask{:z}(center=grid.Lz, width=grid.Lz/2)
 sponge = Relaxation(rate=damping_rate, mask=top_mask)
 
 # Atmosphere model setup
-model = AtmosphereModel(grid, advection = WENO(), forcing=(u=sponge, w=sponge, θ=sponge))
+model = AtmosphereModel(grid, advection = WENO(), forcing=(ρw=sponge))
 
 # Initial conditions and initialization
 θᵢ(x, z) = θ₀ * exp(N² * z / g) # background stratification for isothermal atmosphere
