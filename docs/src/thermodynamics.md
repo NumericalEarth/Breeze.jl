@@ -392,33 +392,69 @@ cᵖᵐ - cᵖᵈ
 ```
 
 
-## The Clausius--Clapeyron relation and saturation specific humidity
+## The Clausius--Clapeyron relation and saturation vapor pressure
 
 The [Clausius--Clapeyron relation](https://en.wikipedia.org/wiki/Clausius%E2%80%93Clapeyron_relation)
-for an ideal gas
+for an ideal gas describes how saturation vapor pressure changes with temperature:
 
 ```math
 \frac{\mathrm{d} pᵛ⁺}{\mathrm{d} T} = \frac{pᵛ⁺ ℒ^β(T)}{Rᵛ T^2} ,
 ```
 
-where ``pᵛ⁺`` is saturation vapor pressure, ``T`` is temperature, ``Rᵛ`` is the specific
-gas constant for vapor, ``ℒ^β(T)`` is the latent heat of the transition from vapor to the
-``β`` phase (e.g., ``β = l`` for vapor → liquid and ``β = i`` for vapor to ice).
+where ``pᵛ⁺`` is saturation vapor pressure over a surface of condensed phase ``β``,
+``T`` is temperature, ``Rᵛ`` is the specific gas constant for vapor, and
+``ℒ^β(T)`` is the latent heat of the phase transition from vapor to phase ``β``.
+For atmospheric moist air, the relevant condensed phases are liquid water (``β = l``)
+and ice (``β = i``).
+
+### Temperature-dependent latent heat
 
 For a thermodynamic formulation that uses constant (i.e. temperature-independent) specific
-heats, the latent heat of a phase transition is linear in temperature.
-For example, for phase change from vapor to liquid,
+heats, the latent heat of a phase transition is linear in temperature:
 
 ```math
-ℒˡ(T) = ℒˡ(T=0) + \big ( \underbrace{cᵖᵛ - cˡ}_{≡Δcˡ} \big ) T ,
+ℒ^β(T) = ℒ^β_0 + \Delta c^β \, T ,
 ```
 
-where ``ℒˡ(T=0)`` is the latent heat at absolute zero, ``T = 0 \; \mathrm{K}``.
-By integrating from the triple-point temperature ``Tᵗʳ`` for which ``p(Tᵗʳ) = pᵗʳ``, we get
+where ``ℒ^β_0 ≡ ℒ^β(T=0)`` is the latent heat at absolute zero and
+``\Delta c^β ≡ c_p^v - c^β`` is the constant difference between the vapor specific heat
+capacity at constant pressure and the specific heat capacity of the condensed phase ``β``.
+
+Note that we typically parameterize the latent heat in terms of a reference
+temperature ``T_r`` that is well above absolute zero. In that case,
+the latent heat is written
 
 ```math
-pᵛ⁺(T) = pᵗʳ \left ( \frac{T}{Tᵗʳ} \right )^{Δcˡ / Rᵛ} \exp \left [ \frac{ℒˡ(T=0)}{Rᵛ} \left (\frac{1}{Tᵗʳ} - \frac{1}{T} \right ) \right ] .
+ℒ^β(T) = ℒ^β_r + \Delta c^β (T - T_r), \qquad \text{and} \qquad
+ℒ^β_0 = ℒ^β_r - \Delta c^β T_r ,
 ```
+
+where ``ℒ^β_r`` is the latent heat at the reference temperature ``T_r``.
+
+### Integration of the Clausius-Clapeyron relation
+
+To find the saturation vapor pressure as a function of temperature, we integrate
+the Clausius-Clapeyron relation with the temperature-linear latent heat model
+from the triple point pressure and temperature ``(p^{tr}, T^{tr})`` to a generic
+pressure ``pᵛ⁺`` and temperature ``T``:
+
+```math
+\int_{p^{tr}}^{pᵛ⁺} \frac{\mathrm{d} p}{p} = \int_{T^{tr}}^{T} \frac{ℒ^β_0 + \Delta c^β T'}{Rᵛ T'^2} \, \mathrm{d} T' .
+```
+
+Evaluating the integrals yields
+
+```math
+\log\left(\frac{pᵛ⁺}{p^{tr}}\right) = -\frac{ℒ^β_0}{Rᵛ T} + \frac{ℒ^β_0}{Rᵛ T^{tr}} + \frac{\Delta c^β}{Rᵛ} \log\left(\frac{T}{T^{tr}}\right) .
+```
+
+Exponentiating both sides gives the closed-form solution:
+
+```math
+pᵛ⁺(T) = p^{tr} \left ( \frac{T}{T^{tr}} \right )^{\Delta c^β / Rᵛ} \exp \left [ \frac{ℒ^β_0}{Rᵛ} \left (\frac{1}{T^{tr}} - \frac{1}{T} \right ) \right ] .
+```
+
+### Example: liquid water and ice parameters
 
 Consider parameters for liquid water,
 
@@ -427,17 +463,63 @@ using Breeze.Thermodynamics: CondensedPhase
 liquid_water = CondensedPhase(reference_latent_heat=2500800, heat_capacity=4181)
 ```
 
-or water ice,
+and water ice,
 
 ```@example thermo
 water_ice = CondensedPhase(reference_latent_heat=2834000, heat_capacity=2108)
 ```
 
-The saturation vapor pressure is
+These represent the latent heat of vaporization at the reference temperature and
+the specific heat capacity of each condensed phase. We can compute the specific heat
+difference ``\Delta c^β`` for liquid water:
+
+```@example thermo
+using Breeze.Thermodynamics: vapor_gas_constant
+cᵖᵛ = thermo.vapor.heat_capacity
+cˡ = thermo.liquid.heat_capacity
+Δcˡ = cᵖᵛ - cˡ
+```
+
+This difference ``\Delta c^l ≈`` $(round(1885 - 4181, digits=1)) J/(kg⋅K) is negative because
+water vapor has a lower heat capacity than liquid water.
+
+### Mixed-phase saturation vapor pressure
+
+In atmospheric conditions near the freezing point, condensate may exist as a mixture of
+liquid and ice. Following [Pressel2015](@citet), we model the saturation vapor pressure
+over a mixed-phase surface using a liquid fraction ``λ`` that varies smoothly between
+0 (pure ice) and 1 (pure liquid). The effective latent heat and specific heat difference
+for the mixture are computed as weighted averages:
+
+```math
+ℒ^{li}_0 = λ \, ℒ^l_0 + (1 - λ) \, ℒ^i_0 ,
+```
+
+```math
+\Delta c^{li} = λ \, \Delta c^l + (1 - λ) \, \Delta c^i .
+```
+
+These effective properties are then used in the Clausius-Clapeyron formula to compute
+the saturation vapor pressure over the mixed-phase surface. This approach ensures
+thermodynamic consistency and smooth transitions between pure liquid and pure ice states.
+
+We can illustrate this by computing the mixed-phase specific heat difference for a
+50/50 mixture:
+
+```@example thermo
+Δcⁱ = thermo.vapor.heat_capacity - thermo.ice.heat_capacity
+λ = 0.5
+Δcˡⁱ = λ * Δcˡ + (1 - λ) * Δcⁱ
+```
+
+### Visualizing saturation vapor pressure
+
+The saturation vapor pressure over liquid, ice, and mixed-phase surfaces can be computed
+and visualized:
 
 ```@example
 using Breeze
-using Breeze.Thermodynamics: saturation_vapor_pressure
+using Breeze.Thermodynamics: saturation_vapor_pressure, PlanarMixedPhaseSurface
 
 thermo = ThermodynamicConstants()
 
@@ -446,63 +528,114 @@ pᵛˡ⁺ = [saturation_vapor_pressure(Tⁱ, thermo, thermo.liquid) for Tⁱ in 
 pᵛⁱ⁺ = [saturation_vapor_pressure(Tⁱ, thermo, thermo.ice) for Tⁱ in T]
 pᵛⁱ⁺[T .> thermo.triple_point_temperature] .= NaN
 
+# Mixed-phase surface with 50% liquid, 50% ice
+mixed_surface = PlanarMixedPhaseSurface(0.5)
+pᵛᵐ⁺ = [saturation_vapor_pressure(Tⁱ, thermo, mixed_surface) for Tⁱ in T]
+
 using CairoMakie
 
 fig = Figure()
-ax = Axis(fig[1, 1], xlabel="Temperature (ᵒK)", ylabel="Saturation vapor pressure pᵛ⁺ (Pa)", yscale = log10, xticks=200:20:320)
-lines!(ax, T, pᵛˡ⁺, label="vapor pressure over liquid")
-lines!(ax, T, pᵛⁱ⁺, linestyle=:dash, label="vapor pressure over ice")
+ax = Axis(fig[1, 1], xlabel="Temperature (ᵒK)", ylabel="Saturation vapor pressure pᵛ⁺ (Pa)", 
+          yscale = log10, xticks=200:20:320)
+lines!(ax, T, pᵛˡ⁺, label="liquid", linewidth=2)
+lines!(ax, T, pᵛⁱ⁺, label="ice", linestyle=:dash, linewidth=2)
+lines!(ax, T, pᵛᵐ⁺, label="mixed (λ=0.5)", linestyle=:dot, linewidth=2, color=:purple)
 axislegend(ax, position=:rb)
 fig
 ```
 
-The saturation specific humidity is
+The mixed-phase saturation vapor pressure lies between the liquid and ice curves,
+providing a smooth interpolation between the two pure phases.
+
+## Saturation specific humidity
+
+The saturation specific humidity ``qᵛ⁺`` is the maximum amount of water vapor that
+can exist in equilibrium with a condensed phase at a given temperature and density.
+It is related to the saturation vapor pressure by:
 
 ```math
-qᵛ⁺ ≡ \frac{ρᵛ⁺}{ρ} = \frac{pᵛ⁺}{ρ Rᵐ T} .
+qᵛ⁺ ≡ \frac{ρᵛ⁺}{ρ} = \frac{pᵛ⁺}{ρ Rᵛ T} ,
 ```
 
-and this is what it looks like:
+where ``ρᵛ⁺`` is the vapor density at saturation, ``ρ`` is the total air density,
+and ``Rᵛ`` is the specific gas constant for water vapor.
+
+### Visualizing saturation vapor pressure and specific humidity
+
+We can visualize how both saturation vapor pressure and saturation specific humidity
+vary with temperature for different liquid fractions, demonstrating the smooth
+interpolation provided by the mixed-phase model:
 
 ```@example
 using Breeze
-using Breeze.Thermodynamics: saturation_specific_humidity
+using Breeze.Thermodynamics: saturation_vapor_pressure, saturation_specific_humidity, PlanarMixedPhaseSurface
 
 thermo = ThermodynamicConstants()
 
-p₀ = 101325
+# Temperature range covering typical atmospheric conditions
+T = collect(250:0.1:320)
+p₀ = 101325  # Surface pressure (Pa)
 Rᵈ = Breeze.Thermodynamics.dry_air_gas_constant(thermo)
-T = collect(273.2:0.1:313.2)
-qᵛ⁺ = zeros(length(T))
 
-for i = 1:length(T)
-    ρ = p₀ / (Rᵈ * T[i])
-    qᵛ⁺[i] = saturation_specific_humidity(T[i], ρ, thermo, thermo.liquid)
-end
+# Liquid fractions to visualize
+λ_values = [0.0, 0.25, 0.5, 0.75, 1.0]
+labels = ["ice (λ=0)", "λ=0.25", "λ=0.5", "λ=0.75", "liquid (λ=1)"]
+colors = [:blue, :cyan, :purple, :orange, :red]
+linestyles = [:solid, :dash, :dot, :dashdot, :solid]
 
 using CairoMakie
 
-fig = Figure()
-ax = Axis(fig[1, 1], xlabel="Temperature (ᵒK)", ylabel="Saturation specific humidity qᵛ⁺ (kg kg⁻¹)")
-lines!(ax, T, qᵛ⁺)
+fig = Figure(size=(1000, 400))
+
+# Panel 1: Saturation vapor pressure
+ax1 = Axis(fig[1, 1], xlabel="Temperature (K)", ylabel="Saturation vapor pressure (Pa)", 
+           yscale=log10, title="Saturation vapor pressure")
+
+for (i, λ) in enumerate(λ_values)
+    surface = PlanarMixedPhaseSurface(λ)
+    pᵛ⁺ = [saturation_vapor_pressure(Tⁱ, thermo, surface) for Tⁱ in T]
+    lines!(ax1, T, pᵛ⁺, label=labels[i], color=colors[i], linestyle=linestyles[i], linewidth=2)
+end
+
+axislegend(ax1, position=:lt)
+
+# Panel 2: Saturation specific humidity
+ax2 = Axis(fig[1, 2], xlabel="Temperature (K)", ylabel="Saturation specific humidity (kg/kg)", 
+           title="Saturation specific humidity")
+
+for (i, λ) in enumerate(λ_values)
+    surface = PlanarMixedPhaseSurface(λ)
+    qᵛ⁺ = zeros(length(T))
+    for (j, Tⁱ) in enumerate(T)
+        ρ = p₀ / (Rᵈ * Tⁱ)  # Approximate density using dry air
+        qᵛ⁺[j] = saturation_specific_humidity(Tⁱ, ρ, thermo, surface)
+    end
+    lines!(ax2, T, qᵛ⁺, label=labels[i], color=colors[i], linestyle=linestyles[i], linewidth=2)
+end
+
 fig
 ```
+
+This figure shows how the liquid fraction ``λ`` smoothly interpolates between pure ice
+(``λ = 0``) and pure liquid (``λ = 1``). At lower temperatures, the differences between
+phases are more pronounced. The mixed-phase model allows for realistic representation of
+conditions near the freezing point where both liquid and ice may coexist.
 
 ## Moist static energy
 
 For moist air, a convenient thermodynamic invariant that couples temperature, composition, and height is the moist static energy (MSE),
 
 ```math
-e ≡ cᵖᵐ \, T + g z - Lˡᵣ \, qᵛ - Lⁱᵣ qⁱ .
+e ≡ cᵖᵐ \, T + g z - Lˡᵣ \, qˡ - Lⁱᵣ qⁱ .
 ```
 
 !!! note "The alternative 'frozen moist static energy' variable"
 
     An alternative, physically equivalent, definition of moist static energy used in atmospheric
-    models such as the Global System for Atmospheric Modeling (GSAM) [Maxwell2020](@cite) is
+    models such as the Global System for Atmospheric Modeling (GSAM) [Khairoutdinov2022](@cite) is
 
     ```math
-    ẽ ≡ cᵖᵐ \, T + g z + Lˡᵣ \, qᵗ - Lᶠᵣ qⁱ .
+    ẽ ≡ cᵖᵐ \, T + g z + Lˡᵣ \, qᵛ - Lᶠᵣ qⁱ .
     ```
 
     ``e`` and ``ẽ`` are not the same, but they obey the same conservation equation provided
