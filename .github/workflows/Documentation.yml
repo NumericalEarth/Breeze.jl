@@ -91,6 +91,11 @@ jobs:
         with:
           name: documentation-build
           path: docs/build
+      - name: Remove extra files
+        # There may be JLD2 files generated during execution of Literate
+        # examples, we don't need them on the website.
+        run:
+          rm -fv docs/build/literated/*.jld2
       - name: Instantiate docs environment
         shell: julia --color=yes {0}
         run: |
