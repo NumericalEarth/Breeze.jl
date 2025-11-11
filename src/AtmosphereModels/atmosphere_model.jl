@@ -1,8 +1,8 @@
 using ..Thermodynamics: Thermodynamics, ThermodynamicConstants, ReferenceState
 
 using Oceananigans: AbstractModel, Center, CenterField, Clock, Field
-using Oceananigans: WENO, XFaceField, YFaceField, ZFaceField
-using Oceananigans.Advection: adapt_advection_order
+using Oceananigans: XFaceField, YFaceField, ZFaceField
+using Oceananigans.Advection: Centered, adapt_advection_order
 using Oceananigans.BoundaryConditions: FieldBoundaryConditions, regularize_field_boundary_conditions
 using Oceananigans.Grids: ZDirection
 using Oceananigans.Solvers: FourierTridiagonalPoissonSolver
@@ -73,7 +73,7 @@ AtmosphereModel{CPU, RectilinearGrid}(time = 0 seconds, iteration = 0)
 ├── grid: 8×8×8 RectilinearGrid{Float64, Periodic, Periodic, Bounded} on CPU with 3×3×3 halo
 ├── formulation: AnelasticFormulation(p₀=101325.0, θ₀=288.0)
 ├── timestepper: RungeKutta3TimeStepper
-├── advection scheme: WENO{3, Float64, Float32}(order=5)
+├── advection scheme: Centered{1, Float64}(order=2)
 ├── tracers: ()
 ├── coriolis: Nothing
 └── microphysics: Nothing
