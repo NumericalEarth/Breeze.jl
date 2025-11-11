@@ -493,16 +493,16 @@ fig
 For moist air, a convenient thermodynamic invariant that couples temperature, composition, and height is the moist static energy (MSE),
 
 ```math
-e ≡ cᵖᵐ \, T + g z - Lˡᵣ \, qᵛ - Lⁱᵣ qⁱ .
+e ≡ cᵖᵐ \, T + g z - Lˡᵣ \, qˡ - Lⁱᵣ qⁱ .
 ```
 
 !!! note "The alternative 'frozen moist static energy' variable"
 
     An alternative, physically equivalent, definition of moist static energy used in atmospheric
-    models such as the Global System for Atmospheric Modeling (GSAM) [Maxwell2020](@cite) is
+    models such as the Global System for Atmospheric Modeling (GSAM) [Khairoutdinov2022](@cite) is
 
     ```math
-    ẽ ≡ cᵖᵐ \, T + g z + Lˡᵣ \, qᵗ - Lᶠᵣ qⁱ .
+    ẽ ≡ cᵖᵐ \, T + g z + Lˡᵣ \, qᵛ - Lᶠᵣ qⁱ .
     ```
 
     ``e`` and ``ẽ`` are not the same, but they obey the same conservation equation provided
