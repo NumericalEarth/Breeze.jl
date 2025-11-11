@@ -138,9 +138,7 @@ function AtmosphereModel(grid;
 
     timestepper = TimeStepper(timestepper, grid, prognostic_fields)
     pressure_solver = formulation_pressure_solver(formulation, grid)
-
-    # TODO: support these
-    diffusivity_fields = nothing
+    diffusivity_fields = Oceananigans.TurbulenceClosures.build_diffusivity_fields(closure, grid)
 
     model = AtmosphereModel(arch,
                             grid,
