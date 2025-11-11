@@ -93,7 +93,7 @@ function AtmosphereModel(grid;
                          coriolis = nothing,
                          boundary_conditions = NamedTuple(),
                          forcing = NamedTuple(),
-                         advection = WENO(order=5),
+                         advection = Centered(order=2),
                          closure = nothing,
                          microphysics = nothing, # WarmPhaseSaturationAdjustment(),
                          timestepper = :RungeKutta3)
@@ -138,7 +138,10 @@ function AtmosphereModel(grid;
 
     timestepper = TimeStepper(timestepper, grid, prognostic_fields)
     pressure_solver = formulation_pressure_solver(formulation, grid)
-    diffusivity_fields = Oceananigans.TurbulenceClosures.build_diffusivity_fields(closure, grid)
+
+    # May need to use more names in `tracers` for this to work
+    diffusivity_fields =
+        Oceananigans.TurbulenceClosures.build_diffusivity_fields(grid, clock, tracers, boundary_conditions, closure)
 
     model = AtmosphereModel(arch,
                             grid,
