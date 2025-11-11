@@ -90,18 +90,17 @@ end
                                                              moisture_density)
     i, j, k = @index(Global, NTuple)
 
-    𝒰 = thermodynamic_state(i, j, k, grid, formulation, thermo, energy_density, moisture_density)
-    T = compute_temperature(𝒰, microphysics, thermo)
+    𝒰₀ = diagnose_thermodynamic_state(i, j, k, grid, formulation, thermo, energy_density, moisture_density)
+    𝒰₁ = compute_thermodynamic_state(𝒰₀, microphysics, thermo)
+    update_microphysical_fields!(microphysical_fields, microphysics, i, j, k, grid, 𝒰₁, thermo)
 
     @inbounds begin
-        temperature[i, j, k] = T
-        moisture_mass_fraction[i, j, k] = total_moisture_mass_fraction(𝒰)
+        @inbounds temperature[i, j, k] = Thermodynamics.temperature(𝒰₁, thermo)
+        moisture_mass_fraction[i, j, k] = total_moisture_mass_fraction(𝒰₁)
         ρe = energy_density[i, j, k]
-        ρᵣ = @inbounds formulation.reference_state.density[i, j, k]
+        ρᵣ = formulation.reference_state.density[i, j, k]
         moist_static_energy[i, j, k] = ρe / ρᵣ
     end
-  
-    update_microphysical_fields!(microphysical_fields, microphysics, i, j, k, grid, 𝒰, thermo)
 end
 
 function compute_tendencies!(model::AnelasticModel)
