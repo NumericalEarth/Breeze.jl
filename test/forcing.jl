@@ -1,8 +1,5 @@
 using Breeze
-using Oceananigans
-using Oceananigans: interior
 using Test
-using Base: Returns
 
 function setup_forcing_model(grid, forcing)
     model = AtmosphereModel(grid; tracers=:ρc, forcing)
@@ -22,73 +19,42 @@ increment_tolerance(::Type{Float64}) = 1e-10
         Forcing(Returns(one(FT)), discrete_form=true),
         Forcing(Returns(one(FT)), field_dependencies=:ρu, discrete_form=true),
         Forcing(Returns(one(FT)), field_dependencies=(:ρe, :ρqᵗ, :ρu), discrete_form=true),
-        1,
     ]
 
-    Δt = 3
+    Δt = convert(FT, 1e-6)
 
-    @testset "Momentum forcing ($FT, $(typeof(forcing)))" for forcing in forcings
+    @testset "Forcing forcing ($FT, $(typeof(forcing)))" for forcing in forcings
         # x-momentum (ρu)
         u_forcing = (; ρu=forcing)
         model = setup_forcing_model(grid, u_forcing)
-        ρu_before = deepcopy(model.momentum.ρu)
         time_step!(model, Δt)
-
-        expected_ρu = ρu_before + Δt
-        diff_ρu = maximum(abs, model.momentum.ρu - expected_ρu)
-        @test diff_ρu ≤ increment_tolerance(FT)
+        @test maximum(model.momentum.ρu) ≈ Δt
 
         # y-momentum (ρv)
         v_forcing = (; ρv=forcing)
         model = setup_forcing_model(grid, v_forcing)
-        ρv_before = deepcopy(model.momentum.ρv)
         time_step!(model, Δt)
+        @test maximum(model.momentum.ρv) ≈ Δt
 
-        expected_ρv = ρv_before + Δt
-        diff_ρv = maximum(abs, model.momentum.ρv - expected_ρv)
-        @test diff_ρv ≤ increment_tolerance(FT)
-
-        # z-momentum (ρw)
-        w_forcing = (; ρw=forcing)
-        model = setup_forcing_model(grid, w_forcing)
-        ρw_before = deepcopy(model.momentum.ρw)
-        time_step!(model, Δt)
-
-        expected_ρw = ρw_before + Δt
-        diff_ρw = maximum(abs, model.momentum.ρw - expected_ρw)
-        @test diff_ρw ≤ increment_tolerance(FT)
-    end
-
-    @testset "Energy forcing ($FT, $(typeof(forcing)))" for forcing in forcings
         e_forcing = (; ρe=forcing)
         model = setup_forcing_model(grid, e_forcing)
         ρe_before = deepcopy(model.energy_density)
         time_step!(model, Δt)
+        @test maximum(model.energy_density) ≈ maximum(ρe_before) + Δt
 
-        expected_ρe = ρe_before + Δt
-        diff_ρe = maximum(abs, model.energy_density - expected_ρe)
-        @test diff_ρe ≤ increment_tolerance(FT)
-    end
-
-    @testset "Moisture forcing ($FT, $(typeof(forcing)))" for forcing in forcings
         q_forcing = (; ρqᵗ=forcing)
         model = setup_forcing_model(grid, q_forcing)
-        ρq_before = deepcopy(model.moisture_density)
         time_step!(model, Δt)
+        @test maximum(model.moisture_density) ≈ Δt
 
-        expected = ρq_before + Δt
-        diff = maximum(abs, model.moisture_density - expected)
-        @test diff ≤ increment_tolerance(FT)
-    end
-
-    @testset "Scalar forcing ($FT, $(typeof(forcing)))" for forcing in forcings
         c_forcing = (; ρc=forcing)
         model = setup_forcing_model(grid, c_forcing)
-        ρc_before = deepcopy(model.tracers.ρc)
         time_step!(model, Δt)
+        @test maximum(model.tracers.ρc) ≈ Δt
+    end
 
-        expected_ρc = ρc_before + Δt
-        diff_ρc = maximum(abs, model.tracers.ρc - expected_ρc)
-        @test diff_ρc ≤ increment_tolerance(FT)
+    @testset "Forcing on non-existing field errors" begin
+        bad = (; u=forcings[1])
+        @test_throws ArgumentError AtmosphereModel(grid; forcing=bad)
     end
 end

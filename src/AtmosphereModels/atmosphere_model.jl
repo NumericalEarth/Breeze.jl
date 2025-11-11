@@ -185,13 +185,13 @@ function Base.show(io::IO, model::AtmosphereModel)
     tracernames = prettykeys(model.tracers)
 
     print(io, summary(model), "\n",
-        "├── grid: ", summary(model.grid), "\n",
-        "├── formulation: ", summary(model.formulation), "\n",
-        "├── timestepper: ", TS, "\n",
-        "├── advection scheme: ", summary(model.advection), "\n",
-        "├── tracers: ", tracernames, "\n",
-        "├── coriolis: ", summary(model.coriolis), "\n",
-        "└── microphysics: ", Mic)
+              "├── grid: ", summary(model.grid), "\n",
+              "├── formulation: ", summary(model.formulation), "\n",
+              "├── timestepper: ", TS, "\n",
+              "├── advection scheme: ", summary(model.advection), "\n",
+              "├── tracers: ", tracernames, "\n",
+              "├── coriolis: ", summary(model.coriolis), "\n",
+              "└── microphysics: ", Mic)
 end
 
 cell_advection_timescale(model::AtmosphereModel) = cell_advection_timescale(model.grid, model.velocities)

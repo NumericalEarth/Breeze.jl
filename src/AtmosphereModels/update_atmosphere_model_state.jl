@@ -111,12 +111,11 @@ function compute_tendencies!(model::AnelasticModel)
                    model.clock,
                    fields(model))
 
-    pₕ′ = model.hydrostatic_pressure_anomaly
     ρᵣ = model.formulation.reference_state.density
-    u_args = tuple(common_args..., model.forcing.ρu, pₕ′, ρᵣ)
-    v_args = tuple(common_args..., model.forcing.ρv, pₕ′, ρᵣ)
-    w_args = tuple(common_args..., model.forcing.ρw, ρᵣ,
-                   model.formulation, model.temperature,
+    u_args = tuple(common_args..., model.forcing.ρu)
+    v_args = tuple(common_args..., model.forcing.ρv)
+    w_args = tuple(common_args..., model.forcing.ρw,
+                   ρᵣ, model.formulation, model.temperature,
                    model.moisture_mass_fraction, model.thermodynamics)
 
     launch!(arch, grid, :xyz, compute_x_momentum_tendency!, Gρu, grid, u_args)
