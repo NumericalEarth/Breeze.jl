@@ -38,15 +38,12 @@ end
     model = AtmosphereModel(grid; thermodynamics=thermo, formulation)
 
     # Initialize with potential temperature and dry air
-    set!(model; θ=θ₀, qᵗ=0)
+    θᵢ = CenterField(grid)
+    set!(θᵢ, (x, y, z) -> randn())
+    set!(model; θ=θᵢ)
 
-    θ_field = Breeze.AtmosphereModels.PotentialTemperatureField(model)
-    compute!(θ_field)
-
-    θ_expected = CenterField(grid)
-    set!(θ_expected, θ₀)
-
-    @test @allowscalar θ_field ≈ θ_expected
+    θ_model = Breeze.AtmosphereModels.PotentialTemperatureField(model)
+    @test @allowscalar θ_model ≈ θᵢ
 end
 
 @testset "Saturation and PotentialTemperatureField (WarmPhase) [$(FT)]" for FT in (Float32, Float64)
@@ -61,15 +58,7 @@ end
     model = AtmosphereModel(grid; thermodynamics=thermo, formulation, microphysics)
 
     # Initialize with potential temperature and dry air
-    set!(model; θ=θ₀, qᵗ=0)
-
-    # Check PotentialTemperatureField recovers θ₀
-    θ_field = Breeze.AtmosphereModels.PotentialTemperatureField(model)
-    compute!(θ_field)
-
-    θ_expected = CenterField(grid)
-    set!(θ_expected, θ₀)
-    @test @allowscalar θ_field ≈ θ_expected
+    set!(model; θ=θ₀)
 
     # Check SaturationSpecificHumidityField matches direct thermodynamics
     q★ = Breeze.AtmosphereModels.SaturationSpecificHumidityField(model)
@@ -83,9 +72,9 @@ end
     pᵣᵢ = @allowscalar interior(model.formulation.reference_state.pressure, 1, 1, k)[]
     q = Breeze.Thermodynamics.MoistureMassFractions(zero(FT), zero(FT), zero(FT))
     ρᵢ = Breeze.Thermodynamics.density(pᵣᵢ, Tᵢ, q, thermo)
-    q★exp = Breeze.Thermodynamics.saturation_specific_humidity(Tᵢ, ρᵢ, thermo, thermo.liquid)
-    q★ᵢ = @allowscalar interior(q★, 1, 1, k)[]
+    qᵛ⁺_expected = Breeze.Thermodynamics.saturation_specific_humidity(Tᵢ, ρᵢ, thermo, thermo.liquid)
+    qᵛ⁺k = @allowscalar interior(q★, 1, 1, k)[]
 
-    @test isfinite(q★ᵢ)
-    @test q★ᵢ ≈ q★exp rtol=FT(1e-5)
+    @test isfinite(qᵛ⁺k)
+    @test qᵛ⁺k ≈ qᵛ⁺_expected rtol=FT(1e-5)
 end
