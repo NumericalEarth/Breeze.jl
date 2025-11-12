@@ -33,7 +33,7 @@ a  = 5000                   # m   (Gaussian half-width parameter)
 K  = 2*π/λ                  # rad m^-1
 
 #  grid configuration
-Nx, Nz = 200, 200
+Nx, Nz = 256, 256
 L, H = 100kilometers, 29kilometers
 
 # Vertical grid stretching parameters, constant spacing (500 m) above 3 km
@@ -52,7 +52,7 @@ z_uniform = range(z_transition+dz_top, H; length=Nz_top)
 z_faces = vcat(z_stretched.faces, collect(z_uniform))
 
 # Set up the simulation doamin
-underlying_grid = RectilinearGrid(CPU(), size = (Nx, Nz), halo = (4, 4),
+underlying_grid = RectilinearGrid(GPU(), size = (Nx, Nz), halo = (4, 4),
                                   x = (-L, L), z = z_faces,
                                   topology = (Periodic, Flat, Bounded))
 
