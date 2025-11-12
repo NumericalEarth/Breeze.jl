@@ -51,7 +51,7 @@ Adapt.adapt_structure(to, mb::MoistAirBuoyancy) =
 """
 $(TYPEDSIGNATURES)
 
-Return a MoistAirBuoyancy formulation that can be provided as input to an
+Return a `MoistAirBuoyancy` formulation that can be provided as input to an
 `Oceananigans.NonhydrostaticModel`.
 
 !!! note "Required tracers"
@@ -72,12 +72,12 @@ MoistAirBuoyancy:
 └── thermodynamics: ThermodynamicConstants{Float64}
 ```
 
-To build a model with MoistAirBuoyancy, we include potential temperature and total specific humidity
+To build a model with `MoistAirBuoyancy`, we include potential temperature and total specific humidity
 tracers `θ` and `qᵗ` to the model.
 
 ```jldoctest mab
 model = NonhydrostaticModel(; grid, buoyancy, tracers = (:θ, :qᵗ))
-                                     
+
 # output
 NonhydrostaticModel{CPU, RectilinearGrid}(time = 0 seconds, iteration = 0)
 ├── grid: 1×1×8 RectilinearGrid{Float64, Periodic, Periodic, Bounded} on CPU with 1×1×3 halo
@@ -97,7 +97,7 @@ function MoistAirBuoyancy(grid;
     reference_state = ReferenceState(grid, thermodynamics;
                                      base_pressure,
                                      potential_temperature = reference_potential_temperature)
-                          
+
     return MoistAirBuoyancy(reference_state, thermodynamics)
 end
 
@@ -168,9 +168,9 @@ The saturation equilibrium temperature satisfies the nonlinear relation
 with ``ℒˡᵣ`` the latent heat at the reference temperature ``Tᵣ``, ``cᵖᵐ`` the mixture
 specific heat, ``Π`` the Exner function, ``qˡ = \\max(0, qᵗ - qᵛ⁺)``
 the condensate specific humidity, ``qᵗ`` is the
-total specific humidity, ``qᵛ⁺`` is the saturation specific humidity.
+total specific humidity, and ``qᵛ⁺`` is the saturation specific humidity.
 
-The saturation equilibrium temperature is thus obtained by solving ``r(T)``, where
+The saturation equilibrium temperature is thus obtained by solving ``r(T) = 0``, where
 ```math
 r(T) ≡ T - θ Π - ℒˡᵣ qˡ / cᵖᵐ .
 ```
@@ -211,7 +211,7 @@ Solution of ``r(T) = 0`` is found via the [secant method](https://en.wikipedia.o
     # since ``qᵛ⁺₁(T₁)`` underestimates the saturation specific humidity,
     # and therefore qˡ₁ is overestimated. This is similar to an approach
     # used in Pressel et al 2015. However, it doesn't work for large liquid fractions.
-    T₂ = T₁ + 1 
+    T₂ = T₁ + 1
 
     #=
     ℒˡᵣ = thermo.liquid.reference_latent_heat
@@ -248,7 +248,7 @@ end
 
 # This estimate assumes that the specific humidity is itself the saturation
 # specific humidity, eg ``qᵛ = qᵛ⁺``. Knowledge of the specific humidity
-# is needed to compute the mixture gas constant, and thus density, 
+# is needed to compute the mixture gas constant, and thus density,
 # which in turn is needed to compute the _saturation_ specific humidity.
 # This consideration culminates in a new expression for saturation specific humidity
 # used below, and also written in Pressel et al 2015, equation 37.
@@ -279,7 +279,7 @@ end
     cᵖᵐ = mixture_heat_capacity(q, thermo)
     qˡ = q.liquid
     θ = 𝒰.potential_temperature
-    return T - Π * θ - ℒˡᵣ * qˡ / cᵖᵐ 
+    return T - Π * θ - ℒˡᵣ * qˡ / cᵖᵐ
 end
 
 #####

@@ -23,6 +23,14 @@ import Oceananigans.TimeSteppers: compute_pressure_correction!, make_pressure_co
 ##### Formulation definition
 #####
 
+"""
+$(TYPEDSIGNATURES)
+
+AnelasticFormulation is a dynamical formulation wherein the density and pressure are
+small perturbations from a dry, hydrostatic, adiabatic `reference_state`.
+The prognostic energy variable is the moist static energy density.
+The energy density equation includes a buoyancy flux term, following [Pauluis2008](@citet).
+"""
 struct AnelasticFormulation{R}
     reference_state :: R
 end
@@ -40,16 +48,6 @@ function Base.summary(formulation::AnelasticFormulation)
 end
 
 Base.show(io::IO, formulation::AnelasticFormulation) = print(io, "AnelasticFormulation")
-
-function AnelasticFormulation(grid, state_constants, thermo)
-    pᵣ = Field{Nothing, Nothing, Center}(grid)
-    ρᵣ = Field{Nothing, Nothing, Center}(grid)
-    set!(pᵣ, z -> reference_pressure(z, state_constants, thermo))
-    set!(ρᵣ, z -> reference_density(z, state_constants, thermo))
-    fill_halo_regions!(pᵣ)
-    fill_halo_regions!(ρᵣ)
-    return AnelasticFormulation(state_constants, pᵣ, ρᵣ)
-end
 
 #####
 ##### Thermodynamic state
