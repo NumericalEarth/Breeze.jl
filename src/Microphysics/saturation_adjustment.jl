@@ -28,7 +28,6 @@ import ..AtmosphereModels:
 
 abstract type AbstractEquilibrium end
 
-
 """
     WarmPhaseSaturationAdjustment(reference_state, thermodynamics)
 
@@ -78,6 +77,12 @@ Return `WarmPhaseEquilibrium` representing an equilibrium between water vapor an
 struct WarmPhaseEquilibrium <: AbstractEquilibrium end
 @inline equilibrated_surface(::WarmPhaseEquilibrium, T) = PlanarLiquidSurface()
 
+@inline function equilibrated_moisture_mass_fractions(::WarmPhaseEquilibrium, T, qᵗ)
+    qˡ = max(0, qᵗ - qᵛ⁺)
+    qᵛ = qᵗ - qˡ
+    return MoistureMassFractions(qᵛ, qˡ, zero(qˡ))
+end
+
 #####
 ##### Mixed-phase equilibrium
 #####
@@ -112,6 +117,15 @@ end
     T′ = clamp(T, Tʰ, Tᶠ)
     λ = (T′ - Tʰ) / (Tᶠ - Tʰ)
     return PlanarMixedPhaseSurface(λ)
+end
+
+@inline function equilibrated_moisture_mass_fractions(equilibrium::MixedPhaseEquilibrium, T, qᵗ)
+    surface = equilibrated_surface(equilibrium, T)
+    λ = surface.liquid_fraction
+    qᶜ = max(0, qᵗ - qᵛ⁺)
+    qˡ = λ * qᶜ
+    qⁱ = (1 - λ) * qᶜ
+    return MoistureMassFractions(qᵛ, qˡ, qⁱ)
 end
 
 const WarmPhaseSaturationAdjustment{FT} = SaturationAdjustment{WarmPhaseEquilibrium, FT} where FT
@@ -197,9 +211,7 @@ end
     pᵣ = 𝒰₀.reference_pressure
     qᵗ = total_moisture_mass_fraction(𝒰₀)
     qᵛ⁺ = adjustment_saturation_specific_humidity(T, pᵣ, qᵗ, thermo, equilibrium)
-    qˡ = max(0, qᵗ - qᵛ⁺)
-    qᵛ = qᵗ - qˡ
-    q₁ = MoistureMassFractions(qᵛ, qˡ, zero(qˡ))
+    q = equilibrated_moisture_mass_fractions(equilibrium, T, qᵗ)
     return with_moisture(𝒰₀, q₁)
 end
 
