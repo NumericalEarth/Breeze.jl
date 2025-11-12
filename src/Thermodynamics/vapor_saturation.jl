@@ -6,7 +6,7 @@ Compute the [saturation vapor pressure](https://en.wikipedia.org/wiki/Vapor_pres
 using the Clausius-Clapeyron relation,
 
 ```math
-dpᵛ⁺ / dT = pᵛ⁺ ℒᵝ(T) / (Rᵛ T^2) ,
+𝖽pᵛ⁺ / 𝖽T = pᵛ⁺ ℒᵝ(T) / (Rᵛ T^2) ,
 ```
 
 where the temperature-dependent latent heat of the surfaceis ``ℒᵝ(T)``.
@@ -24,7 +24,7 @@ and the specific heat of phase ``β``.
 Note that we typically parameterize the latent heat interms of a reference
 temperature ``T = Tᵣ`` that is well above absolute zero. In that case,
 the latent heat is written
- 
+
 ```math
 ℒᵝ = ℒᵝᵣ + Δcᵝ (T - Tᵣ),
 \\qquad \\text{and} \\qquad

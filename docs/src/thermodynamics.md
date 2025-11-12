@@ -83,7 +83,7 @@ By definition, all of the mass fractions sum up to unity,
 
 so that, using ``qᵗ = qᵛ + qˡ + qⁱ``, the dry air mass fraction can be diagnosed with ``qᵈ = 1 - qᵗ``.
 The sometimes tedious bookkeeping required to correctly diagnose the effective mixture properties
-of moist air are facilitated by Breeze's handy `MoistureMassFractions` abstraction.
+of moist air are facilitated by Breeze's handy [`MoistureMassFractions`](@ref Breeze.Thermodynamics.MoistureMassFractions) abstraction.
 For example,
 
 ```@example thermo
@@ -328,7 +328,7 @@ thermo = ThermodynamicConstants()
 thermo.molar_gas_constant
 ```
 
-`ThermodynamicConstants`, which is central to Breeze's implementation of moist thermodynamics.
+[`ThermodynamicConstants`](@ref), which is central to Breeze's implementation of moist thermodynamics.
 holds constants like the molar gas constant and molar masses, latent heats, gravitational acceleration, and more,
 
 ```@example thermo
@@ -480,7 +480,7 @@ cˡ = thermo.liquid.heat_capacity
 Δcˡ = cᵖᵛ - cˡ
 ```
 
-This difference ``\Delta c^l ≈`` $(round(1885 - 4181, digits=1)) J/(kg⋅K) is negative because
+This difference ``\Delta c^l ≈`` -2296 J/(kg⋅K) is negative because
 water vapor has a lower heat capacity than liquid water.
 
 ### Mixed-phase saturation vapor pressure
@@ -535,7 +535,7 @@ pᵛᵐ⁺ = [saturation_vapor_pressure(Tⁱ, thermo, mixed_surface) for Tⁱ in
 using CairoMakie
 
 fig = Figure()
-ax = Axis(fig[1, 1], xlabel="Temperature (ᵒK)", ylabel="Saturation vapor pressure pᵛ⁺ (Pa)", 
+ax = Axis(fig[1, 1], xlabel="Temperature (ᵒK)", ylabel="Saturation vapor pressure pᵛ⁺ (Pa)",
           yscale = log10, xticks=200:20:320)
 lines!(ax, T, pᵛˡ⁺, label="liquid", linewidth=2)
 lines!(ax, T, pᵛⁱ⁺, label="ice", linestyle=:dash, linewidth=2)
@@ -588,7 +588,7 @@ using CairoMakie
 fig = Figure(size=(1000, 400))
 
 # Panel 1: Saturation vapor pressure
-ax1 = Axis(fig[1, 1], xlabel="Temperature (K)", ylabel="Saturation vapor pressure (Pa)", 
+ax1 = Axis(fig[1, 1], xlabel="Temperature (K)", ylabel="Saturation vapor pressure (Pa)",
            yscale=log10, title="Saturation vapor pressure")
 
 for (i, λ) in enumerate(λ_values)
@@ -600,7 +600,7 @@ end
 axislegend(ax1, position=:lt)
 
 # Panel 2: Saturation specific humidity
-ax2 = Axis(fig[1, 2], xlabel="Temperature (K)", ylabel="Saturation specific humidity (kg/kg)", 
+ax2 = Axis(fig[1, 2], xlabel="Temperature (K)", ylabel="Saturation specific humidity (kg/kg)",
            title="Saturation specific humidity")
 
 for (i, λ) in enumerate(λ_values)
