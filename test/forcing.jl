@@ -57,4 +57,9 @@ increment_tolerance(::Type{Float64}) = 1e-10
         bad = (; u=forcings[1])
         @test_throws ArgumentError AtmosphereModel(grid; forcing=bad)
     end
+
+    @testset "Incorrectly specified forcing" begin
+        @test_throws ArgumentError AtmosphereModel(grid; forcing=forcings[1])
+    end
+
 end

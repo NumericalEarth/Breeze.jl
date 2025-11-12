@@ -135,7 +135,7 @@ function AtmosphereModel(grid;
                                                   tracers)
 
     model_fields = merge(prognostic_fields, velocities, (; T=temperature, qᵗ=moisture_mass_fraction))
-    forcing = atmosphere_model_forcing(prognostic_fields, model_fields; forcing...)
+    forcing = atmosphere_model_forcing(forcing, prognostic_fields, model_fields)
     timestepper = TimeStepper(timestepper, grid, prognostic_fields)
     pressure_solver = formulation_pressure_solver(formulation, grid)
 
@@ -203,8 +203,19 @@ function prognostic_field_names(formulation, microphysics, tracer_names)
     return tuple(default_names..., microphysical_names..., tracer_names...)
 end
 
-function atmosphere_model_forcing(prognostic_fields, model_fields; user_forcings...)
+function atmosphere_model_forcing(user_forcings, prognostic_fields, model_fields)
+    forcings_type = typeof(user_forcings)
+    msg = string("AtmosphereModel forcing must be a NamedTuple, got $forcings_type")
+    throw(ArgumentError(msg))
+    return nothing
+end
 
+function atmosphere_model_forcing(::Nothing, prognostic_fields, model_fields)
+    names = keys(prognostic_fields)
+    return NamedTuple{names}(Returns(zero(eltype(prognostic_fields[name]))) for name in names)
+end
+
+function atmosphere_model_forcing(user_forcings::NamedTuple, prognostic_fields, model_fields)
     user_forcing_names = keys(user_forcings)
     for name in user_forcing_names
         if name ∉ keys(prognostic_fields)
