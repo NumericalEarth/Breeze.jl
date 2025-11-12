@@ -57,7 +57,7 @@ using Breeze.Microphysics:
         @testset let T₂=T₂, qᵗ₂=qᵗ₂
             T₂ = convert(FT, T₂)
             qᵗ₂ = convert(FT, qᵗ₂)
-            qᵛ⁺₂ = adjustment_saturation_specific_humidity(T₂, pᵣ, qᵗ₂, thermo)
+            qᵛ⁺₂ = adjustment_saturation_specific_humidity(T₂, pᵣ, qᵗ₂, thermo, microphysics.equilibrium)
 
             if qᵗ₂ > qᵛ⁺₂ # saturated conditions
                 qˡ₂ = qᵗ₂ - qᵛ⁺₂
