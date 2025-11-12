@@ -110,7 +110,7 @@ end
     Tᶠ = equilibrium.freezing_temperature
     Tʰ = equilibrium.homogeneous_ice_nucleation_temperature
     T′ = clamp(T, Tʰ, Tᶠ)
-    λ = (T′ - Tᶠ) / (Tʰ - Tᶠ)
+    λ = (T′ - Tʰ) / (Tᶠ - Tʰ)
     return PlanarMixedPhaseSurface(λ)
 end
 
