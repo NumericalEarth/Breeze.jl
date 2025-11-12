@@ -193,15 +193,8 @@ end
 end
 
 @inline function saturation_adjustment_residual(T, 𝒰₀, thermo, equilibrium)
-    qᵗ = total_moisture_mass_fraction(𝒰₀)
-    pᵣ = 𝒰₀.reference_pressure
-
-    # Adjust the moisture and compute a new temperature
-    qᵛ⁺ = adjustment_saturation_specific_humidity(T, pᵣ, qᵗ, thermo, equilibrium)
-    q = equilibrated_moisture_mass_fractions(T, qᵗ, qᵛ⁺, equilibrium)
-    𝒰₁ = with_moisture(𝒰₀, q)
+    𝒰₁ = adjust_state(𝒰₀, T, thermo, equilibrium)
     T₁ = temperature(𝒰₁, thermo)
-
     return T - T₁
 end
 
