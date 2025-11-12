@@ -480,8 +480,8 @@ cˡ = thermo.liquid.heat_capacity
 Δcˡ = cᵖᵛ - cˡ
 ```
 
-This difference ``\Delta c^l ≈`` -2296 J/(kg⋅K) is negative because
-water vapor has a lower heat capacity than liquid water.
+This difference ``\Delta c^l`` above is negative because water vapor has a lower heat
+capacity than liquid water.
 
 ### Mixed-phase saturation vapor pressure
 
