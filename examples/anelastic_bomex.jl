@@ -48,7 +48,7 @@ microphysics = CloudMicrophysics.Parameters.Parameters0M{FT}(τ_precip=600, S_0=
 q_precip_forcing = Forcing(precipitation, field_dependencies=:qᵗ, parameters=microphysics)
 
 FT = eltype(grid)
-q₀ = Breeze.Thermodynamics.MoistureMassFractions(zero(FT), zero(FT), zero(FT))
+q₀ = Breeze.Thermodynamics.MoistureMassFractions{FT} |> zero
 ρ₀ = Breeze.Thermodynamics.density(p₀, θ₀, q₀, thermo)
 cᵖᵈ = thermo.dry_air.heat_capacity
 ρe_bcs = FieldBoundaryConditions(bottom=FluxBoundaryCondition(ρ₀ * cᵖᵈ * 8e-3))

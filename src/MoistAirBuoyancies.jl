@@ -123,7 +123,7 @@ const c = Center()
 
     z = Oceananigans.Grids.znode(i, j, k, grid, c, c, c)
     p₀ = mb.reference_state.base_pressure
-    q = MoistureMassFractions(qᵗ, zero(qᵗ), zero(qᵗ))
+    q = MoistureMassFractions(qᵗ)
     𝒰 = PotentialTemperatureState(θ, q, z, p₀, pᵣ, ρᵣ)
 
     # Perform saturation adjustment
@@ -183,7 +183,7 @@ Solution of ``r(T) = 0`` is found via the [secant method](https://en.wikipedia.o
 
     # Generate guess for unsaturated conditions; if dry, return T₁
     qᵗ = total_moisture_mass_fraction(𝒰₀)
-    q₁ = MoistureMassFractions(qᵗ, zero(qᵗ), zero(qᵗ))
+    q₁ = MoistureMassFractions(qᵗ)
     𝒰₁ = with_moisture(𝒰₀, q₁)
     Π₁ = exner_function(𝒰₀, thermo)
     T₁ = Π₁ * θ
@@ -200,7 +200,7 @@ Solution of ``r(T) = 0`` is found via the [secant method](https://en.wikipedia.o
     # is given by the saturation specific humidity, eg ``qᵛ = qᵛ⁺``.
     qᵛ⁺₁ = adjustment_saturation_specific_humidity(T₁, 𝒰₁, thermo)
     qˡ₁ = qᵗ - qᵛ⁺₁
-    q₁ = MoistureMassFractions(qᵛ⁺₁, qˡ₁, zero(qˡ₁))
+    q₁ = MoistureMassFractions(qᵛ⁺₁, qˡ₁)
     𝒰₁ = with_moisture(𝒰₀, q₁)
 
     # We generate a second guess simply by adding 1 K to T₁...
@@ -267,7 +267,7 @@ end
     qᵛ⁺ = adjustment_saturation_specific_humidity(T, 𝒰₀, thermo)
     qᵗ = total_moisture_mass_fraction(𝒰₀)
     qˡ = max(0, qᵗ - qᵛ⁺)
-    q₁ = MoistureMassFractions(qᵛ⁺, qˡ, zero(qˡ))
+    q₁ = MoistureMassFractions(qᵛ⁺, qˡ)
     return with_moisture(𝒰₀, q₁)
 end
 
@@ -298,7 +298,7 @@ const c = Center()
     end
     z = Oceananigans.Grids.znode(i, j, k, grid, c, c, c)
     p₀ = mb.reference_state.base_pressure
-    q = MoistureMassFractions(qᵗᵢ, zero(qᵗᵢ), zero(qᵗᵢ))
+    q = MoistureMassFractions(qᵗᵢ)
     𝒰 = PotentialTemperatureState(θᵢ, q, z, p₀, pᵣ, ρᵣ)
     return compute_boussinesq_adjustment_temperature(𝒰, mb.thermodynamics)
 end
@@ -327,7 +327,7 @@ end
         qᵗᵢ = qᵗ[i, j, k]
         pᵣ = mb.reference_state.pressure[i, j, k]
     end
-    q = MoistureMassFractions(qᵗᵢ, zero(qᵗᵢ), zero(qᵗᵢ))
+    q = MoistureMassFractions(qᵗᵢ)
     ρ = density(pᵣ, Tᵢ, q, mb.thermodynamics)
     return saturation_specific_humidity(Tᵢ, ρ, mb.thermodynamics, phase)
 end
@@ -375,7 +375,7 @@ Adapt.adapt_structure(to, ck::CondensateKernel) = CondensateKernel(adapt(to, ck.
     # First assume non-saturation.
     z = Oceananigans.Grids.znode(i, j, k, grid, c, c, c)
     p₀ = mb.reference_state.base_pressure
-    q = MoistureMassFractions(qᵗᵢ, zero(qᵗᵢ), zero(qᵗᵢ))
+    q = MoistureMassFractions(qᵗᵢ)
     𝒰 = PotentialTemperatureState(Tᵢ, q, z, p₀, pᵣ, ρᵣ)
     Π = exner_function(𝒰, mb.thermodynamics)
     Tᵢ <= Π * θᵢ + 10 * eps(Tᵢ) && return zero(qᵗᵢ)

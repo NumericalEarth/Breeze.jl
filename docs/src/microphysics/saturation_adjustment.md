@@ -126,7 +126,7 @@ We are now ready to compute moist static energy,
 ```@example microphysics
 using Breeze.Thermodynamics: MoistureMassFractions
 
-q = MoistureMassFractions(qᵛ⁺, qˡ, zero(qᵗ))
+q = MoistureMassFractions(qᵛ⁺, qˡ)
 cᵖᵐ = mixture_heat_capacity(q, thermo)
 g = thermo.gravitational_acceleration
 z = 0.0
@@ -144,7 +144,7 @@ using Breeze.Microphysics: WarmPhaseSaturationAdjustment
 
 microphysics = WarmPhaseSaturationAdjustment()
 
-q₀ = MoistureMassFractions(qᵗ, zero(qᵗ), zero(qᵗ))
+q₀ = (qᵗ, zero(qᵗ), zero(qᵗ))
 𝒰 = Breeze.Thermodynamics.MoistStaticEnergyState(e, q₀, z, p)
 T★ = compute_temperature(𝒰, microphysics, thermo)
 ```
@@ -175,7 +175,7 @@ We thus increment the first guess by half of the difference implied by the
 estimate ``qˡ₁``,
 
 ```@example  microphysics
-q₂ = MoistureMassFractions(qᵛ⁺₂, qˡ₁, zero(qᵗ))
+q₂ = MoistureMassFractions(qᵛ⁺₂, qˡ₁)
 cᵖᵐ₂ = mixture_heat_capacity(q₂, thermo)
 ΔT = ℒˡᵣ * qˡ₁ / cᵖᵐ₂
 T₂ = T₁ + ΔT / 2
@@ -225,7 +225,7 @@ T = zeros(length(qᵗ))
 qˡ = zeros(length(qᵗ))
 
 for (i, qᵗⁱ) in enumerate(qᵗ)
-    q = MoistureMassFractions(qᵗⁱ, 0.0, 0.0)
+    q = MoistureMassFractions(qᵗⁱ)
     𝒰 = MoistStaticEnergyState(e₀, q, z, p)
     T[i] = compute_temperature(𝒰, microphysics, thermo)
     qᵛ⁺ = Breeze.Microphysics.adjustment_saturation_specific_humidity(T[i], p, qᵗⁱ, thermo, WarmPhaseEquilibrium())
@@ -274,7 +274,7 @@ reference_state = ReferenceState(grid, thermo;
                                  potential_temperature = θ₀)
 
 qᵗ = 0.005
-q = MoistureMassFractions(qᵗ, 0.0, 0.0)
+q = MoistureMassFractions(qᵗ)
 
 z = znodes(grid, Center())
 T = zeros(grid.Nz)

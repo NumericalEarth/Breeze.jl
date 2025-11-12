@@ -70,7 +70,7 @@ end
 
     Tᵢ = @allowscalar interior(model.temperature, 1, 1, k)[]
     pᵣᵢ = @allowscalar interior(model.formulation.reference_state.pressure, 1, 1, k)[]
-    q = Breeze.Thermodynamics.MoistureMassFractions(zero(FT), zero(FT), zero(FT))
+    q = Breeze.Thermodynamics.MoistureMassFractions{FT} |> zero
     ρᵢ = Breeze.Thermodynamics.density(pᵣᵢ, Tᵢ, q, thermo)
     qᵛ⁺_expected = Breeze.Thermodynamics.saturation_specific_humidity(Tᵢ, ρᵢ, thermo, thermo.liquid)
     qᵛ⁺k = @allowscalar interior(q★, 1, 1, k)[]

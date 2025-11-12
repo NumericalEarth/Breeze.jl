@@ -118,7 +118,8 @@ end
     p₀ = formulation.reference_state.base_pressure
 
     # Assuming a state with no condensate?
-    q = MoistureMassFractions(qᵗ, zero(qᵗ), zero(qᵗ))
+    # TODO use microphysics model in the course of determining q
+    q = MoistureMassFractions(qᵗ)
     𝒰₀ = PotentialTemperatureState(θ, q, z, p₀, pᵣ, ρᵣ)
     𝒰 = compute_thermodynamic_state(𝒰₀, microphysics, thermo)
 

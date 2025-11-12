@@ -77,10 +77,10 @@ Return `WarmPhaseEquilibrium` representing an equilibrium between water vapor an
 struct WarmPhaseEquilibrium <: AbstractEquilibrium end
 @inline equilibrated_surface(::WarmPhaseEquilibrium, T) = PlanarLiquidSurface()
 
-@inline function equilibrated_moisture_mass_fractions(::WarmPhaseEquilibrium, T, qᵗ)
+@inline function equilibrated_moisture_mass_fractions(T, qᵗ, qᵛ⁺, ::WarmPhaseEquilibrium)
     qˡ = max(0, qᵗ - qᵛ⁺)
     qᵛ = qᵗ - qˡ
-    return MoistureMassFractions(qᵛ, qˡ, zero(qˡ))
+    return MoistureMassFractions(qᵛ, qˡ)
 end
 
 #####
@@ -119,7 +119,7 @@ end
     return PlanarMixedPhaseSurface(λ)
 end
 
-@inline function equilibrated_moisture_mass_fractions(equilibrium::MixedPhaseEquilibrium, T, qᵗ)
+@inline function equilibrated_moisture_mass_fractions(T, qᵗ, qᵛ⁺, equilibrium::MixedPhaseEquilibrium)
     surface = equilibrated_surface(equilibrium, T)
     λ = surface.liquid_fraction
     qᶜ = max(0, qᵗ - qᵛ⁺)
@@ -137,55 +137,33 @@ const MPSA = MixedPhaseSaturationAdjustment
 prognostic_field_names(::WPSA) = tuple()
 prognostic_field_names(::MPSA) = tuple()
 
-function materialize_microphysical_fields(::WPSA, grid, boundary_conditions)
-    liquid_mass_fraction = CenterField(grid)
-    specific_humidity = CenterField(grid)
-    return (; liquid_mass_fraction, specific_humidity)
-end
+center_field_tuple(grid, names...) = NamedTuple{names}(CenterField(grid) for name in names)
+materialize_microphysical_fields(::WPSA, grid, bcs) = center_field_tuple(grid, :specific_humidity, :liquid_mass_fraction)
+materialize_microphysical_fields(::MPSA, grid, bcs) = center_field_tuple(grid, :specific_humidity, :liquid_mass_fraction, :ice_mass_fraction)
 
-function materialize_microphysical_fields(::MPSA, grid, boundary_conditions)
-    ice_mass_fraction = CenterField(grid)
-    liquid_mass_fraction = CenterField(grid)
-    specific_humidity = CenterField(grid)
-    return (; ice_mass_fraction, liquid_mass_fraction, specific_humidity)
-end
-
-@inline function update_microphysical_fields!(microphysical_fields, ::WPSA, i, j, k, grid, 𝒰, thermo)
-    qˡ = microphysical_fields.liquid_mass_fraction
-    qᵛ = microphysical_fields.specific_humidity
-    @inbounds begin
-        qᵛ[i, j, k] = 𝒰.moisture_mass_fractions.vapor
-        qˡ[i, j, k] = 𝒰.moisture_mass_fractions.liquid
-    end
+@inline @inbounds function update_microphysical_fields!(μ, ::WPSA, i, j, k, grid, 𝒰, thermo)
+    μ.specific_humidity[i, j, k] = 𝒰.moisture_mass_fractions.vapor
+    μ.liquid_mass_fraction[i, j, k] = 𝒰.moisture_mass_fractions.liquid
     return nothing
 end
 
-@inline function update_microphysical_fields!(microphysical_fields, ::MPSA, i, j, k, grid, 𝒰, thermo)
-    qᵛ = microphysical_fields.specific_humidity
-    qˡ = microphysical_fields.liquid_mass_fraction
-    qⁱ = microphysical_fields.ice_mass_fraction
-    @inbounds begin
-        qᵛ[i, j, k] = 𝒰.moisture_mass_fractions.vapor
-        qˡ[i, j, k] = 𝒰.moisture_mass_fractions.liquid
-        qⁱ[i, j, k] = 𝒰.moisture_mass_fractions.ice
-    end
+@inline @inbounds function update_microphysical_fields!(μ, ::MPSA, i, j, k, grid, 𝒰, thermo)
+    μ.specific_humidity[i, j, k] = 𝒰.moisture_mass_fractions.vapor
+    μ.liquid_mass_fraction[i, j, k] = 𝒰.moisture_mass_fractions.liquid
+    μ.ice_mass_fraction[i, j, k] = 𝒰.moisture_mass_fractions.ice
     return nothing
 end 
 
-@inline function moisture_mass_fractions(i, j, k, grid, ::WPSA, μ, qᵗ)
-    @inbounds begin
-        qᵛ = μ.microphysical_fields.specific_humidity[i, j, k]
-        qˡ = μ.microphysical_fields.liquid_mass_fraction[i, j, k]
-    end
-    return MoistureMassFractions(qᵛ, qˡ, zero(qᵛ))
+@inline @inbounds function moisture_mass_fractions(i, j, k, grid, ::WPSA, μ, qᵗ)
+    qᵛ = μ.microphysical_fields.specific_humidity[i, j, k]
+    qˡ = μ.microphysical_fields.liquid_mass_fraction[i, j, k]
+    return MoistureMassFractions(qᵛ, qˡ)
 end
 
-@inline function moisture_mass_fractions(i, j, k, grid, ::MPSA, μ, qᵗ)
-    @inbounds begin
-        qᵛ = μ.microphysical_fields.specific_humidity[i, j, k]
-        qˡ = μ.microphysical_fields.liquid_mass_fraction[i, j, k]
-        qⁱ = μ.microphysical_fields.ice_mass_fraction[i, j, k]
-    end
+@inline @inbounds function moisture_mass_fractions(i, j, k, grid, ::MPSA, μ, qᵗ)
+    qᵛ = μ.microphysical_fields.specific_humidity[i, j, k]
+    qˡ = μ.microphysical_fields.liquid_mass_fraction[i, j, k]
+    qⁱ = μ.microphysical_fields.ice_mass_fraction[i, j, k]
     return MoistureMassFractions(qᵛ, qˡ, qⁱ)
 end
 
@@ -211,7 +189,7 @@ end
     pᵣ = 𝒰₀.reference_pressure
     qᵗ = total_moisture_mass_fraction(𝒰₀)
     qᵛ⁺ = adjustment_saturation_specific_humidity(T, pᵣ, qᵗ, thermo, equilibrium)
-    q = equilibrated_moisture_mass_fractions(equilibrium, T, qᵗ)
+    q₁ = equilibrated_moisture_mass_fractions(T, qᵗ, qᵛ⁺, equilibrium)
     return with_moisture(𝒰₀, q₁)
 end
 
@@ -221,8 +199,7 @@ end
 
     # Adjust the moisture and compute a new temperature
     qᵛ⁺ = adjustment_saturation_specific_humidity(T, pᵣ, qᵗ, thermo, equilibrium)
-    qˡ = max(0, qᵗ - qᵛ⁺)
-    q = MoistureMassFractions(qᵛ⁺, qˡ, zero(qˡ))
+    q = equilibrated_moisture_mass_fractions(T, qᵗ, qᵛ⁺, equilibrium)
     𝒰₁ = with_moisture(𝒰₀, q)
     T₁ = temperature(𝒰₁, thermo)
 
@@ -241,7 +218,7 @@ Return the saturation-adjusted thermodynamic state using a secant iteration.
 
     # Unsaturated initial guess
     qᵗ = total_moisture_mass_fraction(𝒰₀)
-    q₁ = MoistureMassFractions(qᵗ, zero(qᵗ), zero(qᵗ))
+    q₁ = MoistureMassFractions(qᵗ)
     𝒰₁ = with_moisture(𝒰₀, q₁)
     T₁ = temperature(𝒰₁, thermo)
 
@@ -253,8 +230,7 @@ Return the saturation-adjusted thermodynamic state using a secant iteration.
     # Re-initialize first guess assuming saturation
     𝒰₁ = with_moisture(𝒰₀, q₁)
     qᵛ⁺₁ = adjustment_saturation_specific_humidity(T₁, pᵣ, qᵗ, thermo, equilibrium)
-    qˡ₁ = qᵗ - qᵛ⁺₁
-    q₁ = MoistureMassFractions(qᵛ⁺₁, qˡ₁, zero(qˡ₁))
+    q₁ = equilibrated_moisture_mass_fractions(T₁, qᵗ, qᵛ⁺₁, equilibrium)
     𝒰₁ = with_moisture(𝒰₀, q₁)
 
     # Generate a second guess
