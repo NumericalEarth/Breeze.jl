@@ -149,7 +149,7 @@ qᵛ⁺ᵐ = Breeze.Thermodynamics.saturation_specific_humidity(T, ρ, thermo, m
 ```
 
 """
-@inline function saturation_specific_humidity(T, ρ, thermo::ThermodynamicConstants, surface)
+@inline function saturation_specific_humidity(T, ρ, thermo, surface)
     pᵛ⁺ = saturation_vapor_pressure(T, thermo, surface)
     Rᵛ = vapor_gas_constant(thermo)
     return pᵛ⁺ / (ρ * Rᵛ * T)
