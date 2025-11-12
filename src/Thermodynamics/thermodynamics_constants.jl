@@ -251,8 +251,8 @@ struct MoistureMassFractions{FT}
     ice :: FT
 end
 
-@inline MoistureMassFractions(vapor::FT) = MoistureMassFractions(vapor, zero(vapor), zero(vapor))
-@inline MoistureMassFractions(vapor::FT, liquid::FT) = MoistureMassFractions(vapor, liquid, zero(vapor))
+@inline MoistureMassFractions(vapor::FT) where FT = MoistureMassFractions(vapor, zero(vapor), zero(vapor))
+@inline MoistureMassFractions(vapor::FT, liquid::FT) where FT = MoistureMassFractions(vapor, liquid, zero(vapor))
 
 const MMF = MoistureMassFractions
 Base.zero(::Type{MMF{FT}}) where FT = MoistureMassFractions(zero(FT), zero(FT), zero(FT))
