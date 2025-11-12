@@ -41,4 +41,4 @@ Build and return [`MoistureMassFractions`](@ref) at `(i, j, k)` for the given `g
 Dispatch is provided for `::Nothing` microphysics here. Specific microphysics
 schemes may extend this method to provide tailored behavior.
 """
-@inline @inbounds moisture_mass_fractions(i, j, k, grid, ::Nothing, μ, qᵗ) = MoistureMassFractions(qᵗ[i, j, k])
+@inline moisture_mass_fractions(i, j, k, grid, ::Nothing, μ, qᵗ) = @inbounds MoistureMassFractions(qᵗ[i, j, k])

@@ -58,6 +58,7 @@ using Breeze.Microphysics:
             T₂ = convert(FT, T₂)
             qᵗ₂ = convert(FT, qᵗ₂)
             qᵛ⁺₂ = adjustment_saturation_specific_humidity(T₂, pᵣ, qᵗ₂, thermo, microphysics.equilibrium)
+            @test qᵛ⁺₂ isa FT
 
             if qᵗ₂ > qᵛ⁺₂ # saturated conditions
                 qˡ₂ = qᵗ₂ - qᵛ⁺₂
@@ -84,78 +85,9 @@ using Breeze.Microphysics:
     end
 end
 
-@testset "Saturation adjustment (MoistAirBuoyancies)" for FT in (Float32, Float64)
-    # Minimal grid and reference state
-    # grid = RectilinearGrid(FT, size=(), topology=(Flat, Flat, Flat))
-    grid = RectilinearGrid(default_arch, FT; size=(1, 1, 1), x=(0, 1), y=(0, 1), z=(0, 1))
-    thermo = ThermodynamicConstants(FT)
-    reference_state = ReferenceState(grid, thermo; base_pressure=101325, potential_temperature=288)
-
-    # Sample a single cell
-    pᵣ = @allowscalar reference_state.pressure[1, 1, 1]
-    ρᵣ = @allowscalar reference_state.density[1, 1, 1]
-    p₀ = reference_state.base_pressure
-    z = FT(0.5)
-
-    # Case 0: Absolute zero potential temperature returns zero temperature
-    θ₀ = zero(FT)
-    q₀ = MoistureMassFractions{FT} |> zero
-    𝒰₀ = PotentialTemperatureState(θ₀, q₀, z, p₀, pᵣ, ρᵣ)
-    T₀ = compute_boussinesq_adjustment_temperature(𝒰₀, thermo)
-    @test T₀ == 0
-
-    # Helper for tolerances
-    atol_T = FT === Float64 ? 1e-6 : FT(1e-3)
-
-    # Case 1: Unsaturated, dry (qᵗ = 0)
-    θ₁ = FT(300)
-    qᵗ₁ = zero(FT)
-    q₁ = MoistureMassFractions(qᵗ₁)
-    𝒰₁ = PotentialTemperatureState(θ₁, q₁, z, p₀, pᵣ, ρᵣ)
-    Π₁ = exner_function(𝒰₁, thermo)
-    T_dry₁ = Π₁ * θ₁
-
-    T₁ = compute_boussinesq_adjustment_temperature(𝒰₁, thermo)
-    @test isapprox(T₁, T_dry₁; atol=atol_T)
-
-    # Case 2: Unsaturated, humid but below saturation at dry temperature
-    θ₂ = FT(300)
-    q₂ = MoistureMassFractionso{FT} |> zero
-    𝒰₂ = PotentialTemperatureState(θ₂, q₂, z, p₀, pᵣ, ρᵣ)
-    Π₂ = exner_function(𝒰₂, thermo)
-    T_dry₂ = Π₂ * θ₂
-
-    # Choose qᵗ well below saturation at T_dry₂
-    ρ₂ = density(pᵣ, T_dry₂, q₂, thermo)
-    qᵛ⁺₂ = saturation_specific_humidity(T_dry₂, ρ₂, thermo, thermo.liquid)
-    qᵗ₂ = qᵛ⁺₂ / 2
-    q₂ = MoistureMassFractions(qᵗ₂, zero(FT), zero(FT))
-    𝒰₂ = with_moisture(𝒰₂, q₂)
-
-    T₂ = compute_boussinesq_adjustment_temperature(𝒰₂, thermo)
-    Π₂ = exner_function(𝒰₂, thermo)
-    T_dry₂ = Π₂ * θ₂
-    @test isapprox(T₂, T_dry₂; atol=atol_T)
-
-    # Case 3: Saturated, humid (qᵗ = qᵛ⁺)
-    T₃ = θ̃ = FT(300)
-    qᵗ = FT(0.025)
-    q̃ = MoistureMassFractions(qᵗ)
-    𝒰 = PotentialTemperatureState(θ̃, q̃, z, p₀, pᵣ, ρᵣ)
-    qᵛ⁺ = Breeze.MoistAirBuoyancies.adjustment_saturation_specific_humidity(T₃, 𝒰, thermo)
-    @test qᵗ > qᵛ⁺ # otherwise the test is wrong
-
-    qˡ = qᵗ - qᵛ⁺
-    q₃ = MoistureMassFractions(qᵛ⁺, qˡ)
-    𝒰₃ = with_moisture(𝒰, q₃)
-    Π₃ = exner_function(𝒰₃, thermo)
-    cᵖᵐ = mixture_heat_capacity(q₃, thermo)
-    ℒˡᵣ = thermo.liquid.reference_latent_heat
-    θ₃ = (T₃ - ℒˡᵣ / cᵖᵐ * qˡ) / Π₃
-    𝒰₃ = PotentialTemperatureState(θ₃, q₃, z, p₀, pᵣ, ρᵣ)
-
-    T₃_solve = compute_boussinesq_adjustment_temperature(𝒰₃, thermo)
-    @test isapprox(T₃_solve, T₃; atol=atol_T)
+function test_liquid_fraction(T, Tᶠ, Tʰ) 
+    T′ = clamp(T, Tʰ, Tᶠ)
+    return (T′ - Tʰ) / (Tᶠ - Tʰ)
 end
 
 @testset "Mixed-phase saturation adjustment (AtmosphereModel) [$(FT)]" for FT in (Float32, Float64)
@@ -163,9 +95,10 @@ end
     thermo = ThermodynamicConstants(FT)
     reference_state = ReferenceState(grid, thermo; base_pressure=101325, potential_temperature=288)
 
-    tol = FT(1e-3)
+    tol = 1e-3
     Tᶠ = FT(273.15)  # Freezing temperature
     Tʰ = FT(233.15)  # Homogeneous ice nucleation temperature
+
     equilibrium = MixedPhaseEquilibrium(FT; freezing_temperature=Tᶠ, homogeneous_ice_nucleation_temperature=Tʰ)
     microphysics = SaturationAdjustment(FT; tolerance=tol, equilibrium=equilibrium)
 
@@ -195,7 +128,7 @@ end
         T_mid = FT(253.15)  # Midway between Tᶠ and Tʰ
         surface_mid = Breeze.Microphysics.equilibrated_surface(equilibrium, T_mid)
         @test surface_mid isa PlanarMixedPhaseSurface{FT}
-        λ_expected = (T_mid - Tᶠ) / (Tʰ - Tᶠ)
+        λ_expected = test_liquid_fraction(T_mid, Tᶠ, Tʰ)
         @test surface_mid.liquid_fraction ≈ λ_expected
     end
 
@@ -239,14 +172,11 @@ end
 
     # Test 4: Mixed-phase range temperatures with moist static energy verification
     @testset "Mixed-phase range temperatures with moist static energy" begin
-        for T_mixed in [FT(240), FT(250), FT(260), FT(270)]
-            @testset let T_mixed=T_mixed
-                # Compute liquid fraction λ
-                T′ = clamp(T_mixed, Tᶠ, Tʰ)
-                λ = (T′ - Tᶠ) / (Tʰ - Tᶠ)
-
+        for T in [FT(240), FT(250), FT(260), FT(270)]
+            @testset let T=T
+                λ = test_liquid_fraction(T, Tᶠ, Tʰ)
                 qᵗ = FT(0.015)
-                qᵛ⁺ = adjustment_saturation_specific_humidity(T_mixed, pᵣ, qᵗ, thermo, equilibrium)
+                qᵛ⁺ = adjustment_saturation_specific_humidity(T, pᵣ, qᵗ, thermo, equilibrium)
 
                 if qᵗ > qᵛ⁺  # saturated conditions
                     # Partition condensate between liquid and ice based on λ
@@ -260,17 +190,17 @@ end
 
                     # Compute moist static energy: e = cᵖᵐ*T + g*z - ℒˡᵣ*qˡ - ℒⁱᵣ*qⁱ
                     cᵖᵐ = mixture_heat_capacity(q, thermo)
-                    e = cᵖᵐ * T_mixed + g * z - ℒˡᵣ * qˡ - ℒⁱᵣ * qⁱ
+                    e = cᵖᵐ * T + g * z - ℒˡᵣ * qˡ - ℒⁱᵣ * qⁱ
 
                     # Verify moist static energy can recover temperature
                     𝒰 = MoistStaticEnergyState(e, q, z, pᵣ)
                     T_recovered = (e - g * z + ℒˡᵣ * q.liquid + ℒⁱᵣ * q.ice) / mixture_heat_capacity(q, thermo)
-                    @test T_recovered ≈ T_mixed
+                    @test T_recovered ≈ T
 
                     # Test saturation adjustment recovers temperature
-                    𝒰_unadjusted = MoistStaticEnergyState(e, MoistureMassFractions(qᵗ, zero(FT), zero(FT)), z, pᵣ)
+                    𝒰_unadjusted = MoistStaticEnergyState(e, MoistureMassFractions(qᵗ), z, pᵣ)
                     T★ = compute_temperature(𝒰_unadjusted, microphysics, thermo)
-                    @test T★ ≈ T_mixed atol=sqrt(tol)
+                    @test T★ ≈ T atol=sqrt(tol)
                 end
             end
         end
@@ -278,32 +208,31 @@ end
 
     # Test 5: Verify moist static energy formula with various moisture fractions
     @testset "Moist static energy formula verification" begin
-        T_test = FT(253.15)  # Midway in mixed-phase range
-        T′ = clamp(T_test, Tᶠ, Tʰ)
-        λ = (T′ - Tᶠ) / (Tʰ - Tᶠ)
+        T = FT(253.15)  # Midway in mixed-phase range
+        λ = test_liquid_fraction(T, Tᶠ, Tʰ)
 
-        for qᵗ_test in [FT(0.005), FT(0.01), FT(0.02), FT(0.03)]
-            @testset let qᵗ_test=qᵗ_test
-                qᵛ⁺ = adjustment_saturation_specific_humidity(T_test, pᵣ, qᵗ_test, thermo, equilibrium)
+        for qᵗ in [FT(0.005), FT(0.01), FT(0.02), FT(0.03)]
+            @testset let qᵗ=qᵗ
+                qᵛ⁺ = adjustment_saturation_specific_humidity(T, pᵣ, qᵗ, thermo, equilibrium)
 
-                if qᵗ_test > qᵛ⁺  # saturated conditions
-                    q_condensate = qᵗ_test - qᵛ⁺
-                    qˡ = λ * q_condensate
-                    qⁱ = (1 - λ) * q_condensate
+                if qᵗ > qᵛ⁺  # saturated conditions
+                    qᶜ = qᵗ - qᵛ⁺
+                    qˡ = λ * qᶜ
+                    qⁱ = (1 - λ) * qᶜ
                     q = MoistureMassFractions(qᵛ⁺, qˡ, qⁱ)
 
                     # Compute moist static energy
                     cᵖᵐ = mixture_heat_capacity(q, thermo)
-                    e = cᵖᵐ * T_test + g * z - ℒˡᵣ * qˡ - ℒⁱᵣ * qⁱ
+                    e = cᵖᵐ * T + g * z - ℒˡᵣ * qˡ - ℒⁱᵣ * qⁱ
 
                     # Verify formula: T = (e - g*z + ℒˡᵣ*qˡ + ℒⁱᵣ*qⁱ) / cᵖᵐ
                     T_from_mse = (e - g * z + ℒˡᵣ * q.liquid + ℒⁱᵣ * q.ice) / mixture_heat_capacity(q, thermo)
-                    @test T_from_mse ≈ T_test
+                    @test T_from_mse ≈ T
 
                     # Test with saturation adjustment
-                    𝒰 = MoistStaticEnergyState(e, MoistureMassFractions(qᵗ_test)), z, pᵣ)
+                    𝒰 = MoistStaticEnergyState(e, MoistureMassFractions(qᵗ), z, pᵣ)
                     T★ = compute_temperature(𝒰, microphysics, thermo)
-                    @test T★ ≈ T_test atol=sqrt(tol)
+                    @test T★ ≈ T atol=sqrt(tol)
                 end
             end
         end
@@ -313,8 +242,7 @@ end
     @testset "Condensate partitioning verification" begin
         for T_partition in [FT(235), FT(245), FT(255), FT(265)]
             @testset let T_partition=T_partition
-                T′ = clamp(T_partition, Tᶠ, Tʰ)
-                λ_expected = (T′ - Tᶠ) / (Tʰ - Tᶠ)
+                λ_expected = test_liquid_fraction(T_partition, Tᶠ, Tʰ)
 
                 qᵗ = FT(0.02)
                 qᵛ⁺ = adjustment_saturation_specific_humidity(T_partition, pᵣ, qᵗ, thermo, equilibrium)
@@ -343,4 +271,78 @@ end
             end
         end
     end
+end
+
+@testset "Saturation adjustment (MoistAirBuoyancies)" for FT in (Float32, Float64)
+    # Minimal grid and reference state
+    # grid = RectilinearGrid(FT, size=(), topology=(Flat, Flat, Flat))
+    grid = RectilinearGrid(default_arch, FT; size=(1, 1, 1), x=(0, 1), y=(0, 1), z=(0, 1))
+    thermo = ThermodynamicConstants(FT)
+    reference_state = ReferenceState(grid, thermo; base_pressure=101325, potential_temperature=288)
+
+    # Sample a single cell
+    pᵣ = @allowscalar reference_state.pressure[1, 1, 1]
+    ρᵣ = @allowscalar reference_state.density[1, 1, 1]
+    p₀ = reference_state.base_pressure
+    z = FT(0.5)
+
+    # Case 0: Absolute zero potential temperature returns zero temperature
+    θ₀ = zero(FT)
+    q₀ = MoistureMassFractions{FT} |> zero
+    𝒰₀ = PotentialTemperatureState(θ₀, q₀, z, p₀, pᵣ, ρᵣ)
+    T₀ = compute_boussinesq_adjustment_temperature(𝒰₀, thermo)
+    @test T₀ == 0
+
+    # Helper for tolerances
+    atol_T = FT === Float64 ? 1e-6 : FT(1e-3)
+
+    # Case 1: Unsaturated, dry (qᵗ = 0)
+    θ₁ = FT(300)
+    qᵗ₁ = zero(FT)
+    q₁ = MoistureMassFractions(qᵗ₁)
+    𝒰₁ = PotentialTemperatureState(θ₁, q₁, z, p₀, pᵣ, ρᵣ)
+    Π₁ = exner_function(𝒰₁, thermo)
+    T_dry₁ = Π₁ * θ₁
+
+    T₁ = compute_boussinesq_adjustment_temperature(𝒰₁, thermo)
+    @test isapprox(T₁, T_dry₁; atol=atol_T)
+
+    # Case 2: Unsaturated, humid but below saturation at dry temperature
+    θ₂ = FT(300)
+    q₂ = MoistureMassFractions{FT} |> zero
+    𝒰₂ = PotentialTemperatureState(θ₂, q₂, z, p₀, pᵣ, ρᵣ)
+    Π₂ = exner_function(𝒰₂, thermo)
+    T_dry₂ = Π₂ * θ₂
+
+    # Choose qᵗ well below saturation at T_dry₂
+    ρ₂ = density(pᵣ, T_dry₂, q₂, thermo)
+    qᵛ⁺₂ = saturation_specific_humidity(T_dry₂, ρ₂, thermo, thermo.liquid)
+    qᵗ₂ = qᵛ⁺₂ / 2
+    q₂ = MoistureMassFractions(qᵗ₂)
+    𝒰₂ = with_moisture(𝒰₂, q₂)
+
+    T₂ = compute_boussinesq_adjustment_temperature(𝒰₂, thermo)
+    Π₂ = exner_function(𝒰₂, thermo)
+    T_dry₂ = Π₂ * θ₂
+    @test isapprox(T₂, T_dry₂; atol=atol_T)
+
+    # Case 3: Saturated, humid (qᵗ = qᵛ⁺)
+    T₃ = θ̃ = FT(300)
+    qᵗ = FT(0.025)
+    q̃ = MoistureMassFractions(qᵗ)
+    𝒰 = PotentialTemperatureState(θ̃, q̃, z, p₀, pᵣ, ρᵣ)
+    qᵛ⁺ = Breeze.MoistAirBuoyancies.adjustment_saturation_specific_humidity(T₃, 𝒰, thermo)
+    @test qᵗ > qᵛ⁺ # otherwise the test is wrong
+
+    qˡ = qᵗ - qᵛ⁺
+    q₃ = MoistureMassFractions(qᵛ⁺, qˡ)
+    𝒰₃ = with_moisture(𝒰, q₃)
+    Π₃ = exner_function(𝒰₃, thermo)
+    cᵖᵐ = mixture_heat_capacity(q₃, thermo)
+    ℒˡᵣ = thermo.liquid.reference_latent_heat
+    θ₃ = (T₃ - ℒˡᵣ / cᵖᵐ * qˡ) / Π₃
+    𝒰₃ = PotentialTemperatureState(θ₃, q₃, z, p₀, pᵣ, ρᵣ)
+
+    T₃_solve = compute_boussinesq_adjustment_temperature(𝒰₃, thermo)
+    @test isapprox(T₃_solve, T₃; atol=atol_T)
 end

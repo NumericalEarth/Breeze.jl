@@ -106,6 +106,11 @@ the supercooled liquid fraction vanishes.
 function MixedPhaseEquilibrium(FT = Oceananigans.defaults.FloatType;
                                freezing_temperature = 273.15,
                                homogeneous_ice_nucleation_temperature = 233.15)
+
+    if freezing_temperature < homogeneous_ice_nucleation_temperature
+        throw(ArgumentError("`freezing_temperature` must be greater than `homogeneous_ice_nucleation_temperature`"))
+    end
+
     freezing_temperature = convert(FT, freezing_temperature)
     homogeneous_ice_nucleation_temperature = convert(FT, homogeneous_ice_nucleation_temperature)
     return MixedPhaseEquilibrium(freezing_temperature, homogeneous_ice_nucleation_temperature)
@@ -123,6 +128,7 @@ end
     surface = equilibrated_surface(equilibrium, T)
     λ = surface.liquid_fraction
     qᶜ = max(0, qᵗ - qᵛ⁺)
+    qᵛ = qᵗ - qᶜ
     qˡ = λ * qᶜ
     qⁱ = (1 - λ) * qᶜ
     return MoistureMassFractions(qᵛ, qˡ, qⁱ)
@@ -176,8 +182,8 @@ end
     return saturation_specific_humidity(T, ρ, thermo, surface)
 end
 
-@inline function adjustment_saturation_specific_humidity(T, pᵣ, qᵗ, thermo, equilibrium)
-    surface = equilibrated_surface(equilibrium, T)
+@inline function adjustment_saturation_specific_humidity(T, pᵣ, qᵗ, thermo, equil)
+    surface = equilibrated_surface(equil, T)
     pᵛ⁺ = saturation_vapor_pressure(T, thermo, surface)
     Rᵈ = dry_air_gas_constant(thermo)
     Rᵛ = vapor_gas_constant(thermo)
@@ -235,9 +241,14 @@ Return the saturation-adjusted thermodynamic state using a secant iteration.
 
     # Generate a second guess
     ℒˡᵣ = thermo.liquid.reference_latent_heat
+    ℒⁱᵣ = thermo.ice.reference_latent_heat
+    qˡ₁ = q₁.liquid
+    qⁱ₁ = q₁.ice
     cᵖᵐ = mixture_heat_capacity(q₁, thermo)
-    ΔT = ℒˡᵣ * qˡ₁ / cᵖᵐ
-    T₂ = T₁ + ΔT / 2
+    ΔT = (ℒˡᵣ * qˡ₁ + ℒⁱᵣ * qⁱ₁) / cᵖᵐ
+    ϵT = convert(FT, 0.1) # minimum increment for second guess
+    ΔT = max(ϵT, ΔT / 2)
+    T₂ = T₁ + ΔT
     𝒰₂ = adjust_state(𝒰₁, T₂, thermo, equilibrium)
 
     # Initialize secant iteration
