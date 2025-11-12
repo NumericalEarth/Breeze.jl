@@ -52,7 +52,7 @@ z_uniform = range(z_transition+dz_top, H; length=Nz_top)
 z_faces = vcat(z_stretched.faces, collect(z_uniform))
 
 # Set up the simulation doamin
-underlying_grid = RectilinearGrid(GPU(), size = (Nx, Nz), halo = (4, 4),
+underlying_grid = RectilinearGrid(CPU(), size = (Nx, Nz), halo = (4, 4),
                                   x = (-L, L), z = z_faces,
                                   topology = (Periodic, Flat, Bounded))
 
@@ -74,7 +74,7 @@ grid = ImmersedBoundaryGrid(underlying_grid, PartialCellBottom(hill))
     return @inbounds - ω * m * ρc[i, j, k]
 end
 
-@inline ρw_sponge(i, j, k, grid, clock, params, model_fields) =
+@inline ρw_sponge(i, j, k, grid, clock, model_fields, params) =
     sponge(i, j, k, grid, clock, params, model_fields.ρw, Face())
 
 params = (z0=grid.Lz, dz=grid.Lz/2, ω=1/60)
