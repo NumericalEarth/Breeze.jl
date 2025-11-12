@@ -6,16 +6,12 @@ thermo = ThermodynamicConstants()
 ```
 
 Breeze implements thermodynamic relations for moist atmospheres.
-By "moist", we mean that the atmosphere is a binary mixture
-of _(i)_ "dry" air, and _(ii)_ "vapor".
-The presence of moisture makes life interesting, because vapor can _condense_ or _solidify_
-(and liquid can _freeze_) into droplets and particles of so many shapes and sizes.
+By "moist", we mean that the atmosphere is a mixture of four components:
+two gas phases _(i)_ "dry" air and _(ii)_ "vapor", and two "condensed" phases _(iii)_ "liquid", and _(iv)_ "ice".
+Moisture makes _life_ interesting, because vapor can _condense_ or _solidify_
+(and liquid can _freeze_) into liquid droplets and ice particles - with major consequences.
 
-On Earth, dry air is itself a mixture of gases, the vapor component is ``\mathrm{H_2 O}``,
-also known as "water".
-Liquid droplets, which include almost-suspended tiny droplets as well as big raindrops,
-and ice particles such as snow, graupel, and hail, are called "condensates".
-Breeze models dry air as having a fixed composition with
+On Earth, dry air is itself a mixture of gases with fixed composition
 constant [molar mass](https://en.wikipedia.org/wiki/Molar_mass).
 Dry air on Earth's is mostly nitrogen, oxygen, and argon, whose combination produces the typical
 (and Breeze's default) dry air molar mass
@@ -26,14 +22,91 @@ thermo = ThermodynamicConstants()
 thermo.dry_air.molar_mass
 ```
 
+The vapor, liquid, and ice components are ``\mathrm{H_2 O}``, also known as "water".
 Water vapor, which in Breeze has the default molar mass
 
 ```@example thermo
 thermo.vapor.molar_mass
 ```
 
-is lighter than dry air.
-As a result, moist, humid air is _lighter_ than dry air.
+is lighter than dry air. As a result, moist, humid air is _lighter_ than dry air.
+
+Liquid in Earth's atmosphere consists of falling droplets that range from tiny, nearly-suspended mist particles
+to careening fat rain drops.
+Ice in Earth's atmosphere consists of crystals, graupel, sleet, hail and, snow.
+
+## "Moist" thermodynamic relations for a four-component mixture
+
+What does it mean that moist air is a mixture of four components?
+It means that the total mass ``\mathcal{M}`` of air per volume, or _density_, ``ρ``,
+can be expressed as the sum of the masses of the individual components over the total volume ``V``,
+
+```math
+ρ = \frac{\mathcal{M}}{V} = \frac{\mathcal{M}ᵈ + \mathcal{M}ᵛ + \mathcal{M}ˡ + \mathcal{M}ⁱ}{V} = ρᵈ + ρᵛ + ρˡ + ρⁱ
+```
+
+where ``\mathcal{M}ᵈ``, ``\mathcal{M}ᵛ``, ``\mathcal{M}ˡ``, and ``\mathcal{M}ⁱ`` are the masses of dry air, vapor, liquid, and ice, respectively, while ``ρᵈ``, ``ρᵛ``, ``ρˡ``, and ``ρⁱ`` denote their _fractional densities_.
+We likewise define the _mass fractions_ of each component,
+
+```math
+qᵈ ≡ \frac{\mathcal{M}ᵈ}{\mathcal{M}} = \frac{ρᵈ}{ρ} , \qquad qᵛ ≡ \frac{\mathcal{M}ᵛ}{\mathcal{M}} = \frac{ρᵛ}{ρ} , \qquad
+qˡ ≡ \frac{\mathcal{M}ˡ}{\mathcal{M}} = \frac{ρˡ}{ρ}, \qquad \text{and} \qquad qⁱ ≡ \frac{ρⁱ}{ρ} = \frac{\mathcal{M}ⁱ}{\mathcal{M}} .
+```
+
+!!! note "The significance of certain superscripts"
+    Throughout this documentation, superscripts are used to distinguish the components of moist air:
+    - ``d`` denotes "dry air"
+    - ``v`` denotes "vapor"
+    - ``l`` denotes "liquid"
+    - ``i`` denotes "ice"
+
+    A fifth super script ``t`` is used to denote "total".
+    For example, ``qᵈ`` is the mass fraction of dry air, ``qᵛ`` is the mass fraction of vapor,
+    ``qˡ`` is the mass fraction of liquid, ``qⁱ`` is the mass fraction of ice,
+    and
+
+    ```math
+    qᵗ = qᵛ + qˡ + qⁱ
+    ```
+
+    is the "total" mass fraction of the moisture components.
+
+The liquid and ice components are not always present.
+For example, a model with warm-phase microphysics does not have ice.
+With no microphysics at all, there is no liquid _or_ ice.
+
+By definition, all of the mass fractions sum up to unity,
+
+```math
+1 = qᵈ + qᵛ + qˡ + qⁱ ,
+```
+
+so that, using ``qᵗ = qᵛ + qˡ + qⁱ``, the dry air mass fraction can be diagnosed with ``qᵈ = 1 - qᵗ``.
+The sometimes tedious bookkeeping required to correctly diagnose the effective mixture properties
+of moist air are facilitated by Breeze's handy [`MoistureMassFractions`](@ref Breeze.Thermodynamics.MoistureMassFractions) abstraction.
+For example,
+
+```@example thermo
+q = Breeze.Thermodynamics.MoistureMassFractions(0.01, 0.002, 1e-5)
+```
+
+from which we can compute the total moisture mass fraction,
+
+```@example thermo
+qᵗ = Breeze.Thermodynamics.total_moisture_mass_fraction(q)
+```
+
+And the dry as well,
+
+```@example thermo
+qᵈ = Breeze.Thermodynamics.dry_air_mass_fraction(q)
+```
+
+To be sure,
+
+```@example thermo
+qᵈ + qᵗ
+```
 
 ## Two laws for ideal gases
 
@@ -184,7 +257,7 @@ and
 The quantity ``g / cᵖ ≈ 9.76 \;\mathrm{K}\,\mathrm{km}^{-1}`` that appears above is also referred to as
 the "[dry adiabatic lapse rate](https://en.wikipedia.org/wiki/Lapse_rate)".
 
-## An example of a dry reference state in Breeze
+### An example of a dry reference state in Breeze
 
 We can visualise a hydrostatic reference profile evaluating Breeze's reference-state
 utilities (which assume a dry reference state) on a one-dimensional `RectilinearGrid`.
@@ -228,103 +301,160 @@ lines!(axρ, ρᵣ)
 fig
 ```
 
-## Thermodynamic relations for gaseous mixtures
+## The gaseous nature of moist air
 
-"Moist air" is conceived to be a mixture of two gas phases: "dry air" (itself a mixture of gases)
-and water vapor, as well as a collection of liquid droplet and solid ice particle "condensates".
-We assume that the volume of the condensates is negligible, such that the total
-pressure is the sum of partial pressures of vapor and dry air,
+To define the gaseous nature of moist air - that is, the equation of state relating density and pressure,
+we assume that the _volume_ of liquid and ice components are negligible.
+As a result, moist air pressure is the sum of partial pressures of vapor and dry air with no
+contribution from liquid or ice phases,
 
 ```math
 p = pᵈ + pᵛ .
 ```
 
-(Superscripts ``d`` and ``v`` denote dry air and vapor respectively.)
-
-The partial pressure of the dry air and vapor components are related to the component densities
-``ρᵈ`` and ``ρᵛ`` through the ideal gas law,
+Because the dry air and vapor components are ideal gases, their densities are related to pressure through the
+ideal gas law,
 
 ```math
 pᵈ = ρᵈ Rᵈ T \qquad \text{and} \qquad pᵛ = ρᵛ Rᵛ T ,
 ```
 
 where ``T`` is temperature, ``Rⁱ = ℛ / m^β`` is the specific gas constant for component ``β``,
+``m^β`` is the molar mass of component ``β``, and
 ``ℛ``  is the [molar or "universal" gas constant](https://en.wikipedia.org/wiki/Gas_constant),
-and ``m^β`` is the molar mass of component ``β``.
-
-Central to Breeze's implementation of moist thermodynamics is a struct that
-holds parameters like the molar gas constant and molar masses,
 
 ```@example thermo
 thermo = ThermodynamicConstants()
+thermo.molar_gas_constant
 ```
 
-The default parameter evince basic facts about water vapor air typical to Earth's atmosphere:
+[`ThermodynamicConstants`](@ref), which is central to Breeze's implementation of moist thermodynamics.
+holds constants like the molar gas constant and molar masses, latent heats, gravitational acceleration, and more,
+
+```@example thermo
+thermo
+```
+
+These default values evince basic facts about water vapor air typical to Earth's atmosphere:
 for example, the molar masses of dry air (itself a mixture of mostly nitrogen, oxygen, and argon),
 and water vapor are ``mᵈ = 0.029 \; \mathrm{kg} \, \mathrm{mol}^{-1}`` and ``mᵛ = 0.018 \; \mathrm{kg} \, \mathrm{mol}^{-1}``.
+And even more interesting, the triple point temperature and pressure of water vapor are
 
-To write the effective gas law for moist air, we introduce the mass ratios, e.g., specific humidity and specific hydrometeor contents,
-
-```math
-qᵈ ≡ \frac{ρᵈ}{ρ} \qquad \text{and} \qquad qᵛ ≡ \frac{ρᵛ}{ρ} ,
+```@example thermo
+thermo.triple_point_temperature, thermo.triple_point_pressure
 ```
 
-where ``ρ`` is total density of the fluid including dry air, vapor, and condensates,
-``ρᵈ`` is the density of dry air, and ``ρᵛ`` is the density of vapor.
+not so far from the typical conditions we experience on Earth's surface - one of the reasons that things are
+so interesting down here. Also, that temperature is not a typo: the triple point temperature really is just
+``+0.01^\circ``C.
+
+
 It's then convenient to introduce the "mixture" gas constant ``Rᵐ(qᵛ)`` such that
 
 ```math
 p = ρ Rᵐ T, \qquad \text{where} \qquad Rᵐ ≡ qᵈ Rᵈ + qᵛ Rᵛ .
 ```
 
-In "clear" (not cloudy) air, we have that ``qᵈ = 1 - qᵛ``.
-More generally, ``qᵈ = 1 - qᵛ - qᶜ``, where ``qᶜ`` is the total mass
-ratio of condensed species. In most situations on Earth, ``qᶜ ≪ qᵛ``.
+To illustrate, let's compute the mixture gas constant ``Rᵐ`` for air with a small amount of water vapor.
+The contribution of vapor increases ``Rᵐ`` above the dry air value:
 
 ```@example thermo
-using Breeze.Thermodynamics: MoistureMassFractions
-
-# Compute mixture properties for air with 0.01 specific humidity
-qᵗ = 0.01 # 1% water vapor by mass
-q = MoistureMassFractions(qᵗ, zero(qᵗ), zero(qᵗ))
-Rᵐ = mixture_gas_constant(q, thermo)
+q = Breeze.Thermodynamics.MoistureMassFractions(0.01, 0.0, 0.0) # 1% vapor by mass
+Rᵈ = Breeze.Thermodynamics.dry_air_gas_constant(thermo)
+Rᵐ = Breeze.Thermodynamics.mixture_gas_constant(q, thermo)
+Rᵐ - Rᵈ # shows the uplift from the vapor component
 ```
 
-We likewise define a mixture heat capacity via ``cᵖᵐ = qᵈ cᵖᵈ + qᵛ cᵖᵛ``,
+A small increase in specific humidity increases the effective gas constant of air.
+
+## The thermal properties of moist air
+
+Though we neglect the volume of liquid and ice, we do not neglect their _mass_ or _energy_.
+The heat capacity of moist air thus includes contributions from all four components,
+
+```math
+cᵖᵐ = qᵈ cᵖᵈ + qᵛ cᵖᵛ + qˡ cˡ + qⁱ cⁱ,
+```
+
+where the ``cᵖᵝ`` denote the specific heat capacity at constant pressure of
+constituent ``β``, and we have neglected the superscript ``p`` for liquid
+and ice because they are assumed incompressible (their specific heats and constant
+pressure or volume are the same).
+We call ``cᵖᵐ`` the "mixture heat capacity", and because with default parameters the
+heat capacity of dry air is the smallest of either vapor, liquid, or ice,
+any moisture at all tends to increase the mixture heat capacity,
 
 ```@example thermo
-cᵖᵐ = mixture_heat_capacity(q, thermo)
+q = Breeze.Thermodynamics.MoistureMassFractions(0.01, 0.0, 0.0)
+cᵖᵈ = thermo.dry_air.heat_capacity
+cᵖᵐ = Breeze.Thermodynamics.mixture_heat_capacity(q, thermo)
+cᵖᵐ - cᵖᵈ
 ```
 
-## Liquid-ice potential temperature
 
-## The Clausius--Clapeyron relation and saturation specific humidity
+## The Clausius--Clapeyron relation and saturation vapor pressure
 
 The [Clausius--Clapeyron relation](https://en.wikipedia.org/wiki/Clausius%E2%80%93Clapeyron_relation)
-for an ideal gas
+for an ideal gas describes how saturation vapor pressure changes with temperature:
 
 ```math
 \frac{\mathrm{d} pᵛ⁺}{\mathrm{d} T} = \frac{pᵛ⁺ ℒ^β(T)}{Rᵛ T^2} ,
 ```
 
-where ``pᵛ⁺`` is saturation vapor pressure, ``T`` is temperature, ``Rᵛ`` is the specific
-gas constant for vapor, ``ℒ^β(T)`` is the latent heat of the transition from vapor to the
-``β`` phase (e.g., ``β = l`` for vapor → liquid and ``β = i`` for vapor to ice).
+where ``pᵛ⁺`` is saturation vapor pressure over a surface of condensed phase ``β``,
+``T`` is temperature, ``Rᵛ`` is the specific gas constant for vapor, and
+``ℒ^β(T)`` is the latent heat of the phase transition from vapor to phase ``β``.
+For atmospheric moist air, the relevant condensed phases are liquid water (``β = l``)
+and ice (``β = i``).
+
+### Temperature-dependent latent heat
 
 For a thermodynamic formulation that uses constant (i.e. temperature-independent) specific
-heats, the latent heat of a phase transition is linear in temperature.
-For example, for phase change from vapor to liquid,
+heats, the latent heat of a phase transition is linear in temperature:
 
 ```math
-ℒˡ(T) = ℒˡ(T=0) + \big ( \underbrace{cᵖᵛ - cˡ}_{≡Δcˡ} \big ) T ,
+ℒ^β(T) = ℒ^β_0 + \Delta c^β \, T ,
 ```
 
-where ``ℒˡ(T=0)`` is the latent heat at absolute zero, ``T = 0 \; \mathrm{K}``.
-By integrating from the triple-point temperature ``Tᵗʳ`` for which ``p(Tᵗʳ) = pᵗʳ``, we get
+where ``ℒ^β_0 ≡ ℒ^β(T=0)`` is the latent heat at absolute zero and
+``\Delta c^β ≡ c_p^v - c^β`` is the constant difference between the vapor specific heat
+capacity at constant pressure and the specific heat capacity of the condensed phase ``β``.
+
+Note that we typically parameterize the latent heat in terms of a reference
+temperature ``T_r`` that is well above absolute zero. In that case,
+the latent heat is written
 
 ```math
-pᵛ⁺(T) = pᵗʳ \left ( \frac{T}{Tᵗʳ} \right )^{Δcˡ / Rᵛ} \exp \left [ \frac{ℒˡ(T=0)}{Rᵛ} \left (\frac{1}{Tᵗʳ} - \frac{1}{T} \right ) \right ] .
+ℒ^β(T) = ℒ^β_r + \Delta c^β (T - T_r), \qquad \text{and} \qquad
+ℒ^β_0 = ℒ^β_r - \Delta c^β T_r ,
 ```
+
+where ``ℒ^β_r`` is the latent heat at the reference temperature ``T_r``.
+
+### Integration of the Clausius-Clapeyron relation
+
+To find the saturation vapor pressure as a function of temperature, we integrate
+the Clausius-Clapeyron relation with the temperature-linear latent heat model
+from the triple point pressure and temperature ``(p^{tr}, T^{tr})`` to a generic
+pressure ``pᵛ⁺`` and temperature ``T``:
+
+```math
+\int_{p^{tr}}^{pᵛ⁺} \frac{\mathrm{d} p}{p} = \int_{T^{tr}}^{T} \frac{ℒ^β_0 + \Delta c^β T'}{Rᵛ T'^2} \, \mathrm{d} T' .
+```
+
+Evaluating the integrals yields
+
+```math
+\log\left(\frac{pᵛ⁺}{p^{tr}}\right) = -\frac{ℒ^β_0}{Rᵛ T} + \frac{ℒ^β_0}{Rᵛ T^{tr}} + \frac{\Delta c^β}{Rᵛ} \log\left(\frac{T}{T^{tr}}\right) .
+```
+
+Exponentiating both sides gives the closed-form solution:
+
+```math
+pᵛ⁺(T) = p^{tr} \left ( \frac{T}{T^{tr}} \right )^{\Delta c^β / Rᵛ} \exp \left [ \frac{ℒ^β_0}{Rᵛ} \left (\frac{1}{T^{tr}} - \frac{1}{T} \right ) \right ] .
+```
+
+### Example: liquid water and ice parameters
 
 Consider parameters for liquid water,
 
@@ -333,17 +463,63 @@ using Breeze.Thermodynamics: CondensedPhase
 liquid_water = CondensedPhase(reference_latent_heat=2500800, heat_capacity=4181)
 ```
 
-or water ice,
+and water ice,
 
 ```@example thermo
 water_ice = CondensedPhase(reference_latent_heat=2834000, heat_capacity=2108)
 ```
 
-The saturation vapor pressure is
+These represent the latent heat of vaporization at the reference temperature and
+the specific heat capacity of each condensed phase. We can compute the specific heat
+difference ``\Delta c^β`` for liquid water:
+
+```@example thermo
+using Breeze.Thermodynamics: vapor_gas_constant
+cᵖᵛ = thermo.vapor.heat_capacity
+cˡ = thermo.liquid.heat_capacity
+Δcˡ = cᵖᵛ - cˡ
+```
+
+This difference ``\Delta c^l`` above is negative because water vapor has a lower heat
+capacity than liquid water.
+
+### Mixed-phase saturation vapor pressure
+
+In atmospheric conditions near the freezing point, condensate may exist as a mixture of
+liquid and ice. Following [Pressel2015](@citet), we model the saturation vapor pressure
+over a mixed-phase surface using a liquid fraction ``λ`` that varies smoothly between
+0 (pure ice) and 1 (pure liquid). The effective latent heat and specific heat difference
+for the mixture are computed as weighted averages:
+
+```math
+ℒ^{li}_0 = λ \, ℒ^l_0 + (1 - λ) \, ℒ^i_0 ,
+```
+
+```math
+\Delta c^{li} = λ \, \Delta c^l + (1 - λ) \, \Delta c^i .
+```
+
+These effective properties are then used in the Clausius-Clapeyron formula to compute
+the saturation vapor pressure over the mixed-phase surface. This approach ensures
+thermodynamic consistency and smooth transitions between pure liquid and pure ice states.
+
+We can illustrate this by computing the mixed-phase specific heat difference for a
+50/50 mixture:
+
+```@example thermo
+Δcⁱ = thermo.vapor.heat_capacity - thermo.ice.heat_capacity
+λ = 0.5
+Δcˡⁱ = λ * Δcˡ + (1 - λ) * Δcⁱ
+```
+
+### Visualizing saturation vapor pressure
+
+The saturation vapor pressure over liquid, ice, and mixed-phase surfaces can be computed
+and visualized:
 
 ```@example
 using Breeze
-using Breeze.Thermodynamics: saturation_vapor_pressure
+using Breeze.Thermodynamics: saturation_vapor_pressure, PlanarMixedPhaseSurface
 
 thermo = ThermodynamicConstants()
 
@@ -352,44 +528,117 @@ pᵛˡ⁺ = [saturation_vapor_pressure(Tⁱ, thermo, thermo.liquid) for Tⁱ in 
 pᵛⁱ⁺ = [saturation_vapor_pressure(Tⁱ, thermo, thermo.ice) for Tⁱ in T]
 pᵛⁱ⁺[T .> thermo.triple_point_temperature] .= NaN
 
+# Mixed-phase surface with 50% liquid, 50% ice
+mixed_surface = PlanarMixedPhaseSurface(0.5)
+pᵛᵐ⁺ = [saturation_vapor_pressure(Tⁱ, thermo, mixed_surface) for Tⁱ in T]
+
 using CairoMakie
 
 fig = Figure()
-ax = Axis(fig[1, 1], xlabel="Temperature (ᵒK)", ylabel="Saturation vapor pressure pᵛ⁺ (Pa)", yscale = log10, xticks=200:20:320)
-lines!(ax, T, pᵛˡ⁺, label="vapor pressure over liquid")
-lines!(ax, T, pᵛⁱ⁺, linestyle=:dash, label="vapor pressure over ice")
+ax = Axis(fig[1, 1], xlabel="Temperature (ᵒK)", ylabel="Saturation vapor pressure pᵛ⁺ (Pa)",
+          yscale = log10, xticks=200:20:320)
+lines!(ax, T, pᵛˡ⁺, label="liquid", linewidth=2)
+lines!(ax, T, pᵛⁱ⁺, label="ice", linestyle=:dash, linewidth=2)
+lines!(ax, T, pᵛᵐ⁺, label="mixed (λ=0.5)", linestyle=:dot, linewidth=2, color=:purple)
 axislegend(ax, position=:rb)
 fig
 ```
 
-The saturation specific humidity is
+The mixed-phase saturation vapor pressure lies between the liquid and ice curves,
+providing a smooth interpolation between the two pure phases.
+
+## Saturation specific humidity
+
+The saturation specific humidity ``qᵛ⁺`` is the maximum amount of water vapor that
+can exist in equilibrium with a condensed phase at a given temperature and density.
+It is related to the saturation vapor pressure by:
 
 ```math
-qᵛ⁺ ≡ \frac{ρᵛ⁺}{ρ} = \frac{pᵛ⁺}{ρ Rᵐ T} .
+qᵛ⁺ ≡ \frac{ρᵛ⁺}{ρ} = \frac{pᵛ⁺}{ρ Rᵛ T} ,
 ```
 
-and this is what it looks like:
+where ``ρᵛ⁺`` is the vapor density at saturation, ``ρ`` is the total air density,
+and ``Rᵛ`` is the specific gas constant for water vapor.
+
+### Visualizing saturation vapor pressure and specific humidity
+
+We can visualize how both saturation vapor pressure and saturation specific humidity
+vary with temperature for different liquid fractions, demonstrating the smooth
+interpolation provided by the mixed-phase model:
 
 ```@example
 using Breeze
-using Breeze.Thermodynamics: saturation_specific_humidity
+using Breeze.Thermodynamics: saturation_vapor_pressure, saturation_specific_humidity, PlanarMixedPhaseSurface
 
 thermo = ThermodynamicConstants()
 
-p₀ = 101325
+# Temperature range covering typical atmospheric conditions
+T = collect(250:0.1:320)
+p₀ = 101325  # Surface pressure (Pa)
 Rᵈ = Breeze.Thermodynamics.dry_air_gas_constant(thermo)
-T = collect(273.2:0.1:313.2)
-qᵛ⁺ = zeros(length(T))
 
-for i = 1:length(T)
-    ρ = p₀ / (Rᵈ * T[i])
-    qᵛ⁺[i] = saturation_specific_humidity(T[i], ρ, thermo, thermo.liquid)
-end
+# Liquid fractions to visualize
+λ_values = [0.0, 0.25, 0.5, 0.75, 1.0]
+labels = ["ice (λ=0)", "λ=0.25", "λ=0.5", "λ=0.75", "liquid (λ=1)"]
+colors = [:blue, :cyan, :purple, :orange, :red]
+linestyles = [:solid, :dash, :dot, :dashdot, :solid]
 
 using CairoMakie
 
-fig = Figure()
-ax = Axis(fig[1, 1], xlabel="Temperature (ᵒK)", ylabel="Saturation specific humidity qᵛ⁺ (kg kg⁻¹)")
-lines!(ax, T, qᵛ⁺)
+fig = Figure(size=(1000, 400))
+
+# Panel 1: Saturation vapor pressure
+ax1 = Axis(fig[1, 1], xlabel="Temperature (K)", ylabel="Saturation vapor pressure (Pa)",
+           yscale=log10, title="Saturation vapor pressure")
+
+for (i, λ) in enumerate(λ_values)
+    surface = PlanarMixedPhaseSurface(λ)
+    pᵛ⁺ = [saturation_vapor_pressure(Tⁱ, thermo, surface) for Tⁱ in T]
+    lines!(ax1, T, pᵛ⁺, label=labels[i], color=colors[i], linestyle=linestyles[i], linewidth=2)
+end
+
+axislegend(ax1, position=:lt)
+
+# Panel 2: Saturation specific humidity
+ax2 = Axis(fig[1, 2], xlabel="Temperature (K)", ylabel="Saturation specific humidity (kg/kg)",
+           title="Saturation specific humidity")
+
+for (i, λ) in enumerate(λ_values)
+    surface = PlanarMixedPhaseSurface(λ)
+    qᵛ⁺ = zeros(length(T))
+    for (j, Tⁱ) in enumerate(T)
+        ρ = p₀ / (Rᵈ * Tⁱ)  # Approximate density using dry air
+        qᵛ⁺[j] = saturation_specific_humidity(Tⁱ, ρ, thermo, surface)
+    end
+    lines!(ax2, T, qᵛ⁺, label=labels[i], color=colors[i], linestyle=linestyles[i], linewidth=2)
+end
+
 fig
 ```
+
+This figure shows how the liquid fraction ``λ`` smoothly interpolates between pure ice
+(``λ = 0``) and pure liquid (``λ = 1``). At lower temperatures, the differences between
+phases are more pronounced. The mixed-phase model allows for realistic representation of
+conditions near the freezing point where both liquid and ice may coexist.
+
+## Moist static energy
+
+For moist air, a convenient thermodynamic invariant that couples temperature, composition, and height is the moist static energy (MSE),
+
+```math
+e ≡ cᵖᵐ \, T + g z - Lˡᵣ \, qˡ - Lⁱᵣ qⁱ .
+```
+
+!!! note "The alternative 'frozen moist static energy' variable"
+
+    An alternative, physically equivalent, definition of moist static energy used in atmospheric
+    models such as the Global System for Atmospheric Modeling (GSAM) [Khairoutdinov2022](@cite) is
+
+    ```math
+    ẽ ≡ cᵖᵐ \, T + g z + Lˡᵣ \, qᵛ - Lᶠᵣ qⁱ .
+    ```
+
+    ``e`` and ``ẽ`` are not the same, but they obey the same conservation equation provided
+    that total moisture fraction is conserved, or that ``\mathrm{D}qᵗ / \mathrm{D}t = 0``.
+
+## Liquid-ice potential temperature

@@ -49,4 +49,4 @@ Notes:
 - Reference-state quantities use a subscript ``r`` (e.g., ``p_r``, ``\rho_r``), following the Thermodynamics docs and code.
 - Phase or mixture identifiers (``d``, ``v``, ``m``) appear as superscripts (e.g., ``R^{d}``, ``c^{pm}``), matching usage in the codebase (e.g., `Rᵈ`, `cᵖᵐ`).
 - Conservative variables are stored in ρᵣ-weighted form in the code (e.g., `ρu`, `ρv`, `ρw`, `ρe`, `ρqᵗ`).
-- Mapping to AtmosphereModel fields: `ρe` corresponds to `model.energy_density`, `ρqᵗ` to `model.moisture_density`, and `qᵗ` to `model.moisture_fraction`.
+- Mapping to AtmosphereModel fields: `ρe` corresponds to `model.energy_density`, `ρqᵗ` to `model.moisture_density`, and `qᵗ` to `model.moisture_mass_fraction`.

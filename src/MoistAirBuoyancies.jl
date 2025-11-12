@@ -9,7 +9,7 @@ export
 using ..Thermodynamics:
     PotentialTemperatureState,
     MoistureMassFractions,
-    total_specific_humidity,
+    total_moisture_mass_fraction,
     dry_air_gas_constant,
     vapor_gas_constant,
     with_moisture,
@@ -51,7 +51,7 @@ Adapt.adapt_structure(to, mb::MoistAirBuoyancy) =
 """
 $(TYPEDSIGNATURES)
 
-Return a MoistAirBuoyancy formulation that can be provided as input to an
+Return a `MoistAirBuoyancy` formulation that can be provided as input to an
 `Oceananigans.NonhydrostaticModel`.
 
 !!! note "Required tracers"
@@ -72,12 +72,12 @@ MoistAirBuoyancy:
 └── thermodynamics: ThermodynamicConstants{Float64}
 ```
 
-To build a model with MoistAirBuoyancy, we include potential temperature and total specific humidity
+To build a model with `MoistAirBuoyancy`, we include potential temperature and total specific humidity
 tracers `θ` and `qᵗ` to the model.
 
 ```jldoctest mab
 model = NonhydrostaticModel(; grid, buoyancy, tracers = (:θ, :qᵗ))
-                                     
+
 # output
 NonhydrostaticModel{CPU, RectilinearGrid}(time = 0 seconds, iteration = 0)
 ├── grid: 1×1×8 RectilinearGrid{Float64, Periodic, Periodic, Bounded} on CPU with 1×1×3 halo
@@ -97,7 +97,7 @@ function MoistAirBuoyancy(grid;
     reference_state = ReferenceState(grid, thermodynamics;
                                      base_pressure,
                                      potential_temperature = reference_potential_temperature)
-                          
+
     return MoistAirBuoyancy(reference_state, thermodynamics)
 end
 
@@ -113,7 +113,6 @@ required_tracers(::MoistAirBuoyancy) = (:θ, :qᵗ)
 
 const c = Center()
 
-
 @inline function buoyancy_perturbationᶜᶜᶜ(i, j, k, grid, mb::MoistAirBuoyancy, tracers)
     @inbounds begin
         pᵣ = mb.reference_state.pressure[i, j, k]
@@ -128,7 +127,7 @@ const c = Center()
     𝒰 = PotentialTemperatureState(θ, q, z, p₀, pᵣ, ρᵣ)
 
     # Perform saturation adjustment
-    T = temperature(𝒰, mb.thermodynamics)
+    T = compute_boussinesq_adjustment_temperature(𝒰, mb.thermodynamics)
 
     # Compute specific volume
     Rᵐ = mixture_gas_constant(q, mb.thermodynamics)
@@ -169,21 +168,21 @@ The saturation equilibrium temperature satisfies the nonlinear relation
 with ``ℒˡᵣ`` the latent heat at the reference temperature ``Tᵣ``, ``cᵖᵐ`` the mixture
 specific heat, ``Π`` the Exner function, ``qˡ = \\max(0, qᵗ - qᵛ⁺)``
 the condensate specific humidity, ``qᵗ`` is the
-total specific humidity, ``qᵛ⁺`` is the saturation specific humidity.
+total specific humidity, and ``qᵛ⁺`` is the saturation specific humidity.
 
-The saturation equilibrium temperature is thus obtained by solving ``r(T)``, where
+The saturation equilibrium temperature is thus obtained by solving ``r(T) = 0``, where
 ```math
 r(T) ≡ T - θ Π - ℒˡᵣ qˡ / cᵖᵐ .
 ```
 
 Solution of ``r(T) = 0`` is found via the [secant method](https://en.wikipedia.org/wiki/Secant_method).
 """
-@inline function temperature(𝒰₀::PotentialTemperatureState{FT}, thermo) where FT
+@inline function compute_boussinesq_adjustment_temperature(𝒰₀::PotentialTemperatureState{FT}, thermo) where FT
     θ = 𝒰₀.potential_temperature
     θ == 0 && return zero(FT)
 
     # Generate guess for unsaturated conditions; if dry, return T₁
-    qᵗ = total_specific_humidity(𝒰₀)
+    qᵗ = total_moisture_mass_fraction(𝒰₀)
     q₁ = MoistureMassFractions(qᵗ, zero(qᵗ), zero(qᵗ))
     𝒰₁ = with_moisture(𝒰₀, q₁)
     Π₁ = exner_function(𝒰₀, thermo)
@@ -204,14 +203,12 @@ Solution of ``r(T) = 0`` is found via the [secant method](https://en.wikipedia.o
     q₁ = MoistureMassFractions(qᵛ⁺₁, qˡ₁, zero(qˡ₁))
     𝒰₁ = with_moisture(𝒰₀, q₁)
 
-    # We generate a second guess simply by adding 1 K to T₁...
-
     # We generate a second guess to start a secant iteration
     # by applying the potential temperature assuming a liquid fraction
     # associated with T₁. This should represent an _overestimate_,
     # since ``qᵛ⁺₁(T₁)`` underestimates the saturation specific humidity,
     # and therefore qˡ₁ is overestimated. This is similar to an approach
-    # used in Pressel et al 2015.
+    # used in Pressel et al 2015. However, it doesn't work for large liquid fractions.
     ℒˡᵣ = thermo.liquid.reference_latent_heat
     cᵖᵐ = mixture_heat_capacity(q₁, thermo)
     T₂ = T₁ + ℒˡᵣ * qˡ₁ / cᵖᵐ
@@ -244,7 +241,7 @@ end
 
 # This estimate assumes that the specific humidity is itself the saturation
 # specific humidity, eg ``qᵛ = qᵛ⁺``. Knowledge of the specific humidity
-# is needed to compute the mixture gas constant, and thus density, 
+# is needed to compute the mixture gas constant, and thus density,
 # which in turn is needed to compute the _saturation_ specific humidity.
 # This consideration culminates in a new expression for saturation specific humidity
 # used below, and also written in Pressel et al 2015, equation 37.
@@ -252,7 +249,7 @@ end
 @inline function adjustment_saturation_specific_humidity(T, 𝒰, thermo)
     pᵛ⁺ = saturation_vapor_pressure(T, thermo, thermo.liquid)
     pᵣ = 𝒰.reference_pressure
-    qᵗ = total_specific_humidity(𝒰)
+    qᵗ = total_moisture_mass_fraction(𝒰)
     Rᵈ = dry_air_gas_constant(thermo)
     Rᵛ = vapor_gas_constant(thermo)
     ϵᵈᵛ = Rᵈ / Rᵛ
@@ -261,7 +258,7 @@ end
 
 @inline function adjust_state(𝒰₀, T, thermo)
     qᵛ⁺ = adjustment_saturation_specific_humidity(T, 𝒰₀, thermo)
-    qᵗ = total_specific_humidity(𝒰₀)
+    qᵗ = total_moisture_mass_fraction(𝒰₀)
     qˡ = max(0, qᵗ - qᵛ⁺)
     qᵛ = qᵗ - qˡ
     q₁ = MoistureMassFractions(qᵛ, qˡ, zero(qˡ))
@@ -270,13 +267,13 @@ end
 
 @inline function saturation_adjustment_residual(T, 𝒰, thermo)
     Π = exner_function(𝒰, thermo)
-    q = 𝒰.moisture_fractions
+    q = 𝒰.moisture_mass_fractions
     θ = 𝒰.potential_temperature
     ℒˡᵣ = thermo.liquid.reference_latent_heat
     cᵖᵐ = mixture_heat_capacity(q, thermo)
     qˡ = q.liquid
     θ = 𝒰.potential_temperature
-    return T - Π * θ - ℒˡᵣ * qˡ / cᵖᵐ 
+    return T - Π * θ - ℒˡᵣ * qˡ / cᵖᵐ
 end
 
 #####
@@ -297,10 +294,12 @@ const c = Center()
     p₀ = mb.reference_state.base_pressure
     q = MoistureMassFractions(qᵗᵢ, zero(qᵗᵢ), zero(qᵗᵢ))
     𝒰 = PotentialTemperatureState(θᵢ, q, z, p₀, pᵣ, ρᵣ)
-    return temperature(𝒰, mb.thermodynamics)
+    return compute_boussinesq_adjustment_temperature(𝒰, mb.thermodynamics)
 end
 
 struct TemperatureKernelFunction end
+const TemperatureOperation = KernelFunctionOperation{Center, Center, Center, <:Any, <:Any, <:TemperatureKernelFunction}
+const TemperatureField = Field{Center, Center, Center, <:TemperatureOperation}
 
 @inline (::TemperatureKernelFunction)(i, j, k, grid, buoyancy, θ, qᵗ) =
     temperature(i, j, k, grid, buoyancy, θ, qᵗ)

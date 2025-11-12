@@ -5,8 +5,9 @@ using Oceananigans.TimeSteppers: compute_pressure_correction!, make_pressure_cor
 
 using ..Thermodynamics:
     PotentialTemperatureState,
-    exner_function,
-    mixture_heat_capacity
+    MoistureMassFractions,
+    mixture_heat_capacity,
+    temperature
 
 import Oceananigans.Fields: set!
 
@@ -45,21 +46,8 @@ function set!(model::AtmosphereModel; enforce_mass_conservation=true, kw...)
         end
 
         # Setting diagnostic variables
-        if name == :θ
-            θ = model.temperature # use scratch
-            set!(θ, value)
-
-            grid = model.grid
-            arch = grid.architecture
-            thermo = model.thermodynamics
-            formulation = model.formulation
-            energy_density = model.energy_density
-            moisture_fraction = model.moisture_fraction
-            launch!(arch, grid, :xyz, _energy_from_potential_temperature!, energy_density, grid,
-                    θ, moisture_fraction, formulation, thermo)
-
-        elseif name == :qᵗ
-            qᵗ = model.moisture_fraction
+        if name == :qᵗ
+            qᵗ = model.moisture_mass_fraction
             set!(qᵗ, value)
             ρᵣ = model.formulation.reference_state.density
             ρqᵗ = model.moisture_density
@@ -73,6 +61,23 @@ function set!(model::AtmosphereModel; enforce_mass_conservation=true, kw...)
             ϕ = model.momentum[Symbol(:ρ, name)]
             value = ρᵣ * u
             set!(ϕ, value)    
+
+        elseif name == :θ
+            θ = model.temperature # use scratch
+            set!(θ, value)
+
+            grid = model.grid
+            arch = grid.architecture
+
+            launch!(arch, grid, :xyz,
+                    _energy_density_from_potential_temperature!,
+                    model.energy_density,
+                    grid,
+                    θ,
+                    model.moisture_density,
+                    model.formulation,
+                    model.microphysics,
+                    model.thermodynamics)
         end
     end
 
@@ -93,33 +98,38 @@ function set!(model::AtmosphereModel; enforce_mass_conservation=true, kw...)
     return nothing
 end
 
-@kernel function _energy_from_potential_temperature!(moist_static_energy, grid,
-                                                     potential_temperature,
-                                                     moisture_fraction,
-                                                     formulation,
-                                                     thermo)
+@kernel function _energy_density_from_potential_temperature!(energy_density, grid,
+                                                             potential_temperature,
+                                                             moisture_density,
+                                                             formulation::AnelasticFormulation,
+                                                             microphysics,
+                                                             thermo)
     i, j, k = @index(Global, NTuple)
 
     @inbounds begin
-        ρᵣ = formulation.reference_state.density[i, j, k]
-        qᵗ = moisture_fraction[i, j, k]
         pᵣ = formulation.reference_state.pressure[i, j, k]
+        ρᵣ = formulation.reference_state.density[i, j, k]
         θ = potential_temperature[i, j, k]
+        qᵗ = moisture_density[i, j, k] / ρᵣ
     end
 
-    p₀ = formulation.reference_state.base_pressure
+    g = thermo.gravitational_acceleration
     z = znode(i, j, k, grid, c, c, c)
+    p₀ = formulation.reference_state.base_pressure
 
     # Assuming a state with no condensate?
     q = MoistureMassFractions(qᵗ, zero(qᵗ), zero(qᵗ))
+    𝒰₀ = PotentialTemperatureState(θ, q, z, p₀, pᵣ, ρᵣ)
+    𝒰 = compute_thermodynamic_state(𝒰₀, microphysics, thermo)
 
-    𝒰 = PotentialTemperatureState(θ, q, z, p₀, pᵣ, ρᵣ)
-    Π = exner_function(𝒰, thermo)
-    T = Π * θ
-
-    ℒ₀ = thermo.liquid.reference_latent_heat
-    g = thermo.gravitational_acceleration
+    T = temperature(𝒰, thermo)
+    q = 𝒰.moisture_mass_fractions
     cᵖᵐ = mixture_heat_capacity(q, thermo)
 
-    @inbounds moist_static_energy[i, j, k] = ρᵣ * (cᵖᵐ * T + g * z + qᵗ * ℒ₀)
+    ℒˡᵣ = thermo.liquid.reference_latent_heat
+    ℒⁱᵣ = thermo.ice.reference_latent_heat
+    qˡ = q.liquid
+    qⁱ = q.ice
+
+    @inbounds energy_density[i, j, k] = ρᵣ * (cᵖᵐ * T + g * z - ℒˡᵣ * qˡ - ℒⁱᵣ * qⁱ)
 end
