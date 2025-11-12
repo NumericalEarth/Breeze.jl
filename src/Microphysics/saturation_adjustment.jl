@@ -233,10 +233,12 @@ Return the saturation-adjusted thermodynamic state using a secant iteration.
     qᵗ <= qᵛ⁺₁ && return 𝒰₁
 
     # Re-initialize first guess assuming saturation
-    𝒰₁ = with_moisture(𝒰₀, q₁)
-    qᵛ⁺₁ = adjustment_saturation_specific_humidity(T₁, pᵣ, qᵗ, thermo, equilibrium)
-    q₁ = equilibrated_moisture_mass_fractions(T₁, qᵗ, qᵛ⁺₁, equilibrium)
-    𝒰₁ = with_moisture(𝒰₀, q₁)
+    𝒰₁ = adjust_state(𝒰₀, T₁, thermo, equilibrium)
+
+    # 𝒰₁ = with_moisture(𝒰₀, q₁)
+    # qᵛ⁺₁ = adjustment_saturation_specific_humidity(T₁, pᵣ, qᵗ, thermo, equilibrium)
+    # q₁ = equilibrated_moisture_mass_fractions(T₁, qᵗ, qᵛ⁺₁, equilibrium)
+    # 𝒰₁ = with_moisture(𝒰₀, q₁)
 
     # Generate a second guess
     ℒˡᵣ = thermo.liquid.reference_latent_heat

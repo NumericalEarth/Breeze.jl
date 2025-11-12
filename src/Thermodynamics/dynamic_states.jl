@@ -62,8 +62,8 @@ end
 @inline total_moisture_mass_fraction(state::MoistStaticEnergyState) = total_moisture_mass_fraction(state.moisture_mass_fractions)
 @inline is_absolute_zero(𝒰::MoistStaticEnergyState) = 𝒰.moist_static_energy == 0
 
-@inline function with_moisture(𝒰::MoistStaticEnergyState, q::MoistureMassFractions)
-    return MoistStaticEnergyState(𝒰.moist_static_energy, q, 𝒰.height, 𝒰.reference_pressure)
+@inline function with_moisture(𝒰::MoistStaticEnergyState{FT}, q::MoistureMassFractions{FT}) where FT
+    return MoistStaticEnergyState{FT}(𝒰.moist_static_energy, q, 𝒰.height, 𝒰.reference_pressure)
 end
 
 @inline function temperature(𝒰::MoistStaticEnergyState, thermo::ThermodynamicConstants)
