@@ -2,6 +2,7 @@ using Breeze
 using Oceananigans.Units
 using Oceananigans.Forcings
 using Oceananigans.Grids: ExponentialDiscretization
+using CUDA
 
 # Schär mountain wave test case
 # References: 
@@ -57,7 +58,7 @@ z_uniform = collect(range(z_transition, H; length=Nz_top + 1))
 z_faces = vcat(z_stretched[1:end-1], z_uniform)
 
 # Set up the simulation doamin
-underlying_grid = RectilinearGrid(CPU(), size = (Nx, Nz), halo = (4, 4),
+underlying_grid = RectilinearGrid(GPU(), size = (Nx, Nz), halo = (4, 4),
                                   x = (-L, L), z = z_faces,
                                   topology = (Periodic, Flat, Bounded))
 
@@ -71,7 +72,7 @@ top_mask = GaussianMask{:z}(center=grid.Lz, width=grid.Lz/2)
 sponge = Relaxation(rate=damping_rate, mask=top_mask)
 
 # Atmosphere model setup
-model = AtmosphereModel(grid, advection = WENO(), forcing=(ρw=sponge))
+model = AtmosphereModel(grid, advection = WENO(), forcing=(; ρw=sponge))
 
 # Initial conditions and initialization
 θᵢ(x, z) = θ₀ * exp(N² * z / g) # background stratification for isothermal atmosphere
@@ -171,7 +172,7 @@ gb = fig[1, 1]
 xs = LinRange(-L, L, Nx)
 zs = z_faces#LinRange(0, H, Nz+1)
 
-ax1, hm = heatmap(gb[1,1], xs, zs, interior(model.velocities.w, :,1,:), colormap = :bwr, colorrange = (-1.0, 1.0))
+ax1, hm = heatmap(gb[1,1], xs, zs, Array(interior(model.velocities.w, :,1,:)), colormap = :bwr, colorrange = (-1.0, 1.0))
 ax1.xlabel = "x [m]"
 ax1.ylabel = "z [m]"
 ax1.title = "Simulated w at 3-hr"
@@ -189,4 +190,5 @@ ax2.limits = ((-30000., 30000.), (0, 10000.))
 
 cb = Colorbar(gb[1:2, 2], hm, label = "w [m s⁻¹]")
 
-fig
+#fig
+save("mountain_wave_w_comparison.png", fig)
