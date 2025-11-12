@@ -4,7 +4,6 @@ using ..Thermodynamics:
     dry_air_gas_constant,
     vapor_gas_constant,
     PlanarLiquidSurface,
-    PlanarIceSurface,
     PlanarMixedPhaseSurface,
     saturation_vapor_pressure,
     density,
@@ -161,15 +160,15 @@ end
 end 
 
 @inline @inbounds function moisture_mass_fractions(i, j, k, grid, ::WPSA, μ, qᵗ)
-    qᵛ = μ.microphysical_fields.specific_humidity[i, j, k]
-    qˡ = μ.microphysical_fields.liquid_mass_fraction[i, j, k]
+    qᵛ = μ.specific_humidity[i, j, k]
+    qˡ = μ.liquid_mass_fraction[i, j, k]
     return MoistureMassFractions(qᵛ, qˡ)
 end
 
 @inline @inbounds function moisture_mass_fractions(i, j, k, grid, ::MPSA, μ, qᵗ)
-    qᵛ = μ.microphysical_fields.specific_humidity[i, j, k]
-    qˡ = μ.microphysical_fields.liquid_mass_fraction[i, j, k]
-    qⁱ = μ.microphysical_fields.ice_mass_fraction[i, j, k]
+    qᵛ = μ.specific_humidity[i, j, k]
+    qˡ = μ.liquid_mass_fraction[i, j, k]
+    qⁱ = μ.ice_mass_fraction[i, j, k]
     return MoistureMassFractions(qᵛ, qˡ, qⁱ)
 end
 

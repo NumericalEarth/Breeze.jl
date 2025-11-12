@@ -54,7 +54,7 @@ end
     θ₀ = FT(300)
     reference_state = ReferenceState(grid, thermo, base_pressure=p₀, potential_temperature=θ₀)
     formulation = AnelasticFormulation(reference_state)
-    microphysics = Breeze.Microphysics.WarmPhaseSaturationAdjustment(FT)
+    microphysics = SaturationAdjustment()
     model = AtmosphereModel(grid; thermodynamics=thermo, formulation, microphysics)
 
     # Initialize with potential temperature and dry air
