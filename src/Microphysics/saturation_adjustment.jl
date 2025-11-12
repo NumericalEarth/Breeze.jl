@@ -27,12 +27,6 @@ import ..AtmosphereModels:
 
 abstract type AbstractEquilibrium end
 
-"""
-    WarmPhaseSaturationAdjustment(reference_state, thermodynamics)
-
-Simple warm-phase saturation adjustment microphysics that computes temperature
-via a saturation adjustment.
-"""
 struct SaturationAdjustment{E, FT}
     tolerance :: FT
     maxiter :: FT
@@ -143,32 +137,32 @@ prognostic_field_names(::WPSA) = tuple()
 prognostic_field_names(::MPSA) = tuple()
 
 center_field_tuple(grid, names...) = NamedTuple{names}(CenterField(grid) for name in names)
-materialize_microphysical_fields(::WPSA, grid, bcs) = center_field_tuple(grid, :specific_humidity, :liquid_mass_fraction)
-materialize_microphysical_fields(::MPSA, grid, bcs) = center_field_tuple(grid, :specific_humidity, :liquid_mass_fraction, :ice_mass_fraction)
+materialize_microphysical_fields(::WPSA, grid, bcs) = center_field_tuple(grid, :qᵛ, :qˡ)
+materialize_microphysical_fields(::MPSA, grid, bcs) = center_field_tuple(grid, :qᵛ, :qˡ, :qⁱ)
 
 @inline @inbounds function update_microphysical_fields!(μ, ::WPSA, i, j, k, grid, 𝒰, thermo)
-    μ.specific_humidity[i, j, k] = 𝒰.moisture_mass_fractions.vapor
-    μ.liquid_mass_fraction[i, j, k] = 𝒰.moisture_mass_fractions.liquid
+    μ.qᵛ[i, j, k] = 𝒰.moisture_mass_fractions.vapor
+    μ.qˡ[i, j, k] = 𝒰.moisture_mass_fractions.liquid
     return nothing
 end
 
 @inline @inbounds function update_microphysical_fields!(μ, ::MPSA, i, j, k, grid, 𝒰, thermo)
-    μ.specific_humidity[i, j, k] = 𝒰.moisture_mass_fractions.vapor
-    μ.liquid_mass_fraction[i, j, k] = 𝒰.moisture_mass_fractions.liquid
-    μ.ice_mass_fraction[i, j, k] = 𝒰.moisture_mass_fractions.ice
+    μ.qᵛ[i, j, k] = 𝒰.moisture_mass_fractions.vapor
+    μ.qˡ[i, j, k] = 𝒰.moisture_mass_fractions.liquid
+    μ.qⁱ[i, j, k] = 𝒰.moisture_mass_fractions.ice
     return nothing
 end 
 
 @inline @inbounds function moisture_mass_fractions(i, j, k, grid, ::WPSA, μ, qᵗ)
-    qᵛ = μ.specific_humidity[i, j, k]
-    qˡ = μ.liquid_mass_fraction[i, j, k]
+    qᵛ = μ.qᵛ[i, j, k]
+    qˡ = μ.qˡ[i, j, k]
     return MoistureMassFractions(qᵛ, qˡ)
 end
 
 @inline @inbounds function moisture_mass_fractions(i, j, k, grid, ::MPSA, μ, qᵗ)
-    qᵛ = μ.specific_humidity[i, j, k]
-    qˡ = μ.liquid_mass_fraction[i, j, k]
-    qⁱ = μ.ice_mass_fraction[i, j, k]
+    qᵛ = μ.qᵛ[i, j, k]
+    qˡ = μ.qˡ[i, j, k]
+    qⁱ = μ.qⁱ[i, j, k]
     return MoistureMassFractions(qᵛ, qˡ, qⁱ)
 end
 
@@ -234,11 +228,6 @@ Return the saturation-adjusted thermodynamic state using a secant iteration.
 
     # Re-initialize first guess assuming saturation
     𝒰₁ = adjust_state(𝒰₀, T₁, thermo, equilibrium)
-
-    # 𝒰₁ = with_moisture(𝒰₀, q₁)
-    # qᵛ⁺₁ = adjustment_saturation_specific_humidity(T₁, pᵣ, qᵗ, thermo, equilibrium)
-    # q₁ = equilibrated_moisture_mass_fractions(T₁, qᵗ, qᵛ⁺₁, equilibrium)
-    # 𝒰₁ = with_moisture(𝒰₀, q₁)
 
     # Generate a second guess
     ℒˡᵣ = thermo.liquid.reference_latent_heat

@@ -3,7 +3,6 @@ abstract type AbstractThermodynamicState{FT} end
 struct PotentialTemperatureState{FT} <: AbstractThermodynamicState{FT}
     potential_temperature :: FT
     moisture_mass_fractions :: MoistureMassFractions{FT}
-    height :: FT
     base_pressure :: FT
     reference_pressure :: FT
     reference_density :: FT
@@ -13,7 +12,6 @@ end
 
 @inline function exner_function(𝒰::PotentialTemperatureState, thermo::ThermodynamicConstants)
     q = 𝒰.moisture_mass_fractions
-    z = 𝒰.height
     Rᵐ = mixture_gas_constant(q, thermo)
     cᵖᵐ = mixture_heat_capacity(q, thermo)
     pᵣ = 𝒰.reference_pressure
@@ -24,13 +22,12 @@ end
 @inline total_moisture_mass_fraction(state::PotentialTemperatureState) =
     total_moisture_mass_fraction(state.moisture_mass_fractions)
 
-@inline function with_moisture(𝒰::PotentialTemperatureState, q::MoistureMassFractions)
-    return PotentialTemperatureState(𝒰.potential_temperature,
-                                     q,
-                                     𝒰.height,
-                                     𝒰.base_pressure,
-                                     𝒰.reference_pressure,
-                                     𝒰.reference_density)
+@inline function with_moisture(𝒰::PotentialTemperatureState{FT}, q::MoistureMassFractions{FT}) where FT
+    return PotentialTemperatureState{FT}(𝒰.potential_temperature,
+                                         q,
+                                         𝒰.base_pressure,
+                                         𝒰.reference_pressure,
+                                         𝒰.reference_density)
 end
 
 @inline function temperature(𝒰::PotentialTemperatureState, thermo::ThermodynamicConstants)

@@ -289,7 +289,7 @@ end
     # Case 0: Absolute zero potential temperature returns zero temperature
     θ₀ = zero(FT)
     q₀ = MoistureMassFractions{FT} |> zero
-    𝒰₀ = PotentialTemperatureState(θ₀, q₀, z, p₀, pᵣ, ρᵣ)
+    𝒰₀ = PotentialTemperatureState(θ₀, q₀, p₀, pᵣ, ρᵣ)
     T₀ = compute_boussinesq_adjustment_temperature(𝒰₀, thermo)
     @test T₀ == 0
 
@@ -300,7 +300,7 @@ end
     θ₁ = FT(300)
     qᵗ₁ = zero(FT)
     q₁ = MoistureMassFractions(qᵗ₁)
-    𝒰₁ = PotentialTemperatureState(θ₁, q₁, z, p₀, pᵣ, ρᵣ)
+    𝒰₁ = PotentialTemperatureState(θ₁, q₁, p₀, pᵣ, ρᵣ)
     Π₁ = exner_function(𝒰₁, thermo)
     T_dry₁ = Π₁ * θ₁
 
@@ -310,7 +310,7 @@ end
     # Case 2: Unsaturated, humid but below saturation at dry temperature
     θ₂ = FT(300)
     q₂ = MoistureMassFractions{FT} |> zero
-    𝒰₂ = PotentialTemperatureState(θ₂, q₂, z, p₀, pᵣ, ρᵣ)
+    𝒰₂ = PotentialTemperatureState(θ₂, q₂, p₀, pᵣ, ρᵣ)
     Π₂ = exner_function(𝒰₂, thermo)
     T_dry₂ = Π₂ * θ₂
 
@@ -330,7 +330,7 @@ end
     T₃ = θ̃ = FT(300)
     qᵗ = FT(0.025)
     q̃ = MoistureMassFractions(qᵗ)
-    𝒰 = PotentialTemperatureState(θ̃, q̃, z, p₀, pᵣ, ρᵣ)
+    𝒰 = PotentialTemperatureState(θ̃, q̃, p₀, pᵣ, ρᵣ)
     qᵛ⁺ = Breeze.MoistAirBuoyancies.adjustment_saturation_specific_humidity(T₃, 𝒰, thermo)
     @test qᵗ > qᵛ⁺ # otherwise the test is wrong
 
@@ -341,7 +341,7 @@ end
     cᵖᵐ = mixture_heat_capacity(q₃, thermo)
     ℒˡᵣ = thermo.liquid.reference_latent_heat
     θ₃ = (T₃ - ℒˡᵣ / cᵖᵐ * qˡ) / Π₃
-    𝒰₃ = PotentialTemperatureState(θ₃, q₃, z, p₀, pᵣ, ρᵣ)
+    𝒰₃ = PotentialTemperatureState(θ₃, q₃, p₀, pᵣ, ρᵣ)
 
     T₃_solve = compute_boussinesq_adjustment_temperature(𝒰₃, thermo)
     @test isapprox(T₃_solve, T₃; atol=atol_T)

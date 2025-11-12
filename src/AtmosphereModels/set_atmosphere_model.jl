@@ -43,6 +43,9 @@ function set!(model::AtmosphereModel; enforce_mass_conservation=true, kw...)
             set!(model.energy_density, value)
         elseif name == :ρqᵗ
             set!(model.moisture_density, value)
+        elseif name ∈ propertynames(model.microphysical_fields)
+            μ = getproperty(model.microphysical_fields, name)
+            set!(μ, value)
         end
 
         # Setting diagnostic variables
@@ -77,6 +80,7 @@ function set!(model::AtmosphereModel; enforce_mass_conservation=true, kw...)
                     model.moisture_density,
                     model.formulation,
                     model.microphysics,
+                    model.microphysical_fields,
                     model.thermodynamics)
         end
     end
@@ -103,6 +107,7 @@ end
                                                              moisture_density,
                                                              formulation::AnelasticFormulation,
                                                              microphysics,
+                                                             microphysical_fields,
                                                              thermo)
     i, j, k = @index(Global, NTuple)
 
@@ -119,8 +124,8 @@ end
 
     # Assuming a state with no condensate?
     # TODO use microphysics model in the course of determining q
-    q = MoistureMassFractions(qᵗ)
-    𝒰₀ = PotentialTemperatureState(θ, q, z, p₀, pᵣ, ρᵣ)
+    q = moisture_mass_fractions(i, j, k, grid, microphysics, microphysical_fields, qᵗ)
+    𝒰₀ = PotentialTemperatureState(θ, q, p₀, pᵣ, ρᵣ)
     𝒰 = compute_thermodynamic_state(𝒰₀, microphysics, thermo)
 
     T = temperature(𝒰, thermo)
