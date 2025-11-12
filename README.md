@@ -62,6 +62,6 @@ For instance, if we run
 julia> include("examples/thermal_bubble.jl")
 ```
 
-but after we tweak the spatial resolution of the grid to `size = (512, 512)`, we get
+but after we tweak the spatial resolution of the grid to `size = (1024, 512)`, we get
 
-https://github.com/user-attachments/assets/ad71d6aa-2539-40b3-93b5-944e468212b1
+https://github.com/user-attachments/assets/aaca693c-57fe-46bf-8ff7-6646f6e5eebe
