@@ -1,7 +1,5 @@
 using Breeze
 using Oceananigans.Units
-using Oceananigans.Forcings
-using Oceananigans.Grids: ExponentialDiscretization
 using CUDA
 
 # Schär mountain wave test case
@@ -24,9 +22,9 @@ Rᵈ = Breeze.Thermodynamics.dry_air_gas_constant(thermo)
 T₀ = 300                    # K
 θ₀ = T₀                     # K - reference potential temperature
 U  = 20                     # m s^-1 (mean wind)
-N² = g^2/(cᵖᵈ*T₀)           # Brunt–Väisälä frequency squared
+N² = g^2 / (cᵖᵈ * T₀)       # Brunt–Väisälä frequency squared
+β  = g / (Rᵈ * T₀)          # density scale parameter
 N  = sqrt(N²)
-β  = g/(Rᵈ*T₀)              # density scale parameter
 
 # Schär mountain parameters
 h₀ = 250                    # m   (use 25 m for strict linearity; 250 m for full case)
@@ -39,8 +37,8 @@ Nx, Nz = 200, 200
 L, H = 100kilometers, 29kilometers
 
 # Vertical grid stretching parameters, constant spacing (500 m) above 3 km
-z_transition = 3000.0  # m - transition height
-dz_top = 250.0  # m - constant spacing above 3 km
+z_transition = 3000  # m - transition height
+dz_top = 250  # m - constant spacing above 3 km
 
 # Calculate number of cells needed above transition
 Nz_top = ceil(Int, (H - z_transition) / dz_top)
@@ -48,14 +46,10 @@ Nz_top = ceil(Int, (H - z_transition) / dz_top)
 # Remaining cells for stretched region
 Nz_bottom = Nz - Nz_top
 
-# Geometric refinement up to z_transition,
-z_stretched = ExponentialDiscretization(Nz_bottom, 0, z_transition ,scale = z_transition / 8, bias=:left).faces
-
-# Uniform part above transition
-z_uniform = collect(range(z_transition, H; length=Nz_top + 1))
-
-# Combine (avoid duplicate at transition)
-z_faces = vcat(z_stretched[1:end-1], z_uniform)
+# Exponential refinement up to z_transition
+z_stretched = ExponentialDiscretization(Nz_bottom, 0, z_transition, scale = z_transition / 8, bias=:left)
+z_uniform = range(z_transition+dz_top, H; length=Nz_top)
+z_faces = vcat(z_stretched.faces, collect(z_uniform))
 
 # Set up the simulation doamin
 underlying_grid = RectilinearGrid(GPU(), size = (Nx, Nz), halo = (4, 4),
@@ -67,12 +61,27 @@ hill(x) = h₀ * exp(-(x / a)^2) * cos(π * x / λ)^2
 grid = ImmersedBoundaryGrid(underlying_grid, PartialCellBottom(hill))
 
 # Rayleigh damping layer at the top of the domain
-damping_rate = 1/60 # relax fields on a 60 second time-scale
-top_mask = GaussianMask{:z}(center=grid.Lz, width=grid.Lz/2)
-sponge = Relaxation(rate=damping_rate, mask=top_mask)
+# damping_rate = 1/60 # relax fields on a 60 second time-scale
+# top_mask = GaussianMask{:z}(center=grid.Lz, width=grid.Lz/2)
+# sponge = Relaxation(rate=damping_rate, mask=top_mask)
+
+@inline gaussian_mask(z, p) = exp(-(z - p.z0)^2 / (2 * p.dz^2))
+
+@inline function sponge(i, j, k, grid, clock, params, ρc, lz)
+    z = znode(k, grid, lz)
+    ω = params.ω
+    m = gaussian_mask(z, params)
+    return @inbounds - ω * m * ρc[i, j, k]
+end
+
+@inline ρw_sponge(i, j, k, grid, clock, params, model_fields) =
+    sponge(i, j, k, grid, clock, params, model_fields.ρw, Face())
+
+params = (z0=grid.Lz, dz=grid.Lz/2, ω=1/60)
+ρw_forcing = Forcing(ρw_sponge, discrete_form=true, parameters=params)
 
 # Atmosphere model setup
-model = AtmosphereModel(grid, advection = WENO(), forcing=(; ρw=sponge))
+model = AtmosphereModel(grid, advection = WENO(), forcing=(; ρw=ρw_forcing))
 
 # Initial conditions and initialization
 θᵢ(x, z) = θ₀ * exp(N² * z / g) # background stratification for isothermal atmosphere
