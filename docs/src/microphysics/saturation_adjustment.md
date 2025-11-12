@@ -140,11 +140,10 @@ by passing it an "unadjusted" moisture mass fraction into [`Breeze.AtmosphereMod
 
 ```@example microphysics
 using Breeze.AtmosphereModels: compute_temperature
-using Breeze.Microphysics: WarmPhaseSaturationAdjustment
 
-microphysics = WarmPhaseSaturationAdjustment()
+microphysics = SaturationAdjustment(equilibrium=WarmPhaseEquilibrium())
 
-q₀ = (qᵗ, zero(qᵗ), zero(qᵗ))
+q₀ = MoistureMassFractions(qᵗ)
 𝒰 = Breeze.Thermodynamics.MoistStaticEnergyState(e, q₀, z, p)
 T★ = compute_temperature(𝒰, microphysics, thermo)
 ```
@@ -187,9 +186,10 @@ The residual looks like
 using Breeze.Microphysics: saturation_adjustment_residual
 using CairoMakie
 
+equilibrium = WarmPhaseEquilibrium()
 T = 230:0.5:320
-r = [saturation_adjustment_residual(Tʲ, 𝒰, thermo) for Tʲ in T]
-qᵛ⁺ = [adjustment_saturation_specific_humidity(Tʲ, p, qᵗ, thermo, WarmPhaseEquilibrium()) for Tʲ in T]
+r = [saturation_adjustment_residual(Tʲ, 𝒰, thermo, equilibrium) for Tʲ in T]
+qᵛ⁺ = [adjustment_saturation_specific_humidity(Tʲ, p, qᵗ, thermo, equilibrium) for Tʲ in T]
 
 fig = Figure()
 axr = Axis(fig[1, 1], xlabel="Temperature (K)", ylabel="Saturation adjustment residual (K)")
