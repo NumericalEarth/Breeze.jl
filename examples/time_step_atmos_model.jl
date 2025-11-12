@@ -15,7 +15,7 @@ model = AtmosphereModel(grid, advection=WENO(), boundary_conditions=(; e=e_bcs))
 
 Lz = grid.Lz
 Δθ = 5 # K
-Tₛ = model.formulation.constants.reference_potential_temperature
+Tₛ = model.formulation.constants.potential_temperature
 # θᵢ(x, y, z) = Tₛ + Δθ * z / Lz
 qᵢ(x, y, z) = 0
 Ξᵢ(x, y, z) = 1e-2 * randn()
@@ -80,7 +80,7 @@ set!(θ_bg_field, z -> Tₛ + dθdz * z)
 T = model.temperature
 ρʳ = model.formulation.reference_density
 cᵖᵈ = model.thermodynamics.dry_air.heat_capacity
-ρe = model.energy
+ρe = model.energy_density
 θ = ρe / (ρʳ * cᵖᵈ)
 θ′ = θ - θ_bg_field
 

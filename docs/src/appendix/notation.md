@@ -7,42 +7,46 @@ inline math, while the Unicode column shows the exact glyphs used in code.
 
 | mathematical symbol | unicode | description |
 | --- | --- | --- |
-| ``p`` | `p` | Pressure |
-| ``p_r(z)`` | `pᵣ` | Hydrostatic reference pressure at height ``z`` |
-| ``p_0`` | `p₀` | Base (surface) reference pressure |
-| ``p_h'`` | `pₕ′` | Hydrostatic pressure anomaly, ``∂_z p_h' = - ρ_r b`` |
-| ``p_n`` | `pₙ` | Nonhydrostatic pressure (projection/correction potential) |
-| ``\rho`` | `ρ` | Density |
-| ``\rho_r(z)`` | `ρᵣ` | Reference density at height ``z`` |
-| ``\boldsymbol{u} = (u,v,w)`` | `u, v, w` | Velocity components (x, y, z) |
-| ``\rho_r\,u,\; \rho_r\,v,\; \rho_r\,w`` | `ρu, ρv, ρw` | Momentum components (ρᵣ-weighted velocities) |
-| ``g`` | `g` | Gravitational acceleration |
-| ``T`` | `T` | Temperature |
-| ``\theta`` | `θ` | Potential temperature |
-| ``\theta_r`` | `θᵣ` | Reference potential temperature (constant) |
-| ``\alpha`` | `α` | Specific volume, ``α = 1/ρ`` or ``α = R^{m} T / p_r`` in anelastic |
-| ``\alpha_{r}`` | `αᵣ` | Reference specific volume, ``α_{r} = R^{d} θ_r / p_r`` |
-| ``\Pi`` | `Π` | Exner function, ``\Pi = (p_r/p_0)^{R^{m}/c^{pm}}`` |
-| ``R^{d}`` | `Rᵈ` | Dry air gas constant |
-| ``R^{v}`` | `Rᵛ` | Water vapor gas constant |
-| ``R^{m}`` | `Rᵐ` | Mixture gas constant, function of ``q`` |
-| ``c^{pd}`` | `cᵖᵈ` | Heat capacity of dry air at constant pressure |
-| ``c^{pv}`` | `cᵖᵛ` | Heat capacity of vapor at constant pressure |
-| ``c^{pm}`` | `cᵖᵐ` | Mixture heat capacity at constant pressure |
-| ``q`` | `q` | Specific humidity (vapor mass fraction) |
-| ``q^{t}`` | `qᵗ` | Total specific humidity (vapor + condensates) |
-| ``q^{v}`` | `qᵛ` | Water vapor specific humidity |
-| ``q^{\ell}`` | `qˡ` | Liquid water specific humidity |
-| ``q^{i}`` | `qi` | Ice specific humidity |
-| ``q^{v+}`` | `qᵛ⁺` | Saturation specific humidity over liquid/ice (context-dependent) |
-| ``\mathcal{L}^{v}`` | `ℒᵛ` | Latent heat of vaporization |
-| ``\mathcal{R}`` | `ℛ` | Universal (molar) gas constant |
-| ``b`` | `b` | Buoyancy, ``b = g (α - α_{r}) / α_{r}`` |
-| ``\Delta t`` | `Δt` | Time step |
-| ``\Delta z`` | `Δz` | Vertical grid spacing |
- 
+| ``\rho``                      | `ρ`           | Density |
+| ``\boldsymbol{u} = (u,v,w)``  | `u, v, w`     | Velocity components (x, y, z) |
+| ``ρ \, u,\; ρ \,v,\; ρ \, w`` | `ρu, ρv, ρw`  | Momentum components |
+| ``T``                         | `T`           | Temperature |
+| ``\alpha``                    | `α`           | Specific volume, ``α = 1/ρ`` or ``α = R^{m} T / p_r`` in anelastic |
+| ``ρ e``                       | `ρe`          | Moist static energy density (conservative variable) |
+| ``e``                         | `e`           | Moist static energy per unit mass, ``e = c^{pd} \, θ`` |
+| ``ρ q^{t}``                   | `ρqᵗ`         | Total moisture density (conservative water variable) |
+| ``q^{t}``                     | `qᵗ`          | Total moisture mass fraction (vapor + liquid + ice) |
+| ``q^{v}``                     | `qᵛ`          | Vapor specific humidity |
+| ``q^{\ell}``                  | `qˡ`          | Liquid specific humidity |
+| ``q^{i}``                     | `qi`          | Ice specific humidity |
+| ``q^{v+}``                    | `qᵛ⁺`         | Saturation specific humidity over liquid/ice (context-dependent) |
+| ``g``                         | `g`           | Gravitational acceleration |
+| ``\mathcal{R}``               | `ℛ`           | Universal (molar) gas constant |
+| ``R^{d}``                     | `Rᵈ`          | Dry air gas constant |
+| ``R^{v}``                     | `Rᵛ`          | Water vapor gas constant |
+| ``R^{m}``                     | `Rᵐ`          | Mixture gas constant, function of ``q`` |
+| ``c^{pd}``                    | `cᵖᵈ`         | Heat capacity of dry air at constant pressure |
+| ``c^{pv}``                    | `cᵖᵛ`         | Heat capacity of vapor at constant pressure |
+| ``c^l``                       | `cˡ`          | Heat capacity of the liquid phase (incompressible) |
+| ``c^i``                       | `cⁱ`          | Heat capacity of the ice phase (incompressible) |
+| ``c^{pm}``                    | `cᵖᵐ`         | Mixture heat capacity at constant pressure |
+| ``\theta``                    | `θ`           | Potential temperature |
+| ``\theta_0``                  | `θ₀`          | Reference potential temperature (constant) |
+| ``\Pi``                       | `Π`           | Exner function, ``\Pi = (p_r/p_0)^{R^{m}/c^{pm}}`` |
+| ``p``                         | `p`           | Pressure |
+| ``p_0``                       | `p₀`          | Base (surface) reference pressure |
+| ``\rho_r(z)``                 | `ρᵣ`          | Density of a dry reference state at height ``z`` |
+| ``\alpha_{r}``                | `αᵣ`          | Specific volume of a dry reference state, ``α_{r} = R^d θ_0 / p_r`` |
+| ``p_r(z)``                    | `pᵣ`          | Hydrostatic reference pressure at height ``z`` |
+| ``\mathcal{L}^{l}``           | `ℒˡ`          | Latent heat of vaporization |
+| ``b``                         | `b`           | Buoyancy |
+| ``p_h'``                      | `pₕ′`         | Hydrostatic pressure anomaly, ``∂_z p_h' = - ρ_r b`` |
+| ``p_n``                       | `pₙ`          | Nonhydrostatic pressure (projection/correction potential) |
+| ``\Delta t``                  | `Δt`          | Time step |
+| ``\Delta z``                  | `Δz`          | Vertical grid spacing |
 
 Notes:
 - Reference-state quantities use a subscript ``r`` (e.g., ``p_r``, ``\rho_r``), following the Thermodynamics docs and code.
 - Phase or mixture identifiers (``d``, ``v``, ``m``) appear as superscripts (e.g., ``R^{d}``, ``c^{pm}``), matching usage in the codebase (e.g., `Rᵈ`, `cᵖᵐ`).
-- Conservative variables are typically stored in ρᵣ-weighted form in the code (e.g., `ρu`, `ρv`, `ρw`, `ρe`, `ρqᵗ`).
+- Conservative variables are stored in ρᵣ-weighted form in the code (e.g., `ρu`, `ρv`, `ρw`, `ρe`, `ρqᵗ`).
+- Mapping to AtmosphereModel fields: `ρe` corresponds to `model.energy_density`, `ρqᵗ` to `model.moisture_density`, and `qᵗ` to `model.moisture_mass_fraction`.

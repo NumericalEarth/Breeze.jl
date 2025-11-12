@@ -44,6 +44,13 @@ import Pkg
 Pkg.test("Breeze"; test_args=`--verbose --jobs 2 moist_air atmosphere`)
 ```
 
+Similarly, to run only the doctests, you can use the command
+
+```julia
+import Pkg
+Pkg.test("Breeze"; test_args=`doctests`)
+```
+
 !!! note "List of tests"
 
     The names of the test jobs are the file names under the `test` directory, without the `.jl` extension, excluding the `runtests.jl` file.
@@ -55,6 +62,22 @@ Pkg.test("Breeze"; test_args=`--verbose --jobs 2 moist_air atmosphere`)
     import Pkg
     Pkg.test("Breeze"; test_args=`--list`)
     ```
+
+### GPU tests
+
+When running the tests, if a CUDA GPU is detected, they automatically use the [`GPU` Oceananigans architecture](https://clima.github.io/OceananigansDocumentation/stable/appendix/library/#Oceananigans.Architectures.GPU), otherwise they run on [`CPU`](https://clima.github.io/OceananigansDocumentation/stable/appendix/library/#Oceananigans.Architectures.CPU).
+To temporarily disable the automatic detection of the GPU and forcibly run the tests on CPU you can set the environment variable `CUDA_VISIBLE_DEVICES=-1`.
+For example, from within a Julia session you can do
+
+```julia
+ENV["CUDA_VISIBLE_DEVICES"] = "-1"
+import Pkg
+Pkg.test("Breeze")
+```
+
+!!! note "Contributing new tests"
+
+    When contributing new tests to `Breeze.jl`, make sure to pass to the grid the global variable `default_arch`, defined in the [init code of all tests](https://github.com/NumericalEarth/Breeze.jl/blob/155344abedf5a8739202c5faac275c2ca2576680/test/runtests.jl#L10-L19), unless you specifically want to use a different architecture.
 
 ## Coding style
 

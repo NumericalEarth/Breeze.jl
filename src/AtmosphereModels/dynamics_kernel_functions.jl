@@ -6,13 +6,6 @@ using Oceananigans.Operators: ∂xᶠᶜᶜ, ∂yᶜᶠᶜ, ∂zᶜᶜᶠ, ℑz�
 ##### Some key functions
 #####
 
-@inline function buoyancy(i, j, k, grid, formulation, temperature, specific_humidity, thermo)
-    α = specific_volume(i, j, k, grid, formulation, temperature, specific_humidity, thermo)
-    αᵣ = reference_specific_volume(i, j, k, grid, formulation, thermo)
-    g = thermo.gravitational_acceleration
-    return g * (α - αᵣ) / αᵣ
-end
-
 @inline function ρ_bᶜᶜᶠ(i, j, k, grid, ρ, T, q, formulation, thermo)
     ρᶜᶜᶠ = ℑzᵃᵃᶠ(i, j, k, grid, ρ)
     bᶜᶜᶠ = ℑzᵃᵃᶠ(i, j, k, grid, buoyancy, formulation, T, q, thermo)
@@ -35,14 +28,11 @@ hydrostatic_pressure_gradient_y(i, j, k, grid, pₕ′) = ∂yᶜᶠᶜ(i, j, k,
                                      coriolis,
                                      clock,
                                      model_fields,
-                                     forcing,
-                                     reference_density,
-                                     hydrostatic_pressure_anomaly)
+                                     ρu_forcing)
 
     return ( - div_𝐯u(i, j, k, grid, advection, velocities, momentum.ρu)
              - x_f_cross_U(i, j, k, grid, coriolis, momentum)
-             # - hydrostatic_pressure_gradient_x(i, j, k, grid, hydrostatic_pressure_anomaly)
-             + forcing(i, j, k, grid, clock, model_fields))
+             + ρu_forcing(i, j, k, grid, clock, model_fields))
 end
 
 @inline function y_momentum_tendency(i, j, k, grid,
@@ -52,14 +42,11 @@ end
                                      coriolis,
                                      clock,
                                      model_fields,
-                                     forcing,
-                                     reference_density,
-                                     hydrostatic_pressure_anomaly)
+                                     ρv_forcing)
 
     return ( - div_𝐯v(i, j, k, grid, advection, velocities, momentum.ρv)
              - y_f_cross_U(i, j, k, grid, coriolis, momentum)
-             # - hydrostatic_pressure_gradient_y(i, j, k, grid, hydrostatic_pressure_anomaly)
-             + forcing(i, j, k, grid, clock, model_fields))
+             + ρv_forcing(i, j, k, grid, clock, model_fields))
 end
 
 @inline function z_momentum_tendency(i, j, k, grid,
@@ -69,34 +56,34 @@ end
                                      coriolis,
                                      clock,
                                      model_fields,
-                                     forcing,
+                                     ρw_forcing,
                                      reference_density,
                                      formulation,
                                      temperature,
-                                     specific_humidity,
+                                     moisture_mass_fraction,
                                      thermo)
 
     return ( - div_𝐯w(i, j, k, grid, advection, velocities, momentum.ρw)
              - z_f_cross_U(i, j, k, grid, coriolis, momentum)
-             + ρ_bᶜᶜᶠ(i, j, k, grid, reference_density, temperature, specific_humidity, formulation, thermo)
-             + forcing(i, j, k, grid, clock, model_fields))
+             + ρ_bᶜᶜᶠ(i, j, k, grid, reference_density, temperature, moisture_mass_fraction, formulation, thermo)
+             + ρw_forcing(i, j, k, grid, clock, model_fields))
 end
 
 @inline function scalar_tendency(i, j, k, grid,
                                  scalar,
-                                 forcing,
+                                 scalar_forcing,
                                  advection,
                                  velocities,
                                  clock,
                                  model_fields)
 
     return ( - div_Uc(i, j, k, grid, advection, velocities, scalar)
-             + forcing(i, j, k, grid, clock, model_fields))
+             + scalar_forcing(i, j, k, grid, clock, model_fields))
 end
 
 @inline function moist_static_energy_tendency(i, j, k, grid,
                                               moist_static_energy,
-                                              forcing,
+                                              ρe_forcing,
                                               advection,
                                               velocities,
                                               clock,
@@ -104,17 +91,17 @@ end
                                               reference_density,
                                               formulation,
                                               temperature,
-                                              specific_humidity,
+                                              moisture_mass_fraction,
                                               thermo,
-                                              condensates,
+                                              microphysical_fields,
                                               microphysics)
 
     # Compute the buoyancy flux term, ρᵣ w b
     buoyancy_flux = ℑzᵃᵃᶜ(i, j, k, grid, ρ_w_bᶜᶜᶠ, velocities.w, reference_density,
-                          temperature, specific_humidity, formulation, thermo)
+                          temperature, moisture_mass_fraction, formulation, thermo)
 
     return ( - div_Uc(i, j, k, grid, advection, velocities, moist_static_energy)
              + buoyancy_flux
-             # + microphysical_energy_tendency(i, j, k, grid, formulation, microphysics, condensates)
-             + forcing(i, j, k, grid, clock, model_fields))
+             # + microphysical_energy_tendency(i, j, k, grid, formulation, microphysics, microphysical_fields)
+             + ρe_forcing(i, j, k, grid, clock, model_fields))
 end

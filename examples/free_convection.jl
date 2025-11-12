@@ -2,63 +2,53 @@ using Oceananigans
 using Oceananigans.Units
 using Printf
 using Breeze
+using CUDA
 
-arch = CPU()
-
+arch = GPU()
 Nx = Nz = 128
 Lz = 4 * 1024
 grid = RectilinearGrid(arch, size=(Nx, Nz), x=(0, 2Lz), z=(0, Lz), topology=(Periodic, Flat, Bounded))
 
 p₀ = 101325 # Pa
 θ₀ = 288 # K
-reference_constants = Breeze.Thermodynamics.ReferenceStateConstants(base_pressure=p₀, potential_temperature=θ₀)
-buoyancy = Breeze.MoistAirBuoyancy(; reference_constants)
+buoyancy = Breeze.MoistAirBuoyancy(grid, base_pressure=p₀, reference_potential_temperature=θ₀)
 
-# Simple precipitation scheme from CloudMicrophysics
-using CloudMicrophysics
-using CloudMicrophysics.Microphysics0M: remove_precipitation
-
-FT = eltype(grid)
-microphysics = CloudMicrophysics.Parameters.Parameters0M{FT}(τ_precip=600, S_0=0, qc_0=0.02)
-@inline precipitation(x, z, t, q, params) = remove_precipitation(params, q, 0)
-q_forcing = Forcing(precipitation, field_dependencies=:q, parameters=microphysics)
-
-ρ₀ = Breeze.MoistAirBuoyancies.base_density(buoyancy) # air density at z=0
+θ₀ = buoyancy.reference_state.potential_temperature
+p₀ = buoyancy.reference_state.base_pressure
+Rᵈ = Breeze.Thermodynamics.dry_air_gas_constant(buoyancy.thermodynamics)
+ρ₀ = p₀ / (Rᵈ * θ₀) # air density at z=0
 cₚ = buoyancy.thermodynamics.dry_air.heat_capacity
 Q₀ = 1000 # heat flux in W / m²
 Jθ = Q₀ / (ρ₀ * cₚ) # temperature flux
 θ_bcs = FieldBoundaryConditions(bottom=FluxBoundaryCondition(Jθ))
 
 vapor_flux = FluxBoundaryCondition(1e-2)
-q_bcs = FieldBoundaryConditions(bottom=vapor_flux)
+qᵗ_bcs = FieldBoundaryConditions(bottom=vapor_flux)
 
 advection = WENO() #(momentum=WENO(), θ=WENO(), q=WENO(bounds=(0, 1)))
-tracers = (:θ, :q)
 model = NonhydrostaticModel(; grid, advection, buoyancy,
-                            tracers = (:θ, :q),
-                            forcing = (; q=q_forcing),
-                            boundary_conditions = (θ=θ_bcs, q=q_bcs))
+                            tracers = (:θ, :qᵗ),
+                            boundary_conditions = (θ=θ_bcs, qᵗ=qᵗ_bcs))
 
 Lz = grid.Lz
-Δθ = 5 # K
-Tₛ = reference_constants.reference_potential_temperature # K
-θᵢ(x, z) = Tₛ + Δθ * z / Lz + 1e-2 * Δθ * randn()
-qᵢ(x, z) = 0 # 1e-2 + 1e-5 * rand()
-set!(model, θ=θᵢ, q=qᵢ)
+Δθ = 2 # K
+Tₛ = buoyancy.reference_state.potential_temperature # K
+θᵢ(x, z) = Tₛ + Δθ * z / Lz + 1e-2 * Δθ * rand()
+set!(model, θ=θᵢ)
 
-simulation = Simulation(model, Δt=10, stop_time=4hours)
+simulation = Simulation(model, Δt=10, stop_iteration=1000) #stop_time=4hours)
 conjure_time_step_wizard!(simulation, cfl=0.7)
 
 T = Breeze.TemperatureField(model)
 qˡ = Breeze.CondensateField(model, T)
-qᵛ★ = Breeze.SaturationField(model, T)
-δ = Field(model.tracers.q - qᵛ★)
+qᵛ⁺ = Breeze.SaturationField(model, T)
+δ = Field(model.tracers.qᵗ - qᵛ⁺)
 
 function progress(sim)
     compute!(T)
     compute!(qˡ)
     compute!(δ)
-    q = sim.model.tracers.q
+    qᵗ = sim.model.tracers.qᵗ
     θ = sim.model.tracers.θ
     u, v, w = sim.model.velocities
 
@@ -66,8 +56,8 @@ function progress(sim)
     vmax = maximum(v)
     wmax = maximum(w)
 
-    qmin = minimum(q)
-    qmax = maximum(q)
+    qᵗmin = minimum(qᵗ)
+    qᵗmax = maximum(qᵗ)
     qˡmax = maximum(qˡ)
     δmax = maximum(δ)
 
@@ -77,8 +67,8 @@ function progress(sim)
     msg = @sprintf("Iter: %d, t: %s, Δt: %s, max|u|: (%.2e, %.2e, %.2e)",
                     iteration(sim), prettytime(sim), prettytime(sim.Δt), umax, vmax, wmax)
 
-    msg *= @sprintf(", extrema(q): (%.2e, %.2e), max(qˡ): %.2e, min(δ): %.2e, extrema(θ): (%.2e, %.2e)",
-                     qmin, qmax, qˡmax, δmax, θmin, θmax)
+    msg *= @sprintf(", max(qˡ): %.2e, min(δ): %.2e, extrema(θ): (%.2e, %.2e)",
+                     qˡmax, δmax, θmin, θmax)
 
     @info msg
 
@@ -88,8 +78,8 @@ end
 add_callback!(simulation, progress, IterationInterval(10))
 
 using Oceananigans.Models: ForcingOperation
-Sʳ = ForcingOperation(:q, model)
-outputs = merge(model.velocities, model.tracers, (; T, qˡ, qᵛ★, Sʳ))
+Sʳ = ForcingOperation(:qᵗ, model)
+outputs = merge(model.velocities, model.tracers, (; T, qˡ, qᵛ⁺, Sʳ))
 
 ow = JLD2Writer(model, outputs,
                 filename = "free_convection.jld2",
@@ -100,6 +90,7 @@ simulation.output_writers[:jld2] = ow
 
 run!(simulation)
 
+#=
 wt = FieldTimeSeries("free_convection.jld2", "θ")
 θt = FieldTimeSeries("free_convection.jld2", "θ")
 Tt = FieldTimeSeries("free_convection.jld2", "T")
@@ -162,3 +153,4 @@ record(fig, "free_convection.mp4", 1:Nt, framerate=12) do nn
     @info "Drawing frame $nn of $Nt..."
     n[] = nn
 end
+=#

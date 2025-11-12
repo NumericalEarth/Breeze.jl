@@ -5,7 +5,7 @@
 
 <!-- description -->
 <p align="center">
-  <strong>🌪 Fast and friendly Julia software for atmosphere simulations on CPUs and GPUs. https://numericalearth.github.io/BreezeDocumentation/dev/</strong>
+  <strong>🌪 Fast and friendly Julia software for atmospheric fluid dynamics on CPUs and GPUs. https://numericalearth.github.io/BreezeDocumentation/dev/</strong>
 </p>
 
 <p align="center">
@@ -26,10 +26,11 @@
   </a>
 </p>
 
-Breeze is a software package for atmosphere simulations using finite volume methods on CPUs and GPUs.
-Breeze currently supports simulations based on the Boussinesq and anelastic approximations in Cartesian domains.
-Breeze's power flows from [Oceananigans](https://github.com/CliMA/Oceananigans.jl), which provides user interface design, grids, fields, solvers, advection schemes, and more.
-Watch this space for the crystallization of Breeze's roadmap.
+Breeze is a library for simulating atmospheric flows, convection, clouds, weather, and hurricanes on CPUs and GPUs.
+Much of Breeze's power flows from [Oceananigans](https://github.com/CliMA/Oceananigans.jl), which provides a user interface, grids, fields, solvers, advection schemes, Lagrangian particles, physics, and more.
+Right now, `Breeze.AtmosphereModel` is in an early stage of development, and supports simple simulations that use the anelastic formulation of the Euler equations on `RectilinearGrid`.
+But we're working feverishly towards a future with bulk, bin and superdroplet microphysics, radiation, and a fully compressible formulation with acoustic substepping (and note, the roadmap and vision for Breeze is still something of a work in progress).
+Check out [the documentation](https://numericalearth.github.io/BreezeDocumentation/dev/) to see what we can do now, and watch this space (or get in touch to discuss!) its crystallization.
 
 ### Installing and using Breeze
 
@@ -47,20 +48,20 @@ Open Julia from within the local directory of the repo via:
 julia --project
 ```
 
-The first time, you need to install any dependencies:
+The first time, we need to install any dependencies:
 
 ```julia
 julia> using Pkg; Pkg.instantiate()
 ```
 
-Now you are ready to run any of the examples!
+Now we are ready to run any of the examples!
 
-For instance,
+For instance, if we run
 
 ```julia
-julia> include("examples/free_convection.jl")
+julia> include("examples/thermal_bubble.jl")
 ```
 
-produces
+but after we tweak the spatial resolution of the grid to `size = (1024, 512)`, we get
 
-https://github.com/user-attachments/assets/dc45d188-6c61-4eb5-95fb-9a51c6f99013
+https://github.com/user-attachments/assets/aaca693c-57fe-46bf-8ff7-6646f6e5eebe

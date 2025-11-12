@@ -26,7 +26,7 @@ Pkg.add("https://github.com/NumericalEarth/Breeze.jl.git")
 
 A basic free convection simulation:
 
-```@example intro
+```@example
 using Oceananigans
 using Oceananigans.Units
 using CairoMakie
@@ -39,28 +39,27 @@ seed!(42)
 
 Nx = Nz = 64
 Lz = 4 * 1024
-grid = RectilinearGrid(CPU(), size=(Nx, Nz), x=(0, 2Lz), z=(0, Lz), topology=(Periodic, Flat, Bounded))
+grid = RectilinearGrid(size=(Nx, Nz), x=(0, 2Lz), z=(0, Lz), topology=(Periodic, Flat, Bounded))
 
-reference_constants = Breeze.Thermodynamics.ReferenceStateConstants(base_pressure=1e5, potential_temperature=288)
-buoyancy = Breeze.MoistAirBuoyancy(; reference_constants)
+p₀, θ₀ = 1e5, 288 # reference state parameters
+buoyancy = Breeze.MoistAirBuoyancy(grid, base_pressure=p₀, reference_potential_temperature=θ₀)
 
-Q₀ = 1000 # heat flux in W / m²
-ρ₀ = Breeze.MoistAirBuoyancies.base_density(buoyancy) # air density at z=0
+thermo = buoyancy.thermodynamics
+ρ₀ = Breeze.Thermodynamics.base_density(p₀, θ₀, thermo)
 cₚ = buoyancy.thermodynamics.dry_air.heat_capacity
+Q₀ = 1000 # heat flux in W / m²
 θ_bcs = FieldBoundaryConditions(bottom=FluxBoundaryCondition(Q₀ / (ρ₀ * cₚ)))
-q_bcs = FieldBoundaryConditions(bottom=FluxBoundaryCondition(1e-2))
+qᵗ_bcs = FieldBoundaryConditions(bottom=FluxBoundaryCondition(1e-2))
 
 advection = WENO()
-tracers = (:θ, :q)
 model = NonhydrostaticModel(; grid, advection, buoyancy,
-                            tracers = (:θ, :q),
-                            boundary_conditions = (θ=θ_bcs, q=q_bcs))
+                            tracers = (:θ, :qᵗ),
+                            boundary_conditions = (θ=θ_bcs, qᵗ=qᵗ_bcs))
 
 Δθ = 2 # ᵒK
-Tₛ = reference_constants.reference_potential_temperature # K
+Tₛ = buoyancy.reference_state.potential_temperature # K
 θᵢ(x, z) = Tₛ + Δθ * z / grid.Lz + 2e-2 * Δθ * (rand() - 0.5)
-qᵢ(x, z) = 0 # 1e-2 + 1e-5 * rand()
-set!(model, θ=θᵢ, q=qᵢ)
+set!(model, θ=θᵢ)
 
 simulation = Simulation(model, Δt=10, stop_time=2hours)
 conjure_time_step_wizard!(simulation, cfl=0.7)

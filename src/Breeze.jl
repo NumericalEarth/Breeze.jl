@@ -8,7 +8,7 @@ module Breeze
 export
     MoistAirBuoyancy,
     ThermodynamicConstants,
-    ReferenceStateConstants,
+    ReferenceState,
     AnelasticFormulation,
     AtmosphereModel,
     TemperatureField,
@@ -77,5 +77,8 @@ using .MoistAirBuoyancies
 
 include("AtmosphereModels/AtmosphereModels.jl")
 using .AtmosphereModels
+
+include("Microphysics/Microphysics.jl")
+using .Microphysics
 
 end # module Breeze

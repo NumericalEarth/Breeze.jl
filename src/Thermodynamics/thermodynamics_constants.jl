@@ -2,7 +2,7 @@ using Adapt: Adapt, adapt
 using Oceananigans.Grids: prettysummary
 
 """
-    IdealGas{FT}
+$(TYPEDEF)
 
 A struct representing an ideal gas with molar mass and specific heat capacity.
 
@@ -15,7 +15,7 @@ A struct representing an ideal gas with molar mass and specific heat capacity.
 dry_air = IdealGas(molar_mass=0.02897, heat_capacity=1005)
 
 # output
-"IdealGas{Float64}(molar_mass=0.02897, heat_capacity=1005)"
+IdealGas{Float64}(molar_mass=0.02897, heat_capacity=1005.0)
 ```
 """
 struct IdealGas{FT}
@@ -48,50 +48,50 @@ function IdealGas(FT = Oceananigans.defaults.FloatType;
 end
 
 struct CondensedPhase{FT}
-    latent_heat :: FT
+    reference_latent_heat :: FT
     heat_capacity :: FT
 end
 
 function Base.summary(ph::CondensedPhase{FT}) where FT
     return string("CondensedPhase{", FT, "}(",
-                  "latent_heat=", prettysummary(ph.latent_heat), ", ",
+                  "reference_latent_heat=", prettysummary(ph.reference_latent_heat), ", ",
                   "heat_capacity=", prettysummary(ph.heat_capacity), ")")
 end
 
 Base.show(io::IO, ph::CondensedPhase) = print(io, summary(ph))
 
 Adapt.adapt_structure(to, pt::CondensedPhase) =
-    CondensedPhase(adapt(to, pt.latent_heat),
+    CondensedPhase(adapt(to, pt.reference_latent_heat),
                    adapt(to, pt.heat_capacity))
 
 """
-    CondensedPhase(FT = Oceananigans.defaults.FloatType; latent_heat, heat_capacity)
+$(TYPEDSIGNATURES)
 
 Returns `CondensedPhase` with specified parameters converted to `FT`.
 
-Two examples of `CondensedPhase` are liquid and solid.
+Two examples of `CondensedPhase` are liquid and ice.
 When matter is converted from vapor to liquid, water molecules in the
 gas phase cluster together and slow down to form liquid with `heat_capacity`,
-The lost of molecular kinetic energy is called the `latent_heat`.
+The lost of molecular kinetic energy is called the `reference_latent_heat`.
 
 Likewise, during deposition, water molecules in the gas phase cluster into ice crystals.
 
 Arguments
 =========
 - `FT`: Float type to use (defaults to Oceananigans.defaults.FloatType)
-- `latent_heat`: Difference between the internal energy of the gaseous phase at
+- `reference_latent_heat`: Difference between the internal energy of the gaseous phase at
   the `energy_reference_temperature`.
 - `heat_capacity`: Heat capacity of the phase of matter.
 """
-function CondensedPhase(FT = Oceananigans.defaults.FloatType; latent_heat, heat_capacity)
-    return CondensedPhase{FT}(convert(FT, latent_heat),
+function CondensedPhase(FT = Oceananigans.defaults.FloatType; reference_latent_heat, heat_capacity)
+    return CondensedPhase{FT}(convert(FT, reference_latent_heat),
                               convert(FT, heat_capacity))
 end
 
-liquid_water(FT) = CondensedPhase(FT; latent_heat=2500800, heat_capacity=4181)
-water_ice(FT)    = CondensedPhase(FT; latent_heat=2834000, heat_capacity=2108)
+liquid_water(FT) = CondensedPhase(FT; reference_latent_heat=2500800, heat_capacity=4181)
+water_ice(FT)    = CondensedPhase(FT; reference_latent_heat=2834000, heat_capacity=2108)
 
-struct ThermodynamicConstants{FT, C, S}
+struct ThermodynamicConstants{FT, C, I}
     molar_gas_constant :: FT
     gravitational_acceleration :: FT
     energy_reference_temperature :: FT
@@ -100,7 +100,7 @@ struct ThermodynamicConstants{FT, C, S}
     dry_air :: IdealGas{FT}
     vapor :: IdealGas{FT}
     liquid :: C
-    solid :: S
+    ice :: I
 end
 
 Base.summary(at::ThermodynamicConstants{FT}) where FT = "ThermodynamicConstants{$FT}"
@@ -115,7 +115,7 @@ function Base.show(io::IO, at::ThermodynamicConstants)
         "├── dry_air: ", at.dry_air, "\n",
         "├── vapor: ", at.vapor, "\n",
         "├── liquid: ", at.liquid, "\n",
-        "└── solid: ", at.solid)
+        "└── ice: ", at.ice)
 end
 
 Base.eltype(::ThermodynamicConstants{FT}) where FT = FT
@@ -129,11 +129,11 @@ function Adapt.adapt_structure(to, thermo::ThermodynamicConstants)
     triple_point_temperature = adapt(to, thermo.triple_point_temperature)
     triple_point_pressure = adapt(to, thermo.triple_point_pressure)
     liquid = adapt(to, thermo.liquid)
-    solid = adapt(to, thermo.solid)
+    ice = adapt(to, thermo.ice)
     FT = typeof(molar_gas_constant)
     C = typeof(liquid)
-    S = typeof(solid)
-    return ThermodynamicConstants{FT, C, S}(molar_gas_constant,
+    I = typeof(ice)
+    return ThermodynamicConstants{FT, C, I}(molar_gas_constant,
                                             gravitational_acceleration,
                                             energy_reference_temperature,
                                             triple_point_temperature,
@@ -141,25 +141,14 @@ function Adapt.adapt_structure(to, thermo::ThermodynamicConstants)
                                             dry_air,
                                             vapor,
                                             liquid,
-                                            solid)
+                                            ice)
 end
 
 """
-    ThermodynamicConstants(FT = Oceananigans.defaults.FloatType;
-                           molar_gas_constant = 8.314462618,
-                           gravitational_acceleration = 9.81,
-                           energy_reference_temperature = 273.16,
-                           triple_point_temperature = 273.16,
-                           triple_point_pressure = 611.657,
-                           dry_air_molar_mass = 0.02897,
-                           dry_air_heat_capacity = 1005,
-                           vapor_molar_mass = 0.018015,
-                           vapor_heat_capacity = 1850,
-                           liquid = liquid_water(FT),
-                           solid = water_ice(FT))
+$(TYPEDSIGNATURES)
 
 Create `ThermodynamicConstants` with parameters that represent gaseous mixture of dry "air"
-and vapor, as well as condensed liquid and solid phases.
+and vapor, as well as condensed liquid and ice phases.
 The `triple_point_temperature` and `triple_point_pressure` may be combined with
 internal energy parameters for condensed phases to compute the vapor pressure
 at the boundary between vapor and a homogeneous sample of the condensed phase.
@@ -167,23 +156,33 @@ The `gravitational_acceleration` parameter is included to compute `reference_sta
 quantities associated with hydrostatic balance.
 
 The Clausius-Clapeyron relation describes the pressure-temperature relationship during phase
-transitions:
+transitions from vapor to liquid or vapor to ice,
 
 ```math
-d[\\log(pⁱ⁺)] / dT = ℒⁱ / (Rⁱ T²)
+d[\\log(pᵛ⁺ᵝ)] / dT = ℒᵝ / (Rᵛ T²)
 ```
 
 where:
 
-- ``pⁱ⁺`` is the saturation vapor pressure for a transition between vapor and the ``i``-th phase
+- ``pᵛ⁺ᵝ`` is the saturation vapor pressure for a transition between vapor and the ``β``-th phase
+  For example ``β = l`` for liquid and ``β = i`` for ice.
 - ``T`` is temperature
-- ``ℒⁱ`` is the latent heat of vaporization
-- ``Rⁱ`` is the specific gas constant for the ``i``-th phase
+- ``ℒᵝ`` is the latent heat of the transition
+  (the difference between the enthalpy of the vapor and transitioned state at a given temperature)
+- ``Rᵛ`` is the specific gas constant for vapor
 
-For water vapor, this integrates to:
+For a thermodynamic model with constant specific heats, the latent heat may be written
 
 ```math
-pⁱ⁺ = pᵗʳ \\exp[ ℒⁱ (1/Tᵗʳ - 1/T) / Rⁱ ]
+ℒᵝ(T) = ℒᵝ(T=0) + (cᵖᵛ - cᵝ) T,
+```
+
+where ``cᵖᵛ`` is the vapor specific heat at constant pressure, ``cᵝ`` is the specific heat of
+phase ``β``, which is assumed incompressible, and ``ℒᵝ(T=0)`` is the latent heat at ``T=0``K.
+We therefore find that
+
+```math
+pᵛ⁺ᵝ = pᵗʳ \\exp[ ℒᵝ(T=0) (1/Tᵗʳ - 1/T) / Rᵛ ]
 ```
 
 where
@@ -191,7 +190,7 @@ where
 - ``pᵗʳ`` is the triple point pressure
 - ``Tᵗʳ`` is the triple point temperature
 
-and it is calculated via [`saturation_vapor_pressure`](@ref).
+See also [`saturation_vapor_pressure`](@ref).
 
 Note: any reference values for pressure and temperature can be used in principle.
 The advantage of using reference values at the triple point is that the same values
@@ -200,7 +199,7 @@ can then be used for both condensation (vapor → liquid) and deposition (vapor 
 function ThermodynamicConstants(FT = Oceananigans.defaults.FloatType;
                                 molar_gas_constant = 8.314462618,
                                 gravitational_acceleration = 9.81,
-                                energy_reference_temperature = 273.16,
+                                energy_reference_temperature = 273.15,
                                 triple_point_temperature = 273.16,
                                 triple_point_pressure = 611.657,
                                 dry_air_molar_mass = 0.02897,
@@ -208,7 +207,7 @@ function ThermodynamicConstants(FT = Oceananigans.defaults.FloatType;
                                 vapor_molar_mass = 0.018015,
                                 vapor_heat_capacity = 1850,
                                 liquid = liquid_water(FT),
-                                solid = water_ice(FT))
+                                ice = water_ice(FT))
 
     dry_air = IdealGas(FT; molar_mass = dry_air_molar_mass,
                            heat_capacity = dry_air_heat_capacity)
@@ -224,138 +223,124 @@ function ThermodynamicConstants(FT = Oceananigans.defaults.FloatType;
                                   dry_air,
                                   vapor,
                                   liquid,
-                                  solid)
+                                  ice)
 end
 
 const TC = ThermodynamicConstants
-const IG = IdealGas
 
 @inline vapor_gas_constant(thermo::TC)   = thermo.molar_gas_constant / thermo.vapor.molar_mass
 @inline dry_air_gas_constant(thermo::TC) = thermo.molar_gas_constant / thermo.dry_air.molar_mass
 
-const NonCondensingThermodynamicConstants{FT} = ThermodynamicConstants{FT, Nothing, Nothing}
+#####
+##### Mixtures of dry air with vapor, liquid, and ice
+#####
 
 """
-    mixture_gas_constant(q, thermo)
+$(TYPEDEF)
 
-Compute the gas constant of moist air given the specific humidity `q` and
-thermodynamic parameters `thermo`.
+A struct representing the moisture mass fractions of a moist air parcel.
+
+# Fields
+- `vapor`: the mass fraction of vapor
+- `liquid`: the mass fraction of liquid
+- `ice`: the mass fraction of ice
+"""
+struct MoistureMassFractions{FT}
+    vapor :: FT
+    liquid :: FT
+    ice :: FT
+end
+
+Base.zero(::Type{MoistureMassFractions{FT}}) where FT = MoistureMassFractions(zero(FT), zero(FT), zero(FT))
+
+function Base.summary(q::MoistureMassFractions{FT}) where FT
+    return string("MoistureMassFractions{$FT}(vapor=", prettysummary(q.vapor),
+                  ", liquid=", prettysummary(q.liquid), ", ice=", prettysummary(q.ice), ")")
+end
+
+function Base.show(io::IO, q::MoistureMassFractions{FT}) where FT
+    println(io, "MoistureMassFractions{$FT}: \n",
+                "├── vapor:  ", prettysummary(q.vapor), "\n",
+                "├── liquid: ", prettysummary(q.liquid), "\n",
+                "└── ice:    ", prettysummary(q.ice))
+end
+
+const MMF = MoistureMassFractions
+
+@inline total_moisture_mass_fraction(q::MMF) = q.vapor + q.liquid + q.ice
+@inline dry_air_mass_fraction(q::MMF) = 1 - total_moisture_mass_fraction(q)
+
+"""
+$(TYPEDSIGNATURES)
+
+Return the gas constant of moist air mixture [in J/(kg K)] given the specific humidity
+`q` and thermodynamic parameters `thermo`.
 
 The mixture gas constant is calculated as a weighted average of the dry air
-and water vapor gas constants:
+and water vapor gas thermo:
 
 ```math
-R_m = R_d (1 - q) + R_v q
+Rᵐ = qᵈ Rᵈ + qᵛ Rᵛ
 ```
 
 where:
-- `R_d` is the dry air gas constant
-- `R_v` is the water vapor gas constant
-- `q` is the specific humidity (mass fraction of water vapor)
+- `Rᵈ` is the dry air gas constant
+- `Rᵛ` is the water vapor gas constant
+- `qᵈ` is the mass fraction of dry air
+- `qᵛ` is the mass fraction of water vapor
 
 # Arguments
-- `q`: Specific humidity (dimensionless)
-- `thermo`: `ThermodynamicConstants` instance containing gas constants
-
-# Returns
-- Gas constant of the moist air mixture in J/(kg·K)
+- `q`: the moisture mass fractions (vapor, liquid, and ice)
+- `thermo`: `ThermodynamicConstants` instance containing gas thermo
 """
-@inline function mixture_gas_constant(q, thermo::TC)
+@inline function mixture_gas_constant(q::MMF, thermo::TC)
+    qᵈ = dry_air_mass_fraction(q)
+    qᵛ = q.vapor
     Rᵈ = dry_air_gas_constant(thermo)
     Rᵛ = vapor_gas_constant(thermo)
-    return Rᵈ * (1 - q) + Rᵛ * q
+    return qᵈ * Rᵈ + qᵛ * Rᵛ
 end
 
 """
-    mixture_heat_capacity(q, thermo)
+$(TYPEDSIGNATURES)
 
-Compute the heat capacity of state air given the total specific humidity q
-and assuming that condensate mass ratio qᶜ ≪ q, where qℓ is the mass ratio of
-liquid condensate.
+Compute the heat capacity of a mixture of dry air, vapor, liquid, and ice, where
+the mass fractions of vapor, liquid, and ice are given by `q`.
+The heat capacity of moist air is the weighted sum of its constituents: 
+
+```math
+cᵖᵐ = qᵈ cᵖᵈ + qᵛ cᵖᵛ + qˡ cˡ + qⁱ cⁱ
+```
+
+where `qᵛ = q.vapor`, `qˡ = q.liquid`, `qⁱ = q.ice` are
+the mass fractions of vapor, liquid, and ice constituents, respectively,
+and `qᵈ = 1 - qᵛ - qˡ - qⁱ` is the mass fraction of dry air.
+The heat capacities `cᵖᵈ`, `cᵖᵛ`, `cˡ`, `cⁱ` are the heat capacities
+of dry air, vapor, liquid, and ice at constant pressure, respectively.
+The liquid and ice phases are assumed to be incompressible.
 """
-@inline function mixture_heat_capacity(q, thermo::TC)
+@inline function mixture_heat_capacity(q::MMF, thermo::TC)
+    qᵈ = dry_air_mass_fraction(q)
+    qᵛ = q.vapor
+    qˡ = q.liquid
+    qⁱ = q.ice
     cᵖᵈ = thermo.dry_air.heat_capacity
     cᵖᵛ = thermo.vapor.heat_capacity
-    return cᵖᵈ * (1 - q) + cᵖᵛ * q
+    cˡ = thermo.liquid.heat_capacity
+    cⁱ = thermo.ice.heat_capacity
+    return qᵈ * cᵖᵈ + qᵛ * cᵖᵛ + qˡ * cˡ + qⁱ * cⁱ
 end
 
 #####
-##### state thermodynamics for a Boussinesq model
+##### Equation of state
 #####
 
-# Organizing information about the state is a WIP
-struct ThermodynamicState{FT}
-    θ :: FT
-    q :: FT
-    z :: FT
+@inline function density(p, T, q::MMF, thermo::TC)
+    Rᵐ = mixture_gas_constant(q, thermo)
+    return p / (Rᵐ * T)
 end
 
-struct ReferenceState{FT}
-    p₀ :: FT # base pressure: reference pressure at z=0
-    θ :: FT  # constant reference potential temperature
-end
-
-Adapt.adapt_structure(to, ref::ReferenceState) =
-    ReferenceState(adapt(to, ref.p₀),
-                   adapt(to, ref.θ))
-
-function ReferenceState(FT = Oceananigans.defaults.FloatType;
-                        base_pressure = 101325,
-                        potential_temperature = 288)
-
-    return ReferenceState{FT}(convert(FT, base_pressure),
-                              convert(FT, potential_temperature))
-end
-
-"""
-    reference_density(z, ref, thermo)
-
-Compute the reference density associated with the reference pressure and potential temperature.
-The reference density is defined as the density of dry air at the reference pressure and temperature.
-"""
-@inline function reference_density(z, ref, thermo)
-    Rᵈ = dry_air_gas_constant(thermo)
-    p = reference_pressure(z, ref, thermo)
-    return p / (Rᵈ * ref.θ)
-end
-
-@inline function base_density(ref, thermo)
-    Rᵈ = dry_air_gas_constant(thermo)
-    return ref.p₀ / (Rᵈ * ref.θ)
-end
-
-@inline function reference_specific_volume(z, ref, thermo)
-    Rᵈ = dry_air_gas_constant(thermo)
-    p = reference_pressure(z, ref, thermo)
-    return Rᵈ * ref.θ / p
-end
-
-@inline function reference_pressure(z, ref, thermo)
-    cᵖᵈ = thermo.dry_air.heat_capacity
-    Rᵈ = dry_air_gas_constant(thermo)
-    inv_ϰᵈ = Rᵈ / cᵖᵈ
-    g = thermo.gravitational_acceleration
-    return ref.p₀ * (1 - g * z / (cᵖᵈ * ref.θ))^inv_ϰᵈ
-end
-
-@inline function saturation_specific_humidity(T, z, ref::ReferenceState, thermo, condensed_phase)
-    ρ = reference_density(z, ref, thermo)
-    return saturation_specific_humidity(T, ρ, thermo, condensed_phase)
-end
-
-@inline function exner_function(state, ref, thermo)
-    Rᵐ = mixture_gas_constant(state.q, thermo)
-    cᵖᵐ = mixture_heat_capacity(state.q, thermo)
-    inv_ϰᵐ = Rᵐ / cᵖᵐ
-    pᵣ = reference_pressure(state.z, ref, thermo)
-    p₀ = ref.base_pressure
-    return (pᵣ / p₀)^inv_ϰᵐ
-end
-
-condensate_specific_humidity(T, state, ref, thermo) =
-    condensate_specific_humidity(T, state.q, state.z, ref, thermo)
-
-function condensate_specific_humidity(T, q, z, ref, thermo)
-    qᵛ⁺ = saturation_specific_humidity(T, z, ref, thermo, thermo.liquid)
-    return max(0, q - qᵛ⁺)
+@inline function specific_volume(p, T, q::MMF, thermo::TC)
+    Rᵐ = mixture_gas_constant(q, mb.thermodynamics)
+    return Rᵐ * T / p
 end
