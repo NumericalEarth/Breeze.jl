@@ -1,4 +1,5 @@
 using Breeze
+using Breeze.Microphysics
 using Oceananigans
 using Test
 using GPUArraysCore: @allowscalar
@@ -31,7 +32,7 @@ function thermal_bubble_model(grid; Δθ=10, N²=1e-6, uᵢ=0, vᵢ=0, wᵢ=0, q
         θ′ = Δθ * max(0, 1 - r / r₀)
         return θ̄ + θ′
     end
-    
+
     set!(model, θ=θᵢ, u=uᵢ, v=vᵢ, w=wᵢ, qᵗ=qᵗ)
 
     return model
@@ -40,26 +41,26 @@ end
 @testset "Energy conservation with thermal bubble [$(FT)]" for FT in (Float32, Float64)
     Oceananigans.defaults.FloatType = FT
     grid = RectilinearGrid(default_arch;
-                           size = (32, 1, 32), 
-                           x = (-10e3, 10e3), 
-                           y = (-10e3, 10e3), 
+                           size = (32, 1, 32),
+                           x = (-10e3, 10e3),
+                           y = (-10e3, 10e3),
                            z = (-3e3, 7e3),
                            topology = (Periodic, Periodic, Bounded),
                            halo = (5, 1, 5))
-    
-    for microphysics in (nothing, WarmPhaseMicrophysics())
+
+    for microphysics in (nothing, WarmPhaseSaturationAdjustment())
         @testset let microphysics=microphysics
             # Set (moist) thermal bubble initial condition
             model = thermal_bubble_model(grid; qᵗ=1e-3, microphysics)
-    
+
             # Compute initial total energy
             ∫ρe = Field(Integral(model.energy_density))
             compute!(∫ρe)
             E₀ = @allowscalar first(∫ρe)
-    
+
             # Time step the model
             Nt = 10
-    
+
             for step in 1:Nt
                 time_step!(model, 1)
                 compute!(∫ρe)
@@ -73,27 +74,27 @@ end
 @testset "Horizontal momentum conservation with spherical thermal bubble [$(FT)]" for FT in (Float32, Float64)
     Oceananigans.defaults.FloatType = FT
     grid = RectilinearGrid(default_arch;
-                           size = (16, 16, 16), 
+                           size = (16, 16, 16),
                            x = (-10e3, 10e3),
                            y = (-10e3, 10e3),
                            z = (-3e3, 7e3),
                            topology = (Periodic, Periodic, Bounded),
                            halo = (5, 5, 5))
-    
+
     # Set spherical thermal bubble initial condition with sheared horizontal velocities
     uᵢ(x, y, z) = 5 * (z + 3e3) / 10e3
     vᵢ(x, y, z) = 3 * (z + 3e3) / 10e3
     model = thermal_bubble_model(grid; uᵢ, vᵢ)
-    
+
     # Compute initial total u-momentum
     ∫ρu = Field(Integral(model.momentum.ρu))
     ∫ρv = Field(Integral(model.momentum.ρv))
     Px₀ = @allowscalar first(∫ρu)
     Py₀ = @allowscalar first(∫ρv)
-    
+
     # Time step the model
     Nt = 10
-    
+
     for step in 1:Nt
         time_step!(model, 1)
         compute!(∫ρu)
@@ -108,26 +109,26 @@ end
 @testset "Vertical momentum conservation for neutral initial condition [$(FT)]" for FT in (Float32, Float64)
     Oceananigans.defaults.FloatType = FT
     grid = RectilinearGrid(default_arch;
-                           size = (16, 1, 16), 
+                           size = (16, 1, 16),
                            x = (-10e3, 10e3),
                            y = (-10e3, 10e3),
                            z = (-5e3, 5e3),
                            topology = (Bounded, Periodic, Bounded),
                            halo = (5, 1, 5))
-    
+
     # Set spherical thermal bubble initial condition with u velocity only
     wᵢ(x, y, z) = 2 * x / 20e3 * exp(-z^2 / (2 * 1e3^2))
     model = thermal_bubble_model(grid; wᵢ, Δθ=0, N²=0)
-    
+
     # Compute initial total u-momentum
     ∫ρu = Field(Integral(model.momentum.ρu))
     ∫ρw = Field(Integral(model.momentum.ρw))
     Px₀ = @allowscalar first(∫ρu)
     Pz₀ = @allowscalar first(∫ρz)
-    
+
     # Time step the model
     Nt = 10
-    
+
     for step in 1:Nt
         time_step!(model, 1)
         compute!(∫ρu)
