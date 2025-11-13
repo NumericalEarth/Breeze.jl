@@ -56,12 +56,12 @@ struct MoistStaticEnergyState{FT} <: AbstractThermodynamicState{FT}
     reference_pressure :: FT
 
     @inline function MoistStaticEnergyState{FT}(e::FT, q::MoistureMassFractions{FT}, z::FT, pᵣ::FT) where FT
-        return new{FT}(moist_static_energy, moisture_mass_fractions, height, reference_pressure)
+        return new{FT}(e, q, z, pᵣ)
     end
 end
 
 @inline MoistStaticEnergyState(e::FT, q::MoistureMassFractions{FT}, z::FT, pᵣ::FT) where FT =
-    MoistStaticEnergyState{FT}(moist_static_energy, moisture_mass_fractions, height, reference_pressure)
+    MoistStaticEnergyState{FT}(e, q, z, pᵣ)
 
 @inline Base.eltype(::MoistStaticEnergyState{FT}) where FT = FT
 @inline total_moisture_mass_fraction(state::MoistStaticEnergyState) = total_moisture_mass_fraction(state.moisture_mass_fractions)

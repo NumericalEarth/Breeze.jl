@@ -55,7 +55,7 @@ function SaturationAdjustment(FT::DataType=Oceananigans.defaults.FloatType;
                               equilibrium = MixedPhaseEquilibrium(FT))
     tolerance = convert(FT, tolerance)
     maxiter = convert(FT, maxiter)
-    return SaturationAdjustment{typeof(equilibrium), FT}(tolerance, maxiter, equilibrium)
+    return SaturationAdjustment(tolerance, maxiter, equilibrium)
 end
 
 #####
