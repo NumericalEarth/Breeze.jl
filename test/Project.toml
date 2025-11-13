@@ -6,7 +6,6 @@ ExplicitImports = "7d51a73a-1435-4ff3-83d9-f097790105c7"
 GPUArraysCore = "46192b85-c4d5-4398-a991-12ede77f4527"
 Oceananigans = "9e8cae18-63c1-5223-a75c-80ca9d6e9a09"
 ParallelTestRunner = "d3525ed8-44d0-4b2c-a655-542cee43accc"
-Statistics = "10745b16-79ce-11e8-11f9-7d13ad32a3b2"
 Test = "8dfed614-e22c-5e08-85e1-65c5234f0b40"
 
 [compat]
