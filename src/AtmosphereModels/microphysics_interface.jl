@@ -7,6 +7,10 @@ using ..Thermodynamics:
     temperature,
     MoistureMassFractions
 
+#####
+##### "Nothing" microphysics
+#####
+
 prognostic_field_names(::Nothing) = tuple()
 materialize_microphysical_fields(microphysics, grid, bcs) = NamedTuple()
 @inline update_microphysical_fields!(microphysical_fields, ::Nothing, i, j, k, grid, 𝒰₁, thermo) = nothing
@@ -41,10 +45,4 @@ Build and return [`MoistureMassFractions`](@ref) at `(i, j, k)` for the given `g
 Dispatch is provided for `::Nothing` microphysics here. Specific microphysics
 schemes may extend this method to provide tailored behavior.
 """
-@inline function moisture_mass_fractions(i, j, k, grid,
-                                         ::Nothing,
-                                         microphysical_fields,
-                                         moisture_mass_fraction)
-    @inbounds qᵗ = moisture_mass_fraction[i, j, k]
-    return MoistureMassFractions(qᵗ, zero(qᵗ), zero(qᵗ))
-end
+@inline moisture_mass_fractions(i, j, k, grid, ::Nothing, μ, qᵗ) = @inbounds MoistureMassFractions(qᵗ[i, j, k])
