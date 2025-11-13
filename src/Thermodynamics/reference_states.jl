@@ -75,7 +75,7 @@ Keyword arguments
 - `base_pressure`: Default: 101325
 - `potential_temperature`: Default: 288
 """
-function ReferenceState(grid, thermo;
+function ReferenceState(grid, thermo=ThermodynamicConstants(eltype(grid));
                         base_pressure = 101325,
                         potential_temperature = 288)
 
