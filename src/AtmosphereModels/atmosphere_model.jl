@@ -3,7 +3,7 @@ using ..Thermodynamics: Thermodynamics, ThermodynamicConstants, ReferenceState
 using Oceananigans: AbstractModel, Center, CenterField, Clock, Field
 using Oceananigans: WENO, XFaceField, YFaceField, ZFaceField
 using Oceananigans.Advection: adapt_advection_order
-using Oceananigans.Forcings: regularize_forcing
+using Oceananigans.Forcings: materialize_forcing
 using Oceananigans.BoundaryConditions: FieldBoundaryConditions, regularize_field_boundary_conditions
 using Oceananigans.Grids: ZDirection
 using Oceananigans.Solvers: FourierTridiagonalPoissonSolver
@@ -229,7 +229,7 @@ function atmosphere_model_forcing(user_forcings::NamedTuple, prognostic_fields, 
 
     materialized = Tuple(
         name in keys(user_forcings) ?
-            regularize_forcing(user_forcings[name], field, name, model_field_names) :
+            materialize_forcing(user_forcings[name], field, name, model_field_names) :
             Returns(zero(eltype(field)))
             for (name, field) in pairs(prognostic_fields)
     )
