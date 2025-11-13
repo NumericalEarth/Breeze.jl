@@ -3,17 +3,33 @@ using GPUArraysCore: @allowscalar
 using Oceananigans
 using Test
 
-@testset "AtmosphereModel [$(FT)]" for FT in (Float32, Float64)
+@testset "set! AtmosphereModel [$(FT)]" for FT in (Float32, Float64)
+    Oceananigans.defaults.FloatType = FT
     grid = RectilinearGrid(default_arch, FT; size=(8, 8, 8), x=(0, 1_000), y=(0, 1_000), z=(0, 1_000))
-    thermo = ThermodynamicConstants(FT)
+    thermo = ThermodynamicConstants()
 
     for p₀ in (101325, 100000), θ₀ in (288, 300)
         @testset let p₀ = p₀, θ₀ = θ₀
             reference_state = ReferenceState(grid, thermo, base_pressure=p₀, potential_temperature=θ₀)
             formulation = AnelasticFormulation(reference_state)
             model = AtmosphereModel(grid; thermodynamics=thermo, formulation)
+            
+            set!(model; qᵗ = 1e-2)
+            @test @allowscalar model.moisture_mass_fraction) ≈ 1e-2
+            
+            ρᵣ = model.formulation.reference_state.density
+            @test @allowscalar model.moisture_density ≈ ρᵣ * 1e-2
 
-            # test set!
+            set!(model; u = 1, v = 2)
+            @test @allowscalar model.velocities.u ≈ 1
+            @test @allowscalar model.velocities.v ≈ 2
+            @test @allowscalar model.momentum.ρu ≈ ρᵣ
+            @test @allowscalar model.momentum.ρv ≈ ρᵣ * 2
+            
+            ρᵣ = model.formulation.reference_state.density
+            @test @allowscalar model.moisture_density ≈ ρᵣ * 1e-2
+            
+            # test set! for a dry initial state
             ρᵣ = model.formulation.reference_state.density
             cᵖᵈ = model.thermodynamics.dry_air.heat_capacity
             ρeᵢ = ρᵣ * cᵖᵈ * θ₀
@@ -48,38 +64,34 @@ end
 end
 
 @testset "Saturation and PotentialTemperatureField (WarmPhase) [$(FT)]" for FT in (Float32, Float64)
-    if default_arch isa GPU && FT == Float32
-        # skip
-    else
-        Oceananigans.defaults.FloatType = FT
-        grid = RectilinearGrid(default_arch; size=(8, 8, 8), x=(0, 1_000), y=(0, 1_000), z=(0, 1_000))
-        thermo = ThermodynamicConstants()
+    Oceananigans.defaults.FloatType = FT
+    grid = RectilinearGrid(default_arch; size=(8, 8, 8), x=(0, 1_000), y=(0, 1_000), z=(0, 1_000))
+    thermo = ThermodynamicConstants()
 
-        p₀ = FT(101325)
-        θ₀ = FT(300)
-        reference_state = ReferenceState(grid, thermo, base_pressure=p₀, potential_temperature=θ₀)
-        formulation = AnelasticFormulation(reference_state)
-        microphysics = SaturationAdjustment()
-        model = AtmosphereModel(grid; thermodynamics=thermo, formulation, microphysics)
+    p₀ = FT(101325)
+    θ₀ = FT(300)
+    reference_state = ReferenceState(grid, thermo, base_pressure=p₀, potential_temperature=θ₀)
+    formulation = AnelasticFormulation(reference_state)
+    microphysics = SaturationAdjustment()
+    model = AtmosphereModel(grid; thermodynamics=thermo, formulation, microphysics)
 
-        # Initialize with potential temperature and dry air
-        set!(model; θ=θ₀)
+    # Initialize with potential temperature and dry air
+    set!(model; θ=θ₀)
 
-        # Check SaturationSpecificHumidityField matches direct thermodynamics
-        qᵛ⁺ = Breeze.AtmosphereModels.SaturationSpecificHumidityField(model)
+    # Check SaturationSpecificHumidityField matches direct thermodynamics
+    qᵛ⁺ = Breeze.AtmosphereModels.SaturationSpecificHumidityField(model)
 
-        # Sample mid-level cell
-        _, _, Nz = size(grid)
-        k = max(1, Nz ÷ 2)
+    # Sample mid-level cell
+    _, _, Nz = size(grid)
+    k = max(1, Nz ÷ 2)
 
-        Tᵢ = @allowscalar model.temperature[1, 1, k]
-        pᵣᵢ = @allowscalar model.formulation.reference_state.pressure[1, 1, k]
-        q = Breeze.Thermodynamics.MoistureMassFractions{FT} |> zero
-        ρᵢ = Breeze.Thermodynamics.density(pᵣᵢ, Tᵢ, q, thermo)
-        qᵛ⁺_expected = Breeze.Thermodynamics.saturation_specific_humidity(Tᵢ, ρᵢ, thermo, thermo.liquid)
-        qᵛ⁺k = @allowscalar qᵛ⁺[1, 1, k]
+    Tᵢ = @allowscalar model.temperature[1, 1, k]
+    pᵣᵢ = @allowscalar model.formulation.reference_state.pressure[1, 1, k]
+    q = Breeze.Thermodynamics.MoistureMassFractions{FT} |> zero
+    ρᵢ = Breeze.Thermodynamics.density(pᵣᵢ, Tᵢ, q, thermo)
+    qᵛ⁺_expected = Breeze.Thermodynamics.saturation_specific_humidity(Tᵢ, ρᵢ, thermo, thermo.liquid)
+    qᵛ⁺k = @allowscalar qᵛ⁺[1, 1, k]
 
-        @test isfinite(qᵛ⁺k)
-        @test qᵛ⁺k ≈ qᵛ⁺_expected rtol=FT(1e-5)
-    end
+    @test isfinite(qᵛ⁺k)
+    @test qᵛ⁺k ≈ qᵛ⁺_expected rtol=FT(1e-5)
 end
