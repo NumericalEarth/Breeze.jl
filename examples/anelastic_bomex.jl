@@ -41,11 +41,6 @@ thermo = ThermodynamicConstants()
 reference_state = ReferenceState(grid, thermo, base_pressure=p₀, potential_temperature=θ₀)
 formulation = AnelasticFormulation(reference_state)
 
-# Simple precipitation scheme from CloudMicrophysics
-FT = eltype(grid)
-microphysics = CloudMicrophysics.Parameters.Parameters0M{FT}(τ_precip=600, S_0=0, qc_0=0.02)
-@inline precipitation(x, y, z, t, qᵗ, params) = remove_precipitation(params, qᵗ, 0)
-q_precip_forcing = Forcing(precipitation, field_dependencies=:qᵗ, parameters=microphysics)
 
 FT = eltype(grid)
 q₀ = Breeze.Thermodynamics.MoistureMassFractions{FT} |> zero
@@ -122,18 +117,22 @@ set!(ρvᵍ, ρᵣ * ρvᵍ)
 
 @inline function Fρu_geostrophic(i, j, k, grid, clock, fields, parameters)
     f = parameters.f
+    v_avg = parameters.v_avg
     @inbounds ρvᵍᵢ = parameters.ρvᵍ[1, 1, k]
-    return - f * ρvᵍᵢ
+    ρᵣ = @inbounds parameters.ρᵣ[i, j, k]
+    return f * (ρᵣ*v_avg - ρvᵍᵢ)
 end
 
 @inline function Fρv_geostrophic(i, j, k, grid, clock, fields, parameters)
     f = parameters.f
+    u_avg = parameters.u_avg
     @inbounds ρuᵍᵢ = parameters.ρuᵍ[1, 1, k]
-    return + f * ρuᵍᵢ
+    ρᵣ = @inbounds parameters.ρᵣ[i, j, k]
+    return - f * (ρᵣ*u_avg - ρuᵍᵢ)
 end
 
-ρu_geostrophic_forcing = Forcing(Fρu_geostrophic, discrete_form=true, parameters=(; f=coriolis.f, ρvᵍ))
-ρv_geostrophic_forcing = Forcing(Fρv_geostrophic, discrete_form=true, parameters=(; f=coriolis.f, ρuᵍ))
+ρu_geostrophic_forcing = Forcing(Fρu_geostrophic, discrete_form=true, parameters=(; v_avg=v_avg_f, f=coriolis.f, ρvᵍ, ρᵣ))
+ρv_geostrophic_forcing = Forcing(Fρv_geostrophic, discrete_form=true, parameters=(; u_avg=u_avg_f, f=coriolis.f, ρuᵍ, ρᵣ))
 
 ρu_forcing = (ρu_subsidence_forcing, ρu_geostrophic_forcing)
 ρv_forcing = (ρv_subsidence_forcing, ρv_geostrophic_forcing)
@@ -145,7 +144,6 @@ set!(drying, z -> dqdt_bomex(z))
 set!(drying, ρᵣ * drying)
 ρqᵗ_drying_forcing = Forcing(drying)
 ρqᵗ_forcing = (ρqᵗ_drying_forcing, ρqᵗ_subsidence_forcing)
-# q_forcing = (q_precip_forcing, q_drying_forcing, q_subsidence_forcing)
 
 Fρe_field = Field{Nothing, Nothing, Center}(grid)
 dTdt_bomex = AtmosphericProfilesLibrary.Bomex_dTdt(FT)
@@ -207,7 +205,7 @@ qᵛ⁺_avg = Field(Average(qᵛ⁺, dims=(1, 2)))
 rh_avg = Field(Average(rh, dims=(1, 2)))
 
 # Uncomment to make plots
-using WGLMakie
+using GLMakie
 
 fig = Figure(size=(1200, 800), fontsize=12)
 axT = Axis(fig[1, 1], xlabel="T (ᵒK)", ylabel="z (m)")
@@ -298,7 +296,7 @@ averages_ow = JLD2Writer(model, averaged_outputs;
 simulation.output_writers[:avg] = averages_ow
 
 @info "Running BOMEX on grid: \n $grid \n and using model: \n $model"
-run!(simulation)
+#run!(simulation)
 
 #=
 using CairoMakie
