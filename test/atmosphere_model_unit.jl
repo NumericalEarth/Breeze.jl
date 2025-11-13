@@ -11,29 +11,30 @@ end
 
 @testset "set! AtmosphereModel [$(FT)]" for FT in (Float32, Float64)
     Oceananigans.defaults.FloatType = FT
-    grid = RectilinearGrid(default_arch, FT; size=(8, 8, 8), x=(0, 1_000), y=(0, 1_000), z=(0, 1_000))
+    grid = RectilinearGrid(default_arch; size=(8, 8, 8), x=(0, 1_000), y=(0, 1_000), z=(0, 1_000))
     thermo = ThermodynamicConstants()
+    @test eltype(thermo) == FT
 
     for p₀ in (101325, 100000), θ₀ in (288, 300), microphysics in (nothing, SaturationAdjustment())
-        @testset let p₀ = p₀, θ₀ = θ₀
+        @testset let p₀ = p₀, θ₀ = θ₀, microphysics = microphysics
             reference_state = ReferenceState(grid, thermo, base_pressure=p₀, potential_temperature=θ₀)
             formulation = AnelasticFormulation(reference_state)
             model = AtmosphereModel(grid; thermodynamics=thermo, formulation, microphysics)
             
             set!(model; qᵗ = 1e-2)
-            @test @allowscalar model.moisture_mass_fraction ≈ constant_field(grid, 1e-2)
+            @test model.moisture_mass_fraction ≈ constant_field(grid, 1e-2)
             
             ρᵣ = model.formulation.reference_state.density
-            @test @allowscalar model.moisture_density ≈ ρᵣ * 1e-2
+            @test model.moisture_density ≈ ρᵣ * 1e-2
 
             set!(model; u = 1, v = 2)
-            @test @allowscalar model.velocities.u ≈ constant_field(grid, 1)
-            @test @allowscalar model.velocities.v ≈ constant_field(grid, 2)
-            @test @allowscalar model.momentum.ρu ≈ ρᵣ
-            @test @allowscalar model.momentum.ρv ≈ ρᵣ * 2
+            @test model.velocities.u ≈ constant_field(grid, 1)
+            @test model.velocities.v ≈ constant_field(grid, 2)
+            @test model.momentum.ρu ≈ ρᵣ
+            @test model.momentum.ρv ≈ ρᵣ * 2
             
             ρᵣ = model.formulation.reference_state.density
-            @test @allowscalar model.moisture_density ≈ ρᵣ * 1e-2
+            @test model.moisture_density ≈ ρᵣ * 1e-2
             
             # test set! for a dry initial state
             ρᵣ = model.formulation.reference_state.density
@@ -44,7 +45,7 @@ end
             ρe₁ = deepcopy(model.energy_density)
 
             set!(model; ρe = ρeᵢ)
-            @test @allowscalar model.energy_density ≈ ρe₁
+            @test model.energy_density ≈ ρe₁
         end
     end
 end
