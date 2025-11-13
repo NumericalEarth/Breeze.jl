@@ -72,6 +72,12 @@ end
 struct PlanarLiquidSurface end
 struct PlanarIceSurface end
 
+"""
+    $(TYPEDSIGNATURES)
+
+Return `PlanarMixedPhaseSurface` for computing the saturation vapor pressure over
+a surface composed of a mixture of liquid and ice, with a given `liquid_fraction`.
+"""
 struct PlanarMixedPhaseSurface{FT}
     liquid_fraction :: FT
 end
@@ -80,7 +86,6 @@ end
 @inline specific_heat_difference(thermo, ::PlanarIceSurface) = specific_heat_difference(thermo, thermo.ice)
 @inline absolute_zero_latent_heat(thermo, ::PlanarLiquidSurface) = absolute_zero_latent_heat(thermo, thermo.liquid)
 @inline absolute_zero_latent_heat(thermo, ::PlanarIceSurface) = absolute_zero_latent_heat(thermo, thermo.ice)
-
 
 @inline function specific_heat_difference(thermo, surf::PlanarMixedPhaseSurface)
     Δcˡ = specific_heat_difference(thermo, thermo.liquid)
@@ -149,7 +154,7 @@ qᵛ⁺ᵐ = Breeze.Thermodynamics.saturation_specific_humidity(T, ρ, thermo, m
 ```
 
 """
-@inline function saturation_specific_humidity(T, ρ, thermo::ThermodynamicConstants, surface)
+@inline function saturation_specific_humidity(T, ρ, thermo, surface)
     pᵛ⁺ = saturation_vapor_pressure(T, thermo, surface)
     Rᵛ = vapor_gas_constant(thermo)
     return pᵛ⁺ / (ρ * Rᵛ * T)

@@ -1,0 +1,234 @@
+# Breeze.jl - Cursor AI Rules
+
+## Project Overview
+
+Breeze.jl is a Julia package for atmospheric fluid dynamics simulations on CPUs and GPUs.
+It builds on [Oceananigans.jl](https://github.com/CliMA/Oceananigans.jl) for grids, fields, solvers, and advection schemes.
+The project currently supports anelastic formulation of Euler equations and is evolving toward full compressible formulations with microphysics and radiation.
+
+## Language & Environment
+- **Language**: Julia 1.10+
+- **Architectures**: CPU and GPU
+- **Key Packages**: Oceananigans.jl, KernelAbstractions.jl, CUDA.jl, Enzyme.jl, Reactant.jl
+- **Testing**: Uses ParallelTestRunner.jl for distributed testing
+
+## Code Style & Conventions
+
+### Julia Best Practices
+1. **Explicit Imports**: Use `ExplicitImports.jl` style - explicitly import all used functions/types
+   - Import from Oceananigans explicitly (already done in src/Breeze.jl)
+   - Tests automatically check for proper imports
+   
+2. **Type Stability**: Prioritize type-stable code for performance
+   - All structs must be concretely typed
+   
+3. **Kernel Functions**: For GPU compatibility:
+   - Use KernelAbstractions.jl syntax for kernels, eg `@kernel`, `@index`
+   - Keep kernels type-stable and allocation-free
+   - Short-circuiting if-statements should be avoided if possible, ifelse should always be used if possible
+   - No error messages inside kernels
+   - Models _never_ go inside kernels
+   
+4. **Documentation**:
+   - Use DocStringExtensions.jl for consistent docstrings
+   - Include `$(SIGNATURES)` for automatic signature documentation
+   - Add examples in docstrings when helpful
+
+5. **Memory leanness**
+   - Favor doing lots of computations inline versus allocating temporary memory
+   - Generally minimize memory allocation
+   - If an implementation is awkward, don't hesitate to suggest an upstream feature (eg in Oceananigans)
+     that will make something easier, rather than forcing in low quality code.
+
+### Naming Conventions
+- **Files**: snake_case (e.g., `atmosphere_model.jl`, `update_atmosphere_model_state.jl`)
+- **Types**: PascalCase (e.g., `AtmosphereModel`, `AnelasticFormulation`, `MoistAirBuoyancy`)
+- **Functions**: snake_case (e.g., `update_atmosphere_model!`, `compute_pressure!`)
+- **Kernels**: "Kernels" (functions prefixed with `@kernel`) may be prefixed with an underscore (e.g., `_kernel_function`)
+- **Variables**: Use _either_ an English long name, or mathematical notation with readable unicode. Variable names should be taken from `docs/src/appendix/notation.md` in the docs. If a new variable is created (or if one doesn't exist), it should be added to the table in notation.md
+
+
+### Module Structure
+```
+src/
+├── Breeze.jl                  # Main module, exports
+├── Thermodynamics/            # Thermodynamic states & equations
+├── AtmosphereModels/          # Core atmosphere model logic
+├── Microphysics/              # Cloud microphysics
+└── MoistAirBuoyancies.jl      # A legacy buoyancy formulation for usage with Oceananigans.NonhydrostaticModel
+```
+
+These are also planned:
+- an extension in `ext/` for `RRTMGP.jl`
+- modules that correspond to Oceananigans features:
+    * TurbulenceClosures/
+    * LagrangianParticleTracking/
+
+## Testing Guidelines
+
+### Running Tests
+```julia
+# All tests
+Pkg.test("Breeze")
+
+# Run a specific test file by passing in the first few characters of the file:
+Pkg.test("Breeze"; test_args=`atmosphere_model_unit`)
+
+# CPU-only (disable GPU)
+ENV["CUDA_VISIBLE_DEVICES"] = "-1"
+Pkg.test("Breeze")
+```
+
+* GPU tests may fail with "dynamic invocation error". In that case, the tests should be run on CPU.
+  If the error goes away, the problem is GPU-specific, and often a type-inference issue.
+
+### Writing Tests
+- Place tests in `test/` directory
+- Use `default_arch` for architecture selection
+- Toggle the floating point type using `Oceananigans.defaults.FloatType`.
+- Name test files descriptively (snake_case)
+- Include both unit tests and integration tests
+- Test numerical accuracy where analytical solutions exist
+
+### Quality Assurance
+- Ensure doctests pass
+- Run `quality_assurance.jl` to check code standards
+- Use Aqua.jl for package quality checks
+
+## Common Development Tasks
+
+### Adding New Physics
+1. Create module in appropriate subdirectory
+2. Define types/structs with docstrings
+3. Implement kernel functions (GPU-compatible)
+4. Add unit tests
+5. If the user interface is changed, update main module exports in `src/Breeze.jl`
+6. Add a script that can be used to validate the scientific content of the feature in `validation/`.
+
+### Modifying AtmosphereModel
+- Core logic in `src/AtmosphereModels/atmosphere_model.jl`
+- State updates in `update_atmosphere_model_state.jl`
+- Pressure solver in `anelastic_pressure_solver.jl`
+- Always consider anelastic formulation constraints
+
+## Documentation
+
+### Building Docs Locally
+```sh
+julia --project=docs/ docs/make.jl
+```
+
+### Viewing Docs
+```julia
+using LiveServer
+serve(dir="docs/build")
+```
+
+### Documentation Style
+- Mathematical notation in `docs/src/appendix/notation.md`
+- Use Documenter.jl syntax for cross-references
+- Include code examples in documentation pages
+- Add references to papers from the literature by adding bibtex to `breeze.bib`, and then
+  a corresponding citation
+- Make use of cross-references with equations
+
+### Writing examples
+- Explain at the top of the file what a simulation is doing
+- Let code "speak for itself" as much as possible, to keep an explanation concise.
+  In other words, use a Literate style.
+- Use visualization interspersed with model setup or simulation running when needed to
+  give an understanding of a complex grid, initial condition, or other model property.
+- Look at previous examples. New examples should add as much value as possible while
+  remaining simple. This requires judiciously introducing new features and doing creative
+  and surprising things with simulations that will spark readers' imagination.
+
+## Important Files to Know
+
+### Core Implementation
+- `src/Breeze.jl` - Main module, all exports
+- `src/AtmosphereModels/atmosphere_model.jl` - Central model definition
+- `src/AtmosphereModels/anelastic_formulation.jl` - Anelastic equations
+- `src/Thermodynamics/` - Thermodynamic relations
+
+### Configuration
+- `Project.toml` - Package dependencies and compat bounds
+- `test/runtests.jl` - Test configuration and architecture selection
+
+### Examples
+- `examples/thermal_bubble.jl` - Classic dry dynamics test
+- `examples/free_convection.jl` - Moist convection
+- `examples/bomex.jl` - BOMEX intercomparison case
+- Note, add more cases as they come up.
+
+## Physics Domain Knowledge
+
+### Atmospheric Dynamics
+- Anelastic approximation filters acoustic waves
+- Moist thermodynamics via saturation adjustment
+- Reference state defines background stratification
+- Hydrostatic pressure computed diagnostically
+
+### Numerical Methods
+- Finite volume on structured grids
+- Take care of staggered grid location when writing operators or designing diagnostics.
+- Favor WENO advection schemes.
+- Pressure Poisson solver for anelastic divergence constraint
+
+## Common Pitfalls
+
+1. **Type Instability**: Especially in kernel functions - ruins GPU performance
+2. **Overconstraining types**: Julia compiler can infer types. Type annotations should be used primarily for _multiple dispatch_, not for documentation.
+3. **Forgetting Explicit Imports**: Tests will fail - add to using statements
+
+
+## Git Workflow
+- Follow ColPrac (Collaborative Practices for Community Packages)
+- Create feature branches for new work
+- Write descriptive commit messages
+- Update tests and documentation with code changes
+- Check CI passes before merging
+
+## Helpful Resources
+- Oceananigans docs: https://clima.github.io/OceananigansDocumentation/stable/
+- Breeze docs: https://numericalearth.github.io/BreezeDocumentation/dev/
+- Discussions: https://github.com/NumericalEarth/Breeze.jl/discussions
+- KernelAbstractions.jl: https://github.com/JuliaGPU/KernelAbstractions.jl
+- Reactant.jl: https://github.com/EnzymeAD/Reactant.jl
+- Reactant.jl docs: https://enzymead.github.io/Reactant.jl/stable/
+- Enzyme.jl: https://github.com/EnzymeAD/Enzyme.jl
+- Enzyme.jl docs: https://enzyme.mit.edu/julia/dev
+- YASGuide: https://github.com/jrevels/YASGuide
+
+## When Unsure
+1. Check existing examples in `examples/` directory
+2. Look at similar implementations in Oceananigans.jl
+3. Review tests for usage patterns
+4. Ask in GitHub discussions
+5. Check documentation in `docs/src/`
+5. Check validation cases in `validation/`
+
+## AI Assistant Behavior
+- Prioritize type stability and GPU compatibility
+- Follow established patterns in existing code
+- Add tests for new functionality
+- Update exports in main module when adding public API
+- Consider both CPU and GPU architectures
+- Reference physics equations in comments when implementing dynamics
+- Maintain consistency with Oceananigans.jl patterns
+
+## Roadmap
+
+Features that are planned, which should be considered when implementing anything:
+
+- Fully compessible formulation
+    - explicit time-stepping
+    - acoustic substepping
+- A way to use total energy with the anelastic model
+- open boundaries following the Oceananigans.NonhydrostaticModel implementation
+- microphysics schemes from CloudMicrophysics
+- superdroplet microphysics schemes (reference tbd, but will use LagrangianParticleTracking)
+- MPI / distributed GPU support
+- Many, many more canonical LES validation cases
+- Terrain-following coordinate (may require upstream development in Oceananigans + using MutableVerticalCoordinate)
+- Cut-cells ImmersedBoundaryGrid implementation
+- 

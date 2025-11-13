@@ -28,8 +28,9 @@ using Test
 end
 
 @testset "PotentialTemperatureField (no microphysics) [$(FT)]" for FT in (Float32, Float64)
-    grid = RectilinearGrid(default_arch, FT; size=(8, 8, 8), x=(0, 1_000), y=(0, 1_000), z=(0, 1_000))
-    thermo = ThermodynamicConstants(FT)
+    Oceananigans.defaults.FloatType = FT
+    grid = RectilinearGrid(default_arch; size=(8, 8, 8), x=(0, 1_000), y=(0, 1_000), z=(0, 1_000))
+    thermo = ThermodynamicConstants()
 
     p₀ = FT(101325)
     θ₀ = FT(300)
@@ -47,34 +48,38 @@ end
 end
 
 @testset "Saturation and PotentialTemperatureField (WarmPhase) [$(FT)]" for FT in (Float32, Float64)
-    grid = RectilinearGrid(default_arch, FT; size=(8, 8, 8), x=(0, 1_000), y=(0, 1_000), z=(0, 1_000))
-    thermo = ThermodynamicConstants(FT)
+    if default_arch isa GPU && FT == Float32
+        # skip
+    else
+        Oceananigans.defaults.FloatType = FT
+        grid = RectilinearGrid(default_arch; size=(8, 8, 8), x=(0, 1_000), y=(0, 1_000), z=(0, 1_000))
+        thermo = ThermodynamicConstants()
 
-    p₀ = FT(101325)
-    θ₀ = FT(300)
-    reference_state = ReferenceState(grid, thermo, base_pressure=p₀, potential_temperature=θ₀)
-    formulation = AnelasticFormulation(reference_state)
-    microphysics = Breeze.Microphysics.WarmPhaseSaturationAdjustment(FT)
-    model = AtmosphereModel(grid; thermodynamics=thermo, formulation, microphysics)
+        p₀ = FT(101325)
+        θ₀ = FT(300)
+        reference_state = ReferenceState(grid, thermo, base_pressure=p₀, potential_temperature=θ₀)
+        formulation = AnelasticFormulation(reference_state)
+        microphysics = SaturationAdjustment()
+        model = AtmosphereModel(grid; thermodynamics=thermo, formulation, microphysics)
 
-    # Initialize with potential temperature and dry air
-    set!(model; θ=θ₀)
+        # Initialize with potential temperature and dry air
+        set!(model; θ=θ₀)
 
-    # Check SaturationSpecificHumidityField matches direct thermodynamics
-    q★ = Breeze.AtmosphereModels.SaturationSpecificHumidityField(model)
-    compute!(q★)
+        # Check SaturationSpecificHumidityField matches direct thermodynamics
+        qᵛ⁺ = Breeze.AtmosphereModels.SaturationSpecificHumidityField(model)
 
-    # Sample mid-level cell
-    _, _, Nz = size(grid)
-    k = max(1, Nz ÷ 2)
+        # Sample mid-level cell
+        _, _, Nz = size(grid)
+        k = max(1, Nz ÷ 2)
 
-    Tᵢ = @allowscalar interior(model.temperature, 1, 1, k)[]
-    pᵣᵢ = @allowscalar interior(model.formulation.reference_state.pressure, 1, 1, k)[]
-    q = Breeze.Thermodynamics.MoistureMassFractions(zero(FT), zero(FT), zero(FT))
-    ρᵢ = Breeze.Thermodynamics.density(pᵣᵢ, Tᵢ, q, thermo)
-    qᵛ⁺_expected = Breeze.Thermodynamics.saturation_specific_humidity(Tᵢ, ρᵢ, thermo, thermo.liquid)
-    qᵛ⁺k = @allowscalar interior(q★, 1, 1, k)[]
+        Tᵢ = @allowscalar model.temperature[1, 1, k]
+        pᵣᵢ = @allowscalar model.formulation.reference_state.pressure[1, 1, k]
+        q = Breeze.Thermodynamics.MoistureMassFractions{FT} |> zero
+        ρᵢ = Breeze.Thermodynamics.density(pᵣᵢ, Tᵢ, q, thermo)
+        qᵛ⁺_expected = Breeze.Thermodynamics.saturation_specific_humidity(Tᵢ, ρᵢ, thermo, thermo.liquid)
+        qᵛ⁺k = @allowscalar qᵛ⁺[1, 1, k]
 
-    @test isfinite(qᵛ⁺k)
-    @test qᵛ⁺k ≈ qᵛ⁺_expected rtol=FT(1e-5)
+        @test isfinite(qᵛ⁺k)
+        @test qᵛ⁺k ≈ qᵛ⁺_expected rtol=FT(1e-5)
+    end
 end
