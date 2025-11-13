@@ -72,6 +72,12 @@ end
 struct PlanarLiquidSurface end
 struct PlanarIceSurface end
 
+"""
+    $(TYPEDSIGNATURES)
+
+Return `PlanarMixedPhaseSurface` for computing the saturation vapor pressure over
+a surface composed of a mixture of liquid and ice, with a given `liquid_fraction`.
+"""
 struct PlanarMixedPhaseSurface{FT}
     liquid_fraction :: FT
 end
