@@ -48,20 +48,20 @@ Open Julia from within the local directory of the repo via:
 julia --project
 ```
 
-The first time, you need to install any dependencies:
+The first time, we need to install any dependencies:
 
 ```julia
 julia> using Pkg; Pkg.instantiate()
 ```
 
-Now you are ready to run any of the examples!
+Now we are ready to run any of the examples!
 
-For instance, if you run
+For instance, if we run
 
 ```julia
 julia> include("examples/thermal_bubble.jl")
 ```
 
-but after you tweak the spatial resolution of the grid to `size = (512, 512)`, you'll get
+but after we tweak the spatial resolution of the grid to `size = (1024, 512)`, we get
 
-https://github.com/user-attachments/assets/ef5eba54-9b36-4f22-a5ee-c0b6dc69a2d5
+https://github.com/user-attachments/assets/aaca693c-57fe-46bf-8ff7-6646f6e5eebe

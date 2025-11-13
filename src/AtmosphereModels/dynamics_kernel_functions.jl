@@ -35,9 +35,7 @@ hydrostatic_pressure_gradient_y(i, j, k, grid, pₕ′) = ∂yᶜᶠᶜ(i, j, k,
                                      coriolis,
                                      clock,
                                      model_fields,
-                                     forcing,
-                                     reference_density,
-                                     hydrostatic_pressure_anomaly)
+                                     ρu_forcing)
 
     buoyancy = nothing
 
@@ -45,7 +43,7 @@ hydrostatic_pressure_gradient_y(i, j, k, grid, pₕ′) = ∂yᶜᶠᶜ(i, j, k,
              - x_f_cross_U(i, j, k, grid, coriolis, momentum)
              - ∂ⱼ_𝒯₁ⱼ(i, j, k, grid, reference_density, closure, diffusivity_fields, clock, model_fields, buoyancy)
              # - hydrostatic_pressure_gradient_x(i, j, k, grid, hydrostatic_pressure_anomaly)
-             + forcing(i, j, k, grid, clock, model_fields))
+             + ρu_forcing(i, j, k, grid, clock, model_fields))
 end
 
 @inline function y_momentum_tendency(i, j, k, grid,
@@ -57,9 +55,7 @@ end
                                      coriolis,
                                      clock,
                                      model_fields,
-                                     forcing,
-                                     reference_density,
-                                     hydrostatic_pressure_anomaly)
+                                     ρv_forcing)
 
     buoyancy = nothing
 
@@ -67,7 +63,7 @@ end
              - y_f_cross_U(i, j, k, grid, coriolis, momentum)
              - ∂ⱼ_𝒯₂ⱼ(i, j, k, grid, reference_density, closure, diffusivity_fields, clock, model_fields, buoyancy)
              # - hydrostatic_pressure_gradient_y(i, j, k, grid, hydrostatic_pressure_anomaly)
-             + forcing(i, j, k, grid, clock, model_fields))
+             + ρv_forcing(i, j, k, grid, clock, model_fields))
 end
 
 @inline function z_momentum_tendency(i, j, k, grid,
@@ -79,7 +75,7 @@ end
                                      coriolis,
                                      clock,
                                      model_fields,
-                                     forcing,
+                                     ρw_forcing,
                                      reference_density,
                                      formulation,
                                      temperature,
@@ -93,13 +89,13 @@ end
              + ρ_bᶜᶜᶠ(i, j, k, grid, reference_density, temperature, moisture_mass_fraction, formulation, thermo)
              - z_f_cross_U(i, j, k, grid, coriolis, momentum)
              - ∂ⱼ_𝒯₃ⱼ(i, j, k, grid, reference_density, closure, diffusivity_fields, clock, model_fields, buoyancy)
-             + forcing(i, j, k, grid, clock, model_fields))
+             + ρw_forcing(i, j, k, grid, clock, model_fields))
 end
 
 @inline function scalar_tendency(i, j, k, grid,
                                  scalar,
                                  scalar_id,
-                                 forcing,
+                                 scalar_forcing,
                                  reference_density,
                                  advection,
                                  velocities,
@@ -119,7 +115,7 @@ end
                                               energy_density,
                                               energy_id,
                                               energy,
-                                              forcing,
+                                              ρe_forcing,
                                               reference_density,
                                               advection,
                                               velocities,
@@ -144,5 +140,5 @@ end
              + buoyancy_flux
              - ∇_dot_Jᶜ(i, j, k, grid, reference_density, closure, diffusivity_fields, energy_id, energy, clock, model_fields, buoyancy)
              # + microphysical_energy_tendency(i, j, k, grid, formulation, microphysics, microphysical_fields)
-             + forcing(i, j, k, grid, clock, model_fields))
+             + ρe_forcing(i, j, k, grid, clock, model_fields))
 end

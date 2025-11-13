@@ -9,20 +9,9 @@ using Oceananigans.BoundaryConditions: fill_halo_regions!, compute_x_bcs!, compu
 using Oceananigans.ImmersedBoundaries: mask_immersed_field!
 using Oceananigans.Utils: launch!
 
-import Oceananigans: fields, prognostic_fields
 import Oceananigans.TimeSteppers: update_state!, compute_flux_bc_tendencies!
 
 const AnelasticModel = AtmosphereModel{<:AnelasticFormulation}
-
-function prognostic_fields(model::AnelasticModel)
-    thermodynamic_fields = (ρe=model.energy_density, ρqᵗ=model.moisture_density)
-    μphys = model.microphysics
-    μfields = model.microphysical_fields
-    prognostic_microphysical_fields = NamedTuple(μfields[name] for name in prognostic_field_names(μphys))
-    return merge(model.momentum, thermodynamic_fields, prognostic_microphysical_fields, model.tracers)
-end
-
-fields(model::AnelasticModel) = prognostic_fields(model)
 
 function update_state!(model::AnelasticModel, callbacks=[]; compute_tendencies=true)
     fill_halo_regions!(prognostic_fields(model), model.clock, fields(model), async=true)
@@ -122,12 +111,11 @@ function compute_tendencies!(model::AnelasticModel)
                    model.clock,
                    model_fields)
 
-    pₕ′ = model.hydrostatic_pressure_anomaly
     ρᵣ = model.formulation.reference_state.density
-    u_args = tuple(common_args..., model.forcing.ρu, pₕ′, ρᵣ)
-    v_args = tuple(common_args..., model.forcing.ρv, pₕ′, ρᵣ)
-    w_args = tuple(common_args..., model.forcing.ρw, ρᵣ,
-                   model.formulation, model.temperature,
+    u_args = tuple(common_args..., model.forcing.ρu)
+    v_args = tuple(common_args..., model.forcing.ρv)
+    w_args = tuple(common_args..., model.forcing.ρw,
+                   ρᵣ, model.formulation, model.temperature,
                    model.moisture_mass_fraction, model.thermodynamics)
 
     launch!(arch, grid, :xyz, compute_x_momentum_tendency!, Gρu, grid, u_args)

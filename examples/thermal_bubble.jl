@@ -1,6 +1,6 @@
 # # Thermal bubble
 #
-# This script sets up, runs, and visualizes a "thermal bubble" (just a circular
+# This example sets up, runs, and visualizes a "thermal bubble" (just a circular
 # region of warm air) rising through a stably-stratified background.
 
 using Breeze
@@ -56,7 +56,7 @@ fig
 
 # ## Simulation rising
 
-simulation = Simulation(model; Δt=2, stop_time=15minutes)
+simulation = Simulation(model; Δt=2, stop_time=25minutes)
 conjure_time_step_wizard!(simulation, cfl=0.7)
 
 function progress(sim)
