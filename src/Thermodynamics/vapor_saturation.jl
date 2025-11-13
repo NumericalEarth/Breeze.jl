@@ -9,7 +9,7 @@ using the Clausius-Clapeyron relation,
 𝖽pᵛ⁺ / 𝖽T = pᵛ⁺ ℒᵝ(T) / (Rᵛ T^2) ,
 ```
 
-where the temperature-dependent latent heat of the surfaceis ``ℒᵝ(T)``.
+where the temperature-dependent latent heat of the surface is ``ℒᵝ(T)``.
 
 Using a model for the latent heat that is linear in temperature, eg
 
@@ -18,10 +18,10 @@ Using a model for the latent heat that is linear in temperature, eg
 ```
 
 where ``ℒᵝ₀ ≡ ℒᵝ(T=0)`` is the latent heat at absolute zero and
-``Δcᵝ ≡ (cᵖᵛ - cᵝ)``  is the constant difference between the vapor specific heat
+``Δcᵝ ≡ cᵖᵛ - cᵝ``  is the constant difference between the vapor specific heat
 and the specific heat of phase ``β``.
 
-Note that we typically parameterize the latent heat interms of a reference
+Note that we typically parameterize the latent heat in terms of a reference
 temperature ``T = Tᵣ`` that is well above absolute zero. In that case,
 the latent heat is written
 
@@ -36,13 +36,13 @@ from the triple point pressure and temperature ``(pᵗʳ, Tᵗʳ)`` to pressure 
 and temperature ``T``, we obtain
 
 ```math
-log(pᵛ⁺ / pᵗʳ) = - ℒᵝ₀ / (Rᵛ T) + ℒᵝ₀ / (Rᵛ Tᵗʳ) + log(Δcᵝ / Rᵛ * T / Tᵗʳ)
+\\log(pᵛ⁺ / pᵗʳ) = - ℒᵝ₀ / (Rᵛ T) + ℒᵝ₀ / (Rᵛ Tᵗʳ) + \\log \\left[ (Δcᵝ / Rᵛ) (T / Tᵗʳ) \\right] ,
 ```
 
-Which then becomes
+which then becomes
 
 ```math
-pᵛ⁺(T) = pᵗʳ \\left ( \\frac{T}{Tᵗʳ} \\right )^{Δcᵝ / Rᵛ} \\exp \\left [ (1/Tᵗʳ - 1/T) ℒᵝ₀ / Rᵛ \\right ] .
+pᵛ⁺(T) = pᵗʳ (T / Tᵗʳ)^{Δcᵝ / Rᵛ} \\exp \\left [ (1/Tᵗʳ - 1/T) ℒᵝ₀ / Rᵛ \\right ] .
 ```
 """
 @inline function saturation_vapor_pressure(T, thermo, surface)
