@@ -27,7 +27,7 @@ ice surface (cold side). This model yields a mixed-phase surface with effective 
 difference that are linear blends of the pure-phase values, consistent with Pressel et al. (2015).
 
 In Breeze, the equilibrium surface is constructed internally via `PlanarMixedPhaseSurface(λ)` using
-`MixedPhaseEquilibrium`, and is accessed by
+[`MixedPhaseEquilibrium`](@ref Breeze.Microphysics.MixedPhaseEquilibrium), and is accessed by
 
 ```@example mixed_phase
 using Breeze
