@@ -1,6 +1,6 @@
 using Oceananigans: Oceananigans, Center, Field, set!, fill_halo_regions!
 using Adapt: Adapt, adapt
-                   
+
 #####
 ##### Reference state computations for Boussinesq and Anelastic models
 #####
@@ -69,10 +69,13 @@ end
 """
 $(TYPEDSIGNATURES)
 
-Return a `ReferenceState` computed on `grid` with `thermo`dynamic constants,
-a `base_pressure` (reference pressure at ``z=0``, ``p_r(z=0)``), and constant `potential_temperature`.
+Return a `ReferenceState` on `grid`, with [`ThermodynamicConstants`](@ref) `thermo`.
+
+Keyword arguments
+- `base_pressure`: Default: 101325
+- `potential_temperature`: Default: 288
 """
-function ReferenceState(grid, thermo = ThermodynamicConstants();
+function ReferenceState(grid, thermo;
                         base_pressure = 101325,
                         potential_temperature = 288)
 
