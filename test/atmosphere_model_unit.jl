@@ -3,6 +3,12 @@ using GPUArraysCore: @allowscalar
 using Oceananigans
 using Test
 
+# TODO: move this to Oceananigans
+function constant_field(grid, constant) 
+    field = Field{Nothing, Nothing, Nothing}(grid)
+    return set!(field, constant)
+end
+
 @testset "set! AtmosphereModel [$(FT)]" for FT in (Float32, Float64)
     Oceananigans.defaults.FloatType = FT
     grid = RectilinearGrid(default_arch, FT; size=(8, 8, 8), x=(0, 1_000), y=(0, 1_000), z=(0, 1_000))
@@ -15,14 +21,14 @@ using Test
             model = AtmosphereModel(grid; thermodynamics=thermo, formulation, microphysics)
             
             set!(model; qᵗ = 1e-2)
-            @test @allowscalar model.moisture_mass_fraction ≈ 1e-2
+            @test @allowscalar model.moisture_mass_fraction ≈ constant_field(grid, 1e-2)
             
             ρᵣ = model.formulation.reference_state.density
             @test @allowscalar model.moisture_density ≈ ρᵣ * 1e-2
 
             set!(model; u = 1, v = 2)
-            @test @allowscalar model.velocities.u ≈ 1
-            @test @allowscalar model.velocities.v ≈ 2
+            @test @allowscalar model.velocities.u ≈ constant_field(grid, 1)
+            @test @allowscalar model.velocities.v ≈ constant_field(grid, 2)
             @test @allowscalar model.momentum.ρu ≈ ρᵣ
             @test @allowscalar model.momentum.ρv ≈ ρᵣ * 2
             
