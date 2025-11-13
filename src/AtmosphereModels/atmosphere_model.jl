@@ -8,6 +8,7 @@ using Oceananigans.BoundaryConditions: FieldBoundaryConditions, regularize_field
 using Oceananigans.Grids: ZDirection
 using Oceananigans.Solvers: FourierTridiagonalPoissonSolver
 using Oceananigans.TimeSteppers: TimeStepper
+using Oceananigans.TurbulenceClosures: implicit_diffusion_solver, time_discretization, build_diffusivity_fields
 using Oceananigans.Utils: launch!, prettytime, prettykeys
 
 import Oceananigans: fields, prognostic_fields
@@ -19,6 +20,15 @@ struct DefaultValue end
 
 tupleit(t::Tuple) = t
 tupleit(t) = tuple(t)
+
+validate_tracers(tracers) = throw(ArgumentError("tracers for AtmosphereModel must be a tuple of symbols"))
+
+function validate_tracers(tracers::Tuple)
+    for name in tracers
+        name isa Symbol || throw(ArgumentError("The names of tracers for AtmosphereModel must be symbols, got $name"))
+    end
+    return tracers
+end
 
 formulation_pressure_solver(formulation, grid) = nothing
 
@@ -102,6 +112,7 @@ function AtmosphereModel(grid;
 
     arch = grid.architecture
     tracers = tupleit(tracers) # supports tracers=:c keyword argument (for example)
+    tracer_names = validate_tracers(tracers)
 
     hydrostatic_pressure_anomaly = CenterField(grid)
     nonhydrostatic_pressure = CenterField(grid)
@@ -115,9 +126,10 @@ function AtmosphereModel(grid;
 
     density = materialize_density(formulation, grid)
     velocities, momentum = materialize_momentum_and_velocities(formulation, grid, boundary_conditions)
-    tracers = NamedTuple(name => CenterField(grid, boundary_conditions=boundary_conditions[name]) for name in tracers)
     microphysical_fields = materialize_microphysical_fields(microphysics, grid, boundary_conditions)
     advection = adapt_advection_order(advection, grid)
+
+    tracers = NamedTuple(name => CenterField(grid, boundary_conditions=boundary_conditions[name]) for name in tracer_names)
 
     if moisture_density isa DefaultValue
         moisture_density = CenterField(grid, boundary_conditions=boundary_conditions.ρqᵗ)
@@ -137,16 +149,17 @@ function AtmosphereModel(grid;
                                                   prognostic_microphysical_fields,
                                                   tracers)
 
-    model_fields = merge(prognostic_fields, velocities, (; T=temperature, qᵗ=moisture_mass_fraction))
-    forcing = atmosphere_model_forcing(forcing, prognostic_fields, model_fields)
-    timestepper = TimeStepper(timestepper, grid, prognostic_fields)
+    implicit_solver = implicit_diffusion_solver(time_discretization(closure), grid)
+    timestepper = TimeStepper(timestepper, grid, prognostic_fields; implicit_solver)
     pressure_solver = formulation_pressure_solver(formulation, grid)
 
+    model_fields = merge(prognostic_fields, velocities, (; T=temperature, qᵗ=moisture_mass_fraction))
+    forcing = atmosphere_model_forcing(forcing, prognostic_fields, model_fields)
+
     # May need to use more names in `tracers` for this to work
-    closure_names = tuple(:ρe, :ρqᵗ, tracers...)
+    closure_names = tuple(:ρe, :ρqᵗ, tracer_names...)
     closure = Oceananigans.Utils.with_tracers(closure_names, closure)
-    diffusivity_fields =
-        Oceananigans.TurbulenceClosures.build_diffusivity_fields(grid, clock, closure_names, boundary_conditions, closure)
+    diffusivity_fields = build_diffusivity_fields(grid, clock, closure_names, boundary_conditions, closure)
 
     model = AtmosphereModel(arch,
                             grid,

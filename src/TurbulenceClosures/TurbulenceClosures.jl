@@ -11,8 +11,9 @@ using Oceananigans.Operators:
     Ay_qᶠᶠᶜ, Ay_qᶜᶜᶜ, Ay_qᶜᶠᶠ,
     Az_qᶠᶜᶠ, Az_qᶜᶠᶠ, Az_qᶜᶜᶜ,
     Ax_qᶠᶜᶜ, Ay_qᶜᶠᶜ, Az_qᶜᶜᶠ,
-    # Interpolator used for ρᵣ at z-faces
-    ℑzᵃᵃᶠ
+    # Interpolator functions used for ρᵣ at faces
+    ℑxᶠᵃᵃ, ℑyᵃᶠᵃ, ℑzᵃᵃᶠ,
+    ℑxyᶠᶠᵃ, ℑxzᶠᵃᶠ, ℑyzᵃᶠᶠ, ℑxzᶠᵃᶠ
 
 using Oceananigans.TurbulenceClosures:
     AbstractTurbulenceClosure,
@@ -36,9 +37,9 @@ import ..AtmosphereModels: ∂ⱼ_𝒯₁ⱼ, ∂ⱼ_𝒯₂ⱼ, ∂ⱼ_𝒯₃�
 # Face flux wrappers that call Oceananigans' kinematic diffusive fluxes and
 # multiply by ρᵣ at the appropriate face.
 
-@inline Jᶜx(i, j, k, grid, ρ, args...) = ℑxᶠᶜᶜ(i, j, k, grid, ρ) * _diffusive_flux_x(i, j, k, grid, args...)
-@inline Jᶜy(i, j, k, grid, ρ, args...) = ℑyᶜᶠᶜ(i, j, k, grid, ρ) * _diffusive_flux_y(i, j, k, grid, args...)
-@inline Jᶜz(i, j, k, grid, ρ, args...) = ℑzᶜᶜᶠ(i, j, k, grid, ρ) * _diffusive_flux_z(i, j, k, grid, args...)
+@inline Jᶜx(i, j, k, grid, ρ, args...) = ℑxᶠᵃᵃ(i, j, k, grid, ρ) * _diffusive_flux_x(i, j, k, grid, args...)
+@inline Jᶜy(i, j, k, grid, ρ, args...) = ℑyᵃᶠᵃ(i, j, k, grid, ρ) * _diffusive_flux_y(i, j, k, grid, args...)
+@inline Jᶜz(i, j, k, grid, ρ, args...) = ℑzᵃᵃᶠ(i, j, k, grid, ρ) * _diffusive_flux_z(i, j, k, grid, args...)
 
 """
     ∇_dot_Jᶜ(i, j, k, grid, ρᵣ, closure::AbstractTurbulenceClosure, K, id, c, clock, fields, buoyancy)
@@ -61,15 +62,15 @@ end
 
 # Face stress wrappers for u-momentum
 @inline 𝒯_ux(i, j, k, grid, ρ, args...) = @inbounds ρ[i, j, k]     * _viscous_flux_ux(i, j, k, grid, args...)
-@inline 𝒯_uy(i, j, k, grid, ρ, args...) = ℑxyᶠᶠᶜ(i, j, k, grid, ρ) * _viscous_flux_uy(i, j, k, grid, args...)
-@inline 𝒯_uz(i, j, k, grid, ρ, args...) = ℑxzᶠᶜᶠ(i, j, k, grid, ρ) * _viscous_flux_uz(i, j, k, grid, args...)
+@inline 𝒯_uy(i, j, k, grid, ρ, args...) = ℑxyᶠᶠᵃ(i, j, k, grid, ρ) * _viscous_flux_uy(i, j, k, grid, args...)
+@inline 𝒯_uz(i, j, k, grid, ρ, args...) = ℑxzᶠᵃᶠ(i, j, k, grid, ρ) * _viscous_flux_uz(i, j, k, grid, args...)
 
-@inline 𝒯_vx(i, j, k, grid, ρ, args...) = ℑxyᶠᶠᶜ(i, j, k, grid, ρ) * _viscous_flux_vx(i, j, k, grid, args...)
+@inline 𝒯_vx(i, j, k, grid, ρ, args...) = ℑxyᶠᶠᵃ(i, j, k, grid, ρ) * _viscous_flux_vx(i, j, k, grid, args...)
 @inline 𝒯_vy(i, j, k, grid, ρ, args...) = @inbounds ρ[i, j, k]     * _viscous_flux_vy(i, j, k, grid, args...)
-@inline 𝒯_vz(i, j, k, grid, ρ, args...) = ℑyzᶜᶠᶠ(i, j, k, grid, ρ) * _viscous_flux_vz(i, j, k, grid, args...)
+@inline 𝒯_vz(i, j, k, grid, ρ, args...) = ℑyzᵃᶠᶠ(i, j, k, grid, ρ) * _viscous_flux_vz(i, j, k, grid, args...)
 
-@inline 𝒯_wx(i, j, k, grid, ρ, args...) = ℑxzᶠᶜᶠ(i, j, k, grid, ρ) * _viscous_flux_wx(i, j, k, grid, args...)
-@inline 𝒯_wy(i, j, k, grid, ρ, args...) = ℑyzᶜᶠᶠ(i, j, k, grid, ρ) * _viscous_flux_wy(i, j, k, grid, args...)
+@inline 𝒯_wx(i, j, k, grid, ρ, args...) = ℑxzᶠᵃᶠ(i, j, k, grid, ρ) * _viscous_flux_wx(i, j, k, grid, args...)
+@inline 𝒯_wy(i, j, k, grid, ρ, args...) = ℑyzᵃᶠᶠ(i, j, k, grid, ρ) * _viscous_flux_wy(i, j, k, grid, args...)
 @inline 𝒯_wz(i, j, k, grid, ρ, args...) = @inbounds ρ[i, j, k]     * _viscous_flux_wz(i, j, k, grid, args...)
 
 @inline function ∂ⱼ_𝒯₁ⱼ(i, j, k, grid, ρᵣ, closure::AbstractTurbulenceClosure, closure_fields, clock, model_fields, buoyancy)
