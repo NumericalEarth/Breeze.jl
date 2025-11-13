@@ -147,7 +147,7 @@ end
 """
 $(TYPEDSIGNATURES)
 
-Create `ThermodynamicConstants` with parameters that represent gaseous mixture of dry "air"
+Return `ThermodynamicConstants` with parameters that represent gaseous mixture of dry "air"
 and vapor, as well as condensed liquid and ice phases.
 The `triple_point_temperature` and `triple_point_pressure` may be combined with
 internal energy parameters for condensed phases to compute the vapor pressure
@@ -159,17 +159,17 @@ The Clausius-Clapeyron relation describes the pressure-temperature relationship 
 transitions from vapor to liquid or vapor to ice,
 
 ```math
-d[\\log(pᵛ⁺ᵝ)] / dT = ℒᵝ / (Rᵛ T²)
+𝖽[\\log(pᵛ⁺ᵝ)] / 𝖽T = ℒᵝ / (Rᵛ T²)
 ```
 
 where:
 
 - ``pᵛ⁺ᵝ`` is the saturation vapor pressure for a transition between vapor and the ``β``-th phase
-  For example ``β = l`` for liquid and ``β = i`` for ice.
-- ``T`` is temperature
+  For example ``β = l`` for liquid and ``β = i`` for ice,
+- ``T`` is temperature,
 - ``ℒᵝ`` is the latent heat of the transition
-  (the difference between the enthalpy of the vapor and transitioned state at a given temperature)
-- ``Rᵛ`` is the specific gas constant for vapor
+  (the difference between the enthalpy of the vapor and transitioned state at a given temperature),
+- ``Rᵛ`` is the specific gas constant for vapor.
 
 For a thermodynamic model with constant specific heats, the latent heat may be written
 
@@ -192,9 +192,10 @@ where
 
 See also [`saturation_vapor_pressure`](@ref).
 
-Note: any reference values for pressure and temperature can be used in principle.
-The advantage of using reference values at the triple point is that the same values
-can then be used for both condensation (vapor → liquid) and deposition (vapor → ice).
+!!! note
+    Any reference values for pressure and temperature can be used in principle.
+    The advantage of using reference values at the triple point is that the same values
+    can then be used for both condensation (vapor → liquid) and deposition (vapor → ice).
 """
 function ThermodynamicConstants(FT = Oceananigans.defaults.FloatType;
                                 molar_gas_constant = 8.314462618,
@@ -308,7 +309,7 @@ $(TYPEDSIGNATURES)
 
 Compute the heat capacity of a mixture of dry air, vapor, liquid, and ice, where
 the mass fractions of vapor, liquid, and ice are given by `q`.
-The heat capacity of moist air is the weighted sum of its constituents: 
+The heat capacity of moist air is the weighted sum of its constituents:
 
 ```math
 cᵖᵐ = qᵈ cᵖᵈ + qᵛ cᵖᵛ + qˡ cˡ + qⁱ cⁱ
