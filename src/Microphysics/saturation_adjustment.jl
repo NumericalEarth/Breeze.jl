@@ -42,7 +42,7 @@ Return `SaturationAdjustment` microphysics representing an instantaneous adjustm
 The options for `equilibrium` are
     * [`WarmPhaseEquilibrium`](@ref) representing an equilibrium between water vapor and liquid water.
 
-    * `MixedPhaseEquilibrium` representing a temperature-dependent equilibrium between
+    * [`MixedPhaseEquilibrium`](@ref) representing a temperature-dependent equilibrium between
       water vapor, possibly supercooled liquid water, and ice. The equilibrium state is modeled as a linear
       variation of the equilibrium liquid fraction with temperature, between
       the freezing temperature (e.g. 273.15 K) below which liquid water is supercooled,
