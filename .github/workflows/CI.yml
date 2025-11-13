@@ -52,7 +52,7 @@ jobs:
           - version: "min"
             os: windows-latest
         include:
-          - version: "min"
+          - version: "1.12"
             os: nvidia-gpu-t4
             arch: "default"
     steps:
