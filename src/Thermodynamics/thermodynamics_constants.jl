@@ -251,7 +251,11 @@ struct MoistureMassFractions{FT}
     ice :: FT
 end
 
-Base.zero(::Type{MoistureMassFractions{FT}}) where FT = MoistureMassFractions(zero(FT), zero(FT), zero(FT))
+@inline MoistureMassFractions(vapor::FT) where FT = MoistureMassFractions(vapor, zero(vapor), zero(vapor))
+@inline MoistureMassFractions(vapor::FT, liquid::FT) where FT = MoistureMassFractions(vapor, liquid, zero(vapor))
+
+const MMF = MoistureMassFractions
+Base.zero(::Type{MMF{FT}}) where FT = MoistureMassFractions(zero(FT), zero(FT), zero(FT))
 
 function Base.summary(q::MoistureMassFractions{FT}) where FT
     return string("MoistureMassFractions{$FT}(vapor=", prettysummary(q.vapor),
@@ -264,8 +268,6 @@ function Base.show(io::IO, q::MoistureMassFractions{FT}) where FT
                 "├── liquid: ", prettysummary(q.liquid), "\n",
                 "└── ice:    ", prettysummary(q.ice))
 end
-
-const MMF = MoistureMassFractions
 
 @inline total_moisture_mass_fraction(q::MMF) = q.vapor + q.liquid + q.ice
 @inline dry_air_mass_fraction(q::MMF) = 1 - total_moisture_mass_fraction(q)

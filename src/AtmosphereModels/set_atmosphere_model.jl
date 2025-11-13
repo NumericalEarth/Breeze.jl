@@ -43,6 +43,10 @@ function set!(model::AtmosphereModel; enforce_mass_conservation=true, kw...)
             set!(model.energy_density, value)
         elseif name == :ρqᵗ
             set!(model.moisture_density, value)
+            set!(model.moisture_mass_fraction, model.moisture_density / model.formulation.reference_state.density)
+        elseif name ∈ propertynames(model.microphysical_fields)
+            μ = getproperty(model.microphysical_fields, name)
+            set!(μ, value)
         end
 
         # Setting diagnostic variables
@@ -74,9 +78,10 @@ function set!(model::AtmosphereModel; enforce_mass_conservation=true, kw...)
                     model.energy_density,
                     grid,
                     θ,
-                    model.moisture_density,
+                    model.moisture_mass_fraction,
                     model.formulation,
                     model.microphysics,
+                    model.microphysical_fields,
                     model.thermodynamics)
         end
     end
@@ -100,9 +105,10 @@ end
 
 @kernel function _energy_density_from_potential_temperature!(energy_density, grid,
                                                              potential_temperature,
-                                                             moisture_density,
+                                                             moisture_mass_fraction,
                                                              formulation::AnelasticFormulation,
                                                              microphysics,
+                                                             microphysical_fields,
                                                              thermo)
     i, j, k = @index(Global, NTuple)
 
@@ -110,16 +116,14 @@ end
         pᵣ = formulation.reference_state.pressure[i, j, k]
         ρᵣ = formulation.reference_state.density[i, j, k]
         θ = potential_temperature[i, j, k]
-        qᵗ = moisture_density[i, j, k] / ρᵣ
     end
 
     g = thermo.gravitational_acceleration
     z = znode(i, j, k, grid, c, c, c)
     p₀ = formulation.reference_state.base_pressure
 
-    # Assuming a state with no condensate?
-    q = MoistureMassFractions(qᵗ, zero(qᵗ), zero(qᵗ))
-    𝒰₀ = PotentialTemperatureState(θ, q, z, p₀, pᵣ, ρᵣ)
+    q = moisture_mass_fractions(i, j, k, grid, microphysics, microphysical_fields, moisture_mass_fraction)
+    𝒰₀ = PotentialTemperatureState(θ, q, p₀, pᵣ)
     𝒰 = compute_thermodynamic_state(𝒰₀, microphysics, thermo)
 
     T = temperature(𝒰, thermo)

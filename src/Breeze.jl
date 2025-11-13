@@ -15,7 +15,10 @@ export
     IdealGas,
     CondensedPhase,
     mixture_gas_constant,
-    mixture_heat_capacity
+    mixture_heat_capacity,
+    SaturationAdjustment,
+    MixedPhaseEquilibrium,
+    WarmPhaseEquilibrium
 
 using Oceananigans: Oceananigans, @at, AnisotropicMinimumDissipation, Average,
                     AveragedTimeInterval, BackgroundField, BetaPlane, Bounded,
