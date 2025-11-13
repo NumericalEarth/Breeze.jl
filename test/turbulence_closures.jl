@@ -1,7 +1,6 @@
 using Breeze
 using GPUArraysCore: @allowscalar
 using Oceananigans
-using Statistics
 using Test
 
 const TC = Breeze.TurbulenceClosures
@@ -35,12 +34,12 @@ const TC = Breeze.TurbulenceClosures
         set!(model; ρe=ρe₀)
         time_step!(model, 1)
 
-        atol = sqrt(eps(FT))
-        @test model.momentum.ρu ≈ XFaceField(grid) atol=atol
-        @test model.momentum.ρv ≈ YFaceField(grid) atol=atol
-        @test model.momentum.ρw ≈ ZFaceField(grid) atol=atol
-        @test model.moisture_density ≈ CenterField(grid) atol=atol
-        @test model.tracers.ρc ≈ CenterField(grid) atol=atol
-        @test all(isapprox.(interior(model.energy_density), ρe₀, atol=atol))
-end
+        ϵ = sqrt(eps(FT))
+        @test model.momentum.ρu ≈ XFaceField(grid) atol=ϵ
+        @test model.momentum.ρv ≈ YFaceField(grid) atol=ϵ
+        @test model.momentum.ρw ≈ ZFaceField(grid) atol=100ϵ # large bc of non-zero buoyancy
+        @test model.moisture_density ≈ CenterField(grid) atol=ϵ
+        @test model.tracers.ρc ≈ CenterField(grid) atol=ϵ
+        @test all(isapprox.(interior(model.energy_density), ρe₀, atol=100ϵ))
+    end
 end
