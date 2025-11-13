@@ -8,14 +8,14 @@ using Test
     grid = RectilinearGrid(default_arch, FT; size=(8, 8, 8), x=(0, 1_000), y=(0, 1_000), z=(0, 1_000))
     thermo = ThermodynamicConstants()
 
-    for p₀ in (101325, 100000), θ₀ in (288, 300)
+    for p₀ in (101325, 100000), θ₀ in (288, 300), microphysics in (nothing, SaturationAdjustment())
         @testset let p₀ = p₀, θ₀ = θ₀
             reference_state = ReferenceState(grid, thermo, base_pressure=p₀, potential_temperature=θ₀)
             formulation = AnelasticFormulation(reference_state)
-            model = AtmosphereModel(grid; thermodynamics=thermo, formulation)
+            model = AtmosphereModel(grid; thermodynamics=thermo, formulation, microphysics)
             
             set!(model; qᵗ = 1e-2)
-            @test @allowscalar model.moisture_mass_fraction) ≈ 1e-2
+            @test @allowscalar model.moisture_mass_fraction ≈ 1e-2
             
             ρᵣ = model.formulation.reference_state.density
             @test @allowscalar model.moisture_density ≈ ρᵣ * 1e-2
@@ -48,8 +48,7 @@ end
     grid = RectilinearGrid(default_arch; size=(8, 8, 8), x=(0, 1_000), y=(0, 1_000), z=(0, 1_000))
     thermo = ThermodynamicConstants()
 
-    p₀ = FT(101325)
-    θ₀ = FT(300)
+    p₀, θ₀ = 101325, 300
     reference_state = ReferenceState(grid, thermo, base_pressure=p₀, potential_temperature=θ₀)
     formulation = AnelasticFormulation(reference_state)
     model = AtmosphereModel(grid; thermodynamics=thermo, formulation)
@@ -68,8 +67,7 @@ end
     grid = RectilinearGrid(default_arch; size=(8, 8, 8), x=(0, 1_000), y=(0, 1_000), z=(0, 1_000))
     thermo = ThermodynamicConstants()
 
-    p₀ = FT(101325)
-    θ₀ = FT(300)
+    p₀, θ₀ = 101325, 300
     reference_state = ReferenceState(grid, thermo, base_pressure=p₀, potential_temperature=θ₀)
     formulation = AnelasticFormulation(reference_state)
     microphysics = SaturationAdjustment()
