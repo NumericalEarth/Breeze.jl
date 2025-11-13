@@ -5,6 +5,13 @@ struct PotentialTemperatureState{FT} <: AbstractThermodynamicState{FT}
     moisture_mass_fractions :: MoistureMassFractions{FT}
     base_pressure :: FT
     reference_pressure :: FT
+
+    @inline function PotentialTemperatureState{FT}(potential_temperature::FT,
+                                                   moisture_mass_fractions::MoistureMassFractions{FT},
+                                                   base_pressure::FT,
+                                                   reference_pressure::FT) where FT
+        return new{FT}(potential_temperature, moisture_mass_fractions, base_pressure, reference_pressure)
+    end
 end
 
 @inline is_absolute_zero(𝒰::PotentialTemperatureState) = 𝒰.potential_temperature == 0
@@ -21,12 +28,8 @@ end
 @inline total_moisture_mass_fraction(state::PotentialTemperatureState) =
     total_moisture_mass_fraction(state.moisture_mass_fractions)
 
-@inline function with_moisture(𝒰::PotentialTemperatureState{FT}, q::MoistureMassFractions{FT}) where FT
-    return PotentialTemperatureState{FT}(𝒰.potential_temperature,
-                                         q,
-                                         𝒰.base_pressure,
-                                         𝒰.reference_pressure)
-end
+@inline with_moisture(𝒰::PotentialTemperatureState{FT}, q::MoistureMassFractions{FT}) where FT =
+    PotentialTemperatureState{FT}(𝒰.potential_temperature, q, 𝒰.base_pressure, 𝒰.reference_pressure)
 
 @inline function temperature(𝒰::PotentialTemperatureState, thermo::ThermodynamicConstants)
     θ = 𝒰.potential_temperature
@@ -51,15 +54,21 @@ struct MoistStaticEnergyState{FT} <: AbstractThermodynamicState{FT}
     moisture_mass_fractions :: MoistureMassFractions{FT}
     height :: FT
     reference_pressure :: FT
+
+    @inline function MoistStaticEnergyState{FT}(moist_static_energy::FT,
+                                                moisture_mass_fractions::MoistureMassFractions{FT},
+                                                height::FT,
+                                                reference_pressure::FT) where FT
+        return new{FT}(moist_static_energy, moisture_mass_fractions, height, reference_pressure)
+    end
 end
 
 @inline Base.eltype(::MoistStaticEnergyState{FT}) where FT = FT
 @inline total_moisture_mass_fraction(state::MoistStaticEnergyState) = total_moisture_mass_fraction(state.moisture_mass_fractions)
 @inline is_absolute_zero(𝒰::MoistStaticEnergyState) = 𝒰.moist_static_energy == 0
 
-@inline function with_moisture(𝒰::MoistStaticEnergyState{FT}, q::MoistureMassFractions{FT}) where FT
-    return MoistStaticEnergyState{FT}(𝒰.moist_static_energy, q, 𝒰.height, 𝒰.reference_pressure)
-end
+@inline with_moisture(𝒰::MoistStaticEnergyState{FT}, q::MoistureMassFractions{FT}) where FT =
+    MoistStaticEnergyState{FT}(𝒰.moist_static_energy, q, 𝒰.height, 𝒰.reference_pressure)
 
 @inline function temperature(𝒰::MoistStaticEnergyState, thermo::ThermodynamicConstants)
     e = 𝒰.moist_static_energy
