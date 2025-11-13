@@ -80,13 +80,7 @@ a surface composed of a mixture of liquid and ice, with a given `liquid_fraction
 """
 struct PlanarMixedPhaseSurface{FT}
     liquid_fraction :: FT
-
-    @inline function PlanarMixedPhaseSurface{FT}(liquid_fraction::FT) where FT
-        return new{FT}(liquid_fraction)
-    end
 end
-
-@inline PlanarMixedPhaseSurface(λ::FT) where FT = PlanarMixedPhaseSurface{FT}(λ)
 
 @inline specific_heat_difference(thermo, ::PlanarLiquidSurface) = specific_heat_difference(thermo, thermo.liquid)
 @inline specific_heat_difference(thermo, ::PlanarIceSurface) = specific_heat_difference(thermo, thermo.ice)
