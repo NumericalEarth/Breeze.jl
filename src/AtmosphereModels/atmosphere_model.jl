@@ -47,7 +47,7 @@ mutable struct AtmosphereModel{Frm, Arc, Tst, Grd, Clk, Thm, Den, Mom, Eng, Moi,
     microphysical_fields :: Cnd
     timestepper :: Tst
     closure :: Cls
-    diffusivity_fields :: Dif
+    closure_fields :: Dif
 end
 
 function default_formulation(grid, thermo)
@@ -141,7 +141,7 @@ function AtmosphereModel(grid;
 
     # TODO: support these
     closure = nothing
-    diffusivity_fields = nothing
+    closure_fields = nothing
 
     model = AtmosphereModel(arch,
                             grid,
@@ -166,7 +166,7 @@ function AtmosphereModel(grid;
                             microphysical_fields,
                             timestepper,
                             closure,
-                            diffusivity_fields)
+                            closure_fields)
 
     update_state!(model)
 
