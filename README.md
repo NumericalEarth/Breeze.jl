@@ -34,7 +34,7 @@ Check out [the documentation](https://numericalearth.github.io/BreezeDocumentati
 
 ### Installing and using Breeze
 
-First [install Julia](https://julialang.org/downloads/); suggested version 1.10. See [juliaup](https://github.com/JuliaLang/juliaup) README for how to install 1.10 and make that version the default.
+First [install Julia](https://julialang.org/downloads/); suggested version 1.12. See [juliaup](https://github.com/JuliaLang/juliaup) README for how to install 1.12 and make that version the default.
 
 Then clone this repository
 
