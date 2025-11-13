@@ -154,7 +154,7 @@ set!(Fρe_field, ρᵣ * Fρe_field)
 ρe_radiation_forcing = Forcing(Fρe_field)
 ρe_forcing = (ρe_radiation_forcing, ρe_subsidence_forcing)
 
-microphysics = Breeze.Microphysics.WarmPhaseSaturationAdjustment()
+microphysics = Breeze.Microphysics.SaturationAdjustment(equilibrium=Breeze.Microphysics.WarmPhaseEquilibrium())
 
 model = AtmosphereModel(grid; coriolis, microphysics,
                         advection = WENO(order=5),
@@ -165,8 +165,9 @@ model = AtmosphereModel(grid; coriolis, microphysics,
 # of Siebesma et al 2003, 3rd paragraph
 θϵ = 0.1
 qϵ = 2.5e-5
-θᵢ(x, y, z) = θ_bomex(z) + θϵ * randn()
-qᵢ(x, y, z) = q_bomex(z) + qϵ * randn()
+z_perturb = 1600 # m
+θᵢ(x, y, z) = θ_bomex(z) + (z < z_perturb ? θϵ * randn() : 0)
+qᵢ(x, y, z) = q_bomex(z) + (z < z_perturb ? qϵ * randn() : 0)
 uᵢ(x, y, z) = u_bomex(z)
 set!(model, θ=θᵢ, qᵗ=qᵢ, u=uᵢ)
 
@@ -194,8 +195,8 @@ end
 add_callback!(simulation, compute_averages!)
 
 T = model.temperature
-qˡ = model.microphysical_fields.liquid_mass_fraction
-qᵛ = model.microphysical_fields.specific_humidity
+qˡ = model.microphysical_fields.qˡ
+qᵛ = model.microphysical_fields.qᵛ
 
 qᵛ⁺ = Breeze.AtmosphereModels.SaturationSpecificHumidityField(model)
 rh = Field(qᵛ / qᵛ⁺) # relative humidity
@@ -241,7 +242,7 @@ end
 # update_plots!(simulation)
 # display(fig)
 
-add_callback!(simulation, update_plots!, TimeInterval(20minutes))
+#add_callback!(simulation, update_plots!, TimeInterval(20minutes))
 
 function progress(sim)
     compute!(T)
