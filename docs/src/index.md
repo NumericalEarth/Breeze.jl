@@ -30,7 +30,7 @@ Pkg.add("https://github.com/NumericalEarth/Breeze.jl.git")
 
 ## Quick Start
 
-A basic free convection simulation with `AtmosphereModel`:
+A basic free convection simulation with an `AtmosphereModel`:
 
 ```@example
 using Breeze
