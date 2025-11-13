@@ -5,7 +5,6 @@ struct PotentialTemperatureState{FT} <: AbstractThermodynamicState{FT}
     moisture_mass_fractions :: MoistureMassFractions{FT}
     base_pressure :: FT
     reference_pressure :: FT
-    reference_density :: FT
 end
 
 @inline is_absolute_zero(𝒰::PotentialTemperatureState) = 𝒰.potential_temperature == 0
@@ -26,8 +25,7 @@ end
     return PotentialTemperatureState{FT}(𝒰.potential_temperature,
                                          q,
                                          𝒰.base_pressure,
-                                         𝒰.reference_pressure,
-                                         𝒰.reference_density)
+                                         𝒰.reference_pressure)
 end
 
 @inline function temperature(𝒰::PotentialTemperatureState, thermo::ThermodynamicConstants)

@@ -124,7 +124,7 @@ const c = Center()
     z = Oceananigans.Grids.znode(i, j, k, grid, c, c, c)
     p₀ = mb.reference_state.base_pressure
     q = MoistureMassFractions(qᵗ)
-    𝒰 = PotentialTemperatureState(θ, q, p₀, pᵣ, ρᵣ)
+    𝒰 = PotentialTemperatureState(θ, q, p₀, pᵣ)
 
     # Perform saturation adjustment
     T = compute_boussinesq_adjustment_temperature(𝒰, mb.thermodynamics)
@@ -293,7 +293,7 @@ const c = Center()
     z = Oceananigans.Grids.znode(i, j, k, grid, c, c, c)
     p₀ = mb.reference_state.base_pressure
     q = MoistureMassFractions(qᵗᵢ)
-    𝒰 = PotentialTemperatureState(θᵢ, q, p₀, pᵣ, ρᵣ)
+    𝒰 = PotentialTemperatureState(θᵢ, q, p₀, pᵣ)
     return compute_boussinesq_adjustment_temperature(𝒰, mb.thermodynamics)
 end
 
@@ -370,7 +370,7 @@ Adapt.adapt_structure(to, ck::CondensateKernel) = CondensateKernel(adapt(to, ck.
     z = Oceananigans.Grids.znode(i, j, k, grid, c, c, c)
     p₀ = mb.reference_state.base_pressure
     q = MoistureMassFractions(qᵗᵢ)
-    𝒰 = PotentialTemperatureState(Tᵢ, q, p₀, pᵣ, ρᵣ)
+    𝒰 = PotentialTemperatureState(Tᵢ, q, p₀, pᵣ)
     Π = exner_function(𝒰, mb.thermodynamics)
     Tᵢ <= Π * θᵢ + 10 * eps(Tᵢ) && return zero(qᵗᵢ)
 

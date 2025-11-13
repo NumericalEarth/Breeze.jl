@@ -123,7 +123,7 @@ end
     p₀ = formulation.reference_state.base_pressure
 
     q = moisture_mass_fractions(i, j, k, grid, microphysics, microphysical_fields, moisture_mass_fraction)
-    𝒰₀ = PotentialTemperatureState(θ, q, p₀, pᵣ, ρᵣ)
+    𝒰₀ = PotentialTemperatureState(θ, q, p₀, pᵣ)
     𝒰 = compute_thermodynamic_state(𝒰₀, microphysics, thermo)
 
     T = temperature(𝒰, thermo)
