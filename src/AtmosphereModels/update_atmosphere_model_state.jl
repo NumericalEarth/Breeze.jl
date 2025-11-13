@@ -102,20 +102,23 @@ function compute_tendencies!(model::AnelasticModel)
     model_fields = merge(fields(model), model.velocities, model.microphysical_fields,
                          (e = model.moist_static_energy, qᵗ = model.moisture_mass_fraction)) 
 
-    common_args = (model.advection,
-                   model.velocities,
-                   model.closure,
-                   model.diffusivity_fields,
-                   model.momentum,
-                   model.coriolis,
-                   model.clock,
-                   model_fields)
-
     ρᵣ = model.formulation.reference_state.density
+
+    common_args = (
+        model.formulation.reference_state.density,
+        model.advection,
+        model.velocities,
+        model.closure,
+        model.diffusivity_fields,
+        model.momentum,
+        model.coriolis,
+        model.clock,
+        model_fields)
+
     u_args = tuple(common_args..., model.forcing.ρu)
     v_args = tuple(common_args..., model.forcing.ρv)
     w_args = tuple(common_args..., model.forcing.ρw,
-                   ρᵣ, model.formulation, model.temperature,
+                   model.formulation, model.temperature,
                    model.moisture_mass_fraction, model.thermodynamics)
 
     launch!(arch, grid, :xyz, compute_x_momentum_tendency!, Gρu, grid, u_args)

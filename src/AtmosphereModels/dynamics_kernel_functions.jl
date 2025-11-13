@@ -27,6 +27,7 @@ hydrostatic_pressure_gradient_x(i, j, k, grid, pₕ′) = ∂xᶠᶜᶜ(i, j, k,
 hydrostatic_pressure_gradient_y(i, j, k, grid, pₕ′) = ∂yᶜᶠᶜ(i, j, k, grid, pₕ′)
 
 @inline function x_momentum_tendency(i, j, k, grid,
+                                     reference_density,
                                      advection,
                                      velocities,
                                      closure,
@@ -42,11 +43,11 @@ hydrostatic_pressure_gradient_y(i, j, k, grid, pₕ′) = ∂yᶜᶠᶜ(i, j, k,
     return ( - div_𝐯u(i, j, k, grid, advection, velocities, momentum.ρu)
              - x_f_cross_U(i, j, k, grid, coriolis, momentum)
              - ∂ⱼ_𝒯₁ⱼ(i, j, k, grid, reference_density, closure, diffusivity_fields, clock, model_fields, buoyancy)
-             # - hydrostatic_pressure_gradient_x(i, j, k, grid, hydrostatic_pressure_anomaly)
              + ρu_forcing(i, j, k, grid, clock, model_fields))
 end
 
 @inline function y_momentum_tendency(i, j, k, grid,
+                                     reference_density,
                                      advection,
                                      velocities,
                                      closure,
@@ -62,11 +63,11 @@ end
     return ( - div_𝐯v(i, j, k, grid, advection, velocities, momentum.ρv)
              - y_f_cross_U(i, j, k, grid, coriolis, momentum)
              - ∂ⱼ_𝒯₂ⱼ(i, j, k, grid, reference_density, closure, diffusivity_fields, clock, model_fields, buoyancy)
-             # - hydrostatic_pressure_gradient_y(i, j, k, grid, hydrostatic_pressure_anomaly)
              + ρv_forcing(i, j, k, grid, clock, model_fields))
 end
 
 @inline function z_momentum_tendency(i, j, k, grid,
+                                     reference_density,
                                      advection,
                                      velocities,
                                      closure,
@@ -76,7 +77,6 @@ end
                                      clock,
                                      model_fields,
                                      ρw_forcing,
-                                     reference_density,
                                      formulation,
                                      temperature,
                                      moisture_mass_fraction,
@@ -108,7 +108,7 @@ end
 
     return ( - div_Uc(i, j, k, grid, advection, velocities, scalar)
              - ∇_dot_Jᶜ(i, j, k, grid, reference_density, closure, diffusivity_fields, scalar_id, scalar, clock, model_fields, buoyancy)
-             + forcing(i, j, k, grid, clock, model_fields))
+             + scalar_forcing(i, j, k, grid, clock, model_fields))
 end
 
 @inline function moist_static_energy_tendency(i, j, k, grid,
