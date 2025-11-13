@@ -1,7 +1,7 @@
 using ..Thermodynamics: Thermodynamics, ThermodynamicConstants, ReferenceState
 
 using Oceananigans: AbstractModel, Center, CenterField, Clock, Field
-using Oceananigans: WENO, XFaceField, YFaceField, ZFaceField
+using Oceananigans: Centered, XFaceField, YFaceField, ZFaceField
 using Oceananigans.Advection: adapt_advection_order
 using Oceananigans.Forcings: regularize_forcing
 using Oceananigans.BoundaryConditions: FieldBoundaryConditions, regularize_field_boundary_conditions
