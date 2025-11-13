@@ -44,6 +44,11 @@ which then becomes
 ```math
 pᵛ⁺(T) = pᵗʳ (T / Tᵗʳ)^{Δcᵝ / Rᵛ} \\exp \\left [ (1/Tᵗʳ - 1/T) ℒᵝ₀ / Rᵛ \\right ] .
 ```
+
+!!! note
+    Any reference values for pressure and temperature can be used in principle.
+    The advantage of using reference values at the triple point is that the same values
+    can then be used for both condensation (vapor → liquid) and deposition (vapor → ice).
 """
 @inline function saturation_vapor_pressure(T, thermo, surface)
     ℒ₀ = absolute_zero_latent_heat(thermo, surface)

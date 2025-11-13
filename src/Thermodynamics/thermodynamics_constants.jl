@@ -78,7 +78,7 @@ Likewise, during deposition, water molecules in the gas phase cluster into ice c
 
 Arguments
 =========
-- `FT`: Float type to use (defaults to Oceananigans.defaults.FloatType)
+- `FT`: Float type to use (defaults to `Oceananigans.defaults.FloatType`)
 - `reference_latent_heat`: Difference between the internal energy of the gaseous phase at
   the `energy_reference_temperature`.
 - `heat_capacity`: Heat capacity of the phase of matter.
@@ -154,48 +154,6 @@ internal energy parameters for condensed phases to compute the vapor pressure
 at the boundary between vapor and a homogeneous sample of the condensed phase.
 The `gravitational_acceleration` parameter is included to compute `reference_state`
 quantities associated with hydrostatic balance.
-
-The Clausius-Clapeyron relation describes the pressure-temperature relationship during phase
-transitions from vapor to liquid or vapor to ice,
-
-```math
-𝖽[\\log(pᵛ⁺ᵝ)] / 𝖽T = ℒᵝ / (Rᵛ T²)
-```
-
-where:
-
-- ``pᵛ⁺ᵝ`` is the saturation vapor pressure for a transition between vapor and the ``β``-th phase
-  For example ``β = l`` for liquid and ``β = i`` for ice,
-- ``T`` is temperature,
-- ``ℒᵝ`` is the latent heat of the transition
-  (the difference between the enthalpy of the vapor and transitioned state at a given temperature),
-- ``Rᵛ`` is the specific gas constant for vapor.
-
-For a thermodynamic model with constant specific heats, the latent heat may be written
-
-```math
-ℒᵝ(T) = ℒᵝ(T=0) + (cᵖᵛ - cᵝ) T,
-```
-
-where ``cᵖᵛ`` is the vapor specific heat at constant pressure, ``cᵝ`` is the specific heat of
-phase ``β``, which is assumed incompressible, and ``ℒᵝ(T=0)`` is the latent heat at ``T=0``K.
-We therefore find that
-
-```math
-pᵛ⁺ᵝ = pᵗʳ \\exp[ ℒᵝ(T=0) (1/Tᵗʳ - 1/T) / Rᵛ ]
-```
-
-where
-
-- ``pᵗʳ`` is the triple point pressure
-- ``Tᵗʳ`` is the triple point temperature
-
-See also [`saturation_vapor_pressure`](@ref).
-
-!!! note
-    Any reference values for pressure and temperature can be used in principle.
-    The advantage of using reference values at the triple point is that the same values
-    can then be used for both condensation (vapor → liquid) and deposition (vapor → ice).
 """
 function ThermodynamicConstants(FT = Oceananigans.defaults.FloatType;
                                 molar_gas_constant = 8.314462618,
