@@ -55,7 +55,7 @@ function SaturationAdjustment(FT::DataType=Oceananigans.defaults.FloatType;
                               equilibrium = MixedPhaseEquilibrium(FT))
     tolerance = convert(FT, tolerance)
     maxiter = convert(FT, maxiter)
-    return SaturationAdjustment(tolerance, maxiter, equilibrium)
+    return SaturationAdjustment{typeof(equilibrium), FT}(tolerance, maxiter, equilibrium)
 end
 
 #####
@@ -206,32 +206,32 @@ Return the saturation-adjusted thermodynamic state using a secant iteration.
 @inline function compute_thermodynamic_state(𝒰₀::AbstractThermodynamicState, microphysics::SaturationAdjustment, thermo)
     FT = eltype(𝒰₀)
     is_absolute_zero(𝒰₀) && return 𝒰₀
-    equilibrium = microphysics.equilibrium
 
-    # Unsaturated initial guess
+    # Compute an initial guess assuming unsaturated conditions 
     qᵗ = total_moisture_mass_fraction(𝒰₀)
     q₁ = MoistureMassFractions(qᵗ)
     𝒰₁ = with_moisture(𝒰₀, q₁)
     T₁ = temperature(𝒰₁, thermo)
 
+    equilibrium = microphysics.equilibrium
     pᵣ = 𝒰₀.reference_pressure
     ρ₁ = density(pᵣ, T₁, q₁, thermo)
     qᵛ⁺₁ = saturation_specific_humidity(T₁, ρ₁, thermo, equilibrium)
     qᵗ <= qᵛ⁺₁ && return 𝒰₁
 
-    # Re-initialize first guess assuming saturation
+    # If we made it here, the state is saturated.
+    # So, we re-initialize our first guess assuming saturation
     𝒰₁ = adjust_state(𝒰₀, T₁, thermo, equilibrium)
 
-    # Generate a second guess
+    # Next, we generate a second guess that scaled by the supersaturation implied by T₁
     ℒˡᵣ = thermo.liquid.reference_latent_heat
     ℒⁱᵣ = thermo.ice.reference_latent_heat
     qˡ₁ = q₁.liquid
     qⁱ₁ = q₁.ice
     cᵖᵐ = mixture_heat_capacity(q₁, thermo)
     ΔT = (ℒˡᵣ * qˡ₁ + ℒⁱᵣ * qⁱ₁) / cᵖᵐ
-    ϵT = convert(FT, 0.1) # minimum increment for second guess
-    ΔT = max(ϵT, ΔT / 2)
-    T₂ = T₁ + ΔT
+    ϵT = convert(FT, 0.01) # minimum increment for second guess
+    T₂ = T₁ + max(ϵT, ΔT / 2) # reduce the increment, recognizing it is an overshoot
     𝒰₂ = adjust_state(𝒰₁, T₂, thermo, equilibrium)
 
     # Initialize secant iteration
