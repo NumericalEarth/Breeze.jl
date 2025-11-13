@@ -88,7 +88,7 @@ end
 
 @inline function Fρqᵗ_subsidence(i, j, k, grid, clock, fields, parameters)
     wˢ = parameters.wˢ
-    q_avg = parameters.q_avg
+    q_avg = parameters.qᵗ_avg
     w_dz_Q = ℑzᵃᵃᶜ(i, j, k, grid, w_dz_ϕ, wˢ, q_avg)
     ρᵣ = @inbounds parameters.ρᵣ[i, j, k]
     return - ρᵣ * w_dz_Q
@@ -206,7 +206,7 @@ qᵛ⁺_avg = Field(Average(qᵛ⁺, dims=(1, 2)))
 rh_avg = Field(Average(rh, dims=(1, 2)))
 
 # Uncomment to make plots
-using GLMakie
+using WGLMakie
 
 fig = Figure(size=(1200, 800), fontsize=12)
 axT = Axis(fig[1, 1], xlabel="T (ᵒK)", ylabel="z (m)")
