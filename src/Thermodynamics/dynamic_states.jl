@@ -7,9 +7,6 @@ struct PotentialTemperatureState{FT} <: AbstractThermodynamicState{FT}
     reference_pressure :: FT
 end
 
-@inline PotentialTemperatureState(θ::FT, q::MoistureMassFractions{FT}, p₀::FT, pᵣ::FT) where FT =
-    PotentialTemperatureState{FT}(θ, q, p₀, pᵣ)
-
 @inline is_absolute_zero(𝒰::PotentialTemperatureState) = 𝒰.potential_temperature == 0
 
 @inline function exner_function(𝒰::PotentialTemperatureState, thermo::ThermodynamicConstants)
