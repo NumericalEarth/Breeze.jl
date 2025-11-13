@@ -47,7 +47,8 @@ function Base.summary(formulation::AnelasticFormulation)
                   ", θ₀=", prettysummary(θ₀), ")")
 end
 
-Base.show(io::IO, formulation::AnelasticFormulation) = print(io, "AnelasticFormulation")
+Base.show(io::IO, formulation::AnelasticFormulation) = print(io, "AnelasticFormulation with ",
+                                                                 summary(formulation.reference_state))
 
 #####
 ##### Thermodynamic state
