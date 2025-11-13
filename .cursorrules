@@ -27,6 +27,7 @@ The project currently supports anelastic formulation of Euler equations and is e
    - Keep kernels type-stable and allocation-free
    - Short-circuiting if-statements should be avoided if possible, ifelse should always be used if possible
    - No error messages inside kernels
+   - Models _never_ go inside kernels
    
 4. **Documentation**:
    - Use DocStringExtensions.jl for consistent docstrings
