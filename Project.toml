@@ -19,3 +19,9 @@ KernelAbstractions = "0.9"
 Oceananigans = "0.100"
 Printf = "1"
 julia = "1.10.10"
+
+[weakdeps]
+CloudMicrophysics = "6a9e3e04-43cd-43ba-94b9-e8782df3c71b"
+
+[extensions]
+BreezeCloudMicrophysicsExt = ["CloudMicrophysics"]
