@@ -101,10 +101,10 @@ Next, we compute the saturation specific humidity for moist air with
 a carefully chosen moist air mass fraction,
 
 ```@example microphysics
-using Breeze.Microphysics: adjustment_saturation_specific_humidity
+using Breeze.Microphysics: adjustment_saturation_specific_humidity, WarmPhaseEquilibrium
 
 qᵗ = 0.012   # [kg kg⁻¹] total specific humidity
-qᵛ⁺ = Breeze.Microphysics.adjustment_saturation_specific_humidity(T, p, qᵗ, thermo)
+qᵛ⁺ = Breeze.Microphysics.adjustment_saturation_specific_humidity(T, p, qᵗ, thermo, WarmPhaseEquilibrium())
 ```
 
 There are two facts of note. First is that we have identified a situation in which ``qᵗ > qᵛ⁺``,
@@ -126,7 +126,7 @@ We are now ready to compute moist static energy,
 ```@example microphysics
 using Breeze.Thermodynamics: MoistureMassFractions
 
-q = MoistureMassFractions(qᵛ⁺, qˡ, zero(qᵗ))
+q = MoistureMassFractions(qᵛ⁺, qˡ)
 cᵖᵐ = mixture_heat_capacity(q, thermo)
 g = thermo.gravitational_acceleration
 z = 0.0
@@ -140,11 +140,10 @@ by passing it an "unadjusted" moisture mass fraction into [`Breeze.AtmosphereMod
 
 ```@example microphysics
 using Breeze.AtmosphereModels: compute_temperature
-using Breeze.Microphysics: WarmPhaseSaturationAdjustment
 
-microphysics = WarmPhaseSaturationAdjustment()
+microphysics = SaturationAdjustment(equilibrium=WarmPhaseEquilibrium())
 
-q₀ = MoistureMassFractions(qᵗ, zero(qᵗ), zero(qᵗ))
+q₀ = MoistureMassFractions(qᵗ)
 𝒰 = Breeze.Thermodynamics.MoistStaticEnergyState(e, q₀, z, p)
 T★ = compute_temperature(𝒰, microphysics, thermo)
 ```
@@ -165,7 +164,7 @@ To generate a second guess for the secant solver, we start by estimating
 the liquid mass fraction using the guess ``T = T₁``,
 
 ```@example  microphysics
-qᵛ⁺₂ = adjustment_saturation_specific_humidity(T₁, p, qᵗ, thermo)
+qᵛ⁺₂ = adjustment_saturation_specific_humidity(T₁, p, qᵗ, thermo, WarmPhaseEquilibrium())
 qˡ₁ = qᵗ - qᵛ⁺₂
 ```
 
@@ -175,7 +174,7 @@ We thus increment the first guess by half of the difference implied by the
 estimate ``qˡ₁``,
 
 ```@example  microphysics
-q₂ = MoistureMassFractions(qᵛ⁺₂, qˡ₁, zero(qᵗ))
+q₂ = MoistureMassFractions(qᵛ⁺₂, qˡ₁)
 cᵖᵐ₂ = mixture_heat_capacity(q₂, thermo)
 ΔT = ℒˡᵣ * qˡ₁ / cᵖᵐ₂
 T₂ = T₁ + ΔT / 2
@@ -187,9 +186,10 @@ The residual looks like
 using Breeze.Microphysics: saturation_adjustment_residual
 using CairoMakie
 
+equilibrium = WarmPhaseEquilibrium()
 T = 230:0.5:320
-r = [saturation_adjustment_residual(Tʲ, 𝒰, thermo) for Tʲ in T]
-qᵛ⁺ = [adjustment_saturation_specific_humidity(Tʲ, p, qᵗ, thermo) for Tʲ in T]
+r = [saturation_adjustment_residual(Tʲ, 𝒰, thermo, equilibrium) for Tʲ in T]
+qᵛ⁺ = [adjustment_saturation_specific_humidity(Tʲ, p, qᵗ, thermo, equilibrium) for Tʲ in T]
 
 fig = Figure()
 axr = Axis(fig[1, 1], xlabel="Temperature (K)", ylabel="Saturation adjustment residual (K)")
@@ -225,10 +225,10 @@ T = zeros(length(qᵗ))
 qˡ = zeros(length(qᵗ))
 
 for (i, qᵗⁱ) in enumerate(qᵗ)
-    q = MoistureMassFractions(qᵗⁱ, 0.0, 0.0)
+    q = MoistureMassFractions(qᵗⁱ)
     𝒰 = MoistStaticEnergyState(e₀, q, z, p)
     T[i] = compute_temperature(𝒰, microphysics, thermo)
-    qᵛ⁺ = Breeze.Microphysics.adjustment_saturation_specific_humidity(T[i], p, qᵗⁱ, thermo)
+    qᵛ⁺ = Breeze.Microphysics.adjustment_saturation_specific_humidity(T[i], p, qᵗⁱ, thermo, WarmPhaseEquilibrium())
     qˡ[i] = max(0, qᵗⁱ - qᵛ⁺)
 end
 
@@ -274,7 +274,7 @@ reference_state = ReferenceState(grid, thermo;
                                  potential_temperature = θ₀)
 
 qᵗ = 0.005
-q = MoistureMassFractions(qᵗ, 0.0, 0.0)
+q = MoistureMassFractions(qᵗ)
 
 z = znodes(grid, Center())
 T = zeros(grid.Nz)
@@ -295,7 +295,7 @@ for k = 1:grid.Nz
     T[k] = compute_temperature(𝒰, microphysics, thermo)
 
     # Saturation specific humidity via adjustment formula using T[k], pᵣ, and qᵗ
-    qᵛ⁺[k] = Breeze.Microphysics.adjustment_saturation_specific_humidity(T[k], pᵣ, qᵗ, thermo)
+    qᵛ⁺[k] = Breeze.Microphysics.adjustment_saturation_specific_humidity(T[k], pᵣ, qᵗ, thermo, WarmPhaseEquilibrium())
     qˡ[k] = max(0, qᵗ - qᵛ⁺[k])
     rh[k] = 100 * min(qᵗ, qᵛ⁺[k]) / qᵛ⁺[k]
 end

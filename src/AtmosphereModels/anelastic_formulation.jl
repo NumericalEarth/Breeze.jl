@@ -63,7 +63,9 @@ function diagnose_thermodynamic_state(i, j, k, grid, formulation::AnelasticFormu
 
     e = ρe / ρᵣ
     qᵗ = ρqᵗ / ρᵣ
-    q = MoistureMassFractions(qᵗ, zero(qᵗ), zero(qᵗ)) # assuming non-condensed state
+
+    # TODO use microphysics model in the course of determining q
+    q = MoistureMassFractions(qᵗ)
     z = znode(i, j, k, grid, c, c, c)
 
     return MoistStaticEnergyState(e, q, z, pᵣ)
@@ -76,8 +78,8 @@ end
         T = temperature[i, j, k]
     end
 
-    # TODO: fix this assumption of non-condensed state
-    q = MoistureMassFractions(qᵗ, zero(qᵗ), zero(qᵗ))
+    # TODO: fix this assumption of non-condensed state by invoking the microphysics model
+    q = MoistureMassFractions(qᵗ)
     Rᵐ = mixture_gas_constant(q, thermo)
 
     return Rᵐ * T / pᵣ
@@ -270,7 +272,7 @@ $(TYPEDSIGNATURES)
 Update the predictor momentum ``(ρu, ρv, ρw)`` with the non-hydrostatic pressure via
 
 ```math
-(\\rho\\boldsymbol{u})^{n+1} = (\\rho\\boldsymbol{u})^n - \\Delta t \\rho_r \\boldsymbol{\\nabla} \\left( \\alpha_r p_{nh} \\right)
+(\\rho\\boldsymbol{u})^{n+1} = (\\rho\\boldsymbol{u})^n - \\Delta t \\, \\rho_r \\boldsymbol{\\nabla} \\left( \\alpha_r p_{nh} \\right)
 ```
 """
 function make_pressure_correction!(model::AnelasticModel, Δt)
