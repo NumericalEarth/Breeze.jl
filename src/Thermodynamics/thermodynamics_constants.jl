@@ -220,10 +220,7 @@ function ThermodynamicConstants(FT = Oceananigans.defaults.FloatType;
                                   convert(FT, energy_reference_temperature),
                                   convert(FT, triple_point_temperature),
                                   convert(FT, triple_point_pressure),
-                                  dry_air,
-                                  vapor,
-                                  liquid,
-                                  ice)
+                                  dry_air, vapor, liquid, ice)                                     
 end
 
 const TC = ThermodynamicConstants
