@@ -109,7 +109,7 @@ function compute_tendencies!(model::AnelasticModel)
         model.advection,
         model.velocities,
         model.closure,
-        model.diffusivity_fields,
+        model.closure_fields,
         model.momentum,
         model.coriolis,
         model.clock,
@@ -125,7 +125,7 @@ function compute_tendencies!(model::AnelasticModel)
     launch!(arch, grid, :xyz, compute_y_momentum_tendency!, Gρv, grid, v_args)
     launch!(arch, grid, :xyz, compute_z_momentum_tendency!, Gρw, grid, w_args)
 
-    scalar_args = (ρᵣ, model.advection, model.velocities, model.closure, model.diffusivity_fields, model.clock, model_fields)
+    scalar_args = (ρᵣ, model.advection, model.velocities, model.closure, model.closure_fields, model.clock, model_fields)
     Gρe = model.timestepper.Gⁿ.ρe
     ρe = model.energy_density
     e = model.moist_static_energy

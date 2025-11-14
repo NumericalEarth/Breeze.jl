@@ -3,12 +3,12 @@ using ..Thermodynamics: Thermodynamics, ThermodynamicConstants, ReferenceState
 using Oceananigans: AbstractModel, Center, CenterField, Clock, Field
 using Oceananigans: Centered, XFaceField, YFaceField, ZFaceField
 using Oceananigans.Advection: adapt_advection_order
-using Oceananigans.Forcings: regularize_forcing
+using Oceananigans.Forcings: materialize_forcing
 using Oceananigans.BoundaryConditions: FieldBoundaryConditions, regularize_field_boundary_conditions
 using Oceananigans.Grids: ZDirection
 using Oceananigans.Solvers: FourierTridiagonalPoissonSolver
 using Oceananigans.TimeSteppers: TimeStepper
-using Oceananigans.TurbulenceClosures: implicit_diffusion_solver, time_discretization, build_diffusivity_fields
+using Oceananigans.TurbulenceClosures: implicit_diffusion_solver, time_discretization, build_closure_fields
 using Oceananigans.Utils: launch!, prettytime, prettykeys
 
 import Oceananigans: fields, prognostic_fields
@@ -58,7 +58,7 @@ mutable struct AtmosphereModel{Frm, Arc, Tst, Grd, Clk, Thm, Den, Mom, Eng, Mse,
     microphysical_fields :: Cnd
     timestepper :: Tst
     closure :: Cls
-    diffusivity_fields :: Cfs
+    closure_fields :: Cfs
 end
 
 function default_formulation(grid, thermo)
@@ -159,7 +159,7 @@ function AtmosphereModel(grid;
     # May need to use more names in `tracers` for this to work
     closure_names = tuple(:ρe, :ρqᵗ, tracer_names...)
     closure = Oceananigans.Utils.with_tracers(closure_names, closure)
-    diffusivity_fields = build_diffusivity_fields(grid, clock, closure_names, boundary_conditions, closure)
+    closure_fields = build_closure_fields(grid, clock, closure_names, boundary_conditions, closure)
 
     model = AtmosphereModel(arch,
                             grid,
@@ -185,7 +185,7 @@ function AtmosphereModel(grid;
                             microphysical_fields,
                             timestepper,
                             closure,
-                            diffusivity_fields)
+                            closure_fields)
 
     update_state!(model)
 
@@ -248,7 +248,7 @@ function atmosphere_model_forcing(user_forcings::NamedTuple, prognostic_fields, 
 
     materialized = Tuple(
         name in keys(user_forcings) ?
-            regularize_forcing(user_forcings[name], field, name, model_field_names) :
+            materialize_forcing(user_forcings[name], field, name, model_field_names) :
             Returns(zero(eltype(field)))
             for (name, field) in pairs(prognostic_fields)
     )
