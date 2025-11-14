@@ -42,13 +42,6 @@ import ..AtmosphereModels: ∂ⱼ_𝒯₁ⱼ, ∂ⱼ_𝒯₂ⱼ, ∂ⱼ_𝒯₃�
 @inline Jᶜy(i, j, k, grid, ρ, args...) = ℑyᵃᶠᵃ(i, j, k, grid, ρ) * _diffusive_flux_y(i, j, k, grid, args...)
 @inline Jᶜz(i, j, k, grid, ρ, args...) = ℑzᵃᵃᶠ(i, j, k, grid, ρ) * _diffusive_flux_z(i, j, k, grid, args...)
 
-"""
-    ∇_dot_Jᶜ(i, j, k, grid, ρᵣ, closure::AbstractTurbulenceClosure, K, id, c, clock, fields, buoyancy)
-
-Return the discrete divergence of the dynamic scalar flux `J = ρᵣ τ` at cell
-centers, using area-weighted differences divided by cell volume.
-Matches Oceananigans' `∇_dot_qᶜ` signature with the additional `ρᵣ`.
-"""
 @inline function ∇_dot_Jᶜ(i, j, k, grid, ρᵣ, closure::AbstractTurbulenceClosure, closure_fields, clock, fields, buoyancy)
     disc = time_discretization(closure)
     return V⁻¹ᶜᶜᶜ(i, j, k, grid) * (

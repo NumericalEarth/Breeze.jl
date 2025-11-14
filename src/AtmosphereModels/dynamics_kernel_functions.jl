@@ -5,6 +5,16 @@ using Oceananigans.Operators: ∂xᶠᶜᶜ, ∂yᶜᶠᶜ, ∂zᶜᶜᶠ, ℑz�
 @inline ∂ⱼ_𝒯₁ⱼ(i, j, k, grid, args...) = zero(grid)
 @inline ∂ⱼ_𝒯₂ⱼ(i, j, k, grid, args...) = zero(grid)
 @inline ∂ⱼ_𝒯₃ⱼ(i, j, k, grid, args...) = zero(grid)
+
+"""
+    ∇_dot_Jᶜ(i, j, k, grid, density, closure::AbstractTurbulenceClosure, closure_fields,
+             id, c, clock, model_fields, buoyancy)
+
+Return the discrete divergence of the dynamic scalar flux `Jᶜ = ρ jᶜ`,
+where `jᶜ` is the "kinematic scalar flux", using area-weighted differences divided by cell volume.
+Similar to Oceananigans' `∇_dot_qᶜ` signature with the additional density factor `ρ`, where in
+Oceananigans `qᶜ` is the kinematic tracer flux.
+"""
 @inline ∇_dot_Jᶜ(i, j, k, grid, args...) = zero(grid)
 
 #####
