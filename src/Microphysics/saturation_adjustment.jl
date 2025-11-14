@@ -41,14 +41,16 @@ to `equilibrium` between condensates and water vapor, computed by a solver with
 `tolerance` and `maxiter`.
 
 The options for `equilibrium` are:
-* [`WarmPhaseEquilibrium`](@ref) representing an equilibrium between water vapor and liquid water.
 
-* [`MixedPhaseEquilibrium`](@ref) representing a temperature-dependent equilibrium between
-    water vapor, possibly supercooled liquid water, and ice. The equilibrium state is modeled as a linear
-    variation of the equilibrium liquid fraction with temperature, between
-    the freezing temperature (e.g. 273.15 K) below which liquid water is supercooled,
-    and the temperature of homogeneous ice nucleation temperature (e.g. 233.15 K) at which
-    the supercooled liquid fraction vanishes.
+* [`WarmPhaseEquilibrium()`](@ref WarmPhaseEquilibrium) representing an equilibrium between
+  water vapor and liquid water.
+
+* [`MixedPhaseEquilibrium()`](@ref MixedPhaseEquilibrium) representing a temperature-dependent
+  equilibrium between water vapor, possibly supercooled liquid water, and ice. The equilibrium
+  state is modeled as a linear variation of the equilibrium liquid fraction with temperature,
+  between the freezing temperature (e.g. 273.15 K) below which liquid water is supercooled,
+  and the temperature of homogeneous ice nucleation temperature (e.g. 233.15 K) at which
+  the supercooled liquid fraction vanishes.
 """
 function SaturationAdjustment(FT::DataType=Oceananigans.defaults.FloatType;
                               tolerance = 1e-3,
