@@ -25,7 +25,7 @@ using Test
 
     etd = Oceananigans.TurbulenceClosures.ExplicitTimeDiscretization()
     discretizations = (vitd, etd)
-    @testset "Implicit diffusion solver with ScalarDiffusivity [$(FT), $(disc)]" for FT in (Float32, Float64), disc in discretizations
+    @testset "Implicit diffusion solver with ScalarDiffusivity [$(FT), $(typeof(disc))]" for disc in discretizations
         closure = ScalarDiffusivity(disc, ν=1, κ=1)
         model = AtmosphereModel(grid; closure, tracers=:ρc)
         ρe₀ = 3e5
