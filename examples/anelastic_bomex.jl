@@ -20,7 +20,7 @@ Ly = 6400
 Lz = 3000
 
 arch = CPU() # if changing to GPU() add `using CUDA` above
-stop_time = 6hours
+stop_time = 20minutes
 
 grid = RectilinearGrid(arch,
                        size = (Nx, Ny, Nz),
@@ -117,7 +117,7 @@ set!(ρvᵍ, ρᵣ * ρvᵍ)
 
 @inline function Fρu_geostrophic(i, j, k, grid, clock, fields, parameters)
     f = parameters.f
-    v_avg = parameters.v_avg
+    v_avg = parameters.v_avg[i, j, k]
     @inbounds ρvᵍᵢ = parameters.ρvᵍ[1, 1, k]
     ρᵣ = @inbounds parameters.ρᵣ[i, j, k]
     return f * (ρᵣ*v_avg - ρvᵍᵢ)
@@ -125,7 +125,7 @@ end
 
 @inline function Fρv_geostrophic(i, j, k, grid, clock, fields, parameters)
     f = parameters.f
-    u_avg = parameters.u_avg
+    u_avg = parameters.u_avg[i, j, k]
     @inbounds ρuᵍᵢ = parameters.ρuᵍ[1, 1, k]
     ρᵣ = @inbounds parameters.ρᵣ[i, j, k]
     return - f * (ρᵣ*u_avg - ρuᵍᵢ)
@@ -169,7 +169,7 @@ qᵢ(x, y, z) = q_bomex(z) + (z < z_perturb ? qϵ * randn() : 0)
 uᵢ(x, y, z) = u_bomex(z)
 set!(model, θ=θᵢ, qᵗ=qᵢ, u=uᵢ)
 
-simulation = Simulation(model; Δt=1, stop_time)
+simulation = Simulation(model; Δt=2, stop_time)
 conjure_time_step_wizard!(simulation, cfl=0.7)
 
 # Write a callback to compute *_avg_f
@@ -205,7 +205,7 @@ qᵛ⁺_avg = Field(Average(qᵛ⁺, dims=(1, 2)))
 rh_avg = Field(Average(rh, dims=(1, 2)))
 
 # Uncomment to make plots
-using GLMakie
+using CairoMakie
 
 fig = Figure(size=(1200, 800), fontsize=12)
 axT = Axis(fig[1, 1], xlabel="T (ᵒK)", ylabel="z (m)")
@@ -237,10 +237,10 @@ function update_plots!(sim)
     return nothing
 end
 
-# update_plots!(simulation)
-# display(fig)
+update_plots!(simulation)
+display(fig)
 
-#add_callback!(simulation, update_plots!, TimeInterval(20minutes))
+add_callback!(simulation, update_plots!, TimeInterval(20minutes))
 
 function progress(sim)
     compute!(T)
@@ -296,7 +296,7 @@ averages_ow = JLD2Writer(model, averaged_outputs;
 simulation.output_writers[:avg] = averages_ow
 
 @info "Running BOMEX on grid: \n $grid \n and using model: \n $model"
-#run!(simulation)
+run!(simulation)
 
 #=
 using CairoMakie
