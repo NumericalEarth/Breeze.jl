@@ -18,6 +18,7 @@ mkpath(literated_dir)
 
 example_scripts = [
     "thermal_bubble.jl",
+    "prescribed_sst.jl",
 ]
 
 for script_file in example_scripts
@@ -29,6 +30,7 @@ end
 
 example_pages = Any[
     "Thermal bubble" => "literated/thermal_bubble.md",
+    "Prescribed SST" => "literated/prescribed_sst.md",
 ]
 
 makedocs(

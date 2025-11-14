@@ -8,11 +8,12 @@ using Oceananigans.BoundaryConditions: FieldBoundaryConditions, regularize_field
 using Oceananigans.Grids: ZDirection
 using Oceananigans.Solvers: FourierTridiagonalPoissonSolver
 using Oceananigans.TimeSteppers: TimeStepper
-using Oceananigans.TurbulenceClosures: implicit_diffusion_solver, time_discretization
+using Oceananigans.TurbulenceClosures: implicit_diffusion_solver, time_discretization, build_closure_fields
 using Oceananigans.Utils: launch!, prettytime, prettykeys
 
 import Oceananigans: fields, prognostic_fields
 import Oceananigans.Advection: cell_advection_timescale
+import Base: getproperty
 
 materialize_density(formulation, grid) = CenterField(grid)
 
@@ -159,7 +160,7 @@ function AtmosphereModel(grid;
     # May need to use more names in `tracers` for this to work
     closure_names = tuple(:ρe, :ρqᵗ, tracer_names...)
     closure = Oceananigans.Utils.with_tracers(closure_names, closure)
-    closure_fields = Oceananigans.TurbulenceClosures.build_closure_fields(grid, clock, closure_names, boundary_conditions, closure)
+    closure_fields = build_closure_fields(nothing, grid, clock, tracer_names, boundary_conditions, closure)
 
     model = AtmosphereModel(arch,
                             grid,
