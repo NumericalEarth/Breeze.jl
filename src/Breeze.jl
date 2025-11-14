@@ -84,4 +84,7 @@ using .AtmosphereModels
 include("Microphysics/Microphysics.jl")
 using .Microphysics
 
+include("TurbulenceClosures/TurbulenceClosures.jl")
+using .TurbulenceClosures
+
 end # module Breeze
