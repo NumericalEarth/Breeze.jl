@@ -102,7 +102,7 @@ jobs:
           # We only need `Documenter` for publishing the docs, let's not
           # reinstall the world all over again.
           using Pkg
-          Pkg.add(; url="https://github.com/JuliaDocs/Documenter.jl", rev="bcc9f2f18e35f94c0bc52f00dcdb610bcc94e70b")
+          Pkg.add(; name="Documenter", version="1")
       - name: Deploy documentation
         run:
           julia --color=yes docs/deploy.jl
