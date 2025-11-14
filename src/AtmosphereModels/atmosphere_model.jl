@@ -1,13 +1,14 @@
 using ..Thermodynamics: Thermodynamics, ThermodynamicConstants, ReferenceState
 
 using Oceananigans: AbstractModel, Center, CenterField, Clock, Field
-using Oceananigans: WENO, XFaceField, YFaceField, ZFaceField
+using Oceananigans: Centered, XFaceField, YFaceField, ZFaceField
 using Oceananigans.Advection: adapt_advection_order
 using Oceananigans.Forcings: regularize_forcing
 using Oceananigans.BoundaryConditions: FieldBoundaryConditions, regularize_field_boundary_conditions
 using Oceananigans.Grids: ZDirection
 using Oceananigans.Solvers: FourierTridiagonalPoissonSolver
 using Oceananigans.TimeSteppers: TimeStepper
+using Oceananigans.TurbulenceClosures: implicit_diffusion_solver, time_discretization, build_diffusivity_fields
 using Oceananigans.Utils: launch!, prettytime, prettykeys
 
 import Oceananigans: fields, prognostic_fields
@@ -20,10 +21,19 @@ struct DefaultValue end
 tupleit(t::Tuple) = t
 tupleit(t) = tuple(t)
 
+validate_tracers(tracers) = throw(ArgumentError("tracers for AtmosphereModel must be a tuple of symbols"))
+
+function validate_tracers(tracers::Tuple)
+    for name in tracers
+        name isa Symbol || throw(ArgumentError("The names of tracers for AtmosphereModel must be symbols, got $name"))
+    end
+    return tracers
+end
+
 formulation_pressure_solver(formulation, grid) = nothing
 
-mutable struct AtmosphereModel{Frm, Arc, Tst, Grd, Clk, Thm, Den, Mom, Eng, Moi, Mfr,
-                               Tmp, Prs, Ppa, Sol, Vel, Trc, Adv, Cor, Frc, Mic, Cnd, Cls, Dif} <: AbstractModel{Tst, Arc}
+mutable struct AtmosphereModel{Frm, Arc, Tst, Grd, Clk, Thm, Den, Mom, Eng, Mse, Moi, Mfr,
+                               Tmp, Prs, Ppa, Sol, Vel, Trc, Adv, Cor, Frc, Mic, Cnd, Cls, Cfs} <: AbstractModel{Tst, Arc}
     architecture :: Arc
     grid :: Grd
     clock :: Clk
@@ -32,6 +42,7 @@ mutable struct AtmosphereModel{Frm, Arc, Tst, Grd, Clk, Thm, Den, Mom, Eng, Moi,
     density :: Den
     momentum :: Mom
     energy_density :: Eng
+    moist_static_energy :: Mse
     moisture_density :: Moi
     moisture_mass_fraction :: Mfr
     temperature :: Tmp
@@ -47,7 +58,7 @@ mutable struct AtmosphereModel{Frm, Arc, Tst, Grd, Clk, Thm, Den, Mom, Eng, Moi,
     microphysical_fields :: Cnd
     timestepper :: Tst
     closure :: Cls
-    diffusivity_fields :: Dif
+    diffusivity_fields :: Cfs
 end
 
 function default_formulation(grid, thermo)
@@ -74,7 +85,7 @@ AtmosphereModel{CPU, RectilinearGrid}(time = 0 seconds, iteration = 0)
 ├── grid: 8×8×8 RectilinearGrid{Float64, Periodic, Periodic, Bounded} on CPU with 3×3×3 halo
 ├── formulation: AnelasticFormulation(p₀=101325.0, θ₀=288.0)
 ├── timestepper: RungeKutta3TimeStepper
-├── advection scheme: WENO{3, Float64, Float32}(order=5)
+├── advection scheme: Centered(order=2)
 ├── tracers: ()
 ├── coriolis: Nothing
 └── microphysics: Nothing
@@ -94,12 +105,14 @@ function AtmosphereModel(grid;
                          coriolis = nothing,
                          boundary_conditions = NamedTuple(),
                          forcing = NamedTuple(),
-                         advection = WENO(order=5),
+                         advection = Centered(order=2),
+                         closure = nothing,
                          microphysics = nothing, # WarmPhaseSaturationAdjustment(),
                          timestepper = :RungeKutta3)
 
     arch = grid.architecture
     tracers = tupleit(tracers) # supports tracers=:c keyword argument (for example)
+    tracer_names = validate_tracers(tracers)
 
     hydrostatic_pressure_anomaly = CenterField(grid)
     nonhydrostatic_pressure = CenterField(grid)
@@ -113,19 +126,21 @@ function AtmosphereModel(grid;
 
     density = materialize_density(formulation, grid)
     velocities, momentum = materialize_momentum_and_velocities(formulation, grid, boundary_conditions)
-    tracers = NamedTuple(name => CenterField(grid, boundary_conditions=boundary_conditions[name]) for name in tracers)
     microphysical_fields = materialize_microphysical_fields(microphysics, grid, boundary_conditions)
     advection = adapt_advection_order(advection, grid)
+
+    tracers = NamedTuple(name => CenterField(grid, boundary_conditions=boundary_conditions[name]) for name in tracer_names)
 
     if moisture_density isa DefaultValue
         moisture_density = CenterField(grid, boundary_conditions=boundary_conditions.ρqᵗ)
     end
 
     energy_density = CenterField(grid, boundary_conditions=boundary_conditions.ρe)
+    moist_static_energy = CenterField(grid) # e = ρe / ρᵣ (diagnostic per-mass energy)
     moisture_mass_fraction = CenterField(grid, boundary_conditions=boundary_conditions.ρqᵗ)
     temperature = CenterField(grid)
 
-    prognostic_microphysical_fields = NamedTuple(microphysics_fields[name] for name in prognostic_field_names(microphysics))
+    prognostic_microphysical_fields = NamedTuple(microphysical_fields[name] for name in prognostic_field_names(microphysics))
     prognostic_fields = collect_prognostic_fields(formulation,
                                                   density,
                                                   momentum,
@@ -134,14 +149,17 @@ function AtmosphereModel(grid;
                                                   prognostic_microphysical_fields,
                                                   tracers)
 
-    model_fields = merge(prognostic_fields, velocities, (; T=temperature, qᵗ=moisture_mass_fraction))
-    forcing = atmosphere_model_forcing(forcing, prognostic_fields, model_fields)
-    timestepper = TimeStepper(timestepper, grid, prognostic_fields)
+    implicit_solver = implicit_diffusion_solver(time_discretization(closure), grid)
+    timestepper = TimeStepper(timestepper, grid, prognostic_fields; implicit_solver)
     pressure_solver = formulation_pressure_solver(formulation, grid)
 
-    # TODO: support these
-    closure = nothing
-    diffusivity_fields = nothing
+    model_fields = merge(prognostic_fields, velocities, (; T=temperature, qᵗ=moisture_mass_fraction))
+    forcing = atmosphere_model_forcing(forcing, prognostic_fields, model_fields)
+
+    # May need to use more names in `tracers` for this to work
+    closure_names = tuple(:ρe, :ρqᵗ, tracer_names...)
+    closure = Oceananigans.Utils.with_tracers(closure_names, closure)
+    diffusivity_fields = build_diffusivity_fields(grid, clock, closure_names, boundary_conditions, closure)
 
     model = AtmosphereModel(arch,
                             grid,
@@ -151,6 +169,7 @@ function AtmosphereModel(grid;
                             density,
                             momentum,
                             energy_density,
+                            moist_static_energy,
                             moisture_density,
                             moisture_mass_fraction,
                             temperature,
