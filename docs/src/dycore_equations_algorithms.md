@@ -7,12 +7,12 @@ We then introduce the moist static energy equation and outline the time-discreti
 
 ## Compressible momentum equations
 
-Let ``ρ`` denote density, ``\boldsymbol{u}`` velocity, ``p`` pressure, ``\boldsymbol{f}`` non-pressure body forces (e.g., Coriolis), and ``\boldsymbol{\tau}`` subgrid/viscous stresses. With gravity ``- g \hat{\boldsymbol{z}}``, the inviscid compressible equations in flux form are
+Let ``ρ`` denote density, ``\boldsymbol{u}`` velocity, ``p`` pressure, ``\boldsymbol{f}`` non-pressure body forces (e.g., Coriolis), and ``\boldsymbol{\tau}`` the kinematic (per-mass) subgrid/viscous stresses. We denote the corresponding dynamic (per-volume) stresses by ``\boldsymbol{\mathcal{T}} = ρ \, \boldsymbol{\tau}``. With gravity ``- g \hat{\boldsymbol{z}}``, the inviscid compressible equations in flux form are
 
 ```math
 \begin{aligned}
 &\text{Mass:} && \partial_t ρ + \boldsymbol{\nabla \cdot}\, (ρ \boldsymbol{u}) = 0 ,\\
-&\text{Momentum:} && \partial_t(ρ \boldsymbol{u}) + \boldsymbol{\nabla \cdot}\, (ρ \boldsymbol{u} \boldsymbol{u}) + \boldsymbol{\nabla} p = - ρ g \hat{\boldsymbol{z}} + ρ \boldsymbol{f} + \boldsymbol{\nabla \cdot}\, \boldsymbol{\tau} .
+&\text{Momentum:} && \partial_t(ρ \boldsymbol{u}) + \boldsymbol{\nabla \cdot}\, (ρ \boldsymbol{u} \boldsymbol{u}) + \boldsymbol{\nabla} p = - ρ g \hat{\boldsymbol{z}} + ρ \boldsymbol{f} + \boldsymbol{\nabla \cdot}\, \boldsymbol{\mathcal{T}} .
 \end{aligned}
 ```
 
@@ -63,7 +63,7 @@ With ``ρᵣ(z)`` fixed by the reference state, the prognostic equations advance
 - Momentum:
 
 ```math
-\partial_t(ρᵣ \boldsymbol{u}) + \boldsymbol{\nabla \cdot}\, (ρᵣ \boldsymbol{u} \boldsymbol{u}) = - ρᵣ \boldsymbol{\nabla} \phi + ρᵣ \, b \hat{\boldsymbol{z}} + ρᵣ \boldsymbol{f} + \boldsymbol{\nabla \cdot}\, \boldsymbol{\tau} ,
+\partial_t(ρᵣ \boldsymbol{u}) + \boldsymbol{\nabla \cdot}\, (ρᵣ \boldsymbol{u} \boldsymbol{u}) = - ρᵣ \boldsymbol{\nabla} \phi + ρᵣ \, b \hat{\boldsymbol{z}} + ρᵣ \boldsymbol{f} + \boldsymbol{\nabla \cdot}\, \boldsymbol{\mathcal{T}} ,
 ```
 
 where ``\phi`` is a nonhydrostatic pressure correction potential defined by the projection step (see below). Pressure is decomposed as ``p = pᵣ(z) + p_h'(x, y, z, t) + p_n``, where ``p_h'`` is a hydrostatic anomaly (obeying ``\partial_z p_h' = -ρᵣ b``) and ``p_n`` is the nonhydrostatic component responsible for enforcing the anelastic constraint. In the discrete formulation used here, ``\phi`` coincides with the pressure correction variable.
@@ -121,5 +121,9 @@ In Breeze this projection is implemented as a Fourier–tridiagonal solve in the
 - ``e = c^{pd} \, θ``: Energy variable used for moist static energy in the conservative equation.
 - ``q^t``: Total specific humidity (vapor + condensates).
 - ``\phi``: Nonhydrostatic pressure correction potential used by the projection.
+
+Diffusion and turbulence closure notation:
+- ``\boldsymbol{\tau}``: Kinematic (per-mass) subgrid/viscous stress tensor returned by Oceananigans closures.
+- ``\boldsymbol{\mathcal{T}} = ρᵣ \, \boldsymbol{\tau}``: Dynamic (per-volume) stress used in the anelastic momentum equation; Breeze computes flux divergences as ``\boldsymbol{\nabla\cdot}\, \boldsymbol{\mathcal{T}}``.
 
 See [Thermodynamics](@ref Thermodynamics-section) section for definitions of ``R^m(q)``, ``c^{pm}(q)``, and ``Π``.
