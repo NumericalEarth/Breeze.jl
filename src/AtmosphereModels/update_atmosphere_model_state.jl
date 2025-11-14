@@ -148,7 +148,7 @@ function compute_tendencies!(model::AnelasticModel)
         c = getproperty(model.tracers, name)
         Gc = getproperty(model.timestepper.Gⁿ, name)
         Fc = getproperty(model.forcing, name)
-        c_args = tuple(c, name, id, Fc, model.microphysics, scalar_args...)
+        c_args = tuple(c, name, id, Fc, model.microphysics, model.microphysical_fields, thermo, scalar_args...)
         launch!(arch, grid, :xyz, compute_scalar_tendency!, Gc, grid, args)
     end
 

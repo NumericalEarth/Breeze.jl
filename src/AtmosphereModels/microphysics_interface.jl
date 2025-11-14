@@ -80,3 +80,10 @@ and then return the temperature associated with that state.
     𝒰₁ = compute_thermodynamic_state(𝒰₀, microphysics, thermo)
     return temperature(𝒰₁, thermo)
 end
+
+"""
+$(TYPEDSIGNATURES)
+
+Return the tendency of the microphysical field `name` associated with `microphysics` and `thermo`dynamic constants.
+"""
+@inline microphysical_tendency(i, j, k, grid, microphysics::Nothing, name, ρ, μ, thermo) = zero(grid)

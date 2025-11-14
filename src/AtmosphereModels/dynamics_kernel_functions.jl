@@ -102,6 +102,8 @@ end
                                  name,
                                  scalar_forcing,
                                  microphysics,
+                                 microphysical_fields,
+                                 thermo,
                                  reference_density,
                                  advection,
                                  velocities,
@@ -113,8 +115,9 @@ end
     Uᵖ = microphysical_velocities(microphysics, name)
     Uᵗ = sum_of_velocities(velocities, Uᵖ)
 
-    return ( - div_Uc(i, j, k, grid, advection, velocities, scalar)
+    return ( - div_Uc(i, j, k, grid, advection, Uᵗ, scalar)
              - ∇_dot_Jᶜ(i, j, k, grid, reference_density, closure, closure_fields, closure_fields, id, scalar, clock, model_fields, buoyancy)
+             + microphysical_tendency(i, j, k, grid, microphysics, name, reference_density, microphysical_fields, thermo)
              + scalar_forcing(i, j, k, grid, clock, model_fields))
 end
 
@@ -144,6 +147,6 @@ end
     return ( - div_Uc(i, j, k, grid, advection, velocities, energy_density)
              + buoyancy_flux
              - ∇_dot_Jᶜ(i, j, k, grid, reference_density, closure, closure_fields, id, energy, clock, model_fields, nothing)
-             # + microphysical_energy_tendency(i, j, k, grid, formulation, microphysics, microphysical_fields)
+             + microphysical_tendency(i, j, k, grid, microphysics, Val(:ρe), reference_density, microphysical_fields, thermo)
              + ρe_forcing(i, j, k, grid, clock, model_fields))
 end
