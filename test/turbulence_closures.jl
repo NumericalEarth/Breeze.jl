@@ -1,5 +1,4 @@
 using Breeze
-using GPUArraysCore: @allowscalar
 using Oceananigans
 using Test
 
@@ -34,13 +33,11 @@ using Test
         time_step!(model, 1)
 
         ϵ = sqrt(eps(FT))
-        @allowscalar begin
-            @test model.momentum.ρu ≈ XFaceField(grid)
-            @test model.momentum.ρv ≈ YFaceField(grid)
-            @test model.momentum.ρw ≈ ZFaceField(grid) atol=ϵ # use atol bc fields are close to 0
-            @test model.moisture_density ≈ CenterField(grid)
-            @test model.tracers.ρc ≈ CenterField(grid)
-            @test model.energy_density ≈ ρe₀
-        end
+        @test model.momentum.ρu ≈ XFaceField(grid)
+        @test model.momentum.ρv ≈ YFaceField(grid)
+        @test model.momentum.ρw ≈ ZFaceField(grid) atol=ϵ # use atol bc fields are close to 0
+        @test model.moisture_density ≈ CenterField(grid)
+        @test model.tracers.ρc ≈ CenterField(grid)
+        @test model.energy_density ≈ ρe₀
     end
 end

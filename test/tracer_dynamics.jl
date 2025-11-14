@@ -1,5 +1,4 @@
 using Breeze
-using GPUArraysCore: @allowscalar
 using Oceananigans
 using Test
 
