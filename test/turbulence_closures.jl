@@ -1,5 +1,4 @@
 using Breeze
-using GPUArraysCore: @allowscalar
 using Oceananigans
 using Test
 
@@ -25,7 +24,7 @@ using Test
 
     etd = Oceananigans.TurbulenceClosures.ExplicitTimeDiscretization()
     discretizations = (vitd, etd)
-    @testset "Implicit diffusion solver with ScalarDiffusivity [$(FT), $(disc)]" for FT in (Float32, Float64), disc in discretizations
+    @testset "Implicit diffusion solver with ScalarDiffusivity [$(FT), $(typeof(disc))]" for disc in discretizations
         closure = ScalarDiffusivity(disc, ν=1, κ=1)
         model = AtmosphereModel(grid; closure, tracers=:ρc)
         ρe₀ = 3e5
@@ -34,13 +33,11 @@ using Test
         time_step!(model, 1)
 
         ϵ = sqrt(eps(FT))
-        @allowscalar begin
-            @test model.momentum.ρu ≈ XFaceField(grid) atol=ϵ
-            @test model.momentum.ρv ≈ YFaceField(grid) atol=ϵ
-            @test model.momentum.ρw ≈ ZFaceField(grid) atol=100ϵ # large bc of non-zero buoyancy
-            @test model.moisture_density ≈ CenterField(grid) atol=ϵ
-            @test model.tracers.ρc ≈ CenterField(grid) atol=ϵ
-            @test model.energy_density ≈ ρe₀ rtol=10ϵ
-        end
+        @test model.momentum.ρu ≈ XFaceField(grid)
+        @test model.momentum.ρv ≈ YFaceField(grid)
+        @test model.momentum.ρw ≈ ZFaceField(grid) atol=ϵ # use atol bc fields are close to 0
+        @test model.moisture_density ≈ CenterField(grid)
+        @test model.tracers.ρc ≈ CenterField(grid)
+        @test model.energy_density ≈ ρe₀
     end
 end

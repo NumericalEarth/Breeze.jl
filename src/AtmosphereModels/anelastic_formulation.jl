@@ -11,7 +11,7 @@ using Oceananigans: Oceananigans
 using Oceananigans.Architectures: architecture
 using Oceananigans.Grids: inactive_cell, prettysummary
 using Oceananigans.Operators: Δzᵃᵃᶜ, Δzᵃᵃᶠ, divᶜᶜᶜ, Δzᶜᶜᶜ
-using Oceananigans.Solvers: solve!
+using Oceananigans.Solvers: solve!, AbstractHomogeneousNeumannFormulation
 
 using KernelAbstractions: @kernel, @index
 using Adapt: Adapt, adapt
@@ -138,7 +138,7 @@ end
 ##### Anelastic pressure solver utilities
 #####
 
-struct AnelasticTridiagonalSolverFormulation{R}
+struct AnelasticTridiagonalSolverFormulation{R} <: AbstractHomogeneousNeumannFormulation
     reference_density :: R
 end
 
