@@ -46,8 +46,3 @@ end
 @inline function compute_moisture_fractions(i, j, k, grid, bμp::NPBM, ρ, qᵗ, μ)
     return compute_moisture_fractions(i, j, k, grid, bμp.nucleation, ρ, qᵗ, μ)
 end
-
-
-# Stub functions defined in extensions
-function OneMomentCloudMoisture end
-function TwoClassPrecipitation end

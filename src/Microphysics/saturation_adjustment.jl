@@ -26,6 +26,8 @@ struct SaturationAdjustment{E, FT}
     equilibrium :: E
 end
 
+const SA = SaturationAdjustment
+
 """
     $(TYPEDSIGNATURES)
 
@@ -161,6 +163,8 @@ end
     return MoistureMassFractions(qᵛ, qˡ, qⁱ)
 end
 
+@inline microphysical_tendency(i, j, k, grid, ::SA, args...) = zero(grid)
+
 #####
 ##### Saturation adjustment utilities
 #####
@@ -194,7 +198,6 @@ end
 end
 
 const ATC = AbstractThermodynamicState
-const SA = SaturationAdjustment
 
 """
 $(TYPEDSIGNATURES)

@@ -20,7 +20,8 @@ export
     MixedPhaseEquilibrium,
     WarmPhaseEquilibrium,
     BulkMicrophysics,
-    FourCategories
+    ZeroMomentCloudMicrophysics,
+    OneMomentCloudMicrophysics
 
 using Oceananigans: Oceananigans, @at, AnisotropicMinimumDissipation, Average,
                     AveragedTimeInterval, BackgroundField, BetaPlane, Bounded,

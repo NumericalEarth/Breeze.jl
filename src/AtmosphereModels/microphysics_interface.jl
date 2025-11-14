@@ -85,5 +85,7 @@ end
 $(TYPEDSIGNATURES)
 
 Return the tendency of the microphysical field `name` associated with `microphysics` and `thermo`dynamic constants.
+
+TODO: add the function signature when it is stable
 """
-@inline microphysical_tendency(i, j, k, grid, microphysics::Nothing, name, ρ, μ, thermo) = zero(grid)
+@inline microphysical_tendency(i, j, k, grid, microphysics::Nothing, args...) = zero(grid)

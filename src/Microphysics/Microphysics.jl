@@ -5,7 +5,9 @@ export
     MixedPhaseEquilibrium,
     WarmPhaseEquilibrium,
     BulkMicrophysics,
-    FourCategories
+    FourCategories,
+    ZeroMomentCloudMicrophysics,
+    OneMomentCloudMicrophysics
 
 import ..AtmosphereModels:
     compute_thermodynamic_state,
@@ -13,7 +15,8 @@ import ..AtmosphereModels:
     prognostic_field_names,
     materialize_microphysical_fields,
     microphysical_velocities,
-    compute_moisture_fractions
+    compute_moisture_fractions,
+    microphysical_tendency
 
 include("saturation_adjustment.jl")
 include("bulk_microphysics.jl")

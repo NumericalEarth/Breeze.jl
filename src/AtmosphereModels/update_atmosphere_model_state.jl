@@ -128,8 +128,10 @@ function compute_tendencies!(model::AnelasticModel)
     launch!(arch, grid, :xyz, compute_z_momentum_tendency!, Gρw, grid, w_args)
 
     scalar_args = (
+        model.formulation,
         model.thermodynamics,
-        model.formulation.reference_state.density,
+        model.energy_density,
+        model.moisture_density,
         model.advection,
         model.velocities,
         model.microphysics,
@@ -140,12 +142,10 @@ function compute_tendencies!(model::AnelasticModel)
         model_fields)
 
     ρe_args = (
-        model.energy_density,
         Val(1),
         model.moist_static_energy,
         model.forcing.ρe,
         scalar_args...,
-        model.formulation,
         model.temperature,
         model.moisture_mass_fraction)
 

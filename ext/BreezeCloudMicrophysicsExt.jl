@@ -1,12 +1,3 @@
-"""
-Extension module for integrating CloudMicrophysics.jl schemes with Breeze.jl.
-
-This extension provides integration between CloudMicrophysics.jl microphysics schemes
-and Breeze.jl's microphysics interface, allowing CloudMicrophysics schemes to be used
-with AtmosphereModel.
-
-The extension is automatically loaded when CloudMicrophysics is available in the environment.
-"""
 module BreezeCloudMicrophysicsExt
 
 using CloudMicrophysics
@@ -30,12 +21,24 @@ using Breeze.Microphysics: BulkMicrophysics, center_field_tuple
 using Breeze
 
 using Breeze.AtmosphereModels
-using Breeze.Thermodynamics: AbstractThermodynamicState, MoistureMassFractions
+
+using Breeze.Thermodynamics:
+    AbstractThermodynamicState,
+    MoistureMassFractions,
+    saturation_specific_humidity,
+    temperature,
+    density
+
 using Breeze.Microphysics:
     center_field_tuple,
+    equilibrated_surface,
     BulkMicrophysics,
+    FourCategories,
     WarmPhaseSaturationAdjustment,
     MixedPhaseSaturationAdjustment
+
+using Oceananigans: Oceananigans
+using DocStringExtensions: TYPEDSIGNATURES
 
 import Breeze.AtmosphereModels:
     compute_thermodynamic_state,
@@ -49,10 +52,9 @@ import Breeze.Thermodynamics:
     with_moisture,
     MoistureMassFractions
 
-import Breeze.Microphysics: FourCategories
-
-using Oceananigans: Oceananigans
-using DocStringExtensions: TYPEDSIGNATURES
+import Breeze.Microphysics:
+    microphysical_tendency,
+    microphysical_velocities
 
 #####
 ##### Zero-moment bulk microphysics (CloudMicrophysics 0M)
@@ -67,34 +69,72 @@ The 0M scheme instantly removes precipitable condensate above a threshold.
 Interface is identical to non-precipitating microphysics except that
 `compute_thermodynamic_state` calls CloudMicrophysics `remove_precipitation` first.
 """
-const ZeroMomentBulkMicrophysics = BulkMicrophysics{<:Any, <:Parameters0M}
-const ZMBM = ZeroMomentBulkMicrophysics
+const ZeroMomentCloudMicrophysics = BulkMicrophysics{<:Any, <:Parameters0M}
+const ZMCM = ZeroMomentCloudMicrophysics
 const ATC = AbstractThermodynamicState
 
-prognostic_field_names(::ZMBM) = tuple()
-materialize_microphysical_fields(bμp::ZMBM, grid, bcs) = materialize_microphysical_fields(bμp.clouds, grid, bcs)
-@inline update_microphysical_fields!(μ, bμp::ZMBM, i, j, k, grid, density, 𝒰, thermo) = update_microphysical_fields!(μ, bμp.clouds, i, j, k, grid, density, 𝒰, thermo)
-@inline compute_moisture_fractions(i, j, k, grid, bμp::ZMBM, ρ, qᵗ, μ) = compute_moisture_fractions(i, j, k, grid, bμp.nucleation, ρ, qᵗ, μ)
-@inline compute_thermodynamic_state(𝒰₀::ATC, bμp::ZMBM, thermo) = compute_thermodynamic_state(𝒰₀, bμp.clouds, thermo)
+prognostic_field_names(::ZMCM) = tuple()
+materialize_microphysical_fields(bμp::ZMCM, grid, bcs) = materialize_microphysical_fields(bμp.nucleation, grid, bcs)
+@inline update_microphysical_fields!(μ, bμp::ZMCM, i, j, k, grid, density, 𝒰, thermo) = update_microphysical_fields!(μ, bμp.nucleation, i, j, k, grid, density, 𝒰, thermo)
+@inline compute_moisture_fractions(i, j, k, grid, bμp::ZMCM, ρ, qᵗ, μ) = compute_moisture_fractions(i, j, k, grid, bμp.nucleation, ρ, qᵗ, μ)
+@inline compute_thermodynamic_state(𝒰₀::ATC, bμp::ZMCM, thermo) = compute_thermodynamic_state(𝒰₀, bμp.nucleation, thermo)
+@inline microphysical_tendency(i, j, k, grid, bμp::ZMCM, args...) = zero(grid)
+@inline microphysical_velocities(bμp::ZMCM, name) = nothing
+
+@inline @inbounds function microphysical_tendency(i, j, k, grid, bμp::ZMCM, ::Val{:ρqᵗ}, μ, p, T, q, thermo)
+    pᵣ = 𝒰.reference_pressure[i, j, k]
+    T = temperature(𝒰, thermo)
+    surface = equilibrated_surface(bμp.nucleation.equilibrium, T)
+    q = 𝒰.moisture_mass_fractions
+    ρ = density(pᵣ, T, q, thermo)
+    qᵛ⁺ = saturation_specific_humidity(T, ρ, thermo, surface)
+    qˡ = μ.qˡ[i, j, k]
+    qⁱ = μ.qⁱ[i, j, k]
+    ρᵣ = 𝒰.reference_density
+    return ρᵣ * remove_precipitation(bμp.categories, qˡ, qⁱ, qᵛ⁺)
+end
     
+"""
+    ZeroMomentCloudMicrophysics(FT::DataType = Oceananigans.defaults.FloatType,
+                                categories = Parameters0M(FT))
+
+Return a `ZeroMomentCloudMicrophysics` microphysics scheme with zero-moment `categories`
+(in other words, no categories + instant precipitation removal).
+"""
+function ZeroMomentCloudMicrophysics(FT::DataType = Oceananigans.defaults.FloatType;
+                                     categories = Parameters0M(FT))
+    return BulkMicrophysics(SaturationAdjustment(FT), categories)
+end
+
 #####
 ##### One-moment bulk microphysics (CloudMicrophysics 1M)
 #####
 
-function FourCategories(FT::DataType = Oceananigans.defaults.FloatType;
-                        cloud_liquid = CloudLiquid(FT),
-                        cloud_ice = CloudIce(FT),
-                        rain = Rain(FT),
-                        snow = Snow(FT),
-                        collisions = CollisionEff(FT))
+function one_moment_cloud_microphysics_categories(
+    FT::DataType = Oceananigans.defaults.FloatType;
+    cloud_liquid = CloudLiquid(FT),
+    cloud_ice = CloudIce(FT),
+    rain = Rain(FT),
+    snow = Snow(FT),
+    collisions = CollisionEff(FT))
 
     return FourCategories(cloud_liquid, cloud_ice, rain, snow, collisions)
 end
 
 const CM1MCategories = FourCategories{<:CloudLiquid, <:CloudIce, <:Rain, <:Snow, <:CollisionEff}
-const OneMomentBulkMicrophysics = BulkMicrophysics{<:Any, <:CM1MCategories}
+const OneMomentCloudMicrophysics = BulkMicrophysics{<:Any, <:CM1MCategories}
 const WP1M = BulkMicrophysics{<:WarmPhaseSaturationAdjustment, <:CM1MCategories}
 const MP1M = BulkMicrophysics{<:MixedPhaseSaturationAdjustment, <:CM1MCategories}
+
+"""
+$(TYPEDSIGNATURES)
+
+Return a `OneMomentCloudMicrophysics` microphysics scheme with four `categories`.
+"""
+function OneMomentCloudMicrophysics(FT::DataType = Oceananigans.defaults.FloatType,
+                                    categories = one_moment_cloud_microphysics_categories(FT))
+    return BulkMicrophysics(SaturationAdjustment(FT), categories)
+end
 
 prognostic_field_names(::WP1M) = tuple(:ρqʳ)
 prognostic_field_names(::MP1M) = (:ρqʳ, :ρqˢ)
@@ -166,9 +206,8 @@ Delegates to clouds scheme (saturation adjustment) for vapor↔cloud conversion.
 CloudMicrophysics 1M handles cloud↔precipitation processes via tendencies
 computed in `update_microphysical_fields!`.
 """
-@inline function compute_thermodynamic_state(𝒰₀::AbstractThermodynamicState, bμp::OneMomentBulkMicrophysics, thermo)
-    return compute_thermodynamic_state(𝒰₀, bμp.clouds, thermo)
-end
+@inline compute_thermodynamic_state(𝒰₀::AbstractThermodynamicState, bμp::OneMomentCloudMicrophysics, thermo) =
+    compute_thermodynamic_state(𝒰₀, bμp.clouds, thermo)
 
 #####
 ##### show methods
