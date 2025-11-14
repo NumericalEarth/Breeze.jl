@@ -67,7 +67,7 @@ function default_formulation(grid, thermo)
 end
 
 """
-    $(TYPEDSIGNATURES)
+$(TYPEDSIGNATURES)
 
 Return an AtmosphereModel that uses the anelastic approximation following
 [Pauluis2008](@citet).

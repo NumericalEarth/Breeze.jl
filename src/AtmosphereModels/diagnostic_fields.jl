@@ -33,7 +33,7 @@ const SaturationSpecificHumidityOperation = KernelFunctionOperation{C, C, C, <:A
 const SaturationSpecificHumidityField = Field{C, C, C, <:SaturationSpecificHumidityOperation}
 
 """
-    $(TYPEDSIGNATURES)
+$(TYPEDSIGNATURES)
 
 Return a field for the saturation specific humidity.
 """

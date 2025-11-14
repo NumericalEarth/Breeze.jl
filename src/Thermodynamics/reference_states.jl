@@ -38,7 +38,7 @@ Base.show(io::IO, ref::ReferenceState) = print(io, summary(ref))
 end
 
 """
-    $(TYPEDSIGNATURES)
+$(TYPEDSIGNATURES)
 
 Compute the reference pressure at height `z` that associated with the reference pressure and
 potential temperature. The reference pressure is defined as the pressure of dry air at the
@@ -52,7 +52,7 @@ reference pressure and temperature.
 end
 
 """
-    $(TYPEDSIGNATURES)
+$(TYPEDSIGNATURES)
 
 Compute the reference density at height `z` that associated with the reference pressure and
 potential temperature. The reference density is defined as the density of dry air at the
@@ -67,7 +67,7 @@ reference pressure and temperature.
 end
 
 """
-    $(TYPEDSIGNATURES)
+$(TYPEDSIGNATURES)
 
 Return a `ReferenceState` on `grid`, with [`ThermodynamicConstants`](@ref) `thermo`.
 

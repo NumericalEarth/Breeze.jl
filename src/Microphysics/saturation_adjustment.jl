@@ -34,7 +34,7 @@ struct SaturationAdjustment{E, FT}
 end
 
 """
-    $(TYPEDSIGNATURES)
+$(TYPEDSIGNATURES)
 
 Return `SaturationAdjustment` microphysics representing an instantaneous adjustment
 to `equilibrium` between condensates and water vapor, computed by a solver with
@@ -66,7 +66,7 @@ end
 #####
 
 """
-    $(TYPEDSIGNATURES)
+$(TYPEDSIGNATURES)
 
 Return `WarmPhaseEquilibrium` representing an equilibrium between water vapor and liquid water.
 """
@@ -89,7 +89,7 @@ struct MixedPhaseEquilibrium{FT} <: AbstractEquilibrium
 end
 
 """
-    $(TYPEDSIGNATURES)
+$(TYPEDSIGNATURES)
 
 Return `MixedPhaseEquilibrium` representing a temperature-dependent equilibrium between
 water vapor, possibly supercooled liquid water, and ice.
@@ -202,7 +202,7 @@ end
 end
 
 """
-    $(TYPEDSIGNATURES)
+$(TYPEDSIGNATURES)
 
 Return the saturation-adjusted thermodynamic state using a secant iteration.
 """

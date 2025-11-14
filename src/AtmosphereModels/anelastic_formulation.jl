@@ -24,7 +24,7 @@ import Oceananigans.TimeSteppers: compute_pressure_correction!, make_pressure_co
 #####
 
 """
-    $(TYPEDSIGNATURES)
+$(TYPEDSIGNATURES)
 
 `AnelasticFormulation` is a dynamical formulation wherein the density and pressure are
 small perturbations from a dry, hydrostatic, adiabatic `reference_state`.
@@ -267,7 +267,7 @@ end
 end
 
 """
-    $(TYPEDSIGNATURES)
+$(TYPEDSIGNATURES)
 
 Update the predictor momentum ``(ρu, ρv, ρw)`` with the non-hydrostatic pressure via
 

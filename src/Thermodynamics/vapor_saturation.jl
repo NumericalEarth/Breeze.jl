@@ -1,5 +1,5 @@
 """
-    $(TYPEDSIGNATURES)
+$(TYPEDSIGNATURES)
 
 Compute the [saturation vapor pressure](https://en.wikipedia.org/wiki/Vapor_pressure)
 ``pᵛ⁺`` over a surface labeled ``β`` (for example, a planar liquid surface, or curved ice surface)
@@ -78,7 +78,7 @@ struct PlanarLiquidSurface end
 struct PlanarIceSurface end
 
 """
-    $(TYPEDSIGNATURES)
+$(TYPEDSIGNATURES)
 
 Return `PlanarMixedPhaseSurface` for computing the saturation vapor pressure over
 a surface composed of a mixture of liquid and ice, with a given `liquid_fraction`.
@@ -107,7 +107,7 @@ end
 end
 
 """
-    $(TYPEDSIGNATURES)
+$(TYPEDSIGNATURES)
 
 Compute the saturation specific humidity for a gas at temperature `T`, total
 density `ρ`, `thermo`dynamics, and over `surface` via:

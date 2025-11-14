@@ -65,7 +65,7 @@ Adapt.adapt_structure(to, pt::CondensedPhase) =
                    adapt(to, pt.heat_capacity))
 
 """
-    $(TYPEDSIGNATURES)
+$(TYPEDSIGNATURES)
 
 Returns `CondensedPhase` with specified parameters converted to `FT`.
 
@@ -145,7 +145,7 @@ function Adapt.adapt_structure(to, thermo::ThermodynamicConstants)
 end
 
 """
-    $(TYPEDSIGNATURES)
+$(TYPEDSIGNATURES)
 
 Return `ThermodynamicConstants` with parameters that represent gaseous mixture of dry "air"
 and vapor, as well as condensed liquid and ice phases.
@@ -232,7 +232,7 @@ end
 @inline dry_air_mass_fraction(q::MMF) = 1 - total_moisture_mass_fraction(q)
 
 """
-    $(TYPEDSIGNATURES)
+$(TYPEDSIGNATURES)
 
 Return the gas constant of moist air mixture [in J/(kg K)] given the specific humidity
 `q` and thermodynamic parameters `thermo`.
@@ -263,7 +263,7 @@ where:
 end
 
 """
-    $(TYPEDSIGNATURES)
+$(TYPEDSIGNATURES)
 
 Compute the heat capacity of a mixture of dry air, vapor, liquid, and ice, where
 the mass fractions of vapor, liquid, and ice are given by `q`.

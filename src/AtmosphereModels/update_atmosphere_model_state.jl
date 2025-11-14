@@ -181,7 +181,7 @@ end
 end
 
 """
-    $(TYPEDSIGNATURES)
+$(TYPEDSIGNATURES)
 
 Apply boundary conditions by adding flux divergences to the right-hand-side.
 """

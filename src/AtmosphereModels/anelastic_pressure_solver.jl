@@ -69,7 +69,7 @@ infer_launch_configuration(::ZDirection) = :xy
 extent(grid) = (grid.Lx, grid.Ly, grid.Lz)
 
 """
-    $(TYPEDSIGNATURES)
+$(TYPEDSIGNATURES)
 
 Construct a `FourierTridiagonalPoissonSolver` on `grid` with `tridiagonal_direction` either
 `XDirection()`, `YDirection()`, or `ZDirection()`. By default, the `tridiagonal_direction` will
@@ -164,7 +164,7 @@ function solve!(x, solver::FourierTridiagonalPoissonSolver, b=nothing)
 end
 
 """
-    $(TYPEDSIGNATURES)
+$(TYPEDSIGNATURES)
 
 Sets the source term in the discrete Poisson equation `solver` to `source_term` by
 multiplying it by the vertical grid spacing at cell centers in the stretched direction.
