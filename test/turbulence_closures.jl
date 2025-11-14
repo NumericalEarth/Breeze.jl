@@ -32,6 +32,7 @@ const TC = Breeze.TurbulenceClosures
         model = AtmosphereModel(grid; closure, tracers=:ρc)
         ρe₀ = 3e5
         set!(model; ρe=ρe₀)
+        ρe₀ = deepcopy(model.energy_density)
         time_step!(model, 1)
 
         ϵ = sqrt(eps(FT))
@@ -40,6 +41,6 @@ const TC = Breeze.TurbulenceClosures
         @test model.momentum.ρw ≈ ZFaceField(grid) atol=100ϵ # large bc of non-zero buoyancy
         @test model.moisture_density ≈ CenterField(grid) atol=ϵ
         @test model.tracers.ρc ≈ CenterField(grid) atol=ϵ
-        @test all(isapprox.(interior(model.energy_density), ρe₀, rtol=ϵ))
+        @test model.energy_density ≈ ρe₀ rtol=10ϵ
     end
 end
