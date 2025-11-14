@@ -1,6 +1,7 @@
 module TurbulenceClosures
 
-using Oceananigans
+using Oceananigans: Oceananigans
+
 using Oceananigans.Operators:
     # Face-centered difference operators with area metrics
     δxᶠᵃᵃ, δxᶜᵃᵃ, δyᵃᶜᵃ, δyᵃᶠᵃ, δzᵃᵃᶜ, δzᵃᵃᶠ,

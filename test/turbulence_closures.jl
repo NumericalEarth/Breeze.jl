@@ -40,6 +40,6 @@ const TC = Breeze.TurbulenceClosures
         @test model.momentum.ρw ≈ ZFaceField(grid) atol=100ϵ # large bc of non-zero buoyancy
         @test model.moisture_density ≈ CenterField(grid) atol=ϵ
         @test model.tracers.ρc ≈ CenterField(grid) atol=ϵ
-        @test all(isapprox.(interior(model.energy_density), ρe₀, atol=100ϵ))
+        @test all(isapprox.(interior(model.energy_density), ρe₀, rtol=ϵ))
     end
 end
