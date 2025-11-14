@@ -22,7 +22,7 @@ using Test
             ρe₁ = deepcopy(model.energy_density)
 
             set!(model; ρe = ρeᵢ)
-            @test @allowscalar model.energy_density ≈ ρe₁
+            @test model.energy_density ≈ ρe₁
         end
     end
 end
@@ -44,7 +44,7 @@ end
     set!(model; θ=θᵢ)
 
     θ_model = Breeze.AtmosphereModels.PotentialTemperatureField(model)
-    @test @allowscalar θ_model ≈ θᵢ
+    @test θ_model ≈ θᵢ
 end
 
 @testset "Saturation and PotentialTemperatureField (WarmPhase) [$(FT)]" for FT in (Float32, Float64)

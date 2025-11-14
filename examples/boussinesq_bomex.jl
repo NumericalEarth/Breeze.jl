@@ -37,7 +37,7 @@ grid = RectilinearGrid(arch,
 
 FT = eltype(grid)
 θ_bomex = AtmosphericProfilesLibrary.Bomex_θ_liq_ice(FT)
-q_bomex = AtmosphericProfilesLibrary.Bomex_q_tot(FT)
+qᵗ_bomex = AtmosphericProfilesLibrary.Bomex_q_tot(FT)
 u_bomex = AtmosphericProfilesLibrary.Bomex_u(FT)
 
 p₀ = 101500 # Pa
@@ -48,10 +48,10 @@ buoyancy = Breeze.MoistAirBuoyancy(grid, base_pressure=p₀, reference_potential
 FT = eltype(grid)
 microphysics = CloudMicrophysics.Parameters.Parameters0M{FT}(τ_precip=600, S_0=0, qc_0=0.02)
 @inline precipitation(x, y, z, t, qᵗ, params) = remove_precipitation(params, qᵗ, 0)
-q_precip_forcing = Forcing(precipitation, field_dependencies=:qᵗ, parameters=microphysics)
+qᵗ_precip_forcing = Forcing(precipitation, field_dependencies=:qᵗ, parameters=microphysics)
 
 θ_bcs = FieldBoundaryConditions(bottom=FluxBoundaryCondition(8e-3))
-q_bcs = FieldBoundaryConditions(bottom=FluxBoundaryCondition(5.2e-5))
+qᵗ_bcs = FieldBoundaryConditions(bottom=FluxBoundaryCondition(5.2e-5))
 
 u★ = 0.28 # m/s
 @inline u_drag(x, y, t, u, v, u★) = - u★^2 * u / sqrt(u^2 + v^2)
@@ -82,10 +82,10 @@ end
     return - w_dz_T
 end
 
-@inline function Fq_subsidence(i, j, k, grid, clock, fields, parameters)
+@inline function Fqᵗ_subsidence(i, j, k, grid, clock, fields, parameters)
     wˢ = parameters.wˢ
-    q_avg = parameters.q_avg
-    w_dz_Q = ℑzᵃᵃᶜ(i, j, k, grid, w_dz_ϕ, wˢ, q_avg)
+    qᵗ_avg = parameters.qᵗ_avg
+    w_dz_Q = ℑzᵃᵃᶜ(i, j, k, grid, w_dz_ϕ, wˢ, qᵗ_avg)
     return - w_dz_Q
 end
 
@@ -93,7 +93,7 @@ end
 u_avg_f = Field{Nothing, Nothing, Center}(grid)
 v_avg_f = Field{Nothing, Nothing, Center}(grid)
 θ_avg_f = Field{Nothing, Nothing, Center}(grid)
-q_avg_f = Field{Nothing, Nothing, Center}(grid)
+qᵗ_avg_f = Field{Nothing, Nothing, Center}(grid)
 
 wˢ = Field{Nothing, Nothing, Face}(grid)
 w_bomex = AtmosphericProfilesLibrary.Bomex_subsidence(FT)
@@ -102,7 +102,7 @@ set!(wˢ, z -> w_bomex(z))
 u_subsidence_forcing = Forcing(Fu_subsidence, discrete_form=true, parameters=(; u_avg=u_avg_f, wˢ))
 v_subsidence_forcing = Forcing(Fv_subsidence, discrete_form=true, parameters=(; v_avg=v_avg_f, wˢ))
 θ_subsidence_forcing = Forcing(Fθ_subsidence, discrete_form=true, parameters=(; θ_avg=θ_avg_f, wˢ))
-q_subsidence_forcing = Forcing(Fq_subsidence, discrete_form=true, parameters=(; q_avg=q_avg_f, wˢ))
+qᵗ_subsidence_forcing = Forcing(Fqᵗ_subsidence, discrete_form=true, parameters=(; qᵗ_avg=qᵗ_avg_f, wˢ))
 
 coriolis = FPlane(f=3.76e-5)
 uᵍ = Field{Nothing, Nothing, Center}(grid)
@@ -131,10 +131,10 @@ u_forcing = (u_subsidence_forcing, u_geostrophic_forcing)
 v_forcing = (v_subsidence_forcing, v_geostrophic_forcing)
 
 drying = Field{Nothing, Nothing, Center}(grid)
-dqdt_bomex = AtmosphericProfilesLibrary.Bomex_dqtdt(FT)
-set!(drying, z -> dqdt_bomex(z))
-q_drying_forcing = Forcing(drying)
-q_forcing = (q_precip_forcing, q_drying_forcing, q_subsidence_forcing)
+dqᵗdt_bomex = AtmosphericProfilesLibrary.Bomex_dqtdt(FT)
+set!(drying, z -> dqᵗdt_bomex(z))
+qᵗ_drying_forcing = Forcing(drying)
+qᵗ_forcing = (qᵗ_precip_forcing, qᵗ_drying_forcing, qᵗ_subsidence_forcing)
 
 Fθ_field = Field{Nothing, Nothing, Center}(grid)
 dTdt_bomex = AtmosphericProfilesLibrary.Bomex_dTdt(FT)
@@ -145,15 +145,15 @@ set!(Fθ_field, z -> dTdt_bomex(1, z))
 model = NonhydrostaticModel(; grid, buoyancy, coriolis,
                             advection = WENO(order=5), 
                             tracers = (:θ, :qᵗ),
-                            forcing = (; q=q_forcing, u=u_forcing, v=v_forcing, θ=θ_forcing),
-                            boundary_conditions = (θ=θ_bcs, qᵗ=q_bcs, u=u_bcs, v=v_bcs))
+                            forcing = (; qᵗ=qᵗ_forcing, u=u_forcing, v=v_forcing, θ=θ_forcing),
+                            boundary_conditions = (θ=θ_bcs, qᵗ=qᵗ_bcs, u=u_bcs, v=v_bcs))
 
 # Values for the initial perturbations can be found in Appendix B
 # of Siebesma et al 2003, 3rd paragraph
 θϵ = 0.1
-qϵ = 2.5e-5
+qᵗϵ = 2.5e-5
 θᵢ(x, y, z) = θ_bomex(z) + θϵ * randn()
-qᵢ(x, y, z) = q_bomex(z) + qϵ * randn()
+qᵢ(x, y, z) = qᵗ_bomex(z) + qᵗϵ * randn()
 uᵢ(x, y, z) = u_bomex(z)
 set!(model, θ=θᵢ, qᵗ=qᵢ, u=uᵢ)
 
@@ -164,17 +164,17 @@ conjure_time_step_wizard!(simulation, cfl=0.7)
 u_avg = Field(Average(model.velocities.u, dims=(1, 2)))
 v_avg = Field(Average(model.velocities.v, dims=(1, 2)))
 θ_avg = Field(Average(model.tracers.θ, dims=(1, 2)))
-q_avg = Field(Average(model.tracers.qᵗ, dims=(1, 2)))
+qᵗ_avg = Field(Average(model.tracers.qᵗ, dims=(1, 2)))
 
 function compute_averages!(sim)
     compute!(u_avg)
     compute!(v_avg)
     compute!(θ_avg)
-    compute!(q_avg)
+    compute!(qᵗ_avg)
     parent(u_avg_f) .= parent(u_avg)
     parent(v_avg_f) .= parent(v_avg)
     parent(θ_avg_f) .= parent(θ_avg)
-    parent(q_avg_f) .= parent(q_avg)
+    parent(qᵗ_avg_f) .= parent(qᵗ_avg)
     return nothing
 end
 
@@ -208,7 +208,7 @@ function update_plots!(sim)
     compute!(qˡ_avg)
     compute!(qᵛ⁺_avg)
     compute!(rh_avg)
-    compute!(q_avg)
+    compute!(qᵗ_avg)
     compute!(θ_avg)
     compute!(u_avg)
     compute!(v_avg)
@@ -218,7 +218,7 @@ function update_plots!(sim)
     lines!(axrh, rh_avg)
     lines!(axu, u_avg)
     lines!(axu, v_avg)
-    lines!(axq, q_avg)
+    lines!(axq, qᵗ_avg)
     lines!(axq, qᵛ⁺_avg)
     lines!(axθ, θ_avg)
     display(fig)
