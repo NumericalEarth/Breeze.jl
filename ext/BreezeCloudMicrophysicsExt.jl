@@ -71,11 +71,17 @@ const OneMomentBulkMicrophysics = BulkMicrophysics{<:Any, <:Parameters1M}
 const WP1M = BulkMicrophysics{<:WarmPhaseSaturationAdjustment, <:Parameters1M}
 const MP1M = BulkMicrophysics{<:MixedPhaseSaturationAdjustment, <:Parameters1M}
 
-prognostic_field_names(::WP1M) = (:ρqᵛ, :ρqˡ, :ρqʳ)
-prognostic_field_names(::MP1M) = (:ρqᵛ, :ρqᶜˡ, :ρqᶜⁱ, :ρqʳ, :ρqˢ)
+prognostic_field_names(::WP1M) = tuple(:ρqʳ)
+prognostic_field_names(::MP1M) = (:ρqʳ, :ρqˢ)
 
-function materialize_microphysical_fields(bμp::OneMomentBulkMicrophysics, grid, bcs)
-    names = prognostic_field_names(bμp)
+function materialize_microphysical_fields(bμp::WP1M, grid, bcs)
+    names = (:qᵛ, :qᶜˡ, :ρqʳ)
+    fields = center_field_tuple(grid, names...)
+    return NamedTuple{names}(fields)
+end
+
+function materialize_microphysical_fields(bμp::MP1M, grid, bcs)
+    names = (:qᵛ, :qᶜˡ, :qᶜⁱ, :ρqʳ, :ρqˢ)
     fields = center_field_tuple(grid, names...)
     return NamedTuple{names}(fields)
 end
@@ -83,27 +89,32 @@ end
 # Note: we perform saturation adjustment on vapor, total liquid, and total ice.
 # This differs from the adjustment described in Yatunin et al 2025, wherein
 # precipitating species are excluded from the adjustment.
+# The reason we do this is because excluding precipiating species from adjustment requires
+# a more complex algorithm in which precipitating species are passed into compute_thermodynamic_state!
+# We can consider changing this in the future.
 @inline @inbounds function update_microphysical_fields!(μ, bμp::WP1M, i, j, k, grid, density, 𝒰, thermo)
+    ρ = density[i, j, k]
     qᵛ = 𝒰.moisture_mass_fractions.vapor
     qˡ = 𝒰.moisture_mass_fractions.liquid
-    qʳ = μ.qʳ[i, j, k]  
+    qʳ = μ.ρqʳ[i, j, k] / ρ
 
     μ.qᵛ[i, j, k] = qᵛ
-    μ.qᶜˡ[i, j, k] = qˡ - qʳ
+    μ.qˡ[i, j, k] = qʳ + qˡ
 
     return nothing
 end
 
 @inline @inbounds function update_microphysical_fields!(μ, bμp::MP1M, i, j, k, grid, density, 𝒰, thermo)
+    ρ = density[i, j, k]
     qᵛ = 𝒰.moisture_mass_fractions.vapor
     qˡ = 𝒰.moisture_mass_fractions.liquid
     qⁱ = 𝒰.moisture_mass_fractions.ice
-    qʳ = μ.qʳ[i, j, k]  
-    qˢ = μ.qˢ[i, j, k]
+    qʳ = μ.ρqʳ[i, j, k] / ρ
+    qˢ = μ.ρqˢ[i, j, k] / ρ
 
     μ.qᵛ[i, j, k] = qᵛ
-    μ.qᶜˡ[i, j, k] = qˡ - qʳ
-    μ.qᶜⁱ[i, j, k] = qⁱ - qˢ
+    μ.qᶜˡ[i, j, k] = qʳ + qˡ
+    μ.qᶜⁱ[i, j, k] = qˢ + qⁱ
 
     return nothing
 end
@@ -114,9 +125,16 @@ $(TYPEDSIGNATURES)
 Extract moisture mass fractions from microphysical fields for 1M scheme.
 """
 @inline @inbounds function moisture_mass_fractions(i, j, k, grid, bμp::OneMomentBulkMicrophysics, density, qᵗ, μ)
+    ρ = density[i, j, k]
+    ρqʳ = μ.ρqʳ[i, j, k] / ρ
+    ρqˢ = μ.ρqˢ[i, j, k] / ρ
+    qᶜˡ = μ.qᶜˡ[i, j, k]
+    qᶜⁱ = μ.qᶜⁱ[i, j, k]
+
     qᵛ = μ.qᵛ[i, j, k]
-    qˡ = μ.qᶜˡ[i, j, k] + μ.qʳ[i, j, k] 
-    qⁱ = μ.qᶜⁱ[i, j, k] + μ.qˢ[i, j, k]
+    qˡ = qᶜˡ + qʳ
+    qⁱ = qᶜⁱ + qˢ
+
     return MoistureMassFractions(qᵛ, qˡ, qⁱ)
 end
 
