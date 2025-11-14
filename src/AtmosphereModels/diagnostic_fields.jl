@@ -28,7 +28,7 @@ Adapt.adapt_structure(to, k::SaturationSpecificHumidityKernelFunction) =
                                              adapt(to, k.thermodynamics))
 
 const C = Center
- 
+
 const SaturationSpecificHumidityOperation = KernelFunctionOperation{C, C, C, <:Any, <:Any, <:SaturationSpecificHumidityKernelFunction}
 const SaturationSpecificHumidityField = Field{C, C, C, <:SaturationSpecificHumidityOperation}
 
