@@ -101,12 +101,12 @@ end
                                  id,
                                  name,
                                  scalar_forcing,
-                                 microphysics,
-                                 microphysical_fields,
                                  thermo,
-                                 reference_density,
+                                 density,
                                  advection,
                                  velocities,
+                                 microphysics,
+                                 microphysical_fields,
                                  closure,
                                  closure_fields,
                                  clock,
@@ -116,8 +116,8 @@ end
     Uᵗ = sum_of_velocities(velocities, Uᵖ)
 
     return ( - div_Uc(i, j, k, grid, advection, Uᵗ, scalar)
-             - ∇_dot_Jᶜ(i, j, k, grid, reference_density, closure, closure_fields, closure_fields, id, scalar, clock, model_fields, buoyancy)
-             + microphysical_tendency(i, j, k, grid, microphysics, name, reference_density, microphysical_fields, thermo)
+             - ∇_dot_Jᶜ(i, j, k, grid, density, closure, closure_fields, closure_fields, id, scalar, clock, model_fields, buoyancy)
+             + microphysical_tendency(i, j, k, grid, microphysics, name, density, microphysical_fields, thermo)
              + scalar_forcing(i, j, k, grid, clock, model_fields))
 end
 
@@ -126,27 +126,27 @@ end
                                               id,
                                               energy,
                                               ρe_forcing,
-                                              reference_density,
+                                              thermo,
+                                              density,
                                               advection,
                                               velocities,
+                                              microphysics,
+                                              microphysical_fields,
                                               closure,
                                               closure_fields,
                                               clock,
                                               model_fields,
                                               formulation,
                                               temperature,
-                                              moisture_mass_fraction,
-                                              thermo,
-                                              microphysical_fields,
-                                              microphysics)
+                                              moisture_mass_fraction)
 
     # Compute the buoyancy flux term, ρᵣ w b
-    buoyancy_flux = ℑzᵃᵃᶜ(i, j, k, grid, ρ_w_bᶜᶜᶠ, velocities.w, reference_density,
+    buoyancy_flux = ℑzᵃᵃᶜ(i, j, k, grid, ρ_w_bᶜᶜᶠ, velocities.w, density,
                           temperature, moisture_mass_fraction, formulation, thermo)
 
     return ( - div_Uc(i, j, k, grid, advection, velocities, energy_density)
              + buoyancy_flux
-             - ∇_dot_Jᶜ(i, j, k, grid, reference_density, closure, closure_fields, id, energy, clock, model_fields, nothing)
-             + microphysical_tendency(i, j, k, grid, microphysics, Val(:ρe), reference_density, microphysical_fields, thermo)
+             - ∇_dot_Jᶜ(i, j, k, grid, density, closure, closure_fields, id, energy, clock, model_fields, nothing)
+             + microphysical_tendency(i, j, k, grid, microphysics, Val(:ρe), density, microphysical_fields, thermo)
              + ρe_forcing(i, j, k, grid, clock, model_fields))
 end
