@@ -100,7 +100,7 @@ function compute_tendencies!(model::AnelasticModel)
     Gρw = model.timestepper.Gⁿ.ρw
 
     model_fields = merge(fields(model), model.velocities, model.microphysical_fields,
-                         (e = model.moist_static_energy, qᵗ = model.moisture_mass_fraction)) 
+                         (e = model.moist_static_energy, qᵗ = model.moisture_mass_fraction))
 
     ρᵣ = model.formulation.reference_state.density
 
