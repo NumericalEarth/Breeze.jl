@@ -79,7 +79,8 @@ end
                                                              moisture_density)
     i, j, k = @index(Global, NTuple)
 
-    𝒰₀ = diagnose_thermodynamic_state(i, j, k, grid, formulation, thermo, energy_density, moisture_density)
+    𝒰₀ = diagnose_thermodynamic_state(i, j, k, grid, formulation, microphysics, microphysical_fields,
+                                      thermo, energy_density, moisture_density)
     𝒰₁ = compute_thermodynamic_state(𝒰₀, microphysics, thermo)
     update_microphysical_fields!(microphysical_fields, microphysics, i, j, k, grid, 𝒰₁, thermo)
 

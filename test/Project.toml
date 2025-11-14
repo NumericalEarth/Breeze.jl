@@ -1,6 +1,7 @@
 [deps]
 Aqua = "4c88cf16-eb10-579e-8560-4a9242c79595"
 CUDA = "052768ef-5323-5732-b1bb-66c8b64840ba"
+CloudMicrophysics = "6a9e3e04-43cd-43ba-94b9-e8782df3c71b"
 Documenter = "e30172f5-a6a5-5a46-863b-614d45cd2de4"
 ExplicitImports = "7d51a73a-1435-4ff3-83d9-f097790105c7"
 GPUArraysCore = "46192b85-c4d5-4398-a991-12ede77f4527"
