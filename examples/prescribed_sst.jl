@@ -9,6 +9,7 @@
 
 using Breeze
 using Oceananigans.Units
+using Oceananigans: xnode
 using Printf
 using CloudMicrophysics
 
@@ -51,14 +52,29 @@ cᵖᵈ = thermodynamics.dry_air.heat_capacity
 # ## Surface flux parameters
 #
 # We define bulk transfer coefficients (Cᴰ for drag, Cᴴ for heat, Cᵛ for vapor)
-# and a prescribed sea surface temperature θˢ = 295 K (10 K warmer than θ₀).
-# The fluxes are computed using bulk aerodynamic formulas with friction velocity u★.
+# and a prescribed sea surface temperature θˢ(x) that varies as a Gaussian with
+# a peak in the middle 10% of the domain. The fluxes are computed using bulk
+# aerodynamic formulas with friction velocity u★.
+
+# Domain extent for Gaussian SST distribution
+x_min, x_max = -10e3, 10e3
+x_center = (x_min + x_max) / 2  # Center of domain
+domain_width = x_max - x_min
+σ_sst = 0.05 * domain_width  # Standard deviation: 5% of domain width (peak in middle 10%)
+Δθ_max = 10.0  # Maximum SST anomaly (K)
+
+# Gaussian SST function: θˢ(x) = θ₀ + Δθ_max * exp(-(x - x₀)² / (2σ²))
+function sea_surface_temperature(x, y, z)
+    x_offset = x - x_center
+    gaussian = exp(-x_offset^2 / (2 * σ_sst^2))
+    return θ₀ + Δθ_max * gaussian
+end
 
 parameters = (; 
     drag_coefficient = 1e-3,      # Cᴰ: drag coefficient
     heat_transfer_coefficient = 1e-3,  # Cᴴ: heat transfer coefficient
     vapor_transfer_coefficient = 1e-3,  # Cᵛ: vapor transfer coefficient
-    sea_surface_temperature = θ₀ + 10,  # θˢ = 295 K
+    sea_surface_temperature,  # θˢ(x): spatially varying Gaussian SST
     gust_speed = 1e-2,  # Minimum friction velocity u★ (m/s)
     ρ₀,  # Reference density at surface
     cᵖᵈ,  # Heat capacity of dry air
@@ -116,7 +132,11 @@ end
 # where θ★ is the temperature scale computed from the bulk transfer coefficient
 @inline function energy_density_flux(i, j, grid, clock, fields, parameters)
     u★ = friction_velocity(i, j, grid, clock, fields, parameters)
-    θˢ = parameters.sea_surface_temperature
+    
+    # Get x coordinate for spatially varying SST using xnode
+    x = xnode(i, j, 1, grid, Center(), Center(), Center())
+    θˢ = parameters.sea_surface_temperature(x, 0, 0)
+    
     Cᴰ = parameters.drag_coefficient
     Cᴴ = parameters.heat_transfer_coefficient
     
@@ -139,7 +159,11 @@ end
 # where q★ is the moisture scale computed from the bulk transfer coefficient
 @inline function moisture_density_flux(i, j, grid, clock, fields, parameters)
     u★ = friction_velocity(i, j, grid, clock, fields, parameters)
-    θˢ = parameters.sea_surface_temperature
+    
+    # Get x coordinate for spatially varying SST using xnode
+    x = xnode(i, j, 1, grid, Center(), Center(), Center())
+    θˢ = parameters.sea_surface_temperature(x, 0, 0)
+    
     Cᴰ = parameters.drag_coefficient
     Cᵛ = parameters.vapor_transfer_coefficient
     

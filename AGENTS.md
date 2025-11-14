@@ -146,6 +146,8 @@ Pkg.test("Breeze")
 - Check previous examples and strive to make new examples that add new physics and new value relative to old examples. Don't just copy old examples.
 - `@allowscalar` should very sparingly be used or never in an example. If you need to, make a suggestion to change the source code so that `@allowscalar` is not needed.
 - The examples should use exported names primarily. If an example needs an excessive amount of internal names, those names should be exported or a new abstraction needs to be developed.
+- For discrete_form=true forcing and boundayr conditions, always use xnode, ynode, and znode from Oceananigans. _Never_ access grid metrics manually. Do not pass in
+  coordinates into the functions.
 
 ## Documentation
 
