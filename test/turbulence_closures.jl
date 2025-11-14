@@ -34,11 +34,13 @@ using Test
         time_step!(model, 1)
 
         ϵ = sqrt(eps(FT))
-        @test @allowscalar model.momentum.ρu ≈ XFaceField(grid) atol=ϵ
-        @test @allowscalar model.momentum.ρv ≈ YFaceField(grid) atol=ϵ
-        @test @allowscalar model.momentum.ρw ≈ ZFaceField(grid) atol=100ϵ # large bc of non-zero buoyancy
-        @test @allowscalar model.moisture_density ≈ CenterField(grid) atol=ϵ
-        @test @allowscalar model.tracers.ρc ≈ CenterField(grid) atol=ϵ
-        @test @allowscalar model.energy_density ≈ ρe₀ rtol=10ϵ
+        @allowscalar begin
+            @test model.momentum.ρu ≈ XFaceField(grid) atol=ϵ
+            @test model.momentum.ρv ≈ YFaceField(grid) atol=ϵ
+            @test model.momentum.ρw ≈ ZFaceField(grid) atol=100ϵ # large bc of non-zero buoyancy
+            @test model.moisture_density ≈ CenterField(grid) atol=ϵ
+            @test model.tracers.ρc ≈ CenterField(grid) atol=ϵ
+            @test model.energy_density ≈ ρe₀ rtol=10ϵ
+        end
     end
 end
