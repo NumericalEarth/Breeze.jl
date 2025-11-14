@@ -18,7 +18,7 @@ Ly = 6400
 Lz = 3000
 
 arch = CPU() # if changing to GPU() add `using CUDA` above
-stop_time = 20minutes
+stop_time = 6hours
 
 grid = RectilinearGrid(arch,
                        size = (Nx, Ny, Nz),
@@ -190,17 +190,17 @@ end
 
 add_callback!(simulation, compute_averages!)
 
-θ = model.temperature
+θ = Breeze.AtmosphereModels.PotentialTemperatureField(model)
 qˡ = model.microphysical_fields.qˡ
 qᵛ = model.microphysical_fields.qᵛ
 
 qᵛ⁺ = Breeze.AtmosphereModels.SaturationSpecificHumidityField(model)
 rh = Field(qᵛ / qᵛ⁺) # relative humidity
 
-T_avg = Field(Average(T, dims=(1, 2)))
-qˡ_avg = Field(Average(qˡ, dims=(1, 2)))
-qᵛ⁺_avg = Field(Average(qᵛ⁺, dims=(1, 2)))
-rh_avg = Field(Average(rh, dims=(1, 2)))
+# T_avg = Field(Average(T, dims=(1, 2)))
+# qˡ_avg = Field(Average(qˡ, dims=(1, 2)))
+# qᵛ⁺_avg = Field(Average(qᵛ⁺, dims=(1, 2)))
+# rh_avg = Field(Average(rh, dims=(1, 2)))
 
 # Uncomment to make plots
 # using CairoMakie
@@ -241,7 +241,6 @@ rh_avg = Field(Average(rh, dims=(1, 2)))
 # add_callback!(simulation, update_plots!, TimeInterval(20minutes))
 
 function progress(sim)
-    compute!(T)
     qˡmax = maximum(qˡ)
     qᵛmax = maximum(qᵛ)
 
@@ -288,13 +287,13 @@ simulation.output_writers[:jld2] = ow
 
 averages_ow = JLD2Writer(model, averaged_outputs;
                          filename = averages_filename,
-                         schedule = AveragedTimeInterval(10minutes, window=10minutes, stride=1),
+                         schedule = AveragedTimeInterval(60minutes, window=60minutes, stride=1),
                          overwrite_existing = true)
 
 simulation.output_writers[:avg] = averages_ow
 
 @info "Running BOMEX on grid: \n $grid \n and using model: \n $model"
-#run!(simulation)
+run!(simulation)
 
 #=
 using CairoMakie
