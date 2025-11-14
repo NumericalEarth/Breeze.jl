@@ -71,8 +71,8 @@ const OneMomentBulkMicrophysics = BulkMicrophysics{<:Any, <:Parameters1M}
 const WP1M = BulkMicrophysics{<:WarmPhaseSaturationAdjustment, <:Parameters1M}
 const MP1M = BulkMicrophysics{<:MixedPhaseSaturationAdjustment, <:Parameters1M}
 
-prognostic_field_names(::WP1M) = (:qᵛ, :qˡ, :qʳ)
-prognostic_field_names(::MP1M) = (:qᵛ, :qˡ, :qⁱ, :qʳ, :qˢ)
+prognostic_field_names(::WP1M) = (:qᵛ, :qᶜˡ, :qʳ)
+prognostic_field_names(::MP1M) = (:qᵛ, :qᶜˡ, :qᶜⁱ, :qʳ, :qˢ)
 
 function materialize_microphysical_fields(bμp::OneMomentBulkMicrophysics, grid, bcs)
     names = prognostic_field_names(bμp)
@@ -86,21 +86,21 @@ end
     qʳ = μ.qʳ[i, j, k]
 
     μ.qᵛ[i, j, k] = qᵛ
-    μ.qˡ[i, j, k] = qᴸ - qʳ
+    μ.qᶜˡ[i, j, k] = qᴸ - qʳ
 
     return nothing
 end
 
 @inline @inbounds function update_microphysical_fields!(μ, bμp::MP1M, i, j, k, grid, 𝒰, thermo)
     qᵛ = 𝒰.moisture_mass_fractions.vapor
-    qᴸ = 𝒰.moisture_mass_fractions.liquid
-    qᴵ = 𝒰.moisture_mass_fractions.ice
+    qˡ = 𝒰.moisture_mass_fractions.liquid
+    qⁱ = 𝒰.moisture_mass_fractions.ice
     qʳ = μ.qʳ[i, j, k]
     qˢ = μ.qˢ[i, j, k]
 
     μ.qᵛ[i, j, k] = qᵛ
-    μ.qˡ[i, j, k] = qᴸ - qʳ
-    μ.qⁱ[i, j, k] = qᴵ - qˢ
+    μ.qᶜˡ[i, j, k] = qˡ - qʳ
+    μ.qᶜⁱ[i, j, k] = qⁱ - qˢ
 
     return nothing
 end
@@ -112,9 +112,9 @@ Extract moisture mass fractions from microphysical fields for 1M scheme.
 """
 @inline @inbounds function moisture_mass_fractions(i, j, k, grid, bμp::OMBM, μ, qᵗ)
     qᵛ = μ.qᵛ[i, j, k]
-    qᴸ = μ.qˡ[i, j, k] + μ.qʳ[i, j, k] 
-    qᴵ = μ.qⁱ[i, j, k] + μ.qˢ[i, j, k]
-    return MoistureMassFractions(qᵛ, qᴸ, qᴵ)
+    qˡ = μ.qᶜˡ[i, j, k] + μ.qʳ[i, j, k] 
+    qⁱ = μ.qᶜⁱ[i, j, k] + μ.qˢ[i, j, k]
+    return MoistureMassFractions(qᵛ, qˡ, qᶜ)
 end
 
 """
