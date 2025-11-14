@@ -42,7 +42,7 @@ import Breeze.AtmosphereModels:
     prognostic_field_names,
     materialize_microphysical_fields,
     update_microphysical_fields!,
-    moisture_mass_fractions
+    compute_moisture_fractions
 
 import Breeze.Thermodynamics:
     total_moisture_mass_fraction,
@@ -74,7 +74,7 @@ const ATC = AbstractThermodynamicState
 prognostic_field_names(::ZMBM) = tuple()
 materialize_microphysical_fields(bμp::ZMBM, grid, bcs) = materialize_microphysical_fields(bμp.clouds, grid, bcs)
 @inline update_microphysical_fields!(μ, bμp::ZMBM, i, j, k, grid, density, 𝒰, thermo) = update_microphysical_fields!(μ, bμp.clouds, i, j, k, grid, density, 𝒰, thermo)
-@inline moisture_mass_fractions(i, j, k, grid, bμp::ZMBM, ρ, qᵗ, μ) = moisture_mass_fractions(i, j, k, grid, bμp.nucleation, ρ, qᵗ, μ)
+@inline compute_moisture_fractions(i, j, k, grid, bμp::ZMBM, ρ, qᵗ, μ) = compute_moisture_fractions(i, j, k, grid, bμp.nucleation, ρ, qᵗ, μ)
 @inline compute_thermodynamic_state(𝒰₀::ATC, bμp::ZMBM, thermo) = compute_thermodynamic_state(𝒰₀, bμp.clouds, thermo)
     
 #####
@@ -144,8 +144,7 @@ end
     return nothing
 end
 
-@inline @inbounds function moisture_mass_fractions(i, j, k, grid, bμp::MP1M, density, qᵗ, μ)
-    ρ = density[i, j, k]
+@inline @inbounds function compute_moisture_fractions(i, j, k, grid, bμp::MP1M, ρ, qᵗ, μ)
     ρqʳ = μ.ρqʳ[i, j, k] / ρ
     ρqˢ = μ.ρqˢ[i, j, k] / ρ
     qᶜˡ = μ.qᶜˡ[i, j, k]

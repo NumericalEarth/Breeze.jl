@@ -13,7 +13,7 @@ import ..AtmosphereModels:
     prognostic_field_names,
     materialize_microphysical_fields,
     microphysical_velocities,
-    moisture_mass_fractions
+    compute_moisture_fractions
 
 include("saturation_adjustment.jl")
 include("bulk_microphysics.jl")

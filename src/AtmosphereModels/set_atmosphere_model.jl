@@ -115,6 +115,7 @@ end
     @inbounds begin
         pᵣ = formulation.reference_state.pressure[i, j, k]
         ρᵣ = formulation.reference_state.density[i, j, k]
+        qᵗ = moisture_mass_fraction[i, j, k]
         θ = potential_temperature[i, j, k]
     end
 
@@ -122,7 +123,7 @@ end
     z = znode(i, j, k, grid, c, c, c)
     p₀ = formulation.reference_state.base_pressure
 
-    q = moisture_mass_fractions(i, j, k, grid, microphysics, formulation.reference_state.density, moisture_mass_fraction, microphysical_fields)
+    q = compute_moisture_fractions(i, j, k, grid, microphysics, ρᵣ, qᵗ, microphysical_fields)
     𝒰₀ = PotentialTemperatureState(θ, q, p₀, pᵣ)
     𝒰 = compute_thermodynamic_state(𝒰₀, microphysics, thermo)
 

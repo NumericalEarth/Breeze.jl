@@ -148,13 +148,13 @@ end
     return nothing
 end 
 
-@inline @inbounds function moisture_mass_fractions(i, j, k, grid, ::WPSA, density, qᵗ, μ)
+@inline @inbounds function compute_moisture_fractions(i, j, k, grid, ::WPSA, ρ, qᵗ, μ)
     qᵛ = μ.qᵛ[i, j, k]
     qˡ = μ.qˡ[i, j, k]
     return MoistureMassFractions(qᵛ, qˡ)
 end
 
-@inline @inbounds function moisture_mass_fractions(i, j, k, grid, ::MPSA, density, qᵗ, μ)
+@inline @inbounds function compute_moisture_fractions(i, j, k, grid, ::MPSA, ρ, qᵗ, μ)
     qᵛ = μ.qᵛ[i, j, k]
     qˡ = μ.qˡ[i, j, k]
     qⁱ = μ.qⁱ[i, j, k]
