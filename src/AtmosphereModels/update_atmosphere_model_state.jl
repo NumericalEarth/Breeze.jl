@@ -35,6 +35,7 @@ function compute_auxiliary_variables!(model)
     launch!(arch, grid, :xyz,
             _compute_auxiliary_thermodynamic_variables!,
             model.temperature,
+            model.moist_static_energy,
             model.moisture_mass_fraction,
             grid,
             model.thermodynamics,
@@ -67,6 +68,7 @@ end
 end
 
 @kernel function _compute_auxiliary_thermodynamic_variables!(temperature,
+                                                             moist_static_energy,
                                                              moisture_mass_fraction,
                                                              grid,
                                                              thermo,
@@ -78,12 +80,16 @@ end
     i, j, k = @index(Global, NTuple)
 
     𝒰₀ = diagnose_thermodynamic_state(i, j, k, grid, formulation, thermo, energy_density, moisture_density)
-    @inbounds moisture_mass_fraction[i, j, k] = total_moisture_mass_fraction(𝒰₀)
-
-    # Compute temperature via microphysics interface (falls back to dry if nothing)
     𝒰₁ = compute_thermodynamic_state(𝒰₀, microphysics, thermo)
-    @inbounds temperature[i, j, k] = Thermodynamics.temperature(𝒰₁, thermo)
     update_microphysical_fields!(microphysical_fields, microphysics, i, j, k, grid, 𝒰₁, thermo)
+
+    @inbounds begin
+        @inbounds temperature[i, j, k] = Thermodynamics.temperature(𝒰₁, thermo)
+        moisture_mass_fraction[i, j, k] = total_moisture_mass_fraction(𝒰₁)
+        ρe = energy_density[i, j, k]
+        ρᵣ = formulation.reference_state.density[i, j, k]
+        moist_static_energy[i, j, k] = ρe / ρᵣ
+    end
 end
 
 function compute_tendencies!(model::AnelasticModel)
@@ -93,29 +99,38 @@ function compute_tendencies!(model::AnelasticModel)
     Gρv = model.timestepper.Gⁿ.ρv
     Gρw = model.timestepper.Gⁿ.ρw
 
-    common_args = (model.advection,
-                   model.velocities,
-                   model.momentum,
-                   model.coriolis,
-                   model.clock,
-                   fields(model))
+    model_fields = merge(fields(model), model.velocities, model.microphysical_fields,
+                         (e = model.moist_static_energy, qᵗ = model.moisture_mass_fraction)) 
 
     ρᵣ = model.formulation.reference_state.density
+
+    common_args = (
+        model.formulation.reference_state.density,
+        model.advection,
+        model.velocities,
+        model.closure,
+        model.diffusivity_fields,
+        model.momentum,
+        model.coriolis,
+        model.clock,
+        model_fields)
+
     u_args = tuple(common_args..., model.forcing.ρu)
     v_args = tuple(common_args..., model.forcing.ρv)
     w_args = tuple(common_args..., model.forcing.ρw,
-                   ρᵣ, model.formulation, model.temperature,
+                   model.formulation, model.temperature,
                    model.moisture_mass_fraction, model.thermodynamics)
 
     launch!(arch, grid, :xyz, compute_x_momentum_tendency!, Gρu, grid, u_args)
     launch!(arch, grid, :xyz, compute_y_momentum_tendency!, Gρv, grid, v_args)
     launch!(arch, grid, :xyz, compute_z_momentum_tendency!, Gρw, grid, w_args)
 
-    scalar_args = (model.advection, model.velocities, model.clock, fields(model))
+    scalar_args = (ρᵣ, model.advection, model.velocities, model.closure, model.diffusivity_fields, model.clock, model_fields)
     Gρe = model.timestepper.Gⁿ.ρe
     ρe = model.energy_density
+    e = model.moist_static_energy
     Fρe = model.forcing.ρe
-    ρe_args = tuple(ρe, Fρe, scalar_args..., ρᵣ,
+    ρe_args = tuple(ρe, Val(1), e, Fρe, scalar_args...,
                     model.formulation, model.temperature,
                     model.moisture_mass_fraction, model.thermodynamics, model.microphysical_fields, model.microphysics)
     launch!(arch, grid, :xyz, compute_moist_static_energy_tendency!, Gρe, grid, ρe_args)
@@ -123,16 +138,17 @@ function compute_tendencies!(model::AnelasticModel)
     ρqᵗ = model.moisture_density
     Gρqᵗ = model.timestepper.Gⁿ.ρqᵗ
     Fρqᵗ = model.forcing.ρqᵗ
-    ρq_args = tuple(ρqᵗ, Fρqᵗ, scalar_args...)
+    ρq_args = tuple(ρqᵗ, Val(2), Fρqᵗ, scalar_args...)
     launch!(arch, grid, :xyz, compute_scalar_tendency!, Gρqᵗ, grid, ρq_args)
 
-    # Compute tendencies for any user-specified tracers (generic scalars)
-    for name in propertynames(model.tracers)
-        Gc = getproperty(model.timestepper.Gⁿ, name)
+    # Generic tracer tendencies (if any)
+    for (i, name) in enumerate(keys(model.tracers))
+        id = Val(i + 2)
         c = getproperty(model.tracers, name)
+        Gc = getproperty(model.timestepper.Gⁿ, name)
         Fc = getproperty(model.forcing, name)
-        c_args = tuple(c, Fc, scalar_args...)
-        launch!(arch, grid, :xyz, compute_scalar_tendency!, Gc, grid, c_args)
+        args = tuple(c, id, Fc, scalar_args...)
+        launch!(arch, grid, :xyz, compute_scalar_tendency!, Gc, grid, args)
     end
 
     return nothing
