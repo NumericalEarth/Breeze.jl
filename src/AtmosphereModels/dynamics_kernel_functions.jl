@@ -1,6 +1,7 @@
 using Oceananigans.Advection: div_𝐯u, div_𝐯v, div_𝐯w, div_Uc
 using Oceananigans.Coriolis: x_f_cross_U, y_f_cross_U, z_f_cross_U
 using Oceananigans.Operators: ∂xᶠᶜᶜ, ∂yᶜᶠᶜ, ∂zᶜᶜᶠ, ℑzᵃᵃᶜ, ℑzᵃᵃᶠ
+using Oceananigans.Advection: sum_of_velocities
 
 @inline ∂ⱼ_𝒯₁ⱼ(i, j, k, grid, args...) = zero(grid)
 @inline ∂ⱼ_𝒯₂ⱼ(i, j, k, grid, args...) = zero(grid)
@@ -98,7 +99,9 @@ end
 @inline function scalar_tendency(i, j, k, grid,
                                  scalar,
                                  id,
+                                 name,
                                  scalar_forcing,
+                                 microphysics,
                                  reference_density,
                                  advection,
                                  velocities,
@@ -106,6 +109,9 @@ end
                                  closure_fields,
                                  clock,
                                  model_fields)
+
+    Uᵖ = microphysical_velocities(microphysics, name)
+    Uᵗ = sum_of_velocities(velocities, Uᵖ)
 
     return ( - div_Uc(i, j, k, grid, advection, velocities, scalar)
              - ∇_dot_Jᶜ(i, j, k, grid, reference_density, closure, closure_fields, closure_fields, id, scalar, clock, model_fields, buoyancy)

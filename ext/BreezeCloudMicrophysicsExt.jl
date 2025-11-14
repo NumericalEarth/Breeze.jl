@@ -80,13 +80,16 @@ function materialize_microphysical_fields(bμp::OneMomentBulkMicrophysics, grid,
     return NamedTuple{names}(fields)
 end
 
+# Note: we perform saturation adjustment on vapor, total liquid, and total ice.
+# This differs from the adjustment described in Yatunin et al 2025, wherein
+# precipitating species are excluded from the adjustment.
 @inline @inbounds function update_microphysical_fields!(μ, bμp::WP1M, i, j, k, grid, 𝒰, thermo)
     qᵛ = 𝒰.moisture_mass_fractions.vapor
-    qᴸ = 𝒰.moisture_mass_fractions.liquid
-    qʳ = μ.qʳ[i, j, k]
+    qˡ = 𝒰.moisture_mass_fractions.liquid
+    qʳ = μ.qʳ[i, j, k]  
 
     μ.qᵛ[i, j, k] = qᵛ
-    μ.qᶜˡ[i, j, k] = qᴸ - qʳ
+    μ.qᶜˡ[i, j, k] = qˡ - qʳ
 
     return nothing
 end
@@ -95,7 +98,7 @@ end
     qᵛ = 𝒰.moisture_mass_fractions.vapor
     qˡ = 𝒰.moisture_mass_fractions.liquid
     qⁱ = 𝒰.moisture_mass_fractions.ice
-    qʳ = μ.qʳ[i, j, k]
+    qʳ = μ.qʳ[i, j, k]  
     qˢ = μ.qˢ[i, j, k]
 
     μ.qᵛ[i, j, k] = qᵛ
@@ -126,7 +129,10 @@ Delegates to clouds scheme (saturation adjustment) for vapor↔cloud conversion.
 CloudMicrophysics 1M handles cloud↔precipitation processes via tendencies
 computed in `update_microphysical_fields!`.
 """
-@inline compute_thermodynamic_state(𝒰₀::AbstractThermodynamicState, bμp::OMBM, thermo) =
+@inline function compute_thermodynamic_state(𝒰₀::AbstractThermodynamicState, bμp::OMBM, thermo) =
+    qᵗ = total_moisture_mass_fraction(𝒰₀)
+
+    𝒰₁ = compute_thermodynamic_state(𝒰₀, bμp.clouds, thermo)
     compute_thermodynamic_state(𝒰₀, bμp.clouds, thermo)
 
 end # module BreezeCloudMicrophysicsExt

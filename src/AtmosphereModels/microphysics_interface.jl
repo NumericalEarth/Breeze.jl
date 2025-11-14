@@ -18,7 +18,6 @@ Return `tuple()` - zero-moment scheme has no prognostic variables.
 """
 prognostic_field_names(::Nothing) = tuple()
 
-
 """
 $(TYPEDSIGNATURES)
 
@@ -47,7 +46,7 @@ compute_temperature(state, microphysics::Nothing, thermo) = temperature(state, t
 $(TYPEDSIGNATURES)
 
 Return a possibly adjusted thermodynamic state associated with the
-`microphysics` scheme and `thermo`dynamic constants.
+`microphysics` scheme, and `thermo`dynamic constants.
 """
 @inline compute_thermodynamic_state(state::AbstractThermodynamicState, ::Nothing, thermo) = state
 
@@ -61,6 +60,15 @@ Dispatch is provided for `::Nothing` microphysics here. Specific microphysics
 schemes may extend this method to provide tailored behavior.
 """
 @inline moisture_mass_fractions(i, j, k, grid, microphysics::Nothing, μ, qᵗ) = @inbounds MoistureMassFractions(qᵗ[i, j, k])
+
+"""
+$(TYPEDSIGNATURES)
+
+Return the microphysical velocities associated with `microphysics` and `name`.
+
+Must be either `nothing`, or a NamedTuple with three components `u, v, w`.
+"""
+@inline microphysical_velocities(microphysics::Nothing, name) = nothing
 
 """
 $(TYPEDSIGNATURES)

@@ -23,7 +23,8 @@ import ..AtmosphereModels:
     update_microphysical_fields!,
     prognostic_field_names,
     materialize_microphysical_fields,
-    moisture_mass_fractions
+    microphysical_velocities
+    moisture_mass_fractions,
 
 abstract type AbstractEquilibrium end
 
@@ -32,6 +33,8 @@ struct SaturationAdjustment{E, FT}
     maxiter :: FT
     equilibrium :: E
 end
+
+const SA = SaturationAdjustment
 
 """
     $(TYPEDSIGNATURES)
@@ -57,6 +60,8 @@ function SaturationAdjustment(FT::DataType=Oceananigans.defaults.FloatType;
     maxiter = convert(FT, maxiter)
     return SaturationAdjustment(tolerance, maxiter, equilibrium)
 end
+
+@inline microphysical_velocities(::SaturationAdjustment, name) = nothing
 
 #####
 ##### Warm-phase equilibrium
@@ -198,12 +203,14 @@ end
     return T - T₁
 end
 
+const ATC = AbstractThermodynamicState
+
 """
 $(TYPEDSIGNATURES)
 
 Return the saturation-adjusted thermodynamic state using a secant iteration.
 """
-@inline function compute_thermodynamic_state(𝒰₀::AbstractThermodynamicState, microphysics::SaturationAdjustment, thermo)
+@inline function compute_thermodynamic_state(𝒰₀::ATC, microphysics::SA, thermo)
     FT = eltype(𝒰₀)
     is_absolute_zero(𝒰₀) && return 𝒰₀
 

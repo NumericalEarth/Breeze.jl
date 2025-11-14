@@ -86,7 +86,6 @@ end
 
     @inbounds begin
         @inbounds temperature[i, j, k] = Thermodynamics.temperature(𝒰₁, thermo)
-        moisture_mass_fraction[i, j, k] = total_moisture_mass_fraction(𝒰₁)
         ρe = energy_density[i, j, k]
         ρᵣ = formulation.reference_state.density[i, j, k]
         moist_static_energy[i, j, k] = ρe / ρᵣ
@@ -145,10 +144,11 @@ function compute_tendencies!(model::AnelasticModel)
     # Generic tracer tendencies (if any)
     for (i, name) in enumerate(keys(model.tracers))
         id = Val(i + 2)
+        name = Val(name)
         c = getproperty(model.tracers, name)
         Gc = getproperty(model.timestepper.Gⁿ, name)
         Fc = getproperty(model.forcing, name)
-        args = tuple(c, id, Fc, scalar_args...)
+        c_args = tuple(c, name, id, Fc, model.microphysics, scalar_args...)
         launch!(arch, grid, :xyz, compute_scalar_tendency!, Gc, grid, args)
     end
 
