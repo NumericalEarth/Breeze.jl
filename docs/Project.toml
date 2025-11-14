@@ -12,7 +12,7 @@ Breeze = {path = ".."}
 
 [compat]
 Oceananigans = "0.101.2"
-CairoMakie = "0.13, 0.14"
+CairoMakie = "0.13, 0.14, 0.15"
 Documenter = "1"
 DocumenterCitations = "1.4"
 Literate = "2"
