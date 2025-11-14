@@ -1,14 +1,40 @@
-# Breeze.jl
+<!-- Title -->
+<h1 align="center">
+  Breeze.jl
+</h1>
 
+<!-- description -->
+<p align="center">
+  <strong>🌪 Fast and friendly Julia software for atmospheric fluid dynamics on CPUs and GPUs. https://numericalearth.github.io/BreezeDocumentation/dev/</strong>
+</p>
 
-<a href="https://numericalearth.github.io/Breeze.jl/dev/">
-  <img alt="Development documentation" src="https://img.shields.io/badge/documentation-in%20development-orange?style=flat-square">
-</a>
+<p align="center">
+    <a href="https://numericalearth.github.io/BreezeDocumentation/dev/">
+    <img alt="Documentation" src="https://img.shields.io/badge/documentation-in%20development-orange?style=flat-square">
+    </a>
+    <a href="https://github.com/NumericalEarth/Breeze.jl/discussions">
+    <img alt="Ask us anything" src="https://img.shields.io/badge/Ask%20us-anything-1abc9c.svg?style=flat-square">
+  </a>
+  <a href="https://github.com/SciML/ColPrac">
+    <img alt="ColPrac: Contributor's Guide on Collaborative Practices for Community Packages" src="https://img.shields.io/badge/ColPrac-Contributor's%20Guide-blueviolet?style=flat-square">
+  </a>
+  <a href="https://codecov.io/gh/NumericalEarth/Breeze.jl" >
+    <img src="https://codecov.io/gh/NumericalEarth/Breeze.jl/graph/badge.svg?token=09TZGWKUPV"/>
+  </a>  
+  <a href="[https://codecov.io/gh/NumericalEarth/Breeze.jl](https://github.com/JuliaTesting/Aqua.jl)" >
+    <img src="https://raw.githubusercontent.com/JuliaTesting/Aqua.jl/master/badge.svg"/>
+  </a>
+</p>
 
+Breeze is a library for simulating atmospheric flows, convection, clouds, weather, and hurricanes on CPUs and GPUs.
+Much of Breeze's power flows from [Oceananigans](https://github.com/CliMA/Oceananigans.jl), which provides a user interface, grids, fields, solvers, advection schemes, Lagrangian particles, physics, and more.
+Right now, `Breeze.AtmosphereModel` is in an early stage of development, and supports simple simulations that use the anelastic formulation of the Euler equations on `RectilinearGrid`.
+But we're working feverishly towards a future with bulk, bin and superdroplet microphysics, radiation, and a fully compressible formulation with acoustic substepping (and note, the roadmap and vision for Breeze is still something of a work in progress).
+Check out [the documentation](https://numericalearth.github.io/BreezeDocumentation/dev/) to see what we can do now, and watch this space (or get in touch to discuss!) its crystallization.
 
-### Instructions
+### Installing and using Breeze
 
-First [install Julia](https://julialang.org/downloads/); suggested version 1.10. See [juliaup](https://github.com/JuliaLang/juliaup) README for how to install 1.10 and make that version the default.
+First [install Julia](https://julialang.org/install/); suggested version 1.12. See [juliaup](https://github.com/JuliaLang/juliaup) README for how to install 1.12 and make that version the default.
 
 Then clone this repository
 
@@ -22,20 +48,20 @@ Open Julia from within the local directory of the repo via:
 julia --project
 ```
 
-The first time, you need to install any dependencies:
+The first time, we need to install any dependencies:
 
 ```julia
 julia> using Pkg; Pkg.instantiate()
 ```
 
-Now you are ready to run any of the examples!
+Now we are ready to run any of the examples!
 
-For instance,
+For instance, if we run
 
 ```julia
-julia> include("examples/free_convection.jl")
+julia> include("examples/thermal_bubble.jl")
 ```
 
-produces
+but after we tweak the spatial resolution of the grid to `size = (1024, 512)`, we get
 
-https://github.com/user-attachments/assets/dc45d188-6c61-4eb5-95fb-9a51c6f99013
+https://github.com/user-attachments/assets/aaca693c-57fe-46bf-8ff7-6646f6e5eebe

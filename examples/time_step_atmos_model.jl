@@ -15,7 +15,7 @@ model = AtmosphereModel(grid, advection=WENO(), boundary_conditions=(; e=e_bcs))
 
 Lz = grid.Lz
 Δθ = 5 # K
-Tₛ = model.formulation.constants.reference_potential_temperature
+Tₛ = model.formulation.constants.potential_temperature
 # θᵢ(x, y, z) = Tₛ + Δθ * z / Lz
 qᵢ(x, y, z) = 0
 Ξᵢ(x, y, z) = 1e-2 * randn()
@@ -80,7 +80,7 @@ set!(θ_bg_field, z -> Tₛ + dθdz * z)
 T = model.temperature
 ρʳ = model.formulation.reference_density
 cᵖᵈ = model.thermodynamics.dry_air.heat_capacity
-ρe = model.energy
+ρe = model.energy_density
 θ = ρe / (ρʳ * cᵖᵈ)
 θ′ = θ - θ_bg_field
 
@@ -113,8 +113,8 @@ Nt = length(wt)
 
 fig = Figure(size=(1500, 1000), fontsize=12)
 
-axθ′ = Axis(fig[1, 1], title="Perturbation potentital temperature θ′ (K)")
-axT = Axis(fig[1, 2], title="Temperature T (K)")
+axθ′ = Axis(fig[1, 1], title="Perturbation potentital temperature θ′ (ᵒK)")
+axT = Axis(fig[1, 2], title="Temperature T (ᵒK)")
 #axζ = Axis(fig[1, 2], title="Vorticity ζ (s⁻¹)")
 axw = Axis(fig[2, 1], title="Vertical Velocity w (m/s)")
 axe = Axis(fig[2, 2], title="Internal Energy ρe (J/kg)")
@@ -148,8 +148,8 @@ hmw = heatmap!(axw, wn, colorrange=(-w_range, w_range), colormap=:balance)
 hme = heatmap!(axe, en, colorrange=(-e_range, e_range), colormap=:balance)
 
 # Add colorbars
-Colorbar(fig[1, 0], hmθ′, label="θ′ (K)", vertical=true)
-Colorbar(fig[1, 3], hmT, label="T (K)", vertical=true)
+Colorbar(fig[1, 0], hmθ′, label="θ′ (ᵒK)", vertical=true)
+Colorbar(fig[1, 3], hmT, label="T (ᵒK)", vertical=true)
 # Colorbar(fig[1, 3], hmζ, label="ζ (s⁻¹)", vertical=true)
 Colorbar(fig[2, 0], hmw, label="w (m/s)", vertical=true)
 Colorbar(fig[2, 3], hme, label="ρe (J/kg)", vertical=true)

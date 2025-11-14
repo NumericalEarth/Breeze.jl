@@ -28,6 +28,20 @@ Modules = [Breeze.AtmosphereModels]
 Private = false
 ```
 
+### Microphysics
+
+```@autodocs
+Modules = [Breeze.Microphysics]
+Private = false
+```
+
+### TurbulenceClosures
+
+```@autodocs
+Modules = [Breeze.TurbulenceClosures]
+Private = false
+```
+
 ## Private API
 
 ```@autodocs

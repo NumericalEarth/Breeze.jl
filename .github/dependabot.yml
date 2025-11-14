@@ -1,0 +1,39 @@
+# To get started with Dependabot version updates, you'll need to specify which
+# package ecosystems to update and where the package manifests are located.
+# Please see the documentation for all configuration options:
+# https://docs.github.com/en/code-security/dependabot/working-with-dependabot/dependabot-options-reference
+version: 2
+
+# To be able to managet the Julia ecosystem for the time being
+enable-beta-ecosystems: true
+
+updates:
+  - package-ecosystem: "github-actions"
+    directory: "/" # Location of package manifests
+    schedule:
+      interval: "weekly"
+    labels:
+      - "dependencies 🖇️"
+  - package-ecosystem: "julia" # See documentation for possible values
+    # Location of Julia projects
+    directories:
+      - "/"
+      - "/docs"
+      - "/test"
+    schedule:
+      interval: "weekly"
+    ignore:
+      # Ignore package itself
+      - dependency-name: "Breeze"
+    labels:
+      - "dependencies 🖇️"
+    groups:
+      julia-major-updates:
+        update-types:
+          - "major"
+      julia-minor-updates:
+        update-types:
+          - "minor"
+      julia-patch-updates:
+        update-types:
+          - "patch"

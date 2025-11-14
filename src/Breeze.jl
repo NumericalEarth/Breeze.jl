@@ -7,18 +7,41 @@ module Breeze
 
 export
     MoistAirBuoyancy,
-    AtmosphereThermodynamics,
-    ReferenceStateConstants,
+    ThermodynamicConstants,
+    ReferenceState,
     AnelasticFormulation,
     AtmosphereModel,
     TemperatureField,
     IdealGas,
-    PhaseTransitionConstants,
     CondensedPhase,
     mixture_gas_constant,
-    mixture_heat_capacity
+    mixture_heat_capacity,
+    SaturationAdjustment,
+    MixedPhaseEquilibrium,
+    WarmPhaseEquilibrium
 
-using Oceananigans
+using Oceananigans: Oceananigans, @at, AnisotropicMinimumDissipation, Average,
+                    AveragedTimeInterval, BackgroundField, BetaPlane, Bounded,
+                    CPU, Callback, Center, CenterField, Centered, Checkpointer,
+                    ConstantCartesianCoriolis, Distributed, FPlane, Face,
+                    Field, FieldBoundaryConditions, FieldDataset,
+                    FieldTimeSeries, Flat, FluxBoundaryCondition, Forcing, GPU,
+                    GradientBoundaryCondition, GridFittedBottom,
+                    ImmersedBoundaryCondition, ImmersedBoundaryGrid, InMemory,
+                    Integral, IterationInterval, JLD2Writer,
+                    KernelFunctionOperation, LagrangianParticles, NetCDFWriter,
+                    NonTraditionalBetaPlane, OnDisk, OpenBoundaryCondition,
+                    PartialCellBottom, Partition, Periodic,
+                    PerturbationAdvection, RectilinearGrid, Simulation,
+                    SmagorinskyLilly, SpecifiedTimes, TimeInterval,
+                    UpwindBiased, ValueBoundaryCondition, WENO,
+                    WallTimeInterval, XFaceField, YFaceField, ZFaceField,
+                    add_callback!, compute!, conjure_time_step_wizard!,
+                    interior, iteration, minimum_xspacing, minimum_yspacing,
+                    minimum_zspacing, nodes, prettytime, regrid!, run!, set!,
+                    time_step!, xnodes, xspacings, ynodes, yspacings, znodes,
+                    zspacings, ∂x, ∂y, ∂z
+
 using Oceananigans.Grids: znode
 using Oceananigans.Architectures: array_type, CPU, GPU
 using Oceananigans: field
@@ -29,7 +52,7 @@ export
     Center, Face, Periodic, Bounded, Flat,
     RectilinearGrid,
     nodes, xnodes, ynodes, znodes,
-    xnode, ynode, znode,
+    znode,
     xspacings, yspacings, zspacings,
     minimum_xspacing, minimum_yspacing, minimum_zspacing,
     ImmersedBoundaryGrid, GridFittedBottom, PartialCellBottom, ImmersedBoundaryCondition,
@@ -43,7 +66,7 @@ export
     BackgroundField, interior, set!, compute!, regrid!,
     Forcing,
     FPlane, ConstantCartesianCoriolis, BetaPlane, NonTraditionalBetaPlane,
-    SmagorinskyLilly, DynamicSmagorinsky, AnisotropicMinimumDissipation,
+    SmagorinskyLilly, AnisotropicMinimumDissipation,
     LagrangianParticles,
     conjure_time_step_wizard!,
     time_step!, Simulation, run!, Callback, add_callback!, iteration,

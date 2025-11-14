@@ -1,0 +1,45 @@
+using Test
+using Breeze
+using Oceananigans
+
+@testset "Pressure solver matches NonhydrostaticModel with ρᵣ == 1 [$FT]" for FT in (Float32, Float64)
+    Nx = Ny = Nz = 32
+    z = 0:(1/Nz):1
+    grid = RectilinearGrid(default_arch, FT; size=(Nx, Ny, Nz), x=(0, 1), y=(0, 1), z)
+    thermodynamics = ThermodynamicConstants(FT)
+    reference_state = ReferenceState(grid, thermodynamics)
+
+    formulation = AnelasticFormulation(reference_state)
+    parent(formulation.reference_state.density) .= 1
+
+    anelastic = AtmosphereModel(grid; thermodynamics, formulation)
+    boussinesq = NonhydrostaticModel(; grid)
+
+    uᵢ = rand(size(grid)...)
+    vᵢ = rand(size(grid)...)
+    wᵢ = rand(size(grid)...)
+
+    set!(anelastic, ρu=uᵢ, ρv=vᵢ, ρw=wᵢ)
+    set!(boussinesq, u=uᵢ, v=vᵢ, w=wᵢ)
+
+    ρu = anelastic.momentum.ρu
+    ρv = anelastic.momentum.ρv
+    ρw = anelastic.momentum.ρw
+    δᵃ = Field(∂x(ρu) + ∂y(ρv) + ∂z(ρw))
+
+    u = boussinesq.velocities.u
+    v = boussinesq.velocities.v
+    w = boussinesq.velocities.w
+    δᵇ = Field(∂x(u) + ∂y(v) + ∂z(w))
+
+    boussinesq_solver = boussinesq.pressure_solver
+    anelastic_solver = anelastic.pressure_solver
+    @test anelastic_solver.batched_tridiagonal_solver.a == boussinesq_solver.batched_tridiagonal_solver.a
+    @test anelastic_solver.batched_tridiagonal_solver.b == boussinesq_solver.batched_tridiagonal_solver.b
+    @test anelastic_solver.batched_tridiagonal_solver.c == boussinesq_solver.batched_tridiagonal_solver.c
+    @test anelastic_solver.source_term == boussinesq_solver.source_term
+
+    @test maximum(abs, δᵃ) < prod(size(grid)) * eps(FT)
+    @test maximum(abs, δᵇ) < prod(size(grid)) * eps(FT)
+    @test anelastic.nonhydrostatic_pressure == boussinesq.pressures.pNHS
+end

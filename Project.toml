@@ -1,14 +1,11 @@
 name = "Breeze"
 uuid = "660aa2fb-d4c8-4359-a52c-9c057bc511da"
+version = "0.1.2"
 authors = ["Navid C. Constantinou <navidcy@users.noreply.github.com>, Gregory L. Wagner, Madi, Marty, Callum, and Paul"]
-version = "0.1.0"
 
 [deps]
 Adapt = "79e6a3ab-5dfb-504d-930d-738a2a938a0e"
-AtmosphericProfilesLibrary = "86bc3604-9858-485a-bdbe-831ec50de11d"
-ClimaComms = "3a4d1b5c-c61d-41fd-a00a-5873ba7a1b0d"
-ClimaParams = "5c42b081-d73a-476f-9059-fd94b934656c"
-CloudMicrophysics = "6a9e3e04-43cd-43ba-94b9-e8782df3c71b"
+DocStringExtensions = "ffbed154-4ef7-542d-bbb7-c09d3a79fcae"
 JLD2 = "033835bb-8acc-5ee8-8aae-3f567f8a3819"
 KernelAbstractions = "63c18a36-062a-441e-b654-da1e3ab1ce7c"
 Oceananigans = "9e8cae18-63c1-5223-a75c-80ca9d6e9a09"
