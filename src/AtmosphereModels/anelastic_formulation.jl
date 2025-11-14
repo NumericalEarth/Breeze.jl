@@ -56,7 +56,8 @@ Base.show(io::IO, formulation::AnelasticFormulation) = print(io, "AnelasticFormu
 """
     $(TYPEDSIGNATURES)
 
-Diagnose the thermodynamic state at `(i, j, k)` for the given `grid`, `formulation`, `microphysics`, `microphysical_fields`, `thermo`, `energy_density`, and `moisture_density`.
+Return `MoistStaticEnergyState` computed from the prognostic state including
+energy density, moisture density, and microphysical fields.
 """
 function diagnose_thermodynamic_state(i, j, k, grid, formulation::AnelasticFormulation,
                                       microphysics, microphysical_fields,

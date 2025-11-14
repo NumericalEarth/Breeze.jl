@@ -8,12 +8,32 @@ using ..Thermodynamics:
     MoistureMassFractions
 
 #####
-##### "Nothing" microphysics
+##### Definition of the microphysics interface, with methods for "Nothing" microphysics
 #####
 
+"""
+$(TYPEDSIGNATURES)
+
+Return `tuple()` - zero-moment scheme has no prognostic variables.
+"""
 prognostic_field_names(::Nothing) = tuple()
-materialize_microphysical_fields(microphysics, grid, bcs) = NamedTuple()
-@inline update_microphysical_fields!(microphysical_fields, ::Nothing, i, j, k, grid, 𝒰₁, thermo) = nothing
+
+
+"""
+$(TYPEDSIGNATURES)
+
+Build microphysical fields associated with `microphysics` on `grid` and with
+user defined `boundary_conditions`.
+"""
+materialize_microphysical_fields(microphysics::Nothing, grid, boundary_conditions) = NamedTuple()
+
+"""
+$(TYPEDSIGNATURES)
+
+Update microphysical fields for `microphysics_scheme` given the thermodynamic `state` and
+`thermo`dynamic parameters.
+"""
+@inline update_microphysical_fields!(microphysical_fields, microphysics::Nothing, i, j, k, grid, state, thermo) = nothing
 
 """
 $(TYPEDSIGNATURES)
@@ -21,7 +41,7 @@ $(TYPEDSIGNATURES)
 Return the temperature associated with the thermodynamic `state`,
 `microphysics` scheme, and `thermo`dynamic constants.
 """
-function compute_temperature(state, microphysics, thermo) end
+compute_temperature(state, microphysics::Nothing, thermo) = temperature(state, thermo)
 
 """
 $(TYPEDSIGNATURES)
@@ -30,11 +50,6 @@ Return a possibly adjusted thermodynamic state associated with the
 `microphysics` scheme and `thermo`dynamic constants.
 """
 @inline compute_thermodynamic_state(state::AbstractThermodynamicState, ::Nothing, thermo) = state
-
-@inline function compute_temperature(𝒰₀::AbstractThermodynamicState, microphysics, thermo)
-    𝒰₁ = compute_thermodynamic_state(𝒰₀, microphysics, thermo)
-    return temperature(𝒰₁, thermo)
-end
 
 """
 $(TYPEDSIGNATURES)
@@ -45,4 +60,15 @@ Build and return [`MoistureMassFractions`](@ref) at `(i, j, k)` for the given `g
 Dispatch is provided for `::Nothing` microphysics here. Specific microphysics
 schemes may extend this method to provide tailored behavior.
 """
-@inline moisture_mass_fractions(i, j, k, grid, ::Nothing, μ, qᵗ) = @inbounds MoistureMassFractions(qᵗ[i, j, k])
+@inline moisture_mass_fractions(i, j, k, grid, microphysics::Nothing, μ, qᵗ) = @inbounds MoistureMassFractions(qᵗ[i, j, k])
+
+"""
+$(TYPEDSIGNATURES)
+
+Compute the thermodynamic state associated with `microphysics` and `thermo`dynamic constants,
+and then return the temperature associated with that state.
+"""
+@inline function compute_temperature(𝒰₀::AbstractThermodynamicState, microphysics, thermo)
+    𝒰₁ = compute_thermodynamic_state(𝒰₀, microphysics, thermo)
+    return temperature(𝒰₁, thermo)
+end
