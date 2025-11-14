@@ -122,7 +122,7 @@ end
     z = znode(i, j, k, grid, c, c, c)
     p₀ = formulation.reference_state.base_pressure
 
-    q = moisture_mass_fractions(i, j, k, grid, microphysics, microphysical_fields, moisture_mass_fraction)
+    q = moisture_mass_fractions(i, j, k, grid, microphysics, ρᵣ, moisture_mass_fraction, microphysical_fields)
     𝒰₀ = PotentialTemperatureState(θ, q, p₀, pᵣ)
     𝒰 = compute_thermodynamic_state(𝒰₀, microphysics, thermo)
 

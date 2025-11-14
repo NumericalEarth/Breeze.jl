@@ -54,8 +54,9 @@ function (d::SaturationSpecificHumidityKernelFunction)(i, j, k, grid)
     @inbounds begin
         pᵣ = d.reference_state.pressure[i, j, k]
         T = d.temperature[i, j, k]
+        ρᵣ = d.reference_state.density[i, j, k]
     end
-    q = moisture_mass_fractions(i, j, k, grid, d.microphysics, d.microphysical_fields, d.moisture_mass_fraction)
+    q = moisture_mass_fractions(i, j, k, grid, d.microphysics, ρᵣ, d.moisture_mass_fraction, d.microphysical_fields)
     ρ = Thermodynamics.density(pᵣ, T, q, d.thermodynamics)
     return Thermodynamics.saturation_specific_humidity(T, ρ, d.thermodynamics, d.thermodynamics.liquid)
 end
@@ -104,9 +105,10 @@ function (d::PotentialTemperatureKernelFunction)(i, j, k, grid)
         pᵣ = d.reference_state.pressure[i, j, k]
         p₀ = d.reference_state.base_pressure
         T = d.temperature[i, j, k]
+        ρᵣ = d.reference_state.density[i, j, k]
     end
 
-    q = moisture_mass_fractions(i, j, k, grid, d.microphysics, d.microphysical_fields, d.moisture_mass_fraction)
+    q = moisture_mass_fractions(i, j, k, grid, d.microphysics, ρᵣ, d.moisture_mass_fraction, d.microphysical_fields)
     Rᵐ = Thermodynamics.mixture_gas_constant(q, d.thermodynamics)
     cᵖᵐ = Thermodynamics.mixture_heat_capacity(q, d.thermodynamics)
     Π = (pᵣ / p₀)^(Rᵐ / cᵖᵐ)

@@ -32,7 +32,7 @@ $(TYPEDSIGNATURES)
 Update microphysical fields for `microphysics_scheme` given the thermodynamic `state` and
 `thermo`dynamic parameters.
 """
-@inline update_microphysical_fields!(microphysical_fields, microphysics::Nothing, i, j, k, grid, state, thermo) = nothing
+@inline update_microphysical_fields!(microphysical_fields, microphysics::Nothing, i, j, k, grid, density, state, thermo) = nothing
 
 """
 $(TYPEDSIGNATURES)
@@ -59,7 +59,7 @@ Build and return [`MoistureMassFractions`](@ref) at `(i, j, k)` for the given `g
 Dispatch is provided for `::Nothing` microphysics here. Specific microphysics
 schemes may extend this method to provide tailored behavior.
 """
-@inline moisture_mass_fractions(i, j, k, grid, microphysics::Nothing, μ, qᵗ) = @inbounds MoistureMassFractions(qᵗ[i, j, k])
+@inline moisture_mass_fractions(i, j, k, grid, microphysics::Nothing, density, qᵗ, μ) = @inbounds MoistureMassFractions(qᵗ[i, j, k])
 
 """
 $(TYPEDSIGNATURES)

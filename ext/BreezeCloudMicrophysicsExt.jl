@@ -59,8 +59,8 @@ const ATC = AbstractThermodynamicState
 
 prognostic_field_names(::ZMBM) = tuple()
 materialize_microphysical_fields(bμp::ZMBM, grid, bcs) = materialize_microphysical_fields(bμp.clouds, grid, bcs)
-@inline update_microphysical_fields!(μ, bμp::ZMBM, i, j, k, grid, 𝒰, thermo) = update_microphysical_fields!(μ, bμp.clouds, i, j, k, grid, 𝒰, thermo)
-@inline moisture_mass_fractions(i, j, k, grid, bμp::ZMBM, μ, qᵗ) = moisture_mass_fractions(i, j, k, grid, bμp.clouds, μ, qᵗ)
+@inline update_microphysical_fields!(μ, bμp::ZMBM, i, j, k, grid, density, 𝒰, thermo) = update_microphysical_fields!(μ, bμp.clouds, i, j, k, grid, density, 𝒰, thermo)
+@inline moisture_mass_fractions(i, j, k, grid, bμp::ZMBM, density, qᵗ, μ) = moisture_mass_fractions(i, j, k, grid, bμp.clouds, density, qᵗ, μ)
 @inline compute_thermodynamic_state(𝒰₀::ATC, bμp::ZMBM, thermo) = compute_thermodynamic_state(𝒰₀, bμp.clouds, thermo)
     
 #####
@@ -71,8 +71,8 @@ const OneMomentBulkMicrophysics = BulkMicrophysics{<:Any, <:Parameters1M}
 const WP1M = BulkMicrophysics{<:WarmPhaseSaturationAdjustment, <:Parameters1M}
 const MP1M = BulkMicrophysics{<:MixedPhaseSaturationAdjustment, <:Parameters1M}
 
-prognostic_field_names(::WP1M) = (:qᵛ, :qᶜˡ, :qʳ)
-prognostic_field_names(::MP1M) = (:qᵛ, :qᶜˡ, :qᶜⁱ, :qʳ, :qˢ)
+prognostic_field_names(::WP1M) = (:ρqᵛ, :ρqˡ, :ρqʳ)
+prognostic_field_names(::MP1M) = (:ρqᵛ, :ρqᶜˡ, :ρqᶜⁱ, :ρqʳ, :ρqˢ)
 
 function materialize_microphysical_fields(bμp::OneMomentBulkMicrophysics, grid, bcs)
     names = prognostic_field_names(bμp)
@@ -83,7 +83,7 @@ end
 # Note: we perform saturation adjustment on vapor, total liquid, and total ice.
 # This differs from the adjustment described in Yatunin et al 2025, wherein
 # precipitating species are excluded from the adjustment.
-@inline @inbounds function update_microphysical_fields!(μ, bμp::WP1M, i, j, k, grid, 𝒰, thermo)
+@inline @inbounds function update_microphysical_fields!(μ, bμp::WP1M, i, j, k, grid, density, 𝒰, thermo)
     qᵛ = 𝒰.moisture_mass_fractions.vapor
     qˡ = 𝒰.moisture_mass_fractions.liquid
     qʳ = μ.qʳ[i, j, k]  
@@ -94,7 +94,7 @@ end
     return nothing
 end
 
-@inline @inbounds function update_microphysical_fields!(μ, bμp::MP1M, i, j, k, grid, 𝒰, thermo)
+@inline @inbounds function update_microphysical_fields!(μ, bμp::MP1M, i, j, k, grid, density, 𝒰, thermo)
     qᵛ = 𝒰.moisture_mass_fractions.vapor
     qˡ = 𝒰.moisture_mass_fractions.liquid
     qⁱ = 𝒰.moisture_mass_fractions.ice
@@ -113,11 +113,11 @@ $(TYPEDSIGNATURES)
 
 Extract moisture mass fractions from microphysical fields for 1M scheme.
 """
-@inline @inbounds function moisture_mass_fractions(i, j, k, grid, bμp::OMBM, μ, qᵗ)
+@inline @inbounds function moisture_mass_fractions(i, j, k, grid, bμp::OneMomentBulkMicrophysics, density, qᵗ, μ)
     qᵛ = μ.qᵛ[i, j, k]
     qˡ = μ.qᶜˡ[i, j, k] + μ.qʳ[i, j, k] 
     qⁱ = μ.qᶜⁱ[i, j, k] + μ.qˢ[i, j, k]
-    return MoistureMassFractions(qᵛ, qˡ, qᶜ)
+    return MoistureMassFractions(qᵛ, qˡ, qⁱ)
 end
 
 """
@@ -129,11 +129,9 @@ Delegates to clouds scheme (saturation adjustment) for vapor↔cloud conversion.
 CloudMicrophysics 1M handles cloud↔precipitation processes via tendencies
 computed in `update_microphysical_fields!`.
 """
-@inline function compute_thermodynamic_state(𝒰₀::AbstractThermodynamicState, bμp::OMBM, thermo) =
-    qᵗ = total_moisture_mass_fraction(𝒰₀)
-
-    𝒰₁ = compute_thermodynamic_state(𝒰₀, bμp.clouds, thermo)
-    compute_thermodynamic_state(𝒰₀, bμp.clouds, thermo)
+@inline function compute_thermodynamic_state(𝒰₀::AbstractThermodynamicState, bμp::OneMomentBulkMicrophysics, thermo)
+    return compute_thermodynamic_state(𝒰₀, bμp.clouds, thermo)
+end
 
 end # module BreezeCloudMicrophysicsExt
 

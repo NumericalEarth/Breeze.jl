@@ -25,10 +25,10 @@ const NPBM = BulkMicrophysics{<:Any, Nothing}
 prognostic_field_names(::NPBM) = tuple()
 materialize_microphysical_fields(bμp::NPBM, grid, bcs) = materialize_microphysical_fields(bμp.clouds, grid, bcs)
 
-@inline function update_microphysical_fields!(μ, bμp::NPBM, i, j, k, grid, 𝒰, thermo)
-    return update_microphysical_fields!(μ, bμp.clouds, i, j, k, grid, 𝒰, thermo)
+@inline function update_microphysical_fields!(μ, bμp::NPBM, i, j, k, grid, density, 𝒰, thermo)
+    return update_microphysical_fields!(μ, bμp.clouds, i, j, k, grid, density, 𝒰, thermo)
 end
     
-@inline function moisture_mass_fractions(i, j, k, grid, bμp::NPBM, μ, qᵗ)
-    return moisture_mass_fractions(i, j, k, grid, bμp.clouds, μ, qᵗ)
+@inline function moisture_mass_fractions(i, j, k, grid, bμp::NPBM, density, qᵗ, μ)
+    return moisture_mass_fractions(i, j, k, grid, bμp.clouds, density, qᵗ, μ)
 end
