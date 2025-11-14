@@ -273,7 +273,7 @@ $(TYPEDSIGNATURES)
 Update the predictor momentum ``(ρu, ρv, ρw)`` with the non-hydrostatic pressure via
 
 ```math
-(\\rho\\boldsymbol{u})^{n+1} = (\\rho\\boldsymbol{u})^n - \\Delta t \\rho_r \\boldsymbol{\\nabla} \\left( \\alpha_r p_{nh} \\right)
+(\\rho\\boldsymbol{u})^{n+1} = (\\rho\\boldsymbol{u})^n - \\Delta t \\, \\rho_r \\boldsymbol{\\nabla} \\left( \\alpha_r p_{nh} \\right)
 ```
 """
 function make_pressure_correction!(model::AnelasticModel, Δt)
