@@ -4,11 +4,9 @@ using Oceananigans
 using Oceananigans.Units
 
 using AtmosphericProfilesLibrary
-using CloudMicrophysics
 using Printf
 
 using Oceananigans.Operators: ∂zᶜᶜᶠ, ℑzᵃᵃᶜ
-using CloudMicrophysics.Microphysics0M: remove_precipitation
 
 # Siebesma et al (2003) resolution!
 # DOI: https://doi.org/10.1175/1520-0469(2003)60<1201:ALESIS>2.0.CO;2
@@ -205,42 +203,42 @@ qᵛ⁺_avg = Field(Average(qᵛ⁺, dims=(1, 2)))
 rh_avg = Field(Average(rh, dims=(1, 2)))
 
 # Uncomment to make plots
-using CairoMakie
+# using CairoMakie
 
-fig = Figure(size=(1200, 800), fontsize=12)
-axT = Axis(fig[1, 1], xlabel="T (ᵒK)", ylabel="z (m)")
-axqˡ = Axis(fig[1, 2], xlabel="qˡ (kg/kg)", ylabel="z (m)")
-axrh = Axis(fig[1, 3], xlabel="rh (%)", ylabel="z (m)")
-axu = Axis(fig[2, 1], xlabel="u, v (m/s)", ylabel="z (m)")
-axq = Axis(fig[2, 2], xlabel="q (kg/kg)", ylabel="z (m)")
-axθ = Axis(fig[2, 3], xlabel="θ (ᵒK)", ylabel="z (m)")
+# fig = Figure(size=(1200, 800), fontsize=12)
+# axT = Axis(fig[1, 1], xlabel="T (ᵒK)", ylabel="z (m)")
+# axqˡ = Axis(fig[1, 2], xlabel="qˡ (kg/kg)", ylabel="z (m)")
+# axrh = Axis(fig[1, 3], xlabel="rh (%)", ylabel="z (m)")
+# axu = Axis(fig[2, 1], xlabel="u, v (m/s)", ylabel="z (m)")
+# axq = Axis(fig[2, 2], xlabel="q (kg/kg)", ylabel="z (m)")
+# axθ = Axis(fig[2, 3], xlabel="θ (ᵒK)", ylabel="z (m)")
 
-function update_plots!(sim)
-    compute!(T_avg)
-    compute!(qˡ_avg)
-    compute!(qᵛ⁺_avg)
-    compute!(rh_avg)
-    compute!(qᵗ_avg)
-    compute!(e_avg)
-    compute!(u_avg)
-    compute!(v_avg)
+# function update_plots!(sim)
+#     compute!(T_avg)
+#     compute!(qˡ_avg)
+#     compute!(qᵛ⁺_avg)
+#     compute!(rh_avg)
+#     compute!(qᵗ_avg)
+#     compute!(e_avg)
+#     compute!(u_avg)
+#     compute!(v_avg)
 
-    lines!(axT, T_avg)
-    lines!(axqˡ, qˡ_avg)
-    lines!(axrh, rh_avg)
-    lines!(axu, u_avg)
-    lines!(axu, v_avg)
-    lines!(axq, qᵗ_avg)
-    # lines!(axq, qᵛ⁺_avg)
-    lines!(axθ, e_avg)
-    display(fig)
-    return nothing
-end
+#     lines!(axT, T_avg)
+#     lines!(axqˡ, qˡ_avg)
+#     lines!(axrh, rh_avg)
+#     lines!(axu, u_avg)
+#     lines!(axu, v_avg)
+#     lines!(axq, qᵗ_avg)
+#     # lines!(axq, qᵛ⁺_avg)
+#     lines!(axθ, e_avg)
+#     display(fig)
+#     return nothing
+# end
 
-update_plots!(simulation)
-display(fig)
+# update_plots!(simulation)
+# display(fig)
 
-add_callback!(simulation, update_plots!, TimeInterval(20minutes))
+# add_callback!(simulation, update_plots!, TimeInterval(20minutes))
 
 function progress(sim)
     compute!(T)
@@ -276,11 +274,11 @@ add_callback!(simulation, progress, IterationInterval(10))
 # The commented out lines below diagnose the forcing applied to model.tracers.q
 # using Oceananigans.Models: ForcingOperation
 # Sʳ = ForcingOperation(:q, model)
-outputs = merge(model.velocities, model.tracers, (; T, qˡ, qᵛ⁺))
+outputs = merge(model.velocities, model.tracers, (; θ, qˡ, qᵛ))
 averaged_outputs = NamedTuple(name => Average(outputs[name], dims=(1, 2)) for name in keys(outputs))
 
 filename = string("bomex_", Nx, "_", Ny, "_", Nz, ".jld2")
-averages_filename = string("bomex_averages_", Nx, "_", Ny, "_", Nz, ".jld2")
+averages_filename = string("bomex_avg_", Nx, "_", Ny, "_", Nz, ".jld2")
 
 ow = JLD2Writer(model, outputs; filename,
                 schedule = TimeInterval(1minutes),
@@ -290,29 +288,31 @@ simulation.output_writers[:jld2] = ow
 
 averages_ow = JLD2Writer(model, averaged_outputs;
                          filename = averages_filename,
-                         schedule = TimeInterval(1minutes),
+                         schedule = AveragedTimeInterval(10minutes, window=10minutes, stride=1),
                          overwrite_existing = true)
 
 simulation.output_writers[:avg] = averages_ow
 
 @info "Running BOMEX on grid: \n $grid \n and using model: \n $model"
-run!(simulation)
+#run!(simulation)
 
 #=
 using CairoMakie
 
 if get(ENV, "CI", "false") == "false"
     θt  = FieldTimeSeries(averages_filename, "θ")
-    Tt  = FieldTimeSeries(averages_filename, "T")
-    qᵗt  = FieldTimeSeries(averages_filename, "qᵗ")
+    qᵛt  = FieldTimeSeries(averages_filename, "qᵛ")
     qˡt = FieldTimeSeries(averages_filename, "qˡ")
-    times = qᵗt.times
+    ut = FieldTimeSeries(averages_filename, "u")
+    vt = FieldTimeSeries(averages_filename, "v")
+
+    times = qᵛt.times
     Nt = length(θt)
 
     fig = Figure(size=(1200, 800), fontsize=12)
     axθ  = Axis(fig[1, 1], xlabel="θ (ᵒK)", ylabel="z (m)")
-    axqᵗ = Axis(fig[1, 2], xlabel="qᵗ (kg/kg)", ylabel="z (m)")
-    axT  = Axis(fig[2, 1], xlabel="T (ᵒK)", ylabel="z (m)")
+    axqᵛ = Axis(fig[1, 2], xlabel="qᵛ (kg/kg)", ylabel="z (m)")
+    axuv = Axis(fig[2, 1], xlabel="u, v (m/s)", ylabel="z (m)")
     axqˡ = Axis(fig[2, 2], xlabel="qˡ (kg/kg)", ylabel="z (m)")
 
     Nt = length(θt)
@@ -324,21 +324,17 @@ if get(ENV, "CI", "false") == "false"
     qᵗn = @lift interior(qᵗt[$n], 1, 1, :)
     qˡn = @lift interior(qˡt[$n], 1, 1, :)
     z = znodes(θt)
-    title = @lift "t = $(prettytime(times[$n]))"
+    title = "Mean profile averaged over the last hour (5-6 hours)"
 
     fig[0, :] = Label(fig, title, fontsize=22, tellwidth=false)
 
     hmθ  = lines!(axθ, θn, z)
-    hmT  = lines!(axT, Tn, z)
-    hmqᵗ = lines!(axqᵗ, qᵗn, z)
+    hmuv = lines!(axuv, ut[$n], vt[$n], z)
+    hmqᵛ = lines!(axqᵛ, qᵛn, z)
     hmqˡ = lines!(axqˡ, qˡn, z)
     xlims!(axqˡ, -1e-4, 1.5e-3)
 
     fig
 
-    CairoMakie.record(fig, "bomex.mp4", 1:Nt, framerate=12) do nn
-        @info "Drawing frame $nn of $Nt..."
-        n[] = nn
-    end
 end
 =#
