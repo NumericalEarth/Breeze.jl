@@ -49,7 +49,7 @@ Adapt.adapt_structure(to, mb::MoistAirBuoyancy) =
                      adapt(to, mb.thermodynamics))
 
 """
-$(TYPEDSIGNATURES)
+    $(TYPEDSIGNATURES)
 
 Return a `MoistAirBuoyancy` formulation that can be provided as input to an
 `Oceananigans.NonhydrostaticModel`.
@@ -152,7 +152,7 @@ end
 # root of: f(T) = T - Π θ - ℒ qˡ / cᵖᵐ
 
 """
-$(TYPEDSIGNATURES)
+    $(TYPEDSIGNATURES)
 
 Return the temperature ``T`` corresponding to thermodynamic equilibrium between the
 specific humidity and liquid mass fractions of the input thermodynamic state `𝒰₀`,

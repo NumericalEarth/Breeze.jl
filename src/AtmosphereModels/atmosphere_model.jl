@@ -67,7 +67,7 @@ function default_formulation(grid, thermo)
 end
 
 """
-$(TYPEDSIGNATURES)
+    $(TYPEDSIGNATURES)
 
 Return an AtmosphereModel that uses the anelastic approximation following
 [Pauluis2008](@citet).
@@ -240,7 +240,7 @@ function atmosphere_model_forcing(user_forcings::NamedTuple, prognostic_fields, 
         if name ∉ keys(prognostic_fields)
             msg = string("Invalid forcing: forcing contains an entry for $name, but $name is not a prognostic field!", '\n',
                          "The prognostic fields are ", keys(prognostic_fields))
-            throw(ArgumentError(msg))   
+            throw(ArgumentError(msg))
         end
     end
 

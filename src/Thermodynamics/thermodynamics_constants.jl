@@ -65,7 +65,7 @@ Adapt.adapt_structure(to, pt::CondensedPhase) =
                    adapt(to, pt.heat_capacity))
 
 """
-$(TYPEDSIGNATURES)
+    $(TYPEDSIGNATURES)
 
 Returns `CondensedPhase` with specified parameters converted to `FT`.
 
@@ -145,7 +145,7 @@ function Adapt.adapt_structure(to, thermo::ThermodynamicConstants)
 end
 
 """
-$(TYPEDSIGNATURES)
+    $(TYPEDSIGNATURES)
 
 Return `ThermodynamicConstants` with parameters that represent gaseous mixture of dry "air"
 and vapor, as well as condensed liquid and ice phases.
@@ -232,7 +232,7 @@ end
 @inline dry_air_mass_fraction(q::MMF) = 1 - total_moisture_mass_fraction(q)
 
 """
-$(TYPEDSIGNATURES)
+    $(TYPEDSIGNATURES)
 
 Return the gas constant of moist air mixture [in J/(kg K)] given the specific humidity
 `q` and thermodynamic parameters `thermo`.
@@ -241,14 +241,14 @@ The mixture gas constant is calculated as a weighted average of the dry air
 and water vapor gas thermo:
 
 ```math
-Rᵐ = qᵈ Rᵈ + qᵛ Rᵛ
+Rᵐ = qᵈ Rᵈ + qᵛ Rᵛ ,
 ```
 
 where:
-- `Rᵈ` is the dry air gas constant
-- `Rᵛ` is the water vapor gas constant
-- `qᵈ` is the mass fraction of dry air
-- `qᵛ` is the mass fraction of water vapor
+- `Rᵈ` is the dry air gas constant,
+- `Rᵛ` is the water vapor gas constant,
+- `qᵈ` is the mass fraction of dry air, and
+- `qᵛ` is the mass fraction of water vapor.
 
 # Arguments
 - `q`: the moisture mass fractions (vapor, liquid, and ice)
@@ -263,14 +263,14 @@ where:
 end
 
 """
-$(TYPEDSIGNATURES)
+    $(TYPEDSIGNATURES)
 
 Compute the heat capacity of a mixture of dry air, vapor, liquid, and ice, where
 the mass fractions of vapor, liquid, and ice are given by `q`.
 The heat capacity of moist air is the weighted sum of its constituents:
 
 ```math
-cᵖᵐ = qᵈ cᵖᵈ + qᵛ cᵖᵛ + qˡ cˡ + qⁱ cⁱ
+cᵖᵐ = qᵈ cᵖᵈ + qᵛ cᵖᵛ + qˡ cˡ + qⁱ cⁱ ,
 ```
 
 where `qᵛ = q.vapor`, `qˡ = q.liquid`, `qⁱ = q.ice` are
