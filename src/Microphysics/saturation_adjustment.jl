@@ -13,18 +13,10 @@ using ..Thermodynamics:
     total_moisture_mass_fraction,
     AbstractThermodynamicState
 
-import ..Thermodynamics: saturation_specific_humidity
-
 using Oceananigans: Oceananigans, CenterField
 using DocStringExtensions: TYPEDSIGNATURES
 
-import ..AtmosphereModels:
-    compute_thermodynamic_state,
-    update_microphysical_fields!,
-    prognostic_field_names,
-    materialize_microphysical_fields,
-    microphysical_velocities
-    moisture_mass_fractions,
+import ..Thermodynamics: saturation_specific_humidity
 
 abstract type AbstractEquilibrium end
 
@@ -33,8 +25,6 @@ struct SaturationAdjustment{E, FT}
     maxiter :: FT
     equilibrium :: E
 end
-
-const SA = SaturationAdjustment
 
 """
     $(TYPEDSIGNATURES)
@@ -204,6 +194,7 @@ end
 end
 
 const ATC = AbstractThermodynamicState
+const SA = SaturationAdjustment
 
 """
 $(TYPEDSIGNATURES)

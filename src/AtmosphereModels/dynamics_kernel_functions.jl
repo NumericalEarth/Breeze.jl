@@ -1,7 +1,7 @@
 using Oceananigans.Advection: div_𝐯u, div_𝐯v, div_𝐯w, div_Uc
 using Oceananigans.Coriolis: x_f_cross_U, y_f_cross_U, z_f_cross_U
 using Oceananigans.Operators: ∂xᶠᶜᶜ, ∂yᶜᶠᶜ, ∂zᶜᶜᶠ, ℑzᵃᵃᶜ, ℑzᵃᵃᶠ
-using Oceananigans.Advection: sum_of_velocities
+using Oceananigans.Utils: sum_of_velocities
 
 @inline ∂ⱼ_𝒯₁ⱼ(i, j, k, grid, args...) = zero(grid)
 @inline ∂ⱼ_𝒯₂ⱼ(i, j, k, grid, args...) = zero(grid)

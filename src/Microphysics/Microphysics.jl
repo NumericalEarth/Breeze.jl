@@ -5,6 +5,14 @@ export
     MixedPhaseEquilibrium,
     WarmPhaseEquilibrium
 
+import ..AtmosphereModels:
+    compute_thermodynamic_state,
+    update_microphysical_fields!,
+    prognostic_field_names,
+    materialize_microphysical_fields,
+    microphysical_velocities,
+    moisture_mass_fractions
+
 include("saturation_adjustment.jl")
 include("bulk_microphysics.jl")
 
