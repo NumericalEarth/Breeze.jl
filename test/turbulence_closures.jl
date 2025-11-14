@@ -35,12 +35,12 @@ using Test
 
         ϵ = sqrt(eps(FT))
         @allowscalar begin
-            @test model.momentum.ρu ≈ XFaceField(grid) atol=ϵ
-            @test model.momentum.ρv ≈ YFaceField(grid) atol=ϵ
-            @test model.momentum.ρw ≈ ZFaceField(grid) atol=100ϵ # large bc of non-zero buoyancy
-            @test model.moisture_density ≈ CenterField(grid) atol=ϵ
-            @test model.tracers.ρc ≈ CenterField(grid) atol=ϵ
-            @test model.energy_density ≈ ρe₀ rtol=10ϵ
+            @test model.momentum.ρu ≈ XFaceField(grid)
+            @test model.momentum.ρv ≈ YFaceField(grid)
+            @test model.momentum.ρw ≈ ZFaceField(grid) atol=ϵ # use atol bc fields are close to 0
+            @test model.moisture_density ≈ CenterField(grid)
+            @test model.tracers.ρc ≈ CenterField(grid)
+            @test model.energy_density ≈ ρe₀
         end
     end
 end
