@@ -34,20 +34,23 @@ struct SaturationAdjustment{E, FT}
 end
 
 """
-    $(TYPEDSIGNATURES)
+$(TYPEDSIGNATURES)
 
-Return `SaturationAdjustment` microphysics representing an instantaneous adjustment to
-`equilibrium` between condensates and water vapor, computed by a solver with `tolerance` and `maxiter`.
+Return `SaturationAdjustment` microphysics representing an instantaneous adjustment
+to `equilibrium` between condensates and water vapor, computed by a solver with
+`tolerance` and `maxiter`.
 
-The options for `equilibrium` are
-    * [`WarmPhaseEquilibrium`](@ref) representing an equilibrium between water vapor and liquid water.
+The options for `equilibrium` are:
 
-    * [`MixedPhaseEquilibrium`](@ref) representing a temperature-dependent equilibrium between
-      water vapor, possibly supercooled liquid water, and ice. The equilibrium state is modeled as a linear
-      variation of the equilibrium liquid fraction with temperature, between
-      the freezing temperature (e.g. 273.15 K) below which liquid water is supercooled,
-      and the temperature of homogeneous ice nucleation temperature (e.g. 233.15 K) at which
-      the supercooled liquid fraction vanishes.
+* [`WarmPhaseEquilibrium()`](@ref WarmPhaseEquilibrium) representing an equilibrium between
+  water vapor and liquid water.
+
+* [`MixedPhaseEquilibrium()`](@ref MixedPhaseEquilibrium) representing a temperature-dependent
+  equilibrium between water vapor, possibly supercooled liquid water, and ice. The equilibrium
+  state is modeled as a linear variation of the equilibrium liquid fraction with temperature,
+  between the freezing temperature (e.g. 273.15 K) below which liquid water is supercooled,
+  and the temperature of homogeneous ice nucleation temperature (e.g. 233.15 K) at which
+  the supercooled liquid fraction vanishes.
 """
 function SaturationAdjustment(FT::DataType=Oceananigans.defaults.FloatType;
                               tolerance = 1e-3,
@@ -63,7 +66,7 @@ end
 #####
 
 """
-    $(TYPEDSIGNATURES)
+$(TYPEDSIGNATURES)
 
 Return `WarmPhaseEquilibrium` representing an equilibrium between water vapor and liquid water.
 """
@@ -86,7 +89,7 @@ struct MixedPhaseEquilibrium{FT} <: AbstractEquilibrium
 end
 
 """
-    $(TYPEDSIGNATURES)
+$(TYPEDSIGNATURES)
 
 Return `MixedPhaseEquilibrium` representing a temperature-dependent equilibrium between
 water vapor, possibly supercooled liquid water, and ice.
@@ -151,7 +154,7 @@ end
     μ.qˡ[i, j, k] = 𝒰.moisture_mass_fractions.liquid
     μ.qⁱ[i, j, k] = 𝒰.moisture_mass_fractions.ice
     return nothing
-end 
+end
 
 @inline @inbounds function moisture_mass_fractions(i, j, k, grid, ::WPSA, μ, qᵗ)
     qᵛ = μ.qᵛ[i, j, k]
@@ -207,7 +210,7 @@ Return the saturation-adjusted thermodynamic state using a secant iteration.
     FT = eltype(𝒰₀)
     is_absolute_zero(𝒰₀) && return 𝒰₀
 
-    # Compute an initial guess assuming unsaturated conditions 
+    # Compute an initial guess assuming unsaturated conditions
     qᵗ = total_moisture_mass_fraction(𝒰₀)
     q₁ = MoistureMassFractions(qᵗ)
     𝒰₁ = with_moisture(𝒰₀, q₁)

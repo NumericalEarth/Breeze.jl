@@ -72,6 +72,7 @@ $(TYPEDSIGNATURES)
 Return a `ReferenceState` on `grid`, with [`ThermodynamicConstants`](@ref) `thermo`.
 
 Keyword arguments
+=================
 - `base_pressure`: Default: 101325
 - `potential_temperature`: Default: 288
 """
