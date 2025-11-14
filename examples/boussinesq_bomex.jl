@@ -84,8 +84,8 @@ end
 
 @inline function Fqᵗ_subsidence(i, j, k, grid, clock, fields, parameters)
     wˢ = parameters.wˢ
-    q_avg = parameters.q_avg
-    w_dz_Q = ℑzᵃᵃᶜ(i, j, k, grid, w_dz_ϕ, wˢ, q_avg)
+    qᵗ_avg = parameters.qᵗ_avg
+    w_dz_Q = ℑzᵃᵃᶜ(i, j, k, grid, w_dz_ϕ, wˢ, qᵗ_avg)
     return - w_dz_Q
 end
 
@@ -170,7 +170,7 @@ function compute_averages!(sim)
     compute!(u_avg)
     compute!(v_avg)
     compute!(θ_avg)
-    compute!(q_avg)
+    compute!(qᵗ_avg)
     parent(u_avg_f) .= parent(u_avg)
     parent(v_avg_f) .= parent(v_avg)
     parent(θ_avg_f) .= parent(θ_avg)
