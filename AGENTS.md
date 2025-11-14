@@ -114,6 +114,10 @@ Pkg.test("Breeze")
 - Sometimes user scripts are written expecting names to be exported, when they are not. In that case
   consider exporting the name automatically (ie implement the user interface that the user expects) rather
   than changing the user script
+- You should almost NEVER extend `getproperty` to fix a problem with addressing an undefined property.
+  The bug is almost 100% on the caller side and requires changing the calling code so that it does not 
+  try to access an undefined property. 95% of the time, the name of the property has simply changed
+  in the source side and the calling function has not been updated.
 
 ## Common Development Tasks
 
@@ -130,6 +134,18 @@ Pkg.test("Breeze")
 - State updates in `update_atmosphere_model_state.jl`
 - Pressure solver in `anelastic_pressure_solver.jl`
 - Always consider anelastic formulation constraints
+
+## Adding new examples
+- Follow the style of existing examples, not the source code
+- Remember that initial condition functions act _pointwise_, there should be no broadcasting inside an initial condition function
+- Do not convert between units. Always keep the units the same for calculations, unless plotting
+- If possible, avoid long understore names. Use concise evokacative names like `z = znodes(grid, Center())`.
+- Use unicode that is consistent with the source code. Do not be afraid of unicode for intermediate variables.
+- Make sure that all notation in examples is consistent with `docs/src/appendix/notation.md`
+- Always add axis labels and colobars to simulations.
+- Check previous examples and strive to make new examples that add new physics and new value relative to old examples. Don't just copy old examples.
+- `@allowscalar` should very sparingly be used or never in an example. If you need to, make a suggestion to change the source code so that `@allowscalar` is not needed.
+- The examples should use exported names primarily. If an example needs an excessive amount of internal names, those names should be exported or a new abstraction needs to be developed.
 
 ## Documentation
 
