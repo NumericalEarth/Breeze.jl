@@ -5,8 +5,7 @@ export
     MixedPhaseEquilibrium,
     WarmPhaseEquilibrium,
     BulkMicrophysics,
-    OneMomentCloudMoisture,
-    TwoClassPrecipitation
+    FourCategories
 
 import ..AtmosphereModels:
     compute_thermodynamic_state,

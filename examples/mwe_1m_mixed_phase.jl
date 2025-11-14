@@ -9,11 +9,9 @@ using CloudMicrophysics
 # Create 1M mixed-phase microphysics parameters
 FT = Float64
 
-precipitation = TwoClassPrecipitation()
-cloud = OneMomentCloudMoisture()
+categories = FourCategories()
 nucleation = SaturationAdjustment()
-
-microphysics = BulkMicrophysics(nucleation, cloud, precipitation)
+microphysics = BulkMicrophysics(nucleation, categories)
 
 @show microphysics
 

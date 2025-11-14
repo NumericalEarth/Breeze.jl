@@ -1,6 +1,6 @@
 using Oceananigans.Utils: prettysummary
 
-struct BulkMicrophysics{N, C, P}
+struct BulkMicrophysics{N, C}
     nucleation :: N
     categories :: C
 end
@@ -46,3 +46,7 @@ end
 @inline function moisture_mass_fractions(i, j, k, grid, bμp::NPBM, density, qᵗ, μ)
     return moisture_mass_fractions(i, j, k, grid, bμp.nucleation, density, qᵗ, μ)
 end
+
+# Stub functions defined in extensions
+function OneMomentCloudMoisture end
+function TwoClassPrecipitation end

@@ -45,7 +45,7 @@ import Breeze.Thermodynamics:
     with_moisture,
     MoistureMassFractions
 
-import Breeze.Microphysics: OneMomentCloudMoisture, TwoClassPrecipitation
+import Breeze.Microphysics: FourCategories
 
 using Oceananigans: Oceananigans
 using DocStringExtensions: TYPEDSIGNATURES
@@ -70,26 +70,12 @@ const ATC = AbstractThermodynamicState
 prognostic_field_names(::ZMBM) = tuple()
 materialize_microphysical_fields(bμp::ZMBM, grid, bcs) = materialize_microphysical_fields(bμp.clouds, grid, bcs)
 @inline update_microphysical_fields!(μ, bμp::ZMBM, i, j, k, grid, density, 𝒰, thermo) = update_microphysical_fields!(μ, bμp.clouds, i, j, k, grid, density, 𝒰, thermo)
-@inline moisture_mass_fractions(i, j, k, grid, bμp::ZMBM, density, qᵗ, μ) = moisture_mass_fractions(i, j, k, grid, bμp.clouds, density, qᵗ, μ)
+@inline moisture_mass_fractions(i, j, k, grid, bμp::ZMBM, ρ, qᵗ, μ) = moisture_mass_fractions(i, j, k, grid, bμp.nucleation, ρ, qᵗ, μ)
 @inline compute_thermodynamic_state(𝒰₀::ATC, bμp::ZMBM, thermo) = compute_thermodynamic_state(𝒰₀, bμp.clouds, thermo)
     
 #####
 ##### One-moment bulk microphysics (CloudMicrophysics 1M)
 #####
-
-"""
-$(TYPEDSIGNATURES)
-
-Create `OneMomentTwoClassPrecipitation` with parameters for
-`cloud_ice` and `cloud_liquid` from CloudMicrophysics.jl,
-for floating point type `FT`.
-"""
-function OneMomentCloudMoisture(FT::DataType = Oceananigans.defaults.FloatType;
-                                liquid = CloudLiquid(FT),
-                                ice = CloudIce(FT))
-
-    return OneMomentCloudMoisture(liquid, ice)
-end
 
 function FourCategories(FT::DataType = Oceananigans.defaults.FloatType;
                         cloud_liquid = CloudLiquid(FT),
@@ -269,17 +255,10 @@ function prettysummary(aspr::CloudMicrophysics.Parameters.SnowAspectRatio)
                   "κ=", prettysummary(aspr.κ), ")")
 end
 
-function prettysummary(acnv::CloudMicrophysics.Parameters.Acnv1M)
-    return string("Acnv1M(",
-                  "τ=", prettysummary(acnv.τ), ", ",
-                  "q_threshold=", prettysummary(acnv.q_threshold), ", ",
-                  "k=", prettysummary(acnv.k), ")")
-end
-
 function Base.show(io::IO, bμp::BulkMicrophysics{<:Any, <:CM1MCategories})
     print(io, summary(bμp), ":\n",
           "├── nucleation: ", prettysummary(bμp.nucleation), '\n',
-          "├── collisions: ", prettysummary(bμp.categories.collisions))
+          "├── collisions: ", prettysummary(bμp.categories.collisions), '\n',
           "├── cloud_liquid: ", prettysummary(bμp.categories.cloud_liquid), '\n',
           "├── cloud_ice: ", prettysummary(bμp.categories.cloud_ice), '\n',
           "├── rain: ", prettysummary(bμp.categories.rain), '\n',
@@ -293,7 +272,7 @@ function Base.show(io::IO, bμp::BulkMicrophysics{<:Any, <:CM1MCategories})
           "    ├── mass:   ", prettysummary(bμp.categories.snow.mass), '\n',
           "    ├── r0:     ", prettysummary(bμp.categories.snow.r0), '\n',
           "    ├── ρᵢ:     ", prettysummary(bμp.categories.snow.ρᵢ), '\n',
-          "    └── aspr:   ", prettysummary(bμp.categories.snow.aspr), '\n',
+          "    └── aspr:   ", prettysummary(bμp.categories.snow.aspr))
 end
 
 

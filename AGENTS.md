@@ -109,6 +109,12 @@ Pkg.test("Breeze")
 - Run `quality_assurance.jl` to check code standards
 - Use Aqua.jl for package quality checks
 
+### Fixing bugs
+- Subtle bugs often occur when a method is not imported, especially in an extension
+- Sometimes user scripts are written expecting names to be exported, when they are not. In that case
+  consider exporting the name automatically (ie implement the user interface that the user expects) rather
+  than changing the user script
+
 ## Common Development Tasks
 
 ### Adding New Physics

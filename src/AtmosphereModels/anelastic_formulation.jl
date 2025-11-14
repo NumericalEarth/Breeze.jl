@@ -11,7 +11,7 @@ using Oceananigans: Oceananigans
 using Oceananigans.Architectures: architecture
 using Oceananigans.Grids: inactive_cell, prettysummary
 using Oceananigans.Operators: Δzᵃᵃᶜ, Δzᵃᵃᶠ, divᶜᶜᶜ, Δzᶜᶜᶜ
-using Oceananigans.Solvers: solve!, AbstractHomogeneousNeumannFormulation
+using Oceananigans.Solvers: solve!
 
 using KernelAbstractions: @kernel, @index
 using Adapt: Adapt, adapt
@@ -72,7 +72,7 @@ function diagnose_thermodynamic_state(i, j, k, grid, formulation::AnelasticFormu
     e = ρe / ρᵣ
     qᵗ = ρqᵗ / ρᵣ
 
-    q = moisture_mass_fractions(i, j, k, grid, microphysics, formulation.reference_state.density, qᵗ, microphysical_fields)
+    q = moisture_mass_fractions(i, j, k, grid, microphysics, ρᵣ, qᵗ, microphysical_fields)
     z = znode(i, j, k, grid, c, c, c)
 
     return MoistStaticEnergyState(e, q, z, pᵣ)
@@ -138,7 +138,7 @@ end
 ##### Anelastic pressure solver utilities
 #####
 
-struct AnelasticTridiagonalSolverFormulation{R} <: AbstractHomogeneousNeumannFormulation
+struct AnelasticTridiagonalSolverFormulation{R}
     reference_density :: R
 end
 
