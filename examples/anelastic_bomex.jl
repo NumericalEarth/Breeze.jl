@@ -190,7 +190,7 @@ end
 
 add_callback!(simulation, compute_averages!)
 
-T = model.temperature
+θ = model.temperature
 qˡ = model.microphysical_fields.qˡ
 qᵛ = model.microphysical_fields.qᵛ
 
