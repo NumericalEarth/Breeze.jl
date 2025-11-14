@@ -3,7 +3,10 @@ module Microphysics
 export
     SaturationAdjustment,
     MixedPhaseEquilibrium,
-    WarmPhaseEquilibrium
+    WarmPhaseEquilibrium,
+    BulkMicrophysics,
+    OneMomentCloudMoisture,
+    TwoClassPrecipitation
 
 import ..AtmosphereModels:
     compute_thermodynamic_state,

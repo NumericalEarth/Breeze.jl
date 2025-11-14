@@ -18,7 +18,10 @@ export
     mixture_heat_capacity,
     SaturationAdjustment,
     MixedPhaseEquilibrium,
-    WarmPhaseEquilibrium
+    WarmPhaseEquilibrium,
+    BulkMicrophysics,
+    OneMomentCloudMoisture,
+    TwoClassPrecipitation
 
 using Oceananigans: Oceananigans, @at, AnisotropicMinimumDissipation, Average,
                     AveragedTimeInterval, BackgroundField, BetaPlane, Bounded,

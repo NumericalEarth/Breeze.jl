@@ -10,32 +10,42 @@ The extension is automatically loaded when CloudMicrophysics is available in the
 module BreezeCloudMicrophysicsExt
 
 using CloudMicrophysics
-using CloudMicrophysics.Parameters: Parameters0M, Parameters1M
+using CloudMicrophysics.Parameters: Parameters0M, Rain, Snow, CloudIce, CloudLiquid, CollisionEff
 using CloudMicrophysics.Microphysics0M: remove_precipitation
+
+#=
 using CloudMicrophysics.Microphysics1M:
     conv_q_lcl_to_q_rai,
     conv_q_icl_to_q_sno_no_supersat,
     accretion,
     evaporation_sublimation,
     snow_melt
+=#
 
 # Import Breeze modules needed for integration
-using ..Breeze
-using ..Breeze.AtmosphereModels
-using ..Breeze.Thermodynamics: AbstractThermodynamicState, MoistureMassFractions
-using ..Breeze.Microphysics: BulkMicrophysics, center_field_tuple
+using Breeze
 
-import ..Breeze.AtmosphereModels:
+using Breeze.AtmosphereModels
+using Breeze.Thermodynamics: AbstractThermodynamicState, MoistureMassFractions
+using Breeze.Microphysics:
+    center_field_tuple,
+    BulkMicrophysics,
+    WarmPhaseSaturationAdjustment,
+    MixedPhaseSaturationAdjustment
+
+import Breeze.AtmosphereModels:
     compute_thermodynamic_state,
     prognostic_field_names,
     materialize_microphysical_fields,
     update_microphysical_fields!,
     moisture_mass_fractions
 
-import ..Breeze.Thermodynamics:
+import Breeze.Thermodynamics:
     total_moisture_mass_fraction,
     with_moisture,
     MoistureMassFractions
+
+import Breeze.Microphysics: OneMomentCloudMoisture, TwoClassPrecipitation
 
 using Oceananigans: Oceananigans
 using DocStringExtensions: TYPEDSIGNATURES
@@ -67,9 +77,34 @@ materialize_microphysical_fields(bμp::ZMBM, grid, bcs) = materialize_microphysi
 ##### One-moment bulk microphysics (CloudMicrophysics 1M)
 #####
 
-const OneMomentBulkMicrophysics = BulkMicrophysics{<:Any, <:Parameters1M}
-const WP1M = BulkMicrophysics{<:WarmPhaseSaturationAdjustment, <:Parameters1M}
-const MP1M = BulkMicrophysics{<:MixedPhaseSaturationAdjustment, <:Parameters1M}
+"""
+$(TYPEDSIGNATURES)
+
+Create `OneMomentTwoClassPrecipitation` with parameters for
+`cloud_ice` and `cloud_liquid` from CloudMicrophysics.jl,
+for floating point type `FT`.
+"""
+function OneMomentCloudMoisture(FT::DataType = Oceananigans.defaults.FloatType;
+                                liquid = CloudLiquid(FT),
+                                ice = CloudIce(FT))
+
+    return OneMomentCloudMoisture(liquid, ice)
+end
+
+function FourCategories(FT::DataType = Oceananigans.defaults.FloatType;
+                        cloud_liquid = CloudLiquid(FT),
+                        cloud_ice = CloudIce(FT),
+                        rain = Rain(FT),
+                        snow = Snow(FT),
+                        collisions = CollisionEff(FT))
+
+    return FourCategories(cloud_liquid, cloud_ice, rain, snow, collisions)
+end
+
+const CM1MCategories = FourCategories{<:CloudLiquid, <:CloudIce, <:Rain, <:Snow, <:CollisionEff}
+const OneMomentBulkMicrophysics = BulkMicrophysics{<:Any, <:CM1MCategories}
+const WP1M = BulkMicrophysics{<:WarmPhaseSaturationAdjustment, <:CM1MCategories}
+const MP1M = BulkMicrophysics{<:MixedPhaseSaturationAdjustment, <:CM1MCategories}
 
 prognostic_field_names(::WP1M) = tuple(:ρqʳ)
 prognostic_field_names(::MP1M) = (:ρqʳ, :ρqˢ)
@@ -119,12 +154,7 @@ end
     return nothing
 end
 
-"""
-$(TYPEDSIGNATURES)
-
-Extract moisture mass fractions from microphysical fields for 1M scheme.
-"""
-@inline @inbounds function moisture_mass_fractions(i, j, k, grid, bμp::OneMomentBulkMicrophysics, density, qᵗ, μ)
+@inline @inbounds function moisture_mass_fractions(i, j, k, grid, bμp::MP1M, density, qᵗ, μ)
     ρ = density[i, j, k]
     ρqʳ = μ.ρqʳ[i, j, k] / ρ
     ρqˢ = μ.ρqˢ[i, j, k] / ρ
@@ -150,6 +180,122 @@ computed in `update_microphysical_fields!`.
 @inline function compute_thermodynamic_state(𝒰₀::AbstractThermodynamicState, bμp::OneMomentBulkMicrophysics, thermo)
     return compute_thermodynamic_state(𝒰₀, bμp.clouds, thermo)
 end
+
+#####
+##### show methods
+#####
+
+import Oceananigans.Utils: prettysummary
+
+function prettysummary(cl::CloudLiquid)
+    return string("CloudLiquid(",
+                  "ρw=", prettysummary(cl.ρw), ", ",
+                  "r_eff=", prettysummary(cl.r_eff), ", ",
+                  "τ_relax=", prettysummary(cl.τ_relax))
+end
+
+function prettysummary(ci::CloudIce)
+    return string("CloudIce(",
+                  "r0=", prettysummary(ci.r0), ", ",
+                  "r_eff=", prettysummary(ci.r_eff), ", ",
+                  "ρᵢ=", prettysummary(ci.ρᵢ), ", ",
+                  "r_ice_snow=", prettysummary(ci.r_ice_snow), ", ",
+                  "τ_relax=", prettysummary(ci.τ_relax), ", ",
+                  "mass=", prettysummary(ci.mass), ", ",
+                  "pdf=", prettysummary(ci.pdf), ")")
+end
+
+function prettysummary(mass::CloudMicrophysics.Parameters.ParticleMass)
+    return string("ParticleMass(",
+                  "r0=", prettysummary(mass.r0), ", ",
+                  "m0=", prettysummary(mass.m0), ", ",
+                  "me=", prettysummary(mass.me), ", ",
+                  "Δm=", prettysummary(mass.Δm), ", ",
+                  "χm=", prettysummary(mass.χm), ")")
+end
+    
+function prettysummary(pdf::CloudMicrophysics.Parameters.ParticlePDFIceRain)
+    return string("ParticlePDFIceRain(n0=", prettysummary(pdf.n0), ")")
+end
+
+function prettysummary(eff::CloudMicrophysics.Parameters.CollisionEff)
+    return string("CollisionEff(",
+                  "e_lcl_rai=", prettysummary(eff.e_lcl_rai), ", ",
+                  "e_lcl_sno=", prettysummary(eff.e_lcl_sno), ", ",
+                  "e_icl_rai=", prettysummary(eff.e_icl_rai), ", ",
+                  "e_icl_sno=", prettysummary(eff.e_icl_sno), ", ",
+                  "e_rai_sno=", prettysummary(eff.e_rai_sno), ")")
+end
+
+prettysummary(rain::CloudMicrophysics.Parameters.Rain) = "CloudMicrophysics.Parameters.Rain"
+prettysummary(snow::CloudMicrophysics.Parameters.Snow) = "CloudMicrophysics.Parameters.Snow"
+
+#=
+function prettysummary(rain::CloudMicrophysics.Parameters.Rain)
+    return string("Rain(",
+                  "acnv1M=", prettysummary(rain.acnv1M), ", ",
+                  "area=", prettysummary(rain.area), ", ",
+                  "vent=", prettysummary(rain.vent), ", ",
+                  "r0=", prettysummary(rain.r0), ", ",
+                  "mass=", prettysummary(rain.mass), ", ",
+                  "pdf=", prettysummary(rain.pdf), ")")
+end
+=#
+
+function prettysummary(acnv::CloudMicrophysics.Parameters.Acnv1M)
+    return string("Acnv1M(",
+                  "τ=", prettysummary(acnv.τ), ", ",
+                  "q_threshold=", prettysummary(acnv.q_threshold), ", ",
+                  "k=", prettysummary(acnv.k), ")")
+end
+
+function prettysummary(area::CloudMicrophysics.Parameters.ParticleArea)
+    return string("ParticleArea(",
+                  "a0=", prettysummary(area.a0), ", ",
+                  "ae=", prettysummary(area.ae), ", ",
+                  "Δa=", prettysummary(area.Δa), ", ",
+                  "χa=", prettysummary(area.χa), ")")
+end
+
+function prettysummary(vent::CloudMicrophysics.Parameters.Ventilation)
+    return string("Ventilation(",
+                  "a=", prettysummary(vent.a), ", ",
+                  "b=", prettysummary(vent.b), ")")
+end
+
+function prettysummary(aspr::CloudMicrophysics.Parameters.SnowAspectRatio)
+    return string("SnowAspectRatio(",
+                  "ϕ=", prettysummary(aspr.ϕ), ", ",
+                  "κ=", prettysummary(aspr.κ), ")")
+end
+
+function prettysummary(acnv::CloudMicrophysics.Parameters.Acnv1M)
+    return string("Acnv1M(",
+                  "τ=", prettysummary(acnv.τ), ", ",
+                  "q_threshold=", prettysummary(acnv.q_threshold), ", ",
+                  "k=", prettysummary(acnv.k), ")")
+end
+
+function Base.show(io::IO, bμp::BulkMicrophysics{<:Any, <:CM1MCategories})
+    print(io, summary(bμp), ":\n",
+          "├── nucleation: ", prettysummary(bμp.nucleation), '\n',
+          "├── collisions: ", prettysummary(bμp.categories.collisions))
+          "├── cloud_liquid: ", prettysummary(bμp.categories.cloud_liquid), '\n',
+          "├── cloud_ice: ", prettysummary(bμp.categories.cloud_ice), '\n',
+          "├── rain: ", prettysummary(bμp.categories.rain), '\n',
+          "│   ├── acnv1M: ", prettysummary(bμp.categories.rain.acnv1M), '\n',
+          "│   ├── area:   ", prettysummary(bμp.categories.rain.area), '\n',
+          "│   ├── vent:   ", prettysummary(bμp.categories.rain.vent), '\n',
+          "│   └── pdf:    ", prettysummary(bμp.categories.rain.pdf), '\n',
+          "└── snow: ", prettysummary(bμp.categories.snow), "\n",
+          "    ├── acnv1M: ", prettysummary(bμp.categories.snow.acnv1M), '\n',
+          "    ├── area:   ", prettysummary(bμp.categories.snow.area), '\n',
+          "    ├── mass:   ", prettysummary(bμp.categories.snow.mass), '\n',
+          "    ├── r0:     ", prettysummary(bμp.categories.snow.r0), '\n',
+          "    ├── ρᵢ:     ", prettysummary(bμp.categories.snow.ρᵢ), '\n',
+          "    └── aspr:   ", prettysummary(bμp.categories.snow.aspr), '\n',
+end
+
 
 end # module BreezeCloudMicrophysicsExt
 

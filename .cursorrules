@@ -2,15 +2,15 @@
 
 ## Project Overview
 
-Breeze.jl is a Julia package for atmospheric fluid dynamics simulations on CPUs and GPUs.
-It builds on [Oceananigans.jl](https://github.com/CliMA/Oceananigans.jl) for grids, fields, solvers, and advection schemes.
-The project currently supports anelastic formulation of Euler equations and is evolving toward full compressible formulations with microphysics and radiation.
+These cursorrules are a common file for Breeze, Oceananigans, and ClimaOcean.
+These packages provide tools for simulation ocean, atmosphere, and coupled ocean-atmopshere fluid dynamics on CPUs and GPUs.
+Breeze and ClimaOcean builds on [Oceananigans.jl](https://github.com/CliMA/Oceananigans.jl) for grids, fields, solvers, and advection schemes.
 
 ## Language & Environment
 - **Language**: Julia 1.10+
 - **Architectures**: CPU and GPU
-- **Key Packages**: Oceananigans.jl, KernelAbstractions.jl, CUDA.jl, Enzyme.jl, Reactant.jl
-- **Testing**: Uses ParallelTestRunner.jl for distributed testing
+- **Key Packages**: Oceananigans.jl, Breeze.jl, ClimaOcean.jl, KernelAbstractions.jl, CUDA.jl, Enzyme.jl, Reactant.jl
+- **Testing**: Breeze.jl uses ParallelTestRunner.jl for distributed testing
 
 ## Code Style & Conventions
 
@@ -40,6 +40,20 @@ The project currently supports anelastic formulation of Euler equations and is e
    - If an implementation is awkward, don't hesitate to suggest an upstream feature (eg in Oceananigans)
      that will make something easier, rather than forcing in low quality code.
 
+### Oceananigans best practices
+
+1. **Number representation**
+  - Use Oceananigans.default.FloatType=FT to change the precision
+  - The vast majority of times, we do not want to manually set precision. Just let Float64 go.
+  - Use integers when values are integers. Do not "eagerly convert" to Float64 by adding ".0" to integers.
+
+2. **Import style**
+  - Use different style for source code versus user scripts:
+    * in source code, explicitly import all names into files
+    * in scripts, follow the user interface by writing "using Oceananigans" and "using Breeze".
+    * only use explicit import in scripts for names that are _not_ exported by the top-level files Oceananigans.jl, Breeze.jl etc.
+    * sometimes we need to write `using Oceananigans.Units`
+
 ### Naming Conventions
 - **Files**: snake_case (e.g., `atmosphere_model.jl`, `update_atmosphere_model_state.jl`)
 - **Types**: PascalCase (e.g., `AtmosphereModel`, `AnelasticFormulation`, `MoistAirBuoyancy`)
@@ -48,7 +62,7 @@ The project currently supports anelastic formulation of Euler equations and is e
 - **Variables**: Use _either_ an English long name, or mathematical notation with readable unicode. Variable names should be taken from `docs/src/appendix/notation.md` in the docs. If a new variable is created (or if one doesn't exist), it should be added to the table in notation.md
 
 
-### Module Structure
+### Breeze Module Structure
 ```
 src/
 ├── Breeze.jl                  # Main module, exports

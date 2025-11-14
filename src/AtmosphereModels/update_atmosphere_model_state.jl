@@ -79,16 +79,15 @@ end
                                                              moisture_density)
     i, j, k = @index(Global, NTuple)
 
-    @inbounds ρᵣ = formulation.reference_state.density[i, j, k]
-
     𝒰₀ = diagnose_thermodynamic_state(i, j, k, grid, formulation, microphysics, microphysical_fields,
                                       thermo, energy_density, moisture_density)
     𝒰₁ = compute_thermodynamic_state(𝒰₀, microphysics, thermo)
-    update_microphysical_fields!(microphysical_fields, microphysics, i, j, k, grid, ρᵣ, 𝒰₁, thermo)
+    update_microphysical_fields!(microphysical_fields, microphysics, i, j, k, grid, formulation.reference_state.density, 𝒰₁, thermo)
 
     @inbounds begin
         @inbounds temperature[i, j, k] = Thermodynamics.temperature(𝒰₁, thermo)
         ρe = energy_density[i, j, k]
+        ρᵣ = formulation.reference_state.density[i, j, k]
         moist_static_energy[i, j, k] = ρe / ρᵣ
     end
 end

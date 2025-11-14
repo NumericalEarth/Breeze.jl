@@ -72,7 +72,7 @@ function diagnose_thermodynamic_state(i, j, k, grid, formulation::AnelasticFormu
     e = ρe / ρᵣ
     qᵗ = ρqᵗ / ρᵣ
 
-    q = moisture_mass_fractions(i, j, k, grid, microphysics, ρᵣ, qᵗ, microphysical_fields)
+    q = moisture_mass_fractions(i, j, k, grid, microphysics, formulation.reference_state.density, qᵗ, microphysical_fields)
     z = znode(i, j, k, grid, c, c, c)
 
     return MoistStaticEnergyState(e, q, z, pᵣ)
