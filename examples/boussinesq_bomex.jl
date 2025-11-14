@@ -144,7 +144,7 @@ set!(Fθ_field, z -> dTdt_bomex(1, z))
 
 model = NonhydrostaticModel(; grid, buoyancy, coriolis,
                             advection = WENO(order=5), 
-                            tracers = (:θ, :qᵗ),
+                            tracers = (:θ, :qᵗ, :q),
                             forcing = (; q=q_forcing, u=u_forcing, v=v_forcing, θ=θ_forcing),
                             boundary_conditions = (θ=θ_bcs, qᵗ=q_bcs, u=u_bcs, v=v_bcs))
 
