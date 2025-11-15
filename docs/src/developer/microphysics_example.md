@@ -37,14 +37,12 @@ Fields:
 - `nucleation_rate_vapor_to_ice`: Rate constant for vapor → cloud ice nucleation (s⁻¹)
 - `precipitation_threshold_liquid`: Liquid mass fraction threshold for precipitation removal (kg kg⁻¹)
 - `precipitation_threshold_ice`: Ice mass fraction threshold for precipitation removal (kg kg⁻¹)
-- `precipitation_removal_rate`: Fraction of excess condensate removed per time step
 """
 struct SimpleBulkMicrophysics{FT}
-     :: FT
-     :: FT
-     :: FT
-     :: FT
-    :: FT
+   τᵛˡ :: FT
+   τᵛⁱ :: FT
+   qˡ★ :: FT
+   qⁱ★ :: FT
 end
 ```
 
@@ -81,7 +79,7 @@ using Oceananigans
 
 # Create grid
 grid = RectilinearGrid(size=(64, 64, 64), extent=(1000, 1000, 1000))
-microphysics = SimpleBulkMicrophysics(1e-4, 1e-5, 1e-3, 1e-3, 1e-1)
+microphysics = SimpleBulkMicrophysics(1e-4, 1e-5, 1e-3, 1e-3)
 model = AtmosphereModel(grid; microphysics)
 
 # Use the model normally
