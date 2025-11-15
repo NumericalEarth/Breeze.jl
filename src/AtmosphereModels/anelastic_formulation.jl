@@ -53,7 +53,15 @@ Base.show(io::IO, formulation::AnelasticFormulation) = print(io, "AnelasticFormu
 ##### Thermodynamic state
 #####
 
-function diagnose_thermodynamic_state(i, j, k, grid, formulation::AnelasticFormulation, thermo, energy_density, moisture_density)
+"""
+    $(TYPEDSIGNATURES)
+
+Return `MoistStaticEnergyState` computed from the prognostic state including
+energy density, moisture density, and microphysical fields.
+"""
+function diagnose_thermodynamic_state(i, j, k, grid, formulation::AnelasticFormulation,
+                                      microphysics, microphysical_fields,
+                                      thermo, energy_density, moisture_density)
     @inbounds begin
         ρe = energy_density[i, j, k]
         ρᵣ = formulation.reference_state.density[i, j, k]
@@ -64,8 +72,7 @@ function diagnose_thermodynamic_state(i, j, k, grid, formulation::AnelasticFormu
     e = ρe / ρᵣ
     qᵗ = ρqᵗ / ρᵣ
 
-    # TODO use microphysics model in the course of determining q
-    q = MoistureMassFractions(qᵗ)
+    q = compute_moisture_fractions(i, j, k, grid, microphysics, ρᵣ, qᵗ, microphysical_fields)
     z = znode(i, j, k, grid, c, c, c)
 
     return MoistStaticEnergyState(e, q, z, pᵣ)

@@ -1,6 +1,5 @@
 using ..Thermodynamics:
     Thermodynamics,
-    total_moisture_mass_fraction,
     mixture_heat_capacity,
     mixture_gas_constant
 
@@ -21,16 +20,33 @@ function update_state!(model::AnelasticModel, callbacks=[]; compute_tendencies=t
     return nothing
 end
 
+"""
+    $(TYPEDSIGNATURES)
+
+Compute auxiliary model variables:
+
+- velocities from momentum and density (eg ``u = ρu / ρ``)
+
+- thermodynamic variables from the prognostic thermodynamic state,
+    * temperature ``T``, possibly involving saturation adjustment
+    * moist static energy ``e = ρe / ρ``
+    * moisture mass fraction ``qᵗ = ρqᵗ / ρ``
+
+
+"""
 function compute_auxiliary_variables!(model)
     grid = model.grid
     arch = grid.architecture
-    velocities = model.velocities
-    formulation = model.formulation
-    momentum = model.momentum
 
-    launch!(arch, grid, :xyz, _compute_velocities!, velocities, grid, formulation, momentum)
-    fill_halo_regions!(velocities)
-    foreach(mask_immersed_field!, velocities)
+    launch!(arch, grid, :xyz,
+            _compute_velocities!,
+            model.velocities,
+            grid,
+            model.formulation,
+            model.momentum)
+
+    fill_halo_regions!(model.velocities)
+    foreach(mask_immersed_field!, model.velocities)
 
     launch!(arch, grid, :xyz,
             _compute_auxiliary_thermodynamic_variables!,
@@ -39,32 +55,36 @@ function compute_auxiliary_variables!(model)
             model.moisture_mass_fraction,
             grid,
             model.thermodynamics,
-            formulation,
+            model.formulation,
             model.microphysics,
             model.microphysical_fields,
             model.energy_density,
             model.moisture_density)
 
+    # TODO: Can we compute the thermodynamic variable within halos as well, and avoid
+    # halo filling later on?
     fill_halo_regions!(model.temperature)
+    fill_halo_regions!(model.moist_static_energy)
     fill_halo_regions!(model.moisture_mass_fraction)
+
+    # TODO: should we mask the auxiliary variables? They can also be masked in the kernel
 
     return nothing
 end
 
-@kernel function _compute_velocities!(velocities, grid, formulation, momentum)
+@kernel @inbounds function _compute_velocities!(velocities, grid, formulation, momentum)
     i, j, k = @index(Global, NTuple)
 
-    @inbounds begin
-        ρu = momentum.ρu[i, j, k]
-        ρv = momentum.ρv[i, j, k]
-        ρw = momentum.ρw[i, j, k]
+    ρu = momentum.ρu[i, j, k]
+    ρv = momentum.ρv[i, j, k]
+    ρw = momentum.ρw[i, j, k]
 
-        ρᵣᵃᵃᶜ = formulation.reference_state.density[i, j, k]
-        ρᵣᵃᵃᶠ = ℑzᵃᵃᶠ(i, j, k, grid, formulation.reference_state.density)
-        velocities.u[i, j, k] = ρu / ρᵣᵃᵃᶜ
-        velocities.v[i, j, k] = ρv / ρᵣᵃᵃᶜ
-        velocities.w[i, j, k] = ρw / ρᵣᵃᵃᶠ
-    end
+    ρᶜ = formulation.reference_state.density[i, j, k]
+    ρᶠ = ℑzᵃᵃᶠ(i, j, k, grid, formulation.reference_state.density)
+
+    velocities.u[i, j, k] = ρu / ρᶜ
+    velocities.v[i, j, k] = ρv / ρᶜ
+    velocities.w[i, j, k] = ρw / ρᶠ
 end
 
 @kernel function _compute_auxiliary_thermodynamic_variables!(temperature,
@@ -79,16 +99,33 @@ end
                                                              moisture_density)
     i, j, k = @index(Global, NTuple)
 
-    𝒰₀ = diagnose_thermodynamic_state(i, j, k, grid, formulation, thermo, energy_density, moisture_density)
-    𝒰₁ = compute_thermodynamic_state(𝒰₀, microphysics, thermo)
-    update_microphysical_fields!(microphysical_fields, microphysics, i, j, k, grid, 𝒰₁, thermo)
+    𝒰₀ = diagnose_thermodynamic_state(i, j, k, grid,
+                                      formulation,
+                                      microphysics,
+                                      microphysical_fields,
+                                      thermo,
+                                      energy_density,
+                                      moisture_density)
+
+    # Adjust the thermodynamic state if using a microphysics scheme
+    # that invokes saturation adjustment
+    𝒰₁ = maybe_adjust_thermodynamic_state(𝒰₀, microphysics, microphysical_fields, thermo)
+
+    update_microphysical_fields!(microphysical_fields, microphysics,
+                                 i, j, k, grid,
+                                 formulation.reference_state.density,
+                                 𝒰₁,
+                                 thermo)
 
     @inbounds begin
-        @inbounds temperature[i, j, k] = Thermodynamics.temperature(𝒰₁, thermo)
-        moisture_mass_fraction[i, j, k] = total_moisture_mass_fraction(𝒰₁)
         ρe = energy_density[i, j, k]
-        ρᵣ = formulation.reference_state.density[i, j, k]
-        moist_static_energy[i, j, k] = ρe / ρᵣ
+        ρqᵗ = moisture_density[i, j, k]
+        ρ = formulation.reference_state.density[i, j, k]
+        T = temperature(𝒰₁, thermo)
+
+        temperature[i, j, k] = T
+        moist_static_energy[i, j, k] = ρe / ρ
+        moisture_mass_fraction[i, j, k] = ρqᵗ / ρ
     end
 end
 
@@ -99,12 +136,13 @@ function compute_tendencies!(model::AnelasticModel)
     Gρv = model.timestepper.Gⁿ.ρv
     Gρw = model.timestepper.Gⁿ.ρw
 
-    model_fields = merge(fields(model), model.velocities, model.microphysical_fields,
-                         (e = model.moist_static_energy, qᵗ = model.moisture_mass_fraction))
+    model_fields = fields(model)
 
-    ρᵣ = model.formulation.reference_state.density
+    #####
+    ##### Momentum tendencies
+    #####
 
-    common_args = (
+    momentum_args = (
         model.formulation.reference_state.density,
         model.advection,
         model.velocities,
@@ -115,40 +153,79 @@ function compute_tendencies!(model::AnelasticModel)
         model.clock,
         model_fields)
 
-    u_args = tuple(common_args..., model.forcing.ρu)
-    v_args = tuple(common_args..., model.forcing.ρv)
-    w_args = tuple(common_args..., model.forcing.ρw,
-                   model.formulation, model.temperature,
-                   model.moisture_mass_fraction, model.thermodynamics)
+    u_args = tuple(momentum_args..., model.forcing.ρu)
+    v_args = tuple(momentum_args..., model.forcing.ρv)
+
+    # Extra arguments for vertical velocity are required to compute
+    # buoyancy:
+    w_args = tuple(momentum_args..., model.forcing.ρw,
+                   model.formulation,
+                   model.temperature,
+                   model.moisture_mass_fraction,
+                   model.thermodynamics)
 
     launch!(arch, grid, :xyz, compute_x_momentum_tendency!, Gρu, grid, u_args)
     launch!(arch, grid, :xyz, compute_y_momentum_tendency!, Gρv, grid, v_args)
     launch!(arch, grid, :xyz, compute_z_momentum_tendency!, Gρw, grid, w_args)
 
-    scalar_args = (ρᵣ, model.advection, model.velocities, model.closure, model.closure_fields, model.clock, model_fields)
+    # Arguments common to energy density, moisture density, and tracer density tendencies:
+    common_args = (
+        model.formulation,
+        model.thermodynamics,
+        model.energy_density,
+        model.moisture_density,
+        model.advection,
+        model.velocities,
+        model.microphysics,
+        model.microphysical_fields,
+        model.closure,
+        model.closure_fields,
+        model.clock,
+        model_fields)
+
+    #####
+    ##### Energy density tendency
+    #####
+
+    ρe_args = (
+        Val(1),
+        model.moist_static_energy,
+        model.forcing.ρe,
+        common_args...,
+        model.temperature,
+        model.moisture_mass_fraction)
+
     Gρe = model.timestepper.Gⁿ.ρe
-    ρe = model.energy_density
-    e = model.moist_static_energy
-    Fρe = model.forcing.ρe
-    ρe_args = tuple(ρe, Val(1), e, Fρe, scalar_args...,
-                    model.formulation, model.temperature,
-                    model.moisture_mass_fraction, model.thermodynamics, model.microphysical_fields, model.microphysics)
     launch!(arch, grid, :xyz, compute_moist_static_energy_tendency!, Gρe, grid, ρe_args)
 
-    ρqᵗ = model.moisture_density
+    #####
+    ##### Moisture density tendency
+    #####
+
+    ρq_args = (
+        model.moisture_density,
+        Val(2),
+        Val(:ρqᵗ),
+        model.forcing.ρqᵗ,
+        common_args...)
+
     Gρqᵗ = model.timestepper.Gⁿ.ρqᵗ
-    Fρqᵗ = model.forcing.ρqᵗ
-    ρq_args = tuple(ρqᵗ, Val(2), Fρqᵗ, scalar_args...)
     launch!(arch, grid, :xyz, compute_scalar_tendency!, Gρqᵗ, grid, ρq_args)
 
-    # Generic tracer tendencies (if any)
+    #####
+    ##### Tracer density tendencies
+    #####
+
     for (i, name) in enumerate(keys(model.tracers))
-        id = Val(i + 2)
-        c = getproperty(model.tracers, name)
-        Gc = getproperty(model.timestepper.Gⁿ, name)
-        Fc = getproperty(model.forcing, name)
-        args = tuple(c, id, Fc, scalar_args...)
-        launch!(arch, grid, :xyz, compute_scalar_tendency!, Gc, grid, args)
+        scalar_args = (
+            model.tracers[name],
+            Val(i + 2),
+            Val(name),
+            model.forcing[name],
+            common_args...)
+
+        Gρc = getproperty(model.timestepper.Gⁿ, name)
+        launch!(arch, grid, :xyz, compute_scalar_tendency!, Gρc, grid, scalar_args)
     end
 
     return nothing

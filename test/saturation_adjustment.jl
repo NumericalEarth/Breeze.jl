@@ -15,7 +15,7 @@ using Breeze.Thermodynamics:
     PlanarMixedPhaseSurface
 
 using Breeze.MoistAirBuoyancies: compute_boussinesq_adjustment_temperature
-using Breeze.AtmosphereModels: compute_temperature
+using Breeze.Microphysics: compute_temperature
 
 using Breeze.Microphysics:
     adjustment_saturation_specific_humidity

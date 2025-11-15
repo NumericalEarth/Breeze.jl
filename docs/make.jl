@@ -18,6 +18,7 @@ mkpath(literated_dir)
 
 example_scripts = [
     "thermal_bubble.jl",
+    "prescribed_sst.jl",
 ]
 
 for script_file in example_scripts
@@ -29,6 +30,7 @@ end
 
 example_pages = Any[
     "Thermal bubble" => "literated/thermal_bubble.md",
+    "Prescribed SST" => "literated/prescribed_sst.md",
 ]
 
 makedocs(
@@ -42,8 +44,15 @@ makedocs(
         "Thermodynamics" => "thermodynamics.md",
         "Microphysics" => Any[
             "Overview" => "microphysics/microphysics_overview.md",
-            "Warm phase saturation adjustment" => "microphysics/saturation_adjustment.md",
+            "Warm phase saturation adjustment" => "microphysics/warm_phase_saturation_adjustment.md",
+            "Mixed phase saturation adjustment" => "microphysics/mixed_phase_saturation_adjustment.md",
         ],
+        # "Developer Docs" => Any[
+        #     "Microphysics" => Any[
+        #         "Microphysics Interface" => "developer/microphysics_interface.md",
+        #         "Example Implementation" => "developer/microphysics_example.md",
+        #     ],
+        # ],
         "Dycore equations and algorithms" => "dycore_equations_algorithms.md",
         "Appendix" => Any[
             "Notation" => "appendix/notation.md",

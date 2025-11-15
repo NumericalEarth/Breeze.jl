@@ -2,15 +2,15 @@
 
 ## Project Overview
 
-Breeze.jl is a Julia package for atmospheric fluid dynamics simulations on CPUs and GPUs.
-It builds on [Oceananigans.jl](https://github.com/CliMA/Oceananigans.jl) for grids, fields, solvers, and advection schemes.
-The project currently supports anelastic formulation of Euler equations and is evolving toward full compressible formulations with microphysics and radiation.
+These cursorrules are a common file for Breeze, Oceananigans, and ClimaOcean.
+These packages provide tools for simulation ocean, atmosphere, and coupled ocean-atmopshere fluid dynamics on CPUs and GPUs.
+Breeze and ClimaOcean builds on [Oceananigans.jl](https://github.com/CliMA/Oceananigans.jl) for grids, fields, solvers, and advection schemes.
 
 ## Language & Environment
 - **Language**: Julia 1.10+
 - **Architectures**: CPU and GPU
-- **Key Packages**: Oceananigans.jl, KernelAbstractions.jl, CUDA.jl, Enzyme.jl, Reactant.jl
-- **Testing**: Uses ParallelTestRunner.jl for distributed testing
+- **Key Packages**: Oceananigans.jl, Breeze.jl, ClimaOcean.jl, KernelAbstractions.jl, CUDA.jl, Enzyme.jl, Reactant.jl
+- **Testing**: Breeze.jl uses ParallelTestRunner.jl for distributed testing
 
 ## Code Style & Conventions
 
@@ -40,6 +40,20 @@ The project currently supports anelastic formulation of Euler equations and is e
    - If an implementation is awkward, don't hesitate to suggest an upstream feature (eg in Oceananigans)
      that will make something easier, rather than forcing in low quality code.
 
+### Oceananigans best practices
+
+1. **Number representation**
+  - Use Oceananigans.default.FloatType=FT to change the precision
+  - The vast majority of times, we do not want to manually set precision. Just let Float64 go.
+  - Use integers when values are integers. Do not "eagerly convert" to Float64 by adding ".0" to integers.
+
+2. **Import style**
+  - Use different style for source code versus user scripts:
+    * in source code, explicitly import all names into files
+    * in scripts, follow the user interface by writing "using Oceananigans" and "using Breeze".
+    * only use explicit import in scripts for names that are _not_ exported by the top-level files Oceananigans.jl, Breeze.jl etc.
+    * sometimes we need to write `using Oceananigans.Units`
+
 ### Naming Conventions
 - **Files**: snake_case (e.g., `atmosphere_model.jl`, `update_atmosphere_model_state.jl`)
 - **Types**: PascalCase (e.g., `AtmosphereModel`, `AnelasticFormulation`, `MoistAirBuoyancy`)
@@ -48,7 +62,7 @@ The project currently supports anelastic formulation of Euler equations and is e
 - **Variables**: Use _either_ an English long name, or mathematical notation with readable unicode. Variable names should be taken from `docs/src/appendix/notation.md` in the docs. If a new variable is created (or if one doesn't exist), it should be added to the table in notation.md
 
 
-### Module Structure
+### Breeze Module Structure
 ```
 src/
 ├── Breeze.jl                  # Main module, exports
@@ -95,6 +109,16 @@ Pkg.test("Breeze")
 - Run `quality_assurance.jl` to check code standards
 - Use Aqua.jl for package quality checks
 
+### Fixing bugs
+- Subtle bugs often occur when a method is not imported, especially in an extension
+- Sometimes user scripts are written expecting names to be exported, when they are not. In that case
+  consider exporting the name automatically (ie implement the user interface that the user expects) rather
+  than changing the user script
+- You should almost NEVER extend `getproperty` to fix a problem with addressing an undefined property.
+  The bug is almost 100% on the caller side and requires changing the calling code so that it does not 
+  try to access an undefined property. 95% of the time, the name of the property has simply changed
+  in the source side and the calling function has not been updated.
+
 ## Common Development Tasks
 
 ### Adding New Physics
@@ -110,6 +134,20 @@ Pkg.test("Breeze")
 - State updates in `update_atmosphere_model_state.jl`
 - Pressure solver in `anelastic_pressure_solver.jl`
 - Always consider anelastic formulation constraints
+
+## Adding new examples
+- Follow the style of existing examples, not the source code
+- Remember that initial condition functions act _pointwise_, there should be no broadcasting inside an initial condition function
+- Do not convert between units. Always keep the units the same for calculations, unless plotting
+- If possible, avoid long understore names. Use concise evokacative names like `z = znodes(grid, Center())`.
+- Use unicode that is consistent with the source code. Do not be afraid of unicode for intermediate variables.
+- Make sure that all notation in examples is consistent with `docs/src/appendix/notation.md`
+- Always add axis labels and colobars to simulations.
+- Check previous examples and strive to make new examples that add new physics and new value relative to old examples. Don't just copy old examples.
+- `@allowscalar` should very sparingly be used or never in an example. If you need to, make a suggestion to change the source code so that `@allowscalar` is not needed.
+- The examples should use exported names primarily. If an example needs an excessive amount of internal names, those names should be exported or a new abstraction needs to be developed.
+- For discrete_form=true forcing and boundayr conditions, always use xnode, ynode, and znode from Oceananigans. _Never_ access grid metrics manually. Do not pass in
+  coordinates into the functions.
 
 ## Documentation
 
