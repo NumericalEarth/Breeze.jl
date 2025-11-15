@@ -118,10 +118,7 @@ end
         θ = potential_temperature[i, j, k]
     end
 
-    g = thermo.gravitational_acceleration
-    z = znode(i, j, k, grid, c, c, c)
     p₀ = formulation.reference_state.base_pressure
-
     q = moisture_mass_fractions(i, j, k, grid, microphysics, microphysical_fields, moisture_mass_fraction)
     𝒰₀ = PotentialTemperatureState(θ, q, p₀, pᵣ)
     𝒰 = compute_thermodynamic_state(𝒰₀, microphysics, thermo)
@@ -134,6 +131,9 @@ end
     ℒⁱᵣ = thermo.ice.reference_latent_heat
     qˡ = q.liquid
     qⁱ = q.ice
+
+    g = thermo.gravitational_acceleration
+    z = znode(i, j, k, grid, c, c, c)
 
     @inbounds energy_density[i, j, k] = ρᵣ * (cᵖᵐ * T + g * z - ℒˡᵣ * qˡ - ℒⁱᵣ * qⁱ)
 end
