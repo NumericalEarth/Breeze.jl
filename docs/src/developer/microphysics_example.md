@@ -40,199 +40,36 @@ Fields:
 - `precipitation_removal_rate`: Fraction of excess condensate removed per time step
 """
 struct SimpleBulkMicrophysics{FT}
-    nucleation_rate_vapor_to_liquid :: FT
-    nucleation_rate_vapor_to_ice :: FT
-    precipitation_threshold_liquid :: FT
-    precipitation_threshold_ice :: FT
-    precipitation_removal_rate :: FT
+     :: FT
+     :: FT
+     :: FT
+     :: FT
+    :: FT
 end
-
-function SimpleBulkMicrophysics(FT::DataType = Float64;
-                               nucleation_rate_vapor_to_liquid = 1e-4,
-                               nucleation_rate_vapor_to_ice = 1e-5,
-                               precipitation_threshold_liquid = 1e-3,
-                               precipitation_threshold_ice = 1e-3,
-                               precipitation_removal_rate = 0.1)
-    return SimpleBulkMicrophysics(FT(nucleation_rate_vapor_to_liquid),
-                                  FT(nucleation_rate_vapor_to_ice),
-                                  FT(precipitation_threshold_liquid),
-                                  FT(precipitation_threshold_ice),
-                                  FT(precipitation_removal_rate))
-end
+```
 
 #####
 ##### Interface implementation
 #####
 
-"""
-$(TYPEDSIGNATURES)
+```julia
+prognostic_field_names(::SimpleBulkMicrophysics) = (:ρqᵛ, :ρqˡ, :ρqⁱ)
 
-Return `tuple()` - SimpleBulkMicrophysics has no prognostic variables.
-All microphysical processes are diagnostic.
-"""
-prognostic_field_names(::SimpleBulkMicrophysics) = tuple()
-
-"""
-$(TYPEDSIGNATURES)
-
-Create microphysical fields for SimpleBulkMicrophysics.
-Returns diagnostic fields for cloud liquid and cloud ice.
-"""
 function materialize_microphysical_fields(μp::SimpleBulkMicrophysics, grid, boundary_conditions)
-    names = (:qᶜˡ, :qᶜⁱ)
+    names = prognostic_field_names(μp)
     return center_field_tuple(grid, names...)
 end
 
-"""
-$(TYPEDSIGNATURES)
+@inline update_microphysical_fields!(μ, μp::SimpleBulkMicrophysics, i, j, k, grid, density, 𝒰, thermo) = nothing
 
-Update microphysical fields from the thermodynamic state.
-This function applies explicit nucleation and precipitation removal.
-"""
-@inline @inbounds function update_microphysical_fields!(μ, μp::SimpleBulkMicrophysics, 
-                                                        i, j, k, grid, density, 𝒰, thermo)
-    # Extract current moisture state
-    qᵗ = total_moisture_mass_fraction(𝒰)
-    qᵛ = 𝒰.moisture_mass_fractions.vapor
-    qˡ = 𝒰.moisture_mass_fractions.liquid
-    qⁱ = 𝒰.moisture_mass_fractions.ice
-    
-    # Get current cloud fields
-    qᶜˡ_old = μ.qᶜˡ[i, j, k]
-    qᶜⁱ_old = μ.qᶜⁱ[i, j, k]
-    
-    # Explicit nucleation: convert vapor to cloud condensate
-    # This is a simplified model - in reality, nucleation depends on supersaturation
-    # and aerosol properties. Here we use constant rates.
-    Δt_nuc = 1.0  # Time step for nucleation (would come from model in practice)
-    Δqᵛ→ˡ = μp.nucleation_rate_vapor_to_liquid * qᵛ * Δt_nuc
-    Δqᵛ→ⁱ = μp.nucleation_rate_vapor_to_ice * qᵛ * Δt_nuc
-    
-    # Update cloud fields (simplified - in practice, this would be part of tendency calculation)
-    qᶜˡ_new = qᶜˡ_old + Δqᵛ→ˡ
-    qᶜⁱ_new = qᶜⁱ_old + Δqᵛ→ⁱ
-    
-    # Precipitation removal: remove excess condensate above threshold
-    if qᶜˡ_new > μp.precipitation_threshold_liquid
-        excess = qᶜˡ_new - μp.precipitation_threshold_liquid
-        qᶜˡ_new -= μp.precipitation_removal_rate * excess
-    end
-    
-    if qᶜⁱ_new > μp.precipitation_threshold_ice
-        excess = qᶜⁱ_new - μp.precipitation_threshold_ice
-        qᶜⁱ_new -= μp.precipitation_removal_rate * excess
-    end
-    
-    # Store updated fields
-    μ.qᶜˡ[i, j, k] = qᶜˡ_new
-    μ.qᶜⁱ[i, j, k] = qᶜⁱ_new
-    
-    return nothing
+@inline @inbounds function compute_moisture_fractions(i, j, k, grid, μp::SimpleBulkMicrophysics, ρ, qᵗ, μ)
+    qᵛ = μ.ρqᵛ[i, j, k] / ρ
+    qˡ = μ.ρqˡ[i, j, k] / ρ
+    qⁱ = μ.ρqⁱ[i, j, k] / ρ
+    MoistureMassFractions(qᵛ, qˡ, qⁱ)
 end
 
-"""
-$(TYPEDSIGNATURES)
-
-Compute moisture fractions from microphysical fields.
-For SimpleBulkMicrophysics, we combine cloud species with any remaining vapor.
-"""
-@inline @inbounds function compute_moisture_fractions(i, j, k, grid, μp::SimpleBulkMicrophysics, 
-                                                      ρ, qᵗ, μ)
-    qᶜˡ = μ.qᶜˡ[i, j, k]
-    qᶜⁱ = μ.qᶜⁱ[i, j, k]
-    
-    # Total condensate
-    qᶜ = qᶜˡ + qᶜⁱ
-    
-    # Vapor is remainder
-    qᵛ = max(0, qᵗ - qᶜ)
-    
-    # Update liquid and ice to match cloud fields
-    # (In a more sophisticated scheme, we might partition based on temperature)
-    qˡ = qᶜˡ
-    qⁱ = qᶜⁱ
-    
-    return MoistureMassFractions(qᵛ, qˡ, qⁱ)
-end
-
-"""
-$(TYPEDSIGNATURES)
-
-Compute thermodynamic state adjustment.
-For SimpleBulkMicrophysics, we apply nucleation and precipitation removal.
-"""
-@inline function compute_thermodynamic_state(𝒰₀::AbstractThermodynamicState, 
-                                             μp::SimpleBulkMicrophysics, thermo)
-    # Extract current state
-    qᵗ = total_moisture_mass_fraction(𝒰₀)
-    q₀ = 𝒰₀.moisture_mass_fractions
-    
-    # Simplified nucleation model
-    # In practice, this would be more sophisticated and depend on supersaturation
-    qᵛ = q₀.vapor
-    
-    # Apply nucleation rates (simplified - assumes small changes)
-    Δqᵛ→ˡ = μp.nucleation_rate_vapor_to_liquid * qᵛ
-    Δqᵛ→ⁱ = μp.nucleation_rate_vapor_to_ice * qᵛ
-    
-    # Update moisture fractions
-    qˡ_new = q₀.liquid + Δqᵛ→ˡ
-    qⁱ_new = q₀.ice + Δqᵛ→ⁱ
-    qᵛ_new = max(0, qᵗ - qˡ_new - qⁱ_new)
-    
-    # Apply precipitation removal
-    if qˡ_new > μp.precipitation_threshold_liquid
-        excess = qˡ_new - μp.precipitation_threshold_liquid
-        qˡ_new -= μp.precipitation_removal_rate * excess
-        qᵛ_new += μp.precipitation_removal_rate * excess  # Return to vapor
-    end
-    
-    if qⁱ_new > μp.precipitation_threshold_ice
-        excess = qⁱ_new - μp.precipitation_threshold_ice
-        qⁱ_new -= μp.precipitation_removal_rate * excess
-        qᵛ_new += μp.precipitation_removal_rate * excess  # Return to vapor
-    end
-    
-    # Ensure conservation
-    q_total = qᵛ_new + qˡ_new + qⁱ_new
-    if q_total != qᵗ
-        # Normalize to conserve total moisture
-        scale = qᵗ / q_total
-        qᵛ_new *= scale
-        qˡ_new *= scale
-        qⁱ_new *= scale
-    end
-    
-    q₁ = MoistureMassFractions(qᵛ_new, qˡ_new, qⁱ_new)
-    return with_moisture(𝒰₀, q₁)
-end
-
-"""
-$(TYPEDSIGNATURES)
-
-Compute temperature from thermodynamic state.
-Delegates to compute_thermodynamic_state then extracts temperature.
-"""
-@inline function compute_temperature(𝒰₀::AbstractThermodynamicState, 
-                                     μp::SimpleBulkMicrophysics, thermo)
-    𝒰₁ = compute_thermodynamic_state(𝒰₀, μp, thermo)
-    return temperature(𝒰₁, thermo)
-end
-
-"""
-$(TYPEDSIGNATURES)
-
-Return microphysical velocities.
-SimpleBulkMicrophysics has no sedimentation (cloud particles are small).
-"""
 @inline microphysical_velocities(::SimpleBulkMicrophysics, name) = nothing
-
-"""
-$(TYPEDSIGNATURES)
-
-Return microphysical tendency.
-SimpleBulkMicrophysics has no prognostic fields, so tendencies are zero.
-"""
 @inline microphysical_tendency(i, j, k, grid, ::SimpleBulkMicrophysics, args...) = zero(grid)
 ```
 
@@ -244,17 +81,7 @@ using Oceananigans
 
 # Create grid
 grid = RectilinearGrid(size=(64, 64, 64), extent=(1000, 1000, 1000))
-
-# Create microphysics scheme
-microphysics = SimpleBulkMicrophysics(
-    nucleation_rate_vapor_to_liquid = 1e-4,
-    nucleation_rate_vapor_to_ice = 1e-5,
-    precipitation_threshold_liquid = 1e-3,
-    precipitation_threshold_ice = 1e-3,
-    precipitation_removal_rate = 0.1
-)
-
-# Create model
+microphysics = SimpleBulkMicrophysics(1e-4, 1e-5, 1e-3, 1e-3, 1e-1)
 model = AtmosphereModel(grid; microphysics)
 
 # Use the model normally
