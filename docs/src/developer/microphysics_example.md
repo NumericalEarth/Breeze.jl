@@ -18,7 +18,7 @@ The scheme has no prognostic microphysical fields (all processes are diagnostic)
 using Breeze
 using Breeze.AtmosphereModels
 using Breeze.Thermodynamics: AbstractThermodynamicState, MoistureMassFractions, 
-                             total_moisture_mass_fraction, with_moisture, temperature, density
+                             with_moisture, temperature, density
 using Breeze.Microphysics: center_field_tuple
 using Oceananigans: CenterField
 using DocStringExtensions: TYPEDSIGNATURES

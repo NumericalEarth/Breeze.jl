@@ -1,5 +1,3 @@
-using Oceananigans.Utils: prettysummary
-
 struct BulkMicrophysics{N, C}
     nucleation :: N
     categories :: C
