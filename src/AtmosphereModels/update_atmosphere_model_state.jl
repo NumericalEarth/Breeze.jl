@@ -127,7 +127,7 @@ function compute_tendencies!(model::AnelasticModel)
     launch!(arch, grid, :xyz, compute_y_momentum_tendency!, Gρv, grid, v_args)
     launch!(arch, grid, :xyz, compute_z_momentum_tendency!, Gρw, grid, w_args)
 
-    scalar_args = (
+    common_args = (
         model.formulation,
         model.thermodynamics,
         model.energy_density,
@@ -145,7 +145,7 @@ function compute_tendencies!(model::AnelasticModel)
         Val(1),
         model.moist_static_energy,
         model.forcing.ρe,
-        scalar_args...,
+        common_args...,
         model.temperature,
         model.moisture_mass_fraction)
 
@@ -157,7 +157,7 @@ function compute_tendencies!(model::AnelasticModel)
         Val(2),
         Val(:ρqᵗ),
         model.forcing.ρqᵗ,
-        scalar_args...)
+        common_args...)
 
     Gρqᵗ = model.timestepper.Gⁿ.ρqᵗ
     launch!(arch, grid, :xyz, compute_scalar_tendency!, Gρqᵗ, grid, ρq_args)
@@ -169,7 +169,7 @@ function compute_tendencies!(model::AnelasticModel)
             Val(i + 2),
             Val(name),
             model.forcing[name],
-            scalar_args...)
+            common_args...)
 
         Gρc = getproperty(model.timestepper.Gⁿ, name)
         launch!(arch, grid, :xyz, compute_scalar_tendency!, Gρc, grid, scalar_args)
