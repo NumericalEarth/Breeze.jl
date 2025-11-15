@@ -46,6 +46,12 @@ makedocs(
             "Overview" => "microphysics/microphysics_overview.md",
             "Warm phase saturation adjustment" => "microphysics/saturation_adjustment.md",
         ],
+        "Developer Docs" => Any[
+            "Microphysics" => Any[
+                "Microphysics Interface" => "developer/microphysics_interface.md",
+                "Example Implementation" => "developer/microphysics_example.md",
+            ],
+        ],
         "Dycore equations and algorithms" => "dycore_equations_algorithms.md",
         "Appendix" => Any[
             "Notation" => "appendix/notation.md",
