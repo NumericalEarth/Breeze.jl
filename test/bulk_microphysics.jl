@@ -14,7 +14,7 @@ const BulkMicrophysics = Breeze.Microphysics.BulkMicrophysics
     # Test default construction
     bμp_default = BulkMicrophysics(FT)
     @test bμp_default.nucleation isa SaturationAdjustment
-    @test bμp_default.precipitation === nothing
+    @test bμp_default.categories === nothing
     @test bμp_default isa BulkMicrophysics{<:SaturationAdjustment, Nothing}
 
     # Test construction with explicit clouds scheme
