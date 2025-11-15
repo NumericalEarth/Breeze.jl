@@ -13,7 +13,6 @@ using Oceananigans.Utils: launch!, prettytime, prettykeys
 
 import Oceananigans: fields, prognostic_fields
 import Oceananigans.Advection: cell_advection_timescale
-import Base: getproperty
 
 materialize_density(formulation, grid) = CenterField(grid)
 
