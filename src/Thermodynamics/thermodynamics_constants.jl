@@ -152,7 +152,7 @@ and vapor, as well as condensed liquid and ice phases.
 The `triple_point_temperature` and `triple_point_pressure` may be combined with
 internal energy parameters for condensed phases to compute the vapor pressure
 at the boundary between vapor and a homogeneous sample of the condensed phase.
-The `gravitational_acceleration` parameter is included to compute `reference_state`
+The `gravitational_acceleration` parameter is included to compute [`ReferenceState`](@ref)
 quantities associated with hydrostatic balance.
 """
 function ThermodynamicConstants(FT = Oceananigans.defaults.FloatType;
