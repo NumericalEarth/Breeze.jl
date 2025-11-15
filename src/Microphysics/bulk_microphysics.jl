@@ -21,7 +21,7 @@ Base.summary(bμp::FourCategoryBulkMicrophysics) = "FourCategoryBulkMicrophysics
 
 Return a `BulkMicrophysics` microphysics scheme with `clouds` and `precipitation` microphysics schemes.
 """
-function BulkMicrophysics(FT::DataType = Oceananigans.defaults.FloatType,
+function BulkMicrophysics(FT::DataType = Oceananigans.defaults.FloatType;
                           categories = nothing,
                           nucleation = SaturationAdjustment(FT))
 
