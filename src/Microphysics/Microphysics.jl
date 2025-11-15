@@ -10,7 +10,7 @@ export
     OneMomentCloudMicrophysics
 
 import ..AtmosphereModels:
-    compute_thermodynamic_state,
+    maybe_adjust_thermodynamic_state,
     update_microphysical_fields!,
     prognostic_field_names,
     materialize_microphysical_fields,

@@ -48,7 +48,7 @@ $(TYPEDSIGNATURES)
 Return a possibly adjusted thermodynamic state associated with the
 `microphysics` scheme, and `thermo`dynamic constants.
 """
-@inline compute_thermodynamic_state(state::AbstractThermodynamicState, ::Nothing, thermo) = state
+@inline maybe_adjust_thermodynamic_state(state::AbstractThermodynamicState, ::Nothing, thermo) = state
 
 """
 $(TYPEDSIGNATURES)
@@ -77,7 +77,7 @@ Compute the thermodynamic state associated with `microphysics` and `thermo`dynam
 and then return the temperature associated with that state.
 """
 @inline function compute_temperature(𝒰₀, microphysics, thermo)
-    𝒰₁ = compute_thermodynamic_state(𝒰₀, microphysics, thermo)
+    𝒰₁ = maybe_adjust_thermodynamic_state(𝒰₀, microphysics, thermo)
     return temperature(𝒰₁, thermo)
 end
 

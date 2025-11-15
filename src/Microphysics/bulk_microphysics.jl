@@ -28,8 +28,8 @@ function BulkMicrophysics(FT::DataType = Oceananigans.defaults.FloatType;
     return BulkMicrophysics(nucleation, categories)
 end
 
-function compute_thermodynamic_state(𝒰₀::AbstractThermodynamicState, bμp::BulkMicrophysics, thermo)
-    return compute_thermodynamic_state(𝒰₀, bμp.nucleation, thermo)
+function maybe_adjust_thermodynamic_state(𝒰₀::AbstractThermodynamicState, bμp::BulkMicrophysics, thermo)
+    return maybe_adjust_thermodynamic_state(𝒰₀, bμp.nucleation, thermo)
 end
 
 const NPBM = BulkMicrophysics{<:Any, Nothing}

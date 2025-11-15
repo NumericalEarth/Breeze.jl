@@ -125,7 +125,7 @@ end
 
     q = compute_moisture_fractions(i, j, k, grid, microphysics, ρᵣ, qᵗ, microphysical_fields)
     𝒰₀ = PotentialTemperatureState(θ, q, p₀, pᵣ)
-    𝒰 = compute_thermodynamic_state(𝒰₀, microphysics, thermo)
+    𝒰 = maybe_adjust_thermodynamic_state(𝒰₀, microphysics, thermo)
 
     T = temperature(𝒰, thermo)
     q = 𝒰.moisture_mass_fractions

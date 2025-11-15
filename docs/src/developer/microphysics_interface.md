@@ -136,7 +136,7 @@ for k in 1:grid.Nz, j in 1:grid.Ny, i in 1:grid.Nx
                                      model.energy_density, model.moisture_density)
     
     # Adjust state (saturation adjustment)
-    𝒰_adjusted = compute_thermodynamic_state(𝒰, microphysics, model.thermodynamics)
+    𝒰_adjusted = maybe_adjust_thermodynamic_state(𝒰, microphysics, model.thermodynamics)
     
     # Update microphysical fields
     update_microphysical_fields!(model.microphysical_fields, microphysics, 
@@ -155,9 +155,9 @@ end
 - Extract moisture mass fractions from `state.moisture_mass_fractions`
 - For schemes with precipitation, combine cloud and precipitation species (e.g., `qᶜˡ = qˡ + qʳ`)
 
-### `compute_thermodynamic_state(state, microphysics, thermo)`
+### `maybe_adjust_thermodynamic_state(state, microphysics, thermo)`
 
-**Signature:** `compute_thermodynamic_state(state::AbstractThermodynamicState, microphysics, thermo) -> AbstractThermodynamicState`
+**Signature:** `maybe_adjust_thermodynamic_state(state::AbstractThermodynamicState, microphysics, thermo) -> AbstractThermodynamicState`
 
 **Purpose:** Adjusts the thermodynamic state according to microphysical processes (e.g., saturation adjustment, nucleation).
 
@@ -320,11 +320,11 @@ end
 
 **Implementation:**
 
-This function typically calls `compute_thermodynamic_state` and then extracts temperature:
+This function typically calls `maybe_adjust_thermodynamic_state` and then extracts temperature:
 
 ```julia
 @inline function compute_temperature(𝒰₀::AbstractThermodynamicState, microphysics, thermo)
-    𝒰₁ = compute_thermodynamic_state(𝒰₀, microphysics, thermo)
+    𝒰₁ = maybe_adjust_thermodynamic_state(𝒰₀, microphysics, thermo)
     return temperature(𝒰₁, thermo)
 end
 ```

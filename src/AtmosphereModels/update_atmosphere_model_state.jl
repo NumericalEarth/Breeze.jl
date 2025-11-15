@@ -80,7 +80,7 @@ end
 
     𝒰₀ = diagnose_thermodynamic_state(i, j, k, grid, formulation, microphysics, microphysical_fields,
                                       thermo, energy_density, moisture_density)
-    𝒰₁ = compute_thermodynamic_state(𝒰₀, microphysics, thermo)
+    𝒰₁ = maybe_adjust_thermodynamic_state(𝒰₀, microphysics, thermo)
     update_microphysical_fields!(microphysical_fields, microphysics, i, j, k, grid, formulation.reference_state.density, 𝒰₁, thermo)
 
     @inbounds begin

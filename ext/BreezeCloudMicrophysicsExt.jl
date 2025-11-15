@@ -41,7 +41,7 @@ using Oceananigans: Oceananigans
 using DocStringExtensions: TYPEDSIGNATURES
 
 import Breeze.AtmosphereModels:
-    compute_thermodynamic_state,
+    maybe_adjust_thermodynamic_state,
     prognostic_field_names,
     materialize_microphysical_fields,
     update_microphysical_fields!,
@@ -67,7 +67,7 @@ Type alias for `BulkMicrophysics` with CloudMicrophysics 0M precipitation scheme
 
 The 0M scheme instantly removes precipitable condensate above a threshold.
 Interface is identical to non-precipitating microphysics except that
-`compute_thermodynamic_state` calls CloudMicrophysics `remove_precipitation` first.
+`maybe_adjust_thermodynamic_state` calls CloudMicrophysics `remove_precipitation` first.
 """
 const ZeroMomentCloudMicrophysics = BulkMicrophysics{<:Any, <:Parameters0M}
 const ZMCM = ZeroMomentCloudMicrophysics
@@ -77,7 +77,7 @@ prognostic_field_names(::ZMCM) = tuple()
 materialize_microphysical_fields(bμp::ZMCM, grid, bcs) = materialize_microphysical_fields(bμp.nucleation, grid, bcs)
 @inline update_microphysical_fields!(μ, bμp::ZMCM, i, j, k, grid, density, 𝒰, thermo) = update_microphysical_fields!(μ, bμp.nucleation, i, j, k, grid, density, 𝒰, thermo)
 @inline compute_moisture_fractions(i, j, k, grid, bμp::ZMCM, ρ, qᵗ, μ) = compute_moisture_fractions(i, j, k, grid, bμp.nucleation, ρ, qᵗ, μ)
-@inline compute_thermodynamic_state(𝒰₀::ATC, bμp::ZMCM, thermo) = compute_thermodynamic_state(𝒰₀, bμp.nucleation, thermo)
+@inline maybe_adjust_thermodynamic_state(𝒰₀::ATC, bμp::ZMCM, thermo) = maybe_adjust_thermodynamic_state(𝒰₀, bμp.nucleation, thermo)
 @inline microphysical_tendency(i, j, k, grid, bμp::ZMCM, args...) = zero(grid)
 @inline microphysical_velocities(bμp::ZMCM, name) = nothing
 
@@ -155,7 +155,7 @@ end
 # This differs from the adjustment described in Yatunin et al 2025, wherein
 # precipitating species are excluded from the adjustment.
 # The reason we do this is because excluding precipiating species from adjustment requires
-# a more complex algorithm in which precipitating species are passed into compute_thermodynamic_state!
+# a more complex algorithm in which precipitating species are passed into maybe_adjust_thermodynamic_state!
 # We can consider changing this in the future.
 @inline @inbounds function update_microphysical_fields!(μ, bμp::WP1M, i, j, k, grid, density, 𝒰, thermo)
     ρ = density[i, j, k]
@@ -206,8 +206,8 @@ Delegates to clouds scheme (saturation adjustment) for vapor↔cloud conversion.
 CloudMicrophysics 1M handles cloud↔precipitation processes via tendencies
 computed in `update_microphysical_fields!`.
 """
-@inline compute_thermodynamic_state(𝒰₀::AbstractThermodynamicState, bμp::OneMomentCloudMicrophysics, thermo) =
-    compute_thermodynamic_state(𝒰₀, bμp.clouds, thermo)
+@inline maybe_adjust_thermodynamic_state(𝒰₀::AbstractThermodynamicState, bμp::OneMomentCloudMicrophysics, thermo) =
+    maybe_adjust_thermodynamic_state(𝒰₀, bμp.clouds, thermo)
 
 #####
 ##### show methods

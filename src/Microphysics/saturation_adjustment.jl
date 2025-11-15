@@ -207,7 +207,7 @@ $(TYPEDSIGNATURES)
 
 Return the saturation-adjusted thermodynamic state using a secant iteration.
 """
-@inline function compute_thermodynamic_state(𝒰₀::ATC, microphysics::SA, thermo)
+@inline function maybe_adjust_thermodynamic_state(𝒰₀::ATC, microphysics::SA, thermo)
     FT = eltype(𝒰₀)
     is_absolute_zero(𝒰₀) && return 𝒰₀
 
