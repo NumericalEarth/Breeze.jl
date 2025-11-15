@@ -74,7 +74,7 @@ end
 end
 
 @inline function z_momentum_tendency(i, j, k, grid,
-                                     reference_density,
+                                     density,
                                      advection,
                                      velocities,
                                      closure,
@@ -89,10 +89,11 @@ end
                                      moisture_mass_fraction,
                                      thermo)
 
+
     return ( - div_𝐯w(i, j, k, grid, advection, velocities, momentum.ρw)
-             + ρ_bᶜᶜᶠ(i, j, k, grid, reference_density, temperature, moisture_mass_fraction, formulation, thermo)
+             + ρ_bᶜᶜᶠ(i, j, k, grid, density, temperature, moisture_mass_fraction, formulation, thermo)
              - z_f_cross_U(i, j, k, grid, coriolis, momentum)
-             - ∂ⱼ_𝒯₃ⱼ(i, j, k, grid, reference_density, closure, closure_fields, clock, model_fields, nothing)
+             - ∂ⱼ_𝒯₃ⱼ(i, j, k, grid, density, closure, closure_fields, clock, model_fields, nothing)
              + ρw_forcing(i, j, k, grid, clock, model_fields))
 end
 

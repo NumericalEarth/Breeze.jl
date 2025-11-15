@@ -28,11 +28,11 @@ function BulkMicrophysics(FT::DataType = Oceananigans.defaults.FloatType;
     return BulkMicrophysics(nucleation, categories)
 end
 
-function maybe_adjust_thermodynamic_state(𝒰₀::AbstractThermodynamicState, bμp::BulkMicrophysics, thermo)
-    return maybe_adjust_thermodynamic_state(𝒰₀, bμp.nucleation, thermo)
-end
+# Non-categorical bulk microphysics
+const NCBM = BulkMicrophysics{<:Any, Nothing}
 
-const NPBM = BulkMicrophysics{<:Any, Nothing}
+maybe_adjust_thermodynamic_state(𝒰₀, bμp::NCBM, microphysical_fields, thermo) =
+    adjust_thermodynamic_state(𝒰₀, bμp.nucleation, thermo)
 
 prognostic_field_names(::NPBM) = tuple()
 materialize_microphysical_fields(bμp::NPBM, grid, bcs) = materialize_microphysical_fields(bμp.nucleation, grid, bcs)

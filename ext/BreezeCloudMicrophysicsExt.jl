@@ -77,9 +77,9 @@ prognostic_field_names(::ZMCM) = tuple()
 materialize_microphysical_fields(bμp::ZMCM, grid, bcs) = materialize_microphysical_fields(bμp.nucleation, grid, bcs)
 @inline update_microphysical_fields!(μ, bμp::ZMCM, i, j, k, grid, density, 𝒰, thermo) = update_microphysical_fields!(μ, bμp.nucleation, i, j, k, grid, density, 𝒰, thermo)
 @inline compute_moisture_fractions(i, j, k, grid, bμp::ZMCM, ρ, qᵗ, μ) = compute_moisture_fractions(i, j, k, grid, bμp.nucleation, ρ, qᵗ, μ)
-@inline maybe_adjust_thermodynamic_state(𝒰₀::ATC, bμp::ZMCM, thermo) = maybe_adjust_thermodynamic_state(𝒰₀, bμp.nucleation, thermo)
 @inline microphysical_tendency(i, j, k, grid, bμp::ZMCM, args...) = zero(grid)
 @inline microphysical_velocities(bμp::ZMCM, name) = nothing
+@inline maybe_adjust_thermodynamic_state(𝒰₀::ATC, bμp::ZMCM, μ, thermo) = adjust_thermodynamic_state(𝒰₀, bμp.nucleation, μ, thermo)
 
 @inline @inbounds function microphysical_tendency(i, j, k, grid, bμp::ZMCM, ::Val{:ρqᵗ}, μ, p, T, q, thermo)
     pᵣ = 𝒰.reference_pressure[i, j, k]

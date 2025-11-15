@@ -35,20 +35,27 @@ Update microphysical fields for `microphysics_scheme` given the thermodynamic `s
 @inline update_microphysical_fields!(microphysical_fields, microphysics::Nothing, i, j, k, grid, density, state, thermo) = nothing
 
 """
-$(TYPEDSIGNATURES)
+    $(TYPEDSIGNATURES)
 
-Return the temperature associated with the thermodynamic `state`,
-`microphysics` scheme, and `thermo`dynamic constants.
+Adjust the thermodynamic `state` according to the `scheme`.
+For example, if `scheme isa SaturationAdjustment`, then this function
+will adjust and return a new thermodynamic state given the specifications
+of the saturation adjustment `scheme`.
+
+If a scheme is non-adjusting, we just return `state`.
 """
-compute_temperature(state, microphysics::Nothing, thermo) = temperature(state, thermo)
+@inline adjust_thermodynamic_state(state, scheme::Nothing, thermo) = state
 
 """
-$(TYPEDSIGNATURES)
+    $(TYPEDSIGNATURES)
 
-Return a possibly adjusted thermodynamic state associated with the
-`microphysics` scheme, and `thermo`dynamic constants.
+Possibly apply saturation adjustment. If a `micorphysics` scheme does not invoke saturation adjustment,
+just return the `state` unmodified. In contrast to `adjust_thermodynamic_state`, this function
+ingests the entire `microphysics` formulation and the `microphysical_fields`.
+This is needed because some microphysics schemes apply saturation adjustment to a
+subset of the thermodynamic state (for example, omitting precipitating species).
 """
-@inline maybe_adjust_thermodynamic_state(state::AbstractThermodynamicState, ::Nothing, thermo) = state
+@inline maybe_adjust_thermodynamic_state(state, ::Nothing, microphysical_fields, thermo) = state
 
 """
 $(TYPEDSIGNATURES)
@@ -69,17 +76,6 @@ Return the microphysical velocities associated with `microphysics` and `name`.
 Must be either `nothing`, or a NamedTuple with three components `u, v, w`.
 """
 @inline microphysical_velocities(microphysics::Nothing, name) = nothing
-
-"""
-$(TYPEDSIGNATURES)
-
-Compute the thermodynamic state associated with `microphysics` and `thermo`dynamic constants,
-and then return the temperature associated with that state.
-"""
-@inline function compute_temperature(𝒰₀, microphysics, thermo)
-    𝒰₁ = maybe_adjust_thermodynamic_state(𝒰₀, microphysics, thermo)
-    return temperature(𝒰₁, thermo)
-end
 
 """
 $(TYPEDSIGNATURES)

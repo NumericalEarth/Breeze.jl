@@ -260,8 +260,10 @@ function atmosphere_model_forcing(user_forcings::NamedTuple, prognostic_fields, 
 end
 
 function fields(model::AtmosphereModel)
-    additional_fields = (; T=model.temperature, qᵗ=model.moisture_mass_fraction)
-    return merge(prognostic_fields(model), model.velocities, additional_fields)
+    auxiliary_thermodynamic_fields = (T=model.temperature, qᵗ=model.moisture_mass_fraction)
+    return merge(prognostic_fields(model),
+                 model.velocities,
+                 auxiliary_thermodynamic_fields)
 end
 
 function prognostic_fields(model::AtmosphereModel)
