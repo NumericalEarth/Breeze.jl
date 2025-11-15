@@ -76,7 +76,7 @@ $(TYPEDSIGNATURES)
 Compute the thermodynamic state associated with `microphysics` and `thermo`dynamic constants,
 and then return the temperature associated with that state.
 """
-@inline function compute_temperature(𝒰₀::AbstractThermodynamicState, microphysics, thermo)
+@inline function compute_temperature(𝒰₀, microphysics, thermo)
     𝒰₁ = compute_thermodynamic_state(𝒰₀, microphysics, thermo)
     return temperature(𝒰₁, thermo)
 end
