@@ -114,10 +114,16 @@ Pkg.test("Breeze")
 - Sometimes user scripts are written expecting names to be exported, when they are not. In that case
   consider exporting the name automatically (ie implement the user interface that the user expects) rather
   than changing the user script
-- You should almost NEVER extend `getproperty` to fix a problem with addressing an undefined property.
-  The bug is almost 100% on the caller side and requires changing the calling code so that it does not 
-  try to access an undefined property. 95% of the time, the name of the property has simply changed
-  in the source side and the calling function has not been updated.
+- **Extending getproperty:** never do this to fix a bug associated with accessing an undefined property.
+  This bug should be fixed on the _caller_ side, so that an undefined name is not accessed.
+  A common source of this bug is when a property name is changed (for example, to make it clearer).
+  In this case the calling function merely needs to be updated.
+- **"Type is not callbale" errors** Variable naming is hard. Sometimes, variable names conflict. A common issue is when the name of a _field_ (the result
+  of a computation) overlaps with the name of a function in the same scope/context. This can lead to error like "Fields cannot be called".
+  The solution to this problem is to change the name of the field to be more verbose, or use a qualified name for the function
+  that references the module it is defined in to disambiguate the names (if possible).
+- **Connecting dots:** If a test fails immediately after a change was made, go back and re-examine whether that change
+  made sense. Sometimes, a simple fix that gets code to _run_ (ie fixing a test _error_) will end up making it _incorrect_ (which hopefully will be caught as a test _failure_). In this case the original edit should be revisited: a more nuanced solution to the test error may be required.
 
 ## Common Development Tasks
 

@@ -72,19 +72,21 @@ function compute_auxiliary_variables!(model)
     return nothing
 end
 
-@kernel @inbounds function _compute_velocities!(velocities, grid, formulation, momentum)
+@kernel function _compute_velocities!(velocities, grid, formulation, momentum)
     i, j, k = @index(Global, NTuple)
 
-    ρu = momentum.ρu[i, j, k]
-    ρv = momentum.ρv[i, j, k]
-    ρw = momentum.ρw[i, j, k]
+    @inbounds begin
+        ρu = momentum.ρu[i, j, k]
+        ρv = momentum.ρv[i, j, k]
+        ρw = momentum.ρw[i, j, k]
 
-    ρᶜ = formulation.reference_state.density[i, j, k]
-    ρᶠ = ℑzᵃᵃᶠ(i, j, k, grid, formulation.reference_state.density)
+        ρᶜ = formulation.reference_state.density[i, j, k]
+        ρᶠ = ℑzᵃᵃᶠ(i, j, k, grid, formulation.reference_state.density)
 
-    velocities.u[i, j, k] = ρu / ρᶜ
-    velocities.v[i, j, k] = ρv / ρᶜ
-    velocities.w[i, j, k] = ρw / ρᶠ
+        velocities.u[i, j, k] = ρu / ρᶜ
+        velocities.v[i, j, k] = ρv / ρᶜ
+        velocities.w[i, j, k] = ρw / ρᶠ
+    end
 end
 
 @kernel function _compute_auxiliary_thermodynamic_variables!(temperature,
@@ -121,7 +123,7 @@ end
         ρe = energy_density[i, j, k]
         ρqᵗ = moisture_density[i, j, k]
         ρ = formulation.reference_state.density[i, j, k]
-        T = temperature(𝒰₁, thermo)
+        T = Thermodynamics.temperature(𝒰₁, thermo)
 
         temperature[i, j, k] = T
         moist_static_energy[i, j, k] = ρe / ρ

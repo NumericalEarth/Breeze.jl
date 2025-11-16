@@ -272,3 +272,6 @@ function compute_temperature(𝒰₀, adjustment::SA, thermo)
     𝒰₁ = adjust_thermodynamic_state(𝒰₀, adjustment, thermo)
     return temperature(𝒰₁, thermo)
 end
+
+# When no microphysics adjustment is needed
+compute_temperature(𝒰₀, ::Nothing, thermo) = temperature(𝒰₀, thermo)
