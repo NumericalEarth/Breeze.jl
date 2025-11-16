@@ -20,6 +20,12 @@ on:
       - "src/**"
       - "Project.toml"
       - "CHANGELOG.md"
+    types:
+      - opened
+      - synchronize
+      - reopened
+      - converted_to_draft
+      - ready_for_review
   release:
 
 concurrency:
@@ -49,6 +55,13 @@ jobs:
         run: |
           using Pkg
           Pkg.instantiate()
+      - name: Set environment variables
+        run: |
+          BREEZE_DOCS_DRAFT=false
+          if [[ ${{ (github.event_name == 'pull_request') && github.event.pull_request.draft }} == 'true' ]]; then
+              BREEZE_DOCS_DRAFT=true
+          fi
+          echo "BREEZE_DOCS_DRAFT=${BREEZE_DOCS_DRAFT}" | tee "${GITHUB_ENV}"
       - name: Build documentation
         run:
           julia --color=yes --project=docs docs/make.jl
