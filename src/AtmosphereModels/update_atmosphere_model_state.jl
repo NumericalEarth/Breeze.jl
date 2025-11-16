@@ -130,9 +130,15 @@ function compute_tendencies!(model::AnelasticModel)
     ρe = model.energy_density
     e = model.moist_static_energy
     Fρe = model.forcing.ρe
+    # Update radiative fluxes if radiative transfer is enabled
+    if model.radiative_transfer !== nothing
+        # Call update function - will be available when RRTMGP extension is loaded
+        _update_radiative_fluxes!(model.radiative_transfer, model)
+    end
+
     ρe_args = tuple(ρe, Val(1), e, Fρe, scalar_args...,
                     model.formulation, model.temperature,
-                    model.moisture_mass_fraction, model.thermodynamics, model.microphysical_fields, model.microphysics)
+                    model.moisture_mass_fraction, model.thermodynamics, model.microphysical_fields, model.microphysics, model.radiative_transfer)
     launch!(arch, grid, :xyz, compute_moist_static_energy_tendency!, Gρe, grid, ρe_args)
 
     ρqᵗ = model.moisture_density

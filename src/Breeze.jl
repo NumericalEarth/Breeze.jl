@@ -87,4 +87,7 @@ using .Microphysics
 include("TurbulenceClosures/TurbulenceClosures.jl")
 using .TurbulenceClosures
 
+# RadiativeTransfer extension will be loaded via ext/RRTMGPExt.jl when RRTMGP is available
+# Export will be added by the extension
+
 end # module Breeze

@@ -129,15 +129,26 @@ end
                                               moisture_mass_fraction,
                                               thermo,
                                               microphysical_fields,
-                                              microphysics)
+                                              microphysics,
+                                              radiative_transfer)
 
     # Compute the buoyancy flux term, ρᵣ w b
     buoyancy_flux = ℑzᵃᵃᶜ(i, j, k, grid, ρ_w_bᶜᶜᶠ, velocities.w, reference_density,
                           temperature, moisture_mass_fraction, formulation, thermo)
 
+    # Compute radiative heating if radiative transfer is enabled
+    radiative_heating = if radiative_transfer === nothing
+        zero(eltype(energy_density))
+    else
+        # Call radiative heating rate function
+        # Note: This will be available when RRTMGP extension is loaded
+        _radiative_heating_rate(i, j, k, grid, radiative_transfer, reference_density, thermo)
+    end
+
     return ( - div_Uc(i, j, k, grid, advection, velocities, energy_density)
              + buoyancy_flux
              - ∇_dot_Jᶜ(i, j, k, grid, reference_density, closure, closure_fields, id, energy, clock, model_fields, nothing)
              # + microphysical_energy_tendency(i, j, k, grid, formulation, microphysics, microphysical_fields)
-             + ρe_forcing(i, j, k, grid, clock, model_fields))
+             + ρe_forcing(i, j, k, grid, clock, model_fields)
+             + radiative_heating)
 end

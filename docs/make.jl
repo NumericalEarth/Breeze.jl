@@ -44,6 +44,7 @@ makedocs(
             "Overview" => "microphysics/microphysics_overview.md",
             "Warm phase saturation adjustment" => "microphysics/saturation_adjustment.md",
         ],
+        "Radiative Transfer" => "radiative_transfer.md",
         "Dycore equations and algorithms" => "dycore_equations_algorithms.md",
         "Appendix" => Any[
             "Notation" => "appendix/notation.md",
