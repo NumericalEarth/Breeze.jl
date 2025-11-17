@@ -3,7 +3,6 @@
 #####
 
 using ..Thermodynamics:
-    AbstractThermodynamicState,
     temperature,
     MoistureMassFractions
 
