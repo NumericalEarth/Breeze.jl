@@ -11,6 +11,12 @@ KernelAbstractions = "63c18a36-062a-441e-b654-da1e3ab1ce7c"
 Oceananigans = "9e8cae18-63c1-5223-a75c-80ca9d6e9a09"
 Printf = "de0858da-6303-5e67-8744-51eddeeeb8d7"
 
+[weakdeps]
+CloudMicrophysics = "6a9e3e04-43cd-43ba-94b9-e8782df3c71b"
+
+[extensions]
+BreezeCloudMicrophysicsExt = ["CloudMicrophysics"]
+
 [compat]
 Adapt = "4.3.0"
 DocStringExtensions = "0.9.5"
@@ -19,9 +25,5 @@ KernelAbstractions = "0.9"
 Oceananigans = "0.101.2"
 Printf = "1"
 julia = "1.10.10"
+CloudMicrophysics = "0.29.0"
 
-[weakdeps]
-CloudMicrophysics = "6a9e3e04-43cd-43ba-94b9-e8782df3c71b"
-
-[extensions]
-BreezeCloudMicrophysicsExt = ["CloudMicrophysics"]
