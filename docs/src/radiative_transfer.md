@@ -48,7 +48,7 @@ using CairoMakie
 grid = RectilinearGrid(; size=64, z=(0, 20_000), topology = (Flat, Flat, Bounded))
 
 # Thermodynamic constants
-thermo = ThermodynamicConstants(Float64)
+thermo = ThermodynamicConstants()
 
 # Reference state
 reference_state = ReferenceState(grid, thermo, 
