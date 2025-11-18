@@ -295,5 +295,5 @@ ylims!(axqᵛ, (0, 2500))
 #xlims!(axqˡ, (0, 0.001))
 ylims!(axqˡ, (0, 2500))
 
-save("mountain_wave_w_comparison.png", fig)
+save("bomex_avg_profiles.png", fig)
 
