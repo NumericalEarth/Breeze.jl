@@ -1,15 +1,16 @@
-# Breeze.jl - Cursor AI Rules
+# Breeze.jl suggestions for agent-coders
 
 ## Project Overview
 
-These cursorrules are a common file for Breeze, Oceananigans, and ClimaOcean.
-These packages provide tools for simulation ocean, atmosphere, and coupled ocean-atmopshere fluid dynamics on CPUs and GPUs.
-Breeze and ClimaOcean builds on [Oceananigans.jl](https://github.com/CliMA/Oceananigans.jl) for grids, fields, solvers, and advection schemes.
+Breeze.jl is Julia software for simulating atmospheric flows.
+Breeze relies on [Oceananigans.jl](https://github.com/CliMA/Oceananigans.jl) for grids, fields, solvers, and advection schemes.
+Breeze has extensions to CloudMicrophysics for microphysical schemes, RRTMGP for radiative transfer solvers.
+Breeze interfaces with ClimaOcean for coupled atmosphere-ocean simulations.
 
 ## Language & Environment
 - **Language**: Julia 1.10+
 - **Architectures**: CPU and GPU
-- **Key Packages**: Oceananigans.jl, Breeze.jl, ClimaOcean.jl, KernelAbstractions.jl, CUDA.jl, Enzyme.jl, Reactant.jl
+- **Key Packages**: Oceananigans.jl, CloudMicrophysics.jl, RRTMGP.jl, ClimaOcean.jl, KernelAbstractions.jl, CUDA.jl, Enzyme.jl, Reactant.jl
 - **Testing**: Breeze.jl uses ParallelTestRunner.jl for distributed testing
 
 ## Code Style & Conventions
@@ -25,9 +26,11 @@ Breeze and ClimaOcean builds on [Oceananigans.jl](https://github.com/CliMA/Ocean
 3. **Kernel Functions**: For GPU compatibility:
    - Use KernelAbstractions.jl syntax for kernels, eg `@kernel`, `@index`
    - Keep kernels type-stable and allocation-free
-   - Short-circuiting if-statements should be avoided if possible, ifelse should always be used if possible
-   - No error messages inside kernels
+   - Short-circuiting if-statements should be avoided if possible. This includes
+     `if`... `else`, as well as the ternary operator `?` ... `:`. The function `ifelse` should be used for logic instead.
+   - Do not put error messages inside kernels.
    - Models _never_ go inside kernels
+   - Mark functions inside kernels with `@inline`.
    
 4. **Documentation**:
    - Use DocStringExtensions.jl for consistent docstrings
@@ -35,16 +38,15 @@ Breeze and ClimaOcean builds on [Oceananigans.jl](https://github.com/CliMA/Ocean
    - Add examples in docstrings when helpful
 
 5. **Memory leanness**
-   - Favor doing lots of computations inline versus allocating temporary memory
+   - Favor doing computations inline versus allocating temporary memory
    - Generally minimize memory allocation
    - If an implementation is awkward, don't hesitate to suggest an upstream feature (eg in Oceananigans)
      that will make something easier, rather than forcing in low quality code.
 
-### Oceananigans best practices
+### Oceananigans ecosystem best practices
 
 1. **Number representation**
-  - Use Oceananigans.default.FloatType=FT to change the precision
-  - The vast majority of times, we do not want to manually set precision. Just let Float64 go.
+  - Use Oceananigans.default.FloatType=FT to change the precision; do not set precision within constructors manually.
   - Use integers when values are integers. Do not "eagerly convert" to Float64 by adding ".0" to integers.
 
 2. **Import style**
@@ -69,13 +71,13 @@ src/
 ├── Thermodynamics/            # Thermodynamic states & equations
 ├── AtmosphereModels/          # Core atmosphere model logic
 ├── Microphysics/              # Cloud microphysics
+├── TurbulenceClosures/        # TurbulenceClosures, including those ported from Oceananigans
 └── MoistAirBuoyancies.jl      # A legacy buoyancy formulation for usage with Oceananigans.NonhydrostaticModel
 ```
 
 These are also planned:
 - an extension in `ext/` for `RRTMGP.jl`
 - modules that correspond to Oceananigans features:
-    * TurbulenceClosures/
     * LagrangianParticleTracking/
 
 ## Testing Guidelines
@@ -167,6 +169,14 @@ julia --project=docs/ docs/make.jl
 using LiveServer
 serve(dir="docs/build")
 ```
+
+### Testing docs
+- Consider manually running `@example` blocks, rather than building the whole
+  documentation to find errors.
+- Unless explicitly asked, do not write `for` loops in docs blocks. Use built-in functions
+  (which will launch kernels under the hood) instead.
+- Be conservative about developing examples and tutorials. Do not write extensive example code unless asked.
+  Instead, produce skeletons or outlines with minimum viable code.
 
 ### Documentation Style
 - Mathematical notation in `docs/src/appendix/notation.md`
@@ -275,4 +285,3 @@ Features that are planned, which should be considered when implementing anything
 - Many, many more canonical LES validation cases
 - Terrain-following coordinate (may require upstream development in Oceananigans + using MutableVerticalCoordinate)
 - Cut-cells ImmersedBoundaryGrid implementation
-- 
