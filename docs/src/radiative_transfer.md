@@ -15,7 +15,7 @@ using Breeze
 using Oceananigans
 
 # Create grid
-grid = RectilinearGrid(CPU(), Float64; size=(32, 32, 64), x=(0, 10_000), y=(0, 10_000), z=(0, 20_000))
+grid = RectilinearGrid(size=(32, 32, 64), x=(0, 10_000), y=(0, 10_000), z=(0, 20_000))
 
 # Create radiative transfer model
 rtm = RadiativeTransferModel(
