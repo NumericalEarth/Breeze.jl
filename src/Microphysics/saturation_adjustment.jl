@@ -13,17 +13,10 @@ using ..Thermodynamics:
     total_moisture_mass_fraction,
     AbstractThermodynamicState
 
-import ..Thermodynamics: saturation_specific_humidity
-
 using Oceananigans: Oceananigans, CenterField
 using DocStringExtensions: TYPEDSIGNATURES
 
-import ..AtmosphereModels:
-    compute_thermodynamic_state,
-    update_microphysical_fields!,
-    prognostic_field_names,
-    materialize_microphysical_fields,
-    moisture_mass_fractions
+import ..Thermodynamics: saturation_specific_humidity
 
 abstract type AbstractEquilibrium end
 
@@ -32,6 +25,8 @@ struct SaturationAdjustment{E, FT}
     maxiter :: FT
     equilibrium :: E
 end
+
+const SA = SaturationAdjustment
 
 """
 $(TYPEDSIGNATURES)
@@ -60,6 +55,8 @@ function SaturationAdjustment(FT::DataType=Oceananigans.defaults.FloatType;
     maxiter = convert(FT, maxiter)
     return SaturationAdjustment(tolerance, maxiter, equilibrium)
 end
+
+@inline microphysical_velocities(::SaturationAdjustment, name) = nothing
 
 #####
 ##### Warm-phase equilibrium
@@ -143,31 +140,33 @@ center_field_tuple(grid, names...) = NamedTuple{names}(CenterField(grid) for nam
 materialize_microphysical_fields(::WPSA, grid, bcs) = center_field_tuple(grid, :qᵛ, :qˡ)
 materialize_microphysical_fields(::MPSA, grid, bcs) = center_field_tuple(grid, :qᵛ, :qˡ, :qⁱ)
 
-@inline @inbounds function update_microphysical_fields!(μ, ::WPSA, i, j, k, grid, 𝒰, thermo)
+@inline @inbounds function update_microphysical_fields!(μ, ::WPSA, i, j, k, grid, density, 𝒰, thermo)
     μ.qᵛ[i, j, k] = 𝒰.moisture_mass_fractions.vapor
     μ.qˡ[i, j, k] = 𝒰.moisture_mass_fractions.liquid
     return nothing
 end
 
-@inline @inbounds function update_microphysical_fields!(μ, ::MPSA, i, j, k, grid, 𝒰, thermo)
+@inline @inbounds function update_microphysical_fields!(μ, ::MPSA, i, j, k, grid, density, 𝒰, thermo)
     μ.qᵛ[i, j, k] = 𝒰.moisture_mass_fractions.vapor
     μ.qˡ[i, j, k] = 𝒰.moisture_mass_fractions.liquid
     μ.qⁱ[i, j, k] = 𝒰.moisture_mass_fractions.ice
     return nothing
 end
 
-@inline @inbounds function moisture_mass_fractions(i, j, k, grid, ::WPSA, μ, qᵗ)
+@inline @inbounds function compute_moisture_fractions(i, j, k, grid, ::WPSA, ρ, qᵗ, μ)
     qᵛ = μ.qᵛ[i, j, k]
     qˡ = μ.qˡ[i, j, k]
     return MoistureMassFractions(qᵛ, qˡ)
 end
 
-@inline @inbounds function moisture_mass_fractions(i, j, k, grid, ::MPSA, μ, qᵗ)
+@inline @inbounds function compute_moisture_fractions(i, j, k, grid, ::MPSA, ρ, qᵗ, μ)
     qᵛ = μ.qᵛ[i, j, k]
     qˡ = μ.qˡ[i, j, k]
     qⁱ = μ.qⁱ[i, j, k]
     return MoistureMassFractions(qᵛ, qˡ, qⁱ)
 end
+
+@inline microphysical_tendency(i, j, k, grid, ::SA, args...) = zero(grid)
 
 #####
 ##### Saturation adjustment utilities
@@ -201,12 +200,18 @@ end
     return T - T₁
 end
 
+const ATC = AbstractThermodynamicState
+
+# This function allows saturation adjustment to be used as a microphysics scheme directly
+@inline maybe_adjust_thermodynamic_state(𝒰₀, saturation_adjustment::SA, microphysical_fields, thermo) =
+    adjust_thermodynamic_state(𝒰₀, saturation_adjustment, thermo)
+
 """
 $(TYPEDSIGNATURES)
 
 Return the saturation-adjusted thermodynamic state using a secant iteration.
 """
-@inline function compute_thermodynamic_state(𝒰₀::AbstractThermodynamicState, microphysics::SaturationAdjustment, thermo)
+@inline function adjust_thermodynamic_state(𝒰₀::ATC, microphysics::SA, thermo)
     FT = eltype(𝒰₀)
     is_absolute_zero(𝒰₀) && return 𝒰₀
 
@@ -261,3 +266,17 @@ Return the saturation-adjusted thermodynamic state using a secant iteration.
 
     return 𝒰₂
 end
+
+"""
+    $(TYPEDSIGNATURES)
+
+Perform saturation adjustment and return the temperature
+associated with the adjusted state.
+"""
+function compute_temperature(𝒰₀, adjustment::SA, thermo)
+    𝒰₁ = adjust_thermodynamic_state(𝒰₀, adjustment, thermo)
+    return temperature(𝒰₁, thermo)
+end
+
+# When no microphysics adjustment is needed
+compute_temperature(𝒰₀, ::Nothing, thermo) = temperature(𝒰₀, thermo)
