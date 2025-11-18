@@ -1,4 +1,4 @@
-# Mixed-phase saturation adjustment
+# [Mixed-phase saturation adjustment](@id section:mixed-phase-saturation-adjustment)
 
 Mixed-phase saturation adjustment extends the warm-phase model to temperatures between the homogeneous
 ice nucleation temperature and the freezing point, where condensate may exist as a mixture of liquid and ice.

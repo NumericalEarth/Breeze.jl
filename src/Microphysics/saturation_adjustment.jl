@@ -267,7 +267,12 @@ Return the saturation-adjusted thermodynamic state using a secant iteration.
     return 𝒰₂
 end
 
-# Helper
+"""
+    $(TYPEDSIGNATURES)
+
+Perform saturation adjustment and return the temperature
+associated with the adjusted state.
+"""
 function compute_temperature(𝒰₀, adjustment::SA, thermo)
     𝒰₁ = adjust_thermodynamic_state(𝒰₀, adjustment, thermo)
     return temperature(𝒰₁, thermo)

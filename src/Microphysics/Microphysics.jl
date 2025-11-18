@@ -1,6 +1,8 @@
 module Microphysics
 
 export
+    compute_temperature,
+    adjust_thermodynamic_state,
     SaturationAdjustment,
     MixedPhaseEquilibrium,
     WarmPhaseEquilibrium,

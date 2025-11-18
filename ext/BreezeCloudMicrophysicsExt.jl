@@ -35,7 +35,8 @@ using Breeze.Microphysics:
     BulkMicrophysics,
     FourCategories,
     WarmPhaseSaturationAdjustment,
-    MixedPhaseSaturationAdjustment
+    MixedPhaseSaturationAdjustment,
+    adjust_thermodynamic_state
 
 using Oceananigans: Oceananigans
 using DocStringExtensions: TYPEDSIGNATURES
@@ -79,7 +80,7 @@ materialize_microphysical_fields(bμp::ZMCM, grid, bcs) = materialize_microphysi
 @inline compute_moisture_fractions(i, j, k, grid, bμp::ZMCM, ρ, qᵗ, μ) = compute_moisture_fractions(i, j, k, grid, bμp.nucleation, ρ, qᵗ, μ)
 @inline microphysical_tendency(i, j, k, grid, bμp::ZMCM, args...) = zero(grid)
 @inline microphysical_velocities(bμp::ZMCM, name) = nothing
-@inline maybe_adjust_thermodynamic_state(𝒰₀::ATC, bμp::ZMCM, μ, thermo) = adjust_thermodynamic_state(𝒰₀, bμp.nucleation, μ, thermo)
+@inline maybe_adjust_thermodynamic_state(𝒰₀::ATC, bμp::ZMCM, μ, thermo) = adjust_thermodynamic_state(𝒰₀, bμp.nucleation, thermo)
 
 @inline @inbounds function microphysical_tendency(i, j, k, grid, bμp::ZMCM, ::Val{:ρqᵗ}, μ, p, T, q, thermo)
     pᵣ = 𝒰.reference_pressure[i, j, k]
