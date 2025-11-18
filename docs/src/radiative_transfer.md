@@ -44,7 +44,7 @@ using Breeze
 using Oceananigans
 using CairoMakie
 
-# Create a single-column grid (1x1 horizontal, 64 vertical levels)
+# Create a single-column grid with 64 vertical levels
 grid = RectilinearGrid(; size=64, z=(0, 20_000), topology = (Flat, Flat, Bounded))
 
 # Thermodynamic constants
