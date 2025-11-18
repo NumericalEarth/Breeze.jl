@@ -76,6 +76,7 @@ function set!(model::AtmosphereModel; enforce_mass_conservation=true, kw...)
             launch!(arch, grid, :xyz,
                     _energy_density_from_potential_temperature!,
                     model.energy_density,
+                    model.moist_static_energy,
                     grid,
                     θ,
                     model.moisture_mass_fraction,
@@ -103,7 +104,9 @@ function set!(model::AtmosphereModel; enforce_mass_conservation=true, kw...)
     return nothing
 end
 
-@kernel function _energy_density_from_potential_temperature!(energy_density, grid,
+@kernel function _energy_density_from_potential_temperature!(energy_density,
+                                                             specific_energy,
+                                                             grid,
                                                              potential_temperature,
                                                              moisture_mass_fraction,
                                                              formulation::AnelasticFormulation,
@@ -117,13 +120,16 @@ end
         ρᵣ = formulation.reference_state.density[i, j, k]
         qᵗ = moisture_mass_fraction[i, j, k]
         θ = potential_temperature[i, j, k]
+        qᵗ = moisture_mass_fraction[i, j, k]
     end
 
     g = thermo.gravitational_acceleration
     z = znode(i, j, k, grid, c, c, c)
     p₀ = formulation.reference_state.base_pressure
 
-    q = compute_moisture_fractions(i, j, k, grid, microphysics, ρᵣ, qᵗ, microphysical_fields)
+    # TODO: change this so the code works for _both_ adjustment and non-adjustment microphysics
+    # q = moisture_mass_fractions(i, j, k, grid, microphysics, microphysical_fields, moisture_mass_fraction)
+    q = MoistureMassFractions(qᵗ)
     𝒰₀ = PotentialTemperatureState(θ, q, p₀, pᵣ)
     𝒰 = maybe_adjust_thermodynamic_state(𝒰₀, microphysics, microphysical_fields, thermo)
 
@@ -136,5 +142,8 @@ end
     qˡ = q.liquid
     qⁱ = q.ice
 
-    @inbounds energy_density[i, j, k] = ρᵣ * (cᵖᵐ * T + g * z - ℒˡᵣ * qˡ - ℒⁱᵣ * qⁱ)
+    e = cᵖᵐ * T + g * z - ℒˡᵣ * qˡ - ℒⁱᵣ * qⁱ
+    @inbounds specific_energy[i, j, k] = e
+    @inbounds energy_density[i, j, k] = ρᵣ * e
 end
+
