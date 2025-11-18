@@ -1,16 +1,17 @@
-# Breeze.jl - Cursor AI Rules
+# Breeze.jl suggestions for agent-coders
 
 ## Project Overview
 
-Breeze.jl is a Julia package for atmospheric fluid dynamics simulations on CPUs and GPUs.
-It builds on [Oceananigans.jl](https://github.com/CliMA/Oceananigans.jl) for grids, fields, solvers, and advection schemes.
-The project currently supports anelastic formulation of Euler equations and is evolving toward full compressible formulations with microphysics and radiation.
+Breeze.jl is Julia software for simulating atmospheric flows.
+Breeze relies on [Oceananigans.jl](https://github.com/CliMA/Oceananigans.jl) for grids, fields, solvers, and advection schemes.
+Breeze has extensions to CloudMicrophysics for microphysical schemes, RRTMGP for radiative transfer solvers.
+Breeze interfaces with ClimaOcean for coupled atmosphere-ocean simulations.
 
 ## Language & Environment
 - **Language**: Julia 1.10+
 - **Architectures**: CPU and GPU
-- **Key Packages**: Oceananigans.jl, KernelAbstractions.jl, CUDA.jl, Enzyme.jl, Reactant.jl
-- **Testing**: Uses ParallelTestRunner.jl for distributed testing
+- **Key Packages**: Oceananigans.jl, CloudMicrophysics.jl, RRTMGP.jl, ClimaOcean.jl, KernelAbstractions.jl, CUDA.jl, Enzyme.jl, Reactant.jl
+- **Testing**: Breeze.jl uses ParallelTestRunner.jl for distributed testing
 
 ## Code Style & Conventions
 
@@ -25,9 +26,11 @@ The project currently supports anelastic formulation of Euler equations and is e
 3. **Kernel Functions**: For GPU compatibility:
    - Use KernelAbstractions.jl syntax for kernels, eg `@kernel`, `@index`
    - Keep kernels type-stable and allocation-free
-   - Short-circuiting if-statements should be avoided if possible, ifelse should always be used if possible
-   - No error messages inside kernels
+   - Short-circuiting if-statements should be avoided if possible. This includes
+     `if`... `else`, as well as the ternary operator `?` ... `:`. The function `ifelse` should be used for logic instead.
+   - Do not put error messages inside kernels.
    - Models _never_ go inside kernels
+   - Mark functions inside kernels with `@inline`.
    
 4. **Documentation**:
    - Use DocStringExtensions.jl for consistent docstrings
@@ -35,10 +38,23 @@ The project currently supports anelastic formulation of Euler equations and is e
    - Add examples in docstrings when helpful
 
 5. **Memory leanness**
-   - Favor doing lots of computations inline versus allocating temporary memory
+   - Favor doing computations inline versus allocating temporary memory
    - Generally minimize memory allocation
    - If an implementation is awkward, don't hesitate to suggest an upstream feature (eg in Oceananigans)
      that will make something easier, rather than forcing in low quality code.
+
+### Oceananigans ecosystem best practices
+
+1. **Number representation**
+  - Use Oceananigans.default.FloatType=FT to change the precision; do not set precision within constructors manually.
+  - Use integers when values are integers. Do not "eagerly convert" to Float64 by adding ".0" to integers.
+
+2. **Import style**
+  - Use different style for source code versus user scripts:
+    * in source code, explicitly import all names into files
+    * in scripts, follow the user interface by writing "using Oceananigans" and "using Breeze".
+    * only use explicit import in scripts for names that are _not_ exported by the top-level files Oceananigans.jl, Breeze.jl etc.
+    * sometimes we need to write `using Oceananigans.Units`
 
 ### Naming Conventions
 - **Files**: snake_case (e.g., `atmosphere_model.jl`, `update_atmosphere_model_state.jl`)
@@ -48,20 +64,20 @@ The project currently supports anelastic formulation of Euler equations and is e
 - **Variables**: Use _either_ an English long name, or mathematical notation with readable unicode. Variable names should be taken from `docs/src/appendix/notation.md` in the docs. If a new variable is created (or if one doesn't exist), it should be added to the table in notation.md
 
 
-### Module Structure
+### Breeze Module Structure
 ```
 src/
 ├── Breeze.jl                  # Main module, exports
 ├── Thermodynamics/            # Thermodynamic states & equations
 ├── AtmosphereModels/          # Core atmosphere model logic
 ├── Microphysics/              # Cloud microphysics
+├── TurbulenceClosures/        # TurbulenceClosures, including those ported from Oceananigans
 └── MoistAirBuoyancies.jl      # A legacy buoyancy formulation for usage with Oceananigans.NonhydrostaticModel
 ```
 
 These are also planned:
 - an extension in `ext/` for `RRTMGP.jl`
 - modules that correspond to Oceananigans features:
-    * TurbulenceClosures/
     * LagrangianParticleTracking/
 
 ## Testing Guidelines
@@ -95,6 +111,22 @@ Pkg.test("Breeze")
 - Run `quality_assurance.jl` to check code standards
 - Use Aqua.jl for package quality checks
 
+### Fixing bugs
+- Subtle bugs often occur when a method is not imported, especially in an extension
+- Sometimes user scripts are written expecting names to be exported, when they are not. In that case
+  consider exporting the name automatically (ie implement the user interface that the user expects) rather
+  than changing the user script
+- **Extending getproperty:** never do this to fix a bug associated with accessing an undefined property.
+  This bug should be fixed on the _caller_ side, so that an undefined name is not accessed.
+  A common source of this bug is when a property name is changed (for example, to make it clearer).
+  In this case the calling function merely needs to be updated.
+- **"Type is not callbale" errors** Variable naming is hard. Sometimes, variable names conflict. A common issue is when the name of a _field_ (the result
+  of a computation) overlaps with the name of a function in the same scope/context. This can lead to error like "Fields cannot be called".
+  The solution to this problem is to change the name of the field to be more verbose, or use a qualified name for the function
+  that references the module it is defined in to disambiguate the names (if possible).
+- **Connecting dots:** If a test fails immediately after a change was made, go back and re-examine whether that change
+  made sense. Sometimes, a simple fix that gets code to _run_ (ie fixing a test _error_) will end up making it _incorrect_ (which hopefully will be caught as a test _failure_). In this case the original edit should be revisited: a more nuanced solution to the test error may be required.
+
 ## Common Development Tasks
 
 ### Adding New Physics
@@ -111,6 +143,20 @@ Pkg.test("Breeze")
 - Pressure solver in `anelastic_pressure_solver.jl`
 - Always consider anelastic formulation constraints
 
+## Adding new examples
+- Follow the style of existing examples, not the source code
+- Remember that initial condition functions act _pointwise_, there should be no broadcasting inside an initial condition function
+- Do not convert between units. Always keep the units the same for calculations, unless plotting
+- If possible, avoid long understore names. Use concise evokacative names like `z = znodes(grid, Center())`.
+- Use unicode that is consistent with the source code. Do not be afraid of unicode for intermediate variables.
+- Make sure that all notation in examples is consistent with `docs/src/appendix/notation.md`
+- Always add axis labels and colobars to simulations.
+- Check previous examples and strive to make new examples that add new physics and new value relative to old examples. Don't just copy old examples.
+- `@allowscalar` should very sparingly be used or never in an example. If you need to, make a suggestion to change the source code so that `@allowscalar` is not needed.
+- The examples should use exported names primarily. If an example needs an excessive amount of internal names, those names should be exported or a new abstraction needs to be developed.
+- For discrete_form=true forcing and boundayr conditions, always use xnode, ynode, and znode from Oceananigans. _Never_ access grid metrics manually. Do not pass in
+  coordinates into the functions.
+
 ## Documentation
 
 ### Building Docs Locally
@@ -123,6 +169,14 @@ julia --project=docs/ docs/make.jl
 using LiveServer
 serve(dir="docs/build")
 ```
+
+### Testing docs
+- Consider manually running `@example` blocks, rather than building the whole
+  documentation to find errors.
+- Unless explicitly asked, do not write `for` loops in docs blocks. Use built-in functions
+  (which will launch kernels under the hood) instead.
+- Be conservative about developing examples and tutorials. Do not write extensive example code unless asked.
+  Instead, produce skeletons or outlines with minimum viable code.
 
 ### Documentation Style
 - Mathematical notation in `docs/src/appendix/notation.md`
@@ -231,4 +285,3 @@ Features that are planned, which should be considered when implementing anything
 - Many, many more canonical LES validation cases
 - Terrain-following coordinate (may require upstream development in Oceananigans + using MutableVerticalCoordinate)
 - Cut-cells ImmersedBoundaryGrid implementation
-- 

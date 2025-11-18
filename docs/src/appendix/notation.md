@@ -17,9 +17,15 @@ inline math, while the Unicode column shows the exact glyphs used in code.
 | ``ρ q^{t}``                   | `ρqᵗ`         | Total moisture density (conservative water variable) |
 | ``q^{t}``                     | `qᵗ`          | Total moisture mass fraction (vapor + liquid + ice) |
 | ``q^{v}``                     | `qᵛ`          | Vapor specific humidity |
-| ``q^{\ell}``                  | `qˡ`          | Liquid specific humidity |
-| ``q^{i}``                     | `qi`          | Ice specific humidity |
-| ``q^{v+}``                    | `qᵛ⁺`         | Saturation specific humidity over liquid/ice (context-dependent) |
+| ``q^{\ell}``                  | `qˡ`          | Total liquid mass fraction |
+| ``q^{i}``                     | `qⁱ`          | Total ice mass fraction |
+| ``q^{cl}``                    | `qᶜˡ`         | Cloud liquid mass fraction |
+| ``q^{ci}``                    | `qᶜⁱ`         | Cloud ice mass fraction |
+| ``q^{r}``                     | `qʳ`          | Rain mass fraction |
+| ``q^{s}``                     | `qˢ`          | Snow mass fraction |
+| ``q^{v+}``                    | `qᵛ⁺`         | Saturation specific humidity over a surface |
+| ``q^{v+l}``                   | `qᵛ⁺ˡ`        | Saturation specific humidity over a planar liquid surface |
+| ``q^{v+i}``                   | `qᵛ⁺ⁱ`        | Saturation specific humidity over a planar ice surface |
 | ``g``                         | `g`           | Gravitational acceleration |
 | ``\mathcal{R}``               | `ℛ`           | Universal (molar) gas constant |
 | ``R^{d}``                     | `Rᵈ`          | Dry air gas constant |

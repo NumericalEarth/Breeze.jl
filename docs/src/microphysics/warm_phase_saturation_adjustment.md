@@ -1,4 +1,4 @@
-# [Warm-phase saturation adjustment](@id saturation_adjustment-section)
+# [Warm-phase saturation adjustment](@id section:saturation-adjustment)
 
 Warm-phase saturation adjustment is a model for water droplet nucleation that assumes that water vapor
 in excess of the saturation specific humidity is instantaneously converted to liquid water.
@@ -136,10 +136,10 @@ e = cᵖᵐ * T + g * z - ℒˡᵣ * qˡ
 
 Moist static energy has units ``\mathrm{m^2 / s^2}``, or ``\mathrm{J} / \mathrm{kg}``.
 Next we show that the saturation adjustment solver recovers the input temperature
-by passing it an "unadjusted" moisture mass fraction into [`Breeze.AtmosphereModels.compute_temperature`](@ref),
+by passing it an "unadjusted" moisture mass fraction into [`Breeze.Microphysics.compute_temperature`](@ref),
 
 ```@example microphysics
-using Breeze.AtmosphereModels: compute_temperature
+using Breeze.Microphysics: compute_temperature
 
 microphysics = SaturationAdjustment(equilibrium=WarmPhaseEquilibrium())
 
@@ -163,7 +163,7 @@ In other words, ``T₁`` represents a lower bound.
 To generate a second guess for the secant solver, we start by estimating
 the liquid mass fraction using the guess ``T = T₁``,
 
-```@example  microphysics
+```@example microphysics
 qᵛ⁺₂ = adjustment_saturation_specific_humidity(T₁, p, qᵗ, thermo, WarmPhaseEquilibrium())
 qˡ₁ = qᵗ - qᵛ⁺₂
 ```
