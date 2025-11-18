@@ -1,4 +1,9 @@
 using Breeze
+using Breeze.AtmosphereModels: compute_thermodynamic_state
+using Breeze.Microphysics: MixedPhaseEquilibrium
+using Breeze.Thermodynamics:
+    MoistureMassFractions,
+    mixture_heat_capacity
 using GPUArraysCore: @allowscalar
 using Oceananigans
 using Test
@@ -81,5 +86,68 @@ end
 
         @test isfinite(qᵛ⁺k)
         @test qᵛ⁺k ≈ qᵛ⁺_expected rtol=FT(1e-5)
+    end
+end
+
+@testset "Thermodynamics consistency (MixedPhase) [$(FT)]" for FT in (Float32, Float64)
+    if default_arch isa GPU && FT == Float32
+        # skip
+    else
+        Oceananigans.defaults.FloatType = FT
+        grid = RectilinearGrid(default_arch; size=(8, 8, 8), x=(0, 1_000), y=(0, 1_000), z=(0, 1_000))
+        thermo = ThermodynamicConstants()
+
+        p₀ = FT(101325)
+        θ₀_ref = FT(288) 
+        θ₀(z) = 245 - z/1000*6.5 # 
+        qᵗ₀ = FT(0.02)
+
+        reference_state = ReferenceState(grid, thermo, base_pressure=p₀, potential_temperature=θ₀_ref)
+        formulation = AnelasticFormulation(reference_state)
+        equilibrium = MixedPhaseEquilibrium(FT)
+        microphysics = SaturationAdjustment(FT; equilibrium)
+        model = AtmosphereModel(grid; thermodynamics=thermo, formulation, microphysics)
+
+        θ_field = CenterField(grid)
+        set!(θ_field, (x, y, z) -> θ₀(z))
+
+        qᵗ_field = CenterField(grid)
+        set!(qᵗ_field, qᵗ₀)
+
+        q₀ = MoistureMassFractions(qᵗ₀)
+        cᵖᵐ₀ = mixture_heat_capacity(q₀, thermo)
+        
+        # First test with moisture
+        set!(model; qᵗ=qᵗ_field, θ=θ_field)
+
+        θ_model = Breeze.AtmosphereModels.PotentialTemperatureField(model)
+        compute!(θ_model)
+
+        tol = max(sqrt(eps(FT)), FT(1e-5))
+        θ_matches = Ref(true)
+
+        @allowscalar begin
+            for k in 1:size(grid, 3), j in 1:size(grid, 2), i in 1:size(grid, 1)
+                θ_val = θ_model[i, j, k]
+                θ_ref = θ_field[i, j, k]
+                θ_matches[] &= isapprox(θ_val, θ_ref; rtol=tol, atol=tol)
+            end
+        end
+        @test θ_matches[]
+
+        # Now test with dry air
+        set!(model; qᵗ=0, θ=θ_field)
+        compute!(θ_model)
+
+        @allowscalar begin
+            for k in 1:size(grid, 3), j in 1:size(grid, 2), i in 1:size(grid, 1)
+                θ_val = θ_model[i, j, k]
+                θ_ref = θ_field[i, j, k]
+                θ_matches[] &= isapprox(θ_val, θ_ref; rtol=tol, atol=tol)
+            end
+        end
+        @test θ_matches[]
+
+
     end
 end
