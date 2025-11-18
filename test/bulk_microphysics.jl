@@ -1,14 +1,5 @@
 using Breeze
-using Oceananigans
 using Test
-
-using Breeze.Microphysics:
-    SaturationAdjustment,
-    MixedPhaseEquilibrium,
-    WarmPhaseEquilibrium
-
-# BulkMicrophysics is not exported, so we access it via the module
-const BulkMicrophysics = Breeze.Microphysics.BulkMicrophysics
 
 @testset "BulkMicrophysics construction [$(FT)]" for FT in (Float32, Float64)
     # Test default construction
