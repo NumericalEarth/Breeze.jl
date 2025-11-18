@@ -45,12 +45,7 @@ using Oceananigans
 using CairoMakie
 
 # Create a single-column grid (1x1 horizontal, 64 vertical levels)
-grid = RectilinearGrid(CPU(), Float64; 
-    size=(1, 1, 64), 
-    x=(0, 1), 
-    y=(0, 1), 
-    z=(0, 20_000)
-)
+grid = RectilinearGrid(; size=64, z=(0, 20_000), topology = (Flat, Flat, Bounded))
 
 # Thermodynamic constants
 thermo = ThermodynamicConstants(Float64)
