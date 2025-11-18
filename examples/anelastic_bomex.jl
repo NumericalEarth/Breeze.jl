@@ -4,11 +4,10 @@ using Oceananigans
 using Oceananigans.Units
 
 using AtmosphericProfilesLibrary
-using CloudMicrophysics
 using Printf
 
 using Oceananigans.Operators: ∂zᶜᶜᶠ, ℑzᵃᵃᶜ
-using CloudMicrophysics.Microphysics0M: remove_precipitation
+using CUDA
 
 # Siebesma et al (2003) resolution!
 # DOI: https://doi.org/10.1175/1520-0469(2003)60<1201:ALESIS>2.0.CO;2
@@ -19,7 +18,7 @@ Lx = 6400
 Ly = 6400
 Lz = 3000
 
-arch = CPU() # if changing to GPU() add `using CUDA` above
+arch = GPU() # if changing to CPU() remove the `using CUDA` line above
 stop_time = 6hours
 
 grid = RectilinearGrid(arch,
@@ -41,11 +40,6 @@ thermo = ThermodynamicConstants()
 reference_state = ReferenceState(grid, thermo, base_pressure=p₀, potential_temperature=θ₀)
 formulation = AnelasticFormulation(reference_state)
 
-# Simple precipitation scheme from CloudMicrophysics
-FT = eltype(grid)
-microphysics = CloudMicrophysics.Parameters.Parameters0M{FT}(τ_precip=600, S_0=0, qc_0=0.02)
-@inline precipitation(x, y, z, t, qᵗ, params) = remove_precipitation(params, qᵗ, 0)
-q_precip_forcing = Forcing(precipitation, field_dependencies=:qᵗ, parameters=microphysics)
 
 FT = eltype(grid)
 q₀ = Breeze.Thermodynamics.MoistureMassFractions{FT} |> zero
@@ -122,18 +116,22 @@ set!(ρvᵍ, ρᵣ * ρvᵍ)
 
 @inline function Fρu_geostrophic(i, j, k, grid, clock, fields, parameters)
     f = parameters.f
+    v_avg = parameters.v_avg[i, j, k]
     @inbounds ρvᵍᵢ = parameters.ρvᵍ[1, 1, k]
-    return - f * ρvᵍᵢ
+    ρᵣ = @inbounds parameters.ρᵣ[i, j, k]
+    return f * (ρᵣ*v_avg - ρvᵍᵢ)
 end
 
 @inline function Fρv_geostrophic(i, j, k, grid, clock, fields, parameters)
     f = parameters.f
+    u_avg = parameters.u_avg[i, j, k]
     @inbounds ρuᵍᵢ = parameters.ρuᵍ[1, 1, k]
-    return + f * ρuᵍᵢ
+    ρᵣ = @inbounds parameters.ρᵣ[i, j, k]
+    return - f * (ρᵣ*u_avg - ρuᵍᵢ)
 end
 
-ρu_geostrophic_forcing = Forcing(Fρu_geostrophic, discrete_form=true, parameters=(; f=coriolis.f, ρvᵍ))
-ρv_geostrophic_forcing = Forcing(Fρv_geostrophic, discrete_form=true, parameters=(; f=coriolis.f, ρuᵍ))
+ρu_geostrophic_forcing = Forcing(Fρu_geostrophic, discrete_form=true, parameters=(; v_avg=v_avg_f, f=coriolis.f, ρvᵍ, ρᵣ))
+ρv_geostrophic_forcing = Forcing(Fρv_geostrophic, discrete_form=true, parameters=(; u_avg=u_avg_f, f=coriolis.f, ρuᵍ, ρᵣ))
 
 ρu_forcing = (ρu_subsidence_forcing, ρu_geostrophic_forcing)
 ρv_forcing = (ρv_subsidence_forcing, ρv_geostrophic_forcing)
@@ -145,7 +143,6 @@ set!(drying, z -> dqdt_bomex(z))
 set!(drying, ρᵣ * drying)
 ρqᵗ_drying_forcing = Forcing(drying)
 ρqᵗ_forcing = (ρqᵗ_drying_forcing, ρqᵗ_subsidence_forcing)
-# q_forcing = (q_precip_forcing, q_drying_forcing, q_subsidence_forcing)
 
 Fρe_field = Field{Nothing, Nothing, Center}(grid)
 dTdt_bomex = AtmosphericProfilesLibrary.Bomex_dTdt(FT)
@@ -154,7 +151,7 @@ set!(Fρe_field, ρᵣ * Fρe_field)
 ρe_radiation_forcing = Forcing(Fρe_field)
 ρe_forcing = (ρe_radiation_forcing, ρe_subsidence_forcing)
 
-microphysics = Breeze.Microphysics.WarmPhaseSaturationAdjustment()
+microphysics = Breeze.Microphysics.SaturationAdjustment(equilibrium=Breeze.Microphysics.WarmPhaseEquilibrium())
 
 model = AtmosphereModel(grid; coriolis, microphysics,
                         advection = WENO(order=5),
@@ -165,12 +162,13 @@ model = AtmosphereModel(grid; coriolis, microphysics,
 # of Siebesma et al 2003, 3rd paragraph
 θϵ = 0.1
 qϵ = 2.5e-5
-θᵢ(x, y, z) = θ_bomex(z) + θϵ * randn()
-qᵢ(x, y, z) = q_bomex(z) + qϵ * randn()
+z_perturb = 1600 # m
+θᵢ(x, y, z) = θ_bomex(z) + θϵ * randn() * (z < z_perturb)
+qᵢ(x, y, z) = q_bomex(z) + qϵ * randn() * (z < z_perturb)
 uᵢ(x, y, z) = u_bomex(z)
 set!(model, θ=θᵢ, qᵗ=qᵢ, u=uᵢ)
 
-simulation = Simulation(model; Δt=1, stop_time)
+simulation = Simulation(model; Δt=2, stop_time)
 conjure_time_step_wizard!(simulation, cfl=0.7)
 
 # Write a callback to compute *_avg_f
@@ -193,63 +191,17 @@ end
 
 add_callback!(simulation, compute_averages!)
 
-T = model.temperature
-qˡ = model.microphysical_fields.liquid_mass_fraction
-qᵛ = model.microphysical_fields.specific_humidity
+θ = Breeze.AtmosphereModels.PotentialTemperatureField(model)
+qˡ = model.microphysical_fields.qˡ
+qᵛ = model.microphysical_fields.qᵛ
 
 qᵛ⁺ = Breeze.AtmosphereModels.SaturationSpecificHumidityField(model)
-rh = Field(qᵛ / qᵛ⁺) # relative humidity
 
-T_avg = Field(Average(T, dims=(1, 2)))
-qˡ_avg = Field(Average(qˡ, dims=(1, 2)))
-qᵛ⁺_avg = Field(Average(qᵛ⁺, dims=(1, 2)))
-rh_avg = Field(Average(rh, dims=(1, 2)))
-
-# Uncomment to make plots
-using WGLMakie
-
-fig = Figure(size=(1200, 800), fontsize=12)
-axT = Axis(fig[1, 1], xlabel="T (ᵒK)", ylabel="z (m)")
-axqˡ = Axis(fig[1, 2], xlabel="qˡ (kg/kg)", ylabel="z (m)")
-axrh = Axis(fig[1, 3], xlabel="rh (%)", ylabel="z (m)")
-axu = Axis(fig[2, 1], xlabel="u, v (m/s)", ylabel="z (m)")
-axq = Axis(fig[2, 2], xlabel="q (kg/kg)", ylabel="z (m)")
-axθ = Axis(fig[2, 3], xlabel="θ (ᵒK)", ylabel="z (m)")
-
-function update_plots!(sim)
-    compute!(T_avg)
-    compute!(qˡ_avg)
-    compute!(qᵛ⁺_avg)
-    compute!(rh_avg)
-    compute!(qᵗ_avg)
-    compute!(e_avg)
-    compute!(u_avg)
-    compute!(v_avg)
-
-    lines!(axT, T_avg)
-    lines!(axqˡ, qˡ_avg)
-    lines!(axrh, rh_avg)
-    lines!(axu, u_avg)
-    lines!(axu, v_avg)
-    lines!(axq, qᵗ_avg)
-    # lines!(axq, qᵛ⁺_avg)
-    lines!(axθ, e_avg)
-    display(fig)
-    return nothing
-end
-
-# update_plots!(simulation)
-# display(fig)
-
-add_callback!(simulation, update_plots!, TimeInterval(20minutes))
 
 function progress(sim)
-    compute!(T)
     qˡmax = maximum(qˡ)
     qᵛmax = maximum(qᵛ)
 
-    compute!(rh)
-    rhmax = maximum(rh)
 
     umax = maximum(abs, u_avg)
     vmax = maximum(abs, v_avg)
@@ -261,8 +213,8 @@ function progress(sim)
     ρemin = minimum(ρe)
     ρemax = maximum(ρe)
 
-    msg = @sprintf("Iter: %d, t: %s, Δt: %s, max|ū|: (%.2e, %.2e), max(rh): %.2f",
-                    iteration(sim), prettytime(sim), prettytime(sim.Δt), umax, vmax, rhmax)
+    msg = @sprintf("Iter: %d, t: %s, Δt: %s, max|ū|: (%.2e, %.2e)",
+                    iteration(sim), prettytime(sim), prettytime(sim.Δt), umax, vmax)
 
     msg *= @sprintf(", max(qᵗ): %.2e, max(qᵛ): %.2e, max(qˡ): %.2e, extrema(ρe): (%.3e, %.3e)",
                      qᵗmax, qᵛmax, qˡmax, ρemin, ρemax)
@@ -277,11 +229,11 @@ add_callback!(simulation, progress, IterationInterval(10))
 # The commented out lines below diagnose the forcing applied to model.tracers.q
 # using Oceananigans.Models: ForcingOperation
 # Sʳ = ForcingOperation(:q, model)
-outputs = merge(model.velocities, model.tracers, (; T, qˡ, qᵛ⁺))
+outputs = merge(model.velocities, model.tracers, (; θ, qˡ, qᵛ))
 averaged_outputs = NamedTuple(name => Average(outputs[name], dims=(1, 2)) for name in keys(outputs))
 
 filename = string("bomex_", Nx, "_", Ny, "_", Nz, ".jld2")
-averages_filename = string("bomex_averages_", Nx, "_", Ny, "_", Nz, ".jld2")
+averages_filename = string("bomex_avg_", Nx, "_", Ny, "_", Nz, ".jld2")
 
 ow = JLD2Writer(model, outputs; filename,
                 schedule = TimeInterval(1minutes),
@@ -291,7 +243,7 @@ simulation.output_writers[:jld2] = ow
 
 averages_ow = JLD2Writer(model, averaged_outputs;
                          filename = averages_filename,
-                         schedule = TimeInterval(1minutes),
+                         schedule = AveragedTimeInterval(60minutes, window=60minutes, stride=1),
                          overwrite_existing = true)
 
 simulation.output_writers[:avg] = averages_ow
@@ -299,47 +251,49 @@ simulation.output_writers[:avg] = averages_ow
 @info "Running BOMEX on grid: \n $grid \n and using model: \n $model"
 run!(simulation)
 
-#=
+
 using CairoMakie
 
-if get(ENV, "CI", "false") == "false"
-    θt  = FieldTimeSeries(averages_filename, "θ")
-    Tt  = FieldTimeSeries(averages_filename, "T")
-    qᵗt  = FieldTimeSeries(averages_filename, "qᵗ")
-    qˡt = FieldTimeSeries(averages_filename, "qˡ")
-    times = qᵗt.times
-    Nt = length(θt)
+θt  = FieldTimeSeries(averages_filename, "θ")
+qᵛt  = FieldTimeSeries(averages_filename, "qᵛ")
+qˡt = FieldTimeSeries(averages_filename, "qˡ")
+ut = FieldTimeSeries(averages_filename, "u")
+vt = FieldTimeSeries(averages_filename, "v")
 
-    fig = Figure(size=(1200, 800), fontsize=12)
-    axθ  = Axis(fig[1, 1], xlabel="θ (ᵒK)", ylabel="z (m)")
-    axqᵗ = Axis(fig[1, 2], xlabel="qᵗ (kg/kg)", ylabel="z (m)")
-    axT  = Axis(fig[2, 1], xlabel="T (ᵒK)", ylabel="z (m)")
-    axqˡ = Axis(fig[2, 2], xlabel="qˡ (kg/kg)", ylabel="z (m)")
+times = qᵛt.times
+Nt = length(θt)
 
-    Nt = length(θt)
-    slider = Slider(fig[3, 1:2], range=1:Nt, startvalue=1)
+fig = Figure(size=(800, 800), fontsize=12)
+axθ  = Axis(fig[1, 1], xlabel="θ [K]", ylabel="z (m)")
+axqᵛ = Axis(fig[1, 2], xlabel="qᵛ [g/kg]", ylabel="z (m)")
+axuv = Axis(fig[2, 1], xlabel="u, v [m/s]", ylabel="z (m)")
+axqˡ = Axis(fig[2, 2], xlabel="qˡ [g/kg]", ylabel="z (m)")
 
-    n = slider.value #Observable(length(θt))
-    θn  = @lift interior(θt[$n], 1, 1, :)
-    Tn  = @lift interior(Tt[$n], 1, 1, :)
-    qᵗn = @lift interior(qᵗt[$n], 1, 1, :)
-    qˡn = @lift interior(qˡt[$n], 1, 1, :)
-    z = znodes(θt)
-    title = @lift "t = $(prettytime(times[$n]))"
 
-    fig[0, :] = Label(fig, title, fontsize=22, tellwidth=false)
+n = 2
+θn  = @lift interior(θt[$n], 1, 1, :)
+qᵛn = @lift interior(qᵛt[$n], 1, 1, :)
+qˡn = @lift interior(qˡt[$n], 1, 1, :)
+un = @lift interior(ut[$n], 1, 1, :)
+vn = @lift interior(vt[$n], 1, 1, :)
+z = znodes(θt)
+title = "Mean profile averaged over the last hour (5-6 hours)"
 
-    hmθ  = lines!(axθ, θn, z)
-    hmT  = lines!(axT, Tn, z)
-    hmqᵗ = lines!(axqᵗ, qᵗn, z)
-    hmqˡ = lines!(axqˡ, qˡn, z)
-    xlims!(axqˡ, -1e-4, 1.5e-3)
+fig[0, :] = Label(fig, title, fontsize=22, tellwidth=false)
 
-    fig
+hmθ  = lines!(axθ, θn, z)
+hmuv_u = lines!(axuv, un, z)
+hmuv_v = lines!(axuv, vn, z)
+hmqᵛ = lines!(axqᵛ, @lift($qᵛn .* 1000), z)
+hmqˡ = lines!(axqˡ, @lift($qˡn .* 1000), z)
+xlims!(axθ, (298, 310))
+ylims!(axθ, (0, 2500))
+xlims!(axuv, (-10, 2))
+ylims!(axuv, (0, 2500))
+xlims!(axqᵛ, (4, 18))
+ylims!(axqᵛ, (0, 2500))
+#xlims!(axqˡ, (0, 0.001))
+ylims!(axqˡ, (0, 2500))
 
-    CairoMakie.record(fig, "bomex.mp4", 1:Nt, framerate=12) do nn
-        @info "Drawing frame $nn of $Nt..."
-        n[] = nn
-    end
-end
-=#
+save("bomex_avg_profiles.png", fig)
+
