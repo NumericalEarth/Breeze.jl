@@ -12,9 +12,9 @@ Random = "9a3f8284-a2c9-5f02-9a11-845980a1fd5c"
 Breeze = {path = ".."}
 
 [compat]
-CairoMakie = "0.13, 0.14"
+CairoMakie = "0.15"
 Documenter = "1"
 DocumenterCitations = "1.4"
 Literate = "2"
-Oceananigans = "0.101.2"
+Oceananigans = "0.101.3"
 Random = "<0.0.1, 1"
