@@ -7,6 +7,7 @@ GLMakie = "e9467ef8-e4e7-5192-8a1a-b1aee30e663a"
 JLD2 = "033835bb-8acc-5ee8-8aae-3f567f8a3819"
 Oceananigans = "9e8cae18-63c1-5223-a75c-80ca9d6e9a09"
 Printf = "de0858da-6303-5e67-8744-51eddeeeb8d7"
+RRTMGP = "a01a1ee8-cea4-48fc-987c-fc7878d79da1"
 
 [sources]
 Breeze = {path = ".."}
