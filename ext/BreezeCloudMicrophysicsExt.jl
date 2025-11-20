@@ -80,7 +80,7 @@ materialize_microphysical_fields(bμp::ZMCM, grid, bcs) = materialize_microphysi
 @inline compute_moisture_fractions(i, j, k, grid, bμp::ZMCM, ρ, qᵗ, μ) = compute_moisture_fractions(i, j, k, grid, bμp.nucleation, ρ, qᵗ, μ)
 @inline microphysical_tendency(i, j, k, grid, bμp::ZMCM, args...) = zero(grid)
 @inline microphysical_velocities(bμp::ZMCM, name) = nothing
-@inline maybe_adjust_thermodynamic_state(𝒰₀::ATC, bμp::ZMCM, μ, thermo) = adjust_thermodynamic_state(𝒰₀, bμp.nucleation, thermo)
+@inline maybe_adjust_thermodynamic_state(𝒰₀, bμp::ZMCM, μ, qᵗ, thermo) = adjust_thermodynamic_state(𝒰₀, bμp.nucleation, thermo)
 
 @inline @inbounds function microphysical_tendency(i, j, k, grid, bμp::ZMCM, ::Val{:ρqᵗ}, μ, p, T, q, thermo)
     pᵣ = 𝒰.reference_pressure[i, j, k]
@@ -207,8 +207,8 @@ Delegates to clouds scheme (saturation adjustment) for vapor↔cloud conversion.
 CloudMicrophysics 1M handles cloud↔precipitation processes via tendencies
 computed in `update_microphysical_fields!`.
 """
-@inline maybe_adjust_thermodynamic_state(𝒰₀::AbstractThermodynamicState, bμp::OneMomentCloudMicrophysics, thermo) =
-    maybe_adjust_thermodynamic_state(𝒰₀, bμp.clouds, thermo)
+@inline maybe_adjust_thermodynamic_state(𝒰₀, bμp::OneMomentCloudMicrophysics, microphysical_fields, qᵗ, thermo) =
+    maybe_adjust_thermodynamic_state(𝒰₀, bμp.nucleation, microphysical_fields, qᵗ, thermo)
 
 #####
 ##### show methods
