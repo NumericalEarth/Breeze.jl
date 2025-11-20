@@ -18,7 +18,8 @@ Lx = 6400
 Ly = 6400
 Lz = 3000
 
-arch = GPU() # if changing to CPU() remove the `using CUDA` line above
+#arch = GPU() # if changing to CPU() remove the `using CUDA` line above
+arch = CPU() # if changing to CPU() remove the `using CUDA` line above
 stop_time = 6hours
 
 grid = RectilinearGrid(arch,
