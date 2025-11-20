@@ -80,12 +80,10 @@ using Breeze.Microphysics:
                 T★ = @allowscalar first(model.temperature)
                 qᵛ = @allowscalar first(model.microphysical_fields.qᵛ)
                 qˡ = @allowscalar first(model.microphysical_fields.qˡ)
-                qⁱ = @allowscalar first(model.microphysical_fields.qⁱ)
 
                 @test T★ ≈ T₂ atol=sqrt(tol)
                 @test qᵛ == qᵛ⁺₂
                 @test qˡ == qˡ₂
-                @test qⁱ == zero(FT)
             end
         end
     end
