@@ -76,7 +76,7 @@ function set!(model::AtmosphereModel; enforce_mass_conservation=true, kw...)
             launch!(arch, grid, :xyz,
                     _energy_density_from_potential_temperature!,
                     model.energy_density,
-                    model.moist_static_energy,
+                    model.specific_energy,
                     grid,
                     θ,
                     model.moisture_mass_fraction,

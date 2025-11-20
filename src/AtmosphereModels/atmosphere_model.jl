@@ -42,7 +42,7 @@ mutable struct AtmosphereModel{Frm, Arc, Tst, Grd, Clk, Thm, Den, Mom, Eng, Mse,
     density :: Den
     momentum :: Mom
     energy_density :: Eng
-    moist_static_energy :: Mse
+    specific_energy :: Mse
     moisture_density :: Moi
     moisture_mass_fraction :: Mfr
     temperature :: Tmp
@@ -136,7 +136,7 @@ function AtmosphereModel(grid;
     end
 
     energy_density = CenterField(grid, boundary_conditions=boundary_conditions.ρe)
-    moist_static_energy = CenterField(grid) # e = ρe / ρᵣ (diagnostic per-mass energy)
+    specific_energy = CenterField(grid) # e = ρe / ρᵣ (diagnostic per-mass energy)
     moisture_mass_fraction = CenterField(grid, boundary_conditions=boundary_conditions.ρqᵗ)
     temperature = CenterField(grid)
 
@@ -169,7 +169,7 @@ function AtmosphereModel(grid;
                             density,
                             momentum,
                             energy_density,
-                            moist_static_energy,
+                            specific_energy,
                             moisture_density,
                             moisture_mass_fraction,
                             temperature,
@@ -260,7 +260,7 @@ function atmosphere_model_forcing(user_forcings::NamedTuple, prognostic_fields, 
 end
 
 function fields(model::AtmosphereModel)
-    auxiliary_thermodynamic_fields = (e=model.moist_static_energy, T=model.temperature, qᵗ=model.moisture_mass_fraction)
+    auxiliary_thermodynamic_fields = (e=model.specific_energy, T=model.temperature, qᵗ=model.moisture_mass_fraction)
     return merge(prognostic_fields(model),
                  model.velocities,
                  auxiliary_thermodynamic_fields)

@@ -51,7 +51,7 @@ function compute_auxiliary_variables!(model)
     launch!(arch, grid, :xyz,
             _compute_auxiliary_thermodynamic_variables!,
             model.temperature,
-            model.moist_static_energy,
+            model.specific_energy,
             model.moisture_mass_fraction,
             grid,
             model.thermodynamics,
@@ -64,7 +64,7 @@ function compute_auxiliary_variables!(model)
     # TODO: Can we compute the thermodynamic variable within halos as well, and avoid
     # halo filling later on?
     fill_halo_regions!(model.temperature)
-    fill_halo_regions!(model.moist_static_energy)
+    fill_halo_regions!(model.specific_energy)
     fill_halo_regions!(model.moisture_mass_fraction)
 
     # TODO: should we mask the auxiliary variables? They can also be masked in the kernel
@@ -90,7 +90,7 @@ end
 end
 
 @kernel function _compute_auxiliary_thermodynamic_variables!(temperature,
-                                                             moist_static_energy,
+                                                             specific_energy,
                                                              moisture_mass_fraction,
                                                              grid,
                                                              thermo,
@@ -128,7 +128,7 @@ end
         T = Thermodynamics.temperature(𝒰₁, thermo)
 
         temperature[i, j, k] = T
-        moist_static_energy[i, j, k] = ρe / ρ
+        specific_energy[i, j, k] = ρe / ρ
         moisture_mass_fraction[i, j, k] = ρqᵗ / ρ
     end
 end
@@ -193,7 +193,7 @@ function compute_tendencies!(model::AnelasticModel)
 
     ρe_args = (
         Val(1),
-        model.moist_static_energy,
+        model.specific_energy,
         model.forcing.ρe,
         common_args...,
         model.temperature,
