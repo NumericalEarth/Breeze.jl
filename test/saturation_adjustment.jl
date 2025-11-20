@@ -53,7 +53,7 @@ using Breeze.Microphysics:
     @test compute_temperature(𝒰₁, nothing, thermo) ≈ T₁ atol=sqrt(tol)
 
     formulation = AnelasticFormulation(reference_state)
-    model = AtmosphereModel(grid; thermo, formulation, microphysics)
+    model = AtmosphereModel(grid; thermodynamics=thermo, formulation, microphysics)
     ρᵣ = @allowscalar first(reference_state.density)
 
     # Many more tests that touch saturated conditions
@@ -108,7 +108,7 @@ end
     equilibrium = MixedPhaseEquilibrium(FT; freezing_temperature=Tᶠ, homogeneous_ice_nucleation_temperature=Tʰ)
     microphysics = SaturationAdjustment(FT; tolerance=tol, equilibrium=equilibrium)
     formulation = AnelasticFormulation(reference_state)
-    model = AtmosphereModel(grid; thermo, formulation, microphysics)
+    model = AtmosphereModel(grid; thermodynamics=thermo, formulation, microphysics)
     ρᵣ = @allowscalar first(reference_state.density)
 
     # Sample a single cell
