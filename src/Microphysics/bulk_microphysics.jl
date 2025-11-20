@@ -32,7 +32,7 @@ end
 const NCBM = BulkMicrophysics{<:Any, Nothing}
 const NPBM = NCBM  # Alias: Non-Precipitating Bulk Microphysics
 
-maybe_adjust_thermodynamic_state(𝒰₀, bμp::NCBM, microphysical_fields, thermo) =
+maybe_adjust_thermodynamic_state(𝒰₀, bμp::NCBM, microphysical_fields, qᵗ, thermo) =
     adjust_thermodynamic_state(𝒰₀, bμp.nucleation, thermo)
 
 prognostic_field_names(::NPBM) = tuple()
