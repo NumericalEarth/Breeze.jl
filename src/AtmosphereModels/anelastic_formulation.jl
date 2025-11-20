@@ -80,9 +80,9 @@ function diagnose_thermodynamic_state(i, j, k, grid, formulation::AnelasticFormu
     return MoistStaticEnergyState(e, q, z, pᵣ)
 end
 
-@inline function specific_volume(i, j, k, grid, formulation, temperature, moisture_mass_fraction, thermo)
+@inline function specific_volume(i, j, k, grid, formulation, temperature, specific_moisture, thermo)
     @inbounds begin
-        qᵗ = moisture_mass_fraction[i, j, k]
+        qᵗ = specific_moisture[i, j, k]
         pᵣ = formulation.reference_state.pressure[i, j, k]
         T = temperature[i, j, k]
     end

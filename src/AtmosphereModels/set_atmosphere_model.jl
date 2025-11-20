@@ -43,7 +43,7 @@ function set!(model::AtmosphereModel; enforce_mass_conservation=true, kw...)
             set!(model.energy_density, value)
         elseif name == :ρqᵗ
             set!(model.moisture_density, value)
-            set!(model.moisture_mass_fraction, model.moisture_density / model.formulation.reference_state.density)
+            set!(model.specific_moisture, model.moisture_density / model.formulation.reference_state.density)
         elseif name ∈ prognostic_field_names(model.microphysics)
             μ = getproperty(model.microphysical_fields, name)
             set!(μ, value)
@@ -51,7 +51,7 @@ function set!(model::AtmosphereModel; enforce_mass_conservation=true, kw...)
         # Setting diagnostic variables
         supported_diagnostic_variables = (:qᵗ, :u, :v, :w, :θ)
         elseif name == :qᵗ
-            qᵗ = model.moisture_mass_fraction
+            qᵗ = model.specific_moisture
             set!(qᵗ, value)
             ρᵣ = model.formulation.reference_state.density
             ρqᵗ = model.moisture_density
@@ -79,7 +79,7 @@ function set!(model::AtmosphereModel; enforce_mass_conservation=true, kw...)
                     model.specific_energy,
                     grid,
                     θ,
-                    model.moisture_mass_fraction,
+                    model.specific_moisture,
                     model.formulation,
                     model.microphysics,
                     model.microphysical_fields,
@@ -116,7 +116,7 @@ end
                                                              specific_energy,
                                                              grid,
                                                              potential_temperature,
-                                                             moisture_mass_fraction,
+                                                             specific_moisture,
                                                              formulation::AnelasticFormulation,
                                                              microphysics,
                                                              microphysical_fields,
@@ -126,9 +126,8 @@ end
     @inbounds begin
         pᵣ = formulation.reference_state.pressure[i, j, k]
         ρᵣ = formulation.reference_state.density[i, j, k]
-        qᵗ = moisture_mass_fraction[i, j, k]
+        qᵗ = specific_moisture[i, j, k]
         θ = potential_temperature[i, j, k]
-        qᵗ = moisture_mass_fraction[i, j, k]
     end
 
     g = thermo.gravitational_acceleration

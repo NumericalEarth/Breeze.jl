@@ -44,7 +44,7 @@ mutable struct AtmosphereModel{Frm, Arc, Tst, Grd, Clk, Thm, Den, Mom, Eng, Mse,
     energy_density :: Eng
     specific_energy :: Mse
     moisture_density :: Moi
-    moisture_mass_fraction :: Mfr
+    specific_moisture :: Mfr
     temperature :: Tmp
     nonhydrostatic_pressure :: Prs
     hydrostatic_pressure_anomaly :: Ppa
@@ -136,8 +136,10 @@ function AtmosphereModel(grid;
     end
 
     energy_density = CenterField(grid, boundary_conditions=boundary_conditions.ρe)
+
+    # Diagnostic thermodynamic fields
     specific_energy = CenterField(grid) # e = ρe / ρᵣ (diagnostic per-mass energy)
-    moisture_mass_fraction = CenterField(grid, boundary_conditions=boundary_conditions.ρqᵗ)
+    specific_moisture = CenterField(grid)
     temperature = CenterField(grid)
 
     prognostic_microphysical_fields = NamedTuple(microphysical_fields[name] for name in prognostic_field_names(microphysics))
@@ -153,7 +155,7 @@ function AtmosphereModel(grid;
     timestepper = TimeStepper(timestepper, grid, prognostic_fields; implicit_solver)
     pressure_solver = formulation_pressure_solver(formulation, grid)
 
-    model_fields = merge(prognostic_fields, velocities, (; T=temperature, qᵗ=moisture_mass_fraction))
+    model_fields = merge(prognostic_fields, velocities, (; T=temperature, qᵗ=specific_moisture))
     forcing = atmosphere_model_forcing(forcing, prognostic_fields, model_fields)
 
     # May need to use more names in `tracers` for this to work
@@ -171,7 +173,7 @@ function AtmosphereModel(grid;
                             energy_density,
                             specific_energy,
                             moisture_density,
-                            moisture_mass_fraction,
+                            specific_moisture,
                             temperature,
                             nonhydrostatic_pressure,
                             hydrostatic_pressure_anomaly,
@@ -260,7 +262,7 @@ function atmosphere_model_forcing(user_forcings::NamedTuple, prognostic_fields, 
 end
 
 function fields(model::AtmosphereModel)
-    auxiliary_thermodynamic_fields = (e=model.specific_energy, T=model.temperature, qᵗ=model.moisture_mass_fraction)
+    auxiliary_thermodynamic_fields = (e=model.specific_energy, T=model.temperature, qᵗ=model.specific_moisture)
     return merge(prognostic_fields(model),
                  model.velocities,
                  auxiliary_thermodynamic_fields)

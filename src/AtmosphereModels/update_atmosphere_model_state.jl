@@ -52,7 +52,7 @@ function compute_auxiliary_variables!(model)
             _compute_auxiliary_thermodynamic_variables!,
             model.temperature,
             model.specific_energy,
-            model.moisture_mass_fraction,
+            model.specific_moisture,
             grid,
             model.thermodynamics,
             model.formulation,
@@ -65,7 +65,7 @@ function compute_auxiliary_variables!(model)
     # halo filling later on?
     fill_halo_regions!(model.temperature)
     fill_halo_regions!(model.specific_energy)
-    fill_halo_regions!(model.moisture_mass_fraction)
+    fill_halo_regions!(model.specific_moisture)
 
     # TODO: should we mask the auxiliary variables? They can also be masked in the kernel
 
@@ -91,7 +91,7 @@ end
 
 @kernel function _compute_auxiliary_thermodynamic_variables!(temperature,
                                                              specific_energy,
-                                                             moisture_mass_fraction,
+                                                             specific_moisture,
                                                              grid,
                                                              thermo,
                                                              formulation,
@@ -112,7 +112,7 @@ end
 
     # Adjust the thermodynamic state if using a microphysics scheme
     # that invokes saturation adjustment
-    qᵗ = @inbounds moisture_mass_fraction[i, j, k]
+    qᵗ = @inbounds specific_moisture[i, j, k]
     𝒰₁ = maybe_adjust_thermodynamic_state(𝒰₀, microphysics, microphysical_fields, qᵗ, thermo)
 
     update_microphysical_fields!(microphysical_fields, microphysics,
@@ -129,7 +129,7 @@ end
 
         temperature[i, j, k] = T
         specific_energy[i, j, k] = ρe / ρ
-        moisture_mass_fraction[i, j, k] = ρqᵗ / ρ
+        specific_moisture[i, j, k] = ρqᵗ / ρ
     end
 end
 
@@ -165,7 +165,7 @@ function compute_tendencies!(model::AnelasticModel)
     w_args = tuple(momentum_args..., model.forcing.ρw,
                    model.formulation,
                    model.temperature,
-                   model.moisture_mass_fraction,
+                   model.specific_moisture,
                    model.thermodynamics)
 
     launch!(arch, grid, :xyz, compute_x_momentum_tendency!, Gρu, grid, u_args)
@@ -197,7 +197,7 @@ function compute_tendencies!(model::AnelasticModel)
         model.forcing.ρe,
         common_args...,
         model.temperature,
-        model.moisture_mass_fraction)
+        model.specific_moisture)
 
     Gρe = model.timestepper.Gⁿ.ρe
     launch!(arch, grid, :xyz, compute_moist_static_energy_tendency!, Gρe, grid, ρe_args)
