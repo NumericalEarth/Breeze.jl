@@ -52,7 +52,8 @@ using Breeze.Microphysics:
     @test compute_temperature(𝒰₁, microphysics, thermo) ≈ T₁ atol=sqrt(tol)
     @test compute_temperature(𝒰₁, nothing, thermo) ≈ T₁ atol=sqrt(tol)
 
-    model = AtmosphereModel(grid; thermo, microphysics)
+    formulation = AnelasticFormulation(reference_state)
+    model = AtmosphereModel(grid; thermo, formulation, microphysics)
     ρᵣ = @allowscalar first(reference_state.density)
 
     # Many more tests that touch saturated conditions
@@ -106,6 +107,9 @@ end
 
     equilibrium = MixedPhaseEquilibrium(FT; freezing_temperature=Tᶠ, homogeneous_ice_nucleation_temperature=Tʰ)
     microphysics = SaturationAdjustment(FT; tolerance=tol, equilibrium=equilibrium)
+    formulation = AnelasticFormulation(reference_state)
+    model = AtmosphereModel(grid; thermo, formulation, microphysics)
+    ρᵣ = @allowscalar first(reference_state.density)
 
     # Sample a single cell
     pᵣ = @allowscalar first(reference_state.pressure)
@@ -121,20 +125,25 @@ end
         @test microphysics.equilibrium.freezing_temperature == Tᶠ
         @test microphysics.equilibrium.homogeneous_ice_nucleation_temperature == Tʰ
 
-        # Test equilibrated_surface at different temperatures
-        surface_above = Breeze.Microphysics.equilibrated_surface(equilibrium, FT(300))
-        @test surface_above isa PlanarMixedPhaseSurface{FT}
-        @test surface_above.liquid_fraction == 1  # Above freezing, all liquid
+        @test model.microphysics isa SaturationAdjustment
+        @test model.microphysics.equilibrium isa MixedPhaseEquilibrium{FT}
+        @test model.microphysics.equilibrium.freezing_temperature == Tᶠ
+        @test model.microphysics.equilibrium.homogeneous_ice_nucleation_temperature == Tʰ
 
-        surface_below = Breeze.Microphysics.equilibrated_surface(equilibrium, FT(200))
-        @test surface_below isa PlanarMixedPhaseSurface{FT}
-        @test surface_below.liquid_fraction == 0  # Below homogeneous nucleation, all ice
+        # Test equilibrated_surface at different temperatures
+        surface_above_freezing = Breeze.Microphysics.equilibrated_surface(equilibrium, FT(300))
+        @test surface_above_freezing isa PlanarMixedPhaseSurface{FT}
+        @test surface_above_freezing.liquid_fraction == 1  # Above freezing, all liquid
+
+        surface_below_homogeneous_ice_nucleation = Breeze.Microphysics.equilibrated_surface(equilibrium, FT(200))
+        @test surface_below_homogeneous_ice_nucleation isa PlanarMixedPhaseSurface{FT}
+        @test surface_below_homogeneous_ice_nucleation.liquid_fraction == 0  # Below homogeneous nucleation, all ice
 
         T_mid = FT(253.15)  # Midway between Tᶠ and Tʰ
-        surface_mid = Breeze.Microphysics.equilibrated_surface(equilibrium, T_mid)
-        @test surface_mid isa PlanarMixedPhaseSurface{FT}
+        surface_midway = Breeze.Microphysics.equilibrated_surface(equilibrium, T_mid)
+        @test surface_midway isa PlanarMixedPhaseSurface{FT}
         λ_expected = test_liquid_fraction(T_mid, Tᶠ, Tʰ)
-        @test surface_mid.liquid_fraction ≈ λ_expected
+        @test surface_midway.liquid_fraction ≈ λ_expected
     end
 
     # Test 2: Temperatures above freezing - should match warm phase behavior
@@ -153,6 +162,18 @@ end
             𝒰 = MoistStaticEnergyState(e, q, z, pᵣ)
             T★ = compute_temperature(𝒰, microphysics, thermo)
             @test T★ ≈ T_warm atol=sqrt(tol)
+
+            # Parcel test for AtmosphereModel
+            set!(model, ρe = ρᵣ * e, qᵗ = qᵗ)    
+            T★ = @allowscalar first(model.temperature)
+            qᵛm = @allowscalar first(model.microphysical_fields.qᵛ)
+            qˡm = @allowscalar first(model.microphysical_fields.qˡ)
+            qⁱm = @allowscalar first(model.microphysical_fields.qⁱ)
+
+            @test T★ ≈ T_warm atol=sqrt(tol)
+            @test qᵛm == qᵛ⁺
+            @test qˡm == qˡ
+            @test qⁱm == zero(FT)
         end
     end
 
