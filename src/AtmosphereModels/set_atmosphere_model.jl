@@ -131,7 +131,7 @@ end
     # q = moisture_mass_fractions(i, j, k, grid, microphysics, microphysical_fields, moisture_mass_fraction)
     q = MoistureMassFractions(qᵗ)
     𝒰₀ = PotentialTemperatureState(θ, q, p₀, pᵣ)
-    𝒰 = maybe_adjust_thermodynamic_state(𝒰₀, microphysics, microphysical_fields, thermo)
+    𝒰 = maybe_adjust_thermodynamic_state(𝒰₀, microphysics, microphysical_fields, qᵗ, thermo)
 
     T = temperature(𝒰, thermo)
     q = 𝒰.moisture_mass_fractions
@@ -146,4 +146,3 @@ end
     @inbounds specific_energy[i, j, k] = e
     @inbounds energy_density[i, j, k] = ρᵣ * e
 end
-

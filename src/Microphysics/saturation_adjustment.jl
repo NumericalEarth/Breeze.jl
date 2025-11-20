@@ -203,8 +203,11 @@ end
 const ATC = AbstractThermodynamicState
 
 # This function allows saturation adjustment to be used as a microphysics scheme directly
-@inline maybe_adjust_thermodynamic_state(𝒰₀, saturation_adjustment::SA, microphysical_fields, thermo) =
-    adjust_thermodynamic_state(𝒰₀, saturation_adjustment, thermo)
+@inline function maybe_adjust_thermodynamic_state(𝒰₀, saturation_adjustment::SA, microphysical_fields, qᵗ, thermo)
+    qᵃ = MoistureMassFractions(qᵗ) # compute moisture state to be adjusted
+    𝒰ᵃ = with_moisture(𝒰₀, qᵃ)
+    return adjust_thermodynamic_state(𝒰ᵃ, saturation_adjustment, thermo)
+end
 
 """
 $(TYPEDSIGNATURES)

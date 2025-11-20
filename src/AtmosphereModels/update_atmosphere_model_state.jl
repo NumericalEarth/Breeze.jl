@@ -109,9 +109,11 @@ end
                                       energy_density,
                                       moisture_density)
 
+
     # Adjust the thermodynamic state if using a microphysics scheme
     # that invokes saturation adjustment
-    𝒰₁ = maybe_adjust_thermodynamic_state(𝒰₀, microphysics, microphysical_fields, thermo)
+    qᵗ = @inbounds moisture_mass_fraction[i, j, k]
+    𝒰₁ = maybe_adjust_thermodynamic_state(𝒰₀, microphysics, microphysical_fields, qᵗ, thermo)
 
     update_microphysical_fields!(microphysical_fields, microphysics,
                                  i, j, k, grid,
