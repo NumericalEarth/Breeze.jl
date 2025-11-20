@@ -52,6 +52,9 @@ using Breeze.Microphysics:
     @test compute_temperature(𝒰₁, microphysics, thermo) ≈ T₁ atol=sqrt(tol)
     @test compute_temperature(𝒰₁, nothing, thermo) ≈ T₁ atol=sqrt(tol)
 
+    model = AtmosphereModel(grid; thermo, microphysics)
+    ρᵣ = @allowscalar first(reference_state.density)
+
     # Many more tests that touch saturated conditions
     for T₂ in 270:4:320, qᵗ₂ in 1e-2:2e-3:5e-2
         @testset let T₂=T₂, qᵗ₂=qᵗ₂
@@ -70,17 +73,11 @@ using Breeze.Microphysics:
                 𝒰₂ = MoistStaticEnergyState(e₂, q₂, z, pᵣ)
                 T★ = compute_temperature(𝒰₂, microphysics, thermo)
                 @test T★ ≈ T₂ atol=sqrt(tol)
+
+                set!(model, ρe = ρᵣ * e₂, qᵗ = qᵗ₂)    
+                T★ = @allowscalar first(model.temperature)
+                @test T★ ≈ T₂ atol=sqrt(tol)
             end
-            #=
-            else # unsaturated conditions
-            q₂ = MoistureMassFractions(qᵗ₂)
-            cᵖᵐ = mixture_heat_capacity(q₂, thermo)
-            e₂ = cᵖᵐ * T₂ + g * z
-            𝒰₂ = MoistStaticEnergyState(e₂, q₂, z, pᵣ)
-            @test compute_temperature(𝒰₂, microphysics, thermo) ≈ T₂ atol=sqrt(tol)
-            @test compute_temperature(𝒰₂, nothing, thermo) ≈ T₂ atol=sqrt(tol)
-            end
-            =#
         end
     end
 end
