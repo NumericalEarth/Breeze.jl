@@ -33,7 +33,7 @@ end
 formulation_pressure_solver(formulation, grid) = nothing
 
 mutable struct AtmosphereModel{Frm, Arc, Tst, Grd, Clk, Thm, Den, Mom, Eng, Mse, Moi, Mfr,
-                               Tmp, Prs, Ppa, Sol, Vel, Trc, Adv, Cor, Frc, Mic, Cnd, Cls, Cfs} <: AbstractModel{Tst, Arc}
+                               Tmp, Prs, Ppa, Sol, Vel, Trc, Adv, Cor, Frc, Mic, Cnd, Cls, Cfs, Rad} <: AbstractModel{Tst, Arc}
     architecture :: Arc
     grid :: Grd
     clock :: Clk
@@ -59,6 +59,7 @@ mutable struct AtmosphereModel{Frm, Arc, Tst, Grd, Clk, Thm, Den, Mom, Eng, Mse,
     timestepper :: Tst
     closure :: Cls
     closure_fields :: Cfs
+    radiative_transfer :: Rad
 end
 
 function default_formulation(grid, thermo)
@@ -108,7 +109,8 @@ function AtmosphereModel(grid;
                          advection = Centered(order=2),
                          closure = nothing,
                          microphysics = nothing, # WarmPhaseSaturationAdjustment(),
-                         timestepper = :RungeKutta3)
+                         timestepper = :RungeKutta3,
+                         radiative_transfer = nothing)
 
     arch = grid.architecture
     tracers = tupleit(tracers) # supports tracers=:c keyword argument (for example)
@@ -185,7 +187,8 @@ function AtmosphereModel(grid;
                             microphysical_fields,
                             timestepper,
                             closure,
-                            closure_fields)
+                            closure_fields,
+                            radiative_transfer)
 
     update_state!(model)
 

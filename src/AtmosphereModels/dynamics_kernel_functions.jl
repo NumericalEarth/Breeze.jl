@@ -150,7 +150,8 @@ end
                                               clock,
                                               model_fields,
                                               temperature,
-                                              moisture_mass_fraction)
+                                              moisture_mass_fraction,
+                                              radiation_flux)
 
     𝒰 = diagnose_thermodynamic_state(i, j, k, grid, formulation,
                                      microphysics, microphysical_fields,

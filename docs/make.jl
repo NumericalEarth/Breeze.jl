@@ -52,6 +52,7 @@ makedocs(
                 "Microphysics Interface" => "developer/microphysics_interface.md",
             ],
         ],
+        "Radiative Transfer" => "radiative_transfer.md",
         "Dycore equations and algorithms" => "dycore_equations_algorithms.md",
         "Appendix" => Any[
             "Notation" => "appendix/notation.md",

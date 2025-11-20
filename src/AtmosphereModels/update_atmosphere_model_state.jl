@@ -195,9 +195,9 @@ function compute_tendencies!(model::AnelasticModel)
         model.forcing.ρe,
         common_args...,
         model.temperature,
-        model.moisture_mass_fraction)
+        model.moisture_mass_fraction,
+        radiation_flux)
 
-    Gρe = model.timestepper.Gⁿ.ρe
     launch!(arch, grid, :xyz, compute_moist_static_energy_tendency!, Gρe, grid, ρe_args)
 
     #####
