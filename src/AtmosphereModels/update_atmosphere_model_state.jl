@@ -5,6 +5,7 @@ using ..Thermodynamics:
 
 using Oceananigans.Architectures: architecture
 using Oceananigans.BoundaryConditions: fill_halo_regions!, compute_x_bcs!, compute_y_bcs!, compute_z_bcs!
+using Oceananigans.TurbulenceClosures: compute_diffusivities!
 using Oceananigans.ImmersedBoundaries: mask_immersed_field!
 using Oceananigans.Utils: launch!
 
@@ -60,6 +61,9 @@ function compute_auxiliary_variables!(model)
             model.microphysical_fields,
             model.energy_density,
             model.moisture_density)
+
+    # Compute diffusivities
+    compute_diffusivities!(model.closure_fields, model.closure, model)
 
     # TODO: Can we compute the thermodynamic variable within halos as well, and avoid
     # halo filling later on?
