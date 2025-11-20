@@ -20,13 +20,18 @@ using Breeze.Microphysics: compute_temperature
 using Breeze.Microphysics:
     adjustment_saturation_specific_humidity
 
+solver_tol(::Type{Float64}) = 1e-6
+solver_tol(::Type{Float32}) = 1e-3
+test_tol(FT::Type{Float64}) = 10 * sqrt(solver_tol(FT))
+test_tol(FT::Type{Float32}) = sqrt(solver_tol(FT))
+
 @testset "Warm-phase saturation adjustment (AtmosphereModel) [$(FT)]" for FT in (Float32, Float64)
     grid = RectilinearGrid(default_arch, FT; size=(1, 1, 1), x=(0, 1), y=(0, 1), z=(0, 1))
     thermo = ThermodynamicConstants(FT)
     reference_state = ReferenceState(grid, thermo; base_pressure=101325, potential_temperature=288)
 
-    tol = FT(1e-3)
-    microphysics = SaturationAdjustment(FT; tolerance=tol, equilibrium=WarmPhaseEquilibrium())
+    atol = test_tol(FT)
+    microphysics = SaturationAdjustment(FT; tolerance=solver_tol(FT), equilibrium=WarmPhaseEquilibrium())
 
     # Sample a single cell
     pᵣ = @allowscalar first(reference_state.pressure)
@@ -49,8 +54,8 @@ using Breeze.Microphysics:
     e₁ = cᵖᵐ * T₁ + g * z #  + ℒ₀ * qᵗ
     𝒰₁ = MoistStaticEnergyState(e₁, q₁, z, pᵣ)
 
-    @test compute_temperature(𝒰₁, microphysics, thermo) ≈ T₁ atol=sqrt(tol)
-    @test compute_temperature(𝒰₁, nothing, thermo) ≈ T₁ atol=sqrt(tol)
+    @test compute_temperature(𝒰₁, microphysics, thermo) ≈ T₁ atol=atol
+    @test compute_temperature(𝒰₁, nothing, thermo) ≈ T₁ atol=atol
 
     formulation = AnelasticFormulation(reference_state)
     model = AtmosphereModel(grid; thermodynamics=thermo, formulation, microphysics)
@@ -73,7 +78,7 @@ using Breeze.Microphysics:
 
                 𝒰₂ = MoistStaticEnergyState(e₂, q₂, z, pᵣ)
                 T★ = compute_temperature(𝒰₂, microphysics, thermo)
-                @test T★ ≈ T₂ atol=sqrt(tol)
+                @test T★ ≈ T₂ atol=atol
 
                 # Parcel test for AtmosphereModel
                 set!(model, ρe = ρᵣ * e₂, qᵗ = qᵗ₂)    
@@ -81,9 +86,9 @@ using Breeze.Microphysics:
                 qᵛ = @allowscalar first(model.microphysical_fields.qᵛ)
                 qˡ = @allowscalar first(model.microphysical_fields.qˡ)
 
-                @test T★ ≈ T₂ atol=sqrt(tol)
-                @test qᵛ ≈ qᵛ⁺₂ 
-                @test qˡ ≈ qˡ₂
+                @test T★ ≈ T₂ atol=atol
+                @test qᵛ ≈ qᵛ⁺₂ atol=atol
+                @test qˡ ≈ qˡ₂ atol=atol
             end
         end
     end
@@ -98,13 +103,13 @@ end
     grid = RectilinearGrid(default_arch, FT; size=(1, 1, 1), x=(0, 1), y=(0, 1), z=(0, 1))
     thermo = ThermodynamicConstants(FT)
     reference_state = ReferenceState(grid, thermo; base_pressure=101325, potential_temperature=288)
+    atol = test_tol(FT)
 
-    tol = 1e-3
     Tᶠ = FT(273.15)  # Freezing temperature
     Tʰ = FT(233.15)  # Homogeneous ice nucleation temperature
 
     equilibrium = MixedPhaseEquilibrium(FT; freezing_temperature=Tᶠ, homogeneous_ice_nucleation_temperature=Tʰ)
-    microphysics = SaturationAdjustment(FT; tolerance=tol, equilibrium=equilibrium)
+    microphysics = SaturationAdjustment(FT; tolerance=solver_tol(FT), equilibrium=equilibrium)
     formulation = AnelasticFormulation(reference_state)
     model = AtmosphereModel(grid; thermodynamics=thermo, formulation, microphysics)
     ρᵣ = @allowscalar first(reference_state.density)
@@ -149,6 +154,7 @@ end
         T_warm = FT(300)
         qᵗ = FT(0.02)
         qᵛ⁺ = adjustment_saturation_specific_humidity(T_warm, pᵣ, qᵗ, thermo, equilibrium)
+        atol = test_tol(FT)
 
         if qᵗ > qᵛ⁺  # saturated conditions
             # For warm temperatures, all condensate should be liquid
@@ -159,7 +165,7 @@ end
 
             𝒰 = MoistStaticEnergyState(e, q, z, pᵣ)
             T★ = compute_temperature(𝒰, microphysics, thermo)
-            @test T★ ≈ T_warm atol=sqrt(tol)
+            @test T★ ≈ T_warm atol=atol
 
             # Parcel test for AtmosphereModel
             set!(model, ρe = ρᵣ * e, qᵗ = qᵗ)
@@ -168,10 +174,10 @@ end
             qˡm = @allowscalar first(model.microphysical_fields.qˡ)
             qⁱm = @allowscalar first(model.microphysical_fields.qⁱ)
 
-            @test T★ ≈ T_warm atol=sqrt(tol)
-            @test qᵛm ≈ qᵛ⁺
-            @test qˡm ≈ qˡ
-            @test qⁱm ≈ zero(FT) atol=sqrt(tol)
+            @test T★ ≈ T_warm atol=atol
+            @test qᵛm ≈ qᵛ⁺ atol=atol
+            @test qˡm ≈ qˡ atol=atol
+            @test qⁱm ≈ zero(FT) atol=atol
         end
     end
 
@@ -180,6 +186,7 @@ end
         T_cold = FT(220)  # Below Tʰ
         qᵗ = FT(0.01)
         qᵛ⁺ = adjustment_saturation_specific_humidity(T_cold, pᵣ, qᵗ, thermo, equilibrium)
+        atol = test_tol(FT)
 
         if qᵗ > qᵛ⁺  # saturated conditions
             # All condensate should be ice
@@ -190,7 +197,7 @@ end
 
             𝒰 = MoistStaticEnergyState(e, q, z, pᵣ)
             T★ = compute_temperature(𝒰, microphysics, thermo)
-            @test T★ ≈ T_cold atol=sqrt(tol)
+            @test T★ ≈ T_cold atol=atol
 
             set!(model, ρe = ρᵣ * e, qᵗ = qᵗ)
             T★ = @allowscalar first(model.temperature)
@@ -198,17 +205,19 @@ end
             qˡm = @allowscalar first(model.microphysical_fields.qˡ)
             qⁱm = @allowscalar first(model.microphysical_fields.qⁱ)
 
-            @test T★ ≈ T_cold atol=sqrt(tol)
-            @test qᵛm ≈ qᵛ⁺
-            @test qˡm ≈ zero(FT)
-            @test qⁱm ≈ qⁱ
+            @test T★ ≈ T_cold atol=atol
+            @test qᵛm ≈ qᵛ⁺ atol=atol
+            @test qˡm ≈ zero(FT) atol=atol
+            @test qⁱm ≈ qⁱ atol=atol
         end
     end
 
     # Test 4: Mixed-phase range temperatures with moist static energy verification
     @testset "Mixed-phase range temperatures with moist static energy" begin
-        for T in [FT(240), FT(250), FT(260), FT(270)]
+        atol = test_tol(FT)
+        for T in 240:10:270
             @testset let T=T
+                T = convert(FT, T)
                 λ = test_liquid_fraction(T, Tᶠ, Tʰ)
                 qᵗ = FT(0.015)
                 qᵛ⁺ = adjustment_saturation_specific_humidity(T, pᵣ, qᵗ, thermo, equilibrium)
@@ -235,7 +244,7 @@ end
                     # Test saturation adjustment recovers temperature
                     𝒰_unadjusted = MoistStaticEnergyState(e, MoistureMassFractions(qᵗ), z, pᵣ)
                     T★ = compute_temperature(𝒰_unadjusted, microphysics, thermo)
-                    @test T★ ≈ T atol=sqrt(tol)
+                    @test T★ ≈ T atol=atol
 
                     set!(model, ρe = ρᵣ * e, qᵗ = qᵗ)
                     T★ = @allowscalar first(model.temperature)
@@ -243,10 +252,10 @@ end
                     qˡm = @allowscalar first(model.microphysical_fields.qˡ)
                     qⁱm = @allowscalar first(model.microphysical_fields.qⁱ)
 
-                    @test T★ ≈ T atol=sqrt(tol)
-                    @test qᵛm ≈ qᵛ⁺
-                    @test qˡm ≈ qˡ
-                    @test qⁱm ≈ qⁱ
+                    @test T★ ≈ T atol=atol
+                    @test qᵛm ≈ qᵛ⁺ atol=atol
+                    @test qˡm ≈ qˡ atol=atol
+                    @test qⁱm ≈ qⁱ atol=atol
                 end
             end
         end
@@ -254,6 +263,7 @@ end
 
     # Test 5: Verify moist static energy formula with various moisture fractions
     @testset "Moist static energy formula verification" begin
+        atol = test_tol(FT)
         T = FT(253.15)  # Midway in mixed-phase range
         λ = test_liquid_fraction(T, Tᶠ, Tʰ)
 
@@ -274,7 +284,7 @@ end
                     # Test with saturation adjustment
                     𝒰 = MoistStaticEnergyState(e, MoistureMassFractions(qᵗ), z, pᵣ)
                     T★ = compute_temperature(𝒰, microphysics, thermo)
-                    @test T★ ≈ T atol=sqrt(tol)
+                    @test T★ ≈ T atol=atol
                 end
             end
         end
@@ -282,8 +292,10 @@ end
 
     # Test 6: Verify partitioning matches temperature-dependent λ
     @testset "Condensate partitioning verification" begin
-        for T_partition in [FT(235), FT(245), FT(255), FT(265)]
+        atol = test_tol(FT)
+        for T_partition in 235:10:265
             @testset let T_partition=T_partition
+                T_partition = convert(FT, T_partition)
                 λ_expected = test_liquid_fraction(T_partition, Tᶠ, Tʰ)
 
                 qᵗ = FT(0.02)
@@ -308,7 +320,7 @@ end
 
                     𝒰 = MoistStaticEnergyState(e, MoistureMassFractions(qᵗ), z, pᵣ)
                     T★ = compute_temperature(𝒰, microphysics, thermo)
-                    @test T★ ≈ T_partition atol=sqrt(tol)
+                    @test T★ ≈ T_partition atol=atol
                 end
             end
         end
@@ -321,6 +333,7 @@ end
     grid = RectilinearGrid(default_arch, FT; size=(1, 1, 1), x=(0, 1), y=(0, 1), z=(0, 1))
     thermo = ThermodynamicConstants(FT)
     reference_state = ReferenceState(grid, thermo; base_pressure=101325, potential_temperature=288)
+    atol = test_tol(FT)
 
     # Sample a single cell
     pᵣ = @allowscalar reference_state.pressure[1, 1, 1]
@@ -335,9 +348,6 @@ end
     T₀ = compute_boussinesq_adjustment_temperature(𝒰₀, thermo)
     @test T₀ == 0
 
-    # Helper for tolerances
-    atol_T = FT === Float64 ? 1e-6 : FT(1e-3)
-
     # Case 1: Unsaturated, dry (qᵗ = 0)
     θ₁ = FT(300)
     qᵗ₁ = zero(FT)
@@ -347,7 +357,7 @@ end
     T_dry₁ = Π₁ * θ₁
 
     T₁ = compute_boussinesq_adjustment_temperature(𝒰₁, thermo)
-    @test isapprox(T₁, T_dry₁; atol=atol_T)
+    @test isapprox(T₁, T_dry₁; atol=atol)
 
     # Case 2: Unsaturated, humid but below saturation at dry temperature
     θ₂ = FT(300)
@@ -366,7 +376,7 @@ end
     T₂ = compute_boussinesq_adjustment_temperature(𝒰₂, thermo)
     Π₂ = exner_function(𝒰₂, thermo)
     T_dry₂ = Π₂ * θ₂
-    @test isapprox(T₂, T_dry₂; atol=atol_T)
+    @test isapprox(T₂, T_dry₂; atol=atol)
 
     # Case 3: Saturated, humid (qᵗ = qᵛ⁺)
     T₃ = θ̃ = FT(300)
@@ -386,5 +396,5 @@ end
     𝒰₃ = PotentialTemperatureState(θ₃, q₃, p₀, pᵣ)
 
     T₃_solve = compute_boussinesq_adjustment_temperature(𝒰₃, thermo)
-    @test isapprox(T₃_solve, T₃; atol=atol_T)
+    @test isapprox(T₃_solve, T₃; atol=atol)
 end

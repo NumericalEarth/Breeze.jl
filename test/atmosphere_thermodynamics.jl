@@ -18,7 +18,10 @@ end
     z = FT(1000)
     thermo = ThermodynamicConstants(FT)
 
-    for qᵛ in FT.(5e-3:5e-3:3e-2), qˡ in FT.(0:5e-5:3e-4), qˡ in FT.(0:5e-5:3e-4)
+    for qᵛ in 5e-3:5e-3:3e-2, qˡ in 0:5e-5:3e-4, qˡ in 0:5e-5:3e-4
+        qᵛ = convert(FT, qᵛ)
+        qˡ = convert(FT, qˡ)
+        qⁱ = convert(FT, qⁱ)
         q = MoistureMassFractions(qᵛ, qˡ, qⁱ)
         cᵖᵐ = mixture_heat_capacity(q, thermo)
         g = thermo.gravitational_acceleration
