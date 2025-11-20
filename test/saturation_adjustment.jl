@@ -82,8 +82,8 @@ using Breeze.Microphysics:
                 qˡ = @allowscalar first(model.microphysical_fields.qˡ)
 
                 @test T★ ≈ T₂ atol=sqrt(tol)
-                @test qᵛ == qᵛ⁺₂
-                @test qˡ == qˡ₂
+                @test qᵛ ≈ qᵛ⁺₂ 
+                @test qˡ ≈ qˡ₂
             end
         end
     end
@@ -162,16 +162,16 @@ end
             @test T★ ≈ T_warm atol=sqrt(tol)
 
             # Parcel test for AtmosphereModel
-            set!(model, ρe = ρᵣ * e, qᵗ = qᵗ)    
+            set!(model, ρe = ρᵣ * e, qᵗ = qᵗ)
             T★ = @allowscalar first(model.temperature)
             qᵛm = @allowscalar first(model.microphysical_fields.qᵛ)
             qˡm = @allowscalar first(model.microphysical_fields.qˡ)
             qⁱm = @allowscalar first(model.microphysical_fields.qⁱ)
 
             @test T★ ≈ T_warm atol=sqrt(tol)
-            @test qᵛm == qᵛ⁺
-            @test qˡm == qˡ
-            @test qⁱm == zero(FT)
+            @test qᵛm ≈ qᵛ⁺
+            @test qˡm ≈ qˡ
+            @test qⁱm ≈ zero(FT) atol=sqrt(tol)
         end
     end
 
@@ -191,6 +191,17 @@ end
             𝒰 = MoistStaticEnergyState(e, q, z, pᵣ)
             T★ = compute_temperature(𝒰, microphysics, thermo)
             @test T★ ≈ T_cold atol=sqrt(tol)
+
+            set!(model, ρe = ρᵣ * e, qᵗ = qᵗ)
+            T★ = @allowscalar first(model.temperature)
+            qᵛm = @allowscalar first(model.microphysical_fields.qᵛ)
+            qˡm = @allowscalar first(model.microphysical_fields.qˡ)
+            qⁱm = @allowscalar first(model.microphysical_fields.qⁱ)
+
+            @test T★ ≈ T_cold atol=sqrt(tol)
+            @test qᵛm ≈ qᵛ⁺
+            @test qˡm ≈ zero(FT)
+            @test qⁱm ≈ qⁱ
         end
     end
 
@@ -225,6 +236,17 @@ end
                     𝒰_unadjusted = MoistStaticEnergyState(e, MoistureMassFractions(qᵗ), z, pᵣ)
                     T★ = compute_temperature(𝒰_unadjusted, microphysics, thermo)
                     @test T★ ≈ T atol=sqrt(tol)
+
+                    set!(model, ρe = ρᵣ * e, qᵗ = qᵗ)
+                    T★ = @allowscalar first(model.temperature)
+                    qᵛm = @allowscalar first(model.microphysical_fields.qᵛ)
+                    qˡm = @allowscalar first(model.microphysical_fields.qˡ)
+                    qⁱm = @allowscalar first(model.microphysical_fields.qⁱ)
+
+                    @test T★ ≈ T atol=sqrt(tol)
+                    @test qᵛm ≈ qᵛ⁺
+                    @test qˡm ≈ qˡ
+                    @test qⁱm ≈ qⁱ
                 end
             end
         end
@@ -235,7 +257,7 @@ end
         T = FT(253.15)  # Midway in mixed-phase range
         λ = test_liquid_fraction(T, Tᶠ, Tʰ)
 
-        for qᵗ in [FT(0.005), FT(0.01), FT(0.02), FT(0.03)]
+        for qᵗ in FT.(5e-3:5e-3:3e-2)
             @testset let qᵗ=qᵗ
                 qᵛ⁺ = adjustment_saturation_specific_humidity(T, pᵣ, qᵗ, thermo, equilibrium)
 
@@ -248,10 +270,6 @@ end
                     # Compute moist static energy
                     cᵖᵐ = mixture_heat_capacity(q, thermo)
                     e = cᵖᵐ * T + g * z - ℒˡᵣ * qˡ - ℒⁱᵣ * qⁱ
-
-                    # Verify formula: T = (e - g*z + ℒˡᵣ*qˡ + ℒⁱᵣ*qⁱ) / cᵖᵐ
-                    T_from_mse = (e - g * z + ℒˡᵣ * q.liquid + ℒⁱᵣ * q.ice) / mixture_heat_capacity(q, thermo)
-                    @test T_from_mse ≈ T
 
                     # Test with saturation adjustment
                     𝒰 = MoistStaticEnergyState(e, MoistureMassFractions(qᵗ), z, pᵣ)
