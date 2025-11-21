@@ -7,6 +7,9 @@ using CairoMakie
 CairoMakie.activate!(type = "svg")
 set_theme!(Theme(linewidth = 3))
 
+# Whether to build a draft version of the docs.
+draft = get(ENV, "BREEZE_DOCS_DRAFT", "false") == "true"
+
 DocMeta.setdocmeta!(Breeze, :DocTestSetup, :(using Breeze); recursive=true)
 
 bib_filepath = joinpath(@__DIR__, "src", "breeze.bib")
@@ -16,7 +19,7 @@ examples_src_dir = joinpath(@__DIR__, "..", "examples")
 literated_dir = joinpath(@__DIR__, "src", "literated")
 mkpath(literated_dir)
 
-example_scripts = [
+example_scripts = draft ? [] : [
     "thermal_bubble.jl",
     # "prescribed_sst.jl", # this is a WIP
 ]
@@ -28,7 +31,7 @@ for script_file in example_scripts
                       execute = true)
 end
 
-example_pages = Any[
+example_pages = draft ? [] : [
     "Thermal bubble" => "literated/thermal_bubble.md",
     # "Prescribed SST" => "literated/prescribed_sst.md",
 ]
@@ -60,5 +63,5 @@ makedocs(
         "API" => "api.md",
         "Contributors guide" => "contributing.md",
     ],
-    draft = false,
+    draft = draft,
 )
