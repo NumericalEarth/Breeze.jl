@@ -219,10 +219,9 @@ function compute_pressure_correction!(model::AnelasticModel, Δt)
     ρᵣ = model.formulation.reference_state.density
     ρŨ = model.momentum
     solver = model.pressure_solver
-    pₙ = model.nonhydrostatic_pressure
-    solve_for_anelastic_pressure!(pₙ, solver, ρŨ, Δt)
-
-    fill_halo_regions!(pₙ)
+    p′ = model.pressure
+    solve_for_anelastic_pressure!(p′, solver, ρŨ, Δt)
+    fill_halo_regions!(p′)
 
     return nothing
 end
@@ -291,7 +290,7 @@ function make_pressure_correction!(model::AnelasticModel, Δt)
             model.momentum,
             model.grid,
             Δt,
-            model.nonhydrostatic_pressure,
+            model.pressure,
             model.formulation.reference_state.density)
 
     return nothing

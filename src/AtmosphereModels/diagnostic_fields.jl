@@ -89,7 +89,12 @@ Adapt.adapt_structure(to, k::PotentialTemperatureKernelFunction) =
 const PotentialTemperatureOperation = KernelFunctionOperation{Center, Center, Center, <:Any, <:Any, <:PotentialTemperatureKernelFunction}
 const PotentialTemperatureField = Field{Center, Center, Center, <:PotentialTemperatureOperation}
 
-function PotentialTemperatureField(model)
+"""
+    $(TYPEDSIGNATURES)
+
+Return a `KernelFunctionOperation` representing potential temperature.
+"""
+function PotentialTemperature(model)
     grid = model.grid
     func = PotentialTemperatureKernelFunction(model.formulation.reference_state,
                                               model.microphysics,
@@ -97,9 +102,15 @@ function PotentialTemperatureField(model)
                                               model.specific_moisture,
                                               model.temperature,
                                               model.thermodynamics)
-    op = KernelFunctionOperation{Center, Center, Center}(func, grid)
-    return Field(op)
+    return KernelFunctionOperation{Center, Center, Center}(func, grid)
 end
+
+"""
+    $(TYPEDSIGNATURES)
+
+Return a `Field` representing potential temperature.
+"""
+PotentialTemperatureField(model) = Field(PotentialTemperature(model))
 
 function (d::PotentialTemperatureKernelFunction)(i, j, k, grid)
     @inbounds begin
