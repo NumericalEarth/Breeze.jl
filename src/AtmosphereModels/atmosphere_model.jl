@@ -32,7 +32,8 @@ end
 
 formulation_pressure_solver(formulation, grid) = nothing
 
-mutable struct AtmosphereModel{Frm, Arc, Tst, Grd, Clk, Thm, Den, Mom, Eng, Mse, Moi, Mfr,
+
+mutable struct AtmosphereModel{Frm, Arc, Tst, Grd, Clk, Thm, Den, Mom, Eng, Mse, Moi, Mfr, Buy,
                                Tmp, Prs, Sol, Vel, Trc, Adv, Cor, Frc, Mic, Cnd, Cls, Cfs} <: AbstractModel{Tst, Arc}
     architecture :: Arc
     grid :: Grd
@@ -50,6 +51,7 @@ mutable struct AtmosphereModel{Frm, Arc, Tst, Grd, Clk, Thm, Den, Mom, Eng, Mse,
     pressure_solver :: Sol
     velocities :: Vel
     tracers :: Trc
+    buoyancy :: Buy
     advection :: Adv
     coriolis :: Cor
     forcing :: Frc
@@ -177,6 +179,7 @@ function AtmosphereModel(grid;
                             pressure_solver,
                             velocities,
                             tracers,
+                            nothing, # buoyancy, temporary solution for compatibility with Oceananigans.TurbulenceClosures
                             advection,
                             coriolis,
                             forcing,
