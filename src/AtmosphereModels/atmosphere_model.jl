@@ -114,11 +114,12 @@ function AtmosphereModel(grid;
     tracer_names = validate_tracers(tracers)
 
     # Next, we form a list of default boundary conditions:
-    names = prognostic_field_names(formulation, microphysics, tracers)
+    prognostic_names = prognostic_field_names(formulation, microphysics, tracers)
     FT = eltype(grid)
-    default_boundary_conditions = NamedTuple{names}(FieldBoundaryConditions() for _ in names)
+    default_boundary_conditions = NamedTuple{prognostic_names}(FieldBoundaryConditions() for _ in prognostic_names)
     boundary_conditions = merge(default_boundary_conditions, boundary_conditions)
-    boundary_conditions = regularize_field_boundary_conditions(boundary_conditions, grid, names)
+    all_names = field_names(formulation, microphysics, tracers)
+    boundary_conditions = regularize_field_boundary_conditions(boundary_conditions, grid, all_names)
 
     density = materialize_density(formulation, grid)
     velocities, momentum = materialize_momentum_and_velocities(formulation, grid, boundary_conditions)
@@ -218,6 +219,12 @@ function prognostic_field_names(formulation, microphysics, tracer_names)
     default_names = (:ρu, :ρv, :ρw, :ρe, :ρqᵗ)
     microphysical_names = prognostic_field_names(microphysics)
     return tuple(default_names..., microphysical_names..., tracer_names...)
+end
+
+function field_names(formulation, microphysics, tracer_names)
+    prognostic_names = prognostic_field_names(formulation, microphysics, tracer_names)
+    additional_names = (:u, :v, :w, :e, :T, :qᵗ)
+    return tuple(prognostic_names..., additional_names...)
 end
 
 function atmosphere_model_forcing(user_forcings, prognostic_fields, model_fields)
