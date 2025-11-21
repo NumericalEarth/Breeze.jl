@@ -15,7 +15,7 @@ struct SaturationSpecificHumidityKernelFunction{R, T, μ, M, MF, TH}
     temperature :: T
     microphysics :: μ
     microphysical_fields :: M
-    moisture_mass_fraction :: MF
+    specific_moisture :: MF
     thermodynamics :: TH
 end
 
@@ -24,7 +24,7 @@ Adapt.adapt_structure(to, k::SaturationSpecificHumidityKernelFunction) =
                                              adapt(to, k.temperature),
                                              adapt(to, k.microphysics),
                                              adapt(to, k.microphysical_fields),
-                                             adapt(to, k.moisture_mass_fraction),
+                                             adapt(to, k.specific_moisture),
                                              adapt(to, k.thermodynamics))
 
 const C = Center
@@ -42,7 +42,7 @@ function SaturationSpecificHumidityField(model)
                                                     model.temperature,
                                                     model.microphysics,
                                                     model.microphysical_fields,
-                                                    model.moisture_mass_fraction,
+                                                    model.specific_moisture,
                                                     model.thermodynamics)
 
     op = KernelFunctionOperation{Center, Center, Center}(func, model.grid)
@@ -54,7 +54,7 @@ function (d::SaturationSpecificHumidityKernelFunction)(i, j, k, grid)
     @inbounds begin
         pᵣ = d.reference_state.pressure[i, j, k]
         T = d.temperature[i, j, k]
-        qᵗ = d.moisture_mass_fraction[i, j, k]
+        qᵗ = d.specific_moisture[i, j, k]
         ρᵣ = d.reference_state.density[i, j, k]
     end
     q = compute_moisture_fractions(i, j, k, grid, d.microphysics, ρᵣ, qᵗ, d.microphysical_fields)
@@ -73,7 +73,7 @@ struct PotentialTemperatureKernelFunction{R, μ, M, MF, TMP, TH}
     reference_state :: R
     microphysics :: μ
     microphysical_fields :: M
-    moisture_mass_fraction :: MF
+    specific_moisture :: MF
     temperature :: TMP
     thermodynamics :: TH
 end
@@ -82,30 +82,41 @@ Adapt.adapt_structure(to, k::PotentialTemperatureKernelFunction) =
     PotentialTemperatureKernelFunction(adapt(to, k.reference_state),
                                        adapt(to, k.microphysics),
                                        adapt(to, k.microphysical_fields),
-                                       adapt(to, k.moisture_mass_fraction),
+                                       adapt(to, k.specific_moisture),
                                        adapt(to, k.temperature),
                                        adapt(to, k.thermodynamics))
 
 const PotentialTemperatureOperation = KernelFunctionOperation{Center, Center, Center, <:Any, <:Any, <:PotentialTemperatureKernelFunction}
 const PotentialTemperatureField = Field{Center, Center, Center, <:PotentialTemperatureOperation}
 
-function PotentialTemperatureField(model)
+"""
+    $(TYPEDSIGNATURES)
+
+Return a `KernelFunctionOperation` representing potential temperature.
+"""
+function PotentialTemperature(model)
     grid = model.grid
     func = PotentialTemperatureKernelFunction(model.formulation.reference_state,
                                               model.microphysics,
                                               model.microphysical_fields,
-                                              model.moisture_mass_fraction,
+                                              model.specific_moisture,
                                               model.temperature,
                                               model.thermodynamics)
-    op = KernelFunctionOperation{Center, Center, Center}(func, grid)
-    return Field(op)
+    return KernelFunctionOperation{Center, Center, Center}(func, grid)
 end
+
+"""
+    $(TYPEDSIGNATURES)
+
+Return a `Field` representing potential temperature.
+"""
+PotentialTemperatureField(model) = Field(PotentialTemperature(model))
 
 function (d::PotentialTemperatureKernelFunction)(i, j, k, grid)
     @inbounds begin
         pᵣ = d.reference_state.pressure[i, j, k]
         ρᵣ = d.reference_state.density[i, j, k]
-        qᵗ = d.moisture_mass_fraction[i, j, k]
+        qᵗ = d.specific_moisture[i, j, k]
         p₀ = d.reference_state.base_pressure
         T = d.temperature[i, j, k]
     end

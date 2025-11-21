@@ -210,7 +210,7 @@ qᵛ⁺ = Breeze.AtmosphereModels.SaturationSpecificHumidityField(model)
 qˡ = model.microphysical_fields.qˡ
 
 # Supersaturation: positive values indicate supersaturated conditions
-σ = Field(model.moisture_mass_fraction - qᵛ⁺)
+σ = Field(model.specific_moisture - qᵛ⁺)
 
 # ## Progress callback
 
@@ -219,7 +219,7 @@ function progress(sim)
     compute!(qˡ)
     compute!(σ)
     
-    qᵗ = sim.model.moisture_mass_fraction
+    qᵗ = sim.model.specific_moisture
     u, v, w = sim.model.velocities
 
     umax = maximum(abs, u)
@@ -252,7 +252,7 @@ add_callback!(simulation, progress, IterationInterval(10))
 # We write diagnostic fields to a JLD2 file for later analysis.
 
 output_filename = joinpath(@__DIR__, "prescribed_sst_convection.jld2")
-outputs = merge(model.velocities, (; T, θ, qˡ, qᵛ⁺, σ, qᵗ=model.moisture_mass_fraction))
+outputs = merge(model.velocities, (; T, θ, qˡ, qᵛ⁺, σ, qᵗ=model.specific_moisture))
 
 ow = JLD2Writer(model, outputs;
                 filename = output_filename,

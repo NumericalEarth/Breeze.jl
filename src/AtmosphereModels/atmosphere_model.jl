@@ -32,8 +32,9 @@ end
 
 formulation_pressure_solver(formulation, grid) = nothing
 
+
 mutable struct AtmosphereModel{Frm, Arc, Tst, Grd, Clk, Thm, Den, Mom, Eng, Mse, Moi, Mfr, Buy,
-                               Tmp, Prs, Ppa, Sol, Vel, Trc, Adv, Cor, Frc, Mic, Cnd, Cls, Cfs} <: AbstractModel{Tst, Arc}
+                               Tmp, Prs, Sol, Vel, Trc, Adv, Cor, Frc, Mic, Cnd, Cls, Cfs} <: AbstractModel{Tst, Arc}
     architecture :: Arc
     grid :: Grd
     clock :: Clk
@@ -42,12 +43,11 @@ mutable struct AtmosphereModel{Frm, Arc, Tst, Grd, Clk, Thm, Den, Mom, Eng, Mse,
     density :: Den
     momentum :: Mom
     energy_density :: Eng
-    moist_static_energy :: Mse
+    specific_energy :: Mse
     moisture_density :: Moi
-    moisture_mass_fraction :: Mfr
+    specific_moisture :: Mfr
     temperature :: Tmp
-    nonhydrostatic_pressure :: Prs
-    hydrostatic_pressure_anomaly :: Ppa
+    pressure :: Prs
     pressure_solver :: Sol
     velocities :: Vel
     tracers :: Trc
@@ -68,7 +68,7 @@ function default_formulation(grid, thermo)
 end
 
 """
-$(TYPEDSIGNATURES)
+    $(TYPEDSIGNATURES)
 
 Return an AtmosphereModel that uses the anelastic approximation following
 [Pauluis2008](@citet).
@@ -115,9 +115,6 @@ function AtmosphereModel(grid;
     tracers = tupleit(tracers) # supports tracers=:c keyword argument (for example)
     tracer_names = validate_tracers(tracers)
 
-    hydrostatic_pressure_anomaly = CenterField(grid)
-    nonhydrostatic_pressure = CenterField(grid)
-
     # Next, we form a list of default boundary conditions:
     names = prognostic_field_names(formulation, microphysics, tracers)
     FT = eltype(grid)
@@ -137,9 +134,12 @@ function AtmosphereModel(grid;
     end
 
     energy_density = CenterField(grid, boundary_conditions=boundary_conditions.ρe)
-    moist_static_energy = CenterField(grid) # e = ρe / ρᵣ (diagnostic per-mass energy)
-    moisture_mass_fraction = CenterField(grid, boundary_conditions=boundary_conditions.ρqᵗ)
+
+    # Diagnostic fields
+    specific_energy = CenterField(grid) # e = ρe / ρᵣ (diagnostic per-mass energy)
+    specific_moisture = CenterField(grid)
     temperature = CenterField(grid)
+    pressure = CenterField(grid)
 
     prognostic_microphysical_fields = NamedTuple(microphysical_fields[name] for name in prognostic_field_names(microphysics))
     prognostic_fields = collect_prognostic_fields(formulation,
@@ -154,7 +154,7 @@ function AtmosphereModel(grid;
     timestepper = TimeStepper(timestepper, grid, prognostic_fields; implicit_solver)
     pressure_solver = formulation_pressure_solver(formulation, grid)
 
-    model_fields = merge(prognostic_fields, velocities, (; T=temperature, qᵗ=moisture_mass_fraction))
+    model_fields = merge(prognostic_fields, velocities, (; T=temperature, qᵗ=specific_moisture))
     forcing = atmosphere_model_forcing(forcing, prognostic_fields, model_fields)
 
     # May need to use more names in `tracers` for this to work
@@ -170,12 +170,11 @@ function AtmosphereModel(grid;
                             density,
                             momentum,
                             energy_density,
-                            moist_static_energy,
+                            specific_energy,
                             moisture_density,
-                            moisture_mass_fraction,
+                            specific_moisture,
                             temperature,
-                            nonhydrostatic_pressure,
-                            hydrostatic_pressure_anomaly,
+                            pressure,
                             pressure_solver,
                             velocities,
                             tracers,
@@ -262,7 +261,7 @@ function atmosphere_model_forcing(user_forcings::NamedTuple, prognostic_fields, 
 end
 
 function fields(model::AtmosphereModel)
-    auxiliary_thermodynamic_fields = (e=model.moist_static_energy, T=model.temperature, qᵗ=model.moisture_mass_fraction)
+    auxiliary_thermodynamic_fields = (e=model.specific_energy, T=model.temperature, qᵗ=model.specific_moisture)
     return merge(prognostic_fields(model),
                  model.velocities,
                  auxiliary_thermodynamic_fields)

@@ -228,8 +228,8 @@ function Base.show(io::IO, q::MoistureMassFractions{FT}) where FT
                 "└── ice:    ", prettysummary(q.ice))
 end
 
-@inline total_moisture_mass_fraction(q::MMF) = q.vapor + q.liquid + q.ice
-@inline dry_air_mass_fraction(q::MMF) = 1 - total_moisture_mass_fraction(q)
+@inline total_specific_moisture(q::MMF) = q.vapor + q.liquid + q.ice
+@inline dry_air_mass_fraction(q::MMF) = 1 - total_specific_moisture(q)
 
 """
 $(TYPEDSIGNATURES)

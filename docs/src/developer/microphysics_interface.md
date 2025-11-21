@@ -148,5 +148,5 @@ This is a fully prognostic  scheme, so there is no adjustment,
 ```@example microphysics_interface
 import Breeze.AtmosphereModels: maybe_adjust_thermodynamic_state
 
-@inline maybe_adjust_thermodynamic_state(state, ::ExplicitMicrophysics, μ, thermo) = state
+@inline maybe_adjust_thermodynamic_state(state, ::ExplicitMicrophysics, μ, qᵗ, thermo) = state
 ```

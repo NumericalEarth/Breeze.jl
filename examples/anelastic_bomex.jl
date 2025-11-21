@@ -18,7 +18,8 @@ Lx = 6400
 Ly = 6400
 Lz = 3000
 
-arch = GPU() # if changing to CPU() remove the `using CUDA` line above
+#arch = GPU() # if changing to CPU() remove the `using CUDA` line above
+arch = CPU() # if changing to CPU() remove the `using CUDA` line above
 stop_time = 6hours
 
 grid = RectilinearGrid(arch,
@@ -175,7 +176,7 @@ conjure_time_step_wizard!(simulation, cfl=0.7)
 u_avg = Field(Average(model.velocities.u, dims=(1, 2)))
 v_avg = Field(Average(model.velocities.v, dims=(1, 2)))
 e_avg = Field(Average(model.energy_density / ρᵣ, dims=(1, 2)))
-qᵗ_avg = Field(Average(model.moisture_mass_fraction, dims=(1, 2)))
+qᵗ_avg = Field(Average(model.specific_moisture, dims=(1, 2)))
 
 function compute_averages!(sim)
     compute!(u_avg)
@@ -206,7 +207,7 @@ function progress(sim)
     umax = maximum(abs, u_avg)
     vmax = maximum(abs, v_avg)
 
-    qᵗ = sim.model.moisture_mass_fraction
+    qᵗ = sim.model.specific_moisture
     qᵗmax = maximum(qᵗ)
 
     ρe = sim.model.energy_density

@@ -37,7 +37,7 @@ using Statistics: mean
 
     # Test for zero mean
     atol = 10 * grid.Nz * eps(FT)
-    ϕ = model.nonhydrostatic_pressure
+    ϕ = model.pressure
     @test mean(ϕ) ≈ 0 atol=atol
 
     # Test for exact solution

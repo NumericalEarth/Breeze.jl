@@ -10,7 +10,7 @@ using ..Thermodynamics:
     temperature,
     is_absolute_zero,
     with_moisture,
-    total_moisture_mass_fraction,
+    total_specific_moisture,
     AbstractThermodynamicState
 
 using Oceananigans: Oceananigans, CenterField
@@ -188,7 +188,7 @@ end
 
 @inline function adjust_state(𝒰₀, T, thermo, equilibrium)
     pᵣ = 𝒰₀.reference_pressure
-    qᵗ = total_moisture_mass_fraction(𝒰₀)
+    qᵗ = total_specific_moisture(𝒰₀)
     qᵛ⁺ = adjustment_saturation_specific_humidity(T, pᵣ, qᵗ, thermo, equilibrium)
     q₁ = equilibrated_moisture_mass_fractions(T, qᵗ, qᵛ⁺, equilibrium)
     return with_moisture(𝒰₀, q₁)
@@ -203,8 +203,11 @@ end
 const ATC = AbstractThermodynamicState
 
 # This function allows saturation adjustment to be used as a microphysics scheme directly
-@inline maybe_adjust_thermodynamic_state(𝒰₀, saturation_adjustment::SA, microphysical_fields, thermo) =
-    adjust_thermodynamic_state(𝒰₀, saturation_adjustment, thermo)
+@inline function maybe_adjust_thermodynamic_state(𝒰₀, saturation_adjustment::SA, microphysical_fields, qᵗ, thermo)
+    qᵃ = MoistureMassFractions(qᵗ) # compute moisture state to be adjusted
+    𝒰ᵃ = with_moisture(𝒰₀, qᵃ)
+    return adjust_thermodynamic_state(𝒰ᵃ, saturation_adjustment, thermo)
+end
 
 """
 $(TYPEDSIGNATURES)
@@ -216,7 +219,7 @@ Return the saturation-adjusted thermodynamic state using a secant iteration.
     is_absolute_zero(𝒰₀) && return 𝒰₀
 
     # Compute an initial guess assuming unsaturated conditions
-    qᵗ = total_moisture_mass_fraction(𝒰₀)
+    qᵗ = total_specific_moisture(𝒰₀)
     q₁ = MoistureMassFractions(qᵗ)
     𝒰₁ = with_moisture(𝒰₀, q₁)
     T₁ = temperature(𝒰₁, thermo)
