@@ -1,4 +1,4 @@
-# [Warm-phase saturation adjustment](@id section:saturation-adjustment)
+# [Warm-phase saturation adjustment](@id sec:warm-saturation-adjustment)
 
 Warm-phase saturation adjustment is a model for water droplet nucleation that assumes that water vapor
 in excess of the saturation specific humidity is instantaneously converted to liquid water.
