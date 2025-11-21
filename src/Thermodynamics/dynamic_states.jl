@@ -2,7 +2,7 @@ abstract type AbstractThermodynamicState{FT} end
 
 struct PotentialTemperatureState{FT} <: AbstractThermodynamicState{FT}
     potential_temperature :: FT
-    specific_moistures :: MoistureMassFractions{FT}
+    moisture_mass_fractions :: MoistureMassFractions{FT}
     base_pressure :: FT
     reference_pressure :: FT
 end
