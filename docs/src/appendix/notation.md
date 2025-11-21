@@ -12,7 +12,7 @@ Guide:
 * `q isa MoistureMassFractions`
 
 | mathematical symbol           | unicode       | property name                     | description |
-| ---                           | ---           | ---                               | --- |
+| --- | --- | --- | --- |
 | ``\rho``                      | `ρ`           | `AM.density`                      | Density, ``ρ = p_r / R^m T`` for anelastic |
 | ``\boldsymbol{u} = (u,v,w)``  | `u, v, w`     | `AM.velocities`                   | Velocity components (x, y, z) or (east, north, up) |
 | ``ρ \, u,\; ρ \,v,\; ρ \, w`` | `ρu, ρv, ρw`  | `AM.momentum`                     | Momentum components |
