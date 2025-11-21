@@ -18,8 +18,8 @@ end
     return (pᵣ / p₀)^(Rᵐ / cᵖᵐ)
 end
 
-@inline total_moisture_mass_fraction(state::PotentialTemperatureState) =
-    total_moisture_mass_fraction(state.moisture_mass_fractions)
+@inline total_specific_moisture(state::PotentialTemperatureState) =
+    total_specific_moisture(state.moisture_mass_fractions)
 
 @inline with_moisture(𝒰::PotentialTemperatureState{FT}, q::MoistureMassFractions{FT}) where FT =
     PotentialTemperatureState{FT}(𝒰.potential_temperature, q, 𝒰.base_pressure, 𝒰.reference_pressure)
@@ -50,7 +50,7 @@ struct MoistStaticEnergyState{FT} <: AbstractThermodynamicState{FT}
 end
 
 @inline Base.eltype(::MoistStaticEnergyState{FT}) where FT = FT
-@inline total_moisture_mass_fraction(state::MoistStaticEnergyState) = total_moisture_mass_fraction(state.moisture_mass_fractions)
+@inline total_specific_moisture(state::MoistStaticEnergyState) = total_specific_moisture(state.moisture_mass_fractions)
 @inline is_absolute_zero(𝒰::MoistStaticEnergyState) = 𝒰.moist_static_energy == 0
 
 @inline with_moisture(𝒰::MoistStaticEnergyState{FT}, q::MoistureMassFractions{FT}) where FT =

@@ -49,7 +49,7 @@ import Breeze.AtmosphereModels:
     compute_moisture_fractions
 
 import Breeze.Thermodynamics:
-    total_moisture_mass_fraction,
+    total_specific_moisture,
     with_moisture,
     MoistureMassFractions
 

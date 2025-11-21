@@ -86,12 +86,12 @@ end
                                      ρw_forcing,
                                      formulation,
                                      temperature,
-                                     moisture_mass_fraction,
+                                     specific_moisture,
                                      thermo)
 
 
     return ( - div_𝐯w(i, j, k, grid, advection, velocities, momentum.ρw)
-             + ρ_bᶜᶜᶠ(i, j, k, grid, density, temperature, moisture_mass_fraction, formulation, thermo)
+             + ρ_bᶜᶜᶠ(i, j, k, grid, density, temperature, specific_moisture, formulation, thermo)
              - z_f_cross_U(i, j, k, grid, coriolis, momentum)
              - ∂ⱼ_𝒯₃ⱼ(i, j, k, grid, density, closure, closure_fields, clock, model_fields, nothing)
              + ρw_forcing(i, j, k, grid, clock, model_fields))
@@ -150,7 +150,7 @@ end
                                               clock,
                                               model_fields,
                                               temperature,
-                                              moisture_mass_fraction)
+                                              specific_moisture)
 
     𝒰 = diagnose_thermodynamic_state(i, j, k, grid, formulation,
                                      microphysics, microphysical_fields,
@@ -160,7 +160,7 @@ end
 
     # Compute the buoyancy flux term, ρᵣ w b
     buoyancy_flux = ℑzᵃᵃᶜ(i, j, k, grid, ρ_w_bᶜᶜᶠ, velocities.w, density,
-                          temperature, moisture_mass_fraction, formulation, thermo)
+                          temperature, specific_moisture, formulation, thermo)
 
     return ( - div_Uc(i, j, k, grid, advection, velocities, energy_density)
              + buoyancy_flux

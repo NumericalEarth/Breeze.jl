@@ -51,8 +51,8 @@ function compute_auxiliary_variables!(model)
     launch!(arch, grid, :xyz,
             _compute_auxiliary_thermodynamic_variables!,
             model.temperature,
-            model.moist_static_energy,
-            model.moisture_mass_fraction,
+            model.specific_energy,
+            model.specific_moisture,
             grid,
             model.thermodynamics,
             model.formulation,
@@ -64,8 +64,8 @@ function compute_auxiliary_variables!(model)
     # TODO: Can we compute the thermodynamic variable within halos as well, and avoid
     # halo filling later on?
     fill_halo_regions!(model.temperature)
-    fill_halo_regions!(model.moist_static_energy)
-    fill_halo_regions!(model.moisture_mass_fraction)
+    fill_halo_regions!(model.specific_energy)
+    fill_halo_regions!(model.specific_moisture)
 
     # TODO: should we mask the auxiliary variables? They can also be masked in the kernel
 
@@ -90,8 +90,8 @@ end
 end
 
 @kernel function _compute_auxiliary_thermodynamic_variables!(temperature,
-                                                             moist_static_energy,
-                                                             moisture_mass_fraction,
+                                                             specific_energy,
+                                                             specific_moisture,
                                                              grid,
                                                              thermo,
                                                              formulation,
@@ -112,7 +112,7 @@ end
 
     # Adjust the thermodynamic state if using a microphysics scheme
     # that invokes saturation adjustment
-    qᵗ = @inbounds moisture_mass_fraction[i, j, k]
+    qᵗ = @inbounds specific_moisture[i, j, k]
     𝒰₁ = maybe_adjust_thermodynamic_state(𝒰₀, microphysics, microphysical_fields, qᵗ, thermo)
 
     update_microphysical_fields!(microphysical_fields, microphysics,
@@ -128,8 +128,8 @@ end
         T = Thermodynamics.temperature(𝒰₁, thermo)
 
         temperature[i, j, k] = T
-        moist_static_energy[i, j, k] = ρe / ρ
-        moisture_mass_fraction[i, j, k] = ρqᵗ / ρ
+        specific_energy[i, j, k] = ρe / ρ
+        specific_moisture[i, j, k] = ρqᵗ / ρ
     end
 end
 
@@ -165,7 +165,7 @@ function compute_tendencies!(model::AnelasticModel)
     w_args = tuple(momentum_args..., model.forcing.ρw,
                    model.formulation,
                    model.temperature,
-                   model.moisture_mass_fraction,
+                   model.specific_moisture,
                    model.thermodynamics)
 
     launch!(arch, grid, :xyz, compute_x_momentum_tendency!, Gρu, grid, u_args)
@@ -193,11 +193,11 @@ function compute_tendencies!(model::AnelasticModel)
 
     ρe_args = (
         Val(1),
-        model.moist_static_energy,
+        model.specific_energy,
         model.forcing.ρe,
         common_args...,
         model.temperature,
-        model.moisture_mass_fraction)
+        model.specific_moisture)
 
     Gρe = model.timestepper.Gⁿ.ρe
     launch!(arch, grid, :xyz, compute_moist_static_energy_tendency!, Gρe, grid, ρe_args)
