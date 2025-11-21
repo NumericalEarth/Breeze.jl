@@ -44,7 +44,7 @@ end
 
 struct MoistStaticEnergyState{FT} <: AbstractThermodynamicState{FT}
     moist_static_energy :: FT
-    specific_moistures :: MoistureMassFractions{FT}
+    moisture_mass_fractions :: MoistureMassFractions{FT}
     height :: FT
     reference_pressure :: FT
 end
