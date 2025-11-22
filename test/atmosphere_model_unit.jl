@@ -1,6 +1,7 @@
 using Breeze
 using GPUArraysCore: @allowscalar
 using Oceananigans
+using Oceananigans: fields, prognostic_fields
 using Test
 
 @testset "AtmosphereModel [$(FT)]" for FT in (Float32, Float64)
@@ -12,6 +13,11 @@ using Test
             reference_state = ReferenceState(grid, thermo, base_pressure=p₀, potential_temperature=θ₀)
             formulation = AnelasticFormulation(reference_state)
             model = AtmosphereModel(grid; thermodynamics=thermo, formulation)
+
+            prognostic_names = prognostic_fields(model) |> keys
+            field_names = fields(model) |> keys
+            @test :ρw ∈ prognostic_names
+            @test :ρw ∈ field_names
 
             # test set!
             ρᵣ = model.formulation.reference_state.density
