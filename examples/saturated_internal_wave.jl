@@ -22,7 +22,6 @@ using CairoMakie
 using Printf
 
 using Breeze.Thermodynamics: dry_air_gas_constant, vapor_gas_constant, saturation_specific_humidity
-using Oceananigans: @allowscalar
 
 # ## Grid and AtmosphereModel
 
@@ -31,11 +30,7 @@ Nz = 128
 Lx = 30_000        # 30 km
 Lz = 12_000        # 12 km
 
-grid = RectilinearGrid(CPU();
-                       size = (Nx, Nz),
-                       halo = (3, 3),
-                       x = (-Lx / 2, Lx / 2),
-                       z = (0, Lz),
+grid = RectilinearGrid(; size = (Nx, Nz), x = (-Lx/2, Lx/2), z = (0, Lz),
                        topology = (Periodic, Flat, Bounded))
 
 microphysics = SaturationAdjustment()  # instant warm-phase adjustment
@@ -148,20 +143,20 @@ set!(model; u = u_initial,
 
 period_dry = 2π / ω_dry
 stop_time = 8period_dry
-Δt_output = period_dry / 20    # 20 samples per oscillation
+Δt_output = period_dry / 20
 
-simulation = Simulation(model; Δt = 1.0, stop_time)
-conjure_time_step_wizard!(simulation; cfl = 0.6)
+simulation = Simulation(model; Δt = 1, stop_time)
+conjure_time_step_wizard!(simulation; cfl = 0.7)
 
 function progress(sim)
-    w = sim.model.velocities.w
-    msg = @sprintf("iter: %d, t: %s, max|w| = %.3f m/s",
-                   iteration(sim), prettytime(sim), maximum(abs, w))
-    @info msg
+    u, v, w = model.velocities
+    max_w = maximum(abs, w)
+    @info @sprintf("iteration: %d, time: %s, Δt: %s, max|w|: %.2e m/s",
+                   iteration(sim), prettytime(sim), prettytime(sim.Δt), max_w)
     return nothing
 end
 
-add_callback!(simulation, progress, IterationInterval(25))
+add_callback!(simulation, progress, IterationInterval(100))
 
 outputs = (; w = model.velocities.w,
              θ = model.temperature,
@@ -180,18 +175,16 @@ run!(simulation)
 
 # ## Diagnostics: observed vs predicted buoyancy frequency
 
-w_series = FieldTimeSeries(filename, "w")
-θ_series = FieldTimeSeries(filename, "θ")
-q_series = FieldTimeSeries(filename, "qᵗ")
+wt = FieldTimeSeries(filename, "w")
+θt = FieldTimeSeries(filename, "θ")
+qt = FieldTimeSeries(filename, "qᵗ")
 
-times = w_series.times
+times = wt.times
 Nt = length(times)
 i_mid = Nx ÷ 2
 k_mid = Nz ÷ 2
 
-@allowscalar begin
-    w_signal = [w_series[i_mid, 1, k_mid, n] for n in 1:Nt]
-end
+w_signal = [wt[i_mid, 1, k_mid, n] for n in 1:Nt]
 
 function dominant_frequency(times, signal)
     demeaned = signal .- mean(signal)
@@ -209,11 +202,10 @@ period_observed = 2π / ω_observed
 
 # ## Visualization
 
-x = range(grid.x[1], grid.x[2]; length = Nx)
-z = range(grid.z[1], grid.z[2]; length = Nz)
 time_minutes = times ./ 60
 
-w_snapshot = Array(permutedims(w_series[:, 1, :, end]))
+n = Observable(Nt)
+wn = @lift wt[$n]
 w_amplitude = maximum(abs, w_signal)
 
 dry_fit = w_amplitude * sin.(ω_dry .* (times .- times[1]))
@@ -221,23 +213,23 @@ moist_fit = w_amplitude * sin.(ω_moist .* (times .- times[1]))
 
 fig = Figure(size = (900, 950), fontsize = 14)
 
-ax_field = Axis(fig[1, 1]; xlabel = "x (km)", ylabel = "z (km)",
-                title = "Vertical velocity w at t = $(prettytime(times[end]))")
-hm = heatmap!(ax_field, x ./ 1_000, z ./ 1_000, w_snapshot;
+axw = Axis(fig[1, 1]; xlabel = "x (m)", ylabel = "z (m)",
+                      title = "Vertical velocity w at t = $(prettytime(times[end]))")
+hm = heatmap!(axw, wn;
               colormap = :balance, colorrange = (-w_amplitude, w_amplitude))
 Colorbar(fig[1, 2], hm, label = "w (m s⁻¹)")
 
-ax_ts = Axis(fig[2, 1]; xlabel = "time (min)", ylabel = "w (m s⁻¹)",
-             title = "Oscillation at domain center")
-lines!(ax_ts, time_minutes, w_signal; label = "simulation", color = :black)
-lines!(ax_ts, time_minutes, dry_fit; label = "dry N", color = :royalblue, linestyle = :dash)
-lines!(ax_ts, time_minutes, moist_fit; label = "saturated N", color = :firebrick, linestyle = :dot)
-axislegend(ax_ts; position = :rt)
+axts = Axis(fig[2, 1]; xlabel = "time (min)", ylabel = "w (m s⁻¹)",
+            title = "Oscillation at domain center")
+lines!(axts, time_minutes, w_signal; label = "simulation", color = :black)
+lines!(axts, time_minutes, dry_fit; label = "dry N", color = :royalblue, linestyle = :dash)
+lines!(axts, time_minutes, moist_fit; label = "saturated N", color = :firebrick, linestyle = :dot)
+axislegend(axts; position = :rt)
 
-ax_freq = Axis(fig[3, 1]; xlabel = "", ylabel = "ω (s⁻¹)",
-               title = "Dominant frequency comparison",
-               xticks = (1:3, ["observed", "dry", "saturated"]))
-barplot!(ax_freq, 1:3, [ω_observed, ω_dry, ω_moist];
+axf = Axis(fig[3, 1]; xlabel = "", ylabel = "ω (s⁻¹)",
+           title = "Dominant frequency comparison",
+           xticks = (1:3, ["observed", "dry", "saturated"]))
+barplot!(axf, 1:3, [ω_observed, ω_dry, ω_moist];
          color = (:gray50, :royalblue, :firebrick))
 
 fig
