@@ -3,7 +3,6 @@ module AtmosphereModels
 export
     AtmosphereModel,
     AnelasticFormulation,
-    PotentialTemperatureOperation,
     PotentialTemperature,
     PotentialTemperatureField
 
