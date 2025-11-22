@@ -91,8 +91,13 @@ qᵇ(z) = q_max * exp(-(z - z₀)^2 / 2Δz_q^2)
 # ## The Kelvin-Helmholtz instability
 #
 # The Miles–Howard criterion tells us that Kelvin–Helmholtz instability
-# occurs where the Richardson numbers, ``Ri = N² / (∂uᵇ/∂z)² < 1/4``.
-# With the parameters chosen above, the shear layer easily satisfies this.
+# occurs where the Richardson numbers,
+#
+# ```math
+# Ri = \frac{N²}{(∂uᵇ/∂z)²}
+# ```
+#
+# is less than 1/4. With the parameters chosen above this is the case.
 #
 # Let's plot the initial state as well as the Richardson number.
 
