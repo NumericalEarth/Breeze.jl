@@ -17,7 +17,7 @@
 
 using Breeze
 using Oceananigans.Units
-using GLMakie
+using CairoMakie
 using Printf
 
 # ## Domain and grid
@@ -215,7 +215,7 @@ fig
 
 # and then make a movie
 
-GLMakie.record(fig, "wave_clouds.mp4", 1:Nt, framerate = 12) do nn
+CairoMakie.record(fig, "wave_clouds.mp4", 1:Nt, framerate = 12) do nn
     @info "frame $nn out of $Nt"
     n[] = nn
 end
