@@ -180,13 +180,13 @@ qˡn = @lift qˡt[$n]
 
 fig = Figure(size=(800, 800), fontsize=14)
 
-axξ = Axis(fig[1, 1], xlabel="", ylabel="z (m)", title = "Vorticity", titlesize = 20)
-axl = Axis(fig[2, 1], xlabel="x (m)", ylabel="z (m)", title = "Liquid mass fraction", titlesize = 20)
+axξ = Axis(fig[1, 1], ylabel="z (m)", title = "Vorticity", titlesize = 20)
+axl = Axis(fig[2, 1], ylabel="z (m)", title = "Liquid mass fraction", titlesize = 20)
 axθ = Axis(fig[3, 1], xlabel="x (m)", ylabel="z (m)", title = "Potential temperature", titlesize = 20)
 
-hmξ = heatmap!(axξ, ξn, colormap = :balance, colorrange = (-0.3, 0.3))
-hml = heatmap!(axl, qˡn, colormap = Reverse(:Blues_4), colorrange = (0, 0.0035))
-hmθ = heatmap!(axθ, θn, colormap = :thermal, colorrange = (285, 295))
+hmξ = heatmap!(axξ, ξn, colormap = :balance, colorrange = (-0.25, 0.25))
+hml = heatmap!(axl, qˡn, colormap = Reverse(:Blues_4), colorrange = (0, 0.003))
+hmθ = heatmap!(axθ, θn, colormap = :thermal, colorrange = (θ₀, θ₀+ dθdz * grid.Lz))
 
 Colorbar(fig[1, 2], hmξ, label = "s⁻¹", vertical = true)
 Colorbar(fig[2, 2], hml, label = "kg/kg", vertical = true)
