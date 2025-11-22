@@ -1,97 +1,61 @@
-# # Kelvin–Helmholtz "wave clouds" with Breeze.jl
+# # Kelvin–-Helmholtz "wave clouds"
 #
-# This script sets up a two-dimensional (x–z) Kelvin–Helmholtz instability
-# in a moist, stably stratified atmosphere using Breeze.jl (for thermodynamics
-# and moist buoyancy) and Oceananigans.jl (for the nonhydrostatic Boussinesq
-# dynamics).
+# This example sets up a two-dimensional (``x``–``z``) Kelvin–-Helmholtz instability
+# in a moist, stably stratified atmosphere.
 #
 # The configuration is intentionally simple but reasonably "meteorological":
 #
-# - We impose a **tanh shear layer** in the horizontal wind u(z).
-# - We impose a **stably stratified** potential temperature profile θ(z) with
-#   a specified dry Brunt–Väisälä frequency N.
-# - We embed a **Gaussian moisture layer** q(z) centered on the shear layer.
-# - We add a **small vertical velocity perturbation** localized at the shear
-#   layer to seed the KH instability.
+# - We impose a **tanh shear layer** in the horizontal wind ``U(z)``.
+# - We impose a **stably stratified** potential temperature profile ``θ(z)`` with
+#   a specified dry Brunt–Väisälä frequency ``N``.
+# - We embed a **Gaussian moisture layer** ``q(z)`` centered on the shear layer.
 #
 # As the shear layer rolls up, the moist layer is advected and deformed,
 # producing billow-like patterns reminiscent of observed "wave clouds".
-#
-# Physically, this reflects the classic picture of billow clouds / KH wave
-# clouds:
-#
-# - A statically stable inversion or stable layer.
-# - Strong vertical shear concentrated in a layer.
-# - Air in that layer near saturation so that rising branches of the KH
-#   waves cross the lifting condensation level (LCL), producing clouds in
-#   the wave crests.
-#
-# For background reading on billow clouds and KH wave clouds in the atmosphere,
-# see for example:
-#
-# - R. Stull, "Billow clouds", UBC ATSC 113 course notes.
-# - WW2010 "Kelvin-Helmholtz Billow Clouds" (UIUC).
-# - Ludlam (1967), "Characteristics of billow clouds and their relation to
-#   clear-air turbulence", J. Atmos. Sci.
-# - Case studies of cloud-top KH waves (e.g. mid-level altocumulus billows).
-#
-# For the effects of moisture on static stability and the moist Brunt–Väisälä
-# frequency, see:
-#
-# - Durran & Klemp (1982), "On the Effects of Moisture on the Brunt–Väisälä
-#   Frequency", J. Atmos. Sci.
-# - Marquet & Geleyn (2014), "On a general definition of the squared
-#   Brunt–Väisälä Frequency associated with the specific moist entropy
-#   potential temperature".
-#
 # Breeze encapsulates much of this thermodynamics for us via
 # `MoistAirBuoyancy` and saturation adjustment.
 
-
 using Breeze
 using Oceananigans.Units
-# using CairoMakie
 using GLMakie
 using Printf
 
 # ## Domain and grid
 #
-# We use a 2-D x–z slice with periodic boundaries in x and rigid, impermeable
+# We use a 2D ``x``–``z`` slice with periodic boundaries in ``x`` and rigid, impermeable
 # boundaries at the top and bottom.
 #
-# Grid resolution is modest but enough to clearly resolve the KH billows and
+# Grid resolution is modest but enough to clearly resolve the Kelvin-Helmholtz billows and
 # rolled-up moisture filament.
 
-Nx = 256     # horizontal resolution
-Nz = 128     # vertical resolution
+Nx = 384   # horizontal resolution
+Nz = 128   # vertical resolution
 
-Lx = 10_000  # domain length in x [m]  (10 km)
-Lz =  2_000  # domain depth in z [m]  (2 km)
+Lx = 10e3  # domain length
+Lz =  3e3  # domain height
 
-grid = RectilinearGrid(CPU();
-                       size = (Nx, Nz),
-                       x = (0.0, Lx),
-                       z = (0.0, Lz),
-                       topology = (Periodic, Flat, Bounded))
+grid = RectilinearGrid(; size = (Nx, Nz), x = (0, Lx), z = (0, Lz),
+                         topology = (Periodic, Flat, Bounded))
 
-# ## Construct the model
+# ## Model and microphysics
+# We construct the AtmosphereModel model with saturation adjustment microphysics.
 microphysics = SaturationAdjustment(equilibrium=WarmPhaseEquilibrium())
-model = AtmosphereModel(grid, advection=WENO(order=5), microphysics=microphysics)
+model = AtmosphereModel(grid; advection=WENO(order=5), microphysics)
 
 # ## Background thermodynamic state
 #
-# We set a reference potential temperature θ₀ and a linear θ gradient that
-# corresponds to a desired dry Brunt–Väisälä frequency N.
+# We set a reference potential temperature ``θ₀`` and a linear ``θ`` gradient
+# that corresponds to a desired dry Brunt–Väisälä frequency ``N``.
 #
 # For a dry atmosphere,
 #
-#     N² ≈ (g / θ₀) dθ/dz,
+# ```math
+# N² = \frac{g}{θ₀} \frac{∂θ}{∂z} ,
+# ```
 #
-# so for given θ₀ and N² we choose
+# so for given ``θ₀`` and ``N²`` we choose ``\mathrm{d}θ/\mathrm{d}z = N² θ₀ / g``.
 #
-#     dθ/dz = N² θ₀ / g.
-#
-# Here we pick N ≈ 0.01 s⁻¹, representative of mid-tropospheric stability.
+# Here, we pick ``N = 0.01 s⁻¹``, representative of mid-tropospheric stability.
 
 thermo = ThermodynamicConstants()
 g = thermo.gravitational_acceleration
@@ -111,30 +75,34 @@ dθdz =  θ₀ * N^2 / g      # dθ/dz [K m⁻¹] ~ 0.003 K/m = 3 K/km
 # This mimics a moist, stably stratified layer embedded in stronger flow
 # above and weaker flow below.
 
-z₀    = 1_000.0   # center of shear & moist layer [m]
-Δzᶸ   = 150.0     # shear layer half-thickness [m]
-U_bot =  5.0      # lower-layer wind [m/s]
-U_top = 25.0      # upper-layer wind [m/s]
+z₀    = 1e3     # center of shear & moist layer [m]
+Δzᶸ   = 150     # shear layer half-thickness [m]
+U_bot =  5      # lower-layer wind [m/s]
+U_top = 25      # upper-layer wind [m/s]
 
 # Smooth shear layer:
 #
-#   u(z) ≈ U_bot for z << z₀
-#   u(z) ≈ U_top for z >> z₀
+# ```math
+# u(z) = U_{\mathrm{bot}} \quad \text{for} z ≪ z₀ ,
+# u(z) = U_{\mathrm{top}} \quad \text{for} z ≫ z₀ .
+# ```
 #
 uᵇ(z) = U_bot + 0.5 * (U_top - U_bot) * (1 + tanh((z - z₀) / Δzᶸ))
 
 # Moisture layer: Gaussian in z around z₀.
 #
-# q_max ~ 0.012 corresponds to ~12 g/kg, a reasonable mid-level specific humidity.
+# q_max ~ 0.012 corresponds to 0.012 kg/kg, a reasonable mid-level specific humidity.
 #
-q_max     = 0.012     # peak specific humidity [kg/kg]
-Δz_q = 200.0     # moist layer half-width [m]
-qᵇ(z) = q_max * exp(-((z - z₀)^2) / 2Δz_q^2))
+q_max = 0.012  # peak specific humidity [kg/kg]
+Δz_q = 200     # moist layer half-width [m]
+qᵇ(z) = q_max * exp(-(z - z₀)^2 / 2Δz_q^2)
+# #qᵇ(z) = q_max * (1 - tanh((z - 1.1z₀) / 2Δz_q)) / 2
+
 
 # ## Initial perturbation: seed the KH instability
 #
 # The Miles–Howard criterion tells us that Kelvin–Helmholtz instability
-# occurs where Ri = N² / (dU/dz)² < 1/4. With the parameters chosen above,
+# occurs where ``Ri = N² / (dU/dz)² < 1/4``. With the parameters chosen above,
 # the shear layer easily satisfies this.
 #
 # To actually *trigger* the instability in a numerical model, we add a small
@@ -164,7 +132,7 @@ qᵇ(z) = q_max * exp(-((z - z₀)^2) / 2Δz_q^2))
 δu = 1e-3           # ~1% of a typical θ range
 δq = 0.05 * q_max   # 5% of peak humidity
 
-θᵢ(x, z) = θᵇ(z) * (1.0 + δθ * rand() / θ₀)
+θᵢ(x, z) = θᵇ(z) + δθ * rand()
 qᵗᵢ(x, z) = qᵇ(z) + δq * rand()
 uᵢ(x, z) = uᵇ(z) + δu * rand()
 
@@ -178,40 +146,79 @@ set!(model; u=uᵢ, qᵗ=qᵗᵢ, θ=θᵢ)
 #
 # Use the time-step wizard to keep the CFL number under control.
 
-stop_time = 30minutes   # total simulation time
+stop_time = 12minutes   # total simulation time
 
-simulation = Simulation(model; Δt=1, stop_iteration=1000) #stop_time)
+simulation = Simulation(model; Δt=1, stop_time)
 conjure_time_step_wizard!(simulation; cfl = 0.7)
 
 function progress(sim)
     u, v, w = model.velocities
     max_w = maximum(abs, w)
-    @info @sprintf("Iter: %d, t: %s, max|w|: %.2e m/s", iteration(sim), prettytime(sim), max_w)
+    @info @sprintf("iteration: %d, time: %s, Δt: %s, max|w|: %.2e m/s",
+                   iteration(sim), prettytime(sim), prettytime(sim.Δt), max_w)
     return nothing
 end
 
-add_callback!(simulation, progress, IterationInterval(10))
+add_callback!(simulation, progress, TimeInterval(1minute))
 
 u, v, w = model.velocities
-ξ = ∂x(w) - ∂z(u)
+ξ = ∂z(u) - ∂x(w)
 θ = PotentialTemperatureField(model)
 outputs = merge(model.velocities, model.microphysical_fields, (; ξ, θ))
 
+filename = "wave_clouds.jld2"
+
 output_writer = JLD2Writer(model, outputs;
-                           filename = "wave_clouds.jld2",
-                           schedule = IterationInterval(100))
+                           filename,
+                           schedule = TimeInterval(4),
+                           overwrite_existing = true)
 
 simulation.output_writers[:fields] = output_writer
 
 run!(simulation)
 
-fig = Figure(size=(1200, 800), fontsize=12)
+# ## Read output and visualize
 
-axu = Axis(fig[1, 1], xlabel="x (m)", ylabel="z (m)")
-axξ = Axis(fig[2, 1], xlabel="x (m)", ylabel="z (m)")
-axl = Axis(fig[3, 1], xlabel="x (m)", ylabel="z (m)")
+# We load the saved output as Oceananigans' `FieldTimeSeries` and then
+# use CairoMakie to plot and animate it.
 
-heatmap!(axu, model.velocities.u)
-heatmap!(axξ, ξ)
-heatmap!(axl, model.microphysical_fields.qˡ)
-display(fig)
+ξt = FieldTimeSeries(filename, "ξ")
+θt = FieldTimeSeries(filename, "θ")
+qˡt = FieldTimeSeries(filename, "qˡ")
+
+times = ξt.times
+Nt = length(ξt)
+
+n = Observable(Nt)
+
+ξn = @lift ξt[$n]
+θn = @lift θt[$n]
+qˡn = @lift qˡt[$n]
+
+@info "Creating visualization..."
+
+fig = Figure(size=(800, 800), fontsize=14)
+
+axξ = Axis(fig[1, 1], xlabel="", ylabel="z (m)", title = "Vorticity", titlesize = 20)
+axl = Axis(fig[2, 1], xlabel="x (m)", ylabel="z (m)", title = "Liquid mass fraction", titlesize = 20)
+axθ = Axis(fig[3, 1], xlabel="x (m)", ylabel="z (m)", title = "Potential temperature", titlesize = 20)
+
+hmξ = heatmap!(axξ, ξn, colormap = :balance, colorrange = (-0.3, 0.3))
+hml = heatmap!(axl, qˡn, colormap = Reverse(:Blues_4), colorrange = (0, 0.0035))
+hmθ = heatmap!(axθ, θn, colormap = :thermal, colorrange = (285, 295))
+
+Colorbar(fig[1, 2], hmξ, label = "s⁻¹", vertical = true)
+Colorbar(fig[2, 2], hml, label = "kg/kg", vertical = true)
+Colorbar(fig[3, 2], hmθ, label = "Κ", vertical = true)
+
+fig
+
+# and then make a movie
+
+GLMakie.record(fig, "wave_clouds.mp4", 1:Nt, framerate = 12) do nn
+    @info "frame $nn out of $Nt"
+    n[] = nn
+end
+nothing #hide
+
+# ![](wave_clouds.mp4)
