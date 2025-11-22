@@ -17,6 +17,7 @@ export
     mixture_gas_constant,
     mixture_heat_capacity,
     SaturationAdjustment,
+    SaturationSpecificHumidity,
     MixedPhaseEquilibrium,
     WarmPhaseEquilibrium,
     BulkMicrophysics

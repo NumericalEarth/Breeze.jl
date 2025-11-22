@@ -61,8 +61,12 @@ Breeze interfaces with ClimaOcean for coupled atmosphere-ocean simulations.
 - **Types**: PascalCase (e.g., `AtmosphereModel`, `AnelasticFormulation`, `MoistAirBuoyancy`)
 - **Functions**: snake_case (e.g., `update_atmosphere_model!`, `compute_pressure!`)
 - **Kernels**: "Kernels" (functions prefixed with `@kernel`) may be prefixed with an underscore (e.g., `_kernel_function`)
-- **Variables**: Use _either_ an English long name, or mathematical notation with readable unicode. Variable names should be taken from `docs/src/appendix/notation.md` in the docs. If a new variable is created (or if one doesn't exist), it should be added to the table in notation.md
-
+- **Variables**:
+  * Use _either_ an English long name, or mathematical notation with readable unicode.
+  * Variable names should be taken from `docs/src/appendix/notation.md` in the docs.
+  * If a new variable is created (or if one doesn't exist), it should be added to the table in notation.md
+  * When naming variables, do _not_ use a math symbol with an verbose English underscore like `T_background`. Instead, introduce
+    a short yet still explanatory symbol, such as `Tᵇ` or `Tᵇᵍ` if more delineation is needed between variables.
 
 ### Breeze Module Structure
 ```

@@ -18,6 +18,7 @@ mkpath(literated_dir)
 
 example_scripts = [
     "thermal_bubble.jl",
+    "saturated_internal_wave.jl",
     # "prescribed_sst.jl", # this is a WIP
 ]
 
@@ -30,6 +31,7 @@ end
 
 example_pages = Any[
     "Thermal bubble" => "literated/thermal_bubble.md",
+    "Saturated internal wave" => "literated/saturated_internal_wave.md",
     # "Prescribed SST" => "literated/prescribed_sst.md",
 ]
 
