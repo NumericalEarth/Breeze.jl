@@ -86,7 +86,7 @@ Adapt.adapt_structure(to, k::PotentialTemperatureKernelFunction) =
                                        adapt(to, k.temperature),
                                        adapt(to, k.thermodynamics))
 
-const PotentialTemperatureOperation = KernelFunctionOperation{Center, Center, Center, <:Any, <:Any, <:PotentialTemperatureKernelFunction}
+const PotentialTemperature = KernelFunctionOperation{Center, Center, Center, <:Any, <:Any, <:PotentialTemperatureKernelFunction}
 const PotentialTemperatureField = Field{Center, Center, Center, <:PotentialTemperatureOperation}
 
 """
