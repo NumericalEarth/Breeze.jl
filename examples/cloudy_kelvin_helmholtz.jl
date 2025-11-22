@@ -1,4 +1,4 @@
-# # Cloudy Kelvin–-Helmholtz instability
+# # Cloudy Kelvin–Helmholtz instability
 #
 # This example sets up a two-dimensional (``x``–``z``) Kelvin–-Helmholtz instability
 # in a moist, stably stratified atmosphere.
