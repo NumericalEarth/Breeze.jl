@@ -189,8 +189,7 @@ run!(simulation)
 
 # ## Read output and visualize
 
-# We load the saved output as Oceananigans' `FieldTimeSeries` and then
-# use CairoMakie to plot and animate it.
+# We load the saved output as Oceananigans' `FieldTimeSeries`
 
 ξt = FieldTimeSeries(filename, "ξ")
 θt = FieldTimeSeries(filename, "θ")
@@ -199,13 +198,13 @@ qˡt = FieldTimeSeries(filename, "qˡ")
 times = ξt.times
 Nt = length(ξt)
 
+# and then use CairoMakie to plot and animate the output.
+
 n = Observable(Nt)
 
 ξn = @lift ξt[$n]
 θn = @lift θt[$n]
 qˡn = @lift qˡt[$n]
-
-@info "Creating visualization..."
 
 fig = Figure(size=(800, 800), fontsize=14)
 
@@ -223,7 +222,7 @@ Colorbar(fig[3, 2], hmθ, label = "Κ", vertical = true)
 
 fig
 
-# and then make a movie
+# We can also make a movie:
 
 CairoMakie.record(fig, "wave_clouds.mp4", 1:Nt, framerate = 12) do nn
     n[] = nn
