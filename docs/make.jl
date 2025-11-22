@@ -46,8 +46,8 @@ makedocs(
         "Thermodynamics" => "thermodynamics.md",
         "Microphysics" => Any[
             "Overview" => "microphysics/microphysics_overview.md",
-            "Warm phase saturation adjustment" => "microphysics/warm_phase_saturation_adjustment.md",
-            "Mixed phase saturation adjustment" => "microphysics/mixed_phase_saturation_adjustment.md",
+            "Warm-phase saturation adjustment" => "microphysics/warm_phase_saturation_adjustment.md",
+            "Mixed-phase saturation adjustment" => "microphysics/mixed_phase_saturation_adjustment.md",
         ],
         "Developers" => Any[
             "Microphysics" => Any[
