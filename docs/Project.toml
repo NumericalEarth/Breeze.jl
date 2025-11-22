@@ -9,7 +9,7 @@ Oceananigans = "9e8cae18-63c1-5223-a75c-80ca9d6e9a09"
 Random = "9a3f8284-a2c9-5f02-9a11-845980a1fd5c"
 
 [sources]
-Breeze = {path = "/Users/navid/Library/CloudStorage/OneDrive-TheUniversityofMelbourne/Documents/Research/Breeze.jl"}
+Breeze = {path = ".."}
 
 [compat]
 CairoMakie = "0.15"
