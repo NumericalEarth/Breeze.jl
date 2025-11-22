@@ -216,7 +216,6 @@ fig
 # and then make a movie
 
 CairoMakie.record(fig, "wave_clouds.mp4", 1:Nt, framerate = 12) do nn
-    @info "frame $nn out of $Nt"
     n[] = nn
 end
 nothing #hide
