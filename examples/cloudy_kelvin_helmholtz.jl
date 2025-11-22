@@ -91,7 +91,7 @@ qᵇ(z) = q_max * exp(-(z - z₀)^2 / 2Δz_q^2)
 # ## The Kelvin-Helmholtz instability
 #
 # The Miles–Howard criterion tells us that Kelvin–Helmholtz instability
-# occurs where the Richardson numbers,
+# occurs where the Richardson number,
 #
 # ```math
 # Ri = \frac{N²}{(∂uᵇ/∂z)²}
@@ -120,22 +120,21 @@ lines!(axu, uᵇ.(z), z)
 lines!(axq, qᵇ.(z), z)
 lines!(axθ, θᵇ.(z), z)
 lines!(axR, Ri, z)
-lines!(axR, [1/4, 1/4], [0, 3000], linestyle = :dash, color = :black)
+lines!(axR, [1/4, 1/4], [0, Lz], linestyle = :dash, color = :black)
 xlims!(axR, 0, 0.8)
 axR.xticks = 0:0.25:1
 
 for ax in (axq, axθ, axR)
     ax.yticksvisible = false
     ax.yticklabelsvisible = false
-    ax.ylabelvisible = false       # optional: hide y-axis label too
+    ax.ylabelvisible = false
 end
 
 fig
 
 # ## Define initial conditions
 #
-# We initialize the model via Oceananigans `set!`.
-# adding a tiny bit of random noise.
+# We initialize the model via Oceananigans `set!`, adding also a bit of random noise.
 
 δθ = 0.01
 δu = 1e-3
