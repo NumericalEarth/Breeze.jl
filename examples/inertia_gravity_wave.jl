@@ -34,8 +34,14 @@ grid = RectilinearGrid(CPU(),
                        halo = (5, 5),
                        topology = (Periodic, Flat, Bounded))
 
+
+# Boundary conditions
+free_slip_bcs = FieldBoundaryConditions(
+    top = FluxBoundaryCondition(nothing),
+    bottom = FluxBoundaryCondition(nothing)
+)
 # Atmosphere model setup
-model = AtmosphereModel(grid; coriolis = FPlane(f=f₀), advection = WENO(order=5))
+model = AtmosphereModel(grid; coriolis = FPlane(f=f₀), advection = WENO(order=5), boundary_conditions = (u = free_slip_bcs, w = free_slip_bcs))
 
 
 # Initial conditions and initialization
@@ -51,13 +57,9 @@ end
 θᵢ₀ = Field{Center, Nothing, Center}(grid)
 set!(θᵢ₀, (x, z) -> θ̄_0(z) )
 
-# Boundary conditions
-free_slip_bcs = FieldBoundaryConditions(
-    top = FluxBoundaryCondition(nothing),
-    bottom = FluxBoundaryCondition(nothing)
-)
 
-set!(model, θ = θᵢ, u=U, boundary_conditions = (u = free_slip_bcs, w = free_slip_bcs))
+
+set!(model, θ = θᵢ, u=U)
 
 Δt = 1 # seconds
 stop_time = 3000
