@@ -225,9 +225,7 @@ Return the saturation-adjusted thermodynamic state using a secant iteration.
     T₁ = temperature(𝒰₁, thermo)
 
     equilibrium = microphysics.equilibrium
-    pᵣ = 𝒰₀.reference_pressure
-    ρ₁ = density(pᵣ, T₁, q₁, thermo)
-    qᵛ⁺₁ = saturation_specific_humidity(T₁, ρ₁, thermo, equilibrium)
+    qᵛ⁺₁ = saturation_specific_humidity(𝒰₁, thermo, equilibrium)
     qᵗ <= qᵛ⁺₁ && return 𝒰₁
 
     # If we made it here, the state is saturated.
