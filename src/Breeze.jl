@@ -14,7 +14,6 @@ export
     PotentialTemperature,
     PotentialTemperatureField,
     TemperatureField,
-    PotentialTemperatureField,
     IdealGas,
     CondensedPhase,
     mixture_gas_constant,
