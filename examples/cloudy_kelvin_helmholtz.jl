@@ -1,14 +1,14 @@
-# # Cloudy Kelvin–Helmholtz instability
+# # Cloudy Kelvin-Helmholtz instability
 #
-# This example sets up a two-dimensional (``x``–``z``) Kelvin–-Helmholtz instability
+# This example sets up a two-dimensional (``x``–``z``) Kelvin–Helmholtz instability
 # in a moist, stably stratified atmosphere.
 #
 # The configuration is intentionally simple but reasonably "meteorological":
 #
-# - We impose a **tanh shear layer** in the horizontal wind ``U(z)``.
-# - We impose a **stably stratified** potential temperature profile ``θ(z)`` with
+# - We impose horizontal wind ``U(z)`` with a shear layer.
+# - We impose a stably stratified potential temperature profile ``θ(z)`` with
 #   a specified dry [Brunt–Väisälä frequency](https://en.wikipedia.org/wiki/Brunt–Väisälä_frequency) ``N``.
-# - We embed a **Gaussian moisture layer** ``q(z)`` centered on the shear layer.
+# - We embed a Gaussian moisture layer ``q(z)`` centered on the shear layer.
 #
 # As the shear layer rolls up, the moist layer is advected and deformed,
 # producing billow-like patterns reminiscent of observed "wave clouds".
