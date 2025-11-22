@@ -53,9 +53,7 @@ model = AtmosphereModel(grid; advection=WENO(order=5), microphysics)
 # N² = \frac{g}{θ₀} \frac{∂θ}{∂z} ,
 # ```
 #
-# so for given ``θ₀`` and ``N²`` we choose ``\mathrm{d}θ/\mathrm{d}z = N² θ₀ / g``.
-#
-# Here, we pick ``N = 0.01 s⁻¹``, representative of mid-tropospheric stability.
+# We initialize the potential temperature with a gradient that gives constant ``N = 0.01`` s⁻¹, representative of mid-tropospheric stability.
 
 thermo = ThermodynamicConstants()
 g = thermo.gravitational_acceleration
@@ -83,37 +81,29 @@ U_top = 25      # upper-layer wind [m/s]
 # Smooth shear layer:
 #
 # ```math
-# u(z) = U_{\mathrm{bot}} \quad \text{for} z ≪ z₀ ,
-# u(z) = U_{\mathrm{top}} \quad \text{for} z ≫ z₀ .
+# \begin{align*}
+# u(z) &= U_{\mathrm{bot}} \quad \text{for} z ≪ z₀ , \\
+# u(z) &= U_{\mathrm{top}} \quad \text{for} z ≫ z₀ .
+# \end{align}
 # ```
-#
+
 uᵇ(z) = U_bot + 0.5 * (U_top - U_bot) * (1 + tanh((z - z₀) / Δzᶸ))
 
-# Moisture layer: Gaussian in z around z₀.
-#
-# q_max ~ 0.012 corresponds to 0.012 kg/kg, a reasonable mid-level specific humidity.
-#
+# Moisture layer: Gaussian in ``z`` centered at ``z₀``:
+
 q_max = 0.012  # peak specific humidity [kg/kg]
 Δz_q = 200     # moist layer half-width [m]
 qᵇ(z) = q_max * exp(-(z - z₀)^2 / 2Δz_q^2)
-# #qᵇ(z) = q_max * (1 - tanh((z - 1.1z₀) / 2Δz_q)) / 2
 
-
-# ## Initial perturbation: seed the KH instability
+# ## Initial perturbation: seed the Kelvin-Helmholts instability
 #
 # The Miles–Howard criterion tells us that Kelvin–Helmholtz instability
-# occurs where ``Ri = N² / (dU/dz)² < 1/4``. With the parameters chosen above,
+# occurs where ``Ri = N² / (∂uᵇ/∂z)² < 1/4``. With the parameters chosen above,
 # the shear layer easily satisfies this.
 #
 # To actually *trigger* the instability in a numerical model, we add a small
 # vertical velocity perturbation localized at the shear layer.
 #
-# We choose:
-#
-#   w'(x, z) = w₀ * sin(kx) * exp(-((z - z₀)/Δz_pert)^2)
-#
-# with a few wavelengths across the domain.
-
 # ## Define initial conditions
 #
 # Oceananigans `set!` can take functions of (x, z) for 2-D grids.
@@ -141,15 +131,13 @@ set!(model; u=uᵢ, qᵗ=qᵗᵢ, θ=θᵢ)
 
 # ## Set up and run the simulation
 #
-# We run for ~30 minutes of physical time, which should be enough for the
-# KH billows to roll up significantly for these parameters.
-#
-# Use the time-step wizard to keep the CFL number under control.
+# We construct a simulation and use the time-step wizard to keep the CFL number under control.
 
 stop_time = 12minutes   # total simulation time
-
 simulation = Simulation(model; Δt=1, stop_time)
 conjure_time_step_wizard!(simulation; cfl = 0.7)
+
+# We also add a progress callback:
 
 function progress(sim)
     u, v, w = model.velocities
@@ -161,6 +149,9 @@ end
 
 add_callback!(simulation, progress, TimeInterval(1minute))
 
+# ## Output
+# We save the model velocities, the cross-stream component of vorticity, ``ξ = ∂_z u - ∂_x w``,
+# the potential temperatures and the specific humidities (vapour, liquid, ice).
 u, v, w = model.velocities
 ξ = ∂z(u) - ∂x(w)
 θ = PotentialTemperatureField(model)
@@ -175,6 +166,8 @@ output_writer = JLD2Writer(model, outputs;
 
 simulation.output_writers[:fields] = output_writer
 
+# ## Run!
+# Now we are ready to run the simulation.
 run!(simulation)
 
 # ## Read output and visualize
