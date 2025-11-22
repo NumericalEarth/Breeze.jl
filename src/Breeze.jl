@@ -12,6 +12,7 @@ export
     AnelasticFormulation,
     AtmosphereModel,
     TemperatureField,
+    PotentialTemperatureField,
     IdealGas,
     CondensedPhase,
     mixture_gas_constant,
