@@ -106,17 +106,8 @@ qᵇ(z) = q_max * exp(-(z - z₀)^2 / 2Δz_q^2)
 #
 # ## Define initial conditions
 #
-# Oceananigans `set!` can take functions of (x, z) for 2-D grids.
-#
-# We define:
-#
-#   u(x, z) = u_profile(z)
-#   w(x, z) = w_perturbation(x, z)
-#   θ(x, z) = θ_background(z)
-#   q(x, z) = q_background(z)
-#
-# plus a tiny bit of random noise in θ and q so that secondary structures
-# have something to grow from.
+# We initialize the model via Oceananigans `set!`.
+# adding a tiny bit of random noise.
 
 δθ = 0.01           # ~1% of a typical θ range
 δu = 1e-3           # ~1% of a typical θ range
@@ -126,7 +117,6 @@ qᵇ(z) = q_max * exp(-(z - z₀)^2 / 2Δz_q^2)
 qᵗᵢ(x, z) = qᵇ(z) + δq * rand()
 uᵢ(x, z) = uᵇ(z) + δu * rand()
 
-# Apply initial conditions.
 set!(model; u=uᵢ, qᵗ=qᵗᵢ, θ=θᵢ)
 
 # ## Set up and run the simulation
