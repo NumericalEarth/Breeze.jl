@@ -92,7 +92,7 @@ qˡ = λ .* qcond
 qⁱ = (1 .- λ) .* qcond
 
 fig = Figure()
-ax = Axis(fig[1, 1], xlabel="Temperature (K)", ylabel="specific humidity (kg kg⁻¹)")
+ax = Axis(fig[1, 1], xlabel="Temperature (K)", ylabel="Specific humidity (kg kg⁻¹)")
 lines!(ax, T, qˡ, label="liquid")
 lines!(ax, T, qⁱ, label="ice")
 axislegend(ax, position=:lc)
