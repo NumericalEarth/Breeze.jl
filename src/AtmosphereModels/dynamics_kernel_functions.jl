@@ -22,11 +22,31 @@ Oceananigans `qᶜ` is the kinematic tracer flux.
 ##### Some key functions
 #####
 
+@inline function ρ_bᶜᶜᶜ(i, j, k, grid, reference_density, buoyancy, formulation, T, q, thermo)
+    b = buoyancy(i, j, k, grid, formulation, T, q, thermo)
+    ρᵣ = @inbounds reference_density[i, j, k]
+    return ρᵣ * b
+end
+
+@inline ρ_bᶜᶜᶠ(i, j, k, grid, ρ, T, q, formulation, thermo) = ℑzᵃᵃᶠ(i, j, k, grid, ρ_bᶜᶜᶜ, ρ, buoyancy, formulation, T, q, thermo)
+
+#=
+@inline function ρ_bᶜᶜᶠ(i, j, k, grid, ρ, T, q, formulation, thermo)
+    ρᶜᶜᶠ = ℑzᵃᵃᶠ(i, j, k, grid, density, formulation, T, q, thermo)
+    ρᵣ = ℑzᵃᵃᶠ(i, j, k, grid, formulation.reference_state.density)
+    g = thermo.gravitational_acceleration     
+    bᶜᶜᶠ = - g * (ρᶜᶜᶠ - ρᵣ) / ρᶜᶜᶠ
+    return ρᶜᶜᶠ * bᶜᶜᶠ
+end
+=#
+
+#=
 @inline function ρ_bᶜᶜᶠ(i, j, k, grid, ρ, T, q, formulation, thermo)
     ρᶜᶜᶠ = ℑzᵃᵃᶠ(i, j, k, grid, ρ)
     bᶜᶜᶠ = ℑzᵃᵃᶠ(i, j, k, grid, buoyancy, formulation, T, q, thermo)
     return ρᶜᶜᶠ * bᶜᶜᶠ
 end
+=#
 
 @inline function ρ_w_bᶜᶜᶠ(i, j, k, grid, w, ρ, T, q, formulation, thermo)
     ρ_b = ρ_bᶜᶜᶠ(i, j, k, grid, ρ, T, q, formulation, thermo)
