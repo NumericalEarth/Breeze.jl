@@ -7,7 +7,7 @@
 #
 # - We impose a **tanh shear layer** in the horizontal wind ``U(z)``.
 # - We impose a **stably stratified** potential temperature profile ``θ(z)`` with
-#   a specified dry Brunt–Väisälä frequency ``N``.
+#   a specified dry [Brunt–Väisälä frequency](https://en.wikipedia.org/wiki/Brunt–Väisälä_frequency) ``N``.
 # - We embed a **Gaussian moisture layer** ``q(z)`` centered on the shear layer.
 #
 # As the shear layer rolls up, the moist layer is advected and deformed,
@@ -97,7 +97,8 @@ qᵇ(z) = q_max * exp(-(z - z₀)^2 / 2Δz_q^2)
 # Ri = \frac{N²}{(∂uᵇ/∂z)²}
 # ```
 #
-# is less than 1/4. With the parameters chosen above this is the case.
+# is less than 1/4 [Miles1961, Howard1961](@cite). With the parameters chosen
+# above this is the case.
 #
 # Let's plot the initial state as well as the Richardson number.
 
