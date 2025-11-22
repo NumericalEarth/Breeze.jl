@@ -54,7 +54,7 @@ model = AtmosphereModel(grid; advection=WENO(order=5), microphysics)
 # ```
 #
 # We initialize the potential temperature with a gradient that gives
-# constant ``N = 0.01`` s⁻¹, representative of mid-tropospheric stability.
+# constant Brunt–Väisälä frequency, representative of mid-tropospheric stability.
 
 thermo = ThermodynamicConstants()
 g = thermo.gravitational_acceleration
