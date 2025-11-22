@@ -87,7 +87,7 @@ materialize_microphysical_fields(bμp::ZMCM, grid, bcs) = materialize_microphysi
     ρᵣ = 𝒰.reference_density
     return ρᵣ * remove_precipitation(bμp.categories, qˡ, qⁱ, qᵛ⁺)
 end
-    
+
 """
     ZeroMomentCloudMicrophysics(FT::DataType = Oceananigans.defaults.FloatType,
                                 categories = Parameters0M(FT))
@@ -235,7 +235,7 @@ function prettysummary(mass::CloudMicrophysics.Parameters.ParticleMass)
                   "Δm=", prettysummary(mass.Δm), ", ",
                   "χm=", prettysummary(mass.χm), ")")
 end
-    
+
 function prettysummary(pdf::CloudMicrophysics.Parameters.ParticlePDFIceRain)
     return string("ParticlePDFIceRain(n0=", prettysummary(pdf.n0), ")")
 end
@@ -311,6 +311,4 @@ function Base.show(io::IO, bμp::BulkMicrophysics{<:Any, <:CM1MCategories})
           "    └── aspr:   ", prettysummary(bμp.categories.snow.aspr))
 end
 
-
 end # module BreezeCloudMicrophysicsExt
-
