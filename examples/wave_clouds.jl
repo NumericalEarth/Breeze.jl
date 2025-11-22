@@ -39,27 +39,28 @@ grid = RectilinearGrid(; size = (Nx, Nz), x = (0, Lx), z = (0, Lz),
 
 # ## Model and microphysics
 # We construct the AtmosphereModel model with saturation adjustment microphysics.
+
 microphysics = SaturationAdjustment(equilibrium=WarmPhaseEquilibrium())
 model = AtmosphereModel(grid; advection=WENO(order=5), microphysics)
 
 # ## Background thermodynamic state
 #
 # We set a reference potential temperature ``θ₀`` and a linear ``θ`` gradient
-# that corresponds to a desired dry Brunt–Väisälä frequency ``N``.
-#
-# For a dry atmosphere,
+# that corresponds to a desired dry Brunt–Väisälä frequency ``N``. For a dry
+# atmosphere,
 #
 # ```math
 # N² = \frac{g}{θ₀} \frac{∂θ}{∂z} ,
 # ```
 #
-# We initialize the potential temperature with a gradient that gives constant ``N = 0.01`` s⁻¹, representative of mid-tropospheric stability.
+# We initialize the potential temperature with a gradient that gives
+# constant ``N = 0.01`` s⁻¹, representative of mid-tropospheric stability.
 
 thermo = ThermodynamicConstants()
 g = thermo.gravitational_acceleration
 θ₀ = model.formulation.reference_state.potential_temperature
-N = 0.01                  # target dry Brunt–Väisälä frequency [s⁻¹]
-dθdz =  θ₀ * N^2 / g      # dθ/dz [K m⁻¹] ~ 0.003 K/m = 3 K/km
+N = 0.01                  # target dry Brunt–Väisälä frequency (s⁻¹)
+dθdz =  θ₀ * N^2 / g      # dθ/dz (K m⁻¹)
 θᵇ(z) = θ₀ + dθdz * z
 
 # ## Shear and moisture profiles
@@ -73,10 +74,10 @@ dθdz =  θ₀ * N^2 / g      # dθ/dz [K m⁻¹] ~ 0.003 K/m = 3 K/km
 # This mimics a moist, stably stratified layer embedded in stronger flow
 # above and weaker flow below.
 
-z₀    = 1e3     # center of shear & moist layer [m]
-Δzᶸ   = 150     # shear layer half-thickness [m]
-U_bot =  5      # lower-layer wind [m/s]
-U_top = 25      # upper-layer wind [m/s]
+z₀    = 1e3     # center of shear & moist layer (m)
+Δzᶸ   = 150     # shear layer half-thickness (m)
+U_top = 25      # upper-layer wind (m/s)
+U_bot =  5      # lower-layer wind (m/s)
 
 # Smooth shear layer:
 #
@@ -84,15 +85,15 @@ U_top = 25      # upper-layer wind [m/s]
 # \begin{align*}
 # u(z) &= U_{\mathrm{bot}} \quad \text{for} z ≪ z₀ , \\
 # u(z) &= U_{\mathrm{top}} \quad \text{for} z ≫ z₀ .
-# \end{align}
+# \end{align*}
 # ```
 
-uᵇ(z) = U_bot + 0.5 * (U_top - U_bot) * (1 + tanh((z - z₀) / Δzᶸ))
+uᵇ(z) = U_bot + (U_top - U_bot) * (1 + tanh((z - z₀) / Δzᶸ)) / 2
 
 # Moisture layer: Gaussian in ``z`` centered at ``z₀``:
 
-q_max = 0.012  # peak specific humidity [kg/kg]
-Δz_q = 200     # moist layer half-width [m]
+q_max = 0.012  # peak specific humidity (kg/kg)
+Δz_q = 200     # moist layer half-width (m)
 qᵇ(z) = q_max * exp(-(z - z₀)^2 / 2Δz_q^2)
 
 # ## Initial perturbation: seed the Kelvin-Helmholts instability
@@ -100,18 +101,15 @@ qᵇ(z) = q_max * exp(-(z - z₀)^2 / 2Δz_q^2)
 # The Miles–Howard criterion tells us that Kelvin–Helmholtz instability
 # occurs where ``Ri = N² / (∂uᵇ/∂z)² < 1/4``. With the parameters chosen above,
 # the shear layer easily satisfies this.
-#
-# To actually *trigger* the instability in a numerical model, we add a small
-# vertical velocity perturbation localized at the shear layer.
-#
+##
 # ## Define initial conditions
 #
 # We initialize the model via Oceananigans `set!`.
 # adding a tiny bit of random noise.
 
-δθ = 0.01           # ~1% of a typical θ range
-δu = 1e-3           # ~1% of a typical θ range
-δq = 0.05 * q_max   # 5% of peak humidity
+δθ = 0.01
+δu = 1e-3
+δq = 0.05 * q_max
 
 θᵢ(x, z) = θᵇ(z) + δθ * rand()
 qᵗᵢ(x, z) = qᵇ(z) + δq * rand()
