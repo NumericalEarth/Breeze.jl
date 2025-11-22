@@ -96,12 +96,49 @@ q_max = 0.012  # peak specific humidity (kg/kg)
 Δz_q = 200     # moist layer half-width (m)
 qᵇ(z) = q_max * exp(-(z - z₀)^2 / 2Δz_q^2)
 
-# ## Initial perturbation: seed the Kelvin-Helmholts instability
+# ## The Kelvin-Helmholtz instability
 #
 # The Miles–Howard criterion tells us that Kelvin–Helmholtz instability
-# occurs where ``Ri = N² / (∂uᵇ/∂z)² < 1/4``. With the parameters chosen above,
-# the shear layer easily satisfies this.
-##
+# occurs where the Richardson numbers, ``Ri = N² / (∂uᵇ/∂z)² < 1/4``.
+# With the parameters chosen above, the shear layer easily satisfies this.
+#
+# Let's plot the initial state as well as the Richardson number.
+
+z = znodes(grid, Center())
+
+dudz = @. (U_top - U_bot) * sech((z - z₀) / Δzᶸ)^2 / 2Δzᶸ
+Ri = N^2 ./ dudz.^2
+
+using CairoMakie
+
+fig = Figure(size=(800, 500))
+
+axu = Axis(fig[1, 1], xlabel = "uᵇ (m/s)", ylabel = "z (m)", title = "Zonal velocity")
+axq = Axis(fig[1, 2], xlabel = "qᵇ (kg/kg)", title="Total liquid")
+axθ = Axis(fig[1, 3], xlabel = "θᵇ (K)", title="Potential temperature")
+axR = Axis(fig[1, 4], xlabel = "Ri", ylabel="z (m)", title="Richardson number")
+
+lines!(axu, uᵇ.(z), z)
+lines!(axq, qᵇ.(z), z)
+lines!(axθ, θᵇ.(z), z)
+lines!(axR, Ri, z)
+lines!(axR, [1/4, 1/4], [0, 3000], linestyle = :dash, color = :black)
+xlims!(axR, 0, 0.8)
+axR.xticks = 0:0.25:1
+
+for ax in (axq, axθ, axR)
+    ax.yticksvisible = false
+    ax.yticklabelsvisible = false
+    ax.ylabelvisible = false       # optional: hide y-axis label too
+end
+
+fig
+
+fig = Figure()
+ax = Axis(fig[1, 1], xlabel="Ri", ylabel="z (m)")
+fig
+
+#
 # ## Define initial conditions
 #
 # We initialize the model via Oceananigans `set!`.
