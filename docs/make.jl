@@ -31,7 +31,7 @@ end
 
 example_pages = Any[
     "Thermal bubble" => "literated/thermal_bubble.md",
-    "Moist Kelvin-Helmholtz billows" => "literated/wave_clouds.md",
+    "Cloudy Kelvin–-Helmholtz instability" => "literated/wave_clouds.md",
     # "Prescribed SST" => "literated/prescribed_sst.md",
 ]
 
