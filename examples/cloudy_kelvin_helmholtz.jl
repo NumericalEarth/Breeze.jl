@@ -67,30 +67,22 @@ dθdz =  θ₀ * N^2 / g      # dθ/dz (K m⁻¹)
 #
 # We want:
 #
-# - A shear layer centered at height z₀ where u(z) transitions from a lower
-#   speed U_bot to an upper speed U_top.
+# - A shear layer centered at height ``z₀`` with the zonal flow transitioning from a lower
+#   speed ``U_{\rm bot}`` to an upper speed ``U_{\rm top}``.
 # - A moist layer centered at the same height with a Gaussian profile.
 #
-# This mimics a moist, stably stratified layer embedded in stronger flow
+# The above  mimics a moist, stably stratified layer embedded in stronger flow
 # above and weaker flow below.
+
+# First, we set up the shear layer using a ``\tanh`` profile:
 
 z₀    = 1e3     # center of shear & moist layer (m)
 Δzᶸ   = 150     # shear layer half-thickness (m)
 U_top = 25      # upper-layer wind (m/s)
 U_bot =  5      # lower-layer wind (m/s)
-
-# Smooth shear layer:
-#
-# ```math
-# \begin{align*}
-# u(z) &= U_{\mathrm{bot}} \quad \text{for} z ≪ z₀ , \\
-# u(z) &= U_{\mathrm{top}} \quad \text{for} z ≫ z₀ .
-# \end{align*}
-# ```
-
 uᵇ(z) = U_bot + (U_top - U_bot) * (1 + tanh((z - z₀) / Δzᶸ)) / 2
 
-# Moisture layer: Gaussian in ``z`` centered at ``z₀``:
+# For the moisture layer, we use a Gaussian in ``z`` centered at ``z₀``:
 
 q_max = 0.012  # peak specific humidity (kg/kg)
 Δz_q = 200     # moist layer half-width (m)
