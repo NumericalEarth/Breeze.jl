@@ -1,6 +1,11 @@
 module AtmosphereModels
 
-export AtmosphereModel, AnelasticFormulation, PotentialTemperatureOperation
+export
+    AtmosphereModel,
+    AnelasticFormulation,
+    PotentialTemperatureOperation,
+    PotentialTemperature,
+    PotentialTemperatureField
 
 using DocStringExtensions: TYPEDSIGNATURES
 
