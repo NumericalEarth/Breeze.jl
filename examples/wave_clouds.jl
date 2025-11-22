@@ -1,4 +1,4 @@
-# # Kelvin–-Helmholtz "wave clouds"
+# # Cloudy Kelvin–-Helmholtz instability
 #
 # This example sets up a two-dimensional (``x``–``z``) Kelvin–-Helmholtz instability
 # in a moist, stably stratified atmosphere.
@@ -12,8 +12,8 @@
 #
 # As the shear layer rolls up, the moist layer is advected and deformed,
 # producing billow-like patterns reminiscent of observed "wave clouds".
-# Breeze encapsulates much of this thermodynamics for us via
-# `MoistAirBuoyancy` and saturation adjustment.
+# Breeze encapsulates much of this thermodynamics for us via the
+# `AtmosphereModel` and saturation adjustment.
 
 using Breeze
 using Oceananigans.Units
@@ -134,11 +134,6 @@ end
 
 fig
 
-fig = Figure()
-ax = Axis(fig[1, 1], xlabel="Ri", ylabel="z (m)")
-fig
-
-#
 # ## Define initial conditions
 #
 # We initialize the model via Oceananigans `set!`.
