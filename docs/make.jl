@@ -18,6 +18,7 @@ mkpath(literated_dir)
 
 example_scripts = [
     "thermal_bubble.jl",
+    "wave_clouds.jl",
     "saturated_internal_wave.jl",
     # "prescribed_sst.jl", # this is a WIP
 ]
@@ -31,6 +32,7 @@ end
 
 example_pages = Any[
     "Thermal bubble" => "literated/thermal_bubble.md",
+    "Cloudy Kelvin–-Helmholtz instability" => "literated/wave_clouds.md",
     "Saturated internal wave" => "literated/saturated_internal_wave.md",
     # "Prescribed SST" => "literated/prescribed_sst.md",
 ]
@@ -64,3 +66,25 @@ makedocs(
     ],
     draft = false,
 )
+
+"""
+    recursive_find(directory, pattern)
+
+Return list of filepaths within `directory` that contains the `pattern::Regex`.
+"""
+function recursive_find(directory, pattern)
+    mapreduce(vcat, walkdir(directory)) do (root, dirs, filenames)
+        matched_filenames = filter(contains(pattern), filenames)
+        map(filename -> joinpath(root, filename), matched_filenames)
+    end
+end
+
+@info "Cleaning up temporary .jld2 and .nc output created by doctests or literated examples..."
+
+for pattern in [r"\.jld2", r"\.nc"]
+    filenames = recursive_find(@__DIR__, pattern)
+
+    for filename in filenames
+        rm(filename)
+    end
+end
