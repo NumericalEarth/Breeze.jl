@@ -1,5 +1,9 @@
-using Oceananigans: Oceananigans, Center, Field, set!, fill_halo_regions!
+using Oceananigans: Oceananigans, Center, Field, set!, fill_halo_regions!, ∂z
+using Oceananigans.Utils: launch!
+using Oceananigans.Operators: Δzᶜᶜᶠ, ℑzᵃᵃᶠ
+
 using Adapt: Adapt, adapt
+using KernelAbstractions: @kernel, @index
 
 #####
 ##### Reference state computations for Boussinesq and Anelastic models
@@ -91,12 +95,44 @@ function ReferenceState(grid, thermo=ThermodynamicConstants(eltype(grid));
     p₀ = convert(FT, base_pressure)
     θ₀ = convert(FT, potential_temperature)
 
-    pᵣ = Field{Nothing, Nothing, Center}(grid)
+    #=
     ρᵣ = Field{Nothing, Nothing, Center}(grid)
-    set!(pᵣ, z -> adiabatic_hydrostatic_pressure(z, p₀, θ₀, thermo))
     set!(ρᵣ, z -> adiabatic_hydrostatic_density(z, p₀, θ₀, thermo))
+    fill_halo_regions!(ρᵣ)
+
+    pᵣ = Field{Nothing, Nothing, Center}(grid)
+    compute_reference_pressure!(pᵣ, grid, p₀, ρᵣ, thermo)
+    =#
+
+    pᵣ = Field{Nothing, Nothing, Center}(grid)
+    set!(pᵣ, z -> adiabatic_hydrostatic_pressure(z, p₀, θ₀, thermo))
     fill_halo_regions!(pᵣ)
+
+    ρᵣ = Field{Nothing, Nothing, Center}(grid)
+    g = thermo.gravitational_acceleration
+    set!(ρᵣ, - ∂z(pᵣ) / g)
     fill_halo_regions!(ρᵣ)
 
     return ReferenceState(p₀, θ₀, pᵣ, ρᵣ)
+end
+
+@kernel function _compute_reference_pressure!(pᵣ, grid, p₀, ρᵣ, thermo)
+    i, j = @index(Global, NTuple)
+
+    # ∂z p = - ρᵣ g
+    # (p⁺ - pᵏ) / Δz = - ℑzᶠ(ρᵣ) * g
+    # p⁺ = pᵏ - ℑzᶠ(ρᵣ) * g Δz
+ 
+    @inbounds pᵣ[i, j, 1] = p₀
+    g = thermo.gravitational_acceleration
+
+    for k = 2:grid.Nz
+        @inbounds pᵣ[i, j, k] = pᵣ[i, j, k-1] - ℑzᵃᵃᶠ(i, j, k, grid, ρᵣ) * g * Δzᶜᶜᶠ(i, j, k-1, grid)
+    end
+end
+
+function compute_reference_pressure!(pᵣ, grid, p₀, ρᵣ, thermo)
+    arch = grid.architecture
+    launch!(arch, grid, (1, 1), _compute_reference_pressure!, pᵣ, grid, p₀, ρᵣ, thermo)
+    return nothing
 end
