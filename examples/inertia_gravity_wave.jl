@@ -41,27 +41,27 @@ free_slip_bcs = FieldBoundaryConditions(
     bottom = FluxBoundaryCondition(nothing)
 )
 # Atmosphere model setup
-model = AtmosphereModel(grid; coriolis = FPlane(f=f₀), advection = WENO(order=5), boundary_conditions = (u = free_slip_bcs, w = free_slip_bcs))
+model = AtmosphereModel(grid; coriolis = FPlane(f=f₀), advection = WENO(order=5), boundary_conditions = (ρu = free_slip_bcs, ρe = free_slip_bcs) )
 
 
 # Initial conditions and initialization
 g = model.thermodynamics.gravitational_acceleration
-function θᵢ(x, z; x₀=mean(xnodes(grid, Center())), z₀=0.3*grid.Lz)
+function θᵢ(x, z)
+    x_c = Lx / 3
     θ̄ = θ₀ * exp(N² * z / g)
-    θ′ = Δθ₀ * sin(π * z / Lz)  / (1 + ((x - Lx/3)/a)^2)
+    θ′ = Δθ₀ * sin(π * z / Lz)  / (1 + ((x - x_c)/a)^2)
     return θ̄ + θ′
 end
 
-# Save initial potential temperature without perturbation for later comparison
+# Save initial potential temperature without perturbation to compute anomaly later
 θ̄_0(z) = θ₀ * exp(N² * z / g)
 θᵢ₀ = Field{Center, Nothing, Center}(grid)
 set!(θᵢ₀, (x, z) -> θ̄_0(z) )
 
 
-
 set!(model, θ = θᵢ, u=U)
 
-Δt = 1 # seconds
+Δt = 6 # seconds
 stop_time = 3000
 simulation = Simulation(model; Δt, stop_time)
 
@@ -101,15 +101,18 @@ run!(simulation)
 
 
 # Plotting
-fig = Figure(size=(900, 300))
+fig = Figure()
+gb = fig[1, 1]
 
 xs = LinRange(0, Lx, Nx)
 zs = LinRange(0, Lz, Nz+1)
 pdata = Array(interior(θ, :,1,:)) - Array(interior(θᵢ₀, :,1,:))
-ax, hm = heatmap(fig[1, 1][1, 1], xs, zs, pdata, colormap = :balance, colorrange = (-0.01, 0.01))
+ax, hm = heatmap(gb[1,1], xs, zs, pdata, colormap = :balance, colorrange = (-0.01, 0.01))
 ax.xlabel = "x [m]"
 ax.ylabel = "z [m]"
-ax.title = "Potential Temperature Anomaly at t = $(stop_time)s"
-Colorbar(fig[1, 1][1, 2], hm; label = "Potential Temperature Anomaly [K]")
+ax.title = "θ Anomaly at t = $(stop_time)s"
+
+Colorbar(gb[1:1, 2], hm; label = "θ Anomaly [K]")
 
 save("inertia_gravity_wave.png", fig)
+
