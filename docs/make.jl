@@ -62,6 +62,7 @@ makedocs(
         "API" => "api.md",
         "Contributors guide" => "contributing.md",
     ],
+    linkcheck = true,
     draft = false,
 )
 
