@@ -134,9 +134,12 @@ end
     z = znode(i, j, k, grid, c, c, c)
     p₀ = formulation.reference_state.base_pressure
 
-    # TODO: change this so the code works for _both_ adjustment and non-adjustment microphysics
-    # q = moisture_mass_fractions(i, j, k, grid, microphysics, microphysical_fields, moisture_mass_fraction)
-    q = MoistureMassFractions(qᵗ)
+    q = compute_moisture_fractions(i, j, k, grid,
+                                   microphysics,
+                                   formulation.reference_state.density,
+                                   specific_moisture,
+                                   microphysical_fields)
+
     𝒰₀ = PotentialTemperatureState(θ, q, p₀, pᵣ)
     𝒰 = maybe_adjust_thermodynamic_state(𝒰₀, microphysics, microphysical_fields, qᵗ, thermo)
 

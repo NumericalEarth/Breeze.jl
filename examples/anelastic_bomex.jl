@@ -1,6 +1,5 @@
 # using Pkg; Pkg.activate(".")
 using Breeze
-using Oceananigans
 using Oceananigans.Units
 
 using AtmosphericProfilesLibrary
@@ -8,6 +7,7 @@ using Printf
 
 using Oceananigans.Operators: ∂zᶜᶜᶠ, ℑzᵃᵃᶜ
 using CUDA
+using CairoMakie
 
 # Siebesma et al (2003) resolution!
 # DOI: https://doi.org/10.1175/1520-0469(2003)60<1201:ALESIS>2.0.CO;2
@@ -45,9 +45,9 @@ q₀ = Breeze.Thermodynamics.MoistureMassFractions{FT} |> zero
 ρ₀ = Breeze.Thermodynamics.density(p₀, θ₀, q₀, thermo)
 cᵖᵈ = thermo.dry_air.heat_capacity
 Lˡ = thermo.liquid.reference_latent_heat
-w′T′ = 8e-3
-w′q′ = 5.2e-5
-Q = ρ₀ * (cᵖᵈ * w′T′ + Lˡ * w′q′)
+w′T′, w′q′ = 8e-3, 5.2e-5
+#Q = ρ₀ * (cᵖᵈ * w′T′ + Lˡ * w′q′)
+Q = ρ₀ * (cᵖᵈ * w′T′)
 F = ρ₀ * w′q′
 ρe_bcs = FieldBoundaryConditions(bottom=FluxBoundaryCondition(Q))
 ρqᵗ_bcs = FieldBoundaryConditions(bottom=FluxBoundaryCondition(F))
@@ -64,34 +64,34 @@ u★ = 0.28 # m/s
 
 @inline function Fρu_subsidence(i, j, k, grid, clock, fields, parameters)
     wˢ = parameters.wˢ
-    u_avg = parameters.u_avg
-    w_dz_U = ℑzᵃᵃᶜ(i, j, k, grid, w_dz_ϕ, wˢ, u_avg)
+    U = parameters.u_avg
+    w_dz_U = ℑzᵃᵃᶜ(i, j, k, grid, w_dz_ϕ, wˢ, U)
     ρᵣ = @inbounds parameters.ρᵣ[i, j, k]
     return - ρᵣ * w_dz_U
 end
 
 @inline function Fρv_subsidence(i, j, k, grid, clock, fields, parameters)
     wˢ = parameters.wˢ
-    v_avg = parameters.v_avg
-    w_dz_V = ℑzᵃᵃᶜ(i, j, k, grid, w_dz_ϕ, wˢ, v_avg)
+    V = parameters.v_avg
+    w_dz_V = ℑzᵃᵃᶜ(i, j, k, grid, w_dz_ϕ, wˢ, V)
     ρᵣ = @inbounds parameters.ρᵣ[i, j, k]
     return - ρᵣ * w_dz_V
 end
 
 @inline function Fρe_subsidence(i, j, k, grid, clock, fields, parameters)
     wˢ = parameters.wˢ
-    e_avg = parameters.e_avg
-    w_dz_E = ℑzᵃᵃᶜ(i, j, k, grid, w_dz_ϕ, wˢ, e_avg)
+    E = parameters.e_avg
+    w_dz_E = ℑzᵃᵃᶜ(i, j, k, grid, w_dz_ϕ, wˢ, E)
     ρᵣ = @inbounds parameters.ρᵣ[i, j, k]
     return - ρᵣ * w_dz_E
 end
 
 @inline function Fρqᵗ_subsidence(i, j, k, grid, clock, fields, parameters)
     wˢ = parameters.wˢ
-    q_avg = parameters.qᵗ_avg
-    w_dz_Q = ℑzᵃᵃᶜ(i, j, k, grid, w_dz_ϕ, wˢ, q_avg)
+    Qᵗ = parameters.qᵗ_avg
+    w_dz_Qᵗ = ℑzᵃᵃᶜ(i, j, k, grid, w_dz_ϕ, wˢ, Qᵗ)
     ρᵣ = @inbounds parameters.ρᵣ[i, j, k]
-    return - ρᵣ * w_dz_Q
+    return - ρᵣ * w_dz_Qᵗ
 end
 
 # f for "forcing"
@@ -105,9 +105,9 @@ w_bomex = AtmosphericProfilesLibrary.Bomex_subsidence(FT)
 set!(wˢ, z -> w_bomex(z))
 
 ρᵣ = formulation.reference_state.density
-ρu_subsidence_forcing = Forcing(Fρu_subsidence, discrete_form=true, parameters=(; u_avg=u_avg_f, wˢ, ρᵣ))
-ρv_subsidence_forcing = Forcing(Fρv_subsidence, discrete_form=true, parameters=(; v_avg=v_avg_f, wˢ, ρᵣ))
-ρe_subsidence_forcing = Forcing(Fρe_subsidence, discrete_form=true, parameters=(; e_avg=e_avg_f, wˢ, ρᵣ))
+ρu_subsidence_forcing  = Forcing(Fρu_subsidence,  discrete_form=true, parameters=(; u_avg=u_avg_f, wˢ, ρᵣ))
+ρv_subsidence_forcing  = Forcing(Fρv_subsidence,  discrete_form=true, parameters=(; v_avg=v_avg_f, wˢ, ρᵣ))
+ρe_subsidence_forcing  = Forcing(Fρe_subsidence,  discrete_form=true, parameters=(; e_avg=e_avg_f, wˢ, ρᵣ))
 ρqᵗ_subsidence_forcing = Forcing(Fρqᵗ_subsidence, discrete_form=true, parameters=(; qᵗ_avg=qᵗ_avg_f, wˢ, ρᵣ))
 
 coriolis = FPlane(f=3.76e-5)
@@ -153,7 +153,8 @@ set!(Fρe_field, ρᵣ * cᵖᵈ * Fρe_field)
 ρe_radiation_forcing = Forcing(Fρe_field)
 ρe_forcing = (ρe_radiation_forcing, ρe_subsidence_forcing)
 
-microphysics = Breeze.Microphysics.SaturationAdjustment(equilibrium=Breeze.Microphysics.WarmPhaseEquilibrium())
+microphysics = SaturationAdjustment(equilibrium=WarmPhaseEquilibrium())
+closure = nothing
 
 model = AtmosphereModel(grid; coriolis, microphysics,
                         advection = WENO(order=5),
@@ -162,15 +163,13 @@ model = AtmosphereModel(grid; coriolis, microphysics,
 
 # Values for the initial perturbations can be found in Appendix B
 # of Siebesma et al 2003, 3rd paragraph
-θϵ = 0.1
-qϵ = 2.5e-5
-z_perturb = 1600 # m
-θᵢ(x, y, z) = θ_bomex(z) + θϵ * randn() * (z < z_perturb)
-qᵢ(x, y, z) = q_bomex(z) + qϵ * randn() * (z < z_perturb)
+θϵ, qϵ, zϵ = 0.1, 2.5e-5, 1600
+θᵢ(x, y, z) = θ_bomex(z) + θϵ * rand() * (z < zϵ)
+qᵢ(x, y, z) = q_bomex(z) + qϵ * rand() * (z < zϵ)
 uᵢ(x, y, z) = u_bomex(z)
 set!(model, θ=θᵢ, qᵗ=qᵢ, u=uᵢ)
 
-simulation = Simulation(model; Δt=2, stop_time)
+simulation = Simulation(model; Δt=10, stop_time)
 conjure_time_step_wizard!(simulation, cfl=0.7)
 
 # Write a callback to compute *_avg_f
@@ -201,8 +200,6 @@ qᵛ⁺ = Breeze.AtmosphereModels.SaturationSpecificHumidityField(model)
 θ_avg = Average(θ, dims=(1, 2)) |> Field
 qˡ_avg = Average(qˡ, dims=(1, 2)) |> Field
 
-using CairoMakie
-
 fig = Figure()
 axT =  Axis(fig[1, 1], xlabel="Temperature (K)", ylabel="z (m)")
 axu =  Axis(fig[1, 2], xlabel="Velocity (m/s)", ylabel="z (m)")
@@ -221,7 +218,7 @@ function plot_averages(sim)
     return nothing
 end
 
-add_callback!(simulation, plot_averages, TimeInterval(20minutes))
+add_callback!(simulation, plot_averages, TimeInterval(1hour))
 
 function progress(sim)
     qˡmax = maximum(qˡ)
@@ -250,9 +247,6 @@ end
 
 add_callback!(simulation, progress, IterationInterval(100))
 
-# The commented out lines below diagnose the forcing applied to model.tracers.q
-# using Oceananigans.Models: ForcingOperation
-# Sʳ = ForcingOperation(:q, model)
 outputs = merge(model.velocities, model.tracers, (; θ, qˡ, qᵛ))
 averaged_outputs = NamedTuple(name => Average(outputs[name], dims=(1, 2)) for name in keys(outputs))
 
@@ -275,8 +269,9 @@ simulation.output_writers[:avg] = averages_ow
 @info "Running BOMEX on grid: \n $grid \n and using model: \n $model"
 run!(simulation)
 
-
-using CairoMakie
+#####
+##### Post-processing
+#####
 
 θt  = FieldTimeSeries(averages_filename, "θ")
 qᵛt  = FieldTimeSeries(averages_filename, "qᵛ")
@@ -316,8 +311,6 @@ xlims!(axuv, (-10, 2))
 ylims!(axuv, (0, 2500))
 xlims!(axqᵛ, (4, 18))
 ylims!(axqᵛ, (0, 2500))
-#xlims!(axqˡ, (0, 0.001))
 ylims!(axqˡ, (0, 2500))
 
 save("bomex_avg_profiles.png", fig)
-
