@@ -32,7 +32,7 @@ g = model.thermodynamics.gravitational_acceleration
 function θᵢ(x, z;
             x₀ = mean(xnodes(grid, Center())),
             z₀ = 0.3*grid.Lz,
-            N² = 1e-6)
+            N² = N²)
 
     θ̄ = θ₀ * exp(N² * z / g)
     r = sqrt((x - x₀)^2 + (z - z₀)^2)
