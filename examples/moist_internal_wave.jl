@@ -107,8 +107,8 @@ axθ = Axis(fig[1, 2])
 axw = Axis(fig[1, 2])
 θ = PotentialTemperature(model) |> Field
 u, v, w = model.velocities
-heatmap(axθ, θ)
-heatmap(axw, w)
+heatmap!(axθ, θ)
+heatmap!(axw, w)
 fig
 
 Δt = 0.001 * 2π / ω
