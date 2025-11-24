@@ -1,11 +1,11 @@
 # # Saturated internal wave packet
 #
 # This literate example adapts Oceananigans' `internal_wave.jl`
-# to AtmosphereModel so that we can explore how slight supersaturation
-# modifies the buoyancy frequency following Durran & Klemp (1982).
+# to AtmosphereModel to explore how slight supersaturation
+# modifies the buoyancy frequency following the study by [Durran1982](@citet). #Durran & Klemp (1982).
 # The idea is simple:
-# 1. Build a 2-D `x-z` anelastic AtmosphereModel with a realistic dry stratification.
-# 2. Initialize total specific humidity `qᵗ` just **above** saturation everywhere.
+# 1. Build a 2D ``x-z`` anelastic AtmosphereModel with a realistic dry stratification.
+# 2. Initialize total specific humidity ``q`` just **above** saturation everywhere.
 # 3. Launch a Gaussian inertia-gravity wave packet.
 # 4. Output fields at high cadence to resolve oscillations.
 # 5. Compare the oscillation frequency we observe with
@@ -18,7 +18,7 @@ using Breeze
 using Oceananigans.Units
 using FFTW
 using Statistics
-using CairoMakie
+using GLMakie
 using Printf
 
 using Breeze.Thermodynamics: dry_air_gas_constant, vapor_gas_constant, saturation_specific_humidity
@@ -91,6 +91,19 @@ function saturated_buoyancy_frequency(z)
     return sqrt(max(0, g / T * (Γ_m - Γ_env)))
 end
 
+# Let's plot the moist buoyancy frequency
+
+using GLMakie
+
+z = znodes(model.grid, Center())
+
+fig = Figure()
+ax = Axis(fig[1, 1], xlabel="Moist Brunt–Väisälä frequency (s⁻¹)", ylabel="z (m)")
+lines!(ax, saturated_buoyancy_frequency.(z), z)
+fig
+
+# Now let's continue
+
 z₀ = Lz / 2
 N_moist = saturated_buoyancy_frequency(z₀)
 
@@ -98,8 +111,8 @@ N_moist = saturated_buoyancy_frequency(z₀)
 
 # ## Internal wave polarization relations
 
-λx = 10_000.0                     # 10 km horizontal wavelength
-λz = 4_000.0                      # 4 km vertical wavelength
+λx = Lx / 4
+λz = Lz / 5
 k = 2π / λx
 m = 2π / λz
 
@@ -107,7 +120,7 @@ m = 2π / λz
 ω_moist = sqrt(N_moist^2 * k^2 / (k^2 + m^2))
 
 gaussian_amplitude = 0.08         # scales velocities/pressure perturbations
-gaussian_width = Lx / 8
+gaussian_width = Lz / 8
 x₀ = mean(xnodes(grid, Center()))
 
 phase(x, z) = k * (x - x₀) + m * (z - z₀)
@@ -131,13 +144,24 @@ function w_initial(x, z)
 end
 
 qᵗ_initial(x, z) = qᵗ_background(z)
-zero_velocity(x, z) = zero(x)
 
-set!(model; u = u_initial,
-              v = zero_velocity,
-              w = w_initial,
-              θ = θ_initial,
-              qᵗ = qᵗ_initial)
+set!(model, u = u_initial,
+            w = w_initial,
+            θ = θ_initial,
+            qᵗ = qᵗ_initial)
+
+# ## Plot
+
+u, v, w = model.velocities
+
+w_max = maximum(abs, w)
+levels = range(-w_max, stop=w_max, length=12)
+
+fig = Figure()
+ax = Axis(fig[1, 1], xlabel="x (m)", ylabel="z (m)")
+contourf!(ax, w; levels, colormap=:balance)
+fig
+
 
 # ## Time stepping and high-frequency output
 
@@ -211,7 +235,7 @@ w_amplitude = maximum(abs, w_signal)
 dry_fit = w_amplitude * sin.(ω_dry .* (times .- times[1]))
 moist_fit = w_amplitude * sin.(ω_moist .* (times .- times[1]))
 
-fig = Figure(size = (900, 950), fontsize = 14)
+fig = Figure(fontsize = 14)
 
 axw = Axis(fig[1, 1]; xlabel = "x (m)", ylabel = "z (m)",
                       title = "Vertical velocity w at t = $(prettytime(times[end]))")
@@ -219,18 +243,18 @@ hm = heatmap!(axw, wn;
               colormap = :balance, colorrange = (-w_amplitude, w_amplitude))
 Colorbar(fig[1, 2], hm, label = "w (m s⁻¹)")
 
-axts = Axis(fig[2, 1]; xlabel = "time (min)", ylabel = "w (m s⁻¹)",
-            title = "Oscillation at domain center")
-lines!(axts, time_minutes, w_signal; label = "simulation", color = :black)
-lines!(axts, time_minutes, dry_fit; label = "dry N", color = :royalblue, linestyle = :dash)
-lines!(axts, time_minutes, moist_fit; label = "saturated N", color = :firebrick, linestyle = :dot)
-axislegend(axts; position = :rt)
+# axts = Axis(fig[2, 1]; xlabel = "time (min)", ylabel = "w (m s⁻¹)",
+#             title = "Oscillation at domain center")
+# lines!(axts, time_minutes, w_signal; label = "simulation", color = :black)
+# lines!(axts, time_minutes, dry_fit; label = "dry N", color = :royalblue, linestyle = :dash)
+# lines!(axts, time_minutes, moist_fit; label = "saturated N", color = :firebrick, linestyle = :dot)
+# axislegend(axts; position = :rt)
 
-axf = Axis(fig[3, 1]; xlabel = "", ylabel = "ω (s⁻¹)",
-           title = "Dominant frequency comparison",
-           xticks = (1:3, ["observed", "dry", "saturated"]))
-barplot!(axf, 1:3, [ω_observed, ω_dry, ω_moist];
-         color = (:gray50, :royalblue, :firebrick))
+# axf = Axis(fig[3, 1]; xlabel = "", ylabel = "ω (s⁻¹)",
+#            title = "Dominant frequency comparison",
+#            xticks = (1:3, ["observed", "dry", "saturated"]))
+# barplot!(axf, 1:3, [ω_observed, ω_dry, ω_moist];
+#          color = (:gray50, :royalblue, :firebrick))
 
 fig
 
