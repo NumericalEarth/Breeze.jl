@@ -140,7 +140,8 @@ simulation.output_writers[:fields] = writer
 
 run!(simulation)
 
-using GLMakie
+# Let's plot w
+
 heatmap(model.velocities.w)
 
 #=
