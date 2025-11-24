@@ -28,12 +28,7 @@ updates:
     labels:
       - "dependencies 🖇️"
     groups:
-      julia-major-updates:
-        update-types:
-          - "major"
-      julia-minor-updates:
-        update-types:
-          - "minor"
-      julia-patch-updates:
-        update-types:
-          - "patch"
+      # Group all Julia package updates into a single PR
+      all-julia-packages:
+        patterns:
+          - "*"
