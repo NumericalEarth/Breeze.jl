@@ -14,19 +14,14 @@ using CairoMakie
 Nx = Ny = 64
 Nz = 75
 
-Lx = 6400
-Ly = 6400
-Lz = 3000
+x = y = (0, 6400)
+z = (0, 3000)
 
 arch = GPU() # if changing to CPU() remove the `using CUDA` line above
 stop_time = 6hours
 
-grid = RectilinearGrid(arch,
-                       size = (Nx, Ny, Nz),
-                       x = (0, Lx),
-                       y = (0, Ly),
-                       z = (0, Lz),
-                       halo = (5, 5, 5),
+grid = RectilinearGrid(arch; x, y, z, 
+                       size = (Nx, Ny, Nz), halo = (5, 5, 5),
                        topology = (Periodic, Periodic, Bounded))
 
 FT = eltype(grid)
@@ -34,20 +29,19 @@ FT = eltype(grid)
 q_bomex = AtmosphericProfilesLibrary.Bomex_q_tot(FT)
 u_bomex = AtmosphericProfilesLibrary.Bomex_u(FT)
 
-p₀ = 101500 # Pa
-θ₀ = 299.1 # K
+p₀, θ₀ = 101500, 299.1
 thermo = ThermodynamicConstants()
 reference_state = ReferenceState(grid, thermo, base_pressure=p₀, potential_temperature=θ₀)
 formulation = AnelasticFormulation(reference_state)
 
-FT = eltype(grid)
-q₀ = Breeze.Thermodynamics.MoistureMassFractions{FT} |> zero
+q₀ = Breeze.Thermodynamics.MoistureMassFractions{eltype(grid)} |> zero
 ρ₀ = Breeze.Thermodynamics.density(p₀, θ₀, q₀, thermo)
 cᵖᵈ = thermo.dry_air.heat_capacity
 Lˡ = thermo.liquid.reference_latent_heat
-w′T′, w′q′ = 8e-3, 5.2e-5
-#Q = ρ₀ * (cᵖᵈ * w′T′ + Lˡ * w′q′)
-Q = ρ₀ * (cᵖᵈ * w′T′)
+w′T′, w′q′ = 8e-3, 5.2e-6
+@show Js = cᵖᵈ * w′T′
+@show Jl = Lˡ * w′q′
+Q = ρ₀ * (Js + Jl)
 F = ρ₀ * w′q′
 ρe_bcs = FieldBoundaryConditions(bottom=FluxBoundaryCondition(Q))
 ρqᵗ_bcs = FieldBoundaryConditions(bottom=FluxBoundaryCondition(F))
@@ -62,36 +56,24 @@ u★ = 0.28 # m/s
 
 @inline w_dz_ϕ(i, j, k, grid, w, ϕ) = @inbounds w[i, j, k] * ∂zᶜᶜᶠ(i, j, k, grid, ϕ)
 
-@inline function Fρu_subsidence(i, j, k, grid, clock, fields, parameters)
-    wˢ = parameters.wˢ
-    U = parameters.u_avg
-    w_dz_U = ℑzᵃᵃᶜ(i, j, k, grid, w_dz_ϕ, wˢ, U)
-    ρᵣ = @inbounds parameters.ρᵣ[i, j, k]
-    return - ρᵣ * w_dz_U
+@inline @inbounds function Fρu_subsidence(i, j, k, grid, clock, fields, p)
+    w_dz_U = ℑzᵃᵃᶜ(i, j, k, grid, w_dz_ϕ, p.wˢ, p.u_avg)
+    return - p.ρᵣ[i, j, k] * w_dz_U
 end
 
-@inline function Fρv_subsidence(i, j, k, grid, clock, fields, parameters)
-    wˢ = parameters.wˢ
-    V = parameters.v_avg
-    w_dz_V = ℑzᵃᵃᶜ(i, j, k, grid, w_dz_ϕ, wˢ, V)
-    ρᵣ = @inbounds parameters.ρᵣ[i, j, k]
-    return - ρᵣ * w_dz_V
+@inline @inbounds function Fρv_subsidence(i, j, k, grid, clock, fields, p)
+    w_dz_V = ℑzᵃᵃᶜ(i, j, k, grid, w_dz_ϕ, p.wˢ, p.v_avg)
+    return - p.ρᵣ[i, j, k] * w_dz_V
 end
 
-@inline function Fρe_subsidence(i, j, k, grid, clock, fields, parameters)
-    wˢ = parameters.wˢ
-    E = parameters.e_avg
-    w_dz_E = ℑzᵃᵃᶜ(i, j, k, grid, w_dz_ϕ, wˢ, E)
-    ρᵣ = @inbounds parameters.ρᵣ[i, j, k]
-    return - ρᵣ * w_dz_E
+@inline @inbounds function Fρe_subsidence(i, j, k, grid, clock, fields, p)
+    w_dz_E = ℑzᵃᵃᶜ(i, j, k, grid, w_dz_ϕ, p.wˢ, p.e_avg)
+    return - p.ρᵣ[i, j, k] * w_dz_E
 end
 
-@inline function Fρqᵗ_subsidence(i, j, k, grid, clock, fields, parameters)
-    wˢ = parameters.wˢ
-    Qᵗ = parameters.qᵗ_avg
-    w_dz_Qᵗ = ℑzᵃᵃᶜ(i, j, k, grid, w_dz_ϕ, wˢ, Qᵗ)
-    ρᵣ = @inbounds parameters.ρᵣ[i, j, k]
-    return - ρᵣ * w_dz_Qᵗ
+@inline @inbounds function Fρqᵗ_subsidence(i, j, k, grid, clock, fields, p)
+    w_dz_Qᵗ = ℑzᵃᵃᶜ(i, j, k, grid, w_dz_ϕ, p.wˢ, p.qᵗ_avg)
+    return - p.ρᵣ[i, j, k] * w_dz_Qᵗ
 end
 
 # f for "forcing"
@@ -120,17 +102,8 @@ set!(ρvᵍ, z -> vᵍ_bomex(z))
 set!(ρuᵍ, ρᵣ * ρuᵍ)
 set!(ρvᵍ, ρᵣ * ρvᵍ)
 
-@inline function Fρu_geostrophic(i, j, k, grid, clock, fields, parameters)
-    f = parameters.f
-    @inbounds ρvᵍᵏ = parameters.ρvᵍ[1, 1, k]
-    return - f * ρvᵍᵏ
-end
-
-@inline function Fρv_geostrophic(i, j, k, grid, clock, fields, parameters)
-    f = parameters.f
-    @inbounds ρuᵍᵏ = parameters.ρuᵍ[1, 1, k]
-    return + f * ρuᵍᵏ
-end
+@inline Fρu_geostrophic(i, j, k, grid, clock, fields, p) = @inbounds - p.f * p.ρvᵍ[i, j, k]
+@inline Fρv_geostrophic(i, j, k, grid, clock, fields, p) = @inbounds p.f * p.ρuᵍ[i, j, k]
 
 ρu_geostrophic_forcing = Forcing(Fρu_geostrophic, discrete_form=true, parameters=(; f=coriolis.f, ρvᵍ))
 ρv_geostrophic_forcing = Forcing(Fρv_geostrophic, discrete_form=true, parameters=(; f=coriolis.f, ρuᵍ))
@@ -141,7 +114,6 @@ end
 drying = Field{Nothing, Nothing, Center}(grid)
 dqdt_bomex = AtmosphericProfilesLibrary.Bomex_dqtdt(FT)
 set!(drying, z -> dqdt_bomex(z))
-ρᵣ = formulation.reference_state.density
 set!(drying, ρᵣ * drying)
 ρqᵗ_drying_forcing = Forcing(drying)
 ρqᵗ_forcing = (ρqᵗ_drying_forcing, ρqᵗ_subsidence_forcing)
@@ -150,15 +122,25 @@ Fρe_field = Field{Nothing, Nothing, Center}(grid)
 dTdt_bomex = AtmosphericProfilesLibrary.Bomex_dTdt(FT)
 set!(Fρe_field, z -> dTdt_bomex(1, z))
 set!(Fρe_field, ρᵣ * cᵖᵈ * Fρe_field)
+
 ρe_radiation_forcing = Forcing(Fρe_field)
 ρe_forcing = (ρe_radiation_forcing, ρe_subsidence_forcing)
 
+fig = Figure()
+axe = Axis(fig[1, 1], xlabel="z (m)", ylabel="Fρe (K/s)")
+axq = Axis(fig[1, 2], xlabel="z (m)", ylabel="Fρqᵗ (1/s)")
+lines!(axe, Fρe_field)
+lines!(axq, drying)
+save("forcings.png", fig)
+
+using Oceananigans.TurbulenceClosures.Smagorinskys: DynamicSmagorinsky
 microphysics = SaturationAdjustment(equilibrium=WarmPhaseEquilibrium())
+closure = DynamicSmagorinsky()
 closure = nothing
 
-model = AtmosphereModel(grid; coriolis, microphysics,
+model = AtmosphereModel(grid; coriolis, microphysics, closure,
                         advection = WENO(order=5),
-                        forcing = (; ρqᵗ=ρqᵗ_forcing, ρu=ρu_forcing, ρv=ρv_forcing, ρe=ρe_forcing),
+                        forcing = (ρqᵗ=ρqᵗ_forcing, ρu=ρu_forcing, ρv=ρv_forcing, ρe=ρe_forcing),
                         boundary_conditions = (ρe=ρe_bcs, ρqᵗ=ρqᵗ_bcs, ρu=ρu_bcs, ρv=ρv_bcs))
 
 # Values for the initial perturbations can be found in Appendix B
