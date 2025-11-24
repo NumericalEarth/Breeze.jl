@@ -16,16 +16,12 @@ U  = 20                     # m s^-1 (mean wind)
 N  = 0.01
 N² = N^2                    # Brunt–Väisälä frequency squared
 
-Δθ₀ = 0.01                  # K - perturbation amplitude
-a = 5000                    # m   (perturbation half-width parameter)
-f₀ = 1e-4                   # Coriolis parameter
+
 
 
 #  grid configuration
-Nx = 300
-Nz = 10
+Nx, Nz = 300, 10
 Lx, Lz = 300kilometers, 10kilometers
-
 
 grid = RectilinearGrid(CPU(),
                        size = (Nx, Nz),
@@ -41,41 +37,42 @@ free_slip_bcs = FieldBoundaryConditions(
     bottom = FluxBoundaryCondition(nothing)
 )
 # Atmosphere model setup
-model = AtmosphereModel(grid; coriolis = FPlane(f=f₀), advection = WENO(order=5), boundary_conditions = (ρu = free_slip_bcs, ρe = free_slip_bcs) )
+model = AtmosphereModel(grid; advection = WENO(order=5), boundary_conditions = (ρu = free_slip_bcs, ρe = free_slip_bcs) )
 
 
 # Initial conditions and initialization
+Δθ₀ = 0.01                  # K - perturbation amplitude
+a = 5000                    # m   (perturbation half-width parameter)
+x_c = Lx / 3                # m   (perturbation center in x)
+
+# Background potential temperature profile (isothermal)
 g = model.thermodynamics.gravitational_acceleration
+θ̄ᵦ(z) = θ₀ * exp(N² * z / g)
+# Save initial potential temperature without perturbation to compute anomaly later
+θᵢ₀ = Field{Center, Nothing, Center}(grid)
+set!(θᵢ₀, (x, z) -> θ̄ᵦ(z) )
+
+# Perturbation
 function θᵢ(x, z)
-    x_c = Lx / 3
-    θ̄ = θ₀ * exp(N² * z / g)
     θ′ = Δθ₀ * sin(π * z / Lz)  / (1 + ((x - x_c)/a)^2)
-    return θ̄ + θ′
+    return θ̄ᵦ(z)+ θ′
 end
 
-# Save initial potential temperature without perturbation to compute anomaly later
-θ̄_0(z) = θ₀ * exp(N² * z / g)
-θᵢ₀ = Field{Center, Nothing, Center}(grid)
-set!(θᵢ₀, (x, z) -> θ̄_0(z) )
+set!(model, θ = θᵢ, u = U)
 
-
-set!(model, θ = θᵢ, u=U)
-
-Δt = 6 # seconds
+Δt = 3 # seconds
 stop_time = 3000
 simulation = Simulation(model; Δt, stop_time)
 
 
 function progress(sim)
     ρe = sim.model.energy_density
-    u, w = sim.model.velocities
+    u, v, w = sim.model.velocities
 
     ρemean = mean(ρe)
 
-    msg = @sprintf("Iter: %d, t: %s, Δt: %s, mean(ρe): %.6e J/kg, max|u|: %.2f m/s, max|w|: %.2f m/s",
-                   iteration(sim), prettytime(sim), prettytime(sim.Δt),
-                   ρemean,
-                   maximum(abs, u), maximum(abs, w))
+    msg = @sprintf("Iter: %d, t: %s, Δt: %s, mean(ρe): %.6e J/kg, max|u|: %.2f m/s, max w: %.2f m/s, min w: %.2f m/s",
+                   iteration(sim), prettytime(sim), prettytime(sim.Δt), ρemean, maximum(abs, u), maximum(w), minimum(w))
 
     @info msg
     return nothing
@@ -84,7 +81,6 @@ end
 add_callback!(simulation, progress, TimeInterval(1minute))
 
 # Output setup
-u, w = model.velocities
 θ = Breeze.AtmosphereModels.PotentialTemperatureField(model)
 
 outputs = merge(model.velocities, (; θ))
@@ -101,7 +97,7 @@ run!(simulation)
 
 
 # Plotting
-fig = Figure()
+fig = Figure(size=(900, 300))
 gb = fig[1, 1]
 
 xs = LinRange(0, Lx, Nx)
