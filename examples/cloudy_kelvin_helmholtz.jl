@@ -219,7 +219,7 @@ axθ = Axis(fig[3, 1], xlabel="x (m)", ylabel="z (m)", title = "Potential temper
 
 hmξ = heatmap!(axξ, ξn, colormap = :balance, colorrange = (-0.25, 0.25))
 hml = heatmap!(axl, qˡn, colormap = Reverse(:Blues_4), colorrange = (0, 0.003))
-hmθ = heatmap!(axθ, θn, colormap = :thermal, colorrange = (θ₀, θ₀+ dθdz * grid.Lz))
+hmθ = heatmap!(axθ, θn, colormap = :thermal, colorrange = extrema(θt))
 
 Colorbar(fig[1, 2], hmξ, label = "s⁻¹", vertical = true)
 Colorbar(fig[2, 2], hml, label = "kg/kg", vertical = true)
