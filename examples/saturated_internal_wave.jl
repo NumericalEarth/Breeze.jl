@@ -119,7 +119,7 @@ m = 2π / λz
 ω_dry = sqrt(N_dry^2 * k^2 / (k^2 + m^2))
 ω_moist = sqrt(N_moist^2 * k^2 / (k^2 + m^2))
 
-gaussian_amplitude = 0.08         # scales velocities/pressure perturbations
+gaussian_amplitude = 0.0008         # scales velocities/pressure perturbations
 gaussian_width = Lz / 8
 x₀ = mean(xnodes(grid, Center()))
 
@@ -193,6 +193,9 @@ writer = JLD2Writer(model, outputs;
                     overwrite_existing = true)
 simulation.output_writers[:wave] = writer
 
+# ## Run
+# Now we run the simulation
+
 @info "Running saturated internal wave packet..." period_dry stop_time
 run!(simulation)
 @info "Simulation complete"
@@ -205,6 +208,54 @@ qt = FieldTimeSeries(filename, "qᵗ")
 
 times = wt.times
 Nt = length(times)
+
+n = Observable(1)
+
+w = @lift wt[$n]
+w_lim = 4e-3
+
+ω = ω_moist
+
+fig = Figure(size = (600, 600))
+
+ax = Axis(fig[2, 1]; xlabel = "x", ylabel = "z",
+          limits = ((-Lx/2, Lx/2), (0, Lz)), aspect = AxisAspect(1))
+
+heatmap!(ax, w, colormap = :balance)
+
+title = @lift "ωt = " * string(round(times[$n] * ω, digits=2))
+fig[1, 1] = Label(fig, title, fontsize=24, tellwidth=false)
+fig
+
+#=
+contourf!(ax, w;
+          levels = range(-w_lim, stop=w_lim, length=40),
+          colormap = :balance,
+          extendlow = :auto,
+          extendhigh = :auto)
+=#
+
+frames = 1:length(times)
+
+@info "Animating a propagating internal wave..."
+
+CairoMakie.record(fig, "moist_internal_wave.mp4", frames, framerate=8) do i
+    @show i
+    n[] = i
+end
+nothing #hide
+
+# ![](moist_internal_wave.mp4)
+
+
+
+
+
+
+
+
+
+#=
 i_mid = Nx ÷ 2
 k_mid = Nz ÷ 2
 
@@ -280,3 +331,4 @@ fig
 # end
 # @info "Animation saved to moist_internal_wave.mp4"
 
+=#
