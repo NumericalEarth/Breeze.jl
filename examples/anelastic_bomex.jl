@@ -140,7 +140,7 @@ closure = nothing
 
 model = AtmosphereModel(grid; coriolis, microphysics, closure,
                         advection = WENO(order=5),
-                        forcing = (ρqᵗ=ρqᵗ_forcing, ρu=ρu_forcing, ρv=ρv_forcing, ρe=ρe_forcing),
+                        forcing = (; ρqᵗ=ρqᵗ_forcing, ρu=ρu_forcing, ρv=ρv_forcing, ρe=ρe_forcing),
                         boundary_conditions = (ρe=ρe_bcs, ρqᵗ=ρqᵗ_bcs, ρu=ρu_bcs, ρv=ρv_bcs))
 
 # Values for the initial perturbations can be found in Appendix B
