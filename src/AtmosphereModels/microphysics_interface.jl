@@ -13,7 +13,7 @@ using ..Thermodynamics:
 """
     $(TYPEDSIGNATURES)
 
-Possibly apply saturation adjustment. If a `micorphysics` scheme does not invoke saturation adjustment,
+Possibly apply saturation adjustment. If a `microphysics` scheme does not invoke saturation adjustment,
 just return the `state` unmodified. In contrast to `adjust_thermodynamic_state`, this function
 ingests the entire `microphysics` formulation and the `microphysical_fields`.
 This is needed because some microphysics schemes apply saturation adjustment to a
