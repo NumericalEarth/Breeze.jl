@@ -38,7 +38,7 @@ q₀ = Breeze.Thermodynamics.MoistureMassFractions{eltype(grid)} |> zero
 ρ₀ = Breeze.Thermodynamics.density(p₀, θ₀, q₀, thermo)
 cᵖᵈ = thermo.dry_air.heat_capacity
 Lˡ = thermo.liquid.reference_latent_heat
-w′T′, w′q′ = 8e-3, 5.2e-6
+w′T′, w′q′ = 8e-3, 5.2e-5
 Q = ρ₀ * cᵖᵈ * w′T′
 F = ρ₀ * w′q′
 ρe_bcs = FieldBoundaryConditions(bottom=FluxBoundaryCondition(Q))
@@ -133,8 +133,8 @@ save("forcings.png", fig)
 
 microphysics = SaturationAdjustment(equilibrium=WarmPhaseEquilibrium())
 
-model = AtmosphereModel(grid; coriolis, microphysics,
-                        advection = WENO(order=9),
+model = AtmosphereModel(grid; coriolis, microphysics, closure,
+                        advection = WENO(order=5),
                         forcing = (ρqᵗ=ρqᵗ_forcing, ρu=ρu_forcing, ρv=ρv_forcing, ρe=ρe_forcing),
                         boundary_conditions = (ρe=ρe_bcs, ρqᵗ=ρqᵗ_bcs, ρu=ρu_bcs, ρv=ρv_bcs))
 
