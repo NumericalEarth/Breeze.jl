@@ -1,14 +1,14 @@
-# # Cloudy Kelvin–-Helmholtz instability
+# # Cloudy Kelvin-Helmholtz instability
 #
-# This example sets up a two-dimensional (``x``–``z``) Kelvin–-Helmholtz instability
+# This example sets up a two-dimensional (``x``–``z``) Kelvin–Helmholtz instability
 # in a moist, stably stratified atmosphere.
 #
 # The configuration is intentionally simple but reasonably "meteorological":
 #
-# - We impose a **tanh shear layer** in the horizontal wind ``U(z)``.
-# - We impose a **stably stratified** potential temperature profile ``θ(z)`` with
-#   a specified dry Brunt–Väisälä frequency ``N``.
-# - We embed a **Gaussian moisture layer** ``q(z)`` centered on the shear layer.
+# - We impose horizontal wind ``U(z)`` with a shear layer.
+# - We impose a stably stratified potential temperature profile ``θ(z)`` with
+#   a specified dry [Brunt–Väisälä frequency](https://en.wikipedia.org/wiki/Brunt–Väisälä_frequency) ``N``.
+# - We embed a Gaussian moisture layer ``q(z)`` centered on the shear layer.
 #
 # As the shear layer rolls up, the moist layer is advected and deformed,
 # producing billow-like patterns reminiscent of observed "wave clouds".
@@ -54,7 +54,7 @@ model = AtmosphereModel(grid; advection=WENO(order=5), microphysics)
 # ```
 #
 # We initialize the potential temperature with a gradient that gives
-# constant ``N = 0.01`` s⁻¹, representative of mid-tropospheric stability.
+# constant Brunt–Väisälä frequency, representative of mid-tropospheric stability.
 
 thermo = ThermodynamicConstants()
 g = thermo.gravitational_acceleration
@@ -67,30 +67,22 @@ dθdz =  θ₀ * N^2 / g      # dθ/dz (K m⁻¹)
 #
 # We want:
 #
-# - A shear layer centered at height z₀ where u(z) transitions from a lower
-#   speed U_bot to an upper speed U_top.
+# - A shear layer centered at height ``z₀`` with the zonal flow transitioning from a lower
+#   speed ``U_{\rm bot}`` to an upper speed ``U_{\rm top}``.
 # - A moist layer centered at the same height with a Gaussian profile.
 #
-# This mimics a moist, stably stratified layer embedded in stronger flow
+# The above  mimics a moist, stably stratified layer embedded in stronger flow
 # above and weaker flow below.
+
+# First, we set up the shear layer using a ``\tanh`` profile:
 
 z₀    = 1e3     # center of shear & moist layer (m)
 Δzᶸ   = 150     # shear layer half-thickness (m)
 U_top = 25      # upper-layer wind (m/s)
 U_bot =  5      # lower-layer wind (m/s)
-
-# Smooth shear layer:
-#
-# ```math
-# \begin{align*}
-# u(z) &= U_{\mathrm{bot}} \quad \text{for} z ≪ z₀ , \\
-# u(z) &= U_{\mathrm{top}} \quad \text{for} z ≫ z₀ .
-# \end{align*}
-# ```
-
 uᵇ(z) = U_bot + (U_top - U_bot) * (1 + tanh((z - z₀) / Δzᶸ)) / 2
 
-# Moisture layer: Gaussian in ``z`` centered at ``z₀``:
+# For the moisture layer, we use a Gaussian in ``z`` centered at ``z₀``:
 
 q_max = 0.012  # peak specific humidity (kg/kg)
 Δz_q = 200     # moist layer half-width (m)
@@ -99,8 +91,14 @@ qᵇ(z) = q_max * exp(-(z - z₀)^2 / 2Δz_q^2)
 # ## The Kelvin-Helmholtz instability
 #
 # The Miles–Howard criterion tells us that Kelvin–Helmholtz instability
-# occurs where the Richardson numbers, ``Ri = N² / (∂uᵇ/∂z)² < 1/4``.
-# With the parameters chosen above, the shear layer easily satisfies this.
+# occurs where the Richardson number,
+#
+# ```math
+# Ri = \frac{N²}{(∂uᵇ/∂z)²}
+# ```
+#
+# is less than 1/4 [Miles1961, Howard1961](@cite). With the parameters chosen
+# above this is the case.
 #
 # Let's plot the initial state as well as the Richardson number.
 
@@ -122,22 +120,21 @@ lines!(axu, uᵇ.(z), z)
 lines!(axq, qᵇ.(z), z)
 lines!(axθ, θᵇ.(z), z)
 lines!(axR, Ri, z)
-lines!(axR, [1/4, 1/4], [0, 3000], linestyle = :dash, color = :black)
+lines!(axR, [1/4, 1/4], [0, Lz], linestyle = :dash, color = :black)
 xlims!(axR, 0, 0.8)
 axR.xticks = 0:0.25:1
 
 for ax in (axq, axθ, axR)
     ax.yticksvisible = false
     ax.yticklabelsvisible = false
-    ax.ylabelvisible = false       # optional: hide y-axis label too
+    ax.ylabelvisible = false
 end
 
 fig
 
 # ## Define initial conditions
 #
-# We initialize the model via Oceananigans `set!`.
-# adding a tiny bit of random noise.
+# We initialize the model via Oceananigans `set!`, adding also a bit of random noise.
 
 δθ = 0.01
 δu = 1e-3
@@ -192,8 +189,7 @@ run!(simulation)
 
 # ## Read output and visualize
 
-# We load the saved output as Oceananigans' `FieldTimeSeries` and then
-# use CairoMakie to plot and animate it.
+# We load the saved output as Oceananigans' `FieldTimeSeries`
 
 ξt = FieldTimeSeries(filename, "ξ")
 θt = FieldTimeSeries(filename, "θ")
@@ -202,13 +198,13 @@ qˡt = FieldTimeSeries(filename, "qˡ")
 times = ξt.times
 Nt = length(ξt)
 
+# and then use CairoMakie to plot and animate the output.
+
 n = Observable(Nt)
 
 ξn = @lift ξt[$n]
 θn = @lift θt[$n]
 qˡn = @lift qˡt[$n]
-
-@info "Creating visualization..."
 
 fig = Figure(size=(800, 800), fontsize=14)
 
@@ -226,7 +222,7 @@ Colorbar(fig[3, 2], hmθ, label = "Κ", vertical = true)
 
 fig
 
-# and then make a movie
+# We can also make a movie:
 
 CairoMakie.record(fig, "wave_clouds.mp4", 1:Nt, framerate = 12) do nn
     n[] = nn
