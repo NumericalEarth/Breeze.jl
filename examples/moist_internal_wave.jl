@@ -109,7 +109,7 @@ axw = Axis(fig[1, 2])
 u, v, w = model.velocities
 heatmap(axθ, θ)
 heatmap(axw, w)
-display(fig)
+fig
 
 Δt = 0.001 * 2π / ω
 stop_time = 8 * 2π / ω
