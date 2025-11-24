@@ -56,7 +56,7 @@ Tᶠ = eq.freezing_temperature
 Tʰ = eq.homogeneous_ice_nucleation_temperature
 T = range(Tʰ - 10, Tᶠ + 10; length=81) # slightly beyond the mixed-phase range
 
-qᵛ⁺ = [adjustment_saturation_specific_humidity(Tʲ, p, qᵗ, thermo, eq) for Tʲ in T]
+qᵛ⁺ = [equilibrium_saturation_specific_humidity(Tʲ, p, qᵗ, thermo, eq) for Tʲ in T]
 ```
 
 Optionally, we can visualize how `qᵛ⁺` varies with temperature:
