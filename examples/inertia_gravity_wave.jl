@@ -10,13 +10,11 @@ using CairoMakie
 # Skamarock and Klemp (1994): "Efficiency and Accuracy of the Klemp-Wilhelmson Time-Splitting Technique"
 
 # Problem parameters: isothermal base state and mean wind
-P₀ = 100000                 # Pa
-θ₀ = 300                    # K - reference potential temperature
+P₀ = 101325                 # Pa
+θ₀ = 288                    # K - reference potential temperature
 U  = 20                     # m s^-1 (mean wind)
 N  = 0.01
 N² = N^2                    # Brunt–Väisälä frequency squared
-
-
 
 
 #  grid configuration
@@ -31,13 +29,9 @@ grid = RectilinearGrid(CPU(),
                        topology = (Periodic, Flat, Bounded))
 
 
-# Boundary conditions
-free_slip_bcs = FieldBoundaryConditions(
-    top = FluxBoundaryCondition(nothing),
-    bottom = FluxBoundaryCondition(nothing)
-)
+                       
 # Atmosphere model setup
-model = AtmosphereModel(grid; advection = WENO(order=5), boundary_conditions = (ρu = free_slip_bcs, ρe = free_slip_bcs) )
+model = AtmosphereModel(grid; advection = WENO(order=5))
 
 
 # Initial conditions and initialization
@@ -71,7 +65,7 @@ function progress(sim)
 
     ρemean = mean(ρe)
 
-    msg = @sprintf("Iter: %d, t: %s, Δt: %s, mean(ρe): %.6e J/kg, max|u|: %.2f m/s, max w: %.2f m/s, min w: %.2f m/s",
+    msg = @sprintf("Iter: %d, t: %s, Δt: %s, mean(ρe): %.6e J/kg, max|u|: %.5f m/s, max w: %.5f m/s, min w: %.5f m/s",
                    iteration(sim), prettytime(sim), prettytime(sim.Δt), ρemean, maximum(abs, u), maximum(w), minimum(w))
 
     @info msg
