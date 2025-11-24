@@ -52,7 +52,8 @@ dθdz = θ₀ * N^2 / g
 θᵇ(x, z) = θ₀ + dθdz * z
 set!(model, θ=θᵇ)
 
-using GLMakie
+# Let's plot
+
 fig = Figure()
 axe = Axis(fig[1, 1])
 axθ = Axis(fig[1, 2])
@@ -75,7 +76,7 @@ display(fig)
 
 # ## Internal wave polarization relations
 
-λx = 2_000.0 
+λx = 2_000.0
 λz = 2_000.0  # 4 km vertical wavelength
 k = 2π / λx
 m = 2π / λz
