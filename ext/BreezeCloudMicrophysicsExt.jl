@@ -16,14 +16,13 @@ using CloudMicrophysics.Microphysics1M:
 # Import Breeze modules needed for integration
 using Breeze
 using Breeze.AtmosphereModels
-using Breeze.Thermodynamics: AbstractThermodynamicState, MoistureMassFractions
+using Breeze.Thermodynamics: MoistureMassFractions
 using Breeze.Microphysics: BulkMicrophysics, center_field_tuple
 using Breeze
 
 using Breeze.AtmosphereModels
 
 using Breeze.Thermodynamics:
-    AbstractThermodynamicState,
     MoistureMassFractions,
     saturation_specific_humidity,
     temperature,
