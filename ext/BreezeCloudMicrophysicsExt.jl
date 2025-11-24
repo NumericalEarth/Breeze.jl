@@ -207,7 +207,7 @@ computed in `update_microphysical_fields!`.
 ##### show methods
 #####
 
-import Oceananigans.Utils: prettysummary
+import Oceananigans.Grids: prettysummary
 
 function prettysummary(cl::CloudLiquid)
     return string("CloudLiquid(",
