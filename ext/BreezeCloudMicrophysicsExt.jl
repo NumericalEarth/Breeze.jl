@@ -16,14 +16,13 @@ using CloudMicrophysics.Microphysics1M:
 # Import Breeze modules needed for integration
 using Breeze
 using Breeze.AtmosphereModels
-using Breeze.Thermodynamics: AbstractThermodynamicState, MoistureMassFractions
+using Breeze.Thermodynamics: MoistureMassFractions
 using Breeze.Microphysics: BulkMicrophysics, center_field_tuple
 using Breeze
 
 using Breeze.AtmosphereModels
 
 using Breeze.Thermodynamics:
-    AbstractThermodynamicState,
     MoistureMassFractions,
     saturation_specific_humidity,
     temperature,
@@ -65,7 +64,6 @@ Interface is identical to non-precipitating microphysics except that
 """
 const ZeroMomentCloudMicrophysics = BulkMicrophysics{<:Any, <:Parameters0M}
 const ZMCM = ZeroMomentCloudMicrophysics
-const ATC = AbstractThermodynamicState
 
 prognostic_field_names(::ZMCM) = tuple()
 materialize_microphysical_fields(bμp::ZMCM, grid, bcs) = materialize_microphysical_fields(bμp.nucleation, grid, bcs)
