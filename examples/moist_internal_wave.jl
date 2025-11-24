@@ -72,7 +72,7 @@ set!(model, e=eᵢ, qᵗ=qᵗ)
 
 lines!(axe, E)
 lines!(axθ, θ)
-display(fig)
+fig
 
 # ## Internal wave polarization relations
 
