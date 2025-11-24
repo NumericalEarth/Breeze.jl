@@ -39,9 +39,7 @@ q₀ = Breeze.Thermodynamics.MoistureMassFractions{eltype(grid)} |> zero
 cᵖᵈ = thermo.dry_air.heat_capacity
 Lˡ = thermo.liquid.reference_latent_heat
 w′T′, w′q′ = 8e-3, 5.2e-6
-@show Js = cᵖᵈ * w′T′
-@show Jl = Lˡ * w′q′
-Q = ρ₀ * (Js + Jl)
+Q = ρ₀ * cᵖᵈ * w′T′
 F = ρ₀ * w′q′
 ρe_bcs = FieldBoundaryConditions(bottom=FluxBoundaryCondition(Q))
 ρqᵗ_bcs = FieldBoundaryConditions(bottom=FluxBoundaryCondition(F))
@@ -133,13 +131,10 @@ lines!(axe, Fρe_field)
 lines!(axq, drying)
 save("forcings.png", fig)
 
-using Oceananigans.TurbulenceClosures.Smagorinskys: DynamicSmagorinsky
 microphysics = SaturationAdjustment(equilibrium=WarmPhaseEquilibrium())
-closure = DynamicSmagorinsky()
-closure = nothing
 
-model = AtmosphereModel(grid; coriolis, microphysics, closure,
-                        advection = WENO(order=5),
+model = AtmosphereModel(grid; coriolis, microphysics,
+                        advection = WENO(order=9),
                         forcing = (ρqᵗ=ρqᵗ_forcing, ρu=ρu_forcing, ρv=ρv_forcing, ρe=ρe_forcing),
                         boundary_conditions = (ρe=ρe_bcs, ρqᵗ=ρqᵗ_bcs, ρu=ρu_bcs, ρv=ρv_bcs))
 
