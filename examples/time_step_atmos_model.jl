@@ -22,14 +22,14 @@ qᵢ(x, y, z) = 0
 
 # Thermal bubble parameters
 N² = 1e-6        # Brunt-Väisälä frequency squared (s⁻²)
+g = model.thermodynamics.gravitational_acceleration
 x₀ = Lx / 2      # Center of bubble in x
 z₀ = Lz / 3      # Center of bubble in z
 r₀ = Lz / 6      # Initial radius of bubble
-dθdz = N² * Tₛ / 9.81  # Background potential temperature gradient
 
 # Initial conditions
-function θᵢ(x, y, z)
-    θ̄ = Tₛ + dθdz * z # background stratification
+function θᵢ(x, y, z; N²=N²)
+    θ̄ = Tₛ * exp(N² * z / g)
     r = sqrt((x - x₀)^2 + (z - z₀)^2) # distance from bubble center
     θ′ = Δθ * max(0, 1 - r / r₀) # bubble
     return θ̄ + θ′
