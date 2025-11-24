@@ -54,9 +54,7 @@ model = AtmosphereModel(grid; advection=WENO(order=5), microphysics)
 # ```
 #
 # We initialize the potential temperature that gives constant Brunt–Väisälä frequency,
-# representative of mid-tropospheric stability.
-#
-# The Brunt–Väisälä frequency is
+# representative of mid-tropospheric stability. The (dry) Brunt–Väisälä frequency is
 #
 # ```math
 # N² = \frac{g}{θ} \frac{∂θ}{∂z}
