@@ -65,7 +65,6 @@ Interface is identical to non-precipitating microphysics except that
 """
 const ZeroMomentCloudMicrophysics = BulkMicrophysics{<:Any, <:Parameters0M}
 const ZMCM = ZeroMomentCloudMicrophysics
-const ATC = AbstractThermodynamicState
 
 prognostic_field_names(::ZMCM) = tuple()
 materialize_microphysical_fields(bμp::ZMCM, grid, bcs) = materialize_microphysical_fields(bμp.nucleation, grid, bcs)
