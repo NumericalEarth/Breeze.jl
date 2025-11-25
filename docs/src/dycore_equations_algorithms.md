@@ -79,7 +79,7 @@ where ``\phi`` is a nonhydrostatic pressure correction potential defined by the 
 Breeze advances a conservative moist static energy density
 
 ```math
-ρᵣ e ≡ ρᵣ \left ( c^{pm} T + g z - \mathscr{L}^l_r q^l - \mathscr{L}^i_r q^i,
+ρᵣ e ≡ ρᵣ \left ( c^{pm} T + g z - \mathscr{L}^l_r q^l - \mathscr{L}^i_r q^i \right ),
 ```
 
 where ``c^{p m}`` is the mixture heat capacity, ``T`` is temperature, ``g`` is gravitational acceleration,
