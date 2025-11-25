@@ -11,7 +11,7 @@ using Oceananigans: Oceananigans
 using Oceananigans.Architectures: architecture
 using Oceananigans.Grids: inactive_cell, prettysummary
 using Oceananigans.Operators: Δzᵃᵃᶜ, Δzᵃᵃᶠ, divᶜᶜᶜ, Δzᶜᶜᶜ
-using Oceananigans.Solvers: solve!
+using Oceananigans.Solvers: solve!, AbstractHomogeneousNeumannFormulation
 
 using KernelAbstractions: @kernel, @index
 using Adapt: Adapt, adapt
@@ -26,7 +26,7 @@ import Oceananigans.TimeSteppers: compute_pressure_correction!, make_pressure_co
 """
 $(TYPEDSIGNATURES)
 
-AnelasticFormulation is a dynamical formulation wherein the density and pressure are
+`AnelasticFormulation` is a dynamical formulation wherein the density and pressure are
 small perturbations from a dry, hydrostatic, adiabatic `reference_state`.
 The prognostic energy variable is the moist static energy density.
 The energy density equation includes a buoyancy flux term, following [Pauluis2008](@citet).
@@ -53,7 +53,18 @@ Base.show(io::IO, formulation::AnelasticFormulation) = print(io, "AnelasticFormu
 ##### Thermodynamic state
 #####
 
-function diagnose_thermodynamic_state(i, j, k, grid, formulation::AnelasticFormulation, thermo, energy_density, moisture_density)
+"""
+    $(TYPEDSIGNATURES)
+
+Return `MoistStaticEnergyState` computed from the prognostic state including
+energy density, moisture density, and microphysical fields.
+"""
+function diagnose_thermodynamic_state(i, j, k, grid, formulation::AnelasticFormulation,
+                                      microphysics,
+                                      microphysical_fields,
+                                      thermo,
+                                      energy_density,
+                                      moisture_density)
     @inbounds begin
         ρe = energy_density[i, j, k]
         ρᵣ = formulation.reference_state.density[i, j, k]
@@ -63,24 +74,26 @@ function diagnose_thermodynamic_state(i, j, k, grid, formulation::AnelasticFormu
 
     e = ρe / ρᵣ
     qᵗ = ρqᵗ / ρᵣ
-    q = MoistureMassFractions(qᵗ, zero(qᵗ), zero(qᵗ)) # assuming non-condensed state
+    q = compute_moisture_fractions(i, j, k, grid, microphysics, ρᵣ, qᵗ, microphysical_fields)
     z = znode(i, j, k, grid, c, c, c)
 
     return MoistStaticEnergyState(e, q, z, pᵣ)
 end
 
-@inline function specific_volume(i, j, k, grid, formulation, temperature, moisture_mass_fraction, thermo)
+@inline specific_volume(i, j, k, grid, args...) = 1 / density(i, j, k, grid, args...)
+
+@inline function density(i, j, k, grid, formulation, temperature, specific_moisture, thermo)
     @inbounds begin
-        qᵗ = moisture_mass_fraction[i, j, k]
+        qᵗ = specific_moisture[i, j, k]
         pᵣ = formulation.reference_state.pressure[i, j, k]
         T = temperature[i, j, k]
     end
 
-    # TODO: fix this assumption of non-condensed state
-    q = MoistureMassFractions(qᵗ, zero(qᵗ), zero(qᵗ))
+    # TODO: fix this assumption of non-condensed state by invoking the microphysics model
+    q = MoistureMassFractions(qᵗ)
     Rᵐ = mixture_gas_constant(q, thermo)
 
-    return Rᵐ * T / pᵣ
+    return pᵣ / (Rᵐ * T)
 end
 
 @inline function buoyancy(i, j, k, grid, formulation, T, qᵗ, thermo)
@@ -129,7 +142,7 @@ end
 ##### Anelastic pressure solver utilities
 #####
 
-struct AnelasticTridiagonalSolverFormulation{R}
+struct AnelasticTridiagonalSolverFormulation{R} <: AbstractHomogeneousNeumannFormulation
     reference_density :: R
 end
 
@@ -208,10 +221,9 @@ function compute_pressure_correction!(model::AnelasticModel, Δt)
     ρᵣ = model.formulation.reference_state.density
     ρŨ = model.momentum
     solver = model.pressure_solver
-    pₙ = model.nonhydrostatic_pressure
-    solve_for_anelastic_pressure!(pₙ, solver, ρŨ, Δt)
-
-    fill_halo_regions!(pₙ)
+    p′ = model.pressure
+    solve_for_anelastic_pressure!(p′, solver, ρŨ, Δt)
+    fill_halo_regions!(p′)
 
     return nothing
 end
@@ -270,7 +282,7 @@ $(TYPEDSIGNATURES)
 Update the predictor momentum ``(ρu, ρv, ρw)`` with the non-hydrostatic pressure via
 
 ```math
-(\\rho\\boldsymbol{u})^{n+1} = (\\rho\\boldsymbol{u})^n - \\Delta t \\rho_r \\boldsymbol{\\nabla} \\left( \\alpha_r p_{nh} \\right)
+(\\rho\\boldsymbol{u})^{n+1} = (\\rho\\boldsymbol{u})^n - \\Delta t \\, \\rho_r \\boldsymbol{\\nabla} \\left( \\alpha_r p_{nh} \\right)
 ```
 """
 function make_pressure_correction!(model::AnelasticModel, Δt)
@@ -280,7 +292,7 @@ function make_pressure_correction!(model::AnelasticModel, Δt)
             model.momentum,
             model.grid,
             Δt,
-            model.nonhydrostatic_pressure,
+            model.pressure,
             model.formulation.reference_state.density)
 
     return nothing

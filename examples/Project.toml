@@ -14,3 +14,5 @@ Breeze = {path = ".."}
 [compat]
 AtmosphericProfilesLibrary = "0.1.7"
 CloudMicrophysics = "0.22.13, 0.29"
+GLMakie = "0.13"
+Oceananigans = "0.101.3"

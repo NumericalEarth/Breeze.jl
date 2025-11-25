@@ -78,7 +78,7 @@ Likewise, during deposition, water molecules in the gas phase cluster into ice c
 
 Arguments
 =========
-- `FT`: Float type to use (defaults to Oceananigans.defaults.FloatType)
+- `FT`: Float type to use (defaults to `Oceananigans.defaults.FloatType`)
 - `reference_latent_heat`: Difference between the internal energy of the gaseous phase at
   the `energy_reference_temperature`.
 - `heat_capacity`: Heat capacity of the phase of matter.
@@ -147,54 +147,13 @@ end
 """
 $(TYPEDSIGNATURES)
 
-Create `ThermodynamicConstants` with parameters that represent gaseous mixture of dry "air"
+Return `ThermodynamicConstants` with parameters that represent gaseous mixture of dry "air"
 and vapor, as well as condensed liquid and ice phases.
 The `triple_point_temperature` and `triple_point_pressure` may be combined with
 internal energy parameters for condensed phases to compute the vapor pressure
 at the boundary between vapor and a homogeneous sample of the condensed phase.
-The `gravitational_acceleration` parameter is included to compute `reference_state`
+The `gravitational_acceleration` parameter is included to compute [`ReferenceState`](@ref)
 quantities associated with hydrostatic balance.
-
-The Clausius-Clapeyron relation describes the pressure-temperature relationship during phase
-transitions from vapor to liquid or vapor to ice,
-
-```math
-d[\\log(pᵛ⁺ᵝ)] / dT = ℒᵝ / (Rᵛ T²)
-```
-
-where:
-
-- ``pᵛ⁺ᵝ`` is the saturation vapor pressure for a transition between vapor and the ``β``-th phase
-  For example ``β = l`` for liquid and ``β = i`` for ice.
-- ``T`` is temperature
-- ``ℒᵝ`` is the latent heat of the transition
-  (the difference between the enthalpy of the vapor and transitioned state at a given temperature)
-- ``Rᵛ`` is the specific gas constant for vapor
-
-For a thermodynamic model with constant specific heats, the latent heat may be written
-
-```math
-ℒᵝ(T) = ℒᵝ(T=0) + (cᵖᵛ - cᵝ) T,
-```
-
-where ``cᵖᵛ`` is the vapor specific heat at constant pressure, ``cᵝ`` is the specific heat of
-phase ``β``, which is assumed incompressible, and ``ℒᵝ(T=0)`` is the latent heat at ``T=0``K.
-We therefore find that
-
-```math
-pᵛ⁺ᵝ = pᵗʳ \\exp[ ℒᵝ(T=0) (1/Tᵗʳ - 1/T) / Rᵛ ]
-```
-
-where
-
-- ``pᵗʳ`` is the triple point pressure
-- ``Tᵗʳ`` is the triple point temperature
-
-See also [`saturation_vapor_pressure`](@ref).
-
-Note: any reference values for pressure and temperature can be used in principle.
-The advantage of using reference values at the triple point is that the same values
-can then be used for both condensation (vapor → liquid) and deposition (vapor → ice).
 """
 function ThermodynamicConstants(FT = Oceananigans.defaults.FloatType;
                                 molar_gas_constant = 8.314462618,
@@ -251,7 +210,11 @@ struct MoistureMassFractions{FT}
     ice :: FT
 end
 
-Base.zero(::Type{MoistureMassFractions{FT}}) where FT = MoistureMassFractions(zero(FT), zero(FT), zero(FT))
+@inline MoistureMassFractions(vapor::FT) where FT = MoistureMassFractions(vapor, zero(vapor), zero(vapor))
+@inline MoistureMassFractions(vapor::FT, liquid::FT) where FT = MoistureMassFractions(vapor, liquid, zero(vapor))
+
+const MMF = MoistureMassFractions
+Base.zero(::Type{MMF{FT}}) where FT = MoistureMassFractions(zero(FT), zero(FT), zero(FT))
 
 function Base.summary(q::MoistureMassFractions{FT}) where FT
     return string("MoistureMassFractions{$FT}(vapor=", prettysummary(q.vapor),
@@ -265,10 +228,8 @@ function Base.show(io::IO, q::MoistureMassFractions{FT}) where FT
                 "└── ice:    ", prettysummary(q.ice))
 end
 
-const MMF = MoistureMassFractions
-
-@inline total_moisture_mass_fraction(q::MMF) = q.vapor + q.liquid + q.ice
-@inline dry_air_mass_fraction(q::MMF) = 1 - total_moisture_mass_fraction(q)
+@inline total_specific_moisture(q::MMF) = q.vapor + q.liquid + q.ice
+@inline dry_air_mass_fraction(q::MMF) = 1 - total_specific_moisture(q)
 
 """
 $(TYPEDSIGNATURES)
@@ -280,14 +241,14 @@ The mixture gas constant is calculated as a weighted average of the dry air
 and water vapor gas thermo:
 
 ```math
-Rᵐ = qᵈ Rᵈ + qᵛ Rᵛ
+Rᵐ = qᵈ Rᵈ + qᵛ Rᵛ ,
 ```
 
 where:
-- `Rᵈ` is the dry air gas constant
-- `Rᵛ` is the water vapor gas constant
-- `qᵈ` is the mass fraction of dry air
-- `qᵛ` is the mass fraction of water vapor
+- `Rᵈ` is the dry air gas constant,
+- `Rᵛ` is the water vapor gas constant,
+- `qᵈ` is the mass fraction of dry air, and
+- `qᵛ` is the mass fraction of water vapor.
 
 # Arguments
 - `q`: the moisture mass fractions (vapor, liquid, and ice)
@@ -306,10 +267,10 @@ $(TYPEDSIGNATURES)
 
 Compute the heat capacity of a mixture of dry air, vapor, liquid, and ice, where
 the mass fractions of vapor, liquid, and ice are given by `q`.
-The heat capacity of moist air is the weighted sum of its constituents: 
+The heat capacity of moist air is the weighted sum of its constituents:
 
 ```math
-cᵖᵐ = qᵈ cᵖᵈ + qᵛ cᵖᵛ + qˡ cˡ + qⁱ cⁱ
+cᵖᵐ = qᵈ cᵖᵈ + qᵛ cᵖᵛ + qˡ cˡ + qⁱ cⁱ ,
 ```
 
 where `qᵛ = q.vapor`, `qˡ = q.liquid`, `qⁱ = q.ice` are

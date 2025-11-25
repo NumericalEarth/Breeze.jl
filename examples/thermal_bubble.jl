@@ -1,6 +1,6 @@
 # # Thermal bubble
 #
-# This script sets up, runs, and visualizes a "thermal bubble" (just a circular
+# This example sets up, runs, and visualizes a "thermal bubble" (just a circular
 # region of warm air) rising through a stably-stratified background.
 
 using Breeze
@@ -28,12 +28,16 @@ r₀ = 2e3
 N² = 1e-6
 θ₀ = model.formulation.reference_state.potential_temperature
 g = model.thermodynamics.gravitational_acceleration
-dθdz = N² * θ₀ / g
 
-function θᵢ(x, z; x₀=mean(xnodes(grid, Center())), z₀=0.3*grid.Lz)
-    θ̄ = θ₀ + dθdz * z
+function θᵢ(x, z;
+            x₀ = mean(xnodes(grid, Center())),
+            z₀ = 0.3*grid.Lz,
+            N² = N²)
+
+    θ̄ = θ₀ * exp(N² * z / g)
     r = sqrt((x - x₀)^2 + (z - z₀)^2)
     θ′ = Δθ * max(0, 1 - r / r₀)
+
     return θ̄ + θ′
 end
 
@@ -56,7 +60,7 @@ fig
 
 # ## Simulation rising
 
-simulation = Simulation(model; Δt=2, stop_time=15minutes)
+simulation = Simulation(model; Δt=2, stop_time=25minutes)
 conjure_time_step_wizard!(simulation, cfl=0.7)
 
 function progress(sim)

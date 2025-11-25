@@ -20,8 +20,8 @@
   </a>
   <a href="https://codecov.io/gh/NumericalEarth/Breeze.jl" >
     <img src="https://codecov.io/gh/NumericalEarth/Breeze.jl/graph/badge.svg?token=09TZGWKUPV"/>
-  </a>  
-  <a href="[https://codecov.io/gh/NumericalEarth/Breeze.jl](https://github.com/JuliaTesting/Aqua.jl)" >
+  </a>
+  <a href="https://github.com/JuliaTesting/Aqua.jl" >
     <img src="https://raw.githubusercontent.com/JuliaTesting/Aqua.jl/master/badge.svg"/>
   </a>
 </p>
@@ -34,7 +34,7 @@ Check out [the documentation](https://numericalearth.github.io/BreezeDocumentati
 
 ### Installing and using Breeze
 
-First [install Julia](https://julialang.org/downloads/); suggested version 1.10. See [juliaup](https://github.com/JuliaLang/juliaup) README for how to install 1.10 and make that version the default.
+First [install Julia](https://julialang.org/install/); suggested version 1.12. See [juliaup](https://github.com/JuliaLang/juliaup) README for how to install 1.12 and make that version the default.
 
 Then clone this repository
 
@@ -56,12 +56,23 @@ julia> using Pkg; Pkg.instantiate()
 
 Now we are ready to run any of the examples!
 
-For instance, if we run
+For instance, by increasing the resolution of the cloudy Kelvin-Helmholtz instability
+to `Nx=1536` and `Nz=1024` and running
+
+```julia
+julia> include("examples/cloudy_kelvin_helmholtz.jl")
+```
+
+to get
+
+https://github.com/user-attachments/assets/010766c6-ed86-445f-87dc-e3b90c626589
+
+Or cranking up the spatial resolution of the thermal bubble example to to `size = (1024, 512)` and running
 
 ```julia
 julia> include("examples/thermal_bubble.jl")
 ```
 
-but after we tweak the spatial resolution of the grid to `size = (512, 512)`, we get
+we get
 
-https://github.com/user-attachments/assets/fa4f5c75-f8c5-46cf-86b8-64055dabef6f
+https://github.com/user-attachments/assets/aaca693c-57fe-46bf-8ff7-6646f6e5eebe

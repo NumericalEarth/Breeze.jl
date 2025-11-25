@@ -7,6 +7,12 @@ module Breeze
 
 export
     MoistAirBuoyancy,
+    ThermodynamicConstants,
+    ReferenceState,
+    AnelasticFormulation,
+    AtmosphereModel,
+    PotentialTemperature,
+    PotentialTemperatureField,
     TemperatureField,
     ThermodynamicConstants,
     IdealGas,
@@ -16,7 +22,11 @@ export
     AtmosphereModel,
     WarmPhaseSaturationAdjustment,
     mixture_gas_constant,
-    mixture_heat_capacity
+    mixture_heat_capacity,
+    SaturationAdjustment,
+    MixedPhaseEquilibrium,
+    WarmPhaseEquilibrium,
+    BulkMicrophysics
 
 using Oceananigans: Oceananigans, @at, AnisotropicMinimumDissipation, Average,
                     AveragedTimeInterval, BackgroundField, BetaPlane, Bounded,
@@ -81,5 +91,8 @@ using .AtmosphereModels
 
 include("Microphysics/Microphysics.jl")
 using .Microphysics
+
+include("TurbulenceClosures/TurbulenceClosures.jl")
+using .TurbulenceClosures
 
 end # module Breeze
