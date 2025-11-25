@@ -6,7 +6,6 @@ using ..Thermodynamics:
     PlanarLiquidSurface,
     PlanarMixedPhaseSurface,
     saturation_vapor_pressure,
-    density,
     temperature,
     is_absolute_zero,
     with_moisture,
