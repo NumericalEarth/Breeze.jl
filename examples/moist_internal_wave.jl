@@ -73,9 +73,6 @@ lines!(axe, E)
 lines!(axθ, θ)
 fig
 
-# Let's plot the initial condition
-heatmap(model.velocities.w)
-
 # ## Internal wave polarization relations
 
 λx = 2_000.0
@@ -104,6 +101,8 @@ eᵢ = e₀ + e′
 
 set!(model; u=uᵢ, w=wᵢ, e=eᵢ)
 
+# and plot the initial condition
+
 fig = Figure()
 axθ = Axis(fig[1, 2])
 axw = Axis(fig[1, 2])
@@ -113,6 +112,7 @@ heatmap!(axθ, θ)
 heatmap!(axw, w)
 fig
 
+# Now let's set up a simulation
 Δt = 0.001 * 2π / ω
 stop_time = 8 * 2π / ω
 simulation = Simulation(model; Δt, stop_time)
