@@ -23,7 +23,7 @@ using Printf
 # ## Grid and AtmosphereModel
 
 Nx, Nz = 128, 128
-Lx, Lz = 30_000, 12_000 # 30 km
+Lx, Lz = 30_000, 12_000
 
 grid = RectilinearGrid(size = (Nx, Nz),
                        x = (-Lx/2, Lx/2),
@@ -48,7 +48,7 @@ cᵖᵈ = thermo.dry_air.heat_capacity
 ρ₀ = p₀ / (Rᵈ * θ₀)
 
 N = 0.012
-θᵇ(x, z) = θ₀ * exp(N² * z / g)
+θᵇ(x, z) = θ₀ * exp(N^2 * z / g)
 set!(model, θ=θᵇ)
 
 # Let's plot
@@ -61,6 +61,8 @@ E = Average(model.specific_energy, dims=1) |> Field
 lines!(axe, E)
 lines!(axθ, θ)
 
+# And now compute some more things....
+
 qᵗ = SaturationSpecificHumidity(model, :total_moisture) |> Field
 cᵖᵈ = thermo.dry_air.heat_capacity
 cᵖᵛ = thermo.vapor.heat_capacity
@@ -68,10 +70,6 @@ cᵖᵐ = (1 - qᵗ) * cᵖᵈ + qᵗ * cᵖᵛ
 e₀ = model.specific_energy
 eᵢ = cᵖᵐ / cᵖᵈ * e₀
 set!(model, e=eᵢ, qᵗ=qᵗ)
-
-lines!(axe, E)
-lines!(axθ, θ)
-fig
 
 # ## Internal wave polarization relations
 
