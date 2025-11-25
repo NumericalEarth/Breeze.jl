@@ -48,8 +48,7 @@ cᵖᵈ = thermo.dry_air.heat_capacity
 ρ₀ = p₀ / (Rᵈ * θ₀)
 
 N = 0.012
-dθdz = θ₀ * N^2 / g
-θᵇ(x, z) = θ₀ + dθdz * z
+θᵇ(x, z) = θ₀ * exp(N² * z / g)
 set!(model, θ=θᵇ)
 
 # Let's plot
@@ -73,6 +72,9 @@ set!(model, e=eᵢ, qᵗ=qᵗ)
 lines!(axe, E)
 lines!(axθ, θ)
 fig
+
+# Let's plot the initial condition
+heatmap(model.velocities.w)
 
 # ## Internal wave polarization relations
 
