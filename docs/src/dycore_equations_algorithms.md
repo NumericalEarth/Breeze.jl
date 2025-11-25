@@ -74,15 +74,21 @@ where ``\phi`` is a nonhydrostatic pressure correction potential defined by the 
 \partial_t(ρᵣ q^t) + \boldsymbol{\nabla \cdot}\, (ρᵣ q^t \boldsymbol{u}) = S_q .
 ```
 
-### Moist static energy (Pauluis, 2008)
+### Moist static energy
 
-Following [Pauluis2008](@citet), Breeze advances a conservative moist static energy density
+Breeze advances a conservative moist static energy density
 
 ```math
-ρᵣ e ≡ ρᵣ c^{pd} θ ,
+ρᵣ e ≡ ρᵣ \left ( c^{pm} T + g z - \mathscr{L}^l_r q^l - \mathscr{L}^i_r q^i,
 ```
 
-where ``c^{p d}`` is the dry-air heat capacity at constant pressure and ``θ`` is the (moist) potential temperature. The prognostic equation reads
+where ``c^{p m}`` is the mixture heat capacity, ``T`` is temperature, ``g`` is gravitational acceleration,
+``z`` is height,
+``\mathscr{L}^l_r`` is the latent heat of condensation (vapor to liquid) at the energy reference temperature,
+and 
+``\mathscr{L}^i_r`` is the latent heat of deposition (vapor to ice) at the energy reference temperature,
+
+According to [Pauluis2008](@citet) the moist static energy obeys 
 
 ```math
 \partial_t(ρᵣ e) + \boldsymbol{\nabla \cdot}\, (ρᵣ e \boldsymbol{u}) = ρᵣ w b + S_e ,
