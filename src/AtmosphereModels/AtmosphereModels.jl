@@ -9,7 +9,7 @@ export
 using DocStringExtensions: TYPEDSIGNATURES
 
 include("atmosphere_model.jl")
-include("diagnostic_fields.jl")
+include("model_diagnostics.jl")
 include("anelastic_formulation.jl")
 include("microphysics_interface.jl")
 # include("update_hydrostatic_pressure.jl")
