@@ -39,7 +39,7 @@ q₀ = Breeze.Thermodynamics.MoistureMassFractions{eltype(grid)} |> zero
 cᵖᵈ = thermo.dry_air.heat_capacity
 Lˡ = thermo.liquid.reference_latent_heat
 w′T′, w′q′ = 8e-3, 5.2e-5
-Q = ρ₀ * cᵖᵈ * w′T′
+Q = ρ₀ * cᵖᵈ * w′T′ 
 F = ρ₀ * w′q′
 ρe_bcs = FieldBoundaryConditions(bottom=FluxBoundaryCondition(Q))
 ρqᵗ_bcs = FieldBoundaryConditions(bottom=FluxBoundaryCondition(F))
@@ -133,7 +133,9 @@ save("forcings.png", fig)
 
 microphysics = SaturationAdjustment(equilibrium=WarmPhaseEquilibrium())
 
-model = AtmosphereModel(grid; coriolis, microphysics, closure,
+closure = AnisotropicMinimumDissipation()
+
+model = AtmosphereModel(grid; coriolis, microphysics, closure, formulation,
                         advection = WENO(order=5),
                         forcing = (ρqᵗ=ρqᵗ_forcing, ρu=ρu_forcing, ρv=ρv_forcing, ρe=ρe_forcing),
                         boundary_conditions = (ρe=ρe_bcs, ρqᵗ=ρqᵗ_bcs, ρu=ρu_bcs, ρv=ρv_bcs))
@@ -266,14 +268,14 @@ axuv = Axis(fig[2, 1], xlabel="u, v [m/s]", ylabel="z (m)")
 axqˡ = Axis(fig[2, 2], xlabel="qˡ [g/kg]", ylabel="z (m)")
 
 
-n = 2
+n = Nt
 θn  = @lift interior(θt[$n], 1, 1, :)
 qᵛn = @lift interior(qᵛt[$n], 1, 1, :)
 qˡn = @lift interior(qˡt[$n], 1, 1, :)
 un = @lift interior(ut[$n], 1, 1, :)
 vn = @lift interior(vt[$n], 1, 1, :)
 z = znodes(θt)
-title = "Mean profile averaged over the last hour (5-6 hours)"
+title = "Mean profile averaged over the last hour ($(Int(stop_time - 1hours)/3600) - $(Int(stop_time)/3600) hours)"
 
 fig[0, :] = Label(fig, title, fontsize=22, tellwidth=false)
 
