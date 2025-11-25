@@ -11,6 +11,8 @@ export
     ReferenceState,
     AnelasticFormulation,
     AtmosphereModel,
+    PotentialTemperature,
+    PotentialTemperatureField,
     TemperatureField,
     IdealGas,
     CondensedPhase,

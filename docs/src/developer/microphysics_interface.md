@@ -132,9 +132,8 @@ import Breeze.AtmosphereModels:
     @inbounds μ.qᵛ[i, j, k] = state.moisture_mass_fractions.vapor
 
 @inline @inbounds function compute_moisture_fractions(i, j, k, grid,
-    ::ExplicitMicrophysics, density, moisture_fraction, microphysical_fields)
+    ::ExplicitMicrophysics, ρ, qᵗ, microphysical_fields)
 
-    ρ = density[i, j, k]
     qᵛ = microphysical_fields.qᵛ[i, j, k]
     ρqˡ = microphysical_fields.ρqˡ[i, j, k] / ρ
     ρqⁱ = microphysical_fields.ρqⁱ[i, j, k] / ρ

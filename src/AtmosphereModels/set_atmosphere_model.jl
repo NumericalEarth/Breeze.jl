@@ -48,8 +48,6 @@ function set!(model::AtmosphereModel; enforce_mass_conservation=true, kw...)
             μ = getproperty(model.microphysical_fields, name)
             set!(μ, value)
 
-        # Setting diagnostic variables
-        supported_diagnostic_variables = (:qᵗ, :u, :v, :w, :θ)
         elseif name == :qᵗ
             qᵗ = model.specific_moisture
             set!(qᵗ, value)
@@ -86,6 +84,8 @@ function set!(model::AtmosphereModel; enforce_mass_conservation=true, kw...)
                     model.thermodynamics)
         else
             prognostic_names = keys(prognostic_fields(model))
+            supported_diagnostic_variables = (:qᵗ, :u, :v, :w, :θ)
+
             msg = "Cannot set! $name in AtmosphereModel because $name is neither a
                    prognostic variable nor a supported diagnostic variable!
                    The prognostic variables are: $prognostic_names
@@ -134,9 +134,7 @@ end
     z = znode(i, j, k, grid, c, c, c)
     p₀ = formulation.reference_state.base_pressure
 
-    # TODO: change this so the code works for _both_ adjustment and non-adjustment microphysics
-    # q = moisture_mass_fractions(i, j, k, grid, microphysics, microphysical_fields, moisture_mass_fraction)
-    q = MoistureMassFractions(qᵗ)
+    q = compute_moisture_fractions(i, j, k, grid, microphysics, ρᵣ, qᵗ, microphysical_fields)
     𝒰₀ = PotentialTemperatureState(θ, q, p₀, pᵣ)
     𝒰 = maybe_adjust_thermodynamic_state(𝒰₀, microphysics, microphysical_fields, qᵗ, thermo)
 

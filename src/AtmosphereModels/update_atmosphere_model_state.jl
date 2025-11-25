@@ -5,6 +5,7 @@ using ..Thermodynamics:
 
 using Oceananigans.Architectures: architecture
 using Oceananigans.BoundaryConditions: fill_halo_regions!, compute_x_bcs!, compute_y_bcs!, compute_z_bcs!
+using Oceananigans.TurbulenceClosures: compute_diffusivities!
 using Oceananigans.ImmersedBoundaries: mask_immersed_field!
 using Oceananigans.Utils: launch!
 
@@ -15,7 +16,6 @@ const AnelasticModel = AtmosphereModel{<:AnelasticFormulation}
 function update_state!(model::AnelasticModel, callbacks=[]; compute_tendencies=true)
     fill_halo_regions!(prognostic_fields(model), model.clock, fields(model), async=true)
     compute_auxiliary_variables!(model)
-    # update_hydrostatic_pressure!(model)
     compute_tendencies && compute_tendencies!(model)
     return nothing
 end
@@ -66,6 +66,10 @@ function compute_auxiliary_variables!(model)
     fill_halo_regions!(model.temperature)
     fill_halo_regions!(model.specific_energy)
     fill_halo_regions!(model.specific_moisture)
+    fill_halo_regions!(model.microphysical_fields)
+
+    # Compute diffusivities
+    compute_diffusivities!(model.closure_fields, model.closure, model)
 
     # TODO: should we mask the auxiliary variables? They can also be masked in the kernel
 
@@ -166,6 +170,8 @@ function compute_tendencies!(model::AnelasticModel)
                    model.formulation,
                    model.temperature,
                    model.specific_moisture,
+                   model.microphysics,
+                   model.microphysical_fields,
                    model.thermodynamics)
 
     launch!(arch, grid, :xyz, compute_x_momentum_tendency!, Gρu, grid, u_args)

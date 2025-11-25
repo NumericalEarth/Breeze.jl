@@ -80,7 +80,9 @@ function diagnose_thermodynamic_state(i, j, k, grid, formulation::AnelasticFormu
     return MoistStaticEnergyState(e, q, z, pᵣ)
 end
 
-@inline function specific_volume(i, j, k, grid, formulation, temperature, specific_moisture, thermo)
+@inline specific_volume(i, j, k, grid, args...) = 1 / density(i, j, k, grid, args...)
+
+@inline function density(i, j, k, grid, formulation, temperature, specific_moisture, thermo)
     @inbounds begin
         qᵗ = specific_moisture[i, j, k]
         pᵣ = formulation.reference_state.pressure[i, j, k]
@@ -91,7 +93,7 @@ end
     q = MoistureMassFractions(qᵗ)
     Rᵐ = mixture_gas_constant(q, thermo)
 
-    return Rᵐ * T / pᵣ
+    return pᵣ / (Rᵐ * T)
 end
 
 @inline function buoyancy(i, j, k, grid, formulation, T, qᵗ, thermo)

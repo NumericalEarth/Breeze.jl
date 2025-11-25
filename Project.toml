@@ -14,6 +14,9 @@ Printf = "de0858da-6303-5e67-8744-51eddeeeb8d7"
 [weakdeps]
 CloudMicrophysics = "6a9e3e04-43cd-43ba-94b9-e8782df3c71b"
 
+[workspace]
+projects = ["docs", "test"]
+
 [extensions]
 BreezeCloudMicrophysicsExt = "CloudMicrophysics"
 

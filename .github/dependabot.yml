@@ -18,8 +18,6 @@ updates:
     # Location of Julia projects
     directories:
       - "/"
-      - "/docs"
-      - "/test"
     schedule:
       interval: "weekly"
     ignore:

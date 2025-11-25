@@ -18,6 +18,7 @@ mkpath(literated_dir)
 
 example_scripts = [
     "thermal_bubble.jl",
+    "cloudy_kelvin_helmholtz.jl",
     # "prescribed_sst.jl", # this is a WIP
 ]
 
@@ -30,6 +31,7 @@ end
 
 example_pages = Any[
     "Thermal bubble" => "literated/thermal_bubble.md",
+    "Cloudy Kelvin-Helmholtz instability" => "literated/cloudy_kelvin_helmholtz.md",
     # "Prescribed SST" => "literated/prescribed_sst.md",
 ]
 
@@ -44,8 +46,8 @@ makedocs(
         "Thermodynamics" => "thermodynamics.md",
         "Microphysics" => Any[
             "Overview" => "microphysics/microphysics_overview.md",
-            "Warm phase saturation adjustment" => "microphysics/warm_phase_saturation_adjustment.md",
-            "Mixed phase saturation adjustment" => "microphysics/mixed_phase_saturation_adjustment.md",
+            "Warm-phase saturation adjustment" => "microphysics/warm_phase_saturation_adjustment.md",
+            "Mixed-phase saturation adjustment" => "microphysics/mixed_phase_saturation_adjustment.md",
         ],
         "Developers" => Any[
             "Microphysics" => Any[
@@ -60,5 +62,28 @@ makedocs(
         "API" => "api.md",
         "Contributors guide" => "contributing.md",
     ],
+    linkcheck = true,
     draft = false,
 )
+
+"""
+    recursive_find(directory, pattern)
+
+Return list of filepaths within `directory` that contains the `pattern::Regex`.
+"""
+function recursive_find(directory, pattern)
+    mapreduce(vcat, walkdir(directory)) do (root, dirs, filenames)
+        matched_filenames = filter(contains(pattern), filenames)
+        map(filename -> joinpath(root, filename), matched_filenames)
+    end
+end
+
+@info "Cleaning up temporary .jld2 and .nc output created by doctests or literated examples..."
+
+for pattern in [r"\.jld2", r"\.nc"]
+    filenames = recursive_find(@__DIR__, pattern)
+
+    for filename in filenames
+        rm(filename)
+    end
+end

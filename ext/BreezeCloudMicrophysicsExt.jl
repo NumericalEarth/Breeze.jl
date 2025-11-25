@@ -1,6 +1,6 @@
 module BreezeCloudMicrophysicsExt
 
-using CloudMicrophysics
+using CloudMicrophysics: CloudMicrophysics
 using CloudMicrophysics.Parameters: Parameters0M, Rain, Snow, CloudIce, CloudLiquid, CollisionEff
 using CloudMicrophysics.Microphysics0M: remove_precipitation
 
@@ -16,14 +16,13 @@ using CloudMicrophysics.Microphysics1M:
 # Import Breeze modules needed for integration
 using Breeze
 using Breeze.AtmosphereModels
-using Breeze.Thermodynamics: AbstractThermodynamicState, MoistureMassFractions
+using Breeze.Thermodynamics: MoistureMassFractions
 using Breeze.Microphysics: BulkMicrophysics, center_field_tuple
 using Breeze
 
 using Breeze.AtmosphereModels
 
 using Breeze.Thermodynamics:
-    AbstractThermodynamicState,
     MoistureMassFractions,
     saturation_specific_humidity,
     temperature,
@@ -65,7 +64,6 @@ Interface is identical to non-precipitating microphysics except that
 """
 const ZeroMomentCloudMicrophysics = BulkMicrophysics{<:Any, <:Parameters0M}
 const ZMCM = ZeroMomentCloudMicrophysics
-const ATC = AbstractThermodynamicState
 
 prognostic_field_names(::ZMCM) = tuple()
 materialize_microphysical_fields(bμp::ZMCM, grid, bcs) = materialize_microphysical_fields(bμp.nucleation, grid, bcs)
@@ -87,7 +85,7 @@ materialize_microphysical_fields(bμp::ZMCM, grid, bcs) = materialize_microphysi
     ρᵣ = 𝒰.reference_density
     return ρᵣ * remove_precipitation(bμp.categories, qˡ, qⁱ, qᵛ⁺)
 end
-    
+
 """
     ZeroMomentCloudMicrophysics(FT::DataType = Oceananigans.defaults.FloatType,
                                 categories = Parameters0M(FT))
@@ -207,7 +205,7 @@ computed in `update_microphysical_fields!`.
 ##### show methods
 #####
 
-import Oceananigans.Utils: prettysummary
+import Oceananigans.Grids: prettysummary
 
 function prettysummary(cl::CloudLiquid)
     return string("CloudLiquid(",
@@ -235,7 +233,7 @@ function prettysummary(mass::CloudMicrophysics.Parameters.ParticleMass)
                   "Δm=", prettysummary(mass.Δm), ", ",
                   "χm=", prettysummary(mass.χm), ")")
 end
-    
+
 function prettysummary(pdf::CloudMicrophysics.Parameters.ParticlePDFIceRain)
     return string("ParticlePDFIceRain(n0=", prettysummary(pdf.n0), ")")
 end
@@ -311,6 +309,4 @@ function Base.show(io::IO, bμp::BulkMicrophysics{<:Any, <:CM1MCategories})
           "    └── aspr:   ", prettysummary(bμp.categories.snow.aspr))
 end
 
-
 end # module BreezeCloudMicrophysicsExt
-
