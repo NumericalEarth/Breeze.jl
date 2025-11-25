@@ -37,7 +37,14 @@ end
     qˡ = q.liquid
     qⁱ = q.ice
 
-    return Π * θ + (ℒˡᵣ * qˡ + ℒⁱᵣ * qⁱ) / cᵖᵐ 
+    return Π*θ + (ℒˡᵣ*qˡ + ℒⁱᵣ*qⁱ) / cᵖᵐ 
+end
+
+@inline function density(𝒰::PotentialTemperatureState, thermo)
+    pᵣ = 𝒰.reference_pressure
+    T = temperature(𝒰, thermo)
+    q = 𝒰.moisture_mass_fractions
+    return density(pᵣ, T, q, thermo)
 end
 
 #####
@@ -71,5 +78,18 @@ end
     qⁱ = q.ice
 
     # e = cᵖᵐ * T + g * z - ℒˡᵣ * qˡ - ℒⁱᵣ * qⁱ
-    return (e - g * z + ℒˡᵣ * qˡ + ℒⁱᵣ * qⁱ) / cᵖᵐ
+    return (e - g*z + ℒˡᵣ*qˡ + ℒⁱᵣ*qⁱ) / cᵖᵐ
+end
+
+@inline function density(𝒰::AbstractThermodynamicState, thermo)
+    pᵣ = 𝒰.reference_pressure
+    T = temperature(𝒰, thermo)
+    q = 𝒰.moisture_mass_fractions
+    return density(pᵣ, T, q, thermo)
+end
+
+@inline function saturation_specific_humidity(𝒰::AbstractThermodynamicState, thermo, equil)
+    T = temperature(𝒰, thermo)
+    ρ = density(𝒰, thermo)
+    return saturation_specific_humidity(T, ρ, thermo, equil)
 end

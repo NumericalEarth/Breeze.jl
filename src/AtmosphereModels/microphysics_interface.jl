@@ -13,7 +13,7 @@ using ..Thermodynamics:
 """
     $(TYPEDSIGNATURES)
 
-Possibly apply saturation adjustment. If a `micorphysics` scheme does not invoke saturation adjustment,
+Possibly apply saturation adjustment. If a `microphysics` scheme does not invoke saturation adjustment,
 just return the `state` unmodified. In contrast to `adjust_thermodynamic_state`, this function
 ingests the entire `microphysics` formulation and the `microphysical_fields`.
 This is needed because some microphysics schemes apply saturation adjustment to a
@@ -52,8 +52,11 @@ Build and return [`MoistureMassFractions`](@ref) at `(i, j, k)` for the given `g
 
 Dispatch is provided for `::Nothing` microphysics here. Specific microphysics
 schemes may extend this method to provide tailored behavior.
+
+Note: while ρ and qᵗ are scalars, the microphysical fields `μ` are `NamedTuple` of `Field`.
+This may be changed in the future.
 """
-@inline compute_moisture_fractions(i, j, k, grid, microphysics::Nothing, ρ, qᵗ, μ) = @inbounds MoistureMassFractions(qᵗ)
+@inline compute_moisture_fractions(i, j, k, grid, microphysics::Nothing, ρ, qᵗ, μ) = MoistureMassFractions(qᵗ)
 
 """
 $(TYPEDSIGNATURES)

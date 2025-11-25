@@ -1,5 +1,7 @@
 using Oceananigans: Oceananigans, Center, Field, set!, fill_halo_regions!
+
 using Adapt: Adapt, adapt
+using KernelAbstractions: @kernel, @index
 
 #####
 ##### Reference state computations for Boussinesq and Anelastic models
@@ -91,12 +93,13 @@ function ReferenceState(grid, thermo=ThermodynamicConstants(eltype(grid));
     p₀ = convert(FT, base_pressure)
     θ₀ = convert(FT, potential_temperature)
 
-    pᵣ = Field{Nothing, Nothing, Center}(grid)
     ρᵣ = Field{Nothing, Nothing, Center}(grid)
-    set!(pᵣ, z -> adiabatic_hydrostatic_pressure(z, p₀, θ₀, thermo))
     set!(ρᵣ, z -> adiabatic_hydrostatic_density(z, p₀, θ₀, thermo))
-    fill_halo_regions!(pᵣ)
     fill_halo_regions!(ρᵣ)
+
+    pᵣ = Field{Nothing, Nothing, Center}(grid)
+    set!(pᵣ, z -> adiabatic_hydrostatic_pressure(z, p₀, θ₀, thermo))
+    fill_halo_regions!(pᵣ)
 
     return ReferenceState(p₀, θ₀, pᵣ, ρᵣ)
 end
