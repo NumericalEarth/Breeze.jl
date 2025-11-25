@@ -78,7 +78,7 @@ struct PlanarLiquidSurface end
 struct PlanarIceSurface end
 
 """
-    $(TYPEDSIGNATURES)
+$(TYPEDSIGNATURES)
 
 Return `PlanarMixedPhaseSurface` for computing the saturation vapor pressure over
 a surface composed of a mixture of liquid and ice, with a given `liquid_fraction`.
@@ -157,7 +157,6 @@ qᵛ⁺ᵐ = Breeze.Thermodynamics.saturation_specific_humidity(T, ρ, thermo, m
 # output
 0.01128386068542303
 ```
-
 """
 @inline function saturation_specific_humidity(T, ρ, thermo, surface)
     pᵛ⁺ = saturation_vapor_pressure(T, thermo, surface)

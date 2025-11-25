@@ -43,15 +43,13 @@ function set!(model::AtmosphereModel; enforce_mass_conservation=true, kw...)
             set!(model.energy_density, value)
         elseif name == :ρqᵗ
             set!(model.moisture_density, value)
-            set!(model.moisture_mass_fraction, model.moisture_density / model.formulation.reference_state.density)
-        elseif name ∈ propertynames(model.microphysical_fields)
+            set!(model.specific_moisture, model.moisture_density / model.formulation.reference_state.density)
+        elseif name ∈ prognostic_field_names(model.microphysics)
             μ = getproperty(model.microphysical_fields, name)
             set!(μ, value)
-        end
 
-        # Setting diagnostic variables
-        if name == :qᵗ
-            qᵗ = model.moisture_mass_fraction
+        elseif name == :qᵗ
+            qᵗ = model.specific_moisture
             set!(qᵗ, value)
             ρᵣ = model.formulation.reference_state.density
             ρqᵗ = model.moisture_density
@@ -76,13 +74,24 @@ function set!(model::AtmosphereModel; enforce_mass_conservation=true, kw...)
             launch!(arch, grid, :xyz,
                     _energy_density_from_potential_temperature!,
                     model.energy_density,
+                    model.specific_energy,
                     grid,
                     θ,
-                    model.moisture_mass_fraction,
+                    model.specific_moisture,
                     model.formulation,
                     model.microphysics,
                     model.microphysical_fields,
                     model.thermodynamics)
+        else
+            prognostic_names = keys(prognostic_fields(model))
+            supported_diagnostic_variables = (:qᵗ, :u, :v, :w, :θ)
+
+            msg = "Cannot set! $name in AtmosphereModel because $name is neither a
+                   prognostic variable nor a supported diagnostic variable!
+                   The prognostic variables are: $prognostic_names
+                   The supported diagnostic variables are: $supported_diagnostic_variables"
+
+            throw(ArgumentError(msg))
         end
     end
 
@@ -103,9 +112,11 @@ function set!(model::AtmosphereModel; enforce_mass_conservation=true, kw...)
     return nothing
 end
 
-@kernel function _energy_density_from_potential_temperature!(energy_density, grid,
+@kernel function _energy_density_from_potential_temperature!(energy_density,
+                                                             specific_energy,
+                                                             grid,
                                                              potential_temperature,
-                                                             moisture_mass_fraction,
+                                                             specific_moisture,
                                                              formulation::AnelasticFormulation,
                                                              microphysics,
                                                              microphysical_fields,
@@ -115,13 +126,15 @@ end
     @inbounds begin
         pᵣ = formulation.reference_state.pressure[i, j, k]
         ρᵣ = formulation.reference_state.density[i, j, k]
+        qᵗ = specific_moisture[i, j, k]
         θ = potential_temperature[i, j, k]
     end
 
     p₀ = formulation.reference_state.base_pressure
-    q = moisture_mass_fractions(i, j, k, grid, microphysics, microphysical_fields, moisture_mass_fraction)
+
+    q = compute_moisture_fractions(i, j, k, grid, microphysics, ρᵣ, qᵗ, microphysical_fields)
     𝒰₀ = PotentialTemperatureState(θ, q, p₀, pᵣ)
-    𝒰 = compute_thermodynamic_state(𝒰₀, microphysics, thermo)
+    𝒰 = maybe_adjust_thermodynamic_state(𝒰₀, microphysics, microphysical_fields, qᵗ, thermo)
 
     T = temperature(𝒰, thermo)
     q = 𝒰.moisture_mass_fractions
@@ -132,8 +145,7 @@ end
     qˡ = q.liquid
     qⁱ = q.ice
 
-    g = thermo.gravitational_acceleration
-    z = znode(i, j, k, grid, c, c, c)
-
-    @inbounds energy_density[i, j, k] = ρᵣ * (cᵖᵐ * T + g * z - ℒˡᵣ * qˡ - ℒⁱᵣ * qⁱ)
+    e = cᵖᵐ * T + g * z - ℒˡᵣ * qˡ - ℒⁱᵣ * qⁱ
+    @inbounds specific_energy[i, j, k] = e
+    @inbounds energy_density[i, j, k] = ρᵣ * e
 end

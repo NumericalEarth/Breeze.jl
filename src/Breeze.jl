@@ -11,6 +11,8 @@ export
     ReferenceState,
     AnelasticFormulation,
     AtmosphereModel,
+    PotentialTemperature,
+    PotentialTemperatureField,
     TemperatureField,
     IdealGas,
     CondensedPhase,
@@ -18,7 +20,8 @@ export
     mixture_heat_capacity,
     SaturationAdjustment,
     MixedPhaseEquilibrium,
-    WarmPhaseEquilibrium
+    WarmPhaseEquilibrium,
+    BulkMicrophysics
 
 using Oceananigans: Oceananigans, @at, AnisotropicMinimumDissipation, Average,
                     AveragedTimeInterval, BackgroundField, BetaPlane, Bounded,

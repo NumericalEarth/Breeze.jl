@@ -74,7 +74,8 @@ end
     grid = RectilinearGrid(default_arch; size=(8, 8, 8), x=(0, 1_000), y=(0, 1_000), z=(0, 1_000))
     thermo = ThermodynamicConstants()
 
-    p₀, θ₀ = 101325, 300
+    p₀ = FT(101325)
+    θ₀ = FT(300)
     reference_state = ReferenceState(grid, thermo, base_pressure=p₀, potential_temperature=θ₀)
     formulation = AnelasticFormulation(reference_state)
     microphysics = SaturationAdjustment()

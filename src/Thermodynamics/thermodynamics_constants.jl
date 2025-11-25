@@ -152,7 +152,7 @@ and vapor, as well as condensed liquid and ice phases.
 The `triple_point_temperature` and `triple_point_pressure` may be combined with
 internal energy parameters for condensed phases to compute the vapor pressure
 at the boundary between vapor and a homogeneous sample of the condensed phase.
-The `gravitational_acceleration` parameter is included to compute `reference_state`
+The `gravitational_acceleration` parameter is included to compute [`ReferenceState`](@ref)
 quantities associated with hydrostatic balance.
 """
 function ThermodynamicConstants(FT = Oceananigans.defaults.FloatType;
@@ -225,8 +225,8 @@ function Base.show(io::IO, q::MoistureMassFractions{FT}) where FT
                 "└── ice:    ", prettysummary(q.ice))
 end
 
-@inline total_moisture_mass_fraction(q::MMF) = q.vapor + q.liquid + q.ice
-@inline dry_air_mass_fraction(q::MMF) = 1 - total_moisture_mass_fraction(q)
+@inline total_specific_moisture(q::MMF) = q.vapor + q.liquid + q.ice
+@inline dry_air_mass_fraction(q::MMF) = 1 - total_specific_moisture(q)
 
 """
 $(TYPEDSIGNATURES)
@@ -238,14 +238,14 @@ The mixture gas constant is calculated as a weighted average of the dry air
 and water vapor gas thermo:
 
 ```math
-Rᵐ = qᵈ Rᵈ + qᵛ Rᵛ
+Rᵐ = qᵈ Rᵈ + qᵛ Rᵛ ,
 ```
 
 where:
-- `Rᵈ` is the dry air gas constant
-- `Rᵛ` is the water vapor gas constant
-- `qᵈ` is the mass fraction of dry air
-- `qᵛ` is the mass fraction of water vapor
+- `Rᵈ` is the dry air gas constant,
+- `Rᵛ` is the water vapor gas constant,
+- `qᵈ` is the mass fraction of dry air, and
+- `qᵛ` is the mass fraction of water vapor.
 
 # Arguments
 - `q`: the moisture mass fractions (vapor, liquid, and ice)
@@ -267,7 +267,7 @@ the mass fractions of vapor, liquid, and ice are given by `q`.
 The heat capacity of moist air is the weighted sum of its constituents:
 
 ```math
-cᵖᵐ = qᵈ cᵖᵈ + qᵛ cᵖᵛ + qˡ cˡ + qⁱ cⁱ
+cᵖᵐ = qᵈ cᵖᵈ + qᵛ cᵖᵛ + qˡ cˡ + qⁱ cⁱ ,
 ```
 
 where `qᵛ = q.vapor`, `qˡ = q.liquid`, `qⁱ = q.ice` are

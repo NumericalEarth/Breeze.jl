@@ -1,5 +1,7 @@
 abstract type AbstractThermodynamicState{FT} end
 
+@inline Base.eltype(::AbstractThermodynamicState{FT}) where FT = FT
+
 struct PotentialTemperatureState{FT} <: AbstractThermodynamicState{FT}
     potential_temperature :: FT
     moisture_mass_fractions :: MoistureMassFractions{FT}
@@ -18,8 +20,8 @@ end
     return (pᵣ / p₀)^(Rᵐ / cᵖᵐ)
 end
 
-@inline total_moisture_mass_fraction(state::PotentialTemperatureState) =
-    total_moisture_mass_fraction(state.moisture_mass_fractions)
+@inline total_specific_moisture(state::PotentialTemperatureState) =
+    total_specific_moisture(state.moisture_mass_fractions)
 
 @inline with_moisture(𝒰::PotentialTemperatureState{FT}, q::MoistureMassFractions{FT}) where FT =
     PotentialTemperatureState{FT}(𝒰.potential_temperature, q, 𝒰.base_pressure, 𝒰.reference_pressure)
@@ -35,7 +37,14 @@ end
     qˡ = q.liquid
     qⁱ = q.ice
 
-    return Π * θ + (ℒˡᵣ * qˡ + ℒⁱᵣ * qⁱ) / cᵖᵐ 
+    return Π*θ + (ℒˡᵣ*qˡ + ℒⁱᵣ*qⁱ) / cᵖᵐ 
+end
+
+@inline function density(𝒰::PotentialTemperatureState, thermo)
+    pᵣ = 𝒰.reference_pressure
+    T = temperature(𝒰, thermo)
+    q = 𝒰.moisture_mass_fractions
+    return density(pᵣ, T, q, thermo)
 end
 
 #####
@@ -49,8 +58,7 @@ struct MoistStaticEnergyState{FT} <: AbstractThermodynamicState{FT}
     reference_pressure :: FT
 end
 
-@inline Base.eltype(::MoistStaticEnergyState{FT}) where FT = FT
-@inline total_moisture_mass_fraction(state::MoistStaticEnergyState) = total_moisture_mass_fraction(state.moisture_mass_fractions)
+@inline total_specific_moisture(state::MoistStaticEnergyState) = total_specific_moisture(state.moisture_mass_fractions)
 @inline is_absolute_zero(𝒰::MoistStaticEnergyState) = 𝒰.moist_static_energy == 0
 
 @inline with_moisture(𝒰::MoistStaticEnergyState{FT}, q::MoistureMassFractions{FT}) where FT =
@@ -70,5 +78,18 @@ end
     qⁱ = q.ice
 
     # e = cᵖᵐ * T + g * z - ℒˡᵣ * qˡ - ℒⁱᵣ * qⁱ
-    return (e - g * z + ℒˡᵣ * qˡ + ℒⁱᵣ * qⁱ) / cᵖᵐ
+    return (e - g*z + ℒˡᵣ*qˡ + ℒⁱᵣ*qⁱ) / cᵖᵐ
+end
+
+@inline function density(𝒰::AbstractThermodynamicState, thermo)
+    pᵣ = 𝒰.reference_pressure
+    T = temperature(𝒰, thermo)
+    q = 𝒰.moisture_mass_fractions
+    return density(pᵣ, T, q, thermo)
+end
+
+@inline function saturation_specific_humidity(𝒰::AbstractThermodynamicState, thermo, equil)
+    T = temperature(𝒰, thermo)
+    ρ = density(𝒰, thermo)
+    return saturation_specific_humidity(T, ρ, thermo, equil)
 end

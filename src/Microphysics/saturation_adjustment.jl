@@ -9,22 +9,16 @@ using ..Thermodynamics:
     PlanarLiquidSurface,
     PlanarMixedPhaseSurface,
     saturation_vapor_pressure,
+    temperature,
     is_absolute_zero,
     with_moisture,
-    total_moisture_mass_fraction,
+    total_specific_moisture,
     AbstractThermodynamicState
-
-import ..Thermodynamics: saturation_specific_humidity
 
 using Oceananigans: Oceananigans, CenterField
 using DocStringExtensions: TYPEDSIGNATURES
 
-import ..AtmosphereModels:
-    compute_thermodynamic_state,
-    update_microphysical_fields!,
-    prognostic_field_names,
-    materialize_microphysical_fields,
-    moisture_mass_fractions
+import ..Thermodynamics: saturation_specific_humidity
 
 struct SaturationAdjustment{E, FT}
     tolerance :: FT
@@ -32,21 +26,26 @@ struct SaturationAdjustment{E, FT}
     equilibrium :: E
 end
 
+const SA = SaturationAdjustment
+
 """
-    $(TYPEDSIGNATURES)
+$(TYPEDSIGNATURES)
 
-Return `SaturationAdjustment` microphysics representing an instantaneous adjustment to
-`equilibrium` between condensates and water vapor, computed by a solver with `tolerance` and `maxiter`.
+Return `SaturationAdjustment` microphysics representing an instantaneous adjustment
+to `equilibrium` between condensates and water vapor, computed by a solver with
+`tolerance` and `maxiter`.
 
-The options for `equilibrium` are
-    * [`WarmPhaseEquilibrium`](@ref) representing an equilibrium between water vapor and liquid water.
+The options for `equilibrium` are:
 
-    * [`MixedPhaseEquilibrium`](@ref) representing a temperature-dependent equilibrium between
-      water vapor, possibly supercooled liquid water, and ice. The equilibrium state is modeled as a linear
-      variation of the equilibrium liquid fraction with temperature, between
-      the freezing temperature (e.g. 273.15 K) below which liquid water is supercooled,
-      and the temperature of homogeneous ice nucleation temperature (e.g. 233.15 K) at which
-      the supercooled liquid fraction vanishes.
+* [`WarmPhaseEquilibrium()`](@ref WarmPhaseEquilibrium) representing an equilibrium between
+  water vapor and liquid water.
+
+* [`MixedPhaseEquilibrium()`](@ref MixedPhaseEquilibrium) representing a temperature-dependent
+  equilibrium between water vapor, possibly supercooled liquid water, and ice. The equilibrium
+  state is modeled as a linear variation of the equilibrium liquid fraction with temperature,
+  between the freezing temperature (e.g. 273.15 K) below which liquid water is supercooled,
+  and the temperature of homogeneous ice nucleation temperature (e.g. 233.15 K) at which
+  the supercooled liquid fraction vanishes.
 """
 function SaturationAdjustment(FT::DataType=Oceananigans.defaults.FloatType;
                               tolerance = 1e-3,
@@ -58,15 +57,14 @@ function SaturationAdjustment(FT::DataType=Oceananigans.defaults.FloatType;
     return SaturationAdjustment(tolerance, maxiter, equilibrium)
 end
 
-convert_equilibrium(FT, equil) = equil # fallback 
-abstract type AbstractEquilibrium end
+@inline microphysical_velocities(::SaturationAdjustment, name) = nothing
 
 #####
 ##### Warm-phase equilibrium
 #####
 
 """
-    $(TYPEDSIGNATURES)
+$(TYPEDSIGNATURES)
 
 Return `WarmPhaseEquilibrium` representing an equilibrium between water vapor and liquid water.
 """
@@ -96,7 +94,7 @@ function convert_equilibrium(FT, equilibrium::MixedPhaseEquilibrium)
 end
 
 """
-    $(TYPEDSIGNATURES)
+$(TYPEDSIGNATURES)
 
 Return `MixedPhaseEquilibrium` representing a temperature-dependent equilibrium between
 water vapor, possibly supercooled liquid water, and ice.
@@ -150,31 +148,33 @@ center_field_tuple(grid, names...) = NamedTuple{names}(CenterField(grid) for nam
 materialize_microphysical_fields(::WPSA, grid, bcs) = center_field_tuple(grid, :qᵛ, :qˡ)
 materialize_microphysical_fields(::MPSA, grid, bcs) = center_field_tuple(grid, :qᵛ, :qˡ, :qⁱ)
 
-@inline @inbounds function update_microphysical_fields!(μ, ::WPSA, i, j, k, grid, 𝒰, thermo)
+@inline @inbounds function update_microphysical_fields!(μ, ::WPSA, i, j, k, grid, density, 𝒰, thermo)
     μ.qᵛ[i, j, k] = 𝒰.moisture_mass_fractions.vapor
     μ.qˡ[i, j, k] = 𝒰.moisture_mass_fractions.liquid
     return nothing
 end
 
-@inline @inbounds function update_microphysical_fields!(μ, ::MPSA, i, j, k, grid, 𝒰, thermo)
+@inline @inbounds function update_microphysical_fields!(μ, ::MPSA, i, j, k, grid, density, 𝒰, thermo)
     μ.qᵛ[i, j, k] = 𝒰.moisture_mass_fractions.vapor
     μ.qˡ[i, j, k] = 𝒰.moisture_mass_fractions.liquid
     μ.qⁱ[i, j, k] = 𝒰.moisture_mass_fractions.ice
     return nothing
-end 
+end
 
-@inline @inbounds function moisture_mass_fractions(i, j, k, grid, ::WPSA, μ, qᵗ)
+@inline @inbounds function compute_moisture_fractions(i, j, k, grid, ::WPSA, ρ, qᵗ, μ)
     qᵛ = μ.qᵛ[i, j, k]
     qˡ = μ.qˡ[i, j, k]
     return MoistureMassFractions(qᵛ, qˡ)
 end
 
-@inline @inbounds function moisture_mass_fractions(i, j, k, grid, ::MPSA, μ, qᵗ)
+@inline @inbounds function compute_moisture_fractions(i, j, k, grid, ::MPSA, ρ, qᵗ, μ)
     qᵛ = μ.qᵛ[i, j, k]
     qˡ = μ.qˡ[i, j, k]
     qⁱ = μ.qⁱ[i, j, k]
     return MoistureMassFractions(qᵛ, qˡ, qⁱ)
 end
+
+@inline microphysical_tendency(i, j, k, grid, ::SA, args...) = zero(grid)
 
 #####
 ##### Saturation adjustment utilities
@@ -199,7 +199,7 @@ end
                               equilibrium::MixedPhaseEquilibrium{FT}) where FT
 
     pᵣ = 𝒰₀.reference_pressure
-    qᵗ = total_moisture_mass_fraction(𝒰₀)
+    qᵗ = total_specific_moisture(𝒰₀)
     qᵛ⁺ = adjustment_saturation_specific_humidity(T, pᵣ, qᵗ, thermo, equilibrium)
     q₁ = equilibrated_moisture_mass_fractions(T, qᵗ, qᵛ⁺, equilibrium)
     return with_moisture(𝒰₀, q₁)
@@ -214,27 +214,32 @@ end
     return T - T₁
 end
 
+const ATS = AbstractThermodynamicState
+
+# This function allows saturation adjustment to be used as a microphysics scheme directly
+@inline function maybe_adjust_thermodynamic_state(𝒰₀, saturation_adjustment::SA, microphysical_fields, qᵗ, thermo)
+    qᵃ = MoistureMassFractions(qᵗ) # compute moisture state to be adjusted
+    𝒰ᵃ = with_moisture(𝒰₀, qᵃ)
+    return adjust_thermodynamic_state(𝒰ᵃ, saturation_adjustment, thermo)
+end
+
 """
 $(TYPEDSIGNATURES)
 
 Return the saturation-adjusted thermodynamic state using a secant iteration.
 """
-@inline function compute_thermodynamic_state(𝒰₀::AbstractThermodynamicState{FT},
-                                             microphysics::SaturationAdjustment,
-                                             thermo::ThermodynamicConstants{FT}) where FT
-    # FT = eltype(𝒰₀)
+@inline function adjust_thermodynamic_state(𝒰₀::ATS, microphysics::SA, thermo)
+    FT = eltype(𝒰₀)
     is_absolute_zero(𝒰₀) && return 𝒰₀
 
-    # Compute an initial guess assuming unsaturated conditions 
-    qᵗ = total_moisture_mass_fraction(𝒰₀)
+    # Compute an initial guess assuming unsaturated conditions
+    qᵗ = total_specific_moisture(𝒰₀)
     q₁ = MoistureMassFractions(qᵗ)
     𝒰₁ = with_moisture(𝒰₀, q₁)
     T₁ = temperature(𝒰₁, thermo)
 
     equilibrium = microphysics.equilibrium
-    pᵣ = 𝒰₀.reference_pressure
-    ρ₁ = density(pᵣ, T₁, q₁, thermo)
-    qᵛ⁺₁ = saturation_specific_humidity(T₁, ρ₁, thermo, equilibrium)
+    qᵛ⁺₁ = saturation_specific_humidity(𝒰₁, thermo, equilibrium)
     qᵗ <= qᵛ⁺₁ && return 𝒰₁
 
     # If we made it here, the state is saturated.
@@ -277,3 +282,17 @@ Return the saturation-adjusted thermodynamic state using a secant iteration.
 
     return 𝒰₂
 end
+
+"""
+    $(TYPEDSIGNATURES)
+
+Perform saturation adjustment and return the temperature
+associated with the adjusted state.
+"""
+function compute_temperature(𝒰₀, adjustment::SA, thermo)
+    𝒰₁ = adjust_thermodynamic_state(𝒰₀, adjustment, thermo)
+    return temperature(𝒰₁, thermo)
+end
+
+# When no microphysics adjustment is needed
+compute_temperature(𝒰₀, ::Nothing, thermo) = temperature(𝒰₀, thermo)

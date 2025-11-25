@@ -32,8 +32,9 @@ end
 
 formulation_pressure_solver(formulation, grid) = nothing
 
-mutable struct AtmosphereModel{Frm, Arc, Tst, Grd, Clk, Thm, Den, Mom, Eng, Mse, Moi, Mfr,
-                               Tmp, Prs, Ppa, Sol, Vel, Trc, Adv, Cor, Frc, Mic, Cnd, Cls, Cfs} <: AbstractModel{Tst, Arc}
+
+mutable struct AtmosphereModel{Frm, Arc, Tst, Grd, Clk, Thm, Den, Mom, Eng, Mse, Moi, Mfr, Buy,
+                               Tmp, Prs, Sol, Vel, Trc, Adv, Cor, Frc, Mic, Cnd, Cls, Cfs} <: AbstractModel{Tst, Arc}
     architecture :: Arc
     grid :: Grd
     clock :: Clk
@@ -42,15 +43,15 @@ mutable struct AtmosphereModel{Frm, Arc, Tst, Grd, Clk, Thm, Den, Mom, Eng, Mse,
     density :: Den
     momentum :: Mom
     energy_density :: Eng
-    moist_static_energy :: Mse
+    specific_energy :: Mse
     moisture_density :: Moi
-    moisture_mass_fraction :: Mfr
+    specific_moisture :: Mfr
     temperature :: Tmp
-    nonhydrostatic_pressure :: Prs
-    hydrostatic_pressure_anomaly :: Ppa
+    pressure :: Prs
     pressure_solver :: Sol
     velocities :: Vel
     tracers :: Trc
+    buoyancy :: Buy
     advection :: Adv
     coriolis :: Cor
     forcing :: Frc
@@ -67,7 +68,7 @@ function default_formulation(grid, thermo)
 end
 
 """
-$(TYPEDSIGNATURES)
+    $(TYPEDSIGNATURES)
 
 Return an AtmosphereModel that uses the anelastic approximation following
 [Pauluis2008](@citet).
@@ -76,7 +77,7 @@ Example
 =======
 
 ```jldoctest
-julia> using Breeze, Breeze.AtmosphereModels, Oceananigans
+julia> using Breeze
 
 julia> grid = RectilinearGrid(size=(8, 8, 8), extent=(1, 2, 3));
 
@@ -114,15 +115,13 @@ function AtmosphereModel(grid;
     tracers = tupleit(tracers) # supports tracers=:c keyword argument (for example)
     tracer_names = validate_tracers(tracers)
 
-    hydrostatic_pressure_anomaly = CenterField(grid)
-    nonhydrostatic_pressure = CenterField(grid)
-
     # Next, we form a list of default boundary conditions:
-    names = prognostic_field_names(formulation, microphysics, tracers)
+    prognostic_names = prognostic_field_names(formulation, microphysics, tracers)
     FT = eltype(grid)
-    default_boundary_conditions = NamedTuple{names}(FieldBoundaryConditions() for _ in names)
+    default_boundary_conditions = NamedTuple{prognostic_names}(FieldBoundaryConditions() for _ in prognostic_names)
     boundary_conditions = merge(default_boundary_conditions, boundary_conditions)
-    boundary_conditions = regularize_field_boundary_conditions(boundary_conditions, grid, names)
+    all_names = field_names(formulation, microphysics, tracers)
+    boundary_conditions = regularize_field_boundary_conditions(boundary_conditions, grid, all_names)
 
     density = materialize_density(formulation, grid)
     velocities, momentum = materialize_momentum_and_velocities(formulation, grid, boundary_conditions)
@@ -136,9 +135,12 @@ function AtmosphereModel(grid;
     end
 
     energy_density = CenterField(grid, boundary_conditions=boundary_conditions.ρe)
-    moist_static_energy = CenterField(grid) # e = ρe / ρᵣ (diagnostic per-mass energy)
-    moisture_mass_fraction = CenterField(grid, boundary_conditions=boundary_conditions.ρqᵗ)
+
+    # Diagnostic fields
+    specific_energy = CenterField(grid) # e = ρe / ρᵣ (diagnostic per-mass energy)
+    specific_moisture = CenterField(grid)
     temperature = CenterField(grid)
+    pressure = CenterField(grid)
 
     prognostic_microphysical_fields = NamedTuple(microphysical_fields[name] for name in prognostic_field_names(microphysics))
     prognostic_fields = collect_prognostic_fields(formulation,
@@ -153,13 +155,13 @@ function AtmosphereModel(grid;
     timestepper = TimeStepper(timestepper, grid, prognostic_fields; implicit_solver)
     pressure_solver = formulation_pressure_solver(formulation, grid)
 
-    model_fields = merge(prognostic_fields, velocities, (; T=temperature, qᵗ=moisture_mass_fraction))
+    model_fields = merge(prognostic_fields, velocities, (; T=temperature, qᵗ=specific_moisture))
     forcing = atmosphere_model_forcing(forcing, prognostic_fields, model_fields)
 
     # May need to use more names in `tracers` for this to work
     closure_names = tuple(:ρe, :ρqᵗ, tracer_names...)
     closure = Oceananigans.Utils.with_tracers(closure_names, closure)
-    closure_fields = build_closure_fields(grid, clock, closure_names, boundary_conditions, closure)
+    closure_fields = build_closure_fields(nothing, grid, clock, tracer_names, boundary_conditions, closure)
 
     model = AtmosphereModel(arch,
                             grid,
@@ -169,15 +171,15 @@ function AtmosphereModel(grid;
                             density,
                             momentum,
                             energy_density,
-                            moist_static_energy,
+                            specific_energy,
                             moisture_density,
-                            moisture_mass_fraction,
+                            specific_moisture,
                             temperature,
-                            nonhydrostatic_pressure,
-                            hydrostatic_pressure_anomaly,
+                            pressure,
                             pressure_solver,
                             velocities,
                             tracers,
+                            nothing, # buoyancy, temporary solution for compatibility with Oceananigans.TurbulenceClosures
                             advection,
                             coriolis,
                             forcing,
@@ -222,6 +224,12 @@ function prognostic_field_names(formulation, microphysics, tracer_names)
     return tuple(default_names..., microphysical_names..., tracer_names...)
 end
 
+function field_names(formulation, microphysics, tracer_names)
+    prognostic_names = prognostic_field_names(formulation, microphysics, tracer_names)
+    additional_names = (:u, :v, :w, :e, :T, :qᵗ)
+    return tuple(prognostic_names..., additional_names...)
+end
+
 function atmosphere_model_forcing(user_forcings, prognostic_fields, model_fields)
     forcings_type = typeof(user_forcings)
     msg = string("AtmosphereModel forcing must be a NamedTuple, got $forcings_type")
@@ -240,7 +248,7 @@ function atmosphere_model_forcing(user_forcings::NamedTuple, prognostic_fields, 
         if name ∉ keys(prognostic_fields)
             msg = string("Invalid forcing: forcing contains an entry for $name, but $name is not a prognostic field!", '\n',
                          "The prognostic fields are ", keys(prognostic_fields))
-            throw(ArgumentError(msg))   
+            throw(ArgumentError(msg))
         end
     end
 
@@ -260,8 +268,10 @@ function atmosphere_model_forcing(user_forcings::NamedTuple, prognostic_fields, 
 end
 
 function fields(model::AtmosphereModel)
-    additional_fields = (; T=model.temperature, qᵗ=model.moisture_mass_fraction)
-    return merge(prognostic_fields(model), model.velocities, additional_fields)
+    auxiliary_thermodynamic_fields = (e=model.specific_energy, T=model.temperature, qᵗ=model.specific_moisture)
+    return merge(prognostic_fields(model),
+                 model.velocities,
+                 auxiliary_thermodynamic_fields)
 end
 
 function prognostic_fields(model::AtmosphereModel)

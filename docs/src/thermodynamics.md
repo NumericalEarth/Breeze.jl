@@ -93,7 +93,7 @@ q = Breeze.Thermodynamics.MoistureMassFractions(0.01, 0.002, 1e-5)
 from which we can compute the total moisture mass fraction,
 
 ```@example thermo
-qᵗ = Breeze.Thermodynamics.total_moisture_mass_fraction(q)
+qᵗ = Breeze.Thermodynamics.total_specific_moisture(q)
 ```
 
 And the dry as well,

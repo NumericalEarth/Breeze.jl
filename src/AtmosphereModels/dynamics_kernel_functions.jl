@@ -1,6 +1,7 @@
 using Oceananigans.Advection: div_𝐯u, div_𝐯v, div_𝐯w, div_Uc
 using Oceananigans.Coriolis: x_f_cross_U, y_f_cross_U, z_f_cross_U
 using Oceananigans.Operators: ∂xᶠᶜᶜ, ∂yᶜᶠᶜ, ∂zᶜᶜᶠ, ℑzᵃᵃᶜ, ℑzᵃᵃᶠ
+using Oceananigans.Utils: sum_of_velocities
 
 @inline ∂ⱼ_𝒯₁ⱼ(i, j, k, grid, args...) = zero(grid)
 @inline ∂ⱼ_𝒯₂ⱼ(i, j, k, grid, args...) = zero(grid)
@@ -21,15 +22,33 @@ Oceananigans `qᶜ` is the kinematic tracer flux.
 ##### Some key functions
 #####
 
-@inline function ρ_bᶜᶜᶠ(i, j, k, grid, ρ, T, q, formulation, thermo)
-    ρᶜᶜᶠ = ℑzᵃᵃᶠ(i, j, k, grid, ρ)
-    bᶜᶜᶠ = ℑzᵃᵃᶠ(i, j, k, grid, buoyancy, formulation, T, q, thermo)
-    return ρᶜᶜᶠ * bᶜᶜᶠ
+@inline @inbounds function ρ_bᶜᶜᶜ(i, j, k, grid,
+                                  formulation::AnelasticFormulation,
+                                  reference_density,
+                                  temperature,
+                                  specific_moisture,
+                                  microphysics,
+                                  microphysical_fields,
+                                  thermo)
+
+    qᵗ = specific_moisture[i, j, k]
+    pᵣ = formulation.reference_state.pressure[i, j, k]
+    T = temperature[i, j, k]
+    ρᵣ = reference_density[i, j, k]
+
+    q = compute_moisture_fractions(i, j, k, grid, microphysics, ρᵣ, qᵗ, microphysical_fields)
+    Rᵐ = mixture_gas_constant(q, thermo)
+    ρ = pᵣ / (Rᵐ * T)
+    g = thermo.gravitational_acceleration
+
+    return - g * (ρ - ρᵣ)
 end
 
-@inline function ρ_w_bᶜᶜᶠ(i, j, k, grid, w, ρ, T, q, formulation, thermo)
-    ρ_b = ρ_bᶜᶜᶠ(i, j, k, grid, ρ, T, q, formulation, thermo)
-    return @inbounds ρ_b * w[i, j, k]
+@inline ρ_bᶜᶜᶠ(i, j, k, grid, args...) = ℑzᵃᵃᶠ(i, j, k, grid, ρ_bᶜᶜᶜ, args...)   
+
+@inline @inbounds function ρ_w_bᶜᶜᶠ(i, j, k, grid, w, args...)
+    ρ_b = ρ_bᶜᶜᶠ(i, j, k, grid, args...)
+    return ρ_b * w[i, j, k]
 end
 
 # Note: these are unused currently
@@ -73,7 +92,7 @@ end
 end
 
 @inline function z_momentum_tendency(i, j, k, grid,
-                                     reference_density,
+                                     density,
                                      advection,
                                      velocities,
                                      closure,
@@ -85,59 +104,88 @@ end
                                      ρw_forcing,
                                      formulation,
                                      temperature,
-                                     moisture_mass_fraction,
+                                     specific_moisture,
+                                     microphysics,
+                                     microphysical_fields,
                                      thermo)
 
     return ( - div_𝐯w(i, j, k, grid, advection, velocities, momentum.ρw)
-             + ρ_bᶜᶜᶠ(i, j, k, grid, reference_density, temperature, moisture_mass_fraction, formulation, thermo)
+             + ρ_bᶜᶜᶠ(i, j, k, grid, formulation, density, temperature,
+                      specific_moisture, microphysics, microphysical_fields, thermo)
              - z_f_cross_U(i, j, k, grid, coriolis, momentum)
-             - ∂ⱼ_𝒯₃ⱼ(i, j, k, grid, reference_density, closure, closure_fields, clock, model_fields, nothing)
+             - ∂ⱼ_𝒯₃ⱼ(i, j, k, grid, density, closure, closure_fields, clock, model_fields, nothing)
              + ρw_forcing(i, j, k, grid, clock, model_fields))
 end
 
 @inline function scalar_tendency(i, j, k, grid,
                                  scalar,
                                  id,
+                                 name,
                                  scalar_forcing,
-                                 reference_density,
+                                 formulation,
+                                 thermo,
+                                 energy_density,
+                                 moisture_density,
                                  advection,
                                  velocities,
+                                 microphysics,
+                                 microphysical_fields,
                                  closure,
                                  closure_fields,
                                  clock,
                                  model_fields)
 
-    return ( - div_Uc(i, j, k, grid, advection, velocities, scalar)
-             - ∇_dot_Jᶜ(i, j, k, grid, reference_density, closure, closure_fields, closure_fields, id, scalar, clock, model_fields, buoyancy)
+    Uᵖ = microphysical_velocities(microphysics, name)
+    Uᵗ = sum_of_velocities(velocities, Uᵖ)
+    density = formulation.reference_state.density
+
+    𝒰 = diagnose_thermodynamic_state(i, j, k, grid,
+                                     formulation,
+                                     microphysics,
+                                     microphysical_fields,
+                                     thermo,
+                                     energy_density,
+                                     moisture_density)
+
+    return ( - div_Uc(i, j, k, grid, advection, Uᵗ, scalar)
+             - ∇_dot_Jᶜ(i, j, k, grid, density, closure, closure_fields, id, scalar, clock, model_fields, nothing)
+             + microphysical_tendency(i, j, k, grid, microphysics, name, microphysical_fields, 𝒰, thermo)
              + scalar_forcing(i, j, k, grid, clock, model_fields))
 end
 
 @inline function moist_static_energy_tendency(i, j, k, grid,
-                                              energy_density,
                                               id,
                                               energy,
                                               ρe_forcing,
-                                              reference_density,
+                                              formulation,
+                                              thermo,
+                                              energy_density,
+                                              moisture_density,
                                               advection,
                                               velocities,
+                                              microphysics,
+                                              microphysical_fields,
                                               closure,
                                               closure_fields,
                                               clock,
                                               model_fields,
-                                              formulation,
                                               temperature,
-                                              moisture_mass_fraction,
-                                              thermo,
-                                              microphysical_fields,
-                                              microphysics)
+                                              specific_moisture)
+
+    𝒰 = diagnose_thermodynamic_state(i, j, k, grid, formulation,
+                                     microphysics, microphysical_fields,
+                                     thermo, energy_density, moisture_density)
+
+    density = formulation.reference_state.density
 
     # Compute the buoyancy flux term, ρᵣ w b
-    buoyancy_flux = ℑzᵃᵃᶜ(i, j, k, grid, ρ_w_bᶜᶜᶠ, velocities.w, reference_density,
-                          temperature, moisture_mass_fraction, formulation, thermo)
+    buoyancy_flux = ℑzᵃᵃᶜ(i, j, k, grid, ρ_w_bᶜᶜᶠ, velocities.w, formulation, density,
+                          temperature, specific_moisture,
+                          microphysics, microphysical_fields, thermo)
 
     return ( - div_Uc(i, j, k, grid, advection, velocities, energy_density)
              + buoyancy_flux
-             - ∇_dot_Jᶜ(i, j, k, grid, reference_density, closure, closure_fields, id, energy, clock, model_fields, nothing)
-             # + microphysical_energy_tendency(i, j, k, grid, formulation, microphysics, microphysical_fields)
+             - ∇_dot_Jᶜ(i, j, k, grid, density, closure, closure_fields, id, energy, clock, model_fields, nothing)
+             + microphysical_tendency(i, j, k, grid, microphysics, Val(:ρe), microphysical_fields, 𝒰, thermo)
              + ρe_forcing(i, j, k, grid, clock, model_fields))
 end
