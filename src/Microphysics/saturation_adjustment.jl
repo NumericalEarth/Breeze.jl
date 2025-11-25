@@ -200,7 +200,7 @@ end
     return T - T₁
 end
 
-const ATC = AbstractThermodynamicState
+const ATS = AbstractThermodynamicState
 
 # This function allows saturation adjustment to be used as a microphysics scheme directly
 @inline function maybe_adjust_thermodynamic_state(𝒰₀, saturation_adjustment::SA, microphysical_fields, qᵗ, thermo)
@@ -214,7 +214,7 @@ $(TYPEDSIGNATURES)
 
 Return the saturation-adjusted thermodynamic state using a secant iteration.
 """
-@inline function adjust_thermodynamic_state(𝒰₀::ATC, microphysics::SA, thermo)
+@inline function adjust_thermodynamic_state(𝒰₀::ATS, microphysics::SA, thermo)
     FT = eltype(𝒰₀)
     is_absolute_zero(𝒰₀) && return 𝒰₀
 

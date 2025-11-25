@@ -1,5 +1,7 @@
 abstract type AbstractThermodynamicState{FT} end
 
+@inline Base.eltype(::AbstractThermodynamicState{FT}) where FT = FT
+
 struct PotentialTemperatureState{FT} <: AbstractThermodynamicState{FT}
     potential_temperature :: FT
     moisture_mass_fractions :: MoistureMassFractions{FT}
@@ -56,7 +58,6 @@ struct MoistStaticEnergyState{FT} <: AbstractThermodynamicState{FT}
     reference_pressure :: FT
 end
 
-@inline Base.eltype(::MoistStaticEnergyState{FT}) where FT = FT
 @inline total_specific_moisture(state::MoistStaticEnergyState) = total_specific_moisture(state.moisture_mass_fractions)
 @inline is_absolute_zero(𝒰::MoistStaticEnergyState) = 𝒰.moist_static_energy == 0
 

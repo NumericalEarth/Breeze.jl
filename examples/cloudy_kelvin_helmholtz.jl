@@ -53,15 +53,20 @@ model = AtmosphereModel(grid; advection=WENO(order=5), microphysics)
 # N² = \frac{g}{θ₀} \frac{∂θ}{∂z} ,
 # ```
 #
-# We initialize the potential temperature with a gradient that gives
-# constant Brunt–Väisälä frequency, representative of mid-tropospheric stability.
+# We initialize the potential temperature that gives constant Brunt–Väisälä frequency,
+# representative of mid-tropospheric stability. The (dry) Brunt–Väisälä frequency is
+#
+# ```math
+# N² = \frac{g}{θ} \frac{∂θ}{∂z}
+# ```
+#
+# and thus, for constant ``N²`` the above implies ``θ = θ₀ \exp{(N² z / g)}``.
 
 thermo = ThermodynamicConstants()
 g = thermo.gravitational_acceleration
 θ₀ = model.formulation.reference_state.potential_temperature
 N = 0.01                  # target dry Brunt–Väisälä frequency (s⁻¹)
-dθdz =  θ₀ * N^2 / g      # dθ/dz (K m⁻¹)
-θᵇ(z) = θ₀ + dθdz * z
+θᵇ(z) = θ₀ * exp(N^2 * z / g)
 
 # ## Shear and moisture profiles
 #
@@ -214,7 +219,7 @@ axθ = Axis(fig[3, 1], xlabel="x (m)", ylabel="z (m)", title = "Potential temper
 
 hmξ = heatmap!(axξ, ξn, colormap = :balance, colorrange = (-0.25, 0.25))
 hml = heatmap!(axl, qˡn, colormap = Reverse(:Blues_4), colorrange = (0, 0.003))
-hmθ = heatmap!(axθ, θn, colormap = :thermal, colorrange = (θ₀, θ₀+ dθdz * grid.Lz))
+hmθ = heatmap!(axθ, θn, colormap = :thermal, colorrange = extrema(θt))
 
 Colorbar(fig[1, 2], hmξ, label = "s⁻¹", vertical = true)
 Colorbar(fig[2, 2], hml, label = "kg/kg", vertical = true)
