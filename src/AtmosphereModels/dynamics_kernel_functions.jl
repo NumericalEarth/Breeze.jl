@@ -36,14 +36,7 @@ Oceananigans `qᶜ` is the kinematic tracer flux.
     T = temperature[i, j, k]
     ρᵣ = reference_density[i, j, k]
 
-    # TODO: fix this assumption of non-condensed state by invoking the microphysics model
-    q = compute_moisture_fractions(i, j, k, grid,
-                                   microphysics,
-                                   formulation.reference_state.density,
-                                   specific_moisture,
-                                   microphysical_fields)
-
-    q = MoistureMassFractions(qᵗ)
+    q = compute_moisture_fractions(i, j, k, grid, microphysics, ρᵣ, qᵗ, microphysical_fields)
     Rᵐ = mixture_gas_constant(q, thermo)
     ρ = pᵣ / (Rᵐ * T)
     g = thermo.gravitational_acceleration

@@ -52,8 +52,11 @@ Build and return [`MoistureMassFractions`](@ref) at `(i, j, k)` for the given `g
 
 Dispatch is provided for `::Nothing` microphysics here. Specific microphysics
 schemes may extend this method to provide tailored behavior.
+
+Note: while ρ and qᵗ are scalars, the microphysical fields `μ` are `NamedTuple` of `Field`.
+This may be changed in the future.
 """
-@inline compute_moisture_fractions(i, j, k, grid, microphysics::Nothing, ρ, qᵗ, μ) = @inbounds MoistureMassFractions(qᵗ)
+@inline compute_moisture_fractions(i, j, k, grid, microphysics::Nothing, ρ, qᵗ, μ) = MoistureMassFractions(qᵗ)
 
 """
 $(TYPEDSIGNATURES)
