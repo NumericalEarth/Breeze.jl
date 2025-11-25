@@ -1,6 +1,4 @@
 using Oceananigans: Oceananigans, Center, Field, set!, fill_halo_regions!
-using Oceananigans.Utils: launch!
-using Oceananigans.Operators: Δzᶜᶜᶠ, ℑzᵃᵃᶠ
 
 using Adapt: Adapt, adapt
 using KernelAbstractions: @kernel, @index
