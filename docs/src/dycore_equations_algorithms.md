@@ -88,7 +88,7 @@ where ``c^{p m}`` is the mixture heat capacity, ``T`` is temperature, ``g`` is g
 and 
 ``\mathscr{L}^i_r`` is the latent heat of deposition (vapor to ice) at the energy reference temperature,
 
-According to [Pauluis2008](@citet) the moist static energy obeys 
+According to [Pauluis2008](@citet), the moist static energy obeys 
 
 ```math
 \partial_t(ρᵣ e) + \boldsymbol{\nabla \cdot}\, (ρᵣ e \boldsymbol{u}) = ρᵣ w b + S_e ,
