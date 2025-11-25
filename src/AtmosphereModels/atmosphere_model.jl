@@ -77,7 +77,7 @@ Example
 =======
 
 ```jldoctest
-julia> using Breeze, Breeze.AtmosphereModels, Oceananigans
+julia> using Breeze
 
 julia> grid = RectilinearGrid(size=(8, 8, 8), extent=(1, 2, 3));
 
