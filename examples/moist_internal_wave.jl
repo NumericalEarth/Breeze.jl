@@ -2,7 +2,7 @@
 #
 # This literate example adapts [Oceananigans' internal wave example](https://clima.github.io/OceananigansDocumentation/stable/literated/internal_wave/)
 # to AtmosphereModel to explore how slight supersaturation modifies the buoyancy frequency
-# following [durran1982effects](@citet).
+# following the study by [durran1982effects](@citet).
 # The idea is simple:
 # 1. Build a 2-D `x-z` anelastic AtmosphereModel with a realistic dry stratification.
 # 2. Initialize total specific humidity `qᵗ` just **above** saturation everywhere.
