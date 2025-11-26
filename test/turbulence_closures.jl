@@ -44,7 +44,7 @@ using Test
     @testset "Closure flux affects momentum tendency [$(FT)]" begin
         closure = ScalarDiffusivity(ν=1e4)
         model = AtmosphereModel(grid; advection=nothing, closure)
-        set!(model; ρu = (x, y, z) -> exp((z - 50)^2 / (10 * 20^2)))
+        set!(model; ρu = (x, y, z) -> exp((z - 50)^2 / (2 * 20^2)))
         Breeze.AtmosphereModels.compute_tendencies!(model)
         Gρu = model.timestepper.Gⁿ.ρu
         @test maximum(abs, Gρu) > 0
