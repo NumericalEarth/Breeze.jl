@@ -122,10 +122,10 @@ run!(simulation)
 
 # Analytical solution for linear mountain wave problem (Appendix A of Klemp et al, 2015)
 # Analytic Fourier transform (A8)
-hhat(k) = sqrt(π)*h₀*a/4 * ( exp.(-0.25*a^2*(K .+ k).^2) .+ exp.(-0.25*a^2*(K .- k).^2) .+ 2 * exp.(-0.25*a^2*k.^2) )
+hhat(k) = @. sqrt(π) * h₀ * a/4 * (exp(-a^2* ( K + k)^2 / 4) + exp(-a^2 (K - k)^2 / 4) + 2exp(-a^2 * k^2 / 4))
 
 # m² and k* (A5, A11)
-m²(k) = (N²/U^2 - β^2/4) .- k.^2
+m²(k) = (N²/U^2 - β^2/4) - k^2
 kstar = sqrt(N²/U^2 - β^2/4)
 
 # Integral using trapezoidal rule
