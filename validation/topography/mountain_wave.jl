@@ -122,14 +122,14 @@ run!(simulation)
 
 # Analytical solution for linear mountain wave problem (Appendix A of Klemp et al, 2015)
 # Analytic Fourier transform (A8)
-hhat(k) = @. sqrt(π) * h₀ * a/4 * (exp(-a^2* ( K + k)^2 / 4) + exp(-a^2 (K - k)^2 / 4) + 2exp(-a^2 * k^2 / 4))
+hhat(k) = @. sqrt(π) * h₀ * a/4 * (exp(-a^2 * (K + k)^2 / 4) + exp(-a^2 * (K - k)^2 / 4) + 2exp(-a^2 * k^2 / 4))
 
 # m² and k* (A5, A11)
 m²(k) = (N²/U^2 - β^2/4) - k^2
 kstar = sqrt(N²/U^2 - β^2/4)
 
 # Integral using trapezoidal rule
-trapz(x, f) = sum((@view(f[1:end-1]) .+ @view(f[2:end])).*diff(x)) / 2
+trapz(x, f) = sum((@view(f[1:end-1]) .+ @view(f[2:end])) .* diff(x)) / 2
 
 """
     w_linear(x, z; nk=10000)
@@ -144,16 +144,16 @@ Arguments:
 function w_linear(x, z; nk=10000)
     # Discretize wavenumber space
     k = range(0.0, kstar*100; length=nk)
-    m2 = m²(k)
-    ĥ   = hhat(k)
+    m2 = m².(k)
+    ĥ = hhat.(k)
 
     # Oscillatory part: 0 ≤ k ≤ k*
     idx = findall(ki -> ki ≤ kstar, k)
     Iosc = 0.0
     if !isempty(idx)
-        ko   = k[idx]
-        mo   = sqrt.(clamp.(m2[idx], 0, Inf))
-        ĥo   = ĥ[idx]
+        ko = k[idx]
+        mo = sqrt.(clamp.(m2[idx], 0, Inf))
+        ĥo = ĥ[idx]
         integrand = ko .* ĥo .* sin.(mo*z .+ ko*x)
         Iosc = trapz(ko, integrand)
     end
@@ -162,15 +162,15 @@ function w_linear(x, z; nk=10000)
     idx = findall(ki -> ki ≥ kstar, k)
     Iev = 0.0
     if !isempty(idx)
-        ke   = k[idx]
-        me   = sqrt.(clamp.(-m2[idx], 0, Inf))  # |m| when m^2<0
-        ĥe   = ĥ[idx]
-        integrand = ke .* ĥe .* exp.(-me*z) .* sin.(ke*x)
+        ke = k[idx]
+        me = sqrt.(clamp.(-m2[idx], 0, Inf))  # |m| when m^2<0
+        ĥe = ĥ[idx]
+        integrand = @. ke * ĥe * exp(-me * z) * sin(ke * x)
         Iev = trapz(ke, integrand)
     end
 
     # Assemble (A10)
-    return -(U/π) * exp(β*z/2) * (Iosc + Iev)
+    return - U / π * exp(β*z/2) * (Iosc + Iev)
 end
 
 # Visualization
@@ -179,23 +179,22 @@ fig = Figure()
 gb = fig[1, 1]
 
 xs = LinRange(-L, L, Nx)
-zs = z_faces#LinRange(0, H, Nz+1)
+zs = z_faces # LinRange(0, H, Nz+1)
 
-ax1, hm = heatmap(gb[1,1], xs, zs, Array(interior(model.velocities.w, :,1,:)), colormap = :bwr, colorrange = (-1.0, 1.0))
+ax1, hm = heatmap(gb[1, 1], xs, zs, Array(interior(model.velocities.w, :, 1, :)), colormap = :bwr, colorrange = (-1, 1))
 ax1.xlabel = "x [m]"
 ax1.ylabel = "z [m]"
 ax1.title = "Simulated w at 3-hr"
-ax1.limits = ((-30000., 30000.), (0, 10000.))
+ax1.limits = ((-30000, 30000), (0, 10000))
 
-
-xs = range(-30e3, 30e3; length=60)   # x ∈ [-30, 30] km
-zs = range(0.0, 10e3; length=40)     # z ∈ [0, 10] km
+xs = range(-30e3, 30e3; length=60) # x ∈ [-30, 30] km
+zs = range(0, 10e3; length=40)     # z ∈ [0, 10] km
 w_analytical   = [w_linear(x, z) for z in zs, x in xs]
-ax2, hm2 = heatmap(gb[2,1], xs, zs, w_analytical', colormap = :bwr, colorrange = (-1.0, 1.0))
+ax2, hm2 = heatmap(gb[2, 1], xs, zs, w_analytical', colormap = :bwr, colorrange = (-1, 1))
 ax2.xlabel = "x [m]"
 ax2.ylabel = "z [m]"
 ax2.title = "Linear Analytical w"
-ax2.limits = ((-30000., 30000.), (0, 10000.))
+ax2.limits = ((-30000, 30000), (0, 10000))
 
 cb = Colorbar(gb[1:2, 2], hm, label = "w [m s⁻¹]")
 
