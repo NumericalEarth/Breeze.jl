@@ -14,7 +14,9 @@ using Oceananigans.Operators:
     Ax_qᶠᶜᶜ, Ay_qᶜᶠᶜ, Az_qᶜᶜᶠ,
     # Interpolator functions used for ρᵣ at faces
     ℑxᶠᵃᵃ, ℑyᵃᶠᵃ, ℑzᵃᵃᶠ,
-    ℑxyᶠᶠᵃ, ℑxzᶠᵃᶠ, ℑyzᵃᶠᶠ, ℑxzᶠᵃᶠ
+    ℑxyᶠᶠᵃ, ℑxzᶠᵃᶠ, ℑyzᵃᶠᶠ, ℑxzᶠᵃᶠ,
+    # Derivative operator for buoyancy gradient
+    ∂zᶜᶜᶠ
 
 using Oceananigans.TurbulenceClosures:
     AbstractTurbulenceClosure,
@@ -24,7 +26,43 @@ using Oceananigans.TurbulenceClosures:
     _viscous_flux_wx, _viscous_flux_wy, _viscous_flux_wz,
     _diffusive_flux_x, _diffusive_flux_y, _diffusive_flux_z
 
+using Oceananigans.TurbulenceClosures: TurbulenceClosures as OceanTurbulenceClosures
+using Oceananigans.BuoyancyFormulations: BuoyancyFormulations as OceanBuoyancyFormulations
+
+using Adapt: Adapt, adapt
+
 import ..AtmosphereModels: ∂ⱼ_𝒯₁ⱼ, ∂ⱼ_𝒯₂ⱼ, ∂ⱼ_𝒯₃ⱼ, ∇_dot_Jᶜ
+using ..AtmosphereModels: AtmosphereModel, buoyancy
+
+#####
+##### Buoyancy interface for AtmosphereModel
+#####
+
+struct AtmosphereBuoyancy{F, T}
+    formulation :: F
+    thermodynamics :: T
+end
+
+Adapt.adapt_structure(to, b::AtmosphereBuoyancy) =
+    AtmosphereBuoyancy(adapt(to, b.formulation), adapt(to, b.thermodynamics))
+
+OceanTurbulenceClosures.buoyancy_force(model::AtmosphereModel) =
+    AtmosphereBuoyancy(model.formulation, model.thermodynamics)
+
+OceanTurbulenceClosures.buoyancy_tracers(model::AtmosphereModel) =
+    (; T = model.temperature, qᵗ = model.specific_moisture)
+
+@inline function OceanBuoyancyFormulations.∂z_b(i, j, k, grid, b::AtmosphereBuoyancy, tracers)
+    ∂zᶜᶜᶠ(i, j, k, grid, _buoyancy_at_ccc, b, tracers)
+end
+
+@inline function _buoyancy_at_ccc(i, j, k, grid, b::AtmosphereBuoyancy, tracers)
+    buoyancy(i, j, k, grid, b.formulation, tracers.T, tracers.qᵗ, b.thermodynamics)
+end
+
+#####
+##### Fallbacks for closure = nothing
+#####
 
 @inline ∂ⱼ_𝒯₁ⱼ(i, j, k, grid, ρ, ::Nothing, args...) = zero(grid)
 @inline ∂ⱼ_𝒯₂ⱼ(i, j, k, grid, ρ, ::Nothing, args...) = zero(grid)
