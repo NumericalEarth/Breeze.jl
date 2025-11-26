@@ -64,16 +64,24 @@ using Test
         @test haskey(model.closure_fields, :νₑ) || haskey(model.closure_fields, :κₑ)
     end
 
-    # Test scalar diffusion with advection=nothing
+    # Test LES scalar diffusion with advection=nothing
     # This isolates the effect of the closure on scalar fields
-    @testset "Scalar diffusion without advection [$(FT)]" begin
-        closure = ScalarDiffusivity(ν=1e4, κ=1e4)
+    les_closures = (SmagorinskyLilly(), AnisotropicMinimumDissipation())
+
+    @testset "LES scalar diffusion without advection [$(FT), $(nameof(typeof(closure)))]" for closure in les_closures
         model = AtmosphereModel(grid; closure, advection=nothing, tracers=:ρc)
 
+        # Set random velocity field to trigger non-zero eddy diffusivity
+        Ξ(x, y, z) = randn()
+
         # Set scalar gradients for energy, moisture, and passive tracer
-        set!(model; ρe = (x, y, z) -> 3e5 + 1e3 * z)
-        set!(model; ρqᵗ = (x, y, z) -> 0.01 * z / 100)
-        set!(model; ρc = (x, y, z) -> z / 100)
+        θ₀ = model.formulation.reference_state.potential_temperature
+        z₀, dz = 50, 10
+        gaussian(z) = exp(- (z - z₀)^2 / 2dz^2)
+        θᵢ(x, y, z) = θ₀ + 10 * gaussian(z)
+        qᵗᵢ(x, y, z) = 0.01 + 1e-3 * gaussian(z)
+        ρcᵢ(x, y, z) = gaussian(z)
+        set!(model; θ = θᵢ, ρqᵗ = qᵗᵢ, ρc = ρcᵢ, ρu = Ξ, ρv = Ξ, ρw = Ξ)
 
         # Store initial scalar fields
         ρe₀ = deepcopy(model.energy_density)
@@ -87,27 +95,5 @@ using Test
         @test !(model.energy_density ≈ ρe₀)
         @test !(model.moisture_density ≈ ρqᵗ₀)
         @test !(model.tracers.ρc ≈ ρc₀)
-    end
-
-    # Test SmagorinskyLilly scalar diffusion (energy only, since Smagorinsky
-    # computes diffusivity from strain rate and applies it to all scalars)
-    @testset "SmagorinskyLilly energy diffusion [$(FT)]" begin
-        closure = SmagorinskyLilly()
-        model = AtmosphereModel(grid; closure, advection=nothing)
-
-        # Set velocity gradient to trigger eddy diffusivity
-        set!(model; ρu = (x, y, z) -> z / 100)
-
-        # Set energy gradient
-        set!(model; ρe = (x, y, z) -> 3e5 + 1e3 * z)
-
-        # Store initial energy
-        ρe₀ = deepcopy(model.energy_density)
-
-        # Take a time step
-        time_step!(model, 1)
-
-        # Energy should change due to LES diffusion
-        @test !(model.energy_density ≈ ρe₀)
     end
 end

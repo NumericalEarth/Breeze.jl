@@ -26,37 +26,7 @@ using Oceananigans.TurbulenceClosures:
     _viscous_flux_wx, _viscous_flux_wy, _viscous_flux_wz,
     _diffusive_flux_x, _diffusive_flux_y, _diffusive_flux_z
 
-using Oceananigans.TurbulenceClosures: TurbulenceClosures as OceanTurbulenceClosures
-using Oceananigans.BuoyancyFormulations: BuoyancyFormulations as OceanBuoyancyFormulations
-
-using Adapt: Adapt, adapt
-
 import ..AtmosphereModels: ∂ⱼ_𝒯₁ⱼ, ∂ⱼ_𝒯₂ⱼ, ∂ⱼ_𝒯₃ⱼ, ∇_dot_Jᶜ
-using ..AtmosphereModels: AtmosphereModel, buoyancy
-
-#####
-##### Buoyancy interface for AtmosphereModel
-#####
-
-struct AtmosphereModelBuoyancy{F, T}
-    formulation :: F
-    thermodynamics :: T
-end
-
-Adapt.adapt_structure(to, b::AtmosphereModelBuoyancy) =
-    AtmosphereModelBuoyancy(adapt(to, b.formulation), adapt(to, b.thermodynamics))
-
-OceanTurbulenceClosures.buoyancy_force(model::AtmosphereModel) =
-    AtmosphereModelBuoyancy(model.formulation, model.thermodynamics)
-
-OceanTurbulenceClosures.buoyancy_tracers(model::AtmosphereModel) =
-    (; T = model.temperature, qᵗ = model.specific_moisture)
-
-@inline OceanBuoyancyFormulations.∂z_b(i, j, k, grid, b::AtmosphereModelBuoyancy, tracers) =
-    ∂zᶜᶜᶠ(i, j, k, grid, turbulence_closure_buoyancy, b, tracers)
-
-@inline turbulence_closure_buoyancy(i, j, k, grid, b::AtmosphereModelBuoyancy, tracers) =
-    buoyancy(i, j, k, grid, b.formulation, tracers.T, tracers.qᵗ, b.thermodynamics)
 
 #####
 ##### Fallbacks for closure = nothing
@@ -73,17 +43,19 @@ OceanTurbulenceClosures.buoyancy_tracers(model::AtmosphereModel) =
 
 # Face flux wrappers that call Oceananigans' kinematic diffusive fluxes and
 # multiply by ρᵣ at the appropriate face.
+# Note: args must include (disc, closure, closure_fields, id, c, clock, model_fields, buoyancy)
+# where id is the tracer index (Val(n)) and c is the tracer field.
 
 @inline Jᶜx(i, j, k, grid, ρ, args...) = ℑxᶠᵃᵃ(i, j, k, grid, ρ) * _diffusive_flux_x(i, j, k, grid, args...)
 @inline Jᶜy(i, j, k, grid, ρ, args...) = ℑyᵃᶠᵃ(i, j, k, grid, ρ) * _diffusive_flux_y(i, j, k, grid, args...)
 @inline Jᶜz(i, j, k, grid, ρ, args...) = ℑzᵃᵃᶠ(i, j, k, grid, ρ) * _diffusive_flux_z(i, j, k, grid, args...)
 
-@inline function ∇_dot_Jᶜ(i, j, k, grid, ρᵣ, closure::AbstractTurbulenceClosure, closure_fields, clock, model_fields, buoyancy)
+@inline function ∇_dot_Jᶜ(i, j, k, grid, ρᵣ, closure::AbstractTurbulenceClosure, closure_fields, id, c, clock, model_fields, buoyancy)
     disc = time_discretization(closure)
     return V⁻¹ᶜᶜᶜ(i, j, k, grid) * (
-          δxᶜᵃᵃ(i, j, k, grid, Ax_qᶠᶜᶜ, Jᶜx, ρᵣ, disc, closure, closure_fields, clock, model_fields, buoyancy)
-        + δyᵃᶜᵃ(i, j, k, grid, Ay_qᶜᶠᶜ, Jᶜy, ρᵣ, disc, closure, closure_fields, clock, model_fields, buoyancy)
-        + δzᵃᵃᶜ(i, j, k, grid, Az_qᶜᶜᶠ, Jᶜz, ρᵣ, disc, closure, closure_fields, clock, model_fields, buoyancy))
+          δxᶜᵃᵃ(i, j, k, grid, Ax_qᶠᶜᶜ, Jᶜx, ρᵣ, disc, closure, closure_fields, id, c, clock, model_fields, buoyancy)
+        + δyᵃᶜᵃ(i, j, k, grid, Ay_qᶜᶠᶜ, Jᶜy, ρᵣ, disc, closure, closure_fields, id, c, clock, model_fields, buoyancy)
+        + δzᵃᵃᶜ(i, j, k, grid, Az_qᶜᶜᶠ, Jᶜz, ρᵣ, disc, closure, closure_fields, id, c, clock, model_fields, buoyancy))
 end
 
 #####
