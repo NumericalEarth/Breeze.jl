@@ -27,9 +27,9 @@ N² = g^2 / (cᵖᵈ * T₀)       # Brunt–Väisälä frequency squared
 N  = sqrt(N²)
 
 # Schär mountain parameters
-h₀ = 250                    # m   (use 25 m for strict linearity; 250 m for full case)
-a  = 5000                   # m   (Gaussian half-width parameter)
-λ  = 4000                   # m   (terrain envelope wavelength)
+h₀ = 250                    # m (use 25 m for strict linearity; 250 m for full case)
+a  = 5000                   # m (Gaussian half-width parameter)
+λ  = 4000                   # m (terrain envelope wavelength)
 K  = 2*π/λ                  # rad m^-1
 
 #  grid configuration
@@ -65,7 +65,7 @@ grid = ImmersedBoundaryGrid(underlying_grid, PartialCellBottom(hill))
 # top_mask = GaussianMask{:z}(center=grid.Lz, width=grid.Lz/2)
 # sponge = Relaxation(rate=damping_rate, mask=top_mask)
 
-@inline gaussian_mask(z, p) = exp(-(z - p.z0)^2 / (2 * p.dz^2))
+@inline gaussian_mask(z, p) = exp(-(z - p.z0)^2 / 2p.dz^2)
 
 @inline function sponge(i, j, k, grid, clock, params, ρc, lz)
     z = znode(k, grid, lz)
@@ -143,7 +143,7 @@ Arguments:
 """
 function w_linear(x, z; nk=10000)
     # Discretize wavenumber space
-    k = range(0.0, kstar*100; length=nk)
+    k = range(0, 100kstar; length=nk)
     m2 = m².(k)
     ĥ = hhat.(k)
 
@@ -154,7 +154,7 @@ function w_linear(x, z; nk=10000)
         ko = k[idx]
         mo = sqrt.(clamp.(m2[idx], 0, Inf))
         ĥo = ĥ[idx]
-        integrand = ko .* ĥo .* sin.(mo*z .+ ko*x)
+        integrand = @. ko * ĥo * sin(mo*z + ko*x)
         Iosc = trapz(ko, integrand)
     end
 
@@ -165,7 +165,7 @@ function w_linear(x, z; nk=10000)
         ke = k[idx]
         me = sqrt.(clamp.(-m2[idx], 0, Inf))  # |m| when m^2<0
         ĥe = ĥ[idx]
-        integrand = @. ke * ĥe * exp(-me * z) * sin(ke * x)
+        integrand = @. ke * ĥe * exp(-me * z) * sin(ke*x)
         Iev = trapz(ke, integrand)
     end
 
@@ -175,6 +175,7 @@ end
 
 # Visualization
 using CairoMakie
+
 fig = Figure()
 gb = fig[1, 1]
 
@@ -189,7 +190,8 @@ ax1.limits = ((-30000, 30000), (0, 10000))
 
 xs = range(-30e3, 30e3; length=60) # x ∈ [-30, 30] km
 zs = range(0, 10e3; length=40)     # z ∈ [0, 10] km
-w_analytical   = [w_linear(x, z) for z in zs, x in xs]
+w_analytical = [w_linear(x, z) for z in zs, x in xs]
+
 ax2, hm2 = heatmap(gb[2, 1], xs, zs, w_analytical', colormap = :bwr, colorrange = (-1, 1))
 ax2.xlabel = "x [m]"
 ax2.ylabel = "z [m]"
