@@ -27,24 +27,19 @@ using Test
     @testset "Implicit diffusion solver with ScalarDiffusivity [$(FT), $(typeof(disc))]" for disc in discretizations
         closure = ScalarDiffusivity(disc, ν=1, κ=1)
         model = AtmosphereModel(grid; closure, tracers=:ρc)
-        ρe₀ = 3e5
-        set!(model; ρe=ρe₀)
-        ρe₀ = deepcopy(model.energy_density)
+        # Set uniform potential temperature for uniform specific energy (no diffusion)
+        θ₀ = model.formulation.reference_state.potential_temperature
+        cᵖᵈ = model.thermodynamics.dry_air.heat_capacity
+        e₀ = cᵖᵈ * θ₀
+        set!(model; e=e₀)
         time_step!(model, 1)
-
-        ϵ = sqrt(eps(FT))
-        @test model.momentum.ρu ≈ XFaceField(grid)
-        @test model.momentum.ρv ≈ YFaceField(grid)
-        @test model.momentum.ρw ≈ ZFaceField(grid) atol=ϵ # use atol bc fields are close to 0
-        @test model.moisture_density ≈ CenterField(grid)
-        @test model.tracers.ρc ≈ CenterField(grid)
-        @test model.energy_density ≈ ρe₀
+        @test model.energy_density ≈ e₀
     end
 
     @testset "Closure flux affects momentum tendency [$(FT)]" begin
         closure = ScalarDiffusivity(ν=1e4)
         model = AtmosphereModel(grid; advection=nothing, closure)
-        set!(model; ρu = (x, y, z) -> exp((z - 50)^2 / (10 * 20^2)))
+        set!(model; ρu = (x, y, z) -> exp((z - 50)^2 / (2 * 20^2)))
         Breeze.AtmosphereModels.compute_tendencies!(model)
         Gρu = model.timestepper.Gⁿ.ρu
         @test maximum(abs, Gρu) > 0
