@@ -82,9 +82,16 @@ function set!(model::AtmosphereModel; enforce_mass_conservation=true, kw...)
                     model.microphysics,
                     model.microphysical_fields,
                     model.thermodynamics)
+
+        elseif name == :e
+            # Set specific energy directly
+            set!(model.specific_energy, value)
+            ρᵣ = model.formulation.reference_state.density
+            set!(model.energy_density, ρᵣ * model.specific_energy)
+
         else
             prognostic_names = keys(prognostic_fields(model))
-            supported_diagnostic_variables = (:qᵗ, :u, :v, :w, :θ)
+            supported_diagnostic_variables = (:qᵗ, :u, :v, :w, :θ, :e)
 
             msg = "Cannot set! $name in AtmosphereModel because $name is neither a
                    prognostic variable nor a supported diagnostic variable!
