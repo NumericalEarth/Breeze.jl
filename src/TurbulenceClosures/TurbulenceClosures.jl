@@ -38,27 +38,25 @@ using ..AtmosphereModels: AtmosphereModel, buoyancy
 ##### Buoyancy interface for AtmosphereModel
 #####
 
-struct AtmosphereBuoyancy{F, T}
+struct AtmosphereModelBuoyancy{F, T}
     formulation :: F
     thermodynamics :: T
 end
 
-Adapt.adapt_structure(to, b::AtmosphereBuoyancy) =
-    AtmosphereBuoyancy(adapt(to, b.formulation), adapt(to, b.thermodynamics))
+Adapt.adapt_structure(to, b::AtmosphereModelBuoyancy) =
+    AtmosphereModelBuoyancy(adapt(to, b.formulation), adapt(to, b.thermodynamics))
 
 OceanTurbulenceClosures.buoyancy_force(model::AtmosphereModel) =
-    AtmosphereBuoyancy(model.formulation, model.thermodynamics)
+    AtmosphereModelBuoyancy(model.formulation, model.thermodynamics)
 
 OceanTurbulenceClosures.buoyancy_tracers(model::AtmosphereModel) =
     (; T = model.temperature, qᵗ = model.specific_moisture)
 
-@inline function OceanBuoyancyFormulations.∂z_b(i, j, k, grid, b::AtmosphereBuoyancy, tracers)
-    ∂zᶜᶜᶠ(i, j, k, grid, _buoyancy_at_ccc, b, tracers)
-end
+@inline OceanBuoyancyFormulations.∂z_b(i, j, k, grid, b::AtmosphereModelBuoyancy, tracers) =
+    ∂zᶜᶜᶠ(i, j, k, grid, turbulence_closure_buoyancy, b, tracers)
 
-@inline function _buoyancy_at_ccc(i, j, k, grid, b::AtmosphereBuoyancy, tracers)
+@inline turbulence_closure_buoyancy(i, j, k, grid, b::AtmosphereModelBuoyancy, tracers) =
     buoyancy(i, j, k, grid, b.formulation, tracers.T, tracers.qᵗ, b.thermodynamics)
-end
 
 #####
 ##### Fallbacks for closure = nothing
