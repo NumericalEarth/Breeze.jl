@@ -158,10 +158,10 @@ function AtmosphereModel(grid;
     model_fields = merge(prognostic_fields, velocities, (; T=temperature, qᵗ=specific_moisture))
     forcing = atmosphere_model_forcing(forcing, prognostic_fields, model_fields)
 
-    # May need to use more names in `tracers` for this to work
+    # Include ρe, ρqᵗ plus user tracers for closure field construction
     closure_names = tuple(:ρe, :ρqᵗ, tracer_names...)
     closure = Oceananigans.Utils.with_tracers(closure_names, closure)
-    closure_fields = build_closure_fields(nothing, grid, clock, tracer_names, boundary_conditions, closure)
+    closure_fields = build_closure_fields(nothing, grid, clock, closure_names, boundary_conditions, closure)
 
     model = AtmosphereModel(arch,
                             grid,

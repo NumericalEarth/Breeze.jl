@@ -56,6 +56,12 @@ Breeze interfaces with ClimaOcean for coupled atmosphere-ocean simulations.
     * only use explicit import in scripts for names that are _not_ exported by the top-level files Oceananigans.jl, Breeze.jl etc.
     * sometimes we need to write `using Oceananigans.Units`
 
+3. **Example code style**
+  - For examples, or tests that invoke example-like code, invoke `set!` ideally once (or as few times as possible).
+    There are two reasons: first, `set!` will determine the entire state of `AtmosphereModel`, and then call `update_state!` to fill halo regions and compute diagnostic variables. This only needs to be done once.
+    The second reason is that it is easier to interpret a script by reading it when the initial condition is
+    determined on one line rather than spread out over many lines.
+
 ### Naming Conventions
 - **Files**: snake_case (e.g., `atmosphere_model.jl`, `update_atmosphere_model_state.jl`)
 - **Types**: PascalCase (e.g., `AtmosphereModel`, `AnelasticFormulation`, `MoistAirBuoyancy`)
