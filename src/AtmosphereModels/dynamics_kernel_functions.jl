@@ -67,7 +67,8 @@ hydrostatic_pressure_gradient_y(i, j, k, grid, pₕ′) = ∂yᶜᶠᶜ(i, j, k,
                                      model_fields,
                                      ρu_forcing)
 
-    return ( - div_𝐯u(i, j, k, grid, advection, velocities, momentum.ρu)
+    # return ( - div_𝐯u(i, j, k, grid, advection, velocities, momentum.ρu)
+    return ( - div_𝐯u(i, j, k, grid, advection, momentum, velocities.u)
              - x_f_cross_U(i, j, k, grid, coriolis, momentum)
              - ∂ⱼ_𝒯₁ⱼ(i, j, k, grid, reference_density, closure, closure_fields, clock, model_fields, nothing)
              + ρu_forcing(i, j, k, grid, clock, model_fields))
@@ -85,7 +86,8 @@ end
                                      model_fields,
                                      ρv_forcing)
 
-    return ( - div_𝐯v(i, j, k, grid, advection, velocities, momentum.ρv)
+    #return ( - div_𝐯v(i, j, k, grid, advection, velocities, momentum.ρv)
+    return ( - div_𝐯v(i, j, k, grid, advection, momentum, velocities.v)
              - y_f_cross_U(i, j, k, grid, coriolis, momentum)
              - ∂ⱼ_𝒯₂ⱼ(i, j, k, grid, reference_density, closure, closure_fields, clock, model_fields, nothing)
              + ρv_forcing(i, j, k, grid, clock, model_fields))
@@ -109,7 +111,8 @@ end
                                      microphysical_fields,
                                      thermo)
 
-    return ( - div_𝐯w(i, j, k, grid, advection, velocities, momentum.ρw)
+    #return ( - div_𝐯w(i, j, k, grid, advection, velocities, momentum.ρw)
+    return ( - div_𝐯w(i, j, k, grid, advection, momentum, velocities.w)
              + ρ_bᶜᶜᶠ(i, j, k, grid, formulation, density, temperature,
                       specific_moisture, microphysics, microphysical_fields, thermo)
              - z_f_cross_U(i, j, k, grid, coriolis, momentum)
@@ -118,7 +121,7 @@ end
 end
 
 @inline function scalar_tendency(i, j, k, grid,
-                                 scalar,
+                                 scalar_density,
                                  id,
                                  name,
                                  scalar_forcing,
@@ -148,16 +151,18 @@ end
                                      energy_density,
                                      moisture_density)
 
-    return ( - div_Uc(i, j, k, grid, advection, Uᵗ, scalar)
-             - ∇_dot_Jᶜ(i, j, k, grid, density, closure, closure_fields, id, scalar, clock, model_fields, diffusive_flux_buoyancy)
+    return ( - div_Uc(i, j, k, grid, advection, Uᵗ, scalar_density)
+             # TODO: I think we should pass the scalar, not scalar density, to the diffusion term.
+             - ∇_dot_Jᶜ(i, j, k, grid, density, closure, closure_fields, id, scalar_density, clock, model_fields, diffusive_flux_buoyancy)
              + microphysical_tendency(i, j, k, grid, microphysics, name, microphysical_fields, 𝒰, thermo)
              + scalar_forcing(i, j, k, grid, clock, model_fields))
 end
 
 @inline function moist_static_energy_tendency(i, j, k, grid,
                                               id,
-                                              energy,
+                                              specific_energy,
                                               ρe_forcing,
+                                              momentum,
                                               formulation,
                                               thermo,
                                               energy_density,
@@ -184,11 +189,11 @@ end
                           temperature, specific_moisture,
                           microphysics, microphysical_fields, thermo)
 
-    diffusive_flux_buoyancy = AtmosphereModelBuoyancy(formulation, thermo)
+    closure_buoyancy = AtmosphereModelBuoyancy(formulation, thermo)
 
-    return ( - div_Uc(i, j, k, grid, advection, velocities, energy_density)
+    return ( - div_Uc(i, j, k, grid, advection, momentum, specific_energy)
              + buoyancy_flux
-             - ∇_dot_Jᶜ(i, j, k, grid, density, closure, closure_fields, id, energy, clock, model_fields, diffusive_flux_buoyancy)
+             - ∇_dot_Jᶜ(i, j, k, grid, density, closure, closure_fields, id, specific_energy, clock, model_fields, closure_buoyancy)
              + microphysical_tendency(i, j, k, grid, microphysics, Val(:ρe), microphysical_fields, 𝒰, thermo)
              + ρe_forcing(i, j, k, grid, clock, model_fields))
 end
