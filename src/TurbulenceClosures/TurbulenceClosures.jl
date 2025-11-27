@@ -14,9 +14,7 @@ using Oceananigans.Operators:
     Ax_qᶠᶜᶜ, Ay_qᶜᶠᶜ, Az_qᶜᶜᶠ,
     # Interpolator functions used for ρᵣ at faces
     ℑxᶠᵃᵃ, ℑyᵃᶠᵃ, ℑzᵃᵃᶠ,
-    ℑxyᶠᶠᵃ, ℑxzᶠᵃᶠ, ℑyzᵃᶠᶠ, ℑxzᶠᵃᶠ,
-    # Derivative operator for buoyancy gradient
-    ∂zᶜᶜᶠ
+    ℑxyᶠᶠᵃ, ℑxzᶠᵃᶠ, ℑyzᵃᶠᶠ, ℑxzᶠᵃᶠ
 
 using Oceananigans.TurbulenceClosures:
     AbstractTurbulenceClosure,
