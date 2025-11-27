@@ -48,7 +48,9 @@ end
 
 @inline @inbounds function ρ_w_bᶜᶜᶠ(i, j, k, grid, w, args...)
     ρ_b = ρ_bᶜᶜᶠ(i, j, k, grid, args...)
-    return ρ_b * w[i, j, k]
+    ρ_b_w = ρ_b * w[i, j, k]
+    not_interior = (k < 2) | (k > grid.Nz)
+    return ifelse(not_interior, zero(grid), ρ_b_w)
 end
 
 # Note: these are unused currently
