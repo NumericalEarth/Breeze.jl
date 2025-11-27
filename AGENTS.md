@@ -56,11 +56,17 @@ Breeze interfaces with ClimaOcean for coupled atmosphere-ocean simulations.
     * only use explicit import in scripts for names that are _not_ exported by the top-level files Oceananigans.jl, Breeze.jl etc.
     * sometimes we need to write `using Oceananigans.Units`
 
-3. **Example code style**
+3. **Using set!**
   - For examples, or tests that invoke example-like code, invoke `set!` ideally once (or as few times as possible).
     There are two reasons: first, `set!` will determine the entire state of `AtmosphereModel`, and then call `update_state!` to fill halo regions and compute diagnostic variables. This only needs to be done once.
     The second reason is that it is easier to interpret a script by reading it when the initial condition is
     determined on one line rather than spread out over many lines.
+
+4. **Using Field**
+  - Rely on in-built functions of Field as much as possible. Retain `Field` identity
+    as long as possible. Do not convert to `SubArray` by invoking `interior`
+    _unless absolutely necessary_. When something doesn't work with `Field` and requires
+    using `interior`, consider adding functionality for `Field` instead of relying on _interior_.
 
 ### Naming Conventions
 - **Files**: snake_case (e.g., `atmosphere_model.jl`, `update_atmosphere_model_state.jl`)
@@ -117,7 +123,13 @@ Pkg.test("Breeze")
 - Run `quality_assurance.jl` to check code standards
 - Use Aqua.jl for package quality checks
 
-### Fixing bugs
+### Debugging and fixing strategies
+- If an issue is suspected, make sure to check the tests to see if something is tested.
+  If the suspected issue is tested, then it can only be a problem if the test is flawed.
+  Do check to see if the test is flawed, too!
+- Consider the likelihood that an issue could occur, given reasonable results from examples
+  or other elements of the documentation. Consider how "mature" and well-used a feature is
+  when forming hypotheses about likely bugs.
 - Subtle bugs often occur when a method is not imported, especially in an extension
 - Sometimes user scripts are written expecting names to be exported, when they are not. In that case
   consider exporting the name automatically (ie implement the user interface that the user expects) rather
