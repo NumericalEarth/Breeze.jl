@@ -162,6 +162,7 @@ end
                                               id,
                                               specific_energy,
                                               ρe_forcing,
+                                              momentum,
                                               formulation,
                                               thermo,
                                               energy_density,
