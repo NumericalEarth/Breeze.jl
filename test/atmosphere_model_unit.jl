@@ -22,7 +22,7 @@ end
             model = AtmosphereModel(grid; thermodynamics=thermo, formulation, microphysics)
             
             set!(model; qᵗ = 1e-2)
-            @test @allowscalar model.moisture_mass_fraction ≈ constant_field(grid, 1e-2)
+            @test @allowscalar model.specific_moisture ≈ constant_field(grid, 1e-2)
             
             ρᵣ = model.formulation.reference_state.density
             @test @allowscalar model.moisture_density ≈ ρᵣ * 1e-2
