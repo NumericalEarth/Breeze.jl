@@ -142,6 +142,8 @@ end
         θ = potential_temperature[i, j, k]
     end
 
+    g = thermo.gravitational_acceleration
+    z = znode(i, j, k, grid, c, c, c)
     p₀ = formulation.reference_state.base_pressure
 
     q = compute_moisture_fractions(i, j, k, grid, microphysics, ρᵣ, qᵗ, microphysical_fields)

@@ -20,6 +20,8 @@ using DocStringExtensions: TYPEDSIGNATURES
 
 import ..Thermodynamics: saturation_specific_humidity
 
+abstract type AbstractEquilibrium end
+
 struct SaturationAdjustment{E, FT}
     tolerance :: FT
     maxiter :: FT
@@ -58,6 +60,8 @@ function SaturationAdjustment(FT::DataType=Oceananigans.defaults.FloatType;
 end
 
 @inline microphysical_velocities(::SaturationAdjustment, name) = nothing
+
+convert_equilibrium(FT, equil) = equil # fallback
 
 #####
 ##### Warm-phase equilibrium
