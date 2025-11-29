@@ -36,14 +36,18 @@ function set!(model::AtmosphereModel; enforce_mass_conservation=true, kw...)
         if name ∈ propertynames(model.momentum)
             ρu = getproperty(model.momentum, name)
             set!(ρu, value)
+
         elseif name ∈ propertynames(model.tracers)
             c = getproperty(model.tracers, name)
             set!(c, value)
+
         elseif name == :ρe
             set!(model.energy_density, value)
+
         elseif name == :ρqᵗ
             set!(model.moisture_density, value)
             set!(model.specific_moisture, model.moisture_density / model.formulation.reference_state.density)
+
         elseif name ∈ prognostic_field_names(model.microphysics)
             μ = getproperty(model.microphysical_fields, name)
             set!(μ, value)
@@ -64,6 +68,13 @@ function set!(model::AtmosphereModel; enforce_mass_conservation=true, kw...)
             value = ρᵣ * u
             set!(ϕ, value)    
 
+        elseif name == :e
+            # Set specific energy directly
+            set!(model.specific_energy, value)
+            ρᵣ = model.formulation.reference_state.density
+            set!(model.energy_density, ρᵣ * model.specific_energy)
+
+
         elseif name == :θ
             θ = model.temperature # use scratch
             set!(θ, value)
@@ -82,9 +93,10 @@ function set!(model::AtmosphereModel; enforce_mass_conservation=true, kw...)
                     model.microphysics,
                     model.microphysical_fields,
                     model.thermodynamics)
+
         else
             prognostic_names = keys(prognostic_fields(model))
-            supported_diagnostic_variables = (:qᵗ, :u, :v, :w, :θ)
+            supported_diagnostic_variables = (:qᵗ, :u, :v, :w, :θ, :e)
 
             msg = "Cannot set! $name in AtmosphereModel because $name is neither a
                    prognostic variable nor a supported diagnostic variable!

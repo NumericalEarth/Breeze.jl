@@ -138,6 +138,7 @@ end
     Uᵖ = microphysical_velocities(microphysics, name)
     Uᵗ = sum_of_velocities(velocities, Uᵖ)
     density = formulation.reference_state.density
+    diffusive_flux_buoyancy = AtmosphereModelBuoyancy(formulation, thermo)
 
     𝒰 = diagnose_thermodynamic_state(i, j, k, grid,
                                      formulation,
@@ -148,7 +149,7 @@ end
                                      moisture_density)
 
     return ( - div_Uc(i, j, k, grid, advection, Uᵗ, scalar)
-             - ∇_dot_Jᶜ(i, j, k, grid, density, closure, closure_fields, id, scalar, clock, model_fields, nothing)
+             - ∇_dot_Jᶜ(i, j, k, grid, density, closure, closure_fields, id, scalar, clock, model_fields, diffusive_flux_buoyancy)
              + microphysical_tendency(i, j, k, grid, microphysics, name, microphysical_fields, 𝒰, thermo)
              + scalar_forcing(i, j, k, grid, clock, model_fields))
 end
@@ -183,9 +184,11 @@ end
                           temperature, specific_moisture,
                           microphysics, microphysical_fields, thermo)
 
+    diffusive_flux_buoyancy = AtmosphereModelBuoyancy(formulation, thermo)
+
     return ( - div_Uc(i, j, k, grid, advection, velocities, energy_density)
              + buoyancy_flux
-             - ∇_dot_Jᶜ(i, j, k, grid, density, closure, closure_fields, id, energy, clock, model_fields, nothing)
+             - ∇_dot_Jᶜ(i, j, k, grid, density, closure, closure_fields, id, energy, clock, model_fields, diffusive_flux_buoyancy)
              + microphysical_tendency(i, j, k, grid, microphysics, Val(:ρe), microphysical_fields, 𝒰, thermo)
              + ρe_forcing(i, j, k, grid, clock, model_fields))
 end
