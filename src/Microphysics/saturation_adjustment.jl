@@ -2,7 +2,6 @@ using ..Thermodynamics:
     ThermodynamicConstants,
     dry_air_gas_constant,
     vapor_gas_constant,
-    density,
     temperature,
     MoistureMassFractions,
     mixture_heat_capacity,
