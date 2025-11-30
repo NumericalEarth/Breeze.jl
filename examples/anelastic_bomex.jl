@@ -199,6 +199,37 @@ end
 
 add_callback!(simulation, plot_averages, TimeInterval(1hour))
 
+# Plot horizontal averages of energy density, specific energy, and potential temperature
+# in the bottom 400 m to see variation in this lower part of the domain
+ρe_avg = Average(model.energy_density, dims=(1, 2)) |> Field
+e_specific_avg = Average(model.specific_energy, dims=(1, 2)) |> Field
+
+fig_lower = Figure(size=(900, 400))
+ax_ρe = Axis(fig_lower[1, 1], xlabel="Energy density", ylabel="z (m)")
+ax_e  = Axis(fig_lower[1, 2], xlabel="Specific energy", ylabel="z (m)")
+ax_θ  = Axis(fig_lower[1, 3], xlabel="Potential temperature (K)", ylabel="z (m)")
+
+ylims!(ax_ρe, 0, 400)
+ylims!(ax_e, 0, 400)
+ylims!(ax_θ, 0, 400)
+
+xlims!(ax_ρe, 3.45e5, 3.60e5)
+xlims!(ax_e, 304200, 304600)
+xlims!(ax_θ, 298.0, 299.5)
+
+function plot_lower_averages(sim)
+    compute!(ρe_avg)
+    compute!(e_specific_avg)
+    compute!(θ_avg)
+    scatterlines!(ax_ρe, ρe_avg)
+    scatterlines!(ax_e, e_specific_avg)
+    scatterlines!(ax_θ, θ_avg)
+    save("lower_averages.png", fig_lower)
+    return nothing
+end
+
+add_callback!(simulation, plot_lower_averages, TimeInterval(1hour))
+
 function progress(sim)
     qˡmax = maximum(qˡ)
     qᵛmax = maximum(qᵛ)

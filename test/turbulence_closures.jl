@@ -49,7 +49,8 @@ using Test
 
     @testset "SmagorinskyLilly with velocity gradients [$(FT)]" begin
         model = AtmosphereModel(grid; closure=SmagorinskyLilly())
-        set!(model; ρu = (x, y, z) -> z / 100)
+        θ₀ = model.formulation.reference_state.potential_temperature
+        set!(model; θ=θ₀, ρu = (x, y, z) -> z / 100)
         Breeze.AtmosphereModels.update_state!(model)
         @test maximum(abs, model.closure_fields.νₑ) > 0
     end
