@@ -250,7 +250,6 @@ function compute_tendencies!(model::AnelasticModel)
         scalar_args = (
             ρc,
             Val(i + 2),
-            Val(i + 2),
             name,
             model.forcing[name],
             common_args...)
