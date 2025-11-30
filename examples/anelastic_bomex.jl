@@ -11,13 +11,13 @@ using CairoMakie
 
 # Siebesma et al (2003) resolution!
 # DOI: https://doi.org/10.1175/1520-0469(2003)60<1201:ALESIS>2.0.CO;2
-Nx = Ny = 32
+Nx = Ny = 64
 Nz = 75
 
 x = y = (0, 6400)
 z = (0, 3000)
 
-arch = CPU() # if changing to CPU() remove the `using CUDA` line above
+arch = GPU() # if changing to CPU() remove the `using CUDA` line above
 stop_time = 6hours
 
 grid = RectilinearGrid(arch; x, y, z, 
@@ -133,10 +133,15 @@ save("forcings.png", fig)
 
 microphysics = SaturationAdjustment(equilibrium=WarmPhaseEquilibrium())
 
-buffer_scheme = Centered(order=2)
-advection = WENO(order=5; buffer_scheme)
+# buffer_scheme = Centered(order=2)
+# buffer_scheme = WENO(order=7; buffer_scheme)
+# advection = WENO(order=9; buffer_scheme)
+# closure = nothing
 
-model = AtmosphereModel(grid; formulation, coriolis, microphysics, advection,
+advection = Centered(order=2)
+closure = AnisotropicMinimumDissipation()
+
+model = AtmosphereModel(grid; formulation, coriolis, microphysics, advection, closure,
                         forcing = (ρqᵗ=ρqᵗ_forcing, ρu=ρu_forcing, ρv=ρv_forcing, ρe=ρe_forcing),
                         boundary_conditions = (ρe=ρe_bcs, ρqᵗ=ρqᵗ_bcs, ρu=ρu_bcs, ρv=ρv_bcs))
 
@@ -180,7 +185,7 @@ qᵛ⁺ = Breeze.AtmosphereModels.SaturationSpecificHumidityField(model)
 qˡ_avg = Average(qˡ, dims=(1, 2)) |> Field
 
 fig = Figure()
-axT =  Axis(fig[1, 1], xlabel="Temperature (K)", ylabel="z (m)")
+axθ =  Axis(fig[1, 1], xlabel="Potential temperature (K)", ylabel="z (m)")
 axu =  Axis(fig[1, 2], xlabel="Velocity (m/s)", ylabel="z (m)")
 axt =  Axis(fig[2, 1], xlabel="Specific moisture", ylabel="z (m)")
 axl =  Axis(fig[2, 2], xlabel="Liquid mass fraction", ylabel="z (m)")
@@ -188,7 +193,7 @@ axl =  Axis(fig[2, 2], xlabel="Liquid mass fraction", ylabel="z (m)")
 xlims!(axl, -1e-6, 1e-5)
 
 function plot_averages(sim)
-    lines!(axT, θ_avg)
+    lines!(axθ, θ_avg)
     lines!(axu, u_avg)
     lines!(axu, v_avg)
     lines!(axt, qᵗ_avg)
@@ -198,6 +203,36 @@ function plot_averages(sim)
 end
 
 add_callback!(simulation, plot_averages, TimeInterval(1hour))
+
+fig_lower = Figure(size=(900, 400))
+ax_ρe = Axis(fig_lower[1, 1], xlabel="Energy density", ylabel="z (m)")
+ax_e  = Axis(fig_lower[1, 2], xlabel="Specific energy", ylabel="z (m)")
+ax_θ  = Axis(fig_lower[1, 3], xlabel="Potential temperature (K)", ylabel="z (m)")
+
+ρe_avg = Average(model.energy_density, dims=(1, 2)) |> Field
+e_avg = Average(model.specific_energy, dims=(1, 2)) |> Field
+
+ylims!(ax_ρe, 0, 400)
+ylims!(ax_e, 0, 400)
+ylims!(ax_θ, 0, 400)
+
+xlims!(ax_ρe, 3.45e5, 3.60e5)
+xlims!(ax_e, 304200, 304600)
+xlims!(ax_θ, 298.0, 299.5)
+
+function plot_lower_averages(sim)
+    compute!(ρe_avg)
+    compute!(e_avg)
+    compute!(θ_avg)
+    scatterlines!(ax_ρe, ρe_avg)
+    scatterlines!(ax_e, e_specific_avg)
+    scatterlines!(ax_θ, θ_avg)
+    save("lower_averages.png", fig_lower)
+    return nothing
+end
+
+add_callback!(simulation, plot_lower_averages, TimeInterval(1hour))
+
 
 function progress(sim)
     qˡmax = maximum(qˡ)
