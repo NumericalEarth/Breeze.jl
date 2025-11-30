@@ -5,24 +5,25 @@ export div_ρUc
 using Oceananigans.Advection:
     advective_tracer_flux_x,
     advective_tracer_flux_y,
-    advective_tracer_flux_z
+    advective_tracer_flux_z,
     BoundsPreservingWENO,
     bounded_tracer_flux_divergence_x,
     bounded_tracer_flux_divergence_y,
     bounded_tracer_flux_divergence_z
 
+using Oceananigans.Fields: ZeroField
 using Oceananigans.Operators: V⁻¹ᶜᶜᶜ, δxᶜᵃᵃ, δyᵃᶜᵃ, δzᵃᵃᶜ, ℑxᶠᵃᵃ, ℑyᵃᶠᵃ, ℑzᵃᵃᶠ
 
 import Breeze.AtmosphereModels: div_ρUc
 
 # Simple wrappers: interpolate ρ to face, multiply existing flux
-@inline tracer_mass_flux_x(i, j, k, grid, ρ, flux, args...) = 
+@inline tracer_mass_flux_x(i, j, k, grid, ρ, args...) = 
     ℑxᶠᵃᵃ(i, j, k, grid, ρ) * advective_tracer_flux_x(i, j, k, grid, args...)
 
-@inline tracer_mass_flux_y(i, j, k, grid, ρ, flux, args...) = 
+@inline tracer_mass_flux_y(i, j, k, grid, ρ, args...) = 
     ℑyᵃᶠᵃ(i, j, k, grid, ρ) * advective_tracer_flux_x(i, j, k, grid, args...)
 
-@inline tracer_mass_flux_z(i, j, k, grid, ρ, flux, args...) = 
+@inline tracer_mass_flux_z(i, j, k, grid, ρ, args...) = 
     ℑzᵃᵃᶠ(i, j, k, grid, ρ) * advective_tracer_flux_x(i, j, k, grid, args...)
 
 # Main operator

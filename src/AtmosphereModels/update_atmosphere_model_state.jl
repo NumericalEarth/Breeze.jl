@@ -14,9 +14,30 @@ import Oceananigans.TimeSteppers: update_state!, compute_flux_bc_tendencies!
 const AnelasticModel = AtmosphereModel{<:AnelasticFormulation}
 
 function update_state!(model::AnelasticModel, callbacks=[]; compute_tendencies=true)
+    tracer_density_to_specific(model) # convert tracer density to specific tracer distribution
     fill_halo_regions!(prognostic_fields(model), model.clock, fields(model), async=true)
     compute_auxiliary_variables!(model)
     compute_tendencies && compute_tendencies!(model)
+    tracer_specific_to_density(model) # convert specific tracer distribution to tracer density
+    return nothing
+end
+
+tracer_density_to_specific!(model) = tracer_density_to_specific!(model.tracers, model.formulation.reference_state.density)
+tracer_specific_to_density(model) = tracer_specific_to_density(model.tracers, model.formulation.reference_state.density)
+
+function tracer_density_to_specific!(tracers, density)
+    # TODO: do all tracers a single kernel
+    for c in tracers
+        parent(c) ./= parent(density)
+    end
+    return nothing
+end
+
+function tracer_specific_to_density(tracers, density)
+    # TODO: do all tracers a single kernel
+    for c in tracers
+        parent(c) .*= parent(density)
+    end
     return nothing
 end
 
@@ -224,10 +245,13 @@ function compute_tendencies!(model::AnelasticModel)
     #####
 
     for (i, name) in enumerate(keys(model.tracers))
+        ρc = model.tracers[name]
+
         scalar_args = (
-            model.tracers[name],
+            ρc,
             Val(i + 2),
-            Val(name),
+            Val(i + 2),
+            name,
             model.forcing[name],
             common_args...)
 
@@ -280,6 +304,7 @@ function compute_flux_bc_tendencies!(model::AtmosphereModel)
     field_indices = 1:length(prognostic_model_fields)
     Gⁿ = model.timestepper.Gⁿ
 
+    # TODO: should we call tracer_density_to_specific!(model) here?
     foreach(q -> compute_x_bcs!(Gⁿ[q], prognostic_model_fields[q], args...), field_indices)
     foreach(q -> compute_y_bcs!(Gⁿ[q], prognostic_model_fields[q], args...), field_indices)
     foreach(q -> compute_z_bcs!(Gⁿ[q], prognostic_model_fields[q], args...), field_indices)
