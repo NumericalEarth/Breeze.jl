@@ -21,10 +21,10 @@ import Breeze.AtmosphereModels: div_ρUc
     ℑxᶠᵃᵃ(i, j, k, grid, ρ) * advective_tracer_flux_x(i, j, k, grid, args...)
 
 @inline tracer_mass_flux_y(i, j, k, grid, ρ, args...) = 
-    ℑyᵃᶠᵃ(i, j, k, grid, ρ) * advective_tracer_flux_x(i, j, k, grid, args...)
+    ℑyᵃᶠᵃ(i, j, k, grid, ρ) * advective_tracer_flux_y(i, j, k, grid, args...)
 
 @inline tracer_mass_flux_z(i, j, k, grid, ρ, args...) = 
-    ℑzᵃᵃᶠ(i, j, k, grid, ρ) * advective_tracer_flux_x(i, j, k, grid, args...)
+    ℑzᵃᵃᶠ(i, j, k, grid, ρ) * advective_tracer_flux_z(i, j, k, grid, args...)
 
 # Main operator
 @inline function div_ρUc(i, j, k, grid, advection, ρ, U, c)
