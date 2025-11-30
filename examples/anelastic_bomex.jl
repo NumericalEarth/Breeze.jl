@@ -11,13 +11,13 @@ using CairoMakie
 
 # Siebesma et al (2003) resolution!
 # DOI: https://doi.org/10.1175/1520-0469(2003)60<1201:ALESIS>2.0.CO;2
-Nx = Ny = 64
+Nx = Ny = 32
 Nz = 75
 
 x = y = (0, 6400)
 z = (0, 3000)
 
-arch = GPU() # if changing to CPU() remove the `using CUDA` line above
+arch = CPU() # if changing to CPU() remove the `using CUDA` line above
 stop_time = 6hours
 
 grid = RectilinearGrid(arch; x, y, z, 
@@ -133,10 +133,10 @@ save("forcings.png", fig)
 
 microphysics = SaturationAdjustment(equilibrium=WarmPhaseEquilibrium())
 
-closure = AnisotropicMinimumDissipation()
+buffer_scheme = Centered(order=2)
+advection = WENO(order=5; buffer_scheme)
 
-model = AtmosphereModel(grid; coriolis, microphysics, closure, formulation,
-                        advection = WENO(order=5),
+model = AtmosphereModel(grid; formulation, coriolis, microphysics, advection,
                         forcing = (ρqᵗ=ρqᵗ_forcing, ρu=ρu_forcing, ρv=ρv_forcing, ρe=ρe_forcing),
                         boundary_conditions = (ρe=ρe_bcs, ρqᵗ=ρqᵗ_bcs, ρu=ρu_bcs, ρv=ρv_bcs))
 
