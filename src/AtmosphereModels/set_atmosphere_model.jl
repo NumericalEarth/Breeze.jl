@@ -48,7 +48,7 @@ function set!(model::AtmosphereModel; enforce_mass_conservation=true, kw...)
             set!(model.moisture_density, value)
             ρqᵗ = model.moisture_density
             ρᵣ = model.formulation.reference_state.density
-            set!(model.specific_moisture, ρqᵗ / ρ)
+            set!(model.specific_moisture, ρqᵗ / ρᵣ)
 
         elseif name ∈ prognostic_field_names(model.microphysics)
             μ = getproperty(model.microphysical_fields, name)
