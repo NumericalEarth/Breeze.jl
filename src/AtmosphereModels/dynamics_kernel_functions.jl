@@ -24,7 +24,7 @@ Oceananigans `qᶜ` is the kinematic tracer flux.
 ##### Some key functions
 #####
 
-@inline @inbounds function ρ_bᶜᶜᶜ(i, j, k, grid,
+@inline function ρ_bᶜᶜᶜ(i, j, k, grid,
                                   formulation::AnelasticFormulation,
                                   reference_density,
                                   temperature,
@@ -33,10 +33,12 @@ Oceananigans `qᶜ` is the kinematic tracer flux.
                                   microphysical_fields,
                                   thermo)
 
-    qᵗ = specific_moisture[i, j, k]
-    pᵣ = formulation.reference_state.pressure[i, j, k]
-    T = temperature[i, j, k]
-    ρᵣ = reference_density[i, j, k]
+    @inbounds begin
+        qᵗ = specific_moisture[i, j, k]
+        pᵣ = formulation.reference_state.pressure[i, j, k]
+        T = temperature[i, j, k]
+        ρᵣ = reference_density[i, j, k]
+    end
 
     q = compute_moisture_fractions(i, j, k, grid, microphysics, ρᵣ, qᵗ, microphysical_fields)
     Rᵐ = mixture_gas_constant(q, thermo)
@@ -48,9 +50,9 @@ end
 
 @inline ρ_bᶜᶜᶠ(i, j, k, grid, args...) = ℑzᵃᵃᶠ(i, j, k, grid, ρ_bᶜᶜᶜ, args...)   
 
-@inline @inbounds function ρ_w_bᶜᶜᶠ(i, j, k, grid, w, args...)
+@inline function ρ_w_bᶜᶜᶠ(i, j, k, grid, w, args...)
     ρ_b = ρ_bᶜᶜᶠ(i, j, k, grid, args...)
-    return ρ_b * w[i, j, k]
+    return @inbounds ρ_b * w[i, j, k]
 end
 
 # Note: these are unused currently

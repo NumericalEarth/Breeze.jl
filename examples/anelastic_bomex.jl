@@ -54,24 +54,24 @@ u★ = 0.28 # m/s
 
 @inline w_dz_ϕ(i, j, k, grid, w, ϕ) = @inbounds w[i, j, k] * ∂zᶜᶜᶠ(i, j, k, grid, ϕ)
 
-@inline @inbounds function Fρu_subsidence(i, j, k, grid, clock, fields, p)
+@inline function Fρu_subsidence(i, j, k, grid, clock, fields, p)
     w_dz_U = ℑzᵃᵃᶜ(i, j, k, grid, w_dz_ϕ, p.wˢ, p.u_avg)
-    return - p.ρᵣ[i, j, k] * w_dz_U
+    return @inbounds - p.ρᵣ[i, j, k] * w_dz_U
 end
 
-@inline @inbounds function Fρv_subsidence(i, j, k, grid, clock, fields, p)
+@inline function Fρv_subsidence(i, j, k, grid, clock, fields, p)
     w_dz_V = ℑzᵃᵃᶜ(i, j, k, grid, w_dz_ϕ, p.wˢ, p.v_avg)
-    return - p.ρᵣ[i, j, k] * w_dz_V
+    return @inbounds - p.ρᵣ[i, j, k] * w_dz_V
 end
 
-@inline @inbounds function Fρe_subsidence(i, j, k, grid, clock, fields, p)
+@inline function Fρe_subsidence(i, j, k, grid, clock, fields, p)
     w_dz_E = ℑzᵃᵃᶜ(i, j, k, grid, w_dz_ϕ, p.wˢ, p.e_avg)
-    return - p.ρᵣ[i, j, k] * w_dz_E
+    return @inbounds - p.ρᵣ[i, j, k] * w_dz_E
 end
 
-@inline @inbounds function Fρqᵗ_subsidence(i, j, k, grid, clock, fields, p)
+@inline function Fρqᵗ_subsidence(i, j, k, grid, clock, fields, p)
     w_dz_Qᵗ = ℑzᵃᵃᶜ(i, j, k, grid, w_dz_ϕ, p.wˢ, p.qᵗ_avg)
-    return - p.ρᵣ[i, j, k] * w_dz_Qᵗ
+    return @inbounds - p.ρᵣ[i, j, k] * w_dz_Qᵗ
 end
 
 # f for "forcing"

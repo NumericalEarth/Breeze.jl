@@ -48,12 +48,12 @@ end
     return g * ∂z_ϑ / ϑ
 end
 
-@inline @inbounds function virtual_potential_temperature(i, j, k, grid, thermo, formulation, T, qᵗ)
-    pᵣ = formulation.reference_state.pressure[i, j, k]
+@inline function virtual_potential_temperature(i, j, k, grid, thermo, formulation, T, qᵗ)
+    pᵣ = @inbounds formulation.reference_state.pressure[i, j, k]
     p₀ = formulation.reference_state.base_pressure
-    q = MoistureMassFractions(qᵗ[i, j, k])
+    q = @inbounds MoistureMassFractions(qᵗ[i, j, k])
     Rᵐ = mixture_gas_constant(q, thermo)
     Rᵈ = dry_air_gas_constant(thermo)
     cᵖᵐ = mixture_heat_capacity(q, thermo)
-    return Rᵐ / Rᵈ * T[i, j, k] * (p₀ / pᵣ)^(Rᵐ / cᵖᵐ)
+    return @inbounds Rᵐ / Rᵈ * T[i, j, k] * (p₀ / pᵣ)^(Rᵐ / cᵖᵐ)
 end
