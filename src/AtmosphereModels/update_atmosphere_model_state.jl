@@ -109,8 +109,11 @@ end
         ρe = energy_density[i, j, k]
         ρqᵗ = moisture_density[i, j, k]
         ρ = formulation.reference_state.density[i, j, k]
-        specific_energy[i, j, k] = ρe / ρ
-        specific_moisture[i, j, k] = ρqᵗ / ρ
+
+        e = ρe / ρ
+        qᵗ = ρqᵗ / ρ
+        specific_energy[i, j, k] = e
+        specific_moisture[i, j, k] = qᵗ
     end
 
     𝒰₀ = diagnose_thermodynamic_state(i, j, k, grid,

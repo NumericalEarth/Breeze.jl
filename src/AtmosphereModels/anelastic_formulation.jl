@@ -68,6 +68,7 @@ function diagnose_thermodynamic_state(i, j, k, grid, formulation::AnelasticFormu
     @inbounds begin
         e = specific_energy[i, j, k]
         pᵣ = formulation.reference_state.pressure[i, j, k]
+        ρᵣ = formulation.reference_state.density[i, j, k]
         qᵗ = specific_moisture[i, j, k]
     end
 
