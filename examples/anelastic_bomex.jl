@@ -225,7 +225,7 @@ function plot_lower_averages(sim)
     compute!(e_avg)
     compute!(θ_avg)
     scatterlines!(ax_ρe, ρe_avg)
-    scatterlines!(ax_e, e_specific_avg)
+    scatterlines!(ax_e, e_avg)
     scatterlines!(ax_θ, θ_avg)
     save("lower_averages.png", fig_lower)
     return nothing
