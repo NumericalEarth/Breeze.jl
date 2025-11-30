@@ -139,13 +139,13 @@ center_field_tuple(grid, names...) = NamedTuple{names}(CenterField(grid) for nam
 materialize_microphysical_fields(::WPSA, grid, bcs) = center_field_tuple(grid, :qᵛ, :qˡ)
 materialize_microphysical_fields(::MPSA, grid, bcs) = center_field_tuple(grid, :qᵛ, :qˡ, :qⁱ)
 
-@inline @inbounds function update_microphysical_fields!(μ, ::WPSA, i, j, k, grid, density, 𝒰, thermo)
+@inline @inbounds function update_microphysical_fields!(μ, ::WPSA, i, j, k, grid, ρ, 𝒰, thermo)
     μ.qᵛ[i, j, k] = 𝒰.moisture_mass_fractions.vapor
     μ.qˡ[i, j, k] = 𝒰.moisture_mass_fractions.liquid
     return nothing
 end
 
-@inline @inbounds function update_microphysical_fields!(μ, ::MPSA, i, j, k, grid, density, 𝒰, thermo)
+@inline @inbounds function update_microphysical_fields!(μ, ::MPSA, i, j, k, grid, ρ, 𝒰, thermo)
     μ.qᵛ[i, j, k] = 𝒰.moisture_mass_fractions.vapor
     μ.qˡ[i, j, k] = 𝒰.moisture_mass_fractions.liquid
     μ.qⁱ[i, j, k] = 𝒰.moisture_mass_fractions.ice

@@ -67,7 +67,6 @@ hydrostatic_pressure_gradient_y(i, j, k, grid, pₕ′) = ∂yᶜᶠᶜ(i, j, k,
                                      model_fields,
                                      ρu_forcing)
 
-    # return ( - div_𝐯u(i, j, k, grid, advection, velocities, momentum.ρu)
     return ( - div_𝐯u(i, j, k, grid, advection, momentum, velocities.u)
              - x_f_cross_U(i, j, k, grid, coriolis, momentum)
              - ∂ⱼ_𝒯₁ⱼ(i, j, k, grid, reference_density, closure, closure_fields, clock, model_fields, nothing)
@@ -86,7 +85,6 @@ end
                                      model_fields,
                                      ρv_forcing)
 
-    #return ( - div_𝐯v(i, j, k, grid, advection, velocities, momentum.ρv)
     return ( - div_𝐯v(i, j, k, grid, advection, momentum, velocities.v)
              - y_f_cross_U(i, j, k, grid, coriolis, momentum)
              - ∂ⱼ_𝒯₂ⱼ(i, j, k, grid, reference_density, closure, closure_fields, clock, model_fields, nothing)
@@ -111,7 +109,6 @@ end
                                      microphysical_fields,
                                      thermo)
 
-    #return ( - div_𝐯w(i, j, k, grid, advection, velocities, momentum.ρw)
     return ( - div_𝐯w(i, j, k, grid, advection, momentum, velocities.w)
              + ρ_bᶜᶜᶠ(i, j, k, grid, formulation, density, temperature,
                       specific_moisture, microphysics, microphysical_fields, thermo)
@@ -127,10 +124,10 @@ end
                                  scalar_forcing,
                                  formulation,
                                  thermo,
-                                 energy_density,
-                                 moisture_density,
+                                 specific_energy,
+                                 specific_moisture,
                                  advection,
-                                 velocities,
+                                 momentum,
                                  microphysics,
                                  microphysical_fields,
                                  closure,
@@ -138,8 +135,10 @@ end
                                  clock,
                                  model_fields)
 
+    # TODO fix this
     Uᵖ = microphysical_velocities(microphysics, name)
-    Uᵗ = sum_of_velocities(velocities, Uᵖ)
+    # Uᵗ = sum_of_velocities(momentum, Uᵖ)
+    Uᵗ = momentum
     density = formulation.reference_state.density
     diffusive_flux_buoyancy = AtmosphereModelBuoyancy(formulation, thermo)
 
@@ -148,10 +147,10 @@ end
                                      microphysics,
                                      microphysical_fields,
                                      thermo,
-                                     energy_density,
-                                     moisture_density)
+                                     specific_energy,
+                                     specific_moisture)
 
-    return ( - div_Uc(i, j, k, grid, advection, Uᵗ, scalar_density)
+    return ( - div_Uc(i, j, k, grid, advection, momentum, scalar)
              # TODO: I think we should pass the scalar, not scalar density, to the diffusion term.
              - ∇_dot_Jᶜ(i, j, k, grid, density, closure, closure_fields, id, scalar_density, clock, model_fields, diffusive_flux_buoyancy)
              + microphysical_tendency(i, j, k, grid, microphysics, name, microphysical_fields, 𝒰, thermo)
@@ -160,32 +159,30 @@ end
 
 @inline function moist_static_energy_tendency(i, j, k, grid,
                                               id,
-                                              specific_energy,
                                               ρe_forcing,
-                                              momentum,
+                                              vertical_velocity,
                                               formulation,
                                               thermo,
-                                              energy_density,
-                                              moisture_density,
+                                              specific_energy,
+                                              specific_moisture,
                                               advection,
-                                              velocities,
+                                              momentum,
                                               microphysics,
                                               microphysical_fields,
                                               closure,
                                               closure_fields,
                                               clock,
                                               model_fields,
-                                              temperature,
-                                              specific_moisture)
+                                              temperature)
 
     𝒰 = diagnose_thermodynamic_state(i, j, k, grid, formulation,
                                      microphysics, microphysical_fields,
-                                     thermo, energy_density, moisture_density)
+                                     thermo, specific_energy, specific_moisture)
 
     density = formulation.reference_state.density
 
     # Compute the buoyancy flux term, ρᵣ w b
-    buoyancy_flux = ℑzᵃᵃᶜ(i, j, k, grid, ρ_w_bᶜᶜᶠ, velocities.w, formulation, density,
+    buoyancy_flux = ℑzᵃᵃᶜ(i, j, k, grid, ρ_w_bᶜᶜᶠ, vertical_velocity, formulation, density,
                           temperature, specific_moisture,
                           microphysics, microphysical_fields, thermo)
 

@@ -105,36 +105,32 @@ end
                                                              moisture_density)
     i, j, k = @index(Global, NTuple)
 
+    @inbounds begin
+        ρe = energy_density[i, j, k]
+        ρqᵗ = moisture_density[i, j, k]
+        ρ = formulation.reference_state.density[i, j, k]
+        specific_energy[i, j, k] = ρe / ρ
+        specific_moisture[i, j, k] = ρqᵗ / ρ
+    end
+
     𝒰₀ = diagnose_thermodynamic_state(i, j, k, grid,
                                       formulation,
                                       microphysics,
                                       microphysical_fields,
                                       thermo,
-                                      energy_density,
-                                      moisture_density)
-
+                                      specific_energy,
+                                      specific_moisture)
 
     # Adjust the thermodynamic state if using a microphysics scheme
     # that invokes saturation adjustment
-    qᵗ = @inbounds specific_moisture[i, j, k]
     𝒰₁ = maybe_adjust_thermodynamic_state(𝒰₀, microphysics, microphysical_fields, qᵗ, thermo)
 
     update_microphysical_fields!(microphysical_fields, microphysics,
                                  i, j, k, grid,
-                                 formulation.reference_state.density,
-                                 𝒰₁,
-                                 thermo)
-
-    @inbounds begin
-        ρe = energy_density[i, j, k]
-        ρqᵗ = moisture_density[i, j, k]
-        ρ = formulation.reference_state.density[i, j, k]
-        T = Thermodynamics.temperature(𝒰₁, thermo)
-
-        temperature[i, j, k] = T
-        specific_energy[i, j, k] = ρe / ρ
-        specific_moisture[i, j, k] = ρqᵗ / ρ
-    end
+                                 ρ, 𝒰₁, thermo)
+                                 
+    T = Thermodynamics.temperature(𝒰₁, thermo)
+    @inbounds temperature[i, j, k] = T
 end
 
 function compute_tendencies!(model::AnelasticModel)
@@ -182,8 +178,8 @@ function compute_tendencies!(model::AnelasticModel)
     common_args = (
         model.formulation,
         model.thermodynamics,
-        model.energy_density,
-        model.moisture_density,
+        model.specific_energy,
+        model.specific_moisture,
         model.advection,
         model.velocities,
         model.microphysics,
@@ -199,11 +195,10 @@ function compute_tendencies!(model::AnelasticModel)
 
     ρe_args = (
         Val(1),
-        model.specific_energy,
         model.forcing.ρe,
+        model.velocities.w,
         common_args...,
-        model.temperature,
-        model.specific_moisture)
+        model.temperature)
 
     Gρe = model.timestepper.Gⁿ.ρe
     launch!(arch, grid, :xyz, compute_moist_static_energy_tendency!, Gρe, grid, ρe_args)
@@ -213,7 +208,7 @@ function compute_tendencies!(model::AnelasticModel)
     #####
 
     ρq_args = (
-        model.moisture_density,
+        model.specific_moisture,
         Val(2),
         Val(:ρqᵗ),
         model.forcing.ρqᵗ,
