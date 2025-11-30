@@ -23,17 +23,17 @@ function update_state!(model::AnelasticModel, callbacks=[]; compute_tendencies=t
 end
 
 tracer_density_to_specific!(model) = tracer_density_to_specific!(model.tracers, model.formulation.reference_state.density)
-tracer_specific_to_density(model) = tracer_specific_to_density(model.tracers, model.formulation.reference_state.density)
+tracer_specific_to_density!(model) = tracer_specific_to_density!(model.tracers, model.formulation.reference_state.density)
 
 function tracer_density_to_specific!(tracers, density)
     # TODO: do all tracers a single kernel
-    for c in tracers
-        parent(c) ./= parent(density)
+    for ρc in tracers
+        parent(ρc) ./= parent(density)
     end
     return nothing
 end
 
-function tracer_specific_to_density(tracers, density)
+function tracer_specific_to_density!(tracers, density)
     # TODO: do all tracers a single kernel
     for c in tracers
         parent(c) .*= parent(density)
