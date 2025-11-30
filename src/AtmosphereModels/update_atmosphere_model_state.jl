@@ -196,7 +196,6 @@ function compute_tendencies!(model::AnelasticModel)
     ρe_args = (
         Val(1),
         model.forcing.ρe,
-        model.velocities.w,
         common_args...,
         model.temperature)
 
