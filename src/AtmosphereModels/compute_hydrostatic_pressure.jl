@@ -44,5 +44,5 @@ function compute_hydrostatic_pressure!(ph, model)
 
     fill_halo_regions!(ph)
 
-    return nothing
+    return ph
 end
