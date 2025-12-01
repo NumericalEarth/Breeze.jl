@@ -44,12 +44,12 @@ g = model.thermodynamics.gravitational_acceleration
 θ̄ᵦ(z) = θ₀ * exp(N² * z / g)
 # Save initial potential temperature without perturbation to compute anomaly later
 θᵢ₀ = Field{Center, Nothing, Center}(grid)
-set!(θᵢ₀, (x, z) -> θ̄ᵦ(z) )
+set!(θᵢ₀, (x, z) -> θ̄ᵦ(z))
 
 # Perturbation
 function θᵢ(x, z)
-    θ′ = Δθ₀ * sin(π * z / Lz)  / (1 + ((x - x_c)/a)^2)
-    return θ̄ᵦ(z)+ θ′
+    θ′ = Δθ₀ * sin(π * z / Lz)  / (1 + (x - x_c)^2/a^2)
+    return θ̄ᵦ(z) + θ′
 end
 
 set!(model, θ = θᵢ, u = U)
