@@ -80,7 +80,6 @@ end
 
 
 function collect_prognostic_fields(::AnelasticFormulation,
-                                   density,
                                    momentum,
                                    energy_density,
                                    moisture_density,

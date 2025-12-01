@@ -1,4 +1,4 @@
-# Notation
+# Notation and conventions
 
 This appendix establishes a common notation across the documentation and source code.
 Each entry lists a mathematical symbol and the Unicode form commonly used in
@@ -13,16 +13,19 @@ A few notes about the following table:
 * `TC` stands for [`ThermodynamicConstants`](@ref)
 * `AM` stands for [`AtmosphereModel`](@ref)
 * `RS` stands for [`ReferenceState`](@ref Breeze.AtmosphereModels.ReferenceState)
-* `constants` refers to an instance of `ThermodynamicConstants()`
-* `q` refers to an instance of  [`MoistureMassFractions`](@ref Breeze.Thermodynamics.MoistureMassFractions)
-* "Reference" quantities use a subscript ``r`` (e.g., ``p_r``, ``\rho_r``).
 * Note that there are independent concepts of "reference". For example, [`AnelasticFormulation`](@ref) involves
   a "reference state", which is an adiabatic, hydrostatic solution to the equations of motion. But there is also an
   "energy reference temperature" and "reference latent heat", which are thermodynamic constants required to define
   the internal energy of moist atmospheric constituents.
+* Mapping to AM fields: `ρe` corresponds to `model.energy_density`, `ρqᵗ` to `model.moisture_density`, and `qᵗ` to `model.specific_moisture`.
+
+The following table also uses a few conventions that suffuse the source code and which are internalized by wise developers:
+
+* `constants` refers to an instance of `ThermodynamicConstants()`
+* `q` refers to an instance of  [`MoistureMassFractions`](@ref Breeze.Thermodynamics.MoistureMassFractions)
+* "Reference" quantities use a subscript ``r`` (e.g., ``p_r``, ``\rho_r``).
 * Phase or mixture identifiers (``d``, ``v``, ``m``) appear as superscripts (e.g., ``Rᵈ``, ``cᵖᵐ``), matching usage in the codebase (e.g., `Rᵈ`, `cᵖᵐ`).
 * Conservative variables are stored in ρᵣ-weighted form in the code (e.g., `ρu`, `ρv`, `ρw`, `ρe`, `ρqᵗ`).
-* Mapping to AM fields: `ρe` corresponds to `model.energy_density`, `ρqᵗ` to `model.moisture_density`, and `qᵗ` to `model.specific_moisture`.
 
 | math symbol                           | code          | property name                      | description |
 | --- | --- | --- | --- |

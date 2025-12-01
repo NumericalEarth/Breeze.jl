@@ -69,7 +69,7 @@ buoyancy = MoistAirBuoyancy(grid)
 # output
 MoistAirBuoyancy:
 ├── reference_state: ReferenceState{Float64}(p₀=101325.0, θ₀=288.0)
-└── thermodynamics: ThermodynamicConstants{Float64}
+└── thermodynamic_constants: ThermodynamicConstants{Float64}
 ```
 
 To build a model with `MoistAirBuoyancy`, we include potential temperature and total specific humidity

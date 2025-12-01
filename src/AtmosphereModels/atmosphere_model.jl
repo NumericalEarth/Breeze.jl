@@ -14,8 +14,6 @@ using Oceananigans.Utils: launch!, prettytime, prettykeys
 import Oceananigans: fields, prognostic_fields
 import Oceananigans.Advection: cell_advection_timescale
 
-materialize_density(formulation, grid) = CenterField(grid)
-
 struct DefaultValue end
 
 tupleit(t::Tuple) = t
@@ -32,14 +30,13 @@ end
 
 formulation_pressure_solver(formulation, grid) = nothing
 
-mutable struct AtmosphereModel{Frm, Arc, Tst, Grd, Clk, Thm, Den, Mom, Eng, Mse, Moi, Mfr, Buy,
+mutable struct AtmosphereModel{Frm, Arc, Tst, Grd, Clk, Thm, Mom, Eng, Mse, Moi, Mfr, Buy,
                                Tmp, Prs, Sol, Vel, Trc, Adv, Cor, Frc, Mic, Cnd, Cls, Cfs} <: AbstractModel{Tst, Arc}
     architecture :: Arc
     grid :: Grd
     clock :: Clk
     formulation :: Frm
     thermodynamic_constants :: Thm
-    density :: Den
     momentum :: Mom
     energy_density :: Eng
     specific_energy :: Mse
@@ -122,7 +119,6 @@ function AtmosphereModel(grid;
     all_names = field_names(formulation, microphysics, tracers)
     boundary_conditions = regularize_field_boundary_conditions(boundary_conditions, grid, all_names)
 
-    density = materialize_density(formulation, grid)
     velocities, momentum = materialize_momentum_and_velocities(formulation, grid, boundary_conditions)
     microphysical_fields = materialize_microphysical_fields(microphysics, grid, boundary_conditions)
     advection = adapt_advection_order(advection, grid)
@@ -143,7 +139,6 @@ function AtmosphereModel(grid;
 
     prognostic_microphysical_fields = NamedTuple(microphysical_fields[name] for name in prognostic_field_names(microphysics))
     prognostic_fields = collect_prognostic_fields(formulation,
-                                                  density,
                                                   momentum,
                                                   energy_density,
                                                   moisture_density,
@@ -167,7 +162,6 @@ function AtmosphereModel(grid;
                             clock,
                             formulation,
                             thermodynamic_constants,
-                            density,
                             momentum,
                             energy_density,
                             specific_energy,
