@@ -6,6 +6,7 @@ using Oceananigans.Advection: adapt_advection_order
 using Oceananigans.Forcings: materialize_forcing
 using Oceananigans.BoundaryConditions: FieldBoundaryConditions, regularize_field_boundary_conditions
 using Oceananigans.Grids: ZDirection
+using Oceananigans.Models: validate_model_halo, validate_momentum_advection, validate_tracer_advection
 using Oceananigans.Solvers: FourierTridiagonalPoissonSolver
 using Oceananigans.TimeSteppers: TimeStepper
 using Oceananigans.TurbulenceClosures: implicit_diffusion_solver, time_discretization, build_closure_fields
@@ -99,10 +100,34 @@ function AtmosphereModel(grid;
                          coriolis = nothing,
                          boundary_conditions = NamedTuple(),
                          forcing = NamedTuple(),
-                         advection = Centered(order=2),
+                         advection = nothing,
+                         momentum_advection = nothing,
+                         tracer_advection = nothing,
                          closure = nothing,
                          microphysics = nothing, # WarmPhaseSaturationAdjustment(),
                          timestepper = :RungeKutta3)
+
+    if !isnothing(advection)
+        # TODO: check that tracer+momentum advection were not independently set.
+        tracer_advection = momentum_advection = advection
+    else
+        isnothing(momentum_advection) && (momentum_advection = Centered(order=2))
+        isnothing(tracer_advection) && (tracer_advection = Centered(order=2))
+    end
+
+    # Check halos and throw an error if the grid's halo is too small
+    @apply_regionally validate_model_halo(grid, momentum_advection, tracer_advection, closure)
+
+    # Reduce the advection order in directions that do not have enough grid points
+    @apply_regionally momentum_advection = validate_momentum_advection(momentum_advection, grid)
+    default_tracer_advection, tracer_advection = validate_tracer_advection(tracer_advection, grid)
+    default_generator(name, tracer_advection) = default_tracer_advection
+
+    # Generate tracer advection scheme for each tracer
+    tracer_advection_tuple = with_tracers(tracernames(tracers), tracer_advection, default_generator, with_velocities=false)
+    momentum_advection_tuple = (; momentum = momentum_advection)
+    advection = merge(momentum_advection_tuple, tracer_advection_tuple)
+    advection = NamedTuple(name => adapt_advection_order(scheme, grid) for (name, scheme) in pairs(advection))
 
     arch = grid.architecture
     tracers = tupleit(tracers) # supports tracers=:c keyword argument (for example)
