@@ -37,9 +37,9 @@ struct AnelasticFormulation{T, R, P}
     pressure_anomaly :: P
 end
 
-struct StaticEnergyThermodynamics{E}
+struct StaticEnergyThermodynamics{E, S}
     energy_density :: E
-    specific_energy :: E
+    specific_energy :: S
 end
 
 """
