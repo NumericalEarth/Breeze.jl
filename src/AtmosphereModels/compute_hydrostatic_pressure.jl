@@ -2,6 +2,7 @@
 ##### update pressure
 #####
 
+using Oceananigans: Center, Face
 using Oceananigans.Grids: topology
 using Oceananigans.Operators: Δzᶜᶜᶜ, Δzᶜᶜᶠ, ℑzᵃᵃᶠ
 using Oceananigans.Utils: KernelParameters
