@@ -21,7 +21,9 @@ export
     SaturationAdjustment,
     MixedPhaseEquilibrium,
     WarmPhaseEquilibrium,
-    BulkMicrophysics
+    BulkMicrophysics,
+    energy_density,
+    specific_energy
 
 using Oceananigans: Oceananigans, @at, AnisotropicMinimumDissipation, Average,
                     AveragedTimeInterval, BackgroundField, BetaPlane, Bounded,

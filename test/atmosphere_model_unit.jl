@@ -19,10 +19,10 @@ using Test
             ρeᵢ = ρᵣ * cᵖᵈ * θ₀
 
             set!(model; θ = θ₀)
-            ρe₁ = deepcopy(model.formulation.thermodynamics.energy_density)
+            ρe₁ = deepcopy(energy_density(model))
 
             set!(model; ρe = ρeᵢ)
-            @test model.formulation.thermodynamics.energy_density ≈ ρe₁
+            @test energy_density(model) ≈ ρe₁
         end
     end
 end

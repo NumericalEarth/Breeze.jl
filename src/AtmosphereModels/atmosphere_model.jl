@@ -275,3 +275,23 @@ function prognostic_fields(model::AtmosphereModel)
 
     return merge(model.momentum, thermodynamic_fields, prognostic_microphysical_fields, model.tracers)
 end
+
+#####
+##### Helper functions for accessing thermodynamic fields
+#####
+
+"""
+    energy_density(model::AtmosphereModel)
+
+Return the energy density field `ρe` from the model formulation.
+This is a convenience function for accessing `model.formulation.thermodynamics.energy_density`.
+"""
+energy_density(model::AtmosphereModel) = model.formulation.thermodynamics.energy_density
+
+"""
+    specific_energy(model::AtmosphereModel)
+
+Return the specific energy field `e` from the model formulation.
+This is a convenience function for accessing `model.formulation.thermodynamics.specific_energy`.
+"""
+specific_energy(model::AtmosphereModel) = model.formulation.thermodynamics.specific_energy

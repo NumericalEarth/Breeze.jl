@@ -6,7 +6,9 @@ export
     AnelasticFormulation,
     StaticEnergyThermodynamics,
     PotentialTemperature,
-    PotentialTemperatureField
+    PotentialTemperatureField,
+    energy_density,
+    specific_energy
 
 using DocStringExtensions: TYPEDSIGNATURES
 using Adapt: Adapt, adapt
