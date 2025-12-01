@@ -49,8 +49,10 @@ Oceananigans `qᶜ` is the kinematic tracer flux.
     return - g * ρ′
 end
 
+@inline ρ_bᶜᶜᶠ(i, j, k, grid, args...) = ℑzᵃᵃᶠ(i, j, k, grid, ρ_bᶜᶜᶜ, args...)
+
 @inline function ρ_w_bᶜᶜᶠ(i, j, k, grid, w, args...)
-    ρ_b = ℑzᵃᵃᶠ(i, j, k, grid, ρ_bᶜᶜᶜ, args...)
+    ρ_b = ρ_bᶜᶜᶠ(i, j, k, grid, args...)
     return @inbounds ρ_b * w[i, j, k]
 end
 
