@@ -37,7 +37,7 @@ p₀, θ₀ = 101325, 285 # Pa, K
 microphysics = ZeroMomentCloudMicrophysics()
 reference_state = ReferenceState(grid, base_pressure=p₀, potential_temperature=θ₀)
 formulation = AnelasticFormulation(reference_state)
-thermodynamics = ThermodynamicConstants()
+thermodynamic_constants = ThermodynamicConstants()
 
 # ## Surface flux parameters
 #
@@ -50,7 +50,7 @@ thermodynamics = ThermodynamicConstants()
 @inline sea_surface_temperature(x, p) = p.T₀ + p.ΔT * exp(-x^2 / (2 * p.δx^2))
 
 parameters = (;
-    thermodynamics, 
+    thermodynamic_constants, 
     drag_coefficient = 1e-3,      # Cᴰ: drag coefficient
     heat_transfer_coefficient = 1e-3,  # Cᴴ: heat transfer coefficient
     vapor_transfer_coefficient = 1e-3,  # Cᵛ: vapor transfer coefficient
@@ -58,7 +58,7 @@ parameters = (;
     T₀ = 20,  # Sea surface temperature
     ΔT = 10,  # Maximum SST anomaly (K)
     δx = 1e3,  # Standard deviation of Gaussian SST distribution
-    ρ₀ = Breeze.Thermodynamics.base_density(p₀, θ₀, thermodynamics)
+    ρ₀ = Breeze.Thermodynamics.base_density(p₀, θ₀, thermodynamic_constants)
 )
 
 # ## Boundary condition functions
@@ -68,8 +68,8 @@ parameters = (;
 # density fluxes for AtmosphereModel.
 
 # Utility for computing saturation specific humidity at sea surface
-@inline surface_saturation_specific_humidity(T, ρ, thermo) =
-    Breeze.Thermodynamics.saturation_specific_humidity(T, ρ, thermo, Breeze.Thermodynamics.PlanarLiquidSurface())
+@inline surface_saturation_specific_humidity(T, ρ, constants) =
+    Breeze.Thermodynamics.saturation_specific_humidity(T, ρ, constants, Breeze.Thermodynamics.PlanarLiquidSurface())
 
 using Oceananigans.Operators: ℑxyᶠᶜᵃ, ℑxyᶜᶠᵃ, ℑxᶜᵃᵃ, ℑyᵃᶜᵃ
 
@@ -119,7 +119,7 @@ end
 # The sensible heat flux is computed using bulk transfer: Jθ = -u★ θ★
 # where θ★ is the temperature scale computed from the bulk transfer coefficient
 @inline function energy_density_flux(i, j, grid, clock, fields, parameters)
-    thermo = parameters.thermodynamics
+    constants = parameters.thermodynamic_constants
     Uᵍ = parameters.gust_speed
     Ũ = sqrt(s²ᶜᶜᶜ(i, j, grid, fields) + Uᵍ^2)
     
@@ -127,9 +127,9 @@ end
     x = xnode(i, j, 1, grid, Center(), Center(), Center())
     Tˢ = sea_surface_temperature(x, parameters)
     ρ₀ = parameters.ρ₀
-    qᵛ⁺ = surface_saturation_specific_humidity(Tˢ, ρ₀, thermo)
+    qᵛ⁺ = surface_saturation_specific_humidity(Tˢ, ρ₀, constants)
     qˢ = Breeze.Thermodynamics.MoistureMassFractions(qᵛ⁺)
-    cᵖᵐ = mixture_heat_capacity(qˢ, thermo)
+    cᵖᵐ = mixture_heat_capacity(qˢ, constants)
     eˢ = cᵖᵐ * Tˢ
     
     # Get temperature from fields (approximate θ ≈ T near surface)
@@ -138,14 +138,14 @@ end
     ρcᵖw′T′ = - ρ₀ * Cᴴ * Ũ * Δe
 
     ρw′q′ = moisture_density_flux(i, j, grid, clock, fields, parameters)
-    ℒⁱᵣ = thermo.ice.reference_latent_heat
+    ℒⁱᵣ = constants.ice.reference_latent_heat
    
     return ρcᵖw′T′ + ℒⁱᵣ * ρw′q′
 end
 
 # Moisture density flux (converted from specific humidity flux)
 @inline function moisture_density_flux(i, j, grid, clock, fields, parameters)
-    thermo = parameters.thermodynamics
+    constants = parameters.thermodynamic_constants
     Cᵛ = parameters.vapor_transfer_coefficient
     Uᵍ = parameters.gust_speed
     Ũ = sqrt(s²ᶜᶠᶜ(i, j, grid, fields) + Uᵍ^2)
@@ -154,7 +154,7 @@ end
     x = xnode(i, j, 1, grid, Center(), Center(), Center())
     Tˢ = sea_surface_temperature(x, parameters)
     ρ₀ = parameters.ρ₀  # Use surface reference density
-    qᵛ⁺ = surface_saturation_specific_humidity(Tˢ, ρ₀, thermo)
+    qᵛ⁺ = surface_saturation_specific_humidity(Tˢ, ρ₀, constants)
     Δq = @inbounds fields.qᵗ[i, j, 1] - qᵛ⁺
     
     return - ρ₀ * Cᵛ * Ũ * Δq

@@ -31,7 +31,7 @@ Oceananigans `qᶜ` is the kinematic tracer flux.
                                   specific_moisture,
                                   microphysics,
                                   microphysical_fields,
-                                  thermo)
+                                  constants)
 
     @inbounds begin
         qᵗ = specific_moisture[i, j, k]
@@ -41,9 +41,9 @@ Oceananigans `qᶜ` is the kinematic tracer flux.
     end
 
     q = compute_moisture_fractions(i, j, k, grid, microphysics, ρᵣ, qᵗ, microphysical_fields)
-    Rᵐ = mixture_gas_constant(q, thermo)
+    Rᵐ = mixture_gas_constant(q, constants)
     ρ = pᵣ / (Rᵐ * T)
-    g = thermo.gravitational_acceleration
+    g = constants.gravitational_acceleration
 
     return - g * (ρ - ρᵣ)
 end
@@ -111,11 +111,11 @@ end
                                      specific_moisture,
                                      microphysics,
                                      microphysical_fields,
-                                     thermo)
+                                     constants)
 
     return ( - div_𝐯w(i, j, k, grid, advection, momentum, velocities.w)
              + ρ_bᶜᶜᶠ(i, j, k, grid, formulation, density, temperature,
-                      specific_moisture, microphysics, microphysical_fields, thermo)
+                      specific_moisture, microphysics, microphysical_fields, constants)
              - z_f_cross_U(i, j, k, grid, coriolis, momentum)
              - ∂ⱼ_𝒯₃ⱼ(i, j, k, grid, density, closure, closure_fields, clock, model_fields, nothing)
              + ρw_forcing(i, j, k, grid, clock, model_fields))
@@ -127,7 +127,7 @@ end
                                  name,
                                  c_forcing,
                                  formulation,
-                                 thermo,
+                                 constants,
                                  specific_energy,
                                  specific_moisture,
                                  advection,
@@ -143,19 +143,19 @@ end
     Uᵖ = microphysical_velocities(microphysics, name)
     Uᵗ = sum_of_velocities(velocities, Uᵖ)
     ρ = formulation.reference_state.density
-    diffusive_flux_buoyancy = AtmosphereModelBuoyancy(formulation, thermo)
+    diffusive_flux_buoyancy = AtmosphereModelBuoyancy(formulation, constants)
 
     𝒰 = diagnose_thermodynamic_state(i, j, k, grid,
                                      formulation,
                                      microphysics,
                                      microphysical_fields,
-                                     thermo,
+                                     constants,
                                      specific_energy,
                                      specific_moisture)
 
     return ( - div_ρUc(i, j, k, grid, advection, ρ, Uᵗ, c)
              - ∇_dot_Jᶜ(i, j, k, grid, ρ, closure, closure_fields, id, c, clock, model_fields, diffusive_flux_buoyancy)
-             + microphysical_tendency(i, j, k, grid, microphysics, name, microphysical_fields, 𝒰, thermo)
+             + microphysical_tendency(i, j, k, grid, microphysics, name, microphysical_fields, 𝒰, constants)
              + c_forcing(i, j, k, grid, clock, model_fields))
 end
 
@@ -163,7 +163,7 @@ end
                                               id,
                                               ρe_forcing,
                                               formulation,
-                                              thermo,
+                                              constants,
                                               specific_energy,
                                               specific_moisture,
                                               advection,
@@ -180,7 +180,7 @@ end
                                      formulation,
                                      microphysics,
                                      microphysical_fields,
-                                     thermo,
+                                     constants,
                                      specific_energy,
                                      specific_moisture)
 
@@ -189,13 +189,13 @@ end
     # Compute the buoyancy flux term, ρᵣ w b
     buoyancy_flux = ℑzᵃᵃᶜ(i, j, k, grid, ρ_w_bᶜᶜᶠ,
                           velocities.w, formulation, ρ, temperature, specific_moisture,
-                          microphysics, microphysical_fields, thermo)
+                          microphysics, microphysical_fields, constants)
 
-    closure_buoyancy = AtmosphereModelBuoyancy(formulation, thermo)
+    closure_buoyancy = AtmosphereModelBuoyancy(formulation, constants)
 
     return ( - div_ρUc(i, j, k, grid, advection, ρ, velocities, specific_energy)
              + buoyancy_flux
              - ∇_dot_Jᶜ(i, j, k, grid, ρ, closure, closure_fields, id, specific_energy, clock, model_fields, closure_buoyancy)
-             + microphysical_tendency(i, j, k, grid, microphysics, Val(:ρe), microphysical_fields, 𝒰, thermo)
+             + microphysical_tendency(i, j, k, grid, microphysics, Val(:ρe), microphysical_fields, 𝒰, constants)
              + ρe_forcing(i, j, k, grid, clock, model_fields))
 end

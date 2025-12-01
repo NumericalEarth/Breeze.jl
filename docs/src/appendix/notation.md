@@ -1,4 +1,4 @@
-# Notation
+# Notation and conventions
 
 This appendix establishes a common notation across the documentation and source code.
 Each entry lists a mathematical symbol and the Unicode form commonly used in
@@ -13,16 +13,19 @@ A few notes about the following table:
 * `TC` stands for [`ThermodynamicConstants`](@ref)
 * `AM` stands for [`AtmosphereModel`](@ref)
 * `RS` stands for [`ReferenceState`](@ref Breeze.AtmosphereModels.ReferenceState)
-* `thermo` refers to an instance of `ThermodynamicConstants()`
-* `q` refers to an instance of  [`MoistureMassFractions`](@ref Breeze.Thermodynamics.MoistureMassFractions)
-* "Reference" quantities use a subscript ``r`` (e.g., ``p_r``, ``\rho_r``).
 * Note that there are independent concepts of "reference". For example, [`AnelasticFormulation`](@ref) involves
   a "reference state", which is an adiabatic, hydrostatic solution to the equations of motion. But there is also an
   "energy reference temperature" and "reference latent heat", which are thermodynamic constants required to define
   the internal energy of moist atmospheric constituents.
+* Mapping to AM fields: `ρe` corresponds to `model.energy_density`, `ρqᵗ` to `model.moisture_density`, and `qᵗ` to `model.specific_moisture`.
+
+The following table also uses a few conventions that suffuse the source code and which are internalized by wise developers:
+
+* `constants` refers to an instance of `ThermodynamicConstants()`
+* `q` refers to an instance of  [`MoistureMassFractions`](@ref Breeze.Thermodynamics.MoistureMassFractions)
+* "Reference" quantities use a subscript ``r`` (e.g., ``p_r``, ``\rho_r``).
 * Phase or mixture identifiers (``d``, ``v``, ``m``) appear as superscripts (e.g., ``Rᵈ``, ``cᵖᵐ``), matching usage in the codebase (e.g., `Rᵈ`, `cᵖᵐ`).
 * Conservative variables are stored in ρᵣ-weighted form in the code (e.g., `ρu`, `ρv`, `ρw`, `ρe`, `ρqᵗ`).
-* Mapping to AM fields: `ρe` corresponds to `model.energy_density`, `ρqᵗ` to `model.moisture_density`, and `qᵗ` to `model.specific_moisture`.
 
 | math symbol                           | code          | property name                      | description |
 | --- | --- | --- | --- |
@@ -59,14 +62,14 @@ A few notes about the following table:
 | ``pᵗʳ``                               | `pᵗʳ`         | `TC.triple_point_pressure`         | Pressure at the vapor-liquid-ice triple point |
 | ``mᵈ``                                | `mᵈ`          | `TC.dry_air.molar_mass`            | Molar mass of dry air |
 | ``mᵛ``                                | `mᵛ`          | `TC.vapor.molar_mass`              | Molar mass of vapor |
-| ``Rᵈ``                                | `Rᵈ`          | `dry_air_gas_constant(thermo)`     | Dry air gas constant (``Rᵈ = \mathcal{R} / mᵈ``) |
-| ``Rᵛ``                                | `Rᵛ`          | `vapor_gas_constant(thermo)`       | Water vapor gas constant (``Rᵛ = \mathcal{R} / mᵛ``) |
-| ``Rᵐ``                                | `Rᵐ`          | `mixture_gas_constant(q, thermo)`  | Mixture gas constant, function of ``q`` |
+| ``Rᵈ``                                | `Rᵈ`          | `dry_air_gas_constant(constants)`     | Dry air gas constant (``Rᵈ = \mathcal{R} / mᵈ``) |
+| ``Rᵛ``                                | `Rᵛ`          | `vapor_gas_constant(constants)`       | Water vapor gas constant (``Rᵛ = \mathcal{R} / mᵛ``) |
+| ``Rᵐ``                                | `Rᵐ`          | `mixture_gas_constant(q, constants)`  | Mixture gas constant, function of ``q`` |
 | ``cᵖᵈ``                               | `cᵖᵈ`         | `TC.dry_air.heat_capacity`         | Heat capacity of dry air at constant pressure |
 | ``cᵖᵛ``                               | `cᵖᵛ`         | `TC.vapor.heat_capacity`           | Heat capacity of vapor at constant pressure |
 | ``cˡ``                                | `cˡ`          | `TC.liquid.heat_capacity`          | Heat capacity of the liquid phase (incompressible) |
 | ``cⁱ``                                | `cⁱ`          | `TC.ice.heat_capacity`             | Heat capacity of the ice phase (incompressible) |
-| ``cᵖᵐ``                               | `cᵖᵐ`         | `mixture_heat_capacity(q, thermo)` | Mixture heat capacity at constant pressure |
+| ``cᵖᵐ``                               | `cᵖᵐ`         | `mixture_heat_capacity(q, constants)` | Mixture heat capacity at constant pressure |
 | ``Tᵣ``                                | `Tᵣ`          | `TC.energy_reference_temperature`  | Reference temperature for internal energy relations and latent heat |
 | ``\mathcal{L}^l_r``                   | `ℒˡᵣ`         | `TC.liquid.reference_latent_heat`  | Latent heat of condensation at the energy reference temperature |
 | ``\mathcal{L}^i_r``                   | `ℒⁱᵣ`         | `TC.ice.reference_latent_heat`     | Latent heat of deposition at the energy reference temperature |

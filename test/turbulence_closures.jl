@@ -29,7 +29,7 @@ using Test
         model = AtmosphereModel(grid; closure, tracers=:ρc)
         # Set uniform specific energy for no diffusion
         θ₀ = model.formulation.reference_state.potential_temperature
-        cᵖᵈ = model.thermodynamics.dry_air.heat_capacity
+        cᵖᵈ = model.thermodynamic_constants.dry_air.heat_capacity
         e₀ = cᵖᵈ * θ₀
         set!(model; e=e₀)
         ρe₀ = deepcopy(model.energy_density)

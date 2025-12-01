@@ -30,14 +30,14 @@ q_bomex = AtmosphericProfilesLibrary.Bomex_q_tot(FT)
 u_bomex = AtmosphericProfilesLibrary.Bomex_u(FT)
 
 p₀, θ₀ = 101500, 299.1
-thermo = ThermodynamicConstants()
-reference_state = ReferenceState(grid, thermo, base_pressure=p₀, potential_temperature=θ₀)
+constants = ThermodynamicConstants()
+reference_state = ReferenceState(grid, constants, base_pressure=p₀, potential_temperature=θ₀)
 formulation = AnelasticFormulation(reference_state)
 
 q₀ = Breeze.Thermodynamics.MoistureMassFractions{eltype(grid)} |> zero
-ρ₀ = Breeze.Thermodynamics.density(p₀, θ₀, q₀, thermo)
-cᵖᵈ = thermo.dry_air.heat_capacity
-Lˡ = thermo.liquid.reference_latent_heat
+ρ₀ = Breeze.Thermodynamics.density(p₀, θ₀, q₀, constants)
+cᵖᵈ = constants.dry_air.heat_capacity
+Lˡ = constants.liquid.reference_latent_heat
 w′T′, w′q′ = 8e-3, 5.2e-5
 Q = ρ₀ * cᵖᵈ * w′T′ 
 F = ρ₀ * w′q′

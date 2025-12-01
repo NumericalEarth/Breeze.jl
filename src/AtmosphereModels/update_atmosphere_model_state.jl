@@ -75,7 +75,7 @@ function compute_auxiliary_variables!(model)
             model.specific_energy,
             model.specific_moisture,
             grid,
-            model.thermodynamics,
+            model.thermodynamic_constants,
             model.formulation,
             model.microphysics,
             model.microphysical_fields,
@@ -118,7 +118,7 @@ end
                                                              specific_energy,
                                                              specific_moisture,
                                                              grid,
-                                                             thermo,
+                                                             constants,
                                                              formulation,
                                                              microphysics,
                                                              microphysical_fields,
@@ -141,19 +141,19 @@ end
                                       formulation,
                                       microphysics,
                                       microphysical_fields,
-                                      thermo,
+                                      constants,
                                       specific_energy,
                                       specific_moisture)
 
     # Adjust the thermodynamic state if using a microphysics scheme
     # that invokes saturation adjustment
-    𝒰₁ = maybe_adjust_thermodynamic_state(𝒰₀, microphysics, microphysical_fields, qᵗ, thermo)
+    𝒰₁ = maybe_adjust_thermodynamic_state(𝒰₀, microphysics, microphysical_fields, qᵗ, constants)
 
     update_microphysical_fields!(microphysical_fields, microphysics,
                                  i, j, k, grid,
-                                 ρ, 𝒰₁, thermo)
+                                 ρ, 𝒰₁, constants)
                                  
-    T = Thermodynamics.temperature(𝒰₁, thermo)
+    T = Thermodynamics.temperature(𝒰₁, constants)
     @inbounds temperature[i, j, k] = T
 end
 
@@ -192,7 +192,7 @@ function compute_tendencies!(model::AnelasticModel)
                    model.specific_moisture,
                    model.microphysics,
                    model.microphysical_fields,
-                   model.thermodynamics)
+                   model.thermodynamic_constants)
 
     launch!(arch, grid, :xyz, compute_x_momentum_tendency!, Gρu, grid, u_args)
     launch!(arch, grid, :xyz, compute_y_momentum_tendency!, Gρv, grid, v_args)
@@ -201,7 +201,7 @@ function compute_tendencies!(model::AnelasticModel)
     # Arguments common to energy density, moisture density, and tracer density tendencies:
     common_args = (
         model.formulation,
-        model.thermodynamics,
+        model.thermodynamic_constants,
         model.specific_energy,
         model.specific_moisture,
         model.advection,
