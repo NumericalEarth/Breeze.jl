@@ -274,6 +274,8 @@ function compute_tendencies!(model::AnelasticModel)
     launch!(arch, grid, :xyz, compute_y_momentum_tendency!, Gρv, grid, v_args)
     launch!(arch, grid, :xyz, compute_z_momentum_tendency!, Gρw, grid, w_args)
 
+    specific_energy = model.formulation.thermodynamics.specific_energy
+
     # Arguments common to energy density, moisture density, and tracer density tendencies:
     common_args = (
         model.formulation,

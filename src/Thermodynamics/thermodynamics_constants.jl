@@ -300,8 +300,3 @@ end
     Rᵐ = mixture_gas_constant(q, thermo)
     return p / (Rᵐ * T)
 end
-
-@inline function specific_volume(p, T, q::MMF, constants::TC)
-    Rᵐ = mixture_gas_constant(q, constants)
-    return Rᵐ * T / p
-end

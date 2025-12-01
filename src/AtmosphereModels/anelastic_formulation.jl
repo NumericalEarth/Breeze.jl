@@ -38,15 +38,23 @@ struct AnelasticFormulation{T, R, P}
     pressure_anomaly :: P
 end
 
-struct StaticEnergyThermodynamics{E}
-    energy_density :: E
-    specific_energy :: E
+struct PotentialTemperatureThermodynamics{F, T}
+    potential_temperature_density :: F  # ρθ (prognostic)
+    potential_temperature :: T          # θ = ρθ / ρᵣ (diagnostic)
 end
 
-struct PotentialTemperatureThermodynamics{F}
-    potential_temperature_density :: F  # ρθ (prognostic)
-    potential_temperature :: F          # θ = ρθ / ρᵣ (diagnostic)
+struct StaticEnergyThermodynamics{E, S}
+    energy_density :: E
+    specific_energy :: S
 end
+
+"""
+    $(TYPEDSIGNATURES)
+
+Construct a "stub" `AnelasticFormulation` with just the `reference_state`.
+The thermodynamics and pressure fields are materialized later in the model constructor.
+"""
+AnelasticFormulation(reference_state) = AnelasticFormulation(nothing, reference_state, nothing)
 
 Adapt.adapt_structure(to, thermo::StaticEnergyThermodynamics) =
     StaticEnergyThermodynamics(adapt(to, thermo.energy_density),
@@ -76,14 +84,6 @@ Construct a "stub" `AnelasticFormulation` with just the `reference_state`.
 The thermodynamics and pressure fields are materialized later in the model constructor.
 
 Keyword Arguments
-=================
-
-- `thermodynamics`: The thermodynamic variable to use. Options are `:static_energy` (default)
-  or `:potential_temperature`.
-"""
-AnelasticFormulation(reference_state; thermodynamics=:static_energy) =
-    AnelasticFormulation(thermodynamics, reference_state, nothing)
-
 function default_formulation(grid, constants)
     reference_state = ReferenceState(grid, constants)
     return AnelasticFormulation(reference_state)
@@ -150,6 +150,7 @@ function diagnose_thermodynamic_state(i, j, k, grid, formulation::ASEF,
                                       microphysical_fields,
                                       constants,
                                       specific_moisture)
+  
     e = @inbounds formulation.thermodynamics.specific_energy[i, j, k]
     pᵣ = @inbounds formulation.reference_state.pressure[i, j, k]
     ρᵣ = @inbounds formulation.reference_state.density[i, j, k]
@@ -172,6 +173,7 @@ function diagnose_thermodynamic_state(i, j, k, grid, formulation::APTF,
                                       microphysical_fields,
                                       constants,
                                       specific_moisture)
+  
     θ = @inbounds formulation.thermodynamics.potential_temperature[i, j, k]
     pᵣ = @inbounds formulation.reference_state.pressure[i, j, k]
     ρᵣ = @inbounds formulation.reference_state.density[i, j, k]
