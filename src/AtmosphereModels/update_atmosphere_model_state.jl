@@ -229,7 +229,7 @@ function compute_tendencies!(model::AnelasticModel)
         model.temperature)
 
     Gρe = model.timestepper.Gⁿ.ρe
-    launch!(arch, grid, :xyz, compute_moist_static_energy_tendency!, Gρe, grid, ρe_args)
+    launch!(arch, grid, :xyz, compute_static_energy_tendency!, Gρe, grid, ρe_args)
 
     #####
     ##### Moisture density tendency
@@ -272,9 +272,9 @@ end
     @inbounds Gc[i, j, k] = scalar_tendency(i, j, k, grid, args...)
 end
 
-@kernel function compute_moist_static_energy_tendency!(Gρe, grid, args)
+@kernel function compute_static_energy_tendency!(Gρe, grid, args)
     i, j, k = @index(Global, NTuple)
-    @inbounds Gρe[i, j, k] = moist_static_energy_tendency(i, j, k, grid, args...)
+    @inbounds Gρe[i, j, k] = static_energy_tendency(i, j, k, grid, args...)
 end
 
 @kernel function compute_x_momentum_tendency!(Gρu, grid, args)

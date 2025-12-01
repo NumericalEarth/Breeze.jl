@@ -1,6 +1,6 @@
 using ..Thermodynamics:
     MoistureMassFractions,
-    MoistStaticEnergyState,
+    StaticEnergyState,
     ThermodynamicConstants,
     ReferenceState,
     mixture_gas_constant,
@@ -97,7 +97,7 @@ Base.show(io::IO, formulation::AnelasticFormulation) = print(io, "AnelasticFormu
 """
     $(TYPEDSIGNATURES)
 
-Return `MoistStaticEnergyState` computed from the prognostic state including
+Return `StaticEnergyState` computed from the prognostic state including
 energy density, moisture density, and microphysical fields.
 """
 function diagnose_thermodynamic_state(i, j, k, grid, formulation::AnelasticFormulation,
@@ -116,7 +116,7 @@ function diagnose_thermodynamic_state(i, j, k, grid, formulation::AnelasticFormu
     q = compute_moisture_fractions(i, j, k, grid, microphysics, ρᵣ, qᵗ, microphysical_fields)
     z = znode(i, j, k, grid, c, c, c)
 
-    return MoistStaticEnergyState(e, q, z, pᵣ)
+    return StaticEnergyState(e, q, z, pᵣ)
 end
 
 
