@@ -128,7 +128,6 @@ end
                                  c_forcing,
                                  formulation,
                                  constants,
-                                 specific_energy,
                                  specific_moisture,
                                  advection,
                                  velocities,
@@ -150,7 +149,6 @@ end
                                      microphysics,
                                      microphysical_fields,
                                      constants,
-                                     specific_energy,
                                      specific_moisture)
 
     return ( - div_ρUc(i, j, k, grid, advection, ρ, Uᵗ, c)
@@ -164,7 +162,6 @@ end
                                               ρe_forcing,
                                               formulation,
                                               constants,
-                                              specific_energy,
                                               specific_moisture,
                                               advection,
                                               velocities,
@@ -176,12 +173,13 @@ end
                                               model_fields,
                                               temperature)
 
+    specific_energy = formulation.thermodynamics.specific_energy
+
     𝒰 = diagnose_thermodynamic_state(i, j, k, grid,
                                      formulation,
                                      microphysics,
                                      microphysical_fields,
                                      constants,
-                                     specific_energy,
                                      specific_moisture)
 
     ρ = formulation.reference_state.density
@@ -198,4 +196,41 @@ end
              - ∇_dot_Jᶜ(i, j, k, grid, ρ, closure, closure_fields, id, specific_energy, clock, model_fields, closure_buoyancy)
              + microphysical_tendency(i, j, k, grid, microphysics, Val(:ρe), microphysical_fields, 𝒰, constants)
              + ρe_forcing(i, j, k, grid, clock, model_fields))
+end
+
+@inline function potential_temperature_tendency(i, j, k, grid,
+                                                id,
+                                                ρθ_forcing,
+                                                formulation,
+                                                constants,
+                                                specific_moisture,
+                                                advection,
+                                                velocities,
+                                                microphysics,
+                                                microphysical_fields,
+                                                closure,
+                                                closure_fields,
+                                                clock,
+                                                model_fields,
+                                                temperature)
+
+    potential_temperature = formulation.thermodynamics.potential_temperature
+    ρ = formulation.reference_state.density
+
+    # Note: Unlike static energy, potential temperature does not have a buoyancy flux term
+    # since potential temperature is conserved under adiabatic processes.
+
+    𝒰 = diagnose_thermodynamic_state(i, j, k, grid,
+                                     formulation,
+                                     microphysics,
+                                     microphysical_fields,
+                                     constants,
+                                     specific_moisture)
+
+    closure_buoyancy = AtmosphereModelBuoyancy(formulation, constants)
+
+    return ( - div_ρUc(i, j, k, grid, advection, ρ, velocities, potential_temperature)
+             - ∇_dot_Jᶜ(i, j, k, grid, ρ, closure, closure_fields, id, potential_temperature, clock, model_fields, closure_buoyancy)
+             + microphysical_tendency(i, j, k, grid, microphysics, Val(:ρθ), microphysical_fields, 𝒰, constants)
+             + ρθ_forcing(i, j, k, grid, clock, model_fields))
 end

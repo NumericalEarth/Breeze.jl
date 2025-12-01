@@ -50,7 +50,7 @@ Compute auxiliary model variables:
 
 - thermodynamic variables from the prognostic thermodynamic state,
     * temperature ``T``, possibly involving saturation adjustment
-    * moist static energy ``e = ρe / ρ``
+    * specific thermodynamic variable (``e = ρe / ρ`` or ``θ = ρθ / ρ``)
     * moisture mass fraction ``qᵗ = ρqᵗ / ρ``
 
 
@@ -69,33 +69,65 @@ function compute_auxiliary_variables!(model)
     fill_halo_regions!(model.velocities)
     foreach(mask_immersed_field!, model.velocities)
 
-    energy_density = model.formulation.thermodynamics.energy_density
-    specific_energy = model.formulation.thermodynamics.specific_energy
+    # Dispatch on thermodynamics type
+    compute_auxiliary_thermodynamic_variables!(model)
+
+    # Compute diffusivities
+    compute_diffusivities!(model.closure_fields, model.closure, model)
+
+    # TODO: should we mask the auxiliary variables? They can also be masked in the kernel
+
+    return nothing
+end
+
+function compute_auxiliary_thermodynamic_variables!(model::StaticEnergyAnelasticModel)
+    grid = model.grid
+    arch = grid.architecture
+    thermo = model.formulation.thermodynamics
 
     launch!(arch, grid, :xyz,
-            _compute_auxiliary_thermodynamic_variables!,
+            _compute_static_energy_auxiliary_variables!,
             model.temperature,
-            specific_energy,
+            thermo.specific_energy,
             model.specific_moisture,
             grid,
             model.thermodynamic_constants,
             model.formulation,
             model.microphysics,
             model.microphysical_fields,
-            energy_density,
+            thermo.energy_density,
             model.moisture_density)
 
-    # TODO: Can we compute the thermodynamic variable within halos as well, and avoid
-    # halo filling later on?
     fill_halo_regions!(model.temperature)
-    fill_halo_regions!(specific_energy)
+    fill_halo_regions!(thermo.specific_energy)
     fill_halo_regions!(model.specific_moisture)
     fill_halo_regions!(model.microphysical_fields)
 
-    # Compute diffusivities
-    compute_diffusivities!(model.closure_fields, model.closure, model)
+    return nothing
+end
 
-    # TODO: should we mask the auxiliary variables? They can also be masked in the kernel
+function compute_auxiliary_thermodynamic_variables!(model::PotentialTemperatureAnelasticModel)
+    grid = model.grid
+    arch = grid.architecture
+    thermo = model.formulation.thermodynamics
+
+    launch!(arch, grid, :xyz,
+            _compute_potential_temperature_auxiliary_variables!,
+            model.temperature,
+            thermo.potential_temperature,
+            model.specific_moisture,
+            grid,
+            model.thermodynamic_constants,
+            model.formulation,
+            model.microphysics,
+            model.microphysical_fields,
+            thermo.potential_temperature_density,
+            model.moisture_density)
+
+    fill_halo_regions!(model.temperature)
+    fill_halo_regions!(thermo.potential_temperature)
+    fill_halo_regions!(model.specific_moisture)
+    fill_halo_regions!(model.microphysical_fields)
 
     return nothing
 end
@@ -117,16 +149,16 @@ end
     end
 end
 
-@kernel function _compute_auxiliary_thermodynamic_variables!(temperature,
-                                                             specific_energy,
-                                                             specific_moisture,
-                                                             grid,
-                                                             constants,
-                                                             formulation,
-                                                             microphysics,
-                                                             microphysical_fields,
-                                                             energy_density,
-                                                             moisture_density)
+@kernel function _compute_static_energy_auxiliary_variables!(temperature,
+                                                              specific_energy,
+                                                              specific_moisture,
+                                                              grid,
+                                                              constants,
+                                                              formulation,
+                                                              microphysics,
+                                                              microphysical_fields,
+                                                              energy_density,
+                                                              moisture_density)
     i, j, k = @index(Global, NTuple)
 
     @inbounds begin
@@ -145,7 +177,48 @@ end
                                       microphysics,
                                       microphysical_fields,
                                       constants,
-                                      specific_energy,
+                                      specific_moisture)
+
+    # Adjust the thermodynamic state if using a microphysics scheme
+    # that invokes saturation adjustment
+    𝒰₁ = maybe_adjust_thermodynamic_state(𝒰₀, microphysics, microphysical_fields, qᵗ, constants)
+
+    update_microphysical_fields!(microphysical_fields, microphysics,
+                                 i, j, k, grid,
+                                 ρ, 𝒰₁, constants)
+                                 
+    T = Thermodynamics.temperature(𝒰₁, constants)
+    @inbounds temperature[i, j, k] = T
+end
+
+@kernel function _compute_potential_temperature_auxiliary_variables!(temperature,
+                                                                     potential_temperature,
+                                                                     specific_moisture,
+                                                                     grid,
+                                                                     constants,
+                                                                     formulation,
+                                                                     microphysics,
+                                                                     microphysical_fields,
+                                                                     potential_temperature_density,
+                                                                     moisture_density)
+    i, j, k = @index(Global, NTuple)
+
+    @inbounds begin
+        ρθ = potential_temperature_density[i, j, k]
+        ρqᵗ = moisture_density[i, j, k]
+        ρ = formulation.reference_state.density[i, j, k]
+
+        θ = ρθ / ρ
+        qᵗ = ρqᵗ / ρ
+        potential_temperature[i, j, k] = θ
+        specific_moisture[i, j, k] = qᵗ
+    end
+
+    𝒰₀ = diagnose_thermodynamic_state(i, j, k, grid,
+                                      formulation,
+                                      microphysics,
+                                      microphysical_fields,
+                                      constants,
                                       specific_moisture)
 
     # Adjust the thermodynamic state if using a microphysics scheme
@@ -201,13 +274,10 @@ function compute_tendencies!(model::AnelasticModel)
     launch!(arch, grid, :xyz, compute_y_momentum_tendency!, Gρv, grid, v_args)
     launch!(arch, grid, :xyz, compute_z_momentum_tendency!, Gρw, grid, w_args)
 
-    specific_energy = model.formulation.thermodynamics.specific_energy
-
     # Arguments common to energy density, moisture density, and tracer density tendencies:
     common_args = (
         model.formulation,
         model.thermodynamic_constants,
-        specific_energy,
         model.specific_moisture,
         model.advection,
         model.velocities,
@@ -219,17 +289,10 @@ function compute_tendencies!(model::AnelasticModel)
         model_fields)
 
     #####
-    ##### Energy density tendency
+    ##### Thermodynamic density tendency (dispatches on thermodynamics type)
     #####
 
-    ρe_args = (
-        Val(1),
-        model.forcing.ρe,
-        common_args...,
-        model.temperature)
-
-    Gρe = model.timestepper.Gⁿ.ρe
-    launch!(arch, grid, :xyz, compute_static_energy_tendency!, Gρe, grid, ρe_args)
+    compute_thermodynamic_tendency!(model, common_args)
 
     #####
     ##### Moisture density tendency
@@ -266,6 +329,40 @@ function compute_tendencies!(model::AnelasticModel)
     return nothing
 end
 
+#####
+##### Dispatch for thermodynamic tendency computation
+#####
+
+function compute_thermodynamic_tendency!(model::StaticEnergyAnelasticModel, common_args)
+    grid = model.grid
+    arch = grid.architecture
+
+    ρe_args = (
+        Val(1),
+        model.forcing.ρe,
+        common_args...,
+        model.temperature)
+
+    Gρe = model.timestepper.Gⁿ.ρe
+    launch!(arch, grid, :xyz, compute_static_energy_tendency!, Gρe, grid, ρe_args)
+    return nothing
+end
+
+function compute_thermodynamic_tendency!(model::PotentialTemperatureAnelasticModel, common_args)
+    grid = model.grid
+    arch = grid.architecture
+
+    ρθ_args = (
+        Val(1),
+        model.forcing.ρθ,
+        common_args...,
+        model.temperature)
+
+    Gρθ = model.timestepper.Gⁿ.ρθ
+    launch!(arch, grid, :xyz, compute_potential_temperature_tendency!, Gρθ, grid, ρθ_args)
+    return nothing
+end
+
 # See dynamics_kernel_functions.jl
 @kernel function compute_scalar_tendency!(Gc, grid, args)
     i, j, k = @index(Global, NTuple)
@@ -275,6 +372,11 @@ end
 @kernel function compute_static_energy_tendency!(Gρe, grid, args)
     i, j, k = @index(Global, NTuple)
     @inbounds Gρe[i, j, k] = static_energy_tendency(i, j, k, grid, args...)
+end
+
+@kernel function compute_potential_temperature_tendency!(Gρθ, grid, args)
+    i, j, k = @index(Global, NTuple)
+    @inbounds Gρθ[i, j, k] = potential_temperature_tendency(i, j, k, grid, args...)
 end
 
 @kernel function compute_x_momentum_tendency!(Gρu, grid, args)

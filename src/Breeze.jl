@@ -11,8 +11,8 @@ export
     ReferenceState,
     AnelasticFormulation,
     AtmosphereModel,
-    PotentialTemperature,
-    PotentialTemperatureField,
+    StaticEnergyThermodynamics,
+    PotentialTemperatureThermodynamics,
     TemperatureField,
     IdealGas,
     CondensedPhase,
@@ -23,7 +23,9 @@ export
     WarmPhaseEquilibrium,
     BulkMicrophysics,
     energy_density,
-    specific_energy
+    specific_energy,
+    potential_temperature_density,
+    potential_temperature
 
 using Oceananigans: Oceananigans, @at, AnisotropicMinimumDissipation, Average,
                     AveragedTimeInterval, BackgroundField, BetaPlane, Bounded,

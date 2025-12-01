@@ -7,6 +7,7 @@ using ..Thermodynamics:
     PotentialTemperatureState,
     MoistureMassFractions,
     mixture_heat_capacity,
+    mixture_gas_constant,
     temperature
 
 import Oceananigans.Fields: set!
@@ -42,8 +43,10 @@ function set!(model::AtmosphereModel; enforce_mass_conservation=true, kw...)
             set!(c, value)
 
         elseif name == :ρe
-            energy_density = model.formulation.thermodynamics.energy_density
-            set!(energy_density, value)
+            set_thermodynamic_variable!(model, Val(:ρe), value)
+
+        elseif name == :ρθ
+            set_thermodynamic_variable!(model, Val(:ρθ), value)
 
         elseif name == :ρqᵗ
             set!(model.moisture_density, value)
@@ -72,33 +75,10 @@ function set!(model::AtmosphereModel; enforce_mass_conservation=true, kw...)
             set!(ϕ, value)    
 
         elseif name == :e
-            # Set specific energy directly
-            specific_energy = model.formulation.thermodynamics.specific_energy
-            energy_density = model.formulation.thermodynamics.energy_density
-            set!(specific_energy, value)
-            ρᵣ = model.formulation.reference_state.density
-            set!(energy_density, ρᵣ * specific_energy)
+            set_thermodynamic_variable!(model, Val(:e), value)
 
         elseif name == :θ
-            θ = model.temperature # use scratch
-            set!(θ, value)
-
-            grid = model.grid
-            arch = grid.architecture
-            energy_density = model.formulation.thermodynamics.energy_density
-            specific_energy = model.formulation.thermodynamics.specific_energy
-
-            launch!(arch, grid, :xyz,
-                    _energy_density_from_potential_temperature!,
-                    energy_density,
-                    specific_energy,
-                    grid,
-                    θ,
-                    model.specific_moisture,
-                    model.formulation,
-                    model.microphysics,
-                    model.microphysical_fields,
-                    model.thermodynamic_constants)
+            set_thermodynamic_variable!(model, Val(:θ), value)
 
         else
             prognostic_names = keys(prognostic_fields(model))
@@ -125,9 +105,88 @@ function set!(model::AtmosphereModel; enforce_mass_conservation=true, kw...)
         update_state!(model, compute_tendencies=false)
     end
 
-    energy_density = model.formulation.thermodynamics.energy_density
-    fill_halo_regions!(energy_density)
+    # Fill halos for thermodynamic density field
+    thermodynamic_density = get_thermodynamic_density(model.formulation)
+    fill_halo_regions!(thermodynamic_density)
 
+    return nothing
+end
+
+#####
+##### Dispatch for setting thermodynamic variables
+#####
+
+# StaticEnergyThermodynamics: :ρe sets energy density directly
+function set_thermodynamic_variable!(model, ::Val{:ρe}, value)
+    thermo = model.formulation.thermodynamics
+    thermo isa StaticEnergyThermodynamics || throw(ArgumentError("Cannot set :ρe for PotentialTemperatureThermodynamics; use :ρθ instead"))
+    set!(thermo.energy_density, value)
+    return nothing
+end
+
+# PotentialTemperatureThermodynamics: :ρθ sets potential temperature density directly
+function set_thermodynamic_variable!(model, ::Val{:ρθ}, value)
+    thermo = model.formulation.thermodynamics
+    thermo isa PotentialTemperatureThermodynamics || throw(ArgumentError("Cannot set :ρθ for StaticEnergyThermodynamics; use :ρe instead"))
+    set!(thermo.potential_temperature_density, value)
+    return nothing
+end
+
+# StaticEnergyThermodynamics: :e sets specific energy directly
+function set_thermodynamic_variable!(model, ::Val{:e}, value)
+    thermo = model.formulation.thermodynamics
+    if thermo isa StaticEnergyThermodynamics
+        set!(thermo.specific_energy, value)
+        ρᵣ = model.formulation.reference_state.density
+        set!(thermo.energy_density, ρᵣ * thermo.specific_energy)
+    else # PotentialTemperatureThermodynamics: compute θ from e
+        # Use temperature as scratch for intermediate result
+        specific_energy_scratch = model.temperature
+        set!(specific_energy_scratch, value)
+        
+        grid = model.grid
+        arch = grid.architecture
+        launch!(arch, grid, :xyz,
+                _potential_temperature_from_energy!,
+                thermo.potential_temperature_density,
+                thermo.potential_temperature,
+                grid,
+                specific_energy_scratch,
+                model.specific_moisture,
+                model.formulation,
+                model.microphysics,
+                model.microphysical_fields,
+                model.thermodynamic_constants)
+    end
+    return nothing
+end
+
+# Setting :θ (potential temperature)
+function set_thermodynamic_variable!(model, ::Val{:θ}, value)
+    thermo = model.formulation.thermodynamics
+    if thermo isa PotentialTemperatureThermodynamics
+        # Direct set for potential temperature
+        set!(thermo.potential_temperature, value)
+        ρᵣ = model.formulation.reference_state.density
+        set!(thermo.potential_temperature_density, ρᵣ * thermo.potential_temperature)
+    else # StaticEnergyThermodynamics: compute e from θ
+        θ = model.temperature # use scratch
+        set!(θ, value)
+
+        grid = model.grid
+        arch = grid.architecture
+        launch!(arch, grid, :xyz,
+                _energy_density_from_potential_temperature!,
+                thermo.energy_density,
+                thermo.specific_energy,
+                grid,
+                θ,
+                model.specific_moisture,
+                model.formulation,
+                model.microphysics,
+                model.microphysical_fields,
+                model.thermodynamic_constants)
+    end
     return nothing
 end
 
@@ -169,4 +228,47 @@ end
     e = cᵖᵐ * T + g * z - ℒˡᵣ * qˡ - ℒⁱᵣ * qⁱ
     @inbounds specific_energy[i, j, k] = e
     @inbounds energy_density[i, j, k] = ρᵣ * e
+end
+
+@kernel function _potential_temperature_from_energy!(potential_temperature_density,
+                                                     potential_temperature,
+                                                     grid,
+                                                     specific_energy,
+                                                     specific_moisture,
+                                                     formulation::AnelasticFormulation,
+                                                     microphysics,
+                                                     microphysical_fields,
+                                                     constants)
+    i, j, k = @index(Global, NTuple)
+
+    @inbounds begin
+        pᵣ = formulation.reference_state.pressure[i, j, k]
+        ρᵣ = formulation.reference_state.density[i, j, k]
+        qᵗ = specific_moisture[i, j, k]
+        e = specific_energy[i, j, k]
+    end
+
+    g = constants.gravitational_acceleration
+    z = znode(i, j, k, grid, c, c, c)
+    p₀ = formulation.reference_state.base_pressure
+
+    q = compute_moisture_fractions(i, j, k, grid, microphysics, ρᵣ, qᵗ, microphysical_fields)
+
+    # Compute temperature from static energy
+    # e = cᵖᵐ * T + g * z - ℒˡᵣ * qˡ - ℒⁱᵣ * qⁱ
+    cᵖᵐ = mixture_heat_capacity(q, constants)
+    ℒˡᵣ = constants.liquid.reference_latent_heat
+    ℒⁱᵣ = constants.ice.reference_latent_heat
+    qˡ = q.liquid
+    qⁱ = q.ice
+    T = (e - g*z + ℒˡᵣ*qˡ + ℒⁱᵣ*qⁱ) / cᵖᵐ
+
+    # Compute potential temperature from temperature using Exner function
+    # θ = T / Π where Π = (pᵣ / p₀)^(Rᵐ / cᵖᵐ)
+    Rᵐ = mixture_gas_constant(q, constants)
+    Π = (pᵣ / p₀)^(Rᵐ / cᵖᵐ)
+    θ = T / Π
+
+    @inbounds potential_temperature[i, j, k] = θ
+    @inbounds potential_temperature_density[i, j, k] = ρᵣ * θ
 end

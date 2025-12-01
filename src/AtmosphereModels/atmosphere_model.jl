@@ -129,8 +129,8 @@ function AtmosphereModel(grid;
         moisture_density = CenterField(grid, boundary_conditions=boundary_conditions.ρqᵗ)
     end
 
-    # Access energy fields from the formulation
-    energy_density = formulation.thermodynamics.energy_density
+    # Access thermodynamic density from the formulation
+    thermodynamic_density = get_thermodynamic_density(formulation)
 
     # Diagnostic fields
     specific_moisture = CenterField(grid)
@@ -140,7 +140,7 @@ function AtmosphereModel(grid;
     prognostic_microphysical_fields = NamedTuple(microphysical_fields[name] for name in prognostic_field_names(microphysics))
     prognostic_fields = collect_prognostic_fields(formulation,
                                                   momentum,
-                                                  energy_density,
+                                                  thermodynamic_density,
                                                   moisture_density,
                                                   prognostic_microphysical_fields,
                                                   tracers)
@@ -152,8 +152,9 @@ function AtmosphereModel(grid;
     model_fields = merge(prognostic_fields, velocities, (; T=temperature, qᵗ=specific_moisture))
     forcing = atmosphere_model_forcing(forcing, prognostic_fields, model_fields)
 
-    # Include ρe, ρqᵗ plus user tracers for closure field construction
-    closure_names = tuple(:ρe, :ρqᵗ, tracer_names...)
+    # Include thermodynamic density (ρe or ρθ), ρqᵗ plus user tracers for closure field construction
+    closure_thermo_name = thermodynamic_density_name(formulation)
+    closure_names = tuple(closure_thermo_name, :ρqᵗ, tracer_names...)
     closure = Oceananigans.Utils.with_tracers(closure_names, closure)
     closure_fields = build_closure_fields(nothing, grid, clock, closure_names, boundary_conditions, closure)
 
@@ -209,6 +210,7 @@ end
 
 cell_advection_timescale(model::AtmosphereModel) = cell_advection_timescale(model.grid, model.velocities)
 
+# Default prognostic field names - overloaded by formulation-specific files
 function prognostic_field_names(formulation, microphysics, tracer_names)
     default_names = (:ρu, :ρv, :ρw, :ρe, :ρqᵗ)
     microphysical_names = prognostic_field_names(microphysics)
@@ -216,9 +218,9 @@ function prognostic_field_names(formulation, microphysics, tracer_names)
 end
 
 function field_names(formulation, microphysics, tracer_names)
-    prognostic_names = prognostic_field_names(formulation, microphysics, tracer_names)
-    additional_names = (:u, :v, :w, :e, :T, :qᵗ)
-    return tuple(prognostic_names..., additional_names...)
+    prog_names = prognostic_field_names(formulation, microphysics, tracer_names)
+    additional_names = (:u, :v, :w, :e, :θ, :T, :qᵗ)
+    return tuple(prog_names..., additional_names...)
 end
 
 function atmosphere_model_forcing(user_forcings, prognostic_fields, model_fields)
@@ -258,40 +260,49 @@ function atmosphere_model_forcing(user_forcings::NamedTuple, prognostic_fields, 
     return forcings
 end
 
-function fields(model::AtmosphereModel)
-    specific_energy = model.formulation.thermodynamics.specific_energy
-    auxiliary_thermodynamic_fields = (e=specific_energy, T=model.temperature, qᵗ=model.specific_moisture)
-    return merge(prognostic_fields(model),
-                 model.velocities,
-                 auxiliary_thermodynamic_fields)
-end
+fields(model::AtmosphereModel) = _fields(model, model.formulation)
+prognostic_fields(model::AtmosphereModel) = _prognostic_fields(model, model.formulation)
 
-function prognostic_fields(model::AtmosphereModel)
-    energy_density = model.formulation.thermodynamics.energy_density
-    thermodynamic_fields = (ρe=energy_density, ρqᵗ=model.moisture_density)
-    microphysical_names = prognostic_field_names(model.microphysics)
-    prognostic_microphysical_fields = NamedTuple{microphysical_names}(
-        model.microphysical_fields[name] for name in microphysical_names)
-
-    return merge(model.momentum, thermodynamic_fields, prognostic_microphysical_fields, model.tracers)
-end
+# Stub functions for _fields and _prognostic_fields - overloaded by formulation-specific files
+function _fields end
+function _prognostic_fields end
 
 #####
 ##### Helper functions for accessing thermodynamic fields
 #####
 
+# Stub functions - implementations in anelastic_formulation.jl
+function get_thermodynamic_density end
+function thermodynamic_density_name end
+
 """
     energy_density(model::AtmosphereModel)
 
 Return the energy density field `ρe` from the model formulation.
-This is a convenience function for accessing `model.formulation.thermodynamics.energy_density`.
+Returns `nothing` for `PotentialTemperatureThermodynamics`.
 """
-energy_density(model::AtmosphereModel) = model.formulation.thermodynamics.energy_density
+energy_density(model::AtmosphereModel) = energy_density(model.formulation.thermodynamics)
 
 """
     specific_energy(model::AtmosphereModel)
 
 Return the specific energy field `e` from the model formulation.
-This is a convenience function for accessing `model.formulation.thermodynamics.specific_energy`.
+Returns `nothing` for `PotentialTemperatureThermodynamics`.
 """
-specific_energy(model::AtmosphereModel) = model.formulation.thermodynamics.specific_energy
+specific_energy(model::AtmosphereModel) = specific_energy(model.formulation.thermodynamics)
+
+"""
+    potential_temperature_density(model::AtmosphereModel)
+
+Return the potential temperature density field `ρθ` from the model formulation.
+Returns `nothing` for `StaticEnergyThermodynamics`.
+"""
+potential_temperature_density(model::AtmosphereModel) = potential_temperature_density(model.formulation.thermodynamics)
+
+"""
+    potential_temperature(model::AtmosphereModel)
+
+Return the potential temperature field `θ` from the model formulation.
+Returns `nothing` for `StaticEnergyThermodynamics`.
+"""
+potential_temperature(model::AtmosphereModel) = potential_temperature(model.formulation.thermodynamics)

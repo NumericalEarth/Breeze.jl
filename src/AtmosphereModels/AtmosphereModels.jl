@@ -5,10 +5,11 @@ export
     AtmosphereModelBuoyancy,
     AnelasticFormulation,
     StaticEnergyThermodynamics,
-    PotentialTemperature,
-    PotentialTemperatureField,
+    PotentialTemperatureThermodynamics,
     energy_density,
-    specific_energy
+    specific_energy,
+    potential_temperature_density,
+    potential_temperature
 
 using DocStringExtensions: TYPEDSIGNATURES
 using Adapt: Adapt, adapt

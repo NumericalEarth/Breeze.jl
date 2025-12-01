@@ -1,6 +1,7 @@
 using ..Thermodynamics:
     MoistureMassFractions,
     StaticEnergyState,
+    PotentialTemperatureState,
     ThermodynamicConstants,
     ReferenceState,
     mixture_gas_constant,
@@ -42,18 +43,18 @@ struct StaticEnergyThermodynamics{E}
     specific_energy :: E
 end
 
-"""
-    $(TYPEDSIGNATURES)
-
-Construct a "stub" `AnelasticFormulation` with just the `reference_state`.
-The thermodynamics and pressure fields are materialized later in the model constructor.
-"""
-AnelasticFormulation(reference_state) =
-    AnelasticFormulation(nothing, reference_state, nothing)
+struct PotentialTemperatureThermodynamics{F}
+    potential_temperature_density :: F  # ρθ (prognostic)
+    potential_temperature :: F          # θ = ρθ / ρᵣ (diagnostic)
+end
 
 Adapt.adapt_structure(to, thermo::StaticEnergyThermodynamics) =
     StaticEnergyThermodynamics(adapt(to, thermo.energy_density),
                                adapt(to, thermo.specific_energy))
+
+Adapt.adapt_structure(to, thermo::PotentialTemperatureThermodynamics) =
+    PotentialTemperatureThermodynamics(adapt(to, thermo.potential_temperature_density),
+                                       adapt(to, thermo.potential_temperature))
 
 Adapt.adapt_structure(to, formulation::AnelasticFormulation) =
     AnelasticFormulation(adapt(to, formulation.thermodynamics),
@@ -61,6 +62,27 @@ Adapt.adapt_structure(to, formulation::AnelasticFormulation) =
                          adapt(to, formulation.pressure_anomaly))
 
 const AnelasticModel = AtmosphereModel{<:AnelasticFormulation}
+
+# Type aliases for convenience
+const ASEF = AnelasticFormulation{<:StaticEnergyThermodynamics}
+const APTF = AnelasticFormulation{<:PotentialTemperatureThermodynamics}
+const StaticEnergyAnelasticModel = AtmosphereModel{<:ASEF}
+const PotentialTemperatureAnelasticModel = AtmosphereModel{<:APTF}
+
+"""
+    $(TYPEDSIGNATURES)
+
+Construct a "stub" `AnelasticFormulation` with just the `reference_state`.
+The thermodynamics and pressure fields are materialized later in the model constructor.
+
+Keyword Arguments
+=================
+
+- `thermodynamics`: The thermodynamic variable to use. Options are `:static_energy` (default)
+  or `:potential_temperature`.
+"""
+AnelasticFormulation(reference_state; thermodynamics=:static_energy) =
+    AnelasticFormulation(thermodynamics, reference_state, nothing)
 
 function default_formulation(grid, constants)
     reference_state = ReferenceState(grid, constants)
@@ -71,13 +93,23 @@ end
     $(TYPEDSIGNATURES)
 
 Materialize a stub `AnelasticFormulation` into a full formulation with thermodynamic fields
-(`energy_density`, `specific_energy`) and the pressure anomaly field.
+and the pressure anomaly field. The thermodynamic fields depend on the type of thermodynamics
+specified in the stub (`:static_energy` or `:potential_temperature`).
 """
 function materialize_formulation(stub::AnelasticFormulation, grid, boundary_conditions)
-    energy_density = CenterField(grid, boundary_conditions=boundary_conditions.ρe)
-    specific_energy = CenterField(grid) # e = ρe / ρᵣ (diagnostic per-mass energy)
-    thermodynamics = StaticEnergyThermodynamics(energy_density, specific_energy)
+    thermo_type = stub.thermodynamics
     pressure_anomaly = CenterField(grid)
+    
+    if thermo_type === :potential_temperature
+        potential_temperature_density = CenterField(grid, boundary_conditions=boundary_conditions.ρθ)
+        potential_temperature = CenterField(grid) # θ = ρθ / ρᵣ (diagnostic)
+        thermodynamics = PotentialTemperatureThermodynamics(potential_temperature_density, potential_temperature)
+    else # default to static energy
+        energy_density = CenterField(grid, boundary_conditions=boundary_conditions.ρe)
+        specific_energy = CenterField(grid) # e = ρe / ρᵣ (diagnostic per-mass energy)
+        thermodynamics = StaticEnergyThermodynamics(energy_density, specific_energy)
+    end
+    
     return AnelasticFormulation(thermodynamics, stub.reference_state, pressure_anomaly)
 end
 
@@ -90,6 +122,19 @@ end
 
 Base.show(io::IO, formulation::AnelasticFormulation) = print(io, "AnelasticFormulation")
 
+# Return :ρθ instead of :ρe for potential temperature thermodynamics
+function prognostic_field_names(stub::AnelasticFormulation, microphysics, tracer_names)
+    # Stub stores the symbol in thermodynamics field
+    thermo_type = stub.thermodynamics
+    if thermo_type === :potential_temperature
+        default_names = (:ρu, :ρv, :ρw, :ρθ, :ρqᵗ)
+    else
+        default_names = (:ρu, :ρv, :ρw, :ρe, :ρqᵗ)
+    end
+    microphysical_names = prognostic_field_names(microphysics)
+    return tuple(default_names..., microphysical_names..., tracer_names...)
+end
+
 #####
 ##### Thermodynamic state
 #####
@@ -100,18 +145,15 @@ Base.show(io::IO, formulation::AnelasticFormulation) = print(io, "AnelasticFormu
 Return `StaticEnergyState` computed from the prognostic state including
 energy density, moisture density, and microphysical fields.
 """
-function diagnose_thermodynamic_state(i, j, k, grid, formulation::AnelasticFormulation,
+function diagnose_thermodynamic_state(i, j, k, grid, formulation::ASEF,
                                       microphysics,
                                       microphysical_fields,
                                       constants,
-                                      specific_energy,
                                       specific_moisture)
-    @inbounds begin
-        e = specific_energy[i, j, k]
-        pᵣ = formulation.reference_state.pressure[i, j, k]
-        ρᵣ = formulation.reference_state.density[i, j, k]
-        qᵗ = specific_moisture[i, j, k]
-    end
+    e = @inbounds formulation.thermodynamics.specific_energy[i, j, k]
+    pᵣ = @inbounds formulation.reference_state.pressure[i, j, k]
+    ρᵣ = @inbounds formulation.reference_state.density[i, j, k]
+    qᵗ = @inbounds specific_moisture[i, j, k]
 
     q = compute_moisture_fractions(i, j, k, grid, microphysics, ρᵣ, qᵗ, microphysical_fields)
     z = znode(i, j, k, grid, c, c, c)
@@ -119,16 +161,108 @@ function diagnose_thermodynamic_state(i, j, k, grid, formulation::AnelasticFormu
     return StaticEnergyState(e, q, z, pᵣ)
 end
 
+"""
+    $(TYPEDSIGNATURES)
 
-function collect_prognostic_fields(::AnelasticFormulation,
+Return `PotentialTemperatureState` computed from the prognostic state including
+potential temperature density, moisture density, and microphysical fields.
+"""
+function diagnose_thermodynamic_state(i, j, k, grid, formulation::APTF,
+                                      microphysics,
+                                      microphysical_fields,
+                                      constants,
+                                      specific_moisture)
+    θ = @inbounds formulation.thermodynamics.potential_temperature[i, j, k]
+    pᵣ = @inbounds formulation.reference_state.pressure[i, j, k]
+    ρᵣ = @inbounds formulation.reference_state.density[i, j, k]
+    p₀ = formulation.reference_state.base_pressure
+    qᵗ = @inbounds specific_moisture[i, j, k]
+
+    q = compute_moisture_fractions(i, j, k, grid, microphysics, ρᵣ, qᵗ, microphysical_fields)
+
+    return PotentialTemperatureState(θ, q, p₀, pᵣ)
+end
+
+
+function collect_prognostic_fields(::ASEF,
                                    momentum,
-                                   energy_density,
+                                   thermodynamic_density,
                                    moisture_density,
                                    microphysical_fields,
                                    tracers)
 
-    thermodynamic_variables = (ρe=energy_density, ρqᵗ=moisture_density)
+    thermodynamic_variables = (ρe=thermodynamic_density, ρqᵗ=moisture_density)
     return merge(momentum, thermodynamic_variables, microphysical_fields, tracers)
+end
+
+function collect_prognostic_fields(::APTF,
+                                   momentum,
+                                   thermodynamic_density,
+                                   moisture_density,
+                                   microphysical_fields,
+                                   tracers)
+
+    thermodynamic_variables = (ρθ=thermodynamic_density, ρqᵗ=moisture_density)
+    return merge(momentum, thermodynamic_variables, microphysical_fields, tracers)
+end
+
+#####
+##### Accessor functions for thermodynamic fields
+#####
+
+# Get the prognostic thermodynamic density field (ρe or ρθ)
+get_thermodynamic_density(f::ASEF) = f.thermodynamics.energy_density
+get_thermodynamic_density(f::APTF) = f.thermodynamics.potential_temperature_density
+
+# Get the name of the thermodynamic density field
+thermodynamic_density_name(::ASEF) = :ρe
+thermodynamic_density_name(::APTF) = :ρθ
+
+# Accessor functions for individual thermodynamic fields
+energy_density(thermo::StaticEnergyThermodynamics) = thermo.energy_density
+energy_density(::PotentialTemperatureThermodynamics) = nothing
+
+specific_energy(thermo::StaticEnergyThermodynamics) = thermo.specific_energy
+specific_energy(::PotentialTemperatureThermodynamics) = nothing
+
+potential_temperature_density(::StaticEnergyThermodynamics) = nothing
+potential_temperature_density(thermo::PotentialTemperatureThermodynamics) = thermo.potential_temperature_density
+
+potential_temperature(::StaticEnergyThermodynamics) = nothing
+potential_temperature(thermo::PotentialTemperatureThermodynamics) = thermo.potential_temperature
+
+#####
+##### fields() and prognostic_fields() implementations
+#####
+
+function _fields(model, ::ASEF)
+    e = model.formulation.thermodynamics.specific_energy
+    auxiliary = (e=e, T=model.temperature, qᵗ=model.specific_moisture)
+    return merge(prognostic_fields(model), model.velocities, auxiliary)
+end
+
+function _fields(model, ::APTF)
+    θ = model.formulation.thermodynamics.potential_temperature
+    auxiliary = (θ=θ, T=model.temperature, qᵗ=model.specific_moisture)
+    return merge(prognostic_fields(model), model.velocities, auxiliary)
+end
+
+function _prognostic_fields(model, ::ASEF)
+    ρe = model.formulation.thermodynamics.energy_density
+    thermodynamic_fields = (ρe=ρe, ρqᵗ=model.moisture_density)
+    microphysical_names = prognostic_field_names(model.microphysics)
+    prognostic_microphysical_fields = NamedTuple{microphysical_names}(
+        model.microphysical_fields[name] for name in microphysical_names)
+    return merge(model.momentum, thermodynamic_fields, prognostic_microphysical_fields, model.tracers)
+end
+
+function _prognostic_fields(model, ::APTF)
+    ρθ = model.formulation.thermodynamics.potential_temperature_density
+    thermodynamic_fields = (ρθ=ρθ, ρqᵗ=model.moisture_density)
+    microphysical_names = prognostic_field_names(model.microphysics)
+    prognostic_microphysical_fields = NamedTuple{microphysical_names}(
+        model.microphysical_fields[name] for name in microphysical_names)
+    return merge(model.momentum, thermodynamic_fields, prognostic_microphysical_fields, model.tracers)
 end
 
 function materialize_momentum_and_velocities(formulation::AnelasticFormulation, grid, boundary_conditions)
