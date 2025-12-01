@@ -62,6 +62,10 @@ Breeze interfaces with ClimaOcean for coupled atmosphere-ocean simulations.
     The second reason is that it is easier to interpret a script by reading it when the initial condition is
     determined on one line rather than spread out over many lines.
 
+4. **Common misconceptions**
+  - `update_state!` is called within `set!(model, ...)`. Scripts should never or rarely need to manually invoke `update_state!`
+  - Fields and AbstractOperations can be used in `set!`.
+
 ### Naming Conventions
 - **Files**: snake_case (e.g., `atmosphere_model.jl`, `update_atmosphere_model_state.jl`)
 - **Types**: PascalCase (e.g., `AtmosphereModel`, `AnelasticFormulation`, `MoistAirBuoyancy`)
