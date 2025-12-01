@@ -30,7 +30,7 @@ end
 
 formulation_pressure_solver(formulation, grid) = nothing
 
-mutable struct AtmosphereModel{Frm, Arc, Tst, Grd, Clk, Thm, Mom, Eng, Mse, Moi, Mfr, Buy,
+mutable struct AtmosphereModel{Frm, Arc, Tst, Grd, Clk, Thm, Mom, Moi, Mfr, Buy,
                                Tmp, Prs, Sol, Vel, Trc, Adv, Cor, Frc, Mic, Cnd, Cls, Cfs} <: AbstractModel{Tst, Arc}
     architecture :: Arc
     grid :: Grd
@@ -38,8 +38,6 @@ mutable struct AtmosphereModel{Frm, Arc, Tst, Grd, Clk, Thm, Mom, Eng, Mse, Moi,
     formulation :: Frm
     thermodynamic_constants :: Thm
     momentum :: Mom
-    energy_density :: Eng
-    specific_energy :: Mse
     moisture_density :: Moi
     specific_moisture :: Mfr
     temperature :: Tmp
@@ -58,10 +56,9 @@ mutable struct AtmosphereModel{Frm, Arc, Tst, Grd, Clk, Thm, Mom, Eng, Mse, Moi,
     closure_fields :: Cfs
 end
 
-function default_formulation(grid, constants)
-    reference_state = ReferenceState(grid, constants)
-    return AnelasticFormulation(reference_state)
-end
+# Stub functions to be overloaded by formulation-specific files
+function default_formulation end
+function materialize_formulation end
 
 """
     $(TYPEDSIGNATURES)
@@ -119,6 +116,9 @@ function AtmosphereModel(grid;
     all_names = field_names(formulation, microphysics, tracers)
     boundary_conditions = regularize_field_boundary_conditions(boundary_conditions, grid, all_names)
 
+    # Materialize the full formulation with thermodynamic fields and pressure
+    formulation = materialize_formulation(formulation, grid, boundary_conditions)
+
     velocities, momentum = materialize_momentum_and_velocities(formulation, grid, boundary_conditions)
     microphysical_fields = materialize_microphysical_fields(microphysics, grid, boundary_conditions)
     advection = adapt_advection_order(advection, grid)
@@ -129,13 +129,13 @@ function AtmosphereModel(grid;
         moisture_density = CenterField(grid, boundary_conditions=boundary_conditions.ρqᵗ)
     end
 
-    energy_density = CenterField(grid, boundary_conditions=boundary_conditions.ρe)
+    # Access energy fields from the formulation
+    energy_density = formulation.thermodynamics.energy_density
 
     # Diagnostic fields
-    specific_energy = CenterField(grid) # e = ρe / ρᵣ (diagnostic per-mass energy)
     specific_moisture = CenterField(grid)
     temperature = CenterField(grid)
-    pressure = CenterField(grid)
+    pressure = formulation.pressure_anomaly
 
     prognostic_microphysical_fields = NamedTuple(microphysical_fields[name] for name in prognostic_field_names(microphysics))
     prognostic_fields = collect_prognostic_fields(formulation,
@@ -163,8 +163,6 @@ function AtmosphereModel(grid;
                             formulation,
                             thermodynamic_constants,
                             momentum,
-                            energy_density,
-                            specific_energy,
                             moisture_density,
                             specific_moisture,
                             temperature,
@@ -261,14 +259,16 @@ function atmosphere_model_forcing(user_forcings::NamedTuple, prognostic_fields, 
 end
 
 function fields(model::AtmosphereModel)
-    auxiliary_thermodynamic_fields = (e=model.specific_energy, T=model.temperature, qᵗ=model.specific_moisture)
+    specific_energy = model.formulation.thermodynamics.specific_energy
+    auxiliary_thermodynamic_fields = (e=specific_energy, T=model.temperature, qᵗ=model.specific_moisture)
     return merge(prognostic_fields(model),
                  model.velocities,
                  auxiliary_thermodynamic_fields)
 end
 
 function prognostic_fields(model::AtmosphereModel)
-    thermodynamic_fields = (ρe=model.energy_density, ρqᵗ=model.moisture_density)
+    energy_density = model.formulation.thermodynamics.energy_density
+    thermodynamic_fields = (ρe=energy_density, ρqᵗ=model.moisture_density)
     microphysical_names = prognostic_field_names(model.microphysics)
     prognostic_microphysical_fields = NamedTuple{microphysical_names}(
         model.microphysical_fields[name] for name in microphysical_names)

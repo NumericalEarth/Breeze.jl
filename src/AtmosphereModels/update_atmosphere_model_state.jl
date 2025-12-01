@@ -69,23 +69,26 @@ function compute_auxiliary_variables!(model)
     fill_halo_regions!(model.velocities)
     foreach(mask_immersed_field!, model.velocities)
 
+    energy_density = model.formulation.thermodynamics.energy_density
+    specific_energy = model.formulation.thermodynamics.specific_energy
+
     launch!(arch, grid, :xyz,
             _compute_auxiliary_thermodynamic_variables!,
             model.temperature,
-            model.specific_energy,
+            specific_energy,
             model.specific_moisture,
             grid,
             model.thermodynamic_constants,
             model.formulation,
             model.microphysics,
             model.microphysical_fields,
-            model.energy_density,
+            energy_density,
             model.moisture_density)
 
     # TODO: Can we compute the thermodynamic variable within halos as well, and avoid
     # halo filling later on?
     fill_halo_regions!(model.temperature)
-    fill_halo_regions!(model.specific_energy)
+    fill_halo_regions!(specific_energy)
     fill_halo_regions!(model.specific_moisture)
     fill_halo_regions!(model.microphysical_fields)
 
@@ -198,11 +201,13 @@ function compute_tendencies!(model::AnelasticModel)
     launch!(arch, grid, :xyz, compute_y_momentum_tendency!, Gρv, grid, v_args)
     launch!(arch, grid, :xyz, compute_z_momentum_tendency!, Gρw, grid, w_args)
 
+    specific_energy = model.formulation.thermodynamics.specific_energy
+
     # Arguments common to energy density, moisture density, and tracer density tendencies:
     common_args = (
         model.formulation,
         model.thermodynamic_constants,
-        model.specific_energy,
+        specific_energy,
         model.specific_moisture,
         model.advection,
         model.velocities,

@@ -4,6 +4,7 @@ export
     AtmosphereModel,
     AtmosphereModelBuoyancy,
     AnelasticFormulation,
+    StaticEnergyThermodynamics,
     PotentialTemperature,
     PotentialTemperatureField
 
