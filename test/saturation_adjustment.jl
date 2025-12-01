@@ -6,7 +6,7 @@ using Test
 using Breeze.Thermodynamics:
     MoistureMassFractions,
     PotentialTemperatureState,
-    MoistStaticEnergyState,
+    StaticEnergyState,
     exner_function,
     density,
     with_moisture,
@@ -40,7 +40,7 @@ test_tol(FT::Type{Float32}) = sqrt(solver_tol(FT))
 
     # First test: absolute zero
     q₀ = MoistureMassFractions{FT} |> zero
-    𝒰₀ = MoistStaticEnergyState(zero(FT), q₀, z, pᵣ)
+    𝒰₀ = StaticEnergyState(zero(FT), q₀, z, pᵣ)
     @test compute_temperature(𝒰₀, microphysics, constants) == 0
 
     # Second unsaturated test: choose T, pick qᵗ well below saturation
@@ -52,7 +52,7 @@ test_tol(FT::Type{Float32}) = sqrt(solver_tol(FT))
     q₁ = MoistureMassFractions(qᵗ)
     cᵖᵐ = mixture_heat_capacity(q₁, constants)
     e₁ = cᵖᵐ * T₁ + g * z #  + ℒ₀ * qᵗ
-    𝒰₁ = MoistStaticEnergyState(e₁, q₁, z, pᵣ)
+    𝒰₁ = StaticEnergyState(e₁, q₁, z, pᵣ)
 
     @test compute_temperature(𝒰₁, microphysics, constants) ≈ T₁ atol=atol
     @test compute_temperature(𝒰₁, nothing, constants) ≈ T₁ atol=atol
@@ -76,7 +76,7 @@ test_tol(FT::Type{Float32}) = sqrt(solver_tol(FT))
                 ℒˡᵣ = constants.liquid.reference_latent_heat
                 e₂ = cᵖᵐ * T₂ + g * z - ℒˡᵣ * qˡ₂
 
-                𝒰₂ = MoistStaticEnergyState(e₂, q₂, z, pᵣ)
+                𝒰₂ = StaticEnergyState(e₂, q₂, z, pᵣ)
                 T★ = compute_temperature(𝒰₂, microphysics, constants)
                 @test T★ ≈ T₂ atol=atol
 
@@ -163,7 +163,7 @@ end
             cᵖᵐ = mixture_heat_capacity(q, constants)
             e = cᵖᵐ * T_warm + g * z - ℒˡᵣ * qˡ
 
-            𝒰 = MoistStaticEnergyState(e, q, z, pᵣ)
+            𝒰 = StaticEnergyState(e, q, z, pᵣ)
             T★ = compute_temperature(𝒰, microphysics, constants)
             @test T★ ≈ T_warm atol=atol
 
@@ -195,7 +195,7 @@ end
             cᵖᵐ = mixture_heat_capacity(q, constants)
             e = cᵖᵐ * T_cold + g * z - ℒⁱᵣ * qⁱ
 
-            𝒰 = MoistStaticEnergyState(e, q, z, pᵣ)
+            𝒰 = StaticEnergyState(e, q, z, pᵣ)
             T★ = compute_temperature(𝒰, microphysics, constants)
             @test T★ ≈ T_cold atol=atol
 
@@ -237,12 +237,12 @@ end
                     e = cᵖᵐ * T + g * z - ℒˡᵣ * qˡ - ℒⁱᵣ * qⁱ
 
                     # Verify moist static energy can recover temperature
-                    𝒰 = MoistStaticEnergyState(e, q, z, pᵣ)
+                    𝒰 = StaticEnergyState(e, q, z, pᵣ)
                     T_recovered = (e - g * z + ℒˡᵣ * q.liquid + ℒⁱᵣ * q.ice) / mixture_heat_capacity(q, constants)
                     @test T_recovered ≈ T
 
                     # Test saturation adjustment recovers temperature
-                    𝒰_unadjusted = MoistStaticEnergyState(e, MoistureMassFractions(qᵗ), z, pᵣ)
+                    𝒰_unadjusted = StaticEnergyState(e, MoistureMassFractions(qᵗ), z, pᵣ)
                     T★ = compute_temperature(𝒰_unadjusted, microphysics, constants)
                     @test T★ ≈ T atol=atol
 
@@ -282,7 +282,7 @@ end
                     e = cᵖᵐ * T + g * z - ℒˡᵣ * qˡ - ℒⁱᵣ * qⁱ
 
                     # Test with saturation adjustment
-                    𝒰 = MoistStaticEnergyState(e, MoistureMassFractions(qᵗ), z, pᵣ)
+                    𝒰 = StaticEnergyState(e, MoistureMassFractions(qᵗ), z, pᵣ)
                     T★ = compute_temperature(𝒰, microphysics, constants)
                     @test T★ ≈ T atol=atol
                 end
@@ -318,7 +318,7 @@ end
                     cᵖᵐ = mixture_heat_capacity(q, constants)
                     e = cᵖᵐ * T_partition + g * z - ℒˡᵣ * qˡ - ℒⁱᵣ * qⁱ
 
-                    𝒰 = MoistStaticEnergyState(e, MoistureMassFractions(qᵗ), z, pᵣ)
+                    𝒰 = StaticEnergyState(e, MoistureMassFractions(qᵗ), z, pᵣ)
                     T★ = compute_temperature(𝒰, microphysics, constants)
                     @test T★ ≈ T_partition atol=atol
                 end

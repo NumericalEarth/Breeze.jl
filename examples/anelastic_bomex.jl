@@ -157,9 +157,10 @@ simulation = Simulation(model; Δt=10, stop_time)
 conjure_time_step_wizard!(simulation, cfl=0.7)
 
 # Write a callback to compute *_avg_f
+ρe = energy_density(model)
 u_avg = Field(Average(model.velocities.u, dims=(1, 2)))
 v_avg = Field(Average(model.velocities.v, dims=(1, 2)))
-e_avg = Field(Average(model.energy_density / ρᵣ, dims=(1, 2)))
+e_avg = Field(Average(ρe / ρᵣ, dims=(1, 2)))
 qᵗ_avg = Field(Average(model.specific_moisture, dims=(1, 2)))
 
 function compute_averages!(sim)
@@ -209,8 +210,9 @@ ax_ρe = Axis(fig_lower[1, 1], xlabel="Energy density", ylabel="z (m)")
 ax_e  = Axis(fig_lower[1, 2], xlabel="Specific energy", ylabel="z (m)")
 ax_θ  = Axis(fig_lower[1, 3], xlabel="Potential temperature (K)", ylabel="z (m)")
 
-ρe_avg = Average(model.energy_density, dims=(1, 2)) |> Field
-e_avg = Average(model.specific_energy, dims=(1, 2)) |> Field
+e = specific_energy(model)
+ρe_avg = Average(ρe, dims=(1, 2)) |> Field
+e_avg = Average(e, dims=(1, 2)) |> Field
 
 ylims!(ax_ρe, 0, 400)
 ylims!(ax_e, 0, 400)
@@ -243,7 +245,7 @@ function progress(sim)
     qᵗ = sim.model.specific_moisture
     qᵗmax = maximum(qᵗ)
 
-    ρe = sim.model.energy_density
+    ρe = energy_density(sim.model)
     ρemin = minimum(ρe)
     ρemax = maximum(ρe)
 

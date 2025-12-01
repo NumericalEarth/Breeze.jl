@@ -43,7 +43,7 @@ end
 
 set!(model, θ = θᵢ)
 
-ρe = model.energy_density
+ρe = energy_density(model)
 ρE = Field(Average(ρe, dims=1))
 ρe′ = Field(ρe - ρE)
 
@@ -64,7 +64,7 @@ simulation = Simulation(model; Δt=2, stop_time=25minutes)
 conjure_time_step_wizard!(simulation, cfl=0.7)
 
 function progress(sim)
-    ρe = sim.model.energy_density
+    ρe = energy_density(sim.model)
     u, v, w = sim.model.velocities
 
     msg = @sprintf("Iter: %d, t: %s, Δt: %s, extrema(ρe): (%.2f, %.2f) J/kg, max|u|: %.2f m/s, max|w|: %.2f m/s",

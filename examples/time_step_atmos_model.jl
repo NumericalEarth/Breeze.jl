@@ -80,7 +80,7 @@ set!(θ_bg_field, z -> Tₛ + dθdz * z)
 T = model.temperature
 ρʳ = model.formulation.reference_state.density
 cᵖᵈ = model.thermodynamic_constants.dry_air.heat_capacity
-ρe = model.energy_density
+ρe = energy_density(model)
 θ = ρe / (ρʳ * cᵖᵈ)
 θ′ = θ - θ_bg_field
 

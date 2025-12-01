@@ -42,7 +42,8 @@ function set!(model::AtmosphereModel; enforce_mass_conservation=true, kw...)
             set!(c, value)
 
         elseif name == :ρe
-            set!(model.energy_density, value)
+            energy_density = model.formulation.thermodynamics.energy_density
+            set!(energy_density, value)
 
         elseif name == :ρqᵗ
             set!(model.moisture_density, value)
@@ -72,9 +73,11 @@ function set!(model::AtmosphereModel; enforce_mass_conservation=true, kw...)
 
         elseif name == :e
             # Set specific energy directly
-            set!(model.specific_energy, value)
+            specific_energy = model.formulation.thermodynamics.specific_energy
+            energy_density = model.formulation.thermodynamics.energy_density
+            set!(specific_energy, value)
             ρᵣ = model.formulation.reference_state.density
-            set!(model.energy_density, ρᵣ * model.specific_energy)
+            set!(energy_density, ρᵣ * specific_energy)
 
         elseif name == :θ
             θ = model.temperature # use scratch
@@ -82,11 +85,13 @@ function set!(model::AtmosphereModel; enforce_mass_conservation=true, kw...)
 
             grid = model.grid
             arch = grid.architecture
+            energy_density = model.formulation.thermodynamics.energy_density
+            specific_energy = model.formulation.thermodynamics.specific_energy
 
             launch!(arch, grid, :xyz,
                     _energy_density_from_potential_temperature!,
-                    model.energy_density,
-                    model.specific_energy,
+                    energy_density,
+                    specific_energy,
                     grid,
                     θ,
                     model.specific_moisture,
@@ -120,7 +125,8 @@ function set!(model::AtmosphereModel; enforce_mass_conservation=true, kw...)
         update_state!(model, compute_tendencies=false)
     end
 
-    fill_halo_regions!(model.energy_density)
+    energy_density = model.formulation.thermodynamics.energy_density
+    fill_halo_regions!(energy_density)
 
     return nothing
 end

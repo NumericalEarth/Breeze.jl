@@ -159,7 +159,7 @@ end
              + c_forcing(i, j, k, grid, clock, model_fields))
 end
 
-@inline function moist_static_energy_tendency(i, j, k, grid,
+@inline function static_energy_tendency(i, j, k, grid,
                                               id,
                                               ρe_forcing,
                                               formulation,

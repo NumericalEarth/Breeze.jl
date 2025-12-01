@@ -21,7 +21,8 @@ set!(model, θ=θᵢ, u=Ξᵢ, v=Ξᵢ)
 
 simulation = Simulation(model, Δt=10, stop_time=20minutes)
 conjure_time_step_wizard!(simulation, cfl=0.7)
-∫ρe = Field(Integral(model.energy_density))
+ρe = energy_density(model)
+∫ρe = Field(Integral(ρe))
 
 function progress(sim)
     compute!(∫ρe)
