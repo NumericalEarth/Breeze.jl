@@ -38,7 +38,7 @@ mutable struct AtmosphereModel{Frm, Arc, Tst, Grd, Clk, Thm, Den, Mom, Eng, Mse,
     grid :: Grd
     clock :: Clk
     formulation :: Frm
-    thermodynamics :: Thm
+    thermodynamic_constants :: Thm
     density :: Den
     momentum :: Mom
     energy_density :: Eng
@@ -61,8 +61,8 @@ mutable struct AtmosphereModel{Frm, Arc, Tst, Grd, Clk, Thm, Den, Mom, Eng, Mse,
     closure_fields :: Cfs
 end
 
-function default_formulation(grid, thermo)
-    reference_state = ReferenceState(grid, thermo)
+function default_formulation(grid, constants)
+    reference_state = ReferenceState(grid, constants)
     return AnelasticFormulation(reference_state)
 end
 
@@ -98,8 +98,8 @@ Pauluis, O. (2008). Thermodynamic consistency of the anelastic approximation for
 """
 function AtmosphereModel(grid;
                          clock = Clock(grid),
-                         thermodynamics = ThermodynamicConstants(eltype(grid)),
-                         formulation = default_formulation(grid, thermodynamics),
+                         thermodynamic_constants = ThermodynamicConstants(eltype(grid)),
+                         formulation = default_formulation(grid, thermodynamic_constants),
                          moisture_density = DefaultValue(),
                          tracers = tuple(),
                          coriolis = nothing,
@@ -166,7 +166,7 @@ function AtmosphereModel(grid;
                             grid,
                             clock,
                             formulation,
-                            thermodynamics,
+                            thermodynamic_constants,
                             density,
                             momentum,
                             energy_density,

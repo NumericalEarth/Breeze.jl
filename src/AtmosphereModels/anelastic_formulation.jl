@@ -62,7 +62,7 @@ energy density, moisture density, and microphysical fields.
 function diagnose_thermodynamic_state(i, j, k, grid, formulation::AnelasticFormulation,
                                       microphysics,
                                       microphysical_fields,
-                                      thermo,
+                                      constants,
                                       specific_energy,
                                       specific_moisture)
     @inbounds begin
@@ -78,37 +78,6 @@ function diagnose_thermodynamic_state(i, j, k, grid, formulation::AnelasticFormu
     return MoistStaticEnergyState(e, q, z, pᵣ)
 end
 
-#=
-@inline specific_volume(i, j, k, grid, args...) = 1 / density(i, j, k, grid, args...)
-
-@inline function density(i, j, k, grid, formulation, temperature, specific_moisture, thermo)
-    @inbounds begin
-        qᵗ = specific_moisture[i, j, k]
-        pᵣ = formulation.reference_state.pressure[i, j, k]
-        T = temperature[i, j, k]
-    end
-
-    # TODO: fix this assumption of non-condensed state by invoking the microphysics model
-    q = MoistureMassFractions(qᵗ)
-    Rᵐ = mixture_gas_constant(q, thermo)
-
-    return pᵣ / (Rᵐ * T)
-end
-=#
-
-@inline function buoyancy(i, j, k, grid, formulation, T, qᵗ, thermo)
-    α = specific_volume(i, j, k, grid, formulation, T, qᵗ, thermo)
-    αᵣ = reference_specific_volume(i, j, k, grid, formulation, thermo)
-    g = thermo.gravitational_acceleration
-    return g * (α - αᵣ) / αᵣ
-end
-
-@inline function reference_specific_volume(i, j, k, grid, formulation, thermo)
-    Rᵈ = dry_air_gas_constant(thermo)
-    pᵣ = @inbounds formulation.reference_state.pressure[i, j, k]
-    θ₀ = formulation.reference_state.potential_temperature
-    return Rᵈ * θ₀ / pᵣ
-end
 
 function collect_prognostic_fields(::AnelasticFormulation,
                                    density,

@@ -93,7 +93,7 @@ function set!(model::AtmosphereModel; enforce_mass_conservation=true, kw...)
                     model.formulation,
                     model.microphysics,
                     model.microphysical_fields,
-                    model.thermodynamics)
+                    model.thermodynamic_constants)
 
         else
             prognostic_names = keys(prognostic_fields(model))
@@ -133,7 +133,7 @@ end
                                                              formulation::AnelasticFormulation,
                                                              microphysics,
                                                              microphysical_fields,
-                                                             thermo)
+                                                             constants)
     i, j, k = @index(Global, NTuple)
 
     @inbounds begin
@@ -143,20 +143,20 @@ end
         θ = potential_temperature[i, j, k]
     end
 
-    g = thermo.gravitational_acceleration
+    g = constants.gravitational_acceleration
     z = znode(i, j, k, grid, c, c, c)
     p₀ = formulation.reference_state.base_pressure
 
     q = compute_moisture_fractions(i, j, k, grid, microphysics, ρᵣ, qᵗ, microphysical_fields)
     𝒰₀ = PotentialTemperatureState(θ, q, p₀, pᵣ)
-    𝒰 = maybe_adjust_thermodynamic_state(𝒰₀, microphysics, microphysical_fields, qᵗ, thermo)
+    𝒰 = maybe_adjust_thermodynamic_state(𝒰₀, microphysics, microphysical_fields, qᵗ, constants)
 
-    T = temperature(𝒰, thermo)
+    T = temperature(𝒰, constants)
     q = 𝒰.moisture_mass_fractions
-    cᵖᵐ = mixture_heat_capacity(q, thermo)
+    cᵖᵐ = mixture_heat_capacity(q, constants)
 
-    ℒˡᵣ = thermo.liquid.reference_latent_heat
-    ℒⁱᵣ = thermo.ice.reference_latent_heat
+    ℒˡᵣ = constants.liquid.reference_latent_heat
+    ℒⁱᵣ = constants.ice.reference_latent_heat
     qˡ = q.liquid
     qⁱ = q.ice
 

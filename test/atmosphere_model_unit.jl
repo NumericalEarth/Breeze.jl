@@ -5,17 +5,17 @@ using Test
 
 @testset "AtmosphereModel [$(FT)]" for FT in (Float32, Float64)
     grid = RectilinearGrid(default_arch, FT; size=(8, 8, 8), x=(0, 1_000), y=(0, 1_000), z=(0, 1_000))
-    thermo = ThermodynamicConstants(FT)
+    constants = ThermodynamicConstants(FT)
 
     for p₀ in (101325, 100000), θ₀ in (288, 300)
         @testset let p₀ = p₀, θ₀ = θ₀
-            reference_state = ReferenceState(grid, thermo, base_pressure=p₀, potential_temperature=θ₀)
+            reference_state = ReferenceState(grid, constants, base_pressure=p₀, potential_temperature=θ₀)
             formulation = AnelasticFormulation(reference_state)
-            model = AtmosphereModel(grid; thermodynamics=thermo, formulation)
+            model = AtmosphereModel(grid; thermodynamic_constants=constants, formulation)
 
             # test set!
             ρᵣ = model.formulation.reference_state.density
-            cᵖᵈ = model.thermodynamics.dry_air.heat_capacity
+            cᵖᵈ = model.thermodynamic_constants.dry_air.heat_capacity
             ρeᵢ = ρᵣ * cᵖᵈ * θ₀
 
             set!(model; θ = θ₀)
@@ -30,13 +30,13 @@ end
 @testset "PotentialTemperatureField (no microphysics) [$(FT)]" for FT in (Float32, Float64)
     Oceananigans.defaults.FloatType = FT
     grid = RectilinearGrid(default_arch; size=(8, 8, 8), x=(0, 1_000), y=(0, 1_000), z=(0, 1_000))
-    thermo = ThermodynamicConstants()
+    constants = ThermodynamicConstants()
 
     p₀ = FT(101325)
     θ₀ = FT(300)
-    reference_state = ReferenceState(grid, thermo, base_pressure=p₀, potential_temperature=θ₀)
+    reference_state = ReferenceState(grid, constants, base_pressure=p₀, potential_temperature=θ₀)
     formulation = AnelasticFormulation(reference_state)
-    model = AtmosphereModel(grid; thermodynamics=thermo, formulation)
+    model = AtmosphereModel(grid; thermodynamic_constants=constants, formulation)
 
     # Initialize with potential temperature and dry air
     θᵢ = CenterField(grid)
@@ -50,14 +50,14 @@ end
 @testset "Saturation and PotentialTemperatureField (WarmPhase) [$(FT)]" for FT in (Float32, Float64)
     Oceananigans.defaults.FloatType = FT
     grid = RectilinearGrid(default_arch; size=(8, 8, 8), x=(0, 1_000), y=(0, 1_000), z=(0, 1_000))
-    thermo = ThermodynamicConstants()
+    constants = ThermodynamicConstants()
 
     p₀ = FT(101325)
     θ₀ = FT(300)
-    reference_state = ReferenceState(grid, thermo, base_pressure=p₀, potential_temperature=θ₀)
+    reference_state = ReferenceState(grid, constants, base_pressure=p₀, potential_temperature=θ₀)
     formulation = AnelasticFormulation(reference_state)
     microphysics = SaturationAdjustment()
-    model = AtmosphereModel(grid; thermodynamics=thermo, formulation, microphysics)
+    model = AtmosphereModel(grid; thermodynamic_constants=constants, formulation, microphysics)
 
     # Initialize with potential temperature and dry air
     set!(model; θ=θ₀)
@@ -72,8 +72,8 @@ end
     Tᵢ = @allowscalar model.temperature[1, 1, k]
     pᵣᵢ = @allowscalar model.formulation.reference_state.pressure[1, 1, k]
     q = Breeze.Thermodynamics.MoistureMassFractions{FT} |> zero
-    ρᵢ = Breeze.Thermodynamics.density(pᵣᵢ, Tᵢ, q, thermo)
-    qᵛ⁺_expected = Breeze.Thermodynamics.saturation_specific_humidity(Tᵢ, ρᵢ, thermo, thermo.liquid)
+    ρᵢ = Breeze.Thermodynamics.density(pᵣᵢ, Tᵢ, q, constants)
+    qᵛ⁺_expected = Breeze.Thermodynamics.saturation_specific_humidity(Tᵢ, ρᵢ, constants, constants.liquid)
     qᵛ⁺k = @allowscalar qᵛ⁺[1, 1, k]
 
     @test isfinite(qᵛ⁺k)
