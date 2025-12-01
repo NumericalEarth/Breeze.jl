@@ -95,7 +95,7 @@ using Breeze.Thermodynamics:
     return @inbounds ρ * (μ.qᵛ[i, j, k] - q⁺ˡ) / τᵛˡ
 end
 
-@inline @inbounds function microphysical_tendency(i, j, k, grid,
+@inline function microphysical_tendency(i, j, k, grid,
     em::ExplicitMicrophysics, ::Val{:ρqⁱ}, μ, 𝒰, thermo)
 
     ρ = 1.2 # density
@@ -103,12 +103,13 @@ end
     T = temperature(𝒰, thermo)
     q⁺ⁱ = saturation_specific_humidity(T, ρ, thermo, PlanarIceSurface())
     τᵛⁱ = em.vapor_to_ice
+    qᵛ = @inbounds μ.qᵛ[i, j, k]
 
-    return ρ * (μ.qᵛ[i, j, k] - q⁺ⁱ) / τᵛⁱ
+    return ρ * (qᵛ - q⁺ⁱ) / τᵛⁱ
 end
 
-@inline @inbounds function microphysical_tendency(
-    i, j, k, grid, em::ExplicitMicrophysics, ::Val{:ρqᵛ}, μ, 𝒰, thermo)
+@inline function microphysical_tendency(i, j, k, grid,
+    em::ExplicitMicrophysics, ::Val{:ρqᵛ}, μ, 𝒰, thermo)
 
     Sᵛˡ = microphysical_tendency(i, j, k, grid, em, Val(:ρvˡ), μ, 𝒰, thermo)
     Sᵛⁱ = microphysical_tendency(i, j, k, grid, em, Val(:ρvⁱ), μ, 𝒰, thermo)
@@ -131,12 +132,14 @@ import Breeze.AtmosphereModels:
 @inline update_microphysical_fields!(μ, em::ExplicitMicrophysics, i, j, k, grid, ρ, state, thermo) =
     @inbounds μ.qᵛ[i, j, k] = state.moisture_mass_fractions.vapor
 
-@inline @inbounds function compute_moisture_fractions(i, j, k, grid,
+@inline function compute_moisture_fractions(i, j, k, grid,
     ::ExplicitMicrophysics, ρ, qᵗ, microphysical_fields)
 
-    qᵛ = microphysical_fields.qᵛ[i, j, k]
-    ρqˡ = microphysical_fields.ρqˡ[i, j, k] / ρ
-    ρqⁱ = microphysical_fields.ρqⁱ[i, j, k] / ρ
+    @inbounds begin
+        qᵛ = microphysical_fields.qᵛ[i, j, k]
+        qˡ = microphysical_fields.ρqˡ[i, j, k] / ρ
+        qⁱ = microphysical_fields.ρqⁱ[i, j, k] / ρ
+    end
 
     return MoistureMassFractions(qᵛ, qˡ, qⁱ)
 end

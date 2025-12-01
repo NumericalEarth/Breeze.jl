@@ -90,4 +90,7 @@ using .Microphysics
 include("TurbulenceClosures/TurbulenceClosures.jl")
 using .TurbulenceClosures
 
+include("Advection.jl")
+using .Advection
+
 end # module Breeze

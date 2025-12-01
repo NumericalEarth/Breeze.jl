@@ -29,6 +29,7 @@ OceanTurbulenceClosures.buoyancy_force(model::AtmosphereModel) =
 # 2. Diffusivity computation for each tracer in closure_fields.κₑ
 # The energy_density and moisture_density are first (matching closure_names order),
 # followed by user tracers, then diagnostic fields for buoyancy.
+# TODO: make this microphysics-aware, and also saturation/condensate-aware
 function OceanTurbulenceClosures.buoyancy_tracers(model::AtmosphereModel)
     # Diagnostic fields for buoyancy gradient calculation
     buoyancy_tracers = (; T = model.temperature, qᵗ = model.specific_moisture)
@@ -40,8 +41,19 @@ function OceanTurbulenceClosures.buoyancy_tracers(model::AtmosphereModel)
     return merge(all_prognostic, buoyancy_tracers)
 end
 
-@inline OceanBuoyancyFormulations.∂z_b(i, j, k, grid, b::AtmosphereModelBuoyancy, tracers) =
-    ∂zᶜᶜᶠ(i, j, k, grid, turbulence_closure_buoyancy, b, tracers)
+@inline function OceanBuoyancyFormulations.∂z_b(i, j, k, grid, b::AtmosphereModelBuoyancy, tracers)
+    g = b.thermodynamics.gravitational_acceleration
+    ∂z_ϑ = ∂zᶜᶜᶠ(i, j, k, grid, virtual_potential_temperature, b.thermodynamics, b.formulation, tracers.T, tracers.qᵗ)
+    ϑ = virtual_potential_temperature(i, j, k, grid, b.thermodynamics, b.formulation, tracers.T, tracers.qᵗ)
+    return g * ∂z_ϑ / ϑ
+end
 
-@inline turbulence_closure_buoyancy(i, j, k, grid, b::AtmosphereModelBuoyancy, tracers) =
-    buoyancy(i, j, k, grid, b.formulation, tracers.T, tracers.qᵗ, b.thermodynamics)
+@inline function virtual_potential_temperature(i, j, k, grid, thermo, formulation, T, qᵗ)
+    pᵣ = @inbounds formulation.reference_state.pressure[i, j, k]
+    p₀ = formulation.reference_state.base_pressure
+    q = @inbounds MoistureMassFractions(qᵗ[i, j, k])
+    Rᵐ = mixture_gas_constant(q, thermo)
+    Rᵈ = dry_air_gas_constant(thermo)
+    cᵖᵐ = mixture_heat_capacity(q, thermo)
+    return @inbounds Rᵐ / Rᵈ * T[i, j, k] * (p₀ / pᵣ)^(Rᵐ / cᵖᵐ)
+end

@@ -106,8 +106,8 @@ end
 
 # Momentum flux (y-direction)
 # Returns kinematic momentum flux τᵧ/ρ₀ = -u★² v/U for the ρv boundary condition
-@inline @inbounds function y_momentum_flux(i, j, grid, clock, fields, parameters)
-    ρv = fields.ρv[i, j, 1]
+@inline function y_momentum_flux(i, j, grid, clock, fields, parameters)
+    ρv = @inbounds fields.ρv[i, j, 1]
     U = sqrt(s²ᶜᶠᶜ(i, j, grid, fields))
     Uᵍ = parameters.gust_speed
     Ũ² = s²ᶜᶠᶜ(i, j, grid, fields) + Uᵍ^2
@@ -118,7 +118,7 @@ end
 # Energy density flux (converted from potential temperature flux)
 # The sensible heat flux is computed using bulk transfer: Jθ = -u★ θ★
 # where θ★ is the temperature scale computed from the bulk transfer coefficient
-@inline @inbounds function energy_density_flux(i, j, grid, clock, fields, parameters)
+@inline function energy_density_flux(i, j, grid, clock, fields, parameters)
     thermo = parameters.thermodynamics
     Uᵍ = parameters.gust_speed
     Ũ = sqrt(s²ᶜᶜᶜ(i, j, grid, fields) + Uᵍ^2)
@@ -134,7 +134,7 @@ end
     
     # Get temperature from fields (approximate θ ≈ T near surface)
     Cᴴ = parameters.heat_transfer_coefficient
-    Δe = fields.e[i, j, 1] - eˢ
+    Δe = @inbounds fields.e[i, j, 1] - eˢ
     ρcᵖw′T′ = - ρ₀ * Cᴴ * Ũ * Δe
 
     ρw′q′ = moisture_density_flux(i, j, grid, clock, fields, parameters)
@@ -155,7 +155,7 @@ end
     Tˢ = sea_surface_temperature(x, parameters)
     ρ₀ = parameters.ρ₀  # Use surface reference density
     qᵛ⁺ = surface_saturation_specific_humidity(Tˢ, ρ₀, thermo)
-    Δq = fields.qᵗ[i, j, 1] - qᵛ⁺
+    Δq = @inbounds fields.qᵗ[i, j, 1] - qᵛ⁺
     
     return - ρ₀ * Cᵛ * Ũ * Δq
 end

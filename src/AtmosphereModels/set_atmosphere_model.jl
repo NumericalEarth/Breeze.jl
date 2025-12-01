@@ -46,7 +46,9 @@ function set!(model::AtmosphereModel; enforce_mass_conservation=true, kw...)
 
         elseif name == :ρqᵗ
             set!(model.moisture_density, value)
-            set!(model.specific_moisture, model.moisture_density / model.formulation.reference_state.density)
+            ρqᵗ = model.moisture_density
+            ρᵣ = model.formulation.reference_state.density
+            set!(model.specific_moisture, ρqᵗ / ρᵣ)
 
         elseif name ∈ prognostic_field_names(model.microphysics)
             μ = getproperty(model.microphysical_fields, name)
@@ -73,7 +75,6 @@ function set!(model::AtmosphereModel; enforce_mass_conservation=true, kw...)
             set!(model.specific_energy, value)
             ρᵣ = model.formulation.reference_state.density
             set!(model.energy_density, ρᵣ * model.specific_energy)
-
 
         elseif name == :θ
             θ = model.temperature # use scratch

@@ -63,23 +63,22 @@ function diagnose_thermodynamic_state(i, j, k, grid, formulation::AnelasticFormu
                                       microphysics,
                                       microphysical_fields,
                                       thermo,
-                                      energy_density,
-                                      moisture_density)
+                                      specific_energy,
+                                      specific_moisture)
     @inbounds begin
-        ρe = energy_density[i, j, k]
-        ρᵣ = formulation.reference_state.density[i, j, k]
+        e = specific_energy[i, j, k]
         pᵣ = formulation.reference_state.pressure[i, j, k]
-        ρqᵗ = moisture_density[i, j, k]
+        ρᵣ = formulation.reference_state.density[i, j, k]
+        qᵗ = specific_moisture[i, j, k]
     end
 
-    e = ρe / ρᵣ
-    qᵗ = ρqᵗ / ρᵣ
     q = compute_moisture_fractions(i, j, k, grid, microphysics, ρᵣ, qᵗ, microphysical_fields)
     z = znode(i, j, k, grid, c, c, c)
 
     return MoistStaticEnergyState(e, q, z, pᵣ)
 end
 
+#=
 @inline specific_volume(i, j, k, grid, args...) = 1 / density(i, j, k, grid, args...)
 
 @inline function density(i, j, k, grid, formulation, temperature, specific_moisture, thermo)
@@ -95,6 +94,7 @@ end
 
     return pᵣ / (Rᵐ * T)
 end
+=#
 
 @inline function buoyancy(i, j, k, grid, formulation, T, qᵗ, thermo)
     α = specific_volume(i, j, k, grid, formulation, T, qᵗ, thermo)
