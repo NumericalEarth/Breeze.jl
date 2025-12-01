@@ -105,10 +105,6 @@ function set!(model::AtmosphereModel; enforce_mass_conservation=true, kw...)
         update_state!(model, compute_tendencies=false)
     end
 
-    # Fill halos for thermodynamic density field
-    thermodynamic_density = get_thermodynamic_density(model.formulation)
-    fill_halo_regions!(thermodynamic_density)
-
     return nothing
 end
 

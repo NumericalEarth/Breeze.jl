@@ -129,9 +129,6 @@ function AtmosphereModel(grid;
         moisture_density = CenterField(grid, boundary_conditions=boundary_conditions.ρqᵗ)
     end
 
-    # Access thermodynamic density from the formulation
-    thermodynamic_density = get_thermodynamic_density(formulation)
-
     # Diagnostic fields
     specific_moisture = CenterField(grid)
     temperature = CenterField(grid)
@@ -140,7 +137,6 @@ function AtmosphereModel(grid;
     prognostic_microphysical_fields = NamedTuple(microphysical_fields[name] for name in prognostic_field_names(microphysics))
     prognostic_fields = collect_prognostic_fields(formulation,
                                                   momentum,
-                                                  thermodynamic_density,
                                                   moisture_density,
                                                   prognostic_microphysical_fields,
                                                   tracers)
@@ -271,8 +267,7 @@ function _prognostic_fields end
 ##### Helper functions for accessing thermodynamic fields
 #####
 
-# Stub functions - implementations in anelastic_formulation.jl
-function get_thermodynamic_density end
+# Stub function - implementation in anelastic_formulation.jl
 function thermodynamic_density_name end
 
 """

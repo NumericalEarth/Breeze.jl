@@ -184,35 +184,29 @@ function diagnose_thermodynamic_state(i, j, k, grid, formulation::APTF,
 end
 
 
-function collect_prognostic_fields(::ASEF,
+function collect_prognostic_fields(formulation::ASEF,
                                    momentum,
-                                   thermodynamic_density,
                                    moisture_density,
                                    microphysical_fields,
                                    tracers)
-
-    thermodynamic_variables = (ρe=thermodynamic_density, ρqᵗ=moisture_density)
+    ρe = formulation.thermodynamics.energy_density
+    thermodynamic_variables = (ρe=ρe, ρqᵗ=moisture_density)
     return merge(momentum, thermodynamic_variables, microphysical_fields, tracers)
 end
 
-function collect_prognostic_fields(::APTF,
+function collect_prognostic_fields(formulation::APTF,
                                    momentum,
-                                   thermodynamic_density,
                                    moisture_density,
                                    microphysical_fields,
                                    tracers)
-
-    thermodynamic_variables = (ρθ=thermodynamic_density, ρqᵗ=moisture_density)
+    ρθ = formulation.thermodynamics.potential_temperature_density
+    thermodynamic_variables = (ρθ=ρθ, ρqᵗ=moisture_density)
     return merge(momentum, thermodynamic_variables, microphysical_fields, tracers)
 end
 
 #####
 ##### Accessor functions for thermodynamic fields
 #####
-
-# Get the prognostic thermodynamic density field (ρe or ρθ)
-get_thermodynamic_density(f::ASEF) = f.thermodynamics.energy_density
-get_thermodynamic_density(f::APTF) = f.thermodynamics.potential_temperature_density
 
 # Get the name of the thermodynamic density field
 thermodynamic_density_name(::ASEF) = :ρe
