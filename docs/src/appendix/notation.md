@@ -17,7 +17,7 @@ A few notes about the following table:
   a "reference state", which is an adiabatic, hydrostatic solution to the equations of motion. But there is also an
   "energy reference temperature" and "reference latent heat", which are thermodynamic constants required to define
   the internal energy of moist atmospheric constituents.
-* Mapping to AM fields: `ρe` corresponds to `energy_density(model)`, `ρqᵗ` to `model.moisture_density`, and `qᵗ` to `model.specific_moisture`.
+* Mapping to AM fields: `ρe` corresponds to `model.energy_density`, `ρqᵗ` to `model.moisture_density`, and `qᵗ` to `model.specific_moisture`.
 
 The following table also uses a few conventions that suffuse the source code and which are internalized by wise developers:
 
