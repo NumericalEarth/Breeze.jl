@@ -22,18 +22,15 @@ using GPUArraysCore: @allowscalar
     g = constants.gravitational_acceleration
     eᵢ(x, y, z) = cᵖᵈ * θ₀ + g * z
     set!(model; e=eᵢ)
+    @test all(interior(model.temperature) .≈ θ₀)
     
     # Create a pressure field for hydrostatic pressure
-    ph = CenterField(grid)
-    Breeze.AtmosphereModels.compute_hydrostatic_pressure!(ph, model)
+    ph = Breeze.AtmosphereModels.compute_hydrostatic_pressure!(CenterField(grid), model)
     
-    Rᵈ = dry_air_gas_constant(constants)
-    z = Field{Nothing, Nothing, Center}(grid)
-    set!(z, z -> z)
-
     # ∂z p = b = g * (ρᵣ - ρ)
-    dz_ph_expected = ZFaceField(grid)
-    set!(dz_ph_expected, - g * (pᵣ / (Rᵈ * θ₀) - ρᵣ))
+    Rᵈ_θ₀ = dry_air_gas_constant(constants) * θ₀
+    dz_ph_expected_op = @at (Center, Center, Face) g * (ρᵣ - pᵣ / (Rᵈ_θ₀))
+    dz_ph_expected = Field(dz_ph_expected_op)
     dz_ph = Field(∂z(ph))
     @test interior(dz_ph, 1, 1, 2:grid.Nz) ≈ interior(dz_ph_expected, 1, 1, 2:grid.Nz)
 end
