@@ -11,18 +11,21 @@ using Oceananigans.BoundaryConditions: fill_halo_regions!
 const c = Center()
 const f = Face()
 
-@kernel function _compute_hydrostatic_pressure!(ph, grid, args...)
+@kernel function _compute_hydrostatic_pressure!(ph, grid, formulation, args...)
     i, j = @index(Global, NTuple)
 
+    p₀ = formulation.reference_state.base_pressure
     Nz = grid.Nz
-    bᴺ = ℑzᵃᵃᶠ(i, j, Nz+1, grid, ρ_bᶜᶜᶜ, args...)
-    @inbounds ph[i, j, Nz] = - bᴺ * Δzᶜᶜᶠ(i, j, Nz+1, grid)
+    bᴺ = ℑzᵃᵃᶠ(i, j, Nz+1, grid, ρ_bᶜᶜᶜ, formulation, args...)
 
-    # Integrate downwards
-    @inbounds for k in grid.Nz-1:-1:1
-        b⁺ = ℑzᵃᵃᶠ(i, j, k+1, grid, ρ_bᶜᶜᶜ, args...)
-        Δp′ = b⁺ * Δzᶜᶜᶠ(i, j, k+1, grid)
-        ph[i, j, k] = ph[i, j, k+1] - Δp′
+    # ph⁺ - phᵏ = Δz * b
+    # ph⁺ = phᵏ + Δz * b
+    @inbounds ph[i, j, 1] = p₀ - bᴺ * Δzᶜᶜᶠ(i, j, Nz+1, grid)
+
+    # Integrate update downwards
+    for k in 2:Nz
+        bᵏ = ℑzᵃᵃᶠ(i, j, k, grid, ρ_bᶜᶜᶜ, formulation, args...)
+        @inbounds ph[i, j, k] = ph[i, j, k-1] + bᵏ * Δzᶜᶜᶠ(i, j, k, grid)
     end
 end
 
