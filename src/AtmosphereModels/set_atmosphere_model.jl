@@ -113,76 +113,49 @@ end
 #####
 
 # StaticEnergyThermodynamics: :ρe sets energy density directly
-function set_thermodynamic_variable!(model, ::Val{:ρe}, value)
-    thermo = model.formulation.thermodynamics
-    thermo isa StaticEnergyThermodynamics || throw(ArgumentError("Cannot set :ρe for PotentialTemperatureThermodynamics; use :ρθ instead"))
-    set!(thermo.energy_density, value)
+set_thermodynamic_variable!(model::StaticEnergyAnelasticModel, ::Val{:ρe}, value) =
+    set!(model.formulation.thermodynamics.energy_density, value)
+
+function set_thermodynamic_variable!(model::StaticEnergyAnelasticModel, ::Val{:e}, value)
+    set!(model.formulation.thermodynamics.specific_energy, value)
+    ρᵣ = model.formulation.reference_state.density
+    e = model.formulation.thermodynamics.specific_energy
+    set!(model.formulation.thermodynamics.energy_density, ρᵣ * e)
     return nothing
 end
 
-# PotentialTemperatureThermodynamics: :ρθ sets potential temperature density directly
-function set_thermodynamic_variable!(model, ::Val{:ρθ}, value)
-    thermo = model.formulation.thermodynamics
-    thermo isa PotentialTemperatureThermodynamics || throw(ArgumentError("Cannot set :ρθ for StaticEnergyThermodynamics; use :ρe instead"))
-    set!(thermo.potential_temperature_density, value)
-    return nothing
-end
+# StaticEnergyThermodynamics: :ρe sets energy density directly
+set_thermodynamic_variable!(model::PotentialTemperatureAnelasticModel, ::Val{:ρθ}, value) =
+    set!(model.formulation.thermodynamics.potential_temperature_density, value)
 
-# StaticEnergyThermodynamics: :e sets specific energy directly
-function set_thermodynamic_variable!(model, ::Val{:e}, value)
-    thermo = model.formulation.thermodynamics
-    if thermo isa StaticEnergyThermodynamics
-        set!(thermo.specific_energy, value)
-        ρᵣ = model.formulation.reference_state.density
-        set!(thermo.energy_density, ρᵣ * thermo.specific_energy)
-    else # PotentialTemperatureThermodynamics: compute θ from e
-        # Use temperature as scratch for intermediate result
-        specific_energy_scratch = model.temperature
-        set!(specific_energy_scratch, value)
-        
-        grid = model.grid
-        arch = grid.architecture
-        launch!(arch, grid, :xyz,
-                _potential_temperature_from_energy!,
-                thermo.potential_temperature_density,
-                thermo.potential_temperature,
-                grid,
-                specific_energy_scratch,
-                model.specific_moisture,
-                model.formulation,
-                model.microphysics,
-                model.microphysical_fields,
-                model.thermodynamic_constants)
-    end
+function set_thermodynamic_variable!(model::PotentialTemperatureAnelasticModel, ::Val{:θ}, value)
+    set!(model.formulation.thermodynamics.potential_temperature, value)
+    ρᵣ = model.formulation.reference_state.density
+    θ = model.formulation.thermodynamics.potential_temperature
+    set!(model.formulation.thermodynamics.potential_temperature_density, ρᵣ * θ)
     return nothing
 end
 
 # Setting :θ (potential temperature)
-function set_thermodynamic_variable!(model, ::Val{:θ}, value)
+function set_thermodynamic_variable!(model::StaticEnergyAnelasticModel, ::Val{:θ}, value)
     thermo = model.formulation.thermodynamics
-    if thermo isa PotentialTemperatureThermodynamics
-        # Direct set for potential temperature
-        set!(thermo.potential_temperature, value)
-        ρᵣ = model.formulation.reference_state.density
-        set!(thermo.potential_temperature_density, ρᵣ * thermo.potential_temperature)
-    else # StaticEnergyThermodynamics: compute e from θ
-        θ = model.temperature # use scratch
-        set!(θ, value)
+    θ = model.temperature # scratch space
+    set!(θ, value)
 
-        grid = model.grid
-        arch = grid.architecture
-        launch!(arch, grid, :xyz,
-                _energy_density_from_potential_temperature!,
-                thermo.energy_density,
-                thermo.specific_energy,
-                grid,
-                θ,
-                model.specific_moisture,
-                model.formulation,
-                model.microphysics,
-                model.microphysical_fields,
-                model.thermodynamic_constants)
-    end
+    grid = model.grid
+    arch = grid.architecture
+    launch!(arch, grid, :xyz,
+            _energy_density_from_potential_temperature!,
+            thermo.energy_density,
+            thermo.specific_energy,
+            grid,
+            θ,
+            model.specific_moisture,
+            model.formulation,
+            model.microphysics,
+            model.microphysical_fields,
+            model.thermodynamic_constants)
+
     return nothing
 end
 
@@ -226,12 +199,42 @@ end
     @inbounds energy_density[i, j, k] = ρᵣ * e
 end
 
+# Setting :θ (potential temperature)
+function set_thermodynamic_variable!(model::PotentialTemperatureAnelasticModel, ::Val{:e}, value)
+    thermo = model.formulation.thermodynamics
+    e = model.temperature # scratch space
+    set!(e, value)
+
+    grid = model.grid
+    arch = grid.architecture
+    launch!(arch, grid, :xyz,
+            _potential_temperature_from_energy!,
+            thermo.potential_temperature_density,
+            thermo.potential_temperature,
+            grid,
+            e,
+            model.specific_moisture,
+            model.formulation,
+            model.microphysics,
+            model.microphysical_fields,
+            model.thermodynamic_constants)
+
+    return nothing
+end
+
+function set_thermodynamic_variable!(model::PotentialTemperatureAnelasticModel, ::Val{:ρe}, value)
+    ρe = model.temperature # scratch space
+    set!(ρe, value)
+    ρᵣ = model.formulation.reference_state.density
+    return set_thermodynamic_variable!(model, Val(:e), ρe / ρᵣ)
+end
+
 @kernel function _potential_temperature_from_energy!(potential_temperature_density,
                                                      potential_temperature,
                                                      grid,
                                                      specific_energy,
                                                      specific_moisture,
-                                                     formulation::AnelasticFormulation,
+                                                     formulation,
                                                      microphysics,
                                                      microphysical_fields,
                                                      constants)
