@@ -14,16 +14,16 @@ const f = Face()
 
     p₀ = formulation.reference_state.base_pressure
     Nz = grid.Nz
-    bᴺ = ℑzᵃᵃᶠ(i, j, Nz+1, grid, ρ_bᶜᶜᶜ, formulation, args...)
+    b¹ = ℑzᵃᵃᶠ(i, j, 1, grid, ρ_bᶜᶜᶜ, formulation, args...)
 
     # ph⁺ - phᵏ = Δz * b
     # ph⁺ = phᵏ + Δz * b
-    @inbounds ph[i, j, 1] = p₀ - bᴺ * Δzᶜᶜᶠ(i, j, Nz+1, grid)
 
+    @inbounds ph[i, j, 1] = p₀ - b¹ * Δzᶜᶜᶠ(i, j, 1, grid) *0.5
     # Integrate update downwards
     for k in 2:Nz
         bᵏ = ℑzᵃᵃᶠ(i, j, k, grid, ρ_bᶜᶜᶜ, formulation, args...)
-        @inbounds ph[i, j, k] = ph[i, j, k-1] + bᵏ * Δzᶜᶜᶠ(i, j, k, grid)
+        @inbounds ph[i, j, k] = ph[i, j, k-1] - bᵏ * Δzᶜᶜᶜ(i, j, k, grid)
     end
 end
 
