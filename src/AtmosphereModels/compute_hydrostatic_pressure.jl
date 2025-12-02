@@ -1,38 +1,35 @@
 #####
-##### update pressure
+##### Compute hydrostatic pressure
 #####
 
-using Oceananigans: Center, Face
-using Oceananigans.Operators: Δzᶜᶜᶜ, Δzᶜᶜᶠ, ℑzᵃᵃᶠ
+using ..Thermodynamics: dry_air_gas_constant
+using Oceananigans.Operators: Δzᶜᶜᶜ
 using Oceananigans.BoundaryConditions: fill_halo_regions!
 
-const c = Center()
-const f = Face()
-
-@kernel function _compute_hydrostatic_pressure!(ph, grid, formulation, args...)
+@kernel function _compute_hydrostatic_pressure!(ph, grid, formulation, temperature, constants)
     i, j = @index(Global, NTuple)
 
-    ρᵣ = formulation.reference_state.density
-    pᵣ = formulation.reference_state.pressure
+    p₀ = formulation.reference_state.base_pressure
     Nz = grid.Nz
-    b¹ = ℑzᵃᵃᶠ(i, j, 1, grid, ρ_bᶜᶜᶜ, formulation, args...)
-    ρᵣ¹ = ℑzᵃᵃᶠ(1, 1, 1, grid, ρᵣ)
+    g = constants.gravitational_acceleration
+    Rᵈ = dry_air_gas_constant(constants)
 
-    # ph⁺ - phᵏ = Δz * b * pᵣ
-    # ph⁺ = phᵏ + Δz * b * pᵣ
+    @inbounds begin
+        # Start with pressure at bottom interface
+        p_interface_bottom = p₀
 
-    # Pressume no pressure perturbation at the surface
-    @inbounds ph[i, j, 1] = ρᵣ¹ * b¹ * Δzᶜᶜᶜ(i, j, 1, grid) *0.5
-    # Integrate update downwards
-    for k in 2:Nz
-        bᵏ = ℑzᵃᵃᶠ(i, j, k, grid, ρ_bᶜᶜᶜ, formulation, args...)
-        ρᵣᵏ = ℑzᵃᵃᶠ(1, 1, k, grid, ρᵣ)
-        @inbounds ph[i, j, k] = ph[i, j, k-1] + ρᵣᵏ * bᵏ * Δzᶜᶜᶠ(i, j, k, grid)
-    end
+        # Compute cell-mean pressure and interface pressures in a single pass
+        for k in 1:Nz
+            T_k = temperature[i, j, k]
+            Δz = Δzᶜᶜᶜ(i, j, k, grid)
+            H = Rᵈ * T_k / g
 
-    # Add reference pressure
-    for k in 1:Nz
-        @inbounds ph[i, j, k] = ph[i, j, k] + pᵣ[1, 1, k]
+            # Compute cell-mean pressure analytically for an isothermal grid
+            ph[i, j, k] = p_interface_bottom * (H / Δz) * (1 - exp(-Δz / H))
+
+            # Compute pressure at top interface of this cell (becomes bottom for next cell)
+            p_interface_bottom = exp(-Δz / H) * p_interface_bottom
+        end
     end
 end
 
@@ -40,14 +37,8 @@ function compute_hydrostatic_pressure!(ph, model)
     grid = model.grid
     arch = grid.architecture
 
-    launch!(arch, grid, :xy, _compute_hydrostatic_pressure!, ph, grid,
-            model.formulation,
-            model.formulation.reference_state.density,
-            model.temperature,
-            model.specific_moisture,
-            model.microphysics,
-            model.microphysical_fields,
-            model.thermodynamic_constants)
+    launch!(arch, grid, :xy, _compute_hydrostatic_pressure!,
+            ph, grid, model.formulation, model.temperature, model.thermodynamic_constants)
 
     fill_halo_regions!(ph)
 
