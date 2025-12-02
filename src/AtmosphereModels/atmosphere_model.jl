@@ -110,7 +110,6 @@ function AtmosphereModel(grid;
 
     # Next, we form a list of default boundary conditions:
     prognostic_names = prognostic_field_names(formulation, microphysics, tracers)
-    FT = eltype(grid)
     default_boundary_conditions = NamedTuple{prognostic_names}(FieldBoundaryConditions() for _ in prognostic_names)
     boundary_conditions = merge(default_boundary_conditions, boundary_conditions)
     all_names = field_names(formulation, microphysics, tracers)
@@ -208,15 +207,17 @@ cell_advection_timescale(model::AtmosphereModel) = cell_advection_timescale(mode
 
 # Default prognostic field names - overloaded by formulation-specific files
 function prognostic_field_names(formulation, microphysics, tracer_names)
-    default_names = (:ρu, :ρv, :ρw, :ρe, :ρqᵗ)
+    default_names = (:ρu, :ρv, :ρw, :ρqᵗ)
+    formulation_names = prognostic_field_names(formulation)
     microphysical_names = prognostic_field_names(microphysics)
-    return tuple(default_names..., microphysical_names..., tracer_names...)
+    return tuple(default_names..., formulation_names..., microphysical_names..., tracer_names...)
 end
 
 function field_names(formulation, microphysics, tracer_names)
     prog_names = prognostic_field_names(formulation, microphysics, tracer_names)
-    additional_names = (:u, :v, :w, :e, :θ, :T, :qᵗ)
-    return tuple(prog_names..., additional_names...)
+    default_additional_names = (:u, :v, :w, :T, :qᵗ)
+    formulation_additional_names = additional_field_names(formulation)
+    return tuple(prog_names..., default_additional_names..., formulation_additional_names...)
 end
 
 function atmosphere_model_forcing(user_forcings, prognostic_fields, model_fields)

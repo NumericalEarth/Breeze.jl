@@ -80,54 +80,25 @@ function compute_auxiliary_variables!(model)
     return nothing
 end
 
-function compute_auxiliary_thermodynamic_variables!(model::StaticEnergyAnelasticModel)
+function compute_auxiliary_thermodynamic_variables!(model::AtmosphereModel)
     grid = model.grid
     arch = grid.architecture
-    thermo = model.formulation.thermodynamics
 
     launch!(arch, grid, :xyz,
-            _compute_static_energy_auxiliary_variables!,
+            _compute_auxiliary_thermodynamic_variables!,
             model.temperature,
-            thermo.specific_energy,
             model.specific_moisture,
+            model.formulation,
             grid,
             model.thermodynamic_constants,
-            model.formulation,
             model.microphysics,
             model.microphysical_fields,
-            thermo.energy_density,
             model.moisture_density)
 
     fill_halo_regions!(model.temperature)
-    fill_halo_regions!(thermo.specific_energy)
     fill_halo_regions!(model.specific_moisture)
     fill_halo_regions!(model.microphysical_fields)
-
-    return nothing
-end
-
-function compute_auxiliary_thermodynamic_variables!(model::PotentialTemperatureAnelasticModel)
-    grid = model.grid
-    arch = grid.architecture
-    thermo = model.formulation.thermodynamics
-
-    launch!(arch, grid, :xyz,
-            _compute_potential_temperature_auxiliary_variables!,
-            model.temperature,
-            thermo.potential_temperature,
-            model.specific_moisture,
-            grid,
-            model.thermodynamic_constants,
-            model.formulation,
-            model.microphysics,
-            model.microphysical_fields,
-            thermo.potential_temperature_density,
-            model.moisture_density)
-
-    fill_halo_regions!(model.temperature)
-    fill_halo_regions!(thermo.potential_temperature)
-    fill_halo_regions!(model.specific_moisture)
-    fill_halo_regions!(model.microphysical_fields)
+    fill_halo_regions!(model.formulation.thermodynamics)
 
     return nothing
 end
@@ -149,26 +120,22 @@ end
     end
 end
 
-@kernel function _compute_static_energy_auxiliary_variables!(temperature,
-                                                              specific_energy,
-                                                              specific_moisture,
-                                                              grid,
-                                                              constants,
-                                                              formulation,
-                                                              microphysics,
-                                                              microphysical_fields,
-                                                              energy_density,
-                                                              moisture_density)
+@kernel function _compute_auxiliary_thermodynamic_variables!(temperature,
+                                                             specific_moisture,
+                                                             formulation,
+                                                             grid,
+                                                             constants,
+                                                             microphysics,
+                                                             microphysical_fields,
+                                                             moisture_density)
     i, j, k = @index(Global, NTuple)
 
-    @inbounds begin
-        ρe = energy_density[i, j, k]
-        ρqᵗ = moisture_density[i, j, k]
-        ρ = formulation.reference_state.density[i, j, k]
+    compute_auxiliary_thermodynamic_variables!(formulation, i, j, k, grid)
 
-        e = ρe / ρ
+    @inbounds begin
+        ρ = formulation.reference_state.density[i, j, k]
+        ρqᵗ = moisture_density[i, j, k]
         qᵗ = ρqᵗ / ρ
-        specific_energy[i, j, k] = e
         specific_moisture[i, j, k] = qᵗ
     end
 
@@ -273,8 +240,6 @@ function compute_tendencies!(model::AnelasticModel)
     launch!(arch, grid, :xyz, compute_x_momentum_tendency!, Gρu, grid, u_args)
     launch!(arch, grid, :xyz, compute_y_momentum_tendency!, Gρv, grid, v_args)
     launch!(arch, grid, :xyz, compute_z_momentum_tendency!, Gρw, grid, w_args)
-
-    specific_energy = model.formulation.thermodynamics.specific_energy
 
     # Arguments common to energy density, moisture density, and tracer density tendencies:
     common_args = (
