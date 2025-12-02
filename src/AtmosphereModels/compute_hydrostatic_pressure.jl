@@ -12,18 +12,27 @@ const f = Face()
 @kernel function _compute_hydrostatic_pressure!(ph, grid, formulation, args...)
     i, j = @index(Global, NTuple)
 
-    p₀ = formulation.reference_state.base_pressure
+    ρᵣ = formulation.reference_state.density
+    pᵣ = formulation.reference_state.pressure
     Nz = grid.Nz
     b¹ = ℑzᵃᵃᶠ(i, j, 1, grid, ρ_bᶜᶜᶜ, formulation, args...)
+    ρᵣ¹ = ℑzᵃᵃᶠ(1, 1, 1, grid, ρᵣ)
 
-    # ph⁺ - phᵏ = Δz * b
-    # ph⁺ = phᵏ + Δz * b
+    # ph⁺ - phᵏ = Δz * b * pᵣ
+    # ph⁺ = phᵏ + Δz * b * pᵣ
 
-    @inbounds ph[i, j, 1] = p₀ - b¹ * Δzᶜᶜᶠ(i, j, 1, grid) *0.5
+    # Pressume no pressure perturbation at the surface
+    @inbounds ph[i, j, 1] = ρᵣ¹ * b¹ * Δzᶜᶜᶠ(i, j, 1, grid) *0.5
     # Integrate update downwards
     for k in 2:Nz
         bᵏ = ℑzᵃᵃᶠ(i, j, k, grid, ρ_bᶜᶜᶜ, formulation, args...)
-        @inbounds ph[i, j, k] = ph[i, j, k-1] - bᵏ * Δzᶜᶜᶜ(i, j, k, grid)
+        ρᵣᵏ = ℑzᵃᵃᶠ(1, 1, k, grid, ρᵣ)
+        @inbounds ph[i, j, k] = ph[i, j, k-1] + ρᵣᵏ * bᵏ * Δzᶜᶜᶜ(i, j, k, grid)
+    end
+
+    # Add reference pressure
+    for k in 1:Nz
+        @inbounds ph[i, j, k] = ph[i, j, k] + pᵣ[1, 1, k]
     end
 end
 
