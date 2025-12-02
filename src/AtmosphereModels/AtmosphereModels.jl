@@ -18,6 +18,8 @@ using Adapt: Adapt, adapt
 include("atmosphere_model.jl")
 include("diagnostic_fields.jl")
 include("anelastic_formulation.jl")
+include("static_energy_thermodynamics.jl")
+include("potential_temperature_thermodynamics.jl")
 include("atmosphere_model_buoyancy.jl")
 include("microphysics_interface.jl")
 # include("update_hydrostatic_pressure.jl")

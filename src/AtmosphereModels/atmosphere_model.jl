@@ -257,12 +257,19 @@ function atmosphere_model_forcing(user_forcings::NamedTuple, prognostic_fields, 
     return forcings
 end
 
-fields(model::AtmosphereModel) = _fields(model, model.formulation)
-prognostic_fields(model::AtmosphereModel) = _prognostic_fields(model, model.formulation)
+function fields(model::AtmosphereModel)
+    formulation_fields = fields(model.formulation)
+    auxiliary = (; T=model.temperature, qᵗ=model.specific_moisture)
+    return merge(prognostic_fields(model), formulation_fields, model.velocities, auxiliary)
+end
 
-# Stub functions for _fields and _prognostic_fields - overloaded by formulation-specific files
-function _fields end
-function _prognostic_fields end
+function prognostic_fields(model::AtmosphereModel)
+    prognostic_formulation_fields = prognostic_fields(model.formulation)
+    thermodynamic_fields = merge(prognostic_formulation_fields, (; ρqᵗ=model.moisture_density))
+    μ_names = prognostic_field_names(model.microphysics)
+    μ_fields= NamedTuple{μ_names}(model.microphysical_fields[name] for name in μ_names)
+    return merge(model.momentum, thermodynamic_fields, μ_fields, model.tracers)
+end
 
 #####
 ##### Helper functions for accessing thermodynamic fields

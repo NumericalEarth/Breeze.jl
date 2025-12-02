@@ -296,40 +296,6 @@ function compute_tendencies!(model::AnelasticModel)
     return nothing
 end
 
-#####
-##### Dispatch for thermodynamic tendency computation
-#####
-
-function compute_thermodynamic_tendency!(model::StaticEnergyAnelasticModel, common_args)
-    grid = model.grid
-    arch = grid.architecture
-
-    ρe_args = (
-        Val(1),
-        model.forcing.ρe,
-        common_args...,
-        model.temperature)
-
-    Gρe = model.timestepper.Gⁿ.ρe
-    launch!(arch, grid, :xyz, compute_static_energy_tendency!, Gρe, grid, ρe_args)
-    return nothing
-end
-
-function compute_thermodynamic_tendency!(model::PotentialTemperatureAnelasticModel, common_args)
-    grid = model.grid
-    arch = grid.architecture
-
-    ρθ_args = (
-        Val(1),
-        model.forcing.ρθ,
-        common_args...,
-        model.temperature)
-
-    Gρθ = model.timestepper.Gⁿ.ρθ
-    launch!(arch, grid, :xyz, compute_potential_temperature_tendency!, Gρθ, grid, ρθ_args)
-    return nothing
-end
-
 # See dynamics_kernel_functions.jl
 @kernel function compute_scalar_tendency!(Gc, grid, args)
     i, j, k = @index(Global, NTuple)
