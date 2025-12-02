@@ -14,6 +14,11 @@ using Test
             model = AtmosphereModel(grid; thermodynamic_constants=constants, formulation)
             thermo_type = eval(Symbol(thermo_name, :Thermodynamics))
             @test model.formulation.thermodynamics isa thermo_type
+
+            θ₀ = model.formulation.reference_state.potential_temperature
+            set!(model; θ=θ₀)
+            time_step!(model, 1)
+            @test true
         end
     end
 end
