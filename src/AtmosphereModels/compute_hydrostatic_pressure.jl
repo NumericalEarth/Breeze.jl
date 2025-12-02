@@ -3,9 +3,7 @@
 #####
 
 using Oceananigans: Center, Face
-using Oceananigans.Grids: topology
 using Oceananigans.Operators: Δzᶜᶜᶜ, Δzᶜᶜᶠ, ℑzᵃᵃᶠ
-using Oceananigans.Utils: KernelParameters
 using Oceananigans.BoundaryConditions: fill_halo_regions!
 
 const c = Center()
