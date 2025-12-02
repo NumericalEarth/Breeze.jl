@@ -22,12 +22,12 @@ const f = Face()
     # ph⁺ = phᵏ + Δz * b * pᵣ
 
     # Pressume no pressure perturbation at the surface
-    @inbounds ph[i, j, 1] = ρᵣ¹ * b¹ * Δzᶜᶜᶠ(i, j, 1, grid) *0.5
+    @inbounds ph[i, j, 1] = ρᵣ¹ * b¹ * Δzᶜᶜᶜ(i, j, 1, grid) *0.5
     # Integrate update downwards
     for k in 2:Nz
         bᵏ = ℑzᵃᵃᶠ(i, j, k, grid, ρ_bᶜᶜᶜ, formulation, args...)
         ρᵣᵏ = ℑzᵃᵃᶠ(1, 1, k, grid, ρᵣ)
-        @inbounds ph[i, j, k] = ph[i, j, k-1] + ρᵣᵏ * bᵏ * Δzᶜᶜᶜ(i, j, k, grid)
+        @inbounds ph[i, j, k] = ph[i, j, k-1] + ρᵣᵏ * bᵏ * Δzᶜᶜᶠ(i, j, k, grid)
     end
 
     # Add reference pressure
