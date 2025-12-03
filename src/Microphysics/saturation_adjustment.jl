@@ -199,7 +199,7 @@ end
 
 @inline function adjust_state(𝒰₀::AbstractThermodynamicState{FT}, T::FT,
                               constants::ThermodynamicConstants{FT},
-                              equilibrium::MixedPhaseEquilibrium{FT}) where FT
+                              equilibrium::AbstractEquilibrium) where FT
 
     pᵣ = 𝒰₀.reference_pressure
     qᵗ = total_specific_moisture(𝒰₀)
@@ -210,7 +210,7 @@ end
 
 @inline function saturation_adjustment_residual(T::FT, 𝒰₀::AbstractThermodynamicState{FT},
                                                 constants::ThermodynamicConstants{FT},
-                                                equilibrium::MixedPhaseEquilibrium{FT}) where FT
+                                                equilibrium::AbstractEquilibrium) where FT
 
     𝒰₁ = adjust_state(𝒰₀, T, constants, equilibrium)
     T₁ = temperature(𝒰₁, constants)
