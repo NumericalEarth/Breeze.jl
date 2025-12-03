@@ -22,19 +22,19 @@ end
             model = AtmosphereModel(grid; thermodynamic_constants=constants, formulation, microphysics)
             
             set!(model; qᵗ = 1e-2)
-            @test @allowscalar model.specific_moisture ≈ constant_field(grid, 1e-2)
+            @test model.specific_moisture ≈ constant_field(grid, 1e-2)
             
             ρᵣ = model.formulation.reference_state.density
-            @test @allowscalar model.moisture_density ≈ ρᵣ * 1e-2
+            @test model.moisture_density ≈ ρᵣ * 1e-2
 
             set!(model; u = 1, v = 2)
-            @test @allowscalar model.velocities.u ≈ constant_field(grid, 1)
-            @test @allowscalar model.velocities.v ≈ constant_field(grid, 2)
-            @test @allowscalar model.momentum.ρu ≈ ρᵣ
-            @test @allowscalar model.momentum.ρv ≈ ρᵣ * 2
+            @test model.velocities.u ≈ constant_field(grid, 1)
+            @test model.velocities.v ≈ constant_field(grid, 2)
+            @test model.momentum.ρu ≈ ρᵣ
+            @test model.momentum.ρv ≈ ρᵣ * 2
             
             ρᵣ = model.formulation.reference_state.density
-            @test @allowscalar model.moisture_density ≈ ρᵣ * 1e-2
+            @test model.moisture_density ≈ ρᵣ * 1e-2
             
             # test set! for a dry initial state
             ρᵣ = model.formulation.reference_state.density
