@@ -64,7 +64,7 @@ end
 @inline with_moisture(𝒰::StaticEnergyState{FT}, q::MoistureMassFractions{FT}) where FT =
     StaticEnergyState{FT}(𝒰.static_energy, q, 𝒰.height, 𝒰.reference_pressure)
 
-@inline function temperature(𝒰::StaticEnergyState{T}, thermo::ThermodynamicConstants{T})::FT where {FT}
+@inline function temperature(𝒰::StaticEnergyState{FT}, thermo::ThermodynamicConstants{FT})::FT where {FT}
     e = 𝒰.static_energy
     q = 𝒰.moisture_mass_fractions
     cᵖᵐ = mixture_heat_capacity(q, thermo)
