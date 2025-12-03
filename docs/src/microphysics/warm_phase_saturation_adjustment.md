@@ -144,7 +144,7 @@ using Breeze.Microphysics: compute_temperature
 microphysics = SaturationAdjustment(equilibrium=WarmPhaseEquilibrium())
 
 q₀ = MoistureMassFractions(qᵗ)
-𝒰 = Breeze.Thermodynamics.MoistStaticEnergyState(e, q₀, z, p)
+𝒰 = Breeze.Thermodynamics.StaticEnergyState(e, q₀, z, p)
 T★ = compute_temperature(𝒰, microphysics, thermo)
 ```
 
@@ -210,7 +210,7 @@ As a second example, we examine the dependence of temperature on total specific 
 when the moist static energy is held fixed.
 
 ```@example microphysics
-using Breeze.Thermodynamics: MoistStaticEnergyState
+using Breeze.Thermodynamics: StaticEnergyState
 
 T₀ = 288
 cᵖᵈ = thermo.dry_air.heat_capacity
@@ -226,7 +226,7 @@ qˡ = zeros(length(qᵗ))
 
 for (i, qᵗⁱ) in enumerate(qᵗ)
     q = MoistureMassFractions(qᵗⁱ)
-    𝒰 = MoistStaticEnergyState(e₀, q, z, p)
+    𝒰 = StaticEnergyState(e₀, q, z, p)
     T[i] = compute_temperature(𝒰, microphysics, thermo)
     qᵛ⁺ = Breeze.Microphysics.adjustment_saturation_specific_humidity(T[i], p, qᵗⁱ, thermo, WarmPhaseEquilibrium())
     qˡ[i] = max(0, qᵗⁱ - qᵛ⁺)
@@ -291,7 +291,7 @@ for k = 1:grid.Nz
     pᵣ = reference_state.pressure[1, 1, k]
     Tᵣ = θ₀ * (pᵣ / p₀)^(Rᵈ / cᵖᵈ)
     e₀ = cᵖᵐ * Tᵣ + g * z[k]
-    𝒰 = MoistStaticEnergyState(e₀, q, z[k], pᵣ)
+    𝒰 = StaticEnergyState(e₀, q, z[k], pᵣ)
     T[k] = compute_temperature(𝒰, microphysics, thermo)
 
     # Saturation specific humidity via adjustment formula using T[k], pᵣ, and qᵗ

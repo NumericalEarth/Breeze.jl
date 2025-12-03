@@ -67,21 +67,24 @@ const ZMCM = ZeroMomentCloudMicrophysics
 
 prognostic_field_names(::ZMCM) = tuple()
 materialize_microphysical_fields(bμp::ZMCM, grid, bcs) = materialize_microphysical_fields(bμp.nucleation, grid, bcs)
-@inline update_microphysical_fields!(μ, bμp::ZMCM, i, j, k, grid, density, 𝒰, thermo) = update_microphysical_fields!(μ, bμp.nucleation, i, j, k, grid, density, 𝒰, thermo)
+@inline update_microphysical_fields!(μ, bμp::ZMCM, i, j, k, grid, ρ, 𝒰, constants) = update_microphysical_fields!(μ, bμp.nucleation, i, j, k, grid, ρ, 𝒰, constants)
 @inline compute_moisture_fractions(i, j, k, grid, bμp::ZMCM, ρ, qᵗ, μ) = compute_moisture_fractions(i, j, k, grid, bμp.nucleation, ρ, qᵗ, μ)
 @inline microphysical_tendency(i, j, k, grid, bμp::ZMCM, args...) = zero(grid)
 @inline microphysical_velocities(bμp::ZMCM, name) = nothing
-@inline maybe_adjust_thermodynamic_state(𝒰₀, bμp::ZMCM, μ, qᵗ, thermo) = adjust_thermodynamic_state(𝒰₀, bμp.nucleation, thermo)
+@inline maybe_adjust_thermodynamic_state(𝒰₀, bμp::ZMCM, μ, qᵗ, constants) = adjust_thermodynamic_state(𝒰₀, bμp.nucleation, constants)
 
-@inline @inbounds function microphysical_tendency(i, j, k, grid, bμp::ZMCM, ::Val{:ρqᵗ}, μ, p, T, q, thermo)
-    pᵣ = 𝒰.reference_pressure[i, j, k]
-    T = temperature(𝒰, thermo)
+@inline function microphysical_tendency(i, j, k, grid, bμp::ZMCM, ::Val{:ρqᵗ}, μ, p, T, q, constants)
+    @inbounds begin
+        pᵣ = p.reference_pressure[i, j, k]
+        qˡ = μ.qˡ[i, j, k]
+        qⁱ = μ.qⁱ[i, j, k]
+    end
+
+    T = temperature(𝒰, constants)
     surface = equilibrated_surface(bμp.nucleation.equilibrium, T)
     q = 𝒰.moisture_mass_fractions
-    ρ = density(pᵣ, T, q, thermo)
-    qᵛ⁺ = saturation_specific_humidity(T, ρ, thermo, surface)
-    qˡ = μ.qˡ[i, j, k]
-    qⁱ = μ.qⁱ[i, j, k]
+    ρ = density(pᵣ, T, q, constants)
+    qᵛ⁺ = saturation_specific_humidity(T, ρ, constants, surface)
     ρᵣ = 𝒰.reference_density
     return ρᵣ * remove_precipitation(bμp.categories, qˡ, qⁱ, qᵛ⁺)
 end
@@ -149,40 +152,44 @@ end
 # The reason we do this is because excluding precipiating species from adjustment requires
 # a more complex algorithm in which precipitating species are passed into maybe_adjust_thermodynamic_state!
 # We can consider changing this in the future.
-@inline @inbounds function update_microphysical_fields!(μ, bμp::WP1M, i, j, k, grid, density, 𝒰, thermo)
-    ρ = density[i, j, k]
+@inline function update_microphysical_fields!(μ, bμp::WP1M, i, j, k, grid, ρ, 𝒰, constants)
     qᵛ = 𝒰.moisture_mass_fractions.vapor
     qˡ = 𝒰.moisture_mass_fractions.liquid
-    qʳ = μ.ρqʳ[i, j, k] / ρ
 
-    μ.qᵛ[i, j, k] = qᵛ
-    μ.qˡ[i, j, k] = qʳ + qˡ
+    @inbounds begin
+        qʳ = μ.ρqʳ[i, j, k] / ρ
+        μ.qᵛ[i, j, k] = qᵛ
+        μ.qˡ[i, j, k] = qʳ + qˡ
+    end
 
     return nothing
 end
 
-@inline @inbounds function update_microphysical_fields!(μ, bμp::MP1M, i, j, k, grid, density, 𝒰, thermo)
-    ρ = density[i, j, k]
+@inline function update_microphysical_fields!(μ, bμp::MP1M, i, j, k, grid, ρ, 𝒰, constants)
     qᵛ = 𝒰.moisture_mass_fractions.vapor
     qˡ = 𝒰.moisture_mass_fractions.liquid
     qⁱ = 𝒰.moisture_mass_fractions.ice
-    qʳ = μ.ρqʳ[i, j, k] / ρ
-    qˢ = μ.ρqˢ[i, j, k] / ρ
 
-    μ.qᵛ[i, j, k] = qᵛ
-    μ.qᶜˡ[i, j, k] = qʳ + qˡ
-    μ.qᶜⁱ[i, j, k] = qˢ + qⁱ
+    @inbounds begin
+        qʳ = μ.ρqʳ[i, j, k] / ρ
+        qˢ = μ.ρqˢ[i, j, k] / ρ
+        μ.qᵛ[i, j, k] = qᵛ
+        μ.qᶜˡ[i, j, k] = qʳ + qˡ
+        μ.qᶜⁱ[i, j, k] = qˢ + qⁱ
+    end
 
     return nothing
 end
 
-@inline @inbounds function compute_moisture_fractions(i, j, k, grid, bμp::MP1M, ρ, qᵗ, μ)
-    ρqʳ = μ.ρqʳ[i, j, k] / ρ
-    ρqˢ = μ.ρqˢ[i, j, k] / ρ
-    qᶜˡ = μ.qᶜˡ[i, j, k]
-    qᶜⁱ = μ.qᶜⁱ[i, j, k]
+@inline function compute_moisture_fractions(i, j, k, grid, bμp::MP1M, ρ, qᵗ, μ)
+    @inbounds begin
+        ρqʳ = μ.ρqʳ[i, j, k] / ρ
+        ρqˢ = μ.ρqˢ[i, j, k] / ρ
+        qᶜˡ = μ.qᶜˡ[i, j, k]
+        qᶜⁱ = μ.qᶜⁱ[i, j, k]
+        qᵛ = μ.qᵛ[i, j, k]
+    end
 
-    qᵛ = μ.qᵛ[i, j, k]
     qˡ = qᶜˡ + qʳ
     qⁱ = qᶜⁱ + qˢ
 
@@ -198,8 +205,8 @@ Delegates to clouds scheme (saturation adjustment) for vapor↔cloud conversion.
 CloudMicrophysics 1M handles cloud↔precipitation processes via tendencies
 computed in `update_microphysical_fields!`.
 """
-@inline maybe_adjust_thermodynamic_state(𝒰₀, bμp::OneMomentCloudMicrophysics, microphysical_fields, qᵗ, thermo) =
-    maybe_adjust_thermodynamic_state(𝒰₀, bμp.nucleation, microphysical_fields, qᵗ, thermo)
+@inline maybe_adjust_thermodynamic_state(𝒰₀, bμp::OneMomentCloudMicrophysics, microphysical_fields, qᵗ, constants) =
+    maybe_adjust_thermodynamic_state(𝒰₀, bμp.nucleation, microphysical_fields, qᵗ, constants)
 
 #####
 ##### show methods

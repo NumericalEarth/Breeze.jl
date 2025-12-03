@@ -42,11 +42,14 @@ function set!(model::AtmosphereModel; enforce_mass_conservation=true, kw...)
             set!(c, value)
 
         elseif name == :ρe
-            set!(model.energy_density, value)
+            energy_density = model.formulation.thermodynamics.energy_density
+            set!(energy_density, value)
 
         elseif name == :ρqᵗ
             set!(model.moisture_density, value)
-            set!(model.specific_moisture, model.moisture_density / model.formulation.reference_state.density)
+            ρqᵗ = model.moisture_density
+            ρᵣ = model.formulation.reference_state.density
+            set!(model.specific_moisture, ρqᵗ / ρᵣ)
 
         elseif name ∈ prognostic_field_names(model.microphysics)
             μ = getproperty(model.microphysical_fields, name)
@@ -70,10 +73,11 @@ function set!(model::AtmosphereModel; enforce_mass_conservation=true, kw...)
 
         elseif name == :e
             # Set specific energy directly
-            set!(model.specific_energy, value)
+            specific_energy = model.formulation.thermodynamics.specific_energy
+            energy_density = model.formulation.thermodynamics.energy_density
+            set!(specific_energy, value)
             ρᵣ = model.formulation.reference_state.density
-            set!(model.energy_density, ρᵣ * model.specific_energy)
-
+            set!(energy_density, ρᵣ * specific_energy)
 
         elseif name == :θ
             θ = model.temperature # use scratch
@@ -81,18 +85,20 @@ function set!(model::AtmosphereModel; enforce_mass_conservation=true, kw...)
 
             grid = model.grid
             arch = grid.architecture
+            energy_density = model.formulation.thermodynamics.energy_density
+            specific_energy = model.formulation.thermodynamics.specific_energy
 
             launch!(arch, grid, :xyz,
                     _energy_density_from_potential_temperature!,
-                    model.energy_density,
-                    model.specific_energy,
+                    energy_density,
+                    specific_energy,
                     grid,
                     θ,
                     model.specific_moisture,
                     model.formulation,
                     model.microphysics,
                     model.microphysical_fields,
-                    model.thermodynamics)
+                    model.thermodynamic_constants)
 
         else
             prognostic_names = keys(prognostic_fields(model))
@@ -119,7 +125,8 @@ function set!(model::AtmosphereModel; enforce_mass_conservation=true, kw...)
         update_state!(model, compute_tendencies=false)
     end
 
-    fill_halo_regions!(model.energy_density)
+    energy_density = model.formulation.thermodynamics.energy_density
+    fill_halo_regions!(energy_density)
 
     return nothing
 end
@@ -132,7 +139,7 @@ end
                                                              formulation::AnelasticFormulation,
                                                              microphysics,
                                                              microphysical_fields,
-                                                             thermo)
+                                                             constants)
     i, j, k = @index(Global, NTuple)
 
     @inbounds begin
@@ -142,20 +149,20 @@ end
         θ = potential_temperature[i, j, k]
     end
 
-    g = thermo.gravitational_acceleration
+    g = constants.gravitational_acceleration
     z = znode(i, j, k, grid, c, c, c)
     p₀ = formulation.reference_state.base_pressure
 
     q = compute_moisture_fractions(i, j, k, grid, microphysics, ρᵣ, qᵗ, microphysical_fields)
     𝒰₀ = PotentialTemperatureState(θ, q, p₀, pᵣ)
-    𝒰 = maybe_adjust_thermodynamic_state(𝒰₀, microphysics, microphysical_fields, qᵗ, thermo)
+    𝒰 = maybe_adjust_thermodynamic_state(𝒰₀, microphysics, microphysical_fields, qᵗ, constants)
 
-    T = temperature(𝒰, thermo)
+    T = temperature(𝒰, constants)
     q = 𝒰.moisture_mass_fractions
-    cᵖᵐ = mixture_heat_capacity(q, thermo)
+    cᵖᵐ = mixture_heat_capacity(q, constants)
 
-    ℒˡᵣ = thermo.liquid.reference_latent_heat
-    ℒⁱᵣ = thermo.ice.reference_latent_heat
+    ℒˡᵣ = constants.liquid.reference_latent_heat
+    ℒⁱᵣ = constants.ice.reference_latent_heat
     qˡ = q.liquid
     qⁱ = q.ice
 

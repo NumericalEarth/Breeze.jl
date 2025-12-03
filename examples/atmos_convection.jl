@@ -12,7 +12,7 @@ grid = RectilinearGrid(size=(Nx, Nz), x=(0, Lx), z=(0, Lz), topology=(Periodic, 
 model = AtmosphereModel(grid, advection=WENO(), boundary_conditions=(; ρe=ρe_bcs))
 
 Tₛ = model.formulation.reference_state.potential_temperature
-g = model.thermodynamics.gravitational_acceleration
+g = model.thermodynamic_constants.gravitational_acceleration
 N² = 1e-6
 dθdz = N² * Tₛ / g  # Background potential temperature gradient
 θᵢ(x, z) = Tₛ + dθdz * z # background stratification
@@ -21,7 +21,8 @@ set!(model, θ=θᵢ, u=Ξᵢ, v=Ξᵢ)
 
 simulation = Simulation(model, Δt=10, stop_time=20minutes)
 conjure_time_step_wizard!(simulation, cfl=0.7)
-∫ρe = Field(Integral(model.energy_density))
+ρe = energy_density(model)
+∫ρe = Field(Integral(ρe))
 
 function progress(sim)
     compute!(∫ρe)

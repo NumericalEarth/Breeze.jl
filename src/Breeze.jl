@@ -21,7 +21,9 @@ export
     SaturationAdjustment,
     MixedPhaseEquilibrium,
     WarmPhaseEquilibrium,
-    BulkMicrophysics
+    BulkMicrophysics,
+    energy_density,
+    specific_energy
 
 using Oceananigans: Oceananigans, @at, AnisotropicMinimumDissipation, Average,
                     AveragedTimeInterval, BackgroundField, BetaPlane, Bounded,
@@ -89,5 +91,8 @@ using .Microphysics
 
 include("TurbulenceClosures/TurbulenceClosures.jl")
 using .TurbulenceClosures
+
+include("Advection.jl")
+using .Advection
 
 end # module Breeze

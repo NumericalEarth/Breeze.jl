@@ -51,21 +51,21 @@ end
 ##### Moist static energy state (for microphysics interfaces)
 #####
 
-struct MoistStaticEnergyState{FT} <: AbstractThermodynamicState{FT}
-    moist_static_energy :: FT
+struct StaticEnergyState{FT} <: AbstractThermodynamicState{FT}
+    static_energy :: FT
     moisture_mass_fractions :: MoistureMassFractions{FT}
     height :: FT
     reference_pressure :: FT
 end
 
-@inline total_specific_moisture(state::MoistStaticEnergyState) = total_specific_moisture(state.moisture_mass_fractions)
-@inline is_absolute_zero(𝒰::MoistStaticEnergyState) = 𝒰.moist_static_energy == 0
+@inline total_specific_moisture(state::StaticEnergyState) = total_specific_moisture(state.moisture_mass_fractions)
+@inline is_absolute_zero(𝒰::StaticEnergyState) = 𝒰.static_energy == 0
 
-@inline with_moisture(𝒰::MoistStaticEnergyState{FT}, q::MoistureMassFractions{FT}) where FT =
-    MoistStaticEnergyState{FT}(𝒰.moist_static_energy, q, 𝒰.height, 𝒰.reference_pressure)
+@inline with_moisture(𝒰::StaticEnergyState{FT}, q::MoistureMassFractions{FT}) where FT =
+    StaticEnergyState{FT}(𝒰.static_energy, q, 𝒰.height, 𝒰.reference_pressure)
 
-@inline function temperature(𝒰::MoistStaticEnergyState{FT}, thermo::ThermodynamicConstants{FT})::FT where FT
-    e = 𝒰.moist_static_energy
+@inline function temperature(𝒰::StaticEnergyState{T}, thermo::ThermodynamicConstants{T})::FT where {FT}
+    e = 𝒰.static_energy
     q = 𝒰.moisture_mass_fractions
     cᵖᵐ = mixture_heat_capacity(q, thermo)
 

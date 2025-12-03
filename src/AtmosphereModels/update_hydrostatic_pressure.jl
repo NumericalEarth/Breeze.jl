@@ -9,16 +9,16 @@ using Oceananigans.Utils: KernelParameters
 const c = Center()
 const f = Face()
 
-@kernel function _update_hydrostatic_pressure!(pₕ′, grid, formulation, T, q, thermo)
+@kernel function _update_hydrostatic_pressure!(pₕ′, grid, formulation, T, q, constants)
     i, j = @index(Global, NTuple)
 
     Nz = grid.Nz
-    bᴺ = ℑzᵃᵃᶠ(i, j, Nz+1, grid, buoyancy, formulation, T, q, thermo)
+    bᴺ = ℑzᵃᵃᶠ(i, j, Nz+1, grid, buoyancy, formulation, T, q, constants)
     @inbounds pₕ′[i, j, Nz] = - bᴺ * Δzᶜᶜᶠ(i, j, Nz+1, grid)
 
     # Integrate downwards
     @inbounds for k in grid.Nz-1:-1:1
-        b⁺ = ℑzᵃᵃᶠ(i, j, k+1, grid, buoyancy, formulation, T, q, thermo)
+        b⁺ = ℑzᵃᵃᶠ(i, j, k+1, grid, buoyancy, formulation, T, q, constants)
         Δp′ = b⁺ * Δzᶜᶜᶠ(i, j, k+1, grid)
         pₕ′[i, j, k] = pₕ′[i, j, k+1] - Δp′
     end
@@ -31,7 +31,7 @@ function update_hydrostatic_pressure!(model)
     formulation = model.formulation
     T = model.temperature
     q = model.specific_moisture
-    thermo = model.thermodynamics
+    constants = model.thermodynamic_constants
 
     Nx, Ny, _ = size(grid)
     TX, TY, _ = topology(grid)
@@ -39,7 +39,7 @@ function update_hydrostatic_pressure!(model)
     jj = TY == Flat ? (1:Ny) : (0:Ny+1)
     kernel_parameters = KernelParameters(ii, jj)
 
-    launch!(arch, grid, kernel_parameters, _update_hydrostatic_pressure!, pₕ′, grid, formulation, T, q, thermo)
+    launch!(arch, grid, kernel_parameters, _update_hydrostatic_pressure!, pₕ′, grid, formulation, T, q, constants)
 
     return nothing
 end
