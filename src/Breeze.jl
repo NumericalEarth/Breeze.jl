@@ -23,7 +23,8 @@ export
     WarmPhaseEquilibrium,
     BulkMicrophysics,
     energy_density,
-    specific_energy
+    specific_energy,
+    compute_hydrostatic_pressure!
 
 using Oceananigans: Oceananigans, @at, AnisotropicMinimumDissipation, Average,
                     AveragedTimeInterval, BackgroundField, BetaPlane, Bounded,

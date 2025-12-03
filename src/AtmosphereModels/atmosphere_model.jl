@@ -137,7 +137,7 @@ function AtmosphereModel(grid;
     temperature = CenterField(grid)
     pressure = formulation.pressure_anomaly
 
-    prognostic_microphysical_fields = NamedTuple(microphysical_fields[name] for name in prognostic_field_names(microphysics))
+    prognostic_microphysical_fields = NamedTuple(name => microphysical_fields[name] for name in prognostic_field_names(microphysics))
     prognostic_fields = collect_prognostic_fields(formulation,
                                                   momentum,
                                                   energy_density,
