@@ -53,6 +53,6 @@ using GPUArraysCore: @allowscalar
         end
     end
 
-    @test interior(ph) ≈ interior(p_expected)
+    @test ph ≈ p_expected
 end
 
