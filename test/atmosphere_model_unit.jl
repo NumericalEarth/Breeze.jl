@@ -105,22 +105,22 @@ end
         @test model_weno.advection.momentum isa WENO
         @test model_weno.advection.ρe isa WENO
         @test model_weno.advection.ρqᵗ isa WENO
-        time_step!(model, 1)
+        time_step!(model_weno, 1)
         @test true
 
         model_centered = AtmosphereModel(grid; thermodynamic_constants=constants, formulation, advection=Centered(order=4))
         @test model_centered.advection.momentum isa Centered
         @test model_centered.advection.ρe isa Centered
-        time_step!(model, 1)
+        time_step!(model_centered, 1)
         @test true
     end
 
     @testset "Separate momentum and tracer advection" begin
         model = AtmosphereModel(grid; 
-                                thermodynamic_constants=constants, 
+                                thermodynamic_constants = constants, 
                                 formulation,
-                                momentum_advection=WENO(),
-                                tracer_advection=Centered(order=2))
+                                momentum_advection = WENO(),
+                                scalar_advection = Centered(order=2))
         @test model.advection.momentum isa WENO
         @test model.advection.ρe isa Centered
         @test model.advection.ρqᵗ isa Centered
@@ -130,10 +130,10 @@ end
 
     @testset "Tracer advection with user tracers" begin
         model = AtmosphereModel(grid; 
-                                thermodynamic_constants=constants, 
+                                thermodynamic_constants = constants, 
                                 formulation,
-                                tracers=(:c,),
-                                tracer_advection=UpwindBiased(order=1))
+                                tracers = :c,
+                                scalar_advection = UpwindBiased(order=1))
         @test model.advection.momentum isa Centered
         @test model.advection.ρe isa UpwindBiased
         @test model.advection.ρqᵗ isa UpwindBiased
@@ -144,11 +144,11 @@ end
 
     @testset "Mixed configuration with tracers" begin
         model = AtmosphereModel(grid; 
-                                thermodynamic_constants=constants, 
+                                thermodynamic_constants = constants, 
                                 formulation,
-                                tracers=(:c,),
-                                momentum_advection=WENO(),
-                                tracer_advection=Centered(order=2))
+                                tracers = :c,
+                                momentum_advection = WENO(),
+                                scalar_advection = Centered(order=2))
         @test model.advection.momentum isa WENO
         @test model.advection.ρe isa Centered
         @test model.advection.ρqᵗ isa Centered
