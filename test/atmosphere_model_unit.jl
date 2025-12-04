@@ -95,6 +95,9 @@ end
         @test model.advection.momentum isa Centered
         @test model.advection.ρe isa Centered
         @test model.advection.ρqᵗ isa Centered
+
+        time_step!(model, 1)
+        @test true
     end
 
     @testset "Unified advection parameter" begin
@@ -102,10 +105,14 @@ end
         @test model_weno.advection.momentum isa WENO
         @test model_weno.advection.ρe isa WENO
         @test model_weno.advection.ρqᵗ isa WENO
+        time_step!(model, 1)
+        @test true
 
         model_centered = AtmosphereModel(grid; thermodynamic_constants=constants, formulation, advection=Centered(order=4))
         @test model_centered.advection.momentum isa Centered
         @test model_centered.advection.ρe isa Centered
+        time_step!(model, 1)
+        @test true
     end
 
     @testset "Separate momentum and tracer advection" begin
@@ -117,6 +124,8 @@ end
         @test model.advection.momentum isa WENO
         @test model.advection.ρe isa Centered
         @test model.advection.ρqᵗ isa Centered
+        time_step!(model, 1)
+        @test true
     end
 
     @testset "Tracer advection with user tracers" begin
@@ -129,6 +138,8 @@ end
         @test model.advection.ρe isa UpwindBiased
         @test model.advection.ρqᵗ isa UpwindBiased
         @test model.advection.c isa UpwindBiased
+        time_step!(model, 1)
+        @test true
     end
 
     @testset "Mixed configuration with tracers" begin
@@ -142,5 +153,7 @@ end
         @test model.advection.ρe isa Centered
         @test model.advection.ρqᵗ isa Centered
         @test model.advection.c isa Centered
+        time_step!(model, 1)
+        @test true
     end
 end
