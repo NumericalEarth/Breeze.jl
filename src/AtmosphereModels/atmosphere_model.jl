@@ -6,11 +6,12 @@ using Oceananigans.Advection: adapt_advection_order
 using Oceananigans.Forcings: materialize_forcing
 using Oceananigans.BoundaryConditions: FieldBoundaryConditions, regularize_field_boundary_conditions
 using Oceananigans.Grids: ZDirection
-using Oceananigans.Models: validate_model_halo, validate_momentum_advection, validate_tracer_advection
+using Oceananigans.Models: validate_model_halo, validate_tracer_advection
+import Oceananigans.Models.HydrostaticFreeSurfaceModels: validate_momentum_advection
 using Oceananigans.Solvers: FourierTridiagonalPoissonSolver
 using Oceananigans.TimeSteppers: TimeStepper
 using Oceananigans.TurbulenceClosures: implicit_diffusion_solver, time_discretization, build_closure_fields
-using Oceananigans.Utils: launch!, prettytime, prettykeys
+using Oceananigans.Utils: launch!, prettytime, prettykeys, with_tracers
 
 import Oceananigans: fields, prognostic_fields
 import Oceananigans.Advection: cell_advection_timescale
@@ -102,33 +103,26 @@ function AtmosphereModel(grid;
                          forcing = NamedTuple(),
                          advection = nothing,
                          momentum_advection = nothing,
-                         tracer_advection = nothing,
+                         scalar_advection = nothing,
                          closure = nothing,
                          microphysics = nothing, # WarmPhaseSaturationAdjustment(),
                          timestepper = :RungeKutta3)
 
     if !isnothing(advection)
         # TODO: check that tracer+momentum advection were not independently set.
-        tracer_advection = momentum_advection = advection
+        scalar_advection = momentum_advection = advection
     else
         isnothing(momentum_advection) && (momentum_advection = Centered(order=2))
-        isnothing(tracer_advection) && (tracer_advection = Centered(order=2))
+        isnothing(scalar_advection) && (scalar_advection = Centered(order=2))
     end
 
     # Check halos and throw an error if the grid's halo is too small
-    @apply_regionally validate_model_halo(grid, momentum_advection, tracer_advection, closure)
+    validate_model_halo(grid, momentum_advection, scalar_advection, closure)
 
     # Reduce the advection order in directions that do not have enough grid points
-    @apply_regionally momentum_advection = validate_momentum_advection(momentum_advection, grid)
-    default_tracer_advection, tracer_advection = validate_tracer_advection(tracer_advection, grid)
-    default_generator(name, tracer_advection) = default_tracer_advection
-
-    # Generate tracer advection scheme for each tracer
-    tracer_advection_tuple = with_tracers(tracernames(tracers), tracer_advection, default_generator, with_velocities=false)
-    momentum_advection_tuple = (; momentum = momentum_advection)
-    advection = merge(momentum_advection_tuple, tracer_advection_tuple)
-    advection = NamedTuple(name => adapt_advection_order(scheme, grid) for (name, scheme) in pairs(advection))
-
+    momentum_advection = validate_momentum_advection(momentum_advection, grid)
+    default_scalar_advection, scalar_advection = validate_tracer_advection(scalar_advection, grid)
+    
     arch = grid.architecture
     tracers = tupleit(tracers) # supports tracers=:c keyword argument (for example)
     tracer_names = validate_tracers(tracers)
@@ -144,9 +138,9 @@ function AtmosphereModel(grid;
     # Materialize the full formulation with thermodynamic fields and pressure
     formulation = materialize_formulation(formulation, grid, boundary_conditions)
 
+
     velocities, momentum = materialize_momentum_and_velocities(formulation, grid, boundary_conditions)
     microphysical_fields = materialize_microphysical_fields(microphysics, grid, boundary_conditions)
-    advection = adapt_advection_order(advection, grid)
 
     tracers = NamedTuple(name => CenterField(grid, boundary_conditions=boundary_conditions[name]) for name in tracer_names)
 
@@ -178,9 +172,18 @@ function AtmosphereModel(grid;
     forcing = atmosphere_model_forcing(forcing, prognostic_fields, model_fields)
 
     # Include ρe, ρqᵗ plus user tracers for closure field construction
-    closure_names = tuple(:ρe, :ρqᵗ, tracer_names...)
-    closure = Oceananigans.Utils.with_tracers(closure_names, closure)
-    closure_fields = build_closure_fields(nothing, grid, clock, closure_names, boundary_conditions, closure)
+    scalar_names = tuple(:ρe, :ρqᵗ, tracer_names...)
+    closure = Oceananigans.Utils.with_tracers(scalar_names, closure)
+    closure_fields = build_closure_fields(nothing, grid, clock, scalar_names, boundary_conditions, closure)
+
+    # Generate tracer advection scheme for each tracer
+    # scalar_advection is always a NamedTuple after validate_tracer_advection (either user's partial NamedTuple or empty)
+    # with_tracers fills in missing names using default_generator
+    default_generator(names, initial_tuple) = default_scalar_advection
+    scalar_advection_tuple = with_tracers(scalar_names, scalar_advection, default_generator, with_velocities=false)
+    momentum_advection_tuple = (; momentum = momentum_advection)
+    advection = merge(momentum_advection_tuple, scalar_advection_tuple)
+    advection = NamedTuple(name => adapt_advection_order(scheme, grid) for (name, scheme) in pairs(advection))
 
     model = AtmosphereModel(arch,
                             grid,

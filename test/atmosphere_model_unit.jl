@@ -79,3 +79,68 @@ end
     @test isfinite(qᵛ⁺k)
     @test qᵛ⁺k ≈ qᵛ⁺_expected rtol=FT(1e-5)
 end
+
+@testset "Advection scheme configuration [$(FT)]" for FT in (Float32, Float64)
+    Oceananigans.defaults.FloatType = FT
+    grid = RectilinearGrid(default_arch; size=(8, 8, 8), x=(0, 1_000), y=(0, 1_000), z=(0, 1_000))
+    constants = ThermodynamicConstants()
+
+    p₀ = FT(101325)
+    θ₀ = FT(300)
+    reference_state = ReferenceState(grid, constants, base_pressure=p₀, potential_temperature=θ₀)
+    formulation = AnelasticFormulation(reference_state)
+
+    @testset "Default advection schemes" begin
+        model = AtmosphereModel(grid; thermodynamic_constants=constants, formulation)
+        @test model.advection.momentum isa Centered
+        @test model.advection.ρe isa Centered
+        @test model.advection.ρqᵗ isa Centered
+    end
+
+    @testset "Unified advection parameter" begin
+        model_weno = AtmosphereModel(grid; thermodynamic_constants=constants, formulation, advection=WENO())
+        @test model_weno.advection.momentum isa WENO
+        @test model_weno.advection.ρe isa WENO
+        @test model_weno.advection.ρqᵗ isa WENO
+
+        model_centered = AtmosphereModel(grid; thermodynamic_constants=constants, formulation, advection=Centered(order=4))
+        @test model_centered.advection.momentum isa Centered
+        @test model_centered.advection.ρe isa Centered
+    end
+
+    @testset "Separate momentum and tracer advection" begin
+        model = AtmosphereModel(grid; 
+                                thermodynamic_constants=constants, 
+                                formulation,
+                                momentum_advection=WENO(),
+                                tracer_advection=Centered(order=2))
+        @test model.advection.momentum isa WENO
+        @test model.advection.ρe isa Centered
+        @test model.advection.ρqᵗ isa Centered
+    end
+
+    @testset "Tracer advection with user tracers" begin
+        model = AtmosphereModel(grid; 
+                                thermodynamic_constants=constants, 
+                                formulation,
+                                tracers=(:c,),
+                                tracer_advection=UpwindBiased(order=1))
+        @test model.advection.momentum isa Centered
+        @test model.advection.ρe isa UpwindBiased
+        @test model.advection.ρqᵗ isa UpwindBiased
+        @test model.advection.c isa UpwindBiased
+    end
+
+    @testset "Mixed configuration with tracers" begin
+        model = AtmosphereModel(grid; 
+                                thermodynamic_constants=constants, 
+                                formulation,
+                                tracers=(:c,),
+                                momentum_advection=WENO(),
+                                tracer_advection=Centered(order=2))
+        @test model.advection.momentum isa WENO
+        @test model.advection.ρe isa Centered
+        @test model.advection.ρqᵗ isa Centered
+        @test model.advection.c isa Centered
+    end
+end

@@ -17,7 +17,7 @@ Nz = 75
 x = y = (0, 6400)
 z = (0, 3000)
 
-arch = GPU() # if changing to CPU() remove the `using CUDA` line above
+arch = CPU() # if changing to CPU() remove the `using CUDA` line above
 stop_time = 6hours
 
 grid = RectilinearGrid(arch; x, y, z, 
@@ -141,7 +141,9 @@ microphysics = SaturationAdjustment(equilibrium=WarmPhaseEquilibrium())
 advection = Centered(order=2)
 closure = AnisotropicMinimumDissipation()
 
-model = AtmosphereModel(grid; formulation, coriolis, microphysics, advection, closure,
+model = AtmosphereModel(grid; formulation, coriolis, microphysics, closure,
+                        scalar_advection = Centered(order=2),
+                        momentum_advection = WENO(order=9),
                         forcing = (ρqᵗ=ρqᵗ_forcing, ρu=ρu_forcing, ρv=ρv_forcing, ρe=ρe_forcing),
                         boundary_conditions = (ρe=ρe_bcs, ρqᵗ=ρqᵗ_bcs, ρu=ρu_bcs, ρv=ρv_bcs))
 
