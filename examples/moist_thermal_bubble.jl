@@ -16,7 +16,7 @@ using CairoMakie
 # This serves as a baseline for comparison with the moist case.
 
 grid = RectilinearGrid(CPU();
-                       size = (64, 64), halo = (5, 5),
+                       size = (128, 128), halo = (5, 5),
                        x = (-10e3, 10e3),
                        z = (0, 10e3),
                        topology = (Bounded, Flat, Bounded))
