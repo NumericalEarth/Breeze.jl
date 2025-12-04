@@ -5,7 +5,7 @@ export
     AtmosphereModelBuoyancy,
     AnelasticFormulation,
     StaticEnergyThermodynamics,
-    PotentialTemperatureThermodynamics,
+    LiquidIcePotentialTemperatureThermodynamics,
     energy_density,
     specific_energy,
     potential_temperature_density,

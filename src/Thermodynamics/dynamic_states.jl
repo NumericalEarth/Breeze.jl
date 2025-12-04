@@ -9,9 +9,9 @@ struct PotentialTemperatureState{FT} <: AbstractThermodynamicState{FT}
     reference_pressure :: FT
 end
 
-@inline is_absolute_zero(𝒰::PotentialTemperatureState) = 𝒰.potential_temperature == 0
+@inline is_absolute_zero(𝒰::LiquidIcePotentialTemperatureState) = 𝒰.potential_temperature == 0
 
-@inline function exner_function(𝒰::PotentialTemperatureState, thermo::ThermodynamicConstants)
+@inline function exner_function(𝒰::LiquidIcePotentialTemperatureState, thermo::ThermodynamicConstants)
     q = 𝒰.moisture_mass_fractions
     Rᵐ = mixture_gas_constant(q, thermo)
     cᵖᵐ = mixture_heat_capacity(q, thermo)
@@ -20,13 +20,13 @@ end
     return (pᵣ / p₀)^(Rᵐ / cᵖᵐ)
 end
 
-@inline total_specific_moisture(state::PotentialTemperatureState) =
+@inline total_specific_moisture(state::LiquidIcePotentialTemperatureState) =
     total_specific_moisture(state.moisture_mass_fractions)
 
-@inline with_moisture(𝒰::PotentialTemperatureState{FT}, q::MoistureMassFractions{FT}) where FT =
+@inline with_moisture(𝒰::LiquidIcePotentialTemperatureState{FT}, q::MoistureMassFractions{FT}) where FT =
     PotentialTemperatureState{FT}(𝒰.potential_temperature, q, 𝒰.base_pressure, 𝒰.reference_pressure)
 
-@inline function temperature(𝒰::PotentialTemperatureState, thermo::ThermodynamicConstants)
+@inline function temperature(𝒰::LiquidIcePotentialTemperatureState, thermo::ThermodynamicConstants)
     θ = 𝒰.potential_temperature
     Π = exner_function(𝒰, thermo)
 
@@ -40,7 +40,7 @@ end
     return Π*θ + (ℒˡᵣ*qˡ + ℒⁱᵣ*qⁱ) / cᵖᵐ 
 end
 
-@inline function density(𝒰::PotentialTemperatureState, thermo)
+@inline function density(𝒰::LiquidIcePotentialTemperatureState, thermo)
     pᵣ = 𝒰.reference_pressure
     T = temperature(𝒰, thermo)
     q = 𝒰.moisture_mass_fractions

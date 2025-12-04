@@ -323,7 +323,7 @@ function thermodynamic_density_name end
     energy_density(model::AtmosphereModel)
 
 Return the energy density field `ρe` from the model formulation.
-Returns `nothing` for `PotentialTemperatureThermodynamics`.
+Returns `nothing` for `LiquidIcePotentialTemperatureThermodynamics`.
 """
 energy_density(model::AtmosphereModel) = energy_density(model.formulation.thermodynamics)
 
@@ -331,7 +331,7 @@ energy_density(model::AtmosphereModel) = energy_density(model.formulation.thermo
     specific_energy(model::AtmosphereModel)
 
 Return the specific energy field `e` from the model formulation.
-Returns `nothing` for `PotentialTemperatureThermodynamics`.
+Returns `nothing` for `LiquidIcePotentialTemperatureThermodynamics`.
 """
 specific_energy(model::AtmosphereModel) = specific_energy(model.formulation.thermodynamics)
 

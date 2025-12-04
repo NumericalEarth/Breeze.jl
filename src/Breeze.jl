@@ -12,7 +12,7 @@ export
     AnelasticFormulation,
     AtmosphereModel,
     StaticEnergyThermodynamics,
-    PotentialTemperatureThermodynamics,
+    LiquidIcePotentialTemperatureThermodynamics,
     TemperatureField,
     IdealGas,
     CondensedPhase,

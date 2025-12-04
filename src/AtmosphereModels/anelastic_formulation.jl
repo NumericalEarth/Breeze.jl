@@ -39,7 +39,7 @@ struct AnelasticFormulation{T, R, P}
     pressure_anomaly :: P
 end
 
-const valid_thermodynamics_types = (:PotentialTemperature, :StaticEnergy)
+const valid_thermodynamics_types = (:LiquidIcePotentialTemperature, :StaticEnergy)
 
 """
     $(TYPEDSIGNATURES)
@@ -63,7 +63,7 @@ const AnelasticModel = AtmosphereModel{<:AnelasticFormulation}
 function prognostic_field_names(formulation::AnelasticFormulation{<:Symbol})
     if formulation.thermodynamics == :StaticEnergy
         return tuple(:ρe)
-    elseif formulation.thermodynamics == :PotentialTemperature
+    elseif formulation.thermodynamics == :LiquidIcePotentialTemperature
         return tuple(:ρθ)
     else
         throw(ArgumentError("Got $(formulation.thermodynamics) thermodynamics, which is not one of \
@@ -74,7 +74,7 @@ end
 function additional_field_names(formulation::AnelasticFormulation{<:Symbol})
     if formulation.thermodynamics == :StaticEnergy
         return tuple(:e)
-    elseif formulation.thermodynamics == :PotentialTemperature
+    elseif formulation.thermodynamics == :LiquidIcePotentialTemperature
         return tuple(:θ)
     end
 end

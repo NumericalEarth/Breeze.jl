@@ -8,7 +8,7 @@ using Test
     constants = ThermodynamicConstants()
     reference_state = ReferenceState(grid, constants)
 
-    @testset "Time-stepping AtmosphereModel with $thermo_name thermodynamics" for thermo_name in (:PotentialTemperature, :StaticEnergy)
+    @testset "Time-stepping AtmosphereModel with $thermo_name thermodynamics" for thermo_name in (:LiquidIcePotentialTemperature, :StaticEnergy)
         formulation = AnelasticFormulation(reference_state, thermodynamics=thermo_name)
         model = AtmosphereModel(grid; thermodynamic_constants=constants, formulation)
         thermo_type = eval(Symbol(thermo_name, :Thermodynamics))

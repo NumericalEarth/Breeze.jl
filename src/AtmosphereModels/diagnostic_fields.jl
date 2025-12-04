@@ -78,7 +78,7 @@ struct PotentialTemperatureKernelFunction{R, μ, M, MF, TMP, TH}
     thermodynamic_constants :: TH
 end
 
-Adapt.adapt_structure(to, k::PotentialTemperatureKernelFunction) =
+Adapt.adapt_structure(to, k::LiquidIcePotentialTemperatureKernelFunction) =
     PotentialTemperatureKernelFunction(adapt(to, k.reference_state),
                                        adapt(to, k.microphysics),
                                        adapt(to, k.microphysical_fields),
@@ -86,8 +86,8 @@ Adapt.adapt_structure(to, k::PotentialTemperatureKernelFunction) =
                                        adapt(to, k.temperature),
                                        adapt(to, k.thermodynamic_constants))
 
-const PotentialTemperature = KernelFunctionOperation{Center, Center, Center, <:Any, <:Any, <:PotentialTemperatureKernelFunction}
-const PotentialTemperatureField = Field{Center, Center, Center, <:PotentialTemperature}
+const PotentialTemperature = KernelFunctionOperation{Center, Center, Center, <:Any, <:Any, <:LiquidIcePotentialTemperatureKernelFunction}
+const PotentialTemperatureField = Field{Center, Center, Center, <:LiquidIcePotentialTemperature}
 
 """
     $(TYPEDSIGNATURES)
@@ -112,7 +112,7 @@ Return a `Field` representing potential temperature.
 """
 PotentialTemperatureField(model) = Field(PotentialTemperature(model))
 
-function (d::PotentialTemperatureKernelFunction)(i, j, k, grid)
+function (d::LiquidIcePotentialTemperatureKernelFunction)(i, j, k, grid)
     @inbounds begin
         pᵣ = d.reference_state.pressure[i, j, k]
         ρᵣ = d.reference_state.density[i, j, k]

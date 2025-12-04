@@ -23,7 +23,7 @@ grid = RectilinearGrid(CPU();
 
 thermodynamic_constants = ThermodynamicConstants()
 reference_state = ReferenceState(grid, thermodynamic_constants, base_pressure=1e5, potential_temperature=300)
-formulation = AnelasticFormulation(reference_state, thermodynamics=:PotentialTemperature)
+formulation = AnelasticFormulation(reference_state, thermodynamics=:LiquidIcePotentialTemperature)
 advection = WENO(order=9)
 model = AtmosphereModel(grid; formulation, thermodynamic_constants, advection)
 
@@ -152,8 +152,7 @@ nothing #hide
 
 # Create a new model with warm-phase saturation adjustment microphysics
 microphysics = SaturationAdjustment(equilibrium=WarmPhaseEquilibrium())
-moist_model = AtmosphereModel(grid; formulation, thermodynamic_constants,
-                              advection, microphysics)
+moist_model = AtmosphereModel(grid; formulation, thermodynamic_constants, advection, microphysics)
 
 # ## Moist thermal bubble initial conditions
 #
@@ -170,13 +169,14 @@ using Breeze.AtmosphereModels: SaturationSpecificHumidityField
 using Breeze.Thermodynamics: dry_air_gas_constant, vapor_gas_constant
 
 qᵛ⁺ = SaturationSpecificHumidityField(moist_model)
+qᵛ = qᵛ⁺ / 10
 θᵈ = potential_temperature(moist_model) # note, current state is dry
 Rᵈ = dry_air_gas_constant(thermodynamic_constants)
 Rᵛ = vapor_gas_constant(thermodynamic_constants)
-Rᵐ = Rᵈ * (1 - qᵛ⁺) + Rᵛ * qᵛ⁺
+Rᵐ = Rᵈ * (1 - qᵛ) + Rᵛ * qᵛ
 θᵐ = θᵈ * Rᵈ / Rᵐ
 
-set!(moist_model, θ=θᵐ, qᵗ=qᵛ⁺)
+set!(moist_model, θ=θᵐ, qᵗ=qᵛ)
 
 # ## Simulation
 

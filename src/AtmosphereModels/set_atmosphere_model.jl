@@ -125,10 +125,10 @@ function set_thermodynamic_variable!(model::StaticEnergyAnelasticModel, ::Val{:e
 end
 
 # StaticEnergyThermodynamics: :ρe sets energy density directly
-set_thermodynamic_variable!(model::PotentialTemperatureAnelasticModel, ::Val{:ρθ}, value) =
+set_thermodynamic_variable!(model::LiquidIcePotentialTemperatureAnelasticModel, ::Val{:ρθ}, value) =
     set!(model.formulation.thermodynamics.potential_temperature_density, value)
 
-function set_thermodynamic_variable!(model::PotentialTemperatureAnelasticModel, ::Val{:θ}, value)
+function set_thermodynamic_variable!(model::LiquidIcePotentialTemperatureAnelasticModel, ::Val{:θ}, value)
     set!(model.formulation.thermodynamics.potential_temperature, value)
     ρᵣ = model.formulation.reference_state.density
     θ = model.formulation.thermodynamics.potential_temperature
@@ -200,7 +200,7 @@ end
 end
 
 # Setting :θ (potential temperature)
-function set_thermodynamic_variable!(model::PotentialTemperatureAnelasticModel, ::Val{:e}, value)
+function set_thermodynamic_variable!(model::LiquidIcePotentialTemperatureAnelasticModel, ::Val{:e}, value)
     thermo = model.formulation.thermodynamics
     e = model.temperature # scratch space
     set!(e, value)
@@ -222,7 +222,7 @@ function set_thermodynamic_variable!(model::PotentialTemperatureAnelasticModel, 
     return nothing
 end
 
-function set_thermodynamic_variable!(model::PotentialTemperatureAnelasticModel, ::Val{:ρe}, value)
+function set_thermodynamic_variable!(model::LiquidIcePotentialTemperatureAnelasticModel, ::Val{:ρe}, value)
     ρe = model.temperature # scratch space
     set!(ρe, value)
     ρᵣ = model.formulation.reference_state.density

@@ -1,29 +1,29 @@
-struct PotentialTemperatureThermodynamics{F, T}
+struct LiquidIcePotentialTemperatureThermodynamics{F, T}
     potential_temperature_density :: F  # ρθ (prognostic)
     potential_temperature :: T          # θ = ρθ / ρᵣ (diagnostic)
 end
 
-Adapt.adapt_structure(to, thermo::PotentialTemperatureThermodynamics) =
-    PotentialTemperatureThermodynamics(adapt(to, thermo.potential_temperature_density),
+Adapt.adapt_structure(to, thermo::LiquidIcePotentialTemperatureThermodynamics) =
+    LiquidIcePotentialTemperatureThermodynamics(adapt(to, thermo.potential_temperature_density),
                                        adapt(to, thermo.potential_temperature))
 
-function fill_halo_regions!(thermo::PotentialTemperatureThermodynamics)
+function fill_halo_regions!(thermo::LiquidIcePotentialTemperatureThermodynamics)
     fill_halo_regions!(thermo.potential_temperature_density)
     fill_halo_regions!(thermo.potential_temperature)
     return nothing
 end
 
-const APTF = AnelasticFormulation{<:PotentialTemperatureThermodynamics}
+const APTF = AnelasticFormulation{<:LiquidIcePotentialTemperatureThermodynamics}
 prognostic_field_names(formulation::APTF) = tuple(:ρθ)
 additional_field_names(formulation::APTF) = tuple(:θ)
 thermodynamic_density_name(::APTF) = :ρθ
 fields(formulation::APTF) = (; θ=formulation.thermodynamics.potential_temperature)
 prognostic_fields(formulation::APTF) = (; ρθ=formulation.thermodynamics.potential_temperature_density)
 
-function materialize_thermodynamics(::Val{:PotentialTemperature}, grid, boundary_conditions)
+function materialize_thermodynamics(::Val{:LiquidIcePotentialTemperature}, grid, boundary_conditions)
     potential_temperature_density = CenterField(grid, boundary_conditions=boundary_conditions.ρθ)
     potential_temperature = CenterField(grid) # θ = ρθ / ρᵣ (diagnostic)
-    return PotentialTemperatureThermodynamics(potential_temperature_density, potential_temperature)
+    return LiquidIcePotentialTemperatureThermodynamics(potential_temperature_density, potential_temperature)
 end
 
 function compute_auxiliary_thermodynamic_variables!(formulation::APTF, i, j, k, grid)
@@ -62,14 +62,14 @@ function collect_prognostic_fields(formulation::APTF,
     return merge(momentum, thermodynamic_variables, microphysical_fields, tracers)
 end
 
-potential_temperature_density(thermo::PotentialTemperatureThermodynamics) = thermo.potential_temperature_density
-potential_temperature(thermo::PotentialTemperatureThermodynamics) = thermo.potential_temperature
-energy_density(::PotentialTemperatureThermodynamics) = nothing
-specific_energy(::PotentialTemperatureThermodynamics) = nothing
+potential_temperature_density(thermo::LiquidIcePotentialTemperatureThermodynamics) = thermo.potential_temperature_density
+potential_temperature(thermo::LiquidIcePotentialTemperatureThermodynamics) = thermo.potential_temperature
+energy_density(::LiquidIcePotentialTemperatureThermodynamics) = nothing
+specific_energy(::LiquidIcePotentialTemperatureThermodynamics) = nothing
 
 const PotentialTemperatureAnelasticModel = AtmosphereModel{<:APTF}
 
-function compute_thermodynamic_tendency!(model::PotentialTemperatureAnelasticModel, common_args)
+function compute_thermodynamic_tendency!(model::LiquidIcePotentialTemperatureAnelasticModel, common_args)
     grid = model.grid
     arch = grid.architecture
 
