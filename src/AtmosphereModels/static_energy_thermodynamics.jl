@@ -76,6 +76,7 @@ function compute_thermodynamic_tendency!(model::StaticEnergyAnelasticModel, comm
     ρe_args = (
         Val(1),
         model.forcing.ρe,
+        model.advection.ρe,
         common_args...,
         model.temperature)
 

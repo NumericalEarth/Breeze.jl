@@ -76,6 +76,7 @@ function compute_thermodynamic_tendency!(model::PotentialTemperatureAnelasticMod
     ρθ_args = (
         Val(1),
         model.forcing.ρθ,
+        model.advection.ρθ,
         common_args...,
         model.temperature)
 
@@ -87,10 +88,10 @@ end
 @inline function potential_temperature_tendency(i, j, k, grid,
                                                 id,
                                                 ρθ_forcing,
+                                                advection,
                                                 formulation,
                                                 constants,
                                                 specific_moisture,
-                                                advection,
                                                 velocities,
                                                 microphysics,
                                                 microphysical_fields,
