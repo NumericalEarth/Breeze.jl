@@ -35,32 +35,31 @@ grid = RectilinearGrid(GPU(),
 
 
 # Problem parameters and initial conditions
-p_ref, θ_ref = 100000, 300
+pᵣ, θᵣ = 100000, 300
 thermo = ThermodynamicConstants()
-reference_state = ReferenceState(grid, thermo, base_pressure=p_ref, potential_temperature=θ_ref)
+reference_state = ReferenceState(grid, thermo, base_pressure=pᵣ, potential_temperature=θᵣ)
 formulation = AnelasticFormulation(reference_state)
 
-θₜᵣ = 343
-zₜᵣ = 12000
-q₀ = 14e-3
-Tₜᵣ = 213
-zₛ = 5kilometers
-uₛ = 30
-u_c = 15 
+θₜᵣ = 343           # tropopause potential temperature [K]
+zₜᵣ = 12000         # tropopause height [m]
+Tₜᵣ = 213           # tropopause temperature [K]
+zₛ = 5kilometers    # shear layer height [m]
+uₛ = 30             # shear parameter 1 [m/s]
+u_c = 15            # shear parameter 2 [m/s]
 g = thermo.gravitational_acceleration
 cᵖᵈ = thermo.dry_air.heat_capacity
 Rᵈ = dry_air_gas_constant(thermo)
-θᵢ₀(x, y, z) = (θ_ref + (θₜᵣ-θ_ref) * (z / zₜᵣ)^(5/4)) * (z <= zₜᵣ) + θₜᵣ * exp(g/(cᵖᵈ*Tₜᵣ) * (z - zₜᵣ)) * (z > zₜᵣ)
+θᵢ₀(x, y, z) = (θᵣ + (θₜᵣ-θᵣ) * (z / zₜᵣ)^(5/4)) * (z <= zₜᵣ) + θₜᵣ * exp(g/(cᵖᵈ*Tₜᵣ) * (z - zₜᵣ)) * (z > zₜᵣ)
 RHᵢ(z) = (1 - 3/4 * (z / zₜᵣ)^(5/4)) * (z <= zₜᵣ) + 1/4 * (z > zₜᵣ)
 uᵢ(x, y, z) = (uₛ*(z/zₛ)- u_c) * (z < (zₛ-1000))  + ((-4/5 + 3 *(z/zₛ) - 5/4 *(z/zₛ)^2) * uₛ - u_c) * (abs(z - zₛ) < 1000) + (uₛ - u_c) * (z > (zₛ+1000))
 
 # Warm bubble potential temperature perturbation (Eq. 17–18)
-Δθ = 3           # K amplitude
-r_h = 10kilometers
-r_z = 1500       # m vertical radius
-z_c = 1500       # m bubble center height
-x_c = Lx / 2
-y_c = Ly / 2
+Δθ = 3              # perturbation amplitude [K]
+r_h = 10kilometers  # bubble horizontal radius [m]
+r_z = 1500          # bubble vertical radius [m]
+z_c = 1500          # bubble center height [m]
+x_c = Lx / 2        # bubble center x-coordinate [m]
+y_c = Ly / 2        # bubble center y-coordinate [m]
 
 function θᵢ(x, y, z)
     θ_base = θᵢ₀(x, y, z)
@@ -111,6 +110,7 @@ function progress(sim)
     qᵛ = model.microphysical_fields.qᵛ
     qᶜˡ = model.microphysical_fields.qᶜˡ
     qᶜⁱ = model.microphysical_fields.qᶜⁱ
+
     ρe = energy_density(sim.model)
     ρemean = mean(ρe)
     msg = @sprintf("Iter: %d, t: %s, Δt: %s, mean(ρe): %.6e J/kg, max|u|: %.5f m/s, max w: %.5f m/s, min w: %.5f m/s",
@@ -130,10 +130,22 @@ outputs = merge(model.velocities, model.tracers, (; θ, qᶜˡ, qᶜⁱ, qᵛ))
 filename = "supercell.jld2"
 
 ow = JLD2Writer(model, outputs; filename,
-                schedule = TimeInterval(5minutes),
+                schedule = TimeInterval(1minutes),
                 overwrite_existing = true)
 
 
 simulation.output_writers[:jld2] = ow
 
-#run!(simulation)
+run!(simulation)
+
+using CairoMakie
+wt  = FieldTimeSeries(filename, "w")
+
+times = wt.times
+max_w = [maximum(wt[n]) for n in 1:length(times)]
+
+fig = Figure()
+ax = Axis(fig[1, 1], xlabel="Time [s]", ylabel="Max w [m/s]", title="Maximum Vertical Velocity", xticks = 0:900:maximum(times))
+lines!(ax, times, max_w)
+
+save("max_w_timeseries.png", fig)
