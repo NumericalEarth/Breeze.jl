@@ -25,13 +25,13 @@ Oceananigans `qᶜ` is the kinematic tracer flux.
 #####
 
 @inline function ρ_bᶜᶜᶜ(i, j, k, grid,
-                                  formulation::AnelasticFormulation,
-                                  reference_density,
-                                  temperature,
-                                  specific_moisture,
-                                  microphysics,
-                                  microphysical_fields,
-                                  constants)
+                        formulation::AnelasticFormulation,
+                        reference_density,
+                        temperature,
+                        specific_moisture,
+                        microphysics,
+                        microphysical_fields,
+                        constants)
 
     @inbounds begin
         qᵗ = specific_moisture[i, j, k]
@@ -44,20 +44,17 @@ Oceananigans `qᶜ` is the kinematic tracer flux.
     Rᵐ = mixture_gas_constant(q, constants)
     ρ = pᵣ / (Rᵐ * T)
     g = constants.gravitational_acceleration
+    ρ′ = ρ - ρᵣ
 
-    return - g * (ρ - ρᵣ)
+    return - g * ρ′
 end
 
-@inline ρ_bᶜᶜᶠ(i, j, k, grid, args...) = ℑzᵃᵃᶠ(i, j, k, grid, ρ_bᶜᶜᶜ, args...)   
+@inline ρ_bᶜᶜᶠ(i, j, k, grid, args...) = ℑzᵃᵃᶠ(i, j, k, grid, ρ_bᶜᶜᶜ, args...)
 
 @inline function ρ_w_bᶜᶜᶠ(i, j, k, grid, w, args...)
     ρ_b = ρ_bᶜᶜᶠ(i, j, k, grid, args...)
     return @inbounds ρ_b * w[i, j, k]
 end
-
-# Note: these are unused currently
-hydrostatic_pressure_gradient_x(i, j, k, grid, pₕ′) = ∂xᶠᶜᶜ(i, j, k, grid, pₕ′)
-hydrostatic_pressure_gradient_y(i, j, k, grid, pₕ′) = ∂yᶜᶠᶜ(i, j, k, grid, pₕ′)
 
 @inline function x_momentum_tendency(i, j, k, grid,
                                      reference_density,
@@ -126,10 +123,10 @@ end
                                  id,
                                  name,
                                  c_forcing,
+                                 advection,
                                  formulation,
                                  constants,
                                  specific_moisture,
-                                 advection,
                                  velocities,
                                  microphysics,
                                  microphysical_fields,
