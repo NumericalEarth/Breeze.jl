@@ -17,7 +17,6 @@ import Breeze: Breeze
 const BreezeCloudMicrophysicsExt = Base.get_extension(Breeze, :BreezeCloudMicrophysicsExt)
 const BreezeOneMomentCloudMicrophysics  = BreezeCloudMicrophysicsExt.OneMomentCloudMicrophysics
 
-
 # Supercell simulation
 # Reference:
 # Klemp et al. (2015): "Idealized global nonhydrostatic atmospheric test cases on a reduced-radius sphere"
@@ -137,4 +136,4 @@ ow = JLD2Writer(model, outputs; filename,
 
 simulation.output_writers[:jld2] = ow
 
-run!(simulation)
+#run!(simulation)

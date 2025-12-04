@@ -131,17 +131,17 @@ function OneMomentCloudMicrophysics(FT::DataType = Oceananigans.defaults.FloatTy
     return BulkMicrophysics(SaturationAdjustment(FT), categories)
 end
 
-prognostic_field_names(::WP1M) = tuple(:ρqʳ)
-prognostic_field_names(::MP1M) = (:ρqʳ, :ρqˢ)
+prognostic_field_names(::WP1M) = tuple(:qʳ)
+prognostic_field_names(::MP1M) = (:qʳ, :qˢ)
 
 function materialize_microphysical_fields(bμp::WP1M, grid, bcs)
-    names = (:qᵛ, :qᶜˡ, :ρqʳ)
+    names = (:qᵛ, :qᶜˡ, :qʳ)
     fields = center_field_tuple(grid, names...)
     return NamedTuple{names}(fields)
 end
 
 function materialize_microphysical_fields(bμp::MP1M, grid, bcs)
-    names = (:qᵛ, :qᶜˡ, :qᶜⁱ, :ρqʳ, :ρqˢ)
+    names = (:qᵛ, :qᶜˡ, :qᶜⁱ, :qʳ, :qˢ)
     fields = center_field_tuple(grid, names...)
     return NamedTuple{names}(fields)
 end
@@ -157,7 +157,7 @@ end
     qˡ = 𝒰.moisture_mass_fractions.liquid
 
     @inbounds begin
-        qʳ = μ.ρqʳ[i, j, k] / ρ
+        qʳ = μ.qʳ[i, j, k]
         μ.qᵛ[i, j, k] = qᵛ
         μ.qˡ[i, j, k] = qʳ + qˡ
     end
@@ -171,8 +171,8 @@ end
     qⁱ = 𝒰.moisture_mass_fractions.ice
 
     @inbounds begin
-        qʳ = μ.ρqʳ[i, j, k] / ρ
-        qˢ = μ.ρqˢ[i, j, k] / ρ
+        qʳ = μ.qʳ[i, j, k]
+        qˢ = μ.qˢ[i, j, k]
         μ.qᵛ[i, j, k] = qᵛ
         μ.qᶜˡ[i, j, k] = qʳ + qˡ
         μ.qᶜⁱ[i, j, k] = qˢ + qⁱ
@@ -186,8 +186,8 @@ end
 
 @inline function compute_moisture_fractions(i, j, k, grid, bμp::MP1M, ρ, qᵗ, μ)
     @inbounds begin
-        qʳ = μ.ρqʳ[i, j, k] / ρ
-        qˢ = μ.ρqˢ[i, j, k] / ρ
+        qʳ = μ.qʳ[i, j, k]
+        qˢ = μ.qˢ[i, j, k]
         qᶜˡ = μ.qᶜˡ[i, j, k]
         qᶜⁱ = μ.qᶜⁱ[i, j, k]
         qᵛ = μ.qᵛ[i, j, k]
