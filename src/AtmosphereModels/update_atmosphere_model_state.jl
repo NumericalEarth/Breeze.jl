@@ -175,7 +175,7 @@ function compute_tendencies!(model::AnelasticModel)
 
     momentum_args = (
         model.formulation.reference_state.density,
-        model.advection,
+        model.advection.momentum,
         model.velocities,
         model.closure,
         model.closure_fields,
@@ -209,7 +209,6 @@ function compute_tendencies!(model::AnelasticModel)
         model.thermodynamic_constants,
         specific_energy,
         model.specific_moisture,
-        model.advection,
         model.velocities,
         model.microphysics,
         model.microphysical_fields,
@@ -225,6 +224,7 @@ function compute_tendencies!(model::AnelasticModel)
     ρe_args = (
         Val(1),
         model.forcing.ρe,
+        model.advection.ρe,
         common_args...,
         model.temperature)
 
@@ -240,6 +240,7 @@ function compute_tendencies!(model::AnelasticModel)
         Val(2),
         Val(:ρqᵗ),
         model.forcing.ρqᵗ,
+        model.advection.ρqᵗ,
         common_args...)
 
     Gρqᵗ = model.timestepper.Gⁿ.ρqᵗ
@@ -257,6 +258,7 @@ function compute_tendencies!(model::AnelasticModel)
             Val(i + 2),
             Val(name),
             model.forcing[name],
+            model.advection[name],
             common_args...)
 
         Gρc = getproperty(model.timestepper.Gⁿ, name)
