@@ -8,17 +8,14 @@ using Test
     constants = ThermodynamicConstants()
     reference_state = ReferenceState(grid, constants)
 
-    for thermo_name in (:PotentialTemperature, :StaticEnergy)
-        @testset "Time-stepping AtmosphereModel with $thermo_name thermodynamics" begin
-            formulation = AnelasticFormulation(reference_state, thermodynamics=thermo_name)
-            model = AtmosphereModel(grid; thermodynamic_constants=constants, formulation)
-            thermo_type = eval(Symbol(thermo_name, :Thermodynamics))
-            @test model.formulation.thermodynamics isa thermo_type
+    @testset "Time-stepping AtmosphereModel with $thermo_name thermodynamics" for thermo_name in (:PotentialTemperature, :StaticEnergy)
+        formulation = AnelasticFormulation(reference_state, thermodynamics=thermo_name)
+        model = AtmosphereModel(grid; thermodynamic_constants=constants, formulation)
+        thermo_type = eval(Symbol(thermo_name, :Thermodynamics))
+        @test model.formulation.thermodynamics isa thermo_type
 
-            θ₀ = model.formulation.reference_state.potential_temperature
-            set!(model; θ=θ₀)
-            time_step!(model, 1)
-            @test true
-        end
+        θ₀ = model.formulation.reference_state.potential_temperature
+        set!(model; θ=θ₀)
+        time_step!(model, 1)
     end
 end
