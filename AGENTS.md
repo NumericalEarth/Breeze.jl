@@ -58,6 +58,8 @@ Breeze interfaces with ClimaOcean for coupled atmosphere-ocean simulations.
     * Variables should be declared `const` _only when necessary_, and not otherwise. This helps interpret the meaning and usage of variables. Do not overuse `const`.
   - `TitleCase` style is reserved for types, type aliases, and constructors.
   - `snake_case` style should be used for functions and variables (instances of types)
+  - "Number variables" (`Nx`, `Ny`) should start with capital `N`. For number of time steps use `Nt`.
+    Spatial indices are `i, j, k` and time index is `n`. 
   
 3. **Import style**
   - Use different style for source code versus user scripts:
