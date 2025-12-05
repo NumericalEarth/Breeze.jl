@@ -25,7 +25,7 @@ export
     BulkMicrophysics,
     static_energy_density,
     static_energy,
-    static_energy,
+    total_energy,
     potential_temperature_density,
     potential_temperature
 

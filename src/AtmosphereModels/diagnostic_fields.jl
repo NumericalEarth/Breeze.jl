@@ -83,9 +83,9 @@ function (d::LiquidIcePotentialTemperatureKernelFunction)(i, j, k, grid)
 
     θ = (T - (ℒˡᵣ * qˡ + ℒⁱᵣ * qⁱ) / cᵖᵐ) / Π
 
-    if d.flavor isa Specific()
+    if d.flavor isa Specific
         return θ
-    elseif d.flavor isa Density()
+    elseif d.flavor isa Density
         return ρᵣ * θ
     end
 end

@@ -3,11 +3,11 @@ using ..Thermodynamics: Thermodynamics, ThermodynamicConstants, ReferenceState
 using Oceananigans: AbstractModel, Center, CenterField, Clock, Field
 using Oceananigans: Centered, XFaceField, YFaceField, ZFaceField
 using Oceananigans.Advection: adapt_advection_order
+using Oceananigans.AbstractOperations: @at
 using Oceananigans.Forcings: materialize_forcing
 using Oceananigans.BoundaryConditions: FieldBoundaryConditions, regularize_field_boundary_conditions
 using Oceananigans.Grids: ZDirection
 using Oceananigans.Models: validate_model_halo, validate_tracer_advection
-import Oceananigans.Models.HydrostaticFreeSurfaceModels: validate_momentum_advection
 using Oceananigans.Solvers: FourierTridiagonalPoissonSolver
 using Oceananigans.TimeSteppers: TimeStepper
 using Oceananigans.TurbulenceClosures: implicit_diffusion_solver, time_discretization, build_closure_fields
@@ -15,6 +15,7 @@ using Oceananigans.Utils: launch!, prettytime, prettykeys, with_tracers
 
 import Oceananigans: fields, prognostic_fields
 import Oceananigans.Advection: cell_advection_timescale
+import Oceananigans.Models.HydrostaticFreeSurfaceModels: validate_momentum_advection
 
 struct DefaultValue end
 
@@ -349,3 +350,10 @@ Return an `AbstractField` representing potential temperature `θ`
 for `model`.
 """
 function potential_temperature end
+
+function total_energy(model)
+    u, v, w = model.velocities
+    k = @at (Center, Center, Center) (u^2 + v^2 + w^2) / 2 |> Field
+    e = static_energy(model) |> Field
+    return k + e
+end

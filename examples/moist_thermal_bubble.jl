@@ -24,8 +24,9 @@ grid = RectilinearGrid(CPU();
 
 thermodynamic_constants = ThermodynamicConstants()
 reference_state = ReferenceState(grid, thermodynamic_constants, base_pressure=1e5, potential_temperature=300)
-formulation = AnelasticFormulation(reference_state, thermodynamics=:LiquidIcePotentialTemperature)
-advection = WENO(order=9)
+#formulation = AnelasticFormulation(reference_state, thermodynamics=:LiquidIcePotentialTemperature)
+formulation = AnelasticFormulation(reference_state, thermodynamics=:StaticEnergy)
+advection = Centered(order=2) #WENO(order=9)
 model = AtmosphereModel(grid; formulation, thermodynamic_constants, advection)
 
 # ## Potential temperature perturbation
@@ -52,6 +53,8 @@ set!(model, θ=θᵢ)
 # Plot the initial potential temperature to visualize the dry thermal bubble.
 
 θ = potential_temperature(model)
+E = total_energy(model)
+∫E = Integral(E) |> Field
 
 fig = Figure()
 ax = Axis(fig[1, 1], aspect=2, xlabel="x (m)", ylabel="z (m)", title="Initial potential temperature θ (K)")
@@ -68,8 +71,8 @@ conjure_time_step_wizard!(simulation, cfl=0.7)
 function progress(sim)
     u, v, w = sim.model.velocities
 
-    msg = @sprintf("Iter: % 4d, t: % 14s, Δt: % 14s, extrema(θ): (%.2f, %.2f) K, max|w|: %.2f m/s",
-                   iteration(sim), prettytime(sim), prettytime(sim.Δt), extrema(θ)..., maximum(abs, w))
+    msg = @sprintf("Iter: % 4d, t: % 14s, Δt: % 14s, ∫E: %.8e J, extrema(θ): (%.2f, %.2f) K, max|w|: %.2f m/s",
+                   iteration(sim), prettytime(sim), prettytime(sim.Δt), ∫E[], extrema(θ)..., maximum(abs, w))
 
     @info msg
     return nothing
@@ -183,13 +186,18 @@ set!(moist_model, θ=θᵐ)
 moist_simulation = Simulation(moist_model; Δt=2, stop_time=30minutes)
 conjure_time_step_wizard!(moist_simulation, cfl=0.7)
 
+E = total_energy(moist_model)
+∫E = Integral(E) |> Field
+θ = potential_temperature(moist_model)
+
 function progress_moist(sim)
-    θ = potential_temperature(sim.model)
+    compute!(∫E)
     ρqᵗ = sim.model.moisture_density
     u, v, w = sim.model.velocities
-    
-    msg = @sprintf("Iter: % 4d, t: % 14s, Δt: % 14s, extrema(θ): (%.2f, %.2f) K \n",
-                   iteration(sim), prettytime(sim), prettytime(sim.Δt), extrema(θ)...)
+
+    msg = @sprintf("Iter: % 4d, t: % 14s, Δt: % 14s, ∫E: %.8e J, extrema(θ): (%.2f, %.2f) K \n",
+                   iteration(sim), prettytime(sim), prettytime(sim.Δt), ∫E[], extrema(θ)...)
+
     msg *= @sprintf("   extrema(qᵗ): (%.2e, %.2e), max(qˡ): %.2e, max|w|: %.2f m/s, mean(qᵗ): %.2e",
                     extrema(ρqᵗ)..., maximum(qˡ), maximum(abs, w), mean(ρqᵗ))
 
