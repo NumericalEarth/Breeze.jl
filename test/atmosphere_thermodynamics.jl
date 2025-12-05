@@ -3,7 +3,7 @@ using Test
 
 using Breeze.Thermodynamics:
     MoistureMassFractions,
-    MoistStaticEnergyState,
+    StaticEnergyState,
     temperature,
     mixture_heat_capacity
 
@@ -17,7 +17,7 @@ using Breeze.Thermodynamics:
     @test q★ > 0
 end
 
-@testset "MoistStaticEnergyState [$FT]" for FT in (Float32, Float64)
+@testset "StaticEnergyState [$FT]" for FT in (Float32, Float64)
     T = FT(253.15)
     p = FT(101325)
     z = FT(1000)
@@ -35,7 +35,7 @@ end
         e = cᵖᵐ * T + g * z - ℒˡᵣ * qˡ - ℒⁱᵣ * qⁱ
 
         # Test with saturation adjustment
-        𝒰 = MoistStaticEnergyState(e, q, z, p)
+        𝒰 = StaticEnergyState(e, q, z, p)
         T★ = temperature(𝒰, thermo)
         @test T★ ≈ T
     end

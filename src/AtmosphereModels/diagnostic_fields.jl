@@ -16,7 +16,7 @@ struct SaturationSpecificHumidityKernelFunction{R, T, μ, M, MF, TH}
     microphysics :: μ
     microphysical_fields :: M
     specific_moisture :: MF
-    thermodynamics :: TH
+    thermodynamic_constants :: TH
 end
 
 Adapt.adapt_structure(to, k::SaturationSpecificHumidityKernelFunction) =
@@ -25,7 +25,7 @@ Adapt.adapt_structure(to, k::SaturationSpecificHumidityKernelFunction) =
                                              adapt(to, k.microphysics),
                                              adapt(to, k.microphysical_fields),
                                              adapt(to, k.specific_moisture),
-                                             adapt(to, k.thermodynamics))
+                                             adapt(to, k.thermodynamic_constants))
 
 const C = Center
 
@@ -43,7 +43,7 @@ function SaturationSpecificHumidityField(model)
                                                     model.microphysics,
                                                     model.microphysical_fields,
                                                     model.specific_moisture,
-                                                    model.thermodynamics)
+                                                    model.thermodynamic_constants)
 
     op = KernelFunctionOperation{Center, Center, Center}(func, model.grid)
 
@@ -58,8 +58,8 @@ function (d::SaturationSpecificHumidityKernelFunction)(i, j, k, grid)
         ρᵣ = d.reference_state.density[i, j, k]
     end
     q = compute_moisture_fractions(i, j, k, grid, d.microphysics, ρᵣ, qᵗ, d.microphysical_fields)
-    ρ = Thermodynamics.density(pᵣ, T, q, d.thermodynamics)
-    return Thermodynamics.saturation_specific_humidity(T, ρ, d.thermodynamics, d.thermodynamics.liquid)
+    ρ = Thermodynamics.density(pᵣ, T, q, d.thermodynamic_constants)
+    return Thermodynamics.saturation_specific_humidity(T, ρ, d.thermodynamic_constants, d.thermodynamic_constants.liquid)
 end
 
 """
@@ -75,7 +75,7 @@ struct PotentialTemperatureKernelFunction{R, μ, M, MF, TMP, TH}
     microphysical_fields :: M
     specific_moisture :: MF
     temperature :: TMP
-    thermodynamics :: TH
+    thermodynamic_constants :: TH
 end
 
 Adapt.adapt_structure(to, k::PotentialTemperatureKernelFunction) =
@@ -84,7 +84,7 @@ Adapt.adapt_structure(to, k::PotentialTemperatureKernelFunction) =
                                        adapt(to, k.microphysical_fields),
                                        adapt(to, k.specific_moisture),
                                        adapt(to, k.temperature),
-                                       adapt(to, k.thermodynamics))
+                                       adapt(to, k.thermodynamic_constants))
 
 const PotentialTemperature = KernelFunctionOperation{Center, Center, Center, <:Any, <:Any, <:PotentialTemperatureKernelFunction}
 const PotentialTemperatureField = Field{Center, Center, Center, <:PotentialTemperature}
@@ -101,7 +101,7 @@ function PotentialTemperature(model)
                                               model.microphysical_fields,
                                               model.specific_moisture,
                                               model.temperature,
-                                              model.thermodynamics)
+                                              model.thermodynamic_constants)
     return KernelFunctionOperation{Center, Center, Center}(func, grid)
 end
 
@@ -122,12 +122,12 @@ function (d::PotentialTemperatureKernelFunction)(i, j, k, grid)
     end
 
     q = compute_moisture_fractions(i, j, k, grid, d.microphysics, ρᵣ, qᵗ, d.microphysical_fields)
-    Rᵐ = Thermodynamics.mixture_gas_constant(q, d.thermodynamics)
-    cᵖᵐ = Thermodynamics.mixture_heat_capacity(q, d.thermodynamics)
+    Rᵐ = Thermodynamics.mixture_gas_constant(q, d.thermodynamic_constants)
+    cᵖᵐ = Thermodynamics.mixture_heat_capacity(q, d.thermodynamic_constants)
     Π = (pᵣ / p₀)^(Rᵐ / cᵖᵐ)
 
-    ℒˡᵣ = d.thermodynamics.liquid.reference_latent_heat
-    ℒⁱᵣ = d.thermodynamics.ice.reference_latent_heat
+    ℒˡᵣ = d.thermodynamic_constants.liquid.reference_latent_heat
+    ℒⁱᵣ = d.thermodynamic_constants.ice.reference_latent_heat
     qˡ = q.liquid
     qⁱ = q.ice
 

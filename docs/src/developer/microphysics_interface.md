@@ -87,21 +87,21 @@ using Breeze.Thermodynamics:
     PlanarLiquidSurface,
     PlanarIceSurface
 
-@inline function microphysical_tendency(i, j, k, grid, em::ExplicitMicrophysics, ::Val{:ρqˡ}, μ, 𝒰, thermo)
+@inline function microphysical_tendency(i, j, k, grid, em::ExplicitMicrophysics, ::Val{:ρqˡ}, μ, 𝒰, constants)
     ρ = 1.2 # density
-    T = temperature(𝒰, thermo)
-    q⁺ˡ = saturation_specific_humidity(T, ρ, thermo, PlanarLiquidSurface())
+    T = temperature(𝒰, constants)
+    q⁺ˡ = saturation_specific_humidity(T, ρ, constants, PlanarLiquidSurface())
     τᵛˡ = em.vapor_to_liquid
     return @inbounds ρ * (μ.qᵛ[i, j, k] - q⁺ˡ) / τᵛˡ
 end
 
 @inline function microphysical_tendency(i, j, k, grid,
-    em::ExplicitMicrophysics, ::Val{:ρqⁱ}, μ, 𝒰, thermo)
+    em::ExplicitMicrophysics, ::Val{:ρqⁱ}, μ, 𝒰, constants)
 
     ρ = 1.2 # density
     q = MoistureMassFractions(qᵛ, qˡ, qⁱ)
-    T = temperature(𝒰, thermo)
-    q⁺ⁱ = saturation_specific_humidity(T, ρ, thermo, PlanarIceSurface())
+    T = temperature(𝒰, constants)
+    q⁺ⁱ = saturation_specific_humidity(T, ρ, constants, PlanarIceSurface())
     τᵛⁱ = em.vapor_to_ice
     qᵛ = @inbounds μ.qᵛ[i, j, k]
 
@@ -109,10 +109,10 @@ end
 end
 
 @inline function microphysical_tendency(i, j, k, grid,
-    em::ExplicitMicrophysics, ::Val{:ρqᵛ}, μ, 𝒰, thermo)
+    em::ExplicitMicrophysics, ::Val{:ρqᵛ}, μ, 𝒰, constants)
 
-    Sᵛˡ = microphysical_tendency(i, j, k, grid, em, Val(:ρvˡ), μ, 𝒰, thermo)
-    Sᵛⁱ = microphysical_tendency(i, j, k, grid, em, Val(:ρvⁱ), μ, 𝒰, thermo)
+    Sᵛˡ = microphysical_tendency(i, j, k, grid, em, Val(:ρvˡ), μ, 𝒰, constants)
+    Sᵛⁱ = microphysical_tendency(i, j, k, grid, em, Val(:ρvⁱ), μ, 𝒰, constants)
     return - Sᵛˡ - Sᵛⁱ
 end
 
@@ -129,7 +129,7 @@ import Breeze.AtmosphereModels:
     update_microphysical_fields!,
     compute_moisture_fraction
 
-@inline update_microphysical_fields!(μ, em::ExplicitMicrophysics, i, j, k, grid, ρ, state, thermo) =
+@inline update_microphysical_fields!(μ, em::ExplicitMicrophysics, i, j, k, grid, ρ, state, constants) =
     @inbounds μ.qᵛ[i, j, k] = state.moisture_mass_fractions.vapor
 
 @inline function compute_moisture_fractions(i, j, k, grid,
@@ -150,5 +150,5 @@ This is a fully prognostic  scheme, so there is no adjustment,
 ```@example microphysics_interface
 import Breeze.AtmosphereModels: maybe_adjust_thermodynamic_state
 
-@inline maybe_adjust_thermodynamic_state(state, ::ExplicitMicrophysics, μ, qᵗ, thermo) = state
+@inline maybe_adjust_thermodynamic_state(state, ::ExplicitMicrophysics, μ, qᵗ, constants) = state
 ```
