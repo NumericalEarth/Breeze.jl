@@ -65,7 +65,7 @@ julia> include("examples/cloudy_kelvin_helmholtz.jl")
 
 to get
 
-https://github.com/user-attachments/assets/010766c6-ed86-445f-87dc-e3b90c626589
+https://github.com/user-attachments/assets/f47ff268-b2e4-401c-a114-a0aaf0c7ead3
 
 Or cranking up the spatial resolution of the thermal bubble example to to `size = (1024, 512)` and running
 
@@ -75,4 +75,4 @@ julia> include("examples/thermal_bubble.jl")
 
 we get
 
-https://github.com/user-attachments/assets/aaca693c-57fe-46bf-8ff7-6646f6e5eebe
+https://github.com/user-attachments/assets/c9a0c9c3-c199-48b8-9850-f967bdcc4bed
