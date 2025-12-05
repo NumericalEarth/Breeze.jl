@@ -8,6 +8,7 @@ export
     LiquidIcePotentialTemperatureThermodynamics,
     energy_density,
     specific_energy,
+    static_energy,
     potential_temperature_density,
     potential_temperature
 

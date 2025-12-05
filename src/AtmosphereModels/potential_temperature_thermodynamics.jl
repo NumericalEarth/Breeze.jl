@@ -17,6 +17,7 @@ const APTF = AnelasticFormulation{<:LiquidIcePotentialTemperatureThermodynamics}
 prognostic_field_names(formulation::APTF) = tuple(:ρθ)
 additional_field_names(formulation::APTF) = tuple(:θ)
 thermodynamic_density_name(::APTF) = :ρθ
+thermodynamic_density(formulation::APTF) = formulation.thermodynamics.potential_temperature_density
 fields(formulation::APTF) = (; θ=formulation.thermodynamics.potential_temperature)
 prognostic_fields(formulation::APTF) = (; ρθ=formulation.thermodynamics.potential_temperature_density)
 
@@ -69,6 +70,7 @@ energy_density(::LiquidIcePotentialTemperatureThermodynamics) = nothing
 specific_energy(::LiquidIcePotentialTemperatureThermodynamics) = nothing
 
 const LiquidIcePotentialTemperatureAnelasticModel = AtmosphereModel{<:APTF}
+static_energy(model::LiquidIcePotentialTemperatureAnelasticModel) = StaticEnergyField(model)
 
 function compute_thermodynamic_tendency!(model::LiquidIcePotentialTemperatureAnelasticModel, common_args)
     grid = model.grid

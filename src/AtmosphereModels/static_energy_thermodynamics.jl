@@ -17,6 +17,7 @@ const ASEF = AnelasticFormulation{<:StaticEnergyThermodynamics}
 prognostic_field_names(formulation::ASEF) = tuple(:ρe)
 additional_field_names(formulation::ASEF) = tuple(:e)
 thermodynamic_density_name(::ASEF) = :ρe
+thermodynamic_density(formulation::ASEF) = formulation.thermodynamics.energy_density
 fields(formulation::ASEF) = (; e=formulation.thermodynamics.specific_energy)
 prognostic_fields(formulation::ASEF) = (; ρe=formulation.thermodynamics.energy_density)
 
@@ -67,6 +68,7 @@ specific_energy(thermo::StaticEnergyThermodynamics) = thermo.specific_energy
 
 const StaticEnergyAnelasticModel = AtmosphereModel{<:ASEF}
 potential_temperature(model::StaticEnergyAnelasticModel) = LiquidIcePotentialTemperatureField(model)
+static_energy(model::StaticEnergyAnelasticModel) = model.formulation.thermodynamics.specific_energy
 
 function compute_thermodynamic_tendency!(model::StaticEnergyAnelasticModel, common_args)
     grid = model.grid
