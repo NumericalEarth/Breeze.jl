@@ -17,7 +17,7 @@ Nz = 75
 x = y = (0, 6400)
 z = (0, 3000)
 
-arch = GPU() # if changing to CPU() remove the `using CUDA` line above
+arch = CPU() # if changing to CPU() remove the `using CUDA` line above
 stop_time = 6hours
 
 grid = RectilinearGrid(arch; x, y, z, 
@@ -32,7 +32,8 @@ u_bomex = AtmosphericProfilesLibrary.Bomex_u(FT)
 p₀, θ₀ = 101500, 299.1
 constants = ThermodynamicConstants()
 reference_state = ReferenceState(grid, constants, base_pressure=p₀, potential_temperature=θ₀)
-formulation = AnelasticFormulation(reference_state)
+# formulation = AnelasticFormulation(reference_state, thermodynamics=:LiquidIcePotentialTemperature)
+formulation = AnelasticFormulation(reference_state, thermodynamics=:StaticEnergy)
 
 q₀ = Breeze.Thermodynamics.MoistureMassFractions{eltype(grid)} |> zero
 ρ₀ = Breeze.Thermodynamics.density(p₀, θ₀, q₀, constants)

@@ -1,7 +1,7 @@
 using ..Thermodynamics:
     MoistureMassFractions,
     StaticEnergyState,
-    PotentialTemperatureState,
+    LiquidIcePotentialTemperatureState,
     ThermodynamicConstants,
     ReferenceState,
     mixture_gas_constant,

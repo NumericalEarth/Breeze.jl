@@ -5,7 +5,7 @@ using Test
 
 using Breeze.Thermodynamics:
     MoistureMassFractions,
-    PotentialTemperatureState,
+    LiquidIcePotentialTemperatureState,
     StaticEnergyState,
     exner_function,
     density,
@@ -344,7 +344,7 @@ end
     # Case 0: Absolute zero potential temperature returns zero temperature
     θ₀ = zero(FT)
     q₀ = MoistureMassFractions{FT} |> zero
-    𝒰₀ = PotentialTemperatureState(θ₀, q₀, p₀, pᵣ)
+    𝒰₀ = LiquidIcePotentialTemperatureState(θ₀, q₀, p₀, pᵣ)
     T₀ = compute_boussinesq_adjustment_temperature(𝒰₀, constants)
     @test T₀ == 0
 
@@ -352,7 +352,7 @@ end
     θ₁ = FT(300)
     qᵗ₁ = zero(FT)
     q₁ = MoistureMassFractions(qᵗ₁)
-    𝒰₁ = PotentialTemperatureState(θ₁, q₁, p₀, pᵣ)
+    𝒰₁ = LiquidIcePotentialTemperatureState(θ₁, q₁, p₀, pᵣ)
     Π₁ = exner_function(𝒰₁, constants)
     T_dry₁ = Π₁ * θ₁
 
@@ -362,7 +362,7 @@ end
     # Case 2: Unsaturated, humid but below saturation at dry temperature
     θ₂ = FT(300)
     q₂ = MoistureMassFractions{FT} |> zero
-    𝒰₂ = PotentialTemperatureState(θ₂, q₂, p₀, pᵣ)
+    𝒰₂ = LiquidIcePotentialTemperatureState(θ₂, q₂, p₀, pᵣ)
     Π₂ = exner_function(𝒰₂, constants)
     T_dry₂ = Π₂ * θ₂
 
@@ -382,7 +382,7 @@ end
     T₃ = θ̃ = FT(300)
     qᵗ = FT(0.025)
     q̃ = MoistureMassFractions(qᵗ)
-    𝒰 = PotentialTemperatureState(θ̃, q̃, p₀, pᵣ)
+    𝒰 = LiquidIcePotentialTemperatureState(θ̃, q̃, p₀, pᵣ)
     qᵛ⁺ = Breeze.MoistAirBuoyancies.adjustment_saturation_specific_humidity(T₃, 𝒰, constants)
     @test qᵗ > qᵛ⁺ # otherwise the test is wrong
 
@@ -393,7 +393,7 @@ end
     cᵖᵐ = mixture_heat_capacity(q₃, constants)
     ℒˡᵣ = constants.liquid.reference_latent_heat
     θ₃ = (T₃ - ℒˡᵣ / cᵖᵐ * qˡ) / Π₃
-    𝒰₃ = PotentialTemperatureState(θ₃, q₃, p₀, pᵣ)
+    𝒰₃ = LiquidIcePotentialTemperatureState(θ₃, q₃, p₀, pᵣ)
 
     T₃_solve = compute_boussinesq_adjustment_temperature(𝒰₃, constants)
     @test isapprox(T₃_solve, T₃; atol=atol)

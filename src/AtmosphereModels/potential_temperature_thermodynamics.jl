@@ -49,7 +49,7 @@ function diagnose_thermodynamic_state(i, j, k, grid, formulation::APTF,
 
     q = compute_moisture_fractions(i, j, k, grid, microphysics, ρᵣ, qᵗ, microphysical_fields)
 
-    return PotentialTemperatureState(θ, q, p₀, pᵣ)
+    return LiquidIcePotentialTemperatureState(θ, q, p₀, pᵣ)
 end
 
 function collect_prognostic_fields(formulation::APTF,
