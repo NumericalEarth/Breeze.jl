@@ -1,8 +1,9 @@
-# # Moist and dry thermal bubbles
+# # Dry and cloudy thermal bubbles
 #
 # This example sets up, runs, and visualizes simulations of "thermal bubbles"
 # (just circular regions of warm air) rising through a neutral background.
-# We run both a dry and a moist simulation, and compare the results.
+# We run both a dry simulation and a "cloudy" simulation. In the cloudy case,
+# we simulate a pocket of warm air rising in a saturated, condensate-laden environment.
 
 using Breeze
 using Oceananigans.Units
@@ -148,8 +149,10 @@ nothing #hide
 # following the methodology described by Bryan and Fritsch (2002). This simulation
 # includes moisture processes, where excess water vapor condenses to liquid water,
 # releasing latent heat that enhances the buoyancy of the rising bubble.
+# 
+# For pedagogical purposes, we build a new model with warm-phase saturation adjustment microphysics.
+# (We coudl have also used this model for the dry simulation):
 
-# Create a new model with warm-phase saturation adjustment microphysics
 microphysics = SaturationAdjustment(equilibrium=WarmPhaseEquilibrium())
 moist_model = AtmosphereModel(grid; formulation, thermodynamic_constants, advection, microphysics)
 
@@ -177,7 +180,7 @@ set!(moist_model, θ=θᵐ)
 
 # ## Simulation
 
-moist_simulation = Simulation(moist_model; Δt=2, stop_time=1000)
+moist_simulation = Simulation(moist_model; Δt=2, stop_time=30minutes)
 conjure_time_step_wizard!(moist_simulation, cfl=0.7)
 
 function progress_moist(sim)
@@ -190,8 +193,6 @@ function progress_moist(sim)
     msg *= @sprintf("   extrema(qᵗ): (%.2e, %.2e), max(qˡ): %.2e, max|w|: %.2f m/s, mean(qᵗ): %.2e",
                     extrema(ρqᵗ)..., maximum(qˡ), maximum(abs, w), mean(ρqᵗ))
 
-    
-
     @info msg
     return nothing
 end
@@ -202,7 +203,8 @@ add_callback!(moist_simulation, progress_moist, TimeInterval(100))
 u, v, w = moist_model.velocities
 qᵗ = moist_model.specific_moisture
 qˡ = moist_model.microphysical_fields.qˡ
-moist_outputs = (; θ, w, qᵗ, qˡ)
+qˡ′ = qˡ - Field(Average(qˡ, dims=1))
+moist_outputs = (; θ, w, qˡ′)
 
 moist_filename = "moist_thermal_bubble.jld2"
 moist_writer = JLD2Writer(moist_model, moist_outputs; filename=moist_filename,
@@ -217,21 +219,17 @@ fig = Figure(size=(1200, 600))
 
 axθ = Axis(fig[1, 2], aspect=2, xlabel="x (m)", ylabel="z (m)")
 axw = Axis(fig[1, 3], aspect=2, xlabel="x (m)", ylabel="z (m)")
-axt = Axis(fig[2, 2], aspect=2, xlabel="x (m)", ylabel="z (m)")
-axl = Axis(fig[2, 3], aspect=2, xlabel="x (m)", ylabel="z (m)")
+axl = Axis(fig[2, 2:3], aspect=2, xlabel="x (m)", ylabel="z (m)")
 
-qᵗ = moist_model.specific_moisture
 qˡ = moist_model.microphysical_fields.qˡ
 
 hmθ = heatmap!(axθ, θ)
 hmw = heatmap!(axw, w)
-hmqᵗ = heatmap!(axt, qᵗ)
-hmqˡ = heatmap!(axl, qˡ)
+hmqˡ = heatmap!(axl, qˡ′)
 
 t_str = @sprintf("t = %s", prettytime(moist_simulation.model.clock.time))
 Colorbar(fig[1, 1], hmθ, label = "θ (K) at $t_str")
 Colorbar(fig[1, 4], hmw, label = "w (m/s) at $t_str")
-Colorbar(fig[2, 1], hmqᵗ, label = "qᵗ (kg/kg) at $t_str")
 Colorbar(fig[2, 4], hmqˡ, label = "qˡ (kg/kg) at $t_str")
 
 fig
@@ -243,35 +241,29 @@ fig
 
 θt = FieldTimeSeries(moist_filename, "θ")
 wt = FieldTimeSeries(moist_filename, "w")
-qᵗt = FieldTimeSeries(moist_filename, "qᵗ")
-qˡt = FieldTimeSeries(moist_filename, "qˡ")
+qˡ′t = FieldTimeSeries(moist_filename, "qˡ′")
 
 times = θt.times
 fig = Figure(size = (1200, 800), fontsize = 12)
 axθ = Axis(fig[1, 2], aspect=2, xlabel="x (m)", ylabel="z (m)")
 axw = Axis(fig[1, 3], aspect=2, xlabel="x (m)", ylabel="z (m)")
-axt = Axis(fig[2, 2], aspect=2, xlabel="x (m)", ylabel="z (m)")
-axl = Axis(fig[2, 3], aspect=2, xlabel="x (m)", ylabel="z (m)")
+axl = Axis(fig[2, 2:3], aspect=2, xlabel="x (m)", ylabel="z (m)")
 
 θ_range = (minimum(θt), maximum(θt))
 w_range = maximum(abs, wt)
-qᵗ_range = (0, maximum(qᵗt) + 1e-6)
-qˡ_range = (0, maximum(qˡt) + 1e-6)
+qˡ′_range = (minimum(qˡ′t), maximum(qˡ′t))
 
 n = Observable(length(θt))
 θn = @lift θt[$n]
 wn = @lift wt[$n]
-qᵗn = @lift qᵗt[$n]
-qˡn = @lift qˡt[$n]
+qˡ′n = @lift qˡ′t[$n]
 
 hmθ = heatmap!(axθ, θn, colorrange = θ_range, colormap = :thermal)
 hmw = heatmap!(axw, wn, colorrange = (-w_range, w_range), colormap = :balance)
-hmt = heatmap!(axt, qᵗn, colorrange = qᵗ_range, colormap = :viridis)
-hml = heatmap!(axl, qˡn, colorrange = qˡ_range, colormap = :viridis)
+hml = heatmap!(axl, qˡ′n, colorrange = qˡ′_range, colormap = :balance)
 
 Colorbar(fig[1, 1], hmθ, label = "θ (K)", vertical = true)
 Colorbar(fig[1, 4], hmw, label = "w (m/s)", vertical = true)
-Colorbar(fig[2, 1], hmt, label = "qᵗ (kg/kg)", vertical = true)
 Colorbar(fig[2, 4], hml, label = "qˡ (kg/kg)", vertical = true)
 
 CairoMakie.record(fig, "moist_thermal_bubble.mp4", 1:length(θt), framerate = 12) do nn
