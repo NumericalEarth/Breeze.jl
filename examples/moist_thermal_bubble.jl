@@ -62,14 +62,13 @@ fig
 
 simulation = Simulation(model; Δt=2, stop_time=1000)
 conjure_time_step_wizard!(simulation, cfl=0.7)
+θ = potential_temperature(sim.model)
 
 function progress(sim)
-    θ = potential_temperature(sim.model)
     u, v, w = sim.model.velocities
 
-    msg = @sprintf("Iter: % 4d, t: % 14s, Δt: % 14s, extrema(θ): (%.2f, %.2f) K, max|u|: %.2f m/s, max|w|: %.2f m/s",
-                   iteration(sim), prettytime(sim), prettytime(sim.Δt), extrema(θ)...,
-                   maximum(abs, u), maximum(abs, w))
+    msg = @sprintf("Iter: % 4d, t: % 14s, Δt: % 14s, extrema(θ): (%.2f, %.2f) K, max|w|: %.2f m/s",
+                   iteration(sim), prettytime(sim), prettytime(sim.Δt), extrema(θ)..., maximum(abs, w))
 
     @info msg
     return nothing
