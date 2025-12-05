@@ -166,7 +166,12 @@ set!(moist_model, θ=θᵢ)
 # Compute saturation specific humidity using the diagnostic field
 using Breeze.Thermodynamics: dry_air_gas_constant, vapor_gas_constant
 
-qᵛ⁺ = SaturationSpecificHumidityField(moist_model, :total_moisture)
+qᵛ⁺ = SaturationSpecificHumidityField(moist_model, :equilibrium)
+@show maximum(qᵛ⁺)
+qᵗ = 0.025
+set!(moist_model.specific_moisture, qᵗ)
+compute!(qᵛ⁺)
+
 qᵛ = qᵛ⁺
 θᵈ = potential_temperature(moist_model) # note, current state is dry
 Rᵈ = dry_air_gas_constant(thermodynamic_constants)
@@ -174,7 +179,7 @@ Rᵛ = vapor_gas_constant(thermodynamic_constants)
 Rᵐ = Rᵈ * (1 - qᵛ) + Rᵛ * qᵛ
 θᵐ = θᵈ * Rᵈ / Rᵐ
 
-set!(moist_model, θ=θᵐ, qᵗ=qᵛ)
+set!(moist_model, θ=θᵐ, qᵗ=qᵗ)
 
 # ## Simulation
 
@@ -257,7 +262,7 @@ axl = Axis(fig[2, 3], aspect=2, xlabel="x (m)", ylabel="z (m)")
 θ_range = (minimum(θt), maximum(θt))
 w_range = maximum(abs, wt)
 qᵗ_range = (minimum(qᵗt), maximum(qᵗt))
-qˡ_range = (minimum(qˡt), maximum(qˡt))
+qˡ_range = (0, maximum(qˡt) + 1e-6)
 
 n = Observable(length(θt))
 θn = @lift θt[$n]
