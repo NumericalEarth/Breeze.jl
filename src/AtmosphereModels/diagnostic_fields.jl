@@ -124,13 +124,14 @@ function (d::StaticEnergyKernelFunction)(i, j, k, grid)
         T = d.temperature[i, j, k]
     end
 
+    q = compute_moisture_fractions(i, j, k, grid, d.microphysics, ρᵣ, qᵗ, d.microphysical_fields)
     cᵖᵐ = Thermodynamics.mixture_heat_capacity(q, d.thermodynamic_constants)
 
-    z = znode(i, j, k, grid, c, c, c)
     g = d.thermodynamic_constants.gravitational_acceleration
+    z = znode(i, j, k, grid, c, c, c)
+
     ℒˡᵣ = d.thermodynamic_constants.liquid.reference_latent_heat
     ℒⁱᵣ = d.thermodynamic_constants.ice.reference_latent_heat
-    q = compute_moisture_fractions(i, j, k, grid, d.microphysics, ρᵣ, qᵗ, d.microphysical_fields)
     qˡ = q.liquid
     qⁱ = q.ice
 
