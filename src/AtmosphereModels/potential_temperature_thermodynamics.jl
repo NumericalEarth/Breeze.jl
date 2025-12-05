@@ -69,8 +69,8 @@ const LIPTAM = LiquidIcePotentialTemperatureAnelasticModel
 
 potential_temperature_density(model::LIPTAM) = model.formulation.thermodynamics.potential_temperature_density
 potential_temperature(model::LIPTAM) = model.formulation.thermodynamics.potential_temperature
-static_energy(model::LIPTAM) = StaticEnergyField(model, :specific_energy)
-static_energy_density(model::LIPTAM) = StaticEnergyField(model, :energy_density)
+static_energy(model::LIPTAM) = StaticEnergyField(model, :specific)
+static_energy_density(model::LIPTAM) = StaticEnergyField(model, :energy)
 
 function compute_thermodynamic_tendency!(model::LiquidIcePotentialTemperatureAnelasticModel, common_args)
     grid = model.grid

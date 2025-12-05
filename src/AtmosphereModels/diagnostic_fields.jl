@@ -6,7 +6,7 @@ using Adapt: Adapt, adapt
 struct Specific end
 struct Density end
 
-struct LiquidIcePotentialTemperatureKernelFunction{R, μ, M, MF, TMP, TH}
+struct LiquidIcePotentialTemperatureKernelFunction{F, R, μ, M, MF, TMP, TH}
     flavor :: F
     reference_state :: R
     microphysics :: μ
