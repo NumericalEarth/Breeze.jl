@@ -10,8 +10,8 @@ using CairoMakie
 # Skamarock and Klemp (1994): "Efficiency and Accuracy of the Klemp-Wilhelmson Time-Splitting Technique"
 
 # Problem parameters: isothermal base state and mean wind
-P₀ = 101325                 # Pa
-θ₀ = 288                    # K - reference potential temperature
+p₀ = 100000                 # Pa
+θ₀ = 300                    # K - reference potential temperature
 U  = 20                     # m s^-1 (mean wind)
 N  = 0.01
 N² = N^2                    # Brunt–Väisälä frequency squared
@@ -31,7 +31,11 @@ grid = RectilinearGrid(CPU(),
 
                        
 # Atmosphere model setup
-model = AtmosphereModel(grid; advection = WENO(order=5))
+constants = ThermodynamicConstants()
+reference_state = ReferenceState(grid, constants, base_pressure=p₀, potential_temperature=θ₀)
+formulation = AnelasticFormulation(reference_state)
+
+model = AtmosphereModel(grid; formulation, advection = Centered(order=2))
 
 
 # Initial conditions and initialization
@@ -40,7 +44,7 @@ a = 5000                    # m   (perturbation half-width parameter)
 x_c = Lx / 3                # m   (perturbation center in x)
 
 # Background potential temperature profile (isothermal)
-g = model.thermodynamics.gravitational_acceleration
+g = model.thermodynamic_constants.gravitational_acceleration
 θ̄ᵦ(z) = θ₀ * exp(N² * z / g)
 # Save initial potential temperature without perturbation to compute anomaly later
 θᵢ₀ = Field{Center, Nothing, Center}(grid)
@@ -54,13 +58,13 @@ end
 
 set!(model, θ = θᵢ, u = U)
 
-Δt = 3 # seconds
+Δt = 6 # seconds
 stop_time = 3000
 simulation = Simulation(model; Δt, stop_time)
 
 
 function progress(sim)
-    ρe = sim.model.energy_density
+    ρe = sim.model.formulation.thermodynamics.energy_density
     u, v, w = sim.model.velocities
 
     ρemean = mean(ρe)
