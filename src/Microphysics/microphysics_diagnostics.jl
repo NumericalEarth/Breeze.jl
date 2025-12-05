@@ -16,7 +16,7 @@ struct SaturationSpecificHumidityKernelFunction{μ, FL, M, MF, T, R, TH}
     specific_moisture :: MF
     temperature :: T
     pressure :: R
-    thermodynamics :: TH
+    thermodynamic_constants :: TH
 end
 
 Adapt.adapt_structure(to, k::SaturationSpecificHumidityKernelFunction) =
@@ -67,8 +67,8 @@ end
 @inline function saturation_total_specific_moisture(T, p, constants, equil)
     surface = equilibrated_surface(equil, T)
     pᵛ⁺ = saturation_vapor_pressure(T, constants, surface)
-    Rᵈ = dry_air_gas_constant(thermo)
-    Rᵛ = vapor_gas_constant(thermo)
+    Rᵈ = dry_air_gas_constant(constants)
+    Rᵛ = vapor_gas_constant(constants)
     δᵈᵛ = Rᵈ / Rᵛ - 1
     return pᵛ⁺ / (p + δᵈᵛ * pᵛ⁺)
 end

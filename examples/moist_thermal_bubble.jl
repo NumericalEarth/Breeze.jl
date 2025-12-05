@@ -166,7 +166,7 @@ set!(moist_model, θ=θᵢ)
 # Compute saturation specific humidity using the diagnostic field
 using Breeze.Thermodynamics: dry_air_gas_constant, vapor_gas_constant
 
-qᵛ⁺ = SaturationSpecificHumidityField(moist_model, :equilibrium)
+qᵛ⁺ = SaturationSpecificHumidityField(moist_model, :total_moisture)
 qᵛ = qᵛ⁺
 θᵈ = potential_temperature(moist_model) # note, current state is dry
 Rᵈ = dry_air_gas_constant(thermodynamic_constants)
