@@ -68,7 +68,7 @@ potential_temperature(thermo::LiquidIcePotentialTemperatureThermodynamics) = the
 energy_density(::LiquidIcePotentialTemperatureThermodynamics) = nothing
 specific_energy(::LiquidIcePotentialTemperatureThermodynamics) = nothing
 
-const PotentialTemperatureAnelasticModel = AtmosphereModel{<:APTF}
+const LiquidIcePotentialTemperatureAnelasticModel = AtmosphereModel{<:APTF}
 
 function compute_thermodynamic_tendency!(model::LiquidIcePotentialTemperatureAnelasticModel, common_args)
     grid = model.grid

@@ -62,7 +62,7 @@ fig
 
 simulation = Simulation(model; Δt=2, stop_time=1000)
 conjure_time_step_wizard!(simulation, cfl=0.7)
-θ = potential_temperature(sim.model)
+θ = potential_temperature(model)
 
 function progress(sim)
     u, v, w = sim.model.velocities
