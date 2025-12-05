@@ -26,7 +26,7 @@ Adapt.adapt_structure(to, k::SaturationSpecificHumidityKernelFunction) =
                                              adapt(to, k.specific_moisture),
                                              adapt(to, k.temperature),
                                              adapt(to, k.pressure),
-                                             adapt(to, k.thermodynamics))
+                                             adapt(to, k.thermodynamic_constants))
 
 const C = Center
 const SaturationSpecificHumidity = KernelFunctionOperation{C, C, C, <:Any, <:Any, <:SaturationSpecificHumidityKernelFunction}
@@ -59,14 +59,14 @@ function SaturationSpecificHumidity(model, flavor_symbol=:prognostic)
                                                     model.specific_moisture,
                                                     model.temperature,
                                                     pressure,
-                                                    model.thermodynamics)
+                                                    model.thermodynamic_constants)
 
     return KernelFunctionOperation{Center, Center, Center}(func, model.grid)
 end
 
-@inline function saturation_total_specific_moisture(T, p, thermo, equil)
+@inline function saturation_total_specific_moisture(T, p, constants, equil)
     surface = equilibrated_surface(equil, T)
-    pᵛ⁺ = saturation_vapor_pressure(T, thermo, surface)
+    pᵛ⁺ = saturation_vapor_pressure(T, constants, surface)
     Rᵈ = dry_air_gas_constant(thermo)
     Rᵛ = vapor_gas_constant(thermo)
     δᵈᵛ = Rᵈ / Rᵛ - 1
@@ -81,22 +81,22 @@ function (d::AdjustmentSH)(i, j, k, grid)
         T = d.temperature[i, j, k]
     end
 
-    thermo = d.thermodynamics
+    constants = d.thermodynamic_constants
     equil = d.microphysics.equilibrium
 
     if d.flavor isa Prognostic
         qᵗ = @inbounds d.specific_moisture[i, j, k]
         q = compute_moisture_fractions(i, j, k, grid, d.microphysics, ρ, qᵗ, d.microphysical_fields)
-        ρ = density(p, T, q, thermo)
+        ρ = density(p, T, q, constants)
         surface = equilibrated_surface(equil, T)
-        return saturation_specific_humidity(T, ρ, thermo, surface)
+        return saturation_specific_humidity(T, ρ, constants, surface)
 
     elseif d.flavor isa Equilibrium
         qᵗ = @inbounds d.specific_moisture[i, j, k]
-        return equilibrium_saturation_specific_humidity(T, p, qᵗ, thermo, equil)
+        return equilibrium_saturation_specific_humidity(T, p, qᵗ, constants, equil)
 
     elseif d.flavor isa TotalMoisture
-        return saturation_total_specific_moisture(T, p, thermo, equil)
+        return saturation_total_specific_moisture(T, p, constants, equil)
 
     end
 end
