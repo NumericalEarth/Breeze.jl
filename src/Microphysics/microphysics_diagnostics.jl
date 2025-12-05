@@ -44,12 +44,7 @@ Return a field computing the specified flavor of *saturation specific humidity* 
 
 ### `:prognostic`
 
-Returns the *saturation specific humidity* corresponding to the `model`'s prognostic state
-
-```math
-qᵛ⁺ = \frac{p_{vs}(T, \ldots)}{p_r + (\frac{R_d}{R_v} - 1) p_{vs}(T, \ldots)}
-```
-
+Returns the *saturation specific humidity* corresponding to the `model`'s prognostic state.
 This is the same as the equilibrium saturation specific humidity for saturated conditions
 and a model that uses saturation adjustment microphysics.
 
