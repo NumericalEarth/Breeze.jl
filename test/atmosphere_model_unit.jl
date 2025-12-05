@@ -43,7 +43,7 @@ end
     set!(θᵢ, (x, y, z) -> θ₀ + rand())
     set!(model; θ=θᵢ)
 
-    θ_model = Breeze.AtmosphereModels.LiquidIcePotentialTemperatureField(model)
+    θ_model = potential_temperature(model) |> Field
     @test θ_model ≈ θᵢ
 end
 
@@ -63,7 +63,7 @@ end
     set!(model; θ=θ₀)
 
     # Check SaturationSpecificHumidityField matches direct thermodynamics
-    qᵛ⁺ = Breeze.AtmosphereModels.SaturationSpecificHumidityField(model)
+    qᵛ⁺ = SaturationSpecificHumidityField(model)
 
     # Sample mid-level cell
     _, _, Nz = size(grid)
