@@ -57,7 +57,7 @@ julia> using Pkg; Pkg.instantiate()
 Now we are ready to run any of the examples!
 
 For instance, by increasing the resolution of the cloudy Kelvin-Helmholtz instability
-to `Nx=1536` and `Nz=1024` and running
+to `Nx=1536` and `Nz=1024`, decrease the timestep to `Δt = 0.1`, and running
 
 ```julia
 julia> include("examples/cloudy_kelvin_helmholtz.jl")
