@@ -102,4 +102,4 @@ function (d::AdjustmentSH)(i, j, k, grid)
 end
 
 const SaturationSpecificHumidityField = Field{C, C, C, <:SaturationSpecificHumidity}
-SaturationSpecificHumidityField(model, flavor_symbol=:prognostic)) = Field(SaturationSpecificHumidity(model, flavor_symbol))
+SaturationSpecificHumidityField(model, flavor_symbol=:prognostic) = Field(SaturationSpecificHumidity(model, flavor_symbol))
