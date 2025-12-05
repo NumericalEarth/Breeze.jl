@@ -96,7 +96,7 @@ function MoistAirBuoyancy(grid;
 
     reference_state = ReferenceState(grid, thermodynamic_constants;
                                      base_pressure,
-                                     liquid_ice_potential_temperature = reference_potential_temperature)
+                                     potential_temperature = reference_potential_temperature)
 
     return MoistAirBuoyancy(reference_state, thermodynamic_constants)
 end
