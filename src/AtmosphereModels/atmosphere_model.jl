@@ -344,12 +344,12 @@ for `model`.
 function potential_temperature_density end
 
 """
-    potential_temperature(model::AtmosphereModel)
+    liquid_ice_potential_temperature(model::AtmosphereModel)
 
 Return an `AbstractField` representing potential temperature `θ`
 for `model`.
 """
-function potential_temperature end
+function liquid_ice_potential_temperature end
 
 function total_energy(model)
     u, v, w = model.velocities

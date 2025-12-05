@@ -120,7 +120,7 @@ U = Field(Average(model.velocities.u, dims=1))
 Ri = N^2 / ∂z(U)^2
 
 Qᵗ = Field(Average(model.specific_moisture, dims=1))
-θ = Field(Average(potential_temperature(model), dims=1))
+θ = Field(Average(liquid_ice_potential_temperature(model), dims=1))
 
 fig = Figure(size=(800, 500))
 
@@ -170,7 +170,7 @@ add_callback!(simulation, progress, TimeInterval(1minute))
 # the potential temperatures and the specific humidities (vapour, liquid, ice).
 u, v, w = model.velocities
 ξ = ∂z(u) - ∂x(w)
-θ = potential_temperature(model)
+θ = liquid_ice_potential_temperature(model)
 outputs = merge(model.velocities, model.microphysical_fields, (; ξ, θ))
 
 filename = "wave_clouds.jld2"

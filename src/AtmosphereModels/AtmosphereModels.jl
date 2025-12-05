@@ -10,7 +10,7 @@ export
     static_energy,
     total_energy,
     potential_temperature_density,
-    potential_temperature
+    liquid_ice_potential_temperature
 
 using DocStringExtensions: TYPEDSIGNATURES
 using Adapt: Adapt, adapt

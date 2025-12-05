@@ -64,7 +64,7 @@ function collect_prognostic_fields(formulation::ASEF,
 end
 
 const StaticEnergyAnelasticModel = AtmosphereModel{<:ASEF}
-potential_temperature(model::StaticEnergyAnelasticModel) = LiquidIcePotentialTemperature(model, :specific)
+liquid_ice_potential_temperature(model::StaticEnergyAnelasticModel) = LiquidIcePotentialTemperature(model, :specific)
 potential_temperature_density(model::StaticEnergyAnelasticModel) = LiquidIcePotentialTemperature(model, :density)
 static_energy(model::StaticEnergyAnelasticModel) = model.formulation.thermodynamics.specific_energy
 static_energy_density(model::StaticEnergyAnelasticModel) = model.formulation.thermodynamics.energy_density

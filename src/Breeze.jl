@@ -27,7 +27,7 @@ export
     static_energy,
     total_energy,
     potential_temperature_density,
-    potential_temperature
+    liquid_ice_potential_temperature
 
 using Oceananigans: Oceananigans, @at, AnisotropicMinimumDissipation, Average,
                     AveragedTimeInterval, BackgroundField, BetaPlane, Bounded,

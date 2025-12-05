@@ -184,7 +184,7 @@ conjure_time_step_wizard!(simulation, cfl=0.7)
 
 # Write a callback to compute *_avg_f
 e = static_energy(model)
-θ = potential_temperature(model)
+θ = liquid_ice_potential_temperature(model)
 u_avg = Field(Average(model.velocities.u, dims=(1, 2)))
 v_avg = Field(Average(model.velocities.v, dims=(1, 2)))
 e_avg = Field(Average(e, dims=(1, 2)))

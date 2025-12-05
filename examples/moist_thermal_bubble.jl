@@ -52,7 +52,7 @@ set!(model, θ=θᵢ)
 #
 # Plot the initial potential temperature to visualize the dry thermal bubble.
 
-θ = potential_temperature(model)
+θ = liquid_ice_potential_temperature(model)
 E = total_energy(model)
 ∫E = Integral(E) |> Field
 
@@ -66,7 +66,7 @@ fig
 
 simulation = Simulation(model; Δt=2, stop_time=1000)
 conjure_time_step_wizard!(simulation, cfl=0.7)
-θ = potential_temperature(model)
+θ = liquid_ice_potential_temperature(model)
 
 function progress(sim)
     u, v, w = sim.model.velocities
@@ -173,7 +173,7 @@ set!(moist_model, θ=θᵢ, qᵗ=0.025)
 using Breeze.Thermodynamics: dry_air_gas_constant, vapor_gas_constant
 
 qᵛ⁺ = SaturationSpecificHumidityField(moist_model, :equilibrium)
-θᵈ = potential_temperature(moist_model) # note, current state is dry
+θᵈ = liquid_ice_potential_temperature(moist_model) # note, current state is dry
 Rᵈ = dry_air_gas_constant(thermodynamic_constants)
 Rᵛ = vapor_gas_constant(thermodynamic_constants)
 Rᵐ = Rᵈ * (1 - qᵛ⁺) + Rᵛ * qᵛ⁺
@@ -188,7 +188,7 @@ conjure_time_step_wizard!(moist_simulation, cfl=0.7)
 
 E = total_energy(moist_model)
 ∫E = Integral(E) |> Field
-θ = potential_temperature(moist_model)
+θ = liquid_ice_potential_temperature(moist_model)
 
 function progress_moist(sim)
     compute!(∫E)
@@ -207,7 +207,7 @@ end
 
 add_callback!(moist_simulation, progress_moist, TimeInterval(100))
 
-θ = potential_temperature(moist_model)
+θ = liquid_ice_potential_temperature(moist_model)
 u, v, w = moist_model.velocities
 qᵗ = moist_model.specific_moisture
 qˡ = moist_model.microphysical_fields.qˡ
