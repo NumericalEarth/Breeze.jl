@@ -8,7 +8,8 @@ export
     PotentialTemperature,
     PotentialTemperatureField,
     energy_density,
-    specific_energy
+    specific_energy,
+    compute_hydrostatic_pressure!
 
 using DocStringExtensions: TYPEDSIGNATURES
 using Adapt: Adapt, adapt
