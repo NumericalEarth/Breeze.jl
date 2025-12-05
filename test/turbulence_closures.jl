@@ -32,10 +32,10 @@ using Test
         cᵖᵈ = model.thermodynamic_constants.dry_air.heat_capacity
         e₀ = cᵖᵈ * θ₀
         set!(model; e=e₀)
-        ρe₀ = deepcopy(energy_density(model))
+        ρe₀ = deepcopy(static_energy_density(model))
         time_step!(model, 1)
         # Use rtol for implicit solver which may have small numerical effects
-        @test isapprox(energy_density(model), ρe₀, rtol=1e-5)
+        @test isapprox(static_energy_density(model), ρe₀, rtol=1e-5)
     end
 
     @testset "Closure flux affects momentum tendency [$(FT)]" begin
@@ -82,7 +82,7 @@ using Test
         set!(model; θ = θᵢ, ρqᵗ = qᵗᵢ, ρc = ρcᵢ, ρu = Ξ, ρv = Ξ, ρw = Ξ)
 
         # Store initial scalar fields (using copy of data to avoid reference issues)
-        ρe₀ = copy(interior(energy_density(model)))
+        ρe₀ = copy(interior(static_energy_density(model)))
         ρqᵗ₀ = copy(interior(model.moisture_density))
         ρc₀ = copy(interior(model.tracers.ρc))
 
@@ -91,7 +91,7 @@ using Test
 
         # Scalars should change due to diffusion (not advection since advection=nothing)
         # Use explicit maximum difference check instead of ≈ to handle Float32
-        @test maximum(abs, interior(energy_density(model)) .- ρe₀) > 0
+        @test maximum(abs, interior(static_energy_density(model)) .- ρe₀) > 0
         @test maximum(abs, interior(model.moisture_density) .- ρqᵗ₀) > 0
         @test maximum(abs, interior(model.tracers.ρc) .- ρc₀) > 0
     end

@@ -64,13 +64,13 @@ function collect_prognostic_fields(formulation::APTF,
     return merge(momentum, thermodynamic_variables, microphysical_fields, tracers)
 end
 
-potential_temperature_density(thermo::LiquidIcePotentialTemperatureThermodynamics) = thermo.potential_temperature_density
-potential_temperature(thermo::LiquidIcePotentialTemperatureThermodynamics) = thermo.potential_temperature
-energy_density(::LiquidIcePotentialTemperatureThermodynamics) = nothing
-specific_energy(::LiquidIcePotentialTemperatureThermodynamics) = nothing
-
 const LiquidIcePotentialTemperatureAnelasticModel = AtmosphereModel{<:APTF}
-static_energy(model::LiquidIcePotentialTemperatureAnelasticModel) = StaticEnergyField(model)
+const LIPTAM = LiquidIcePotentialTemperatureAnelasticModel 
+
+potential_temperature_density(model::LIPTAM) = model.formulation.thermodynamics.potential_temperature_density
+potential_temperature(model::LIPTAM) = model.formulation.thermodynamics.potential_temperature
+static_energy(model::LIPTAM) = StaticEnergyField(model, :specific_energy)
+static_energy_density(model::LIPTAM) = StaticEnergyField(model, :energy_density)
 
 function compute_thermodynamic_tendency!(model::LiquidIcePotentialTemperatureAnelasticModel, common_args)
     grid = model.grid

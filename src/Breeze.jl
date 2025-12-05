@@ -23,8 +23,8 @@ export
     WarmPhaseEquilibrium,
     SaturationSpecificHumidityField,
     BulkMicrophysics,
-    energy_density,
-    specific_energy,
+    static_energy_density,
+    static_energy,
     static_energy,
     potential_temperature_density,
     potential_temperature

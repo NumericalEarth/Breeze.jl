@@ -320,33 +320,32 @@ end
 function thermodynamic_density_name end
 
 """
-    energy_density(model::AtmosphereModel)
+    static_energy_density(model::AtmosphereModel)
 
-Return the energy density field `ρe` from the model formulation.
-Returns `nothing` for `LiquidIcePotentialTemperatureThermodynamics`.
+Return an `AbstractField` representing static energy density for `model`.
 """
-energy_density(model::AtmosphereModel) = energy_density(model.formulation.thermodynamics)
+function static_energy_density end
 
 """
-    specific_energy(model::AtmosphereModel)
+    static_energy(model::AtmosphereModel)
 
-Return the specific energy field `e` from the model formulation.
-Returns `nothing` for `LiquidIcePotentialTemperatureThermodynamics`.
+Return an `AbstractField` representing the (specific) static energy
+for `model`.
 """
-specific_energy(model::AtmosphereModel) = specific_energy(model.formulation.thermodynamics)
+function static_energy end
 
 """
     potential_temperature_density(model::AtmosphereModel)
 
-Return the potential temperature density field `ρθ` from the model formulation.
-Returns `nothing` for `StaticEnergyThermodynamics`.
+Return an `AbstractField` representing potential temperature density
+for `model`.
 """
-potential_temperature_density(model::AtmosphereModel) = potential_temperature_density(model.formulation.thermodynamics)
+function potential_temperature_density end
 
 """
     potential_temperature(model::AtmosphereModel)
 
-Return the potential temperature field `θ` from the model formulation.
-Returns `nothing` for `StaticEnergyThermodynamics`.
+Return an `AbstractField` representing potential temperature `θ`
+for `model`.
 """
-potential_temperature(model::AtmosphereModel) = potential_temperature(model.formulation.thermodynamics)
+function potential_temperature end

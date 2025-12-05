@@ -19,10 +19,10 @@ using Test
             ρeᵢ = ρᵣ * cᵖᵈ * θ₀
 
             set!(model; θ = θ₀)
-            ρe₁ = deepcopy(energy_density(model))
+            ρe₁ = deepcopy(static_energy_density(model))
 
             set!(model; ρe = ρeᵢ)
-            @test energy_density(model) ≈ ρe₁
+            @test static_energy_density(model) ≈ ρe₁
         end
     end
 end

@@ -3,7 +3,11 @@ using Oceananigans: Center, Field
 using Oceananigans.AbstractOperations: KernelFunctionOperation
 using Adapt: Adapt, adapt
 
+struct Specific end
+struct Density end
+
 struct LiquidIcePotentialTemperatureKernelFunction{R, μ, M, MF, TMP, TH}
+    flavor :: F
     reference_state :: R
     microphysics :: μ
     microphysical_fields :: M
@@ -13,12 +17,13 @@ struct LiquidIcePotentialTemperatureKernelFunction{R, μ, M, MF, TMP, TH}
 end
 
 Adapt.adapt_structure(to, k::LiquidIcePotentialTemperatureKernelFunction) =
-    LiquidIcePotentialTemperatureKernelFunction(adapt(to, k.reference_state),
-                                       adapt(to, k.microphysics),
-                                       adapt(to, k.microphysical_fields),
-                                       adapt(to, k.specific_moisture),
-                                       adapt(to, k.temperature),
-                                       adapt(to, k.thermodynamic_constants))
+    LiquidIcePotentialTemperatureKernelFunction(adapt(to, k.flavor),
+                                                adapt(to, k.reference_state),
+                                                adapt(to, k.microphysics),
+                                                adapt(to, k.microphysical_fields),
+                                                adapt(to, k.specific_moisture),
+                                                adapt(to, k.temperature),
+                                                adapt(to, k.thermodynamic_constants))
 
 const LiquidIcePotentialTemperature = KernelFunctionOperation{Center, Center, Center, <:Any, <:Any, <:LiquidIcePotentialTemperatureKernelFunction}
 const LiquidIcePotentialTemperatureField = Field{Center, Center, Center, <:LiquidIcePotentialTemperature}
@@ -28,15 +33,25 @@ const LiquidIcePotentialTemperatureField = Field{Center, Center, Center, <:Liqui
 
 Return a `KernelFunctionOperation` representing liquid-ice potential temperature.
 """
-function LiquidIcePotentialTemperature(model)
-    grid = model.grid
-    func = LiquidIcePotentialTemperatureKernelFunction(model.formulation.reference_state,
-                                              model.microphysics,
-                                              model.microphysical_fields,
-                                              model.specific_moisture,
-                                              model.temperature,
-                                              model.thermodynamic_constants)
-    return KernelFunctionOperation{Center, Center, Center}(func, grid)
+function LiquidIcePotentialTemperature(model, flavor_symbol=:specific)
+
+    flavor = if flavor_symbol === :specific
+        Specific()
+    elseif flavor_symbol === :density
+        Density()
+    else
+        error("Unknown $flavor_symbol")
+    end
+
+    func = LiquidIcePotentialTemperatureKernelFunction(flavor, 
+                                                       model.formulation.reference_state,
+                                                       model.microphysics,
+                                                       model.microphysical_fields,
+                                                       model.specific_moisture,
+                                                       model.temperature,
+                                                       model.thermodynamic_constants)
+
+    return KernelFunctionOperation{Center, Center, Center}(func, model.grid)
 end
 
 """
@@ -44,7 +59,8 @@ end
 
 Return a `Field` representing potential temperature.
 """
-LiquidIcePotentialTemperatureField(model) = Field(LiquidIcePotentialTemperature(model))
+LiquidIcePotentialTemperatureField(model, flavor_symbol=:specific) =
+    LiquidIcePotentialTemperature(model, flavor_symbol) |> Field
 
 function (d::LiquidIcePotentialTemperatureKernelFunction)(i, j, k, grid)
     @inbounds begin
@@ -65,14 +81,21 @@ function (d::LiquidIcePotentialTemperatureKernelFunction)(i, j, k, grid)
     qˡ = q.liquid
     qⁱ = q.ice
 
-    return (T - (ℒˡᵣ * qˡ + ℒⁱᵣ * qⁱ) / cᵖᵐ) / Π
+    θ = (T - (ℒˡᵣ * qˡ + ℒⁱᵣ * qⁱ) / cᵖᵐ) / Π
+
+    if d.flavor isa Specific()
+        return θ
+    elseif d.flavor isa Density()
+        return ρᵣ * θ
+    end
 end
 
 #####
 ##### Static energy
 #####
 
-struct StaticEnergyKernelFunction{R, μ, M, MF, TMP, TH}
+struct StaticEnergyKernelFunction{F, R, μ, M, MF, TMP, TH}
+    flavor :: F
     reference_state :: R
     microphysics :: μ
     microphysical_fields :: M
@@ -80,9 +103,10 @@ struct StaticEnergyKernelFunction{R, μ, M, MF, TMP, TH}
     temperature :: TMP
     thermodynamic_constants :: TH
 end
-
+ 
 Adapt.adapt_structure(to, k::StaticEnergyKernelFunction) =
-    StaticEnergyKernelFunction(adapt(to, k.reference_state),
+    StaticEnergyKernelFunction(adapt(to, k.flavor),
+                               adapt(to, k.reference_state),
                                adapt(to, k.microphysics),
                                adapt(to, k.microphysical_fields),
                                adapt(to, k.specific_moisture),
@@ -97,15 +121,25 @@ const StaticEnergyField = Field{Center, Center, Center, <:StaticEnergy}
 
 Return a `KernelFunctionOperation` representing potential temperature.
 """
-function StaticEnergy(model)
-    grid = model.grid
-    func = StaticEnergyKernelFunction(model.formulation.reference_state,
+function StaticEnergy(model, flavor_symbol=:specific)
+
+    flavor = if flavor_symbol === :specific
+        Specific()
+    elseif flavor_symbol === :density
+        Density()
+    else
+        error("Unknown $flavor_symbol")
+    end
+
+    func = StaticEnergyKernelFunction(flavor,
+                                      model.formulation.reference_state,
                                       model.microphysics,
                                       model.microphysical_fields,
                                       model.specific_moisture,
                                       model.temperature,
                                       model.thermodynamic_constants)
-    return KernelFunctionOperation{Center, Center, Center}(func, grid)
+
+    return KernelFunctionOperation{Center, Center, Center}(func, model.grid)
 end
 
 """
@@ -113,11 +147,11 @@ end
 
 Return a `Field` representing potential temperature.
 """
-StaticEnergyField(model) = Field(StaticEnergy(model))
+StaticEnergyField(model, flavor_symbol=:specific) =
+    StaticEnergy(model, flavor_symbol) |> Field
 
 function (d::StaticEnergyKernelFunction)(i, j, k, grid)
     @inbounds begin
-        pᵣ = d.reference_state.pressure[i, j, k]
         ρᵣ = d.reference_state.density[i, j, k]
         qᵗ = d.specific_moisture[i, j, k]
         p₀ = d.reference_state.base_pressure
@@ -135,5 +169,12 @@ function (d::StaticEnergyKernelFunction)(i, j, k, grid)
     qˡ = q.liquid
     qⁱ = q.ice
 
-    return cᵖᵐ * T + g * z - ℒˡᵣ * qˡ + ℒⁱᵣ * qⁱ
+    # Moist static energy
+    e = cᵖᵐ * T + g * z - ℒˡᵣ * qˡ + ℒⁱᵣ * qⁱ
+
+    if d.flavor isa Specific
+        return e
+    elseif d.flavor isa Density
+        return ρᵣ * e
+    end
 end

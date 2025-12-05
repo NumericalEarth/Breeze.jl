@@ -238,7 +238,8 @@ ax_ρe = Axis(fig_lower[1, 1], xlabel="Energy density", ylabel="z (m)")
 ax_e  = Axis(fig_lower[1, 2], xlabel="Specific energy", ylabel="z (m)")
 ax_θ  = Axis(fig_lower[1, 3], xlabel="Potential temperature (K)", ylabel="z (m)")
 
-e = specific_energy(model)
+e = static_energy(model)
+ρe = ρᵣ * e
 ρe_avg = Average(ρe, dims=(1, 2)) |> Field
 e_avg = Average(e, dims=(1, 2)) |> Field
 
@@ -273,7 +274,7 @@ function progress(sim)
     qᵗ = sim.model.specific_moisture
     qᵗmax = maximum(qᵗ)
 
-    ρe = energy_density(sim.model)
+    ρe = static_energy_density(sim.model)
     ρemin = minimum(ρe)
     ρemax = maximum(ρe)
 

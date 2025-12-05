@@ -63,12 +63,11 @@ function collect_prognostic_fields(formulation::ASEF,
     return merge(momentum, thermodynamic_variables, microphysical_fields, tracers)
 end
 
-energy_density(thermo::StaticEnergyThermodynamics) = thermo.energy_density
-specific_energy(thermo::StaticEnergyThermodynamics) = thermo.specific_energy
-
 const StaticEnergyAnelasticModel = AtmosphereModel{<:ASEF}
-potential_temperature(model::StaticEnergyAnelasticModel) = LiquidIcePotentialTemperatureField(model)
+potential_temperature(model::StaticEnergyAnelasticModel) = LiquidIcePotentialTemperature(model, :specific)
+potential_temperature_density(model::StaticEnergyAnelasticModel) = LiquidIcePotentialTemperature(model, :density)
 static_energy(model::StaticEnergyAnelasticModel) = model.formulation.thermodynamics.specific_energy
+static_energy_density(model::StaticEnergyAnelasticModel) = model.formulation.thermodynamics.energy_density
 
 function compute_thermodynamic_tendency!(model::StaticEnergyAnelasticModel, common_args)
     grid = model.grid
