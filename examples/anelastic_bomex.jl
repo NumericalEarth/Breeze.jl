@@ -180,7 +180,7 @@ end
 
 add_callback!(simulation, compute_averages!)
 
-θ = Breeze.AtmosphereModels.PotentialTemperatureField(model)
+θ = potential_temperature(model)
 qˡ = model.microphysical_fields.qˡ
 qᵛ = model.microphysical_fields.qᵛ
 qᵗ = model.specific_moisture

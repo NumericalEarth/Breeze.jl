@@ -66,7 +66,7 @@ energy_density(thermo::StaticEnergyThermodynamics) = thermo.energy_density
 specific_energy(thermo::StaticEnergyThermodynamics) = thermo.specific_energy
 
 const StaticEnergyAnelasticModel = AtmosphereModel{<:ASEF}
-potential_temperature(model::StaticEnergyAnelasticModel) = PotentialTemperatureField(model)
+potential_temperature(model::StaticEnergyAnelasticModel) = LiquidIcePotentialTemperatureField(model)
 
 function compute_thermodynamic_tendency!(model::StaticEnergyAnelasticModel, common_args)
     grid = model.grid

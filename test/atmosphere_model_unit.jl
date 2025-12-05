@@ -27,7 +27,7 @@ using Test
     end
 end
 
-@testset "PotentialTemperatureField (no microphysics) [$(FT)]" for FT in (Float32, Float64)
+@testset "LiquidIcePotentialTemperatureField (no microphysics) [$(FT)]" for FT in (Float32, Float64)
     Oceananigans.defaults.FloatType = FT
     grid = RectilinearGrid(default_arch; size=(8, 8, 8), x=(0, 1_000), y=(0, 1_000), z=(0, 1_000))
     constants = ThermodynamicConstants()
@@ -43,11 +43,11 @@ end
     set!(θᵢ, (x, y, z) -> θ₀ + rand())
     set!(model; θ=θᵢ)
 
-    θ_model = Breeze.AtmosphereModels.PotentialTemperatureField(model)
+    θ_model = Breeze.AtmosphereModels.LiquidIcePotentialTemperatureField(model)
     @test θ_model ≈ θᵢ
 end
 
-@testset "Saturation and PotentialTemperatureField (WarmPhase) [$(FT)]" for FT in (Float32, Float64)
+@testset "Saturation and LiquidIcePotentialTemperatureField (WarmPhase) [$(FT)]" for FT in (Float32, Float64)
     Oceananigans.defaults.FloatType = FT
     grid = RectilinearGrid(default_arch; size=(8, 8, 8), x=(0, 1_000), y=(0, 1_000), z=(0, 1_000))
     constants = ThermodynamicConstants()

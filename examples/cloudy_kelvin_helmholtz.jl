@@ -170,7 +170,7 @@ add_callback!(simulation, progress, TimeInterval(1minute))
 # the potential temperatures and the specific humidities (vapour, liquid, ice).
 u, v, w = model.velocities
 ξ = ∂z(u) - ∂x(w)
-θ = PotentialTemperatureField(model)
+θ = potential_temperature(model)
 outputs = merge(model.velocities, model.microphysical_fields, (; ξ, θ))
 
 filename = "wave_clouds.jld2"

@@ -71,7 +71,7 @@ A callable object for diagnosing the potential temperature field,
 given a temperature field, designed for use as a `KernelFunctionOperation`
 in Oceananigans. Follows the pattern used for saturation diagnostics.
 """
-struct PotentialTemperatureKernelFunction{R, μ, M, MF, TMP, TH}
+struct LiquidIcePotentialTemperatureKernelFunction{R, μ, M, MF, TMP, TH}
     reference_state :: R
     microphysics :: μ
     microphysical_fields :: M
@@ -81,24 +81,24 @@ struct PotentialTemperatureKernelFunction{R, μ, M, MF, TMP, TH}
 end
 
 Adapt.adapt_structure(to, k::LiquidIcePotentialTemperatureKernelFunction) =
-    PotentialTemperatureKernelFunction(adapt(to, k.reference_state),
+    LiquidIcePotentialTemperatureKernelFunction(adapt(to, k.reference_state),
                                        adapt(to, k.microphysics),
                                        adapt(to, k.microphysical_fields),
                                        adapt(to, k.specific_moisture),
                                        adapt(to, k.temperature),
                                        adapt(to, k.thermodynamic_constants))
 
-const PotentialTemperature = KernelFunctionOperation{Center, Center, Center, <:Any, <:Any, <:LiquidIcePotentialTemperatureKernelFunction}
-const PotentialTemperatureField = Field{Center, Center, Center, <:LiquidIcePotentialTemperature}
+const LiquidIcePotentialTemperature = KernelFunctionOperation{Center, Center, Center, <:Any, <:Any, <:LiquidIcePotentialTemperatureKernelFunction}
+const LiquidIcePotentialTemperatureField = Field{Center, Center, Center, <:LiquidIcePotentialTemperature}
 
 """
     $(TYPEDSIGNATURES)
 
 Return a `KernelFunctionOperation` representing potential temperature.
 """
-function PotentialTemperature(model)
+function LiquidIcePotentialTemperature(model)
     grid = model.grid
-    func = PotentialTemperatureKernelFunction(model.formulation.reference_state,
+    func = LiquidIcePotentialTemperatureKernelFunction(model.formulation.reference_state,
                                               model.microphysics,
                                               model.microphysical_fields,
                                               model.specific_moisture,
@@ -112,7 +112,7 @@ end
 
 Return a `Field` representing potential temperature.
 """
-PotentialTemperatureField(model) = Field(PotentialTemperature(model))
+LiquidIcePotentialTemperatureField(model) = Field(LiquidIcePotentialTemperature(model))
 
 function (d::LiquidIcePotentialTemperatureKernelFunction)(i, j, k, grid)
     @inbounds begin
