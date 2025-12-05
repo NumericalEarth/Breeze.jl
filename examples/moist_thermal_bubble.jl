@@ -165,11 +165,10 @@ moist_model = AtmosphereModel(grid; formulation, thermodynamic_constants, advect
 set!(moist_model, θ=θᵢ)
 
 # Compute saturation specific humidity using the diagnostic field
-using Breeze.AtmosphereModels: SaturationSpecificHumidityField
 using Breeze.Thermodynamics: dry_air_gas_constant, vapor_gas_constant
 
-qᵛ⁺ = SaturationSpecificHumidityField(moist_model)
-qᵛ = qᵛ⁺ / 10
+qᵛ⁺ = SaturationSpecificHumidityField(moist_model, :equilibrium)
+qᵛ = qᵛ⁺
 θᵈ = potential_temperature(moist_model) # note, current state is dry
 Rᵈ = dry_air_gas_constant(thermodynamic_constants)
 Rᵛ = vapor_gas_constant(thermodynamic_constants)

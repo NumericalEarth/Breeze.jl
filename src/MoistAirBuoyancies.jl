@@ -198,7 +198,7 @@ Solution of ``r(T) = 0`` is found via the [secant method](https://en.wikipedia.o
     # has to be modified to consistently include the liquid mass fraction.
     # Subsequent computations will assume that the specific humidity
     # is given by the saturation specific humidity, eg ``qᵛ = qᵛ⁺``.
-    qᵛ⁺₁ = adjustment_saturation_specific_humidity(T₁, 𝒰₁, constants)
+    qᵛ⁺₁ = equilibrium_saturation_specific_humidity(T₁, 𝒰₁, constants)
     qˡ₁ = qᵗ - qᵛ⁺₁
     q₁ = MoistureMassFractions(qᵛ⁺₁, qˡ₁)
     𝒰₁ = with_moisture(𝒰₀, q₁)
@@ -246,7 +246,7 @@ end
 # This consideration culminates in a new expression for saturation specific humidity
 # used below, and also written in Pressel et al 2015, equation 37.
 # (There is an error in the description below it, but the equation 37 is correct.)
-@inline function adjustment_saturation_specific_humidity(T, 𝒰, constants)
+@inline function equilibrium_saturation_specific_humidity(T, 𝒰, constants)
     pᵛ⁺ = saturation_vapor_pressure(T, constants, constants.liquid)
     pᵣ = 𝒰.reference_pressure
     qᵗ = total_specific_moisture(𝒰)
@@ -257,7 +257,7 @@ end
 end
 
 @inline function adjust_state(𝒰₀, T, constants)
-    qᵛ⁺ = adjustment_saturation_specific_humidity(T, 𝒰₀, constants)
+    qᵛ⁺ = equilibrium_saturation_specific_humidity(T, 𝒰₀, constants)
     qᵗ = total_specific_moisture(𝒰₀)
     qˡ = max(0, qᵗ - qᵛ⁺)
     qᵛ = qᵗ - qˡ
@@ -375,7 +375,7 @@ Adapt.adapt_structure(to, ck::CondensateKernel) = CondensateKernel(adapt(to, ck.
     Tᵢ <= Π * θᵢ + 10 * eps(Tᵢ) && return zero(qᵗᵢ)
 
     # Next assume a saturation value
-    qᵛ⁺ = adjustment_saturation_specific_humidity(Tᵢ, 𝒰, mb.thermodynamic_constants)
+    qᵛ⁺ = equilibrium_saturation_specific_humidity(Tᵢ, 𝒰, mb.thermodynamic_constants)
     return max(0, qᵗᵢ - qᵛ⁺)
 end
 

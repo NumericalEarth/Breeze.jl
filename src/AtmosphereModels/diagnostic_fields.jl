@@ -3,6 +3,7 @@ using Oceananigans: Center, Field
 using Oceananigans.AbstractOperations: KernelFunctionOperation
 using Adapt: Adapt, adapt
 
+#=
 """
     SaturationSpecificHumidityKernel(temperature)
 
@@ -61,6 +62,7 @@ function (d::SaturationSpecificHumidityKernelFunction)(i, j, k, grid)
     ρ = Thermodynamics.density(pᵣ, T, q, d.thermodynamic_constants)
     return Thermodynamics.saturation_specific_humidity(T, ρ, d.thermodynamic_constants, d.thermodynamic_constants.liquid)
 end
+=#
 
 """
     PotentialTemperatureKernel(temperature)

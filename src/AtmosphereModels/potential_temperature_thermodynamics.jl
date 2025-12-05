@@ -57,6 +57,7 @@ function collect_prognostic_fields(formulation::APTF,
                                    moisture_density,
                                    microphysical_fields,
                                    tracers)
+
     ρθ = formulation.thermodynamics.potential_temperature_density
     thermodynamic_variables = (ρθ=ρθ, ρqᵗ=moisture_density)
     return merge(momentum, thermodynamic_variables, microphysical_fields, tracers)

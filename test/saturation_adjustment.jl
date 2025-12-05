@@ -18,7 +18,7 @@ using Breeze.MoistAirBuoyancies: compute_boussinesq_adjustment_temperature
 using Breeze.Microphysics: compute_temperature
 
 using Breeze.Microphysics:
-    adjustment_saturation_specific_humidity
+    equilibrium_saturation_specific_humidity
 
 solver_tol(::Type{Float64}) = 1e-6
 solver_tol(::Type{Float32}) = 1e-3
@@ -66,7 +66,7 @@ test_tol(FT::Type{Float32}) = sqrt(solver_tol(FT))
         @testset let T₂=T₂, qᵗ₂=qᵗ₂
             T₂ = convert(FT, T₂)
             qᵗ₂ = convert(FT, qᵗ₂)
-            qᵛ⁺₂ = adjustment_saturation_specific_humidity(T₂, pᵣ, qᵗ₂, constants, microphysics.equilibrium)
+            qᵛ⁺₂ = equilibrium_saturation_specific_humidity(T₂, pᵣ, qᵗ₂, constants, microphysics.equilibrium)
             @test qᵛ⁺₂ isa FT
 
             if qᵗ₂ > qᵛ⁺₂ # saturated conditions
@@ -153,7 +153,7 @@ end
     @testset "Temperatures above freezing (warm phase equivalence)" begin
         T_warm = FT(300)
         qᵗ = FT(0.02)
-        qᵛ⁺ = adjustment_saturation_specific_humidity(T_warm, pᵣ, qᵗ, constants, equilibrium)
+        qᵛ⁺ = equilibrium_saturation_specific_humidity(T_warm, pᵣ, qᵗ, constants, equilibrium)
         atol = test_tol(FT)
 
         if qᵗ > qᵛ⁺  # saturated conditions
@@ -185,7 +185,7 @@ end
     @testset "Temperatures below homogeneous ice nucleation (all ice)" begin
         T_cold = FT(220)  # Below Tʰ
         qᵗ = FT(0.01)
-        qᵛ⁺ = adjustment_saturation_specific_humidity(T_cold, pᵣ, qᵗ, constants, equilibrium)
+        qᵛ⁺ = equilibrium_saturation_specific_humidity(T_cold, pᵣ, qᵗ, constants, equilibrium)
         atol = test_tol(FT)
 
         if qᵗ > qᵛ⁺  # saturated conditions
@@ -220,7 +220,7 @@ end
                 T = convert(FT, T)
                 λ = test_liquid_fraction(T, Tᶠ, Tʰ)
                 qᵗ = FT(0.015)
-                qᵛ⁺ = adjustment_saturation_specific_humidity(T, pᵣ, qᵗ, constants, equilibrium)
+                qᵛ⁺ = equilibrium_saturation_specific_humidity(T, pᵣ, qᵗ, constants, equilibrium)
 
                 if qᵗ > qᵛ⁺  # saturated conditions
                     # Partition condensate between liquid and ice based on λ
@@ -269,7 +269,7 @@ end
 
         for qᵗ in FT.(5e-3:5e-3:3e-2)
             @testset let qᵗ=qᵗ
-                qᵛ⁺ = adjustment_saturation_specific_humidity(T, pᵣ, qᵗ, constants, equilibrium)
+                qᵛ⁺ = equilibrium_saturation_specific_humidity(T, pᵣ, qᵗ, constants, equilibrium)
 
                 if qᵗ > qᵛ⁺  # saturated conditions
                     qᶜ = qᵗ - qᵛ⁺
@@ -299,7 +299,7 @@ end
                 λ_expected = test_liquid_fraction(T_partition, Tᶠ, Tʰ)
 
                 qᵗ = FT(0.02)
-                qᵛ⁺ = adjustment_saturation_specific_humidity(T_partition, pᵣ, qᵗ, constants, equilibrium)
+                qᵛ⁺ = equilibrium_saturation_specific_humidity(T_partition, pᵣ, qᵗ, constants, equilibrium)
 
                 if qᵗ > qᵛ⁺  # saturated conditions
                     q_condensate = qᵗ - qᵛ⁺
@@ -383,7 +383,7 @@ end
     qᵗ = FT(0.025)
     q̃ = MoistureMassFractions(qᵗ)
     𝒰 = LiquidIcePotentialTemperatureState(θ̃, q̃, p₀, pᵣ)
-    qᵛ⁺ = Breeze.MoistAirBuoyancies.adjustment_saturation_specific_humidity(T₃, 𝒰, constants)
+    qᵛ⁺ = Breeze.MoistAirBuoyancies.equilibrium_saturation_specific_humidity(T₃, 𝒰, constants)
     @test qᵗ > qᵛ⁺ # otherwise the test is wrong
 
     qˡ = qᵗ - qᵛ⁺
