@@ -116,7 +116,7 @@ set!(model; u=uᵢ, qᵗ=qᵗᵢ, θ=θᵢ)
 #
 # Let's plot the initial state as well as the Richardson number.
 
-U = Field(Average(model.velocities.u, dims=1))
+U = Field(Average(model.velocities.u, dims=(1, 2)))
 Ri = N^2 / ∂z(U)^2
 
 Qᵗ = Field(Average(model.specific_moisture, dims=1))
