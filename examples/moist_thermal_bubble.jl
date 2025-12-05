@@ -161,25 +161,19 @@ moist_model = AtmosphereModel(grid; formulation, thermodynamic_constants, advect
 # then we use the diagnostic saturation specific humidity field to set the moisture.
 
 # Set potential temperature to match the dry bubble initially
-set!(moist_model, θ=θᵢ)
+set!(moist_model, θ=θᵢ, qᵗ=0.025)
 
 # Compute saturation specific humidity using the diagnostic field
 using Breeze.Thermodynamics: dry_air_gas_constant, vapor_gas_constant
 
 qᵛ⁺ = SaturationSpecificHumidityField(moist_model, :equilibrium)
-@show maximum(qᵛ⁺)
-qᵗ = 0.025
-set!(moist_model.specific_moisture, qᵗ)
-compute!(qᵛ⁺)
-
-qᵛ = qᵛ⁺
 θᵈ = potential_temperature(moist_model) # note, current state is dry
 Rᵈ = dry_air_gas_constant(thermodynamic_constants)
 Rᵛ = vapor_gas_constant(thermodynamic_constants)
-Rᵐ = Rᵈ * (1 - qᵛ) + Rᵛ * qᵛ
+Rᵐ = Rᵈ * (1 - qᵛ⁺) + Rᵛ * qᵛ⁺
 θᵐ = θᵈ * Rᵈ / Rᵐ
 
-set!(moist_model, θ=θᵐ, qᵗ=qᵗ)
+set!(moist_model, θ=θᵐ)
 
 # ## Simulation
 
@@ -261,7 +255,7 @@ axl = Axis(fig[2, 3], aspect=2, xlabel="x (m)", ylabel="z (m)")
 
 θ_range = (minimum(θt), maximum(θt))
 w_range = maximum(abs, wt)
-qᵗ_range = (minimum(qᵗt), maximum(qᵗt))
+qᵗ_range = (0, maximum(qᵗt) + 1e-6)
 qˡ_range = (0, maximum(qˡt) + 1e-6)
 
 n = Observable(length(θt))
