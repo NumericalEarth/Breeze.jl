@@ -33,7 +33,7 @@ end
 formulation_pressure_solver(formulation, grid) = nothing
 
 mutable struct AtmosphereModel{Frm, Arc, Tst, Grd, Clk, Thm, Mom, Moi, Mfr, Buy,
-                               Tmp, Prs, Sol, Vel, Trc, Adv, Cor, Frc, Mic, Cnd, Cls, Cfs} <: AbstractModel{Tst, Arc}
+                               Tmp, Sol, Vel, Trc, Adv, Cor, Frc, Mic, Cnd, Cls, Cfs} <: AbstractModel{Tst, Arc}
     architecture :: Arc
     grid :: Grd
     clock :: Clk
@@ -43,7 +43,6 @@ mutable struct AtmosphereModel{Frm, Arc, Tst, Grd, Clk, Thm, Mom, Moi, Mfr, Buy,
     moisture_density :: Moi
     specific_moisture :: Mfr
     temperature :: Tmp
-    pressure :: Prs
     pressure_solver :: Sol
     velocities :: Vel
     tracers :: Trc
@@ -157,7 +156,6 @@ function AtmosphereModel(grid;
     # Diagnostic fields
     specific_moisture = CenterField(grid)
     temperature = CenterField(grid)
-    pressure = formulation.pressure_anomaly
 
     prognostic_microphysical_fields = NamedTuple(microphysical_fields[name] for name in prognostic_field_names(microphysics))
     prognostic_fields = collect_prognostic_fields(formulation,
@@ -197,7 +195,6 @@ function AtmosphereModel(grid;
                             moisture_density,
                             specific_moisture,
                             temperature,
-                            pressure,
                             pressure_solver,
                             velocities,
                             tracers,
