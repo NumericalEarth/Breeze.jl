@@ -81,7 +81,7 @@ qᵛ⁺ = SaturationSpecificHumidity(model, :prognostic)
 
 # output
 KernelFunctionOperation at (Center, Center, Center)
-├── grid: 4×4×4 RectilinearGrid{Float64, Periodic, Periodic, Bounded} on CPU with 3×3×3 halo
+├── grid: 1×1×128 RectilinearGrid{Float64, Periodic, Periodic, Bounded} on CPU with 1×1×3 halo
 ├── kernel_function: Breeze.Microphysics.Prognostic() SaturationSpecificHumidityKernelFunction
 └── arguments: ()
 ```
