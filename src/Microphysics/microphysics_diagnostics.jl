@@ -9,6 +9,8 @@ using Breeze.Thermodynamics:
     density,
     saturation_vapor_pressure
 
+import Oceananigans.Grids: prettysummary
+
 struct SaturationSpecificHumidityKernelFunction{μ, FL, M, MF, T, R, TH}
     flavor :: FL
     microphysics :: μ
@@ -18,6 +20,8 @@ struct SaturationSpecificHumidityKernelFunction{μ, FL, M, MF, T, R, TH}
     reference_state :: R
     thermodynamic_constants :: TH
 end
+
+prettysummary(kf::SaturationSpecificHumidityKernelFunction) = "$(kf.flavor) SaturationSpecificHumidityKernelFunction"
 
 Adapt.adapt_structure(to, k::SaturationSpecificHumidityKernelFunction) =
     SaturationSpecificHumidityKernelFunction(adapt(to, k.flavor),
@@ -30,7 +34,6 @@ Adapt.adapt_structure(to, k::SaturationSpecificHumidityKernelFunction) =
 
 const C = Center
 const SaturationSpecificHumidity = KernelFunctionOperation{C, C, C, <:Any, <:Any, <:SaturationSpecificHumidityKernelFunction}
-const SaturationSpecificHumidityField = Field{C, C, C, <:SaturationSpecificHumidity}
 
 struct Prognostic end
 struct Equilibrium end
@@ -39,7 +42,11 @@ struct TotalMoisture end
 """
 $(TYPEDSIGNATURES)
 
-Return a field computing the specified flavor of *saturation specific humidity* ``qᵛ⁺``.
+Return a `KernelFunctionOperation` representing the specified flavor
+of *saturation specific humidity* ``qᵛ⁺`` which correpsonds to `model.microphysics`.
+If `model.microphysics` is not a saturation adjustment scheme, then 
+a warm phase scheme is assumed which computes the saturation specific humidity
+over a planar liquid surface.
 
 ## Flavor options
 
@@ -64,24 +71,55 @@ This is useful for manufacturing perfectly saturated initial conditions.
 
 ## Examples
 
-```@example ssh
+```jldoctestssh
 using Breeze
-grid = RectilinearGrid(size=(4, 4, 4), extent=(500, 500, 1000))
-model = AtmosphereModel(grid)
+grid = RectilinearGrid(size=(1, 1, 128), extent=(1e3, 1e3, 1e3))
+microphysics = SaturationAdjustment()
+model = AtmosphereModel(grid; microphysics)
 set!(model, θ=300)
 qᵛ⁺ = SaturationSpecificHumidity(model, :prognostic)
+
+# output
+KernelFunctionOperation at (Center, Center, Center)
+├── grid: 4×4×4 RectilinearGrid{Float64, Periodic, Periodic, Bounded} on CPU with 3×3×3 halo
+├── kernel_function: Breeze.Microphysics.Prognostic() SaturationSpecificHumidityKernelFunction
+└── arguments: ()
 ```
 
-Equilibrium flavor
+As `SaturationSpecificHumidity` it may be wrapped in `Field` to store the result 
+of its computation. For example, a `Field` representing the equilibrium saturation specific
+humidity may be formed via,
 
-```@example ssh
-qᵛ⁺ₑ = SaturationSpecificHumidity(model, :equilibrium)
+```jldoctest ssh
+qᵛ = SaturationSpecificHumidity(model, :equilibrium) |> Field
+
+# output
+1×1×128 Field{Center, Center, Center} on RectilinearGrid on CPU
+├── grid: 1×1×128 RectilinearGrid{Float64, Periodic, Periodic, Bounded} on CPU with 1×1×3 halo
+├── boundary conditions: FieldBoundaryConditions
+│   └── west: Periodic, east: Periodic, south: Periodic, north: Periodic, bottom: ZeroFlux, top: ZeroFlux, immersed: Nothing
+├── operand: KernelFunctionOperation at (Center, Center, Center)
+├── status: time=0.0
+└── data: 3×3×134 OffsetArray(::Array{Float64, 3}, 0:2, 0:2, -2:131) with eltype Float64 with indices 0:2×0:2×-2:131
+    └── max=0.0361828, min=0.0224965, mean=0.028878
 ```
 
-Equilibrium flavor
+We also provide a constructor and type alias for the `Field` itself.
+For example, to build a `Field` representing the saturation specific humidity
+in the case that the total specific moisture is exactly at saturation,
 
 ```@example ssh
-qᵛ = SaturationSpecificHumidity(model, :total_moisture)
+qᵗ = SaturationSpecificHumidityField(model, :total_moisture)
+
+# output
+1×1×128 Field{Center, Center, Center} on RectilinearGrid on CPU
+├── grid: 1×1×128 RectilinearGrid{Float64, Periodic, Periodic, Bounded} on CPU with 1×1×3 halo
+├── boundary conditions: FieldBoundaryConditions
+│   └── west: Periodic, east: Periodic, south: Periodic, north: Periodic, bottom: ZeroFlux, top: ZeroFlux, immersed: Nothing
+├── operand: KernelFunctionOperation at (Center, Center, Center)
+├── status: time=0.0
+└── data: 3×3×134 OffsetArray(::Array{Float64, 3}, 0:2, 0:2, -2:131) with eltype Float64 with indices 0:2×0:2×-2:131
+    └── max=0.0561539, min=0.0353807, mean=0.0451121
 ```
 """
 function SaturationSpecificHumidity(model, flavor_symbol=:prognostic)
@@ -97,8 +135,14 @@ function SaturationSpecificHumidity(model, flavor_symbol=:prognostic)
         throw(ArgumentError("Flavor $flavor_symbol is not one of the valid flavors $valid_flavors"))
     end
 
+    microphysics = if model.microphysics isa SaturationAdjustment
+        model.microphysics
+    else
+        SaturationAdjustment(equilibrium=WarmPhaseEquilibrium())
+    end
+
     func = SaturationSpecificHumidityKernelFunction(flavor,
-                                                    model.microphysics,
+                                                    microphysics,
                                                     model.microphysical_fields,
                                                     model.specific_moisture,
                                                     model.temperature,
@@ -146,4 +190,5 @@ function (d::AdjustmentSH)(i, j, k, grid)
     end
 end
 
+const SaturationSpecificHumidityField = Field{C, C, C, <:SaturationSpecificHumidity}
 SaturationSpecificHumidityField(model, flavor_symbol=:prognostic) = Field(SaturationSpecificHumidity(model, flavor_symbol))
