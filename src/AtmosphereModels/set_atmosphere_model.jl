@@ -4,9 +4,10 @@ using Oceananigans.BoundaryConditions: fill_halo_regions!
 using Oceananigans.TimeSteppers: compute_pressure_correction!, make_pressure_correction!, update_state!
 
 using ..Thermodynamics:
-    PotentialTemperatureState,
+    LiquidIcePotentialTemperatureState,
     MoistureMassFractions,
     mixture_heat_capacity,
+    mixture_gas_constant,
     temperature
 
 import Oceananigans.Fields: set!
@@ -25,6 +26,8 @@ function prioritize_names(names)
     return names
 end
 
+function set_thermodynamic_variable! end
+
 function set!(model::AtmosphereModel; enforce_mass_conservation=true, kw...)
     names = collect(keys(kw))
     prioritized = prioritize_names(names)
@@ -42,8 +45,10 @@ function set!(model::AtmosphereModel; enforce_mass_conservation=true, kw...)
             set!(c, value)
 
         elseif name == :ρe
-            energy_density = model.formulation.thermodynamics.energy_density
-            set!(energy_density, value)
+            set_thermodynamic_variable!(model, Val(:ρe), value)
+
+        elseif name == :ρθ
+            set_thermodynamic_variable!(model, Val(:ρθ), value)
 
         elseif name == :ρqᵗ
             set!(model.moisture_density, value)
@@ -72,33 +77,10 @@ function set!(model::AtmosphereModel; enforce_mass_conservation=true, kw...)
             set!(ϕ, value)    
 
         elseif name == :e
-            # Set specific energy directly
-            specific_energy = model.formulation.thermodynamics.specific_energy
-            energy_density = model.formulation.thermodynamics.energy_density
-            set!(specific_energy, value)
-            ρᵣ = model.formulation.reference_state.density
-            set!(energy_density, ρᵣ * specific_energy)
+            set_thermodynamic_variable!(model, Val(:e), value)
 
         elseif name == :θ
-            θ = model.temperature # use scratch
-            set!(θ, value)
-
-            grid = model.grid
-            arch = grid.architecture
-            energy_density = model.formulation.thermodynamics.energy_density
-            specific_energy = model.formulation.thermodynamics.specific_energy
-
-            launch!(arch, grid, :xyz,
-                    _energy_density_from_potential_temperature!,
-                    energy_density,
-                    specific_energy,
-                    grid,
-                    θ,
-                    model.specific_moisture,
-                    model.formulation,
-                    model.microphysics,
-                    model.microphysical_fields,
-                    model.thermodynamic_constants)
+            set_thermodynamic_variable!(model, Val(:θ), value)
 
         else
             prognostic_names = keys(prognostic_fields(model))
@@ -125,48 +107,5 @@ function set!(model::AtmosphereModel; enforce_mass_conservation=true, kw...)
         update_state!(model, compute_tendencies=false)
     end
 
-    energy_density = model.formulation.thermodynamics.energy_density
-    fill_halo_regions!(energy_density)
-
     return nothing
-end
-
-@kernel function _energy_density_from_potential_temperature!(energy_density,
-                                                             specific_energy,
-                                                             grid,
-                                                             potential_temperature,
-                                                             specific_moisture,
-                                                             formulation::AnelasticFormulation,
-                                                             microphysics,
-                                                             microphysical_fields,
-                                                             constants)
-    i, j, k = @index(Global, NTuple)
-
-    @inbounds begin
-        pᵣ = formulation.reference_state.pressure[i, j, k]
-        ρᵣ = formulation.reference_state.density[i, j, k]
-        qᵗ = specific_moisture[i, j, k]
-        θ = potential_temperature[i, j, k]
-    end
-
-    g = constants.gravitational_acceleration
-    z = znode(i, j, k, grid, c, c, c)
-    p₀ = formulation.reference_state.base_pressure
-
-    q = compute_moisture_fractions(i, j, k, grid, microphysics, ρᵣ, qᵗ, microphysical_fields)
-    𝒰₀ = PotentialTemperatureState(θ, q, p₀, pᵣ)
-    𝒰 = maybe_adjust_thermodynamic_state(𝒰₀, microphysics, microphysical_fields, qᵗ, constants)
-
-    T = temperature(𝒰, constants)
-    q = 𝒰.moisture_mass_fractions
-    cᵖᵐ = mixture_heat_capacity(q, constants)
-
-    ℒˡᵣ = constants.liquid.reference_latent_heat
-    ℒⁱᵣ = constants.ice.reference_latent_heat
-    qˡ = q.liquid
-    qⁱ = q.ice
-
-    e = cᵖᵐ * T + g * z - ℒˡᵣ * qˡ - ℒⁱᵣ * qⁱ
-    @inbounds specific_energy[i, j, k] = e
-    @inbounds energy_density[i, j, k] = ρᵣ * e
 end

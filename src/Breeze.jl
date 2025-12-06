@@ -11,8 +11,8 @@ export
     ReferenceState,
     AnelasticFormulation,
     AtmosphereModel,
-    PotentialTemperature,
-    PotentialTemperatureField,
+    StaticEnergyThermodynamics,
+    LiquidIcePotentialTemperatureThermodynamics,
     TemperatureField,
     IdealGas,
     CondensedPhase,
@@ -21,9 +21,14 @@ export
     SaturationAdjustment,
     MixedPhaseEquilibrium,
     WarmPhaseEquilibrium,
+    SaturationSpecificHumidity,
+    SaturationSpecificHumidityField,
     BulkMicrophysics,
-    energy_density,
-    specific_energy
+    static_energy_density,
+    static_energy,
+    total_energy,
+    potential_temperature_density,
+    liquid_ice_potential_temperature
 
 using Oceananigans: Oceananigans, @at, AnisotropicMinimumDissipation, Average,
                     AveragedTimeInterval, BackgroundField, BetaPlane, Bounded,

@@ -32,7 +32,8 @@ u_bomex = AtmosphericProfilesLibrary.Bomex_u(FT)
 p₀, θ₀ = 101500, 299.1
 constants = ThermodynamicConstants()
 reference_state = ReferenceState(grid, constants, base_pressure=p₀, potential_temperature=θ₀)
-formulation = AnelasticFormulation(reference_state)
+formulation = AnelasticFormulation(reference_state, thermodynamics=:LiquidIcePotentialTemperature)
+# formulation = AnelasticFormulation(reference_state, thermodynamics=:StaticEnergy)
 
 q₀ = Breeze.Thermodynamics.MoistureMassFractions{eltype(grid)} |> zero
 ρ₀ = Breeze.Thermodynamics.density(p₀, θ₀, q₀, constants)
@@ -41,7 +42,9 @@ Lˡ = constants.liquid.reference_latent_heat
 w′T′, w′q′ = 8e-3, 5.2e-5
 Q = ρ₀ * cᵖᵈ * w′T′ 
 F = ρ₀ * w′q′
+
 ρe_bcs = FieldBoundaryConditions(bottom=FluxBoundaryCondition(Q))
+ρθ_bcs = FieldBoundaryConditions(bottom=FluxBoundaryCondition(ρ₀ * w′T′))
 ρqᵗ_bcs = FieldBoundaryConditions(bottom=FluxBoundaryCondition(F))
 
 u★ = 0.28 # m/s
@@ -69,6 +72,11 @@ end
     return @inbounds - p.ρᵣ[i, j, k] * w_dz_E
 end
 
+@inline function Fρθ_subsidence(i, j, k, grid, clock, fields, p)
+    w_dz_T = ℑzᵃᵃᶜ(i, j, k, grid, w_dz_ϕ, p.wˢ, p.θ_avg)
+    return @inbounds - p.ρᵣ[i, j, k] * w_dz_T
+end
+
 @inline function Fρqᵗ_subsidence(i, j, k, grid, clock, fields, p)
     w_dz_Qᵗ = ℑzᵃᵃᶜ(i, j, k, grid, w_dz_ϕ, p.wˢ, p.qᵗ_avg)
     return @inbounds - p.ρᵣ[i, j, k] * w_dz_Qᵗ
@@ -78,6 +86,7 @@ end
 u_avg_f = Field{Nothing, Nothing, Center}(grid)
 v_avg_f = Field{Nothing, Nothing, Center}(grid)
 e_avg_f = Field{Nothing, Nothing, Center}(grid)
+θ_avg_f = Field{Nothing, Nothing, Center}(grid)
 qᵗ_avg_f = Field{Nothing, Nothing, Center}(grid)
 
 wˢ = Field{Nothing, Nothing, Face}(grid)
@@ -88,17 +97,24 @@ set!(wˢ, z -> w_bomex(z))
 ρu_subsidence_forcing  = Forcing(Fρu_subsidence,  discrete_form=true, parameters=(; u_avg=u_avg_f, wˢ, ρᵣ))
 ρv_subsidence_forcing  = Forcing(Fρv_subsidence,  discrete_form=true, parameters=(; v_avg=v_avg_f, wˢ, ρᵣ))
 ρe_subsidence_forcing  = Forcing(Fρe_subsidence,  discrete_form=true, parameters=(; e_avg=e_avg_f, wˢ, ρᵣ))
+ρθ_subsidence_forcing  = Forcing(Fρθ_subsidence,  discrete_form=true, parameters=(; θ_avg=θ_avg_f, wˢ, ρᵣ))
 ρqᵗ_subsidence_forcing = Forcing(Fρqᵗ_subsidence, discrete_form=true, parameters=(; qᵗ_avg=qᵗ_avg_f, wˢ, ρᵣ))
 
 coriolis = FPlane(f=3.76e-5)
-ρuᵍ = Field{Nothing, Nothing, Center}(grid)
-ρvᵍ = Field{Nothing, Nothing, Center}(grid)
+# ρuᵍ = Field{Nothing, Nothing, Center}(grid)
+# ρvᵍ = Field{Nothing, Nothing, Center}(grid)
+uᵍ = Field{Nothing, Nothing, Center}(grid)
+vᵍ = Field{Nothing, Nothing, Center}(grid)
 uᵍ_bomex = AtmosphericProfilesLibrary.Bomex_geostrophic_u(FT)
 vᵍ_bomex = AtmosphericProfilesLibrary.Bomex_geostrophic_v(FT)
-set!(ρuᵍ, z -> uᵍ_bomex(z))
-set!(ρvᵍ, z -> vᵍ_bomex(z))
-set!(ρuᵍ, ρᵣ * ρuᵍ)
-set!(ρvᵍ, ρᵣ * ρvᵍ)
+set!(uᵍ, z -> uᵍ_bomex(z))
+set!(vᵍ, z -> vᵍ_bomex(z))
+
+ρuᵍ = Field(ρᵣ * uᵍ)
+ρvᵍ = Field(ρᵣ * vᵍ)
+
+# set!(ρuᵍ, ρᵣ * ρuᵍ)
+# set!(ρvᵍ, ρᵣ * ρvᵍ)
 
 @inline Fρu_geostrophic(i, j, k, grid, clock, fields, p) = @inbounds - p.f * p.ρvᵍ[i, j, k]
 @inline Fρv_geostrophic(i, j, k, grid, clock, fields, p) = @inbounds p.f * p.ρuᵍ[i, j, k]
@@ -117,12 +133,18 @@ set!(drying, ρᵣ * drying)
 ρqᵗ_forcing = (ρqᵗ_drying_forcing, ρqᵗ_subsidence_forcing)
 
 Fρe_field = Field{Nothing, Nothing, Center}(grid)
+Fρθ_field = Field{Nothing, Nothing, Center}(grid)
 dTdt_bomex = AtmosphericProfilesLibrary.Bomex_dTdt(FT)
 set!(Fρe_field, z -> dTdt_bomex(1, z))
 set!(Fρe_field, ρᵣ * cᵖᵈ * Fρe_field)
+set!(Fρθ_field, z -> dTdt_bomex(1, z))
+set!(Fρθ_field, ρᵣ * Fρe_field)
 
 ρe_radiation_forcing = Forcing(Fρe_field)
 ρe_forcing = (ρe_radiation_forcing, ρe_subsidence_forcing)
+
+ρθ_radiation_forcing = Forcing(Fρθ_field)
+ρθ_forcing = (ρθ_radiation_forcing, ρθ_subsidence_forcing)
 
 fig = Figure()
 axe = Axis(fig[1, 1], xlabel="z (m)", ylabel="Fρe (K/s)")
@@ -144,8 +166,10 @@ closure = AnisotropicMinimumDissipation()
 model = AtmosphereModel(grid; formulation, coriolis, microphysics, closure,
                         scalar_advection = Centered(order=2),
                         momentum_advection = WENO(order=9),
-                        forcing = (ρqᵗ=ρqᵗ_forcing, ρu=ρu_forcing, ρv=ρv_forcing, ρe=ρe_forcing),
-                        boundary_conditions = (ρe=ρe_bcs, ρqᵗ=ρqᵗ_bcs, ρu=ρu_bcs, ρv=ρv_bcs))
+                        forcing = (ρqᵗ=ρqᵗ_forcing, ρu=ρu_forcing, ρv=ρv_forcing, ρθ=ρθ_forcing),
+                        boundary_conditions = (ρθ=ρθ_bcs, ρqᵗ=ρqᵗ_bcs, ρu=ρu_bcs, ρv=ρv_bcs))
+                        # forcing = (ρqᵗ=ρqᵗ_forcing, ρu=ρu_forcing, ρv=ρv_forcing, ρe=ρe_forcing),
+                        # boundary_conditions = (ρe=ρe_bcs, ρqᵗ=ρqᵗ_bcs, ρu=ρu_bcs, ρv=ρv_bcs))
 
 # Values for the initial perturbations can be found in Appendix B
 # of Siebesma et al 2003, 3rd paragraph
@@ -159,32 +183,34 @@ simulation = Simulation(model; Δt=10, stop_time)
 conjure_time_step_wizard!(simulation, cfl=0.7)
 
 # Write a callback to compute *_avg_f
-ρe = energy_density(model)
+e = static_energy(model)
+θ = liquid_ice_potential_temperature(model)
 u_avg = Field(Average(model.velocities.u, dims=(1, 2)))
 v_avg = Field(Average(model.velocities.v, dims=(1, 2)))
-e_avg = Field(Average(ρe / ρᵣ, dims=(1, 2)))
+e_avg = Field(Average(e, dims=(1, 2)))
+θ_avg = Field(Average(θ, dims=(1, 2)))
 qᵗ_avg = Field(Average(model.specific_moisture, dims=(1, 2)))
 
 function compute_averages!(sim)
     compute!(u_avg)
     compute!(v_avg)
     compute!(e_avg)
+    compute!(θ_avg)
     compute!(qᵗ_avg)
     parent(u_avg_f) .= parent(u_avg)
     parent(v_avg_f) .= parent(v_avg)
     parent(e_avg_f) .= parent(e_avg)
+    parent(θ_avg_f) .= parent(θ_avg)
     parent(qᵗ_avg_f) .= parent(qᵗ_avg)
     return nothing
 end
 
 add_callback!(simulation, compute_averages!)
 
-θ = Breeze.AtmosphereModels.PotentialTemperatureField(model)
 qˡ = model.microphysical_fields.qˡ
 qᵛ = model.microphysical_fields.qᵛ
 qᵗ = model.specific_moisture
-qᵛ⁺ = Breeze.AtmosphereModels.SaturationSpecificHumidityField(model)
-θ_avg = Average(θ, dims=(1, 2)) |> Field
+qᵛ⁺ = SaturationSpecificHumidityField(model)
 qˡ_avg = Average(qˡ, dims=(1, 2)) |> Field
 
 fig = Figure()
@@ -212,7 +238,8 @@ ax_ρe = Axis(fig_lower[1, 1], xlabel="Energy density", ylabel="z (m)")
 ax_e  = Axis(fig_lower[1, 2], xlabel="Specific energy", ylabel="z (m)")
 ax_θ  = Axis(fig_lower[1, 3], xlabel="Potential temperature (K)", ylabel="z (m)")
 
-e = specific_energy(model)
+e = static_energy(model)
+ρe = ρᵣ * e
 ρe_avg = Average(ρe, dims=(1, 2)) |> Field
 e_avg = Average(e, dims=(1, 2)) |> Field
 
@@ -247,7 +274,7 @@ function progress(sim)
     qᵗ = sim.model.specific_moisture
     qᵗmax = maximum(qᵗ)
 
-    ρe = energy_density(sim.model)
+    ρe = static_energy_density(sim.model)
     ρemin = minimum(ρe)
     ρemax = maximum(ρe)
 

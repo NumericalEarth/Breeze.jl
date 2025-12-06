@@ -7,10 +7,10 @@ using Test
     grid = RectilinearGrid(default_arch, FT; size=(8, 8, 8), x=(0, 1_000), y=(0, 1_000), z=(0, 1_000))
     constants = ThermodynamicConstants(FT)
 
-    for p₀ in (101325, 100000), θ₀ in (288, 300)
-        @testset let p₀ = p₀, θ₀ = θ₀
+    for p₀ in (101325, 100000), θ₀ in (288, 300), thermodynamics in (:LiquidIcePotentialTemperature, :StaticEnergy)
+        @testset let p₀ = p₀, θ₀ = θ₀, thermodynamics = thermodynamics
             reference_state = ReferenceState(grid, constants, base_pressure=p₀, potential_temperature=θ₀)
-            formulation = AnelasticFormulation(reference_state)
+            formulation = AnelasticFormulation(reference_state; thermodynamics)
             model = AtmosphereModel(grid; thermodynamic_constants=constants, formulation)
 
             # test set!
@@ -19,15 +19,17 @@ using Test
             ρeᵢ = ρᵣ * cᵖᵈ * θ₀
 
             set!(model; θ = θ₀)
-            ρe₁ = deepcopy(energy_density(model))
+            ρe₁ = deepcopy(static_energy_density(model))
+            θ₁ = deepcopy(liquid_ice_potential_temperature(model))
 
             set!(model; ρe = ρeᵢ)
-            @test energy_density(model) ≈ ρe₁
+            @test static_energy_density(model) ≈ ρe₁
+            @test liquid_ice_potential_temperature(model) ≈ θ₁
         end
     end
 end
 
-@testset "PotentialTemperatureField (no microphysics) [$(FT)]" for FT in (Float32, Float64)
+@testset "liquid_ice_potential_temperature no microphysics) [$(FT)]" for FT in (Float32, Float64), thermodynamics in (:LiquidIcePotentialTemperature, :StaticEnergy)
     Oceananigans.defaults.FloatType = FT
     grid = RectilinearGrid(default_arch; size=(8, 8, 8), x=(0, 1_000), y=(0, 1_000), z=(0, 1_000))
     constants = ThermodynamicConstants()
@@ -35,7 +37,7 @@ end
     p₀ = FT(101325)
     θ₀ = FT(300)
     reference_state = ReferenceState(grid, constants, base_pressure=p₀, potential_temperature=θ₀)
-    formulation = AnelasticFormulation(reference_state)
+    formulation = AnelasticFormulation(reference_state; thermodynamics)
     model = AtmosphereModel(grid; thermodynamic_constants=constants, formulation)
 
     # Initialize with potential temperature and dry air
@@ -43,11 +45,11 @@ end
     set!(θᵢ, (x, y, z) -> θ₀ + rand())
     set!(model; θ=θᵢ)
 
-    θ_model = Breeze.AtmosphereModels.PotentialTemperatureField(model)
+    θ_model = liquid_ice_potential_temperature(model) |> Field
     @test θ_model ≈ θᵢ
 end
 
-@testset "Saturation and PotentialTemperatureField (WarmPhase) [$(FT)]" for FT in (Float32, Float64)
+@testset "Saturation and LiquidIcePotentialTemperatureField (WarmPhase) [$(FT)]" for FT in (Float32, Float64), thermodynamics in (:LiquidIcePotentialTemperature, :StaticEnergy)
     Oceananigans.defaults.FloatType = FT
     grid = RectilinearGrid(default_arch; size=(8, 8, 8), x=(0, 1_000), y=(0, 1_000), z=(0, 1_000))
     constants = ThermodynamicConstants()
@@ -55,7 +57,7 @@ end
     p₀ = FT(101325)
     θ₀ = FT(300)
     reference_state = ReferenceState(grid, constants, base_pressure=p₀, potential_temperature=θ₀)
-    formulation = AnelasticFormulation(reference_state)
+    formulation = AnelasticFormulation(reference_state; thermodynamics)
     microphysics = SaturationAdjustment()
     model = AtmosphereModel(grid; thermodynamic_constants=constants, formulation, microphysics)
 
@@ -63,7 +65,7 @@ end
     set!(model; θ=θ₀)
 
     # Check SaturationSpecificHumidityField matches direct thermodynamics
-    qᵛ⁺ = Breeze.AtmosphereModels.SaturationSpecificHumidityField(model)
+    qᵛ⁺ = SaturationSpecificHumidityField(model)
 
     # Sample mid-level cell
     _, _, Nz = size(grid)
@@ -88,72 +90,82 @@ end
     p₀ = FT(101325)
     θ₀ = FT(300)
     reference_state = ReferenceState(grid, constants, base_pressure=p₀, potential_temperature=θ₀)
-    formulation = AnelasticFormulation(reference_state)
+    potential_temperature_formulation = AnelasticFormulation(reference_state; thermodynamics=:LiquidIcePotentialTemperature)
+    static_energy_formulation = AnelasticFormulation(reference_state; thermodynamics=:StaticEnergy)
 
     @testset "Default advection schemes" begin
-        model = AtmosphereModel(grid; thermodynamic_constants=constants, formulation)
-        @test model.advection.momentum isa Centered
-        @test model.advection.ρe isa Centered
-        @test model.advection.ρqᵗ isa Centered
+        static_energy_model = AtmosphereModel(grid; thermodynamic_constants=constants, formulation=static_energy_formulation)
+        potential_temperature_model = AtmosphereModel(grid; thermodynamic_constants=constants, formulation=potential_temperature_formulation)
 
-        time_step!(model, 1)
-        @test true
+        @test static_energy_model.advection.ρe isa Centered
+        @test potential_temperature_model.advection.ρθ isa Centered
+
+        for model in (static_energy_model, potential_temperature_model)
+            @test model.advection.momentum isa Centered
+            @test model.advection.ρqᵗ isa Centered
+            time_step!(model, 1)
+        end
     end
 
     @testset "Unified advection parameter" begin
-        model_weno = AtmosphereModel(grid; thermodynamic_constants=constants, formulation, advection=WENO())
-        @test model_weno.advection.momentum isa WENO
-        @test model_weno.advection.ρe isa WENO
-        @test model_weno.advection.ρqᵗ isa WENO
-        time_step!(model_weno, 1)
-        @test true
+        static_energy_model = AtmosphereModel(grid; thermodynamic_constants=constants, formulation=static_energy_formulation, advection=WENO())
+        potential_temperature_model= AtmosphereModel(grid; thermodynamic_constants=constants, formulation=potential_temperature_formulation, advection=WENO())
 
-        model_centered = AtmosphereModel(grid; thermodynamic_constants=constants, formulation, advection=Centered(order=4))
-        @test model_centered.advection.momentum isa Centered
-        @test model_centered.advection.ρe isa Centered
-        time_step!(model_centered, 1)
-        @test true
+        @test static_energy_model.advection.ρe isa WENO
+        @test potential_temperature_model.advection.ρθ isa WENO
+
+        for model in (static_energy_model, potential_temperature_model)
+            @test model.advection.momentum isa WENO
+            @test model.advection.ρqᵗ isa WENO
+            time_step!(model, 1)
+        end
     end
 
     @testset "Separate momentum and tracer advection" begin
-        model = AtmosphereModel(grid; 
-                                thermodynamic_constants = constants, 
-                                formulation,
-                                momentum_advection = WENO(),
-                                scalar_advection = Centered(order=2))
-        @test model.advection.momentum isa WENO
-        @test model.advection.ρe isa Centered
-        @test model.advection.ρqᵗ isa Centered
-        time_step!(model, 1)
-        @test true
+        kw = (thermodynamic_constants=constants, momentum_advection = WENO(), scalar_advection = Centered(order=2))
+        static_energy_model = AtmosphereModel(grid; formulation=static_energy_formulation, kw...)
+        potential_temperature_model = AtmosphereModel(grid; formulation=potential_temperature_formulation, kw...)
+
+        @test static_energy_model.advection.ρe isa Centered
+        @test potential_temperature_model.advection.ρθ isa Centered
+
+        for model in (static_energy_model, potential_temperature_model)
+            @test model.advection.momentum isa WENO
+            @test model.advection.ρqᵗ isa Centered
+            time_step!(model, 1)
+        end
     end
 
     @testset "Tracer advection with user tracers" begin
-        model = AtmosphereModel(grid; 
-                                thermodynamic_constants = constants, 
-                                formulation,
-                                tracers = :c,
-                                scalar_advection = UpwindBiased(order=1))
-        @test model.advection.momentum isa Centered
-        @test model.advection.ρe isa UpwindBiased
-        @test model.advection.ρqᵗ isa UpwindBiased
-        @test model.advection.c isa UpwindBiased
-        time_step!(model, 1)
-        @test true
+        kw = (thermodynamic_constants=constants, tracers = :c, scalar_advection = UpwindBiased(order=1))
+        static_energy_model = AtmosphereModel(grid; formulation=static_energy_formulation, kw...)
+        potential_temperature_model = AtmosphereModel(grid; formulation=potential_temperature_formulation, kw...)
+
+        @test static_energy_model.advection.ρe isa UpwindBiased
+        @test potential_temperature_model.advection.ρθ isa UpwindBiased
+
+        for model in (static_energy_model, potential_temperature_model)
+            @test model.advection.momentum isa Centered
+            @test model.advection.ρqᵗ isa UpwindBiased
+            @test model.advection.c isa UpwindBiased
+            time_step!(model, 1)
+        end
     end
 
     @testset "Mixed configuration with tracers" begin
-        model = AtmosphereModel(grid; 
-                                thermodynamic_constants = constants, 
-                                formulation,
-                                tracers = :c,
-                                momentum_advection = WENO(),
-                                scalar_advection = Centered(order=2))
-        @test model.advection.momentum isa WENO
-        @test model.advection.ρe isa Centered
-        @test model.advection.ρqᵗ isa Centered
-        @test model.advection.c isa Centered
-        time_step!(model, 1)
-        @test true
+        scalar_advection = (; c=Centered(order=2), ρqᵗ=WENO())
+        kw = (thermodynamic_constants=constants, tracers = :c, momentum_advection = WENO(), scalar_advection)
+        static_energy_model = AtmosphereModel(grid; formulation=static_energy_formulation, kw...)
+        potential_temperature_model = AtmosphereModel(grid; formulation=potential_temperature_formulation, kw...)
+
+        @test static_energy_model.advection.ρe isa Centered
+        @test potential_temperature_model.advection.ρθ isa Centered
+
+        for model in (static_energy_model, potential_temperature_model)
+            @test model.advection.momentum isa WENO
+            @test model.advection.ρqᵗ isa WENO
+            @test model.advection.c isa Centered
+            time_step!(model, 1)
+        end
     end
 end

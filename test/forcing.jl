@@ -38,9 +38,9 @@ increment_tolerance(::Type{Float64}) = 1e-10
 
         e_forcing = (; ρe=forcing)
         model = setup_forcing_model(grid, e_forcing)
-        ρe_before = deepcopy(energy_density(model))
+        ρe_before = deepcopy(static_energy_density(model))
         time_step!(model, Δt)
-        @test maximum(energy_density(model)) ≈ maximum(ρe_before) + Δt
+        @test maximum(static_energy_density(model)) ≈ maximum(ρe_before) + Δt
 
         q_forcing = (; ρqᵗ=forcing)
         model = setup_forcing_model(grid, q_forcing)
