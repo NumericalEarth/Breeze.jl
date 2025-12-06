@@ -50,7 +50,7 @@ and a model that uses saturation adjustment microphysics.
 
 ### `:equilibrium`
 
-Returns the *saturation specific humidity* in saturated conditions, using the 
+Returns the *saturation specific humidity* in saturated conditions, using the
 `model.specific_moisture`. This is equivalent to the `:total_moisture` flavor
 under saturated conditions with no condensate; or in other words, if `model.specific_moisture` happens
 to be equal to the saturation specific humidity.
@@ -63,7 +63,7 @@ This is useful for manufacturing perfectly saturated initial conditions.
 
 ## Examples
 
-```jldoctest ssh
+```@example ssh
 using Breeze
 grid = RectilinearGrid(size=(4, 4, 4), extent=(500, 500, 1000))
 model = AtmosphereModel(grid)
@@ -73,17 +73,17 @@ qᵛ⁺ = SaturationSpecificHumidityField(model, :prognostic)
 
 Equilibrium flavor
 
-```jldoctest ssh
-qᵛ⁺ₑ = SaturationSpecificHumidity(model, :equilibrium)
+```@example ssh
+qᵛ⁺ₑ = SaturationSpecificHumidityField(model, :equilibrium)
 ```
 
 Equilibrium flavor
 
-```jldoctest ssh
-qᵛ = SaturationSpecificHumidity(model, :total_moisture)
+```@example ssh
+qᵛ = SaturationSpecificHumidityField(model, :total_moisture)
 ```
 """
-function SaturationSpecificHumidity(model, flavor_symbol=:prognostic)
+function SaturationSpecificHumidityField(model, flavor_symbol=:prognostic)
 
     flavor = if flavor_symbol == :prognostic
         Prognostic()
