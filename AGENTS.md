@@ -98,6 +98,9 @@ Breeze interfaces with ClimaOcean for coupled atmosphere-ocean simulations.
   - Keyword arguments that expect tuples (eg `tracers = (:a, :b)`) often "autotuple" single arguments. Always rely on this: i.e. use `tracers = :c` instead of `tracers = (:c,)` (the latter is more prone to mistakes and harder to read)
   - Instances of `AtmosphereModel` are almost always called `model`
   and instances of `Simulation` are called `simulation`.
+  - The examples and docs have their own `Project.toml` environment. When your run examples you need to use `examples/Project.toml`.
+    When you build new examples, please add example-specific packages to `examples/Project.toml`. Do not add example-specific
+    packages to the main Breeze Project.toml. You may also need to add relevant packages to AtmosphereProfilesLibrary.
 
 5. **Documentation Style**
   - Mathematical notation in `docs/src/appendix/notation.md`
