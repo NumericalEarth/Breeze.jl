@@ -33,7 +33,6 @@ p₀, θ₀ = 101500, 299.1
 constants = ThermodynamicConstants()
 reference_state = ReferenceState(grid, constants, base_pressure=p₀, potential_temperature=θ₀)
 formulation = AnelasticFormulation(reference_state, thermodynamics=:LiquidIcePotentialTemperature)
-# formulation = AnelasticFormulation(reference_state, thermodynamics=:StaticEnergy)
 
 q₀ = Breeze.Thermodynamics.MoistureMassFractions{eltype(grid)} |> zero
 ρ₀ = Breeze.Thermodynamics.density(p₀, θ₀, q₀, constants)
@@ -101,20 +100,14 @@ set!(wˢ, z -> w_bomex(z))
 ρqᵗ_subsidence_forcing = Forcing(Fρqᵗ_subsidence, discrete_form=true, parameters=(; qᵗ_avg=qᵗ_avg_f, wˢ, ρᵣ))
 
 coriolis = FPlane(f=3.76e-5)
-# ρuᵍ = Field{Nothing, Nothing, Center}(grid)
-# ρvᵍ = Field{Nothing, Nothing, Center}(grid)
 uᵍ = Field{Nothing, Nothing, Center}(grid)
 vᵍ = Field{Nothing, Nothing, Center}(grid)
 uᵍ_bomex = AtmosphericProfilesLibrary.Bomex_geostrophic_u(FT)
 vᵍ_bomex = AtmosphericProfilesLibrary.Bomex_geostrophic_v(FT)
 set!(uᵍ, z -> uᵍ_bomex(z))
 set!(vᵍ, z -> vᵍ_bomex(z))
-
 ρuᵍ = Field(ρᵣ * uᵍ)
 ρvᵍ = Field(ρᵣ * vᵍ)
-
-# set!(ρuᵍ, ρᵣ * ρuᵍ)
-# set!(ρvᵍ, ρᵣ * ρvᵍ)
 
 @inline Fρu_geostrophic(i, j, k, grid, clock, fields, p) = @inbounds - p.f * p.ρvᵍ[i, j, k]
 @inline Fρv_geostrophic(i, j, k, grid, clock, fields, p) = @inbounds p.f * p.ρuᵍ[i, j, k]
@@ -154,23 +147,11 @@ lines!(axq, drying)
 save("forcings.png", fig)
 
 microphysics = SaturationAdjustment(equilibrium=WarmPhaseEquilibrium())
+advection = WENO(order=9)
 
-# buffer_scheme = Centered(order=2)
-# buffer_scheme = WENO(order=7; buffer_scheme)
-# advection = WENO(order=9; buffer_scheme)
-# closure = nothing
-
-advection = Centered(order=2)
-closure = AnisotropicMinimumDissipation()
-
-model = AtmosphereModel(grid; formulation, coriolis, microphysics, closure,
-                        scalar_advection = Centered(order=2),
-                        momentum_advection = WENO(order=9),
-                        # forcing = (ρqᵗ=ρqᵗ_forcing, ρu=ρu_forcing, ρv=ρv_forcing, ρθ=ρθ_subsidence_forcing, ρe=ρe_radiation_forcing),
-                        forcing = (ρqᵗ=ρqᵗ_forcing, ρu=ρu_forcing, ρv=ρv_forcing, ρθ=ρθ_subsidence_forcing), 
+model = AtmosphereModel(grid; formulation, coriolis, microphysics, advection,
+                        forcing = (ρqᵗ=ρqᵗ_forcing, ρu=ρu_forcing, ρv=ρv_forcing, ρθ=ρθ_subsidence_forcing, ρe=ρe_radiation_forcing),
                         boundary_conditions = (ρθ=ρθ_bcs, ρqᵗ=ρqᵗ_bcs, ρu=ρu_bcs, ρv=ρv_bcs))
-                        # forcing = (ρqᵗ=ρqᵗ_forcing, ρu=ρu_forcing, ρv=ρv_forcing, ρe=ρe_forcing),
-                        # boundary_conditions = (ρe=ρe_bcs, ρqᵗ=ρqᵗ_bcs, ρu=ρu_bcs, ρv=ρv_bcs))
 
 # Values for the initial perturbations can be found in Appendix B
 # of Siebesma et al 2003, 3rd paragraph
