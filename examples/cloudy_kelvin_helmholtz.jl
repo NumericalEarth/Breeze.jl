@@ -28,7 +28,7 @@ using Printf
 # Grid resolution is modest but enough to clearly resolve the Kelvin-Helmholtz billows and
 # rolled-up moisture filament.
 
-Nx, Nz = 384, 128  # resolution
+Nx, Nz = 384, 128   # resolution
 Lx, Lz = 10e3, 3e3  # domain extent
 
 grid = RectilinearGrid(; size = (Nx, Nz), x = (0, Lx), z = (0, Lz),
