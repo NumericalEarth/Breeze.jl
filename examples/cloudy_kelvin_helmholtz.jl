@@ -134,6 +134,7 @@ lines!(axq, Qᵗ)
 lines!(axθ, θ)
 lines!(axR, Ri)
 lines!(axR, [1/4, 1/4], [0, Lz], linestyle = :dash, color = :black)
+
 xlims!(axR, 0, 0.8)
 axR.xticks = 0:0.25:1
 
