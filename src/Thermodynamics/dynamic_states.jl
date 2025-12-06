@@ -26,7 +26,7 @@ end
 @inline with_moisture(𝒰::PotentialTemperatureState{FT}, q::MoistureMassFractions{FT}) where FT =
     PotentialTemperatureState{FT}(𝒰.potential_temperature, q, 𝒰.base_pressure, 𝒰.reference_pressure)
 
-@inline function temperature(𝒰::PotentialTemperatureState, thermo::ThermodynamicConstants)
+@inline function temperature(𝒰::PotentialTemperatureState{FT}, thermo::ThermodynamicConstants{FT})::FT where FT
     θ = 𝒰.potential_temperature
     Π = exner_function(𝒰, thermo)
 
@@ -64,7 +64,7 @@ end
 @inline with_moisture(𝒰::StaticEnergyState{FT}, q::MoistureMassFractions{FT}) where FT =
     StaticEnergyState{FT}(𝒰.static_energy, q, 𝒰.height, 𝒰.reference_pressure)
 
-@inline function temperature(𝒰::StaticEnergyState, thermo::ThermodynamicConstants)
+@inline function temperature(𝒰::StaticEnergyState{FT}, thermo::ThermodynamicConstants{FT})::FT where {FT}
     e = 𝒰.static_energy
     q = 𝒰.moisture_mass_fractions
     cᵖᵐ = mixture_heat_capacity(q, thermo)
