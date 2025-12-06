@@ -33,7 +33,7 @@ const LiquidIcePotentialTemperatureField = Field{Center, Center, Center, <:Liqui
 
 Return a `KernelFunctionOperation` representing liquid-ice potential temperature.
 """
-function LiquidIcePotentialTemperature(model, flavor_symbol=:specific)
+function LiquidIcePotentialTemperature(model::AtmosphereModel, flavor_symbol=:specific)
 
     flavor = if flavor_symbol === :specific
         Specific()

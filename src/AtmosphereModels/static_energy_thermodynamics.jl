@@ -14,6 +14,7 @@ function fill_halo_regions!(thermo::StaticEnergyThermodynamics)
 end
 
 const ASEF = AnelasticFormulation{<:StaticEnergyThermodynamics}
+
 prognostic_field_names(formulation::ASEF) = tuple(:ρe)
 additional_field_names(formulation::ASEF) = tuple(:e)
 thermodynamic_density_name(::ASEF) = :ρe
@@ -64,10 +65,12 @@ function collect_prognostic_fields(formulation::ASEF,
 end
 
 const StaticEnergyAnelasticModel = AtmosphereModel{<:ASEF}
-liquid_ice_potential_temperature(model::StaticEnergyAnelasticModel) = LiquidIcePotentialTemperature(model, :specific)
-potential_temperature_density(model::StaticEnergyAnelasticModel) = LiquidIcePotentialTemperature(model, :density)
-static_energy(model::StaticEnergyAnelasticModel) = model.formulation.thermodynamics.specific_energy
-static_energy_density(model::StaticEnergyAnelasticModel) = model.formulation.thermodynamics.energy_density
+const SEAM = StaticEnergyAnelasticModel
+
+liquid_ice_potential_temperature(model::SEAM) = LiquidIcePotentialTemperature(model, :specific)
+potential_temperature_density(model::SEAM) = LiquidIcePotentialTemperature(model, :density)
+static_energy(model::SEAM) = model.formulation.thermodynamics.specific_energy
+static_energy_density(model::SEAM) = model.formulation.thermodynamics.energy_density
 
 function compute_thermodynamic_tendency!(model::StaticEnergyAnelasticModel, common_args)
     grid = model.grid

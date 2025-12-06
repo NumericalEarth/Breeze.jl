@@ -25,7 +25,9 @@ solver_tol(::Type{Float32}) = 1e-3
 test_tol(FT::Type{Float64}) = 10 * sqrt(solver_tol(FT))
 test_tol(FT::Type{Float32}) = sqrt(solver_tol(FT))
 
-@testset "Warm-phase saturation adjustment (AtmosphereModel) [$(FT)]" for FT in (Float32, Float64)
+test_thermodynamics = (:StaticEnergy,) # :LiquidIcePotentialTemperature)
+
+@testset "Warm-phase saturation adjustment [$(FT)]" for FT in (Float32, Float64)
     grid = RectilinearGrid(default_arch, FT; size=(1, 1, 1), x=(0, 1), y=(0, 1), z=(0, 1))
     constants = ThermodynamicConstants(FT)
     reference_state = ReferenceState(grid, constants; base_pressure=101325, potential_temperature=288)
@@ -57,38 +59,40 @@ test_tol(FT::Type{Float32}) = sqrt(solver_tol(FT))
     @test compute_temperature(𝒰₁, microphysics, constants) ≈ T₁ atol=atol
     @test compute_temperature(𝒰₁, nothing, constants) ≈ T₁ atol=atol
 
-    formulation = AnelasticFormulation(reference_state)
-    model = AtmosphereModel(grid; thermodynamic_constants=constants, formulation, microphysics)
-    ρᵣ = @allowscalar first(reference_state.density)
+    @testset "AtmosphereModel with $thermodynamics thermodynamics [$FT]" for thermodynamics in test_thermodynamics
+        formulation = AnelasticFormulation(reference_state; thermodynamics)
+        model = AtmosphereModel(grid; thermodynamic_constants=constants, formulation, microphysics)
+        ρᵣ = @allowscalar first(reference_state.density)
 
-    # Many more tests that touch saturated conditions
-    for T₂ in 270:4:320, qᵗ₂ in 1e-2:2e-3:5e-2
-        @testset let T₂=T₂, qᵗ₂=qᵗ₂
-            T₂ = convert(FT, T₂)
-            qᵗ₂ = convert(FT, qᵗ₂)
-            qᵛ⁺₂ = equilibrium_saturation_specific_humidity(T₂, pᵣ, qᵗ₂, constants, microphysics.equilibrium)
-            @test qᵛ⁺₂ isa FT
+        # Many more tests that touch saturated conditions
+        for T₂ in 270:4:320, qᵗ₂ in 1e-2:2e-3:5e-2
+            @testset let T₂=T₂, qᵗ₂=qᵗ₂
+                T₂ = convert(FT, T₂)
+                qᵗ₂ = convert(FT, qᵗ₂)
+                qᵛ⁺₂ = equilibrium_saturation_specific_humidity(T₂, pᵣ, qᵗ₂, constants, microphysics.equilibrium)
+                @test qᵛ⁺₂ isa FT
 
-            if qᵗ₂ > qᵛ⁺₂ # saturated conditions
-                qˡ₂ = qᵗ₂ - qᵛ⁺₂
-                q₂ = MoistureMassFractions(qᵛ⁺₂, qˡ₂)
-                cᵖᵐ = mixture_heat_capacity(q₂, constants)
-                ℒˡᵣ = constants.liquid.reference_latent_heat
-                e₂ = cᵖᵐ * T₂ + g * z - ℒˡᵣ * qˡ₂
+                if qᵗ₂ > qᵛ⁺₂ # saturated conditions
+                    qˡ₂ = qᵗ₂ - qᵛ⁺₂
+                    q₂ = MoistureMassFractions(qᵛ⁺₂, qˡ₂)
+                    cᵖᵐ = mixture_heat_capacity(q₂, constants)
+                    ℒˡᵣ = constants.liquid.reference_latent_heat
+                    e₂ = cᵖᵐ * T₂ + g * z - ℒˡᵣ * qˡ₂
 
-                𝒰₂ = StaticEnergyState(e₂, q₂, z, pᵣ)
-                T★ = compute_temperature(𝒰₂, microphysics, constants)
-                @test T★ ≈ T₂ atol=atol
+                    𝒰₂ = StaticEnergyState(e₂, q₂, z, pᵣ)
+                    T★ = compute_temperature(𝒰₂, microphysics, constants)
+                    @test T★ ≈ T₂ atol=atol
 
-                # Parcel test for AtmosphereModel
-                set!(model, ρe = ρᵣ * e₂, qᵗ = qᵗ₂)    
-                T★ = @allowscalar first(model.temperature)
-                qᵛ = @allowscalar first(model.microphysical_fields.qᵛ)
-                qˡ = @allowscalar first(model.microphysical_fields.qˡ)
+                    # Parcel test for AtmosphereModel
+                    set!(model, ρe = ρᵣ * e₂, qᵗ = qᵗ₂)    
+                    T★ = @allowscalar first(model.temperature)
+                    qᵛ = @allowscalar first(model.microphysical_fields.qᵛ)
+                    qˡ = @allowscalar first(model.microphysical_fields.qˡ)
 
-                @test T★ ≈ T₂ atol=atol
-                @test qᵛ ≈ qᵛ⁺₂ atol=atol
-                @test qˡ ≈ qˡ₂ atol=atol
+                    @test T★ ≈ T₂ atol=atol
+                    @test qᵛ ≈ qᵛ⁺₂ atol=atol
+                    @test qˡ ≈ qˡ₂ atol=atol
+                end
             end
         end
     end
@@ -101,28 +105,29 @@ end
 
 @testset "Mixed-phase saturation adjustment (AtmosphereModel) [$(FT)]" for FT in (Float32, Float64)
     grid = RectilinearGrid(default_arch, FT; size=(1, 1, 1), x=(0, 1), y=(0, 1), z=(0, 1))
+
     constants = ThermodynamicConstants(FT)
-    reference_state = ReferenceState(grid, constants; base_pressure=101325, potential_temperature=288)
-    atol = test_tol(FT)
-
-    Tᶠ = FT(273.15)  # Freezing temperature
-    Tʰ = FT(233.15)  # Homogeneous ice nucleation temperature
-
-    equilibrium = MixedPhaseEquilibrium(FT; freezing_temperature=Tᶠ, homogeneous_ice_nucleation_temperature=Tʰ)
-    microphysics = SaturationAdjustment(FT; tolerance=solver_tol(FT), equilibrium=equilibrium)
-    formulation = AnelasticFormulation(reference_state)
-    model = AtmosphereModel(grid; thermodynamic_constants=constants, formulation, microphysics)
-    ρᵣ = @allowscalar first(reference_state.density)
-
-    # Sample a single cell
-    pᵣ = @allowscalar first(reference_state.pressure)
-    g = constants.gravitational_acceleration
-    z = zero(FT)
     ℒˡᵣ = constants.liquid.reference_latent_heat
     ℒⁱᵣ = constants.ice.reference_latent_heat
+    g = constants.gravitational_acceleration
+    z = zero(FT)
 
-    # Test 1: Constructor and equilibrated_surface utility
-    @testset "Constructor and equilibrated_surface" begin
+    reference_state = ReferenceState(grid, constants; base_pressure=101325, potential_temperature=288)
+    pᵣ = @allowscalar first(reference_state.pressure)
+    ρᵣ = @allowscalar first(reference_state.density)
+
+    atol = test_tol(FT)
+    Tʰ = FT(233.15)  # Homogeneous ice nucleation temperature
+    Tᶠ = FT(273.15)  # Freezing temperature
+
+    equilibrium = MixedPhaseEquilibrium(FT; freezing_temperature=Tᶠ, homogeneous_ice_nucleation_temperature=Tʰ)
+    microphysics = SaturationAdjustment(FT; tolerance=solver_tol(FT), equilibrium)
+
+    @testset "AtmosphereModel with $thermodynamics thermodynamics [$FT]" for thermodynamics in test_thermodynamics
+        formulation = AnelasticFormulation(reference_state; thermodynamics)
+        model = AtmosphereModel(grid; thermodynamic_constants=constants, formulation, microphysics)
+
+        # Test 1: Constructor and equilibrated_surface utility
         @test microphysics isa SaturationAdjustment
         @test microphysics.equilibrium isa MixedPhaseEquilibrium{FT}
         @test microphysics.equilibrium.freezing_temperature == Tᶠ
@@ -133,129 +138,132 @@ end
         @test model.microphysics.equilibrium.freezing_temperature == Tᶠ
         @test model.microphysics.equilibrium.homogeneous_ice_nucleation_temperature == Tʰ
 
-        # Test equilibrated_surface at different temperatures
-        surface_above_freezing = Breeze.Microphysics.equilibrated_surface(equilibrium, FT(300))
-        @test surface_above_freezing isa PlanarMixedPhaseSurface{FT}
-        @test surface_above_freezing.liquid_fraction == 1  # Above freezing, all liquid
+        @testset "equilibrated_surface" begin
+            # Test equilibrated_surface at different temperatures
+            surface_above_freezing = Breeze.Microphysics.equilibrated_surface(equilibrium, FT(300))
+            @test surface_above_freezing isa PlanarMixedPhaseSurface{FT}
+            @test surface_above_freezing.liquid_fraction == 1  # Above freezing, all liquid
 
-        surface_below_homogeneous_ice_nucleation = Breeze.Microphysics.equilibrated_surface(equilibrium, FT(200))
-        @test surface_below_homogeneous_ice_nucleation isa PlanarMixedPhaseSurface{FT}
-        @test surface_below_homogeneous_ice_nucleation.liquid_fraction == 0  # Below homogeneous nucleation, all ice
+            surface_below_homogeneous_ice_nucleation = Breeze.Microphysics.equilibrated_surface(equilibrium, FT(200))
+            @test surface_below_homogeneous_ice_nucleation isa PlanarMixedPhaseSurface{FT}
+            @test surface_below_homogeneous_ice_nucleation.liquid_fraction == 0  # Below homogeneous nucleation, all ice
 
-        T_mid = FT(253.15)  # Midway between Tᶠ and Tʰ
-        surface_midway = Breeze.Microphysics.equilibrated_surface(equilibrium, T_mid)
-        @test surface_midway isa PlanarMixedPhaseSurface{FT}
-        λ_expected = test_liquid_fraction(T_mid, Tᶠ, Tʰ)
-        @test surface_midway.liquid_fraction ≈ λ_expected
-    end
-
-    # Test 2: Temperatures above freezing - should match warm phase behavior
-    @testset "Temperatures above freezing (warm phase equivalence)" begin
-        T_warm = FT(300)
-        qᵗ = FT(0.02)
-        qᵛ⁺ = equilibrium_saturation_specific_humidity(T_warm, pᵣ, qᵗ, constants, equilibrium)
-        atol = test_tol(FT)
-
-        if qᵗ > qᵛ⁺  # saturated conditions
-            # For warm temperatures, all condensate should be liquid
-            qˡ = qᵗ - qᵛ⁺
-            q = MoistureMassFractions(qᵛ⁺, qˡ)
-            cᵖᵐ = mixture_heat_capacity(q, constants)
-            e = cᵖᵐ * T_warm + g * z - ℒˡᵣ * qˡ
-
-            𝒰 = StaticEnergyState(e, q, z, pᵣ)
-            T★ = compute_temperature(𝒰, microphysics, constants)
-            @test T★ ≈ T_warm atol=atol
-
-            # Parcel test for AtmosphereModel
-            set!(model, ρe = ρᵣ * e, qᵗ = qᵗ)
-            T★ = @allowscalar first(model.temperature)
-            qᵛm = @allowscalar first(model.microphysical_fields.qᵛ)
-            qˡm = @allowscalar first(model.microphysical_fields.qˡ)
-            qⁱm = @allowscalar first(model.microphysical_fields.qⁱ)
-
-            @test T★ ≈ T_warm atol=atol
-            @test qᵛm ≈ qᵛ⁺ atol=atol
-            @test qˡm ≈ qˡ atol=atol
-            @test qⁱm ≈ zero(FT) atol=atol
+            T_mid = FT(253.15)  # Midway between Tᶠ and Tʰ
+            surface_midway = Breeze.Microphysics.equilibrated_surface(equilibrium, T_mid)
+            @test surface_midway isa PlanarMixedPhaseSurface{FT}
+            λ_expected = test_liquid_fraction(T_mid, Tᶠ, Tʰ)
+            @test surface_midway.liquid_fraction ≈ λ_expected
         end
-    end
 
-    # Test 3: Temperatures below homogeneous ice nucleation - all ice
-    @testset "Temperatures below homogeneous ice nucleation (all ice)" begin
-        T_cold = FT(220)  # Below Tʰ
-        qᵗ = FT(0.01)
-        qᵛ⁺ = equilibrium_saturation_specific_humidity(T_cold, pᵣ, qᵗ, constants, equilibrium)
-        atol = test_tol(FT)
+        # Test 2: Temperatures above freezing - should match warm phase behavior
+        @testset "Temperatures above freezing (warm phase equivalence)" begin
+            T_warm = FT(300)
+            qᵗ = FT(0.02)
+            qᵛ⁺ = equilibrium_saturation_specific_humidity(T_warm, pᵣ, qᵗ, constants, equilibrium)
+            atol = test_tol(FT)
 
-        if qᵗ > qᵛ⁺  # saturated conditions
-            # All condensate should be ice
-            qⁱ = qᵗ - qᵛ⁺
-            q = MoistureMassFractions(qᵛ⁺, zero(FT), qⁱ)
-            cᵖᵐ = mixture_heat_capacity(q, constants)
-            e = cᵖᵐ * T_cold + g * z - ℒⁱᵣ * qⁱ
+            if qᵗ > qᵛ⁺  # saturated conditions
+                # For warm temperatures, all condensate should be liquid
+                qˡ = qᵗ - qᵛ⁺
+                q = MoistureMassFractions(qᵛ⁺, qˡ)
+                cᵖᵐ = mixture_heat_capacity(q, constants)
+                e = cᵖᵐ * T_warm + g * z - ℒˡᵣ * qˡ
 
-            𝒰 = StaticEnergyState(e, q, z, pᵣ)
-            T★ = compute_temperature(𝒰, microphysics, constants)
-            @test T★ ≈ T_cold atol=atol
+                𝒰 = StaticEnergyState(e, q, z, pᵣ)
+                T★ = compute_temperature(𝒰, microphysics, constants)
+                @test T★ ≈ T_warm atol=atol
 
-            set!(model, ρe = ρᵣ * e, qᵗ = qᵗ)
-            T★ = @allowscalar first(model.temperature)
-            qᵛm = @allowscalar first(model.microphysical_fields.qᵛ)
-            qˡm = @allowscalar first(model.microphysical_fields.qˡ)
-            qⁱm = @allowscalar first(model.microphysical_fields.qⁱ)
+                # Parcel test for AtmosphereModel
+                set!(model, ρe = ρᵣ * e, qᵗ = qᵗ)
+                T★ = @allowscalar first(model.temperature)
+                qᵛm = @allowscalar first(model.microphysical_fields.qᵛ)
+                qˡm = @allowscalar first(model.microphysical_fields.qˡ)
+                qⁱm = @allowscalar first(model.microphysical_fields.qⁱ)
 
-            @test T★ ≈ T_cold atol=atol
-            @test qᵛm ≈ qᵛ⁺ atol=atol
-            @test qˡm ≈ zero(FT) atol=atol
-            @test qⁱm ≈ qⁱ atol=atol
+                @test T★ ≈ T_warm atol=atol
+                @test qᵛm ≈ qᵛ⁺ atol=atol
+                @test qˡm ≈ qˡ atol=atol
+                @test qⁱm ≈ zero(FT) atol=atol
+            end
         end
-    end
 
-    # Test 4: Mixed-phase range temperatures with moist static energy verification
-    @testset "Mixed-phase range temperatures with moist static energy" begin
-        atol = test_tol(FT)
-        for T in 240:10:270
-            @testset let T=T
-                T = convert(FT, T)
-                λ = test_liquid_fraction(T, Tᶠ, Tʰ)
-                qᵗ = FT(0.015)
-                qᵛ⁺ = equilibrium_saturation_specific_humidity(T, pᵣ, qᵗ, constants, equilibrium)
+        # Test 3: Temperatures below homogeneous ice nucleation - all ice
+        @testset "Temperatures below homogeneous ice nucleation (all ice)" begin
+            T_cold = FT(220)  # Below Tʰ
+            qᵗ = FT(0.01)
+            qᵛ⁺ = equilibrium_saturation_specific_humidity(T_cold, pᵣ, qᵗ, constants, equilibrium)
+            atol = test_tol(FT)
 
-                if qᵗ > qᵛ⁺  # saturated conditions
-                    # Partition condensate between liquid and ice based on λ
-                    q_condensate = qᵗ - qᵛ⁺
-                    qˡ = λ * q_condensate
-                    qⁱ = (1 - λ) * q_condensate
-                    q = MoistureMassFractions(qᵛ⁺, qˡ, qⁱ)
+            if qᵗ > qᵛ⁺  # saturated conditions
+                # All condensate should be ice
+                qⁱ = qᵗ - qᵛ⁺
+                q = MoistureMassFractions(qᵛ⁺, zero(FT), qⁱ)
+                cᵖᵐ = mixture_heat_capacity(q, constants)
+                e = cᵖᵐ * T_cold + g * z - ℒⁱᵣ * qⁱ
 
-                    # Verify partitioning sums correctly
-                    @test q.vapor + q.liquid + q.ice ≈ qᵗ
+                𝒰 = StaticEnergyState(e, q, z, pᵣ)
+                T★ = compute_temperature(𝒰, microphysics, constants)
+                @test T★ ≈ T_cold atol=atol
 
-                    # Compute moist static energy: e = cᵖᵐ*T + g*z - ℒˡᵣ*qˡ - ℒⁱᵣ*qⁱ
-                    cᵖᵐ = mixture_heat_capacity(q, constants)
-                    e = cᵖᵐ * T + g * z - ℒˡᵣ * qˡ - ℒⁱᵣ * qⁱ
+                set!(model, ρe = ρᵣ * e, qᵗ = qᵗ)
+                T★ = @allowscalar first(model.temperature)
+                qᵛm = @allowscalar first(model.microphysical_fields.qᵛ)
+                qˡm = @allowscalar first(model.microphysical_fields.qˡ)
+                qⁱm = @allowscalar first(model.microphysical_fields.qⁱ)
 
-                    # Verify moist static energy can recover temperature
-                    𝒰 = StaticEnergyState(e, q, z, pᵣ)
-                    T_recovered = (e - g * z + ℒˡᵣ * q.liquid + ℒⁱᵣ * q.ice) / mixture_heat_capacity(q, constants)
-                    @test T_recovered ≈ T
+                @test T★ ≈ T_cold atol=atol
+                @test qᵛm ≈ qᵛ⁺ atol=atol
+                @test qˡm ≈ zero(FT) atol=atol
+                @test qⁱm ≈ qⁱ atol=atol
+            end
+        end
 
-                    # Test saturation adjustment recovers temperature
-                    𝒰_unadjusted = StaticEnergyState(e, MoistureMassFractions(qᵗ), z, pᵣ)
-                    T★ = compute_temperature(𝒰_unadjusted, microphysics, constants)
-                    @test T★ ≈ T atol=atol
+        # Test 4: Mixed-phase range temperatures with moist static energy verification
+        @testset "Mixed-phase range temperatures with moist static energy" begin
+            atol = test_tol(FT)
 
-                    set!(model, ρe = ρᵣ * e, qᵗ = qᵗ)
-                    T★ = @allowscalar first(model.temperature)
-                    qᵛm = @allowscalar first(model.microphysical_fields.qᵛ)
-                    qˡm = @allowscalar first(model.microphysical_fields.qˡ)
-                    qⁱm = @allowscalar first(model.microphysical_fields.qⁱ)
+            for T in 240:10:270
+                @testset let T=T
+                    T = convert(FT, T)
+                    λ = test_liquid_fraction(T, Tᶠ, Tʰ)
+                    qᵗ = FT(0.015)
+                    qᵛ⁺ = equilibrium_saturation_specific_humidity(T, pᵣ, qᵗ, constants, equilibrium)
 
-                    @test T★ ≈ T atol=atol
-                    @test qᵛm ≈ qᵛ⁺ atol=atol
-                    @test qˡm ≈ qˡ atol=atol
-                    @test qⁱm ≈ qⁱ atol=atol
+                    if qᵗ > qᵛ⁺  # saturated conditions
+                        # Partition condensate between liquid and ice based on λ
+                        q_condensate = qᵗ - qᵛ⁺
+                        qˡ = λ * q_condensate
+                        qⁱ = (1 - λ) * q_condensate
+                        q = MoistureMassFractions(qᵛ⁺, qˡ, qⁱ)
+
+                        # Verify partitioning sums correctly
+                        @test q.vapor + q.liquid + q.ice ≈ qᵗ
+
+                        # Compute moist static energy: e = cᵖᵐ*T + g*z - ℒˡᵣ*qˡ - ℒⁱᵣ*qⁱ
+                        cᵖᵐ = mixture_heat_capacity(q, constants)
+                        e = cᵖᵐ * T + g * z - ℒˡᵣ * qˡ - ℒⁱᵣ * qⁱ
+
+                        # Verify moist static energy can recover temperature
+                        𝒰 = StaticEnergyState(e, q, z, pᵣ)
+                        T_recovered = (e - g * z + ℒˡᵣ * q.liquid + ℒⁱᵣ * q.ice) / mixture_heat_capacity(q, constants)
+                        @test T_recovered ≈ T
+
+                        # Test saturation adjustment recovers temperature
+                        𝒰_unadjusted = StaticEnergyState(e, MoistureMassFractions(qᵗ), z, pᵣ)
+                        T★ = compute_temperature(𝒰_unadjusted, microphysics, constants)
+                        @test T★ ≈ T atol=atol
+
+                        set!(model, ρe = ρᵣ * e, qᵗ = qᵗ)
+                        T★ = @allowscalar first(model.temperature)
+                        qᵛm = @allowscalar first(model.microphysical_fields.qᵛ)
+                        qˡm = @allowscalar first(model.microphysical_fields.qˡ)
+                        qⁱm = @allowscalar first(model.microphysical_fields.qⁱ)
+
+                        @test T★ ≈ T atol=atol
+                        @test qᵛm ≈ qᵛ⁺ atol=atol
+                        @test qˡm ≈ qˡ atol=atol
+                        @test qⁱm ≈ qⁱ atol=atol
+                    end
                 end
             end
         end

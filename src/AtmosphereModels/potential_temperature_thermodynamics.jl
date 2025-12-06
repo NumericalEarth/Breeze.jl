@@ -14,6 +14,7 @@ function fill_halo_regions!(thermo::LiquidIcePotentialTemperatureThermodynamics)
 end
 
 const APTF = AnelasticFormulation{<:LiquidIcePotentialTemperatureThermodynamics}
+
 prognostic_field_names(formulation::APTF) = tuple(:ρθ)
 additional_field_names(formulation::APTF) = tuple(:θ)
 thermodynamic_density_name(::APTF) = :ρθ
@@ -67,8 +68,8 @@ end
 const LiquidIcePotentialTemperatureAnelasticModel = AtmosphereModel{<:APTF}
 const LIPTAM = LiquidIcePotentialTemperatureAnelasticModel 
 
-potential_temperature_density(model::LIPTAM) = model.formulation.thermodynamics.potential_temperature_density
-potential_temperature(model::LIPTAM) = model.formulation.thermodynamics.potential_temperature
+liquid_ice_potential_temperature_density(model::LIPTAM) = model.formulation.thermodynamics.potential_temperature_density
+liquid_ice_potential_temperature(model::LIPTAM) = model.formulation.thermodynamics.potential_temperature
 static_energy(model::LIPTAM) = StaticEnergyField(model, :specific)
 static_energy_density(model::LIPTAM) = StaticEnergyField(model, :density)
 
