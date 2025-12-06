@@ -50,14 +50,14 @@ model = AtmosphereModel(grid; advection=WENO(order=5), microphysics)
 # N² = \frac{g}{θ₀} \frac{∂θ}{∂z} ,
 # ```
 #
-# We initialize the potential temperature that gives constant Brunt–Väisälä frequency,
+# We initialize with a potential temperature that gives constant Brunt–Väisälä frequency,
 # representative of mid-tropospheric stability. The (dry) Brunt–Väisälä frequency is
 #
 # ```math
 # N² = \frac{g}{θ} \frac{∂θ}{∂z}
 # ```
 #
-# and thus, for constant ``N²`` the above implies ``θ = θ₀ \exp{(N² z / g)}``.
+# and thus, for constant ``N²``, the above implies that ``θ = θ₀ \exp{(N² z / g)}``.
 
 thermo = ThermodynamicConstants()
 g = thermo.gravitational_acceleration
