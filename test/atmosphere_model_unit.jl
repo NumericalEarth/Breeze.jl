@@ -43,7 +43,7 @@ end
     set!(θᵢ, (x, y, z) -> θ₀ + rand())
     set!(model; θ=θᵢ)
 
-    θ_model = potential_temperature(model) |> Field
+    θ_model = liquid_ice_potential_temperature(model) |> Field
     @test θ_model ≈ θᵢ
 end
 
@@ -116,8 +116,8 @@ end
     end
 
     @testset "Separate momentum and tracer advection" begin
-        model = AtmosphereModel(grid; 
-                                thermodynamic_constants = constants, 
+        model = AtmosphereModel(grid;
+                                thermodynamic_constants = constants,
                                 formulation,
                                 momentum_advection = WENO(),
                                 scalar_advection = Centered(order=2))
@@ -129,8 +129,8 @@ end
     end
 
     @testset "Tracer advection with user tracers" begin
-        model = AtmosphereModel(grid; 
-                                thermodynamic_constants = constants, 
+        model = AtmosphereModel(grid;
+                                thermodynamic_constants = constants,
                                 formulation,
                                 tracers = :c,
                                 scalar_advection = UpwindBiased(order=1))
@@ -143,8 +143,8 @@ end
     end
 
     @testset "Mixed configuration with tracers" begin
-        model = AtmosphereModel(grid; 
-                                thermodynamic_constants = constants, 
+        model = AtmosphereModel(grid;
+                                thermodynamic_constants = constants,
                                 formulation,
                                 tracers = :c,
                                 momentum_advection = WENO(),
