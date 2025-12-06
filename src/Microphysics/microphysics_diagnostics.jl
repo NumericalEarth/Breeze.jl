@@ -30,7 +30,6 @@ Adapt.adapt_structure(to, k::SaturationSpecificHumidityKernelFunction) =
 
 const C = Center
 const SaturationSpecificHumidity = KernelFunctionOperation{C, C, C, <:Any, <:Any, <:SaturationSpecificHumidityKernelFunction}
-const SaturationSpecificHumidityField = Field{C, C, C, <:SaturationSpecificHumidity}
 
 struct Prognostic end
 struct Equilibrium end
@@ -146,4 +145,5 @@ function (d::AdjustmentSH)(i, j, k, grid)
     end
 end
 
+const SaturationSpecificHumidityField = Field{C, C, C, <:SaturationSpecificHumidity}
 SaturationSpecificHumidityField(model, flavor_symbol=:prognostic) = Field(SaturationSpecificHumidity(model, flavor_symbol))
