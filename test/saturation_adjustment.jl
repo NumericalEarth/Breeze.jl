@@ -25,7 +25,7 @@ solver_tol(::Type{Float32}) = 1e-3
 test_tol(FT::Type{Float64}) = 10 * sqrt(solver_tol(FT))
 test_tol(FT::Type{Float32}) = sqrt(solver_tol(FT))
 
-test_thermodynamics = (:StaticEnergy,) # :LiquidIcePotentialTemperature)
+test_thermodynamics = (:StaticEnergy, :LiquidIcePotentialTemperature)
 
 @testset "Warm-phase saturation adjustment [$(FT)]" for FT in (Float32, Float64)
     grid = RectilinearGrid(default_arch, FT; size=(1, 1, 1), x=(0, 1), y=(0, 1), z=(0, 1))

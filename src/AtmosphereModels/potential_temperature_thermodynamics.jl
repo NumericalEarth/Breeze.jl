@@ -1,3 +1,5 @@
+using Breeze.Thermodynamics: LiquidIcePotentialTemperatureState, with_temperature
+
 struct LiquidIcePotentialTemperatureThermodynamics{F, T}
     potential_temperature_density :: F  # ρθ (prognostic)
     potential_temperature :: T          # θ = ρθ / ρᵣ (diagnostic)
@@ -106,10 +108,7 @@ end
                                                 temperature)
 
     potential_temperature = formulation.thermodynamics.potential_temperature
-    ρ = formulation.reference_state.density
-
-    # Note: Unlike static energy, potential temperature does not have a buoyancy flux term
-    # since potential temperature is conserved under adiabatic processes.
+    ρᵣ = formulation.reference_state.density
 
     𝒰 = diagnose_thermodynamic_state(i, j, k, grid,
                                      formulation,
@@ -120,8 +119,84 @@ end
 
     closure_buoyancy = AtmosphereModelBuoyancy(formulation, constants)
 
-    return ( - div_ρUc(i, j, k, grid, advection, ρ, velocities, potential_temperature)
-             - ∇_dot_Jᶜ(i, j, k, grid, ρ, closure, closure_fields, id, potential_temperature, clock, model_fields, closure_buoyancy)
+    return ( - div_ρUc(i, j, k, grid, advection, ρᵣ, velocities, potential_temperature)
+             - ∇_dot_Jᶜ(i, j, k, grid, ρᵣ, closure, closure_fields, id, potential_temperature, clock, model_fields, closure_buoyancy)
              + microphysical_tendency(i, j, k, grid, microphysics, Val(:ρθ), microphysical_fields, 𝒰, constants)
              + ρθ_forcing(i, j, k, grid, clock, model_fields))
+end
+
+#####
+##### Set
+#####
+
+set_thermodynamic_variable!(model::LiquidIcePotentialTemperatureAnelasticModel, ::Val{:ρθ}, value) =
+    set!(model.formulation.thermodynamics.potential_temperature_density, value)
+
+function set_thermodynamic_variable!(model::LiquidIcePotentialTemperatureAnelasticModel, ::Val{:θ}, value)
+    set!(model.formulation.thermodynamics.potential_temperature, value)
+    ρᵣ = model.formulation.reference_state.density
+    θ = model.formulation.thermodynamics.potential_temperature
+    set!(model.formulation.thermodynamics.potential_temperature_density, ρᵣ * θ)
+    return nothing
+end
+
+# Setting :θ (potential temperature)
+function set_thermodynamic_variable!(model::LiquidIcePotentialTemperatureAnelasticModel, ::Val{:e}, value)
+    thermo = model.formulation.thermodynamics
+    e = model.temperature # scratch space
+    set!(e, value)
+
+    grid = model.grid
+    arch = grid.architecture
+    launch!(arch, grid, :xyz,
+            _potential_temperature_from_energy!,
+            thermo.potential_temperature_density,
+            thermo.potential_temperature,
+            grid,
+            e,
+            model.specific_moisture,
+            model.formulation,
+            model.microphysics,
+            model.microphysical_fields,
+            model.thermodynamic_constants)
+
+    return nothing
+end
+
+function set_thermodynamic_variable!(model::LiquidIcePotentialTemperatureAnelasticModel, ::Val{:ρe}, value)
+    ρe = model.temperature # scratch space
+    set!(ρe, value)
+    ρᵣ = model.formulation.reference_state.density
+    return set_thermodynamic_variable!(model, Val(:e), ρe / ρᵣ)
+end
+
+@kernel function _potential_temperature_from_energy!(potential_temperature_density,
+                                                     potential_temperature,
+                                                     grid,
+                                                     specific_energy,
+                                                     specific_moisture,
+                                                     formulation,
+                                                     microphysics,
+                                                     microphysical_fields,
+                                                     constants)
+    i, j, k = @index(Global, NTuple)
+
+    @inbounds begin
+        pᵣ = formulation.reference_state.pressure[i, j, k]
+        ρᵣ = formulation.reference_state.density[i, j, k]
+        qᵗ = specific_moisture[i, j, k]
+        e = specific_energy[i, j, k]
+    end
+
+    z = znode(i, j, k, grid, c, c, c)
+    q = compute_moisture_fractions(i, j, k, grid, microphysics, ρᵣ, qᵗ, microphysical_fields)
+    𝒰e₀ = StaticEnergyState(e, q, z, pᵣ)
+    𝒰e₁ = maybe_adjust_thermodynamic_state(𝒰e₀, microphysics, microphysical_fields, qᵗ, constants)
+    T = temperature(𝒰e₁, constants)
+
+    p₀ = formulation.reference_state.base_pressure
+    q₁ = 𝒰e₁.moisture_mass_fractions
+    𝒰θ = LiquidIcePotentialTemperatureState(zero(T), q₁, p₀, pᵣ)
+    @inbounds potential_temperature[i, j, k] = with_temperature(𝒰θ, T, constants).potential_temperature
+    @inbounds potential_temperature_density[i, j, k] = ρᵣ * with_temperature(𝒰θ, T, constants).potential_temperature
 end
