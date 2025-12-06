@@ -1,4 +1,4 @@
-# # Dry and cloudy thermal bubbles
+# # Cloudy thermal bubble
 #
 # This example sets up, runs, and visualizes simulations of "thermal bubbles"
 # (just circular regions of warm air) rising through a neutral background.
@@ -24,9 +24,8 @@ grid = RectilinearGrid(CPU();
 
 thermodynamic_constants = ThermodynamicConstants()
 reference_state = ReferenceState(grid, thermodynamic_constants, base_pressure=1e5, potential_temperature=300)
-#formulation = AnelasticFormulation(reference_state, thermodynamics=:LiquidIcePotentialTemperature)
-formulation = AnelasticFormulation(reference_state, thermodynamics=:StaticEnergy)
-advection = Centered(order=2) #WENO(order=9)
+formulation = AnelasticFormulation(reference_state, thermodynamics=:LiquidIcePotentialTemperature)
+advection = WENO(order=9)
 model = AtmosphereModel(grid; formulation, thermodynamic_constants, advection)
 
 # ## Potential temperature perturbation

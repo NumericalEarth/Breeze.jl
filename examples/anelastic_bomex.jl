@@ -166,7 +166,8 @@ closure = AnisotropicMinimumDissipation()
 model = AtmosphereModel(grid; formulation, coriolis, microphysics, closure,
                         scalar_advection = Centered(order=2),
                         momentum_advection = WENO(order=9),
-                        forcing = (ρqᵗ=ρqᵗ_forcing, ρu=ρu_forcing, ρv=ρv_forcing, ρθ=ρθ_forcing),
+                        # forcing = (ρqᵗ=ρqᵗ_forcing, ρu=ρu_forcing, ρv=ρv_forcing, ρθ=ρθ_subsidence_forcing, ρe=ρe_radiation_forcing),
+                        forcing = (ρqᵗ=ρqᵗ_forcing, ρu=ρu_forcing, ρv=ρv_forcing, ρθ=ρθ_subsidence_forcing), 
                         boundary_conditions = (ρθ=ρθ_bcs, ρqᵗ=ρqᵗ_bcs, ρu=ρu_bcs, ρv=ρv_bcs))
                         # forcing = (ρqᵗ=ρqᵗ_forcing, ρu=ρu_forcing, ρv=ρv_forcing, ρe=ρe_forcing),
                         # boundary_conditions = (ρe=ρe_bcs, ρqᵗ=ρqᵗ_bcs, ρu=ρu_bcs, ρv=ρv_bcs))
