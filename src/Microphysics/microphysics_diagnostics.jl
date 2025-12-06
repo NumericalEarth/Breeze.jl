@@ -69,22 +69,22 @@ using Breeze
 grid = RectilinearGrid(size=(4, 4, 4), extent=(500, 500, 1000))
 model = AtmosphereModel(grid)
 set!(model, θ=300)
-qᵛ⁺ = SaturationSpecificHumidityField(model, :prognostic)
+qᵛ⁺ = SaturationSpecificHumidity(model, :prognostic)
 ```
 
 Equilibrium flavor
 
 ```@example ssh
-qᵛ⁺ₑ = SaturationSpecificHumidityField(model, :equilibrium)
+qᵛ⁺ₑ = SaturationSpecificHumidity(model, :equilibrium)
 ```
 
 Equilibrium flavor
 
 ```@example ssh
-qᵛ = SaturationSpecificHumidityField(model, :total_moisture)
+qᵛ = SaturationSpecificHumidity(model, :total_moisture)
 ```
 """
-function SaturationSpecificHumidityField(model, flavor_symbol=:prognostic)
+function SaturationSpecificHumidity(model, flavor_symbol=:prognostic)
 
     flavor = if flavor_symbol == :prognostic
         Prognostic()
