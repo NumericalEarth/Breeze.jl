@@ -195,7 +195,7 @@ end
     T = temperature(𝒰θ₁, constants)
 
     z = znode(i, j, k, grid, c, c, c)
-    q₁ = 𝒰e₁.moisture_mass_fractions
+    q₁ = 𝒰θ₁.moisture_mass_fractions
     𝒰e₀ = StaticEnergyState(zero(T), q₁, z, pᵣ)
     𝒰e₁ = with_temperature(𝒰e₀, T, constants)
     e = 𝒰e₁.static_energy
