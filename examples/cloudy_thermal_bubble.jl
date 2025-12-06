@@ -69,10 +69,8 @@ conjure_time_step_wizard!(simulation, cfl=0.7)
 
 function progress(sim)
     u, v, w = sim.model.velocities
-
-    msg = @sprintf("Iter: % 4d, t: % 14s, Δt: % 14s, ∫E: %.8e J, extrema(θ): (%.2f, %.2f) K, max|w|: %.2f m/s",
-                   iteration(sim), prettytime(sim), prettytime(sim.Δt), ∫E[], extrema(θ)..., maximum(abs, w))
-
+    msg = @sprintf("Iter: % 4d, t: % 14s, Δt: % 14s, ⟨E⟩: %.8e J, extrema(θ): (%.2f, %.2f) K, max|w|: %.2f m/s",
+                   iteration(sim), prettytime(sim), prettytime(sim.Δt), mean(E), extrema(θ)..., maximum(abs, w))
     @info msg
     return nothing
 end
@@ -168,7 +166,10 @@ moist_model = AtmosphereModel(grid; formulation, thermodynamic_constants, advect
 # Set potential temperature to match the dry bubble initially
 set!(moist_model, θ=θᵢ, qᵗ=0.025)
 
-# Compute saturation specific humidity using the diagnostic field
+# Compute saturation specific humidity using the diagnostic field,
+# and adjust the buoyancy to match the dry bubble
+# Note, this isn't quite right and needs to be fixed.
+
 using Breeze.Thermodynamics: dry_air_gas_constant, vapor_gas_constant
 
 qᵛ⁺ = SaturationSpecificHumidityField(moist_model, :equilibrium)
@@ -182,20 +183,18 @@ set!(moist_model, θ=θᵐ)
 
 # ## Simulation
 
-moist_simulation = Simulation(moist_model; Δt=2, stop_time=30minutes)
+moist_simulation = Simulation(moist_model; Δt=2, stop_time=2hours)
 conjure_time_step_wizard!(moist_simulation, cfl=0.7)
 
 E = total_energy(moist_model)
-∫E = Integral(E) |> Field
 θ = liquid_ice_potential_temperature(moist_model)
 
 function progress_moist(sim)
-    compute!(∫E)
     ρqᵗ = sim.model.moisture_density
     u, v, w = sim.model.velocities
 
-    msg = @sprintf("Iter: % 4d, t: % 14s, Δt: % 14s, ∫E: %.8e J, extrema(θ): (%.2f, %.2f) K \n",
-                   iteration(sim), prettytime(sim), prettytime(sim.Δt), ∫E[], extrema(θ)...)
+    msg = @sprintf("Iter: % 4d, t: % 14s, Δt: % 14s, ⟨E⟩: %.8e J, extrema(θ): (%.2f, %.2f) K \n",
+                   iteration(sim), prettytime(sim), prettytime(sim.Δt), mean(E), extrema(θ)...)
 
     msg *= @sprintf("   extrema(qᵗ): (%.2e, %.2e), max(qˡ): %.2e, max|w|: %.2f m/s, mean(qᵗ): %.2e",
                     extrema(ρqᵗ)..., maximum(qˡ), maximum(abs, w), mean(ρqᵗ))
@@ -221,28 +220,6 @@ moist_writer = JLD2Writer(moist_model, moist_outputs; filename=moist_filename,
 moist_simulation.output_writers[:jld2] = moist_writer
 
 run!(moist_simulation)
-
-fig = Figure(size=(1200, 600))
-
-axθ = Axis(fig[1, 2], aspect=2, xlabel="x (m)", ylabel="z (m)")
-axw = Axis(fig[1, 3], aspect=2, xlabel="x (m)", ylabel="z (m)")
-axl = Axis(fig[2, 2:3], aspect=2, xlabel="x (m)", ylabel="z (m)")
-
-qˡ = moist_model.microphysical_fields.qˡ
-
-hmθ = heatmap!(axθ, θ)
-hmw = heatmap!(axw, w)
-hmqˡ = heatmap!(axl, qˡ′)
-
-t_str = @sprintf("t = %s", prettytime(moist_simulation.model.clock.time))
-Colorbar(fig[1, 1], hmθ, label = "θ (K) at $t_str")
-Colorbar(fig[1, 4], hmw, label = "w (m/s) at $t_str")
-Colorbar(fig[2, 4], hmqˡ, label = "qˡ (kg/kg) at $t_str")
-
-fig
-
-# simulation_moist.stop_time = 30minutes
-# run!(simulation_moist)
 
 # ## Visualization of moist thermal bubble
 
