@@ -276,10 +276,19 @@ end
 
 function atmosphere_model_forcing(user_forcings::NamedTuple, prognostic_fields, model_fields)
     user_forcing_names = keys(user_forcings)
+
+    if :ρe ∈ keys(prognostic_fields)
+        forcing_fields = prognostic_fields
+    else
+        forcing_fields = merge(prognostic_fields, (; ρe=prognostic_fields.ρθ))
+    end
+
+    forcing_names = keys(forcing_fields)
+
     for name in user_forcing_names
-        if name ∉ keys(prognostic_fields)
+        if name ∉ forcing_names
             msg = string("Invalid forcing: forcing contains an entry for $name, but $name is not a prognostic field!", '\n',
-                         "The prognostic fields are ", keys(prognostic_fields))
+                         "The forcing fields are ", forcing_names)
             throw(ArgumentError(msg))
         end
     end
@@ -290,11 +299,10 @@ function atmosphere_model_forcing(user_forcings::NamedTuple, prognostic_fields, 
         name in keys(user_forcings) ?
             materialize_forcing(user_forcings[name], field, name, model_field_names) :
             Returns(zero(eltype(field)))
-            for (name, field) in pairs(prognostic_fields)
+            for (name, field) in pairs(forcing_fields)
     )
 
-    prognostic_names = keys(prognostic_fields)
-    forcings = NamedTuple{prognostic_names}(materialized)
+    forcings = NamedTuple{forcing_names}(materialized)
 
     return forcings
 end

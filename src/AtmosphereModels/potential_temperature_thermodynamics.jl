@@ -1,4 +1,4 @@
-using Breeze.Thermodynamics: LiquidIcePotentialTemperatureState, with_temperature
+using Breeze.Thermodynamics: LiquidIcePotentialTemperatureState, with_temperature, exner_function, mixture_heat_capacity
 
 struct LiquidIcePotentialTemperatureThermodynamics{F, T}
     potential_temperature_density :: F  # ρθ (prognostic)
@@ -82,6 +82,7 @@ function compute_thermodynamic_tendency!(model::LiquidIcePotentialTemperatureAne
     ρθ_args = (
         Val(1),
         model.forcing.ρθ,
+        model.forcing.ρe,
         model.advection.ρθ,
         common_args...,
         model.temperature)
@@ -94,6 +95,7 @@ end
 @inline function potential_temperature_tendency(i, j, k, grid,
                                                 id,
                                                 ρθ_forcing,
+                                                ρe_forcing,
                                                 advection,
                                                 formulation,
                                                 constants,
@@ -117,12 +119,16 @@ end
                                      constants,
                                      specific_moisture)
 
+    Π = exner_function(𝒰, constants)
+    q = 𝒰.moisture_mass_fractions
+    cᵖᵐ = mixture_heat_capacity(q, constants)
     closure_buoyancy = AtmosphereModelBuoyancy(formulation, constants)
 
     return ( - div_ρUc(i, j, k, grid, advection, ρᵣ, velocities, potential_temperature)
              - ∇_dot_Jᶜ(i, j, k, grid, ρᵣ, closure, closure_fields, id, potential_temperature, clock, model_fields, closure_buoyancy)
              + microphysical_tendency(i, j, k, grid, microphysics, Val(:ρθ), microphysical_fields, 𝒰, constants)
-             + ρθ_forcing(i, j, k, grid, clock, model_fields))
+             + ρθ_forcing(i, j, k, grid, clock, model_fields)
+             + ρe_forcing(i, j, k, grid, clock, model_fields) / (cᵖᵐ * Π))
 end
 
 #####
