@@ -12,6 +12,7 @@ A struct representing an ideal gas with molar mass and specific heat capacity.
 
 # Examples
 ```jldoctest
+using Breeze
 dry_air = IdealGas(molar_mass=0.02897, heat_capacity=1005)
 
 # output
@@ -67,7 +68,7 @@ Adapt.adapt_structure(to, pt::CondensedPhase) =
 """
 $(TYPEDSIGNATURES)
 
-Returns `CondensedPhase` with specified parameters converted to `FT`.
+Return `CondensedPhase` with specified parameters converted to `FT`.
 
 Two examples of `CondensedPhase` are liquid and ice.
 When matter is converted from vapor to liquid, water molecules in the
