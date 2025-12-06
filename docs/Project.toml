@@ -1,4 +1,5 @@
 [deps]
+AtmosphericProfilesLibrary = "86bc3604-9858-485a-bdbe-831ec50de11d"
 Breeze = "660aa2fb-d4c8-4359-a52c-9c057bc511da"
 CairoMakie = "13f3f980-e62b-5c42-98c6-ff1f3baf88f0"
 CloudMicrophysics = "6a9e3e04-43cd-43ba-94b9-e8782df3c71b"
@@ -12,8 +13,8 @@ Random = "9a3f8284-a2c9-5f02-9a11-845980a1fd5c"
 Breeze = {path = ".."}
 
 [compat]
-CloudMicrophysics = "0.29.0"
 CairoMakie = "0.15"
+CloudMicrophysics = "0.29.0"
 Documenter = "1"
 DocumenterCitations = "1.4"
 Literate = "2"
