@@ -8,6 +8,7 @@ export
     WarmPhaseEquilibrium,
     BulkMicrophysics,
     FourCategories,
+    SaturationSpecificHumidity,
     SaturationSpecificHumidityField
 
 import ..AtmosphereModels:

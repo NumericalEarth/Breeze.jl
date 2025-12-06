@@ -21,6 +21,7 @@ export
     SaturationAdjustment,
     MixedPhaseEquilibrium,
     WarmPhaseEquilibrium,
+    SaturationSpecificHumidity,
     SaturationSpecificHumidityField,
     BulkMicrophysics,
     static_energy_density,
