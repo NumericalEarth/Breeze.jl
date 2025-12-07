@@ -372,14 +372,14 @@ axq = Axis(fig[1, 2], xlabel="qᵛ (kg/kg)", ylabel="z (m)")
 axuv = Axis(fig[2, 1], xlabel="u, v (m/s)", ylabel="z (m)")
 axqˡ = Axis(fig[2, 2], xlabel="qˡ (kg/kg)", ylabel="z (m)")
 
-default_colours = Makie.wong_colors()
-colors = [default_colours[mod1(i, length(default_colours))] for i in 1:Nt]
-
 times = θt.times
 Nt = length(times)
 
+default_colours = Makie.wong_colors()
+colors = [default_colours[mod1(i, length(default_colours))] for i in 1:Nt]
+
 for n in 1:Nt
-    t_max = Int(times[n] / 60)
+    t_max = Int(times[n] / minute)
     label = n == 1 ? "initial condition" : "mean over $(t_max - 20)-$t_max min"
 
     lines!(axθ, θt[n], color=colors[n], label=label)
