@@ -25,7 +25,7 @@ using Oceananigans.Operators: ∂zᶜᶜᶠ, ℑzᵃᵃᶜ
 # ## Domain and grid
 #
 # The BOMEX domain is 6.4 km × 6.4 km horizontally with a vertical extent of 3 km
-# ([Siebesma2003](@citet), Section 3a). The original intercomparison used
+# ([Siebesma2003](@citet); Section 3a). The original intercomparison used
 # 64 × 64 × 75 grid points with 100 m horizontal resolution and 40 m vertical resolution.
 #
 # For this documentation example, we use reduced horizontal resolution (32²) to enable
@@ -45,7 +45,7 @@ grid = RectilinearGrid(CPU(); x, y, z,
 #
 # We use the anelastic formulation with a dry adiabatic reference state.
 # The surface potential temperature ``θ_0 = 299.1`` K and surface pressure
-# ``p_0 = 1015`` hPa are taken from [Siebesma2003](@citet), Appendix B.
+# ``p_0 = 1015`` hPa are taken from [Siebesma2003](@citet); Appendix B.
 
 constants = ThermodynamicConstants()
 reference_state = ReferenceState(grid, constants,
@@ -80,7 +80,7 @@ q₀ = Breeze.Thermodynamics.MoistureMassFractions{FT} |> zero
 # ## Surface momentum flux (drag)
 #
 # A bulk drag parameterization is applied with friction velocity
-# ``u_* = 0.28`` m/s ([Siebesma2003](@citet), Appendix B, after Eq. B4).
+# ``u_* = 0.28`` m/s ([Siebesma2003](@citet); Appendix B, after Eq. B4).
 
 u★ = 0.28 # m/s
 @inline ρu_drag(x, y, t, ρu, ρv, p) = - p.ρ₀ * p.u★^2 * ρu / sqrt(ρu^2 + ρv^2)
@@ -94,7 +94,7 @@ u★ = 0.28 # m/s
 # ## Large-scale subsidence
 #
 # The BOMEX case includes large-scale subsidence that advects mean profiles downward.
-# The subsidence velocity profile is prescribed by [Siebesma2003](@citet), Appendix B, Eq. B5:
+# The subsidence velocity profile is prescribed by [Siebesma2003](@citet); Appendix B, Eq. B5:
 # ```math
 # w^s(z) = \begin{cases}
 #   W^s \frac{z}{z_1} & z \le z_1 \\
@@ -155,7 +155,7 @@ qᵗ_avg = Field{Nothing, Nothing, Center}(grid)
 # ## Geostrophic forcing
 #
 # The momentum equations include a Coriolis force with prescribed geostrophic wind.
-# The geostrophic wind profiles are given by [Siebesma2003](@citet), Appendix B, Eq. B6.
+# The geostrophic wind profiles are given by [Siebesma2003](@citet); Appendix B, Eq. B6.
 
 coriolis = FPlane(f=3.76e-5)
 
@@ -177,7 +177,7 @@ set!(vᵍ, z -> vᵍ_profile(z))
 # ## Moisture tendency (drying)
 #
 # A prescribed large-scale drying tendency removes moisture above the cloud layer
-# ([Siebesma2003](@citet), Appendix B, Eq. B4). This represents the effects of
+# ([Siebesma2003](@citet); Appendix B, Eq. B4). This represents the effects of
 # advection by the large-scale circulation.
 
 drying = Field{Nothing, Nothing, Center}(grid)
@@ -189,7 +189,7 @@ set!(drying, ρᵣ * drying)
 # ## Radiative cooling
 #
 # A prescribed radiative cooling profile is applied to the thermodynamic equation
-# ([Siebesma2003](@citet), Appendix B, Eq. B3). Below the inversion, radiative cooling
+# ([Siebesma2003](@citet); Appendix B, Eq. B3). Below the inversion, radiative cooling
 # of about 2 K/day counteracts the surface heating.
 
 Fρe_field = Field{Nothing, Nothing, Center}(grid)
@@ -252,7 +252,7 @@ qᵗ₀ = AtmosphericProfilesLibrary.Bomex_q_tot(FT)
 u₀ = AtmosphericProfilesLibrary.Bomex_u(FT)
 
 # The initial profiles are perturbed with random noise below 1600 m to trigger
-# convection. The perturbation amplitudes are specified by [Siebesma2003](@citet),
+# convection. The perturbation amplitudes are specified by [Siebesma2003](@citet);
 # Appendix B (third paragraph after Eq. B6):
 # 
 # - Potential temperature perturbation: ``δθ = 0.1`` K
@@ -333,8 +333,8 @@ run!(simulation)
 
 # ## Results: mean profile evolution
 #
-# We visualize the evolution of horizontally-averaged profiles every 20 minutes,
-# similar to Figure 3 in [Siebesma2003](@cite). The intercomparison study shows
+# We visualize the evolution of horizontally-averaged profiles every 20 minutes, similar
+# to Figure 3 in the paper by [Siebesma2003](@cite). The intercomparison study shows
 # that after spin-up, the boundary layer reaches a quasi-steady state with:
 # - A well-mixed layer below cloud base (~500 m)
 # - A conditionally unstable cloud layer (~500-1500 m)
