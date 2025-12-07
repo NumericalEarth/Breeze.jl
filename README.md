@@ -76,3 +76,8 @@ julia> include("examples/thermal_bubble.jl")
 we get
 
 https://github.com/user-attachments/assets/c9a0c9c3-c199-48b8-9850-f967bdcc4bed
+
+We can reproduce the BOMEX validation case by Siebesma et al. (2003) if we increase the horizontal resolution
+to `Nx = Ny = 64`, run until `stop_time = 6hours`, and output 1-hourly averages every `1hour`:
+
+<img width="900" alt="bomex_profiles" src="https://github.com/user-attachments/assets/25939e19-c2d8-457c-b7ed-c4dafc3cab99" />
