@@ -361,7 +361,7 @@ axqˡ = Axis(fig[2, 2], xlabel="qˡ (kg/kg)", ylabel="z (m)")
 for n in 1:Nt
     t_max = Int(times[n] / 60)
 
-    label = n == 1 ? "t = $t_max min" : "mean $(t_max - 20)-$t_max min"
+    label = n == 1 ? "initial condition" : "mean over $(t_max - 20)-$t_max min"
 
     lines!(axθ, θt[n], label=label)
     lines!(axq, qᵛt[n])
