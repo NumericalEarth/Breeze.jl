@@ -17,10 +17,10 @@ literated_dir = joinpath(@__DIR__, "src", "literated")
 mkpath(literated_dir)
 
 example_scripts = [
+    "bomex.jl",
     "dry_thermal_bubble.jl",
     "cloudy_thermal_bubble.jl",
     "cloudy_kelvin_helmholtz.jl",
-    "bomex.jl",
     # "prescribed_sst.jl", # this is a WIP
 ]
 
