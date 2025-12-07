@@ -24,11 +24,11 @@ example_scripts = [
     # "prescribed_sst.jl", # this is a WIP
 ]
 
-for script_file in example_scripts
+@time "literate" for script_file in example_scripts
     script_path = joinpath(examples_src_dir, script_file)
-    Literate.markdown(script_path, literated_dir;
-                      flavor = Literate.DocumenterFlavor(),
-                      execute = true)
+    @time script_file Literate.markdown(script_path, literated_dir;
+                                        flavor = Literate.DocumenterFlavor(),
+                                        execute = true)
 end
 
 example_pages = Any[
