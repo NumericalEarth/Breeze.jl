@@ -2,7 +2,7 @@
 #
 # This example simulates shallow cumulus convection following the Barbados Oceanographic
 # and Meteorological Experiment (BOMEX) intercomparison case [Siebesma2003](@cite).
-# BOMEX has become a canonical test case for large eddy simulations of shallow cumulus
+# BOMEX is a canonical test case for large eddy simulations of shallow cumulus
 # convection over a subtropical ocean.
 #
 # The case is based on observations from the Barbados Oceanographic and Meteorological
@@ -37,27 +37,9 @@ Nz = 75
 x = y = (0, 6400)
 z = (0, 3000)
 
-stop_time = 1hour
-
 grid = RectilinearGrid(CPU(); x, y, z,
                        size = (Nx, Ny, Nz), halo = (5, 5, 5),
                        topology = (Periodic, Periodic, Bounded))
-
-# ## Initial profiles from AtmosphericProfilesLibrary
-#
-# The initial thermodynamic profiles are piecewise linear functions defined by
-# [Siebesma2003](@citet); Appendix B, Tables B1 and B2. These include:
-# - Liquid-ice potential temperature ``θ_{\ell i}(z)`` (Table B1)
-# - Total water specific humidity ``q_t(z)`` (Table B1)
-# - Zonal velocity ``u(z)`` (Table B2)
-#
-# The [AtmosphericProfilesLibrary](https://github.com/CliMA/AtmosphericProfilesLibrary.jl)
-# provides convenient functions to retrieve these profiles.
-
-FT = eltype(grid)
-θ_bomex = AtmosphericProfilesLibrary.Bomex_θ_liq_ice(FT)
-q_bomex = AtmosphericProfilesLibrary.Bomex_q_tot(FT)
-u_bomex = AtmosphericProfilesLibrary.Bomex_u(FT)
 
 # ## Reference state and formulation
 #
@@ -65,28 +47,35 @@ u_bomex = AtmosphericProfilesLibrary.Bomex_u(FT)
 # The surface potential temperature ``θ_0 = 299.1`` K and surface pressure
 # ``p_0 = 1015`` hPa are taken from [Siebesma2003](@citet); Appendix B.
 
-p₀, θ₀ = 101500, 299.1
 constants = ThermodynamicConstants()
-reference_state = ReferenceState(grid, constants, base_pressure=p₀, potential_temperature=θ₀)
-formulation = AnelasticFormulation(reference_state, thermodynamics=:LiquidIcePotentialTemperature)
+reference_state = ReferenceState(grid, constants,
+                                 base_pressure = 101500,
+                                 potential_temperature = 299.1)
+formulation = AnelasticFormulation(reference_state,
+                                   thermodynamics = :LiquidIcePotentialTemperature)
 
 # ## Surface fluxes
 #
 # BOMEX prescribes constant surface sensible and latent heat fluxes
-# ([Siebesma2003](@citet); Appendix B, after Eq. B4):
-# - Sensible heat flux: ``\overline{w'\theta_v'}|_s = 8 \times 10^{-3}`` K m/s
-# - Latent heat flux: ``\overline{w'q_t'}|_s = 5.2 \times 10^{-5}`` m/s
+# ([Siebesma2003](@citet), Appendix B, after Eq. B4):
+# - Sensible heat flux: ``\overline{w'\theta'}|_0 = 8 \times 10^{-3}`` K m/s
+# - Moisture flux: ``\overline{w'q^t'}|_0 = 5.2 \times 10^{-5}`` m/s
 #
-# We convert these kinematic fluxes to mass fluxes by multiplying by surface density.
+# ([Siebesma2003](@citet) refers to the moisture flux as the "latent heat flux".
+# We convert these kinematic fluxes to mass fluxes by multiplying by surface density,
+# which we estimate for a dry state using the pressure and temperature at ``z=0``.
 
+w′θ′ = 8e-3    # K m/s (sensible heat flux)
+w′qᵗ′ = 5.2e-5  # m/s (moisture flux)
+
+FT = eltype(grid)
+p₀ = reference_state.base_pressure
+θ₀ = reference_state.potential_temperature
 q₀ = Breeze.Thermodynamics.MoistureMassFractions{FT} |> zero
 ρ₀ = Breeze.Thermodynamics.density(p₀, θ₀, q₀, constants)
 
-w′θ′ = 8e-3    # K m/s (sensible heat flux)
-w′q′ = 5.2e-5  # m/s (latent heat flux)
-
 ρθ_bcs = FieldBoundaryConditions(bottom=FluxBoundaryCondition(ρ₀ * w′θ′))
-ρqᵗ_bcs = FieldBoundaryConditions(bottom=FluxBoundaryCondition(ρ₀ * w′q′))
+ρqᵗ_bcs = FieldBoundaryConditions(bottom=FluxBoundaryCondition(ρ₀ * w′qᵗ′))
 
 # ## Surface momentum flux (drag)
 #
@@ -107,14 +96,21 @@ u★ = 0.28 # m/s
 # The BOMEX case includes large-scale subsidence that advects mean profiles downward.
 # The subsidence velocity profile is prescribed by [Siebesma2003](@citet); Appendix B, Eq. B5:
 # ```math
-# w_s(z) = \begin{cases}
-#   -0.65 \times 10^{-2} \frac{z}{z_1} & z \le z_1 \\
-#   -0.65 \times 10^{-2} \left(1 - \frac{z - z_1}{z_2 - z_1}\right) & z_1 < z \le z_2 \\
+# w^s(z) = \begin{cases}
+#   W^s \frac{z}{z_1} & z \le z_1 \\
+#   W^s \left ( 1 - \frac{z - z_1}{z_2 - z_1} \right ) & z_1 < z \le z_2 \\
 #   0 & z > z_2
 # \end{cases}
 # ```
-# where ``z_1 = 1500`` m and ``z_2 = 2100`` m.
-#
+# where ``W^s = -0.65 \times 10^{-2}`` m/s (note the negative sign for "subisdence"),
+# ``z_1 = 1500`` m and ``z_2 = 2100`` m.
+# 
+# The subsidence velocity profile is provided by AtmosphericProfilesLibrary,
+
+wˢ = Field{Nothing, Nothing, Face}(grid)
+wˢ_profile = AtmosphericProfilesLibrary.Bomex_subsidence(FT)
+set!(wˢ, z -> wˢ_profile(z))
+
 # We apply subsidence as a forcing term to the horizontally-averaged prognostic variables.
 # This requires computing horizontal averages at each time step and storing them in
 # fields that can be accessed by the forcing functions.
@@ -141,24 +137,20 @@ end
     return @inbounds - p.ρᵣ[i, j, k] * w_dz_Qᵗ
 end
 
-# Set up horizontally-averaged fields for subsidence (suffix `_f` for "forcing")
+# Next, we build horizontally-averaged fields for subsidence. We suffix these `_f` for "forcing".
+# After we construct the model and simulation, we will write a callback that computes these
+# horizontal averages every time step.
 
-u_avg_f = Field{Nothing, Nothing, Center}(grid)
-v_avg_f = Field{Nothing, Nothing, Center}(grid)
-θ_avg_f = Field{Nothing, Nothing, Center}(grid)
-qᵗ_avg_f = Field{Nothing, Nothing, Center}(grid)
-
-# Subsidence velocity profile from AtmosphericProfilesLibrary
-
-wˢ = Field{Nothing, Nothing, Face}(grid)
-w_bomex = AtmosphericProfilesLibrary.Bomex_subsidence(FT)
-set!(wˢ, z -> w_bomex(z))
+u_avg = Field{Nothing, Nothing, Center}(grid)
+v_avg = Field{Nothing, Nothing, Center}(grid)
+θ_avg = Field{Nothing, Nothing, Center}(grid)
+qᵗ_avg = Field{Nothing, Nothing, Center}(grid)
 
 ρᵣ = formulation.reference_state.density
-ρu_subsidence_forcing = Forcing(Fρu_subsidence, discrete_form=true, parameters=(; u_avg=u_avg_f, wˢ, ρᵣ))
-ρv_subsidence_forcing = Forcing(Fρv_subsidence, discrete_form=true, parameters=(; v_avg=v_avg_f, wˢ, ρᵣ))
-ρθ_subsidence_forcing = Forcing(Fρθ_subsidence, discrete_form=true, parameters=(; θ_avg=θ_avg_f, wˢ, ρᵣ))
-ρqᵗ_subsidence_forcing = Forcing(Fρqᵗ_subsidence, discrete_form=true, parameters=(; qᵗ_avg=qᵗ_avg_f, wˢ, ρᵣ))
+ρu_subsidence_forcing = Forcing(Fρu_subsidence, discrete_form=true, parameters=(; u_avg, wˢ, ρᵣ))
+ρv_subsidence_forcing = Forcing(Fρv_subsidence, discrete_form=true, parameters=(; v_avg, wˢ, ρᵣ))
+ρθ_subsidence_forcing = Forcing(Fρθ_subsidence, discrete_form=true, parameters=(; θ_avg, wˢ, ρᵣ))
+ρqᵗ_subsidence_forcing = Forcing(Fρqᵗ_subsidence, discrete_form=true, parameters=(; qᵗ_avg, wˢ, ρᵣ))
 
 # ## Geostrophic forcing
 #
@@ -169,10 +161,10 @@ coriolis = FPlane(f=3.76e-5)
 
 uᵍ = Field{Nothing, Nothing, Center}(grid)
 vᵍ = Field{Nothing, Nothing, Center}(grid)
-uᵍ_bomex = AtmosphericProfilesLibrary.Bomex_geostrophic_u(FT)
-vᵍ_bomex = AtmosphericProfilesLibrary.Bomex_geostrophic_v(FT)
-set!(uᵍ, z -> uᵍ_bomex(z))
-set!(vᵍ, z -> vᵍ_bomex(z))
+uᵍ_profile = AtmosphericProfilesLibrary.Bomex_geostrophic_u(FT)
+vᵍ_profile = AtmosphericProfilesLibrary.Bomex_geostrophic_v(FT)
+set!(uᵍ, z -> uᵍ_profile(z))
+set!(vᵍ, z -> vᵍ_profile(z))
 ρuᵍ = Field(ρᵣ * uᵍ)
 ρvᵍ = Field(ρᵣ * vᵍ)
 
@@ -182,9 +174,6 @@ set!(vᵍ, z -> vᵍ_bomex(z))
 ρu_geostrophic_forcing = Forcing(Fρu_geostrophic, discrete_form=true, parameters=(; f=coriolis.f, ρvᵍ))
 ρv_geostrophic_forcing = Forcing(Fρv_geostrophic, discrete_form=true, parameters=(; f=coriolis.f, ρuᵍ))
 
-ρu_forcing = (ρu_subsidence_forcing, ρu_geostrophic_forcing)
-ρv_forcing = (ρv_subsidence_forcing, ρv_geostrophic_forcing)
-
 # ## Moisture tendency (drying)
 #
 # A prescribed large-scale drying tendency removes moisture above the cloud layer
@@ -192,12 +181,10 @@ set!(vᵍ, z -> vᵍ_bomex(z))
 # advection by the large-scale circulation.
 
 drying = Field{Nothing, Nothing, Center}(grid)
-dqdt_bomex = AtmosphericProfilesLibrary.Bomex_dqtdt(FT)
-set!(drying, z -> dqdt_bomex(z))
+dqdt_profile = AtmosphericProfilesLibrary.Bomex_dqtdt(FT)
+set!(drying, z -> dqdt_profile(z))
 set!(drying, ρᵣ * drying)
 ρqᵗ_drying_forcing = Forcing(drying)
-
-ρqᵗ_forcing = (ρqᵗ_drying_forcing, ρqᵗ_subsidence_forcing)
 
 # ## Radiative cooling
 #
@@ -205,40 +192,83 @@ set!(drying, ρᵣ * drying)
 # ([Siebesma2003](@citet); Appendix B, Eq. B3). Below the inversion, radiative cooling
 # of about 2 K/day counteracts the surface heating.
 
-Fρθ_field = Field{Nothing, Nothing, Center}(grid)
+Fρe_field = Field{Nothing, Nothing, Center}(grid)
+cᵖᵈ = constants.dry_air.heat_capacity
 dTdt_bomex = AtmosphericProfilesLibrary.Bomex_dTdt(FT)
-set!(Fρθ_field, z -> dTdt_bomex(1, z))
-set!(Fρθ_field, ρᵣ * Fρθ_field)
+set!(Fρe_field, z -> dTdt_bomex(1, z))
+set!(Fρe_field, ρᵣ * cᵖᵈ * Fρe_field)
+ρe_radiation_forcing = Forcing(Fρe_field)
 
-ρθ_radiation_forcing = Forcing(Fρθ_field)
-ρθ_forcing = (ρθ_radiation_forcing, ρθ_subsidence_forcing)
+# ## Assembling all the forcings
+#
+# We build tuples of forcings for all the variables. Note that forcing functions
+# are provided for both `ρθ` and `ρe`, which both contribute to the tendency of `ρθ`
+# in different ways. In particular, the tendency for `ρθ` is written
+#
+# ```math
+# ∂_t (ρ θ) = F_{ρθ} + \frac{1}{c^{p m} \Pi} F_{ρ e} + \cdots
+# ```
+#
+# where ``F_{ρ e}`` denotes the forcing function provided for `ρe` (e.g. for "energy density"),
+# ``F_{ρθ}`` denotes the forcing function provided for `ρθ`, and the ``\cdots`` denote additional terms.
+
+ρu_forcing = (ρu_subsidence_forcing, ρu_geostrophic_forcing)
+ρv_forcing = (ρv_subsidence_forcing, ρv_geostrophic_forcing)
+ρqᵗ_forcing = (ρqᵗ_drying_forcing, ρqᵗ_subsidence_forcing)
+ρθ_forcing = ρθ_subsidence_forcing
+ρe_forcing = ρe_radiation_forcing
+
+forcing = (; ρu=ρu_forcing, ρv=ρv_forcing, ρθ=ρθ_forcing,
+             ρe=ρe_forcing, ρqᵗ=ρqᵗ_forcing)
+
+nothing # hide
 
 # ## Model setup
 #
-# We use warm-phase saturation adjustment microphysics and WENO advection.
+# We use warm-phase saturation adjustment microphysics and 9th-order WENO advection.
 
 microphysics = SaturationAdjustment(equilibrium=WarmPhaseEquilibrium())
 advection = WENO(order=9)
 
-model = AtmosphereModel(grid; formulation, coriolis, microphysics, advection,
-                        forcing = (ρqᵗ=ρqᵗ_forcing, ρu=ρu_forcing, ρv=ρv_forcing, ρθ=ρθ_forcing),
+model = AtmosphereModel(grid; formulation, coriolis, microphysics, advection, forcing,
                         boundary_conditions = (ρθ=ρθ_bcs, ρqᵗ=ρqᵗ_bcs, ρu=ρu_bcs, ρv=ρv_bcs))
 
 # ## Initial conditions
+# 
+# ### Profiles from AtmosphericProfilesLibrary
 #
+# Mean profiles are specified as piecewise linear functions by [Siebesma2003](@citet),
+# Appendix B, Tables B1 and B2, and include:
+#    - Liquid-ice potential temperature ``θ^{\ell i}(z)`` (Table B1)
+#    - Total water specific humidity ``q^t(z)`` (Table B1)
+#    - Zonal velocity ``u(z)`` (Table B2)
+#
+# The amazing and convenient [AtmosphericProfilesLibrary](https://github.com/CliMA/AtmosphericProfilesLibrary.jl)
+# implements functions that retrieve these profiles.
+
+FT = eltype(grid)
+θˡⁱ₀ = AtmosphericProfilesLibrary.Bomex_θ_liq_ice(FT)
+qᵗ₀ = AtmosphericProfilesLibrary.Bomex_q_tot(FT)
+u₀ = AtmosphericProfilesLibrary.Bomex_u(FT)
+
 # The initial profiles are perturbed with random noise below 1600 m to trigger
 # convection. The perturbation amplitudes are specified by [Siebesma2003](@citet);
 # Appendix B (third paragraph after Eq. B6):
-# - Potential temperature perturbation: ``\delta\theta = 0.1`` K
-# - Moisture perturbation: ``\delta q_t = 2.5 \times 10^{-5}`` kg/kg
+# 
+# - Potential temperature perturbation: ``δθ = 0.1`` K
+# - Moisture perturbation: ``δqᵗ = 2.5 \times 10^{-5}`` kg/kg
+#
+# Magnitudes for the random perturbations applied to the initial profiles are given by
+# [Siebesma2003](@citet), Appendix B, third paragraph after Eq. B6.
 
-θϵ = 0.1     # K
-qϵ = 2.5e-5  # kg/kg
-zϵ = 1600    # m
+δθ = 0.1     # K
+δqᵗ = 2.5e-5 # kg/kg
+zδ = 1600    # m
 
-θᵢ(x, y, z) = θ_bomex(z) + θϵ * rand() * (z < zϵ)
-qᵢ(x, y, z) = q_bomex(z) + qϵ * rand() * (z < zϵ)
-uᵢ(x, y, z) = u_bomex(z)
+ϵ() = rand() - 1/2
+θᵢ(x, y, z) = θˡⁱ₀(z) + δθ  * ϵ() * (z < zδ)
+qᵢ(x, y, z) = qᵗ₀(z)  + δqᵗ * ϵ() * (z < zδ)
+uᵢ(x, y, z) = u₀(z)
 
 set!(model, θ=θᵢ, qᵗ=qᵢ, u=uᵢ)
 
@@ -246,27 +276,23 @@ set!(model, θ=θᵢ, qᵗ=qᵢ, u=uᵢ)
 #
 # We run the simulation for 1 hour with adaptive time-stepping.
 
-simulation = Simulation(model; Δt=10, stop_time)
+simulation = Simulation(model; Δt=10, stop_time=1hour)
 conjure_time_step_wizard!(simulation, cfl=0.7)
 
 # Set up horizontal average diagnostics for subsidence forcing.
 # These must be computed at each time step via a callback.
 
 θ = liquid_ice_potential_temperature(model)
-u_avg = Field(Average(model.velocities.u, dims=(1, 2)))
-v_avg = Field(Average(model.velocities.v, dims=(1, 2)))
-θ_avg = Field(Average(θ, dims=(1, 2)))
-qᵗ_avg = Field(Average(model.specific_moisture, dims=(1, 2)))
+u_avg = Field(Average(model.velocities.u, dims=(1, 2)), data=u_avg.data)
+v_avg = Field(Average(model.velocities.v, dims=(1, 2)), data=v_avg.data)
+θ_avg = Field(Average(θ, dims=(1, 2)), data=θ_avg.data)
+qᵗ_avg = Field(Average(model.specific_moisture, dims=(1, 2)), data=qᵗ_avg.data)
 
 function compute_averages!(sim)
     compute!(u_avg)
     compute!(v_avg)
     compute!(θ_avg)
     compute!(qᵗ_avg)
-    parent(u_avg_f) .= parent(u_avg)
-    parent(v_avg_f) .= parent(v_avg)
-    parent(θ_avg_f) .= parent(θ_avg)
-    parent(qᵗ_avg_f) .= parent(qᵗ_avg)
     return nothing
 end
 
