@@ -346,10 +346,6 @@ qˡt = FieldTimeSeries(filename, "qˡ")
 ut = FieldTimeSeries(filename, "u")
 vt = FieldTimeSeries(filename, "v")
 
-for fts in (qᵛt, qˡt)
-    fts .*= 1000 # convert kg/kg -> g/kg
-end
-
 times = θt.times
 Nt = length(times)
 
@@ -358,9 +354,9 @@ Nt = length(times)
 fig = Figure(size=(900, 800), fontsize=14)
 
 axθ = Axis(fig[1, 1], xlabel="θ (K)", ylabel="z (m)")
-axq = Axis(fig[1, 2], xlabel="qᵛ (g/kg)", ylabel="z (m)")
+axq = Axis(fig[1, 2], xlabel="qᵛ (kg/kg)", ylabel="z (m)")
 axuv = Axis(fig[2, 1], xlabel="u, v (m/s)", ylabel="z (m)")
-axqˡ = Axis(fig[2, 2], xlabel="qˡ (g/kg)", ylabel="z (m)")
+axqˡ = Axis(fig[2, 2], xlabel="qˡ (kg/kg)", ylabel="z (m)")
 
 for n in 1:Nt
     t_max = Int(times[n] / 60)
@@ -375,12 +371,11 @@ for n in 1:Nt
 end
 
 # Set axis limits to focus on the boundary layer
-ylims!(axθ, 0, 2500)
-ylims!(axq, 0, 2500)
-ylims!(axuv, 0, 2500)
-ylims!(axqˡ, 0, 2500)
+for ax in (axθ, axq, axuv, axqˡ)
+    ylims!(ax, 0, 2500)
+end
 
-xlims!(axθ, 298, 312)
+xlims!(axθ, 298, 310)
 xlims!(axq, 4, 18)
 xlims!(axuv, -10, 2)
 
