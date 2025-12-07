@@ -307,8 +307,8 @@ run!(simulation)
 
 # ## Results: mean profile evolution
 #
-# We visualize the evolution of horizontally-averaged profiles every 20 minutes,
-# similar to Figure 3 in [Siebesma2003](@cite). The intercomparison study shows
+# We visualize the evolution of horizontally-averaged profiles every 20 minutes, similar
+# to Figure 3 in the paper by [Siebesma2003](@cite). The intercomparison study shows
 # that after spin-up, the boundary layer reaches a quasi-steady state with:
 # - A well-mixed layer below cloud base (~500 m)
 # - A conditionally unstable cloud layer (~500-1500 m)
