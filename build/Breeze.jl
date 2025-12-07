@@ -6,7 +6,6 @@ are based on Oceananigans.
 module Breeze
 
 export
-    # AtmosphereModel
     MoistAirBuoyancy,
     ThermodynamicConstants,
     ReferenceState,
@@ -19,28 +18,22 @@ export
     CondensedPhase,
     mixture_gas_constant,
     mixture_heat_capacity,
-    static_energy_density,
-    static_energy,
-    total_energy,
-    potential_temperature_density,
-    liquid_ice_potential_temperature,
-
-    # Diagnostics
-    DryPotentialTemperature,
-    VirtualPotentialTemperature,
-    EquivalentPotentialTemperature,
-    LiquidIcePotentialTemperature,
-    LiquidIcePotentialTemperatureField,
-    StaticEnergy,
-    StaticEnergyField,
-
-    # Microphysics
     SaturationAdjustment,
     MixedPhaseEquilibrium,
     WarmPhaseEquilibrium,
     SaturationSpecificHumidity,
     SaturationSpecificHumidityField,
-    BulkMicrophysics
+    BulkMicrophysics,
+    static_energy_density,
+    static_energy,
+    total_energy,
+    potential_temperature_density,
+    liquid_ice_potential_temperature,
+    DryPotentialTemperature,
+    VirtualPotentialTemperature,
+    EquivalentPotentialTemperature,
+    LiquidIcePotentialTemperature,
+    StaticEnergy
 
 using Oceananigans: Oceananigans, @at, AnisotropicMinimumDissipation, Average,
                     AveragedTimeInterval, BackgroundField, BetaPlane, Bounded,
