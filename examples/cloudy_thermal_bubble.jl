@@ -1,4 +1,4 @@
-# # Dry and cloudy thermal bubbles
+# # Cloudy thermal bubble
 #
 # This example sets up, runs, and visualizes simulations of "thermal bubbles"
 # (just circular regions of warm air) rising through a neutral background.
@@ -24,9 +24,8 @@ grid = RectilinearGrid(CPU();
 
 thermodynamic_constants = ThermodynamicConstants()
 reference_state = ReferenceState(grid, thermodynamic_constants, base_pressure=1e5, potential_temperature=300)
-#formulation = AnelasticFormulation(reference_state, thermodynamics=:LiquidIcePotentialTemperature)
-formulation = AnelasticFormulation(reference_state, thermodynamics=:StaticEnergy)
-advection = Centered(order=2) #WENO(order=9)
+formulation = AnelasticFormulation(reference_state, thermodynamics=:LiquidIcePotentialTemperature)
+advection = WENO(order=9)
 model = AtmosphereModel(grid; formulation, thermodynamic_constants, advection)
 
 # ## Potential temperature perturbation
@@ -70,10 +69,8 @@ conjure_time_step_wizard!(simulation, cfl=0.7)
 
 function progress(sim)
     u, v, w = sim.model.velocities
-
-    msg = @sprintf("Iter: % 4d, t: % 14s, Δt: % 14s, ∫E: %.8e J, extrema(θ): (%.2f, %.2f) K, max|w|: %.2f m/s",
-                   iteration(sim), prettytime(sim), prettytime(sim.Δt), ∫E[], extrema(θ)..., maximum(abs, w))
-
+    msg = @sprintf("Iter: % 4d, t: % 14s, Δt: % 14s, ⟨E⟩: %.8e J, extrema(θ): (%.2f, %.2f) K, max|w|: %.2f m/s",
+                   iteration(sim), prettytime(sim), prettytime(sim.Δt), mean(E), extrema(θ)..., maximum(abs, w))
     @info msg
     return nothing
 end
@@ -169,7 +166,10 @@ moist_model = AtmosphereModel(grid; formulation, thermodynamic_constants, advect
 # Set potential temperature to match the dry bubble initially
 set!(moist_model, θ=θᵢ, qᵗ=0.025)
 
-# Compute saturation specific humidity using the diagnostic field
+# Compute saturation specific humidity using the diagnostic field,
+# and adjust the buoyancy to match the dry bubble
+# Note, this isn't quite right and needs to be fixed.
+
 using Breeze.Thermodynamics: dry_air_gas_constant, vapor_gas_constant
 
 qᵛ⁺ = SaturationSpecificHumidityField(moist_model, :equilibrium)
@@ -187,16 +187,14 @@ moist_simulation = Simulation(moist_model; Δt=2, stop_time=30minutes)
 conjure_time_step_wizard!(moist_simulation, cfl=0.7)
 
 E = total_energy(moist_model)
-∫E = Integral(E) |> Field
 θ = liquid_ice_potential_temperature(moist_model)
 
 function progress_moist(sim)
-    compute!(∫E)
     ρqᵗ = sim.model.moisture_density
     u, v, w = sim.model.velocities
 
-    msg = @sprintf("Iter: % 4d, t: % 14s, Δt: % 14s, ∫E: %.8e J, extrema(θ): (%.2f, %.2f) K \n",
-                   iteration(sim), prettytime(sim), prettytime(sim.Δt), ∫E[], extrema(θ)...)
+    msg = @sprintf("Iter: % 4d, t: % 14s, Δt: % 14s, ⟨E⟩: %.8e J, extrema(θ): (%.2f, %.2f) K \n",
+                   iteration(sim), prettytime(sim), prettytime(sim.Δt), mean(E), extrema(θ)...)
 
     msg *= @sprintf("   extrema(qᵗ): (%.2e, %.2e), max(qˡ): %.2e, max|w|: %.2f m/s, mean(qᵗ): %.2e",
                     extrema(ρqᵗ)..., maximum(qˡ), maximum(abs, w), mean(ρqᵗ))
@@ -205,7 +203,7 @@ function progress_moist(sim)
     return nothing
 end
 
-add_callback!(moist_simulation, progress_moist, TimeInterval(100))
+add_callback!(moist_simulation, progress_moist, TimeInterval(3minutes))
 
 θ = liquid_ice_potential_temperature(moist_model)
 u, v, w = moist_model.velocities
@@ -214,7 +212,7 @@ qˡ = moist_model.microphysical_fields.qˡ
 qˡ′ = qˡ - Field(Average(qˡ, dims=1))
 moist_outputs = (; θ, w, qˡ′)
 
-moist_filename = "moist_thermal_bubble.jld2"
+moist_filename = "cloudy_thermal_bubble.jld2"
 moist_writer = JLD2Writer(moist_model, moist_outputs; filename=moist_filename,
                           schedule = TimeInterval(10seconds),
                           overwrite_existing = true)
@@ -223,28 +221,6 @@ moist_simulation.output_writers[:jld2] = moist_writer
 
 run!(moist_simulation)
 
-fig = Figure(size=(1200, 600))
-
-axθ = Axis(fig[1, 2], aspect=2, xlabel="x (m)", ylabel="z (m)")
-axw = Axis(fig[1, 3], aspect=2, xlabel="x (m)", ylabel="z (m)")
-axl = Axis(fig[2, 2:3], aspect=2, xlabel="x (m)", ylabel="z (m)")
-
-qˡ = moist_model.microphysical_fields.qˡ
-
-hmθ = heatmap!(axθ, θ)
-hmw = heatmap!(axw, w)
-hmqˡ = heatmap!(axl, qˡ′)
-
-t_str = @sprintf("t = %s", prettytime(moist_simulation.model.clock.time))
-Colorbar(fig[1, 1], hmθ, label = "θ (K) at $t_str")
-Colorbar(fig[1, 4], hmw, label = "w (m/s) at $t_str")
-Colorbar(fig[2, 4], hmqˡ, label = "qˡ (kg/kg) at $t_str")
-
-fig
-
-# simulation_moist.stop_time = 30minutes
-# run!(simulation_moist)
-
 # ## Visualization of moist thermal bubble
 
 θt = FieldTimeSeries(moist_filename, "θ")
@@ -252,7 +228,7 @@ wt = FieldTimeSeries(moist_filename, "w")
 qˡ′t = FieldTimeSeries(moist_filename, "qˡ′")
 
 times = θt.times
-fig = Figure(size = (1200, 800), fontsize = 12)
+fig = Figure(size = (1800, 800), fontsize = 12)
 axθ = Axis(fig[1, 2], aspect=2, xlabel="x (m)", ylabel="z (m)")
 axw = Axis(fig[1, 3], aspect=2, xlabel="x (m)", ylabel="z (m)")
 axl = Axis(fig[2, 2:3], aspect=2, xlabel="x (m)", ylabel="z (m)")
@@ -274,9 +250,9 @@ Colorbar(fig[1, 1], hmθ, label = "θ (K)", vertical = true)
 Colorbar(fig[1, 4], hmw, label = "w (m/s)", vertical = true)
 Colorbar(fig[2, 4], hml, label = "qˡ (kg/kg)", vertical = true)
 
-CairoMakie.record(fig, "moist_thermal_bubble.mp4", 1:length(θt), framerate = 12) do nn
+CairoMakie.record(fig, "cloudy_thermal_bubble.mp4", 1:length(θt), framerate = 24) do nn
     n[] = nn
 end
 nothing #hide
 
-# ![](moist_thermal_bubble.mp4)
+# ![](cloudy_thermal_bubble.mp4)

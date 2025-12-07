@@ -116,7 +116,16 @@ function Base.summary(formulation::AnelasticFormulation)
     return string("AnelasticFormulation(p₀=", p₀_str, ", θ₀=", θ₀_str, ")")
 end
 
-Base.show(io::IO, formulation::AnelasticFormulation) = print(io, "AnelasticFormulation")
+function Base.show(io::IO, formulation::AnelasticFormulation)
+    print(io, summary(formulation), '\n')
+
+    if formulation.thermodynamics isa Symbol
+        print(io, "└── thermodynamics: ", formulation.thermodynamics, '\n')
+    else
+        print(io, "├── pressure_anomaly: ", prettysummary(formulation.pressure_anomaly), '\n')
+        print(io, "└── thermodynamics: ", prettysummary(formulation.thermodynamics))
+    end
+end
 
 function materialize_momentum_and_velocities(formulation::AnelasticFormulation, grid, boundary_conditions)
     ρu = XFaceField(grid, boundary_conditions=boundary_conditions.ρu)
