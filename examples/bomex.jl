@@ -299,7 +299,7 @@ averaged_outputs = NamedTuple(name => Average(outputs[name], dims=(1, 2)) for na
 
 filename = "bomex.jld2"
 simulation.output_writers[:averages] = JLD2Writer(model, averaged_outputs; filename,
-                                                  schedule = TimeInterval(20minutes),
+                                                  schedule = AveragedTimeInterval(20minutes, window=20minutes, stride=1),
                                                   overwrite_existing = true)
 
 @info "Running BOMEX simulation..."
@@ -320,9 +320,12 @@ qˡt = FieldTimeSeries(filename, "qˡ")
 ut = FieldTimeSeries(filename, "u")
 vt = FieldTimeSeries(filename, "v")
 
+for fts in (qᵛt, qˡt)
+    fts .*= 1000 # convert kg/kg -> g/kg
+end
+
 times = θt.times
 Nt = length(times)
-z = znodes(θt)
 
 # Create a 2×2 panel plot showing the evolution of key variables
 
@@ -340,17 +343,11 @@ for n in 1:Nt
     t_min = Int(times[n] / 60)
     label = "t = $(t_min) min"
 
-    θn = interior(θt[n], 1, 1, :)
-    qᵛn = interior(qᵛt[n], 1, 1, :) .* 1000  # Convert to g/kg
-    qˡn = interior(qˡt[n], 1, 1, :) .* 1000  # Convert to g/kg
-    un = interior(ut[n], 1, 1, :)
-    vn = interior(vt[n], 1, 1, :)
-
-    lines!(axθ, θn, z, color=colors[n], label=label)
-    lines!(axq, qᵛn, z, color=colors[n])
-    lines!(axuv, un, z, color=colors[n], linestyle=:solid)
-    lines!(axuv, vn, z, color=colors[n], linestyle=:dash)
-    lines!(axqˡ, qˡn, z, color=colors[n])
+    lines!(axθ, θt[n], color=colors[n], label=label)
+    lines!(axq, qᵛt[n], color=colors[n])
+    lines!(axuv, ut[n], color=colors[n], linestyle=:solid)
+    lines!(axuv, vt[n], color=colors[n], linestyle=:dash)
+    lines!(axqˡ, qˡt[n], color=colors[n])
 end
 
 # Set axis limits to focus on the boundary layer
@@ -364,7 +361,7 @@ xlims!(axq, 4, 18)
 xlims!(axuv, -10, 2)
 
 # Add legends and annotations
-axislegend(axθ, position=:rt)
+axislegend(axθ, position=:rb)
 text!(axuv, -8.5, 2200, text="solid: u\ndashed: v", fontsize=12)
 
 fig[0, :] = Label(fig, "BOMEX: Mean profile evolution (Siebesma et al., 2003)", fontsize=18, tellwidth=false)
@@ -379,5 +376,6 @@ fig
 # - Westerly flow throughout the domain with weak meridional winds
 #
 # Note: This short 1-hour simulation captures the initial spin-up phase.
-# For production results comparable to [Siebesma2003](@cite), the simulation
-# should be run for 6 hours at full resolution (64² × 75), e.g., on a GPU.
+# For production results comparable to the ones by [Siebesma2003](@cite),
+# the simulation should be run for 6 hours at full resolution (64² × 75),
+# e.g., on a GPU.
