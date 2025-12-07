@@ -104,7 +104,7 @@ u★ = 0.28 # m/s
 # ```
 # where ``W^s = -0.65 \times 10^{-2}`` m/s (note the negative sign for "subisdence"),
 # ``z_1 = 1500`` m and ``z_2 = 2100`` m.
-# 
+#
 # The subsidence velocity profile is provided by AtmosphericProfilesLibrary,
 
 wˢ = Field{Nothing, Nothing, Face}(grid)
@@ -234,7 +234,7 @@ model = AtmosphereModel(grid; formulation, coriolis, microphysics, advection, fo
                         boundary_conditions = (ρθ=ρθ_bcs, ρqᵗ=ρqᵗ_bcs, ρu=ρu_bcs, ρv=ρv_bcs))
 
 # ## Initial conditions
-# 
+#
 # ### Profiles from AtmosphericProfilesLibrary
 #
 # Mean profiles are specified as piecewise linear functions by [Siebesma2003](@citet),
@@ -254,7 +254,7 @@ u₀ = AtmosphericProfilesLibrary.Bomex_u(FT)
 # The initial profiles are perturbed with random noise below 1600 m to trigger
 # convection. The perturbation amplitudes are specified by [Siebesma2003](@citet);
 # Appendix B (third paragraph after Eq. B6):
-# 
+#
 # - Potential temperature perturbation: ``δθ = 0.1`` K
 # - Moisture perturbation: ``δqᵗ = 2.5 \times 10^{-5}`` kg/kg
 #
@@ -362,18 +362,16 @@ axq = Axis(fig[1, 2], xlabel="qᵛ (g/kg)", ylabel="z (m)")
 axuv = Axis(fig[2, 1], xlabel="u, v (m/s)", ylabel="z (m)")
 axqˡ = Axis(fig[2, 2], xlabel="qˡ (g/kg)", ylabel="z (m)")
 
-# Plot profiles at each output time (every 20 minutes)
-colors = cgrad(:viridis, Nt, categorical=true)
-
 for n in 1:Nt
-    t_min = Int(times[n] / 60)
-    label = "t = $(t_min) min"
+    t_max = Int(times[n] / 60)
 
-    lines!(axθ, θt[n], color=colors[n], label=label)
-    lines!(axq, qᵛt[n], color=colors[n])
-    lines!(axuv, ut[n], color=colors[n], linestyle=:solid)
-    lines!(axuv, vt[n], color=colors[n], linestyle=:dash)
-    lines!(axqˡ, qˡt[n], color=colors[n])
+    label = n == 1 ? "t = $t_max min" : "mean $(t_max - 20)-$t_max min"
+
+    lines!(axθ, θt[n], label=label)
+    lines!(axq, qᵛt[n])
+    lines!(axuv, ut[n], linestyle=:solid)
+    lines!(axuv, vt[n], linestyle=:dash)
+    lines!(axqˡ, qˡt[n])
 end
 
 # Set axis limits to focus on the boundary layer
