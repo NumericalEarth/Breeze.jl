@@ -27,9 +27,7 @@ example_scripts = [
 @sync for script_file in example_scripts
     Threads.@spawn :interactive begin
         script_path = joinpath(examples_src_dir, script_file)
-        Literate.markdown(script_path, literated_dir;
-                          flavor = Literate.DocumenterFlavor(),
-                          execute = true)
+        run(`$(Base.julia_cmd()) --color=yes --project=$(dirname(Base.active_project())) -e "using Literate; Literate.markdown($(repr(script_path)), $(repr(literated_dir)); flavor = Literate.DocumenterFlavor(), execute = true)"`)
     end
 end
 
