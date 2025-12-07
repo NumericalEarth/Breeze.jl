@@ -376,7 +376,7 @@ for ax in (axθ, axq, axuv, axqˡ)
 end
 
 xlims!(axθ, 298, 310)
-xlims!(axq, 4, 18)
+xlims!(axq, 4e-3, 18e-3)
 xlims!(axuv, -10, 2)
 
 # Add legends and annotations
