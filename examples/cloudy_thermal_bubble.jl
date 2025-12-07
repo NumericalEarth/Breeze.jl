@@ -183,7 +183,7 @@ set!(moist_model, θ=θᵐ)
 
 # ## Simulation
 
-moist_simulation = Simulation(moist_model; Δt=2, stop_time=2hours)
+moist_simulation = Simulation(moist_model; Δt=2, stop_time=1hours)
 conjure_time_step_wizard!(moist_simulation, cfl=0.7)
 
 E = total_energy(moist_model)
@@ -228,7 +228,7 @@ wt = FieldTimeSeries(moist_filename, "w")
 qˡ′t = FieldTimeSeries(moist_filename, "qˡ′")
 
 times = θt.times
-fig = Figure(size = (1200, 800), fontsize = 12)
+fig = Figure(size = (1800, 800), fontsize = 12)
 axθ = Axis(fig[1, 2], aspect=2, xlabel="x (m)", ylabel="z (m)")
 axw = Axis(fig[1, 3], aspect=2, xlabel="x (m)", ylabel="z (m)")
 axl = Axis(fig[2, 2:3], aspect=2, xlabel="x (m)", ylabel="z (m)")
@@ -250,9 +250,9 @@ Colorbar(fig[1, 1], hmθ, label = "θ (K)", vertical = true)
 Colorbar(fig[1, 4], hmw, label = "w (m/s)", vertical = true)
 Colorbar(fig[2, 4], hml, label = "qˡ (kg/kg)", vertical = true)
 
-CairoMakie.record(fig, "moist_thermal_bubble.mp4", 1:length(θt), framerate = 12) do nn
+CairoMakie.record(fig, "cloudy_thermal_bubble.mp4", 1:length(θt), framerate = 24) do nn
     n[] = nn
 end
 nothing #hide
 
-# ![](moist_thermal_bubble.mp4)
+# ![](cloudy_thermal_bubble.mp4)
