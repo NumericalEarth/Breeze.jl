@@ -183,7 +183,7 @@ set!(moist_model, θ=θᵐ)
 
 # ## Simulation
 
-moist_simulation = Simulation(moist_model; Δt=2, stop_time=1hours)
+moist_simulation = Simulation(moist_model; Δt=2, stop_time=30minutes)
 conjure_time_step_wizard!(moist_simulation, cfl=0.7)
 
 E = total_energy(moist_model)
@@ -203,7 +203,7 @@ function progress_moist(sim)
     return nothing
 end
 
-add_callback!(moist_simulation, progress_moist, TimeInterval(100))
+add_callback!(moist_simulation, progress_moist, TimeInterval(3minutes))
 
 θ = liquid_ice_potential_temperature(moist_model)
 u, v, w = moist_model.velocities
