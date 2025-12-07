@@ -24,9 +24,10 @@ example_scripts = [
     # "prescribed_sst.jl", # this is a WIP
 ]
 
+semaphore = Base.Semaphore(Threads.nthreads(:interactive))
 @sync for script_file in example_scripts
-    Threads.@spawn :interactive begin
-        script_path = joinpath(examples_src_dir, script_file)
+    script_path = joinpath(examples_src_dir, script_file)
+    Threads.@spawn :interactive Base.acquire(semaphore) do
         run(`$(Base.julia_cmd()) --color=yes --project=$(dirname(Base.active_project())) -e "using Literate; Literate.markdown($(repr(script_path)), $(repr(literated_dir)); flavor = Literate.DocumenterFlavor(), execute = true)"`)
     end
 end
