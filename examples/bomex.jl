@@ -25,7 +25,7 @@ using Oceananigans.Operators: ∂zᶜᶜᶠ, ℑzᵃᵃᶜ
 # ## Domain and grid
 #
 # The BOMEX domain is 6.4 km × 6.4 km horizontally with a vertical extent of 3 km
-# ([Siebesma2003](@citet), Section 3a). The original intercomparison used
+# ([Siebesma2003](@citet); Section 3a). The original intercomparison used
 # 64 × 64 × 75 grid points with 100 m horizontal resolution and 40 m vertical resolution.
 #
 # For this documentation example, we use reduced horizontal resolution (32²) to enable
@@ -46,7 +46,7 @@ grid = RectilinearGrid(CPU(); x, y, z,
 # ## Initial profiles from AtmosphericProfilesLibrary
 #
 # The initial thermodynamic profiles are piecewise linear functions defined by
-# [Siebesma2003](@citet), Appendix B, Tables B1 and B2. These include:
+# [Siebesma2003](@citet); Appendix B, Tables B1 and B2. These include:
 # - Liquid-ice potential temperature ``θ_{\ell i}(z)`` (Table B1)
 # - Total water specific humidity ``q_t(z)`` (Table B1)
 # - Zonal velocity ``u(z)`` (Table B2)
@@ -63,7 +63,7 @@ u_bomex = AtmosphericProfilesLibrary.Bomex_u(FT)
 #
 # We use the anelastic formulation with a dry adiabatic reference state.
 # The surface potential temperature ``θ_0 = 299.1`` K and surface pressure
-# ``p_0 = 1015`` hPa are taken from [Siebesma2003](@citet), Appendix B.
+# ``p_0 = 1015`` hPa are taken from [Siebesma2003](@citet); Appendix B.
 
 p₀, θ₀ = 101500, 299.1
 constants = ThermodynamicConstants()
@@ -73,7 +73,7 @@ formulation = AnelasticFormulation(reference_state, thermodynamics=:LiquidIcePot
 # ## Surface fluxes
 #
 # BOMEX prescribes constant surface sensible and latent heat fluxes
-# ([Siebesma2003](@citet), Appendix B, after Eq. B4):
+# ([Siebesma2003](@citet); Appendix B, after Eq. B4):
 # - Sensible heat flux: ``\overline{w'\theta_v'}|_s = 8 \times 10^{-3}`` K m/s
 # - Latent heat flux: ``\overline{w'q_t'}|_s = 5.2 \times 10^{-5}`` m/s
 #
@@ -91,7 +91,7 @@ w′q′ = 5.2e-5  # m/s (latent heat flux)
 # ## Surface momentum flux (drag)
 #
 # A bulk drag parameterization is applied with friction velocity
-# ``u_* = 0.28`` m/s ([Siebesma2003](@citet), Appendix B, after Eq. B4).
+# ``u_* = 0.28`` m/s ([Siebesma2003](@citet); Appendix B, after Eq. B4).
 
 u★ = 0.28 # m/s
 @inline ρu_drag(x, y, t, ρu, ρv, p) = - p.ρ₀ * p.u★^2 * ρu / sqrt(ρu^2 + ρv^2)
@@ -105,11 +105,11 @@ u★ = 0.28 # m/s
 # ## Large-scale subsidence
 #
 # The BOMEX case includes large-scale subsidence that advects mean profiles downward.
-# The subsidence velocity profile is prescribed by [Siebesma2003](@citet), Appendix B, Eq. B5:
+# The subsidence velocity profile is prescribed by [Siebesma2003](@citet); Appendix B, Eq. B5:
 # ```math
 # w_s(z) = \begin{cases}
-#   -0.65 \times 10^{-2} z / z_1 & z \le z_1 \\
-#   -0.65 \times 10^{-2} (1 - (z - z_1)/(z_2 - z_1)) & z_1 < z \le z_2 \\
+#   -0.65 \times 10^{-2} \frac{z}{z_1} & z \le z_1 \\
+#   -0.65 \times 10^{-2} \left(1 - \frac{z - z_1}{z_2 - z_1}\right) & z_1 < z \le z_2 \\
 #   0 & z > z_2
 # \end{cases}
 # ```
@@ -163,7 +163,7 @@ set!(wˢ, z -> w_bomex(z))
 # ## Geostrophic forcing
 #
 # The momentum equations include a Coriolis force with prescribed geostrophic wind.
-# The geostrophic wind profiles are given by [Siebesma2003](@citet), Appendix B, Eq. B6.
+# The geostrophic wind profiles are given by [Siebesma2003](@citet); Appendix B, Eq. B6.
 
 coriolis = FPlane(f=3.76e-5)
 
@@ -188,7 +188,7 @@ set!(vᵍ, z -> vᵍ_bomex(z))
 # ## Moisture tendency (drying)
 #
 # A prescribed large-scale drying tendency removes moisture above the cloud layer
-# ([Siebesma2003](@citet), Appendix B, Eq. B4). This represents the effects of
+# ([Siebesma2003](@citet); Appendix B, Eq. B4). This represents the effects of
 # advection by the large-scale circulation.
 
 drying = Field{Nothing, Nothing, Center}(grid)
@@ -202,7 +202,7 @@ set!(drying, ρᵣ * drying)
 # ## Radiative cooling
 #
 # A prescribed radiative cooling profile is applied to the thermodynamic equation
-# ([Siebesma2003](@citet), Appendix B, Eq. B3). Below the inversion, radiative cooling
+# ([Siebesma2003](@citet); Appendix B, Eq. B3). Below the inversion, radiative cooling
 # of about 2 K/day counteracts the surface heating.
 
 Fρθ_field = Field{Nothing, Nothing, Center}(grid)
@@ -227,7 +227,7 @@ model = AtmosphereModel(grid; formulation, coriolis, microphysics, advection,
 # ## Initial conditions
 #
 # The initial profiles are perturbed with random noise below 1600 m to trigger
-# convection. The perturbation amplitudes are specified by [Siebesma2003](@citet),
+# convection. The perturbation amplitudes are specified by [Siebesma2003](@citet);
 # Appendix B (third paragraph after Eq. B6):
 # - Potential temperature perturbation: ``\delta\theta = 0.1`` K
 # - Moisture perturbation: ``\delta q_t = 2.5 \times 10^{-5}`` kg/kg
