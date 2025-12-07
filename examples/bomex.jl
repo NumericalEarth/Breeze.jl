@@ -414,6 +414,6 @@ fig
 # - Westerly flow throughout the domain with weak meridional winds
 #
 # Note: This short 1-hour simulation captures the initial spin-up phase.
-# For production results comparable to the ones by [Siebesma2003](@cite),
+# For production results comparable to the ones by [Siebesma2003](@citet),
 # the simulation should be run for 6 hours at full resolution (64² × 75),
 # e.g., on a GPU.
