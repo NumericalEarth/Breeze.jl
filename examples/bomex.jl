@@ -359,18 +359,18 @@ axuv = Axis(fig[2, 1], xlabel="u, v (m/s)", ylabel="z (m)")
 axqˡ = Axis(fig[2, 2], xlabel="qˡ (kg/kg)", ylabel="z (m)")
 
 default_colours = Makie.wong_colors()
-colors = [cols[mod1(i, length(default_colours))] for i in 1:Nt]
+colors = [default_colours[mod1(i, length(default_colours))] for i in 1:Nt]
 
 for n in 1:Nt
     t_max = Int(times[n] / 60)
 
     label = n == 1 ? "initial condition" : "mean over $(t_max - 20)-$t_max min"
 
-    lines!(axθ, θt[n], color=colours[n], label=label)
-    lines!(axq, qᵛt[n], color=colours[n])
-    lines!(axuv, ut[n], color=colours[n], linestyle=:solid)
-    lines!(axuv, vt[n], color=colours[n], linestyle=:dash)
-    lines!(axqˡ, qˡt[n], color=colours[n])
+    lines!(axθ, θt[n], color=colors[n], label=label)
+    lines!(axq, qᵛt[n], color=colors[n])
+    lines!(axuv, ut[n], color=colors[n], linestyle=:solid)
+    lines!(axuv, vt[n], color=colors[n], linestyle=:dash)
+    lines!(axqˡ, qˡt[n], color=colors[n])
 end
 
 # Set axis limits to focus on the boundary layer
