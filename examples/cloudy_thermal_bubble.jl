@@ -10,13 +10,14 @@ using Oceananigans.Units
 using Statistics
 using Printf
 using CairoMakie
+using CUDA
 
 # ## Dry thermal bubble
 #
 # We first set up a dry thermal bubble simulation without moisture processes.
 # This serves as a baseline for comparison with the moist case.
 
-grid = RectilinearGrid(CPU();
+grid = RectilinearGrid(GPU();
                        size = (128, 128), halo = (5, 5),
                        x = (-10e3, 10e3),
                        z = (0, 10e3),
