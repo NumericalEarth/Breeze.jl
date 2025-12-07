@@ -212,7 +212,7 @@ qˡ = moist_model.microphysical_fields.qˡ
 qˡ′ = qˡ - Field(Average(qˡ, dims=1))
 moist_outputs = (; θ, w, qˡ′)
 
-moist_filename = "moist_thermal_bubble.jld2"
+moist_filename = "cloudy_thermal_bubble.jld2"
 moist_writer = JLD2Writer(moist_model, moist_outputs; filename=moist_filename,
                           schedule = TimeInterval(10seconds),
                           overwrite_existing = true)
