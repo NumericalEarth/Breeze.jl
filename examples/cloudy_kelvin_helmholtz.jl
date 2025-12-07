@@ -19,6 +19,7 @@ using Breeze
 using Oceananigans.Units
 using CairoMakie
 using Printf
+using DisplayAs #hide
 
 # ## Domain and grid
 #
@@ -145,6 +146,7 @@ for ax in (axq, axθ, axR)
 end
 
 fig
+DisplayAs.SVG(fig) #hide
 
 # ## Set up and run the simulation
 #
@@ -221,6 +223,7 @@ Colorbar(fig[2, 2], hml, label = "kg/kg", vertical = true)
 Colorbar(fig[3, 2], hmθ, label = "Κ", vertical = true)
 
 fig
+DisplayAs.SVG(fig) #hide
 
 # We can also make a movie:
 
