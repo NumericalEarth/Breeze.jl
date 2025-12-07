@@ -33,7 +33,7 @@ using Oceananigans.Operators: ∂zᶜᶜᶠ, ℑzᵃᵃᶜ
 # (and 200 m horizontal resolution) to speed up the documentation build.
 # The full resolution case should be run for production simulations.
 
-Nx = Ny = 32
+Nx = Ny = 64
 Nz = 75
 
 x = y = (0, 6400)
@@ -294,7 +294,7 @@ set!(model, θ=θᵢ, qᵗ=qᵢ, u=uᵢ)
 #
 # We run the simulation for 1 hour with adaptive time-stepping.
 
-simulation = Simulation(model; Δt=10, stop_time=1hour)
+simulation = Simulation(model; Δt=10, stop_time=6hour)
 conjure_time_step_wizard!(simulation, cfl=0.7)
 
 # Set up horizontal average diagnostics for subsidence forcing.
@@ -343,7 +343,7 @@ averaged_outputs = NamedTuple(name => Average(outputs[name], dims=(1, 2)) for na
 
 filename = "bomex.jld2"
 simulation.output_writers[:averages] = JLD2Writer(model, averaged_outputs; filename,
-                                                  schedule = AveragedTimeInterval(20minutes),
+                                                  schedule = AveragedTimeInterval(1hour),
                                                   overwrite_existing = true)
 
 @info "Running BOMEX simulation..."
