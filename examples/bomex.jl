@@ -10,8 +10,8 @@
 # clouds. The intercomparison study by [Siebesma2003](@citet) brought together results
 # from 10 different large eddy simulation codes to establish benchmark statistics.
 #
-# Initial and boundary conditions for this case are provided by
-# [AtmosphericProfilesLibrary.jl](https://github.com/CliMA/AtmosphericProfilesLibrary.jl).
+# Initial and boundary conditions for this case are provided by the wonderfully useful
+# package [AtmosphericProfilesLibrary.jl](https://github.com/CliMA/AtmosphericProfilesLibrary.jl).
 
 using Breeze
 using Oceananigans.Units
@@ -28,8 +28,9 @@ using Oceananigans.Operators: ∂zᶜᶜᶠ, ℑzᵃᵃᶜ
 # ([Siebesma2003](@citet); Section 3a). The original intercomparison used
 # 64 × 64 × 75 grid points with 100 m horizontal resolution and 40 m vertical resolution.
 #
-# For this documentation example, we use reduced horizontal resolution (32²) to enable
-# fast execution on a CPU. The full resolution case should be run for production simulations.
+# For this documentation example, we use a reduced horizontal resolution of 32²
+# (and 200 m horizontal resolution) to speed up the documentation build.
+# The full resolution case should be run for production simulations.
 
 Nx = Ny = 32
 Nz = 75
@@ -48,9 +49,11 @@ grid = RectilinearGrid(CPU(); x, y, z,
 # ``p_0 = 1015`` hPa are taken from [Siebesma2003](@citet); Appendix B.
 
 constants = ThermodynamicConstants()
+
 reference_state = ReferenceState(grid, constants,
                                  base_pressure = 101500,
                                  potential_temperature = 299.1)
+
 formulation = AnelasticFormulation(reference_state,
                                    thermodynamics = :LiquidIcePotentialTemperature)
 
@@ -59,7 +62,7 @@ formulation = AnelasticFormulation(reference_state,
 # BOMEX prescribes constant surface sensible and latent heat fluxes
 # ([Siebesma2003](@citet), Appendix B, after Eq. B4):
 # - Sensible heat flux: ``\overline{w'\theta'}|_0 = 8 \times 10^{-3}`` K m/s
-# - Moisture flux: ``\overline{w'q^t'}|_0 = 5.2 \times 10^{-5}`` m/s
+# - Moisture flux: ``\overline{w'q_t'}|_0 = 5.2 \times 10^{-5}`` m/s
 #
 # ([Siebesma2003](@citet) refers to the moisture flux as the "latent heat flux".
 # We convert these kinematic fluxes to mass fluxes by multiplying by surface density,
@@ -102,10 +105,10 @@ u★ = 0.28 # m/s
 #   0 & z > z_2
 # \end{cases}
 # ```
-# where ``W^s = -0.65 \times 10^{-2}`` m/s (note the negative sign for "subisdence"),
+# where ``W^s = -6.5 \times 10^{-3}`` m/s (note the negative sign for "subisdence"),
 # ``z_1 = 1500`` m and ``z_2 = 2100`` m.
 #
-# The subsidence velocity profile is provided by AtmosphericProfilesLibrary,
+# The subsidence velocity profile is provided by [AtmosphericProfilesLibrary](https://github.com/CliMA/AtmosphericProfilesLibrary.jl),
 
 wˢ = Field{Nothing, Nothing, Face}(grid)
 wˢ_profile = AtmosphericProfilesLibrary.Bomex_subsidence(FT)
@@ -206,11 +209,12 @@ set!(Fρe_field, ρᵣ * cᵖᵈ * Fρe_field)
 # in different ways. In particular, the tendency for `ρθ` is written
 #
 # ```math
-# ∂_t (ρ θ) = F_{ρθ} + \frac{1}{c^{p m} \Pi} F_{ρ e} + \cdots
+# ∂_t (ρ θ) = - ∇ ⋅ ( ρ \boldsymbol{u} θ ) + F_{ρθ} + \frac{1}{cᵖᵐ Π} F_{ρ e} + \cdots
 # ```
 #
 # where ``F_{ρ e}`` denotes the forcing function provided for `ρe` (e.g. for "energy density"),
-# ``F_{ρθ}`` denotes the forcing function provided for `ρθ`, and the ``\cdots`` denote additional terms.
+# ``F_{ρθ}`` denotes the forcing function provided for `ρθ`, and the ``\cdots`` denote
+# additional terms.
 
 ρu_forcing = (ρu_subsidence_forcing, ρu_geostrophic_forcing)
 ρv_forcing = (ρv_subsidence_forcing, ρv_geostrophic_forcing)
@@ -220,8 +224,7 @@ set!(Fρe_field, ρᵣ * cᵖᵈ * Fρe_field)
 
 forcing = (; ρu=ρu_forcing, ρv=ρv_forcing, ρθ=ρθ_forcing,
              ρe=ρe_forcing, ρqᵗ=ρqᵗ_forcing)
-
-nothing # hide
+nothing #hide
 
 # ## Model setup
 #
@@ -255,7 +258,8 @@ u₀ = AtmosphericProfilesLibrary.Bomex_u(FT)
 # pressure from the base pressure of the reference profile, rather than using
 # the standard ``10^5`` Pa. Because of this we need to apply a correction to
 # the initial condition: without this correction, our results do not match
-# Siebesma's.
+# [Siebesma2003](@citet) (and note that our outputted potential temperature
+# is displaced from [Siebesma2003](@citet)'s by precisely the factor below).
 
 using Breeze.Thermodynamics: dry_air_gas_constant, vapor_gas_constant
 
@@ -359,9 +363,6 @@ qˡt = FieldTimeSeries(filename, "qˡ")
 ut = FieldTimeSeries(filename, "u")
 vt = FieldTimeSeries(filename, "v")
 
-times = θt.times
-Nt = length(times)
-
 # Create a 2×2 panel plot showing the evolution of key variables
 
 fig = Figure(size=(900, 800), fontsize=14)
@@ -374,9 +375,11 @@ axqˡ = Axis(fig[2, 2], xlabel="qˡ (kg/kg)", ylabel="z (m)")
 default_colours = Makie.wong_colors()
 colors = [default_colours[mod1(i, length(default_colours))] for i in 1:Nt]
 
+times = θt.times
+Nt = length(times)
+
 for n in 1:Nt
     t_max = Int(times[n] / 60)
-
     label = n == 1 ? "initial condition" : "mean over $(t_max - 20)-$t_max min"
 
     lines!(axθ, θt[n], color=colors[n], label=label)
