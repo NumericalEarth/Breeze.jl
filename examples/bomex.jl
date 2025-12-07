@@ -325,7 +325,7 @@ averaged_outputs = NamedTuple(name => Average(outputs[name], dims=(1, 2)) for na
 
 filename = "bomex.jld2"
 simulation.output_writers[:averages] = JLD2Writer(model, averaged_outputs; filename,
-                                                  schedule = AveragedTimeInterval(20minutes, window=20minutes, stride=1),
+                                                  schedule = AveragedTimeInterval(20minutes),
                                                   overwrite_existing = true)
 
 @info "Running BOMEX simulation..."
