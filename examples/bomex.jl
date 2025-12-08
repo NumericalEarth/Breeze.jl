@@ -260,7 +260,7 @@ u₀ = AtmosphericProfilesLibrary.Bomex_u(FT)
 
 # Breeze's current definition of the Exner function derives its reference
 # pressure from the base pressure of the reference profile, rather than using
-# the standard ``10^5`` Pa. Because of this we need to apply a correction to
+# the standard ``10^5`` Pa. Because of this, we need to apply a correction to
 # the initial condition: without this correction, our results do not match
 # [Siebesma2003](@citet) (and note that our outputted potential temperature
 # is displaced from [Siebesma2003](@citet)'s by precisely the factor below).
@@ -321,7 +321,8 @@ add_callback!(simulation, compute_averages!)
 
 # ## Output and progress
 #
-# We output horizontally-averaged profiles for post-processing.
+# We add a progress callback and output the 20-minute time-averages of the horizontally-averaged
+# profiles for post-processing.
 
 qˡ = model.microphysical_fields.qˡ
 qᵛ = model.microphysical_fields.qᵛ
