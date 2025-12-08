@@ -56,9 +56,6 @@ adapted from the derivation in [DurranKlemp1982](@citet).
 
 # Examples
 
-Equivalent potential temperature is larger than dry potential temperature when moisture
-is present (due to the latent heat of condensation):
-
 ```jldoctest
 using Breeze
 
@@ -67,13 +64,17 @@ model = AtmosphereModel(grid)
 set!(model, θ=300, qᵗ=0.01)
 
 θₑ = EquivalentPotentialTemperature(model)
-θ = DryPotentialTemperature(model)
-θₑ_field = compute!(Field(θₑ))
-θ_field = compute!(Field(θ))
-minimum(θₑ_field) > minimum(θ_field)
+Field(θₑ)
 
 # output
-true
+1×1×8 Field{Center, Center, Center} on RectilinearGrid on CPU
+├── grid: 1×1×8 RectilinearGrid{Float64, Periodic, Periodic, Bounded} on CPU with 1×1×3 halo
+├── boundary conditions: FieldBoundaryConditions
+│   └── west: Periodic, east: Periodic, south: Periodic, north: Periodic, bottom: ZeroFlux, top: ZeroFlux, immersed: Nothing
+├── operand: KernelFunctionOperation at (Center, Center, Center)
+├── status: time=0.0
+└── data: 3×3×14 OffsetArray(::Array{Float64, 3}, 0:2, 0:2, -2:11) with eltype Float64 with indices 0:2×0:2×-2:11
+    └── max=326.469, min=325.564, mean=326.012
 ```
 
 # References

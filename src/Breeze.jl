@@ -30,9 +30,7 @@ export
     VirtualPotentialTemperature,
     EquivalentPotentialTemperature,
     LiquidIcePotentialTemperature,
-    LiquidIcePotentialTemperatureField,
     StaticEnergy,
-    StaticEnergyField,
 
     # Microphysics
     SaturationAdjustment,

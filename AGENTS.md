@@ -110,7 +110,7 @@ Breeze interfaces with ClimaOcean for coupled atmosphere-ocean simulations.
     a corresponding citation
   - Make use of cross-references with equations
 
-6. **Common misconceptions**
+6. **Other tips and common misconceptions**
   - `update_state!` is called within `set!(model, ...)`. Scripts should never or rarely need to manually invoke `update_state!`
   - Fields and AbstractOperations can be used in `set!`.
   - `compute!` is called in the `Field(op)` constructor for `op::AbstractOperation`. It is redundant to call `compute!`

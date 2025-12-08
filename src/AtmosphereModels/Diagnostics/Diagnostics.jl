@@ -5,9 +5,7 @@ export
     VirtualPotentialTemperature,
     EquivalentPotentialTemperature,
     LiquidIcePotentialTemperature,
-    LiquidIcePotentialTemperatureField,
-    StaticEnergy,
-    StaticEnergyField
+    StaticEnergy
 
 using DocStringExtensions: TYPEDSIGNATURES
 using Adapt: Adapt, adapt

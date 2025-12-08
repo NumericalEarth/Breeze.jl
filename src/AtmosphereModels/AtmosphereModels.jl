@@ -36,8 +36,6 @@ export
     VirtualPotentialTemperature,
     EquivalentPotentialTemperature,
     LiquidIcePotentialTemperature,
-    LiquidIcePotentialTemperatureField,
-    StaticEnergy,
-    StaticEnergyField
+    StaticEnergy
 
 end

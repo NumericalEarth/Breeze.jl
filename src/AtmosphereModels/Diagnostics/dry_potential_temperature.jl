@@ -43,7 +43,7 @@ model = AtmosphereModel(grid)
 set!(model, θ=300)
 
 θ = DryPotentialTemperature(model)
-compute!(Field(θ))
+Field(θ)
 
 # output
 1×1×8 Field{Center, Center, Center} on RectilinearGrid on CPU

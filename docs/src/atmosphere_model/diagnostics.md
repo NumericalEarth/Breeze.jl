@@ -31,7 +31,6 @@ Breeze.AtmosphereModels.EquivalentPotentialTemperature
 
 ```@docs
 Breeze.AtmosphereModels.LiquidIcePotentialTemperature
-Breeze.AtmosphereModels.LiquidIcePotentialTemperatureField
 ```
 
 ## Static energy
@@ -40,7 +39,6 @@ Static energy is another conserved thermodynamic variable used in atmospheric mo
 
 ```@docs
 Breeze.AtmosphereModels.StaticEnergy
-Breeze.AtmosphereModels.StaticEnergyField
 ```
 
 ## Saturation specific humidity
