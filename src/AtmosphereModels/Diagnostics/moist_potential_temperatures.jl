@@ -303,7 +303,7 @@ correctly expressed in terms of the vertical gradient of a moist-conservative va
 The formulation is based on equation (17) in [DurranKlemp1982](@cite):
 
 ```math
-θᵇ = θᵉ \\left( \\frac{T}{Tᵣ} \\right)^{cˡ qᵗ / cᵖᵐ}
+θᵇ = θᵉ \\left( \\frac{T}{Tᵣ} \\right)^{cˡ qˡ / cᵖᵐ}
 ```
 
 where ``θᵉ`` is the equivalent potential temperature, ``T`` is temperature, ``Tᵣ`` is
@@ -433,7 +433,7 @@ function (d::MoistPotentialTemperatureKernelFunction)(i, j, k, grid)
             # Equation 16, Durran & Klemp 1982
             Tᵣ = constants.energy_reference_temperature
             cˡ = constants.liquid.heat_capacity
-            θ★ = θᵉ * (T / Tᵣ)^(cˡ * qᵗ / cᵖᵐ)
+            θ★ = θᵉ * (T / Tᵣ)^(cˡ * qˡ / cᵖᵐ)
 
         else # d.flavor isa AbstractEquivalentFlavor (but not stability)
             θ★ = θᵉ
