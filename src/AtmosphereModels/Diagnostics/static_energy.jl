@@ -76,7 +76,8 @@ function StaticEnergy(model, flavor_symbol=:specific)
     elseif flavor_symbol === :density
         Density()
     else
-        error("Unknown $flavor_symbol")
+        msg = "`flavor` must be :specific or :density, received :$flavor_symbol"
+        throw(ArgumentError(msg))
     end
 
     func = StaticEnergyKernelFunction(flavor,

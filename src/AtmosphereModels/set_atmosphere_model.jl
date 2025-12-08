@@ -28,6 +28,37 @@ end
 
 function set_thermodynamic_variable! end
 
+"""
+    set!(model::AtmosphereModel; enforce_mass_conservation=true, kw...)
+
+Set variables in an `AtmosphereModel`.
+
+# Keyword Arguments
+
+Variables are set via keyword arguments. Supported variables include:
+
+**Prognostic variables** (density-weighted):
+- `ρu`, `ρv`, `ρw`: momentum components
+- `ρqᵗ`: total moisture density
+- `ρθ`: potential temperature density (for `LiquidIcePotentialTemperatureThermodynamics`)
+- `ρe`: static energy density (for `StaticEnergyThermodynamics`)
+
+**Diagnostic variables** (specific, ie per unit mass):
+- `u`, `v`, `w`: velocity components (sets both velocity and momentum)
+- `qᵗ`: total specific moisture (sets both specific and density-weighted moisture)
+- `θ`: potential temperature (interpreted as liquid-ice potential temperature ``θˡⁱ``)
+- `e`: static energy
+
+!!! note "The meaning of `θ`"
+    When using `set!(model, θ=...)`, the value is interpreted as the **liquid-ice
+    potential temperature** ``θˡⁱ``, not the dry potential temperature ``θᵈ``.
+    This is consistent with the prognostic variable in `LiquidIcePotentialTemperatureThermodynamics`.
+
+# Options
+
+- `enforce_mass_conservation`: If `true` (default), applies a pressure correction
+  to ensure the velocity field satisfies the anelastic continuity equation.
+"""
 function set!(model::AtmosphereModel; enforce_mass_conservation=true, kw...)
     names = collect(keys(kw))
     prioritized = prioritize_names(names)

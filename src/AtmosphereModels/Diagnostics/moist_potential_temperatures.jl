@@ -108,7 +108,8 @@ function VirtualPotentialTemperature(model::AtmosphereModel, flavor_symbol=:spec
     elseif flavor_symbol === :density
         VirtualDensity()
     else
-        error("Unknown $flavor_symbol")
+        msg = "`flavor` must be :specific or :density, received :$flavor_symbol"
+        throw(ArgumentError(msg))
     end
 
     func = MoistPotentialTemperatureKernelFunction(flavor,
@@ -176,7 +177,8 @@ function LiquidIcePotentialTemperature(model::AtmosphereModel, flavor_symbol=:sp
     elseif flavor_symbol === :density
         LiquidIceDensity()
     else
-        error("Unknown $flavor_symbol")
+        msg = "`flavor` must be :specific or :density, received :$flavor_symbol"
+        throw(ArgumentError(msg))
     end
 
     func = MoistPotentialTemperatureKernelFunction(flavor,
@@ -256,7 +258,8 @@ function EquivalentPotentialTemperature(model::AtmosphereModel, flavor_symbol=:s
     elseif flavor_symbol === :density
         EquivalentDensity()
     else
-        error("Unknown $flavor_symbol")
+        msg = "`flavor` must be :specific or :density, received :$flavor_symbol"
+        throw(ArgumentError(msg))
     end
 
     func = MoistPotentialTemperatureKernelFunction(flavor,
