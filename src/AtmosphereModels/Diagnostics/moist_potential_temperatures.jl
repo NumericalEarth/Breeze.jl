@@ -215,7 +215,7 @@ where ``T`` is temperature, ``pᵈ`` is dry air pressure, ``p₀`` is the refere
 ``ℒˡ`` is the latent heat of vaporization, ``qᵛ`` is the vapor specific humidity,
 and ``cᵖᵐ`` is the heat capacity of the moist air mixture.
 
-The formulation follows equation (39) of [BryanFritsch2002](@cite), which was
+The formulation follows equation (34) of [BryanFritsch2002](@cite), 
 adapted from the derivation in [DurranKlemp1982](@citet).
 
 # Arguments
