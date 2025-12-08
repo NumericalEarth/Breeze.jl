@@ -1,16 +1,16 @@
 using Breeze.Thermodynamics: LiquidIcePotentialTemperatureState, with_temperature, exner_function, mixture_heat_capacity
 
 struct LiquidIcePotentialTemperatureThermodynamics{F, T}
-    potential_temperature_density :: F  # ρθ (prognostic)
+    liquid_ice_potential_temperature_density :: F  # ρθ (prognostic)
     potential_temperature :: T          # θ = ρθ / ρᵣ (diagnostic)
 end
 
 Adapt.adapt_structure(to, thermo::LiquidIcePotentialTemperatureThermodynamics) =
-    LiquidIcePotentialTemperatureThermodynamics(adapt(to, thermo.potential_temperature_density),
+    LiquidIcePotentialTemperatureThermodynamics(adapt(to, thermo.liquid_ice_potential_temperature_density),
                                        adapt(to, thermo.potential_temperature))
 
 function fill_halo_regions!(thermo::LiquidIcePotentialTemperatureThermodynamics)
-    fill_halo_regions!(thermo.potential_temperature_density)
+    fill_halo_regions!(thermo.liquid_ice_potential_temperature_density)
     fill_halo_regions!(thermo.potential_temperature)
     return nothing
 end
@@ -20,20 +20,20 @@ const APTF = AnelasticFormulation{<:LiquidIcePotentialTemperatureThermodynamics}
 prognostic_field_names(formulation::APTF) = tuple(:ρθ)
 additional_field_names(formulation::APTF) = tuple(:θ)
 thermodynamic_density_name(::APTF) = :ρθ
-thermodynamic_density(formulation::APTF) = formulation.thermodynamics.potential_temperature_density
+thermodynamic_density(formulation::APTF) = formulation.thermodynamics.liquid_ice_potential_temperature_density
 fields(formulation::APTF) = (; θ=formulation.thermodynamics.potential_temperature)
-prognostic_fields(formulation::APTF) = (; ρθ=formulation.thermodynamics.potential_temperature_density)
+prognostic_fields(formulation::APTF) = (; ρθ=formulation.thermodynamics.liquid_ice_potential_temperature_density)
 
 function materialize_thermodynamics(::Val{:LiquidIcePotentialTemperature}, grid, boundary_conditions)
-    potential_temperature_density = CenterField(grid, boundary_conditions=boundary_conditions.ρθ)
+    liquid_ice_potential_temperature_density = CenterField(grid, boundary_conditions=boundary_conditions.ρθ)
     potential_temperature = CenterField(grid) # θ = ρθ / ρᵣ (diagnostic)
-    return LiquidIcePotentialTemperatureThermodynamics(potential_temperature_density, potential_temperature)
+    return LiquidIcePotentialTemperatureThermodynamics(liquid_ice_potential_temperature_density, potential_temperature)
 end
 
 function compute_auxiliary_thermodynamic_variables!(formulation::APTF, i, j, k, grid)
     @inbounds begin
         ρᵣ = formulation.reference_state.density[i, j, k]
-        ρθ = formulation.thermodynamics.potential_temperature_density[i, j, k]
+        ρθ = formulation.thermodynamics.liquid_ice_potential_temperature_density[i, j, k]
         formulation.thermodynamics.potential_temperature[i, j, k] = ρθ / ρᵣ
     end
     return nothing
@@ -62,7 +62,7 @@ function collect_prognostic_fields(formulation::APTF,
                                    microphysical_fields,
                                    tracers)
 
-    ρθ = formulation.thermodynamics.potential_temperature_density
+    ρθ = formulation.thermodynamics.liquid_ice_potential_temperature_density
     thermodynamic_variables = (ρθ=ρθ, ρqᵗ=moisture_density)
     return merge(momentum, thermodynamic_variables, microphysical_fields, tracers)
 end
@@ -70,7 +70,7 @@ end
 const LiquidIcePotentialTemperatureAnelasticModel = AtmosphereModel{<:APTF}
 const LIPTAM = LiquidIcePotentialTemperatureAnelasticModel 
 
-liquid_ice_potential_temperature_density(model::LIPTAM) = model.formulation.thermodynamics.potential_temperature_density
+liquid_ice_liquid_ice_potential_temperature_density(model::LIPTAM) = model.formulation.thermodynamics.liquid_ice_potential_temperature_density
 liquid_ice_potential_temperature(model::LIPTAM) = model.formulation.thermodynamics.potential_temperature
 static_energy(model::LIPTAM) = Diagnostics.StaticEnergy(model, :specific)
 static_energy_density(model::LIPTAM) = Diagnostics.StaticEnergy(model, :density)
@@ -136,13 +136,13 @@ end
 #####
 
 set_thermodynamic_variable!(model::LiquidIcePotentialTemperatureAnelasticModel, ::Union{Val{:ρθ}, Val{:ρθˡⁱ}}, value) =
-    set!(model.formulation.thermodynamics.potential_temperature_density, value)
+    set!(model.formulation.thermodynamics.liquid_ice_potential_temperature_density, value)
 
 function set_thermodynamic_variable!(model::LiquidIcePotentialTemperatureAnelasticModel, ::Union{Val{:θ}, Val{:θˡⁱ}}, value)
     set!(model.formulation.thermodynamics.potential_temperature, value)
     ρᵣ = model.formulation.reference_state.density
     θˡⁱ = model.formulation.thermodynamics.potential_temperature
-    set!(model.formulation.thermodynamics.potential_temperature_density, ρᵣ * θˡⁱ)
+    set!(model.formulation.thermodynamics.liquid_ice_potential_temperature_density, ρᵣ * θˡⁱ)
     return nothing
 end
 
@@ -156,7 +156,7 @@ function set_thermodynamic_variable!(model::LiquidIcePotentialTemperatureAnelast
     arch = grid.architecture
     launch!(arch, grid, :xyz,
             _potential_temperature_from_energy!,
-            thermo.potential_temperature_density,
+            thermo.liquid_ice_potential_temperature_density,
             thermo.potential_temperature,
             grid,
             e,
@@ -176,7 +176,7 @@ function set_thermodynamic_variable!(model::LiquidIcePotentialTemperatureAnelast
     return set_thermodynamic_variable!(model, Val(:e), ρe / ρᵣ)
 end
 
-@kernel function _potential_temperature_from_energy!(potential_temperature_density,
+@kernel function _potential_temperature_from_energy!(liquid_ice_potential_temperature_density,
                                                      potential_temperature,
                                                      grid,
                                                      specific_energy,
@@ -204,5 +204,5 @@ end
     q₁ = 𝒰e₁.moisture_mass_fractions
     𝒰θ = LiquidIcePotentialTemperatureState(zero(T), q₁, p₀, pᵣ)
     @inbounds potential_temperature[i, j, k] = with_temperature(𝒰θ, T, constants).potential_temperature
-    @inbounds potential_temperature_density[i, j, k] = ρᵣ * with_temperature(𝒰θ, T, constants).potential_temperature
+    @inbounds liquid_ice_potential_temperature_density[i, j, k] = ρᵣ * with_temperature(𝒰θ, T, constants).potential_temperature
 end

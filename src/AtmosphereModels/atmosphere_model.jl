@@ -430,12 +430,12 @@ for `model`.
 function static_energy end
 
 """
-    potential_temperature_density(model::AtmosphereModel)
+    liquid_ice_potential_temperature_density(model::AtmosphereModel)
 
 Return an `AbstractField` representing potential temperature density
 for `model`.
 """
-function potential_temperature_density end
+function liquid_ice_potential_temperature_density end
 
 """
     liquid_ice_potential_temperature(model::AtmosphereModel)

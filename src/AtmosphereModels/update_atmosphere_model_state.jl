@@ -187,12 +187,12 @@ end
                                                                      formulation,
                                                                      microphysics,
                                                                      microphysical_fields,
-                                                                     potential_temperature_density,
+                                                                     liquid_ice_potential_temperature_density,
                                                                      moisture_density)
     i, j, k = @index(Global, NTuple)
 
     @inbounds begin
-        ρθ = potential_temperature_density[i, j, k]
+        ρθ = liquid_ice_potential_temperature_density[i, j, k]
         ρqᵗ = moisture_density[i, j, k]
         ρ = formulation.reference_state.density[i, j, k]
 
