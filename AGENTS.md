@@ -15,7 +15,8 @@ Breeze interfaces with ClimaOcean for coupled atmosphere-ocean simulations.
 
 ## Code Style & Conventions
 
-### Julia Best Practices
+### Julia practices and information
+
 1. **Explicit Imports**: Use `ExplicitImports.jl` style - explicitly import all used functions/types
    - Import from Oceananigans explicitly (already done in src/Breeze.jl)
    - Tests automatically check for proper imports
@@ -42,6 +43,10 @@ Breeze interfaces with ClimaOcean for coupled atmosphere-ocean simulations.
    - Generally minimize memory allocation
    - If an implementation is awkward, don't hesitate to suggest an upstream feature (eg in Oceananigans)
      that will make something easier, rather than forcing in low quality code.
+
+6. **Debugging**
+   - Sometimes "julia version compatibility" issues are resolved by deleting the Manifest.toml,
+     and then re-populating it with `using Pkg; Pkg.instantiate()`.
 
 ### Oceananigans ecosystem best practices
 

@@ -28,7 +28,10 @@ export
     static_energy,
     total_energy,
     potential_temperature_density,
-    liquid_ice_potential_temperature
+    liquid_ice_potential_temperature,
+    # Forcing utilities
+    geostrophic_forcings,
+    SubsidenceForcing
 
 using Oceananigans: Oceananigans, @at, AnisotropicMinimumDissipation, Average,
                     AveragedTimeInterval, BackgroundField, BetaPlane, Bounded,
@@ -87,6 +90,9 @@ using .Thermodynamics
 
 include("MoistAirBuoyancies.jl")
 using .MoistAirBuoyancies
+
+include("Forcings/Forcings.jl")
+using .Forcings
 
 include("AtmosphereModels/AtmosphereModels.jl")
 using .AtmosphereModels
