@@ -116,7 +116,7 @@ set!(wˢ, z -> wˢ_profile(z))
 
 # and looks like:
 
-lines(wˢ)
+lines(wˢ; axis = (xlabel = "wˢ (m/s)",))
 
 # We apply subsidence as a forcing term to the horizontally-averaged prognostic variables.
 # This requires computing horizontal averages at each time step and storing them in
