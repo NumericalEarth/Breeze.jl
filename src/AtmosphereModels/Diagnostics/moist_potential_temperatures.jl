@@ -225,12 +225,12 @@ We use a formulation derived from [Emanuel1994](@citet),
 
 ```math
 θᵉ = T \\left( \\frac{p₀}{pᵈ} \\right)^{Rᵈ / cᵖᵐ}
-      \\exp \\left( \\frac{ℒˡ qᵛ}{cᵖᵐ T} \\right)
+      \\exp \\left( \\frac{ℒˡ qᵛ}{cᵖᵐ T} \\right) ℋ^{- Rᵛ qᵛ / cᵖᵐ}
 ```
 
 where ``T`` is temperature, ``pᵈ`` is dry air pressure, ``p₀`` is the reference pressure,
 ``ℒˡ`` is the latent heat of vaporization, ``qᵛ`` is the vapor specific humidity,
-and ``cᵖᵐ`` is the heat capacity of the moist air mixture.
+``ℋ`` is the relative humidity, and ``cᵖᵐ`` is the heat capacity of the moist air mixture.
 
 The formulation follows equation (34) of [BryanFritsch2002](@cite), 
 adapted from the derivation in [DurranKlemp1982](@citet).
@@ -413,7 +413,7 @@ function (d::MoistPotentialTemperatureKernelFunction)(i, j, k, grid)
         # Saturation specific humidity over a liquid surface
         surface = PlanarLiquidSurface()
         ℋ = relative_humidity(pᵣ, T, q, constants, surface)
-        γ = - qᵛ * Rᵛ / cᵖᵐ
+        γ = - Rᵛ * qᵛ / cᵖᵐ
 
         # Latent heat of vaporization at temperature T
         ℒˡ = liquid_latent_heat(T, constants)
@@ -427,7 +427,7 @@ function (d::MoistPotentialTemperatureKernelFunction)(i, j, k, grid)
         # - Not to mention that "specific entropy" should be entropy per
         #   unit total mass, rather than per unit dry air mass, as in Emmanuel.
         # - When this is verified, the math should be written in the documentation.
-        θᵉ = T * (p₀ / pᵣ)^(Rᵈ / cᵖᵐ) * ℋ^γ * exp(ℒˡ * qᵛ / (cᵖᵐ * T))
+        θᵉ = T * (p₀ / pᵣ)^(Rᵈ / cᵖᵐ) * exp(ℒˡ * qᵛ / (cᵖᵐ * T)) * ℋ^γ
 
         if d.flavor isa AbstractStabilityEquivalentFlavor
             # Equation 16, Durran & Klemp 1982
