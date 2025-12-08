@@ -150,10 +150,16 @@ Liquid-ice potential temperature is a conserved quantity under moist adiabatic p
 that accounts for the latent heat associated with liquid water and ice:
 
 ```math
-θˡⁱ = \\frac{T - (ℒˡᵣ qˡ + ℒⁱᵣ qⁱ) / cᵖᵐ}{Π}
+θˡⁱ = θ \\left (1 - \\frac{ℒˡᵣ qˡ + ℒⁱᵣ qⁱ}{cᵖᵐ T} \\right )
 ```
 
-where ``Π = (p/p₀)^{Rᵐ/cᵖᵐ}`` is the Exner function using mixture properties,
+or
+
+```math
+θˡⁱ = \frac{T}{Π} \\left (1 - \\frac{ℒˡᵣ qˡ + ℒⁱᵣ qⁱ}{cᵖᵐ T} \\right )
+```
+
+where ``θ`` is the potential temperature, ``Π = (p/p₀)^{Rᵐ/cᵖᵐ}`` is the Exner function using mixture properties,
 ``ℒˡᵣ`` and ``ℒⁱᵣ`` are the reference latent heats of vaporization and sublimation,
 ``qˡ`` and ``qⁱ`` are the liquid and ice specific humidities, and
 ``cᵖᵐ`` is the moist air heat capacity.
@@ -260,7 +266,7 @@ Field(θᵉ)
 ├── operand: KernelFunctionOperation at (Center, Center, Center)
 ├── status: time=0.0
 └── data: 3×3×14 OffsetArray(::Array{Float64, 3}, 0:2, 0:2, -2:11) with eltype Float64 with indices 0:2×0:2×-2:11
-    └── max=346.793, min=327.559, mean=337.137
+    └── max=326.183, min=325.87, mean=326.026
 ```
 
 # References
@@ -338,7 +344,7 @@ Field(θᵇ)
 ├── operand: KernelFunctionOperation at (Center, Center, Center)
 ├── status: time=0.0
 └── data: 3×3×14 OffsetArray(::Array{Float64, 3}, 0:2, 0:2, -2:11) with eltype Float64 with indices 0:2×0:2×-2:11
-    └── max=348.585, min=328.857, mean=338.68
+    └── max=326.183, min=325.87, mean=326.026
 ```
 
 # References
