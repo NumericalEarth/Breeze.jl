@@ -48,6 +48,9 @@ makedocs(
         "Home" => "index.md",
         "Examples" => example_pages,
         "Thermodynamics" => "thermodynamics.md",
+        "AtmosphereModel" => Any[
+            "Diagnostics" => "atmosphere_model/diagnostics.md",
+        ],
         "Microphysics" => Any[
             "Overview" => "microphysics/microphysics_overview.md",
             "Warm-phase saturation adjustment" => "microphysics/warm_phase_saturation_adjustment.md",
