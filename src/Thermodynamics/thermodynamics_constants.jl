@@ -345,3 +345,39 @@ end
     Rᵐ = mixture_gas_constant(q, constants)
     return p / (Rᵐ * T)
 end
+
+"""
+    vapor_pressure(T, ρ, qᵛ, constants)
+
+Compute the vapor pressure from the ideal gas law:
+
+```math
+pᵛ = ρ qᵛ Rᵛ T
+```
+"""
+@inline function vapor_pressure(ρ, T, qᵛ, constants)
+    Rᵛ = vapor_gas_constant(constants)
+    return ρ * qᵛ * Rᵛ * T
+end
+
+"""
+    relative_humidity(T, ρ, qᵛ, constants, surface=PlanarLiquidSurface())
+
+Compute the relative humidity as the ratio of vapor pressure to saturation vapor pressure:
+
+```math
+ℋ = pᵛ / pᵛ⁺ = qᵛ / qᵛ⁺
+```
+"""
+@inline function relative_humidity(ρ, T, qᵛ, constants, surface=PlanarLiquidSurface())
+    pᵛ = vapor_pressure(T, ρ, qᵛ, constants)
+    pᵛ⁺ = saturation_vapor_pressure(T, constants, surface)
+    return pᵛ / pᵛ⁺
+end
+
+@inline function relative_humidity(p, T, q::MMF, constants, surface=PlanarLiquidSurface())
+    ρ = density(p, T, q, constants)
+    pᵛ = vapor_pressure(T, ρ, q.vapor, constants)
+    pᵛ⁺ = saturation_vapor_pressure(T, constants, surface)
+    return pᵛ / pᵛ⁺
+end

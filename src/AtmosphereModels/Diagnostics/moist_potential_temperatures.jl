@@ -1,5 +1,5 @@
 #####
-##### Moist potential temperatures (virtual, liquid-ice, and equivalent)
+##### Moist potential temperatures (virtual, liquid-ice, equivalent, and stability-equivalent)
 #####
 
 # Abstract type hierarchy for moist potential temperature flavors
@@ -19,6 +19,25 @@ struct LiquidIceDensity <: AbstractLiquidIceFlavor end
 abstract type AbstractEquivalentFlavor <: AbstractMoistPotentialTemperatureFlavor end
 struct SpecificEquivalent <: AbstractEquivalentFlavor end
 struct EquivalentDensity <: AbstractEquivalentFlavor end
+
+# Stability-equivalent potential temperature flavors (θᵇ)
+abstract type AbstractStabilityEquivalentFlavor <: AbstractMoistPotentialTemperatureFlavor end
+struct SpecificStabilityEquivalent <: AbstractStabilityEquivalentFlavor end
+struct StabilityEquivalentDensity <: AbstractStabilityEquivalentFlavor end
+
+const SpecificPotentialTemperature = Union{
+    SpecificVirtual,
+    SpecificLiquidIce,
+    SpecificEquivalent,
+    SpecificStabilityEquivalent
+}
+
+const PotentialTemperatureDensity = Union{
+    VirtualDensity,
+    LiquidIceDensity,
+    EquivalentDensity,
+    StabilityEquivalentDensity
+}
 
 struct MoistPotentialTemperatureKernelFunction{F, R, μ, M, MF, TMP, TH}
     flavor :: F
@@ -40,14 +59,18 @@ Adapt.adapt_structure(to, k::MoistPotentialTemperatureKernelFunction) =
                                             adapt(to, k.thermodynamic_constants))
 
 # Type aliases for the user interface
-const VirtualPotentialTemperature = KernelFunctionOperation{Center, Center, Center, <:Any, <:Any,
+const C = Center
+const VirtualPotentialTemperature = KernelFunctionOperation{C, C, C, <:Any, <:Any,
     <:MoistPotentialTemperatureKernelFunction{<:AbstractVirtualFlavor}}
 
-const LiquidIcePotentialTemperature = KernelFunctionOperation{Center, Center, Center, <:Any, <:Any,
+const LiquidIcePotentialTemperature = KernelFunctionOperation{C, C, C, <:Any, <:Any,
     <:MoistPotentialTemperatureKernelFunction{<:AbstractLiquidIceFlavor}}
 
-const EquivalentPotentialTemperature = KernelFunctionOperation{Center, Center, Center, <:Any, <:Any,
+const EquivalentPotentialTemperature = KernelFunctionOperation{C, C, C, <:Any, <:Any,
     <:MoistPotentialTemperatureKernelFunction{<:AbstractEquivalentFlavor}}
+
+const StabilityEquivalentPotentialTemperature = KernelFunctionOperation{C, C, C, <:Any, <:Any,
+    <:MoistPotentialTemperatureKernelFunction{<:AbstractStabilityEquivalentFlavor}}
 
 """
     VirtualPotentialTemperature(model, flavor=:specific)
@@ -59,12 +82,12 @@ in order to have the same density as moist air at the same pressure. It accounts
 for the effect of water vapor on air density:
 
 ```math
-θᵛ = θᵈ \\left( 1 + ε qᵛ - qˡ - qⁱ \\right)
+θᵛ = θᵈ \\left( qᵈ + ε qᵛ \\right)
 ```
 
 where ``θᵈ`` is dry potential temperature, ``qᵛ``, ``qˡ``, ``qⁱ`` are the
 specific humidities of vapor, liquid, and ice respectively, and
-``ε = Rᵛ / Rᵈ - 1 ≈ 0.608`` is a constant related to the ratio of gas constants.
+``ε = Rᵛ / Rᵈ ≈ 1.608`` is the ratio between the vapor and dry air gas constants.
 
 See [Emanuel1994](@citet) for a derivation and discussion of virtual temperature
 and its utility in atmospheric thermodynamics.
@@ -273,6 +296,83 @@ function EquivalentPotentialTemperature(model::AtmosphereModel, flavor_symbol=:s
     return KernelFunctionOperation{Center, Center, Center}(func, model.grid)
 end
 
+"""
+    StabilityEquivalentPotentialTemperature(model, flavor=:specific)
+
+Return a `KernelFunctionOperation` representing stability-equivalent potential temperature ``θᵇ``.
+
+Stability-equivalent potential temperature is a moist-conservative variable suitable for
+computing the moist Brunt-Väisälä frequency. It follows from the derivation in
+[DurranKlemp1982](@citet), who show that the moist Brunt-Väisälä frequency ``Nᵐ`` is
+correctly expressed in terms of the vertical gradient of a moist-conservative variable.
+
+The formulation is based on equation (17) in [DurranKlemp1982](@cite):
+
+```math
+θᵇ = θᵉ \\left( \\frac{T}{Tᵣ} \\right)^{cˡ qᵗ / cᵖᵐ}
+```
+
+where ``θᵉ`` is the equivalent potential temperature, ``T`` is temperature, ``Tᵣ`` is
+the energy reference temperature, ``cˡ`` is the heat capacity of liquid water,
+``qᵗ`` is the total moisture specific humidity, and ``cᵖᵐ`` is the moist air heat capacity.
+
+This quantity is conserved along moist adiabats and is appropriate for use in stability
+calculations in saturated atmospheres.
+
+# Arguments
+
+- `model`: An `AtmosphereModel` instance.
+- `flavor`: Either `:specific` (default) to return ``θᵇ``, or `:density` to return ``ρ θᵇ``.
+
+# Examples
+
+```jldoctest
+using Breeze
+
+grid = RectilinearGrid(size=(1, 1, 8), extent=(1, 1, 1e3))
+model = AtmosphereModel(grid)
+set!(model, θ=300, qᵗ=0.01)
+
+θᵇ = StabilityEquivalentPotentialTemperature(model)
+Field(θᵇ)
+
+# output
+1×1×8 Field{Center, Center, Center} on RectilinearGrid on CPU
+├── grid: 1×1×8 RectilinearGrid{Float64, Periodic, Periodic, Bounded} on CPU with 1×1×3 halo
+├── boundary conditions: FieldBoundaryConditions
+│   └── west: Periodic, east: Periodic, south: Periodic, north: Periodic, bottom: ZeroFlux, top: ZeroFlux, immersed: Nothing
+├── operand: KernelFunctionOperation at (Center, Center, Center)
+├── status: time=0.0
+└── data: 3×3×14 OffsetArray(::Array{Float64, 3}, 0:2, 0:2, -2:11) with eltype Float64 with indices 0:2×0:2×-2:11
+    └── max=326.469, min=325.564, mean=326.012
+```
+
+# References
+
+* [DurranKlemp1982](@cite)
+"""
+function StabilityEquivalentPotentialTemperature(model::AtmosphereModel, flavor_symbol=:specific)
+
+    flavor = if flavor_symbol === :specific
+        SpecificStabilityEquivalent()
+    elseif flavor_symbol === :density
+        StabilityEquivalentDensity()
+    else
+        msg = "`flavor` must be :specific or :density, received :$flavor_symbol"
+        throw(ArgumentError(msg))
+    end
+
+    func = MoistPotentialTemperatureKernelFunction(flavor,
+                                                   model.formulation.reference_state,
+                                                   model.microphysics,
+                                                   model.microphysical_fields,
+                                                   model.specific_moisture,
+                                                   model.temperature,
+                                                   model.thermodynamic_constants)
+
+    return KernelFunctionOperation{Center, Center, Center}(func, model.grid)
+end
+
 #####
 ##### Unified kernel function
 #####
@@ -286,61 +386,64 @@ function (d::MoistPotentialTemperatureKernelFunction)(i, j, k, grid)
         T = d.temperature[i, j, k]
     end
 
-    thermo = d.thermodynamic_constants
+    constants = d.thermodynamic_constants
     q = compute_moisture_fractions(i, j, k, grid, d.microphysics, ρᵣ, qᵗ, d.microphysical_fields)
+    qᵛ = q.vapor
+    qˡ = q.liquid
+    qⁱ = q.ice
 
-    if d.flavor isa AbstractVirtualFlavor
-        # Virtual potential temperature
-        Rᵈ = dry_air_gas_constant(thermo)
-        cᵖᵈ = thermo.dry_air.heat_capacity
-        Π = (pᵣ / p₀)^(Rᵈ / cᵖᵈ)
-        θ = T / Π
+    Rᵈ = dry_air_gas_constant(constants)
+    Rᵛ = vapor_gas_constant(constants)
+    Rᵐ = mixture_gas_constant(q, constants)
+    cᵖᵐ = mixture_heat_capacity(q, constants)
+    Πᵐ = (pᵣ / p₀)^(Rᵐ / cᵖᵐ)
 
-        # Virtual correction factor: ε = Rᵛ/Rᵈ - 1
-        Rᵛ = vapor_gas_constant(thermo)
-        ε = Rᵛ / Rᵈ - 1
-        qᵛ = q.vapor
-        qˡ = q.liquid
-        qⁱ = q.ice
-
-        θ = θ * (1 + ε * qᵛ - qˡ - qⁱ)
-
-    elseif d.flavor isa AbstractLiquidIceFlavor
+    if d.flavor isa AbstractLiquidIceFlavor || d.flavor isa AbstractVirtualFlavor
         # Liquid-ice potential temperature
-        cᵖᵐ = Thermodynamics.mixture_heat_capacity(q, thermo)
-        Rᵐ = Thermodynamics.mixture_gas_constant(q, thermo)
-        Π = (pᵣ / p₀)^(Rᵐ / cᵖᵐ)
+        θˡⁱ = (T - (ℒˡᵣ * qˡ + ℒⁱᵣ * qⁱ) / cᵖᵐ) / Πᵐ
 
-        ℒˡᵣ = thermo.liquid.reference_latent_heat
-        ℒⁱᵣ = thermo.ice.reference_latent_heat
-        qˡ = q.liquid
-        qⁱ = q.ice
+        if d.flavor isa AbstractLiquidIceFlavor
+            θ★ = θˡⁱ
 
-        θ = (T - (ℒˡᵣ * qˡ + ℒⁱᵣ * qⁱ) / cᵖᵐ) / Π
+        elseif d.flavor isa AbstractVirtualFlavor
+            θ★ = θˡⁱ * (1 + Rᵛ / Rᵈ * qᵛ)
 
-    else # d.flavor isa AbstractEquivalentFlavor
-        # Equivalent potential temperature following Bryan & Fritsch (2002)
-        cᵖᵐ = Thermodynamics.mixture_heat_capacity(q, thermo)
-        Rᵈ = dry_air_gas_constant(thermo)
-        Rᵛ = vapor_gas_constant(thermo)
+        end
 
-        # Dry air pressure: pᵈ = pᵣ - pᵛ, where pᵛ = ρ qᵛ Rᵛ T
-        # Using the approximation pᵈ ≈ pᵣ * (1 - qᵛ * Rᵛ / Rᵐ)
-        qᵛ = q.vapor
-        Rᵐ = Thermodynamics.mixture_gas_constant(q, thermo)
-        pᵈ = pᵣ * (1 - qᵛ * Rᵛ / Rᵐ)
+    elseif d.flavor isa AbstractEquivalentFlavor
+        # Saturation specific humidity over a liquid surface
+        surface = PlanarLiquidSurface()
+        ℋ = relative_humidity(pᵣ, T, q, constants, surface)
+        γ = - qᵛ * Rᵛ / cᵖᵐ
 
         # Latent heat of vaporization at temperature T
-        ℒˡ = liquid_latent_heat(T, thermo)
+        ℒˡ = liquid_latent_heat(T, constants)
 
-        # θᵉ = T * (p₀ / pᵈ)^(Rᵈ / cᵖᵐ) * exp(ℒˡ * qᵛ / (cᵖᵐ * T))
-        θ = T * (p₀ / pᵈ)^(Rᵈ / cᵖᵐ) * exp(ℒˡ * qᵛ / (cᵖᵐ * T))
+        # Equation 4.5.11 in Emanuel 1994
+        # See also equation 17 in Durran & Klemp 1982
+        # TODO: many things here... 
+        # - Equation 4.5.11 (and Emmanuel 1994's whole development) via moist entropy uses mixing ratios.
+        # - I have actually just guessed about these expressions, which we must form in terms
+        #   of mass fractions.
+        # - Not to mention that "specific entropy" should be entropy per
+        #   unit total mass, rather than per unit dry air mass, as in Emmanuel.
+        # - When this is verified, the math should be written in the documentation.
+        θᵉ = (pᵣ / p₀)^(Rᵐ / cᵖᵐ) * ℋ^γ * exp(ℒˡ * qᵛ / (cᵖᵐ * T))
+
+        if d.flavor isa AbstractStabilityEquivalentFlavor
+            # Equation 16, Durran & Klemp 1982
+            θ★ = θᵉ + (T / Tᵣ)^(cˡ * qᵗ / cᵖᵐ)
+
+        elseif d.flavor isa AbstractEquivalentFlavor
+            θ★ = θᵉ
+
+        end
     end
 
     # Return specific or density-weighted value
-    if d.flavor isa SpecificVirtual || d.flavor isa SpecificLiquidIce || d.flavor isa SpecificEquivalent
-        return θ
-    else # VirtualDensity, LiquidIceDensity, or EquivalentDensity
-        return ρᵣ * θ
+    if d.flavor isa SpecificPotentialTemperature
+        return θ★
+    elseif d.flavor isa PotentialTemperatureDensity
+        return ρᵣ * θ★
     end
 end
