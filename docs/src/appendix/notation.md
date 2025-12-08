@@ -85,6 +85,7 @@ The following table also uses a few conventions that suffuse the source code and
 | ``θᵛ``                                | `θᵛ`          |                                    | Virtual potential temperature |
 | ``θᵉ``                                | `θᵉ`          |                                    | Equivalent potential temperature |
 | ``θˡⁱ``                               | `θˡⁱ`         |                                    | Liquid-ice potential temperature |
+| ``θᵇ``                                | `θᵇ`          |                                    | Stability-equivalent potential temperature (for moist Brunt-Väisälä) |
 | ``θ``                                 | `θ`           |                                    | Shorthand for liquid-ice potential temperature (used in `set!`) |
 | ``\Delta t``                          | `Δt`          | `Simulation.Δt`                    | Time step |
 | ``\boldsymbol{\tau}``                 | `τ`           |                                    | Kinematic subgrid/viscous stress tensor (per unit mass) |

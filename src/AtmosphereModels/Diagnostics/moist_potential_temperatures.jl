@@ -1,27 +1,31 @@
+using Breeze.Thermodynamics:
+    Thermodynamics,
+    vapor_gas_constant,
+    dry_air_gas_constant,
+    liquid_latent_heat
+
 #####
 ##### Moist potential temperatures (virtual, liquid-ice, equivalent, and stability-equivalent)
 #####
 
-# Abstract type hierarchy for moist potential temperature flavors
-abstract type AbstractMoistPotentialTemperatureFlavor end
-
 # Virtual potential temperature flavors
-abstract type AbstractVirtualFlavor <: AbstractMoistPotentialTemperatureFlavor end
+abstract type AbstractVirtualFlavor end
 struct SpecificVirtual <: AbstractVirtualFlavor end
 struct VirtualDensity <: AbstractVirtualFlavor end
 
 # Liquid-ice potential temperature flavors
-abstract type AbstractLiquidIceFlavor <: AbstractMoistPotentialTemperatureFlavor end
+abstract type AbstractLiquidIceFlavor end
 struct SpecificLiquidIce <: AbstractLiquidIceFlavor end
 struct LiquidIceDensity <: AbstractLiquidIceFlavor end
 
 # Equivalent potential temperature flavors  
-abstract type AbstractEquivalentFlavor <: AbstractMoistPotentialTemperatureFlavor end
+abstract type AbstractEquivalentFlavor end
 struct SpecificEquivalent <: AbstractEquivalentFlavor end
 struct EquivalentDensity <: AbstractEquivalentFlavor end
 
 # Stability-equivalent potential temperature flavors (θᵇ)
-abstract type AbstractStabilityEquivalentFlavor <: AbstractMoistPotentialTemperatureFlavor end
+# This is a subtype of AbstractEquivalentFlavor because the computation builds on θᵉ
+abstract type AbstractStabilityEquivalentFlavor <: AbstractEquivalentFlavor end
 struct SpecificStabilityEquivalent <: AbstractStabilityEquivalentFlavor end
 struct StabilityEquivalentDensity <: AbstractStabilityEquivalentFlavor end
 
@@ -82,22 +86,13 @@ in order to have the same density as moist air at the same pressure. It accounts
 for the effect of water vapor on air density:
 
 ```math
-θᵛ = θᵈ \\left( qᵈ + ε qᵛ \\right)
+θᵛ = θˡⁱ \\left( qᵈ + ε qᵛ \\right)
 ```
 
-where ``θᵈ`` is dry potential temperature, ``qᵛ``, ``qˡ``, ``qⁱ`` are the
-specific humidities of vapor, liquid, and ice respectively, and
-``ε = Rᵛ / Rᵈ ≈ 1.608`` is the ratio between the vapor and dry air gas constants.
-
-See [Emanuel1994](@citet) for a derivation and discussion of virtual temperature
-and its utility in atmospheric thermodynamics.
-
-# Arguments
-
-- `model`: An `AtmosphereModel` instance.
-- `flavor`: Either `:specific` (default) to return ``θᵛ``, or `:density` to return ``ρ θᵛ``.
-
-# Examples
+where ``θˡⁱ`` is liquid-ice potential temperature, ``qᵈ`` and ``qᵛ`` are the
+specific humidities of dry air and vapor respectively, and
+``ε = Rᵛ / Rᵈ`` is the ratio between the vapor and dry air gas constants.
+``ε ≈ 1.608`` for water vapor and a dry air mixture typical to Earth's atmosphere.
 
 ```jldoctest
 using Breeze
@@ -117,7 +112,7 @@ Field(θᵛ)
 ├── operand: KernelFunctionOperation at (Center, Center, Center)
 ├── status: time=0.0
 └── data: 3×3×14 OffsetArray(::Array{Float64, 3}, 0:2, 0:2, -2:11) with eltype Float64 with indices 0:2×0:2×-2:11
-    └── max=301.823, min=301.803, mean=301.813
+    └── max=304.824, min=304.824, mean=304.824
 ```
 
 # References
@@ -226,8 +221,7 @@ and diagnosing moist instabilities. It is the temperature that a parcel would ha
 if all its moisture were condensed out and the resulting latent heat used to warm
 the parcel, followed by adiabatic expansion to a reference pressure.
 
-We use the formulation from [BryanFritsch2002](@citet), which provides an accurate
-approximation:
+We use a formulation derived from [Emanuel1994](@citet),
 
 ```math
 θᵉ = T \\left( \\frac{p₀}{pᵈ} \\right)^{Rᵈ / cᵖᵐ}
@@ -266,7 +260,7 @@ Field(θᵉ)
 ├── operand: KernelFunctionOperation at (Center, Center, Center)
 ├── status: time=0.0
 └── data: 3×3×14 OffsetArray(::Array{Float64, 3}, 0:2, 0:2, -2:11) with eltype Float64 with indices 0:2×0:2×-2:11
-    └── max=326.469, min=325.564, mean=326.012
+    └── max=346.793, min=327.559, mean=337.137
 ```
 
 # References
@@ -344,7 +338,7 @@ Field(θᵇ)
 ├── operand: KernelFunctionOperation at (Center, Center, Center)
 ├── status: time=0.0
 └── data: 3×3×14 OffsetArray(::Array{Float64, 3}, 0:2, 0:2, -2:11) with eltype Float64 with indices 0:2×0:2×-2:11
-    └── max=326.469, min=325.564, mean=326.012
+    └── max=348.585, min=328.857, mean=338.68
 ```
 
 # References
@@ -392,8 +386,13 @@ function (d::MoistPotentialTemperatureKernelFunction)(i, j, k, grid)
     qˡ = q.liquid
     qⁱ = q.ice
 
+    # Extract thermodynamic constants
     Rᵈ = dry_air_gas_constant(constants)
     Rᵛ = vapor_gas_constant(constants)
+    ℒˡᵣ = constants.liquid.reference_latent_heat
+    ℒⁱᵣ = constants.ice.reference_latent_heat
+
+    # Mixture properties
     Rᵐ = mixture_gas_constant(q, constants)
     cᵖᵐ = mixture_heat_capacity(q, constants)
     Πᵐ = (pᵣ / p₀)^(Rᵐ / cᵖᵐ)
@@ -428,13 +427,15 @@ function (d::MoistPotentialTemperatureKernelFunction)(i, j, k, grid)
         # - Not to mention that "specific entropy" should be entropy per
         #   unit total mass, rather than per unit dry air mass, as in Emmanuel.
         # - When this is verified, the math should be written in the documentation.
-        θᵉ = (pᵣ / p₀)^(Rᵐ / cᵖᵐ) * ℋ^γ * exp(ℒˡ * qᵛ / (cᵖᵐ * T))
+        θᵉ = T * (pᵣ / p₀)^(Rᵐ / cᵖᵐ) * ℋ^γ * exp(ℒˡ * qᵛ / (cᵖᵐ * T))
 
         if d.flavor isa AbstractStabilityEquivalentFlavor
             # Equation 16, Durran & Klemp 1982
-            θ★ = θᵉ + (T / Tᵣ)^(cˡ * qᵗ / cᵖᵐ)
+            Tᵣ = constants.energy_reference_temperature
+            cˡ = constants.liquid.heat_capacity
+            θ★ = θᵉ * (T / Tᵣ)^(cˡ * qᵗ / cᵖᵐ)
 
-        elseif d.flavor isa AbstractEquivalentFlavor
+        else # d.flavor isa AbstractEquivalentFlavor (but not stability)
             θ★ = θᵉ
 
         end

@@ -55,6 +55,20 @@ using GPUArraysCore: @allowscalar
     @test all(isfinite.(interior(θˡⁱ_field)))
     # Liquid-ice potential temperature should match what we set (θ=300)
     @test all(interior(θˡⁱ_field) .≈ 300)
+
+    # Test StabilityEquivalentPotentialTemperature
+    θᵇ = StabilityEquivalentPotentialTemperature(model)
+    @test θᵇ isa Oceananigans.AbstractOperations.KernelFunctionOperation
+    θᵇ_field = Field(θᵇ)
+    @test all(isfinite.(interior(θᵇ_field)))
+    # Stability-equivalent potential temperature should be larger than equivalent
+    @test all(interior(θᵇ_field) .> interior(θᵉ_field))
+
+    # Test density flavor
+    θᵇ_density = StabilityEquivalentPotentialTemperature(model, :density)
+    θᵇ_density_field = Field(θᵇ_density)
+    @test all(isfinite.(interior(θᵇ_density_field)))
+    @test all(interior(θᵇ_density_field) .> 0)
 end
 
 @testset "Static energy diagnostics [$(FT)]" for FT in (Float32, Float64)

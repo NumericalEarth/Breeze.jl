@@ -4,6 +4,7 @@ export
     DryPotentialTemperature,
     VirtualPotentialTemperature,
     EquivalentPotentialTemperature,
+    StabilityEquivalentPotentialTemperature,
     LiquidIcePotentialTemperature,
     StaticEnergy
 
@@ -11,7 +12,11 @@ using Breeze.Thermodynamics:
     Thermodynamics,
     vapor_gas_constant,
     dry_air_gas_constant,
-    liquid_latent_heat
+    liquid_latent_heat,
+    mixture_gas_constant,
+    mixture_heat_capacity,
+    relative_humidity,
+    PlanarLiquidSurface
 
 using Breeze.AtmosphereModels: AtmosphereModel, compute_moisture_fractions
 

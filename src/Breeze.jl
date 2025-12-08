@@ -29,6 +29,7 @@ export
     DryPotentialTemperature,
     VirtualPotentialTemperature,
     EquivalentPotentialTemperature,
+    StabilityEquivalentPotentialTemperature,
     LiquidIcePotentialTemperature,
     StaticEnergy,
 
