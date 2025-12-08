@@ -11,22 +11,21 @@ using GPUArraysCore: @allowscalar
     model = AtmosphereModel(grid)
     set!(model, θ=300, qᵗ=0.01)
 
-    # Test DryPotentialTemperature
-    θᵈ = DryPotentialTemperature(model)
-    @test θᵈ isa Oceananigans.AbstractOperations.KernelFunctionOperation
-    θᵈ_field = Field(θᵈ)
-    @test all(isfinite.(interior(θᵈ_field)))
-    # Dry potential temperature should be in a reasonable range
-    @test all(interior(θᵈ_field) .> 290)
-    @test all(interior(θᵈ_field) .< 310)
+    # Test LiquidIcePotentialTemperature
+    θˡⁱ = LiquidIcePotentialTemperature(model)
+    @test θˡⁱ isa Oceananigans.AbstractOperations.KernelFunctionOperation
+    θˡⁱ_field = Field(θˡⁱ)
+    @test all(isfinite.(interior(θˡⁱ_field)))
+    # Liquid-ice potential temperature should match what we set (θ=300)
+    @test all(interior(θˡⁱ_field) .≈ 300)
 
     # Test VirtualPotentialTemperature
     θᵛ = VirtualPotentialTemperature(model)
     @test θᵛ isa Oceananigans.AbstractOperations.KernelFunctionOperation
     θᵛ_field = Field(θᵛ)
     @test all(isfinite.(interior(θᵛ_field)))
-    # Virtual potential temperature should be larger than dry when moisture is present
-    @test all(interior(θᵛ_field) .> interior(θᵈ_field))
+    # Virtual potential temperature should be larger than liquid-ice when moisture is present
+    @test all(interior(θᵛ_field) .> interior(θˡⁱ_field))
 
     # Test density flavor
     θᵛ_density = VirtualPotentialTemperature(model, :density)
@@ -39,8 +38,8 @@ using GPUArraysCore: @allowscalar
     @test θᵉ isa Oceananigans.AbstractOperations.KernelFunctionOperation
     θᵉ_field = Field(θᵉ)
     @test all(isfinite.(interior(θᵉ_field)))
-    # Equivalent potential temperature should be larger than dry when moisture is present
-    @test all(interior(θᵉ_field) .> interior(θᵈ_field))
+    # Equivalent potential temperature should be larger than liquid-ice when moisture is present
+    @test all(interior(θᵉ_field) .> interior(θˡⁱ_field))
 
     # Test density flavor
     θᵉ_density = EquivalentPotentialTemperature(model, :density)
@@ -48,21 +47,14 @@ using GPUArraysCore: @allowscalar
     @test all(isfinite.(interior(θᵉ_density_field)))
     @test all(interior(θᵉ_density_field) .> 0)
 
-    # Test LiquidIcePotentialTemperature
-    θˡⁱ = LiquidIcePotentialTemperature(model)
-    @test θˡⁱ isa Oceananigans.AbstractOperations.KernelFunctionOperation
-    θˡⁱ_field = Field(θˡⁱ)
-    @test all(isfinite.(interior(θˡⁱ_field)))
-    # Liquid-ice potential temperature should match what we set (θ=300)
-    @test all(interior(θˡⁱ_field) .≈ 300)
-
     # Test StabilityEquivalentPotentialTemperature
     θᵇ = StabilityEquivalentPotentialTemperature(model)
     @test θᵇ isa Oceananigans.AbstractOperations.KernelFunctionOperation
     θᵇ_field = Field(θᵇ)
     @test all(isfinite.(interior(θᵇ_field)))
-    # Stability-equivalent potential temperature should be larger than equivalent
-    @test all(interior(θᵇ_field) .> interior(θᵉ_field))
+    # Stability-equivalent potential temperature should be >= equivalent
+    # (equal when no liquid water is present, i.e., qˡ = 0)
+    @test all(interior(θᵇ_field) .>= interior(θᵉ_field))
 
     # Test density flavor
     θᵇ_density = StabilityEquivalentPotentialTemperature(model, :density)

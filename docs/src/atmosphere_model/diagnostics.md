@@ -8,7 +8,7 @@ which allows them to be evaluated lazily or wrapped in [`Field`](@ref Oceananiga
 
 Diagnostic functions follow a naming convention that indicates their return type:
 
-- **`TitleCase` names** (e.g., `DryPotentialTemperature`, `StaticEnergy`): These functions
+- **`TitleCase` names** (e.g., `VirtualPotentialTemperature`, `StaticEnergy`): These functions
   *always* return a [`KernelFunctionOperation`](@ref Oceananigans.AbstractOperations.KernelFunctionOperation).
   These are "pure diagnostics" that are computed on-the-fly from the model state.
 
@@ -25,13 +25,7 @@ or a derived quantity.
 
 Potential temperatures are conserved quantities that are useful for diagnosing atmospheric stability
 and identifying air masses. See the [notation appendix](@ref "Notation and conventions") for
-the symbols used (``θᵈ``, ``θᵛ``, ``θᵉ``, ``θˡⁱ``).
-
-### Dry potential temperature
-
-```@docs
-Breeze.AtmosphereModels.DryPotentialTemperature
-```
+the symbols used (``θᵛ``, ``θᵉ``, ``θˡⁱ``, ``θᵇ``).
 
 ### Virtual potential temperature
 
@@ -49,6 +43,12 @@ Breeze.AtmosphereModels.EquivalentPotentialTemperature
 
 ```@docs
 Breeze.AtmosphereModels.LiquidIcePotentialTemperature
+```
+
+### Stability-equivalent potential temperature
+
+```@docs
+Breeze.AtmosphereModels.StabilityEquivalentPotentialTemperature
 ```
 
 ## Static energy

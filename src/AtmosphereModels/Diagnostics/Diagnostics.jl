@@ -1,7 +1,6 @@
 module Diagnostics
 
 export
-    DryPotentialTemperature,
     VirtualPotentialTemperature,
     EquivalentPotentialTemperature,
     StabilityEquivalentPotentialTemperature,
@@ -32,8 +31,7 @@ struct Density end
 # Location aliases
 const c = Center()
 
-include("dry_potential_temperature.jl")
-include("moist_potential_temperatures.jl")
+include("potential_temperatures.jl")
 include("static_energy.jl")
 
 end # module

@@ -26,7 +26,6 @@ export
     liquid_ice_potential_temperature,
 
     # Diagnostics
-    DryPotentialTemperature,
     VirtualPotentialTemperature,
     EquivalentPotentialTemperature,
     StabilityEquivalentPotentialTemperature,

@@ -81,7 +81,6 @@ The following table also uses a few conventions that suffuse the source code and
 | ``αᵣ``                                | `αᵣ`          |                                    | Specific volume of a dry reference state, ``αᵣ = Rᵈ θ₀ / pᵣ`` |
 | ``p_r``                               | `pᵣ`          | `RS.pressure`                      | Pressure of a dry adiabatic reference pressure for the anelastic formulation |
 | ``\Pi``                               | `Π`           |                                    | Exner function, ``Π = (pᵣ / p₀)^{Rᵐ / cᵖᵐ}`` |
-| ``θᵈ``                                | `θᵈ`          |                                    | Dry potential temperature |
 | ``θᵛ``                                | `θᵛ`          |                                    | Virtual potential temperature |
 | ``θᵉ``                                | `θᵉ`          |                                    | Equivalent potential temperature |
 | ``θˡⁱ``                               | `θˡⁱ`         |                                    | Liquid-ice potential temperature |

@@ -26,6 +26,7 @@ function prioritize_names(names)
     return names
 end
 
+const settable_thermodynamic_variables = (:ρθ, :θ, :ρθˡⁱ, :θˡⁱ, :ρe, :e)
 function set_thermodynamic_variable! end
 
 """
@@ -75,12 +76,6 @@ function set!(model::AtmosphereModel; enforce_mass_conservation=true, kw...)
             c = getproperty(model.tracers, name)
             set!(c, value)
 
-        elseif name == :ρe
-            set_thermodynamic_variable!(model, Val(:ρe), value)
-
-        elseif name == :ρθ
-            set_thermodynamic_variable!(model, Val(:ρθ), value)
-
         elseif name == :ρqᵗ
             set!(model.moisture_density, value)
             ρqᵗ = model.moisture_density
@@ -107,20 +102,19 @@ function set!(model::AtmosphereModel; enforce_mass_conservation=true, kw...)
             value = ρᵣ * u
             set!(ϕ, value)    
 
-        elseif name == :e
-            set_thermodynamic_variable!(model, Val(:e), value)
-
-        elseif name == :θ
-            set_thermodynamic_variable!(model, Val(:θ), value)
+        elseif name ∈ settable_thermodynamic_variables
+            set_thermodynamic_variable!(model, Val(name), value)
 
         else
             prognostic_names = keys(prognostic_fields(model))
-            supported_diagnostic_variables = (:qᵗ, :u, :v, :w, :θ, :e)
+            settable_diagnostic_variables = (:qᵗ, :u, :v, :w)
 
             msg = "Cannot set! $name in AtmosphereModel because $name is neither a
-                   prognostic variable nor a supported diagnostic variable!
-                   The prognostic variables are: $prognostic_names
-                   The supported diagnostic variables are: $supported_diagnostic_variables"
+                   prognostic variable, a settable thermodynamic variable, nor a settable
+                   diagnostic variable! The settable variables are
+                       - prognostic variables: $prognostic_names
+                       - settable thermodynamic variables: $settable_thermodynamic_variables
+                       - settable diagnostic variables: $settable_diagnostic_variables"
 
             throw(ArgumentError(msg))
         end
