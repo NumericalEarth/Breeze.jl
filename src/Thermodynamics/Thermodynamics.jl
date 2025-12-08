@@ -2,7 +2,13 @@ module Thermodynamics
 
 export ThermodynamicConstants, ReferenceState, IdealGas,
        CondensedPhase,
-       mixture_gas_constant, mixture_heat_capacity
+       MoistureMassFractions,
+       vapor_gas_constant, dry_air_gas_constant,
+       mixture_gas_constant, mixture_heat_capacity,
+       liquid_latent_heat, ice_latent_heat,
+       saturation_vapor_pressure, saturation_specific_humidity,
+       vapor_pressure, relative_humidity,
+       PlanarLiquidSurface, PlanarIceSurface, PlanarMixedPhaseSurface
 
 using DocStringExtensions: TYPEDSIGNATURES, TYPEDEF
 

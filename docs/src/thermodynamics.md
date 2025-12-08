@@ -260,7 +260,7 @@ the "[dry adiabatic lapse rate](https://en.wikipedia.org/wiki/Lapse_rate)".
 ### An example of a dry reference state in Breeze
 
 We can visualise a hydrostatic reference profile evaluating Breeze's reference-state
-utilities (which assume a dry reference state) on a one-dimensional `RectilinearGrid`.
+utilities (which assume a dry reference state) on a one-dimensional [`RectilinearGrid`](https://clima.github.io/OceananigansDocumentation/stable/appendix/library/#Oceananigans.Grids.RectilinearGrid).
 In the following code, the superscript ``d`` denotes dry air, e.g., an ideal gas
 with ``Rᵈ = 286.71 \; \mathrm{J} \, \mathrm{K}^{-1}``:
 

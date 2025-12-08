@@ -148,7 +148,9 @@ function set_thermodynamic_variable!(model::StaticEnergyAnelasticModel, ::Val{:e
 end
 
 # Setting :θ (potential temperature)
-function set_thermodynamic_variable!(model::StaticEnergyAnelasticModel, ::Val{:θ}, value)
+const PotentialTemperatureNames = Union{Val{:θ}, Val{:θˡⁱ}}
+
+function set_thermodynamic_variable!(model::StaticEnergyAnelasticModel, ::PotentialTemperatureNames, value)
     thermo = model.formulation.thermodynamics
     θ = model.temperature # scratch space
     set!(θ, value)
