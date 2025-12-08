@@ -10,7 +10,8 @@ Breeze interfaces with ClimaOcean for coupled atmosphere-ocean simulations.
 ## Language & Environment
 - **Language**: Julia 1.10+
 - **Architectures**: CPU and GPU
-- **Key Packages**: Oceananigans.jl, CloudMicrophysics.jl, RRTMGP.jl, ClimaOcean.jl, KernelAbstractions.jl, CUDA.jl, Enzyme.jl, Reactant.jl
+- **Key Packages**: Oceananigans.jl, CloudMicrophysics.jl, RRTMGP.jl, ClimaOcean.jl,
+                    KernelAbstractions.jl, CUDA.jl, Enzyme.jl, Reactant.jl, Documenter.jl
 - **Testing**: Breeze.jl uses ParallelTestRunner.jl for distributed testing
 
 ## Code Style & Conventions
