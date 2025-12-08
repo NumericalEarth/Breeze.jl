@@ -113,6 +113,13 @@ Breeze interfaces with ClimaOcean for coupled atmosphere-ocean simulations.
 6. **Common misconceptions**
   - `update_state!` is called within `set!(model, ...)`. Scripts should never or rarely need to manually invoke `update_state!`
   - Fields and AbstractOperations can be used in `set!`.
+  - `compute!` is called in the `Field(op)` constructor for `op::AbstractOperation`. It is redundant to call `compute!`
+    immediately after building a `Field`.
+  - "doctests" usually should not contain actual equality comparisons or "tests". Instead, doctests should exercise `Base.show`.
+    Developing a doctest typically also involves ensuring that `show` for a newly defined object looks good and is human-readable.
+    In turn this can require work for nested structs to develop summary, prettysummary, and other methods for
+    displaying the content of a new type.
+
 
 ### Naming Conventions
 - **Files**: snake_case (e.g., `atmosphere_model.jl`, `update_atmosphere_model_state.jl`)
