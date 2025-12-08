@@ -9,9 +9,9 @@ using Breeze.Thermodynamics:
 #####
 
 # Plain (mixture) potential temperature flavors (θ = T / Π)
-abstract type AbstractMixtureFlavor end
-struct SpecificMixture <: AbstractMixtureFlavor end
-struct MixtureDensity <: AbstractMixtureFlavor end
+abstract type AbstractPlainFlavor end
+struct SpecificPlain <: AbstractPlainFlavor end
+struct PlainDensity <: AbstractPlainFlavor end
 
 # Virtual potential temperature flavors
 abstract type AbstractVirtualFlavor end
@@ -35,7 +35,7 @@ struct SpecificStabilityEquivalent <: AbstractStabilityEquivalentFlavor end
 struct StabilityEquivalentDensity <: AbstractStabilityEquivalentFlavor end
 
 const SpecificPotentialTemperatureType = Union{
-    SpecificMixture,
+    SpecificPlain,
     SpecificVirtual,
     SpecificLiquidIce,
     SpecificEquivalent,
@@ -43,7 +43,7 @@ const SpecificPotentialTemperatureType = Union{
 }
 
 const PotentialTemperatureDensityType = Union{
-    MixtureDensity,
+    PlainDensity,
     VirtualDensity,
     LiquidIceDensity,
     EquivalentDensity,
@@ -73,7 +73,7 @@ Adapt.adapt_structure(to, k::MoistPotentialTemperatureKernelFunction) =
 const C = Center
 
 const PotentialTemperature = KernelFunctionOperation{C, C, C, <:Any, <:Any,
-    <:MoistPotentialTemperatureKernelFunction{<:AbstractMixtureFlavor}}
+    <:MoistPotentialTemperatureKernelFunction{<:AbstractPlainFlavor}}
 
 const VirtualPotentialTemperature = KernelFunctionOperation{C, C, C, <:Any, <:Any,
     <:MoistPotentialTemperatureKernelFunction{<:AbstractVirtualFlavor}}
@@ -133,9 +133,9 @@ Field(θ)
 function PotentialTemperature(model::AtmosphereModel, flavor_symbol=:specific)
 
     flavor = if flavor_symbol === :specific
-        SpecificMixture()
+        SpecificPlain()
     elseif flavor_symbol === :density
-        MixtureDensity()
+        PlainDensity()
     else
         msg = "`flavor` must be :specific or :density, received :$flavor_symbol"
         throw(ArgumentError(msg))
@@ -474,7 +474,7 @@ function (d::MoistPotentialTemperatureKernelFunction)(i, j, k, grid)
     ℒˡᵣ = constants.liquid.reference_latent_heat
     ℒⁱᵣ = constants.ice.reference_latent_heat
 
-    # Mixture properties
+    # Plain properties
     Rᵐ = mixture_gas_constant(q, constants)
     cᵖᵐ = mixture_heat_capacity(q, constants)
     Πᵐ = (pᵣ / p₀)^(Rᵐ / cᵖᵐ)
@@ -482,7 +482,7 @@ function (d::MoistPotentialTemperatureKernelFunction)(i, j, k, grid)
     # Plain potential temperature (used as a base for several others)
     θ = T / Πᵐ
 
-    if d.flavor isa AbstractMixtureFlavor
+    if d.flavor isa AbstractPlainFlavor
         θ★ = θ
 
     elseif d.flavor isa AbstractLiquidIceFlavor || d.flavor isa AbstractVirtualFlavor
@@ -513,6 +513,7 @@ function (d::MoistPotentialTemperatureKernelFunction)(i, j, k, grid)
         # - I have (mostly) guessed about these expressions, which we must form in terms
         #   of mass fractions.
         # - When this is verified, the math should be written in the documentation.
+        # - Could this also be written θᵉ = θ * exp(ℒˡ * qᵛ / (cᵖᵐ * T)) * ℋ^γ ?
         θᵉ = T * (p₀ / pᵣ)^(Rᵈ / cᵖᵐ) * exp(ℒˡ * qᵛ / (cᵖᵐ * T)) * ℋ^γ
 
         if d.flavor isa AbstractStabilityEquivalentFlavor
