@@ -52,7 +52,7 @@ Variables are set via keyword arguments. Supported variables include:
 - `ρθˡⁱ`: liquid-ice potential temperature density
 - `ρe`: static energy density (for `StaticEnergyThermodynamics`)
 
-**Diagnostic variables** (specific, ie per unit mass):
+**Diagnostic variables** (specific, i.e., per unit mass):
 - `u`, `v`, `w`: velocity components (sets both velocity and momentum)
 - `qᵗ`: total specific moisture (sets both specific and density-weighted moisture)
 
