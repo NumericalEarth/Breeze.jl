@@ -1,19 +1,19 @@
 # Diagnostics
 
 Breeze.jl provides a variety of diagnostic fields for analyzing atmospheric simulations.
-These diagnostics can be computed as `KernelFunctionOperation`s,
-which allows them to be evaluated lazily or wrapped in `Field`s for storage and output.
+These diagnostics can be computed as [`KernelFunctionOperation`](https://clima.github.io/OceananigansDocumentation/stable/appendix/library/#Oceananigans.AbstractOperations.KernelFunctionOperation)s,
+which allows them to be evaluated lazily or wrapped in [`Field`](https://clima.github.io/OceananigansDocumentation/stable/appendix/library/#Oceananigans.Fields.Field)s for storage and output.
 
 ## Naming conventions
 
 Diagnostic functions follow a naming convention that indicates their return type:
 
 - **`TitleCase` names** (e.g., `VirtualPotentialTemperature`, `StaticEnergy`): These functions
-  *always* return a `KernelFunctionOperation`.
+  *always* return a [`KernelFunctionOperation`](https://clima.github.io/OceananigansDocumentation/stable/appendix/library/#Oceananigans.AbstractOperations.KernelFunctionOperation).
   These are "pure diagnostics" that are computed on-the-fly from the model state.
 
 - **`snake_case` names** (e.g., `temperature`, `density`): These functions may return either
-  a `Field` or a `KernelFunctionOperation`, depending on
+  a [`Field`](https://clima.github.io/OceananigansDocumentation/stable/appendix/library/#Oceananigans.Fields.Field) or a `KernelFunctionOperation`, depending on
   the model formulation. When a quantity is directly stored or computed by a particular
   [`AtmosphereModel`](@ref) formulation, it is returned as a `Field`. Otherwise, it is
   computed on-the-fly as a `KernelFunctionOperation`.
