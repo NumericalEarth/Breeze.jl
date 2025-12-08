@@ -81,10 +81,10 @@ The following table also uses a few conventions that suffuse the source code and
 | ``αᵣ``                                | `αᵣ`          |                                    | Specific volume of a dry reference state, ``αᵣ = Rᵈ θ₀ / pᵣ`` |
 | ``p_r``                               | `pᵣ`          | `RS.pressure`                      | Pressure of a dry adiabatic reference pressure for the anelastic formulation |
 | ``\Pi``                               | `Π`           |                                    | Exner function, ``Π = (pᵣ / p₀)^{Rᵐ / cᵖᵐ}`` |
-| ``θ``                                 | `θ`           |                                    | Dry potential temperature |
-| ``θ^v``                               | `θᵛ`          |                                    | Virtual potential temperature |
-| ``θ^e``                               | `θᵉ`          |                                    | Equivalent potential temperature |
-| ``θ^{li}``                            | `θˡⁱ`         |                                    | Liquid-ice potential temperature |
+| ``θᵈ``                                | `θᵈ`          |                                    | Dry potential temperature |
+| ``θᵛ``                                | `θᵛ`          |                                    | Virtual potential temperature |
+| ``θᵉ``                                | `θᵉ`          |                                    | Equivalent potential temperature |
+| ``θˡⁱ``                               | `θˡⁱ`         |                                    | Liquid-ice potential temperature |
 | ``\Delta t``                          | `Δt`          | `Simulation.Δt`                    | Time step |
 | ``\boldsymbol{\tau}``                 | `τ`           |                                    | Kinematic subgrid/viscous stress tensor (per unit mass) |
 | ``\boldsymbol{\mathcal{T}}``          | `𝒯`           |                                   | Dynamic stress tensor used in anelastic momentum, ``\mathcal{T} = ρᵣ τ`` |

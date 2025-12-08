@@ -25,7 +25,7 @@ or a derived quantity.
 
 Potential temperatures are conserved quantities that are useful for diagnosing atmospheric stability
 and identifying air masses. See the [notation appendix](@ref "Notation and conventions") for
-the symbols used (``θ``, ``θ^v``, ``θ^e``, ``θ^{li}``).
+the symbols used (``θᵈ``, ``θᵛ``, ``θᵉ``, ``θˡⁱ``).
 
 ### Dry potential temperature
 

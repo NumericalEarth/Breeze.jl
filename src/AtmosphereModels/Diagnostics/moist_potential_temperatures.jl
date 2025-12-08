@@ -52,19 +52,19 @@ const EquivalentPotentialTemperature = KernelFunctionOperation{Center, Center, C
 """
     VirtualPotentialTemperature(model, flavor=:specific)
 
-Return a `KernelFunctionOperation` representing virtual potential temperature ``θ^v``.
+Return a `KernelFunctionOperation` representing virtual potential temperature ``θᵛ``.
 
 Virtual potential temperature is the temperature that dry air would need to have
 in order to have the same density as moist air at the same pressure. It accounts
 for the effect of water vapor on air density:
 
 ```math
-θ^v = θ \\left( 1 + \\epsilon q^v - q^l - q^i \\right)
+θᵛ = θᵈ \\left( 1 + ε qᵛ - qˡ - qⁱ \\right)
 ```
 
-where ``θ`` is dry potential temperature, ``q^v``, ``q^l``, ``q^i`` are the
+where ``θᵈ`` is dry potential temperature, ``qᵛ``, ``qˡ``, ``qⁱ`` are the
 specific humidities of vapor, liquid, and ice respectively, and
-``ε = R^v / R^d - 1 ≈ 0.608`` is a constant related to the ratio of gas constants.
+``ε = Rᵛ / Rᵈ - 1 ≈ 0.608`` is a constant related to the ratio of gas constants.
 
 See [Emanuel1994](@citet) for a derivation and discussion of virtual temperature
 and its utility in atmospheric thermodynamics.
@@ -72,7 +72,7 @@ and its utility in atmospheric thermodynamics.
 # Arguments
 
 - `model`: An `AtmosphereModel` instance.
-- `flavor`: Either `:specific` (default) to return ``θ^v``, or `:density` to return ``ρ θ^v``.
+- `flavor`: Either `:specific` (default) to return ``θᵛ``, or `:density` to return ``ρ θᵛ``.
 
 # Examples
 
@@ -125,26 +125,26 @@ end
 """
     LiquidIcePotentialTemperature(model, flavor=:specific)
 
-Return a `KernelFunctionOperation` representing liquid-ice potential temperature ``θ^{li}``.
+Return a `KernelFunctionOperation` representing liquid-ice potential temperature ``θˡⁱ``.
 
 Liquid-ice potential temperature is a conserved quantity under moist adiabatic processes
 that accounts for the latent heat associated with liquid water and ice:
 
 ```math
-θ^{li} = \\frac{T - (L^l_r q^l + L^i_r q^i) / c_p^m}{\\Pi}
+θˡⁱ = \\frac{T - (ℒˡᵣ qˡ + ℒⁱᵣ qⁱ) / cᵖᵐ}{Π}
 ```
 
-where ``\\Pi = (p/p_0)^{R^m/c_p^m}`` is the Exner function using mixture properties,
-the ``L_r`` are the reference latent heats of vaporization and sublimation,
-``q^l`` and ``q^i`` are the liquid and ice specific humidities, and
-``c_p^m`` is the moist air heat capacity.
+where ``Π = (p/p₀)^{Rᵐ/cᵖᵐ}`` is the Exner function using mixture properties,
+``ℒˡᵣ`` and ``ℒⁱᵣ`` are the reference latent heats of vaporization and sublimation,
+``qˡ`` and ``qⁱ`` are the liquid and ice specific humidities, and
+``cᵖᵐ`` is the moist air heat capacity.
 
 This is the prognostic thermodynamic variable used in `LiquidIcePotentialTemperatureThermodynamics`.
 
 # Arguments
 
 - `model`: An `AtmosphereModel` instance.
-- `flavor`: Either `:specific` (default) to return ``θ^{li}``, or `:density` to return ``ρ θ^{li}``.
+- `flavor`: Either `:specific` (default) to return ``θˡⁱ``, or `:density` to return ``ρ θˡⁱ``.
 
 # Examples
 
@@ -193,7 +193,7 @@ end
 """
     EquivalentPotentialTemperature(model, flavor=:specific)
 
-Return a `KernelFunctionOperation` representing equivalent potential temperature ``θ^e``.
+Return a `KernelFunctionOperation` representing equivalent potential temperature ``θᵉ``.
 
 Equivalent potential temperature is conserved during moist adiabatic processes
 (including condensation and evaporation) and is useful for identifying air masses
@@ -205,13 +205,13 @@ We use the formulation from [BryanFritsch2002](@citet), which provides an accura
 approximation:
 
 ```math
-θ^e = T \\left( \\frac{p_0}{p_d} \\right)^{R^d / c_{pm}}
-      \\exp \\left( \\frac{L_v q^v}{c_{pm} T} \\right)
+θᵉ = T \\left( \\frac{p₀}{pᵈ} \\right)^{Rᵈ / cᵖᵐ}
+      \\exp \\left( \\frac{ℒˡ qᵛ}{cᵖᵐ T} \\right)
 ```
 
-where ``T`` is temperature, ``p_d`` is dry air pressure, ``p_0`` is the reference pressure,
-``L_v`` is the latent heat of vaporization, ``q^v`` is the vapor specific humidity,
-and ``c_{pm}`` is the heat capacity of the moist air mixture.
+where ``T`` is temperature, ``pᵈ`` is dry air pressure, ``p₀`` is the reference pressure,
+``ℒˡ`` is the latent heat of vaporization, ``qᵛ`` is the vapor specific humidity,
+and ``cᵖᵐ`` is the heat capacity of the moist air mixture.
 
 The formulation follows equation (39) of [BryanFritsch2002](@cite), which was
 adapted from the derivation in [DurranKlemp1982](@citet).
@@ -219,7 +219,7 @@ adapted from the derivation in [DurranKlemp1982](@citet).
 # Arguments
 
 - `model`: An `AtmosphereModel` instance.
-- `flavor`: Either `:specific` (default) to return ``θ^e``, or `:density` to return ``ρ θ^e``.
+- `flavor`: Either `:specific` (default) to return ``θᵉ``, or `:density` to return ``ρ θᵉ``.
 
 # Examples
 

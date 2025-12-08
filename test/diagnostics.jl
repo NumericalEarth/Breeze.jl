@@ -12,13 +12,13 @@ using GPUArraysCore: @allowscalar
     set!(model, θ=300, qᵗ=0.01)
 
     # Test DryPotentialTemperature
-    θ = DryPotentialTemperature(model)
-    @test θ isa Oceananigans.AbstractOperations.KernelFunctionOperation
-    θ_field = Field(θ)
-    @test all(isfinite.(interior(θ_field)))
+    θᵈ = DryPotentialTemperature(model)
+    @test θᵈ isa Oceananigans.AbstractOperations.KernelFunctionOperation
+    θᵈ_field = Field(θᵈ)
+    @test all(isfinite.(interior(θᵈ_field)))
     # Dry potential temperature should be in a reasonable range
-    @test all(interior(θ_field) .> 290)
-    @test all(interior(θ_field) .< 310)
+    @test all(interior(θᵈ_field) .> 290)
+    @test all(interior(θᵈ_field) .< 310)
 
     # Test VirtualPotentialTemperature
     θᵛ = VirtualPotentialTemperature(model)
@@ -26,7 +26,7 @@ using GPUArraysCore: @allowscalar
     θᵛ_field = Field(θᵛ)
     @test all(isfinite.(interior(θᵛ_field)))
     # Virtual potential temperature should be larger than dry when moisture is present
-    @test all(interior(θᵛ_field) .> interior(θ_field))
+    @test all(interior(θᵛ_field) .> interior(θᵈ_field))
 
     # Test density flavor
     θᵛ_density = VirtualPotentialTemperature(model, :density)
@@ -40,7 +40,7 @@ using GPUArraysCore: @allowscalar
     θᵉ_field = Field(θᵉ)
     @test all(isfinite.(interior(θᵉ_field)))
     # Equivalent potential temperature should be larger than dry when moisture is present
-    @test all(interior(θᵉ_field) .> interior(θ_field))
+    @test all(interior(θᵉ_field) .> interior(θᵈ_field))
 
     # Test density flavor
     θᵉ_density = EquivalentPotentialTemperature(model, :density)

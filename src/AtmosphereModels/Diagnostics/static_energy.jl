@@ -32,12 +32,12 @@ Moist static energy is a conserved quantity in adiabatic, frictionless flow that
 combines sensible heat, gravitational potential energy, and latent heat:
 
 ```math
-e = c_p^m T + g z - ℒ^l_r q^l - ℒ^i_r q^i
+e = cᵖᵐ T + g z - ℒˡᵣ qˡ - ℒⁱᵣ qⁱ
 ```
 
-where ``c_p^m`` is the moist air heat capacity, ``T`` is temperature,
+where ``cᵖᵐ`` is the moist air heat capacity, ``T`` is temperature,
 ``g`` is gravitational acceleration, ``z`` is height, and
-``ℒ^l_r q^l + ℒ^i_r q^i`` is the latent heat content of condensate.
+``ℒˡᵣ qˡ + ℒⁱᵣ qⁱ`` is the latent heat content of condensate.
 
 This is the prognostic thermodynamic variable used in `StaticEnergyThermodynamics`.
 

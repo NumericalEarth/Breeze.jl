@@ -18,17 +18,17 @@ const DryPotentialTemperature = KernelFunctionOperation{Center, Center, Center, 
 """
     DryPotentialTemperature(model)
 
-Return a `KernelFunctionOperation` representing dry potential temperature ``θ``.
+Return a `KernelFunctionOperation` representing dry potential temperature ``θᵈ``.
 
 Dry potential temperature is the temperature that an unsaturated parcel of air
-would attain if adiabatically brought to a reference pressure ``p_0``:
+would attain if adiabatically brought to a reference pressure ``p₀``:
 
 ```math
-θ = T \\left( \\frac{p_0}{p} \\right)^{R^d / c_p^d}
+θᵈ = T \\left( \\frac{p₀}{p} \\right)^{Rᵈ / cᵖᵈ}
 ```
 
-where ``T`` is temperature, ``p`` is pressure, ``p_0`` is the reference pressure,
-``R^d`` is the dry air gas constant, and ``c_p^d`` is the specific heat capacity
+where ``T`` is temperature, ``p`` is pressure, ``p₀`` is the reference pressure,
+``Rᵈ`` is the dry air gas constant, and ``cᵖᵈ`` is the specific heat capacity
 of dry air at constant pressure.
 
 See [Stull1988](@citet) for a thorough discussion of potential temperature.
@@ -42,8 +42,8 @@ grid = RectilinearGrid(size=(1, 1, 8), extent=(1, 1, 1e3))
 model = AtmosphereModel(grid)
 set!(model, θ=300)
 
-θ = DryPotentialTemperature(model)
-Field(θ)
+θᵈ = DryPotentialTemperature(model)
+Field(θᵈ)
 
 # output
 1×1×8 Field{Center, Center, Center} on RectilinearGrid on CPU
