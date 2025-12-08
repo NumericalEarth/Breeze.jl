@@ -1,6 +1,7 @@
 module Diagnostics
 
 export
+    PotentialTemperature,
     VirtualPotentialTemperature,
     EquivalentPotentialTemperature,
     StabilityEquivalentPotentialTemperature,

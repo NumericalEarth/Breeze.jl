@@ -25,7 +25,13 @@ or a derived quantity.
 
 Potential temperatures are conserved quantities that are useful for diagnosing atmospheric stability
 and identifying air masses. See the [notation appendix](@ref "Notation and conventions") for
-the symbols used (``θᵛ``, ``θᵉ``, ``θˡⁱ``, ``θᵇ``).
+the symbols used (``θ``, ``θᵛ``, ``θᵉ``, ``θˡⁱ``, ``θᵇ``).
+
+### Potential temperature (mixture)
+
+```@docs
+Breeze.AtmosphereModels.PotentialTemperature
+```
 
 ### Virtual potential temperature
 

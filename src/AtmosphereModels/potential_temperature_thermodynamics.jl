@@ -135,14 +135,14 @@ end
 ##### Set
 #####
 
-set_thermodynamic_variable!(model::LiquidIcePotentialTemperatureAnelasticModel, ::Val{:ρθ}, value) =
+set_thermodynamic_variable!(model::LiquidIcePotentialTemperatureAnelasticModel, ::Union{Val{:ρθ}, Val{:ρθˡⁱ}}, value) =
     set!(model.formulation.thermodynamics.potential_temperature_density, value)
 
-function set_thermodynamic_variable!(model::LiquidIcePotentialTemperatureAnelasticModel, ::Val{:θ}, value)
+function set_thermodynamic_variable!(model::LiquidIcePotentialTemperatureAnelasticModel, ::Union{Val{:θ}, Val{:θˡⁱ}}, value)
     set!(model.formulation.thermodynamics.potential_temperature, value)
     ρᵣ = model.formulation.reference_state.density
-    θ = model.formulation.thermodynamics.potential_temperature
-    set!(model.formulation.thermodynamics.potential_temperature_density, ρᵣ * θ)
+    θˡⁱ = model.formulation.thermodynamics.potential_temperature
+    set!(model.formulation.thermodynamics.potential_temperature_density, ρᵣ * θˡⁱ)
     return nothing
 end
 

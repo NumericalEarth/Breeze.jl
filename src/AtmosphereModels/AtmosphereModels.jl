@@ -14,6 +14,7 @@ export
     liquid_ice_potential_temperature,
 
     # Diagnostics (re-exported from Diagnostics submodule)
+    PotentialTemperature,
     VirtualPotentialTemperature,
     EquivalentPotentialTemperature,
     StabilityEquivalentPotentialTemperature,

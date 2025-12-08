@@ -41,19 +41,24 @@ Variables are set via keyword arguments. Supported variables include:
 **Prognostic variables** (density-weighted):
 - `ρu`, `ρv`, `ρw`: momentum components
 - `ρqᵗ`: total moisture density
-- `ρθ`: potential temperature density (for `LiquidIcePotentialTemperatureThermodynamics`)
+- Prognostic microphysical variables
+- Prognostic user-specified tracer fields
+
+**Settable thermodynamic variables**:
+- `θ`: potential temperature
+- `θˡⁱ`: liquid-ice potential temperature
+- `e`: static energy
+- `ρθ`: potential temperature density
+- `ρθˡⁱ`: liquid-ice potential temperature density
 - `ρe`: static energy density (for `StaticEnergyThermodynamics`)
 
 **Diagnostic variables** (specific, ie per unit mass):
 - `u`, `v`, `w`: velocity components (sets both velocity and momentum)
 - `qᵗ`: total specific moisture (sets both specific and density-weighted moisture)
-- `θ`: potential temperature (interpreted as liquid-ice potential temperature ``θˡⁱ``)
-- `e`: static energy
 
 !!! note "The meaning of `θ`"
     When using `set!(model, θ=...)`, the value is interpreted as the **liquid-ice
-    potential temperature** ``θˡⁱ``, not the dry potential temperature ``θᵈ``.
-    This is consistent with the prognostic variable in `LiquidIcePotentialTemperatureThermodynamics`.
+    potential temperature** ``θˡⁱ``.
 
 # Options
 

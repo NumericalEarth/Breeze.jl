@@ -11,6 +11,21 @@ using GPUArraysCore: @allowscalar
     model = AtmosphereModel(grid)
     set!(model, θ=300, qᵗ=0.01)
 
+    # Test PotentialTemperature (mixture)
+    θ = PotentialTemperature(model)
+    @test θ isa Oceananigans.AbstractOperations.KernelFunctionOperation
+    θ_field = Field(θ)
+    @test all(isfinite.(interior(θ_field)))
+    # Potential temperature should be in a reasonable range
+    @test all(interior(θ_field) .> 290)
+    @test all(interior(θ_field) .< 310)
+
+    # Test density flavor
+    θ_density = PotentialTemperature(model, :density)
+    θ_density_field = Field(θ_density)
+    @test all(isfinite.(interior(θ_density_field)))
+    @test all(interior(θ_density_field) .> 0)
+
     # Test LiquidIcePotentialTemperature
     θˡⁱ = LiquidIcePotentialTemperature(model)
     @test θˡⁱ isa Oceananigans.AbstractOperations.KernelFunctionOperation

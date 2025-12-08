@@ -5,8 +5,13 @@ using Breeze.Thermodynamics:
     liquid_latent_heat
 
 #####
-##### Moist potential temperatures (virtual, liquid-ice, equivalent, and stability-equivalent)
+##### Potential temperatures (mixture, virtual, liquid-ice, equivalent, and stability-equivalent)
 #####
+
+# Plain (mixture) potential temperature flavors (θ = T / Π)
+abstract type AbstractMixtureFlavor end
+struct SpecificMixture <: AbstractMixtureFlavor end
+struct MixtureDensity <: AbstractMixtureFlavor end
 
 # Virtual potential temperature flavors
 abstract type AbstractVirtualFlavor end
@@ -29,14 +34,16 @@ abstract type AbstractStabilityEquivalentFlavor <: AbstractEquivalentFlavor end
 struct SpecificStabilityEquivalent <: AbstractStabilityEquivalentFlavor end
 struct StabilityEquivalentDensity <: AbstractStabilityEquivalentFlavor end
 
-const SpecificPotentialTemperature = Union{
+const SpecificPotentialTemperatureType = Union{
+    SpecificMixture,
     SpecificVirtual,
     SpecificLiquidIce,
     SpecificEquivalent,
     SpecificStabilityEquivalent
 }
 
-const PotentialTemperatureDensity = Union{
+const PotentialTemperatureDensityType = Union{
+    MixtureDensity,
     VirtualDensity,
     LiquidIceDensity,
     EquivalentDensity,
@@ -64,6 +71,10 @@ Adapt.adapt_structure(to, k::MoistPotentialTemperatureKernelFunction) =
 
 # Type aliases for the user interface
 const C = Center
+
+const PotentialTemperature = KernelFunctionOperation{C, C, C, <:Any, <:Any,
+    <:MoistPotentialTemperatureKernelFunction{<:AbstractMixtureFlavor}}
+
 const VirtualPotentialTemperature = KernelFunctionOperation{C, C, C, <:Any, <:Any,
     <:MoistPotentialTemperatureKernelFunction{<:AbstractVirtualFlavor}}
 
@@ -75,6 +86,71 @@ const EquivalentPotentialTemperature = KernelFunctionOperation{C, C, C, <:Any, <
 
 const StabilityEquivalentPotentialTemperature = KernelFunctionOperation{C, C, C, <:Any, <:Any,
     <:MoistPotentialTemperatureKernelFunction{<:AbstractStabilityEquivalentFlavor}}
+
+"""
+    PotentialTemperature(model, flavor=:specific)
+
+Return a `KernelFunctionOperation` representing the (mixture) potential temperature ``θ``.
+
+The potential temperature is defined as the temperature a parcel would have if
+adiabatically brought to a reference pressure ``p₀``:
+
+```math
+θ = \\frac{T}{Π}
+```
+
+where ``T`` is temperature and ``Π = (p/p₀)^{Rᵐ/cᵖᵐ}`` is the mixture Exner function,
+computed using the moist air gas constant ``Rᵐ`` and heat capacity ``cᵖᵐ``.
+
+# Arguments
+
+- `model`: An `AtmosphereModel` instance.
+- `flavor`: Either `:specific` (default) to return ``θ``, or `:density` to return ``ρ θ``.
+
+# Examples
+
+```jldoctest
+using Breeze
+
+grid = RectilinearGrid(size=(1, 1, 8), extent=(1, 1, 1e3))
+model = AtmosphereModel(grid)
+set!(model, θ=300)
+
+θ = PotentialTemperature(model)
+Field(θ)
+
+# output
+1×1×8 Field{Center, Center, Center} on RectilinearGrid on CPU
+├── grid: 1×1×8 RectilinearGrid{Float64, Periodic, Periodic, Bounded} on CPU with 1×1×3 halo
+├── boundary conditions: FieldBoundaryConditions
+│   └── west: Periodic, east: Periodic, south: Periodic, north: Periodic, bottom: ZeroFlux, top: ZeroFlux, immersed: Nothing
+├── operand: KernelFunctionOperation at (Center, Center, Center)
+├── status: time=0.0
+└── data: 3×3×14 OffsetArray(::Array{Float64, 3}, 0:2, 0:2, -2:11) with eltype Float64 with indices 0:2×0:2×-2:11
+    └── max=300.0, min=300.0, mean=300.0
+```
+"""
+function PotentialTemperature(model::AtmosphereModel, flavor_symbol=:specific)
+
+    flavor = if flavor_symbol === :specific
+        SpecificMixture()
+    elseif flavor_symbol === :density
+        MixtureDensity()
+    else
+        msg = "`flavor` must be :specific or :density, received :$flavor_symbol"
+        throw(ArgumentError(msg))
+    end
+
+    func = MoistPotentialTemperatureKernelFunction(flavor,
+                                                   model.formulation.reference_state,
+                                                   model.microphysics,
+                                                   model.microphysical_fields,
+                                                   model.specific_moisture,
+                                                   model.temperature,
+                                                   model.thermodynamic_constants)
+
+    return KernelFunctionOperation{Center, Center, Center}(func, model.grid)
+end
 
 """
     VirtualPotentialTemperature(model, flavor=:specific)
@@ -403,9 +479,15 @@ function (d::MoistPotentialTemperatureKernelFunction)(i, j, k, grid)
     cᵖᵐ = mixture_heat_capacity(q, constants)
     Πᵐ = (pᵣ / p₀)^(Rᵐ / cᵖᵐ)
 
-    if d.flavor isa AbstractLiquidIceFlavor || d.flavor isa AbstractVirtualFlavor
+    # Plain potential temperature (used as a base for several others)
+    θ = T / Πᵐ
+
+    if d.flavor isa AbstractMixtureFlavor
+        θ★ = θ
+
+    elseif d.flavor isa AbstractLiquidIceFlavor || d.flavor isa AbstractVirtualFlavor
         # Liquid-ice potential temperature
-        θˡⁱ = (T - (ℒˡᵣ * qˡ + ℒⁱᵣ * qⁱ) / cᵖᵐ) / Πᵐ
+        θˡⁱ = θ * (1 - (ℒˡᵣ * qˡ + ℒⁱᵣ * qⁱ) / (cᵖᵐ * T))
 
         if d.flavor isa AbstractLiquidIceFlavor
             θ★ = θˡⁱ
@@ -446,9 +528,9 @@ function (d::MoistPotentialTemperatureKernelFunction)(i, j, k, grid)
     end
 
     # Return specific or density-weighted value
-    if d.flavor isa SpecificPotentialTemperature
+    if d.flavor isa SpecificPotentialTemperatureType
         return θ★
-    elseif d.flavor isa PotentialTemperatureDensity
+    elseif d.flavor isa PotentialTemperatureDensityType
         return ρᵣ * θ★
     end
 end
