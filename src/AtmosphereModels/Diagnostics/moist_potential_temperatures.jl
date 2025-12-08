@@ -427,7 +427,7 @@ function (d::MoistPotentialTemperatureKernelFunction)(i, j, k, grid)
         # - Not to mention that "specific entropy" should be entropy per
         #   unit total mass, rather than per unit dry air mass, as in Emmanuel.
         # - When this is verified, the math should be written in the documentation.
-        θᵉ = T * (pᵣ / p₀)^(Rᵐ / cᵖᵐ) * ℋ^γ * exp(ℒˡ * qᵛ / (cᵖᵐ * T))
+        θᵉ = T * (p₀ / pᵣ)^(Rᵈ / cᵖᵐ) * ℋ^γ * exp(ℒˡ * qᵛ / (cᵖᵐ * T))
 
         if d.flavor isa AbstractStabilityEquivalentFlavor
             # Equation 16, Durran & Klemp 1982
