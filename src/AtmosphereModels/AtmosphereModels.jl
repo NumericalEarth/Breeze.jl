@@ -1,6 +1,7 @@
 module AtmosphereModels
 
 export
+    # AtmosphereModel core
     AtmosphereModel,
     AtmosphereModelBuoyancy,
     AnelasticFormulation,
@@ -10,7 +11,14 @@ export
     static_energy,
     total_energy,
     potential_temperature_density,
-    liquid_ice_potential_temperature
+    liquid_ice_potential_temperature,
+
+    # Diagnostics (re-exported from Diagnostics submodule)
+    DryPotentialTemperature,
+    VirtualPotentialTemperature,
+    EquivalentPotentialTemperature,
+    LiquidIcePotentialTemperature,
+    StaticEnergy
 
 using DocStringExtensions: TYPEDSIGNATURES
 using Adapt: Adapt, adapt
@@ -29,13 +37,5 @@ include("compute_hydrostatic_pressure.jl")
 # Include Diagnostics submodule after AtmosphereModel is defined
 include("Diagnostics/Diagnostics.jl")
 using .Diagnostics
-
-# Re-export diagnostics
-export
-    DryPotentialTemperature,
-    VirtualPotentialTemperature,
-    EquivalentPotentialTemperature,
-    LiquidIcePotentialTemperature,
-    StaticEnergy
 
 end

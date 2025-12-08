@@ -191,6 +191,50 @@ const TC = ThermodynamicConstants
 @inline vapor_gas_constant(thermo::TC)   = thermo.molar_gas_constant / thermo.vapor.molar_mass
 @inline dry_air_gas_constant(thermo::TC) = thermo.molar_gas_constant / thermo.dry_air.molar_mass
 
+"""
+$(TYPEDSIGNATURES)
+
+Return the latent heat of vaporization (vapor → liquid) at temperature `T`.
+
+The latent heat varies linearly with temperature:
+
+```math
+ℒˡ(T) = ℒˡᵣ + (cᵖᵛ - cˡ)(T - Tᵣ)
+```
+
+where ``ℒˡᵣ`` is the reference latent heat at the energy reference temperature ``Tᵣ``,
+``cᵖᵛ`` is the heat capacity of vapor, and ``cˡ`` is the heat capacity of liquid water.
+"""
+@inline function liquid_latent_heat(T, thermo::TC)
+    ℒˡᵣ = thermo.liquid.reference_latent_heat
+    cᵖᵛ = thermo.vapor.heat_capacity
+    cˡ = thermo.liquid.heat_capacity
+    Tᵣ = thermo.energy_reference_temperature
+    return ℒˡᵣ + (cᵖᵛ - cˡ) * (T - Tᵣ)
+end
+
+"""
+$(TYPEDSIGNATURES)
+
+Return the latent heat of sublimation (vapor → ice) at temperature `T`.
+
+The latent heat varies linearly with temperature:
+
+```math
+ℒⁱ(T) = ℒⁱᵣ + (cᵖᵛ - cⁱ)(T - Tᵣ)
+```
+
+where ``ℒⁱᵣ`` is the reference latent heat at the energy reference temperature ``Tᵣ``,
+``cᵖᵛ`` is the heat capacity of vapor, and ``cⁱ`` is the heat capacity of ice.
+"""
+@inline function ice_latent_heat(T, thermo::TC)
+    ℒⁱᵣ = thermo.ice.reference_latent_heat
+    cᵖᵛ = thermo.vapor.heat_capacity
+    cⁱ = thermo.ice.heat_capacity
+    Tᵣ = thermo.energy_reference_temperature
+    return ℒⁱᵣ + (cᵖᵛ - cⁱ) * (T - Tᵣ)
+end
+
 #####
 ##### Mixtures of dry air with vapor, liquid, and ice
 #####

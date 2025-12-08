@@ -2,7 +2,8 @@ module Thermodynamics
 
 export ThermodynamicConstants, ReferenceState, IdealGas,
        CondensedPhase,
-       mixture_gas_constant, mixture_heat_capacity
+       mixture_gas_constant, mixture_heat_capacity,
+       liquid_latent_heat, ice_latent_heat
 
 using DocStringExtensions: TYPEDSIGNATURES, TYPEDEF
 

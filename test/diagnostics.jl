@@ -21,40 +21,40 @@ using GPUArraysCore: @allowscalar
     @test all(interior(θ_field) .< 310)
 
     # Test VirtualPotentialTemperature
-    θᵥ = VirtualPotentialTemperature(model)
-    @test θᵥ isa Oceananigans.AbstractOperations.KernelFunctionOperation
-    θᵥ_field = Field(θᵥ)
-    @test all(isfinite.(interior(θᵥ_field)))
+    θᵛ = VirtualPotentialTemperature(model)
+    @test θᵛ isa Oceananigans.AbstractOperations.KernelFunctionOperation
+    θᵛ_field = Field(θᵛ)
+    @test all(isfinite.(interior(θᵛ_field)))
     # Virtual potential temperature should be larger than dry when moisture is present
-    @test all(interior(θᵥ_field) .> interior(θ_field))
+    @test all(interior(θᵛ_field) .> interior(θ_field))
 
     # Test density flavor
-    θᵥ_density = VirtualPotentialTemperature(model, :density)
-    θᵥ_density_field = Field(θᵥ_density)
-    @test all(isfinite.(interior(θᵥ_density_field)))
-    @test all(interior(θᵥ_density_field) .> 0)
+    θᵛ_density = VirtualPotentialTemperature(model, :density)
+    θᵛ_density_field = Field(θᵛ_density)
+    @test all(isfinite.(interior(θᵛ_density_field)))
+    @test all(interior(θᵛ_density_field) .> 0)
 
     # Test EquivalentPotentialTemperature
-    θₑ = EquivalentPotentialTemperature(model)
-    @test θₑ isa Oceananigans.AbstractOperations.KernelFunctionOperation
-    θₑ_field = Field(θₑ)
-    @test all(isfinite.(interior(θₑ_field)))
+    θᵉ = EquivalentPotentialTemperature(model)
+    @test θᵉ isa Oceananigans.AbstractOperations.KernelFunctionOperation
+    θᵉ_field = Field(θᵉ)
+    @test all(isfinite.(interior(θᵉ_field)))
     # Equivalent potential temperature should be larger than dry when moisture is present
-    @test all(interior(θₑ_field) .> interior(θ_field))
+    @test all(interior(θᵉ_field) .> interior(θ_field))
 
     # Test density flavor
-    θₑ_density = EquivalentPotentialTemperature(model, :density)
-    θₑ_density_field = Field(θₑ_density)
-    @test all(isfinite.(interior(θₑ_density_field)))
-    @test all(interior(θₑ_density_field) .> 0)
+    θᵉ_density = EquivalentPotentialTemperature(model, :density)
+    θᵉ_density_field = Field(θᵉ_density)
+    @test all(isfinite.(interior(θᵉ_density_field)))
+    @test all(interior(θᵉ_density_field) .> 0)
 
     # Test LiquidIcePotentialTemperature
-    θₗᵢ = LiquidIcePotentialTemperature(model)
-    @test θₗᵢ isa Oceananigans.AbstractOperations.KernelFunctionOperation
-    θₗᵢ_field = Field(θₗᵢ)
-    @test all(isfinite.(interior(θₗᵢ_field)))
+    θˡⁱ = LiquidIcePotentialTemperature(model)
+    @test θˡⁱ isa Oceananigans.AbstractOperations.KernelFunctionOperation
+    θˡⁱ_field = Field(θˡⁱ)
+    @test all(isfinite.(interior(θˡⁱ_field)))
     # Liquid-ice potential temperature should match what we set (θ=300)
-    @test all(interior(θₗᵢ_field) .≈ 300)
+    @test all(interior(θˡⁱ_field) .≈ 300)
 end
 
 @testset "Static energy diagnostics [$(FT)]" for FT in (Float32, Float64)
