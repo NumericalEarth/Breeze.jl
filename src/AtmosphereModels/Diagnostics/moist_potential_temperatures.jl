@@ -422,10 +422,8 @@ function (d::MoistPotentialTemperatureKernelFunction)(i, j, k, grid)
         # See also equation 17 in Durran & Klemp 1982
         # TODO: many things here... 
         # - Equation 4.5.11 (and Emmanuel 1994's whole development) via moist entropy uses mixing ratios.
-        # - I have actually just guessed about these expressions, which we must form in terms
+        # - I have (mostly) guessed about these expressions, which we must form in terms
         #   of mass fractions.
-        # - Not to mention that "specific entropy" should be entropy per
-        #   unit total mass, rather than per unit dry air mass, as in Emmanuel.
         # - When this is verified, the math should be written in the documentation.
         θᵉ = T * (p₀ / pᵣ)^(Rᵈ / cᵖᵐ) * exp(ℒˡ * qᵛ / (cᵖᵐ * T)) * ℋ^γ
 
