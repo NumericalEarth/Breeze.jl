@@ -4,7 +4,7 @@ using DocumenterCitations
 using Literate
 
 using CairoMakie
-CairoMakie.activate!(type = "svg")
+CairoMakie.activate!(type = "png")
 set_theme!(Theme(linewidth = 3))
 
 DocMeta.setdocmeta!(Breeze, :DocTestSetup, :(using Breeze); recursive=true)
