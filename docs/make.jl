@@ -44,6 +44,11 @@ makedocs(
     modules = [Breeze],
     sitename = "Breeze",
     plugins = [bib],
+    format = Documenter.HTML(
+        ;
+        size_threshold_warn = 2 ^ 19, # 512 KiB
+        size_threshold = 2 ^ 20, # 1 MiB
+    ),
     pages=[
         "Home" => "index.md",
         "Examples" => example_pages,
