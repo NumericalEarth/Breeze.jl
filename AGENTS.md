@@ -116,8 +116,10 @@ Breeze interfaces with ClimaOcean for coupled atmosphere-ocean simulations.
   - When writing math expressions, use unicode equivalents as much as possible and leverage the automatic conversion
     to latex that Documenter will do under the hood. This will make the source code more readable.
     For example, use ``θᵉ`` instead of ``\theta^e``.
-  - Always add cross-references, eg using `@ref`. For example, `(KernelFunctionOperation)[@ref Oceananigans.AbstractOperations.KernelFunctionOperation]`
-    This should be done at least once in every documentation file, and oftentimes more than once for long files with multiple sections.
+  - Always add cross-references for Breeze functions, eg using `@ref`. For functions in Oceananigans,
+    provide explicit links to Oceananigans documentation.
+    Cross-references should be attached to every code object mentioned at least once in every documentation file,
+    and often more than once for long files with multiple sections.
 
 5. **Other tips and common misconceptions**
   - `update_state!` is called within `set!(model, ...)`. Scripts should never or rarely need to manually invoke `update_state!`
