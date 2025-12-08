@@ -18,8 +18,6 @@ updates:
     # Location of Julia projects
     directories:
       - "/"
-      - "/docs"
-      - "/test"
     schedule:
       interval: "weekly"
     ignore:
@@ -27,3 +25,13 @@ updates:
       - dependency-name: "Breeze"
     labels:
       - "dependencies 🖇️"
+    groups:
+      julia-major-updates:
+        update-types:
+          - "major"
+      julia-minor-updates:
+        update-types:
+          - "minor"
+      julia-patch-updates:
+        update-types:
+          - "patch"

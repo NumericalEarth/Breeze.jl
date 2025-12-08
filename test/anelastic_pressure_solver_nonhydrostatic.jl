@@ -6,13 +6,13 @@ using Oceananigans
     Nx = Ny = Nz = 32
     z = 0:(1/Nz):1
     grid = RectilinearGrid(default_arch, FT; size=(Nx, Ny, Nz), x=(0, 1), y=(0, 1), z)
-    thermodynamics = ThermodynamicConstants(FT)
-    reference_state = ReferenceState(grid, thermodynamics)
+    constants = ThermodynamicConstants(FT)
+    reference_state = ReferenceState(grid, constants)
 
     formulation = AnelasticFormulation(reference_state)
     parent(formulation.reference_state.density) .= 1
 
-    anelastic = AtmosphereModel(grid; thermodynamics, formulation)
+    anelastic = AtmosphereModel(grid; thermodynamic_constants=constants, formulation)
     boussinesq = NonhydrostaticModel(; grid)
 
     uᵢ = rand(size(grid)...)
@@ -41,5 +41,5 @@ using Oceananigans
 
     @test maximum(abs, δᵃ) < prod(size(grid)) * eps(FT)
     @test maximum(abs, δᵇ) < prod(size(grid)) * eps(FT)
-    @test anelastic.nonhydrostatic_pressure == boussinesq.pressures.pNHS
+    @test anelastic.pressure == boussinesq.pressures.pNHS
 end

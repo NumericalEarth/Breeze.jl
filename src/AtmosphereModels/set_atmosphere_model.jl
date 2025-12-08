@@ -4,9 +4,11 @@ using Oceananigans.BoundaryConditions: fill_halo_regions!
 using Oceananigans.TimeSteppers: compute_pressure_correction!, make_pressure_correction!, update_state!
 
 using ..Thermodynamics:
-    PotentialTemperatureState,
-    exner_function,
-    mixture_heat_capacity
+    LiquidIcePotentialTemperatureState,
+    MoistureMassFractions,
+    mixture_heat_capacity,
+    mixture_gas_constant,
+    temperature
 
 import Oceananigans.Fields: set!
 
@@ -24,6 +26,8 @@ function prioritize_names(names)
     return names
 end
 
+function set_thermodynamic_variable! end
+
 function set!(model::AtmosphereModel; enforce_mass_conservation=true, kw...)
     names = collect(keys(kw))
     prioritized = prioritize_names(names)
@@ -35,31 +39,29 @@ function set!(model::AtmosphereModel; enforce_mass_conservation=true, kw...)
         if name ∈ propertynames(model.momentum)
             ρu = getproperty(model.momentum, name)
             set!(ρu, value)
+
         elseif name ∈ propertynames(model.tracers)
             c = getproperty(model.tracers, name)
             set!(c, value)
+
         elseif name == :ρe
-            set!(model.energy_density, value)
+            set_thermodynamic_variable!(model, Val(:ρe), value)
+
+        elseif name == :ρθ
+            set_thermodynamic_variable!(model, Val(:ρθ), value)
+
         elseif name == :ρqᵗ
             set!(model.moisture_density, value)
-        end
+            ρqᵗ = model.moisture_density
+            ρᵣ = model.formulation.reference_state.density
+            set!(model.specific_moisture, ρqᵗ / ρᵣ)
 
-        # Setting diagnostic variables
-        if name == :θ
-            θ = model.temperature # use scratch
-            set!(θ, value)
-
-            grid = model.grid
-            arch = grid.architecture
-            thermo = model.thermodynamics
-            formulation = model.formulation
-            energy_density = model.energy_density
-            moisture_fraction = model.moisture_fraction
-            launch!(arch, grid, :xyz, _energy_from_potential_temperature!, energy_density, grid,
-                    θ, moisture_fraction, formulation, thermo)
+        elseif name ∈ prognostic_field_names(model.microphysics)
+            μ = getproperty(model.microphysical_fields, name)
+            set!(μ, value)
 
         elseif name == :qᵗ
-            qᵗ = model.moisture_fraction
+            qᵗ = model.specific_moisture
             set!(qᵗ, value)
             ρᵣ = model.formulation.reference_state.density
             ρqᵗ = model.moisture_density
@@ -73,6 +75,23 @@ function set!(model::AtmosphereModel; enforce_mass_conservation=true, kw...)
             ϕ = model.momentum[Symbol(:ρ, name)]
             value = ρᵣ * u
             set!(ϕ, value)    
+
+        elseif name == :e
+            set_thermodynamic_variable!(model, Val(:e), value)
+
+        elseif name == :θ
+            set_thermodynamic_variable!(model, Val(:θ), value)
+
+        else
+            prognostic_names = keys(prognostic_fields(model))
+            supported_diagnostic_variables = (:qᵗ, :u, :v, :w, :θ, :e)
+
+            msg = "Cannot set! $name in AtmosphereModel because $name is neither a
+                   prognostic variable nor a supported diagnostic variable!
+                   The prognostic variables are: $prognostic_names
+                   The supported diagnostic variables are: $supported_diagnostic_variables"
+
+            throw(ArgumentError(msg))
         end
     end
 
@@ -88,38 +107,5 @@ function set!(model::AtmosphereModel; enforce_mass_conservation=true, kw...)
         update_state!(model, compute_tendencies=false)
     end
 
-    fill_halo_regions!(model.energy_density)
-
     return nothing
-end
-
-@kernel function _energy_from_potential_temperature!(moist_static_energy, grid,
-                                                     potential_temperature,
-                                                     moisture_fraction,
-                                                     formulation,
-                                                     thermo)
-    i, j, k = @index(Global, NTuple)
-
-    @inbounds begin
-        ρᵣ = formulation.reference_state.density[i, j, k]
-        qᵗ = moisture_fraction[i, j, k]
-        pᵣ = formulation.reference_state.pressure[i, j, k]
-        θ = potential_temperature[i, j, k]
-    end
-
-    p₀ = formulation.reference_state.base_pressure
-    z = znode(i, j, k, grid, c, c, c)
-
-    # Assuming a state with no condensate?
-    q = MoistureMassFractions(qᵗ, zero(qᵗ), zero(qᵗ))
-
-    𝒰 = PotentialTemperatureState(θ, q, z, p₀, pᵣ, ρᵣ)
-    Π = exner_function(𝒰, thermo)
-    T = Π * θ
-
-    ℒ₀ = thermo.liquid.reference_latent_heat
-    g = thermo.gravitational_acceleration
-    cᵖᵐ = mixture_heat_capacity(q, thermo)
-
-    @inbounds moist_static_energy[i, j, k] = ρᵣ * (cᵖᵐ * T + g * z + qᵗ * ℒ₀)
 end

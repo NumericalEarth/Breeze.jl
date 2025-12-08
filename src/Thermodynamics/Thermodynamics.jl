@@ -3,6 +3,7 @@ module Thermodynamics
 export ThermodynamicConstants, ReferenceState, IdealGas,
        CondensedPhase,
        mixture_gas_constant, mixture_heat_capacity
+
 using DocStringExtensions: TYPEDSIGNATURES, TYPEDEF
 
 include("thermodynamics_constants.jl")

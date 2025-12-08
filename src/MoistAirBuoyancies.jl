@@ -7,9 +7,9 @@ export
     SaturationField
 
 using ..Thermodynamics:
-    PotentialTemperatureState,
+    LiquidIcePotentialTemperatureState,
     MoistureMassFractions,
-    total_specific_humidity,
+    total_specific_moisture,
     dry_air_gas_constant,
     vapor_gas_constant,
     with_moisture,
@@ -41,17 +41,17 @@ using ..Thermodynamics:
 
 struct MoistAirBuoyancy{RS, AT} <: AbstractBuoyancyFormulation{Nothing}
     reference_state :: RS
-    thermodynamics :: AT
+    thermodynamic_constants :: AT
 end
 
 Adapt.adapt_structure(to, mb::MoistAirBuoyancy) =
     MoistAirBuoyancy(adapt(to, mb.reference_state),
-                     adapt(to, mb.thermodynamics))
+                     adapt(to, mb.thermodynamic_constants))
 
 """
 $(TYPEDSIGNATURES)
 
-Return a MoistAirBuoyancy formulation that can be provided as input to an
+Return a `MoistAirBuoyancy` formulation that can be provided as input to an
 `Oceananigans.NonhydrostaticModel`.
 
 !!! note "Required tracers"
@@ -69,15 +69,15 @@ buoyancy = MoistAirBuoyancy(grid)
 # output
 MoistAirBuoyancy:
 ├── reference_state: ReferenceState{Float64}(p₀=101325.0, θ₀=288.0)
-└── thermodynamics: ThermodynamicConstants{Float64}
+└── thermodynamic_constants: ThermodynamicConstants{Float64}
 ```
 
-To build a model with MoistAirBuoyancy, we include potential temperature and total specific humidity
+To build a model with `MoistAirBuoyancy`, we include potential temperature and total specific humidity
 tracers `θ` and `qᵗ` to the model.
 
 ```jldoctest mab
 model = NonhydrostaticModel(; grid, buoyancy, tracers = (:θ, :qᵗ))
-                                     
+
 # output
 NonhydrostaticModel{CPU, RectilinearGrid}(time = 0 seconds, iteration = 0)
 ├── grid: 1×1×8 RectilinearGrid{Float64, Periodic, Periodic, Bounded} on CPU with 1×1×3 halo
@@ -92,13 +92,13 @@ NonhydrostaticModel{CPU, RectilinearGrid}(time = 0 seconds, iteration = 0)
 function MoistAirBuoyancy(grid;
                           base_pressure = 101325,
                           reference_potential_temperature = 288,
-                          thermodynamics = ThermodynamicConstants(eltype(grid)))
+                          thermodynamic_constants = ThermodynamicConstants(eltype(grid)))
 
-    reference_state = ReferenceState(grid, thermodynamics;
+    reference_state = ReferenceState(grid, thermodynamic_constants;
                                      base_pressure,
                                      potential_temperature = reference_potential_temperature)
-                          
-    return MoistAirBuoyancy(reference_state, thermodynamics)
+
+    return MoistAirBuoyancy(reference_state, thermodynamic_constants)
 end
 
 Base.summary(b::MoistAirBuoyancy) = "MoistAirBuoyancy"
@@ -106,13 +106,12 @@ Base.summary(b::MoistAirBuoyancy) = "MoistAirBuoyancy"
 function Base.show(io::IO, b::MoistAirBuoyancy)
     print(io, summary(b), ":\n",
         "├── reference_state: ", summary(b.reference_state), "\n",
-        "└── thermodynamics: ", summary(b.thermodynamics))
+        "└── thermodynamic_constants: ", summary(b.thermodynamic_constants))
 end
 
 required_tracers(::MoistAirBuoyancy) = (:θ, :qᵗ)
 
 const c = Center()
-
 
 @inline function buoyancy_perturbationᶜᶜᶜ(i, j, k, grid, mb::MoistAirBuoyancy, tracers)
     @inbounds begin
@@ -124,17 +123,17 @@ const c = Center()
 
     z = Oceananigans.Grids.znode(i, j, k, grid, c, c, c)
     p₀ = mb.reference_state.base_pressure
-    q = MoistureMassFractions(qᵗ, zero(qᵗ), zero(qᵗ))
-    𝒰 = PotentialTemperatureState(θ, q, z, p₀, pᵣ, ρᵣ)
+    q = MoistureMassFractions(qᵗ)
+    𝒰 = LiquidIcePotentialTemperatureState(θ, q, p₀, pᵣ)
 
     # Perform saturation adjustment
-    T = temperature(𝒰, mb.thermodynamics)
+    T = compute_boussinesq_adjustment_temperature(𝒰, mb.thermodynamic_constants)
 
     # Compute specific volume
-    Rᵐ = mixture_gas_constant(q, mb.thermodynamics)
+    Rᵐ = mixture_gas_constant(q, mb.thermodynamic_constants)
     α = Rᵐ * T / pᵣ
 
-    g = mb.thermodynamics.gravitational_acceleration
+    g = mb.thermodynamic_constants.gravitational_acceleration
 
     # b = g * (α - αᵣ) / αᵣ
     return g * (ρᵣ * α - 1)
@@ -158,7 +157,7 @@ $(TYPEDSIGNATURES)
 Return the temperature ``T`` corresponding to thermodynamic equilibrium between the
 specific humidity and liquid mass fractions of the input thermodynamic state `𝒰₀`,
 wherein the specific humidity is equal to or less than the saturation specific humidity
-at the given conditions and affiliated with theromdynamic constants `thermo`.
+at the given conditions and affiliated with theromdynamic constants `constants`.
 
 The saturation equilibrium temperature satisfies the nonlinear relation
 
@@ -169,29 +168,29 @@ The saturation equilibrium temperature satisfies the nonlinear relation
 with ``ℒˡᵣ`` the latent heat at the reference temperature ``Tᵣ``, ``cᵖᵐ`` the mixture
 specific heat, ``Π`` the Exner function, ``qˡ = \\max(0, qᵗ - qᵛ⁺)``
 the condensate specific humidity, ``qᵗ`` is the
-total specific humidity, ``qᵛ⁺`` is the saturation specific humidity.
+total specific humidity, and ``qᵛ⁺`` is the saturation specific humidity.
 
-The saturation equilibrium temperature is thus obtained by solving ``r(T)``, where
+The saturation equilibrium temperature is thus obtained by solving ``r(T) = 0``, where
 ```math
 r(T) ≡ T - θ Π - ℒˡᵣ qˡ / cᵖᵐ .
 ```
 
 Solution of ``r(T) = 0`` is found via the [secant method](https://en.wikipedia.org/wiki/Secant_method).
 """
-@inline function temperature(𝒰₀::PotentialTemperatureState{FT}, thermo) where FT
+@inline function compute_boussinesq_adjustment_temperature(𝒰₀::LiquidIcePotentialTemperatureState{FT}, constants) where FT
     θ = 𝒰₀.potential_temperature
     θ == 0 && return zero(FT)
 
     # Generate guess for unsaturated conditions; if dry, return T₁
-    qᵗ = total_specific_humidity(𝒰₀)
-    q₁ = MoistureMassFractions(qᵗ, zero(qᵗ), zero(qᵗ))
+    qᵗ = total_specific_moisture(𝒰₀)
+    q₁ = MoistureMassFractions(qᵗ)
     𝒰₁ = with_moisture(𝒰₀, q₁)
-    Π₁ = exner_function(𝒰₀, thermo)
+    Π₁ = exner_function(𝒰₀, constants)
     T₁ = Π₁ * θ
 
     pᵣ = 𝒰₀.reference_pressure
-    ρ₁ = density(pᵣ, T₁, q₁, thermo)
-    qᵛ⁺₁ = saturation_specific_humidity(T₁, ρ₁, thermo, thermo.liquid)
+    ρ₁ = density(pᵣ, T₁, q₁, constants)
+    qᵛ⁺₁ = saturation_specific_humidity(T₁, ρ₁, constants, constants.liquid)
     qᵗ <= qᵛ⁺₁ && return T₁
 
     # If we made it this far, the state is saturated.
@@ -199,32 +198,25 @@ Solution of ``r(T) = 0`` is found via the [secant method](https://en.wikipedia.o
     # has to be modified to consistently include the liquid mass fraction.
     # Subsequent computations will assume that the specific humidity
     # is given by the saturation specific humidity, eg ``qᵛ = qᵛ⁺``.
-    qᵛ⁺₁ = adjustment_saturation_specific_humidity(T₁, 𝒰₁, thermo)
+    qᵛ⁺₁ = equilibrium_saturation_specific_humidity(T₁, 𝒰₁, constants)
     qˡ₁ = qᵗ - qᵛ⁺₁
-    q₁ = MoistureMassFractions(qᵛ⁺₁, qˡ₁, zero(qˡ₁))
+    q₁ = MoistureMassFractions(qᵛ⁺₁, qˡ₁)
     𝒰₁ = with_moisture(𝒰₀, q₁)
 
-    # We generate a second guess simply by adding 1 K to T₁...
-
-    # NOTE: We could also generate a second guess to start a secant iteration
+    # We generate a second guess to start a secant iteration
     # by applying the potential temperature assuming a liquid fraction
     # associated with T₁. This should represent an _overestimate_,
     # since ``qᵛ⁺₁(T₁)`` underestimates the saturation specific humidity,
     # and therefore qˡ₁ is overestimated. This is similar to an approach
     # used in Pressel et al 2015. However, it doesn't work for large liquid fractions.
-    T₂ = T₁ + 1 
-
-    #=
-    ℒˡᵣ = thermo.liquid.reference_latent_heat
-    cᵖᵐ = mixture_heat_capacity(q₁, thermo)
+    ℒˡᵣ = constants.liquid.reference_latent_heat
+    cᵖᵐ = mixture_heat_capacity(q₁, constants)
     T₂ = T₁ + ℒˡᵣ * qˡ₁ / cᵖᵐ
-    =#
-
-    𝒰₂ = adjust_state(𝒰₁, T₂, thermo)
+    𝒰₂ = adjust_state(𝒰₁, T₂, constants)
 
     # Initialize saturation adjustment
-    r₁ = saturation_adjustment_residual(T₁, 𝒰₁, thermo)
-    r₂ = saturation_adjustment_residual(T₂, 𝒰₂, thermo)
+    r₁ = saturation_adjustment_residual(T₁, 𝒰₁, constants)
+    r₂ = saturation_adjustment_residual(T₂, 𝒰₂, constants)
     δ = convert(FT, 1e-3)
     iter = 0
 
@@ -238,8 +230,8 @@ Solution of ``r(T) = 0`` is found via the [secant method](https://en.wikipedia.o
         𝒰₁ = 𝒰₂
 
         T₂ -= r₂ * ΔTΔr
-        𝒰₂ = adjust_state(𝒰₂, T₂, thermo)
-        r₂ = saturation_adjustment_residual(T₂, 𝒰₂, thermo)
+        𝒰₂ = adjust_state(𝒰₂, T₂, constants)
+        r₂ = saturation_adjustment_residual(T₂, 𝒰₂, constants)
 
         iter += 1
     end
@@ -249,38 +241,39 @@ end
 
 # This estimate assumes that the specific humidity is itself the saturation
 # specific humidity, eg ``qᵛ = qᵛ⁺``. Knowledge of the specific humidity
-# is needed to compute the mixture gas constant, and thus density, 
+# is needed to compute the mixture gas constant, and thus density,
 # which in turn is needed to compute the _saturation_ specific humidity.
 # This consideration culminates in a new expression for saturation specific humidity
 # used below, and also written in Pressel et al 2015, equation 37.
 # (There is an error in the description below it, but the equation 37 is correct.)
-@inline function adjustment_saturation_specific_humidity(T, 𝒰, thermo)
-    pᵛ⁺ = saturation_vapor_pressure(T, thermo, thermo.liquid)
+@inline function equilibrium_saturation_specific_humidity(T, 𝒰, constants)
+    pᵛ⁺ = saturation_vapor_pressure(T, constants, constants.liquid)
     pᵣ = 𝒰.reference_pressure
-    qᵗ = total_specific_humidity(𝒰)
-    Rᵈ = dry_air_gas_constant(thermo)
-    Rᵛ = vapor_gas_constant(thermo)
+    qᵗ = total_specific_moisture(𝒰)
+    Rᵈ = dry_air_gas_constant(constants)
+    Rᵛ = vapor_gas_constant(constants)
     ϵᵈᵛ = Rᵈ / Rᵛ
     return ϵᵈᵛ * (1 - qᵗ) * pᵛ⁺ / (pᵣ - pᵛ⁺)
 end
 
-@inline function adjust_state(𝒰₀, T, thermo)
-    qᵛ⁺ = adjustment_saturation_specific_humidity(T, 𝒰₀, thermo)
-    qᵗ = total_specific_humidity(𝒰₀)
+@inline function adjust_state(𝒰₀, T, constants)
+    qᵛ⁺ = equilibrium_saturation_specific_humidity(T, 𝒰₀, constants)
+    qᵗ = total_specific_moisture(𝒰₀)
     qˡ = max(0, qᵗ - qᵛ⁺)
-    q₁ = MoistureMassFractions(qᵛ⁺, qˡ, zero(qˡ))
+    qᵛ = qᵗ - qˡ
+    q₁ = MoistureMassFractions(qᵛ, qˡ)
     return with_moisture(𝒰₀, q₁)
 end
 
-@inline function saturation_adjustment_residual(T, 𝒰, thermo)
-    Π = exner_function(𝒰, thermo)
-    q = 𝒰.moisture_fractions
+@inline function saturation_adjustment_residual(T, 𝒰, constants)
+    Π = exner_function(𝒰, constants)
+    q = 𝒰.moisture_mass_fractions
     θ = 𝒰.potential_temperature
-    ℒˡᵣ = thermo.liquid.reference_latent_heat
-    cᵖᵐ = mixture_heat_capacity(q, thermo)
+    ℒˡᵣ = constants.liquid.reference_latent_heat
+    cᵖᵐ = mixture_heat_capacity(q, constants)
     qˡ = q.liquid
     θ = 𝒰.potential_temperature
-    return T - Π * θ - ℒˡᵣ * qˡ / cᵖᵐ 
+    return T - Π * θ - ℒˡᵣ * qˡ / cᵖᵐ
 end
 
 #####
@@ -299,12 +292,14 @@ const c = Center()
     end
     z = Oceananigans.Grids.znode(i, j, k, grid, c, c, c)
     p₀ = mb.reference_state.base_pressure
-    q = MoistureMassFractions(qᵗᵢ, zero(qᵗᵢ), zero(qᵗᵢ))
-    𝒰 = PotentialTemperatureState(θᵢ, q, z, p₀, pᵣ, ρᵣ)
-    return temperature(𝒰, mb.thermodynamics)
+    q = MoistureMassFractions(qᵗᵢ)
+    𝒰 = LiquidIcePotentialTemperatureState(θᵢ, q, p₀, pᵣ)
+    return compute_boussinesq_adjustment_temperature(𝒰, mb.thermodynamic_constants)
 end
 
 struct TemperatureKernelFunction end
+const TemperatureOperation = KernelFunctionOperation{Center, Center, Center, <:Any, <:Any, <:TemperatureKernelFunction}
+const TemperatureField = Field{Center, Center, Center, <:TemperatureOperation}
 
 @inline (::TemperatureKernelFunction)(i, j, k, grid, buoyancy, θ, qᵗ) =
     temperature(i, j, k, grid, buoyancy, θ, qᵗ)
@@ -326,9 +321,9 @@ end
         qᵗᵢ = qᵗ[i, j, k]
         pᵣ = mb.reference_state.pressure[i, j, k]
     end
-    q = MoistureMassFractions(qᵗᵢ, zero(qᵗᵢ), zero(qᵗᵢ))
-    ρ = density(pᵣ, Tᵢ, q, mb.thermodynamics)
-    return saturation_specific_humidity(Tᵢ, ρ, mb.thermodynamics, phase)
+    q = MoistureMassFractions(qᵗᵢ)
+    ρ = density(pᵣ, Tᵢ, q, mb.thermodynamic_constants)
+    return saturation_specific_humidity(Tᵢ, ρ, mb.thermodynamic_constants, phase)
 end
 
 struct PhaseTransitionConstantsKernel{T, P}
@@ -346,7 +341,7 @@ Adapt.adapt_structure(to, sk::PhaseTransitionConstantsKernel) =
 end
 
 function SaturationField(model, T = TemperatureField(model);
-                         condensed_phase = model.buoyancy.formulation.thermodynamics.liquid)
+                         condensed_phase = model.buoyancy.formulation.thermodynamic_constants.liquid)
     func = PhaseTransitionConstantsKernel(condensed_phase, T)
     grid = model.grid
     buoyancy = model.buoyancy.formulation
@@ -374,13 +369,13 @@ Adapt.adapt_structure(to, ck::CondensateKernel) = CondensateKernel(adapt(to, ck.
     # First assume non-saturation.
     z = Oceananigans.Grids.znode(i, j, k, grid, c, c, c)
     p₀ = mb.reference_state.base_pressure
-    q = MoistureMassFractions(qᵗᵢ, zero(qᵗᵢ), zero(qᵗᵢ))
-    𝒰 = PotentialTemperatureState(Tᵢ, q, z, p₀, pᵣ, ρᵣ)
-    Π = exner_function(𝒰, mb.thermodynamics)
+    q = MoistureMassFractions(qᵗᵢ)
+    𝒰 = LiquidIcePotentialTemperatureState(Tᵢ, q, p₀, pᵣ)
+    Π = exner_function(𝒰, mb.thermodynamic_constants)
     Tᵢ <= Π * θᵢ + 10 * eps(Tᵢ) && return zero(qᵗᵢ)
 
     # Next assume a saturation value
-    qᵛ⁺ = adjustment_saturation_specific_humidity(Tᵢ, 𝒰, mb.thermodynamics)
+    qᵛ⁺ = equilibrium_saturation_specific_humidity(Tᵢ, 𝒰, mb.thermodynamic_constants)
     return max(0, qᵗᵢ - qᵛ⁺)
 end
 
