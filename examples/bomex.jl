@@ -19,7 +19,6 @@ using Oceananigans.Units
 using AtmosphericProfilesLibrary
 using Printf
 using CairoMakie
-using DisplayAs #hide
 
 using Oceananigans.Operators: ∂zᶜᶜᶠ, ℑzᵃᵃᶜ
 
@@ -407,7 +406,6 @@ fig[0, :] = Label(fig, "BOMEX: Mean profile evolution (Siebesma et al., 2003)", 
 
 save("bomex_profiles.png", fig)
 fig
-DisplayAs.SVG(fig) #hide
 
 # The simulation shows the development of a cloudy boundary layer with:
 # - Warming of the subcloud layer from surface fluxes

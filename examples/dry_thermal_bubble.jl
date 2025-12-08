@@ -8,7 +8,6 @@ using Oceananigans.Units
 using Statistics
 using Printf
 using CairoMakie
-using DisplayAs #hide
 
 # ## A simple model on a RectilinearGrid
 
@@ -58,7 +57,6 @@ ax = Axis(fig[1, 1], aspect=2, xlabel="x (m)", ylabel="z (m)", title="Initial en
 hm = heatmap!(ax, ρe′)
 Colorbar(fig[1, 2], hm, label = "ρe′ (J/kg)")
 fig
-DisplayAs.SVG(fig) #hide
 
 # ## Simulation rising
 

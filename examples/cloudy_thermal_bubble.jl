@@ -10,7 +10,6 @@ using Oceananigans.Units
 using Statistics
 using Printf
 using CairoMakie
-using DisplayAs #hide
 
 # ## Dry thermal bubble
 #
@@ -61,7 +60,6 @@ ax = Axis(fig[1, 1], aspect=2, xlabel="x (m)", ylabel="z (m)", title="Initial po
 hm = heatmap!(ax, θ)
 Colorbar(fig[1, 2], hm, label = "ρe′ (J/kg)")
 fig
-DisplayAs.SVG(fig) #hide
 
 # ## Simulation rising
 
@@ -102,7 +100,6 @@ Colorbar(fig[1, 2], hmθ, label = "θ (K) at t = $(prettytime(simulation.model.c
 Colorbar(fig[2, 2], hmw, label = "w (m/s) at t = $(prettytime(simulation.model.clock.time))")
 
 fig
-DisplayAs.SVG(fig) #hide
 
 # Just running to t=1000 is pretty boring, Let's run the simulation for a longer time, just for fun!
 
