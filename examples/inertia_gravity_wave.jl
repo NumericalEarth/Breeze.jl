@@ -33,7 +33,7 @@ grid = RectilinearGrid(CPU(),
 # Atmosphere model setup
 constants = ThermodynamicConstants()
 reference_state = ReferenceState(grid, constants, base_pressure=p₀, potential_temperature=θ₀)
-formulation = AnelasticFormulation(reference_state)
+formulation = AnelasticFormulation(reference_state, thermodynamics=:LiquidIcePotentialTemperature)
 
 model = AtmosphereModel(grid; formulation, advection = Centered(order=2))
 
@@ -58,19 +58,19 @@ end
 
 set!(model, θ = θᵢ, u = U)
 
-Δt = 6 # seconds
+Δt = 12 # seconds
 stop_time = 3000
 simulation = Simulation(model; Δt, stop_time)
 
 
 function progress(sim)
-    ρe = sim.model.formulation.thermodynamics.energy_density
+    ρθ = sim.model.formulation.thermodynamics.potential_temperature_density
     u, v, w = sim.model.velocities
 
-    ρemean = mean(ρe)
+    ρθmean = mean(ρθ)
 
-    msg = @sprintf("Iter: %d, t: %s, Δt: %s, mean(ρe): %.6e J/kg, max|u|: %.5f m/s, max w: %.5f m/s, min w: %.5f m/s",
-                   iteration(sim), prettytime(sim), prettytime(sim.Δt), ρemean, maximum(abs, u), maximum(w), minimum(w))
+    msg = @sprintf("Iter: %d, t: %s, Δt: %s, mean(ρθ): %.6e K kg/m³, max|u|: %.5f m/s, max w: %.5f m/s, min w: %.5f m/s",
+                   iteration(sim), prettytime(sim), prettytime(sim.Δt), ρθmean, maximum(abs, u), maximum(w), minimum(w))
 
     @info msg
     return nothing
@@ -79,7 +79,7 @@ end
 add_callback!(simulation, progress, TimeInterval(1minute))
 
 # Output setup
-θ = Breeze.AtmosphereModels.PotentialTemperatureField(model)
+θ = PotentialTemperature(model)
 
 outputs = merge(model.velocities, (; θ))
 
@@ -100,7 +100,8 @@ gb = fig[1, 1]
 
 xs = LinRange(0, Lx, Nx)
 zs = LinRange(0, Lz, Nz+1)
-pdata = Array(interior(θ, :,1,:)) - Array(interior(θᵢ₀, :,1,:))
+θ_field = Field(θ)
+pdata = Array(interior(θ_field, :,1,:)) - Array(interior(θᵢ₀, :,1,:))
 ax, hm = heatmap(gb[1,1], xs, zs, pdata, colormap = :balance, colorrange = (-0.01, 0.01))
 ax.xlabel = "x [m]"
 ax.ylabel = "z [m]"
