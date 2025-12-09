@@ -15,6 +15,23 @@ bib = CitationBibliography(bib_filepath, style=:authoryear)
 examples_src_dir = joinpath(@__DIR__, "..", "examples")
 literated_dir = joinpath(@__DIR__, "src", "literated")
 mkpath(literated_dir)
+# We'll append the following postable to the literate examples, to include
+# information about the computing environment used to run them.
+example_postamble = """
+
+# ---
+# This example was executed with the following version of Julia:
+
+using InteractiveUtils: versioninfo
+versioninfo()
+
+# These were the top-level packages installed in the environment:
+
+import Pkg
+Pkg.status()
+
+# If you use the same version of Julia, you can reproduce the computing environment by using the attached [`Project.toml`](../Project.toml) and [`Manifest.toml`](../Manifest.toml) files.
+"""
 
 example_scripts = [
     "dry_thermal_bubble.jl",
@@ -28,6 +45,7 @@ for script_file in example_scripts
     script_path = joinpath(examples_src_dir, script_file)
     Literate.markdown(script_path, literated_dir;
                       flavor = Literate.DocumenterFlavor(),
+                      preprocess = content -> content * example_postamble,
                       execute = true)
 end
 
@@ -39,44 +57,54 @@ example_pages = Any[
     # "Prescribed SST" => "literated/prescribed_sst.md",
 ]
 
-makedocs(
-    ;
-    modules = [Breeze],
-    sitename = "Breeze",
-    plugins = [bib],
-    format = Documenter.HTML(
+@info "Copying environment to source directory..."
+cp(Base.active_project(), joinpath(@__DIR__, "src", "Project.toml"))
+cp(joinpath(dirname(Base.active_project()), "Manifest.toml"), joinpath(@__DIR__, "src", "Manifest.toml"))
+
+try
+    makedocs(
         ;
-        size_threshold_warn = 2 ^ 19, # 512 KiB
-        size_threshold = 2 ^ 20, # 1 MiB
-    ),
-    pages=[
-        "Home" => "index.md",
-        "Examples" => example_pages,
-        "Thermodynamics" => "thermodynamics.md",
-        "AtmosphereModel" => Any[
-            "Diagnostics" => "atmosphere_model/diagnostics.md",
-        ],
-        "Microphysics" => Any[
-            "Overview" => "microphysics/microphysics_overview.md",
-            "Warm-phase saturation adjustment" => "microphysics/warm_phase_saturation_adjustment.md",
-            "Mixed-phase saturation adjustment" => "microphysics/mixed_phase_saturation_adjustment.md",
-        ],
-        "Developers" => Any[
-            "Microphysics" => Any[
-                "Microphysics Interface" => "developer/microphysics_interface.md",
+        modules = [Breeze],
+        sitename = "Breeze",
+        plugins = [bib],
+        format = Documenter.HTML(
+            ;
+            size_threshold_warn = 2 ^ 19, # 512 KiB
+            size_threshold = 2 ^ 20, # 1 MiB
+        ),
+        pages=[
+            "Home" => "index.md",
+            "Examples" => example_pages,
+            "Thermodynamics" => "thermodynamics.md",
+            "AtmosphereModel" => Any[
+                "Diagnostics" => "atmosphere_model/diagnostics.md",
             ],
+            "Microphysics" => Any[
+                "Overview" => "microphysics/microphysics_overview.md",
+                "Warm-phase saturation adjustment" => "microphysics/warm_phase_saturation_adjustment.md",
+                "Mixed-phase saturation adjustment" => "microphysics/mixed_phase_saturation_adjustment.md",
+            ],
+            "Developers" => Any[
+                "Microphysics" => Any[
+                    "Microphysics Interface" => "developer/microphysics_interface.md",
+                ],
+            ],
+            "Dycore equations and algorithms" => "dycore_equations_algorithms.md",
+            "Appendix" => Any[
+                "Notation" => "appendix/notation.md",
+            ],
+            "References" => "references.md",
+            "API" => "api.md",
+            "Contributors guide" => "contributing.md",
         ],
-        "Dycore equations and algorithms" => "dycore_equations_algorithms.md",
-        "Appendix" => Any[
-            "Notation" => "appendix/notation.md",
-        ],
-        "References" => "references.md",
-        "API" => "api.md",
-        "Contributors guide" => "contributing.md",
-    ],
-    linkcheck = true,
-    draft = false,
-)
+        linkcheck = true,
+        draft = false,
+    )
+finally
+    @info "Cleaning up environment files from source directory..."
+    rm(joinpath(@__DIR__, "src", "Project.toml"))
+    rm(joinpath(@__DIR__, "src", "Manifest.toml"))
+end
 
 """
     recursive_find(directory, pattern)
