@@ -10,7 +10,7 @@ using Test
 
     coriolis = FPlane(f=FT(1e-4))
 
-    geostrophic = geostrophic_forcings(uᵍ, vᵍ)
+    geostrophic = geostrophic_forcings(uᵍ, vᵍ; f=coriolis.f)
 
     model = AtmosphereModel(grid; coriolis, forcing=geostrophic)
 
@@ -66,7 +66,7 @@ end
 
     coriolis = FPlane(f=FT(1e-4))
 
-    geostrophic = geostrophic_forcings(uᵍ, vᵍ)
+    geostrophic = geostrophic_forcings(uᵍ, vᵍ; f=coriolis.f)
     subsidence = SubsidenceForcing(wˢ)
 
     # Combine forcings: (subsidence, geostrophic) for momentum

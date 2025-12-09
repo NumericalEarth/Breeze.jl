@@ -49,6 +49,14 @@ Breeze interfaces with ClimaOcean for coupled atmosphere-ocean simulations.
    - Sometimes "julia version compatibility" issues are resolved by deleting the Manifest.toml,
      and then re-populating it with `using Pkg; Pkg.instantiate()`.
 
+7. **Software design**
+   - Try _very_ hard to minimize code duplication. Allow some code duplication for very small
+     and simple functions, for example one-liners like `instantiate(X) = X()` that can be immediately
+     understood. But for complicated infrastructure, re-use as much as possible.
+   - Within Breeze, you will inevitably run into situations that would be better implemented by
+     extending Oceananigans, rather than writing Breeze source code. When this happens, make a
+     detailed and descriptive TODO note about what should be moved to Oceananigans.
+
 ### Oceananigans ecosystem best practices
 
 1. **General coding style**

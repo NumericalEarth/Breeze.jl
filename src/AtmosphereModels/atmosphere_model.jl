@@ -1,10 +1,4 @@
 using ..Thermodynamics: Thermodynamics, ThermodynamicConstants, ReferenceState
-using ..Forcings:
-    UGeostrophicForcing,
-    VGeostrophicForcing,
-    SubsidenceForcing,
-    materialize_geostrophic_forcing,
-    materialize_subsidence_forcing
 
 using Oceananigans: AbstractModel, Center, CenterField, Clock, Field
 using Oceananigans: Centered, XFaceField, YFaceField, ZFaceField
@@ -310,12 +304,16 @@ function atmosphere_model_forcing(user_forcings::NamedTuple, prognostic_fields, 
 
     model_field_names = keys(model_fields)
 
-    # Build context for special forcing types
-    forcing_context = (; grid, coriolis, reference_density, velocities, formulation, specific_moisture)
+    # Build specific fields for subsidence forcing (maps specific field names like :u, :θ to fields)
+    formulation_fields = fields(formulation)
+    specific_fields = merge(velocities, formulation_fields, (; qᵗ=specific_moisture))
+
+    # Build context for special forcing types (used by extended materialize_forcing in Forcings module)
+    forcing_context = (; coriolis, reference_density, specific_fields)
 
     materialized = Tuple(
         name in keys(user_forcings) ?
-            materialize_atmosphere_forcing(user_forcings[name], field, name, model_field_names, forcing_context) :
+            materialize_forcing(user_forcings[name], field, name, model_field_names, forcing_context) :
             Returns(zero(eltype(field)))
             for (name, field) in pairs(forcing_fields)
     )
@@ -323,74 +321,6 @@ function atmosphere_model_forcing(user_forcings::NamedTuple, prognostic_fields, 
     forcings = NamedTuple{forcing_names}(materialized)
 
     return forcings
-end
-
-#####
-##### Materialize forcings for AtmosphereModel
-#####
-
-# Fallback to Oceananigans' materialize_forcing for standard forcing types
-function materialize_atmosphere_forcing(forcing, field, name, model_field_names, context)
-    return materialize_forcing(forcing, field, name, model_field_names)
-end
-
-# Wrapper for summing multiple forcings on the same field
-struct SumOfForcings{T}
-    forcings :: T
-end
-
-@inline function (sf::SumOfForcings{<:Tuple{Any, Any}})(i, j, k, grid, clock, model_fields)
-    f1, f2 = sf.forcings
-    return f1(i, j, k, grid, clock, model_fields) + f2(i, j, k, grid, clock, model_fields)
-end
-
-@inline function (sf::SumOfForcings{<:Tuple{Any, Any, Any}})(i, j, k, grid, clock, model_fields)
-    f1, f2, f3 = sf.forcings
-    return (f1(i, j, k, grid, clock, model_fields) +
-            f2(i, j, k, grid, clock, model_fields) +
-            f3(i, j, k, grid, clock, model_fields))
-end
-
-# Handle tuples of forcings (multiple forcings on the same field)
-function materialize_atmosphere_forcing(forcings::Tuple, field, name, model_field_names, context)
-    materialized = Tuple(materialize_atmosphere_forcing(f, field, name, model_field_names, context) for f in forcings)
-    return SumOfForcings(materialized)
-end
-
-# Geostrophic forcing for u-momentum
-function materialize_atmosphere_forcing(forcing::UGeostrophicForcing, field, name, model_field_names, context)
-    return materialize_geostrophic_forcing(forcing, context.grid, context.coriolis, context.reference_density)
-end
-
-# Geostrophic forcing for v-momentum
-function materialize_atmosphere_forcing(forcing::VGeostrophicForcing, field, name, model_field_names, context)
-    return materialize_geostrophic_forcing(forcing, context.grid, context.coriolis, context.reference_density)
-end
-
-# Subsidence forcing - needs to know which field to average based on name
-function materialize_atmosphere_forcing(forcing::SubsidenceForcing, field, name, model_field_names, context)
-    averaged_field = get_subsidence_averaged_field(name, context)
-    return materialize_subsidence_forcing(forcing, context.grid, context.reference_density, averaged_field)
-end
-
-# Determine which field to average for subsidence based on the forcing target
-function get_subsidence_averaged_field(name::Symbol, context)
-    if name == :ρu
-        return context.velocities.u
-    elseif name == :ρv
-        return context.velocities.v
-    elseif name == :ρθ
-        # LiquidIcePotentialTemperatureThermodynamics
-        return context.formulation.thermodynamics.potential_temperature
-    elseif name == :ρe
-        # StaticEnergyThermodynamics
-        return context.formulation.thermodynamics.specific_energy
-    elseif name == :ρqᵗ
-        return context.specific_moisture
-    else
-        error("SubsidenceForcing is not supported for field $name. " *
-              "Supported fields are: ρu, ρv, ρθ, ρe, ρqᵗ.")
-    end
 end
 
 function fields(model::AtmosphereModel)
