@@ -19,6 +19,7 @@ using Oceananigans.Units
 using AtmosphericProfilesLibrary
 using Printf
 using CairoMakie
+using Random
 
 # ## Domain and grid
 #
