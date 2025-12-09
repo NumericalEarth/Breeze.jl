@@ -20,8 +20,9 @@
 using Breeze
 using Oceananigans
 using Oceananigans.Units
-using Oceananigans: xnode
+using Oceananigans.Models: BoundaryConditionOperation
 using Printf
+using CairoMakie
 
 # ## Grid setup
 #
@@ -81,25 +82,36 @@ scalar_advection = WENO(order=5)
 #
 # The bulk transfer coefficients are:
 # - Cᴰ (drag coefficient): relates surface momentum flux to wind speed
-# - Cᴴ (heat transfer coefficient): relates sensible heat flux to temperature difference
+# - Cᵀ (sensible heat transfer coefficient): relates sensible heat flux to temperature difference
 # - Cᵛ (vapor transfer coefficient): relates latent heat flux to humidity difference
 #
 # The sea surface temperature varies as a step function across the domain center,
 # creating a sharp SST front. This idealized pattern drives a strong circulation
 # with rising motion over the warm side and sinking motion over the cold side.
 
-@inline sea_surface_temperature(x, p) = p.T₀ + p.ΔT * sign(cos(2π * x / p.Lx))
+ΔT = 2
+T₀_func(x) = θ₀ + ΔT * sign(cos(2π * x / grid.Lx))
+
+T₀ = Field{Center, Center, Nothing}(grid)
+set!(T₀, T₀_func)
+
+using Breeze.Thermodynamics:
+    saturation_specific_humidity,
+    base_density,
+    PlanarLiquidSurface
+
+qᵛ₀ = Field{Center, Center, Nothing}(grid)
+ρ₀ = base_density(p₀, θ₀, constants)
+surface = PlanarLiquidSurface()
+qᵛ₀_func(x) = saturation_specific_humidity(T₀(x), ρ₀, constants, surface)
+set!(qᵛ₀, qᵛ₀_func)
 
 parameters = (;
-    constants,
+    T₀, qᵛ₀, ρ₀,
     drag_coefficient = 1e-3,
-    heat_transfer_coefficient = 1e-3,
+    sensible_heat_transfer_coefficient = 1e-3,
     vapor_transfer_coefficient = 1e-3,
     gust_speed = 1e-2,  # Minimum wind speed (m/s)
-    T₀ = θ₀,   # Background SST (K)
-    ΔT = 2,   # Maximum SST anomaly (K)
-    ρ₀ = Breeze.Thermodynamics.base_density(p₀, θ₀, constants),
-    Lx = grid.Lx
 )
 
 # ## Boundary condition functions
@@ -110,13 +122,10 @@ parameters = (;
 #
 # The flux formulas follow the standard bulk aerodynamic approach:
 # ```math
-# F_\phi = -\rho_0 C_\phi U (\phi_{air} - \phi_{surface})
+# Jψ = - ρ₀ Cψ U (ϕₕ - ϕ₀)
 # ```
 # where φ represents potential temperature or specific humidity, Cᵩ is the
 # corresponding transfer coefficient, and U is the near-surface wind speed.
-
-@inline surface_saturation_specific_humidity(T, ρ, constants) =
-    Breeze.Thermodynamics.saturation_specific_humidity(T, ρ, constants, Breeze.Thermodynamics.PlanarLiquidSurface())
 
 # We need interpolation operators to compute wind speed at the appropriate
 # grid locations for each flux calculation.
@@ -171,17 +180,14 @@ end
 # since the Exner function is close to unity at surface pressure.
 
 @inline function potential_temperature_flux(i, j, grid, clock, fields, parameters)
+    Δθ = @inbounds fields.θ[i, j, 1] - parameters.T₀[i, j, 1]
+
+    Cᵀ = parameters.sensible_heat_transfer_coefficient
     Uᵍ = parameters.gust_speed
     Ũ = sqrt(s²ᶜᶜᶜ(i, j, grid, fields) + Uᵍ^2)
 
-    x = xnode(i, j, 1, grid, Center(), Center(), Center())
-    θˢ = sea_surface_temperature(x, parameters)
-
     ρ₀ = parameters.ρ₀
-    Cᴴ = parameters.heat_transfer_coefficient
-    Δθ = @inbounds fields.θ[i, j, 1] - θˢ
-
-    return - ρ₀ * Cᴴ * Ũ * Δθ
+    return - ρ₀ * Cᵀ * Ũ * Δθ
 end
 
 # The latent heat flux (moisture flux) transfers water vapor between the ocean
@@ -190,17 +196,13 @@ end
 # at the surface and the actual specific humidity in the near-surface air.
 
 @inline function moisture_density_flux(i, j, grid, clock, fields, parameters)
-    constants = parameters.constants
+    Δq = @inbounds fields.qᵗ[i, j, 1] - parameters.qᵛ₀[i, j, 1]
+
     Cᵛ = parameters.vapor_transfer_coefficient
     Uᵍ = parameters.gust_speed
     Ũ = sqrt(s²ᶜᶜᶜ(i, j, grid, fields) + Uᵍ^2)
 
-    x = xnode(i, j, 1, grid, Center(), Center(), Center())
-    Tˢ = sea_surface_temperature(x, parameters)
     ρ₀ = parameters.ρ₀
-    qᵛ⁺ = surface_saturation_specific_humidity(Tˢ, ρ₀, constants)
-    Δq = @inbounds fields.qᵗ[i, j, 1] - qᵛ⁺
-
     return - ρ₀ * Cᵛ * Ũ * Δq
 end
 
@@ -259,34 +261,40 @@ T = model.temperature
 qˡ = model.microphysical_fields.qˡ
 qᵛ⁺ = Breeze.Microphysics.SaturationSpecificHumidity(model)
 
-# ## Turbulent flux diagnostics
-#
-# We compute horizontally-averaged vertical turbulent fluxes, which characterize
-# the transport of momentum and scalars by convective motions. These fluxes are
-# essential diagnostics for understanding the dynamics of convective boundary layers.
-#
-# The fluxes are computed as horizontal averages of the products of vertical
-# velocity with the transported quantity. For 2D simulations, we average along
-# the x-direction (dims=1).
-
 u, v, w = model.velocities
 qᵗ = model.specific_moisture
 
-# Vertical flux of horizontal momentum (Reynolds stress)
-wu = Average(w * u, dims=1)
+# ## Surface flux diagnostics
+#
+# We use Oceananigans' `BoundaryConditionOperation` to extract the surface flux
+# values from the boundary conditions. These 1D fields (varying only in x)
+# represent the actual flux values applied at the ocean-atmosphere interface.
+#
+# The surface fluxes are:
+# - τˣ: surface momentum flux (stress), in kg m⁻¹ s⁻²
+# - 𝒬ᵀ: sensible heat flux = cᵖᵐ × Jᵀ, in W m⁻²
+# - 𝒬ᵛ: latent heat flux = ℒˡ × Jᵛ, in W m⁻²
+#
+# where Jᵀ is the temperature flux and Jᵛ is the moisture flux.
 
-# Vertical flux of potential temperature (sensible heat flux)
-wθ = Average(w * θ, dims=1)
+ρu = model.momentum.ρu
+ρθ = model.tracers.ρθ
+ρqᵗ = model.moisture_density
 
-# Vertical flux of total water (moisture flux)
-wqᵗ = Average(w * qᵗ, dims=1)
+# Surface momentum flux
+τˣ = BoundaryConditionOperation(ρu, :bottom, model)
 
-# We also save the mean profiles for computing turbulent perturbations in post-processing
-u_avg = Average(u, dims=1)
-w_avg = Average(w, dims=1)
-θ_avg = Average(θ, dims=1)
-qᵗ_avg = Average(qᵗ, dims=1)
-qˡ_avg = Average(qˡ, dims=1)
+# Sensible heat flux: 𝒬ᵀ = cᵖᵐ × Jᵀ
+cᵖᵈ = constants.dry_air.heat_capacity
+cᵖᵛ = constants.vapor.heat_capacity
+cᵖᵐ = cᵖᵈ * (1 - qᵛ₀) + cᵖᵛ * qᵛ₀
+Jᵀ = BoundaryConditionOperation(ρθ, :bottom, model)
+𝒬ᵀ = cᵖᵐ * Jᵀ
+
+# Latent heat flux: 𝒬ᵛ = ℒˡ × Jᵛ
+ℒˡ = Breeze.Thermodynamics.liquid_latent_heat(T₀, constants)
+Jᵛ = BoundaryConditionOperation(ρqᵗ, :bottom, model)
+𝒬ᵛ = ℒˡ * Jᵛ
 
 # ## Progress callback
 #
@@ -323,14 +331,12 @@ add_callback!(simulation, progress, IterationInterval(10))
 
 # ## Output
 #
-# We configure two output writers:
-# 1. Full 2D fields for visualization and detailed analysis
-# 2. Horizontally-averaged profiles and fluxes for bulk statistics
-#
+# We save both the full 2D fields and the 1D surface flux fields.
 # The JLD2 format provides efficient storage with full Julia type preservation.
 
 output_filename = joinpath(@__DIR__, "prescribed_sst_convection.jld2")
-outputs = merge(model.velocities, (; T, θ, qˡ, qᵛ⁺, qᵗ=model.specific_moisture))
+qᵗ = model.specific_moisture
+outputs = merge(model.velocities, (; T, θ, qˡ, qᵛ⁺, qᵗ, τˣ, 𝒬ᵀ, 𝒬ᵛ))
 
 ow = JLD2Writer(model, outputs;
                 filename = output_filename,
@@ -339,17 +345,6 @@ ow = JLD2Writer(model, outputs;
 
 simulation.output_writers[:jld2] = ow
 
-# Horizontally-averaged profiles and fluxes
-averages_filename = joinpath(@__DIR__, "prescribed_sst_averages.jld2")
-averaged_outputs = (; u_avg, w_avg, θ_avg, qᵗ_avg, qˡ_avg, wu, wθ, wqᵗ)
-
-averages_ow = JLD2Writer(model, averaged_outputs;
-                         filename = averages_filename,
-                         schedule = TimeInterval(2minutes),
-                         overwrite_existing = true)
-
-simulation.output_writers[:averages] = averages_ow
-
 # ## Run the simulation
 
 @info "Running prescribed SST convection simulation..."
@@ -357,11 +352,9 @@ run!(simulation)
 
 # ## Visualization
 #
-# We create animations showing the evolution of the flow fields. The 2×3 panel
-# layout displays velocity components (u, w), thermodynamic fields (θ, T),
-# and moisture fields (qᵗ, qˡ).
-
-using CairoMakie
+# We create animations showing the evolution of the flow fields. The figure
+# displays velocity components (u, w), thermodynamic fields (θ, T),
+# moisture fields (qᵗ, qˡ), and surface fluxes (momentum and heat).
 
 @assert isfile(output_filename) "Output file $(output_filename) not found."
 
@@ -371,6 +364,9 @@ w_ts = FieldTimeSeries(output_filename, "w")
 T_ts = FieldTimeSeries(output_filename, "T")
 qᵗ_ts = FieldTimeSeries(output_filename, "qᵗ")
 qˡ_ts = FieldTimeSeries(output_filename, "qˡ")
+τˣ_ts = FieldTimeSeries(output_filename, "τˣ")
+𝒬ᵀ_ts = FieldTimeSeries(output_filename, "𝒬ᵀ")
+𝒬ᵛ_ts = FieldTimeSeries(output_filename, "𝒬ᵛ")
 
 times = θ_ts.times
 Nt = length(θ_ts)
@@ -383,8 +379,15 @@ w_snapshot = @lift w_ts[$n]
 qᵗ_snapshot = @lift qᵗ_ts[$n]
 T_snapshot = @lift T_ts[$n]
 qˡ_snapshot = @lift qˡ_ts[$n]
+τˣ_snapshot = @lift interior(τˣ_ts[$n], :, 1, 1)
 
-fig = Figure(size=(800, 800), fontsize=12)
+# Total surface heat flux: sensible + latent
+𝒬_snapshot = @lift interior(𝒬ᵀ_ts[$n], :, 1, 1) .+ interior(𝒬ᵛ_ts[$n], :, 1, 1)
+
+# Get x coordinates for the surface flux line plots
+x = xnodes(τˣ_ts)
+
+fig = Figure(size=(800, 1000), fontsize=12)
 
 title = @lift "t = $(prettytime(times[$n]))"
 
@@ -394,6 +397,10 @@ axθ = Axis(fig[2, 1], xlabel="x (m)", ylabel="z (m)")
 axq = Axis(fig[2, 2], xlabel="x (m)", ylabel="z (m)")
 axT = Axis(fig[3, 1], xlabel="x (m)", ylabel="z (m)")
 axqˡ = Axis(fig[3, 2], xlabel="x (m)", ylabel="z (m)")
+
+# Surface flux line plots at bottom
+axτ = Axis(fig[4, 1], xlabel="x (m)", ylabel="τˣ [kg m⁻¹ s⁻²]", title="Surface momentum flux")
+ax𝒬 = Axis(fig[4, 2], xlabel="x (m)", ylabel="𝒬 [W m⁻²]", title="Surface heat flux (𝒬ᵀ + 𝒬ᵛ)")
 
 fig[0, :] = Label(fig, title, fontsize=22, tellwidth=false)
 
@@ -406,19 +413,34 @@ w_limits = (-w_max, w_max)
 qᵗ_max = maximum(qᵗ_ts)
 qˡ_max = maximum(qˡ_ts)
 
+# Flux limits
+τˣ_max = max(abs(minimum(τˣ_ts)), abs(maximum(τˣ_ts)))
+𝒬ᵀ_min, 𝒬ᵀ_max = extrema(𝒬ᵀ_ts)
+𝒬ᵛ_min, 𝒬ᵛ_max = extrema(𝒬ᵛ_ts)
+𝒬_min = 𝒬ᵀ_min + 𝒬ᵛ_min
+𝒬_max = 𝒬ᵀ_max + 𝒬ᵛ_max
+
 hmu = heatmap!(axu, u_snapshot, colorrange=u_limits, colormap=:balance)
 hmw = heatmap!(axw, w_snapshot, colorrange=w_limits, colormap=:balance)
 hmθ = heatmap!(axθ, θ_snapshot, colorrange=θ_limits)
-hmq = heatmap!(axq, qᵗ_snapshot, colorrange=(0, qᵗ_max), colormap = Reverse(:Purples_4))
+hmq = heatmap!(axq, qᵗ_snapshot, colorrange=(0, qᵗ_max), colormap=Reverse(:Purples_4))
 hmT = heatmap!(axT, T_snapshot, colorrange=T_limits)
-hmqˡ = heatmap!(axqˡ, qˡ_snapshot, colorrange=(0, qˡ_max), colormap = Reverse(:Blues_4))
+hmqˡ = heatmap!(axqˡ, qˡ_snapshot, colorrange=(0, qˡ_max), colormap=Reverse(:Blues_4))
 
-Colorbar(fig[1, 0], hmu, label = "u [m/s]", vertical=true)
-Colorbar(fig[1, 3], hmw, label = "w [m/s]", vertical=true)
-Colorbar(fig[2, 0], hmθ, label = "θ [K]", vertical=true)
-Colorbar(fig[2, 3], hmq, label = "qᵗ", vertical=true)
-Colorbar(fig[3, 0], hmT, label = "T [K]", vertical=true)
-Colorbar(fig[3, 3], hmqˡ, label = "qˡ", vertical=true)
+# Surface flux line plots
+lines!(axτ, x, τˣ_snapshot, color=:black, linewidth=2)
+lines!(ax𝒬, x, 𝒬_snapshot, color=:firebrick, linewidth=2)
+
+# Set y-limits for flux plots
+ylims!(axτ, -τˣ_max, τˣ_max)
+ylims!(ax𝒬, 𝒬_min, 𝒬_max)
+
+Colorbar(fig[1, 0], hmu, label="u [m/s]", flipaxis=false)
+Colorbar(fig[1, 3], hmw, label="w [m/s]")
+Colorbar(fig[2, 0], hmθ, label="θ [K]", flipaxis=false)
+Colorbar(fig[2, 3], hmq, label="qᵗ")
+Colorbar(fig[3, 0], hmT, label="T [K]", flipaxis=false)
+Colorbar(fig[3, 3], hmqˡ, label="qˡ")
 
 fig
 
@@ -430,26 +452,3 @@ end
 nothing #hide
 
 # ![](prescribed_sst.mp4)
-
-
-# Potential temperature animation
-n = Observable(1)
-θ_snapshot = @lift θ_ts[$n]
-title = @lift "Potential temperature: t = $(prettytime(times[$n]))"
-
-fig = Figure(size=(500, 400), fontsize=12)
-ax = Axis(fig[1, 1], xlabel="x (m)", ylabel="z (m)")
-
-fig[0, :] = Label(fig, title, fontsize=22, tellwidth=false)
-
-hm = heatmap!(ax, θ_snapshot, colorrange=θ_limits)
-Colorbar(fig[1, 2], hm, label = "θ [K]", vertical=true)
-
-fig
-
-CairoMakie.record(fig, "prescribed_sst_theta.mp4", 1:Nt, framerate=12) do nn
-    n[] = nn
-end
-nothing #hide
-
-# ![](prescribed_sst_theta.mp4)
