@@ -404,9 +404,9 @@ ax𝒬 = Axis(fig[4, 2], xlabel="x (m)", ylabel="𝒬 (W m⁻²)", title="Surfac
 fig[0, :] = Label(fig, title, fontsize=22, tellwidth=false)
 
 # Compute color limits from the full time series
-θ_limits = (minimum(θ_ts), maximum(θ_ts))
-T_limits = (minimum(T_ts), maximum(T_ts))
-u_limits = (minimum(u_ts), maximum(u_ts))
+θ_limits = extrema(θ_ts)
+T_limits = extrema(T_ts)
+u_limits = extrema(u_ts)
 w_max = max(abs(minimum(w_ts)), abs(maximum(w_ts)))
 w_limits = (-w_max, w_max)
 qᵗ_max = maximum(qᵗ_ts)
@@ -418,7 +418,7 @@ qˡ_max = maximum(qˡ_ts)
 
 hmu = heatmap!(axu, un, colorrange=u_limits, colormap=:balance)
 hmw = heatmap!(axw, wn, colorrange=w_limits, colormap=:balance)
-hmθ = heatmap!(axθ, θn, colorrange=θ_limits)
+hmθ = heatmap!(axθ, θn, colorrange=θ_limits, colormap=:thermal)
 hmq = heatmap!(axq, qᵗn, colorrange=(0, qᵗ_max), colormap=Reverse(:Purples_4))
 hmT = heatmap!(axT, Tn, colorrange=T_limits)
 hmqˡ = heatmap!(axqˡ, qˡn, colorrange=(0, qˡ_max), colormap=Reverse(:Blues_4))
@@ -436,9 +436,9 @@ ylims!(ax𝒬, 𝒬_min, 𝒬_max)
 Colorbar(fig[1, 0], hmu, label="u (m/s)", flipaxis=false)
 Colorbar(fig[1, 3], hmw, label="w (m/s)")
 Colorbar(fig[2, 0], hmθ, label="θ (K)", flipaxis=false)
-Colorbar(fig[2, 3], hmq, label="qᵗ")
+Colorbar(fig[2, 3], hmq, label="qᵗ (kg/kg)")
 Colorbar(fig[3, 0], hmT, label="T (K)", flipaxis=false)
-Colorbar(fig[3, 3], hmqˡ, label="qˡ")
+Colorbar(fig[3, 3], hmqˡ, label="qˡ (kg/kg)")
 
 fig
 
