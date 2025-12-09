@@ -251,7 +251,7 @@ set!(model, θ=reference_state.potential_temperature, u=1)
 # with a target CFL number of 0.7 providing a good balance between efficiency
 # and accuracy.
 
-simulation = Simulation(model, Δt=10, stop_time=4hours)
+simulation = Simulation(model, Δt=10, stop_time=6hours)
 conjure_time_step_wizard!(simulation, cfl=0.7)
 
 # ## Diagnostic fields
