@@ -396,8 +396,8 @@ qˡn = @lift qˡ_ts[$n]
 𝒬ᵛn = @lift 𝒬ᵛ_ts[$n]
 Σ𝒬n = @lift Σ𝒬_ts[$n]
 
-# We compute some extra diagnostics, like total speed, ``\sqrt{u² + w²}`` and
-# cross-stream vorticity ``∂u/∂z - ∂w/∂x``.
+# We compute some extra diagnostics, like the total speed, ``\sqrt{u² + w²}`` and
+# the cross-stream vorticity ``∂u/∂z - ∂w/∂x``.
 
 sn = @lift sqrt(u_ts[$n]^2 + w_ts[$n]^2)
 ξn = @lift ∂z(u_ts[$n]) - ∂x(w_ts[$n])
