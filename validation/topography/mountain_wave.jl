@@ -33,12 +33,12 @@ a  = 5000                   # m (Gaussian half-width parameter)
 K  = 2*π/λ                  # rad m^-1
 
 #  grid configuration
-Nx, Nz = 256, 256
-L, H = 100kilometers, 29kilometers
+Nx, Nz = 200, 100
+L, H = 100kilometers, 20kilometers
 
 # Vertical grid stretching parameters, constant spacing (500 m) above 3 km
-z_transition = 3000  # m - transition height
-dz_top = 250  # m - constant spacing above 3 km
+z_transition = 1000  # m - transition height
+dz_top = 500  # m - constant spacing above 3 km
 
 # Calculate number of cells needed above transition
 Nz_top = ceil(Int, (H - z_transition) / dz_top)
@@ -81,7 +81,11 @@ params = (z0=grid.Lz, dz=grid.Lz/2, ω=1/60)
 ρw_forcing = Forcing(ρw_sponge, discrete_form=true, parameters=params)
 
 # Atmosphere model setup
-model = AtmosphereModel(grid, advection = WENO(), forcing=(; ρw=ρw_forcing))
+reference_state = ReferenceState(grid, thermo)
+formulation = AnelasticFormulation(reference_state, thermodynamics=:LiquidIcePotentialTemperature)
+ρᵣ = formulation.reference_state.density
+
+model = AtmosphereModel(grid, formulation; advection = WENO(), forcing=(; ρw=ρw_forcing))
 
 # Initial conditions and initialization
 θᵢ(x, z) = θ₀ * exp(N² * z / g) # background stratification for isothermal atmosphere
