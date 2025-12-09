@@ -398,8 +398,8 @@ axT = Axis(fig[3, 1], xlabel="x (m)", ylabel="z (m)")
 axqˡ = Axis(fig[3, 2], xlabel="x (m)", ylabel="z (m)")
 
 # Surface flux line plots at bottom
-axτ = Axis(fig[4, 1], xlabel="x (m)", ylabel="τˣ [kg m⁻¹ s⁻²]", title="Surface momentum flux")
-ax𝒬 = Axis(fig[4, 2], xlabel="x (m)", ylabel="𝒬 [W m⁻²]", title="Surface heat flux (𝒬ᵀ + 𝒬ᵛ)")
+axτ = Axis(fig[4, 1], xlabel="x (m)", ylabel="τˣ (kg m⁻¹ s⁻²)", title="Surface momentum flux")
+ax𝒬 = Axis(fig[4, 2], xlabel="x (m)", ylabel="𝒬 (W m⁻²)", title="Surface heat flux (𝒬ᵀ + 𝒬ᵛ)")
 
 fig[0, :] = Label(fig, title, fontsize=22, tellwidth=false)
 
@@ -424,20 +424,20 @@ hmT = heatmap!(axT, Tn, colorrange=T_limits)
 hmqˡ = heatmap!(axqˡ, qˡn, colorrange=(0, qˡ_max), colormap=Reverse(:Blues_4))
 
 # Surface flux line plots
-lines!(axτ, x, τˣn, color=:black, linewidth=2)
-lines!(ax𝒬, x, 𝒬ᵀn, color=:firebrick, linewidth=2)
-lines!(ax𝒬, x, 𝒬ᵛn, color=:blue, linewidth=2)
-lines!(ax𝒬, x, Σ𝒬n, color=:green, linewidth=4)
+lines!(axτ, τˣn, color=:black, linewidth=2)
+lines!(ax𝒬, 𝒬ᵀn, color=:firebrick, linewidth=2)
+lines!(ax𝒬, 𝒬ᵛn, color=:blue, linewidth=2)
+lines!(ax𝒬, Σ𝒬n, color=:green, linewidth=4)
 
 # Set y-limits for flux plots
 ylims!(axτ, -τˣ_max, τˣ_max)
 ylims!(ax𝒬, 𝒬_min, 𝒬_max)
 
-Colorbar(fig[1, 0], hmu, label="u [m/s]", flipaxis=false)
-Colorbar(fig[1, 3], hmw, label="w [m/s]")
-Colorbar(fig[2, 0], hmθ, label="θ [K]", flipaxis=false)
+Colorbar(fig[1, 0], hmu, label="u (m/s)", flipaxis=false)
+Colorbar(fig[1, 3], hmw, label="w (m/s)")
+Colorbar(fig[2, 0], hmθ, label="θ (K)", flipaxis=false)
 Colorbar(fig[2, 3], hmq, label="qᵗ")
-Colorbar(fig[3, 0], hmT, label="T [K]", flipaxis=false)
+Colorbar(fig[3, 0], hmT, label="T (K)", flipaxis=false)
 Colorbar(fig[3, 3], hmqˡ, label="qˡ")
 
 fig
