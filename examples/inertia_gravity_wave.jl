@@ -34,7 +34,7 @@ constants = ThermodynamicConstants()
 reference_state = ReferenceState(grid, constants, base_pressure=p₀, potential_temperature=θ₀)
 formulation = AnelasticFormulation(reference_state, thermodynamics=:LiquidIcePotentialTemperature)
 
-model = AtmosphereModel(grid; formulation, advection = Centered(order=2))
+model = AtmosphereModel(grid; formulation, advection = WENO(minimum_buffer_upwind_order=3))
 
 
 # Initial conditions and initialization
@@ -57,7 +57,7 @@ end
 
 set!(model, θ = θᵢ, u = U)
 
-Δt = 12 # seconds
+Δt = 24 # seconds
 stop_time = 3000
 simulation = Simulation(model; Δt, stop_time)
 
