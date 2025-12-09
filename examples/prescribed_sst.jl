@@ -415,7 +415,7 @@ axq = Axis(fig[2, 2])
 axT = Axis(fig[3, 1], ylabel="z (m)")
 axqˡ = Axis(fig[3, 2])
 
-# Surface flux line plots at bottom
+# Surface flux plots at bottom
 axτ = Axis(fig[4, 1], xlabel="x (m)", ylabel="τˣ (kg m⁻¹ s⁻²)", title="Surface momentum flux")
 ax𝒬 = Axis(fig[4, 2], xlabel="x (m)", ylabel="𝒬 (W m⁻²)", title="Surface heat flux (𝒬ᵀ + 𝒬ᵛ)")
 
@@ -442,13 +442,15 @@ hmq = heatmap!(axq, qᵗn, colorrange=(0, qᵗ_max), colormap=Reverse(:Purples_4
 hmT = heatmap!(axT, Tn, colorrange=T_limits)
 hmqˡ = heatmap!(axqˡ, qˡn, colorrange=(0, qˡ_max), colormap=Reverse(:Blues_4))
 
-# Surface fluxes
+# Plot the surface fluxes
 lines!(axτ, τˣn, color=:black, linewidth=2)
 
 lines!(ax𝒬, 𝒬ᵀn, color=:firebrick, linewidth=2, label="sensible")
 lines!(ax𝒬, 𝒬ᵛn, color=:blue, linewidth=2, label="latent")
 lines!(ax𝒬, Σ𝒬n, color=:green, linewidth=4, label="total")
 Legend(fig[4, 3], ax𝒬)
+
+# Add zero lines, fix axis limits, and add colorbars.
 
 for ax in (axτ, ax𝒬)
     lines!(ax, [-grid.Lx/2, grid.Lx/2], [0, 0], color=:grey, linestyle=:dash)
