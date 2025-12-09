@@ -19,6 +19,7 @@ cᵖᵈ = thermo.dry_air.heat_capacity
 Rᵈ = Breeze.Thermodynamics.dry_air_gas_constant(thermo)
 
 # Isothermal base state and mean wind
+p₀ = 100000                 # Pa
 T₀ = 300                    # K
 θ₀ = T₀                     # K - reference potential temperature
 U  = 20                     # m s^-1 (mean wind)
@@ -81,11 +82,10 @@ params = (z0=grid.Lz, dz=grid.Lz/2, ω=1/60)
 ρw_forcing = Forcing(ρw_sponge, discrete_form=true, parameters=params)
 
 # Atmosphere model setup
-reference_state = ReferenceState(grid, thermo)
+constants = ThermodynamicConstants()
+reference_state = ReferenceState(grid, constants, base_pressure=p₀, potential_temperature=θ₀)
 formulation = AnelasticFormulation(reference_state, thermodynamics=:LiquidIcePotentialTemperature)
-ρᵣ = formulation.reference_state.density
-
-model = AtmosphereModel(grid, formulation; advection = WENO(), forcing=(; ρw=ρw_forcing))
+model = AtmosphereModel(grid; formulation, advection = WENO(), forcing=(; ρw=ρw_forcing))
 
 # Initial conditions and initialization
 θᵢ(x, z) = θ₀ * exp(N² * z / g) # background stratification for isothermal atmosphere
@@ -93,8 +93,8 @@ set!(model, θ=θᵢ, u=U)
 
 # Time-stepping and simulation setup
 Δt = 6.0 # seconds
-stop_iteration = 1800
-simulation = Simulation(model; Δt, stop_iteration, align_time_step=false)
+stop_time = 2hours
+simulation = Simulation(model; Δt, stop_time, align_time_step=false)
 
 using Printf
 
@@ -143,9 +143,9 @@ Compute the 2-D linear vertical velocity w(x,z) from Appendix A, eq. (A10).
 Arguments:
 - `x`: horizontal position in meters
 - `z`: vertical position in meters
-- `nk`: controls resolution of the wavenumber space (default: 10000)
+- `nk`: controls resolution of the wavenumber space (default: 1000)
 """
-function w_linear(x, z; nk=10000)
+function w_linear(x, z; nk=1000)
     # Discretize wavenumber space
     k = range(0, 100kstar; length=nk)
     m2 = m².(k)
