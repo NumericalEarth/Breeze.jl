@@ -113,6 +113,8 @@ set!(qᵛ₀, qᵛ₀_func)
 
 lines(qᵛ₀; axis = (xlabel = "qᵛ⁺ (kg/kg)",))
 
+# We gather few parameters in a named tuple
+
 parameters = (;
     T₀, qᵛ₀, ρ₀,
     drag_coefficient = 1e-3,
