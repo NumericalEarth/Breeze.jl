@@ -1,112 +1,181 @@
+# # Inertia-gravity waves
+#
+# This example simulates the propagation of inertia-gravity waves in a stably stratified
+# atmosphere, following the classical benchmark test case described by [SkamarockKlemp1994](@cite).
+# This test evaluates the accuracy of numerical pressure solvers by introducing a small-amplitude
+# temperature perturbation into an isothermal, stratified environment, triggering propagating
+# inertia-gravity waves.
+#
+# The test case is particularly useful for validating anelastic and compressible solvers,
+# as discussed at the [CM1 inertia-gravity wave test page](https://www2.mmm.ucar.edu/people/bryan/cm1/test_inertia_gravity_waves/).
+#
+# ## Physical setup
+#
+# The background state is an isothermal atmosphere with constant Brunt-Väisälä frequency ``N``,
+# which gives a potential temperature profile
+#
+# ```math
+# θ^{\rm bg}(z) = θ_0 \exp\left( \frac{N^2 z}{g} \right)
+# ```
+#
+# where ``θ_0 = 300 \, {\rm K}`` is the surface potential temperature and ``g`` is
+# the gravitational acceleration.
+#
+# The initial perturbation is a localized temperature anomaly centered at ``x = x_0``:
+#
+# ```math
+# θ'(x, z) = Δθ \frac{\sin(π z / L_z)}{1 + (x - x_0)^2 / a^2}
+# ```
+#
+# with amplitude ``Δθ = 0.01 \, {\rm K}``, half-width parameter ``a = 5000 \, {\rm m}``,
+# and perturbation center ``x_0 = L_x / 3``. A uniform mean wind ``U = 20 \, {\rm m \, s^{-1}}``
+# advects the waves.
+
 using Breeze
 using Oceananigans.Units
 using Statistics
 using Printf
 using CairoMakie
 
+# ## Problem parameters
+#
+# We define the thermodynamic base state and mean wind following [SkamarockKlemp1994](@cite):
 
-# Inertia Gravity Wave
-# Reference:
-# Skamarock and Klemp (1994): "Efficiency and Accuracy of the Klemp-Wilhelmson Time-Splitting Technique"
+p₀ = 100000  # Pa - surface pressure
+θ₀ = 300     # K - reference potential temperature
+U  = 20      # m s⁻¹ - mean wind
+N  = 0.01    # s⁻¹ - Brunt-Väisälä frequency
+N² = N^2
 
-# Problem parameters: isothermal base state and mean wind
-p₀ = 100000                 # Pa
-θ₀ = 300                    # K - reference potential temperature
-U  = 20                     # m s^-1 (mean wind)
-N  = 0.01                   # s^-1 - Brunt-Väisälä frequency
-N² = N^2                    # Brunt–Väisälä frequency squared
+# ## Grid configuration
+#
+# The domain is 300 km × 10 km with 300 × 10 grid points, matching the hydrostatic-scale
+# configuration in [SkamarockKlemp1994](@cite).
 
-
-# Grid configuration
 Nx, Nz = 300, 10
 Lx, Lz = 300kilometers, 10kilometers
 
-grid = RectilinearGrid(CPU(),
-                       size = (Nx, Nz),
-                       x = (0, Lx),
-                       z = (0, Lz),
-                       halo = (5, 5),
+grid = RectilinearGrid(CPU(), size = (Nx, Nz), halo = (5, 5),
+                       x = (0, Lx), z = (0, Lz),
                        topology = (Periodic, Flat, Bounded))
 
+# ## Atmosphere model setup
+#
+# We use the anelastic formulation with liquid-ice potential temperature thermodynamics:
 
-# Atmosphere model setup
 constants = ThermodynamicConstants()
 reference_state = ReferenceState(grid, constants, base_pressure=p₀, potential_temperature=θ₀)
 formulation = AnelasticFormulation(reference_state, thermodynamics=:LiquidIcePotentialTemperature)
+advection = WENO(minimum_buffer_upwind_order=3)
+model = AtmosphereModel(grid; formulation, advection)
 
-model = AtmosphereModel(grid; formulation, advection = WENO(minimum_buffer_upwind_order=3))
+# ## Initial conditions
+#
+# The perturbation parameters from [SkamarockKlemp1994](@cite):
 
+Δθ = 0.01               # K - perturbation amplitude
+a  = 5000               # m - perturbation half-width parameter
+x₀ = Lx / 3             # m - perturbation center in x
 
-# Initial conditions and initialization
-Δθ₀ = 0.01                  # K - perturbation amplitude
-a = 5000                    # m   (perturbation half-width parameter)
-x_c = Lx / 3                # m   (perturbation center in x)
+# The background potential temperature profile for an isothermal atmosphere:
 
-# Background potential temperature profile (isothermal)
 g = model.thermodynamic_constants.gravitational_acceleration
-θ̄ᵦ(z) = θ₀ * exp(N² * z / g)
-# Save initial potential temperature without perturbation to compute anomaly later
-θᵢ₀ = Field{Center, Nothing, Center}(grid)
-set!(θᵢ₀, (x, z) -> θ̄ᵦ(z))
+θᵇᵍ(z) = θ₀ * exp(N² * z / g)
 
-# Perturbation
-function θᵢ(x, z)
-    θ′ = Δθ₀ * sin(π * z / Lz) / (1 + (x - x_c)^2/a^2)
-    return θ̄ᵦ(z) + θ′
-end
+# The initial condition combines the background profile with the localized perturbation:
 
-set!(model, θ = θᵢ, u = U)
+θᵢ(x, z) = θᵇᵍ(z) + Δθ * sin(π * z / Lz) / (1 + (x - x₀)^2 / a^2)
+
+set!(model, θ=θᵢ, u=U)
+
+# ## Simulation
+#
+# We run for 3000 seconds with a fixed time step, matching the simulation time in
+# [SkamarockKlemp1994](@cite):
 
 Δt = 24 # seconds
-stop_time = 3000
-simulation = Simulation(model; Δt, stop_time)
+simulation = Simulation(model; Δt, stop_time=3000)
 
+# Progress callback:
+
+θ = PotentialTemperature(model)
+θᵇᵍf = CenterField(grid)
+set!(θᵇᵍf, (x, z) -> θᵇᵍ(z))
+θ′ = θ - θᵇᵍf
 
 function progress(sim)
-    ρθ = sim.model.formulation.thermodynamics.potential_temperature_density
     u, v, w = sim.model.velocities
-
-    ρθmean = mean(ρθ)
-
-    msg = @sprintf("Iter: %d, t: %s, Δt: %s, mean(ρθ): %.6e K kg/m³, max|u|: %.5f m/s, max w: %.5f m/s, min w: %.5f m/s",
-                   iteration(sim), prettytime(sim), prettytime(sim.Δt), ρθmean, maximum(abs, u), maximum(w), minimum(w))
-
+    msg = @sprintf("Iter: % 4d, t: % 14s, max(θ′): %.4e, max|w|: %.4f",
+                   iteration(sim), prettytime(sim), maximum(θ′), maximum(abs, w))
     @info msg
     return nothing
 end
 
-add_callback!(simulation, progress, TimeInterval(1minute))
+add_callback!(simulation, progress, IterationInterval(20))
 
-# Output setup
-θ = PotentialTemperature(model)
+# ## Output
+#
+# We save the potential temperature for visualization, including an animation of the
+# wave propagation:
 
-outputs = merge(model.velocities, (; θ))
+
+outputs = merge(model.velocities, (; θ′))
 
 filename = "inertia_gravity_wave.jld2"
-writer = JLD2Writer(model, outputs; filename,
-                    schedule = TimeInterval(Δt),
-                    overwrite_existing = true)
+simulation.output_writers[:jld2] = JLD2Writer(model, outputs; filename,
+                                              schedule = TimeInterval(100),
+                                              overwrite_existing = true)
 
-simulation.output_writers[:jld2] = writer
-
-# Model execution
 run!(simulation)
 
+# ## Results: potential temperature perturbation
+#
+# Following [SkamarockKlemp1994](@cite), we visualize the potential temperature perturbation
+# ``θ' = θ - θ^{\rm bg}``. The final state at ``t = 3000 \, {\rm s}`` can be compared
+# directly to Figure 3b in [SkamarockKlemp1994](@cite), which shows the analytic solution
+# for incompressible flow.
+#
+# The [CM1 model test page](https://www2.mmm.ucar.edu/people/bryan/cm1/test_inertia_gravity_waves/)
+# provides additional comparisons between compressible, anelastic, and incompressible solvers.
 
-# Plotting
-fig = Figure(size=(900, 300))
-gb = fig[1, 1]
+θ′t = FieldTimeSeries(filename, "θ′")
+times = θ′t.times
+Nt = length(times)
 
-xs = LinRange(0, Lx, Nx)
-zs = LinRange(0, Lz, Nz+1)
-θ_field = Field(θ)
-pdata = Array(interior(θ_field, :,1,:)) - Array(interior(θᵢ₀, :,1,:))
-ax, hm = heatmap(gb[1,1], xs, zs, pdata, colormap = :balance, colorrange = (-0.01, 0.01))
-ax.xlabel = "x [m]"
-ax.ylabel = "z [m]"
-ax.title = "θ Anomaly at t = $(stop_time)s"
+# Plot the final potential temperature perturbation (compare to Figure 3b in
+# [SkamarockKlemp1994](@cite)):
 
-Colorbar(gb[1:1, 2], hm; label = "θ Anomaly [K]")
+θ′N = θ′t[Nt]
+
+fig = Figure(size=(800, 300))
+ax = Axis(fig[1, 1], xlabel = "x (km)", ylabel = "z (km)",
+          title = "Potential temperature perturbation θ′ at t = $(Int(times[end])) s")
+
+levels = range(-Δθ/2, stop=Δθ/2, length=20)
+hm = contourf!(ax, θ′N, colormap=:balance; levels)
+fig
 
 save("inertia_gravity_wave.png", fig)
 
+# ## Animation of wave propagation
+#
+# The animation shows the evolution of the potential temperature perturbation as the
+# inertia-gravity waves propagate away from the initial disturbance:
+
+fig = Figure(size=(800, 300))
+ax = Axis(fig[1, 1], xlabel = "x (km)", ylabel = "z (km)")
+n = Observable(1)
+
+θ′n = @lift θ′t[$n]
+title = @lift "Potential temperature perturbation θ′ at t = $(prettytime(times[$n]))"
+fig[0, :] = Label(fig, title, fontsize=16, tellwidth=false)
+
+hm = heatmap!(ax, θ′n, colormap = :balance, colorrange = (-Δθ/2, Δθ/2))
+fig
+
+record(fig, "inertia_gravity_wave.mp4", 1:Nt, framerate=8) do nn
+    n[] = nn
+end
+nothing #hide
+
+# ![](inertia_gravity_wave.mp4)

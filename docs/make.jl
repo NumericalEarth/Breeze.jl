@@ -21,6 +21,7 @@ example_scripts = [
     "cloudy_thermal_bubble.jl",
     "cloudy_kelvin_helmholtz.jl",
     "bomex.jl",
+    "inertia_gravity_wave.jl",
     # "prescribed_sst.jl", # this is a WIP
 ]
 
@@ -36,6 +37,7 @@ example_pages = Any[
     "Cloudy thermal bubble" => "literated/cloudy_thermal_bubble.md",
     "Cloudy Kelvin-Helmholtz instability" => "literated/cloudy_kelvin_helmholtz.md",
     "Shallow cumulus convection (BOMEX)" => "literated/bomex.md",
+    "Inertia gravity wave" => "literated/inertia_gravity_wave.md",
     # "Prescribed SST" => "literated/prescribed_sst.md",
 ]
 
