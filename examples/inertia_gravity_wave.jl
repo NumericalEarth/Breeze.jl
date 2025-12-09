@@ -52,7 +52,7 @@ set!(θᵢ₀, (x, z) -> θ̄ᵦ(z))
 
 # Perturbation
 function θᵢ(x, z)
-    θ′ = Δθ₀ * sin(π * z / Lz)  / (1 + (x - x_c)^2/a^2)
+    θ′ = Δθ₀ * sin(π * z / Lz) / (1 + (x - x_c)^2/a^2)
     return θ̄ᵦ(z) + θ′
 end
 
