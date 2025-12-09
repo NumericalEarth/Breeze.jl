@@ -202,7 +202,7 @@ conjure_time_step_wizard!(simulation, cfl=0.7)
 # liquid condensate mass fraction qˡ, and supersaturation δ = qᵗ - qᵛ⁺.
 
 T = model.temperature
-θ = Breeze.AtmosphereModels.PotentialTemperatureField(model)
+θ = liquid_ice_potential_temperature(model)
 qᵛ⁺ = Breeze.AtmosphereModels.SaturationSpecificHumidityField(model)
 
 # Liquid condensate mass fraction from microphysical fields
