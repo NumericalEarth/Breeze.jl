@@ -19,7 +19,6 @@ using Breeze
 using Oceananigans.Units
 using CairoMakie
 using Printf
-using CUDA
 
 # ## Domain and grid
 #
