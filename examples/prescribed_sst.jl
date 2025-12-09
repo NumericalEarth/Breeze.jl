@@ -396,11 +396,13 @@ qˡn = @lift qˡ_ts[$n]
 𝒬ᵛn = @lift 𝒬ᵛ_ts[$n]
 Σ𝒬n = @lift Σ𝒬_ts[$n]
 
-# speed, √(u²+w²)
-sn = @lift sqrt(u_ts[$n]^2 + w_ts[$n]^2)
+# We compute some extra diagnostics, like total speed, ``\sqrt{u² + w²}`` and
+# cross-stream vorticity ``∂u/∂z - ∂w/∂x``.
 
-# cross-stream vorticity, ∂z(u) - ∂x(w)
+sn = @lift sqrt(u_ts[$n]^2 + w_ts[$n]^2)
 ξn = @lift ∂z(u_ts[$n]) - ∂x(w_ts[$n])
+
+# Now we are ready to plot.
 
 fig = Figure(size=(800, 1000), fontsize=13)
 
@@ -455,6 +457,7 @@ end
 for ax in (axs, axξ, axθ, axq, axT, axqˡ, axτ, ax𝒬)
     xlims!(ax, -grid.Lx/2, grid.Lx/2)
 end
+
 ylims!(axτ, -τˣ_max, τˣ_max)
 ylims!(ax𝒬, 𝒬_min, 𝒬_max)
 
