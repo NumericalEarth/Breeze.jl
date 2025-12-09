@@ -4,7 +4,7 @@ using DocumenterCitations
 using Literate
 
 using CairoMakie
-CairoMakie.activate!(type = "svg")
+CairoMakie.activate!(type = "png")
 set_theme!(Theme(linewidth = 3))
 
 DocMeta.setdocmeta!(Breeze, :DocTestSetup, :(using Breeze); recursive=true)
@@ -44,6 +44,11 @@ makedocs(
     modules = [Breeze],
     sitename = "Breeze",
     plugins = [bib],
+    format = Documenter.HTML(
+        ;
+        size_threshold_warn = 2 ^ 19, # 512 KiB
+        size_threshold = 2 ^ 20, # 1 MiB
+    ),
     pages=[
         "Home" => "index.md",
         "Examples" => example_pages,
