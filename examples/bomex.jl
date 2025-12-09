@@ -116,21 +116,9 @@ set!(wˢ, z -> wˢ_profile(z))
 
 lines(wˢ; axis = (xlabel = "wˢ (m/s)",))
 
-# We apply subsidence as a forcing term to the horizontally-averaged prognostic variables.
-# This requires computing horizontal averages at each time step and storing them in
-# fields that can be accessed by the forcing functions.
-
-@inline w_dz_ϕ(i, j, k, grid, w, ϕ) = @inbounds w[i, j, k] * ∂zᶜᶜᶠ(i, j, k, grid, ϕ)
-
-@inline function Fρu_subsidence(i, j, k, grid, clock, fields, p)
-    w_dz_U = ℑzᵃᵃᶜ(i, j, k, grid, w_dz_ϕ, p.wˢ, p.u_avg)
-    return @inbounds - p.ρᵣ[i, j, k] * w_dz_U
-end
-
-@inline function Fρv_subsidence(i, j, k, grid, clock, fields, p)
-    w_dz_V = ℑzᵃᵃᶜ(i, j, k, grid, w_dz_ϕ, p.wˢ, p.v_avg)
-    return @inbounds - p.ρᵣ[i, j, k] * w_dz_V
-end
+# Subsidence is implemented as an advection of the horizontally-averaged prognostic variables.
+# This implementation --- which requires building `Field`s to represent horizontal averages
+# and computing it every time step --- is handled by `SubsidenceForcing`.
 
 wˢ = AtmosphericProfilesLibrary.Bomex_subsidence(FT)
 subsidence = SubsidenceForcing(wˢ)
@@ -166,7 +154,9 @@ set!(drying, ρᵣ * drying)
 #
 # A prescribed radiative cooling profile is applied to the thermodynamic equation
 # ([Siebesma2003](@citet); Appendix B, Eq. B3). Below the inversion, radiative cooling
-# of about 2 K/day counteracts the surface heating.
+# of about 2 K/day counteracts the surface heating. We use an energy forcing for radiation
+# to ensure that it is applied to the potential temperature conservation equation
+# consistently (see below for some elaboration about that).
 
 Fρe_field = Field{Nothing, Nothing, Center}(grid)
 cᵖᵈ = constants.dry_air.heat_capacity
