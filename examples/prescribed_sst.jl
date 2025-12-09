@@ -402,7 +402,7 @@ sn = @lift sqrt(u_ts[$n]^2 + w_ts[$n]^2)
 # cross-stream vorticity, ∂z(u) - ∂x(w)
 ξn = @lift ∂z(u_ts[$n]) - ∂x(w_ts[$n])
 
-fig = Figure(size=(800, 1000), fontsize=12)
+fig = Figure(size=(800, 1000), fontsize=14)
 
 title = @lift "t = $(prettytime(times[$n]))"
 
