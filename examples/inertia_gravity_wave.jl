@@ -13,7 +13,7 @@ using CairoMakie
 p₀ = 100000                 # Pa
 θ₀ = 300                    # K - reference potential temperature
 U  = 20                     # m s^-1 (mean wind)
-N  = 0.01
+N  = 0.01                   # s^-1 - Brunt-Väisälä frequency
 N² = N^2                    # Brunt–Väisälä frequency squared
 
 
