@@ -9,7 +9,7 @@ using Breeze.Thermodynamics:
     density,
     saturation_vapor_pressure
 
-import Oceananigans.Grids: prettysummary
+import Oceananigans.Utils: prettysummary
 
 struct SaturationSpecificHumidityKernelFunction{μ, FL, M, MF, T, R, TH}
     flavor :: FL
@@ -44,7 +44,7 @@ $(TYPEDSIGNATURES)
 
 Return a `KernelFunctionOperation` representing the specified flavor
 of *saturation specific humidity* ``qᵛ⁺`` which correpsonds to `model.microphysics`.
-If `model.microphysics` is not a saturation adjustment scheme, then 
+If `model.microphysics` is not a saturation adjustment scheme, then
 a warm phase scheme is assumed which computes the saturation specific humidity
 over a planar liquid surface.
 
@@ -86,7 +86,7 @@ KernelFunctionOperation at (Center, Center, Center)
 └── arguments: ()
 ```
 
-As `SaturationSpecificHumidity` it may be wrapped in `Field` to store the result 
+As `SaturationSpecificHumidity` it may be wrapped in `Field` to store the result
 of its computation. For example, a `Field` representing the equilibrium saturation specific
 humidity may be formed via,
 
