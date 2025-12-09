@@ -263,6 +263,7 @@ T = model.temperature
 qˡ = model.microphysical_fields.qˡ
 qᵛ⁺ = Breeze.Microphysics.SaturationSpecificHumidity(model)
 
+ρu, ρv, ρw = model.momentum
 u, v, w = model.velocities
 qᵗ = model.specific_moisture
 
