@@ -19,8 +19,11 @@ using Oceananigans.Units
 using AtmosphericProfilesLibrary
 using Printf
 using CairoMakie
+using Random
 
 using Oceananigans.Operators: ∂zᶜᶜᶠ, ℑzᵃᵃᶜ
+
+Random.seed!(938)
 
 # ## Domain and grid
 #
