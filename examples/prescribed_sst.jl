@@ -23,6 +23,7 @@ using Oceananigans.Units
 using Oceananigans.Models: BoundaryConditionOperation
 using Printf
 using CairoMakie
+using Statistics: mean
 
 # ## Grid setup
 #
@@ -251,7 +252,7 @@ set!(model, θ=reference_state.potential_temperature, u=1)
 # with a target CFL number of 0.7 providing a good balance between efficiency
 # and accuracy.
 
-simulation = Simulation(model, Δt=10, stop_time=6hours)
+simulation = Simulation(model, Δt=10, stop_time=4hours)
 conjure_time_step_wizard!(simulation, cfl=0.7)
 
 # ## Diagnostic fields
@@ -377,7 +378,7 @@ qˡ_ts = FieldTimeSeries(output_filename, "qˡ")
 times = θ_ts.times
 Nt = length(θ_ts)
 
-n = Observable(1)
+n = Observable(Nt)
 
 un = @lift u_ts[$n]
 wn = @lift w_ts[$n]
@@ -390,12 +391,18 @@ qˡn = @lift qˡ_ts[$n]
 𝒬ᵛn = @lift 𝒬ᵛ_ts[$n]
 Σ𝒬n = @lift Σ𝒬_ts[$n]
 
+# speed, √(u²+w²)
+sn = @lift sqrt(u_ts[$n]^2 + w_ts[$n]^2)
+
+# cross-stream vorticity, ∂z(u) - ∂x(w)
+ξn = @lift ∂z(u_ts[$n]) - ∂x(w_ts[$n])
+
 fig = Figure(size=(800, 1000), fontsize=12)
 
 title = @lift "t = $(prettytime(times[$n]))"
 
-axu = Axis(fig[1, 1], xlabel="x (m)", ylabel="z (m)")
-axw = Axis(fig[1, 2], xlabel="x (m)", ylabel="z (m)")
+axs = Axis(fig[1, 1], xlabel="x (m)", ylabel="z (m)")
+axξ = Axis(fig[1, 2], xlabel="x (m)", ylabel="z (m)")
 axθ = Axis(fig[2, 1], xlabel="x (m)", ylabel="z (m)")
 axq = Axis(fig[2, 2], xlabel="x (m)", ylabel="z (m)")
 axT = Axis(fig[3, 1], xlabel="x (m)", ylabel="z (m)")
@@ -410,9 +417,9 @@ fig[0, :] = Label(fig, title, fontsize=22, tellwidth=false)
 # Compute color limits from the full time series
 θ_limits = extrema(θ_ts)
 T_limits = extrema(T_ts)
-u_limits = extrema(u_ts)
-w_max = max(abs(minimum(w_ts)), abs(maximum(w_ts)))
-w_limits = (-w_max, w_max)
+s_limits = (0, mean([maximum(u_ts), maximum(w_ts)]))
+ξ_limits = (-0.1, 0.1)
+
 qᵗ_max = maximum(qᵗ_ts)
 qˡ_max = maximum(qˡ_ts)
 
@@ -421,8 +428,8 @@ qˡ_max = maximum(qˡ_ts)
 𝒬_min = min(minimum(𝒬ᵀ_ts), minimum(𝒬ᵛ_ts), minimum(Σ𝒬_ts))
 𝒬_max = max(maximum(𝒬ᵀ_ts), maximum(𝒬ᵛ_ts), maximum(Σ𝒬_ts))
 
-hmu = heatmap!(axu, un, colorrange=u_limits, colormap=:balance)
-hmw = heatmap!(axw, wn, colorrange=w_limits, colormap=:balance)
+hms = heatmap!(axs, sn, colorrange=s_limits, colormap=:speed)
+hmξ = heatmap!(axξ, ξn, colorrange=ξ_limits, colormap=:balance)
 hmθ = heatmap!(axθ, θn, colorrange=θ_limits, colormap=:thermal)
 hmq = heatmap!(axq, qᵗn, colorrange=(0, qᵗ_max), colormap=Reverse(:Purples_4))
 hmT = heatmap!(axT, Tn, colorrange=T_limits)
@@ -442,8 +449,8 @@ Legend(fig[4, 3], ax𝒬)
 ylims!(axτ, -τˣ_max, τˣ_max)
 ylims!(ax𝒬, 𝒬_min, 𝒬_max)
 
-Colorbar(fig[1, 0], hmu, label="u (m/s)", flipaxis=false)
-Colorbar(fig[1, 3], hmw, label="w (m/s)")
+Colorbar(fig[1, 0], hms, label="√(u² + w²) (m/s)", flipaxis=false)
+Colorbar(fig[1, 3], hmξ, label="∂u/∂z - ∂w/∂x (1/s)")
 Colorbar(fig[2, 0], hmθ, label="θ (K)", flipaxis=false)
 Colorbar(fig[2, 3], hmq, label="qᵗ (kg/kg)")
 Colorbar(fig[3, 0], hmT, label="T (K)", flipaxis=false)
