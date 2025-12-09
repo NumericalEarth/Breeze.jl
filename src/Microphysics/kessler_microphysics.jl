@@ -22,6 +22,8 @@ $(TYPEDSIGNATURES)
 
 Kessler (1969) warm-rain bulk microphysics scheme following Klemp and Wilhelmson (1978).
 
+Fortran reference: https://gitlab.in2p3.fr/ipsl/projets/dynamico/dynamico/-/blob/master/src/dcmip2016_kessler_physic.f90
+
 This scheme represents three moisture categories:
 - Water vapor (`qᵛ`)
 - Cloud water (`qᶜ`) - liquid water that moves with the flow
@@ -79,6 +81,15 @@ function materialize_microphysical_fields(::KM, grid, boundary_conditions)
     wʳ = ZFaceField(grid)
     return (; ρqᵛ, ρqᶜ, ρqʳ, qᵛ, qᶜ, qʳ, Sᶜᵒⁿᵈ, Sᵃᵘᵗᵒ, Sᵃᶜᶜʳ, Sᵉᵛᵃᵖ, wʳ)
 end
+
+#
+# ρ = pᵣ / (Rᵐ T)
+# p′ = 
+# ρ = ρᵣ + ρ′
+# ∂t ρ + ∇⋅(ρ u) = ∇ ⋅ (ρᵣ u) + ∂t ρ′ + ∇ ⋅ (ρ′ u) + ∇ ⋅ (ρᵣ u′) = 0
+
+# O(0): ∇ ⋅ (ρᵣ u) = 0
+# O(ϵ): + ∂t ρ′ + ∇ ⋅ (ρ′ u) + ∇ ⋅ (ρᵣ u′) = 0
 
 @inline function update_microphysical_fields!(μ, ::KM, i, j, k, grid, ρ, 𝒰, p′, constants, Δt)
     T = temperature(𝒰, constants)
@@ -360,3 +371,79 @@ end
 
 # Default: no tendency for other fields
 @inline microphysical_tendency(i, j, k, grid, ::KM, name, μ, 𝒰, constants) = zero(grid)
+
+function microphysics_model_update!(km::KM, model)
+    grid = model.grid
+    arch = grid.architecture
+    Δt = model.clock.last_Δt
+
+    # Prognostic fields updated by Kessler scheme.
+    ρθ = model.formulation.thermodynamics.potential_temperature_density
+    ρqᵛ = model.microphysical_fields.ρqᵛ
+    ρqʳ = model.microphysical_fields.ρqʳ
+    ρqᶜˡ = model.microphysical_fields.ρqᶜˡ
+
+    # Diagnostic fields updated by Kessler scheme.
+    θ = model.formulation.thermodynamics.potential_temperature
+    qᵛ = model.microphysical_fields.qᵛ
+    qʳ = model.microphysical_fields.qʳ
+    qᶜˡ = model.microphysical_fields.qᶜˡ
+    T = model.temperature
+    Pʳ = model.microphysical_fields.precipitation_rate
+
+    fields_to_update = (ρθ, ρqᵛ, ρqʳ, ρqᶜˡ, θ, qᵛ, qʳ, qᶜˡ, T, Pʳ)
+    launch!(arch, grid, :xy, _kessler_microphysical_update!,
+            fields_to_update, grid, other_needed_fields...)
+
+    return nothing
+end
+
+@kernel function _kessler_microphysical_update!(fields, grid, everything_else...)
+    i, j = @index(Global, NTuple)
+
+    for k = 1:grid.Nz
+
+        # Saturation mixing ratio following KW eq. 2.11
+        rᵛˢ = kessler_saturation_mixing_ratio(T[i, j, k], pᵣ[i, j, k])
+
+        # Saturation adjustment: prod = (rv - rvs) / (1 + rvs*f5/(T - 36)^2)
+        prod = (rᵛ - rᵛˢ) / (1 + rᵛˢ * (4093 * 2.5e6 / 1003) / (T - 36)^2) 
+
+        # Net condensation rate (limited by available cloud water for evaporation)
+        # From Fortran: rc = max(rc + max(prod, -rc), 0)
+        # This means condensation is max(prod, -rc), i.e., if prod < 0, we can only evaporate up to rc
+        Sᶜᵒⁿᵈ = max(prod, -rᶜ) / Δt
+
+        # Cloud-to-rain conversion rate (autoconversion + accretion) following KW eq. 2.13a,b
+        # Original Fortran implicit formula:
+        # rrprod = rc - (rc - dt*max(0.001*(rc-0.001),0)) / (1 + dt*2.2*rr^0.875)
+        # This is an implicit Euler discretization that guarantees positivity.
+        # We use Δt to compute the effective rate.
+
+        # Implicit formula for rrprod (amount converted from cloud to rain in Δt)
+        rrprod = rᶜ - (rᶜ - Δt * max(0.001 * (rᶜ - 0.001), 0)) / (1 + Δt * 2.2 * rʳ^0.875)
+
+        # Convert to a rate (per unit time)
+        Sʳᵃⁱⁿ = rrprod / Δt
+
+        # Rain evaporation rate following KW eq. 2.14a,b
+        # Only occurs when subsaturated (rvs > rv)
+        r = 0.001 * ρ
+        rrr = r * rʳ  # Product of r and rain mixing ratio
+        numerator = (1.6 + 124.9 * rrr^0.2046) * rrr^0.525
+
+        p_mb = pᵣ / 100
+        pc = 3.8 / p_mb
+        subsaturation = max(rᵛˢ - rᵛ, 0)
+        denomerator = 2550000 * pc / (3.8 * rᵛˢ) + 540000
+        ern_rate = numerator / denomerator * subsaturation / (r * rᵛˢ + 1e-20)
+
+        # Evaporation is limited by available rain and available subsaturation
+        # From Fortran: ern = min(dt*(ern_rate), max(-prod - rc, 0), rr)
+        # The original Fortran computes ern as an amount, we want the rate
+        ern_max = max(-prod - rᶜ, 0)  # Maximum evaporable amount based on subsaturation
+        Sᵉᵛᵃᵖ = min(ern_rate, ern_max / Δt, rʳ / Δt)
+
+        #return Sᶜᵒⁿᵈ, Sʳᵃⁱⁿ, Sᵉᵛᵃᵖ
+    end
+end

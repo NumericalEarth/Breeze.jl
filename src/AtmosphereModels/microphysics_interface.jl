@@ -88,3 +88,10 @@ of the saturation adjustment `scheme`.
 If a scheme is non-adjusting, we just return `state`.
 """
 @inline adjust_thermodynamic_state(state, scheme::Nothing, thermo) = state
+
+"""
+    $(TYPEDSIGNATURES)
+
+Update anything you want based on `microphysics`.
+"""
+microphysics_model_update!(microphysics::Nothing, model) = nothing
