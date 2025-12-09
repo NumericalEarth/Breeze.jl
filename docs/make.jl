@@ -21,7 +21,7 @@ example_scripts = [
     "cloudy_thermal_bubble.jl",
     "cloudy_kelvin_helmholtz.jl",
     "bomex.jl",
-    # "prescribed_sst.jl", # this is a WIP
+    "prescribed_sst.jl",
 ]
 
 for script_file in example_scripts
@@ -36,7 +36,7 @@ example_pages = Any[
     "Cloudy thermal bubble" => "literated/cloudy_thermal_bubble.md",
     "Cloudy Kelvin-Helmholtz instability" => "literated/cloudy_kelvin_helmholtz.md",
     "Shallow cumulus convection (BOMEX)" => "literated/bomex.md",
-    # "Prescribed SST" => "literated/prescribed_sst.md",
+    "Prescribed sea surface temperature" => "literated/prescribed_sst.md",
 ]
 
 makedocs(
