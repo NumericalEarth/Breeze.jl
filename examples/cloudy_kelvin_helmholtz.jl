@@ -35,7 +35,7 @@ Nx, Nz = 384, 128   # resolution
 Lx, Lz = 10e3, 3e3  # domain extent
 
 grid = RectilinearGrid(CPU(); size = (Nx, Nz), x = (0, Lx), z = (0, Lz),
-                         topology = (Periodic, Flat, Bounded))
+                       topology = (Periodic, Flat, Bounded))
 
 # ## Model and microphysics
 # We construct the AtmosphereModel model with saturation adjustment microphysics.
