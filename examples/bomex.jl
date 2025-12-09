@@ -306,9 +306,15 @@ k = searchsortedfirst(800, z)
 @info "Saving slices at z = $(z[k]) m (k = $k)"
 
 u, v, w = model.velocities
-slice_outputs = (; w=w_slice, qˡ=qˡ_slice)
-simulation.output_writers[:slices] = JLD2Writer(model, (; w=w, qˡ=qˡ;
-                                                indices = (:, :, k),
+slice_fields = (; w, qˡ)
+slice_outputs = (
+    wxy = view(w, :, :, k),
+    qˡxy = view(qˡ, :, :, k),
+    wxz = view(w, :, 1, :),
+    qˡxz = view(qˡ, :, 1, :),
+)
+
+simulation.output_writers[:slices] = JLD2Writer(model, slice_outputs;
                                                 filename = "bomex_slices.jld2",
                                                 schedule = TimeInterval(30seconds),
                                                 overwrite_existing = true)
@@ -391,39 +397,47 @@ fig
 # We create an animation showing the evolution of vertical velocity and liquid
 # water at z = 800 m, which is near the cloud base level.
 
-wts = FieldTimeSeries("bomex_slices.jld2", "w")
-qˡts = FieldTimeSeries("bomex_slices.jld2", "qˡ")
+wxz_ts = FieldTimeSeries("bomex_slices.jld2", "wxz")
+qˡxz_ts = FieldTimeSeries("bomex_slices.jld2", "qˡxz")
+wxy_ts = FieldTimeSeries("bomex_slices.jld2", "wxy")
+qˡxy_ts = FieldTimeSeries("bomex_slices.jld2", "qˡxy")
 
-slice_times = wt.times
-Nt_slices = length(slice_times)
+times = wxz_ts.times
+Nt = length(times)
 
 # Create animation
-fig_anim = Figure(size=(1000, 500), fontsize=14)
-axw = Axis(fig_anim[1, 2], xlabel="x (m)", ylabel="y (m)", title="Vertical velocity w")
-axq = Axis(fig_anim[1, 3], xlabel="x (m)", ylabel="y (m)", title="Liquid water qˡ")
+slices_fig = Figure(size=(1000, 500), fontsize=14)
+axwxz = Axis(slices_fig[1, 2], xlabel="x (m)", ylabel="z (m)", title="Vertical velocity w")
+axqxz = Axis(slices_fig[1, 3], xlabel="x (m)", ylabel="z (m)", title="Liquid water qˡ")
+axwxy = Axis(slices_fig[2, 2], xlabel="x (m)", ylabel="y (m)")
+axqxy = Axis(slices_fig[2, 3], xlabel="x (m)", ylabel="y (m)")
 
 # Determine color limits from the data
-wmax = maximum(abs, wts)
-qˡmax = maximum(qˡts)
+wmax = maximum(abs, wxz_ts)
+qˡmax = maximum(qˡxz_ts)
 
 n = Observable(1)
+wxz_n = @lift wxz_ts[$n]
+qˡxz_n = @lift qˡxz_ts[$n]
+wxy_n = @lift wxy_ts[$n]
+qˡxy_n = @lift qˡxy_ts[$n]
+title_text = @lift "BOMEX slices at t = " * prettytime(times[$n])
 
-wn = @lift wts[$n]
-qˡn = @lift qˡts[$n]
-title_text = @lift "BOMEX: Horizontal slices at z ≈ 800 m, t = " * prettytime(slice_times[$n])
+hmw = heatmap!(axwxz, wxz_n, colormap=:balance, colorrange=(-wmax, wmax))
+hmq = heatmap!(axqxz, qˡxz_n, colormap=:dense, colorrange=(0, qˡmax))
+hmw = heatmap!(axwxy, wxy_n, colormap=:balance, colorrange=(-wmax, wmax))
+hmq = heatmap!(axqxy, qˡxy_n, colormap=:dense, colorrange=(0, qˡmax))
 
-hmw = heatmap!(axw, wn, colormap=:balance, colorrange=(-wmax, wmax))
-hmq = heatmap!(axq, qˡn, colormap=:dense, colorrange=(0, qˡmax))
+Colorbar(slices_fig[1:2, 1], hmw, label="w (m/s)", flipaxis=false)
+Colorbar(slices_fig[1:2, 4], hmq, label="qˡ (kg/kg)")
 
-Colorbar(fig_anim[1, 1], hmw, label="w (m/s)")
-Colorbar(fig_anim[1, 4], hmq, label="qˡ (kg/kg)")
-
-fig_anim[0, :] = Label(fig_anim, title_text, fontsize=18, tellwidth=false)
+slices_fig[0, :] = Label(slices_fig, title_text, fontsize=18, tellwidth=false)
 
 # Record animation
-record(fig_anim, "bomex_slices.mp4", 1:Nt_slices, framerate=10) do nn
+record(slices_fig, "bomex_slices.mp4", 1:Nt, framerate=10) do nn
     n[] = nn
 end
+nothing #hide
 
-@info "Animation saved to bomex_slices.mp4"
-fig_anim
+# ![](bomex_slices.mp4)
+ 
