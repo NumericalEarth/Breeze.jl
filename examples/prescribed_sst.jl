@@ -131,6 +131,7 @@ parameters = (;
 # ```
 # where ``φ`` represents potential temperature or specific humidity, ``Cᵩ`` is the
 # corresponding transfer coefficient, and ``U`` is the near-surface wind speed.
+# More on the bulk formulae could be found at https://clima.github.io/ClimaOceanDocumentation/stable/interface_fluxes/
 
 # We need interpolation operators to compute wind speed at the appropriate
 # grid locations for each flux calculation.
