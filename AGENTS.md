@@ -118,6 +118,10 @@ Breeze interfaces with ClimaOcean for coupled atmosphere-ocean simulations.
   - The examples and docs have their own `Project.toml` environment. When your run examples you need to use `examples/Project.toml`.
     When you build new examples, please add example-specific packages to `examples/Project.toml`. Do not add example-specific
     packages to the main Breeze Project.toml. You may also need to add relevant packages to AtmosphereProfilesLibrary.
+  - Do not use `interior` to plot Fields unless necessary. Always try to pass Field or windowed Field
+    (generated using `view(field, i, j, k)` where `i, j, k` may be indices or index ranges) first.
+  - In examples, use the suffix `ts` (no underscore) for "time series" and the suffix `n` (no underscore)
+    to refer to `FieldTimeSeries` indexed at time-index `n`.
 
 4. **Documentation Style**
   - Mathematical notation in `docs/src/appendix/notation.md`

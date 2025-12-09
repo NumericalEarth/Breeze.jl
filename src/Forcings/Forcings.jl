@@ -32,38 +32,10 @@ function materialize_atmosphere_model_forcing(forcings::Tuple, field, name, mode
     return MultipleForcings(materialized)
 end
 
-
-# Subsidence forcing
-function materialize_atmosphere_model_forcing(forcing::SubsidenceForcing, field, name, model_field_names, context)
-    grid = field.grid
-    
-    # Strip the rho prefix to get the specific field name (e.g., :rhou -> :u)
-    specific_name = strip_density_prefix(name)
-    
-    if !haskey(context.specific_fields, specific_name)
-        error("SubsidenceForcing is not supported for field $name. " *
-              "Available specific fields are: $(keys(context.specific_fields))")
-    end
-    
-    averaged_field = context.specific_fields[specific_name]
-    return materialize_subsidence_forcing(forcing, grid, context.reference_density, averaged_field)
-end
-
-"""
-    strip_density_prefix(name::Symbol)
-
-Convert a density-weighted field name to its specific counterpart by removing
-the rho prefix. For example, :rhou -> :u
-"""
-function strip_density_prefix(name::Symbol)
-    s = string(name)
-    if startswith(s, "ρ")
-        return Symbol(s[nextind(s, 1):end])
-    end
-    return name
-end
-
 # Handle compute_forcing! for MultipleForcings
 compute_forcing!(mf::MultipleForcings) = compute_forcing!(mf.forcings)
+
+# Fallback for other forcing types - do nothing
+compute_forcing!(forcing) = nothing
 
 end

@@ -31,7 +31,7 @@ using Random
 # (and 200 m horizontal resolution) to speed up the documentation build.
 # The full resolution case should be run for production simulations.
 
-Nx = Ny = 32
+Nx = Ny = 64
 Nz = 75
 
 x = y = (0, 6400)
@@ -121,7 +121,6 @@ lines(wˢ; axis = (xlabel = "wˢ (m/s)",))
 # This implementation --- which requires building `Field`s to represent horizontal averages
 # and computing it every time step --- is handled by `SubsidenceForcing`.
 
-wˢ = AtmosphericProfilesLibrary.Bomex_subsidence(FT)
 subsidence = SubsidenceForcing(wˢ)
 
 # ## Geostrophic forcing
@@ -136,7 +135,7 @@ coriolis = FPlane(f=3.76e-5)
 
 uᵍ = AtmosphericProfilesLibrary.Bomex_geostrophic_u(FT)
 vᵍ = AtmosphericProfilesLibrary.Bomex_geostrophic_v(FT)
-geostrophic = geostrophic_forcings(uᵍ, vᵍ)
+geostrophic = geostrophic_forcings(z -> uᵍ(z), z -> vᵍ(z))
 
 # ## Moisture tendency (drying)
 #
@@ -300,6 +299,20 @@ simulation.output_writers[:averages] = JLD2Writer(model, averaged_outputs; filen
                                                   schedule = AveragedTimeInterval(20minutes),
                                                   overwrite_existing = true)
 
+# Output horizontal slices at z = 600 m for animation
+# Find the k-index closest to z = 600 m
+z = Oceananigans.Grids.znodes(grid, Center())
+k = searchsortedfirst(800, z)
+@info "Saving slices at z = $(z[k]) m (k = $k)"
+
+u, v, w = model.velocities
+slice_outputs = (; w=w_slice, qˡ=qˡ_slice)
+simulation.output_writers[:slices] = JLD2Writer(model, (; w=w, qˡ=qˡ;
+                                                indices = (:, :, k),
+                                                filename = "bomex_slices.jld2",
+                                                schedule = TimeInterval(30seconds),
+                                                overwrite_existing = true)
+
 @info "Running BOMEX simulation..."
 run!(simulation)
 
@@ -372,3 +385,45 @@ fig
 # For production results comparable to the ones by [Siebesma2003](@citet),
 # the simulation should be run for 6 hours at full resolution (64² × 75),
 # e.g., on a GPU.
+
+# ## Animation of horizontal slices
+#
+# We create an animation showing the evolution of vertical velocity and liquid
+# water at z = 800 m, which is near the cloud base level.
+
+wts = FieldTimeSeries("bomex_slices.jld2", "w")
+qˡts = FieldTimeSeries("bomex_slices.jld2", "qˡ")
+
+slice_times = wt.times
+Nt_slices = length(slice_times)
+
+# Create animation
+fig_anim = Figure(size=(1000, 500), fontsize=14)
+axw = Axis(fig_anim[1, 2], xlabel="x (m)", ylabel="y (m)", title="Vertical velocity w")
+axq = Axis(fig_anim[1, 3], xlabel="x (m)", ylabel="y (m)", title="Liquid water qˡ")
+
+# Determine color limits from the data
+wmax = maximum(abs, wts)
+qˡmax = maximum(qˡts)
+
+n = Observable(1)
+
+wn = @lift wts[$n]
+qˡn = @lift qˡts[$n]
+title_text = @lift "BOMEX: Horizontal slices at z ≈ 800 m, t = " * prettytime(slice_times[$n])
+
+hmw = heatmap!(axw, wn, colormap=:balance, colorrange=(-wmax, wmax))
+hmq = heatmap!(axq, qˡn, colormap=:dense, colorrange=(0, qˡmax))
+
+Colorbar(fig_anim[1, 1], hmw, label="w (m/s)")
+Colorbar(fig_anim[1, 4], hmq, label="qˡ (kg/kg)")
+
+fig_anim[0, :] = Label(fig_anim, title_text, fontsize=18, tellwidth=false)
+
+# Record animation
+record(fig_anim, "bomex_slices.mp4", 1:Nt_slices, framerate=10) do nn
+    n[] = nn
+end
+
+@info "Animation saved to bomex_slices.mp4"
+fig_anim
