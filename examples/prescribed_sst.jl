@@ -42,17 +42,18 @@ scalar_advection = WENO(order=5)
 # and a prescribed sea surface temperature θˢ(x) that varies as a Gaussian with
 # a peak in the middle 10% of the domain.
 
-@inline sea_surface_temperature(x, p) = p.T₀ + p.ΔT * sign(x)
+@inline sea_surface_temperature(x, p) = p.T₀ + p.ΔT * sign(cos(2π * x / p.Lx))
 
 parameters = (;
-    constants, 
+    constants,
     drag_coefficient = 1e-3,
     heat_transfer_coefficient = 1e-3,
     vapor_transfer_coefficient = 1e-3,
     gust_speed = 1e-2,  # Minimum wind speed (m/s)
     T₀ = θ₀,   # Background SST (K)
     ΔT = 2,   # Maximum SST anomaly (K)
-    ρ₀ = Breeze.Thermodynamics.base_density(p₀, θ₀, constants)
+    ρ₀ = Breeze.Thermodynamics.base_density(p₀, θ₀, constants),
+    Lx = grid.Lx
 )
 
 # ## Boundary condition functions
@@ -111,14 +112,14 @@ end
 @inline function potential_temperature_flux(i, j, grid, clock, fields, parameters)
     Uᵍ = parameters.gust_speed
     Ũ = sqrt(s²ᶜᶜᶜ(i, j, grid, fields) + Uᵍ^2)
-    
+
     x = xnode(i, j, 1, grid, Center(), Center(), Center())
     θˢ = sea_surface_temperature(x, parameters)
-    
+
     ρ₀ = parameters.ρ₀
     Cᴴ = parameters.heat_transfer_coefficient
     Δθ = @inbounds fields.θ[i, j, 1] - θˢ
-    
+
     return - ρ₀ * Cᴴ * Ũ * Δθ
 end
 
@@ -128,13 +129,13 @@ end
     Cᵛ = parameters.vapor_transfer_coefficient
     Uᵍ = parameters.gust_speed
     Ũ = sqrt(s²ᶜᶜᶜ(i, j, grid, fields) + Uᵍ^2)
-    
+
     x = xnode(i, j, 1, grid, Center(), Center(), Center())
     Tˢ = sea_surface_temperature(x, parameters)
     ρ₀ = parameters.ρ₀
     qᵛ⁺ = surface_saturation_specific_humidity(Tˢ, ρ₀, constants)
     Δq = @inbounds fields.qᵗ[i, j, 1] - qᵛ⁺
-    
+
     return - ρ₀ * Cᵛ * Ũ * Δq
 end
 
@@ -222,7 +223,7 @@ run!(simulation)
 # The plotting code below can be uncommented to visualize the results.
 # It creates animations of the temperature, moisture, and condensate fields.
 
-using GLMakie
+using CairoMakie
 
 @assert isfile(output_filename) "Output file $(output_filename) not found."
 
@@ -244,9 +245,11 @@ w_snapshot = @lift w_ts[$n]
 qᵗ_snapshot = @lift qᵗ_ts[$n]
 T_snapshot = @lift T_ts[$n]
 qˡ_snapshot = @lift qˡ_ts[$n]
-title = @lift "t = $(prettytime(times[$n]))"
 
 fig = Figure(size=(800, 800), fontsize=12)
+
+title = @lift "t = $(prettytime(times[$n]))"
+
 axu = Axis(fig[1, 1], xlabel="x (m)", ylabel="z (m)")
 axw = Axis(fig[1, 2], xlabel="x (m)", ylabel="z (m)")
 axθ = Axis(fig[2, 1], xlabel="x (m)", ylabel="z (m)")
@@ -266,37 +269,47 @@ qˡ_max = maximum(qˡ_ts)
 hmu = heatmap!(axu, u_snapshot, colorrange=u_limits)
 hmw = heatmap!(axw, w_snapshot, colorrange=w_limits)
 hmθ = heatmap!(axθ, θ_snapshot, colorrange=θ_limits)
-hmq = heatmap!(axq, qᵗ_snapshot, colorrange=(0, qᵗ_max), colormap=:magma)
+hmq = heatmap!(axq, qᵗ_snapshot, colorrange=(0, qᵗ_max), colormap = Reverse(:Purples_4))
 hmT = heatmap!(axT, T_snapshot, colorrange=T_limits)
-hmqˡ = heatmap!(axqˡ, qˡ_snapshot, colorrange=(0, qˡ_max), colormap=:magma)
+hmqˡ = heatmap!(axqˡ, qˡ_snapshot, colorrange=(0, qˡ_max), colormap = Reverse(:Blues_4))
 
 Colorbar(fig[1, 0], hmu, label = "u [m/s]", vertical=true)
 Colorbar(fig[1, 3], hmw, label = "w [m/s]", vertical=true)
 Colorbar(fig[2, 0], hmθ, label = "θ [K]", vertical=true)
-Colorbar(fig[1, 3], hmq, label = "qᵗ", vertical=true)
-Colorbar(fig[2, 0], hmT, label = "T [K]", vertical=true)
-Colorbar(fig[2, 3], hmqˡ, label = "qˡ", vertical=true)
+Colorbar(fig[2, 3], hmq, label = "qᵗ", vertical=true)
+Colorbar(fig[3, 0], hmT, label = "T [K]", vertical=true)
+Colorbar(fig[3, 3], hmqˡ, label = "qˡ", vertical=true)
 
 fig
 
-record(fig, joinpath(@__DIR__, "prescribed_sst.mp4"), 1:Nt, framerate=12) do nn
+# And we can also make movies
+
+CairoMakie.record(fig, "prescribed_sst.mp4", 1:Nt, framerate=12) do nn
     n[] = nn
 end
+nothing #hide
+
+# ![](prescribed_sst.mp4)
+
 
 # Potential temperature animation
-θ_anim_index = Observable(1)
-θ_anim_snapshot = @lift θ_ts[$θ_anim_index]
-θ_anim_title = @lift "Potential temperature: t = $(prettytime(times[$θ_anim_index]))"
+n = Observable(1)
+θ_snapshot = @lift θ_ts[$n]
+title = @lift "Potential temperature: t = $(prettytime(times[$n]))"
 
-θ_fig = Figure(size=(500, 400), fontsize=12)
-θ_ax = Axis(θ_fig[1, 1], xlabel="x (m)", ylabel="z (m)")
-θ_fig[0, :] = Label(θ_fig, θ_anim_title, fontsize=22, tellwidth=false)
+fig = Figure(size=(500, 400), fontsize=12)
+ax = Axis(fig[1, 1], xlabel="x (m)", ylabel="z (m)")
 
-θ_heatmap = heatmap!(θ_ax, θ_anim_snapshot, colorrange=θ_limits)
-Colorbar(θ_fig[1, 2], θ_heatmap, label = "θ [K]", vertical=true)
+fig[0, :] = Label(fig, title, fontsize=22, tellwidth=false)
 
-record(θ_fig, joinpath(@__DIR__, "prescribed_sst_theta.mp4"), 1:Nt, framerate=12) do nn
-    θ_anim_index[] = nn
+hm = heatmap!(ax, θ_snapshot, colorrange=θ_limits)
+Colorbar(fig[1, 2], hm, label = "θ [K]", vertical=true)
+
+fig
+
+CairoMakie.record(fig, "prescribed_sst_theta.mp4", 1:Nt, framerate=12) do nn
+    n[] = nn
 end
-
 nothing #hide
+
+# ![](prescribed_sst_theta.mp4)
