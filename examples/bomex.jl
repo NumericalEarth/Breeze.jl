@@ -66,7 +66,7 @@ formulation = AnelasticFormulation(reference_state,
 # We convert these kinematic fluxes to mass fluxes by multiplying by surface density,
 # which we estimate for a dry state using the pressure and temperature at ``z=0``.
 
-w′θ′ = 8e-3    # K m/s (sensible heat flux)
+w′θ′ = 8e-3     # K m/s (sensible heat flux)
 w′qᵗ′ = 5.2e-5  # m/s (moisture flux)
 
 FT = eltype(grid)
@@ -83,7 +83,7 @@ q₀ = Breeze.Thermodynamics.MoistureMassFractions{FT} |> zero
 # A bulk drag parameterization is applied with friction velocity
 # ``u_* = 0.28`` m/s ([Siebesma2003](@citet); Appendix B, after Eq. B4).
 
-u★ = 0.28 # m/s
+u★ = 0.28  # m/s
 @inline ρu_drag(x, y, t, ρu, ρv, p) = - p.ρ₀ * p.u★^2 * ρu / sqrt(ρu^2 + ρv^2)
 @inline ρv_drag(x, y, t, ρu, ρv, p) = - p.ρ₀ * p.u★^2 * ρv / sqrt(ρu^2 + ρv^2)
 
@@ -106,9 +106,31 @@ u★ = 0.28 # m/s
 # where ``W^s = -6.5 \times 10^{-3}`` m/s (note the negative sign for "subisdence"),
 # ``z_1 = 1500`` m and ``z_2 = 2100`` m.
 #
-# The subsidence velocity profile is provided by [AtmosphericProfilesLibrary](https://github.com/CliMA/AtmosphericProfilesLibrary.jl).
-# Using `SubsidenceForcing`, we simply pass the profile function; horizontal averages
-# are computed automatically during the time-stepping.
+# The subsidence velocity profile is provided by [AtmosphericProfilesLibrary](https://github.com/CliMA/AtmosphericProfilesLibrary.jl),
+
+wˢ = Field{Nothing, Nothing, Face}(grid)
+wˢ_profile = AtmosphericProfilesLibrary.Bomex_subsidence(FT)
+set!(wˢ, z -> wˢ_profile(z))
+
+# and looks like:
+
+lines(wˢ; axis = (xlabel = "wˢ (m/s)",))
+
+# We apply subsidence as a forcing term to the horizontally-averaged prognostic variables.
+# This requires computing horizontal averages at each time step and storing them in
+# fields that can be accessed by the forcing functions.
+
+@inline w_dz_ϕ(i, j, k, grid, w, ϕ) = @inbounds w[i, j, k] * ∂zᶜᶜᶠ(i, j, k, grid, ϕ)
+
+@inline function Fρu_subsidence(i, j, k, grid, clock, fields, p)
+    w_dz_U = ℑzᵃᵃᶜ(i, j, k, grid, w_dz_ϕ, p.wˢ, p.u_avg)
+    return @inbounds - p.ρᵣ[i, j, k] * w_dz_U
+end
+
+@inline function Fρv_subsidence(i, j, k, grid, clock, fields, p)
+    w_dz_V = ℑzᵃᵃᶜ(i, j, k, grid, w_dz_ϕ, p.wˢ, p.v_avg)
+    return @inbounds - p.ρᵣ[i, j, k] * w_dz_V
+end
 
 wˢ = AtmosphericProfilesLibrary.Bomex_subsidence(FT)
 subsidence = SubsidenceForcing(wˢ)
@@ -210,7 +232,7 @@ u₀ = AtmosphericProfilesLibrary.Bomex_u(FT)
 
 # Breeze's current definition of the Exner function derives its reference
 # pressure from the base pressure of the reference profile, rather than using
-# the standard ``10^5`` Pa. Because of this we need to apply a correction to
+# the standard ``10^5`` Pa. Because of this, we need to apply a correction to
 # the initial condition: without this correction, our results do not match
 # [Siebesma2003](@citet) (and note that our outputted potential temperature
 # is displaced from [Siebesma2003](@citet)'s by precisely the factor below).
@@ -252,7 +274,8 @@ conjure_time_step_wizard!(simulation, cfl=0.7)
 
 # ## Output and progress
 #
-# We output horizontally-averaged profiles for post-processing.
+# We add a progress callback and output the 20-minute time-averages of the horizontally-averaged
+# profiles for post-processing.
 
 θ = liquid_ice_potential_temperature(model)
 qˡ = model.microphysical_fields.qˡ
