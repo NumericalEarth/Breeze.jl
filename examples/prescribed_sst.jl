@@ -120,14 +120,15 @@ parameters = (;
 #
 # The boundary conditions compute surface fluxes using bulk aerodynamic formulas.
 # For potential temperature thermodynamics, we specify fluxes for the potential
-# temperature density ρθ and moisture density ρqᵗ.
+# temperature density θ and moisture density ρqᵗ.
 #
 # The flux formulas follow the standard bulk aerodynamic approach:
+#
 # ```math
-# Jψ = - ρ₀ Cψ U (ϕₕ - ϕ₀)
+# J_ψ = - ρ₀ C_ψ U (φₕ - φ₀)
 # ```
-# where φ represents potential temperature or specific humidity, Cᵩ is the
-# corresponding transfer coefficient, and U is the near-surface wind speed.
+# where ``φ`` represents potential temperature or specific humidity, ``Cᵩ`` is the
+# corresponding transfer coefficient, and ``U`` is the near-surface wind speed.
 
 # We need interpolation operators to compute wind speed at the appropriate
 # grid locations for each flux calculation.
