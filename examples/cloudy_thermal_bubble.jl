@@ -10,7 +10,6 @@ using Oceananigans.Units
 using Statistics
 using Printf
 using CairoMakie
-using CUDA
 
 # ## Dry thermal bubble
 #
