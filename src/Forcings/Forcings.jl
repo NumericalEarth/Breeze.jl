@@ -13,7 +13,7 @@ export
 using DocStringExtensions: TYPEDSIGNATURES
 
 using Oceananigans: Average, Field, set!, compute!
-using Oceananigans.Grids: Center, Face, znodes
+using Oceananigans.Grids: Center, Face
 
 include("geostrophic_forcings.jl")
 include("subsidence_forcings.jl")
