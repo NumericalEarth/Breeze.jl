@@ -15,6 +15,7 @@
 
 using Breeze
 using Oceananigans.Units
+using Oceanaingans: Oceananigans
 
 using AtmosphericProfilesLibrary
 using Printf
@@ -26,12 +27,13 @@ using Oceananigans.Operators: ∂zᶜᶜᶠ, ℑzᵃᵃᶜ
 # ## Domain and grid
 #
 # The BOMEX domain is 6.4 km × 6.4 km horizontally with a vertical extent of 3 km
-# ([Siebesma2003](@citet); Section 3a). The original intercomparison used
+# ([Siebesma2003](@citet); Section 3a). The intercomparison uses
 # 64 × 64 × 75 grid points with 100 m horizontal resolution and 40 m vertical resolution.
 #
-# For this documentation example, we use a reduced horizontal resolution of 32²
-# (and 200 m horizontal resolution) to speed up the documentation build.
-# The full resolution case should be run for production simulations.
+# For this documentation example, we reduce the resolution to Float32. This yields a 10x
+# speed up on an NVidia T4 (which is used to build the docs).
+
+Oceananigans.defaults.FloatType = Float32
 
 Nx = Ny = 64
 Nz = 75
