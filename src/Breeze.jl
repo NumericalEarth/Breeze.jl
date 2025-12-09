@@ -22,6 +22,7 @@ export
     MixedPhaseEquilibrium,
     WarmPhaseEquilibrium,
     BulkMicrophysics,
+    KesslerMicrophysics,
     energy_density,
     specific_energy
 

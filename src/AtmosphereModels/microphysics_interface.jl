@@ -39,10 +39,10 @@ materialize_microphysical_fields(microphysics::Nothing, grid, boundary_condition
 """
 $(TYPEDSIGNATURES)
 
-Update microphysical fields for `microphysics_scheme` given the thermodynamic `state` and
-`thermo`dynamic parameters.
+Update microphysical fields for `microphysics_scheme` given the thermodynamic `state`,
+`thermo`dynamic parameters, perturbation pressure `p′`, and timestep `Δt`.
 """
-@inline update_microphysical_fields!(microphysical_fields, microphysics::Nothing, i, j, k, grid, density, state, thermo) = nothing
+@inline update_microphysical_fields!(microphysical_fields, microphysics::Nothing, i, j, k, grid, density, state, p′, thermo, Δt) = nothing
 
 """
 $(TYPEDSIGNATURES)
@@ -61,11 +61,12 @@ This may be changed in the future.
 """
 $(TYPEDSIGNATURES)
 
-Return the microphysical velocities associated with `microphysics` and `name`.
+Return the microphysical velocities associated with `microphysics`, `name`, and `microphysical_fields`.
 
 Must be either `nothing`, or a NamedTuple with three components `u, v, w`.
+The velocity components can be `nothing`, a constant, or a `Field`.
 """
-@inline microphysical_velocities(microphysics::Nothing, name) = nothing
+@inline microphysical_velocities(microphysics::Nothing, name, microphysical_fields) = nothing
 
 """
 $(TYPEDSIGNATURES)

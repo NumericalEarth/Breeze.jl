@@ -129,7 +129,7 @@ import Breeze.AtmosphereModels:
     update_microphysical_fields!,
     compute_moisture_fraction
 
-@inline update_microphysical_fields!(μ, em::ExplicitMicrophysics, i, j, k, grid, ρ, state, constants) =
+@inline update_microphysical_fields!(μ, em::ExplicitMicrophysics, i, j, k, grid, ρ, state, p′, constants, Δt) =
     @inbounds μ.qᵛ[i, j, k] = state.moisture_mass_fractions.vapor
 
 @inline function compute_moisture_fractions(i, j, k, grid,

@@ -38,8 +38,8 @@ maybe_adjust_thermodynamic_state(𝒰₀, bμp::NCBM, microphysical_fields, qᵗ
 prognostic_field_names(::NPBM) = tuple()
 materialize_microphysical_fields(bμp::NPBM, grid, bcs) = materialize_microphysical_fields(bμp.nucleation, grid, bcs)
 
-@inline function update_microphysical_fields!(μ, bμp::NPBM, i, j, k, grid, ρ, 𝒰, constants)
-    return update_microphysical_fields!(μ, bμp.nucleation, i, j, k, grid, ρ, 𝒰, constants)
+@inline function update_microphysical_fields!(μ, bμp::NPBM, i, j, k, grid, ρ, 𝒰, p′, constants, Δt)
+    return update_microphysical_fields!(μ, bμp.nucleation, i, j, k, grid, ρ, 𝒰, p′, constants, Δt)
 end
     
 @inline function compute_moisture_fractions(i, j, k, grid, bμp::NPBM, ρ, qᵗ, μ)

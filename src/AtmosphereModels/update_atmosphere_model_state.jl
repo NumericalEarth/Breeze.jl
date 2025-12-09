@@ -83,7 +83,9 @@ function compute_auxiliary_variables!(model)
             model.microphysics,
             model.microphysical_fields,
             energy_density,
-            model.moisture_density)
+            model.moisture_density,
+            model.pressure,
+            model.clock.last_Δt)
 
     # TODO: Can we compute the thermodynamic variable within halos as well, and avoid
     # halo filling later on?
@@ -126,13 +128,16 @@ end
                                                              microphysics,
                                                              microphysical_fields,
                                                              energy_density,
-                                                             moisture_density)
+                                                             moisture_density,
+                                                             perturbation_pressure,
+                                                             Δt)
     i, j, k = @index(Global, NTuple)
 
     @inbounds begin
         ρe = energy_density[i, j, k]
         ρqᵗ = moisture_density[i, j, k]
         ρ = formulation.reference_state.density[i, j, k]
+        p′ = perturbation_pressure[i, j, k]
 
         e = ρe / ρ
         qᵗ = ρqᵗ / ρ
@@ -154,7 +159,7 @@ end
 
     update_microphysical_fields!(microphysical_fields, microphysics,
                                  i, j, k, grid,
-                                 ρ, 𝒰₁, constants)
+                                 ρ, 𝒰₁, p′, constants, Δt)
                                  
     T = Thermodynamics.temperature(𝒰₁, constants)
     @inbounds temperature[i, j, k] = T
