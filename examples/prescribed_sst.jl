@@ -329,7 +329,6 @@ function progress(sim)
 end
 
 add_callback!(simulation, progress, IterationInterval(100))
-add_callback!(simulation, progress, TimeInterval(20minutes))
 
 # ## Output
 #
