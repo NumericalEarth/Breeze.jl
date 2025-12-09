@@ -17,7 +17,7 @@ N  = 0.01
 N² = N^2                    # Brunt–Väisälä frequency squared
 
 
-#  grid configuration
+# Grid configuration
 Nx, Nz = 300, 10
 Lx, Lz = 300kilometers, 10kilometers
 
