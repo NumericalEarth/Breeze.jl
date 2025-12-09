@@ -15,7 +15,7 @@
 
 using Breeze
 using Oceananigans.Units
-using Oceanaingans: Oceananigans
+using Oceananigans: Oceananigans
 
 using AtmosphericProfilesLibrary
 using Printf
