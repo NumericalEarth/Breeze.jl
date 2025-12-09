@@ -19,6 +19,9 @@ using Breeze
 using Oceananigans.Units
 using CairoMakie
 using Printf
+using Random
+
+Random.seed!(301)
 
 # ## Domain and grid
 #
@@ -96,9 +99,10 @@ qᵇ(z) = qᵗ₀ * exp(-(z - z₀)^2 / 2Δzᵗ^2)
 δu = 1e-3
 δq = 0.05 * qᵗ₀
 
-θᵢ(x, z) = θᵇ(z) + δθ * rand()
-qᵗᵢ(x, z) = qᵇ(z) + δq * rand()
-uᵢ(x, z) = uᵇ(z) + δu * rand()
+ϵ() = rand() - 1/2
+θᵢ(x, z) = θᵇ(z) + δθ * ϵ()
+qᵗᵢ(x, z) = qᵇ(z) + δq * ϵ()
+uᵢ(x, z) = uᵇ(z) + δu * ϵ()
 
 set!(model; u=uᵢ, qᵗ=qᵗᵢ, θ=θᵢ)
 

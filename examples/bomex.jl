@@ -21,8 +21,11 @@ using AtmosphericProfilesLibrary
 using Printf
 using CairoMakie
 using CUDA
+using Random
 
 using Oceananigans.Operators: ∂zᶜᶜᶠ, ℑzᵃᵃᶜ
+
+Random.seed!(938)
 
 # ## Domain and grid
 #
