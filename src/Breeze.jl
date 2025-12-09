@@ -6,24 +6,40 @@ are based on Oceananigans.
 module Breeze
 
 export
+    # AtmosphereModel
     MoistAirBuoyancy,
     ThermodynamicConstants,
     ReferenceState,
     AnelasticFormulation,
     AtmosphereModel,
-    PotentialTemperature,
-    PotentialTemperatureField,
+    StaticEnergyThermodynamics,
+    LiquidIcePotentialTemperatureThermodynamics,
     TemperatureField,
     IdealGas,
     CondensedPhase,
     mixture_gas_constant,
     mixture_heat_capacity,
+    static_energy_density,
+    static_energy,
+    total_energy,
+    potential_temperature_density,
+    liquid_ice_potential_temperature,
+
+    # Diagnostics
+    PotentialTemperature,
+    VirtualPotentialTemperature,
+    EquivalentPotentialTemperature,
+    StabilityEquivalentPotentialTemperature,
+    LiquidIcePotentialTemperature,
+    StaticEnergy,
+
+    # Microphysics
     SaturationAdjustment,
     MixedPhaseEquilibrium,
     WarmPhaseEquilibrium,
-    BulkMicrophysics,
-    energy_density,
-    specific_energy
+    SaturationSpecificHumidity,
+    SaturationSpecificHumidityField,
+    BulkMicrophysics
 
 using Oceananigans: Oceananigans, @at, AnisotropicMinimumDissipation, Average,
                     AveragedTimeInterval, BackgroundField, BetaPlane, Bounded,

@@ -50,27 +50,27 @@ pᵛ⁺(T) = pᵗʳ (T / Tᵗʳ)^{Δcᵝ / Rᵛ} \\exp \\left [ (1/Tᵗʳ - 1/T)
     The advantage of using reference values at the triple point is that the same values
     can then be used for both condensation (vapor → liquid) and deposition (vapor → ice).
 """
-@inline function saturation_vapor_pressure(T, thermo, surface)
-    ℒ₀ = absolute_zero_latent_heat(thermo, surface)
-    Δcᵝ = specific_heat_difference(thermo, surface)
+@inline function saturation_vapor_pressure(T, constants, surface)
+    ℒ₀ = absolute_zero_latent_heat(constants, surface)
+    Δcᵝ = specific_heat_difference(constants, surface)
 
-    Tᵗʳ = thermo.triple_point_temperature
-    pᵗʳ = thermo.triple_point_pressure
-    Rᵛ = vapor_gas_constant(thermo)
+    Tᵗʳ = constants.triple_point_temperature
+    pᵗʳ = constants.triple_point_pressure
+    Rᵛ = vapor_gas_constant(constants)
 
     return pᵗʳ * (T / Tᵗʳ)^(Δcᵝ / Rᵛ) * exp((1/Tᵗʳ - 1/T) * ℒ₀ / Rᵛ)
 end
 
-@inline function specific_heat_difference(thermo, phase::CondensedPhase)
-    cᵖᵛ = thermo.vapor.heat_capacity
+@inline function specific_heat_difference(constants, phase::CondensedPhase)
+    cᵖᵛ = constants.vapor.heat_capacity
     cᵝ = phase.heat_capacity
     return cᵖᵛ - cᵝ
 end
 
-@inline function absolute_zero_latent_heat(thermo, phase::CondensedPhase)
-    ℒᵣ = phase.reference_latent_heat # at thermo.energy_reference_temperature
-    Δcᵝ = specific_heat_difference(thermo, phase)
-    Tᵣ = thermo.energy_reference_temperature
+@inline function absolute_zero_latent_heat(constants, phase::CondensedPhase)
+    ℒᵣ = phase.reference_latent_heat # at constants.energy_reference_temperature
+    Δcᵝ = specific_heat_difference(constants, phase)
+    Tᵣ = constants.energy_reference_temperature
     return ℒᵣ - Δcᵝ * Tᵣ
 end
 
@@ -87,21 +87,21 @@ struct PlanarMixedPhaseSurface{FT}
     liquid_fraction :: FT
 end
 
-@inline specific_heat_difference(thermo, ::PlanarLiquidSurface) = specific_heat_difference(thermo, thermo.liquid)
-@inline specific_heat_difference(thermo, ::PlanarIceSurface) = specific_heat_difference(thermo, thermo.ice)
-@inline absolute_zero_latent_heat(thermo, ::PlanarLiquidSurface) = absolute_zero_latent_heat(thermo, thermo.liquid)
-@inline absolute_zero_latent_heat(thermo, ::PlanarIceSurface) = absolute_zero_latent_heat(thermo, thermo.ice)
+@inline specific_heat_difference(constants, ::PlanarLiquidSurface) = specific_heat_difference(constants, constants.liquid)
+@inline specific_heat_difference(constants, ::PlanarIceSurface) = specific_heat_difference(constants, constants.ice)
+@inline absolute_zero_latent_heat(constants, ::PlanarLiquidSurface) = absolute_zero_latent_heat(constants, constants.liquid)
+@inline absolute_zero_latent_heat(constants, ::PlanarIceSurface) = absolute_zero_latent_heat(constants, constants.ice)
 
-@inline function specific_heat_difference(thermo, surf::PlanarMixedPhaseSurface)
-    Δcˡ = specific_heat_difference(thermo, thermo.liquid)
-    Δcⁱ = specific_heat_difference(thermo, thermo.ice)
+@inline function specific_heat_difference(constants, surf::PlanarMixedPhaseSurface)
+    Δcˡ = specific_heat_difference(constants, constants.liquid)
+    Δcⁱ = specific_heat_difference(constants, constants.ice)
     λ = surf.liquid_fraction
     return λ * Δcˡ + (1 - λ) * Δcⁱ
 end
 
-@inline function absolute_zero_latent_heat(thermo, surf::PlanarMixedPhaseSurface)
-    ℒˡ₀ = absolute_zero_latent_heat(thermo, thermo.liquid)
-    ℒⁱ₀ = absolute_zero_latent_heat(thermo, thermo.ice)
+@inline function absolute_zero_latent_heat(constants, surf::PlanarMixedPhaseSurface)
+    ℒˡ₀ = absolute_zero_latent_heat(constants, constants.liquid)
+    ℒⁱ₀ = absolute_zero_latent_heat(constants, constants.ice)
     λ = surf.liquid_fraction
     return λ * ℒˡ₀ + (1 - λ) * ℒⁱ₀
 end
@@ -110,7 +110,7 @@ end
 $(TYPEDSIGNATURES)
 
 Compute the saturation specific humidity for a gas at temperature `T`, total
-density `ρ`, `thermo`dynamics, and over `surface` via:
+density `ρ`, `constants`dynamics, and over `surface` via:
 
 ```math
 qᵛ⁺ = pᵛ⁺ / (ρ Rᵛ T) ,
@@ -127,13 +127,13 @@ First we compute the saturation specific humidity over a liquid surface:
 using Breeze
 using Breeze.Thermodynamics: PlanarLiquidSurface, PlanarIceSurface, PlanarMixedPhaseSurface
 
-thermo = ThermodynamicConstants()
+constants = ThermodynamicConstants()
 T = 288.0 # Room temperature (K)
 p = 101325.0 # Mean sea-level pressure
-Rᵈ = Breeze.Thermodynamics.dry_air_gas_constant(thermo)
+Rᵈ = Breeze.Thermodynamics.dry_air_gas_constant(constants)
 q = zero(Breeze.Thermodynamics.MoistureMassFractions{Float64})
-ρ = Breeze.Thermodynamics.density(p, T, q, thermo)
-qᵛ⁺ˡ = Breeze.Thermodynamics.saturation_specific_humidity(T, ρ, thermo, PlanarLiquidSurface())
+ρ = Breeze.Thermodynamics.density(p, T, q, constants)
+qᵛ⁺ˡ = Breeze.Thermodynamics.saturation_specific_humidity(T, ρ, constants, PlanarLiquidSurface())
 
 # output
 0.010359995391195264
@@ -142,7 +142,7 @@ qᵛ⁺ˡ = Breeze.Thermodynamics.saturation_specific_humidity(T, ρ, thermo, Pl
 Note, this is slightly smaller than the saturation specific humidity over an ice surface:
 
 ```jldoctest saturation
-julia> qᵛ⁺ˡ = Breeze.Thermodynamics.saturation_specific_humidity(T, ρ, thermo, PlanarIceSurface())
+julia> qᵛ⁺ˡ = Breeze.Thermodynamics.saturation_specific_humidity(T, ρ, constants, PlanarIceSurface())
 0.011945100768555072
 ```
 
@@ -152,14 +152,14 @@ over the mixed phase surface,
 
 ```jldoctest saturation
 mixed_surface = PlanarMixedPhaseSurface(0.4)
-qᵛ⁺ᵐ = Breeze.Thermodynamics.saturation_specific_humidity(T, ρ, thermo, mixed_surface)
+qᵛ⁺ᵐ = Breeze.Thermodynamics.saturation_specific_humidity(T, ρ, constants, mixed_surface)
 
 # output
 0.01128386068542303
 ```
 """
-@inline function saturation_specific_humidity(T, ρ, thermo, surface)
-    pᵛ⁺ = saturation_vapor_pressure(T, thermo, surface)
-    Rᵛ = vapor_gas_constant(thermo)
+@inline function saturation_specific_humidity(T, ρ, constants, surface)
+    pᵛ⁺ = saturation_vapor_pressure(T, constants, surface)
+    Rᵛ = vapor_gas_constant(constants)
     return pᵛ⁺ / (ρ * Rᵛ * T)
 end

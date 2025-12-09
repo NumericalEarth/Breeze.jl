@@ -17,8 +17,10 @@ literated_dir = joinpath(@__DIR__, "src", "literated")
 mkpath(literated_dir)
 
 example_scripts = [
-    "thermal_bubble.jl",
+    "dry_thermal_bubble.jl",
+    "cloudy_thermal_bubble.jl",
     "cloudy_kelvin_helmholtz.jl",
+    "bomex.jl",
     # "prescribed_sst.jl", # this is a WIP
 ]
 
@@ -30,8 +32,10 @@ for script_file in example_scripts
 end
 
 example_pages = Any[
-    "Thermal bubble" => "literated/thermal_bubble.md",
+    "Stratified dry thermal bubble" => "literated/dry_thermal_bubble.md",
+    "Cloudy thermal bubble" => "literated/cloudy_thermal_bubble.md",
     "Cloudy Kelvin-Helmholtz instability" => "literated/cloudy_kelvin_helmholtz.md",
+    "Shallow cumulus convection (BOMEX)" => "literated/bomex.md",
     # "Prescribed SST" => "literated/prescribed_sst.md",
 ]
 
@@ -44,6 +48,9 @@ makedocs(
         "Home" => "index.md",
         "Examples" => example_pages,
         "Thermodynamics" => "thermodynamics.md",
+        "AtmosphereModel" => Any[
+            "Diagnostics" => "atmosphere_model/diagnostics.md",
+        ],
         "Microphysics" => Any[
             "Overview" => "microphysics/microphysics_overview.md",
             "Warm-phase saturation adjustment" => "microphysics/warm_phase_saturation_adjustment.md",

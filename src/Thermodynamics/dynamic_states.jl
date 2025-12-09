@@ -2,49 +2,80 @@ abstract type AbstractThermodynamicState{FT} end
 
 @inline Base.eltype(::AbstractThermodynamicState{FT}) where FT = FT
 
-struct PotentialTemperatureState{FT} <: AbstractThermodynamicState{FT}
+@inline function density(𝒰::AbstractThermodynamicState, constants)
+    pᵣ = 𝒰.reference_pressure
+    T = temperature(𝒰, constants)
+    q = 𝒰.moisture_mass_fractions
+    return density(pᵣ, T, q, constants)
+end
+
+@inline function saturation_specific_humidity(𝒰::AbstractThermodynamicState, constants, equil)
+    T = temperature(𝒰, constants)
+    ρ = density(𝒰, constants)
+    return saturation_specific_humidity(T, ρ, constants, equil)
+end
+
+#####
+##### Liquid-ice potential temperature state
+#####
+
+struct LiquidIcePotentialTemperatureState{FT} <: AbstractThermodynamicState{FT}
     potential_temperature :: FT
     moisture_mass_fractions :: MoistureMassFractions{FT}
     base_pressure :: FT
     reference_pressure :: FT
 end
 
-@inline is_absolute_zero(𝒰::PotentialTemperatureState) = 𝒰.potential_temperature == 0
+@inline is_absolute_zero(𝒰::LiquidIcePotentialTemperatureState) = 𝒰.potential_temperature == 0
 
-@inline function exner_function(𝒰::PotentialTemperatureState, thermo::ThermodynamicConstants)
+@inline function exner_function(𝒰::LiquidIcePotentialTemperatureState, constants::ThermodynamicConstants)
     q = 𝒰.moisture_mass_fractions
-    Rᵐ = mixture_gas_constant(q, thermo)
-    cᵖᵐ = mixture_heat_capacity(q, thermo)
+    Rᵐ = mixture_gas_constant(q, constants)
+    cᵖᵐ = mixture_heat_capacity(q, constants)
     pᵣ = 𝒰.reference_pressure
     p₀ = 𝒰.base_pressure
     return (pᵣ / p₀)^(Rᵐ / cᵖᵐ)
 end
 
-@inline total_specific_moisture(state::PotentialTemperatureState) =
+@inline total_specific_moisture(state::LiquidIcePotentialTemperatureState) =
     total_specific_moisture(state.moisture_mass_fractions)
 
-@inline with_moisture(𝒰::PotentialTemperatureState{FT}, q::MoistureMassFractions{FT}) where FT =
-    PotentialTemperatureState{FT}(𝒰.potential_temperature, q, 𝒰.base_pressure, 𝒰.reference_pressure)
+@inline with_moisture(𝒰::LiquidIcePotentialTemperatureState{FT}, q::MoistureMassFractions{FT}) where FT =
+    LiquidIcePotentialTemperatureState{FT}(𝒰.potential_temperature, q, 𝒰.base_pressure, 𝒰.reference_pressure)
 
-@inline function temperature(𝒰::PotentialTemperatureState, thermo::ThermodynamicConstants)
+@inline function temperature(𝒰::LiquidIcePotentialTemperatureState, constants::ThermodynamicConstants)
     θ = 𝒰.potential_temperature
-    Π = exner_function(𝒰, thermo)
+    Π = exner_function(𝒰, constants)
 
     q = 𝒰.moisture_mass_fractions
-    cᵖᵐ = mixture_heat_capacity(q, thermo)
-    ℒˡᵣ = thermo.liquid.reference_latent_heat
-    ℒⁱᵣ = thermo.ice.reference_latent_heat
+    cᵖᵐ = mixture_heat_capacity(q, constants)
+    ℒˡᵣ = constants.liquid.reference_latent_heat
+    ℒⁱᵣ = constants.ice.reference_latent_heat
     qˡ = q.liquid
     qⁱ = q.ice
 
-    return Π*θ + (ℒˡᵣ*qˡ + ℒⁱᵣ*qⁱ) / cᵖᵐ 
+    return Π * θ + (ℒˡᵣ * qˡ + ℒⁱᵣ * qⁱ) / cᵖᵐ 
 end
 
-@inline function density(𝒰::PotentialTemperatureState, thermo)
-    pᵣ = 𝒰.reference_pressure
-    T = temperature(𝒰, thermo)
+@inline function with_temperature(𝒰::LiquidIcePotentialTemperatureState, T, constants)
+    Π = exner_function(𝒰, constants)
     q = 𝒰.moisture_mass_fractions
-    return density(pᵣ, T, q, thermo)
+    cᵖᵐ = mixture_heat_capacity(q, constants)
+    ℒˡᵣ = constants.liquid.reference_latent_heat
+    ℒⁱᵣ = constants.ice.reference_latent_heat
+    qˡ = q.liquid
+    qⁱ = q.ice
+
+    θ = (T - (ℒˡᵣ * qˡ + ℒⁱᵣ * qⁱ) / cᵖᵐ) / Π
+
+    return LiquidIcePotentialTemperatureState(θ, q, 𝒰.base_pressure, 𝒰.reference_pressure)
+end
+
+@inline function density(𝒰::LiquidIcePotentialTemperatureState, constants)
+    pᵣ = 𝒰.reference_pressure
+    T = temperature(𝒰, constants)
+    q = 𝒰.moisture_mass_fractions
+    return density(pᵣ, T, q, constants)
 end
 
 #####
@@ -64,32 +95,34 @@ end
 @inline with_moisture(𝒰::StaticEnergyState{FT}, q::MoistureMassFractions{FT}) where FT =
     StaticEnergyState{FT}(𝒰.static_energy, q, 𝒰.height, 𝒰.reference_pressure)
 
-@inline function temperature(𝒰::StaticEnergyState, thermo::ThermodynamicConstants)
+@inline function temperature(𝒰::StaticEnergyState, constants::ThermodynamicConstants)
     e = 𝒰.static_energy
     q = 𝒰.moisture_mass_fractions
-    cᵖᵐ = mixture_heat_capacity(q, thermo)
+    cᵖᵐ = mixture_heat_capacity(q, constants)
 
-    g = thermo.gravitational_acceleration
+    g = constants.gravitational_acceleration
     z = 𝒰.height
 
-    ℒˡᵣ = thermo.liquid.reference_latent_heat
-    ℒⁱᵣ = thermo.ice.reference_latent_heat
+    ℒˡᵣ = constants.liquid.reference_latent_heat
+    ℒⁱᵣ = constants.ice.reference_latent_heat
     qˡ = q.liquid
     qⁱ = q.ice
 
     # e = cᵖᵐ * T + g * z - ℒˡᵣ * qˡ - ℒⁱᵣ * qⁱ
-    return (e - g*z + ℒˡᵣ*qˡ + ℒⁱᵣ*qⁱ) / cᵖᵐ
+    return (e - g * z + ℒˡᵣ * qˡ + ℒⁱᵣ * qⁱ) / cᵖᵐ
 end
 
-@inline function density(𝒰::AbstractThermodynamicState, thermo)
-    pᵣ = 𝒰.reference_pressure
-    T = temperature(𝒰, thermo)
+@inline function with_temperature(𝒰::StaticEnergyState, T, constants)
     q = 𝒰.moisture_mass_fractions
-    return density(pᵣ, T, q, thermo)
-end
+    cᵖᵐ = mixture_heat_capacity(q, constants)
+    g = constants.gravitational_acceleration
+    z = 𝒰.height
+    ℒˡᵣ = constants.liquid.reference_latent_heat
+    ℒⁱᵣ = constants.ice.reference_latent_heat
+    qˡ = q.liquid
+    qⁱ = q.ice
 
-@inline function saturation_specific_humidity(𝒰::AbstractThermodynamicState, thermo, equil)
-    T = temperature(𝒰, thermo)
-    ρ = density(𝒰, thermo)
-    return saturation_specific_humidity(T, ρ, thermo, equil)
+    e = cᵖᵐ * T + g * z - ℒˡᵣ * qˡ - ℒⁱᵣ * qⁱ
+
+    return StaticEnergyState(e, q, z, 𝒰.reference_pressure)
 end

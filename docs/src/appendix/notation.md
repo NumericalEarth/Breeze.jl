@@ -17,7 +17,7 @@ A few notes about the following table:
   a "reference state", which is an adiabatic, hydrostatic solution to the equations of motion. But there is also an
   "energy reference temperature" and "reference latent heat", which are thermodynamic constants required to define
   the internal energy of moist atmospheric constituents.
-* Mapping to AM fields: `ρe` corresponds to `model.energy_density`, `ρqᵗ` to `model.moisture_density`, and `qᵗ` to `model.specific_moisture`.
+* Mapping to AM fields: `ρe` corresponds to `energy_density(model)`, `ρqᵗ` to `model.moisture_density`, and `qᵗ` to `model.specific_moisture`.
 
 The following table also uses a few conventions that suffuse the source code and which are internalized by wise developers:
 
@@ -73,12 +73,19 @@ The following table also uses a few conventions that suffuse the source code and
 | ``Tᵣ``                                | `Tᵣ`          | `TC.energy_reference_temperature`  | Reference temperature for internal energy relations and latent heat |
 | ``\mathcal{L}^l_r``                   | `ℒˡᵣ`         | `TC.liquid.reference_latent_heat`  | Latent heat of condensation at the energy reference temperature |
 | ``\mathcal{L}^i_r``                   | `ℒⁱᵣ`         | `TC.ice.reference_latent_heat`     | Latent heat of deposition at the energy reference temperature |
+| ``\mathcal{L}^l(T)``                  | `ℒˡ`          | `liquid_latent_heat(T, constants)` | Temperature-dependent latent heat of condensation |
+| ``\mathcal{L}^i(T)``                  | `ℒⁱ`          | `ice_latent_heat(T, constants)`    | Temperature-dependent latent heat of deposition |
 | ``θ₀``                                | `θ₀`          | `RS.potential_temperature`         | (Constant) reference potential temperature for the anelastic formulation |
 | ``p₀``                                | `p₀`          | `RS.base_pressure`                 | Base (surface) reference pressure |
 | ``ρᵣ``                                | `ρᵣ`          | `RS.density`                       | Density of a dry reference state for the anelastic formulation |
 | ``αᵣ``                                | `αᵣ`          |                                    | Specific volume of a dry reference state, ``αᵣ = Rᵈ θ₀ / pᵣ`` |
 | ``p_r``                               | `pᵣ`          | `RS.pressure`                      | Pressure of a dry adiabatic reference pressure for the anelastic formulation |
 | ``\Pi``                               | `Π`           |                                    | Exner function, ``Π = (pᵣ / p₀)^{Rᵐ / cᵖᵐ}`` |
+| ``θᵛ``                                | `θᵛ`          |                                    | Virtual potential temperature |
+| ``θᵉ``                                | `θᵉ`          |                                    | Equivalent potential temperature |
+| ``θˡⁱ``                               | `θˡⁱ`         |                                    | Liquid-ice potential temperature |
+| ``θᵇ``                                | `θᵇ`          |                                    | Stability-equivalent potential temperature (for moist Brunt-Väisälä) |
+| ``θ``                                 | `θ`           |                                    | Shorthand for liquid-ice potential temperature (used in [`set!`](https://clima.github.io/OceananigansDocumentation/stable/appendix/library/#Oceananigans.Fields.set!)) |
 | ``\Delta t``                          | `Δt`          | `Simulation.Δt`                    | Time step |
 | ``\boldsymbol{\tau}``                 | `τ`           |                                    | Kinematic subgrid/viscous stress tensor (per unit mass) |
 | ``\boldsymbol{\mathcal{T}}``          | `𝒯`           |                                   | Dynamic stress tensor used in anelastic momentum, ``\mathcal{T} = ρᵣ τ`` |
