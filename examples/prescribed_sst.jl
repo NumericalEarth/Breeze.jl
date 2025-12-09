@@ -418,7 +418,8 @@ qˡ_max = maximum(qˡ_ts)
 
 # Flux limits
 τˣ_max = max(abs(minimum(τˣ_ts)), abs(maximum(τˣ_ts)))
-𝒬_min, 𝒬_max = extrema(Σ𝒬_ts)
+𝒬_min = min(minimum(𝒬ᵀ_ts), minimum(𝒬ᵛ_ts), minimum(Σ𝒬_ts))
+𝒬_max = max(maximum(𝒬ᵀ_ts), maximum(𝒬ᵛ_ts), maximum(Σ𝒬_ts))
 
 hmu = heatmap!(axu, un, colorrange=u_limits, colormap=:balance)
 hmw = heatmap!(axw, wn, colorrange=w_limits, colormap=:balance)
@@ -429,9 +430,13 @@ hmqˡ = heatmap!(axqˡ, qˡn, colorrange=(0, qˡ_max), colormap=Reverse(:Blues_4
 
 # Surface flux line plots
 lines!(axτ, τˣn, color=:black, linewidth=2)
-lines!(ax𝒬, 𝒬ᵀn, color=:firebrick, linewidth=2)
-lines!(ax𝒬, 𝒬ᵛn, color=:blue, linewidth=2)
-lines!(ax𝒬, Σ𝒬n, color=:green, linewidth=4)
+lines!(axτ, [-grid.Lx/2, grid.Lx/2], [0, 0], color=:grey, linestyle=:dash)
+
+lines!(ax𝒬, 𝒬ᵀn, color=:firebrick, linewidth=2, label="sensible")
+lines!(ax𝒬, 𝒬ᵛn, color=:blue, linewidth=2, label="latent")
+lines!(ax𝒬, Σ𝒬n, color=:green, linewidth=4, label="total")
+lines!(ax𝒬, [-grid.Lx/2, grid.Lx/2], [0, 0], color=:grey, linestyle=:dash)
+Legend(fig[4, 3], ax𝒬)
 
 # Set y-limits for flux plots
 ylims!(axτ, -τˣ_max, τˣ_max)
