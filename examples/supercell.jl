@@ -38,7 +38,7 @@ grid = RectilinearGrid(GPU(),
 pᵣ, θᵣ = 100000, 300
 thermo = ThermodynamicConstants()
 reference_state = ReferenceState(grid, thermo, base_pressure=pᵣ, potential_temperature=θᵣ)
-formulation = AnelasticFormulation(reference_state)
+formulation = AnelasticFormulation(reference_state, thermodynamics=:LiquidIcePotentialTemperature)
 
 θₜᵣ = 343           # tropopause potential temperature [K]
 zₜᵣ = 12000         # tropopause height [m]
