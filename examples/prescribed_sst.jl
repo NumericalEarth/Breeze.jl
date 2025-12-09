@@ -450,15 +450,13 @@ ylims!(axτ, -τˣ_max, τˣ_max)
 ylims!(ax𝒬, 𝒬_min, 𝒬_max)
 
 Colorbar(fig[1, 0], hms, label="√(u² + w²) (m/s)", flipaxis=false)
-Colorbar(fig[1, 3], hmξ, label="∂u/∂z - ∂w/∂x (1/s)")
+Colorbar(fig[1, 3], hmξ, label="∂u/∂z - ∂w/∂x (s⁻¹)")
 Colorbar(fig[2, 0], hmθ, label="θ (K)", flipaxis=false)
 Colorbar(fig[2, 3], hmq, label="qᵗ (kg/kg)")
 Colorbar(fig[3, 0], hmT, label="T (K)", flipaxis=false)
 Colorbar(fig[3, 3], hmqˡ, label="qˡ (kg/kg)")
 
-fig
-
-# And we can also make movies
+# Now we are ready to make a cool animation.
 
 CairoMakie.record(fig, "prescribed_sst.mp4", 1:Nt, framerate=12) do nn
     n[] = nn
