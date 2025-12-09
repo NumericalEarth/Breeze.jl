@@ -89,21 +89,23 @@ scalar_advection = WENO(order=5)
 # creating a sharp SST front. This idealized pattern drives a strong circulation
 # with rising motion over the warm side and sinking motion over the cold side.
 
-ΔT = 2
-T₀_func(x) = θ₀ + ΔT * sign(cos(2π * x / grid.Lx))
-
-T₀ = Field{Center, Center, Nothing}(grid)
-set!(T₀, T₀_func)
-
 using Breeze.Thermodynamics:
     saturation_specific_humidity,
     base_density,
     PlanarLiquidSurface
 
-qᵛ₀ = Field{Center, Center, Nothing}(grid)
+ΔT = 2
 ρ₀ = base_density(p₀, θ₀, constants)
 surface = PlanarLiquidSurface()
-qᵛ₀_func(x) = saturation_specific_humidity(T₀(x), ρ₀, constants, surface)
+
+# Sea surface temperature field
+T₀_func(x) = θ₀ + ΔT * sign(cos(2π * x / grid.Lx))
+T₀ = Field{Center, Center, Nothing}(grid)
+set!(T₀, T₀_func)
+
+# Saturation specific humidity at sea surface (use function, not field)
+qᵛ₀_func(x) = saturation_specific_humidity(T₀_func(x), ρ₀, constants, surface)
+qᵛ₀ = Field{Center, Center, Nothing}(grid)
 set!(qᵛ₀, qᵛ₀_func)
 
 parameters = (;
@@ -277,14 +279,11 @@ qᵗ = model.specific_moisture
 #
 # where Jᵀ is the temperature flux and Jᵛ is the moisture flux.
 
-ρu = model.momentum.ρu
-ρθ = model.tracers.ρθ
-ρqᵗ = model.moisture_density
-
 # Surface momentum flux
 τˣ = BoundaryConditionOperation(ρu, :bottom, model)
 
 # Sensible heat flux: 𝒬ᵀ = cᵖᵐ × Jᵀ
+ρθ = liquid_ice_potential_temperature_density(model)
 cᵖᵈ = constants.dry_air.heat_capacity
 cᵖᵛ = constants.vapor.heat_capacity
 cᵖᵐ = cᵖᵈ * (1 - qᵛ₀) + cᵖᵛ * qᵛ₀
@@ -292,6 +291,7 @@ Jᵀ = BoundaryConditionOperation(ρθ, :bottom, model)
 𝒬ᵀ = cᵖᵐ * Jᵀ
 
 # Latent heat flux: 𝒬ᵛ = ℒˡ × Jᵛ
+ρqᵗ = model.moisture_density
 ℒˡ = Breeze.Thermodynamics.liquid_latent_heat(T₀, constants)
 Jᵛ = BoundaryConditionOperation(ρqᵗ, :bottom, model)
 𝒬ᵛ = ℒˡ * Jᵛ
@@ -327,7 +327,7 @@ function progress(sim)
     return nothing
 end
 
-add_callback!(simulation, progress, IterationInterval(10))
+add_callback!(simulation, progress, IterationInterval(100))
 
 # ## Output
 #
@@ -336,7 +336,7 @@ add_callback!(simulation, progress, IterationInterval(10))
 
 output_filename = joinpath(@__DIR__, "prescribed_sst_convection.jld2")
 qᵗ = model.specific_moisture
-outputs = merge(model.velocities, (; T, θ, qˡ, qᵛ⁺, qᵗ, τˣ, 𝒬ᵀ, 𝒬ᵛ))
+outputs = merge(model.velocities, (; T, θ, qˡ, qᵛ⁺, qᵗ, τˣ, 𝒬ᵀ, 𝒬ᵛ, Σ𝒬=𝒬ᵀ+𝒬ᵛ))
 
 ow = JLD2Writer(model, outputs;
                 filename = output_filename,
@@ -367,25 +367,23 @@ qˡ_ts = FieldTimeSeries(output_filename, "qˡ")
 τˣ_ts = FieldTimeSeries(output_filename, "τˣ")
 𝒬ᵀ_ts = FieldTimeSeries(output_filename, "𝒬ᵀ")
 𝒬ᵛ_ts = FieldTimeSeries(output_filename, "𝒬ᵛ")
+Σ𝒬_ts = FieldTimeSeries(output_filename, "Σ𝒬")
 
 times = θ_ts.times
 Nt = length(θ_ts)
 
 n = Observable(1)
 
-u_snapshot = @lift u_ts[$n]
-w_snapshot = @lift w_ts[$n]
-θ_snapshot = @lift θ_ts[$n]
-qᵗ_snapshot = @lift qᵗ_ts[$n]
-T_snapshot = @lift T_ts[$n]
-qˡ_snapshot = @lift qˡ_ts[$n]
-τˣ_snapshot = @lift interior(τˣ_ts[$n], :, 1, 1)
-
-# Total surface heat flux: sensible + latent
-𝒬_snapshot = @lift interior(𝒬ᵀ_ts[$n], :, 1, 1) .+ interior(𝒬ᵛ_ts[$n], :, 1, 1)
-
-# Get x coordinates for the surface flux line plots
-x = xnodes(τˣ_ts)
+un = @lift u_ts[$n]
+wn = @lift w_ts[$n]
+θn = @lift θ_ts[$n]
+qᵗn = @lift qᵗ_ts[$n]
+Tn = @lift T_ts[$n]
+qˡn = @lift qˡ_ts[$n]
+τˣn = @lift τˣ_ts[$n]
+𝒬ᵀn = @lift 𝒬ᵀ_ts[$n]
+𝒬ᵛn = @lift 𝒬ᵛ_ts[$n]
+Σ𝒬n = @lift Σ𝒬_ts[$n]
 
 fig = Figure(size=(800, 1000), fontsize=12)
 
@@ -415,21 +413,20 @@ qˡ_max = maximum(qˡ_ts)
 
 # Flux limits
 τˣ_max = max(abs(minimum(τˣ_ts)), abs(maximum(τˣ_ts)))
-𝒬ᵀ_min, 𝒬ᵀ_max = extrema(𝒬ᵀ_ts)
-𝒬ᵛ_min, 𝒬ᵛ_max = extrema(𝒬ᵛ_ts)
-𝒬_min = 𝒬ᵀ_min + 𝒬ᵛ_min
-𝒬_max = 𝒬ᵀ_max + 𝒬ᵛ_max
+𝒬_min, 𝒬_max = extrema(Σ𝒬_ts)
 
-hmu = heatmap!(axu, u_snapshot, colorrange=u_limits, colormap=:balance)
-hmw = heatmap!(axw, w_snapshot, colorrange=w_limits, colormap=:balance)
-hmθ = heatmap!(axθ, θ_snapshot, colorrange=θ_limits)
-hmq = heatmap!(axq, qᵗ_snapshot, colorrange=(0, qᵗ_max), colormap=Reverse(:Purples_4))
-hmT = heatmap!(axT, T_snapshot, colorrange=T_limits)
-hmqˡ = heatmap!(axqˡ, qˡ_snapshot, colorrange=(0, qˡ_max), colormap=Reverse(:Blues_4))
+hmu = heatmap!(axu, un, colorrange=u_limits, colormap=:balance)
+hmw = heatmap!(axw, wn, colorrange=w_limits, colormap=:balance)
+hmθ = heatmap!(axθ, θn, colorrange=θ_limits)
+hmq = heatmap!(axq, qᵗn, colorrange=(0, qᵗ_max), colormap=Reverse(:Purples_4))
+hmT = heatmap!(axT, Tn, colorrange=T_limits)
+hmqˡ = heatmap!(axqˡ, qˡn, colorrange=(0, qˡ_max), colormap=Reverse(:Blues_4))
 
 # Surface flux line plots
-lines!(axτ, x, τˣ_snapshot, color=:black, linewidth=2)
-lines!(ax𝒬, x, 𝒬_snapshot, color=:firebrick, linewidth=2)
+lines!(axτ, x, τˣn, color=:black, linewidth=2)
+lines!(ax𝒬, x, 𝒬ᵀn, color=:firebrick, linewidth=2)
+lines!(ax𝒬, x, 𝒬ᵛn, color=:blue, linewidth=2)
+lines!(ax𝒬, x, Σ𝒬n, color=:green, linewidth=4)
 
 # Set y-limits for flux plots
 ylims!(axτ, -τˣ_max, τˣ_max)

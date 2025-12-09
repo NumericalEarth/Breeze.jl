@@ -22,7 +22,7 @@ export
     static_energy_density,
     static_energy,
     total_energy,
-    potential_temperature_density,
+    liquid_ice_potential_temperature_density,
     liquid_ice_potential_temperature,
 
     # Diagnostics
