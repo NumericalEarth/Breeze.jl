@@ -15,7 +15,7 @@ bib = CitationBibliography(bib_filepath, style=:authoryear)
 examples_src_dir = joinpath(@__DIR__, "..", "examples")
 literated_dir = joinpath(@__DIR__, "src", "literated")
 mkpath(literated_dir)
-# We'll append the following postable to the literate examples, to include
+# We'll append the following postamble to the literate examples, to include
 # information about the computing environment used to run them.
 example_postamble = """
 
