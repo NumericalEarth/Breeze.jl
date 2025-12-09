@@ -8,7 +8,6 @@ using Oceananigans.Units
 using Statistics
 using Printf
 using CairoMakie
-using CUDA
 
 # ## A simple model on a RectilinearGrid
 
