@@ -100,6 +100,7 @@ end
 
 function materialize_atmosphere_model_forcing(forcing::UGeostrophicForcing, field, name, model_field_names, context)
     grid = field.grid
+    reference_density = context.reference_density
     vᵍ_func = forcing.vᵍ
     FT = eltype(grid)
     f = FT(forcing.f)
@@ -117,6 +118,7 @@ end
 
 function materialize_atmosphere_model_forcing(forcing::VGeostrophicForcing, field, name, model_field_names, context)
     grid = field.grid
+    reference_density = context.reference_density
     uᵍ_func = forcing.uᵍ
     FT = eltype(grid)
     f = FT(forcing.f)

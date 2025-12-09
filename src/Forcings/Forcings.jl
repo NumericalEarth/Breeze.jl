@@ -5,12 +5,14 @@ export
     SubsidenceForcing,
     UGeostrophicForcing,
     VGeostrophicForcing,
+    materialize_atmosphere_model_forcing,
     compute_forcing!
 
 using DocStringExtensions: TYPEDSIGNATURES
 
 using Oceananigans: Average, Field, set!, compute!
 using Oceananigans.Grids: Center, Face
+using Oceananigans.Forcings: materialize_forcing, MultipleForcings
 
 include("geostrophic_forcings.jl")
 include("subsidence_forcings.jl")
