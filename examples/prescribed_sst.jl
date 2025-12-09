@@ -67,8 +67,8 @@ microphysics = SaturationAdjustment(equilibrium = WarmPhaseEquilibrium())
 
 # We use high-order WENO advection schemes to accurately represent the sharp
 # gradients that develop in convective flows. WENO (Weighted Essentially
-# Non-Oscillatory) schemes provide excellent shock-capturing properties while
-# maintaining high accuracy in smooth regions.
+# Non-Oscillatory; [Shu09](@citet)) schemes provide excellent shock-capturing
+# properties while maintaining high accuracy in smooth regions.
 
 momentum_advection = WENO(order=9)
 scalar_advection = WENO(order=5)
@@ -94,14 +94,16 @@ using Breeze.Thermodynamics:
     base_density,
     PlanarLiquidSurface
 
-ΔT = 2
+ΔT = 2 # K
 ρ₀ = base_density(p₀, θ₀, constants)
 surface = PlanarLiquidSurface()
 
-# Sea surface temperature field
+# Sea surface temperature field with two sharp gradients
 T₀_func(x) = θ₀ + ΔT * sign(cos(2π * x / grid.Lx))
 T₀ = Field{Center, Center, Nothing}(grid)
 set!(T₀, T₀_func)
+
+lines(T₀; axis = (xlabel = "SST (K)",))
 
 # Saturation specific humidity at sea surface (use function, not field)
 qᵛ₀_func(x) = saturation_specific_humidity(T₀_func(x), ρ₀, constants, surface)
@@ -300,7 +302,7 @@ Jᵛ = BoundaryConditionOperation(ρqᵗ, :bottom, model)
 
 # ## Progress callback
 #
-# A callback function prints diagnostic information every 10 iterations,
+# A callback function prints diagnostic information every few iterations,
 # helping monitor the simulation's progress and detect any numerical issues.
 
 function progress(sim)
