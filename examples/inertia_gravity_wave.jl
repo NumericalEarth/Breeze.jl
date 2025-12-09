@@ -29,7 +29,6 @@ grid = RectilinearGrid(CPU(),
                        topology = (Periodic, Flat, Bounded))
 
 
-                       
 # Atmosphere model setup
 constants = ThermodynamicConstants()
 reference_state = ReferenceState(grid, constants, base_pressure=p₀, potential_temperature=θ₀)
