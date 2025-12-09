@@ -452,6 +452,9 @@ for ax in (axτ, ax𝒬)
     lines!(ax, [-grid.Lx/2, grid.Lx/2], [0, 0], color=:grey, linestyle=:dash)
 end
 
+for ax in (axs, axξ, axθ, axq, axT, axqˡ, axτ, ax𝒬)
+    xlims!(ax, -grid.Lx/2, grid.Lx/2)
+end
 ylims!(axτ, -τˣ_max, τˣ_max)
 ylims!(ax𝒬, 𝒬_min, 𝒬_max)
 
