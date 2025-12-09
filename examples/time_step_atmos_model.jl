@@ -15,21 +15,21 @@ model = AtmosphereModel(grid, advection=WENO(), boundary_conditions=(; e=e_bcs))
 
 Lz = grid.Lz
 Δθ = 5 # K
-Tₛ = model.formulation.constants.potential_temperature
+Tₛ = model.formulation.reference_state.potential_temperature
 # θᵢ(x, y, z) = Tₛ + Δθ * z / Lz
 qᵢ(x, y, z) = 0
 Ξᵢ(x, y, z) = 1e-2 * randn()
 
 # Thermal bubble parameters
 N² = 1e-6        # Brunt-Väisälä frequency squared (s⁻²)
+g = model.thermodynamic_constants.gravitational_acceleration
 x₀ = Lx / 2      # Center of bubble in x
 z₀ = Lz / 3      # Center of bubble in z
 r₀ = Lz / 6      # Initial radius of bubble
-dθdz = N² * Tₛ / 9.81  # Background potential temperature gradient
 
 # Initial conditions
-function θᵢ(x, y, z)
-    θ̄ = Tₛ + dθdz * z # background stratification
+function θᵢ(x, y, z; N²=N²)
+    θ̄ = Tₛ * exp(N² * z / g)
     r = sqrt((x - x₀)^2 + (z - z₀)^2) # distance from bubble center
     θ′ = Δθ * max(0, 1 - r / r₀) # bubble
     return θ̄ + θ′
@@ -78,9 +78,9 @@ u, v, w = model.velocities
 set!(θ_bg_field, z -> Tₛ + dθdz * z)
 
 T = model.temperature
-ρʳ = model.formulation.reference_density
-cᵖᵈ = model.thermodynamics.dry_air.heat_capacity
-ρe = model.energy_density
+ρʳ = model.formulation.reference_state.density
+cᵖᵈ = model.thermodynamic_constants.dry_air.heat_capacity
+ρe = static_energy_density(model)
 θ = ρe / (ρʳ * cᵖᵈ)
 θ′ = θ - θ_bg_field
 

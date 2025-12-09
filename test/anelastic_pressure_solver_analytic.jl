@@ -1,13 +1,14 @@
 using Test
 using Breeze
-using GPUArraysCore: @allowscalar
 using Oceananigans
 using Oceananigans.Fields: fill_halo_regions!
+using Statistics: mean
 
 @testset "Anelastic pressure solver recovers analytic solution [$FT]" for FT in (Float32, Float64)
-    grid = RectilinearGrid(default_arch, FT; size=48, z=(0, 1), topology=(Flat, Flat, Bounded))
-    thermodynamics = ThermodynamicConstants(FT)
-    reference_state = ReferenceState(grid, thermodynamics, base_pressure=101325, potential_temperature=288)
+    Oceananigans.defaults.FloatType = FT
+    grid = RectilinearGrid(default_arch; size=48, z=(0, 1), topology=(Flat, Flat, Bounded))
+    constants = ThermodynamicConstants()
+    reference_state = ReferenceState(grid, constants, base_pressure=101325, potential_temperature=288)
     formulation = AnelasticFormulation(reference_state)
 
     #=
@@ -31,10 +32,18 @@ using Oceananigans.Fields: fill_halo_regions!
 
     set!(formulation.reference_state.density, z -> z)
     fill_halo_regions!(formulation.reference_state.density)
-    model = AtmosphereModel(grid; thermodynamics, formulation)
+    model = AtmosphereModel(grid; thermodynamic_constants=constants, formulation)
     set!(model, ρw = z -> z^2 - z^3)
 
+    # Test for zero mean
+    atol = 10 * grid.Nz * eps(FT)
+    ϕ = model.pressure
+    @test mean(ϕ) ≈ 0 atol=atol
+
+    # Test for exact solution
     ϕ_exact = CenterField(grid)
     set!(ϕ_exact, z -> z^2 / 2 - z^3 / 3 - 1 / 12)
-    @test @allowscalar isapprox(ϕ_exact, model.nonhydrostatic_pressure; rtol=1e-3)
+    parent(ϕ_exact) .-= mean(ϕ_exact)
+
+    @test isapprox(ϕ_exact, ϕ; rtol=1e-3)
 end

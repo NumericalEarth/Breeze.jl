@@ -35,6 +35,12 @@ Modules = [Breeze.Microphysics]
 Private = false
 ```
 
+### TurbulenceClosures
+
+```@autodocs
+Modules = [Breeze.TurbulenceClosures]
+Private = false
+```
 
 ## Private API
 

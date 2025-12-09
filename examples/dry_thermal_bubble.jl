@@ -27,19 +27,23 @@ r₀ = 2e3
 Δθ = 10 # K
 N² = 1e-6
 θ₀ = model.formulation.reference_state.potential_temperature
-g = model.thermodynamics.gravitational_acceleration
-dθdz = N² * θ₀ / g
+g = model.thermodynamic_constants.gravitational_acceleration
 
-function θᵢ(x, z; x₀=mean(xnodes(grid, Center())), z₀=0.3*grid.Lz)
-    θ̄ = θ₀ + dθdz * z
+function θᵢ(x, z;
+            x₀ = mean(xnodes(grid, Center())),
+            z₀ = 0.3*grid.Lz,
+            N² = N²)
+
+    θ̄ = θ₀ * exp(N² * z / g)
     r = sqrt((x - x₀)^2 + (z - z₀)^2)
     θ′ = Δθ * max(0, 1 - r / r₀)
+
     return θ̄ + θ′
 end
 
 set!(model, θ = θᵢ)
 
-ρe = model.energy_density
+ρe = static_energy_density(model)
 ρE = Field(Average(ρe, dims=1))
 ρe′ = Field(ρe - ρE)
 
@@ -60,7 +64,7 @@ simulation = Simulation(model; Δt=2, stop_time=25minutes)
 conjure_time_step_wizard!(simulation, cfl=0.7)
 
 function progress(sim)
-    ρe = sim.model.energy_density
+    ρe = static_energy_density(sim.model)
     u, v, w = sim.model.velocities
 
     msg = @sprintf("Iter: %d, t: %s, Δt: %s, extrema(ρe): (%.2f, %.2f) J/kg, max|u|: %.2f m/s, max|w|: %.2f m/s",
