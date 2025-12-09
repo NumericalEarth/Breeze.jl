@@ -16,7 +16,8 @@ using CairoMakie
 # We first set up a dry thermal bubble simulation without moisture processes.
 # This serves as a baseline for comparison with the moist case.
 
-grid = RectilinearGrid(CPU(); size = (128, 128), halo = (5, 5),
+grid = RectilinearGrid(CPU();
+                       size = (128, 128), halo = (5, 5),
                        x = (-10e3, 10e3),
                        z = (0, 10e3),
                        topology = (Bounded, Flat, Bounded))
