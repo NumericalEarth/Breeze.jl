@@ -402,16 +402,16 @@ sn = @lift sqrt(u_ts[$n]^2 + w_ts[$n]^2)
 # cross-stream vorticity, ∂z(u) - ∂x(w)
 ξn = @lift ∂z(u_ts[$n]) - ∂x(w_ts[$n])
 
-fig = Figure(size=(800, 1000), fontsize=14)
+fig = Figure(size=(800, 1000), fontsize=13)
 
 title = @lift "t = $(prettytime(times[$n]))"
 
-axs = Axis(fig[1, 1], xlabel="x (m)", ylabel="z (m)")
-axξ = Axis(fig[1, 2], xlabel="x (m)", ylabel="z (m)")
-axθ = Axis(fig[2, 1], xlabel="x (m)", ylabel="z (m)")
-axq = Axis(fig[2, 2], xlabel="x (m)", ylabel="z (m)")
-axT = Axis(fig[3, 1], xlabel="x (m)", ylabel="z (m)")
-axqˡ = Axis(fig[3, 2], xlabel="x (m)", ylabel="z (m)")
+axs = Axis(fig[1, 1], ylabel="z (m)")
+axξ = Axis(fig[1, 2])
+axθ = Axis(fig[2, 1], ylabel="z (m)")
+axq = Axis(fig[2, 2])
+axT = Axis(fig[3, 1], ylabel="z (m)")
+axqˡ = Axis(fig[3, 2])
 
 # Surface flux line plots at bottom
 axτ = Axis(fig[4, 1], xlabel="x (m)", ylabel="τˣ (kg m⁻¹ s⁻²)", title="Surface momentum flux")
@@ -440,17 +440,18 @@ hmq = heatmap!(axq, qᵗn, colorrange=(0, qᵗ_max), colormap=Reverse(:Purples_4
 hmT = heatmap!(axT, Tn, colorrange=T_limits)
 hmqˡ = heatmap!(axqˡ, qˡn, colorrange=(0, qˡ_max), colormap=Reverse(:Blues_4))
 
-# Surface flux line plots
+# Surface fluxes
 lines!(axτ, τˣn, color=:black, linewidth=2)
-lines!(axτ, [-grid.Lx/2, grid.Lx/2], [0, 0], color=:grey, linestyle=:dash)
 
 lines!(ax𝒬, 𝒬ᵀn, color=:firebrick, linewidth=2, label="sensible")
 lines!(ax𝒬, 𝒬ᵛn, color=:blue, linewidth=2, label="latent")
 lines!(ax𝒬, Σ𝒬n, color=:green, linewidth=4, label="total")
-lines!(ax𝒬, [-grid.Lx/2, grid.Lx/2], [0, 0], color=:grey, linestyle=:dash)
 Legend(fig[4, 3], ax𝒬)
 
-# Set y-limits for flux plots
+for ax in (axτ, ax𝒬)
+    lines!(ax, [-grid.Lx/2, grid.Lx/2], [0, 0], color=:grey, linestyle=:dash)
+end
+
 ylims!(axτ, -τˣ_max, τˣ_max)
 ylims!(ax𝒬, 𝒬_min, 𝒬_max)
 
