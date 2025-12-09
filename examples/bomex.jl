@@ -19,8 +19,11 @@ using Oceananigans.Units
 using AtmosphericProfilesLibrary
 using Printf
 using CairoMakie
+using Random
 
 using Oceananigans.Operators: ∂zᶜᶜᶠ, ℑzᵃᵃᶜ
+
+Random.seed!(938)
 
 # ## Domain and grid
 #
@@ -68,7 +71,7 @@ formulation = AnelasticFormulation(reference_state,
 # We convert these kinematic fluxes to mass fluxes by multiplying by surface density,
 # which we estimate for a dry state using the pressure and temperature at ``z=0``.
 
-w′θ′ = 8e-3    # K m/s (sensible heat flux)
+w′θ′ = 8e-3     # K m/s (sensible heat flux)
 w′qᵗ′ = 5.2e-5  # m/s (moisture flux)
 
 FT = eltype(grid)
@@ -85,7 +88,7 @@ q₀ = Breeze.Thermodynamics.MoistureMassFractions{FT} |> zero
 # A bulk drag parameterization is applied with friction velocity
 # ``u_* = 0.28`` m/s ([Siebesma2003](@citet); Appendix B, after Eq. B4).
 
-u★ = 0.28 # m/s
+u★ = 0.28  # m/s
 @inline ρu_drag(x, y, t, ρu, ρv, p) = - p.ρ₀ * p.u★^2 * ρu / sqrt(ρu^2 + ρv^2)
 @inline ρv_drag(x, y, t, ρu, ρv, p) = - p.ρ₀ * p.u★^2 * ρv / sqrt(ρu^2 + ρv^2)
 
@@ -113,6 +116,10 @@ u★ = 0.28 # m/s
 wˢ = Field{Nothing, Nothing, Face}(grid)
 wˢ_profile = AtmosphericProfilesLibrary.Bomex_subsidence(FT)
 set!(wˢ, z -> wˢ_profile(z))
+
+# and looks like:
+
+lines(wˢ; axis = (xlabel = "wˢ (m/s)",))
 
 # We apply subsidence as a forcing term to the horizontally-averaged prognostic variables.
 # This requires computing horizontal averages at each time step and storing them in
@@ -256,7 +263,7 @@ u₀ = AtmosphericProfilesLibrary.Bomex_u(FT)
 
 # Breeze's current definition of the Exner function derives its reference
 # pressure from the base pressure of the reference profile, rather than using
-# the standard ``10^5`` Pa. Because of this we need to apply a correction to
+# the standard ``10^5`` Pa. Because of this, we need to apply a correction to
 # the initial condition: without this correction, our results do not match
 # [Siebesma2003](@citet) (and note that our outputted potential temperature
 # is displaced from [Siebesma2003](@citet)'s by precisely the factor below).
@@ -317,7 +324,8 @@ add_callback!(simulation, compute_averages!)
 
 # ## Output and progress
 #
-# We output horizontally-averaged profiles for post-processing.
+# We add a progress callback and output the 20-minute time-averages of the horizontally-averaged
+# profiles for post-processing.
 
 qˡ = model.microphysical_fields.qˡ
 qᵛ = model.microphysical_fields.qᵛ

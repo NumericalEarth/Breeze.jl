@@ -72,8 +72,8 @@ const LIPTAM = LiquidIcePotentialTemperatureAnelasticModel
 
 liquid_ice_potential_temperature_density(model::LIPTAM) = model.formulation.thermodynamics.potential_temperature_density
 liquid_ice_potential_temperature(model::LIPTAM) = model.formulation.thermodynamics.potential_temperature
-static_energy(model::LIPTAM) = StaticEnergyField(model, :specific)
-static_energy_density(model::LIPTAM) = StaticEnergyField(model, :density)
+static_energy(model::LIPTAM) = Diagnostics.StaticEnergy(model, :specific)
+static_energy_density(model::LIPTAM) = Diagnostics.StaticEnergy(model, :density)
 
 function compute_thermodynamic_tendency!(model::LiquidIcePotentialTemperatureAnelasticModel, common_args)
     grid = model.grid
@@ -135,14 +135,14 @@ end
 ##### Set
 #####
 
-set_thermodynamic_variable!(model::LiquidIcePotentialTemperatureAnelasticModel, ::Val{:ρθ}, value) =
+set_thermodynamic_variable!(model::LiquidIcePotentialTemperatureAnelasticModel, ::Union{Val{:ρθ}, Val{:ρθˡⁱ}}, value) =
     set!(model.formulation.thermodynamics.potential_temperature_density, value)
 
-function set_thermodynamic_variable!(model::LiquidIcePotentialTemperatureAnelasticModel, ::Val{:θ}, value)
+function set_thermodynamic_variable!(model::LiquidIcePotentialTemperatureAnelasticModel, ::Union{Val{:θ}, Val{:θˡⁱ}}, value)
     set!(model.formulation.thermodynamics.potential_temperature, value)
     ρᵣ = model.formulation.reference_state.density
-    θ = model.formulation.thermodynamics.potential_temperature
-    set!(model.formulation.thermodynamics.potential_temperature_density, ρᵣ * θ)
+    θˡⁱ = model.formulation.thermodynamics.potential_temperature
+    set!(model.formulation.thermodynamics.potential_temperature_density, ρᵣ * θˡⁱ)
     return nothing
 end
 
