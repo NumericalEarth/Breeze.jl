@@ -5,7 +5,7 @@ using Printf
 using CairoMakie
 
 
-# inertia Gravity Wave
+# Inertia Gravity Wave
 # Reference:
 # Skamarock and Klemp (1994): "Efficiency and Accuracy of the Klemp-Wilhelmson Time-Splitting Technique"
 
