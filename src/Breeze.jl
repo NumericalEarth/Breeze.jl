@@ -42,11 +42,11 @@ export
     BulkMicrophysics,
 
     # BoundaryConditions
-    DragFunction,
-    XDirectionDragFunction,
-    YDirectionDragFunction,
-    Drag,
-    DragBoundaryCondition,
+    BulkDragFunction,
+    XDirectionBulkDragFunction,
+    YDirectionBulkDragFunction,
+    BulkDrag,
+    BulkDragBoundaryCondition,
     BulkSensibleHeatFluxFunction,
     BulkSensibleHeatFlux,
     BulkSensibleHeatFluxBoundaryCondition,
@@ -116,6 +116,9 @@ using .Thermodynamics
 include("MoistAirBuoyancies.jl")
 using .MoistAirBuoyancies
 
+include("BoundaryConditions/BoundaryConditions.jl")
+using .BoundaryConditions
+
 include("AtmosphereModels/AtmosphereModels.jl")
 using .AtmosphereModels
 
@@ -127,8 +130,5 @@ using .TurbulenceClosures
 
 include("Advection.jl")
 using .Advection
-
-include("BoundaryConditions/BoundaryConditions.jl")
-using .BoundaryConditions
 
 end # module Breeze

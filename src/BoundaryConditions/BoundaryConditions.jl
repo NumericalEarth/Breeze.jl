@@ -1,22 +1,25 @@
 module BoundaryConditions
 
-export DragFunction,
-       XDirectionDragFunction,
-       YDirectionDragFunction,
-       Drag,
-       DragBoundaryCondition,
+export BulkDragFunction,
+       XDirectionBulkDragFunction,
+       YDirectionBulkDragFunction,
+       BulkDrag,
+       BulkDragBoundaryCondition,
        BulkSensibleHeatFluxFunction,
        BulkSensibleHeatFlux,
        BulkSensibleHeatFluxBoundaryCondition,
        BulkVaporFluxFunction,
        BulkVaporFlux,
-       BulkVaporFluxBoundaryCondition
+       BulkVaporFluxBoundaryCondition,
+       regularize_atmosphere_model_boundary_conditions
 
 using Oceananigans.Grids: Center, Face, XDirection, YDirection
+using Oceananigans.Fields: Field, set!
 using Oceananigans.BoundaryConditions: FluxBoundaryCondition,
                                        BoundaryCondition,
                                        Flux,
                                        DiscreteBoundaryFunction,
+                                       FieldBoundaryConditions,
                                        regularize_boundary_condition
 
 using Oceananigans.Operators: ℑxyᶠᶜᵃ, ℑxyᶜᶠᵃ, ℑxᶜᵃᵃ, ℑyᵃᶜᵃ
@@ -27,19 +30,19 @@ import Oceananigans.BoundaryConditions: regularize_boundary_condition
 import Oceananigans.Architectures: on_architecture
 
 #####
-##### DragFunction for momentum fluxes
+##### BulkDragFunction for momentum fluxes
 #####
 
-struct DragFunction{D, C, G}
+struct BulkDragFunction{D, C, G}
     direction :: D
     coefficient :: C
     gustiness :: G
 end
 
 """
-    DragFunction(; direction=nothing, coefficient=1e-3, gustiness=0)
+    BulkDragFunction(; direction=nothing, coefficient=1e-3, gustiness=0)
 
-Create a drag function for computing surface momentum fluxes using bulk aerodynamic
+Create a bulk drag function for computing surface momentum fluxes using bulk aerodynamic
 formulas. The drag function computes a quadratic drag:
 
 ```math
@@ -57,26 +60,26 @@ where `Cᴰ` is the drag coefficient, `|U| = √(u² + v² + gustiness²)` is th
 - `coefficient`: The drag coefficient (default: `1e-3`)
 - `gustiness`: Minimum wind speed to prevent singularities when winds are calm (default: `0`)
 """
-function DragFunction(; direction=nothing, coefficient=1e-3, gustiness=0)
-    return DragFunction(direction, coefficient, gustiness)
+function BulkDragFunction(; direction=nothing, coefficient=1e-3, gustiness=0)
+    return BulkDragFunction(direction, coefficient, gustiness)
 end
 
-const XDirectionDragFunction = DragFunction{<:XDirection}
-const YDirectionDragFunction = DragFunction{<:YDirection}
+const XDirectionBulkDragFunction = BulkDragFunction{<:XDirection}
+const YDirectionBulkDragFunction = BulkDragFunction{<:YDirection}
 
-Adapt.adapt_structure(to, df::DragFunction) =
-    DragFunction(Adapt.adapt(to, df.direction),
-                 Adapt.adapt(to, df.coefficient),
-                 Adapt.adapt(to, df.gustiness))
+Adapt.adapt_structure(to, df::BulkDragFunction) =
+    BulkDragFunction(Adapt.adapt(to, df.direction),
+                     Adapt.adapt(to, df.coefficient),
+                     Adapt.adapt(to, df.gustiness))
 
-on_architecture(to, df::DragFunction) =
-    DragFunction(on_architecture(to, df.direction),
-                 on_architecture(to, df.coefficient),
-                 on_architecture(to, df.gustiness))
+on_architecture(to, df::BulkDragFunction) =
+    BulkDragFunction(on_architecture(to, df.direction),
+                     on_architecture(to, df.coefficient),
+                     on_architecture(to, df.gustiness))
 
-Base.summary(df::DragFunction) = string("DragFunction(direction=", summary(df.direction),
-                                        ", coefficient=", df.coefficient,
-                                        ", gustiness=", df.gustiness, ")")
+Base.summary(df::BulkDragFunction) = string("BulkDragFunction(direction=", summary(df.direction),
+                                            ", coefficient=", df.coefficient,
+                                            ", gustiness=", df.gustiness, ")")
 
 #####
 ##### Wind speed calculations at staggered locations
@@ -109,7 +112,7 @@ end
 ##### Drag flux computation
 #####
 
-@inline function (df::XDirectionDragFunction)(i, j, grid, clock, fields)
+@inline function (df::XDirectionBulkDragFunction)(i, j, grid, clock, fields)
     ρu = @inbounds fields.ρu[i, j, 1]
     U² = wind_speed²ᶠᶜᶜ(i, j, grid, fields)
     U = sqrt(U²)
@@ -118,7 +121,7 @@ end
     return - Cᴰ * Ũ² * ρu / U * (U > 0)
 end
 
-@inline function (df::YDirectionDragFunction)(i, j, grid, clock, fields)
+@inline function (df::YDirectionBulkDragFunction)(i, j, grid, clock, fields)
     ρv = @inbounds fields.ρv[i, j, 1]
     U² = wind_speed²ᶜᶠᶜ(i, j, grid, fields)
     U = sqrt(U²)
@@ -139,7 +142,7 @@ struct BulkSensibleHeatFluxFunction{C, G, T, R}
 end
 
 """
-    BulkSensibleHeatFluxFunction(; coefficient=1e-3, gustiness=0, surface_temperature, reference_density=1.2)
+    BulkSensibleHeatFluxFunction(; coefficient=1e-3, gustiness=0, surface_temperature, reference_density=nothing)
 
 Create a bulk sensible heat flux function for computing surface heat fluxes.
 The flux is computed as:
@@ -155,12 +158,14 @@ potential temperature at the surface, and `θ₀` is the surface temperature.
 
 - `coefficient`: The sensible heat transfer coefficient (default: `1e-3`)
 - `gustiness`: Minimum wind speed to prevent singularities (default: `0`)
-- `surface_temperature`: The surface temperature field or value (required)
-- `reference_density`: Reference air density for flux calculation (default: `1.2` kg/m³)
+- `surface_temperature`: The surface temperature. Can be a `Field`, a `Function`, or a `Number`.
+                         Functions are converted to Fields during model construction.
+- `reference_density`: Reference air density for flux calculation. If `nothing` (default),
+                       the density is automatically computed from the model's reference state.
 """
 function BulkSensibleHeatFluxFunction(; coefficient=1e-3, gustiness=0,
                                         surface_temperature,
-                                        reference_density=1.2)
+                                        reference_density=nothing)
     return BulkSensibleHeatFluxFunction(coefficient, gustiness,
                                         surface_temperature, reference_density)
 end
@@ -198,15 +203,16 @@ end
 ##### BulkVaporFluxFunction for moisture fluxes
 #####
 
-struct BulkVaporFluxFunction{C, G, Q, R}
+struct BulkVaporFluxFunction{C, G, T, Q, R}
     coefficient :: C
     gustiness :: G
+    surface_temperature :: T
     surface_specific_humidity :: Q
     reference_density :: R
 end
 
 """
-    BulkVaporFluxFunction(; coefficient=1e-3, gustiness=0, surface_specific_humidity, reference_density=1.2)
+    BulkVaporFluxFunction(; coefficient=1e-3, gustiness=0, surface_temperature, surface_specific_humidity=nothing, reference_density=nothing)
 
 Create a bulk vapor flux function for computing surface moisture fluxes.
 The flux is computed as:
@@ -222,25 +228,35 @@ specific humidity, and `qᵛ₀` is the saturation specific humidity at the surf
 
 - `coefficient`: The vapor transfer coefficient (default: `1e-3`)
 - `gustiness`: Minimum wind speed to prevent singularities (default: `0`)
-- `surface_specific_humidity`: The surface saturation specific humidity field or value (required)
-- `reference_density`: Reference air density for flux calculation (default: `1.2` kg/m³)
+- `surface_temperature`: The surface temperature. Can be a `Field`, a `Function`, or a `Number`.
+                         Used to compute `surface_specific_humidity` if not provided.
+- `surface_specific_humidity`: The surface saturation specific humidity. If `nothing` (default),
+                               it is computed from `surface_temperature` using the model's
+                               thermodynamic constants.
+- `reference_density`: Reference air density for flux calculation. If `nothing` (default),
+                       the density is automatically computed from the model's reference state.
 """
 function BulkVaporFluxFunction(; coefficient=1e-3, gustiness=0,
-                                 surface_specific_humidity,
-                                 reference_density=1.2)
+                                 surface_temperature,
+                                 surface_specific_humidity=nothing,
+                                 reference_density=nothing)
     return BulkVaporFluxFunction(coefficient, gustiness,
-                                 surface_specific_humidity, reference_density)
+                                 surface_temperature,
+                                 surface_specific_humidity,
+                                 reference_density)
 end
 
 Adapt.adapt_structure(to, bf::BulkVaporFluxFunction) =
     BulkVaporFluxFunction(Adapt.adapt(to, bf.coefficient),
                           Adapt.adapt(to, bf.gustiness),
+                          Adapt.adapt(to, bf.surface_temperature),
                           Adapt.adapt(to, bf.surface_specific_humidity),
                           Adapt.adapt(to, bf.reference_density))
 
 on_architecture(to, bf::BulkVaporFluxFunction) =
     BulkVaporFluxFunction(on_architecture(to, bf.coefficient),
                           on_architecture(to, bf.gustiness),
+                          on_architecture(to, bf.surface_temperature),
                           on_architecture(to, bf.surface_specific_humidity),
                           on_architecture(to, bf.reference_density))
 
@@ -265,8 +281,8 @@ end
 ##### Regularization: assign direction based on field location
 #####
 
-# For DiscreteBoundaryFunction wrapping DragFunction without direction, infer from field location
-function regularize_boundary_condition(dbf::DiscreteBoundaryFunction{Nothing, <:DragFunction{Nothing}},
+# For DiscreteBoundaryFunction wrapping BulkDragFunction without direction, infer from field location
+function regularize_boundary_condition(dbf::DiscreteBoundaryFunction{Nothing, <:BulkDragFunction{Nothing}},
                                        grid, loc, dim, args...)
     df = dbf.func
     LX, LY, LZ = loc
@@ -281,22 +297,22 @@ function regularize_boundary_condition(dbf::DiscreteBoundaryFunction{Nothing, <:
                             "Please specify direction=XDirection() or direction=YDirection()."))
     end
     
-    regularized_df = DragFunction(direction, df.coefficient, df.gustiness)
+    regularized_df = BulkDragFunction(direction, df.coefficient, df.gustiness)
     return DiscreteBoundaryFunction(regularized_df, nothing)
 end
 
 # If direction is already set, pass through
-function regularize_boundary_condition(dbf::DiscreteBoundaryFunction{Nothing, <:XDirectionDragFunction},
+function regularize_boundary_condition(dbf::DiscreteBoundaryFunction{Nothing, <:XDirectionBulkDragFunction},
                                        grid, loc, dim, args...)
     return dbf
 end
 
-function regularize_boundary_condition(dbf::DiscreteBoundaryFunction{Nothing, <:YDirectionDragFunction},
+function regularize_boundary_condition(dbf::DiscreteBoundaryFunction{Nothing, <:YDirectionBulkDragFunction},
                                        grid, loc, dim, args...)
     return dbf
 end
 
-# BulkSensibleHeatFluxFunction and BulkVaporFluxFunction don't need regularization
+# BulkSensibleHeatFluxFunction and BulkVaporFluxFunction don't need Oceananigans regularization
 function regularize_boundary_condition(dbf::DiscreteBoundaryFunction{Nothing, <:BulkSensibleHeatFluxFunction},
                                        grid, loc, dim, args...)
     return dbf
@@ -312,11 +328,11 @@ end
 #####
 
 """
-    DragBoundaryCondition
+    BulkDragBoundaryCondition
 
-Type alias for a `FluxBoundaryCondition` with a `DragFunction` condition.
+Type alias for a `FluxBoundaryCondition` with a `BulkDragFunction` condition.
 """
-const DragBoundaryCondition = BoundaryCondition{<:Flux, <:DiscreteBoundaryFunction{Nothing, <:DragFunction}}
+const BulkDragBoundaryCondition = BoundaryCondition{<:Flux, <:DiscreteBoundaryFunction{Nothing, <:BulkDragFunction}}
 
 """
     BulkSensibleHeatFluxBoundaryCondition
@@ -337,11 +353,11 @@ const BulkVaporFluxBoundaryCondition = BoundaryCondition{<:Flux, <:DiscreteBound
 #####
 
 """
-    Drag(; direction=nothing, coefficient=1e-3, gustiness=0)
+    BulkDrag(; direction=nothing, coefficient=1e-3, gustiness=0)
 
 Create a `FluxBoundaryCondition` for surface momentum drag.
 
-See [`DragFunction`](@ref) for details.
+See [`BulkDragFunction`](@ref) for details.
 
 # Example
 
@@ -349,24 +365,24 @@ See [`DragFunction`](@ref) for details.
 using Breeze
 
 # Drag for both u and v (direction inferred from field location)
-drag = Drag(coefficient=1e-3, gustiness=0.1)
+drag = BulkDrag(coefficient=1e-3, gustiness=0.1)
 
 # Or with explicit direction
-u_drag = Drag(direction=XDirection(), coefficient=1e-3)
-v_drag = Drag(direction=YDirection(), coefficient=1e-3)
+u_drag = BulkDrag(direction=XDirection(), coefficient=1e-3)
+v_drag = BulkDrag(direction=YDirection(), coefficient=1e-3)
 
 ρu_bcs = FieldBoundaryConditions(bottom=u_drag)
 ρv_bcs = FieldBoundaryConditions(bottom=v_drag)
 ```
 """
-function Drag(; kwargs...)
-    df = DragFunction(; kwargs...)
+function BulkDrag(; kwargs...)
+    df = BulkDragFunction(; kwargs...)
     condition = DiscreteBoundaryFunction(df, nothing)
     return BoundaryCondition(Flux(), condition)
 end
 
 """
-    BulkSensibleHeatFlux(; coefficient=1e-3, gustiness=0, surface_temperature, reference_density=1.2)
+    BulkSensibleHeatFlux(; coefficient=1e-3, gustiness=0, surface_temperature, reference_density=nothing)
 
 Create a `FluxBoundaryCondition` for surface sensible heat flux.
 
@@ -377,13 +393,12 @@ See [`BulkSensibleHeatFluxFunction`](@ref) for details.
 ```julia
 using Breeze
 
-T₀ = 290  # constant surface temperature (K)
-ρ₀ = 1.2  # reference density (kg/m³)
+# Surface temperature can be a function, Field, or number
+T₀(x, y) = 290 + 2 * sign(cos(2π * x / 20e3))
 
 ρθ_bc = BulkSensibleHeatFlux(coefficient = 1e-3,
                               gustiness = 0.1,
-                              surface_temperature = T₀,
-                              reference_density = ρ₀)
+                              surface_temperature = T₀)
 
 ρθ_bcs = FieldBoundaryConditions(bottom=ρθ_bc)
 ```
@@ -395,9 +410,12 @@ function BulkSensibleHeatFlux(; kwargs...)
 end
 
 """
-    BulkVaporFlux(; coefficient=1e-3, gustiness=0, surface_specific_humidity, reference_density=1.2)
+    BulkVaporFlux(; coefficient=1e-3, gustiness=0, surface_temperature, surface_specific_humidity=nothing, reference_density=nothing)
 
 Create a `FluxBoundaryCondition` for surface moisture flux.
+
+The saturation specific humidity at the surface is automatically computed from
+`surface_temperature` if `surface_specific_humidity` is not provided.
 
 See [`BulkVaporFluxFunction`](@ref) for details.
 
@@ -406,13 +424,13 @@ See [`BulkVaporFluxFunction`](@ref) for details.
 ```julia
 using Breeze
 
-qᵛ₀ = 0.015  # surface saturation specific humidity (kg/kg)
-ρ₀ = 1.2     # reference density (kg/m³)
+# Surface temperature can be a function, Field, or number
+# Saturation specific humidity is computed automatically
+T₀(x, y) = 290 + 2 * sign(cos(2π * x / 20e3))
 
 ρqᵗ_bc = BulkVaporFlux(coefficient = 1e-3,
                         gustiness = 0.1,
-                        surface_specific_humidity = qᵛ₀,
-                        reference_density = ρ₀)
+                        surface_temperature = T₀)
 
 ρqᵗ_bcs = FieldBoundaryConditions(bottom=ρqᵗ_bc)
 ```
@@ -423,5 +441,124 @@ function BulkVaporFlux(; kwargs...)
     return BoundaryCondition(Flux(), condition)
 end
 
-end # module BoundaryConditions
+#####
+##### Pre-regularization for AtmosphereModel
+#####
 
+"""
+    regularize_atmosphere_model_boundary_conditions(boundary_conditions, grid, formulation, thermodynamic_constants)
+
+Pre-regularize boundary conditions for `AtmosphereModel` by:
+1. Converting function-based surface temperatures to Fields
+2. Computing reference density from the formulation's reference state
+3. Computing saturation specific humidity from surface temperature for vapor fluxes
+
+This function should be called in `AtmosphereModel` before the standard Oceananigans
+boundary condition regularization.
+"""
+function regularize_atmosphere_model_boundary_conditions(boundary_conditions, grid, formulation, thermodynamic_constants)
+    # Extract reference state info and compute base density
+    reference_state = formulation.reference_state
+    p₀ = reference_state.base_pressure
+    θ₀ = reference_state.potential_temperature
+    ρ₀ = base_density(p₀, θ₀, thermodynamic_constants)
+    constants = thermodynamic_constants
+    
+    # Regularize each field's boundary conditions
+    regularized = Dict{Symbol, Any}()
+    for (name, fbcs) in pairs(boundary_conditions)
+        regularized[name] = regularize_field_bulk_bcs(fbcs, grid, ρ₀, constants)
+    end
+    
+    return NamedTuple(regularized)
+end
+
+# Pass through non-FieldBoundaryConditions
+regularize_field_bulk_bcs(fbcs, grid, ρ₀, constants) = fbcs
+
+# Regularize FieldBoundaryConditions
+function regularize_field_bulk_bcs(fbcs::FieldBoundaryConditions, grid, ρ₀, constants)
+    bottom = regularize_bulk_bc(fbcs.bottom, grid, ρ₀, constants)
+    top = regularize_bulk_bc(fbcs.top, grid, ρ₀, constants)
+    # Keep other boundaries as-is
+    return FieldBoundaryConditions(west = fbcs.west,
+                                   east = fbcs.east,
+                                   south = fbcs.south,
+                                   north = fbcs.north,
+                                   bottom = bottom,
+                                   top = top,
+                                   immersed = fbcs.immersed)
+end
+
+# Pass through non-bulk-flux boundary conditions
+regularize_bulk_bc(bc, grid, ρ₀, constants) = bc
+
+# Regularize BulkSensibleHeatFlux
+function regularize_bulk_bc(bc::BulkSensibleHeatFluxBoundaryCondition, grid, ρ₀, constants)
+    bf = bc.condition.func
+    
+    # Convert surface_temperature to Field if it's a function
+    T₀ = materialize_surface_field(bf.surface_temperature, grid)
+    
+    # Use provided reference_density or compute from formulation
+    ref_density = isnothing(bf.reference_density) ? ρ₀ : bf.reference_density
+    
+    new_bf = BulkSensibleHeatFluxFunction(bf.coefficient, bf.gustiness, T₀, ref_density)
+    return BoundaryCondition(Flux(), DiscreteBoundaryFunction(new_bf, nothing))
+end
+
+# Regularize BulkVaporFlux
+function regularize_bulk_bc(bc::BulkVaporFluxBoundaryCondition, grid, ρ₀, constants)
+    bf = bc.condition.func
+    
+    # Convert surface_temperature to Field if it's a function
+    T₀ = materialize_surface_field(bf.surface_temperature, grid)
+    
+    # Use provided reference_density or compute from formulation
+    ref_density = isnothing(bf.reference_density) ? ρ₀ : bf.reference_density
+    
+    # Compute saturation specific humidity if not provided
+    if isnothing(bf.surface_specific_humidity)
+        qᵛ₀ = compute_saturation_specific_humidity(T₀, ref_density, constants, grid)
+    else
+        qᵛ₀ = materialize_surface_field(bf.surface_specific_humidity, grid)
+    end
+    
+    new_bf = BulkVaporFluxFunction(bf.coefficient, bf.gustiness, T₀, qᵛ₀, ref_density)
+    return BoundaryCondition(Flux(), DiscreteBoundaryFunction(new_bf, nothing))
+end
+
+# Helper to convert functions/numbers to Fields
+materialize_surface_field(f::Field, grid) = f
+materialize_surface_field(f::Number, grid) = f
+
+function materialize_surface_field(f::Function, grid)
+    field = Field{Center, Center, Nothing}(grid)
+    set!(field, f)
+    return field
+end
+
+# Import thermodynamic functions from Thermodynamics
+using Breeze.Thermodynamics: saturation_specific_humidity, base_density, PlanarLiquidSurface
+
+function compute_saturation_specific_humidity(T₀::Field, ρ₀, constants, grid)
+    surface = PlanarLiquidSurface()
+    qᵛ₀ = Field{Center, Center, Nothing}(grid)
+    
+    # Create a function that computes qᵛ₀ pointwise
+    qᵛ₀_func(i, j) = saturation_specific_humidity(T₀[i, j, 1], ρ₀, constants, surface)
+    
+    # Set the field using the interior indices
+    for i in 1:size(grid, 1), j in 1:size(grid, 2)
+        qᵛ₀[i, j, 1] = qᵛ₀_func(i, j)
+    end
+    
+    return qᵛ₀
+end
+
+function compute_saturation_specific_humidity(T₀::Number, ρ₀, constants, grid)
+    surface = PlanarLiquidSurface()
+    return saturation_specific_humidity(T₀, ρ₀, constants, surface)
+end
+
+end # module BoundaryConditions

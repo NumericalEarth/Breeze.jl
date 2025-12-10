@@ -1,4 +1,5 @@
 using ..Thermodynamics: Thermodynamics, ThermodynamicConstants, ReferenceState
+using ..BoundaryConditions: regularize_atmosphere_model_boundary_conditions
 
 using Oceananigans: AbstractModel, Center, CenterField, Clock, Field
 using Oceananigans: Centered, XFaceField, YFaceField, ZFaceField
@@ -136,6 +137,10 @@ function AtmosphereModel(grid;
     prognostic_names = prognostic_field_names(formulation, microphysics, tracers)
     default_boundary_conditions = NamedTuple{prognostic_names}(FieldBoundaryConditions() for _ in prognostic_names)
     boundary_conditions = merge(default_boundary_conditions, boundary_conditions)
+
+    # Pre-regularize AtmosphereModel boundary conditions (fill in reference_density, compute saturation humidity, etc.)
+    boundary_conditions = regularize_atmosphere_model_boundary_conditions(boundary_conditions, grid, formulation, thermodynamic_constants)
+
     all_names = field_names(formulation, microphysics, tracers)
     boundary_conditions = regularize_field_boundary_conditions(boundary_conditions, grid, all_names)
 
