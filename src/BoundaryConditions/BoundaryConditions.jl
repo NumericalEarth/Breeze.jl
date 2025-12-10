@@ -459,7 +459,7 @@ boundary condition regularization.
 function regularize_atmosphere_model_boundary_conditions(boundary_conditions, grid, formulation, thermodynamic_constants)
     # Extract reference state info and compute base density
     reference_state = formulation.reference_state
-    p₀ = reference_state.base_pressure
+    p₀ = reference_state.surface_pressure
     θ₀ = reference_state.potential_temperature
     ρ₀ = base_density(p₀, θ₀, thermodynamic_constants)
     constants = thermodynamic_constants
