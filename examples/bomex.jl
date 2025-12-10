@@ -415,8 +415,6 @@ text!(axuv, -8.5, 2200, text="solid: u\ndashed: v", fontsize=12)
 
 fig[0, :] = Label(fig, "BOMEX: Mean profile evolution (Siebesma et al., 2003)", fontsize=18, tellwidth=false)
 
-Oceananigans.defaults.FloatType = Float64 # Reset default float type in Oceananigans
-
 save("bomex_profiles.png", fig)
 fig
 
@@ -425,8 +423,6 @@ fig
 # - Moistening of the lower troposphere
 # - Development of cloud water in the conditionally unstable layer
 # - Westerly flow throughout the domain with weak meridional winds
-#
-# Note: This short 1-hour simulation captures the initial spin-up phase.
-# For production results comparable to the ones by [Siebesma2003](@citet),
-# the simulation should be run for 6 hours at full resolution (64² × 75),
-# e.g., on a GPU.
+
+Oceananigans.defaults.FloatType = Float64 #hide --- reset default float type in Oceananigans
+
