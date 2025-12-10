@@ -17,6 +17,7 @@ function update_state!(model::AnelasticModel, callbacks=[]; compute_tendencies=t
     tracer_density_to_specific!(model) # convert tracer density to specific tracer distribution
     fill_halo_regions!(prognostic_fields(model), model.clock, fields(model), async=true)
     compute_auxiliary_variables!(model)
+    update_radiation!(model.radiative_transfer, model)
     compute_tendencies && compute_tendencies!(model)
     tracer_specific_to_density!(model) # convert specific tracer distribution to tracer density
     return nothing

@@ -39,11 +39,14 @@ export
     WarmPhaseEquilibrium,
     SaturationSpecificHumidity,
     SaturationSpecificHumidityField,
-    BulkMicrophysics
+    BulkMicrophysics,
+
+    # Radiation (implemented by extensions)
+    GrayRadiation
 
 using Oceananigans: Oceananigans, @at, AnisotropicMinimumDissipation, Average,
                     AveragedTimeInterval, BackgroundField, BetaPlane, Bounded,
-                    CPU, Callback, Center, CenterField, Centered, Checkpointer,
+                    CPU, Callback, Center, CenterField, Centered, Checkpointer, Clock,
                     ConstantCartesianCoriolis, Distributed, FPlane, Face,
                     Field, FieldBoundaryConditions, FieldDataset,
                     FieldTimeSeries, Flat, FluxBoundaryCondition, Forcing, GPU,
@@ -68,7 +71,7 @@ using Oceananigans.Grids: znode
 export
     CPU, GPU,
     Center, Face, Periodic, Bounded, Flat,
-    RectilinearGrid,
+    RectilinearGrid, Clock,
     nodes, xnodes, ynodes, znodes,
     znode,
     xspacings, yspacings, zspacings,
@@ -110,5 +113,21 @@ using .TurbulenceClosures
 
 include("Advection.jl")
 using .Advection
+
+#####
+##### Radiation stubs (implemented by extensions)
+#####
+
+"""
+    GrayRadiation(grid; kwargs...)
+
+Construct a gray atmosphere radiative transfer model.
+
+This is a stub function - the actual implementation is provided by
+the BreezeRRTMGPExt extension when RRTMGP.jl is loaded.
+
+See the extension documentation for available keyword arguments.
+"""
+function GrayRadiation end
 
 end # module Breeze

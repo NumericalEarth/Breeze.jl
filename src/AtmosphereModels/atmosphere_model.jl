@@ -113,7 +113,8 @@ function AtmosphereModel(grid;
                          closure = nothing,
                          microphysics = nothing, # WarmPhaseSaturationAdjustment(),
                          timestepper = :RungeKutta3,
-                         radiative_transfer = nothing)
+                         radiation = nothing,
+                         radiative_transfer = radiation)
 
     if !isnothing(advection)
         # TODO: check that tracer+momentum advection were not independently set.
@@ -315,6 +316,28 @@ function fields(model::AtmosphereModel)
     formulation_fields = fields(model.formulation)
     auxiliary = (; T=model.temperature, qᵗ=model.specific_moisture)
     return merge(prognostic_fields(model), formulation_fields, model.velocities, auxiliary)
+end
+
+"""
+    auxiliary_fields(model::AtmosphereModel)
+
+Return a NamedTuple of auxiliary (diagnostic) fields for the model.
+"""
+function auxiliary_fields(model::AtmosphereModel)
+    return (; T = model.temperature, qᵗ = model.specific_moisture)
+end
+
+# Provide property access for auxiliary_fields
+function Base.getproperty(model::AtmosphereModel, name::Symbol)
+    if name === :auxiliary_fields
+        return auxiliary_fields(model)
+    else
+        return getfield(model, name)
+    end
+end
+
+function Base.propertynames(model::AtmosphereModel, private::Bool=false)
+    return (fieldnames(AtmosphereModel)..., :auxiliary_fields)
 end
 
 function prognostic_fields(model::AtmosphereModel)
