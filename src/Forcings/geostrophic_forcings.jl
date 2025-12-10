@@ -29,13 +29,13 @@ const YGeostrophicForcing = GeostrophicForcing{YDirection}
 @inline function (forcing::XGeostrophicForcing)(i, j, k, grid, clock, fields)
     f = forcing.coriolis_parameter
     ρvᵍ = @inbounds forcing.geostrophic_momentum[i, j, k]
-    return + f * ρvᵍ[i, j, k]
+    return - f * ρvᵍ
 end
 
 @inline function (forcing::YGeostrophicForcing)(i, j, k, grid, clock, fields)
     f = forcing.coriolis_parameter
     ρuᵍ = @inbounds forcing.geostrophic_momentum[i, j, k]
-    return - f * ρuᵍ[i, j, k]
+    return + f * ρuᵍ
 end
 
 """
@@ -80,11 +80,13 @@ end
 function materialize_atmosphere_model_forcing(forcing::GeostrophicForcing, field, name, model_field_names, context)
     grid = field.grid
 
-    uᵍ = if forcing.vᵍ isa Field
-        forcing.uᵍ
+    forcing_uᵍ = forcing.geostrophic_momentum
+
+    uᵍ = if forcing_uᵍ isa Field
+        forcing_uᵍ
     else
         uᵍ = Field{Nothing, Nothing, Center}(grid)  
-        set!(uᵍ, forcing.vᵍ)
+        set!(uᵍ, forcing_uᵍ)
     end
 
     # Compute the geostrophic momentum density field ρᵣ * vᵍ

@@ -4,6 +4,8 @@ using Oceananigans.Fields: AbstractField
 using Oceananigans.Operators: ∂zᶜᶜᶠ, ℑzᵃᵃᶜ
 using Oceananigans.Utils: prettysummary
 
+using Adapt
+
 #####
 ##### Subsidence forcing types (unmaterialized stubs)
 #####
@@ -13,6 +15,11 @@ struct SubsidenceForcing{W, R, A}
     reference_density :: R
     averaged_field :: A
 end
+
+Adapt.adapt_structure(to, sf::SubsidenceForcing) =
+    SubsidenceForcing(Adapt.adapt(to, sf.subsidence_vertical_velocity),
+                      Adapt.adapt(to, sf.reference_density),
+                      Adapt.adapt(to, sf.averaged_field))
 
 """
     $(TYPEDSIGNATURES)
