@@ -17,7 +17,6 @@ using Breeze
 using Oceananigans: Oceananigans
 using Oceananigans.Units
 using Oceananigans: Oceananigans
-using Oceananigans.Operators: ∂zᶜᶜᶠ, ℑzᵃᵃᶜ
 
 using AtmosphericProfilesLibrary
 using CairoMakie
@@ -435,7 +434,7 @@ Colorbar(slices_fig[1:2, 4], hmq, label="qˡ (kg/kg)")
 slices_fig[0, :] = Label(slices_fig, title_text, fontsize=18, tellwidth=false)
 
 # Record animation
-record(slices_fig, "bomex_slices.mp4", 1:Nt, framerate=10) do nn
+CairoMakie.record(slices_fig, "bomex_slices.mp4", 1:Nt, framerate=10) do nn
     n[] = nn
 end
 nothing #hide
