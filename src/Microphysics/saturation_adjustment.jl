@@ -55,7 +55,7 @@ function SaturationAdjustment(FT::DataType=Oceananigans.defaults.FloatType;
     return SaturationAdjustment(tolerance, maxiter, equilibrium)
 end
 
-@inline microphysical_velocities(::SaturationAdjustment, name) = nothing
+@inline microphysical_velocities(::SaturationAdjustment, name, μ) = nothing
 
 #####
 ##### Warm-phase equilibrium
