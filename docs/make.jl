@@ -24,11 +24,22 @@ example_scripts = [
     "prescribed_sst.jl",
 ]
 
-for script_file in example_scripts
+literate_code(script_path, literated_dir) = """
+using Literate
+using CairoMakie
+
+CairoMakie.activate!(type = "png")
+set_theme!(Theme(linewidth = 3))
+
+Literate.markdown($(repr(script_path)), $(repr(literated_dir)); flavor = Literate.DocumenterFlavor(), execute = true)
+"""
+
+semaphore = Base.Semaphore(Threads.nthreads(:interactive))
+@sync for script_file in example_scripts
     script_path = joinpath(examples_src_dir, script_file)
-    Literate.markdown(script_path, literated_dir;
-                      flavor = Literate.DocumenterFlavor(),
-                      execute = true)
+    Threads.@spawn :interactive Base.acquire(semaphore) do
+        run(`$(Base.julia_cmd()) --color=yes --project=$(dirname(Base.active_project())) -e $(literate_code(script_path, literated_dir))`)
+    end
 end
 
 example_pages = Any[
