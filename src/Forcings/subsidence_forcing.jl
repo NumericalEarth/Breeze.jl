@@ -1,7 +1,8 @@
 using Oceananigans: Average, Field, set!, compute!
-using Oceananigans.Grids: Center, Face, prettysummary
+using Oceananigans.Grids: Center, Face
 using Oceananigans.Fields: AbstractField
 using Oceananigans.Operators: ∂zᶜᶜᶠ, ℑzᵃᵃᶜ
+using Oceananigans.Utils: prettysummary
 
 #####
 ##### Subsidence forcing types (unmaterialized stubs)
@@ -24,7 +25,7 @@ F_{ρ ϕ} = - ρᵣ wˢ ∂_z \\overline{ϕ}
 ```
 
 where ``wˢ`` is the `subsidence_vertical_velocity`, ``ρᵣ`` is the reference density,
-and ``\\overline{ϕ}`` is the horizontal average of the field being forced.
+and ``\overline{ϕ}`` is the horizontal average of the field being forced.
 
 # Fields
 - `wˢ`: Either a function of `z` specifying the subsidence velocity profile,
