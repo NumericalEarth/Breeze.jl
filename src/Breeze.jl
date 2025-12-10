@@ -42,17 +42,9 @@ export
     BulkMicrophysics,
 
     # BoundaryConditions
-    BulkDragFunction,
-    XDirectionBulkDragFunction,
-    YDirectionBulkDragFunction,
     BulkDrag,
-    BulkDragBoundaryCondition,
-    BulkSensibleHeatFluxFunction,
     BulkSensibleHeatFlux,
-    BulkSensibleHeatFluxBoundaryCondition,
-    BulkVaporFluxFunction,
-    BulkVaporFlux,
-    BulkVaporFluxBoundaryCondition
+    BulkVaporFlux
 
 using Oceananigans: Oceananigans, @at, AnisotropicMinimumDissipation, Average,
                     AveragedTimeInterval, BackgroundField, BetaPlane, Bounded,
