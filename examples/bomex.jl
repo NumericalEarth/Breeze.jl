@@ -16,14 +16,13 @@
 using Breeze
 using Oceananigans.Units
 using Oceananigans: Oceananigans
+using Oceananigans.Operators: ∂zᶜᶜᶠ, ℑzᵃᵃᶜ
 
 using AtmosphericProfilesLibrary
-using Printf
 using CairoMakie
 using CUDA
+using Printf
 using Random
-
-using Oceananigans.Operators: ∂zᶜᶜᶠ, ℑzᵃᵃᶜ
 
 Random.seed!(938)
 
@@ -390,8 +389,7 @@ default_colours = Makie.wong_colors()
 colors = [default_colours[mod1(i, length(default_colours))] for i in 1:Nt]
 
 for n in 1:Nt
-    t_max = Int(times[n] / hour)
-    label = n == 1 ? "initial condition" : "mean over $(t_max - 1)-$t_max hr"
+    label = n == 1 ? "initial condition" : "mean over $(Int(times[n-1]/hour))-$(Int(times[n]/hour)) hr"
 
     lines!(axθ, θt[n], color=colors[n], label=label)
     lines!(axq, qᵛt[n], color=colors[n])
