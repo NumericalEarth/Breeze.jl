@@ -342,7 +342,7 @@ add_callback!(simulation, progress, IterationInterval(100))
 # ## Output
 #
 # We save both the full 2D fields and the 1D surface flux fields.
-# We include native model variables and othesr like, e.g., the total speed,
+# We include both native model variables and others like, e.g., the total speed,
 # ``\sqrt{u² + w²}`` and the cross-stream vorticity ``∂_z u - ∂_x w``.
 # The JLD2 format provides efficient storage with full Julia type preservation.
 
