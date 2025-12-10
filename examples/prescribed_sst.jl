@@ -56,7 +56,7 @@ grid = RectilinearGrid(size = (128, 128), halo = (5, 5),
 
 p₀, θ₀ = 101325, 285 # Pa, K
 constants = ThermodynamicConstants()
-reference_state = ReferenceState(grid, constants; base_pressure=p₀, potential_temperature=θ₀)
+reference_state = ReferenceState(grid, constants; surface_pressure=p₀, potential_temperature=θ₀)
 formulation = AnelasticFormulation(reference_state, thermodynamics = :LiquidIcePotentialTemperature)
 
 # The microphysics scheme uses saturation adjustment to maintain thermodynamic
@@ -91,11 +91,11 @@ scalar_advection = WENO(order=5)
 
 using Breeze.Thermodynamics:
     saturation_specific_humidity,
-    base_density,
+    surface_density,
     PlanarLiquidSurface
 
 ΔT = 2 # K
-ρ₀ = base_density(p₀, θ₀, constants)
+ρ₀ = surface_density(p₀, θ₀, constants)
 surface = PlanarLiquidSurface()
 
 # Sea surface temperature field with two sharp gradients

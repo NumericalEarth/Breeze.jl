@@ -48,7 +48,7 @@ function diagnose_thermodynamic_state(i, j, k, grid, formulation::APTF,
     θ = @inbounds formulation.thermodynamics.potential_temperature[i, j, k]
     pᵣ = @inbounds formulation.reference_state.pressure[i, j, k]
     ρᵣ = @inbounds formulation.reference_state.density[i, j, k]
-    p₀ = formulation.reference_state.base_pressure
+    p₀ = formulation.reference_state.surface_pressure
     qᵗ = @inbounds specific_moisture[i, j, k]
 
     q = compute_moisture_fractions(i, j, k, grid, microphysics, ρᵣ, qᵗ, microphysical_fields)
@@ -200,7 +200,7 @@ end
     𝒰e₁ = maybe_adjust_thermodynamic_state(𝒰e₀, microphysics, microphysical_fields, qᵗ, constants)
     T = temperature(𝒰e₁, constants)
 
-    p₀ = formulation.reference_state.base_pressure
+    p₀ = formulation.reference_state.surface_pressure
     q₁ = 𝒰e₁.moisture_mass_fractions
     𝒰θ = LiquidIcePotentialTemperatureState(zero(T), q₁, p₀, pᵣ)
     @inbounds potential_temperature[i, j, k] = with_temperature(𝒰θ, T, constants).potential_temperature
