@@ -23,7 +23,7 @@ abstract type AbstractLiquidIceFlavor end
 struct SpecificLiquidIce <: AbstractLiquidIceFlavor end
 struct LiquidIceDensity <: AbstractLiquidIceFlavor end
 
-# Equivalent potential temperature flavors  
+# Equivalent potential temperature flavors
 abstract type AbstractEquivalentFlavor end
 struct SpecificEquivalent <: AbstractEquivalentFlavor end
 struct EquivalentDensity <: AbstractEquivalentFlavor end
@@ -193,7 +193,7 @@ Field(θᵛ)
 
 # References
 
-* [Emanuel1994](@cite)
+* Emanuel, K. A. (1994). Atmospheric Convection (Oxford University Press).
 """
 function VirtualPotentialTemperature(model::AtmosphereModel, flavor_symbol=:specific)
 
@@ -232,7 +232,7 @@ that accounts for the latent heat associated with liquid water and ice:
 or
 
 ```math
-θˡⁱ = \frac{T}{Π} \\left (1 - \\frac{ℒˡᵣ qˡ + ℒⁱᵣ qⁱ}{cᵖᵐ T} \\right )
+θˡⁱ = \\frac{T}{Π} \\left (1 - \\frac{ℒˡᵣ qˡ + ℒⁱᵣ qⁱ}{cᵖᵐ T} \\right )
 ```
 
 where ``θ`` is the potential temperature, ``Π = (p/p₀)^{Rᵐ/cᵖᵐ}`` is the Exner function using mixture properties,
@@ -303,7 +303,7 @@ and diagnosing moist instabilities. It is the temperature that a parcel would ha
 if all its moisture were condensed out and the resulting latent heat used to warm
 the parcel, followed by adiabatic expansion to a reference pressure.
 
-We use a formulation derived from [Emanuel1994](@citet),
+We use a formulation derived by [Emanuel1994](@citet),
 
 ```math
 θᵉ = T \\left( \\frac{p₀}{pᵈ} \\right)^{Rᵈ / cᵖᵐ}
@@ -314,8 +314,8 @@ where ``T`` is temperature, ``pᵈ`` is dry air pressure, ``p₀`` is the refere
 ``ℒˡ`` is the latent heat of vaporization, ``qᵛ`` is the vapor specific humidity,
 ``ℋ`` is the relative humidity, and ``cᵖᵐ`` is the heat capacity of the moist air mixture.
 
-The formulation follows equation (34) of [BryanFritsch2002](@cite), 
-adapted from the derivation in [DurranKlemp1982](@citet).
+The formulation follows equation (34) of the paper by [BryanFritsch2002](@citet),
+adapted from the derivation in the work by [DurranKlemp1982](@citet).
 
 # Arguments
 
@@ -347,8 +347,11 @@ Field(θᵉ)
 
 # References
 
-* [BryanFritsch2002](@cite)
-* [DurranKlemp1982](@cite)
+* Bryan, G. H. and Fritsch, J. M. (2002). A benchmark simulation for moist nonhydrostatic numerical models.
+    Monthly Weather Review 130, 2917–2928.
+* Durran, D. R. and Klemp, J. B. (1982). On the effects of moisture on the Brunt-Väisälä frequency.
+    Journal of the Atmospheric Sciences 39, 2152–2158.
+* Emanuel, K. A. (1994). Atmospheric Convection (Oxford University Press).
 """
 function EquivalentPotentialTemperature(model::AtmosphereModel, flavor_symbol=:specific)
 
@@ -378,11 +381,11 @@ end
 Return a `KernelFunctionOperation` representing stability-equivalent potential temperature ``θᵇ``.
 
 Stability-equivalent potential temperature is a moist-conservative variable suitable for
-computing the moist Brunt-Väisälä frequency. It follows from the derivation in
-[DurranKlemp1982](@citet), who show that the moist Brunt-Väisälä frequency ``Nᵐ`` is
+computing the moist Brunt-Väisälä frequency. It follows from the derivation in the paper
+by [DurranKlemp1982](@citet), who show that the moist Brunt-Väisälä frequency ``Nᵐ`` is
 correctly expressed in terms of the vertical gradient of a moist-conservative variable.
 
-The formulation is based on equation (17) in [DurranKlemp1982](@cite):
+The formulation is based on equation (17) in the paper by [DurranKlemp1982](@citet):
 
 ```math
 θᵇ = θᵉ \\left( \\frac{T}{Tᵣ} \\right)^{cˡ qˡ / cᵖᵐ}
@@ -425,7 +428,8 @@ Field(θᵇ)
 
 # References
 
-* [DurranKlemp1982](@cite)
+* Durran, D. R. and Klemp, J. B. (1982). On the effects of moisture on the Brunt-Väisälä frequency.
+    Journal of the Atmospheric Sciences 39, 2152–2158.
 """
 function StabilityEquivalentPotentialTemperature(model::AtmosphereModel, flavor_symbol=:specific)
 
@@ -508,7 +512,7 @@ function (d::MoistPotentialTemperatureKernelFunction)(i, j, k, grid)
 
         # Equation 4.5.11 in Emanuel 1994
         # See also equation 17 in Durran & Klemp 1982
-        # TODO: many things here... 
+        # TODO: many things here...
         # - Equation 4.5.11 (and Emmanuel 1994's whole development) via moist entropy uses mixing ratios.
         # - I have (mostly) guessed about these expressions, which we must form in terms
         #   of mass fractions.

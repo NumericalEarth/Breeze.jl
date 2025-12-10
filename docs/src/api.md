@@ -28,6 +28,13 @@ Modules = [Breeze.AtmosphereModels]
 Private = false
 ```
 
+### AtmosphereModels.Diagnostics
+
+```@autodocs
+Modules = [Breeze.AtmosphereModels.Diagnostics]
+Private = false
+```
+
 ### Microphysics
 
 ```@autodocs
@@ -67,5 +74,12 @@ Public = false
 
 ```@autodocs
 Modules = [Breeze.AtmosphereModels]
+Public = false
+```
+
+### AtmosphereModels.Diagnostics
+
+```@autodocs
+Modules = [Breeze.AtmosphereModels.Diagnostics]
 Public = false
 ```
