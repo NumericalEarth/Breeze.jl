@@ -29,8 +29,6 @@ versioninfo()
 
 import Pkg
 Pkg.status()
-
-# If you use the same version of Julia, you can reproduce the computing environment by using the attached [`Project.toml`](../Project.toml) and [`Manifest.toml`](../Manifest.toml) files.
 """
 
 example_scripts = [
@@ -57,54 +55,44 @@ example_pages = Any[
     # "Prescribed SST" => "literated/prescribed_sst.md",
 ]
 
-@info "Copying environment to source directory..."
-cp(Base.active_project(), joinpath(@__DIR__, "src", "Project.toml"))
-cp(joinpath(dirname(Base.active_project()), "Manifest.toml"), joinpath(@__DIR__, "src", "Manifest.toml"))
-
-try
-    makedocs(
+makedocs(
+    ;
+    modules = [Breeze],
+    sitename = "Breeze",
+    plugins = [bib],
+    format = Documenter.HTML(
         ;
-        modules = [Breeze],
-        sitename = "Breeze",
-        plugins = [bib],
-        format = Documenter.HTML(
-            ;
-            size_threshold_warn = 2 ^ 19, # 512 KiB
-            size_threshold = 2 ^ 20, # 1 MiB
-        ),
-        pages=[
-            "Home" => "index.md",
-            "Examples" => example_pages,
-            "Thermodynamics" => "thermodynamics.md",
-            "AtmosphereModel" => Any[
-                "Diagnostics" => "atmosphere_model/diagnostics.md",
-            ],
-            "Microphysics" => Any[
-                "Overview" => "microphysics/microphysics_overview.md",
-                "Warm-phase saturation adjustment" => "microphysics/warm_phase_saturation_adjustment.md",
-                "Mixed-phase saturation adjustment" => "microphysics/mixed_phase_saturation_adjustment.md",
-            ],
-            "Developers" => Any[
-                "Microphysics" => Any[
-                    "Microphysics Interface" => "developer/microphysics_interface.md",
-                ],
-            ],
-            "Dycore equations and algorithms" => "dycore_equations_algorithms.md",
-            "Appendix" => Any[
-                "Notation" => "appendix/notation.md",
-            ],
-            "References" => "references.md",
-            "API" => "api.md",
-            "Contributors guide" => "contributing.md",
+        size_threshold_warn = 2 ^ 19, # 512 KiB
+        size_threshold = 2 ^ 20, # 1 MiB
+    ),
+    pages=[
+        "Home" => "index.md",
+        "Examples" => example_pages,
+        "Thermodynamics" => "thermodynamics.md",
+        "AtmosphereModel" => Any[
+            "Diagnostics" => "atmosphere_model/diagnostics.md",
         ],
-        linkcheck = true,
-        draft = false,
-    )
-finally
-    @info "Cleaning up environment files from source directory..."
-    rm(joinpath(@__DIR__, "src", "Project.toml"))
-    rm(joinpath(@__DIR__, "src", "Manifest.toml"))
-end
+        "Microphysics" => Any[
+            "Overview" => "microphysics/microphysics_overview.md",
+            "Warm-phase saturation adjustment" => "microphysics/warm_phase_saturation_adjustment.md",
+            "Mixed-phase saturation adjustment" => "microphysics/mixed_phase_saturation_adjustment.md",
+        ],
+        "Developers" => Any[
+            "Microphysics" => Any[
+                "Microphysics Interface" => "developer/microphysics_interface.md",
+            ],
+        ],
+        "Dycore equations and algorithms" => "dycore_equations_algorithms.md",
+        "Appendix" => Any[
+            "Notation" => "appendix/notation.md",
+        ],
+        "References" => "references.md",
+        "API" => "api.md",
+        "Contributors guide" => "contributing.md",
+    ],
+    linkcheck = true,
+    draft = false,
+)
 
 """
     recursive_find(directory, pattern)
