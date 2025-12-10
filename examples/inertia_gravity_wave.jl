@@ -155,6 +155,7 @@ hm = contourf!(ax, θ′N, colormap=:balance; levels)
 fig
 
 save("inertia_gravity_wave.png", fig)
+# ![](inertia_gravity_wave.png)
 
 # ## Animation of wave propagation
 #
