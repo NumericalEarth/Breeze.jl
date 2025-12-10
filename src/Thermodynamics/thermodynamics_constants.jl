@@ -1,5 +1,5 @@
 using Adapt: Adapt, adapt
-using Oceananigans.Grids: prettysummary
+using Oceananigans.Utils: prettysummary
 
 """
 $(TYPEDEF)
@@ -12,6 +12,7 @@ A struct representing an ideal gas with molar mass and specific heat capacity.
 
 # Examples
 ```jldoctest
+using Breeze
 dry_air = IdealGas(molar_mass=0.02897, heat_capacity=1005)
 
 # output
@@ -67,7 +68,7 @@ Adapt.adapt_structure(to, pt::CondensedPhase) =
 """
 $(TYPEDSIGNATURES)
 
-Returns `CondensedPhase` with specified parameters converted to `FT`.
+Return `CondensedPhase` with specified parameters converted to `FT`.
 
 Two examples of `CondensedPhase` are liquid and ice.
 When matter is converted from vapor to liquid, water molecules in the
@@ -120,16 +121,16 @@ end
 
 Base.eltype(::ThermodynamicConstants{FT}) where FT = FT
 
-function Adapt.adapt_structure(to, thermo::ThermodynamicConstants)
-    molar_gas_constant = adapt(to, thermo.molar_gas_constant)
-    gravitational_acceleration = adapt(to, thermo.gravitational_acceleration)
-    dry_air = adapt(to, thermo.dry_air)
-    vapor = adapt(to, thermo.vapor)
-    energy_reference_temperature = adapt(to, thermo.energy_reference_temperature)
-    triple_point_temperature = adapt(to, thermo.triple_point_temperature)
-    triple_point_pressure = adapt(to, thermo.triple_point_pressure)
-    liquid = adapt(to, thermo.liquid)
-    ice = adapt(to, thermo.ice)
+function Adapt.adapt_structure(to, constants::ThermodynamicConstants)
+    molar_gas_constant = adapt(to, constants.molar_gas_constant)
+    gravitational_acceleration = adapt(to, constants.gravitational_acceleration)
+    dry_air = adapt(to, constants.dry_air)
+    vapor = adapt(to, constants.vapor)
+    energy_reference_temperature = adapt(to, constants.energy_reference_temperature)
+    triple_point_temperature = adapt(to, constants.triple_point_temperature)
+    triple_point_pressure = adapt(to, constants.triple_point_pressure)
+    liquid = adapt(to, constants.liquid)
+    ice = adapt(to, constants.ice)
     FT = typeof(molar_gas_constant)
     C = typeof(liquid)
     I = typeof(ice)
@@ -187,8 +188,52 @@ end
 
 const TC = ThermodynamicConstants
 
-@inline vapor_gas_constant(thermo::TC)   = thermo.molar_gas_constant / thermo.vapor.molar_mass
-@inline dry_air_gas_constant(thermo::TC) = thermo.molar_gas_constant / thermo.dry_air.molar_mass
+@inline vapor_gas_constant(constants::TC)   = constants.molar_gas_constant / constants.vapor.molar_mass
+@inline dry_air_gas_constant(constants::TC) = constants.molar_gas_constant / constants.dry_air.molar_mass
+
+"""
+$(TYPEDSIGNATURES)
+
+Return the latent heat of vaporization (vapor → liquid) at temperature `T`.
+
+The latent heat varies linearly with temperature:
+
+```math
+ℒˡ(T) = ℒˡᵣ + (cᵖᵛ - cˡ)(T - Tᵣ)
+```
+
+where ``ℒˡᵣ`` is the reference latent heat at the energy reference temperature ``Tᵣ``,
+``cᵖᵛ`` is the heat capacity of vapor, and ``cˡ`` is the heat capacity of liquid water.
+"""
+@inline function liquid_latent_heat(T, constants::TC)
+    ℒˡᵣ = constants.liquid.reference_latent_heat
+    cᵖᵛ = constants.vapor.heat_capacity
+    cˡ = constants.liquid.heat_capacity
+    Tᵣ = constants.energy_reference_temperature
+    return ℒˡᵣ + (cᵖᵛ - cˡ) * (T - Tᵣ)
+end
+
+"""
+$(TYPEDSIGNATURES)
+
+Return the latent heat of sublimation (vapor → ice) at temperature `T`.
+
+The latent heat varies linearly with temperature:
+
+```math
+ℒⁱ(T) = ℒⁱᵣ + (cᵖᵛ - cⁱ)(T - Tᵣ)
+```
+
+where ``ℒⁱᵣ`` is the reference latent heat at the energy reference temperature ``Tᵣ``,
+``cᵖᵛ`` is the heat capacity of vapor, and ``cⁱ`` is the heat capacity of ice.
+"""
+@inline function ice_latent_heat(T, constants::TC)
+    ℒⁱᵣ = constants.ice.reference_latent_heat
+    cᵖᵛ = constants.vapor.heat_capacity
+    cⁱ = constants.ice.heat_capacity
+    Tᵣ = constants.energy_reference_temperature
+    return ℒⁱᵣ + (cᵖᵛ - cⁱ) * (T - Tᵣ)
+end
 
 #####
 ##### Mixtures of dry air with vapor, liquid, and ice
@@ -228,17 +273,17 @@ function Base.show(io::IO, q::MoistureMassFractions{FT}) where FT
                 "└── ice:    ", prettysummary(q.ice))
 end
 
-@inline total_moisture_mass_fraction(q::MMF) = q.vapor + q.liquid + q.ice
-@inline dry_air_mass_fraction(q::MMF) = 1 - total_moisture_mass_fraction(q)
+@inline total_specific_moisture(q::MMF) = q.vapor + q.liquid + q.ice
+@inline dry_air_mass_fraction(q::MMF) = 1 - total_specific_moisture(q)
 
 """
 $(TYPEDSIGNATURES)
 
 Return the gas constant of moist air mixture [in J/(kg K)] given the specific humidity
-`q` and thermodynamic parameters `thermo`.
+`q` and thermodynamic parameters `constants`.
 
 The mixture gas constant is calculated as a weighted average of the dry air
-and water vapor gas thermo:
+and water vapor gas constants:
 
 ```math
 Rᵐ = qᵈ Rᵈ + qᵛ Rᵛ ,
@@ -252,13 +297,13 @@ where:
 
 # Arguments
 - `q`: the moisture mass fractions (vapor, liquid, and ice)
-- `thermo`: `ThermodynamicConstants` instance containing gas thermo
+- `constants`: `ThermodynamicConstants` instance containing gas constants
 """
-@inline function mixture_gas_constant(q::MMF, thermo::TC)
+@inline function mixture_gas_constant(q::MMF, constants::TC)
     qᵈ = dry_air_mass_fraction(q)
     qᵛ = q.vapor
-    Rᵈ = dry_air_gas_constant(thermo)
-    Rᵛ = vapor_gas_constant(thermo)
+    Rᵈ = dry_air_gas_constant(constants)
+    Rᵛ = vapor_gas_constant(constants)
     return qᵈ * Rᵈ + qᵛ * Rᵛ
 end
 
@@ -280,15 +325,15 @@ The heat capacities `cᵖᵈ`, `cᵖᵛ`, `cˡ`, `cⁱ` are the heat capacities
 of dry air, vapor, liquid, and ice at constant pressure, respectively.
 The liquid and ice phases are assumed to be incompressible.
 """
-@inline function mixture_heat_capacity(q::MMF, thermo::TC)
+@inline function mixture_heat_capacity(q::MMF, constants::TC)
     qᵈ = dry_air_mass_fraction(q)
     qᵛ = q.vapor
     qˡ = q.liquid
     qⁱ = q.ice
-    cᵖᵈ = thermo.dry_air.heat_capacity
-    cᵖᵛ = thermo.vapor.heat_capacity
-    cˡ = thermo.liquid.heat_capacity
-    cⁱ = thermo.ice.heat_capacity
+    cᵖᵈ = constants.dry_air.heat_capacity
+    cᵖᵛ = constants.vapor.heat_capacity
+    cˡ = constants.liquid.heat_capacity
+    cⁱ = constants.ice.heat_capacity
     return qᵈ * cᵖᵈ + qᵛ * cᵖᵛ + qˡ * cˡ + qⁱ * cⁱ
 end
 
@@ -296,12 +341,43 @@ end
 ##### Equation of state
 #####
 
-@inline function density(p, T, q::MMF, thermo::TC)
-    Rᵐ = mixture_gas_constant(q, thermo)
+@inline function density(p, T, q::MMF, constants::TC)
+    Rᵐ = mixture_gas_constant(q, constants)
     return p / (Rᵐ * T)
 end
 
-@inline function specific_volume(p, T, q::MMF, thermo::TC)
-    Rᵐ = mixture_gas_constant(q, mb.thermodynamics)
-    return Rᵐ * T / p
+"""
+    vapor_pressure(T, ρ, qᵛ, constants)
+
+Compute the vapor pressure from the ideal gas law:
+
+```math
+pᵛ = ρ qᵛ Rᵛ T
+```
+"""
+@inline function vapor_pressure(ρ, T, qᵛ, constants)
+    Rᵛ = vapor_gas_constant(constants)
+    return ρ * qᵛ * Rᵛ * T
+end
+
+"""
+    relative_humidity(T, ρ, qᵛ, constants, surface=PlanarLiquidSurface())
+
+Compute the relative humidity as the ratio of vapor pressure to saturation vapor pressure:
+
+```math
+ℋ = pᵛ / pᵛ⁺ = qᵛ / qᵛ⁺
+```
+"""
+@inline function relative_humidity(ρ, T, qᵛ, constants, surface=PlanarLiquidSurface())
+    pᵛ = vapor_pressure(T, ρ, qᵛ, constants)
+    pᵛ⁺ = saturation_vapor_pressure(T, constants, surface)
+    return pᵛ / pᵛ⁺
+end
+
+@inline function relative_humidity(p, T, q::MMF, constants, surface=PlanarLiquidSurface())
+    ρ = density(p, T, q, constants)
+    pᵛ = vapor_pressure(T, ρ, q.vapor, constants)
+    pᵛ⁺ = saturation_vapor_pressure(T, constants, surface)
+    return pᵛ / pᵛ⁺
 end

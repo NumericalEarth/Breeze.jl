@@ -35,10 +35,10 @@ jobs:
       contents: write
       pull-requests: read
       statuses: write
-    runs-on: ubuntu-latest
-    timeout-minutes: 30
+    runs-on: nvidia-gpu-t4
+    timeout-minutes: 60
     steps:
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@v6
       - uses: julia-actions/setup-julia@v2
         with:
           version: "1.12"
@@ -50,8 +50,11 @@ jobs:
           using Pkg
           Pkg.instantiate()
       - name: Build documentation
+        timeout-minutes: 45
         run:
-          julia --color=yes --project=docs docs/make.jl
+          julia --color=yes --project=docs --threads 1,4 docs/make.jl
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
       - name: Save Julia depot cache on cancel or failure
         id: julia-cache-save
         if: cancelled() || failure()
@@ -67,8 +70,11 @@ jobs:
           retention-days: 10
 
   deploy-docs:
-    # Deploy docs only if triggers is not a PR, or a PR not from a fork.
-    if: ${{ (github.event_name != 'pull_request') || (! github.event.pull_request.head.repo.fork) }}
+    # We want to deploy docs if:
+    # * it's a push, but only to main
+    # * it's a PR, but not from a fork
+    # * on a release
+    if: ${{ (github.event_name == 'push' && github.ref == 'refs/heads/main') || (github.event_name == 'pull_request' && ! github.event.pull_request.head.repo.fork) || (github.event_name == 'release') }}
     needs: build-docs
     permissions:
       actions: write
@@ -81,7 +87,7 @@ jobs:
       # Have only one job pushing the docs at a time.
       group: docs-pushing
     steps:
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@v6
       - uses: julia-actions/setup-julia@v2
         with:
           version: "1.12"

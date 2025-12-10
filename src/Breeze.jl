@@ -6,19 +6,39 @@ are based on Oceananigans.
 module Breeze
 
 export
+    # AtmosphereModel
     MoistAirBuoyancy,
     ThermodynamicConstants,
     ReferenceState,
     AnelasticFormulation,
     AtmosphereModel,
+    StaticEnergyThermodynamics,
+    LiquidIcePotentialTemperatureThermodynamics,
     TemperatureField,
     IdealGas,
     CondensedPhase,
     mixture_gas_constant,
     mixture_heat_capacity,
+    static_energy_density,
+    static_energy,
+    total_energy,
+    liquid_ice_potential_temperature_density,
+    liquid_ice_potential_temperature,
+
+    # Diagnostics
+    PotentialTemperature,
+    VirtualPotentialTemperature,
+    EquivalentPotentialTemperature,
+    StabilityEquivalentPotentialTemperature,
+    LiquidIcePotentialTemperature,
+    StaticEnergy,
+
+    # Microphysics
     SaturationAdjustment,
     MixedPhaseEquilibrium,
     WarmPhaseEquilibrium,
+    SaturationSpecificHumidity,
+    SaturationSpecificHumidityField,
     BulkMicrophysics
 
 using Oceananigans: Oceananigans, @at, AnisotropicMinimumDissipation, Average,
@@ -88,7 +108,7 @@ using .Microphysics
 include("TurbulenceClosures/TurbulenceClosures.jl")
 using .TurbulenceClosures
 
-# RadiativeTransfer extension will be loaded via ext/RRTMGPExt.jl when RRTMGP is available
-# Export will be added by the extension
+include("Advection.jl")
+using .Advection
 
 end # module Breeze

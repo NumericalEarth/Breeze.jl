@@ -93,7 +93,7 @@ q = Breeze.Thermodynamics.MoistureMassFractions(0.01, 0.002, 1e-5)
 from which we can compute the total moisture mass fraction,
 
 ```@example thermo
-qᵗ = Breeze.Thermodynamics.total_moisture_mass_fraction(q)
+qᵗ = Breeze.Thermodynamics.total_specific_moisture(q)
 ```
 
 And the dry as well,
@@ -260,7 +260,7 @@ the "[dry adiabatic lapse rate](https://en.wikipedia.org/wiki/Lapse_rate)".
 ### An example of a dry reference state in Breeze
 
 We can visualise a hydrostatic reference profile evaluating Breeze's reference-state
-utilities (which assume a dry reference state) on a one-dimensional `RectilinearGrid`.
+utilities (which assume a dry reference state) on a one-dimensional [`RectilinearGrid`](https://clima.github.io/OceananigansDocumentation/stable/appendix/library/#Oceananigans.Grids.RectilinearGrid).
 In the following code, the superscript ``d`` denotes dry air, e.g., an ideal gas
 with ``Rᵈ = 286.71 \; \mathrm{J} \, \mathrm{K}^{-1}``:
 
@@ -425,7 +425,7 @@ temperature ``T_r`` that is well above absolute zero. In that case,
 the latent heat is written
 
 ```math
-ℒ^β(T) = ℒ^β_r + \Delta c^β (T - T_r), \qquad \text{and} \qquad
+ℒ^β(T) = ℒ^β_r + \Delta c^β (T - T_r) \qquad \text{and} \qquad
 ℒ^β_0 = ℒ^β_r - \Delta c^β T_r ,
 ```
 

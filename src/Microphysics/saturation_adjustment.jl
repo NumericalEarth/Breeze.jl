@@ -6,11 +6,10 @@ using ..Thermodynamics:
     PlanarLiquidSurface,
     PlanarMixedPhaseSurface,
     saturation_vapor_pressure,
-    density,
     temperature,
     is_absolute_zero,
     with_moisture,
-    total_moisture_mass_fraction,
+    total_specific_moisture,
     AbstractThermodynamicState
 
 using Oceananigans: Oceananigans, CenterField
@@ -140,29 +139,29 @@ center_field_tuple(grid, names...) = NamedTuple{names}(CenterField(grid) for nam
 materialize_microphysical_fields(::WPSA, grid, bcs) = center_field_tuple(grid, :qᵛ, :qˡ)
 materialize_microphysical_fields(::MPSA, grid, bcs) = center_field_tuple(grid, :qᵛ, :qˡ, :qⁱ)
 
-@inline @inbounds function update_microphysical_fields!(μ, ::WPSA, i, j, k, grid, density, 𝒰, thermo)
-    μ.qᵛ[i, j, k] = 𝒰.moisture_mass_fractions.vapor
-    μ.qˡ[i, j, k] = 𝒰.moisture_mass_fractions.liquid
+@inline function update_microphysical_fields!(μ, ::WPSA, i, j, k, grid, ρ, 𝒰, constants)
+    @inbounds μ.qᵛ[i, j, k] = 𝒰.moisture_mass_fractions.vapor
+    @inbounds μ.qˡ[i, j, k] = 𝒰.moisture_mass_fractions.liquid
     return nothing
 end
 
-@inline @inbounds function update_microphysical_fields!(μ, ::MPSA, i, j, k, grid, density, 𝒰, thermo)
-    μ.qᵛ[i, j, k] = 𝒰.moisture_mass_fractions.vapor
-    μ.qˡ[i, j, k] = 𝒰.moisture_mass_fractions.liquid
-    μ.qⁱ[i, j, k] = 𝒰.moisture_mass_fractions.ice
+@inline function update_microphysical_fields!(μ, ::MPSA, i, j, k, grid, ρ, 𝒰, constants)
+    @inbounds μ.qᵛ[i, j, k] = 𝒰.moisture_mass_fractions.vapor
+    @inbounds μ.qˡ[i, j, k] = 𝒰.moisture_mass_fractions.liquid
+    @inbounds μ.qⁱ[i, j, k] = 𝒰.moisture_mass_fractions.ice
     return nothing
 end
 
-@inline @inbounds function compute_moisture_fractions(i, j, k, grid, ::WPSA, ρ, qᵗ, μ)
-    qᵛ = μ.qᵛ[i, j, k]
-    qˡ = μ.qˡ[i, j, k]
+@inline function compute_moisture_fractions(i, j, k, grid, ::WPSA, ρ, qᵗ, μ)
+    qᵛ = @inbounds μ.qᵛ[i, j, k]
+    qˡ = @inbounds μ.qˡ[i, j, k]
     return MoistureMassFractions(qᵛ, qˡ)
 end
 
-@inline @inbounds function compute_moisture_fractions(i, j, k, grid, ::MPSA, ρ, qᵗ, μ)
-    qᵛ = μ.qᵛ[i, j, k]
-    qˡ = μ.qˡ[i, j, k]
-    qⁱ = μ.qⁱ[i, j, k]
+@inline function compute_moisture_fractions(i, j, k, grid, ::MPSA, ρ, qᵗ, μ)
+    qᵛ = @inbounds μ.qᵛ[i, j, k]
+    qˡ = @inbounds μ.qˡ[i, j, k]
+    qⁱ = @inbounds μ.qⁱ[i, j, k]
     return MoistureMassFractions(qᵛ, qˡ, qⁱ)
 end
 
@@ -172,79 +171,80 @@ end
 ##### Saturation adjustment utilities
 #####
 
-@inline function saturation_specific_humidity(T, ρ, thermo, equilibrium::AbstractEquilibrium)
+@inline function saturation_specific_humidity(T, ρ, constants, equilibrium::AbstractEquilibrium)
     surface = equilibrated_surface(equilibrium, T)
-    return saturation_specific_humidity(T, ρ, thermo, surface)
+    return saturation_specific_humidity(T, ρ, constants, surface)
 end
 
-@inline function adjustment_saturation_specific_humidity(T, pᵣ, qᵗ, thermo, equil)
+@inline function equilibrium_saturation_specific_humidity(T, pᵣ, qᵗ, constants, equil)
     surface = equilibrated_surface(equil, T)
-    pᵛ⁺ = saturation_vapor_pressure(T, thermo, surface)
-    Rᵈ = dry_air_gas_constant(thermo)
-    Rᵛ = vapor_gas_constant(thermo)
+    pᵛ⁺ = saturation_vapor_pressure(T, constants, surface)
+    Rᵈ = dry_air_gas_constant(constants)
+    Rᵛ = vapor_gas_constant(constants)
     ϵᵈᵛ = Rᵈ / Rᵛ
     return ϵᵈᵛ * (1 - qᵗ) * pᵛ⁺ / (pᵣ - pᵛ⁺)
 end
 
-@inline function adjust_state(𝒰₀, T, thermo, equilibrium)
+@inline function adjust_state(𝒰₀, T, constants, equilibrium)
     pᵣ = 𝒰₀.reference_pressure
-    qᵗ = total_moisture_mass_fraction(𝒰₀)
-    qᵛ⁺ = adjustment_saturation_specific_humidity(T, pᵣ, qᵗ, thermo, equilibrium)
+    qᵗ = total_specific_moisture(𝒰₀)
+    qᵛ⁺ = equilibrium_saturation_specific_humidity(T, pᵣ, qᵗ, constants, equilibrium)
     q₁ = equilibrated_moisture_mass_fractions(T, qᵗ, qᵛ⁺, equilibrium)
     return with_moisture(𝒰₀, q₁)
 end
 
-@inline function saturation_adjustment_residual(T, 𝒰₀, thermo, equilibrium)
-    𝒰₁ = adjust_state(𝒰₀, T, thermo, equilibrium)
-    T₁ = temperature(𝒰₁, thermo)
+@inline function saturation_adjustment_residual(T, 𝒰₀, constants, equilibrium)
+    𝒰₁ = adjust_state(𝒰₀, T, constants, equilibrium)
+    T₁ = temperature(𝒰₁, constants)
     return T - T₁
 end
 
-const ATC = AbstractThermodynamicState
+const ATS = AbstractThermodynamicState
 
 # This function allows saturation adjustment to be used as a microphysics scheme directly
-@inline maybe_adjust_thermodynamic_state(𝒰₀, saturation_adjustment::SA, microphysical_fields, thermo) =
-    adjust_thermodynamic_state(𝒰₀, saturation_adjustment, thermo)
+@inline function maybe_adjust_thermodynamic_state(𝒰₀, saturation_adjustment::SA, microphysical_fields, qᵗ, constants)
+    qᵃ = MoistureMassFractions(qᵗ) # compute moisture state to be adjusted
+    𝒰ᵃ = with_moisture(𝒰₀, qᵃ)
+    return adjust_thermodynamic_state(𝒰ᵃ, saturation_adjustment, constants)
+end
 
 """
 $(TYPEDSIGNATURES)
 
 Return the saturation-adjusted thermodynamic state using a secant iteration.
 """
-@inline function adjust_thermodynamic_state(𝒰₀::ATC, microphysics::SA, thermo)
+@inline function adjust_thermodynamic_state(𝒰₀::ATS, microphysics::SA, constants)
     FT = eltype(𝒰₀)
     is_absolute_zero(𝒰₀) && return 𝒰₀
 
     # Compute an initial guess assuming unsaturated conditions
-    qᵗ = total_moisture_mass_fraction(𝒰₀)
+    qᵗ = total_specific_moisture(𝒰₀)
     q₁ = MoistureMassFractions(qᵗ)
     𝒰₁ = with_moisture(𝒰₀, q₁)
-    T₁ = temperature(𝒰₁, thermo)
+    T₁ = temperature(𝒰₁, constants)
 
     equilibrium = microphysics.equilibrium
-    pᵣ = 𝒰₀.reference_pressure
-    ρ₁ = density(pᵣ, T₁, q₁, thermo)
-    qᵛ⁺₁ = saturation_specific_humidity(T₁, ρ₁, thermo, equilibrium)
+    qᵛ⁺₁ = saturation_specific_humidity(𝒰₁, constants, equilibrium)
     qᵗ <= qᵛ⁺₁ && return 𝒰₁
 
     # If we made it here, the state is saturated.
     # So, we re-initialize our first guess assuming saturation
-    𝒰₁ = adjust_state(𝒰₀, T₁, thermo, equilibrium)
+    𝒰₁ = adjust_state(𝒰₀, T₁, constants, equilibrium)
 
     # Next, we generate a second guess that scaled by the supersaturation implied by T₁
-    ℒˡᵣ = thermo.liquid.reference_latent_heat
-    ℒⁱᵣ = thermo.ice.reference_latent_heat
+    ℒˡᵣ = constants.liquid.reference_latent_heat
+    ℒⁱᵣ = constants.ice.reference_latent_heat
     qˡ₁ = q₁.liquid
     qⁱ₁ = q₁.ice
-    cᵖᵐ = mixture_heat_capacity(q₁, thermo)
+    cᵖᵐ = mixture_heat_capacity(q₁, constants)
     ΔT = (ℒˡᵣ * qˡ₁ + ℒⁱᵣ * qⁱ₁) / cᵖᵐ
     ϵT = convert(FT, 0.01) # minimum increment for second guess
     T₂ = T₁ + max(ϵT, ΔT / 2) # reduce the increment, recognizing it is an overshoot
-    𝒰₂ = adjust_state(𝒰₁, T₂, thermo, equilibrium)
+    𝒰₂ = adjust_state(𝒰₁, T₂, constants, equilibrium)
 
     # Initialize secant iteration
-    r₁ = saturation_adjustment_residual(T₁, 𝒰₁, thermo, equilibrium)
-    r₂ = saturation_adjustment_residual(T₂, 𝒰₂, thermo, equilibrium)
+    r₁ = saturation_adjustment_residual(T₁, 𝒰₁, constants, equilibrium)
+    r₂ = saturation_adjustment_residual(T₂, 𝒰₂, constants, equilibrium)
     δ = microphysics.tolerance
     iter = 0
 
@@ -259,8 +259,8 @@ Return the saturation-adjusted thermodynamic state using a secant iteration.
 
         # Update
         T₂ -= r₂ * ΔTΔr
-        𝒰₂ = adjust_state(𝒰₂, T₂, thermo, equilibrium)
-        r₂ = saturation_adjustment_residual(T₂, 𝒰₂, thermo, equilibrium)
+        𝒰₂ = adjust_state(𝒰₂, T₂, constants, equilibrium)
+        r₂ = saturation_adjustment_residual(T₂, 𝒰₂, constants, equilibrium)
         iter += 1
     end
 
@@ -273,10 +273,10 @@ end
 Perform saturation adjustment and return the temperature
 associated with the adjusted state.
 """
-function compute_temperature(𝒰₀, adjustment::SA, thermo)
-    𝒰₁ = adjust_thermodynamic_state(𝒰₀, adjustment, thermo)
-    return temperature(𝒰₁, thermo)
+function compute_temperature(𝒰₀, adjustment::SA, constants)
+    𝒰₁ = adjust_thermodynamic_state(𝒰₀, adjustment, constants)
+    return temperature(𝒰₁, constants)
 end
 
 # When no microphysics adjustment is needed
-compute_temperature(𝒰₀, ::Nothing, thermo) = temperature(𝒰₀, thermo)
+compute_temperature(𝒰₀, ::Nothing, constants) = temperature(𝒰₀, constants)

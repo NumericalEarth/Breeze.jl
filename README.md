@@ -20,8 +20,8 @@
   </a>
   <a href="https://codecov.io/gh/NumericalEarth/Breeze.jl" >
     <img src="https://codecov.io/gh/NumericalEarth/Breeze.jl/graph/badge.svg?token=09TZGWKUPV"/>
-  </a>  
-  <a href="[https://codecov.io/gh/NumericalEarth/Breeze.jl](https://github.com/JuliaTesting/Aqua.jl)" >
+  </a>
+  <a href="https://github.com/JuliaTesting/Aqua.jl" >
     <img src="https://raw.githubusercontent.com/JuliaTesting/Aqua.jl/master/badge.svg"/>
   </a>
 </p>
@@ -56,12 +56,23 @@ julia> using Pkg; Pkg.instantiate()
 
 Now we are ready to run any of the examples!
 
-For instance, if we run
+For instance, by increasing the resolution of the cloudy Kelvin-Helmholtz instability
+to `Nx=1536` and `Nz=1024`, decrease the timestep to `Δt = 0.1`, and running
 
 ```julia
-julia> include("examples/thermal_bubble.jl")
+julia> include("examples/cloudy_kelvin_helmholtz.jl")
 ```
 
-but after we tweak the spatial resolution of the grid to `size = (1024, 512)`, we get
+to get
 
-https://github.com/user-attachments/assets/aaca693c-57fe-46bf-8ff7-6646f6e5eebe
+https://github.com/user-attachments/assets/f47ff268-b2e4-401c-a114-a0aaf0c7ead3
+
+Or cranking up the spatial resolution of the thermal bubble example to to `size = (1024, 512)` and running
+
+```julia
+julia> include("examples/dry_thermal_bubble.jl")
+```
+
+we get
+
+https://github.com/user-attachments/assets/c9a0c9c3-c199-48b8-9850-f967bdcc4bed

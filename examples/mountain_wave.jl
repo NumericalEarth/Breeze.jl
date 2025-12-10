@@ -19,11 +19,10 @@ grid = ImmersedBoundaryGrid(underlying_grid, PartialCellBottom(hill))
 model = AtmosphereModel(grid, advection = WENO())
 
 # Initial conditions
-θ₀ = model.formulation.constants.potential_temperature
-g = model.thermodynamics.gravitational_acceleration
+θ₀ = model.formulation.reference_state.potential_temperature
+g = model.thermodynamic_constants.gravitational_acceleration
 N² = 1e-4           # Brunt-Väisälä frequency squared (s⁻²)
-dθdz = N² * θ₀ / g  # Background potential temperature gradient
-θᵢ(x, z) = θ₀ + dθdz * z # background stratification
+θᵢ(x, z) = θ₀ * exp(N² * z / g)
 Uᵢ = 10
 set!(model, θ=θᵢ, u=Uᵢ)
 
