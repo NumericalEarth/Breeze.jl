@@ -424,5 +424,4 @@ fig
 # - Development of cloud water in the conditionally unstable layer
 # - Westerly flow throughout the domain with weak meridional winds
 
-Oceananigans.defaults.FloatType = Float64 #hide --- reset default float type in Oceananigans
-
+Oceananigans.defaults.FloatType = Float64 #hide
