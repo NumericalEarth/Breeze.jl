@@ -39,6 +39,7 @@ example_scripts = [
     "cloudy_thermal_bubble.jl",
     "cloudy_kelvin_helmholtz.jl",
     "bomex.jl",
+    "rico.jl",
     "prescribed_sst.jl",
 ]
 
@@ -69,6 +70,7 @@ example_pages = Any[
     "Cloudy thermal bubble" => "literated/cloudy_thermal_bubble.md",
     "Cloudy Kelvin-Helmholtz instability" => "literated/cloudy_kelvin_helmholtz.md",
     "Shallow cumulus convection (BOMEX)" => "literated/bomex.md",
+    "Precipitating shallow cumulus (RICO)" => "literated/rico.md",
     "Prescribed SST convection" => "literated/prescribed_sst.md",
 ]
 
