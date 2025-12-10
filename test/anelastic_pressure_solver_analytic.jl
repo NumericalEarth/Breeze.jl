@@ -8,7 +8,7 @@ using Statistics: mean
     Oceananigans.defaults.FloatType = FT
     grid = RectilinearGrid(default_arch; size=48, z=(0, 1), topology=(Flat, Flat, Bounded))
     constants = ThermodynamicConstants()
-    reference_state = ReferenceState(grid, constants, base_pressure=101325, potential_temperature=288)
+    reference_state = ReferenceState(grid, constants, surface_pressure=101325, potential_temperature=288)
     formulation = AnelasticFormulation(reference_state)
 
     #=

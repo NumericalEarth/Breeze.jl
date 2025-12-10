@@ -36,7 +36,7 @@ u_bomex = AtmosphericProfilesLibrary.Bomex_u(FT)
 
 p₀ = 101325 # Pa
 θ₀ = θ_bomex(0) # K
-reference_state = Breeze.ReferenceState(base_pressure=p₀, potential_temperature=θ₀)
+reference_state = Breeze.ReferenceState(surface_pressure=p₀, potential_temperature=θ₀)
 buoyancy = Breeze.MoistAirBuoyancy(; reference_state) #, microphysics)
 
 # Simple precipitation scheme from CloudMicrophysics    

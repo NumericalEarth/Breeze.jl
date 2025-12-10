@@ -104,7 +104,7 @@ end
     constants = ThermodynamicConstants()
 
     p₀, θ₀ = 101325, 288
-    reference_state = ReferenceState(grid, constants, base_pressure=p₀, potential_temperature=θ₀)
+    reference_state = ReferenceState(grid, constants, surface_pressure=p₀, potential_temperature=θ₀)
     formulation = AnelasticFormulation(reference_state)
     model = AtmosphereModel(grid; thermodynamic_constants=constants, formulation)
 

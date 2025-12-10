@@ -23,7 +23,7 @@ grid = RectilinearGrid(CPU();
                        topology = (Bounded, Flat, Bounded))
 
 thermodynamic_constants = ThermodynamicConstants()
-reference_state = ReferenceState(grid, thermodynamic_constants, base_pressure=1e5, potential_temperature=300)
+reference_state = ReferenceState(grid, thermodynamic_constants, surface_pressure=1e5, potential_temperature=300)
 formulation = AnelasticFormulation(reference_state, thermodynamics=:LiquidIcePotentialTemperature)
 advection = WENO(order=9)
 model = AtmosphereModel(grid; formulation, thermodynamic_constants, advection)
