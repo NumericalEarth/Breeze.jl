@@ -391,7 +391,7 @@ colors = [default_colours[mod1(i, length(default_colours))] for i in 1:Nt]
 
 for n in 1:Nt
     t_max = Int(times[n] / minute)
-    label = n == 1 ? "initial condition" : "mean over $(t_max - 20)-$t_max min"
+    label = n == 1 ? "initial condition" : "mean over $(t_max - 60)-$t_max min"
 
     lines!(axθ, θt[n], color=colors[n], label=label)
     lines!(axq, qᵛt[n], color=colors[n])
