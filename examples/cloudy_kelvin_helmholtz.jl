@@ -19,6 +19,9 @@ using Breeze
 using Oceananigans.Units
 using CairoMakie
 using Printf
+using Random
+
+Random.seed!(301)
 
 # ## Domain and grid
 #
@@ -28,14 +31,11 @@ using Printf
 # Grid resolution is modest but enough to clearly resolve the Kelvin-Helmholtz billows and
 # rolled-up moisture filament.
 
-Nx = 384   # horizontal resolution
-Nz = 128   # vertical resolution
+Nx, Nz = 384, 128   # resolution
+Lx, Lz = 10e3, 3e3  # domain extent
 
-Lx = 10e3  # domain length
-Lz =  3e3  # domain height
-
-grid = RectilinearGrid(; size = (Nx, Nz), x = (0, Lx), z = (0, Lz),
-                         topology = (Periodic, Flat, Bounded))
+grid = RectilinearGrid(CPU(); size = (Nx, Nz), x = (0, Lx), z = (0, Lz),
+                       topology = (Periodic, Flat, Bounded))
 
 # ## Model and microphysics
 # We construct the AtmosphereModel model with saturation adjustment microphysics.
@@ -53,14 +53,14 @@ model = AtmosphereModel(grid; advection=WENO(order=5), microphysics)
 # N² = \frac{g}{θ₀} \frac{∂θ}{∂z} ,
 # ```
 #
-# We initialize the potential temperature that gives constant Brunt–Väisälä frequency,
+# We initialize with a potential temperature that gives constant Brunt–Väisälä frequency,
 # representative of mid-tropospheric stability. The (dry) Brunt–Väisälä frequency is
 #
 # ```math
 # N² = \frac{g}{θ} \frac{∂θ}{∂z}
 # ```
 #
-# and thus, for constant ``N²`` the above implies ``θ = θ₀ \exp{(N² z / g)}``.
+# and thus, for constant ``N²``, the above implies that ``θ = θ₀ \exp{(N² z / g)}``.
 
 thermo = ThermodynamicConstants()
 g = thermo.gravitational_acceleration
@@ -81,17 +81,30 @@ N = 0.01                  # target dry Brunt–Väisälä frequency (s⁻¹)
 
 # First, we set up the shear layer using a ``\tanh`` profile:
 
-z₀    = 1e3     # center of shear & moist layer (m)
-Δzᶸ   = 150     # shear layer half-thickness (m)
-U_top = 25      # upper-layer wind (m/s)
-U_bot =  5      # lower-layer wind (m/s)
-uᵇ(z) = U_bot + (U_top - U_bot) * (1 + tanh((z - z₀) / Δzᶸ)) / 2
+z₀  = 1e3  # center of shear & moist layer (m)
+Δzᵘ = 150  # shear layer half-thickness (m)
+U₀  =  5   # base wind speed (m/s)
+ΔU  = 20   # upper-layer wind (m/s)
+uᵇ(z) = U₀ + ΔU * (1 + tanh((z - z₀) / Δzᵘ)) / 2
 
 # For the moisture layer, we use a Gaussian in ``z`` centered at ``z₀``:
 
-q_max = 0.012  # peak specific humidity (kg/kg)
-Δz_q = 200     # moist layer half-width (m)
-qᵇ(z) = q_max * exp(-(z - z₀)^2 / 2Δz_q^2)
+qᵗ₀ = 0.012  # peak specific humidity (kg/kg)
+Δzᵗ = 200     # moist layer half-width (m)
+qᵇ(z) = qᵗ₀ * exp(-(z - z₀)^2 / 2Δzᵗ^2)
+
+# We initialize the model via Oceananigans `set!`, adding also a bit of random noise.
+
+δθ = 0.01
+δu = 1e-3
+δq = 0.05 * qᵗ₀
+
+ϵ() = rand() - 1/2
+θᵢ(x, z) = θᵇ(z) + δθ * ϵ()
+qᵗᵢ(x, z) = qᵇ(z) + δq * ϵ()
+uᵢ(x, z) = uᵇ(z) + δu * ϵ()
+
+set!(model; u=uᵢ, qᵗ=qᵗᵢ, θ=θᵢ)
 
 # ## The Kelvin-Helmholtz instability
 #
@@ -107,12 +120,11 @@ qᵇ(z) = q_max * exp(-(z - z₀)^2 / 2Δz_q^2)
 #
 # Let's plot the initial state as well as the Richardson number.
 
-z = znodes(grid, Center())
+U = Field(Average(model.velocities.u, dims=(1, 2)))
+Ri = N^2 / ∂z(U)^2
 
-dudz = @. (U_top - U_bot) * sech((z - z₀) / Δzᶸ)^2 / 2Δzᶸ
-Ri = N^2 ./ dudz.^2
-
-using CairoMakie
+Qᵗ = Field(Average(model.specific_moisture, dims=1))
+θ = Field(Average(liquid_ice_potential_temperature(model), dims=1))
 
 fig = Figure(size=(800, 500))
 
@@ -121,11 +133,12 @@ axq = Axis(fig[1, 2], xlabel = "qᵇ (kg/kg)", title="Total liquid")
 axθ = Axis(fig[1, 3], xlabel = "θᵇ (K)", title="Potential temperature")
 axR = Axis(fig[1, 4], xlabel = "Ri", ylabel="z (m)", title="Richardson number")
 
-lines!(axu, uᵇ.(z), z)
-lines!(axq, qᵇ.(z), z)
-lines!(axθ, θᵇ.(z), z)
-lines!(axR, Ri, z)
+lines!(axu, U)
+lines!(axq, Qᵗ)
+lines!(axθ, θ)
+lines!(axR, Ri)
 lines!(axR, [1/4, 1/4], [0, Lz], linestyle = :dash, color = :black)
+
 xlims!(axR, 0, 0.8)
 axR.xticks = 0:0.25:1
 
@@ -136,20 +149,6 @@ for ax in (axq, axθ, axR)
 end
 
 fig
-
-# ## Define initial conditions
-#
-# We initialize the model via Oceananigans `set!`, adding also a bit of random noise.
-
-δθ = 0.01
-δu = 1e-3
-δq = 0.05 * q_max
-
-θᵢ(x, z) = θᵇ(z) + δθ * rand()
-qᵗᵢ(x, z) = qᵇ(z) + δq * rand()
-uᵢ(x, z) = uᵇ(z) + δu * rand()
-
-set!(model; u=uᵢ, qᵗ=qᵗᵢ, θ=θᵢ)
 
 # ## Set up and run the simulation
 #
@@ -176,7 +175,7 @@ add_callback!(simulation, progress, TimeInterval(1minute))
 # the potential temperatures and the specific humidities (vapour, liquid, ice).
 u, v, w = model.velocities
 ξ = ∂z(u) - ∂x(w)
-θ = PotentialTemperatureField(model)
+θ = liquid_ice_potential_temperature(model)
 outputs = merge(model.velocities, model.microphysical_fields, (; ξ, θ))
 
 filename = "wave_clouds.jld2"

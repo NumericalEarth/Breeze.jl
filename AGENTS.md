@@ -10,7 +10,8 @@ Breeze interfaces with ClimaOcean for coupled atmosphere-ocean simulations.
 ## Language & Environment
 - **Language**: Julia 1.10+
 - **Architectures**: CPU and GPU
-- **Key Packages**: Oceananigans.jl, CloudMicrophysics.jl, RRTMGP.jl, ClimaOcean.jl, KernelAbstractions.jl, CUDA.jl, Enzyme.jl, Reactant.jl
+- **Key Packages**: Oceananigans.jl, CloudMicrophysics.jl, RRTMGP.jl, ClimaOcean.jl,
+                    KernelAbstractions.jl, CUDA.jl, Enzyme.jl, Reactant.jl, Documenter.jl
 - **Testing**: Breeze.jl uses ParallelTestRunner.jl for distributed testing
 
 ## Code Style & Conventions
@@ -43,6 +44,9 @@ Breeze interfaces with ClimaOcean for coupled atmosphere-ocean simulations.
    - If an implementation is awkward, don't hesitate to suggest an upstream feature (eg in Oceananigans)
      that will make something easier, rather than forcing in low quality code.
 
+6. **Extending functions**
+   - Almost always extend functions in source code, not in examples
+
 ### Oceananigans ecosystem best practices
 
 1. **General coding style**
@@ -61,14 +65,17 @@ Breeze interfaces with ClimaOcean for coupled atmosphere-ocean simulations.
   - "Number variables" (`Nx`, `Ny`) should start with capital `N`. For number of time steps use `Nt`.
     Spatial indices are `i, j, k` and time index is `n`. 
   
-3. **Import style**
+2. **Import/export style**
+  - Write all exported names at the top of a module file, before any other code.
+  - For explicit imports, import Oceananigans and Breeze names first. Then write imports for "external" packages.
+  - For internal Breeze imports, use absolute paths, not relative paths.
   - Use different style for source code versus user scripts:
     * in source code, explicitly import all names into files
     * in scripts, follow the user interface by writing "using Oceananigans" and "using Breeze".
     * only use explicit import in scripts for names that are _not_ exported by the top-level files Oceananigans.jl, Breeze.jl etc.
     * sometimes we need to write `using Oceananigans.Units`
 
-4. **Examples and integration tests**
+3. **Examples and integration tests**
   - Explain at the top of the file what a simulation is doing
   - Let code "speak for itself" as much as possible, to keep an explanation concise.
     In other words, use a Literate style.
@@ -98,18 +105,35 @@ Breeze interfaces with ClimaOcean for coupled atmosphere-ocean simulations.
   - Keyword arguments that expect tuples (eg `tracers = (:a, :b)`) often "autotuple" single arguments. Always rely on this: i.e. use `tracers = :c` instead of `tracers = (:c,)` (the latter is more prone to mistakes and harder to read)
   - Instances of `AtmosphereModel` are almost always called `model`
   and instances of `Simulation` are called `simulation`.
+  - The examples and docs have their own `Project.toml` environment. When your run examples you need to use `examples/Project.toml`.
+    When you build new examples, please add example-specific packages to `examples/Project.toml`. Do not add example-specific
+    packages to the main Breeze Project.toml. You may also need to add relevant packages to AtmosphereProfilesLibrary.
 
-5. **Documentation Style**
+4. **Documentation Style**
   - Mathematical notation in `docs/src/appendix/notation.md`
   - Use Documenter.jl syntax for cross-references
   - Include code examples in documentation pages
   - Add references to papers from the literature by adding bibtex to `breeze.bib`, and then
     a corresponding citation
   - Make use of cross-references with equations
+  - When writing math expressions, use unicode equivalents as much as possible and leverage the automatic conversion
+    to latex that Documenter will do under the hood. This will make the source code more readable.
+    For example, use ``θᵉ`` instead of ``\theta^e``.
+  - Always add cross-references for Breeze functions, eg using `@ref`. For functions in Oceananigans,
+    provide explicit links to Oceananigans documentation.
+    Cross-references should be attached to every code object mentioned at least once in every documentation file,
+    and often more than once for long files with multiple sections.
 
-6. **Common misconceptions**
+5. **Other tips and common misconceptions**
   - `update_state!` is called within `set!(model, ...)`. Scripts should never or rarely need to manually invoke `update_state!`
   - Fields and AbstractOperations can be used in `set!`.
+  - `compute!` is called in the `Field(op)` constructor for `op::AbstractOperation`. It is redundant to call `compute!`
+    immediately after building a `Field`.
+  - "doctests" usually should not contain actual equality comparisons or "tests". Instead, doctests should exercise `Base.show`.
+    Developing a doctest typically also involves ensuring that `show` for a newly defined object looks good and is human-readable.
+    In turn this can require work for nested structs to develop summary, prettysummary, and other methods for
+    displaying the content of a new type.
+
 
 ### Naming Conventions
 - **Files**: snake_case (e.g., `atmosphere_model.jl`, `update_atmosphere_model_state.jl`)
@@ -134,6 +158,16 @@ These are also planned:
 - an extension in `ext/` for `RRTMGP.jl`
 - modules that correspond to Oceananigans features:
     * LagrangianParticleTracking/
+
+### Breeze formulations
+
+Breeze uses "formulations" to express different equation sets that encode conservation of mass, momentum, and energy.
+Currently Breeze always uses `AnelasticFormulation` in conservation form. In conservation form, all prognostic
+variables are "densities". There are currently two anelastic thermodynamic formulations:
+  - `LiquidIcePotentialTemperatureThermodynamics` with prognostic potential temperature density `ρθ`.
+  - `StaticEnergyThermodynamics` with prognostic static energy density `ρe`.
+Eventually there will also be a fully compressible formulation with prognostic total energy density.
+We may also implement `EntropyThermodynamics` which prognostics entropy density `ρη`.
 
 ## Testing Guidelines
 

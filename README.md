@@ -70,7 +70,7 @@ https://github.com/user-attachments/assets/f47ff268-b2e4-401c-a114-a0aaf0c7ead3
 Or cranking up the spatial resolution of the thermal bubble example to to `size = (1024, 512)` and running
 
 ```julia
-julia> include("examples/thermal_bubble.jl")
+julia> include("examples/dry_thermal_bubble.jl")
 ```
 
 we get

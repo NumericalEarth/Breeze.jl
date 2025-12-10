@@ -1,6 +1,7 @@
 using ..Thermodynamics:
     MoistureMassFractions,
     StaticEnergyState,
+    LiquidIcePotentialTemperatureState,
     ThermodynamicConstants,
     ReferenceState,
     mixture_gas_constant,
@@ -9,13 +10,15 @@ using ..Thermodynamics:
 
 using Oceananigans: Oceananigans, CenterField
 using Oceananigans.Architectures: architecture
-using Oceananigans.Grids: inactive_cell, prettysummary
+using Oceananigans.Grids: inactive_cell
 using Oceananigans.Operators: Δzᵃᵃᶜ, Δzᵃᵃᶠ, divᶜᶜᶜ, Δzᶜᶜᶜ
 using Oceananigans.Solvers: solve!, AbstractHomogeneousNeumannFormulation
+using Oceananigans.Utils: prettysummary
 
 using KernelAbstractions: @kernel, @index
 using Adapt: Adapt, adapt
 
+import Oceananigans.BoundaryConditions: fill_halo_regions!
 import Oceananigans.Solvers: tridiagonal_direction, compute_main_diagonal!, compute_lower_diagonal!
 import Oceananigans.TimeSteppers: compute_pressure_correction!, make_pressure_correction!
 
@@ -37,23 +40,17 @@ struct AnelasticFormulation{T, R, P}
     pressure_anomaly :: P
 end
 
-struct StaticEnergyThermodynamics{E, S}
-    energy_density :: E
-    specific_energy :: S
-end
+const valid_thermodynamics_types = (:LiquidIcePotentialTemperature, :StaticEnergy)
 
 """
     $(TYPEDSIGNATURES)
 
-Construct a "stub" `AnelasticFormulation` with just the `reference_state`.
+Construct an un-materialized "stub" `AnelasticFormulation` with `reference_state` and `thermodynamics`.
 The thermodynamics and pressure fields are materialized later in the model constructor.
 """
-AnelasticFormulation(reference_state) =
-    AnelasticFormulation(nothing, reference_state, nothing)
-
-Adapt.adapt_structure(to, thermo::StaticEnergyThermodynamics) =
-    StaticEnergyThermodynamics(adapt(to, thermo.energy_density),
-                               adapt(to, thermo.specific_energy))
+function AnelasticFormulation(reference_state; thermodynamics=:StaticEnergy)
+    return AnelasticFormulation(thermodynamics, reference_state, nothing)
+end
 
 Adapt.adapt_structure(to, formulation::AnelasticFormulation) =
     AnelasticFormulation(adapt(to, formulation.thermodynamics),
@@ -62,6 +59,33 @@ Adapt.adapt_structure(to, formulation::AnelasticFormulation) =
 
 const AnelasticModel = AtmosphereModel{<:AnelasticFormulation}
 
+# Type aliases for convenience
+
+function prognostic_field_names(formulation::AnelasticFormulation{<:Symbol})
+    if formulation.thermodynamics == :StaticEnergy
+        return tuple(:ρe)
+    elseif formulation.thermodynamics == :LiquidIcePotentialTemperature
+        return tuple(:ρθ)
+    else
+        throw(ArgumentError("Got $(formulation.thermodynamics) thermodynamics, which is not one of \
+                             the valid types $valid_thermodynamics_types."))
+    end
+end
+
+function additional_field_names(formulation::AnelasticFormulation{<:Symbol})
+    if formulation.thermodynamics == :StaticEnergy
+        return tuple(:e)
+    elseif formulation.thermodynamics == :LiquidIcePotentialTemperature
+        return tuple(:θ)
+    end
+end
+
+"""
+    $(TYPEDSIGNATURES)
+
+Construct a "stub" `AnelasticFormulation` with just the `reference_state`.
+The thermodynamics and pressure fields are materialized later in the model constructor.
+"""
 function default_formulation(grid, constants)
     reference_state = ReferenceState(grid, constants)
     return AnelasticFormulation(reference_state)
@@ -71,64 +95,37 @@ end
     $(TYPEDSIGNATURES)
 
 Materialize a stub `AnelasticFormulation` into a full formulation with thermodynamic fields
-(`energy_density`, `specific_energy`) and the pressure anomaly field.
+and the pressure anomaly field. The thermodynamic fields depend on the type of thermodynamics
+specified in the stub (`:static_energy` or `:potential_temperature`).
 """
 function materialize_formulation(stub::AnelasticFormulation, grid, boundary_conditions)
-    energy_density = CenterField(grid, boundary_conditions=boundary_conditions.ρe)
-    specific_energy = CenterField(grid) # e = ρe / ρᵣ (diagnostic per-mass energy)
-    thermodynamics = StaticEnergyThermodynamics(energy_density, specific_energy)
+    thermo_type = stub.thermodynamics
     pressure_anomaly = CenterField(grid)
+    thermodynamics = materialize_thermodynamics(Val(thermo_type), grid, boundary_conditions)
     return AnelasticFormulation(thermodynamics, stub.reference_state, pressure_anomaly)
 end
 
+function materialize_thermodynamics(::Val{T}, grid, boundary_conditions) where T
+    throw(ArgumentError("Got $T thermodynamics, which is not one of \
+                         the valid types $valid_thermodynamics_types."))
+    return nothing
+end
+
 function Base.summary(formulation::AnelasticFormulation)
-    p₀ = formulation.reference_state.base_pressure
-    θ₀ = formulation.reference_state.potential_temperature
-    return string("AnelasticFormulation(p₀=", prettysummary(p₀),
-                  ", θ₀=", prettysummary(θ₀), ")")
+    p₀_str = prettysummary(formulation.reference_state.base_pressure)
+    θ₀_str = prettysummary(formulation.reference_state.potential_temperature)
+    return string("AnelasticFormulation(p₀=", p₀_str, ", θ₀=", θ₀_str, ")")
 end
 
-Base.show(io::IO, formulation::AnelasticFormulation) = print(io, "AnelasticFormulation")
+function Base.show(io::IO, formulation::AnelasticFormulation)
+    print(io, summary(formulation), '\n')
 
-#####
-##### Thermodynamic state
-#####
-
-"""
-    $(TYPEDSIGNATURES)
-
-Return `StaticEnergyState` computed from the prognostic state including
-energy density, moisture density, and microphysical fields.
-"""
-function diagnose_thermodynamic_state(i, j, k, grid, formulation::AnelasticFormulation,
-                                      microphysics,
-                                      microphysical_fields,
-                                      constants,
-                                      specific_energy,
-                                      specific_moisture)
-    @inbounds begin
-        e = specific_energy[i, j, k]
-        pᵣ = formulation.reference_state.pressure[i, j, k]
-        ρᵣ = formulation.reference_state.density[i, j, k]
-        qᵗ = specific_moisture[i, j, k]
+    if formulation.thermodynamics isa Symbol
+        print(io, "└── thermodynamics: ", formulation.thermodynamics, '\n')
+    else
+        print(io, "├── pressure_anomaly: ", prettysummary(formulation.pressure_anomaly), '\n')
+        print(io, "└── thermodynamics: ", prettysummary(formulation.thermodynamics))
     end
-
-    q = compute_moisture_fractions(i, j, k, grid, microphysics, ρᵣ, qᵗ, microphysical_fields)
-    z = znode(i, j, k, grid, c, c, c)
-
-    return StaticEnergyState(e, q, z, pᵣ)
-end
-
-
-function collect_prognostic_fields(::AnelasticFormulation,
-                                   momentum,
-                                   energy_density,
-                                   moisture_density,
-                                   microphysical_fields,
-                                   tracers)
-
-    thermodynamic_variables = (ρe=energy_density, ρqᵗ=moisture_density)
-    return merge(momentum, thermodynamic_variables, microphysical_fields, tracers)
 end
 
 function materialize_momentum_and_velocities(formulation::AnelasticFormulation, grid, boundary_conditions)
