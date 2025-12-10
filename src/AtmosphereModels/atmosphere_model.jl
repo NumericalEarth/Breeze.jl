@@ -16,6 +16,7 @@ using Oceananigans.Utils: launch!, prettytime, prettykeys, with_tracers
 import Oceananigans: fields, prognostic_fields
 import Oceananigans.Advection: cell_advection_timescale
 import Oceananigans.Models.HydrostaticFreeSurfaceModels: validate_momentum_advection
+import Oceananigans.Models: boundary_condition_args
 
 struct DefaultValue end
 
@@ -336,6 +337,8 @@ function prognostic_fields(model::AtmosphereModel)
     μ_fields= NamedTuple{μ_names}(model.microphysical_fields[name] for name in μ_names)
     return merge(model.momentum, thermodynamic_fields, μ_fields, model.tracers)
 end
+
+boundary_condition_args(model::AtmosphereModel) = (model.clock, fields(model))
 
 #####
 ##### Helper functions for accessing thermodynamic fields

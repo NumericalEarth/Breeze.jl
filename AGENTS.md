@@ -56,6 +56,8 @@ Breeze interfaces with ClimaOcean for coupled atmosphere-ocean simulations.
    - Within Breeze, you will inevitably run into situations that would be better implemented by
      extending Oceananigans, rather than writing Breeze source code. When this happens, make a
      detailed and descriptive TODO note about what should be moved to Oceananigans.
+8. **Extending functions**
+   - Almost always extend functions in source code, not in examples
 
 ### Oceananigans ecosystem best practices
 

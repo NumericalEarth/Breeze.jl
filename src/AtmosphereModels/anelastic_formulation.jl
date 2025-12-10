@@ -10,9 +10,10 @@ using ..Thermodynamics:
 
 using Oceananigans: Oceananigans, CenterField
 using Oceananigans.Architectures: architecture
-using Oceananigans.Grids: inactive_cell, prettysummary
+using Oceananigans.Grids: inactive_cell
 using Oceananigans.Operators: Δzᵃᵃᶜ, Δzᵃᵃᶠ, divᶜᶜᶜ, Δzᶜᶜᶜ
 using Oceananigans.Solvers: solve!, AbstractHomogeneousNeumannFormulation
+using Oceananigans.Utils: prettysummary
 
 using KernelAbstractions: @kernel, @index
 using Adapt: Adapt, adapt
