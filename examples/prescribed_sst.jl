@@ -189,17 +189,15 @@ qᵗ = model.specific_moisture
 # Surface momentum flux
 τˣ = BoundaryConditionOperation(ρu, :bottom, model)
 
-# Sensible heat flux: 𝒬ᵀ = cᵖᵐ × Jᵀ
+# Sensible heat flux: 𝒬ᵀ = cᵖ × Jᵀ (using dry air heat capacity as approximation)
 ρθ = liquid_ice_potential_temperature_density(model)
-cᵖᵈ = constants.dry_air.heat_capacity
-cᵖᵛ = constants.vapor.heat_capacity
-cᵖᵐ = cᵖᵈ * (1 - qᵛ₀) + cᵖᵛ * qᵛ₀
+cᵖ = constants.dry_air.heat_capacity
 Jᵀ = BoundaryConditionOperation(ρθ, :bottom, model)
-𝒬ᵀ = cᵖᵐ * Jᵀ
+𝒬ᵀ = cᵖ * Jᵀ
 
-# Latent heat flux: 𝒬ᵛ = ℒˡ × Jᵛ
+# Latent heat flux: 𝒬ᵛ = ℒˡ × Jᵛ (using reference θ₀ for latent heat)
 ρqᵗ = model.moisture_density
-ℒˡ = Breeze.Thermodynamics.liquid_latent_heat(T₀, constants)
+ℒˡ = Breeze.Thermodynamics.liquid_latent_heat(θ₀, constants)
 Jᵛ = BoundaryConditionOperation(ρqᵗ, :bottom, model)
 𝒬ᵛ = ℒˡ * Jᵛ
 
