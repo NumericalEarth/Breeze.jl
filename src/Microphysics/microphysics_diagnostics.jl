@@ -9,7 +9,7 @@ using Breeze.Thermodynamics:
     density,
     saturation_vapor_pressure
 
-import Oceananigans.Grids: prettysummary
+import Oceananigans.Utils: prettysummary
 
 struct SaturationSpecificHumidityKernelFunction{μ, FL, M, MF, T, R, TH}
     flavor :: FL
@@ -44,34 +44,34 @@ $(TYPEDSIGNATURES)
 
 Return a `KernelFunctionOperation` representing the specified flavor
 of *saturation specific humidity* ``qᵛ⁺`` which correpsonds to `model.microphysics`.
-If `model.microphysics` is not a saturation adjustment scheme, then 
+If `model.microphysics` is not a saturation adjustment scheme, then
 a warm phase scheme is assumed which computes the saturation specific humidity
 over a planar liquid surface.
 
 ## Flavor options
 
-### `:prognostic`
+* `:prognostic`
 
-Returns the *saturation specific humidity* corresponding to the `model`'s prognostic state.
-This is the same as the equilibrium saturation specific humidity for saturated conditions
-and a model that uses saturation adjustment microphysics.
+  Return the *saturation specific humidity* corresponding to the `model`'s prognostic state.
+  This is the same as the equilibrium saturation specific humidity for saturated conditions
+  and a model that uses saturation adjustment microphysics.
 
-### `:equilibrium`
+* `:equilibrium`
 
-Returns the *saturation specific humidity* in saturated conditions, using the
-`model.specific_moisture`. This is equivalent to the `:total_moisture` flavor
-under saturated conditions with no condensate; or in other words, if `model.specific_moisture` happens
-to be equal to the saturation specific humidity.
+  Return the *saturation specific humidity* in saturated conditions, using the
+  `model.specific_moisture`. This is equivalent to the `:total_moisture` flavor
+  under saturated conditions with no condensate; or in other words, if `model.specific_moisture` happens
+  to be equal to the saturation specific humidity.
 
-### `:total_moisture`
+* `:total_moisture`
 
-Returns *saturation specific humidity* in the case that the total specific moisture is
-equal to the saturation specific humidity and there is no condensate.
-This is useful for manufacturing perfectly saturated initial conditions.
+  Return *saturation specific humidity* in the case that the total specific moisture is
+  equal to the saturation specific humidity and there is no condensate.
+  This is useful for manufacturing perfectly saturated initial conditions.
 
 ## Examples
 
-```jldoctestssh
+```jldoctest ssh
 using Breeze
 grid = RectilinearGrid(size=(1, 1, 128), extent=(1e3, 1e3, 1e3))
 microphysics = SaturationAdjustment()
@@ -86,7 +86,7 @@ KernelFunctionOperation at (Center, Center, Center)
 └── arguments: ()
 ```
 
-As `SaturationSpecificHumidity` it may be wrapped in `Field` to store the result 
+As `SaturationSpecificHumidity` it may be wrapped in `Field` to store the result
 of its computation. For example, a `Field` representing the equilibrium saturation specific
 humidity may be formed via,
 
@@ -108,7 +108,7 @@ We also provide a constructor and type alias for the `Field` itself.
 For example, to build a `Field` representing the saturation specific humidity
 in the case that the total specific moisture is exactly at saturation,
 
-```@example ssh
+```jldoctest ssh
 qᵗ = SaturationSpecificHumidityField(model, :total_moisture)
 
 # output

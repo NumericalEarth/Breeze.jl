@@ -15,6 +15,24 @@ bib = CitationBibliography(bib_filepath, style=:authoryear)
 examples_src_dir = joinpath(@__DIR__, "..", "examples")
 literated_dir = joinpath(@__DIR__, "src", "literated")
 mkpath(literated_dir)
+# We'll append the following postamble to the literate examples, to include
+# information about the computing environment used to run them.
+example_postamble = """
+
+# ---
+
+# ### Julia version and environment information
+#
+# This example was executed with the following version of Julia:
+
+using InteractiveUtils: versioninfo
+versioninfo()
+
+# These were the top-level packages installed in the environment:
+
+import Pkg
+Pkg.status()
+"""
 
 example_scripts = [
     "dry_thermal_bubble.jl",
@@ -25,11 +43,26 @@ example_scripts = [
     # "prescribed_sst.jl", # this is a WIP
 ]
 
-for script_file in example_scripts
+literate_code(script_path, literated_dir) = """
+using Literate
+using CairoMakie
+
+CairoMakie.activate!(type = "png")
+set_theme!(Theme(linewidth = 3))
+
+Literate.markdown($(repr(script_path)), $(repr(literated_dir));
+                  flavor = Literate.DocumenterFlavor(),
+                  preprocess = content -> content * $(repr(example_postamble)),
+                  execute = true,
+                 )
+"""
+
+semaphore = Base.Semaphore(Threads.nthreads(:interactive))
+@time "literate" @sync for script_file in example_scripts
     script_path = joinpath(examples_src_dir, script_file)
-    Literate.markdown(script_path, literated_dir;
-                      flavor = Literate.DocumenterFlavor(),
-                      execute = true)
+    Threads.@spawn :interactive Base.acquire(semaphore) do
+        @time script_file run(`$(Base.julia_cmd()) --color=yes --project=$(dirname(Base.active_project())) -e $(literate_code(script_path, literated_dir))`)
+    end
 end
 
 example_pages = Any[
