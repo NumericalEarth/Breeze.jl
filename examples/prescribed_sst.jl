@@ -424,7 +424,7 @@ fig[0, :] = Label(fig, title, fontsize=22, tellwidth=false)
 T_limits = extrema(T_ts)
 s_limits = (0, maximum(s_ts))
 max_absξ = maximum(abs, ξ_ts)
-ξ_limits = (-max_absξ, max_absξ)
+ξ_limits = (-0.8*max_absξ, 0.8*max_absξ)
 
 qᵗ_max = maximum(qᵗ_ts)
 qˡ_max = maximum(qˡ_ts)
