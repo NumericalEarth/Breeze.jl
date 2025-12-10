@@ -15,6 +15,24 @@ bib = CitationBibliography(bib_filepath, style=:authoryear)
 examples_src_dir = joinpath(@__DIR__, "..", "examples")
 literated_dir = joinpath(@__DIR__, "src", "literated")
 mkpath(literated_dir)
+# We'll append the following postamble to the literate examples, to include
+# information about the computing environment used to run them.
+example_postamble = """
+
+# ---
+
+# ## Julia version and environment information
+#
+# This example was executed with the following version of Julia:
+
+using InteractiveUtils: versioninfo
+versioninfo()
+
+# These were the top-level packages installed in the environment:
+
+import Pkg
+Pkg.status()
+"""
 
 example_scripts = [
     "bomex.jl",
@@ -29,6 +47,7 @@ example_scripts = [
     script_path = joinpath(examples_src_dir, script_file)
     @time script_file Literate.markdown(script_path, literated_dir;
                                         flavor = Literate.DocumenterFlavor(),
+                                        preprocess = content -> content * example_postamble,
                                         execute = true)
 end
 
