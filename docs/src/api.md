@@ -28,6 +28,13 @@ Modules = [Breeze.AtmosphereModels]
 Private = false
 ```
 
+### AtmosphereModels.Diagnostics
+
+```@autodocs
+Modules = [Breeze.AtmosphereModels.Diagnostics]
+Private = false
+```
+
 ### Microphysics
 
 ```@autodocs
@@ -39,6 +46,13 @@ Private = false
 
 ```@autodocs
 Modules = [Breeze.TurbulenceClosures]
+Private = false
+```
+
+### Forcings
+
+```@autodocs
+Modules = [Breeze.Forcings]
 Private = false
 ```
 
@@ -67,5 +81,19 @@ Public = false
 
 ```@autodocs
 Modules = [Breeze.AtmosphereModels]
+Public = false
+```
+
+### AtmosphereModels.Diagnostics
+
+```@autodocs
+Modules = [Breeze.AtmosphereModels.Diagnostics]
+Public = false
+```
+
+### Forcings
+
+```@autodocs
+Modules = [Breeze.Forcings]
 Public = false
 ```

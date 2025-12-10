@@ -35,7 +35,7 @@ jobs:
       contents: write
       pull-requests: read
       statuses: write
-    runs-on: ubuntu-latest
+    runs-on: nvidia-gpu-t4
     timeout-minutes: 60
     steps:
       - uses: actions/checkout@v6
@@ -52,7 +52,7 @@ jobs:
       - name: Build documentation
         timeout-minutes: 45
         run:
-          julia --color=yes --project=docs docs/make.jl
+          julia --color=yes --project=docs --threads 1,4 docs/make.jl
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
       - name: Save Julia depot cache on cancel or failure
