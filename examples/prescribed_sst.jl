@@ -428,7 +428,7 @@ s_limits = (0, mean([maximum(u_ts), maximum(w_ts)]))
 max_ξ = 0
 for n in 1:Nt
     uₙ, wₙ = u_ts[n], w_ts[n]
-    max_ξ = 0.9 * max(max_ξ, maximum(abs, ∂z(uₙ) - ∂x(wₙ)))
+    global max_ξ = 0.9 * max(max_ξ, maximum(abs, ∂z(uₙ) - ∂x(wₙ)))
 end
 ξ_limits = (-max_ξ, max_ξ)
 
