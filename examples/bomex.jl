@@ -33,8 +33,8 @@ Random.seed!(938)
 # ([Siebesma2003](@citet); Section 3a). The intercomparison uses
 # 64 × 64 × 75 grid points with 100 m horizontal resolution and 40 m vertical resolution.
 #
-# For this documentation example, we reduce the resolution to Float32. This yields a 10x
-# speed up on an NVidia T4 (which is used to build the docs).
+# For this documentation example, we reduce the numerical precision to Float32.
+# This yields a 10x speed up on an NVidia T4 (which is used to build the docs).
 
 Oceananigans.defaults.FloatType = Float32
 
@@ -269,7 +269,7 @@ u₀ = AtmosphericProfilesLibrary.Bomex_u(FT)
 # the standard ``10^5`` Pa. Because of this, we need to apply a correction to
 # the initial condition: without this correction, our results do not match
 # [Siebesma2003](@citet) (and note that our outputted potential temperature
-# is displaced from [Siebesma2003](@citet)'s by precisely the factor below).
+# is displaced from [Siebesma2003](@citet)'s by precisely the factor ``χ`` below).
 
 using Breeze.Thermodynamics: dry_air_gas_constant, vapor_gas_constant
 
@@ -288,9 +288,9 @@ p₀ = reference_state.base_pressure
 # Magnitudes for the random perturbations applied to the initial profiles are given by
 # [Siebesma2003](@citet), Appendix B, third paragraph after Eq. B6.
 
-δθ = 0.1     # K
-δqᵗ = 2.5e-5 # kg/kg
-zδ = 1600    # m
+δθ = 0.1      # K
+δqᵗ = 2.5e-5  # kg/kg
+zδ = 1600     # m
 
 ϵ() = rand() - 1/2
 θᵢ(x, y, z) = χ * θˡⁱ₀(z) + δθ  * ϵ() * (z < zδ)
@@ -301,7 +301,7 @@ set!(model, θ=θᵢ, qᵗ=qᵢ, u=uᵢ)
 
 # ## Simulation
 #
-# We run the simulation for 1 hour with adaptive time-stepping.
+# We run the simulation for 6 hours with adaptive time-stepping.
 
 simulation = Simulation(model; Δt=10, stop_time=6hour)
 conjure_time_step_wizard!(simulation, cfl=0.7)
@@ -390,8 +390,8 @@ default_colours = Makie.wong_colors()
 colors = [default_colours[mod1(i, length(default_colours))] for i in 1:Nt]
 
 for n in 1:Nt
-    t_max = Int(times[n] / minute)
-    label = n == 1 ? "initial condition" : "mean over $(t_max - 60)-$t_max min"
+    t_max = Int(times[n] / hour)
+    label = n == 1 ? "initial condition" : "mean over $(t_max - 1)-$t_max hr"
 
     lines!(axθ, θt[n], color=colors[n], label=label)
     lines!(axq, qᵛt[n], color=colors[n])
@@ -425,4 +425,4 @@ fig
 # - Westerly flow throughout the domain with weak meridional winds
 
 Oceananigans.defaults.FloatType = Float64 #hide --- reset default float type in Oceananigans
-
+nothing #hide
