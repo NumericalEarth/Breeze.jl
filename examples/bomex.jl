@@ -327,7 +327,7 @@ add_callback!(simulation, compute_averages!)
 
 # ## Output and progress
 #
-# We add a progress callback and output the 20-minute time-averages of the horizontally-averaged
+# We add a progress callback and output the hourly time-averages of the horizontally-averaged
 # profiles for post-processing.
 
 qˡ = model.microphysical_fields.qˡ
@@ -361,7 +361,7 @@ run!(simulation)
 
 # ## Results: mean profile evolution
 #
-# We visualize the evolution of horizontally-averaged profiles every 20 minutes, similar
+# We visualize the evolution of horizontally-averaged profiles every hour, similar
 # to Figure 3 in the paper by [Siebesma2003](@cite). The intercomparison study shows
 # that after spin-up, the boundary layer reaches a quasi-steady state with:
 # - A well-mixed layer below cloud base (~500 m)
