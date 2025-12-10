@@ -49,7 +49,7 @@ N² = N^2
 
 # ## Grid configuration
 #
-# The domain is 300 km × 10 km with 300 × 10 grid points, matching the hydrostatic-scale
+# The domain is 300 km × 10 km with 300 × 10 grid points, matching the nonhydrostatic case
 # configuration in [SkamarockKlemp1994](@cite).
 
 Nx, Nz = 300, 10
@@ -77,7 +77,7 @@ model = AtmosphereModel(grid; formulation, advection)
 a  = 5000               # m - perturbation half-width parameter
 x₀ = Lx / 3             # m - perturbation center in x
 
-# The background potential temperature profile for an isothermal atmosphere:
+# The background potential temperature profile with a constant Brunt-Väisälä frequency:
 
 g = model.thermodynamic_constants.gravitational_acceleration
 θᵇᵍ(z) = θ₀ * exp(N² * z / g)
@@ -90,11 +90,10 @@ set!(model, θ=θᵢ, u=U)
 
 # ## Simulation
 #
-# We run for 3000 seconds with a fixed time step, matching the simulation time in
+# We run for 3000 seconds with a fixed time step equal 24 seconds, matching the simulation time in
 # [SkamarockKlemp1994](@cite):
 
-Δt = 24 # seconds
-simulation = Simulation(model; Δt, stop_time=3000)
+simulation = Simulation(model; Δt=24, stop_time=3000)
 
 # Progress callback:
 
