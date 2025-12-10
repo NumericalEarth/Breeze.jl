@@ -112,7 +112,7 @@ function materialize_thermodynamics(::Val{T}, grid, boundary_conditions) where T
 end
 
 function Base.summary(formulation::AnelasticFormulation)
-    p₀_str = prettysummary(formulation.reference_state.base_pressure)
+    p₀_str = prettysummary(formulation.reference_state.surface_pressure)
     θ₀_str = prettysummary(formulation.reference_state.potential_temperature)
     return string("AnelasticFormulation(p₀=", p₀_str, ", θ₀=", θ₀_str, ")")
 end

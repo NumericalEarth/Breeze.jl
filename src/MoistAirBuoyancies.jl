@@ -90,12 +90,12 @@ NonhydrostaticModel{CPU, RectilinearGrid}(time = 0 seconds, iteration = 0)
 ```
 """
 function MoistAirBuoyancy(grid;
-                          base_pressure = 101325,
+                          surface_pressure = 101325,
                           reference_potential_temperature = 288,
                           thermodynamic_constants = ThermodynamicConstants(eltype(grid)))
 
     reference_state = ReferenceState(grid, thermodynamic_constants;
-                                     base_pressure,
+                                     surface_pressure,
                                      potential_temperature = reference_potential_temperature)
 
     return MoistAirBuoyancy(reference_state, thermodynamic_constants)
@@ -122,7 +122,7 @@ const c = Center()
     end
 
     z = Oceananigans.Grids.znode(i, j, k, grid, c, c, c)
-    p₀ = mb.reference_state.base_pressure
+    p₀ = mb.reference_state.surface_pressure
     q = MoistureMassFractions(qᵗ)
     𝒰 = LiquidIcePotentialTemperatureState(θ, q, p₀, pᵣ)
 
@@ -291,7 +291,7 @@ const c = Center()
         ρᵣ = mb.reference_state.density[i, j, k]
     end
     z = Oceananigans.Grids.znode(i, j, k, grid, c, c, c)
-    p₀ = mb.reference_state.base_pressure
+    p₀ = mb.reference_state.surface_pressure
     q = MoistureMassFractions(qᵗᵢ)
     𝒰 = LiquidIcePotentialTemperatureState(θᵢ, q, p₀, pᵣ)
     return compute_boussinesq_adjustment_temperature(𝒰, mb.thermodynamic_constants)
@@ -368,7 +368,7 @@ Adapt.adapt_structure(to, ck::CondensateKernel) = CondensateKernel(adapt(to, ck.
 
     # First assume non-saturation.
     z = Oceananigans.Grids.znode(i, j, k, grid, c, c, c)
-    p₀ = mb.reference_state.base_pressure
+    p₀ = mb.reference_state.surface_pressure
     q = MoistureMassFractions(qᵗᵢ)
     𝒰 = LiquidIcePotentialTemperatureState(Tᵢ, q, p₀, pᵣ)
     Π = exner_function(𝒰, mb.thermodynamic_constants)

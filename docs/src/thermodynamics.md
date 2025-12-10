@@ -270,14 +270,14 @@ using CairoMakie
 
 grid = RectilinearGrid(size=160, z=(0, 12_000), topology=(Flat, Flat, Bounded))
 thermo = ThermodynamicConstants()
-reference_state = ReferenceState(grid, thermo, base_pressure=101325, potential_temperature=288)
+reference_state = ReferenceState(grid, thermo, surface_pressure=101325, potential_temperature=288)
 
 pᵣ = reference_state.pressure
 ρᵣ = reference_state.density
 
 Rᵈ = Breeze.Thermodynamics.dry_air_gas_constant(thermo)
 cᵖᵈ = thermo.dry_air.heat_capacity
-p₀ = reference_state.base_pressure
+p₀ = reference_state.surface_pressure
 θ₀ = reference_state.potential_temperature
 g = thermo.gravitational_acceleration
 

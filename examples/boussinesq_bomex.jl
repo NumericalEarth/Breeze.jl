@@ -42,7 +42,7 @@ u_bomex = AtmosphericProfilesLibrary.Bomex_u(FT)
 
 p₀ = 101500 # Pa
 θ₀ = 299.1 # K
-buoyancy = Breeze.MoistAirBuoyancy(grid, base_pressure=p₀, reference_potential_temperature=θ₀)
+buoyancy = Breeze.MoistAirBuoyancy(grid, surface_pressure=p₀, reference_potential_temperature=θ₀)
 
 # Simple precipitation scheme from CloudMicrophysics
 FT = eltype(grid)

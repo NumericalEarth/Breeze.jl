@@ -11,10 +11,10 @@ grid = RectilinearGrid(arch, size=(Nx, Nz), x=(0, 2Lz), z=(0, Lz), topology=(Per
 
 p₀ = 101325 # Pa
 θ₀ = 288 # K
-buoyancy = Breeze.MoistAirBuoyancy(grid, base_pressure=p₀, reference_potential_temperature=θ₀)
+buoyancy = Breeze.MoistAirBuoyancy(grid, surface_pressure=p₀, reference_potential_temperature=θ₀)
 
 θ₀ = buoyancy.reference_state.potential_temperature
-p₀ = buoyancy.reference_state.base_pressure
+p₀ = buoyancy.reference_state.surface_pressure
 Rᵈ = Breeze.Thermodynamics.dry_air_gas_constant(buoyancy.thermodynamic_constants)
 ρ₀ = p₀ / (Rᵈ * θ₀) # air density at z=0
 cₚ = buoyancy.thermodynamic_constants.dry_air.heat_capacity
