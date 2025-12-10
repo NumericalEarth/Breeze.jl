@@ -75,19 +75,21 @@ function update_atmospheric_state!(as::GrayAtmosphericState, model, surface_temp
     zf = znodes(grid, Face())
 
     for k in 1:nlev
-        # Pressure at levels - use reference state
-        # For anelastic model, pressure is hydrostatic
+        # Pressure at levels - use hydrostatic extrapolation from cell centers
+        # p(z) = p(z₀) * exp(-(z - z₀) * g / (R * T))
+        g = FT(9.80665)
+        Rᵈ = FT(287.0)
         if k == 1
-            # Bottom level - extrapolate from first layer
-            as.p_lev[k, 1] = reference_state.pressure[1, 1, 1] * 
-                             exp((zf[k] - z[1]) * FT(9.81) / (FT(287) * T[1, 1, 1]))
+            # Bottom level - extrapolate downward from first layer center
+            Δz = zf[k] - z[1]  # negative (going down)
+            as.p_lev[k, 1] = reference_state.pressure[1, 1, 1] * exp(-Δz * g / (Rᵈ * T[1, 1, 1]))
         elseif k == nlev
-            # Top level - extrapolate from last layer
-            as.p_lev[k, 1] = reference_state.pressure[1, 1, nlay] * 
-                             exp((zf[k] - z[nlay]) * FT(9.81) / (FT(287) * T[1, 1, nlay]))
+            # Top level - extrapolate upward from last layer center
+            Δz = zf[k] - z[nlay]  # positive (going up)
+            as.p_lev[k, 1] = reference_state.pressure[1, 1, nlay] * exp(-Δz * g / (Rᵈ * T[1, 1, nlay]))
         else
-            # Interior levels - interpolate
-            as.p_lev[k, 1] = (reference_state.pressure[1, 1, k-1] + reference_state.pressure[1, 1, k]) / 2
+            # Interior levels - interpolate between adjacent cell centers
+            as.p_lev[k, 1] = sqrt(reference_state.pressure[1, 1, k-1] * reference_state.pressure[1, 1, k])
         end
 
         # Temperature at levels - simple interpolation
@@ -134,6 +136,8 @@ end
     copy_fluxes_to_fields!(radiation::GrayRadiationModel, grid)
 
 Copy RRTMGP flux arrays to Oceananigans ZFaceFields.
+
+For the non-scattering shortwave solver, only the direct beam flux is computed.
 """
 function copy_fluxes_to_fields!(radiation::GrayRadiationModel, grid::SingleColumnGrid)
     nlay = size(grid, 3)
@@ -148,8 +152,8 @@ function copy_fluxes_to_fields!(radiation::GrayRadiationModel, grid::SingleColum
     for k in 1:nlev
         radiation.upwelling_longwave_flux[1, 1, k] = lw_flux.flux_up[k, 1]
         radiation.downwelling_longwave_flux[1, 1, k] = lw_flux.flux_dn[k, 1]
-        radiation.upwelling_shortwave_flux[1, 1, k] = sw_flux.flux_up[k, 1]
-        radiation.downwelling_shortwave_flux[1, 1, k] = sw_flux.flux_dn[k, 1]
+        # For NoScatSWRTE, only direct beam is computed
+        radiation.downwelling_shortwave_flux[1, 1, k] = sw_flux.flux_dn_dir[k, 1]
     end
 
     return nothing

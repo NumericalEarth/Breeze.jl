@@ -40,6 +40,7 @@ example_scripts = [
     "cloudy_kelvin_helmholtz.jl",
     "bomex.jl",
     "prescribed_sst.jl",
+    "single_column_radiation.jl",
 ]
 
 literate_code(script_path, literated_dir) = """
@@ -70,6 +71,7 @@ example_pages = Any[
     "Cloudy Kelvin-Helmholtz instability" => "literated/cloudy_kelvin_helmholtz.md",
     "Shallow cumulus convection (BOMEX)" => "literated/bomex.md",
     "Prescribed SST convection" => "literated/prescribed_sst.md",
+    "Single column gray radiation" => "literated/single_column_radiation.md",
 ]
 
 makedocs(

@@ -1,168 +1,125 @@
 # Radiative Transfer
 
-Breeze.jl integrates with [RRTMGP.jl](https://github.com/NumericalEarth/RRTMGP.jl) to provide radiative transfer capabilities for atmospheric simulations. The radiative transfer model computes longwave and shortwave radiative fluxes and heating rates, which are then incorporated into the moist static energy tendency equation.
+Breeze.jl integrates with [RRTMGP.jl](https://github.com/NumericalEarth/RRTMGP.jl) to provide radiative transfer capabilities for atmospheric simulations. The radiative transfer model computes longwave and shortwave radiative fluxes, which can be incorporated into energy tendency equations.
 
-## Overview
+## Gray Atmosphere Radiation
 
-The radiative transfer implementation in Breeze uses a column-based approach, where each horizontal column of the 3D grid is treated independently. This allows efficient computation of radiative fluxes using RRTMGP's optimized column radiation solver.
+The simplest radiative transfer option is gray atmosphere radiation, which uses the optical thickness parameterization from [OGormanSchneider2008](@cite) and [Schneider2004](@cite). This approximation treats the atmosphere as having a single effective absorption coefficient rather than computing full spectral radiation.
 
-## Basic Usage
+### Basic Usage
 
-To use radiative transfer in a Breeze simulation, create a `RadiativeTransferModel` and pass it to the `AtmosphereModel` constructor:
-
-```julia
-using Breeze
-using Oceananigans
-
-# Create grid
-grid = RectilinearGrid(size=(32, 32, 64), x=(0, 10_000), y=(0, 10_000), z=(0, 20_000))
-
-# Create radiative transfer model
-rtm = RadiativeTransferModel(
-    grid;
-    surface_emissivity = 0.98,
-    surface_albedo_direct = 0.1,
-    surface_albedo_diffuse = 0.1,
-    cos_zenith = 0.5,
-    toa_solar_flux = 1360.0,
-    toa_longwave_flux = 0.0
-)
-
-# Create atmosphere model with radiative transfer
-model = AtmosphereModel(
-    grid;
-    radiative_transfer = rtm
-)
-```
-
-## Column Model Example
-
-Here we demonstrate a simple column model calculation of radiative fluxes. This example sets up a single-column atmosphere and computes radiative heating rates.
+To use gray radiation in a Breeze simulation, create a [`GrayRadiation`](@ref) model and pass it to the [`AtmosphereModel`](@ref) constructor:
 
 ```julia
 using Breeze
-using Oceananigans
-using CairoMakie
+using Oceananigans.Units
+using Dates
 
-# Create a single-column grid with 64 vertical levels
-grid = RectilinearGrid(; size=64, z=(0, 20_000), topology = (Flat, Flat, Bounded))
+# Create grid (single column at Beverly, MA)
+Nz = 64
+λ, φ = -70.9, 42.5  # longitude, latitude
+grid = RectilinearGrid(size=Nz, x=λ, y=φ, z=(0, 20kilometers),
+                       topology=(Flat, Flat, Bounded))
 
-# Thermodynamic constants
-thermo = ThermodynamicConstants()
+# Thermodynamic setup
+constants = ThermodynamicConstants()
+reference_state = ReferenceState(grid, constants,
+                                 base_pressure = 101325,
+                                 potential_temperature = 300)
+formulation = AnelasticFormulation(reference_state,
+                                   thermodynamics = :LiquidIcePotentialTemperature)
 
-# Reference state
-reference_state = ReferenceState(grid, thermo, 
-    base_pressure = 101325.0,
-    potential_temperature = 288.0
-)
+# Create gray radiation model
+radiation = GrayRadiation(grid;
+                          surface_temperature = 300,    # K
+                          surface_emissivity = 0.98,
+                          surface_albedo = 0.1,
+                          solar_constant = 1361)        # W/m²
 
-formulation = AnelasticFormulation(reference_state)
-
-# Create radiative transfer model
-rtm = RadiativeTransferModel(
-    grid;
-    surface_emissivity = 0.98,
-    surface_albedo_direct = 0.1,
-    surface_albedo_diffuse = 0.1,
-    cos_zenith = 0.5,  # Solar zenith angle cosine
-    toa_solar_flux = 1360.0,  # Top-of-atmosphere solar flux [W/m²]
-    toa_longwave_flux = 0.0
-)
-
-# Create atmosphere model
-model = AtmosphereModel(
-    grid;
-    thermodynamics = thermo,
-    formulation = formulation,
-    radiative_transfer = rtm
-)
-
-# Initialize with a temperature profile
-# Simple linear temperature profile decreasing with height
-set!(model.temperature, (x, y, z) -> 288.0 - 0.0065 * z)
-
-# Update model state
-update_state!(model)
-
-# Update radiative fluxes
-Breeze.AtmosphereModels._update_radiative_fluxes!(rtm, model)
-
-# Extract heating rates
-nz = size(grid, 3)
-heating_rate = zeros(Float64, nz)
-
-using Oceananigans: interior
-using Oceananigans.Grids: znode
-using GPUArraysCore: @allowscalar
-
-@allowscalar begin
-    ρᵣ = model.formulation.reference_state.density
-    for k in 1:nz
-        hr = Breeze.AtmosphereModels._radiative_heating_rate(
-            1, 1, k, grid, rtm, 
-            ρᵣ,
-            thermo
-        )
-        # Convert from energy density tendency to heating rate per unit mass
-        heating_rate[k] = hr / ρᵣ[1, 1, k]
-    end
-end
-
-# Extract height levels for plotting
-z_lev = [znode(1, 1, k, grid, Center(), Center(), Center()) for k in 1:nz]
-
-# Plot heating rate profile
-using CairoMakie
-
-fig = Figure(resolution = (600, 400))
-ax = Axis(fig[1, 1], 
-    xlabel = "Heating Rate [K/day]",
-    ylabel = "Height [m]",
-    title = "Radiative Heating Rate Profile"
-)
-
-# Convert to K/day
-cp = thermo.dry_air.heat_capacity
-seconds_per_day = 86400.0
-heating_rate_k_per_day = heating_rate .* seconds_per_day ./ cp
-
-lines!(ax, heating_rate_k_per_day, z_lev, linewidth = 2)
-fig
+# Create atmosphere model with DateTime clock for solar position
+clock = Clock(time=DateTime(2024, 9, 27, 16, 0, 0))
+model = AtmosphereModel(grid; clock, formulation, radiation)
 ```
+
+When a `DateTime` clock is used, the solar zenith angle is computed automatically from the time and grid location (longitude and latitude).
+
+### Gray Radiation Model
+
+The [`GrayRadiation`](@ref) model computes:
+
+- **Longwave radiation**: Both upwelling and downwelling thermal radiation using RRTMGP's two-stream solver
+- **Shortwave radiation**: Direct beam solar radiation (no scattering) using the O'Gorman optical thickness
+
+The gray atmosphere optical thickness follows the parameterization in [OGormanSchneider2008](@cite):
+
+```math
+τ_{lw} = α \frac{Δp}{p} \left( f_l σ + (1-f_l) 4σ^4 \right) \left( τ_e + (τ_p - τ_e) \sin^2 φ \right)
+```
+
+where ``σ = p/p_0`` is the normalized pressure, ``φ`` is latitude, and ``α``, ``f_l``, ``τ_e``, ``τ_p`` are empirical parameters.
+
+For shortwave:
+```math
+τ_{sw} = 2 τ_0 \frac{p}{p_0} \frac{Δp}{p_0}
+```
+
+where ``τ_0 = 0.22`` is the shortwave optical depth parameter.
+
+### Radiative Fluxes
+
+After running [`set!`](@ref) or [`update_state!`](@ref), the radiative fluxes are available from the radiation model:
+
+```julia
+# Longwave fluxes (ZFaceFields)
+F_lw_up = radiation.upwelling_longwave_flux
+F_lw_dn = radiation.downwelling_longwave_flux
+
+# Shortwave flux (direct beam only for non-scattering solver)
+F_sw = radiation.downwelling_shortwave_flux
+```
+
+!!! note "Shortwave Radiation"
+    The gray atmosphere uses a non-scattering shortwave approximation, so only
+    the direct beam flux is computed. There is no diffuse shortwave or upwelling
+    shortwave in this model.
+
+### Solar Zenith Angle
+
+When using a `DateTime` clock, the solar zenith angle is computed from:
+- Grid location (longitude from `x`, latitude from `y` for single-column grids)
+- Date and time from `model.clock.time`
+
+The calculation accounts for:
+- Day of year (for solar declination)
+- Hour angle (based on solar time)
+- Latitude (for observer position)
 
 ## Surface Properties
 
-The `RadiativeTransferModel` requires several surface properties that are not part of the `AtmosphereModel`:
+The [`GrayRadiation`](@ref) model requires surface properties:
 
-- **Surface temperature**: Temperature at the surface (can be extracted from model or specified)
-- **Surface emissivity**: Longwave emissivity of the surface (typically 0.95-0.99)
-- **Surface albedo (direct)**: Albedo for direct solar radiation
-- **Surface albedo (diffuse)**: Albedo for diffuse solar radiation
-- **Cosine of solar zenith angle**: Determines solar insolation
-- **TOA solar flux**: Top-of-atmosphere solar flux [W/m²]
-- **TOA longwave flux**: Top-of-atmosphere longwave flux [W/m²] (usually 0)
-
-These properties are stored in the `RadiativeTransferModel` and can be updated as needed during the simulation.
-
-## Reference Pressure
-
-Breeze uses the **reference pressure** from the anelastic formulation for radiative transfer calculations, not the total pressure. This is consistent with the anelastic approximation where pressure perturbations are small compared to the reference state.
+| Property | Description | Typical Values |
+|----------|-------------|----------------|
+| `surface_temperature` | Temperature at the surface [K] | 280-310 |
+| `surface_emissivity` | Longwave emissivity (0-1) | 0.95-0.99 |
+| `surface_albedo` | Shortwave albedo (0-1) | 0.1-0.3 |
+| `solar_constant` | TOA solar flux [W/m²] | 1361 |
 
 ## Integration with Dynamics
 
-Radiative heating is automatically added to the moist static energy tendency equation when a `RadiativeTransferModel` is provided. The heating rate is computed from flux differences:
+Radiative fluxes can be used to compute heating rates for the energy equation. The radiative heating rate is computed from flux divergence:
 
 ```math
-\frac{\partial (\rho e)}{\partial t} = \ldots + \rho_r \frac{g}{c_p} \frac{F_{k+1} - F_k}{\Delta p}
+\dot{Q}_{rad} = -\frac{1}{\rho c_p} \frac{\partial F_{net}}{\partial z}
 ```
 
-where ``F_k`` is the net radiative flux at level ``k``, ``\Delta p`` is the pressure difference across the layer, ``g`` is gravitational acceleration, ``c_p`` is specific heat capacity, and ``\rho_r`` is the reference density.
-
-## Gray Atmosphere Model
-
-The current implementation uses a gray atmosphere radiation model, which treats the atmosphere as having a single effective absorption coefficient. This is suitable for initial testing and development. Future versions will support full spectral radiation using RRTMGP's band-by-band calculations.
+where ``F_{net}`` is the net radiative flux (upwelling minus downwelling) and ``c_p`` is the specific heat capacity.
 
 ## Architecture Support
 
-The radiative transfer implementation supports both CPU and GPU architectures. The grid conversion utilities automatically handle the conversion between Oceananigans' 3D grid format and RRTMGP's column-based format, including proper handling of CPU and GPU arrays.
+The radiative transfer implementation supports both CPU and GPU architectures. The column-based RRTMGP solver is called from Oceananigans' field data arrays with appropriate data layout conversions.
 
+## References
+
+- [OGormanSchneider2008](@cite): Gray atmosphere optical thickness parameterization
+- [Schneider2004](@cite): Idealized dry atmosphere radiation

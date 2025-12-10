@@ -18,12 +18,16 @@ Gray atmosphere radiative transfer model using RRTMGP.
 - `atmospheric_state`: RRTMGP GrayAtmosphericState
 - `upwelling_longwave_flux`: ZFaceField for upwelling LW flux (W/m²)
 - `downwelling_longwave_flux`: ZFaceField for downwelling LW flux (W/m²)
-- `upwelling_shortwave_flux`: ZFaceField for upwelling SW flux (W/m²)
-- `downwelling_shortwave_flux`: ZFaceField for downwelling SW flux (W/m²)
+- `downwelling_shortwave_flux`: ZFaceField for direct-beam SW flux (W/m²)
 - `surface_temperature`: Surface temperature (K)
 - `surface_emissivity`: Surface emissivity (0-1)
 - `surface_albedo`: Surface albedo (0-1)
 - `solar_constant`: Top-of-atmosphere solar flux (W/m²)
+
+!!! note "Shortwave radiation"
+    The gray atmosphere uses a non-scattering shortwave approximation, so only
+    the direct beam flux (`downwelling_shortwave_flux`) is computed. There is
+    no diffuse shortwave or upwelling shortwave in this model.
 """
 struct GrayRadiationModel{LW, SW, AS, FT, F}
     longwave_solver :: LW
@@ -31,8 +35,7 @@ struct GrayRadiationModel{LW, SW, AS, FT, F}
     atmospheric_state :: AS
     upwelling_longwave_flux :: F
     downwelling_longwave_flux :: F
-    upwelling_shortwave_flux :: F
-    downwelling_shortwave_flux :: F
+    downwelling_shortwave_flux :: F  # Direct beam only for no-scattering solver
     surface_temperature :: FT
     surface_emissivity :: FT
     surface_albedo :: FT
@@ -123,15 +126,13 @@ function Breeze.GrayRadiation(grid::SingleColumnGrid;
     # Create Oceananigans fields to store fluxes for output/plotting
     upwelling_longwave_flux = ZFaceField(grid)
     downwelling_longwave_flux = ZFaceField(grid)
-    upwelling_shortwave_flux = ZFaceField(grid)
-    downwelling_shortwave_flux = ZFaceField(grid)
+    downwelling_shortwave_flux = ZFaceField(grid)  # Direct beam only
 
     return GrayRadiationModel(longwave_solver,
                               shortwave_solver,
                               atmospheric_state,
                               upwelling_longwave_flux,
                               downwelling_longwave_flux,
-                              upwelling_shortwave_flux,
                               downwelling_shortwave_flux,
                               FT(surface_temperature),
                               FT(surface_emissivity),
