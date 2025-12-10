@@ -21,7 +21,7 @@ example_postamble = """
 
 # ---
 
-# ## Julia version and environment information
+# ### Julia version and environment information
 #
 # This example was executed with the following version of Julia:
 
