@@ -344,6 +344,8 @@ add_callback!(simulation, progress, IterationInterval(100))
 #
 # We save both the full 2D fields and the 1D surface flux fields.
 # The JLD2 format provides efficient storage with full Julia type preservation.
+# We save the halos so we can compute derivatives of the output fields during
+# post-processing.
 
 output_filename = joinpath(@__DIR__, "prescribed_sst_convection.jld2")
 qᵗ = model.specific_moisture
@@ -352,6 +354,7 @@ outputs = merge(model.velocities, (; T, θ, qˡ, qᵛ⁺, qᵗ, τˣ, 𝒬ᵀ, �
 ow = JLD2Writer(model, outputs;
                 filename = output_filename,
                 schedule = TimeInterval(2minutes),
+                with_halos = true,
                 overwrite_existing = true)
 
 simulation.output_writers[:jld2] = ow
