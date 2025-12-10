@@ -1,64 +1,41 @@
 using Oceananigans: Field, set!, compute!
 using Oceananigans.Grids: Center
 
+using Adapt
+
 #####
 ##### Geostrophic forcing types
 #####
 
-"""
-    UGeostrophicForcing{V}
+struct XDirection end
+struct YDirection end
 
-Forcing on the x-momentum equation representing the Coriolis force
-acting on the deviation from geostrophic balance:
-
-```math
-F_{\\rho u} = - f \\rho_r v^g
-```
-
-where ``f`` is the Coriolis parameter, ``\\rho_r`` is the reference density,
-and ``v^g`` is the y-component of the geostrophic velocity.
-
-Before materialization, `vᵍ` is a function of `z`.
-After materialization, this struct holds `f` and the computed field `ρᵣ * vᵍ(z)`.
-"""
-struct UGeostrophicForcing{V}
-    vᵍ :: V
+struct GeostrophicForcing{S, V, F}
+    geostrophic_momentum :: V
+    direction :: S  # +1 for v-forcing, -1 for u-forcing
+    coriolis_parameter :: F
 end
 
-"""
-    VGeostrophicForcing{U}
+Adapt.adapt_structure(to,gf::GeostrophicForcing) =
+    GeostrophicForcing(Adapt.adapt(to, gf.geostrophic_momentum),
+                       Adapt.adapt(to, gf.direction),
+                       Adapt.adapt(to, gf.coriolis_parameter))
 
-Forcing on the y-momentum equation representing the Coriolis force
-acting on the deviation from geostrophic balance:
+GeostrophicForcing(u, dir) = GeostrophicForcing(u, dir, nothing)
 
-```math
-F_{\\rho v} = + f \\rho_r u^g
-```
+const XGeostrophicForcing = GeostrophicForcing{XDirection}
+const YGeostrophicForcing = GeostrophicForcing{YDirection}
 
-where ``f`` is the Coriolis parameter, ``\\rho_r`` is the reference density,
-and ``u^g`` is the x-component of the geostrophic velocity.
-
-Before materialization, `uᵍ` is a function of `z`.
-After materialization, this struct holds `f` and the computed field `ρᵣ * uᵍ(z)`.
-"""
-struct VGeostrophicForcing{U}
-    uᵍ :: U
+@inline function (forcing::XGeostrophicForcing)(i, j, k, grid, clock, fields)
+    f = forcing.coriolis_parameter
+    ρvᵍ = @inbounds forcing.geostrophic_momentum[i, j, k]
+    return + f * ρvᵍ[i, j, k]
 end
 
-"""
-    MaterializedGeostrophicForcing{F, V}
-
-Materialized geostrophic forcing containing the Coriolis parameter `f`
-and the precomputed geostrophic momentum density field.
-"""
-struct MaterializedGeostrophicForcing{S, F, V}
-    sign :: S  # +1 for v-forcing, -1 for u-forcing
-    f :: F
-    ρϕᵍ :: V
-end
-
-@inline function (forcing::MaterializedGeostrophicForcing)(i, j, k, grid, clock, fields)
-    return @inbounds forcing.sign * forcing.f * forcing.ρϕᵍ[i, j, k]
+@inline function (forcing::YGeostrophicForcing)(i, j, k, grid, clock, fields)
+    f = forcing.coriolis_parameter
+    ρuᵍ = @inbounds forcing.geostrophic_momentum[i, j, k]
+    return - f * ρuᵍ[i, j, k]
 end
 
 """
@@ -91,8 +68,8 @@ model = AtmosphereModel(grid; coriolis, forcing)
 ```
 """
 function geostrophic_forcings(uᵍ, vᵍ)
-    Fρu = UGeostrophicForcing(vᵍ)
-    Fρv = VGeostrophicForcing(uᵍ)
+    Fρu = GeostrophicForcing(vᵍ, XDirection())
+    Fρv = GeostrophicForcing(uᵍ, YDirection())
     return (; ρu=Fρu, ρv=Fρv)
 end
 
@@ -100,42 +77,22 @@ end
 ##### Materialization functions for geostrophic forcings
 #####
 
-function materialize_atmosphere_model_forcing(forcing::UGeostrophicForcing, field, name, model_field_names, context)
+function materialize_atmosphere_model_forcing(forcing::GeostrophicForcing, field, name, model_field_names, context)
     grid = field.grid
-    reference_density = context.reference_density
-    coriolis = context.coriolis
-    vᵍ_func = forcing.vᵍ
-    FT = eltype(grid)
-    f = FT(coriolis.f)
 
-    # Create a column velocity field to hold vᵍ
-    vᵍ = Field{Nothing, Nothing, Center}(grid)
-    set!(vᵍ, vᵍ_func)
+    uᵍ = if forcing.vᵍ isa Field
+        forcing.uᵍ
+    else
+        uᵍ = Field{Nothing, Nothing, Center}(grid)  
+        set!(uᵍ, forcing.vᵍ)
+    end
 
     # Compute the geostrophic momentum density field ρᵣ * vᵍ
-    ρvᵍ = Field(reference_density * vᵍ)
-    compute!(ρvᵍ)
+    ρᵣ = context.reference_density
+    set!(uᵍ, ρᵣ * uᵍ)
 
-    # Fρu = -f * ρᵣ * vᵍ
-    return MaterializedGeostrophicForcing(-one(FT), f, ρvᵍ)
-end
-
-function materialize_atmosphere_model_forcing(forcing::VGeostrophicForcing, field, name, model_field_names, context)
-    grid = field.grid
-    reference_density = context.reference_density
-    coriolis = context.coriolis
-    uᵍ_func = forcing.uᵍ
     FT = eltype(grid)
-    f = FT(coriolis.f)
+    f = context.coriolis.f |> FT
 
-    # Create a column velocity field to hold uᵍ
-    uᵍ = Field{Nothing, Nothing, Center}(grid)
-    set!(uᵍ, uᵍ_func)
-
-    # Compute the geostrophic momentum density field ρᵣ * uᵍ
-    ρuᵍ = Field(reference_density * uᵍ)
-    compute!(ρuᵍ)
-
-    # Fρv = +f * ρᵣ * uᵍ
-    return MaterializedGeostrophicForcing(one(FT), f, ρuᵍ)
+    return GeostrophicForcing(uᵍ, forcing.direction, f)
 end
