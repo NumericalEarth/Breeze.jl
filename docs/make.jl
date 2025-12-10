@@ -20,6 +20,9 @@ mkpath(literated_dir)
 example_postamble = """
 
 # ---
+
+# ## Julia version and environment information
+#
 # This example was executed with the following version of Julia:
 
 using InteractiveUtils: versioninfo
