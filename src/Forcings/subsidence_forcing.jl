@@ -97,6 +97,10 @@ end
 # The `averaged_field` is determined by the field name (e.g., :ρu → u, :ρθ → θ)
 # and passed in from atmosphere_model_forcing
 
+# Strip the ρ prefix from density variable names
+# e.g., :ρu → :u, :ρθ → :θ, :ρe → :e
+strip_density_prefix(name::Symbol) = Symbol(collect(string(name))[2:end]...)
+
 function materialize_atmosphere_model_forcing(forcing::SubsidenceForcing, field, name, model_field_names, context)
     if forcing.subsidence_vertical_velocity isa AbstractField
         wˢ = forcing.subsidence_vertical_velocity
@@ -106,7 +110,15 @@ function materialize_atmosphere_model_forcing(forcing::SubsidenceForcing, field,
     end
 
     ρᵣ = context.reference_density
-    averaged_field = Average(field / ρᵣ, dims=(1, 2)) |> Field
+
+    if name ∈ (:ρu, :ρv, :ρw, :ρθ, :ρe)
+        specific_name = strip_density_prefix(name)
+        specific_field = context.specific_fields[specific_name]
+    else
+        specific_field = field / ρᵣ |> Field
+    end
+
+    averaged_field = Average(specific_field, dims=(1, 2)) |> Field
 
     return SubsidenceForcing(wˢ, ρᵣ, averaged_field)
 end

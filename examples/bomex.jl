@@ -395,7 +395,8 @@ fig
 # ## Animation of horizontal slices
 #
 # We create an animation showing the evolution of vertical velocity and liquid
-# water at z = 800 m, which is near the cloud base level.
+# water at z = 800 m, which is near the cloud base level. We limit the animation to
+# the first two hours, where most of the interesting development occurs.
 
 wxz_ts = FieldTimeSeries("bomex_slices.jld2", "wxz")
 qˡxz_ts = FieldTimeSeries("bomex_slices.jld2", "qˡxz")
@@ -406,11 +407,11 @@ times = wxz_ts.times
 Nt = length(times)
 
 # Create animation
-slices_fig = Figure(size=(1000, 500), fontsize=14)
-axwxz = Axis(slices_fig[1, 2], xlabel="x (m)", ylabel="z (m)", title="Vertical velocity w")
-axqxz = Axis(slices_fig[1, 3], xlabel="x (m)", ylabel="z (m)", title="Liquid water qˡ")
-axwxy = Axis(slices_fig[2, 2], xlabel="x (m)", ylabel="y (m)")
-axqxy = Axis(slices_fig[2, 3], xlabel="x (m)", ylabel="y (m)")
+slices_fig = Figure(size=(1200, 1000), fontsize=14)
+axwxz = Axis(slices_fig[1, 2], aspect=2, xlabel="x (m)", ylabel="z (m)", title="Vertical velocity w")
+axqxz = Axis(slices_fig[1, 3], aspect=2, xlabel="x (m)", ylabel="z (m)", title="Liquid water qˡ")
+axwxy = Axis(slices_fig[2, 2], aspect=1,  xlabel="x (m)", ylabel="y (m)")
+axqxy = Axis(slices_fig[2, 3], aspect=1, xlabel="x (m)", ylabel="y (m)")
 
 # Determine color limits from the data
 wmax = maximum(abs, wxz_ts)
@@ -434,7 +435,8 @@ Colorbar(slices_fig[1:2, 4], hmq, label="qˡ (kg/kg)")
 slices_fig[0, :] = Label(slices_fig, title_text, fontsize=18, tellwidth=false)
 
 # Record animation
-CairoMakie.record(slices_fig, "bomex_slices.mp4", 1:Nt, framerate=10) do nn
+N2 = ceil(Int, Nt/3)
+CairoMakie.record(slices_fig, "bomex_slices.mp4", 1:N2, framerate=12) do nn
     n[] = nn
 end
 nothing #hide
