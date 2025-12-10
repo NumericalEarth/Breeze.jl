@@ -102,35 +102,34 @@ F_sw = radiation.downwelling_shortwave_flux  # Direct beam only (no-scattering s
 # Net flux = upwelling LW - downwelling LW - downwelling SW (absorbed)
 F_net = Field(F_lw_up - F_lw_dn - F_sw)
 
-# Extract data and convert altitude to km
-zc = znodes(grid, Center()) ./ 1e3   # cell centers in km
-zf = znodes(grid, Face()) ./ 1e3     # cell faces in km
+# Convert altitude to km for plotting
+zc = znodes(grid, Center()) ./ 1e3
+zf = znodes(grid, Face()) ./ 1e3
 
 fig = Figure(size=(1100, 600), fontsize=14)
 
-ax_T = Axis(fig[1, 1], xlabel="Temperature (K)", ylabel="Altitude (km)")
-ax_q = Axis(fig[1, 2], xlabel="Specific humidity (g/kg)", ylabel="Altitude (km)")
-ax_lw = Axis(fig[2, 1], xlabel="Longwave flux (W/m²)", ylabel="Altitude (km)")
-ax_sw = Axis(fig[2, 2], xlabel="Shortwave flux (W/m²)", ylabel="Altitude (km)")
-ax_net = Axis(fig[1:2, 3], xlabel="Net flux (W/m²)", ylabel="Altitude (km)")
+ax_T = Axis(fig[1, 1], xlabel="Altitude (km)", ylabel="Temperature (K)")
+ax_q = Axis(fig[1, 2], xlabel="Altitude (km)", ylabel="Specific humidity (kg/kg)")
+ax_lw = Axis(fig[2, 1], xlabel="Altitude (km)", ylabel="Longwave flux (W/m²)")
+ax_sw = Axis(fig[2, 2], xlabel="Altitude (km)", ylabel="Shortwave flux (W/m²)")
+ax_net = Axis(fig[1:2, 3], xlabel="Altitude (km)", ylabel="Net flux (W/m²)")
 
-lines!(ax_T, interior(T, 1, 1, :), zc; label="T")
-lines!(ax_T, interior(θ, 1, 1, :), zc; linestyle=:dash, label="θ")
+lines!(ax_T, zc, T; label="T")
+lines!(ax_T, zc, θ; linestyle=:dash, label="θ")
 axislegend(ax_T, position=:lt)
 
-lines!(ax_q, interior(qᵗ, 1, 1, :) .* 1000, zc; label="qᵗ")
-lines!(ax_q, interior(qˡ, 1, 1, :) .* 1000, zc; label="qˡ")
+lines!(ax_q, zc, qᵗ; label="qᵗ")
+lines!(ax_q, zc, qˡ; label="qˡ")
 axislegend(ax_q, position=:rt)
 
-lines!(ax_lw, interior(F_lw_up, 1, 1, :), zf; label="↑ upwelling")
-lines!(ax_lw, interior(F_lw_dn, 1, 1, :), zf; label="↓ downwelling")
+lines!(ax_lw, zf, F_lw_up; label="↑ upwelling")
+lines!(ax_lw, zf, F_lw_dn; label="↓ downwelling")
 axislegend(ax_lw, position=:rt)
 
-# Non-scattering solver: only direct beam
-lines!(ax_sw, interior(F_sw, 1, 1, :), zf; label="↓ direct beam")
+lines!(ax_sw, zf, F_sw; label="↓ direct beam")
 axislegend(ax_sw, position=:lb)
 
-lines!(ax_net, interior(F_net, 1, 1, :), zf)
+lines!(ax_net, zf, F_net)
 
 fig[0, :] = Label(fig, "Single Column Gray Radiation (O'Gorman & Schneider, 2008)", fontsize=18, tellwidth=false)
 

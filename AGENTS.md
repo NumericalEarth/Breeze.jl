@@ -108,6 +108,12 @@ Breeze interfaces with ClimaOcean for coupled atmosphere-ocean simulations.
   - The examples and docs have their own `Project.toml` environment. When your run examples you need to use `examples/Project.toml`.
     When you build new examples, please add example-specific packages to `examples/Project.toml`. Do not add example-specific
     packages to the main Breeze Project.toml. You may also need to add relevant packages to AtmosphereProfilesLibrary.
+  - When making plots, do not use `interior(field, i, j, k)` to make a plot. Instead either pass `field` 
+    directly, as in `lines!(ax, field)` or `lines!(ax, z, field)` for a 1D plot with either automatic
+    or custom vertical coordinate. You only need to provide the coordinate if it has different units, eg
+    if you have converted z to kilometers. 1D fields work with `lines` and 2D fields work with 2D plots
+    like `heatmap` or `contourf`. For 3D fields in a 2D plane, use `view(field, :, :, k)`
+    (e.g. for a xy-slice).
 
 4. **Documentation Style**
   - Mathematical notation in `docs/src/appendix/notation.md`
