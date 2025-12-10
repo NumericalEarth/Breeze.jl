@@ -44,6 +44,9 @@ Breeze interfaces with ClimaOcean for coupled atmosphere-ocean simulations.
    - If an implementation is awkward, don't hesitate to suggest an upstream feature (eg in Oceananigans)
      that will make something easier, rather than forcing in low quality code.
 
+6. **Extending functions**
+   - Almost always extend functions in source code, not in examples
+
 ### Oceananigans ecosystem best practices
 
 1. **General coding style**
