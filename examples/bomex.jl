@@ -421,6 +421,3 @@ fig
 # - Moistening of the lower troposphere
 # - Development of cloud water in the conditionally unstable layer
 # - Westerly flow throughout the domain with weak meridional winds
-
-Oceananigans.defaults.FloatType = Float64 #hide
-nothing #hide

@@ -21,7 +21,7 @@ example_postamble = """
 
 # ---
 
-# ## Julia version and environment information
+# ### Julia version and environment information
 #
 # This example was executed with the following version of Julia:
 
@@ -42,12 +42,26 @@ example_scripts = [
     "prescribed_sst.jl",
 ]
 
-@time "literate" for script_file in example_scripts
+literate_code(script_path, literated_dir) = """
+using Literate
+using CairoMakie
+
+CairoMakie.activate!(type = "png")
+set_theme!(Theme(linewidth = 3))
+
+Literate.markdown($(repr(script_path)), $(repr(literated_dir));
+                  flavor = Literate.DocumenterFlavor(),
+                  preprocess = content -> content * $(repr(example_postamble)),
+                  execute = true,
+                 )
+"""
+
+semaphore = Base.Semaphore(Threads.nthreads(:interactive))
+@time "literate" @sync for script_file in example_scripts
     script_path = joinpath(examples_src_dir, script_file)
-    @time script_file Literate.markdown(script_path, literated_dir;
-                                        flavor = Literate.DocumenterFlavor(),
-                                        preprocess = content -> content * example_postamble,
-                                        execute = true)
+    Threads.@spawn :interactive Base.acquire(semaphore) do
+        @time script_file run(`$(Base.julia_cmd()) --color=yes --project=$(dirname(Base.active_project())) -e $(literate_code(script_path, literated_dir))`)
+    end
 end
 
 example_pages = Any[
