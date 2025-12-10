@@ -163,7 +163,7 @@ end
 
     update_microphysical_fields!(microphysical_fields, microphysics,
                                  i, j, k, grid,
-                                 ρ, 𝒰₁, p′, constants, Δt)
+                                 ρ, 𝒰₁, constants)
                                  
     T = Thermodynamics.temperature(𝒰₁, constants)
     @inbounds temperature[i, j, k] = T

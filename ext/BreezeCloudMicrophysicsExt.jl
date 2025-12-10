@@ -67,7 +67,7 @@ const ZMCM = ZeroMomentCloudMicrophysics
 
 prognostic_field_names(::ZMCM) = tuple()
 materialize_microphysical_fields(bμp::ZMCM, grid, bcs) = materialize_microphysical_fields(bμp.nucleation, grid, bcs)
-@inline update_microphysical_fields!(μ, bμp::ZMCM, i, j, k, grid, ρ, 𝒰, p′, constants, Δt) = update_microphysical_fields!(μ, bμp.nucleation, i, j, k, grid, ρ, 𝒰, p′, constants, Δt)
+@inline update_microphysical_fields!(μ, bμp::ZMCM, i, j, k, grid, ρ, 𝒰, constants) = update_microphysical_fields!(μ, bμp.nucleation, i, j, k, grid, ρ, 𝒰, constants)
 @inline compute_moisture_fractions(i, j, k, grid, bμp::ZMCM, ρ, qᵗ, μ) = compute_moisture_fractions(i, j, k, grid, bμp.nucleation, ρ, qᵗ, μ)
 @inline microphysical_tendency(i, j, k, grid, bμp::ZMCM, args...) = zero(grid)
 @inline microphysical_velocities(bμp::ZMCM, name, microphysical_fields) = nothing
@@ -152,7 +152,7 @@ end
 # The reason we do this is because excluding precipiating species from adjustment requires
 # a more complex algorithm in which precipitating species are passed into maybe_adjust_thermodynamic_state!
 # We can consider changing this in the future.
-@inline function update_microphysical_fields!(μ, bμp::WP1M, i, j, k, grid, ρ, 𝒰, p′, constants, Δt)
+@inline function update_microphysical_fields!(μ, bμp::WP1M, i, j, k, grid, ρ, 𝒰, constants)
     qᵛ = 𝒰.moisture_mass_fractions.vapor
     qˡ = 𝒰.moisture_mass_fractions.liquid
 
@@ -165,7 +165,7 @@ end
     return nothing
 end
 
-@inline function update_microphysical_fields!(μ, bμp::MP1M, i, j, k, grid, ρ, 𝒰, p′, constants, Δt)
+@inline function update_microphysical_fields!(μ, bμp::MP1M, i, j, k, grid, ρ, 𝒰, constants)
     qᵛ = 𝒰.moisture_mass_fractions.vapor
     qˡ = 𝒰.moisture_mass_fractions.liquid
     qⁱ = 𝒰.moisture_mass_fractions.ice

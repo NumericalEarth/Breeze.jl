@@ -39,10 +39,10 @@ materialize_microphysical_fields(microphysics::Nothing, grid, boundary_condition
 """
 $(TYPEDSIGNATURES)
 
-Update microphysical fields for `microphysics_scheme` given the thermodynamic `state`,
-`thermo`dynamic parameters, perturbation pressure `p′`, and timestep `Δt`.
+Update microphysical fields for `microphysics_scheme` given the thermodynamic `state`
+and `thermo`dynamic constants.
 """
-@inline update_microphysical_fields!(microphysical_fields, microphysics::Nothing, i, j, k, grid, density, state, p′, thermo, Δt) = nothing
+@inline update_microphysical_fields!(microphysical_fields, microphysics::Nothing, i, j, k, grid, density, state, thermo) = nothing
 
 """
 $(TYPEDSIGNATURES)
