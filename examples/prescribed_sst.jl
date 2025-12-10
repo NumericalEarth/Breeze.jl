@@ -397,7 +397,7 @@ qˡn = @lift qˡ_ts[$n]
 Σ𝒬n = @lift Σ𝒬_ts[$n]
 
 # We compute some extra diagnostics, like the total speed, ``\sqrt{u² + w²}`` and
-# the cross-stream vorticity ``∂u/∂z - ∂w/∂x``.
+# the cross-stream vorticity ``∂_z u - ∂_x w``.
 
 sn = @lift sqrt(u_ts[$n]^2 + w_ts[$n]^2)
 ξn = @lift ∂z(u_ts[$n]) - ∂x(w_ts[$n])
@@ -425,7 +425,12 @@ fig[0, :] = Label(fig, title, fontsize=22, tellwidth=false)
 θ_limits = extrema(θ_ts)
 T_limits = extrema(T_ts)
 s_limits = (0, mean([maximum(u_ts), maximum(w_ts)]))
-ξ_limits = (-0.021, 0.021)
+max_ξ = 0
+for n in 1:Nt
+    uₙ, wₙ = u_ts[n], w_ts[n]
+    max_ξ = 0.9 * max(max_ξ, maximum(abs, ∂z(uₙ) - ∂x(wₙ)))
+end
+ξ_limits = (-max_ξ, max_ξ)
 
 qᵗ_max = maximum(qᵗ_ts)
 qˡ_max = maximum(qˡ_ts)
