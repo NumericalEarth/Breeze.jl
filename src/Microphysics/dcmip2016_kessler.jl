@@ -254,6 +254,10 @@ function microphysics_model_update!(::KM, model)
     Nz = grid.Nz
     Δt = model.clock.last_Δt
 
+    # Skip microphysics update if timestep is zero or invalid
+    # (e.g., during model construction before any time step has been taken)
+    (isnan(Δt) || Δt ≤ 0) && return nothing
+
     # Reference state
     ρᵣ = model.formulation.reference_state.density
     pᵣ = model.formulation.reference_state.pressure
@@ -516,8 +520,6 @@ end
             qʳ_field[i, j, k]  = qʳ
         end
     end
-
-    return nothing
 end
 
 #####
