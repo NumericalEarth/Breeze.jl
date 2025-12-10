@@ -90,46 +90,39 @@ set!(model; θ=θ_profile, qᵗ=qᵗ_profile)
 # After `set!`, the radiation has been computed. We build Fields and
 # AbstractOperations to visualize the atmospheric state and radiative fluxes.
 
-θ = liquid_ice_potential_temperature(model)
 T = model.auxiliary_fields.T
+pᵣ = reference_state.pressure
 qᵗ = model.specific_moisture
-qˡ = model.microphysical_fields.qˡ
+ℋ = RelativeHumidityField(model)
 
 F_lw_up = radiation.upwelling_longwave_flux
 F_lw_dn = radiation.downwelling_longwave_flux
-F_sw = radiation.downwelling_shortwave_flux  # Direct beam only (no-scattering solver)
-
-# Net flux = upwelling LW - downwelling LW - downwelling SW (absorbed)
+F_sw = radiation.downwelling_shortwave_flux
 F_net = Field(F_lw_up - F_lw_dn - F_sw)
 
 # Convert altitude to km for plotting
 zc = znodes(grid, Center()) ./ 1e3
 zf = znodes(grid, Face()) ./ 1e3
 
-fig = Figure(size=(1100, 600), fontsize=14)
+fig = Figure(size=(1400, 350), fontsize=14)
 
-ax_T = Axis(fig[1, 1], xlabel="Altitude (km)", ylabel="Temperature (K)")
-ax_q = Axis(fig[1, 2], xlabel="Altitude (km)", ylabel="Specific humidity (kg/kg)")
-ax_lw = Axis(fig[2, 1], xlabel="Altitude (km)", ylabel="Longwave flux (W/m²)")
-ax_sw = Axis(fig[2, 2], xlabel="Altitude (km)", ylabel="Shortwave flux (W/m²)")
-ax_net = Axis(fig[1:2, 3], xlabel="Altitude (km)", ylabel="Net flux (W/m²)")
+ax_T = Axis(fig[1, 1], xlabel="T (K)",      ylabel="Altitude (km)")
+ax_p = Axis(fig[1, 2], xlabel="pᵣ (hPa)",   ylabel="Altitude (km)")
+ax_q = Axis(fig[1, 3], xlabel="qᵗ (kg/kg)", ylabel="Altitude (km)")
+ax_H = Axis(fig[1, 4], xlabel="ℋ",          ylabel="Altitude (km)")
+ax_F = Axis(fig[1, 5], xlabel="F (W/m²)",   ylabel="Altitude (km)")
 
-lines!(ax_T, zc, T; label="T")
-lines!(ax_T, zc, θ; linestyle=:dash, label="θ")
-axislegend(ax_T, position=:lt)
+lines!(ax_T, zc, T)
+lines!(ax_p, zc, pᵣ / 100)  # Convert Pa to hPa
+lines!(ax_q, zc, qᵗ)
+lines!(ax_H, zc, ℋ)
 
-lines!(ax_q, zc, qᵗ; label="qᵗ")
-lines!(ax_q, zc, qˡ; label="qˡ")
-axislegend(ax_q, position=:rt)
-
-lines!(ax_lw, zf, F_lw_up; label="↑ upwelling")
-lines!(ax_lw, zf, F_lw_dn; label="↓ downwelling")
-axislegend(ax_lw, position=:rt)
-
-lines!(ax_sw, zf, F_sw; label="↓ direct beam")
-axislegend(ax_sw, position=:lb)
-
-lines!(ax_net, zf, F_net)
+# All radiation fluxes in one panel
+lines!(ax_F, zf, F_lw_up; label="LW ↑")
+lines!(ax_F, zf, F_lw_dn; label="LW ↓")
+lines!(ax_F, zf, F_sw; linestyle=:dash, label="SW ↓")
+lines!(ax_F, zf, F_net; linewidth=4, alpha=0.6, color=:black, label="Net")
+axislegend(ax_F, position=:lb)
 
 fig[0, :] = Label(fig, "Single Column Gray Radiation (O'Gorman & Schneider, 2008)", fontsize=18, tellwidth=false)
 

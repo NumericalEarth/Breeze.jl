@@ -39,6 +39,8 @@ export
     WarmPhaseEquilibrium,
     SaturationSpecificHumidity,
     SaturationSpecificHumidityField,
+    RelativeHumidity,
+    RelativeHumidityField,
     BulkMicrophysics,
 
     # Radiation (implemented by extensions)
