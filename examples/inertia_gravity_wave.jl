@@ -3,15 +3,15 @@
 # This example simulates the propagation of inertia-gravity waves in a stably stratified
 # atmosphere, following the classical benchmark test case described by [SkamarockKlemp1994](@cite).
 # This test evaluates the accuracy of numerical pressure solvers by introducing a small-amplitude
-# temperature perturbation into an isothermal, stratified environment, triggering propagating
-# inertia-gravity waves.
+# temperature perturbation into a stratified environment with constant Brunt-Väisälä frequency,
+# triggering propagating inertia-gravity waves.
 #
 # The test case is particularly useful for validating anelastic and compressible solvers,
 # as discussed at the [CM1 inertia-gravity wave test page](https://www2.mmm.ucar.edu/people/bryan/cm1/test_inertia_gravity_waves/).
 #
 # ## Physical setup
 #
-# The background state is an isothermal atmosphere with constant Brunt-Väisälä frequency ``N``,
+# The background state is a stably stratified atmosphere with constant Brunt-Väisälä frequency ``N``,
 # which gives a potential temperature profile
 #
 # ```math
