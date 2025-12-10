@@ -39,7 +39,20 @@ export
     WarmPhaseEquilibrium,
     SaturationSpecificHumidity,
     SaturationSpecificHumidityField,
-    BulkMicrophysics
+    BulkMicrophysics,
+
+    # BoundaryConditions
+    DragFunction,
+    XDirectionDragFunction,
+    YDirectionDragFunction,
+    Drag,
+    DragBoundaryCondition,
+    BulkSensibleHeatFluxFunction,
+    BulkSensibleHeatFlux,
+    BulkSensibleHeatFluxBoundaryCondition,
+    BulkVaporFluxFunction,
+    BulkVaporFlux,
+    BulkVaporFluxBoundaryCondition
 
 using Oceananigans: Oceananigans, @at, AnisotropicMinimumDissipation, Average,
                     AveragedTimeInterval, BackgroundField, BetaPlane, Bounded,
@@ -93,6 +106,10 @@ export
     ∂x, ∂y, ∂z, @at, KernelFunctionOperation,
     prettytime
 
+using Oceananigans.Grids: XDirection, YDirection
+
+export XDirection, YDirection
+
 include("Thermodynamics/Thermodynamics.jl")
 using .Thermodynamics
 
@@ -110,5 +127,8 @@ using .TurbulenceClosures
 
 include("Advection.jl")
 using .Advection
+
+include("BoundaryConditions/BoundaryConditions.jl")
+using .BoundaryConditions
 
 end # module Breeze
