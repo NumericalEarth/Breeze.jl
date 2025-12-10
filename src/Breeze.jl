@@ -19,11 +19,6 @@ export
     CondensedPhase,
     mixture_gas_constant,
     mixture_heat_capacity,
-    static_energy_density,
-    static_energy,
-    total_energy,
-    liquid_ice_potential_temperature_density,
-    liquid_ice_potential_temperature,
 
     # Diagnostics
     PotentialTemperature,
@@ -32,6 +27,11 @@ export
     StabilityEquivalentPotentialTemperature,
     LiquidIcePotentialTemperature,
     StaticEnergy,
+    static_energy_density,
+    static_energy,
+    total_energy,
+    liquid_ice_potential_temperature_density,
+    liquid_ice_potential_temperature,
 
     # Microphysics
     SaturationAdjustment,
@@ -39,7 +39,11 @@ export
     WarmPhaseEquilibrium,
     SaturationSpecificHumidity,
     SaturationSpecificHumidityField,
-    BulkMicrophysics
+    BulkMicrophysics,
+
+    # Forcing utilities
+    geostrophic_forcings,
+    SubsidenceForcing
 
 using Oceananigans: Oceananigans, @at, AnisotropicMinimumDissipation, Average,
                     AveragedTimeInterval, BackgroundField, BetaPlane, Bounded,
@@ -98,6 +102,9 @@ using .Thermodynamics
 
 include("MoistAirBuoyancies.jl")
 using .MoistAirBuoyancies
+
+include("Forcings/Forcings.jl")
+using .Forcings
 
 include("AtmosphereModels/AtmosphereModels.jl")
 using .AtmosphereModels
