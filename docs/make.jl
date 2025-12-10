@@ -51,7 +51,7 @@ set_theme!(Theme(linewidth = 3))
 
 Literate.markdown($(repr(script_path)), $(repr(literated_dir));
                   flavor = Literate.DocumenterFlavor(),
-                  preprocess = content -> content * $(example_postamble),
+                  preprocess = content -> content * $(repr(example_postamble)),
                   execute = true,
                  )
 """
