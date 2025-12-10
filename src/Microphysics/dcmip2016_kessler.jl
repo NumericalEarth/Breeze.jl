@@ -12,9 +12,9 @@ using ..Thermodynamics:
     total_specific_moisture,
     AbstractThermodynamicState
 
-using Oceananigans: Oceananigans, CenterField, ZFaceField
+using Oceananigans: Oceananigans, CenterField, Field
 using Oceananigans.Architectures: architecture
-using Oceananigans.Grids: znode, Center
+using Oceananigans.Grids: znode, Center, Nothing as GridNothing
 using Oceananigans.Utils: launch!
 
 using KernelAbstractions: @kernel, @index
@@ -107,7 +107,7 @@ function materialize_microphysical_fields(::KM, grid, boundary_conditions)
     qʳ  = CenterField(grid)
 
     # Precipitation and velocity diagnostics
-    precipitation_rate = ZFaceField(grid)
+    precipitation_rate = Field{Center, Center, GridNothing}(grid)
     vᵗ_rain = CenterField(grid)
 
     return (; ρqᵛ, ρqᶜˡ, ρqʳ, qᵛ, qᶜˡ, qʳ, precipitation_rate, vᵗ_rain)
@@ -349,8 +349,8 @@ end
                 z_kp1 = znode(i, j, k+1, grid, Center(), Center(), Center())
                 dz = z_kp1 - z_k
                 velqr = vᵗ_rain[i, j, k]
-                if velqr > FT(0)
-                    dt_max = min(dt_max, FT(0.8) * dz / velqr)
+                if velqr > 0
+                    dt_max = min(dt_max, 0.8 * dz / velqr)
                 end
             end
         end
@@ -362,7 +362,7 @@ end
     dt0 = Δt / rainsplit
 
     # Initialize surface precipitation accumulator
-    @inbounds precipitation_rate[i, j, 1] = zero(FT)
+    @inbounds precipitation_rate[i, j] = zero(FT)
 
     #####
     ##### PHASE 2: Subcycle through microphysics (all in mixing ratio space)
@@ -373,8 +373,7 @@ end
         @inbounds begin
             ρ_1 = ρᵣ[i, j, 1]
             rʳ_1 = qʳ_field[i, j, 1]  # This is mixing ratio during physics loop
-            velqr_1 = vᵗ_rain[i, j, 1]
-            precipitation_rate[i, j, 1] += ρ_1 * rʳ_1 * velqr_1 / kessler_rhoqr
+            precipitation_rate[i, j] += ρ_1 * rʳ_1 * vᵗ_rain[i, j, 1] / kessler_rhoqr
         end
 
         #####
@@ -399,7 +398,7 @@ end
                 #####
                 ##### Rain sedimentation using upstream differencing
                 #####
-                r_k = FT(0.001) * ρ
+                r_k = 0.001 * ρ
                 velqr_k = vᵗ_rain[i, j, k]
 
                 if k < Nz
@@ -408,7 +407,7 @@ end
                     dz = z_kp1 - z_k
 
                     ρ_kp1 = ρᵣ[i, j, k+1]
-                    r_kp1 = FT(0.001) * ρ_kp1
+                    r_kp1 = 0.001 * ρ_kp1
                     rʳ_kp1 = qʳ_field[i, j, k+1]  # Mixing ratio
                     velqr_kp1 = vᵗ_rain[i, j, k+1]
 
@@ -417,46 +416,46 @@ end
                     # Top boundary: rain falls out
                     z_k   = znode(i, j, k, grid, Center(), Center(), Center())
                     z_km1 = znode(i, j, k-1, grid, Center(), Center(), Center())
-                    dz_half = FT(0.5) * (z_k - z_km1)
+                    dz_half = 0.5 * (z_k - z_km1)
                     sed = -dt0 * rʳ * velqr_k / dz_half
                 end
 
                 #####
                 ##### Autoconversion + accretion (KW eq. 2.13a,b) - implicit formula
                 #####
-                rrprod = rᶜ - (rᶜ - dt0 * max(FT(0.001) * (rᶜ - FT(0.001)), FT(0))) / 
-                         (FT(1) + dt0 * FT(2.2) * rʳ^FT(0.875))
-                rᶜ_new = max(rᶜ - rrprod, FT(0))
-                rʳ_new = max(rʳ + rrprod + sed, FT(0))
+                rrprod = rᶜ - (rᶜ - dt0 * max(0.001 * (rᶜ - 0.001), 0)) / 
+                         (1 + dt0 * 2.2 * rʳ^0.875)
+                rᶜ_new = max(rᶜ - rrprod, 0)
+                rʳ_new = max(rʳ + rrprod + sed, 0)
 
                 #####
                 ##### Saturation mixing ratio (KW eq. 2.11)
                 #####
-                pc = FT(3.8) / (pk^(FT(1) / kessler_xk) * kessler_psl)
-                rᵛˢ = pc * exp(kessler_f2x * (T_k - FT(273)) / (T_k - FT(36)))
+                pc = 3.8 / (pk^(1 / kessler_xk) * kessler_psl)
+                rᵛˢ = pc * exp(kessler_f2x * (T_k - 273) / (T_k - 36))
 
                 #####
                 ##### Saturation adjustment
                 #####
-                prod = (rᵛ - rᵛˢ) / (FT(1) + rᵛˢ * kessler_f5 / (T_k - FT(36))^2)
+                prod = (rᵛ - rᵛˢ) / (1 + rᵛˢ * kessler_f5 / (T_k - 36)^2)
 
                 #####
                 ##### Rain evaporation (KW eq. 2.14a,b)
                 #####
                 rrr = r_k * rʳ_new
-                ern_num = (FT(1.6) + FT(124.9) * rrr^FT(0.2046)) * rrr^FT(0.525)
-                ern_den = FT(2550000) * pc / (FT(3.8) * rᵛˢ) + FT(540000)
-                subsaturation = max(rᵛˢ - rᵛ, FT(0))
-                ern_rate = ern_num / ern_den * subsaturation / (r_k * rᵛˢ + FT(1e-20))
-                ern = min(dt0 * ern_rate, max(-prod - rᶜ_new, FT(0)), rʳ_new)
+                ern_num = (1.6 + 124.9 * rrr^0.2046) * rrr^0.525
+                ern_den = 2550000 * pc / (3.8 * rᵛˢ) + 540000
+                subsaturation = max(rᵛˢ - rᵛ, 0)
+                ern_rate = ern_num / ern_den * subsaturation / (r_k * rᵛˢ + 1e-20)
+                ern = min(dt0 * ern_rate, max(-prod - rᶜ_new, 0), rʳ_new)
 
                 #####
                 ##### Apply adjustments (KW eq. 3.10)
                 #####
                 condensation = max(prod, -rᶜ_new)
-                θ_new = θ_k + FT(2500000) / (FT(1003) * pk) * (condensation - ern)
+                θ_new = θ_k + 2500000 / (1003 * pk) * (condensation - ern)
 
-                rᵛ_new = max(rᵛ - condensation + ern, FT(0))
+                rᵛ_new = max(rᵛ - condensation + ern, 0)
                 rᶜ_final = rᶜ_new + condensation
                 rʳ_final = rʳ_new - ern
 
@@ -485,7 +484,7 @@ end
     end
 
     # Convert accumulated precipitation to average rate
-    @inbounds precipitation_rate[i, j, 1] /= rainsplit
+    @inbounds precipitation_rate[i, j] /= rainsplit
 
     #####
     ##### PHASE 3: Convert mixing ratio → mass fraction for entire column
