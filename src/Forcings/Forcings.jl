@@ -15,7 +15,7 @@ using Oceananigans.Grids: Center, Face
 using Oceananigans.Forcings: materialize_forcing, MultipleForcings
 
 include("geostrophic_forcings.jl")
-include("subsidence_forcings.jl")
+include("subsidence_forcing.jl")
 
 #####
 ##### Extension of materialize_forcing with context argument
