@@ -425,7 +425,7 @@ temperature ``T_r`` that is well above absolute zero. In that case,
 the latent heat is written
 
 ```math
-ℒ^β(T) = ℒ^β_r + \Delta c^β (T - T_r), \qquad \text{and} \qquad
+ℒ^β(T) = ℒ^β_r + \Delta c^β (T - T_r) \qquad \text{and} \qquad
 ℒ^β_0 = ℒ^β_r - \Delta c^β T_r ,
 ```
 
