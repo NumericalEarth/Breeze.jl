@@ -21,6 +21,6 @@ import ..AtmosphereModels:
 
 include("saturation_adjustment.jl")
 include("bulk_microphysics.jl")
-include("kessler_microphysics.jl")
+include("dcmip2016_kessler.jl")
 
 end # module Microphysics

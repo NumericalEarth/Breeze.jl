@@ -20,6 +20,7 @@ using DocStringExtensions: TYPEDSIGNATURES
 """
 $(TYPEDSIGNATURES)
 
+DCMIP2016 
 Kessler (1969) warm-rain bulk microphysics scheme following Klemp and Wilhelmson (1978).
 
 Fortran reference: https://gitlab.in2p3.fr/ipsl/projets/dynamico/dynamico/-/blob/master/src/dcmip2016_kessler_physic.f90
@@ -155,7 +156,7 @@ end
 
 @inline maybe_adjust_thermodynamic_state(𝒰, ::KM, μ, qᵗ, constants) = 𝒰
 
-@inline microphysical_velocities(::KM, ::Val{:ρqʳ}, μ) = (u = nothing, v = nothing, w = μ.wʳ)
+#@inline microphysical_velocities(::KM, ::Val{:ρqʳ}, μ) = (u = nothing, v = nothing, w = μ.wʳ)
 @inline microphysical_velocities(::KM, name, μ) = nothing
 
 #####
@@ -268,109 +269,6 @@ These rates are related to the tendencies as (in mixing ratio space):
 
 Note: Rates must be converted from mixing ratio to specific humidity before use in Breeze.
 """
-@inline function kessler_microphysical_rates(rᵛ, rᶜ, rʳ, ρ, T, pᵣ, Δt)
-    # Saturation mixing ratio following KW eq. 2.11
-    rᵛˢ = kessler_saturation_mixing_ratio(T, pᵣ)
-
-    # Saturation adjustment: prod = (rv - rvs) / (1 + rvs*f5/(T - 36)^2)
-    prod = (rᵛ - rᵛˢ) / (1 + rᵛˢ * (4093 * 2.5e6 / 1003) / (T - 36)^2) 
-
-    # Net condensation rate (limited by available cloud water for evaporation)
-    # From Fortran: rc = max(rc + max(prod, -rc), 0)
-    # This means condensation is max(prod, -rc), i.e., if prod < 0, we can only evaporate up to rc
-    Sᶜᵒⁿᵈ = max(prod, -rᶜ) / Δt
-
-    # Cloud-to-rain conversion rate (autoconversion + accretion) following KW eq. 2.13a,b
-    # Original Fortran implicit formula:
-    # rrprod = rc - (rc - dt*max(0.001*(rc-0.001),0)) / (1 + dt*2.2*rr^0.875)
-    # This is an implicit Euler discretization that guarantees positivity.
-    # We use Δt to compute the effective rate.
-
-    # Implicit formula for rrprod (amount converted from cloud to rain in Δt)
-    rrprod = rᶜ - (rᶜ - Δt * max(0.001 * (rᶜ - 0.001), 0)) / (1 + Δt * 2.2 * rʳ^0.875)
-
-    # Convert to a rate (per unit time)
-    Sʳᵃⁱⁿ = rrprod / Δt
-
-    # Rain evaporation rate following KW eq. 2.14a,b
-    # Only occurs when subsaturated (rvs > rv)
-    r = 0.001 * ρ
-    rrr = r * rʳ  # Product of r and rain mixing ratio
-    numerator = (1.6 + 124.9 * rrr^0.2046) * rrr^0.525
-
-    p_mb = pᵣ / 100
-    pc = 3.8 / p_mb
-    subsaturation = max(rᵛˢ - rᵛ, 0)
-    denomerator = 2550000 * pc / (3.8 * rᵛˢ) + 540000
-    ern_rate = numerator / denomerator * subsaturation / (r * rᵛˢ + 1e-20)
-
-    # Evaporation is limited by available rain and available subsaturation
-    # From Fortran: ern = min(dt*(ern_rate), max(-prod - rc, 0), rr)
-    # The original Fortran computes ern as an amount, we want the rate
-    ern_max = max(-prod - rᶜ, 0)  # Maximum evaporable amount based on subsaturation
-    Sᵉᵛᵃᵖ = min(ern_rate, ern_max / Δt, rʳ / Δt)
-
-    return Sᶜᵒⁿᵈ, Sʳᵃⁱⁿ, Sᵉᵛᵃᵖ
-end
-
-#####
-##### Microphysical tendencies (using pre-computed rates)
-#####
-
-@inline function microphysical_tendency(i, j, k, grid, ::KM, ::Val{:ρqᵛ}, μ, 𝒰, constants)
-    # Vapor tendency: loses to condensation, gains from rain evaporation
-    # Sᵛ = -Sᶜᵒⁿᵈ + Sᵉᵛᵃᵖ
-    ρ = density(𝒰, constants)
-    @inbounds begin
-        Sᶜᵒⁿᵈ = μ.Sᶜᵒⁿᵈ[i, j, k]
-        Sᵉᵛᵃᵖ = μ.Sᵉᵛᵃᵖ[i, j, k]
-    end
-    Sᵛ = -Sᶜᵒⁿᵈ + Sᵉᵛᵃᵖ
-    return ρ * Sᵛ
-end
-
-@inline function microphysical_tendency(i, j, k, grid, ::KM, ::Val{:ρqᶜ}, μ, 𝒰, constants)
-    # Cloud water tendency: gains from condensation, loses to rain (autoconversion + accretion)
-    # Sᶜ = Sᶜᵒⁿᵈ - Sʳᵃⁱⁿ
-    # Note: Sᵃᵘᵗᵒ stores the combined cloud-to-rain rate (Sʳᵃⁱⁿ), Sᵃᶜᶜʳ is set to 0
-    ρ = density(𝒰, constants)
-    @inbounds begin
-        Sᶜᵒⁿᵈ = μ.Sᶜᵒⁿᵈ[i, j, k]
-        Sʳᵃⁱⁿ = μ.Sᵃᵘᵗᵒ[i, j, k]  # Combined autoconversion + accretion rate
-    end
-    Sᶜ = Sᶜᵒⁿᵈ - Sʳᵃⁱⁿ
-    return ρ * Sᶜ
-end
-
-@inline function microphysical_tendency(i, j, k, grid, ::KM, ::Val{:ρqʳ}, μ, 𝒰, constants)
-    # Rain water tendency: gains from cloud (autoconversion + accretion), loses to evaporation
-    # Sʳ = Sʳᵃⁱⁿ - Sᵉᵛᵃᵖ
-    ρ = density(𝒰, constants)
-    @inbounds begin
-        Sʳᵃⁱⁿ = μ.Sᵃᵘᵗᵒ[i, j, k]  # Combined autoconversion + accretion rate
-        Sᵉᵛᵃᵖ = μ.Sᵉᵛᵃᵖ[i, j, k]
-    end
-    Sʳ = Sʳᵃⁱⁿ - Sᵉᵛᵃᵖ
-    return ρ * Sʳ
-end
-
-@inline function microphysical_tendency(i, j, k, grid, ::KM, ::Val{:ρe}, μ, 𝒰, constants)
-    # Energy tendency from latent heat release/absorption
-    # Sᵉ = ρ * Lv * (Sᶜᵒⁿᵈ - Sᵉᵛᵃᵖ)
-    # Net latent heating = condensation - rain evaporation
-    ρ = density(𝒰, constants)
-    @inbounds begin
-        Sᶜᵒⁿᵈ = μ.Sᶜᵒⁿᵈ[i, j, k]
-        Sᵉᵛᵃᵖ = μ.Sᵉᵛᵃᵖ[i, j, k]
-    end
-    # Latent heat of vaporization (J/kg) from kessler.f90
-    Lv = 2500000.0
-    Sᵉ = ρ * Lv * (Sᶜᵒⁿᵈ - Sᵉᵛᵃᵖ)
-    return Sᵉ
-end
-
-# Default: no tendency for other fields
-@inline microphysical_tendency(i, j, k, grid, ::KM, name, μ, 𝒰, constants) = zero(grid)
 
 function microphysics_model_update!(km::KM, model)
     grid = model.grid
