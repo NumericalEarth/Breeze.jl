@@ -408,10 +408,10 @@ Nt = length(times)
 
 # Create animation
 slices_fig = Figure(size=(1200, 1000), fontsize=14)
-axwxz = Axis(slices_fig[1, 2], xlabel="x (m)", ylabel="z (m)", title="Vertical velocity w")
-axqxz = Axis(slices_fig[1, 3], xlabel="x (m)", ylabel="z (m)", title="Liquid water qˡ")
-axwxy = Axis(slices_fig[2, 2], xlabel="x (m)", ylabel="y (m)")
-axqxy = Axis(slices_fig[2, 3], xlabel="x (m)", ylabel="y (m)")
+axwxz = Axis(slices_fig[1, 2], aspect=2, xlabel="x (m)", ylabel="z (m)", title="Vertical velocity w")
+axqxz = Axis(slices_fig[1, 3], aspect=2, xlabel="x (m)", ylabel="z (m)", title="Liquid water qˡ")
+axwxy = Axis(slices_fig[2, 2], aspect=1,  xlabel="x (m)", ylabel="y (m)")
+axqxy = Axis(slices_fig[2, 3], aspect=1, xlabel="x (m)", ylabel="y (m)")
 
 # Determine color limits from the data
 wmax = maximum(abs, wxz_ts)
@@ -424,10 +424,10 @@ wxy_n = @lift wxy_ts[$n]
 qˡxy_n = @lift qˡxy_ts[$n]
 title_text = @lift "BOMEX slices at t = " * prettytime(times[$n])
 
-hmw = heatmap!(axwxz, wxz_n, aspect=2, colormap=:balance, colorrange=(-wmax, wmax))
-hmq = heatmap!(axqxz, qˡxz_n, aspect=2, colormap=:dense, colorrange=(0, qˡmax))
-hmw = heatmap!(axwxy, wxy_n, aspect=1, colormap=:balance, colorrange=(-wmax, wmax))
-hmq = heatmap!(axqxy, qˡxy_n, aspect=1, colormap=:dense, colorrange=(0, qˡmax))
+hmw = heatmap!(axwxz, wxz_n, colormap=:balance, colorrange=(-wmax, wmax))
+hmq = heatmap!(axqxz, qˡxz_n, colormap=:dense, colorrange=(0, qˡmax))
+hmw = heatmap!(axwxy, wxy_n, colormap=:balance, colorrange=(-wmax, wmax))
+hmq = heatmap!(axqxy, qˡxy_n, colormap=:dense, colorrange=(0, qˡmax))
 
 Colorbar(slices_fig[1:2, 1], hmw, label="w (m/s)", flipaxis=false)
 Colorbar(slices_fig[1:2, 4], hmq, label="qˡ (kg/kg)")
