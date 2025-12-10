@@ -12,7 +12,7 @@ using ..Thermodynamics:
     total_specific_moisture,
     AbstractThermodynamicState
 
-using Oceananigans: Oceananigans, CenterField, Field
+using Oceananigans: Oceananigans, CenterField, Field, interior
 using Oceananigans.Architectures: architecture
 using Oceananigans.Grids: znode, Center, Nothing as GridNothing
 using Oceananigans.Utils: launch!
@@ -146,7 +146,7 @@ saturation adjustment internally via the kernel.
 Return `nothing` - rain sedimentation is handled internally by the kernel
 rather than through the advection interface.
 """
-@inline microphysical_velocities(::KM, name, μ) = nothing
+@inline microphysical_velocities(::KM, name) = nothing
 
 """
     microphysical_tendency(i, j, k, grid, ::KesslerMicrophysics, name, μ, 𝒰, constants)
@@ -254,13 +254,13 @@ function microphysics_model_update!(::KM, model)
     Nz = grid.Nz
     Δt = model.clock.last_Δt
 
-    # Skip microphysics update if timestep is zero or invalid
+    # Skip microphysics update if timestep is zero, infinite, or invalid
     # (e.g., during model construction before any time step has been taken)
-    (isnan(Δt) || Δt ≤ 0) && return nothing
+    (isnan(Δt) || isinf(Δt) || Δt ≤ 0) && return nothing
 
-    # Reference state
-    ρᵣ = model.formulation.reference_state.density
-    pᵣ = model.formulation.reference_state.pressure
+    # Reference state - use interior() for reduced fields to get GPU-compatible arrays
+    ρᵣ = interior(model.formulation.reference_state.density, 1, 1, :)
+    pᵣ = interior(model.formulation.reference_state.pressure, 1, 1, :)
 
     # Thermodynamic fields
     θ  = model.formulation.thermodynamics.potential_temperature
@@ -270,11 +270,14 @@ function microphysics_model_update!(::KM, model)
     # Microphysical fields
     μ = model.microphysical_fields
 
+    # Use interior() for 2D field to avoid GPU indexing issues
+    precipitation_rate_data = interior(μ.precipitation_rate, :, :, 1)
+
     launch!(arch, grid, :xy, _kessler_microphysical_update!,
             grid, Nz, Δt, ρᵣ, pᵣ, θ, ρθ, T,
             μ.ρqᵛ, μ.ρqᶜˡ, μ.ρqʳ,
             μ.qᵛ, μ.qᶜˡ, μ.qʳ,
-            μ.precipitation_rate, μ.vᵗ_rain)
+            precipitation_rate_data, μ.vᵗ_rain)
 
     return nothing
 end
@@ -311,7 +314,7 @@ end
     FT = eltype(grid)
 
     # Surface density for terminal velocity calculation (KW eq. 2.15 correction factor)
-    @inbounds ρˢ = ρᵣ[i, j, 1]
+    @inbounds ρˢ = ρᵣ[1]
 
     #####
     ##### PHASE 1: Convert mass fraction → mixing ratio for entire column
@@ -322,7 +325,7 @@ end
     dt_max = Δt
     for k = 1:Nz
         @inbounds begin
-            ρ = ρᵣ[i, j, k]
+            ρ = ρᵣ[k]
 
             # Get mass fractions from prognostic fields
             qᵛ  = ρqᵛ[i, j, k] / ρ
@@ -375,7 +378,7 @@ end
 
         # Accumulate surface precipitation (using mixing ratio stored in qʳ_field)
         @inbounds begin
-            ρ_1 = ρᵣ[i, j, 1]
+            ρ_1 = ρᵣ[1]
             rʳ_1 = qʳ_field[i, j, 1]  # This is mixing ratio during physics loop
             precipitation_rate[i, j] += ρ_1 * rʳ_1 * vᵗ_rain[i, j, 1] / kessler_rhoqr
         end
@@ -385,8 +388,8 @@ end
         #####
         for k = 1:Nz
             @inbounds begin
-                ρ = ρᵣ[i, j, k]
-                p = pᵣ[i, j, k]
+                ρ = ρᵣ[k]
+                p = pᵣ[k]
                 θ_k = θ[i, j, k]
 
                 # Exner function and temperature
@@ -410,7 +413,7 @@ end
                     z_kp1 = znode(i, j, k+1, grid, Center(), Center(), Center())
                     dz = z_kp1 - z_k
 
-                    ρ_kp1 = ρᵣ[i, j, k+1]
+                    ρ_kp1 = ρᵣ[k+1]
                     r_kp1 = 0.001 * ρ_kp1
                     rʳ_kp1 = qʳ_field[i, j, k+1]  # Mixing ratio
                     velqr_kp1 = vᵗ_rain[i, j, k+1]
@@ -479,7 +482,7 @@ end
         if nt < rainsplit
             for k = 1:Nz
                 @inbounds begin
-                    ρ = ρᵣ[i, j, k]
+                    ρ = ρᵣ[k]
                     rʳ = qʳ_field[i, j, k]  # Already mixing ratio
                     vᵗ_rain[i, j, k] = kessler_terminal_velocity(rʳ, ρ, ρˢ)
                 end
@@ -496,7 +499,7 @@ end
     # Write final values back to prognostic and diagnostic fields
     for k = 1:Nz
         @inbounds begin
-            ρ = ρᵣ[i, j, k]
+            ρ = ρᵣ[k]
 
             # Read final mixing ratios
             rᵛ = qᵛ_field[i, j, k]
