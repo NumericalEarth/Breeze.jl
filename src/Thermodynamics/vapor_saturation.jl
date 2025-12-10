@@ -26,9 +26,7 @@ temperature ``T = Tᵣ`` that is well above absolute zero. In that case,
 the latent heat is written
 
 ```math
-ℒᵝ = ℒᵝᵣ + Δcᵝ (T - Tᵣ),
-\\qquad \\text{and} \\qquad
-ℒᵝ₀ = ℒᵝᵣ - Δcᵝ Tᵣ .
+ℒᵝ = ℒᵝᵣ + Δcᵝ (T - Tᵣ) \\qquad \\text{and} \\qquad ℒᵝ₀ = ℒᵝᵣ - Δcᵝ Tᵣ .
 ```
 
 Integrating the Clausius-Clapeyron relation with a temperature-linear latent heat model,
