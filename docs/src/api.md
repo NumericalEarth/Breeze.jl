@@ -49,6 +49,13 @@ Modules = [Breeze.TurbulenceClosures]
 Private = false
 ```
 
+### Forcings
+
+```@autodocs
+Modules = [Breeze.Forcings]
+Private = false
+```
+
 ## Private API
 
 ```@autodocs
@@ -81,5 +88,12 @@ Public = false
 
 ```@autodocs
 Modules = [Breeze.AtmosphereModels.Diagnostics]
+Public = false
+```
+
+### Forcings
+
+```@autodocs
+Modules = [Breeze.Forcings]
 Public = false
 ```
