@@ -1,10 +1,10 @@
 using ..Thermodynamics: Thermodynamics, ThermodynamicConstants, ReferenceState
+using ..Forcings: materialize_atmosphere_model_forcing
 
 using Oceananigans: AbstractModel, Center, CenterField, Clock, Field
 using Oceananigans: Centered, XFaceField, YFaceField, ZFaceField
 using Oceananigans.Advection: adapt_advection_order
 using Oceananigans.AbstractOperations: @at
-using Oceananigans.Forcings: materialize_forcing
 using Oceananigans.BoundaryConditions: FieldBoundaryConditions, regularize_field_boundary_conditions
 using Oceananigans.Grids: ZDirection
 using Oceananigans.Models: validate_model_halo, validate_tracer_advection
@@ -172,7 +172,10 @@ function AtmosphereModel(grid;
     pressure_solver = formulation_pressure_solver(formulation, grid)
 
     model_fields = merge(prognostic_fields, velocities, (; T=temperature, qᵗ=specific_moisture))
-    forcing = atmosphere_model_forcing(forcing, prognostic_fields, model_fields)
+    reference_density = formulation.reference_state.density
+    forcing = atmosphere_model_forcing(forcing, prognostic_fields, model_fields,
+                                       grid, coriolis, reference_density,
+                                       velocities, formulation, specific_moisture)
 
     # Include thermodynamic density (ρe or ρθ), ρqᵗ plus user tracers for closure field construction
     closure_thermo_name = thermodynamic_density_name(formulation)
@@ -267,19 +270,25 @@ function field_names(formulation, microphysics, tracer_names)
     return tuple(prog_names..., default_additional_names..., formulation_additional_names...)
 end
 
-function atmosphere_model_forcing(user_forcings, prognostic_fields, model_fields)
+function atmosphere_model_forcing(user_forcings, prognostic_fields, model_fields,
+                                  grid, coriolis, reference_density,
+                                  velocities, formulation, specific_moisture)
     forcings_type = typeof(user_forcings)
     msg = string("AtmosphereModel forcing must be a NamedTuple, got $forcings_type")
     throw(ArgumentError(msg))
     return nothing
 end
 
-function atmosphere_model_forcing(::Nothing, prognostic_fields, model_fields)
+function atmosphere_model_forcing(::Nothing, prognostic_fields, model_fields,
+                                  grid, coriolis, reference_density,
+                                  velocities, formulation, specific_moisture)
     names = keys(prognostic_fields)
     return NamedTuple{names}(Returns(zero(eltype(prognostic_fields[name]))) for name in names)
 end
 
-function atmosphere_model_forcing(user_forcings::NamedTuple, prognostic_fields, model_fields)
+function atmosphere_model_forcing(user_forcings::NamedTuple, prognostic_fields, model_fields,
+                                  grid, coriolis, reference_density,
+                                  velocities, formulation, specific_moisture)
     user_forcing_names = keys(user_forcings)
 
     if :ρe ∈ keys(prognostic_fields)
@@ -300,9 +309,16 @@ function atmosphere_model_forcing(user_forcings::NamedTuple, prognostic_fields, 
 
     model_field_names = keys(model_fields)
 
+    # Build specific fields for subsidence forcing (maps specific field names like :u, :θ to fields)
+    formulation_fields = fields(formulation)
+    specific_fields = merge(velocities, formulation_fields, (; qᵗ=specific_moisture))
+
+    # Build context for special forcing types (used by extended materialize_forcing in Forcings module)
+    forcing_context = (; coriolis, reference_density, specific_fields)
+
     materialized = Tuple(
         name in keys(user_forcings) ?
-            materialize_forcing(user_forcings[name], field, name, model_field_names) :
+            materialize_atmosphere_model_forcing(user_forcings[name], field, name, model_field_names, forcing_context) :
             Returns(zero(eltype(field)))
             for (name, field) in pairs(forcing_fields)
     )
@@ -373,12 +389,12 @@ for `model`.
 function static_energy end
 
 """
-    potential_temperature_density(model::AtmosphereModel)
+    liquid_ice_potential_temperature_density(model::AtmosphereModel)
 
 Return an `AbstractField` representing potential temperature density
 for `model`.
 """
-function potential_temperature_density end
+function liquid_ice_potential_temperature_density end
 
 """
     liquid_ice_potential_temperature(model::AtmosphereModel)

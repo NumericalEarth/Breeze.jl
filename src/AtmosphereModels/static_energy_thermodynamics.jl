@@ -70,7 +70,7 @@ const StaticEnergyAnelasticModel = AtmosphereModel{<:ASEF}
 const SEAM = StaticEnergyAnelasticModel
 
 liquid_ice_potential_temperature(model::SEAM) = LiquidIcePotentialTemperature(model, :specific)
-potential_temperature_density(model::SEAM) = LiquidIcePotentialTemperature(model, :density)
+liquid_ice_potential_temperature_density(model::SEAM) = LiquidIcePotentialTemperature(model, :density)
 static_energy(model::SEAM) = model.formulation.thermodynamics.specific_energy
 static_energy_density(model::SEAM) = model.formulation.thermodynamics.energy_density
 

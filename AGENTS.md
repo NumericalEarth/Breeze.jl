@@ -16,7 +16,8 @@ Breeze interfaces with ClimaOcean for coupled atmosphere-ocean simulations.
 
 ## Code Style & Conventions
 
-### Julia Best Practices
+### Julia practices and information
+
 1. **Explicit Imports**: Use `ExplicitImports.jl` style - explicitly import all used functions/types
    - Import from Oceananigans explicitly (already done in src/Breeze.jl)
    - Tests automatically check for proper imports
@@ -44,7 +45,18 @@ Breeze interfaces with ClimaOcean for coupled atmosphere-ocean simulations.
    - If an implementation is awkward, don't hesitate to suggest an upstream feature (eg in Oceananigans)
      that will make something easier, rather than forcing in low quality code.
 
-6. **Extending functions**
+6. **Debugging**
+   - Sometimes "julia version compatibility" issues are resolved by deleting the Manifest.toml,
+     and then re-populating it with `using Pkg; Pkg.instantiate()`.
+
+7. **Software design**
+   - Try _very_ hard to minimize code duplication. Allow some code duplication for very small
+     and simple functions, for example one-liners like `instantiate(X) = X()` that can be immediately
+     understood. But for complicated infrastructure, re-use as much as possible.
+   - Within Breeze, you will inevitably run into situations that would be better implemented by
+     extending Oceananigans, rather than writing Breeze source code. When this happens, make a
+     detailed and descriptive TODO note about what should be moved to Oceananigans.
+8. **Extending functions**
    - Almost always extend functions in source code, not in examples
 
 ### Oceananigans ecosystem best practices
