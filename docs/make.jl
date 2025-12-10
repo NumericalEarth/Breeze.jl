@@ -40,7 +40,7 @@ example_scripts = [
     "cloudy_kelvin_helmholtz.jl",
     "bomex.jl",
     "prescribed_sst.jl",
-    "inertia_gravity_wave.jl"
+    "inertia_gravity_wave.jl",
 ]
 
 literate_code(script_path, literated_dir) = """
@@ -71,7 +71,7 @@ example_pages = Any[
     "Cloudy Kelvin-Helmholtz instability" => "literated/cloudy_kelvin_helmholtz.md",
     "Shallow cumulus convection (BOMEX)" => "literated/bomex.md",
     "Prescribed SST" => "literated/prescribed_sst.md",
-    "Inertia gravity wave" => "literated/inertia_gravity_wave.md"
+    "Inertia gravity wave" => "literated/inertia_gravity_wave.md",
 ]
 
 makedocs(
