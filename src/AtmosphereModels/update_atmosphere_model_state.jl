@@ -134,15 +134,13 @@ end
                                                              moisture_density)
     i, j, k = @index(Global, NTuple)
 
+    # Update formulation-specific thermodynamic variables (dispatches on formulation type)
+    compute_auxiliary_thermodynamic_variables!(formulation, i, j, k, grid)
+
     @inbounds begin
-        ρθ = potential_temperature_density[i, j, k]
         ρqᵗ = moisture_density[i, j, k]
         ρ = formulation.reference_state.density[i, j, k]
-        p′ = perturbation_pressure[i, j, k]
-
-        θ = ρθ / ρ
         qᵗ = ρqᵗ / ρ
-        potential_temperature[i, j, k] = θ
         specific_moisture[i, j, k] = qᵗ
     end
 
