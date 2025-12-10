@@ -1,5 +1,6 @@
 using Oceananigans: Average, Field, set!, compute!
-using Oceananigans.Grids: Center, Face, prettysummary
+using Oceananigans.Grids: Center, Face
+using Oceananigans.Utils: prettysummary
 using Oceananigans.Fields: AbstractField
 using Oceananigans.Operators: ∂zᶜᶜᶠ, ℑzᵃᵃᶜ
 
