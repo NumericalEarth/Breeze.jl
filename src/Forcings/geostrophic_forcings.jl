@@ -1,7 +1,6 @@
 using Oceananigans: Field, set!, compute!
 using Oceananigans.Grids: Center
-
-using Adapt
+using Adapt: Adapt
 
 #####
 ##### Geostrophic forcing types

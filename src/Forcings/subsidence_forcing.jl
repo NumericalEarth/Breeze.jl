@@ -3,8 +3,7 @@ using Oceananigans.Grids: Center, Face
 using Oceananigans.Fields: AbstractField
 using Oceananigans.Operators: ∂zᶜᶜᶠ, ℑzᵃᵃᶜ
 using Oceananigans.Utils: prettysummary
-
-using Adapt
+using Adapt: Adapt
 
 #####
 ##### Subsidence forcing types (unmaterialized stubs)

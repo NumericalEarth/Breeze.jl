@@ -3,8 +3,7 @@ module Forcings
 export
     geostrophic_forcings,
     SubsidenceForcing,
-    UGeostrophicForcing,
-    VGeostrophicForcing,
+    GeostrophicForcing,
     materialize_atmosphere_model_forcing,
     compute_forcing!
 
