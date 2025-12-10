@@ -16,21 +16,24 @@
 using Breeze
 using Oceananigans: Oceananigans
 using Oceananigans.Units
+using Oceananigans: Oceananigans
 
 using AtmosphericProfilesLibrary
 using Printf
 using CairoMakie
+using CUDA
 using Random
 
 # ## Domain and grid
 #
 # The BOMEX domain is 6.4 km × 6.4 km horizontally with a vertical extent of 3 km
-# ([Siebesma2003](@citet); Section 3a). The original intercomparison used
+# ([Siebesma2003](@citet); Section 3a). The intercomparison uses
 # 64 × 64 × 75 grid points with 100 m horizontal resolution and 40 m vertical resolution.
 #
-# For this documentation example, we use a reduced horizontal resolution of 32²
-# (and 200 m horizontal resolution) to speed up the documentation build.
-# The full resolution case should be run for production simulations.
+# For this documentation example, we reduce the resolution to Float32. This yields a 10x
+# speed up on an NVidia T4 (which is used to build the docs).
+
+Oceananigans.defaults.FloatType = Float32
 
 Nx = Ny = 64
 Nz = 75
@@ -38,7 +41,7 @@ Nz = 75
 x = y = (0, 6400)
 z = (0, 3000)
 
-grid = RectilinearGrid(CPU(); x, y, z,
+grid = RectilinearGrid(GPU(); x, y, z,
                        size = (Nx, Ny, Nz), halo = (5, 5, 5),
                        topology = (Periodic, Periodic, Bounded))
 
@@ -260,12 +263,12 @@ set!(model, θ=θᵢ, qᵗ=qᵢ, u=uᵢ)
 #
 # We run the simulation for 1 hour with adaptive time-stepping.
 
-simulation = Simulation(model; Δt=10, stop_time=1hour)
+simulation = Simulation(model; Δt=10, stop_time=6hour)
 conjure_time_step_wizard!(simulation, cfl=0.7)
 
 # ## Output and progress
 #
-# We add a progress callback and output the 20-minute time-averages of the horizontally-averaged
+# We add a progress callback and output the hourly time-averages of the horizontally-averaged
 # profiles for post-processing.
 
 θ = liquid_ice_potential_temperature(model)
@@ -290,14 +293,14 @@ function progress(sim)
     return nothing
 end
 
-add_callback!(simulation, progress, IterationInterval(100))
+add_callback!(simulation, progress, TimeInterval(1hour))
 
 outputs = merge(model.velocities, model.tracers, (; θ, qˡ, qᵛ))
 averaged_outputs = NamedTuple(name => Average(outputs[name], dims=(1, 2)) for name in keys(outputs))
 
 filename = "bomex.jld2"
 simulation.output_writers[:averages] = JLD2Writer(model, averaged_outputs; filename,
-                                                  schedule = AveragedTimeInterval(20minutes),
+                                                  schedule = AveragedTimeInterval(1hour),
                                                   overwrite_existing = true)
 
 # Output horizontal slices at z = 600 m for animation
@@ -325,7 +328,7 @@ run!(simulation)
 
 # ## Results: mean profile evolution
 #
-# We visualize the evolution of horizontally-averaged profiles every 20 minutes, similar
+# We visualize the evolution of horizontally-averaged profiles every hour, similar
 # to Figure 3 in the paper by [Siebesma2003](@cite). The intercomparison study shows
 # that after spin-up, the boundary layer reaches a quasi-steady state with:
 # - A well-mixed layer below cloud base (~500 m)
@@ -355,7 +358,7 @@ colors = [default_colours[mod1(i, length(default_colours))] for i in 1:Nt]
 
 for n in 1:Nt
     t_max = Int(times[n] / minute)
-    label = n == 1 ? "initial condition" : "mean over $(t_max - 20)-$t_max min"
+    label = n == 1 ? "initial condition" : "mean over $(t_max - 60)-$t_max min"
 
     lines!(axθ, θt[n], color=colors[n], label=label)
     lines!(axq, qᵛt[n], color=colors[n])
@@ -387,11 +390,6 @@ fig
 # - Moistening of the lower troposphere
 # - Development of cloud water in the conditionally unstable layer
 # - Westerly flow throughout the domain with weak meridional winds
-#
-# Note: This short 1-hour simulation captures the initial spin-up phase.
-# For production results comparable to the ones by [Siebesma2003](@citet),
-# the simulation should be run for 6 hours at full resolution (64² × 75),
-# e.g., on a GPU.
 
 # ## Animation of horizontal slices
 #
