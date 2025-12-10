@@ -35,7 +35,6 @@ Pkg.status()
 """
 
 example_scripts = [
-    "bomex.jl",
     "dry_thermal_bubble.jl",
     "cloudy_thermal_bubble.jl",
     "cloudy_kelvin_helmholtz.jl",
