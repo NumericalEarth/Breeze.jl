@@ -386,5 +386,3 @@ nothing #hide
 # ![](rico_slices.mp4)
 nothing #hide
 
-# ![](rico_slices.mp4)
-
