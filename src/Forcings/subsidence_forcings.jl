@@ -87,13 +87,7 @@ end
 ##### compute_forcing! for subsidence forcing
 #####
 
-"""
-    compute_forcing!(forcing::MaterializedSubsidenceForcing)
-
-Compute the horizontal average needed by the subsidence forcing.
-This is called automatically during `update_state!`.
-"""
-function compute_forcing!(forcing::MaterializedSubsidenceForcing)
+function compute_forcing!(forcing::SubsidenceForcing)
     compute!(forcing.subsidence_vertical_velocity)
     compute!(forcing.averaged_field)
     return nothing

@@ -14,6 +14,7 @@
 # package [AtmosphericProfilesLibrary.jl](https://github.com/CliMA/AtmosphericProfilesLibrary.jl).
 
 using Breeze
+using Oceananigans: Oceananigans
 using Oceananigans.Units
 
 using AtmosphericProfilesLibrary
@@ -302,7 +303,7 @@ simulation.output_writers[:averages] = JLD2Writer(model, averaged_outputs; filen
 # Output horizontal slices at z = 600 m for animation
 # Find the k-index closest to z = 600 m
 z = Oceananigans.Grids.znodes(grid, Center())
-k = searchsortedfirst(800, z)
+k = searchsortedfirst(z, 800)
 @info "Saving slices at z = $(z[k]) m (k = $k)"
 
 u, v, w = model.velocities
