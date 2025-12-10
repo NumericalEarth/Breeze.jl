@@ -5,7 +5,6 @@ authors = ["NumericalEarth organization (github.com/NumericalEarth) and lovely c
 
 [deps]
 Adapt = "79e6a3ab-5dfb-504d-930d-738a2a938a0e"
-ClimaComms = "3a4d1b5c-c61d-41fd-a00a-5873ba7a1b0d"
 Dates = "ade2ca70-3891-5945-98fb-dc099432e06a"
 DocStringExtensions = "ffbed154-4ef7-542d-bbb7-c09d3a79fcae"
 JLD2 = "033835bb-8acc-5ee8-8aae-3f567f8a3819"
@@ -14,6 +13,7 @@ Oceananigans = "9e8cae18-63c1-5223-a75c-80ca9d6e9a09"
 Printf = "de0858da-6303-5e67-8744-51eddeeeb8d7"
 
 [weakdeps]
+ClimaComms = "3a4d1b5c-c61d-41fd-a00a-5873ba7a1b0d"
 CloudMicrophysics = "6a9e3e04-43cd-43ba-94b9-e8782df3c71b"
 RRTMGP = "a01a1ee8-cea4-48fc-987c-fc7878d79da1"
 
@@ -22,7 +22,7 @@ projects = ["docs", "test"]
 
 [extensions]
 BreezeCloudMicrophysicsExt = "CloudMicrophysics"
-BreezeRRTMGPExt = "RRTMGP"
+BreezeRRTMGPExt = ["ClimaComms", "RRTMGP"]
 
 [compat]
 Adapt = "4.3.0"

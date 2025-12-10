@@ -11,7 +11,6 @@ RRTMGP = "a01a1ee8-cea4-48fc-987c-fc7878d79da1"
 
 [sources]
 Breeze = {path = ".."}
-RRTMGP = {path = "/Users/gregorywagner/Projects/RRTMGP.jl"}
 
 [compat]
 AtmosphericProfilesLibrary = "0.1.7"
