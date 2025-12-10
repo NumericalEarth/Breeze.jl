@@ -21,7 +21,7 @@ using Oceananigans.Units
 
 using AtmosphericProfilesLibrary
 using CairoMakie
-using CUDA
+using CloudMicrophysics
 using Printf
 using Random
 
@@ -168,12 +168,15 @@ nothing #hide
 
 # ## Model setup
 #
-# We use warm-phase saturation adjustment microphysics and 9th-order WENO advection.
-# The warm-phase microphysics allows condensation and evaporation but the
-# saturation adjustment scheme does not include explicit precipitation.
-# Precipitation tendencies would require a more sophisticated microphysics scheme.
+# We use zero-moment bulk microphysics from CloudMicrophysics with warm-phase saturation adjustment
+# and 9th-order WENO advection. The zero-moment scheme allows condensation and evaporation
+# and includes instant precipitation removal above a threshold, making it suitable for
+# precipitating shallow cumulus simulations like RICO.
 
-microphysics = SaturationAdjustment(equilibrium=WarmPhaseEquilibrium())
+BreezeCloudMicrophysicsExt = Base.get_extension(Breeze, :BreezeCloudMicrophysicsExt)
+using .BreezeCloudMicrophysicsExt: ZeroMomentCloudMicrophysics
+
+microphysics = ZeroMomentCloudMicrophysics()
 advection = WENO(order=9)
 
 model = AtmosphereModel(grid; formulation, coriolis, microphysics, advection, forcing,
@@ -221,11 +224,11 @@ set!(model, θ=θᵢ, qᵗ=qᵢ, u=uᵢ, v=vᵢ)
 
 # ## Simulation
 #
-# We run the simulation for 24 hours with adaptive time-stepping.
+# We run the simulation for 6 hours with adaptive time-stepping.
 # RICO typically requires longer integration times than BOMEX to develop
-# a quasi-steady precipitating state.
+# a quasi-steady precipitating state, but we use 6 hours for consistency with BOMEX.
 
-simulation = Simulation(model; Δt=10, stop_time=24hour)
+simulation = Simulation(model; Δt=10, stop_time=6hour)
 conjure_time_step_wizard!(simulation, cfl=0.7)
 
 # ## Output and progress
@@ -378,6 +381,9 @@ slices_fig[0, :] = Label(slices_fig, title_text, fontsize=18, tellwidth=false)
 CairoMakie.record(slices_fig, "rico_slices.mp4", 1:Nt, framerate=10) do nn
     n[] = nn
 end
+nothing #hide
+
+# ![](rico_slices.mp4)
 nothing #hide
 
 # ![](rico_slices.mp4)
