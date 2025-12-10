@@ -23,7 +23,6 @@ using Oceananigans.Units
 using Oceananigans.Models: BoundaryConditionOperation
 using Printf
 using CairoMakie
-using Statistics: mean
 
 # ## Grid setup
 #
@@ -343,18 +342,20 @@ add_callback!(simulation, progress, IterationInterval(100))
 # ## Output
 #
 # We save both the full 2D fields and the 1D surface flux fields.
+# We include native model variables and othesr like, e.g., the total speed,
+# ``\sqrt{u² + w²}`` and the cross-stream vorticity ``∂_z u - ∂_x w``.
 # The JLD2 format provides efficient storage with full Julia type preservation.
-# We save the halos so we can compute derivatives of the output fields during
-# post-processing.
 
-output_filename = joinpath(@__DIR__, "prescribed_sst_convection.jld2")
+output_filename = "prescribed_sst_convection.jld2"
 qᵗ = model.specific_moisture
-outputs = merge(model.velocities, (; T, θ, qˡ, qᵛ⁺, qᵗ, τˣ, 𝒬ᵀ, 𝒬ᵛ, Σ𝒬=𝒬ᵀ+𝒬ᵛ))
+u, v, w, = model.velocities
+s = sqrt(u^2 + w^2) # speed
+ξ = ∂z(u) - ∂x(w)   # cross-stream vorticity
+outputs = (; s, ξ, T, θ, qˡ, qᵛ⁺, qᵗ, τˣ, 𝒬ᵀ, 𝒬ᵛ, Σ𝒬=𝒬ᵀ+𝒬ᵛ)
 
 ow = JLD2Writer(model, outputs;
                 filename = output_filename,
                 schedule = TimeInterval(2minutes),
-                with_halos = true,
                 overwrite_existing = true)
 
 simulation.output_writers[:jld2] = ow
@@ -372,8 +373,8 @@ run!(simulation)
 
 @assert isfile(output_filename) "Output file $(output_filename) not found."
 
-u_ts = FieldTimeSeries(output_filename, "u")
-w_ts = FieldTimeSeries(output_filename, "w")
+s_ts = FieldTimeSeries(output_filename, "s")
+ξ_ts = FieldTimeSeries(output_filename, "ξ")
 θ_ts = FieldTimeSeries(output_filename, "θ")
 T_ts = FieldTimeSeries(output_filename, "T")
 qᵗ_ts = FieldTimeSeries(output_filename, "qᵗ")
@@ -388,8 +389,8 @@ Nt = length(θ_ts)
 
 n = Observable(Nt)
 
-un = @lift u_ts[$n]
-wn = @lift w_ts[$n]
+sn = @lift s_ts[$n]
+ξn = @lift ξ_ts[$n]
 θn = @lift θ_ts[$n]
 qᵗn = @lift qᵗ_ts[$n]
 Tn = @lift T_ts[$n]
@@ -398,12 +399,6 @@ qˡn = @lift qˡ_ts[$n]
 𝒬ᵀn = @lift 𝒬ᵀ_ts[$n]
 𝒬ᵛn = @lift 𝒬ᵛ_ts[$n]
 Σ𝒬n = @lift Σ𝒬_ts[$n]
-
-# We compute some extra diagnostics, like the total speed, ``\sqrt{u² + w²}`` and
-# the cross-stream vorticity ``∂_z u - ∂_x w``.
-
-sn = @lift sqrt(u_ts[$n]^2 + w_ts[$n]^2)
-ξn = @lift ∂z(u_ts[$n]) - ∂x(w_ts[$n])
 
 # Now we are ready to plot.
 
@@ -427,13 +422,9 @@ fig[0, :] = Label(fig, title, fontsize=22, tellwidth=false)
 # Compute color limits from the full time series
 θ_limits = extrema(θ_ts)
 T_limits = extrema(T_ts)
-s_limits = (0, mean([maximum(u_ts), maximum(w_ts)]))
-max_ξ = 0
-for n in 1:Nt
-    uₙ, wₙ = u_ts[n], w_ts[n]
-    global max_ξ = 0.9 * max(max_ξ, maximum(abs, ∂z(uₙ) - ∂x(wₙ)))
-end
-ξ_limits = (-max_ξ, max_ξ)
+s_limits = (0, maximum(s_ts))
+max_absξ = maximum(abs, ξ_ts)
+ξ_limits = (-max_absξ, max_absξ)
 
 qᵗ_max = maximum(qᵗ_ts)
 qˡ_max = maximum(qˡ_ts)
