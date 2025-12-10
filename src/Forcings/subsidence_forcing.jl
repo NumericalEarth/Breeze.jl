@@ -1,6 +1,5 @@
 using Oceananigans: Average, Field, set!, compute!
-using Oceananigans.Grids: Center, Face
-using Oceananigans.Utils: prettysummary
+using Oceananigans.Grids: Center, Face, prettysummary
 using Oceananigans.Fields: AbstractField
 using Oceananigans.Operators: ∂zᶜᶜᶠ, ℑzᵃᵃᶜ
 
@@ -21,11 +20,11 @@ Forcing that represents large-scale subsidence advecting horizontally-averaged
 fields downward:
 
 ```math
-F_{ρ ϕ} = - ρᵣ wˢ \\partial_z \\overline{\\phi}
+F_{ρ ϕ} = - ρᵣ wˢ ∂_z \\overline{ϕ}
 ```
 
 where ``wˢ`` is the `subsidence_vertical_velocity`, ``ρᵣ`` is the reference density,
-and ``\\overline{\\phi}`` is the horizontal average of the field being forced.
+and ``\\overline{ϕ}`` is the horizontal average of the field being forced.
 
 # Fields
 - `wˢ`: Either a function of `z` specifying the subsidence velocity profile,
