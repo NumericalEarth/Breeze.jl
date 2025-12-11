@@ -268,7 +268,7 @@ function progress(sim)
     elapsed = 1e-9 * (time_ns() - wall_clock[])
 
     msg = @sprintf("Iter: %d, t: %s, Δt: %s, wall time: %s, max|w|: %.2e m/s \n",
-                   iteration(sim), prettvtime(sim), prettytime(sim.Δt),
+                   iteration(sim), prettytime(sim), prettytime(sim.Δt),
                    prettytime(elapsed), wmax)
 
     msg *= @sprintf(" --- max(qᵗ): %.2e, max(qᵛ): %.2e, max(qˡ): %.2e, ∫ⱽP: %.2e kg/kg/s",
