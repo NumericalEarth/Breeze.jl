@@ -78,29 +78,34 @@ formulation = AnelasticFormulation(reference_state,
 # These values are similar to BOMEX but produce a moister boundary layer
 # that supports warm-rain processes.
 
-w′θ′ = 8e-3     # K m/s (sensible heat flux)
-w′qᵗ′ = 5.2e-5  # kg/kg m/s (moisture flux)
-
 FT = eltype(grid)
 p₀ = reference_state.surface_pressure
 θ₀ = reference_state.potential_temperature
 q₀ = Breeze.Thermodynamics.MoistureMassFractions{FT} |> zero
 ρ₀ = Breeze.Thermodynamics.density(p₀, θ₀, q₀, constants)
 
-ρθ_bcs = FieldBoundaryConditions(bottom=FluxBoundaryCondition(ρ₀ * w′θ′))
-ρqᵗ_bcs = FieldBoundaryConditions(bottom=FluxBoundaryCondition(ρ₀ * w′qᵗ′))
+Cₕ = 1.094e-3
+C_q = 1.133e-3
+qᵛ⁺₀ = 20.4e-3  # surface saturation specific humidity
+
+ρw′θ′(x, y, t, ρu, ρv, ρθ, p) = -p.Cₕ * sqrt(ρu^2 + ρv^2)  / p.ρ₀ * ( ρθ - p.ρ₀*p.θ₀ )
+ρw′qᵗ′(x, y, t, ρu, ρv, ρqᵗ, p) = -p.C_q * sqrt(ρu^2 + ρv^2) / p.ρ₀ * ( ρqᵗ - p.ρ₀*p.qᵛ⁺₀ )
+
+ρθ_bcs = FieldBoundaryConditions(bottom=FluxBoundaryCondition( ρw′θ′,
+                                                                 field_dependencies=(:ρu, :ρv, :ρθ),
+                                                                 parameters=(; ρ₀, Cₕ, θ₀)))
+ρqᵗ_bcs = FieldBoundaryConditions(bottom=FluxBoundaryCondition( ρw′qᵗ′,
+                                                                 field_dependencies=(:ρu, :ρv, :ρqᵗ),
+                                                                 parameters=(; ρ₀, C_q, qᵛ⁺₀)))
 
 # ## Surface momentum flux (drag)
 #
-# A bulk drag parameterization is applied with friction velocity
-# ``u_* = 0.28`` m/s [vanZanten2011](@cite).
+Cₘ = 1.229e-3
+@inline ρu_drag(x, y, t, ρu, ρv, p) = -p.Cₘ * sqrt(ρu^2 + ρv^2) * ρu / p.ρ₀
+@inline ρv_drag(x, y, t, ρu, ρv, p) = -p.Cₘ * sqrt(ρu^2 + ρv^2) * ρv / p.ρ₀
 
-u★ = 0.28  # m/s
-@inline ρu_drag(x, y, t, ρu, ρv, p) = - p.ρ₀ * p.u★^2 * ρu / sqrt(ρu^2 + ρv^2)
-@inline ρv_drag(x, y, t, ρu, ρv, p) = - p.ρ₀ * p.u★^2 * ρv / sqrt(ρu^2 + ρv^2)
-
-ρu_drag_bc = FluxBoundaryCondition(ρu_drag, field_dependencies=(:ρu, :ρv), parameters=(; ρ₀, u★))
-ρv_drag_bc = FluxBoundaryCondition(ρv_drag, field_dependencies=(:ρu, :ρv), parameters=(; ρ₀, u★))
+ρu_drag_bc = FluxBoundaryCondition(ρu_drag, field_dependencies=(:ρu, :ρv), parameters=(; ρ₀, Cₘ))
+ρv_drag_bc = FluxBoundaryCondition(ρv_drag, field_dependencies=(:ρu, :ρv), parameters=(; ρ₀, Cₘ))
 ρu_bcs = FieldBoundaryConditions(bottom=ρu_drag_bc)
 ρv_bcs = FieldBoundaryConditions(bottom=ρv_drag_bc)
 
@@ -152,22 +157,20 @@ set!(drying, ρᵣ * drying)
 # applied uniformly throughout the domain [vanZanten2011](@cite).
 # This is the key simplification that allows us to avoid interactive radiation.
 
-Fρe_field = Field{Nothing, Nothing, Center}(grid)
-cᵖᵈ = constants.dry_air.heat_capacity
+cooling = Field{Nothing, Nothing, Center}(grid)
 dTdt_rico = AtmosphericProfilesLibrary.Rico_dTdt(FT)
-set!(Fρe_field, z -> dTdt_rico(1, z))
-set!(Fρe_field, ρᵣ * cᵖᵈ * Fρe_field)
-ρe_radiation_forcing = Forcing(Fρe_field)
+set!(cooling, z -> dTdt_rico(1, z))
+set!(cooling, ρᵣ * cooling)
+ρθ_radiation_forcing = Forcing(cooling)
 
 # ## Assembling forcing and boundary conditions
 
-Fρu = (subsidence, geostrophic.ρu)
-Fρv = (subsidence, geostrophic.ρv)
+Fρu = (subsidence)#, geostrophic.ρu)
+Fρv = (subsidence)#, geostrophic.ρv)
 Fρqᵗ = (subsidence, ρqᵗ_drying_forcing)
-Fρθ = subsidence
-Fρe = ρe_radiation_forcing
+Fρθ = (subsidence, ρθ_radiation_forcing) 
 
-forcing = (ρu=Fρu, ρv=Fρv, ρθ=Fρθ, ρe=Fρe, ρqᵗ=Fρqᵗ)
+forcing = (ρu=Fρu, ρv=Fρv, ρθ=Fρθ, ρqᵗ=Fρqᵗ)
 boundary_conditions = (ρθ=ρθ_bcs, ρqᵗ=ρqᵗ_bcs, ρu=ρu_bcs, ρv=ρv_bcs)
 
 nothing #hide
@@ -239,7 +242,7 @@ set!(model, θ=θᵢ, qᵗ=qᵢ, u=uᵢ, v=vᵢ)
 # RICO typically requires longer integration times than BOMEX to develop
 # a quasi-steady precipitating state.
 
-simulation = Simulation(model; Δt=10, stop_time=12hour)
+simulation = Simulation(model; Δt=10, stop_time=6hour)
 conjure_time_step_wizard!(simulation, cfl=0.7)
 
 # ## Output and progress
