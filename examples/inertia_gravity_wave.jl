@@ -39,7 +39,7 @@ using CairoMakie
 
 # ## Problem parameters
 #
-# We define the thermodynamic base state and mean wind following [SkamarockKlemp1994](@cite):
+# We define the thermodynamic base state and mean wind following [SkamarockKlemp1994](@citet):
 
 p₀ = 100000  # Pa - surface pressure
 θ₀ = 300     # K - reference potential temperature
@@ -50,7 +50,7 @@ N² = N^2
 # ## Grid configuration
 #
 # The domain is 300 km × 10 km with 300 × 10 grid points, matching the nonhydrostatic case
-# configuration in [SkamarockKlemp1994](@cite).
+# configuration in the paper by [SkamarockKlemp1994](@citet).
 
 Nx, Nz = 300, 10
 Lx, Lz = 300kilometers, 10kilometers
@@ -71,7 +71,7 @@ model = AtmosphereModel(grid; formulation, advection)
 
 # ## Initial conditions
 #
-# The perturbation parameters from [SkamarockKlemp1994](@cite):
+# The perturbation parameters from the paper by [SkamarockKlemp1994](@citet):
 
 Δθ = 0.01               # K - perturbation amplitude
 a  = 5000               # m - perturbation half-width parameter
@@ -129,10 +129,10 @@ run!(simulation)
 
 # ## Results: potential temperature perturbation
 #
-# Following [SkamarockKlemp1994](@cite), we visualize the potential temperature perturbation
+# Following [SkamarockKlemp1994](@citet),s we visualize the potential temperature perturbation
 # ``θ' = θ - θ^{\rm bg}``. The final state at ``t = 3000 \, {\rm s}`` can be compared
-# directly to Figure 3b in [SkamarockKlemp1994](@cite), which shows the analytic solution
-# for incompressible flow.
+# directly to Figure 3b in the paper by [SkamarockKlemp1994](@citet), which shows the analytic
+# solution for incompressible flow.
 #
 # The [CM1 model test page](https://www2.mmm.ucar.edu/people/bryan/cm1/test_inertia_gravity_waves/)
 # provides additional comparisons between compressible, anelastic, and incompressible solvers.
@@ -147,7 +147,7 @@ Nt = length(times)
 θ′N = θ′t[Nt]
 
 fig = Figure(size=(800, 300))
-ax = Axis(fig[1, 1], xlabel = "x (km)", ylabel = "z (km)",
+ax = Axis(fig[1, 1], xlabel = "x (m)", ylabel = "z (m)",
           title = "Potential temperature perturbation θ′ at t = $(Int(times[end])) s")
 
 levels = range(-Δθ/2, stop=Δθ/2, length=20)
@@ -163,7 +163,7 @@ save("inertia_gravity_wave.png", fig)
 # inertia-gravity waves propagate away from the initial disturbance:
 
 fig = Figure(size=(800, 300))
-ax = Axis(fig[1, 1], xlabel = "x (km)", ylabel = "z (km)")
+ax = Axis(fig[1, 1], xlabel = "x (m)", ylabel = "z (m)")
 n = Observable(1)
 
 θ′n = @lift θ′t[$n]
