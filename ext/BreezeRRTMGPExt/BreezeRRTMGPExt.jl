@@ -7,7 +7,7 @@ using Dates: DateTime
 
 # Oceananigans imports
 using Oceananigans.Architectures: architecture, CPU
-using Oceananigans.Grids: AbstractGrid, Center, Face, Flat, Bounded, topology, znodes, znode
+using Oceananigans.Grids: AbstractGrid, Center, Face, Flat, Bounded, znode
 using Oceananigans.Fields: ZFaceField
 
 # RRTMGP imports (external types - cannot modify)
