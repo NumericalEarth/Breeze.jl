@@ -52,8 +52,8 @@ end
                                topology=(Flat, Flat, Bounded))
 
         constants = ThermodynamicConstants()
-        reference_state = ReferenceState(grid, constants,
-                                         base_pressure = 101325,
+        reference_state = ReferenceState(grid, constants;
+                                         surface_pressure = 101325,
                                          potential_temperature = 300)
         formulation = AnelasticFormulation(reference_state,
                                            thermodynamics = :LiquidIcePotentialTemperature)
@@ -78,8 +78,8 @@ end
                                topology=(Flat, Flat, Bounded))
 
         constants = ThermodynamicConstants()
-        reference_state = ReferenceState(grid, constants,
-                                         base_pressure = 101325,
+        reference_state = ReferenceState(grid, constants;
+                                         surface_pressure = 101325,
                                          potential_temperature = 300)
         formulation = AnelasticFormulation(reference_state,
                                            thermodynamics = :LiquidIcePotentialTemperature)
@@ -135,8 +135,8 @@ end
         constants = ThermodynamicConstants()
         surface_temperature = FT(300)
 
-        reference_state = ReferenceState(grid, constants,
-                                         base_pressure = 101325,
+        reference_state = ReferenceState(grid, constants;
+                                         surface_pressure = 101325,
                                          potential_temperature = surface_temperature)
 
         formulation = AnelasticFormulation(reference_state,

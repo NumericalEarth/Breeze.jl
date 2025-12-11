@@ -23,8 +23,8 @@ grid = RectilinearGrid(size=Nz, x=λ, y=φ, z=(0, 20kilometers),
 
 # Thermodynamic setup
 constants = ThermodynamicConstants()
-reference_state = ReferenceState(grid, constants,
-                                 base_pressure = 101325,
+reference_state = ReferenceState(grid, constants;
+                                 surface_pressure = 101325,
                                  potential_temperature = 300)
 formulation = AnelasticFormulation(reference_state,
                                    thermodynamics = :LiquidIcePotentialTemperature)

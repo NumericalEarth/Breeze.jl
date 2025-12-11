@@ -39,8 +39,8 @@ constants = ThermodynamicConstants()
 
 surface_temperature = 300
 
-reference_state = ReferenceState(grid, constants,
-                                 base_pressure = 101325,
+reference_state = ReferenceState(grid, constants;
+                                 surface_pressure = 101325,
                                  potential_temperature = surface_temperature)
 
 formulation = AnelasticFormulation(reference_state,
