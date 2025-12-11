@@ -43,7 +43,7 @@ Random.seed!(42)
 
 Oceananigans.defaults.FloatType = Float32
 
-Nx = Ny = 128
+Nx = Ny = 256
 Nz = 100
 
 x = y = (0, 12800)
@@ -239,7 +239,7 @@ set!(model, θ=θᵢ, qᵗ=qᵢ, u=uᵢ, v=vᵢ)
 # RICO typically requires longer integration times than BOMEX to develop
 # a quasi-steady precipitating state.
 
-simulation = Simulation(model; Δt=10, stop_time=12hour)
+simulation = Simulation(model; Δt=10, stop_time=24hour)
 conjure_time_step_wizard!(simulation, cfl=0.7)
 
 # ## Output and progress
@@ -255,6 +255,10 @@ P = precipitation_rate(model, :liquid)
 ∫ᶻP = Field(Integral(P, dims=3))
 ∫ⱽP = Field(Integral(P))
 
+# Horizontal averages
+u_avg = Field(Average(model.velocities.u, dims=(1, 2)))
+v_avg = Field(Average(model.velocities.v, dims=(1, 2)))
+
 wall_clock = Ref(time_ns())
 
 function progress(sim)
@@ -267,7 +271,7 @@ function progress(sim)
     elapsed = 1e-9 * (time_ns() - wall_clock[])
 
     msg = @sprintf("Iter: %d, t: %s, Δt: %s, wall time: %s, max|w|: %.2e m/s \n",
-                   iteration(sim), prettvtime(sim), prettytime(sim.Δt),
+                   iteration(sim), prettytime(sim), prettytime(sim.Δt),
                    prettytime(elapsed), wmax)
 
     msg *= @sprintf(" --- max(qᵗ): %.2e, max(qᵛ): %.2e, max(qˡ): %.2e, ∫ⱽP: %.2e kg/kg/s",
