@@ -35,7 +35,7 @@ Random.seed!(42)
 # ## Domain and grid
 #
 # The RICO domain is 12.8 km × 12.8 km horizontally with a vertical extent of 4 km
-# ([vanZanten2011](@citet)). The intercomparison uses 256 × 256 × 100 grid points
+# [vanZanten2011](@cite). The intercomparison uses 256 × 256 × 100 grid points
 # with 50 m horizontal resolution and 40 m vertical resolution.
 #
 # For this example, we use a coarser grid (64 × 64 × 100) with 200 m horizontal
@@ -169,7 +169,7 @@ Fρe = ρe_radiation_forcing
 
 forcing = (ρu=Fρu, ρv=Fρv, ρθ=Fρθ, ρe=Fρe, ρqᵗ=Fρqᵗ)
 boundary_conditions = (ρθ=ρθ_bcs, ρqᵗ=ρqᵗ_bcs, ρu=ρu_bcs, ρv=ρv_bcs)
-             
+
 nothing #hide
 
 # ## Model setup
