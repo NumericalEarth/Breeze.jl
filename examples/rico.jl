@@ -224,13 +224,9 @@ p₀ = reference_state.surface_pressure
 # - Potential temperature perturbation: ``δθ = 0.1`` K
 # - Moisture perturbation: ``δqᵗ = 2.5 \times 10^{-5}`` kg/kg
 
-δθ = 0.1      # K
-δqᵗ = 2.5e-5  # kg/kg
-zδ = 1600     # m
-
 ϵ() = rand() - 1/2
-θᵢ(x, y, z) = χ * θˡⁱ₀(z) + δθ  * ϵ() * (z < zδ)
-qᵢ(x, y, z) = qᵗ₀(z)  + δqᵗ * ϵ() * (z < zδ)
+θᵢ(x, y, z) = χ * θˡⁱ₀(z)
+qᵢ(x, y, z) = qᵗ₀(z)
 uᵢ(x, y, z) = u₀(z)
 vᵢ(x, y, z) = v₀(z)
 
