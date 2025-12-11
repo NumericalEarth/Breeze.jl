@@ -313,16 +313,13 @@ See [`BulkDragFunction`](@ref) for details.
 
 # Examples
 
-```jldoctest
-julia> using Breeze
+```jldoctest bulkdrag
+using Breeze
 
-julia> drag = BulkDrag(coefficient=1e-3, gustiness=0.1)
+drag = BulkDrag(coefficient=1e-3, gustiness=0.1)
+
+# output
 FluxBoundaryCondition: BulkDragFunction(direction=Nothing, coefficient=0.001, gustiness=0.1)
-
-julia> using Oceananigans.Grids: XDirection
-
-julia> u_drag = BulkDrag(direction=XDirection(), coefficient=1e-3)
-FluxBoundaryCondition: BulkDragFunction(direction=XDirection(), coefficient=0.001, gustiness=0)
 ```
 
 Or with explicit direction, e.g., `XDirection()` for u:
@@ -339,7 +336,7 @@ Oceananigans.FieldBoundaryConditions, with boundary conditions
 ├── east: DefaultBoundaryCondition (FluxBoundaryCondition: Nothing)
 ├── south: DefaultBoundaryCondition (FluxBoundaryCondition: Nothing)
 ├── north: DefaultBoundaryCondition (FluxBoundaryCondition: Nothing)
-├── bottom: FluxBoundaryCondition: DiscreteBoundaryFunction with BulkDragFunction(direction=XDirection(), coefficient=0.001, gustiness=0)
+├── bottom: FluxBoundaryCondition: BulkDragFunction(direction=XDirection(), coefficient=0.001, gustiness=0)
 ├── top: DefaultBoundaryCondition (FluxBoundaryCondition: Nothing)
 └── immersed: DefaultBoundaryCondition (FluxBoundaryCondition: Nothing)
 ```
@@ -361,14 +358,15 @@ See [`BulkSensibleHeatFluxFunction`](@ref) for details.
 # Example
 
 ```jldoctest
-julia> using Breeze
+using Breeze
 
-julia> T₀(x, y) = 290 + 2 * sign(cos(2π * x / 20e3))
-T₀ (generic function with 1 method)
+T₀(x, y) = 290 + 2 * sign(cos(2π * x / 20e3))
 
-julia> ρθ_bc = BulkSensibleHeatFlux(coefficient = 1e-3,
-                                    gustiness = 0.1,
-                                    surface_temperature = T₀)
+ρθ_bc = BulkSensibleHeatFlux(coefficient = 1e-3,
+                             gustiness = 0.1,
+                             surface_temperature = T₀)
+
+# output
 FluxBoundaryCondition: BulkSensibleHeatFluxFunction(coefficient=0.001, gustiness=0.1)
 ```
 """
@@ -390,14 +388,15 @@ See [`BulkVaporFluxFunction`](@ref) for details.
 # Example
 
 ```jldoctest
-julia> using Breeze
+using Breeze
 
-julia> T₀(x, y) = 290 + 2 * sign(cos(2π * x / 20e3))
-T₀ (generic function with 1 method)
+T₀(x, y) = 290 + 2 * sign(cos(2π * x / 20e3))
 
-julia> ρqᵗ_bc = BulkVaporFlux(coefficient = 1e-3,
-                               gustiness = 0.1,
-                               surface_temperature = T₀)
+ρqᵗ_bc = BulkVaporFlux(coefficient = 1e-3,
+                       gustiness = 0.1,
+                       surface_temperature = T₀)
+
+# output
 FluxBoundaryCondition: BulkVaporFluxFunction(coefficient=0.001, gustiness=0.1)
 ```
 """
