@@ -43,7 +43,7 @@ Random.seed!(42)
 
 Oceananigans.defaults.FloatType = Float32
 
-Nx = Ny = 256
+Nx = Ny = 64
 Nz = 100
 
 x = y = (0, 12800)
@@ -239,7 +239,7 @@ set!(model, θ=θᵢ, qᵗ=qᵢ, u=uᵢ, v=vᵢ)
 # RICO typically requires longer integration times than BOMEX to develop
 # a quasi-steady precipitating state.
 
-simulation = Simulation(model; Δt=10, stop_time=24hour)
+simulation = Simulation(model; Δt=10, stop_time=12hour)
 conjure_time_step_wizard!(simulation, cfl=0.7)
 
 # ## Output and progress
