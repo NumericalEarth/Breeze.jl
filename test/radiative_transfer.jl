@@ -98,21 +98,22 @@ end
         set!(model; θ = 300)
 
         # Check that longwave fluxes are computed (should be non-zero)
+        # Sign convention: positive = upward, negative = downward
         @allowscalar begin
-            # Surface upwelling LW should be approximately σT⁴/π ≈ 145 W/m² (for Planck source)
-            # or σT⁴ ≈ 459 W/m² for total flux
-            F_lw_up_sfc = radiation.upwelling_longwave_flux[1, 1, 1]
-            @test F_lw_up_sfc > 100  # Should be significant
-            @test F_lw_up_sfc < 600  # But not unreasonably large
+            # Surface upwelling LW should be approximately σT⁴ ≈ 459 W/m² (positive)
+            ℐ_lw_up_sfc = radiation.upwelling_longwave_flux[1, 1, 1]
+            @test ℐ_lw_up_sfc > 100  # Should be significant
+            @test ℐ_lw_up_sfc < 600  # But not unreasonably large
 
-            # TOA downwelling LW should be small (space is cold)
-            F_lw_dn_toa = radiation.downwelling_longwave_flux[1, 1, Nz + 1]
-            @test F_lw_dn_toa < 10
+            # TOA downwelling LW should be small (space is cold), negative sign
+            ℐ_lw_dn_toa = radiation.downwelling_longwave_flux[1, 1, Nz + 1]
+            @test abs(ℐ_lw_dn_toa) < 10
 
             # Shortwave direct beam at TOA should be solar_constant * cos(zenith)
-            F_sw_toa = radiation.downwelling_shortwave_flux[1, 1, Nz + 1]
-            @test F_sw_toa > 0
-            @test F_sw_toa <= 1361  # Cannot exceed solar constant
+            # Sign convention: downwelling is negative
+            ℐ_sw_toa = radiation.downwelling_shortwave_flux[1, 1, Nz + 1]
+            @test ℐ_sw_toa < 0  # Downwelling is negative
+            @test abs(ℐ_sw_toa) <= 1361  # Magnitude cannot exceed solar constant
         end
     end
 end

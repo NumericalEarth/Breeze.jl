@@ -19,6 +19,7 @@ using Oceananigans.Operators: ℑzᵃᵃᶠ
 
 using Breeze: dry_air_gas_constant
 using Breeze.AtmosphereModels: ReferenceState
+using Breeze.Thermodynamics: adiabatic_hydrostatic_pressure
 
 import Breeze.AtmosphereModels: update_radiation!
 
@@ -41,20 +42,22 @@ function update_radiation!(radiation::GrayRadiationModel, model)
     clock = model.clock
     constants = model.thermodynamic_constants
 
+    rrtmgp_state = radiation.atmospheric_state
+    surface_temperature = radiation.surface_temperature
+
     # Update RRTMGP atmospheric state from model fields
-    update_atmospheric_state!(radiation.atmospheric_state, model, 
-                              radiation.surface_temperature, constants)
+    update_rrtmgp_atmospheric_state!(rrtmgp_state, model, surface_temperature, constants)
 
     # Update solar zenith angle from clock
     update_solar_zenith_angle!(radiation.shortwave_solver, grid, clock)
 
     # Solve longwave RTE (RRTMGP external call)
-    solve_lw!(radiation.longwave_solver, radiation.atmospheric_state)
+    solve_lw!(radiation.longwave_solver, rrtmgp_state)
 
     # Solve shortwave RTE (only if sun is above horizon)
     cos_θz = radiation.shortwave_solver.bcs.cos_zenith[1]
     if cos_θz > 0
-        solve_sw!(radiation.shortwave_solver, radiation.atmospheric_state)
+        solve_sw!(radiation.shortwave_solver, rrtmgp_state)
     else
         # Sun below horizon - zero shortwave fluxes
         radiation.shortwave_solver.flux.flux_up .= 0
@@ -74,101 +77,147 @@ end
 #####
 
 """
-    update_atmospheric_state!(as::GrayAtmosphericState, model, surface_temperature, constants)
+    update_rrtmgp_atmospheric_state!(rrtmgp_state, model, surface_temperature, constants)
 
-Update the RRTMGP atmospheric state arrays from model fields.
+Update the RRTMGP `GrayAtmosphericState` arrays from model fields.
 
-Maps Oceananigans fields to RRTMGP array format:
-- RRTMGP uses (nlay, ncol) for layer values
-- RRTMGP uses (nlev, ncol) for level values  
+# Physics notes
+
+For radiation, we need temperature and pressure at both cell centers (layers)
+and cell faces (levels).
+
+**Temperature**: We use the actual temperature field `T` computed from the model state.
+This is the temperature that matters for emission and absorption.
+
+**Pressure**: In the anelastic approximation, pressure perturbations are negligible
+compared to the reference (hydrostatic) pressure. We use the reference state pressure
+`reference_state.pressure` at cell centers, and interpolate/extrapolate to faces.
+The reference pressure is computed via `adiabatic_hydrostatic_pressure(z, p₀, θ₀)`.
+
+# RRTMGP array layout
+- RRTMGP uses (nlay, ncol) for layer values (at cell centers)
+- RRTMGP uses (nlev, ncol) for level values (at cell faces)
 - Layer 1 is at the bottom (surface), layer nlay is at the top
 """
-function update_atmospheric_state!(as::GrayAtmosphericState, model, surface_temperature, constants)
+function update_rrtmgp_atmospheric_state!(rrtmgp_state::GrayAtmosphericState,
+                                          model, surface_temperature, constants)
     grid = model.grid
     arch = architecture(grid)
-    FT = eltype(grid)
     
+    # Temperature field (actual temperature from model state)
     T = model.temperature
+
+    # Reference state provides the hydrostatic pressure profile
+    # In the anelastic approximation, pressure ≈ reference pressure
     reference_state = model.formulation.reference_state
+    p₀ = reference_state.surface_pressure  # Pressure at z = 0
+    θ₀ = reference_state.potential_temperature  # Reference potential temperature
 
-    # Extract physical constants
-    g = constants.gravitational_acceleration
-    Rᵈ = dry_air_gas_constant(constants)
+    # Unpack RRTMGP state arrays for kernels
+    t_lay = rrtmgp_state.t_lay
+    p_lay = rrtmgp_state.p_lay
+    t_lev = rrtmgp_state.t_lev
+    p_lev = rrtmgp_state.p_lev
+    z_lev = rrtmgp_state.z_lev
+    t_sfc = rrtmgp_state.t_sfc
 
-    # Update layer values (cell centers)
-    launch!(arch, grid, :xyz, _update_layer_values!, as, grid, T, reference_state)
+    # Update layer values (at cell centers)
+    # Temperature: actual temperature field
+    # Pressure: reference hydrostatic pressure
+    launch!(arch, grid, :xyz, _update_layer_values!, t_lay, p_lay, grid, T, reference_state)
 
-    # Update level values (cell faces)
-    launch!(arch, grid, :xyz, _update_level_values!, as, grid, T, reference_state, g, Rᵈ)
+    # Update level values (at cell faces)
+    # Temperature: interpolated from cell centers
+    # Pressure: interpolated from reference state, using surface_pressure at z=0
+    launch!(arch, grid, :xyz, _update_level_values!,
+            t_lev, p_lev, z_lev, grid, T, reference_state, p₀, θ₀, constants)
 
-    # Update surface temperature (single value for now)
-    as.t_sfc[1] = surface_temperature
+    # Surface skin temperature (for longwave emission from ground)
+    t_sfc[1] = surface_temperature
 
     return nothing
 end
 
-@kernel function _update_layer_values!(as, grid, T, reference_state)
+@kernel function _update_layer_values!(t_lay, p_lay, grid, T, reference_state)
     i, j, k = @index(Global, NTuple)
 
-    # RRTMGP expects (k, col) indexing, but for single column col=1
+    # Layer values are at cell centers
+    # RRTMGP expects (k, col) indexing; for single column, col=1
     # For 3D grids, we'd need to linearize (i, j) → col
-    # For now, support single column (i=j=1)
     @inbounds begin
-        as.t_lay[k, 1] = T[i, j, k]
-        as.p_lay[k, 1] = reference_state.pressure[i, j, k]
+        # Actual temperature from model state
+        t_lay[k, 1] = T[i, j, k]
+
+        # Reference pressure (hydrostatic background)
+        # In anelastic models, pressure perturbations are negligible for radiation
+        p_lay[k, 1] = reference_state.pressure[i, j, k]
     end
 end
 
-@kernel function _update_level_values!(as, grid, T, reference_state, g, Rᵈ)
+@kernel function _update_level_values!(t_lev, p_lev, z_lev, grid, T, reference_state,
+                                       p₀, θ₀, constants)
     i, j, k = @index(Global, NTuple)
     Nz = size(grid, 3)
     nlev = Nz + 1
 
-    # Level values are at cell faces
-    # Need to handle bottom (k=1), interior (k=2:Nz), and top (k=Nz+1) differently
+    # Level values are at cell faces (Nz+1 faces for Nz cells)
+    # The kernel runs for k = 1:Nz, so we handle:
+    #   - k=1: bottom face (face index 1) and interior face (face index 2)
+    #   - k=2:Nz-1: interior faces (face index k+1)
+    #   - k=Nz: top face (face index Nz+1) and interior face (face index Nz)
+
     @inbounds begin
-        # Level k corresponds to face k
-        # Bottom face (k=1): extrapolate downward from first layer center
+        # --- Bottom face (face index 1, at z = 0) ---
         if k == 1
-            z_center = znode(i, j, 1, grid, Center(), Center(), Center())
-            z_face = znode(i, j, 1, grid, Center(), Center(), Face())
-            Δz = z_face - z_center  # negative (going down)
-            T_center = T[i, j, 1]
-            p_center = reference_state.pressure[i, j, 1]
-            
-            as.p_lev[1, 1] = p_center * exp(-Δz * g / (Rᵈ * T_center))
-            as.t_lev[1, 1] = T_center  # Use surface layer temperature
-            as.z_lev[1, 1] = z_face
+            z_bottom = znode(i, j, 1, grid, Center(), Center(), Face())
+
+            # Pressure at z=0: use the reference state's surface pressure directly
+            # This is exact by definition of the reference state
+            p_lev[1, 1] = p₀
+
+            # Temperature at bottom face: extrapolate from first cell center
+            # Use the first layer temperature as approximation for near-surface air
+            t_lev[1, 1] = T[i, j, 1]
+
+            # Altitude
+            z_lev[1, 1] = z_bottom
         end
 
-        # Top face (k=Nz+1): extrapolate upward from last layer center
+        # --- Top face (face index Nz+1) ---
         if k == Nz
-            z_center = znode(i, j, Nz, grid, Center(), Center(), Center())
-            z_face = znode(i, j, nlev, grid, Center(), Center(), Face())
-            Δz = z_face - z_center  # positive (going up)
-            T_center = T[i, j, Nz]
-            p_center = reference_state.pressure[i, j, Nz]
-            
-            as.p_lev[nlev, 1] = p_center * exp(-Δz * g / (Rᵈ * T_center))
-            as.t_lev[nlev, 1] = T_center  # Use top layer temperature
-            as.z_lev[nlev, 1] = z_face
+            z_top = znode(i, j, nlev, grid, Center(), Center(), Face())
+
+            # Pressure at top: use the same adiabatic hydrostatic formula
+            # that defines the reference state, for consistency
+            p_lev[nlev, 1] = adiabatic_hydrostatic_pressure(z_top, p₀, θ₀, constants)
+
+            # Temperature at top face: use last layer temperature
+            t_lev[nlev, 1] = T[i, j, Nz]
+
+            # Altitude
+            z_lev[nlev, 1] = z_top
         end
 
-        # Interior faces (k+1 for faces 2 to Nz): interpolate between adjacent centers
+        # --- Interior faces (face indices 2 to Nz) ---
+        # These fall between cell centers k and k+1
         if k < Nz
             kface = k + 1
-            # Geometric mean for pressure (log-linear interpolation)
+            z_face = znode(i, j, kface, grid, Center(), Center(), Face())
+
+            # Pressure: geometric mean of adjacent cell centers
+            # This is equivalent to log-linear interpolation, which is appropriate
+            # for the exponential-like hydrostatic pressure profile
             p_below = reference_state.pressure[i, j, k]
             p_above = reference_state.pressure[i, j, k + 1]
-            as.p_lev[kface, 1] = sqrt(p_below * p_above)
-            
-            # Arithmetic mean for temperature
+            p_lev[kface, 1] = sqrt(p_below * p_above)
+
+            # Temperature: arithmetic mean of adjacent cell centers
             T_below = T[i, j, k]
             T_above = T[i, j, k + 1]
-            as.t_lev[kface, 1] = (T_below + T_above) / 2
-            
-            # Altitude at face
-            as.z_lev[kface, 1] = znode(i, j, kface, grid, Center(), Center(), Face())
+            t_lev[kface, 1] = (T_below + T_above) / 2
+
+            # Altitude
+            z_lev[kface, 1] = z_face
         end
     end
 end
@@ -181,6 +230,9 @@ end
     update_solar_zenith_angle!(sw_solver, grid, clock)
 
 Update the solar zenith angle in the shortwave solver from the model clock.
+
+Uses the datetime from `clock.time` and the grid's location (latitude/longitude)
+to compute the cosine of the solar zenith angle via celestial mechanics.
 """
 function update_solar_zenith_angle!(sw_solver, grid, clock)
     datetime = clock.time
@@ -210,35 +262,39 @@ For the non-scattering shortwave solver, only the direct beam flux is computed.
 """
 function copy_fluxes_to_fields!(radiation::GrayRadiationModel, grid)
     arch = architecture(grid)
+    Nz = size(grid, 3)
     
-    lw_flux = radiation.longwave_solver.flux
-    sw_flux = radiation.shortwave_solver.flux
+    # Unpack flux arrays from RRTMGP solvers
+    lw_flux_up = radiation.longwave_solver.flux.flux_up
+    lw_flux_dn = radiation.longwave_solver.flux.flux_dn
+    sw_flux_dn_dir = radiation.shortwave_solver.flux.flux_dn_dir
+
+    # Unpack Oceananigans output fields
+    ℐ_lw_up = radiation.upwelling_longwave_flux
+    ℐ_lw_dn = radiation.downwelling_longwave_flux
+    ℐ_sw_dn = radiation.downwelling_shortwave_flux
 
     launch!(arch, grid, :xyz, _copy_fluxes_kernel!,
-            radiation.upwelling_longwave_flux,
-            radiation.downwelling_longwave_flux,
-            radiation.downwelling_shortwave_flux,
-            lw_flux, sw_flux, grid)
+            ℐ_lw_up, ℐ_lw_dn, ℐ_sw_dn, lw_flux_up, lw_flux_dn, sw_flux_dn_dir, grid)
 
     # Handle top face (k = Nz + 1) separately since kernel only goes to Nz
-    Nz = size(grid, 3)
-    radiation.upwelling_longwave_flux[1, 1, Nz + 1] = lw_flux.flux_up[Nz + 1, 1]
-    radiation.downwelling_longwave_flux[1, 1, Nz + 1] = -lw_flux.flux_dn[Nz + 1, 1]
-    radiation.downwelling_shortwave_flux[1, 1, Nz + 1] = -sw_flux.flux_dn_dir[Nz + 1, 1]
+    ℐ_lw_up[1, 1, Nz + 1] = lw_flux_up[Nz + 1, 1]
+    ℐ_lw_dn[1, 1, Nz + 1] = -lw_flux_dn[Nz + 1, 1]
+    ℐ_sw_dn[1, 1, Nz + 1] = -sw_flux_dn_dir[Nz + 1, 1]
 
     return nothing
 end
 
-@kernel function _copy_fluxes_kernel!(ℐ_lw_up, ℐ_lw_dn, ℐ_sw_dn, lw_flux, sw_flux, grid)
+@kernel function _copy_fluxes_kernel!(ℐ_lw_up, ℐ_lw_dn, ℐ_sw_dn, 
+                                      lw_flux_up, lw_flux_dn, sw_flux_dn_dir, grid)
     i, j, k = @index(Global, NTuple)
 
     # RRTMGP uses (nlev, ncol), we use (i, j, k) for ZFaceField
     # Sign convention: upwelling positive, downwelling negative
     @inbounds begin
-        ℐ_lw_up[i, j, k] = lw_flux.flux_up[k, 1]
-        ℐ_lw_dn[i, j, k] = -lw_flux.flux_dn[k, 1]  # Negate for downward
-        # For NoScatSWRTE, only direct beam is computed
-        ℐ_sw_dn[i, j, k] = -sw_flux.flux_dn_dir[k, 1]  # Negate for downward
+        ℐ_lw_up[i, j, k] = lw_flux_up[k, 1]
+        ℐ_lw_dn[i, j, k] = -lw_flux_dn[k, 1]  # Negate for downward
+        ℐ_sw_dn[i, j, k] = -sw_flux_dn_dir[k, 1]  # Negate for downward
     end
 end
 

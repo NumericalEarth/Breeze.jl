@@ -8,6 +8,8 @@ export cos_solar_zenith_angle,
 
 using Dates: DateTime, Dates
 
+using Oceananigans.Grids: AbstractGrid, Flat, topology
+
 include("solar_zenith_angle.jl")
 
 end # module

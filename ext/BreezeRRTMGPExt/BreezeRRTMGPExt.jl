@@ -23,7 +23,8 @@ using RRTMGP.Parameters: RRTMGPParameters
 
 using ClimaComms: ClimaComms
 
-include("solar_zenith_angle.jl")
+using Breeze.CelestialMechanics: cos_solar_zenith_angle
+
 include("gray_radiation.jl")
 include("update_radiation.jl")
 
