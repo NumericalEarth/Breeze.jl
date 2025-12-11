@@ -39,7 +39,7 @@ Random.seed!(42)
 
 Oceananigans.defaults.FloatType = Float32
 
-Nx = Ny = 64
+Nx = Ny = 128
 Nz = 100
 
 x = y = (0, 12800)
@@ -230,11 +230,11 @@ set!(model, θ=θᵢ, qᵗ=qᵢ, u=uᵢ, v=vᵢ)
 
 # ## Simulation
 #
-# We run the simulation for 6 hours with adaptive time-stepping.
+# We run the simulation for 12 hours with adaptive time-stepping.
 # RICO typically requires longer integration times than BOMEX to develop
-# a quasi-steady precipitating state, but we use 6 hours for consistency with BOMEX.
+# a quasi-steady precipitating state.
 
-simulation = Simulation(model; Δt=10, stop_time=2hour)
+simulation = Simulation(model; Δt=10, stop_time=12hour)
 conjure_time_step_wizard!(simulation, cfl=0.7)
 
 # ## Output and progress
@@ -250,8 +250,7 @@ P = precipitation_rate(model, :liquid)
 ∫ᶻP = Field(Integral(P, dims=3))
 ∫ⱽP = Field(Integral(P))
 
-u_avg = Field(Average(model.velocities.u, dims=(1, 2)))
-v_avg = Field(Average(model.velocities.v, dims=(1, 2)))
+wall_clock = Ref(time_ns())
 
 function progress(sim)
     compute!(u_avg)
@@ -260,24 +259,23 @@ function progress(sim)
     qᵛmax = maximum(qᵛ)
     qˡmax = maximum(qˡ)
     qᵗmax = maximum(sim.model.specific_moisture)
-    umax = maximum(abs, u_avg)
-    vmax = maximum(abs, v_avg)
+    wmax = maximum(abs, model.velocities.w)
     ∫P = CUDA.@allowscalar ∫ⱽP[]
+    elapsed = 1e-9 * (time_ns() - wall_clock[])
 
-    msg = @sprintf("Iter: %d, t: %s, Δt: %s, max|ū|: (%.2e, %.2e), max(qᵗ): %.2e",
-                   iteration(sim), prettytime(sim), prettytime(sim.Δt),
-                   umax, vmax, qᵗmax)
+    msg = @sprintf("Iter: %d, t: %s, Δt: %s, wall time: %s, max|w|: %.2e m/s \n",
+                   iteration(sim), prettvtime(sim), prettytime(sim.Δt),
+                   prettytime(elapsed), wmax)
 
-    msg *= @sprintf(", max(qᵛ): %.2e, max(qˡ): %.2e, ∫ⱽP: %.2e kg/kg/s",
-                    qᵛmax, qˡmax, ∫P)
+    msg *= @sprintf(" --- max(qᵗ): %.2e, max(qᵛ): %.2e, max(qˡ): %.2e, ∫ⱽP: %.2e kg/kg/s",
+                    qᵗmax, qᵛmax, qˡmax, ∫P)
 
     @info msg
 
     return nothing
 end
 
-#add_callback!(simulation, progress, TimeInterval(1hour))
-add_callback!(simulation, progress, IterationInterval(10))
+add_callback!(simulation, progress, TimeInterval(1hour))
 
 outputs = merge(model.velocities, model.tracers, (; θ, qˡ, qᵛ))
 averaged_outputs = NamedTuple(name => Average(outputs[name], dims=(1, 2)) for name in keys(outputs))
@@ -303,8 +301,7 @@ slice_outputs = (
 )
 
 simulation.output_writers[:slices] = JLD2Writer(model, slice_outputs;
-                                                filename = "rico_slices.jld2",
-                                                schedule = TimeInterval(30seconds),
+                                                schedule = TimeInterval(2minutes),
                                                 overwrite_existing = true)
 
 @info "Running RICO simulation..."
@@ -333,7 +330,7 @@ Nt = length(times)
 default_colours = Makie.wong_colors()
 colors = [default_colours[mod1(i, length(default_colours))] for i in 1:Nt]
 
-for n in 1:Nt
+for n in 1:3:Nt
     label = n == 1 ? "initial condition" : "mean over $(Int(times[n-1]/hour))-$(Int(times[n]/hour)) hr"
 
     lines!(axθ, θt[n], color=colors[n], label=label)
@@ -356,7 +353,7 @@ xlims!(axuv, -12, 2)
 axislegend(axθ, position=:rb)
 text!(axuv, -10, 3200, text="solid: u\ndashed: v", fontsize=12)
 
-fig[0, :] = Label(fig, "RICO: Mean profile evolution (van Zanten et al., 2011)", fontsize=18, tellwidth=false)
+fig[0, :] = Label(fig, "RICO: Horizontally-averaged profiles", fontsize=18, tellwidth=false)
 
 save("rico_profiles.png", fig)
 fig
@@ -393,10 +390,10 @@ Plim = max(maximum(Pxz_ts), 1e-10) / 4
 
 slices_fig = Figure(size=(1100, 800), fontsize=14)
 
-axqxz = Axis(slices_fig[1, 1], xlabel="x (m)", ylabel="z (m)", title="Cloud liquid water qˡ (xz)")
-axPxz = Axis(slices_fig[1, 2], xlabel="x (m)", ylabel="z (m)", title="Precipitation rate P (xz)")
-axqxy = Axis(slices_fig[2, 1], xlabel="x (m)", ylabel="y (m)", title="Cloud liquid water qˡ (xy at z ≈ 1.5 km)")
-ax∫P = Axis(slices_fig[2, 2], xlabel="x (m)", ylabel="y (m)", title="Column-integrated precipitation rate")
+axqxz = Axis(slices_fig[1, 2], xlabel="x (m)", ylabel="z (m)", title="Cloud liquid water qˡ (xz)")
+axPxz = Axis(slices_fig[1, 3], xlabel="x (m)", ylabel="z (m)", title="Precipitation rate P (xz)")
+axqxy = Axis(slices_fig[2, 2], xlabel="x (m)", ylabel="y (m)", title="Cloud liquid water qˡ (xy at z ≈ 1.5 km)")
+ax∫P = Axis(slices_fig[2, 3], xlabel="x (m)", ylabel="y (m)", title="Column-integrated precipitation rate")
 
 n = Observable(1)
 qˡxz_n = @lift qˡxz_ts[$n]
@@ -410,14 +407,14 @@ hmP1 = heatmap!(axPxz, Pxz_n, colormap=:amp, colorrange=(0, Plim))
 hmq2 = heatmap!(axqxy, qˡxy_n, colormap=:dense, colorrange=(0, qˡlim))
 hmP2 = heatmap!(ax∫P, ∫P_n, colormap=:amp, colorrange=(0, ∫Plim))
 
-Colorbar(slices_fig[1, 3], hmq1, label="qˡ (kg/kg)")
-Colorbar(slices_fig[1, 4], hmP1, label="P (kg/kg/s)")
-Colorbar(slices_fig[2, 3], hmq2, label="qˡ (kg/kg)")
-Colorbar(slices_fig[2, 4], hmP2, label="∫P dz (kg/kg⋅m/s)")
+Colorbar(slices_fig[1, 1], hmq1, flipaxis=true, label="qˡ (kg/kg)")
+Colorbar(slices_fig[1, 4], hmP1, label="P (1/s)")
+Colorbar(slices_fig[2, 1], hmq2, flipaxis=true, label="qˡ (kg/kg)")
+Colorbar(slices_fig[2, 4], hmP2, label="∫P dz (m/s)")
 
 slices_fig[0, :] = Label(slices_fig, title_text, fontsize=18, tellwidth=false)
 
-CairoMakie.record(slices_fig, "rico_slices.mp4", 1:Nt, framerate=10) do nn
+CairoMakie.record(slices_fig, "rico_slices.mp4", 1:Nt, framerate=24) do nn
     n[] = nn
 end
 nothing #hide
