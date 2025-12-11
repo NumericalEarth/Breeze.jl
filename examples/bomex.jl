@@ -265,7 +265,7 @@ set!(model, θ=θᵢ, qᵗ=qᵢ, u=uᵢ)
 #
 # We run the simulation for 6 hours with adaptive time-stepping.
 
-simulation = Simulation(model; Δt=10, stop_time=6hour)
+simulation = Simulation(model; Δt=10, stop_time=6hours)
 conjure_time_step_wizard!(simulation, cfl=0.7)
 
 # ## Output and progress
@@ -406,13 +406,16 @@ qˡxy_ts = FieldTimeSeries("bomex_slices.jld2", "qˡxy")
 times = wxz_ts.times
 Nt = length(times)
 
+x = xnodes(grid, Center())
+z = znodes(grid, Center())
+
 # Create animation
 fig = Figure(size=(900, 750), fontsize=14)
 
 axwxz = Axis(fig[1, 2], aspect=2, xlabel="x (m)", ylabel="z (m)", title="Vertical velocity w")
 axqxz = Axis(fig[1, 3], aspect=2, xlabel="x (m)", ylabel="z (m)", title="Liquid water qˡ")
-axwxy = Axis(fig[2, 2], aspect=1,  xlabel="x (m)", ylabel="y (m)")
-axqxy = Axis(fig[2, 3], aspect=1, xlabel="x (m)", ylabel="y (m)")
+axwxy = Axis(fig[2, 2], aspect=1, xlabel="x (m)", ylabel="y (m)", title="@ z = $(z[k]) m")
+axqxy = Axis(fig[2, 3], aspect=1, xlabel="x (m)", ylabel="y (m)", title="@ z = $(z[k]) m")
 
 # Determine color limits from the data
 wmax = maximum(abs, wxz_ts)
@@ -431,19 +434,20 @@ hmq = heatmap!(axqxz, qˡxz_n, colormap=:dense, colorrange=(0, qˡmax))
 hmw = heatmap!(axwxy, wxy_n, colormap=:balance, colorrange=(-wmax, wmax))
 hmq = heatmap!(axqxy, qˡxy_n, colormap=:dense, colorrange=(0, qˡmax))
 
+for ax in (axwxz, axqxz)
+    lines!(ax, x, fill(z[k], length(x)), color=:grey, linestyle=:dash)
+end
+
 Colorbar(fig[1:2, 1], hmw, label="w (m/s)", tellheight = false, height = Relative(0.5), flipaxis=false)
 Colorbar(fig[1:2, 4], hmq, label="qˡ (kg/kg)", tellheight = false, height = Relative(0.5))
 
 fig[0, :] = Label(fig, title, fontsize=20, tellwidth=false)
 
-fig
-
 # Record animation
 N₂ = ceil(Int, Nt/3)
-CairoMakie.record(slices_fig, "bomex_slices.mp4", 1:N₂, framerate=12) do nn
+CairoMakie.record(fig, "bomex_slices.mp4", 1:N₂, framerate=12) do nn
     n[] = nn
 end
 nothing #hide
 
 # ![](bomex_slices.mp4)
-
