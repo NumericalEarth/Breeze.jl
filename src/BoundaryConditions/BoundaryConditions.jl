@@ -401,24 +401,7 @@ Oceananigans.FieldBoundaryConditions, with boundary conditions
 └── immersed: DefaultBoundaryCondition (FluxBoundaryCondition: Nothing)
 ```
 
-and `YDirection` for v:
-
-```jldoctest bulkdrag
-using Oceananigans.Grids: YDirection
-
-v_drag = BulkDrag(direction=YDirection(), coefficient=1e-3)
-ρv_bcs = FieldBoundaryConditions(bottom=v_drag)
-
-# output
-Oceananigans.FieldBoundaryConditions, with boundary conditions
-├── west: DefaultBoundaryCondition (FluxBoundaryCondition: Nothing)
-├── east: DefaultBoundaryCondition (FluxBoundaryCondition: Nothing)
-├── south: DefaultBoundaryCondition (FluxBoundaryCondition: Nothing)
-├── north: DefaultBoundaryCondition (FluxBoundaryCondition: Nothing)
-├── bottom: FluxBoundaryCondition: DiscreteBoundaryFunction with BulkDragFunction(direction=YDirection(), coefficient=0.001, gustiness=0)
-├── top: DefaultBoundaryCondition (FluxBoundaryCondition: Nothing)
-└── immersed: DefaultBoundaryCondition (FluxBoundaryCondition: Nothing)
-```
+and similartly for `YDirection` for v.
 """
 function BulkDrag(; kwargs...)
     df = BulkDragFunction(; kwargs...)
