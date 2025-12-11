@@ -12,6 +12,7 @@ export
     total_energy,
     liquid_ice_potential_temperature_density,
     liquid_ice_potential_temperature,
+    precipitation_rate,
 
     # Diagnostics (re-exported from Diagnostics submodule)
     PotentialTemperature,

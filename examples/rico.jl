@@ -58,7 +58,7 @@ grid = RectilinearGrid(GPU(); x, y, z,
 constants = ThermodynamicConstants()
 
 reference_state = ReferenceState(grid, constants,
-                                 base_pressure = 101540,
+                                 surface_pressure = 101540,
                                  potential_temperature = 297.9)
 
 formulation = AnelasticFormulation(reference_state,
@@ -78,7 +78,7 @@ w′θ′ = 8e-3     # K m/s (sensible heat flux)
 w′qᵗ′ = 5.2e-5  # kg/kg m/s (moisture flux)
 
 FT = eltype(grid)
-p₀ = reference_state.base_pressure
+p₀ = reference_state.surface_pressure
 θ₀ = reference_state.potential_temperature
 q₀ = Breeze.Thermodynamics.MoistureMassFractions{FT} |> zero
 ρ₀ = Breeze.Thermodynamics.density(p₀, θ₀, q₀, constants)
@@ -173,11 +173,15 @@ nothing #hide
 # and 9th-order WENO advection. The zero-moment scheme allows condensation and evaporation
 # and includes instant precipitation removal above a threshold, making it suitable for
 # precipitating shallow cumulus simulations like RICO.
+#
+# The zero-moment scheme removes cloud liquid water exceeding a threshold `qc_0` at a rate
+# determined by the precipitation timescale `τ_precip`. Typical values for shallow cumulus
+# are `τ_precip ~ 1000 s` and `qc_0 ~ 5×10⁻⁴ kg/kg`.
 
 BreezeCloudMicrophysicsExt = Base.get_extension(Breeze, :BreezeCloudMicrophysicsExt)
 using .BreezeCloudMicrophysicsExt: ZeroMomentCloudMicrophysics
 
-microphysics = ZeroMomentCloudMicrophysics()
+microphysics = ZeroMomentCloudMicrophysics(τ_precip = 1000, qc_0 = 5e-4)
 advection = WENO(order=9)
 
 model = AtmosphereModel(grid; formulation, coriolis, microphysics, advection, forcing,
@@ -202,7 +206,7 @@ using Breeze.Thermodynamics: dry_air_gas_constant
 
 Rᵈ = dry_air_gas_constant(constants)
 cᵖᵈ = constants.dry_air.heat_capacity
-p₀ = reference_state.base_pressure
+p₀ = reference_state.surface_pressure
 χ = (p₀ / 1e5)^(Rᵈ / cᵖᵈ)
 
 # The initial profiles are perturbed with random noise below 1600 m to trigger
@@ -238,20 +242,25 @@ conjure_time_step_wizard!(simulation, cfl=0.7)
 qˡ = model.microphysical_fields.qˡ
 qᵛ = model.microphysical_fields.qᵛ
 
+# Precipitation rate diagnostic from zero-moment microphysics
+P = precipitation_rate(model, :liquid)
+
 u_avg = Field(Average(model.velocities.u, dims=(1, 2)))
 v_avg = Field(Average(model.velocities.v, dims=(1, 2)))
 
 function progress(sim)
     compute!(u_avg)
     compute!(v_avg)
+    compute!(P)
     qˡmax = maximum(qˡ)
     qᵗmax = maximum(sim.model.specific_moisture)
     umax = maximum(abs, u_avg)
     vmax = maximum(abs, v_avg)
+    Pmax = maximum(P)
 
-    msg = @sprintf("Iter: %d, t: %s, Δt: %s, max|ū|: (%.2e, %.2e), max(qᵗ): %.2e, max(qˡ): %.2e",
+    msg = @sprintf("Iter: %d, t: %s, Δt: %s, max|ū|: (%.2e, %.2e), max(qᵗ): %.2e, max(qˡ): %.2e, max(P): %.2e",
                    iteration(sim), prettytime(sim), prettytime(sim.Δt),
-                   umax, vmax, qᵗmax, qˡmax)
+                   umax, vmax, qᵗmax, qˡmax, Pmax)
     @info msg
     return nothing
 end
@@ -266,17 +275,22 @@ simulation.output_writers[:averages] = JLD2Writer(model, averaged_outputs; filen
                                                   schedule = AveragedTimeInterval(1hour),
                                                   overwrite_existing = true)
 
-# Output horizontal slices at z = 1000 m for animation (near cloud base for RICO)
-z = Oceananigans.Grids.znodes(grid, Center())
-k = searchsortedfirst(z, 1000)
-@info "Saving slices at z = $(z[k]) m (k = $k)"
+# Output slices for animation:
+# - xz-slices of qˡ and precipitation rate
+# - xy-slice of qˡ in cloud layer (z ≈ 1500 m) and vertically-integrated precipitation rate
 
-u, v, w = model.velocities
+z = Oceananigans.Grids.znodes(grid, Center())
+k_cloud = searchsortedfirst(z, 1500)  # cloud layer height for RICO
+@info "Saving xy slices at z = $(z[k_cloud]) m (k = $k_cloud)"
+
+# Vertical integral of precipitation rate (column-integrated rain rate)
+P_int = Field(Integral(P, dims=3))
+
 slice_outputs = (
-    wxy = view(w, :, :, k),
-    qˡxy = view(qˡ, :, :, k),
-    wxz = view(w, :, 1, :),
     qˡxz = view(qˡ, :, 1, :),
+    Pxz = view(P, :, 1, :),
+    qˡxy = view(qˡ, :, :, k_cloud),
+    Pint = P_int,
 )
 
 simulation.output_writers[:slices] = JLD2Writer(model, slice_outputs;
@@ -343,39 +357,54 @@ fig
 # - Higher moisture content supporting warm-rain processes
 # - Trade-wind flow with stronger westerlies
 
-# ## Animation of horizontal slices
+# ## Animation: cloud liquid water and precipitation rate
+#
+# We create a 4-panel animation showing:
+# - Top left: xz-slice of cloud liquid water qˡ
+# - Top right: xz-slice of precipitation rate P
+# - Bottom left: xy-slice of qˡ in the cloud layer
+# - Bottom right: vertically-integrated precipitation rate
 
-wxz_ts = FieldTimeSeries("rico_slices.jld2", "wxz")
 qˡxz_ts = FieldTimeSeries("rico_slices.jld2", "qˡxz")
-wxy_ts = FieldTimeSeries("rico_slices.jld2", "wxy")
+Pxz_ts = FieldTimeSeries("rico_slices.jld2", "Pxz")
 qˡxy_ts = FieldTimeSeries("rico_slices.jld2", "qˡxy")
+Pint_ts = FieldTimeSeries("rico_slices.jld2", "Pint")
 
-times = wxz_ts.times
+times = qˡxz_ts.times
 Nt = length(times)
 
-slices_fig = Figure(size=(1000, 500), fontsize=14)
-axwxz = Axis(slices_fig[1, 2], xlabel="x (m)", ylabel="z (m)", title="Vertical velocity w")
-axqxz = Axis(slices_fig[1, 3], xlabel="x (m)", ylabel="z (m)", title="Liquid water qˡ")
-axwxy = Axis(slices_fig[2, 2], xlabel="x (m)", ylabel="y (m)")
-axqxy = Axis(slices_fig[2, 3], xlabel="x (m)", ylabel="y (m)")
-
-wmax = maximum(abs, wxz_ts)
+# Compute color ranges
 qˡmax = maximum(qˡxz_ts)
+Pmax = maximum(Pxz_ts)
+Pintmax = maximum(Pint_ts)
+
+# Convert precipitation rate to mm/day for more intuitive units
+# P is in kg/kg/s, multiply by ρ~1 kg/m³ and 86400 s/day and 1000 mm/m gives ~86.4 factor
+# But since P is specific (kg/kg/s), we'll just show it in 10⁻⁶ s⁻¹ for clarity
+
+slices_fig = Figure(size=(1100, 800), fontsize=14)
+
+axqxz = Axis(slices_fig[1, 1], xlabel="x (m)", ylabel="z (m)", title="Cloud liquid water qˡ (xz)")
+axPxz = Axis(slices_fig[1, 2], xlabel="x (m)", ylabel="z (m)", title="Precipitation rate P (xz)")
+axqxy = Axis(slices_fig[2, 1], xlabel="x (m)", ylabel="y (m)", title="Cloud liquid water qˡ (xy at z ≈ 1.5 km)")
+axPint = Axis(slices_fig[2, 2], xlabel="x (m)", ylabel="y (m)", title="Column-integrated precipitation rate")
 
 n = Observable(1)
-wxz_n = @lift wxz_ts[$n]
 qˡxz_n = @lift qˡxz_ts[$n]
-wxy_n = @lift wxy_ts[$n]
+Pxz_n = @lift Pxz_ts[$n]
 qˡxy_n = @lift qˡxy_ts[$n]
-title_text = @lift "RICO slices at t = " * prettytime(times[$n])
+Pint_n = @lift Pint_ts[$n]
+title_text = @lift "RICO: Clouds and precipitation at t = " * prettytime(times[$n])
 
-hmw = heatmap!(axwxz, wxz_n, colormap=:balance, colorrange=(-wmax, wmax))
-hmq = heatmap!(axqxz, qˡxz_n, colormap=:dense, colorrange=(0, qˡmax))
-hmw = heatmap!(axwxy, wxy_n, colormap=:balance, colorrange=(-wmax, wmax))
-hmq = heatmap!(axqxy, qˡxy_n, colormap=:dense, colorrange=(0, qˡmax))
+hmq1 = heatmap!(axqxz, qˡxz_n, colormap=:dense, colorrange=(0, qˡmax))
+hmP1 = heatmap!(axPxz, Pxz_n, colormap=:amp, colorrange=(0, Pmax))
+hmq2 = heatmap!(axqxy, qˡxy_n, colormap=:dense, colorrange=(0, qˡmax))
+hmP2 = heatmap!(axPint, Pint_n, colormap=:amp, colorrange=(0, Pintmax))
 
-Colorbar(slices_fig[1:2, 1], hmw, label="w (m/s)", flipaxis=false)
-Colorbar(slices_fig[1:2, 4], hmq, label="qˡ (kg/kg)")
+Colorbar(slices_fig[1, 3], hmq1, label="qˡ (kg/kg)")
+Colorbar(slices_fig[1, 4], hmP1, label="P (kg/kg/s)")
+Colorbar(slices_fig[2, 3], hmq2, label="qˡ (kg/kg)")
+Colorbar(slices_fig[2, 4], hmP2, label="∫P dz (kg/kg⋅m/s)")
 
 slices_fig[0, :] = Label(slices_fig, title_text, fontsize=18, tellwidth=false)
 
