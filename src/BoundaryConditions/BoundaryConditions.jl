@@ -459,7 +459,7 @@ See [`BulkVaporFluxFunction`](@ref) for details.
 
 # Example
 
-```julia
+```jldoctest
 using Breeze
 
 # Surface temperature can be a function, Field, or number
