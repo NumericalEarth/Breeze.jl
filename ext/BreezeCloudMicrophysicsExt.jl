@@ -24,13 +24,10 @@ using Breeze.AtmosphereModels
 
 using Breeze.Thermodynamics:
     MoistureMassFractions,
-    saturation_specific_humidity,
-    temperature,
     density
 
 using Breeze.Microphysics:
     center_field_tuple,
-    equilibrated_surface,
     BulkMicrophysics,
     FourCategories,
     WarmPhaseSaturationAdjustment,
