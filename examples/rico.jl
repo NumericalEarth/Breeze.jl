@@ -373,10 +373,10 @@ Pint_ts = FieldTimeSeries("rico_slices.jld2", "Pint")
 times = qˡxz_ts.times
 Nt = length(times)
 
-# Compute color ranges
-qˡmax = maximum(qˡxz_ts)
-Pmax = maximum(Pxz_ts)
-Pintmax = maximum(Pint_ts)
+# Compute color ranges (with fallback to avoid zero range which breaks Makie)
+qˡmax = max(maximum(qˡxz_ts), 1e-6)
+Pmax = max(maximum(Pxz_ts), 1e-10)
+Pintmax = max(maximum(Pint_ts), 1e-8)
 
 # Convert precipitation rate to mm/day for more intuitive units
 # P is in kg/kg/s, multiply by ρ~1 kg/m³ and 86400 s/day and 1000 mm/m gives ~86.4 factor
