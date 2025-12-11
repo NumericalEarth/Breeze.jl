@@ -14,6 +14,11 @@ export
     liquid_ice_potential_temperature,
     precipitation_rate,
 
+    # Interface functions (extended by BoundaryConditions and Forcings)
+    regularize_atmosphere_model_boundary_conditions,
+    materialize_atmosphere_model_forcing,
+    compute_forcing!,
+
     # Diagnostics (re-exported from Diagnostics submodule)
     PotentialTemperature,
     VirtualPotentialTemperature,
@@ -25,13 +30,15 @@ export
 using DocStringExtensions: TYPEDSIGNATURES
 using Adapt: Adapt, adapt
 
+# Interface functions defined first (extended by downstream modules)
+include("forcing_interface.jl")
+include("microphysics_interface.jl")
 include("atmosphere_model.jl")
 include("set_atmosphere_model.jl")
 include("anelastic_formulation.jl")
 include("static_energy_thermodynamics.jl")
 include("potential_temperature_thermodynamics.jl")
 include("atmosphere_model_buoyancy.jl")
-include("microphysics_interface.jl")
 include("dynamics_kernel_functions.jl")
 include("update_atmosphere_model_state.jl")
 include("compute_hydrostatic_pressure.jl")

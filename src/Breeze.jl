@@ -42,6 +42,11 @@ export
     SaturationSpecificHumidityField,
     BulkMicrophysics,
 
+    # BoundaryConditions
+    BulkDrag,
+    BulkSensibleHeatFlux,
+    BulkVaporFlux,
+
     # Forcing utilities
     geostrophic_forcings,
     SubsidenceForcing
@@ -104,9 +109,6 @@ using .Thermodynamics
 include("MoistAirBuoyancies.jl")
 using .MoistAirBuoyancies
 
-include("Forcings/Forcings.jl")
-using .Forcings
-
 include("AtmosphereModels/AtmosphereModels.jl")
 using .AtmosphereModels
 
@@ -118,5 +120,11 @@ using .TurbulenceClosures
 
 include("Advection.jl")
 using .Advection
+
+include("BoundaryConditions/BoundaryConditions.jl")
+using .BoundaryConditions
+
+include("Forcings/Forcings.jl")
+using .Forcings
 
 end # module Breeze
