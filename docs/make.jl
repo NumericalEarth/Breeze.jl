@@ -50,11 +50,11 @@ using CairoMakie
 CairoMakie.activate!(type = "png")
 set_theme!(Theme(linewidth = 3))
 
-Literate.markdown($(repr(script_path)), $(repr(literated_dir));
-                  flavor = Literate.DocumenterFlavor(),
-                  preprocess = content -> content * $(repr(example_postamble)),
-                  execute = true,
-                 )
+@time $(repr(basename(script_path))) Literate.markdown($(repr(script_path)), $(repr(literated_dir));
+                                                        flavor = Literate.DocumenterFlavor(),
+                                                        preprocess = content -> content * $(repr(example_postamble)),
+                                                        execute = true,
+                                                       )
 """
 
 semaphore = Base.Semaphore(Threads.nthreads(:interactive))
@@ -62,7 +62,7 @@ semaphore = Base.Semaphore(Threads.nthreads(:interactive))
     script_file = splitext(basename(dest_file))[1] * ".jl"
     script_path = joinpath(examples_src_dir, script_file)
     Threads.@spawn :interactive Base.acquire(semaphore) do
-        @time script_file run(`$(Base.julia_cmd()) --color=yes --project=$(dirname(Base.active_project())) -e $(literate_code(script_path, literated_dir))`)
+        run(`$(Base.julia_cmd()) --color=yes --project=$(dirname(Base.active_project())) -e $(literate_code(script_path, literated_dir))`)
     end
 end
 
