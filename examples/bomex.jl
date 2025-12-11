@@ -265,7 +265,7 @@ set!(model, θ=θᵢ, qᵗ=qᵢ, u=uᵢ)
 #
 # We run the simulation for 6 hours with adaptive time-stepping.
 
-simulation = Simulation(model; Δt=10, stop_time=6hours)
+simulation = Simulation(model; Δt=10, stop_time=6hour)
 conjure_time_step_wizard!(simulation, cfl=0.7)
 
 # ## Output and progress
@@ -305,8 +305,8 @@ simulation.output_writers[:averages] = JLD2Writer(model, averaged_outputs; filen
                                                   schedule = AveragedTimeInterval(1hour),
                                                   overwrite_existing = true)
 
-# Output horizontal slices at z = 800 m for animation. To do that, we find the `k` index
-# closest to z = 800 m.
+# Output horizontal slices at z = 600 m for animation
+# Find the k-index closest to z = 600 m
 z = Oceananigans.Grids.znodes(grid, Center())
 k = searchsortedfirst(z, 800)
 @info "Saving slices at z = $(z[k]) m (k = $k)"
@@ -426,13 +426,12 @@ wxz_n = @lift wxz_ts[$n]
 qˡxz_n = @lift qˡxz_ts[$n]
 wxy_n = @lift wxy_ts[$n]
 qˡxy_n = @lift qˡxy_ts[$n]
-
 title = @lift "BOMEX slices at t = " * prettytime(times[$n])
 
 hmw = heatmap!(axwxz, wxz_n, colormap=:balance, colorrange=(-wmax, wmax))
-hmq = heatmap!(axqxz, qˡxz_n, colormap=:dense, colorrange=(0, qˡmax))
+hmq = heatmap!(axqxz, qˡxz_n, colormap=Reverse(:Blues_4), colorrange=(0, qˡmax))
 hmw = heatmap!(axwxy, wxy_n, colormap=:balance, colorrange=(-wmax, wmax))
-hmq = heatmap!(axqxy, qˡxy_n, colormap=:dense, colorrange=(0, qˡmax))
+hmq = heatmap!(axqxy, qˡxy_n, colormap=Reverse(:Blues_4), colorrange=(0, qˡmax))
 
 for ax in (axwxz, axqxz)
     lines!(ax, x, fill(z[k], length(x)), color=:grey, linestyle=:dash)
@@ -441,11 +440,11 @@ end
 Colorbar(fig[1:2, 1], hmw, label="w (m/s)", tellheight = false, height = Relative(0.5), flipaxis=false)
 Colorbar(fig[1:2, 4], hmq, label="qˡ (kg/kg)", tellheight = false, height = Relative(0.5))
 
-fig[0, :] = Label(fig, title, fontsize=20, tellwidth=false)
+fig[0, :] = Label(fig, title, fontsize=18, tellwidth=false)
 
 # Record animation
-N₂ = ceil(Int, Nt/3)
-CairoMakie.record(fig, "bomex_slices.mp4", 1:N₂, framerate=12) do nn
+N2 = ceil(Int, Nt/3)
+CairoMakie.record(fig, "bomex_slices.mp4", 1:N2, framerate=12) do nn
     n[] = nn
 end
 nothing #hide
