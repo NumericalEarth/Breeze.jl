@@ -143,7 +143,7 @@ end
     
     # Test prognostic field names
     names = prognostic_field_names(μ)
-    @test names == (:ρqᵛ, :ρqᶜˡ, :ρqʳ)
+    @test names == (:ρqᶜˡ, :ρqʳ)
 end
 
 #####
@@ -160,7 +160,7 @@ if RUN_INTEGRATION_TESTS
     p₀ = FT(101325)
     θ₀ = FT(300)
     reference_state = ReferenceState(grid, constants; base_pressure=p₀, potential_temperature=θ₀)
-    formulation = AnelasticFormulation(reference_state)
+    formulation = AnelasticFormulation(reference_state, thermodynamics=:LiquidIcePotentialTemperature)
     microphysics = KesslerMicrophysics()
     
     # Let AtmosphereModel materialize fields properly with boundary conditions
@@ -168,10 +168,8 @@ if RUN_INTEGRATION_TESTS
     fields = model.microphysical_fields
     
     # Check prognostic fields exist and are the right type
-    @test haskey(fields, :ρqᵛ)
     @test haskey(fields, :ρqᶜˡ)
     @test haskey(fields, :ρqʳ)
-    @test fields.ρqᵛ isa Field
     @test fields.ρqᶜˡ isa Field
     @test fields.ρqʳ isa Field
     
@@ -183,7 +181,7 @@ if RUN_INTEGRATION_TESTS
     @test haskey(fields, :vᵗ_rain)
     
     # Check field types
-    @test eltype(fields.ρqᵛ) == FT
+    @test eltype(fields.ρqᶜˡ) == FT
     @test eltype(fields.qᵛ) == FT
 end
 
@@ -199,14 +197,13 @@ end
     p₀ = FT(101325)
     θ₀ = FT(300)
     reference_state = ReferenceState(grid, constants; base_pressure=p₀, potential_temperature=θ₀)
-    formulation = AnelasticFormulation(reference_state)
+    formulation = AnelasticFormulation(reference_state, thermodynamics=:LiquidIcePotentialTemperature)
     microphysics = KesslerMicrophysics()
     
     model = AtmosphereModel(grid; thermodynamic_constants=constants, formulation, microphysics)
     
     @testset "Model construction" begin
         @test model.microphysics isa KesslerMicrophysics
-        @test haskey(model.microphysical_fields, :ρqᵛ)
         @test haskey(model.microphysical_fields, :ρqᶜˡ)
         @test haskey(model.microphysical_fields, :ρqʳ)
         @test haskey(model.microphysical_fields, :precipitation_rate)
@@ -217,7 +214,7 @@ end
         set!(model; θ = θ₀)
         
         # Check that moisture fields are zero
-        @test @allowscalar all(model.microphysical_fields.ρqᵛ .== 0)
+        @test @allowscalar all(model.moisture_density .== 0)
         @test @allowscalar all(model.microphysical_fields.ρqᶜˡ .== 0)
         @test @allowscalar all(model.microphysical_fields.ρqʳ .== 0)
     end
@@ -227,20 +224,20 @@ end
         ρᵣ = model.formulation.reference_state.density
         qᵛ₀ = FT(0.01)  # 10 g/kg vapor
         
-        # Set moisture via density-weighted field
-        set!(model.microphysical_fields.ρqᵛ, (x, y, z) -> @allowscalar(ρᵣ[1, 1, 1]) * qᵛ₀)
+        # Set total moisture via ρqᵗ
+        set!(model, ρqᵗ = (x, y, z) -> @allowscalar(ρᵣ[1, 1, 1]) * qᵛ₀)
         set!(model.microphysical_fields.ρqᶜˡ, 0)
         set!(model.microphysical_fields.ρqʳ, 0)
         set!(model; θ = θ₀)
         
-        # Check vapor is set
-        @test @allowscalar model.microphysical_fields.ρqᵛ[1, 1, 1] > 0
+        # Check total moisture is set
+        @test @allowscalar model.moisture_density[1, 1, 1] > 0
     end
     
     @testset "Time stepping" begin
         # Reinitialize with simple conditions
         set!(model; θ = θ₀)
-        set!(model.microphysical_fields.ρqᵛ, 0)
+        set!(model, ρqᵗ = 0)
         set!(model.microphysical_fields.ρqᶜˡ, 0)
         set!(model.microphysical_fields.ρqʳ, 0)
         
@@ -260,7 +257,7 @@ end
     p₀ = FT(101325)
     θ₀ = FT(300)
     reference_state = ReferenceState(grid, constants; base_pressure=p₀, potential_temperature=θ₀)
-    formulation = AnelasticFormulation(reference_state)
+    formulation = AnelasticFormulation(reference_state, thermodynamics=:LiquidIcePotentialTemperature)
     microphysics = KesslerMicrophysics()
     
     model = AtmosphereModel(grid; thermodynamic_constants=constants, formulation, microphysics)
@@ -272,7 +269,7 @@ end
     
     # Set up rain in upper half of domain
     set!(model; θ = θ₀)
-    set!(model.microphysical_fields.ρqᵛ, 0)
+    set!(model, ρqᵗ = 0)  # Set total moisture to zero (no vapor initially)
     set!(model.microphysical_fields.ρqᶜˡ, 0)
     
     qʳ_init = FT(0.001)  # 1 g/kg rain
@@ -309,7 +306,7 @@ end
     p₀ = FT(101325)
     θ₀ = FT(300)
     reference_state = ReferenceState(grid, constants; base_pressure=p₀, potential_temperature=θ₀)
-    formulation = AnelasticFormulation(reference_state)
+    formulation = AnelasticFormulation(reference_state, thermodynamics=:LiquidIcePotentialTemperature)
     microphysics = KesslerMicrophysics()
     
     model = AtmosphereModel(grid; thermodynamic_constants=constants, formulation, microphysics)
@@ -319,11 +316,12 @@ end
     qʳ_init = FT(0.002)  # 2 g/kg rain
     
     set!(model; θ = θ₀)
-    set!(model.microphysical_fields.ρqᵛ, 0)
+    # Set total moisture to rain only
     set!(model.microphysical_fields.ρqᶜˡ, 0)
     
     for k in 1:grid.Nz
         @allowscalar model.microphysical_fields.ρqʳ[1, 1, k] = ρᵣ[1, 1, k] * qʳ_init
+        @allowscalar model.moisture_density[1, 1, k] = ρᵣ[1, 1, k] * qʳ_init  # qᵗ = qʳ, so qᵛ = 0
     end
     
     # Time step to trigger precipitation calculation
@@ -346,7 +344,7 @@ end
     p₀ = FT(101325)
     θ₀ = FT(300)
     reference_state = ReferenceState(grid, constants; base_pressure=p₀, potential_temperature=θ₀)
-    formulation = AnelasticFormulation(reference_state)
+    formulation = AnelasticFormulation(reference_state, thermodynamics=:LiquidIcePotentialTemperature)
     microphysics = KesslerMicrophysics()
     
     model = AtmosphereModel(grid; thermodynamic_constants=constants, formulation, microphysics)
@@ -359,26 +357,28 @@ end
     qᵛ₀ = FT(0.015)
     qᶜ₀ = FT(0.002)
     qʳ₀ = FT(0.001)
+    qᵗ₀ = qᵛ₀ + qᶜ₀ + qʳ₀  # Total moisture
     
     for k in 1:grid.Nz
         ρ_k = @allowscalar ρᵣ[1, 1, k]
-        @allowscalar model.microphysical_fields.ρqᵛ[1, 1, k] = ρ_k * qᵛ₀
+        # Set total moisture = vapor + cloud + rain
+        @allowscalar model.moisture_density[1, 1, k] = ρ_k * qᵗ₀
         @allowscalar model.microphysical_fields.ρqᶜˡ[1, 1, k] = ρ_k * qᶜ₀
         @allowscalar model.microphysical_fields.ρqʳ[1, 1, k] = ρ_k * qʳ₀
     end
     
     # Compute initial total water (note: this is not conserved due to precipitation leaving the domain)
-    initial_vapor = @allowscalar sum(model.microphysical_fields.ρqᵛ)
+    initial_total_moisture = @allowscalar sum(model.moisture_density)
     initial_cloud = @allowscalar sum(model.microphysical_fields.ρqᶜˡ)
     initial_rain = @allowscalar sum(model.microphysical_fields.ρqʳ)
-    initial_total = initial_vapor + initial_cloud + initial_rain
+    initial_total = initial_total_moisture
     
     
     # Time step
     time_step!(model, FT(0.1))
     
     # Check that all moisture fields remain non-negative (physical constraint)
-    @test @allowscalar all(model.microphysical_fields.ρqᵛ .>= 0)
+    @test @allowscalar all(model.moisture_density .>= 0)
     @test @allowscalar all(model.microphysical_fields.ρqᶜˡ .>= 0)
     @test @allowscalar all(model.microphysical_fields.ρqʳ .>= 0)
     

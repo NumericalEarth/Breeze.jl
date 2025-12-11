@@ -38,13 +38,16 @@ following Klemp and Wilhelmson (1978).
 
 # Moisture categories
 
-This scheme represents three moisture categories as prognostic variables:
-- Water vapor (`ρqᵛ`): density-weighted vapor mass fraction
-- Cloud water (`ρqᶜˡ`): density-weighted cloud liquid mass fraction  
-- Rain water (`ρqʳ`): density-weighted rain mass fraction
+This scheme represents moisture in three categories:
+- Water vapor mixing ratio (`rᵛ`)
+- Cloud water mixing ratio (`rᶜˡ`)
+- Rain water mixing ratio(`rʳ`)
 
-Internally, the scheme uses mixing ratios (mass per unit mass of dry air) for physics
-calculations, with conversions at kernel boundaries.
+Breeze uses mass fractions, so conversions between mass fractions and mixing ratios are performed as needed. 
+Also, Breeze does not track water vapor as a prognostic variable; instead, it is diagnosed from total moisture. 
+
+Internally, the scheme uses mixing ratios (mass per unit mass of dry air) for microphysics
+calculations. 
 
 # Physical processes
 
@@ -76,11 +79,13 @@ const KM = KesslerMicrophysics
     prognostic_field_names(::KesslerMicrophysics)
 
 Return the names of prognostic microphysical fields for Kessler scheme:
-- `ρqᵛ`: density-weighted water vapor mass fraction (kg/m³)
 - `ρqᶜˡ`: density-weighted cloud liquid mass fraction (kg/m³)  
 - `ρqʳ`: density-weighted rain mass fraction (kg/m³)
+
+Note: Water vapor `qᵛ` is **not** prognostic. It is diagnosed as `qᵛ = qᵗ - qᶜˡ - qʳ`,
+where `qᵗ` is the total specific moisture (a prognostic variable of `AtmosphereModel`).
 """
-prognostic_field_names(::KM) = (:ρqᵛ, :ρqᶜˡ, :ρqʳ)
+prognostic_field_names(::KM) = (:ρqᶜˡ, :ρqʳ)
 
 """
     materialize_microphysical_fields(::KesslerMicrophysics, grid, boundary_conditions)
@@ -88,16 +93,16 @@ prognostic_field_names(::KM) = (:ρqᵛ, :ρqᶜˡ, :ρqʳ)
 Create and return all microphysical fields for the Kessler scheme.
 
 # Prognostic fields (density-weighted, with boundary conditions)
-- `ρqᵛ`, `ρqᶜˡ`, `ρqʳ`: Density-weighted mass fractions
+- `ρqᶜˡ`, `ρqʳ`: Density-weighted cloud liquid and rain mass fractions
 
 # Diagnostic fields (mass fractions, no boundary conditions needed)
-- `qᵛ`, `qᶜˡ`, `qʳ`: Mass fractions (kg/kg)
+- `qᵛ`: Water vapor mass fraction, diagnosed as `qᵛ = qᵗ - qᶜˡ - qʳ`
+- `qᶜˡ`, `qʳ`: Cloud liquid and rain mass fractions (kg/kg)
 - `precipitation_rate`: Surface precipitation rate (m/s)
 - `vᵗ_rain`: Rain terminal velocity (m/s)
 """
 function materialize_microphysical_fields(::KM, grid, boundary_conditions)
     # Prognostic fields (density-weighted)
-    ρqᵛ  = CenterField(grid, boundary_conditions=boundary_conditions.ρqᵛ)
     ρqᶜˡ = CenterField(grid, boundary_conditions=boundary_conditions.ρqᶜˡ)
     ρqʳ  = CenterField(grid, boundary_conditions=boundary_conditions.ρqʳ)
 
@@ -110,7 +115,7 @@ function materialize_microphysical_fields(::KM, grid, boundary_conditions)
     precipitation_rate = Field{Center, Center, GridNothing}(grid)
     vᵗ_rain = CenterField(grid)
 
-    return (; ρqᵛ, ρqᶜˡ, ρqʳ, qᵛ, qᶜˡ, qʳ, precipitation_rate, vᵗ_rain)
+    return (; ρqᶜˡ, ρqʳ, qᵛ, qᶜˡ, qʳ, precipitation_rate, vᵗ_rain)
 end
 
 #####
@@ -121,15 +126,17 @@ end
     compute_moisture_fractions(i, j, k, grid, ::KesslerMicrophysics, ρ, qᵗ, μ)
 
 Compute moisture mass fractions at grid point (i, j, k) for thermodynamic state.
+Water vapor is diagnosed as `qᵛ = qᵗ - qᶜˡ - qʳ`.
 Returns `MoistureMassFractions(qᵛ, qˡ)` where `qˡ = qᶜˡ + qʳ` is total liquid.
 """
 @inline function compute_moisture_fractions(i, j, k, grid, ::KM, ρ, qᵗ, μ)
     @inbounds begin
-        qᵛ  = μ.ρqᵛ[i, j, k] / ρ
         qᶜˡ = μ.ρqᶜˡ[i, j, k] / ρ
         qʳ  = μ.ρqʳ[i, j, k] / ρ
     end
-    return MoistureMassFractions(qᵛ, qᶜˡ + qʳ)
+    qˡ = qᶜˡ + qʳ
+    qᵛ = qᵗ - qˡ
+    return MoistureMassFractions(qᵛ, qˡ)
 end
 
 """
@@ -246,7 +253,7 @@ Apply Kessler microphysics to the model. This function launches a GPU kernel
 that processes each column independently, with rain sedimentation subcycling.
 
 The kernel handles conversion between mass fractions (Breeze) and mixing ratios (Kessler)
-internally for efficiency.
+internally for efficiency. Water vapor is diagnosed from `qᵛ = qᵗ - qᶜˡ - qʳ`.
 """
 function microphysics_model_update!(::KM, model)
     grid = model.grid
@@ -267,6 +274,9 @@ function microphysics_model_update!(::KM, model)
     ρθ = model.formulation.thermodynamics.potential_temperature_density
     T  = model.temperature
 
+    # Total moisture density (prognostic variable of AtmosphereModel)
+    ρqᵗ = model.moisture_density
+
     # Microphysical fields
     μ = model.microphysical_fields
 
@@ -275,7 +285,7 @@ function microphysics_model_update!(::KM, model)
 
     launch!(arch, grid, :xy, _kessler_microphysical_update!,
             grid, Nz, Δt, ρᵣ, pᵣ, θ, ρθ, T,
-            μ.ρqᵛ, μ.ρqᶜˡ, μ.ρqʳ,
+            ρqᵗ, μ.ρqᶜˡ, μ.ρqʳ,
             μ.qᵛ, μ.qᶜˡ, μ.qʳ,
             precipitation_rate_data, μ.vᵗ_rain)
 
@@ -289,6 +299,7 @@ end
 # This kernel processes each (i,j) column independently. The algorithm:
 #
 # 1. INITIALIZATION: Convert mass fractions → mixing ratios for entire column
+#    - Diagnose qᵛ = qᵗ - qᶜˡ - qʳ from total moisture and condensates
 #    - Store mixing ratios temporarily in diagnostic fields (qᵛ_field, qᶜˡ_field, qʳ_field)
 #    - Compute terminal velocities and determine CFL-limited subcycle timestep
 #
@@ -303,11 +314,11 @@ end
 #    c. Recalculate terminal velocities for next subcycle
 #
 # 3. FINALIZATION: Convert mixing ratios → mass fractions for entire column
-#    - Write back to prognostic fields (ρqᵛ, ρqᶜˡ, ρqʳ)
+#    - Write back to prognostic fields (ρqᵗ, ρqᶜˡ, ρqʳ)
 #    - Update diagnostic fields with final mass fractions
 
 @kernel function _kessler_microphysical_update!(grid, Nz, Δt, ρᵣ, pᵣ, θ, ρθ, T,
-                                                 ρqᵛ, ρqᶜˡ, ρqʳ,
+                                                 ρqᵗ, ρqᶜˡ, ρqʳ,
                                                  qᵛ_field, qᶜˡ_field, qʳ_field,
                                                  precipitation_rate, vᵗ_rain)
     i, j = @index(Global, NTuple)
@@ -327,11 +338,15 @@ end
         @inbounds begin
             ρ = ρᵣ[k]
 
-            # Get mass fractions from prognostic fields
-            qᵛ  = ρqᵛ[i, j, k] / ρ
+            # Get total moisture from prognostic field
+            qᵗ = ρqᵗ[i, j, k] / ρ
+
+            # Get condensate mass fractions from prognostic microphysical fields
             qᶜˡ = ρqᶜˡ[i, j, k] / ρ
             qʳ  = ρqʳ[i, j, k] / ρ
-            qᵗ  = qᵛ + qᶜˡ + qʳ
+
+            # Diagnose water vapor: qᵛ = qᵗ - qᶜˡ - qʳ
+            qᵛ = qᵗ - qᶜˡ - qʳ
 
             # ===== CONVERSION: mass fraction → mixing ratio =====
             rʳ = mass_fraction_to_mixing_ratio(qʳ, qᵗ)
@@ -511,9 +526,12 @@ end
             qᵛ  = mixing_ratio_to_mass_fraction(rᵛ, rᵗ)
             qᶜˡ = mixing_ratio_to_mass_fraction(rᶜ, rᵗ)
             qʳ  = mixing_ratio_to_mass_fraction(rʳ, rᵗ)
+            qᵗ  = qᵛ + qᶜˡ + qʳ
 
             # Update prognostic fields (density-weighted mass fractions)
-            ρqᵛ[i, j, k]  = ρ * qᵛ
+            # Note: ρqᵗ is updated because microphysics can change total moisture
+            # (e.g., precipitation removes moisture from the column)
+            ρqᵗ[i, j, k]  = ρ * qᵗ
             ρqᶜˡ[i, j, k] = ρ * qᶜˡ
             ρqʳ[i, j, k]  = ρ * qʳ
 
@@ -533,14 +551,16 @@ end
     update_microphysical_fields!(μ, ::KesslerMicrophysics, i, j, k, grid, ρ, 𝒰, constants)
 
 Update diagnostic mass fraction fields from prognostic density-weighted fields.
+Water vapor is diagnosed as `qᵛ = qᵗ - qᶜˡ - qʳ`.
 This is called by the general `update_state!` machinery. The main microphysics
 updates are performed via `microphysics_model_update!` kernel.
 """
 @inline function update_microphysical_fields!(μ, ::KM, i, j, k, grid, ρ, 𝒰, constants)
+    qᵗ = total_specific_moisture(𝒰)
     @inbounds begin
-        μ.qᵛ[i, j, k]  = μ.ρqᵛ[i, j, k] / ρ
         μ.qᶜˡ[i, j, k] = μ.ρqᶜˡ[i, j, k] / ρ
         μ.qʳ[i, j, k]  = μ.ρqʳ[i, j, k] / ρ
+        μ.qᵛ[i, j, k]  = qᵗ - μ.qᶜˡ[i, j, k] - μ.qʳ[i, j, k]
     end
     return nothing
 end
