@@ -149,7 +149,6 @@ end
     @inbounds μ.qᵛ[i, j, k] = 𝒰.moisture_mass_fractions.vapor
     @inbounds μ.qˡ[i, j, k] = 𝒰.moisture_mass_fractions.liquid
     @inbounds μ.qⁱ[i, j, k] = 𝒰.moisture_mass_fractions.ice
-    @show 𝒰.moisture_mass_fractions
     return nothing
 end
 
