@@ -141,37 +141,35 @@ run!(simulation)
 times = θ′t.times
 Nt = length(times)
 
-# Plot the final potential temperature perturbation (compare to Figure 3b in
-# [SkamarockKlemp1994](@cite)):
+# Plot the final potential temperature perturbation (compare to Figure 3b by
+# [SkamarockKlemp1994](@citet)):
 
 θ′N = θ′t[Nt]
 
 fig = Figure(size=(800, 300))
 ax = Axis(fig[1, 1], xlabel = "x (m)", ylabel = "z (m)",
-          title = "Potential temperature perturbation θ′ at t = $(Int(times[end])) s")
+          title = "Potential temperature perturbation θ′ at t = $(prettytime(times[Nt]))")
 
 levels = range(-Δθ/2, stop=Δθ/2, length=20)
-hm = contourf!(ax, θ′N, colormap=:balance; levels)
-fig
+contourf!(ax, θ′N, colormap=:balance; levels)
 
-save("inertia_gravity_wave.png", fig)
-# ![](inertia_gravity_wave.png)
+fig
 
 # ## Animation of wave propagation
 #
 # The animation shows the evolution of the potential temperature perturbation as the
 # inertia-gravity waves propagate away from the initial disturbance:
 
+n = Observable(1)
+θ′n = @lift θ′t[$n]
+
 fig = Figure(size=(800, 300))
 ax = Axis(fig[1, 1], xlabel = "x (m)", ylabel = "z (m)")
-n = Observable(1)
 
-θ′n = @lift θ′t[$n]
 title = @lift "Potential temperature perturbation θ′ at t = $(prettytime(times[$n]))"
 fig[0, :] = Label(fig, title, fontsize=16, tellwidth=false)
 
-hm = heatmap!(ax, θ′n, colormap = :balance, colorrange = (-Δθ/2, Δθ/2))
-fig
+heatmap!(ax, θ′n, colormap = :balance, colorrange = (-Δθ/2, Δθ/2))
 
 record(fig, "inertia_gravity_wave.mp4", 1:Nt, framerate=8) do nn
     n[] = nn
