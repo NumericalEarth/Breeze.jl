@@ -1,7 +1,7 @@
 # # Inertia-gravity waves
 #
 # This example simulates the propagation of inertia-gravity waves in a stably stratified
-# atmosphere, following the classical benchmark test case described by [SkamarockKlemp1994](@cite).
+# atmosphere, following the classical benchmark test case described by [SkamarockKlemp1994](@citet).
 # This test evaluates the accuracy of numerical pressure solvers by introducing a small-amplitude
 # temperature perturbation into a stratified environment with constant Brunt-Väisälä frequency,
 # triggering propagating inertia-gravity waves.
@@ -129,7 +129,7 @@ run!(simulation)
 
 # ## Results: potential temperature perturbation
 #
-# Following [SkamarockKlemp1994](@citet),s we visualize the potential temperature perturbation
+# Following [SkamarockKlemp1994](@citet), we visualize the potential temperature perturbation
 # ``θ' = θ - θ^{\rm bg}``. The final state at ``t = 3000 \, {\rm s}`` can be compared
 # directly to Figure 3b in the paper by [SkamarockKlemp1994](@citet), which shows the analytic
 # solution for incompressible flow.
