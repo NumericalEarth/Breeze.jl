@@ -102,10 +102,6 @@ export
     ∂x, ∂y, ∂z, @at, KernelFunctionOperation,
     prettytime
 
-using Oceananigans.Grids: XDirection, YDirection
-
-export XDirection, YDirection
-
 include("Thermodynamics/Thermodynamics.jl")
 using .Thermodynamics
 
