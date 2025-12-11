@@ -18,7 +18,7 @@ using Oceananigans.Utils: launch!
 using Oceananigans.Operators: ℑzᵃᵃᶠ
 
 using Breeze: dry_air_gas_constant
-using Breeze.AtmosphereModels: ReferenceState
+using Breeze.Thermodynamics: ReferenceState
 using Breeze.Thermodynamics: adiabatic_hydrostatic_pressure
 
 import Breeze.AtmosphereModels: update_radiation!
