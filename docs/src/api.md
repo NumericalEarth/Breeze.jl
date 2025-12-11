@@ -56,6 +56,13 @@ Modules = [Breeze.Forcings]
 Private = false
 ```
 
+### BoundaryConditions
+
+```@autodocs
+Modules = [Breeze.BoundaryConditions]
+Private = false
+```
+
 ## Private API
 
 ```@autodocs
@@ -95,5 +102,12 @@ Public = false
 
 ```@autodocs
 Modules = [Breeze.Forcings]
+Public = false
+```
+
+### BoundaryConditions
+
+```@autodocs
+Modules = [Breeze.BoundaryConditions]
 Public = false
 ```

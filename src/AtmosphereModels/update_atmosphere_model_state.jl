@@ -27,8 +27,6 @@ end
 ##### Compute forcing-specific quantities (e.g., horizontal averages for subsidence)
 #####
 
-using ..Forcings: compute_forcing!
-
 """
     compute_forcings!(model)
 

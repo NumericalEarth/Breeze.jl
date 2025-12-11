@@ -89,142 +89,38 @@ scalar_advection = WENO(order=5)
 # creating a sharp SST front. This idealized pattern drives a strong circulation
 # with rising motion over the warm side and sinking motion over the cold side.
 
-using Breeze.Thermodynamics:
-    saturation_specific_humidity,
-    surface_density,
-    PlanarLiquidSurface
-
+# Sea surface temperature as a function of x
 ΔT = 2 # K
-ρ₀ = surface_density(p₀, θ₀, constants)
-surface = PlanarLiquidSurface()
+T₀(x) = θ₀ + ΔT * sign(cos(2π * x / grid.Lx))
 
-# Sea surface temperature field with two sharp gradients
-T₀_func(x) = θ₀ + ΔT * sign(cos(2π * x / grid.Lx))
-T₀ = Field{Center, Center, Nothing}(grid)
-set!(T₀, T₀_func)
+# We define the transfer coefficients and gustiness parameter.
+Cᴰ = 1e-3  # Drag coefficient
+Cᵀ = 1e-3  # Sensible heat transfer coefficient
+Cᵛ = 1e-3  # Vapor transfer coefficient
+Uᵍ = 1e-2  # Minimum wind speed (m/s)
 
-lines(T₀; axis = (xlabel = "SST (K)",))
-
-# Saturation specific humidity at sea surface (use function, not field)
-qᵛ₀_func(x) = saturation_specific_humidity(T₀_func(x), ρ₀, constants, surface)
-qᵛ₀ = Field{Center, Center, Nothing}(grid)
-set!(qᵛ₀, qᵛ₀_func)
-
-lines(qᵛ₀; axis = (xlabel = "qᵛ⁺ (kg/kg)",))
-
-# We gather few parameters in a named tuple
-
-parameters = (;
-    T₀, qᵛ₀, ρ₀,
-    drag_coefficient = 1e-3,
-    sensible_heat_transfer_coefficient = 1e-3,
-    vapor_transfer_coefficient = 1e-3,
-    gust_speed = 1e-2,  # Minimum wind speed (m/s)
-)
-
-# ## Boundary condition functions
+# ## Boundary conditions
 #
-# The boundary conditions compute surface fluxes using bulk aerodynamic formulas.
-# For potential temperature thermodynamics, we specify fluxes for the potential
-# temperature density θ and moisture density ρqᵗ.
-#
-# The flux formulas follow the standard bulk aerodynamic approach:
+# Breeze provides convenient abstractions for bulk aerodynamic surface fluxes.
+# The `BulkDrag`, `BulkSensibleHeatFlux`, and `BulkVaporFlux` boundary conditions
+# compute fluxes using bulk aerodynamic formulas:
 #
 # ```math
-# J_ψ = - ρ₀ C_ψ U (φₕ - φ₀)
+# Jᵘ = - Cᴰ |U| ρu, \quad Jᵀ = - ρ₀ Cᵀ |U| (θ - θ₀), \quad Jᵛ = - ρ₀ Cᵛ |U| (qᵗ - qᵛ₀)
 # ```
-# where ``φ`` represents potential temperature or specific humidity, ``Cᵩ`` is the
-# corresponding transfer coefficient, and ``U`` is the near-surface wind speed.
-# More on the bulk formulae could be found at the
-# [Interface fluxes section in ClimaOcean documentation](https://clima.github.io/ClimaOceanDocumentation/stable/interface_fluxes/).
+#
+# where ``|U|`` is the wind speed (including gustiness), ``Cᴰ, Cᵀ, Cᵛ`` are transfer
+# coefficients, and ``θ₀, qᵛ₀`` are the surface temperature and saturation specific humidity.
+#
+# The reference density ``ρ₀`` is automatically computed from the model's reference state,
+# and for `BulkVaporFlux`, the saturation specific humidity is computed from the surface
+# temperature if not provided explicitly. Surface temperature can be provided as a
+# `Field`, a `Function`, or a `Number`.
 
-# We need interpolation operators to compute wind speed at the appropriate
-# grid locations for each flux calculation.
-
-using Oceananigans.Operators: ℑxyᶠᶜᵃ, ℑxyᶜᶠᵃ, ℑxᶜᵃᵃ, ℑyᵃᶜᵃ
-
-@inline ϕ²(i, j, k, grid, ϕ) = @inbounds ϕ[i, j, k]^2
-
-@inline function s²ᶠᶜᶜ(i, j, grid, fields)
-    u² = @inbounds fields.u[i, j, 1]^2
-    v² = ℑxyᶠᶜᵃ(i, j, 1, grid, ϕ², fields.v)
-    return u² + v²
-end
-
-@inline function s²ᶜᶠᶜ(i, j, grid, fields)
-    u² = ℑxyᶜᶠᵃ(i, j, 1, grid, ϕ², fields.u)
-    v² = @inbounds fields.v[i, j, 1]^2
-    return u² + v²
-end
-
-@inline function s²ᶜᶜᶜ(i, j, grid, fields)
-    u² = ℑxᶜᵃᵃ(i, j, 1, grid, ϕ², fields.u)
-    v² = ℑyᵃᶜᵃ(i, j, 1, grid, ϕ², fields.v)
-    return u² + v²
-end
-
-# The momentum flux (surface stress) uses a quadratic drag law. The stress is
-# proportional to the square of the wind speed, directed opposite to the
-# near-surface velocity. A small "gust speed" prevents division by zero
-# when winds are calm.
-
-@inline function x_momentum_flux(i, j, grid, clock, fields, parameters)
-    ρu = @inbounds fields.ρu[i, j, 1]
-    U = sqrt(s²ᶠᶜᶜ(i, j, grid, fields))
-    Uᵍ = parameters.gust_speed
-    Ũ² = s²ᶠᶜᶜ(i, j, grid, fields) + Uᵍ^2
-    Cᴰ = parameters.drag_coefficient
-    return - Cᴰ * Ũ² * ρu / U * (U > 0)
-end
-
-@inline function y_momentum_flux(i, j, grid, clock, fields, parameters)
-    ρv = @inbounds fields.ρv[i, j, 1]
-    U = sqrt(s²ᶜᶠᶜ(i, j, grid, fields))
-    Uᵍ = parameters.gust_speed
-    Ũ² = s²ᶜᶠᶜ(i, j, grid, fields) + Uᵍ^2
-    Cᴰ = parameters.drag_coefficient
-    return - Cᴰ * Ũ² * ρv / U * (U > 0)
-end
-
-# The sensible heat flux transfers heat between the ocean surface and atmosphere.
-# At the surface, the potential temperature approximately equals the temperature
-# since the Exner function is close to unity at surface pressure.
-
-@inline function potential_temperature_flux(i, j, grid, clock, fields, parameters)
-    Δθ = @inbounds fields.θ[i, j, 1] - parameters.T₀[i, j, 1]
-
-    Cᵀ = parameters.sensible_heat_transfer_coefficient
-    Uᵍ = parameters.gust_speed
-    Ũ = sqrt(s²ᶜᶜᶜ(i, j, grid, fields) + Uᵍ^2)
-
-    ρ₀ = parameters.ρ₀
-    return - ρ₀ * Cᵀ * Ũ * Δθ
-end
-
-# The latent heat flux (moisture flux) transfers water vapor between the ocean
-# and atmosphere. The ocean surface is assumed to be saturated at the SST,
-# so the flux depends on the difference between the saturation specific humidity
-# at the surface and the actual specific humidity in the near-surface air.
-
-@inline function moisture_density_flux(i, j, grid, clock, fields, parameters)
-    Δq = @inbounds fields.qᵗ[i, j, 1] - parameters.qᵛ₀[i, j, 1]
-
-    Cᵛ = parameters.vapor_transfer_coefficient
-    Uᵍ = parameters.gust_speed
-    Ũ = sqrt(s²ᶜᶜᶜ(i, j, grid, fields) + Uᵍ^2)
-
-    ρ₀ = parameters.ρ₀
-    return - ρ₀ * Cᵛ * Ũ * Δq
-end
-
-# Assemble the boundary conditions for all prognostic variables.
-# Each flux boundary condition uses `discrete_form=true` to access the
-# grid indices directly, enabling efficient computation of spatially-varying fluxes.
-
-ρu_surface_flux = FluxBoundaryCondition(x_momentum_flux; discrete_form=true, parameters)
-ρv_surface_flux = FluxBoundaryCondition(y_momentum_flux; discrete_form=true, parameters)
-ρθ_surface_flux = FluxBoundaryCondition(potential_temperature_flux; discrete_form=true, parameters)
-ρqᵗ_surface_flux = FluxBoundaryCondition(moisture_density_flux; discrete_form=true, parameters)
+ρu_surface_flux = BulkDrag(coefficient = Cᴰ, gustiness = Uᵍ)
+ρv_surface_flux = BulkDrag(coefficient = Cᴰ, gustiness = Uᵍ)
+ρθ_surface_flux = BulkSensibleHeatFlux(coefficient = Cᵀ, gustiness = Uᵍ, surface_temperature = T₀)
+ρqᵗ_surface_flux = BulkVaporFlux(coefficient = Cᵛ, gustiness = Uᵍ, surface_temperature = T₀)
 
 ρu_bcs = FieldBoundaryConditions(bottom=ρu_surface_flux)
 ρv_bcs = FieldBoundaryConditions(bottom=ρv_surface_flux)
@@ -292,17 +188,15 @@ qᵗ = model.specific_moisture
 # Surface momentum flux
 τˣ = BoundaryConditionOperation(ρu, :bottom, model)
 
-# Sensible heat flux: 𝒬ᵀ = cᵖᵐ × Jᵀ
+# Sensible heat flux: 𝒬ᵀ = cᵖ × Jᵀ (using dry air heat capacity as approximation)
 ρθ = liquid_ice_potential_temperature_density(model)
-cᵖᵈ = constants.dry_air.heat_capacity
-cᵖᵛ = constants.vapor.heat_capacity
-cᵖᵐ = cᵖᵈ * (1 - qᵛ₀) + cᵖᵛ * qᵛ₀
+cᵖ = constants.dry_air.heat_capacity
 Jᵀ = BoundaryConditionOperation(ρθ, :bottom, model)
-𝒬ᵀ = cᵖᵐ * Jᵀ
+𝒬ᵀ = cᵖ * Jᵀ
 
-# Latent heat flux: 𝒬ᵛ = ℒˡ × Jᵛ
+# Latent heat flux: 𝒬ᵛ = ℒˡ × Jᵛ (using reference θ₀ for latent heat)
 ρqᵗ = model.moisture_density
-ℒˡ = Breeze.Thermodynamics.liquid_latent_heat(T₀, constants)
+ℒˡ = Breeze.Thermodynamics.liquid_latent_heat(θ₀, constants)
 Jᵛ = BoundaryConditionOperation(ρqᵗ, :bottom, model)
 𝒬ᵛ = ℒˡ * Jᵛ
 

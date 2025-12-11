@@ -1,5 +1,4 @@
 using ..Thermodynamics: Thermodynamics, ThermodynamicConstants, ReferenceState
-using ..Forcings: materialize_atmosphere_model_forcing
 
 using Oceananigans: AbstractModel, Center, CenterField, Clock, Field
 using Oceananigans: Centered, XFaceField, YFaceField, ZFaceField
@@ -136,12 +135,16 @@ function AtmosphereModel(grid;
     prognostic_names = prognostic_field_names(formulation, microphysics, tracers)
     default_boundary_conditions = NamedTuple{prognostic_names}(FieldBoundaryConditions() for _ in prognostic_names)
     boundary_conditions = merge(default_boundary_conditions, boundary_conditions)
+
+    # Pre-regularize AtmosphereModel boundary conditions (fill in reference_density, compute saturation humidity, etc.)
+    surface_pressure = formulation.reference_state.surface_pressure
+    boundary_conditions = regularize_atmosphere_model_boundary_conditions(boundary_conditions, grid, surface_pressure, thermodynamic_constants)
+
     all_names = field_names(formulation, microphysics, tracers)
     boundary_conditions = regularize_field_boundary_conditions(boundary_conditions, grid, all_names)
 
     # Materialize the full formulation with thermodynamic fields and pressure
     formulation = materialize_formulation(formulation, grid, boundary_conditions)
-
 
     velocities, momentum = materialize_momentum_and_velocities(formulation, grid, boundary_conditions)
     microphysical_fields = materialize_microphysical_fields(microphysics, grid, boundary_conditions)
