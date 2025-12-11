@@ -14,6 +14,10 @@
 #
 # Initial and boundary conditions for this case are provided by the wonderfully useful
 # package [AtmosphericProfilesLibrary.jl](https://github.com/CliMA/AtmosphericProfilesLibrary.jl).
+# For precipitation we use the 0-moment scheme from
+# [CloudMicrophysics.jl](https://github.com/CliMA/CloudMicrophysics.jl) which is certainly
+# the least interesting of the microphysics schemes that CloudMicrophysics provides.
+# (Support for CloudMicrophysics's 1 moment, 2 moment, and P3 are hopefully be coming soon!)
 
 using Breeze
 using Oceananigans: Oceananigans
@@ -155,16 +159,17 @@ set!(Fρe_field, z -> dTdt_rico(1, z))
 set!(Fρe_field, ρᵣ * cᵖᵈ * Fρe_field)
 ρe_radiation_forcing = Forcing(Fρe_field)
 
-# ## Assembling all the forcings
+# ## Assembling forcing and boundary conditions
 
-ρu_forcing = (subsidence, geostrophic.ρu)
-ρv_forcing = (subsidence, geostrophic.ρv)
-ρqᵗ_forcing = (ρqᵗ_drying_forcing, subsidence)
-ρθ_forcing = subsidence
-ρe_forcing = ρe_radiation_forcing
+Fρu = (subsidence, geostrophic.ρu)
+Fρv = (subsidence, geostrophic.ρv)
+Fρqᵗ = (subsidence, ρqᵗ_drying_forcing)
+Fρθ = subsidence
+Fρe = ρe_radiation_forcing
 
-forcing = (; ρu=ρu_forcing, ρv=ρv_forcing, ρθ=ρθ_forcing,
-             ρe=ρe_forcing, ρqᵗ=ρqᵗ_forcing)
+forcing = (ρu=Fρu, ρv=Fρv, ρθ=Fρθ, ρe=Fρe, ρqᵗ=Fρqᵗ)
+boundary_conditions = (ρθ=ρθ_bcs, ρqᵗ=ρqᵗ_bcs, ρu=ρu_bcs, ρv=ρv_bcs)
+             
 nothing #hide
 
 # ## Model setup
@@ -183,10 +188,10 @@ using .BreezeCloudMicrophysicsExt: ZeroMomentCloudMicrophysics
 
 nucleation = SaturationAdjustment(equilibrium=WarmPhaseEquilibrium())
 microphysics = ZeroMomentCloudMicrophysics(τ_precip=20minutes, qc_0=2e-4; nucleation)
-advection = WENO(order=5)
+advection = WENO(order=9)
 
-model = AtmosphereModel(grid; formulation, coriolis, microphysics, advection, forcing,
-                        boundary_conditions = (ρθ=ρθ_bcs, ρqᵗ=ρqᵗ_bcs, ρu=ρu_bcs, ρv=ρv_bcs))
+model = AtmosphereModel(grid; formulation, coriolis, microphysics,
+                        advection, forcing, boundary_conditions)
 
 # ## Initial conditions
 #
