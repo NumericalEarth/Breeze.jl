@@ -300,7 +300,8 @@ slice_outputs = (
     ∫P = ∫ᶻP,
 )
 
-simulation.output_writers[:slices] = JLD2Writer(model, slice_outputs;
+filename = "rico_slices.jld2"
+simulation.output_writers[:slices] = JLD2Writer(model, slice_outputs; filename,
                                                 schedule = TimeInterval(2minutes),
                                                 overwrite_existing = true)
 
