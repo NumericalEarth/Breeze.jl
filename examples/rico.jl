@@ -315,11 +315,12 @@ run!(simulation)
 #
 # We visualize the evolution of horizontally-averaged profiles every hour.
 
-θt = FieldTimeSeries(filename, "θ")
-qᵛt = FieldTimeSeries(filename, "qᵛ")
-qˡt = FieldTimeSeries(filename, "qˡ")
-ut = FieldTimeSeries(filename, "u")
-vt = FieldTimeSeries(filename, "v")
+averages_filename = "rico.jld2"
+θt = FieldTimeSeries(averages_filename, "θ")
+qᵛt = FieldTimeSeries(averages_filename, "qᵛ")
+qˡt = FieldTimeSeries(averages_filename, "qˡ")
+ut = FieldTimeSeries(averages_filename, "u")
+vt = FieldTimeSeries(averages_filename, "v")
 
 fig = Figure(size=(900, 800), fontsize=14)
 
