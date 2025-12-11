@@ -41,6 +41,7 @@ example_scripts = [
     "bomex.jl",
     "prescribed_sst.jl",
     "single_column_radiation.jl",
+    "inertia_gravity_wave.jl",
 ]
 
 literate_code(script_path, literated_dir) = """
@@ -72,6 +73,8 @@ example_pages = Any[
     "Shallow cumulus convection (BOMEX)" => "literated/bomex.md",
     "Prescribed SST convection" => "literated/prescribed_sst.md",
     "Single column gray radiation" => "literated/single_column_radiation.md",
+    "Prescribed SST" => "literated/prescribed_sst.md",
+    "Inertia gravity wave" => "literated/inertia_gravity_wave.md",
 ]
 
 makedocs(

@@ -31,7 +31,7 @@ u_bomex = AtmosphericProfilesLibrary.Bomex_u(FT)
 
 p₀, θ₀ = 101500, 299.1
 constants = ThermodynamicConstants()
-reference_state = ReferenceState(grid, constants, base_pressure=p₀, potential_temperature=θ₀)
+reference_state = ReferenceState(grid, constants, surface_pressure=p₀, potential_temperature=θ₀)
 formulation = AnelasticFormulation(reference_state, thermodynamics=:LiquidIcePotentialTemperature)
 
 q₀ = Breeze.Thermodynamics.MoistureMassFractions{eltype(grid)} |> zero

@@ -47,7 +47,7 @@ Lz = 4 * 1024
 grid = RectilinearGrid(size=(Nx, Nz), x=(0, 2Lz), z=(0, Lz), topology=(Periodic, Flat, Bounded))
 
 p₀, θ₀ = 1e5, 288 # reference state parameters
-reference_state = ReferenceState(grid, base_pressure=p₀, potential_temperature=θ₀)
+reference_state = ReferenceState(grid, surface_pressure=p₀, potential_temperature=θ₀)
 formulation = AnelasticFormulation(reference_state)
 
 Q₀ = 1000 # heat flux in W / m²
