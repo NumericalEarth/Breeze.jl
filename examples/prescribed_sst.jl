@@ -106,7 +106,7 @@ Uᵍ = 1e-2  # Minimum wind speed (m/s)
 # compute fluxes using bulk aerodynamic formulas:
 #
 # ```math
-# Jᵘ = - Cᴰ |U| ρu, \\quad Jᵀ = - ρ₀ Cᵀ |U| (θ - θ₀), \\quad Jᵛ = - ρ₀ Cᵛ |U| (qᵗ - qᵛ₀)
+# Jᵘ = - Cᴰ |U| ρu, \quad Jᵀ = - ρ₀ Cᵀ |U| (θ - θ₀), \quad Jᵛ = - ρ₀ Cᵛ |U| (qᵗ - qᵛ₀)
 # ```
 #
 # where ``|U|`` is the wind speed (including gustiness), ``Cᴰ, Cᵀ, Cᵛ`` are transfer
