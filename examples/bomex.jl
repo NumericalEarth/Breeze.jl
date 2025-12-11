@@ -406,12 +406,16 @@ qˡxy_ts = FieldTimeSeries("bomex_slices.jld2", "qˡxy")
 times = wxz_ts.times
 Nt = length(times)
 
+x = xnodes(grid, Center())
+z = znodes(grid, Center())
+
 # Create animation
-slices_fig = Figure(size=(1200, 1000), fontsize=14)
-axwxz = Axis(slices_fig[1, 2], aspect=2, xlabel="x (m)", ylabel="z (m)", title="Vertical velocity w")
-axqxz = Axis(slices_fig[1, 3], aspect=2, xlabel="x (m)", ylabel="z (m)", title="Liquid water qˡ")
-axwxy = Axis(slices_fig[2, 2], aspect=1,  xlabel="x (m)", ylabel="y (m)")
-axqxy = Axis(slices_fig[2, 3], aspect=1, xlabel="x (m)", ylabel="y (m)")
+fig = Figure(size=(900, 750), fontsize=14)
+
+axwxz = Axis(fig[1, 2], aspect=2, xlabel="x (m)", ylabel="z (m)", title="Vertical velocity w")
+axqxz = Axis(fig[1, 3], aspect=2, xlabel="x (m)", ylabel="z (m)", title="Liquid water qˡ")
+axwxy = Axis(fig[2, 2], aspect=1, xlabel="x (m)", ylabel="y (m)", title="@ z = $(z[k]) m")
+axqxy = Axis(fig[2, 3], aspect=1, xlabel="x (m)", ylabel="y (m)", title="@ z = $(z[k]) m")
 
 # Determine color limits from the data
 wmax = maximum(abs, wxz_ts)
@@ -425,21 +429,24 @@ qˡxy_n = @lift qˡxy_ts[$n]
 title_text = @lift "BOMEX slices at t = " * prettytime(times[$n])
 
 hmw = heatmap!(axwxz, wxz_n, colormap=:balance, colorrange=(-wmax, wmax))
-hmq = heatmap!(axqxz, qˡxz_n, colormap=:dense, colorrange=(0, qˡmax))
+hmq = heatmap!(axqxz, qˡxz_n, colormap=Reverse(:Blues_4), colorrange=(0, qˡmax))
 hmw = heatmap!(axwxy, wxy_n, colormap=:balance, colorrange=(-wmax, wmax))
-hmq = heatmap!(axqxy, qˡxy_n, colormap=:dense, colorrange=(0, qˡmax))
+hmq = heatmap!(axqxy, qˡxy_n, colormap=Reverse(:Blues_4), colorrange=(0, qˡmax))
 
-Colorbar(slices_fig[1:2, 1], hmw, label="w (m/s)", flipaxis=false)
-Colorbar(slices_fig[1:2, 4], hmq, label="qˡ (kg/kg)")
+for ax in (axwxz, axqxz)
+    lines!(ax, x, fill(z[k], length(x)), color=:grey, linestyle=:dash)
+end
 
-slices_fig[0, :] = Label(slices_fig, title_text, fontsize=18, tellwidth=false)
+Colorbar(fig[1:2, 1], hmw, label="w (m/s)", tellheight = false, height = Relative(0.5), flipaxis=false)
+Colorbar(fig[1:2, 4], hmq, label="qˡ (kg/kg)", tellheight = false, height = Relative(0.5))
+
+fig[0, :] = Label(fig, title_text, fontsize=18, tellwidth=false)
 
 # Record animation
 N2 = ceil(Int, Nt/3)
-CairoMakie.record(slices_fig, "bomex_slices.mp4", 1:N2, framerate=12) do nn
+CairoMakie.record(fig, "bomex_slices.mp4", 1:N2, framerate=12) do nn
     n[] = nn
 end
 nothing #hide
 
 # ![](bomex_slices.mp4)
- 
