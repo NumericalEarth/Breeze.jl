@@ -50,7 +50,7 @@ increment_tolerance(::Type{Float64}) = 1e-10
 
         c_forcing = (; ρc=forcing)
         model = setup_forcing_model(grid, c_forcing)
- ds       time_step!(model, Δt)
+        time_step!(model, Δt)
         @test maximum(model.tracers.ρc) ≈ Δt
     end
 
@@ -71,9 +71,9 @@ end
 
 @testset "Bulk boundary conditions [$FT]" for FT in (Float32, Float64)
     grid = RectilinearGrid(default_arch, FT; size=(4, 4, 4), x=(0, 100), y=(0, 100), z=(0, 100))
-    Cᴰ = 1e-3
-    gustiness = 0.1
-    T₀ = 290
+    const Cᴰ = 1e-3
+    const gustiness = 0.1
+    const T₀ = 290
 
     @testset "BulkDrag construction and application [$FT]" begin
         # Test construction with default parameters
