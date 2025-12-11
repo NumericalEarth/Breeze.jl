@@ -6,25 +6,50 @@ are based on Oceananigans.
 module Breeze
 
 export
+    # AtmosphereModel
     MoistAirBuoyancy,
     ThermodynamicConstants,
     ReferenceState,
     AnelasticFormulation,
     AtmosphereModel,
-    PotentialTemperature,
-    PotentialTemperatureField,
+    StaticEnergyThermodynamics,
+    LiquidIcePotentialTemperatureThermodynamics,
     TemperatureField,
     IdealGas,
     CondensedPhase,
     mixture_gas_constant,
     mixture_heat_capacity,
+
+    # Diagnostics
+    PotentialTemperature,
+    VirtualPotentialTemperature,
+    EquivalentPotentialTemperature,
+    StabilityEquivalentPotentialTemperature,
+    LiquidIcePotentialTemperature,
+    StaticEnergy,
+    static_energy_density,
+    static_energy,
+    total_energy,
+    liquid_ice_potential_temperature_density,
+    liquid_ice_potential_temperature,
+
+    # Microphysics
     SaturationAdjustment,
     MixedPhaseEquilibrium,
     WarmPhaseEquilibrium,
+    SaturationSpecificHumidity,
+    SaturationSpecificHumidityField,
     BulkMicrophysics,
-    energy_density,
-    specific_energy,
-    compute_hydrostatic_pressure!
+    compute_hydrostatic_pressure!,
+
+    # BoundaryConditions
+    BulkDrag,
+    BulkSensibleHeatFlux,
+    BulkVaporFlux,
+
+    # Forcing utilities
+    geostrophic_forcings,
+    SubsidenceForcing
 
 using Oceananigans: Oceananigans, @at, AnisotropicMinimumDissipation, Average,
                     AveragedTimeInterval, BackgroundField, BetaPlane, Bounded,
@@ -95,5 +120,11 @@ using .TurbulenceClosures
 
 include("Advection.jl")
 using .Advection
+
+include("BoundaryConditions/BoundaryConditions.jl")
+using .BoundaryConditions
+
+include("Forcings/Forcings.jl")
+using .Forcings
 
 end # module Breeze

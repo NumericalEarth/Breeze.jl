@@ -34,8 +34,7 @@ function OceanTurbulenceClosures.buoyancy_tracers(model::AtmosphereModel)
     # Diagnostic fields for buoyancy gradient calculation
     buoyancy_tracers = (; T = model.temperature, qᵗ = model.specific_moisture)
     # Prognostic tracer fields for diffusivity computation
-    energy_density = model.formulation.thermodynamics.energy_density
-    prognostic_tracers = (; ρe = energy_density, ρqᵗ = model.moisture_density)
+    prognostic_tracers = merge(prognostic_fields(model.formulation), (; ρqᵗ = model.moisture_density))
     # Merge with user tracers
     all_prognostic = merge(prognostic_tracers, model.tracers)
     # Final merge - buoyancy tracers at end for named access in ∂z_b
@@ -51,7 +50,7 @@ end
 
 @inline function virtual_potential_temperature(i, j, k, grid, constants, formulation, T, qᵗ)
     pᵣ = @inbounds formulation.reference_state.pressure[i, j, k]
-    p₀ = formulation.reference_state.base_pressure
+    p₀ = formulation.reference_state.surface_pressure
     q = @inbounds MoistureMassFractions(qᵗ[i, j, k])
     Rᵐ = mixture_gas_constant(q, constants)
     Rᵈ = dry_air_gas_constant(constants)

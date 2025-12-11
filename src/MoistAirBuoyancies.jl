@@ -7,7 +7,7 @@ export
     SaturationField
 
 using ..Thermodynamics:
-    PotentialTemperatureState,
+    LiquidIcePotentialTemperatureState,
     MoistureMassFractions,
     total_specific_moisture,
     dry_air_gas_constant,
@@ -90,12 +90,12 @@ NonhydrostaticModel{CPU, RectilinearGrid}(time = 0 seconds, iteration = 0)
 ```
 """
 function MoistAirBuoyancy(grid;
-                          base_pressure = 101325,
+                          surface_pressure = 101325,
                           reference_potential_temperature = 288,
                           thermodynamic_constants = ThermodynamicConstants(eltype(grid)))
 
     reference_state = ReferenceState(grid, thermodynamic_constants;
-                                     base_pressure,
+                                     surface_pressure,
                                      potential_temperature = reference_potential_temperature)
 
     return MoistAirBuoyancy(reference_state, thermodynamic_constants)
@@ -122,9 +122,9 @@ const c = Center()
     end
 
     z = Oceananigans.Grids.znode(i, j, k, grid, c, c, c)
-    p₀ = mb.reference_state.base_pressure
+    p₀ = mb.reference_state.surface_pressure
     q = MoistureMassFractions(qᵗ)
-    𝒰 = PotentialTemperatureState(θ, q, p₀, pᵣ)
+    𝒰 = LiquidIcePotentialTemperatureState(θ, q, p₀, pᵣ)
 
     # Perform saturation adjustment
     T = compute_boussinesq_adjustment_temperature(𝒰, mb.thermodynamic_constants)
@@ -177,7 +177,7 @@ r(T) ≡ T - θ Π - ℒˡᵣ qˡ / cᵖᵐ .
 
 Solution of ``r(T) = 0`` is found via the [secant method](https://en.wikipedia.org/wiki/Secant_method).
 """
-@inline function compute_boussinesq_adjustment_temperature(𝒰₀::PotentialTemperatureState{FT}, constants) where FT
+@inline function compute_boussinesq_adjustment_temperature(𝒰₀::LiquidIcePotentialTemperatureState{FT}, constants) where FT
     θ = 𝒰₀.potential_temperature
     θ == 0 && return zero(FT)
 
@@ -198,7 +198,7 @@ Solution of ``r(T) = 0`` is found via the [secant method](https://en.wikipedia.o
     # has to be modified to consistently include the liquid mass fraction.
     # Subsequent computations will assume that the specific humidity
     # is given by the saturation specific humidity, eg ``qᵛ = qᵛ⁺``.
-    qᵛ⁺₁ = adjustment_saturation_specific_humidity(T₁, 𝒰₁, constants)
+    qᵛ⁺₁ = equilibrium_saturation_specific_humidity(T₁, 𝒰₁, constants)
     qˡ₁ = qᵗ - qᵛ⁺₁
     q₁ = MoistureMassFractions(qᵛ⁺₁, qˡ₁)
     𝒰₁ = with_moisture(𝒰₀, q₁)
@@ -246,7 +246,7 @@ end
 # This consideration culminates in a new expression for saturation specific humidity
 # used below, and also written in Pressel et al 2015, equation 37.
 # (There is an error in the description below it, but the equation 37 is correct.)
-@inline function adjustment_saturation_specific_humidity(T, 𝒰, constants)
+@inline function equilibrium_saturation_specific_humidity(T, 𝒰, constants)
     pᵛ⁺ = saturation_vapor_pressure(T, constants, constants.liquid)
     pᵣ = 𝒰.reference_pressure
     qᵗ = total_specific_moisture(𝒰)
@@ -257,7 +257,7 @@ end
 end
 
 @inline function adjust_state(𝒰₀, T, constants)
-    qᵛ⁺ = adjustment_saturation_specific_humidity(T, 𝒰₀, constants)
+    qᵛ⁺ = equilibrium_saturation_specific_humidity(T, 𝒰₀, constants)
     qᵗ = total_specific_moisture(𝒰₀)
     qˡ = max(0, qᵗ - qᵛ⁺)
     qᵛ = qᵗ - qˡ
@@ -291,9 +291,9 @@ const c = Center()
         ρᵣ = mb.reference_state.density[i, j, k]
     end
     z = Oceananigans.Grids.znode(i, j, k, grid, c, c, c)
-    p₀ = mb.reference_state.base_pressure
+    p₀ = mb.reference_state.surface_pressure
     q = MoistureMassFractions(qᵗᵢ)
-    𝒰 = PotentialTemperatureState(θᵢ, q, p₀, pᵣ)
+    𝒰 = LiquidIcePotentialTemperatureState(θᵢ, q, p₀, pᵣ)
     return compute_boussinesq_adjustment_temperature(𝒰, mb.thermodynamic_constants)
 end
 
@@ -368,14 +368,14 @@ Adapt.adapt_structure(to, ck::CondensateKernel) = CondensateKernel(adapt(to, ck.
 
     # First assume non-saturation.
     z = Oceananigans.Grids.znode(i, j, k, grid, c, c, c)
-    p₀ = mb.reference_state.base_pressure
+    p₀ = mb.reference_state.surface_pressure
     q = MoistureMassFractions(qᵗᵢ)
-    𝒰 = PotentialTemperatureState(Tᵢ, q, p₀, pᵣ)
+    𝒰 = LiquidIcePotentialTemperatureState(Tᵢ, q, p₀, pᵣ)
     Π = exner_function(𝒰, mb.thermodynamic_constants)
     Tᵢ <= Π * θᵢ + 10 * eps(Tᵢ) && return zero(qᵗᵢ)
 
     # Next assume a saturation value
-    qᵛ⁺ = adjustment_saturation_specific_humidity(Tᵢ, 𝒰, mb.thermodynamic_constants)
+    qᵛ⁺ = equilibrium_saturation_specific_humidity(Tᵢ, 𝒰, mb.thermodynamic_constants)
     return max(0, qᵗᵢ - qᵛ⁺)
 end
 

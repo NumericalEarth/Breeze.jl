@@ -176,7 +176,7 @@ end
     return saturation_specific_humidity(T, ρ, constants, surface)
 end
 
-@inline function adjustment_saturation_specific_humidity(T, pᵣ, qᵗ, constants, equil)
+@inline function equilibrium_saturation_specific_humidity(T, pᵣ, qᵗ, constants, equil)
     surface = equilibrated_surface(equil, T)
     pᵛ⁺ = saturation_vapor_pressure(T, constants, surface)
     Rᵈ = dry_air_gas_constant(constants)
@@ -188,7 +188,7 @@ end
 @inline function adjust_state(𝒰₀, T, constants, equilibrium)
     pᵣ = 𝒰₀.reference_pressure
     qᵗ = total_specific_moisture(𝒰₀)
-    qᵛ⁺ = adjustment_saturation_specific_humidity(T, pᵣ, qᵗ, constants, equilibrium)
+    qᵛ⁺ = equilibrium_saturation_specific_humidity(T, pᵣ, qᵗ, constants, equilibrium)
     q₁ = equilibrated_moisture_mass_fractions(T, qᵗ, qᵛ⁺, equilibrium)
     return with_moisture(𝒰₀, q₁)
 end

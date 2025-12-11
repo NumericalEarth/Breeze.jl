@@ -260,7 +260,7 @@ the "[dry adiabatic lapse rate](https://en.wikipedia.org/wiki/Lapse_rate)".
 ### An example of a dry reference state in Breeze
 
 We can visualise a hydrostatic reference profile evaluating Breeze's reference-state
-utilities (which assume a dry reference state) on a one-dimensional `RectilinearGrid`.
+utilities (which assume a dry reference state) on a one-dimensional [`RectilinearGrid`](https://clima.github.io/OceananigansDocumentation/stable/appendix/library/#Oceananigans.Grids.RectilinearGrid).
 In the following code, the superscript ``d`` denotes dry air, e.g., an ideal gas
 with ``Rᵈ = 286.71 \; \mathrm{J} \, \mathrm{K}^{-1}``:
 
@@ -270,14 +270,14 @@ using CairoMakie
 
 grid = RectilinearGrid(size=160, z=(0, 12_000), topology=(Flat, Flat, Bounded))
 thermo = ThermodynamicConstants()
-reference_state = ReferenceState(grid, thermo, base_pressure=101325, potential_temperature=288)
+reference_state = ReferenceState(grid, thermo, surface_pressure=101325, potential_temperature=288)
 
 pᵣ = reference_state.pressure
 ρᵣ = reference_state.density
 
 Rᵈ = Breeze.Thermodynamics.dry_air_gas_constant(thermo)
 cᵖᵈ = thermo.dry_air.heat_capacity
-p₀ = reference_state.base_pressure
+p₀ = reference_state.surface_pressure
 θ₀ = reference_state.potential_temperature
 g = thermo.gravitational_acceleration
 
@@ -425,7 +425,7 @@ temperature ``T_r`` that is well above absolute zero. In that case,
 the latent heat is written
 
 ```math
-ℒ^β(T) = ℒ^β_r + \Delta c^β (T - T_r), \qquad \text{and} \qquad
+ℒ^β(T) = ℒ^β_r + \Delta c^β (T - T_r) \qquad \text{and} \qquad
 ℒ^β_0 = ℒ^β_r - \Delta c^β T_r ,
 ```
 
