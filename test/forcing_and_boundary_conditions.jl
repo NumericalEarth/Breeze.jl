@@ -50,7 +50,7 @@ increment_tolerance(::Type{Float64}) = 1e-10
 
         c_forcing = (; ρc=forcing)
         model = setup_forcing_model(grid, c_forcing)
- ds       time_step!(model, Δt)
+        time_step!(model, Δt)
         @test maximum(model.tracers.ρc) ≈ Δt
     end
 
