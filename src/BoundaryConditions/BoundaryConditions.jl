@@ -91,9 +91,9 @@ where `Cᴰ` is the drag coefficient, `|U| = √(u² + v² + gustiness²)` is th
 # Keyword Arguments
 
 - `direction`: The direction of the momentum component (`XDirection()` or `YDirection()`).
-              If `nothing`, the direction is inferred from the field location during
-              boundary condition regularization.
-- `coefficient`: The drag coefficient (default: `1e-3`)
+               If `nothing`, the direction is inferred from the field location during
+               boundary condition regularization.
+- `coefficient`: The drag coefficient (default: `1e-3`).
 - `gustiness`: Minimum wind speed to prevent singularities when winds are calm (default: `0`)
 """
 function BulkDragFunction(; direction=nothing, coefficient=1e-3, gustiness=0)
@@ -167,8 +167,8 @@ potential temperature at the surface, and `θ₀` is the surface temperature.
 
 # Keyword Arguments
 
-- `coefficient`: The sensible heat transfer coefficient
-- `gustiness`: Minimum wind speed to prevent singularities (default: `0`)
+- `coefficient`: The sensible heat transfer coefficient.
+- `gustiness`: Minimum wind speed to prevent singularities (default: `0`).
 - `surface_temperature`: The surface temperature. Can be a `Field`, a `Function`, or a `Number`.
                          Functions are converted to Fields during model construction.
 """
@@ -204,7 +204,7 @@ Base.summary(bf::BulkSensibleHeatFluxFunction) =
 
     U² = wind_speed²ᶜᶜᶜ(i, j, grid, fields)
     Ũ = sqrt(U² + bf.gustiness^2)
-    
+
     constants = bf.thermodynamic_constants
     p₀ = bf.formulation.reference_state.surface_pressure
     ρ₀ = surface_density(p₀, T₀, constants)
@@ -241,8 +241,8 @@ specific humidity, and `qᵛ₀` is the saturation specific humidity at the surf
 
 # Keyword Arguments
 
-- `coefficient`: The vapor transfer coefficient
-- `gustiness`: Minimum wind speed to prevent singularities (default: `0`)
+- `coefficient`: The vapor transfer coefficient.
+- `gustiness`: Minimum wind speed to prevent singularities (default: `0`).
 - `surface_temperature`: The surface temperature. Can be a `Field`, a `Function`, or a `Number`.
                          Used to compute saturation specific humidity at the surface.
 """
@@ -284,7 +284,7 @@ const BVFF = BulkVaporFluxFunction
 
     qᵗ = @inbounds fields.qᵗ[i, j, 1]
     Δq = qᵗ - qᵛ₀ # neglecting condensate
-    
+
     U² = wind_speed²ᶜᶜᶜ(i, j, grid, fields)
     Ũ = sqrt(U² + bf.gustiness^2)
 
@@ -344,7 +344,7 @@ Oceananigans.FieldBoundaryConditions, with boundary conditions
 └── immersed: DefaultBoundaryCondition (FluxBoundaryCondition: Nothing)
 ```
 
-and similartly for `YDirection` for v.
+and similarly for `YDirection` for v.
 """
 function BulkDrag(; kwargs...)
     df = BulkDragFunction(; kwargs...)
@@ -445,7 +445,7 @@ function regularize_atmosphere_field_bcs(fbcs::FieldBoundaryConditions, loc, gri
     bottom   = regularize_atmosphere_boundary_condition(fbcs.bottom, loc, grid, formulation, constants)
     top      = regularize_atmosphere_boundary_condition(fbcs.top, loc, grid, formulation, constants)
     immersed = regularize_atmosphere_boundary_condition(fbcs.immersed, loc, grid, formulation, constants)
-    
+
     return FieldBoundaryConditions(; west, east, south, north, bottom, top, immersed)
 end
 
@@ -457,7 +457,7 @@ function regularize_atmosphere_boundary_condition(bc::BoundaryCondition{<:Flux, 
                                                   loc, grid, formulation, constants)
     df = bc.condition
     LX, LY, LZ = loc
-    
+
     # Determine direction from location: Face in x means x-momentum, Face in y means y-momentum
     if LX isa Face
         direction = XDirection()
@@ -466,7 +466,7 @@ function regularize_atmosphere_boundary_condition(bc::BoundaryCondition{<:Flux, 
     else
         throw(ArgumentError("Can only specify BulkDrag on x-momentum or y-momentum fields!"))
     end
-    
+
     regularized_df = BulkDragFunction(direction, df.coefficient, df.gustiness)
     return BoundaryCondition(Flux(), regularized_df)
 end
