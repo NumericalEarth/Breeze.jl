@@ -144,11 +144,11 @@ end
 ##### BulkSensibleHeatFluxFunction for temperature/potential temperature fluxes
 #####
 
-struct BulkSensibleHeatFluxFunction{C, G, T, F, TC}
+struct BulkSensibleHeatFluxFunction{C, G, T, P, TC}
     coefficient :: C
     gustiness :: G
     surface_temperature :: T
-    formulation :: F
+    surface_pressure :: P
     thermodynamic_constants :: TC
 end
 
@@ -181,14 +181,14 @@ Adapt.adapt_structure(to, bf::BulkSensibleHeatFluxFunction) =
     BulkSensibleHeatFluxFunction(Adapt.adapt(to, bf.coefficient),
                                  Adapt.adapt(to, bf.gustiness),
                                  Adapt.adapt(to, bf.surface_temperature),
-                                 Adapt.adapt(to, bf.formulation),
+                                 Adapt.adapt(to, bf.surface_pressure),
                                  Adapt.adapt(to, bf.thermodynamic_constants))
 
 on_architecture(to, bf::BulkSensibleHeatFluxFunction) =
     BulkSensibleHeatFluxFunction(on_architecture(to, bf.coefficient),
                                  on_architecture(to, bf.gustiness),
                                  on_architecture(to, bf.surface_temperature),
-                                 on_architecture(to, bf.formulation),
+                                 on_architecture(to, bf.surface_pressure),
                                  on_architecture(to, bf.thermodynamic_constants))
 
 Base.summary(bf::BulkSensibleHeatFluxFunction) =
@@ -206,7 +206,7 @@ Base.summary(bf::BulkSensibleHeatFluxFunction) =
     Ũ = sqrt(U² + bf.gustiness^2)
     
     constants = bf.thermodynamic_constants
-    p₀ = bf.formulation.reference_state.surface_pressure
+    p₀ = bf.surface_pressure
     ρ₀ = surface_density(p₀, T₀, constants)
 
     Cᵀ = bf.coefficient
@@ -221,7 +221,7 @@ struct BulkVaporFluxFunction{C, G, T, F, TC, S}
     coefficient :: C
     gustiness :: G
     surface_temperature :: T
-    formulation :: F
+    surface_pressure :: F
     thermodynamic_constants :: TC
     surface :: S
 end
@@ -255,7 +255,7 @@ Adapt.adapt_structure(to, bf::BulkVaporFluxFunction) =
     BulkVaporFluxFunction(Adapt.adapt(to, bf.coefficient),
                           Adapt.adapt(to, bf.gustiness),
                           Adapt.adapt(to, bf.surface_temperature),
-                          Adapt.adapt(to, bf.formulation),
+                          Adapt.adapt(to, bf.surface_pressure),
                           Adapt.adapt(to, bf.thermodynamic_constants),
                           Adapt.adapt(to, bf.surface))
 
@@ -263,7 +263,7 @@ on_architecture(to, bf::BulkVaporFluxFunction) =
     BulkVaporFluxFunction(on_architecture(to, bf.coefficient),
                           on_architecture(to, bf.gustiness),
                           on_architecture(to, bf.surface_temperature),
-                          on_architecture(to, bf.formulation),
+                          on_architecture(to, bf.surface_pressure),
                           on_architecture(to, bf.thermodynamic_constants),
                           on_architecture(to, bf.surface))
 
@@ -278,7 +278,7 @@ const BVFF = BulkVaporFluxFunction
     constants = bf.thermodynamic_constants
     surface = bf.surface
     T₀ = surface_value(bf.surface_temperature, i, j)
-    p₀ = bf.formulation.reference_state.surface_pressure
+    p₀ = bf.surface_pressure
     ρ₀ = surface_density(p₀, T₀, constants)
     qᵛ₀ = saturation_specific_humidity(T₀, ρ₀, constants, surface)
 
@@ -417,44 +417,44 @@ field_location(::Val{:ρw}) = (Center(), Center(), Face())
 field_location(::Val) = (Center(), Center(), Center())  # default for scalars
 
 """
-    regularize_atmosphere_model_boundary_conditions(boundary_conditions, grid, formulation, thermodynamic_constants)
+    regularize_atmosphere_model_boundary_conditions(boundary_conditions, grid, surface_pressure, thermodynamic_constants)
 
 Regularize boundary conditions for `AtmosphereModel`. This function walks through
 all boundary conditions and calls `regularize_atmosphere_boundary_condition` on each one,
 allowing specialized handling for bulk flux boundary conditions and other atmosphere-specific
 boundary condition types.
 """
-function regularize_atmosphere_model_boundary_conditions(boundary_conditions, grid, formulation, thermodynamic_constants)
+function regularize_atmosphere_model_boundary_conditions(boundary_conditions, grid, surface_pressure, thermodynamic_constants)
     regularized = Dict{Symbol, Any}()
     for (name, fbcs) in pairs(boundary_conditions)
         loc = field_location(Val(name))
-        regularized[name] = regularize_atmosphere_field_bcs(fbcs, loc, grid, formulation, thermodynamic_constants)
+        regularized[name] = regularize_atmosphere_field_bcs(fbcs, loc, grid, surface_pressure, thermodynamic_constants)
     end
     return NamedTuple(regularized)
 end
 
 # Pass through non-FieldBoundaryConditions
-regularize_atmosphere_field_bcs(fbcs, loc, grid, formulation, constants) = fbcs
+regularize_atmosphere_field_bcs(fbcs, loc, grid, surface_pressure, constants) = fbcs
 
 # Regularize FieldBoundaryConditions by walking through each boundary
-function regularize_atmosphere_field_bcs(fbcs::FieldBoundaryConditions, loc, grid, formulation, constants)
-    west     = regularize_atmosphere_boundary_condition(fbcs.west, loc, grid, formulation, constants)
-    east     = regularize_atmosphere_boundary_condition(fbcs.east, loc, grid, formulation, constants)
-    south    = regularize_atmosphere_boundary_condition(fbcs.south, loc, grid, formulation, constants)
-    north    = regularize_atmosphere_boundary_condition(fbcs.north, loc, grid, formulation, constants)
-    bottom   = regularize_atmosphere_boundary_condition(fbcs.bottom, loc, grid, formulation, constants)
-    top      = regularize_atmosphere_boundary_condition(fbcs.top, loc, grid, formulation, constants)
-    immersed = regularize_atmosphere_boundary_condition(fbcs.immersed, loc, grid, formulation, constants)
+function regularize_atmosphere_field_bcs(fbcs::FieldBoundaryConditions, loc, grid, surface_pressure, constants)
+    west     = regularize_atmosphere_boundary_condition(fbcs.west, loc, grid, surface_pressure, constants)
+    east     = regularize_atmosphere_boundary_condition(fbcs.east, loc, grid, surface_pressure, constants)
+    south    = regularize_atmosphere_boundary_condition(fbcs.south, loc, grid, surface_pressure, constants)
+    north    = regularize_atmosphere_boundary_condition(fbcs.north, loc, grid, surface_pressure, constants)
+    bottom   = regularize_atmosphere_boundary_condition(fbcs.bottom, loc, grid, surface_pressure, constants)
+    top      = regularize_atmosphere_boundary_condition(fbcs.top, loc, grid, surface_pressure, constants)
+    immersed = regularize_atmosphere_boundary_condition(fbcs.immersed, loc, grid, surface_pressure, constants)
     
     return FieldBoundaryConditions(; west, east, south, north, bottom, top, immersed)
 end
 
 # Default: pass through unchanged
-regularize_atmosphere_boundary_condition(bc, loc, grid, formulation, constants) = bc
+regularize_atmosphere_boundary_condition(bc, loc, grid, surface_pressure, constants) = bc
 
 # Regularize BulkDrag: infer direction from field location if needed
 function regularize_atmosphere_boundary_condition(bc::BoundaryCondition{<:Flux, <:BulkDragFunction{Nothing}},
-                                                  loc, grid, formulation, constants)
+                                                  loc, grid, surface_pressure, constants)
     df = bc.condition
     LX, LY, LZ = loc
     
@@ -473,26 +473,26 @@ end
 
 # BulkDrag with direction already set: pass through
 regularize_atmosphere_boundary_condition(bc::BoundaryCondition{<:Flux, <:XDirectionBulkDragFunction},
-                                         loc, grid, formulation, constants) = bc
+                                         loc, grid, surface_pressure, constants) = bc
 regularize_atmosphere_boundary_condition(bc::BoundaryCondition{<:Flux, <:YDirectionBulkDragFunction},
-                                         loc, grid, formulation, constants) = bc
+                                         loc, grid, surface_pressure, constants) = bc
 
-# Regularize BulkSensibleHeatFlux: populate formulation and thermodynamic_constants
+# Regularize BulkSensibleHeatFlux: populate surface_pressure and thermodynamic_constants
 function regularize_atmosphere_boundary_condition(bc::BulkSensibleHeatFluxBoundaryCondition,
-                                                  loc, grid, formulation, constants)
+                                                  loc, grid, surface_pressure, constants)
     bf = bc.condition
     T₀ = materialize_surface_field(bf.surface_temperature, grid)
-    new_bf = BulkSensibleHeatFluxFunction(bf.coefficient, bf.gustiness, T₀, formulation, constants)
+    new_bf = BulkSensibleHeatFluxFunction(bf.coefficient, bf.gustiness, T₀, surface_pressure, constants)
     return BoundaryCondition(Flux(), new_bf)
 end
 
-# Regularize BulkVaporFlux: populate formulation, thermodynamic_constants, and surface
+# Regularize BulkVaporFlux: populate surface_pressure, thermodynamic_constants, and surface
 function regularize_atmosphere_boundary_condition(bc::BulkVaporFluxBoundaryCondition,
-                                                  loc, grid, formulation, constants)
+                                                  loc, grid, surface_pressure, constants)
     bf = bc.condition
     T₀ = materialize_surface_field(bf.surface_temperature, grid)
     surface = PlanarLiquidSurface()
-    new_bf = BulkVaporFluxFunction(bf.coefficient, bf.gustiness, T₀, formulation, constants, surface)
+    new_bf = BulkVaporFluxFunction(bf.coefficient, bf.gustiness, T₀, surface_pressure, constants, surface)
     return BoundaryCondition(Flux(), new_bf)
 end
 
