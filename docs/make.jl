@@ -34,13 +34,13 @@ import Pkg
 Pkg.status()
 """
 
-example_scripts = [
-    "dry_thermal_bubble.jl",
-    "cloudy_thermal_bubble.jl",
-    "cloudy_kelvin_helmholtz.jl",
-    "bomex.jl",
-    "prescribed_sst.jl",
-    "inertia_gravity_wave.jl",
+example_pages = [
+    "Stratified dry thermal bubble" => "literated/dry_thermal_bubble.md",
+    "Cloudy thermal bubble" => "literated/cloudy_thermal_bubble.md",
+    "Cloudy Kelvin-Helmholtz instability" => "literated/cloudy_kelvin_helmholtz.md",
+    "Shallow cumulus convection (BOMEX)" => "literated/bomex.md",
+    "Prescribed SST" => "literated/prescribed_sst.md",
+    "Inertia gravity wave" => "literated/inertia_gravity_wave.md",
 ]
 
 literate_code(script_path, literated_dir) = """
@@ -58,21 +58,13 @@ Literate.markdown($(repr(script_path)), $(repr(literated_dir));
 """
 
 semaphore = Base.Semaphore(Threads.nthreads(:interactive))
-@time "literate" @sync for script_file in example_scripts
+@time "literate" @sync for (_, dest_file) in example_pages
+    script_file = splitext(basename(dest_file))[1] * ".jl"
     script_path = joinpath(examples_src_dir, script_file)
     Threads.@spawn :interactive Base.acquire(semaphore) do
         @time script_file run(`$(Base.julia_cmd()) --color=yes --project=$(dirname(Base.active_project())) -e $(literate_code(script_path, literated_dir))`)
     end
 end
-
-example_pages = Any[
-    "Stratified dry thermal bubble" => "literated/dry_thermal_bubble.md",
-    "Cloudy thermal bubble" => "literated/cloudy_thermal_bubble.md",
-    "Cloudy Kelvin-Helmholtz instability" => "literated/cloudy_kelvin_helmholtz.md",
-    "Shallow cumulus convection (BOMEX)" => "literated/bomex.md",
-    "Prescribed SST" => "literated/prescribed_sst.md",
-    "Inertia gravity wave" => "literated/inertia_gravity_wave.md",
-]
 
 makedocs(
     ;
