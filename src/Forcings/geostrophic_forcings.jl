@@ -1,13 +1,10 @@
 using Oceananigans: Field, set!, compute!
-using Oceananigans.Grids: Center
+using Oceananigans.Grids: Center, XDirection, YDirection
 using Adapt: Adapt
 
 #####
 ##### Geostrophic forcing types
 #####
-
-struct XDirection end
-struct YDirection end
 
 struct GeostrophicForcing{S, V, F}
     geostrophic_momentum :: V
