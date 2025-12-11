@@ -84,6 +84,14 @@ Base.summary(df::BulkDragFunction) = string("BulkDragFunction(direction=", summa
                                             ", gustiness=", df.gustiness, ")")
 
 #####
+##### Helper function for surface values
+#####
+
+# Get surface value from a Field or a Number
+@inline surface_value(field::Field, i, j) = @inbounds field[i, j, 1]
+@inline surface_value(x::Number, i, j) = x
+
+#####
 ##### Wind speed calculations at staggered locations
 #####
 
@@ -189,7 +197,7 @@ Base.summary(bf::BulkSensibleHeatFluxFunction) =
            ", gustiness=", bf.gustiness, ")")
 
 @inline function (bf::BulkSensibleHeatFluxFunction)(i, j, grid, clock, fields)
-    T₀ = @inbounds bf.surface_temperature[i, j, 1]
+    T₀ = surface_value(bf.surface_temperature, i, j)
     θ = @inbounds fields.θ[i, j, 1]
     Δθ = θ - T₀
     
@@ -267,7 +275,7 @@ Base.summary(bf::BulkVaporFluxFunction) =
            ", gustiness=", bf.gustiness, ")")
 
 @inline function (bf::BulkVaporFluxFunction)(i, j, grid, clock, fields)
-    qᵛ₀ = @inbounds bf.surface_specific_humidity[i, j, 1]
+    qᵛ₀ = surface_value(bf.surface_specific_humidity, i, j)
     qᵗ = @inbounds fields.qᵗ[i, j, 1]
     Δq = qᵗ - qᵛ₀
     
