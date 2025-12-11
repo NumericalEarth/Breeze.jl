@@ -176,13 +176,14 @@ nothing #hide
 #
 # The zero-moment scheme removes cloud liquid water exceeding a threshold `qc_0` at a rate
 # determined by the precipitation timescale `τ_precip`. Typical values for shallow cumulus
-# are `τ_precip ~ 1000 s` and `qc_0 ~ 5×10⁻⁴ kg/kg`.
+# are `τ_precip ~ 20minutes` and `qc_0 ~ 2×10⁻⁴ kg/kg`.
 
 BreezeCloudMicrophysicsExt = Base.get_extension(Breeze, :BreezeCloudMicrophysicsExt)
 using .BreezeCloudMicrophysicsExt: ZeroMomentCloudMicrophysics
 
-microphysics = ZeroMomentCloudMicrophysics(τ_precip = 1000, qc_0 = 5e-4)
-advection = WENO(order=9)
+nucleation = SaturationAdjustment(equilibrium=WarmPhaseEquilibrium())
+microphysics = ZeroMomentCloudMicrophysics(τ_precip=20minutes, qc_0=2e-4; nucleation)
+advection = WENO(order=5)
 
 model = AtmosphereModel(grid; formulation, coriolis, microphysics, advection, forcing,
                         boundary_conditions = (ρθ=ρθ_bcs, ρqᵗ=ρqᵗ_bcs, ρu=ρu_bcs, ρv=ρv_bcs))
@@ -233,7 +234,7 @@ set!(model, θ=θᵢ, qᵗ=qᵢ, u=uᵢ, v=vᵢ)
 # RICO typically requires longer integration times than BOMEX to develop
 # a quasi-steady precipitating state, but we use 6 hours for consistency with BOMEX.
 
-simulation = Simulation(model; Δt=10, stop_time=6hour)
+simulation = Simulation(model; Δt=10, stop_time=2hour)
 conjure_time_step_wizard!(simulation, cfl=0.7)
 
 # ## Output and progress
@@ -245,27 +246,38 @@ qᵛ = model.microphysical_fields.qᵛ
 # Precipitation rate diagnostic from zero-moment microphysics
 P = precipitation_rate(model, :liquid)
 
+# Integrals of precip rate
+∫ᶻP = Field(Integral(P, dims=3))
+∫ⱽP = Field(Integral(P))
+
 u_avg = Field(Average(model.velocities.u, dims=(1, 2)))
 v_avg = Field(Average(model.velocities.v, dims=(1, 2)))
 
 function progress(sim)
     compute!(u_avg)
     compute!(v_avg)
-    compute!(P)
+    compute!(∫ⱽP)
+    qᵛmax = maximum(qᵛ)
     qˡmax = maximum(qˡ)
     qᵗmax = maximum(sim.model.specific_moisture)
     umax = maximum(abs, u_avg)
     vmax = maximum(abs, v_avg)
-    Pmax = maximum(P)
+    ∫P = CUDA.@allowscalar ∫ⱽP[]
 
-    msg = @sprintf("Iter: %d, t: %s, Δt: %s, max|ū|: (%.2e, %.2e), max(qᵗ): %.2e, max(qˡ): %.2e, max(P): %.2e",
+    msg = @sprintf("Iter: %d, t: %s, Δt: %s, max|ū|: (%.2e, %.2e), max(qᵗ): %.2e",
                    iteration(sim), prettytime(sim), prettytime(sim.Δt),
-                   umax, vmax, qᵗmax, qˡmax, Pmax)
+                   umax, vmax, qᵗmax)
+
+    msg *= @sprintf(", max(qᵛ): %.2e, max(qˡ): %.2e, ∫ⱽP: %.2e kg/kg/s",
+                    qᵛmax, qˡmax, ∫P)
+
     @info msg
+
     return nothing
 end
 
-add_callback!(simulation, progress, TimeInterval(1hour))
+#add_callback!(simulation, progress, TimeInterval(1hour))
+add_callback!(simulation, progress, IterationInterval(10))
 
 outputs = merge(model.velocities, model.tracers, (; θ, qˡ, qᵛ))
 averaged_outputs = NamedTuple(name => Average(outputs[name], dims=(1, 2)) for name in keys(outputs))
@@ -283,14 +295,11 @@ z = Oceananigans.Grids.znodes(grid, Center())
 k_cloud = searchsortedfirst(z, 1500)  # cloud layer height for RICO
 @info "Saving xy slices at z = $(z[k_cloud]) m (k = $k_cloud)"
 
-# Vertical integral of precipitation rate (column-integrated rain rate)
-P_int = Field(Integral(P, dims=3))
-
 slice_outputs = (
     qˡxz = view(qˡ, :, 1, :),
     Pxz = view(P, :, 1, :),
     qˡxy = view(qˡ, :, :, k_cloud),
-    Pint = P_int,
+    ∫P = ∫ᶻP,
 )
 
 simulation.output_writers[:slices] = JLD2Writer(model, slice_outputs;
@@ -368,15 +377,15 @@ fig
 qˡxz_ts = FieldTimeSeries("rico_slices.jld2", "qˡxz")
 Pxz_ts = FieldTimeSeries("rico_slices.jld2", "Pxz")
 qˡxy_ts = FieldTimeSeries("rico_slices.jld2", "qˡxy")
-Pint_ts = FieldTimeSeries("rico_slices.jld2", "Pint")
+∫P_ts = FieldTimeSeries("rico_slices.jld2", "∫P")
 
 times = qˡxz_ts.times
 Nt = length(times)
 
 # Compute color ranges (with fallback to avoid zero range which breaks Makie)
-qˡmax = max(maximum(qˡxz_ts), 1e-6)
-Pmax = max(maximum(Pxz_ts), 1e-10)
-Pintmax = max(maximum(Pint_ts), 1e-8)
+qˡlim = max(maximum(qˡxz_ts), 1e-6) / 4
+Plim = max(maximum(Pxz_ts), 1e-10) / 4
+∫Plim = max(maximum(∫P_ts), 1e-8) / 4
 
 # Convert precipitation rate to mm/day for more intuitive units
 # P is in kg/kg/s, multiply by ρ~1 kg/m³ and 86400 s/day and 1000 mm/m gives ~86.4 factor
@@ -387,19 +396,19 @@ slices_fig = Figure(size=(1100, 800), fontsize=14)
 axqxz = Axis(slices_fig[1, 1], xlabel="x (m)", ylabel="z (m)", title="Cloud liquid water qˡ (xz)")
 axPxz = Axis(slices_fig[1, 2], xlabel="x (m)", ylabel="z (m)", title="Precipitation rate P (xz)")
 axqxy = Axis(slices_fig[2, 1], xlabel="x (m)", ylabel="y (m)", title="Cloud liquid water qˡ (xy at z ≈ 1.5 km)")
-axPint = Axis(slices_fig[2, 2], xlabel="x (m)", ylabel="y (m)", title="Column-integrated precipitation rate")
+ax∫P = Axis(slices_fig[2, 2], xlabel="x (m)", ylabel="y (m)", title="Column-integrated precipitation rate")
 
 n = Observable(1)
 qˡxz_n = @lift qˡxz_ts[$n]
 Pxz_n = @lift Pxz_ts[$n]
 qˡxy_n = @lift qˡxy_ts[$n]
-Pint_n = @lift Pint_ts[$n]
+∫P_n = @lift ∫P_ts[$n]
 title_text = @lift "RICO: Clouds and precipitation at t = " * prettytime(times[$n])
 
-hmq1 = heatmap!(axqxz, qˡxz_n, colormap=:dense, colorrange=(0, qˡmax))
-hmP1 = heatmap!(axPxz, Pxz_n, colormap=:amp, colorrange=(0, Pmax))
-hmq2 = heatmap!(axqxy, qˡxy_n, colormap=:dense, colorrange=(0, qˡmax))
-hmP2 = heatmap!(axPint, Pint_n, colormap=:amp, colorrange=(0, Pintmax))
+hmq1 = heatmap!(axqxz, qˡxz_n, colormap=:dense, colorrange=(0, qˡlim))
+hmP1 = heatmap!(axPxz, Pxz_n, colormap=:amp, colorrange=(0, Plim))
+hmq2 = heatmap!(axqxy, qˡxy_n, colormap=:dense, colorrange=(0, qˡlim))
+hmP2 = heatmap!(ax∫P, ∫P_n, colormap=:amp, colorrange=(0, ∫Plim))
 
 Colorbar(slices_fig[1, 3], hmq1, label="qˡ (kg/kg)")
 Colorbar(slices_fig[1, 4], hmP1, label="P (kg/kg/s)")
@@ -414,5 +423,3 @@ end
 nothing #hide
 
 # ![](rico_slices.mp4)
-nothing #hide
-
