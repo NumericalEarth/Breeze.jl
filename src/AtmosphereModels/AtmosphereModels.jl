@@ -30,15 +30,14 @@ using DocStringExtensions: TYPEDSIGNATURES
 using Adapt: Adapt, adapt
 
 # Interface functions defined first (extended by downstream modules)
-include("atmosphere_model_interface.jl")
-
+include("forcing_interface.jl")
+include("microphysics_interface.jl")
 include("atmosphere_model.jl")
 include("set_atmosphere_model.jl")
 include("anelastic_formulation.jl")
 include("static_energy_thermodynamics.jl")
 include("potential_temperature_thermodynamics.jl")
 include("atmosphere_model_buoyancy.jl")
-include("microphysics_interface.jl")
 include("dynamics_kernel_functions.jl")
 include("update_atmosphere_model_state.jl")
 include("compute_hydrostatic_pressure.jl")
