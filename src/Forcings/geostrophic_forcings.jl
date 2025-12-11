@@ -35,7 +35,7 @@ end
 end
 
 """
-    $(TYPEDSIGNATURES)
+$(TYPEDSIGNATURES)
 
 Create a pair of geostrophic forcings for the x- and y-momentum equations.
 
@@ -81,7 +81,7 @@ function materialize_atmosphere_model_forcing(forcing::GeostrophicForcing, field
     uᵍ = if forcing_uᵍ isa Field
         forcing_uᵍ
     else
-        uᵍ = Field{Nothing, Nothing, Center}(grid)  
+        uᵍ = Field{Nothing, Nothing, Center}(grid)
         set!(uᵍ, forcing_uᵍ)
     end
 
