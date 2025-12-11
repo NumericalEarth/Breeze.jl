@@ -50,7 +50,7 @@ increment_tolerance(::Type{Float64}) = 1e-10
 
         c_forcing = (; ρc=forcing)
         model = setup_forcing_model(grid, c_forcing)
-        time_step!(model, Δt)
+ ds       time_step!(model, Δt)
         @test maximum(model.tracers.ρc) ≈ Δt
     end
 
@@ -71,9 +71,9 @@ end
 
 @testset "Bulk boundary conditions [$FT]" for FT in (Float32, Float64)
     grid = RectilinearGrid(default_arch, FT; size=(4, 4, 4), x=(0, 100), y=(0, 100), z=(0, 100))
-    Cᴰ = FT(1e-3)
-    gustiness = FT(0.1)
-    T₀ = FT(290)
+    Cᴰ = 1e-3
+    gustiness = 0.1
+    T₀ = 290
 
     @testset "BulkDrag construction and application [$FT]" begin
         # Test construction with default parameters
@@ -81,7 +81,7 @@ end
         @test drag isa BoundaryCondition
 
         # Test construction with explicit coefficient and gustiness
-        drag = BulkDrag(coefficient=FT(2e-3), gustiness=FT(0.5))
+        drag = BulkDrag(coefficient=2e-3, gustiness=0.5)
         @test drag isa BoundaryCondition
 
         # Test that model can be built with BulkDrag boundary conditions
@@ -89,10 +89,10 @@ end
         ρv_bcs = FieldBoundaryConditions(bottom=BulkDrag(coefficient=Cᴰ, gustiness=gustiness))
         boundary_conditions = (; ρu=ρu_bcs, ρv=ρv_bcs)
         model = AtmosphereModel(grid; boundary_conditions)
-        
+
         θ₀ = model.formulation.reference_state.potential_temperature
         set!(model; θ=θ₀)
-        
+
         # Model should build and run without error
         time_step!(model, FT(1e-6))
         @test true  # If we get here, construction and time stepping worked
@@ -104,7 +104,7 @@ end
         @test bc isa BoundaryCondition
 
         # Test with function for surface temperature
-        T₀_func(x, y) = FT(290) + FT(2) * sign(cos(FT(2π) * x / 100))
+        T₀_func(x, y) = T₀ + 2 * sign(cos(2π * x / 100))
         bc = BulkSensibleHeatFlux(surface_temperature=T₀_func, coefficient=Cᴰ, gustiness=gustiness)
         @test bc isa BoundaryCondition
 
@@ -112,10 +112,10 @@ end
         ρθ_bcs = FieldBoundaryConditions(bottom=bc)
         boundary_conditions = (; ρθ=ρθ_bcs)
         model = AtmosphereModel(grid; boundary_conditions)
-        
+
         θ₀ = model.formulation.reference_state.potential_temperature
         set!(model; θ=θ₀)
-        
+
         # Model should build and run without error
         time_step!(model, FT(1e-6))
         @test true
@@ -127,7 +127,7 @@ end
         @test bc isa BoundaryCondition
 
         # Test with function for surface temperature
-        T₀_func(x, y) = FT(290) + FT(2) * sign(cos(FT(2π) * x / 100))
+        T₀_func(x, y) = T₀ + 2 * sign(cos(2π * x / 100))
         bc = BulkVaporFlux(surface_temperature=T₀_func, coefficient=Cᴰ, gustiness=gustiness)
         @test bc isa BoundaryCondition
 
@@ -135,10 +135,10 @@ end
         ρqᵗ_bcs = FieldBoundaryConditions(bottom=bc)
         boundary_conditions = (; ρqᵗ=ρqᵗ_bcs)
         model = AtmosphereModel(grid; boundary_conditions)
-        
+
         θ₀ = model.formulation.reference_state.potential_temperature
         set!(model; θ=θ₀)
-        
+
         # Model should build and run without error
         time_step!(model, FT(1e-6))
         @test true
@@ -148,19 +148,17 @@ end
         # Build a model with all bulk boundary conditions
         ρu_bcs = FieldBoundaryConditions(bottom=BulkDrag(coefficient=Cᴰ, gustiness=gustiness))
         ρv_bcs = FieldBoundaryConditions(bottom=BulkDrag(coefficient=Cᴰ, gustiness=gustiness))
-        ρθ_bcs = FieldBoundaryConditions(bottom=BulkSensibleHeatFlux(surface_temperature=T₀, 
-                                                                      coefficient=Cᴰ, 
-                                                                      gustiness=gustiness))
+        ρθ_bcs = FieldBoundaryConditions(bottom=BulkSensibleHeatFlux(surface_temperature=T₀,
+                                                                     coefficient=Cᴰ, gustiness=gustiness))
         ρqᵗ_bcs = FieldBoundaryConditions(bottom=BulkVaporFlux(surface_temperature=T₀,
-                                                                coefficient=Cᴰ,
-                                                                gustiness=gustiness))
-        
+                                                               coefficient=Cᴰ, gustiness=gustiness))
+
         boundary_conditions = (; ρu=ρu_bcs, ρv=ρv_bcs, ρθ=ρθ_bcs, ρqᵗ=ρqᵗ_bcs)
         model = AtmosphereModel(grid; boundary_conditions)
-        
+
         θ₀ = model.formulation.reference_state.potential_temperature
         set!(model; θ=θ₀)
-        
+
         # Model should build and run without error
         time_step!(model, FT(1e-6))
         @test true

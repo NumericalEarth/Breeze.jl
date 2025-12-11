@@ -201,7 +201,7 @@ Base.summary(bf::BulkSensibleHeatFluxFunction) =
     T₀ = surface_value(bf.surface_temperature, i, j)
     θ = @inbounds fields.θ[i, j, 1]
     Δθ = θ - T₀
-    
+
     U² = wind_speed²ᶜᶜᶜ(i, j, grid, fields)
     Ũ = sqrt(U² + bf.gustiness^2)
     
@@ -287,7 +287,7 @@ const BVFF = BulkVaporFluxFunction
     
     U² = wind_speed²ᶜᶜᶜ(i, j, grid, fields)
     Ũ = sqrt(U² + bf.gustiness^2)
-    
+
     Cᵛ = bf.coefficient
     return - ρ₀ * Cᵛ * Ũ * Δq
 end
@@ -311,7 +311,7 @@ Create a `FluxBoundaryCondition` for surface momentum drag.
 
 See [`BulkDragFunction`](@ref) for details.
 
-# Example
+# Examples
 
 ```jldoctest
 julia> using Breeze
@@ -324,6 +324,27 @@ julia> using Oceananigans.Grids: XDirection
 julia> u_drag = BulkDrag(direction=XDirection(), coefficient=1e-3)
 FluxBoundaryCondition: BulkDragFunction(direction=XDirection(), coefficient=0.001, gustiness=0)
 ```
+
+Or with explicit direction, e.g., `XDirection()` for u:
+
+```jldoctest bulkdrag
+using Oceananigans.Grids: XDirection
+
+u_drag = BulkDrag(direction=XDirection(), coefficient=1e-3)
+ρu_bcs = FieldBoundaryConditions(bottom=u_drag)
+
+# output
+Oceananigans.FieldBoundaryConditions, with boundary conditions
+├── west: DefaultBoundaryCondition (FluxBoundaryCondition: Nothing)
+├── east: DefaultBoundaryCondition (FluxBoundaryCondition: Nothing)
+├── south: DefaultBoundaryCondition (FluxBoundaryCondition: Nothing)
+├── north: DefaultBoundaryCondition (FluxBoundaryCondition: Nothing)
+├── bottom: FluxBoundaryCondition: DiscreteBoundaryFunction with BulkDragFunction(direction=XDirection(), coefficient=0.001, gustiness=0)
+├── top: DefaultBoundaryCondition (FluxBoundaryCondition: Nothing)
+└── immersed: DefaultBoundaryCondition (FluxBoundaryCondition: Nothing)
+```
+
+and similartly for `YDirection` for v.
 """
 function BulkDrag(; kwargs...)
     df = BulkDragFunction(; kwargs...)

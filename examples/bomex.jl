@@ -305,8 +305,8 @@ simulation.output_writers[:averages] = JLD2Writer(model, averaged_outputs; filen
                                                   schedule = AveragedTimeInterval(1hour),
                                                   overwrite_existing = true)
 
-# Output horizontal slices at z = 600 m for animation
-# Find the k-index closest to z = 600 m
+# Output horizontal slices at z = 800 m for animation. To do that, we find the `k` index
+# closest to z = 800 m.
 z = Oceananigans.Grids.znodes(grid, Center())
 k = searchsortedfirst(z, 800)
 @info "Saving slices at z = $(z[k]) m (k = $k)"
@@ -407,11 +407,12 @@ times = wxz_ts.times
 Nt = length(times)
 
 # Create animation
-slices_fig = Figure(size=(1200, 1000), fontsize=14)
-axwxz = Axis(slices_fig[1, 2], aspect=2, xlabel="x (m)", ylabel="z (m)", title="Vertical velocity w")
-axqxz = Axis(slices_fig[1, 3], aspect=2, xlabel="x (m)", ylabel="z (m)", title="Liquid water qˡ")
-axwxy = Axis(slices_fig[2, 2], aspect=1,  xlabel="x (m)", ylabel="y (m)")
-axqxy = Axis(slices_fig[2, 3], aspect=1, xlabel="x (m)", ylabel="y (m)")
+fig = Figure(size=(900, 750), fontsize=14)
+
+axwxz = Axis(fig[1, 2], aspect=2, xlabel="x (m)", ylabel="z (m)", title="Vertical velocity w")
+axqxz = Axis(fig[1, 3], aspect=2, xlabel="x (m)", ylabel="z (m)", title="Liquid water qˡ")
+axwxy = Axis(fig[2, 2], aspect=1,  xlabel="x (m)", ylabel="y (m)")
+axqxy = Axis(fig[2, 3], aspect=1, xlabel="x (m)", ylabel="y (m)")
 
 # Determine color limits from the data
 wmax = maximum(abs, wxz_ts)
@@ -422,24 +423,27 @@ wxz_n = @lift wxz_ts[$n]
 qˡxz_n = @lift qˡxz_ts[$n]
 wxy_n = @lift wxy_ts[$n]
 qˡxy_n = @lift qˡxy_ts[$n]
-title_text = @lift "BOMEX slices at t = " * prettytime(times[$n])
+
+title = @lift "BOMEX slices at t = " * prettytime(times[$n])
 
 hmw = heatmap!(axwxz, wxz_n, colormap=:balance, colorrange=(-wmax, wmax))
 hmq = heatmap!(axqxz, qˡxz_n, colormap=:dense, colorrange=(0, qˡmax))
 hmw = heatmap!(axwxy, wxy_n, colormap=:balance, colorrange=(-wmax, wmax))
 hmq = heatmap!(axqxy, qˡxy_n, colormap=:dense, colorrange=(0, qˡmax))
 
-Colorbar(slices_fig[1:2, 1], hmw, label="w (m/s)", flipaxis=false)
-Colorbar(slices_fig[1:2, 4], hmq, label="qˡ (kg/kg)")
+Colorbar(fig[1:2, 1], hmw, label="w (m/s)", tellheight = false, height = Relative(0.5), flipaxis=false)
+Colorbar(fig[1:2, 4], hmq, label="qˡ (kg/kg)", tellheight = false, height = Relative(0.5))
 
-slices_fig[0, :] = Label(slices_fig, title_text, fontsize=18, tellwidth=false)
+fig[0, :] = Label(fig, title, fontsize=20, tellwidth=false)
+
+fig
 
 # Record animation
-N2 = ceil(Int, Nt/3)
-CairoMakie.record(slices_fig, "bomex_slices.mp4", 1:N2, framerate=12) do nn
+N₂ = ceil(Int, Nt/3)
+CairoMakie.record(slices_fig, "bomex_slices.mp4", 1:N₂, framerate=12) do nn
     n[] = nn
 end
 nothing #hide
 
 # ![](bomex_slices.mp4)
- 
+
