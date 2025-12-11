@@ -27,14 +27,14 @@ const YGeostrophicForcing = GeostrophicForcing{YDirection}
 ##### Show methods
 #####
 
-direction_str(::XDirection) = "x"
-direction_str(::YDirection) = "y"
+direction_str(::XDirection) = "XDirection"
+direction_str(::YDirection) = "YDirection"
 
 function Base.summary(forcing::GeostrophicForcing)
     dir = direction_str(forcing.direction)
     f = forcing.coriolis_parameter
-    f_str = isnothing(f) ? "" : ", f=$(prettysummary(f))"
-    return string("GeostrophicForcing{", dir, f_str, "}")
+    f_str = isnothing(f) ? "" : "(f=$(prettysummary(f)))"
+    return string("GeostrophicForcing{", dir, "}", "f_str")
 end
 
 function Base.show(io::IO, forcing::GeostrophicForcing)
@@ -96,13 +96,14 @@ into the model forcing.
 Example
 =======
 
-```julia
+```jldoctest
+using Breeze
+
 uᵍ(z) = -10 + 0.001z
 vᵍ(z) = 0.0
 
 coriolis = FPlane(f=1e-4)
 forcing = geostrophic_forcings(uᵍ, vᵍ)
-model = AtmosphereModel(grid; coriolis, forcing)
 ```
 """
 function geostrophic_forcings(uᵍ, vᵍ)

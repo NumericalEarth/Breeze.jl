@@ -258,8 +258,6 @@ P = precipitation_rate(model, :liquid)
 wall_clock = Ref(time_ns())
 
 function progress(sim)
-    compute!(u_avg)
-    compute!(v_avg)
     compute!(∫ⱽP)
     qᵛmax = maximum(qᵛ)
     qˡmax = maximum(qˡ)
