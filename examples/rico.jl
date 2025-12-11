@@ -93,7 +93,7 @@ q₀ = Breeze.Thermodynamics.MoistureMassFractions{FT} |> zero
 # ## Surface momentum flux (drag)
 #
 # A bulk drag parameterization is applied with friction velocity
-# ``u_* = 0.28`` m/s ([vanZanten2011](@citet)).
+# ``u_* = 0.28`` m/s [vanZanten2011](@cite).
 
 u★ = 0.28  # m/s
 @inline ρu_drag(x, y, t, ρu, ρv, p) = - p.ρ₀ * p.u★^2 * ρu / sqrt(ρu^2 + ρv^2)
@@ -108,7 +108,7 @@ u★ = 0.28  # m/s
 #
 # The RICO case includes large-scale subsidence that advects mean profiles downward.
 # The subsidence velocity profile increases linearly to ``-0.005`` m/s at 2260 m and
-# remains constant above ([vanZanten2011](@citet)).
+# remains constant above [vanZanten2011](@cite).
 
 wˢ = Field{Nothing, Nothing, Face}(grid)
 wˢ_profile = AtmosphericProfilesLibrary.Rico_subsidence(FT)
@@ -125,7 +125,7 @@ subsidence = SubsidenceForcing(wˢ)
 # ## Geostrophic forcing
 #
 # The momentum equations include a Coriolis force with prescribed geostrophic wind.
-# The RICO Coriolis parameter corresponds to latitude ~18°N: ``f = 4.5 \times 10^{-5}`` s⁻¹.
+# The RICO Coriolis parameter corresponds to latitude around 18°N: ``f = 4.5 \times 10^{-5}`` s⁻¹.
 
 coriolis = FPlane(f=4.5e-5)
 
@@ -136,7 +136,7 @@ geostrophic = geostrophic_forcings(z -> uᵍ(z), z -> vᵍ(z))
 # ## Moisture tendency
 #
 # A prescribed large-scale moisture tendency represents the effects of advection
-# by the large-scale circulation ([vanZanten2011](@citet)).
+# by the large-scale circulation [vanZanten2011](@cite).
 
 ρᵣ = formulation.reference_state.density
 drying = Field{Nothing, Nothing, Center}(grid)
@@ -149,7 +149,7 @@ set!(drying, ρᵣ * drying)
 #
 # A prescribed radiative cooling profile is applied to the thermodynamic equation.
 # The RICO case uses a constant radiative cooling rate of ``-2.5`` K/day
-# ([vanZanten2011](@citet)), applied uniformly throughout the domain.
+# applied uniformly throughout the domain [vanZanten2011](@cite).
 # This is the key simplification that allows us to avoid interactive radiation.
 
 Fρe_field = Field{Nothing, Nothing, Center}(grid)
