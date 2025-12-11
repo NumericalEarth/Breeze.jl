@@ -1,4 +1,5 @@
 using Oceananigans: Oceananigans, Center, Field, set!, fill_halo_regions!
+using Oceananigans.BoundaryConditions: FieldBoundaryConditions, ValueBoundaryCondition
 
 using Adapt: Adapt, adapt
 using KernelAbstractions: @kernel, @index
@@ -92,12 +93,16 @@ function ReferenceState(grid, constants=ThermodynamicConstants(eltype(grid));
     FT = eltype(grid)
     p₀ = convert(FT, surface_pressure)
     θ₀ = convert(FT, potential_temperature)
+    loc = (nothing, nothing, Center())
 
-    ρᵣ = Field{Nothing, Nothing, Center}(grid)
+    ρ₀ = surface_density(p₀, θ₀, constants)
+    ρ_bcs = FieldBoundaryConditions(grid, loc, bottom=ValueBoundaryCondition(ρ₀))
+    ρᵣ = Field{Nothing, Nothing, Center}(grid, boundary_conditions=ρ_bcs)
     set!(ρᵣ, z -> adiabatic_hydrostatic_density(z, p₀, θ₀, constants))
     fill_halo_regions!(ρᵣ)
 
-    pᵣ = Field{Nothing, Nothing, Center}(grid)
+    p_bcs = FieldBoundaryConditions(grid, loc, bottom=ValueBoundaryCondition(p₀))
+    pᵣ = Field{Nothing, Nothing, Center}(grid, boundary_conditions=p_bcs)
     set!(pᵣ, z -> adiabatic_hydrostatic_pressure(z, p₀, θ₀, constants))
     fill_halo_regions!(pᵣ)
 

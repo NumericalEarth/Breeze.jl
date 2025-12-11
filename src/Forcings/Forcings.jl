@@ -3,15 +3,15 @@ module Forcings
 export
     geostrophic_forcings,
     SubsidenceForcing,
-    GeostrophicForcing,
-    materialize_atmosphere_model_forcing,
-    compute_forcing!
+    GeostrophicForcing
 
 using DocStringExtensions: TYPEDSIGNATURES
 
 using Oceananigans: Average, Field, set!, compute!
 using Oceananigans.Grids: Center, Face
 using Oceananigans.Forcings: materialize_forcing, MultipleForcings
+
+import ..AtmosphereModels: materialize_atmosphere_model_forcing, compute_forcing!
 
 include("geostrophic_forcings.jl")
 include("subsidence_forcing.jl")
