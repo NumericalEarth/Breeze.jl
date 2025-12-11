@@ -112,12 +112,6 @@ using .Thermodynamics
 include("MoistAirBuoyancies.jl")
 using .MoistAirBuoyancies
 
-include("BoundaryConditions/BoundaryConditions.jl")
-using .BoundaryConditions
-
-include("Forcings/Forcings.jl")
-using .Forcings
-
 include("AtmosphereModels/AtmosphereModels.jl")
 using .AtmosphereModels
 
@@ -129,5 +123,11 @@ using .TurbulenceClosures
 
 include("Advection.jl")
 using .Advection
+
+include("BoundaryConditions/BoundaryConditions.jl")
+using .BoundaryConditions
+
+include("Forcings/Forcings.jl")
+using .Forcings
 
 end # module Breeze

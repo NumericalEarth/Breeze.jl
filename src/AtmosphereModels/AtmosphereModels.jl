@@ -13,6 +13,11 @@ export
     liquid_ice_potential_temperature_density,
     liquid_ice_potential_temperature,
 
+    # Interface functions (extended by BoundaryConditions and Forcings)
+    regularize_atmosphere_model_boundary_conditions,
+    materialize_atmosphere_model_forcing,
+    compute_forcing!,
+
     # Diagnostics (re-exported from Diagnostics submodule)
     PotentialTemperature,
     VirtualPotentialTemperature,
@@ -23,6 +28,9 @@ export
 
 using DocStringExtensions: TYPEDSIGNATURES
 using Adapt: Adapt, adapt
+
+# Interface functions defined first (extended by downstream modules)
+include("atmosphere_model_interface.jl")
 
 include("atmosphere_model.jl")
 include("set_atmosphere_model.jl")

@@ -1,6 +1,4 @@
 using ..Thermodynamics: Thermodynamics, ThermodynamicConstants, ReferenceState
-using ..BoundaryConditions: regularize_atmosphere_model_boundary_conditions
-using ..Forcings: materialize_atmosphere_model_forcing
 
 using Oceananigans: AbstractModel, Center, CenterField, Clock, Field
 using Oceananigans: Centered, XFaceField, YFaceField, ZFaceField

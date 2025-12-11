@@ -10,13 +10,15 @@ export BulkDragFunction,
        BulkSensibleHeatFluxBoundaryCondition,
        BulkVaporFluxFunction,
        BulkVaporFlux,
-       BulkVaporFluxBoundaryCondition,
-       regularize_atmosphere_model_boundary_conditions
+       BulkVaporFluxBoundaryCondition
+
+import ..AtmosphereModels: regularize_atmosphere_model_boundary_conditions
+
+using ..Thermodynamics: saturation_specific_humidity, surface_density, PlanarLiquidSurface
 
 using Oceananigans.Grids: Center, Face, XDirection, YDirection
 using Oceananigans.Fields: Field, set!
-using Oceananigans.BoundaryConditions: FluxBoundaryCondition,
-                                       BoundaryCondition,
+using Oceananigans.BoundaryConditions: BoundaryCondition,
                                        Flux,
                                        DiscreteBoundaryFunction,
                                        FieldBoundaryConditions,
@@ -24,7 +26,7 @@ using Oceananigans.BoundaryConditions: FluxBoundaryCondition,
 
 using Oceananigans.Operators: ℑxyᶠᶜᵃ, ℑxyᶜᶠᵃ, ℑxᶜᵃᵃ, ℑyᵃᶜᵃ
 
-using Adapt
+using Adapt: Adapt
 
 import Oceananigans.BoundaryConditions: regularize_boundary_condition
 import Oceananigans.Architectures: on_architecture
@@ -461,7 +463,7 @@ function regularize_atmosphere_model_boundary_conditions(boundary_conditions, gr
     reference_state = formulation.reference_state
     p₀ = reference_state.surface_pressure
     θ₀ = reference_state.potential_temperature
-    ρ₀ = base_density(p₀, θ₀, thermodynamic_constants)
+    ρ₀ = surface_density(p₀, θ₀, thermodynamic_constants)
     constants = thermodynamic_constants
     
     # Regularize each field's boundary conditions
@@ -537,9 +539,6 @@ function materialize_surface_field(f::Function, grid)
     set!(field, f)
     return field
 end
-
-# Import thermodynamic functions from Thermodynamics
-using Breeze.Thermodynamics: saturation_specific_humidity, base_density, PlanarLiquidSurface
 
 function compute_saturation_specific_humidity(T₀::Field, ρ₀, constants, grid)
     surface = PlanarLiquidSurface()
