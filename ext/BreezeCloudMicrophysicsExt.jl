@@ -196,6 +196,12 @@ end
     return MoistureMassFractions(qᵛ, qˡ, qⁱ)
 end
 
+# Default fallback for OneMomentCloudMicrophysics tendencies that are not explicitly implemented
+@inline microphysical_tendency(i, j, k, grid, bμp::OneMomentCloudMicrophysics, args...) = zero(grid)
+
+# Default fallback for OneMomentCloudMicrophysics velocities
+@inline microphysical_velocities(bμp::OneMomentCloudMicrophysics, name) = nothing
+
 """
 $(TYPEDSIGNATURES)
 
