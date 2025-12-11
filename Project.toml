@@ -14,6 +14,7 @@ Printf = "de0858da-6303-5e67-8744-51eddeeeb8d7"
 [weakdeps]
 ClimaComms = "3a4d1b5c-c61d-41fd-a00a-5873ba7a1b0d"
 CloudMicrophysics = "6a9e3e04-43cd-43ba-94b9-e8782df3c71b"
+Dates = "ade2ca70-3891-5945-98fb-dc099432e06a"
 RRTMGP = "a01a1ee8-cea4-48fc-987c-fc7878d79da1"
 
 [workspace]
@@ -21,12 +22,13 @@ projects = ["docs", "test"]
 
 [extensions]
 BreezeCloudMicrophysicsExt = "CloudMicrophysics"
-BreezeRRTMGPExt = ["ClimaComms", "RRTMGP"]
+BreezeRRTMGPExt = ["ClimaComms", "Dates", "RRTMGP"]
 
 [compat]
 Adapt = "4.3.0"
 ClimaComms = "0.6"
 CloudMicrophysics = "0.29.0"
+Dates = "<0.0.1, 1"
 DocStringExtensions = "0.9.5"
 JLD2 = "0.5.13, 0.6"
 KernelAbstractions = "0.9"

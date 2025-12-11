@@ -5,7 +5,7 @@
 ##### with RRTMGP's two-stream or no-scattering solvers.
 #####
 
-const SingleColumnGrid = Oceananigans.Grids.AbstractGrid{<:AbstractFloat, <:Flat, <:Flat, <:Bounded}
+const SingleColumnGrid = AbstractGrid{<:AbstractFloat, <:Flat, <:Flat, <:Bounded}
 
 """
     GrayRadiationModel{LW, SW, AS, FT, F}
@@ -69,7 +69,7 @@ function Breeze.GrayRadiation(grid::SingleColumnGrid;
                                solar_constant = 1361)
 
     FT = eltype(grid)
-    arch = Oceananigans.architecture(grid)
+    arch = architecture(grid)
     nlay = size(grid, 3)
     nlev = nlay + 1
     ncol = 1  # Single column
@@ -145,13 +145,13 @@ end
 
 Create an RRTMGP-compatible ClimaComms context from an Oceananigans architecture.
 """
-function rrtmgp_context(arch::Oceananigans.CPU)
+function rrtmgp_context(arch::CPU)
     device = Threads.nthreads() > 1 ? ClimaComms.CPUMultiThreaded() : ClimaComms.CPUSingleThreaded()
     return ClimaComms.context(device)
 end
 
 # GPU support would go here
-# function rrtmgp_context(arch::Oceananigans.GPU)
+# function rrtmgp_context(arch::GPU)
 #     return ClimaComms.context(ClimaComms.CUDADevice())
 # end
 
