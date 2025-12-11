@@ -101,13 +101,13 @@ qᵛ⁺₀ = 20.4e-3  # surface saturation specific humidity
 # ## Surface momentum flux (drag)
 #
 Cₘ = 1.229e-3
-@inline ρu_drag(x, y, t, ρu, ρv, p) = -p.Cₘ * sqrt(ρu^2 + ρv^2) * ρu / p.ρ₀
-@inline ρv_drag(x, y, t, ρu, ρv, p) = -p.Cₘ * sqrt(ρu^2 + ρv^2) * ρv / p.ρ₀
+@inline ρu_flux(x, y, t, ρu, ρv, p) = -p.Cₘ * sqrt(ρu^2 + ρv^2) * ρu / p.ρ₀
+@inline ρv_flux(x, y, t, ρu, ρv, p) = -p.Cₘ * sqrt(ρu^2 + ρv^2) * ρv / p.ρ₀
 
-ρu_drag_bc = FluxBoundaryCondition(ρu_drag, field_dependencies=(:ρu, :ρv), parameters=(; ρ₀, Cₘ))
-ρv_drag_bc = FluxBoundaryCondition(ρv_drag, field_dependencies=(:ρu, :ρv), parameters=(; ρ₀, Cₘ))
-ρu_bcs = FieldBoundaryConditions(bottom=ρu_drag_bc)
-ρv_bcs = FieldBoundaryConditions(bottom=ρv_drag_bc)
+ρu_flux_bc = FluxBoundaryCondition(ρu_flux, field_dependencies=(:ρu, :ρv), parameters=(; ρ₀, Cₘ))
+ρv_flux_bc = FluxBoundaryCondition(ρv_flux, field_dependencies=(:ρu, :ρv), parameters=(; ρ₀, Cₘ))
+ρu_bcs = FieldBoundaryConditions(bottom=ρu_flux_bc)
+ρv_bcs = FieldBoundaryConditions(bottom=ρv_flux_bc)
 
 # ## Large-scale subsidence
 #
