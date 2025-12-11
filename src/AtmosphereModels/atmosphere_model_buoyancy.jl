@@ -50,7 +50,7 @@ end
 
 @inline function virtual_potential_temperature(i, j, k, grid, constants, formulation, T, qᵗ)
     pᵣ = @inbounds formulation.reference_state.pressure[i, j, k]
-    p₀ = formulation.reference_state.base_pressure
+    p₀ = formulation.reference_state.surface_pressure
     q = @inbounds MoistureMassFractions(qᵗ[i, j, k])
     Rᵐ = mixture_gas_constant(q, constants)
     Rᵈ = dry_air_gas_constant(constants)

@@ -56,7 +56,7 @@ grid = RectilinearGrid(GPU(); x, y, z,
 constants = ThermodynamicConstants()
 
 reference_state = ReferenceState(grid, constants,
-                                 base_pressure = 101500,
+                                 surface_pressure = 101500,
                                  potential_temperature = 299.1)
 
 formulation = AnelasticFormulation(reference_state,
@@ -77,7 +77,7 @@ w′θ′ = 8e-3     # K m/s (sensible heat flux)
 w′qᵗ′ = 5.2e-5  # m/s (moisture flux)
 
 FT = eltype(grid)
-p₀ = reference_state.base_pressure
+p₀ = reference_state.surface_pressure
 θ₀ = reference_state.potential_temperature
 q₀ = Breeze.Thermodynamics.MoistureMassFractions{FT} |> zero
 ρ₀ = Breeze.Thermodynamics.density(p₀, θ₀, q₀, constants)
@@ -237,7 +237,7 @@ using Breeze.Thermodynamics: dry_air_gas_constant, vapor_gas_constant
 
 Rᵈ = dry_air_gas_constant(constants)
 cᵖᵈ = constants.dry_air.heat_capacity
-p₀ = reference_state.base_pressure
+p₀ = reference_state.surface_pressure
 χ = (p₀ / 1e5)^(Rᵈ/  cᵖᵈ)
 
 # The initial profiles are perturbed with random noise below 1600 m to trigger

@@ -9,7 +9,7 @@ using Test
 
     for p₀ in (101325, 100000), θ₀ in (288, 300), thermodynamics in (:LiquidIcePotentialTemperature, :StaticEnergy)
         @testset let p₀ = p₀, θ₀ = θ₀, thermodynamics = thermodynamics
-            reference_state = ReferenceState(grid, constants, base_pressure=p₀, potential_temperature=θ₀)
+            reference_state = ReferenceState(grid, constants, surface_pressure=p₀, potential_temperature=θ₀)
             formulation = AnelasticFormulation(reference_state; thermodynamics)
             model = AtmosphereModel(grid; thermodynamic_constants=constants, formulation)
 
@@ -36,7 +36,7 @@ end
 
     p₀ = FT(101325)
     θ₀ = FT(300)
-    reference_state = ReferenceState(grid, constants, base_pressure=p₀, potential_temperature=θ₀)
+    reference_state = ReferenceState(grid, constants, surface_pressure=p₀, potential_temperature=θ₀)
     formulation = AnelasticFormulation(reference_state; thermodynamics)
     model = AtmosphereModel(grid; thermodynamic_constants=constants, formulation)
 
@@ -56,7 +56,7 @@ end
 
     p₀ = FT(101325)
     θ₀ = FT(300)
-    reference_state = ReferenceState(grid, constants, base_pressure=p₀, potential_temperature=θ₀)
+    reference_state = ReferenceState(grid, constants, surface_pressure=p₀, potential_temperature=θ₀)
     formulation = AnelasticFormulation(reference_state; thermodynamics)
     microphysics = SaturationAdjustment()
     model = AtmosphereModel(grid; thermodynamic_constants=constants, formulation, microphysics)
@@ -89,7 +89,7 @@ end
 
     p₀ = FT(101325)
     θ₀ = FT(300)
-    reference_state = ReferenceState(grid, constants, base_pressure=p₀, potential_temperature=θ₀)
+    reference_state = ReferenceState(grid, constants, surface_pressure=p₀, potential_temperature=θ₀)
     potential_temperature_formulation = AnelasticFormulation(reference_state; thermodynamics=:LiquidIcePotentialTemperature)
     static_energy_formulation = AnelasticFormulation(reference_state; thermodynamics=:StaticEnergy)
 
