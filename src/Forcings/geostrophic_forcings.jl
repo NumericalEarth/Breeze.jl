@@ -34,7 +34,7 @@ function Base.summary(forcing::GeostrophicForcing)
     dir = direction_str(forcing.direction)
     f = forcing.coriolis_parameter
     f_str = isnothing(f) ? "" : "(f=$(prettysummary(f)))"
-    return string("GeostrophicForcing{", dir, "}", "f_str")
+    return string("GeostrophicForcing{", dir, "}", f_str)
 end
 
 function Base.show(io::IO, forcing::GeostrophicForcing)
@@ -104,6 +104,13 @@ vᵍ(z) = 0.0
 
 coriolis = FPlane(f=1e-4)
 forcing = geostrophic_forcings(uᵍ, vᵍ)
+
+# output
+NamedTuple with 2 GeostrophicForcings:
+├── ρu: GeostrophicForcing{XDirection}
+│   └── geostrophic_momentum: vᵍ (generic function with 1 method)
+└── ρv: GeostrophicForcing{YDirection}
+    └── geostrophic_momentum: uᵍ (generic function with 1 method)
 ```
 """
 function geostrophic_forcings(uᵍ, vᵍ)

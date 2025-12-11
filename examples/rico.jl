@@ -255,10 +255,6 @@ P = precipitation_rate(model, :liquid)
 ∫ᶻP = Field(Integral(P, dims=3))
 ∫ⱽP = Field(Integral(P))
 
-# Horizontal averages
-u_avg = Field(Average(model.velocities.u, dims=(1, 2)))
-v_avg = Field(Average(model.velocities.v, dims=(1, 2)))
-
 wall_clock = Ref(time_ns())
 
 function progress(sim)
