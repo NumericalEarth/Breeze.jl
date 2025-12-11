@@ -200,10 +200,10 @@ Base.summary(bf::BulkSensibleHeatFluxFunction) =
     T₀ = surface_value(bf.surface_temperature, i, j)
     θ = @inbounds fields.θ[i, j, 1]
     Δθ = θ - T₀
-    
+
     U² = wind_speed²ᶜᶜᶜ(i, j, grid, fields)
     Ũ = sqrt(U² + bf.gustiness^2)
-    
+
     Cᵀ = bf.coefficient
     ρ₀ = bf.reference_density
     return - ρ₀ * Cᵀ * Ũ * Δθ
@@ -278,10 +278,10 @@ Base.summary(bf::BulkVaporFluxFunction) =
     qᵛ₀ = surface_value(bf.surface_specific_humidity, i, j)
     qᵗ = @inbounds fields.qᵗ[i, j, 1]
     Δq = qᵗ - qᵛ₀
-    
+
     U² = wind_speed²ᶜᶜᶜ(i, j, grid, fields)
     Ũ = sqrt(U² + bf.gustiness^2)
-    
+
     Cᵛ = bf.coefficient
     ρ₀ = bf.reference_density
     return - ρ₀ * Cᵛ * Ũ * Δq
@@ -296,7 +296,7 @@ function regularize_boundary_condition(dbf::DiscreteBoundaryFunction{Nothing, <:
                                        grid, loc, dim, args...)
     df = dbf.func
     LX, LY, LZ = loc
-    
+
     # Determine direction from location: Face in x means x-momentum, Face in y means y-momentum
     if LX isa Face
         direction = XDirection()
@@ -306,7 +306,7 @@ function regularize_boundary_condition(dbf::DiscreteBoundaryFunction{Nothing, <:
         throw(ArgumentError("Cannot infer drag direction from field location $loc. " *
                             "Please specify direction=XDirection() or direction=YDirection()."))
     end
-    
+
     regularized_df = BulkDragFunction(direction, df.coefficient, df.gustiness)
     return DiscreteBoundaryFunction(regularized_df, nothing)
 end
@@ -369,20 +369,55 @@ Create a `FluxBoundaryCondition` for surface momentum drag.
 
 See [`BulkDragFunction`](@ref) for details.
 
-# Example
+# Examples
 
-```julia
+Drag for both u and v (direction inferred from field location)
+
+```jldoctest bulkdrag
 using Breeze
 
-# Drag for both u and v (direction inferred from field location)
 drag = BulkDrag(coefficient=1e-3, gustiness=0.1)
 
-# Or with explicit direction
-u_drag = BulkDrag(direction=XDirection(), coefficient=1e-3)
-v_drag = BulkDrag(direction=YDirection(), coefficient=1e-3)
+# output
+FluxBoundaryCondition: DiscreteBoundaryFunction with BulkDragFunction(direction=Nothing, coefficient=0.001, gustiness=0.1)
+```
 
+Or with explicit direction, e.g., `XDirection()` for u:
+
+```jldoctest bulkdrag
+using Oceananigans.Grids: XDirection
+
+u_drag = BulkDrag(direction=XDirection(), coefficient=1e-3)
 ρu_bcs = FieldBoundaryConditions(bottom=u_drag)
+
+# output
+Oceananigans.FieldBoundaryConditions, with boundary conditions
+├── west: DefaultBoundaryCondition (FluxBoundaryCondition: Nothing)
+├── east: DefaultBoundaryCondition (FluxBoundaryCondition: Nothing)
+├── south: DefaultBoundaryCondition (FluxBoundaryCondition: Nothing)
+├── north: DefaultBoundaryCondition (FluxBoundaryCondition: Nothing)
+├── bottom: FluxBoundaryCondition: DiscreteBoundaryFunction with BulkDragFunction(direction=XDirection(), coefficient=0.001, gustiness=0)
+├── top: DefaultBoundaryCondition (FluxBoundaryCondition: Nothing)
+└── immersed: DefaultBoundaryCondition (FluxBoundaryCondition: Nothing)
+```
+
+and `YDirection` for v:
+
+```jldoctest bulkdrag
+using Oceananigans.Grids: YDirection
+
+v_drag = BulkDrag(direction=YDirection(), coefficient=1e-3)
 ρv_bcs = FieldBoundaryConditions(bottom=v_drag)
+
+# output
+Oceananigans.FieldBoundaryConditions, with boundary conditions
+├── west: DefaultBoundaryCondition (FluxBoundaryCondition: Nothing)
+├── east: DefaultBoundaryCondition (FluxBoundaryCondition: Nothing)
+├── south: DefaultBoundaryCondition (FluxBoundaryCondition: Nothing)
+├── north: DefaultBoundaryCondition (FluxBoundaryCondition: Nothing)
+├── bottom: FluxBoundaryCondition: DiscreteBoundaryFunction with BulkDragFunction(direction=YDirection(), coefficient=0.001, gustiness=0)
+├── top: DefaultBoundaryCondition (FluxBoundaryCondition: Nothing)
+└── immersed: DefaultBoundaryCondition (FluxBoundaryCondition: Nothing)
 ```
 """
 function BulkDrag(; kwargs...)
@@ -400,7 +435,7 @@ See [`BulkSensibleHeatFluxFunction`](@ref) for details.
 
 # Example
 
-```julia
+```jldoctest
 using Breeze
 
 # Surface temperature can be a function, Field, or number
@@ -411,6 +446,16 @@ T₀(x, y) = 290 + 2 * sign(cos(2π * x / 20e3))
                               surface_temperature = T₀)
 
 ρθ_bcs = FieldBoundaryConditions(bottom=ρθ_bc)
+
+# output
+Oceananigans.FieldBoundaryConditions, with boundary conditions
+├── west: DefaultBoundaryCondition (FluxBoundaryCondition: Nothing)
+├── east: DefaultBoundaryCondition (FluxBoundaryCondition: Nothing)
+├── south: DefaultBoundaryCondition (FluxBoundaryCondition: Nothing)
+├── north: DefaultBoundaryCondition (FluxBoundaryCondition: Nothing)
+├── bottom: FluxBoundaryCondition: DiscreteBoundaryFunction with BulkSensibleHeatFluxFunction(coefficient=0.001, gustiness=0.1)
+├── top: DefaultBoundaryCondition (FluxBoundaryCondition: Nothing)
+└── immersed: DefaultBoundaryCondition (FluxBoundaryCondition: Nothing)
 ```
 """
 function BulkSensibleHeatFlux(; kwargs...)
@@ -443,6 +488,16 @@ T₀(x, y) = 290 + 2 * sign(cos(2π * x / 20e3))
                         surface_temperature = T₀)
 
 ρqᵗ_bcs = FieldBoundaryConditions(bottom=ρqᵗ_bc)
+
+# output
+Oceananigans.FieldBoundaryConditions, with boundary conditions
+├── west: DefaultBoundaryCondition (FluxBoundaryCondition: Nothing)
+├── east: DefaultBoundaryCondition (FluxBoundaryCondition: Nothing)
+├── south: DefaultBoundaryCondition (FluxBoundaryCondition: Nothing)
+├── north: DefaultBoundaryCondition (FluxBoundaryCondition: Nothing)
+├── bottom: FluxBoundaryCondition: DiscreteBoundaryFunction with BulkVaporFluxFunction(coefficient=0.001, gustiness=0.1)
+├── top: DefaultBoundaryCondition (FluxBoundaryCondition: Nothing)
+└── immersed: DefaultBoundaryCondition (FluxBoundaryCondition: Nothing)
 ```
 """
 function BulkVaporFlux(; kwargs...)
@@ -473,13 +528,13 @@ function regularize_atmosphere_model_boundary_conditions(boundary_conditions, gr
     θ₀ = reference_state.potential_temperature
     ρ₀ = surface_density(p₀, θ₀, thermodynamic_constants)
     constants = thermodynamic_constants
-    
+
     # Regularize each field's boundary conditions
     regularized = Dict{Symbol, Any}()
     for (name, fbcs) in pairs(boundary_conditions)
         regularized[name] = regularize_field_bulk_bcs(fbcs, grid, ρ₀, constants)
     end
-    
+
     return NamedTuple(regularized)
 end
 
@@ -506,13 +561,13 @@ regularize_bulk_bc(bc, grid, ρ₀, constants) = bc
 # Regularize BulkSensibleHeatFlux
 function regularize_bulk_bc(bc::BulkSensibleHeatFluxBoundaryCondition, grid, ρ₀, constants)
     bf = bc.condition.func
-    
+
     # Convert surface_temperature to Field if it's a function
     T₀ = materialize_surface_field(bf.surface_temperature, grid)
-    
+
     # Use provided reference_density or compute from formulation
     ref_density = isnothing(bf.reference_density) ? ρ₀ : bf.reference_density
-    
+
     new_bf = BulkSensibleHeatFluxFunction(bf.coefficient, bf.gustiness, T₀, ref_density)
     return BoundaryCondition(Flux(), DiscreteBoundaryFunction(new_bf, nothing))
 end
@@ -520,20 +575,20 @@ end
 # Regularize BulkVaporFlux
 function regularize_bulk_bc(bc::BulkVaporFluxBoundaryCondition, grid, ρ₀, constants)
     bf = bc.condition.func
-    
+
     # Convert surface_temperature to Field if it's a function
     T₀ = materialize_surface_field(bf.surface_temperature, grid)
-    
+
     # Use provided reference_density or compute from formulation
     ref_density = isnothing(bf.reference_density) ? ρ₀ : bf.reference_density
-    
+
     # Compute saturation specific humidity if not provided
     if isnothing(bf.surface_specific_humidity)
         qᵛ₀ = compute_saturation_specific_humidity(T₀, ref_density, constants, grid)
     else
         qᵛ₀ = materialize_surface_field(bf.surface_specific_humidity, grid)
     end
-    
+
     new_bf = BulkVaporFluxFunction(bf.coefficient, bf.gustiness, T₀, qᵛ₀, ref_density)
     return BoundaryCondition(Flux(), DiscreteBoundaryFunction(new_bf, nothing))
 end
@@ -550,16 +605,10 @@ end
 
 function compute_saturation_specific_humidity(T₀::Field, ρ₀, constants, grid)
     surface = PlanarLiquidSurface()
+
     qᵛ₀ = Field{Center, Center, Nothing}(grid)
-    
-    # Create a function that computes qᵛ₀ pointwise
-    qᵛ₀_func(i, j) = saturation_specific_humidity(T₀[i, j, 1], ρ₀, constants, surface)
-    
-    # Set the field using the interior indices
-    for i in 1:size(grid, 1), j in 1:size(grid, 2)
-        qᵛ₀[i, j, 1] = qᵛ₀_func(i, j)
-    end
-    
+    view(qᵛ₀, :, :, 1) .= saturation_specific_humidity.(view(T₀, :, :, 1), ρ₀, constants, surface)
+
     return qᵛ₀
 end
 
