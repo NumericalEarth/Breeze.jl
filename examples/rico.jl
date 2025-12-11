@@ -24,6 +24,7 @@ using CairoMakie
 using CloudMicrophysics
 using Printf
 using Random
+using CUDA
 
 Random.seed!(42)
 
