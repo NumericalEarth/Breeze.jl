@@ -46,6 +46,12 @@ export
     # Radiation (implemented by extensions)
     GrayRadiation,
 
+    # Celestial mechanics
+    cos_solar_zenith_angle,
+    solar_declination,
+    equation_of_time,
+    hour_angle,
+
     # Forcing utilities
     geostrophic_forcings,
     SubsidenceForcing
@@ -122,6 +128,9 @@ using .TurbulenceClosures
 
 include("Advection.jl")
 using .Advection
+
+include("CelestialMechanics/CelestialMechanics.jl")
+using .CelestialMechanics
 
 #####
 ##### Radiation stubs (implemented by extensions)

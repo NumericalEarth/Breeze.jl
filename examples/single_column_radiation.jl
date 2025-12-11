@@ -40,7 +40,7 @@ constants = ThermodynamicConstants()
 surface_temperature = 300
 
 reference_state = ReferenceState(grid, constants,
-                                 base_pressure = 101325,
+                                 surface_pressure = 101325,
                                  potential_temperature = surface_temperature)
 
 formulation = AnelasticFormulation(reference_state,
@@ -93,38 +93,50 @@ set!(model; θ=θ_profile, qᵗ=qᵗ_profile)
 T = model.auxiliary_fields.T
 pᵣ = reference_state.pressure
 qᵗ = model.specific_moisture
+qˡ = model.microphysical_fields.qˡ
 ℋ = RelativeHumidityField(model)
 
-F_lw_up = radiation.upwelling_longwave_flux
-F_lw_dn = radiation.downwelling_longwave_flux
-F_sw = radiation.downwelling_shortwave_flux
-F_net = Field(F_lw_up - F_lw_dn - F_sw)
+ℐ_lw_up = radiation.upwelling_longwave_flux
+ℐ_lw_dn = radiation.downwelling_longwave_flux
+ℐ_sw = radiation.downwelling_shortwave_flux
+ℐ_net = ℐ_lw_up + ℐ_lw_dn + ℐ_sw
 
-# Convert altitude to km for plotting
-zc = znodes(grid, Center()) ./ 1e3
-zf = znodes(grid, Face()) ./ 1e3
+set_theme!(fontsize=14, linewidth=3)
+fig = Figure(size=(1200, 400), fontsize=14)
 
-fig = Figure(size=(1400, 350), fontsize=14)
+ax_T = Axis(fig[2, 1]; xlabel="Temperature, T (K)", ylabel="Altitude (km)")
+ax_p = Axis(fig[2, 2]; xlabel="Pressure, p (hPa)")
+ax_q = Axis(fig[2, 3]; xlabel="Specific humidity, q (kg/kg)")
+ax_H = Axis(fig[2, 4]; xlabel="Relative humidity, ℋ (%)")
+ax_I = Axis(fig[2, 5:6], xlabel="Radiation intensity, ℐ (W/m²)",
+            ylabel="Altitude (km)", yaxisposition=:right)
+            
+[hideydecorations!(ax, grid=false) for ax in (ax_p, ax_q, ax_H)]
+hidespines!(ax_T, :r, :t)
+hidespines!(ax_p, :l, :r, :t)
+hidespines!(ax_q, :l, :r, :t)
+hidespines!(ax_H, :l, :r, :t)
+hidespines!(ax_I, :l, :t)
 
-ax_T = Axis(fig[1, 1], xlabel="T (K)",      ylabel="Altitude (km)")
-ax_p = Axis(fig[1, 2], xlabel="pᵣ (hPa)",   ylabel="Altitude (km)")
-ax_q = Axis(fig[1, 3], xlabel="qᵗ (kg/kg)", ylabel="Altitude (km)")
-ax_H = Axis(fig[1, 4], xlabel="ℋ",          ylabel="Altitude (km)")
-ax_F = Axis(fig[1, 5], xlabel="F (W/m²)",   ylabel="Altitude (km)")
 
-lines!(ax_T, zc, T)
-lines!(ax_p, zc, pᵣ / 100)  # Convert Pa to hPa
-lines!(ax_q, zc, qᵗ)
-lines!(ax_H, zc, ℋ)
+lines!(ax_T, T)
+lines!(ax_p, pᵣ / 100)  # Convert Pa to hPa
 
-# All radiation fluxes in one panel
-lines!(ax_F, zf, F_lw_up; label="LW ↑")
-lines!(ax_F, zf, F_lw_dn; label="LW ↓")
-lines!(ax_F, zf, F_sw; linestyle=:dash, label="SW ↓")
-lines!(ax_F, zf, F_net; linewidth=4, alpha=0.6, color=:black, label="Net")
-axislegend(ax_F, position=:lb)
+lines!(ax_q, qᵗ; label="qᵗ (total)")
+lines!(ax_q, qˡ; label="qˡ (liquid)")
+axislegend(ax_q, position=:rt, framevisible=false)
 
-fig[0, :] = Label(fig, "Single Column Gray Radiation (O'Gorman & Schneider, 2008)", fontsize=18, tellwidth=false)
+lines!(ax_H, 100ℋ)  # Convert to %
+
+# All radiation fluxes in one panel (positive = upward, negative = downward)
+lines!(ax_I, ℐ_lw_up; label="LW ↑")
+lines!(ax_I, ℐ_lw_dn; label="LW ↓")
+lines!(ax_I, ℐ_sw; linestyle=:dash, label="SW ↓")
+lines!(ax_I, ℐ_net; linewidth=4, alpha=0.5, color=:black, label="Net")
+
+Legend(fig[1, 6], ax_I, orientation=:horizontal, nbanks=2, framevisible=false)
+
+fig[1, :] = Label(fig, "Single Column Gray Radiation (O'Gorman & Schneider, 2008)", fontsize=18, tellwidth=false)
 
 save("single_column_radiation.png", fig)
 fig
