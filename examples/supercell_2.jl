@@ -74,9 +74,6 @@ ph = Breeze.AtmosphereModels.compute_hydrostatic_pressure!(CenterField(grid), mo
 T = model.temperature
 
 # Saturation mixing ratio (kg/kg) and water vapor initial condition
-# Compute specific humidity qᵛ, then convert to total moisture density ρqᵗ
-# For Kessler, qᵛ is diagnosed from qᵛ = qᵗ - qᶜˡ - qʳ
-# Initially qᶜˡ = qʳ = 0, so qᵗ = qᵛ
 ρᵣ = formulation.reference_state.density
 qᵛᵢ = Field{Center, Center, Center}(grid)
 ph_host = Array(parent(ph)) # bring to CPU to avoid GPU scalar indexing
@@ -93,12 +90,8 @@ end
 
 copyto!(parent(qᵛᵢ), qᵛᵢ_host)
 
-# Convert specific humidity to density-weighted total moisture
-# Initially qᵗ = qᵛ since cloud and rain are zero
-ρqᵗᵢ = ρᵣ * qᵛᵢ
-
-# Set prognostic total moisture ρqᵗ (qᵛ is diagnosed as qᵗ - qᶜˡ - qʳ)
-set!(model, ρqᵗ = ρqᵗᵢ, θ = θᵢ, u = uᵢ)
+# Model initialization
+set!(model, qᵗ = qᵛᵢ, θ = θᵢ, u = uᵢ)
 θ = liquid_ice_potential_temperature(model)
 
 qᶜˡ = model.microphysical_fields.qᶜˡ
@@ -110,9 +103,6 @@ conjure_time_step_wizard!(simulation, cfl=0.7)
 
 function progress(sim)
     u, v, w = sim.model.velocities
-    qᵛ = sim.model.microphysical_fields.qᵛ
-    qᶜˡ = sim.model.microphysical_fields.qᶜˡ
-    qʳ = sim.model.microphysical_fields.qʳ
 
     ρe = static_energy_density(sim.model)
     ρemean = mean(ρe)
