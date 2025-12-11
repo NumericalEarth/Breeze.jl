@@ -88,6 +88,11 @@ Breeze interfaces with ClimaOcean for coupled atmosphere-ocean simulations.
     * sometimes we need to write `using Oceananigans.Units`
 
 3. **Examples and integration tests**
+  - **Testing examples**: When testing or debugging examples, reduce resolution and switch to CPU
+    to speed up iteration. For example, change `Nx = Ny = 64` to `Nx = Ny = 16`, `Nz = 100` to
+    `Nz = 20`, and `RectilinearGrid(GPU(); ...)` to `RectilinearGrid(CPU(); ...)`. You may also
+    add `simulation.stop_iteration = 50` to limit runtime. **Always revert these changes** before
+    committing - examples should run at full resolution on GPU for production.
   - Explain at the top of the file what a simulation is doing
   - Let code "speak for itself" as much as possible, to keep an explanation concise.
     In other words, use a Literate style.

@@ -24,7 +24,8 @@ using Breeze.AtmosphereModels
 
 using Breeze.Thermodynamics:
     MoistureMassFractions,
-    density
+    density,
+    with_moisture
 
 using Breeze.Microphysics:
     center_field_tuple,
@@ -73,19 +74,27 @@ materialize_microphysical_fields(bμp::ZMCM, grid, bcs) = materialize_microphysi
 @inline compute_moisture_fractions(i, j, k, grid, bμp::ZMCM, ρ, qᵗ, μ) = compute_moisture_fractions(i, j, k, grid, bμp.nucleation, ρ, qᵗ, μ)
 @inline microphysical_tendency(i, j, k, grid, bμp::ZMCM, args...) = zero(grid)
 @inline microphysical_velocities(bμp::ZMCM, name) = nothing
-@inline maybe_adjust_thermodynamic_state(𝒰₀, bμp::ZMCM, μ, qᵗ, constants) = adjust_thermodynamic_state(𝒰₀, bμp.nucleation, constants)
+
+@inline function maybe_adjust_thermodynamic_state(𝒰₀, bμp::ZMCM, μ, qᵗ, constants)
+    # Initialize moisture state from total moisture qᵗ (not from stale microphysical fields)
+    q₀ = MoistureMassFractions(qᵗ)
+    𝒰₁ = with_moisture(𝒰₀, q₀)
+    return adjust_thermodynamic_state(𝒰₁, bμp.nucleation, constants)
+end
 
 @inline function microphysical_tendency(i, j, k, grid, bμp::ZMCM, ::Val{:ρqᵗ}, μ, 𝒰, constants)
     # Get cloud liquid water from microphysical fields
-    @inbounds qˡ = μ.qˡ[i, j, k]
-
-    # Warm-phase only: no ice
-    qⁱ = zero(qˡ)
+    q = 𝒰.moisture_mass_fractions
+    qˡ = q.liquid
+    qⁱ = q.ice
 
     # remove_precipitation returns -dqᵗ/dt (rate of moisture removal)
     # Multiply by density to get the tendency for ρqᵗ
+    # TODO: pass density into microphysical_tendency
     ρ = density(𝒰, constants)
-    return ρ * remove_precipitation(bμp.categories, qˡ, qⁱ)
+    parameters_0M = bμp.categories
+
+    return ρ * remove_precipitation(parameters_0M, qˡ, qⁱ)
 end
 
 """
@@ -108,13 +117,16 @@ The precipitation rate is computed as:
 where `τ = τ_precip` and `q_c = qc_0`.
 """
 function ZeroMomentCloudMicrophysics(FT::DataType = Oceananigans.defaults.FloatType;
+                                     nucleation = SaturationAdjustment(FT),
                                      τ_precip = 1000,
                                      qc_0 = 5e-4,
                                      S_0 = 0)
+
     categories = Parameters0M{FT}(; τ_precip = FT(τ_precip),
                                     qc_0 = FT(qc_0),
                                     S_0 = FT(S_0))
-    return BulkMicrophysics(SaturationAdjustment(FT), categories)
+
+    return BulkMicrophysics(nucleation, categories)
 end
 
 #####
