@@ -251,7 +251,7 @@ add_callback!(simulation, progress, IterationInterval(100))
 # ``\sqrt{u² + w²}`` and the cross-stream vorticity ``∂_z u - ∂_x w``.
 # The JLD2 format provides efficient storage with full Julia type preservation.
 
-output_filename = "prescribed_sst_convection.jld2"
+output_filename = "prescribed_sea_surface_temperature_convection.jld2"
 qᵗ = model.specific_moisture
 u, v, w, = model.velocities
 s = sqrt(u^2 + w^2) # speed
@@ -376,7 +376,7 @@ Colorbar(fig[3, 3], hmqˡ, label="qˡ (kg/kg)")
 
 # Now we are ready to make a cool animation.
 
-CairoMakie.record(fig, "prescribed_sst.mp4", 1:Nt, framerate=12) do nn
+CairoMakie.record(fig, "prescribed_sea_surface_temperature.mp4", 1:Nt, framerate=12) do nn
     n[] = nn
 end
 nothing #hide
