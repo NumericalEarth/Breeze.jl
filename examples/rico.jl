@@ -86,17 +86,13 @@ q₀ = Breeze.Thermodynamics.MoistureMassFractions{FT} |> zero
 
 Cₕ = 1.094e-3
 C_q = 1.133e-3
-qᵛ⁺₀ = 20.4e-3  # surface saturation specific humidity
+T₀ = 299.8  # sea surface temperature (K)
 
-ρw′θ′(x, y, t, ρu, ρv, ρθ, p) = -p.Cₕ * sqrt(ρu^2 + ρv^2)  / p.ρ₀ * ( ρθ - p.ρ₀*p.θ₀ )
-ρw′qᵗ′(x, y, t, ρu, ρv, ρqᵗ, p) = -p.C_q * sqrt(ρu^2 + ρv^2) / p.ρ₀ * ( ρqᵗ - p.ρ₀*p.qᵛ⁺₀ )
+ρθ_bc = BulkSensibleHeatFlux(coefficient=Cₕ, surface_temperature=θ₀)
+ρqᵗ_bc = BulkVaporFlux(coefficient=C_q, surface_temperature=T₀)
 
-ρθ_bcs = FieldBoundaryConditions(bottom=FluxBoundaryCondition( ρw′θ′,
-                                                                 field_dependencies=(:ρu, :ρv, :ρθ),
-                                                                 parameters=(; ρ₀, Cₕ, θ₀)))
-ρqᵗ_bcs = FieldBoundaryConditions(bottom=FluxBoundaryCondition( ρw′qᵗ′,
-                                                                 field_dependencies=(:ρu, :ρv, :ρqᵗ),
-                                                                 parameters=(; ρ₀, C_q, qᵛ⁺₀)))
+ρθ_bcs = FieldBoundaryConditions(bottom=ρθ_bc)
+ρqᵗ_bcs = FieldBoundaryConditions(bottom=ρqᵗ_bc)
 
 # ## Surface momentum flux (drag)
 #
@@ -224,7 +220,6 @@ p₀ = reference_state.surface_pressure
 # - Potential temperature perturbation: ``δθ = 0.1`` K
 # - Moisture perturbation: ``δqᵗ = 2.5 \times 10^{-5}`` kg/kg
 
-ϵ() = rand() - 1/2
 θᵢ(x, y, z) = χ * θˡⁱ₀(z)
 qᵢ(x, y, z) = qᵗ₀(z)
 uᵢ(x, y, z) = u₀(z)
