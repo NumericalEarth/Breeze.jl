@@ -2,7 +2,6 @@ using Breeze
 using Documenter
 using DocumenterCitations
 using Literate
-using RRTMGP: RRTMGP
 
 using CairoMakie
 CairoMakie.activate!(type = "png")
