@@ -381,4 +381,4 @@ CairoMakie.record(fig, "prescribed_sea_surface_temperature.mp4", 1:Nt, framerate
 end
 nothing #hide
 
-# ![](prescribed_sst.mp4)
+# ![](prescribed_sea_surface_temperature.mp4)
