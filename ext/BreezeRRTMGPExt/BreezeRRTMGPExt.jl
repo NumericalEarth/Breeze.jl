@@ -8,7 +8,7 @@ using DocStringExtensions: TYPEDSIGNATURES
 
 # Oceananigans imports
 using Oceananigans.Architectures: architecture, CPU
-using Oceananigans.Grids: AbstractGrid, Center, Face, Flat, Bounded, znode
+using Oceananigans.Grids: Face
 using Oceananigans.Fields: ZFaceField
 
 # RRTMGP imports (external types - cannot modify)
