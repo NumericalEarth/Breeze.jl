@@ -245,8 +245,8 @@ qᵛ = model.microphysical_fields.qᵛ
 P = precipitation_rate(model, :liquid)
 
 # Integrals of precip rate
-∫ᶻP = Field(Integral(P, dims=3))
-∫ⱽP = Field(Integral(P))
+∫Pdz = Field(Integral(P, dims=3))
+∫PdV = Field(Integral(P))
 
 wall_clock = Ref(time_ns())
 
