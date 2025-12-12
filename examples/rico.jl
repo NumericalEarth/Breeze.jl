@@ -283,7 +283,7 @@ slice_outputs = (
 
 filename = "rico_slices.jld2"
 simulation.output_writers[:slices] = JLD2Writer(model, slice_outputs; filename,
-                                                schedule = TimeInterval(10minutes),
+                                                schedule = TimeInterval(2minutes),
                                                 overwrite_existing = true)
 
 @info "Running RICO simulation..."
@@ -397,7 +397,7 @@ Colorbar(slices_fig[2, 4], hmP2, label="∫P dz (m/s)")
 
 slices_fig[0, :] = Label(slices_fig, title_text, fontsize=18, tellwidth=false)
 
-CairoMakie.record(slices_fig, "rico_slices.mp4", 1:Nt, framerate=24) do nn
+CairoMakie.record(slices_fig, "rico_slices.mp4", 1:Nt, framerate=18) do nn
     n[] = nn
 end
 nothing #hide
