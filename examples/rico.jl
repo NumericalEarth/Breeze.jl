@@ -240,12 +240,12 @@ P = precipitation_rate(model, :liquid)
 wall_clock = Ref(time_ns())
 
 function progress(sim)
-    compute!(∫ⱽP)
+    compute!(∫PdV)
     qᵛmax = maximum(qᵛ)
     qˡmax = maximum(qˡ)
     qᵗmax = maximum(sim.model.specific_moisture)
     wmax = maximum(abs, model.velocities.w)
-    ∫P = CUDA.@allowscalar ∫ⱽP[]
+    ∫P = CUDA.@allowscalar ∫PdV[]
     elapsed = 1e-9 * (time_ns() - wall_clock[])
 
     msg = @sprintf("Iter: %d, t: %s, Δt: %s, wall time: %s, max|w|: %.2e m/s \n",
@@ -282,7 +282,7 @@ slice_outputs = (
     qˡxz = view(qˡ, :, 1, :),
     Pxz = view(P, :, 1, :),
     qˡxy = view(qˡ, :, :, k_cloud),
-    ∫P = ∫ᶻP,
+    ∫P = ∫Pdz,
 )
 
 filename = "rico_slices.jld2"
