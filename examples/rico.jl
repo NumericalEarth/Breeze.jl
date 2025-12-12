@@ -93,16 +93,12 @@ T₀ = 299.8  # sea surface temperature (K)
 
 ρθ_bcs = FieldBoundaryConditions(bottom=ρθ_flux)
 ρqᵗ_bcs = FieldBoundaryConditions(bottom=ρqᵗ_flux)
+
 # ## Surface momentum flux (drag)
 #
 Cₘ = 1.229e-3
-@inline ρu_flux(x, y, t, ρu, ρv, p) = -p.Cₘ * sqrt(ρu^2 + ρv^2) * ρu / p.ρ₀
-@inline ρv_flux(x, y, t, ρu, ρv, p) = -p.Cₘ * sqrt(ρu^2 + ρv^2) * ρv / p.ρ₀
-
-ρu_flux_bc = FluxBoundaryCondition(ρu_flux, field_dependencies=(:ρu, :ρv), parameters=(; ρ₀, Cₘ))
-ρv_flux_bc = FluxBoundaryCondition(ρv_flux, field_dependencies=(:ρu, :ρv), parameters=(; ρ₀, Cₘ))
-ρu_bcs = FieldBoundaryConditions(bottom=ρu_flux_bc)
-ρv_bcs = FieldBoundaryConditions(bottom=ρv_flux_bc)
+ρu_bcs = FieldBoundaryConditions(bottom=BulkDrag(coefficient=Cₘ))
+ρv_bcs = FieldBoundaryConditions(bottom=BulkDrag(coefficient=Cₘ))
 
 # ## Large-scale subsidence
 #
