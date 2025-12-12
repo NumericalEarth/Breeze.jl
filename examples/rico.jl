@@ -212,13 +212,6 @@ Rᵈ = dry_air_gas_constant(constants)
 cᵖᵈ = constants.dry_air.heat_capacity
 p₀ = reference_state.surface_pressure
 χ = (p₀ / 1e5)^(Rᵈ / cᵖᵈ)
-
-# The initial profiles are perturbed with random noise below 1600 m to trigger
-# convection. Similar perturbation amplitudes as BOMEX are used:
-#
-# - Potential temperature perturbation: ``δθ = 0.1`` K
-# - Moisture perturbation: ``δqᵗ = 2.5 \times 10^{-5}`` kg/kg
-
 θᵢ(x, y, z) = χ * θˡⁱ₀(z)
 qᵢ(x, y, z) = qᵗ₀(z)
 uᵢ(x, y, z) = u₀(z)
