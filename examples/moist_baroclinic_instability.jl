@@ -24,6 +24,7 @@
 
 using Breeze
 using Oceananigans.Units
+using Oceananigans: Oceananigans
 using CairoMakie
 using Printf
 using Random
