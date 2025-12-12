@@ -27,6 +27,7 @@ using Oceananigans.Units
 using CairoMakie
 using Printf
 using Random
+using CUDA
 
 Random.seed!(1234)
 
