@@ -49,5 +49,6 @@ function Base.show(io::IO, radiation::RadiativeTransferModel)
           "├── solar_constant: ", prettysummary(radiation.solar_constant),
           "├── surface_temperature: ", radiation.surface_properties.surface_temperature, " K\n",
           "├── surface_emissivity: ", radiation.surface_properties.surface_emissivity, "\n",
-          "└── surface_albedo: ", radiation.surface_properties.surface_albedo)
+          "├── direct_surface_albedo: ", radiation.surface_properties.direct_surface_albedo, "\n",
+          "└── diffuse_surface_albedo: ", radiation.surface_properties.diffuse_surface_albedo)
 end
