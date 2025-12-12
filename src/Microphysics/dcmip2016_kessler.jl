@@ -213,23 +213,6 @@ The conversion is: q = r / (1 + rᵗ)
 """
 @inline mixing_ratio_to_mass_fraction(r, rᵗ) = r / (1 + rᵗ)
 
-"""
-    kessler_saturation_mixing_ratio(T, p)
-
-Compute saturation vapor mixing ratio following KW eq. 2.11.
-Uses temperature T (K) and pressure p (Pa).
-Original Fortran implementation: qvs = pc * exp(f2x * (Π*θ - 273) / (Π*θ - 36))
-where pc = 3.8 / (Π^(1/xk) * psl) = 3.8 / (p/p0 * psl) with p in suitable units.
-
-Note: This returns mixing ratio (mass of vapor / mass of dry air), not mass fraction.
-"""
-@inline function kessler_saturation_mixing_ratio(T, p)
-    # Convert pressure from Pa to mb for consistency with Fortran
-    p_mb = p / 100
-    pc = 3.8 / p_mb
-    rᵛˢ = pc * exp(kessler_f2x * (T - 273) / (T - 36))
-    return rᵛˢ
-end
 
 """
     kessler_terminal_velocity(rʳ, ρ, ρˢ)
@@ -272,7 +255,6 @@ function microphysics_model_update!(::KM, model)
     # Thermodynamic fields
     θ  = model.formulation.thermodynamics.potential_temperature
     ρθ = model.formulation.thermodynamics.potential_temperature_density
-    T  = model.temperature
 
     # Total moisture density (prognostic variable of AtmosphereModel)
     ρqᵗ = model.moisture_density
@@ -284,7 +266,7 @@ function microphysics_model_update!(::KM, model)
     precipitation_rate_data = interior(μ.precipitation_rate, :, :, 1)
 
     launch!(arch, grid, :xy, _kessler_microphysical_update!,
-            grid, Nz, Δt, ρᵣ, pᵣ, θ, ρθ, T,
+            grid, Nz, Δt, ρᵣ, pᵣ, θ, ρθ,
             ρqᵗ, μ.ρqᶜˡ, μ.ρqʳ,
             μ.qᵛ, μ.qᶜˡ, μ.qʳ,
             precipitation_rate_data, μ.vᵗ_rain)
@@ -317,7 +299,7 @@ end
 #    - Write back to prognostic fields (ρqᵗ, ρqᶜˡ, ρqʳ)
 #    - Update diagnostic fields with final mass fractions
 
-@kernel function _kessler_microphysical_update!(grid, Nz, Δt, ρᵣ, pᵣ, θ, ρθ, T,
+@kernel function _kessler_microphysical_update!(grid, Nz, Δt, ρᵣ, pᵣ, θ, ρθ,
                                                  ρqᵗ, ρqᶜˡ, ρqʳ,
                                                  qᵛ_field, qᶜˡ_field, qʳ_field,
                                                  precipitation_rate, vᵗ_rain)
@@ -489,7 +471,6 @@ end
                 # Update thermodynamics
                 θ[i, j, k]  = θ_new
                 ρθ[i, j, k] = ρ * θ_new
-                T[i, j, k]  = pk * θ_new
             end
         end
 
