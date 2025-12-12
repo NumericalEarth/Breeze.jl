@@ -28,7 +28,7 @@ using CairoMakie
 # at a particular place.
 
 Nz = 64
-λ, φ = -70.9, 42.5
+λ, φ = -76.13, 39.48
 
 grid = RectilinearGrid(size=Nz, x=λ, y=φ, z=(0, 20kilometers),
                        topology=(Flat, Flat, Bounded))
@@ -55,16 +55,16 @@ formulation = AnelasticFormulation(reference_state,
 using Dates
 
 radiation = GrayRadiativeTransferModel(grid, constants;
-                          surface_temperature,
-                          surface_emissivity = 0.98,
-                          surface_albedo = 0.1,
-                          solar_constant = 1361)        # W/m²
+                                       surface_temperature,
+                                       surface_emissivity = 0.98,
+                                       surface_albedo = 0.1,
+                                       solar_constant = 1361)        # W/m²
 
 # ## Atmosphere model
 #
 # Build the atmosphere model with saturation adjustment microphysics.
 
-clock = Clock(time=DateTime(2025, 9, 27, 16, 0, 0))
+clock = Clock(time=DateTime(1950, 11, 1, 12, 0, 0))
 microphysics = SaturationAdjustment(equilibrium = WarmPhaseEquilibrium())
 model = AtmosphereModel(grid; clock, formulation, microphysics, radiation)
 
@@ -77,13 +77,13 @@ model = AtmosphereModel(grid; clock, formulation, microphysics, radiation)
 cᵖᵈ = constants.dry_air.heat_capacity
 g = constants.gravitational_acceleration
 Γ = g / cᵖᵈ
-θ_profile(z) = θ₀ + Γ * z / 1000
+θᵢ(z) = θ₀ + Γ * z / 1000
 
 q₀ = 0.015    # surface specific humidity (kg/kg)
 Hᵗ = 2500     # moisture scale height (m)
-qᵗ_profile(z) = q₀ * exp(-z / Hᵗ)
+qᵗᵢ(z) = q₀ * exp(-z / Hᵗ)
 
-set!(model; θ=θ_profile, qᵗ=qᵗ_profile)
+set!(model; θ=θᵢ, qᵗ=qᵗᵢ)
 
 # ## Visualization
 #
@@ -140,4 +140,3 @@ fig[1, :] = Label(fig, "Single Column Gray Radiation (O'Gorman & Schneider, 2008
 
 save("single_column_radiation.png", fig)
 fig
-

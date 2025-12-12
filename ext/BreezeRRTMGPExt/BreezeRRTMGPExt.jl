@@ -16,6 +16,7 @@ using Oceananigans.Fields: ZFaceField
 #   NoScatLWRTE, NoScatSWRTE: longwave/shortwave RTE solvers  
 #   FluxLW, FluxSW: flux storage (flux_up, flux_dn, flux_net, flux_dn_dir)
 #   RRTMGPParameters: physical constants for RRTMGP
+
 using RRTMGP: RRTMGPGridParams
 using RRTMGP.AtmosphericStates: GrayAtmosphericState, GrayOpticalThicknessOGorman2008
 using RRTMGP.RTE: NoScatLWRTE, NoScatSWRTE
@@ -29,8 +30,7 @@ using Breeze.CelestialMechanics: cos_solar_zenith_angle
 const SingleColumnGrid = RectilinearGrid{<:Any, <:Flat, <:Flat, <:Bounded}
 const DateTimeClock = Clock{DateTime}
 
-include("gray_radiation.jl")
-include("update_radiation.jl")
+include("gray_radiative_transfer_model.jl")
 
 end # module
 

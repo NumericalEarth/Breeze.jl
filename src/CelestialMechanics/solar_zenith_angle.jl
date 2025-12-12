@@ -124,7 +124,7 @@ where:
 # Returns
 A value between -1 and 1. Negative values indicate the sun is below the horizon.
 """
-function cos_solar_zenith_angle(datetime::DateTime, latitude, longitude)
+function cos_solar_zenith_angle(datetime::DateTime, longitude, latitude)
     φ = deg2rad(latitude)
     doy = day_of_year(datetime)
     δ = solar_declination(doy)
@@ -148,5 +148,5 @@ extracts latitude from the y-coordinate and longitude from the x-coordinate.
 function cos_solar_zenith_angle(i, j, grid::SingleColumnGrid, datetime::DateTime)
     λ = xnode(i, j, 1, grid, Center(), Center(), Center())
     φ = ynode(i, j, 1, grid, Center(), Center(), Center())
-    return cos_solar_zenith_angle(datetime, φ, λ)
+    return cos_solar_zenith_angle(datetime, λ, φ)
 end
