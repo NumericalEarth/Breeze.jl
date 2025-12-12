@@ -78,27 +78,21 @@ formulation = AnelasticFormulation(reference_state,
 # These values are similar to BOMEX but produce a moister boundary layer
 # that supports warm-rain processes.
 
-FT = eltype(grid)
-p₀ = reference_state.surface_pressure
-θ₀ = reference_state.potential_temperature
-q₀ = Breeze.Thermodynamics.MoistureMassFractions{FT} |> zero
-ρ₀ = Breeze.Thermodynamics.density(p₀, θ₀, q₀, constants)
-
-Cₕ = 1.094e-3
-C_q = 1.133e-3
+Cᵀ = 1.094e-3
+Cᵛ = 1.133e-3
 T₀ = 299.8  # sea surface temperature (K)
 
-ρθ_flux = BulkSensibleHeatFlux(coefficient=Cₕ, surface_temperature=θ₀)
-ρqᵗ_flux = BulkVaporFlux(coefficient=C_q, surface_temperature=T₀)
+ρθ_flux = BulkSensibleHeatFlux(coefficient=Cᵀ, surface_temperature=T₀)
+ρqᵗ_flux = BulkVaporFlux(coefficient=Cᵛ, surface_temperature=T₀)
 
 ρθ_bcs = FieldBoundaryConditions(bottom=ρθ_flux)
 ρqᵗ_bcs = FieldBoundaryConditions(bottom=ρqᵗ_flux)
 
 # ## Surface momentum flux (drag)
-#
-Cₘ = 1.229e-3
-ρu_bcs = FieldBoundaryConditions(bottom=BulkDrag(coefficient=Cₘ))
-ρv_bcs = FieldBoundaryConditions(bottom=BulkDrag(coefficient=Cₘ))
+
+Cᴰ = 1.229e-3
+ρu_bcs = FieldBoundaryConditions(bottom=BulkDrag(coefficient=Cᴰ))
+ρv_bcs = FieldBoundaryConditions(bottom=BulkDrag(coefficient=Cᴰ))
 
 # ## Large-scale subsidence
 #
@@ -109,14 +103,11 @@ Cₘ = 1.229e-3
 wˢ = Field{Nothing, Nothing, Face}(grid)
 wˢ_profile = AtmosphericProfilesLibrary.Rico_subsidence(FT)
 set!(wˢ, z -> wˢ_profile(z))
+subsidence = SubsidenceForcing(wˢ)
 
 # Visualize the subsidence profile:
 
 lines(wˢ; axis = (xlabel = "wˢ (m/s)",))
-
-# Subsidence is implemented as an advection of the horizontally-averaged prognostic variables.
-
-subsidence = SubsidenceForcing(wˢ)
 
 # ## Geostrophic forcing
 #
@@ -150,20 +141,23 @@ set!(drying, ρᵣ * drying)
 
 cooling = Field{Nothing, Nothing, Center}(grid)
 dTdt_rico = AtmosphericProfilesLibrary.Rico_dTdt(FT)
+cᵖᵈ = constants.dry_air.heat_capacity
 set!(cooling, z -> dTdt_rico(1, z))
-set!(cooling, ρᵣ * cooling)
-ρθ_radiation_forcing = Forcing(cooling)
+set!(cooling, ρᵣ * cᵖᵈ * cooling)
+ρe_radiation_forcing = Forcing(cooling)
 
 # ## Assembling forcing and boundary conditions
 
-Fρu = (subsidence)#, geostrophic.ρu)
-Fρv = (subsidence)#, geostrophic.ρv)
+# Fρu = (subsidence, geostrophic.ρu)
+# Fρv = (subsidence, geostrophic.ρv)
+Fρu = subsidence
+Fρv = subsidence
 Fρqᵗ = (subsidence, ρqᵗ_drying_forcing)
-Fρθ = (subsidence, ρθ_radiation_forcing) 
+Fρθ = subsidence
+Fρe = ρe_radiation_forcing
 
-forcing = (ρu=Fρu, ρv=Fρv, ρθ=Fρθ, ρqᵗ=Fρqᵗ)
+forcing = (ρu=Fρu, ρv=Fρv, ρθ=Fρθ, ρqᵗ=Fρqᵗ, ρe=Fρe)
 boundary_conditions = (ρθ=ρθ_bcs, ρqᵗ=ρqᵗ_bcs, ρu=ρu_bcs, ρv=ρv_bcs)
-
 nothing #hide
 
 # ## Model setup
@@ -181,7 +175,7 @@ BreezeCloudMicrophysicsExt = Base.get_extension(Breeze, :BreezeCloudMicrophysics
 using .BreezeCloudMicrophysicsExt: ZeroMomentCloudMicrophysics
 
 nucleation = SaturationAdjustment(equilibrium=WarmPhaseEquilibrium())
-microphysics = ZeroMomentCloudMicrophysics(τ_precip=20minutes, qc_0=2e-4; nucleation)
+microphysics = ZeroMomentCloudMicrophysics(τ_precip=2minutes, qc_0=2e-4; nucleation)
 advection = WENO(order=9)
 
 model = AtmosphereModel(grid; formulation, coriolis, microphysics,
@@ -208,7 +202,9 @@ Rᵈ = dry_air_gas_constant(constants)
 cᵖᵈ = constants.dry_air.heat_capacity
 p₀ = reference_state.surface_pressure
 χ = (p₀ / 1e5)^(Rᵈ / cᵖᵈ)
-θᵢ(x, y, z) = χ * θˡⁱ₀(z)
+zϵ = 1500 # m 
+
+θᵢ(x, y, z) = χ * θˡⁱ₀(z) + 1e-1 * (rand() - 1) * (z < zϵ)
 qᵢ(x, y, z) = qᵗ₀(z)
 uᵢ(x, y, z) = u₀(z)
 vᵢ(x, y, z) = v₀(z)
@@ -221,7 +217,7 @@ set!(model, θ=θᵢ, qᵗ=qᵢ, u=uᵢ, v=vᵢ)
 # RICO typically requires longer integration times than BOMEX to develop
 # a quasi-steady precipitating state.
 
-simulation = Simulation(model; Δt=10, stop_time=6hour)
+simulation = Simulation(model; Δt=10, stop_time=12hour)
 conjure_time_step_wizard!(simulation, cfl=0.7)
 
 # ## Output and progress
@@ -260,7 +256,7 @@ function progress(sim)
     return nothing
 end
 
-add_callback!(simulation, progress, TimeInterval(1hour))
+add_callback!(simulation, progress, IterationInterval(100)) #TimeInterval(1hour))
 
 outputs = merge(model.velocities, model.tracers, (; θ, qˡ, qᵛ))
 averaged_outputs = NamedTuple(name => Average(outputs[name], dims=(1, 2)) for name in keys(outputs))
@@ -287,7 +283,7 @@ slice_outputs = (
 
 filename = "rico_slices.jld2"
 simulation.output_writers[:slices] = JLD2Writer(model, slice_outputs; filename,
-                                                schedule = TimeInterval(2minutes),
+                                                schedule = TimeInterval(10minutes),
                                                 overwrite_existing = true)
 
 @info "Running RICO simulation..."

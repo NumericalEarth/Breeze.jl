@@ -2,6 +2,8 @@
 ##### Microphysics interface (default implementations)
 #####
 
+using Oceananigans.Fields: ZeroField
+
 using ..Thermodynamics:
     temperature,
     MoistureMassFractions
@@ -111,4 +113,7 @@ Specific microphysics schemes must extend this function.
 precipitation_rate(model, phase::Symbol=:liquid) = precipitation_rate(model, model.microphysics, Val(phase))
 
 # Default: no precipitation for Nothing microphysics
-precipitation_rate(model, ::Nothing, phase) = nothing
+# We implmement this as a fallback for convenience
+# TODO: support reductions over ZeroField or the like, so we can swap
+# non-precipitating microphysics schemes with precipitating ones
+precipitation_rate(model, microphysics, phase) = CenterField(model.grid) 

@@ -13,6 +13,7 @@ using ..Thermodynamics:
     AbstractThermodynamicState
 
 using Oceananigans: Oceananigans, CenterField
+using Oceananigans.Fields: ZeroField
 using DocStringExtensions: TYPEDSIGNATURES
 
 import ..Thermodynamics: saturation_specific_humidity
