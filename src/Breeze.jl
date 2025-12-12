@@ -46,11 +46,10 @@ export
     # Radiation (implemented by extensions)
     GrayRadiation,
 
-    # Celestial mechanics
-    cos_solar_zenith_angle,
-    solar_declination,
-    equation_of_time,
-    hour_angle,
+    # BoundaryConditions
+    BulkDrag,
+    BulkSensibleHeatFlux,
+    BulkVaporFlux,
 
     # Forcing utilities
     geostrophic_forcings,
@@ -114,9 +113,6 @@ using .Thermodynamics
 include("MoistAirBuoyancies.jl")
 using .MoistAirBuoyancies
 
-include("Forcings/Forcings.jl")
-using .Forcings
-
 include("AtmosphereModels/AtmosphereModels.jl")
 using .AtmosphereModels
 
@@ -131,6 +127,12 @@ using .Advection
 
 include("CelestialMechanics/CelestialMechanics.jl")
 using .CelestialMechanics
+
+include("BoundaryConditions/BoundaryConditions.jl")
+using .BoundaryConditions
+
+include("Forcings/Forcings.jl")
+using .Forcings
 
 #####
 ##### Radiation stubs (implemented by extensions)

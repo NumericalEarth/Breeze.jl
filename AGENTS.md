@@ -150,10 +150,17 @@ Breeze interfaces with ClimaOcean for coupled atmosphere-ocean simulations.
   - Fields and AbstractOperations can be used in `set!`.
   - `compute!` is called in the `Field(op)` constructor for `op::AbstractOperation`. It is redundant to call `compute!`
     immediately after building a `Field`.
-  - "doctests" usually should not contain actual equality comparisons or "tests". Instead, doctests should exercise `Base.show`.
-    Developing a doctest typically also involves ensuring that `show` for a newly defined object looks good and is human-readable.
-    In turn this can require work for nested structs to develop summary, prettysummary, and other methods for
-    displaying the content of a new type.
+
+6. **Doctests**
+  - Always use `jldoctest` blocks, never plain code blocks (`` ```julia ``). Plain code blocks are not tested.
+  - All doctests must include expected output. A doctest without output will fail.
+  - Doctests should exercise `Base.show` rather than equality comparisons. The purpose is to verify
+    that objects display correctly and that the code runs without error.
+  - Developing a doctest typically involves ensuring that `show` for a newly defined object looks good
+    and is human-readable. This can require work on nested structs to develop `summary`, `prettysummary`,
+    and other display methods.
+  - For doctests that only need to verify code runs, end with a statement that produces simple output,
+    such as `typeof(result)` or accessing a field that returns a simple value.
 
 
 ### Naming Conventions

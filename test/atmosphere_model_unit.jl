@@ -1,15 +1,26 @@
 using Breeze
 using GPUArraysCore: @allowscalar
 using Oceananigans
+using Oceananigans.Operators: ℑzᵃᵃᶠ
 using Test
 
 @testset "AtmosphereModel [$(FT)]" for FT in (Float32, Float64)
-    grid = RectilinearGrid(default_arch, FT; size=(8, 8, 8), x=(0, 1_000), y=(0, 1_000), z=(0, 1_000))
+    Nx = Ny = 3
+    grid = RectilinearGrid(default_arch, FT; size=(Nx, Ny, 8), x=(0, 1_000), y=(0, 1_000), z=(0, 1_000))
     constants = ThermodynamicConstants(FT)
 
     for p₀ in (101325, 100000), θ₀ in (288, 300), thermodynamics in (:LiquidIcePotentialTemperature, :StaticEnergy)
         @testset let p₀ = p₀, θ₀ = θ₀, thermodynamics = thermodynamics
             reference_state = ReferenceState(grid, constants, surface_pressure=p₀, potential_temperature=θ₀)
+
+            # Check that interpolating to the first face (k=1) recovers surface values
+            q₀ = Breeze.Thermodynamics.MoistureMassFractions{FT} |> zero
+            ρ₀ = Breeze.Thermodynamics.density(p₀, θ₀, q₀, constants)
+            for i = 1:Nx, j = 1:Ny
+                @test p₀ ≈ @allowscalar ℑzᵃᵃᶠ(i, j, 1, grid, reference_state.pressure)
+                @test ρ₀ ≈ @allowscalar ℑzᵃᵃᶠ(i, j, 1, grid, reference_state.density)
+            end
+
             formulation = AnelasticFormulation(reference_state; thermodynamics)
             model = AtmosphereModel(grid; thermodynamic_constants=constants, formulation)
 

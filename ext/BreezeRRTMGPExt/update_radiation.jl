@@ -17,13 +17,9 @@ using Oceananigans.Operators: ℑzᵃᵃᶠ
 
 using KernelAbstractions: @kernel, @index
 using Oceananigans.Utils: launch!
-using Oceananigans.Operators: ℑzᵃᵃᶠ
 
-using Breeze: dry_air_gas_constant
-using Breeze.AtmosphereModels: ReferenceState
 using Breeze.Thermodynamics: adiabatic_hydrostatic_pressure
-
-import Breeze.AtmosphereModels: update_radiation!
+using Breeze.AtmosphereModels: AtmosphereModels
 
 """
     $(TYPEDSIGNATURES)
@@ -38,7 +34,7 @@ This function:
 
 Sign convention: positive flux = upward, negative flux = downward.
 """
-function update_radiation!(radiation::GrayRadiationModel, model)
+function AtmosphereModels.update_radiation!(radiation::GrayRadiationModel, model)
     grid = model.grid
     clock = model.clock
 
