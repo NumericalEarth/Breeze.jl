@@ -8,7 +8,7 @@ export cos_solar_zenith_angle,
 
 using Dates: DateTime, Dates
 
-using Oceananigans.Grids: AbstractGrid, Flat, topology
+using Oceananigans.Grids: RectilinearGrid, Flat, Bounded, Center, xnode, ynode
 
 include("solar_zenith_angle.jl")
 

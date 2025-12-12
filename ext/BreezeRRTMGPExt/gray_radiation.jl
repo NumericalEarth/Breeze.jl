@@ -8,6 +8,8 @@
 ##### This extension provides the constructor and update methods.
 #####
 
+using Oceananigans.Grids: znodes
+
 import Breeze: GrayRadiativeTransferModel
 
 """
@@ -26,15 +28,15 @@ Uses the O'Gorman and Schneider (2008) optical thickness parameterization.
 - `surface_albedo`: Surface albedo, 0-1 (default: 0.1). Can be scalar or 2D field.
 - `solar_constant`: Top-of-atmosphere solar flux in W/m² (default: 1361)
 """
-function Breeze.GrayRadiativeTransferModel(grid, constants;
-                              stefan_boltzmann_constant = 5.670374419e-8,
-                              avogadro_number = 6.02214076e23,
-                              optical_thickness = nothing,
-                              latitude = nothing,
-                              surface_temperature = 300,
-                              surface_emissivity = 0.98,
-                              surface_albedo = 0.1,
-                              solar_constant = 1361)
+function GrayRadiativeTransferModel(grid, constants;
+                                    stefan_boltzmann_constant = 5.670374419e-8,
+                                    avogadro_number = 6.02214076e23,
+                                    optical_thickness = nothing,
+                                    latitude = nothing,
+                                    surface_temperature = 300,
+                                    surface_emissivity = 0.98,
+                                    surface_albedo = 0.1,
+                                    solar_constant = 1361)
 
     FT = eltype(grid)
     
@@ -73,19 +75,9 @@ function Breeze.GrayRadiativeTransferModel(grid, constants;
     z_lev = DA{FT}(undef, Nz+1, Nc)
     t_sfc = DA{FT}(undef, Nc)
 
-    # Set latitude: either from keyword argument or from grid
-    if isnothing(latitude)
-        # Extract from grid y-coordinate (for RectilinearGrid with Flat x/y, this gives location)
-        φ = grid.yᵃᶜᵃ[1]
-        rrtmgp_latitude .= FT(φ)
-    elseif latitude isa Number
-        rrtmgp_latitude .= FT(latitude)
-    else
-        # latitude is a field - will be handled in update_radiation!
-        # For now, initialize with zeros; the update kernel will fill it
-        rrtmgp_latitude .= FT(0)
-    end
-
+    rrtmgp_latitude .= 0
+    set_latitude!(rrtmgp_latitude, latitude, grid)
+    
     # Set altitude at cell faces (fixed, doesn't change during simulation)
     # z_lev has shape (Nz+1, Nc) - broadcast z nodes across all columns
     zf = znodes(grid, Face())
@@ -130,9 +122,13 @@ function Breeze.GrayRadiativeTransferModel(grid, constants;
     downwelling_shortwave_flux = ZFaceField(grid)  # Direct beam only
 
     # Store surface properties (can be scalar or field)
-    surface_temperature = surface_temperature isa Number ? convert(FT, surface_temperature) : surface_temperature
-    surface_albedo = surface_albedo isa Number ? convert(FT, surface_albedo) : surface_albedo
-    latitude = latitude isa Number ? convert(FT, latitude) : latitude
+    if surface_temperature isa Number
+        surface_temperature = ConstantField(convert(FT, surface_temperature))
+    end
+
+    if surface_albedo isa Number
+        surface_albedo = ConstantField(convert(FT, surface_albedo))
+    end
 
     return GrayRadiativeTransferModel(longwave_solver,
                          shortwave_solver,
@@ -146,6 +142,19 @@ function Breeze.GrayRadiativeTransferModel(grid, constants;
                          convert(FT, surface_emissivity),
                          surface_albedo,
                          convert(FT, solar_constant))
+end
+
+function set_latitude!(rrtmgp_latitude, ::Nothing, grid::SingleColumnGrid)
+    # TODO: could launch kernel over xy to support ensembles of columns
+    φ = ynode(1, 1, 1, grid, Center(), Center(), Center())
+    rrtmgp_latitude .= φ
+    return nothing
+end
+
+function set_latitude!(rrtmgp_latitude, latitude::Number, grid)
+    FT = eltype(grid)
+    rrtmgp_latitude .= FT(latitude)
+    return nothing
 end
 
 """

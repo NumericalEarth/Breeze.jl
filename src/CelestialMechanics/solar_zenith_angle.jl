@@ -135,6 +135,8 @@ function cos_solar_zenith_angle(datetime::DateTime, latitude, longitude)
     return cos_θz
 end
 
+const SingleColumnGrid = RectilinearGrid{<:Any, <:Flat, <:Flat, <:Bounded}
+
 """
     cos_solar_zenith_angle(grid::AbstractGrid, datetime::DateTime)
 
@@ -143,16 +145,8 @@ Compute the cosine of the solar zenith angle for the grid's location.
 For single-column grids with `Flat` horizontal topology,
 extracts latitude from the y-coordinate and longitude from the x-coordinate.
 """
-function cos_solar_zenith_angle(grid::AbstractGrid, datetime::DateTime)
-    TX, TY, TZ = topology(grid)
-
-    if TX == Flat && TY == Flat
-        # Single column: x is longitude, y is latitude
-        λ = grid.xᶜᵃᵃ[1]  # longitude
-        φ = grid.yᵃᶜᵃ[1]  # latitude
-        return cos_solar_zenith_angle(datetime, φ, λ)
-    else
-        error("cos_solar_zenith_angle for multi-column grids not yet implemented")
-    end
+function cos_solar_zenith_angle(i, j, grid::SingleColumnGrid, datetime::DateTime)
+    λ = xnode(i, j, 1, grid, Center(), Center(), Center())
+    φ = ynode(i, j, 1, grid, Center(), Center(), Center())
+    return cos_solar_zenith_angle(datetime, φ, λ)
 end
-

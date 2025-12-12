@@ -8,8 +8,8 @@ using DocStringExtensions: TYPEDSIGNATURES
 
 # Oceananigans imports
 using Oceananigans.Architectures: architecture, CPU
-using Oceananigans.Grids: AbstractGrid, Center, Face, Flat, Bounded, znode
-using Oceananigans.Fields: ZFaceField
+using Oceananigans.Grids: AbstractGrid, RectilinearGrid, Center, Face, Flat, Bounded, ynode
+using Oceananigans.Fields: ZFaceField, ConstantField
 
 # RRTMGP imports (external types - cannot modify)
 #   GrayAtmosphericState: atmospheric state arrays (t_lay, p_lay, t_lev, p_lev, z_lev, t_sfc)
@@ -25,6 +25,9 @@ using RRTMGP.Parameters: RRTMGPParameters
 using ClimaComms: ClimaComms
 
 using Breeze.CelestialMechanics: cos_solar_zenith_angle
+
+const SingleColumnGrid = RectilinearGrid{<:Any, <:Flat, <:Flat, <:Bounded}
+const DateTimeClock = Clock{DateTime}
 
 include("gray_radiation.jl")
 include("update_radiation.jl")

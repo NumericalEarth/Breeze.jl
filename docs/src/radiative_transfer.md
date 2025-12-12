@@ -10,12 +10,11 @@ The simplest radiative transfer option is gray atmosphere radiation, which uses 
 
 To use gray radiation in a Breeze simulation, create a [`GrayRadiativeTransferModel`](@ref) model and pass it to the [`AtmosphereModel`](@ref) constructor:
 
-```julia
+```@example
 using Breeze
 using Oceananigans.Units
 using Dates
 
-# Create grid (single column at Beverly, MA)
 Nz = 64
 λ, φ = -70.9, 42.5  # longitude, latitude
 grid = RectilinearGrid(size=Nz, x=λ, y=φ, z=(0, 20kilometers),
@@ -31,10 +30,10 @@ formulation = AnelasticFormulation(reference_state,
 
 # Create gray radiation model
 radiation = GrayRadiativeTransferModel(grid;
-                          surface_temperature = 300,    # K
-                          surface_emissivity = 0.98,
-                          surface_albedo = 0.1,
-                          solar_constant = 1361)        # W/m²
+                                       surface_temperature = 300,    # K
+                                       surface_emissivity = 0.98,
+                                       surface_albedo = 0.1,
+                                       solar_constant = 1361)        # W/m²
 
 # Create atmosphere model with DateTime clock for solar position
 clock = Clock(time=DateTime(2024, 9, 27, 16, 0, 0))
@@ -71,11 +70,11 @@ After running [`set!`](@ref) or [`update_state!`](@ref), the radiative fluxes ar
 
 ```julia
 # Longwave fluxes (ZFaceFields)
-F_lw_up = radiation.upwelling_longwave_flux
-F_lw_dn = radiation.downwelling_longwave_flux
+ℐ_lw_up = radiation.upwelling_longwave_flux
+ℐ_lw_dn = radiation.downwelling_longwave_flux
 
 # Shortwave flux (direct beam only for non-scattering solver)
-F_sw = radiation.downwelling_shortwave_flux
+ℐ_sw = radiation.downwelling_shortwave_flux
 ```
 
 !!! note "Shortwave Radiation"
@@ -110,10 +109,10 @@ The [`GrayRadiativeTransferModel`](@ref) model requires surface properties:
 Radiative fluxes can be used to compute heating rates for the energy equation. The radiative heating rate is computed from flux divergence:
 
 ```math
-\dot{Q}_{rad} = -\frac{1}{\rho c_p} \frac{\partial F_{net}}{\partial z}
+F_{\mathscr{I}} = -\frac{1}{\rho cᵖᵐ} \frac{\partial \mathscr{I}_{net}}{\partial z}
 ```
 
-where ``F_{net}`` is the net radiative flux (upwelling minus downwelling) and ``c_p`` is the specific heat capacity.
+where ``\mathscr{I}_{net}`` is the net radiative flux (upwelling minus downwelling), ``cᵖᵐ`` is the mixture heat capacity, and ``F_{\mathscr{I}}`` is the radiative flux divergence (heating rate).
 
 ## Architecture Support
 

@@ -176,39 +176,14 @@ end
     @inbounds begin
         # Surface temperature (scalar in this implementation)
         if k == 1
-            T₀[col] = surface_temperature
+            T₀[col] = surface_temperature[i, j, 1]
         end
 
-        # Cell values (centers)
         Tᶜ[k, col] = T[i, j, k]
         pᶜ[k, col] = p[i, j, k]
 
-        # Face values (interfaces)
-        # Face k is at the bottom of cell k
-        # Face 1: bottom (surface)
-        # Face Nz+1: top (TOA)
-        if k == 1
-            # Bottom face (surface): use first cell values
-            pᶠ[1, col] = p[i, j, 1]
-            Tᶠ[1, col] = T[i, j, 1]
-        end
-
-        # Interior faces (between cells k and k+1)
-        if k < Nz
-            kface = k + 1
-            # Geometric mean for pressure (log-linear interpolation)
-            pᶠ[kface, col] = sqrt(p[i, j, k] * p[i, j, k + 1])
-            # Arithmetic mean for temperature
-            Tᶠ[kface, col] = (T[i, j, k] + T[i, j, k + 1]) / 2
-        end
-
-        # Top face (TOA): extrapolate from top cell
-        if k == Nz
-            nlev = Nz + 1
-            # Rough pressure extrapolation (halve top cell pressure)
-            pᶠ[nlev, col] = p[i, j, Nz] / 2
-            Tᶠ[nlev, col] = T[i, j, Nz]
-        end
+        pᶠ[1, col] = ℑzᵃᵃᶠ(i, j, k, grid, p)
+        Tᶠ[1, col] = ℑzᵃᵃᶠ(i, j, k, grid, T)
     end
 end
 
@@ -224,17 +199,9 @@ Update the solar zenith angle in the shortwave solver from the model clock.
 Uses the datetime from `clock.time` and the grid's location (latitude/longitude)
 to compute the cosine of the solar zenith angle via celestial mechanics.
 """
-function update_solar_zenith_angle!(sw_solver, grid, clock)
-    datetime = clock.time
-
-    if datetime isa DateTime
-        cos_θz = cos_solar_zenith_angle(grid, datetime)
-        sw_solver.bcs.cos_zenith[1] = max(cos_θz, 0)  # Clamp to positive (sun above horizon)
-    else
-        # If clock.time is not a DateTime, use a default (overhead sun)
-        sw_solver.bcs.cos_zenith[1] = 0.5
-    end
-
+function update_solar_zenith_angle!(sw_solver, grid::SingleColumnGrid, clock::DateTimeClock)
+    cos_θz = cos_solar_zenith_angle(1, 1, grid, clock.time)
+    sw_solver.bcs.cos_zenith[1] = max(cos_θz, 0)  # Clamp to positive (sun above horizon)
     return nothing
 end
 
@@ -264,27 +231,25 @@ function copy_fluxes_to_fields!(radiation::GrayRadiativeTransferModel, grid)
     ℐ_lw_dn = radiation.downwelling_longwave_flux
     ℐ_sw_dn = radiation.downwelling_shortwave_flux
 
-    launch!(arch, grid, :xyz, _copy_fluxes_kernel!,
+    Nx, Ny, Nz = size(grid)
+    launch!(arch, grid, (Nx, Ny, Nz+1), _copy_rrtmgp_fluxes!,
             ℐ_lw_up, ℐ_lw_dn, ℐ_sw_dn, lw_flux_up, lw_flux_dn, sw_flux_dn_dir, grid)
-
-    # Handle top face (k = Nz + 1) separately since kernel only goes to Nz
-    ℐ_lw_up[1, 1, Nz + 1] = lw_flux_up[Nz + 1, 1]
-    ℐ_lw_dn[1, 1, Nz + 1] = -lw_flux_dn[Nz + 1, 1]
-    ℐ_sw_dn[1, 1, Nz + 1] = -sw_flux_dn_dir[Nz + 1, 1]
 
     return nothing
 end
 
-@kernel function _copy_fluxes_kernel!(ℐ_lw_up, ℐ_lw_dn, ℐ_sw_dn, 
+@kernel function _copy_rrtmgp_fluxes!(ℐ_lw_up, ℐ_lw_dn, ℐ_sw_dn, 
                                       lw_flux_up, lw_flux_dn, sw_flux_dn_dir, grid)
     i, j, k = @index(Global, NTuple)
 
     # RRTMGP uses (nlev, ncol), we use (i, j, k) for ZFaceField
     # Sign convention: upwelling positive, downwelling negative
+    col = rrtmgp_column_index(i, j, grid.Nx)
+
     @inbounds begin
-        ℐ_lw_up[i, j, k] = lw_flux_up[k, 1]
-        ℐ_lw_dn[i, j, k] = -lw_flux_dn[k, 1]  # Negate for downward
-        ℐ_sw_dn[i, j, k] = -sw_flux_dn_dir[k, 1]  # Negate for downward
+        ℐ_lw_up[i, j, k] = lw_flux_up[k, col]
+        ℐ_lw_dn[i, j, k] = -lw_flux_dn[k, col]  # Negate for downward
+        ℐ_sw_dn[i, j, k] = -sw_flux_dn_dir[k, col]  # Negate for downward
     end
 end
 
