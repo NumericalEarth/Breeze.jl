@@ -41,6 +41,7 @@ example_pages = [
     "Shallow cumulus convection (BOMEX)" => "literated/bomex.md",
     "Prescribed SST" => "literated/prescribed_sst.md",
     "Inertia gravity wave" => "literated/inertia_gravity_wave.md",
+    "Moist baroclinic instability" => "literated/moist_baroclinic_instability.md",
 ]
 
 literate_code(script_path, literated_dir) = """
