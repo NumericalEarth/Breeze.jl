@@ -64,7 +64,7 @@ radiation = GrayRadiativeTransferModel(grid, constants;
 #
 # Build the atmosphere model with saturation adjustment microphysics.
 
-clock = Clock(time=DateTime(2024, 9, 27, 16, 0, 0))
+clock = Clock(time=DateTime(2025, 9, 27, 16, 0, 0))
 microphysics = SaturationAdjustment(equilibrium = WarmPhaseEquilibrium())
 model = AtmosphereModel(grid; clock, formulation, microphysics, radiation)
 
