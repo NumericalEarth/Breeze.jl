@@ -84,14 +84,28 @@ p₀ = reference_state.surface_pressure
 q₀ = Breeze.Thermodynamics.MoistureMassFractions{FT} |> zero
 ρ₀ = Breeze.Thermodynamics.density(p₀, θ₀, q₀, constants)
 
+# Bulk sensible heat flux + constant 21 W/m² flux
 Cₕ = 1.094e-3
+cₚ = constants.dry_air.heat_capacity
+H₀ = 21.0  # W/m²
+ρw′θ′₀ = H₀ / cₚ  # constant kinematic flux contribution
+
+# Combined flux function: bulk formula + constant offset
+function ρθ_surface_flux(x, y, t, ρu, ρv, ρθ, p)
+    U = sqrt(ρu^2 + ρv^2) / p.ρ₀
+    bulk_flux = -p.ρ₀ * p.Cₕ * U * (ρθ / p.ρ₀ - p.θ₀)
+    return bulk_flux + p.ρw′θ′₀
+end
+
+ρθ_flux = FluxBoundaryCondition(ρθ_surface_flux,
+                                field_dependencies=(:ρu, :ρv, :ρθ),
+                                parameters=(; ρ₀, Cₕ, θ₀, ρw′θ′₀))
+ρθ_bcs = FieldBoundaryConditions(bottom=ρθ_flux)
+
 C_q = 1.133e-3
 T₀ = 299.8  # sea surface temperature (K)
 
-ρθ_flux = BulkSensibleHeatFlux(coefficient=Cₕ, surface_temperature=θ₀)
 ρqᵗ_flux = BulkVaporFlux(coefficient=C_q, surface_temperature=T₀)
-
-ρθ_bcs = FieldBoundaryConditions(bottom=ρθ_flux)
 ρqᵗ_bcs = FieldBoundaryConditions(bottom=ρqᵗ_flux)
 
 # ## Surface momentum flux (drag)
@@ -182,7 +196,7 @@ using .BreezeCloudMicrophysicsExt: ZeroMomentCloudMicrophysics
 
 nucleation = SaturationAdjustment(equilibrium=WarmPhaseEquilibrium())
 microphysics = ZeroMomentCloudMicrophysics(τ_precip=20minutes, qc_0=2e-4; nucleation)
-advection = WENO(order=9)
+advection = WENO(order=9, minimum_buffer_upwind_order=3)
 
 model = AtmosphereModel(grid; formulation, coriolis, microphysics,
                         advection, forcing, boundary_conditions)
