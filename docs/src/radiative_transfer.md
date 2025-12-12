@@ -1,6 +1,6 @@
 # Radiative Transfer
 
-Breeze.jl integrates with [RRTMGP.jl](https://github.com/NumericalEarth/RRTMGP.jl) to provide radiative transfer capabilities for atmospheric simulations. The radiative transfer model computes longwave and shortwave radiative fluxes, which can be incorporated into energy tendency equations.
+Breeze.jl integrates with [RRTMGP.jl](https://github.com/CliMA/RRTMGP.jl) to provide radiative transfer capabilities for atmospheric simulations. The radiative transfer model computes longwave and shortwave radiative fluxes, which can be incorporated into energy tendency equations.
 
 ## Gray Atmosphere Radiation
 
