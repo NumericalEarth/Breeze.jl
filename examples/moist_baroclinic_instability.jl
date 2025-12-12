@@ -40,7 +40,7 @@ Random.seed!(1234)
 
 Oceananigans.defaults.FloatType = Float32
 arch = GPU()              # architecture for the simulation
-Nx, Ny, Nz = 64, 64, 16   # resolution (low for testing; increase for production)
+Nx, Ny, Nz = 128, 128, 32   # resolution 
 Lx = 6000kilometers       # zonal extent
 Ly = 3000kilometers       # meridional extent (channel width)
 Lz = 10kilometers         # vertical extent (troposphere depth)
