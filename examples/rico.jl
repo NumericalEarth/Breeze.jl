@@ -88,12 +88,11 @@ Cₕ = 1.094e-3
 C_q = 1.133e-3
 T₀ = 299.8  # sea surface temperature (K)
 
-ρθ_bc = BulkSensibleHeatFlux(coefficient=Cₕ, surface_temperature=θ₀)
-ρqᵗ_bc = BulkVaporFlux(coefficient=C_q, surface_temperature=T₀)
+ρθ_flux = BulkSensibleHeatFlux(coefficient=Cₕ, surface_temperature=θ₀)
+ρqᵗ_flux = BulkVaporFlux(coefficient=C_q, surface_temperature=T₀)
 
-ρθ_bcs = FieldBoundaryConditions(bottom=ρθ_bc)
-ρqᵗ_bcs = FieldBoundaryConditions(bottom=ρqᵗ_bc)
-
+ρθ_bcs = FieldBoundaryConditions(bottom=ρθ_flux)
+ρqᵗ_bcs = FieldBoundaryConditions(bottom=ρqᵗ_flux)
 # ## Surface momentum flux (drag)
 #
 Cₘ = 1.229e-3
