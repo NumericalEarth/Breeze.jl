@@ -23,9 +23,11 @@ grid = RectilinearGrid(size=Nz, x=λ, y=φ, z=(0, 20kilometers),
 
 # Thermodynamic setup
 constants = ThermodynamicConstants()
+
 reference_state = ReferenceState(grid, constants;
                                  surface_pressure = 101325,
                                  potential_temperature = 300)
+
 formulation = AnelasticFormulation(reference_state,
                                    thermodynamics = :LiquidIcePotentialTemperature)
 
@@ -45,7 +47,7 @@ When a `DateTime` clock is used, the solar zenith angle is computed automaticall
 
 ### Gray Radiation Model
 
-The [`GrayRadiativeTransferModel`](@ref) model computes:
+The `GrayRadiativeTransferModel` model computes:
 
 - **Longwave radiation**: Both upwelling and downwelling thermal radiation using RRTMGP's two-stream solver
 - **Shortwave radiation**: Direct beam solar radiation (no scattering) using the O'Gorman optical thickness
@@ -96,7 +98,7 @@ The calculation accounts for:
 
 ## Surface Properties
 
-The [`GrayRadiativeTransferModel`](@ref) model requires surface properties:
+The `GrayRadiativeTransferModel` model requires surface properties:
 
 | Property | Description | Typical Values |
 |----------|-------------|----------------|
