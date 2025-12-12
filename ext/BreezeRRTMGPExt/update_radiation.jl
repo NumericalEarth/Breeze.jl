@@ -1,3 +1,5 @@
+using Oceananigans.Operators: ℑzᵃᵃᶠ
+
 #####
 ##### Update radiation fluxes from model state
 #####
@@ -24,7 +26,7 @@ using Breeze.Thermodynamics: adiabatic_hydrostatic_pressure
 import Breeze.AtmosphereModels: update_radiation!
 
 """
-    update_radiation!(radiation::GrayRadiationModel, model)
+    $(TYPEDSIGNATURES)
 
 Update the radiative fluxes from the current model state.
 
@@ -38,15 +40,13 @@ Sign convention: positive flux = upward, negative flux = downward.
 """
 function update_radiation!(radiation::GrayRadiationModel, model)
     grid = model.grid
-    arch = architecture(grid)
     clock = model.clock
-    constants = model.thermodynamic_constants
 
     rrtmgp_state = radiation.atmospheric_state
     surface_temperature = radiation.surface_temperature
 
     # Update RRTMGP atmospheric state from model fields
-    update_rrtmgp_atmospheric_state!(rrtmgp_state, model, surface_temperature, constants)
+    update_rrtmgp_state!(rrtmgp_state, model, surface_temperature)
 
     # Update solar zenith angle from clock
     update_solar_zenith_angle!(radiation.shortwave_solver, grid, clock)
@@ -77,147 +77,141 @@ end
 #####
 
 """
-    update_rrtmgp_atmospheric_state!(rrtmgp_state, model, surface_temperature, constants)
+    $(TYPEDSIGNATURES)
 
 Update the RRTMGP `GrayAtmosphericState` arrays from model fields.
 
+# Grid staggering: layers vs levels
+
+RRTMGP requires atmospheric state at both "layers" (cell centers) and "levels" (cell faces).
+This matches the finite-volume staggering used in Oceananigans:
+
+```
+                        ┌─────────────────────────────────────────────────┐
+    z_lev[Nz+1] ━━━━━━━ │  level Nz+1 (TOA):  p_lev, t_lev, z_lev         │ ← extrapolated
+                        └─────────────────────────────────────────────────┘
+                        ┌─────────────────────────────────────────────────┐
+                        │  layer Nz:  T[Nz], p_lay[Nz] = pᵣ[Nz]           │ ← from model
+                        └─────────────────────────────────────────────────┘
+    z_lev[Nz]   ━━━━━━━   level Nz:   p_lev, t_lev, z_lev                   ← interpolated
+                        ┌─────────────────────────────────────────────────┐
+                        │  layer Nz-1                                     │
+                        └─────────────────────────────────────────────────┘
+                                            ⋮
+                        ┌─────────────────────────────────────────────────┐
+                        │  layer 2                                        │
+                        └─────────────────────────────────────────────────┘
+    z_lev[2]    ━━━━━━━   level 2:    p_lev, t_lev, z_lev                   ← interpolated
+                        ┌─────────────────────────────────────────────────┐
+                        │  layer 1:   T[1], p_lay[1] = pᵣ[1]              │ ← from model
+                        └─────────────────────────────────────────────────┘
+    z_lev[1]    ━━━━━━━   level 1 (surface, z=0):  p_lev = p₀, t_lev      │ ← from reference state
+                        ══════════════════════════════════════════════════
+                                        GROUND (t_sfc)
+```
+
+# Why the model must provide level values
+
+RRTMGP is a general-purpose radiative transfer solver that operates on columns of
+atmospheric data. It does not interpolate from layers to levels internally because:
+
+1. **Boundary conditions**: The surface (level 1) and TOA (level Nz+1) require
+   boundary values that only the atmospheric model knows. For pressure, we use
+   the reference state's `surface_pressure` at z=0. For the top, we extrapolate
+   using the adiabatic hydrostatic formula.
+
+2. **Physics-appropriate interpolation**: Different quantities need different
+   interpolation methods. Pressure uses geometric mean (log-linear interpolation)
+   because it varies exponentially with height. Temperature uses arithmetic mean.
+
+3. **Model consistency**: The pressure profile must be consistent with the
+   atmospheric model's reference state. RRTMGP has no knowledge of the anelastic
+   approximation or the reference potential temperature θ₀.
+
 # Physics notes
 
-For radiation, we need temperature and pressure at both cell centers (layers)
-and cell faces (levels).
-
-**Temperature**: We use the actual temperature field `T` computed from the model state.
-This is the temperature that matters for emission and absorption.
+**Temperature**: We use the actual temperature field `T` from the model state.
+This is the temperature that matters for thermal emission and absorption.
 
 **Pressure**: In the anelastic approximation, pressure perturbations are negligible
-compared to the reference (hydrostatic) pressure. We use the reference state pressure
-`reference_state.pressure` at cell centers, and interpolate/extrapolate to faces.
-The reference pressure is computed via `adiabatic_hydrostatic_pressure(z, p₀, θ₀)`.
+compared to the hydrostatic reference pressure. We use `reference_state.pressure`
+at cell centers, computed via `adiabatic_hydrostatic_pressure(z, p₀, θ₀)`.
 
 # RRTMGP array layout
-- RRTMGP uses (nlay, ncol) for layer values (at cell centers)
-- RRTMGP uses (nlev, ncol) for level values (at cell faces)
-- Layer 1 is at the bottom (surface), layer nlay is at the top
+- Layer arrays `(nlay, ncol)`: values at cell centers, layer 1 at bottom
+- Level arrays `(nlev, ncol)`: values at cell faces, level 1 at surface (z=0)
+- `nlev = nlay + 1`
 """
-function update_rrtmgp_atmospheric_state!(rrtmgp_state::GrayAtmosphericState,
-                                          model, surface_temperature, constants)
+function update_rrtmgp_state!(rrtmgp_state::GrayAtmosphericState, model, surface_temperature)
     grid = model.grid
     arch = architecture(grid)
     
     # Temperature field (actual temperature from model state)
-    T = model.temperature
-
     # Reference state provides the hydrostatic pressure profile
     # In the anelastic approximation, pressure ≈ reference pressure
-    reference_state = model.formulation.reference_state
-    p₀ = reference_state.surface_pressure  # Pressure at z = 0
-    θ₀ = reference_state.potential_temperature  # Reference potential temperature
+    p = model.formulation.reference_state.pressure
+    T = model.temperature
+    T₀ = surface_temperature
 
-    # Unpack RRTMGP state arrays for kernels
-    t_lay = rrtmgp_state.t_lay
-    p_lay = rrtmgp_state.p_lay
-    t_lev = rrtmgp_state.t_lev
-    p_lev = rrtmgp_state.p_lev
-    z_lev = rrtmgp_state.z_lev
-    t_sfc = rrtmgp_state.t_sfc
-
-    # Update layer values (at cell centers)
-    # Temperature: actual temperature field
-    # Pressure: reference hydrostatic pressure
-    launch!(arch, grid, :xyz, _update_layer_values!, t_lay, p_lay, grid, T, reference_state)
-
-    # Update level values (at cell faces)
-    # Temperature: interpolated from cell centers
-    # Pressure: interpolated from reference state, using surface_pressure at z=0
-    launch!(arch, grid, :xyz, _update_level_values!,
-            t_lev, p_lev, z_lev, grid, T, reference_state, p₀, θ₀, constants)
-
-    # Surface skin temperature (for longwave emission from ground)
-    t_sfc[1] = surface_temperature
+    launch!(arch, grid, :xyz, _update_rrtmgp_state!, rrtmgp_state, grid, p, T, T₀)
 
     return nothing
 end
 
-@kernel function _update_layer_values!(t_lay, p_lay, grid, T, reference_state)
+@inline rrtmgp_column_index(i, j, Nx) = i + (j - 1) * Nx
+
+@kernel function _update_rrtmgp_state!(rrtmgp_state, grid, p, T, surface_temperature)
     i, j, k = @index(Global, NTuple)
 
-    # Layer values are at cell centers
-    # RRTMGP expects (k, col) indexing; for single column, col=1
-    # For 3D grids, we'd need to linearize (i, j) → col
-    @inbounds begin
-        # Actual temperature from model state
-        t_lay[k, 1] = T[i, j, k]
-
-        # Reference pressure (hydrostatic background)
-        # In anelastic models, pressure perturbations are negligible for radiation
-        p_lay[k, 1] = reference_state.pressure[i, j, k]
-    end
-end
-
-@kernel function _update_level_values!(t_lev, p_lev, z_lev, grid, T, reference_state,
-                                       p₀, θ₀, constants)
-    i, j, k = @index(Global, NTuple)
     Nz = size(grid, 3)
-    nlev = Nz + 1
 
-    # Level values are at cell faces (Nz+1 faces for Nz cells)
-    # The kernel runs for k = 1:Nz, so we handle:
-    #   - k=1: bottom face (face index 1) and interior face (face index 2)
-    #   - k=2:Nz-1: interior faces (face index k+1)
-    #   - k=Nz: top face (face index Nz+1) and interior face (face index Nz)
+    # Unpack RRTMGP arrays with Oceananigans naming conventions:
+    #   ᶜ = cell center (RRTMGP "layer")
+    #   ᶠ = cell face (RRTMGP "level")
+    # Note: latitude (lat) and altitude (z_lev) are fixed at construction time
+    Tᶜ = rrtmgp_state.t_lay  # Temperature at cell centers
+    pᶜ = rrtmgp_state.p_lay  # Pressure at cell centers
+    Tᶠ = rrtmgp_state.t_lev  # Temperature at cell faces
+    pᶠ = rrtmgp_state.p_lev  # Pressure at cell faces
+    T₀ = rrtmgp_state.t_sfc  # Surface temperature
+
+    col = rrtmgp_column_index(i, j, grid.Nx)
 
     @inbounds begin
-        # --- Bottom face (face index 1, at z = 0) ---
+        # Surface temperature (scalar in this implementation)
         if k == 1
-            z_bottom = znode(i, j, 1, grid, Center(), Center(), Face())
-
-            # Pressure at z=0: use the reference state's surface pressure directly
-            # This is exact by definition of the reference state
-            p_lev[1, 1] = p₀
-
-            # Temperature at bottom face: extrapolate from first cell center
-            # Use the first layer temperature as approximation for near-surface air
-            t_lev[1, 1] = T[i, j, 1]
-
-            # Altitude
-            z_lev[1, 1] = z_bottom
+            T₀[col] = surface_temperature
         end
 
-        # --- Top face (face index Nz+1) ---
-        if k == Nz
-            z_top = znode(i, j, nlev, grid, Center(), Center(), Face())
+        # Cell values (centers)
+        Tᶜ[k, col] = T[i, j, k]
+        pᶜ[k, col] = p[i, j, k]
 
-            # Pressure at top: use the same adiabatic hydrostatic formula
-            # that defines the reference state, for consistency
-            p_lev[nlev, 1] = adiabatic_hydrostatic_pressure(z_top, p₀, θ₀, constants)
-
-            # Temperature at top face: use last layer temperature
-            t_lev[nlev, 1] = T[i, j, Nz]
-
-            # Altitude
-            z_lev[nlev, 1] = z_top
+        # Face values (interfaces)
+        # Face k is at the bottom of cell k
+        # Face 1: bottom (surface)
+        # Face Nz+1: top (TOA)
+        if k == 1
+            # Bottom face (surface): use first cell values
+            pᶠ[1, col] = p[i, j, 1]
+            Tᶠ[1, col] = T[i, j, 1]
         end
 
-        # --- Interior faces (face indices 2 to Nz) ---
-        # These fall between cell centers k and k+1
+        # Interior faces (between cells k and k+1)
         if k < Nz
             kface = k + 1
-            z_face = znode(i, j, kface, grid, Center(), Center(), Face())
+            # Geometric mean for pressure (log-linear interpolation)
+            pᶠ[kface, col] = sqrt(p[i, j, k] * p[i, j, k + 1])
+            # Arithmetic mean for temperature
+            Tᶠ[kface, col] = (T[i, j, k] + T[i, j, k + 1]) / 2
+        end
 
-            # Pressure: geometric mean of adjacent cell centers
-            # This is equivalent to log-linear interpolation, which is appropriate
-            # for the exponential-like hydrostatic pressure profile
-            p_below = reference_state.pressure[i, j, k]
-            p_above = reference_state.pressure[i, j, k + 1]
-            p_lev[kface, 1] = sqrt(p_below * p_above)
-
-            # Temperature: arithmetic mean of adjacent cell centers
-            T_below = T[i, j, k]
-            T_above = T[i, j, k + 1]
-            t_lev[kface, 1] = (T_below + T_above) / 2
-
-            # Altitude
-            z_lev[kface, 1] = z_face
+        # Top face (TOA): extrapolate from top cell
+        if k == Nz
+            nlev = Nz + 1
+            # Rough pressure extrapolation (halve top cell pressure)
+            pᶠ[nlev, col] = p[i, j, Nz] / 2
+            Tᶠ[nlev, col] = T[i, j, Nz]
         end
     end
 end
@@ -227,7 +221,7 @@ end
 #####
 
 """
-    update_solar_zenith_angle!(sw_solver, grid, clock)
+    $(TYPEDSIGNATURES)
 
 Update the solar zenith angle in the shortwave solver from the model clock.
 
@@ -253,7 +247,7 @@ end
 #####
 
 """
-    copy_fluxes_to_fields!(radiation::GrayRadiationModel, grid)
+    $(TYPEDSIGNATURES)
 
 Copy RRTMGP flux arrays to Oceananigans ZFaceFields.
 

@@ -20,7 +20,8 @@ using RRTMGP
         grid = RectilinearGrid(size=Nz, x=0.0, y=45.0, z=(0, 10kilometers),
                                topology=(Flat, Flat, Bounded))
 
-        radiation = GrayRadiation(grid;
+        constants = ThermodynamicConstants()
+        radiation = GrayRadiation(grid, constants;
                                   surface_temperature = 300,
                                   surface_emissivity = 0.98,
                                   surface_albedo = 0.1,
@@ -58,7 +59,7 @@ end
         formulation = AnelasticFormulation(reference_state,
                                            thermodynamics = :LiquidIcePotentialTemperature)
 
-        radiation = GrayRadiation(grid;
+        radiation = GrayRadiation(grid, constants;
                                   surface_temperature = 300,
                                   surface_emissivity = 0.98,
                                   surface_albedo = 0.1,
@@ -84,7 +85,7 @@ end
         formulation = AnelasticFormulation(reference_state,
                                            thermodynamics = :LiquidIcePotentialTemperature)
 
-        radiation = GrayRadiation(grid;
+        radiation = GrayRadiation(grid, constants;
                                   surface_temperature = 300,
                                   surface_emissivity = 0.98,
                                   surface_albedo = 0.1,
@@ -141,7 +142,7 @@ end
         formulation = AnelasticFormulation(reference_state,
                                            thermodynamics = :LiquidIcePotentialTemperature)
 
-        radiation = GrayRadiation(grid;
+        radiation = GrayRadiation(grid, constants;
                                   surface_temperature,
                                   surface_emissivity = FT(0.98),
                                   surface_albedo = FT(0.1),

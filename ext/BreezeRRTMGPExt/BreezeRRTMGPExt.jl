@@ -4,6 +4,7 @@ using Breeze
 using RRTMGP: RRTMGP
 
 using Dates: DateTime
+using DocStringExtensions: TYPEDSIGNATURES
 
 # Oceananigans imports
 using Oceananigans.Architectures: architecture, CPU
