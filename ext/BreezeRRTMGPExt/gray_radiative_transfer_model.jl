@@ -4,9 +4,6 @@
 ##### Uses the O'Gorman and Schneider (2008) optical thickness parameterization
 ##### with RRTMGP's two-stream or no-scattering solvers.
 #####
-##### Note: GrayRadiativeTransferModel struct is defined in Breeze.AtmosphereModels.radiation_interface
-##### This extension provides the constructor and update methods.
-#####
 
 using Oceananigans.Utils: launch!
 using Oceananigans.Operators: ℑzᵃᵃᶠ
@@ -19,9 +16,9 @@ using RRTMGP.AtmosphericStates: GrayAtmosphericState, GrayOpticalThicknessOGorma
 using KernelAbstractions: @kernel, @index
 using Dates: AbstractDateTime
 
-import Breeze.AtmosphereModels: RadiativeTransferModel, GrayRadiativeTransferModel
+import Breeze.AtmosphereModels: RadiativeTransferModel
 
-const GrayRadiativeTransferModelType = RadiativeTransferModel{<:GrayOpticalThicknessOGorman2008}
+const GrayRadiativeTransferModel = RadiativeTransferModel{<:GrayOpticalThicknessOGorman2008}
 const SingleColumnGrid = RectilinearGrid{<:Any, <:Flat, <:Flat, <:Bounded}
 
 materialize_surface_property(x::Number, grid) = convert(eltype(grid), x)
@@ -131,9 +128,7 @@ function RadiativeTransferModel(grid, constants,
 
     # Set z_lev (altitude at cell faces) - this is fixed and doesn't change during simulation
     zf = znodes(grid, Face())
-    for k in 1:Nz+1
-        rrtmgp_zᶠ[k, :] .= zf[k]
-    end
+    rrtmgp_zᶠ .= zf
 
     atmospheric_state = GrayAtmosphericState(rrtmgp_φ,
                                              rrtmgp_pᶜ,
@@ -213,30 +208,6 @@ function RadiativeTransferModel(grid, constants,
                                   downwelling_shortwave_flux)
 end
 
-"""
-    $(TYPEDSIGNATURES)
-
-Construct a gray atmosphere radiative transfer model for the given grid.
-
-Uses the O'Gorman and Schneider (2008) optical thickness parameterization.
-This is a convenience constructor that uses `GrayOpticalThicknessOGorman2008` by default.
-
-# Keyword Arguments
-- `coordinate`: Longitude and latitude as `(λ, φ)` tuple. If `nothing`, inferred from grid.
-- `epoch`: Optional epoch for floating-point clocks.
-- `surface_temperature`: Surface temperature in Kelvin (default: 300).
-- `surface_emissivity`: Surface emissivity, 0-1 (default: 0.98).
-- `surface_albedo`: Surface albedo, 0-1 (used for both direct and diffuse if provided).
-- `direct_surface_albedo`: Direct surface albedo, 0-1.
-- `diffuse_surface_albedo`: Diffuse surface albedo, 0-1.
-- `solar_constant`: Top-of-atmosphere solar flux in W/m² (default: 1361).
-"""
-function GrayRadiativeTransferModel(grid, constants; kw...)
-    FT = eltype(grid)
-    optical_thickness = GrayOpticalThicknessOGorman2008(FT)
-    return RadiativeTransferModel(grid, constants, optical_thickness; kw...)
-end
-
 @inline rrtmgp_column_index(i, j, Nx) = i + (j - 1) * Nx
 
 function set_latitude!(rrtmgp_latitude, coordinate, grid)
@@ -304,7 +275,7 @@ This function:
 
 Sign convention: positive flux = upward, negative flux = downward.
 """
-function AtmosphereModels.update_radiation!(rtm::GrayRadiativeTransferModelType, model)
+function AtmosphereModels.update_radiation!(rtm::GrayRadiativeTransferModel, model)
     grid = model.grid
     clock = model.clock
 
@@ -460,30 +431,15 @@ end
         # Layer values (cell centers) - k runs from 1 to Nz
         Tᶜ[k, col] = T[i, j, k]
         pᶜ[k, col] = p[i, j, k]
+        pᶠ[k, col] = ℑzᵃᵃᶠ(i, j, k, grid, p)
+        Tᶠ[k, col] = ℑzᵃᵃᶠ(i, j, k, grid, T)
 
-        # Level values (cell faces) - we need Nz+1 levels
-        # Face k+1 is the face above cell k (between cell k and cell k+1)
-        # Face 1 is at the surface, Face Nz+1 is at the top
-
+        # Special case setting the topmost level + surface temperature
+        # Because kernel spans (Nx, Ny, Nz)
         if k == 1
-            # Bottom face (level 1): use values from the first cell
-            # Note: for surface, we use surface_temperature for t_sfc,
-            # but t_lev[1] represents the air temperature at z=0
-            pᶠ[1, col] = p[i, j, 1]  # Use bottom cell pressure
-            Tᶠ[1, col] = T[i, j, 1]  # Use bottom cell temperature
             T₀[col] = surface_temperature[i, j, 1]
-        end
-
-        if k < Nz
-            # Interior faces: interpolate from adjacent cells
-            pᶠ[k+1, col] = ℑzᵃᵃᶠ(i, j, k+1, grid, p)
-            Tᶠ[k+1, col] = ℑzᵃᵃᶠ(i, j, k+1, grid, T)
-        end
-
-        if k == Nz
-            # Top face (level Nz+1): extrapolate from top cell
-            pᶠ[Nz+1, col] = p[i, j, Nz]  # Use top cell pressure
-            Tᶠ[Nz+1, col] = T[i, j, Nz]  # Use top cell temperature
+            pᶠ[Nz+1, col] = ℑzᵃᵃᶠ(i, j, Nz+1, grid, p)
+            Tᶠ[Nz+1, col] = ℑzᵃᵃᶠ(i, j, Nz+1, grid, T)
         end
     end
 end
@@ -538,7 +494,7 @@ Copy RRTMGP flux arrays to Oceananigans ZFaceFields.
 Applies sign convention: positive = upward, negative = downward.
 For the non-scattering shortwave solver, only the direct beam flux is computed.
 """
-function copy_fluxes_to_fields!(rtm::GrayRadiativeTransferModelType, grid)
+function copy_fluxes_to_fields!(rtm::GrayRadiativeTransferModel, grid)
     arch = architecture(grid)
     Nz = size(grid, 3)
     
