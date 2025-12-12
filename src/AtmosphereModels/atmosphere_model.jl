@@ -346,19 +346,6 @@ function auxiliary_fields(model::AtmosphereModel)
     return (; T = model.temperature, qᵗ = model.specific_moisture)
 end
 
-# Provide property access for auxiliary_fields
-function Base.getproperty(model::AtmosphereModel, name::Symbol)
-    if name === :auxiliary_fields
-        return auxiliary_fields(model)
-    else
-        return getfield(model, name)
-    end
-end
-
-function Base.propertynames(model::AtmosphereModel, private::Bool=false)
-    return (fieldnames(AtmosphereModel)..., :auxiliary_fields)
-end
-
 function prognostic_fields(model::AtmosphereModel)
     prognostic_formulation_fields = prognostic_fields(model.formulation)
     thermodynamic_fields = merge(prognostic_formulation_fields, (; ρqᵗ=model.moisture_density))
