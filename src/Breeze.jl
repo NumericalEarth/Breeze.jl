@@ -40,6 +40,7 @@ export
     SaturationSpecificHumidity,
     SaturationSpecificHumidityField,
     BulkMicrophysics,
+    compute_hydrostatic_pressure!,
 
     # BoundaryConditions
     BulkDrag,
