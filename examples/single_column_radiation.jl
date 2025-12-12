@@ -54,7 +54,7 @@ formulation = AnelasticFormulation(reference_state,
 
 using Dates
 
-radiation = GrayRadiation(grid, constants;
+radiation = GrayRadiativeTransferModel(grid, constants;
                           surface_temperature,
                           surface_emissivity = 0.98,
                           surface_albedo = 0.1,

@@ -13,7 +13,7 @@ using RRTMGP
 ##### Unit tests
 #####
 
-@testset "GrayRadiation construction" begin
+@testset "GrayRadiativeTransferModel construction" begin
     @testset "Single column grid [$(FT)]" for FT in (Float32, Float64)
         Oceananigans.defaults.FloatType = FT
         Nz = 16
@@ -21,7 +21,7 @@ using RRTMGP
                                topology=(Flat, Flat, Bounded))
 
         constants = ThermodynamicConstants()
-        radiation = GrayRadiation(grid, constants;
+        radiation = GrayRadiativeTransferModel(grid, constants;
                                   surface_temperature = 300,
                                   surface_emissivity = 0.98,
                                   surface_albedo = 0.1,
@@ -45,7 +45,7 @@ using RRTMGP
     end
 end
 
-@testset "GrayRadiation with AtmosphereModel" begin
+@testset "GrayRadiativeTransferModel with AtmosphereModel" begin
     @testset "Model construction [$(FT)]" for FT in (Float32, Float64)
         Oceananigans.defaults.FloatType = FT
         Nz = 16
@@ -59,7 +59,7 @@ end
         formulation = AnelasticFormulation(reference_state,
                                            thermodynamics = :LiquidIcePotentialTemperature)
 
-        radiation = GrayRadiation(grid, constants;
+        radiation = GrayRadiativeTransferModel(grid, constants;
                                   surface_temperature = 300,
                                   surface_emissivity = 0.98,
                                   surface_albedo = 0.1,
@@ -85,7 +85,7 @@ end
         formulation = AnelasticFormulation(reference_state,
                                            thermodynamics = :LiquidIcePotentialTemperature)
 
-        radiation = GrayRadiation(grid, constants;
+        radiation = GrayRadiativeTransferModel(grid, constants;
                                   surface_temperature = 300,
                                   surface_emissivity = 0.98,
                                   surface_albedo = 0.1,
@@ -142,7 +142,7 @@ end
         formulation = AnelasticFormulation(reference_state,
                                            thermodynamics = :LiquidIcePotentialTemperature)
 
-        radiation = GrayRadiation(grid, constants;
+        radiation = GrayRadiativeTransferModel(grid, constants;
                                   surface_temperature,
                                   surface_emissivity = FT(0.98),
                                   surface_albedo = FT(0.1),

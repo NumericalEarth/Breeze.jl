@@ -44,7 +44,7 @@ export
     BulkMicrophysics,
 
     # Radiation (implemented by extensions)
-    GrayRadiation,
+    GrayRadiativeTransferModel,
 
     # BoundaryConditions
     BulkDrag,
@@ -133,21 +133,5 @@ using .BoundaryConditions
 
 include("Forcings/Forcings.jl")
 using .Forcings
-
-#####
-##### Radiation stubs (implemented by extensions)
-#####
-
-"""
-    GrayRadiation(grid; kwargs...)
-
-Construct a gray atmosphere radiative transfer model.
-
-This is a stub function - the actual implementation is provided by
-the BreezeRRTMGPExt extension when RRTMGP.jl is loaded.
-
-See the extension documentation for available keyword arguments.
-"""
-function GrayRadiation end
 
 end # module Breeze

@@ -1,26 +1,14 @@
 #####
-##### GrayRadiation: Gray atmosphere radiative transfer model
+##### GrayRadiativeTransferModel: Gray atmosphere radiative transfer model
 #####
 ##### Uses the O'Gorman and Schneider (2008) optical thickness parameterization
 ##### with RRTMGP's two-stream or no-scattering solvers.
 #####
+##### Note: GrayRadiativeTransferModel struct is defined in Breeze.AtmosphereModels.radiation_interface
+##### This extension provides the constructor and update methods.
+#####
 
-import Breeze: GrayRadiation
-
-struct GrayRadiation{LW, SW, AS, OT, LA, ST, SE, SA, SC, F}
-    longwave_solver :: LW
-    shortwave_solver :: SW
-    atmospheric_state :: AS
-    optical_thickness :: OT
-    latitude :: LA
-    upwelling_longwave_flux :: F
-    downwelling_longwave_flux :: F
-    downwelling_shortwave_flux :: F  # Direct beam only for no-scattering solver
-    surface_temperature :: ST  # Scalar or 2D field
-    surface_emissivity :: SE   # Scalar
-    surface_albedo :: SA       # Scalar or 2D field
-    solar_constant :: SC       # Scalar
-end
+import Breeze: GrayRadiativeTransferModel
 
 """
     $(TYPEDSIGNATURES)
@@ -38,7 +26,7 @@ Uses the O'Gorman and Schneider (2008) optical thickness parameterization.
 - `surface_albedo`: Surface albedo, 0-1 (default: 0.1). Can be scalar or 2D field.
 - `solar_constant`: Top-of-atmosphere solar flux in W/m² (default: 1361)
 """
-function Breeze.GrayRadiation(grid, constants;
+function Breeze.GrayRadiativeTransferModel(grid, constants;
                               stefan_boltzmann_constant = 5.670374419e-8,
                               avogadro_number = 6.02214076e23,
                               optical_thickness = nothing,
@@ -146,7 +134,7 @@ function Breeze.GrayRadiation(grid, constants;
     surface_albedo = surface_albedo isa Number ? convert(FT, surface_albedo) : surface_albedo
     latitude = latitude isa Number ? convert(FT, latitude) : latitude
 
-    return GrayRadiation(longwave_solver,
+    return GrayRadiativeTransferModel(longwave_solver,
                          shortwave_solver,
                          atmospheric_state,
                          optical_thickness,
@@ -174,14 +162,3 @@ end
 # function rrtmgp_context(arch::GPU)
 #     return ClimaComms.context(ClimaComms.CUDADevice())
 # end
-
-Base.summary(radiation::GrayRadiationModel) = "GrayRadiationModel"
-
-function Base.show(io::IO, radiation::GrayRadiationModel)
-    print(io, summary(radiation), "\n",
-          "├── surface_temperature: ", radiation.surface_temperature, " K\n",
-          "├── surface_emissivity: ", radiation.surface_emissivity, "\n",
-          "├── surface_albedo: ", radiation.surface_albedo, "\n",
-          "└── solar_constant: ", radiation.solar_constant, " W/m²")
-end
-

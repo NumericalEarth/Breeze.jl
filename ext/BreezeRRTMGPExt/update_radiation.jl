@@ -11,7 +11,7 @@ using Oceananigans.Operators: ℑzᵃᵃᶠ
 #     - FluxLW, FluxSW: flux storage (flux_up, flux_dn, flux_net, flux_dn_dir)
 #
 #   Breeze types (internal, can modify):
-#     - GrayRadiationModel: wrapper containing RRTMGP solvers and Oceananigans flux fields
+#     - GrayRadiativeTransferModel: wrapper containing RRTMGP solvers and Oceananigans flux fields
 #     - SingleColumnGrid type alias
 #
 
@@ -34,7 +34,7 @@ This function:
 
 Sign convention: positive flux = upward, negative flux = downward.
 """
-function AtmosphereModels.update_radiation!(radiation::GrayRadiationModel, model)
+function AtmosphereModels.update_radiation!(radiation::GrayRadiativeTransferModel, model)
     grid = model.grid
     clock = model.clock
 
@@ -250,7 +250,7 @@ Copy RRTMGP flux arrays to Oceananigans ZFaceFields.
 Applies sign convention: positive = upward, negative = downward.
 For the non-scattering shortwave solver, only the direct beam flux is computed.
 """
-function copy_fluxes_to_fields!(radiation::GrayRadiationModel, grid)
+function copy_fluxes_to_fields!(radiation::GrayRadiativeTransferModel, grid)
     arch = architecture(grid)
     Nz = size(grid, 3)
     

@@ -6,7 +6,7 @@ using Breeze: field, ZFaceField, RectilinearGrid, set!, ncols, array_type
 using Breeze.Radiation: AbstractRadiationModel, update_atmospheric_state!
 
 """
-GrayRadiationModel stores state and solver handles for a gray-band radiative
+GrayRadiativeTransferModelModel stores state and solver handles for a gray-band radiative
 transfer setup.
 Field conventions (array shapes):
 - cos_zenith_angle: (Nx, Ny) — cos of zenith angle on the horizontal grid
@@ -17,7 +17,7 @@ Field conventions (array shapes):
 """
 
 """
-    GrayRadiationModel(grid; 
+    GrayRadiativeTransferModelModel(grid; 
                        temperature,
                        pressure,
                        zenith_angle, 
@@ -29,7 +29,7 @@ Field conventions (array shapes):
 Construct a gray-band model using a precomputed atmospheric state.
 Inputs may be scalars or arrays and are normalized to device arrays.
 """
-function GrayRadiationModel(
+function GrayRadiativeTransferModelModel(
     grid;
     zenith_angle,
     sfc_emissivity,
@@ -76,7 +76,7 @@ function GrayRadiationModel(
     downwelling_longwave_flux = ZFaceField(grid)
     downwelling_shortwave_flux = ZFaceField(grid)
 
-    return GrayRadiationModel(
+    return GrayRadiativeTransferModelModel(
         downwelling_longwave_flux,
         downwelling_shortwave_flux,
         sw_params.cos_zenith,
@@ -91,13 +91,13 @@ function GrayRadiationModel(
 end
 
 """
-    (model::GrayRadiationModel)(temperature::Field, pressure::Field)
+    (model::GrayRadiativeTransferModelModel)(temperature::Field, pressure::Field)
 
-Update the radiative fluxes for the given `GrayRadiationModel` by running the
+Update the radiative fluxes for the given `GrayRadiativeTransferModelModel` by running the
 longwave and shortwave two-stream solvers with the current atmospheric state
 and boundary conditions.
 """
-function (model::GrayRadiationModel)(temperature::Field, pressure::Field)
+function (model::GrayRadiativeTransferModelModel)(temperature::Field, pressure::Field)
     # Update the atmospheric state inside the RRTMGP.jl atmospheric state
     # This is needed before running the solvers to make sure the atmospheric state is updated
     # before computing the radiative fluxes

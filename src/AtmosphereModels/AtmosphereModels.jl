@@ -18,6 +18,10 @@ export
     materialize_atmosphere_model_forcing,
     compute_forcing!,
 
+    # Radiation (implemented by extensions)
+    GrayRadiativeTransferModel,
+    update_radiation!,
+
     # Diagnostics (re-exported from Diagnostics submodule)
     PotentialTemperature,
     VirtualPotentialTemperature,

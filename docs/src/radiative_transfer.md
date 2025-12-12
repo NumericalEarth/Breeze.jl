@@ -8,7 +8,7 @@ The simplest radiative transfer option is gray atmosphere radiation, which uses 
 
 ### Basic Usage
 
-To use gray radiation in a Breeze simulation, create a [`GrayRadiation`](@ref) model and pass it to the [`AtmosphereModel`](@ref) constructor:
+To use gray radiation in a Breeze simulation, create a [`GrayRadiativeTransferModel`](@ref) model and pass it to the [`AtmosphereModel`](@ref) constructor:
 
 ```julia
 using Breeze
@@ -30,7 +30,7 @@ formulation = AnelasticFormulation(reference_state,
                                    thermodynamics = :LiquidIcePotentialTemperature)
 
 # Create gray radiation model
-radiation = GrayRadiation(grid;
+radiation = GrayRadiativeTransferModel(grid;
                           surface_temperature = 300,    # K
                           surface_emissivity = 0.98,
                           surface_albedo = 0.1,
@@ -45,7 +45,7 @@ When a `DateTime` clock is used, the solar zenith angle is computed automaticall
 
 ### Gray Radiation Model
 
-The [`GrayRadiation`](@ref) model computes:
+The [`GrayRadiativeTransferModel`](@ref) model computes:
 
 - **Longwave radiation**: Both upwelling and downwelling thermal radiation using RRTMGP's two-stream solver
 - **Shortwave radiation**: Direct beam solar radiation (no scattering) using the O'Gorman optical thickness
@@ -96,7 +96,7 @@ The calculation accounts for:
 
 ## Surface Properties
 
-The [`GrayRadiation`](@ref) model requires surface properties:
+The [`GrayRadiativeTransferModel`](@ref) model requires surface properties:
 
 | Property | Description | Typical Values |
 |----------|-------------|----------------|
