@@ -24,8 +24,7 @@ using CairoMakie
 
 # ## Grid and thermodynamics
 #
-# We create a single column spanning 20 km with 64 layers, located
-# at Beverly, Massachusetts, USA (42.5°N, 70.9°W).
+# We create a single column spanning 20 km with 64 layers.
 
 Nz = 64
 λ, φ = -70.9, 42.5
