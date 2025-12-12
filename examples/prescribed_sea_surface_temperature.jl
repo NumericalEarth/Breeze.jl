@@ -29,8 +29,7 @@ using CairoMakie
 # We use a 2D domain (x-z plane) with periodic horizontal boundaries and a bounded
 # vertical domain. The horizontal periodicity allows convective cells to develop
 # and interact without artificial boundary effects. The domain extends 20 km
-# horizontally to accommodate multiple convective cells, and 10 km vertically
-# to capture the full depth of tropospheric convection.
+# horizontally and 10 km vertically.
 #
 # The grid resolution of 128 points in each direction provides approximately
 # 156 m horizontal and 78 m vertical resolution, sufficient to resolve the
@@ -73,54 +72,65 @@ microphysics = SaturationAdjustment(equilibrium = WarmPhaseEquilibrium())
 momentum_advection = WENO(order=9)
 scalar_advection = WENO(order=5)
 
-# ## Surface flux parameterization
-#
-# The surface fluxes are computed using bulk aerodynamic formulas, which relate
-# the turbulent fluxes to the difference between surface and atmospheric properties
-# multiplied by a transfer coefficient and wind speed. This approach parameterizes
-# the complex turbulent exchange processes in the atmospheric surface layer.
-#
-# The bulk transfer coefficients are:
-# - Cᴰ (drag coefficient): relates surface momentum flux to wind speed
-# - Cᵀ (sensible heat transfer coefficient): relates sensible heat flux to temperature difference
-# - Cᵛ (vapor transfer coefficient): relates latent heat flux to humidity difference
-#
-# The sea surface temperature varies as a step function across the domain center,
-# creating a sharp SST front. This idealized pattern drives a strong circulation
-# with rising motion over the warm side and sinking motion over the cold side.
-
-# Sea surface temperature as a function of x
-ΔT = 2 # K
-T₀(x) = θ₀ + ΔT * sign(cos(2π * x / grid.Lx))
-
-# We define the transfer coefficients and gustiness parameter.
-Cᴰ = 1e-3  # Drag coefficient
-Cᵀ = 1e-3  # Sensible heat transfer coefficient
-Cᵛ = 1e-3  # Vapor transfer coefficient
-Uᵍ = 1e-2  # Minimum wind speed (m/s)
-
 # ## Boundary conditions
 #
-# Breeze provides convenient abstractions for bulk aerodynamic surface fluxes.
+# Breeze provides abstractions for specifying bulk surface fluxes.
 # The `BulkDrag`, `BulkSensibleHeatFlux`, and `BulkVaporFlux` boundary conditions
-# compute fluxes using bulk aerodynamic formulas:
+# compute fluxes of momentum, temperature density (proportional to sensible heat flux),
+# and moisture density according to bulk aerodynamic formulae that relate turbulent fluxes
+# to the difference between atmosphere properties, surface properties, and the differential
+# motion of the air and surface,
 #
 # ```math
-# Jᵘ = - Cᴰ |U| ρu, \quad Jᵀ = - ρ₀ Cᵀ |U| (θ - θ₀), \quad Jᵛ = - ρ₀ Cᵛ |U| (qᵗ - qᵛ₀)
+# τˣ = - Cᴰ |U| ρu, \\quad Jᵀ = - ρ₀ Cᵀ |U| (θ - θ₀), \\quad Jᵛ = - ρ₀ Cᵛ |U| (qᵗ - qᵛ₀)
 # ```
 #
-# where ``|U|`` is the wind speed (including gustiness), ``Cᴰ, Cᵀ, Cᵛ`` are transfer
-# coefficients, and ``θ₀, qᵛ₀`` are the surface temperature and saturation specific humidity.
+# where ``|U|`` is "total" the differential wind speed (including gustiness),
+# ``Cᴰ, Cᵀ, Cᵛ`` are transfer coefficients, and ``θ₀, qᵛ₀`` are the surface temperature
+# and surface specific humidity, which for wet surfaces is presumed to be the
+# saturation specific humidity over a planar liquid surface computed at the surface temperature.
+# ``τˣ`` is the surface momentum flux, ``Jᵀ`` is the surface temperature density flux, and
+# ``Jᵛ`` is the surface moisture density flux.
+# The surface density density ``ρ₀`` is computed from the model's reference state.
 #
-# The reference density ``ρ₀`` is automatically computed from the model's reference state,
-# and for `BulkVaporFlux`, the saturation specific humidity is computed from the surface
-# temperature if not provided explicitly. Surface temperature can be provided as a
-# `Field`, a `Function`, or a `Number`.
+# The temperature density flux is proportional to the sensible heat flux,
+#
+# ```math
+# 𝒬ᵀ = - ρ₀ cᵖᵐ Cᵀ |U| (θ - θ₀) .
+# ```
+# where ``cᵖᵐ`` is the mixture heat capacity.
+#
+# We start by defining the drag coefficient and gustiness parameter,
 
-ρu_surface_flux = BulkDrag(coefficient = Cᴰ, gustiness = Uᵍ)
-ρv_surface_flux = BulkDrag(coefficient = Cᴰ, gustiness = Uᵍ)
-ρθ_surface_flux = BulkSensibleHeatFlux(coefficient = Cᵀ, gustiness = Uᵍ, surface_temperature = T₀)
-ρqᵗ_surface_flux = BulkVaporFlux(coefficient = Cᵛ, gustiness = Uᵍ, surface_temperature = T₀)
+Cᴰ = 1e-3  # Drag coefficient
+Uᵍ = 1e-2  # Minimum wind speed (m/s)
+
+ρu_surface_flux = ρv_surface_flux = BulkDrag(coefficient=Cᴰ, gustiness=Uᵍ)
+
+# ## Sensible heat flux and vapor fluxes
+#
+# For `BulkVaporFlux`, the saturation specific humidity is computed from the surface
+# temperature. Surface temperature can be provided as a `Field`, a `Function`, or a `Number`.
+# 
+# In this example, we specify the sea surface temperature as a top hat function
+# i.e. representing a pair of ocean fronts in a periodic domain, with a 
+# difference of 4 degrees K,
+
+ΔT = 4 # K
+T₀(x) = θ₀ + ΔT / 2 * sign(cos(2π * x / grid.Lx))
+
+# We complete our specification with the sensible heat transfer coefficient
+# and vapor transfer coefficient,
+
+Cᵀ = 1e-3  # Sensible heat transfer coefficient
+Cᵛ = 1e-3  # Vapor transfer coefficient
+
+# and build the flux parameterizations
+
+ρθ_surface_flux = BulkSensibleHeatFlux(coefficient=Cᵀ, gustiness=Uᵍ, surface_temperature=T₀)
+ρqᵗ_surface_flux = BulkVaporFlux(coefficient=Cᵛ, gustiness=Uᵍ, surface_temperature=T₀)
+
+# We finally assemble all of the boundary conditions,
 
 ρu_bcs = FieldBoundaryConditions(bottom=ρu_surface_flux)
 ρv_bcs = FieldBoundaryConditions(bottom=ρv_surface_flux)
@@ -179,22 +189,23 @@ qᵗ = model.specific_moisture
 # represent the actual flux values applied at the ocean-atmosphere interface.
 #
 # The surface fluxes are:
-# - τˣ: surface momentum flux (stress), in kg m⁻¹ s⁻²
-# - 𝒬ᵀ: sensible heat flux = cᵖᵐ × Jᵀ, in W m⁻²
-# - 𝒬ᵛ: latent heat flux = ℒˡ × Jᵛ, in W m⁻²
 #
-# where Jᵀ is the temperature flux and Jᵛ is the moisture flux.
+# - ``τˣ``: momentum flux (stress), in kg m⁻¹ s⁻²
+# - ``𝒬ᵀ``: sensible heat flux = cᵖᵐ Jᵀ, in W m⁻²
+# - ``𝒬ᵛ``: latent heat flux = ℒˡ Jᵛ, in W m⁻²
+#
+# where Jᵀ is the temperature density flux and Jᵛ is the moisture density flux.
 
-# Surface momentum flux
+## Surface momentum flux
 τˣ = BoundaryConditionOperation(ρu, :bottom, model)
 
-# Sensible heat flux: 𝒬ᵀ = cᵖ × Jᵀ (using dry air heat capacity as approximation)
+## Sensible heat flux: 𝒬ᵀ = cᵖᵈ Jᵀ (using dry air heat capacity as approximation)
 ρθ = liquid_ice_potential_temperature_density(model)
-cᵖ = constants.dry_air.heat_capacity
+cᵖᵈ = constants.dry_air.heat_capacity
 Jᵀ = BoundaryConditionOperation(ρθ, :bottom, model)
-𝒬ᵀ = cᵖ * Jᵀ
+𝒬ᵀ = cᵖᵈ * Jᵀ
 
-# Latent heat flux: 𝒬ᵛ = ℒˡ × Jᵛ (using reference θ₀ for latent heat)
+## Latent heat flux: 𝒬ᵛ = ℒˡ Jᵛ (using reference θ₀ for latent heat)
 ρqᵗ = model.moisture_density
 ℒˡ = Breeze.Thermodynamics.liquid_latent_heat(θ₀, constants)
 Jᵛ = BoundaryConditionOperation(ρqᵗ, :bottom, model)
@@ -240,7 +251,7 @@ add_callback!(simulation, progress, IterationInterval(100))
 # ``\sqrt{u² + w²}`` and the cross-stream vorticity ``∂_z u - ∂_x w``.
 # The JLD2 format provides efficient storage with full Julia type preservation.
 
-output_filename = "prescribed_sst_convection.jld2"
+output_filename = "prescribed_sea_surface_temperature_convection.jld2"
 qᵗ = model.specific_moisture
 u, v, w, = model.velocities
 s = sqrt(u^2 + w^2) # speed
@@ -317,8 +328,8 @@ fig[0, :] = Label(fig, title, fontsize=22, tellwidth=false)
 θ_limits = extrema(θ_ts)
 T_limits = extrema(T_ts)
 s_limits = (0, maximum(s_ts))
-max_absξ = maximum(abs, ξ_ts)
-ξ_limits = (-0.8*max_absξ, 0.8*max_absξ)
+ξ_lim = 0.8 * maximum(abs, ξ_ts)
+ξ_limits = (-ξ_lim, +ξ_lim)
 
 qᵗ_max = maximum(qᵗ_ts)
 qˡ_max = maximum(qˡ_ts)
@@ -365,9 +376,9 @@ Colorbar(fig[3, 3], hmqˡ, label="qˡ (kg/kg)")
 
 # Now we are ready to make a cool animation.
 
-CairoMakie.record(fig, "prescribed_sst.mp4", 1:Nt, framerate=12) do nn
+CairoMakie.record(fig, "prescribed_sea_surface_temperature.mp4", 1:Nt, framerate=12) do nn
     n[] = nn
 end
 nothing #hide
 
-# ![](prescribed_sst.mp4)
+# ![](prescribed_sea_surface_temperature.mp4)
