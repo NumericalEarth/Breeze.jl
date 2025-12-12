@@ -14,7 +14,7 @@ To use gray radiation in a Breeze simulation, create a `GrayRadiativeTransferMod
 using Breeze
 using Oceananigans.Units
 using Dates
-using RRTMGP  # Load RRTMGP to enable radiation extension
+using RRTMGP.AtmosphericStates: GrayOpticalThicknessOGorman2008
 
 Nz = 64
 λ, φ = -70.9, 42.5  # longitude, latitude
@@ -22,21 +22,23 @@ grid = RectilinearGrid(size=Nz, x=λ, y=φ, z=(0, 20kilometers),
                        topology=(Flat, Flat, Bounded))
 
 # Thermodynamic setup
+surface_temperature = 300
 constants = ThermodynamicConstants()
 
 reference_state = ReferenceState(grid, constants;
                                  surface_pressure = 101325,
-                                 potential_temperature = 300)
+                                 potential_temperature = surface_temperature)
 
 formulation = AnelasticFormulation(reference_state,
                                    thermodynamics = :LiquidIcePotentialTemperature)
 
 # Create gray radiation model
-radiation = GrayRadiativeTransferModel(grid, constants;
-                                       surface_temperature = 300,    # K
-                                       surface_emissivity = 0.98,
-                                       surface_albedo = 0.1,
-                                       solar_constant = 1361)        # W/m²
+optical_thickness = GrayOpticalThicknessOGorman2008(eltype(grid))
+radiation = RadiativeTransferModel(grid, constants, optical_thickness;
+                                   surface_temperature,
+                                   surface_emissivity = 0.98,
+                                   surface_albedo = 0.1,
+                                   solar_constant = 1361) # W/m²
 
 # Create atmosphere model with DateTime clock for solar position
 clock = Clock(time=DateTime(2024, 9, 27, 16, 0, 0))
@@ -47,10 +49,10 @@ When a `DateTime` clock is used, the solar zenith angle is computed automaticall
 
 ### Gray Radiation Model
 
-The `GrayRadiativeTransferModel` model computes:
+The `RadiativeTransferModel` model computes:
 
 - **Longwave radiation**: Both upwelling and downwelling thermal radiation using RRTMGP's two-stream solver
-- **Shortwave radiation**: Direct beam solar radiation (no scattering) using the O'Gorman optical thickness
+- **Shortwave radiation**: Direct beam solar radiation 
 
 The gray atmosphere optical thickness follows the parameterization in [OGormanSchneider2008](@cite):
 

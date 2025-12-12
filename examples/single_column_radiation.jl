@@ -29,10 +29,8 @@ grid = RectilinearGrid(size=Nz, x=λ, y=φ, z=(0, 20kilometers),
                        topology=(Flat, Flat, Bounded))
 
 # Set up the thermodynamic constants and reference state.
-
-constants = ThermodynamicConstants()
-
 surface_temperature = 300
+constants = ThermodynamicConstants()
 
 reference_state = ReferenceState(grid, constants;
                                  surface_pressure = 101325,
