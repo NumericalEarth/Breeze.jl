@@ -8,8 +8,8 @@ using DocStringExtensions: TYPEDSIGNATURES
 
 # Oceananigans imports
 using Oceananigans.Architectures: architecture, CPU
-using Oceananigans.Grids: AbstractGrid, RectilinearGrid, Center, Face, Flat, Bounded, ynode
-using Oceananigans.Fields: ZFaceField, ConstantField
+using Oceananigans.Grids: Face
+using Oceananigans.Fields: ZFaceField
 
 # RRTMGP imports (external types - cannot modify)
 #   GrayAtmosphericState: atmospheric state arrays (t_lay, p_lay, t_lev, p_lev, z_lev, t_sfc)

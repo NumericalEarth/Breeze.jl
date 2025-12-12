@@ -1,5 +1,3 @@
-using Oceananigans.Operators: ℑzᵃᵃᶠ
-
 #####
 ##### Update radiation fluxes from model state
 #####
@@ -18,7 +16,6 @@ using Oceananigans.Operators: ℑzᵃᵃᶠ
 using KernelAbstractions: @kernel, @index
 using Oceananigans.Utils: launch!
 
-using Breeze.Thermodynamics: adiabatic_hydrostatic_pressure
 using Breeze.AtmosphereModels: AtmosphereModels
 
 """
