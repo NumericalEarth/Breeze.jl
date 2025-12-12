@@ -270,7 +270,7 @@ thermo = ThermodynamicConstants()
 θ₀ = 288
 p₀ = 101325
 reference_state = ReferenceState(grid, thermo;
-                                 base_pressure = p₀,
+                                 surface_pressure = p₀,
                                  potential_temperature = θ₀)
 
 qᵗ = 0.005

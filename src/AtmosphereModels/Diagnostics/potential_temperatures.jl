@@ -462,7 +462,7 @@ function (d::MoistPotentialTemperatureKernelFunction)(i, j, k, grid)
         pᵣ = d.reference_state.pressure[i, j, k]
         ρᵣ = d.reference_state.density[i, j, k]
         qᵗ = d.specific_moisture[i, j, k]
-        p₀ = d.reference_state.base_pressure
+        p₀ = d.reference_state.surface_pressure
         T = d.temperature[i, j, k]
     end
 

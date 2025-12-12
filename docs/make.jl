@@ -34,12 +34,13 @@ import Pkg
 Pkg.status()
 """
 
-example_scripts = [
-    "dry_thermal_bubble.jl",
-    "cloudy_thermal_bubble.jl",
-    "cloudy_kelvin_helmholtz.jl",
-    "bomex.jl",
-    "prescribed_sst.jl",
+example_pages = [
+    "Stratified dry thermal bubble" => "literated/dry_thermal_bubble.md",
+    "Cloudy thermal bubble" => "literated/cloudy_thermal_bubble.md",
+    "Cloudy Kelvin-Helmholtz instability" => "literated/cloudy_kelvin_helmholtz.md",
+    "Shallow cumulus convection (BOMEX)" => "literated/bomex.md",
+    "Convection over prescribed sea surface temperatureSST" => "literated/prescribed_sea_surface_temperature.md",
+    "Inertia gravity wave" => "literated/inertia_gravity_wave.md",
 ]
 
 literate_code(script_path, literated_dir) = """
@@ -49,28 +50,21 @@ using CairoMakie
 CairoMakie.activate!(type = "png")
 set_theme!(Theme(linewidth = 3))
 
-Literate.markdown($(repr(script_path)), $(repr(literated_dir));
-                  flavor = Literate.DocumenterFlavor(),
-                  preprocess = content -> content * $(repr(example_postamble)),
-                  execute = true,
-                 )
+@time $(repr(basename(script_path))) Literate.markdown($(repr(script_path)), $(repr(literated_dir));
+                                                        flavor = Literate.DocumenterFlavor(),
+                                                        preprocess = content -> content * $(repr(example_postamble)),
+                                                        execute = true,
+                                                       )
 """
 
 semaphore = Base.Semaphore(Threads.nthreads(:interactive))
-@time "literate" @sync for script_file in example_scripts
+@time "literate" @sync for (_, dest_file) in example_pages
+    script_file = splitext(basename(dest_file))[1] * ".jl"
     script_path = joinpath(examples_src_dir, script_file)
     Threads.@spawn :interactive Base.acquire(semaphore) do
-        @time script_file run(`$(Base.julia_cmd()) --color=yes --project=$(dirname(Base.active_project())) -e $(literate_code(script_path, literated_dir))`)
+        run(`$(Base.julia_cmd()) --color=yes --project=$(dirname(Base.active_project())) -e $(literate_code(script_path, literated_dir))`)
     end
 end
-
-example_pages = Any[
-    "Stratified dry thermal bubble" => "literated/dry_thermal_bubble.md",
-    "Cloudy thermal bubble" => "literated/cloudy_thermal_bubble.md",
-    "Cloudy Kelvin-Helmholtz instability" => "literated/cloudy_kelvin_helmholtz.md",
-    "Shallow cumulus convection (BOMEX)" => "literated/bomex.md",
-    "Prescribed SST convection" => "literated/prescribed_sst.md",
-]
 
 makedocs(
     ;

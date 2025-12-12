@@ -18,11 +18,30 @@ function update_state!(model::AnelasticModel, callbacks=[]; compute_tendencies=t
 
     fill_halo_regions!(prognostic_fields(model), model.clock, fields(model), async=true)
     compute_auxiliary_variables!(model)
+    compute_forcings!(model)
     microphysics_model_update!(model.microphysics, model)
     compute_tendencies && compute_tendencies!(model)
 
     tracer_specific_to_density!(model) # convert specific tracer distribution to tracer density
 
+    return nothing
+end
+
+#####
+##### Compute forcing-specific quantities (e.g., horizontal averages for subsidence)
+#####
+
+"""
+    compute_forcings!(model)
+
+Compute forcing-specific quantities needed before tendency calculation.
+For example, `SubsidenceForcing` requires horizontal averages of the
+fields being advected.
+"""
+function compute_forcings!(model)
+    for forcing in model.forcing
+        compute_forcing!(forcing)
+    end
     return nothing
 end
 
@@ -141,6 +160,48 @@ end
         ρqᵗ = moisture_density[i, j, k]
         ρ = formulation.reference_state.density[i, j, k]
         qᵗ = ρqᵗ / ρ
+        specific_moisture[i, j, k] = qᵗ
+    end
+
+    𝒰₀ = diagnose_thermodynamic_state(i, j, k, grid,
+                                      formulation,
+                                      microphysics,
+                                      microphysical_fields,
+                                      constants,
+                                      specific_moisture)
+
+    # Adjust the thermodynamic state if using a microphysics scheme
+    # that invokes saturation adjustment
+    𝒰₁ = maybe_adjust_thermodynamic_state(𝒰₀, microphysics, microphysical_fields, qᵗ, constants)
+
+    update_microphysical_fields!(microphysical_fields, microphysics,
+                                 i, j, k, grid,
+                                 ρ, 𝒰₁, constants)
+                                 
+    T = Thermodynamics.temperature(𝒰₁, constants)
+    @inbounds temperature[i, j, k] = T
+end
+
+@kernel function _compute_potential_temperature_auxiliary_variables!(temperature,
+                                                                     potential_temperature,
+                                                                     specific_moisture,
+                                                                     grid,
+                                                                     constants,
+                                                                     formulation,
+                                                                     microphysics,
+                                                                     microphysical_fields,
+                                                                     potential_temperature_density,
+                                                                     moisture_density)
+    i, j, k = @index(Global, NTuple)
+
+    @inbounds begin
+        ρθ = potential_temperature_density[i, j, k]
+        ρqᵗ = moisture_density[i, j, k]
+        ρ = formulation.reference_state.density[i, j, k]
+
+        θ = ρθ / ρ
+        qᵗ = ρqᵗ / ρ
+        potential_temperature[i, j, k] = θ
         specific_moisture[i, j, k] = qᵗ
     end
 
