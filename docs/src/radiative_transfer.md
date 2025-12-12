@@ -14,6 +14,7 @@ To use gray radiation in a Breeze simulation, create a `GrayRadiativeTransferMod
 using Breeze
 using Oceananigans.Units
 using Dates
+using RRTMGP  # Load RRTMGP to enable radiation extension
 
 Nz = 64
 λ, φ = -70.9, 42.5  # longitude, latitude
@@ -29,7 +30,7 @@ formulation = AnelasticFormulation(reference_state,
                                    thermodynamics = :LiquidIcePotentialTemperature)
 
 # Create gray radiation model
-radiation = GrayRadiativeTransferModel(grid;
+radiation = GrayRadiativeTransferModel(grid, constants;
                                        surface_temperature = 300,    # K
                                        surface_emissivity = 0.98,
                                        surface_albedo = 0.1,

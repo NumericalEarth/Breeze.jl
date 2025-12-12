@@ -90,7 +90,7 @@ set!(model; θ=θ_profile, qᵗ=qᵗ_profile)
 # After `set!`, the radiation has been computed. We build Fields and
 # AbstractOperations to visualize the atmospheric state and radiative fluxes.
 
-T = model.auxiliary_fields.T
+T = model.temperature
 pᵣ = reference_state.pressure
 qᵗ = model.specific_moisture
 qˡ = model.microphysical_fields.qˡ
