@@ -337,15 +337,6 @@ function fields(model::AtmosphereModel)
     return merge(prognostic_fields(model), formulation_fields, model.velocities, auxiliary)
 end
 
-"""
-    auxiliary_fields(model::AtmosphereModel)
-
-Return a NamedTuple of auxiliary (diagnostic) fields for the model.
-"""
-function auxiliary_fields(model::AtmosphereModel)
-    return (; T = model.temperature, qᵗ = model.specific_moisture)
-end
-
 function prognostic_fields(model::AtmosphereModel)
     prognostic_formulation_fields = prognostic_fields(model.formulation)
     thermodynamic_fields = merge(prognostic_formulation_fields, (; ρqᵗ=model.moisture_density))
