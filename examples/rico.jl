@@ -35,15 +35,15 @@ Random.seed!(42)
 # ## Domain and grid
 #
 # The RICO domain is 12.8 km × 12.8 km horizontally with a vertical extent of 4 km
-# [vanZanten2011](@cite). The intercomparison uses 256 × 256 × 100 grid points
-# with 50 m horizontal resolution and 40 m vertical resolution.
+# [vanZanten2011](@cite). The intercomparison uses 128 × 128 × 100 grid points
+# with 100 m horizontal resolution and 40 m vertical resolution.
 #
 # For this example, we use a coarser grid (64 × 64 × 100) with 200 m horizontal
 # resolution, suitable for development and testing.
 
 Oceananigans.defaults.FloatType = Float32
 
-Nx = Ny = 64
+Nx = Ny = 128
 Nz = 100
 
 x = y = (0, 12800)
@@ -52,6 +52,8 @@ z = (0, 4000)
 grid = RectilinearGrid(GPU(); x, y, z,
                        size = (Nx, Ny, Nz), halo = (5, 5, 5),
                        topology = (Periodic, Periodic, Bounded))
+
+FT = eltype(grid)
 
 # ## Reference state and formulation
 #
@@ -148,15 +150,13 @@ set!(cooling, ρᵣ * cᵖᵈ * cooling)
 
 # ## Assembling forcing and boundary conditions
 
-# Fρu = (subsidence, geostrophic.ρu)
-# Fρv = (subsidence, geostrophic.ρv)
-Fρu = subsidence
-Fρv = subsidence
+Fρu = (subsidence, geostrophic.ρu)
+Fρv = (subsidence, geostrophic.ρv)
 Fρqᵗ = (subsidence, ρqᵗ_drying_forcing)
 Fρθ = subsidence
 Fρe = ρe_radiation_forcing
 
-forcing = (ρu=Fρu, ρv=Fρv, ρθ=Fρθ, ρqᵗ=Fρqᵗ, ρe=Fρe)
+forcing = (ρu=Fρu, ρv=Fρv, ρqᵗ=Fρqᵗ, ρe=Fρe)
 boundary_conditions = (ρθ=ρθ_bcs, ρqᵗ=ρqᵗ_bcs, ρu=ρu_bcs, ρv=ρv_bcs)
 nothing #hide
 
@@ -188,7 +188,6 @@ model = AtmosphereModel(grid; formulation, coriolis, microphysics,
 #    - Total water specific humidity ``q^t(z)``
 #    - Zonal velocity ``u(z)`` and meridional velocity ``v(z)``
 
-FT = eltype(grid)
 θˡⁱ₀ = AtmosphericProfilesLibrary.Rico_θ_liq_ice(FT)
 qᵗ₀ = AtmosphericProfilesLibrary.Rico_q_tot(FT)
 u₀ = AtmosphericProfilesLibrary.Rico_u(FT)
@@ -204,7 +203,7 @@ p₀ = reference_state.surface_pressure
 χ = (p₀ / 1e5)^(Rᵈ / cᵖᵈ)
 zϵ = 1500 # m 
 
-θᵢ(x, y, z) = χ * θˡⁱ₀(z) + 1e-1 * (rand() - 1) * (z < zϵ)
+θᵢ(x, y, z) = χ * θˡⁱ₀(z) + 1e-2 * (rand() - 1) * (z < zϵ)
 qᵢ(x, y, z) = qᵗ₀(z)
 uᵢ(x, y, z) = u₀(z)
 vᵢ(x, y, z) = v₀(z)
@@ -217,7 +216,7 @@ set!(model, θ=θᵢ, qᵗ=qᵢ, u=uᵢ, v=vᵢ)
 # RICO typically requires longer integration times than BOMEX to develop
 # a quasi-steady precipitating state.
 
-simulation = Simulation(model; Δt=10, stop_time=12hour)
+simulation = Simulation(model; Δt=10, stop_time=6hour)
 conjure_time_step_wizard!(simulation, cfl=0.7)
 
 # ## Output and progress
