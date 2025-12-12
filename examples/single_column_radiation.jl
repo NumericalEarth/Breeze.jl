@@ -24,7 +24,8 @@ using CairoMakie
 
 # ## Grid and thermodynamics
 #
-# We create a single column spanning 20 km with 64 layers.
+# We create a single column spanning 20 km with 64 layers
+# at a particular place.
 
 Nz = 64
 λ, φ = -70.9, 42.5
