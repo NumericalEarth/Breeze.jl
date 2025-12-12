@@ -41,11 +41,11 @@ using CairoMakie
 #
 # We define the thermodynamic base state and mean wind following [SkamarockKlemp1994](@citet):
 
-p₀ = 100000  # Pa - surface pressure
-θ₀ = 300     # K - reference potential temperature
-U  = 20      # m s⁻¹ - mean wind
-N  = 0.01    # s⁻¹ - Brunt-Väisälä frequency
-N² = N^2
+const p₀ = 100000  # Pa - surface pressure
+const θ₀ = 300     # K - reference potential temperature
+const U  = 20      # m s⁻¹ - mean wind
+const N  = 0.01    # s⁻¹ - Brunt-Väisälä frequency
+const N² = N^2
 
 # ## Grid configuration
 #
@@ -55,7 +55,7 @@ N² = N^2
 Nx, Nz = 300, 10
 Lx, Lz = 300kilometers, 10kilometers
 
-grid = RectilinearGrid(CPU(), size = (Nx, Nz), halo = (5, 5),
+const grid = RectilinearGrid(CPU(), size = (Nx, Nz), halo = (5, 5),
                        x = (0, Lx), z = (0, Lz),
                        topology = (Periodic, Flat, Bounded))
 
@@ -63,23 +63,23 @@ grid = RectilinearGrid(CPU(), size = (Nx, Nz), halo = (5, 5),
 #
 # We use the anelastic formulation with liquid-ice potential temperature thermodynamics:
 
-constants = ThermodynamicConstants()
-reference_state = ReferenceState(grid, constants; surface_pressure=p₀, potential_temperature=θ₀)
-formulation = AnelasticFormulation(reference_state, thermodynamics=:LiquidIcePotentialTemperature)
-advection = WENO(minimum_buffer_upwind_order=3)
-model = AtmosphereModel(grid; formulation, advection)
+const constants = ThermodynamicConstants()
+const reference_state = ReferenceState(grid, constants; surface_pressure=p₀, potential_temperature=θ₀)
+const formulation = AnelasticFormulation(reference_state, thermodynamics=:LiquidIcePotentialTemperature)
+const advection = WENO(minimum_buffer_upwind_order=3)
+const model = AtmosphereModel(grid; formulation, advection)
 
 # ## Initial conditions
 #
 # The perturbation parameters from the paper by [SkamarockKlemp1994](@citet):
 
-Δθ = 0.01               # K - perturbation amplitude
-a  = 5000               # m - perturbation half-width parameter
-x₀ = Lx / 3             # m - perturbation center in x
+const Δθ = 0.01               # K - perturbation amplitude
+const a  = 5000               # m - perturbation half-width parameter
+const x₀ = Lx / 3             # m - perturbation center in x
 
 # The background potential temperature profile with a constant Brunt-Väisälä frequency:
 
-g = model.thermodynamic_constants.gravitational_acceleration
+const g = model.thermodynamic_constants.gravitational_acceleration
 θᵇᵍ(z) = θ₀ * exp(N² * z / g)
 
 # The initial condition combines the background profile with the localized perturbation:
@@ -93,14 +93,14 @@ set!(model, θ=θᵢ, u=U)
 # We run for 3000 seconds with a fixed time step equal 24 seconds, matching the simulation time in
 # [SkamarockKlemp1994](@cite):
 
-simulation = Simulation(model; Δt=24, stop_time=3000)
+const simulation = Simulation(model; Δt=24, stop_time=3000)
 
 # Progress callback:
 
-θ = PotentialTemperature(model)
-θᵇᵍf = CenterField(grid)
+const θ = PotentialTemperature(model)
+const θᵇᵍf = CenterField(grid)
 set!(θᵇᵍf, (x, z) -> θᵇᵍ(z))
-θ′ = θ - θᵇᵍf
+const θ′ = θ - θᵇᵍf
 
 function progress(sim)
     u, v, w = sim.model.velocities
@@ -118,7 +118,7 @@ add_callback!(simulation, progress, IterationInterval(20))
 # wave propagation:
 
 
-outputs = merge(model.velocities, (; θ′))
+const outputs = merge(model.velocities, (; θ′))
 
 filename = "inertia_gravity_wave.jld2"
 simulation.output_writers[:jld2] = JLD2Writer(model, outputs; filename,
@@ -137,14 +137,14 @@ run!(simulation)
 # The [CM1 model test page](https://www2.mmm.ucar.edu/people/bryan/cm1/test_inertia_gravity_waves/)
 # provides additional comparisons between compressible, anelastic, and incompressible solvers.
 
-θ′t = FieldTimeSeries(filename, "θ′")
-times = θ′t.times
-Nt = length(times)
+const θ′t = FieldTimeSeries(filename, "θ′")
+const times = θ′t.times
+const Nt = length(times)
 
 # Plot the final potential temperature perturbation (compare to Figure 3b by
 # [SkamarockKlemp1994](@citet)):
 
-θ′N = θ′t[Nt]
+const θ′N = θ′t[Nt]
 
 fig = Figure(size=(800, 300))
 ax = Axis(fig[1, 1], xlabel = "x (m)", ylabel = "z (m)",
