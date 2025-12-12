@@ -8,7 +8,7 @@ The simplest radiative transfer option is gray atmosphere radiation, which uses 
 
 ### Basic Usage
 
-To use gray radiation in a Breeze simulation, create a [`GrayRadiativeTransferModel`](@ref) model and pass it to the [`AtmosphereModel`](@ref) constructor:
+To use gray radiation in a Breeze simulation, create a `GrayRadiativeTransferModel` model and pass it to the [`AtmosphereModel`](@ref) constructor:
 
 ```@example
 using Breeze
@@ -66,7 +66,7 @@ where ``τ_0 = 0.22`` is the shortwave optical depth parameter.
 
 ### Radiative Fluxes
 
-After running [`set!`](@ref) or [`update_state!`](@ref), the radiative fluxes are available from the radiation model:
+After running [`set!`](@ref), the radiative fluxes are available from the radiation model:
 
 ```julia
 # Longwave fluxes (ZFaceFields)
