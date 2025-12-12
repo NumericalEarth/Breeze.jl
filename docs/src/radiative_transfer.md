@@ -100,7 +100,7 @@ The calculation accounts for:
 
 ## Surface Properties
 
-The `GrayRadiativeTransferModel` model requires surface properties:
+The `RadiativeTransferModel` model requires surface properties:
 
 | Property | Description | Typical Values |
 |----------|-------------|----------------|

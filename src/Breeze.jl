@@ -44,9 +44,6 @@ export
     RelativeHumidityField,
     BulkMicrophysics,
 
-    # Radiation (implemented by extensions)
-    GrayRadiativeTransferModel,
-
     # BoundaryConditions
     BulkDrag,
     BulkSensibleHeatFlux,
