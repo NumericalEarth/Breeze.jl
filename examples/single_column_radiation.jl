@@ -10,17 +10,12 @@
 # > O'Gorman, P. A., & Schneider, T. (2008). The hydrological cycle over a wide
 # > range of climates simulated with an idealized GCM. *Journal of Climate*, 21(15),
 # > 3815–3832. DOI: [10.1175/2007JCLI2065.1](https://doi.org/10.1175/2007JCLI2065.1)
-#
-# See also Schneider (2004) for background on idealized gray radiation:
-#
-# > Schneider, T. (2004). The tropopause and the thermal stratification in the
-# > extratropics of a dry atmosphere. *Journal of the Atmospheric Sciences*, 61(12),
-# > 1317–1340. DOI: [10.1175/1520-0469(2004)061<1317:TTATTS>2.0.CO;2](https://doi.org/10.1175/1520-0469(2004)061<1317:TTATTS>2.0.CO;2)
 
 using Breeze
 using Oceananigans.Units
-using RRTMGP
 using CairoMakie
+
+using RRTMGP.AtmosphericStates: GrayOpticalThicknessOGorman2008
 
 # ## Grid and thermodynamics
 #
@@ -54,11 +49,12 @@ formulation = AnelasticFormulation(reference_state,
 
 using Dates
 
-radiation = GrayRadiativeTransferModel(grid, constants;
-                                       surface_temperature,
-                                       surface_emissivity = 0.98,
-                                       surface_albedo = 0.1,
-                                       solar_constant = 1361)        # W/m²
+optical_thickness = GrayOpticalThicknessOGorman2008(eltype(grid))
+radiation = RadiativeTransferModel(grid, constants, optical_thickness;
+                                   surface_temperature,
+                                   surface_emissivity = 0.98,
+                                   surface_albedo = 0.1,
+                                   solar_constant = 1361)        # W/m²
 
 # ## Atmosphere model
 #
@@ -136,7 +132,8 @@ lines!(ax_I, ℐ_net; linewidth=4, alpha=0.5, color=:black, label="Net")
 
 Legend(fig[1, 6], ax_I, orientation=:horizontal, nbanks=2, framevisible=false)
 
-fig[1, :] = Label(fig, "Single Column Gray Radiation (O'Gorman & Schneider, 2008)", fontsize=18, tellwidth=false)
-
+title = "Single Column Gray Radiation with O'Gorman & Schneider (2008) optical thickness"
+fig[1, :] = Label(fig, title, fontsize=18, tellwidth=false)
+                  
 save("single_column_radiation.png", fig)
 fig

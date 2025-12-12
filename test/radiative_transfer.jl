@@ -8,6 +8,7 @@ using Test
 # Load RRTMGP to trigger the extension
 using ClimaComms
 using RRTMGP
+using RRTMGP.AtmosphericStates: GrayOpticalThicknessOGorman2008
 
 #####
 ##### Unit tests
@@ -21,16 +22,18 @@ using RRTMGP
                                topology=(Flat, Flat, Bounded))
 
         constants = ThermodynamicConstants()
-        radiation = GrayRadiativeTransferModel(grid, constants;
-                                               surface_temperature = 300,
-                                               surface_emissivity = 0.98,
-                                               surface_albedo = 0.1,
-                                               solar_constant = 1361)
+        optical_thickness = GrayOpticalThicknessOGorman2008(FT)
+        radiation = RadiativeTransferModel(grid, constants, optical_thickness;
+                                           surface_temperature = 300,
+                                           surface_emissivity = 0.98,
+                                           surface_albedo = 0.1,
+                                           solar_constant = 1361)
 
         @test radiation !== nothing
-        @test radiation.surface_temperature.constant == FT(300)
-        @test radiation.surface_emissivity == FT(0.98)
-        @test radiation.surface_albedo.constant == FT(0.1)
+        @test radiation.surface_properties.surface_temperature.constant == FT(300)
+        @test radiation.surface_properties.surface_emissivity.constant == FT(0.98)
+        @test radiation.surface_properties.direct_surface_albedo.constant == FT(0.1)
+        @test radiation.surface_properties.diffuse_surface_albedo.constant == FT(0.1)
         @test radiation.solar_constant == FT(1361)
 
         # Check flux fields are created
@@ -59,11 +62,12 @@ end
         formulation = AnelasticFormulation(reference_state,
                                            thermodynamics = :LiquidIcePotentialTemperature)
 
-        radiation = GrayRadiativeTransferModel(grid, constants;
-                                               surface_temperature = 300,
-                                               surface_emissivity = 0.98,
-                                               surface_albedo = 0.1,
-                                               solar_constant = 1361)
+        optical_thickness = GrayOpticalThicknessOGorman2008(FT)
+        radiation = RadiativeTransferModel(grid, constants, optical_thickness;
+                                           surface_temperature = 300,
+                                           surface_emissivity = 0.98,
+                                           surface_albedo = 0.1,
+                                           solar_constant = 1361)
 
         clock = Clock(time=DateTime(2024, 6, 21, 12, 0, 0))
         model = AtmosphereModel(grid; clock, formulation, radiation)
@@ -85,11 +89,12 @@ end
         formulation = AnelasticFormulation(reference_state,
                                            thermodynamics = :LiquidIcePotentialTemperature)
 
-        radiation = GrayRadiativeTransferModel(grid, constants;
-                                               surface_temperature = 300,
-                                               surface_emissivity = 0.98,
-                                               surface_albedo = 0.1,
-                                               solar_constant = 1361)
+        optical_thickness = GrayOpticalThicknessOGorman2008(FT)
+        radiation = RadiativeTransferModel(grid, constants, optical_thickness;
+                                           surface_temperature = 300,
+                                           surface_emissivity = 0.98,
+                                           surface_albedo = 0.1,
+                                           solar_constant = 1361)
 
         # Use noon on summer solstice at 45°N for good solar illumination
         clock = Clock(time=DateTime(2024, 6, 21, 16, 0, 0))

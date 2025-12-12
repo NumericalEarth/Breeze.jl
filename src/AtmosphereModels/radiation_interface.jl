@@ -15,12 +15,18 @@ radiation extensions (e.g., BreezeRRTMGPExt) to compute radiative transfer.
 """
 update_radiation!(radiation, model) = nothing
 
-struct GrayRadiativeTransferModel{FT, C, E, SP, OT, AS, LW, SW, F}
+"""
+    RadiativeTransferModel(grid, constants, optical_thickness; kw...)
+
+Return a RadiativeTransferModel on `grid` with thermodynamic `constants` and using
+the `optical_thickness` model for radiative transfer.
+"""
+struct RadiativeTransferModel{OT, FT, C, E, SP, AS, LW, SW, F}
+    optical_thickness :: OT
     solar_constant :: FT # Scalar
     coordinate :: C # coordinates (for RectilinearGrid) for computing the solar zenith angle
     epoch :: E # optional epoch for computing time with floating-point clocks
     surface_properties :: SP
-    optical_thickness :: OT
     atmospheric_state :: AS
     longwave_solver :: LW
     shortwave_solver :: SW
@@ -36,13 +42,12 @@ struct SurfaceRadiativeProperties{ST, SE, SA, DW}
     diffuse_surface_albedo :: DW  # Scalar or 2D field
 end
 
-Base.summary(radiation::GrayRadiativeTransferModel) = "GrayRadiativeTransferModel"
+Base.summary(radiation::RadiativeTransferModel) = "RadiativeTransferModel"
 
-function Base.show(io::IO, radiation::GrayRadiativeTransferModel)
+function Base.show(io::IO, radiation::RadiativeTransferModel)
     print(io, summary(radiation), "\n",
-          "├── solar_constant: ", prettysummary(radiation.solar_constant))
-
-          # "├── surface_temperature: ", radiation.surface_properties.surface_temperature, " K\n",
-          # "├── surface_emissivity: ", radiation.surface_emissivity, "\n",
-          # "└── surface_albedo: ", radiation.surface_properties.surface_albedo, "\n",
+          "├── solar_constant: ", prettysummary(radiation.solar_constant),
+          "├── surface_temperature: ", radiation.surface_properties.surface_temperature, " K\n",
+          "├── surface_emissivity: ", radiation.surface_properties.surface_emissivity, "\n",
+          "└── surface_albedo: ", radiation.surface_properties.surface_albedo)
 end

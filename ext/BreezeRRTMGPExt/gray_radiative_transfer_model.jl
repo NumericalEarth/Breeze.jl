@@ -13,14 +13,15 @@ using Oceananigans.Operators: ℑzᵃᵃᶠ
 using Oceananigans.Grids: xnode, ynode, λnode, φnode
 using Oceananigans.Grids: RectilinearGrid, Center, Flat, Bounded
 using Oceananigans.Fields: ConstantField
-
 using Breeze.AtmosphereModels: AtmosphereModels, SurfaceRadiativeProperties
 
+using RRTMGP.AtmosphericStates: GrayAtmosphericState, GrayOpticalThicknessOGorman2008
 using KernelAbstractions: @kernel, @index
 using Dates: AbstractDateTime, Seconds
 
-import Breeze.AtmosphereModels: GrayRadiativeTransferModel
+import Breeze.AtmosphereModels: RadiativeTransferModel
 
+const GrayRadiativeTransferModel = RadiativeTransferModel{<:GrayOpticalThicknessOGorman2008}
 const SingleColumnGrid = RectilinearGrid{<:Any, <:Flat, <:Flat, <:Bounded}
 
 materialize_surface_property(x::Number, grid) = convert(eltype(grid), x)
@@ -58,19 +59,19 @@ Construct a gray atmosphere radiative transfer model for the given grid.
 - `diffuse_surface_albedo`: Diffuse surface albedo, 0-1 (default: 0.1). Can be scalar or 2D field.
 - `solar_constant`: Top-of-atmosphere solar flux in W/m² (default: 1361)
 """
-function GrayRadiativeTransferModel(grid, constants;
-                                    coordinate = nothing,
-                                    epoch = nothing,
-                                    stefan_boltzmann_constant = 5.670374419e-8,
-                                    avogadro_number = 6.02214076e23,
-                                    optical_thickness = nothing,
-                                    latitude = nothing,
-                                    surface_temperature = 300,
-                                    surface_emissivity = 0.98,
-                                    direct_surface_albedo = nothing,
-                                    diffuse_surface_albedo = nothing,
-                                    surface_albedo = nothing,
-                                    solar_constant = 1361)
+function RadiativeTransferModel(grid, constants,
+                                optical_thickness::GrayOpticalThicknessOGorman2008;
+                                coordinate = nothing,
+                                epoch = nothing,
+                                stefan_boltzmann_constant = 5.670374419e-8,
+                                avogadro_number = 6.02214076e23,
+                                latitude = nothing,
+                                surface_temperature = 300,
+                                surface_emissivity = 0.98,
+                                direct_surface_albedo = nothing,
+                                diffuse_surface_albedo = nothing,
+                                surface_albedo = nothing,
+                                solar_constant = 1361)
 
     FT = eltype(grid)
 
@@ -95,11 +96,6 @@ function GrayRadiativeTransferModel(grid, constants;
         throw(ArgumentError(error_msg))
     end
     
-    # Default optical thickness parameterization
-    if isnothing(optical_thickness)
-        optical_thickness = GrayOpticalThicknessOGorman2008(FT)
-    end
-
     arch = architecture(grid)
     Nx, Ny, Nz = size(grid)
     Nc = Nx * Ny
@@ -135,9 +131,9 @@ function GrayRadiativeTransferModel(grid, constants;
 
     atmospheric_state = GrayAtmosphericState(rrtmgp_φ,
                                              rrtmgp_pᶜ,
+                                             rrtmgp_pᶠ,
                                              rrtmgp_Tᶜ,
                                              rrtmgp_Tᶠ,
-                                             rrtmgp_pᶠ,
                                              rrtmgp_zᶠ,
                                              rrtmgp_T₀,
                                              optical_thickness)
@@ -198,17 +194,17 @@ function GrayRadiativeTransferModel(grid, constants;
                                                     direct_surface_albedo,
                                                     diffuse_surface_albedo)
     
-    return GrayRadiativeTransferModel(convert(FT, solar_constant),
-                                      coordinate,
-                                      epoch,
-                                      surface_properties,
-                                      optical_thickness,
-                                      atmospheric_state,
-                                      longwave_solver,
-                                      shortwave_solver,
-                                      upwelling_longwave_flux,
-                                      downwelling_longwave_flux,
-                                      downwelling_shortwave_flux)
+    return RadiativeTransferModel(optical_thickness,
+                                  convert(FT, solar_constant),
+                                  coordinate,
+                                  epoch,
+                                  surface_properties,
+                                  atmospheric_state,
+                                  longwave_solver,
+                                  shortwave_solver,
+                                  upwelling_longwave_flux,
+                                  downwelling_longwave_flux,
+                                  downwelling_shortwave_flux)
 end
 
 @inline rrtmgp_column_index(i, j, Nx) = i + (j - 1) * Nx
@@ -258,12 +254,13 @@ end
 #     - FluxLW, FluxSW: flux storage (flux_up, flux_dn, flux_net, flux_dn_dir)
 #
 #   Breeze types (internal, can modify):
-#     - GrayRadiativeTransferModel: wrapper containing RRTMGP solvers and Oceananigans flux fields
+#     - RadiativeTransferModel: wrapper containing RRTMGP solvers and Oceananigans flux fields
 #     - SingleColumnGrid type alias
 #
 
 compute_datetime(dt::AbstractDateTime, epoch) = dt
 compute_datetime(t::Number, epoch::AbstractDateTime) = epoch + Seconds(t)
+
 """
     $(TYPEDSIGNATURES)
 
@@ -433,27 +430,12 @@ end
         # Layer values (cell centers)
         Tᶜ[k, col] = T[i, j, k]
         pᶜ[k, col] = p[i, j, k]
-
-        # Level values (cell faces)
-        # Face k+1 lies between cells k and k+1 (interior faces)
-        # Face 1 is the surface, face Nz+1 is the top
-        if k < Nz
-            # Interior faces: interpolate from adjacent cell values
-            pᶠ[k+1, col] = ℑzᵃᵃᶠ(i, j, k+1, grid, p)
-            Tᶠ[k+1, col] = ℑzᵃᵃᶠ(i, j, k+1, grid, T)
-        end
+        pᶠ[k, col] = ℑzᵃᵃᶠ(i, j, k, grid, p)
+        Tᶠ[k, col] = ℑzᵃᵃᶠ(i, j, k, grid, T)
 
         if k == 1
             # Surface face: use surface temperature and bottom cell pressure
             T₀[col] = surface_temperature[i, j, 1]
-            Tᶠ[1, col] = surface_temperature[i, j, 1]
-            pᶠ[1, col] = p[i, j, 1]  # Use bottom cell pressure as approximation
-        end
-
-        if k == Nz
-            # Top face: extrapolate from top cell
-            Tᶠ[Nz+1, col] = T[i, j, Nz]
-            pᶠ[Nz+1, col] = p[i, j, Nz]  # Use top cell pressure as approximation
         end
     end
 end

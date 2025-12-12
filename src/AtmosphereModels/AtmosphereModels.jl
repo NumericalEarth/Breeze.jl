@@ -19,8 +19,7 @@ export
     compute_forcing!,
 
     # Radiation (implemented by extensions)
-    GrayRadiativeTransferModel,
-    update_radiation!,
+    RadiativeTransferModel,
 
     # Diagnostics (re-exported from Diagnostics submodule)
     PotentialTemperature,
