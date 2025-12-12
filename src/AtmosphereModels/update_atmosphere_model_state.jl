@@ -153,12 +153,11 @@ end
                                                              moisture_density)
     i, j, k = @index(Global, NTuple)
 
-    # Update formulation-specific thermodynamic variables (dispatches on formulation type)
     compute_auxiliary_thermodynamic_variables!(formulation, i, j, k, grid)
 
     @inbounds begin
-        ρqᵗ = moisture_density[i, j, k]
         ρ = formulation.reference_state.density[i, j, k]
+        ρqᵗ = moisture_density[i, j, k]
         qᵗ = ρqᵗ / ρ
         specific_moisture[i, j, k] = qᵗ
     end
@@ -190,12 +189,12 @@ end
                                                                      formulation,
                                                                      microphysics,
                                                                      microphysical_fields,
-                                                                     potential_temperature_density,
+                                                                     liquid_ice_potential_temperature_density,
                                                                      moisture_density)
     i, j, k = @index(Global, NTuple)
 
     @inbounds begin
-        ρθ = potential_temperature_density[i, j, k]
+        ρθ = liquid_ice_potential_temperature_density[i, j, k]
         ρqᵗ = moisture_density[i, j, k]
         ρ = formulation.reference_state.density[i, j, k]
 
