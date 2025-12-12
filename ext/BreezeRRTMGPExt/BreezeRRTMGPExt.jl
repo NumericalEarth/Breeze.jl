@@ -8,7 +8,6 @@ using DocStringExtensions: TYPEDSIGNATURES
 
 # Oceananigans imports
 using Oceananigans.Architectures: architecture, CPU
-using Oceananigans.Grids: Face
 using Oceananigans.Fields: ZFaceField
 
 # RRTMGP imports (external types - cannot modify)
@@ -18,7 +17,6 @@ using Oceananigans.Fields: ZFaceField
 #   RRTMGPParameters: physical constants for RRTMGP
 
 using RRTMGP: RRTMGPGridParams
-using RRTMGP.AtmosphericStates: GrayAtmosphericState, GrayOpticalThicknessOGorman2008
 using RRTMGP.RTE: NoScatLWRTE, NoScatSWRTE
 using RRTMGP.RTESolver: solve_lw!, solve_sw!
 using RRTMGP.Parameters: RRTMGPParameters
