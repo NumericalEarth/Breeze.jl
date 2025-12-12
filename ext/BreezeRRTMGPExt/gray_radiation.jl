@@ -8,9 +8,12 @@
 ##### This extension provides the constructor and update methods.
 #####
 
-using Oceananigans.Grids: znodes
+using Oceananigans.Grids: znodes, ynode, RectilinearGrid, Center, Flat, Bounded
+using Oceananigans.Fields: ConstantField
 
 import Breeze: GrayRadiativeTransferModel
+
+const SingleColumnGrid = RectilinearGrid{<:Any, <:Flat, <:Flat, <:Bounded}
 
 """
     $(TYPEDSIGNATURES)

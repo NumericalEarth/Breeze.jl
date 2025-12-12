@@ -15,6 +15,7 @@
 
 using KernelAbstractions: @kernel, @index
 using Oceananigans.Utils: launch!
+using Oceananigans.Operators: ℑzᵃᵃᶠ
 
 using Breeze.AtmosphereModels: AtmosphereModels
 
@@ -171,16 +172,31 @@ end
     col = rrtmgp_column_index(i, j, grid.Nx)
 
     @inbounds begin
-        # Surface temperature (scalar in this implementation)
-        if k == 1
-            T₀[col] = surface_temperature[i, j, 1]
-        end
-
+        # Layer values (cell centers)
         Tᶜ[k, col] = T[i, j, k]
         pᶜ[k, col] = p[i, j, k]
 
-        pᶠ[1, col] = ℑzᵃᵃᶠ(i, j, k, grid, p)
-        Tᶠ[1, col] = ℑzᵃᵃᶠ(i, j, k, grid, T)
+        # Level values (cell faces)
+        # Face k+1 lies between cells k and k+1 (interior faces)
+        # Face 1 is the surface, face Nz+1 is the top
+        if k < Nz
+            # Interior faces: interpolate from adjacent cell values
+            pᶠ[k+1, col] = ℑzᵃᵃᶠ(i, j, k+1, grid, p)
+            Tᶠ[k+1, col] = ℑzᵃᵃᶠ(i, j, k+1, grid, T)
+        end
+
+        if k == 1
+            # Surface face: use surface temperature and bottom cell pressure
+            T₀[col] = surface_temperature[i, j, 1]
+            Tᶠ[1, col] = surface_temperature[i, j, 1]
+            pᶠ[1, col] = p[i, j, 1]  # Use bottom cell pressure as approximation
+        end
+
+        if k == Nz
+            # Top face: extrapolate from top cell
+            Tᶠ[Nz+1, col] = T[i, j, Nz]
+            pᶠ[Nz+1, col] = p[i, j, Nz]  # Use top cell pressure as approximation
+        end
     end
 end
 
