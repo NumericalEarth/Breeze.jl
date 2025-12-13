@@ -216,13 +216,14 @@ The conversion is: q = r / (1 + rᵗ)
 
 
 """
-    kessler_terminal_velocity(rʳ, ρ, ρˢ)
+    kessler_terminal_velocity(rʳ, ρ, ρ_bottom)
 
 Compute liquid water terminal velocity (m/s) following KW eq. 2.15.
-Uses three-argument form with explicit reference density. ρˢ is surface air density (kg/m³).
+Uses three-argument form with explicit reference density. 
+`ρ_bottom` is reference density at the lowest vertical level (kg/m³).
 """
-@inline function kessler_terminal_velocity(rʳ, ρ, ρˢ)
-    rhalf = sqrt(ρˢ / ρ)
+@inline function kessler_terminal_velocity(rʳ, ρ, ρ_bottom)
+    rhalf = sqrt(ρ_bottom / ρ)
     return 36.34 * (rʳ * 0.001 * ρ)^0.1364 * rhalf
 end
 
@@ -323,11 +324,10 @@ end
 
     # Extract thermodynamic constants for liquid-ice potential temperature
     ℒˡᵣ = constants.liquid.reference_latent_heat  # Latent heat of vaporization (J/kg)
-    cᵖᵈ = constants.dry_air.heat_capacity         # Dry air heat capacity (J/kg/K)
-    Rᵈ  = dry_air_gas_constant(constants)         # Dry air gas constant (J/kg/K)
 
-    # Surface density for terminal velocity calculation (KW eq. 2.15 correction factor)
-    @inbounds ρˢ = ρᵣ[1]
+    # Reference density at lowest level for terminal velocity correction (KW eq. 2.15)
+    # Used as ρˢ in: velqr = 36.34 * (qr * 0.001 * ρ)^0.1364 * sqrt(ρˢ/ρ)
+    @inbounds ρ_bottom = ρᵣ[1]
 
     #####
     ##### PHASE 1: Convert mass fraction → mixing ratio for entire column
@@ -344,8 +344,12 @@ end
             qᵗ = ρqᵗ[i, j, k] / ρ
 
             # Get condensate mass fractions from prognostic microphysical fields
-            qᶜˡ = ρqᶜˡ[i, j, k] / ρ
-            qʳ  = ρqʳ[i, j, k] / ρ
+            qᶜˡ = max(ρqᶜˡ[i, j, k] / ρ, zero(FT))
+            qʳ  = max(ρqʳ[i, j, k] / ρ, zero(FT))
+
+            # Ensure total moisture is at least the diagnosed condensate.
+            # This prevents negative diagnosed vapor in rare inconsistent states.
+            qᵗ = max(qᵗ, qᶜˡ + qʳ)
 
             # Diagnose water vapor: qᵛ = qᵗ - qᶜˡ - qʳ
             qᵛ = qᵗ - qᶜˡ - qʳ
@@ -354,7 +358,7 @@ end
             rʳ = mass_fraction_to_mixing_ratio(qʳ, qᵗ)
 
             # Terminal velocity (m/s) - uses mixing ratio
-            velqr = kessler_terminal_velocity(rʳ, ρ, ρˢ)
+            velqr = kessler_terminal_velocity(rʳ, ρ, ρ_bottom)
             vᵗ_rain[i, j, k] = velqr
 
             # Store mixing ratios in diagnostic fields temporarily for use in physics loop
@@ -417,16 +421,19 @@ end
                 # Current liquid mass fraction (cloud + rain) for temperature calculation
                 # Convert from mixing ratio to mass fraction for thermodynamic calculation
                 rᵗ = rᵛ + rᶜ + rʳ
+                qᵛ_current = mixing_ratio_to_mass_fraction(rᵛ, rᵗ)
                 qˡ_current = mixing_ratio_to_mass_fraction(rᶜ + rʳ, rᵗ)
 
-                # Exner function using mixture properties (simplified for warm phase)
-                # Using dry air approximation: Π ≈ (p/p₀)^(Rᵈ/cᵖᵈ)
-                Π = (p / p₀)^(Rᵈ / cᵖᵈ)
+                # Use Breeze's moist Exner function and moist heat capacity so that
+                # θˡⁱ ↔ T is thermodynamically consistent with the model.
+                q = MoistureMassFractions(qᵛ_current, qˡ_current)
+                cᵖᵐ = mixture_heat_capacity(q, constants)
+                Rᵐ  = mixture_gas_constant(q, constants)
+                Π = (p / p₀)^(Rᵐ / cᵖᵐ)
 
-                # Compute temperature from liquid-ice potential temperature
-                # T = Π * θˡⁱ + ℒˡᵣ * qˡ / cᵖᵐ
-                # Using dry air heat capacity as approximation for cᵖᵐ
-                T_k = Π * θˡⁱ_k + ℒˡᵣ * qˡ_current / cᵖᵈ
+                # Temperature from liquid-ice potential temperature state:
+                # T = Π θˡⁱ + (ℒˡᵣ qˡ)/cᵖᵐ (warm phase; qⁱ = 0)
+                T_k = Π * θˡⁱ_k + ℒˡᵣ * qˡ_current / cᵖᵐ
 
                 # Also compute Kessler's pk for saturation calculation
                 p_mb = p / 100
@@ -515,25 +522,32 @@ end
                 #   ΔT = ℒᵥ * (condensation - ern) / cₚ
                 #
                 # Note: We use Kessler's hardcoded constants (ℒᵥ = 2500000, cₚ = 1003) for 
-                # the latent heating to match the Fortran exactly, but use Breeze's ℒˡᵣ for 
+                # the latent heating to match the DCMIP2016 configuration exactly, but use Breeze's ℒˡᵣ for 
                 # the θˡⁱ definition for thermodynamic consistency.
                 
                 # Net phase change in mixing ratio (positive = condensation, negative = evaporation)
                 net_phase_change = condensation - ern
                 
                 # Temperature change from latent heating using Kessler's constants
-                # (same as Fortran: 2500000/(1003*pk) * net_phase_change, but pk = Π for dry air)
+                # (same as Fortran: ΔT = 2500000/1003 * net_phase_change)
                 ΔT_phase = 2500000.0 * net_phase_change / 1003.0
                 T_new = T_k + ΔT_phase
 
                 # Compute new liquid mass fraction (includes ALL changes: autoconversion, 
                 # sedimentation, saturation adjustment, evaporation)
                 rᵗ_new = rᵛ_new + rᶜ_final + rʳ_final
+                qᵛ_new_mf = mixing_ratio_to_mass_fraction(rᵛ_new, rᵗ_new)
                 qˡ_new = mixing_ratio_to_mass_fraction(rᶜ_final + rʳ_final, rᵗ_new)
 
+                # Update moist thermodynamic properties with the new moisture state.
+                q_new = MoistureMassFractions(qᵛ_new_mf, qˡ_new)
+                cᵖᵐ_new = mixture_heat_capacity(q_new, constants)
+                Rᵐ_new  = mixture_gas_constant(q_new, constants)
+                Π_new = (p / p₀)^(Rᵐ_new / cᵖᵐ_new)
+
                 # Convert back to liquid-ice potential temperature:
-                # θˡⁱ_new = (T_new - ℒˡᵣ * qˡ_new / cₚ) / Π
-                θˡⁱ_new = (T_new - ℒˡᵣ * qˡ_new / cᵖᵈ) / Π
+                # θˡⁱ = (T - ℒˡᵣ qˡ / cᵖᵐ) / Π
+                θˡⁱ_new = (T_new - ℒˡᵣ * qˡ_new / cᵖᵐ_new) / Π_new
 
                 # Update thermodynamics
                 θˡⁱ[i, j, k]  = θˡⁱ_new
@@ -547,7 +561,7 @@ end
                 @inbounds begin
                     ρ = ρᵣ[k]
                     rʳ = qʳ_field[i, j, k]  # Already mixing ratio
-                    vᵗ_rain[i, j, k] = kessler_terminal_velocity(rʳ, ρ, ρˢ)
+                    vᵗ_rain[i, j, k] = kessler_terminal_velocity(rʳ, ρ, ρ_bottom)
                 end
             end
         end
