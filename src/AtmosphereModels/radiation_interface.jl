@@ -15,12 +15,6 @@ radiation extensions (e.g., BreezeRRTMGPExt) to compute radiative transfer.
 """
 update_radiation!(radiation, model) = nothing
 
-"""
-    RadiativeTransferModel(grid, constants, optical_thickness; kw...)
-
-Return a RadiativeTransferModel on `grid` with thermodynamic `constants` and using
-the `optical_thickness` model for radiative transfer.
-"""
 struct RadiativeTransferModel{OT, FT, C, E, SP, AS, LW, SW, F}
     optical_thickness :: OT
     solar_constant :: FT # Scalar
@@ -33,6 +27,19 @@ struct RadiativeTransferModel{OT, FT, C, E, SP, AS, LW, SW, F}
     upwelling_longwave_flux :: F
     downwelling_longwave_flux :: F
     downwelling_shortwave_flux :: F
+end
+
+"""
+    $(TYPEDSIGNATURES)
+
+Return a RadiativeTransferModel on `grid` with thermodynamic `constants` and using
+the `optical_thickness` model for radiative transfer.
+"""
+function RadiativeTransferModel(grid, constants, optical_thickness; kw...)
+    msg = "At the moment, RadiativeTransferModel requires RRTMGP and is only valid with
+          optical_thickness = GrayOpticalThicknessOGorman2008(FT). Received $optical_thickness."
+    throw(ArgumentError(msg))
+    return nothing
 end
 
 struct SurfaceRadiativeProperties{ST, SE, SA, DW}
