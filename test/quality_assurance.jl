@@ -3,8 +3,11 @@ using Aqua: Aqua
 using ExplicitImports: ExplicitImports
 using Test: @testset, @test
 
-# Needed only to trigger loading the extension, so that `ExplicitImports` can analyse it.
+# Needed only to trigger loading the extensions, so that `ExplicitImports` can analyse them.
 using CloudMicrophysics: CloudMicrophysics
+using ClimaComms: ClimaComms
+using Dates: Dates
+using RRTMGP: RRTMGP
 
 @testset "Aqua" begin
     Aqua.test_all(Breeze)

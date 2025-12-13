@@ -1,24 +1,25 @@
 [deps]
 AtmosphericProfilesLibrary = "86bc3604-9858-485a-bdbe-831ec50de11d"
 Breeze = "660aa2fb-d4c8-4359-a52c-9c057bc511da"
+CUDA = "052768ef-5323-5732-b1bb-66c8b64840ba"
 CairoMakie = "13f3f980-e62b-5c42-98c6-ff1f3baf88f0"
 CloudMicrophysics = "6a9e3e04-43cd-43ba-94b9-e8782df3c71b"
-CUDA = "052768ef-5323-5732-b1bb-66c8b64840ba"
 Documenter = "e30172f5-a6a5-5a46-863b-614d45cd2de4"
 DocumenterCitations = "daee34ce-89f3-4625-b898-19384cb65244"
 InteractiveUtils = "b77e0a4c-d291-57a0-90e8-8db25a27a240"
 Literate = "98b081ad-f1c9-55d3-8b20-4c87d4299306"
 Oceananigans = "9e8cae18-63c1-5223-a75c-80ca9d6e9a09"
 Pkg = "44cfe95a-1eb2-52ea-b672-e2afdf69b78f"
+RRTMGP = "a01a1ee8-cea4-48fc-987c-fc7878d79da1"
 Random = "9a3f8284-a2c9-5f02-9a11-845980a1fd5c"
 
 [sources]
 Breeze = {path = ".."}
 
 [compat]
+CUDA = "5"
 CairoMakie = "0.15"
 CloudMicrophysics = "0.29.0"
-CUDA = "5"
 Documenter = "1"
 DocumenterCitations = "1.4"
 InteractiveUtils = "<0.0.1, 1"

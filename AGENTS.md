@@ -33,10 +33,13 @@ Breeze interfaces with ClimaOcean for coupled atmosphere-ocean simulations.
    - Do not put error messages inside kernels.
    - Models _never_ go inside kernels
    - Mark functions inside kernels with `@inline`.
+   - **Never use loops outside kernels**: Always replace `for` loops that iterate over grid points
+     with kernels launched via `launch!`. This ensures code works on both CPU and GPU.
    
 4. **Documentation**:
    - Use DocStringExtensions.jl for consistent docstrings
-   - Include `$(SIGNATURES)` for automatic signature documentation
+   - Use `$(TYPEDSIGNATURES)` for automatic typed signature documentation (preferred over `$(SIGNATURES)`)
+   - Never write explicit function signatures in docstrings; always use `$(TYPEDSIGNATURES)`
    - Add examples in docstrings when helpful
 
 5. **Memory leanness**
@@ -120,10 +123,12 @@ Breeze interfaces with ClimaOcean for coupled atmosphere-ocean simulations.
   - The examples and docs have their own `Project.toml` environment. When your run examples you need to use `examples/Project.toml`.
     When you build new examples, please add example-specific packages to `examples/Project.toml`. Do not add example-specific
     packages to the main Breeze Project.toml. You may also need to add relevant packages to AtmosphereProfilesLibrary.
-  - Do not use `interior` to plot Fields unless necessary. Always try to pass Field or windowed Field
-    (generated using `view(field, i, j, k)` where `i, j, k` may be indices or index ranges) first.
-  - In examples, use the suffix `ts` (no underscore) for "time series" and the suffix `n` (no underscore)
-    to refer to `FieldTimeSeries` indexed at time-index `n`.
+  - When making plots, do not use `interior(field, i, j, k)` to make a plot. Instead either pass `field` 
+    directly, as in `lines!(ax, field)` or `lines!(ax, z, field)` for a 1D plot with either automatic
+    or custom vertical coordinate. You only need to provide the coordinate if it has different units, eg
+    if you have converted z to kilometers. 1D fields work with `lines` and 2D fields work with 2D plots
+    like `heatmap` or `contourf`. For 3D fields in a 2D plane, use `view(field, :, :, k)`
+    (e.g. for a xy-slice).
 
 4. **Documentation Style**
   - Mathematical notation in `docs/src/appendix/notation.md`
@@ -164,6 +169,7 @@ Breeze interfaces with ClimaOcean for coupled atmosphere-ocean simulations.
 - **Functions**: snake_case (e.g., `update_atmosphere_model!`, `compute_pressure!`)
 - **Kernels**: "Kernels" (functions prefixed with `@kernel`) may be prefixed with an underscore (e.g., `_kernel_function`)
 - **Variables**: Use _either_ an English long name, or mathematical notation with readable unicode. Variable names should be taken from `docs/src/appendix/notation.md` in the docs. If a new variable is created (or if one doesn't exist), it should be added to the table in notation.md
+- **Avoid abbreviations**: Use full words instead of abbreviations. For example, use `latitude` instead of `lat`, `longitude` instead of `lon`, `temperature` instead of `temp`. This improves code readability and self-documentation.
 
 ### Breeze Module Structure
 ```

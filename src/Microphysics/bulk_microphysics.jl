@@ -17,7 +17,7 @@ const FourCategoryBulkMicrophysics = BulkMicrophysics{<:Any, <:FourCategories}
 Base.summary(bμp::FourCategoryBulkMicrophysics) = "FourCategoryBulkMicrophysics"
 
 """
-    $(TYPEDSIGNATURES)
+$(TYPEDSIGNATURES)
 
 Return a `BulkMicrophysics` microphysics scheme with `clouds` and `precipitation` microphysics schemes.
 """
@@ -41,7 +41,7 @@ materialize_microphysical_fields(bμp::NPBM, grid, bcs) = materialize_microphysi
 @inline function update_microphysical_fields!(μ, bμp::NPBM, i, j, k, grid, ρ, 𝒰, constants)
     return update_microphysical_fields!(μ, bμp.nucleation, i, j, k, grid, ρ, 𝒰, constants)
 end
-    
+
 @inline function compute_moisture_fractions(i, j, k, grid, bμp::NPBM, ρ, qᵗ, μ)
     return compute_moisture_fractions(i, j, k, grid, bμp.nucleation, ρ, qᵗ, μ)
 end

@@ -43,7 +43,7 @@ end
 const valid_thermodynamics_types = (:LiquidIcePotentialTemperature, :StaticEnergy)
 
 """
-    $(TYPEDSIGNATURES)
+$(TYPEDSIGNATURES)
 
 Construct an un-materialized "stub" `AnelasticFormulation` with `reference_state` and `thermodynamics`.
 The thermodynamics and pressure fields are materialized later in the model constructor.
@@ -81,7 +81,7 @@ function additional_field_names(formulation::AnelasticFormulation{<:Symbol})
 end
 
 """
-    $(TYPEDSIGNATURES)
+$(TYPEDSIGNATURES)
 
 Construct a "stub" `AnelasticFormulation` with just the `reference_state`.
 The thermodynamics and pressure fields are materialized later in the model constructor.
@@ -92,7 +92,7 @@ function default_formulation(grid, constants)
 end
 
 """
-    $(TYPEDSIGNATURES)
+$(TYPEDSIGNATURES)
 
 Materialize a stub `AnelasticFormulation` into a full formulation with thermodynamic fields
 and the pressure anomaly field. The thermodynamic fields depend on the type of thermodynamics

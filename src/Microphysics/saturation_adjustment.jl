@@ -268,7 +268,7 @@ Return the saturation-adjusted thermodynamic state using a secant iteration.
 end
 
 """
-    $(TYPEDSIGNATURES)
+$(TYPEDSIGNATURES)
 
 Perform saturation adjustment and return the temperature
 associated with the adjusted state.

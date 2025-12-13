@@ -63,6 +63,13 @@ Modules = [Breeze.BoundaryConditions]
 Private = false
 ```
 
+### CelestialMechanics
+
+```@autodocs
+Modules = [Breeze.CelestialMechanics]
+Private = false
+```
+
 ## Private API
 
 ```@autodocs
@@ -109,5 +116,12 @@ Public = false
 
 ```@autodocs
 Modules = [Breeze.BoundaryConditions]
+Public = false
+```
+
+### CelestialMechanics
+
+```@autodocs
+Modules = [Breeze.CelestialMechanics]
 Public = false
 ```
