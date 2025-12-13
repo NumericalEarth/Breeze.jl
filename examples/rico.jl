@@ -216,7 +216,7 @@ set!(model, θ=θᵢ, qᵗ=qᵢ, u=uᵢ, v=vᵢ)
 # RICO typically requires longer integration times than BOMEX to develop
 # a quasi-steady precipitating state.
 
-simulation = Simulation(model; Δt=10, stop_time=6hour)
+simulation = Simulation(model; Δt=10, stop_time=12hour)
 conjure_time_step_wizard!(simulation, cfl=0.7)
 
 # ## Output and progress
@@ -255,7 +255,7 @@ function progress(sim)
     return nothing
 end
 
-add_callback!(simulation, progress, IterationInterval(100)) #TimeInterval(1hour))
+add_callback!(simulation, progress, TimeInterval(1hour))
 
 outputs = merge(model.velocities, model.tracers, (; θ, qˡ, qᵛ))
 averaged_outputs = NamedTuple(name => Average(outputs[name], dims=(1, 2)) for name in keys(outputs))
@@ -282,7 +282,7 @@ slice_outputs = (
 
 filename = "rico_slices.jld2"
 simulation.output_writers[:slices] = JLD2Writer(model, slice_outputs; filename,
-                                                schedule = TimeInterval(2minutes),
+                                                schedule = TimeInterval(1minutes),
                                                 overwrite_existing = true)
 
 @info "Running RICO simulation..."
@@ -396,7 +396,7 @@ Colorbar(slices_fig[2, 4], hmP2, label="∫P dz (m/s)")
 
 slices_fig[0, :] = Label(slices_fig, title_text, fontsize=18, tellwidth=false)
 
-CairoMakie.record(slices_fig, "rico_slices.mp4", 1:Nt, framerate=18) do nn
+CairoMakie.record(slices_fig, "rico_slices.mp4", 1:Nt, framerate=12) do nn
     n[] = nn
 end
 nothing #hide
