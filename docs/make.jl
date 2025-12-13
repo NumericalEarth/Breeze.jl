@@ -40,7 +40,7 @@ example_pages = [
     "Cloudy Kelvin-Helmholtz instability" => "literated/cloudy_kelvin_helmholtz.md",
     "Shallow cumulus convection (BOMEX)" => "literated/bomex.md",
     "Precipitating shallow cumulus (RICO)" => "literated/rico.md",
-    "Convection over prescribed sea surface temperatureSST" => "literated/prescribed_sea_surface_temperature.md",
+    "Convection over prescribed sea surface temperature (SST)" => "literated/prescribed_sea_surface_temperature.md",
     "Inertia gravity wave" => "literated/inertia_gravity_wave.md",
 ]
 
