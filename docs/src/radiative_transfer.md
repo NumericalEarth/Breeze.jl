@@ -57,10 +57,10 @@ The [`RadiativeTransferModel`](@ref) model computes:
 The gray atmosphere optical thickness follows the parameterization by [OGormanSchneider2008](@citet):
 
 ```math
-τ_{lw} = α \frac{Δp}{p} \left[ f_l σ + (1-f_l) 4σ^4 \right] \left[ τ_e + (τ_p - τ_e) \sin^2 φ \right]
+τ_{lw} = α \frac{Δp}{p} \left[ f_l \frac{p}{p_0} + 4 (1 - f_l) \left(\frac{p}{p_0}\right)^4 \right] \left[ τ_e + (τ_p - τ_e) \sin^2 φ \right]
 ```
 
-where ``σ = p / p_0`` is the normalized pressure, ``φ`` is latitude, and ``α``, ``f_l``, ``τ_e``, ``τ_p`` are empirical parameters.
+where ``φ`` is latitude, and ``α``, ``f_l``, ``τ_e``, ``τ_p`` are empirical parameters.
 
 For shortwave:
 ```math
