@@ -202,7 +202,7 @@ p₀ = reference_state.surface_pressure
 χ = (p₀ / 1e5)^(Rᵈ / cᵖᵈ)
 zϵ = 1500 # m 
 
-θᵢ(x, y, z) = χ * θˡⁱ₀(z) + 1e-2 * (rand() - 1) * (z < zϵ)
+θᵢ(x, y, z) = χ * θˡⁱ₀(z) + 1e-2 * (rand() - 0.5) * (z < zϵ)
 qᵢ(x, y, z) = qᵗ₀(z)
 uᵢ(x, y, z) = u₀(z)
 vᵢ(x, y, z) = v₀(z)
