@@ -11,7 +11,7 @@ using ..Thermodynamics:
 #####
 
 """
-    $(TYPEDSIGNATURES)
+$(TYPEDSIGNATURES)
 
 Possibly apply saturation adjustment. If a `microphysics` scheme does not invoke saturation adjustment,
 just return the `state` unmodified. In contrast to `adjust_thermodynamic_state`, this function
@@ -77,7 +77,7 @@ TODO: add the function signature when it is stable
 @inline microphysical_tendency(i, j, k, grid, microphysics::Nothing, name, args...) = zero(grid)
 
 """
-    $(TYPEDSIGNATURES)
+$(TYPEDSIGNATURES)
 
 Adjust the thermodynamic `state` according to the `scheme`.
 For example, if `scheme isa SaturationAdjustment`, then this function

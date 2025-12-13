@@ -41,7 +41,7 @@ maybe_infer_coordinate(coordinate, grid) = coordinate
 # TODO: blacklist invalid coordinate/grid combinations
 
 """
-    $(TYPEDSIGNATURES)
+$(TYPEDSIGNATURES)
 
 Construct a gray atmosphere radiative transfer model for the given grid.
 
@@ -91,7 +91,7 @@ function RadiativeTransferModel(grid, constants,
     else
         throw(ArgumentError(error_msg))
     end
-    
+
     arch = architecture(grid)
     Nx, Ny, Nz = size(grid)
     Nc = Nx * Ny
@@ -193,7 +193,7 @@ function RadiativeTransferModel(grid, constants,
                                                     surface_emissivity,
                                                     direct_surface_albedo,
                                                     diffuse_surface_albedo)
-    
+
     return RadiativeTransferModel(optical_thickness,
                                   convert(FT, solar_constant),
                                   coordinate,
@@ -230,7 +230,7 @@ end
 end
 
 """
-    $(TYPEDSIGNATURES)
+$(TYPEDSIGNATURES)
 
 Create an RRTMGP-compatible ClimaComms context from an Oceananigans architecture.
 """
@@ -262,7 +262,7 @@ compute_datetime(dt::AbstractDateTime, epoch) = dt
 compute_datetime(t::Number, epoch::AbstractDateTime) = epoch + Seconds(t)
 
 """
-    $(TYPEDSIGNATURES)
+$(TYPEDSIGNATURES)
 
 Update the radiative fluxes from the current model state.
 
@@ -328,7 +328,7 @@ end
 #####
 
 """
-    $(TYPEDSIGNATURES)
+$(TYPEDSIGNATURES)
 
 Update the RRTMGP `GrayAtmosphericState` arrays from model fields.
 
@@ -396,7 +396,7 @@ at cell centers, computed via `adiabatic_hydrostatic_pressure(z, p₀, θ₀)`.
 function update_rrtmgp_state!(rrtmgp_state::GrayAtmosphericState, model, surface_temperature)
     grid = model.grid
     arch = architecture(grid)
-    
+
     # Temperature field (actual temperature from model state)
     # Reference state provides the hydrostatic pressure profile
     # In the anelastic approximation, pressure ≈ reference pressure
@@ -448,7 +448,7 @@ end
 #####
 
 """
-    $(TYPEDSIGNATURES)
+$(TYPEDSIGNATURES)
 
 Update the solar zenith angle in the shortwave solver from the model clock.
 
@@ -486,7 +486,7 @@ end
 #####
 
 """
-    $(TYPEDSIGNATURES)
+$(TYPEDSIGNATURES)
 
 Copy RRTMGP flux arrays to Oceananigans ZFaceFields.
 
@@ -496,7 +496,7 @@ For the non-scattering shortwave solver, only the direct beam flux is computed.
 function copy_fluxes_to_fields!(rtm::GrayRadiativeTransferModel, grid)
     arch = architecture(grid)
     Nz = size(grid, 3)
-    
+
     # Unpack flux arrays from RRTMGP solvers
     lw_flux_up = rtm.longwave_solver.flux.flux_up
     lw_flux_dn = rtm.longwave_solver.flux.flux_dn
@@ -514,7 +514,7 @@ function copy_fluxes_to_fields!(rtm::GrayRadiativeTransferModel, grid)
     return nothing
 end
 
-@kernel function _copy_rrtmgp_fluxes!(ℐ_lw_up, ℐ_lw_dn, ℐ_sw_dn, 
+@kernel function _copy_rrtmgp_fluxes!(ℐ_lw_up, ℐ_lw_dn, ℐ_sw_dn,
                                       lw_flux_up, lw_flux_dn, sw_flux_dn_dir, grid)
     i, j, k = @index(Global, NTuple)
 

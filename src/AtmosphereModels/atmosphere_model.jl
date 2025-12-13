@@ -65,7 +65,7 @@ function default_formulation end
 function materialize_formulation end
 
 """
-    $(TYPEDSIGNATURES)
+$(TYPEDSIGNATURES)
 
 Return an AtmosphereModel that uses the anelastic approximation following
 [Pauluis2008](@citet).
@@ -83,7 +83,7 @@ AtmosphereModel{CPU, RectilinearGrid}(time = 0 seconds, iteration = 0)
 ├── grid: 8×8×8 RectilinearGrid{Float64, Periodic, Periodic, Bounded} on CPU with 3×3×3 halo
 ├── formulation: AnelasticFormulation(p₀=101325.0, θ₀=288.0)
 ├── timestepper: RungeKutta3TimeStepper
-├── advection scheme: 
+├── advection scheme:
 │   ├── momentum: Centered(order=2)
 │   ├── ρe: Centered(order=2)
 │   └── ρqᵗ: Centered(order=2)
@@ -129,7 +129,7 @@ function AtmosphereModel(grid;
     # Reduce the advection order in directions that do not have enough grid points
     momentum_advection = validate_momentum_advection(momentum_advection, grid)
     default_scalar_advection, scalar_advection = validate_tracer_advection(scalar_advection, grid)
-    
+
     arch = grid.architecture
     tracers = tupleit(tracers) # supports tracers=:c keyword argument (for example)
     tracer_names = validate_tracers(tracers)

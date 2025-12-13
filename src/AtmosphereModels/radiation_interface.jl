@@ -6,7 +6,7 @@
 #####
 
 """
-    $(TYPEDSIGNATURES)
+$(TYPEDSIGNATURES)
 
 Update the radiative fluxes from the current model state.
 
@@ -30,7 +30,7 @@ struct RadiativeTransferModel{OT, FT, C, E, SP, AS, LW, SW, F}
 end
 
 """
-    $(TYPEDSIGNATURES)
+$(TYPEDSIGNATURES)
 
 Return a RadiativeTransferModel on `grid` with thermodynamic `constants` and using
 the `optical_thickness` model for radiative transfer.
