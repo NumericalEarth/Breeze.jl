@@ -2,8 +2,6 @@
 ##### Microphysics interface (default implementations)
 #####
 
-using Oceananigans.Fields: ZeroField
-
 using ..Thermodynamics:
     temperature,
     MoistureMassFractions

@@ -38,7 +38,7 @@ Random.seed!(42)
 # [vanZanten2011](@cite). The intercomparison uses 128 × 128 × 100 grid points
 # with 100 m horizontal resolution and 40 m vertical resolution.
 #
-# For this example, we use a coarser grid (64 × 64 × 100) with 200 m horizontal
+# For this example, we use a coarser grid (128 × 128 × 100) with 200 m horizontal
 # resolution, suitable for development and testing.
 
 Oceananigans.defaults.FloatType = Float32
