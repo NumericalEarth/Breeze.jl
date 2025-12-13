@@ -169,7 +169,7 @@ nothing #hide
 #
 # The zero-moment scheme removes cloud liquid water exceeding a threshold `qc_0` at a rate
 # determined by the precipitation timescale `τ_precip`. Typical values for shallow cumulus
-# are `τ_precip ~ 20minutes` and `qc_0 ~ 2×10⁻⁴ kg/kg`.
+# are `τ_precip  2minutes` and `qc_0 ~ 2×10⁻⁴ kg/kg`.
 
 BreezeCloudMicrophysicsExt = Base.get_extension(Breeze, :BreezeCloudMicrophysicsExt)
 using .BreezeCloudMicrophysicsExt: ZeroMomentCloudMicrophysics
@@ -216,7 +216,7 @@ set!(model, θ=θᵢ, qᵗ=qᵢ, u=uᵢ, v=vᵢ)
 # RICO typically requires longer integration times than BOMEX to develop
 # a quasi-steady precipitating state.
 
-simulation = Simulation(model; Δt=10, stop_time=12hour)
+simulation = Simulation(model; Δt=10, stop_time=12hours)
 conjure_time_step_wizard!(simulation, cfl=0.7)
 
 # ## Output and progress
@@ -247,7 +247,7 @@ function progress(sim)
                    iteration(sim), prettytime(sim), prettytime(sim.Δt),
                    prettytime(elapsed), wmax)
 
-    msg *= @sprintf(" --- max(qᵗ): %.2e, max(qᵛ): %.2e, max(qˡ): %.2e, ∫ⱽP: %.2e kg/kg/s",
+    msg *= @sprintf(" --- max(qᵗ): %.2e, max(qᵛ): %.2e, max(qˡ): %.2e, ∫PdV: %.2e kg/kg/s",
                     qᵗmax, qᵛmax, qˡmax, ∫P)
 
     @info msg
@@ -282,7 +282,7 @@ slice_outputs = (
 
 filename = "rico_slices.jld2"
 simulation.output_writers[:slices] = JLD2Writer(model, slice_outputs; filename,
-                                                schedule = TimeInterval(1minutes),
+                                                schedule = TimeInterval(1minute),
                                                 overwrite_existing = true)
 
 @info "Running RICO simulation..."
