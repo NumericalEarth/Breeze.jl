@@ -23,54 +23,42 @@ using KernelAbstractions: @kernel, @index
 using DocStringExtensions: TYPEDSIGNATURES
 
 """
-    KesslerMicrophysics
+    struct KesslerMicrophysics <: AbstractMicrophysics
 
-DCMIP2016 implementation of the Kessler (1969) warm-rain bulk microphysics scheme,
-following Klemp and Wilhelmson (1978).
+DCMIP2016 implementation of the Kessler (1969) warm-rain bulk microphysics scheme.
+
+This implementation follows the DCMIP2016 test case specification, which is based on
+Klemp and Wilhelmson (1978).
 
 # References
+- Zarzycki, C. M., et al. (2019). DCMIP2016: the splitting supercell test case. Geoscientific Model Development, 12, 879–892.
+- Kessler, E. (1969). On the Distribution and Continuity of Water Substance in Atmospheric Circulations.
+  Meteorological Monographs, 10(32).
+- Klemp, J. B., & Wilhelmson, R. B. (1978). The Simulation of Three-Dimensional Convective Storm Dynamics.
+  Journal of the Atmospheric Sciences, 35(6), 1070-1096.
+- [DCMIP2016 Fortran implementation](https://gitlab.in2p3.fr/ipsl/projets/dynamico/dynamico/-/blob/master/src/dcmip2016_kessler_physic.f90)
 
-- Kessler, E. (1969). On the Distribution and Continuity of Water Substance in 
-  Atmospheric Circulations. Meteorological Monographs, 10(32).
-- Klemp, J. B., & Wilhelmson, R. B. (1978). The Simulation of Three-Dimensional 
-  Convective Storm Dynamics. Journal of the Atmospheric Sciences, 35(6), 1070-1096.
-- DCMIP2016 Fortran implementation: 
-  https://gitlab.in2p3.fr/ipsl/projets/dynamico/dynamico/-/blob/master/src/dcmip2016_kessler_physic.f90
-
-# Moisture categories
-
+# Moisture Categories
 This scheme represents moisture in three categories:
 - Water vapor mixing ratio (`rᵛ`)
 - Cloud water mixing ratio (`rᶜˡ`)
-- Rain water mixing ratio(`rʳ`)
+- Rain water mixing ratio (`rʳ`)
 
-Breeze uses mass fractions, so conversions between mass fractions and mixing ratios are performed as needed. 
-Also, Breeze does not track water vapor as a prognostic variable; instead, it is diagnosed from total moisture. 
+Breeze tracks moisture using mass fractions ($q$), whereas the Kessler scheme uses mixing ratios ($r$).
+Conversions between these representations are performed internally. In Breeze, water vapor is not a prognostic variable;
+instead, it is diagnosed from the total specific moisture $q^t$ and the liquid condensates.
 
-Internally, the scheme uses mixing ratios (mass per unit mass of dry air) for microphysics
-calculations. 
+# Physical Processes
+1. **Autoconversion**: Cloud water converts to rain water when the cloud water mixing ratio exceeds a threshold.
+2. **Accretion**: Rain water collects cloud water as it falls.
+3. **Saturation Adjustment**: Water vapor condenses to cloud water or cloud water evaporates to maintain saturation.
+4. **Rain Evaporation**: Rain water evaporates into subsaturated air.
+5. **Rain Sedimentation**: Rain water falls gravitationally.
 
-# Physical processes
-
-1. **Autoconversion** (KW eq. 2.13a): Cloud → Rain when cloud exceeds threshold
-2. **Accretion** (KW eq. 2.13b): Cloud → Rain via collection by falling rain  
-3. **Saturation adjustment** (KW eq. 3.10): Vapor ↔ Cloud to maintain saturation
-4. **Rain evaporation** (KW eq. 2.14): Rain → Vapor in subsaturated air
-5. **Rain sedimentation** (KW eq. 2.15): Gravitational settling of rain
-
-# Constants (from `kessler.f90`)
-
-- `kessler_f2x = 17.27`: Clausius-Clapeyron coefficient
-- `kessler_f5 = 237.3 * f2x * 2500000 / 1003`: Saturation adjustment coefficient  
-- `kessler_xk = 0.2875`: Kappa (Rᵈ/cₚ)
-- `kessler_psl = 1000`: Reference pressure (mb)
-- `kessler_rhoqr = 1000`: Density of liquid water (kg/m³)
-
-# Implementation notes
-
-- Physics is applied via a GPU kernel launched from `microphysics_model_update!`
-- Rain sedimentation uses subcycling to satisfy CFL constraints
-- All microphysical tendencies return zero; updates are applied directly in the kernel
+# Implementation Details
+- The microphysics update is applied via a GPU-compatible kernel launched from `microphysics_model_update!`.
+- Rain sedimentation uses subcycling to satisfy CFL constraints, following the Fortran implementation.
+- All microphysical updates are applied directly to the state variables in the kernel.
 """
 struct KesslerMicrophysics end
 
@@ -79,28 +67,33 @@ const KM = KesslerMicrophysics
 """
     prognostic_field_names(::KesslerMicrophysics)
 
-Return the names of prognostic microphysical fields for Kessler scheme:
-- `ρqᶜˡ`: density-weighted cloud liquid mass fraction (kg/m³)  
-- `ρqʳ`: density-weighted rain mass fraction (kg/m³)
+Return the names of prognostic microphysical fields for the Kessler scheme.
 
-Note: Water vapor `qᵛ` is **not** prognostic. It is diagnosed as `qᵛ = qᵗ - qᶜˡ - qʳ`,
-where `qᵗ` is the total specific moisture (a prognostic variable of `AtmosphereModel`).
+# Fields
+- `:ρqᶜˡ`: Density-weighted cloud liquid mass fraction (\$kg/m^3\$).
+- `:ρqʳ`: Density-weighted rain mass fraction (\$kg/m^3\$).
+
+!!! note
+    Water vapor \$q^v\$ is **not** a prognostic variable in this scheme. It is diagnosed as
+    \$q^v = q^t - q^{cl} - q^r\$, where \$q^t\$ is the total specific moisture (a prognostic variable of `AtmosphereModel`).
 """
 prognostic_field_names(::KM) = (:ρqᶜˡ, :ρqʳ)
 
 """
     materialize_microphysical_fields(::KesslerMicrophysics, grid, boundary_conditions)
 
-Create and return all microphysical fields for the Kessler scheme.
+Create and return the microphysical fields for the Kessler scheme.
 
-# Prognostic fields (density-weighted, with boundary conditions)
-- `ρqᶜˡ`, `ρqʳ`: Density-weighted cloud liquid and rain mass fractions
+# Prognostic Fields (Density-Weighted)
+- `ρqᶜˡ`: Density-weighted cloud liquid mass fraction.
+- `ρqʳ`: Density-weighted rain mass fraction.
 
-# Diagnostic fields (mass fractions, no boundary conditions needed)
-- `qᵛ`: Water vapor mass fraction, diagnosed as `qᵛ = qᵗ - qᶜˡ - qʳ`
-- `qᶜˡ`, `qʳ`: Cloud liquid and rain mass fractions (kg/kg)
-- `precipitation_rate`: Surface precipitation rate (m/s)
-- `vᵗ_rain`: Rain terminal velocity (m/s)
+# Diagnostic Fields (Mass Fractions)
+- `qᵛ`: Water vapor mass fraction, diagnosed as \$q^v = q^t - q^{cl} - q^r\$.
+- `qᶜˡ`: Cloud liquid mass fraction (\$kg/kg\$).
+- `qʳ`: Rain mass fraction (\$kg/kg\$).
+- `precipitation_rate`: Surface precipitation rate (\$m/s\$).
+- `vᵗ_rain`: Rain terminal velocity (\$m/s\$).
 """
 function materialize_microphysical_fields(::KM, grid, boundary_conditions)
     # Prognostic fields (density-weighted)
@@ -126,9 +119,10 @@ end
 """
     compute_moisture_fractions(i, j, k, grid, ::KesslerMicrophysics, ρ, qᵗ, μ)
 
-Compute moisture mass fractions at grid point (i, j, k) for thermodynamic state.
-Water vapor is diagnosed as `qᵛ = qᵗ - qᶜˡ - qʳ`.
-Returns `MoistureMassFractions(qᵛ, qˡ)` where `qˡ = qᶜˡ + qʳ` is total liquid.
+Compute moisture mass fractions at grid point `(i, j, k)` for the thermodynamic state.
+
+Water vapor is diagnosed as \$q^v = q^t - q^{cl} - q^r\$.
+Returns `MoistureMassFractions(qᵛ, qˡ)` where \$q^l = q^{cl} + q^r\$ is the total liquid mass fraction.
 """
 @inline function compute_moisture_fractions(i, j, k, grid, ::KM, ρ, qᵗ, μ)
     @inbounds begin
@@ -143,25 +137,28 @@ end
 """
     maybe_adjust_thermodynamic_state(𝒰, ::KesslerMicrophysics, μ, qᵗ, constants)
 
-Return thermodynamic state without adjustment. Kessler scheme performs its own
-saturation adjustment internally via the kernel.
+Return the thermodynamic state without adjustment.
+
+The Kessler scheme performs its own saturation adjustment internally via the kernel.
 """
 @inline maybe_adjust_thermodynamic_state(𝒰, ::KM, μ, qᵗ, constants) = 𝒰
 
 """
     microphysical_velocities(::KesslerMicrophysics, name, μ)
 
-Return `nothing` - rain sedimentation is handled internally by the kernel
-rather than through the advection interface.
+Return `nothing`.
+
+Rain sedimentation is handled internally by the kernel rather than through the advection interface.
 """
 @inline microphysical_velocities(::KM, name) = nothing
 
 """
     microphysical_tendency(i, j, k, grid, ::KesslerMicrophysics, name, μ, 𝒰, constants)
 
-Return zero tendency. All microphysical source/sink terms are applied directly
-to prognostic fields via `microphysics_model_update!` kernel, bypassing the
-standard tendency interface.
+Return zero tendency.
+
+All microphysical source/sink terms are applied directly to the prognostic fields via the
+`microphysics_model_update!` kernel, bypassing the standard tendency interface.
 """
 @inline microphysical_tendency(i, j, k, grid, ::KM, name, μ, 𝒰, constants) = zero(eltype(grid))
 
@@ -172,45 +169,47 @@ standard tendency interface.
 # Clausius-Clapeyron coefficient for saturation vapor pressure
 const kessler_f2x = 17.27
 
-# Saturation adjustment coefficient: 237.3 * f2x * Lᵥ / cₚ
-# where Lᵥ = 2.5e6 J/kg (latent heat of vaporization) and cₚ = 1003 J/(kg·K)
+# Saturation adjustment coefficient: \$237.3 \cdot f2x \cdot L_v / c_p\$
+# where \$L_v = 2.5 \times 10^6 J/kg\$ (latent heat of vaporization) and \$c_p = 1003 J/(kg \cdot K)\$
 const kessler_f5 = 237.3 * kessler_f2x * 2500000.0 / 1003.0
 
-# Kappa = Rᵈ/cₚ (ratio of dry air gas constant to specific heat)
+# Kappa = \$R_d/c_p\$ (ratio of dry air gas constant to specific heat)
 const kessler_xk = 0.2875
 
 # Reference sea level pressure (millibars)
 const kessler_psl = 1000.0
 
-# Density of liquid water (kg/m³)
+# Density of liquid water (\$kg/m^3\$)
 const kessler_rhoqr = 1000.0
 
 #####
 ##### Conversion between mass fraction and mixing ratio
 #####
-# Kessler scheme uses mixing ratio (mass of hydrometeor / mass of dry air)
-# Breeze uses mass fraction (mass of hydrometeor / total mass of moist air)
-# Conversion: r = q / (1 - qᵗ)  where qᵗ is total mass fraction
-#             q = r / (1 + rᵗ)  where rᵗ is total mixing ratio
+# The Kessler scheme uses mixing ratios (mass of hydrometeor / mass of dry air).
+# Breeze uses mass fractions (mass of hydrometeor / total mass of moist air).
+#
+# Conversion:
+#   r = q / (1 - q^t)  where q^t is total mass fraction
+#   q = r / (1 + r^t)  where r^t is total mixing ratio
 #####
 
 """
     mass_fraction_to_mixing_ratio(q, qᵗ)
 
-Convert mass fraction `q` to mixing ratio `r`.
-`qᵗ` is the total mass fraction (sum of all moisture species).
+Convert mass fraction \$q\$ to mixing ratio \$r\$.
+\$q^t\$ is the total mass fraction (sum of all moisture species).
 
-The conversion is: r = q / (1 - qᵗ)
+The conversion is: \$r = q / (1 - q^t)\$
 """
 @inline mass_fraction_to_mixing_ratio(q, qᵗ) = q / (1 - qᵗ)
 
 """
     mixing_ratio_to_mass_fraction(r, rᵗ)
 
-Convert mixing ratio `r` to mass fraction `q`.
-`rᵗ` is the total mixing ratio (sum of all moisture species).
+Convert mixing ratio \$r\$ to mass fraction \$q\$.
+\$r^t\$ is the total mixing ratio (sum of all moisture species).
 
-The conversion is: q = r / (1 + rᵗ)
+The conversion is: \$q = r / (1 + r^t)\$
 """
 @inline mixing_ratio_to_mass_fraction(r, rᵗ) = r / (1 + rᵗ)
 
@@ -218,9 +217,10 @@ The conversion is: q = r / (1 + rᵗ)
 """
     kessler_terminal_velocity(rʳ, ρ, ρ_bottom)
 
-Compute liquid water terminal velocity (m/s) following KW eq. 2.15.
-Uses three-argument form with explicit reference density. 
-`ρ_bottom` is reference density at the lowest vertical level (kg/m³).
+Compute liquid water terminal velocity (\$m/s\$) following Klemp and Wilhelmson (1978) eq. 2.15.
+
+Uses the three-argument form with explicit reference density.
+`ρ_bottom` is the reference density at the lowest vertical level (\$kg/m^3\$).
 """
 @inline function kessler_terminal_velocity(rʳ, ρ, ρ_bottom)
     rhalf = sqrt(ρ_bottom / ρ)
@@ -234,11 +234,12 @@ end
 """
     microphysics_model_update!(::KM, model)
 
-Apply Kessler microphysics to the model. This function launches a GPU kernel
-that processes each column independently, with rain sedimentation subcycling.
+Apply the Kessler microphysics to the model.
+
+This function launches a GPU kernel that processes each column independently, with rain sedimentation subcycling.
 
 The kernel handles conversion between mass fractions (Breeze) and mixing ratios (Kessler)
-internally for efficiency. Water vapor is diagnosed from `qᵛ = qᵗ - qᶜˡ - qʳ`.
+internally for efficiency. Water vapor is diagnosed from \$q^v = q^t - q^{cl} - q^r\$.
 """
 function microphysics_model_update!(::KM, model)
     grid = model.grid
@@ -288,31 +289,31 @@ end
 
 # This kernel processes each (i,j) column independently. The algorithm:
 #
-# 1. INITIALIZATION: Convert mass fractions → mixing ratios for entire column
-#    - Diagnose qᵛ = qᵗ - qᶜˡ - qʳ from total moisture and condensates
-#    - Store mixing ratios temporarily in diagnostic fields (qᵛ_field, qᶜˡ_field, qʳ_field)
-#    - Compute terminal velocities and determine CFL-limited subcycle timestep
+# 1. INITIALIZATION: Convert mass fractions -> mixing ratios for the entire column.
+#    - Diagnose q^v = q^t - q^{cl} - q^r from total moisture and condensates.
+#    - Store mixing ratios temporarily in diagnostic fields (qᵛ_field, qᶜˡ_field, qʳ_field).
+#    - Compute terminal velocities and determine the CFL-limited subcycle timestep.
 #
 # 2. SUBCYCLING: For each subcycle timestep:
-#    a. Accumulate surface precipitation
+#    a. Accumulate surface precipitation.
 #    b. For each vertical level (bottom to top):
-#       - Compute temperature from liquid-ice potential temperature: T = Π*θˡⁱ + ℒˡᵣ*qˡ/cᵖ
-#       - Rain sedimentation via upstream differencing
-#       - Autoconversion + accretion (cloud → rain)
-#       - Saturation adjustment (vapor ↔ cloud)
-#       - Rain evaporation (rain → vapor in subsaturated air)
+#       - Compute temperature from liquid-ice potential temperature: T = Π * θ_li + L_lv * q_l / c_p.
+#       - Rain sedimentation via upstream differencing.
+#       - Autoconversion + accretion (cloud -> rain).
+#       - Saturation adjustment (vapor <-> cloud).
+#       - Rain evaporation (rain -> vapor in subsaturated air).
 #       - Update liquid-ice potential temperature accounting for:
-#         * Latent heating from phase changes (T_new = T + ℒˡᵣ*Δqˡ/cᵖ)
-#         * Conversion back to θˡⁱ with new liquid content: θˡⁱ = (T - ℒˡᵣ*qˡ/cᵖ)/Π
-#    c. Recalculate terminal velocities for next subcycle
+#         * Latent heating from phase changes (T_new = T + L_lv * Δq_l / c_p).
+#         * Conversion back to θ_li with new liquid content: θ_li = (T - L_lv * q_l / c_p) / Π.
+#    c. Recalculate terminal velocities for the next subcycle.
 #
-# 3. FINALIZATION: Convert mixing ratios → mass fractions for entire column
-#    - Write back to prognostic fields (ρqᵗ, ρqᶜˡ, ρqʳ)
-#    - Update diagnostic fields with final mass fractions
+# 3. FINALIZATION: Convert mixing ratios -> mass fractions for the entire column.
+#    - Write back to prognostic fields (ρqᵗ, ρqᶜˡ, ρqʳ).
+#    - Update diagnostic fields with final mass fractions.
 #
-# Note: Breeze uses liquid-ice potential temperature (θˡⁱ), NOT standard potential 
+# Note: Breeze uses liquid-ice potential temperature (θ_li), NOT standard potential
 # temperature (θ). The relationship is:
-#   T = Π * θˡⁱ + (ℒˡᵣ * qˡ + ℒⁱᵣ * qⁱ) / cᵖᵐ
+#   T = Π * θ_li + (L_lv * q_l + L_iv * q_i) / c_pm
 # For this warm-phase Kessler scheme (no ice), ice terms are zero.
 
 @kernel function _kessler_microphysical_update!(grid, Nz, Δt, ρᵣ, pᵣ, p₀, constants, θˡⁱ, ρθˡⁱ,
@@ -612,10 +613,12 @@ end
 """
     update_microphysical_fields!(μ, ::KesslerMicrophysics, i, j, k, grid, ρ, 𝒰, constants)
 
-Update diagnostic mass fraction fields from prognostic density-weighted fields.
-Water vapor is diagnosed as `qᵛ = qᵗ - qᶜˡ - qʳ`.
-This is called by the general `update_state!` machinery. The main microphysics
-updates are performed via `microphysics_model_update!` kernel.
+Update the diagnostic mass fraction fields from the prognostic density-weighted fields.
+
+Water vapor is diagnosed as \$q^v = q^t - q^{cl} - q^r\$.
+
+This function is called by the general `update_state!` machinery. The main microphysics
+updates are performed via the `microphysics_model_update!` kernel.
 """
 @inline function update_microphysical_fields!(μ, ::KM, i, j, k, grid, ρ, 𝒰, constants)
     qᵗ = total_specific_moisture(𝒰)
