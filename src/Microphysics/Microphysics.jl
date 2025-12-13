@@ -18,8 +18,7 @@ import ..AtmosphereModels:
     materialize_microphysical_fields,
     microphysical_velocities,
     compute_moisture_fractions,
-    microphysical_tendency,
-    precipitation_rate
+    microphysical_tendency
 
 include("saturation_adjustment.jl")
 include("bulk_microphysics.jl")
