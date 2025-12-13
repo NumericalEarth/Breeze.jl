@@ -53,8 +53,6 @@ grid = RectilinearGrid(GPU(); x, y, z,
                        size = (Nx, Ny, Nz), halo = (5, 5, 5),
                        topology = (Periodic, Periodic, Bounded))
 
-FT = eltype(grid)
-
 # ## Reference state and formulation
 #
 # We use the anelastic formulation with a dry adiabatic reference state.
@@ -102,8 +100,9 @@ Cᴰ = 1.229e-3
 # The subsidence velocity profile increases linearly to ``-0.005`` m/s at 2260 m and
 # remains constant above [vanZanten2011](@cite).
 
-wˢ = Field{Nothing, Nothing, Face}(grid)
+FT = eltype(grid)
 wˢ_profile = AtmosphericProfilesLibrary.Rico_subsidence(FT)
+wˢ = Field{Nothing, Nothing, Face}(grid)
 set!(wˢ, z -> wˢ_profile(z))
 subsidence = SubsidenceForcing(wˢ)
 
