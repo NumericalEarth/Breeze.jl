@@ -107,14 +107,14 @@ Return a `ZeroMomentCloudMicrophysics` microphysics scheme for warm-rain precipi
 
 The zero-moment scheme removes cloud liquid water above a threshold at a specified rate:
 - `τ_precip`: precipitation timescale in seconds (default: 1000 s)
-- `qc_0`: cloud liquid water threshold for precipitation (default: 5×10⁻⁴ kg/kg)
-- `S_0`: supersaturation threshold (default: 0)
 
-The precipitation rate is computed as:
-```math
-\\frac{dq^t}{dt} = -\\frac{1}{τ} \\max(0, q^ˡ - q_c)
-```
-where `τ = τ_precip` and `q_c = qc_0`.
+and _either_
+
+- `S_0`: supersaturation threshold (default: 0)
+- `qc_0`: cloud liquid water threshold for precipitation (default: 5×10⁻⁴ kg/kg)
+
+For more information see the
+[`CloudMicrophysics.jl` documentation](https://clima.github.io/CloudMicrophysicsDocumentation.jl/dev/parameters/parameters0m/).
 """
 function ZeroMomentCloudMicrophysics(FT::DataType = Oceananigans.defaults.FloatType;
                                      nucleation = SaturationAdjustment(FT),
