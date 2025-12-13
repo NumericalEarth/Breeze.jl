@@ -1,6 +1,7 @@
 using ..Thermodynamics:
     MoistureMassFractions,
     mixture_heat_capacity,
+    mixture_gas_constant,
     dry_air_gas_constant,
     vapor_gas_constant,
     PlanarLiquidSurface,
@@ -252,9 +253,15 @@ function microphysics_model_update!(::KM, model)
     ρᵣ = interior(model.formulation.reference_state.density, 1, 1, :)
     pᵣ = interior(model.formulation.reference_state.pressure, 1, 1, :)
 
-    # Thermodynamic fields
-    θ  = model.formulation.thermodynamics.potential_temperature
-    ρθ = model.formulation.thermodynamics.potential_temperature_density
+    # Surface pressure for Exner function
+    p₀ = model.formulation.reference_state.surface_pressure
+
+    # Thermodynamic constants for liquid-ice potential temperature conversion
+    constants = model.thermodynamic_constants
+
+    # Thermodynamic fields (liquid-ice potential temperature, NOT regular potential temperature)
+    θˡⁱ  = model.formulation.thermodynamics.potential_temperature
+    ρθˡⁱ = model.formulation.thermodynamics.potential_temperature_density
 
     # Total moisture density (prognostic variable of AtmosphereModel)
     ρqᵗ = model.moisture_density
@@ -266,7 +273,7 @@ function microphysics_model_update!(::KM, model)
     precipitation_rate_data = interior(μ.precipitation_rate, :, :, 1)
 
     launch!(arch, grid, :xy, _kessler_microphysical_update!,
-            grid, Nz, Δt, ρᵣ, pᵣ, θ, ρθ,
+            grid, Nz, Δt, ρᵣ, pᵣ, p₀, constants, θˡⁱ, ρθˡⁱ,
             ρqᵗ, μ.ρqᶜˡ, μ.ρqʳ,
             μ.qᵛ, μ.qᶜˡ, μ.qʳ,
             precipitation_rate_data, μ.vᵗ_rain)
@@ -288,23 +295,36 @@ end
 # 2. SUBCYCLING: For each subcycle timestep:
 #    a. Accumulate surface precipitation
 #    b. For each vertical level (bottom to top):
+#       - Compute temperature from liquid-ice potential temperature: T = Π*θˡⁱ + ℒˡᵣ*qˡ/cᵖ
 #       - Rain sedimentation via upstream differencing
 #       - Autoconversion + accretion (cloud → rain)
 #       - Saturation adjustment (vapor ↔ cloud)
 #       - Rain evaporation (rain → vapor in subsaturated air)
-#       - Update potential temperature for latent heating
+#       - Update liquid-ice potential temperature accounting for:
+#         * Latent heating from phase changes (T_new = T + ℒˡᵣ*Δqˡ/cᵖ)
+#         * Conversion back to θˡⁱ with new liquid content: θˡⁱ = (T - ℒˡᵣ*qˡ/cᵖ)/Π
 #    c. Recalculate terminal velocities for next subcycle
 #
 # 3. FINALIZATION: Convert mixing ratios → mass fractions for entire column
 #    - Write back to prognostic fields (ρqᵗ, ρqᶜˡ, ρqʳ)
 #    - Update diagnostic fields with final mass fractions
+#
+# Note: Breeze uses liquid-ice potential temperature (θˡⁱ), NOT standard potential 
+# temperature (θ). The relationship is:
+#   T = Π * θˡⁱ + (ℒˡᵣ * qˡ + ℒⁱᵣ * qⁱ) / cᵖᵐ
+# For this warm-phase Kessler scheme (no ice), ice terms are zero.
 
-@kernel function _kessler_microphysical_update!(grid, Nz, Δt, ρᵣ, pᵣ, θ, ρθ,
+@kernel function _kessler_microphysical_update!(grid, Nz, Δt, ρᵣ, pᵣ, p₀, constants, θˡⁱ, ρθˡⁱ,
                                                  ρqᵗ, ρqᶜˡ, ρqʳ,
                                                  qᵛ_field, qᶜˡ_field, qʳ_field,
                                                  precipitation_rate, vᵗ_rain)
     i, j = @index(Global, NTuple)
     FT = eltype(grid)
+
+    # Extract thermodynamic constants for liquid-ice potential temperature
+    ℒˡᵣ = constants.liquid.reference_latent_heat  # Latent heat of vaporization (J/kg)
+    cᵖᵈ = constants.dry_air.heat_capacity         # Dry air heat capacity (J/kg/K)
+    Rᵈ  = dry_air_gas_constant(constants)         # Dry air gas constant (J/kg/K)
 
     # Surface density for terminal velocity calculation (KW eq. 2.15 correction factor)
     @inbounds ρˢ = ρᵣ[1]
@@ -387,17 +407,30 @@ end
             @inbounds begin
                 ρ = ρᵣ[k]
                 p = pᵣ[k]
-                θ_k = θ[i, j, k]
-
-                # Exner function and temperature
-                p_mb = p / 100
-                pk = (p_mb / kessler_psl)^kessler_xk
-                T_k = pk * θ_k
+                θˡⁱ_k = θˡⁱ[i, j, k]
 
                 # Read mixing ratios (stored in diagnostic fields during physics)
                 rᵛ = qᵛ_field[i, j, k]
                 rᶜ = qᶜˡ_field[i, j, k]
                 rʳ = qʳ_field[i, j, k]
+
+                # Current liquid mass fraction (cloud + rain) for temperature calculation
+                # Convert from mixing ratio to mass fraction for thermodynamic calculation
+                rᵗ = rᵛ + rᶜ + rʳ
+                qˡ_current = mixing_ratio_to_mass_fraction(rᶜ + rʳ, rᵗ)
+
+                # Exner function using mixture properties (simplified for warm phase)
+                # Using dry air approximation: Π ≈ (p/p₀)^(Rᵈ/cᵖᵈ)
+                Π = (p / p₀)^(Rᵈ / cᵖᵈ)
+
+                # Compute temperature from liquid-ice potential temperature
+                # T = Π * θˡⁱ + ℒˡᵣ * qˡ / cᵖᵐ
+                # Using dry air heat capacity as approximation for cᵖᵐ
+                T_k = Π * θˡⁱ_k + ℒˡᵣ * qˡ_current / cᵖᵈ
+
+                # Also compute Kessler's pk for saturation calculation
+                p_mb = p / 100
+                pk = (p_mb / kessler_psl)^kessler_xk
 
                 #####
                 ##### Rain sedimentation using upstream differencing
@@ -457,7 +490,6 @@ end
                 ##### Apply adjustments (KW eq. 3.10)
                 #####
                 condensation = max(prod, -rᶜ_new)
-                θ_new = θ_k + 2500000 / (1003 * pk) * (condensation - ern)
 
                 rᵛ_new = max(rᵛ - condensation + ern, 0)
                 rᶜ_final = rᶜ_new + condensation
@@ -468,9 +500,44 @@ end
                 qᶜˡ_field[i, j, k] = rᶜ_final
                 qʳ_field[i, j, k]  = rʳ_final
 
+                #####
+                ##### Update liquid-ice potential temperature
+                #####
+                # The Fortran Kessler scheme updates θ (standard potential temperature) as:
+                #   θ_new = θ + ℒᵥ * (condensation - ern) / (cₚ * Π)
+                # where condensation and ern are in mixing ratio and represent PHASE CHANGES ONLY.
+                #
+                # For liquid-ice potential temperature θˡⁱ, the relationship is:
+                #   T = Π * θˡⁱ + ℒˡᵣ * qˡ / cₚ
+                #   θˡⁱ = (T - ℒˡᵣ * qˡ / cₚ) / Π
+                #
+                # The temperature change from latent heating (PHASE CHANGES ONLY) is:
+                #   ΔT = ℒᵥ * (condensation - ern) / cₚ
+                #
+                # Note: We use Kessler's hardcoded constants (ℒᵥ = 2500000, cₚ = 1003) for 
+                # the latent heating to match the Fortran exactly, but use Breeze's ℒˡᵣ for 
+                # the θˡⁱ definition for thermodynamic consistency.
+                
+                # Net phase change in mixing ratio (positive = condensation, negative = evaporation)
+                net_phase_change = condensation - ern
+                
+                # Temperature change from latent heating using Kessler's constants
+                # (same as Fortran: 2500000/(1003*pk) * net_phase_change, but pk = Π for dry air)
+                ΔT_phase = 2500000.0 * net_phase_change / 1003.0
+                T_new = T_k + ΔT_phase
+
+                # Compute new liquid mass fraction (includes ALL changes: autoconversion, 
+                # sedimentation, saturation adjustment, evaporation)
+                rᵗ_new = rᵛ_new + rᶜ_final + rʳ_final
+                qˡ_new = mixing_ratio_to_mass_fraction(rᶜ_final + rʳ_final, rᵗ_new)
+
+                # Convert back to liquid-ice potential temperature:
+                # θˡⁱ_new = (T_new - ℒˡᵣ * qˡ_new / cₚ) / Π
+                θˡⁱ_new = (T_new - ℒˡᵣ * qˡ_new / cᵖᵈ) / Π
+
                 # Update thermodynamics
-                θ[i, j, k]  = θ_new
-                ρθ[i, j, k] = ρ * θ_new
+                θˡⁱ[i, j, k]  = θˡⁱ_new
+                ρθˡⁱ[i, j, k] = ρ * θˡⁱ_new
             end
         end
 
