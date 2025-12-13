@@ -19,7 +19,6 @@ using Dates: AbstractDateTime
 import Breeze.AtmosphereModels: RadiativeTransferModel
 
 const GrayRadiativeTransferModel = RadiativeTransferModel{<:GrayOpticalThicknessOGorman2008}
-const SingleColumnGrid = RectilinearGrid{<:Any, <:Flat, <:Flat, <:Bounded}
 
 materialize_surface_property(x::Number, grid) = convert(eltype(grid), x)
 materialize_surface_property(x::Field, grid) = x
