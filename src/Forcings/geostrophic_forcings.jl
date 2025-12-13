@@ -1,5 +1,6 @@
 using Oceananigans: Field, set!, compute!
 using Oceananigans.Grids: Center, XDirection, YDirection
+using Oceananigans.Utils: prettysummary
 using Adapt: Adapt
 
 #####
@@ -21,6 +22,47 @@ GeostrophicForcing(u, dir) = GeostrophicForcing(u, dir, nothing)
 
 const XGeostrophicForcing = GeostrophicForcing{XDirection}
 const YGeostrophicForcing = GeostrophicForcing{YDirection}
+
+#####
+##### Show methods
+#####
+
+direction_str(::XDirection) = "XDirection"
+direction_str(::YDirection) = "YDirection"
+
+function Base.summary(forcing::GeostrophicForcing)
+    dir = direction_str(forcing.direction)
+    f = forcing.coriolis_parameter
+    f_str = isnothing(f) ? "" : "(f=$(prettysummary(f)))"
+    return string("GeostrophicForcing{", dir, "}", f_str)
+end
+
+function Base.show(io::IO, forcing::GeostrophicForcing)
+    print(io, summary(forcing))
+    print(io, '\n')
+    print(io, "└── geostrophic_momentum: ", prettysummary(forcing.geostrophic_momentum))
+end
+
+const GeostrophicForcingTuple = Tuple{GeostrophicForcing, Vararg{GeostrophicForcing}}
+const NamedGeostrophicForcingTuple = NamedTuple{S, <:GeostrophicForcingTuple} where S
+
+function Base.show(io::IO, ft::NamedGeostrophicForcingTuple)
+    names = keys(ft)
+    N = length(ft)
+
+    print(io, "NamedTuple with ", N, " GeostrophicForcings:\n")
+
+    for name in names[1:end-1]
+        forcing = ft[name]
+        print(io, "├── $name: ", summary(forcing), "\n")
+        print(io, "│   └── geostrophic_momentum: ", prettysummary(forcing.geostrophic_momentum), "\n")
+    end
+
+    name = names[end]
+    forcing = ft[name]
+    print(io, "└── $name: ", summary(forcing), "\n")
+    print(io, "    └── geostrophic_momentum: ", prettysummary(forcing.geostrophic_momentum))
+end
 
 @inline function (forcing::XGeostrophicForcing)(i, j, k, grid, clock, fields)
     f = forcing.coriolis_parameter
@@ -54,13 +96,21 @@ into the model forcing.
 Example
 =======
 
-```julia
+```jldoctest
+using Breeze
+
 uᵍ(z) = -10 + 0.001z
 vᵍ(z) = 0.0
 
 coriolis = FPlane(f=1e-4)
 forcing = geostrophic_forcings(uᵍ, vᵍ)
-model = AtmosphereModel(grid; coriolis, forcing)
+
+# output
+NamedTuple with 2 GeostrophicForcings:
+├── ρu: GeostrophicForcing{XDirection}
+│   └── geostrophic_momentum: vᵍ (generic function with 1 method)
+└── ρv: GeostrophicForcing{YDirection}
+    └── geostrophic_momentum: uᵍ (generic function with 1 method)
 ```
 """
 function geostrophic_forcings(uᵍ, vᵍ)
