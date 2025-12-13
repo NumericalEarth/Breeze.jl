@@ -166,9 +166,9 @@ nothing #hide
 # and includes instant precipitation removal above a threshold, making it suitable for
 # precipitating shallow cumulus simulations like RICO.
 #
-# The zero-moment scheme removes cloud liquid water exceeding a threshold `qc_0` at a rate
-# determined by the precipitation timescale `τ_precip`. Typical values for shallow cumulus
-# are `τ_precip  2minutes` and `qc_0 ~ 2×10⁻⁴ kg/kg`.
+# In the configuration we use it, the zero-moment scheme removes cloud liquid water
+# exceeding a threshold `qc_0` at a rate determined by the precipitation
+# timescale `τ_precip`.
 
 BreezeCloudMicrophysicsExt = Base.get_extension(Breeze, :BreezeCloudMicrophysicsExt)
 using .BreezeCloudMicrophysicsExt: ZeroMomentCloudMicrophysics
