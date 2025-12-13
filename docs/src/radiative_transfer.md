@@ -4,7 +4,7 @@ Breeze.jl integrates with [RRTMGP.jl](https://github.com/CliMA/RRTMGP.jl) to pro
 
 ## Gray Atmosphere Radiation
 
-The simplest radiative transfer option is gray atmosphere radiation, which uses the optical thickness parameterization from [OGormanSchneider2008](@cite) and [Schneider2004](@cite). This approximation treats the atmosphere as having a single effective absorption coefficient rather than computing full spectral radiation.
+The simplest radiative transfer option is gray atmosphere radiation, which uses the optical thickness parameterization from [Schneider2004](@citet) and [OGormanSchneider2008](@citet). This approximation treats the atmosphere as having a single effective absorption coefficient rather than computing full spectral radiation.
 
 ### Basic Usage
 
@@ -49,18 +49,18 @@ When a `DateTime` clock is used, the solar zenith angle is computed automaticall
 
 ### Gray Radiation Model
 
-The `RadiativeTransferModel` model computes:
+The [`RadiativeTransferModel`](@ref) model computes:
 
 - **Longwave radiation**: Both upwelling and downwelling thermal radiation using RRTMGP's two-stream solver
-- **Shortwave radiation**: Direct beam solar radiation 
+- **Shortwave radiation**: Direct beam solar radiation
 
-The gray atmosphere optical thickness follows the parameterization in [OGormanSchneider2008](@cite):
+The gray atmosphere optical thickness follows the parameterization by [OGormanSchneider2008](@citet):
 
 ```math
-τ_{lw} = α \frac{Δp}{p} \left( f_l σ + (1-f_l) 4σ^4 \right) \left( τ_e + (τ_p - τ_e) \sin^2 φ \right)
+τ_{lw} = α \frac{Δp}{p} \left[ f_l σ + (1-f_l) 4σ^4 \right] \left[ τ_e + (τ_p - τ_e) \sin^2 φ \right]
 ```
 
-where ``σ = p/p_0`` is the normalized pressure, ``φ`` is latitude, and ``α``, ``f_l``, ``τ_e``, ``τ_p`` are empirical parameters.
+where ``σ = p / p_0`` is the normalized pressure, ``φ`` is latitude, and ``α``, ``f_l``, ``τ_e``, ``τ_p`` are empirical parameters.
 
 For shortwave:
 ```math
@@ -109,7 +109,7 @@ The `RadiativeTransferModel` model requires surface properties:
 | `surface_albedo` | Shortwave albedo (0-1) | 0.1-0.3 |
 | `solar_constant` | TOA solar flux [W/m²] | 1361 |
 
-## Integration with Dynamics
+## Integration with dynamics
 
 Radiative fluxes can be used to compute heating rates for the energy equation. The radiative heating rate is computed from flux divergence:
 
@@ -122,8 +122,3 @@ where ``\mathscr{I}_{net}`` is the net radiative flux (upwelling minus downwelli
 ## Architecture Support
 
 The radiative transfer implementation supports both CPU and GPU architectures. The column-based RRTMGP solver is called from Oceananigans' field data arrays with appropriate data layout conversions.
-
-## References
-
-- [OGormanSchneider2008](@cite): Gray atmosphere optical thickness parameterization
-- [Schneider2004](@cite): Idealized dry atmosphere radiation
