@@ -17,7 +17,7 @@
 # For precipitation we use the 0-moment scheme from
 # [CloudMicrophysics.jl](https://github.com/CliMA/CloudMicrophysics.jl) which is certainly
 # the least interesting of the microphysics schemes that CloudMicrophysics provides.
-# (Support for CloudMicrophysics's 1 moment, 2 moment, and P3 are hopefully be coming soon!)
+# (Support for CloudMicrophysics's 1 moment, 2 moment, and P3 are hopefully coming soon!)
 
 using Breeze
 using Oceananigans: Oceananigans
