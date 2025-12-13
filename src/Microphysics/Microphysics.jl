@@ -9,7 +9,8 @@ export
     BulkMicrophysics,
     FourCategories,
     SaturationSpecificHumidity,
-    SaturationSpecificHumidityField
+    SaturationSpecificHumidityField,
+    KesslerMicrophysics
 
 import ..AtmosphereModels:
     maybe_adjust_thermodynamic_state,
@@ -18,10 +19,11 @@ import ..AtmosphereModels:
     materialize_microphysical_fields,
     microphysical_velocities,
     compute_moisture_fractions,
-    microphysical_tendency
+    microphysical_tendency,
+    microphysics_model_update!
 
 include("saturation_adjustment.jl")
 include("bulk_microphysics.jl")
-include("microphysics_diagnostics.jl")
+include("dcmip2016_kessler.jl")
 
 end # module Microphysics

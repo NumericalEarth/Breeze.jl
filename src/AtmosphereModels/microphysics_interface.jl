@@ -65,7 +65,7 @@ Return the microphysical velocities associated with `microphysics` and `name`.
 
 Must be either `nothing`, or a NamedTuple with three components `u, v, w`.
 """
-@inline microphysical_velocities(microphysics::Nothing, name) = nothing
+@inline microphysical_velocities(microphysics::Nothing, name, microphysical_fields) = nothing
 
 """
 $(TYPEDSIGNATURES)
@@ -87,3 +87,10 @@ of the saturation adjustment `scheme`.
 If a scheme is non-adjusting, we just return `state`.
 """
 @inline adjust_thermodynamic_state(state, scheme::Nothing, thermo) = state
+
+"""
+    $(TYPEDSIGNATURES)
+
+Update anything you want based on `microphysics`.
+"""
+microphysics_model_update!(microphysics::Nothing, model) = nothing

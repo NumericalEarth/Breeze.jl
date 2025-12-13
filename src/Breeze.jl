@@ -40,6 +40,7 @@ export
     SaturationSpecificHumidity,
     SaturationSpecificHumidityField,
     BulkMicrophysics,
+    KesslerMicrophysics,
 
     # BoundaryConditions
     BulkDrag,
