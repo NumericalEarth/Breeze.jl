@@ -44,9 +44,9 @@ This scheme represents moisture in three categories:
 - Cloud water mixing ratio (`rᶜˡ`)
 - Rain water mixing ratio (`rʳ`)
 
-Breeze tracks moisture using mass fractions ($q$), whereas the Kessler scheme uses mixing ratios ($r$).
+Breeze tracks moisture using mass fractions (`q`), whereas the Kessler scheme uses mixing ratios (`r`).
 Conversions between these representations are performed internally. In Breeze, water vapor is not a prognostic variable;
-instead, it is diagnosed from the total specific moisture $q^t$ and the liquid condensates.
+instead, it is diagnosed from the total specific moisture `qᵗ` and the liquid condensates.
 
 # Physical Processes
 1. **Autoconversion**: Cloud water converts to rain water when the cloud water mixing ratio exceeds a threshold.
