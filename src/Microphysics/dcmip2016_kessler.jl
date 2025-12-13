@@ -72,10 +72,6 @@ Return the names of prognostic microphysical fields for the Kessler scheme.
 # Fields
 - `:ρqᶜˡ`: Density-weighted cloud liquid mass fraction (\$kg/m^3\$).
 - `:ρqʳ`: Density-weighted rain mass fraction (\$kg/m^3\$).
-
-!!! note
-    Water vapor \$q^v\$ is **not** a prognostic variable in this scheme. It is diagnosed as
-    \$q^v = q^t - q^{cl} - q^r\$, where \$q^t\$ is the total specific moisture (a prognostic variable of `AtmosphereModel`).
 """
 prognostic_field_names(::KM) = (:ρqᶜˡ, :ρqʳ)
 
