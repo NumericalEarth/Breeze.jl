@@ -212,7 +212,7 @@ set!(model, θ=θᵢ, qᵗ=qᵢ, u=uᵢ, v=vᵢ)
 
 # ## Simulation
 #
-# We run the simulation for 6 hours with adaptive time-stepping.
+# We run the simulation for 12 hours with adaptive time-stepping.
 # RICO typically requires longer integration times than BOMEX to develop
 # a quasi-steady precipitating state.
 
