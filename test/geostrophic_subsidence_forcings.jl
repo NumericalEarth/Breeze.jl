@@ -1,14 +1,16 @@
 using Breeze
+using Oceananigans: Oceananigans
 using Test
 
 @testset "GeostrophicForcing [$(FT)]" for FT in (Float32, Float64)
-    grid = RectilinearGrid(default_arch, FT; size=(4, 4, 4), x=(0, 100), y=(0, 100), z=(0, 100))
+    Oceananigans.defaults.FloatType = FT
+    grid = RectilinearGrid(default_arch; size=(4, 4, 4), x=(0, 100), y=(0, 100), z=(0, 100))
 
     # Simple geostrophic wind profiles
-    uᵍ(z) = FT(-10)
-    vᵍ(z) = FT(0)
+    uᵍ(z) = -10
+    vᵍ(z) = 0
 
-    coriolis = FPlane(f=FT(1e-4))
+    coriolis = FPlane(f=1e-4)
 
     geostrophic = geostrophic_forcings(uᵍ, vᵍ)
 
@@ -22,7 +24,7 @@ using Test
     @test haskey(model.forcing, :ρv)
 
     # Time step should not error
-    Δt = FT(1e-6)
+    Δt = 1e-6
     time_step!(model, Δt)
 
     # With constant uᵍ = -10 and vᵍ = 0:
@@ -33,10 +35,11 @@ using Test
 end
 
 @testset "SubsidenceForcing [$(FT)]" for FT in (Float32, Float64)
-    grid = RectilinearGrid(default_arch, FT; size=(4, 4, 4), x=(0, 100), y=(0, 100), z=(0, 100))
+    Oceananigans.defaults.FloatType = FT
+    grid = RectilinearGrid(default_arch; size=(4, 4, 4), x=(0, 100), y=(0, 100), z=(0, 100))
 
     # Simple subsidence profile
-    wˢ(z) = FT(-0.01)  # Constant downward velocity
+    wˢ(z) = -0.01  # Constant downward velocity
 
     subsidence = SubsidenceForcing(wˢ)
 
@@ -50,21 +53,22 @@ end
     @test haskey(model.forcing, :ρe)
 
     # Time step should not error
-    Δt = FT(1e-6)
+    Δt = 1e-6
     time_step!(model, Δt)
 end
 
 @testset "Combined GeostrophicForcing and SubsidenceForcing [$(FT)]" for FT in (Float32, Float64)
-    grid = RectilinearGrid(default_arch, FT; size=(4, 4, 4), x=(0, 100), y=(0, 100), z=(0, 100))
+    Oceananigans.defaults.FloatType = FT
+    grid = RectilinearGrid(default_arch; size=(4, 4, 4), x=(0, 100), y=(0, 100), z=(0, 100))
 
     # Geostrophic wind profiles
-    uᵍ(z) = FT(-10)
-    vᵍ(z) = FT(0)
+    uᵍ(z) = -10
+    vᵍ(z) = 0
 
     # Subsidence profile
-    wˢ(z) = FT(-0.01)
+    wˢ(z) = -0.01
 
-    coriolis = FPlane(f=FT(1e-4))
+    coriolis = FPlane(f=1e-4)
 
     geostrophic = geostrophic_forcings(uᵍ, vᵍ)
     subsidence = SubsidenceForcing(wˢ)
@@ -84,11 +88,10 @@ end
     set!(model, θ=θ₀)
 
     # Time step should not error
-    Δt = FT(1e-6)
+    Δt = 1e-6
     time_step!(model, Δt)
 
     # With constant uᵍ = -10 and vᵍ = 0:
     # The geostrophic forcing on ρv should make ρv negative
     @test maximum(model.momentum.ρv) < 0
 end
-
