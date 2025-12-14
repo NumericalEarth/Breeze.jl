@@ -67,17 +67,17 @@ formulation = AnelasticFormulation(reference_state,
 
 # ## Surface fluxes
 #
-# Unlike BOMEX, which prescribes momentum, moisture, and thermodynamic fluxes,
-# RICO specifies their computation with bulk aerodynamic formula with constant
-# transfer coefficients ([vanZanten2011](@citet), text surrounding equations 1--4):
+# Unlike the BOMEX protocol, which prescribes momentum, moisture, and thermodynamic fluxes,
+# the RICO protocol decrees the computation of fluxes by bulk aerodynamic formulae
+# with constant transfer coefficients ([vanZanten2011](@citet), text surrounding equations 1--4):
 
 Cᴰ = 1.229e-3 # Drag coefficient for momentum
 Cᵀ = 1.094e-3 # "Temperature" aka sensible heat transfer coefficient
 Cᵛ = 1.133e-3 # Moisture flux transfer coefficient
 T₀ = 299.8    # Sea surface temperature (K)
 
-# We compute fluxes from these transfer coefficients using Breeze utilities
-# for simple bulk fluxes,
+# We implement the specified bulk formula with Breeze utilities whose scope
+# currently extends only to constant coefficients (but could expand in the future),
 
 ρθ_flux = BulkSensibleHeatFlux(coefficient=Cᵀ, surface_temperature=T₀)
 ρqᵗ_flux = BulkVaporFlux(coefficient=Cᵛ, surface_temperature=T₀)
@@ -95,9 +95,9 @@ T₀ = 299.8    # Sea surface temperature (K)
 
 # ## Large-scale subsidence
 #
-# The RICO case includes large-scale subsidence that advects mean profiles downward.
+# The RICO protocol includes large-scale subsidence that advects mean profiles downward.
 # The subsidence velocity profile increases linearly to ``-0.005`` m/s at 2260 m and
-# remains constant above [vanZanten2011](@cite).
+# remains constant above [vanZanten2011](@cite),
 
 FT = eltype(grid)
 wˢ_profile = AtmosphericProfilesLibrary.Rico_subsidence(FT)
@@ -105,7 +105,7 @@ wˢ = Field{Nothing, Nothing, Face}(grid)
 set!(wˢ, z -> wˢ_profile(z))
 subsidence = SubsidenceForcing(wˢ)
 
-# Visualize the subsidence profile:
+# This is what it looks like:
 
 lines(wˢ; axis = (xlabel = "wˢ (m/s)",))
 
@@ -182,16 +182,23 @@ model = AtmosphereModel(grid; formulation, coriolis, microphysics,
 # ## Initial conditions
 #
 # Mean profiles are specified as piecewise linear functions by [vanZanten2011](@citet):
+#
 #    - Liquid-ice potential temperature ``θ^{\ell i}(z)``
 #    - Total water specific humidity ``q^t(z)``
 #    - Zonal velocity ``u(z)`` and meridional velocity ``v(z)``
+# 
+# The profiles are implemented in the wonderfully useful
+# [AtmosphericProfilesLibrary](https://github.com/CliMA/AtmosphericProfilesLibrary.jl)
+# package developed by the Climate Modeling Alliance,
 
 θˡⁱ₀ = AtmosphericProfilesLibrary.Rico_θ_liq_ice(FT)
 qᵗ₀ = AtmosphericProfilesLibrary.Rico_q_tot(FT)
 u₀ = AtmosphericProfilesLibrary.Rico_u(FT)
 v₀ = AtmosphericProfilesLibrary.Rico_v(FT)
 
-# Apply Exner function correction for Breeze's reference pressure convention:
+# We dutifully apply a correction to the Exner function due to the fact that
+# Breeze does not currently distinguish between the surface pressure and the
+# standard "potential temperature reference pressure" of ``10⁵`` Pa,
 
 using Breeze.Thermodynamics: dry_air_gas_constant
 
@@ -218,18 +225,22 @@ simulation = Simulation(model; Δt=10, stop_time=12hours)
 conjure_time_step_wizard!(simulation, cfl=0.7)
 
 # ## Output and progress
+# 
+# We set up a progress callback with hourly messages about interesting
+# quantities,
 
 θ = liquid_ice_potential_temperature(model)
 qˡ = model.microphysical_fields.qˡ
 qᵛ = model.microphysical_fields.qᵛ
 
-# Precipitation rate diagnostic from zero-moment microphysics
+## Precipitation rate diagnostic from zero-moment microphysics
 P = precipitation_rate(model, :liquid)
 
-# Integrals of precip rate
+## Integrals of precip rate
 ∫Pdz = Field(Integral(P, dims=3))
 ∫PdV = Field(Integral(P))
 
+## For keeping track of the computational expense
 wall_clock = Ref(time_ns())
 
 function progress(sim)
@@ -255,7 +266,10 @@ end
 
 add_callback!(simulation, progress, TimeInterval(1hour))
 
-outputs = merge(model.velocities, model.tracers, (; θ, qˡ, qᵛ))
+# In addition to velocities, we output horizontal and time-averages of
+# liquid water mass fraction, specific humidity, and liquid-ice potential temperature,
+
+outputs = merge(model.velocities, (; θ, qˡ, qᵛ))
 averaged_outputs = NamedTuple(name => Average(outputs[name], dims=(1, 2)) for name in keys(outputs))
 
 filename = "rico.jld2"
@@ -263,7 +277,8 @@ simulation.output_writers[:averages] = JLD2Writer(model, averaged_outputs; filen
                                                   schedule = AveragedTimeInterval(1hour),
                                                   overwrite_existing = true)
 
-# Output slices for animation:
+# For an animation, we also output slices,
+#
 # - xz-slices of qˡ and precipitation rate
 # - xy-slice of qˡ in cloud layer (z ≈ 1500 m) and vertically-integrated precipitation rate
 
@@ -283,7 +298,8 @@ simulation.output_writers[:slices] = JLD2Writer(model, slice_outputs; filename,
                                                 schedule = TimeInterval(30),
                                                 overwrite_existing = true)
 
-@info "Running RICO simulation..."
+# We're finally ready to run this thing, 
+
 run!(simulation)
 
 # ## Results: mean profile evolution
