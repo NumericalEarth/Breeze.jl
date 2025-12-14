@@ -112,6 +112,7 @@ function materialize_atmosphere_model_forcing(forcing::SubsidenceForcing, field,
         bcs = FieldBoundaryConditions(grid, loc, bottom=ibc, top=ibc)
         wˢ = Field{Nothing, Nothing, Face}(grid, boundary_conditions=bcs)
         set!(wˢ, forcing.subsidence_vertical_velocity)
+        fill_halo_regions!(wˢ)
     end
 
     ρᵣ = context.reference_density
