@@ -386,27 +386,27 @@ Plim = max(maximum(Pxz_ts), 1e-10) / 4
 
 fig = Figure(size=(900, 750), fontsize=14)
 
-axqxz = Axis(fig[1, 2], xlabel="x (m)", ylabel="z (m)", title="Cloud liquid water qˡ (xz @ y = 0)")
-axPxz = Axis(fig[1, 3], xlabel="x (m)", ylabel="z (m)", title="Precipitation rate P (xz @ y = 0)")
-axqxy = Axis(fig[2, 2], xlabel="x (m)", ylabel="y (m)", title="Cloud liquid water qˡ (xy @ z = $(z[k_cloud]) m)")
-ax∫P = Axis(fig[2, 3], xlabel="x (m)", ylabel="y (m)", title="Column-integrated precipitation rate")
+axqxz = Axis(fig[2, 1], xlabel="x (m)", ylabel="z (m)", xaxisposition=:top)
+axPxz = Axis(fig[2, 2], xlabel="x (m)", ylabel="z (m)", xaxisposition=:top)
+axqxy = Axis(fig[3, 1], xlabel="x (m)", ylabel="y (m)") 
+ax∫P  = Axis(fig[3, 2], xlabel="x (m)", ylabel="y (m)", yaxisposition=:right)
 
 n = Observable(1)
 qˡxz_n = @lift qˡxz_ts[$n]
 Pxz_n = @lift Pxz_ts[$n]
 qˡxy_n = @lift qˡxy_ts[$n]
 ∫P_n = @lift ∫P_ts[$n]
-title = @lift "RICO: Clouds and precipitation at t = " * prettytime(times[$n])
+title = @lift "Cloud liquid and precipitation in RICO at t = " * prettytime(times[$n])
 
 hmq1 = heatmap!(axqxz, qˡxz_n, colormap=:dense, colorrange=(0, qˡlim))
 hmP1 = heatmap!(axPxz, Pxz_n, colormap=:amp, colorrange=(0, Plim))
 hmq2 = heatmap!(axqxy, qˡxy_n, colormap=:dense, colorrange=(0, qˡlim))
 hmP2 = heatmap!(ax∫P, ∫P_n, colormap=:amp, colorrange=(0, ∫Plim))
 
-Colorbar(fig[1, 1], hmq1, flipaxis=false, label="qˡ (kg/kg)")
-Colorbar(fig[1, 4], hmP1, label="P (1/s)")
-Colorbar(fig[2, 1], hmq2, flipaxis=false, label="qˡ (kg/kg)")
-Colorbar(fig[2, 4], hmP2, label="∫P dz (m/s)")
+Colorbar(fig[1, 1], hmq1, vertical=false, flipaxis=false, label="Cloud liquid water qˡ (x, y=0, z)")
+Colorbar(fig[1, 2], hmP1, vertical=false, flipaxis=false, label="Precipitation rate P (x, y=0, z)")
+Colorbar(fig[4, 1], hmq2, vertical=false, flipaxis=true, label="Cloud liquid water qˡ (x, y, z=$(z[k_cloud]))")
+Colorbar(fig[4, 2], hmP2, vertical=false, flipaxis=true, label="Column-integrated precipitation rate")
 
 fig[0, :] = Label(fig, title, fontsize=18, tellwidth=false)
 
