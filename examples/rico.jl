@@ -186,7 +186,7 @@ model = AtmosphereModel(grid; formulation, coriolis, microphysics,
 #    - Liquid-ice potential temperature ``θ^{\ell i}(z)``
 #    - Total water specific humidity ``q^t(z)``
 #    - Zonal velocity ``u(z)`` and meridional velocity ``v(z)``
-# 
+#
 # The profiles are implemented in the wonderfully useful
 # [AtmosphericProfilesLibrary](https://github.com/CliMA/AtmosphericProfilesLibrary.jl)
 # package developed by the Climate Modeling Alliance,
@@ -206,7 +206,7 @@ Rᵈ = dry_air_gas_constant(constants)
 cᵖᵈ = constants.dry_air.heat_capacity
 p₀ = reference_state.surface_pressure
 χ = (p₀ / 1e5)^(Rᵈ / cᵖᵈ)
-zϵ = 1500 # m 
+zϵ = 1500 # m
 
 θᵢ(x, y, z) = χ * θˡⁱ₀(z) + 1e-2 * (rand() - 0.5) * (z < zϵ)
 qᵢ(x, y, z) = qᵗ₀(z)
@@ -225,7 +225,7 @@ simulation = Simulation(model; Δt=10, stop_time=12hours)
 conjure_time_step_wizard!(simulation, cfl=0.7)
 
 # ## Output and progress
-# 
+#
 # We set up a progress callback with hourly messages about interesting
 # quantities,
 
@@ -298,7 +298,7 @@ simulation.output_writers[:slices] = JLD2Writer(model, slice_outputs; filename,
                                                 schedule = TimeInterval(30),
                                                 overwrite_existing = true)
 
-# We're finally ready to run this thing, 
+# We're finally ready to run this thing,
 
 run!(simulation)
 
@@ -372,6 +372,8 @@ Pxz_ts = FieldTimeSeries("rico_slices.jld2", "Pxz")
 qˡxy_ts = FieldTimeSeries("rico_slices.jld2", "qˡxy")
 ∫P_ts = FieldTimeSeries("rico_slices.jld2", "∫P")
 
+z = znodes(qˡxz_ts.grid, Center())
+
 times = qˡxz_ts.times
 Nt = length(times)
 
@@ -384,33 +386,33 @@ Plim = max(maximum(Pxz_ts), 1e-10) / 4
 # P is in kg/kg/s, multiply by ρ~1 kg/m³ and 86400 s/day and 1000 mm/m gives ~86.4 factor
 # But since P is specific (kg/kg/s), we'll just show it in 10⁻⁶ s⁻¹ for clarity
 
-slices_fig = Figure(size=(1100, 800), fontsize=14)
+fig = Figure(size=(900, 750), fontsize=14)
 
-axqxz = Axis(slices_fig[1, 2], xlabel="x (m)", ylabel="z (m)", title="Cloud liquid water qˡ (xz)")
-axPxz = Axis(slices_fig[1, 3], xlabel="x (m)", ylabel="z (m)", title="Precipitation rate P (xz)")
-axqxy = Axis(slices_fig[2, 2], xlabel="x (m)", ylabel="y (m)", title="Cloud liquid water qˡ (xy at z ≈ 1.5 km)")
-ax∫P = Axis(slices_fig[2, 3], xlabel="x (m)", ylabel="y (m)", title="Column-integrated precipitation rate")
+axqxz = Axis(fig[1, 2], xlabel="x (m)", ylabel="z (m)", title="Cloud liquid water qˡ (xz @ y = 0)")
+axPxz = Axis(fig[1, 3], xlabel="x (m)", ylabel="z (m)", title="Precipitation rate P (xz @ y = 0)")
+axqxy = Axis(fig[2, 2], xlabel="x (m)", ylabel="y (m)", title="Cloud liquid water qˡ (xy @ z = $(z[k_cloud]) m)")
+ax∫P = Axis(fig[2, 3], xlabel="x (m)", ylabel="y (m)", title="Column-integrated precipitation rate")
 
 n = Observable(1)
 qˡxz_n = @lift qˡxz_ts[$n]
 Pxz_n = @lift Pxz_ts[$n]
 qˡxy_n = @lift qˡxy_ts[$n]
 ∫P_n = @lift ∫P_ts[$n]
-title_text = @lift "RICO: Clouds and precipitation at t = " * prettytime(times[$n])
+title = @lift "RICO: Clouds and precipitation at t = " * prettytime(times[$n])
 
 hmq1 = heatmap!(axqxz, qˡxz_n, colormap=:dense, colorrange=(0, qˡlim))
 hmP1 = heatmap!(axPxz, Pxz_n, colormap=:amp, colorrange=(0, Plim))
 hmq2 = heatmap!(axqxy, qˡxy_n, colormap=:dense, colorrange=(0, qˡlim))
 hmP2 = heatmap!(ax∫P, ∫P_n, colormap=:amp, colorrange=(0, ∫Plim))
 
-Colorbar(slices_fig[1, 1], hmq1, flipaxis=false, label="qˡ (kg/kg)")
-Colorbar(slices_fig[1, 4], hmP1, label="P (1/s)")
-Colorbar(slices_fig[2, 1], hmq2, flipaxis=false, label="qˡ (kg/kg)")
-Colorbar(slices_fig[2, 4], hmP2, label="∫P dz (m/s)")
+Colorbar(fig[1, 1], hmq1, flipaxis=false, label="qˡ (kg/kg)")
+Colorbar(fig[1, 4], hmP1, label="P (1/s)")
+Colorbar(fig[2, 1], hmq2, flipaxis=false, label="qˡ (kg/kg)")
+Colorbar(fig[2, 4], hmP2, label="∫P dz (m/s)")
 
-slices_fig[0, :] = Label(slices_fig, title_text, fontsize=18, tellwidth=false)
+fig[0, :] = Label(fig, title, fontsize=18, tellwidth=false)
 
-CairoMakie.record(slices_fig, "rico_slices.mp4", 1:Nt, framerate=12) do nn
+CairoMakie.record(fig, "rico_slices.mp4", 1:Nt, framerate=12) do nn
     n[] = nn
 end
 nothing #hide
