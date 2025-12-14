@@ -69,7 +69,7 @@ formulation = AnelasticFormulation(reference_state,
 #
 # Unlike the BOMEX protocol, which prescribes momentum, moisture, and thermodynamic fluxes,
 # the RICO protocol decrees the computation of fluxes by bulk aerodynamic formulae
-# with constant transfer coefficients ([vanZanten2011](@citet), text surrounding equations 1--4):
+# with constant transfer coefficients (see [vanZanten2011](@citet); text surrounding equations 1-4):
 
 Cᴰ = 1.229e-3 # Drag coefficient for momentum
 Cᵀ = 1.094e-3 # "Temperature" aka sensible heat transfer coefficient
@@ -91,7 +91,7 @@ T₀ = 299.8    # Sea surface temperature (K)
 # Within the canon of Monin-Obukhov similarity theory, these transfer
 # coefficients should be scaled if the vertical grid spacing is changed.
 # Here we can use the values from [vanZanten2011](@citet) verbatim because
-# we use the recommend vertical grid spacing of 40 m.
+# we use the recommended vertical grid spacing of 40 m.
 
 # ## Large-scale subsidence
 #
@@ -236,7 +236,7 @@ qᵛ = model.microphysical_fields.qᵛ
 ## Precipitation rate diagnostic from zero-moment microphysics
 P = precipitation_rate(model, :liquid)
 
-## Integrals of precip rate
+## Integrals of precipitation rate
 ∫Pdz = Field(Integral(P, dims=3))
 ∫PdV = Field(Integral(P))
 
