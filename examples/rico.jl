@@ -382,9 +382,7 @@ qˡlim = max(maximum(qˡxz_ts), 1e-6) / 4
 Plim = max(maximum(Pxz_ts), 1e-10) / 4
 ∫Plim = max(maximum(∫P_ts), 1e-8) / 4
 
-# Convert precipitation rate to mm/day for more intuitive units
-# P is in kg/kg/s, multiply by ρ~1 kg/m³ and 86400 s/day and 1000 mm/m gives ~86.4 factor
-# But since P is specific (kg/kg/s), we'll just show it in 10⁻⁶ s⁻¹ for clarity
+# Now let's plot the slices and animate them.
 
 fig = Figure(size=(900, 750), fontsize=14)
 
