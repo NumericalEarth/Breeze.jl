@@ -8,7 +8,7 @@ using Test
     uᵍ(z) = FT(-10)
     vᵍ(z) = FT(0)
 
-    coriolis = FPlane(f=FT(1e-4))
+    coriolis = FPlane(FT, f=1e-4)
 
     geostrophic = geostrophic_forcings(uᵍ, vᵍ)
 
@@ -64,7 +64,7 @@ end
     # Subsidence profile
     wˢ(z) = FT(-0.01)
 
-    coriolis = FPlane(f=FT(1e-4))
+    coriolis = FPlane(FT, f=1e-4)
 
     geostrophic = geostrophic_forcings(uᵍ, vᵍ)
     subsidence = SubsidenceForcing(wˢ)
