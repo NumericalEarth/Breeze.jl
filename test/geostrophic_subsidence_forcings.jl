@@ -91,4 +91,3 @@ end
     # The geostrophic forcing on ρv should make ρv negative
     @test maximum(model.momentum.ρv) < 0
 end
-
