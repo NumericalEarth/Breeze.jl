@@ -1,4 +1,5 @@
 using Breeze
+using Oceananigans: Oceananigans
 using Test
 
 @testset "GeostrophicForcing [$(FT)]" for FT in (Float32, Float64)
