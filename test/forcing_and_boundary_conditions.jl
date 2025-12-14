@@ -13,7 +13,8 @@ increment_tolerance(::Type{Float32}) = 1f-5
 increment_tolerance(::Type{Float64}) = 1e-10
 
 @testset "AtmosphereModel forcing increments prognostic fields [$(FT)]" for FT in (Float32, Float64)
-    grid = RectilinearGrid(default_arch, FT; size=(4, 4, 4), x=(0, 100), y=(0, 100), z=(0, 100))
+    Oceananigans.defaults.FloatType = FT
+    grid = RectilinearGrid(default_arch; size=(4, 4, 4), x=(0, 100), y=(0, 100), z=(0, 100))
 
     forcings = [
         Returns(one(FT)),
@@ -70,7 +71,8 @@ end
 #####
 
 @testset "Bulk boundary conditions [$FT]" for FT in (Float32, Float64)
-    grid = RectilinearGrid(default_arch, FT; size=(4, 4, 4), x=(0, 100), y=(0, 100), z=(0, 100))
+    Oceananigans.defaults.FloatType = FT
+    grid = RectilinearGrid(default_arch; size=(4, 4, 4), x=(0, 100), y=(0, 100), z=(0, 100))
     Cᴰ = 1e-3
     gustiness = 0.1
     T₀ = 290
@@ -94,7 +96,7 @@ end
         set!(model; θ=θ₀)
 
         # Model should build and run without error
-        time_step!(model, FT(1e-6))
+        time_step!(model, 1e-6)
         @test true  # If we get here, construction and time stepping worked
     end
 
@@ -117,7 +119,7 @@ end
         set!(model; θ=θ₀)
 
         # Model should build and run without error
-        time_step!(model, FT(1e-6))
+        time_step!(model, 1e-6)
         @test true
     end
 
@@ -140,7 +142,7 @@ end
         set!(model; θ=θ₀)
 
         # Model should build and run without error
-        time_step!(model, FT(1e-6))
+        time_step!(model, 1e-6)
         @test true
     end
 
@@ -160,7 +162,7 @@ end
         set!(model; θ=θ₀)
 
         # Model should build and run without error
-        time_step!(model, FT(1e-6))
+        time_step!(model, 1e-6)
         @test true
     end
 end
