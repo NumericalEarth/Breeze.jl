@@ -37,9 +37,6 @@ Random.seed!(42)
 # The RICO domain is 12.8 km × 12.8 km horizontally with a vertical extent of 4 km
 # [vanZanten2011](@cite). The intercomparison uses 128 × 128 × 100 grid points
 # with 100 m horizontal resolution and 40 m vertical resolution.
-#
-# For this example, we use a coarser grid (128 × 128 × 100) with 200 m horizontal
-# resolution, suitable for development and testing.
 
 Oceananigans.defaults.FloatType = Float32
 
@@ -70,17 +67,17 @@ formulation = AnelasticFormulation(reference_state,
 
 # ## Surface fluxes
 #
-# RICO prescribes constant surface sensible and latent heat fluxes
-# ([vanZanten2011](@citet)):
-# - Sensible heat flux: ``\overline{w'\theta'}|_0 \approx 8 \times 10^{-3}`` K m/s
-# - Moisture flux: ``\overline{w'q_t'}|_0 \approx 5.2 \times 10^{-5}`` kg/kg m/s
-#
-# These values are similar to BOMEX but produce a moister boundary layer
-# that supports warm-rain processes.
+# Unlike BOMEX, which prescribes momentum, moisture, and thermodynamic fluxes,
+# RICO specifies their computation with bulk aerodynamic formula with constant
+# transfer coefficients ([vanZanten2011](@citet), text surrounding equations 1--4):
 
-Cᵀ = 1.094e-3
-Cᵛ = 1.133e-3
-T₀ = 299.8  # sea surface temperature (K)
+Cᴰ = 1.229e-3 # Drag coefficient for momentum
+Cᵀ = 1.094e-3 # "Temperature" aka sensible heat transfer coefficient
+Cᵛ = 1.133e-3 # Moisture flux transfer coefficient
+T₀ = 299.8    # Sea surface temperature (K)
+
+# We compute fluxes from these transfer coefficients using Breeze utilities
+# for simple bulk fluxes,
 
 ρθ_flux = BulkSensibleHeatFlux(coefficient=Cᵀ, surface_temperature=T₀)
 ρqᵗ_flux = BulkVaporFlux(coefficient=Cᵛ, surface_temperature=T₀)
@@ -88,11 +85,13 @@ T₀ = 299.8  # sea surface temperature (K)
 ρθ_bcs = FieldBoundaryConditions(bottom=ρθ_flux)
 ρqᵗ_bcs = FieldBoundaryConditions(bottom=ρqᵗ_flux)
 
-# ## Surface momentum flux (drag)
-
-Cᴰ = 1.229e-3
 ρu_bcs = FieldBoundaryConditions(bottom=BulkDrag(coefficient=Cᴰ))
 ρv_bcs = FieldBoundaryConditions(bottom=BulkDrag(coefficient=Cᴰ))
+
+# Within the canon of Monin-Obukhov similarity theory, these transfer
+# coefficients should be scaled if the vertical grid spacing is changed.
+# Here we can use the values from [vanZanten2011](@citet) verbatim because
+# we use the recommend vertical grid spacing of 40 m.
 
 # ## Large-scale subsidence
 #
@@ -281,7 +280,7 @@ slice_outputs = (
 
 filename = "rico_slices.jld2"
 simulation.output_writers[:slices] = JLD2Writer(model, slice_outputs; filename,
-                                                schedule = TimeInterval(1minute),
+                                                schedule = TimeInterval(30),
                                                 overwrite_existing = true)
 
 @info "Running RICO simulation..."
@@ -388,9 +387,9 @@ hmP1 = heatmap!(axPxz, Pxz_n, colormap=:amp, colorrange=(0, Plim))
 hmq2 = heatmap!(axqxy, qˡxy_n, colormap=:dense, colorrange=(0, qˡlim))
 hmP2 = heatmap!(ax∫P, ∫P_n, colormap=:amp, colorrange=(0, ∫Plim))
 
-Colorbar(slices_fig[1, 1], hmq1, flipaxis=true, label="qˡ (kg/kg)")
+Colorbar(slices_fig[1, 1], hmq1, flipaxis=false, label="qˡ (kg/kg)")
 Colorbar(slices_fig[1, 4], hmP1, label="P (1/s)")
-Colorbar(slices_fig[2, 1], hmq2, flipaxis=true, label="qˡ (kg/kg)")
+Colorbar(slices_fig[2, 1], hmq2, flipaxis=false, label="qˡ (kg/kg)")
 Colorbar(slices_fig[2, 4], hmP2, label="∫P dz (m/s)")
 
 slices_fig[0, :] = Label(slices_fig, title_text, fontsize=18, tellwidth=false)

@@ -102,10 +102,15 @@ end
 strip_density_prefix(name::Symbol) = Symbol(collect(string(name))[2:end]...)
 
 function materialize_atmosphere_model_forcing(forcing::SubsidenceForcing, field, name, model_field_names, context)
+    grid = field.grid
+
     if forcing.subsidence_vertical_velocity isa AbstractField
         wˢ = forcing.subsidence_vertical_velocity
     else
-        wˢ = Field{Nothing, Nothing, Face}(field.grid)
+        ibc = ImpenetrableBoundaryCondition()
+        loc = (nothing, nothing, Face())
+        bcs = FieldBoundaryConditions(grid, loc, bottom=ibc, top=ibc)
+        wˢ = Field{Nothing, Nothing, Face}(grid, boundary_conditions=bcs)
         set!(wˢ, forcing.subsidence_vertical_velocity)
     end
 
