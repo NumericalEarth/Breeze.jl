@@ -1,6 +1,8 @@
 using Oceananigans: Average, Field, set!, compute!
-using Oceananigans.Grids: Center, Face
+using Oceananigans.BoundaryConditions: FieldBoundaryConditions, ImpenetrableBoundaryCondition,
+                                       fill_halo_regions!
 using Oceananigans.Fields: AbstractField
+using Oceananigans.Grids: Center, Face
 using Oceananigans.Operators: ∂zᶜᶜᶠ, ℑzᵃᵃᶜ
 using Oceananigans.Utils: prettysummary
 using Adapt: Adapt
@@ -128,7 +130,7 @@ function materialize_atmosphere_model_forcing(forcing::SubsidenceForcing, field,
 
     return SubsidenceForcing(wˢ, ρᵣ, averaged_field)
 end
-    
+
 #####
 ##### compute_forcing! for subsidence forcing
 #####
@@ -138,4 +140,3 @@ function compute_forcing!(forcing::SubsidenceForcing)
     compute!(forcing.averaged_field)
     return nothing
 end
-
