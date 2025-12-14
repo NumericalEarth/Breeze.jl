@@ -71,8 +71,6 @@ Compute auxiliary model variables:
     * temperature ``T``, possibly involving saturation adjustment
     * specific thermodynamic variable (``e = ρe / ρ`` or ``θ = ρθ / ρ``)
     * moisture mass fraction ``qᵗ = ρqᵗ / ρ``
-
-
 """
 function compute_auxiliary_variables!(model)
     grid = model.grid

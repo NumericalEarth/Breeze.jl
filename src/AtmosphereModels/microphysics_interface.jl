@@ -87,3 +87,31 @@ of the saturation adjustment `scheme`.
 If a scheme is non-adjusting, we just return `state`.
 """
 @inline adjust_thermodynamic_state(state, scheme::Nothing, thermo) = state
+
+#####
+##### Precipitation rate diagnostic
+#####
+
+"""
+    precipitation_rate(model, phase=:liquid)
+
+Return a `KernelFunctionOperation` representing the precipitation rate for the given `phase`.
+
+The precipitation rate is the rate at which moisture is removed from the atmosphere
+by precipitation processes. For zero-moment schemes, this is computed from the
+`remove_precipitation` function applied to cloud condensate.
+
+Arguments:
+- `model`: An `AtmosphereModel` with a microphysics scheme
+- `phase`: Either `:liquid` (rain) or `:ice` (snow). Default is `:liquid`.
+
+Returns a `Field` or `KernelFunctionOperation` that can be computed and visualized.
+Specific microphysics schemes must extend this function.
+"""
+precipitation_rate(model, phase::Symbol=:liquid) = precipitation_rate(model, model.microphysics, Val(phase))
+
+# Default: no precipitation for Nothing microphysics
+# We implmement this as a fallback for convenience
+# TODO: support reductions over ZeroField or the like, so we can swap
+# non-precipitating microphysics schemes with precipitating ones
+precipitation_rate(model, microphysics, phase) = CenterField(model.grid) 
