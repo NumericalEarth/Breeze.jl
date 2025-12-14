@@ -16,7 +16,6 @@
 using Breeze
 using Oceananigans: Oceananigans
 using Oceananigans.Units
-using Oceananigans: Oceananigans
 
 using AtmosphericProfilesLibrary
 using CairoMakie
