@@ -1,7 +1,8 @@
 import Breeze
 using ParallelTestRunner: find_tests, parse_args, filter_tests!, runtests
+using Oceananigans: Oceananigans
 
-# Start with auto-discovered tests
+# Start with autodiscovered tests
 testsuite = find_tests(@__DIR__)
 
 # Parse arguments
