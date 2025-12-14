@@ -340,7 +340,6 @@ end
 @testset "Saturation adjustment (MoistAirBuoyancies)" for FT in (Float32, Float64)
     # Minimal grid and reference state
     Oceananigans.defaults.FloatType = FT
-    # grid = RectilinearGrid(size=(), topology=(Flat, Flat, Flat))
     grid = RectilinearGrid(default_arch; size=(1, 1, 1), x=(0, 1), y=(0, 1), z=(0, 1))
     constants = ThermodynamicConstants(FT)
     reference_state = ReferenceState(grid, constants; surface_pressure=101325, potential_temperature=288)
