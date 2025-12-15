@@ -410,7 +410,7 @@ Colorbar(fig[4, 2], hmP2, vertical=false, flipaxis=true, label="Column-integrate
 
 fig[0, :] = Label(fig, title, fontsize=18, tellwidth=false)
 
-CairoMakie.record(fig, "rico_slices.mp4", 1:Nt, framerate=12) do nn
+CairoMakie.record(fig, "rico_slices.mp4", 1:round(Int, Nt/2), framerate=6) do nn
     n[] = nn
 end
 nothing #hide
