@@ -5,13 +5,17 @@ end
 
 Base.summary(bμp::BulkMicrophysics) = "BulkMicrophysics"
 
-struct FourCategories{L, I, R, S, C}
+struct FourCategories{L, I, R, S, C, V}
     cloud_liquid :: L
     cloud_ice :: I
     rain :: R
     snow :: S
     collisions :: C
+    hydrometeor_velocities :: V
 end
+
+FourCategories(cloud_liquid, cloud_ice, rain, snow, collisions) =
+    FourCategories(cloud_liquid, cloud_ice, rain, snow, collisions, nothing)
 
 const FourCategoryBulkMicrophysics = BulkMicrophysics{<:Any, <:FourCategories}
 Base.summary(bμp::FourCategoryBulkMicrophysics) = "FourCategoryBulkMicrophysics"
@@ -32,7 +36,7 @@ end
 const NCBM = BulkMicrophysics{<:Any, Nothing}
 const NPBM = NCBM  # Alias: Non-Precipitating Bulk Microphysics
 
-maybe_adjust_thermodynamic_state(𝒰₀, bμp::NCBM, microphysical_fields, qᵗ, constants) =
+maybe_adjust_thermodynamic_state(i, j, k, 𝒰₀, bμp::NCBM, microphysical_fields, qᵗ, constants) =
     adjust_thermodynamic_state(𝒰₀, bμp.nucleation, constants)
 
 prognostic_field_names(::NPBM) = tuple()

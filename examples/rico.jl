@@ -14,10 +14,9 @@
 #
 # Initial and boundary conditions for this case are provided by the wonderfully useful
 # package [AtmosphericProfilesLibrary.jl](https://github.com/CliMA/AtmosphericProfilesLibrary.jl).
-# For precipitation we use the 0-moment scheme from
-# [CloudMicrophysics.jl](https://github.com/CliMA/CloudMicrophysics.jl), which is certainly
-# the least interesting of the microphysics schemes that CloudMicrophysics provides.
-# (Support for CloudMicrophysics's 1 moment, 2 moment, and P3 are hopefully coming soon!)
+# For precipitation we use the 1-moment scheme from
+# [CloudMicrophysics.jl](https://github.com/CliMA/CloudMicrophysics.jl), which provides
+# prognostic rain mass with autoconversion and accretion processes.
 
 using Breeze
 using Oceananigans: Oceananigans
@@ -40,13 +39,13 @@ Random.seed!(42)
 
 Oceananigans.defaults.FloatType = Float32
 
-Nx = Ny = 128
-Nz = 100
+Nx = Ny = 16  # reduced for testing, use 128 for production
+Nz = 20       # reduced for testing, use 100 for production
 
 x = y = (0, 12800)
 z = (0, 4000)
 
-grid = RectilinearGrid(GPU(); x, y, z,
+grid = RectilinearGrid(CPU(); x, y, z,  # CPU for testing, use GPU() for production
                        size = (Nx, Ny, Nz), halo = (5, 5, 5),
                        topology = (Periodic, Periodic, Bounded))
 
@@ -160,20 +159,16 @@ nothing #hide
 
 # ## Model setup
 #
-# We use zero-moment bulk microphysics from CloudMicrophysics with warm-phase saturation adjustment
-# and 9th-order WENO advection. The zero-moment scheme allows condensation and evaporation
-# and includes instant precipitation removal above a threshold, making it suitable for
-# precipitating shallow cumulus simulations like RICO.
-#
-# In the configuration we use it, the zero-moment scheme removes cloud liquid water
-# exceeding a threshold `qc_0` at a rate determined by the precipitation
-# timescale `τ_precip`.
+# We use one-moment bulk microphysics from CloudMicrophysics with warm-phase saturation adjustment
+# and 9th-order WENO advection. The one-moment scheme tracks prognostic rain mass (`qʳ`) 
+# and includes autoconversion (cloud liquid → rain) and accretion (cloud liquid swept up
+# by falling rain) processes. This is a more physically-realistic representation of
+# warm-rain precipitation than the zero-moment scheme.
 
 BreezeCloudMicrophysicsExt = Base.get_extension(Breeze, :BreezeCloudMicrophysicsExt)
-using .BreezeCloudMicrophysicsExt: ZeroMomentCloudMicrophysics
+using .BreezeCloudMicrophysicsExt: OneMomentCloudMicrophysics
 
-nucleation = SaturationAdjustment(equilibrium=WarmPhaseEquilibrium())
-microphysics = ZeroMomentCloudMicrophysics(τ_precip=2minutes, qc_0=2e-4; nucleation)
+microphysics = OneMomentCloudMicrophysics()
 advection = WENO(order=9)
 
 model = AtmosphereModel(grid; formulation, coriolis, microphysics,
@@ -222,6 +217,7 @@ set!(model, θ=θᵢ, qᵗ=qᵢ, u=uᵢ, v=vᵢ)
 # a quasi-steady precipitating state.
 
 simulation = Simulation(model; Δt=10, stop_time=6hour)
+simulation.stop_iteration = 50  # for testing, remove for production
 conjure_time_step_wizard!(simulation, cfl=0.7)
 
 # ## Output and progress
@@ -230,10 +226,16 @@ conjure_time_step_wizard!(simulation, cfl=0.7)
 # quantities,
 
 θ = liquid_ice_potential_temperature(model)
-qˡ = model.microphysical_fields.qˡ
+qˡ = model.microphysical_fields.qˡ    # total liquid (cloud + rain)
+qᶜˡ = model.microphysical_fields.qᶜˡ  # cloud liquid only
 qᵛ = model.microphysical_fields.qᵛ
+ρqʳ = model.microphysical_fields.ρqʳ  # rain mass density (prognostic)
 
-## Precipitation rate diagnostic from zero-moment microphysics
+# Compute rain specific humidity qʳ = ρqʳ / ρ
+ρᵣ = formulation.reference_state.density
+qʳ = ρqʳ / ρᵣ
+
+## Precipitation rate diagnostic from one-moment microphysics
 P = precipitation_rate(model, :liquid)
 
 ## Integrals of precipitation rate
@@ -246,18 +248,19 @@ wall_clock = Ref(time_ns())
 function progress(sim)
     compute!(∫PdV)
     qᵛmax = maximum(qᵛ)
-    qˡmax = maximum(qˡ)
+    qᶜˡmax = maximum(qᶜˡ)
+    ρqʳmax = maximum(ρqʳ)
     qᵗmax = maximum(sim.model.specific_moisture)
     wmax = maximum(abs, model.velocities.w)
-    ∫P = CUDA.@allowscalar ∫PdV[]
+    ∫P_val = ∫PdV[]
     elapsed = 1e-9 * (time_ns() - wall_clock[])
 
     msg = @sprintf("Iter: %d, t: %s, Δt: %s, wall time: %s, max|w|: %.2e m/s \n",
                    iteration(sim), prettytime(sim), prettytime(sim.Δt),
                    prettytime(elapsed), wmax)
 
-    msg *= @sprintf(" --- max(qᵗ): %.2e, max(qᵛ): %.2e, max(qˡ): %.2e, ∫PdV: %.2e kg/kg/s",
-                    qᵗmax, qᵛmax, qˡmax, ∫P)
+    msg *= @sprintf(" --- max(qᵗ): %.2e, max(qᵛ): %.2e, max(qᶜˡ): %.2e, max(ρqʳ): %.2e, ∫PdV: %.2e kg/kg/s",
+                    qᵗmax, qᵛmax, qᶜˡmax, ρqʳmax, ∫P_val)
 
     @info msg
 
@@ -267,9 +270,10 @@ end
 add_callback!(simulation, progress, TimeInterval(1hour))
 
 # In addition to velocities, we output horizontal and time-averages of
-# liquid water mass fraction, specific humidity, and liquid-ice potential temperature,
+# liquid water mass fraction (cloud and rain separately), specific humidity,
+# and liquid-ice potential temperature,
 
-outputs = merge(model.velocities, (; θ, qˡ, qᵛ))
+outputs = merge(model.velocities, (; θ, qᶜˡ, qʳ, qᵛ))
 averaged_outputs = NamedTuple(name => Average(outputs[name], dims=(1, 2)) for name in keys(outputs))
 
 filename = "rico.jld2"
@@ -309,7 +313,8 @@ run!(simulation)
 averages_filename = "rico.jld2"
 θt = FieldTimeSeries(averages_filename, "θ")
 qᵛt = FieldTimeSeries(averages_filename, "qᵛ")
-qˡt = FieldTimeSeries(averages_filename, "qˡ")
+qᶜˡt = FieldTimeSeries(averages_filename, "qᶜˡ")
+qʳt = FieldTimeSeries(averages_filename, "qʳ")
 ut = FieldTimeSeries(averages_filename, "u")
 vt = FieldTimeSeries(averages_filename, "v")
 
@@ -318,7 +323,7 @@ fig = Figure(size=(900, 800), fontsize=14)
 axθ = Axis(fig[1, 1], xlabel="θ (K)", ylabel="z (m)")
 axq = Axis(fig[1, 2], xlabel="qᵛ (kg/kg)", ylabel="z (m)")
 axuv = Axis(fig[2, 1], xlabel="u, v (m/s)", ylabel="z (m)")
-axqˡ = Axis(fig[2, 2], xlabel="qˡ (kg/kg)", ylabel="z (m)")
+axqˡ = Axis(fig[2, 2], xlabel="qᶜˡ, qʳ (kg/kg)", ylabel="z (m)")
 
 times = θt.times
 Nt = length(times)
@@ -333,7 +338,8 @@ for n in 1:3:Nt
     lines!(axq, qᵛt[n], color=colors[n])
     lines!(axuv, ut[n], color=colors[n], linestyle=:solid)
     lines!(axuv, vt[n], color=colors[n], linestyle=:dash)
-    lines!(axqˡ, qˡt[n], color=colors[n])
+    lines!(axqˡ, qᶜˡt[n], color=colors[n], linestyle=:solid)  # cloud liquid
+    lines!(axqˡ, qʳt[n], color=colors[n], linestyle=:dash)    # rain
 end
 
 # Set axis limits to focus on the boundary layer
@@ -348,6 +354,7 @@ xlims!(axuv, -12, 2)
 # Add legends and annotations
 axislegend(axθ, position=:rb)
 text!(axuv, -10, 3200, text="solid: u\ndashed: v", fontsize=12)
+text!(axqˡ, 0.5e-4, 3200, text="solid: qᶜˡ\ndashed: qʳ", fontsize=12)
 
 fig[0, :] = Label(fig, "RICO: Horizontally-averaged profiles", fontsize=18, tellwidth=false)
 
@@ -358,6 +365,7 @@ fig
 # - Deeper cloud layer than BOMEX (tops reaching ~2.5-3 km)
 # - Higher moisture content supporting warm-rain processes
 # - Trade-wind flow with stronger westerlies
+# - Distinct profiles of cloud liquid (qᶜˡ) and rain (qʳ) as in [vanZanten2011](@citet)
 
 # ## Animation: cloud liquid water and precipitation rate
 #

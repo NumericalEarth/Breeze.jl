@@ -18,8 +18,11 @@ just return the `state` unmodified. In contrast to `adjust_thermodynamic_state`,
 ingests the entire `microphysics` formulation and the `microphysical_fields`.
 This is needed because some microphysics schemes apply saturation adjustment to a
 subset of the thermodynamic state (for example, omitting precipitating species).
+
+Grid indices `(i, j, k)` are provided to allow access to prognostic microphysical fields
+at the current grid point.
 """
-@inline maybe_adjust_thermodynamic_state(state, ::Nothing, microphysical_fields, qᵗ, thermo) = state
+@inline maybe_adjust_thermodynamic_state(i, j, k, state, ::Nothing, microphysical_fields, qᵗ, thermo) = state
 
 """
 $(TYPEDSIGNATURES)
