@@ -1,14 +1,15 @@
 using Breeze
-using Oceananigans.Grids: ImmersedBoundaryGrid, PartialCellBottom
+using Oceananigans.Grids: ImmersedBoundaryGrid, PartialCellBottom, minimum_xspacing
 using Oceananigans.Units
 using Printf
 
 Nx, Nz = 512, 512
 H, L = 20kilometers, 200kilometers
 
+# Use Bounded topology in x-direction for open boundaries
 underlying_grid = RectilinearGrid(size = (Nx, Nz), halo = (4, 4),
                                   x = (-L, L), z = (0, H),
-                                  topology = (Periodic, Flat, Bounded))
+                                  topology = (Bounded, Flat, Bounded))
 
 h₀ = 250meters
 a = 5kilometers
@@ -16,14 +17,21 @@ a = 5kilometers
 hill(x) = h₀ * exp(-(x / a)^2) * cos(π * x / λ)^2
 grid = ImmersedBoundaryGrid(underlying_grid, PartialCellBottom(hill))
 
-model = AtmosphereModel(grid, advection = WENO())
+# Set up open boundary conditions with PerturbationAdvection
+Uᵢ = 10  # background velocity (m/s)
+dx = minimum_xspacing(grid)
+timescale = 10 * dx / Uᵢ
+scheme = PerturbationAdvection(outflow_timescale=timescale, inflow_timescale=timescale)
+open_bc = OpenBoundaryCondition(Uᵢ; scheme)
+boundary_conditions = (; u = FieldBoundaryConditions(west=open_bc, east=open_bc))
+
+model = AtmosphereModel(grid; advection=WENO(), boundary_conditions)
 
 # Initial conditions
 θ₀ = model.formulation.reference_state.potential_temperature
 g = model.thermodynamic_constants.gravitational_acceleration
 N² = 1e-4           # Brunt-Väisälä frequency squared (s⁻²)
 θᵢ(x, z) = θ₀ * exp(N² * z / g)
-Uᵢ = 10
 set!(model, θ=θᵢ, u=Uᵢ)
 
 Δt = 1 # seconds

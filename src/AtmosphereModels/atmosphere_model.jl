@@ -34,7 +34,7 @@ end
 formulation_pressure_solver(formulation, grid) = nothing
 
 mutable struct AtmosphereModel{Frm, Arc, Tst, Grd, Clk, Thm, Mom, Moi, Mfr, Buy,
-                               Tmp, Prs, Sol, Vel, Trc, Adv, Cor, Frc, Mic, Cnd, Cls, Cfs, Rad} <: AbstractModel{Tst, Arc}
+                               Tmp, Prs, Sol, Vel, Trc, Adv, Cor, Frc, Mic, Cnd, Cls, Cfs, Rad, BM} <: AbstractModel{Tst, Arc}
     architecture :: Arc
     grid :: Grd
     clock :: Clk
@@ -58,6 +58,7 @@ mutable struct AtmosphereModel{Frm, Arc, Tst, Grd, Clk, Thm, Mom, Moi, Mfr, Buy,
     closure :: Cls
     closure_fields :: Cfs
     radiative_transfer :: Rad
+    boundary_mass_fluxes :: BM
 end
 
 # Stub functions to be overloaded by formulation-specific files
@@ -195,6 +196,9 @@ function AtmosphereModel(grid;
     advection = merge(momentum_advection_tuple, scalar_advection_tuple)
     advection = NamedTuple(name => adapt_advection_order(scheme, grid) for (name, scheme) in pairs(advection))
 
+    # Initialize boundary mass fluxes container for open boundary conditions
+    boundary_mass_fluxes = initialize_boundary_mass_fluxes(momentum)
+
     model = AtmosphereModel(arch,
                             grid,
                             clock,
@@ -217,7 +221,8 @@ function AtmosphereModel(grid;
                             timestepper,
                             closure,
                             closure_fields,
-                            radiative_transfer)
+                            radiative_transfer,
+                            boundary_mass_fluxes)
 
     update_state!(model)
 

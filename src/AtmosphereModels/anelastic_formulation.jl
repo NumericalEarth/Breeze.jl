@@ -224,6 +224,9 @@ function compute_pressure_correction!(model::AnelasticModel, Δt)
     foreach(mask_immersed_field!, model.momentum)
     fill_halo_regions!(model.momentum, model.clock, fields(model))
 
+    # Enforce mass conservation at open boundaries
+    enforce_open_boundary_mass_conservation!(model, model.boundary_mass_fluxes)
+
     ρᵣ = model.formulation.reference_state.density
     ρŨ = model.momentum
     solver = model.pressure_solver

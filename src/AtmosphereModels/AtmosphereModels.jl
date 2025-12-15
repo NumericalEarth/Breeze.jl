@@ -37,6 +37,7 @@ using Adapt: Adapt, adapt
 # Interface functions defined first (extended by downstream modules)
 include("forcing_interface.jl")
 include("microphysics_interface.jl")
+include("boundary_mass_fluxes.jl")
 include("atmosphere_model.jl")
 include("set_atmosphere_model.jl")
 include("anelastic_formulation.jl")

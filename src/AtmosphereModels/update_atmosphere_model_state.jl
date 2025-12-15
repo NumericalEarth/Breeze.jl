@@ -5,6 +5,7 @@ using ..Thermodynamics:
 
 using Oceananigans.Architectures: architecture
 using Oceananigans.BoundaryConditions: fill_halo_regions!, compute_x_bcs!, compute_y_bcs!, compute_z_bcs!
+using Oceananigans.BoundaryConditions: update_boundary_conditions!
 using Oceananigans.TurbulenceClosures: compute_diffusivities!
 using Oceananigans.ImmersedBoundaries: mask_immersed_field!
 using Oceananigans.Utils: launch!
@@ -15,6 +16,10 @@ const AnelasticModel = AtmosphereModel{<:AnelasticFormulation}
 
 function update_state!(model::AnelasticModel, callbacks=[]; compute_tendencies=true)
     tracer_density_to_specific!(model) # convert tracer density to specific tracer distribution
+
+    # Update open boundary conditions (e.g., PerturbationAdvection)
+    update_boundary_conditions!(fields(model), model)
+
     fill_halo_regions!(prognostic_fields(model), model.clock, fields(model), async=true)
     compute_auxiliary_variables!(model)
     update_radiation!(model.radiative_transfer, model)
