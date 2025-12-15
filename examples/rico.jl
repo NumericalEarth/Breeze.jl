@@ -39,13 +39,13 @@ Random.seed!(42)
 
 Oceananigans.defaults.FloatType = Float32
 
-Nx = Ny = 16  # reduced for testing, use 128 for production
-Nz = 20       # reduced for testing, use 100 for production
+Nx = Ny = 128
+Nz = 100
 
 x = y = (0, 12800)
 z = (0, 4000)
 
-grid = RectilinearGrid(CPU(); x, y, z,  # CPU for testing, use GPU() for production
+grid = RectilinearGrid(GPU(); x, y, z,
                        size = (Nx, Ny, Nz), halo = (5, 5, 5),
                        topology = (Periodic, Periodic, Bounded))
 
@@ -217,7 +217,6 @@ set!(model, θ=θᵢ, qᵗ=qᵢ, u=uᵢ, v=vᵢ)
 # a quasi-steady precipitating state.
 
 simulation = Simulation(model; Δt=10, stop_time=6hour)
-simulation.stop_iteration = 50  # for testing, remove for production
 conjure_time_step_wizard!(simulation, cfl=0.7)
 
 # ## Output and progress
