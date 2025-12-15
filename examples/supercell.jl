@@ -131,6 +131,30 @@ end
 
 RHᵢ(z) = (1 - 3/4 * (z / zₜᵣ)^(5/4)) * (z <= zₜᵣ) + 1/4 * (z > zₜᵣ)
 
+# ## Plot: Initial thermodynamic profiles
+#
+# Visualize the background potential temperature and relative humidity profiles:
+
+θ_profile = [θᵢ₀(0, 0, z) for z in z_plot]
+RH_profile = [RHᵢ(z) for z in z_plot]
+
+fig_thermo = Figure(size=(900, 600))
+
+ax_theta = Axis(fig_thermo[1, 1],
+                xlabel = "Potential temperature θ (K)",
+                ylabel = "Height (m)",
+                title = "Background Potential Temperature")
+lines!(ax_theta, θ_profile, collect(z_plot), linewidth = 2, color = :red)
+
+ax_rh = Axis(fig_thermo[1, 2],
+             xlabel = "Relative humidity",
+             ylabel = "Height (m)",
+             title = "Relative Humidity Profile")
+lines!(ax_rh, RH_profile, collect(z_plot), linewidth = 2, color = :blue)
+
+save("supercell_thermo_profiles.png", fig_thermo)
+fig_thermo
+
 # Zonal wind profile with linear shear below ``z_s`` and smooth transition (Equation 15-16):
 
 function uᵢ(x, y, z)
@@ -167,138 +191,6 @@ axislegend(ax_wind, position = :rb)
 save("supercell_wind_profile.png", fig_wind)
 fig_wind
 
-# ## Plot: Skew-T Log-P diagram
-#
-# The Skew-T Log-P diagram is a standard meteorological tool for visualizing the
-# atmospheric thermodynamic profile. Temperature lines are skewed 45° to the right,
-# and pressure uses a logarithmic scale.
-#
-# We compute temperature and dewpoint from the potential temperature and relative
-# humidity profiles:
-
-# Compute pressure profile using hydrostatic balance:
-# p(z) = p₀ * (θ₀/θ(z))^(cₚ/R) for dry adiabatic reference
-
-function pressure_profile(z)
-    θ = θᵢ₀(0, 0, z)
-    # Use Poisson's equation: T = θ * (p/p₀)^(R/cₚ)
-    # For hydrostatic atmosphere with varying θ, integrate numerically
-    # Simplified: use reference pressure profile
-    return pᵣ * exp(-g * z / (Rᵈ * 270))  # Approximate scale height
-end
-
-# More accurate pressure calculation using hydrostatic integration:
-
-function compute_pressure_and_temperature(z_levels)
-    nz = length(z_levels)
-    p = zeros(nz)
-    T = zeros(nz)
-    
-    # Surface values
-    p[1] = pᵣ
-    θ_surf = θᵢ₀(0, 0, z_levels[1])
-    T[1] = θ_surf * (p[1] / pᵣ)^(Rᵈ / cᵖᵈ)
-    
-    # Integrate upward using hydrostatic equation
-    for k in 2:nz
-        dz = z_levels[k] - z_levels[k-1]
-        θ_k = θᵢ₀(0, 0, z_levels[k])
-        
-        # Estimate temperature at midpoint for integration
-        T_mid = (T[k-1] + θ_k * (p[k-1] / pᵣ)^(Rᵈ / cᵖᵈ)) / 2
-        
-        # Hydrostatic equation: dp/dz = -ρg = -pg/(RT)
-        p[k] = p[k-1] * exp(-g * dz / (Rᵈ * T_mid))
-        
-        # Temperature from potential temperature
-        T[k] = θ_k * (p[k] / pᵣ)^(Rᵈ / cᵖᵈ)
-    end
-    
-    return p, T
-end
-
-# Compute saturation vapor pressure (Tetens formula):
-
-eₛ(T) = 610.78 * exp(17.27 * (T - 273.15) / (T - 35.85))
-
-# Compute dewpoint temperature from relative humidity:
-
-function dewpoint(T, RH)
-    e = RH * eₛ(T)
-    # Inverse Tetens formula
-    return 35.85 + 243.04 * log(e / 610.78) / (17.27 - log(e / 610.78)) + 273.15
-end
-
-# Generate profile data for Skew-T:
-
-z_skewt = range(0, 15000, length=100)
-p_profile, T_profile = compute_pressure_and_temperature(collect(z_skewt))
-RH_profile = [RHᵢ(z) for z in z_skewt]
-Td_profile = [dewpoint(T_profile[k], RH_profile[k]) for k in eachindex(T_profile)]
-
-# Convert to Celsius for plotting:
-
-T_celsius = T_profile .- 273.15
-Td_celsius = Td_profile .- 273.15
-p_hPa = p_profile ./ 100  # Convert to hPa
-
-# Skew-T transformation: x_skew = T + skew_factor * log(p₀/p)
-
-skew_factor = 40  # Skew angle parameter
-
-function skew_transform(T_celsius, p_hPa)
-    return T_celsius .+ skew_factor * log10.(1000 ./ p_hPa)
-end
-
-T_skewed = skew_transform(T_celsius, p_hPa)
-Td_skewed = skew_transform(Td_celsius, p_hPa)
-
-# Create Skew-T diagram:
-
-fig_skewt = Figure(size=(700, 800))
-ax_skewt = Axis(fig_skewt[1, 1],
-                xlabel = "Temperature (°C) [skewed]",
-                ylabel = "Pressure (hPa)",
-                title = "Skew-T Log-P Diagram: Initial Sounding",
-                yreversed = true,
-                yscale = log10,
-                yticks = [1000, 850, 700, 500, 300, 200, 100],
-                yminorticks = IntervalsBetween(5))
-
-ylims!(ax_skewt, 1050, 100)
-xlims!(ax_skewt, -40, 60)
-
-# Add isotherms (skewed):
-
-for T_iso in -80:10:40
-    T_iso_skewed = skew_transform(fill(T_iso, length(p_hPa)), p_hPa)
-    lines!(ax_skewt, T_iso_skewed, p_hPa, color = (:gray, 0.3), linewidth = 0.5)
-end
-
-# Add isobars:
-
-for p_iso in [1000, 850, 700, 500, 300, 200, 100]
-    hlines!(ax_skewt, p_iso, color = (:gray, 0.3), linewidth = 0.5)
-end
-
-# Plot temperature and dewpoint profiles:
-
-lines!(ax_skewt, T_skewed, p_hPa, color = :red, linewidth = 2.5, label = "Temperature")
-lines!(ax_skewt, Td_skewed, p_hPa, color = :green, linewidth = 2.5, label = "Dewpoint")
-
-# Add dry adiabats (lines of constant θ):
-
-for θ_adiabat in 280:10:400
-    T_adiabat = [θ_adiabat * (p / 1000)^(Rᵈ / cᵖᵈ) - 273.15 for p in p_hPa]
-    T_adiabat_skewed = skew_transform(T_adiabat, p_hPa)
-    lines!(ax_skewt, T_adiabat_skewed, p_hPa, color = (:orange, 0.3), linewidth = 0.5)
-end
-
-axislegend(ax_skewt, position = :rt)
-
-save("supercell_skewt.png", fig_skewt)
-fig_skewt
-
 # ## Warm bubble initial perturbation
 #
 # The warm bubble parameters following Equations 17–18 in [KlempEtAl2015](@cite):
@@ -320,6 +212,28 @@ function θᵢ(x, y, z)
     θ_pert = ifelse(R < 1, Δθ * cos((π / 2) * R)^2, 0.0)
     return θ_base + θ_pert
 end
+
+# ## Plot: Warm bubble perturbation
+#
+# Visualize the warm bubble perturbation on a vertical slice through the domain center:
+
+x_slice = range(0, Lx, length=200)
+z_slice = range(0, Lz, length=200)  # Focus on lower atmosphere where bubble is located
+
+θ_pert_slice = [θᵢ(x, y_c, z) - θᵢ₀(x, y_c, z) for x in x_slice, z in z_slice]
+
+fig_bubble = Figure(size=(800, 400))
+ax_bubble = Axis(fig_bubble[1, 1],
+                 xlabel = "x (km)",
+                 ylabel = "Height (m)",
+                 title = "Warm Bubble Perturbation θ' (K) at y = Ly/2")
+
+hm = heatmap!(ax_bubble, collect(x_slice) ./ 1000, collect(z_slice), θ_pert_slice,
+              colormap = :thermal, colorrange = (0, Δθ))
+Colorbar(fig_bubble[1, 2], hm, label = "θ' (K)")
+
+save("supercell_warm_bubble.png", fig_bubble)
+fig_bubble
 
 # ## Model initialization
 #
@@ -447,3 +361,61 @@ ax = Axis(fig[1, 1],
 lines!(ax, times, max_w)
 
 save("max_w_timeseries.png", fig)
+
+# ## Animation: horizontal slices at 5 km
+#
+# We create a 3-panel animation showing the storm structure at mid-levels (z ≈ 5 km):
+# - Vertical velocity ``w``: reveals the updraft/downdraft structure
+# - Cloud water ``q^{cl}``: shows the cloud boundaries
+# - Rain water ``q^r``: indicates precipitation regions
+
+wxy_ts = FieldTimeSeries("supercell_slices.jld2", "wxy")
+qʳxy_ts = FieldTimeSeries("supercell_slices.jld2", "qʳxy")
+qᶜˡxy_ts = FieldTimeSeries("supercell_slices.jld2", "qᶜˡxy")
+
+times = wxy_ts.times
+Nt = length(times)
+
+# Set color limits for visualization:
+
+wlim = 25       # m/s - vertical velocity range
+qʳlim = 0.01    # kg/kg - rain water range
+qᶜˡlim = 0.001  # kg/kg - cloud water range
+
+# Create the figure with 3 panels:
+
+slices_fig = Figure(size=(900, 1000), fontsize=14)
+
+axw = Axis(slices_fig[1, 1], xlabel="x (m)", ylabel="y (m)", title="Vertical velocity w")
+axqᶜˡ = Axis(slices_fig[1, 2], xlabel="x (m)", ylabel="y (m)", title="Cloud water qᶜˡ")
+axqʳ = Axis(slices_fig[3, 1], xlabel="x (m)", ylabel="y (m)", title="Rain water qʳ")
+
+# Set up observables for animation:
+
+n = Observable(1)
+wxy_n = @lift wxy_ts[$n]
+qᶜˡxy_n = @lift qᶜˡxy_ts[$n]
+qʳxy_n = @lift qʳxy_ts[$n]
+title_text = @lift "Supercell: Horizontal slices at z ≈ 5 km, t = " * prettytime(times[$n])
+
+# Create heatmaps and colorbars:
+
+hmw = heatmap!(axw, wxy_n, colormap=:balance, colorrange=(-wlim, wlim))
+hmqᶜˡ = heatmap!(axqᶜˡ, qᶜˡxy_n, colormap=:viridis, colorrange=(0, qᶜˡlim))
+hmqʳ = heatmap!(axqʳ, qʳxy_n, colormap=:viridis, colorrange=(0, qʳlim))
+
+Colorbar(slices_fig[2, 1], hmw, label="w (m/s)", vertical=false, flipaxis=false)
+Colorbar(slices_fig[2, 2], hmqᶜˡ, label="qᶜˡ (kg/kg)", vertical=false, flipaxis=false)
+Colorbar(slices_fig[4, 1], hmqʳ, label="qʳ (kg/kg)", vertical=false, flipaxis=false)
+
+slices_fig[0, :] = Label(slices_fig, title_text, fontsize=18, tellwidth=false)
+
+# Record the animation:
+
+CairoMakie.record(slices_fig, "supercell_horizontal_5km.mp4", 1:Nt, framerate=10) do nn
+    n[] = nn
+end
+
+@info "Animation saved to supercell_horizontal_5km.mp4"
+
+# ![](supercell_horizontal_5km.mp4)
