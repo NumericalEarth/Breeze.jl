@@ -18,7 +18,7 @@ test_thermodynamics = (:StaticEnergy, :LiquidIcePotentialTemperature)
 
     for closure in closures
         @testset let closure=closure
-            model = AtmosphereModel(grid; closure)
+            model = @test_logs match_mode=:any AtmosphereModel(grid; closure)
             time_step!(model, 1)
             @test true
         end
@@ -34,7 +34,7 @@ test_thermodynamics = (:StaticEnergy, :LiquidIcePotentialTemperature)
 
         @testset "Implicit diffusion solver with ScalarDiffusivity [$thermodynamics, $(FT), $(typeof(disc))]" for disc in discretizations
             closure = ScalarDiffusivity(disc, ν=1, κ=1)
-            model = AtmosphereModel(grid; closure, tracers=:ρc)
+            model = @test_logs match_mode=:any AtmosphereModel(grid; closure, tracers=:ρc)
             # Set uniform specific energy for no diffusion
             θ₀ = model.formulation.reference_state.potential_temperature
             cᵖᵈ = model.thermodynamic_constants.dry_air.heat_capacity

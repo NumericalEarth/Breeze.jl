@@ -10,9 +10,10 @@ using ..Thermodynamics:
 
 using Oceananigans: Oceananigans, CenterField
 using Oceananigans.Architectures: architecture
-using Oceananigans.Grids: inactive_cell, prettysummary
+using Oceananigans.Grids: inactive_cell
 using Oceananigans.Operators: Δzᵃᵃᶜ, Δzᵃᵃᶠ, divᶜᶜᶜ, Δzᶜᶜᶜ
 using Oceananigans.Solvers: solve!, AbstractHomogeneousNeumannFormulation
+using Oceananigans.Utils: prettysummary
 
 using KernelAbstractions: @kernel, @index
 using Adapt: Adapt, adapt
@@ -42,7 +43,7 @@ end
 const valid_thermodynamics_types = (:LiquidIcePotentialTemperature, :StaticEnergy)
 
 """
-    $(TYPEDSIGNATURES)
+$(TYPEDSIGNATURES)
 
 Construct an un-materialized "stub" `AnelasticFormulation` with `reference_state` and `thermodynamics`.
 The thermodynamics and pressure fields are materialized later in the model constructor.
@@ -80,7 +81,7 @@ function additional_field_names(formulation::AnelasticFormulation{<:Symbol})
 end
 
 """
-    $(TYPEDSIGNATURES)
+$(TYPEDSIGNATURES)
 
 Construct a "stub" `AnelasticFormulation` with just the `reference_state`.
 The thermodynamics and pressure fields are materialized later in the model constructor.
@@ -91,7 +92,7 @@ function default_formulation(grid, constants)
 end
 
 """
-    $(TYPEDSIGNATURES)
+$(TYPEDSIGNATURES)
 
 Materialize a stub `AnelasticFormulation` into a full formulation with thermodynamic fields
 and the pressure anomaly field. The thermodynamic fields depend on the type of thermodynamics
@@ -111,7 +112,7 @@ function materialize_thermodynamics(::Val{T}, grid, boundary_conditions) where T
 end
 
 function Base.summary(formulation::AnelasticFormulation)
-    p₀_str = prettysummary(formulation.reference_state.base_pressure)
+    p₀_str = prettysummary(formulation.reference_state.surface_pressure)
     θ₀_str = prettysummary(formulation.reference_state.potential_temperature)
     return string("AnelasticFormulation(p₀=", p₀_str, ", θ₀=", θ₀_str, ")")
 end

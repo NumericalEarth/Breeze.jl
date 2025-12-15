@@ -1,16 +1,36 @@
 using Breeze
 using GPUArraysCore: @allowscalar
 using Oceananigans
-using Oceananigans: fields, prognostic_fields
+using Oceananigans.Operators: ℑzᵃᵃᶠ
 using Test
 
 @testset "AtmosphereModel [$(FT)]" for FT in (Float32, Float64)
-    grid = RectilinearGrid(default_arch, FT; size=(8, 8, 8), x=(0, 1_000), y=(0, 1_000), z=(0, 1_000))
-    constants = ThermodynamicConstants(FT)
+    Oceananigans.defaults.FloatType = FT
+    Nx = Ny = 3
+    grid = RectilinearGrid(default_arch; size=(Nx, Ny, 8), x=(0, 1_000), y=(0, 1_000), z=(0, 1_000))
+    model = AtmosphereModel(grid)
+    @test model.grid === grid
+
+    @testset "Basic tests for set!" begin
+        set!(model, time=1)
+        @test model.clock.time == 1
+    end
+
+    constants = ThermodynamicConstants()
+    @test eltype(constants) == FT
 
     for p₀ in (101325, 100000), θ₀ in (288, 300), thermodynamics in (:LiquidIcePotentialTemperature, :StaticEnergy)
         @testset let p₀ = p₀, θ₀ = θ₀, thermodynamics = thermodynamics
-            reference_state = ReferenceState(grid, constants, base_pressure=p₀, potential_temperature=θ₀)
+            reference_state = ReferenceState(grid, constants, surface_pressure=p₀, potential_temperature=θ₀)
+
+            # Check that interpolating to the first face (k=1) recovers surface values
+            q₀ = Breeze.Thermodynamics.MoistureMassFractions{FT} |> zero
+            ρ₀ = Breeze.Thermodynamics.density(p₀, θ₀, q₀, constants)
+            for i = 1:Nx, j = 1:Ny
+                @test p₀ ≈ @allowscalar ℑzᵃᵃᶠ(i, j, 1, grid, reference_state.pressure)
+                @test ρ₀ ≈ @allowscalar ℑzᵃᵃᶠ(i, j, 1, grid, reference_state.density)
+            end
+
             formulation = AnelasticFormulation(reference_state; thermodynamics)
             model = AtmosphereModel(grid; thermodynamic_constants=constants, formulation)
 
@@ -42,7 +62,7 @@ end
 
     p₀ = FT(101325)
     θ₀ = FT(300)
-    reference_state = ReferenceState(grid, constants, base_pressure=p₀, potential_temperature=θ₀)
+    reference_state = ReferenceState(grid, constants, surface_pressure=p₀, potential_temperature=θ₀)
     formulation = AnelasticFormulation(reference_state; thermodynamics)
     model = AtmosphereModel(grid; thermodynamic_constants=constants, formulation)
 
@@ -62,7 +82,7 @@ end
 
     p₀ = FT(101325)
     θ₀ = FT(300)
-    reference_state = ReferenceState(grid, constants, base_pressure=p₀, potential_temperature=θ₀)
+    reference_state = ReferenceState(grid, constants, surface_pressure=p₀, potential_temperature=θ₀)
     formulation = AnelasticFormulation(reference_state; thermodynamics)
     microphysics = SaturationAdjustment()
     model = AtmosphereModel(grid; thermodynamic_constants=constants, formulation, microphysics)
@@ -95,7 +115,7 @@ end
 
     p₀ = FT(101325)
     θ₀ = FT(300)
-    reference_state = ReferenceState(grid, constants, base_pressure=p₀, potential_temperature=θ₀)
+    reference_state = ReferenceState(grid, constants, surface_pressure=p₀, potential_temperature=θ₀)
     potential_temperature_formulation = AnelasticFormulation(reference_state; thermodynamics=:LiquidIcePotentialTemperature)
     static_energy_formulation = AnelasticFormulation(reference_state; thermodynamics=:StaticEnergy)
 
@@ -114,8 +134,11 @@ end
     end
 
     @testset "Unified advection parameter" begin
-        static_energy_model = AtmosphereModel(grid; thermodynamic_constants=constants, formulation=static_energy_formulation, advection=WENO())
-        potential_temperature_model= AtmosphereModel(grid; thermodynamic_constants=constants, formulation=potential_temperature_formulation, advection=WENO())
+        static_energy_model = AtmosphereModel(grid; thermodynamic_constants=constants,
+                                              formulation=static_energy_formulation, advection=WENO())
+
+        potential_temperature_model= AtmosphereModel(grid; thermodynamic_constants=constants,
+                                                     formulation=potential_temperature_formulation, advection=WENO())
 
         @test static_energy_model.advection.ρe isa WENO
         @test potential_temperature_model.advection.ρθ isa WENO
@@ -138,6 +161,32 @@ end
         for model in (static_energy_model, potential_temperature_model)
             @test model.advection.momentum isa WENO
             @test model.advection.ρqᵗ isa Centered
+            time_step!(model, 1)
+        end
+    end
+
+    @testset "FluxFormAdvection for momentum and tracers" begin
+        advection = FluxFormAdvection(WENO(), WENO(), Centered(order=2))
+        kw = (; thermodynamic_constants=constants, advection)
+        static_energy_model = AtmosphereModel(grid; formulation=static_energy_formulation, kw...)
+        potential_temperature_model = AtmosphereModel(grid; formulation=potential_temperature_formulation, kw...)
+
+        @test static_energy_model.advection.ρe isa FluxFormAdvection
+        @test static_energy_model.advection.ρe.x isa WENO
+        @test static_energy_model.advection.ρe.y isa WENO
+        @test static_energy_model.advection.ρe.z isa Centered
+
+        @test potential_temperature_model.advection.ρθ isa FluxFormAdvection
+        @test potential_temperature_model.advection.ρθ.x isa WENO
+        @test potential_temperature_model.advection.ρθ.y isa WENO
+        @test potential_temperature_model.advection.ρθ.z isa Centered
+
+        for model in (static_energy_model, potential_temperature_model)
+            @test model.advection.momentum isa FluxFormAdvection
+            @test model.advection.ρqᵗ isa FluxFormAdvection 
+            @test model.advection.ρqᵗ.x isa WENO
+            @test model.advection.ρqᵗ.y isa WENO
+            @test model.advection.ρqᵗ.z isa Centered
             time_step!(model, 1)
         end
     end

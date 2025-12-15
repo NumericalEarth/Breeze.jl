@@ -9,7 +9,9 @@ export
     BulkMicrophysics,
     FourCategories,
     SaturationSpecificHumidity,
-    SaturationSpecificHumidityField
+    SaturationSpecificHumidityField,
+    RelativeHumidity,
+    RelativeHumidityField
 
 import ..AtmosphereModels:
     maybe_adjust_thermodynamic_state,

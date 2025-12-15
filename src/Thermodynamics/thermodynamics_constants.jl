@@ -1,5 +1,5 @@
 using Adapt: Adapt, adapt
-using Oceananigans.Grids: prettysummary
+using Oceananigans.Utils: prettysummary
 
 """
 $(TYPEDEF)

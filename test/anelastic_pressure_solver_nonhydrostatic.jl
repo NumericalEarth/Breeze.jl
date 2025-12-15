@@ -3,9 +3,10 @@ using Breeze
 using Oceananigans
 
 @testset "Pressure solver matches NonhydrostaticModel with ρᵣ == 1 [$FT]" for FT in (Float32, Float64)
+    Oceananigans.defaults.FloatType = FT
     Nx = Ny = Nz = 32
     z = 0:(1/Nz):1
-    grid = RectilinearGrid(default_arch, FT; size=(Nx, Ny, Nz), x=(0, 1), y=(0, 1), z)
+    grid = RectilinearGrid(default_arch; size=(Nx, Ny, Nz), x=(0, 1), y=(0, 1), z)
     constants = ThermodynamicConstants(FT)
     reference_state = ReferenceState(grid, constants)
 

@@ -14,16 +14,12 @@ export
     AtmosphereModel,
     StaticEnergyThermodynamics,
     LiquidIcePotentialTemperatureThermodynamics,
+    RadiativeTransferModel,
     TemperatureField,
     IdealGas,
     CondensedPhase,
     mixture_gas_constant,
     mixture_heat_capacity,
-    static_energy_density,
-    static_energy,
-    total_energy,
-    potential_temperature_density,
-    liquid_ice_potential_temperature,
 
     # Diagnostics
     PotentialTemperature,
@@ -32,6 +28,12 @@ export
     StabilityEquivalentPotentialTemperature,
     LiquidIcePotentialTemperature,
     StaticEnergy,
+    static_energy_density,
+    static_energy,
+    total_energy,
+    liquid_ice_potential_temperature_density,
+    liquid_ice_potential_temperature,
+    precipitation_rate,
 
     # Microphysics
     SaturationAdjustment,
@@ -39,11 +41,23 @@ export
     WarmPhaseEquilibrium,
     SaturationSpecificHumidity,
     SaturationSpecificHumidityField,
-    BulkMicrophysics
+    RelativeHumidity,
+    RelativeHumidityField,
+    BulkMicrophysics,
+    compute_hydrostatic_pressure!,
+
+    # BoundaryConditions
+    BulkDrag,
+    BulkSensibleHeatFlux,
+    BulkVaporFlux,
+
+    # Forcing utilities
+    geostrophic_forcings,
+    SubsidenceForcing
 
 using Oceananigans: Oceananigans, @at, AnisotropicMinimumDissipation, Average,
                     AveragedTimeInterval, BackgroundField, BetaPlane, Bounded,
-                    CPU, Callback, Center, CenterField, Centered, Checkpointer,
+                    CPU, Callback, Center, CenterField, Centered, Checkpointer, Clock,
                     ConstantCartesianCoriolis, Distributed, ExponentialDiscretization,
                     FPlane, Face, Field, FieldBoundaryConditions, FieldDataset,
                     FieldTimeSeries, Flat, FluxBoundaryCondition, Forcing,
@@ -56,7 +70,7 @@ using Oceananigans: Oceananigans, @at, AnisotropicMinimumDissipation, Average,
                     PartialCellBottom, Partition, Periodic,
                     PerturbationAdvection, RectilinearGrid, Simulation,
                     SmagorinskyLilly, SpecifiedTimes, TimeInterval,
-                    UpwindBiased, ValueBoundaryCondition, WENO,
+                    UpwindBiased, ValueBoundaryCondition, WENO, FluxFormAdvection,
                     WallTimeInterval, XFaceField, YFaceField, ZFaceField,
                     add_callback!, compute!, conjure_time_step_wizard!,
                     interior, iteration, minimum_xspacing, minimum_yspacing,
@@ -69,14 +83,14 @@ using Oceananigans.Grids: znode
 export
     CPU, GPU,
     Center, Face, Periodic, Bounded, Flat,
-    RectilinearGrid, ExponentialDiscretization,
+    RectilinearGrid, ExponentialDiscretization, Clock,
     nodes, xnodes, ynodes, znodes,
     znode,
     xspacings, yspacings, zspacings,
     minimum_xspacing, minimum_yspacing, minimum_zspacing,
     ImmersedBoundaryGrid, GridFittedBottom, PartialCellBottom, ImmersedBoundaryCondition,
     Distributed, Partition,
-    Centered, UpwindBiased, WENO,
+    Centered, UpwindBiased, WENO, FluxFormAdvection,
     FluxBoundaryCondition, ValueBoundaryCondition, GradientBoundaryCondition,
     OpenBoundaryCondition, PerturbationAdvection, FieldBoundaryConditions,
     Field, CenterField, XFaceField, YFaceField, ZFaceField,
@@ -111,5 +125,14 @@ using .TurbulenceClosures
 
 include("Advection.jl")
 using .Advection
+
+include("CelestialMechanics/CelestialMechanics.jl")
+using .CelestialMechanics
+
+include("BoundaryConditions/BoundaryConditions.jl")
+using .BoundaryConditions
+
+include("Forcings/Forcings.jl")
+using .Forcings
 
 end # module Breeze

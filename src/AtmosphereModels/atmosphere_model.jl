@@ -4,7 +4,6 @@ using Oceananigans: AbstractModel, Center, CenterField, Clock, Field
 using Oceananigans: Centered, XFaceField, YFaceField, ZFaceField
 using Oceananigans.Advection: adapt_advection_order
 using Oceananigans.AbstractOperations: @at
-using Oceananigans.Forcings: materialize_forcing
 using Oceananigans.BoundaryConditions: FieldBoundaryConditions, regularize_field_boundary_conditions
 using Oceananigans.Grids: ZDirection
 using Oceananigans.Models: validate_model_halo, validate_tracer_advection
@@ -16,6 +15,7 @@ using Oceananigans.Utils: launch!, prettytime, prettykeys, with_tracers
 import Oceananigans: fields, prognostic_fields
 import Oceananigans.Advection: cell_advection_timescale
 import Oceananigans.Models.HydrostaticFreeSurfaceModels: validate_momentum_advection
+import Oceananigans.Models: boundary_condition_args
 
 struct DefaultValue end
 
@@ -34,7 +34,7 @@ end
 formulation_pressure_solver(formulation, grid) = nothing
 
 mutable struct AtmosphereModel{Frm, Arc, Tst, Grd, Clk, Thm, Mom, Moi, Mfr, Buy,
-                               Tmp, Prs, Sol, Vel, Trc, Adv, Cor, Frc, Mic, Cnd, Cls, Cfs} <: AbstractModel{Tst, Arc}
+                               Tmp, Prs, Sol, Vel, Trc, Adv, Cor, Frc, Mic, Cnd, Cls, Cfs, Rad} <: AbstractModel{Tst, Arc}
     architecture :: Arc
     grid :: Grd
     clock :: Clk
@@ -57,6 +57,7 @@ mutable struct AtmosphereModel{Frm, Arc, Tst, Grd, Clk, Thm, Mom, Moi, Mfr, Buy,
     timestepper :: Tst
     closure :: Cls
     closure_fields :: Cfs
+    radiative_transfer :: Rad
 end
 
 # Stub functions to be overloaded by formulation-specific files
@@ -64,7 +65,7 @@ function default_formulation end
 function materialize_formulation end
 
 """
-    $(TYPEDSIGNATURES)
+$(TYPEDSIGNATURES)
 
 Return an AtmosphereModel that uses the anelastic approximation following
 [Pauluis2008](@citet).
@@ -82,7 +83,7 @@ AtmosphereModel{CPU, RectilinearGrid}(time = 0 seconds, iteration = 0)
 ├── grid: 8×8×8 RectilinearGrid{Float64, Periodic, Periodic, Bounded} on CPU with 3×3×3 halo
 ├── formulation: AnelasticFormulation(p₀=101325.0, θ₀=288.0)
 ├── timestepper: RungeKutta3TimeStepper
-├── advection scheme: 
+├── advection scheme:
 │   ├── momentum: Centered(order=2)
 │   ├── ρe: Centered(order=2)
 │   └── ρqᵗ: Centered(order=2)
@@ -110,7 +111,9 @@ function AtmosphereModel(grid;
                          scalar_advection = nothing,
                          closure = nothing,
                          microphysics = nothing, # WarmPhaseSaturationAdjustment(),
-                         timestepper = :RungeKutta3)
+                         timestepper = :RungeKutta3,
+                         radiation = nothing,
+                         radiative_transfer = radiation)
 
     if !isnothing(advection)
         # TODO: check that tracer+momentum advection were not independently set.
@@ -126,7 +129,7 @@ function AtmosphereModel(grid;
     # Reduce the advection order in directions that do not have enough grid points
     momentum_advection = validate_momentum_advection(momentum_advection, grid)
     default_scalar_advection, scalar_advection = validate_tracer_advection(scalar_advection, grid)
-    
+
     arch = grid.architecture
     tracers = tupleit(tracers) # supports tracers=:c keyword argument (for example)
     tracer_names = validate_tracers(tracers)
@@ -135,12 +138,16 @@ function AtmosphereModel(grid;
     prognostic_names = prognostic_field_names(formulation, microphysics, tracers)
     default_boundary_conditions = NamedTuple{prognostic_names}(FieldBoundaryConditions() for _ in prognostic_names)
     boundary_conditions = merge(default_boundary_conditions, boundary_conditions)
+
+    # Pre-regularize AtmosphereModel boundary conditions (fill in reference_density, compute saturation humidity, etc.)
+    surface_pressure = formulation.reference_state.surface_pressure
+    boundary_conditions = regularize_atmosphere_model_boundary_conditions(boundary_conditions, grid, surface_pressure, thermodynamic_constants)
+
     all_names = field_names(formulation, microphysics, tracers)
     boundary_conditions = regularize_field_boundary_conditions(boundary_conditions, grid, all_names)
 
     # Materialize the full formulation with thermodynamic fields and pressure
     formulation = materialize_formulation(formulation, grid, boundary_conditions)
-
 
     velocities, momentum = materialize_momentum_and_velocities(formulation, grid, boundary_conditions)
     microphysical_fields = materialize_microphysical_fields(microphysics, grid, boundary_conditions)
@@ -156,7 +163,7 @@ function AtmosphereModel(grid;
     temperature = CenterField(grid)
     pressure = formulation.pressure_anomaly
 
-    prognostic_microphysical_fields = NamedTuple(microphysical_fields[name] for name in prognostic_field_names(microphysics))
+    prognostic_microphysical_fields = NamedTuple(name => microphysical_fields[name] for name in prognostic_field_names(microphysics))
     prognostic_fields = collect_prognostic_fields(formulation,
                                                   momentum,
                                                   moisture_density,
@@ -168,7 +175,10 @@ function AtmosphereModel(grid;
     pressure_solver = formulation_pressure_solver(formulation, grid)
 
     model_fields = merge(prognostic_fields, velocities, (; T=temperature, qᵗ=specific_moisture))
-    forcing = atmosphere_model_forcing(forcing, prognostic_fields, model_fields)
+    reference_density = formulation.reference_state.density
+    forcing = atmosphere_model_forcing(forcing, prognostic_fields, model_fields,
+                                       grid, coriolis, reference_density,
+                                       velocities, formulation, specific_moisture)
 
     # Include thermodynamic density (ρe or ρθ), ρqᵗ plus user tracers for closure field construction
     closure_thermo_name = thermodynamic_density_name(formulation)
@@ -206,7 +216,8 @@ function AtmosphereModel(grid;
                             microphysical_fields,
                             timestepper,
                             closure,
-                            closure_fields)
+                            closure_fields,
+                            radiative_transfer)
 
     update_state!(model)
 
@@ -262,19 +273,25 @@ function field_names(formulation, microphysics, tracer_names)
     return tuple(prog_names..., default_additional_names..., formulation_additional_names...)
 end
 
-function atmosphere_model_forcing(user_forcings, prognostic_fields, model_fields)
+function atmosphere_model_forcing(user_forcings, prognostic_fields, model_fields,
+                                  grid, coriolis, reference_density,
+                                  velocities, formulation, specific_moisture)
     forcings_type = typeof(user_forcings)
     msg = string("AtmosphereModel forcing must be a NamedTuple, got $forcings_type")
     throw(ArgumentError(msg))
     return nothing
 end
 
-function atmosphere_model_forcing(::Nothing, prognostic_fields, model_fields)
+function atmosphere_model_forcing(::Nothing, prognostic_fields, model_fields,
+                                  grid, coriolis, reference_density,
+                                  velocities, formulation, specific_moisture)
     names = keys(prognostic_fields)
     return NamedTuple{names}(Returns(zero(eltype(prognostic_fields[name]))) for name in names)
 end
 
-function atmosphere_model_forcing(user_forcings::NamedTuple, prognostic_fields, model_fields)
+function atmosphere_model_forcing(user_forcings::NamedTuple, prognostic_fields, model_fields,
+                                  grid, coriolis, reference_density,
+                                  velocities, formulation, specific_moisture)
     user_forcing_names = keys(user_forcings)
 
     if :ρe ∈ keys(prognostic_fields)
@@ -295,9 +312,16 @@ function atmosphere_model_forcing(user_forcings::NamedTuple, prognostic_fields, 
 
     model_field_names = keys(model_fields)
 
+    # Build specific fields for subsidence forcing (maps specific field names like :u, :θ to fields)
+    formulation_fields = fields(formulation)
+    specific_fields = merge(velocities, formulation_fields, (; qᵗ=specific_moisture))
+
+    # Build context for special forcing types (used by extended materialize_forcing in Forcings module)
+    forcing_context = (; coriolis, reference_density, specific_fields)
+
     materialized = Tuple(
         name in keys(user_forcings) ?
-            materialize_forcing(user_forcings[name], field, name, model_field_names) :
+            materialize_atmosphere_model_forcing(user_forcings[name], field, name, model_field_names, forcing_context) :
             Returns(zero(eltype(field)))
             for (name, field) in pairs(forcing_fields)
     )
@@ -320,6 +344,8 @@ function prognostic_fields(model::AtmosphereModel)
     μ_fields= NamedTuple{μ_names}(model.microphysical_fields[name] for name in μ_names)
     return merge(model.momentum, thermodynamic_fields, μ_fields, model.tracers)
 end
+
+boundary_condition_args(model::AtmosphereModel) = (model.clock, fields(model))
 
 #####
 ##### Helper functions for accessing thermodynamic fields
@@ -344,12 +370,12 @@ for `model`.
 function static_energy end
 
 """
-    potential_temperature_density(model::AtmosphereModel)
+    liquid_ice_potential_temperature_density(model::AtmosphereModel)
 
 Return an `AbstractField` representing potential temperature density
 for `model`.
 """
-function potential_temperature_density end
+function liquid_ice_potential_temperature_density end
 
 """
     liquid_ice_potential_temperature(model::AtmosphereModel)

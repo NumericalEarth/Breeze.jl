@@ -24,13 +24,11 @@ using Breeze.AtmosphereModels
 
 using Breeze.Thermodynamics:
     MoistureMassFractions,
-    saturation_specific_humidity,
-    temperature,
-    density
+    density,
+    with_moisture
 
 using Breeze.Microphysics:
     center_field_tuple,
-    equilibrated_surface,
     BulkMicrophysics,
     FourCategories,
     WarmPhaseSaturationAdjustment,
@@ -40,6 +38,10 @@ using Breeze.Microphysics:
 using Oceananigans: Oceananigans
 using DocStringExtensions: TYPEDSIGNATURES
 
+using Oceananigans: Center, Field
+using Oceananigans.AbstractOperations: KernelFunctionOperation
+using Adapt: Adapt, adapt
+
 import Breeze.AtmosphereModels:
     maybe_adjust_thermodynamic_state,
     prognostic_field_names,
@@ -47,7 +49,8 @@ import Breeze.AtmosphereModels:
     update_microphysical_fields!,
     compute_moisture_fractions,
     microphysical_tendency,
-    microphysical_velocities
+    microphysical_velocities,
+    precipitation_rate
 
 #####
 ##### Zero-moment bulk microphysics (CloudMicrophysics 0M)
@@ -71,35 +74,101 @@ materialize_microphysical_fields(bμp::ZMCM, grid, bcs) = materialize_microphysi
 @inline compute_moisture_fractions(i, j, k, grid, bμp::ZMCM, ρ, qᵗ, μ) = compute_moisture_fractions(i, j, k, grid, bμp.nucleation, ρ, qᵗ, μ)
 @inline microphysical_tendency(i, j, k, grid, bμp::ZMCM, args...) = zero(grid)
 @inline microphysical_velocities(bμp::ZMCM, name) = nothing
-@inline maybe_adjust_thermodynamic_state(𝒰₀, bμp::ZMCM, μ, qᵗ, constants) = adjust_thermodynamic_state(𝒰₀, bμp.nucleation, constants)
 
-@inline function microphysical_tendency(i, j, k, grid, bμp::ZMCM, ::Val{:ρqᵗ}, μ, p, T, q, constants)
-    @inbounds begin
-        pᵣ = p.reference_pressure[i, j, k]
-        qˡ = μ.qˡ[i, j, k]
-        qⁱ = μ.qⁱ[i, j, k]
-    end
+@inline function maybe_adjust_thermodynamic_state(𝒰₀, bμp::ZMCM, μ, qᵗ, constants)
+    # Initialize moisture state from total moisture qᵗ (not from stale microphysical fields)
+    q₀ = MoistureMassFractions(qᵗ)
+    𝒰₁ = with_moisture(𝒰₀, q₀)
+    return adjust_thermodynamic_state(𝒰₁, bμp.nucleation, constants)
+end
 
-    T = temperature(𝒰, constants)
-    surface = equilibrated_surface(bμp.nucleation.equilibrium, T)
+@inline function microphysical_tendency(i, j, k, grid, bμp::ZMCM, ::Val{:ρqᵗ}, μ, 𝒰, constants)
+    # Get cloud liquid water from microphysical fields
     q = 𝒰.moisture_mass_fractions
-    ρ = density(pᵣ, T, q, constants)
-    qᵛ⁺ = saturation_specific_humidity(T, ρ, constants, surface)
-    ρᵣ = 𝒰.reference_density
-    return ρᵣ * remove_precipitation(bμp.categories, qˡ, qⁱ, qᵛ⁺)
+    qˡ = q.liquid
+    qⁱ = q.ice
+
+    # remove_precipitation returns -dqᵗ/dt (rate of moisture removal)
+    # Multiply by density to get the tendency for ρqᵗ
+    # TODO: pass density into microphysical_tendency
+    ρ = density(𝒰, constants)
+    parameters_0M = bμp.categories
+
+    return ρ * remove_precipitation(parameters_0M, qˡ, qⁱ)
 end
 
 """
-    ZeroMomentCloudMicrophysics(FT::DataType = Oceananigans.defaults.FloatType,
-                                categories = Parameters0M(FT))
+    ZeroMomentCloudMicrophysics(FT = Oceananigans.defaults.FloatType;
+                                τ_precip = 1000,
+                                qc_0 = 5e-4,
+                                S_0 = 0)
 
-Return a `ZeroMomentCloudMicrophysics` microphysics scheme with zero-moment `categories`
-(in other words, no categories + instant precipitation removal).
+Return a `ZeroMomentCloudMicrophysics` microphysics scheme for warm-rain precipitation.
+
+The zero-moment scheme removes cloud liquid water above a threshold at a specified rate:
+- `τ_precip`: precipitation timescale in seconds (default: 1000 s)
+
+and _either_
+
+- `S_0`: supersaturation threshold (default: 0)
+- `qc_0`: cloud liquid water threshold for precipitation (default: 5×10⁻⁴ kg/kg)
+
+For more information see the
+[`CloudMicrophysics.jl` documentation](https://clima.github.io/CloudMicrophysicsDocumentation.jl/dev/parameters/parameters0m/).
 """
 function ZeroMomentCloudMicrophysics(FT::DataType = Oceananigans.defaults.FloatType;
-                                     categories = Parameters0M(FT))
-    return BulkMicrophysics(SaturationAdjustment(FT), categories)
+                                     nucleation = SaturationAdjustment(FT),
+                                     τ_precip = 1000,
+                                     qc_0 = 5e-4,
+                                     S_0 = 0)
+
+    categories = Parameters0M{FT}(; τ_precip = FT(τ_precip),
+                                    qc_0 = FT(qc_0),
+                                    S_0 = FT(S_0))
+
+    return BulkMicrophysics(nucleation, categories)
 end
+
+#####
+##### Precipitation rate diagnostic for zero-moment microphysics
+#####
+
+struct ZeroMomentPrecipitationRateKernel{C, Q}
+    categories :: C
+    cloud_liquid :: Q
+end
+
+Adapt.adapt_structure(to, k::ZeroMomentPrecipitationRateKernel) =
+    ZeroMomentPrecipitationRateKernel(adapt(to, k.categories),
+                                       adapt(to, k.cloud_liquid))
+
+@inline function (k::ZeroMomentPrecipitationRateKernel)(i, j, k_idx, grid)
+    @inbounds qˡ = k.cloud_liquid[i, j, k_idx]
+    # Warm-phase only: no ice
+    qⁱ = zero(qˡ)
+    # remove_precipitation returns dqᵗ/dt (negative = moisture removal = precipitation)
+    # We return positive precipitation rate (kg/kg/s)
+    return -remove_precipitation(k.categories, qˡ, qⁱ)
+end
+
+"""
+    precipitation_rate(model, microphysics::ZeroMomentCloudMicrophysics, ::Val{:liquid})
+
+Return a `Field` representing the liquid precipitation rate (rain rate) in kg/kg/s.
+
+For zero-moment microphysics, this is the rate at which cloud liquid water
+is removed by precipitation: `-dqᵗ/dt` from the `remove_precipitation` function.
+"""
+function precipitation_rate(model, microphysics::ZMCM, ::Val{:liquid})
+    grid = model.grid
+    qˡ = model.microphysical_fields.qˡ
+    kernel = ZeroMomentPrecipitationRateKernel(microphysics.categories, qˡ)
+    op = KernelFunctionOperation{Center, Center, Center}(kernel, grid)
+    return Field(op)
+end
+
+# Ice precipitation not supported for zero-moment warm-phase scheme
+precipitation_rate(model, ::ZMCM, ::Val{:ice}) = nothing
 
 #####
 ##### One-moment bulk microphysics (CloudMicrophysics 1M)
@@ -183,8 +252,8 @@ end
 
 @inline function compute_moisture_fractions(i, j, k, grid, bμp::MP1M, ρ, qᵗ, μ)
     @inbounds begin
-        ρqʳ = μ.ρqʳ[i, j, k] / ρ
-        ρqˢ = μ.ρqˢ[i, j, k] / ρ
+        qʳ = μ.ρqʳ[i, j, k] / ρ
+        qˢ = μ.ρqˢ[i, j, k] / ρ
         qᶜˡ = μ.qᶜˡ[i, j, k]
         qᶜⁱ = μ.qᶜⁱ[i, j, k]
         qᵛ = μ.qᵛ[i, j, k]
@@ -195,6 +264,12 @@ end
 
     return MoistureMassFractions(qᵛ, qˡ, qⁱ)
 end
+
+# Default fallback for OneMomentCloudMicrophysics tendencies that are not explicitly implemented
+@inline microphysical_tendency(i, j, k, grid, bμp::OneMomentCloudMicrophysics, args...) = zero(grid)
+
+# Default fallback for OneMomentCloudMicrophysics velocities
+@inline microphysical_velocities(bμp::OneMomentCloudMicrophysics, name) = nothing
 
 """
 $(TYPEDSIGNATURES)
@@ -212,7 +287,7 @@ computed in `update_microphysical_fields!`.
 ##### show methods
 #####
 
-import Oceananigans.Grids: prettysummary
+import Oceananigans.Utils: prettysummary
 
 function prettysummary(cl::CloudLiquid)
     return string("CloudLiquid(",
