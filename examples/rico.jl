@@ -228,11 +228,8 @@ conjure_time_step_wizard!(simulation, cfl=0.7)
 qˡ = model.microphysical_fields.qˡ    # total liquid (cloud + rain)
 qᶜˡ = model.microphysical_fields.qᶜˡ  # cloud liquid only
 qᵛ = model.microphysical_fields.qᵛ
+qʳ = model.microphysical_fields.qʳ    # rain mass fraction (diagnostic)
 ρqʳ = model.microphysical_fields.ρqʳ  # rain mass density (prognostic)
-
-# Compute rain specific humidity qʳ = ρqʳ / ρ
-ρᵣ = formulation.reference_state.density
-qʳ = ρqʳ / ρᵣ
 
 ## Precipitation rate diagnostic from one-moment microphysics
 P = precipitation_rate(model, :liquid)

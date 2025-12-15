@@ -216,13 +216,13 @@ prognostic_field_names(::WP1M) = tuple(:ρqʳ)
 prognostic_field_names(::MP1M) = (:ρqʳ, :ρqˢ)
 
 function materialize_microphysical_fields(bμp::WP1M, grid, bcs)
-    names = (:qᵛ, :qˡ, :qᶜˡ, :ρqʳ)
+    names = (:qᵛ, :qˡ, :qᶜˡ, :qʳ, :ρqʳ)
     fields = center_field_tuple(grid, names...)
     return NamedTuple{names}(fields)
 end
 
 function materialize_microphysical_fields(bμp::MP1M, grid, bcs)
-    names = (:qᵛ, :qˡ, :qᶜˡ, :qᶜⁱ, :ρqʳ, :ρqˢ)
+    names = (:qᵛ, :qˡ, :qᶜˡ, :qᶜⁱ, :qʳ, :qˢ, :ρqʳ, :ρqˢ)
     fields = center_field_tuple(grid, names...)
     return NamedTuple{names}(fields)
 end
@@ -235,13 +235,14 @@ end
 # We can consider changing this in the future.
 @inline function update_microphysical_fields!(μ, bμp::WP1M, i, j, k, grid, ρ, 𝒰, constants)
     qᵛ = 𝒰.moisture_mass_fractions.vapor
-    qˡ = 𝒰.moisture_mass_fractions.liquid  # cloud liquid from saturation adjustment
+    qᶜˡ = 𝒰.moisture_mass_fractions.liquid  # cloud liquid from saturation adjustment
 
     @inbounds begin
         qʳ = μ.ρqʳ[i, j, k] / ρ
         μ.qᵛ[i, j, k] = qᵛ
-        μ.qᶜˡ[i, j, k] = qˡ            # cloud liquid (non-precipitating)
-        μ.qˡ[i, j, k] = qʳ + qˡ        # total liquid (cloud + rain)
+        μ.qʳ[i, j, k] = qʳ             # rain mass fraction (diagnostic)
+        μ.qᶜˡ[i, j, k] = qᶜˡ           # cloud liquid (non-precipitating)
+        μ.qˡ[i, j, k] = qʳ + qᶜˡ       # total liquid (cloud + rain)
     end
 
     return nothing
@@ -249,16 +250,18 @@ end
 
 @inline function update_microphysical_fields!(μ, bμp::MP1M, i, j, k, grid, ρ, 𝒰, constants)
     qᵛ = 𝒰.moisture_mass_fractions.vapor
-    qˡ = 𝒰.moisture_mass_fractions.liquid
-    qⁱ = 𝒰.moisture_mass_fractions.ice
+    qᶜˡ = 𝒰.moisture_mass_fractions.liquid
+    qᶜⁱ = 𝒰.moisture_mass_fractions.ice
 
     @inbounds begin
         qʳ = μ.ρqʳ[i, j, k] / ρ
         qˢ = μ.ρqˢ[i, j, k] / ρ
         μ.qᵛ[i, j, k] = qᵛ
-        μ.qᶜˡ[i, j, k] = qˡ
-        μ.qˡ[i, j, k] = qʳ + qˡ
-        μ.qᶜⁱ[i, j, k] = qⁱ
+        μ.qʳ[i, j, k] = qʳ             # rain mass fraction (diagnostic)
+        μ.qˢ[i, j, k] = qˢ             # snow mass fraction (diagnostic)
+        μ.qᶜˡ[i, j, k] = qᶜˡ
+        μ.qˡ[i, j, k] = qʳ + qᶜˡ
+        μ.qᶜⁱ[i, j, k] = qᶜⁱ
     end
 
     return nothing
@@ -266,7 +269,7 @@ end
 
 @inline function compute_moisture_fractions(i, j, k, grid, bμp::WP1M, ρ, qᵗ, μ)
     @inbounds begin
-        qʳ = μ.ρqʳ[i, j, k] / ρ
+        qʳ = μ.qʳ[i, j, k]
         qᶜˡ = μ.qᶜˡ[i, j, k]
         qᵛ = μ.qᵛ[i, j, k]
     end
@@ -347,10 +350,8 @@ This is required because:
 3. Excluding rain/snow from adjustment prevents spurious evaporation of precipitation
 """
 @inline function maybe_adjust_thermodynamic_state(i, j, k, 𝒰₀, bμp::WP1M, μ, qᵗ, constants)
-    # Get rain mass fraction from prognostic microphysical field
-    ρ = density(𝒰₀, constants)
-    @inbounds ρqʳ = μ.ρqʳ[i, j, k]
-    qʳ = ρqʳ / ρ
+    # Get rain mass fraction from diagnostic microphysical field
+    @inbounds qʳ = μ.qʳ[i, j, k]
     
     # Compute cloud moisture (excluding rain)
     qᵗ_cloud = qᵗ - qʳ
@@ -360,24 +361,21 @@ This is required because:
     𝒰_cloud = with_moisture(𝒰₀, q_cloud)
     
     # Perform saturation adjustment on cloud moisture only
-    𝒰_adjusted = adjust_thermodynamic_state(𝒰_cloud, bμp.nucleation, constants)
+    𝒰′ = adjust_thermodynamic_state(𝒰_cloud, bμp.nucleation, constants)
     
     # Add rain back to the liquid fraction
-    q_adj = 𝒰_adjusted.moisture_mass_fractions
-    qᵛ = q_adj.vapor
-    qˡ_total = q_adj.liquid + qʳ  # cloud liquid + rain
-    q_final = MoistureMassFractions(qᵛ, qˡ_total)
+    q′ = 𝒰′.moisture_mass_fractions
+    qᵛ = q′.vapor
+    qˡ = q′.liquid + qʳ  # cloud liquid + rain
+    q = MoistureMassFractions(qᵛ, qˡ)
     
-    return with_moisture(𝒰_adjusted, q_final)
+    return with_moisture(𝒰′, q)
 end
 
 @inline function maybe_adjust_thermodynamic_state(i, j, k, 𝒰₀, bμp::MP1M, μ, qᵗ, constants)
-    # Get rain and snow mass fractions from prognostic microphysical fields
-    ρ = density(𝒰₀, constants)
-    @inbounds ρqʳ = μ.ρqʳ[i, j, k]
-    @inbounds ρqˢ = μ.ρqˢ[i, j, k]
-    qʳ = ρqʳ / ρ
-    qˢ = ρqˢ / ρ
+    # Get rain and snow mass fractions from diagnostic microphysical fields
+    @inbounds qʳ = μ.qʳ[i, j, k]
+    @inbounds qˢ = μ.qˢ[i, j, k]
     
     # Compute cloud moisture (excluding rain and snow)
     qᵗ_cloud = qᵗ - qʳ - qˢ
