@@ -8,7 +8,16 @@ using Test
     Oceananigans.defaults.FloatType = FT
     Nx = Ny = 3
     grid = RectilinearGrid(default_arch; size=(Nx, Ny, 8), x=(0, 1_000), y=(0, 1_000), z=(0, 1_000))
-    constants = ThermodynamicConstants(FT)
+    model = AtmosphereModel(grid)
+    @test model.grid === grid
+
+    @testset "Basic tests for set!" begin
+        set!(model, time=1)
+        @test model.clock.time == 1
+    end
+
+    constants = ThermodynamicConstants()
+    @test eltype(constants) == FT
 
     for p₀ in (101325, 100000), θ₀ in (288, 300), thermodynamics in (:LiquidIcePotentialTemperature, :StaticEnergy)
         @testset let p₀ = p₀, θ₀ = θ₀, thermodynamics = thermodynamics
