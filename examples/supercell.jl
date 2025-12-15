@@ -137,7 +137,7 @@ RHᵇᵍ(z) = (1 - 3/4 * (z / zₜᵣ)^(5/4)) * (z <= zₜᵣ) + 1/4 * (z > zₜ
 
 z_plot = range(0, Lz, length=200)
 θ_profile = [θᵇᵍ(0, 0, z) for z in z_plot]
-RH_profile = [RHᵇᵍ(z) for z in z_plot]
+RH_profile = [RHᵇᵍ(z) * 100 for z in z_plot]  # Convert to percentage
 
 fig_thermo = Figure(size=(900, 600))
 
@@ -148,7 +148,7 @@ ax_theta = Axis(fig_thermo[1, 1],
 lines!(ax_theta, θ_profile, collect(z_plot), linewidth = 2, color = :red)
 
 ax_rh = Axis(fig_thermo[1, 2],
-             xlabel = "Relative humidity",
+             xlabel = "Relative humidity (%)",
              ylabel = "Height (m)",
              title = "Relative Humidity Profile")
 lines!(ax_rh, RH_profile, collect(z_plot), linewidth = 2, color = :blue)
