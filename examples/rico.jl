@@ -245,7 +245,7 @@ function progress(sim)
     compute!(∫PdV)
     qᵛmax = maximum(qᵛ)
     qᶜˡmax = maximum(qᶜˡ)
-    ρqʳmax = maximum(ρqʳ)
+    qʳmax = maximum(qʳ)
     qᵗmax = maximum(sim.model.specific_moisture)
     wmax = maximum(abs, model.velocities.w)
     ∫P = CUDA.@allowscalar ∫PdV[]
@@ -256,7 +256,7 @@ function progress(sim)
                    prettytime(elapsed), wmax)
 
     msg *= @sprintf(" --- max(qᵗ): %.2e, max(qᵛ): %.2e, max(qᶜˡ): %.2e, max(ρqʳ): %.2e, ∫PdV: %.2e kg/kg/s",
-                    qᵗmax, qᵛmax, qᶜˡmax, ρqʳmax, ∫P)
+                    qᵗmax, qᵛmax, qᶜˡmax, qʳmax, ∫P)
 
     @info msg
 
