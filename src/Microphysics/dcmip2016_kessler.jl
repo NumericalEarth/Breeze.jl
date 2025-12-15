@@ -508,17 +508,18 @@ end
                 ##### Update liquid-ice potential temperature
                 #####
                 # The Fortran Kessler scheme updates θ (standard potential temperature) as:
-                #   θ_new = θ + ℒᵥ * (condensation - ern) / (cₚ * Π)
-                # where condensation and ern are in mixing ratio and represent PHASE CHANGES ONLY.
+                #   θ_new = θ + ℒᵥ_Kessler * (condensation - ern) / (cₚ_Kessler * Π)
+                # where ℒᵥ_Kessler = 2500000 J/kg, cₚ_Kessler = 1003 J/(kg·K), and
+                # condensation and ern are in mixing ratio and represent PHASE CHANGES ONLY.
                 #
                 # For liquid-ice potential temperature θˡⁱ, the relationship is:
                 #   T = Π * θˡⁱ + ℒˡᵣ * qˡ / cₚ
                 #   θˡⁱ = (T - ℒˡᵣ * qˡ / cₚ) / Π
                 #
                 # The temperature change from latent heating (PHASE CHANGES ONLY) is:
-                #   ΔT = ℒᵥ * (condensation - ern) / cₚ
+                #   ΔT = ℒᵥ_Kessler * (condensation - ern) / cₚ_Kessler
                 #
-                # Note: We use Kessler's hardcoded constants (ℒᵥ = 2500000, cₚ = 1003) for 
+                # Note: We use Kessler's hardcoded constants (ℒᵥ_Kessler = 2500000, cₚ_Kessler = 1003) for 
                 # the latent heating to match the DCMIP2016 configuration exactly, but use Breeze's ℒˡᵣ for 
                 # the θˡⁱ definition for thermodynamic consistency.
                 
