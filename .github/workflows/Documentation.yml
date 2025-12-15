@@ -93,7 +93,7 @@ jobs:
           version: "1.12"
       - uses: julia-actions/cache@v2
         id: julia-cache
-      - uses: actions/download-artifact@v6
+      - uses: actions/download-artifact@v7
         with:
           name: documentation-build
           path: docs/build
