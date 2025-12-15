@@ -81,7 +81,7 @@ function RadiativeTransferModel(grid, constants,
         direct_surface_albedo = surface_albedo
 
     elseif !isnothing(diffuse_surface_albedo) && !isnothing(direct_surface_albedo)
-        diffuse_surface_albedo = materialize_surface_property(direct_surface_albedo, grid)
+        direct_surface_albedo = materialize_surface_property(direct_surface_albedo, grid)
         diffuse_surface_albedo = materialize_surface_property(diffuse_surface_albedo, grid)
     else
         throw(ArgumentError(error_msg))
