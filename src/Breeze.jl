@@ -14,6 +14,7 @@ export
     AtmosphereModel,
     StaticEnergyThermodynamics,
     LiquidIcePotentialTemperatureThermodynamics,
+    RadiativeTransferModel,
     TemperatureField,
     IdealGas,
     CondensedPhase,
@@ -40,6 +41,8 @@ export
     WarmPhaseEquilibrium,
     SaturationSpecificHumidity,
     SaturationSpecificHumidityField,
+    RelativeHumidity,
+    RelativeHumidityField,
     BulkMicrophysics,
     compute_hydrostatic_pressure!,
 
@@ -54,7 +57,7 @@ export
 
 using Oceananigans: Oceananigans, @at, AnisotropicMinimumDissipation, Average,
                     AveragedTimeInterval, BackgroundField, BetaPlane, Bounded,
-                    CPU, Callback, Center, CenterField, Centered, Checkpointer,
+                    CPU, Callback, Center, CenterField, Centered, Checkpointer, Clock,
                     ConstantCartesianCoriolis, Distributed, FPlane, Face,
                     Field, FieldBoundaryConditions, FieldDataset,
                     FieldTimeSeries, Flat, FluxBoundaryCondition, Forcing, GPU,
@@ -79,7 +82,7 @@ using Oceananigans.Grids: znode
 export
     CPU, GPU,
     Center, Face, Periodic, Bounded, Flat,
-    RectilinearGrid,
+    RectilinearGrid, Clock,
     nodes, xnodes, ynodes, znodes,
     znode,
     xspacings, yspacings, zspacings,
@@ -121,6 +124,9 @@ using .TurbulenceClosures
 
 include("Advection.jl")
 using .Advection
+
+include("CelestialMechanics/CelestialMechanics.jl")
+using .CelestialMechanics
 
 include("BoundaryConditions/BoundaryConditions.jl")
 using .BoundaryConditions

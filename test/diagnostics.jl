@@ -98,6 +98,40 @@ end
     @test all(interior(e_density_field) .> 0)
 end
 
+@testset "Relative humidity diagnostics [$(FT)]" for FT in (Float32, Float64)
+    Oceananigans.defaults.FloatType = FT
+    grid = RectilinearGrid(default_arch; size=(2, 2, 8), extent=(100, 100, 1000))
+    microphysics = SaturationAdjustment()
+    model = AtmosphereModel(grid; microphysics)
+
+    # Test with subsaturated conditions (low moisture)
+    set!(model, θ=300, qᵗ=0.005)
+    RH = RelativeHumidity(model)
+    @test RH isa Oceananigans.AbstractOperations.KernelFunctionOperation
+    RH_field = Field(RH)
+    @test all(isfinite.(interior(RH_field)))
+    # Relative humidity should be between 0 and 1 for subsaturated conditions
+    @test all(interior(RH_field) .>= 0)
+    @test all(interior(RH_field) .<= 1)
+
+    # With low moisture, should be subsaturated (RH < 1)
+    @test all(interior(RH_field) .< 1)
+
+    # Test with saturated conditions (high moisture)
+    set!(model, θ=300, qᵗ=0.03)  # High moisture to ensure saturation
+    RH_saturated = RelativeHumidityField(model)
+    # For saturated conditions with saturation adjustment, RH should be very close to 1
+    # where there is condensate
+    qˡ = model.microphysical_fields.qˡ
+    @allowscalar begin
+        for k in 1:8
+            if qˡ[1, 1, k] > 0  # If there's condensate, should be saturated
+                @test RH_saturated[1, 1, k] ≈ 1 rtol=FT(1e-3)
+            end
+        end
+    end
+end
+
 @testset "Hydrostatic pressure computation [$(FT)]" for FT in (Float32, Float64)
     Oceananigans.defaults.FloatType = FT
     grid = RectilinearGrid(default_arch; size=(1, 1, 20), x=(0, 1000), y=(0, 1000), z=(0, 10000))

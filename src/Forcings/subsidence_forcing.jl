@@ -23,7 +23,7 @@ Adapt.adapt_structure(to, sf::SubsidenceForcing) =
                       Adapt.adapt(to, sf.averaged_field))
 
 """
-    $(TYPEDSIGNATURES)
+$(TYPEDSIGNATURES)
 
 Forcing that represents large-scale subsidence advecting horizontally-averaged
 fields downward:

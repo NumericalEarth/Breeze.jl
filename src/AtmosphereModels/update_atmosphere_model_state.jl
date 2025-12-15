@@ -17,6 +17,7 @@ function update_state!(model::AnelasticModel, callbacks=[]; compute_tendencies=t
     tracer_density_to_specific!(model) # convert tracer density to specific tracer distribution
     fill_halo_regions!(prognostic_fields(model), model.clock, fields(model), async=true)
     compute_auxiliary_variables!(model)
+    update_radiation!(model.radiative_transfer, model)
     compute_forcings!(model)
     compute_tendencies && compute_tendencies!(model)
     tracer_specific_to_density!(model) # convert specific tracer distribution to tracer density
@@ -61,7 +62,7 @@ function tracer_specific_to_density!(tracers, density)
 end
 
 """
-    $(TYPEDSIGNATURES)
+$(TYPEDSIGNATURES)
 
 Compute auxiliary model variables:
 
@@ -170,7 +171,7 @@ end
     update_microphysical_fields!(microphysical_fields, microphysics,
                                  i, j, k, grid,
                                  ρ, 𝒰₁, constants)
-                                 
+
     T = Thermodynamics.temperature(𝒰₁, constants)
     @inbounds temperature[i, j, k] = T
 end
@@ -212,7 +213,7 @@ end
     update_microphysical_fields!(microphysical_fields, microphysics,
                                  i, j, k, grid,
                                  ρ, 𝒰₁, constants)
-                                 
+
     T = Thermodynamics.temperature(𝒰₁, constants)
     @inbounds temperature[i, j, k] = T
 end

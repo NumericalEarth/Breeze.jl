@@ -19,6 +19,9 @@ export
     materialize_atmosphere_model_forcing,
     compute_forcing!,
 
+    # Radiation (implemented by extensions)
+    RadiativeTransferModel,
+
     # Diagnostics (re-exported from Diagnostics submodule)
     PotentialTemperature,
     VirtualPotentialTemperature,
@@ -40,6 +43,7 @@ include("anelastic_formulation.jl")
 include("static_energy_thermodynamics.jl")
 include("potential_temperature_thermodynamics.jl")
 include("atmosphere_model_buoyancy.jl")
+include("radiation_interface.jl")
 include("dynamics_kernel_functions.jl")
 include("update_atmosphere_model_state.jl")
 include("compute_hydrostatic_pressure.jl")
