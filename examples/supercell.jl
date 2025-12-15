@@ -77,7 +77,7 @@ const BreezeOneMomentCloudMicrophysics = BreezeCloudMicrophysicsExt.OneMomentClo
 # 1 km horizontal resolution and 500 m vertical resolution. The grid uses periodic
 # lateral boundary conditions and bounded top/bottom boundaries.
 
-Nx, Ny, Nz = 336, 336, 40
+Nx, Ny, Nz = 168, 168, 40
 Lx, Ly, Lz = 168kilometers, 168kilometers, 20kilometers
 
 grid = RectilinearGrid(GPU(),
@@ -93,10 +93,10 @@ grid = RectilinearGrid(GPU(),
 # We define the reference state with surface pressure ``p_0 = 1000 \, {\rm hPa}`` and
 # reference potential temperature ``θ_0 = 300 \, {\rm K}``:
 
-pᵣ = 100000  # Pa - surface pressure
-θᵣ = 300     # K - reference potential temperature
-thermo = ThermodynamicConstants()
-reference_state = ReferenceState(grid, thermo, surface_pressure=pᵣ, potential_temperature=θᵣ)
+p₀ = 100000  # Pa - surface pressure
+θ₀ = 300     # K - reference potential temperature
+constants = ThermodynamicConstants()
+reference_state = ReferenceState(grid, constants, surface_pressure=p₀, potential_temperature=θ₀)
 formulation = AnelasticFormulation(reference_state, thermodynamics=:LiquidIcePotentialTemperature)
 
 # ## Background atmosphere profiles
@@ -115,28 +115,29 @@ u_c = 15            # m/s - storm motion (Galilean translation speed)
 
 # Extract thermodynamic constants for profile calculations:
 
-g = thermo.gravitational_acceleration
-cᵖᵈ = thermo.dry_air.heat_capacity
-Rᵈ = dry_air_gas_constant(thermo)
+g = constants.gravitational_acceleration
+cᵖᵈ = constants.dry_air.heat_capacity
+Rᵈ = dry_air_gas_constant(constants)
 
 # Background potential temperature profile (Equation 14 in [KlempEtAl2015](@cite)):
 
-function θᵢ₀(x, y, z)
-    θ_troposphere = θᵣ + (θₜᵣ - θᵣ) * (z / zₜᵣ)^(5/4)
+function θᵇᵍ(x, y, z)
+    θ_troposphere = θ₀ + (θₜᵣ - θ₀) * (z / zₜᵣ)^(5/4)
     θ_stratosphere = θₜᵣ * exp(g / (cᵖᵈ * Tₜᵣ) * (z - zₜᵣ))
     return (z <= zₜᵣ) * θ_troposphere + (z > zₜᵣ) * θ_stratosphere
 end
 
 # Relative humidity profile (decreases with height, 25% above tropopause):
 
-RHᵢ(z) = (1 - 3/4 * (z / zₜᵣ)^(5/4)) * (z <= zₜᵣ) + 1/4 * (z > zₜᵣ)
+RHᵇᵍ(z) = (1 - 3/4 * (z / zₜᵣ)^(5/4)) * (z <= zₜᵣ) + 1/4 * (z > zₜᵣ)
 
 # ## Plot: Initial thermodynamic profiles
 #
 # Visualize the background potential temperature and relative humidity profiles:
 
-θ_profile = [θᵢ₀(0, 0, z) for z in z_plot]
-RH_profile = [RHᵢ(z) for z in z_plot]
+z_plot = range(0, Lz, length=200)
+θ_profile = [θᵇᵍ(0, 0, z) for z in z_plot]
+RH_profile = [RHᵇᵍ(z) for z in z_plot]
 
 fig_thermo = Figure(size=(900, 600))
 
@@ -174,7 +175,6 @@ vᵢ(x, y, z) = 0.0
 #
 # Visualize the environmental wind shear that promotes supercell rotation:
 
-z_plot = range(0, Lz, length=200)
 u_profile = [uᵢ(0, 0, z) for z in z_plot]
 v_profile = [vᵢ(0, 0, z) for z in z_plot]
 
@@ -196,19 +196,19 @@ fig_wind
 # The warm bubble parameters following Equations 17–18 in [KlempEtAl2015](@cite):
 
 Δθ = 3              # K - perturbation amplitude
-r_h = 10kilometers  # m - bubble horizontal radius
-r_z = 1500          # m - bubble vertical radius
-z_c = 1500          # m - bubble center height
-x_c = Lx / 2        # m - bubble center x-coordinate
-y_c = Ly / 2        # m - bubble center y-coordinate
+rₕ = 10kilometers   # m - bubble horizontal radius
+rᵥ = 1500           # m - bubble vertical radius
+zᵦ = 1500           # m - bubble center height
+xᵦ = Lx / 2         # m - bubble center x-coordinate
+yᵦ = Ly / 2         # m - bubble center y-coordinate
 
 # The total initial potential temperature combines the background profile with the
 # cosine-squared warm bubble perturbation:
 
 function θᵢ(x, y, z)
-    θ_base = θᵢ₀(x, y, z)
-    r = sqrt((x - x_c)^2 + (y - y_c)^2)
-    R = sqrt((r / r_h)^2 + ((z - z_c) / r_z)^2)
+    θ_base = θᵇᵍ(x, y, z)
+    r = sqrt((x - xᵦ)^2 + (y - yᵦ)^2)
+    R = sqrt((r / rₕ)^2 + ((z - zᵦ) / rᵥ)^2)
     θ_pert = ifelse(R < 1, Δθ * cos((π / 2) * R)^2, 0.0)
     return θ_base + θ_pert
 end
@@ -220,7 +220,7 @@ end
 x_slice = range(0, Lx, length=200)
 z_slice = range(0, Lz, length=200)  # Focus on lower atmosphere where bubble is located
 
-θ_pert_slice = [θᵢ(x, y_c, z) - θᵢ₀(x, y_c, z) for x in x_slice, z in z_slice]
+θ_pert_slice = [θᵢ(x, yᵦ, z) - θᵇᵍ(x, yᵦ, z) for x in x_slice, z in z_slice]
 
 fig_bubble = Figure(size=(800, 400))
 ax_bubble = Axis(fig_bubble[1, 1],
@@ -247,7 +247,7 @@ model = AtmosphereModel(grid; formulation, closure, microphysics, advection)
 
 # Initialize with background potential temperature to compute hydrostatic pressure:
 
-set!(model, θ = θᵢ₀)
+set!(model, θ = θᵇᵍ)
 
 # ## Water vapor initialization
 #
@@ -276,7 +276,7 @@ for k in axes(qᵛᵢ_host, 3), j in axes(qᵛᵢ_host, 2), i in axes(qᵛᵢ_ho
     T_eq = @inbounds T_host[i, j, k]
     p_eq = @inbounds ph_host[i, j, k]
     qᵛ_sat = 380 / p_eq * exp(17.27 * ((T_eq - 273) / (T_eq - 36)))
-    @inbounds qᵛᵢ_host[i, j, k] = RHᵢ(z) * qᵛ_sat
+    @inbounds qᵛᵢ_host[i, j, k] = RHᵇᵍ(z) * qᵛ_sat
 end
 
 copyto!(parent(qᵛᵢ), qᵛᵢ_host)
@@ -289,7 +289,7 @@ set!(model, qᵗ = qᵛᵢ, θ = θᵢ, u = uᵢ)
 
 θ = Breeze.AtmosphereModels.liquid_ice_potential_temperature(model)
 θᵇᵍf = CenterField(grid)
-set!(θᵇᵍf, (x, y, z) -> θᵢ₀(x, y, z))
+set!(θᵇᵍf, (x, y, z) -> θᵇᵍ(x, y, z))
 θ′ = θ - θᵇᵍf
 
 # Extract microphysical fields for output:
