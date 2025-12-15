@@ -221,7 +221,7 @@ set!(model, θ=θᵢ, qᵗ=qᵢ, u=uᵢ, v=vᵢ)
 # RICO typically requires longer integration times than BOMEX to develop
 # a quasi-steady precipitating state.
 
-simulation = Simulation(model; Δt=10, stop_time=12hours)
+simulation = Simulation(model; Δt=10, stop_time=6hour)
 conjure_time_step_wizard!(simulation, cfl=0.7)
 
 # ## Output and progress
@@ -295,7 +295,7 @@ slice_outputs = (
 
 filename = "rico_slices.jld2"
 simulation.output_writers[:slices] = JLD2Writer(model, slice_outputs; filename,
-                                                schedule = TimeInterval(1minute),
+                                                schedule = TimeInterval(30seconds),
                                                 overwrite_existing = true)
 
 # We're finally ready to run this thing,
@@ -384,12 +384,15 @@ Plim = max(maximum(Pxz_ts), 1e-10) / 4
 
 # Now let's plot the slices and animate them.
 
-fig = Figure(size=(900, 750), fontsize=14)
+fig = Figure(size=(900, 800), fontsize=14)
 
-axqxz = Axis(fig[2, 1], xlabel="x (m)", ylabel="z (m)", xaxisposition=:top)
-axPxz = Axis(fig[2, 2], xlabel="x (m)", ylabel="z (m)", xaxisposition=:top)
-axqxy = Axis(fig[3, 1], xlabel="x (m)", ylabel="y (m)") 
-ax∫P  = Axis(fig[3, 2], xlabel="x (m)", ylabel="y (m)", yaxisposition=:right)
+axqxz = Axis(fig[2, 1], aspect=2, ylabel="z (m)", xaxisposition=:top)
+axPxz = Axis(fig[2, 2], aspect=2, ylabel="z (m)", yaxisposition=:right, xaxisposition=:top)
+axqxy = Axis(fig[3, 1], aspect=1, xlabel="x (m)", ylabel="y (m)") 
+ax∫P  = Axis(fig[3, 2], aspect=1, xlabel="x (m)", ylabel="y (m)", yaxisposition=:right)
+
+hidexdecorations!(axqxz)
+hidexdecorations!(axPxz)
 
 n = Observable(1)
 qˡxz_n = @lift qˡxz_ts[$n]
@@ -403,14 +406,18 @@ hmP1 = heatmap!(axPxz, Pxz_n, colormap=:amp, colorrange=(0, Plim))
 hmq2 = heatmap!(axqxy, qˡxy_n, colormap=:dense, colorrange=(0, qˡlim))
 hmP2 = heatmap!(ax∫P, ∫P_n, colormap=:amp, colorrange=(0, ∫Plim))
 
-Colorbar(fig[1, 1], hmq1, vertical=false, flipaxis=false, label="Cloud liquid water qˡ (x, y=0, z)")
-Colorbar(fig[1, 2], hmP1, vertical=false, flipaxis=false, label="Precipitation rate P (x, y=0, z)")
-Colorbar(fig[4, 1], hmq2, vertical=false, flipaxis=true, label="Cloud liquid water qˡ (x, y, z=$(z[k_cloud]))")
-Colorbar(fig[4, 2], hmP2, vertical=false, flipaxis=true, label="Column-integrated precipitation rate")
+Colorbar(fig[1, 1], hmq1, vertical=false, flipaxis=true, label="Cloud liquid water qˡ (x, y=0, z)")
+Colorbar(fig[1, 2], hmP1, vertical=false, flipaxis=true, label="Precipitation rate P (x, y=0, z)")
+Colorbar(fig[4, 1], hmq2, vertical=false, flipaxis=false, label="Cloud liquid water qˡ (x, y, z=$(z[k_cloud]))")
+Colorbar(fig[4, 2], hmP2, vertical=false, flipaxis=false, label="Column-integrated precipitation rate")
 
 fig[0, :] = Label(fig, title, fontsize=18, tellwidth=false)
 
-CairoMakie.record(fig, "rico_slices.mp4", 1:round(Int, Nt/2), framerate=6) do nn
+rowgap!(fig.layout, 2, -80)
+rowgap!(fig.layout, 3, -100)
+rowgap!(fig.layout, 4, 0)
+
+CairoMakie.record(fig, "rico_slices.mp4", 1:Nt, framerate=12) do nn
     n[] = nn
 end
 nothing #hide
