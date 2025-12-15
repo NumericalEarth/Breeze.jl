@@ -509,7 +509,8 @@ end
                 #####
                 # The Fortran Kessler scheme updates θ (standard potential temperature) as:
                 #   θ_new = θ + ℒᵛ_Kessler * (condensation - ern) / (cᵖᵈ_Kessler * Π)
-                # where condensation and ern are in mixing ratio and represent PHASE CHANGES ONLY.
+                # where ℒᵛ_Kessler = 2500000 J/kg, cᵖᵈ_Kessler = 1003 J/(kg·K), and
+                # condensation and ern are in mixing ratio and represent PHASE CHANGES ONLY.
                 #
                 # For liquid-ice potential temperature θˡⁱ, the relationship is:
                 #   T = Π * θˡⁱ + ℒˡᵣ * qˡ / cᵖᵐ
