@@ -21,10 +21,10 @@ Breeze interfaces with ClimaOcean for coupled atmosphere-ocean simulations.
 1. **Explicit Imports**: Use `ExplicitImports.jl` style - explicitly import all used functions/types
    - Import from Oceananigans explicitly (already done in src/Breeze.jl)
    - Tests automatically check for proper imports
-   
+
 2. **Type Stability**: Prioritize type-stable code for performance
    - All structs must be concretely typed
-   
+
 3. **Kernel Functions**: For GPU compatibility:
    - Use KernelAbstractions.jl syntax for kernels, eg `@kernel`, `@index`
    - Keep kernels type-stable and allocation-free
@@ -35,7 +35,7 @@ Breeze interfaces with ClimaOcean for coupled atmosphere-ocean simulations.
    - Mark functions inside kernels with `@inline`.
    - **Never use loops outside kernels**: Always replace `for` loops that iterate over grid points
      with kernels launched via `launch!`. This ensures code works on both CPU and GPU.
-   
+
 4. **Documentation**:
    - Use DocStringExtensions.jl for consistent docstrings
    - Use `$(TYPEDSIGNATURES)` for automatic typed signature documentation (preferred over `$(SIGNATURES)`)
@@ -78,8 +78,8 @@ Breeze interfaces with ClimaOcean for coupled atmosphere-ocean simulations.
   - `TitleCase` style is reserved for types, type aliases, and constructors.
   - `snake_case` style should be used for functions and variables (instances of types)
   - "Number variables" (`Nx`, `Ny`) should start with capital `N`. For number of time steps use `Nt`.
-    Spatial indices are `i, j, k` and time index is `n`. 
-  
+    Spatial indices are `i, j, k` and time index is `n`.
+
 2. **Import/export style**
   - Write all exported names at the top of a module file, before any other code.
   - For explicit imports, import Oceananigans and Breeze names first. Then write imports for "external" packages.
@@ -91,6 +91,11 @@ Breeze interfaces with ClimaOcean for coupled atmosphere-ocean simulations.
     * sometimes we need to write `using Oceananigans.Units`
 
 3. **Examples and integration tests**
+  - **Testing examples**: When testing or debugging examples, reduce resolution and switch to CPU
+    to speed up iteration. For example, change `Nx = Ny = 64` to `Nx = Ny = 16`, `Nz = 100` to
+    `Nz = 20`, and `RectilinearGrid(GPU(); ...)` to `RectilinearGrid(CPU(); ...)`. You may also
+    add `simulation.stop_iteration = 50` to limit runtime. **Always revert these changes** before
+    committing - examples should run at full resolution on GPU for production.
   - Explain at the top of the file what a simulation is doing
   - Let code "speak for itself" as much as possible, to keep an explanation concise.
     In other words, use a Literate style.
@@ -123,12 +128,27 @@ Breeze interfaces with ClimaOcean for coupled atmosphere-ocean simulations.
   - The examples and docs have their own `Project.toml` environment. When your run examples you need to use `examples/Project.toml`.
     When you build new examples, please add example-specific packages to `examples/Project.toml`. Do not add example-specific
     packages to the main Breeze Project.toml. You may also need to add relevant packages to AtmosphereProfilesLibrary.
-  - When making plots, do not use `interior(field, i, j, k)` to make a plot. Instead either pass `field` 
+  - When making plots, do not use `interior(field, i, j, k)` to make a plot. Instead either pass `field`
     directly, as in `lines!(ax, field)` or `lines!(ax, z, field)` for a 1D plot with either automatic
     or custom vertical coordinate. You only need to provide the coordinate if it has different units, eg
     if you have converted z to kilometers. 1D fields work with `lines` and 2D fields work with 2D plots
     like `heatmap` or `contourf`. For 3D fields in a 2D plane, use `view(field, :, :, k)`
     (e.g. for a xy-slice).
+  - **CRITICAL - Plotting Fields**: NEVER use `interior(field, ...)` for plotting. Makie/CairoMakie
+    can plot `Field` objects directly, which automatically handles coordinates and is cleaner.
+    Use `view(field, i, j, k)` to window fields if needed. This applies to both static plots and
+    animations with `@lift`. For example:
+    ```julia
+    # WRONG - do not do this:
+    data = @lift interior(field_ts[$n], :, 1, :)
+    heatmap!(ax, x, z, data, ...)
+
+    # CORRECT - pass Field directly:
+    field_n = @lift field_ts[$n]
+    heatmap!(ax, field_n, ...)
+    ```
+  - In examples, use the suffix `ts` (no underscore) for "time series" and the suffix `n` (no underscore)
+    to refer to `FieldTimeSeries` indexed at time-index `n`.
 
 4. **Documentation Style**
   - Mathematical notation in `docs/src/appendix/notation.md`

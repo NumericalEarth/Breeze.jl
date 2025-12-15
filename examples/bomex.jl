@@ -1,4 +1,4 @@
-# # Shallow cumulus convection (BOMEX)
+# # [Shallow cumulus convection (BOMEX)](@id bomex_example)
 #
 # This example simulates shallow cumulus convection following the Barbados Oceanographic
 # and Meteorological Experiment (BOMEX) intercomparison case [Siebesma2003](@cite).
@@ -16,7 +16,6 @@
 using Breeze
 using Oceananigans: Oceananigans
 using Oceananigans.Units
-using Oceananigans: Oceananigans
 
 using AtmosphericProfilesLibrary
 using CairoMakie
