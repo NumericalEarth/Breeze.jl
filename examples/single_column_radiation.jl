@@ -61,16 +61,11 @@ model = AtmosphereModel(grid; clock, formulation, microphysics, radiation)
 # layer and a cloud between 1-2 km altitude.
 
 θ₀ = formulation.reference_state.potential_temperature
-cᵖᵈ = constants.dry_air.heat_capacity
-g = constants.gravitational_acceleration
-Γ = g / cᵖᵈ
-θᵢ(z) = θ₀ + Γ * z / 1000
-
 q₀ = 0.015    # surface specific humidity (kg/kg)
 Hᵗ = 2500     # moisture scale height (m)
 qᵗᵢ(z) = q₀ * exp(-z / Hᵗ)
 
-set!(model; θ=θᵢ, qᵗ=qᵗᵢ)
+set!(model; θ=θ₀, qᵗ=qᵗᵢ)
 
 # ## Visualization
 #
