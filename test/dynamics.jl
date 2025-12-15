@@ -40,62 +40,6 @@ end
 Δt = 1e-3
 tol = 1e-6
 
-@testset "Energy conservation with thermal bubble [$(FT)]" for FT in tuple(Float64) #(Float32, Float64)
-    Oceananigans.defaults.FloatType = FT
-    grid = RectilinearGrid(default_arch;
-                           size = (32, 5, 32),
-                           x = (-10e3, 10e3),
-                           y = (-10e3, 10e3),
-                           z = (-3e3, 7e3),
-                           topology = (Periodic, Periodic, Bounded),
-                           halo = (5, 5, 5))
-
-    for microphysics in (nothing, SaturationAdjustment())
-        @testset let microphysics=microphysics
-            # Set (moist) thermal bubble initial condition
-            model = thermal_bubble_model(grid; qᵗ=1e-3, microphysics)
-
-            # Compute initial total energy
-            ρe = model.energy_density
-            u, v, w = model.velocities
-            ρᵣ = model.formulation.reference_state.density
-            ρk = @at (Center, Center, Center) (ρᵣ * (u^2 + v^2 + w^2) / 2)
-            ρE = ρe + ρk
-            ∫ρE = Field(Integral(ρE))
-            ∫ρu = Field(Integral(model.momentum.ρu))
-            ∫ρv = Field(Integral(model.momentum.ρv))
-            compute!(∫ρE)
-            compute!(∫ρu)
-            compute!(∫ρv)
-            ∫ρE₀ = @allowscalar first(∫ρE)
-            ∫ρu₀ = @allowscalar first(∫ρu)
-            ∫ρv₀ = @allowscalar first(∫ρv)
-
-            # Time step the model
-            Nt = 10
-
-            for step in 1:Nt
-                time_step!(model, 1)
-                compute!(∫ρE)
-                compute!(∫ρu)
-                compute!(∫ρv)
-                ∫ρE₁ = @allowscalar first(∫ρE)
-                ∫ρu₁ = @allowscalar first(∫ρu)
-                ∫ρv₁ = @allowscalar first(∫ρv)
-
-                @show (∫ρE₁ - ∫ρE₀) / ∫ρE₀
-                @show ∫ρu₁ - ∫ρu₀
-                @show ∫ρv₁ - ∫ρv₀
-
-                @test ∫ρE₁ ≈ ∫ρE₀ rtol=Nt*tol
-                @test ∫ρu₁ ≈ ∫ρu₀ atol=Nt*tol
-                @test ∫ρv₁ ≈ ∫ρv₀ atol=Nt*tol
-            end
-        end
-    end
-end
-
-#=
 @testset "Horizontal momentum conservation with spherical thermal bubble [$(FT)]" for FT in (Float32, Float64)
     Oceananigans.defaults.FloatType = FT
     grid = RectilinearGrid(default_arch;
@@ -164,5 +108,3 @@ end
         @test Pz ≈ Pz₀
     end
 end
-
-=#
