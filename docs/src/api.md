@@ -70,6 +70,20 @@ Modules = [Breeze.CelestialMechanics]
 Private = false
 ```
 
+### BreezeRRTMGPExt
+
+```@autodocs
+Modules = [BreezeRRTMGPExt]
+Private = false
+```
+
+### BreezeCloudMicrophysicsExt
+
+```@autodocs
+Modules = [BreezeCloudMicrophysicsExt]
+Private = false
+```
+
 ## Private API
 
 ```@autodocs
@@ -123,5 +137,19 @@ Public = false
 
 ```@autodocs
 Modules = [Breeze.CelestialMechanics]
+Public = false
+```
+
+### BreezeRRTMGPExt
+
+```@autodocs
+Modules = [BreezeRRTMGPExt]
+Public = false
+```
+
+### BreezeCloudMicrophysicsExt
+
+```@autodocs
+Modules = [BreezeCloudMicrophysicsExt]
 Public = false
 ```
