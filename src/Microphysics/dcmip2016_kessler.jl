@@ -165,11 +165,11 @@ All microphysical source/sink terms are applied directly to the prognostic field
 # Clausius-Clapeyron coefficient for saturation vapor pressure
 const kessler_f2x = 17.27
 
-# Saturation adjustment coefficient: \$237.3 \cdot f2x \cdot L_v / c_p\$
-# where \$L_v = 2.5 \times 10^6 J/kg\$ (latent heat of vaporization) and \$c_p = 1003 J/(kg \cdot K)\$
+# Saturation adjustment coefficient: \$237.3 \cdot f2x \cdot ℒᵛ_Kessler / cᵖᵈ_Kessler\$
+# where \$ℒᵛ_Kessler = 2.5 \times 10^6 J/kg\$ (latent heat of vaporization) and \$cᵖᵈ_Kessler = 1003 J/(kg \cdot K)\$
 const kessler_f5 = 237.3 * kessler_f2x * 2500000.0 / 1003.0
 
-# Kappa = \$R_d/c_p\$ (ratio of dry air gas constant to specific heat)
+# Kappa = \$R_d/cᵖᵈ_Kessler\$ (ratio of dry air gas constant to specific heat)
 const kessler_xk = 0.2875
 
 # Reference sea level pressure (millibars)
@@ -293,14 +293,14 @@ end
 # 2. SUBCYCLING: For each subcycle timestep:
 #    a. Accumulate surface precipitation.
 #    b. For each vertical level (bottom to top):
-#       - Compute temperature from liquid-ice potential temperature: T = Π * θ_li + L_lv * q_l / c_p.
+#       - Compute temperature from liquid-ice potential temperature: T = Π * θ_li + ℒˡᵣ * q_l / cᵖᵐ.
 #       - Rain sedimentation via upstream differencing.
 #       - Autoconversion + accretion (cloud -> rain).
 #       - Saturation adjustment (vapor <-> cloud).
 #       - Rain evaporation (rain -> vapor in subsaturated air).
 #       - Update liquid-ice potential temperature accounting for:
-#         * Latent heating from phase changes (T_new = T + L_lv * Δq_l / c_p).
-#         * Conversion back to θ_li with new liquid content: θ_li = (T - L_lv * q_l / c_p) / Π.
+#         * Latent heating from phase changes (T_new = T + ℒᵛ_Kessler * Δq_l / cᵖᵈ_Kessler).
+#         * Conversion back to θ_li with new liquid content: θ_li = (T - ℒˡᵣ * q_l / cᵖᵐ) / Π.
 #    c. Recalculate terminal velocities for the next subcycle.
 #
 # 3. FINALIZATION: Convert mixing ratios -> mass fractions for the entire column.
@@ -309,7 +309,7 @@ end
 #
 # Note: Breeze uses liquid-ice potential temperature (θ_li), NOT standard potential
 # temperature (θ). The relationship is:
-#   T = Π * θ_li + (L_lv * q_l + L_iv * q_i) / c_pm
+#   T = Π * θ_li + (ℒˡᵣ * q_l + ℒⁱᵣ * q_i) / cᵖᵐ
 # For this warm-phase Kessler scheme (no ice), ice terms are zero.
 
 @kernel function _kessler_microphysical_update!(grid, Nz, Δt, ρᵣ, pᵣ, p₀, constants, θˡⁱ, ρθˡⁱ,
@@ -513,8 +513,8 @@ end
                 # condensation and ern are in mixing ratio and represent PHASE CHANGES ONLY.
                 #
                 # For liquid-ice potential temperature θˡⁱ, the relationship is:
-                #   T = Π * θˡⁱ + ℒˡᵣ * qˡ / cₚ
-                #   θˡⁱ = (T - ℒˡᵣ * qˡ / cₚ) / Π
+                #   T = Π * θˡⁱ + ℒˡᵣ * qˡ / cᵖᵐ
+                #   θˡⁱ = (T - ℒˡᵣ * qˡ / cᵖᵐ) / Π
                 #
                 # The temperature change from latent heating (PHASE CHANGES ONLY) is:
                 #   ΔT = ℒᵛ_Kessler * (condensation - ern) / cᵖᵈ_Kessler
