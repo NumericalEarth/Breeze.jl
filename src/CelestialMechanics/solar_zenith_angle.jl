@@ -6,10 +6,6 @@
 ##### - Latitude (in degrees)
 ##### - Longitude (in degrees)
 #####
-##### Reference:
-##### Spencer, J. W. (1971). Fourier series representation of the position of the sun.
-##### Search, 2(5), 172.
-#####
 
 """
     day_of_year(dt::DateTime)
@@ -23,7 +19,7 @@ day_of_year(dt::DateTime) = Dates.dayofyear(dt)
 
 Compute the solar declination angle (in radians) for a given day of year.
 
-Uses the approximation from Spencer (1971):
+Uses the approximation by [spencer1971fourier](@citet):
 
 ```math
 δ = 0.006918 - 0.399912 \\cos(γ) + 0.070257 \\sin(γ)
@@ -33,6 +29,10 @@ Uses the approximation from Spencer (1971):
 
 where ``γ = 2π (d - 1) / 365`` is the fractional year in radians
 and ``d`` is the day of year.
+
+# References
+
+* Spencer, J. W. (1971) Fourier series representation of the position of the sun. Search, 2, 162-172.
 """
 function solar_declination(day_of_year)
     # Fractional year in radians
@@ -54,7 +54,11 @@ Compute the equation of time (in minutes) for a given day of year.
 This accounts for the difference between mean solar time and apparent solar time
 due to the eccentricity of Earth's orbit and the obliquity of the ecliptic.
 
-Uses the Spencer (1971) approximation.
+Uses the approximation by [spencer1971fourier](@citet).
+
+# References
+
+* Spencer, J. W. (1971) Fourier series representation of the position of the sun. Search, 2, 162-172.
 """
 function equation_of_time(day_of_year)
     # Fractional year in radians

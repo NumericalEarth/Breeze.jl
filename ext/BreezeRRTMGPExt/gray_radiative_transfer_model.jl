@@ -485,7 +485,10 @@ $(TYPEDSIGNATURES)
 
 Copy RRTMGP flux arrays to Oceananigans ZFaceFields.
 
-Applies sign convention: positive = upward, negative = downward.
+Applies sign convention:
+* positive = upward
+* negative = downward.
+
 For the non-scattering shortwave solver, only the direct beam flux is computed.
 """
 function copy_fluxes_to_fields!(rtm::GrayRadiativeTransferModel, grid)
