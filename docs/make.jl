@@ -1,4 +1,5 @@
 using Breeze
+using RRTMGP, CloudMicrophysics # to load Breeze extensions
 using Documenter
 using DocumenterCitations
 using Literate
