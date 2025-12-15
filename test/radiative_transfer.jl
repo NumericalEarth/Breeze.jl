@@ -23,69 +23,73 @@ using RRTMGP.AtmosphericStates: GrayOpticalThicknessOGorman2008
 
         constants = ThermodynamicConstants()
         optical_thickness = GrayOpticalThicknessOGorman2008(FT)
-        radiation = RadiativeTransferModel(grid, constants, optical_thickness;
-                                           surface_temperature = 300,
-                                           surface_emissivity = 0.98,
-                                           surface_albedo = 0.1,
-                                           solar_constant = 1361)
 
-        @test radiation !== nothing
-        @test radiation.surface_properties.surface_temperature.constant == FT(300)
-        @test radiation.surface_properties.surface_emissivity.constant == FT(0.98)
-        @test radiation.surface_properties.direct_surface_albedo.constant == FT(0.1)
-        @test radiation.surface_properties.diffuse_surface_albedo.constant == FT(0.1)
-        @test radiation.solar_constant == FT(1361)
+        @testset "Number-based surface properties" begin
+            radiation = RadiativeTransferModel(grid, constants, optical_thickness;
+                                               surface_temperature = 300,
+                                               surface_emissivity = 0.98,
+                                               surface_albedo = 0.1,
+                                               solar_constant = 1361)
 
-        # Check flux fields are created
-        @test radiation.upwelling_longwave_flux !== nothing
-        @test radiation.downwelling_longwave_flux !== nothing
-        @test radiation.downwelling_shortwave_flux !== nothing
-
-        # Check flux fields have correct size (Nz+1 levels)
-        @test size(radiation.upwelling_longwave_flux) == (1, 1, Nz + 1)
-        @test size(radiation.downwelling_longwave_flux) == (1, 1, Nz + 1)
-        @test size(radiation.downwelling_shortwave_flux) == (1, 1, Nz + 1)
-
-        radiation = RadiativeTransferModel(grid, constants, optical_thickness;
-                                           surface_temperature = 300,
-                                           direct_surface_albedo = 0.15,
-                                           diffuse_surface_albedo = 0.2)
-
-        @test radiation.surface_properties.direct_surface_albedo.constant == FT(0.15)
-        @test radiation.surface_properties.diffuse_surface_albedo.constant == FT(0.2)
-
-        @test_throws ArgumentError RadiativeTransferModel(grid, constants, optical_thickness;
-                                                          surface_temperature = 300,
-                                                          surface_albedo = 0.15,
-                                                          direct_surface_albedo = 0.15,
-                                                          diffuse_surface_albedo = 0.2)
-
-        @test_throws ArgumentError RadiativeTransferModel(grid, constants, optical_thickness;
-                                                          surface_temperature = 300,
-                                                          surface_albedo = 0.15,
-                                                          diffuse_surface_albedo = 0.2)
-    end
-
-    @testset "Field-based surface properties" begin
-        T₀ = set!(CenterField(grid), 300)
-        α₀ = set!(CenterField(grid), 0.1)
-        ε₀ = set!(CenterField(grid), 0.98)
-
-        radiation = RadiativeTransferModel(grid, constants, optical_thickness;
-                                           surface_temperature = T₀,
-                                           surface_emissivity = ε₀,
-                                           surface_albedo = α₀)
-
-        @test radiation !== nothing
-
-        @allowscalar begin
-            @test first(radiation.surface_properties.surface_temperature) == FT(300)
-            @test first(radiation.surface_properties.surface_emissivity) == FT(0.98)
-            @test first(radiation.surface_properties.direct_surface_albedo) == FT(0.1)
-            @test first(radiation.surface_properties.diffuse_surface_albedo) == FT(0.1)
+            @test radiation !== nothing
+            @test radiation.surface_properties.surface_temperature.constant == FT(300)
+            @test radiation.surface_properties.surface_emissivity.constant == FT(0.98)
+            @test radiation.surface_properties.direct_surface_albedo.constant == FT(0.1)
+            @test radiation.surface_properties.diffuse_surface_albedo.constant == FT(0.1)
             @test radiation.solar_constant == FT(1361)
+
+            # Check flux fields are created
+            @test radiation.upwelling_longwave_flux !== nothing
+            @test radiation.downwelling_longwave_flux !== nothing
+            @test radiation.downwelling_shortwave_flux !== nothing
+
+            # Check flux fields have correct size (Nz+1 levels)
+            @test size(radiation.upwelling_longwave_flux) == (1, 1, Nz + 1)
+            @test size(radiation.downwelling_longwave_flux) == (1, 1, Nz + 1)
+            @test size(radiation.downwelling_shortwave_flux) == (1, 1, Nz + 1)
+
+            radiation = RadiativeTransferModel(grid, constants, optical_thickness;
+                                               surface_temperature = 300,
+                                               direct_surface_albedo = 0.15,
+                                               diffuse_surface_albedo = 0.2)
+
+            @test radiation.surface_properties.direct_surface_albedo.constant == FT(0.15)
+            @test radiation.surface_properties.diffuse_surface_albedo.constant == FT(0.2)
         end
 
+        @testset "Field-based surface properties" begin
+            T₀ = set!(CenterField(grid), 300)
+            α₀ = set!(CenterField(grid), 0.1)
+            ε₀ = set!(CenterField(grid), 0.98)
+
+            radiation = RadiativeTransferModel(grid, constants, optical_thickness;
+                                               surface_temperature = T₀,
+                                               surface_emissivity = ε₀,
+                                               surface_albedo = α₀)
+
+            @test radiation !== nothing
+
+            @allowscalar begin
+                @test first(radiation.surface_properties.surface_temperature) == FT(300)
+                @test first(radiation.surface_properties.surface_emissivity) == FT(0.98)
+                @test first(radiation.surface_properties.direct_surface_albedo) == FT(0.1)
+                @test first(radiation.surface_properties.diffuse_surface_albedo) == FT(0.1)
+                @test radiation.solar_constant == FT(1361)
+            end
+        end
+
+        @testset "Invalid surface properties" begin
+            @test_throws ArgumentError RadiativeTransferModel(grid, constants, optical_thickness;
+                                                            surface_temperature = 300,
+                                                            surface_albedo = 0.15,
+                                                            direct_surface_albedo = 0.15,
+                                                            diffuse_surface_albedo = 0.2)
+
+            @test_throws ArgumentError RadiativeTransferModel(grid, constants, optical_thickness;
+                                                            surface_temperature = 300,
+                                                            surface_albedo = 0.15,
+                                                            diffuse_surface_albedo = 0.2)
+        end
 
     end
 end
