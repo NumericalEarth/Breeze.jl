@@ -25,7 +25,8 @@ export
     EquivalentPotentialTemperature,
     StabilityEquivalentPotentialTemperature,
     LiquidIcePotentialTemperature,
-    StaticEnergy
+    StaticEnergy,
+    compute_hydrostatic_pressure!
 
 using DocStringExtensions: TYPEDSIGNATURES
 using Adapt: Adapt, adapt

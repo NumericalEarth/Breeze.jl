@@ -252,8 +252,8 @@ end
 
 @inline function compute_moisture_fractions(i, j, k, grid, bμp::MP1M, ρ, qᵗ, μ)
     @inbounds begin
-        ρqʳ = μ.ρqʳ[i, j, k] / ρ
-        ρqˢ = μ.ρqˢ[i, j, k] / ρ
+        qʳ = μ.ρqʳ[i, j, k] / ρ
+        qˢ = μ.ρqˢ[i, j, k] / ρ
         qᶜˡ = μ.qᶜˡ[i, j, k]
         qᶜⁱ = μ.qᶜⁱ[i, j, k]
         qᵛ = μ.qᵛ[i, j, k]
@@ -264,6 +264,12 @@ end
 
     return MoistureMassFractions(qᵛ, qˡ, qⁱ)
 end
+
+# Default fallback for OneMomentCloudMicrophysics tendencies that are not explicitly implemented
+@inline microphysical_tendency(i, j, k, grid, bμp::OneMomentCloudMicrophysics, args...) = zero(grid)
+
+# Default fallback for OneMomentCloudMicrophysics velocities
+@inline microphysical_velocities(bμp::OneMomentCloudMicrophysics, name) = nothing
 
 """
 $(TYPEDSIGNATURES)
