@@ -1,9 +1,9 @@
 # # Supercell thunderstorm
 #
-# This example simulates the development of a supercell thunderstorm, following the idealized
+# This example simulates the development of a splitting supercell thunderstorm, following the idealized
 # test case described by [KlempEtAl2015](@citet) ("Idealized global nonhydrostatic atmospheric
 # test cases on a reduced-radius sphere"). This benchmark evaluates the model's ability to
-# capture deep moist convection with rotation, cloud microphysics, and strong updrafts.
+# capture deep moist convection with cloud microphysics, and strong updrafts.
 #
 # ## Physical setup
 #
@@ -73,8 +73,8 @@ const BreezeOneMomentCloudMicrophysics = BreezeCloudMicrophysicsExt.OneMomentClo
 
 # ## Grid configuration
 #
-# The domain is 168 km × 168 km × 20 km with 336 × 336 × 40 grid points, giving
-# 500 m horizontal resolution and 500 m vertical resolution. The grid uses periodic
+# The domain is 168 km × 168 km × 20 km with 168 × 168 × 40 grid points, giving
+# 1 km horizontal resolution and 500 m vertical resolution. The grid uses periodic
 # lateral boundary conditions and bounded top/bottom boundaries.
 
 Nx, Ny, Nz = 336, 336, 40
