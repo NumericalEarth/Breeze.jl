@@ -7,8 +7,8 @@ using Statistics: mean
 @testset "Anelastic pressure solver recovers analytic solution [$FT]" for FT in (Float32, Float64)
     Oceananigans.defaults.FloatType = FT
     grid = RectilinearGrid(default_arch; size=48, z=(0, 1), topology=(Flat, Flat, Bounded))
-    thermodynamics = ThermodynamicConstants()
-    reference_state = ReferenceState(grid, thermodynamics, base_pressure=101325, potential_temperature=288)
+    constants = ThermodynamicConstants()
+    reference_state = ReferenceState(grid, constants, surface_pressure=101325, potential_temperature=288)
     formulation = AnelasticFormulation(reference_state)
 
     #=
@@ -32,7 +32,7 @@ using Statistics: mean
 
     set!(formulation.reference_state.density, z -> z)
     fill_halo_regions!(formulation.reference_state.density)
-    model = AtmosphereModel(grid; thermodynamics, formulation)
+    model = AtmosphereModel(grid; thermodynamic_constants=constants, formulation)
     set!(model, ρw = z -> z^2 - z^3)
 
     # Test for zero mean

@@ -4,7 +4,7 @@ using DocumenterCitations
 using Literate
 
 using CairoMakie
-CairoMakie.activate!(type = "svg")
+CairoMakie.activate!(type = "png")
 set_theme!(Theme(linewidth = 3))
 
 DocMeta.setdocmeta!(Breeze, :DocTestSetup, :(using Breeze); recursive=true)
@@ -15,35 +15,76 @@ bib = CitationBibliography(bib_filepath, style=:authoryear)
 examples_src_dir = joinpath(@__DIR__, "..", "examples")
 literated_dir = joinpath(@__DIR__, "src", "literated")
 mkpath(literated_dir)
+# We'll append the following postamble to the literate examples, to include
+# information about the computing environment used to run them.
+example_postamble = """
 
-example_scripts = [
-    "thermal_bubble.jl",
-    "cloudy_kelvin_helmholtz.jl",
-    # "prescribed_sst.jl", # this is a WIP
-]
+# ---
 
-for script_file in example_scripts
-    script_path = joinpath(examples_src_dir, script_file)
-    Literate.markdown(script_path, literated_dir;
-                      flavor = Literate.DocumenterFlavor(),
-                      execute = true)
-end
+# ### Julia version and environment information
+#
+# This example was executed with the following version of Julia:
 
-example_pages = Any[
-    "Thermal bubble" => "literated/thermal_bubble.md",
+using InteractiveUtils: versioninfo
+versioninfo()
+
+# These were the top-level packages installed in the environment:
+
+import Pkg
+Pkg.status()
+"""
+
+example_pages = [
+    "Stratified dry thermal bubble" => "literated/dry_thermal_bubble.md",
+    "Cloudy thermal bubble" => "literated/cloudy_thermal_bubble.md",
     "Cloudy Kelvin-Helmholtz instability" => "literated/cloudy_kelvin_helmholtz.md",
-    # "Prescribed SST" => "literated/prescribed_sst.md",
+    "Shallow cumulus convection (BOMEX)" => "literated/bomex.md",
+    "Precipitating shallow cumulus (RICO)" => "literated/rico.md",
+    "Convection over prescribed sea surface temperature (SST)" => "literated/prescribed_sea_surface_temperature.md",
+    "Inertia gravity wave" => "literated/inertia_gravity_wave.md",
+    "Single column gray radiation" => "literated/single_column_radiation.md",
 ]
+
+literate_code(script_path, literated_dir) = """
+using Literate
+using CairoMakie
+
+CairoMakie.activate!(type = "png")
+set_theme!(Theme(linewidth = 3))
+
+@time $(repr(basename(script_path))) Literate.markdown($(repr(script_path)), $(repr(literated_dir));
+                                                        flavor = Literate.DocumenterFlavor(),
+                                                        preprocess = content -> content * $(repr(example_postamble)),
+                                                        execute = true,
+                                                       )
+"""
+
+semaphore = Base.Semaphore(Threads.nthreads(:interactive))
+@time "literate" @sync for (_, dest_file) in example_pages
+    script_file = splitext(basename(dest_file))[1] * ".jl"
+    script_path = joinpath(examples_src_dir, script_file)
+    Threads.@spawn :interactive Base.acquire(semaphore) do
+        run(`$(Base.julia_cmd()) --color=yes --project=$(dirname(Base.active_project())) -e $(literate_code(script_path, literated_dir))`)
+    end
+end
 
 makedocs(
     ;
     modules = [Breeze],
     sitename = "Breeze",
     plugins = [bib],
+    format = Documenter.HTML(
+        ;
+        size_threshold_warn = 2 ^ 19, # 512 KiB
+        size_threshold = 2 ^ 20, # 1 MiB
+    ),
     pages=[
         "Home" => "index.md",
         "Examples" => example_pages,
         "Thermodynamics" => "thermodynamics.md",
+        "AtmosphereModel" => Any[
+            "Diagnostics" => "atmosphere_model/diagnostics.md",
+        ],
         "Microphysics" => Any[
             "Overview" => "microphysics/microphysics_overview.md",
             "Warm-phase saturation adjustment" => "microphysics/warm_phase_saturation_adjustment.md",
@@ -54,6 +95,7 @@ makedocs(
                 "Microphysics Interface" => "developer/microphysics_interface.md",
             ],
         ],
+        "Radiative Transfer" => "radiative_transfer.md",
         "Dycore equations and algorithms" => "dycore_equations_algorithms.md",
         "Appendix" => Any[
             "Notation" => "appendix/notation.md",
