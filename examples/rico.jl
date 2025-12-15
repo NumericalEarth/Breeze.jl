@@ -15,9 +15,9 @@
 # Initial and boundary conditions for this case are provided by the wonderfully useful
 # package [AtmosphericProfilesLibrary.jl](https://github.com/CliMA/AtmosphericProfilesLibrary.jl).
 # For precipitation we use the 0-moment scheme from
-# [CloudMicrophysics.jl](https://github.com/CliMA/CloudMicrophysics.jl) which is certainly
+# [CloudMicrophysics.jl](https://github.com/CliMA/CloudMicrophysics.jl), which is certainly
 # the least interesting of the microphysics schemes that CloudMicrophysics provides.
-# (Support for CloudMicrophysics's 1 moment, 2 moment, and P3 are hopefully be coming soon!)
+# (Support for CloudMicrophysics's 1 moment, 2 moment, and P3 are hopefully coming soon!)
 
 using Breeze
 using Oceananigans: Oceananigans
@@ -37,9 +37,6 @@ Random.seed!(42)
 # The RICO domain is 12.8 km × 12.8 km horizontally with a vertical extent of 4 km
 # [vanZanten2011](@cite). The intercomparison uses 128 × 128 × 100 grid points
 # with 100 m horizontal resolution and 40 m vertical resolution.
-#
-# For this example, we use a coarser grid (64 × 64 × 100) with 200 m horizontal
-# resolution, suitable for development and testing.
 
 Oceananigans.defaults.FloatType = Float32
 
@@ -52,8 +49,6 @@ z = (0, 4000)
 grid = RectilinearGrid(GPU(); x, y, z,
                        size = (Nx, Ny, Nz), halo = (5, 5, 5),
                        topology = (Periodic, Periodic, Bounded))
-
-FT = eltype(grid)
 
 # ## Reference state and formulation
 #
@@ -72,17 +67,17 @@ formulation = AnelasticFormulation(reference_state,
 
 # ## Surface fluxes
 #
-# RICO prescribes constant surface sensible and latent heat fluxes
-# ([vanZanten2011](@citet)):
-# - Sensible heat flux: ``\overline{w'\theta'}|_0 \approx 8 \times 10^{-3}`` K m/s
-# - Moisture flux: ``\overline{w'q_t'}|_0 \approx 5.2 \times 10^{-5}`` kg/kg m/s
-#
-# These values are similar to BOMEX but produce a moister boundary layer
-# that supports warm-rain processes.
+# Unlike the BOMEX protocol, which prescribes momentum, moisture, and thermodynamic fluxes,
+# the RICO protocol decrees the computation of fluxes by bulk aerodynamic formulae
+# with constant transfer coefficients (see [vanZanten2011](@citet); text surrounding equations 1-4):
 
-Cᵀ = 1.094e-3
-Cᵛ = 1.133e-3
-T₀ = 299.8  # sea surface temperature (K)
+Cᴰ = 1.229e-3 # Drag coefficient for momentum
+Cᵀ = 1.094e-3 # "Temperature" aka sensible heat transfer coefficient
+Cᵛ = 1.133e-3 # Moisture flux transfer coefficient
+T₀ = 299.8    # Sea surface temperature (K)
+
+# We implement the specified bulk formula with Breeze utilities whose scope
+# currently extends only to constant coefficients (but could expand in the future),
 
 ρθ_flux = BulkSensibleHeatFlux(coefficient=Cᵀ, surface_temperature=T₀)
 ρqᵗ_flux = BulkVaporFlux(coefficient=Cᵛ, surface_temperature=T₀)
@@ -90,24 +85,27 @@ T₀ = 299.8  # sea surface temperature (K)
 ρθ_bcs = FieldBoundaryConditions(bottom=ρθ_flux)
 ρqᵗ_bcs = FieldBoundaryConditions(bottom=ρqᵗ_flux)
 
-# ## Surface momentum flux (drag)
-
-Cᴰ = 1.229e-3
 ρu_bcs = FieldBoundaryConditions(bottom=BulkDrag(coefficient=Cᴰ))
 ρv_bcs = FieldBoundaryConditions(bottom=BulkDrag(coefficient=Cᴰ))
 
+# Within the canon of Monin-Obukhov similarity theory, these transfer
+# coefficients should be scaled if the vertical grid spacing is changed.
+# Here we can use the values from [vanZanten2011](@citet) verbatim because
+# we use the recommended vertical grid spacing of 40 m.
+
 # ## Large-scale subsidence
 #
-# The RICO case includes large-scale subsidence that advects mean profiles downward.
+# The RICO protocol includes large-scale subsidence that advects mean profiles downward.
 # The subsidence velocity profile increases linearly to ``-0.005`` m/s at 2260 m and
-# remains constant above [vanZanten2011](@cite).
+# remains constant above [vanZanten2011](@cite),
 
-wˢ = Field{Nothing, Nothing, Face}(grid)
+FT = eltype(grid)
 wˢ_profile = AtmosphericProfilesLibrary.Rico_subsidence(FT)
+wˢ = Field{Nothing, Nothing, Face}(grid)
 set!(wˢ, z -> wˢ_profile(z))
 subsidence = SubsidenceForcing(wˢ)
 
-# Visualize the subsidence profile:
+# This is what it looks like:
 
 lines(wˢ; axis = (xlabel = "wˢ (m/s)",))
 
@@ -167,9 +165,9 @@ nothing #hide
 # and includes instant precipitation removal above a threshold, making it suitable for
 # precipitating shallow cumulus simulations like RICO.
 #
-# The zero-moment scheme removes cloud liquid water exceeding a threshold `qc_0` at a rate
-# determined by the precipitation timescale `τ_precip`. Typical values for shallow cumulus
-# are `τ_precip ~ 20minutes` and `qc_0 ~ 2×10⁻⁴ kg/kg`.
+# In the configuration we use it, the zero-moment scheme removes cloud liquid water
+# exceeding a threshold `qc_0` at a rate determined by the precipitation
+# timescale `τ_precip`.
 
 BreezeCloudMicrophysicsExt = Base.get_extension(Breeze, :BreezeCloudMicrophysicsExt)
 using .BreezeCloudMicrophysicsExt: ZeroMomentCloudMicrophysics
@@ -184,16 +182,23 @@ model = AtmosphereModel(grid; formulation, coriolis, microphysics,
 # ## Initial conditions
 #
 # Mean profiles are specified as piecewise linear functions by [vanZanten2011](@citet):
+#
 #    - Liquid-ice potential temperature ``θ^{\ell i}(z)``
 #    - Total water specific humidity ``q^t(z)``
 #    - Zonal velocity ``u(z)`` and meridional velocity ``v(z)``
+#
+# The profiles are implemented in the wonderfully useful
+# [AtmosphericProfilesLibrary](https://github.com/CliMA/AtmosphericProfilesLibrary.jl)
+# package developed by the Climate Modeling Alliance,
 
 θˡⁱ₀ = AtmosphericProfilesLibrary.Rico_θ_liq_ice(FT)
 qᵗ₀ = AtmosphericProfilesLibrary.Rico_q_tot(FT)
 u₀ = AtmosphericProfilesLibrary.Rico_u(FT)
 v₀ = AtmosphericProfilesLibrary.Rico_v(FT)
 
-# Apply Exner function correction for Breeze's reference pressure convention:
+# We dutifully apply a correction to the Exner function due to the fact that
+# Breeze does not currently distinguish between the surface pressure and the
+# standard "potential temperature reference pressure" of ``10⁵`` Pa,
 
 using Breeze.Thermodynamics: dry_air_gas_constant
 
@@ -201,9 +206,9 @@ Rᵈ = dry_air_gas_constant(constants)
 cᵖᵈ = constants.dry_air.heat_capacity
 p₀ = reference_state.surface_pressure
 χ = (p₀ / 1e5)^(Rᵈ / cᵖᵈ)
-zϵ = 1500 # m 
+zϵ = 1500 # m
 
-θᵢ(x, y, z) = χ * θˡⁱ₀(z) + 1e-2 * (rand() - 1) * (z < zϵ)
+θᵢ(x, y, z) = χ * θˡⁱ₀(z) + 1e-2 * (rand() - 0.5) * (z < zϵ)
 qᵢ(x, y, z) = qᵗ₀(z)
 uᵢ(x, y, z) = u₀(z)
 vᵢ(x, y, z) = v₀(z)
@@ -212,7 +217,7 @@ set!(model, θ=θᵢ, qᵗ=qᵢ, u=uᵢ, v=vᵢ)
 
 # ## Simulation
 #
-# We run the simulation for 6 hours with adaptive time-stepping.
+# We run the simulation for 12 hours with adaptive time-stepping.
 # RICO typically requires longer integration times than BOMEX to develop
 # a quasi-steady precipitating state.
 
@@ -220,18 +225,22 @@ simulation = Simulation(model; Δt=10, stop_time=6hour)
 conjure_time_step_wizard!(simulation, cfl=0.7)
 
 # ## Output and progress
+#
+# We set up a progress callback with hourly messages about interesting
+# quantities,
 
 θ = liquid_ice_potential_temperature(model)
 qˡ = model.microphysical_fields.qˡ
 qᵛ = model.microphysical_fields.qᵛ
 
-# Precipitation rate diagnostic from zero-moment microphysics
+## Precipitation rate diagnostic from zero-moment microphysics
 P = precipitation_rate(model, :liquid)
 
-# Integrals of precip rate
+## Integrals of precipitation rate
 ∫Pdz = Field(Integral(P, dims=3))
 ∫PdV = Field(Integral(P))
 
+## For keeping track of the computational expense
 wall_clock = Ref(time_ns())
 
 function progress(sim)
@@ -247,7 +256,7 @@ function progress(sim)
                    iteration(sim), prettytime(sim), prettytime(sim.Δt),
                    prettytime(elapsed), wmax)
 
-    msg *= @sprintf(" --- max(qᵗ): %.2e, max(qᵛ): %.2e, max(qˡ): %.2e, ∫ⱽP: %.2e kg/kg/s",
+    msg *= @sprintf(" --- max(qᵗ): %.2e, max(qᵛ): %.2e, max(qˡ): %.2e, ∫PdV: %.2e kg/kg/s",
                     qᵗmax, qᵛmax, qˡmax, ∫P)
 
     @info msg
@@ -255,9 +264,12 @@ function progress(sim)
     return nothing
 end
 
-add_callback!(simulation, progress, IterationInterval(100)) #TimeInterval(1hour))
+add_callback!(simulation, progress, TimeInterval(1hour))
 
-outputs = merge(model.velocities, model.tracers, (; θ, qˡ, qᵛ))
+# In addition to velocities, we output horizontal and time-averages of
+# liquid water mass fraction, specific humidity, and liquid-ice potential temperature,
+
+outputs = merge(model.velocities, (; θ, qˡ, qᵛ))
 averaged_outputs = NamedTuple(name => Average(outputs[name], dims=(1, 2)) for name in keys(outputs))
 
 filename = "rico.jld2"
@@ -265,7 +277,8 @@ simulation.output_writers[:averages] = JLD2Writer(model, averaged_outputs; filen
                                                   schedule = AveragedTimeInterval(1hour),
                                                   overwrite_existing = true)
 
-# Output slices for animation:
+# For an animation, we also output slices,
+#
 # - xz-slices of qˡ and precipitation rate
 # - xy-slice of qˡ in cloud layer (z ≈ 1500 m) and vertically-integrated precipitation rate
 
@@ -282,10 +295,11 @@ slice_outputs = (
 
 filename = "rico_slices.jld2"
 simulation.output_writers[:slices] = JLD2Writer(model, slice_outputs; filename,
-                                                schedule = TimeInterval(2minutes),
+                                                schedule = TimeInterval(30seconds),
                                                 overwrite_existing = true)
 
-@info "Running RICO simulation..."
+# We're finally ready to run this thing,
+
 run!(simulation)
 
 # ## Results: mean profile evolution
@@ -358,6 +372,8 @@ Pxz_ts = FieldTimeSeries("rico_slices.jld2", "Pxz")
 qˡxy_ts = FieldTimeSeries("rico_slices.jld2", "qˡxy")
 ∫P_ts = FieldTimeSeries("rico_slices.jld2", "∫P")
 
+z = znodes(qˡxz_ts.grid, Center())
+
 times = qˡxz_ts.times
 Nt = length(times)
 
@@ -366,37 +382,42 @@ qˡlim = max(maximum(qˡxz_ts), 1e-6) / 4
 Plim = max(maximum(Pxz_ts), 1e-10) / 4
 ∫Plim = max(maximum(∫P_ts), 1e-8) / 4
 
-# Convert precipitation rate to mm/day for more intuitive units
-# P is in kg/kg/s, multiply by ρ~1 kg/m³ and 86400 s/day and 1000 mm/m gives ~86.4 factor
-# But since P is specific (kg/kg/s), we'll just show it in 10⁻⁶ s⁻¹ for clarity
+# Now let's plot the slices and animate them.
 
-slices_fig = Figure(size=(1100, 800), fontsize=14)
+fig = Figure(size=(900, 800), fontsize=14)
 
-axqxz = Axis(slices_fig[1, 2], xlabel="x (m)", ylabel="z (m)", title="Cloud liquid water qˡ (xz)")
-axPxz = Axis(slices_fig[1, 3], xlabel="x (m)", ylabel="z (m)", title="Precipitation rate P (xz)")
-axqxy = Axis(slices_fig[2, 2], xlabel="x (m)", ylabel="y (m)", title="Cloud liquid water qˡ (xy at z ≈ 1.5 km)")
-ax∫P = Axis(slices_fig[2, 3], xlabel="x (m)", ylabel="y (m)", title="Column-integrated precipitation rate")
+axqxz = Axis(fig[2, 1], aspect=2, ylabel="z (m)", xaxisposition=:top)
+axPxz = Axis(fig[2, 2], aspect=2, ylabel="z (m)", yaxisposition=:right, xaxisposition=:top)
+axqxy = Axis(fig[3, 1], aspect=1, xlabel="x (m)", ylabel="y (m)") 
+ax∫P  = Axis(fig[3, 2], aspect=1, xlabel="x (m)", ylabel="y (m)", yaxisposition=:right)
+
+hidexdecorations!(axqxz)
+hidexdecorations!(axPxz)
 
 n = Observable(1)
 qˡxz_n = @lift qˡxz_ts[$n]
 Pxz_n = @lift Pxz_ts[$n]
 qˡxy_n = @lift qˡxy_ts[$n]
 ∫P_n = @lift ∫P_ts[$n]
-title_text = @lift "RICO: Clouds and precipitation at t = " * prettytime(times[$n])
+title = @lift "Cloud liquid and precipitation in RICO at t = " * prettytime(times[$n])
 
 hmq1 = heatmap!(axqxz, qˡxz_n, colormap=:dense, colorrange=(0, qˡlim))
 hmP1 = heatmap!(axPxz, Pxz_n, colormap=:amp, colorrange=(0, Plim))
 hmq2 = heatmap!(axqxy, qˡxy_n, colormap=:dense, colorrange=(0, qˡlim))
 hmP2 = heatmap!(ax∫P, ∫P_n, colormap=:amp, colorrange=(0, ∫Plim))
 
-Colorbar(slices_fig[1, 1], hmq1, flipaxis=true, label="qˡ (kg/kg)")
-Colorbar(slices_fig[1, 4], hmP1, label="P (1/s)")
-Colorbar(slices_fig[2, 1], hmq2, flipaxis=true, label="qˡ (kg/kg)")
-Colorbar(slices_fig[2, 4], hmP2, label="∫P dz (m/s)")
+Colorbar(fig[1, 1], hmq1, vertical=false, flipaxis=true, label="Cloud liquid water qˡ (x, y=0, z)")
+Colorbar(fig[1, 2], hmP1, vertical=false, flipaxis=true, label="Precipitation rate P (x, y=0, z)")
+Colorbar(fig[4, 1], hmq2, vertical=false, flipaxis=false, label="Cloud liquid water qˡ (x, y, z=$(z[k_cloud]))")
+Colorbar(fig[4, 2], hmP2, vertical=false, flipaxis=false, label="Column-integrated precipitation rate")
 
-slices_fig[0, :] = Label(slices_fig, title_text, fontsize=18, tellwidth=false)
+fig[0, :] = Label(fig, title, fontsize=18, tellwidth=false)
 
-CairoMakie.record(slices_fig, "rico_slices.mp4", 1:Nt, framerate=18) do nn
+rowgap!(fig.layout, 2, -80)
+rowgap!(fig.layout, 3, -100)
+rowgap!(fig.layout, 4, 0)
+
+CairoMakie.record(fig, "rico_slices.mp4", 1:Nt, framerate=12) do nn
     n[] = nn
 end
 nothing #hide

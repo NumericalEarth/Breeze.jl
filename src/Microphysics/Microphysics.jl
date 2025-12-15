@@ -10,7 +10,9 @@ export
     FourCategories,
     SaturationSpecificHumidity,
     SaturationSpecificHumidityField,
-    KesslerMicrophysics
+    KesslerMicrophysics,
+    RelativeHumidity,
+    RelativeHumidityField
 
 import ..AtmosphereModels:
     maybe_adjust_thermodynamic_state,

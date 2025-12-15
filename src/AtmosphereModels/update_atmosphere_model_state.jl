@@ -18,6 +18,7 @@ function update_state!(model::AnelasticModel, callbacks=[]; compute_tendencies=t
 
     fill_halo_regions!(prognostic_fields(model), model.clock, fields(model), async=true)
     compute_auxiliary_variables!(model)
+    update_radiation!(model.radiative_transfer, model)
     compute_forcings!(model)
     microphysics_model_update!(model.microphysics, model)
     compute_tendencies && compute_tendencies!(model)
@@ -65,7 +66,7 @@ function tracer_specific_to_density!(tracers, density)
 end
 
 """
-    $(TYPEDSIGNATURES)
+$(TYPEDSIGNATURES)
 
 Compute auxiliary model variables:
 
@@ -75,8 +76,6 @@ Compute auxiliary model variables:
     * temperature ``T``, possibly involving saturation adjustment
     * specific thermodynamic variable (``e = ρe / ρ`` or ``θ = ρθ / ρ``)
     * moisture mass fraction ``qᵗ = ρqᵗ / ρ``
-
-
 """
 function compute_auxiliary_variables!(model)
     grid = model.grid
@@ -176,7 +175,7 @@ end
     update_microphysical_fields!(microphysical_fields, microphysics,
                                  i, j, k, grid,
                                  ρ, 𝒰₁, constants)
-                                 
+
     T = Thermodynamics.temperature(𝒰₁, constants)
     @inbounds temperature[i, j, k] = T
 end
@@ -218,7 +217,7 @@ end
     update_microphysical_fields!(microphysical_fields, microphysics,
                                  i, j, k, grid,
                                  ρ, 𝒰₁, constants)
-                                 
+
     T = Thermodynamics.temperature(𝒰₁, constants)
     @inbounds temperature[i, j, k] = T
 end

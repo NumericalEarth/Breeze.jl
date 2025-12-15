@@ -39,8 +39,10 @@ example_pages = [
     "Cloudy thermal bubble" => "literated/cloudy_thermal_bubble.md",
     "Cloudy Kelvin-Helmholtz instability" => "literated/cloudy_kelvin_helmholtz.md",
     "Shallow cumulus convection (BOMEX)" => "literated/bomex.md",
-    "Convection over prescribed sea surface temperatureSST" => "literated/prescribed_sea_surface_temperature.md",
+    "Precipitating shallow cumulus (RICO)" => "literated/rico.md",
+    "Convection over prescribed sea surface temperature (SST)" => "literated/prescribed_sea_surface_temperature.md",
     "Inertia gravity wave" => "literated/inertia_gravity_wave.md",
+    "Single column gray radiation" => "literated/single_column_radiation.md",
 ]
 
 literate_code(script_path, literated_dir) = """
@@ -93,6 +95,7 @@ makedocs(
                 "Microphysics Interface" => "developer/microphysics_interface.md",
             ],
         ],
+        "Radiative Transfer" => "radiative_transfer.md",
         "Dycore equations and algorithms" => "dycore_equations_algorithms.md",
         "Appendix" => Any[
             "Notation" => "appendix/notation.md",

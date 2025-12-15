@@ -3,9 +3,9 @@ module Advection
 export div_ρUc
 
 using Oceananigans.Advection:
-    advective_tracer_flux_x,
-    advective_tracer_flux_y,
-    advective_tracer_flux_z,
+    _advective_tracer_flux_x,
+    _advective_tracer_flux_y,
+    _advective_tracer_flux_z,
     BoundsPreservingWENO,
     bounded_tracer_flux_divergence_x,
     bounded_tracer_flux_divergence_y,
@@ -18,13 +18,13 @@ import Breeze.AtmosphereModels: div_ρUc
 
 # Simple wrappers: interpolate ρ to face, multiply existing flux
 @inline tracer_mass_flux_x(i, j, k, grid, ρ, args...) =
-    ℑxᶠᵃᵃ(i, j, k, grid, ρ) * advective_tracer_flux_x(i, j, k, grid, args...)
+    ℑxᶠᵃᵃ(i, j, k, grid, ρ) * _advective_tracer_flux_x(i, j, k, grid, args...)
 
 @inline tracer_mass_flux_y(i, j, k, grid, ρ, args...) =
-    ℑyᵃᶠᵃ(i, j, k, grid, ρ) * advective_tracer_flux_y(i, j, k, grid, args...)
+    ℑyᵃᶠᵃ(i, j, k, grid, ρ) * _advective_tracer_flux_y(i, j, k, grid, args...)
 
 @inline tracer_mass_flux_z(i, j, k, grid, ρ, args...) =
-    ℑzᵃᵃᶠ(i, j, k, grid, ρ) * advective_tracer_flux_z(i, j, k, grid, args...)
+    ℑzᵃᵃᶠ(i, j, k, grid, ρ) * _advective_tracer_flux_z(i, j, k, grid, args...)
 
 # Main operator
 @inline function div_ρUc(i, j, k, grid, advection, ρ, U, c)

@@ -1,6 +1,8 @@
 using Oceananigans: Average, Field, set!, compute!
-using Oceananigans.Grids: Center, Face
+using Oceananigans.BoundaryConditions: FieldBoundaryConditions, ImpenetrableBoundaryCondition,
+                                       fill_halo_regions!
 using Oceananigans.Fields: AbstractField
+using Oceananigans.Grids: Center, Face
 using Oceananigans.Operators: ∂zᶜᶜᶠ, ℑzᵃᵃᶜ
 using Oceananigans.Utils: prettysummary
 using Adapt: Adapt
@@ -21,7 +23,7 @@ Adapt.adapt_structure(to, sf::SubsidenceForcing) =
                       Adapt.adapt(to, sf.averaged_field))
 
 """
-    $(TYPEDSIGNATURES)
+$(TYPEDSIGNATURES)
 
 Forcing that represents large-scale subsidence advecting horizontally-averaged
 fields downward:
@@ -102,11 +104,17 @@ end
 strip_density_prefix(name::Symbol) = Symbol(collect(string(name))[2:end]...)
 
 function materialize_atmosphere_model_forcing(forcing::SubsidenceForcing, field, name, model_field_names, context)
+    grid = field.grid
+
     if forcing.subsidence_vertical_velocity isa AbstractField
         wˢ = forcing.subsidence_vertical_velocity
     else
-        wˢ = Field{Nothing, Nothing, Face}(field.grid)
+        ibc = ImpenetrableBoundaryCondition()
+        loc = (nothing, nothing, Face())
+        bcs = FieldBoundaryConditions(grid, loc, bottom=ibc, top=ibc)
+        wˢ = Field{Nothing, Nothing, Face}(grid, boundary_conditions=bcs)
         set!(wˢ, forcing.subsidence_vertical_velocity)
+        fill_halo_regions!(wˢ)
     end
 
     ρᵣ = context.reference_density
@@ -122,7 +130,7 @@ function materialize_atmosphere_model_forcing(forcing::SubsidenceForcing, field,
 
     return SubsidenceForcing(wˢ, ρᵣ, averaged_field)
 end
-    
+
 #####
 ##### compute_forcing! for subsidence forcing
 #####
@@ -132,4 +140,3 @@ function compute_forcing!(forcing::SubsidenceForcing)
     compute!(forcing.averaged_field)
     return nothing
 end
-

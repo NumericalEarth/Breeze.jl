@@ -12,11 +12,15 @@ export
     total_energy,
     liquid_ice_potential_temperature_density,
     liquid_ice_potential_temperature,
+    precipitation_rate,
 
     # Interface functions (extended by BoundaryConditions and Forcings)
     regularize_atmosphere_model_boundary_conditions,
     materialize_atmosphere_model_forcing,
     compute_forcing!,
+
+    # Radiation (implemented by extensions)
+    RadiativeTransferModel,
 
     # Diagnostics (re-exported from Diagnostics submodule)
     PotentialTemperature,
@@ -24,7 +28,8 @@ export
     EquivalentPotentialTemperature,
     StabilityEquivalentPotentialTemperature,
     LiquidIcePotentialTemperature,
-    StaticEnergy
+    StaticEnergy,
+    compute_hydrostatic_pressure!
 
 using DocStringExtensions: TYPEDSIGNATURES
 using Adapt: Adapt, adapt
@@ -38,6 +43,7 @@ include("anelastic_formulation.jl")
 include("static_energy_thermodynamics.jl")
 include("potential_temperature_thermodynamics.jl")
 include("atmosphere_model_buoyancy.jl")
+include("radiation_interface.jl")
 include("dynamics_kernel_functions.jl")
 include("update_atmosphere_model_state.jl")
 include("compute_hydrostatic_pressure.jl")

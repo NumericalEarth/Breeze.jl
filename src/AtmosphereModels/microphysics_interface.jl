@@ -11,7 +11,7 @@ using ..Thermodynamics:
 #####
 
 """
-    $(TYPEDSIGNATURES)
+$(TYPEDSIGNATURES)
 
 Possibly apply saturation adjustment. If a `microphysics` scheme does not invoke saturation adjustment,
 just return the `state` unmodified. In contrast to `adjust_thermodynamic_state`, this function
@@ -77,7 +77,7 @@ TODO: add the function signature when it is stable
 @inline microphysical_tendency(i, j, k, grid, microphysics::Nothing, name, args...) = zero(grid)
 
 """
-    $(TYPEDSIGNATURES)
+$(TYPEDSIGNATURES)
 
 Adjust the thermodynamic `state` according to the `scheme`.
 For example, if `scheme isa SaturationAdjustment`, then this function
@@ -88,9 +88,30 @@ If a scheme is non-adjusting, we just return `state`.
 """
 @inline adjust_thermodynamic_state(state, scheme::Nothing, thermo) = state
 
-"""
-    $(TYPEDSIGNATURES)
+#####
+##### Precipitation rate diagnostic
+#####
 
-Update anything you want based on `microphysics`.
 """
-microphysics_model_update!(microphysics::Nothing, model) = nothing
+    precipitation_rate(model, phase=:liquid)
+
+Return a `KernelFunctionOperation` representing the precipitation rate for the given `phase`.
+
+The precipitation rate is the rate at which moisture is removed from the atmosphere
+by precipitation processes. For zero-moment schemes, this is computed from the
+`remove_precipitation` function applied to cloud condensate.
+
+Arguments:
+- `model`: An `AtmosphereModel` with a microphysics scheme
+- `phase`: Either `:liquid` (rain) or `:ice` (snow). Default is `:liquid`.
+
+Returns a `Field` or `KernelFunctionOperation` that can be computed and visualized.
+Specific microphysics schemes must extend this function.
+"""
+precipitation_rate(model, phase::Symbol=:liquid) = precipitation_rate(model, model.microphysics, Val(phase))
+
+# Default: no precipitation for Nothing microphysics
+# We implmement this as a fallback for convenience
+# TODO: support reductions over ZeroField or the like, so we can swap
+# non-precipitating microphysics schemes with precipitating ones
+precipitation_rate(model, microphysics, phase) = CenterField(model.grid) 

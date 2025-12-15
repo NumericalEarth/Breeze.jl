@@ -28,7 +28,8 @@ test_tol(FT::Type{Float32}) = sqrt(solver_tol(FT))
 test_thermodynamics = (:StaticEnergy, :LiquidIcePotentialTemperature)
 
 @testset "Warm-phase saturation adjustment [$(FT)]" for FT in (Float32, Float64)
-    grid = RectilinearGrid(default_arch, FT; size=(1, 1, 1), x=(0, 1), y=(0, 1), z=(0, 1))
+    Oceananigans.defaults.FloatType = FT
+    grid = RectilinearGrid(default_arch; size=(1, 1, 1), x=(0, 1), y=(0, 1), z=(0, 1))
     constants = ThermodynamicConstants(FT)
     reference_state = ReferenceState(grid, constants; surface_pressure=101325, potential_temperature=288)
 
@@ -84,7 +85,7 @@ test_thermodynamics = (:StaticEnergy, :LiquidIcePotentialTemperature)
                     @test T★ ≈ T₂ atol=atol
 
                     # Parcel test for AtmosphereModel
-                    set!(model, ρe = ρᵣ * e₂, qᵗ = qᵗ₂)    
+                    set!(model, ρe = ρᵣ * e₂, qᵗ = qᵗ₂)
                     T★ = @allowscalar first(model.temperature)
                     qᵛ = @allowscalar first(model.microphysical_fields.qᵛ)
                     qˡ = @allowscalar first(model.microphysical_fields.qˡ)
@@ -98,13 +99,14 @@ test_thermodynamics = (:StaticEnergy, :LiquidIcePotentialTemperature)
     end
 end
 
-function test_liquid_fraction(T, Tᶠ, Tʰ) 
+function test_liquid_fraction(T, Tᶠ, Tʰ)
     T′ = clamp(T, Tʰ, Tᶠ)
     return (T′ - Tʰ) / (Tᶠ - Tʰ)
 end
 
 @testset "Mixed-phase saturation adjustment (AtmosphereModel) [$(FT)]" for FT in (Float32, Float64)
-    grid = RectilinearGrid(default_arch, FT; size=(1, 1, 1), x=(0, 1), y=(0, 1), z=(0, 1))
+    Oceananigans.defaults.FloatType = FT
+    grid = RectilinearGrid(default_arch; size=(1, 1, 1), x=(0, 1), y=(0, 1), z=(0, 1))
 
     constants = ThermodynamicConstants(FT)
     ℒˡᵣ = constants.liquid.reference_latent_heat
@@ -337,8 +339,8 @@ end
 
 @testset "Saturation adjustment (MoistAirBuoyancies)" for FT in (Float32, Float64)
     # Minimal grid and reference state
-    # grid = RectilinearGrid(FT, size=(), topology=(Flat, Flat, Flat))
-    grid = RectilinearGrid(default_arch, FT; size=(1, 1, 1), x=(0, 1), y=(0, 1), z=(0, 1))
+    Oceananigans.defaults.FloatType = FT
+    grid = RectilinearGrid(default_arch; size=(1, 1, 1), x=(0, 1), y=(0, 1), z=(0, 1))
     constants = ThermodynamicConstants(FT)
     reference_state = ReferenceState(grid, constants; surface_pressure=101325, potential_temperature=288)
     atol = test_tol(FT)
