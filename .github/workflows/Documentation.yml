@@ -35,7 +35,7 @@ jobs:
       contents: write
       pull-requests: read
       statuses: write
-    runs-on: nvidia-gpu-t4
+    runs-on: self-hosted
     timeout-minutes: 60
     steps:
       - uses: actions/checkout@v6

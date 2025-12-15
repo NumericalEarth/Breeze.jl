@@ -53,7 +53,7 @@ jobs:
             os: windows-latest
         include:
           - version: "1.12.2"
-            os: nvidia-gpu-t4
+            os: self-hosted
             arch: "default"
     steps:
       - uses: actions/checkout@v6
@@ -69,7 +69,7 @@ jobs:
           # Run tests in verbose mode
           TEST_ARGS=(--verbose)
 
-          if [[ ${{ matrix.os }} == "nvidia-gpu-t4" ]]; then
+          if [[ ${{ matrix.os }} == "self-hosted" ]]; then
               # When running the tests on a GPU node we always want to make sure
               # CUDA is functional.
               echo "BREEZE_ENSURE_CUDA_FUNCTIONAL=true" >> "${GITHUB_ENV}"
