@@ -23,11 +23,6 @@ const GrayRadiativeTransferModel = RadiativeTransferModel{<:GrayOpticalThickness
 materialize_surface_property(x::Number, grid) = convert(eltype(grid), x)
 materialize_surface_property(x::Field, grid) = x
 
-function materialize_surface_property(x, grid)
-    loc = (Center, Center, Nothing)
-    return field(x, loc, grid)
-end
-
 function maybe_infer_coordinate(::Nothing, grid::SingleColumnGrid)
     λ = xnode(1, 1, 1, grid, Center(), Center(), Center())
     φ = ynode(1, 1, 1, grid, Center(), Center(), Center())
@@ -57,12 +52,12 @@ Construct a gray atmosphere radiative transfer model for the given grid.
 """
 function RadiativeTransferModel(grid, constants,
                                 optical_thickness::GrayOpticalThicknessOGorman2008;
+                                surface_temperature,
                                 coordinate = nothing,
                                 epoch = nothing,
                                 stefan_boltzmann_constant = 5.670374419e-8,
                                 avogadro_number = 6.02214076e23,
                                 latitude = nothing,
-                                surface_temperature = 300,
                                 surface_emissivity = 0.98,
                                 direct_surface_albedo = nothing,
                                 diffuse_surface_albedo = nothing,
