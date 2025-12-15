@@ -120,8 +120,11 @@ end
     end
 
     @testset "Unified advection parameter" begin
-        static_energy_model = AtmosphereModel(grid; thermodynamic_constants=constants, formulation=static_energy_formulation, advection=WENO())
-        potential_temperature_model= AtmosphereModel(grid; thermodynamic_constants=constants, formulation=potential_temperature_formulation, advection=WENO())
+        static_energy_model = AtmosphereModel(grid; thermodynamic_constants=constants,
+                                              formulation=static_energy_formulation, advection=WENO())
+
+        potential_temperature_model= AtmosphereModel(grid; thermodynamic_constants=constants,
+                                                     formulation=potential_temperature_formulation, advection=WENO())
 
         @test static_energy_model.advection.ρe isa WENO
         @test potential_temperature_model.advection.ρθ isa WENO
@@ -144,6 +147,32 @@ end
         for model in (static_energy_model, potential_temperature_model)
             @test model.advection.momentum isa WENO
             @test model.advection.ρqᵗ isa Centered
+            time_step!(model, 1)
+        end
+    end
+
+    @testset "FluxFormAdvection for momentum and tracers" begin
+        advection = FluxFormAdvection(WENO(), WENO(), Centered(order=2))
+        kw = (; thermodynamic_constants=constants, advection)
+        static_energy_model = AtmosphereModel(grid; formulation=static_energy_formulation, kw...)
+        potential_temperature_model = AtmosphereModel(grid; formulation=potential_temperature_formulation, kw...)
+
+        @test static_energy_model.advection.ρe isa FluxFormAdvection
+        @test static_energy_model.advection.ρe.x isa WENO
+        @test static_energy_model.advection.ρe.y isa WENO
+        @test static_energy_model.advection.ρe.z isa Centered
+
+        @test potential_temperature_model.advection.ρθ isa FluxFormAdvection
+        @test potential_temperature_model.advection.ρθ.x isa WENO
+        @test potential_temperature_model.advection.ρθ.y isa WENO
+        @test potential_temperature_model.advection.ρθ.z isa Centered
+
+        for model in (static_energy_model, potential_temperature_model)
+            @test model.advection.momentum isa FluxFormAdvection
+            @test model.advection.ρqᵗ isa FluxFormAdvection 
+            @test model.advection.ρqᵗ.x isa WENO
+            @test model.advection.ρqᵗ.y isa WENO
+            @test model.advection.ρqᵗ.z isa Centered
             time_step!(model, 1)
         end
     end
