@@ -88,6 +88,11 @@ Breeze interfaces with ClimaOcean for coupled atmosphere-ocean simulations.
     * sometimes we need to write `using Oceananigans.Units`
 
 3. **Examples and integration tests**
+  - **Testing examples**: When testing or debugging examples, reduce resolution and switch to CPU
+    to speed up iteration. For example, change `Nx = Ny = 64` to `Nx = Ny = 16`, `Nz = 100` to
+    `Nz = 20`, and `RectilinearGrid(GPU(); ...)` to `RectilinearGrid(CPU(); ...)`. You may also
+    add `simulation.stop_iteration = 50` to limit runtime. **Always revert these changes** before
+    committing - examples should run at full resolution on GPU for production.
   - Explain at the top of the file what a simulation is doing
   - Let code "speak for itself" as much as possible, to keep an explanation concise.
     In other words, use a Literate style.
@@ -120,8 +125,19 @@ Breeze interfaces with ClimaOcean for coupled atmosphere-ocean simulations.
   - The examples and docs have their own `Project.toml` environment. When your run examples you need to use `examples/Project.toml`.
     When you build new examples, please add example-specific packages to `examples/Project.toml`. Do not add example-specific
     packages to the main Breeze Project.toml. You may also need to add relevant packages to AtmosphereProfilesLibrary.
-  - Do not use `interior` to plot Fields unless necessary. Always try to pass Field or windowed Field
-    (generated using `view(field, i, j, k)` where `i, j, k` may be indices or index ranges) first.
+  - **CRITICAL - Plotting Fields**: NEVER use `interior(field, ...)` for plotting. Makie/CairoMakie
+    can plot `Field` objects directly, which automatically handles coordinates and is cleaner.
+    Use `view(field, i, j, k)` to window fields if needed. This applies to both static plots and
+    animations with `@lift`. For example:
+    ```julia
+    # WRONG - do not do this:
+    data = @lift interior(field_ts[$n], :, 1, :)
+    heatmap!(ax, x, z, data, ...)
+    
+    # CORRECT - pass Field directly:
+    field_n = @lift field_ts[$n]
+    heatmap!(ax, field_n, ...)
+    ```
   - In examples, use the suffix `ts` (no underscore) for "time series" and the suffix `n` (no underscore)
     to refer to `FieldTimeSeries` indexed at time-index `n`.
 
