@@ -37,7 +37,7 @@ grid = RectilinearGrid(GPU(),
 # Problem parameters and initial conditions
 pᵣ, θᵣ = 100000, 300
 thermo = ThermodynamicConstants()
-reference_state = ReferenceState(grid, thermo, base_pressure=pᵣ, potential_temperature=θᵣ)
+reference_state = ReferenceState(grid, thermo, surface_pressure=pᵣ, potential_temperature=θᵣ)
 formulation = AnelasticFormulation(reference_state, thermodynamics=:LiquidIcePotentialTemperature)
 
 θₜᵣ = 343           # tropopause potential temperature [K]
@@ -71,10 +71,10 @@ end
 
 # Atmosphere model setup
 microphysics = BreezeOneMomentCloudMicrophysics()
-model = AtmosphereModel(grid;formulation, microphysics, advection = WENO(order=5))
+advection = WENO(order=9, minimum_buffer_upwind_order=3)
+closure = AnisotropicMinimumDissipation()
+model = AtmosphereModel(grid; formulation, closure, microphysics, advection)
 set!(model, θ = θᵢ₀)
-θ₀ = Field{Center, Center, Center}(grid)
-set!(θ₀, θᵢ₀)
 
 ph = Breeze.AtmosphereModels.compute_hydrostatic_pressure!(CenterField(grid), model)
 T = model.temperature
@@ -96,7 +96,10 @@ end
 copyto!(parent(qᵛᵢ), qᵛᵢ_host)
 
 set!(model, qᵗ = qᵛᵢ, θ = θᵢ, u = uᵢ)
-θ = Breeze.AtmosphereModels.PotentialTemperatureField(model)
+θ = Breeze.AtmosphereModels.liquid_ice_potential_temperature(model)
+θᵇᵍf = CenterField(grid)
+set!(θᵇᵍf, (x, y, z) -> θᵢ₀(x, y, z))
+θ′ = θ - θᵇᵍf
 
 qᶜˡ = model.microphysical_fields.qᶜˡ
 qᶜⁱ = model.microphysical_fields.qᶜⁱ
@@ -111,7 +114,7 @@ function progress(sim)
     qᶜˡ = model.microphysical_fields.qᶜˡ
     qᶜⁱ = model.microphysical_fields.qᶜⁱ
 
-    ρe = energy_density(sim.model)
+    ρe = Breeze.AtmosphereModels.static_energy_density(sim.model)
     ρemean = mean(ρe)
     msg = @sprintf("Iter: %d, t: %s, Δt: %s, mean(ρe): %.6e J/kg, max|u|: %.5f m/s, max w: %.5f m/s, min w: %.5f m/s",
                    iteration(sim), prettytime(sim), prettytime(sim.Δt), ρemean, maximum(abs, u), maximum(w), minimum(w))
@@ -125,7 +128,7 @@ end
 
 add_callback!(simulation, progress, IterationInterval(100))
 
-outputs = merge(model.velocities, model.tracers, (; θ, qᶜˡ, qᶜⁱ, qᵛ))
+outputs = merge(model.velocities, model.tracers, (; θ, θ′, qᶜˡ, qᶜⁱ, qᵛ))
 
 filename = "supercell.jld2"
 
