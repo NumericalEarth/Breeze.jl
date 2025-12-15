@@ -79,6 +79,17 @@ TODO: add the function signature when it is stable
 """
 $(TYPEDSIGNATURES)
 
+Apply microphysics model update for the given `microphysics` scheme.
+
+This function is called during `update_state!` to apply microphysics processes
+that operate on the full model state (not the tendency fields).
+Specific microphysics schemes should extend this function.
+"""
+microphysics_model_update!(microphysics::Nothing, model) = nothing
+
+"""
+$(TYPEDSIGNATURES)
+
 Adjust the thermodynamic `state` according to the `scheme`.
 For example, if `scheme isa SaturationAdjustment`, then this function
 will adjust and return a new thermodynamic state given the specifications
