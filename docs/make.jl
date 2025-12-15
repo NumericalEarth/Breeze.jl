@@ -42,6 +42,7 @@ example_pages = [
     "Precipitating shallow cumulus (RICO)" => "literated/rico.md",
     "Convection over prescribed sea surface temperature (SST)" => "literated/prescribed_sea_surface_temperature.md",
     "Inertia gravity wave" => "literated/inertia_gravity_wave.md",
+    "Moist baroclinic instability" => "literated/moist_baroclinic_instability.md",
 ]
 
 literate_code(script_path, literated_dir) = """
