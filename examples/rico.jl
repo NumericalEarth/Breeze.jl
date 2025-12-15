@@ -251,7 +251,7 @@ function progress(sim)
     ρqʳmax = maximum(ρqʳ)
     qᵗmax = maximum(sim.model.specific_moisture)
     wmax = maximum(abs, model.velocities.w)
-    ∫P_val = ∫PdV[]
+    ∫P = CUDA.@allowscalar ∫PdV[]
     elapsed = 1e-9 * (time_ns() - wall_clock[])
 
     msg = @sprintf("Iter: %d, t: %s, Δt: %s, wall time: %s, max|w|: %.2e m/s \n",
@@ -259,7 +259,7 @@ function progress(sim)
                    prettytime(elapsed), wmax)
 
     msg *= @sprintf(" --- max(qᵗ): %.2e, max(qᵛ): %.2e, max(qᶜˡ): %.2e, max(ρqʳ): %.2e, ∫PdV: %.2e kg/kg/s",
-                    qᵗmax, qᵛmax, qᶜˡmax, ρqʳmax, ∫P_val)
+                    qᵗmax, qᵛmax, qᶜˡmax, ρqʳmax, ∫P)
 
     @info msg
 

@@ -7,8 +7,7 @@ using CloudMicrophysics.Microphysics0M: remove_precipitation
 
 using CloudMicrophysics.Microphysics1M:
     conv_q_lcl_to_q_rai,
-    accretion,
-    terminal_velocity
+    accretion
 
 # Import Breeze modules needed for integration
 using Breeze
