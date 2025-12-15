@@ -41,7 +41,7 @@ jobs:
       matrix:
         version:
           - "min"
-          - "1.12"
+          - "1.12.2"
         os:
           - ubuntu-latest
           - macOS-latest
@@ -52,7 +52,7 @@ jobs:
           - version: "min"
             os: windows-latest
         include:
-          - version: "1.12"
+          - version: "1.12.2"
             os: nvidia-gpu-t4
             arch: "default"
     steps:
