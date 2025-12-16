@@ -1,5 +1,5 @@
 struct BulkMicrophysics{N, C}
-    nucleation :: N
+    cloud_formation :: N
     categories :: C
 end
 
@@ -27,9 +27,9 @@ Return a `BulkMicrophysics` microphysics scheme with `clouds` and `precipitation
 """
 function BulkMicrophysics(FT::DataType = Oceananigans.defaults.FloatType;
                           categories = nothing,
-                          nucleation = SaturationAdjustment(FT))
+                          cloud_formation = SaturationAdjustment(FT))
 
-    return BulkMicrophysics(nucleation, categories)
+    return BulkMicrophysics(cloud_formation, categories)
 end
 
 # Non-categorical bulk microphysics
@@ -37,15 +37,15 @@ const NCBM = BulkMicrophysics{<:Any, Nothing}
 const NPBM = NCBM  # Alias: Non-Precipitating Bulk Microphysics
 
 maybe_adjust_thermodynamic_state(i, j, k, 𝒰₀, bμp::NCBM, microphysical_fields, qᵗ, constants) =
-    adjust_thermodynamic_state(𝒰₀, bμp.nucleation, constants)
+    adjust_thermodynamic_state(𝒰₀, bμp.cloud_formation, constants)
 
 prognostic_field_names(::NPBM) = tuple()
-materialize_microphysical_fields(bμp::NPBM, grid, bcs) = materialize_microphysical_fields(bμp.nucleation, grid, bcs)
+materialize_microphysical_fields(bμp::NPBM, grid, bcs) = materialize_microphysical_fields(bμp.cloud_formation, grid, bcs)
 
 @inline function update_microphysical_fields!(μ, bμp::NPBM, i, j, k, grid, ρ, 𝒰, constants)
-    return update_microphysical_fields!(μ, bμp.nucleation, i, j, k, grid, ρ, 𝒰, constants)
+    return update_microphysical_fields!(μ, bμp.cloud_formation, i, j, k, grid, ρ, 𝒰, constants)
 end
 
 @inline function compute_moisture_fractions(i, j, k, grid, bμp::NPBM, ρ, qᵗ, μ)
-    return compute_moisture_fractions(i, j, k, grid, bμp.nucleation, ρ, qᵗ, μ)
+    return compute_moisture_fractions(i, j, k, grid, bμp.cloud_formation, ρ, qᵗ, μ)
 end

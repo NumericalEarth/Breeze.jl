@@ -67,9 +67,9 @@ const ZeroMomentCloudMicrophysics = BulkMicrophysics{<:Any, <:Parameters0M}
 const ZMCM = ZeroMomentCloudMicrophysics
 
 prognostic_field_names(::ZMCM) = tuple()
-materialize_microphysical_fields(bμp::ZMCM, grid, bcs) = materialize_microphysical_fields(bμp.nucleation, grid, bcs)
-@inline update_microphysical_fields!(μ, bμp::ZMCM, i, j, k, grid, ρ, 𝒰, constants) = update_microphysical_fields!(μ, bμp.nucleation, i, j, k, grid, ρ, 𝒰, constants)
-@inline compute_moisture_fractions(i, j, k, grid, bμp::ZMCM, ρ, qᵗ, μ) = compute_moisture_fractions(i, j, k, grid, bμp.nucleation, ρ, qᵗ, μ)
+materialize_microphysical_fields(bμp::ZMCM, grid, bcs) = materialize_microphysical_fields(bμp.cloud_formation, grid, bcs)
+@inline update_microphysical_fields!(μ, bμp::ZMCM, i, j, k, grid, ρ, 𝒰, constants) = update_microphysical_fields!(μ, bμp.cloud_formation, i, j, k, grid, ρ, 𝒰, constants)
+@inline compute_moisture_fractions(i, j, k, grid, bμp::ZMCM, ρ, qᵗ, μ) = compute_moisture_fractions(i, j, k, grid, bμp.cloud_formation, ρ, qᵗ, μ)
 @inline microphysical_tendency(i, j, k, grid, bμp::ZMCM, args...) = zero(grid)
 @inline microphysical_velocities(bμp::ZMCM, name) = nothing
 
@@ -77,7 +77,7 @@ materialize_microphysical_fields(bμp::ZMCM, grid, bcs) = materialize_microphysi
     # Initialize moisture state from total moisture qᵗ (not from stale microphysical fields)
     q₀ = MoistureMassFractions(qᵗ)
     𝒰₁ = with_moisture(𝒰₀, q₀)
-    return adjust_thermodynamic_state(𝒰₁, bμp.nucleation, constants)
+    return adjust_thermodynamic_state(𝒰₁, bμp.cloud_formation, constants)
 end
 
 @inline function microphysical_tendency(i, j, k, grid, bμp::ZMCM, ::Val{:ρqᵗ}, ρ, μ, 𝒰, constants)
@@ -114,7 +114,7 @@ and _either_
 For more information see the [CloudMicrophysics.jl documentation](https://clima.github.io/CloudMicrophysics.jl/stable/Microphysics0M).
 """
 function ZeroMomentCloudMicrophysics(FT::DataType = Oceananigans.defaults.FloatType;
-                                     nucleation = SaturationAdjustment(FT),
+                                     cloud_formation = SaturationAdjustment(FT),
                                      τ_precip = 1000,
                                      qc_0 = 5e-4,
                                      S_0 = 0)
@@ -123,7 +123,7 @@ function ZeroMomentCloudMicrophysics(FT::DataType = Oceananigans.defaults.FloatT
                                     qc_0 = FT(qc_0),
                                     S_0 = FT(S_0))
 
-    return BulkMicrophysics(nucleation, categories)
+    return BulkMicrophysics(cloud_formation, categories)
 end
 
 #####
@@ -190,7 +190,7 @@ const MP1M = BulkMicrophysics{<:MixedPhaseSaturationAdjustment, <:CM1MCategories
 
 """
     OneMomentCloudMicrophysics(FT = Oceananigans.defaults.FloatType;
-                               nucleation = SaturationAdjustment(FT; equilibrium=WarmPhaseEquilibrium()),
+                               cloud_formation = SaturationAdjustment(FT; equilibrium=WarmPhaseEquilibrium()),
                                categories = one_moment_cloud_microphysics_categories(FT))
 
 Return a `OneMomentCloudMicrophysics` microphysics scheme for warm-rain and mixed-phase precipitation.
@@ -206,9 +206,9 @@ For mixed-phase microphysics, additional prognostic variable `ρqˢ` (snow mass 
 See the [CloudMicrophysics.jl documentation](https://clima.github.io/CloudMicrophysics.jl/dev/) for details.
 """
 function OneMomentCloudMicrophysics(FT::DataType = Oceananigans.defaults.FloatType;
-                                    nucleation = SaturationAdjustment(FT; equilibrium=WarmPhaseEquilibrium()),
+                                    cloud_formation = SaturationAdjustment(FT; equilibrium=WarmPhaseEquilibrium()),
                                     categories = one_moment_cloud_microphysics_categories(FT))
-    return BulkMicrophysics(nucleation, categories)
+    return BulkMicrophysics(cloud_formation, categories)
 end
 
 prognostic_field_names(::WP1M) = tuple(:ρqʳ)
@@ -363,7 +363,7 @@ This is required because:
     𝒰_cloud = with_moisture(𝒰₀, q_cloud)
     
     # Perform saturation adjustment on cloud moisture only
-    𝒰′ = adjust_thermodynamic_state(𝒰_cloud, bμp.nucleation, constants)
+    𝒰′ = adjust_thermodynamic_state(𝒰_cloud, bμp.cloud_formation, constants)
     
     # Add rain back to the liquid fraction
     q′ = 𝒰′.moisture_mass_fractions
@@ -388,7 +388,7 @@ end
     𝒰_cloud = with_moisture(𝒰₀, q_cloud)
     
     # Perform saturation adjustment on cloud moisture only
-    𝒰_adjusted = adjust_thermodynamic_state(𝒰_cloud, bμp.nucleation, constants)
+    𝒰_adjusted = adjust_thermodynamic_state(𝒰_cloud, bμp.cloud_formation, constants)
     
     # Add rain to liquid and snow to ice
     q_adj = 𝒰_adjusted.moisture_mass_fractions
@@ -552,7 +552,7 @@ prettysummary(vel::Blk1MVelTypeSnow) = "Blk1MVelTypeSnow(...)"
 
 function Base.show(io::IO, bμp::BulkMicrophysics{<:Any, <:CM1MCategories})
     print(io, summary(bμp), ":\n",
-          "├── nucleation: ", prettysummary(bμp.nucleation), '\n',
+          "├── cloud_formation: ", prettysummary(bμp.cloud_formation), '\n',
           "├── collisions: ", prettysummary(bμp.categories.collisions), '\n',
           "├── cloud_liquid: ", prettysummary(bμp.categories.cloud_liquid), '\n',
           "├── cloud_ice: ", prettysummary(bμp.categories.cloud_ice), '\n',
