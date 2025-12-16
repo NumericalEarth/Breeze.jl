@@ -1,4 +1,5 @@
 using Breeze
+using RRTMGP, CloudMicrophysics # to load Breeze extensions
 using Documenter
 using DocumenterCitations
 using Literate
@@ -68,9 +69,19 @@ semaphore = Base.Semaphore(Threads.nthreads(:interactive))
     end
 end
 
+modules = Module[]
+BreezeRRTMGPExt = isdefined(Base, :get_extension) ? Base.get_extension(Breeze, :BreezeRRTMGPExt) : Breeze.BreezeRRTMGPExt
+BreezeCloudMicrophysicsExt = isdefined(Base, :get_extension) ? Base.get_extension(Breeze, :BreezeCloudMicrophysicsExt) : Breeze.BreezeCloudMicrophysicsExt
+
+for m in [Breeze, BreezeRRTMGPExt, BreezeCloudMicrophysicsExt]
+    if !isnothing(m)
+        push!(modules, m)
+    end
+end
+
 makedocs(
     ;
-    modules = [Breeze],
+    modules,
     sitename = "Breeze",
     plugins = [bib],
     format = Documenter.HTML(

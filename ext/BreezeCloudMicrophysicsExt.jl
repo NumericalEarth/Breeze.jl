@@ -111,8 +111,7 @@ and _either_
 - `S_0`: supersaturation threshold (default: 0)
 - `qc_0`: cloud liquid water threshold for precipitation (default: 5×10⁻⁴ kg/kg)
 
-For more information see the
-[`CloudMicrophysics.jl` documentation](https://clima.github.io/CloudMicrophysicsDocumentation.jl/dev/parameters/parameters0m/).
+For more information see the [CloudMicrophysics.jl documentation](https://clima.github.io/CloudMicrophysics.jl/stable/Microphysics0M).
 """
 function ZeroMomentCloudMicrophysics(FT::DataType = Oceananigans.defaults.FloatType;
                                      nucleation = SaturationAdjustment(FT),
