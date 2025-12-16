@@ -93,12 +93,12 @@ The following table also uses a few conventions that suffuse the source code and
 | ``\boldsymbol{\tau}``               | `τ`    |                                     | Kinematic subgrid/viscous stress tensor (per unit mass)                        |
 | ``\boldsymbol{\mathcal{T}}``        | `𝒯`    |                                     | Dynamic stress tensor used in anelastic momentum, ``\mathcal{T} = ρᵣ τ``       |
 | ``\boldsymbol{J}``                  | `J`    |                                     | Dynamic diffusive flux for scalars                                             |
-| ``τˣ``                              | `τˣ`   |                                     | Surface momentum flux (``x``-component), ``τˣ = -ρ₀ Cᴰ U ρu / |U|``            |
-| ``τʸ``                              | `τʸ`   |                                     | Surface momentum flux (``y``-component), ``τʸ = -ρ₀ Cᴰ U ρv / |U|``            |
+| ``τˣ``                              | `τˣ`   |                                     | Surface momentum flux (``x``-component), N/m²                                  |
+| ``τʸ``                              | `τʸ`   |                                     | Surface momentum flux (``y``-component), N/m²                                  |
 | ``\mathcal{Q}^T``                   | `𝒬ᵀ`   |                                     | Surface sensible heat flux, ``\mathcal{Q}^T = cᵖᵐ Jᵀ``                         |
 | ``\mathcal{Q}^v``                   | `𝒬ᵛ`   |                                     | Surface latent heat flux, ``\mathcal{Q}^v = \mathcal{L}^l Jᵛ``                 |
-| ``Jᵀ``                              | `Jᵀ`   |                                     | Surface temperature flux, ``Jᵀ = -ρ₀ Cᵀ U (θ - θ_0)``                          |
-| ``Jᵛ``                              | `Jᵛ`   |                                     | Surface moisture flux, ``Jᵛ = -ρ₀ Cᵛ U (q - q_0^{v+})``                        |
+| ``Jᵀ``                              | `Jᵀ`   |                                     | Surface temperature flux, kg K/m²s                                             |
+| ``Jᵛ``                              | `Jᵛ`   |                                     | Surface moisture flux, kg/m²s                                                  |
 | ``Cᴰ``                              | `Cᴰ`   |                                     | Surface drag coefficient                                                       |
 | ``Cᵀ``                              | `Cᵀ`   |                                     | Surface sensible heat transfer coefficient (Stanton number)                    |
 | ``Cᵛ``                              | `Cᵛ`   |                                     | Surface vapor transfer coefficient (Dalton number)                             |
