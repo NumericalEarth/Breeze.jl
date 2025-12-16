@@ -172,8 +172,8 @@ microphysics = OneMomentCloudMicrophysics()
 momentum_advection = WENO(order=9)
 scalar_advection = (
     ρθ = WENO(order=9),
-    ρqᵗ = WENO(order=3, bounds=(0, 1)),
-    ρqʳ = WENO(order=3, bounds=(0, 1)))
+    ρqᵗ = WENO(order=5, bounds=(0, 1e-1)),
+    ρqʳ = WENO(order=5, bounds=(0, 1e-1)))
 
 model = AtmosphereModel(grid; formulation, coriolis, microphysics,
                         momentum_advection, scalar_advection, forcing, boundary_conditions)
