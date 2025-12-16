@@ -169,10 +169,14 @@ BreezeCloudMicrophysicsExt = Base.get_extension(Breeze, :BreezeCloudMicrophysics
 using .BreezeCloudMicrophysicsExt: OneMomentCloudMicrophysics
 
 microphysics = OneMomentCloudMicrophysics()
-advection = WENO(order=9)
+momentum_advection = WENO(order=9)
+scalar_advection = (
+    ρθ = WENO(order=9),
+    ρqᵗ = WENO(order=3, bounds=(0, 1)),
+    ρqʳ = WENO(order=3, bounds=(0, 1)))
 
 model = AtmosphereModel(grid; formulation, coriolis, microphysics,
-                        advection, forcing, boundary_conditions)
+                        momentum_advection, scalar_advection, forcing, boundary_conditions)
 
 # ## Initial conditions
 #
@@ -229,6 +233,7 @@ qˡ = model.microphysical_fields.qˡ    # total liquid (cloud + rain)
 qᶜˡ = model.microphysical_fields.qᶜˡ  # cloud liquid only
 qᵛ = model.microphysical_fields.qᵛ
 qʳ = model.microphysical_fields.qʳ    # rain mass fraction (diagnostic)
+ρqʳ = model.microphysical_fields.ρqʳ 
 ρqʳ = model.microphysical_fields.ρqʳ  # rain mass density (prognostic)
 
 ## Precipitation rate diagnostic from one-moment microphysics
@@ -246,6 +251,7 @@ function progress(sim)
     qᵛmax = maximum(qᵛ)
     qᶜˡmax = maximum(qᶜˡ)
     qʳmax = maximum(qʳ)
+    qʳmin = minimum(qʳ)
     qᵗmax = maximum(sim.model.specific_moisture)
     wmax = maximum(abs, model.velocities.w)
     ∫P = CUDA.@allowscalar ∫PdV[]
@@ -255,8 +261,8 @@ function progress(sim)
                    iteration(sim), prettytime(sim), prettytime(sim.Δt),
                    prettytime(elapsed), wmax)
 
-    msg *= @sprintf(" --- max(qᵗ): %.2e, max(qᵛ): %.2e, max(qᶜˡ): %.2e, max(ρqʳ): %.2e, ∫PdV: %.2e kg/kg/s",
-                    qᵗmax, qᵛmax, qᶜˡmax, qʳmax, ∫P)
+    msg *= @sprintf(" --- max(qᵗ): %.2e, max(qᶜˡ): %.2e, extrema(qʳ): (%.2e, %.2e), ∫PdV: %.2e kg/kg/s",
+                    qᵗmax, qᶜˡmax, qʳmin, qʳmax, ∫P)
 
     @info msg
 

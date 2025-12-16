@@ -148,6 +148,10 @@ end
                                      constants,
                                      specific_moisture)
 
+    # if name == Val(:ρqʳ)
+    #     @show "ρqʳ tendency", microphysical_tendency(i, j, k, grid, microphysics, name, microphysical_fields, 𝒰, constants)
+    # end
+
     return ( - div_ρUc(i, j, k, grid, advection, ρ, Uᵗ, c)
              - ∇_dot_Jᶜ(i, j, k, grid, ρ, closure, closure_fields, id, c, clock, model_fields, diffusive_flux_buoyancy)
              + microphysical_tendency(i, j, k, grid, microphysics, name, microphysical_fields, 𝒰, constants)

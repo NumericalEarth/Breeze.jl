@@ -309,7 +309,9 @@ end
     categories = bμp.categories
 
     @inbounds qᶜˡ = μ.qᶜˡ[i, j, k]  # cloud liquid
-    @inbounds qʳ = μ.ρqʳ[i, j, k] / ρ  # rain
+    @inbounds qʳ = μ.qʳ[i, j, k] # rain
+
+    # @show qᶜˡ, qʳ
 
     # Autoconversion: cloud liquid → rain
     acnv_rate = conv_q_lcl_to_q_rai(categories.rain.acnv1M, qᶜˡ)
@@ -351,7 +353,8 @@ This is required because:
 """
 @inline function maybe_adjust_thermodynamic_state(i, j, k, 𝒰₀, bμp::WP1M, μ, qᵗ, constants)
     # Get rain mass fraction from diagnostic microphysical field
-    @inbounds qʳ = μ.qʳ[i, j, k]
+    ρ = density(𝒰₀, constants)
+    @inbounds qʳ = μ.ρqʳ[i, j, k] / ρ
     
     # Compute cloud moisture (excluding rain)
     qᵗ_cloud = qᵗ - qʳ
@@ -374,8 +377,9 @@ end
 
 @inline function maybe_adjust_thermodynamic_state(i, j, k, 𝒰₀, bμp::MP1M, μ, qᵗ, constants)
     # Get rain and snow mass fractions from diagnostic microphysical fields
-    @inbounds qʳ = μ.qʳ[i, j, k]
-    @inbounds qˢ = μ.qˢ[i, j, k]
+    ρ = density(𝒰₀, constants)
+    @inbounds qʳ = μ.ρqʳ[i, j, k] / ρ   
+    @inbounds qˢ = μ.ρqˢ[i, j, k] / ρ
     
     # Compute cloud moisture (excluding rain and snow)
     qᵗ_cloud = qᵗ - qʳ - qˢ

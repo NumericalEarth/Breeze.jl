@@ -77,7 +77,7 @@ Return the tendency of the microphysical field `name` associated with `microphys
 
 TODO: add the function signature when it is stable
 """
-@inline microphysical_tendency(i, j, k, grid, microphysics::Nothing, name, args...) = zero(grid)
+@inline microphysical_tendency(i, j, k, grid, microphysics::Nothing, name, microphysical_fields, 𝒰, constants) = zero(grid)
 
 """
 $(TYPEDSIGNATURES)
