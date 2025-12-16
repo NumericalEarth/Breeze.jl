@@ -31,7 +31,16 @@ using Breeze.Microphysics:
     SaturationAdjustment,
     WarmPhaseSaturationAdjustment,
     MixedPhaseSaturationAdjustment,
+    NonEquilibriumCloudFormation,
     adjust_thermodynamic_state
+
+using Breeze.Thermodynamics:
+    temperature,
+    PlanarLiquidSurface,
+    saturation_specific_humidity,
+    liquid_latent_heat,
+    vapor_gas_constant,
+    mixture_heat_capacity
 
 using Oceananigans: Oceananigans
 using DocStringExtensions: TYPEDSIGNATURES
@@ -188,25 +197,37 @@ const OneMomentCloudMicrophysics = BulkMicrophysics{<:Any, <:CM1MCategories}
 const WP1M = BulkMicrophysics{<:WarmPhaseSaturationAdjustment, <:CM1MCategories}
 const MP1M = BulkMicrophysics{<:MixedPhaseSaturationAdjustment, <:CM1MCategories}
 
+# Non-equilibrium cloud formation with 1M precipitation (warm-phase only for now)
+const WarmPhaseNonEquilibrium1M = BulkMicrophysics{<:NonEquilibriumCloudFormation{<:CloudLiquid, Nothing}, <:CM1MCategories}
+const WPNE1M = WarmPhaseNonEquilibrium1M
+
 """
     OneMomentCloudMicrophysics(FT = Oceananigans.defaults.FloatType;
-                               cloud_formation = SaturationAdjustment(FT; equilibrium=WarmPhaseEquilibrium()),
+                               cloud_formation = NonEquilibriumCloudFormation(CloudLiquid(FT), nothing),
                                categories = one_moment_cloud_microphysics_categories(FT))
 
 Return a `OneMomentCloudMicrophysics` microphysics scheme for warm-rain and mixed-phase precipitation.
 
 The one-moment scheme uses CloudMicrophysics.jl 1M processes:
+- Condensation/evaporation of cloud liquid (relaxation toward saturation)
 - Autoconversion of cloud liquid to rain
 - Accretion of cloud liquid by rain
 - Terminal velocity for rain sedimentation
 
-For warm-phase microphysics (the default), the prognostic variable is `ρqʳ` (rain mass density).
-For mixed-phase microphysics, additional prognostic variable `ρqˢ` (snow mass density) is included.
+By default, non-equilibrium cloud formation is used, where cloud liquid is a prognostic
+variable that evolves via condensation/evaporation tendencies following Morrison and
+Milbrandt (2015). The prognostic variables are `ρqᶜˡ` (cloud liquid mass density) and
+`ρqʳ` (rain mass density).
+
+For equilibrium (saturation adjustment) cloud formation, pass:
+```julia
+cloud_formation = SaturationAdjustment(FT; equilibrium=WarmPhaseEquilibrium())
+```
 
 See the [CloudMicrophysics.jl documentation](https://clima.github.io/CloudMicrophysics.jl/dev/) for details.
 """
 function OneMomentCloudMicrophysics(FT::DataType = Oceananigans.defaults.FloatType;
-                                    cloud_formation = SaturationAdjustment(FT; equilibrium=WarmPhaseEquilibrium()),
+                                    cloud_formation = NonEquilibriumCloudFormation(CloudLiquid(FT), nothing),
                                     categories = one_moment_cloud_microphysics_categories(FT))
     return BulkMicrophysics(cloud_formation, categories)
 end
@@ -295,6 +316,78 @@ end
 end
 
 #####
+##### Non-equilibrium 1M microphysics (warm-phase)
+#####
+# Cloud liquid is prognostic and evolves via condensation/evaporation tendencies
+# following Morrison and Milbrandt (2015) relaxation formulation.
+
+prognostic_field_names(::WPNE1M) = (:ρqᶜˡ, :ρqʳ)
+
+function materialize_microphysical_fields(bμp::WPNE1M, grid, bcs)
+    names = (:qᵛ, :qˡ, :qᶜˡ, :qʳ, :ρqᶜˡ, :ρqʳ)
+    fields = center_field_tuple(grid, names...)
+    return NamedTuple{names}(fields)
+end
+
+@inline function update_microphysical_fields!(μ, bμp::WPNE1M, i, j, k, grid, ρ, 𝒰, constants)
+    q = 𝒰.moisture_mass_fractions
+    qᵛ = q.vapor
+    qˡ = q.liquid  # total liquid from thermodynamic state
+
+    @inbounds begin
+        qᶜˡ = μ.ρqᶜˡ[i, j, k] / ρ  # cloud liquid from prognostic field
+        qʳ = μ.ρqʳ[i, j, k] / ρ    # rain from prognostic field
+        μ.qᵛ[i, j, k] = qᵛ
+        μ.qᶜˡ[i, j, k] = qᶜˡ
+        μ.qʳ[i, j, k] = qʳ
+        μ.qˡ[i, j, k] = qᶜˡ + qʳ  # total liquid (cloud + rain)
+    end
+
+    return nothing
+end
+
+@inline function compute_moisture_fractions(i, j, k, grid, bμp::WPNE1M, ρ, qᵗ, μ)
+    @inbounds begin
+        qᶜˡ = μ.ρqᶜˡ[i, j, k] / ρ
+        qʳ = μ.ρqʳ[i, j, k] / ρ
+    end
+
+    # Vapor is diagnosed from total moisture minus condensates
+    qᵛ = qᵗ - qᶜˡ - qʳ
+    qˡ = qᶜˡ + qʳ
+    qⁱ = zero(qˡ)
+
+    return MoistureMassFractions(qᵛ, qˡ, qⁱ)
+end
+
+"""
+$(TYPEDSIGNATURES)
+
+Compute thermodynamic state for non-equilibrium 1M microphysics.
+
+Unlike saturation adjustment, cloud liquid is prognostic and temperature is computed
+directly from the thermodynamic state without iteration. The moisture partition is
+determined from the prognostic cloud liquid and rain fields.
+"""
+@inline function maybe_adjust_thermodynamic_state(i, j, k, 𝒰₀, bμp::WPNE1M, μ, qᵗ, constants)
+    ρ = density(𝒰₀, constants)
+
+    # Get cloud liquid and rain from prognostic fields
+    @inbounds qᶜˡ = μ.ρqᶜˡ[i, j, k] / ρ
+    @inbounds qʳ = μ.ρqʳ[i, j, k] / ρ
+
+    # Vapor is diagnosed from total moisture minus condensates
+    qᵛ = qᵗ - qᶜˡ - qʳ
+    qˡ = qᶜˡ + qʳ
+
+    # Build moisture state from prognostic fields
+    q = MoistureMassFractions(qᵛ, qˡ)
+
+    # Return thermodynamic state with prognostic moisture (no adjustment iteration)
+    return with_moisture(𝒰₀, q)
+end
+
+#####
 ##### Microphysical tendencies for 1M warm-phase scheme
 #####
 
@@ -328,6 +421,103 @@ end
 # TODO: add rain evaporation
 @inline function microphysical_tendency(i, j, k, grid, bμp::WP1M, ::Val{:ρqᵗ}, ρ, μ, 𝒰, constants)
     return zero(grid)
+end
+
+#####
+##### Microphysical tendencies for non-equilibrium 1M warm-phase scheme
+#####
+
+# Rain tendency for non-equilibrium 1M: autoconversion + accretion (same physics as equilibrium)
+@inline function microphysical_tendency(i, j, k, grid, bμp::WPNE1M, ::Val{:ρqʳ}, ρ, μ, 𝒰, constants)
+    categories = bμp.categories
+    ρⁱʲᵏ = @inbounds ρ[i, j, k]
+
+    @inbounds qᶜˡ = μ.qᶜˡ[i, j, k]  # cloud liquid
+    @inbounds qʳ = μ.qʳ[i, j, k]    # rain
+
+    # Autoconversion: cloud liquid → rain
+    acnv_rate = conv_q_lcl_to_q_rai(categories.rain.acnv1M, qᶜˡ)
+
+    # Accretion: cloud liquid captured by falling rain
+    acc_rate = accretion(categories.cloud_liquid, categories.rain,
+                         categories.hydrometeor_velocities.rain, categories.collisions,
+                         qᶜˡ, qʳ, ρⁱʲᵏ)
+
+    # Total tendency for ρqʳ (positive = rain increase)
+    return ρⁱʲᵏ * (acnv_rate + acc_rate)
+end
+
+"""
+    condensation_rate(qᵛ, qᵛ⁺, T, τ_relax, constants)
+
+Compute the condensation/evaporation rate following Morrison and Milbrandt (2015).
+
+The rate is given by:
+```math
+\\frac{dq^{cℓ}}{dt} = \\frac{q^v - q^{v+}}{τ_{relax} Γ_ℓ}
+```
+
+where:
+- `qᵛ` is the vapor specific humidity
+- `qᵛ⁺` is the saturation specific humidity over liquid
+- `τ_relax` is the relaxation timescale (typically ~10 s)
+- `Γₗ = 1 + (Lᵥ/cₚ) * dqₛ/dT` is the thermodynamic adjustment factor
+
+A positive rate indicates condensation (vapor → liquid), negative indicates evaporation.
+"""
+@inline function condensation_rate(qᵛ, qᵛ⁺, T, ρ, q, τ_relax, constants)
+    # Latent heat of vaporization at temperature T
+    Lᵥ = liquid_latent_heat(T, constants)
+
+    # Mixture heat capacity
+    cₚ = mixture_heat_capacity(q, constants)
+
+    # Vapor gas constant
+    Rᵛ = vapor_gas_constant(constants)
+
+    # Derivative of saturation specific humidity with respect to temperature
+    # dqₛ/dT = qᵛ⁺ * (Lᵥ / (Rᵛ * T²) - 1/T)
+    dqₛdT = qᵛ⁺ * (Lᵥ / (Rᵛ * T^2) - 1 / T)
+
+    # Thermodynamic adjustment factor (accounts for latent heat feedback)
+    Γₗ = 1 + (Lᵥ / cₚ) * dqₛdT
+
+    # Condensation/evaporation rate (positive = condensation)
+    return (qᵛ - qᵛ⁺) / (τ_relax * Γₗ)
+end
+
+# Cloud liquid tendency for non-equilibrium 1M: condensation/evaporation - (autoconversion + accretion)
+@inline function microphysical_tendency(i, j, k, grid, bμp::WPNE1M, ::Val{:ρqᶜˡ}, ρ, μ, 𝒰, constants)
+    categories = bμp.categories
+    cloud_formation = bμp.cloud_formation
+    τ_relax = cloud_formation.liquid.τ_relax
+
+    ρⁱʲᵏ = @inbounds ρ[i, j, k]
+
+    @inbounds qᶜˡ = μ.qᶜˡ[i, j, k]
+    @inbounds qʳ = μ.qʳ[i, j, k]
+
+    # Get thermodynamic state
+    T = temperature(𝒰, constants)
+    q = 𝒰.moisture_mass_fractions
+    qᵛ = q.vapor
+
+    # Saturation specific humidity over liquid
+    qᵛ⁺ = saturation_specific_humidity(T, ρⁱʲᵏ, constants, PlanarLiquidSurface())
+
+    # Condensation/evaporation rate (positive = condensation = cloud liquid increase)
+    cond_rate = condensation_rate(qᵛ, qᵛ⁺, T, ρⁱʲᵏ, q, τ_relax, constants)
+
+    # Autoconversion: cloud liquid → rain (sink for cloud liquid)
+    acnv_rate = conv_q_lcl_to_q_rai(categories.rain.acnv1M, qᶜˡ)
+
+    # Accretion: cloud liquid captured by falling rain (sink for cloud liquid)
+    acc_rate = accretion(categories.cloud_liquid, categories.rain,
+                         categories.hydrometeor_velocities.rain, categories.collisions,
+                         qᶜˡ, qʳ, ρⁱʲᵏ)
+
+    # Total tendency for ρqᶜˡ: condensation - autoconversion - accretion
+    return ρⁱʲᵏ * (cond_rate - acnv_rate - acc_rate)
 end
 
 # Default fallback for OneMomentCloudMicrophysics velocities
@@ -455,6 +645,17 @@ function precipitation_rate(model, microphysics::WP1M, ::Val{:liquid})
     return Field(op)
 end
 
+# Non-equilibrium 1M uses the same precipitation rate calculation (autoconversion + accretion)
+function precipitation_rate(model, microphysics::WPNE1M, ::Val{:liquid})
+    grid = model.grid
+    qᶜˡ = model.microphysical_fields.qᶜˡ
+    ρqʳ = model.microphysical_fields.ρqʳ
+    ρ = model.formulation.reference_state.density
+    kernel = OneMomentPrecipitationRateKernel(microphysics.categories, qᶜˡ, ρqʳ, ρ)
+    op = KernelFunctionOperation{Center, Center, Center}(kernel, grid)
+    return Field(op)
+end
+
 # Ice precipitation not yet implemented for one-moment scheme
 precipitation_rate(model, ::OneMomentCloudMicrophysics, ::Val{:ice}) = nothing
 
@@ -549,6 +750,12 @@ end
 prettysummary(vel::Blk1MVelType) = "Blk1MVelType(...)"
 prettysummary(vel::Blk1MVelTypeRain) = "Blk1MVelTypeRain(...)"
 prettysummary(vel::Blk1MVelTypeSnow) = "Blk1MVelTypeSnow(...)"
+
+function prettysummary(ne::NonEquilibriumCloudFormation)
+    liquid_str = isnothing(ne.liquid) ? "nothing" : "CloudLiquid(τ_relax=$(ne.liquid.τ_relax))"
+    ice_str = isnothing(ne.ice) ? "nothing" : "CloudIce(τ_relax=$(ne.ice.τ_relax))"
+    return "NonEquilibriumCloudFormation($liquid_str, $ice_str)"
+end
 
 function Base.show(io::IO, bμp::BulkMicrophysics{<:Any, <:CM1MCategories})
     print(io, summary(bμp), ":\n",
