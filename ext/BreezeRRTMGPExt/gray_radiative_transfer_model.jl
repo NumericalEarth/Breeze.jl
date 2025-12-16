@@ -167,10 +167,10 @@ function RadiativeTransferModel(grid, constants,
 
     grid_parameters = RRTMGPGridParams(FT; context, nlay=Nz, ncol=Nc)
 
-    longwave_solver  = NoScatLWRTE(grid_parameters;
-                                   params = radiative_transfer_parameters,
-                                   sfc_emis = rrtmgp_ε₀,
-                                   inc_flux = nothing)
+    longwave_solver = NoScatLWRTE(grid_parameters;
+                                  params = radiative_transfer_parameters,
+                                  sfc_emis = rrtmgp_ε₀,
+                                  inc_flux = nothing)
 
     shortwave_solver = NoScatSWRTE(grid_parameters;
                                    cos_zenith = cos_zenith,
@@ -485,7 +485,10 @@ $(TYPEDSIGNATURES)
 
 Copy RRTMGP flux arrays to Oceananigans ZFaceFields.
 
-Applies sign convention: positive = upward, negative = downward.
+Applies sign convention:
+* positive = upward
+* negative = downward.
+
 For the non-scattering shortwave solver, only the direct beam flux is computed.
 """
 function copy_fluxes_to_fields!(rtm::GrayRadiativeTransferModel, grid)
