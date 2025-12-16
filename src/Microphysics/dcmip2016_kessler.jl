@@ -65,7 +65,7 @@ struct KesslerMicrophysics end
 const KM = KesslerMicrophysics
 
 """
-    prognostic_field_names(::KesslerMicrophysics)
+$(TYPEDSIGNATURES)
 
 Return the names of prognostic microphysical fields for the Kessler scheme.
 
@@ -76,7 +76,7 @@ Return the names of prognostic microphysical fields for the Kessler scheme.
 prognostic_field_names(::KM) = (:ρqᶜˡ, :ρqʳ)
 
 """
-    materialize_microphysical_fields(::KesslerMicrophysics, grid, boundary_conditions)
+$(TYPEDSIGNATURES)
 
 Create and return the microphysical fields for the Kessler scheme.
 
@@ -113,7 +113,7 @@ end
 #####
 
 """
-    compute_moisture_fractions(i, j, k, grid, ::KesslerMicrophysics, ρ, qᵗ, μ)
+$(TYPEDSIGNATURES)
 
 Compute moisture mass fractions at grid point `(i, j, k)` for the thermodynamic state.
 
@@ -131,7 +131,7 @@ Returns `MoistureMassFractions(qᵛ, qˡ)` where \$q^l = q^{cl} + q^r\$ is the t
 end
 
 """
-    maybe_adjust_thermodynamic_state(𝒰, ::KesslerMicrophysics, μ, qᵗ, constants)
+$(TYPEDSIGNATURES)
 
 Return the thermodynamic state without adjustment.
 
@@ -140,7 +140,7 @@ The Kessler scheme performs its own saturation adjustment internally via the ker
 @inline maybe_adjust_thermodynamic_state(𝒰, ::KM, μ, qᵗ, constants) = 𝒰
 
 """
-    microphysical_velocities(::KesslerMicrophysics, name, μ)
+$(TYPEDSIGNATURES)
 
 Return `nothing`.
 
@@ -149,7 +149,7 @@ Rain sedimentation is handled internally by the kernel rather than through the a
 @inline microphysical_velocities(::KM, name) = nothing
 
 """
-    microphysical_tendency(i, j, k, grid, ::KesslerMicrophysics, name, μ, 𝒰, constants)
+$(TYPEDSIGNATURES)
 
 Return zero tendency.
 
@@ -190,7 +190,7 @@ const kessler_rhoqr = 1000.0
 #####
 
 """
-    mass_fraction_to_mixing_ratio(q, qᵗ)
+$(TYPEDSIGNATURES)
 
 Convert mass fraction \$q\$ to mixing ratio \$r\$.
 \$q^t\$ is the total mass fraction (sum of all moisture species).
@@ -200,7 +200,7 @@ The conversion is: \$r = q / (1 - q^t)\$
 @inline mass_fraction_to_mixing_ratio(q, qᵗ) = q / (1 - qᵗ)
 
 """
-    mixing_ratio_to_mass_fraction(r, rᵗ)
+$(TYPEDSIGNATURES)
 
 Convert mixing ratio \$r\$ to mass fraction \$q\$.
 \$r^t\$ is the total mixing ratio (sum of all moisture species).
@@ -211,7 +211,7 @@ The conversion is: \$q = r / (1 + r^t)\$
 
 
 """
-    kessler_terminal_velocity(rʳ, ρ, ρ_bottom)
+$(TYPEDSIGNATURES)
 
 Compute liquid water terminal velocity (\$m/s\$) following Klemp and Wilhelmson (1978) eq. 2.15.
 
@@ -228,7 +228,7 @@ end
 #####
 
 """
-    microphysics_model_update!(::KM, model)
+$(TYPEDSIGNATURES)
 
 Apply the Kessler microphysics to the model.
 
@@ -608,7 +608,7 @@ end
 #####
 
 """
-    update_microphysical_fields!(μ, ::KesslerMicrophysics, i, j, k, grid, ρ, 𝒰, constants)
+$(TYPEDSIGNATURES)
 
 Update the diagnostic mass fraction fields from the prognostic density-weighted fields.
 
