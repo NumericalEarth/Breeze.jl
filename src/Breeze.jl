@@ -53,7 +53,11 @@ export
 
     # Forcing utilities
     geostrophic_forcings,
-    SubsidenceForcing
+    SubsidenceForcing,
+
+    # TimeSteppers
+    PositivityPreservingRK3TimeStepper,
+    compute_split_advection_tendency!
 
 using Oceananigans: Oceananigans, @at, AnisotropicMinimumDissipation, Average,
                     AveragedTimeInterval, BackgroundField, BetaPlane, Bounded,
@@ -133,5 +137,8 @@ using .BoundaryConditions
 
 include("Forcings/Forcings.jl")
 using .Forcings
+
+include("TimeSteppers/TimeSteppers.jl")
+using .TimeSteppers
 
 end # module Breeze
