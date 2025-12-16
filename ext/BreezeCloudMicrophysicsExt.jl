@@ -304,9 +304,9 @@ end
 
 # Rain mass tendency (ρqʳ): autoconversion + accretion
 # Note: ρqᵗ tendency is the negative of ρqʳ tendency (conservation of moisture)
-@inline function microphysical_tendency(i, j, k, grid, bμp::WP1M, ::Val{:ρqʳ}, μ, 𝒰, constants)
-    ρ = density(𝒰, constants)
+@inline function microphysical_tendency(i, j, k, grid, bμp::WP1M, ::Val{:ρqʳ}, ρ, μ, 𝒰, constants)
     categories = bμp.categories
+    ρⁱʲᵏ = @inbounds ρ[i, j, k]
 
     @inbounds qᶜˡ = μ.qᶜˡ[i, j, k]  # cloud liquid
     @inbounds qʳ = μ.qʳ[i, j, k] # rain
@@ -319,10 +319,10 @@ end
     # Accretion: cloud liquid captured by falling rain
     acc_rate = accretion(categories.cloud_liquid, categories.rain,
                          categories.hydrometeor_velocities.rain, categories.collisions,
-                         qᶜˡ, qʳ, ρ)
+                         qᶜˡ, qʳ, ρⁱʲᵏ)
 
     # Total tendency for ρqʳ (positive = rain increase)
-    return ρ * (acnv_rate + acc_rate)
+    return ρⁱʲᵏ * (acnv_rate + acc_rate)
 end
 
 # Moisture tendency (ρqᵗ): loss to precipitation (currently zero since rain is tracked separately)
