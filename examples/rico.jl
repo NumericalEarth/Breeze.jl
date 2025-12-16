@@ -169,11 +169,15 @@ BreezeCloudMicrophysicsExt = Base.get_extension(Breeze, :BreezeCloudMicrophysics
 using .BreezeCloudMicrophysicsExt: OneMomentCloudMicrophysics
 
 microphysics = OneMomentCloudMicrophysics()
-momentum_advection = WENO(order=9)
-scalar_advection = (
-    ρθ = WENO(order=9),
-    ρqᵗ = UpwindBiased(order=1), # WENO(order=5, bounds=(0, 1e-1)),
-    ρqʳ = UpwindBiased(order=1)) # WENO(order=5, bounds=(0, 1e-1)))
+
+ninth_order_weno = WENO(order=9)
+bounds_preserving_weno = WENO(order=5, bounds=(0, 1))
+
+momentum_advection = ninth_order_weno
+scalar_advection = (ρθ = ninth_order_weno,
+                    ρqᵗ = bounds_preserving_weno,
+                    ρqᶜˡ = bounds_preserving_weno,
+                    ρqʳ = bounds_preserving_weno)
 
 model = AtmosphereModel(grid; formulation, coriolis, microphysics,
                         momentum_advection, scalar_advection, forcing, boundary_conditions)
