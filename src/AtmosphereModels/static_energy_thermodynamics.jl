@@ -127,7 +127,7 @@ end
     return ( - div_ρUc(i, j, k, grid, advection, ρ, velocities, specific_energy)
              + buoyancy_flux
              - ∇_dot_Jᶜ(i, j, k, grid, ρ, closure, closure_fields, id, specific_energy, clock, model_fields, closure_buoyancy)
-             + microphysical_tendency(i, j, k, grid, microphysics, Val(:ρe), microphysical_fields, 𝒰, constants)
+             + microphysical_tendency(i, j, k, grid, microphysics, Val(:ρe), ρ, microphysical_fields, 𝒰, constants)
              + ρe_forcing(i, j, k, grid, clock, model_fields))
 end
 

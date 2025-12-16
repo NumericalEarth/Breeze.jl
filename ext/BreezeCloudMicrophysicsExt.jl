@@ -80,7 +80,7 @@ materialize_microphysical_fields(bμp::ZMCM, grid, bcs) = materialize_microphysi
     return adjust_thermodynamic_state(𝒰₁, bμp.nucleation, constants)
 end
 
-@inline function microphysical_tendency(i, j, k, grid, bμp::ZMCM, ::Val{:ρqᵗ}, μ, 𝒰, constants)
+@inline function microphysical_tendency(i, j, k, grid, bμp::ZMCM, ::Val{:ρqᵗ}, ρ, μ, 𝒰, constants)
     # Get cloud liquid water from microphysical fields
     q = 𝒰.moisture_mass_fractions
     qˡ = q.liquid
@@ -326,7 +326,7 @@ end
 
 # Moisture tendency (ρqᵗ): loss to precipitation (currently zero since rain is tracked separately)
 # TODO: add rain evaporation
-@inline function microphysical_tendency(i, j, k, grid, bμp::WP1M, ::Val{:ρqᵗ}, μ, 𝒰, constants)
+@inline function microphysical_tendency(i, j, k, grid, bμp::WP1M, ::Val{:ρqᵗ}, ρ, μ, 𝒰, constants)
     return zero(grid)
 end
 
