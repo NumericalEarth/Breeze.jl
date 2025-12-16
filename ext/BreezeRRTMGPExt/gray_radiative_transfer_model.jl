@@ -167,10 +167,10 @@ function RadiativeTransferModel(grid, constants,
 
     grid_parameters = RRTMGPGridParams(FT; context, nlay=Nz, ncol=Nc)
 
-    longwave_solver  = NoScatLWRTE(grid_parameters;
-                                   params = radiative_transfer_parameters,
-                                   sfc_emis = rrtmgp_ε₀,
-                                   inc_flux = nothing)
+    longwave_solver = NoScatLWRTE(grid_parameters;
+                                  params = radiative_transfer_parameters,
+                                  sfc_emis = rrtmgp_ε₀,
+                                  inc_flux = nothing)
 
     shortwave_solver = NoScatSWRTE(grid_parameters;
                                    cos_zenith = cos_zenith,
