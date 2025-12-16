@@ -15,7 +15,7 @@ using ..Thermodynamics:
 
 using Oceananigans: Oceananigans, CenterField, Field, interior
 using Oceananigans.Architectures: architecture
-using Oceananigans.Grids: znode, Center, Nothing as GridNothing
+using Oceananigans.Grids: znode, Center
 using Oceananigans.Utils: launch!
 
 using KernelAbstractions: @kernel, @index
@@ -102,7 +102,7 @@ function materialize_microphysical_fields(::KM, grid, boundary_conditions)
     qʳ  = CenterField(grid)
 
     # Precipitation and velocity diagnostics
-    precipitation_rate = Field{Center, Center, GridNothing}(grid)
+    precipitation_rate = Field{Center, Center, Nothing}(grid)
     vᵗ_rain = CenterField(grid)
 
     return (; ρqᶜˡ, ρqʳ, qᵛ, qᶜˡ, qʳ, precipitation_rate, vᵗ_rain)
