@@ -65,7 +65,7 @@ Return the microphysical velocities associated with `microphysics` and `name`.
 
 Must be either `nothing`, or a NamedTuple with three components `u, v, w`.
 """
-@inline microphysical_velocities(microphysics::Nothing, name, microphysical_fields) = nothing
+@inline microphysical_velocities(microphysics::Nothing, name) = nothing
 
 """
 $(TYPEDSIGNATURES)
