@@ -106,5 +106,5 @@ The following table also uses a few conventions that suffuse the source code and
 | ``qᵛ₀``                             | `qᵛ₀`  |                                     | Saturation specific humidity at sea surface                                    |
 | ``\mathscr{I}``                     | `ℐ`    |                                     | Radiative flux (intensity), W/m²                                               |
 | ``F_{\mathscr{I}}``                 | `Fℐ`   |                                     | Radiative flux divergence (heating rate), K/s                                  |
-| ``τˡʷ``                             | `τˡʷ`  |                                     | Atmospheric atmosphere optical thickness for longwave                          |
-| ``τˢʷ``                             | `τˢʷ`  |                                     | Atmospheric atmosphere optical thickness for shortwave                         |
+| ``τˡʷ``                             | `τˡʷ`  |                                     | Atmosphere optical thickness for longwave                                      |
+| ``τˢʷ``                             | `τˢʷ`  |                                     | Atmosphere optical thickness for shortwave                                     |
