@@ -63,6 +63,7 @@ jobs:
           arch: ${{ matrix.arch }}
       - uses: julia-actions/cache@v2
         id: julia-cache
+        if: ${{ matrix.os != 'self-hosted' }}
       - name: "Set test arguments and other environment variables"
         shell: bash
         run: |
@@ -93,7 +94,7 @@ jobs:
         continue-on-error: true
       - name: Save Julia depot cache on cancel or failure
         id: julia-cache-save
-        if: cancelled() || failure()
+        if: ${{ matrix.os != 'self-hosted' && (cancelled() || failure()) }}
         uses: actions/cache/save@v5
         with:
           path: |
