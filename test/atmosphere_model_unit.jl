@@ -16,7 +16,7 @@ function run_nan_checker_test(arch; erroring)
         @test_throws ErrorException run!(simulation)
     else
         run!(simulation)
-        @show @test model.clock.iteration == 1 # simulation stopped after one iteration
+        @test model.clock.iteration == 1 # simulation stopped after one iteration
     end
 
     return nothing
