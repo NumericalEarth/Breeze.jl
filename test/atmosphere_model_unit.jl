@@ -1,8 +1,26 @@
 using Breeze
 using GPUArraysCore: @allowscalar
 using Oceananigans
+using Oceananigans.Diagnostics: erroring_NaNChecker!
 using Oceananigans.Operators: ℑzᵃᵃᶠ
 using Test
+
+function run_nan_checker_test(arch; erroring)
+    grid = RectilinearGrid(arch, size=(4, 2, 1), extent=(1, 1, 1))
+    model = AtmosphereModel(grid)
+    simulation = Simulation(model, Δt=1, stop_iteration=2)
+    @allowscalar model.momentum.ρu[1, 1, 1] = NaN
+    erroring && erroring_NaNChecker!(simulation)
+
+    if erroring
+        @test_throws ErrorException run!(simulation)
+    else
+        run!(simulation)
+        @show @test model.clock.iteration == 1 # simulation stopped after one iteration
+    end
+
+    return nothing
+end
 
 @testset "AtmosphereModel [$(FT)]" for FT in (Float32, Float64)
     Oceananigans.defaults.FloatType = FT
@@ -14,6 +32,12 @@ using Test
     @testset "Basic tests for set!" begin
         set!(model, time=1)
         @test model.clock.time == 1
+    end
+
+    @testset "NaN Checker" begin
+        @info "  Testing NaN Checker..."
+        run_nan_checker_test(default_arch, erroring=true)
+        run_nan_checker_test(default_arch, erroring=false)
     end
 
     constants = ThermodynamicConstants()
@@ -178,7 +202,7 @@ end
 
         for model in (static_energy_model, potential_temperature_model)
             @test model.advection.momentum isa FluxFormAdvection
-            @test model.advection.ρqᵗ isa FluxFormAdvection 
+            @test model.advection.ρqᵗ isa FluxFormAdvection
             @test model.advection.ρqᵗ.x isa WENO
             @test model.advection.ρqᵗ.y isa WENO
             @test model.advection.ρqᵗ.z isa Centered
@@ -219,3 +243,4 @@ end
         end
     end
 end
+

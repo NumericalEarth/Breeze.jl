@@ -1,10 +1,11 @@
 using ..Thermodynamics: Thermodynamics, ThermodynamicConstants, ReferenceState
 
-using Oceananigans: AbstractModel, Center, CenterField, Clock, Field
-using Oceananigans: Centered, XFaceField, YFaceField, ZFaceField
+using Oceananigans: AbstractModel, Center, CenterField, Clock, Field,
+                    Centered, XFaceField, YFaceField, ZFaceField
 using Oceananigans.Advection: adapt_advection_order
 using Oceananigans.AbstractOperations: @at
 using Oceananigans.BoundaryConditions: FieldBoundaryConditions, regularize_field_boundary_conditions
+using Oceananigans.Diagnostics: NaNChecker
 using Oceananigans.Grids: ZDirection
 using Oceananigans.Models: validate_model_halo, validate_tracer_advection
 using Oceananigans.Solvers: FourierTridiagonalPoissonSolver
@@ -14,6 +15,7 @@ using Oceananigans.Utils: launch!, prettytime, prettykeys, with_tracers
 
 import Oceananigans: fields, prognostic_fields
 import Oceananigans.Advection: cell_advection_timescale
+import Oceananigans.Diagnostics: default_nan_checker
 import Oceananigans.Models.HydrostaticFreeSurfaceModels: validate_momentum_advection
 import Oceananigans.Models: boundary_condition_args
 
@@ -390,4 +392,18 @@ function total_energy(model)
     k = @at (Center, Center, Center) (u^2 + v^2 + w^2) / 2 |> Field
     e = static_energy(model) |> Field
     return k + e
+end
+
+# Check for NaNs in the first prognostic field
+function default_nan_checker(model::AtmosphereModel)
+    model_fields = prognostic_fields(model)
+
+    if isempty(model_fields)
+        return nothing
+    end
+
+    first_name = first(keys(model_fields))
+    field_to_check_nans = NamedTuple{tuple(first_name)}(model_fields)
+    nan_checker = NaNChecker(field_to_check_nans)
+    return nan_checker
 end
