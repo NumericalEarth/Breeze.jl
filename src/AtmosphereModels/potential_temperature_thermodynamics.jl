@@ -197,7 +197,7 @@ end
     z = znode(i, j, k, grid, c, c, c)
     q = compute_moisture_fractions(i, j, k, grid, microphysics, ρᵣ, qᵗ, microphysical_fields)
     𝒰e₀ = StaticEnergyState(e, q, z, pᵣ)
-    𝒰e₁ = maybe_adjust_thermodynamic_state(i, j, k, 𝒰e₀, microphysics, microphysical_fields, qᵗ, constants)
+    𝒰e₁ = maybe_adjust_thermodynamic_state(i, j, k, 𝒰e₀, microphysics, ρᵣ, microphysical_fields, qᵗ, constants)
     T = temperature(𝒰e₁, constants)
 
     p₀ = formulation.reference_state.surface_pressure

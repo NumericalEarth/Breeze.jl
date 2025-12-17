@@ -1,0 +1,58 @@
+module BreezeCloudMicrophysicsExt
+
+using CloudMicrophysics: CloudMicrophysics
+using CloudMicrophysics.Parameters: Parameters0M, Rain, Snow, CloudIce, CloudLiquid, CollisionEff
+using CloudMicrophysics.Parameters: Blk1MVelType, Blk1MVelTypeRain, Blk1MVelTypeSnow
+using CloudMicrophysics.Microphysics0M: remove_precipitation
+
+using CloudMicrophysics.Microphysics1M:
+    conv_q_lcl_to_q_rai,
+    accretion
+
+using Breeze
+using Breeze.AtmosphereModels
+
+using Breeze.Thermodynamics:
+    MoistureMassFractions,
+    density,
+    with_moisture,
+    temperature,
+    PlanarLiquidSurface,
+    saturation_specific_humidity,
+    liquid_latent_heat,
+    vapor_gas_constant,
+    mixture_heat_capacity
+
+using Breeze.Microphysics:
+    center_field_tuple,
+    BulkMicrophysics,
+    FourCategories,
+    WarmPhaseEquilibrium,
+    SaturationAdjustment,
+    WarmPhaseSaturationAdjustment,
+    MixedPhaseSaturationAdjustment,
+    NonEquilibriumCloudFormation,
+    adjust_thermodynamic_state
+
+using Oceananigans: Oceananigans
+using DocStringExtensions: TYPEDSIGNATURES
+
+using Oceananigans: Center, Field
+using Oceananigans.AbstractOperations: KernelFunctionOperation
+using Adapt: Adapt, adapt
+
+import Breeze.AtmosphereModels:
+    maybe_adjust_thermodynamic_state,
+    prognostic_field_names,
+    materialize_microphysical_fields,
+    update_microphysical_fields!,
+    compute_moisture_fractions,
+    microphysical_tendency,
+    microphysical_velocities,
+    precipitation_rate
+
+include("zero_moment_microphysics.jl")
+include("one_moment_microphysics.jl")
+
+end # module BreezeCloudMicrophysicsExt
+

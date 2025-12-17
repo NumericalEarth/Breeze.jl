@@ -20,9 +20,9 @@ This is needed because some microphysics schemes apply saturation adjustment to 
 subset of the thermodynamic state (for example, omitting precipitating species).
 
 Grid indices `(i, j, k)` are provided to allow access to prognostic microphysical fields
-at the current grid point.
+at the current grid point. The reference density `ρᵣ` is passed to avoid recomputing it.
 """
-@inline maybe_adjust_thermodynamic_state(i, j, k, state, ::Nothing, microphysical_fields, qᵗ, thermo) = state
+@inline maybe_adjust_thermodynamic_state(i, j, k, state, ::Nothing, ρᵣ, microphysical_fields, qᵗ, thermo) = state
 
 """
 $(TYPEDSIGNATURES)
