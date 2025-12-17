@@ -134,10 +134,19 @@ function materialize_microphysical_fields(::KM, grid, boundary_conditions)
     qᶜˡ = CenterField(grid)
     qʳ = CenterField(grid)
 
-    return (; ρqᶜˡ, ρqʳ, qᵛ, qᶜˡ, qʳ)
+    # Cached microphysics rates (computed once per timestep in update_microphysical_fields!)
+    # These are tendencies in mixing ratio space [kg kg⁻¹ s⁻¹]
+    Cₖ = CenterField(grid)  # Condensation rate
+    Eₖ = CenterField(grid)  # Cloud evaporation rate
+    Aₖ = CenterField(grid)  # Autoconversion rate
+    Kₖ = CenterField(grid)  # Accretion rate
+    Eʳ = CenterField(grid)  # Rain evaporation rate
+
+    return (; ρqᶜˡ, ρqʳ, qᵛ, qᶜˡ, qʳ, Cₖ, Eₖ, Aₖ, Kₖ, Eʳ)
 end
 
-@inline function update_microphysical_fields!(μ, ::KM, i, j, k, grid, ρ, 𝒰, constants)
+@inline function update_microphysical_fields!(μ, km::KM, i, j, k, grid, ρ, 𝒰, constants)
+    FT = eltype(grid)
     @inbounds begin
         # Get total moisture from thermodynamic state
         # In the moisture_mass_fractions, vapor contains qᵛ and liquid contains total condensate (qᶜˡ + qʳ)
@@ -154,6 +163,38 @@ end
         μ.qᵛ[i, j, k] = qᵛ
         μ.qᶜˡ[i, j, k] = qᶜˡ
         μ.qʳ[i, j, k] = qʳ
+        
+        # Compute and cache microphysics rates (once per timestep)
+        T = temperature(𝒰, constants)
+        
+        # Convert mass fractions to mixing ratios for Kessler formulas
+        rᵛ = mass_fraction_to_mixing_ratio(qᵛ, qᵗ)
+        rᶜˡ = mass_fraction_to_mixing_ratio(qᶜˡ, qᵗ)
+        rʳ = mass_fraction_to_mixing_ratio(qʳ, qᵗ)
+        
+        # Saturation: compute in mixing ratio space
+        qᵛ⁺ = saturation_specific_humidity(T, ρ, constants, PlanarLiquidSurface())
+        rᵛ⁺ = mass_fraction_to_mixing_ratio(qᵛ⁺, qᵗ)
+        
+        # Latent heat and heat capacity
+        L = liquid_latent_heat(T, constants)
+        q = MoistureMassFractions(qᵛ, qᶜˡ + qʳ)
+        cₚ = mixture_heat_capacity(q, constants)
+        
+        # Compute all rates in mixing ratio space
+        D = condensation_denominator(T, rᵛ⁺, L, cₚ)
+        Cₖ_val = condensation_rate(rᵛ, rᵛ⁺, D)
+        Eₖ_val = cloud_evaporation_rate(rᵛ, rᶜˡ, rᵛ⁺, D)
+        Aₖ_val = autoconversion_rate(rᶜˡ, km)
+        Kₖ_val = accretion_rate(rᶜˡ, rʳ, km)
+        Eʳ_val = rain_evaporation_rate(ρ, rᵛ, rʳ, rᵛ⁺)
+        
+        # Store rates for use in microphysical_tendency
+        μ.Cₖ[i, j, k] = Cₖ_val
+        μ.Eₖ[i, j, k] = Eₖ_val
+        μ.Aₖ[i, j, k] = Aₖ_val
+        μ.Kₖ[i, j, k] = Kₖ_val
+        μ.Eʳ[i, j, k] = Eʳ_val
     end
     return nothing
 end
@@ -352,50 +393,27 @@ $(TYPEDSIGNATURES)
 
 Compute the tendency for cloud liquid density (ρqᶜˡ).
 
-The Kessler formulas are computed in mixing ratio space, then converted to mass fraction tendencies.
+The rates Cₖ, Eₖ, Aₖ, Kₖ are computed once per timestep in `update_microphysical_fields!`
+and cached in the microphysical fields.
 
 ```math
 \\frac{∂(ρqᶜˡ)}{∂t} = ρ \\cdot (1 - qᵗ) \\cdot (Cₖ - Eₖ - Aₖ - Kₖ)
 ```
 
-where the rates Cₖ, Eₖ, Aₖ, Kₖ are computed in mixing ratio space.
+where the rates Cₖ, Eₖ, Aₖ, Kₖ are in mixing ratio space.
 """
 @inline function microphysical_tendency(i, j, k, grid, km::KM, ::Val{:ρqᶜˡ}, μ, 𝒰, constants)
-    FT = eltype(grid)
-    
     # Get thermodynamic quantities
-    T = temperature(𝒰, constants)
     ρ = density(𝒰, constants)
     qᵗ = total_specific_moisture(𝒰)
     
-    # Get mass fractions from diagnostic fields
+    # Get cached rates (computed in update_microphysical_fields!)
     @inbounds begin
-        qᵛ = μ.qᵛ[i, j, k]
-        qᶜˡ = μ.qᶜˡ[i, j, k]
-        qʳ = μ.qʳ[i, j, k]
+        Cₖ = μ.Cₖ[i, j, k]
+        Eₖ = μ.Eₖ[i, j, k]
+        Aₖ = μ.Aₖ[i, j, k]
+        Kₖ = μ.Kₖ[i, j, k]
     end
-    
-    # Convert mass fractions to mixing ratios for Kessler formulas
-    rᵛ = mass_fraction_to_mixing_ratio(qᵛ, qᵗ)
-    rᶜˡ = mass_fraction_to_mixing_ratio(qᶜˡ, qᵗ)
-    rʳ = mass_fraction_to_mixing_ratio(qʳ, qᵗ)
-    
-    # Saturation: compute in mixing ratio space
-    # saturation_specific_humidity returns mass fraction, convert to mixing ratio
-    qᵛ⁺ = saturation_specific_humidity(T, ρ, constants, PlanarLiquidSurface())
-    rᵛ⁺ = mass_fraction_to_mixing_ratio(qᵛ⁺, qᵗ)
-    
-    # Latent heat and heat capacity
-    L = liquid_latent_heat(T, constants)
-    q = MoistureMassFractions(qᵛ, qᶜˡ + qʳ)
-    cₚ = mixture_heat_capacity(q, constants)
-    
-    # Compute rates in mixing ratio space
-    D = condensation_denominator(T, rᵛ⁺, L, cₚ)
-    Cₖ = condensation_rate(rᵛ, rᵛ⁺, D)
-    Eₖ = cloud_evaporation_rate(rᵛ, rᶜˡ, rᵛ⁺, D)
-    Aₖ = autoconversion_rate(rᶜˡ, km)
-    Kₖ = accretion_rate(rᶜˡ, rʳ, km)
     
     # Tendency in mixing ratio space: drᶜˡ/dt = Cₖ - Eₖ - Aₖ - Kₖ
     drᶜˡdt = Cₖ - Eₖ - Aₖ - Kₖ
@@ -411,6 +429,9 @@ $(TYPEDSIGNATURES)
 
 Compute the tendency for rain density (ρqʳ).
 
+The rates Aₖ, Kₖ, Eʳ are computed once per timestep in `update_microphysical_fields!`
+and cached in the microphysical fields.
+
 ```math
 \\frac{∂(ρqʳ)}{∂t} = ρ \\cdot (1 - qᵗ) \\cdot (Aₖ + Kₖ - Eʳ)
 ```
@@ -418,33 +439,16 @@ Compute the tendency for rain density (ρqʳ).
 Note: Sedimentation is not yet implemented.
 """
 @inline function microphysical_tendency(i, j, k, grid, km::KM, ::Val{:ρqʳ}, μ, 𝒰, constants)
-    FT = eltype(grid)
-    
     # Get thermodynamic quantities
-    T = temperature(𝒰, constants)
     ρ = density(𝒰, constants)
     qᵗ = total_specific_moisture(𝒰)
     
-    # Get mass fractions from diagnostic fields
+    # Get cached rates (computed in update_microphysical_fields!)
     @inbounds begin
-        qᵛ = μ.qᵛ[i, j, k]
-        qᶜˡ = μ.qᶜˡ[i, j, k]
-        qʳ = μ.qʳ[i, j, k]
+        Aₖ = μ.Aₖ[i, j, k]
+        Kₖ = μ.Kₖ[i, j, k]
+        Eʳ = μ.Eʳ[i, j, k]
     end
-    
-    # Convert mass fractions to mixing ratios
-    rᵛ = mass_fraction_to_mixing_ratio(qᵛ, qᵗ)
-    rᶜˡ = mass_fraction_to_mixing_ratio(qᶜˡ, qᵗ)
-    rʳ = mass_fraction_to_mixing_ratio(qʳ, qᵗ)
-    
-    # Saturation mixing ratio
-    qᵛ⁺ = saturation_specific_humidity(T, ρ, constants, PlanarLiquidSurface())
-    rᵛ⁺ = mass_fraction_to_mixing_ratio(qᵛ⁺, qᵗ)
-    
-    # Compute rates in mixing ratio space
-    Aₖ = autoconversion_rate(rᶜˡ, km)
-    Kₖ = accretion_rate(rᶜˡ, rʳ, km)
-    Eʳ = rain_evaporation_rate(ρ, rᵛ, rʳ, rᵛ⁺)
     
     # Tendency in mixing ratio space: drʳ/dt = Aₖ + Kₖ - Eʳ
     drʳdt = Aₖ + Kₖ - Eʳ
