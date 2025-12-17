@@ -1,7 +1,6 @@
+using Oceananigans.Architectures: Architectures, architecture
 using Oceananigans.Operators: Δxᶜᵃᵃ, Δxᶠᵃᵃ, Δyᵃᶜᵃ, Δyᵃᶠᵃ, Δzᵃᵃᶜ, Δzᵃᵃᶠ
 using Oceananigans.Grids: XYRegularRG, XZRegularRG, YZRegularRG, XYZRegularRG, stretched_dimensions
-
-import Oceananigans.Architectures: architecture
 
 struct FourierTridiagonalPoissonSolver{G, B, R, S, β, T}
     grid :: G
@@ -12,7 +11,7 @@ struct FourierTridiagonalPoissonSolver{G, B, R, S, β, T}
     transforms :: T
 end
 
-architecture(solver::FourierTridiagonalPoissonSolver) = architecture(solver.grid)
+Architectures.architecture(solver::FourierTridiagonalPoissonSolver) = architecture(solver.grid)
 
 @kernel function compute_main_diagonal!(D, grid, λy, λz, ::XDirection)
     j, k = @index(Global, NTuple)
