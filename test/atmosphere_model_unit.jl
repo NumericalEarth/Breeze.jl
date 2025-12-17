@@ -58,16 +58,12 @@ end
             formulation = AnelasticFormulation(reference_state; thermodynamics)
             model = AtmosphereModel(grid; thermodynamic_constants=constants, formulation)
 
-            # test set!
-            ρᵣ = model.formulation.reference_state.density
-            cᵖᵈ = model.thermodynamic_constants.dry_air.heat_capacity
-            ρeᵢ = ρᵣ * cᵖᵈ * θ₀
-
+            # Test round-trip consistency: set θ, get ρe; then set ρe, get back θ
             set!(model; θ = θ₀)
-            ρe₁ = deepcopy(static_energy_density(model))
-            θ₁ = deepcopy(liquid_ice_potential_temperature(model))
+            ρe₁ = Field(static_energy_density(model))
+            θ₁ = Field(liquid_ice_potential_temperature(model))
 
-            set!(model; ρe = ρeᵢ)
+            set!(model; ρe = ρe₁)
             @test static_energy_density(model) ≈ ρe₁
             @test liquid_ice_potential_temperature(model) ≈ θ₁
         end

@@ -138,12 +138,13 @@ end
     constants = ThermodynamicConstants()
 
     p₀, θ₀ = 101325, 288
+    pˢᵗ = FT(1e5) # Standard pressure for potential temperature
     reference_state = ReferenceState(grid, constants, surface_pressure=p₀, potential_temperature=θ₀)
     formulation = AnelasticFormulation(reference_state)
     model = AtmosphereModel(grid; thermodynamic_constants=constants, formulation)
 
     # Set up isothermal atmosphere: T = T₀ = constant
-    # For constant T, we need: θ = T₀ * (p₀/pᵣ)^(Rᵈ/cᵖᵈ)
+    # For constant T, we need: θ = T₀ * (pˢᵗ/pᵣ)^(Rᵈ/cᵖᵈ) using the standard pressure
     T₀ = θ₀
     Rᵈ = dry_air_gas_constant(constants)
     cᵖᵈ = constants.dry_air.heat_capacity
@@ -152,7 +153,7 @@ end
     θ_field = CenterField(grid)
     set!(θ_field, (x, y, z) -> begin
         pᵣ_z = adiabatic_hydrostatic_pressure(z, p₀, θ₀, constants)
-        T₀ * (p₀ / pᵣ_z)^(Rᵈ / cᵖᵈ)
+        T₀ * (pˢᵗ / pᵣ_z)^(Rᵈ / cᵖᵈ)
     end)
 
     set!(model; θ = θ_field)
