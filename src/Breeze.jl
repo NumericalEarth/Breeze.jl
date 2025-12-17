@@ -113,6 +113,9 @@ using .Thermodynamics
 include("MoistAirBuoyancies.jl")
 using .MoistAirBuoyancies
 
+include("Advection.jl")
+using .Advection
+
 include("AtmosphereModels/AtmosphereModels.jl")
 using .AtmosphereModels
 
@@ -121,9 +124,6 @@ using .Microphysics
 
 include("TurbulenceClosures/TurbulenceClosures.jl")
 using .TurbulenceClosures
-
-include("Advection.jl")
-using .Advection
 
 include("CelestialMechanics/CelestialMechanics.jl")
 using .CelestialMechanics

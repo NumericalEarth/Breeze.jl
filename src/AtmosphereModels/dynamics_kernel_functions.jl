@@ -1,3 +1,4 @@
+using ..Advection: div_ρUc
 using Oceananigans.Advection: div_𝐯u, div_𝐯v, div_𝐯w
 using Oceananigans.Coriolis: x_f_cross_U, y_f_cross_U, z_f_cross_U
 using Oceananigans.Operators: ∂xᶠᶜᶜ, ∂yᶜᶠᶜ, ∂zᶜᶜᶠ, ℑzᵃᵃᶜ, ℑzᵃᵃᶠ
@@ -7,7 +8,6 @@ using Oceananigans.Utils: sum_of_velocities
 @inline ∂ⱼ_𝒯₁ⱼ(i, j, k, grid, args...) = zero(grid)
 @inline ∂ⱼ_𝒯₂ⱼ(i, j, k, grid, args...) = zero(grid)
 @inline ∂ⱼ_𝒯₃ⱼ(i, j, k, grid, args...) = zero(grid)
-@inline div_ρUc(i, j, k, grid, args...) = zero(grid)
 
 """
     ∇_dot_Jᶜ(i, j, k, grid, density, closure::AbstractTurbulenceClosure, closure_fields,

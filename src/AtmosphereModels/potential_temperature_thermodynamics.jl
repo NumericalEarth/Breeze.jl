@@ -1,3 +1,4 @@
+using ..Advection: div_ρUc
 using Breeze.Thermodynamics: LiquidIcePotentialTemperatureState, with_temperature, exner_function, mixture_heat_capacity
 using Oceananigans: Oceananigans
 using Oceananigans.BoundaryConditions: BoundaryConditions, fill_halo_regions!

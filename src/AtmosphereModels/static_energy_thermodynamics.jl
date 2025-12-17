@@ -1,3 +1,4 @@
+using ..Advection: div_ρUc
 using Breeze.Thermodynamics: StaticEnergyState, with_temperature
 using Oceananigans: Oceananigans
 using Oceananigans.BoundaryConditions: BoundaryConditions, fill_halo_regions!
