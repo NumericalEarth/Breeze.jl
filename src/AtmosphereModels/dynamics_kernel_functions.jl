@@ -135,8 +135,7 @@ end
                                  clock,
                                  model_fields)
 
-    # TODO fix this
-    Uᵖ = microphysical_velocities(microphysics, name)
+    Uᵖ = microphysical_velocities(microphysics, microphysical_fields, name)
     Uᵗ = sum_of_velocities(velocities, Uᵖ)
     ρ = formulation.reference_state.density
     diffusive_flux_buoyancy = AtmosphereModelBuoyancy(formulation, constants)

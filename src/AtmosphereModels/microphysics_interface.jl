@@ -64,11 +64,13 @@ This may be changed in the future.
 """
 $(TYPEDSIGNATURES)
 
-Return the microphysical velocities associated with `microphysics` and `name`.
+Return the microphysical velocities associated with `microphysics`, `microphysical_fields`, and tracer `name`.
 
 Must be either `nothing`, or a NamedTuple with three components `u, v, w`.
+The velocities are added to the bulk flow velocities for advecting the tracer.
+For example, the terminal velocity of falling rain.
 """
-@inline microphysical_velocities(microphysics::Nothing, name) = nothing
+@inline microphysical_velocities(microphysics::Nothing, microphysical_fields, name) = nothing
 
 """
 $(TYPEDSIGNATURES)

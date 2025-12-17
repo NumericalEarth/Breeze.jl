@@ -19,7 +19,7 @@ materialize_microphysical_fields(bμp::ZMCM, grid, bcs) = materialize_microphysi
 @inline update_microphysical_fields!(μ, bμp::ZMCM, i, j, k, grid, ρ, 𝒰, constants) = update_microphysical_fields!(μ, bμp.cloud_formation, i, j, k, grid, ρ, 𝒰, constants)
 @inline compute_moisture_fractions(i, j, k, grid, bμp::ZMCM, ρ, qᵗ, μ) = compute_moisture_fractions(i, j, k, grid, bμp.cloud_formation, ρ, qᵗ, μ)
 @inline microphysical_tendency(i, j, k, grid, bμp::ZMCM, args...) = zero(grid)
-@inline microphysical_velocities(bμp::ZMCM, name) = nothing
+@inline microphysical_velocities(bμp::ZMCM, μ, name) = nothing
 
 @inline function maybe_adjust_thermodynamic_state(i, j, k, 𝒰₀, bμp::ZMCM, ρᵣ, μ, qᵗ, constants)
     # Initialize moisture state from total moisture qᵗ (not from stale microphysical fields)

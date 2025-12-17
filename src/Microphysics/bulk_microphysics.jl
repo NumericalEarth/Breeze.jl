@@ -26,17 +26,18 @@ end
 
 Base.summary(::NonEquilibriumCloudFormation) = "NonEquilibriumCloudFormation"
 
-struct FourCategories{L, I, R, S, C, V}
+struct FourCategories{L, I, R, S, C, V, A}
     cloud_liquid :: L
     cloud_ice :: I
     rain :: R
     snow :: S
     collisions :: C
     hydrometeor_velocities :: V
+    air_properties :: A
 end
 
-FourCategories(cloud_liquid, cloud_ice, rain, snow, collisions) =
-    FourCategories(cloud_liquid, cloud_ice, rain, snow, collisions, nothing)
+FourCategories(cloud_liquid, cloud_ice, rain, snow, collisions, hydrometeor_velocities) =
+    FourCategories(cloud_liquid, cloud_ice, rain, snow, collisions, hydrometeor_velocities, nothing)
 
 const FourCategoryBulkMicrophysics = BulkMicrophysics{<:Any, <:FourCategories}
 Base.summary(bμp::FourCategoryBulkMicrophysics) = "FourCategoryBulkMicrophysics"

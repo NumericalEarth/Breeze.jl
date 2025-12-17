@@ -3,11 +3,13 @@ module BreezeCloudMicrophysicsExt
 using CloudMicrophysics: CloudMicrophysics
 using CloudMicrophysics.Parameters: Parameters0M, Rain, Snow, CloudIce, CloudLiquid, CollisionEff
 using CloudMicrophysics.Parameters: Blk1MVelType, Blk1MVelTypeRain, Blk1MVelTypeSnow
+using CloudMicrophysics.Parameters: AirProperties
 using CloudMicrophysics.Microphysics0M: remove_precipitation
 
 using CloudMicrophysics.Microphysics1M:
     conv_q_lcl_to_q_rai,
-    accretion
+    accretion,
+    terminal_velocity
 
 using Breeze
 using Breeze.AtmosphereModels
@@ -27,7 +29,6 @@ using Breeze.Microphysics:
     center_field_tuple,
     BulkMicrophysics,
     FourCategories,
-    WarmPhaseEquilibrium,
     SaturationAdjustment,
     WarmPhaseSaturationAdjustment,
     MixedPhaseSaturationAdjustment,
@@ -39,6 +40,7 @@ using DocStringExtensions: TYPEDSIGNATURES
 
 using Oceananigans: Center, Field
 using Oceananigans.AbstractOperations: KernelFunctionOperation
+using Oceananigans.Fields: ZeroField, ZFaceField
 using Adapt: Adapt, adapt
 
 import Breeze.AtmosphereModels:
@@ -55,4 +57,3 @@ include("zero_moment_microphysics.jl")
 include("one_moment_microphysics.jl")
 
 end # module BreezeCloudMicrophysicsExt
-

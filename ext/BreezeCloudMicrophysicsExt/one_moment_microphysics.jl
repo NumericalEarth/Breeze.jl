@@ -9,12 +9,13 @@ function one_moment_cloud_microphysics_categories(
     rain = Rain(FT),
     snow = Snow(FT),
     collisions = CollisionEff(FT),
-    hydrometeor_velocities = Blk1MVelType(FT))
+    hydrometeor_velocities = Blk1MVelType(FT),
+    air_properties = AirProperties(FT))
 
-    return FourCategories(cloud_liquid, cloud_ice, rain, snow, collisions, hydrometeor_velocities)
+    return FourCategories(cloud_liquid, cloud_ice, rain, snow, collisions, hydrometeor_velocities, air_properties)
 end
 
-const CM1MCategories = FourCategories{<:CloudLiquid, <:CloudIce, <:Rain, <:Snow, <:CollisionEff, <:Blk1MVelType}
+const CM1MCategories = FourCategories{<:CloudLiquid, <:CloudIce, <:Rain, <:Snow, <:CollisionEff, <:Blk1MVelType, <:AirProperties}
 const OneMomentCloudMicrophysics = BulkMicrophysics{<:Any, <:CM1MCategories}
 const WP1M = BulkMicrophysics{<:WarmPhaseSaturationAdjustment, <:CM1MCategories}
 const MP1M = BulkMicrophysics{<:MixedPhaseSaturationAdjustment, <:CM1MCategories}
@@ -61,9 +62,10 @@ end
 prognostic_field_names(::WP1M) = tuple(:ρqʳ)
 
 function materialize_microphysical_fields(bμp::WP1M, grid, bcs)
-    names = (:qᵛ, :qˡ, :qᶜˡ, :qʳ, :ρqʳ)
-    fields = center_field_tuple(grid, names...)
-    return NamedTuple{names}(fields)
+    center_names = (:qᵛ, :qˡ, :qᶜˡ, :qʳ, :ρqʳ)
+    center_fields = center_field_tuple(grid, center_names...)
+    wʳ = ZFaceField(grid)  # Rain terminal velocity (negative = downward)
+    return (; zip(center_names, center_fields)..., wʳ)
 end
 
 # Note: we perform saturation adjustment on vapor, total liquid, and total ice.
@@ -75,6 +77,7 @@ end
 @inline function update_microphysical_fields!(μ, bμp::WP1M, i, j, k, grid, ρ, 𝒰, constants)
     qᵛ = 𝒰.moisture_mass_fractions.vapor
     qᶜˡ = 𝒰.moisture_mass_fractions.liquid  # cloud liquid from saturation adjustment
+    categories = bμp.categories
 
     @inbounds begin
         qʳ = μ.ρqʳ[i, j, k] / ρ
@@ -82,6 +85,10 @@ end
         μ.qʳ[i, j, k] = qʳ             # rain mass fraction (diagnostic)
         μ.qᶜˡ[i, j, k] = qᶜˡ           # cloud liquid (non-precipitating)
         μ.qˡ[i, j, k] = qʳ + qᶜˡ       # total liquid (cloud + rain)
+
+        # Terminal velocity for rain (negative = downward)
+        wᵗ = terminal_velocity(categories.rain, categories.hydrometeor_velocities.rain, ρ, qʳ)
+        μ.wʳ[i, j, k] = -wᵗ
     end
 
     return nothing
@@ -171,15 +178,17 @@ end
 prognostic_field_names(::MP1M) = (:ρqʳ, :ρqˢ)
 
 function materialize_microphysical_fields(bμp::MP1M, grid, bcs)
-    names = (:qᵛ, :qˡ, :qᶜˡ, :qᶜⁱ, :qʳ, :qˢ, :ρqʳ, :ρqˢ)
-    fields = center_field_tuple(grid, names...)
-    return NamedTuple{names}(fields)
+    center_names = (:qᵛ, :qˡ, :qᶜˡ, :qᶜⁱ, :qʳ, :qˢ, :ρqʳ, :ρqˢ)
+    center_fields = center_field_tuple(grid, center_names...)
+    wʳ = ZFaceField(grid)  # Rain terminal velocity (negative = downward)
+    return (; zip(center_names, center_fields)..., wʳ)
 end
 
 @inline function update_microphysical_fields!(μ, bμp::MP1M, i, j, k, grid, ρ, 𝒰, constants)
     qᵛ = 𝒰.moisture_mass_fractions.vapor
     qᶜˡ = 𝒰.moisture_mass_fractions.liquid
     qᶜⁱ = 𝒰.moisture_mass_fractions.ice
+    categories = bμp.categories
 
     @inbounds begin
         qʳ = μ.ρqʳ[i, j, k] / ρ
@@ -190,6 +199,10 @@ end
         μ.qᶜˡ[i, j, k] = qᶜˡ
         μ.qˡ[i, j, k] = qʳ + qᶜˡ
         μ.qᶜⁱ[i, j, k] = qᶜⁱ
+
+        # Terminal velocity for rain (negative = downward)
+        wᵗ = terminal_velocity(categories.rain, categories.hydrometeor_velocities.rain, ρ, qʳ)
+        μ.wʳ[i, j, k] = -wᵗ
     end
 
     return nothing
@@ -244,15 +257,17 @@ end
 prognostic_field_names(::WPNE1M) = (:ρqᶜˡ, :ρqʳ)
 
 function materialize_microphysical_fields(bμp::WPNE1M, grid, bcs)
-    names = (:qᵛ, :qˡ, :qᶜˡ, :qʳ, :ρqᶜˡ, :ρqʳ)
-    fields = center_field_tuple(grid, names...)
-    return NamedTuple{names}(fields)
+    center_names = (:qᵛ, :qˡ, :qᶜˡ, :qʳ, :ρqᶜˡ, :ρqʳ)
+    center_fields = center_field_tuple(grid, center_names...)
+    wʳ = ZFaceField(grid)  # Rain terminal velocity (negative = downward)
+    return (; zip(center_names, center_fields)..., wʳ)
 end
 
 @inline function update_microphysical_fields!(μ, bμp::WPNE1M, i, j, k, grid, ρ, 𝒰, constants)
     q = 𝒰.moisture_mass_fractions
     qᵛ = q.vapor
     qˡ = q.liquid  # total liquid from thermodynamic state
+    categories = bμp.categories
 
     @inbounds begin
         qᶜˡ = μ.ρqᶜˡ[i, j, k] / ρ  # cloud liquid from prognostic field
@@ -261,6 +276,10 @@ end
         μ.qᶜˡ[i, j, k] = qᶜˡ
         μ.qʳ[i, j, k] = qʳ
         μ.qˡ[i, j, k] = qᶜˡ + qʳ  # total liquid (cloud + rain)
+
+        # Terminal velocity for rain (negative = downward)
+        wᵗ = terminal_velocity(categories.rain, categories.hydrometeor_velocities.rain, ρ, qʳ)
+        μ.wʳ[i, j, k] = -wᵗ
     end
 
     return nothing
@@ -312,7 +331,7 @@ end
 # Default fallback for OneMomentCloudMicrophysics tendencies that are not explicitly implemented
 @inline microphysical_tendency(i, j, k, grid, bμp::OneMomentCloudMicrophysics, args...) = zero(grid)
 
-# Rain tendency for non-equilibrium 1M: autoconversion + accretion (same physics as equilibrium)
+# Rain tendency for non-equilibrium 1M: autoconversion + accretion - evaporation
 @inline function microphysical_tendency(i, j, k, grid, bμp::WPNE1M, ::Val{:ρqʳ}, ρ, μ, 𝒰, constants)
     categories = bμp.categories
     ρⁱʲᵏ = @inbounds ρ[i, j, k]
@@ -328,9 +347,77 @@ end
                      categories.hydrometeor_velocities.rain, categories.collisions,
                      qᶜˡ, qʳ, ρⁱʲᵏ)
 
+    # Get thermodynamic state for evaporation
+    T = temperature(𝒰, constants)
+    q = 𝒰.moisture_mass_fractions
+    qᵛ = q.vapor
+    qᵛ⁺ = saturation_specific_humidity(T, ρⁱʲᵏ, constants, PlanarLiquidSurface())
+
+    # Rain evaporation (negative = rain decrease)
+    τᵉᵛᵃᵖ = typeof(qᵛ)(DEFAULT_RAIN_EVAPORATION_TIMESCALE)
+    Sᵉᵛᵃᵖ = rain_evaporation_rate(qᵛ, qᵛ⁺, qʳ, T, ρⁱʲᵏ, q, τᵉᵛᵃᵖ, constants)
+
     # Total tendency for ρqʳ (positive = rain increase)
-    return ρⁱʲᵏ * (Sᵃᶜⁿᵛ + Sᵃᶜᶜ)
+    return ρⁱʲᵏ * (Sᵃᶜⁿᵛ + Sᵃᶜᶜ + Sᵉᵛᵃᵖ)
 end
+
+"""
+    rain_evaporation_rate(qᵛ, qᵛ⁺, qʳ, T, ρ, q, τᵉᵛᵃᵖ, constants)
+
+Compute the rate of rain evaporation.
+
+Rain evaporates when the air is subsaturated (qᵛ < qᵛ⁺). The evaporation rate
+is proportional to the subsaturation and the rain content.
+
+Returns a negative value (rain decrease) when subsaturated, zero otherwise.
+
+The formula is a simplified version of the full ventilated evaporation formula,
+using a relaxation approach similar to cloud condensation.
+
+# Arguments
+- `qᵛ`: vapor specific humidity
+- `qᵛ⁺`: saturation specific humidity over liquid
+- `qʳ`: rain specific humidity
+- `T`: temperature
+- `ρ`: air density
+- `q`: MoistureMassFractions
+- `τᵉᵛᵃᵖ`: evaporation timescale (typically ~100-1000 s for rain)
+- `constants`: ThermodynamicConstants
+"""
+@inline function rain_evaporation_rate(qᵛ, qᵛ⁺, qʳ, T, ρ, q, τᵉᵛᵃᵖ, constants)
+    FT = typeof(qᵛ)
+
+    # No evaporation if rain is negligible or air is supersaturated
+    no_evap = (qʳ ≤ eps(FT)) | (qᵛ ≥ qᵛ⁺)
+
+    # Subsaturation (negative when subsaturated)
+    S = (qᵛ - qᵛ⁺) / qᵛ⁺
+
+    # Latent heat of vaporization at temperature T
+    ℒˡ = liquid_latent_heat(T, constants)
+
+    # Mixture heat capacity
+    cᵖᵐ = mixture_heat_capacity(q, constants)
+
+    # Vapor gas constant
+    Rᵛ = vapor_gas_constant(constants)
+
+    # Derivative of saturation specific humidity with respect to temperature
+    dt_qᵛ⁺ = qᵛ⁺ * (ℒˡ / (Rᵛ * T^2) - 1 / T)
+
+    # Thermodynamic adjustment factor
+    Γˡ = 1 + (ℒˡ / cᵖᵐ) * dt_qᵛ⁺
+
+    # Evaporation rate (negative = rain decrease)
+    # This is proportional to subsaturation and rain content
+    Sᵉᵛᵃᵖ = S * qʳ / (Γˡ * τᵉᵛᵃᵖ)
+
+    # Only evaporate, clamp to zero when not subsaturated
+    return ifelse(no_evap, zero(Sᵉᵛᵃᵖ), Sᵉᵛᵃᵖ)
+end
+
+# Default rain evaporation timescale (s) - can be overridden via parameters
+const DEFAULT_RAIN_EVAPORATION_TIMESCALE = 500.0
 
 """
     condensation_rate(qᵛ, qᵛ⁺, T, τ_relax, constants)
@@ -406,10 +493,13 @@ end
 end
 
 # Default fallback for OneMomentCloudMicrophysics velocities
-@inline microphysical_velocities(bμp::OneMomentCloudMicrophysics, name) = nothing
+@inline microphysical_velocities(bμp::OneMomentCloudMicrophysics, μ, name) = nothing
 
-# TODO: Implement terminal velocity for rain sedimentation
-# This requires building a velocity field from terminal_velocity(rain, vel.rain, ρ, qʳ)
+# Rain sedimentation: rain falls with terminal velocity (stored in microphysical fields)
+@inline function microphysical_velocities(bμp::OneMomentCloudMicrophysics, μ, ::Val{:ρqʳ})
+    wʳ = μ.wʳ
+    return (; u = ZeroField(), v = ZeroField(), w = wʳ)
+end
 
 #####
 ##### Precipitation rate diagnostic for one-moment microphysics
