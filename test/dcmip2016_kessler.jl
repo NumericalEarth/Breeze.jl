@@ -107,10 +107,10 @@ end
     p₀ = 100000.0
 
     # Initial conditions (mixing ratios for reference implementation)
-    qv_ref = 0.01 * ones(Nz)
-    qc_ref = 0.001 * ones(Nz)
-    qr_ref = 0.0005 * ones(Nz)
-    θ_ref = 300.0 * ones(Nz)
+    qv_ref = 0.01
+    qc_ref = 0.001
+    qr_ref = 0.0005
+    θ_ref = 300
     κᵈ_Kessler = 0.2875
     pk = (p ./ p₀) .^ κᵈ_Kessler  # Exner function (Kessler xk)
 
