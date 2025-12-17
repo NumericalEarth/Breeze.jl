@@ -47,9 +47,17 @@ jobs:
         run: |
           using Pkg
           Pkg.instantiate()
+      - name: Install early-oom
+        run: |
+          git clone --depth=1 --branch=v1.9.0 https://github.com/rfjakob/earlyoom
+          cd earlyoom
+          make -j
+          sudo make install
       - name: Build documentation
+        shell: bash
         timeout-minutes: 45
         run:
+          sudo earlyoom -m 3 -s 100 -r 300 --prefer 'julia' &
           julia --color=yes --project=docs --threads 1,4 docs/make.jl
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

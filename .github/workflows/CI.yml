@@ -84,10 +84,21 @@ jobs:
               TEST_ARGS+=(--jobs=2)
           fi
           echo "runtest_test_args=${TEST_ARGS[@]}" >> "${GITHUB_ENV}"
-      - uses: julia-actions/julia-runtest@v1
-        with:
-          coverage: true
-          test_args: ${{ env.runtest_test_args }}
+      - name: Install early-oom
+        if: ${{ matrix.os == 'aws-linux-nvidia-gpu' }}
+        run: |
+          git clone --depth=1 --branch=v1.9.0 https://github.com/rfjakob/earlyoom
+          cd earlyoom
+          make -j
+          sudo make install
+      - name: Run tests
+        shell: bash
+        run: |
+          if [[ ${{ matrix.os }} == aws-linux-nvidia-gpu* ]]; then
+              # We use earlyoom only on the GPU machines
+              sudo earlyoom -m 3 -s 100 -r 300 --prefer 'julia' &
+          fi
+          julia --project --color=yes -e 'using Pkg; Pkg.test(; coverage=true, julia_args=["--check-bounds=yes", "--compiled-modules=yes", "--depwarn=yes"], test_args=`${{ env.runtest_test_args }}`, force_latest_compatible_version=false, allow_reresolve=true)'
       - uses: julia-actions/julia-processcoverage@v1
       - uses: codecov/codecov-action@v5
         with:
