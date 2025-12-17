@@ -16,7 +16,13 @@ using Oceananigans.Architectures: architecture
 using Oceananigans.Grids: AbstractGrid
 using Oceananigans.Utils: launch!
 
+import Oceananigans.TimeSteppers: TimeStepper
+
 include("positivity_preserving_rk3.jl")
+
+# Extend TimeStepper to support PositivityPreservingRK3 via Symbol
+TimeStepper(::Val{:PositivityPreservingRK3}, args...; split_advection=NamedTuple(), kwargs...) =
+    PositivityPreservingRK3TimeStepper(args...; split_advection, kwargs...)
 
 end # module
 

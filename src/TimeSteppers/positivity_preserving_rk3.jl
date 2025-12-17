@@ -22,12 +22,15 @@ using Oceananigans.Advection:
     _advective_tracer_flux_y,
     _advective_tracer_flux_z,
     BoundsPreservingWENO,
+    FluxFormAdvection,
     bounded_tracer_flux_divergence_x,
     bounded_tracer_flux_divergence_y,
     bounded_tracer_flux_divergence_z
 
+using Oceananigans.BoundaryConditions: fill_halo_regions!
+
 using Oceananigans.Grids: Flat
-using Oceananigans.Operators: V⁻¹ᶜᶜᶜ, δxᶜᵃᵃ, δyᵃᶜᵃ, δzᵃᵃᶜ, ℑxᶠᵃᵃ, ℑyᵃᶠᵃ, ℑzᵃᵃᶠ
+using Oceananigans.Operators: V⁻¹ᶜᶜᶜ, ∂xᶜᶜᶜ, ∂yᶜᶜᶜ, ∂zᶜᶜᶜ
 
 """
     PositivityPreservingRK3TimeStepper{FT, TG, CS, TI} <: AbstractTimeStepper
@@ -65,9 +68,10 @@ Fields
 - `Gⁿ`: Tendency fields at current stage
 - `G⁻`: Tendency fields at previous stage
 - `cˢ`: Scratch storage for intermediate tracer values (one field per positivity-preserving tracer)
+- `split_advection`: Advection schemes for positivity-preserving tracers (stored here, not in model)
 - `implicit_solver`: Optional implicit solver for diffusion
 """
-struct PositivityPreservingRK3TimeStepper{FT, TG, CS, TI} <: AbstractTimeStepper
+struct PositivityPreservingRK3TimeStepper{FT, TG, CS, AD, TI} <: AbstractTimeStepper
     γ¹ :: FT
     γ² :: FT
     γ³ :: FT
@@ -76,6 +80,7 @@ struct PositivityPreservingRK3TimeStepper{FT, TG, CS, TI} <: AbstractTimeStepper
     Gⁿ :: TG
     G⁻ :: TG
     cˢ :: CS  # Scratch storage for intermediate tracer state during directional splitting
+    split_advection :: AD  # Advection schemes for positivity-preserving tracers
     implicit_solver :: TI
 end
 
@@ -84,7 +89,7 @@ end
                                         implicit_solver = nothing,
                                         Gⁿ = map(similar, prognostic_fields),
                                         G⁻ = map(similar, prognostic_fields),
-                                        positivity_preserving_tracers = Tuple())
+                                        split_advection = NamedTuple())
 
 Construct a `PositivityPreservingRK3TimeStepper` on `grid` with `prognostic_fields`.
 
@@ -97,8 +102,10 @@ Keyword Arguments
 - `implicit_solver`: Optional implicit solver for diffusion. Default: `nothing`
 - `Gⁿ`: Tendency fields at current stage. Default: similar to `prognostic_fields`
 - `G⁻`: Tendency fields at previous stage. Default: similar to `prognostic_fields`  
-- `positivity_preserving_tracers`: Names of tracers to treat with positivity-preserving
-  advection. Default: empty tuple (no tracers use positivity-preserving advection).
+- `split_advection`: NamedTuple of advection schemes for positivity-preserving tracers.
+  These advection schemes are stored in the time stepper and used for directionally-split
+  advection. **Important**: The corresponding tracers in the model should have 
+  `advection = nothing` to avoid double-counting the advection tendency.
 
 References
 ==========
@@ -113,7 +120,7 @@ function PositivityPreservingRK3TimeStepper(grid, prognostic_fields;
                                              implicit_solver::TI = nothing,
                                              Gⁿ::TG = map(similar, prognostic_fields),
                                              G⁻ = map(similar, prognostic_fields),
-                                             positivity_preserving_tracers = Tuple()) where {TI, TG}
+                                             split_advection::AD = NamedTuple()) where {TI, TG, AD}
 
     FT = eltype(grid)
     
@@ -125,11 +132,12 @@ function PositivityPreservingRK3TimeStepper(grid, prognostic_fields;
     ζ³ = -5 // 12
 
     # Create scratch storage for each tracer that needs positivity-preserving treatment.
-    cˢ = NamedTuple(name => CenterField(grid) for name in positivity_preserving_tracers)
+    # The tracer names come from the keys of split_advection.
+    cˢ = NamedTuple(name => CenterField(grid) for name in keys(split_advection))
     CS = typeof(cˢ)
 
-    return PositivityPreservingRK3TimeStepper{FT, TG, CS, TI}(
-        γ¹, γ², γ³, ζ², ζ³, Gⁿ, G⁻, cˢ, implicit_solver
+    return PositivityPreservingRK3TimeStepper{FT, TG, CS, AD, TI}(
+        γ¹, γ², γ³, ζ², ζ³, Gⁿ, G⁻, cˢ, split_advection, implicit_solver
     )
 end
 
@@ -138,75 +146,118 @@ end
 #####
 
 """
-    compute_split_advection_tendency!(Gc, c, cˢ, grid, advection, ρ, velocities, Δt)
+    apply_split_advection!(c, cˢ, grid, advection, ρ, velocities, Δt)
 
-Compute the advection tendency for tracer `c` using directional splitting.
+Apply advection to tracer `c` using directional splitting, updating `c` in-place.
 
-The algorithm applies advection dimension-by-dimension to maintain positivity:
+The algorithm applies advection dimension-by-dimension to maintain positivity,
+following the MITgcm algorithm (equations 2.201-2.203):
 
-1. Copy `c` to scratch storage `cˢ`
-2. Apply x-advection: `cˢ ← cˢ - Δt * ∇ ⋅ (u * cˢ)`
-3. Apply y-advection: `cˢ ← cˢ - Δt * ∇ ⋅ (v * cˢ)`  
-4. Apply z-advection: `cˢ ← cˢ - Δt * ∇ ⋅ (w * cˢ)`
-5. Compute tendency: `Gc += (cˢ - c) / Δt`
+1. Copy `c` to scratch storage `cˢ` (cˢ will be updated, c is preserved as cⁿ)
+2. Apply x-advection: `cˢ ← cˢ - Δt * (∇ ⋅ (u * cˢ) + cⁿ * ∂u/∂x)`
+3. Apply y-advection: `cˢ ← cˢ - Δt * (∇ ⋅ (v * cˢ) + cⁿ * ∂v/∂y)`
+4. Apply z-advection: `cˢ ← cˢ - Δt * (∇ ⋅ (w * cˢ) + cⁿ * ∂w/∂z)`
+5. Copy result back: `c ← cˢ`
+
+Key: The flux divergence uses the UPDATED cˢ (for positivity preservation),
+but the velocity divergence term uses the ORIGINAL c (= cⁿ) for all steps.
 
 This maintains positivity when each 1D step uses a bounds-preserving flux limiter.
+
+Note: This function directly updates the tracer field `c`, bypassing the normal
+tendency-based time stepping. This is necessary because split advection cannot
+be properly integrated via the RK3 tendency blending mechanism.
 """
-function compute_split_advection_tendency!(Gc, c, cˢ, grid, advection, ρ, velocities, Δt)
-    arch = architecture(grid)
-    
-    # Step 1: Copy current tracer state to scratch
-    launch!(arch, grid, :xyz, _copy_field!, cˢ, c)
+function apply_split_advection!(c, cˢ, grid, advection, ρ, velocities, Δt)
+    # Step 1: Copy current tracer state to scratch (including halos)
+    # c is preserved as the "original" value (cⁿ) for the velocity divergence term
+    parent(cˢ) .= parent(c)
 
     # Step 2-4: Apply advection in each direction sequentially
-    launch!(arch, grid, :xyz, _apply_x_advection!, cˢ, grid, advection, ρ, velocities.u, Δt)
-    launch!(arch, grid, :xyz, _apply_y_advection!, cˢ, grid, advection, ρ, velocities.v, Δt)
-    launch!(arch, grid, :xyz, _apply_z_advection!, cˢ, grid, advection, ρ, velocities.w, Δt)
+    # - First argument (cˢ): field being updated, also used for flux divergence
+    # - Second argument (c): original field, used for velocity divergence correction
+    # This matches MITgcm equations where velocity divergence always uses τ^n
+    apply_x_advection!(cˢ, c, advection, grid, ρ, velocities.u, Δt)
+    apply_y_advection!(cˢ, c, advection, grid, ρ, velocities.v, Δt)
+    apply_z_advection!(cˢ, c, advection, grid, ρ, velocities.w, Δt)
     
-    # Step 5: Add the effective advection tendency to existing tendency
-    launch!(arch, grid, :xyz, _add_advection_tendency!, Gc, c, cˢ, Δt)
+    # Step 5: Copy result back to tracer field
+    parent(c) .= parent(cˢ)
 
     return nothing
 end
 
-@kernel function _copy_field!(dst, src)
-    i, j, k = @index(Global, NTuple)
-    @inbounds dst[i, j, k] = src[i, j, k]
+# Fallbacks for unsupported advection schemes
+apply_x_advection!(cˢ, cⁿ, advection, grid, args...) = nothing
+apply_y_advection!(cˢ, cⁿ, advection, grid, args...) = nothing
+apply_z_advection!(cˢ, cⁿ, advection, grid, args...) = nothing
+
+# FluxFormAdvection: dispatch to component schemes
+apply_x_advection!(cˢ, cⁿ, advection::FluxFormAdvection, grid, args...) = apply_x_advection!(cˢ, cⁿ, advection.x, grid, args...)
+apply_y_advection!(cˢ, cⁿ, advection::FluxFormAdvection, grid, args...) = apply_y_advection!(cˢ, cⁿ, advection.y, grid, args...)
+apply_z_advection!(cˢ, cⁿ, advection::FluxFormAdvection, grid, args...) = apply_z_advection!(cˢ, cⁿ, advection.z, grid, args...)
+
+# BoundsPreservingWENO: apply kernel and fill halos
+function apply_x_advection!(cˢ, cⁿ, advection::BoundsPreservingWENO, grid, ρ, u, Δt)
+    launch!(grid.architecture, grid, :xyz, _apply_x_advection!, cˢ, cⁿ, advection, grid, ρ, u, Δt)
+    fill_halo_regions!(cˢ)
+    return nothing
 end
 
-@kernel function _add_advection_tendency!(Gc, c, cˢ, Δt)
-    i, j, k = @index(Global, NTuple)
-    @inbounds Gc[i, j, k] += (cˢ[i, j, k] - c[i, j, k]) / Δt
+function apply_y_advection!(cˢ, cⁿ, advection::BoundsPreservingWENO, grid, ρ, v, Δt)
+    launch!(grid.architecture, grid, :xyz, _apply_y_advection!, cˢ, cⁿ, advection, grid, ρ, v, Δt)
+    fill_halo_regions!(cˢ)
+    return nothing
 end
+
+function apply_z_advection!(cˢ, cⁿ, advection::BoundsPreservingWENO, grid, ρ, w, Δt)
+    launch!(grid.architecture, grid, :xyz, _apply_z_advection!, cˢ, cⁿ, advection, grid, ρ, w, Δt)
+    fill_halo_regions!(cˢ)
+    return nothing
+end
+
 
 #####
 ##### Directional advection kernels for BoundsPreservingWENO
 #####
-##### These use the existing bounded operators from Oceananigans which are
-##### designed for single-direction flux divergence computation.
+##### These implement the MITgcm operator splitting algorithm (equations 2.201-2.203):
+##### - The flux divergence uses the UPDATED tracer cˢ (for positivity preservation)
+##### - The velocity divergence uses the ORIGINAL tracer cⁿ (for correct splitting)
+#####
+##### Each directional step computes:
+#####   cˢ -= Δt * (1/V * δ(Flux(cˢ)) + cⁿ * δ(velocity)/Δ)
 #####
 
-@kernel function _apply_x_advection!(c, grid, advection::BoundsPreservingWENO, ρ, u, Δt)
+@kernel function _apply_x_advection!(cˢ, cⁿ, advection, grid, ρ, u, Δt)
     i, j, k = @index(Global, NTuple)
     @inbounds begin
-        div_x = V⁻¹ᶜᶜᶜ(i, j, k, grid) * bounded_tracer_flux_divergence_x(i, j, k, grid, advection, ρ, u, c)
-        c[i, j, k] -= Δt * div_x
+        # Flux divergence term: uses updated cˢ
+        flux_div = V⁻¹ᶜᶜᶜ(i, j, k, grid) * bounded_tracer_flux_divergence_x(i, j, k, grid, advection, ρ, u, cˢ)
+        # Velocity divergence term: uses original cⁿ (MITgcm eq 2.201)
+        vel_div = cⁿ[i, j, k] * ∂xᶜᶜᶜ(i, j, k, grid, u)
+        cˢ[i, j, k] -= Δt * (flux_div + vel_div)
     end
 end
 
-@kernel function _apply_y_advection!(c, grid, advection::BoundsPreservingWENO, ρ, v, Δt)
+@kernel function _apply_y_advection!(cˢ, cⁿ, advection, grid, ρ, v, Δt)
     i, j, k = @index(Global, NTuple)
     @inbounds begin
-        div_y = V⁻¹ᶜᶜᶜ(i, j, k, grid) * bounded_tracer_flux_divergence_y(i, j, k, grid, advection, ρ, v, c)
-        c[i, j, k] -= Δt * div_y
+        # Flux divergence term: uses updated cˢ
+        flux_div = V⁻¹ᶜᶜᶜ(i, j, k, grid) * bounded_tracer_flux_divergence_y(i, j, k, grid, advection, ρ, v, cˢ)
+        # Velocity divergence term: uses original cⁿ (MITgcm eq 2.202)
+        vel_div = cⁿ[i, j, k] * ∂yᶜᶜᶜ(i, j, k, grid, v)
+        cˢ[i, j, k] -= Δt * (flux_div + vel_div)
     end
 end
 
-@kernel function _apply_z_advection!(c, grid, advection::BoundsPreservingWENO, ρ, w, Δt)
+@kernel function _apply_z_advection!(cˢ, cⁿ, advection, grid, ρ, w, Δt)
     i, j, k = @index(Global, NTuple)
     @inbounds begin
-        div_z = V⁻¹ᶜᶜᶜ(i, j, k, grid) * bounded_tracer_flux_divergence_z(i, j, k, grid, advection, ρ, w, c)
-        c[i, j, k] -= Δt * div_z
+        # Flux divergence term: uses updated cˢ
+        flux_div = V⁻¹ᶜᶜᶜ(i, j, k, grid) * bounded_tracer_flux_divergence_z(i, j, k, grid, advection, ρ, w, cˢ)
+        # Velocity divergence term: uses original cⁿ (MITgcm eq 2.203)
+        vel_div = cⁿ[i, j, k] * ∂zᶜᶜᶜ(i, j, k, grid, w)
+        cˢ[i, j, k] -= Δt * (flux_div + vel_div)
     end
 end
 
@@ -220,8 +271,13 @@ end
 Step forward `model` one time step `Δt` with a 3rd-order Runge-Kutta method
 using directionally-split advection for positivity-preserving tracer transport.
 
-This is similar to the standard RK3 time stepper, but after computing tendencies,
-the split advection tendencies are computed for tracers in `timestepper.cˢ`.
+For tracers with split advection:
+1. Standard RK3 substep advances non-advection tendencies (diffusion, forcing)
+2. Split advection is applied directly AFTER rk3_substep! as a direct field update
+
+This approach is necessary because the split advection algorithm requires using
+the result of each directional step as input to the next, which is incompatible
+with the RK3 multi-stage tendency blending mechanism.
 """
 function time_step!(model::AbstractModel{<:PositivityPreservingRK3TimeStepper}, Δt; callbacks=[])
     Δt == 0 && @warn "Δt == 0 may cause model blowup!"
@@ -249,7 +305,7 @@ function time_step!(model::AbstractModel{<:PositivityPreservingRK3TimeStepper}, 
     #
 
     compute_flux_bc_tendencies!(model)
-    compute_split_advection_tendencies!(model, first_stage_Δt)
+    apply_split_advection_updates!(model, first_stage_Δt)
     rk3_substep!(model, Δt, γ¹, nothing)
 
     tick!(model.clock, first_stage_Δt; stage=true)
@@ -266,7 +322,7 @@ function time_step!(model::AbstractModel{<:PositivityPreservingRK3TimeStepper}, 
     #
 
     compute_flux_bc_tendencies!(model)
-    compute_split_advection_tendencies!(model, second_stage_Δt)
+    apply_split_advection_updates!(model, second_stage_Δt)
     rk3_substep!(model, Δt, γ², ζ²)
 
     tick!(model.clock, second_stage_Δt; stage=true)
@@ -283,7 +339,7 @@ function time_step!(model::AbstractModel{<:PositivityPreservingRK3TimeStepper}, 
     #
 
     compute_flux_bc_tendencies!(model)
-    compute_split_advection_tendencies!(model, third_stage_Δt)
+    apply_split_advection_updates!(model, third_stage_Δt)
     rk3_substep!(model, Δt, γ³, ζ³)
 
     # Adjust final time-step to reduce floating point error accumulation
@@ -302,29 +358,34 @@ function time_step!(model::AbstractModel{<:PositivityPreservingRK3TimeStepper}, 
 end
 
 #####
-##### Split advection tendency computation
+##### Split advection updates
 #####
 
 """
-    compute_split_advection_tendencies!(model, Δt)
+    apply_split_advection_updates!(model, Δt)
 
-Compute advection tendencies via directional splitting for tracers
-that use positivity-preserving advection.
+Apply directionally-split advection directly to tracer fields.
+
+This is called AFTER rk3_substep! to apply the split advection as a direct
+update, bypassing the tendency-based RK3 blending. This is necessary because
+the split advection algorithm requires each directional step to use the
+result of the previous step, which is incompatible with the RK3 multi-stage
+tendency blending.
 """
-compute_split_advection_tendencies!(model, Δt) = nothing
+apply_split_advection_updates!(model, Δt) = nothing
 
-# TODO: Implement for AtmosphereModel. This requires:
-# 1. Access to model.tracers, model.advection, model.velocities, model.formulation.reference_state.density
-# 2. The implementation should look something like:
-#
-# function compute_split_advection_tendencies!(model::AtmosphereModel{<:PositivityPreservingRK3TimeStepper}, Δt)
-#     for name in keys(model.timestepper.cˢ)
-#         c = model.tracers[name]
-#         cˢ = model.timestepper.cˢ[name]
-#         Gc = model.timestepper.Gⁿ[name]
-#         advection = model.advection[name]
-#         ρ = model.formulation.reference_state.density
-#         compute_split_advection_tendency!(Gc, c, cˢ, model.grid, advection, ρ, model.velocities, Δt)
-#     end
-#     return nothing
-# end
+using Breeze.AtmosphereModels: AtmosphereModel
+
+function apply_split_advection_updates!(model::AtmosphereModel{<:Any, <:Any, <:PositivityPreservingRK3TimeStepper}, Δt)
+    timestepper = model.timestepper
+    for name in keys(timestepper.cˢ)
+        c = model.tracers[name]
+        cˢ = timestepper.cˢ[name]
+        # Use advection from the time stepper, NOT from the model.
+        # The model should have advection = nothing for these tracers to avoid double-counting.
+        advection = timestepper.split_advection[name]
+        ρ = model.formulation.reference_state.density
+        apply_split_advection!(c, cˢ, model.grid, advection, ρ, model.velocities, Δt)
+    end
+    return nothing
+end

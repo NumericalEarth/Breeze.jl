@@ -6,13 +6,15 @@
 #
 # We advect a Gaussian tracer distribution diagonally across a periodic domain
 # and compare standard advection (which can produce spurious negative values)
-# with positivity-preserving advection (which maintains tracer bounds).
+# with positivity-preserving advection using `PositivityPreservingRK3TimeStepper`.
 #
 # This is a classic test case for advection schemes, used in many papers and
 # model validation studies.
 
 using Breeze
 using Oceananigans
+using Oceananigans: prognostic_fields
+using Oceananigans.TimeSteppers: time_step!
 using Oceananigans.Units
 using CairoMakie
 using Printf
@@ -28,7 +30,7 @@ Lx = Ly = 1.0 # domain length
 Lz = 100 # meters, thin vertical extent
 
 grid = RectilinearGrid(CPU();
-                       size = (Nx, Ny, 1),
+                       size = (Nx, Ny, 5),
                        halo = (5, 5, 5),
                        x = (0, Lx),
                        y = (0, Ly),
@@ -65,39 +67,91 @@ end
 
 # ## Standard advection model (may produce negative values)
 #
-# First, we run with standard advection to see if spurious negative values appear.
+# First, we run with standard RK3 time stepping and WENO advection
+# to see if spurious negative values appear.
 
-advection_standard = WENO(order=5)
+advection = WENO(order=5, bounds=(0, 1))
 
 model_standard = AtmosphereModel(grid;
                                  tracers = :c,
-                                 advection = advection_standard,
+                                 advection,
                                  microphysics = nothing,
                                  closure = nothing)
 
-# Set initial tracer distribution
-set!(model_standard, c = gaussian_tracer)
+# Set initial tracer distribution and uniform velocity
+set!(model_standard, c = gaussian_tracer, u = u_velocity, v = v_velocity)
 
-# The tracer is advected by the background flow. For pure advection test,
-# we modify the velocities to be uniform.
-u, v, w = model_standard.velocities
-set!(model_standard, u = u_velocity, v = v_velocity)
-
-# ## Bounds-preserving WENO advection (should maintain bounds)
+# ## Positivity-preserving advection with directional splitting
 #
-# Now we set up the same problem but with bounds-preserving WENO.
-# The bounds are set to (0, 1) since the Gaussian is normalized.
+# Now we set up the same problem but with `PositivityPreservingRK3TimeStepper`
+# which applies advection dimension-by-dimension to maintain positivity.
+#
+# **Key**: The advection scheme is passed to the TIME STEPPER via `split_advection`,
+# NOT to the model. The model uses `scalar_advection = (; c = nothing)` for the tracer
+# to avoid double-counting the advection tendency.
 
-advection_bounded = WENO(order=5, bounds=(0, 1))
+# First create a temporary model to get the prognostic fields layout
+temp_model = AtmosphereModel(grid; tracers=:c, microphysics=nothing, closure=nothing)
+pf = prognostic_fields(temp_model)
 
-model_bounded = AtmosphereModel(grid;
-                                tracers = :c,
-                                advection = advection_bounded,
-                                microphysics = nothing,
-                                closure = nothing)
+# The advection scheme is stored in the time stepper via `split_advection`
+pp_timestepper = PositivityPreservingRK3TimeStepper(grid, pf;
+                                                    split_advection = (; c = advection))
 
-set!(model_bounded, c = gaussian_tracer)
-set!(model_bounded, u = u_velocity, v = v_velocity)
+# The model uses scalar_advection = (; c = nothing) so normal tendency computation
+# skips advection for tracer c. Split advection is handled by the time stepper.
+model_pp = AtmosphereModel(grid;
+                           tracers = :c,
+                           momentum_advection = advection,
+                           scalar_advection = (; c = nothing),  # No normal advection for c
+                           microphysics = nothing,
+                           closure = nothing,
+                           timestepper = pp_timestepper)
+
+set!(model_pp, c = gaussian_tracer, u = u_velocity, v = v_velocity)
+
+# ## Diagnostic tests
+#
+# Before running the full simulation, let's verify the setup is correct.
+
+# Check that advection is configured correctly
+@info "Checking advection configuration..."
+@info "  model_standard.advection.c = $(model_standard.advection.c)"
+@info "  model_pp.advection.c = $(model_pp.advection.c)"  # Should be `nothing`
+@info "  model_pp.timestepper.split_advection.c = $(model_pp.timestepper.split_advection.c)"
+
+# Check initial state
+@info "Initial state:"
+@info "  Standard model: min(c) = $(minimum(model_standard.tracers.c)), max(c) = $(maximum(model_standard.tracers.c))"
+@info "  PP model: min(c) = $(minimum(model_pp.tracers.c)), max(c) = $(maximum(model_pp.tracers.c))"
+
+# Run a single time step test to compare behavior
+Δt = 1.0  # seconds
+
+# Store initial values
+c_standard_init = copy(interior(model_standard.tracers.c))
+c_pp_init = copy(interior(model_pp.tracers.c))
+
+@info "\nRunning single time step test..."
+time_step!(model_standard, Δt)
+time_step!(model_pp, Δt)
+
+@info "After 1 time step (Δt = $Δt):"
+@info "  Standard: min(c) = $(minimum(model_standard.tracers.c)), max(c) = $(maximum(model_standard.tracers.c))"
+@info "  PP model: min(c) = $(minimum(model_pp.tracers.c)), max(c) = $(maximum(model_pp.tracers.c))"
+
+# Compare the change
+Δc_standard = interior(model_standard.tracers.c) .- c_standard_init
+Δc_pp = interior(model_pp.tracers.c) .- c_pp_init
+
+@info "Change in tracer field:"
+@info "  Standard: Δc range = [$(minimum(Δc_standard)), $(maximum(Δc_standard))]"
+@info "  PP model: Δc range = [$(minimum(Δc_pp)), $(maximum(Δc_pp))]"
+@info "  Ratio of max changes: $(maximum(abs.(Δc_pp)) / maximum(abs.(Δc_standard)))"
+
+# Reset models for full simulation
+set!(model_standard, c = gaussian_tracer, u = u_velocity, v = v_velocity)
+set!(model_pp, c = gaussian_tracer, u = u_velocity, v = v_velocity)
 
 # ## Run simulations
 #
@@ -105,43 +159,46 @@ set!(model_bounded, u = u_velocity, v = v_velocity)
 # of the domain, T = 0.5 which corresponds to diagonal transport to the
 # opposite corner).
 
-Δt = 1.0  # seconds, chosen so velocity * Δt / Δx = courant_number
 stop_time = Lx / velocity_magnitude  # time for one domain traversal
 
 simulation_standard = Simulation(model_standard; Δt, stop_time)
-simulation_bounded = Simulation(model_bounded; Δt, stop_time)
+simulation_pp = Simulation(model_pp; Δt, stop_time)
 
-# Track minimum values during the simulation
+# Track minimum and maximum values during the simulation
 min_values_standard = Float64[]
-min_values_bounded = Float64[]
+min_values_pp = Float64[]
+max_values_standard = Float64[]
+max_values_pp = Float64[]
 
-function track_minimum_standard!(sim)
+function track_extrema_standard!(sim)
     c = sim.model.tracers.c
     push!(min_values_standard, minimum(c))
+    push!(max_values_standard, maximum(c))
     return nothing
 end
 
-function track_minimum_bounded!(sim)
+function track_extrema_pp!(sim)
     c = sim.model.tracers.c
-    push!(min_values_bounded, minimum(c))
+    push!(min_values_pp, minimum(c))
+    push!(max_values_pp, maximum(c))
     return nothing
 end
 
-add_callback!(simulation_standard, track_minimum_standard!, IterationInterval(1))
-add_callback!(simulation_bounded, track_minimum_bounded!, IterationInterval(1))
+add_callback!(simulation_standard, track_extrema_standard!, IterationInterval(1))
+add_callback!(simulation_pp, track_extrema_pp!, IterationInterval(1))
 
-@info "Running standard advection..."
+@info "Running standard RK3 advection..."
 run!(simulation_standard)
 
-@info "Running bounds-preserving advection..."
-run!(simulation_bounded)
+@info "Running positivity-preserving RK3 advection..."
+run!(simulation_pp)
 
 # ## Results
 #
 # Check for negative values
 
-@info "Standard advection: min(c) = $(minimum(model_standard.tracers.c)), max(c) = $(maximum(model_standard.tracers.c))"
-@info "Bounded advection: min(c) = $(minimum(model_bounded.tracers.c)), max(c) = $(maximum(model_bounded.tracers.c))"
+@info "Standard RK3: min(c) = $(minimum(model_standard.tracers.c)), max(c) = $(maximum(model_standard.tracers.c))"
+@info "Positivity-preserving RK3: min(c) = $(minimum(model_pp.tracers.c)), max(c) = $(maximum(model_pp.tracers.c))"
 
 # ## Visualization
 #
@@ -151,65 +208,81 @@ fig = Figure(size = (1000, 500), fontsize = 14)
 
 # Extract tracer data for plotting
 c_standard = interior(model_standard.tracers.c, :, :, 1)
-c_bounded = interior(model_bounded.tracers.c, :, :, 1)
+c_pp = interior(model_pp.tracers.c, :, :, 1)
 
 x = xnodes(grid, Center())
 y = ynodes(grid, Center())
 
 # Common colormap limits (include potential negative values for visualization)
-cmin = min(minimum(c_standard), minimum(c_bounded), 0)
-cmax = max(maximum(c_standard), maximum(c_bounded))
+cmin = min(minimum(c_standard), minimum(c_pp), 0)
+cmax = max(maximum(c_standard), maximum(c_pp))
 
 ax1 = Axis(fig[1, 1],
            aspect = 1,
            xlabel = "x",
            ylabel = "y",
-           title = "Standard WENO(order=5)\nCourant = $courant_number")
+           title = "Standard RK3 + WENO(bounds)\nCourant = $courant_number")
 
 ax2 = Axis(fig[1, 2],
            aspect = 1,
            xlabel = "x",
            ylabel = "y",
-           title = "Bounds-preserving WENO(order=5)\nCourant = $courant_number")
+           title = "Positivity-preserving RK3\nCourant = $courant_number")
 
 hm1 = heatmap!(ax1, x, y, c_standard, colorrange = (cmin, cmax), colormap = :viridis)
-hm2 = heatmap!(ax2, x, y, c_bounded, colorrange = (cmin, cmax), colormap = :viridis)
+hm2 = heatmap!(ax2, x, y, c_pp, colorrange = (cmin, cmax), colormap = :viridis)
 
 # Add contour at c = 0 to highlight negative values (white line)
 contour!(ax1, x, y, c_standard, levels = [0], color = :white, linewidth = 2)
-contour!(ax2, x, y, c_bounded, levels = [0], color = :white, linewidth = 2)
+contour!(ax2, x, y, c_pp, levels = [0], color = :white, linewidth = 2)
 
 Colorbar(fig[1, 3], hm1, label = "Tracer concentration")
 
 # Add text annotations showing min/max values
 min_std = @sprintf("%.2e", minimum(c_standard))
-min_bnd = @sprintf("%.2e", minimum(c_bounded))
+min_pp_val = @sprintf("%.2e", minimum(c_pp))
 text!(ax1, 0.02, 0.98, text = "min = $min_std", align = (:left, :top), 
       color = :white, fontsize = 12, space = :relative)
-text!(ax2, 0.02, 0.98, text = "min = $min_bnd", align = (:left, :top),
+text!(ax2, 0.02, 0.98, text = "min = $min_pp_val", align = (:left, :top),
       color = :white, fontsize = 12, space = :relative)
 
 save("positivity_preserving_comparison.png", fig)
 
 fig
 
-# ## Minimum value evolution
+# ## Extrema evolution
 #
-# Plot how the minimum tracer value evolves during the simulation.
+# Plot how the minimum and maximum tracer values evolve during the simulation.
 
-fig2 = Figure(size = (600, 400))
-ax = Axis(fig2[1, 1],
-          xlabel = "Iteration",
-          ylabel = "Minimum tracer value",
-          title = "Evolution of minimum tracer value during diagonal advection")
+fig2 = Figure(size = (900, 400))
 
-lines!(ax, 1:length(min_values_standard), min_values_standard, 
-       label = "Standard WENO", linewidth = 2)
-lines!(ax, 1:length(min_values_bounded), min_values_bounded,
-       label = "Bounds-preserving WENO", linewidth = 2, linestyle = :dash)
-hlines!(ax, [0], color = :red, linestyle = :dot, linewidth = 1, label = "Zero line")
+ax_min = Axis(fig2[1, 1],
+              xlabel = "Iteration",
+              ylabel = "Minimum tracer value",
+              title = "Minimum tracer value")
 
-axislegend(ax, position = :rb)
+ax_max = Axis(fig2[1, 2],
+              xlabel = "Iteration",
+              ylabel = "Maximum tracer value",
+              title = "Maximum tracer value")
+
+lines!(ax_min, 1:length(min_values_standard), min_values_standard, 
+       label = "Standard RK3", linewidth = 2)
+lines!(ax_min, 1:length(min_values_pp), min_values_pp,
+       label = "PP RK3", linewidth = 2, linestyle = :dash)
+hlines!(ax_min, [0], color = :red, linestyle = :dot, linewidth = 1, label = "Zero")
+
+lines!(ax_max, 1:length(max_values_standard), max_values_standard, 
+       label = "Standard RK3", linewidth = 2)
+lines!(ax_max, 1:length(max_values_pp), max_values_pp,
+       label = "PP RK3", linewidth = 2, linestyle = :dash)
+
+axislegend(ax_min, position = :rb)
+axislegend(ax_max, position = :rb)
+
+@info "Final maximum values:"
+@info "  Standard: $(max_values_standard[end])"
+@info "  PP: $(max_values_pp[end])"
 
 save("minimum_value_evolution.png", fig2)
 
@@ -219,13 +292,12 @@ fig2
 #
 # The white contour lines in the first figure show where the tracer concentration
 # crosses zero. In standard advection, you may see these contours indicating
-# spurious negative values. The bounds-preserving scheme should maintain
-# positivity (no white contours inside the tracer distribution).
+# spurious negative values. The positivity-preserving scheme with directional
+# splitting should maintain positivity (no white contours inside the tracer
+# distribution).
 #
-# Note: The full positivity guarantee requires the `PositivityPreservingRK3TimeStepper`
-# which applies advection dimension-by-dimension. The `WENO(bounds=...)` scheme alone
-# limits flux interpolants but doesn't guarantee positivity in multi-dimensional
-# advection with combined tendencies. See:
+# The `PositivityPreservingRK3TimeStepper` applies advection dimension-by-dimension
+# following the MITgcm algorithm:
 # https://mitgcm.org/sealion/online_documents/node80.html
-# https://github.com/CliMA/Oceananigans.jl/pull/3434
-
+#
+# See also: https://github.com/CliMA/Oceananigans.jl/pull/3434
