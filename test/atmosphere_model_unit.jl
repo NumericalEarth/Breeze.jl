@@ -34,7 +34,7 @@ end
         @test model.clock.time == 1
     end
 
-    @testset "NaN Checker [$(typeof(arch))]" begin
+    @testset "NaN Checker" begin
         @info "  Testing NaN Checker..."
         run_nan_checker_test(default_arch, erroring=true)
         run_nan_checker_test(default_arch, erroring=false)
