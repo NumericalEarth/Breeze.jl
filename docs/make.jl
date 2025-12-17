@@ -44,6 +44,7 @@ example_pages = [
     "Convection over prescribed sea surface temperature (SST)" => "literated/prescribed_sea_surface_temperature.md",
     "Inertia gravity wave" => "literated/inertia_gravity_wave.md",
     "Single column gray radiation" => "literated/single_column_radiation.md",
+    "Stationary parcel model" => "literated/stationary_parcel_model.md",
 ]
 
 literate_code(script_path, literated_dir) = """

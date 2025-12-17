@@ -109,7 +109,10 @@ Breeze interfaces with ClimaOcean for coupled atmosphere-ocean simulations.
     determined on one line rather than spread out over many lines.
   - Follow the style of existing examples, not the source code
   - Remember that initial condition functions act _pointwise_, there should be no broadcasting inside an initial condition function
-  - Do not convert between units. Always keep the units the same for calculations, unless plotting coordinates into the functions.
+  - **CRITICAL - Do not convert units**: Never multiply or divide by conversion factors (e.g., `* 1000` to convert
+    kg/kg to g/kg). Always keep units consistent with the source code. If plotting requires different scales,
+    consider plotting differences from initial conditions or using scientific notation in axis labels.
+    The only exception is converting spatial coordinates to kilometers for axis labels.
   - If possible, avoid long underscore names. Use concise evocative names like `z = znodes(grid, Center())`.
   - Use unicode that is consistent with the source code. Do not be afraid of unicode for intermediate variables.
   - Make sure that all notation in examples is consistent with `docs/src/appendix/notation.md`
