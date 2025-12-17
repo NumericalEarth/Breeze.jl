@@ -111,7 +111,8 @@ end
     qc_ref = 0.001 * ones(Nz)
     qr_ref = 0.0005 * ones(Nz)
     θ_ref = 300.0 * ones(Nz)
-    pk = (p ./ p₀) .^ 0.2875  # Exner function (Kessler xk)
+    κᵈ_Kessler = 0.2875
+    pk = (p ./ p₀) .^ κᵈ_Kessler  # Exner function (Kessler xk)
 
     # Convert mixing ratios to mass fractions for Breeze
     qt_b = zeros(Nz)
