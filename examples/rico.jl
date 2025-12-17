@@ -252,7 +252,6 @@ wall_clock = Ref(time_ns())
 
 function progress(sim)
     compute!(∫PdV)
-    qᵛmax = maximum(qᵛ)
     qᶜˡmax = maximum(qᶜˡ)
     qʳmax = maximum(qʳ)
     qʳmin = minimum(qʳ)

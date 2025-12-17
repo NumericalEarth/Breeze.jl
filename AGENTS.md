@@ -218,6 +218,22 @@ variables are "densities". There are currently two anelastic thermodynamic formu
 Eventually there will also be a fully compressible formulation with prognostic total energy density.
 We may also implement `EntropyThermodynamics` which prognostics entropy density `ρη`.
 
+### Microphysics implementation guidelines
+
+Breeze has a microphysics interface in `src/AtmosphereModels/microphysics_interface.jl` that defines
+the functions that microphysics schemes must implement. Key functions include:
+
+- `maybe_adjust_thermodynamic_state`: Adjusts the thermodynamic state based on the microphysics scheme.
+  - For **saturation adjustment** schemes (equilibrium cloud formation): this function performs iterative
+    saturation adjustment to partition moisture between vapor and condensate.
+  - For **non-equilibrium** schemes (prognostic cloud condensate): this function should be **trivial**
+    (just return the input state unchanged). Non-equilibrium schemes have fully prognostic cloud
+    liquid/ice, so there is no adjustment to perform. The moisture partition is already determined
+    by the prognostic fields.
+- `microphysical_tendency`: Computes tendencies for prognostic microphysical variables.
+- `compute_moisture_fractions`: Computes moisture mass fractions from prognostic fields.
+- `update_microphysical_fields!`: Updates diagnostic microphysical fields after state update.
+
 ## Testing Guidelines
 
 ### Running Tests

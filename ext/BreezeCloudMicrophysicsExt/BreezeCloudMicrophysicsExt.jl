@@ -15,14 +15,19 @@ using Breeze
 using Breeze.AtmosphereModels
 
 using Breeze.Thermodynamics:
+    ThermodynamicConstants,
     MoistureMassFractions,
     density,
     with_moisture,
     temperature,
     PlanarLiquidSurface,
+    saturation_vapor_pressure,
     saturation_specific_humidity,
+    supersaturation,
+    vapor_pressure,
     liquid_latent_heat,
     vapor_gas_constant,
+    dry_air_gas_constant,
     mixture_heat_capacity
 
 using Breeze.Microphysics:
@@ -53,7 +58,10 @@ import Breeze.AtmosphereModels:
     microphysical_velocities,
     precipitation_rate
 
+include("cloud_microphysics_translations.jl")
 include("zero_moment_microphysics.jl")
 include("one_moment_microphysics.jl")
+include("saturation_adjustment_one_moment.jl")
+include("nonequilibrium_one_moment.jl")
 
 end # module BreezeCloudMicrophysicsExt
