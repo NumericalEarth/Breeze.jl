@@ -5,7 +5,7 @@ using Oceananigans: AbstractModel, Center, CenterField, Clock, Field,
 using Oceananigans.Advection: adapt_advection_order
 using Oceananigans.AbstractOperations: @at
 using Oceananigans.BoundaryConditions: FieldBoundaryConditions, regularize_field_boundary_conditions
-using Oceananigans.Diagnostics: Diagnostics, NaNChecker
+using Oceananigans.Diagnostics: Diagnostics as OceananigansDiagnostics, NaNChecker
 using Oceananigans.Grids: ZDirection
 using Oceananigans.Models: validate_model_halo, validate_tracer_advection
 using Oceananigans.Solvers: FourierTridiagonalPoissonSolver
@@ -394,7 +394,7 @@ function total_energy(model)
 end
 
 # Check for NaNs in the first prognostic field
-function Diagnostics.default_nan_checker(model::AtmosphereModel)
+function OceananigansDiagnostics.default_nan_checker(model::AtmosphereModel)
     model_fields = prognostic_fields(model)
 
     if isempty(model_fields)
