@@ -34,7 +34,4 @@ end
 # Handle compute_forcing! for MultipleForcings
 AtmosphereModels.compute_forcing!(mf::MultipleForcings) = compute_forcing!(mf.forcings)
 
-# Fallback for other forcing types - do nothing
-AtmosphereModels.compute_forcing!(forcing) = nothing
-
 end
