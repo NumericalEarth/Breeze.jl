@@ -76,8 +76,6 @@ jobs:
               # When running the tests on a GPU node we always want to make sure
               # CUDA is functional.
               echo "BREEZE_ENSURE_CUDA_FUNCTIONAL=true" >> "${GITHUB_ENV}"
-              # Reduce the number of jobs to avoid memory issues.
-              TEST_ARGS+=(--jobs=2)
           fi
 
           if [[ ${{ runner.os }} == "macOS" ]]; then
