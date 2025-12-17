@@ -6,7 +6,7 @@ A "warm-rain" (Kessler-type) bulk microphysics scheme with water vapor, cloud li
 Breeze uses mass fractions (q = mass_species / mass_total), while Kessler formulas use
 mixing ratios (r = mass_species / mass_dry_air). Conversion:
 - r = q / (1 - qᵗ)  where qᵗ is total moisture mass fraction
-- q = r * (1 - qᵗ)  (approximately, for small moisture)
+- q = r * (1 - qᵗ)
 
 Prognostic variables (in Breeze mass fraction form):
 - qᶜˡ: cloud liquid water mass fraction
@@ -44,13 +44,14 @@ Kessler warm-rain microphysics scheme with cloud liquid and rain.
 - `autoconversion_rate`: Rate constant for autoconversion (cloud → rain), k₁ [s⁻¹]. Default: 0.001 s⁻¹
 - `autoconversion_threshold`: Cloud water threshold for autoconversion, a [kg kg⁻¹]. Default: 0.001 kg kg⁻¹  
 - `accretion_rate`: Rate constant for accretion (collection of cloud by rain), k₂ [s⁻¹]. Default: 2.2 s⁻¹
-- `reference_density`: Reference density for terminal velocity calculation, ρ₀ [kg m⁻³]. Default: 1.0 kg m⁻³
+
+Note: The reference density ρ₀ for terminal velocity is obtained from Breeze's reference state
+(ρᵣ[1,1,1]) rather than being stored as a parameter.
 """
 struct KesslerMicrophysics{FT}
     autoconversion_rate :: FT       # k₁ [s⁻¹]
     autoconversion_threshold :: FT  # a [kg kg⁻¹]
     accretion_rate :: FT            # k₂ [s⁻¹]
-    reference_density :: FT         # ρ₀ [kg m⁻³]
 end
 
 Base.summary(::KesslerMicrophysics) = "KesslerMicrophysics"
@@ -59,8 +60,7 @@ function Base.show(io::IO, km::KesslerMicrophysics{FT}) where FT
     print(io, "KesslerMicrophysics{$FT}:\n",
               "├── autoconversion_rate: ", km.autoconversion_rate, " s⁻¹\n",
               "├── autoconversion_threshold: ", km.autoconversion_threshold, " kg kg⁻¹\n",
-              "├── accretion_rate: ", km.accretion_rate, " s⁻¹\n",
-              "└── reference_density: ", km.reference_density, " kg m⁻³")
+              "└── accretion_rate: ", km.accretion_rate, " s⁻¹")
 end
 
 """
@@ -75,18 +75,15 @@ Construct a `KesslerMicrophysics` scheme with default parameters from Kessler (1
 - `autoconversion_rate`: Rate constant k₁ [s⁻¹]. Default: 0.001 s⁻¹
 - `autoconversion_threshold`: Cloud water threshold a [kg kg⁻¹]. Default: 0.001 kg kg⁻¹
 - `accretion_rate`: Rate constant k₂ [s⁻¹]. Default: 2.2 s⁻¹
-- `reference_density`: Reference density ρ₀ [kg m⁻³]. Default: 1.0 kg m⁻³
 """
 function KesslerMicrophysics(FT::DataType = Oceananigans.defaults.FloatType;
                              autoconversion_rate = 0.001,
                              autoconversion_threshold = 0.001,
-                             accretion_rate = 2.2,
-                             reference_density = 1.0)
+                             accretion_rate = 2.2)
 
     return KesslerMicrophysics{FT}(convert(FT, autoconversion_rate),
                                    convert(FT, autoconversion_threshold),
-                                   convert(FT, accretion_rate),
-                                   convert(FT, reference_density))
+                                   convert(FT, accretion_rate))
 end
 
 const KM = KesslerMicrophysics
@@ -108,14 +105,16 @@ where qᵗ is total moisture mass fraction and (1 - qᵗ) is dry air mass fracti
 end
 
 """
-Convert mixing ratio tendency dr/dt to mass fraction tendency dq/dt.
+Convert mixing ratio r to mass fraction q.
 
-For constant total moisture (dqᵗ/dt = 0 from advection perspective within microphysics):
-dq/dt = dr/dt * (1 - qᵗ)
+q = r * (1 - qᵗ)
+
+where qᵗ is total moisture mass fraction and (1 - qᵗ) is dry air mass fraction.
+Also used to convert mixing ratio tendencies to mass fraction tendencies.
 """
-@inline function mixing_ratio_tendency_to_mass_fraction(drdt, qᵗ)
+@inline function mixing_ratio_to_mass_fraction(r, qᵗ)
     qᵈ = 1 - qᵗ  # dry air mass fraction
-    return drdt * qᵈ
+    return r * qᵈ
 end
 
 #####
@@ -190,14 +189,14 @@ The terminal velocity is given by:
 wₜ = 36.34 (ρ rʳ)^{0.1346} (ρ / ρ₀)^{-1/2}
 ```
 
-where ρ is air density, rʳ is rain mixing ratio, and ρ₀ is reference density.
+where ρ is air density, rʳ is rain mixing ratio, and ρ₀ is reference density
+(obtained from Breeze's reference state at the surface, ρᵣ[1,1,1]).
 
 Note: The original formula gives velocity in cm s⁻¹ with coefficient 3634.
 Here we use 36.34 m s⁻¹ for SI units.
 """
-@inline function rain_terminal_velocity(ρ, rʳ, km::KM)
+@inline function rain_terminal_velocity(ρ, rʳ, ρ₀)
     FT = typeof(ρ)
-    ρ₀ = km.reference_density
     ρrʳ = ρ * max(zero(FT), rʳ)
     
     # Coefficient 36.34 m/s (converted from 3634 cm/s)
@@ -212,7 +211,9 @@ $(TYPEDSIGNATURES)
 Return the microphysical velocities for the Kessler scheme.
 
 Currently returns `nothing` as sedimentation is not yet implemented via the velocity interface.
-The terminal velocity formula is provided via `rain_terminal_velocity` for future implementation.
+The terminal velocity formula is provided via `rain_terminal_velocity(ρ, rʳ, ρ₀)` for future
+implementation, where ρ₀ should be obtained from the model's reference state density at
+the surface (ρᵣ[1,1,1]).
 """
 @inline microphysical_velocities(::KM, name::Val{:ρqʳ}) = nothing
 @inline microphysical_velocities(::KM, ::Val{:ρqᶜˡ}) = nothing
@@ -400,7 +401,7 @@ where the rates Cₖ, Eₖ, Aₖ, Kₖ are computed in mixing ratio space.
     drᶜˡdt = Cₖ - Eₖ - Aₖ - Kₖ
     
     # Convert to mass fraction tendency
-    dqᶜˡdt = mixing_ratio_tendency_to_mass_fraction(drᶜˡdt, qᵗ)
+    dqᶜˡdt = mixing_ratio_to_mass_fraction(drᶜˡdt, qᵗ)
     
     return ρ * dqᶜˡdt
 end
@@ -449,7 +450,7 @@ Note: Sedimentation is not yet implemented.
     drʳdt = Aₖ + Kₖ - Eʳ
     
     # Convert to mass fraction tendency
-    dqʳdt = mixing_ratio_tendency_to_mass_fraction(drʳdt, qᵗ)
+    dqʳdt = mixing_ratio_to_mass_fraction(drʳdt, qᵗ)
     
     return ρ * dqʳdt
 end

@@ -13,21 +13,18 @@ const BM = Breeze.Microphysics
         @test km.autoconversion_rate == FT(0.001)
         @test km.autoconversion_threshold == FT(0.001)
         @test km.accretion_rate == FT(2.2)
-        @test km.reference_density == FT(1.0)
     end
 
     @testset "Custom parameters [$(FT)]" for FT in (Float32, Float64)
         km = KesslerMicrophysics(FT;
             autoconversion_rate = 0.002,
             autoconversion_threshold = 0.0005,
-            accretion_rate = 3.0,
-            reference_density = 1.2
+            accretion_rate = 3.0
         )
         
         @test km.autoconversion_rate == FT(0.002)
         @test km.autoconversion_threshold == FT(0.0005)
         @test km.accretion_rate == FT(3.0)
-        @test km.reference_density == FT(1.2)
     end
 end
 
@@ -52,11 +49,11 @@ end
         @test r ≈ q / (1 - qᵗ)
     end
     
-    @testset "mixing_ratio_tendency_to_mass_fraction" begin
+    @testset "mixing_ratio_to_mass_fraction" begin
         qᵗ = 0.02
-        drdt = 0.001  # mixing ratio tendency
-        dqdt = BM.mixing_ratio_tendency_to_mass_fraction(drdt, qᵗ)
-        @test dqdt ≈ drdt * (1 - qᵗ)
+        r = 0.001  # mixing ratio (or tendency)
+        q = BM.mixing_ratio_to_mass_fraction(r, qᵗ)
+        @test q ≈ r * (1 - qᵗ)
     end
 end
 
@@ -144,19 +141,20 @@ end
     end
 
     @testset "Terminal velocity" begin
-        km = KesslerMicrophysics(Float64)
+        # Reference density at surface (would come from ρᵣ[1,1,1] in practice)
+        ρ₀ = 1.0
         
         # No rain: zero terminal velocity
-        wₜ = BM.rain_terminal_velocity(1.0, 0.0, km)
+        wₜ = BM.rain_terminal_velocity(1.0, 0.0, ρ₀)
         @test wₜ == 0.0
         
         # With rain: positive terminal velocity
-        wₜ = BM.rain_terminal_velocity(1.0, 0.001, km)
+        wₜ = BM.rain_terminal_velocity(1.0, 0.001, ρ₀)
         @test wₜ > 0.0
         
         # Higher density decreases terminal velocity
-        wₜ_low_ρ = BM.rain_terminal_velocity(0.5, 0.001, km)
-        wₜ_high_ρ = BM.rain_terminal_velocity(1.5, 0.001, km)
+        wₜ_low_ρ = BM.rain_terminal_velocity(0.5, 0.001, ρ₀)
+        wₜ_high_ρ = BM.rain_terminal_velocity(1.5, 0.001, ρ₀)
         @test wₜ_low_ρ > wₜ_high_ρ
     end
 end
