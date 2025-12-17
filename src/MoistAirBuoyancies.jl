@@ -22,9 +22,7 @@ using DocStringExtensions: TYPEDSIGNATURES
 using Oceananigans: Oceananigans, Center, Field, KernelFunctionOperation
 using Oceananigans.BuoyancyFormulations: BuoyancyFormulations,
     AbstractBuoyancyFormulation,
-    buoyancy_perturbationᶜᶜᶜ,
-    ∂z_b,
-    required_tracers
+    buoyancy_perturbationᶜᶜᶜ
 using Oceananigans.Grids: AbstractGrid
 using Oceananigans.Operators: ∂zᶜᶜᶠ
 

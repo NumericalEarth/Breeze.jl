@@ -7,7 +7,7 @@ using Oceananigans.AbstractOperations: @at
 using Oceananigans.BoundaryConditions: FieldBoundaryConditions, regularize_field_boundary_conditions
 using Oceananigans.Diagnostics: Diagnostics as OceananigansDiagnostics, NaNChecker
 using Oceananigans.Grids: ZDirection
-using Oceananigans.Models: Models, boundary_condition_args, validate_model_halo, validate_tracer_advection
+using Oceananigans.Models: Models, validate_model_halo, validate_tracer_advection
 using Oceananigans.Models.HydrostaticFreeSurfaceModels: validate_momentum_advection
 using Oceananigans.Solvers: FourierTridiagonalPoissonSolver
 using Oceananigans.TimeSteppers: TimeStepper

@@ -21,8 +21,7 @@ using Oceananigans.Fields: Field, set!
 using Oceananigans.BoundaryConditions: BoundaryConditions as OceananigansBC,
                                        BoundaryCondition,
                                        Flux,
-                                       FieldBoundaryConditions,
-                                       getbc
+                                       FieldBoundaryConditions
 
 using Oceananigans.Operators: ℑxyᶠᶜᵃ, ℑxyᶜᶠᵃ, ℑxᶜᵃᵃ, ℑyᵃᶜᵃ
 
