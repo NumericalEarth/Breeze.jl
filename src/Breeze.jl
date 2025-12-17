@@ -44,7 +44,7 @@ export
     RelativeHumidity,
     RelativeHumidityField,
     BulkMicrophysics,
-    KesslerMicrophysics,
+    DCMIP2016KesslerMicrophysics,
     compute_hydrostatic_pressure!,
 
     # BoundaryConditions

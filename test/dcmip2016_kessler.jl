@@ -93,7 +93,7 @@ function kessler_reference(theta, qv, qc, qr, rho, pk, dt, z, nz)
     return theta, qv, qc, qr, precl
 end
 
-@testset "KesslerMicrophysics [$(typeof(default_arch))]" begin
+@testset "DCMIP2016KesslerMicrophysics [$(typeof(default_arch))]" begin
     Nz = 10
     Lz = 10000.0
     grid = RectilinearGrid(default_arch; size=(1, 1, Nz), x=(0, 100), y=(0, 100), z=(0, Lz),

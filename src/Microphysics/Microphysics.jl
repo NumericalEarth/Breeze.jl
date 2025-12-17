@@ -10,7 +10,7 @@ export
     FourCategories,
     SaturationSpecificHumidity,
     SaturationSpecificHumidityField,
-    KesslerMicrophysics,
+    DCMIP2016KesslerMicrophysics,
     RelativeHumidity,
     RelativeHumidityField
 

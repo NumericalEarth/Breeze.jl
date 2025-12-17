@@ -23,7 +23,7 @@ using KernelAbstractions: @kernel, @index
 using DocStringExtensions: TYPEDSIGNATURES
 
 """
-    struct KesslerMicrophysics <: AbstractMicrophysics
+    struct DCMIP2016KesslerMicrophysics <: AbstractMicrophysics
 
 DCMIP2016 implementation of the Kessler (1969) warm-rain bulk microphysics scheme.
 
@@ -60,9 +60,9 @@ instead, it is diagnosed from the total specific moisture `qᵗ` and the liquid 
 - Rain sedimentation uses subcycling to satisfy CFL constraints, following the Fortran implementation.
 - All microphysical updates are applied directly to the state variables in the kernel.
 """
-struct KesslerMicrophysics end
+struct DCMIP2016KesslerMicrophysics end
 
-const KM = KesslerMicrophysics
+const DCMIP2016KM = DCMIP2016KesslerMicrophysics
 
 """
 $(TYPEDSIGNATURES)
@@ -73,7 +73,7 @@ Return the names of prognostic microphysical fields for the Kessler scheme.
 - `:ρqᶜˡ`: Density-weighted cloud liquid mass fraction (\$kg/m^3\$).
 - `:ρqʳ`: Density-weighted rain mass fraction (\$kg/m^3\$).
 """
-prognostic_field_names(::KM) = (:ρqᶜˡ, :ρqʳ)
+prognostic_field_names(::DCMIP2016KM) = (:ρqᶜˡ, :ρqʳ)
 
 """
 $(TYPEDSIGNATURES)
@@ -91,7 +91,7 @@ Create and return the microphysical fields for the Kessler scheme.
 - `precipitation_rate`: Surface precipitation rate (\$m/s\$).
 - `vᵗ_rain`: Rain terminal velocity (\$m/s\$).
 """
-function materialize_microphysical_fields(::KM, grid, boundary_conditions)
+function materialize_microphysical_fields(::DCMIP2016KM, grid, boundary_conditions)
     # Prognostic fields (density-weighted)
     ρqᶜˡ = CenterField(grid, boundary_conditions=boundary_conditions.ρqᶜˡ)
     ρqʳ  = CenterField(grid, boundary_conditions=boundary_conditions.ρqʳ)
@@ -120,7 +120,7 @@ Compute moisture mass fractions at grid point `(i, j, k)` for the thermodynamic 
 Water vapor is diagnosed as \$q^v = q^t - q^{cl} - q^r\$.
 Returns `MoistureMassFractions(qᵛ, qˡ)` where \$q^l = q^{cl} + q^r\$ is the total liquid mass fraction.
 """
-@inline function compute_moisture_fractions(i, j, k, grid, ::KM, ρ, qᵗ, μ)
+@inline function compute_moisture_fractions(i, j, k, grid, ::DCMIP2016KM, ρ, qᵗ, μ)
     @inbounds begin
         qᶜˡ = μ.ρqᶜˡ[i, j, k] / ρ
         qʳ  = μ.ρqʳ[i, j, k] / ρ
@@ -137,7 +137,7 @@ Return the thermodynamic state without adjustment.
 
 The Kessler scheme performs its own saturation adjustment internally via the kernel.
 """
-@inline maybe_adjust_thermodynamic_state(𝒰, ::KM, μ, qᵗ, constants) = 𝒰
+@inline maybe_adjust_thermodynamic_state(𝒰, ::DCMIP2016KM, μ, qᵗ, constants) = 𝒰
 
 """
 $(TYPEDSIGNATURES)
@@ -146,7 +146,7 @@ Return `nothing`.
 
 Rain sedimentation is handled internally by the kernel rather than through the advection interface.
 """
-@inline microphysical_velocities(::KM, name) = nothing
+@inline microphysical_velocities(::DCMIP2016KM, name) = nothing
 
 """
 $(TYPEDSIGNATURES)
@@ -156,7 +156,7 @@ Return zero tendency.
 All microphysical source/sink terms are applied directly to the prognostic fields via the
 `microphysics_model_update!` kernel, bypassing the standard tendency interface.
 """
-@inline microphysical_tendency(i, j, k, grid, ::KM, name, μ, 𝒰, constants) = zero(eltype(grid))
+@inline microphysical_tendency(i, j, k, grid, ::DCMIP2016KM, name, μ, 𝒰, constants) = zero(eltype(grid))
 
 #####
 ##### Kessler scheme constants (from kessler.f90)
@@ -237,7 +237,7 @@ This function launches a GPU kernel that processes each column independently, wi
 The kernel handles conversion between mass fractions (Breeze) and mixing ratios (Kessler)
 internally for efficiency. Water vapor is diagnosed from \$q^v = q^t - q^{cl} - q^r\$.
 """
-function microphysics_model_update!(::KM, model)
+function microphysics_model_update!(::DCMIP2016KM, model)
     grid = model.grid
     arch = architecture(grid)
     Nz = grid.Nz
@@ -617,7 +617,7 @@ Water vapor is diagnosed as \$q^v = q^t - q^{cl} - q^r\$.
 This function is called by the general `update_state!` machinery. The main microphysics
 updates are performed via the `microphysics_model_update!` kernel.
 """
-@inline function update_microphysical_fields!(μ, ::KM, i, j, k, grid, ρ, 𝒰, constants)
+@inline function update_microphysical_fields!(μ, ::DCMIP2016KM, i, j, k, grid, ρ, 𝒰, constants)
     qᵗ = total_specific_moisture(𝒰)
     @inbounds begin
         μ.qᶜˡ[i, j, k] = μ.ρqᶜˡ[i, j, k] / ρ
