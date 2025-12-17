@@ -294,6 +294,27 @@ function compute_tendencies!(model::AnelasticModel)
     launch!(arch, grid, :xyz, compute_scalar_tendency!, Gρqᵗ, grid, ρq_args)
 
     #####
+    ##### Microphysical prognostic field tendencies
+    #####
+
+    microphysical_names = prognostic_field_names(model.microphysics)
+    n_tracers = length(model.tracers)
+    for (i, name) in enumerate(microphysical_names)
+        ρc = model.microphysical_fields[name]
+
+        scalar_args = (
+            ρc,
+            Val(i + 2 + n_tracers),
+            Val(name),
+            model.forcing[name],
+            model.advection[name],
+            common_args...)
+
+        Gρc = getproperty(model.timestepper.Gⁿ, name)
+        launch!(arch, grid, :xyz, compute_scalar_tendency!, Gρc, grid, scalar_args)
+    end
+
+    #####
     ##### Tracer density tendencies
     #####
 
