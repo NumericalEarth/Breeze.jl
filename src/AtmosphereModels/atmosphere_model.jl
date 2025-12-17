@@ -5,8 +5,7 @@ using Oceananigans: AbstractModel, Center, CenterField, Clock, Field,
 using Oceananigans.Advection: adapt_advection_order
 using Oceananigans.AbstractOperations: @at
 using Oceananigans.BoundaryConditions: FieldBoundaryConditions, regularize_field_boundary_conditions
-using Oceananigans.Diagnostics
-using Oceananigans.Diagnostics: NaNChecker
+using Oceananigans.Diagnostics: Diagnostics, NaNChecker
 using Oceananigans.Grids: ZDirection
 using Oceananigans.Models: validate_model_halo, validate_tracer_advection
 using Oceananigans.Solvers: FourierTridiagonalPoissonSolver
