@@ -5,6 +5,7 @@ using Oceananigans: AbstractModel, Center, CenterField, Clock, Field,
 using Oceananigans.Advection: adapt_advection_order
 using Oceananigans.AbstractOperations: @at
 using Oceananigans.BoundaryConditions: FieldBoundaryConditions, regularize_field_boundary_conditions
+using Oceananigans.Diagnostics
 using Oceananigans.Diagnostics: NaNChecker
 using Oceananigans.Grids: ZDirection
 using Oceananigans.Models: validate_model_halo, validate_tracer_advection
@@ -15,7 +16,6 @@ using Oceananigans.Utils: launch!, prettytime, prettykeys, with_tracers
 
 import Oceananigans: fields, prognostic_fields
 import Oceananigans.Advection: cell_advection_timescale
-import Oceananigans.Diagnostics: default_nan_checker
 import Oceananigans.Models.HydrostaticFreeSurfaceModels: validate_momentum_advection
 import Oceananigans.Models: boundary_condition_args
 
@@ -395,7 +395,7 @@ function total_energy(model)
 end
 
 # Check for NaNs in the first prognostic field
-function default_nan_checker(model::AtmosphereModel)
+function Diagnostics.default_nan_checker(model::AtmosphereModel)
     model_fields = prognostic_fields(model)
 
     if isempty(model_fields)
