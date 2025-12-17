@@ -61,15 +61,8 @@ using Oceananigans.Grids: znode
 using Oceananigans: Center, Face
 using Oceananigans.Operators: Δzᶜᶜᶜ, Δzᶜᶜᶠ, ℑzᵃᵃᶠ
 using Breeze.Thermodynamics: dry_air_gas_constant
+using Breeze.Microphysics: KesslerMicrophysics
 using CUDA
-
-using CloudMicrophysics
-import Breeze: Breeze
-
-# Access extension module and define aliases to avoid namespace conflicts:
-
-const BreezeCloudMicrophysicsExt = Base.get_extension(Breeze, :BreezeCloudMicrophysicsExt)
-const BreezeOneMomentCloudMicrophysics = BreezeCloudMicrophysicsExt.OneMomentCloudMicrophysics
 
 # ## Grid configuration
 #
@@ -237,10 +230,10 @@ fig_bubble
 
 # ## Model initialization
 #
-# Create the atmosphere model with one-moment cloud microphysics from CloudMicrophysics.jl,
+# Create the atmosphere model with Kessler warm-rain microphysics,
 # high-order WENO advection, and anisotropic minimum dissipation turbulence closure:
 
-microphysics = BreezeOneMomentCloudMicrophysics()
+microphysics = KesslerMicrophysics()
 advection = WENO(order=9, minimum_buffer_upwind_order=3)
 closure = AnisotropicMinimumDissipation()
 model = AtmosphereModel(grid; formulation, closure, microphysics, advection)
@@ -293,9 +286,10 @@ set!(θᵇᵍf, (x, y, z) -> θᵇᵍ(x, y, z))
 θ′ = θ - θᵇᵍf
 
 # Extract microphysical fields for output:
+# Kessler scheme has cloud liquid (qᶜˡ), rain (qʳ), and diagnosed vapor (qᵛ)
 
 qᶜˡ = model.microphysical_fields.qᶜˡ
-qᶜⁱ = model.microphysical_fields.qᶜⁱ
+qʳ = model.microphysical_fields.qʳ
 qᵛ = model.microphysical_fields.qᵛ
 
 # ## Simulation
@@ -311,7 +305,7 @@ function progress(sim)
     u, v, w = sim.model.velocities
     qᵛ = model.microphysical_fields.qᵛ
     qᶜˡ = model.microphysical_fields.qᶜˡ
-    qᶜⁱ = model.microphysical_fields.qᶜⁱ
+    qʳ = model.microphysical_fields.qʳ
 
     ρe = Breeze.AtmosphereModels.static_energy_density(sim.model)
     ρemean = mean(ρe)
@@ -321,8 +315,8 @@ function progress(sim)
                    maximum(abs, u), maximum(w), minimum(w))
     @info msg
     
-    msg *= @sprintf(", max(qᵛ): %.5e, max(qᶜˡ): %.5e, max(qᶜⁱ): %.5e",
-                    maximum(qᵛ), maximum(qᶜˡ), maximum(qᶜⁱ))
+    msg *= @sprintf(", max(qᵛ): %.5e, max(qᶜˡ): %.5e, max(qʳ): %.5e",
+                    maximum(qᵛ), maximum(qᶜˡ), maximum(qʳ))
     @info msg
     return nothing
 end
@@ -333,7 +327,7 @@ add_callback!(simulation, progress, IterationInterval(100))
 #
 # Save full 3D fields for post-processing analysis:
 
-outputs = merge(model.velocities, model.tracers, (; θ, θ′, qᶜˡ, qᶜⁱ, qᵛ))
+outputs = merge(model.velocities, model.tracers, (; θ, θ′, qᶜˡ, qʳ, qᵛ))
 
 filename = "supercell.jld2"
 ow = JLD2Writer(model, outputs; filename,
@@ -366,8 +360,8 @@ save("max_w_timeseries.png", fig)
 #
 # We create a 3-panel animation showing the storm structure at mid-levels (z ≈ 5 km):
 # - Vertical velocity ``w``: reveals the updraft/downdraft structure
-# - Cloud water ``q^{cl}``: shows the cloud boundaries
-# - Rain water ``q^r``: indicates precipitation regions
+# - Cloud liquid water ``qᶜˡ``: shows the cloud boundaries
+# - Rain water ``qʳ``: indicates precipitation regions
 
 wxy_ts = FieldTimeSeries("supercell_slices.jld2", "wxy")
 qʳxy_ts = FieldTimeSeries("supercell_slices.jld2", "qʳxy")
@@ -380,14 +374,14 @@ Nt = length(times)
 
 wlim = 25       # m/s - vertical velocity range
 qʳlim = 0.01    # kg/kg - rain water range
-qᶜˡlim = 0.001  # kg/kg - cloud water range
+qᶜˡlim = 0.001   # kg/kg - cloud liquid water range
 
 # Create the figure with 3 panels:
 
 slices_fig = Figure(size=(900, 1000), fontsize=14)
 
 axw = Axis(slices_fig[1, 1], xlabel="x (m)", ylabel="y (m)", title="Vertical velocity w")
-axqᶜˡ = Axis(slices_fig[1, 2], xlabel="x (m)", ylabel="y (m)", title="Cloud water qᶜˡ")
+axqᶜˡ = Axis(slices_fig[1, 2], xlabel="x (m)", ylabel="y (m)", title="Cloud liquid water qᶜˡ")
 axqʳ = Axis(slices_fig[3, 1], xlabel="x (m)", ylabel="y (m)", title="Rain water qʳ")
 
 # Set up observables for animation:

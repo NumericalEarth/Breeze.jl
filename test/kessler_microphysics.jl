@@ -35,7 +35,28 @@ end
     @testset "Prognostic field names" begin
         km = KesslerMicrophysics()
         names = prognostic_field_names(km)
-        @test names == (:ρqᵛ, :ρqˡ, :ρqʳ)
+        # Only cloud liquid and rain are prognostic; vapor is diagnosed from qᵗ
+        @test names == (:ρqᶜˡ, :ρqʳ)
+    end
+end
+
+@testset "Mass fraction ↔ mixing ratio conversion" begin
+    @testset "mass_fraction_to_mixing_ratio" begin
+        # Simple case: no moisture → division by 1
+        @test BM.mass_fraction_to_mixing_ratio(0.01, 0.0) ≈ 0.01
+        
+        # With 2% total moisture → division by 0.98
+        qᵗ = 0.02
+        q = 0.01
+        r = BM.mass_fraction_to_mixing_ratio(q, qᵗ)
+        @test r ≈ q / (1 - qᵗ)
+    end
+    
+    @testset "mixing_ratio_tendency_to_mass_fraction" begin
+        qᵗ = 0.02
+        drdt = 0.001  # mixing ratio tendency
+        dqdt = BM.mixing_ratio_tendency_to_mass_fraction(drdt, qᵗ)
+        @test dqdt ≈ drdt * (1 - qᵗ)
     end
 end
 
