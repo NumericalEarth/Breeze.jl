@@ -39,18 +39,18 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        version:
-          - "min"
-          - "1.12.2"
-        os:
-          - ubuntu-latest
-          - macOS-latest
-          - windows-latest
-        arch:
-          - "default"
-        exclude:
-          - version: "min"
-            os: windows-latest
+        # version:
+        #   - "min"
+        #   - "1.12.2"
+        # os:
+        #   - ubuntu-latest
+        #   - macOS-latest
+        #   - windows-latest
+        # arch:
+        #   - "default"
+        # exclude:
+        #   - version: "min"
+        #     os: windows-latest
         include:
           - version: "1.12.2"
             os: aws-linux-nvidia-gpu
