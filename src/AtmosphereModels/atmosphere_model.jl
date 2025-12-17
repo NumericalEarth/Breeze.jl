@@ -394,7 +394,7 @@ function total_energy(model)
     return k + e
 end
 
-# Check for NaNs in the first prognostic field (generalizes to prescribed velocities).
+# Check for NaNs in the first prognostic field
 function default_nan_checker(model::AtmosphereModel)
     model_fields = prognostic_fields(model)
 
