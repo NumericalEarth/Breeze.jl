@@ -2,18 +2,9 @@ using ..Thermodynamics:
     MoistureMassFractions,
     mixture_heat_capacity,
     mixture_gas_constant,
-    dry_air_gas_constant,
-    vapor_gas_constant,
-    PlanarLiquidSurface,
-    saturation_vapor_pressure,
-    temperature,
-    density,
-    is_absolute_zero,
-    with_moisture,
-    total_specific_moisture,
-    AbstractThermodynamicState
+    total_specific_moisture
 
-using Oceananigans: Oceananigans, CenterField, Field, interior
+using Oceananigans: CenterField, Field, interior
 using Oceananigans.Architectures: architecture
 using Oceananigans.Grids: znode, Center
 using Oceananigans.Utils: launch!
