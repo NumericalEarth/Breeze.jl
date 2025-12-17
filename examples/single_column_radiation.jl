@@ -121,5 +121,4 @@ Legend(fig[1, 6], ax_I, orientation=:horizontal, nbanks=2, framevisible=false)
 title = "Single Column Gray Radiation with O'Gorman & Schneider (2008) optical thickness"
 fig[1, :] = Label(fig, title, fontsize=18, tellwidth=false)
 
-save("single_column_radiation.png", fig)
 fig

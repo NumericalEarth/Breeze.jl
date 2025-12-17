@@ -54,20 +54,22 @@ The [`RadiativeTransferModel`](@ref) model computes:
 - **Longwave radiation**: Both upwelling and downwelling thermal radiation using RRTMGP's two-stream solver
 - **Shortwave radiation**: Direct beam solar radiation
 
-The gray atmosphere optical thickness follows the parameterization by [OGormanSchneider2008](@citet):
+The gray atmosphere optical thickness for longwave follows the parameterization by [OGormanSchneider2008](@citet)š
 
 ```math
-τ_{lw} = α \frac{Δp}{p} \left[ f_l \frac{p}{p_0} + 4 (1 - f_l) \left(\frac{p}{p_0}\right)^4 \right] \left[ τ_e + (τ_p - τ_e) \sin^2 φ \right]
+τ_{lw} = α \frac{Δp}{p_0} \left[ f_l + 4 (1 - f_l) \left(\frac{p}{p_0}\right)^3 \right] \left[ τ_e + (τ_p - τ_e) \sin^2 φ \right]
 ```
 
 where ``φ`` is latitude and ``α``, ``f_l``, ``τ_e``, ``τ_p`` are empirical parameters.
 
 For shortwave:
 ```math
-τ_{sw} = 2 τ_0 \frac{p}{p_0} \frac{Δp}{p_0}
+τ_{sw} = 2 τ_0 \frac{Δp}{p_0} \frac{p}{p_0}
 ```
 
 where ``τ_0 = 0.22`` is the shortwave optical depth parameter.
+
+The above two expressions are identical to those in the [RRTMGP documentation](https://clima.github.io/RRTMGP.jl/latest/Optics/#Gray-atmosphere-optics).
 
 ### Radiative Fluxes
 
