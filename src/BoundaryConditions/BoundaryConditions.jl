@@ -18,7 +18,7 @@ using ..Thermodynamics: saturation_specific_humidity, surface_density, PlanarLiq
 using Oceananigans.Architectures: Architectures, on_architecture
 using Oceananigans.Grids: Center, Face, XDirection, YDirection, AbstractGrid
 using Oceananigans.Fields: Field, set!
-using Oceananigans.BoundaryConditions: BoundaryConditions as OBC,
+using Oceananigans.BoundaryConditions: BoundaryConditions as OceananigansBC,
                                        BoundaryCondition,
                                        Flux,
                                        FieldBoundaryConditions,
@@ -120,7 +120,7 @@ Base.summary(df::BulkDragFunction) = string("BulkDragFunction(direction=", summa
 const XDBDF = XDirectionBulkDragFunction
 const YDBDF = YDirectionBulkDragFunction
 
-@inline function OBC.getbc(df::XDBDF, i::Integer, j::Integer, grid::AbstractGrid, clock, fields)
+@inline function OceananigansBC.getbc(df::XDBDF, i::Integer, j::Integer, grid::AbstractGrid, clock, fields)
     ρu = @inbounds fields.ρu[i, j, 1]
     U² = wind_speed²ᶠᶜᶜ(i, j, grid, fields)
     U = sqrt(U²)
@@ -129,7 +129,7 @@ const YDBDF = YDirectionBulkDragFunction
     return - Cᴰ * Ũ² * ρu / U * (U > 0)
 end
 
-@inline function OBC.getbc(df::YDBDF, i::Integer, j::Integer, grid::AbstractGrid, clock, fields)
+@inline function OceananigansBC.getbc(df::YDBDF, i::Integer, j::Integer, grid::AbstractGrid, clock, fields)
     ρv = @inbounds fields.ρv[i, j, 1]
     U² = wind_speed²ᶜᶠᶜ(i, j, grid, fields)
     U = sqrt(U²)
@@ -194,8 +194,8 @@ Base.summary(bf::BulkSensibleHeatFluxFunction) =
            ", gustiness=", bf.gustiness, ")")
 
 # getbc for BulkSensibleHeatFluxFunction
-@inline function OBC.getbc(bf::BulkSensibleHeatFluxFunction, i::Integer, j::Integer,
-                           grid::AbstractGrid, clock, fields)
+@inline function OceananigansBC.getbc(bf::BulkSensibleHeatFluxFunction, i::Integer, j::Integer,
+                                      grid::AbstractGrid, clock, fields)
     T₀ = surface_value(bf.surface_temperature, i, j)
     θ = @inbounds fields.θ[i, j, 1]
     Δθ = θ - T₀
@@ -272,7 +272,7 @@ Base.summary(bf::BulkVaporFluxFunction) =
 const BVFF = BulkVaporFluxFunction
 
 # getbc for BulkVaporFluxFunction
-@inline function OBC.getbc(bf::BVFF, i::Integer, j::Integer, grid::AbstractGrid, clock, fields)
+@inline function OceananigansBC.getbc(bf::BVFF, i::Integer, j::Integer, grid::AbstractGrid, clock, fields)
     constants = bf.thermodynamic_constants
     surface = bf.surface
     T₀ = surface_value(bf.surface_temperature, i, j)
