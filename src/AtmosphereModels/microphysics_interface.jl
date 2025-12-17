@@ -119,4 +119,29 @@ precipitation_rate(model, phase::Symbol=:liquid) = precipitation_rate(model, mod
 # We implmement this as a fallback for convenience
 # TODO: support reductions over ZeroField or the like, so we can swap
 # non-precipitating microphysics schemes with precipitating ones
-precipitation_rate(model, microphysics, phase) = CenterField(model.grid) 
+precipitation_rate(model, microphysics, phase) = CenterField(model.grid)
+
+#####
+##### Surface precipitation flux diagnostic
+#####
+
+"""
+    surface_precipitation_flux(model)
+
+Return a 2D `Field` representing the flux of precipitating moisture at the bottom boundary.
+
+The surface precipitation flux is `wʳ * ρqʳ` at the bottom face (k=1), representing
+the rate at which rain mass leaves the domain through the bottom boundary.
+
+Units: kg/m²/s (positive = downward flux out of domain)
+
+Arguments:
+- `model`: An `AtmosphereModel` with a microphysics scheme
+
+Returns a 2D `Field` that can be computed and visualized.
+Specific microphysics schemes must extend this function.
+"""
+surface_precipitation_flux(model) = surface_precipitation_flux(model, model.microphysics)
+
+# Default: zero flux for Nothing microphysics
+surface_precipitation_flux(model, ::Nothing) = Field{Center, Center, Nothing}(model.grid) 

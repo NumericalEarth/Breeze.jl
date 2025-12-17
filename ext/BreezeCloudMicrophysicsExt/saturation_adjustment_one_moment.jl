@@ -13,7 +13,10 @@ prognostic_field_names(::WP1M) = tuple(:ρqʳ)
 function materialize_microphysical_fields(bμp::WP1M, grid, bcs)
     center_names = (:qᵛ, :qˡ, :qᶜˡ, :qʳ, :ρqʳ)
     center_fields = center_field_tuple(grid, center_names...)
-    wʳ = ZFaceField(grid)  # Rain terminal velocity (negative = downward)
+    # Rain terminal velocity (negative = downward)
+    # bottom = nothing ensures the kernel-set value is preserved during fill_halo_regions!
+    wʳ_bcs = FieldBoundaryConditions(grid, (Center(), Center(), Face()); bottom=nothing)
+    wʳ = ZFaceField(grid; boundary_conditions=wʳ_bcs)
     return (; zip(center_names, center_fields)..., wʳ)
 end
 
@@ -123,7 +126,10 @@ prognostic_field_names(::MP1M) = (:ρqʳ, :ρqˢ)
 function materialize_microphysical_fields(bμp::MP1M, grid, bcs)
     center_names = (:qᵛ, :qˡ, :qᶜˡ, :qᶜⁱ, :qʳ, :qˢ, :ρqʳ, :ρqˢ)
     center_fields = center_field_tuple(grid, center_names...)
-    wʳ = ZFaceField(grid)  # Rain terminal velocity (negative = downward)
+    # Rain terminal velocity (negative = downward)
+    # bottom = nothing ensures the kernel-set value is preserved during fill_halo_regions!
+    wʳ_bcs = FieldBoundaryConditions(grid, (Center(), Center(), Face()); bottom=nothing)
+    wʳ = ZFaceField(grid; boundary_conditions=wʳ_bcs)
     return (; zip(center_names, center_fields)..., wʳ)
 end
 

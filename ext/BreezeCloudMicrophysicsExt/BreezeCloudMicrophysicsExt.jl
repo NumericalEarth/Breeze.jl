@@ -43,9 +43,10 @@ using Breeze.Microphysics:
 using Oceananigans: Oceananigans
 using DocStringExtensions: TYPEDSIGNATURES
 
-using Oceananigans: Center, Field
+using Oceananigans: Center, Face, Field
 using Oceananigans.AbstractOperations: KernelFunctionOperation
 using Oceananigans.Fields: ZeroField, ZFaceField
+using Oceananigans.BoundaryConditions: FieldBoundaryConditions
 using Adapt: Adapt, adapt
 
 import Breeze.AtmosphereModels:
@@ -56,7 +57,8 @@ import Breeze.AtmosphereModels:
     compute_moisture_fractions,
     microphysical_tendency,
     microphysical_velocities,
-    precipitation_rate
+    precipitation_rate,
+    surface_precipitation_flux
 
 include("cloud_microphysics_translations.jl")
 include("zero_moment_microphysics.jl")

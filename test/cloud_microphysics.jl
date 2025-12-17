@@ -276,3 +276,64 @@ end
     @test μ1.cloud_formation isa NonEquilibriumCloudFormation
     @test μ1.cloud_formation.liquid.τ_relax == FT(10.0)
 end
+
+@testset "Setting specific microphysical variables [$(FT)]" for FT in (Float32, Float64)
+    Oceananigans.defaults.FloatType = FT
+    grid = RectilinearGrid(default_arch; size=(2, 2, 2), x=(0, 100), y=(0, 100), z=(0, 100))
+
+    constants = ThermodynamicConstants()
+    reference_state = ReferenceState(grid, constants, surface_pressure=101325, potential_temperature=300)
+    formulation = AnelasticFormulation(reference_state; thermodynamics=:LiquidIcePotentialTemperature)
+
+    # Non-equilibrium scheme has both qᶜˡ and qʳ as prognostic
+    microphysics = OneMomentCloudMicrophysics()
+    model = AtmosphereModel(grid; formulation, microphysics)
+
+    # Get reference density
+    ρᵣ = reference_state.density[1, 1, 1]
+
+    # Set specific microphysical variables (without ρ prefix)
+    qᶜˡ_value = FT(0.001)
+    qʳ_value = FT(0.002)
+    set!(model; θ=300, qᵗ=0.020, qᶜˡ=qᶜˡ_value, qʳ=qʳ_value)
+
+    # Check that density-weighted fields were set correctly
+    @test model.microphysical_fields.ρqᶜˡ[1, 1, 1] ≈ ρᵣ * qᶜˡ_value
+    @test model.microphysical_fields.ρqʳ[1, 1, 1] ≈ ρᵣ * qʳ_value
+
+    # Check that specific fields are diagnosed correctly
+    @test model.microphysical_fields.qᶜˡ[1, 1, 1] ≈ qᶜˡ_value
+    @test model.microphysical_fields.qʳ[1, 1, 1] ≈ qʳ_value
+
+    # Test that time-stepping works after setting specific variables
+    time_step!(model, 1)
+    @test model.clock.iteration == 1
+end
+
+@testset "Surface precipitation flux diagnostic [$(FT)]" for FT in (Float32, Float64)
+    Oceananigans.defaults.FloatType = FT
+    grid = RectilinearGrid(default_arch; size=(2, 2, 4), x=(0, 100), y=(0, 100), z=(0, 100))
+
+    constants = ThermodynamicConstants()
+    reference_state = ReferenceState(grid, constants, surface_pressure=101325, potential_temperature=300)
+    formulation = AnelasticFormulation(reference_state; thermodynamics=:LiquidIcePotentialTemperature)
+
+    microphysics = OneMomentCloudMicrophysics()
+    model = AtmosphereModel(grid; formulation, microphysics)
+
+    # Set some rain
+    set!(model; θ=300, qᵗ=0.020, qᶜˡ=0, qʳ=0.001)
+
+    # Get surface precipitation flux
+    spf = surface_precipitation_flux(model)
+    @test spf isa Field
+    compute!(spf)
+
+    # Check that flux is computed correctly
+    wʳ = model.microphysical_fields.wʳ[1, 1, 1]
+    ρqʳ = model.microphysical_fields.ρqʳ[1, 1, 1]
+    expected_flux = -wʳ * ρqʳ  # Positive for downward flux (wʳ < 0)
+
+    @test spf[1, 1] ≈ expected_flux
+    @test spf[1, 1] > 0  # Rain falls down, so flux should be positive
+end

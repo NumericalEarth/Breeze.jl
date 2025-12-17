@@ -13,7 +13,10 @@ prognostic_field_names(::WPNE1M) = (:ρqᶜˡ, :ρqʳ)
 function materialize_microphysical_fields(bμp::WPNE1M, grid, bcs)
     center_names = (:qᵛ, :qˡ, :qᶜˡ, :qʳ, :ρqᶜˡ, :ρqʳ)
     center_fields = center_field_tuple(grid, center_names...)
-    wʳ = ZFaceField(grid)  # Rain terminal velocity (negative = downward)
+    # Rain terminal velocity (negative = downward)
+    # bottom = nothing ensures the kernel-set value is preserved during fill_halo_regions!
+    wʳ_bcs = FieldBoundaryConditions(grid, (Center(), Center(), Face()); bottom=nothing)
+    wʳ = ZFaceField(grid; boundary_conditions=wʳ_bcs)
     return (; zip(center_names, center_fields)..., wʳ)
 end
 
@@ -63,9 +66,15 @@ end
     return 1 + (ℒˡ / cᵖᵐ) * dqᵛ⁺_dT
 end
 
-@inline function condensation_rate(qᵛ, qᵛ⁺, T, ρ, q, τᶜˡ, constants)
+@inline function condensation_rate(qᵛ, qᵛ⁺, qᶜˡ, T, ρ, q, τᶜˡ, constants)
     Γˡ = thermodynamic_adjustment_factor(qᵛ⁺, T, q, constants)
-    return (qᵛ - qᵛ⁺) / (Γˡ * τᶜˡ)
+    Sᶜᵒⁿᵈ = (qᵛ - qᵛ⁺) / (Γˡ * τᶜˡ)
+    
+    # Limit evaporation (Sᶜᵒⁿᵈ < 0) to available cloud liquid
+    # This prevents qᶜˡ from going negative
+    Sᶜᵒⁿᵈ_limited = ifelse(Sᶜᵒⁿᵈ < 0, max(Sᶜᵒⁿᵈ, -qᶜˡ / τᶜˡ), Sᶜᵒⁿᵈ)
+    
+    return Sᶜᵒⁿᵈ_limited
 end
 
 #####
@@ -97,8 +106,13 @@ end
                              categories.air_properties,
                              q, qʳ, ρⁱʲᵏ, T, constants)
 
+    # Limit evaporation to available rain (relaxation-style limiter)
+    # Use condensation timescale as reference for limiting
+    τᶜˡ = bμp.cloud_formation.liquid.τ_relax
+    Sᵉᵛᵃᵖ_limited = max(Sᵉᵛᵃᵖ, -qʳ / τᶜˡ)
+
     # Total tendency for ρqʳ (positive = rain increase)
-    return ρⁱʲᵏ * (Sᵃᶜⁿᵛ + Sᵃᶜᶜ + Sᵉᵛᵃᵖ)
+    return ρⁱʲᵏ * (Sᵃᶜⁿᵛ + Sᵃᶜᶜ + Sᵉᵛᵃᵖ_limited)
 end
 
 
@@ -122,7 +136,8 @@ end
     qᵛ⁺ = saturation_specific_humidity(T, ρⁱʲᵏ, constants, PlanarLiquidSurface())
 
     # Condensation/evaporation rate (positive = condensation = cloud liquid increase)
-    Sᶜᵒⁿᵈ = condensation_rate(qᵛ, qᵛ⁺, T, ρⁱʲᵏ, q, τᶜˡ, constants)
+    # Limited to prevent qᶜˡ from going negative
+    Sᶜᵒⁿᵈ = condensation_rate(qᵛ, qᵛ⁺, qᶜˡ, T, ρⁱʲᵏ, q, τᶜˡ, constants)
 
     # Autoconversion: cloud liquid → rain (sink for cloud liquid)
     Sᵃᶜⁿᵛ = conv_q_lcl_to_q_rai(categories.rain.acnv1M, qᶜˡ)

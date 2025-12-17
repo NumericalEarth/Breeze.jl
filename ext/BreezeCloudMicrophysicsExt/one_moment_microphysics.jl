@@ -112,6 +112,51 @@ Adapt.adapt_structure(to, k::OneMomentPrecipitationRateKernel) =
 end
 
 #####
+##### Surface precipitation flux (flux out of bottom boundary)
+#####
+
+"""
+$(TYPEDSIGNATURES)
+
+Return a 2D `Field` representing the precipitation flux at the bottom boundary.
+
+The surface precipitation flux is `wʳ * ρqʳ` at k=1 (bottom face), representing
+the rate at which rain mass leaves the domain through the bottom boundary.
+
+Units: kg/m²/s (positive = downward, out of domain)
+
+Note: The returned value is positive when rain is falling out of the domain
+(the terminal velocity `wʳ` is negative, and we flip the sign).
+"""
+function surface_precipitation_flux(model, microphysics::OneMomentCloudMicrophysics)
+    grid = model.grid
+    wʳ = model.microphysical_fields.wʳ
+    ρqʳ = model.microphysical_fields.ρqʳ
+    kernel = SurfacePrecipitationFluxKernel(wʳ, ρqʳ)
+    op = KernelFunctionOperation{Center, Center, Nothing}(kernel, grid)
+    return Field(op)
+end
+
+struct SurfacePrecipitationFluxKernel{W, R}
+    terminal_velocity :: W
+    rain_density :: R
+end
+
+Adapt.adapt_structure(to, k::SurfacePrecipitationFluxKernel) =
+    SurfacePrecipitationFluxKernel(adapt(to, k.terminal_velocity),
+                                    adapt(to, k.rain_density))
+
+@inline function (kernel::SurfacePrecipitationFluxKernel)(i, j, k_idx, grid)
+    # Flux at bottom face (k=1), ignore k_idx since this is a 2D field
+    # wʳ < 0 (downward), so -wʳ * ρqʳ > 0 represents flux out of domain
+    @inbounds wʳ = kernel.terminal_velocity[i, j, 1]
+    @inbounds ρqʳ = kernel.rain_density[i, j, 1]
+    
+    # Return positive flux for rain leaving domain (downward)
+    return -wʳ * ρqʳ
+end
+
+#####
 ##### show methods
 #####
 
