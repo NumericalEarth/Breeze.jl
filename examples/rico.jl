@@ -264,7 +264,7 @@ function progress(sim)
     return nothing
 end
 
-add_callback!(simulation, progress, TimeInterval(1hour))
+add_callback!(simulation, progress, IterationInterval(500))
 
 # In addition to velocities, we output horizontal and time-averages of
 # liquid water mass fraction, specific humidity, and liquid-ice potential temperature,
