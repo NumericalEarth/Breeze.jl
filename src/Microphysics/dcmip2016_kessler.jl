@@ -36,7 +36,7 @@ Klemp and Wilhelmson (1978).
   Meteorological Monographs, 10(32).
 - Klemp, J. B., & Wilhelmson, R. B. (1978). The Simulation of Three-Dimensional Convective Storm Dynamics.
   Journal of the Atmospheric Sciences, 35(6), 1070-1096.
-- [DCMIP2016 Fortran implementation](https://gitlab.in2p3.fr/ipsl/projets/dynamico/dynamico/-/blob/master/src/dcmip2016_kessler_physic.f90)
+- [DCMIP2016 Fortran implementation](kessler.f90 in https://doi.org/10.5281/zenodo.1298671)
 
 # Moisture Categories
 This scheme represents moisture in three categories:

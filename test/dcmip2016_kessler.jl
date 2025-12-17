@@ -12,7 +12,8 @@ if !@isdefined(default_arch)
     const default_arch = CPU()
 end
 
-# Reference implementation of the KESSLER subroutine from dcmip2016_kessler_physic.f90
+# Reference implementation of the KESSLER subroutine from the DCMIP2016 Fortran implementation
+# Reference: ClimateGlobalChange/DCMIP2016: v1.0. https://doi.org/10.5281/zenodo.1298671
 function kessler_reference(theta, qv, qc, qr, rho, pk, dt, z, nz)
     # Constants
     f2x = 17.27
