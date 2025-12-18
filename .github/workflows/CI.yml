@@ -53,7 +53,7 @@ jobs:
             os: windows-latest
         include:
           - version: "1.12.2"
-            os: aws-linux-nvidia-gpu
+            os: aws-linux-nvidia-gpu-t4
             arch: "default"
     steps:
       - uses: actions/checkout@v6
@@ -65,7 +65,7 @@ jobs:
         id: julia-cache
         # On self-hosted runners we don't use the cache: in re-use mode we run on a machine
         # which has just run another job, which would conflict with the existing cache.
-        if: ${{ matrix.os != 'aws-linux-nvidia-gpu' }}
+        if: ${{ matrix.os != 'aws-linux-nvidia-gpu-t4' }}
       - name: "Set test arguments and other environment variables"
         shell: bash
         run: |
@@ -85,7 +85,7 @@ jobs:
           fi
           echo "runtest_test_args=${TEST_ARGS[@]}" >> "${GITHUB_ENV}"
       - name: Install early-oom
-        if: ${{ matrix.os == 'aws-linux-nvidia-gpu' }}
+        if: ${{ matrix.os == 'aws-linux-nvidia-gpu-t4' }}
         run: |
           git clone --depth=1 --branch=v1.9.0 https://github.com/rfjakob/earlyoom
           cd earlyoom
@@ -107,7 +107,7 @@ jobs:
         continue-on-error: true
       - name: Save Julia depot cache on cancel or failure
         id: julia-cache-save
-        if: ${{ matrix.os != 'aws-linux-nvidia-gpu' && (cancelled() || failure()) }}
+        if: ${{ matrix.os != 'aws-linux-nvidia-gpu-t4' && (cancelled() || failure()) }}
         uses: actions/cache/save@v5
         with:
           path: |

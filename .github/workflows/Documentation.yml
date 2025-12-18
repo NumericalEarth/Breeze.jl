@@ -35,7 +35,7 @@ jobs:
       contents: write
       pull-requests: read
       statuses: write
-    runs-on: aws-linux-nvidia-gpu-a10g
+    runs-on: aws-linux-nvidia-gpu-t4
     timeout-minutes: 60
     steps:
       - uses: actions/checkout@v6
