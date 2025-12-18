@@ -15,7 +15,6 @@ using Breeze
 using Breeze.AtmosphereModels
 
 using Breeze.Thermodynamics:
-    ThermodynamicConstants,
     MoistureMassFractions,
     density,
     with_moisture,
@@ -24,10 +23,8 @@ using Breeze.Thermodynamics:
     saturation_vapor_pressure,
     saturation_specific_humidity,
     supersaturation,
-    vapor_pressure,
     liquid_latent_heat,
     vapor_gas_constant,
-    dry_air_gas_constant,
     mixture_heat_capacity
 
 using Breeze.Microphysics:
