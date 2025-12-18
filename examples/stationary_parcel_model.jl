@@ -68,7 +68,7 @@ case1 = run_parcel_simulation(qᵗ=0.025)                    # Supersaturated
 case2 = run_parcel_simulation(qᵗ=0.030)                    # Higher moisture
 case3 = run_parcel_simulation(qᵗ=0.015, qʳ=0.002)          # Subsaturated with rain
 case4 = run_parcel_simulation(qᵗ=0.03, qᶜˡ=0.02, qʳ=0.005) # Supersaturated with rain
-case5 = run_parcel_simulation(θ=280, qᵗ=0.030, qᶜˡ=0.010)  # Autoconversion + evaporation
+case5 = run_parcel_simulation(θ=280, qᵗ=0.040, qᶜˡ=0.010)  # Autoconversion + evaporation
 nothing #hide
 
 # ## Visualization
@@ -112,10 +112,10 @@ end
 ax1, _ = plot_case!(fig, 1, case1, "(a) Supersaturation: vapor → cloud liquid")
 plot_case!(fig, 3, case2, "(b) Strong supersaturation: vapor → cloud liquid → rain")
 plot_case!(fig, 5, case3, "(c) Evaporating rain in a subsaturated environment")
-plot_case!(fig, 7, case4, "(d) Rain autoconversion then evaporation", show_xlabel=true)
+plot_case!(fig, 7, case4, "(d) Transient autoconversion of rain, then evaporation", show_xlabel=true)
 
 # Plot last case with xlims=(0, 500) for slow autoconversion
-plot_case!(fig, 9, case5, "(e) Autoconversion from lots of cloud liquid → rain (long 100τ run)";
+plot_case!(fig, 9, case5, "(e) Sustained autoconversion from cloud liquid → rain";
            show_xlabel=true)
 
 # Legend outside the figure
@@ -127,6 +127,8 @@ for i in 1:2:9
 end
 
 fig
+
+save("stationary_parcel_model.png", fig)
 
 # ## Discussion
 #

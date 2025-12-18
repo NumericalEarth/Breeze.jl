@@ -123,12 +123,12 @@ end
     Sᵉᵛᵃᵖ = max(Sᵉᵛᵃᵖ, Sᵉᵛᵃᵖ_min)
 
     # Numerical tendency for negative values
-    ρSⁿᵘᵐ = - ρⁱʲᵏ * qʳ / τᶜˡ
+    ρSⁿᵘᵐ = - 1 / 10τᶜˡ
 
     # Total tendency for ρqʳ (positive = rain increase)
     ΣρS = ρⁱʲᵏ * (Sᵃᶜⁿᵛ + Sᵃᶜᶜ + Sᵉᵛᵃᵖ)
 
-    return ifelse(qʳ > 0, ΣρS, ρSⁿᵘᵐ)
+    return ifelse(qʳ >= 0, ΣρS, ρSⁿᵘᵐ)
 end
 
 # Cloud liquid tendency for non-equilibrium 1M: condensation/evaporation - (autoconversion + accretion)
@@ -154,6 +154,7 @@ end
     # Condensation/evaporation rate (positive = condensation = cloud liquid increase)
     # Limited to prevent qᶜˡ from going negative
     Sᶜᵒⁿᵈ = condensation_rate(qᵛ, qᵛ⁺, qᶜˡ, T, ρⁱʲᵏ, q, τᶜˡ, constants)
+    Sᶜᵒⁿᵈ = ifelse(isnan(Sᶜᵒⁿᵈ), zero(Sᶜᵒⁿᵈ), Sᶜᵒⁿᵈ)
 
     # Autoconversion: cloud liquid → rain (sink for cloud liquid)
     Sᵃᶜⁿᵛ = conv_q_lcl_to_q_rai(categories.rain.acnv1M, qᶜˡ)
@@ -167,9 +168,9 @@ end
     ΣρS = ρⁱʲᵏ * (Sᶜᵒⁿᵈ - Sᵃᶜⁿᵛ - Sᵃᶜᶜ)
 
     # Numerical tendency for negative values
-    ρSⁿᵘᵐ = - ρⁱʲᵏ * qᶜˡ / τᶜˡ
+    ρSⁿᵘᵐ = - 1 / 10τᶜˡ
 
-    return ifelse(qᶜˡ > 0, ΣρS, ρSⁿᵘᵐ)
+    return ifelse(qᶜˡ >= 0, ΣρS, ρSⁿᵘᵐ)
 end
 
 #####

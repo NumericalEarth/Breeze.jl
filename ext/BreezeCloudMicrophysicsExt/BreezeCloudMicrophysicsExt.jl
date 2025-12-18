@@ -43,7 +43,7 @@ using DocStringExtensions: TYPEDSIGNATURES
 using Oceananigans: Center, Face, Field
 using Oceananigans.AbstractOperations: KernelFunctionOperation
 using Oceananigans.Fields: ZeroField, ZFaceField
-using Oceananigans.BoundaryConditions: FieldBoundaryConditions, OpenBoundaryCondition
+using Oceananigans.BoundaryConditions: FieldBoundaryConditions, BoundaryCondition, Open
 using Adapt: Adapt, adapt
 
 import Breeze.AtmosphereModels:

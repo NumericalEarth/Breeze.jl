@@ -78,10 +78,13 @@ end
     return (; u = ZeroField(), v = ZeroField(), w = wʳ)
 end
 
+# ImpenetrableBoundaryCondition alias
+const IBC = BoundaryCondition{<:Open, Nothing}
+
 # Helper for bottom terminal velocity based on precipitation_boundary_condition
 # Used in update_microphysical_fields! to set wʳ[bottom] = 0 for ImpenetrableBoundaryCondition
 @inline bottom_terminal_velocity(::Nothing, wʳ) = wʳ  # no boundary condition / open: keep computed value
-@inline bottom_terminal_velocity(bc, wʳ) = zero(wʳ)  # impenetrable boundary condition
+@inline bottom_terminal_velocity(::IBC, wʳ) = zero(wʳ)  # impenetrable boundary condition
 
 # Ice precipitation not yet implemented for one-moment scheme
 precipitation_rate(model, ::OneMomentCloudMicrophysics, ::Val{:ice}) = nothing
