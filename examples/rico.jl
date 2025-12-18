@@ -199,19 +199,11 @@ qᵗ₀ = AtmosphericProfilesLibrary.Rico_q_tot(FT)
 u₀ = AtmosphericProfilesLibrary.Rico_u(FT)
 v₀ = AtmosphericProfilesLibrary.Rico_v(FT)
 
-# We dutifully apply a correction to the Exner function due to the fact that
-# Breeze does not currently distinguish between the surface pressure and the
-# standard "potential temperature reference pressure" of ``10⁵`` Pa,
+# We add a small random perturbation below 1500 m to trigger convection.
 
-using Breeze.Thermodynamics: dry_air_gas_constant
-
-Rᵈ = dry_air_gas_constant(constants)
-cᵖᵈ = constants.dry_air.heat_capacity
-p₀ = reference_state.surface_pressure
-χ = (p₀ / 1e5)^(Rᵈ / cᵖᵈ)
 zϵ = 1500 # m
 
-θᵢ(x, y, z) = χ * θˡⁱ₀(z) + 1e-2 * (rand() - 0.5) * (z < zϵ)
+θᵢ(x, y, z) = θˡⁱ₀(z) + 1e-2 * (rand() - 0.5) * (z < zϵ)
 qᵢ(x, y, z) = qᵗ₀(z)
 uᵢ(x, y, z) = u₀(z)
 vᵢ(x, y, z) = v₀(z)
