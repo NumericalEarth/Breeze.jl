@@ -1,4 +1,6 @@
 using Breeze.Thermodynamics: LiquidIcePotentialTemperatureState, with_temperature, exner_function, mixture_heat_capacity
+using Oceananigans: Oceananigans
+using Oceananigans.BoundaryConditions: BoundaryConditions, fill_halo_regions!
 
 struct LiquidIcePotentialTemperatureThermodynamics{F, T}
     potential_temperature_density :: F  # ρθ (prognostic)
@@ -9,7 +11,7 @@ Adapt.adapt_structure(to, thermo::LiquidIcePotentialTemperatureThermodynamics) =
     LiquidIcePotentialTemperatureThermodynamics(adapt(to, thermo.potential_temperature_density),
                                        adapt(to, thermo.potential_temperature))
 
-function fill_halo_regions!(thermo::LiquidIcePotentialTemperatureThermodynamics)
+function BoundaryConditions.fill_halo_regions!(thermo::LiquidIcePotentialTemperatureThermodynamics)
     fill_halo_regions!(thermo.potential_temperature_density)
     fill_halo_regions!(thermo.potential_temperature)
     return nothing
@@ -21,8 +23,8 @@ prognostic_field_names(formulation::APTF) = tuple(:ρθ)
 additional_field_names(formulation::APTF) = tuple(:θ)
 thermodynamic_density_name(::APTF) = :ρθ
 thermodynamic_density(formulation::APTF) = formulation.thermodynamics.potential_temperature_density
-fields(formulation::APTF) = (; θ=formulation.thermodynamics.potential_temperature)
-prognostic_fields(formulation::APTF) = (; ρθ=formulation.thermodynamics.potential_temperature_density)
+Oceananigans.fields(formulation::APTF) = (; θ=formulation.thermodynamics.potential_temperature)
+Oceananigans.prognostic_fields(formulation::APTF) = (; ρθ=formulation.thermodynamics.potential_temperature_density)
 
 function materialize_thermodynamics(::Val{:LiquidIcePotentialTemperature}, grid, boundary_conditions)
     potential_temperature_density = CenterField(grid, boundary_conditions=boundary_conditions.ρθ)
