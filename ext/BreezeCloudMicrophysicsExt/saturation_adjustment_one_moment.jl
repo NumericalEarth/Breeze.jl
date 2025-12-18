@@ -74,8 +74,15 @@ This is required because:
     # Get rain mass fraction from diagnostic microphysical field
     @inbounds qʳ = μ.ρqʳ[i, j, k] / ρᵣ
     
+    q₁ = MoistureMassFractions(qᵗ)
+    𝒰₁ = with_moisture(𝒰₀, q₁)
+    𝒰′ = adjust_thermodynamic_state(𝒰₁, bμp.cloud_formation, constants)
+    q = 𝒰′.moisture_mass_fractions
+
+    #=
     # Compute cloud moisture (excluding rain)
-    qᵗᶜ = qᵗ - qʳ
+    qʳ⁺ = max(0, qʳ)
+    qᵗᶜ = max(0, qᵗ - qʳ⁺)
     
     # Build moisture state for cloud-only adjustment
     qᶜ = MoistureMassFractions(qᵗᶜ)
@@ -87,8 +94,9 @@ This is required because:
     # Add rain back to the liquid fraction
     q′ = 𝒰′.moisture_mass_fractions
     qᵛ = q′.vapor
-    qˡ = q′.liquid + qʳ  # cloud liquid + rain
+    qˡ = q′.liquid + qʳ⁺  # cloud liquid + rain
     q = MoistureMassFractions(qᵛ, qˡ)
+    =#
     
     return with_moisture(𝒰′, q)
 end
@@ -110,8 +118,14 @@ end
                      categories.hydrometeor_velocities.rain, categories.collisions,
                      qᶜˡ, qʳ, ρⁱʲᵏ)
 
+    # Numerical tendency for negative values
+    τⁿᵘᵐ = 10 # seconds
+    ρSⁿᵘᵐ = - ρⁱʲᵏ * qʳ / τⁿᵘᵐ
+
     # Total tendency for ρqʳ (positive = rain increase)
-    return ρⁱʲᵏ * (Sᵃᶜⁿᵛ + Sᵃᶜᶜ)
+    ΣρS = ρⁱʲᵏ * (Sᵃᶜⁿᵛ + Sᵃᶜᶜ)
+
+    return ifelse(qʳ >= 0, ΣρS, ρSⁿᵘᵐ)
 end
 
 # Moisture tendency (ρqᵗ): loss to precipitation (currently zero since rain is tracked separately)

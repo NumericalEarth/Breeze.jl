@@ -168,10 +168,14 @@ nothing #hide
 BreezeCloudMicrophysicsExt = Base.get_extension(Breeze, :BreezeCloudMicrophysicsExt)
 using .BreezeCloudMicrophysicsExt: OneMomentCloudMicrophysics
 
-microphysics = OneMomentCloudMicrophysics()
+cloud_formation = SaturationAdjustment(FT; equilibrium=WarmPhaseEquilibrium())
+microphysics = OneMomentCloudMicrophysics(; cloud_formation)
 
-ninth_order_weno = WENO(order=9)
-bounds_preserving_weno = WENO(order=9, bounds=(0, 1))
+# Default non-equilibrium cloud formation
+# microphysics = OneMomentCloudMicrophysics()
+
+ninth_order_weno = WENO(order=5)
+bounds_preserving_weno = WENO(order=5, bounds=(0, 1))
 
 momentum_advection = ninth_order_weno
 scalar_advection = (ρθ = ninth_order_weno,
@@ -217,7 +221,7 @@ set!(model, θ=θᵢ, qᵗ=qᵢ, u=uᵢ, v=vᵢ)
 # a quasi-steady precipitating state.
 
 simulation = Simulation(model; Δt=10, stop_time=6hour)
-conjure_time_step_wizard!(simulation, cfl=0.2)
+conjure_time_step_wizard!(simulation, cfl=0.7) #, max_Δt=1)
 
 # ## Output and progress
 #
@@ -252,11 +256,11 @@ function progress(sim)
     ∫P = CUDA.@allowscalar ∫PdV[]
     elapsed = 1e-9 * (time_ns() - wall_clock[])
 
-    msg = @sprintf("Iter: %d, t: %s, Δt: %s, wall time: %s, max|w|: %.2e m/s \n",
+    msg = @sprintf("Iter: %d, t: %s, Δt: %s, wall time: %s, max|w|: %.2e m/s",
                    iteration(sim), prettytime(sim), prettytime(sim.Δt),
                    prettytime(elapsed), wmax)
 
-    msg *= @sprintf(" --- max(qᵗ): %.2e, max(qᶜˡ): %.2e, extrema(qʳ): (%.2e, %.2e), ∫PdV: %.2e kg/kg/s",
+    msg *= @sprintf("\n --- max(qᵗ): %.2e, max(qᶜˡ): %.2e, extrema(qʳ): (%.2e, %.2e), ∫PdV: %.2e kg/kg/s",
                     qᵗmax, qᶜˡmax, qʳmin, qʳmax, ∫P)
 
     @info msg
@@ -299,7 +303,7 @@ slice_outputs = (
 
 filename = "rico_slices.jld2"
 simulation.output_writers[:slices] = JLD2Writer(model, slice_outputs; filename,
-                                                schedule = TimeInterval(10seconds),
+                                                schedule = TimeInterval(20seconds),
                                                 overwrite_existing = true)
 
 # We're finally ready to run this thing,

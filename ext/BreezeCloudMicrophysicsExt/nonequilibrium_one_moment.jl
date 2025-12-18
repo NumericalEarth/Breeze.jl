@@ -123,7 +123,7 @@ end
     Sᵉᵛᵃᵖ = max(Sᵉᵛᵃᵖ, Sᵉᵛᵃᵖ_min)
 
     # Numerical tendency for negative values
-    ρSⁿᵘᵐ = - 1 / 10τᶜˡ
+    ρSⁿᵘᵐ = - ρⁱʲᵏ * qʳ / τᶜˡ
 
     # Total tendency for ρqʳ (positive = rain increase)
     ΣρS = ρⁱʲᵏ * (Sᵃᶜⁿᵛ + Sᵃᶜᶜ + Sᵉᵛᵃᵖ)
@@ -168,7 +168,7 @@ end
     ΣρS = ρⁱʲᵏ * (Sᶜᵒⁿᵈ - Sᵃᶜⁿᵛ - Sᵃᶜᶜ)
 
     # Numerical tendency for negative values
-    ρSⁿᵘᵐ = - 1 / 10τᶜˡ
+    ρSⁿᵘᵐ = - ρⁱʲᵏ * qᶜˡ / τᶜˡ
 
     return ifelse(qᶜˡ >= 0, ΣρS, ρSⁿᵘᵐ)
 end
