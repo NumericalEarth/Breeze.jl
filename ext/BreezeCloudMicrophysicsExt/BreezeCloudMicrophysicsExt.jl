@@ -35,7 +35,6 @@ using Breeze.Microphysics:
     WarmPhaseSaturationAdjustment,
     MixedPhaseSaturationAdjustment,
     NonEquilibriumCloudFormation,
-    ImpenetrableBoundaryCondition,
     adjust_thermodynamic_state
 
 using Oceananigans: Oceananigans
@@ -44,7 +43,7 @@ using DocStringExtensions: TYPEDSIGNATURES
 using Oceananigans: Center, Face, Field
 using Oceananigans.AbstractOperations: KernelFunctionOperation
 using Oceananigans.Fields: ZeroField, ZFaceField
-using Oceananigans.BoundaryConditions: FieldBoundaryConditions
+using Oceananigans.BoundaryConditions: FieldBoundaryConditions, OpenBoundaryCondition
 using Adapt: Adapt, adapt
 
 import Breeze.AtmosphereModels:

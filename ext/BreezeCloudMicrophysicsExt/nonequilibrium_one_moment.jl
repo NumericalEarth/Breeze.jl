@@ -23,12 +23,12 @@ end
 @inline function update_microphysical_fields!(μ, bμp::WPNE1M, i, j, k, grid, ρ, 𝒰, constants)
     q = 𝒰.moisture_mass_fractions
     qᵛ = q.vapor
-    qˡ = q.liquid  # total liquid from thermodynamic state
     categories = bμp.categories
 
     @inbounds begin
         qᶜˡ = μ.ρqᶜˡ[i, j, k] / ρ  # cloud liquid from prognostic field
         qʳ = μ.ρqʳ[i, j, k] / ρ    # rain from prognostic field
+
         μ.qᵛ[i, j, k] = qᵛ
         μ.qᶜˡ[i, j, k] = qᶜˡ
         μ.qʳ[i, j, k] = qʳ
@@ -40,7 +40,7 @@ end
 
         if k == 1
             # For ImpenetrableBoundaryCondition, set wʳ = 0 at bottom face to prevent rain from exiting
-            μ.wʳ[i, j, 1] = bottom_terminal_velocity(bμp.precipitation_boundary_condition, wʳ)
+            μ.wʳ[i, j, k] = bottom_terminal_velocity(bμp.precipitation_boundary_condition, wʳ)
         else
             μ.wʳ[i, j, k] = wʳ
         end
@@ -56,9 +56,9 @@ end
     end
 
     # Vapor is diagnosed from total moisture minus condensates
-    qᵛ = qᵗ - qᶜˡ - qʳ
     qˡ = qᶜˡ + qʳ
     qⁱ = zero(qˡ)
+    qᵛ = qᵗ - qˡ - qⁱ
 
     return MoistureMassFractions(qᵛ, qˡ, qⁱ)
 end
@@ -92,10 +92,12 @@ end
 # Rain tendency for non-equilibrium 1M: autoconversion + accretion + evaporation
 @inline function microphysical_tendency(i, j, k, grid, bμp::WPNE1M, ::Val{:ρqʳ}, ρ, μ, 𝒰, constants)
     categories = bμp.categories
-    ρⁱʲᵏ = @inbounds ρ[i, j, k]
 
-    @inbounds qᶜˡ = μ.qᶜˡ[i, j, k]  # cloud liquid
-    @inbounds qʳ = μ.qʳ[i, j, k]    # rain
+    @inbounds begin
+        ρⁱʲᵏ = ρ[i, j, k]
+        qᶜˡ = μ.qᶜˡ[i, j, k]  # cloud liquid
+        qʳ = μ.qʳ[i, j, k]    # rain
+    end
 
     # Autoconversion: cloud liquid → rain
     Sᵃᶜⁿᵛ = conv_q_lcl_to_q_rai(categories.rain.acnv1M, qᶜˡ)
@@ -120,8 +122,13 @@ end
     Sᵉᵛᵃᵖ_min = - max(0, qʳ) / τᶜˡ
     Sᵉᵛᵃᵖ = max(Sᵉᵛᵃᵖ, Sᵉᵛᵃᵖ_min)
 
+    # Numerical tendency for negative values
+    ρSⁿᵘᵐ = - ρⁱʲᵏ * qʳ / τᶜˡ
+
     # Total tendency for ρqʳ (positive = rain increase)
-    return ρⁱʲᵏ * (Sᵃᶜⁿᵛ + Sᵃᶜᶜ + Sᵉᵛᵃᵖ)
+    ΣρS = ρⁱʲᵏ * (Sᵃᶜⁿᵛ + Sᵃᶜᶜ + Sᵉᵛᵃᵖ)
+
+    return ifelse(qʳ > 0, ΣρS, ρSⁿᵘᵐ)
 end
 
 # Cloud liquid tendency for non-equilibrium 1M: condensation/evaporation - (autoconversion + accretion)
@@ -132,8 +139,8 @@ end
 
     @inbounds begin
         ρⁱʲᵏ = ρ[i, j, k]
-        qᶜˡ = μ.qᶜˡ[i, j, k]
         qʳ = μ.qʳ[i, j, k]
+        qᶜˡ = μ.qᶜˡ[i, j, k]
     end
 
     # Get thermodynamic state
@@ -156,8 +163,13 @@ end
                      categories.hydrometeor_velocities.rain, categories.collisions,
                      qᶜˡ, qʳ, ρⁱʲᵏ)
 
-    # Total tendency for ρqᶜˡ: condensation - autoconversion - accretion
-    return ρⁱʲᵏ * (Sᶜᵒⁿᵈ - Sᵃᶜⁿᵛ - Sᵃᶜᶜ)
+    # Total tendency for ρqᶜˡ: condensation - autoconversion - accretion - number adjustment
+    ΣρS = ρⁱʲᵏ * (Sᶜᵒⁿᵈ - Sᵃᶜⁿᵛ - Sᵃᶜᶜ)
+
+    # Numerical tendency for negative values
+    ρSⁿᵘᵐ = - ρⁱʲᵏ * qᶜˡ / τᶜˡ
+
+    return ifelse(qᶜˡ > 0, ΣρS, ρSⁿᵘᵐ)
 end
 
 #####

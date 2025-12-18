@@ -80,8 +80,8 @@ end
 
 # Helper for bottom terminal velocity based on precipitation_boundary_condition
 # Used in update_microphysical_fields! to set wʳ[bottom] = 0 for ImpenetrableBoundaryCondition
-@inline bottom_terminal_velocity(::Nothing, wʳ) = wʳ  # open: keep computed value
-@inline bottom_terminal_velocity(::ImpenetrableBoundaryCondition, wʳ) = zero(wʳ)  # closed: zero velocity
+@inline bottom_terminal_velocity(::Nothing, wʳ) = wʳ  # no boundary condition / open: keep computed value
+@inline bottom_terminal_velocity(bc, wʳ) = zero(wʳ)  # impenetrable boundary condition
 
 # Ice precipitation not yet implemented for one-moment scheme
 precipitation_rate(model, ::OneMomentCloudMicrophysics, ::Val{:ice}) = nothing

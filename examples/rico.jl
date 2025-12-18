@@ -217,7 +217,7 @@ set!(model, θ=θᵢ, qᵗ=qᵢ, u=uᵢ, v=vᵢ)
 # a quasi-steady precipitating state.
 
 simulation = Simulation(model; Δt=10, stop_time=6hour)
-conjure_time_step_wizard!(simulation, cfl=0.7)
+conjure_time_step_wizard!(simulation, cfl=0.2)
 
 # ## Output and progress
 #
@@ -264,7 +264,7 @@ function progress(sim)
     return nothing
 end
 
-add_callback!(simulation, progress, IterationInterval(1000))
+add_callback!(simulation, progress, IterationInterval(100))
 
 # In addition to velocities, we output horizontal and time-averages of
 # liquid water mass fraction (cloud and rain separately), specific humidity,
