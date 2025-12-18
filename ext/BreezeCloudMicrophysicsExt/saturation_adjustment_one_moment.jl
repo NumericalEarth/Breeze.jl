@@ -118,12 +118,27 @@ end
                      categories.hydrometeor_velocities.rain, categories.collisions,
                      qᶜˡ, qʳ, ρⁱʲᵏ)
 
-    # Numerical tendency for negative values
+    # Rain evaporation using translated CloudMicrophysics physics
+    T = temperature(𝒰, constants)
+    q = 𝒰.moisture_mass_fractions
+
+    Sᵉᵛᵃᵖ = rain_evaporation(categories.rain,
+                             categories.hydrometeor_velocities.rain,
+                             categories.air_properties,
+                             q, qʳ, ρⁱʲᵏ, T, constants)
+
+    # Numerical time scale for limiting
     τⁿᵘᵐ = 10 # seconds
+
+    # Limit evaporation to available rain (relaxation-style limiter)
+    Sᵉᵛᵃᵖ_min = - max(0, qʳ) / τⁿᵘᵐ
+    Sᵉᵛᵃᵖ = max(Sᵉᵛᵃᵖ, Sᵉᵛᵃᵖ_min)
+
+    # Numerical tendency for negative values
     ρSⁿᵘᵐ = - ρⁱʲᵏ * qʳ / τⁿᵘᵐ
 
     # Total tendency for ρqʳ (positive = rain increase)
-    ΣρS = ρⁱʲᵏ * (Sᵃᶜⁿᵛ + Sᵃᶜᶜ)
+    ΣρS = ρⁱʲᵏ * (Sᵃᶜⁿᵛ + Sᵃᶜᶜ + Sᵉᵛᵃᵖ)
 
     return ifelse(qʳ >= 0, ΣρS, ρSⁿᵘᵐ)
 end
