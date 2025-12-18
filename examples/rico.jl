@@ -171,7 +171,7 @@ using .BreezeCloudMicrophysicsExt: OneMomentCloudMicrophysics
 microphysics = OneMomentCloudMicrophysics()
 
 ninth_order_weno = WENO(order=9)
-bounds_preserving_weno = WENO(order=5, bounds=(0, 1))
+bounds_preserving_weno = WENO(order=9, bounds=(0, 1))
 
 momentum_advection = ninth_order_weno
 scalar_advection = (ρθ = ninth_order_weno,
@@ -288,23 +288,26 @@ simulation.output_writers[:averages] = JLD2Writer(model, averaged_outputs; filen
 
 # For an animation, we also output slices,
 #
-# - xz-slices of qˡ and precipitation rate
-# - xy-slice of qˡ in cloud layer (z ≈ 1500 m) and vertically-integrated precipitation rate
+# - xz-slices of qᶜˡ (cloud liquid) and qʳ (rain mass fraction)
+# - xy-slice of w (vertical velocity) with qˡ contours overlaid
+
+w = model.velocities.w
 
 z = Oceananigans.Grids.znodes(grid, Center())
 k_cloud = searchsortedfirst(z, 1500)  # cloud layer height for RICO
 @info "Saving xy slices at z = $(z[k_cloud]) m (k = $k_cloud)"
 
 slice_outputs = (
-    qˡxz = view(qˡ, :, 1, :),
-    Pxz = view(P, :, 1, :),
+    qᶜˡxz = view(qᶜˡ, :, 1, :),
+    qʳxz = view(qʳ, :, 1, :),
+    wxy = view(w, :, :, k_cloud),
     qˡxy = view(qˡ, :, :, k_cloud),
-    ∫P = ∫Pdz,
+    qʳxy = view(qʳ, :, :, 1),
 )
 
 filename = "rico_slices.jld2"
 simulation.output_writers[:slices] = JLD2Writer(model, slice_outputs; filename,
-                                                schedule = TimeInterval(30seconds),
+                                                schedule = TimeInterval(10seconds),
                                                 overwrite_existing = true)
 
 # We're finally ready to run this thing,
@@ -372,63 +375,65 @@ fig
 # - Trade-wind flow with stronger westerlies
 # - Distinct profiles of cloud liquid (qᶜˡ) and rain (qʳ) as in [vanZanten2011](@citet)
 
-# ## Animation: cloud liquid water and precipitation rate
+# ## Animation: cloud structure and dynamics
 #
 # We create a 4-panel animation showing:
-# - Top left: xz-slice of cloud liquid water qˡ
-# - Top right: xz-slice of precipitation rate P
-# - Bottom left: xy-slice of qˡ in the cloud layer
-# - Bottom right: vertically-integrated precipitation rate
+# - Top left: xz-slice of cloud liquid water qᶜˡ
+# - Top right: xz-slice of rain mass fraction qʳ
+# - Bottom: xy-slice of vertical velocity w with qˡ contours overlaid
 
-qˡxz_ts = FieldTimeSeries("rico_slices.jld2", "qˡxz")
-Pxz_ts = FieldTimeSeries("rico_slices.jld2", "Pxz")
+qᶜˡxz_ts = FieldTimeSeries("rico_slices.jld2", "qᶜˡxz")
+qʳxz_ts = FieldTimeSeries("rico_slices.jld2", "qʳxz")
+wxy_ts = FieldTimeSeries("rico_slices.jld2", "wxy")
 qˡxy_ts = FieldTimeSeries("rico_slices.jld2", "qˡxy")
-∫P_ts = FieldTimeSeries("rico_slices.jld2", "∫P")
+qʳxy_ts = FieldTimeSeries("rico_slices.jld2", "qʳxy")
 
-z = znodes(qˡxz_ts.grid, Center())
-
-times = qˡxz_ts.times
+times = qᶜˡxz_ts.times
 Nt = length(times)
 
-# Compute color ranges (with fallback to avoid zero range which breaks Makie)
-qˡlim = max(maximum(qˡxz_ts), 1e-6) / 4
-Plim = max(maximum(Pxz_ts), 1e-10) / 4
-∫Plim = max(maximum(∫P_ts), 1e-8) / 4
+qᶜˡlim = maximum(qᶜˡxz_ts) / 4
+qʳlim = maximum(qʳxz_ts) / 4
+wlim = maximum(abs, wxy_ts) / 2
+qˡcontour = maximum(qˡxy_ts) / 8  # threshold for cloud contours
 
 # Now let's plot the slices and animate them.
 
-fig = Figure(size=(900, 800), fontsize=14)
+fig = Figure(size=(900, 850), fontsize=14)
 
-axqxz = Axis(fig[2, 1], aspect=2, ylabel="z (m)", xaxisposition=:top)
-axPxz = Axis(fig[2, 2], aspect=2, ylabel="z (m)", yaxisposition=:right, xaxisposition=:top)
-axqxy = Axis(fig[3, 1], aspect=1, xlabel="x (m)", ylabel="y (m)") 
-ax∫P  = Axis(fig[3, 2], aspect=1, xlabel="x (m)", ylabel="y (m)", yaxisposition=:right)
+axqᶜˡxz = Axis(fig[2, 1], aspect=2, ylabel="z (m)", xaxisposition=:top)
+axqʳxz = Axis(fig[2, 2], aspect=2, ylabel="z (m)", yaxisposition=:right, xaxisposition=:top)
+axwxy = Axis(fig[3, 1], aspect=1, xlabel="x (m)", ylabel="y (m)")
+axqʳxy = Axis(fig[3, 2], aspect=1, xlabel="x (m)", ylabel="y (m)", yaxisposition=:right)
 
-hidexdecorations!(axqxz)
-hidexdecorations!(axPxz)
+hidexdecorations!(axqᶜˡxz)
+hidexdecorations!(axqʳxz)
 
 n = Observable(1)
-qˡxz_n = @lift qˡxz_ts[$n]
-Pxz_n = @lift Pxz_ts[$n]
+qᶜˡxz_n = @lift qᶜˡxz_ts[$n]
+qʳxz_n = @lift qʳxz_ts[$n]
+wxy_n = @lift wxy_ts[$n]
 qˡxy_n = @lift qˡxy_ts[$n]
-∫P_n = @lift ∫P_ts[$n]
-title = @lift "Cloud liquid and precipitation in RICO at t = " * prettytime(times[$n])
+qʳxy_n = @lift qʳxy_ts[$n]
+title = @lift @sprintf("Clouds, rain, and updrafts in RICO at t = %16.3f hours", times[$n] / hour)
 
-hmq1 = heatmap!(axqxz, qˡxz_n, colormap=:dense, colorrange=(0, qˡlim))
-hmP1 = heatmap!(axPxz, Pxz_n, colormap=:amp, colorrange=(0, Plim))
-hmq2 = heatmap!(axqxy, qˡxy_n, colormap=:dense, colorrange=(0, qˡlim))
-hmP2 = heatmap!(ax∫P, ∫P_n, colormap=:amp, colorrange=(0, ∫Plim))
+hmqᶜˡ = heatmap!(axqᶜˡxz, qᶜˡxz_n, colormap=:dense, colorrange=(0, qᶜˡlim))
+hmqʳ = heatmap!(axqʳxz, qʳxz_n, colormap=:amp, colorrange=(0, qʳlim))
 
-Colorbar(fig[1, 1], hmq1, vertical=false, flipaxis=true, label="Cloud liquid water qˡ (x, y=0, z)")
-Colorbar(fig[1, 2], hmP1, vertical=false, flipaxis=true, label="Precipitation rate P (x, y=0, z)")
-Colorbar(fig[4, 1], hmq2, vertical=false, flipaxis=false, label="Cloud liquid water qˡ (x, y, z=$(z[k_cloud]))")
-Colorbar(fig[4, 2], hmP2, vertical=false, flipaxis=false, label="Column-integrated precipitation rate")
+hmw = heatmap!(axwxy, wxy_n, colormap=:balance, colorrange=(-wlim, wlim))
+contour!(axwxy, qˡxy_n, levels=[qˡcontour], color=(:black, 0.3), linewidth=3)
+
+hmqʳ = heatmap!(axqʳxy, qʳxy_n, colormap=:amp, colorrange=(0, qʳlim))
+contour!(axqʳxy, qˡxy_n, levels=[qˡcontour], color=(:black, 0.3), linewidth=3)
+
+Colorbar(fig[1, 1], hmqᶜˡ, vertical=false, flipaxis=true, label="Cloud liquid qᶜˡ (x, y=0, z)")
+Colorbar(fig[1, 2], hmqʳ, vertical=false, flipaxis=true, label="Rain mass fraction qʳ (x, y=0, z)")
+Colorbar(fig[4, 1], hmw, vertical=false, flipaxis=false, label="Vertical velocity w (x, y, z=$(z[k_cloud])) with qˡ contours")
+Colorbar(fig[4, 2], hmqʳ, vertical=false, flipaxis=false, label="Rain mass fraction qʳ (x, y, z=0)")
 
 fig[0, :] = Label(fig, title, fontsize=18, tellwidth=false)
 
-rowgap!(fig.layout, 2, -80)
-rowgap!(fig.layout, 3, -100)
-rowgap!(fig.layout, 4, 0)
+rowgap!(fig.layout, 2, -60)
+rowgap!(fig.layout, 3, -80)
 
 CairoMakie.record(fig, "rico_slices.mp4", 1:Nt, framerate=12) do nn
     n[] = nn
