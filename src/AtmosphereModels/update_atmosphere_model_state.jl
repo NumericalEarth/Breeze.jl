@@ -10,7 +10,7 @@ using Oceananigans.ImmersedBoundaries: mask_immersed_field!
 using Oceananigans.TimeSteppers: TimeSteppers
 using Oceananigans.Utils: launch!
 
-const AnelasticModel = AtmosphereModel{<:AnelasticFormulation}
+# AnelasticModel type alias imported from AnelasticFormulation submodule
 
 function TimeSteppers.update_state!(model::AnelasticModel, callbacks=[]; compute_tendencies=true)
     tracer_density_to_specific!(model) # convert tracer density to specific tracer distribution

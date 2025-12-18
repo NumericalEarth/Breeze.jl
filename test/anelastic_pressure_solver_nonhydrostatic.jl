@@ -42,5 +42,6 @@ using Oceananigans
 
     @test maximum(abs, δᵃ) < prod(size(grid)) * eps(FT)
     @test maximum(abs, δᵇ) < prod(size(grid)) * eps(FT)
-    @test anelastic.pressure == boussinesq.pressures.pNHS
+    # When ρᵣ == 1, the kinematic pressure p'/ρᵣ equals the Boussinesq non-hydrostatic pressure
+    @test anelastic.formulation.pressure_anomaly == boussinesq.pressures.pNHS
 end
