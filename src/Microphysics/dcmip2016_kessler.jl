@@ -14,7 +14,7 @@ using KernelAbstractions: @kernel, @index
 using DocStringExtensions: TYPEDSIGNATURES
 
 """
-    struct DCMIP2016KesslerMicrophysics <: AbstractMicrophysics
+    struct DCMIP2016KesslerMicrophysics
 
 DCMIP2016 implementation of the Kessler (1969) warm-rain bulk microphysics scheme.
 
