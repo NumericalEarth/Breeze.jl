@@ -22,7 +22,7 @@ end
 struct LiquidIcePotentialTemperatureState{FT} <: AbstractThermodynamicState{FT}
     potential_temperature :: FT
     moisture_mass_fractions :: MoistureMassFractions{FT}
-    surface_pressure :: FT
+    standard_pressure :: FT # pˢᵗ: reference pressure for potential temperature
     reference_pressure :: FT
 end
 
@@ -33,15 +33,15 @@ end
     Rᵐ = mixture_gas_constant(q, constants)
     cᵖᵐ = mixture_heat_capacity(q, constants)
     pᵣ = 𝒰.reference_pressure
-    p₀ = 𝒰.surface_pressure
-    return (pᵣ / p₀)^(Rᵐ / cᵖᵐ)
+    pˢᵗ = 𝒰.standard_pressure
+    return (pᵣ / pˢᵗ)^(Rᵐ / cᵖᵐ)
 end
 
 @inline total_specific_moisture(state::LiquidIcePotentialTemperatureState) =
     total_specific_moisture(state.moisture_mass_fractions)
 
 @inline with_moisture(𝒰::LiquidIcePotentialTemperatureState{FT}, q::MoistureMassFractions{FT}) where FT =
-    LiquidIcePotentialTemperatureState{FT}(𝒰.potential_temperature, q, 𝒰.surface_pressure, 𝒰.reference_pressure)
+    LiquidIcePotentialTemperatureState{FT}(𝒰.potential_temperature, q, 𝒰.standard_pressure, 𝒰.reference_pressure)
 
 @inline function temperature(𝒰::LiquidIcePotentialTemperatureState, constants::ThermodynamicConstants)
     θ = 𝒰.potential_temperature
@@ -68,7 +68,7 @@ end
 
     θ = (T - (ℒˡᵣ * qˡ + ℒⁱᵣ * qⁱ) / cᵖᵐ) / Π
 
-    return LiquidIcePotentialTemperatureState(θ, q, 𝒰.surface_pressure, 𝒰.reference_pressure)
+    return LiquidIcePotentialTemperatureState(θ, q, 𝒰.standard_pressure, 𝒰.reference_pressure)
 end
 
 @inline function density(𝒰::LiquidIcePotentialTemperatureState, constants)
