@@ -9,8 +9,7 @@ using Breeze.Thermodynamics:
     vapor_gas_constant,
     density,
     saturation_vapor_pressure
-
-import Oceananigans.Utils: prettysummary
+using Oceananigans.Utils: Utils
 
 struct SaturationSpecificHumidityKernelFunction{μ, FL, M, MF, T, R, TH}
     flavor :: FL
@@ -22,7 +21,7 @@ struct SaturationSpecificHumidityKernelFunction{μ, FL, M, MF, T, R, TH}
     thermodynamic_constants :: TH
 end
 
-prettysummary(kf::SaturationSpecificHumidityKernelFunction) = "$(kf.flavor) SaturationSpecificHumidityKernelFunction"
+Utils.prettysummary(kf::SaturationSpecificHumidityKernelFunction) = "$(kf.flavor) SaturationSpecificHumidityKernelFunction"
 
 Adapt.adapt_structure(to, k::SaturationSpecificHumidityKernelFunction) =
     SaturationSpecificHumidityKernelFunction(adapt(to, k.flavor),
@@ -207,7 +206,7 @@ struct RelativeHumidityKernelFunction{μ, M, MF, T, R, TH}
     thermodynamic_constants :: TH
 end
 
-prettysummary(kf::RelativeHumidityKernelFunction) = "RelativeHumidityKernelFunction"
+Utils.prettysummary(kf::RelativeHumidityKernelFunction) = "RelativeHumidityKernelFunction"
 
 Adapt.adapt_structure(to, k::RelativeHumidityKernelFunction) =
     RelativeHumidityKernelFunction(adapt(to, k.microphysics),

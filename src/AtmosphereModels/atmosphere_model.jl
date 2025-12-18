@@ -1,23 +1,18 @@
 using ..Thermodynamics: Thermodynamics, ThermodynamicConstants, ReferenceState
 
-using Oceananigans: AbstractModel, Center, CenterField, Clock, Field,
-                    Centered, XFaceField, YFaceField, ZFaceField
-using Oceananigans.Advection: adapt_advection_order
+using Oceananigans: Oceananigans, AbstractModel, Center, CenterField, Clock, Field,
+                    Centered, XFaceField, YFaceField, ZFaceField, fields, prognostic_fields
+using Oceananigans.Advection: Advection, adapt_advection_order, cell_advection_timescale
 using Oceananigans.AbstractOperations: @at
 using Oceananigans.BoundaryConditions: FieldBoundaryConditions, regularize_field_boundary_conditions
-using Oceananigans.Diagnostics: NaNChecker
+using Oceananigans.Diagnostics: Diagnostics as OceananigansDiagnostics, NaNChecker
 using Oceananigans.Grids: ZDirection
-using Oceananigans.Models: validate_model_halo, validate_tracer_advection
+using Oceananigans.Models: Models, validate_model_halo, validate_tracer_advection
+using Oceananigans.Models.HydrostaticFreeSurfaceModels: validate_momentum_advection
 using Oceananigans.Solvers: FourierTridiagonalPoissonSolver
 using Oceananigans.TimeSteppers: TimeStepper
 using Oceananigans.TurbulenceClosures: implicit_diffusion_solver, time_discretization, build_closure_fields
 using Oceananigans.Utils: launch!, prettytime, prettykeys, with_tracers
-
-import Oceananigans: fields, prognostic_fields
-import Oceananigans.Advection: cell_advection_timescale
-import Oceananigans.Diagnostics: default_nan_checker
-import Oceananigans.Models.HydrostaticFreeSurfaceModels: validate_momentum_advection
-import Oceananigans.Models: boundary_condition_args
 
 struct DefaultValue end
 
@@ -258,7 +253,7 @@ function Base.show(io::IO, model::AtmosphereModel)
               "└── microphysics: ", Mic)
 end
 
-cell_advection_timescale(model::AtmosphereModel) = cell_advection_timescale(model.grid, model.velocities)
+Advection.cell_advection_timescale(model::AtmosphereModel) = cell_advection_timescale(model.grid, model.velocities)
 
 # Default prognostic field names - overloaded by formulation-specific files
 function prognostic_field_names(formulation, microphysics, tracer_names)
@@ -333,13 +328,13 @@ function atmosphere_model_forcing(user_forcings::NamedTuple, prognostic_fields, 
     return forcings
 end
 
-function fields(model::AtmosphereModel)
+function Oceananigans.fields(model::AtmosphereModel)
     formulation_fields = fields(model.formulation)
     auxiliary = (; T=model.temperature, qᵗ=model.specific_moisture)
     return merge(prognostic_fields(model), formulation_fields, model.velocities, auxiliary)
 end
 
-function prognostic_fields(model::AtmosphereModel)
+function Oceananigans.prognostic_fields(model::AtmosphereModel)
     prognostic_formulation_fields = prognostic_fields(model.formulation)
     thermodynamic_fields = merge(prognostic_formulation_fields, (; ρqᵗ=model.moisture_density))
     μ_names = prognostic_field_names(model.microphysics)
@@ -347,7 +342,7 @@ function prognostic_fields(model::AtmosphereModel)
     return merge(model.momentum, thermodynamic_fields, μ_fields, model.tracers)
 end
 
-boundary_condition_args(model::AtmosphereModel) = (model.clock, fields(model))
+Models.boundary_condition_args(model::AtmosphereModel) = (model.clock, fields(model))
 
 #####
 ##### Helper functions for accessing thermodynamic fields
@@ -395,7 +390,7 @@ function total_energy(model)
 end
 
 # Check for NaNs in the first prognostic field
-function default_nan_checker(model::AtmosphereModel)
+function OceananigansDiagnostics.default_nan_checker(model::AtmosphereModel)
     model_fields = prognostic_fields(model)
 
     if isempty(model_fields)
