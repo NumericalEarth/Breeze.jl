@@ -7,6 +7,9 @@ export
     AnelasticFormulation,
     StaticEnergyThermodynamics,
     LiquidIcePotentialTemperatureThermodynamics,
+    mean_pressure,
+    pressure_anomaly,
+    total_pressure,
     static_energy_density,
     static_energy,
     total_energy,
@@ -33,22 +36,56 @@ export
 
 using DocStringExtensions: TYPEDSIGNATURES
 using Adapt: Adapt, adapt
+using KernelAbstractions: @kernel, @index
 
-# Interface functions defined first (extended by downstream modules)
+using Oceananigans: Oceananigans, CenterField, fields
+using Oceananigans.BoundaryConditions: FieldBoundaryConditions, regularize_field_boundary_conditions, fill_halo_regions!
+using Oceananigans.ImmersedBoundaries: mask_immersed_field!
+using Oceananigans.Operators: Δzᶜᶜᶜ, ℑzᵃᵃᶠ
+using Oceananigans.Solvers: Solvers
+using Oceananigans.TimeSteppers: TimeSteppers
+using Oceananigans.Utils: prettysummary, launch!
+
+#####
+##### Formulation interface and AtmosphereModel
+#####
+
+include("formulation_interface.jl")
 include("forcing_interface.jl")
 include("microphysics_interface.jl")
 include("atmosphere_model.jl")
 include("set_atmosphere_model.jl")
-include("anelastic_formulation.jl")
+
+#####
+##### AnelasticFormulation submodule
+#####
+
+include("AnelasticFormulations/AnelasticFormulations.jl")
+using .AnelasticFormulations:
+    AnelasticFormulation,
+    AnelasticModel
+
+#####
+##### Thermodynamics implementations
+#####
+
 include("static_energy_thermodynamics.jl")
 include("potential_temperature_thermodynamics.jl")
+
+#####
+##### Remaining AtmosphereModel components
+#####
+
 include("atmosphere_model_buoyancy.jl")
 include("radiation_interface.jl")
 include("dynamics_kernel_functions.jl")
 include("update_atmosphere_model_state.jl")
 include("compute_hydrostatic_pressure.jl")
 
-# Include Diagnostics submodule after AtmosphereModel is defined
+#####
+##### Diagnostics submodule
+#####
+
 include("Diagnostics/Diagnostics.jl")
 using .Diagnostics
 

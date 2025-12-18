@@ -1,6 +1,7 @@
 using Breeze.Thermodynamics: StaticEnergyState, with_temperature
 using Oceananigans: Oceananigans
 using Oceananigans.BoundaryConditions: BoundaryConditions, fill_halo_regions!
+using Oceananigans.Operators: ℑzᵃᵃᶜ
 
 struct StaticEnergyThermodynamics{E, S}
     energy_density :: E
@@ -46,7 +47,7 @@ function diagnose_thermodynamic_state(i, j, k, grid, formulation::ASEF,
                                       microphysical_fields,
                                       constants,
                                       specific_moisture)
-  
+
     e = @inbounds formulation.thermodynamics.specific_energy[i, j, k]
     pᵣ = @inbounds formulation.reference_state.pressure[i, j, k]
     ρᵣ = @inbounds formulation.reference_state.density[i, j, k]

@@ -1,6 +1,5 @@
 using Oceananigans.Advection: div_𝐯u, div_𝐯v, div_𝐯w
 using Oceananigans.Coriolis: x_f_cross_U, y_f_cross_U, z_f_cross_U
-using Oceananigans.Operators: ∂xᶠᶜᶜ, ∂yᶜᶠᶜ, ∂zᶜᶜᶠ, ℑzᵃᵃᶜ, ℑzᵃᵃᶠ
 using Oceananigans.Utils: sum_of_velocities
 
 # Fallback kernel functions
