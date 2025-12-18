@@ -18,23 +18,27 @@ end
 
 Base.summary(bμp::BulkMicrophysics) = "BulkMicrophysics"
 
-"""
-    NonEquilibriumCloudFormation{L, I}
-
-A cloud formation scheme where cloud liquid and ice are prognostic variables
-that evolve via condensation/evaporation and deposition/sublimation tendencies,
-rather than being diagnosed instantaneously via saturation adjustment.
-
-The condensation/evaporation rate follows Morrison and Milbrandt (2015),
-relaxing toward saturation with timescale `τ_relax`.
-
-# Fields
-- `liquid`: Parameters for cloud liquid (contains relaxation timescale `τ_relax`)
-- `ice`: Parameters for cloud ice (contains relaxation timescale `τ_relax`), or `nothing` for warm-phase only
-"""
 struct NonEquilibriumCloudFormation{L, I}
     liquid :: L
     ice :: I
+
+    @doc"""
+        $(TYPEDSIGNATURES)
+
+        A cloud formation scheme where cloud liquid and ice are prognostic variables
+        that evolve via condensation/evaporation and deposition/sublimation tendencies,
+        rather than being diagnosed instantaneously via saturation adjustment.
+
+        The condensation/evaporation rate follows Morrison and Milbrandt (2015),
+        relaxing toward saturation with timescale `τ_relax`.
+
+        # Fields
+        - `liquid`: Parameters for cloud liquid (contains relaxation timescale `τ_relax`)
+        - `ice`: Parameters for cloud ice (contains relaxation timescale `τ_relax`), or `nothing` for warm-phase only
+    """
+    function NonEquilibriumCloudFormation(liquid, ice=nothing)
+        return new{typeof(liquid), typeof(ice)}(liquid, ice)
+    end
 end
 
 Base.summary(::NonEquilibriumCloudFormation) = "NonEquilibriumCloudFormation"

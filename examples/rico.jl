@@ -172,7 +172,9 @@ cloud_formation = SaturationAdjustment(FT; equilibrium=WarmPhaseEquilibrium())
 microphysics = OneMomentCloudMicrophysics(; cloud_formation)
 
 # Default non-equilibrium cloud formation
-# microphysics = OneMomentCloudMicrophysics()
+# cloud_liquid = CloudMicrophysics.Parameters.CloudLiquid{Float32}(τ_relax=2, ρw=1000, r_eff=1.4e-5)
+# cloud_formation = NonEquilibriumCloudFormation(cloud_liquid)
+# microphysics = OneMomentCloudMicrophysics(; cloud_formation)
 
 ninth_order_weno = WENO(order=5)
 bounds_preserving_weno = WENO(order=5, bounds=(0, 1))
@@ -221,7 +223,7 @@ set!(model, θ=θᵢ, qᵗ=qᵢ, u=uᵢ, v=vᵢ)
 # a quasi-steady precipitating state.
 
 simulation = Simulation(model; Δt=10, stop_time=6hour)
-conjure_time_step_wizard!(simulation, cfl=0.7) #, max_Δt=1)
+conjure_time_step_wizard!(simulation, cfl=0.7)
 
 # ## Output and progress
 #
@@ -260,7 +262,7 @@ function progress(sim)
                    iteration(sim), prettytime(sim), prettytime(sim.Δt),
                    prettytime(elapsed), wmax)
 
-    msg *= @sprintf("\n --- max(qᵗ): %.2e, max(qᶜˡ): %.2e, extrema(qʳ): (%.2e, %.2e), ∫PdV: %.2e kg/kg/s",
+    msg *= @sprintf(", max(qᵗ): %.2e, max(qᶜˡ): %.2e, extrema(qʳ): (%.2e, %.2e), ∫PdV: %.2e kg/kg/s",
                     qᵗmax, qᶜˡmax, qʳmin, qʳmax, ∫P)
 
     @info msg
@@ -431,7 +433,10 @@ fig[0, :] = Label(fig, title, fontsize=18, tellwidth=false)
 rowgap!(fig.layout, 2, -60)
 rowgap!(fig.layout, 3, -80)
 
-CairoMakie.record(fig, "rico_slices.mp4", 1:Nt, framerate=12) do nn
+n₁ = floor(Int, 30minutes / 20)
+n₂ = ceil(Int, 3hours / 20)
+
+CairoMakie.record(fig, "rico_slices.mp4", n₁:n₂, framerate=12) do nn
     n[] = nn
 end
 nothing #hide

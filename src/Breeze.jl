@@ -21,12 +21,8 @@ export
     mixture_gas_constant,
     mixture_heat_capacity,
     
-    # Pressure accessors
-    mean_pressure,
-    pressure_anomaly,
-    total_pressure,
-
     # Diagnostics
+    compute_hydrostatic_pressure!,
     PotentialTemperature,
     VirtualPotentialTemperature,
     EquivalentPotentialTemperature,
@@ -40,6 +36,9 @@ export
     liquid_ice_potential_temperature,
     precipitation_rate,
     surface_precipitation_flux,
+    mean_pressure,
+    pressure_anomaly,
+    total_pressure,
 
     # Microphysics
     SaturationAdjustment,
@@ -50,7 +49,7 @@ export
     RelativeHumidity,
     RelativeHumidityField,
     BulkMicrophysics,
-    compute_hydrostatic_pressure!,
+    NonEquilibriumCloudFormation,
 
     # BoundaryConditions
     BulkDrag,
