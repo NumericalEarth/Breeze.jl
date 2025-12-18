@@ -56,4 +56,3 @@ const AnelasticModel = AtmosphereModel{<:AnelasticFormulation}
 include("anelastic_time_stepping.jl")
 
 end # module
-
