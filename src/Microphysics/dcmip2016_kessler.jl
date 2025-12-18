@@ -223,7 +223,7 @@ $(TYPEDSIGNATURES)
 
 Apply the Kessler microphysics to the model.
 
-This function launches a GPU kernel that processes each column independently, with rain sedimentation subcycling.
+This function launches a kernel that processes each column independently, with rain sedimentation subcycling.
 
 The kernel handles conversion between mass fractions (Breeze) and mixing ratios (Kessler)
 internally for efficiency. Water vapor is diagnosed from \$q^v = q^t - q^{cl} - q^r\$.
