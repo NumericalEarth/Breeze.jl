@@ -12,7 +12,7 @@ A few notes about the following table:
 
 * `TC` stands for [`ThermodynamicConstants`](@ref)
 * `AM` stands for [`AtmosphereModel`](@ref)
-* `RS` stands for [`ReferenceState`](@ref Breeze.AtmosphereModels.ReferenceState)
+* `RS` stands for [`ReferenceState`](@ref Breeze.Thermodynamics.ReferenceState)
 * Note that there are independent concepts of "reference". For example, [`AnelasticFormulation`](@ref) involves
   a "reference state", which is an adiabatic, hydrostatic solution to the equations of motion. But there is also an
   "energy reference temperature" and "reference latent heat", which are thermodynamic constants required to define
