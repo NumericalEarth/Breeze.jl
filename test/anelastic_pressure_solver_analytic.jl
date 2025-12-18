@@ -35,9 +35,9 @@ using Statistics: mean
     model = AtmosphereModel(grid; thermodynamic_constants=constants, formulation)
     set!(model, ρw = z -> z^2 - z^3)
 
-    # Test for zero mean
+    # Test for zero mean (using kinematic pressure p'/ρᵣ directly)
     atol = 10 * grid.Nz * eps(FT)
-    ϕ = model.pressure
+    ϕ = model.formulation.pressure_anomaly
     @test mean(ϕ) ≈ 0 atol=atol
 
     # Test for exact solution
