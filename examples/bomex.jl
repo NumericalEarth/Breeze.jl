@@ -225,20 +225,6 @@ FT = eltype(grid)
 qᵗ₀ = AtmosphericProfilesLibrary.Bomex_q_tot(FT)
 u₀ = AtmosphericProfilesLibrary.Bomex_u(FT)
 
-# Breeze's current definition of the Exner function derives its reference
-# pressure from the base pressure of the reference profile, rather than using
-# the standard ``10^5`` Pa. Because of this, we need to apply a correction to
-# the initial condition: without this correction, our results do not match
-# [Siebesma2003](@citet) (and note that our outputted potential temperature
-# is displaced from [Siebesma2003](@citet)'s by precisely the factor ``χ`` below).
-
-using Breeze.Thermodynamics: dry_air_gas_constant, vapor_gas_constant
-
-Rᵈ = dry_air_gas_constant(constants)
-cᵖᵈ = constants.dry_air.heat_capacity
-p₀ = reference_state.surface_pressure
-χ = (p₀ / 1e5)^(Rᵈ/  cᵖᵈ)
-
 # The initial profiles are perturbed with random noise below 1600 m to trigger
 # convection. The perturbation amplitudes are specified by [Siebesma2003](@citet);
 # Appendix B (third paragraph after Eq. B6):
@@ -254,8 +240,8 @@ p₀ = reference_state.surface_pressure
 zδ = 1600     # m
 
 ϵ() = rand() - 1/2
-θᵢ(x, y, z) = χ * θˡⁱ₀(z) + δθ  * ϵ() * (z < zδ)
-qᵢ(x, y, z) = qᵗ₀(z)  + δqᵗ * ϵ() * (z < zδ)
+θᵢ(x, y, z) = θˡⁱ₀(z) + δθ * ϵ() * (z < zδ)
+qᵢ(x, y, z) = qᵗ₀(z) + δqᵗ * ϵ() * (z < zδ)
 uᵢ(x, y, z) = u₀(z)
 
 set!(model, θ=θᵢ, qᵗ=qᵢ, u=uᵢ)

@@ -342,7 +342,7 @@ Field(θᵉ)
 ├── operand: KernelFunctionOperation at (Center, Center, Center)
 ├── status: time=0.0
 └── data: 3×3×14 OffsetArray(::Array{Float64, 3}, 0:2, 0:2, -2:11) with eltype Float64 with indices 0:2×0:2×-2:11
-    └── max=326.183, min=325.87, mean=326.026
+    └── max=326.162, min=325.849, mean=326.005
 ```
 
 # References
@@ -423,7 +423,7 @@ Field(θᵇ)
 ├── operand: KernelFunctionOperation at (Center, Center, Center)
 ├── status: time=0.0
 └── data: 3×3×14 OffsetArray(::Array{Float64, 3}, 0:2, 0:2, -2:11) with eltype Float64 with indices 0:2×0:2×-2:11
-    └── max=326.183, min=325.87, mean=326.026
+    └── max=326.162, min=325.849, mean=326.005
 ```
 
 # References
@@ -462,7 +462,7 @@ function (d::MoistPotentialTemperatureKernelFunction)(i, j, k, grid)
         pᵣ = d.reference_state.pressure[i, j, k]
         ρᵣ = d.reference_state.density[i, j, k]
         qᵗ = d.specific_moisture[i, j, k]
-        p₀ = d.reference_state.surface_pressure
+        pˢᵗ = d.reference_state.standard_pressure
         T = d.temperature[i, j, k]
     end
 
@@ -481,7 +481,7 @@ function (d::MoistPotentialTemperatureKernelFunction)(i, j, k, grid)
     # Plain properties
     Rᵐ = mixture_gas_constant(q, constants)
     cᵖᵐ = mixture_heat_capacity(q, constants)
-    Πᵐ = (pᵣ / p₀)^(Rᵐ / cᵖᵐ)
+    Πᵐ = (pᵣ / pˢᵗ)^(Rᵐ / cᵖᵐ)
 
     # Plain potential temperature (used as a base for several others)
     θ = T / Πᵐ
@@ -518,7 +518,7 @@ function (d::MoistPotentialTemperatureKernelFunction)(i, j, k, grid)
         #   of mass fractions.
         # - When this is verified, the math should be written in the documentation.
         # - Could this also be written θᵉ = θ * exp(ℒˡ * qᵛ / (cᵖᵐ * T)) * ℋ^γ ?
-        θᵉ = T * (p₀ / pᵣ)^(Rᵈ / cᵖᵐ) * exp(ℒˡ * qᵛ / (cᵖᵐ * T)) * ℋ^γ
+        θᵉ = T * (pˢᵗ / pᵣ)^(Rᵈ / cᵖᵐ) * exp(ℒˡ * qᵛ / (cᵖᵐ * T)) * ℋ^γ
 
         if d.flavor isa AbstractStabilityEquivalentFlavor
             # Equation 16, Durran & Klemp 1982
