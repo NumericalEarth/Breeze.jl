@@ -137,8 +137,9 @@ end
     grid = RectilinearGrid(default_arch; size=(1, 1, 20), x=(0, 1000), y=(0, 1000), z=(0, 10000))
     constants = ThermodynamicConstants()
 
-    p₀, θ₀ = 101325, 288
-    pˢᵗ = FT(1e5) # Standard pressure for potential temperature
+    p₀ = FT(101325) # surface pressure, Pa
+    pˢᵗ = FT(1e5) # standard pressure for potential temperature, Pa
+    θ₀ = 288 # K
     reference_state = ReferenceState(grid, constants, surface_pressure=p₀, potential_temperature=θ₀)
     formulation = AnelasticFormulation(reference_state)
     model = AtmosphereModel(grid; thermodynamic_constants=constants, formulation)
