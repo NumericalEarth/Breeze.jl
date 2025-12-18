@@ -41,7 +41,7 @@ jobs:
       matrix:
         version:
           - "min"
-          - "1.12"
+          - "1.12.2"
         os:
           - ubuntu-latest
           - macOS-latest
@@ -52,8 +52,8 @@ jobs:
           - version: "min"
             os: windows-latest
         include:
-          - version: "1.12"
-            os: nvidia-gpu-t4
+          - version: "1.12.2"
+            os: aws-linux-nvidia-gpu-t4
             arch: "default"
     steps:
       - uses: actions/checkout@v6
@@ -63,13 +63,16 @@ jobs:
           arch: ${{ matrix.arch }}
       - uses: julia-actions/cache@v2
         id: julia-cache
+        # On self-hosted runners we don't use the cache: in re-use mode we run on a machine
+        # which has just run another job, which would conflict with the existing cache.
+        if: ${{ matrix.os != 'aws-linux-nvidia-gpu-t4' }}
       - name: "Set test arguments and other environment variables"
         shell: bash
         run: |
           # Run tests in verbose mode
           TEST_ARGS=(--verbose)
 
-          if [[ ${{ matrix.os }} == "nvidia-gpu-t4" ]]; then
+          if [[ ${{ matrix.os }} == *linux-nvidia-gpu* ]]; then
               # When running the tests on a GPU node we always want to make sure
               # CUDA is functional.
               echo "BREEZE_ENSURE_CUDA_FUNCTIONAL=true" >> "${GITHUB_ENV}"
@@ -81,10 +84,21 @@ jobs:
               TEST_ARGS+=(--jobs=2)
           fi
           echo "runtest_test_args=${TEST_ARGS[@]}" >> "${GITHUB_ENV}"
-      - uses: julia-actions/julia-runtest@v1
-        with:
-          coverage: true
-          test_args: ${{ env.runtest_test_args }}
+      - name: Install early-oom
+        if: ${{ matrix.os == 'aws-linux-nvidia-gpu-t4' }}
+        run: |
+          git clone --depth=1 --branch=v1.9.0 https://github.com/rfjakob/earlyoom
+          cd earlyoom
+          make -j
+          sudo make install
+      - name: Run tests
+        shell: bash
+        run: |
+          if [[ ${{ matrix.os }} == aws-linux-nvidia-gpu* ]]; then
+              # We use earlyoom only on the GPU machines
+              sudo earlyoom -m 3 -s 100 -r 300 --prefer 'julia' &
+          fi
+          julia --project --color=yes -e 'using Pkg; Pkg.test(; coverage=true, julia_args=["--check-bounds=yes", "--compiled-modules=yes", "--depwarn=yes"], test_args=`${{ env.runtest_test_args }}`, force_latest_compatible_version=false, allow_reresolve=true)'
       - uses: julia-actions/julia-processcoverage@v1
       - uses: codecov/codecov-action@v5
         with:
@@ -93,7 +107,7 @@ jobs:
         continue-on-error: true
       - name: Save Julia depot cache on cancel or failure
         id: julia-cache-save
-        if: cancelled() || failure()
+        if: ${{ matrix.os != 'aws-linux-nvidia-gpu-t4' && (cancelled() || failure()) }}
         uses: actions/cache/save@v5
         with:
           path: |

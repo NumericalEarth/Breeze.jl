@@ -20,24 +20,21 @@ using ..Thermodynamics:
 using DocStringExtensions: TYPEDSIGNATURES
 
 using Oceananigans: Oceananigans, Center, Field, KernelFunctionOperation
+using Oceananigans.BuoyancyFormulations: BuoyancyFormulations,
+    AbstractBuoyancyFormulation,
+    buoyancy_perturbationᶜᶜᶜ
 using Oceananigans.Grids: AbstractGrid
 using Oceananigans.Operators: ∂zᶜᶜᶠ
 
 using Adapt: Adapt, adapt
 
-import Oceananigans.BuoyancyFormulations:
-    AbstractBuoyancyFormulation,
-    buoyancy_perturbationᶜᶜᶜ,
-    ∂z_b,
-    required_tracers
-
-import ..Thermodynamics: saturation_specific_humidity
-
 using ..Thermodynamics:
+    Thermodynamics,
     ThermodynamicConstants,
     ReferenceState,
     mixture_heat_capacity,
-    mixture_gas_constant
+    mixture_gas_constant,
+    saturation_specific_humidity
 
 struct MoistAirBuoyancy{RS, AT} <: AbstractBuoyancyFormulation{Nothing}
     reference_state :: RS
@@ -68,7 +65,7 @@ buoyancy = MoistAirBuoyancy(grid)
 
 # output
 MoistAirBuoyancy:
-├── reference_state: ReferenceState{Float64}(p₀=101325.0, θ₀=288.0)
+├── reference_state: ReferenceState{Float64}(p₀=101325.0, θ₀=288.0, pˢᵗ=100000.0)
 └── thermodynamic_constants: ThermodynamicConstants{Float64}
 ```
 
@@ -92,11 +89,13 @@ NonhydrostaticModel{CPU, RectilinearGrid}(time = 0 seconds, iteration = 0)
 function MoistAirBuoyancy(grid;
                           surface_pressure = 101325,
                           reference_potential_temperature = 288,
+                          standard_pressure = 1e5,
                           thermodynamic_constants = ThermodynamicConstants(eltype(grid)))
 
     reference_state = ReferenceState(grid, thermodynamic_constants;
                                      surface_pressure,
-                                     potential_temperature = reference_potential_temperature)
+                                     potential_temperature = reference_potential_temperature,
+                                     standard_pressure)
 
     return MoistAirBuoyancy(reference_state, thermodynamic_constants)
 end
@@ -109,11 +108,11 @@ function Base.show(io::IO, b::MoistAirBuoyancy)
         "└── thermodynamic_constants: ", summary(b.thermodynamic_constants))
 end
 
-required_tracers(::MoistAirBuoyancy) = (:θ, :qᵗ)
+BuoyancyFormulations.required_tracers(::MoistAirBuoyancy) = (:θ, :qᵗ)
 
 const c = Center()
 
-@inline function buoyancy_perturbationᶜᶜᶜ(i, j, k, grid, mb::MoistAirBuoyancy, tracers)
+@inline function BuoyancyFormulations.buoyancy_perturbationᶜᶜᶜ(i, j, k, grid, mb::MoistAirBuoyancy, tracers)
     @inbounds begin
         pᵣ = mb.reference_state.pressure[i, j, k]
         ρᵣ = mb.reference_state.density[i, j, k]
@@ -122,9 +121,9 @@ const c = Center()
     end
 
     z = Oceananigans.Grids.znode(i, j, k, grid, c, c, c)
-    p₀ = mb.reference_state.surface_pressure
+    pˢᵗ = mb.reference_state.standard_pressure
     q = MoistureMassFractions(qᵗ)
-    𝒰 = LiquidIcePotentialTemperatureState(θ, q, p₀, pᵣ)
+    𝒰 = LiquidIcePotentialTemperatureState(θ, q, pˢᵗ, pᵣ)
 
     # Perform saturation adjustment
     T = compute_boussinesq_adjustment_temperature(𝒰, mb.thermodynamic_constants)
@@ -139,7 +138,7 @@ const c = Center()
     return g * (ρᵣ * α - 1)
 end
 
-@inline ∂z_b(i, j, k, grid, mb::MoistAirBuoyancy, tracers) =
+@inline BuoyancyFormulations.∂z_b(i, j, k, grid, mb::MoistAirBuoyancy, tracers) =
     ∂zᶜᶜᶠ(i, j, k, grid, buoyancy_perturbationᶜᶜᶜ, mb, tracers)
 
 #####
@@ -291,9 +290,9 @@ const c = Center()
         ρᵣ = mb.reference_state.density[i, j, k]
     end
     z = Oceananigans.Grids.znode(i, j, k, grid, c, c, c)
-    p₀ = mb.reference_state.surface_pressure
+    pˢᵗ = mb.reference_state.standard_pressure
     q = MoistureMassFractions(qᵗᵢ)
-    𝒰 = LiquidIcePotentialTemperatureState(θᵢ, q, p₀, pᵣ)
+    𝒰 = LiquidIcePotentialTemperatureState(θᵢ, q, pˢᵗ, pᵣ)
     return compute_boussinesq_adjustment_temperature(𝒰, mb.thermodynamic_constants)
 end
 
@@ -315,7 +314,7 @@ function TemperatureField(model)
 end
 
 # Saturation specific humidity
-@inline function saturation_specific_humidity(i, j, k, grid, mb::MoistAirBuoyancy, T, qᵗ, phase)
+@inline function Thermodynamics.saturation_specific_humidity(i, j, k, grid, mb::MoistAirBuoyancy, T, qᵗ, phase)
     @inbounds begin
         Tᵢ = T[i, j, k]
         qᵗᵢ = qᵗ[i, j, k]
@@ -368,9 +367,9 @@ Adapt.adapt_structure(to, ck::CondensateKernel) = CondensateKernel(adapt(to, ck.
 
     # First assume non-saturation.
     z = Oceananigans.Grids.znode(i, j, k, grid, c, c, c)
-    p₀ = mb.reference_state.surface_pressure
+    pˢᵗ = mb.reference_state.standard_pressure
     q = MoistureMassFractions(qᵗᵢ)
-    𝒰 = LiquidIcePotentialTemperatureState(Tᵢ, q, p₀, pᵣ)
+    𝒰 = LiquidIcePotentialTemperatureState(Tᵢ, q, pˢᵗ, pᵣ)
     Π = exner_function(𝒰, mb.thermodynamic_constants)
     Tᵢ <= Π * θᵢ + 10 * eps(Tᵢ) && return zero(qᵗᵢ)
 

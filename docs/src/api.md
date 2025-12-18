@@ -28,6 +28,13 @@ Modules = [Breeze.AtmosphereModels]
 Private = false
 ```
 
+### AtmosphereModels.AnelasticFormulations
+
+```@autodocs
+Modules = [Breeze.AtmosphereModels.AnelasticFormulations]
+Private = false
+```
+
 ### AtmosphereModels.Diagnostics
 
 ```@autodocs
@@ -70,6 +77,20 @@ Modules = [Breeze.CelestialMechanics]
 Private = false
 ```
 
+### BreezeRRTMGPExt
+
+```@autodocs
+Modules = [BreezeRRTMGPExt]
+Private = false
+```
+
+### BreezeCloudMicrophysicsExt
+
+```@autodocs
+Modules = [BreezeCloudMicrophysicsExt]
+Private = false
+```
+
 ## Private API
 
 ```@autodocs
@@ -98,10 +119,24 @@ Modules = [Breeze.AtmosphereModels]
 Public = false
 ```
 
+### AtmosphereModels.AnelasticFormulations
+
+```@autodocs
+Modules = [Breeze.AtmosphereModels.AnelasticFormulations]
+Public = false
+```
+
 ### AtmosphereModels.Diagnostics
 
 ```@autodocs
 Modules = [Breeze.AtmosphereModels.Diagnostics]
+Public = false
+```
+
+### Microphysics
+
+```@autodocs
+Modules = [Breeze.Microphysics]
 Public = false
 ```
 
@@ -123,5 +158,19 @@ Public = false
 
 ```@autodocs
 Modules = [Breeze.CelestialMechanics]
+Public = false
+```
+
+### BreezeRRTMGPExt
+
+```@autodocs
+Modules = [BreezeRRTMGPExt]
+Public = false
+```
+
+### BreezeCloudMicrophysicsExt
+
+```@autodocs
+Modules = [BreezeCloudMicrophysicsExt]
 Public = false
 ```

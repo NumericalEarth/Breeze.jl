@@ -66,7 +66,7 @@ Field(e)
 ├── operand: KernelFunctionOperation at (Center, Center, Center)
 ├── status: time=0.0
 └── data: 3×3×14 OffsetArray(::Array{Float64, 3}, 0:2, 0:2, -2:11) with eltype Float64 with indices 0:2×0:2×-2:11
-    └── max=3.01883e5, min=3.01526e5, mean=3.01704e5
+    └── max=3.03055e5, min=3.02663e5, mean=3.02859e5
 ```
 """
 function StaticEnergy(model, flavor_symbol=:specific)
@@ -95,7 +95,6 @@ function (d::StaticEnergyKernelFunction)(i, j, k, grid)
     @inbounds begin
         ρᵣ = d.reference_state.density[i, j, k]
         qᵗ = d.specific_moisture[i, j, k]
-        p₀ = d.reference_state.surface_pressure
         T = d.temperature[i, j, k]
     end
 
