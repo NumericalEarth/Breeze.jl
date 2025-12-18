@@ -322,7 +322,7 @@ end
     #####
     # All physics calculations use mixing ratios (mass per dry air mass)
     # Diagnostic fields temporarily store mixing ratios during physics loop
-    
+
     dt_max = Δt
     for k = 1:Nz
         @inbounds begin
@@ -455,7 +455,7 @@ end
                 #####
                 ##### Autoconversion + accretion (KW eq. 2.13a,b) - implicit formula
                 #####
-                rrprod = rᶜ - (rᶜ - dt0 * max(0.001 * (rᶜ - 0.001), 0)) / 
+                rrprod = rᶜ - (rᶜ - dt0 * max(0.001 * (rᶜ - 0.001), 0)) /
                          (1 + dt0 * 2.2 * rʳ^0.875)
                 rᶜ_new = max(rᶜ - rrprod, 0)
                 rʳ_new = max(rʳ + rrprod + sed, 0)
@@ -510,19 +510,19 @@ end
                 # The temperature change from latent heating (PHASE CHANGES ONLY) is:
                 #   ΔT = ℒᵛ_Kessler * (condensation - ern) / cᵖᵈ_Kessler
                 #
-                # Note: We use Kessler's hardcoded constants (ℒᵛ_Kessler = 2500000, cᵖᵈ_Kessler = 1003) for 
-                # the latent heating to match the DCMIP2016 configuration exactly, but use Breeze's ℒˡᵣ for 
+                # Note: We use Kessler's hardcoded constants (ℒᵛ_Kessler = 2500000, cᵖᵈ_Kessler = 1003) for
+                # the latent heating to match the DCMIP2016 configuration exactly, but use Breeze's ℒˡᵣ for
                 # the θˡⁱ definition for thermodynamic consistency.
-                
+
                 # Net phase change in mixing ratio (positive = condensation, negative = evaporation)
                 net_phase_change = condensation - ern
-                
+
                 # Temperature change from latent heating using Kessler's constants
                 # (same as Fortran: ΔT = 2500000/1003 * net_phase_change)
                 ΔT_phase = 2500000.0 * net_phase_change / 1003.0
                 T_new = T_k + ΔT_phase
 
-                # Compute new liquid mass fraction (includes ALL changes: autoconversion, 
+                # Compute new liquid mass fraction (includes ALL changes: autoconversion,
                 # sedimentation, saturation adjustment, evaporation)
                 rᵗ_new = rᵛ_new + rᶜ_final + rʳ_final
                 qᵛ_new_mf = mixing_ratio_to_mass_fraction(rᵛ_new, rᵗ_new)
