@@ -48,7 +48,7 @@ Kessler warm-rain microphysics scheme with cloud liquid and rain.
 - `accretion_rate`: Rate constant for accretion (collection of cloud by rain), k₂ [s⁻¹]. Default: 2.2 s⁻¹
 
 Note: The reference density ρ₀ for terminal velocity is obtained from Breeze's reference state
-(ρᵣ[1,1,1]) rather than being stored as a parameter.
+(ρᵣ[i,j,1]) rather than being stored as a parameter.
 """
 struct KesslerMicrophysics{FT}
     autoconversion_rate :: FT       # k₁ [s⁻¹]
@@ -226,10 +226,10 @@ $(TYPEDSIGNATURES)
 
 Compute the terminal fall speed of rain droplets [m s⁻¹].
 
-The terminal velocity is given by (following Klemp & Wilhelmson 1978, eq. 2.15):
+The terminal velocity is given by (following the DCMIP2016 Fortran Kessler reference):
 
 ```math
-wₜ = 36.34 (ρ rʳ)^{0.1346} (ρ₀ / ρ)^{1/2}
+wₜ = 36.34 (0.001 ρ rʳ)^{0.1364} (ρ₀ / ρ)^{1/2}
 ```
 
 where ρ is air density [kg m⁻³], rʳ is rain mixing ratio [kg kg⁻¹], and ρ₀ is reference 
@@ -240,14 +240,15 @@ Here we use 36.34 m s⁻¹ for SI units.
 """
 @inline function rain_terminal_velocity(ρ, rʳ, ρ₀)
     FT = typeof(ρ)
-    ρrʳ = ρ * max(zero(FT), rʳ)
+    # Match Fortran: r(k) = 0.001 * rho(k) is used inside (qr * r)^0.1364.
+    ρrʳ = convert(FT, 0.001) * ρ * max(zero(FT), rʳ)
     
     # Avoid issues when there's no rain
     ρrʳ <= zero(FT) && return zero(FT)
     
     # Coefficient 36.34 m/s (converted from 3634 cm/s)
     # rhalf = sqrt(ρ₀/ρ) as in Fortran reference
-    wₜ = convert(FT, 36.34) * ρrʳ^convert(FT, 0.1346) * sqrt(ρ₀ / ρ)
+    wₜ = convert(FT, 36.34) * ρrʳ^convert(FT, 0.1364) * sqrt(ρ₀ / ρ)
     
     return wₜ
 end
@@ -259,7 +260,7 @@ Compute the sedimentation flux for rain at level k.
 
 Uses upstream differencing following the Fortran Kessler reference:
 ```math
-\\text{sed}_k = \\frac{(ρ r^r w_t)_{k+1} - (ρ r^r w_t)_k}{Δz_k}
+\\text{sed}_k = \\frac{(ρ r^r w_t)_{k+1} - (ρ r^r w_t)_k}{ρ_k Δz_k}
 ```
 
 At the top boundary (k = Nz), uses:
@@ -269,7 +270,7 @@ At the top boundary (k = Nz), uses:
 
 At the bottom boundary (k = 1), rain falling out is removed (precip).
 """
-@inline function sedimentation_tendency(i, j, k, grid, ρ, ρ₀, μ)
+@inline function sedimentation_tendency(i, j, k, grid, ρᵣ, μ)
     FT = eltype(grid)
     Nz = size(grid, 3)
     
@@ -277,10 +278,18 @@ At the bottom boundary (k = 1), rain falling out is removed (precip).
     Δz = Δzᶜᶜᶜ(i, j, k, grid)
     
     @inbounds begin
-        # Current level values
+        # Column densities (use reference-state profile to access k+1 in a local kernel)
+        ρ_k = ρᵣ[i, j, k]
+        ρ₀ = ρᵣ[i, j, 1]
+
+        # Current level moisture: convert mass fractions -> mixing ratios (no q≈r shortcut)
         qʳ_k = μ.qʳ[i, j, k]
-        rʳ_k = qʳ_k  # Approximate: mass fraction ≈ mixing ratio for small moisture
-        wₜ_k = rain_terminal_velocity(ρ, rʳ_k, ρ₀)
+        qᵛ_k = μ.qᵛ[i, j, k]
+        qᶜˡ_k = μ.qᶜˡ[i, j, k]
+        qᵗ_k = min(qᵛ_k + qᶜˡ_k + qʳ_k, one(FT) - eps(one(FT)))
+        rʳ_k = mass_fraction_to_mixing_ratio(qʳ_k, qᵗ_k)
+
+        wₜ_k = rain_terminal_velocity(ρ_k, rʳ_k, ρ₀)
         
         if k == Nz
             # Top boundary: no flux from above, only outflow
@@ -288,19 +297,20 @@ At the bottom boundary (k = 1), rain falling out is removed (precip).
             Δz_half = Δz / 2
             sed = -rʳ_k * wₜ_k / Δz_half
         else
-            # Interior: upstream differencing (flux from above minus flux at this level)
+            # Interior: Fortran-style flux divergence normalized by local density (ρ_k)
+            ρ_kp1 = ρᵣ[i, j, k+1]
+
             qʳ_kp1 = μ.qʳ[i, j, k+1]
-            rʳ_kp1 = qʳ_kp1
-            
-            # Need density at k+1 - approximate using reference density ratio
-            # In the Fortran code, they use r(k) = 0.001 * rho(k) for scaling
-            # Here we just use the same ρ for simplicity (anelastic approximation)
-            wₜ_kp1 = rain_terminal_velocity(ρ, rʳ_kp1, ρ₀)
-            
-            # Flux in from above minus flux out at this level
-            # F = ρ * r * wₜ (mass flux density)
-            # ∂(ρr)/∂t = -∂F/∂z ≈ (F_above - F_here) / Δz
-            sed = (rʳ_kp1 * wₜ_kp1 - rʳ_k * wₜ_k) / Δz
+            qᵛ_kp1 = μ.qᵛ[i, j, k+1]
+            qᶜˡ_kp1 = μ.qᶜˡ[i, j, k+1]
+            qᵗ_kp1 = min(qᵛ_kp1 + qᶜˡ_kp1 + qʳ_kp1, one(FT) - eps(one(FT)))
+            rʳ_kp1 = mass_fraction_to_mixing_ratio(qʳ_kp1, qᵗ_kp1)
+
+            wₜ_kp1 = rain_terminal_velocity(ρ_kp1, rʳ_kp1, ρ₀)
+
+            F_kp1 = ρ_kp1 * rʳ_kp1 * wₜ_kp1
+            F_k = ρ_k * rʳ_k * wₜ_k
+            sed = (F_kp1 - F_k) / (ρ_k * Δz)
         end
         
         # At bottom (k=1), rain that would fall below is removed (precipitation)
@@ -513,9 +523,8 @@ where S is the sedimentation term.
     ρ = density(𝒰, constants)
     qᵗ = total_specific_moisture(𝒰)
     
-    # Get reference density for terminal velocity
+    # Reference density profile for sedimentation (allows access to k+1 in local kernel)
     ρᵣ = formulation.reference_state.density
-    @inbounds ρ₀ = ρᵣ[1, 1, 1]  # Surface reference density
     
     # Get cached rates (computed in update_microphysical_fields!)
     @inbounds begin
@@ -525,7 +534,7 @@ where S is the sedimentation term.
     end
     
     # Sedimentation term (in mixing ratio space)
-    sed = sedimentation_tendency(i, j, k, grid, ρ, ρ₀, μ)
+    sed = sedimentation_tendency(i, j, k, grid, ρᵣ, μ)
     
     # Tendency in mixing ratio space: drʳ/dt = Aₖ + Kₖ - Eʳ + sed
     drʳdt = Aₖ + Kₖ - Eʳ + sed
@@ -576,12 +585,11 @@ This ensures:
     qᵗ = total_specific_moisture(𝒰)
     T = temperature(𝒰, constants)
     
-    # Get reference density for terminal velocity
+    # Reference density profile for sedimentation (allows access to k+1 in local kernel)
     ρᵣ = formulation.reference_state.density
-    @inbounds ρ₀ = ρᵣ[1, 1, 1]  # Surface reference density
     
     # Sedimentation tendency for rain (in mixing ratio space)
-    sed = sedimentation_tendency(i, j, k, grid, ρ, ρ₀, μ)
+    sed = sedimentation_tendency(i, j, k, grid, ρᵣ, μ)
     
     # Convert to mass fraction tendency
     dqʳdt_sed = mixing_ratio_to_mass_fraction(sed, qᵗ)
