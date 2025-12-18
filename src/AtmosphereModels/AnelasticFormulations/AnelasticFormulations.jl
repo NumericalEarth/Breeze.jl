@@ -47,7 +47,7 @@ import Breeze.AtmosphereModels:
 # Import AtmosphereModel for type alias
 using Breeze.AtmosphereModels: AtmosphereModel
 
-include("anelastic_formulation_type.jl")
+include("anelastic_formulation.jl")
 include("anelastic_pressure_solver.jl")
 
 # Define type alias for AnelasticModel

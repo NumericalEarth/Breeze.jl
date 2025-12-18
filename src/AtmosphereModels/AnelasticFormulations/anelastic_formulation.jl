@@ -24,14 +24,13 @@ $(TYPEDSIGNATURES)
 Construct an un-materialized "stub" `AnelasticFormulation` with `reference_state` and `thermodynamics`.
 The thermodynamics and pressure fields are materialized later in the model constructor.
 """
-function AnelasticFormulation(reference_state; thermodynamics=:StaticEnergy)
-    return AnelasticFormulation(thermodynamics, reference_state, nothing)
-end
+AnelasticFormulation(reference_state; thermodynamics=:StaticEnergy) =
+    AnelasticFormulation(thermodynamics, reference_state, nothing)
 
 Adapt.adapt_structure(to, formulation::AnelasticFormulation) =
     AnelasticFormulation(adapt(to, formulation.thermodynamics),
-                             adapt(to, formulation.reference_state),
-                             adapt(to, formulation.pressure_anomaly))
+                         adapt(to, formulation.reference_state),
+                         adapt(to, formulation.pressure_anomaly))
 
 # Note: AnelasticModel = AtmosphereModel{<:AnelasticFormulation} is defined in AtmosphereModels.jl
 
@@ -170,4 +169,3 @@ function materialize_momentum_and_velocities(formulation::AnelasticFormulation, 
 
     return velocities, momentum
 end
-
