@@ -262,20 +262,12 @@ conjure_time_step_wizard!(simulation, cfl=0.7)
 qˡ = model.microphysical_fields.qˡ
 qᵛ = model.microphysical_fields.qᵛ
 
-u_avg = Field(Average(model.velocities.u, dims=(1, 2)))
-v_avg = Field(Average(model.velocities.v, dims=(1, 2)))
-
 function progress(sim)
-    compute!(u_avg)
-    compute!(v_avg)
     qˡmax = maximum(qˡ)
     qᵗmax = maximum(sim.model.specific_moisture)
-    umax = maximum(abs, u_avg)
-    vmax = maximum(abs, v_avg)
-
-    msg = @sprintf("Iter: %d, t: %s, Δt: %s, max|ū|: (%.2e, %.2e), max(qᵗ): %.2e, max(qˡ): %.2e",
-                   iteration(sim), prettytime(sim), prettytime(sim.Δt),
-                   umax, vmax, qᵗmax, qˡmax)
+    wmax = maximum(abs, sim.model.velocities.w)
+    msg = @sprintf("Iter: %d, t: % 12s, Δt: %s, max|w|: %.2e m/s, max(qᵗ): %.2e, max(qˡ): %.2e",
+                   iteration(sim), prettytime(sim), prettytime(sim.Δt), wmax, qᵗmax, qˡmax)
     @info msg
     return nothing
 end
@@ -283,10 +275,10 @@ end
 add_callback!(simulation, progress, IterationInterval(1000))
 
 outputs = merge(model.velocities, model.tracers, (; θ, qˡ, qᵛ))
-averaged_outputs = NamedTuple(name => Average(outputs[name], dims=(1, 2)) for name in keys(outputs))
+avg_outputs = NamedTuple(name => Average(outputs[name], dims=(1, 2)) for name in keys(outputs))
 
 filename = "bomex.jld2"
-simulation.output_writers[:averages] = JLD2Writer(model, averaged_outputs; filename,
+simulation.output_writers[:averages] = JLD2Writer(model, avg_outputs; filename,
                                                   schedule = AveragedTimeInterval(1hour),
                                                   overwrite_existing = true)
 
@@ -395,16 +387,16 @@ x = xnodes(grid, Center())
 z = znodes(grid, Center())
 
 # Create animation
-fig = Figure(size=(900, 750), fontsize=14)
+fig = Figure(size=(900, 700), fontsize=14)
 
-axwxz = Axis(fig[1, 2], aspect=2, xlabel="x (m)", ylabel="z (m)", title="Vertical velocity w")
-axqxz = Axis(fig[1, 3], aspect=2, xlabel="x (m)", ylabel="z (m)", title="Liquid water qˡ")
-axwxy = Axis(fig[2, 2], aspect=1, xlabel="x (m)", ylabel="y (m)", title="@ z = $(z[k]) m")
-axqxy = Axis(fig[2, 3], aspect=1, xlabel="x (m)", ylabel="y (m)", title="@ z = $(z[k]) m")
+axwxz = Axis(fig[2, 2], aspect=2, xaxisposition=:top, xlabel="x (m)", ylabel="z (m)", title="Vertical velocity w")
+axqxz = Axis(fig[2, 3], aspect=2, xaxisposition=:top, xlabel="x (m)", ylabel="z (m)", title="Liquid water qˡ")
+axwxy = Axis(fig[3, 2], aspect=1, xlabel="x (m)", ylabel="y (m)", title="@ z = $(z[k]) m")
+axqxy = Axis(fig[3, 3], aspect=1, xlabel="x (m)", ylabel="y (m)", title="@ z = $(z[k]) m")
 
 # Determine color limits from the data
-wmax = maximum(abs, wxz_ts)
-qˡmax = maximum(qˡxz_ts)
+wlim = maximum(abs, wxz_ts) / 4
+qˡlim = maximum(qˡxz_ts) / 4
 
 n = Observable(1)
 wxz_n = @lift wxz_ts[$n]
@@ -413,23 +405,25 @@ wxy_n = @lift wxy_ts[$n]
 qˡxy_n = @lift qˡxy_ts[$n]
 title = @lift "BOMEX slices at t = " * prettytime(times[$n])
 
-hmw = heatmap!(axwxz, wxz_n, colormap=:balance, colorrange=(-wmax, wmax))
-hmq = heatmap!(axqxz, qˡxz_n, colormap=Reverse(:Blues_4), colorrange=(0, qˡmax))
-hmw = heatmap!(axwxy, wxy_n, colormap=:balance, colorrange=(-wmax, wmax))
-hmq = heatmap!(axqxy, qˡxy_n, colormap=Reverse(:Blues_4), colorrange=(0, qˡmax))
+hmw = heatmap!(axwxz, wxz_n, colormap=:balance, colorrange=(-wlim, wlim))
+hmq = heatmap!(axqxz, qˡxz_n, colormap=Reverse(:Blues_4), colorrange=(0, qˡlim))
+hmw = heatmap!(axwxy, wxy_n, colormap=:balance, colorrange=(-wlim, wlim))
+hmq = heatmap!(axqxy, qˡxy_n, colormap=Reverse(:Blues_4), colorrange=(0, qˡlim))
 
 for ax in (axwxz, axqxz)
     lines!(ax, x, fill(z[k], length(x)), color=:grey, linestyle=:dash)
 end
 
-Colorbar(fig[1:2, 1], hmw, label="w (m/s)", tellheight = false, height = Relative(0.5), flipaxis=false)
-Colorbar(fig[1:2, 4], hmq, label="qˡ (kg/kg)", tellheight = false, height = Relative(0.5))
+Colorbar(fig[2:3, 1], hmw, label="w (m/s)", tellheight=false, height=Relative(0.7), flipaxis=false)
+Colorbar(fig[2:3, 4], hmq, label="qˡ (kg/kg)", tellheight=false, height=Relative(0.7))
 
-fig[0, :] = Label(fig, title, fontsize=18, tellwidth=false)
+fig[1, :] = Label(fig, title, fontsize=18, tellwidth=false)
+
+rowgap!(fig.layout, 1, -50)
+rowgap!(fig.layout, 2, -50)
 
 # Record animation
-N2 = ceil(Int, Nt/3)
-CairoMakie.record(fig, "bomex_slices.mp4", 1:N2, framerate=12) do nn
+CairoMakie.record(fig, "bomex_slices.mp4", 1:Nt, framerate=12) do nn
     n[] = nn
 end
 nothing #hide
