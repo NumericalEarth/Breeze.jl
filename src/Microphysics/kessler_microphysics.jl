@@ -19,6 +19,7 @@ Reference: Kessler (1969), "On the Distribution and Continuity of Water Substanc
 """
 
 using Oceananigans: Oceananigans, CenterField
+using Oceananigans.Operators: Δzᶜᶜᶜ
 using DocStringExtensions: TYPEDSIGNATURES
 
 using ..Thermodynamics:
@@ -29,7 +30,8 @@ using ..Thermodynamics:
     density,
     liquid_latent_heat,
     mixture_heat_capacity,
-    total_specific_moisture
+    total_specific_moisture,
+    exner_function
 
 #####
 ##### Kessler microphysics struct
@@ -224,14 +226,14 @@ $(TYPEDSIGNATURES)
 
 Compute the terminal fall speed of rain droplets [m s⁻¹].
 
-The terminal velocity is given by:
+The terminal velocity is given by (following Klemp & Wilhelmson 1978, eq. 2.15):
 
 ```math
-wₜ = 36.34 (ρ rʳ)^{0.1346} (ρ / ρ₀)^{-1/2}
+wₜ = 36.34 (ρ rʳ)^{0.1346} (ρ₀ / ρ)^{1/2}
 ```
 
-where ρ is air density, rʳ is rain mixing ratio, and ρ₀ is reference density
-(obtained from Breeze's reference state at the surface, ρᵣ[1,1,1]).
+where ρ is air density [kg m⁻³], rʳ is rain mixing ratio [kg kg⁻¹], and ρ₀ is reference 
+surface density [kg m⁻³].
 
 Note: The original formula gives velocity in cm s⁻¹ with coefficient 3634.
 Here we use 36.34 m s⁻¹ for SI units.
@@ -240,8 +242,12 @@ Here we use 36.34 m s⁻¹ for SI units.
     FT = typeof(ρ)
     ρrʳ = ρ * max(zero(FT), rʳ)
     
+    # Avoid issues when there's no rain
+    ρrʳ <= zero(FT) && return zero(FT)
+    
     # Coefficient 36.34 m/s (converted from 3634 cm/s)
-    wₜ = convert(FT, 36.34) * ρrʳ^convert(FT, 0.1346) * (ρ / ρ₀)^(-convert(FT, 0.5))
+    # rhalf = sqrt(ρ₀/ρ) as in Fortran reference
+    wₜ = convert(FT, 36.34) * ρrʳ^convert(FT, 0.1346) * sqrt(ρ₀ / ρ)
     
     return wₜ
 end
@@ -249,12 +255,69 @@ end
 """
 $(TYPEDSIGNATURES)
 
+Compute the sedimentation flux for rain at level k.
+
+Uses upstream differencing following the Fortran Kessler reference:
+```math
+\\text{sed}_k = \\frac{(ρ r^r w_t)_{k+1} - (ρ r^r w_t)_k}{Δz_k}
+```
+
+At the top boundary (k = Nz), uses:
+```math
+\\text{sed}_{Nz} = -\\frac{r^r_{Nz} \\cdot w_{t,Nz}}{0.5 \\cdot Δz_{Nz}}
+```
+
+At the bottom boundary (k = 1), rain falling out is removed (precip).
+"""
+@inline function sedimentation_tendency(i, j, k, grid, ρ, ρ₀, μ)
+    FT = eltype(grid)
+    Nz = size(grid, 3)
+    
+    # Get Δz at this level
+    Δz = Δzᶜᶜᶜ(i, j, k, grid)
+    
+    @inbounds begin
+        # Current level values
+        qʳ_k = μ.qʳ[i, j, k]
+        rʳ_k = qʳ_k  # Approximate: mass fraction ≈ mixing ratio for small moisture
+        wₜ_k = rain_terminal_velocity(ρ, rʳ_k, ρ₀)
+        
+        if k == Nz
+            # Top boundary: no flux from above, only outflow
+            # sed = -qr * vt / (0.5 * Δz)  following Fortran
+            Δz_half = Δz / 2
+            sed = -rʳ_k * wₜ_k / Δz_half
+        else
+            # Interior: upstream differencing (flux from above minus flux at this level)
+            qʳ_kp1 = μ.qʳ[i, j, k+1]
+            rʳ_kp1 = qʳ_kp1
+            
+            # Need density at k+1 - approximate using reference density ratio
+            # In the Fortran code, they use r(k) = 0.001 * rho(k) for scaling
+            # Here we just use the same ρ for simplicity (anelastic approximation)
+            wₜ_kp1 = rain_terminal_velocity(ρ, rʳ_kp1, ρ₀)
+            
+            # Flux in from above minus flux out at this level
+            # F = ρ * r * wₜ (mass flux density)
+            # ∂(ρr)/∂t = -∂F/∂z ≈ (F_above - F_here) / Δz
+            sed = (rʳ_kp1 * wₜ_kp1 - rʳ_k * wₜ_k) / Δz
+        end
+        
+        # At bottom (k=1), rain that would fall below is removed (precipitation)
+        # This is handled by the flux divergence naturally - flux out at bottom
+        # is not balanced by flux from below
+    end
+    
+    return sed
+end
+
+"""
+$(TYPEDSIGNATURES)
+
 Return the microphysical velocities for the Kessler scheme.
 
-Currently returns `nothing` as sedimentation is not yet implemented via the velocity interface.
-The terminal velocity formula is provided via `rain_terminal_velocity(ρ, rʳ, ρ₀)` for future
-implementation, where ρ₀ should be obtained from the model's reference state density at
-the surface (ρᵣ[1,1,1]).
+Returns `nothing` for all fields - sedimentation is handled internally
+via the sedimentation_tendency function in the rain tendency calculation.
 """
 @inline microphysical_velocities(::KM, name::Val{:ρqʳ}) = nothing
 @inline microphysical_velocities(::KM, ::Val{:ρqᶜˡ}) = nothing
@@ -269,9 +332,16 @@ $(TYPEDSIGNATURES)
 
 Compute the denominator D for condensation/evaporation rate.
 
+This follows Klemp & Wilhelmson (1978) eq. 3.10 and the DCMIP Kessler implementation.
+The formula derives from the Tetens saturation vapor pressure approximation.
+
 ```math
 D = 1 + \\frac{rᵛ⁺ \\cdot 4093 \\cdot L}{cₚ (T - 36)^2}
 ```
+
+where T is temperature in **Kelvin**. The constant 36 K comes from the Tetens formula:
+in Celsius, the denominator is (Tc + 237.3), and converting to Kelvin gives
+(T - 273.15 + 237.3) = (T - 35.85) ≈ (T - 36).
 """
 @inline function condensation_denominator(T, rᵛ⁺, L, cₚ)
     FT = typeof(T)
@@ -367,7 +437,7 @@ C = 1.6 + 124.9 (ρ rʳ)^{0.2046}
     
     ρrʳ = ρ * rʳ
     ρrᵛ⁺ = ρ * rᵛ⁺
-    
+        
     # Ventilation factor
     C = convert(FT, 1.6) + convert(FT, 124.9) * ρrʳ^convert(FT, 0.2046)
     
@@ -402,7 +472,7 @@ and cached in the microphysical fields.
 
 where the rates Cₖ, Eₖ, Aₖ, Kₖ are in mixing ratio space.
 """
-@inline function microphysical_tendency(i, j, k, grid, km::KM, ::Val{:ρqᶜˡ}, μ, 𝒰, constants)
+@inline function microphysical_tendency(i, j, k, grid, km::KM, ::Val{:ρqᶜˡ}, formulation, μ, 𝒰, constants)
     # Get thermodynamic quantities
     ρ = density(𝒰, constants)
     qᵗ = total_specific_moisture(𝒰)
@@ -430,18 +500,22 @@ $(TYPEDSIGNATURES)
 Compute the tendency for rain density (ρqʳ).
 
 The rates Aₖ, Kₖ, Eʳ are computed once per timestep in `update_microphysical_fields!`
-and cached in the microphysical fields.
+and cached in the microphysical fields. Sedimentation is included using upstream differencing.
 
 ```math
-\\frac{∂(ρqʳ)}{∂t} = ρ \\cdot (1 - qᵗ) \\cdot (Aₖ + Kₖ - Eʳ)
+\\frac{∂(ρqʳ)}{∂t} = ρ \\cdot (1 - qᵗ) \\cdot (Aₖ + Kₖ - Eʳ + S)
 ```
 
-Note: Sedimentation is not yet implemented.
+where S is the sedimentation term.
 """
-@inline function microphysical_tendency(i, j, k, grid, km::KM, ::Val{:ρqʳ}, μ, 𝒰, constants)
+@inline function microphysical_tendency(i, j, k, grid, km::KM, ::Val{:ρqʳ}, formulation, μ, 𝒰, constants)
     # Get thermodynamic quantities
     ρ = density(𝒰, constants)
     qᵗ = total_specific_moisture(𝒰)
+    
+    # Get reference density for terminal velocity
+    ρᵣ = formulation.reference_state.density
+    @inbounds ρ₀ = ρᵣ[1, 1, 1]  # Surface reference density
     
     # Get cached rates (computed in update_microphysical_fields!)
     @inbounds begin
@@ -450,8 +524,11 @@ Note: Sedimentation is not yet implemented.
         Eʳ = μ.Eʳ[i, j, k]
     end
     
-    # Tendency in mixing ratio space: drʳ/dt = Aₖ + Kₖ - Eʳ
-    drʳdt = Aₖ + Kₖ - Eʳ
+    # Sedimentation term (in mixing ratio space)
+    sed = sedimentation_tendency(i, j, k, grid, ρ, ρ₀, μ)
+    
+    # Tendency in mixing ratio space: drʳ/dt = Aₖ + Kₖ - Eʳ + sed
+    drʳdt = Aₖ + Kₖ - Eʳ + sed
     
     # Convert to mass fraction tendency
     dqʳdt = mixing_ratio_to_mass_fraction(drʳdt, qᵗ)
@@ -460,7 +537,7 @@ Note: Sedimentation is not yet implemented.
 end
 
 # Default: no tendency for other variables
-@inline microphysical_tendency(i, j, k, grid, ::KM, name, μ, 𝒰, constants) = zero(grid)
+@inline microphysical_tendency(i, j, k, grid, ::KM, name, formulation, μ, 𝒰, constants) = zero(grid)
 
 #####
 ##### Potential temperature tendency
@@ -469,7 +546,7 @@ end
 """
 $(TYPEDSIGNATURES)
 
-Compute the tendency for liquid-ice potential temperature density (ρθ).
+Compute the tendency for liquid-ice potential temperature density (ρθˡⁱ).
 
 In Breeze, the potential temperature is liquid-ice potential temperature (θˡⁱ), defined such that
 temperature is computed as:
@@ -478,15 +555,47 @@ temperature is computed as:
 T = Π θˡⁱ + (ℒˡ qˡ + ℒⁱ qⁱ) / cₚ
 ```
 
-where qˡ includes ALL liquid water (both cloud and rain). Since rain is counted as liquid,
-all processes in the Kessler warm-rain scheme conserve θˡⁱ:
+**Phase change processes** (condensation, evaporation) conserve θˡⁱ by design.
 
-- **Condensation** (vapor → cloud liquid): θˡⁱ conserved
-- **Cloud evaporation** (cloud liquid → vapor): θˡⁱ conserved
-- **Autoconversion** (cloud → rain): θˡⁱ conserved (liquid → liquid)
-- **Accretion** (cloud → rain): θˡⁱ conserved (liquid → liquid)
-- **Rain evaporation** (rain → vapor): θˡⁱ conserved (liquid → vapor)
+**Sedimentation** requires a θˡⁱ adjustment to maintain constant temperature when rain
+enters or leaves a cell. When rain sediments, qˡ changes locally but T should not change
+(no phase change during sedimentation). From the definition:
 
-Therefore, the Kessler scheme has zero tendency for θˡⁱ.
+```math
+\\frac{∂θˡⁱ}{∂t}\\bigg|_{sed} = -\\frac{ℒˡ}{cₚ Π} \\frac{∂qʳ}{∂t}\\bigg|_{sed}
+```
+
+This ensures:
+- When rain enters a cell (∂qʳ/∂t > 0): θˡⁱ decreases to maintain T
+- When rain leaves a cell (∂qʳ/∂t < 0): θˡⁱ increases to maintain T
+- Rain falling out at the surface warms the air (removes "cold" liquid)
 """
-@inline microphysical_tendency(i, j, k, grid, ::KM, ::Val{:ρθ}, μ, 𝒰, constants) = zero(grid)
+@inline function microphysical_tendency(i, j, k, grid, ::KM, ::Val{:ρθ}, formulation, μ, 𝒰, constants)
+    # Get thermodynamic quantities
+    ρ = density(𝒰, constants)
+    qᵗ = total_specific_moisture(𝒰)
+    T = temperature(𝒰, constants)
+    
+    # Get reference density for terminal velocity
+    ρᵣ = formulation.reference_state.density
+    @inbounds ρ₀ = ρᵣ[1, 1, 1]  # Surface reference density
+    
+    # Sedimentation tendency for rain (in mixing ratio space)
+    sed = sedimentation_tendency(i, j, k, grid, ρ, ρ₀, μ)
+    
+    # Convert to mass fraction tendency
+    dqʳdt_sed = mixing_ratio_to_mass_fraction(sed, qᵗ)
+    
+    # Compute Exner function Π
+    Π = exner_function(𝒰, constants)
+    
+    # Get latent heat and heat capacity
+    q = 𝒰.moisture_mass_fractions
+    ℒˡ = liquid_latent_heat(T, constants)
+    cₚ = mixture_heat_capacity(q, constants)
+    
+    # θˡⁱ tendency from sedimentation: ∂θˡⁱ/∂t = -(ℒˡ / (cₚ Π)) * ∂qʳ/∂t|_sed
+    dθdt_sed = -ℒˡ / (cₚ * Π) * dqʳdt_sed
+    
+    return ρ * dθdt_sed
+end

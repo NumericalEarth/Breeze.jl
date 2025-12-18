@@ -126,7 +126,7 @@ end
 
     return ( - div_ρUc(i, j, k, grid, advection, ρᵣ, velocities, potential_temperature)
              - ∇_dot_Jᶜ(i, j, k, grid, ρᵣ, closure, closure_fields, id, potential_temperature, clock, model_fields, closure_buoyancy)
-             + microphysical_tendency(i, j, k, grid, microphysics, Val(:ρθ), microphysical_fields, 𝒰, constants)
+             + microphysical_tendency(i, j, k, grid, microphysics, Val(:ρθ), formulation, microphysical_fields, 𝒰, constants)
              + ρθ_forcing(i, j, k, grid, clock, model_fields)
              + ρe_forcing(i, j, k, grid, clock, model_fields) / (cᵖᵐ * Π))
 end

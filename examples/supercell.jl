@@ -297,7 +297,7 @@ qᵛ = model.microphysical_fields.qᵛ
 # Run for 2 hours with adaptive time stepping (CFL = 0.7) starting from Δt = 2 s:
 
 simulation = Simulation(model; Δt=2, stop_time=2hours)
-conjure_time_step_wizard!(simulation, cfl=0.7)
+#conjure_time_step_wizard!(simulation, cfl=0.7)
 
 # Progress callback to monitor simulation health:
 
