@@ -20,14 +20,15 @@ function one_moment_cloud_microphysics_categories(
 end
 
 const CM1MCategories = FourCategories{<:CloudLiquid, <:CloudIce, <:Rain, <:Snow, <:CollisionEff, <:Blk1MVelType, <:AirProperties}
-const OneMomentCloudMicrophysics = BulkMicrophysics{<:Any, <:CM1MCategories}
-const WP1M = BulkMicrophysics{<:WarmPhaseSaturationAdjustment, <:CM1MCategories}
-const MP1M = BulkMicrophysics{<:MixedPhaseSaturationAdjustment, <:CM1MCategories}
+const OneMomentCloudMicrophysics = BulkMicrophysics{<:Any, <:CM1MCategories, <:Any}
+const WP1M = BulkMicrophysics{<:WarmPhaseSaturationAdjustment, <:CM1MCategories, <:Any}
+const MP1M = BulkMicrophysics{<:MixedPhaseSaturationAdjustment, <:CM1MCategories, <:Any}
 
 """
     OneMomentCloudMicrophysics(FT = Oceananigans.defaults.FloatType;
                                cloud_formation = NonEquilibriumCloudFormation(CloudLiquid(FT), nothing),
-                               categories = one_moment_cloud_microphysics_categories(FT))
+                               categories = one_moment_cloud_microphysics_categories(FT),
+                               precipitation_boundary_condition = nothing)
 
 Return a `OneMomentCloudMicrophysics` microphysics scheme for warm-rain and mixed-phase precipitation.
 
@@ -47,12 +48,18 @@ For equilibrium (saturation adjustment) cloud formation, pass:
 cloud_formation = SaturationAdjustment(FT; equilibrium=WarmPhaseEquilibrium())
 ```
 
+# Keyword arguments
+- `precipitation_boundary_condition`: Controls whether precipitation passes through the bottom boundary.
+  - `nothing` (default): Rain exits through the bottom (open boundary)
+  - `ImpenetrableBottom()`: Rain collects at the bottom (zero terminal velocity at surface)
+
 See the [CloudMicrophysics.jl documentation](https://clima.github.io/CloudMicrophysics.jl/dev/) for details.
 """
 function OneMomentCloudMicrophysics(FT::DataType = Oceananigans.defaults.FloatType;
                                     cloud_formation = NonEquilibriumCloudFormation(CloudLiquid(FT), nothing),
-                                    categories = one_moment_cloud_microphysics_categories(FT))
-    return BulkMicrophysics(cloud_formation, categories)
+                                    categories = one_moment_cloud_microphysics_categories(FT),
+                                    precipitation_boundary_condition = nothing)
+    return BulkMicrophysics(cloud_formation, categories, precipitation_boundary_condition)
 end
 
 #####
@@ -70,6 +77,11 @@ end
     wʳ = μ.wʳ
     return (; u = ZeroField(), v = ZeroField(), w = wʳ)
 end
+
+# Helper for bottom terminal velocity based on precipitation_boundary_condition
+# Used in update_microphysical_fields! to set wʳ[bottom] = 0 for ImpenetrableBottom
+@inline bottom_terminal_velocity(::Nothing, wʳ) = wʳ  # open: keep computed value
+@inline bottom_terminal_velocity(::ImpenetrableBottom, wʳ) = zero(wʳ)  # closed: zero velocity
 
 # Ice precipitation not yet implemented for one-moment scheme
 precipitation_rate(model, ::OneMomentCloudMicrophysics, ::Val{:ice}) = nothing

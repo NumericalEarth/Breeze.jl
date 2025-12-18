@@ -9,7 +9,7 @@ using .BreezeCloudMicrophysicsExt:
     ZeroMomentCloudMicrophysics,
     OneMomentCloudMicrophysics
 
-using Breeze.Microphysics: NonEquilibriumCloudFormation
+using Breeze.Microphysics: NonEquilibriumCloudFormation, ImpenetrableBottom
 
 #####
 ##### Zero-moment microphysics tests
@@ -336,4 +336,100 @@ end
 
     @test spf[1, 1] ≈ expected_flux
     @test spf[1, 1] > 0  # Rain falls down, so flux should be positive
+end
+
+@testset "Rain accumulation from autoconversion [$(FT)]" for FT in (Float32, Float64)
+    # This test verifies that microphysical tendencies (autoconversion) are
+    # actually being applied to prognostic fields during time-stepping.
+    # If this test fails, it indicates a bug in tendency application.
+    #
+    # Note: We use multiple vertical levels because in a single-cell domain,
+    # rain sedimentation (terminal velocity) creates a flux divergence that
+    # exactly cancels the autoconversion tendency. With multiple levels,
+    # rain can accumulate in the domain before sedimenting out.
+    
+    Oceananigans.defaults.FloatType = FT
+    Nz = 10
+    grid = RectilinearGrid(default_arch; size=(1, 1, Nz), x=(0, 1), y=(0, 1), z=(0, 1000),
+                           topology=(Periodic, Periodic, Bounded))
+
+    constants = ThermodynamicConstants()
+    reference_state = ReferenceState(grid, constants; surface_pressure=101325, potential_temperature=300)
+    formulation = AnelasticFormulation(reference_state; thermodynamics=:LiquidIcePotentialTemperature)
+
+    microphysics = OneMomentCloudMicrophysics()
+    model = AtmosphereModel(grid; formulation, thermodynamic_constants=constants, microphysics)
+
+    # Set initial conditions with cloud liquid present (at saturation or above)
+    # High qᵗ ensures supersaturation → cloud forms
+    set!(model; θ=300, qᵗ=FT(0.050))
+
+    # First, run to condensation equilibrium (~20τ)
+    τ = microphysics.cloud_formation.liquid.τ_relax
+    simulation = Simulation(model; Δt=FT(0.1), stop_time=20τ, verbose=false)
+    run!(simulation)
+
+    # Cloud liquid should have formed
+    qᶜˡ_equilibrium = maximum(model.microphysical_fields.qᶜˡ)
+    @test qᶜˡ_equilibrium > FT(0.001)  # At least 1 g/kg cloud liquid
+
+    # Sum total rain in domain before autoconversion run
+    ρqʳ_total_initial = sum(model.microphysical_fields.ρqʳ)
+
+    # Now run longer for autoconversion to accumulate rain
+    # Autoconversion timescale is ~1000s (100τ), so run for 100τ
+    # (Rain will sediment and exit at bottom, but should still accumulate in upper cells)
+    simulation.stop_time = simulation.model.clock.time + 100τ
+    run!(simulation)
+
+    # Check that rain was produced (either still in domain or has sedimented through)
+    # We check total rain mass in domain
+    ρqʳ_total_final = sum(model.microphysical_fields.ρqʳ)
+    qʳ_max_final = maximum(model.microphysical_fields.qʳ)
+
+    # Rain should exist somewhere in the domain
+    # (Even if some has sedimented out, there should be rain in upper cells)
+    @test qʳ_max_final > FT(1e-8)  # At least some rain exists
+    
+    # Check that autoconversion is happening by verifying rain increases initially
+    # before sedimentation can remove it all. We'll check the top cell which
+    # should accumulate rain without losing it to sedimentation as quickly.
+    qʳ_top = model.microphysical_fields.qʳ[1, 1, Nz]
+    @test qʳ_top > FT(1e-10)  # Rain should form in top cell
+end
+
+@testset "ImpenetrableBottom prevents rain from exiting domain [$(FT)]" for FT in (Float32, Float64)
+    # This test verifies that ImpenetrableBottom allows rain to accumulate
+    # in a single-cell domain where it would otherwise sediment out.
+    
+    Oceananigans.defaults.FloatType = FT
+    grid = RectilinearGrid(default_arch; size=(1, 1, 1), x=(0, 1), y=(0, 1), z=(0, 1),
+                           topology=(Periodic, Periodic, Bounded))
+
+    constants = ThermodynamicConstants()
+    reference_state = ReferenceState(grid, constants; surface_pressure=101325, potential_temperature=300)
+    formulation = AnelasticFormulation(reference_state; thermodynamics=:LiquidIcePotentialTemperature)
+
+    # Use ImpenetrableBottom to prevent rain from exiting
+    microphysics = OneMomentCloudMicrophysics(; precipitation_boundary_condition=ImpenetrableBottom())
+    model = AtmosphereModel(grid; formulation, thermodynamic_constants=constants, microphysics)
+
+    # Set initial conditions with cloud liquid present
+    set!(model; θ=300, qᵗ=FT(0.050))
+
+    # Run to condensation equilibrium and beyond for autoconversion
+    τ = microphysics.cloud_formation.liquid.τ_relax
+    simulation = Simulation(model; Δt=FT(0.1), stop_time=200τ, verbose=false)
+    run!(simulation)
+
+    # With ImpenetrableBottom, rain should accumulate in the domain
+    # because it can't sediment out through the bottom
+    qʳ_final = model.microphysical_fields.qʳ[1, 1, 1]
+    
+    # Check terminal velocity at bottom is zero (impenetrable)
+    wʳ_bottom = model.microphysical_fields.wʳ[1, 1, 1]
+    @test wʳ_bottom == 0  # Terminal velocity should be zero at impenetrable bottom
+
+    # Rain should have accumulated substantially
+    @test qʳ_final > FT(0.001)  # At least 1 g/kg rain accumulated
 end

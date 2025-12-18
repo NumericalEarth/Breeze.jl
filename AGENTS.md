@@ -152,6 +152,14 @@ Breeze interfaces with ClimaOcean for coupled atmosphere-ocean simulations.
     ```
   - In examples, use the suffix `ts` (no underscore) for "time series" and the suffix `n` (no underscore)
     to refer to `FieldTimeSeries` indexed at time-index `n`.
+  - **Preferred color palette**: Use bright, colorblind-friendly colors for plots:
+    ```julia
+    c_vapor = :dodgerblue      # Bright blue for vapor/moisture
+    c_cloud = :lime            # Vivid green for cloud liquid
+    c_rain = :orangered        # Bright orange-red for rain/precipitation
+    c_temp = :magenta          # Vibrant magenta for temperature
+    ```
+    These colors are distinct, high-contrast, and accessible for colorblind viewers.
 
 4. **Documentation Style**
   - Mathematical notation in `docs/src/appendix/notation.md`

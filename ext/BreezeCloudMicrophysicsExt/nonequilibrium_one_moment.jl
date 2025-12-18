@@ -5,7 +5,7 @@
 # following Morrison and Milbrandt (2015) relaxation formulation.
 
 # Non-equilibrium cloud formation with 1M precipitation (warm-phase only for now)
-const WarmPhaseNonEquilibrium1M = BulkMicrophysics{<:NonEquilibriumCloudFormation{<:CloudLiquid, Nothing}, <:CM1MCategories}
+const WarmPhaseNonEquilibrium1M = BulkMicrophysics{<:NonEquilibriumCloudFormation{<:CloudLiquid, Nothing}, <:CM1MCategories, <:Any}
 const WPNE1M = WarmPhaseNonEquilibrium1M
 
 prognostic_field_names(::WPNE1M) = (:ρqᶜˡ, :ρqʳ)
@@ -37,6 +37,9 @@ end
         # Terminal velocity for rain (negative = downward)
         wᵗ = terminal_velocity(categories.rain, categories.hydrometeor_velocities.rain, ρ, qʳ)
         μ.wʳ[i, j, k] = -wᵗ
+
+        # For ImpenetrableBottom, set wʳ = 0 at bottom face to prevent rain from exiting
+        μ.wʳ[i, j, 1] = bottom_terminal_velocity(bμp.precipitation_boundary_condition, μ.wʳ[i, j, 1])
     end
 
     return nothing

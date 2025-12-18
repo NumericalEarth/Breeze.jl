@@ -9,6 +9,7 @@ export
     NonEquilibriumCloudFormation,
     BulkMicrophysics,
     FourCategories,
+    ImpenetrableBottom,
     SaturationSpecificHumidity,
     SaturationSpecificHumidityField,
     RelativeHumidity,

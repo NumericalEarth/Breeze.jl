@@ -1,6 +1,30 @@
-struct BulkMicrophysics{N, C}
+"""
+    ImpenetrableBottom
+
+Marker type indicating that precipitation should collect at the bottom of the domain
+rather than passing through. When used as `precipitation_bottom` in `BulkMicrophysics`,
+rain (and other hydrometeors) will accumulate at the surface.
+
+See also: [`BulkMicrophysics`](@ref)
+"""
+struct ImpenetrableBottom end
+
+"""
+    BulkMicrophysics{N, C, B}
+
+Bulk microphysics scheme with cloud formation and precipitation categories.
+
+# Fields
+- `cloud_formation`: Cloud formation scheme (saturation adjustment or non-equilibrium)
+- `categories`: Precipitation categories (e.g., rain, snow) or `nothing`
+- `precipitation_boundary_condition`: Bottom boundary condition for precipitation sedimentation.
+  - `nothing` (default): Precipitation passes through the bottom (open boundary)
+  - `ImpenetrableBottom()`: Precipitation collects at the bottom (zero terminal velocity at surface)
+"""
+struct BulkMicrophysics{N, C, B}
     cloud_formation :: N
     categories :: C
+    precipitation_boundary_condition :: B
 end
 
 Base.summary(bμp::BulkMicrophysics) = "BulkMicrophysics"
@@ -39,23 +63,31 @@ end
 FourCategories(cloud_liquid, cloud_ice, rain, snow, collisions, hydrometeor_velocities) =
     FourCategories(cloud_liquid, cloud_ice, rain, snow, collisions, hydrometeor_velocities, nothing)
 
-const FourCategoryBulkMicrophysics = BulkMicrophysics{<:Any, <:FourCategories}
+const FourCategoryBulkMicrophysics = BulkMicrophysics{<:Any, <:FourCategories, <:Any}
 Base.summary(bμp::FourCategoryBulkMicrophysics) = "FourCategoryBulkMicrophysics"
 
 """
 $(TYPEDSIGNATURES)
 
-Return a `BulkMicrophysics` microphysics scheme with `clouds` and `precipitation` microphysics schemes.
+Return a `BulkMicrophysics` microphysics scheme.
+
+# Keyword arguments
+- `categories`: Precipitation categories (e.g., rain, snow) or `nothing` for non-precipitating
+- `cloud_formation`: Cloud formation scheme (default: `SaturationAdjustment`)
+- `precipitation_boundary_condition`: Bottom boundary condition for precipitation sedimentation.
+  - `nothing` (default): Precipitation passes through the bottom
+  - `ImpenetrableBottom()`: Precipitation collects at the bottom
 """
 function BulkMicrophysics(FT::DataType = Oceananigans.defaults.FloatType;
                           categories = nothing,
-                          cloud_formation = SaturationAdjustment(FT))
+                          cloud_formation = SaturationAdjustment(FT),
+                          precipitation_boundary_condition = nothing)
 
-    return BulkMicrophysics(cloud_formation, categories)
+    return BulkMicrophysics(cloud_formation, categories, precipitation_boundary_condition)
 end
 
 # Non-categorical bulk microphysics
-const NCBM = BulkMicrophysics{<:Any, Nothing}
+const NCBM = BulkMicrophysics{<:Any, Nothing, <:Any}
 const NPBM = NCBM  # Alias: Non-Precipitating Bulk Microphysics
 
 maybe_adjust_thermodynamic_state(i, j, k, 𝒰₀, bμp::NCBM, ρᵣ, microphysical_fields, qᵗ, constants) =

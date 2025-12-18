@@ -21,6 +21,9 @@ export
     mixture_gas_constant,
     mixture_heat_capacity,
 
+    # Microphysics
+    ImpenetrableBottom,
+    
     # Diagnostics
     PotentialTemperature,
     VirtualPotentialTemperature,

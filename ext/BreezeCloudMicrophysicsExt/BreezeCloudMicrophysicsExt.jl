@@ -38,6 +38,7 @@ using Breeze.Microphysics:
     WarmPhaseSaturationAdjustment,
     MixedPhaseSaturationAdjustment,
     NonEquilibriumCloudFormation,
+    ImpenetrableBottom,
     adjust_thermodynamic_state
 
 using Oceananigans: Oceananigans
