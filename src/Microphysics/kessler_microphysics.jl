@@ -22,6 +22,14 @@ using Oceananigans: Oceananigans, CenterField
 using Oceananigans.Operators: Δzᶜᶜᶜ
 using DocStringExtensions: TYPEDSIGNATURES
 
+import ..AtmosphereModels:
+    prognostic_field_names,
+    materialize_microphysical_fields,
+    microphysical_velocities,
+    compute_moisture_fractions,
+    microphysical_tendency,
+    update_microphysical_fields!
+
 using ..Thermodynamics:
     MoistureMassFractions,
     PlanarLiquidSurface,
