@@ -57,6 +57,10 @@ end
 
 @inline microphysical_velocities(::SaturationAdjustment, name) = nothing
 
+# SaturationAdjustment operates through the thermodynamic state adjustment pathway,
+# so no explicit model update is needed.
+microphysics_model_update!(microphysics::SaturationAdjustment, model) = nothing
+
 #####
 ##### Warm-phase equilibrium
 #####
