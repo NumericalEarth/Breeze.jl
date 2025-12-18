@@ -1,4 +1,6 @@
 using Breeze.Thermodynamics: StaticEnergyState, with_temperature
+using Oceananigans: Oceananigans
+using Oceananigans.BoundaryConditions: BoundaryConditions, fill_halo_regions!
 
 struct StaticEnergyThermodynamics{E, S}
     energy_density :: E
@@ -9,7 +11,7 @@ Adapt.adapt_structure(to, thermo::StaticEnergyThermodynamics) =
     StaticEnergyThermodynamics(adapt(to, thermo.energy_density),
                                adapt(to, thermo.specific_energy))
 
-function fill_halo_regions!(thermo::StaticEnergyThermodynamics)
+function BoundaryConditions.fill_halo_regions!(thermo::StaticEnergyThermodynamics)
     fill_halo_regions!(thermo.energy_density)
     fill_halo_regions!(thermo.specific_energy)
     return nothing
@@ -21,8 +23,8 @@ prognostic_field_names(formulation::ASEF) = tuple(:ρe)
 additional_field_names(formulation::ASEF) = tuple(:e)
 thermodynamic_density_name(::ASEF) = :ρe
 thermodynamic_density(formulation::ASEF) = formulation.thermodynamics.energy_density
-fields(formulation::ASEF) = (; e=formulation.thermodynamics.specific_energy)
-prognostic_fields(formulation::ASEF) = (; ρe=formulation.thermodynamics.energy_density)
+Oceananigans.fields(formulation::ASEF) = (; e=formulation.thermodynamics.specific_energy)
+Oceananigans.prognostic_fields(formulation::ASEF) = (; ρe=formulation.thermodynamics.energy_density)
 
 function materialize_thermodynamics(::Val{:StaticEnergy}, grid, boundary_conditions)
     energy_density = CenterField(grid, boundary_conditions=boundary_conditions.ρe)

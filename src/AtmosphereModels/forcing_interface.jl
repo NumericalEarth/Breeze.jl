@@ -31,5 +31,4 @@ Compute any fields or quantities needed by a forcing before it is applied.
 This function is extended by the `Forcings` module for forcing types that
 require pre-computation (e.g., `SubsidenceForcing` which computes horizontal averages).
 """
-function compute_forcing! end
-
+compute_forcing!(forcing) = nothing # Fallback - do nothing

@@ -15,14 +15,8 @@ export
     RelativeHumidity,
     RelativeHumidityField
 
-import ..AtmosphereModels:
-    maybe_adjust_thermodynamic_state,
-    update_microphysical_fields!,
-    prognostic_field_names,
-    materialize_microphysical_fields,
-    microphysical_velocities,
-    compute_moisture_fractions,
-    microphysical_tendency
+using ..AtmosphereModels: AtmosphereModels, compute_moisture_fractions,
+    materialize_microphysical_fields, update_microphysical_fields!
 
 include("saturation_adjustment.jl")
 include("bulk_microphysics.jl")

@@ -272,7 +272,7 @@ function progress(sim)
     return nothing
 end
 
-add_callback!(simulation, progress, TimeInterval(1hour))
+add_callback!(simulation, progress, IterationInterval(1000))
 
 # In addition to velocities, we output horizontal and time-averages of
 # liquid water mass fraction (cloud and rain separately), specific humidity,

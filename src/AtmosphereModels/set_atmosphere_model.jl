@@ -1,3 +1,4 @@
+using Oceananigans.Fields: Fields, set!
 using Oceananigans.Grids: znode, Center
 using Oceananigans.TimeSteppers: update_state!
 using Oceananigans.BoundaryConditions: fill_halo_regions!
@@ -9,8 +10,6 @@ using ..Thermodynamics:
     mixture_heat_capacity,
     mixture_gas_constant,
     temperature
-
-import Oceananigans.Fields: set!
 
 const c = Center()
 
@@ -108,7 +107,7 @@ Variables are set via keyword arguments. Supported variables include:
 - `enforce_mass_conservation`: If `true` (default), applies a pressure correction
   to ensure the velocity field satisfies the anelastic continuity equation.
 """
-function set!(model::AtmosphereModel; time=nothing, enforce_mass_conservation=true, kw...)
+function Fields.set!(model::AtmosphereModel; time=nothing, enforce_mass_conservation=true, kw...)
     if !isnothing(time)
         model.clock.time = time
     end
