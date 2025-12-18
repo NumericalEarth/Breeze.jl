@@ -133,6 +133,13 @@ Modules = [Breeze.AtmosphereModels.Diagnostics]
 Public = false
 ```
 
+### Microphysics
+
+```@autodocs
+Modules = [Breeze.Microphysics]
+Public = false
+```
+
 ### Forcings
 
 ```@autodocs
