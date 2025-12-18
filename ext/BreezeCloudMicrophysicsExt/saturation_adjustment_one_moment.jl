@@ -36,7 +36,7 @@ end
         wᵗ = terminal_velocity(categories.rain, categories.hydrometeor_velocities.rain, ρ, qʳ)
         μ.wʳ[i, j, k] = -wᵗ
 
-        # For ImpenetrableBottom, set wʳ = 0 at bottom face to prevent rain from exiting
+        # For ImpenetrableBoundaryCondition, set wʳ = 0 at bottom face to prevent rain from exiting
         μ.wʳ[i, j, 1] = bottom_terminal_velocity(bμp.precipitation_boundary_condition, μ.wʳ[i, j, 1])
     end
 
@@ -156,7 +156,7 @@ end
         𝒲ʳ = terminal_velocity(categories.rain, categories.hydrometeor_velocities.rain, ρ, qʳ)
         μ.wʳ[i, j, k] = -𝒲ʳ
 
-        # For ImpenetrableBottom, set wʳ = 0 at bottom face to prevent rain from exiting
+        # For ImpenetrableBoundaryCondition, set wʳ = 0 at bottom face to prevent rain from exiting
         μ.wʳ[i, j, 1] = bottom_terminal_velocity(bμp.precipitation_boundary_condition, μ.wʳ[i, j, 1])
     end
 

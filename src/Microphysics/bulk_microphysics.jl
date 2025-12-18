@@ -1,15 +1,4 @@
 """
-    ImpenetrableBottom
-
-Marker type indicating that precipitation should collect at the bottom of the domain
-rather than passing through. When used as `precipitation_bottom` in `BulkMicrophysics`,
-rain (and other hydrometeors) will accumulate at the surface.
-
-See also: [`BulkMicrophysics`](@ref)
-"""
-struct ImpenetrableBottom end
-
-"""
     BulkMicrophysics{N, C, B}
 
 Bulk microphysics scheme with cloud formation and precipitation categories.
@@ -19,7 +8,7 @@ Bulk microphysics scheme with cloud formation and precipitation categories.
 - `categories`: Precipitation categories (e.g., rain, snow) or `nothing`
 - `precipitation_boundary_condition`: Bottom boundary condition for precipitation sedimentation.
   - `nothing` (default): Precipitation passes through the bottom (open boundary)
-  - `ImpenetrableBottom()`: Precipitation collects at the bottom (zero terminal velocity at surface)
+  - `ImpenetrableBoundaryCondition()`: Precipitation collects at the bottom (zero terminal velocity at surface)
 """
 struct BulkMicrophysics{N, C, B}
     cloud_formation :: N
@@ -76,7 +65,7 @@ Return a `BulkMicrophysics` microphysics scheme.
 - `cloud_formation`: Cloud formation scheme (default: `SaturationAdjustment`)
 - `precipitation_boundary_condition`: Bottom boundary condition for precipitation sedimentation.
   - `nothing` (default): Precipitation passes through the bottom
-  - `ImpenetrableBottom()`: Precipitation collects at the bottom
+  - `ImpenetrableBoundaryCondition()`: Precipitation collects at the bottom
 """
 function BulkMicrophysics(FT::DataType = Oceananigans.defaults.FloatType;
                           categories = nothing,

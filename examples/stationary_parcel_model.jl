@@ -18,7 +18,7 @@ using CairoMakie
 # ## Model setup
 #
 # A Lagrangian parcel is a closed system - rain doesn't "fall out" because
-# the parcel moves with the hydrometeors. We use `ImpenetrableBottom()` to
+# the parcel moves with the hydrometeors. We use `ImpenetrableBoundaryCondition()` to
 # ensure moisture is conserved within the parcel.
 
 grid = RectilinearGrid(CPU(); size=(1, 1, 1), x=(0, 1), y=(0, 1), z=(0, 1),
@@ -31,8 +31,8 @@ formulation = AnelasticFormulation(reference_state; thermodynamics=:LiquidIcePot
 BreezeCloudMicrophysicsExt = Base.get_extension(Breeze, :BreezeCloudMicrophysicsExt)
 OneMomentCloudMicrophysics = BreezeCloudMicrophysicsExt.OneMomentCloudMicrophysics
 
-# ImpenetrableBottom ensures rain collects in the parcel rather than exiting
-microphysics = OneMomentCloudMicrophysics(precipitation_boundary_condition = ImpenetrableBottom())
+# ImpenetrableBoundaryCondition ensures rain collects in the parcel rather than exiting
+microphysics = OneMomentCloudMicrophysics(precipitation_boundary_condition = ImpenetrableBoundaryCondition())
 
 τ = microphysics.cloud_formation.liquid.τ_relax  # Condensation timescale (~10 s)
 

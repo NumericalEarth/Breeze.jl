@@ -51,7 +51,7 @@ cloud_formation = SaturationAdjustment(FT; equilibrium=WarmPhaseEquilibrium())
 # Keyword arguments
 - `precipitation_boundary_condition`: Controls whether precipitation passes through the bottom boundary.
   - `nothing` (default): Rain exits through the bottom (open boundary)
-  - `ImpenetrableBottom()`: Rain collects at the bottom (zero terminal velocity at surface)
+  - `ImpenetrableBoundaryCondition()`: Rain collects at the bottom (zero terminal velocity at surface)
 
 See the [CloudMicrophysics.jl documentation](https://clima.github.io/CloudMicrophysics.jl/dev/) for details.
 """
@@ -79,9 +79,9 @@ end
 end
 
 # Helper for bottom terminal velocity based on precipitation_boundary_condition
-# Used in update_microphysical_fields! to set wʳ[bottom] = 0 for ImpenetrableBottom
+# Used in update_microphysical_fields! to set wʳ[bottom] = 0 for ImpenetrableBoundaryCondition
 @inline bottom_terminal_velocity(::Nothing, wʳ) = wʳ  # open: keep computed value
-@inline bottom_terminal_velocity(::ImpenetrableBottom, wʳ) = zero(wʳ)  # closed: zero velocity
+@inline bottom_terminal_velocity(::ImpenetrableBoundaryCondition, wʳ) = zero(wʳ)  # closed: zero velocity
 
 # Ice precipitation not yet implemented for one-moment scheme
 precipitation_rate(model, ::OneMomentCloudMicrophysics, ::Val{:ice}) = nothing

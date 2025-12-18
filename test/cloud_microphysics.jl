@@ -5,11 +5,12 @@ using Oceananigans
 using Test
 
 BreezeCloudMicrophysicsExt = Base.get_extension(Breeze, :BreezeCloudMicrophysicsExt)
+
 using .BreezeCloudMicrophysicsExt:
     ZeroMomentCloudMicrophysics,
     OneMomentCloudMicrophysics
 
-using Breeze.Microphysics: NonEquilibriumCloudFormation, ImpenetrableBottom
+using Oceananigans.BoundaryConditions: ImpenetrableBoundaryCondition
 
 #####
 ##### Zero-moment microphysics tests
@@ -398,8 +399,8 @@ end
     @test qʳ_top > FT(1e-10)  # Rain should form in top cell
 end
 
-@testset "ImpenetrableBottom prevents rain from exiting domain [$(FT)]" for FT in (Float32, Float64)
-    # This test verifies that ImpenetrableBottom allows rain to accumulate
+@testset "ImpenetrableBoundaryCondition prevents rain from exiting domain [$(FT)]" for FT in (Float32, Float64)
+    # This test verifies that ImpenetrableBoundaryCondition allows rain to accumulate
     # in a single-cell domain where it would otherwise sediment out.
     
     Oceananigans.defaults.FloatType = FT
@@ -410,8 +411,8 @@ end
     reference_state = ReferenceState(grid, constants; surface_pressure=101325, potential_temperature=300)
     formulation = AnelasticFormulation(reference_state; thermodynamics=:LiquidIcePotentialTemperature)
 
-    # Use ImpenetrableBottom to prevent rain from exiting
-    microphysics = OneMomentCloudMicrophysics(; precipitation_boundary_condition=ImpenetrableBottom())
+    # Use ImpenetrableBoundaryCondition to prevent rain from exiting
+    microphysics = OneMomentCloudMicrophysics(; precipitation_boundary_condition=ImpenetrableBoundaryCondition())
     model = AtmosphereModel(grid; formulation, thermodynamic_constants=constants, microphysics)
 
     # Set initial conditions with cloud liquid present
@@ -422,7 +423,7 @@ end
     simulation = Simulation(model; Δt=FT(0.1), stop_time=200τ, verbose=false)
     run!(simulation)
 
-    # With ImpenetrableBottom, rain should accumulate in the domain
+    # With ImpenetrableBoundaryCondition, rain should accumulate in the domain
     # because it can't sediment out through the bottom
     qʳ_final = model.microphysical_fields.qʳ[1, 1, 1]
     

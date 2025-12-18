@@ -35,11 +35,15 @@ end
         μ.qˡ[i, j, k] = qᶜˡ + qʳ  # total liquid (cloud + rain)
 
         # Terminal velocity for rain (negative = downward)
-        wᵗ = terminal_velocity(categories.rain, categories.hydrometeor_velocities.rain, ρ, qʳ)
-        μ.wʳ[i, j, k] = -wᵗ
+        V = terminal_velocity(categories.rain, categories.hydrometeor_velocities.rain, ρ, qʳ)
+        wʳ = -V
 
-        # For ImpenetrableBottom, set wʳ = 0 at bottom face to prevent rain from exiting
-        μ.wʳ[i, j, 1] = bottom_terminal_velocity(bμp.precipitation_boundary_condition, μ.wʳ[i, j, 1])
+        if k == 1
+            # For ImpenetrableBoundaryCondition, set wʳ = 0 at bottom face to prevent rain from exiting
+            μ.wʳ[i, j, 1] = bottom_terminal_velocity(bμp.precipitation_boundary_condition, wʳ)
+        else
+            μ.wʳ[i, j, k] = wʳ
+        end
     end
 
     return nothing
@@ -75,9 +79,10 @@ end
     
     # Limit evaporation (Sᶜᵒⁿᵈ < 0) to available cloud liquid
     # This prevents qᶜˡ from going negative
-    Sᶜᵒⁿᵈ_limited = ifelse(Sᶜᵒⁿᵈ < 0, max(Sᶜᵒⁿᵈ, -qᶜˡ / τᶜˡ), Sᶜᵒⁿᵈ)
+    Sᶜᵒⁿᵈ_min = - max(0, qᶜˡ) / τᶜˡ
+    Sᶜᵒⁿᵈ = max(Sᶜᵒⁿᵈ, Sᶜᵒⁿᵈ_min)
     
-    return Sᶜᵒⁿᵈ_limited
+    return Sᶜᵒⁿᵈ
 end
 
 #####
@@ -112,12 +117,12 @@ end
     # Limit evaporation to available rain (relaxation-style limiter)
     # Use condensation timescale as reference for limiting
     τᶜˡ = bμp.cloud_formation.liquid.τ_relax
-    Sᵉᵛᵃᵖ_limited = max(Sᵉᵛᵃᵖ, -qʳ / τᶜˡ)
+    Sᵉᵛᵃᵖ_min = - max(0, qʳ) / τᶜˡ
+    Sᵉᵛᵃᵖ = max(Sᵉᵛᵃᵖ, Sᵉᵛᵃᵖ_min)
 
     # Total tendency for ρqʳ (positive = rain increase)
-    return ρⁱʲᵏ * (Sᵃᶜⁿᵛ + Sᵃᶜᶜ + Sᵉᵛᵃᵖ_limited)
+    return ρⁱʲᵏ * (Sᵃᶜⁿᵛ + Sᵃᶜᶜ + Sᵉᵛᵃᵖ)
 end
-
 
 # Cloud liquid tendency for non-equilibrium 1M: condensation/evaporation - (autoconversion + accretion)
 @inline function microphysical_tendency(i, j, k, grid, bμp::WPNE1M, ::Val{:ρqᶜˡ}, ρ, μ, 𝒰, constants)
@@ -125,10 +130,11 @@ end
     cloud_formation = bμp.cloud_formation
     τᶜˡ = cloud_formation.liquid.τ_relax
 
-    ρⁱʲᵏ = @inbounds ρ[i, j, k]
-
-    @inbounds qᶜˡ = μ.qᶜˡ[i, j, k]
-    @inbounds qʳ = μ.qʳ[i, j, k]
+    @inbounds begin
+        ρⁱʲᵏ = ρ[i, j, k]
+        qᶜˡ = μ.qᶜˡ[i, j, k]
+        qʳ = μ.qʳ[i, j, k]
+    end
 
     # Get thermodynamic state
     T = temperature(𝒰, constants)
@@ -168,4 +174,3 @@ function precipitation_rate(model, microphysics::WPNE1M, ::Val{:liquid})
     op = KernelFunctionOperation{Center, Center, Center}(kernel, grid)
     return Field(op)
 end
-

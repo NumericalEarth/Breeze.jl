@@ -96,7 +96,7 @@ export
     ImmersedBoundaryGrid, GridFittedBottom, PartialCellBottom, ImmersedBoundaryCondition,
     Distributed, Partition,
     Centered, UpwindBiased, WENO, FluxFormAdvection,
-    FluxBoundaryCondition, ValueBoundaryCondition, GradientBoundaryCondition,
+    FluxBoundaryCondition, ValueBoundaryCondition, GradientBoundaryCondition, ImpenetrableBoundaryCondition,
     OpenBoundaryCondition, PerturbationAdvection, FieldBoundaryConditions,
     Field, CenterField, XFaceField, YFaceField, ZFaceField,
     Average, Integral,
