@@ -1,15 +1,13 @@
-using ..Thermodynamics: Thermodynamics, ThermodynamicConstants, ReferenceState
+using ..Thermodynamics: Thermodynamics, ThermodynamicConstants
 
 using Oceananigans: Oceananigans, AbstractModel, Center, CenterField, Clock, Field,
-                    Centered, XFaceField, YFaceField, ZFaceField, fields, prognostic_fields
+                    Centered, fields, prognostic_fields
 using Oceananigans.Advection: Advection, adapt_advection_order, cell_advection_timescale
 using Oceananigans.AbstractOperations: @at
 using Oceananigans.BoundaryConditions: FieldBoundaryConditions, regularize_field_boundary_conditions
 using Oceananigans.Diagnostics: Diagnostics as OceananigansDiagnostics, NaNChecker
-using Oceananigans.Grids: ZDirection
 using Oceananigans.Models: Models, validate_model_halo, validate_tracer_advection
 using Oceananigans.Models.HydrostaticFreeSurfaceModels: validate_momentum_advection
-using Oceananigans.Solvers: FourierTridiagonalPoissonSolver
 using Oceananigans.TimeSteppers: TimeStepper
 using Oceananigans.TurbulenceClosures: implicit_diffusion_solver, time_discretization, build_closure_fields
 using Oceananigans.Utils: launch!, prettytime, prettykeys, with_tracers
