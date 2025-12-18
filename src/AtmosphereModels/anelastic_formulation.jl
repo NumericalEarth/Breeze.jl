@@ -10,17 +10,16 @@ using ..Thermodynamics:
 
 using Oceananigans: Oceananigans, CenterField
 using Oceananigans.Architectures: architecture
+using Oceananigans.BoundaryConditions: fill_halo_regions!
 using Oceananigans.Grids: inactive_cell
 using Oceananigans.Operators: Δzᵃᵃᶜ, Δzᵃᵃᶠ, divᶜᶜᶜ, Δzᶜᶜᶜ
-using Oceananigans.Solvers: solve!, AbstractHomogeneousNeumannFormulation
+using Oceananigans.Solvers: Solvers, solve!, AbstractHomogeneousNeumannFormulation
+using Oceananigans.TimeSteppers: TimeSteppers
 using Oceananigans.Utils: prettysummary
 
 using KernelAbstractions: @kernel, @index
 using Adapt: Adapt, adapt
 
-import Oceananigans.BoundaryConditions: fill_halo_regions!
-import Oceananigans.Solvers: tridiagonal_direction, compute_main_diagonal!, compute_lower_diagonal!
-import Oceananigans.TimeSteppers: compute_pressure_correction!, make_pressure_correction!
 
 #####
 ##### Formulation definition
@@ -152,7 +151,7 @@ struct AnelasticTridiagonalSolverFormulation{R} <: AbstractHomogeneousNeumannFor
     reference_density :: R
 end
 
-tridiagonal_direction(formulation::AnelasticTridiagonalSolverFormulation) = ZDirection()
+Solvers.tridiagonal_direction(formulation::AnelasticTridiagonalSolverFormulation) = ZDirection()
 
 function formulation_pressure_solver(anelastic_formulation::AnelasticFormulation, grid)
     reference_density = anelastic_formulation.reference_state.density
@@ -171,7 +170,7 @@ end
 
 # Note: diagonal coefficients depend on non-tridiagonal directions because
 # eigenvalues depend on non-tridiagonal directions.
-function compute_main_diagonal!(main_diagonal, formulation::AnelasticTridiagonalSolverFormulation, grid, λ1, λ2)
+function Solvers.compute_main_diagonal!(main_diagonal, formulation::AnelasticTridiagonalSolverFormulation, grid, λ1, λ2)
     arch = grid.architecture
     reference_density = formulation.reference_density
     launch!(arch, grid, :xy, _compute_anelastic_main_diagonal!, main_diagonal, grid, λ1, λ2, reference_density)
@@ -203,7 +202,7 @@ end
     end
 end
 
-function compute_lower_diagonal!(lower_diagonal, formulation::AnelasticTridiagonalSolverFormulation, grid)
+function Solvers.compute_lower_diagonal!(lower_diagonal, formulation::AnelasticTridiagonalSolverFormulation, grid)
     N = length(lower_diagonal)
     arch = grid.architecture
     reference_density = formulation.reference_density
@@ -219,7 +218,7 @@ end
     end
 end
 
-function compute_pressure_correction!(model::AnelasticModel, Δt)
+function TimeSteppers.compute_pressure_correction!(model::AnelasticModel, Δt)
     # Mask immersed velocities
     foreach(mask_immersed_field!, model.momentum)
     fill_halo_regions!(model.momentum, model.clock, fields(model))
@@ -291,7 +290,7 @@ Update the predictor momentum ``(ρu, ρv, ρw)`` with the non-hydrostatic press
 (\\rho\\boldsymbol{u})^{n+1} = (\\rho\\boldsymbol{u})^n - \\Delta t \\, \\rho_r \\boldsymbol{\\nabla} \\left( \\alpha_r p_{nh} \\right)
 ```
 """
-function make_pressure_correction!(model::AnelasticModel, Δt)
+function TimeSteppers.make_pressure_correction!(model::AnelasticModel, Δt)
 
     launch!(model.architecture, model.grid, :xyz,
             _pressure_correct_momentum!,

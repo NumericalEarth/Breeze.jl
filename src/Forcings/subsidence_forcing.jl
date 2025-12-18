@@ -1,3 +1,4 @@
+using ..AtmosphereModels: AtmosphereModels
 using Oceananigans: Average, Field, set!, compute!
 using Oceananigans.BoundaryConditions: FieldBoundaryConditions, ImpenetrableBoundaryCondition,
                                        fill_halo_regions!
@@ -103,7 +104,7 @@ end
 # e.g., :ρu → :u, :ρθ → :θ, :ρe → :e
 strip_density_prefix(name::Symbol) = Symbol(collect(string(name))[2:end]...)
 
-function materialize_atmosphere_model_forcing(forcing::SubsidenceForcing, field, name, model_field_names, context)
+function AtmosphereModels.materialize_atmosphere_model_forcing(forcing::SubsidenceForcing, field, name, model_field_names, context)
     grid = field.grid
 
     if forcing.subsidence_vertical_velocity isa AbstractField
@@ -135,7 +136,7 @@ end
 ##### compute_forcing! for subsidence forcing
 #####
 
-function compute_forcing!(forcing::SubsidenceForcing)
+function AtmosphereModels.compute_forcing!(forcing::SubsidenceForcing)
     compute!(forcing.subsidence_vertical_velocity)
     compute!(forcing.averaged_field)
     return nothing

@@ -20,24 +20,21 @@ using ..Thermodynamics:
 using DocStringExtensions: TYPEDSIGNATURES
 
 using Oceananigans: Oceananigans, Center, Field, KernelFunctionOperation
+using Oceananigans.BuoyancyFormulations: BuoyancyFormulations,
+    AbstractBuoyancyFormulation,
+    buoyancy_perturbationᶜᶜᶜ
 using Oceananigans.Grids: AbstractGrid
 using Oceananigans.Operators: ∂zᶜᶜᶠ
 
 using Adapt: Adapt, adapt
 
-import Oceananigans.BuoyancyFormulations:
-    AbstractBuoyancyFormulation,
-    buoyancy_perturbationᶜᶜᶜ,
-    ∂z_b,
-    required_tracers
-
-import ..Thermodynamics: saturation_specific_humidity
-
 using ..Thermodynamics:
+    Thermodynamics,
     ThermodynamicConstants,
     ReferenceState,
     mixture_heat_capacity,
-    mixture_gas_constant
+    mixture_gas_constant,
+    saturation_specific_humidity
 
 struct MoistAirBuoyancy{RS, AT} <: AbstractBuoyancyFormulation{Nothing}
     reference_state :: RS
@@ -111,11 +108,11 @@ function Base.show(io::IO, b::MoistAirBuoyancy)
         "└── thermodynamic_constants: ", summary(b.thermodynamic_constants))
 end
 
-required_tracers(::MoistAirBuoyancy) = (:θ, :qᵗ)
+BuoyancyFormulations.required_tracers(::MoistAirBuoyancy) = (:θ, :qᵗ)
 
 const c = Center()
 
-@inline function buoyancy_perturbationᶜᶜᶜ(i, j, k, grid, mb::MoistAirBuoyancy, tracers)
+@inline function BuoyancyFormulations.buoyancy_perturbationᶜᶜᶜ(i, j, k, grid, mb::MoistAirBuoyancy, tracers)
     @inbounds begin
         pᵣ = mb.reference_state.pressure[i, j, k]
         ρᵣ = mb.reference_state.density[i, j, k]
@@ -141,7 +138,7 @@ const c = Center()
     return g * (ρᵣ * α - 1)
 end
 
-@inline ∂z_b(i, j, k, grid, mb::MoistAirBuoyancy, tracers) =
+@inline BuoyancyFormulations.∂z_b(i, j, k, grid, mb::MoistAirBuoyancy, tracers) =
     ∂zᶜᶜᶠ(i, j, k, grid, buoyancy_perturbationᶜᶜᶜ, mb, tracers)
 
 #####
@@ -317,7 +314,7 @@ function TemperatureField(model)
 end
 
 # Saturation specific humidity
-@inline function saturation_specific_humidity(i, j, k, grid, mb::MoistAirBuoyancy, T, qᵗ, phase)
+@inline function Thermodynamics.saturation_specific_humidity(i, j, k, grid, mb::MoistAirBuoyancy, T, qᵗ, phase)
     @inbounds begin
         Tᵢ = T[i, j, k]
         qᵗᵢ = qᵗ[i, j, k]
