@@ -38,7 +38,7 @@ microphysics = OneMomentCloudMicrophysics(precipitation_boundary_condition = Imp
 
 # ## Simulation helper
 
-function run_parcel_simulation(; θ=300, qᵗ=0.020, qᶜˡ=0, qʳ=0, stop_time=5τ, Δt=0.1)
+function run_parcel_simulation(; θ=300, qᵗ=0.020, qᶜˡ=0, qʳ=0, stop_time=20τ, Δt=1)
     model = AtmosphereModel(grid; formulation, thermodynamic_constants=constants, microphysics)
     set!(model; θ, qᵗ, qᶜˡ, qʳ)
     simulation = Simulation(model; Δt, stop_time, verbose=false)
@@ -64,11 +64,11 @@ end
 # We run five simulations with different initial conditions to explore
 # the full spectrum of microphysical behavior:
 
-case1 = run_parcel_simulation(qᵗ=0.025)                      # Supersaturated
-case2 = run_parcel_simulation(qᵗ=0.030)                      # Higher moisture
-case3 = run_parcel_simulation(qᵗ=0.015, qʳ=0.002)            # Subsaturated with rain
-case4 = run_parcel_simulation(qᵗ=0.025, qʳ=0.001)            # Supersaturated with rain
-case5 = run_parcel_simulation(qᵗ=0.030, stop_time=500τ)      # Long run for autoconversion
+case1 = run_parcel_simulation(qᵗ=0.025)                    # Supersaturated
+case2 = run_parcel_simulation(qᵗ=0.030)                    # Higher moisture
+case3 = run_parcel_simulation(qᵗ=0.015, qʳ=0.002)          # Subsaturated with rain
+case4 = run_parcel_simulation(qᵗ=0.03, qᶜˡ=0.02, qʳ=0.005) # Supersaturated with rain
+case5 = run_parcel_simulation(θ=280, qᵗ=0.030, qᶜˡ=0.010)  # Autoconversion + evaporation
 nothing #hide
 
 # ## Visualization
@@ -88,9 +88,10 @@ c_temp = :magenta          # Vibrant magenta
 
 Δ(x) = x .- x[1]  # Deviation from initial value
 
-function plot_case!(fig, row, case, description; show_xlabel=false, xlims=(0, 20))
+function plot_case!(fig, row, case, description; show_xlabel=false, xlim=20)
     # Label spanning both columns
-    Label(fig[row, 1:2], description; fontsize=17, halign=:left, padding=(10, 0, 0, 0))
+    Label(fig[row, 1:2], description; fontsize=17, halign=:center, padding=(10, 0, 0, 0))
+    xlims = (-0.05 * xlim, xlim)
     
     # Moisture panel
     ax_q = Axis(fig[row+1, 1]; ylabel="Δq", limits=(xlims, nothing),
@@ -108,14 +109,14 @@ function plot_case!(fig, row, case, description; show_xlabel=false, xlims=(0, 20
 end
 
 # Plot first 4 cases with xlims=(0, 20) for rapid evolution
-ax1, _ = plot_case!(fig, 1, case1, "(a) Condensation: supersaturated vapor → cloud")
-plot_case!(fig, 3, case2, "(b) High moisture: more condensation")
-plot_case!(fig, 5, case3, "(c) Evaporation: subsaturated with pre-existing rain")
-plot_case!(fig, 7, case4, "(d) Mixed: condensation + rain evaporation")
+ax1, _ = plot_case!(fig, 1, case1, "(a) Supersaturation: vapor → cloud liquid")
+plot_case!(fig, 3, case2, "(b) Strong supersaturation: vapor → cloud liquid → rain")
+plot_case!(fig, 5, case3, "(c) Evaporating rain in a subsaturated environment")
+plot_case!(fig, 7, case4, "(d) Rain autoconversion then evaporation", show_xlabel=true)
 
 # Plot last case with xlims=(0, 500) for slow autoconversion
-plot_case!(fig, 9, case5, "(e) Autoconversion: cloud liquid → rain (500τ run)";
-           show_xlabel=true, xlims=(0, 500))
+plot_case!(fig, 9, case5, "(e) Autoconversion from lots of cloud liquid → rain (long 100τ run)";
+           show_xlabel=true)
 
 # Legend outside the figure
 Legend(fig[0, 1:2], ax1; orientation=:horizontal, framevisible=false)
