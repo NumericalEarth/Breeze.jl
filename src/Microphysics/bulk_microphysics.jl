@@ -3,6 +3,13 @@ struct BulkMicrophysics{N, C}
     categories :: C
 end
 
+# Bulk microphysics schemes (including those from extensions like CloudMicrophysics)
+# use the standard tendency interface, so the model-wide microphysics update is a no-op.
+# We forward to the nucleation / saturation-adjustment component to allow specialized
+# nucleation schemes to hook into the update cycle.
+AtmosphereModels.microphysics_model_update!(bμp::BulkMicrophysics, model) =
+    AtmosphereModels.microphysics_model_update!(bμp.nucleation, model)
+
 Base.summary(bμp::BulkMicrophysics) = "BulkMicrophysics"
 
 struct FourCategories{L, I, R, S, C}

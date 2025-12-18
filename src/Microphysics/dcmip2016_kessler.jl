@@ -64,7 +64,7 @@ Return the names of prognostic microphysical fields for the Kessler scheme.
 - `:ρqᶜˡ`: Density-weighted cloud liquid mass fraction (\$kg/m^3\$).
 - `:ρqʳ`: Density-weighted rain mass fraction (\$kg/m^3\$).
 """
-prognostic_field_names(::DCMIP2016KM) = (:ρqᶜˡ, :ρqʳ)
+AtmosphereModels.prognostic_field_names(::DCMIP2016KM) = (:ρqᶜˡ, :ρqʳ)
 
 """
 $(TYPEDSIGNATURES)
@@ -128,7 +128,7 @@ Return the thermodynamic state without adjustment.
 
 The Kessler scheme performs its own saturation adjustment internally via the kernel.
 """
-@inline maybe_adjust_thermodynamic_state(𝒰, ::DCMIP2016KM, μ, qᵗ, constants) = 𝒰
+@inline AtmosphereModels.maybe_adjust_thermodynamic_state(𝒰, ::DCMIP2016KM, μ, qᵗ, constants) = 𝒰
 
 """
 $(TYPEDSIGNATURES)
@@ -137,7 +137,7 @@ Return `nothing`.
 
 Rain sedimentation is handled internally by the kernel rather than through the advection interface.
 """
-@inline microphysical_velocities(::DCMIP2016KM, name) = nothing
+@inline AtmosphereModels.microphysical_velocities(::DCMIP2016KM, name) = nothing
 
 """
 $(TYPEDSIGNATURES)
@@ -147,7 +147,7 @@ Return zero tendency.
 All microphysical source/sink terms are applied directly to the prognostic fields via the
 `microphysics_model_update!` kernel, bypassing the standard tendency interface.
 """
-@inline microphysical_tendency(i, j, k, grid, ::DCMIP2016KM, name, μ, 𝒰, constants) = zero(eltype(grid))
+@inline AtmosphereModels.microphysical_tendency(i, j, k, grid, ::DCMIP2016KM, name, μ, 𝒰, constants) = zero(eltype(grid))
 
 #####
 ##### Kessler scheme constants (from kessler.f90)
@@ -228,7 +228,7 @@ This function launches a GPU kernel that processes each column independently, wi
 The kernel handles conversion between mass fractions (Breeze) and mixing ratios (Kessler)
 internally for efficiency. Water vapor is diagnosed from \$q^v = q^t - q^{cl} - q^r\$.
 """
-function microphysics_model_update!(::DCMIP2016KM, model)
+function AtmosphereModels.microphysics_model_update!(::DCMIP2016KM, model)
     grid = model.grid
     arch = architecture(grid)
     Nz = grid.Nz
