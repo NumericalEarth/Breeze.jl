@@ -3,14 +3,13 @@ using ..Thermodynamics:
     mixture_heat_capacity,
     mixture_gas_constant
 
-using Oceananigans.Architectures: architecture
 using Oceananigans.BoundaryConditions: fill_halo_regions!, compute_x_bcs!, compute_y_bcs!, compute_z_bcs!
 using Oceananigans.TurbulenceClosures: compute_diffusivities!
 using Oceananigans.ImmersedBoundaries: mask_immersed_field!
 using Oceananigans.TimeSteppers: TimeSteppers
 using Oceananigans.Utils: launch!
 
-const AnelasticModel = AtmosphereModel{<:AnelasticFormulation}
+# AnelasticModel type alias imported from AnelasticFormulation submodule
 
 function TimeSteppers.update_state!(model::AnelasticModel, callbacks=[]; compute_tendencies=true)
     tracer_density_to_specific!(model) # convert tracer density to specific tracer distribution

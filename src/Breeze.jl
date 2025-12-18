@@ -20,10 +20,12 @@ export
     CondensedPhase,
     mixture_gas_constant,
     mixture_heat_capacity,
-
-    # Microphysics
-    ImpenetrableBottom,
     
+    # Pressure accessors
+    mean_pressure,
+    pressure_anomaly,
+    total_pressure,
+
     # Diagnostics
     PotentialTemperature,
     VirtualPotentialTemperature,
