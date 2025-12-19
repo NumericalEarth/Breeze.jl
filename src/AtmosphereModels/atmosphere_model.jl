@@ -100,21 +100,20 @@ function AtmosphereModel(grid;
                          coriolis = nothing,
                          boundary_conditions = NamedTuple(),
                          forcing = NamedTuple(),
-                         advection = nothing,
-                         momentum_advection = nothing,
-                         scalar_advection = nothing,
+                         advection = DefaultValue(),
+                         momentum_advection = DefaultValue(),
+                         scalar_advection = DefaultValue(),
                          closure = nothing,
                          microphysics = nothing, # WarmPhaseSaturationAdjustment(),
                          timestepper = :RungeKutta3,
-                         radiation = nothing,
-                         radiative_transfer = radiation)
+                         radiative_transfer = nothing)
 
-    if !isnothing(advection)
+    if !(advection isa DefaultValue)
         # TODO: check that tracer+momentum advection were not independently set.
         scalar_advection = momentum_advection = advection
     else
-        isnothing(momentum_advection) && (momentum_advection = Centered(order=2))
-        isnothing(scalar_advection) && (scalar_advection = Centered(order=2))
+        (momentum_advection isa DefaultValue) && (momentum_advection = Centered(order=2))
+        (scalar_advection isa DefaultValue) && (scalar_advection = Centered(order=2))
     end
 
     # Check halos and throw an error if the grid's halo is too small
