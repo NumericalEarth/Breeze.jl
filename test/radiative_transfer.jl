@@ -118,8 +118,8 @@ end
         clock = Clock(time=DateTime(2024, 6, 21, 12, 0, 0))
         model = AtmosphereModel(grid; clock, formulation, radiation)
 
-        @test model.radiative_transfer !== nothing
-        @test model.radiative_transfer === radiation
+        @test model.radiation !== nothing
+        @test model.radiation === radiation
     end
 
     @testset "Radiatiative transfer basic tests [$(FT)]" for FT in (Float32, Float64)
@@ -144,7 +144,7 @@ end
 
         # Use noon on summer solstice at 45°N for good solar illumination
         clock = Clock(time=DateTime(2024, 6, 21, 16, 0, 0))
-        model = AtmosphereModel(grid; clock, formulation, radiative_transfer=radiation)
+        model = AtmosphereModel(grid; clock, formulation, radiation)
 
         # Set initial condition - this should trigger radiation update
         θ(z) = 300 + 0.01 * z / 1000

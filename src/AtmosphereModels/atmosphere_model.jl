@@ -52,7 +52,7 @@ mutable struct AtmosphereModel{Frm, Arc, Tst, Grd, Clk, Thm, Mom, Moi, Mfr, Buy,
     timestepper :: Tst
     closure :: Cls
     closure_fields :: Cfs
-    radiative_transfer :: Rad
+    radiation :: Rad
 end
 
 # Note: Formulation-specific functions (default_formulation, materialize_formulation, etc.)
@@ -119,7 +119,7 @@ function AtmosphereModel(grid;
                          closure = nothing,
                          microphysics = nothing, # WarmPhaseSaturationAdjustment(),
                          timestepper = :RungeKutta3,
-                         radiative_transfer = nothing)
+                         radiation = nothing)
 
     if !(advection isa DefaultValue)
         # TODO: check that tracer+momentum advection were not independently set.
@@ -221,7 +221,7 @@ function AtmosphereModel(grid;
                             timestepper,
                             closure,
                             closure_fields,
-                            radiative_transfer)
+                            radiation)
 
     update_state!(model)
 
