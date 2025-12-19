@@ -45,9 +45,11 @@ Uᵢ = 10  # background velocity (m/s)
 Δx = minimum_xspacing(grid)
 τ = 10 * Δx / Uᵢ  # relaxation timescale
 
+reference_state = ReferenceState(grid)
+ρᵣ = reference_state.density
 scheme = PerturbationAdvection(outflow_timescale=τ, inflow_timescale=τ)
-open_bc = OpenBoundaryCondition(Uᵢ; scheme)
-boundary_conditions = (; u = FieldBoundaryConditions(west=open_bc, east=open_bc))
+open_bc = OpenBoundaryCondition(ρᵣ * Uᵢ; scheme)
+boundary_conditions = (; ρu = FieldBoundaryConditions(west=open_bc, east=open_bc))
 
 # ## Sponge layer
 #
