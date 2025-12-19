@@ -51,11 +51,11 @@ grid = RectilinearGrid(size=(64, 64, 75), x=(0, 6400), y=(0, 6400), z=(0, 3000))
 
 wˢ(z) = z < 1500 ? -0.0065 * z / 1500 : -0.0065 * (1 - (z - 1500) / 600)
 subsidence = SubsidenceForcing(wˢ)
-forcing = (; ρe=subsidence, ρqᵗ=subsidence)
+forcing = (; ρθ=subsidence, ρqᵗ=subsidence)
 
 model = AtmosphereModel(grid; forcing)
 
-model.forcing.ρe
+model.forcing.ρθ
 
 # output
 SubsidenceForcing with wˢ: 1×1×76 Field{Nothing, Nothing, Face} reduced over dims = (1, 2) on RectilinearGrid on CPU
