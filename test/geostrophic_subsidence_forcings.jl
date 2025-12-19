@@ -103,7 +103,7 @@ end
 
 @testset "Subsidence forcing gradient [$FT]" for FT in (Float32, Float64)
     Oceananigans.defaults.FloatType = FT
-    grid = RectilinearGrid(default_arch; size=(1, 1, 8), x=(0, 10), y=(0, 10), z=(0, 16))
+    grid = RectilinearGrid(default_arch; size=(1, 1, 4), x=(0, 10), y=(0, 10), z=(0, 16))
     reference_state = ReferenceState(grid)
     formulation = AnelasticFormulation(reference_state, thermodynamics=:LiquidIcePotentialTemperature)
 
@@ -129,7 +129,6 @@ end
                 θ₀ = model.formulation.reference_state.potential_temperature
 
                 ρᵣ = model.formulation.reference_state.density
-                parent(ρᵣ) .= 1
                 ρϕ = CenterField(grid)
                 set!(ρϕ, ϕᵢ)
                 set!(ρϕ, ρᵣ * ρϕ)
@@ -141,12 +140,15 @@ end
                     set!(model; θ=θ₀, kw...)
                 end
 
-                ϕ = prognostic_fields(model)[name]
-                ϕ_before = interior(ϕ) |> Array
+                ρϕ = prognostic_fields(model)[name]
+                ρϕ₀ = interior(ρϕ) |> Array
                 time_step!(model, Δt)
-                ϕ_after = interior(ϕ) |> Array
+                ρϕ₁ = interior(ρϕ) |> Array
+                ρᵣ = interior(ρᵣ) |> Array
 
-                @test ϕ_after[1, 1, 4] - ϕ_before[1, 1, 4] ≈ Δϕ rtol=1e-2
+                # Only test points that don't touch the boundary.
+                @test ρϕ₁[1, 1, 2] - ρϕ₀[1, 1, 2] ≈ ρᵣ[1, 1, 2] * Δϕ rtol=1e-3
+                @test ρϕ₁[1, 1, 3] - ρϕ₀[1, 1, 3] ≈ ρᵣ[1, 1, 3] * Δϕ rtol=1e-3
             end
         end
     end

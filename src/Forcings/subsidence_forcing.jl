@@ -120,11 +120,13 @@ function AtmosphereModels.materialize_atmosphere_model_forcing(forcing::Subsiden
 
     ρᵣ = context.reference_density
 
-    if name ∈ (:ρu, :ρv, :ρw, :ρθ, :ρe)
+    if name ∈ (:ρu, :ρv, :ρw, :ρθ, :ρe, :ρqᵗ)
         specific_name = strip_density_prefix(name)
         specific_field = context.specific_fields[specific_name]
     else
-        specific_field = field / ρᵣ |> Field
+        # Note that tracers are converted from density to specific within
+        # update_state!, before `compute_forcing!` is called.
+        specific_field = field
     end
 
     averaged_field = Average(specific_field, dims=(1, 2)) |> Field
