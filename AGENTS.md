@@ -236,6 +236,15 @@ Pkg.test("Breeze")
 * GPU tests may fail with "dynamic invocation error". In that case, the tests should be run on CPU.
   If the error goes away, the problem is GPU-specific, and often a type-inference issue.
 
+### Test Strategy for Debugging
+When asked to run tests to look for errors (e.g., after a merge), run tests **one by one** rather than
+running the full test suite. This approach is faster for several reasons:
+1. Fixes propagate up faster - you can fix an error and immediately verify the fix
+2. Multiple tests may fail due to the same root cause - fixing one error may resolve many test failures
+3. Running all tests is wasteful if an early test reveals a fundamental issue
+
+Start with a single test file that covers core functionality, fix any errors, then proceed to the next.
+
 ### Writing Tests
 - Place tests in `test/` directory
 - Use `default_arch` for architecture selection
