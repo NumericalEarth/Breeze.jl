@@ -1,6 +1,7 @@
 using Breeze
 using CloudMicrophysics
 using CloudMicrophysics.Parameters: CloudLiquid, CloudIce
+using GPUArraysCore: @allowscalar
 using Oceananigans
 using Test
 
@@ -291,7 +292,7 @@ end
     model = AtmosphereModel(grid; formulation, microphysics)
 
     # Get reference density
-    ρᵣ = reference_state.density[1, 1, 1]
+    ρᵣ = @allowscalar reference_state.density[1, 1, 1]
 
     # Set specific microphysical variables (without ρ prefix)
     qᶜˡ_value = FT(0.001)
@@ -331,8 +332,8 @@ end
     compute!(spf)
 
     # Check that flux is computed correctly
-    wʳ = model.microphysical_fields.wʳ[1, 1, 1]
-    ρqʳ = model.microphysical_fields.ρqʳ[1, 1, 1]
+    wʳ = @allowscalar model.microphysical_fields.wʳ[1, 1, 1]
+    ρqʳ = @allowscalar model.microphysical_fields.ρqʳ[1, 1, 1]
     expected_flux = -wʳ * ρqʳ  # Positive for downward flux (wʳ < 0)
 
     @test spf[1, 1] ≈ expected_flux
@@ -395,7 +396,7 @@ end
     # Check that autoconversion is happening by verifying rain increases initially
     # before sedimentation can remove it all. We'll check the top cell which
     # should accumulate rain without losing it to sedimentation as quickly.
-    qʳ_top = model.microphysical_fields.qʳ[1, 1, Nz]
+    qʳ_top = @allowscalar model.microphysical_fields.qʳ[1, 1, Nz]
     @test qʳ_top > FT(1e-10)  # Rain should form in top cell
 end
 
@@ -425,10 +426,10 @@ end
 
     # With ImpenetrableBoundaryCondition, rain should accumulate in the domain
     # because it can't sediment out through the bottom
-    qʳ_final = model.microphysical_fields.qʳ[1, 1, 1]
+    qʳ_final = @allowscalar model.microphysical_fields.qʳ[1, 1, 1]
     
     # Check terminal velocity at bottom is zero (impenetrable)
-    wʳ_bottom = model.microphysical_fields.wʳ[1, 1, 1]
+    wʳ_bottom = @allowscalar model.microphysical_fields.wʳ[1, 1, 1]
     @test wʳ_bottom == 0  # Terminal velocity should be zero at impenetrable bottom
 
     # Rain should have accumulated substantially
