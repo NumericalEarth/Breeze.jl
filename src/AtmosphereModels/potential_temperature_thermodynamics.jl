@@ -208,3 +208,70 @@ end
     @inbounds potential_temperature[i, j, k] = with_temperature(𝒰θ, T, constants).potential_temperature
     @inbounds potential_temperature_density[i, j, k] = ρᵣ * with_temperature(𝒰θ, T, constants).potential_temperature
 end
+
+#####
+##### Setting temperature directly
+#####
+
+"""
+    set_thermodynamic_variable!(model, Val(:T), value)
+
+Set the thermodynamic state from temperature `T`.
+
+The temperature is converted to liquid-ice potential temperature θˡⁱ using
+the relation between T and θˡⁱ that accounts for the moisture distribution.
+For unsaturated air (no condensate), this simplifies to θ = T / Π where
+Π is the Exner function.
+"""
+function set_thermodynamic_variable!(model::LiquidIcePotentialTemperatureAnelasticModel, ::Val{:T}, value)
+    T_field = model.temperature # use temperature field as scratch/storage
+    set!(T_field, value)
+
+    grid = model.grid
+    arch = grid.architecture
+    thermo = model.formulation.thermodynamics
+
+    launch!(arch, grid, :xyz,
+            _potential_temperature_from_temperature!,
+            thermo.potential_temperature_density,
+            thermo.potential_temperature,
+            grid,
+            T_field,
+            model.specific_moisture,
+            model.formulation,
+            model.microphysics,
+            model.microphysical_fields,
+            model.thermodynamic_constants)
+
+    return nothing
+end
+
+@kernel function _potential_temperature_from_temperature!(potential_temperature_density,
+                                                          potential_temperature,
+                                                          grid,
+                                                          temperature_field,
+                                                          specific_moisture,
+                                                          formulation,
+                                                          microphysics,
+                                                          microphysical_fields,
+                                                          constants)
+    i, j, k = @index(Global, NTuple)
+
+    @inbounds begin
+        pᵣ = formulation.reference_state.pressure[i, j, k]
+        ρᵣ = formulation.reference_state.density[i, j, k]
+        qᵗ = specific_moisture[i, j, k]
+        T = temperature_field[i, j, k]
+    end
+
+    # Get moisture fractions (vapor only for unsaturated air)
+    q = compute_moisture_fractions(i, j, k, grid, microphysics, ρᵣ, qᵗ, microphysical_fields)
+
+    # Convert temperature to potential temperature using the inverse of the T(θ) relation
+    pˢᵗ = formulation.reference_state.standard_pressure
+    𝒰θ = LiquidIcePotentialTemperatureState(zero(T), q, pˢᵗ, pᵣ)
+    θ = with_temperature(𝒰θ, T, constants).potential_temperature
+
+    @inbounds potential_temperature[i, j, k] = θ
+    @inbounds potential_temperature_density[i, j, k] = ρᵣ * θ
+end

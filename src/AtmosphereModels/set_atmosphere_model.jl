@@ -25,7 +25,7 @@ function prioritize_names(names)
     return names
 end
 
-const settable_thermodynamic_variables = (:ρθ, :θ, :ρθˡⁱ, :θˡⁱ, :ρe, :e)
+const settable_thermodynamic_variables = (:ρθ, :θ, :ρθˡⁱ, :θˡⁱ, :ρe, :e, :T)
 function set_thermodynamic_variable! end
 
 """
@@ -46,6 +46,7 @@ Variables are set via keyword arguments. Supported variables include:
 **Settable thermodynamic variables**:
 - `θ`: potential temperature
 - `θˡⁱ`: liquid-ice potential temperature
+- `T`: temperature (converted to potential temperature internally)
 - `e`: static energy
 - `ρθ`: potential temperature density
 - `ρθˡⁱ`: liquid-ice potential temperature density
@@ -58,6 +59,12 @@ Variables are set via keyword arguments. Supported variables include:
 !!! note "The meaning of `θ`"
     When using `set!(model, θ=...)`, the value is interpreted as the **liquid-ice
     potential temperature** ``θˡⁱ``.
+
+!!! note "Setting temperature"
+    When using `set!(model, T=...)`, the temperature is converted to liquid-ice
+    potential temperature using the thermodynamic relation ``θ = (T - L q^c / c_p^m) / Π``
+    where ``q^c`` is the condensate and ``Π`` is the Exner function.
+    For dry or unsaturated air this simplifies to ``θ = T / Π``.
 
 # Options
 
