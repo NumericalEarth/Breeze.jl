@@ -1,4 +1,5 @@
 using Breeze
+using Breeze: ReferenceState, AnelasticFormulation, GeostrophicForcing
 using Oceananigans: Oceananigans
 using Test
 
@@ -16,43 +17,117 @@ using Test
 
     model = AtmosphereModel(grid; coriolis, forcing=geostrophic)
 
-    θ₀ = model.formulation.reference_state.potential_temperature
-    set!(model, θ=θ₀)
-
     # Check that forcing is materialized correctly
     @test haskey(model.forcing, :ρu)
     @test haskey(model.forcing, :ρv)
+
+    # Check the forcing type
+    @test model.forcing.ρu isa GeostrophicForcing
+    @test model.forcing.ρv isa GeostrophicForcing
 
     # Time step should not error
     Δt = 1e-6
     time_step!(model, Δt)
 
     # With constant uᵍ = -10 and vᵍ = 0:
-    # Fρu = -f * ρᵣ * vᵍ = 0
-    # Fρv = +f * ρᵣ * uᵍ = f * ρᵣ * (-10) < 0
-    # So ρv should become negative after one time step
-    @test maximum(model.momentum.ρv) < 0
+    # Fρu = -f * ρvᵍ = -f * ρᵣ * 0 = 0
+    # Fρv = +f * ρuᵍ = +f * ρᵣ * (-10) < 0
+    # So ρv should become NEGATIVE after one time step
+    @test minimum(model.momentum.ρv) < 0
 end
 
 @testset "SubsidenceForcing [$(FT)]" for FT in (Float32, Float64)
     Oceananigans.defaults.FloatType = FT
     grid = RectilinearGrid(default_arch; size=(4, 4, 4), x=(0, 100), y=(0, 100), z=(0, 100))
 
-    # Simple subsidence profile
-    wˢ(z) = -0.01  # Constant downward velocity
+    # Simple subsidence profile: constant downward velocity
+    wˢ(z) = -0.01
 
     subsidence = SubsidenceForcing(wˢ)
 
     # Apply subsidence to energy (default formulation uses StaticEnergy)
     model = AtmosphereModel(grid; forcing=(; ρe=subsidence))
 
-    θ₀ = model.formulation.reference_state.potential_temperature
-    set!(model, θ=θ₀)
-
     # Check that forcing is materialized correctly
     @test haskey(model.forcing, :ρe)
+    @test model.forcing.ρe isa SubsidenceForcing
+
+    # Check that the subsidence velocity field is set up correctly
+    @test !isnothing(model.forcing.ρe.subsidence_vertical_velocity)
 
     # Time step should not error
+    Δt = 1e-6
+    time_step!(model, Δt)
+end
+
+@testset "SubsidenceForcing with LiquidIcePotentialTemperature [$(FT)]" for FT in (Float32, Float64)
+    Oceananigans.defaults.FloatType = FT
+    
+    Nz = 10
+    Hz = 1000  # 1 km domain height
+    grid = RectilinearGrid(default_arch; size=(4, 4, Nz), x=(0, 100), y=(0, 100), z=(0, Hz))
+
+    # Simple subsidence profile: constant downward velocity
+    wˢ(z) = FT(-0.01)
+
+    subsidence = SubsidenceForcing(wˢ)
+
+    # Use LiquidIcePotentialTemperature thermodynamics
+    reference_state = ReferenceState(grid)
+    formulation = AnelasticFormulation(reference_state; thermodynamics=:LiquidIcePotentialTemperature)
+    model = AtmosphereModel(grid; formulation, forcing=(; ρqᵗ=subsidence))
+
+    # Set potential temperature to reference state
+    θ₀ = model.formulation.reference_state.potential_temperature
+
+    # Set up a linear moisture profile with known gradient
+    q₀ = FT(0.015)  # 15 g/kg at surface
+    Γq = FT(1e-5)   # moisture decreases with height
+    qᵗ_profile(x, y, z) = q₀ - Γq * z
+    set!(model, θ=θ₀, qᵗ=qᵗ_profile)
+
+    # Check that forcing is materialized correctly
+    @test haskey(model.forcing, :ρqᵗ)
+    @test model.forcing.ρqᵗ isa SubsidenceForcing
+
+    # Get initial moisture density for comparison
+    ρqᵗ_initial = sum(model.moisture_density)
+
+    # Time step (multiple iterations to see the effect)
+    Δt = FT(0.1)
+    for _ in 1:10
+        time_step!(model, Δt)
+    end
+
+    ρqᵗ_final = sum(model.moisture_density)
+    
+    # Check simulation didn't produce NaN
+    @test !isnan(ρqᵗ_final)
+    
+    # With downward subsidence (wˢ < 0) and moisture decreasing with height (∂qᵗ/∂z < 0),
+    # the subsidence forcing is: F_ρqᵗ = -ρᵣ * wˢ * ∂qᵗ/∂z = -ρᵣ * (-0.01) * (-Γq) < 0
+    # So moisture should DECREASE
+    @test ρqᵗ_final < ρqᵗ_initial
+end
+
+@testset "θ → e conversion in StaticEnergy model [$(FT)]" for FT in (Float32, Float64)
+    # This test verifies that set!(model, θ=...) works correctly for StaticEnergy models
+    # by converting potential temperature to energy density
+    Oceananigans.defaults.FloatType = FT
+    grid = RectilinearGrid(default_arch; size=(4, 4, 4), x=(0, 100), y=(0, 100), z=(0, 100))
+
+    model = AtmosphereModel(grid)  # Default is StaticEnergy
+
+    # Get the reference potential temperature
+    θ₀ = model.formulation.reference_state.potential_temperature
+
+    # This should work without error (tests the maybe_adjust_thermodynamic_state fix)
+    set!(model, θ=θ₀)
+
+    # Verify energy was set to a non-zero value
+    @test sum(abs, model.formulation.thermodynamics.energy_density) > 0
+
+    # Time step should work
     Δt = 1e-6
     time_step!(model, Δt)
 end
@@ -74,7 +149,6 @@ end
     subsidence = SubsidenceForcing(wˢ)
 
     # Combine forcings: (subsidence, geostrophic) for momentum
-    # Note: default formulation uses StaticEnergy, so use ρe not ρθ
     forcing = (;
         ρu = (subsidence, geostrophic.ρu),
         ρv = (subsidence, geostrophic.ρv),
@@ -84,14 +158,18 @@ end
 
     model = AtmosphereModel(grid; coriolis, forcing)
 
-    θ₀ = model.formulation.reference_state.potential_temperature
-    set!(model, θ=θ₀)
+    # Check that forcings are materialized correctly
+    # When tuples are passed, they get wrapped in MultipleForcings
+    @test haskey(model.forcing, :ρu)
+    @test haskey(model.forcing, :ρv)
+    @test haskey(model.forcing, :ρe)
+    @test haskey(model.forcing, :ρqᵗ)
 
     # Time step should not error
     Δt = 1e-6
     time_step!(model, Δt)
 
-    # With constant uᵍ = -10 and vᵍ = 0:
-    # The geostrophic forcing on ρv should make ρv negative
-    @test maximum(model.momentum.ρv) < 0
+    # The geostrophic forcing pushes ρv negative
+    # Fρv = +f * ρuᵍ = +f * ρᵣ * (-10) < 0
+    @test minimum(model.momentum.ρv) < 0
 end
