@@ -35,16 +35,32 @@ import Pkg
 Pkg.status()
 """
 
-example_pages = [
-    "Stratified dry thermal bubble" => "literated/dry_thermal_bubble.md",
-    "Cloudy thermal bubble" => "literated/cloudy_thermal_bubble.md",
-    "Cloudy Kelvin-Helmholtz instability" => "literated/cloudy_kelvin_helmholtz.md",
-    "Shallow cumulus convection (BOMEX)" => "literated/bomex.md",
-    "Precipitating shallow cumulus (RICO)" => "literated/rico.md",
-    "Convection over prescribed sea surface temperature (SST)" => "literated/prescribed_sea_surface_temperature.md",
-    "Inertia gravity wave" => "literated/inertia_gravity_wave.md",
-    "Single column gray radiation" => "literated/single_column_radiation.md",
+struct Example
+    # Title of the example page in `Documenter` ToC
+    title::String
+    # Basename of the example file, without extension (`.jl` will be appended for the input
+    # to `Literate.markdown`, `.md` will be appended for the generated file)
+    basename::String
+    # Whether to always build this example: set it to `false` for long-running examples to
+    # be built only on `main` or on-demand in PRS.
+    build_always::Bool
+end
+
+examples = [
+    Example("Stratified dry thermal bubble", "dry_thermal_bubble", true),
+    Example("Cloudy thermal bubble", "cloudy_thermal_bubble", true),
+    Example("Cloudy Kelvin-Helmholtz instability", "cloudy_kelvin_helmholtz", true),
+    Example("Shallow cumulus convection (BOMEX)", "bomex", true),
+    Example("Precipitating shallow cumulus (RICO)", "rico", true),
+    Example("Convection over prescribed sea surface temperature (SST)", "prescribed_sea_surface_temperature", true),
+    Example("Inertia gravity wave", "inertia_gravity_wave", true),
+    Example("Single column gray radiation", "single_column_radiation", true),
 ]
+
+# Filter out long-running example if necessary
+filter!(x -> x.build_always || get(ENV, "BREEZE_BUILD_ALL_EXAMPLES", "false") == "true", examples)
+
+example_pages = [ex.title => joinpath("literated", ex.basename * ".md") for ex in examples]
 
 literate_code(script_path, literated_dir) = """
 using Literate
@@ -61,8 +77,8 @@ set_theme!(Theme(linewidth = 3))
 """
 
 semaphore = Base.Semaphore(Threads.nthreads(:interactive))
-@time "literate" @sync for (_, dest_file) in example_pages
-    script_file = splitext(basename(dest_file))[1] * ".jl"
+@time "literate" @sync for example in examples
+    script_file = example.basename * ".jl"
     script_path = joinpath(examples_src_dir, script_file)
     Threads.@spawn :interactive Base.acquire(semaphore) do
         run(`$(Base.julia_cmd()) --color=yes --project=$(dirname(Base.active_project())) -e $(literate_code(script_path, literated_dir))`)
