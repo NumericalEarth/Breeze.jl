@@ -38,6 +38,7 @@ example_pages = [
     "Stratified dry thermal bubble" => "literated/dry_thermal_bubble.md",
     "Cloudy thermal bubble" => "literated/cloudy_thermal_bubble.md",
     "Cloudy Kelvin-Helmholtz instability" => "literated/cloudy_kelvin_helmholtz.md",
+    "Mountain waves" => "literated/mountain_wave.md",
     "Shallow cumulus convection (BOMEX)" => "literated/bomex.md",
     "Precipitating shallow cumulus (RICO)" => "literated/rico.md",
     "Convection over prescribed sea surface temperature (SST)" => "literated/prescribed_sea_surface_temperature.md",
