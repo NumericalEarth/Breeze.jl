@@ -79,7 +79,7 @@ AtmosphereModel{CPU, RectilinearGrid}(time = 0 seconds, iteration = 0)
 ├── timestepper: RungeKutta3TimeStepper
 ├── advection scheme:
 │   ├── momentum: Centered(order=2)
-│   ├── ρe: Centered(order=2)
+│   ├── ρθ: Centered(order=2)
 │   └── ρqᵗ: Centered(order=2)
 ├── tracers: ()
 ├── coriolis: Nothing

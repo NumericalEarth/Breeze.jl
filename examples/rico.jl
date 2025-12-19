@@ -62,8 +62,7 @@ reference_state = ReferenceState(grid, constants,
                                  surface_pressure = 101540,
                                  potential_temperature = 297.9)
 
-formulation = AnelasticFormulation(reference_state,
-                                   thermodynamics = :LiquidIcePotentialTemperature)
+formulation = AnelasticFormulation(reference_state)
 
 # ## Surface fluxes
 #

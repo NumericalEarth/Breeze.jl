@@ -24,7 +24,7 @@ $(TYPEDSIGNATURES)
 Construct an un-materialized "stub" `AnelasticFormulation` with `reference_state` and `thermodynamics`.
 The thermodynamics and pressure fields are materialized later in the model constructor.
 """
-AnelasticFormulation(reference_state; thermodynamics=:StaticEnergy) =
+AnelasticFormulation(reference_state; thermodynamics=:LiquidIcePotentialTemperature) =
     AnelasticFormulation(thermodynamics, reference_state, nothing)
 
 Adapt.adapt_structure(to, formulation::AnelasticFormulation) =
