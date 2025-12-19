@@ -284,6 +284,7 @@ end
 function atmosphere_model_forcing(user_forcings::NamedTuple, prognostic_fields, model_fields,
                                   grid, coriolis, reference_density,
                                   velocities, formulation, specific_moisture)
+
     user_forcing_names = keys(user_forcings)
 
     if :ρe ∈ keys(prognostic_fields)
@@ -302,7 +303,7 @@ function atmosphere_model_forcing(user_forcings::NamedTuple, prognostic_fields, 
         end
     end
 
-    model_field_names = keys(model_fields)
+    model_names = keys(model_fields)
 
     # Build specific fields for subsidence forcing (maps specific field names like :u, :θ to fields)
     formulation_fields = fields(formulation)
@@ -313,9 +314,9 @@ function atmosphere_model_forcing(user_forcings::NamedTuple, prognostic_fields, 
 
     materialized = Tuple(
         name in keys(user_forcings) ?
-            materialize_atmosphere_model_forcing(user_forcings[name], field, name, model_field_names, forcing_context) :
+            materialize_atmosphere_model_forcing(user_forcings[n], f, n, model_names, forcing_context) :
             Returns(zero(eltype(field)))
-            for (name, field) in pairs(forcing_fields)
+            for (n, f) in pairs(forcing_fields)
     )
 
     forcings = NamedTuple{forcing_names}(materialized)

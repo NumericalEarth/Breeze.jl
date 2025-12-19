@@ -102,9 +102,21 @@ end
 
 # Strip the ρ prefix from density variable names
 # e.g., :ρu → :u, :ρθ → :θ, :ρe → :e
-strip_density_prefix(name::Symbol) = Symbol(collect(string(name))[2:end]...)
+function strip_density_prefix(name::Symbol)
+    chars = string(name) |> collect 
+    prefix = popfirst!(chars)
+    prefix == 'ρ' || error("Expected name $name to be prefixed with 'ρ', got $prefix")
+    return Symbol(chars...)
+end
 
-function AtmosphereModels.materialize_atmosphere_model_forcing(forcing::SubsidenceForcing, field, name, model_field_names, context)
+function add_density_prefix(name::Symbol)
+    chars = string(name) |> collect 
+    pushfirst!(chars, 'ρ')
+    return Symbol(chars...)
+end
+
+function AtmosphereModels.materialize_atmosphere_model_forcing(forcing::SubsidenceForcing, field, name,
+                                                               model_field_names, context::NamedTuple)
     grid = field.grid
 
     if forcing.subsidence_vertical_velocity isa AbstractField
@@ -119,8 +131,9 @@ function AtmosphereModels.materialize_atmosphere_model_forcing(forcing::Subsiden
     end
 
     ρᵣ = context.reference_density
+    specific_field_names = keys(context.specific_fields)
 
-    if name ∈ (:ρu, :ρv, :ρw, :ρθ, :ρe)
+    if name ∈ map(add_density_prefix, specific_field_names)
         specific_name = strip_density_prefix(name)
         specific_field = context.specific_fields[specific_name]
     else
