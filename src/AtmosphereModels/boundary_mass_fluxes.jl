@@ -1,6 +1,7 @@
 using Oceananigans.BoundaryConditions: BoundaryCondition, Open
 using Oceananigans.AbstractOperations: Integral, Ax, Ay, Az, grid_metric_operation
-using Oceananigans.Fields: Field, interior
+using Oceananigans.Fields: Field, interior, compute!
+using Oceananigans.Grids: Face, Center
 using GPUArraysCore: @allowscalar
 
 const OBC  = BoundaryCondition{<:Open}  # OpenBoundaryCondition
