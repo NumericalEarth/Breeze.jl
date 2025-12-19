@@ -41,11 +41,11 @@ formulation = AnelasticFormulation(reference_state,
 using Dates
 
 optical_thickness = GrayOpticalThicknessOGorman2008(eltype(grid))
-radiation = RadiativeTransferModel(grid, constants, optical_thickness;
-                                   surface_temperature,
-                                   surface_emissivity = 0.98,
-                                   surface_albedo = 0.1,
-                                   solar_constant = 1361)        # W/m²
+radiative_transfer = RadiativeTransferModel(grid, constants, optical_thickness;
+                                            surface_temperature,
+                                            surface_emissivity = 0.98,
+                                            surface_albedo = 0.1,
+                                            solar_constant = 1361)        # W/m²
 
 # ## Atmosphere model
 #
@@ -53,7 +53,7 @@ radiation = RadiativeTransferModel(grid, constants, optical_thickness;
 
 clock = Clock(time=DateTime(1950, 11, 1, 12, 0, 0))
 microphysics = SaturationAdjustment(equilibrium = WarmPhaseEquilibrium())
-model = AtmosphereModel(grid; clock, formulation, microphysics, radiation)
+model = AtmosphereModel(grid; clock, formulation, microphysics, radiative_transfer)
 
 # ## Initial condition: idealized tropical profile with a cloud
 #
