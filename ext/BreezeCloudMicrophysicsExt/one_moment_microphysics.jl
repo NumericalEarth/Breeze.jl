@@ -56,8 +56,12 @@ Milbrandt (2015). The prognostic variables are `ρqᶜˡ` (cloud liquid mass den
 `ρqʳ` (rain mass density).
 
 For equilibrium (saturation adjustment) cloud formation, pass:
-```julia
-cloud_formation = SaturationAdjustment(FT; equilibrium=WarmPhaseEquilibrium())
+
+```jldoctest
+cloud_formation = SaturationAdjustment(equilibrium=WarmPhaseEquilibrium())
+
+# output
+SaturationAdjustment{WarmPhaseEquilibrium, Float64}(0.001, Inf, WarmPhaseEquilibrium())
 ```
 
 # Keyword arguments
@@ -71,6 +75,7 @@ function OneMomentCloudMicrophysics(FT::DataType = Oceananigans.defaults.FloatTy
                                     cloud_formation = NonEquilibriumCloudFormation(CloudLiquid(FT), nothing),
                                     categories = one_moment_cloud_microphysics_categories(FT),
                                     precipitation_boundary_condition = nothing)
+
     return BulkMicrophysics(cloud_formation, categories, precipitation_boundary_condition)
 end
 
@@ -112,9 +117,14 @@ const MP1M = BulkMicrophysics{<:MixedPhaseSaturationAdjustment, <:CM1MCategories
 const WarmPhaseNonEquilibrium1M = BulkMicrophysics{<:NonEquilibriumCloudFormation{<:CloudLiquid, Nothing}, <:CM1MCategories, <:Any}
 const WPNE1M = WarmPhaseNonEquilibrium1M
 
+# Mixed-phase non-equilibrium with 1M precipitation
+const MixedPhaseNonEquilibrium1M = BulkMicrophysics{<:NonEquilibriumCloudFormation{<:CloudLiquid, <:CloudIce}, <:CM1MCategories, <:Any}
+const MPNE1M = MixedPhaseNonEquilibrium1M
+
 # Union types for dispatch
 const WarmPhase1M = Union{WP1M, WPNE1M}
-const OneMomentLiquidRain = Union{WP1M, WPNE1M, MP1M}
+const NonEquilibrium1M = Union{WPNE1M, MPNE1M}
+const OneMomentLiquidRain = Union{WP1M, WPNE1M, MP1M, MPNE1M}
 
 #####
 ##### Prognostic field names
@@ -123,13 +133,14 @@ const OneMomentLiquidRain = Union{WP1M, WPNE1M, MP1M}
 prognostic_field_names(::WP1M) = (:ρqʳ,)
 prognostic_field_names(::WPNE1M) = (:ρqᶜˡ, :ρqʳ)
 prognostic_field_names(::MP1M) = (:ρqʳ, :ρqˢ)
+prognostic_field_names(::MPNE1M) = (:ρqᶜˡ, :ρqᶜⁱ, :ρqʳ, :ρqˢ)
 
 #####
 ##### Field materialization
 #####
 
 const warm_phase_field_names = (:ρqʳ, :qᵛ, :qˡ, :qᶜˡ, :qʳ)
-const ice_phase_field_names = (:ρqˢ, :qᶜⁱ, :qˢ)
+const ice_phase_field_names = (:ρqˢ, :qⁱ, :qᶜⁱ, :qˢ)
 
 function materialize_microphysical_fields(bμp::OneMomentLiquidRain, grid, bcs)
     if bμp isa WP1M
@@ -138,6 +149,8 @@ function materialize_microphysical_fields(bμp::OneMomentLiquidRain, grid, bcs)
         center_names = (:ρqᶜˡ, warm_phase_field_names...)
     elseif bμp isa MP1M
         center_names = (warm_phase_field_names..., ice_phase_field_names...)
+    elseif bμp isa MPNE1M
+        center_names = (:ρqᶜˡ, :ρqᶜⁱ, warm_phase_field_names..., ice_phase_field_names...)
     end
     
     center_fields = center_field_tuple(grid, center_names...)
@@ -173,7 +186,7 @@ end
     return nothing
 end
 
-# Non-equilibrium: cloud liquid from prognostic field
+# Non-equilibrium warm-phase: cloud liquid from prognostic field
 @inline function update_microphysical_fields!(μ, bμp::WPNE1M, i, j, k, grid, ρ, 𝒰, constants)
     q = 𝒰.moisture_mass_fractions
     categories = bμp.categories
@@ -185,6 +198,30 @@ end
         μ.qᶜˡ[i, j, k] = qᶜˡ
         μ.qʳ[i, j, k] = qʳ
         μ.qˡ[i, j, k] = qᶜˡ + qʳ  # total liquid = cloud + rain
+    end
+
+    update_rain_terminal_velocity!(μ, bμp, categories, i, j, k, ρ)
+
+    return nothing
+end
+
+# Non-equilibrium mixed-phase: cloud liquid and ice from prognostic fields
+@inline function update_microphysical_fields!(μ, bμp::MPNE1M, i, j, k, grid, ρ, 𝒰, constants)
+    q = 𝒰.moisture_mass_fractions
+    categories = bμp.categories
+
+    @inbounds begin
+        qᶜˡ = μ.ρqᶜˡ[i, j, k] / ρ  # cloud liquid from prognostic field
+        qᶜⁱ = μ.ρqᶜⁱ[i, j, k] / ρ  # cloud ice from prognostic field
+        qʳ = μ.ρqʳ[i, j, k] / ρ
+        qˢ = μ.ρqˢ[i, j, k] / ρ
+        μ.qᵛ[i, j, k] = q.vapor
+        μ.qᶜˡ[i, j, k] = qᶜˡ
+        μ.qᶜⁱ[i, j, k] = qᶜⁱ
+        μ.qʳ[i, j, k] = qʳ
+        μ.qˢ[i, j, k] = qˢ
+        μ.qˡ[i, j, k] = qᶜˡ + qʳ  # total liquid
+        μ.qⁱ[i, j, k] = qᶜⁱ + qˢ  # total ice
     end
 
     update_rain_terminal_velocity!(μ, bμp, categories, i, j, k, ρ)
@@ -218,7 +255,7 @@ end
 ##### Moisture fraction computation
 #####
 
-# Non-equilibrium: cloud liquid is prognostic (ρqᶜˡ field exists)
+# Non-equilibrium warm-phase: cloud liquid is prognostic
 @inline function compute_moisture_fractions(i, j, k, grid, bμp::WPNE1M, ρ, qᵗ, μ)
     qᶜˡ = @inbounds μ.ρqᶜˡ[i, j, k] / ρ
     qʳ = @inbounds μ.ρqʳ[i, j, k] / ρ
@@ -227,30 +264,46 @@ end
     return MoistureMassFractions(qᵛ, qˡ)
 end
 
-# Saturation adjustment: moisture is partitioned by the adjustment.
-# Here we provide an initial estimate; the adjustment will refine vapor/liquid split.
-@inline function compute_moisture_fractions(i, j, k, grid, bμp::WP1M, ρ, qᵗ, μ)
-    qʳ = @inbounds μ.ρqʳ[i, j, k] / ρ
-    # Initial estimate: assume remaining moisture is vapor (adjustment will fix this)
-    return MoistureMassFractions(qᵗ - qʳ, qʳ)
-end
-
-# Mixed-phase saturation adjustment: moisture is partitioned by the adjustment.
-# Here we provide an initial estimate; the adjustment will refine vapor/liquid/ice split.
-@inline function compute_moisture_fractions(i, j, k, grid, bμp::MP1M, ρ, qᵗ, μ)
+# Non-equilibrium mixed-phase: cloud liquid and ice are prognostic
+@inline function compute_moisture_fractions(i, j, k, grid, bμp::MPNE1M, ρ, qᵗ, μ)
+    qᶜˡ = @inbounds μ.ρqᶜˡ[i, j, k] / ρ
+    qᶜⁱ = @inbounds μ.ρqᶜⁱ[i, j, k] / ρ
     qʳ = @inbounds μ.ρqʳ[i, j, k] / ρ
     qˢ = @inbounds μ.ρqˢ[i, j, k] / ρ
-    qᵖ = qʳ + qˢ  # total precipitation
-    # Initial estimate: assume remaining moisture is vapor (adjustment will fix this)
-    return MoistureMassFractions(qᵗ - qᵖ, qʳ, qˢ)
+    qˡ = qᶜˡ + qʳ
+    qⁱ = qᶜⁱ + qˢ
+    qᵛ = qᵗ - qˡ - qⁱ
+    return MoistureMassFractions(qᵛ, qˡ, qⁱ)
+end
+
+# Saturation adjustment: read moisture partition from diagnostic fields (set in previous timestep).
+# maybe_adjust_thermodynamic_state will then adjust to equilibrium for the current state.
+@inline function compute_moisture_fractions(i, j, k, grid, bμp::WP1M, ρ, qᵗ, μ)
+    qᶜˡ = @inbounds μ.qᶜˡ[i, j, k]
+    qʳ = @inbounds μ.ρqʳ[i, j, k] / ρ
+    qˡ = qᶜˡ + qʳ
+    qᵛ = qᵗ - qˡ
+    return MoistureMassFractions(qᵛ, qˡ)
+end
+
+# Mixed-phase saturation adjustment: read moisture partition from diagnostic fields.
+@inline function compute_moisture_fractions(i, j, k, grid, bμp::MP1M, ρ, qᵗ, μ)
+    qᶜˡ = @inbounds μ.qᶜˡ[i, j, k]
+    qᶜⁱ = @inbounds μ.qᶜⁱ[i, j, k]
+    qʳ = @inbounds μ.ρqʳ[i, j, k] / ρ
+    qˢ = @inbounds μ.ρqˢ[i, j, k] / ρ
+    qˡ = qᶜˡ + qʳ
+    qⁱ = qᶜⁱ + qˢ
+    qᵛ = qᵗ - qˡ - qⁱ
+    return MoistureMassFractions(qᵛ, qˡ, qⁱ)
 end
 
 #####
 ##### Thermodynamic state adjustment
 #####
 
-# Non-equilibrium: no adjustment (cloud is prognostic)
-@inline maybe_adjust_thermodynamic_state(i, j, k, 𝒰₀, bμp::WPNE1M, args...) = 𝒰₀
+# Non-equilibrium: no adjustment (cloud liquid and ice are prognostic)
+@inline maybe_adjust_thermodynamic_state(i, j, k, 𝒰₀, bμp::NonEquilibrium1M, args...) = 𝒰₀
 
 # Saturation adjustment (warm-phase and mixed-phase)
 @inline function maybe_adjust_thermodynamic_state(i, j, k, 𝒰₀, bμp::Union{WP1M, MP1M}, ρᵣ, μ, qᵗ, constants)
@@ -266,12 +319,12 @@ end
 #
 # The condensation rate follows Morrison and Milbrandt (2015, JAS), Eq. (A1):
 #
-#   dqˡ/dt = (qᵛ - qᵛ*) / (Γˡ τˡ)
+#   dqˡ/dt = (qᵛ - qᵛ⁺) / (Γˡ τˡ)
 #
-# where qᵛ* is the saturation specific humidity, τˡ is the relaxation timescale,
+# where qᵛ⁺ is the saturation specific humidity, τˡ is the relaxation timescale,
 # and Γˡ is a thermodynamic adjustment factor that accounts for latent heating:
 #
-#   Γˡ = 1 + (Lᵛ / cₚ) × dqᵛ*/dT
+#   Γˡ = 1 + (ℒˡ / cᵖᵐ) ⋅ dqᵛ⁺/dT
 #
 # This factor arises because condensation releases latent heat, which increases
 # temperature and hence increases the saturation specific humidity, creating a
@@ -279,12 +332,11 @@ end
 #
 # The derivative dqᵛ*/dT follows from the Clausius-Clapeyron equation:
 #
-#   dqᵛ*/dT = qᵛ* × (Lᵛ / (Rᵛ T²) - 1/T)
+#   dqᵛ⁺/dT = qᵛ⁺ ⋅ (ℒˡ / (Rᵛ T²) - 1/T)
 #
 # See Morrison and Grabowski (2008, JAS) Eq. (4) and Morrison and Milbrandt (2015) 
 # Appendix A for derivation.
 #####
-
 """
     thermodynamic_adjustment_factor(qᵛ⁺, T, q, constants)
 
@@ -294,13 +346,13 @@ This factor accounts for the temperature dependence of saturation vapor pressure
 during phase change, following Morrison and Milbrandt (2015, JAS), Eq. (A1):
 
 ```math
-Γˡ = 1 + \\frac{Lᵛ}{cₚᵐ} \\frac{dqᵛ*}{dT}
+Γˡ = 1 + \\frac{ℒˡ}{cᵖᵐ} \\frac{dqᵛ⁺}{dT}
 ```
 
 where the temperature derivative of saturation specific humidity is:
 
 ```math
-\\frac{dqᵛ*}{dT} = qᵛ* \\left( \\frac{Lᵛ}{Rᵛ T²} - \\frac{1}{T} \\right)
+\\frac{dqᵛ⁺}{dT} = qᵛ⁺ \\left( \\frac{ℒˡ}{Rᵛ T²} - \\frac{1}{T} \\right)
 ```
 
 # References
@@ -313,7 +365,6 @@ where the temperature derivative of saturation specific humidity is:
     ℒˡ = liquid_latent_heat(T, constants)
     cᵖᵐ = mixture_heat_capacity(q, constants)
     Rᵛ = vapor_gas_constant(constants)
-    # Clausius-Clapeyron: dqᵛ*/dT
     dqᵛ⁺_dT = qᵛ⁺ * (ℒˡ / (Rᵛ * T^2) - 1 / T)
     return 1 + (ℒˡ / cᵖᵐ) * dqᵛ⁺_dT
 end
@@ -329,7 +380,7 @@ Positive values indicate condensation, negative values indicate evaporation.
 The rate follows Morrison and Milbrandt (2015, JAS), Eq. (A1):
 
 ```math
-\\frac{dqᶜˡ}{dt} = \\frac{qᵛ - qᵛ*}{Γˡ τˡ}
+\\frac{dqᶜˡ}{dt} = \\frac{qᵛ - qᵛ⁺}{Γˡ τˡ}
 ```
 
 Evaporation is limited to the available cloud liquid to prevent negative values.
@@ -437,4 +488,105 @@ end
     ρSⁿᵘᵐ = -ρⁱʲᵏ * qᶜˡ / τᶜˡ
 
     return ifelse(qᶜˡ >= 0, ΣρS, ρSⁿᵘᵐ)
+end
+
+# Mixed-phase non-equilibrium: same as warm-phase for cloud liquid
+@inline function microphysical_tendency(i, j, k, grid, bμp::MPNE1M, ::Val{:ρqᶜˡ}, ρ, μ, 𝒰, constants)
+    categories = bμp.categories
+    τᶜˡ = bμp.cloud_formation.liquid.τ_relax
+    ρⁱʲᵏ = @inbounds ρ[i, j, k]
+
+    @inbounds qᶜˡ = μ.qᶜˡ[i, j, k]
+    @inbounds qʳ = μ.qʳ[i, j, k]
+
+    T = temperature(𝒰, constants)
+    q = 𝒰.moisture_mass_fractions
+    qᵛ = q.vapor
+
+    qᵛ⁺ = saturation_specific_humidity(T, ρⁱʲᵏ, constants, PlanarLiquidSurface())
+    Sᶜᵒⁿᵈ = condensation_rate(qᵛ, qᵛ⁺, qᶜˡ, T, ρⁱʲᵏ, q, τᶜˡ, constants)
+    Sᶜᵒⁿᵈ = ifelse(isnan(Sᶜᵒⁿᵈ), zero(Sᶜᵒⁿᵈ), Sᶜᵒⁿᵈ)
+
+    Sᵃᶜⁿᵛ = conv_q_lcl_to_q_rai(categories.rain.acnv1M, qᶜˡ)
+    Sᵃᶜᶜ = accretion(categories.cloud_liquid, categories.rain,
+                     categories.hydrometeor_velocities.rain, categories.collisions,
+                     qᶜˡ, qʳ, ρⁱʲᵏ)
+
+    ΣρS = ρⁱʲᵏ * (Sᶜᵒⁿᵈ - Sᵃᶜⁿᵛ - Sᵃᶜᶜ)
+    ρSⁿᵘᵐ = -ρⁱʲᵏ * qᶜˡ / τᶜˡ
+
+    return ifelse(qᶜˡ >= 0, ΣρS, ρSⁿᵘᵐ)
+end
+
+#####
+##### Cloud ice tendency (non-equilibrium mixed-phase only)
+#####
+#
+# The deposition rate follows Morrison and Milbrandt (2015, JAS), Eq. (A1) but for ice:
+#
+#   dqⁱ/dt = (qᵛ - qᵛ⁺ⁱ) / (Γⁱ τⁱ)
+#
+# where qᵛ⁺ⁱ is the saturation specific humidity over ice, τⁱ is the ice relaxation 
+# timescale, and Γⁱ is the thermodynamic adjustment factor using ice latent heat.
+#####
+
+"""
+    ice_thermodynamic_adjustment_factor(qᵛ⁺ⁱ, T, q, constants)
+
+Compute the thermodynamic adjustment factor Γⁱ for deposition/sublimation.
+
+Same as `thermodynamic_adjustment_factor` but uses ice latent heat and 
+saturation over ice surface.
+"""
+@inline function ice_thermodynamic_adjustment_factor(qᵛ⁺ⁱ, T, q, constants)
+    ℒⁱ = ice_latent_heat(T, constants)
+    cᵖᵐ = mixture_heat_capacity(q, constants)
+    Rᵛ = vapor_gas_constant(constants)
+    dqᵛ⁺ⁱ_dT = qᵛ⁺ⁱ * (ℒⁱ / (Rᵛ * T^2) - 1 / T)
+    return 1 + (ℒⁱ / cᵖᵐ) * dqᵛ⁺ⁱ_dT
+end
+
+"""
+    deposition_rate(qᵛ, qᵛ⁺ⁱ, qᶜⁱ, T, ρ, q, τᶜⁱ, constants)
+
+Compute the deposition/sublimation rate for cloud ice.
+
+Returns the rate of change of cloud ice mass fraction (kg/kg/s).
+Positive values indicate deposition, negative values indicate sublimation.
+"""
+@inline function deposition_rate(qᵛ, qᵛ⁺ⁱ, qᶜⁱ, T, ρ, q, τᶜⁱ, constants)
+    Γⁱ = ice_thermodynamic_adjustment_factor(qᵛ⁺ⁱ, T, q, constants)
+    Sᵈᵉᵖ = (qᵛ - qᵛ⁺ⁱ) / (Γⁱ * τᶜⁱ)
+    
+    # Limit sublimation to available cloud ice
+    Sᵈᵉᵖ_min = -max(0, qᶜⁱ) / τᶜⁱ
+    Sᵈᵉᵖ = max(Sᵈᵉᵖ, Sᵈᵉᵖ_min)
+    
+    return Sᵈᵉᵖ
+end
+
+@inline function microphysical_tendency(i, j, k, grid, bμp::MPNE1M, ::Val{:ρqᶜⁱ}, ρ, μ, 𝒰, constants)
+    τᶜⁱ = bμp.cloud_formation.ice.τ_relax
+    ρⁱʲᵏ = @inbounds ρ[i, j, k]
+
+    @inbounds qᶜⁱ = μ.qᶜⁱ[i, j, k]
+
+    T = temperature(𝒰, constants)
+    q = 𝒰.moisture_mass_fractions
+    qᵛ = q.vapor
+
+    # Saturation specific humidity over ice
+    qᵛ⁺ⁱ = saturation_specific_humidity(T, ρⁱʲᵏ, constants, PlanarIceSurface())
+
+    # Deposition/sublimation rate
+    Sᵈᵉᵖ = deposition_rate(qᵛ, qᵛ⁺ⁱ, qᶜⁱ, T, ρⁱʲᵏ, q, τᶜⁱ, constants)
+    Sᵈᵉᵖ = ifelse(isnan(Sᵈᵉᵖ), zero(Sᵈᵉᵖ), Sᵈᵉᵖ)
+
+    # TODO: Add autoconversion cloud ice → snow when snow processes are implemented
+    # For now, cloud ice only grows/shrinks via deposition/sublimation
+
+    ΣρS = ρⁱʲᵏ * Sᵈᵉᵖ
+    ρSⁿᵘᵐ = -ρⁱʲᵏ * qᶜⁱ / τᶜⁱ
+
+    return ifelse(qᶜⁱ >= 0, ΣρS, ρSⁿᵘᵐ)
 end

@@ -20,10 +20,12 @@ using Breeze.Thermodynamics:
     with_moisture,
     temperature,
     PlanarLiquidSurface,
+    PlanarIceSurface,
     saturation_vapor_pressure,
     saturation_specific_humidity,
     supersaturation,
     liquid_latent_heat,
+    ice_latent_heat,
     vapor_gas_constant,
     mixture_heat_capacity
 
