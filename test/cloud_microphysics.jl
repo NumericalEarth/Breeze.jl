@@ -300,12 +300,12 @@ end
     set!(model; θ=300, qᵗ=0.020, qᶜˡ=qᶜˡ_value, qʳ=qʳ_value)
 
     # Check that density-weighted fields were set correctly
-    @test model.microphysical_fields.ρqᶜˡ[1, 1, 1] ≈ ρᵣ * qᶜˡ_value
-    @test model.microphysical_fields.ρqʳ[1, 1, 1] ≈ ρᵣ * qʳ_value
+    @test @allowscalar model.microphysical_fields.ρqᶜˡ[1, 1, 1] ≈ ρᵣ * qᶜˡ_value
+    @test @allowscalar model.microphysical_fields.ρqʳ[1, 1, 1] ≈ ρᵣ * qʳ_value
 
     # Check that specific fields are diagnosed correctly
-    @test model.microphysical_fields.qᶜˡ[1, 1, 1] ≈ qᶜˡ_value
-    @test model.microphysical_fields.qʳ[1, 1, 1] ≈ qʳ_value
+    @test @allowscalar model.microphysical_fields.qᶜˡ[1, 1, 1] ≈ qᶜˡ_value
+    @test @allowscalar model.microphysical_fields.qʳ[1, 1, 1] ≈ qʳ_value
 
     # Test that time-stepping works after setting specific variables
     time_step!(model, 1)
@@ -336,8 +336,8 @@ end
     ρqʳ = @allowscalar model.microphysical_fields.ρqʳ[1, 1, 1]
     expected_flux = -wʳ * ρqʳ  # Positive for downward flux (wʳ < 0)
 
-    @test spf[1, 1] ≈ expected_flux
-    @test spf[1, 1] > 0  # Rain falls down, so flux should be positive
+    @test @allowscalar spf[1, 1] ≈ expected_flux
+    @test @allowscalar spf[1, 1] > 0  # Rain falls down, so flux should be positive
 end
 
 @testset "Rain accumulation from autoconversion [$(FT)]" for FT in (Float32, Float64)
