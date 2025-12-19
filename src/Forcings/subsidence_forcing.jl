@@ -118,8 +118,6 @@ function AtmosphereModels.materialize_atmosphere_model_forcing(forcing::Subsiden
         fill_halo_regions!(wˢ)
     end
 
-    ρᵣ = context.reference_density
-
     if name ∈ (:ρu, :ρv, :ρw, :ρθ, :ρe, :ρqᵗ)
         specific_name = strip_density_prefix(name)
         specific_field = context.specific_fields[specific_name]
@@ -130,7 +128,7 @@ function AtmosphereModels.materialize_atmosphere_model_forcing(forcing::Subsiden
     end
 
     averaged_field = Average(specific_field, dims=(1, 2)) |> Field
-
+    ρᵣ = context.reference_density
     return SubsidenceForcing(wˢ, ρᵣ, averaged_field)
 end
 
