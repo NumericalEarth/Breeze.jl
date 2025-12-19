@@ -60,13 +60,10 @@ end
     # Geostrophic wind profiles
     uᵍ(z) = -10
     vᵍ(z) = 0
+    geostrophic = geostrophic_forcings(uᵍ, vᵍ)
 
     # Subsidence profile
     wˢ(z) = -0.01
-
-    coriolis = FPlane(f=1e-4)
-
-    geostrophic = geostrophic_forcings(uᵍ, vᵍ)
     subsidence = SubsidenceForcing(wˢ)
 
     # Combine forcings: (subsidence, geostrophic) for momentum
@@ -74,10 +71,11 @@ end
     forcing = (;
         ρu = (subsidence, geostrophic.ρu),
         ρv = (subsidence, geostrophic.ρv),
-        ρe = subsidence,
+        ρθ = subsidence,
         ρqᵗ = subsidence
     )
 
+    coriolis = FPlane(f=1e-4)
     model = AtmosphereModel(grid; coriolis, forcing)
 
     θ₀ = model.formulation.reference_state.potential_temperature
