@@ -328,6 +328,13 @@ serve(dir="docs/build")
   (which will launch kernels under the hood) instead.
 - Be conservative about developing examples and tutorials. Do not write extensive example code unless asked.
   Instead, produce skeletons or outlines with minimum viable code.
+- **Debugging literated examples**: When a specific example fails during doc builds, comment out
+  all other examples in `docs/make.jl` except the failing one to isolate the error. This speeds up
+  iteration dramatically since you only build one example at a time.
+- **Literate.jl comment syntax**: In literated examples, lines starting with `# ` (hash + space)
+  at column 1 are converted to markdown. Comments inside functions that start with `#` at the
+  beginning of a line will prematurely end code blocks. Either remove such comments or use `##`
+  to keep them as code comments.
 
 ## Important Files to Know
 
