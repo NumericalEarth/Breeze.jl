@@ -9,11 +9,8 @@ using Test
     # Simple geostrophic wind profiles
     uᵍ(z) = -10
     vᵍ(z) = 0
-
-    coriolis = FPlane(f=1e-4)
-
     geostrophic = geostrophic_forcings(uᵍ, vᵍ)
-
+    coriolis = FPlane(f=1e-4)
     model = AtmosphereModel(grid; coriolis, forcing=geostrophic)
 
     θ₀ = model.formulation.reference_state.potential_temperature
@@ -40,11 +37,10 @@ end
 
     # Simple subsidence profile
     wˢ(z) = -0.01  # Constant downward velocity
-
     subsidence = SubsidenceForcing(wˢ)
 
     # Apply subsidence to energy (default formulation uses StaticEnergy)
-    model = AtmosphereModel(grid; forcing=(; ρe=subsidence))
+    model = AtmosphereModel(grid; forcing=(; ρθ=subsidence))
 
     θ₀ = model.formulation.reference_state.potential_temperature
     set!(model, θ=θ₀)
