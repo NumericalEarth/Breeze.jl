@@ -58,6 +58,7 @@ Milbrandt (2015). The prognostic variables are `ρqᶜˡ` (cloud liquid mass den
 For equilibrium (saturation adjustment) cloud formation, pass:
 
 ```jldoctest
+using Breeze.Microphysics
 cloud_formation = SaturationAdjustment(equilibrium=WarmPhaseEquilibrium())
 
 # output
