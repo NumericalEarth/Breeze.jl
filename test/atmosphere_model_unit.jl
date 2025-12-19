@@ -1,8 +1,26 @@
 using Breeze
 using GPUArraysCore: @allowscalar
 using Oceananigans
+using Oceananigans.Diagnostics: erroring_NaNChecker!
 using Oceananigans.Operators: ℑzᵃᵃᶠ
 using Test
+
+function run_nan_checker_test(arch; erroring)
+    grid = RectilinearGrid(arch, size=(4, 2, 1), extent=(1, 1, 1))
+    model = AtmosphereModel(grid)
+    simulation = Simulation(model, Δt=1, stop_iteration=2)
+    @allowscalar model.momentum.ρu[1, 1, 1] = NaN
+    erroring && erroring_NaNChecker!(simulation)
+
+    if erroring
+        @test_throws ErrorException run!(simulation)
+    else
+        run!(simulation)
+        @test model.clock.iteration == 1 # simulation stopped after one iteration
+    end
+
+    return nothing
+end
 
 @testset "AtmosphereModel [$(FT)]" for FT in (Float32, Float64)
     Oceananigans.defaults.FloatType = FT
@@ -14,6 +32,12 @@ using Test
     @testset "Basic tests for set!" begin
         set!(model, time=1)
         @test model.clock.time == 1
+    end
+
+    @testset "NaN Checker" begin
+        @info "  Testing NaN Checker..."
+        run_nan_checker_test(default_arch, erroring=true)
+        run_nan_checker_test(default_arch, erroring=false)
     end
 
     constants = ThermodynamicConstants()
@@ -34,16 +58,12 @@ using Test
             formulation = AnelasticFormulation(reference_state; thermodynamics)
             model = AtmosphereModel(grid; thermodynamic_constants=constants, formulation)
 
-            # test set!
-            ρᵣ = model.formulation.reference_state.density
-            cᵖᵈ = model.thermodynamic_constants.dry_air.heat_capacity
-            ρeᵢ = ρᵣ * cᵖᵈ * θ₀
-
+            # Test round-trip consistency: set θ, get ρe; then set ρe, get back θ
             set!(model; θ = θ₀)
-            ρe₁ = deepcopy(static_energy_density(model))
-            θ₁ = deepcopy(liquid_ice_potential_temperature(model))
+            ρe₁ = Field(static_energy_density(model))
+            θ₁ = Field(liquid_ice_potential_temperature(model))
 
-            set!(model; ρe = ρeᵢ)
+            set!(model; ρe = ρe₁)
             @test static_energy_density(model) ≈ ρe₁
             @test liquid_ice_potential_temperature(model) ≈ θ₁
         end
@@ -178,7 +198,7 @@ end
 
         for model in (static_energy_model, potential_temperature_model)
             @test model.advection.momentum isa FluxFormAdvection
-            @test model.advection.ρqᵗ isa FluxFormAdvection 
+            @test model.advection.ρqᵗ isa FluxFormAdvection
             @test model.advection.ρqᵗ.x isa WENO
             @test model.advection.ρqᵗ.y isa WENO
             @test model.advection.ρqᵗ.z isa Centered
@@ -219,3 +239,4 @@ end
         end
     end
 end
+

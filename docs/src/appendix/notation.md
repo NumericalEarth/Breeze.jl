@@ -12,7 +12,7 @@ A few notes about the following table:
 
 * `TC` stands for [`ThermodynamicConstants`](@ref)
 * `AM` stands for [`AtmosphereModel`](@ref)
-* `RS` stands for [`ReferenceState`](@ref Breeze.AtmosphereModels.ReferenceState)
+* `RS` stands for [`ReferenceState`](@ref Breeze.Thermodynamics.ReferenceState)
 * Note that there are independent concepts of "reference". For example, [`AnelasticFormulation`](@ref) involves
   a "reference state", which is an adiabatic, hydrostatic solution to the equations of motion. But there is also an
   "energy reference temperature" and "reference latent heat", which are thermodynamic constants required to define
@@ -79,26 +79,27 @@ The following table also uses a few conventions that suffuse the source code and
 | ``\mathcal{L}^l(T)``                | `ℒˡ`   | `liquid_latent_heat(T, constants)`  | Temperature-dependent latent heat of condensation                              |
 | ``\mathcal{L}^i(T)``                | `ℒⁱ`   | `ice_latent_heat(T, constants)`     | Temperature-dependent latent heat of deposition                                |
 | ``θ₀``                              | `θ₀`   | `RS.potential_temperature`          | (Constant) reference potential temperature for the anelastic formulation       |
-| ``p₀``                              | `p₀`   | `RS.surface_pressure`                  | Base (surface) reference pressure                                              |
+| ``p₀``                              | `p₀`   | `RS.surface_pressure`               | Surface reference pressure                                              |
+| ``p^{st}``                          | `pˢᵗ`  | `RS.standard_pressure`              | Standard pressure for potential temperature (default 10⁵ Pa)                   |
 | ``ρᵣ``                              | `ρᵣ`   | `RS.density`                        | Density of a dry reference state for the anelastic formulation                 |
 | ``αᵣ``                              | `αᵣ`   |                                     | Specific volume of a dry reference state, ``αᵣ = Rᵈ θ₀ / pᵣ``                  |
 | ``pᵣ``                              | `pᵣ`   | `RS.pressure`                       | Pressure of a dry adiabatic reference pressure for the anelastic formulation   |
-| ``\Pi``                             | `Π`    |                                     | Exner function, ``Π = (pᵣ / p₀)^{Rᵐ / cᵖᵐ}``                                   |
+| ``\Pi``                             | `Π`    |                                     | Exner function, ``Π = (pᵣ / pˢᵗ)^{Rᵐ / cᵖᵐ}``                                  |
 | ``θᵛ``                              | `θᵛ`   |                                     | Virtual potential temperature                                                  |
 | ``θᵉ``                              | `θᵉ`   |                                     | Equivalent potential temperature                                               |
 | ``θˡⁱ``                             | `θˡⁱ`  |                                     | Liquid-ice potential temperature                                               |
 | ``θᵇ``                              | `θᵇ`   |                                     | Stability-equivalent potential temperature (for moist Brunt-Väisälä)           |
 | ``θ``                               | `θ`    |                                     | Shorthand for liquid-ice potential temperature (used in [`set!`](https://clima.github.io/OceananigansDocumentation/stable/appendix/library/#Oceananigans.Fields.set!)) |
-| ``\Delta t``                        | `Δt`   | `Simulation.Δt`                     | Time step                                                                      |
+| ``\Delta t``                        | `Δt`   | `Simulation.Δt`                     | Time step.                                                                     |
 | ``\boldsymbol{\tau}``               | `τ`    |                                     | Kinematic subgrid/viscous stress tensor (per unit mass)                        |
 | ``\boldsymbol{\mathcal{T}}``        | `𝒯`    |                                     | Dynamic stress tensor used in anelastic momentum, ``\mathcal{T} = ρᵣ τ``       |
 | ``\boldsymbol{J}``                  | `J`    |                                     | Dynamic diffusive flux for scalars                                             |
-| ``τˣ``                              | `τˣ`   |                                     | Surface momentum flux (x-component), ``τˣ = -ρ₀ Cᴰ U ρu / |U|``                |
-| ``τʸ``                              | `τʸ`   |                                     | Surface momentum flux (y-component), ``τʸ = -ρ₀ Cᴰ U ρv / |U|``                |
+| ``τˣ``                              | `τˣ`   |                                     | Surface momentum flux (``x``-component), N/m²                                  |
+| ``τʸ``                              | `τʸ`   |                                     | Surface momentum flux (``y``-component), N/m²                                  |
 | ``\mathcal{Q}^T``                   | `𝒬ᵀ`   |                                     | Surface sensible heat flux, ``\mathcal{Q}^T = cᵖᵐ Jᵀ``                         |
 | ``\mathcal{Q}^v``                   | `𝒬ᵛ`   |                                     | Surface latent heat flux, ``\mathcal{Q}^v = \mathcal{L}^l Jᵛ``                 |
-| ``Jᵀ``                              | `Jᵀ`   |                                     | Surface temperature flux, ``Jᵀ = -ρ₀ Cᵀ U (θ - θ_0)``                         |
-| ``Jᵛ``                              | `Jᵛ`   |                                     | Surface moisture flux, ``Jᵛ = -ρ₀ Cᵛ U (q - q_0^{v+})``                        |
+| ``Jᵀ``                              | `Jᵀ`   |                                     | Surface temperature flux, kg K/m²s                                             |
+| ``Jᵛ``                              | `Jᵛ`   |                                     | Surface moisture flux, kg/m²s                                                  |
 | ``Cᴰ``                              | `Cᴰ`   |                                     | Surface drag coefficient                                                       |
 | ``Cᵀ``                              | `Cᵀ`   |                                     | Surface sensible heat transfer coefficient (Stanton number)                    |
 | ``Cᵛ``                              | `Cᵛ`   |                                     | Surface vapor transfer coefficient (Dalton number)                             |
@@ -106,3 +107,5 @@ The following table also uses a few conventions that suffuse the source code and
 | ``qᵛ₀``                             | `qᵛ₀`  |                                     | Saturation specific humidity at sea surface                                    |
 | ``\mathscr{I}``                     | `ℐ`    |                                     | Radiative flux (intensity), W/m²                                               |
 | ``F_{\mathscr{I}}``                 | `Fℐ`   |                                     | Radiative flux divergence (heating rate), K/s                                  |
+| ``τˡʷ``                             | `τˡʷ`  |                                     | Atmosphere optical thickness for longwave                                      |
+| ``τˢʷ``                             | `τˢʷ`  |                                     | Atmosphere optical thickness for shortwave                                     |

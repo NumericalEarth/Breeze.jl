@@ -1,21 +1,16 @@
-using ..Thermodynamics: Thermodynamics, ThermodynamicConstants, ReferenceState
+using ..Thermodynamics: Thermodynamics, ThermodynamicConstants
 
-using Oceananigans: AbstractModel, Center, CenterField, Clock, Field
-using Oceananigans: Centered, XFaceField, YFaceField, ZFaceField
-using Oceananigans.Advection: adapt_advection_order
+using Oceananigans: Oceananigans, AbstractModel, Center, CenterField, Clock, Field,
+                    Centered, fields, prognostic_fields
+using Oceananigans.Advection: Advection, adapt_advection_order, cell_advection_timescale
 using Oceananigans.AbstractOperations: @at
 using Oceananigans.BoundaryConditions: FieldBoundaryConditions, regularize_field_boundary_conditions
-using Oceananigans.Grids: ZDirection
-using Oceananigans.Models: validate_model_halo, validate_tracer_advection
-using Oceananigans.Solvers: FourierTridiagonalPoissonSolver
+using Oceananigans.Diagnostics: Diagnostics as OceananigansDiagnostics, NaNChecker
+using Oceananigans.Models: Models, validate_model_halo, validate_tracer_advection
+using Oceananigans.Models.HydrostaticFreeSurfaceModels: validate_momentum_advection
 using Oceananigans.TimeSteppers: TimeStepper
 using Oceananigans.TurbulenceClosures: implicit_diffusion_solver, time_discretization, build_closure_fields
 using Oceananigans.Utils: launch!, prettytime, prettykeys, with_tracers
-
-import Oceananigans: fields, prognostic_fields
-import Oceananigans.Advection: cell_advection_timescale
-import Oceananigans.Models.HydrostaticFreeSurfaceModels: validate_momentum_advection
-import Oceananigans.Models: boundary_condition_args
 
 struct DefaultValue end
 
@@ -31,10 +26,11 @@ function validate_tracers(tracers::Tuple)
     return tracers
 end
 
-formulation_pressure_solver(formulation, grid) = nothing
+# Note: formulation_pressure_solver is defined in AtmosphereModels.jl as a forwarding function
+# to the AnelasticFormulation submodule.
 
 mutable struct AtmosphereModel{Frm, Arc, Tst, Grd, Clk, Thm, Mom, Moi, Mfr, Buy,
-                               Tmp, Prs, Sol, Vel, Trc, Adv, Cor, Frc, Mic, Cnd, Cls, Cfs, Rad, BM} <: AbstractModel{Tst, Arc}
+                               Tmp, Sol, Vel, Trc, Adv, Cor, Frc, Mic, Cnd, Cls, Cfs, Rad, Bmf} <: AbstractModel{Tst, Arc}
     architecture :: Arc
     grid :: Grd
     clock :: Clk
@@ -44,7 +40,6 @@ mutable struct AtmosphereModel{Frm, Arc, Tst, Grd, Clk, Thm, Mom, Moi, Mfr, Buy,
     moisture_density :: Moi
     specific_moisture :: Mfr
     temperature :: Tmp
-    pressure :: Prs
     pressure_solver :: Sol
     velocities :: Vel
     tracers :: Trc
@@ -58,12 +53,11 @@ mutable struct AtmosphereModel{Frm, Arc, Tst, Grd, Clk, Thm, Mom, Moi, Mfr, Buy,
     closure :: Cls
     closure_fields :: Cfs
     radiative_transfer :: Rad
-    boundary_mass_fluxes :: BM
+    boundary_mass_fluxes :: Bmf
 end
 
-# Stub functions to be overloaded by formulation-specific files
-function default_formulation end
-function materialize_formulation end
+# Note: Formulation-specific functions (default_formulation, materialize_formulation, etc.)
+# are defined in the AnelasticFormulation submodule and imported into AtmosphereModels.
 
 """
 $(TYPEDSIGNATURES)
@@ -162,7 +156,6 @@ function AtmosphereModel(grid;
     # Diagnostic fields
     specific_moisture = CenterField(grid)
     temperature = CenterField(grid)
-    pressure = formulation.pressure_anomaly
 
     prognostic_microphysical_fields = NamedTuple(name => microphysical_fields[name] for name in prognostic_field_names(microphysics))
     prognostic_fields = collect_prognostic_fields(formulation,
@@ -208,7 +201,6 @@ function AtmosphereModel(grid;
                             moisture_density,
                             specific_moisture,
                             temperature,
-                            pressure,
                             pressure_solver,
                             velocities,
                             tracers,
@@ -261,7 +253,7 @@ function Base.show(io::IO, model::AtmosphereModel)
               "└── microphysics: ", Mic)
 end
 
-cell_advection_timescale(model::AtmosphereModel) = cell_advection_timescale(model.grid, model.velocities)
+Advection.cell_advection_timescale(model::AtmosphereModel) = cell_advection_timescale(model.grid, model.velocities)
 
 # Default prognostic field names - overloaded by formulation-specific files
 function prognostic_field_names(formulation, microphysics, tracer_names)
@@ -336,13 +328,13 @@ function atmosphere_model_forcing(user_forcings::NamedTuple, prognostic_fields, 
     return forcings
 end
 
-function fields(model::AtmosphereModel)
+function Oceananigans.fields(model::AtmosphereModel)
     formulation_fields = fields(model.formulation)
     auxiliary = (; T=model.temperature, qᵗ=model.specific_moisture)
     return merge(prognostic_fields(model), formulation_fields, model.velocities, auxiliary)
 end
 
-function prognostic_fields(model::AtmosphereModel)
+function Oceananigans.prognostic_fields(model::AtmosphereModel)
     prognostic_formulation_fields = prognostic_fields(model.formulation)
     thermodynamic_fields = merge(prognostic_formulation_fields, (; ρqᵗ=model.moisture_density))
     μ_names = prognostic_field_names(model.microphysics)
@@ -350,13 +342,13 @@ function prognostic_fields(model::AtmosphereModel)
     return merge(model.momentum, thermodynamic_fields, μ_fields, model.tracers)
 end
 
-boundary_condition_args(model::AtmosphereModel) = (model.clock, fields(model))
+Models.boundary_condition_args(model::AtmosphereModel) = (model.clock, fields(model))
 
 #####
 ##### Helper functions for accessing thermodynamic fields
 #####
 
-# Stub function - implementation in anelastic_formulation.jl
+# Stub function - implementation in formulation-specific files
 function thermodynamic_density_name end
 
 """
@@ -395,4 +387,18 @@ function total_energy(model)
     k = @at (Center, Center, Center) (u^2 + v^2 + w^2) / 2 |> Field
     e = static_energy(model) |> Field
     return k + e
+end
+
+# Check for NaNs in the first prognostic field
+function OceananigansDiagnostics.default_nan_checker(model::AtmosphereModel)
+    model_fields = prognostic_fields(model)
+
+    if isempty(model_fields)
+        return nothing
+    end
+
+    first_name = first(keys(model_fields))
+    field_to_check_nans = NamedTuple{tuple(first_name)}(model_fields)
+    nan_checker = NaNChecker(field_to_check_nans)
+    return nan_checker
 end

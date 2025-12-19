@@ -1,4 +1,7 @@
 using Breeze.Thermodynamics: StaticEnergyState, with_temperature
+using Oceananigans: Oceananigans
+using Oceananigans.BoundaryConditions: BoundaryConditions, fill_halo_regions!
+using Oceananigans.Operators: ℑzᵃᵃᶜ
 
 struct StaticEnergyThermodynamics{E, S}
     energy_density :: E
@@ -9,7 +12,7 @@ Adapt.adapt_structure(to, thermo::StaticEnergyThermodynamics) =
     StaticEnergyThermodynamics(adapt(to, thermo.energy_density),
                                adapt(to, thermo.specific_energy))
 
-function fill_halo_regions!(thermo::StaticEnergyThermodynamics)
+function BoundaryConditions.fill_halo_regions!(thermo::StaticEnergyThermodynamics)
     fill_halo_regions!(thermo.energy_density)
     fill_halo_regions!(thermo.specific_energy)
     return nothing
@@ -21,8 +24,8 @@ prognostic_field_names(formulation::ASEF) = tuple(:ρe)
 additional_field_names(formulation::ASEF) = tuple(:e)
 thermodynamic_density_name(::ASEF) = :ρe
 thermodynamic_density(formulation::ASEF) = formulation.thermodynamics.energy_density
-fields(formulation::ASEF) = (; e=formulation.thermodynamics.specific_energy)
-prognostic_fields(formulation::ASEF) = (; ρe=formulation.thermodynamics.energy_density)
+Oceananigans.fields(formulation::ASEF) = (; e=formulation.thermodynamics.specific_energy)
+Oceananigans.prognostic_fields(formulation::ASEF) = (; ρe=formulation.thermodynamics.energy_density)
 
 function materialize_thermodynamics(::Val{:StaticEnergy}, grid, boundary_conditions)
     energy_density = CenterField(grid, boundary_conditions=boundary_conditions.ρe)
@@ -44,7 +47,7 @@ function diagnose_thermodynamic_state(i, j, k, grid, formulation::ASEF,
                                       microphysical_fields,
                                       constants,
                                       specific_moisture)
-  
+
     e = @inbounds formulation.thermodynamics.specific_energy[i, j, k]
     pᵣ = @inbounds formulation.reference_state.pressure[i, j, k]
     ρᵣ = @inbounds formulation.reference_state.density[i, j, k]
@@ -190,9 +193,9 @@ end
         θ = potential_temperature[i, j, k]
     end
 
-    p₀ = formulation.reference_state.surface_pressure
+    pˢᵗ = formulation.reference_state.standard_pressure
     q = compute_moisture_fractions(i, j, k, grid, microphysics, ρᵣ, qᵗ, microphysical_fields)
-    𝒰θ₀ = LiquidIcePotentialTemperatureState(θ, q, p₀, pᵣ)
+    𝒰θ₀ = LiquidIcePotentialTemperatureState(θ, q, pˢᵗ, pᵣ)
     𝒰θ₁ = maybe_adjust_thermodynamic_state(𝒰θ₀, microphysics, microphysical_fields, qᵗ, constants)
     T = temperature(𝒰θ₁, constants)
 

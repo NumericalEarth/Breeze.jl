@@ -168,7 +168,7 @@ function progress(sim)
     return nothing
 end
 
-add_callback!(simulation, progress, TimeInterval(1minute))
+add_callback!(simulation, progress, IterationInterval(200))
 
 # ## Output
 # We save the model velocities, the cross-stream component of vorticity, ``ξ = ∂_z u - ∂_x w``,

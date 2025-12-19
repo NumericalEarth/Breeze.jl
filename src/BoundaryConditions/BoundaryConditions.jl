@@ -12,23 +12,20 @@ export BulkDragFunction,
        BulkVaporFlux,
        BulkVaporFluxBoundaryCondition
 
-import ..AtmosphereModels: regularize_atmosphere_model_boundary_conditions
-
+using ..AtmosphereModels: AtmosphereModels
 using ..Thermodynamics: saturation_specific_humidity, surface_density, PlanarLiquidSurface
 
+using Oceananigans.Architectures: Architectures, on_architecture
 using Oceananigans.Grids: Center, Face, XDirection, YDirection, AbstractGrid
 using Oceananigans.Fields: Field, set!
-using Oceananigans.BoundaryConditions: BoundaryCondition,
+using Oceananigans.BoundaryConditions: BoundaryConditions as OceananigansBC,
+                                       BoundaryCondition,
                                        Flux,
-                                       FieldBoundaryConditions,
-                                       getbc
+                                       FieldBoundaryConditions
 
 using Oceananigans.Operators: ℑxyᶠᶜᵃ, ℑxyᶜᶠᵃ, ℑxᶜᵃᵃ, ℑyᵃᶜᵃ
 
 using Adapt: Adapt
-
-import Oceananigans.BoundaryConditions: getbc
-import Oceananigans.Architectures: on_architecture
 
 #####
 ##### Helper function for surface values
@@ -108,7 +105,7 @@ Adapt.adapt_structure(to, df::BulkDragFunction) =
                      Adapt.adapt(to, df.coefficient),
                      Adapt.adapt(to, df.gustiness))
 
-on_architecture(to, df::BulkDragFunction) =
+Architectures.on_architecture(to, df::BulkDragFunction) =
     BulkDragFunction(on_architecture(to, df.direction),
                      on_architecture(to, df.coefficient),
                      on_architecture(to, df.gustiness))
@@ -122,7 +119,7 @@ Base.summary(df::BulkDragFunction) = string("BulkDragFunction(direction=", summa
 const XDBDF = XDirectionBulkDragFunction
 const YDBDF = YDirectionBulkDragFunction
 
-@inline function getbc(df::XDBDF, i::Integer, j::Integer, grid::AbstractGrid, clock, fields)
+@inline function OceananigansBC.getbc(df::XDBDF, i::Integer, j::Integer, grid::AbstractGrid, clock, fields)
     ρu = @inbounds fields.ρu[i, j, 1]
     U² = wind_speed²ᶠᶜᶜ(i, j, grid, fields)
     U = sqrt(U²)
@@ -131,7 +128,7 @@ const YDBDF = YDirectionBulkDragFunction
     return - Cᴰ * Ũ² * ρu / U * (U > 0)
 end
 
-@inline function getbc(df::YDBDF, i::Integer, j::Integer, grid::AbstractGrid, clock, fields)
+@inline function OceananigansBC.getbc(df::YDBDF, i::Integer, j::Integer, grid::AbstractGrid, clock, fields)
     ρv = @inbounds fields.ρv[i, j, 1]
     U² = wind_speed²ᶜᶠᶜ(i, j, grid, fields)
     U = sqrt(U²)
@@ -184,7 +181,7 @@ Adapt.adapt_structure(to, bf::BulkSensibleHeatFluxFunction) =
                                  Adapt.adapt(to, bf.surface_pressure),
                                  Adapt.adapt(to, bf.thermodynamic_constants))
 
-on_architecture(to, bf::BulkSensibleHeatFluxFunction) =
+Architectures.on_architecture(to, bf::BulkSensibleHeatFluxFunction) =
     BulkSensibleHeatFluxFunction(on_architecture(to, bf.coefficient),
                                  on_architecture(to, bf.gustiness),
                                  on_architecture(to, bf.surface_temperature),
@@ -196,8 +193,8 @@ Base.summary(bf::BulkSensibleHeatFluxFunction) =
            ", gustiness=", bf.gustiness, ")")
 
 # getbc for BulkSensibleHeatFluxFunction
-@inline function getbc(bf::BulkSensibleHeatFluxFunction, i::Integer, j::Integer,
-                       grid::AbstractGrid, clock, fields)
+@inline function OceananigansBC.getbc(bf::BulkSensibleHeatFluxFunction, i::Integer, j::Integer,
+                                      grid::AbstractGrid, clock, fields)
     T₀ = surface_value(bf.surface_temperature, i, j)
     θ = @inbounds fields.θ[i, j, 1]
     Δθ = θ - T₀
@@ -259,7 +256,7 @@ Adapt.adapt_structure(to, bf::BulkVaporFluxFunction) =
                           Adapt.adapt(to, bf.thermodynamic_constants),
                           Adapt.adapt(to, bf.surface))
 
-on_architecture(to, bf::BulkVaporFluxFunction) =
+Architectures.on_architecture(to, bf::BulkVaporFluxFunction) =
     BulkVaporFluxFunction(on_architecture(to, bf.coefficient),
                           on_architecture(to, bf.gustiness),
                           on_architecture(to, bf.surface_temperature),
@@ -274,7 +271,7 @@ Base.summary(bf::BulkVaporFluxFunction) =
 const BVFF = BulkVaporFluxFunction
 
 # getbc for BulkVaporFluxFunction
-@inline function getbc(bf::BVFF, i::Integer, j::Integer, grid::AbstractGrid, clock, fields)
+@inline function OceananigansBC.getbc(bf::BVFF, i::Integer, j::Integer, grid::AbstractGrid, clock, fields)
     constants = bf.thermodynamic_constants
     surface = bf.surface
     T₀ = surface_value(bf.surface_temperature, i, j)
@@ -423,7 +420,7 @@ all boundary conditions and calls `regularize_atmosphere_boundary_condition` on 
 allowing specialized handling for bulk flux boundary conditions and other atmosphere-specific
 boundary condition types.
 """
-function regularize_atmosphere_model_boundary_conditions(boundary_conditions, grid, surface_pressure, thermodynamic_constants)
+function AtmosphereModels.regularize_atmosphere_model_boundary_conditions(boundary_conditions, grid, surface_pressure, thermodynamic_constants)
     regularized = Dict{Symbol, Any}()
     for (name, fbcs) in pairs(boundary_conditions)
         loc = field_location(Val(name))

@@ -3,18 +3,16 @@ using ..Thermodynamics:
     mixture_heat_capacity,
     mixture_gas_constant
 
-using Oceananigans.Architectures: architecture
 using Oceananigans.BoundaryConditions: fill_halo_regions!, compute_x_bcs!, compute_y_bcs!, compute_z_bcs!
 using Oceananigans.BoundaryConditions: update_boundary_conditions!
 using Oceananigans.TurbulenceClosures: compute_diffusivities!
 using Oceananigans.ImmersedBoundaries: mask_immersed_field!
+using Oceananigans.TimeSteppers: TimeSteppers
 using Oceananigans.Utils: launch!
 
-import Oceananigans.TimeSteppers: update_state!, compute_flux_bc_tendencies!
+# AnelasticModel type alias imported from AnelasticFormulation submodule
 
-const AnelasticModel = AtmosphereModel{<:AnelasticFormulation}
-
-function update_state!(model::AnelasticModel, callbacks=[]; compute_tendencies=true)
+function TimeSteppers.update_state!(model::AnelasticModel, callbacks=[]; compute_tendencies=true)
     tracer_density_to_specific!(model) # convert tracer density to specific tracer distribution
 
     # Update open boundary conditions (e.g., PerturbationAdvection)
@@ -356,7 +354,7 @@ $(TYPEDSIGNATURES)
 
 Apply boundary conditions by adding flux divergences to the right-hand-side.
 """
-function compute_flux_bc_tendencies!(model::AtmosphereModel)
+function TimeSteppers.compute_flux_bc_tendencies!(model::AtmosphereModel)
 
     Gⁿ = model.timestepper.Gⁿ
     arch  = model.architecture
