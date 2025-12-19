@@ -64,6 +64,19 @@ $(TYPEDSIGNATURES)
 Return an AtmosphereModel that uses the anelastic approximation following
 [Pauluis2008](@citet).
 
+Arguments
+=========
+
+   * The `default_formulation` is `AnelasticFormulation`.
+
+   * The default `advection` scheme is `Centered(order=2)` for both momentum
+     and scalars. If a single `advection` is provided, it is used for both momentum
+     and scalars.
+
+   * Alternatively, specific `momentum_advection` and `scalar_advection`
+     schemes may be provided. `scalar_advection` may be a `NamedTuple` with
+     a different scheme for each respective scalar, identified by name.
+
 Example
 =======
 
