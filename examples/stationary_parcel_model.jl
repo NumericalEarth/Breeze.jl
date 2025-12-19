@@ -89,22 +89,16 @@ c_temp = :magenta          # Vibrant magenta
 Δ(x) = x .- x[1]  # Deviation from initial value
 
 function plot_case!(fig, row, case, description; show_xlabel=false, xlim=20)
-    # Label spanning both columns
     Label(fig[row, 1:2], description; fontsize=17, halign=:center, padding=(10, 0, 0, 0))
     xlims = (-0.05 * xlim, xlim)
-    
-    # Moisture panel
     ax_q = Axis(fig[row+1, 1]; ylabel="Δq", limits=(xlims, nothing),
                 xticklabelsvisible=show_xlabel, xlabel=show_xlabel ? "t / τ" : "")
     lines!(ax_q, norm(case.t), Δ(case.qᵛ);  color=c_vapor, linewidth=2.5, label="Δqᵛ")
     lines!(ax_q, norm(case.t), Δ(case.qᶜˡ); color=c_cloud, linewidth=2.5, label="Δqᶜˡ")
     lines!(ax_q, norm(case.t), Δ(case.qʳ);  color=c_rain,  linewidth=2.5, label="Δqʳ")
-    
-    # Temperature panel
     ax_T = Axis(fig[row+1, 2]; ylabel="T (K)", limits=(xlims, nothing),
                 xticklabelsvisible=show_xlabel, xlabel=show_xlabel ? "t / τ" : "")
     lines!(ax_T, norm(case.t), case.T; color=c_temp, linewidth=2.5)
-    
     return ax_q, ax_T
 end
 
