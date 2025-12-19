@@ -2,6 +2,7 @@ using Breeze
 using Oceananigans: Oceananigans
 using Oceananigans.BoundaryConditions: BoundaryCondition
 using Oceananigans.Grids: minimum_xspacing
+using Statistics: mean
 using Test
 
 #####
@@ -198,5 +199,78 @@ end
 
     time_step!(model, 1e-3)
     @test true
+end
+
+#####
+##### Tests for momentum density with open boundaries
+#####
+
+@testset "Open boundary ρu: set! preserves mean when matching boundary value [$FT]" for FT in (Float32, Float64)
+    Oceananigans.defaults.FloatType = FT
+    grid = RectilinearGrid(default_arch; size = (8, 8, 8),
+                           x = (0, 1), y = (0, 1), z = (0, 1),
+                           topology = (Bounded, Bounded, Bounded))
+
+    Uᵢ = 1
+    scheme = PerturbationAdvection(outflow_timescale=1, inflow_timescale=1)
+    open_bc = OpenBoundaryCondition(Uᵢ; scheme)
+    ρu_bcs = FieldBoundaryConditions(west=open_bc, east=open_bc)
+    boundary_conditions = (; ρu=ρu_bcs)
+
+    model = AtmosphereModel(grid; boundary_conditions)
+
+    θ₀ = model.formulation.reference_state.potential_temperature
+    set!(model; θ=θ₀, u=Uᵢ)
+
+    # When u is set to match the boundary value, mean(u) should equal Uᵢ
+    @test mean(model.velocities.u) ≈ Uᵢ
+end
+
+@testset "Open boundary ρv: set! preserves mean when matching boundary value [$FT]" for FT in (Float32, Float64)
+    Oceananigans.defaults.FloatType = FT
+    grid = RectilinearGrid(default_arch; size = (8, 8, 8),
+                           x = (0, 1), y = (0, 1), z = (0, 1),
+                           topology = (Bounded, Bounded, Bounded))
+
+    Vᵢ = 1
+    scheme = PerturbationAdvection(outflow_timescale=1, inflow_timescale=1)
+    open_bc = OpenBoundaryCondition(Vᵢ; scheme)
+    ρv_bcs = FieldBoundaryConditions(south=open_bc, north=open_bc)
+    boundary_conditions = (; ρv=ρv_bcs)
+
+    model = AtmosphereModel(grid; boundary_conditions)
+
+    θ₀ = model.formulation.reference_state.potential_temperature
+    set!(model; θ=θ₀, v=Vᵢ)
+
+    # When v is set to match the boundary value, mean(v) should equal Vᵢ
+    @test mean(model.velocities.v) ≈ Vᵢ
+end
+
+@testset "Open boundary ρu and ρv: set! preserves mean when matching boundary values [$FT]" for FT in (Float32, Float64)
+    Oceananigans.defaults.FloatType = FT
+    grid = RectilinearGrid(default_arch; size = (8, 8, 8),
+                           x = (0, 1), y = (0, 1), z = (0, 1),
+                           topology = (Bounded, Bounded, Bounded))
+
+    Uᵢ = 1
+    Vᵢ = 2
+    scheme = PerturbationAdvection(outflow_timescale=1, inflow_timescale=1)
+
+    u_open_bc = OpenBoundaryCondition(Uᵢ; scheme)
+    v_open_bc = OpenBoundaryCondition(Vᵢ; scheme)
+
+    ρu_bcs = FieldBoundaryConditions(west=u_open_bc, east=u_open_bc)
+    ρv_bcs = FieldBoundaryConditions(south=v_open_bc, north=v_open_bc)
+    boundary_conditions = (; ρu=ρu_bcs, ρv=ρv_bcs)
+
+    model = AtmosphereModel(grid; boundary_conditions)
+
+    θ₀ = model.formulation.reference_state.potential_temperature
+    set!(model; θ=θ₀, u=Uᵢ, v=Vᵢ)
+
+    # When u and v are set to match their boundary values, means should match
+    @test mean(model.velocities.u) ≈ Uᵢ
+    @test mean(model.velocities.v) ≈ Vᵢ
 end
 
