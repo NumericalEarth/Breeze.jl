@@ -297,6 +297,7 @@ end
 function atmosphere_model_forcing(user_forcings::NamedTuple, prognostic_fields, model_fields,
                                   grid, coriolis, reference_density,
                                   velocities, formulation, specific_moisture)
+
     user_forcing_names = keys(user_forcings)
 
     if :ρe ∈ keys(prognostic_fields)
