@@ -32,6 +32,11 @@ function AtmosphereModels.materialize_atmosphere_model_forcing(forcings::Tuple, 
 end
 
 # Handle compute_forcing! for MultipleForcings
-AtmosphereModels.compute_forcing!(mf::MultipleForcings) = compute_forcing!(mf.forcings)
+function AtmosphereModels.compute_forcing!(mf::MultipleForcings)
+    for forcing in mf.forcings
+        compute_forcing!(forcing)
+    end
+    return nothing
+end
 
 end
