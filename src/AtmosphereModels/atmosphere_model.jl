@@ -52,7 +52,7 @@ mutable struct AtmosphereModel{Frm, Arc, Tst, Grd, Clk, Thm, Mom, Moi, Mfr, Buy,
     timestepper :: Tst
     closure :: Cls
     closure_fields :: Cfs
-    radiative_transfer :: Rad
+    radiation :: Rad
 end
 
 # Note: Formulation-specific functions (default_formulation, materialize_formulation, etc.)
@@ -63,6 +63,19 @@ $(TYPEDSIGNATURES)
 
 Return an AtmosphereModel that uses the anelastic approximation following
 [Pauluis2008](@citet).
+
+Arguments
+=========
+
+   * The `default_formulation` is `AnelasticFormulation`.
+
+   * The default `advection` scheme is `Centered(order=2)` for both momentum
+     and scalars. If a single `advection` is provided, it is used for both momentum
+     and scalars.
+
+   * Alternatively, specific `momentum_advection` and `scalar_advection`
+     schemes may be provided. `scalar_advection` may be a `NamedTuple` with
+     a different scheme for each respective scalar, identified by name.
 
 Example
 =======
@@ -100,21 +113,20 @@ function AtmosphereModel(grid;
                          coriolis = nothing,
                          boundary_conditions = NamedTuple(),
                          forcing = NamedTuple(),
-                         advection = nothing,
-                         momentum_advection = nothing,
-                         scalar_advection = nothing,
+                         advection = DefaultValue(),
+                         momentum_advection = DefaultValue(),
+                         scalar_advection = DefaultValue(),
                          closure = nothing,
                          microphysics = nothing, # WarmPhaseSaturationAdjustment(),
                          timestepper = :RungeKutta3,
-                         radiation = nothing,
-                         radiative_transfer = radiation)
+                         radiation = nothing)
 
-    if !isnothing(advection)
+    if !(advection isa DefaultValue)
         # TODO: check that tracer+momentum advection were not independently set.
         scalar_advection = momentum_advection = advection
     else
-        isnothing(momentum_advection) && (momentum_advection = Centered(order=2))
-        isnothing(scalar_advection) && (scalar_advection = Centered(order=2))
+        (momentum_advection isa DefaultValue) && (momentum_advection = Centered(order=2))
+        (scalar_advection isa DefaultValue) && (scalar_advection = Centered(order=2))
     end
 
     # Check halos and throw an error if the grid's halo is too small
@@ -209,7 +221,7 @@ function AtmosphereModel(grid;
                             timestepper,
                             closure,
                             closure_fields,
-                            radiative_transfer)
+                            radiation)
 
     update_state!(model)
 
