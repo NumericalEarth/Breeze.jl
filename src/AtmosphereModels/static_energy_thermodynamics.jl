@@ -270,9 +270,10 @@ end
 
     # Convert temperature to static energy
     z = znode(i, j, k, grid, c, c, c)
-    𝒰e = StaticEnergyState(zero(T), q, z, pᵣ)
-    e = with_temperature(𝒰e, T, constants).static_energy
+    𝒰₀ = StaticEnergyState(zero(T), q, z, pᵣ)
+    𝒰₁ = with_temperature(𝒰₀, T, constants)
 
+    e = 𝒰₁.static_energy
     @inbounds specific_energy[i, j, k] = e
     @inbounds energy_density[i, j, k] = ρᵣ * e
 end
