@@ -88,7 +88,19 @@ end
     wˢ = forcing.subsidence_vertical_velocity
     ϕ_avg = forcing.averaged_field
     ρᵣ = forcing.reference_density
-    w_dz_ϕ_avg = ℑzᵃᵃᶜ(i, j, k, grid, w_dz_ϕ, wˢ, ϕ_avg)
+
+    # Use one-sided interpolation at the vertical boundaries to avoid
+    # halving the forcing magnitude near the top or bottom when the
+    # averaged field has zero-gradient halo values.
+    Nz = grid.Nz
+    w_dz_ϕ_avg = if k == 1
+        w_dz_ϕ(i, j, k + 1, grid, wˢ, ϕ_avg)
+    elseif k == Nz
+        w_dz_ϕ(i, j, k, grid, wˢ, ϕ_avg)
+    else
+        ℑzᵃᵃᶜ(i, j, k, grid, w_dz_ϕ, wˢ, ϕ_avg)
+    end
+
     return @inbounds - ρᵣ[i, j, k] * w_dz_ϕ_avg
 end
 
@@ -139,5 +151,6 @@ end
 function AtmosphereModels.compute_forcing!(forcing::SubsidenceForcing)
     compute!(forcing.subsidence_vertical_velocity)
     compute!(forcing.averaged_field)
+    fill_halo_regions!(forcing.averaged_field)
     return nothing
 end
