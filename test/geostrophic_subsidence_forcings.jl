@@ -224,9 +224,10 @@ end
                 ρϕ₁ = interior(ρϕ) |> Array
                 ρᵣ = interior(ρᵣ) |> Array
 
-                # Only test points that don't touch the boundary.
+                @test ρϕ₁[1, 1, 1] - ρϕ₀[1, 1, 1] ≈ ρᵣ[1, 1, 1] * Δϕ / 2 rtol=1e-3
                 @test ρϕ₁[1, 1, 2] - ρϕ₀[1, 1, 2] ≈ ρᵣ[1, 1, 2] * Δϕ rtol=1e-3
                 @test ρϕ₁[1, 1, 3] - ρϕ₀[1, 1, 3] ≈ ρᵣ[1, 1, 3] * Δϕ rtol=1e-3
+                @test ρϕ₁[1, 1, 4] - ρϕ₀[1, 1, 4] ≈ ρᵣ[1, 1, 4] * Δϕ / 2 rtol=1e-3
             end
         end
     end
