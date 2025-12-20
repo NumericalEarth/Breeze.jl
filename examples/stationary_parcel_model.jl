@@ -9,7 +9,7 @@
 # - **Rain evaporation**: Subsaturated rain → vapor
 #
 # Stationary parcel models are classic tools in cloud physics, isolating microphysics
-# from dynamics. See Rogers & Yau (1989) "A Short Course in Cloud Physics".
+# from dynamics; see [rogers1989short](@citet).
 
 using Breeze
 using CloudMicrophysics
@@ -18,8 +18,8 @@ using CairoMakie
 # ## Model setup
 #
 # A Lagrangian parcel is a closed system - rain doesn't "fall out" because
-# the parcel moves with the hydrometeors. We use `ImpenetrableBoundaryCondition()` to
-# ensure moisture is conserved within the parcel.
+# the parcel moves with the hydrometeors. We use an `ImpenetrableBoundaryCondition()`
+# to ensure moisture is conserved within the parcel.
 
 grid = RectilinearGrid(CPU(); size=(1, 1, 1), x=(0, 1), y=(0, 1), z=(0, 1),
                        topology=(Periodic, Periodic, Bounded))
@@ -42,9 +42,9 @@ function run_parcel_simulation(; θ=300, qᵗ=0.020, qᶜˡ=0, qʳ=0, stop_time=
     model = AtmosphereModel(grid; formulation, thermodynamic_constants=constants, microphysics)
     set!(model; θ, qᵗ, qᶜˡ, qʳ)
     simulation = Simulation(model; Δt, stop_time, verbose=false)
-    
+
     t, qᵛ, qᶜˡ, qʳ, T = Float64[], Float64[], Float64[], Float64[], Float64[]
-    
+
     function record_time_series(sim)
         push!(t, time(sim))
         push!(qᵛ, first(sim.model.microphysical_fields.qᵛ))
@@ -52,10 +52,10 @@ function run_parcel_simulation(; θ=300, qᵗ=0.020, qᶜˡ=0, qʳ=0, stop_time=
         push!(qʳ, first(sim.model.microphysical_fields.qʳ))
         push!(T, first(sim.model.temperature))
     end
-    
+
     add_callback!(simulation, record_time_series)
     run!(simulation)
-    
+
     return (; t, qᵛ, qᶜˡ, qʳ, T)
 end
 
@@ -73,8 +73,7 @@ nothing #hide
 
 # ## Visualization
 #
-# We plot the *change* in moisture mass fractions from initial conditions,
-# keeping units consistent (no conversions).
+# We plot the *change* in moisture mass fractions from initial conditions.
 
 fig = Figure(size=(900, 900), fontsize=16)
 
@@ -82,7 +81,7 @@ norm(t) = t ./ τ  # Normalize time by condensation timescale
 
 # Bright, colorblind-friendly colors (Wong palette + vibrant choices)
 c_vapor = :dodgerblue      # Bright blue
-c_cloud = :lime            # Vivid green  
+c_cloud = :lime            # Vivid green
 c_rain = :orangered        # Bright orange-red
 c_temp = :magenta          # Vibrant magenta
 
@@ -101,6 +100,7 @@ function plot_case!(fig, row, case, description; show_xlabel=false, xlim=20)
     lines!(ax_T, norm(case.t), case.T; color=c_temp, linewidth=2.5)
     return ax_q, ax_T
 end
+nothing #hide
 
 # Plot first 4 cases with xlims=(0, 20) for rapid evolution
 ax1, _ = plot_case!(fig, 1, case1, "(a) Supersaturation: vapor → cloud liquid")
@@ -121,8 +121,6 @@ for i in 1:2:9
 end
 
 fig
-
-save("stationary_parcel_model.png", fig)
 
 # ## Discussion
 #
