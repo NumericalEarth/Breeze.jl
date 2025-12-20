@@ -325,9 +325,9 @@ function atmosphere_model_forcing(user_forcings::NamedTuple, prognostic_fields, 
     forcing_context = (; coriolis, reference_density, specific_fields)
 
     materialized = Tuple(
-        name in keys(user_forcings) ?
+        n in keys(user_forcings) ?
             materialize_atmosphere_model_forcing(user_forcings[n], f, n, model_names, forcing_context) :
-            Returns(zero(eltype(field)))
+            Returns(zero(eltype(f)))
             for (n, f) in pairs(forcing_fields)
     )
 
