@@ -214,10 +214,15 @@ end
 #####
 
 """
-    set_thermodynamic_variable!(model::StaticEnergyAnelasticModel, Val(:T), value)
+    $(TYPEDSIGNATURES)
+
 Set the thermodynamic state from temperature `T`.
+
 The temperature is converted to static energy using the relation
-`e = cᵖᵐ T + g z - ℒˡ qˡ - ℒⁱ qⁱ`.
+
+```math
+e = cᵖᵐ T + g z - ℒˡ qˡ - ℒⁱ qⁱ .
+```
 """
 function set_thermodynamic_variable!(model::StaticEnergyAnelasticModel, ::Val{:T}, value)
     T_field = model.temperature # use temperature field as scratch/storage

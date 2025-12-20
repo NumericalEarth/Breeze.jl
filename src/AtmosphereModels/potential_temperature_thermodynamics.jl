@@ -214,11 +214,13 @@ end
 #####
 
 """
-$(TYPEDFIELDS)
+    $(TYPEDSIGNATURES)
 
-Set the thermodynamic state from temperature `T`.
+Set the thermodynamic state from in-situ temperature `T`.
+
 The temperature is converted to liquid-ice potential temperature θˡⁱ using
 the relation between T and θˡⁱ that accounts for the moisture distribution.
+
 For unsaturated air (no condensate), this simplifies to θ = T / Π where
 Π is the Exner function.
 """
