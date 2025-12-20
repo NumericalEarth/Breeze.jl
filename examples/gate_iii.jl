@@ -45,13 +45,14 @@ Random.seed!(123)
 
 Oceananigans.defaults.FloatType = Float32
 
-Nx = Ny = 64
-Nz = 90
+Nx = Ny = 2048
+Nz = 256
+Δx = 100
 
-x = y = (0, 25600)  # 25.6 km × 25.6 km horizontal domain
-z = (0, 18000)       # 18 km vertical extent
+x = y = (0, Nx * Δx)
+z = (0, 27000)       # 18 km vertical extent
 
-grid = RectilinearGrid(CPU(); x, y, z,
+grid = RectilinearGrid(GPU(); x, y, z,
                        size = (Nx, Ny, Nz), halo = (5, 5, 5),
                        topology = (Periodic, Periodic, Bounded))
 
@@ -140,7 +141,7 @@ using .BreezeCloudMicrophysicsExt: ZeroMomentCloudMicrophysics
 
 nucleation = SaturationAdjustment(equilibrium=MixedPhaseEquilibrium())
 microphysics = ZeroMomentCloudMicrophysics(τ_precip=3minutes, qc_0=1e-4; nucleation)
-advection = WENO(order=9)
+advection = WENO(order=5)
 
 model = AtmosphereModel(grid; formulation, coriolis, microphysics,
                         advection, forcing, boundary_conditions)
@@ -189,7 +190,7 @@ set!(model, T=Tᵢ, qᵗ=qᵢ, u=uᵢ, v=0)
 # for 3 hours with adaptive time-stepping. Production runs would extend
 # to 24-48 hours to reach statistical equilibrium.
 
-simulation = Simulation(model; Δt=5, stop_time=3hour)
+simulation = Simulation(model; Δt=1, stop_time=3hour)
 conjure_time_step_wizard!(simulation, cfl=0.7)
 
 # ## Output and progress
@@ -205,6 +206,7 @@ P = precipitation_rate(model, :liquid)
 ∫PdV = Field(Integral(P))
 
 wall_clock = Ref(time_ns())
+previous_time = Ref(time(simulation))
 
 function progress(sim)
     compute!(∫PdV)
@@ -214,16 +216,18 @@ function progress(sim)
     wmax = maximum(abs, model.velocities.w)
     ∫P = CUDA.@allowscalar ∫PdV[]
     elapsed = 1e-9 * (time_ns() - wall_clock[])
+    SDPD = (time(simulation) - previous_time[]) / elapsed
+    previous_time[] = time(simulation)
 
-    msg = @sprintf("Iter: %d, t: %s, Δt: %s, wall time: %s, max|w|: %.2e m/s \n",
+    msg = @sprintf("Iter: %d, t: %s, Δt: %s, wall time: %s, SDPD: %.2f, max|w|: %.2e m/s",
                    iteration(sim), prettytime(sim), prettytime(sim.Δt),
-                   prettytime(elapsed), wmax)
+                   prettytime(elapsed), SDPD, wmax)
 
-    msg *= @sprintf(" --- max(qᵛ): %.2e, max(qˡ): %.2e, max(qⁱ): %.2e, ∫PdV: %.2e kg/kg/s",
-                    qᵛmax, qˡmax, qⁱmax, ∫P)
+    msg *= @sprintf(", max(qᵛ): %.2e, max(qˡ): %.2e, max(qⁱ): %.2e",
+                    qᵛmax, qˡmax, qⁱmax)
 
     @info msg
-
+    wall_clock[] = time_ns()
     return nothing
 end
 
