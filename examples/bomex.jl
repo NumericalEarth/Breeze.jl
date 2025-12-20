@@ -189,7 +189,7 @@ set!(Fρe_field, ρᵣ * cᵖᵈ * Fρe_field)
 
 ρu_forcing = (subsidence, geostrophic.ρu)
 ρv_forcing = (subsidence, geostrophic.ρv)
-ρqᵗ_forcing = (ρqᵗ_drying_forcing, subsidence)
+ρqᵗ_forcing = (subsidence, ρqᵗ_drying_forcing)
 ρθ_forcing = subsidence
 ρe_forcing = ρe_radiation_forcing
 
