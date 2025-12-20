@@ -92,6 +92,16 @@ T₀ = 299.8    # Sea surface temperature (K)
 # Here we can use the values from [vanZanten2011](@citet) verbatim because
 # we use the recommended vertical grid spacing of 40 m.
 
+# ## Sponge layer
+#
+# To prevent spurious wave reflections from the upper boundary, we add a Rayleigh
+# damping sponge layer in the upper 500 m of the domain. The sponge damps vertical
+# velocity toward zero using Oceananigans' `Relaxation` forcing with a `GaussianMask`.
+
+sponge_rate = 1/60  # s⁻¹ - relaxation rate (60 s timescale)
+sponge_mask = GaussianMask{:z}(center=4000, width=500)
+sponge = Relaxation(rate=sponge_rate, mask=sponge_mask)
+
 # ## Large-scale subsidence
 #
 # The RICO protocol includes large-scale subsidence that advects mean profiles downward.
@@ -138,22 +148,21 @@ set!(drying, ρᵣ * drying)
 # applied uniformly throughout the domain [vanZanten2011](@cite).
 # This is the key simplification that allows us to avoid interactive radiation.
 
-cooling = Field{Nothing, Nothing, Center}(grid)
-dTdt_rico = AtmosphericProfilesLibrary.Rico_dTdt(FT)
-cᵖᵈ = constants.dry_air.heat_capacity
-set!(cooling, z -> dTdt_rico(1, z))
-set!(cooling, ρᵣ * cᵖᵈ * cooling)
-ρe_radiation_forcing = Forcing(cooling)
+
+∂t_ρθ_large_scale = Field{Nothing, Nothing, Center}(grid)
+∂t_θ_large_scale = - 2.5 / day # K / day
+set!(∂t_ρθ_large_scale, ρᵣ * ∂t_θ_large_scale)
+ρθ_large_scale_forcing = Forcing(∂t_ρθ_large_scale)
 
 # ## Assembling forcing and boundary conditions
 
 Fρu = (subsidence, geostrophic.ρu)
 Fρv = (subsidence, geostrophic.ρv)
+Fρw = sponge
 Fρqᵗ = (subsidence, ρqᵗ_drying_forcing)
-Fρθ = subsidence
-Fρe = ρe_radiation_forcing
+Fρθ = (subsidence, ρθ_large_scale_forcing)
 
-forcing = (ρu=Fρu, ρv=Fρv, ρqᵗ=Fρqᵗ, ρe=Fρe)
+forcing = (ρu=Fρu, ρv=Fρv, ρw=Fρw, ρqᵗ=Fρqᵗ, ρθ=Fρθ)
 boundary_conditions = (ρθ=ρθ_bcs, ρqᵗ=ρqᵗ_bcs, ρu=ρu_bcs, ρv=ρv_bcs)
 nothing #hide
 
@@ -270,7 +279,7 @@ function progress(sim)
     return nothing
 end
 
-add_callback!(simulation, progress, IterationInterval(100))
+add_callback!(simulation, progress, IterationInterval(1000))
 
 # In addition to velocities, we output horizontal and time-averages of
 # liquid water mass fraction (cloud and rain separately), specific humidity,
