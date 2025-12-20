@@ -214,7 +214,8 @@ end
 #####
 
 """
-    set_thermodynamic_variable!(model, Val(:T), value)
+$(TYPEDFIELDS)
+
 Set the thermodynamic state from temperature `T`.
 The temperature is converted to liquid-ice potential temperature θˡⁱ using
 the relation between T and θˡⁱ that accounts for the moisture distribution.
