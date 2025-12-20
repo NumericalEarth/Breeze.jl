@@ -270,8 +270,9 @@ end
 
     # Convert temperature to potential temperature using the inverse of the T(θ) relation
     pˢᵗ = formulation.reference_state.standard_pressure
-    𝒰θ = LiquidIcePotentialTemperatureState(zero(T), q, pˢᵗ, pᵣ)
-    θ = with_temperature(𝒰θ, T, constants).potential_temperature
+    𝒰₀ = LiquidIcePotentialTemperatureState(zero(T), q, pˢᵗ, pᵣ)
+    𝒰₁ = with_temperature(𝒰₀, T, constants)
+    θ = 𝒰₁.potential_temperature
 
     @inbounds potential_temperature[i, j, k] = θ
     @inbounds potential_temperature_density[i, j, k] = ρᵣ * θ
