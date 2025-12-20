@@ -1,5 +1,6 @@
 using Breeze
 using CloudMicrophysics
+using Oceananigans
 using Test
 
 BreezeCloudMicrophysicsExt = Base.get_extension(Breeze, :BreezeCloudMicrophysicsExt)
