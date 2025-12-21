@@ -94,10 +94,6 @@ test_thermodynamics = (:StaticEnergy, :LiquidIcePotentialTemperature)
             ρqᵗ₀ = model.moisture_density |> Field |> interior |> Array
             ρc₀ = model.tracers.ρc |> Field |> interior |> Array
 
-            ρe₀ = deepcopy(static_energy_density(model))
-            ρqᵗ₀ = deepcopy(model.moisture_density)
-            ρc₀ = deepcopy(model.tracers.ρc)
-
             # Take a time step
             time_step!(model, 1)
 
