@@ -349,13 +349,13 @@ colors = [default_colours[mod1(i, length(default_colours))] for i in 1:Nt]
 for n in 1:Nt
     label = n == 1 ? "initial condition" : "mean over $(Int(times[n-1]/hour))-$(Int(times[n]/hour)) hr"
 
-    # Top row
+    ## Top row
     lines!(axθ, θts[n], color=colors[n], label=label)
     lines!(axqᵛ, qᵛts[n], color=colors[n])
     lines!(axqˡ, qᶜˡts[n], color=colors[n], linestyle=:solid)
     lines!(axqˡ, qʳts[n], color=colors[n], linestyle=:dash)
 
-    # Bottom row
+    ## Bottom row
     lines!(axuv, uts[n], color=colors[n], linestyle=:solid)
     lines!(axuv, vts[n], color=colors[n], linestyle=:dash)
     lines!(axw², w²ts[n], color=colors[n])
