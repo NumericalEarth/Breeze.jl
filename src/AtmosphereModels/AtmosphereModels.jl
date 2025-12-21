@@ -11,6 +11,7 @@ export
     pressure_anomaly,
     total_pressure,
     formulation_density,
+    formulation_pressure,
     static_energy_density,
     static_energy,
     total_energy,

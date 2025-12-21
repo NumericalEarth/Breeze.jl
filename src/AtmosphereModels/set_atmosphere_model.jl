@@ -131,35 +131,35 @@ function Fields.set!(model::AtmosphereModel; time=nothing, enforce_mass_conserva
         elseif name == :ρqᵗ
             set!(model.moisture_density, value)
             ρqᵗ = model.moisture_density
-            ρᵣ = model.formulation.reference_state.density
-            set!(model.specific_moisture, ρqᵗ / ρᵣ)
+            ρ = formulation_density(model.formulation)
+            set!(model.specific_moisture, ρqᵗ / ρ)
 
         elseif name ∈ prognostic_field_names(model.microphysics)
             μ = getproperty(model.microphysical_fields, name)
             set!(μ, value)
 
         elseif name ∈ settable_specific_microphysical_names(model.microphysics)
-            # Convert specific value to density-weighted: ρq = ρᵣ * q
+            # Convert specific value to density-weighted: ρq = ρ * q
             density_name = specific_to_density_weighted(name)
             ρμ = model.microphysical_fields[density_name]
             set!(ρμ, value)
-            ρᵣ = model.formulation.reference_state.density
-            set!(ρμ, ρᵣ * ρμ)
+            ρ = formulation_density(model.formulation)
+            set!(ρμ, ρ * ρμ)
 
         elseif name == :qᵗ
             qᵗ = model.specific_moisture
             set!(qᵗ, value)
-            ρᵣ = model.formulation.reference_state.density
+            ρ = formulation_density(model.formulation)
             ρqᵗ = model.moisture_density
-            set!(ρqᵗ, ρᵣ * qᵗ)                
+            set!(ρqᵗ, ρ * qᵗ)                
 
         elseif name ∈ (:u, :v, :w)
             u = model.velocities[name]
             set!(u, value)
 
-            ρᵣ = model.formulation.reference_state.density
+            ρ = formulation_density(model.formulation)
             ϕ = model.momentum[Symbol(:ρ, name)]
-            value = ρᵣ * u
+            value = ρ * u
             set!(ϕ, value)    
 
         elseif name ∈ settable_thermodynamic_variables

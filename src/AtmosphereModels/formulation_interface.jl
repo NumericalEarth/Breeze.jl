@@ -97,3 +97,13 @@ For anelastic formulations, returns the reference density (time-independent back
 For compressible formulations, returns the prognostic density field.
 """
 function formulation_density end
+
+"""
+    formulation_pressure(formulation)
+
+Return the pressure field appropriate to the dynamical formulation.
+
+For anelastic formulations, returns the reference pressure (hydrostatic background state).
+For compressible formulations, returns the prognostic pressure field.
+"""
+function formulation_pressure end
