@@ -102,25 +102,3 @@ makedocs(
     linkcheck = true,
     draft = false,
 )
-
-"""
-    recursive_find(directory, pattern)
-
-Return list of filepaths within `directory` that contains the `pattern::Regex`.
-"""
-function recursive_find(directory, pattern)
-    mapreduce(vcat, walkdir(directory)) do (root, dirs, filenames)
-        matched_filenames = filter(contains(pattern), filenames)
-        map(filename -> joinpath(root, filename), matched_filenames)
-    end
-end
-
-@info "Cleaning up temporary .jld2 and .nc output created by doctests or literated examples..."
-
-for pattern in [r"\.jld2", r"\.nc"]
-    filenames = recursive_find(@__DIR__, pattern)
-
-    for filename in filenames
-        rm(filename)
-    end
-end
