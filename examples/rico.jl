@@ -98,9 +98,11 @@ T₀ = 299.8    # Sea surface temperature (K)
 # damping sponge layer in the upper 500 m of the domain. The sponge damps vertical
 # velocity toward zero using Oceananigans' `Relaxation` forcing with a `GaussianMask`.
 
-sponge_rate = 1/60  # s⁻¹ - relaxation rate (60 s timescale)
-sponge_mask = GaussianMask{:z}(center=4000, width=500)
+sponge_rate = 1/8  # s⁻¹ - relaxation rate (8 s timescale)
+sponge_mask = GaussianMask{:z}(center=3500, width=500)
 sponge = Relaxation(rate=sponge_rate, mask=sponge_mask)
+
+ρᵣ = formulation.reference_state.density
 
 # ## Large-scale subsidence
 #
@@ -134,12 +136,11 @@ geostrophic = geostrophic_forcings(z -> uᵍ(z), z -> vᵍ(z))
 # A prescribed large-scale moisture tendency represents the effects of advection
 # by the large-scale circulation [vanZanten2011](@cite).
 
-ρᵣ = formulation.reference_state.density
-drying = Field{Nothing, Nothing, Center}(grid)
+∂t_ρqᵗ_large_scale = Field{Nothing, Nothing, Center}(grid)
 dqdt_profile = AtmosphericProfilesLibrary.Rico_dqtdt(FT)
-set!(drying, z -> dqdt_profile(z))
-set!(drying, ρᵣ * drying)
-ρqᵗ_drying_forcing = Forcing(drying)
+set!(∂t_ρqᵗ_large_scale, z -> dqdt_profile(z))
+set!(∂t_ρqᵗ_large_scale, ρᵣ * ∂t_ρqᵗ_large_scale)
+∂t_ρqᵗ_large_scale_forcing = Forcing(∂t_ρqᵗ_large_scale)
 
 # ## Radiative cooling
 #
@@ -147,7 +148,6 @@ set!(drying, ρᵣ * drying)
 # The RICO case uses a constant radiative cooling rate of ``-2.5`` K/day
 # applied uniformly throughout the domain [vanZanten2011](@cite).
 # This is the key simplification that allows us to avoid interactive radiation.
-
 
 ∂t_ρθ_large_scale = Field{Nothing, Nothing, Center}(grid)
 ∂t_θ_large_scale = - 2.5 / day # K / day
@@ -159,7 +159,7 @@ set!(∂t_ρθ_large_scale, ρᵣ * ∂t_θ_large_scale)
 Fρu = (subsidence, geostrophic.ρu)
 Fρv = (subsidence, geostrophic.ρv)
 Fρw = sponge
-Fρqᵗ = (subsidence, ρqᵗ_drying_forcing)
+Fρqᵗ = (subsidence, ∂t_ρqᵗ_large_scale_forcing)
 Fρθ = (subsidence, ρθ_large_scale_forcing)
 
 forcing = (ρu=Fρu, ρv=Fρv, ρw=Fρw, ρqᵗ=Fρqᵗ, ρθ=Fρθ)
@@ -231,7 +231,7 @@ set!(model, θ=θᵢ, qᵗ=qᵢ, u=uᵢ, v=vᵢ)
 # RICO typically requires longer integration times than BOMEX to develop
 # a quasi-steady precipitating state.
 
-simulation = Simulation(model; Δt=10, stop_time=6hour)
+simulation = Simulation(model; Δt=2, stop_time=12hour)
 conjure_time_step_wizard!(simulation, cfl=0.7)
 
 # ## Output and progress
@@ -247,45 +247,41 @@ qʳ = model.microphysical_fields.qʳ    # rain mass fraction (diagnostic)
 ρqʳ = model.microphysical_fields.ρqʳ 
 ρqʳ = model.microphysical_fields.ρqʳ  # rain mass density (prognostic)
 
-## Precipitation rate diagnostic from one-moment microphysics
-P = precipitation_rate(model, :liquid)
-
-## Integrals of precipitation rate
-∫Pdz = Field(Integral(P, dims=3))
-∫PdV = Field(Integral(P))
-
 ## For keeping track of the computational expense
 wall_clock = Ref(time_ns())
 
 function progress(sim)
-    compute!(∫PdV)
     qᶜˡmax = maximum(qᶜˡ)
     qʳmax = maximum(qʳ)
     qʳmin = minimum(qʳ)
-    qᵗmax = maximum(sim.model.specific_moisture)
     wmax = maximum(abs, model.velocities.w)
-    ∫P = CUDA.@allowscalar ∫PdV[]
     elapsed = 1e-9 * (time_ns() - wall_clock[])
 
     msg = @sprintf("Iter: %d, t: %s, Δt: %s, wall time: %s, max|w|: %.2e m/s",
                    iteration(sim), prettytime(sim), prettytime(sim.Δt),
                    prettytime(elapsed), wmax)
 
-    msg *= @sprintf(", max(qᵗ): %.2e, max(qᶜˡ): %.2e, extrema(qʳ): (%.2e, %.2e), ∫PdV: %.2e kg/kg/s",
-                    qᵗmax, qᶜˡmax, qʳmin, qʳmax, ∫P)
+    msg *= @sprintf(", max(qᶜˡ): %.2e, extrema(qʳ): (%.2e, %.2e)",
+                    qᶜˡmax, qʳmin, qʳmax)
 
     @info msg
 
     return nothing
 end
 
-add_callback!(simulation, progress, IterationInterval(1000))
+add_callback!(simulation, progress, IterationInterval(100))
 
 # In addition to velocities, we output horizontal and time-averages of
 # liquid water mass fraction (cloud and rain separately), specific humidity,
 # and liquid-ice potential temperature,
 
-outputs = merge(model.velocities, (; θ, qᶜˡ, qʳ, qᵛ))
+## Precipitation rate diagnostic from one-moment microphysics
+## Integrals of precipitation rate
+P = precipitation_rate(model, :liquid)
+∫Pdz = Field(Integral(P, dims=3))
+
+u, v, w = model.velocities
+outputs = merge(model.velocities, (; θ, qᶜˡ, qʳ, qᵛ, w² = w^2, uw = u*w, vw = v*w))
 averaged_outputs = NamedTuple(name => Average(outputs[name], dims=(1, 2)) for name in keys(outputs))
 
 filename = "rico.jld2"
@@ -301,14 +297,14 @@ simulation.output_writers[:averages] = JLD2Writer(model, averaged_outputs; filen
 w = model.velocities.w
 
 z = Oceananigans.Grids.znodes(grid, Center())
-k_cloud = searchsortedfirst(z, 1500)  # cloud layer height for RICO
-@info "Saving xy slices at z = $(z[k_cloud]) m (k = $k_cloud)"
+k = searchsortedfirst(z, 1500)  # cloud layer height for RICO
+@info "Saving xy slices at z = $(z[k]) m (k = $k)"
 
 slice_outputs = (
     qᶜˡxz = view(qᶜˡ, :, 1, :),
     qʳxz = view(qʳ, :, 1, :),
-    wxy = view(w, :, :, k_cloud),
-    qˡxy = view(qˡ, :, :, k_cloud),
+    wxy = view(w, :, :, k),
+    qˡxy = view(qˡ, :, :, k),
     qʳxy = view(qʳ, :, :, 1),
 )
 
@@ -326,21 +322,29 @@ run!(simulation)
 # We visualize the evolution of horizontally-averaged profiles every hour.
 
 averages_filename = "rico.jld2"
-θt = FieldTimeSeries(averages_filename, "θ")
-qᵛt = FieldTimeSeries(averages_filename, "qᵛ")
-qᶜˡt = FieldTimeSeries(averages_filename, "qᶜˡ")
-qʳt = FieldTimeSeries(averages_filename, "qʳ")
-ut = FieldTimeSeries(averages_filename, "u")
-vt = FieldTimeSeries(averages_filename, "v")
+θts = FieldTimeSeries(averages_filename, "θ")
+qᵛts = FieldTimeSeries(averages_filename, "qᵛ")
+qᶜˡts = FieldTimeSeries(averages_filename, "qᶜˡ")
+qʳts = FieldTimeSeries(averages_filename, "qʳ")
+uts = FieldTimeSeries(averages_filename, "u")
+vts = FieldTimeSeries(averages_filename, "v")
+w²ts = FieldTimeSeries(averages_filename, "w²")
+uwts = FieldTimeSeries(averages_filename, "uw")
+vwts = FieldTimeSeries(averages_filename, "vw")
 
-fig = Figure(size=(900, 800), fontsize=14)
+fig = Figure(size=(1100, 700), fontsize=14)
 
+# Top row: θ, qᵛ, qᶜˡ/qʳ
 axθ = Axis(fig[1, 1], xlabel="θ (K)", ylabel="z (m)")
-axq = Axis(fig[1, 2], xlabel="qᵛ (kg/kg)", ylabel="z (m)")
-axuv = Axis(fig[2, 1], xlabel="u, v (m/s)", ylabel="z (m)")
-axqˡ = Axis(fig[2, 2], xlabel="qᶜˡ, qʳ (kg/kg)", ylabel="z (m)")
+axqᵛ = Axis(fig[1, 2], xlabel="qᵛ (kg/kg)", ylabel="z (m)")
+axqˡ = Axis(fig[1, 3], xlabel="qᶜˡ, qʳ (kg/kg)", ylabel="z (m)")
 
-times = θt.times
+# Bottom row: u/v, w², uw/vw
+axuv = Axis(fig[2, 1], xlabel="u, v (m/s)", ylabel="z (m)")
+axw² = Axis(fig[2, 2], xlabel="w² (m²/s²)", ylabel="z (m)")
+axuw = Axis(fig[2, 3], xlabel="uw, vw (m²/s²)", ylabel="z (m)")
+
+times = θts.times
 Nt = length(times)
 
 default_colours = Makie.wong_colors()
@@ -349,33 +353,41 @@ colors = [default_colours[mod1(i, length(default_colours))] for i in 1:Nt]
 for n in 1:3:Nt
     label = n == 1 ? "initial condition" : "mean over $(Int(times[n-1]/hour))-$(Int(times[n]/hour)) hr"
 
-    lines!(axθ, θt[n], color=colors[n], label=label)
-    lines!(axq, qᵛt[n], color=colors[n])
-    lines!(axuv, ut[n], color=colors[n], linestyle=:solid)
-    lines!(axuv, vt[n], color=colors[n], linestyle=:dash)
-    lines!(axqˡ, qᶜˡt[n], color=colors[n], linestyle=:solid)  # cloud liquid
-    lines!(axqˡ, qʳt[n], color=colors[n], linestyle=:dash)    # rain
+    # Top row
+    lines!(axθ, θts[n], color=colors[n], label=label)
+    lines!(axqᵛ, qᵛts[n], color=colors[n])
+    lines!(axqˡ, qᶜˡts[n], color=colors[n], linestyle=:solid)
+    lines!(axqˡ, qʳts[n], color=colors[n], linestyle=:dash)
+
+    # Bottom row
+    lines!(axuv, uts[n], color=colors[n], linestyle=:solid)
+    lines!(axuv, vts[n], color=colors[n], linestyle=:dash)
+    lines!(axw², w²ts[n], color=colors[n])
+    lines!(axuw, uwts[n], color=colors[n], linestyle=:solid)
+    lines!(axuw, vwts[n], color=colors[n], linestyle=:dash)
 end
 
 # Set axis limits to focus on the boundary layer
-for ax in (axθ, axq, axuv, axqˡ)
+for ax in (axθ, axqᵛ, axqˡ, axuv, axw², axuw)
     ylims!(ax, 0, 3500)
 end
 
 xlims!(axθ, 296, 318)
-xlims!(axq, 0, 18e-3)
+xlims!(axqᵛ, 0, 18e-3)
 xlims!(axuv, -12, 2)
 
 # Add legends and annotations
 axislegend(axθ, position=:rb)
-text!(axuv, -10, 3200, text="solid: u\ndashed: v", fontsize=12)
-text!(axqˡ, 0.5e-4, 3200, text="solid: qᶜˡ\ndashed: qʳ", fontsize=12)
+text!(axuv, -10, 3000, text="solid: u\ndashed: v", fontsize=14)
+text!(axqˡ, 1e-5, 3000, text="solid: qᶜˡ\ndashed: qʳ", fontsize=14)
+text!(axuw, 0.03, 3000, text="solid: uw\ndashed: vw", fontsize=14)
 
 fig[0, :] = Label(fig, "RICO: Horizontally-averaged profiles", fontsize=18, tellwidth=false)
 
 save("rico_profiles.png", fig)
 fig
 
+#=
 # The simulation shows the development of a cloudy, precipitating boundary layer with:
 # - Deeper cloud layer than BOMEX (tops reaching ~2.5-3 km)
 # - Higher moisture content supporting warm-rain processes
@@ -434,7 +446,7 @@ contour!(axqʳxy, qˡxy_n, levels=[qˡcontour], color=(:black, 0.3), linewidth=3
 
 Colorbar(fig[1, 1], hmqᶜˡ, vertical=false, flipaxis=true, label="Cloud liquid qᶜˡ (x, y=0, z)")
 Colorbar(fig[1, 2], hmqʳ, vertical=false, flipaxis=true, label="Rain mass fraction qʳ (x, y=0, z)")
-Colorbar(fig[4, 1], hmw, vertical=false, flipaxis=false, label="Vertical velocity w (x, y, z=$(z[k_cloud])) with qˡ contours")
+Colorbar(fig[4, 1], hmw, vertical=false, flipaxis=false, label="Vertical velocity w (x, y, z=$(z[k])) with qˡ contours")
 Colorbar(fig[4, 2], hmqʳ, vertical=false, flipaxis=false, label="Rain mass fraction qʳ (x, y, z=0)")
 
 fig[0, :] = Label(fig, title, fontsize=18, tellwidth=false)
@@ -451,3 +463,4 @@ end
 nothing #hide
 
 # ![](rico_slices.mp4)
+=#
