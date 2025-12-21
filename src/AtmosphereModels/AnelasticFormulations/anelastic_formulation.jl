@@ -167,5 +167,5 @@ function materialize_momentum_and_velocities(formulation::AnelasticFormulation, 
     w = ZFaceField(grid, boundary_conditions=velocity_bcs.w)
     velocities = (; u, v, w)
 
-    return velocities, momentum
+    return momentum, velocities
 end
