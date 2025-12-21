@@ -390,19 +390,18 @@ fig
 # - Top right: xz-slice of rain mass fraction qʳ
 # - Bottom: xy-slice of vertical velocity w with qˡ contours overlaid
 
+wxy_ts = FieldTimeSeries("rico_slices.jld2", "wxy")
 qᶜˡxz_ts = FieldTimeSeries("rico_slices.jld2", "qᶜˡxz")
 qʳxz_ts = FieldTimeSeries("rico_slices.jld2", "qʳxz")
-wxy_ts = FieldTimeSeries("rico_slices.jld2", "wxy")
 qˡxy_ts = FieldTimeSeries("rico_slices.jld2", "qˡxy")
 qʳxy_ts = FieldTimeSeries("rico_slices.jld2", "qʳxy")
 
-times = qᶜˡxz_ts.times
+times = wxy_ts.times
 Nt = length(times)
 
 qᶜˡlim = maximum(qᶜˡxz_ts) / 4
 qʳlim = maximum(qʳxz_ts) / 4
 wlim = maximum(abs, wxy_ts) / 2
-qˡcontour = maximum(qˡxy_ts) / 8  # threshold for cloud contours
 
 # Now let's plot the slices and animate them.
 
@@ -420,18 +419,22 @@ n = Observable(1)
 qᶜˡxz_n = @lift qᶜˡxz_ts[$n]
 qʳxz_n = @lift qʳxz_ts[$n]
 wxy_n = @lift wxy_ts[$n]
-qˡxy_n = @lift qˡxy_ts[$n]
 qʳxy_n = @lift qʳxy_ts[$n]
+qˡxy_n = @lift qˡxy_ts[$n]
+
+qˡcontour = @lift maximum(qˡxy_ts[$n]) / 8  # threshold for cloud contours
+levels = @lift [$qˡcontour]
+
 title = @lift @sprintf("Clouds, rain, and updrafts in RICO at t = %16.3f hours", times[$n] / hour)
 
 hmqᶜˡ = heatmap!(axqᶜˡxz, qᶜˡxz_n, colormap=:dense, colorrange=(0, qᶜˡlim))
 hmqʳ = heatmap!(axqʳxz, qʳxz_n, colormap=:amp, colorrange=(0, qʳlim))
 
 hmw = heatmap!(axwxy, wxy_n, colormap=:balance, colorrange=(-wlim, wlim))
-contour!(axwxy, qˡxy_n, levels=[qˡcontour], color=(:black, 0.3), linewidth=3)
+contour!(axwxy, qˡxy_n; levels, color=(:black, 0.3), linewidth=3)
 
 hmqʳ = heatmap!(axqʳxy, qʳxy_n, colormap=:amp, colorrange=(0, qʳlim))
-contour!(axqʳxy, qˡxy_n, levels=[qˡcontour], color=(:black, 0.3), linewidth=3)
+contour!(axqʳxy, qˡxy_n; levels, color=(:black, 0.3), linewidth=3)
 
 Colorbar(fig[1, 1], hmqᶜˡ, vertical=false, flipaxis=true, label="Cloud liquid qᶜˡ (x, y=0, z)")
 Colorbar(fig[1, 2], hmqʳ, vertical=false, flipaxis=true, label="Rain mass fraction qʳ (x, y=0, z)")
