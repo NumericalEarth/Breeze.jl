@@ -221,11 +221,12 @@ set!(model, θ=θᵢ, qᵗ=qᵢ, u=uᵢ, v=vᵢ)
 
 # ## Simulation
 #
-# We run the simulation for 12 hours with adaptive time-stepping.
+# We run the simulation for 8 hours with adaptive time-stepping.
 # RICO typically requires longer integration times than BOMEX to develop
-# a quasi-steady precipitating state.
+# a quasi-steady precipitating state, and should be run for 24 hours.
+# We choose 8 hours here to save computational costs in building the examples.
 
-simulation = Simulation(model; Δt=2, stop_time=12hour)
+simulation = Simulation(model; Δt=2, stop_time=8hour)
 conjure_time_step_wizard!(simulation, cfl=0.7)
 
 # ## Output and progress
@@ -280,7 +281,7 @@ averaged_outputs = NamedTuple(name => Average(outputs[name], dims=(1, 2)) for na
 
 filename = "rico.jld2"
 simulation.output_writers[:averages] = JLD2Writer(model, averaged_outputs; filename,
-                                                  schedule = AveragedTimeInterval(4hour),
+                                                  schedule = AveragedTimeInterval(2hour),
                                                   overwrite_existing = true)
 
 # For an animation, we also output slices,
@@ -452,8 +453,8 @@ fig[0, :] = Label(fig, title, fontsize=18, tellwidth=false)
 rowgap!(fig.layout, 2, -60)
 rowgap!(fig.layout, 3, -80)
 
-n₁ = floor(Int, 10hours / output_interval)
-n₂ = ceil(Int, 12hours / output_interval)
+n₁ = floor(Int, 6hours / output_interval)
+n₂ = ceil(Int, 8hours / output_interval)
 
 CairoMakie.record(fig, "rico_slices.mp4", n₁:n₂, framerate=12) do nn
     n[] = nn
