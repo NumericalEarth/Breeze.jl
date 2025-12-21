@@ -216,9 +216,9 @@ end
 """
     $(TYPEDSIGNATURES)
 
-Set the thermodynamic state from temperature `T`.
+Set the thermodynamic state from temperature ``T``.
 
-The temperature is converted to static energy using the relation
+The temperature is converted to static energy ``e`` using the relation:
 
 ```math
 e = cᵖᵐ T + g z - ℒˡ qˡ - ℒⁱ qⁱ .
