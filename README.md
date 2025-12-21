@@ -32,14 +32,24 @@ Right now, `Breeze.AtmosphereModel` is in an early stage of development, and sup
 But we're working feverishly towards a future with bulk, bin and superdroplet microphysics, radiation, and a fully compressible formulation with acoustic substepping (and note, the roadmap and vision for Breeze is still something of a work in progress).
 Check out [the documentation](https://numericalearth.github.io/BreezeDocumentation/dev/) to see what we can do now, and watch this space (or get in touch to discuss!) its crystallization.
 
-### Installing and using Breeze
+### Installation
 
-First [install Julia](https://julialang.org/install/); suggested version 1.12. See [juliaup](https://github.com/JuliaLang/juliaup) README for how to install 1.12 and make that version the default.
+Breeze is a registered Julia package. First [install Julia](https://julialang.org/install/); suggested version 1.12. See [juliaup](https://github.com/JuliaLang/juliaup) README for how to install 1.12 and make that version the default.
 
-Then clone this repository
+Then launch Julia and type
 
-```bash
-git clone git@github.com:NumericalEarth/Breeze.jl.git
+```julia
+julia> using Pkg
+
+julia> Pkg.add("Breeze")
+```
+
+which will install the latest stable version of Breeze that's compatible with your current environment.
+
+You can check which version of Breeze you got via
+
+```julia
+Pkg.status("Oceananigans")
 ```
 
 Open Julia from within the local directory of the repo via:
@@ -53,6 +63,13 @@ The first time, we need to install any dependencies:
 ```julia
 julia> using Pkg; Pkg.instantiate()
 ```
+
+If you want to live on the cutting edge, you can use, e.g.,
+`Pkg.add(url="https://github.com/CliMA/ClimaOcean.jl.git", rev="main")` to install the latest version of
+Breeze from `main` branch. For more information, see the
+[Pkg.jl documentation](https://pkgdocs.julialang.org).
+
+### Using Breeze
 
 Now we are ready to run any of the examples!
 
