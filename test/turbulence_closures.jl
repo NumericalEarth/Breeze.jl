@@ -90,18 +90,22 @@ test_thermodynamics = (:StaticEnergy, :LiquidIcePotentialTemperature)
             set!(model; θ = θᵢ, ρqᵗ = qᵗᵢ, ρc = ρcᵢ, ρu = Ξ, ρv = Ξ, ρw = Ξ)
 
             # Store initial scalar fields (using copy of data to avoid reference issues)
-            ρe₀ = copy(interior(static_energy_density(model)))
-            ρqᵗ₀ = copy(interior(model.moisture_density))
-            ρc₀ = copy(interior(model.tracers.ρc))
+            ρe₀ = interior(static_energy_density(model)) |> Array
+            ρqᵗ₀ = interior(model.moisture_density) |> Array
+            ρc₀ = interior(model.tracers.ρc) |> Array
 
             # Take a time step
             time_step!(model, 1)
 
+            ρe₁ = interior(static_energy_density(model)) |> Array
+            ρqᵗ₁ = interior(model.moisture_density) |> Array
+            ρc₁ = interior(model.tracers.ρc) |> Array
+
             # Scalars should change due to diffusion (not advection since advection=nothing)
             # Use explicit maximum difference check instead of ≈ to handle Float32
-            @test maximum(abs, interior(static_energy_density(model)) .- ρe₀) > 0
-            @test maximum(abs, interior(model.moisture_density) .- ρqᵗ₀) > 0
-            @test maximum(abs, interior(model.tracers.ρc) .- ρc₀) > 0
+            @test maximum(abs, ρe₁ .- ρe₀) > 0
+            @test maximum(abs, ρqᵗ₁ .- ρqᵗ₀) > 0
+            @test maximum(abs, ρc₁ .- ρc₀) > 0
         end
     end
 end
