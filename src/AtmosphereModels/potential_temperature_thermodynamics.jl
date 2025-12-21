@@ -12,7 +12,7 @@ Adapt.adapt_structure(to, thermo::LiquidIcePotentialTemperatureThermodynamics) =
                                        adapt(to, thermo.potential_temperature))
 
 function BoundaryConditions.fill_halo_regions!(thermo::LiquidIcePotentialTemperatureThermodynamics)
-    fill_halo_regions!(thermo.potential_temperature_density)
+    # fill_halo_regions!(thermo.potential_temperature_density)
     fill_halo_regions!(thermo.potential_temperature)
     return nothing
 end
@@ -86,8 +86,7 @@ function compute_thermodynamic_tendency!(model::LiquidIcePotentialTemperatureAne
         model.forcing.ρθ,
         model.forcing.ρe,
         model.advection.ρθ,
-        common_args...,
-        model.temperature)
+        common_args...)
 
     Gρθ = model.timestepper.Gⁿ.ρθ
     launch!(arch, grid, :xyz, compute_potential_temperature_tendency!, Gρθ, grid, ρθ_args)
@@ -108,8 +107,7 @@ end
                                                 closure,
                                                 closure_fields,
                                                 clock,
-                                                model_fields,
-                                                temperature)
+                                                model_fields)
 
     potential_temperature = formulation.thermodynamics.potential_temperature
     ρᵣ = formulation.reference_state.density
@@ -130,7 +128,8 @@ end
              - ∇_dot_Jᶜ(i, j, k, grid, ρᵣ, closure, closure_fields, id, potential_temperature, clock, model_fields, closure_buoyancy)
              + microphysical_tendency(i, j, k, grid, microphysics, Val(:ρθ), ρᵣ, microphysical_fields, 𝒰, constants)
              + ρθ_forcing(i, j, k, grid, clock, model_fields)
-             + ρe_forcing(i, j, k, grid, clock, model_fields) / (cᵖᵐ * Π))
+             + ρe_forcing(i, j, k, grid, clock, model_fields) / (cᵖᵐ * Π)
+    )
 end
 
 #####
