@@ -36,6 +36,7 @@ examples = [
     Example("Convection over prescribed sea surface temperature (SST)", "prescribed_sea_surface_temperature", true),
     Example("Inertia gravity wave", "inertia_gravity_wave", true),
     Example("Single column gray radiation", "single_column_radiation", true),
+    Example("Stationary parcel model", "stationary_parcel_model", true),
 ]
 
 # Filter out long-running example if necessary

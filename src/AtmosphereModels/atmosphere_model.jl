@@ -187,7 +187,8 @@ function AtmosphereModel(grid;
 
     # Include thermodynamic density (ρe or ρθ), ρqᵗ plus user tracers for closure field construction
     closure_thermo_name = thermodynamic_density_name(formulation)
-    scalar_names = tuple(closure_thermo_name, :ρqᵗ, tracer_names...)
+    microphysical_names = prognostic_field_names(microphysics)
+    scalar_names = tuple(closure_thermo_name, :ρqᵗ, microphysical_names..., tracer_names...)
     closure = Oceananigans.Utils.with_tracers(scalar_names, closure)
     closure_fields = build_closure_fields(nothing, grid, clock, scalar_names, boundary_conditions, closure)
 
@@ -296,6 +297,7 @@ end
 function atmosphere_model_forcing(user_forcings::NamedTuple, prognostic_fields, model_fields,
                                   grid, coriolis, reference_density,
                                   velocities, formulation, specific_moisture)
+
     user_forcing_names = keys(user_forcings)
 
     if :ρe ∈ keys(prognostic_fields)

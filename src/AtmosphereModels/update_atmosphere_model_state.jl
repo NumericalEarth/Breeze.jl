@@ -164,7 +164,7 @@ end
 
     # Adjust the thermodynamic state if using a microphysics scheme
     # that invokes saturation adjustment
-    𝒰₁ = maybe_adjust_thermodynamic_state(𝒰₀, microphysics, microphysical_fields, qᵗ, constants)
+    𝒰₁ = maybe_adjust_thermodynamic_state(i, j, k, 𝒰₀, microphysics, ρ, microphysical_fields, qᵗ, constants)
 
     update_microphysical_fields!(microphysical_fields, microphysics,
                                  i, j, k, grid,
@@ -206,7 +206,7 @@ end
 
     # Adjust the thermodynamic state if using a microphysics scheme
     # that invokes saturation adjustment
-    𝒰₁ = maybe_adjust_thermodynamic_state(𝒰₀, microphysics, microphysical_fields, qᵗ, constants)
+    𝒰₁ = maybe_adjust_thermodynamic_state(i, j, k, 𝒰₀, microphysics, ρ, microphysical_fields, qᵗ, constants)
 
     update_microphysical_fields!(microphysical_fields, microphysics,
                                  i, j, k, grid,
@@ -295,8 +295,12 @@ function compute_tendencies!(model::AnelasticModel)
     ##### Tracer density tendencies
     #####
 
-    for (i, name) in enumerate(keys(model.tracers))
-        ρc = model.tracers[name]
+    prognostic_microphysical_fields = NamedTuple(name => model.microphysical_fields[name]
+                                                 for name in prognostic_field_names(model.microphysics))
+
+    scalars = merge(prognostic_microphysical_fields, model.tracers)
+    for (i, name) in enumerate(keys(scalars))
+        ρc = scalars[name]
 
         scalar_args = (
             ρc,

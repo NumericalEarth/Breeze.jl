@@ -130,7 +130,7 @@ end
     return ( - div_ρUc(i, j, k, grid, advection, ρ, velocities, specific_energy)
              + buoyancy_flux
              - ∇_dot_Jᶜ(i, j, k, grid, ρ, closure, closure_fields, id, specific_energy, clock, model_fields, closure_buoyancy)
-             + microphysical_tendency(i, j, k, grid, microphysics, Val(:ρe), microphysical_fields, 𝒰, constants)
+             + microphysical_tendency(i, j, k, grid, microphysics, Val(:ρe), ρ, microphysical_fields, 𝒰, constants)
              + ρe_forcing(i, j, k, grid, clock, model_fields))
 end
 
@@ -196,7 +196,7 @@ end
     pˢᵗ = formulation.reference_state.standard_pressure
     q = compute_moisture_fractions(i, j, k, grid, microphysics, ρᵣ, qᵗ, microphysical_fields)
     𝒰θ₀ = LiquidIcePotentialTemperatureState(θ, q, pˢᵗ, pᵣ)
-    𝒰θ₁ = maybe_adjust_thermodynamic_state(𝒰θ₀, microphysics, microphysical_fields, qᵗ, constants)
+    𝒰θ₁ = maybe_adjust_thermodynamic_state(i, j, k, 𝒰θ₀, microphysics, ρᵣ, microphysical_fields, qᵗ, constants)
     T = temperature(𝒰θ₁, constants)
 
     z = znode(i, j, k, grid, c, c, c)
