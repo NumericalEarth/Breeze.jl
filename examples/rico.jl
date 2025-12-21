@@ -169,7 +169,7 @@ nothing #hide
 # ## Model setup
 #
 # We use one-moment bulk microphysics from CloudMicrophysics with warm-phase saturation adjustment
-# and 9th-order WENO advection. The one-moment scheme tracks prognostic rain mass (`qʳ`) 
+# and 9th-order WENO advection. The one-moment scheme tracks prognostic rain mass (`qʳ`)
 # and includes autoconversion (cloud liquid → rain) and accretion (cloud liquid swept up
 # by falling rain) processes. This is a more physically-realistic representation of
 # warm-rain precipitation than the zero-moment scheme.
@@ -244,7 +244,7 @@ qˡ = model.microphysical_fields.qˡ    # total liquid (cloud + rain)
 qᶜˡ = model.microphysical_fields.qᶜˡ  # cloud liquid only
 qᵛ = model.microphysical_fields.qᵛ
 qʳ = model.microphysical_fields.qʳ    # rain mass fraction (diagnostic)
-ρqʳ = model.microphysical_fields.ρqʳ 
+ρqʳ = model.microphysical_fields.ρqʳ
 ρqʳ = model.microphysical_fields.ρqʳ  # rain mass density (prognostic)
 
 ## For keeping track of the computational expense
@@ -309,8 +309,9 @@ slice_outputs = (
 )
 
 filename = "rico_slices.jld2"
+output_interval = 20seconds
 simulation.output_writers[:slices] = JLD2Writer(model, slice_outputs; filename,
-                                                schedule = TimeInterval(20seconds),
+                                                schedule = TimeInterval(output_interval),
                                                 overwrite_existing = true)
 
 # We're finally ready to run this thing,
@@ -401,19 +402,18 @@ fig
 # - Top right: xz-slice of rain mass fraction qʳ
 # - Bottom: xy-slice of vertical velocity w with qˡ contours overlaid
 
+wxy_ts = FieldTimeSeries("rico_slices.jld2", "wxy")
 qᶜˡxz_ts = FieldTimeSeries("rico_slices.jld2", "qᶜˡxz")
 qʳxz_ts = FieldTimeSeries("rico_slices.jld2", "qʳxz")
-wxy_ts = FieldTimeSeries("rico_slices.jld2", "wxy")
 qˡxy_ts = FieldTimeSeries("rico_slices.jld2", "qˡxy")
 qʳxy_ts = FieldTimeSeries("rico_slices.jld2", "qʳxy")
 
-times = qᶜˡxz_ts.times
+times = wxy_ts.times
 Nt = length(times)
 
 qᶜˡlim = maximum(qᶜˡxz_ts) / 4
 qʳlim = maximum(qʳxz_ts) / 4
 wlim = maximum(abs, wxy_ts) / 2
-qˡcontour = maximum(qˡxy_ts) / 8  # threshold for cloud contours
 
 # Now let's plot the slices and animate them.
 
@@ -431,18 +431,22 @@ n = Observable(1)
 qᶜˡxz_n = @lift qᶜˡxz_ts[$n]
 qʳxz_n = @lift qʳxz_ts[$n]
 wxy_n = @lift wxy_ts[$n]
-qˡxy_n = @lift qˡxy_ts[$n]
 qʳxy_n = @lift qʳxy_ts[$n]
+qˡxy_n = @lift qˡxy_ts[$n]
+
+qˡcontour = @lift maximum(qˡxy_ts[$n]) / 8  # threshold for cloud contours
+levels = @lift [$qˡcontour]
+
 title = @lift @sprintf("Clouds, rain, and updrafts in RICO at t = %16.3f hours", times[$n] / hour)
 
 hmqᶜˡ = heatmap!(axqᶜˡxz, qᶜˡxz_n, colormap=:dense, colorrange=(0, qᶜˡlim))
 hmqʳ = heatmap!(axqʳxz, qʳxz_n, colormap=:amp, colorrange=(0, qʳlim))
 
 hmw = heatmap!(axwxy, wxy_n, colormap=:balance, colorrange=(-wlim, wlim))
-contour!(axwxy, qˡxy_n, levels=[qˡcontour], color=(:black, 0.3), linewidth=3)
+contour!(axwxy, qˡxy_n; levels, color=(:black, 0.3), linewidth=3)
 
 hmqʳ = heatmap!(axqʳxy, qʳxy_n, colormap=:amp, colorrange=(0, qʳlim))
-contour!(axqʳxy, qˡxy_n, levels=[qˡcontour], color=(:black, 0.3), linewidth=3)
+contour!(axqʳxy, qˡxy_n; levels, color=(:black, 0.3), linewidth=3)
 
 Colorbar(fig[1, 1], hmqᶜˡ, vertical=false, flipaxis=true, label="Cloud liquid qᶜˡ (x, y=0, z)")
 Colorbar(fig[1, 2], hmqʳ, vertical=false, flipaxis=true, label="Rain mass fraction qʳ (x, y=0, z)")
@@ -454,8 +458,8 @@ fig[0, :] = Label(fig, title, fontsize=18, tellwidth=false)
 rowgap!(fig.layout, 2, -60)
 rowgap!(fig.layout, 3, -80)
 
-n₁ = floor(Int, 30minutes / 20)
-n₂ = ceil(Int, 3hours / 20)
+n₁ = floor(Int, 30minutes / output_interval)
+n₂ = ceil(Int, 3hours / output_interval)
 
 CairoMakie.record(fig, "rico_slices.mp4", n₁:n₂, framerate=12) do nn
     n[] = nn
