@@ -40,7 +40,7 @@ jobs:
       - name: Set BREEZE_BUILD_ALL_EXAMPLES
         shell: bash
         run: |
-          if [[ ('${{ github.event_name }}' == 'push' && '${{ github.ref }}' == 'refs/heads/main') || ('${{ github.event_name }}' == 'release') || ('${{ github.event_name }}' == 'pull_request' && '${{ github.event.label.name }}' == 'build all examples 🏗️') ]]; then
+          if [[ ('${{ github.event_name }}' == 'push' && ('${{ github.ref }}' == 'refs/heads/main') || '${{ github.ref }}' == refs/tags/v*) || ('${{ github.event_name }}' == 'release') || ('${{ github.event_name }}' == 'pull_request' && '${{ github.event.label.name }}' == 'build all examples 🏗️') ]]; then
               BREEZE_BUILD_ALL_EXAMPLES=true
           else
               BREEZE_BUILD_ALL_EXAMPLES=false
@@ -76,7 +76,7 @@ jobs:
     # * it's a push, but only to main
     # * it's a PR, but not from a fork
     # * on a release
-    if: ${{ (github.event_name == 'push' && github.ref == 'refs/heads/main') || (github.event_name == 'pull_request' && ! github.event.pull_request.head.repo.fork) || (github.event_name == 'release') }}
+    if: ${{ (github.event_name == 'push' && (github.ref == 'refs/heads/main' || startsWith(github.ref, 'refs/tags/v'))) || (github.event_name == 'pull_request' && ! github.event.pull_request.head.repo.fork) || (github.event_name == 'release') }}
     needs: build-docs
     permissions:
       actions: write
