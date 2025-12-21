@@ -94,18 +94,22 @@ test_thermodynamics = (:StaticEnergy, :LiquidIcePotentialTemperature)
             ρqᵗ₀ = interior(model.moisture_density) |> Array
             ρc₀ = interior(model.tracers.ρc) |> Array
 
+            ρe₀ = deepcopy(static_energy_density(model))
+            ρqᵗ₀ = deepcopy(model.moisture_density)
+            ρc₀ = deepcopy(model.tracers.ρc)
+
             # Take a time step
             time_step!(model, 1)
 
-            ρe₁ = interior(static_energy_density(model)) |> Array
-            ρqᵗ₁ = interior(model.moisture_density) |> Array
-            ρc₁ = interior(model.tracers.ρc) |> Array
+            ρe₁ = static_energy_density(model)
+            ρqᵗ₁ = model.moisture_density
+            ρc₁ = model.tracers.ρc
 
             # Scalars should change due to diffusion (not advection since advection=nothing)
             # Use explicit maximum difference check instead of ≈ to handle Float32
-            @test maximum(abs, ρe₁ .- ρe₀) > 0
-            @test maximum(abs, ρqᵗ₁ .- ρqᵗ₀) > 0
-            @test maximum(abs, ρc₁ .- ρc₀) > 0
+            @test maximum(abs, ρe₁ - ρe₀) > 0
+            @test maximum(abs, ρqᵗ₁ - ρqᵗ₀) > 0
+            @test maximum(abs, ρc₁ - ρc₀) > 0
         end
     end
 end
