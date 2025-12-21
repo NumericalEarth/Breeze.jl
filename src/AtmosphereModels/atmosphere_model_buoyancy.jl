@@ -2,6 +2,8 @@ using Oceananigans.TurbulenceClosures: TurbulenceClosures as OceanTurbulenceClos
 using Oceananigans.BuoyancyFormulations: BuoyancyFormulations as OceanBuoyancyFormulations
 using Oceananigans.Operators: ∂zᶜᶜᶠ
 
+import Oceananigans.BuoyancyFormulations: top_buoyancy_flux
+
 """
     AtmosphereModelBuoyancy{F, T}
 
@@ -57,3 +59,12 @@ end
     cᵖᵐ = mixture_heat_capacity(q, constants)
     return @inbounds Rᵐ / Rᵈ * T[i, j, k] * (p₀ / pᵣ)^(Rᵐ / cᵖᵐ)
 end
+
+#####
+##### Top buoyancy flux for Oceananigans closures
+#####
+# For atmospheric models, the "top" of the domain is the free atmosphere,
+# not a surface with buoyancy flux. The actual surface forcing occurs at
+# the bottom boundary. Return zero for top buoyancy flux.
+
+@inline top_buoyancy_flux(i, j, grid, b::AtmosphereModelBuoyancy, args...) = zero(eltype(grid))

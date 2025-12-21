@@ -83,6 +83,21 @@ include("update_atmosphere_model_state.jl")
 include("compute_hydrostatic_pressure.jl")
 
 #####
+##### Single column model mode
+#####
+
+include("single_column_model_mode.jl")
+
+#####
+##### Time-stepping methods
+#####
+# These methods step momentum and scalars separately for proper tracer indexing,
+# which is essential for TKE-based closures (CATKE, TKEDissipation).
+
+include("ab2_step_atmosphere_model.jl")
+include("rk3_step_atmosphere_model.jl")
+
+#####
 ##### Diagnostics submodule
 #####
 

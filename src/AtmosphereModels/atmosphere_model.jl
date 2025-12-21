@@ -10,6 +10,10 @@ using Oceananigans.Models: Models, validate_model_halo, validate_tracer_advectio
 using Oceananigans.Models.HydrostaticFreeSurfaceModels: validate_momentum_advection
 using Oceananigans.TimeSteppers: TimeStepper
 using Oceananigans.TurbulenceClosures: implicit_diffusion_solver, time_discretization, build_closure_fields
+
+using Oceananigans.TurbulenceClosures.TKEBasedVerticalDiffusivities:
+    CATKEVerticalDiffusivity,
+    TKEDissipationVerticalDiffusivity
 using Oceananigans.Utils: launch!, prettytime, prettykeys, with_tracers
 
 struct DefaultValue end
@@ -18,6 +22,34 @@ tupleit(t::Tuple) = t
 tupleit(t) = tuple(t)
 
 validate_tracers(tracers) = throw(ArgumentError("tracers for AtmosphereModel must be a tuple of symbols"))
+
+#####
+##### Closure-required tracers
+#####
+
+"""
+    closure_tracers(closure)
+
+Return a tuple of tracer names required by `closure`.
+TKE-based closures require specific tracers:
+- `CATKEVerticalDiffusivity` requires `:e` (turbulent kinetic energy)
+- `TKEDissipationVerticalDiffusivity` requires `:e` and `:ϵ` (TKE and dissipation rate)
+"""
+closure_tracers(::Nothing) = tuple()
+closure_tracers(closure) = tuple()  # Fallback for closures with no required tracers
+closure_tracers(::CATKEVerticalDiffusivity) = (:e,)
+closure_tracers(::TKEDissipationVerticalDiffusivity) = (:e, :ϵ)
+
+# Handle tuples of closures
+function closure_tracers(closures::Tuple)
+    all_tracers = Symbol[]
+    for closure in closures
+        for tracer in closure_tracers(closure)
+            tracer ∉ all_tracers && push!(all_tracers, tracer)
+        end
+    end
+    return Tuple(all_tracers)
+end
 
 function validate_tracers(tracers::Tuple)
     for name in tracers
@@ -128,8 +160,17 @@ function AtmosphereModel(grid;
     tracers = tupleit(tracers) # supports tracers=:c keyword argument (for example)
     tracer_names = validate_tracers(tracers)
 
+    # Automatically add tracers required by the closure
+    required_closure_tracers = closure_tracers(closure)
+    for tracer in required_closure_tracers
+        if tracer ∉ tracer_names
+            tracer_names = tuple(tracer_names..., tracer)
+        end
+    end
+
     # Next, we form a list of default boundary conditions:
-    prognostic_names = prognostic_field_names(formulation, microphysics, tracers)
+    # Note: use tracer_names which includes closure-required tracers
+    prognostic_names = prognostic_field_names(formulation, microphysics, tracer_names)
     default_boundary_conditions = NamedTuple{prognostic_names}(FieldBoundaryConditions() for _ in prognostic_names)
     boundary_conditions = merge(default_boundary_conditions, boundary_conditions)
 
@@ -137,7 +178,7 @@ function AtmosphereModel(grid;
     surface_pressure = formulation.reference_state.surface_pressure
     boundary_conditions = regularize_atmosphere_model_boundary_conditions(boundary_conditions, grid, surface_pressure, thermodynamic_constants)
 
-    all_names = field_names(formulation, microphysics, tracers)
+    all_names = field_names(formulation, microphysics, tracer_names)
     boundary_conditions = regularize_field_boundary_conditions(boundary_conditions, grid, all_names)
 
     # Materialize the full formulation with thermodynamic fields and pressure
@@ -179,9 +220,7 @@ function AtmosphereModel(grid;
     closure = Oceananigans.Utils.with_tracers(scalar_names, closure)
     closure_fields = build_closure_fields(nothing, grid, clock, scalar_names, boundary_conditions, closure)
 
-    # Generate tracer advection scheme for each tracer
-    # scalar_advection is always a NamedTuple after validate_tracer_advection (either user's partial NamedTuple or empty)
-    # with_tracers fills in missing names using default_generator
+    # Generate tracer advection scheme for each scalar (non-momentum) field
     default_generator(names, initial_tuple) = default_scalar_advection
     scalar_advection_tuple = with_tracers(scalar_names, scalar_advection, default_generator, with_velocities=false)
     momentum_advection_tuple = (; momentum = momentum_advection)
