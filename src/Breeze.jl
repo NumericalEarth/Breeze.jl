@@ -36,10 +36,7 @@ export
     liquid_ice_potential_temperature,
     precipitation_rate,
     surface_precipitation_flux,
-    mean_pressure,
-    pressure_anomaly,
     total_pressure,
-    formulation_density,
 
     # Microphysics
     SaturationAdjustment,
