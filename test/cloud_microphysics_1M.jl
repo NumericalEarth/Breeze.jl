@@ -362,3 +362,70 @@ end
     # Rain should have accumulated substantially
     @test qʳ_final > FT(0.001)  # At least 1 g/kg rain accumulated
 end
+
+@testset "Mixed-phase non-equilibrium time-stepping [$(FT)]" for FT in (Float32, Float64)
+    Oceananigans.defaults.FloatType = FT
+    grid = RectilinearGrid(default_arch; size=(2, 2, 2), x=(0, 100), y=(0, 100), z=(0, 100))
+
+    constants = ThermodynamicConstants()
+    reference_state = ReferenceState(grid, constants, surface_pressure=101325, potential_temperature=260)
+    formulation = AnelasticFormulation(reference_state; thermodynamics=:LiquidIcePotentialTemperature)
+
+    # Mixed-phase non-equilibrium (both cloud liquid and ice are prognostic)
+    cloud_formation = NonEquilibriumCloudFormation(CloudLiquid(FT), CloudIce(FT))
+    microphysics = OneMomentCloudMicrophysics(FT; cloud_formation)
+    model = AtmosphereModel(grid; formulation, microphysics)
+
+    prog_fields = Breeze.AtmosphereModels.prognostic_field_names(microphysics)
+    @test :ρqᶜˡ in prog_fields
+    @test :ρqᶜⁱ in prog_fields
+    @test :ρqʳ in prog_fields
+    @test :ρqˢ in prog_fields
+
+    set!(model; θ=260, qᵗ=0.010)
+    @test haskey(model.microphysical_fields, :ρqᶜⁱ)
+    @test haskey(model.microphysical_fields, :qᶜⁱ)
+
+    time_step!(model, 1)
+    @test model.clock.iteration == 1
+end
+
+@testset "OneMomentCloudMicrophysics show methods [$(FT)]" for FT in (Float32, Float64)
+    Oceananigans.defaults.FloatType = FT
+
+    # Non-equilibrium scheme
+    μ_ne = OneMomentCloudMicrophysics()
+    str_ne = sprint(show, μ_ne)
+    @test contains(str_ne, "BulkMicrophysics")
+    @test contains(str_ne, "cloud_formation")
+
+    # Saturation adjustment scheme
+    cloud_formation = SaturationAdjustment(FT; equilibrium=WarmPhaseEquilibrium())
+    μ_sa = OneMomentCloudMicrophysics(FT; cloud_formation)
+    str_sa = sprint(show, μ_sa)
+    @test contains(str_sa, "BulkMicrophysics")
+end
+
+@testset "microphysical_velocities [$(FT)]" for FT in (Float32, Float64)
+    Oceananigans.defaults.FloatType = FT
+    grid = RectilinearGrid(default_arch; size=(2, 2, 2), x=(0, 100), y=(0, 100), z=(0, 100))
+
+    constants = ThermodynamicConstants()
+    reference_state = ReferenceState(grid, constants, surface_pressure=101325, potential_temperature=300)
+    formulation = AnelasticFormulation(reference_state; thermodynamics=:LiquidIcePotentialTemperature)
+
+    microphysics = OneMomentCloudMicrophysics()
+    model = AtmosphereModel(grid; formulation, microphysics)
+    set!(model; θ=300, qᵗ=0.015, qʳ=0.001)
+
+    # Rain should have sedimentation velocity
+    using .BreezeCloudMicrophysicsExt: microphysical_velocities
+    μ = model.microphysical_fields
+    vel_rain = microphysical_velocities(microphysics, μ, Val(:ρqʳ))
+    @test vel_rain !== nothing
+    @test haskey(vel_rain, :w)
+
+    # Cloud liquid has no sedimentation velocity
+    vel_cloud = microphysical_velocities(microphysics, μ, Val(:ρqᶜˡ))
+    @test vel_cloud === nothing
+end
