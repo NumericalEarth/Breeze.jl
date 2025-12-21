@@ -169,7 +169,7 @@ nothing #hide
 # ## Model setup
 #
 # We use one-moment bulk microphysics from CloudMicrophysics with warm-phase saturation adjustment
-# and 9th-order WENO advection. The one-moment scheme tracks prognostic rain mass (`qʳ`) 
+# and 9th-order WENO advection. The one-moment scheme tracks prognostic rain mass (`qʳ`)
 # and includes autoconversion (cloud liquid → rain) and accretion (cloud liquid swept up
 # by falling rain) processes. This is a more physically-realistic representation of
 # warm-rain precipitation than the zero-moment scheme.
@@ -244,7 +244,7 @@ qˡ = model.microphysical_fields.qˡ    # total liquid (cloud + rain)
 qᶜˡ = model.microphysical_fields.qᶜˡ  # cloud liquid only
 qᵛ = model.microphysical_fields.qᵛ
 qʳ = model.microphysical_fields.qʳ    # rain mass fraction (diagnostic)
-ρqʳ = model.microphysical_fields.ρqʳ 
+ρqʳ = model.microphysical_fields.ρqʳ
 ρqʳ = model.microphysical_fields.ρqʳ  # rain mass density (prognostic)
 
 ## Precipitation rate diagnostic from one-moment microphysics
@@ -313,8 +313,9 @@ slice_outputs = (
 )
 
 filename = "rico_slices.jld2"
+output_interval = 20seconds
 simulation.output_writers[:slices] = JLD2Writer(model, slice_outputs; filename,
-                                                schedule = TimeInterval(20seconds),
+                                                schedule = TimeInterval(output_interval),
                                                 overwrite_existing = true)
 
 # We're finally ready to run this thing,
@@ -442,8 +443,8 @@ fig[0, :] = Label(fig, title, fontsize=18, tellwidth=false)
 rowgap!(fig.layout, 2, -60)
 rowgap!(fig.layout, 3, -80)
 
-n₁ = floor(Int, 30minutes / 20)
-n₂ = ceil(Int, 3hours / 20)
+n₁ = floor(Int, 30minutes / output_interval)
+n₂ = ceil(Int, 3hours / output_interval)
 
 CairoMakie.record(fig, "rico_slices.mp4", n₁:n₂, framerate=12) do nn
     n[] = nn
