@@ -38,7 +38,7 @@ microphysics = OneMomentCloudMicrophysics(precipitation_boundary_condition = Imp
 
 # ## Simulation helper
 
-function run_parcel_simulation(; θ=300, qᵗ=0.020, qᶜˡ=0, qʳ=0, stop_time=20τ, Δt=1)
+function run_parcel_simulation(; θ=300, qᵗ=0.020, qᶜˡ=0, qʳ=0, stop_time=65τ, Δt=1)
     model = AtmosphereModel(grid; formulation, thermodynamic_constants=constants, microphysics)
     set!(model; θ, qᵗ, qᶜˡ, qʳ)
     simulation = Simulation(model; Δt, stop_time, verbose=false)
@@ -79,15 +79,15 @@ fig = Figure(size=(900, 900), fontsize=16)
 
 norm(t) = t ./ τ  # Normalize time by condensation timescale
 
-# Bright, colorblind-friendly colors (Wong palette + vibrant choices)
+# We choose some, bright, colorblind-friendly colors (Wong palette + vibrant choices)
 c_vapor = :dodgerblue      # Bright blue
-c_cloud = :lime            # Vivid green
-c_rain = :orangered        # Bright orange-red
-c_temp = :magenta          # Vibrant magenta
+c_cloud = :limegreen       # Vivid green
+c_rain  = :orangered       # Bright orange-red
+c_temp  = :magenta         # Vibrant magenta
 
 Δ(x) = x .- x[1]  # Deviation from initial value
 
-function plot_case!(fig, row, case, description; show_xlabel=false, xlim=20)
+function plot_case!(fig, row, case, description; show_xlabel=false, xlim=65)
     Label(fig[row, 1:2], description; fontsize=17, halign=:center, padding=(10, 0, 0, 0))
     xlims = (-0.05 * xlim, xlim)
     ax_q = Axis(fig[row+1, 1]; ylabel="Δq", limits=(xlims, nothing),
@@ -102,20 +102,18 @@ function plot_case!(fig, row, case, description; show_xlabel=false, xlim=20)
 end
 nothing #hide
 
-# Plot first 4 cases with xlims=(0, 20) for rapid evolution
+# Plot all 5 cases
+
 ax1, _ = plot_case!(fig, 1, case1, "(a) Supersaturation: vapor → cloud liquid")
 plot_case!(fig, 3, case2, "(b) Strong supersaturation: vapor → cloud liquid → rain")
 plot_case!(fig, 5, case3, "(c) Evaporating rain in a subsaturated environment")
 plot_case!(fig, 7, case4, "(d) Transient autoconversion of rain, then evaporation", show_xlabel=true)
-
-# Plot last case with xlims=(0, 500) for slow autoconversion
 plot_case!(fig, 9, case5, "(e) Sustained autoconversion from cloud liquid → rain";
            show_xlabel=true)
 
-# Legend outside the figure
-Legend(fig[0, 1:2], ax1; orientation=:horizontal, framevisible=false)
+# We add a legend outside the figure and adjust row heights for labels vs axes
+Legend(fig[0, :], ax1; orientation=:horizontal, framevisible=false)
 
-# Adjust row heights for labels vs axes
 for i in 1:2:9
     rowsize!(fig.layout, i, Relative(0.02))
 end
