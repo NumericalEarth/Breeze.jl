@@ -5,13 +5,16 @@
 
 <!-- description -->
 <p align="center">
-  <strong>🌪 Fast and friendly Julia software for atmospheric fluid dynamics on CPUs and GPUs. https://numericalearth.github.io/BreezeDocumentation/dev/</strong>
+  <strong>🌪 Fast and friendly Julia software for atmospheric fluid dynamics on CPUs and GPUs. https://numericalearth.github.io/BreezeDocumentation/stable</strong>
 </p>
 
 <p align="center">
-    <a href="https://numericalearth.github.io/BreezeDocumentation/dev/">
+  <a href="https://numericalearth.github.io/BreezeDocumentation/stable/">
+    <img alt="Documentation" src="https://img.shields.io/badge/documentation-stable-blue?style=flat-square">
+  </a>
+  <a href="https://numericalearth.github.io/BreezeDocumentation/dev/">
     <img alt="Documentation" src="https://img.shields.io/badge/documentation-in%20development-orange?style=flat-square">
-    </a>
+  </a>
     <a href="https://github.com/NumericalEarth/Breeze.jl/discussions">
     <img alt="Ask us anything" src="https://img.shields.io/badge/Ask%20us-anything-1abc9c.svg?style=flat-square">
   </a>
