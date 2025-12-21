@@ -49,19 +49,7 @@ which will install the latest stable version of Breeze that's compatible with yo
 You can check which version of Breeze you got via
 
 ```julia
-Pkg.status("Oceananigans")
-```
-
-Open Julia from within the local directory of the repo via:
-
-```bash
-julia --project
-```
-
-The first time, we need to install any dependencies:
-
-```julia
-julia> using Pkg; Pkg.instantiate()
+Pkg.status("Breeze")
 ```
 
 If you want to live on the cutting edge, you can use, e.g.,
