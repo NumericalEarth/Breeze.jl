@@ -25,7 +25,7 @@ function prioritize_names(names)
     return names
 end
 
-const settable_thermodynamic_variables = (:ρθ, :θ, :ρθˡⁱ, :θˡⁱ, :ρe, :e)
+const settable_thermodynamic_variables = (:ρθ, :θ, :ρθˡⁱ, :θˡⁱ, :ρe, :e, :T)
 function set_thermodynamic_variable! end
 
 """
@@ -44,6 +44,7 @@ Variables are set via keyword arguments. Supported variables include:
 - Prognostic user-specified tracer fields
 
 **Settable thermodynamic variables**:
+- `T`: in-situ temperature
 - `θ`: potential temperature
 - `θˡⁱ`: liquid-ice potential temperature
 - `e`: static energy
