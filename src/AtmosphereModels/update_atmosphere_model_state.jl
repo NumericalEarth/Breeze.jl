@@ -20,7 +20,7 @@ function TimeSteppers.update_state!(model::AnelasticModel, callbacks=[]; compute
 
     fill_halo_regions!(prognostic_fields(model), model.clock, fields(model), async=true)
     compute_auxiliary_variables!(model)
-    update_radiation!(model.radiative_transfer, model)
+    update_radiation!(model.radiation, model)
     compute_forcings!(model)
     compute_tendencies && compute_tendencies!(model)
     tracer_specific_to_density!(model) # convert specific tracer distribution to tracer density

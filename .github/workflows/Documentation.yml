@@ -5,7 +5,7 @@ on:
     branches:
       - main
     tags: "*"
-    paths:
+    paths: &paths
       - ".github/workflows/Documentation.yml"
       - "docs/**"
       - "examples/**"
@@ -13,13 +13,8 @@ on:
       - "Project.toml"
       - "CHANGELOG.md"
   pull_request:
-    paths:
-      - ".github/workflows/Documentation.yml"
-      - "docs/**"
-      - "examples/**"
-      - "src/**"
-      - "Project.toml"
-      - "CHANGELOG.md"
+    types: [labeled, unlabeled, opened, reopened, edited, synchronize]
+    paths: *paths
   release:
 
 concurrency:
@@ -35,13 +30,22 @@ jobs:
       contents: write
       pull-requests: read
       statuses: write
-    runs-on: aws-linux-nvidia-gpu-t4
+    runs-on: aws-linux-nvidia-gpu-l4
     timeout-minutes: 60
     steps:
       - uses: actions/checkout@v6
       - uses: julia-actions/setup-julia@v2
         with:
           version: "1.12.2"
+      - name: Set BREEZE_BUILD_ALL_EXAMPLES
+        shell: bash
+        run: |
+          if [[ ('${{ github.event_name }}' == 'push' && '${{ github.ref }}' == 'refs/heads/main') || ('${{ github.event_name }}' == 'release') || ('${{ github.event_name }}' == 'pull_request' && '${{ github.event.label.name }}' == 'build all examples 🏗️') ]]; then
+              BREEZE_BUILD_ALL_EXAMPLES=true
+          else
+              BREEZE_BUILD_ALL_EXAMPLES=false
+          fi
+          echo "BREEZE_BUILD_ALL_EXAMPLES=${BREEZE_BUILD_ALL_EXAMPLES}" >> "${GITHUB_ENV}"
       - name: Instantiate docs environment
         shell: julia --color=yes --project=docs {0}
         run: |
