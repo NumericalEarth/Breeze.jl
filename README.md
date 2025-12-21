@@ -53,7 +53,7 @@ Pkg.status("Breeze")
 ```
 
 If you want to live on the cutting edge, you can use, e.g.,
-`Pkg.add(url="https://github.com/CliMA/ClimaOcean.jl.git", rev="main")` to install the latest version of
+`Pkg.add(; url="https://github.com/NumericalEarth/Breeze.jl.git", rev="main")` to install the latest version of
 Breeze from `main` branch. For more information, see the
 [Pkg.jl documentation](https://pkgdocs.julialang.org).
 
