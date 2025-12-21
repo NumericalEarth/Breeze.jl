@@ -5,13 +5,16 @@
 
 <!-- description -->
 <p align="center">
-  <strong>🌪 Fast and friendly Julia software for atmospheric fluid dynamics on CPUs and GPUs. https://numericalearth.github.io/BreezeDocumentation/dev/</strong>
+  <strong>🌪 Fast and friendly Julia software for atmospheric fluid dynamics on CPUs and GPUs. https://numericalearth.github.io/BreezeDocumentation/stable</strong>
 </p>
 
 <p align="center">
-    <a href="https://numericalearth.github.io/BreezeDocumentation/dev/">
+  <a href="https://numericalearth.github.io/BreezeDocumentation/stable/">
+    <img alt="Documentation" src="https://img.shields.io/badge/documentation-stable-blue?style=flat-square">
+  </a>
+  <a href="https://numericalearth.github.io/BreezeDocumentation/dev/">
     <img alt="Documentation" src="https://img.shields.io/badge/documentation-in%20development-orange?style=flat-square">
-    </a>
+  </a>
     <a href="https://github.com/NumericalEarth/Breeze.jl/discussions">
     <img alt="Ask us anything" src="https://img.shields.io/badge/Ask%20us-anything-1abc9c.svg?style=flat-square">
   </a>
@@ -30,7 +33,7 @@ Breeze is a library for simulating atmospheric flows, convection, clouds, weathe
 Much of Breeze's power flows from [Oceananigans](https://github.com/CliMA/Oceananigans.jl), which provides a user interface, grids, fields, solvers, advection schemes, Lagrangian particles, physics, and more.
 Right now, `Breeze.AtmosphereModel` is in an early stage of development, and supports simple simulations that use the anelastic formulation of the Euler equations on `RectilinearGrid`.
 But we're working feverishly towards a future with bulk, bin and superdroplet microphysics, radiation, and a fully compressible formulation with acoustic substepping (and note, the roadmap and vision for Breeze is still something of a work in progress).
-Check out [the documentation](https://numericalearth.github.io/BreezeDocumentation/dev/) to see what we can do now, and watch this space (or get in touch to discuss!) its crystallization.
+Check out [the documentation](https://numericalearth.github.io/BreezeDocumentation/stable/) to see what we can do now, and watch this space (or get in touch to [discuss](https://github.com/NumericalEarth/Breeze.jl/discussions)!) its crystallization.
 
 ### Installation
 
