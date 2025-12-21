@@ -13,13 +13,13 @@ using Adapt: Adapt
 
 struct SubsidenceForcing{W, R, A}
     subsidence_vertical_velocity :: W
-    reference_density :: R
+    density :: R
     averaged_field :: A
 end
 
 Adapt.adapt_structure(to, sf::SubsidenceForcing) =
     SubsidenceForcing(Adapt.adapt(to, sf.subsidence_vertical_velocity),
-                      Adapt.adapt(to, sf.reference_density),
+                      Adapt.adapt(to, sf.density),
                       Adapt.adapt(to, sf.averaged_field))
 
 """
@@ -95,9 +95,9 @@ end
  function (forcing::SubsidenceForcing)(i, j, k, grid, clock, fields)
     wˢ = forcing.subsidence_vertical_velocity
     ϕ_avg = forcing.averaged_field
-    ρᵣ = @inbounds forcing.reference_density[1, 1, k]
+    ρ = @inbounds forcing.density[1, 1, k]
     w_dz_ϕ_avg = ℑzbᵃᵃᶜ(i, j, k, grid, w_dz_ϕᵃᵃᶠ, wˢ, ϕ_avg)
-    return - ρᵣ * w_dz_ϕ_avg
+    return - ρ * w_dz_ϕ_avg
 end
 
 #####
@@ -133,8 +133,8 @@ function AtmosphereModels.materialize_atmosphere_model_forcing(forcing::Subsiden
     end
 
     averaged_field = Average(specific_field, dims=(1, 2)) |> Field
-    ρᵣ = context.reference_density
-    return SubsidenceForcing(wˢ, ρᵣ, averaged_field)
+    ρ = context.density
+    return SubsidenceForcing(wˢ, ρ, averaged_field)
 end
 
 #####

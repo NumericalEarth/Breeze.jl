@@ -136,9 +136,9 @@ function AtmosphereModels.materialize_atmosphere_model_forcing(forcing::Geostrop
         set!(uᵍ, forcing_uᵍ)
     end
 
-    # Compute the geostrophic momentum density field ρᵣ * vᵍ
-    ρᵣ = context.reference_density
-    set!(uᵍ, ρᵣ * uᵍ)
+    # Compute the geostrophic momentum density field ρ * vᵍ
+    ρ = context.density
+    set!(uᵍ, ρ * uᵍ)
 
     FT = eltype(grid)
     f = context.coriolis.f |> FT

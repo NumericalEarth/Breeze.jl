@@ -40,8 +40,8 @@ function compute_forcings!(model)
     return nothing
 end
 
-tracer_density_to_specific!(model) = tracer_density_to_specific!(model.tracers, model.formulation.reference_state.density)
-tracer_specific_to_density!(model) = tracer_specific_to_density!(model.tracers, model.formulation.reference_state.density)
+tracer_density_to_specific!(model) = tracer_density_to_specific!(model.tracers, formulation_density(model.formulation))
+tracer_specific_to_density!(model) = tracer_specific_to_density!(model.tracers, formulation_density(model.formulation))
 
 function tracer_density_to_specific!(tracers, density)
     # TODO: do all tracers a single kernel
@@ -122,13 +122,15 @@ end
 @kernel function _compute_velocities!(velocities, grid, formulation, momentum)
     i, j, k = @index(Global, NTuple)
 
+    ρ = formulation_density(formulation)
+
     @inbounds begin
         ρu = momentum.ρu[i, j, k]
         ρv = momentum.ρv[i, j, k]
         ρw = momentum.ρw[i, j, k]
 
-        ρᶜ = formulation.reference_state.density[i, j, k]
-        ρᶠ = ℑzᵃᵃᶠ(i, j, k, grid, formulation.reference_state.density)
+        ρᶜ = ρ[i, j, k]
+        ρᶠ = ℑzᵃᵃᶠ(i, j, k, grid, ρ)
 
         velocities.u[i, j, k] = ρu / ρᶜ
         velocities.v[i, j, k] = ρv / ρᶜ
@@ -148,8 +150,9 @@ end
 
     compute_auxiliary_thermodynamic_variables!(formulation, i, j, k, grid)
 
+    ρ_field = formulation_density(formulation)
     @inbounds begin
-        ρ = formulation.reference_state.density[i, j, k]
+        ρ = ρ_field[i, j, k]
         ρqᵗ = moisture_density[i, j, k]
         qᵗ = ρqᵗ / ρ
         specific_moisture[i, j, k] = qᵗ
@@ -186,10 +189,11 @@ end
                                                                      moisture_density)
     i, j, k = @index(Global, NTuple)
 
+    ρ_field = formulation_density(formulation)
     @inbounds begin
         ρθ = liquid_ice_potential_temperature_density[i, j, k]
         ρqᵗ = moisture_density[i, j, k]
-        ρ = formulation.reference_state.density[i, j, k]
+        ρ = ρ_field[i, j, k]
 
         θ = ρθ / ρ
         qᵗ = ρqᵗ / ρ
@@ -230,7 +234,7 @@ function compute_tendencies!(model::AnelasticModel)
     #####
 
     momentum_args = (
-        model.formulation.reference_state.density,
+        formulation_density(model.formulation),
         model.advection.momentum,
         model.velocities,
         model.closure,

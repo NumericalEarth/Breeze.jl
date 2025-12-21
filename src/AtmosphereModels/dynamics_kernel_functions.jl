@@ -136,7 +136,7 @@ end
 
     Uᵖ = microphysical_velocities(microphysics, microphysical_fields, name)
     Uᵗ = sum_of_velocities(velocities, Uᵖ)
-    ρ = formulation.reference_state.density
+    ρ = formulation_density(formulation)
     closure_buoyancy = AtmosphereModelBuoyancy(formulation, constants)
 
     𝒰 = diagnose_thermodynamic_state(i, j, k, grid,
