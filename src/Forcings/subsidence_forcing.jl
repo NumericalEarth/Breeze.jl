@@ -118,10 +118,7 @@ function AtmosphereModels.materialize_atmosphere_model_forcing(forcing::Subsiden
     if forcing.subsidence_vertical_velocity isa AbstractField
         wˢ = forcing.subsidence_vertical_velocity
     else
-        ibc = ImpenetrableBoundaryCondition()
-        loc = (nothing, nothing, Face())
-        bcs = FieldBoundaryConditions(grid, loc, bottom=ibc, top=ibc)
-        wˢ = Field{Nothing, Nothing, Face}(grid, boundary_conditions=bcs)
+        wˢ = Field{Nothing, Nothing, Face}(grid)
         set!(wˢ, forcing.subsidence_vertical_velocity)
         fill_halo_regions!(wˢ)
     end
