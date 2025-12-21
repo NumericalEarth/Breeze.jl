@@ -168,28 +168,23 @@ nothing #hide
 
 # ## Model setup
 #
-# We use one-moment bulk microphysics from CloudMicrophysics with warm-phase saturation adjustment
-# and 9th-order WENO advection. The one-moment scheme tracks prognostic rain mass (`qʳ`)
-# and includes autoconversion (cloud liquid → rain) and accretion (cloud liquid swept up
-# by falling rain) processes. This is a more physically-realistic representation of
-# warm-rain precipitation than the zero-moment scheme.
+# We use one-moment bulk microphysics from [CloudMicrophysics](https://clima.github.io/CloudMicrophysics.jl/dev/)
+# with cloud formatiom modeled with warm-phase saturationa adjustment and 5th-order WENO advection.
+# The one-moment scheme prognoses rain density `ρqʳ` includes autoconversion (cloud liquid → rain)
+# and accretion (cloud liquid swept up by falling rain) processes. This is a more physically-realistic
+# representation of warm-rain precipitation than the zero-moment scheme.
 
 BreezeCloudMicrophysicsExt = Base.get_extension(Breeze, :BreezeCloudMicrophysicsExt)
 using .BreezeCloudMicrophysicsExt: OneMomentCloudMicrophysics
 
-cloud_formation = SaturationAdjustment(FT; equilibrium=WarmPhaseEquilibrium())
+cloud_formation = SaturationAdjustment(equilibrium=WarmPhaseEquilibrium())
 microphysics = OneMomentCloudMicrophysics(; cloud_formation)
 
-# Default non-equilibrium cloud formation
-# cloud_liquid = CloudMicrophysics.Parameters.CloudLiquid{Float32}(τ_relax=2, ρw=1000, r_eff=1.4e-5)
-# cloud_formation = NonEquilibriumCloudFormation(cloud_liquid)
-# microphysics = OneMomentCloudMicrophysics(; cloud_formation)
-
-ninth_order_weno = WENO(order=5)
+weno = WENO(order=5)
 bounds_preserving_weno = WENO(order=5, bounds=(0, 1))
 
-momentum_advection = ninth_order_weno
-scalar_advection = (ρθ = ninth_order_weno,
+momentum_advection = weno
+scalar_advection = (ρθ = weno,
                     ρqᵗ = bounds_preserving_weno,
                     ρqᶜˡ = bounds_preserving_weno,
                     ρqʳ = bounds_preserving_weno)
@@ -286,7 +281,7 @@ averaged_outputs = NamedTuple(name => Average(outputs[name], dims=(1, 2)) for na
 
 filename = "rico.jld2"
 simulation.output_writers[:averages] = JLD2Writer(model, averaged_outputs; filename,
-                                                  schedule = AveragedTimeInterval(1hour),
+                                                  schedule = AveragedTimeInterval(4hour),
                                                   overwrite_existing = true)
 
 # For an animation, we also output slices,
@@ -351,7 +346,7 @@ Nt = length(times)
 default_colours = Makie.wong_colors()
 colors = [default_colours[mod1(i, length(default_colours))] for i in 1:Nt]
 
-for n in 1:3:Nt
+for n in 1:Nt
     label = n == 1 ? "initial condition" : "mean over $(Int(times[n-1]/hour))-$(Int(times[n]/hour)) hr"
 
     # Top row
@@ -370,18 +365,19 @@ end
 
 # Set axis limits to focus on the boundary layer
 for ax in (axθ, axqᵛ, axqˡ, axuv, axw², axuw)
-    ylims!(ax, 0, 3500)
+    ylims!(ax, -100, 3500)
 end
 
 xlims!(axθ, 296, 318)
-xlims!(axqᵛ, 0, 18e-3)
+xlims!(axqᵛ, 0, 1.8e-2)
+xlims!(axqˡ, -2e-6, 1.2e-5)
 xlims!(axuv, -12, 2)
 
 # Add legends and annotations
 axislegend(axθ, position=:rb)
-text!(axuv, -10, 3000, text="solid: u\ndashed: v", fontsize=14)
-text!(axqˡ, 1e-5, 3000, text="solid: qᶜˡ\ndashed: qʳ", fontsize=14)
-text!(axuw, 0.03, 3000, text="solid: uw\ndashed: vw", fontsize=14)
+text!(axuv, -10, 2500, text="solid: u\ndashed: v", fontsize=14)
+text!(axqˡ, 1e-6, 2500, text="solid: qᶜˡ\ndashed: qʳ", fontsize=14)
+text!(axuw, 0.01, 2500, text="solid: uw\ndashed: vw", fontsize=14)
 
 fig[0, :] = Label(fig, "RICO: Horizontally-averaged profiles", fontsize=18, tellwidth=false)
 
@@ -457,8 +453,8 @@ fig[0, :] = Label(fig, title, fontsize=18, tellwidth=false)
 rowgap!(fig.layout, 2, -60)
 rowgap!(fig.layout, 3, -80)
 
-n₁ = floor(Int, 30minutes / output_interval)
-n₂ = ceil(Int, 3hours / output_interval)
+n₁ = floor(Int, 10hours / output_interval)
+n₂ = ceil(Int, 12hours / output_interval)
 
 CairoMakie.record(fig, "rico_slices.mp4", n₁:n₂, framerate=12) do nn
     n[] = nn
