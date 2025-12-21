@@ -155,7 +155,7 @@ function AtmosphereModel(grid;
     # Materialize the full formulation with thermodynamic fields and pressure
     formulation = materialize_formulation(formulation, grid, boundary_conditions)
 
-    velocities, momentum = materialize_momentum_and_velocities(formulation, grid, boundary_conditions)
+    momentum, velocities = materialize_momentum_and_velocities(formulation, grid, boundary_conditions)
     microphysical_fields = materialize_microphysical_fields(microphysics, grid, boundary_conditions)
 
     tracers = NamedTuple(name => CenterField(grid, boundary_conditions=boundary_conditions[name]) for name in tracer_names)
