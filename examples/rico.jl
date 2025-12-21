@@ -388,7 +388,6 @@ fig[0, :] = Label(fig, "RICO: Horizontally-averaged profiles", fontsize=18, tell
 save("rico_profiles.png", fig)
 fig
 
-#=
 # The simulation shows the development of a cloudy, precipitating boundary layer with:
 # - Deeper cloud layer than BOMEX (tops reaching ~2.5-3 km)
 # - Higher moisture content supporting warm-rain processes
@@ -467,4 +466,3 @@ end
 nothing #hide
 
 # ![](rico_slices.mp4)
-=#
