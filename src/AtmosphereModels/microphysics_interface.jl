@@ -18,8 +18,11 @@ just return the `state` unmodified. In contrast to `adjust_thermodynamic_state`,
 ingests the entire `microphysics` formulation and the `microphysical_fields`.
 This is needed because some microphysics schemes apply saturation adjustment to a
 subset of the thermodynamic state (for example, omitting precipitating species).
+
+Grid indices `(i, j, k)` are provided to allow access to prognostic microphysical fields
+at the current grid point. The reference density `ρᵣ` is passed to avoid recomputing it.
 """
-@inline maybe_adjust_thermodynamic_state(state, ::Nothing, microphysical_fields, qᵗ, thermo) = state
+@inline maybe_adjust_thermodynamic_state(i, j, k, state, ::Nothing, ρᵣ, microphysical_fields, qᵗ, thermo) = state
 
 """
 $(TYPEDSIGNATURES)
@@ -61,11 +64,13 @@ This may be changed in the future.
 """
 $(TYPEDSIGNATURES)
 
-Return the microphysical velocities associated with `microphysics` and `name`.
+Return the microphysical velocities associated with `microphysics`, `microphysical_fields`, and tracer `name`.
 
 Must be either `nothing`, or a NamedTuple with three components `u, v, w`.
+The velocities are added to the bulk flow velocities for advecting the tracer.
+For example, the terminal velocity of falling rain.
 """
-@inline microphysical_velocities(microphysics::Nothing, name) = nothing
+@inline microphysical_velocities(microphysics::Nothing, microphysical_fields, name) = nothing
 
 """
 $(TYPEDSIGNATURES)
@@ -74,7 +79,7 @@ Return the tendency of the microphysical field `name` associated with `microphys
 
 TODO: add the function signature when it is stable
 """
-@inline microphysical_tendency(i, j, k, grid, microphysics::Nothing, name, args...) = zero(grid)
+@inline microphysical_tendency(i, j, k, grid, microphysics::Nothing, name, ρ, μ, 𝒰, constants) = zero(grid)
 
 """
 $(TYPEDSIGNATURES)
@@ -114,4 +119,29 @@ precipitation_rate(model, phase::Symbol=:liquid) = precipitation_rate(model, mod
 # We implmement this as a fallback for convenience
 # TODO: support reductions over ZeroField or the like, so we can swap
 # non-precipitating microphysics schemes with precipitating ones
-precipitation_rate(model, microphysics, phase) = CenterField(model.grid) 
+precipitation_rate(model, microphysics, phase) = CenterField(model.grid)
+
+#####
+##### Surface precipitation flux diagnostic
+#####
+
+"""
+    surface_precipitation_flux(model)
+
+Return a 2D `Field` representing the flux of precipitating moisture at the bottom boundary.
+
+The surface precipitation flux is `wʳ * ρqʳ` at the bottom face (k=1), representing
+the rate at which rain mass leaves the domain through the bottom boundary.
+
+Units: kg/m²/s (positive = downward flux out of domain)
+
+Arguments:
+- `model`: An `AtmosphereModel` with a microphysics scheme
+
+Returns a 2D `Field` that can be computed and visualized.
+Specific microphysics schemes must extend this function.
+"""
+surface_precipitation_flux(model) = surface_precipitation_flux(model, model.microphysics)
+
+# Default: zero flux for Nothing microphysics
+surface_precipitation_flux(model, ::Nothing) = Field{Center, Center, Nothing}(model.grid) 
