@@ -33,7 +33,7 @@ Breeze is a library for simulating atmospheric flows, convection, clouds, weathe
 Much of Breeze's power flows from [Oceananigans](https://github.com/CliMA/Oceananigans.jl), which provides a user interface, grids, fields, solvers, advection schemes, Lagrangian particles, physics, and more.
 Right now, `Breeze.AtmosphereModel` is in an early stage of development, and supports simple simulations that use the anelastic formulation of the Euler equations on `RectilinearGrid`.
 But we're working feverishly towards a future with bulk, bin and superdroplet microphysics, radiation, and a fully compressible formulation with acoustic substepping (and note, the roadmap and vision for Breeze is still something of a work in progress).
-Check out [the documentation](https://numericalearth.github.io/BreezeDocumentation/dev/) to see what we can do now, and watch this space (or get in touch to discuss!) its crystallization.
+Check out [the documentation](https://numericalearth.github.io/BreezeDocumentation/stable/) to see what we can do now, and watch this space (or get in touch to [discuss](https://github.com/NumericalEarth/Breeze.jl/discussions)!) its crystallization.
 
 ### Installation
 
