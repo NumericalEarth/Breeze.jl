@@ -1,9 +1,9 @@
 using ..AtmosphereModels: AtmosphereModels
 using Oceananigans: Average, Field, set!, compute!
-using Oceananigans.BoundaryConditions: FieldBoundaryConditions, ImpenetrableBoundaryCondition, fill_halo_regions!
+using Oceananigans.BoundaryConditions: fill_halo_regions!
 using Oceananigans.Fields: AbstractField
 using Oceananigans.Grids: Center, Face
-using Oceananigans.Operators: ∂zᶜᶜᶠ, ℑzᵃᵃᶜ
+using Oceananigans.Operators: ∂zᶜᶜᶠ
 using Oceananigans.Utils: prettysummary
 using Adapt: Adapt
 
