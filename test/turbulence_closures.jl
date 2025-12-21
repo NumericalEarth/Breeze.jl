@@ -34,7 +34,7 @@ test_thermodynamics = (:StaticEnergy, :LiquidIcePotentialTemperature)
 
         @testset "Implicit diffusion solver with ScalarDiffusivity [$thermodynamics, $(FT), $(typeof(disc))]" for disc in discretizations
             closure = ScalarDiffusivity(disc, ν=1, κ=1)
-            model = @test_logs match_mode=:any AtmosphereModel(grid; closure, tracers=:ρc)
+            model = @test_logs match_mode=:any AtmosphereModel(grid; formulation, closure, tracers=:ρc)
             # Set uniform specific energy for no diffusion
             θ₀ = model.formulation.reference_state.potential_temperature
             cᵖᵈ = model.thermodynamic_constants.dry_air.heat_capacity
@@ -48,7 +48,7 @@ test_thermodynamics = (:StaticEnergy, :LiquidIcePotentialTemperature)
 
         @testset "Closure flux affects momentum tendency [$thermodynamics, $(FT)]" begin
             closure = ScalarDiffusivity(ν=1e4)
-            model = AtmosphereModel(grid; advection=nothing, closure)
+            model = AtmosphereModel(grid; formulation, advection=nothing, closure)
             set!(model; ρu = (x, y, z) -> exp((z - 50)^2 / (2 * 20^2)))
             Breeze.AtmosphereModels.compute_tendencies!(model)
             Gρu = model.timestepper.Gⁿ.ρu
@@ -56,7 +56,7 @@ test_thermodynamics = (:StaticEnergy, :LiquidIcePotentialTemperature)
         end
 
         @testset "SmagorinskyLilly with velocity gradients [$thermodynamics, $(FT)]" begin
-            model = AtmosphereModel(grid; closure=SmagorinskyLilly())
+            model = AtmosphereModel(grid; formulation, closure=SmagorinskyLilly())
             θ₀ = model.formulation.reference_state.potential_temperature
             set!(model; θ=θ₀, ρu = (x, y, z) -> z / 100)
             Breeze.AtmosphereModels.update_state!(model)
@@ -64,7 +64,7 @@ test_thermodynamics = (:StaticEnergy, :LiquidIcePotentialTemperature)
         end
 
         @testset "AnisotropicMinimumDissipation with velocity gradients [$thermodynamics, $(FT)]" begin
-            model = AtmosphereModel(grid; closure=AnisotropicMinimumDissipation())
+            model = AtmosphereModel(grid; formulation, closure=AnisotropicMinimumDissipation())
             set!(model; ρu = (x, y, z) -> z / 100)
             Breeze.AtmosphereModels.update_state!(model)
             @test haskey(model.closure_fields, :νₑ) || haskey(model.closure_fields, :κₑ)
@@ -75,7 +75,7 @@ test_thermodynamics = (:StaticEnergy, :LiquidIcePotentialTemperature)
         les_closures = (SmagorinskyLilly(), AnisotropicMinimumDissipation())
 
         @testset "LES scalar diffusion without advection [$thermodynamics, $(FT), $(nameof(typeof(closure)))]" for closure in les_closures
-            model = AtmosphereModel(grid; closure, advection=nothing, tracers=:ρc)
+            model = AtmosphereModel(grid; formulation, closure, advection=nothing, tracers=:ρc)
 
             # Set random velocity field to trigger non-zero eddy diffusivity
             Ξ(x, y, z) = randn()
