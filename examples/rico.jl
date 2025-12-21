@@ -264,7 +264,7 @@ function progress(sim)
     return nothing
 end
 
-add_callback!(simulation, progress, IterationInterval(100))
+add_callback!(simulation, progress, IterationInterval(1000))
 
 # In addition to velocities, we output horizontal and time-averages of
 # liquid water mass fraction (cloud and rain separately), specific humidity,
@@ -330,12 +330,12 @@ vwts = FieldTimeSeries(averages_filename, "vw")
 
 fig = Figure(size=(1100, 700), fontsize=14)
 
-# Top row: θ, qᵛ, qᶜˡ/qʳ
+## Top row: θ, qᵛ, qᶜˡ/qʳ
 axθ = Axis(fig[1, 1], xlabel="θ (K)", ylabel="z (m)")
 axqᵛ = Axis(fig[1, 2], xlabel="qᵛ (kg/kg)", ylabel="z (m)")
 axqˡ = Axis(fig[1, 3], xlabel="qᶜˡ, qʳ (kg/kg)", ylabel="z (m)")
 
-# Bottom row: u/v, w², uw/vw
+## Bottom row: u/v, w², uw/vw
 axuv = Axis(fig[2, 1], xlabel="u, v (m/s)", ylabel="z (m)")
 axw² = Axis(fig[2, 2], xlabel="w² (m²/s²)", ylabel="z (m)")
 axuw = Axis(fig[2, 3], xlabel="uw, vw (m²/s²)", ylabel="z (m)")
