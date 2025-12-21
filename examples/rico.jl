@@ -102,8 +102,6 @@ sponge_rate = 1/8  # s⁻¹ - relaxation rate (8 s timescale)
 sponge_mask = GaussianMask{:z}(center=3500, width=500)
 sponge = Relaxation(rate=sponge_rate, mask=sponge_mask)
 
-ρᵣ = formulation.reference_state.density
-
 # ## Large-scale subsidence
 #
 # The RICO protocol includes large-scale subsidence that advects mean profiles downward.
@@ -136,6 +134,7 @@ geostrophic = geostrophic_forcings(z -> uᵍ(z), z -> vᵍ(z))
 # A prescribed large-scale moisture tendency represents the effects of advection
 # by the large-scale circulation [vanZanten2011](@cite).
 
+ρᵣ = formulation.reference_state.density
 ∂t_ρqᵗ_large_scale = Field{Nothing, Nothing, Center}(grid)
 dqdt_profile = AtmosphericProfilesLibrary.Rico_dqtdt(FT)
 set!(∂t_ρqᵗ_large_scale, z -> dqdt_profile(z))
