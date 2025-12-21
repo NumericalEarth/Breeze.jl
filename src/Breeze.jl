@@ -39,6 +39,7 @@ export
     mean_pressure,
     pressure_anomaly,
     total_pressure,
+    formulation_density,
 
     # Microphysics
     SaturationAdjustment,

@@ -130,6 +130,20 @@ function total_pressure(formulation::AnelasticFormulation)
 end
 
 #####
+##### Density interface
+#####
+
+"""
+$(TYPEDSIGNATURES)
+
+Return the reference density field for `AnelasticFormulation`.
+
+For anelastic models, the formulation density is the time-independent
+reference state density `ρᵣ(z)`.
+"""
+formulation_density(formulation::AnelasticFormulation) = formulation.reference_state.density
+
+#####
 ##### Show methods
 #####
 
