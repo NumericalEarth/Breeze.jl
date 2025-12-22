@@ -307,10 +307,6 @@ hhat(k) = sqrt(π) * h₀ * a / 4 * (exp(-a^2 * (K + k)^2 / 4) +
 m²(k) = (N² / U^2 - β^2 / 4) - k^2
 k★ = sqrt(N² / U^2 - β^2 / 4)
 
-# Numerical integration using trapezoidal rule:
-
-trapz(x, f) = sum((@view(f[1:end-1]) .+ @view(f[2:end])) .* diff(x)) / 2
-
 # ### Linear vertical velocity
 #
 # Compute the analytical vertical velocity ``w(x, z)`` from Equation A10:
@@ -332,7 +328,7 @@ Compute the 2-D linear vertical velocity `w(x,z)` from the analytical solution
 (Appendix A, Equation A10 of Klemp et al., 2015).
 """
 function w_linear(x, z; nk=100)
-    k = 10 .^ range(log10(1e-5), log10(10k★); length=nk)
+    k = range(1e-5, 10k★; length=nk)
     m2 = m².(k)
     ĥ = hhat.(k)
 
@@ -341,7 +337,9 @@ function w_linear(x, z; nk=100)
                                  sin(m_abs * z + k * x),
                                  exp(-m_abs * z) * sin(k * x))
 
-    return -(U / π) * exp(β * z / 2) * trapz(k, integrand)
+    Δk = step(k)
+    integral = Δk * (sum(integrand) - (first(integrand) + last(integrand)) / 2)
+    return -(U / π) * exp(β * z / 2) * integral
 end
 
 # ## Results: Comparison with analytical solution
