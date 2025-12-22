@@ -116,7 +116,7 @@ end
     grid = RectilinearGrid(default_arch; size=(4, 4, 4), x=(0, 100), y=(0, 100), z=(0, 100))
     reference_state = ReferenceState(grid)
     formulation = AnelasticFormulation(reference_state; thermodynamics=:StaticEnergy)
-    model = AtmosphereModel(grid; formulation)  # Default is StaticEnergy
+    model = AtmosphereModel(grid; formulation)
 
     # Get the reference potential temperature
     θ₀ = model.formulation.reference_state.potential_temperature
