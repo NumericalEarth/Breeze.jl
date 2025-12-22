@@ -105,8 +105,9 @@ Pauluis, O. (2008). Thermodynamic consistency of the anelastic approximation for
 function AtmosphereModel(grid;
                          clock = Clock(grid),
                          thermodynamic_constants = ThermodynamicConstants(eltype(grid)),
-                         dynamics = default_dynamics(grid, thermodynamic_constants),
-                         thermodynamic_formulation = default_thermodynamic_formulation(),
+                         formulation = nothing,
+                         dynamics = nothing,
+                         thermodynamic_formulation = nothing,
                          moisture_density = DefaultValue(),
                          tracers = tuple(),
                          coriolis = nothing,
@@ -119,6 +120,18 @@ function AtmosphereModel(grid;
                          microphysics = nothing,
                          timestepper = :RungeKutta3,
                          radiation = nothing)
+
+    # Handle formulation keyword (extracts dynamics and thermodynamic_formulation)
+    if !isnothing(formulation)
+        isnothing(dynamics) || @warn "Both `formulation` and `dynamics` specified; using `formulation.dynamics`."
+        isnothing(thermodynamic_formulation) || @warn "Both `formulation` and `thermodynamic_formulation` specified; using `formulation.thermodynamic_formulation`."
+        dynamics = formulation.dynamics
+        thermodynamic_formulation = formulation.thermodynamic_formulation
+    end
+
+    # Use defaults if not specified
+    isnothing(dynamics) && (dynamics = default_dynamics(grid, thermodynamic_constants))
+    isnothing(thermodynamic_formulation) && (thermodynamic_formulation = default_thermodynamic_formulation())
 
     if !(advection isa DefaultValue)
         # TODO: check that tracer+momentum advection were not independently set.

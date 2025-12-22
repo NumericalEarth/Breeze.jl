@@ -32,12 +32,11 @@ using DocStringExtensions: TYPEDSIGNATURES
 using Adapt: Adapt, adapt
 using KernelAbstractions: @kernel, @index
 
-using Oceananigans: Oceananigans, CenterField, XFaceField, YFaceField, ZFaceField, fields
+using Oceananigans: Oceananigans, CenterField, XFaceField, YFaceField, ZFaceField
 using Oceananigans.Architectures: architecture
-using Oceananigans.BoundaryConditions: FieldBoundaryConditions, regularize_field_boundary_conditions, fill_halo_regions!
+using Oceananigans.BoundaryConditions: FieldBoundaryConditions, regularize_field_boundary_conditions
 using Oceananigans.Grids: ZDirection, inactive_cell
-using Oceananigans.ImmersedBoundaries: mask_immersed_field!
-using Oceananigans.Operators: Δzᵃᵃᶜ, Δzᵃᵃᶠ, divᶜᶜᶜ, Δzᶜᶜᶜ, ℑzᵃᵃᶠ, ∂xᶠᶜᶜ, ∂yᶜᶠᶜ, ∂zᶜᶜᶠ
+using Oceananigans.Operators: Δzᵃᵃᶜ, Δzᵃᵃᶠ, divᶜᶜᶜ, Δzᶜᶜᶜ, ℑzᵃᵃᶠ
 using Oceananigans.Solvers: Solvers, solve!, FourierTridiagonalPoissonSolver, AbstractHomogeneousNeumannFormulation
 using Oceananigans.TimeSteppers: TimeSteppers
 using Oceananigans.Utils: prettysummary, launch!

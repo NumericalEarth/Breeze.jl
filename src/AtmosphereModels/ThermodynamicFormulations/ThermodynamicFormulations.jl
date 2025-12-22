@@ -34,9 +34,9 @@ using DocStringExtensions: TYPEDSIGNATURES
 using Adapt: Adapt, adapt
 using KernelAbstractions: @kernel, @index
 
-using Oceananigans: Oceananigans, CenterField, Center, znode, fields, prognostic_fields
+using Oceananigans: Oceananigans, CenterField, Center, znode
 using Oceananigans.BoundaryConditions: BoundaryConditions, fill_halo_regions!
-using Oceananigans.Utils: prettysummary, launch!
+using Oceananigans.Utils: prettysummary
 
 # The lowercase c is a singleton instance of Center
 const c = Center()

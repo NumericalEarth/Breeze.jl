@@ -2,7 +2,7 @@
 ##### StaticEnergyFormulation
 #####
 
-using Breeze.Thermodynamics: StaticEnergyState, with_temperature, LiquidIcePotentialTemperatureState, temperature
+using Breeze.Thermodynamics: StaticEnergyState
 
 """
 $(TYPEDSIGNATURES)

@@ -2,7 +2,7 @@
 ##### LiquidIcePotentialTemperatureFormulation
 #####
 
-using Breeze.Thermodynamics: LiquidIcePotentialTemperatureState, with_temperature, exner_function, mixture_heat_capacity
+using Breeze.Thermodynamics: LiquidIcePotentialTemperatureState
 
 """
 $(TYPEDSIGNATURES)
