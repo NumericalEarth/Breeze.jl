@@ -133,7 +133,7 @@ geostrophic = geostrophic_forcings(z -> uᵍ(z), z -> vᵍ(z))
 # A prescribed large-scale moisture tendency represents the effects of advection
 # by the large-scale circulation [vanZanten2011](@cite).
 
-ρᵣ = formulation.reference_state.density
+ρᵣ = reference_state.density
 ∂t_ρqᵗ_large_scale = Field{Nothing, Nothing, Center}(grid)
 dqdt_profile = AtmosphericProfilesLibrary.Rico_dqtdt(FT)
 set!(∂t_ρqᵗ_large_scale, z -> dqdt_profile(z))

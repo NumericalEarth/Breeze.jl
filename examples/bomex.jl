@@ -147,7 +147,7 @@ geostrophic = geostrophic_forcings(z -> uᵍ(z), z -> vᵍ(z))
 # ([Siebesma2003](@citet); Appendix B, Eq. B4). This represents the effects of
 # advection by the large-scale circulation.
 
-ρᵣ = formulation.reference_state.density
+ρᵣ = reference_state.density
 drying = Field{Nothing, Nothing, Center}(grid)
 dqdt_profile = AtmosphericProfilesLibrary.Bomex_dqtdt(FT)
 set!(drying, z -> dqdt_profile(z))
