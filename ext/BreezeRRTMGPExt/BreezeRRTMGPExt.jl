@@ -29,6 +29,7 @@ const SingleColumnGrid = RectilinearGrid{<:Any, <:Flat, <:Flat, <:Bounded}
 const DateTimeClock = Clock{DateTime}
 
 include("gray_radiative_transfer_model.jl")
+include("clear_sky_radiative_transfer_model.jl")
 
 end # module
 

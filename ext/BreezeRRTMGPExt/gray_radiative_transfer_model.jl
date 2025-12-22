@@ -14,7 +14,7 @@ using Breeze.AtmosphereModels: AtmosphereModels, SurfaceRadiativeProperties
 
 using RRTMGP.AtmosphericStates: GrayAtmosphericState, GrayOpticalThicknessOGorman2008
 using KernelAbstractions: @kernel, @index
-using Dates: AbstractDateTime
+using Dates: AbstractDateTime, Millisecond
 
 import Breeze.AtmosphereModels: RadiativeTransferModel
 
@@ -254,7 +254,7 @@ end
 #
 
 compute_datetime(dt::AbstractDateTime, epoch) = dt
-compute_datetime(t::Number, epoch::AbstractDateTime) = epoch + Seconds(t)
+compute_datetime(t::Number, epoch::AbstractDateTime) = epoch + Millisecond(round(Int, 1000t))
 
 """
 $(TYPEDSIGNATURES)
@@ -458,12 +458,9 @@ function update_solar_zenith_angle!(sw_solver, coordinate::Tuple, grid, datetime
     return nothing
 end
 
-function update_solar_zenith_angle!(sw_solver, ::Nothing, grid)
+function update_solar_zenith_angle!(sw_solver, ::Nothing, grid, datetime)
     arch = architecture(grid)
-    launch!(arch, grid, :xy, _update_solar_zenith_angle_from_grid!, sw_solver.bcs.cos_zenith, grid)
-    datetime = epoch + Seconds(clock.time)
-    cos_θz = cos_solar_zenith_angle(1, 1, grid, datetime)
-    sw_solver.bcs.cos_zenith[1] = max(cos_θz, 0)  # Clamp to positive (sun above horizon)
+    launch!(arch, grid, :xy, _update_solar_zenith_angle_from_grid!, sw_solver.bcs.cos_zenith, grid, datetime)
     return nothing
 end
 

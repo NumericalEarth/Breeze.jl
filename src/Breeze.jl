@@ -15,6 +15,7 @@ export
     StaticEnergyThermodynamics,
     LiquidIcePotentialTemperatureThermodynamics,
     RadiativeTransferModel,
+    RRTMGPGasOptics,
     TemperatureField,
     IdealGas,
     CondensedPhase,
