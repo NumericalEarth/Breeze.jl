@@ -337,6 +337,7 @@ function w_linear(x, z; nk=100)
                                  sin(m_abs * z + k * x),
                                  exp(-m_abs * z) * sin(k * x))
 
+    # Numerical integration using trapezoidal rule:   
     Δk = step(k)
     integral = Δk * (sum(integrand) - (first(integrand) + last(integrand)) / 2)
     return -(U / π) * exp(β * z / 2) * integral
