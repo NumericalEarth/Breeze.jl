@@ -10,11 +10,11 @@ using NCDatasets
 using RRTMGP
 
 @testset "Clear-sky full-spectrum RadiativeTransferModel" begin
-    @testset "Single column grid [Float64, CPU]" begin
-        Oceananigans.defaults.FloatType = Float64
+    @testset "Single column grid [$(FT)]" for FT in (Float32, Float64)
+        Oceananigans.defaults.FloatType = FT
 
         Nz = 8
-        grid = RectilinearGrid(CPU(); size=Nz, x=0.0, y=45.0, z=(0, 10kilometers),
+        grid = RectilinearGrid(default_arch; size=Nz, x=0.0, y=45.0, z=(0, 10kilometers),
                                topology=(Flat, Flat, Bounded))
 
         constants = ThermodynamicConstants()
