@@ -326,7 +326,7 @@ trapz(x, f) = sum((@view(f[1:end-1]) .+ @view(f[2:end])) .* diff(x)) / 2
 # evanescent waves.
 
 """
-    w_linear(x, z; nk=1000)
+    w_linear(x, z; nk=100)
 
 Compute the 2-D linear vertical velocity `w(x,z)` from the analytical solution
 (Appendix A, Equation A10 of Klemp et al., 2015).
