@@ -163,25 +163,28 @@ grid = ImmersedBoundaryGrid(underlying_grid, PartialCellBottom(hill))
 # Visualize the terrain comparing the analytical profile with the model's discretized
 # representation:
 
-# High-resolution analytical profile:
-x_analytical = range(-30e3, 30e3; length=500)
-h_analytical = [hill(x) for x in x_analytical]
+# High-resolution analytical profile on a high resolution grid:
+analytical_grid = RectilinearGrid(CPU(), size=500, x=(-30e3, 30e3), topology=(Periodic, Flat, Flat))
+h_analytical = Field{Center, Nothing, Nothing}(analytical_grid)
+set!(h_analytical, hill)
 
 # Discretized profile as represented in the model:
-x_grid = xnodes(grid, Center())
-h_grid = Array(interior(grid.immersed_boundary.bottom_height, :, 1, 1))
+h_model = grid.immersed_boundary.bottom_height
 
 fig_terrain = Figure(size=(900, 400))
 ax_terrain = Axis(fig_terrain[1, 1],
                   xlabel = "x (m)",
                   ylabel = "Height (m)",
                   title = "Schär Mountain Profile")
-lines!(ax_terrain, collect(x_analytical), h_analytical, linewidth = 1, color = :black, 
+lines!(ax_terrain, h_analytical, linewidth = 1, color = :black, 
        label = "Analytical")
-lines!(ax_terrain, collect(x_grid), h_grid, linewidth = 2, color = :brown, linestyle = :dash,
-       label = "Model (Nx = $Nx)")
-band!(ax_terrain, collect(x_analytical), zeros(length(x_analytical)), h_analytical, 
-      color = (:brown, 0.2))
+lines!(ax_terrain, h_model, linewidth = 2, color = :brown, linestyle = :dash,
+       label = "Model")
+
+# band! requires arrays, not Fields
+x_ana = xnodes(h_analytical)
+h_ana = interior(h_analytical, :, 1, 1)
+band!(ax_terrain, x_ana, zeros(length(x_ana)), h_ana, color = (:brown, 0.2))
 xlims!(ax_terrain, -30e3, 30e3)
 axislegend(ax_terrain, position = :rt)
 
@@ -304,7 +307,9 @@ hhat(k) = sqrt(π) * h₀ * a / 4 * (exp(-a^2 * (K + k)^2 / 4) +
 m²(k) = (N² / U^2 - β^2 / 4) - k^2
 k★ = sqrt(N² / U^2 - β^2 / 4)
 
-# Numerical integration uses the trapezoidal rule.
+# Numerical integration using trapezoidal rule:
+
+trapz(x, f) = sum((@view(f[1:end-1]) .+ @view(f[2:end])) .* diff(x)) / 2
 
 # ### Linear vertical velocity
 #
@@ -321,13 +326,13 @@ k★ = sqrt(N² / U^2 - β^2 / 4)
 # evanescent waves.
 
 """
-    w_linear(x, z; nk=100)
+    w_linear(x, z; nk=1000)
 
 Compute the 2-D linear vertical velocity `w(x,z)` from the analytical solution
 (Appendix A, Equation A10 of Klemp et al., 2015).
 """
 function w_linear(x, z; nk=100)
-    k = range(1e-5, 10k★; length=nk)
+    k = 10 .^ range(log10(1e-5), log10(10k★); length=nk)
     m2 = m².(k)
     ĥ = hhat.(k)
 
@@ -336,9 +341,7 @@ function w_linear(x, z; nk=100)
                                  sin(m_abs * z + k * x),
                                  exp(-m_abs * z) * sin(k * x))
 
-    Δk = step(k)
-    integral = Δk * (sum(integrand) - (first(integrand) + last(integrand)) / 2)
-    return -(U / π) * exp(β * z / 2) * integral
+    return -(U / π) * exp(β * z / 2) * trapz(k, integrand)
 end
 
 # ## Results: Comparison with analytical solution
@@ -354,10 +357,8 @@ end
 
 fig = Figure(size=(900, 800), fontsize=14)
 
-# Extract simulated field:
+# Plot simulated field:
 
-xs_sim = range(-L, L, length=Nx)
-zs_sim = z_faces
 w_simulated = model.velocities.w
 
 ax1 = Axis(fig[1, 1],
@@ -367,17 +368,16 @@ ax1 = Axis(fig[1, 1],
 hm1 = heatmap!(ax1, w_simulated, colormap = :balance, colorrange = (-1, 1))
 ax1.limits = ((-30000, 30000), (0, 10000))
 
-# Compute analytical solution on a regular grid:
+# Compute analytical solution on the same grid as the simulation:
 
-xs_ana = range(-30e3, 30e3; length=60)
-zs_ana = range(0, 10e3; length=40)
-w_analytical = [w_linear(x, z) for z in zs_ana, x in xs_ana]
+w_analytical = Field{Center, Nothing, Face}(grid)
+set!(w_analytical, w_linear)
 
 ax2 = Axis(fig[2, 1],
            xlabel = "x (m)",
            ylabel = "z (m)",
            title = "Linear Analytical w")
-hm2 = heatmap!(ax2, collect(xs_ana), collect(zs_ana), w_analytical', colormap = :balance, colorrange = (-1, 1))
+hm2 = heatmap!(ax2, w_analytical, colormap = :balance, colorrange = (-1, 1))
 ax2.limits = ((-30000, 30000), (0, 10000))
 
 # Shared colorbar:
