@@ -325,7 +325,7 @@ trapz(x, f) = sum((@view(f[1:end-1]) .+ @view(f[2:end])) .* diff(x)) / 2
 """
     w_linear(x, z; nk=1000)
 
-Compute the 2-D linear vertical velocity ``w(x,z)`` from the analytical solution
+Compute the 2-D linear vertical velocity `w(x,z)` from the analytical solution
 (Appendix A, Equation A10 of Klemp et al., 2015).
 
 # Arguments
