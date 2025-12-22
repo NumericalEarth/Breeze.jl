@@ -304,9 +304,7 @@ hhat(k) = sqrt(π) * h₀ * a / 4 * (exp(-a^2 * (K + k)^2 / 4) +
 m²(k) = (N² / U^2 - β^2 / 4) - k^2
 k★ = sqrt(N² / U^2 - β^2 / 4)
 
-# Numerical integration using trapezoidal rule:
-
-trapz(x, f) = sum((@view(f[1:end-1]) .+ @view(f[2:end])) .* diff(x)) / 2
+# Numerical integration uses the trapezoidal rule.
 
 # ### Linear vertical velocity
 #
@@ -323,46 +321,24 @@ trapz(x, f) = sum((@view(f[1:end-1]) .+ @view(f[2:end])) .* diff(x)) / 2
 # evanescent waves.
 
 """
-    w_linear(x, z; nk=1000)
+    w_linear(x, z; nk=100)
 
 Compute the 2-D linear vertical velocity `w(x,z)` from the analytical solution
 (Appendix A, Equation A10 of Klemp et al., 2015).
-
-# Arguments
-- `x`: horizontal position (m)
-- `z`: vertical position (m)
-- `nk`: wavenumber discretization resolution (default: 1000)
 """
-function w_linear(x, z; nk=1000)
-    # Discretize wavenumber space
-    k = range(0, 100k★; length=nk)
+function w_linear(x, z; nk=100)
+    k = range(1e-5, 10k★; length=nk)
     m2 = m².(k)
     ĥ = hhat.(k)
 
-    # Propagating waves: 0 ≤ k ≤ k*
-    idx_prop = findall(ki -> ki ≤ k★, k)
-    I_propagating = 0.0
-    if !isempty(idx_prop)
-        kₚ = k[idx_prop]
-        mₚ = sqrt.(clamp.(m2[idx_prop], 0, Inf))
-        ĥₚ = ĥ[idx_prop]
-        integrand = @. kₚ * ĥₚ * sin(mₚ * z + kₚ * x)
-        I_propagating = trapz(kₚ, integrand)
-    end
+    m_abs = sqrt.(abs.(m2))
+    integrand = @. k * ĥ * ifelse(m2 ≥ 0,
+                                 sin(m_abs * z + k * x),
+                                 exp(-m_abs * z) * sin(k * x))
 
-    # Evanescent waves: k* ≤ k < ∞
-    idx_evan = findall(ki -> ki ≥ k★, k)
-    I_evanescent = 0.0
-    if !isempty(idx_evan)
-        kₑ = k[idx_evan]
-        mₑ = sqrt.(clamp.(-m2[idx_evan], 0, Inf))  # |m| when m² < 0
-        ĥₑ = ĥ[idx_evan]
-        integrand = @. kₑ * ĥₑ * exp(-mₑ * z) * sin(kₑ * x)
-        I_evanescent = trapz(kₑ, integrand)
-    end
-
-    # Assemble full solution (Equation A10)
-    return -U / π * exp(β * z / 2) * (I_propagating + I_evanescent)
+    Δk = step(k)
+    integral = Δk * (sum(integrand) - (first(integrand) + last(integrand)) / 2)
+    return -(U / π) * exp(β * z / 2) * integral
 end
 
 # ## Results: Comparison with analytical solution
