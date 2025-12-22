@@ -59,7 +59,7 @@ model = AtmosphereModel(grid; clock, formulation, microphysics, radiation)
 # We prescribe a simple tropical-like temperature profile with a moist boundary
 # layer and a cloud between 1-2 km altitude.
 
-θ₀ = formulation.reference_state.potential_temperature
+θ₀ = reference_state.potential_temperature
 q₀ = 0.015    # surface specific humidity (kg/kg)
 Hᵗ = 2500     # moisture scale height (m)
 qᵗᵢ(z) = q₀ * exp(-z / Hᵗ)
