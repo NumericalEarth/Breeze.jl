@@ -328,7 +328,7 @@ Compute the 2-D linear vertical velocity `w(x,z)` from the analytical solution
 (Appendix A, Equation A10 of Klemp et al., 2015).
 """
 function w_linear(x, z; nk=100)
-    k = range(1e-5, 10k★; length=nk)
+    k = range(0, 10k★; length=nk)
     m2 = m².(k)
     ĥ = hhat.(k)
 
