@@ -29,8 +29,7 @@ reference_state = ReferenceState(grid, constants;
                                  surface_pressure = 101325,
                                  potential_temperature = surface_temperature)
 
-formulation = AnelasticFormulation(reference_state,
-                                   thermodynamics = :LiquidIcePotentialTemperature)
+formulation = AnelasticFormulation(reference_state)
 
 # ## Radiative transfer model
 #
