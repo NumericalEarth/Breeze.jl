@@ -97,7 +97,7 @@ p₀ = 100000  # Pa - surface pressure
 θ₀ = 300     # K - reference potential temperature
 constants = ThermodynamicConstants()
 reference_state = ReferenceState(grid, constants, surface_pressure=p₀, potential_temperature=θ₀)
-formulation = AnelasticFormulation(reference_state, thermodynamics=:LiquidIcePotentialTemperature)
+formulation = AnelasticFormulation(reference_state)
 
 # ## Background atmosphere profiles
 #
