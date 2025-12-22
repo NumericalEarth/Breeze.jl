@@ -388,7 +388,7 @@ ax1 = Axis(fig[1, 1],
            xlabel = "x (m)",
            ylabel = "z (m)",
            title = "Simulated w at t = 2 hours")
-hm1 = heatmap!(ax1, collect(xs_sim), zs_sim, w_simulated, colormap = :balance, colorrange = (-1, 1))
+hm1 = heatmap!(ax1, w_simulated, colormap = :balance, colorrange = (-1, 1))
 ax1.limits = ((-30000, 30000), (0, 10000))
 
 # Compute analytical solution on a regular grid:
