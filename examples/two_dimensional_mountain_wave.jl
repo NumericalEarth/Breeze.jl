@@ -163,7 +163,7 @@ grid = ImmersedBoundaryGrid(underlying_grid, PartialCellBottom(hill))
 # Visualize the terrain comparing the analytical profile with the model's discretized
 # representation:
 
-# High-resolution analytical profile on a high resolution grid:
+# Analytical profile on a high-resolution grid:
 analytical_grid = RectilinearGrid(CPU(), size=500, x=(-30e3, 30e3), topology=(Periodic, Flat, Flat))
 h_analytical = Field{Center, Nothing, Nothing}(analytical_grid)
 set!(h_analytical, hill)
