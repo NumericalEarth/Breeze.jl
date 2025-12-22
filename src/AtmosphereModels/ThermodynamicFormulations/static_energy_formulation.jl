@@ -49,8 +49,6 @@ Oceananigans.prognostic_fields(formulation::StaticEnergyFormulation) = (; ρe=fo
 ##### Materialization
 #####
 
-default_thermodynamic_formulation() = StaticEnergyFormulation(nothing, nothing)
-
 function materialize_thermodynamic_formulation(::StaticEnergyFormulation, dynamics, grid, boundary_conditions)
     energy_density = CenterField(grid, boundary_conditions=boundary_conditions.ρe)
     specific_energy = CenterField(grid)  # e = ρe / ρ (diagnostic per-mass energy)

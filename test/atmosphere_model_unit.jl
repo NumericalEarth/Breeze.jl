@@ -137,7 +137,8 @@ end
     dynamics = AnelasticDynamics(reference_state)
 
     @testset "Default advection schemes" begin
-        static_energy_model = AtmosphereModel(grid; thermodynamic_constants=constants, dynamics)
+        static_energy_model = AtmosphereModel(grid; thermodynamic_constants=constants, dynamics,
+                                              thermodynamic_formulation=StaticEnergyFormulation(nothing, nothing))
         potential_temperature_model = AtmosphereModel(grid; thermodynamic_constants=constants, dynamics, 
                                                       thermodynamic_formulation=LiquidIcePotentialTemperatureFormulation(nothing, nothing))
 
@@ -153,7 +154,7 @@ end
 
     @testset "Unified advection parameter" begin
         static_energy_model = AtmosphereModel(grid; thermodynamic_constants=constants,
-                                              dynamics, advection=WENO())
+                                              dynamics, thermodynamic_formulation=StaticEnergyFormulation(nothing, nothing), advection=WENO())
 
         potential_temperature_model= AtmosphereModel(grid; thermodynamic_constants=constants,
                                                      dynamics, thermodynamic_formulation=LiquidIcePotentialTemperatureFormulation(nothing, nothing), advection=WENO())
@@ -170,7 +171,7 @@ end
 
     @testset "Separate momentum and tracer advection" begin
         kw = (thermodynamic_constants=constants, momentum_advection = WENO(), scalar_advection = Centered(order=2))
-        static_energy_model = AtmosphereModel(grid; dynamics, kw...)
+        static_energy_model = AtmosphereModel(grid; dynamics, thermodynamic_formulation=StaticEnergyFormulation(nothing, nothing), kw...)
         potential_temperature_model = AtmosphereModel(grid; dynamics, thermodynamic_formulation=LiquidIcePotentialTemperatureFormulation(nothing, nothing), kw...)
 
         @test static_energy_model.advection.ρe isa Centered
@@ -186,7 +187,7 @@ end
     @testset "FluxFormAdvection for momentum and tracers" begin
         advection = FluxFormAdvection(WENO(), WENO(), Centered(order=2))
         kw = (; thermodynamic_constants=constants, advection)
-        static_energy_model = AtmosphereModel(grid; dynamics, kw...)
+        static_energy_model = AtmosphereModel(grid; dynamics, thermodynamic_formulation=StaticEnergyFormulation(nothing, nothing), kw...)
         potential_temperature_model = AtmosphereModel(grid; dynamics, thermodynamic_formulation=LiquidIcePotentialTemperatureFormulation(nothing, nothing), kw...)
 
         @test static_energy_model.advection.ρe isa FluxFormAdvection
@@ -211,7 +212,7 @@ end
 
     @testset "Tracer advection with user tracers" begin
         kw = (thermodynamic_constants=constants, tracers = :c, scalar_advection = UpwindBiased(order=1))
-        static_energy_model = AtmosphereModel(grid; dynamics, kw...)
+        static_energy_model = AtmosphereModel(grid; dynamics, thermodynamic_formulation=StaticEnergyFormulation(nothing, nothing), kw...)
         potential_temperature_model = AtmosphereModel(grid; dynamics, thermodynamic_formulation=LiquidIcePotentialTemperatureFormulation(nothing, nothing), kw...)
 
         @test static_energy_model.advection.ρe isa UpwindBiased
@@ -228,7 +229,7 @@ end
     @testset "Mixed configuration with tracers" begin
         scalar_advection = (; c=Centered(order=2), ρqᵗ=WENO())
         kw = (thermodynamic_constants=constants, tracers = :c, momentum_advection = WENO(), scalar_advection)
-        static_energy_model = AtmosphereModel(grid; dynamics, kw...)
+        static_energy_model = AtmosphereModel(grid; dynamics, thermodynamic_formulation=StaticEnergyFormulation(nothing, nothing), kw...)
         potential_temperature_model = AtmosphereModel(grid; dynamics, thermodynamic_formulation=LiquidIcePotentialTemperatureFormulation(nothing, nothing), kw...)
 
         @test static_energy_model.advection.ρe isa Centered

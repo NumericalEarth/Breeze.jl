@@ -12,7 +12,7 @@
 """
     default_thermodynamic_formulation()
 
-Return the default thermodynamic formulation (StaticEnergyFormulation).
+Return the default thermodynamic formulation (LiquidIcePotentialTemperatureFormulation).
 """
 function default_thermodynamic_formulation end
 

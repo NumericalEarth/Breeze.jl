@@ -7,8 +7,8 @@ Keyword arguments
 =================
 
 - `thermodynamics`: The thermodynamic formulation to use. Can be:
-  - `:StaticEnergy` or `:e` - uses static energy density `ρe` as prognostic variable (default)
-  - `:LiquidIcePotentialTemperature` or `:θ` - uses liquid-ice potential temperature density `ρθ`
+  - `:LiquidIcePotentialTemperature` or `:θ` - uses liquid-ice potential temperature density `ρθ` (default)
+  - `:StaticEnergy` or `:e` - uses static energy density `ρe` as prognostic variable
 
 Returns a `NamedTuple` with `dynamics` and `thermodynamic_formulation` that can be passed
 to `AtmosphereModel` via the `formulation` keyword argument.
@@ -25,7 +25,7 @@ julia> constants = ThermodynamicConstants();
 
 julia> reference_state = ReferenceState(grid, constants);
 
-julia> formulation = AnelasticFormulation(reference_state; thermodynamics=:LiquidIcePotentialTemperature);
+julia> formulation = AnelasticFormulation(reference_state);
 
 julia> model = AtmosphereModel(grid; formulation)
 AtmosphereModel{CPU, RectilinearGrid}(time = 0 seconds, iteration = 0)
@@ -42,7 +42,7 @@ AtmosphereModel{CPU, RectilinearGrid}(time = 0 seconds, iteration = 0)
 └── microphysics: Nothing
 ```
 """
-function AnelasticFormulation(reference_state; thermodynamics = :StaticEnergy)
+function AnelasticFormulation(reference_state; thermodynamics = :LiquidIcePotentialTemperature)
     dynamics = AnelasticDynamics(reference_state)
     thermodynamic_formulation = convert_thermodynamics_symbol(thermodynamics)
     return (; dynamics, thermodynamic_formulation)

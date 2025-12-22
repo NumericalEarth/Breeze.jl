@@ -86,7 +86,7 @@ julia> model = AtmosphereModel(grid)
 AtmosphereModel{CPU, RectilinearGrid}(time = 0 seconds, iteration = 0)
 ├── grid: 8×8×8 RectilinearGrid{Float64, Periodic, Periodic, Bounded} on CPU with 3×3×3 halo
 ├── dynamics: AnelasticDynamics(p₀=101325.0, θ₀=288.0)
-├── formulation: StaticEnergyFormulation
+├── formulation: LiquidIcePotentialTemperatureFormulation
 ├── timestepper: RungeKutta3TimeStepper
 ├── advection scheme:
 │   ├── momentum: Centered(order=2)
@@ -239,7 +239,7 @@ function AtmosphereModel(grid;
                             closure_fields,
                             radiation)
 
-    θ₀ = formulation.reference_state.potential_temperature
+    θ₀ = dynamics.reference_state.potential_temperature
     set!(model, θ=θ₀)
 
     return model

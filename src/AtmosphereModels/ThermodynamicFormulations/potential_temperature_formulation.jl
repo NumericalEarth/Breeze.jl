@@ -47,6 +47,8 @@ Oceananigans.prognostic_fields(formulation::LiquidIcePotentialTemperatureFormula
 ##### Materialization
 #####
 
+default_thermodynamic_formulation() = LiquidIcePotentialTemperatureFormulation(nothing, nothing)
+
 function materialize_thermodynamic_formulation(::LiquidIcePotentialTemperatureFormulation, dynamics, grid, boundary_conditions)
     potential_temperature_density = CenterField(grid, boundary_conditions=boundary_conditions.ρθ)
     potential_temperature = CenterField(grid)  # θ = ρθ / ρ (diagnostic)
