@@ -81,8 +81,8 @@ using Oceananigans.Units
 using Printf
 using CairoMakie
 
-using Oceananigans.Grids: znode
-using Oceananigans: Face
+using Oceananigans.Grids: znode, xnodes
+using Oceananigans: Face, Center
 using Breeze.Thermodynamics: dry_air_gas_constant
 using CUDA
 
@@ -160,18 +160,30 @@ grid = ImmersedBoundaryGrid(underlying_grid, PartialCellBottom(hill))
 
 # ## Plot: Mountain profile and vertical grid
 #
-# Visualize the terrain and grid structure near the mountain:
+# Visualize the terrain comparing the analytical profile with the model's discretized
+# representation:
 
-x_plot = range(-30e3, 30e3; length=500)
-h_plot = [hill(x) for x in x_plot]
+# High-resolution analytical profile:
+x_analytical = range(-30e3, 30e3; length=500)
+h_analytical = [hill(x) for x in x_analytical]
+
+# Discretized profile as represented in the model:
+x_grid = xnodes(grid, Center())
+h_grid = Array(interior(grid.immersed_boundary.bottom_height, :, 1, 1))
 
 fig_terrain = Figure(size=(900, 400))
 ax_terrain = Axis(fig_terrain[1, 1],
                   xlabel = "x (m)",
                   ylabel = "Height (m)",
                   title = "Schär Mountain Profile")
-lines!(ax_terrain, collect(x_plot), h_plot, linewidth = 2, color = :brown)
-band!(ax_terrain, collect(x_plot), zeros(length(x_plot)), h_plot, color = (:brown, 0.3))
+lines!(ax_terrain, collect(x_analytical), h_analytical, linewidth = 1, color = :black, 
+       label = "Analytical")
+lines!(ax_terrain, collect(x_grid), h_grid, linewidth = 2, color = :brown, linestyle = :dash,
+       label = "Model (Nx = $Nx)")
+band!(ax_terrain, collect(x_analytical), zeros(length(x_analytical)), h_analytical, 
+      color = (:brown, 0.2))
+xlims!(ax_terrain, -30e3, 30e3)
+axislegend(ax_terrain, position = :rt)
 
 save("mountain_wave_terrain.png", fig_terrain)
 fig_terrain
