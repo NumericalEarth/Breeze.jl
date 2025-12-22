@@ -302,7 +302,7 @@ hhat(k) = sqrt(π) * h₀ * a / 4 * (exp(-a^2 * (K + k)^2 / 4) +
 # Vertical wavenumber squared (Equation A5) and critical wavenumber (Equation A11):
 
 m²(k) = (N² / U^2 - β^2 / 4) - k^2
-kstar = sqrt(N² / U^2 - β^2 / 4)
+k★ = sqrt(N² / U^2 - β^2 / 4)
 
 # Numerical integration using trapezoidal rule:
 
@@ -335,12 +335,12 @@ Compute the 2-D linear vertical velocity ``w(x,z)`` from the analytical solution
 """
 function w_linear(x, z; nk=1000)
     # Discretize wavenumber space
-    k = range(0, 100kstar; length=nk)
+    k = range(0, 100k★; length=nk)
     m2 = m².(k)
     ĥ = hhat.(k)
 
     # Propagating waves: 0 ≤ k ≤ k*
-    idx_prop = findall(ki -> ki ≤ kstar, k)
+    idx_prop = findall(ki -> ki ≤ k★, k)
     I_propagating = 0.0
     if !isempty(idx_prop)
         kₚ = k[idx_prop]
@@ -351,7 +351,7 @@ function w_linear(x, z; nk=1000)
     end
 
     # Evanescent waves: k* ≤ k < ∞
-    idx_evan = findall(ki -> ki ≥ kstar, k)
+    idx_evan = findall(ki -> ki ≥ k★, k)
     I_evanescent = 0.0
     if !isempty(idx_evan)
         kₑ = k[idx_evan]
