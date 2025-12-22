@@ -382,7 +382,7 @@ fig = Figure(size=(900, 800), fontsize=14)
 
 xs_sim = range(-L, L, length=Nx)
 zs_sim = z_faces
-w_simulated = Array(interior(model.velocities.w, :, 1, :))
+w_simulated = model.velocities.w
 
 ax1 = Axis(fig[1, 1],
            xlabel = "x (m)",
