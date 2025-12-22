@@ -55,8 +55,9 @@ end
                 @test ρ₀ ≈ @allowscalar ℑzᵃᵃᶠ(i, j, 1, grid, reference_state.density)
             end
 
-            formulation = AnelasticFormulation(reference_state; thermodynamics)
-            model = AtmosphereModel(grid; thermodynamic_constants=constants, formulation)
+            dynamics = AnelasticDynamics(reference_state)
+            thermodynamic_formulation = thermodynamics == :StaticEnergy ? StaticEnergyFormulation(nothing, nothing) : LiquidIcePotentialTemperatureFormulation(nothing, nothing)
+            model = AtmosphereModel(grid; thermodynamic_constants=constants, dynamics, thermodynamic_formulation)
 
             # Test round-trip consistency: set θ, get ρe; then set ρe, get back θ
             set!(model; θ = θ₀)
@@ -78,8 +79,9 @@ end
     p₀ = FT(101325)
     θ₀ = FT(300)
     reference_state = ReferenceState(grid, constants, surface_pressure=p₀, potential_temperature=θ₀)
-    formulation = AnelasticFormulation(reference_state; thermodynamics)
-    model = AtmosphereModel(grid; thermodynamic_constants=constants, formulation)
+    dynamics = AnelasticDynamics(reference_state)
+    thermodynamic_formulation = thermodynamics == :StaticEnergy ? StaticEnergyFormulation(nothing, nothing) : LiquidIcePotentialTemperatureFormulation(nothing, nothing)
+    model = AtmosphereModel(grid; thermodynamic_constants=constants, dynamics, thermodynamic_formulation)
 
     # Initialize with potential temperature and dry air
     θᵢ = CenterField(grid)
@@ -98,9 +100,10 @@ end
     p₀ = FT(101325)
     θ₀ = FT(300)
     reference_state = ReferenceState(grid, constants, surface_pressure=p₀, potential_temperature=θ₀)
-    formulation = AnelasticFormulation(reference_state; thermodynamics)
+    dynamics = AnelasticDynamics(reference_state)
+    thermodynamic_formulation = thermodynamics == :StaticEnergy ? StaticEnergyFormulation(nothing, nothing) : LiquidIcePotentialTemperatureFormulation(nothing, nothing)
     microphysics = SaturationAdjustment()
-    model = AtmosphereModel(grid; thermodynamic_constants=constants, formulation, microphysics)
+    model = AtmosphereModel(grid; thermodynamic_constants=constants, dynamics, thermodynamic_formulation, microphysics)
 
     # Initialize with potential temperature and dry air
     set!(model; θ=θ₀)
@@ -113,7 +116,7 @@ end
     k = max(1, Nz ÷ 2)
 
     Tᵢ = @allowscalar model.temperature[1, 1, k]
-    pᵣᵢ = @allowscalar model.formulation.reference_state.pressure[1, 1, k]
+    pᵣᵢ = @allowscalar model.dynamics.reference_state.pressure[1, 1, k]
     q = Breeze.Thermodynamics.MoistureMassFractions{FT} |> zero
     ρᵢ = Breeze.Thermodynamics.density(pᵣᵢ, Tᵢ, q, constants)
     qᵛ⁺_expected = Breeze.Thermodynamics.saturation_specific_humidity(Tᵢ, ρᵢ, constants, constants.liquid)
@@ -131,12 +134,12 @@ end
     p₀ = FT(101325)
     θ₀ = FT(300)
     reference_state = ReferenceState(grid, constants, surface_pressure=p₀, potential_temperature=θ₀)
-    potential_temperature_formulation = AnelasticFormulation(reference_state; thermodynamics=:LiquidIcePotentialTemperature)
-    static_energy_formulation = AnelasticFormulation(reference_state; thermodynamics=:StaticEnergy)
+    dynamics = AnelasticDynamics(reference_state)
 
     @testset "Default advection schemes" begin
-        static_energy_model = AtmosphereModel(grid; thermodynamic_constants=constants, formulation=static_energy_formulation)
-        potential_temperature_model = AtmosphereModel(grid; thermodynamic_constants=constants, formulation=potential_temperature_formulation)
+        static_energy_model = AtmosphereModel(grid; thermodynamic_constants=constants, dynamics)
+        potential_temperature_model = AtmosphereModel(grid; thermodynamic_constants=constants, dynamics, 
+                                                      thermodynamic_formulation=LiquidIcePotentialTemperatureFormulation(nothing, nothing))
 
         @test static_energy_model.advection.ρe isa Centered
         @test potential_temperature_model.advection.ρθ isa Centered
@@ -150,10 +153,10 @@ end
 
     @testset "Unified advection parameter" begin
         static_energy_model = AtmosphereModel(grid; thermodynamic_constants=constants,
-                                              formulation=static_energy_formulation, advection=WENO())
+                                              dynamics, advection=WENO())
 
         potential_temperature_model= AtmosphereModel(grid; thermodynamic_constants=constants,
-                                                     formulation=potential_temperature_formulation, advection=WENO())
+                                                     dynamics, thermodynamic_formulation=LiquidIcePotentialTemperatureFormulation(nothing, nothing), advection=WENO())
 
         @test static_energy_model.advection.ρe isa WENO
         @test potential_temperature_model.advection.ρθ isa WENO
@@ -167,8 +170,8 @@ end
 
     @testset "Separate momentum and tracer advection" begin
         kw = (thermodynamic_constants=constants, momentum_advection = WENO(), scalar_advection = Centered(order=2))
-        static_energy_model = AtmosphereModel(grid; formulation=static_energy_formulation, kw...)
-        potential_temperature_model = AtmosphereModel(grid; formulation=potential_temperature_formulation, kw...)
+        static_energy_model = AtmosphereModel(grid; dynamics, kw...)
+        potential_temperature_model = AtmosphereModel(grid; dynamics, thermodynamic_formulation=LiquidIcePotentialTemperatureFormulation(nothing, nothing), kw...)
 
         @test static_energy_model.advection.ρe isa Centered
         @test potential_temperature_model.advection.ρθ isa Centered
@@ -183,8 +186,8 @@ end
     @testset "FluxFormAdvection for momentum and tracers" begin
         advection = FluxFormAdvection(WENO(), WENO(), Centered(order=2))
         kw = (; thermodynamic_constants=constants, advection)
-        static_energy_model = AtmosphereModel(grid; formulation=static_energy_formulation, kw...)
-        potential_temperature_model = AtmosphereModel(grid; formulation=potential_temperature_formulation, kw...)
+        static_energy_model = AtmosphereModel(grid; dynamics, kw...)
+        potential_temperature_model = AtmosphereModel(grid; dynamics, thermodynamic_formulation=LiquidIcePotentialTemperatureFormulation(nothing, nothing), kw...)
 
         @test static_energy_model.advection.ρe isa FluxFormAdvection
         @test static_energy_model.advection.ρe.x isa WENO
@@ -208,8 +211,8 @@ end
 
     @testset "Tracer advection with user tracers" begin
         kw = (thermodynamic_constants=constants, tracers = :c, scalar_advection = UpwindBiased(order=1))
-        static_energy_model = AtmosphereModel(grid; formulation=static_energy_formulation, kw...)
-        potential_temperature_model = AtmosphereModel(grid; formulation=potential_temperature_formulation, kw...)
+        static_energy_model = AtmosphereModel(grid; dynamics, kw...)
+        potential_temperature_model = AtmosphereModel(grid; dynamics, thermodynamic_formulation=LiquidIcePotentialTemperatureFormulation(nothing, nothing), kw...)
 
         @test static_energy_model.advection.ρe isa UpwindBiased
         @test potential_temperature_model.advection.ρθ isa UpwindBiased
@@ -225,8 +228,8 @@ end
     @testset "Mixed configuration with tracers" begin
         scalar_advection = (; c=Centered(order=2), ρqᵗ=WENO())
         kw = (thermodynamic_constants=constants, tracers = :c, momentum_advection = WENO(), scalar_advection)
-        static_energy_model = AtmosphereModel(grid; formulation=static_energy_formulation, kw...)
-        potential_temperature_model = AtmosphereModel(grid; formulation=potential_temperature_formulation, kw...)
+        static_energy_model = AtmosphereModel(grid; dynamics, kw...)
+        potential_temperature_model = AtmosphereModel(grid; dynamics, thermodynamic_formulation=LiquidIcePotentialTemperatureFormulation(nothing, nothing), kw...)
 
         @test static_energy_model.advection.ρe isa Centered
         @test potential_temperature_model.advection.ρθ isa Centered
@@ -248,10 +251,11 @@ end
     p₀ = FT(101500)
     θ₀ = FT(300)
     reference_state = ReferenceState(grid, constants, surface_pressure=p₀, potential_temperature=θ₀)
-    formulation = AnelasticFormulation(reference_state; thermodynamics)
+    dynamics = AnelasticDynamics(reference_state)
+    thermodynamic_formulation = thermodynamics == :StaticEnergy ? StaticEnergyFormulation(nothing, nothing) : LiquidIcePotentialTemperatureFormulation(nothing, nothing)
 
     # Test with no microphysics first (no saturation adjustment effects)
-    model = AtmosphereModel(grid; thermodynamic_constants=constants, formulation)
+    model = AtmosphereModel(grid; thermodynamic_constants=constants, dynamics, thermodynamic_formulation)
 
     # Set a standard lapse rate temperature profile with dry air
     T_profile(x, y, z) = FT(300) - FT(0.0065) * z
@@ -282,7 +286,7 @@ end
 
     # Now test with saturation adjustment
     microphysics = SaturationAdjustment(equilibrium=MixedPhaseEquilibrium())
-    model_moist = AtmosphereModel(grid; thermodynamic_constants=constants, formulation, microphysics)
+    model_moist = AtmosphereModel(grid; thermodynamic_constants=constants, dynamics, thermodynamic_formulation, microphysics)
 
     # Set T with subsaturated moisture (no condensate expected)
     set!(model_moist, T=T_profile, qᵗ=FT(0.001))  # low moisture

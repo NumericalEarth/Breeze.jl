@@ -77,7 +77,7 @@ end
     model = AtmosphereModel(grid; formulation, forcing=(; ρqᵗ=subsidence))
 
     # Set potential temperature to reference state
-    θ₀ = model.formulation.reference_state.potential_temperature
+    θ₀ = model.dynamics.reference_state.potential_temperature
 
     # Set up a linear moisture profile with known gradient
     q₀ = FT(0.015)  # 15 g/kg at surface
@@ -118,13 +118,13 @@ end
     model = AtmosphereModel(grid)  # Default is StaticEnergy
 
     # Get the reference potential temperature
-    θ₀ = model.formulation.reference_state.potential_temperature
+    θ₀ = model.dynamics.reference_state.potential_temperature
 
     # This should work without error (tests the maybe_adjust_thermodynamic_state fix)
     set!(model, θ=θ₀)
 
     # Verify energy was set to a non-zero value
-    @test sum(abs, model.formulation.thermodynamics.energy_density) > 0
+    @test sum(abs, model.formulation.energy_density) > 0
 
     # Time step should work
     Δt = 1e-6
@@ -204,9 +204,9 @@ end
 
                 kw = (; advection=nothing, timestepper=:QuasiAdamsBashforth2, formulation, forcing)
                 model = AtmosphereModel(grid; tracers=:ρc, kw...)
-                θ₀ = model.formulation.reference_state.potential_temperature
+                θ₀ = model.dynamics.reference_state.potential_temperature
 
-                ρᵣ = model.formulation.reference_state.density
+                ρᵣ = model.dynamics.reference_state.density
                 ρϕ = CenterField(grid)
                 set!(ρϕ, ϕᵢ)
                 set!(ρϕ, ρᵣ * ρϕ)

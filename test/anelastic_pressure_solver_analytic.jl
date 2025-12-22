@@ -37,7 +37,7 @@ using Statistics: mean
 
     # Test for zero mean (using kinematic pressure p'/ρᵣ directly)
     atol = 10 * grid.Nz * eps(FT)
-    ϕ = model.formulation.pressure_anomaly
+    ϕ = model.dynamics.pressure_anomaly
     @test mean(ϕ) ≈ 0 atol=atol
 
     # Test for exact solution

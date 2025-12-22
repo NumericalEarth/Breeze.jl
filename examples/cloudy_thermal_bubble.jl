@@ -37,7 +37,7 @@ model = AtmosphereModel(grid; formulation, thermodynamic_constants, advection)
 r₀ = 2e3
 z₀ = 2e3
 Δθ = 2 # K
-θ₀ = model.formulation.reference_state.potential_temperature
+θ₀ = model.dynamics.reference_state.potential_temperature
 g = model.thermodynamic_constants.gravitational_acceleration
 
 function θᵢ(x, z)

@@ -81,7 +81,7 @@ function StaticEnergy(model, flavor_symbol=:specific)
     end
 
     func = StaticEnergyKernelFunction(flavor,
-                                      model.formulation.reference_state,
+                                      model.dynamics.reference_state,
                                       model.microphysics,
                                       model.microphysical_fields,
                                       model.specific_moisture,

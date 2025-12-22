@@ -36,7 +36,7 @@ test_thermodynamics = (:StaticEnergy, :LiquidIcePotentialTemperature)
             closure = ScalarDiffusivity(disc, ν=1, κ=1)
             model = @test_logs match_mode=:any AtmosphereModel(grid; formulation, closure, tracers=:ρc)
             # Set uniform specific energy for no diffusion
-            θ₀ = model.formulation.reference_state.potential_temperature
+            θ₀ = model.dynamics.reference_state.potential_temperature
             cᵖᵈ = model.thermodynamic_constants.dry_air.heat_capacity
             e₀ = cᵖᵈ * θ₀
             set!(model; e=e₀)
@@ -57,7 +57,7 @@ test_thermodynamics = (:StaticEnergy, :LiquidIcePotentialTemperature)
 
         @testset "SmagorinskyLilly with velocity gradients [$thermodynamics, $(FT)]" begin
             model = AtmosphereModel(grid; formulation, closure=SmagorinskyLilly())
-            θ₀ = model.formulation.reference_state.potential_temperature
+            θ₀ = model.dynamics.reference_state.potential_temperature
             set!(model; θ=θ₀, ρu = (x, y, z) -> z / 100)
             Breeze.AtmosphereModels.update_state!(model)
             @test maximum(abs, model.closure_fields.νₑ) > 0
@@ -81,7 +81,7 @@ test_thermodynamics = (:StaticEnergy, :LiquidIcePotentialTemperature)
             Ξ(x, y, z) = randn()
 
             # Set scalar gradients for energy, moisture, and passive tracer
-            θ₀ = model.formulation.reference_state.potential_temperature
+            θ₀ = model.dynamics.reference_state.potential_temperature
             z₀, dz = 50, 10
             gaussian(z) = exp(- (z - z₀)^2 / 2dz^2)
             θᵢ(x, y, z) = θ₀ + 10 * gaussian(z)
