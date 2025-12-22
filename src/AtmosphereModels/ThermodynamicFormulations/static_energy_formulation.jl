@@ -42,6 +42,11 @@ additional_thermodynamic_field_names(::StaticEnergyFormulation) = tuple(:e)
 thermodynamic_density_name(::StaticEnergyFormulation) = :ρe
 thermodynamic_density(formulation::StaticEnergyFormulation) = formulation.energy_density
 
+# Type-based versions (for use before materialization)
+prognostic_thermodynamic_field_names(::Type{StaticEnergyFormulation}) = tuple(:ρe)
+additional_thermodynamic_field_names(::Type{StaticEnergyFormulation}) = tuple(:e)
+thermodynamic_density_name(::Type{StaticEnergyFormulation}) = :ρe
+
 Oceananigans.fields(formulation::StaticEnergyFormulation) = (; e=formulation.specific_energy)
 Oceananigans.prognostic_fields(formulation::StaticEnergyFormulation) = (; ρe=formulation.energy_density)
 
@@ -49,7 +54,7 @@ Oceananigans.prognostic_fields(formulation::StaticEnergyFormulation) = (; ρe=fo
 ##### Materialization
 #####
 
-function materialize_thermodynamic_formulation(::StaticEnergyFormulation, dynamics, grid, boundary_conditions)
+function materialize_formulation(::Type{StaticEnergyFormulation}, dynamics, grid, boundary_conditions)
     energy_density = CenterField(grid, boundary_conditions=boundary_conditions.ρe)
     specific_energy = CenterField(grid)  # e = ρe / ρ (diagnostic per-mass energy)
     return StaticEnergyFormulation(energy_density, specific_energy)

@@ -6,7 +6,6 @@ export
     AtmosphereModelBuoyancy,
     # Dynamics
     AnelasticDynamics,
-    AnelasticFormulation,
     AnelasticModel,
     dynamics_density,
     dynamics_pressure,
@@ -88,8 +87,7 @@ include("ThermodynamicFormulations/ThermodynamicFormulations.jl")
 using .ThermodynamicFormulations:
     StaticEnergyFormulation,
     LiquidIcePotentialTemperatureFormulation,
-    default_thermodynamic_formulation,
-    materialize_thermodynamic_formulation,
+    materialize_formulation,
     prognostic_thermodynamic_field_names,
     additional_thermodynamic_field_names,
     thermodynamic_density_name,
@@ -98,12 +96,6 @@ using .ThermodynamicFormulations:
 
 # Import with `import` (not `using`) to allow extension
 import .ThermodynamicFormulations: compute_auxiliary_thermodynamic_variables!, compute_thermodynamic_tendency!
-
-#####
-##### AnelasticFormulation helper (combines dynamics + thermodynamic formulation)
-#####
-
-include("anelastic_formulation.jl")
 
 #####
 ##### AtmosphereModel core

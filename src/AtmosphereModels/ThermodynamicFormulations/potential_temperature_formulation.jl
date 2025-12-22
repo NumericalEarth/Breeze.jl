@@ -40,6 +40,22 @@ additional_thermodynamic_field_names(::LiquidIcePotentialTemperatureFormulation)
 thermodynamic_density_name(::LiquidIcePotentialTemperatureFormulation) = :ρθ
 thermodynamic_density(formulation::LiquidIcePotentialTemperatureFormulation) = formulation.potential_temperature_density
 
+# Type-based versions (for use before materialization)
+prognostic_thermodynamic_field_names(::Val{:LiquidIcePotentialTemperatureFormulation}) = tuple(:ρθ)
+additional_thermodynamic_field_names(::Val{:LiquidIcePotentialTemperatureFormulation}) = tuple(:θ)
+thermodynamic_density_name(::Val{:LiquidIcePotentialTemperatureFormulation}) = :ρθ
+
+# Helper to convert symbol to type
+function _formulation_type(formulation::Symbol)
+    if formulation ∈ (:StaticEnergy, :e, :ρe)
+        return StaticEnergyFormulation
+    elseif formulation ∈ (:LiquidIcePotentialTemperature, :θ, :ρθ, :PotentialTemperature)
+        return LiquidIcePotentialTemperatureFormulation
+    else
+        throw(ArgumentError("Unknown thermodynamic formulation: $formulation."))
+    end
+end
+
 Oceananigans.fields(formulation::LiquidIcePotentialTemperatureFormulation) = (; θ=formulation.potential_temperature)
 Oceananigans.prognostic_fields(formulation::LiquidIcePotentialTemperatureFormulation) = (; ρθ=formulation.potential_temperature_density)
 
@@ -47,9 +63,19 @@ Oceananigans.prognostic_fields(formulation::LiquidIcePotentialTemperatureFormula
 ##### Materialization
 #####
 
-default_thermodynamic_formulation() = LiquidIcePotentialTemperatureFormulation(nothing, nothing)
+# Materialize formulation from Symbol
+function materialize_formulation(formulation::Symbol, dynamics, grid, boundary_conditions)
+    if formulation ∈ (:StaticEnergy, :e, :ρe)
+        return materialize_formulation(StaticEnergyFormulation, dynamics, grid, boundary_conditions)
+    elseif formulation ∈ (:LiquidIcePotentialTemperature, :θ, :ρθ, :PotentialTemperature)
+        return materialize_formulation(LiquidIcePotentialTemperatureFormulation, dynamics, grid, boundary_conditions)
+    else
+        throw(ArgumentError("Unknown thermodynamic formulation: $formulation. " *
+                            "Valid options are :StaticEnergy, :LiquidIcePotentialTemperature."))
+    end
+end
 
-function materialize_thermodynamic_formulation(::LiquidIcePotentialTemperatureFormulation, dynamics, grid, boundary_conditions)
+function materialize_formulation(::Type{LiquidIcePotentialTemperatureFormulation}, dynamics, grid, boundary_conditions)
     potential_temperature_density = CenterField(grid, boundary_conditions=boundary_conditions.ρθ)
     potential_temperature = CenterField(grid)  # θ = ρθ / ρ (diagnostic)
     return LiquidIcePotentialTemperatureFormulation(potential_temperature_density, potential_temperature)

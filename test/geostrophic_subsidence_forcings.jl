@@ -116,8 +116,8 @@ end
     Oceananigans.defaults.FloatType = FT
     grid = RectilinearGrid(default_arch; size=(4, 4, 4), x=(0, 100), y=(0, 100), z=(0, 100))
     reference_state = ReferenceState(grid)
-    formulation = AnelasticFormulation(reference_state; thermodynamics=:StaticEnergy)
-    model = AtmosphereModel(grid; formulation)
+    dynamics = AnelasticDynamics(reference_state)
+    model = AtmosphereModel(grid; dynamics, formulation=:StaticEnergy)
 
     # Get the reference potential temperature
     θ₀ = model.dynamics.reference_state.potential_temperature

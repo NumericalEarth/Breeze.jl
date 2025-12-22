@@ -19,8 +19,7 @@ export
     StaticEnergyFormulation,
     LiquidIcePotentialTemperatureFormulation,
     # Interface functions
-    default_thermodynamic_formulation,
-    materialize_thermodynamic_formulation,
+    materialize_formulation,
     prognostic_thermodynamic_field_names,
     additional_thermodynamic_field_names,
     thermodynamic_density_name,

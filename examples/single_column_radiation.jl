@@ -29,7 +29,7 @@ reference_state = ReferenceState(grid, constants;
                                  surface_pressure = 101325,
                                  potential_temperature = surface_temperature)
 
-formulation = AnelasticFormulation(reference_state)
+dynamics = AnelasticDynamics(reference_state)
 
 # ## Radiative transfer model
 #
@@ -52,7 +52,7 @@ radiation = RadiativeTransferModel(grid, constants, optical_thickness;
 
 clock = Clock(time=DateTime(1950, 11, 1, 12, 0, 0))
 microphysics = SaturationAdjustment(equilibrium = WarmPhaseEquilibrium())
-model = AtmosphereModel(grid; clock, formulation, microphysics, radiation)
+model = AtmosphereModel(grid; clock, dynamics, microphysics, radiation)
 
 # ## Initial condition: idealized tropical profile with a cloud
 #

@@ -64,7 +64,7 @@ Arguments
 
    * The default `dynamics` is `AnelasticDynamics`.
 
-   * The default `thermodynamic_formulation` is `StaticEnergyFormulation`.
+   * The default `formulation` is `:LiquidIcePotentialTemperature`.
 
    * The default `advection` scheme is `Centered(order=2)` for both momentum
      and scalars. If a single `advection` is provided, it is used for both momentum
@@ -105,9 +105,8 @@ Pauluis, O. (2008). Thermodynamic consistency of the anelastic approximation for
 function AtmosphereModel(grid;
                          clock = Clock(grid),
                          thermodynamic_constants = ThermodynamicConstants(eltype(grid)),
-                         formulation = nothing,
+                         formulation = :LiquidIcePotentialTemperature,
                          dynamics = nothing,
-                         thermodynamic_formulation = nothing,
                          moisture_density = DefaultValue(),
                          tracers = tuple(),
                          coriolis = nothing,
@@ -121,17 +120,8 @@ function AtmosphereModel(grid;
                          timestepper = :RungeKutta3,
                          radiation = nothing)
 
-    # Handle formulation keyword (extracts dynamics and thermodynamic_formulation)
-    if !isnothing(formulation)
-        isnothing(dynamics) || @warn "Both `formulation` and `dynamics` specified; using `formulation.dynamics`."
-        isnothing(thermodynamic_formulation) || @warn "Both `formulation` and `thermodynamic_formulation` specified; using `formulation.thermodynamic_formulation`."
-        dynamics = formulation.dynamics
-        thermodynamic_formulation = formulation.thermodynamic_formulation
-    end
-
-    # Use defaults if not specified
+    # Use default dynamics if not specified
     isnothing(dynamics) && (dynamics = default_dynamics(grid, thermodynamic_constants))
-    isnothing(thermodynamic_formulation) && (thermodynamic_formulation = default_thermodynamic_formulation())
 
     if !(advection isa DefaultValue)
         # TODO: check that tracer+momentum advection were not independently set.
@@ -152,8 +142,8 @@ function AtmosphereModel(grid;
     tracers = tupleit(tracers) # supports tracers=:c keyword argument (for example)
     tracer_names = validate_tracers(tracers)
 
-    # Get field names from dynamics and thermodynamic formulation
-    prognostic_names = prognostic_field_names(dynamics, thermodynamic_formulation, microphysics, tracers)
+    # Get field names from dynamics and formulation
+    prognostic_names = prognostic_field_names(dynamics, formulation, microphysics, tracers)
     default_boundary_conditions = NamedTuple{prognostic_names}(FieldBoundaryConditions() for _ in prognostic_names)
     boundary_conditions = merge(default_boundary_conditions, boundary_conditions)
 
@@ -161,12 +151,12 @@ function AtmosphereModel(grid;
     surface_pressure = dynamics.reference_state.surface_pressure
     boundary_conditions = regularize_atmosphere_model_boundary_conditions(boundary_conditions, grid, surface_pressure, thermodynamic_constants)
 
-    all_names = field_names(dynamics, thermodynamic_formulation, microphysics, tracers)
+    all_names = field_names(dynamics, formulation, microphysics, tracers)
     boundary_conditions = regularize_field_boundary_conditions(boundary_conditions, grid, all_names)
 
-    # Materialize dynamics and thermodynamic formulation
+    # Materialize dynamics and formulation
     dynamics = materialize_dynamics(dynamics, grid, boundary_conditions)
-    formulation = materialize_thermodynamic_formulation(thermodynamic_formulation, dynamics, grid, boundary_conditions)
+    formulation = materialize_formulation(formulation, dynamics, grid, boundary_conditions)
 
     momentum, velocities = materialize_momentum_and_velocities(dynamics, grid, boundary_conditions)
     microphysical_fields = materialize_microphysical_fields(microphysics, grid, boundary_conditions)

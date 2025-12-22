@@ -10,18 +10,16 @@
 #####
 
 """
-    default_thermodynamic_formulation()
+    materialize_formulation(formulation, dynamics, grid, boundary_conditions)
 
-Return the default thermodynamic formulation (LiquidIcePotentialTemperatureFormulation).
-"""
-function default_thermodynamic_formulation end
+Materialize a thermodynamic formulation from a Symbol (or formulation struct) into a 
+complete formulation with all required fields.
 
+Valid symbols:
+- `:LiquidIcePotentialTemperature`, `:θ`, `:ρθ`, `:PotentialTemperature` → `LiquidIcePotentialTemperatureFormulation`
+- `:StaticEnergy`, `:e`, `:ρe` → `StaticEnergyFormulation`
 """
-    materialize_thermodynamic_formulation(formulation_stub, dynamics, grid, boundary_conditions)
-
-Materialize a thermodynamic formulation stub into a complete formulation with all required fields.
-"""
-function materialize_thermodynamic_formulation end
+function materialize_formulation end
 
 #####
 ##### Field naming interface
@@ -32,7 +30,8 @@ function materialize_thermodynamic_formulation end
 
 Return a tuple of prognostic field names for the given thermodynamic formulation.
 """
-function prognostic_thermodynamic_field_names end
+prognostic_thermodynamic_field_names(formulation::Symbol) =
+    prognostic_thermodynamic_field_names(Val(formulation))
 
 """
     additional_thermodynamic_field_names(formulation)

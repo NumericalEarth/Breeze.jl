@@ -58,7 +58,7 @@ reference_state = ReferenceState(grid, constants,
                                  surface_pressure = 101500,
                                  potential_temperature = 299.1)
 
-formulation = AnelasticFormulation(reference_state)
+dynamics = AnelasticDynamics(reference_state)
 
 # ## Surface fluxes
 #
@@ -203,7 +203,7 @@ nothing #hide
 microphysics = SaturationAdjustment(equilibrium=WarmPhaseEquilibrium())
 advection = WENO(order=9)
 
-model = AtmosphereModel(grid; formulation, coriolis, microphysics, advection, forcing,
+model = AtmosphereModel(grid; dynamics, coriolis, microphysics, advection, forcing,
                         boundary_conditions = (ρθ=ρθ_bcs, ρqᵗ=ρqᵗ_bcs, ρu=ρu_bcs, ρv=ρv_bcs))
 
 # ## Initial conditions
