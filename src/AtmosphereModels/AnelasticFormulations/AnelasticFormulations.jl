@@ -42,7 +42,9 @@ import Breeze.AtmosphereModels:
     additional_field_names,
     mean_pressure,
     pressure_anomaly,
-    total_pressure
+    total_pressure,
+    formulation_density,
+    formulation_pressure
 
 # Import AtmosphereModel for type alias
 using Breeze.AtmosphereModels: AtmosphereModel

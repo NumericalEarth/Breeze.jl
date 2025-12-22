@@ -6,6 +6,7 @@ export
     SaturationAdjustment,
     MixedPhaseEquilibrium,
     WarmPhaseEquilibrium,
+    NonEquilibriumCloudFormation,
     BulkMicrophysics,
     FourCategories,
     SaturationSpecificHumidity,

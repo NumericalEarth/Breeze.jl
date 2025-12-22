@@ -20,13 +20,9 @@ export
     CondensedPhase,
     mixture_gas_constant,
     mixture_heat_capacity,
-
-    # Pressure accessors
-    mean_pressure,
-    pressure_anomaly,
-    total_pressure,
-
+    
     # Diagnostics
+    compute_hydrostatic_pressure!,
     PotentialTemperature,
     VirtualPotentialTemperature,
     EquivalentPotentialTemperature,
@@ -39,6 +35,8 @@ export
     liquid_ice_potential_temperature_density,
     liquid_ice_potential_temperature,
     precipitation_rate,
+    surface_precipitation_flux,
+    total_pressure,
 
     # Microphysics
     SaturationAdjustment,
@@ -51,6 +49,7 @@ export
     BulkMicrophysics,
     DCMIP2016KesslerMicrophysics,
     compute_hydrostatic_pressure!,
+    NonEquilibriumCloudFormation,
 
     # BoundaryConditions
     BulkDrag,
@@ -64,9 +63,10 @@ export
 using Oceananigans: Oceananigans, @at, AnisotropicMinimumDissipation, Average,
                     AveragedTimeInterval, BackgroundField, BetaPlane, Bounded,
                     CPU, Callback, Center, CenterField, Centered, Checkpointer, Clock,
-                    ConstantCartesianCoriolis, Distributed, FPlane, Face,
-                    Field, FieldBoundaryConditions, FieldDataset,
-                    FieldTimeSeries, Flat, FluxBoundaryCondition, Forcing, GPU,
+                    ConstantCartesianCoriolis, Distributed, DynamicSmagorinsky,
+                    ExponentialDiscretization, FPlane, Face, Field, FieldBoundaryConditions,
+                    FieldDataset, FieldTimeSeries, Flat, FluxBoundaryCondition, Forcing,
+                    Relaxation, GaussianMask, GPU,
                     GradientBoundaryCondition, GridFittedBottom,
                     ImmersedBoundaryCondition, ImmersedBoundaryGrid, InMemory,
                     Integral, IterationInterval, JLD2Writer,
@@ -84,11 +84,12 @@ using Oceananigans: Oceananigans, @at, AnisotropicMinimumDissipation, Average,
                     zspacings, ∂x, ∂y, ∂z
 
 using Oceananigans.Grids: znode
+using Oceananigans.BoundaryConditions: ImpenetrableBoundaryCondition
 
 export
     CPU, GPU,
     Center, Face, Periodic, Bounded, Flat,
-    RectilinearGrid, Clock,
+    RectilinearGrid, ExponentialDiscretization, Clock,
     nodes, xnodes, ynodes, znodes,
     znode,
     xspacings, yspacings, zspacings,
@@ -96,14 +97,14 @@ export
     ImmersedBoundaryGrid, GridFittedBottom, PartialCellBottom, ImmersedBoundaryCondition,
     Distributed, Partition,
     Centered, UpwindBiased, WENO, FluxFormAdvection,
-    FluxBoundaryCondition, ValueBoundaryCondition, GradientBoundaryCondition,
+    FluxBoundaryCondition, ValueBoundaryCondition, GradientBoundaryCondition, ImpenetrableBoundaryCondition,
     OpenBoundaryCondition, PerturbationAdvection, FieldBoundaryConditions,
     Field, CenterField, XFaceField, YFaceField, ZFaceField,
     Average, Integral,
     BackgroundField, interior, set!, compute!, regrid!,
-    Forcing,
+    Forcing, Relaxation, GaussianMask,
     FPlane, ConstantCartesianCoriolis, BetaPlane, NonTraditionalBetaPlane,
-    SmagorinskyLilly, AnisotropicMinimumDissipation,
+    SmagorinskyLilly, AnisotropicMinimumDissipation, DynamicSmagorinsky,
     LagrangianParticles,
     conjure_time_step_wizard!,
     time_step!, Simulation, run!, Callback, add_callback!, iteration,
