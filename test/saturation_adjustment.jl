@@ -61,8 +61,9 @@ test_thermodynamics = (:StaticEnergy, :LiquidIcePotentialTemperature)
     @test compute_temperature(𝒰₁, nothing, constants) ≈ T₁ atol=atol
 
     @testset "AtmosphereModel with $thermodynamics thermodynamics [$FT]" for thermodynamics in test_thermodynamics
-        formulation = AnelasticFormulation(reference_state; thermodynamics)
-        model = AtmosphereModel(grid; thermodynamic_constants=constants, formulation, microphysics)
+        dynamics = AnelasticDynamics(reference_state)
+        thermodynamic_formulation = thermodynamics == :StaticEnergy ? StaticEnergyFormulation(nothing, nothing) : LiquidIcePotentialTemperatureFormulation(nothing, nothing)
+        model = AtmosphereModel(grid; thermodynamic_constants=constants, dynamics, thermodynamic_formulation, microphysics)
         ρᵣ = @allowscalar first(reference_state.density)
 
         # Many more tests that touch saturated conditions
@@ -126,8 +127,9 @@ end
     microphysics = SaturationAdjustment(FT; tolerance=solver_tol(FT), equilibrium)
 
     @testset "AtmosphereModel with $thermodynamics thermodynamics [$FT]" for thermodynamics in test_thermodynamics
-        formulation = AnelasticFormulation(reference_state; thermodynamics)
-        model = AtmosphereModel(grid; thermodynamic_constants=constants, formulation, microphysics)
+        dynamics = AnelasticDynamics(reference_state)
+        thermodynamic_formulation = thermodynamics == :StaticEnergy ? StaticEnergyFormulation(nothing, nothing) : LiquidIcePotentialTemperatureFormulation(nothing, nothing)
+        model = AtmosphereModel(grid; thermodynamic_constants=constants, dynamics, thermodynamic_formulation, microphysics)
 
         # Test 1: Constructor and equilibrated_surface utility
         @test microphysics isa SaturationAdjustment

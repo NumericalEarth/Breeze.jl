@@ -105,8 +105,8 @@ end
         reference_state = ReferenceState(grid, constants;
                                          surface_pressure = 101325,
                                          potential_temperature = 300)
-        formulation = AnelasticFormulation(reference_state,
-                                           thermodynamics = :LiquidIcePotentialTemperature)
+        dynamics = AnelasticDynamics(reference_state)
+        thermodynamic_formulation = LiquidIcePotentialTemperatureFormulation(nothing, nothing)
 
         optical_thickness = GrayOpticalThicknessOGorman2008(FT)
         radiation = RadiativeTransferModel(grid, constants, optical_thickness;
@@ -116,7 +116,7 @@ end
                                            solar_constant = 1361)
 
         clock = Clock(time=DateTime(2024, 6, 21, 12, 0, 0))
-        model = AtmosphereModel(grid; clock, formulation, radiation)
+        model = AtmosphereModel(grid; clock, dynamics, thermodynamic_formulation, radiation)
 
         @test model.radiation !== nothing
         @test model.radiation === radiation
@@ -132,8 +132,8 @@ end
         reference_state = ReferenceState(grid, constants;
                                          surface_pressure = 101325,
                                          potential_temperature = 300)
-        formulation = AnelasticFormulation(reference_state,
-                                           thermodynamics = :LiquidIcePotentialTemperature)
+        dynamics = AnelasticDynamics(reference_state)
+        thermodynamic_formulation = LiquidIcePotentialTemperatureFormulation(nothing, nothing)
 
         optical_thickness = GrayOpticalThicknessOGorman2008(FT)
         radiation = RadiativeTransferModel(grid, constants, optical_thickness;
@@ -144,7 +144,7 @@ end
 
         # Use noon on summer solstice at 45°N for good solar illumination
         clock = Clock(time=DateTime(2024, 6, 21, 16, 0, 0))
-        model = AtmosphereModel(grid; clock, formulation, radiation)
+        model = AtmosphereModel(grid; clock, dynamics, thermodynamic_formulation, radiation)
 
         # Set initial condition - this should trigger radiation update
         θ(z) = 300 + 0.01 * z / 1000

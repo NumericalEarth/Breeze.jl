@@ -1,5 +1,5 @@
 using Breeze
-using Breeze: ReferenceState, AnelasticFormulation, GeostrophicForcing
+using Breeze: ReferenceState, AnelasticDynamics, LiquidIcePotentialTemperatureFormulation, GeostrophicForcing
 using Oceananigans: Oceananigans, prognostic_fields
 using Oceananigans.Fields: interior
 using Oceananigans.Grids: znodes, Center
@@ -73,8 +73,9 @@ end
 
     # Use LiquidIcePotentialTemperature thermodynamics
     reference_state = ReferenceState(grid)
-    formulation = AnelasticFormulation(reference_state; thermodynamics=:LiquidIcePotentialTemperature)
-    model = AtmosphereModel(grid; formulation, forcing=(; ρqᵗ=subsidence))
+    dynamics = AnelasticDynamics(reference_state)
+    thermodynamic_formulation = LiquidIcePotentialTemperatureFormulation(nothing, nothing)
+    model = AtmosphereModel(grid; dynamics, thermodynamic_formulation, forcing=(; ρqᵗ=subsidence))
 
     # Set potential temperature to reference state
     θ₀ = model.dynamics.reference_state.potential_temperature
@@ -183,7 +184,8 @@ end
     Oceananigans.defaults.FloatType = FT
     grid = RectilinearGrid(default_arch; size=(1, 1, 4), x=(0, 10), y=(0, 10), z=(0, 16))
     reference_state = ReferenceState(grid)
-    formulation = AnelasticFormulation(reference_state, thermodynamics=:LiquidIcePotentialTemperature)
+    dynamics = AnelasticDynamics(reference_state)
+    thermodynamic_formulation = LiquidIcePotentialTemperatureFormulation(nothing, nothing)
 
     wˢ = 1
     Γ = 1e-2
@@ -202,7 +204,7 @@ end
                     forcing = (; name => (subsidence, zero_forcing))
                 end
 
-                kw = (; advection=nothing, timestepper=:QuasiAdamsBashforth2, formulation, forcing)
+                kw = (; advection=nothing, timestepper=:QuasiAdamsBashforth2, dynamics, thermodynamic_formulation, forcing)
                 model = AtmosphereModel(grid; tracers=:ρc, kw...)
                 θ₀ = model.dynamics.reference_state.potential_temperature
 
