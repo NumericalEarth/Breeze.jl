@@ -118,7 +118,7 @@ K  = 2π / λ                 # rad m⁻¹ - terrain wavenumber
 
 # ## Grid configuration
 #
-# The domain spans 200 km horizontally (±100 km) and 20 km vertically. We use a hybrid
+# The domain spans 200 km horizontally (±100 km) and 20 km vertically. We use a non-uniform
 # vertical grid with exponential refinement near the surface to resolve the terrain,
 # transitioning to uniform 500 m spacing above 1 km altitude.
 
@@ -133,7 +133,7 @@ dz_top = 500                # m - constant spacing above transition
 # Calculate grid distribution:
 
 Nz_top = ceil(Int, (H - z_transition) / dz_top)     # cells in uniform region
-Nz_bottom = Nz - Nz_top                              # cells in stretched region
+Nz_bottom = Nz - Nz_top                             # cells in stretched region
 
 # Construct hybrid vertical grid:
 
@@ -153,7 +153,7 @@ underlying_grid = RectilinearGrid(GPU(),
 # ## Mountain profile and immersed boundary
 #
 # Define the Schär mountain profile and create an immersed boundary grid using the
-# partial cell method for improved terrain representation:
+# partial cell method for terrain representation:
 
 hill(x) = h₀ * exp(-(x / a)^2) * cos(π * x / λ)^2
 grid = ImmersedBoundaryGrid(underlying_grid, PartialCellBottom(hill))
@@ -216,12 +216,12 @@ sponge_params = (z0 = grid.Lz, dz = grid.Lz / 2, ω = 1/60)
 
 # ## Model initialization
 #
-# Create the atmosphere model with the anelastic formulation, high-order WENO advection,
+# Create the atmosphere model with the anelastic formulation, 5th-order WENO advection,
 # and the Rayleigh damping layer:
 reference_state = ReferenceState(grid, constants, surface_pressure=p₀, potential_temperature=θ₀)
 formulation = AnelasticFormulation(reference_state)
 
-advection = WENO()
+advection = WENO(order=5)
 model = AtmosphereModel(grid; formulation, advection, forcing=(; ρw=ρw_forcing))
 
 # ## Initial conditions
@@ -368,8 +368,11 @@ end
 # ## Results: Comparison with analytical solution
 #
 # We compare the simulated vertical velocity field at 2 hours with the linear
-# analytical solution. Good agreement in the near-field validates the model's
-# representation of terrain-induced gravity waves.
+# analytical solution. While the simulation reproduces the general gravity wave
+# pattern, noticeable discrepancies in wavenumber appear. The immersed boundary
+# method struggles to resolve the low-amplitude, fine-scale terrain corrugations
+# at this resolution. A terrain-following coordinate would be better suited for
+# this test case.
 
 # Create comparison figure with simulated and analytical vertical velocity:
 
