@@ -48,11 +48,11 @@ end
     model = AtmosphereModel(grid; forcing=(; ρθ=subsidence))
 
     # Check that forcing is materialized correctly
-    @test haskey(model.forcing, :ρe)
-    @test model.forcing.ρe isa SubsidenceForcing
+    @test haskey(model.forcing, :ρθ)
+    @test model.forcing.ρθ isa SubsidenceForcing
 
     # Check that the subsidence velocity field is set up correctly
-    @test !isnothing(model.forcing.ρe.subsidence_vertical_velocity)
+    @test !isnothing(model.forcing.ρθ.subsidence_vertical_velocity)
 
     # Time step should not error
     Δt = 1e-6
@@ -114,8 +114,9 @@ end
     # by converting potential temperature to energy density
     Oceananigans.defaults.FloatType = FT
     grid = RectilinearGrid(default_arch; size=(4, 4, 4), x=(0, 100), y=(0, 100), z=(0, 100))
-
-    model = AtmosphereModel(grid)  # Default is StaticEnergy
+    reference_state = ReferenceState(grid)
+    formulation = AnelasticFormulation(reference_state; thermodynamics=:StaticEnergy)
+    model = AtmosphereModel(grid; formulation)  # Default is StaticEnergy
 
     # Get the reference potential temperature
     θ₀ = model.formulation.reference_state.potential_temperature
@@ -148,9 +149,7 @@ end
     # Combine forcings: (subsidence, geostrophic) for momentum
     forcing = (;
         ρu = (subsidence, geostrophic.ρu),
-        ρv = (subsidence, geostrophic.ρv),
-        ρθ = subsidence,
-        ρqᵗ = subsidence
+        ρv = (subsidence, geostrophic.ρv)
     )
 
     coriolis = FPlane(f=1e-4)
@@ -160,8 +159,6 @@ end
     # When tuples are passed, they get wrapped in MultipleForcings
     @test haskey(model.forcing, :ρu)
     @test haskey(model.forcing, :ρv)
-    @test haskey(model.forcing, :ρe)
-    @test haskey(model.forcing, :ρqᵗ)
 
     # Time step should not error
     Δt = 1e-6

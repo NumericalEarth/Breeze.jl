@@ -224,7 +224,8 @@ function AtmosphereModel(grid;
                             closure_fields,
                             radiation)
 
-    update_state!(model)
+    θ₀ = formulation.reference_state.potential_temperature
+    set!(model, θ=θ₀)
 
     return model
 end
