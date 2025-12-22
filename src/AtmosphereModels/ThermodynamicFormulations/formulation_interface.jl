@@ -19,7 +19,8 @@ Valid symbols:
 - `:LiquidIcePotentialTemperature`, `:θ`, `:ρθ`, `:PotentialTemperature` → `LiquidIcePotentialTemperatureFormulation`
 - `:StaticEnergy`, `:e`, `:ρe` → `StaticEnergyFormulation`
 """
-function materialize_formulation end
+materialize_formulation(formulation_name::Symbol, args...) =
+    materialize_formulation(Val(formulation_name), args...)
 
 #####
 ##### Field naming interface
@@ -29,23 +30,28 @@ function materialize_formulation end
     prognostic_thermodynamic_field_names(formulation)
 
 Return a tuple of prognostic field names for the given thermodynamic formulation.
+Accepts a Symbol, Val(Symbol), or formulation struct.
 """
-prognostic_thermodynamic_field_names(formulation::Symbol) =
-    prognostic_thermodynamic_field_names(Val(formulation))
+prognostic_thermodynamic_field_names(formulation_name::Symbol) =
+    prognostic_thermodynamic_field_names(Val(formulation_name))
 
 """
     additional_thermodynamic_field_names(formulation)
 
 Return a tuple of additional (diagnostic) field names for the given thermodynamic formulation.
+Accepts a Symbol, Val(Symbol), or formulation struct.
 """
-function additional_thermodynamic_field_names end
+additional_thermodynamic_field_names(formulation_name::Symbol) =
+    additional_thermodynamic_field_names(Val(formulation_name))
 
 """
     thermodynamic_density_name(formulation)
 
 Return the name of the thermodynamic density field (e.g., `:ρθ`, `:ρe`, `:ρE`).
+Accepts a Symbol, Val(Symbol), or formulation struct.
 """
-function thermodynamic_density_name end
+thermodynamic_density_name(formulation::Symbol) =
+    thermodynamic_density_name(Val(formulation))
 
 """
     thermodynamic_density(formulation)
