@@ -349,8 +349,7 @@ end
 # analytical solution. While the simulation reproduces the general gravity wave
 # pattern, noticeable discrepancies in wavenumber appear. The immersed boundary
 # method struggles to resolve the low-amplitude, fine-scale terrain corrugations
-# at this resolution. A terrain-following coordinate would be better suited for
-# this test case.
+# at this resolution.
 
 # Create comparison figure with simulated and analytical vertical velocity:
 
