@@ -25,7 +25,7 @@ using RRTMGP
                                            thermodynamics = :LiquidIcePotentialTemperature)
 
         optics = RRTMGPGasOptics(Float64)
-        radiation = RadiativeTransferModel(grid, constants, optics;
+        radiation = RadiativeTransferModel(grid, optics, constants;
                                            surface_temperature = 300,
                                            surface_emissivity = 0.98,
                                            surface_albedo = 0.1,
