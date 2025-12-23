@@ -1,5 +1,5 @@
-using Oceananigans.BoundaryConditions: BoundaryCondition, Open
 using Oceananigans.AbstractOperations: Integral, Ax, Ay, Az, grid_metric_operation
+using Oceananigans.BoundaryConditions: BoundaryCondition, Open
 using Oceananigans.Fields: Field, interior, compute!
 using Oceananigans.Grids: Face, Center
 using GPUArraysCore: @allowscalar
@@ -101,7 +101,7 @@ needs_mass_flux_correction(::Nothing) = false
 needs_mass_flux_correction(bc) = false
 
 """
-    initialize_boundary_mass_fluxes(momentum::NamedTuple)
+$(TYPEDSIGNATURES)
 
 Initialize boundary mass fluxes for boundaries with OpenBoundaryConditions,
 returning a NamedTuple of boundary fluxes. For AtmosphereModel, this integrates
@@ -201,7 +201,7 @@ open_boundary_mass_flux(model, bc::ZIOBC, ::Val{:top}, ρw) = zero(model.grid)
 open_boundary_mass_flux(model, bc, side, momentum) = zero(model.grid)
 
 """
-    open_boundary_mass_inflow(model)
+$(TYPEDSIGNATURES)
 
 Compute the total mass inflow through all open boundaries. Positive values
 indicate net mass entering the domain.
@@ -248,7 +248,7 @@ correct_right_boundary_mass_flux!(ρu, bc, side, A⁻¹_∮ρudA) = nothing
 enforce_open_boundary_mass_conservation!(model, ::Nothing) = nothing
 
 """
-    enforce_open_boundary_mass_conservation!(model, boundary_mass_fluxes)
+$(TYPEDSIGNATURES)
 
 Correct boundary mass fluxes for perturbation advection boundary conditions to ensure
 zero net mass flux through all open boundaries. This corrects the momentum fields
@@ -270,4 +270,3 @@ function enforce_open_boundary_mass_conservation!(model, boundary_mass_fluxes)
     correct_right_boundary_mass_flux!(ρv, ρv.boundary_conditions.north, Val(:north), A⁻¹_∮ρudA)
     correct_right_boundary_mass_flux!(ρw, ρw.boundary_conditions.top, Val(:top), A⁻¹_∮ρudA)
 end
-
