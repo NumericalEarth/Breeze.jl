@@ -2,16 +2,6 @@
 ##### AnelasticDynamics definition
 #####
 
-"""
-$(TYPEDSIGNATURES)
-
-`AnelasticDynamics` is a dynamical formulation wherein the density and pressure are
-small perturbations from a dry, hydrostatic, adiabatic `reference_state`.
-The anelastic approximation filters acoustic waves.
-
-Following [Pauluis2008](@citet), the anelastic equations include a buoyancy flux term
-in the energy equation when using static energy as the thermodynamic variable.
-"""
 struct AnelasticDynamics{R, P}
     reference_state :: R
     pressure_anomaly :: P
