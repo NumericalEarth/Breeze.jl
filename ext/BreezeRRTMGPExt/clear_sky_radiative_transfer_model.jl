@@ -9,6 +9,7 @@ using Oceananigans.Grids: Center, Face
 using Oceananigans.Fields: ConstantField
 
 using Breeze.AtmosphereModels: AtmosphereModels, SurfaceRadiativeProperties
+using Breeze.Thermodynamics: ThermodynamicConstants
 import Breeze.AtmosphereModels: RadiativeTransferModel, RRTMGPGasOptics, BackgroundAtmosphericComposition
 
 using Dates: AbstractDateTime, Millisecond
@@ -30,7 +31,7 @@ RRTMGP loads lookup tables from netCDF via an extension.
 """
 function RadiativeTransferModel(grid,
                                 optics::RRTMGPGasOptics,
-                                parameters::RRTMGPParameters = default_rrtmgp_parameters(eltype(grid));
+                                constants::ThermodynamicConstants;
                                 surface_temperature,
                                 coordinate = nothing,
                                 epoch = nothing,
@@ -41,6 +42,7 @@ function RadiativeTransferModel(grid,
                                 solar_constant = 1361)
 
     FT = eltype(grid)
+    parameters = RRTMGPParameters(constants)
 
     error_msg = "Must either provide surface_albedo or *both* of
                  direct_surface_albedo and diffuse_surface_albedo"

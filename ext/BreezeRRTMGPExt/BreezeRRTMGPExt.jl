@@ -1,6 +1,8 @@
 module BreezeRRTMGPExt
 
 using Breeze
+
+using Breeze.Thermodynamics: ThermodynamicConstants
 using RRTMGP: RRTMGP
 
 using Dates: DateTime
@@ -19,7 +21,8 @@ using Oceananigans.Fields: ZFaceField
 using RRTMGP: RRTMGPGridParams
 using RRTMGP.RTE: NoScatLWRTE, NoScatSWRTE
 using RRTMGP.RTESolver: solve_lw!, solve_sw!
-using RRTMGP.Parameters: RRTMGPParameters
+
+import RRTMGP.Parameters: RRTMGPParameters
 
 using ClimaComms: ClimaComms
 
@@ -29,38 +32,24 @@ const SingleColumnGrid = RectilinearGrid{<:Any, <:Flat, <:Flat, <:Bounded}
 const DateTimeClock = Clock{DateTime}
 
 """
-    default_rrtmgp_parameters(FT=Float64)
-
-Return `RRTMGPParameters` with sensible default values for Earth's atmosphere.
-"""
-function default_rrtmgp_parameters(::Type{FT}=Float64) where FT
-    return RRTMGPParameters(
-        grav           = FT(9.80665),        # m/s²
-        molmass_dryair = FT(0.028964),       # kg/mol
-        molmass_water  = FT(0.018015),       # kg/mol
-        gas_constant   = FT(8.3144598),      # J/(mol·K)
-        kappa_d        = FT(1004.64/0.028964), # J/(kg·K) / (kg/mol) = J/(mol·K)
-        Stefan         = FT(5.670374419e-8), # W m⁻² K⁻⁴
-        avogad         = FT(6.02214076e23),  # mol⁻¹
-    )
-end
-
-"""
     RRTMGPParameters(constants::ThermodynamicConstants)
 
 Construct `RRTMGPParameters` from Breeze's `ThermodynamicConstants`.
 """
-function RRTMGPParameters(constants::ThermodynamicConstants{FT}) where FT
+function RRTMGPParameters(constants::ThermodynamicConstants{FT};
+                          stefan_bolzmann_constant = 5.670374419e-8,  # W m⁻² K⁻⁴
+                          avogadro_number = 6.02214076e23) where FT  # mol⁻¹
+
     ϰᵈ = constants.dry_air.heat_capacity / constants.dry_air.molar_mass
 
     return RRTMGPParameters(
-        grav           = FT(constants.gravitational_acceleration),
-        molmass_dryair = FT(constants.dry_air.molar_mass),
-        molmass_water  = FT(constants.vapor.molar_mass),
-        gas_constant   = FT(constants.molar_gas_constant),
-        kappa_d        = FT(ϰᵈ),
-        Stefan         = FT(5.670374419e-8),  # W m⁻² K⁻⁴
-        avogad         = FT(6.02214076e23),   # mol⁻¹
+        grav           = convert(FT, constants.gravitational_acceleration),
+        molmass_dryair = convert(FT, constants.dry_air.molar_mass),
+        molmass_water  = convert(FT, constants.vapor.molar_mass),
+        gas_constant   = convert(FT, constants.molar_gas_constant),
+        kappa_d        = convert(FT, ϰᵈ),
+        Stefan         = convert(FT, stefan_bolzmann_constant),  # W m⁻² K⁻⁴
+        avogad         = convert(FT, avogadro_number),   # mol⁻¹
     )
 end
 

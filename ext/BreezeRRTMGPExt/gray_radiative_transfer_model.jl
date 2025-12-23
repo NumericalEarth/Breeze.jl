@@ -52,7 +52,7 @@ Construct a gray atmosphere radiative transfer model for the given grid.
 """
 function RadiativeTransferModel(grid,
                                 optics::GrayOpticalThicknessOGorman2008,
-                                parameters::RRTMGPParameters = default_rrtmgp_parameters(eltype(grid));
+                                constants::ThermodynamicConstants;
                                 surface_temperature,
                                 coordinate = nothing,
                                 epoch = nothing,
@@ -64,6 +64,7 @@ function RadiativeTransferModel(grid,
                                 solar_constant = 1361)
 
     FT = eltype(grid)
+    parameters = RRTMGPParameters(constants)
 
     error_msg = "Must either provide surface_albedo or *both* of
                  direct_surface_albedo and diffuse_surface_albedo"
