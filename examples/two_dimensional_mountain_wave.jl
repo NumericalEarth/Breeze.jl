@@ -7,12 +7,10 @@
 #
 # ## References
 #
-# - [Schar2002](@cite) Schär, C., Leuenberger, D., Fuhrer, O., Lüthi, D., & Girard, C. (2002).
-#   "A new terrain-following vertical coordinate formulation for atmospheric prediction models."
-#   Monthly Weather Review, 130(10), 2459–2480.
-# - [KlempEtAl2015](@cite) Klemp, J. B., Skamarock, W. C., & Park, S.-H. (2015).
-#   "Idealized global nonhydrostatic atmospheric test cases on a reduced-radius sphere."
-#   Journal of Advances in Modeling Earth Systems, 7(3), 1155–1177.
+# ```@bibliography
+# Pages = ["literated/two_dimensional_mountain_wave.md"]
+# Canonical = false
+# ```
 #
 # ## Physical setup
 #
