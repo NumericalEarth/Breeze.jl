@@ -10,8 +10,7 @@ end
 """
 $(TYPEDSIGNATURES)
 
-Construct an un-materialized "stub" `AnelasticDynamics` with `reference_state`.
-The pressure anomaly field is materialized later in the model constructor.
+Return `AnelasticDynamics` representing incompressible fluid dynamics expanded about `reference_state`.
 """
 AnelasticDynamics(reference_state) = AnelasticDynamics(reference_state, nothing)
 
