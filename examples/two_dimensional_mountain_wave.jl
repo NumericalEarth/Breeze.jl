@@ -342,6 +342,7 @@ function w_linear(x, z; nk=100)
     integral = Δk * (sum(integrand) - (first(integrand) + last(integrand)) / 2)
     return -(U / π) * exp(β * z / 2) * integral
 end
+nothing #hide
 
 # ## Results: Comparison with analytical solution
 #
