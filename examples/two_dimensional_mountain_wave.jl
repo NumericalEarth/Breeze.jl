@@ -120,12 +120,12 @@ K  = 2π / λ                 # rad m⁻¹ - terrain wavenumber
 # vertical grid with exponential refinement near the surface to resolve the terrain,
 # transitioning to uniform 500 m spacing above 1 km altitude.
 
-Nx, Nz = 200, 100
+Nx, Nz = 200, 75
 L, H = 100kilometers, 20kilometers
 
 # Vertical grid stretching parameters:
 
-z_transition = 1000         # m - transition height to uniform spacing
+z_transition = 500         # m - transition height to uniform spacing
 dz_top = 500                # m - constant spacing above transition
 
 # Calculate grid distribution:
@@ -135,7 +135,7 @@ Nz_bottom = Nz - Nz_top                             # cells in stretched region
 
 # Construct hybrid vertical grid:
 
-z_stretched = ExponentialDiscretization(Nz_bottom, 0, z_transition, scale = z_transition / 8, bias=:left)
+z_stretched = ExponentialDiscretization(Nz_bottom, 0, z_transition, scale = z_transition / 4, bias=:left)
 z_uniform = range(z_transition + dz_top, H; length=Nz_top)
 z_faces = vcat(z_stretched.faces, collect(z_uniform))
 nothing #hide
@@ -235,7 +235,7 @@ set!(model, θ = θᵢ, u = U)
 #
 # Run for 2 hours with a fixed time step. A small time step is required for numerical stability with this test case:
 
-Δt = 2.0            # s - time step (reduced for stability)
+Δt = 4.0            # s - time step (reduced for stability)
 stop_time = 2hours  # total simulation time
 
 simulation = Simulation(model; Δt, stop_time, align_time_step=false)
