@@ -50,11 +50,11 @@ grid = RectilinearGrid(size=(64, 64, 75), x=(0, 6400), y=(0, 6400), z=(0, 3000))
 
 wˢ(z) = z < 1500 ? -0.0065 * z / 1500 : -0.0065 * (1 - (z - 1500) / 600)
 subsidence = SubsidenceForcing(wˢ)
-forcing = (; ρe=subsidence, ρqᵗ=subsidence)
+forcing = (; ρθ=subsidence, ρqᵗ=subsidence)
 
 model = AtmosphereModel(grid; forcing)
 
-model.forcing.ρe
+model.forcing.ρθ
 
 # output
 SubsidenceForcing with wˢ: 1×1×76 Field{Nothing, Nothing, Face} reduced over dims = (1, 2) on RectilinearGrid on CPU
@@ -110,9 +110,14 @@ end
 
 # Strip the ρ prefix from density variable names
 # e.g., :ρu → :u, :ρθ → :θ, :ρe → :e
-strip_density_prefix(name::Symbol) = Symbol(collect(string(name))[2:end]...)
+function strip_density_prefix(name::Symbol)
+    chars = string(name) |> collect 
+    prefix = popfirst!(chars)
+    return Symbol(chars...)
+end
 
-function AtmosphereModels.materialize_atmosphere_model_forcing(forcing::SubsidenceForcing, field, name, model_field_names, context)
+function AtmosphereModels.materialize_atmosphere_model_forcing(forcing::SubsidenceForcing, field, name,
+                                                               model_field_names, context::NamedTuple)
     grid = field.grid
 
     if forcing.subsidence_vertical_velocity isa AbstractField
