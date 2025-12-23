@@ -16,6 +16,7 @@ export
     StaticEnergyFormulation,
     LiquidIcePotentialTemperatureFormulation,
     thermodynamic_density_name,
+    thermodynamic_density,
     # Helpers
     static_energy_density,
     static_energy,
