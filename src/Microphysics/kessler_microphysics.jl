@@ -18,7 +18,9 @@ Diagnostic variable:
 Reference: Kessler (1969), "On the Distribution and Continuity of Water Substance in Atmospheric Circulations"
 """
 
-using Oceananigans: Oceananigans, CenterField
+using Oceananigans: Oceananigans, CenterField, Field, Center, Face, Nothing as ONothing
+using Oceananigans.BoundaryConditions: FieldBoundaryConditions
+using Oceananigans.Fields: ZFaceField, ZeroField
 using Oceananigans.Operators: Δzᶜᶜᶜ
 using DocStringExtensions: TYPEDSIGNATURES
 
@@ -28,7 +30,9 @@ import ..AtmosphereModels:
     microphysical_velocities,
     compute_moisture_fractions,
     microphysical_tendency,
-    update_microphysical_fields!
+    update_microphysical_fields!,
+    precipitation_rate,
+    surface_precipitation_flux
 
 using ..Thermodynamics:
     MoistureMassFractions,
@@ -152,7 +156,16 @@ function materialize_microphysical_fields(::KM, grid, boundary_conditions)
     Kₖ = CenterField(grid)  # Accretion rate
     Eʳ = CenterField(grid)  # Rain evaporation rate
 
-    return (; ρqᶜˡ, ρqʳ, qᵛ, qᶜˡ, qʳ, Cₖ, Eₖ, Aₖ, Kₖ, Eʳ)
+    # Rain terminal velocity (negative = downward)
+    # bottom = nothing ensures the kernel-set value is preserved during fill_halo_regions!
+    wʳ_bcs = FieldBoundaryConditions(grid, (Center(), Center(), Face()); bottom=nothing)
+    wʳ = ZFaceField(grid; boundary_conditions=wʳ_bcs)
+
+    # Surface precipitation rate (2D field, m/s)
+    # This is the volume flux of rain at the surface: wʳ * qʳ (positive = precipitation out of domain)
+    precipitation_rate = Field{Center, Center, ONothing}(grid)
+
+    return (; ρqᶜˡ, ρqʳ, qᵛ, qᶜˡ, qʳ, Cₖ, Eₖ, Aₖ, Kₖ, Eʳ, wʳ, precipitation_rate)
 end
 
 @inline function update_microphysical_fields!(μ, km::KM, i, j, k, grid, ρ, 𝒰, constants)
@@ -205,6 +218,18 @@ end
         μ.Aₖ[i, j, k] = Aₖ_val
         μ.Kₖ[i, j, k] = Kₖ_val
         μ.Eʳ[i, j, k] = Eʳ_val
+        
+        # Compute terminal velocity at face k (using standard sea-level reference density)
+        ρ₀ = convert(FT, 1.225)  # Standard sea-level air density [kg/m³]
+        wₜ = rain_terminal_velocity(ρ, rʳ, ρ₀)
+        wʳ = -wₜ  # Negative = downward
+        μ.wʳ[i, j, k] = wʳ
+        
+        # Compute surface precipitation rate at k=1 only (2D field)
+        # precipitation_rate = -wʳ * qʳ [m/s] (positive = precipitation falling out)
+        if k == 1
+            μ.precipitation_rate[i, j, 1] = wₜ * qʳ
+        end
     end
     return nothing
 end
@@ -334,12 +359,15 @@ $(TYPEDSIGNATURES)
 
 Return the microphysical velocities for the Kessler scheme.
 
-Returns `nothing` for all fields - sedimentation is handled internally
-via the sedimentation_tendency function in the rain tendency calculation.
+For rain (`ρqʳ`), returns the terminal velocity field `wʳ` so that Breeze's
+advection machinery handles sedimentation. Cloud liquid has no sedimentation velocity.
 """
-@inline microphysical_velocities(::KM, name::Val{:ρqʳ}) = nothing
-@inline microphysical_velocities(::KM, ::Val{:ρqᶜˡ}) = nothing
-@inline microphysical_velocities(::KM, name) = nothing
+@inline function microphysical_velocities(::KM, μ, ::Val{:ρqʳ})
+    wʳ = μ.wʳ
+    return (; u = ZeroField(), v = ZeroField(), w = wʳ)
+end
+@inline microphysical_velocities(::KM, μ, ::Val{:ρqᶜˡ}) = nothing
+@inline microphysical_velocities(::KM, μ, name) = nothing
 
 #####
 ##### Source term calculations (in mixing ratio space)
@@ -518,13 +546,14 @@ $(TYPEDSIGNATURES)
 Compute the tendency for rain density (ρqʳ).
 
 The rates Aₖ, Kₖ, Eʳ are computed once per timestep in `update_microphysical_fields!`
-and cached in the microphysical fields. Sedimentation is included using upstream differencing.
+and cached in the microphysical fields.
+
+**Sedimentation** is handled by Breeze's advection machinery via `microphysical_velocities`,
+which adds the terminal velocity `wʳ` to the rain tracer advection.
 
 ```math
-\\frac{∂(ρqʳ)}{∂t} = ρ \\cdot (1 - qᵗ) \\cdot (Aₖ + Kₖ - Eʳ + S)
+\\frac{∂(ρqʳ)}{∂t} = ρ \\cdot (1 - qᵗ) \\cdot (Aₖ + Kₖ - Eʳ)
 ```
-
-where S is the sedimentation term.
 """
 @inline function microphysical_tendency(i, j, k, grid, km::KM, ::Val{:ρqʳ}, ρᵣ, μ, 𝒰, constants)
     # Get thermodynamic quantities
@@ -538,11 +567,9 @@ where S is the sedimentation term.
         Eʳ = μ.Eʳ[i, j, k]
     end
     
-    # Sedimentation term (in mixing ratio space)
-    sed = sedimentation_tendency(i, j, k, grid, ρᵣ, μ)
-    
-    # Tendency in mixing ratio space: drʳ/dt = Aₖ + Kₖ - Eʳ + sed
-    drʳdt = Aₖ + Kₖ - Eʳ + sed
+    # Tendency in mixing ratio space: drʳ/dt = Aₖ + Kₖ - Eʳ
+    # Note: sedimentation is handled via microphysical_velocities, not here
+    drʳdt = Aₖ + Kₖ - Eʳ
     
     # Convert to mass fraction tendency
     dqʳdt = mixing_ratio_to_mass_fraction(drʳdt, qᵗ)
@@ -551,61 +578,69 @@ where S is the sedimentation term.
 end
 
 # Default: no tendency for other variables
+# Note: There is no explicit θ tendency from microphysics in this scheme.
+# Phase changes (condensation/evaporation) conserve liquid-ice potential temperature by design.
+# Sedimentation is handled via microphysical_velocities (advection of ρqʳ with terminal velocity),
+# and any θ adjustments associated with rain transport are handled automatically by Breeze's
+# thermodynamic consistency in the advection scheme.
 @inline microphysical_tendency(i, j, k, grid, ::KM, name, ρ, μ, 𝒰, constants) = zero(grid)
 
 #####
-##### Potential temperature tendency
+##### Precipitation rate diagnostics
 #####
 
 """
 $(TYPEDSIGNATURES)
 
-Compute the tendency for liquid-ice potential temperature density (ρθˡⁱ).
+Return the precipitation rate field for the Kessler scheme.
 
-In Breeze, the potential temperature is liquid-ice potential temperature (θˡⁱ), defined such that
-temperature is computed as:
+For `phase = :liquid`, returns the pre-computed `precipitation_rate` 2D field
+from `model.microphysical_fields`, which represents the surface precipitation rate [m/s].
 
-```math
-T = Π θˡⁱ + (ℒˡ qˡ + ℒⁱ qⁱ) / cₚ
-```
-
-**Phase change processes** (condensation, evaporation) conserve θˡⁱ by design.
-
-**Sedimentation** requires a θˡⁱ adjustment to maintain constant temperature when rain
-enters or leaves a cell. When rain sediments, qˡ changes locally but T should not change
-(no phase change during sedimentation). From the definition:
-
-```math
-\\frac{∂θˡⁱ}{∂t}\\bigg|_{sed} = -\\frac{ℒˡ}{cₚ Π} \\frac{∂qʳ}{∂t}\\bigg|_{sed}
-```
-
-This ensures:
-- When rain enters a cell (∂qʳ/∂t > 0): θˡⁱ decreases to maintain T
-- When rain leaves a cell (∂qʳ/∂t < 0): θˡⁱ increases to maintain T
-- Rain falling out at the surface warms the air (removes "cold" liquid)
+For `phase = :ice`, returns `nothing` (Kessler is a warm-rain scheme).
 """
-@inline function microphysical_tendency(i, j, k, grid, ::KM, ::Val{:ρθ}, ρᵣ, μ, 𝒰, constants)
-    # Get thermodynamic quantities
-    ρ = density(𝒰, constants)
-    qᵗ = total_specific_moisture(𝒰)
-    T = temperature(𝒰, constants)
+precipitation_rate(model, ::KM, ::Val{:liquid}) = model.microphysical_fields.precipitation_rate
+precipitation_rate(model, ::KM, ::Val{:ice}) = nothing
+
+"""
+$(TYPEDSIGNATURES)
+
+Return the surface precipitation flux for the Kessler scheme.
+
+The surface precipitation flux is `|wʳ| * ρqʳ` at k=1 (bottom face), representing
+the rate at which rain mass leaves the domain through the bottom boundary.
+
+Units: kg/m²/s (positive = downward, out of domain)
+"""
+function surface_precipitation_flux(model, ::KM)
+    grid = model.grid
+    μ = model.microphysical_fields
+    ρᵣ = model.formulation.reference_state.density
+    kernel = KesslerSurfacePrecipitationFluxKernel(μ.wʳ, μ.ρqʳ, ρᵣ)
+    op = KernelFunctionOperation{Center, Center, ONothing}(kernel, grid)
+    return Field(op)
+end
+
+using Oceananigans.AbstractOperations: KernelFunctionOperation
+using Adapt: Adapt, adapt
+
+struct KesslerSurfacePrecipitationFluxKernel{W, R, D}
+    terminal_velocity :: W
+    rain_density :: R
+    reference_density :: D
+end
+
+Adapt.adapt_structure(to, k::KesslerSurfacePrecipitationFluxKernel) =
+    KesslerSurfacePrecipitationFluxKernel(adapt(to, k.terminal_velocity),
+                                           adapt(to, k.rain_density),
+                                           adapt(to, k.reference_density))
+
+@inline function (kernel::KesslerSurfacePrecipitationFluxKernel)(i, j, k_idx, grid)
+    # Flux at bottom face (k=1), ignore k_idx since this is a 2D field
+    # wʳ < 0 (downward), so -wʳ * ρqʳ > 0 represents flux out of domain
+    @inbounds wʳ = kernel.terminal_velocity[i, j, 1]
+    @inbounds ρqʳ = kernel.rain_density[i, j, 1]
     
-    # Sedimentation tendency for rain (in mixing ratio space)
-    sed = sedimentation_tendency(i, j, k, grid, ρᵣ, μ)
-    
-    # Convert to mass fraction tendency
-    dqʳdt_sed = mixing_ratio_to_mass_fraction(sed, qᵗ)
-    
-    # Compute Exner function Π
-    Π = exner_function(𝒰, constants)
-    
-    # Get latent heat and heat capacity
-    q = 𝒰.moisture_mass_fractions
-    ℒˡ = liquid_latent_heat(T, constants)
-    cₚ = mixture_heat_capacity(q, constants)
-    
-    # θˡⁱ tendency from sedimentation: ∂θˡⁱ/∂t = -(ℒˡ / (cₚ Π)) * ∂qʳ/∂t|_sed
-    dθdt_sed = -ℒˡ / (cₚ * Π) * dqʳdt_sed
-    
-    return ρ * dθdt_sed
+    # Return positive flux for rain leaving domain (downward)
+    return -wʳ * ρqʳ
 end
