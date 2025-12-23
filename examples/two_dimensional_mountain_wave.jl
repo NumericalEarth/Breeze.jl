@@ -109,7 +109,7 @@ N  = sqrt(N²)               # s⁻¹ - Brunt–Väisälä frequency
 
 # ## Schär mountain parameters
 #
-# The mountain profile parameters following [Schar2002](@cite):
+# The mountain profile parameters following [Schar2002](@citet):
 
 h₀ = 250                    # m - peak mountain height (use 25 m for strict linearity)
 a  = 5000                   # m - Gaussian half-width parameter
