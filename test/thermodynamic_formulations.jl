@@ -16,8 +16,9 @@ using Test
     dynamics_stub = AnelasticDynamics(reference_state)
     dynamics = materialize_dynamics(dynamics_stub, grid, NamedTuple())
 
-    # Boundary conditions needed for materialization
-    boundary_conditions = (ρθ = FieldBoundaryConditions(), ρe = FieldBoundaryConditions())
+    # Boundary conditions needed for materialization (must pass grid to respect topology)
+    ccc = (Center(), Center(), Center())
+    boundary_conditions = (ρθ = FieldBoundaryConditions(grid, ccc), ρe = FieldBoundaryConditions(grid, ccc))
 
     @testset "LiquidIcePotentialTemperature field naming (Symbol)" begin
         @test prognostic_thermodynamic_field_names(:LiquidIcePotentialTemperature) == (:ρθ,)

@@ -91,6 +91,7 @@ using .ThermodynamicFormulations:
     prognostic_thermodynamic_field_names,
     additional_thermodynamic_field_names,
     thermodynamic_density_name,
+    thermodynamic_density,
     collect_prognostic_fields,
     diagnose_thermodynamic_state
 
