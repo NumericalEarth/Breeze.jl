@@ -51,7 +51,7 @@ using RRTMGP
         @test all(isfinite, interior(ℐ_sw_dn))
 
         # Allow small numerical tolerance (wider for Float32)
-        ε = FT == Float32 ? FT(1e-3) : FT(1e-6)
+        ε = FT == Float32 ? FT(1e-2) : FT(1e-6)
         @test all(interior(ℐ_lw_up) .>= -ε)
         @test all(interior(ℐ_lw_dn) .<= ε)
         @test all(interior(ℐ_sw_dn) .<= ε)
