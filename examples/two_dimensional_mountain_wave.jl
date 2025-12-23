@@ -354,6 +354,7 @@ end
 # Create comparison figure with simulated and analytical vertical velocity:
 
 fig = Figure(size=(900, 800), fontsize=14)
+nothing #hide
 
 # Plot simulated field:
 
