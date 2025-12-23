@@ -164,33 +164,26 @@ grid = ImmersedBoundaryGrid(underlying_grid, PartialCellBottom(hill))
 # Visualize the terrain comparing the analytical profile with the model's discretized
 # representation:
 
-# Analytical profile on a high-resolution grid:
-analytical_grid = RectilinearGrid(CPU(), size=500, x=(-30e3, 30e3), topology=(Periodic, Flat, Flat))
-h_analytical = Field{Center, Nothing, Nothing}(analytical_grid)
-set!(h_analytical, hill)
+# The hill profile on a high-resolution grid:
+x_finegrid = -L/3:L/1000:L/3
+h_finegrid = hill.(x_finegrid)
 
 # Discretized profile as represented in the model:
 h_model = grid.immersed_boundary.bottom_height
 
-fig_terrain = Figure(size=(900, 400))
-ax_terrain = Axis(fig_terrain[1, 1],
-                  xlabel = "x (m)",
-                  ylabel = "Height (m)",
-                  title = "Schär Mountain Profile")
-lines!(ax_terrain, h_analytical, linewidth = 1, color = :black, 
-       label = "Analytical")
-lines!(ax_terrain, h_model, linewidth = 2, color = :brown, linestyle = :dash,
-       label = "Model")
+fig = Figure(size=(900, 400))
+ax = Axis(fig[1, 1],
+          xlabel = "x (m)",
+          ylabel = "Height (m)",
+          title = "Schär Mountain Profile")
 
-# band! requires arrays, not Fields
-x_ana = xnodes(h_analytical)
-h_ana = interior(h_analytical, :, 1, 1)
-band!(ax_terrain, x_ana, zeros(length(x_ana)), h_ana, color = (:brown, 0.2))
-xlims!(ax_terrain, -30e3, 30e3)
-axislegend(ax_terrain, position = :rt)
+lines!(ax, x_finegrid, h_finegrid, linewidth = 1, color = :black, label = "Analytical")
+lines!(ax, h_model, linewidth = 2, color = :brown, linestyle = :dash, label = "Model")
+band!(ax, x_finegrid, zeros(length(x_finegrid)), h_finegrid, color = (:brown, 0.2))
 
-save("mountain_wave_terrain.png", fig_terrain)
-fig_terrain
+axislegend(ax, position = :rt)
+xlims!(ax, extrema(x_finegrid)...)
+fig
 
 # ## Rayleigh damping layer
 #
