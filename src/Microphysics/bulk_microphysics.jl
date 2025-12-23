@@ -50,6 +50,10 @@ end
 
 Base.summary(::NonEquilibriumCloudFormation) = "NonEquilibriumCloudFormation"
 
+# NonEquilibriumCloudFormation uses the standard tendency interface,
+# so the model-wide microphysics update is a no-op.
+AtmosphereModels.microphysics_model_update!(::NonEquilibriumCloudFormation, model) = nothing
+
 struct FourCategories{L, I, R, S, C, V, A}
     cloud_liquid :: L
     cloud_ice :: I
