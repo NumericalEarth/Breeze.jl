@@ -235,7 +235,7 @@ set!(model, θ = θᵢ, u = U)
 #
 # Run for 2 hours with a fixed time step. A small time step is required for numerical stability with this test case:
 
-Δt = 4.0            # s - time step (reduced for stability)
+Δt = 2.0            # s - time step (reduced for stability)
 stop_time = 2hours  # total simulation time
 
 simulation = Simulation(model; Δt, stop_time, align_time_step=false)
