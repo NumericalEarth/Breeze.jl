@@ -334,8 +334,8 @@ function w_linear(x, z; nk=100)
 
     m_abs = sqrt.(abs.(m2))
     integrand = @. k * ĥ * ifelse(m2 ≥ 0,
-                                 sin(m_abs * z + k * x),
-                                 exp(-m_abs * z) * sin(k * x))
+                                   sin(m_abs * z + k * x),
+                                   exp(-m_abs * z) * sin(k * x))
 
     ## Numerical integration using trapezoidal rule:   
     Δk = step(k)
