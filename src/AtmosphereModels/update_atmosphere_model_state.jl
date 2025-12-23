@@ -5,10 +5,11 @@ using ..Thermodynamics:
 
 using Oceananigans.BoundaryConditions: fill_halo_regions!, compute_x_bcs!, compute_y_bcs!, compute_z_bcs!
 using Oceananigans.BoundaryConditions: update_boundary_conditions!
-using Oceananigans.TurbulenceClosures: compute_diffusivities!
+using Oceananigans.Grids: Bounded, Periodic, Flat, topology, halo_size
 using Oceananigans.ImmersedBoundaries: mask_immersed_field!
 using Oceananigans.TimeSteppers: TimeSteppers
-using Oceananigans.Utils: launch!
+using Oceananigans.TurbulenceClosures: compute_diffusivities!
+using Oceananigans.Utils: launch!, KernelParameters
 
 # AnelasticModel type alias imported from AnelasticFormulation submodule
 
@@ -64,6 +65,10 @@ function tracer_specific_to_density!(tracers, density)
     return nothing
 end
 
+diagnostic_indices(::Bounded, N, H) = 0:N+1
+diagnostic_indices(::Periodic, N, H) = -H+1:N+2H
+diagnostic_indices(::Flat, N, H) = 1:N
+
 """
 $(TYPEDSIGNATURES)
 
@@ -80,7 +85,17 @@ function compute_auxiliary_variables!(model)
     grid = model.grid
     arch = grid.architecture
 
-    launch!(arch, grid, :xyz,
+    TX, TY, TZ = topology(grid)
+    Nx, Ny, Nz = size(grid)
+    Hx, Hy, Hz = halo_size(grid)
+
+    ii = diagnostic_indices(TX(), Nx, Hx)
+    jj = diagnostic_indices(TY(), Ny, Hy)
+    kk = diagnostic_indices(TZ(), Nz, Hz)
+
+    kp = KernelParameters(ii, jj, kk)
+
+    launch!(arch, grid, kp,
             _compute_velocities!,
             model.velocities,
             grid,
