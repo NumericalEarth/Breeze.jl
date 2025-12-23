@@ -9,7 +9,7 @@ using Oceananigans.Utils: sum_of_velocities
 @inline div_ρUc(i, j, k, grid, args...) = zero(grid)
 
 """
-    ∇_dot_Jᶜ(i, j, k, grid, density, closure::AbstractTurbulenceClosure, closure_fields,
+    ∇_dot_Jᶜ(i, j, k, grid, ρ, closure::AbstractTurbulenceClosure, closure_fields,
              id, c, clock, model_fields, buoyancy)
 
 Return the discrete divergence of the dynamic scalar flux `Jᶜ = ρ jᶜ`,
