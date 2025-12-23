@@ -50,7 +50,7 @@ jobs:
             os: windows-latest
         include:
           - version: "1.12.2"
-            os: aws-linux-nvidia-gpu-t4
+            os: aws-linux-nvidia-gpu-l4
             arch: "default"
     steps:
       - uses: actions/checkout@v6
