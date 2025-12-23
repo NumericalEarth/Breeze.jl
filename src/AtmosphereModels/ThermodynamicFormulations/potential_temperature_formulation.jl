@@ -26,7 +26,6 @@ Adapt.adapt_structure(to, formulation::LiquidIcePotentialTemperatureFormulation)
                                              adapt(to, formulation.potential_temperature))
 
 function BoundaryConditions.fill_halo_regions!(formulation::LiquidIcePotentialTemperatureFormulation)
-    # fill_halo_regions!(formulation.potential_temperature_density)
     fill_halo_regions!(formulation.potential_temperature)
     return nothing
 end
