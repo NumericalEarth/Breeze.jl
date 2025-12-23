@@ -111,7 +111,7 @@ Compute moisture mass fractions at grid point `(i, j, k)` for the thermodynamic 
 Water vapor is diagnosed as \$q^v = q^t - q^{cl} - q^r\$.
 Returns `MoistureMassFractions(qᵛ, qˡ)` where \$q^l = q^{cl} + q^r\$ is the total liquid mass fraction.
 """
-@inline function compute_moisture_fractions(i, j, k, grid, ::DCMIP2016KM, ρ, qᵗ, μ)
+@inline function AtmosphereModels.compute_moisture_fractions(i, j, k, grid, ::DCMIP2016KM, ρ, qᵗ, μ)
     @inbounds begin
         qᶜˡ = μ.ρqᶜˡ[i, j, k] / ρ
         qʳ  = μ.ρqʳ[i, j, k] / ρ
@@ -128,7 +128,7 @@ Return the thermodynamic state without adjustment.
 
 The Kessler scheme performs its own saturation adjustment internally via the kernel.
 """
-@inline AtmosphereModels.maybe_adjust_thermodynamic_state(𝒰, ::DCMIP2016KM, μ, qᵗ, constants) = 𝒰
+@inline AtmosphereModels.maybe_adjust_thermodynamic_state(i, j, k, 𝒰, ::DCMIP2016KM, ρᵣ, μ, qᵗ, constants) = 𝒰
 
 """
 $(TYPEDSIGNATURES)
@@ -137,7 +137,7 @@ Return `nothing`.
 
 Rain sedimentation is handled internally by the kernel rather than through the advection interface.
 """
-@inline AtmosphereModels.microphysical_velocities(::DCMIP2016KM, name) = nothing
+@inline AtmosphereModels.microphysical_velocities(::DCMIP2016KM, μ, name) = nothing
 
 """
 $(TYPEDSIGNATURES)
@@ -147,7 +147,7 @@ Return zero tendency.
 All microphysical source/sink terms are applied directly to the prognostic fields via the
 `microphysics_model_update!` kernel, bypassing the standard tendency interface.
 """
-@inline AtmosphereModels.microphysical_tendency(i, j, k, grid, ::DCMIP2016KM, name, μ, 𝒰, constants) = zero(eltype(grid))
+@inline AtmosphereModels.microphysical_tendency(i, j, k, grid, ::DCMIP2016KM, name, ρ, μ, 𝒰, constants) = zero(grid)
 
 #####
 ##### Kessler scheme constants (from kessler.f90)
