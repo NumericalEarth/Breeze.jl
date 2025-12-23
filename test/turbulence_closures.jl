@@ -30,12 +30,11 @@ test_thermodynamics = (:StaticEnergy, :LiquidIcePotentialTemperature)
     etd = Oceananigans.TurbulenceClosures.ExplicitTimeDiscretization()
     discretizations = (vitd, etd)
 
-    @testset "AtmosphereModel with $thermodynamics thermodynamics [$FT]" for thermodynamics in test_thermodynamics
-        thermodynamic_formulation = thermodynamics == :StaticEnergy ? StaticEnergyFormulation(nothing, nothing) : LiquidIcePotentialTemperatureFormulation(nothing, nothing)
+    @testset "AtmosphereModel with $formulation thermodynamics [$FT]" for formulation in test_thermodynamics
 
-        @testset "Implicit diffusion solver with ScalarDiffusivity [$thermodynamics, $(FT), $(typeof(disc))]" for disc in discretizations
+        @testset "Implicit diffusion solver with ScalarDiffusivity [$formulation, $(FT), $(typeof(disc))]" for disc in discretizations
             closure = ScalarDiffusivity(disc, ν=1, κ=1)
-            model = @test_logs match_mode=:any AtmosphereModel(grid; dynamics, thermodynamic_formulation, closure, tracers=:ρc)
+            model = @test_logs match_mode=:any AtmosphereModel(grid; dynamics, formulation, closure, tracers=:ρc)
             # Set uniform specific energy for no diffusion
             θ₀ = model.dynamics.reference_state.potential_temperature
             cᵖᵈ = model.thermodynamic_constants.dry_air.heat_capacity
@@ -47,25 +46,25 @@ test_thermodynamics = (:StaticEnergy, :LiquidIcePotentialTemperature)
             @test isapprox(static_energy_density(model), ρe₀, rtol=1e-5)
         end
 
-        @testset "Closure flux affects momentum tendency [$thermodynamics, $(FT)]" begin
+        @testset "Closure flux affects momentum tendency [$formulation, $(FT)]" begin
             closure = ScalarDiffusivity(ν=1e4)
-            model = AtmosphereModel(grid; dynamics, thermodynamic_formulation, advection=nothing, closure)
+            model = AtmosphereModel(grid; dynamics, formulation, advection=nothing, closure)
             set!(model; ρu = (x, y, z) -> exp((z - 50)^2 / (2 * 20^2)))
             Breeze.AtmosphereModels.compute_tendencies!(model)
             Gρu = model.timestepper.Gⁿ.ρu
             @test maximum(abs, Gρu) > 0
         end
 
-        @testset "SmagorinskyLilly with velocity gradients [$thermodynamics, $(FT)]" begin
-            model = AtmosphereModel(grid; dynamics, thermodynamic_formulation, closure=SmagorinskyLilly())
+        @testset "SmagorinskyLilly with velocity gradients [$formulation, $(FT)]" begin
+            model = AtmosphereModel(grid; dynamics, formulation, closure=SmagorinskyLilly())
             θ₀ = model.dynamics.reference_state.potential_temperature
             set!(model; θ=θ₀, ρu = (x, y, z) -> z / 100)
             Breeze.AtmosphereModels.update_state!(model)
             @test maximum(abs, model.closure_fields.νₑ) > 0
         end
 
-        @testset "AnisotropicMinimumDissipation with velocity gradients [$thermodynamics, $(FT)]" begin
-            model = AtmosphereModel(grid; dynamics, thermodynamic_formulation, closure=AnisotropicMinimumDissipation())
+        @testset "AnisotropicMinimumDissipation with velocity gradients [$formulation, $(FT)]" begin
+            model = AtmosphereModel(grid; dynamics, formulation, closure=AnisotropicMinimumDissipation())
             set!(model; ρu = (x, y, z) -> z / 100)
             Breeze.AtmosphereModels.update_state!(model)
             @test haskey(model.closure_fields, :νₑ) || haskey(model.closure_fields, :κₑ)
@@ -75,8 +74,8 @@ test_thermodynamics = (:StaticEnergy, :LiquidIcePotentialTemperature)
         # This isolates the effect of the closure on scalar fields
         les_closures = (SmagorinskyLilly(), AnisotropicMinimumDissipation())
 
-        @testset "LES scalar diffusion without advection [$thermodynamics, $(FT), $(nameof(typeof(closure)))]" for closure in les_closures
-            model = AtmosphereModel(grid; dynamics, thermodynamic_formulation, closure, advection=nothing, tracers=:ρc)
+        @testset "LES scalar diffusion without advection [$formulation, $(FT), $(nameof(typeof(closure)))]" for closure in les_closures
+            model = AtmosphereModel(grid; dynamics, formulation, closure, advection=nothing, tracers=:ρc)
 
             # Set random velocity field to trigger non-zero eddy diffusivity
             Ξ(x, y, z) = randn()
