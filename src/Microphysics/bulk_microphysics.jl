@@ -18,10 +18,10 @@ end
 
 # Bulk microphysics schemes (including those from extensions like CloudMicrophysics)
 # use the standard tendency interface, so the model-wide microphysics update is a no-op.
-# We forward to the nucleation / saturation-adjustment component to allow specialized
-# nucleation schemes to hook into the update cycle.
+# We forward to the cloud_formation / saturation-adjustment component to allow specialized
+# cloud formation schemes to hook into the update cycle.
 AtmosphereModels.microphysics_model_update!(bμp::BulkMicrophysics, model) =
-    AtmosphereModels.microphysics_model_update!(bμp.nucleation, model)
+    AtmosphereModels.microphysics_model_update!(bμp.cloud_formation, model)
 
 Base.summary(bμp::BulkMicrophysics) = "BulkMicrophysics"
 
