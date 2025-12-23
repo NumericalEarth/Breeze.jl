@@ -57,7 +57,7 @@
 # ### Linear wave theory
 #
 # For the linearized mountain wave problem, vertical wavenumber ``m`` satisfies the
-# dispersion relation (Appendix A of [KlempEtAl2015](@cite)):
+# dispersion relation (Appendix A of [KlempEtAl2015](@citet)):
 #
 # ```math
 # m^2 = \frac{N^2}{U^2} - \frac{\beta^2}{4} - k^2
