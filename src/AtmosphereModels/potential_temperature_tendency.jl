@@ -149,8 +149,10 @@ end
     pˢᵗ = dynamics.reference_state.standard_pressure
     q₁ = 𝒰e₁.moisture_mass_fractions
     𝒰θ = LiquidIcePotentialTemperatureState(zero(T), q₁, pˢᵗ, pᵣ)
-    @inbounds potential_temperature[i, j, k] = with_temperature(𝒰θ, T, constants).potential_temperature
-    @inbounds potential_temperature_density[i, j, k] = ρᵣ * with_temperature(𝒰θ, T, constants).potential_temperature
+    𝒰θ = with_temperature(𝒰θ, T, constants)
+    θ = 𝒰θ.potential_temperature
+    @inbounds potential_temperature[i, j, k] = θ
+    @inbounds potential_temperature_density[i, j, k] = ρᵣ * θ
 end
 
 #####
