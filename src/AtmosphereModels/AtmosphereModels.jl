@@ -19,6 +19,7 @@ export
     liquid_ice_potential_temperature,
     precipitation_rate,
     surface_precipitation_flux,
+    specific_humidity,
 
     # Interface functions (extended by BoundaryConditions and Forcings)
     regularize_atmosphere_model_boundary_conditions,

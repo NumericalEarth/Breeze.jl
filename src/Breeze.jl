@@ -39,6 +39,7 @@ export
     precipitation_rate,
     surface_precipitation_flux,
     total_pressure,
+    specific_humidity,
 
     # Microphysics
     SaturationAdjustment,

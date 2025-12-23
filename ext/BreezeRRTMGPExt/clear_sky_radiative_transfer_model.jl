@@ -8,7 +8,7 @@ using Oceananigans.Grids: xnode, ynode, λnode, φnode, znodes
 using Oceananigans.Grids: Center, Face
 using Oceananigans.Fields: ConstantField
 
-using Breeze.AtmosphereModels: AtmosphereModels, SurfaceRadiativeProperties
+using Breeze.AtmosphereModels: AtmosphereModels, SurfaceRadiativeProperties, specific_humidity
 using Breeze.Thermodynamics: ThermodynamicConstants
 import Breeze.AtmosphereModels: RadiativeTransferModel, RRTMGPGasOptics, BackgroundAtmosphericComposition
 
@@ -261,8 +261,7 @@ function update_rrtmgp_clear_sky_state!(as::AtmosphericState, model, surface_tem
 
     pᵣ = model.formulation.reference_state.pressure
     T = model.temperature
-    μ = model.microphysical_fields
-    qᵛ = (μ === nothing || !hasproperty(μ, :qᵛ)) ? model.specific_moisture : getproperty(μ, :qᵛ)
+    qᵛ = specific_humidity(model)
 
     g = params.grav
     mᵈ = params.molmass_dryair
