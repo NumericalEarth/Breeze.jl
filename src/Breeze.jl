@@ -16,8 +16,13 @@ export
     LiquidIcePotentialTemperatureThermodynamics,
     RadiativeTransferModel,
     TemperatureField,
+    ThermodynamicConstants,
     IdealGas,
     CondensedPhase,
+    AnelasticFormulation,
+    ReferenceState,
+    AtmosphereModel,
+    WarmPhaseSaturationAdjustment,
     mixture_gas_constant,
     mixture_heat_capacity,
     
