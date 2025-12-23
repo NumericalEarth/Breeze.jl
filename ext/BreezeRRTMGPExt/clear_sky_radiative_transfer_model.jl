@@ -76,6 +76,7 @@ function RadiativeTransferModel(grid,
 
     # Lookup tables (requires NCDatasets extension for RRTMGP)
     radiation_method = ClearSkyRadiation(false)
+
     luts = try
         lookup_tables(grid_params, radiation_method)
     catch err
@@ -96,52 +97,52 @@ function RadiativeTransferModel(grid,
 
 
     # Atmospheric state arrays
-    lon = DA{FT}(undef, Nc)
-    lat = DA{FT}(undef, Nc)
-    layerdata = DA{FT}(undef, 4, Nz, Nc)
-    p_lev = DA{FT}(undef, Nz+1, Nc)
-    t_lev = DA{FT}(undef, Nz+1, Nc)
-    t_sfc = DA{FT}(undef, Nc)
+    rrtmgp_λ = DA{FT}(undef, Nc)
+    rrtmgp_φ = DA{FT}(undef, Nc)
+    rrtmgp_layerdata = DA{FT}(undef, 4, Nz, Nc)
+    rrtmgp_pᶠ = DA{FT}(undef, Nz+1, Nc)
+    rrtmgp_Tᶠ = DA{FT}(undef, Nz+1, Nc)
+    rrtmgp_T₀ = DA{FT}(undef, Nc)
 
-    set_longitude!(lon, coordinate, grid)
-    set_latitude!(lat, coordinate, grid)
+    set_longitude!(rrtmgp_λ, coordinate, grid)
+    set_latitude!(rrtmgp_φ, coordinate, grid)
 
     vmr = init_vmr(ngas, Nz, Nc, FT, DA; gm=true)
     set_global_mean_gases!(vmr, luts.lookups.idx_gases_sw, optics.background_composition)
 
-    atmospheric_state = AtmosphericState(lon, lat, layerdata, p_lev, t_lev, t_sfc, vmr, nothing, nothing)
+    atmospheric_state = AtmosphericState(rrtmgp_λ, rrtmgp_φ, rrtmgp_layerdata, rrtmgp_pᶠ, rrtmgp_Tᶠ, rrtmgp_T₀, vmr, nothing, nothing)
 
     # Boundary conditions (bandwise emissivity/albedo; incident fluxes are unused here)
     cos_zenith = DA{FT}(undef, Nc)
-    toa_flux = DA{FT}(undef, Nc)
-    toa_flux .= convert(FT, solar_constant)
+    rrtmgp_ℐ₀ = DA{FT}(undef, Nc)
+    rrtmgp_ℐ₀ .= convert(FT, solar_constant)
 
-    sfc_emis = DA{FT}(undef, nbnd_lw, Nc)
-    sfc_alb_direct = DA{FT}(undef, nbnd_sw, Nc)
-    sfc_alb_diffuse = DA{FT}(undef, nbnd_sw, Nc)
+    rrtmgp_ε₀ = DA{FT}(undef, nbnd_lw, Nc)
+    rrtmgp_αb₀ = DA{FT}(undef, nbnd_sw, Nc)
+    rrtmgp_αw₀ = DA{FT}(undef, nbnd_sw, Nc)
 
     if surface_emissivity isa Number
         surface_emissivity = ConstantField(convert(FT, surface_emissivity))
-        sfc_emis .= surface_emissivity.constant
+        rrtmgp_ε₀ .= surface_emissivity.constant
     end
 
     if direct_surface_albedo isa Number
         direct_surface_albedo = ConstantField(convert(FT, direct_surface_albedo))
-        sfc_alb_direct .= direct_surface_albedo.constant
+        rrtmgp_αb₀ .= direct_surface_albedo.constant
     end
 
     if diffuse_surface_albedo isa Number
         diffuse_surface_albedo = ConstantField(convert(FT, diffuse_surface_albedo))
-        sfc_alb_diffuse .= diffuse_surface_albedo.constant
+        rrtmgp_αw₀ .= diffuse_surface_albedo.constant
     end
 
     if surface_temperature isa Number
         surface_temperature = ConstantField(convert(FT, surface_temperature))
-        t_sfc .= surface_temperature.constant
+        rrtmgp_T₀ .= surface_temperature.constant
     end
 
-    lw_bcs = LwBCs(sfc_emis, nothing)
-    sw_bcs = SwBCs(cos_zenith, toa_flux, sfc_alb_direct, nothing, sfc_alb_diffuse)
+    lw_bcs = LwBCs(rrtmgp_ε₀, nothing)
+    sw_bcs = SwBCs(cos_zenith, rrtmgp_ℐ₀, rrtmgp_αb₀, nothing, rrtmgp_αw₀)
 
     solver = RRTMGPSolver(grid_params, radiation_method, parameters, lw_bcs, sw_bcs, atmospheric_state)
 
@@ -206,24 +207,23 @@ const RRTMGP_GAS_NAME_MAP = Dict{String, Symbol}(
     return nothing
 end
 
-@inline function set_longitude!(rrtmgp_longitude, coordinate::Tuple, grid)
+@inline function set_longitude!(rrtmgp_λ, coordinate::Tuple, grid)
     λ = coordinate[1]
-    rrtmgp_longitude .= λ
+    rrtmgp_λ .= λ
     return nothing
 end
 
-function set_longitude!(rrtmgp_longitude, ::Nothing, grid)
-    # Mirror latitude behavior; for now only single-column grids are supported.
+function set_longitude!(rrtmgp_λ, ::Nothing, grid)
     arch = grid.architecture
-    launch!(arch, grid, :xy, _set_longitude_from_grid!, rrtmgp_longitude, grid)
+    launch!(arch, grid, :xy, _set_longitude_from_grid!, rrtmgp_λ, grid)
     return nothing
 end
 
-@kernel function _set_longitude_from_grid!(rrtmgp_longitude, grid)
+@kernel function _set_longitude_from_grid!(rrtmgp_λ, grid)
     i, j = @index(Global, NTuple)
     λ = xnode(i, j, 1, grid, Center(), Center(), Center())
     col = rrtmgp_column_index(i, j, grid.Nx)
-    @inbounds rrtmgp_longitude[col] = λ
+    @inbounds rrtmgp_λ[col] = λ
 end
 
 """
@@ -259,85 +259,83 @@ function update_rrtmgp_clear_sky_state!(as::AtmosphericState, model, surface_tem
     grid = model.grid
     arch = architecture(grid)
 
-    p = model.formulation.reference_state.pressure
+    pᵣ = model.formulation.reference_state.pressure
     T = model.temperature
     μ = model.microphysical_fields
-    q = (μ === nothing || !hasproperty(μ, :qᵛ)) ? model.specific_moisture : getproperty(μ, :qᵛ)
+    qᵛ = (μ === nothing || !hasproperty(μ, :qᵛ)) ? model.specific_moisture : getproperty(μ, :qᵛ)
 
     g = params.grav
-    M_dry = params.molmass_dryair
-    M_w = params.molmass_water
-    N_A = params.avogad
-    o3 = optics.background_composition.O₃
+    mᵈ = params.molmass_dryair
+    mᵛ = params.molmass_water
+    ℕᴬ = params.avogad
+    O₃ = optics.background_composition.O₃
 
-    launch!(arch, grid, :xyz, _update_rrtmgp_clear_sky_state!, as, grid, p, T, q, surface_temperature, g, M_dry, M_w, N_A, o3)
+    launch!(arch, grid, :xyz, _update_rrtmgp_clear_sky_state!, as, grid, pᵣ, T, qᵛ, surface_temperature, g, mᵈ, mᵛ, ℕᴬ, O₃)
     return nothing
 end
 
-@kernel function _update_rrtmgp_clear_sky_state!(as, grid, p, T, q, surface_temperature, g, M_dry, M_w, N_A, o3)
+@kernel function _update_rrtmgp_clear_sky_state!(as, grid, pᵣ, T, qᵛ, surface_temperature, g, mᵈ, mᵛ, ℕᴬ, O₃)
     i, j, k = @index(Global, NTuple)
 
     Nz = size(grid, 3)
     col = rrtmgp_column_index(i, j, grid.Nx)
 
     layerdata = as.layerdata
-    p_lev = as.p_lev
-    t_lev = as.t_lev
-    t_sfc = as.t_sfc
+    pᶠ = as.p_lev
+    Tᶠ = as.t_lev
+    T₀ = as.t_sfc
 
     vmr_h2o = as.vmr.vmr_h2o
     vmr_o3 = as.vmr.vmr_o3
 
     @inbounds begin
-        # Layer values
-        p_lay = p[i, j, k]
-        t_lay = T[i, j, k]
-        q_lay = max(q[i, j, k], zero(eltype(q)))
+        # Layer (cell-centered) values
+        pᶜ = pᵣ[i, j, k]
+        Tᶜ = T[i, j, k]
+        qᵛₖ = max(qᵛ[i, j, k], zero(eltype(qᵛ)))
 
-        # Face values at k and k+1 (needed for col_dry)
-        p_face_k = ℑzᵃᵃᶠ(i, j, k, grid, p)
-        t_face_k = ℑzᵃᵃᶠ(i, j, k, grid, T)
-        p_face_kp1 = ℑzᵃᵃᶠ(i, j, k+1, grid, p)
+        # Face values at k and k+1 (needed for column dry air mass)
+        pᶠₖ = ℑzᵃᵃᶠ(i, j, k, grid, pᵣ)
+        Tᶠₖ = ℑzᵃᵃᶠ(i, j, k, grid, T)
+        pᶠₖ₊₁ = ℑzᵃᵃᶠ(i, j, k+1, grid, pᵣ)
 
         # RRTMGP Planck/source lookup tables are defined over a finite temperature range.
         # Clamp temperatures to avoid extrapolation that can yield tiny negative source values
         # and trigger DomainErrors in geometric means.
         # TODO: This clamping should ideally be done internally in RRTMGP.jl.
-        # See https://github.com/CliMA/RRTMGP.jl/issues/XXX
-        t_min = one(t_lay) * 160
-        t_max = one(t_lay) * 355
-        t_lay = clamp(t_lay, t_min, t_max)
-        t_face_k = clamp(t_face_k, t_min, t_max)
+        Tₘᵢₙ = one(Tᶜ) * 160
+        Tₘₐₓ = one(Tᶜ) * 355
+        Tᶜ = clamp(Tᶜ, Tₘᵢₙ, Tₘₐₓ)
+        Tᶠₖ = clamp(Tᶠₖ, Tₘᵢₙ, Tₘₐₓ)
 
         # Store level values
-        p_lev[k, col] = p_face_k
-        t_lev[k, col] = t_face_k
+        pᶠ[k, col] = pᶠₖ
+        Tᶠ[k, col] = Tᶠₖ
 
         # Topmost level (once)
         if k == 1
-            p_lev[Nz+1, col] = ℑzᵃᵃᶠ(i, j, Nz+1, grid, p)
-            t_top = ℑzᵃᵃᶠ(i, j, Nz+1, grid, T)
-            t_lev[Nz+1, col] = clamp(t_top, t_min, t_max)
-            t_sfc[col] = clamp(surface_temperature[i, j, 1], t_min, t_max)
+            pᶠ[Nz+1, col] = ℑzᵃᵃᶠ(i, j, Nz+1, grid, pᵣ)
+            Tₜₒₚ = ℑzᵃᵃᶠ(i, j, Nz+1, grid, T)
+            Tᶠ[Nz+1, col] = clamp(Tₜₒₚ, Tₘᵢₙ, Tₘₐₓ)
+            T₀[col] = clamp(surface_temperature[i, j, 1], Tₘᵢₙ, Tₘₐₓ)
         end
 
-        # col_dry: molecules / cm^2 of dry air
-        Δp = max(p_face_k - p_face_kp1, zero(p_face_k))
-        one_minus_q = one(q_lay) - q_lay
-        dry_mass_per_area = (Δp / g) * one_minus_q
-        col_dry = dry_mass_per_area / M_dry * N_A / (one(dry_mass_per_area) * 1e4)  # (molecules / m^2) -> (molecules / cm^2)
+        # Column dry air mass: molecules / cm² of dry air
+        Δp = max(pᶠₖ - pᶠₖ₊₁, zero(pᶠₖ))
+        dry_mass_fraction = one(qᵛₖ) - qᵛₖ
+        dry_mass_per_area = (Δp / g) * dry_mass_fraction
+        col_dry = dry_mass_per_area / mᵈ * ℕᴬ / (one(dry_mass_per_area) * 1e4)  # (molecules / m²) -> (molecules / cm²)
 
-        # Populate layerdata: (col_dry, p_lay, t_lay, rel_hum)
+        # Populate layerdata: (col_dry, pᶜ, Tᶜ, relative_humidity)
         layerdata[1, k, col] = col_dry
-        layerdata[2, k, col] = p_lay
-        layerdata[3, k, col] = t_lay
-        layerdata[4, k, col] = zero(eltype(t_lay))
+        layerdata[2, k, col] = pᶜ
+        layerdata[3, k, col] = Tᶜ
+        layerdata[4, k, col] = zero(eltype(Tᶜ))
 
-        # H2O vmr from specific humidity
-        denom = one(q_lay) - q_lay
-        r = q_lay / denom
-        vmr_h2o[k, col] = r * (M_dry / M_w)
-        vmr_o3[k, col] = o3
+        # H₂O volume mixing ratio from specific humidity
+        r = qᵛₖ / dry_mass_fraction
+        vmr_h2o[k, col] = r * (mᵈ / mᵛ)
+        vmr_o3[k, col] = O₃
     end
 end
 
