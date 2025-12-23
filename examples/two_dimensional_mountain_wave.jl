@@ -349,32 +349,26 @@ nothing #hide
 fig = Figure(size=(900, 800), fontsize=14)
 nothing #hide
 
-# Plot simulated field:
-
-w_simulated = model.velocities.w
-
-ax1 = Axis(fig[1, 1],
-           xlabel = "x (m)",
-           ylabel = "z (m)",
-           title = "Simulated w at t = 2 hours")
-hm1 = heatmap!(ax1, w_simulated, colormap = :balance, colorrange = (-1, 1))
-ax1.limits = ((-30000, 30000), (0, 10000))
-
-# Compute analytical solution on the same grid as the simulation:
+# Compute analytical vertical velocity ``w`` on the same grid as the simulation and plot both of
+# them for comparison.
 
 w_analytical = Field{Center, Nothing, Face}(grid)
 set!(w_analytical, w_linear)
 
-ax2 = Axis(fig[2, 1],
-           xlabel = "x (m)",
-           ylabel = "z (m)",
-           title = "Linear Analytical w")
-hm2 = heatmap!(ax2, w_analytical, colormap = :balance, colorrange = (-1, 1))
-ax2.limits = ((-30000, 30000), (0, 10000))
+w_simulated = model.velocities.w
 
-# Shared colorbar:
+fig = Figure(size=(900, 800), fontsize=14)
+
+ax1 = Axis(fig[1, 1], xlabel = "x (m)", ylabel = "z (m)", title = "Simulated w at t = 2 hours")
+ax2 = Axis(fig[2, 1], xlabel = "x (m)", ylabel = "z (m)", title = "Linear Analytical w")
+
+hm1 = heatmap!(ax1, w_simulated, colormap = :balance, colorrange = (-1, 1))
+hm2 = heatmap!(ax2, w_analytical, colormap = :balance, colorrange = (-1, 1))
 
 Colorbar(fig[1:2, 2], hm1, label = "w (m s⁻¹)")
 
-save("mountain_wave_w_comparison.png", fig)
+for ax in (ax1, ax2)
+    ax.limits = ((-30e3, 30e3), (0, 10e3))
+end
+
 fig
