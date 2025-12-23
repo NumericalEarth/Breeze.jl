@@ -74,8 +74,7 @@ end
     # Use LiquidIcePotentialTemperature thermodynamics
     reference_state = ReferenceState(grid)
     dynamics = AnelasticDynamics(reference_state)
-    thermodynamic_formulation = LiquidIcePotentialTemperatureFormulation(nothing, nothing)
-    model = AtmosphereModel(grid; dynamics, thermodynamic_formulation, forcing=(; ρqᵗ=subsidence))
+    model = AtmosphereModel(grid; dynamics, formulation=:LiquidIcePotentialTemperature, forcing=(; ρqᵗ=subsidence))
 
     # Set potential temperature to reference state
     θ₀ = model.dynamics.reference_state.potential_temperature
@@ -183,7 +182,6 @@ end
     grid = RectilinearGrid(default_arch; size=(1, 1, 4), x=(0, 10), y=(0, 10), z=(0, 16))
     reference_state = ReferenceState(grid)
     dynamics = AnelasticDynamics(reference_state)
-    thermodynamic_formulation = LiquidIcePotentialTemperatureFormulation(nothing, nothing)
 
     wˢ = 1
     Γ = 1e-2
@@ -202,7 +200,7 @@ end
                     forcing = (; name => (subsidence, zero_forcing))
                 end
 
-                kw = (; advection=nothing, timestepper=:QuasiAdamsBashforth2, dynamics, thermodynamic_formulation, forcing)
+                kw = (; advection=nothing, timestepper=:QuasiAdamsBashforth2, dynamics, formulation=:LiquidIcePotentialTemperature, forcing)
                 model = AtmosphereModel(grid; tracers=:ρc, kw...)
                 θ₀ = model.dynamics.reference_state.potential_temperature
 
