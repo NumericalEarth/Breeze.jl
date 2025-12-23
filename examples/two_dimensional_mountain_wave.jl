@@ -140,6 +140,7 @@ Nz_bottom = Nz - Nz_top                             # cells in stretched region
 z_stretched = ExponentialDiscretization(Nz_bottom, 0, z_transition, scale = z_transition / 8, bias=:left)
 z_uniform = range(z_transition + dz_top, H; length=Nz_top)
 z_faces = vcat(z_stretched.faces, collect(z_uniform))
+nothing #hide
 
 # Create the underlying rectilinear grid:
 
