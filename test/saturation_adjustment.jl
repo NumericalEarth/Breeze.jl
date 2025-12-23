@@ -60,10 +60,9 @@ test_thermodynamics = (:StaticEnergy, :LiquidIcePotentialTemperature)
     @test compute_temperature(𝒰₁, microphysics, constants) ≈ T₁ atol=atol
     @test compute_temperature(𝒰₁, nothing, constants) ≈ T₁ atol=atol
 
-    @testset "AtmosphereModel with $thermodynamics thermodynamics [$FT]" for thermodynamics in test_thermodynamics
+    @testset "AtmosphereModel with $formulation thermodynamics [$FT]" for formulation in test_thermodynamics
         dynamics = AnelasticDynamics(reference_state)
-        thermodynamic_formulation = thermodynamics == :StaticEnergy ? StaticEnergyFormulation(nothing, nothing) : LiquidIcePotentialTemperatureFormulation(nothing, nothing)
-        model = AtmosphereModel(grid; thermodynamic_constants=constants, dynamics, thermodynamic_formulation, microphysics)
+        model = AtmosphereModel(grid; thermodynamic_constants=constants, dynamics, formulation, microphysics)
         ρᵣ = @allowscalar first(reference_state.density)
 
         # Many more tests that touch saturated conditions
@@ -126,10 +125,9 @@ end
     equilibrium = MixedPhaseEquilibrium(FT; freezing_temperature=Tᶠ, homogeneous_ice_nucleation_temperature=Tʰ)
     microphysics = SaturationAdjustment(FT; tolerance=solver_tol(FT), equilibrium)
 
-    @testset "AtmosphereModel with $thermodynamics thermodynamics [$FT]" for thermodynamics in test_thermodynamics
+    @testset "AtmosphereModel with $formulation thermodynamics [$FT]" for formulation in test_thermodynamics
         dynamics = AnelasticDynamics(reference_state)
-        thermodynamic_formulation = thermodynamics == :StaticEnergy ? StaticEnergyFormulation(nothing, nothing) : LiquidIcePotentialTemperatureFormulation(nothing, nothing)
-        model = AtmosphereModel(grid; thermodynamic_constants=constants, dynamics, thermodynamic_formulation, microphysics)
+        model = AtmosphereModel(grid; thermodynamic_constants=constants, dynamics, formulation, microphysics)
 
         # Test 1: Constructor and equilibrated_surface utility
         @test microphysics isa SaturationAdjustment
