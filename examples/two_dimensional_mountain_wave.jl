@@ -8,7 +8,7 @@
 # ## References
 #
 # ```@bibliography
-# Pages = ["literated/two_dimensional_mountain_wave.md"]
+# Pages = ["two_dimensional_mountain_wave.md"]
 # Canonical = false
 # ```
 #
@@ -21,7 +21,7 @@
 #
 # ### Mountain profile
 #
-# The terrain follows the Schär mountain profile (Equation 46 in [Schar2002](@cite)):
+# The terrain follows the Schär mountain profile (Equation 46 by [Schar2002](@citet)):
 #
 # ```math
 # h(x) = h_0 \exp\left(-\frac{x^2}{a^2}\right) \cos^2\left(\frac{\pi x}{\lambda}\right)
@@ -165,6 +165,7 @@ grid = ImmersedBoundaryGrid(underlying_grid, PartialCellBottom(hill))
 # The hill profile on a high-resolution grid:
 x_finegrid = -L/3:L/1000:L/3
 h_finegrid = hill.(x_finegrid)
+nothing #hide
 
 # Discretized profile as represented in the model:
 h_model = grid.immersed_boundary.bottom_height
@@ -176,7 +177,7 @@ ax = Axis(fig[1, 1],
           title = "Schär Mountain Profile")
 
 lines!(ax, x_finegrid, h_finegrid, linewidth = 1, color = :black, label = "Analytical")
-lines!(ax, h_model, linewidth = 2, color = :brown, linestyle = :dash, label = "Model")
+scatterlines!(ax, h_model, linewidth = 2, color = :brown, linestyle = :dash, label = "Model")
 band!(ax, x_finegrid, zeros(length(x_finegrid)), h_finegrid, color = (:brown, 0.2))
 
 axislegend(ax, position = :rt)
@@ -275,7 +276,7 @@ run!(simulation)
 # ## Analytical solution
 #
 # The linear analytical solution for mountain waves provides a validation benchmark.
-# Following Appendix A of [KlempEtAl2015](@cite), the vertical velocity field is computed
+# Following Appendix A of [KlempEtAl2015](@citet), the vertical velocity field is computed
 # via Fourier integration over wavenumber space.
 #
 # ### Fourier transform of terrain
@@ -301,7 +302,7 @@ k★ = sqrt(N² / U^2 - β^2 / 4)
 
 # ### Linear vertical velocity
 #
-# Compute the analytical vertical velocity ``w(x, z)`` from Equation A10:
+# Compute the analytical vertical velocity ``w(x, z)`` from Equation A10 by [KlempEtAl2015](@citet):
 #
 # ```math
 # w(x, z) = -\frac{U}{\pi} e^{\beta z/2} \left[
@@ -343,14 +344,9 @@ nothing #hide
 # pattern, noticeable discrepancies in wavenumber appear. The immersed boundary
 # method struggles to resolve the low-amplitude, fine-scale terrain corrugations
 # at this resolution.
-
-# Create comparison figure with simulated and analytical vertical velocity:
-
-fig = Figure(size=(900, 800), fontsize=14)
-nothing #hide
-
-# Compute analytical vertical velocity ``w`` on the same grid as the simulation and plot both of
-# them for comparison.
+#
+# First, we compute analytical vertical velocity ``w`` on the same grid as the
+# simulation and then we plot both of them.
 
 w_analytical = Field{Center, Nothing, Face}(grid)
 set!(w_analytical, w_linear)
