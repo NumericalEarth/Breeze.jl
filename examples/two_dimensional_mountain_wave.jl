@@ -314,8 +314,8 @@ k★ = sqrt(N² / U^2 - β^2 / 4)
 #
 # ```math
 # w(x, z) = -\frac{U}{\pi} e^{\beta z/2} \left[
-#     \int_0^{k^*} k \hat{h}(k) \sin(m z + k x) \, dk +
-#     \int_{k^*}^{\infty} k \hat{h}(k) e^{-|m| z} \sin(k x) \, dk
+#     \int_0^{k^*} k \hat{h}(k) \sin(m z + k x) \, \mathrm{d}k +
+#     \int_{k^*}^{\infty} k \hat{h}(k) e^{-|m| z} \sin(k x) \, \mathrm{d}k
 # \right]
 # ```
 #
