@@ -65,7 +65,7 @@ grid = RectilinearGrid(CPU(), size = (Nx, Nz), halo = (5, 5),
 
 constants = ThermodynamicConstants()
 reference_state = ReferenceState(grid, constants; surface_pressure=p₀, potential_temperature=θ₀)
-formulation = AnelasticFormulation(reference_state, thermodynamics=:LiquidIcePotentialTemperature)
+formulation = AnelasticFormulation(reference_state)
 advection = WENO(minimum_buffer_upwind_order=3)
 model = AtmosphereModel(grid; formulation, advection)
 

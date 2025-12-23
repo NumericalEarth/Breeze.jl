@@ -15,8 +15,13 @@ grid = RectilinearGrid(CPU(); size = (128, 128), halo = (5, 5),
                        x = (-10e3, 10e3), z = (0, 10e3),
                        topology = (Periodic, Flat, Bounded))
 
+# This example uses StaticEnergy thermodynamics, which is an alternative to the
+# default LiquidIcePotentialTemperature thermodynamics. StaticEnergy is useful
+# for dry simulations that don't require potential temperature diagnostics.
+reference_state = ReferenceState(grid, ThermodynamicConstants(eltype(grid)))
+formulation = AnelasticFormulation(reference_state, thermodynamics=:StaticEnergy)
 advection = WENO(order=9)
-model = AtmosphereModel(grid; advection)
+model = AtmosphereModel(grid; formulation, advection)
 
 # ## Moist static energy perturbation
 #

@@ -93,7 +93,7 @@ AtmosphereModel{CPU, RectilinearGrid}(time = 0 seconds, iteration = 0)
 ├── timestepper: RungeKutta3TimeStepper
 ├── advection scheme:
 │   ├── momentum: Centered(order=2)
-│   ├── ρe: Centered(order=2)
+│   ├── ρθ: Centered(order=2)
 │   └── ρqᵗ: Centered(order=2)
 ├── tracers: ()
 ├── coriolis: Nothing
@@ -229,7 +229,8 @@ function AtmosphereModel(grid;
                             radiation,
                             boundary_mass_fluxes)
 
-    update_state!(model)
+    θ₀ = formulation.reference_state.potential_temperature
+    set!(model, θ=θ₀)
 
     return model
 end
@@ -321,7 +322,7 @@ function atmosphere_model_forcing(user_forcings::NamedTuple, prognostic_fields, 
         end
     end
 
-    model_field_names = keys(model_fields)
+    model_names = keys(model_fields)
 
     # Build specific fields for subsidence forcing (maps specific field names like :u, :θ to fields)
     formulation_fields = fields(formulation)
@@ -331,10 +332,10 @@ function atmosphere_model_forcing(user_forcings::NamedTuple, prognostic_fields, 
     forcing_context = (; coriolis, density, specific_fields)
 
     materialized = Tuple(
-        name in keys(user_forcings) ?
-            materialize_atmosphere_model_forcing(user_forcings[name], field, name, model_field_names, forcing_context) :
-            Returns(zero(eltype(field)))
-            for (name, field) in pairs(forcing_fields)
+        n in keys(user_forcings) ?
+            materialize_atmosphere_model_forcing(user_forcings[n], f, n, model_names, forcing_context) :
+            Returns(zero(eltype(f)))
+            for (n, f) in pairs(forcing_fields)
     )
 
     forcings = NamedTuple{forcing_names}(materialized)
