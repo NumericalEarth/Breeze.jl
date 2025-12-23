@@ -9,7 +9,7 @@ using Oceananigans.Grids: Center, Face
 using Oceananigans.Fields: ConstantField
 
 using Breeze.AtmosphereModels: AtmosphereModels, SurfaceRadiativeProperties
-import Breeze.AtmosphereModels: RadiativeTransferModel, RRTMGPGasOptics
+import Breeze.AtmosphereModels: RadiativeTransferModel, RRTMGPGasOptics, BackgroundAtmosphericComposition
 
 using Dates: AbstractDateTime, Millisecond
 using KernelAbstractions: @kernel, @index
@@ -28,13 +28,12 @@ Construct a clear-sky (gas-only) full-spectrum `RadiativeTransferModel` for the 
 This constructor requires that `NCDatasets` is loadable in the user environment because
 RRTMGP loads lookup tables from netCDF via an extension.
 """
-function RadiativeTransferModel(grid, constants,
-                                optics::RRTMGPGasOptics;
+function RadiativeTransferModel(grid,
+                                optics::RRTMGPGasOptics,
+                                parameters::RRTMGPParameters = default_rrtmgp_parameters(eltype(grid));
                                 surface_temperature,
                                 coordinate = nothing,
                                 epoch = nothing,
-                                stefan_boltzmann_constant = 5.670374419e-8,
-                                avogadro_number = 6.02214076e23,
                                 surface_emissivity = 0.98,
                                 direct_surface_albedo = nothing,
                                 diffuse_surface_albedo = nothing,
@@ -93,17 +92,6 @@ function RadiativeTransferModel(grid, constants,
     nbnd_sw = luts.lu_kwargs.nbnd_sw
     ngas = luts.lu_kwargs.ngas_sw
 
-    # RRTMGP parameters
-    kappa_d = constants.dry_air.heat_capacity / constants.dry_air.molar_mass
-    radiative_transfer_parameters = RRTMGPParameters(;
-        grav = FT(constants.gravitational_acceleration),
-        molmass_dryair = FT(constants.dry_air.molar_mass),
-        molmass_water = FT(constants.vapor.molar_mass),
-        gas_constant = FT(constants.molar_gas_constant),
-        kappa_d = FT(kappa_d),
-        Stefan = FT(stefan_boltzmann_constant),
-        avogad = FT(avogadro_number),
-    )
 
     # Atmospheric state arrays
     lon = DA{FT}(undef, Nc)
@@ -117,7 +105,7 @@ function RadiativeTransferModel(grid, constants,
     set_latitude!(lat, coordinate, grid)
 
     vmr = init_vmr(ngas, Nz, Nc, FT, DA; gm=true)
-    set_global_mean_gases!(vmr, luts.lookups.idx_gases_sw, optics)
+    set_global_mean_gases!(vmr, luts.lookups.idx_gases_sw, optics.background_composition)
 
     atmospheric_state = AtmosphericState(lon, lat, layerdata, p_lev, t_lev, t_sfc, vmr, nothing, nothing)
 
@@ -153,7 +141,7 @@ function RadiativeTransferModel(grid, constants,
     lw_bcs = LwBCs(sfc_emis, nothing)
     sw_bcs = SwBCs(cos_zenith, toa_flux, sfc_alb_direct, nothing, sfc_alb_diffuse)
 
-    solver = RRTMGPSolver(grid_params, radiation_method, radiative_transfer_parameters, lw_bcs, sw_bcs, atmospheric_state)
+    solver = RRTMGPSolver(grid_params, radiation_method, parameters, lw_bcs, sw_bcs, atmospheric_state)
 
     # Oceananigans output fields
     upwelling_longwave_flux = ZFaceField(grid)
@@ -178,16 +166,37 @@ function RadiativeTransferModel(grid, constants,
                                   downwelling_shortwave_flux)
 end
 
-@inline function set_global_mean_gases!(vmr, idx_gases_sw, optics::RRTMGPGasOptics)
+# Mapping from RRTMGP's internal gas names to BackgroundAtmosphericComposition field names
+const RRTMGP_GAS_NAME_MAP = Dict{String, Symbol}(
+    "n2"      => :N₂,
+    "o2"      => :O₂,
+    "co2"     => :CO₂,
+    "ch4"     => :CH₄,
+    "n2o"     => :N₂O,
+    "co"      => :CO,
+    "no2"     => :NO₂,
+    "o3"      => :O₃,
+    "cfc11"   => :CFC₁₁,
+    "cfc12"   => :CFC₁₂,
+    "cfc22"   => :CFC₂₂,
+    "ccl4"    => :CCl₄,
+    "cf4"     => :CF₄,
+    "hfc125"  => :HFC₁₂₅,
+    "hfc134a" => :HFC₁₃₄ₐ,
+    "hfc143a" => :HFC₁₄₃ₐ,
+    "hfc23"   => :HFC₂₃,
+    "hfc32"   => :HFC₃₂,
+)
+
+@inline function set_global_mean_gases!(vmr, idx_gases_sw, atm::BackgroundAtmosphericComposition)
     FT = eltype(vmr.vmr)
     ngas = length(vmr.vmr)
     host = zeros(FT, ngas)
 
-    # Fill from the optics NamedTuple when available; otherwise default to zero.
     for (name, ig) in idx_gases_sw
-        sym = Symbol(name)
-        if hasproperty(optics.gas_vmr, sym)
-            host[ig] = getproperty(optics.gas_vmr, sym)
+        sym = get(RRTMGP_GAS_NAME_MAP, name, nothing)
+        if !isnothing(sym) && hasproperty(atm, sym)
+            host[ig] = getproperty(atm, sym)
         end
     end
 
@@ -257,7 +266,7 @@ function update_rrtmgp_clear_sky_state!(as::AtmosphericState, model, surface_tem
     M_dry = params.molmass_dryair
     M_w = params.molmass_water
     N_A = params.avogad
-    o3 = optics.gas_vmr.o3
+    o3 = optics.background_composition.O₃
 
     launch!(arch, grid, :xyz, _update_rrtmgp_clear_sky_state!, as, grid, p, T, q, surface_temperature, g, M_dry, M_w, N_A, o3)
     return nothing

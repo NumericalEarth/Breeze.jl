@@ -16,6 +16,7 @@ export
     LiquidIcePotentialTemperatureThermodynamics,
     RadiativeTransferModel,
     RRTMGPGasOptics,
+    BackgroundAtmosphericComposition,
     TemperatureField,
     IdealGas,
     CondensedPhase,

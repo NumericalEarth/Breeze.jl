@@ -26,9 +26,8 @@ grid = RectilinearGrid(size=Nz, x=λ, y=φ, z=(0, 20kilometers),
 
 # Set up the thermodynamic constants and reference state.
 surface_temperature = 300
-constants = ThermodynamicConstants()
 
-reference_state = ReferenceState(grid, constants;
+reference_state = ReferenceState(grid;
                                  surface_pressure = 101325,
                                  potential_temperature = surface_temperature)
 
@@ -44,14 +43,14 @@ formulation = AnelasticFormulation(reference_state)
 using Dates
 
 gray_optics = GrayOpticalThicknessOGorman2008(eltype(grid))
-gray_radiation = RadiativeTransferModel(grid, constants, gray_optics;
+gray_radiation = RadiativeTransferModel(grid, gray_optics;
                                         surface_temperature,
                                         surface_emissivity = 0.98,
                                         surface_albedo = 0.1,
                                         solar_constant = 1361)        # W/m²
 
-clear_sky_optics = RRTMGPGasOptics(eltype(grid))
-clear_sky_radiation = RadiativeTransferModel(grid, constants, clear_sky_optics;
+clear_sky_optics = RRTMGPGasOptics()
+clear_sky_radiation = RadiativeTransferModel(grid, clear_sky_optics;
                                              surface_temperature,
                                              surface_emissivity = 0.98,
                                              surface_albedo = 0.1,

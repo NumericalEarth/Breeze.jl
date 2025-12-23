@@ -32,14 +32,59 @@ end
 """
 $(TYPEDSIGNATURES)
 
-Return a RadiativeTransferModel on `grid` with thermodynamic `constants` and using
-the `optics` configuration for radiative transfer.
+Return a RadiativeTransferModel on `grid` using the `optics` configuration for radiative transfer.
+The `parameters` argument provides physical constants for the radiative transfer solver.
 """
-function RadiativeTransferModel(grid, constants, optics; kw...)
-    msg = "At the moment, RadiativeTransferModel requires RRTMGP and is only valid with
-          optics = GrayOpticalThicknessOGorman2008(FT). Received $optics."
+function RadiativeTransferModel(grid, optics, parameters=nothing; kw...)
+    msg = "RadiativeTransferModel requires RRTMGP. Valid optics are:\n" *
+          "  - GrayOpticalThicknessOGorman2008(FT)\n" *
+          "  - RRTMGPGasOptics()\n" *
+          "Received: $optics"
     throw(ArgumentError(msg))
     return nothing
+end
+
+"""
+    BackgroundAtmosphericComposition
+
+Constant (spatially uniform) volume mixing ratios (VMR) for radiatively active gases.
+All values are dimensionless molar fractions.
+
+# Fields
+- Major atmospheric constituents: `N₂`, `O₂`, `CO₂`, `CH₄`, `N₂O`, `CO`, `NO₂`, `O₃`
+- Halocarbons: `CFC₁₁`, `CFC₁₂`, `CFC₂₂`, `CCl₄`, `CF₄`
+- Hydrofluorocarbons: `HFC₁₂₅`, `HFC₁₃₄ₐ`, `HFC₁₄₃ₐ`, `HFC₂₃`, `HFC₃₂`
+
+Defaults are approximate modern atmospheric values for major gases; halocarbons default to zero.
+
+Note: H₂O is computed from the model's prognostic moisture field, not specified here.
+"""
+Base.@kwdef struct BackgroundAtmosphericComposition{FT}
+    # Major atmospheric constituents
+    N₂  :: FT = 0.78084      # Nitrogen (~78%)
+    O₂  :: FT = 0.20946      # Oxygen (~21%)
+    CO₂ :: FT = 420e-6       # Carbon dioxide (~420 ppm)
+    CH₄ :: FT = 1.8e-6       # Methane (~1.8 ppm)
+    N₂O :: FT = 0.33e-6      # Nitrous oxide (~330 ppb)
+    CO  :: FT = 0.0          # Carbon monoxide
+    NO₂ :: FT = 0.0          # Nitrogen dioxide
+    O₃  :: FT = 0.0          # Ozone (often specified as a profile)
+
+    # Chlorofluorocarbons (CFCs)
+    CFC₁₁ :: FT = 0.0        # Trichlorofluoromethane
+    CFC₁₂ :: FT = 0.0        # Dichlorodifluoromethane
+    CFC₂₂ :: FT = 0.0        # Chlorodifluoromethane
+
+    # Other halocarbons
+    CCl₄ :: FT = 0.0         # Carbon tetrachloride
+    CF₄  :: FT = 0.0         # Carbon tetrafluoride
+
+    # Hydrofluorocarbons (HFCs)
+    HFC₁₂₅  :: FT = 0.0      # Pentafluoroethane
+    HFC₁₃₄ₐ :: FT = 0.0      # 1,1,1,2-Tetrafluoroethane
+    HFC₁₄₃ₐ :: FT = 0.0      # 1,1,1-Trifluoroethane
+    HFC₂₃   :: FT = 0.0      # Trifluoromethane
+    HFC₃₂   :: FT = 0.0      # Difluoromethane
 end
 
 """
@@ -50,54 +95,14 @@ Configuration for RRTMGP full-spectrum **gas optics** (clear-sky).
 This object is intentionally defined in Breeze (so users can configure it without importing
 RRTMGP internals), but it is **only usable** when the RRTMGP extension is active.
 
-# Keyword Arguments
-All keywords correspond to volume mixing ratios (VMR) and are dimensionless.
-Defaults are reasonable modern values for the major constituents and `0` for trace halocarbons.
-
-Notes:
-- H₂O and O₃ are treated as prognostic / profile fields in the solver setup (H₂O from Breeze
-  moisture; O₃ defaults to a constant here but can be upgraded later).
+The `background_composition` field specifies the gas volume mixing ratios for radiatively
+active species (except H₂O, which is computed from the model's moisture field).
 """
-struct RRTMGPGasOptics{GV}
-    gas_vmr :: GV
+struct RRTMGPGasOptics{BA}
+    background_composition :: BA
 end
 
-@inline function default_rrtmgp_gas_vmr(::Type{FT}) where {FT}
-    return (;
-        # Major/background gases
-        n2  = FT(0.78084),
-        o2  = FT(0.20946),
-        co2 = FT(420e-6),
-        ch4 = FT(1.8e-6),
-        n2o = FT(0.33e-6),
-        co  = FT(0),
-        no2 = FT(0),
-        o3  = FT(0),
-
-        # Halocarbons / trace gases (default off)
-        cfc11   = FT(0),
-        cfc12   = FT(0),
-        cfc22   = FT(0),
-        ccl4    = FT(0),
-        cf4     = FT(0),
-        hfc125  = FT(0),
-        hfc134a = FT(0),
-        hfc143a = FT(0),
-        hfc23   = FT(0),
-        hfc32   = FT(0),
-    )
-end
-
-"""
-$(TYPEDSIGNATURES)
-
-Construct `RRTMGPGasOptics` with default gas volume mixing ratios, optionally overridden by keywords.
-"""
-function RRTMGPGasOptics(::Type{FT}; kwargs...) where {FT}
-    defaults = default_rrtmgp_gas_vmr(FT)
-    overrides = NamedTuple{keys(kwargs)}(map(x -> convert(FT, x), values(kwargs)))
-    return RRTMGPGasOptics(merge(defaults, overrides))
-end
+RRTMGPGasOptics() = RRTMGPGasOptics(BackgroundAtmosphericComposition{Float64}())
 
 struct SurfaceRadiativeProperties{ST, SE, SA, DW}
     surface_temperature :: ST  # Scalar or 2D field

@@ -50,13 +50,12 @@ Construct a gray atmosphere radiative transfer model for the given grid.
 - `diffuse_surface_albedo`: Diffuse surface albedo, 0-1 (default: 0.1). Can be scalar or 2D field.
 - `solar_constant`: Top-of-atmosphere solar flux in W/m² (default: 1361)
 """
-function RadiativeTransferModel(grid, constants,
-                                optical_thickness::GrayOpticalThicknessOGorman2008;
+function RadiativeTransferModel(grid,
+                                optics::GrayOpticalThicknessOGorman2008,
+                                parameters::RRTMGPParameters = default_rrtmgp_parameters(eltype(grid));
                                 surface_temperature,
                                 coordinate = nothing,
                                 epoch = nothing,
-                                stefan_boltzmann_constant = 5.670374419e-8,
-                                avogadro_number = 6.02214076e23,
                                 latitude = nothing,
                                 surface_emissivity = 0.98,
                                 direct_surface_albedo = nothing,
@@ -95,19 +94,6 @@ function RadiativeTransferModel(grid, constants,
     context = rrtmgp_context(arch)
     DA = ClimaComms.array_type(context.device)
 
-    # Create RRTMGP parameters with default values
-    kappa_d = constants.dry_air.heat_capacity / constants.dry_air.molar_mass
-
-    radiative_transfer_parameters = RRTMGPParameters(;
-        grav = FT(constants.gravitational_acceleration),
-        molmass_dryair = FT(constants.dry_air.molar_mass),
-        molmass_water = FT(constants.vapor.molar_mass),
-        gas_constant = FT(constants.molar_gas_constant),
-        kappa_d = FT(kappa_d),
-        Stefan = FT(stefan_boltzmann_constant),
-        avogad = FT(avogadro_number),
-    )
-
     # Allocate RRTMGP arrays: (nlay/nlev, ncol)
     # Note: RRTMGP uses "lat" internally for its GrayAtmosphericState struct
     rrtmgp_φ  = DA{FT}(undef, Nc)
@@ -131,7 +117,7 @@ function RadiativeTransferModel(grid, constants,
                                              rrtmgp_Tᶠ,
                                              rrtmgp_zᶠ,
                                              rrtmgp_T₀,
-                                             optical_thickness)
+                                             optics)
 
     # Surface emissivity for the longwave solver
     rrtmgp_ε₀ = DA{FT}(undef, Nc)
@@ -168,7 +154,7 @@ function RadiativeTransferModel(grid, constants,
     grid_parameters = RRTMGPGridParams(FT; context, nlay=Nz, ncol=Nc)
 
     longwave_solver = NoScatLWRTE(grid_parameters;
-                                  params = radiative_transfer_parameters,
+                                  params = parameters,
                                   sfc_emis = rrtmgp_ε₀,
                                   inc_flux = nothing)
 
@@ -189,7 +175,7 @@ function RadiativeTransferModel(grid, constants,
                                                     direct_surface_albedo,
                                                     diffuse_surface_albedo)
 
-    return RadiativeTransferModel(optical_thickness,
+    return RadiativeTransferModel(optics,
                                   convert(FT, solar_constant),
                                   coordinate,
                                   epoch,

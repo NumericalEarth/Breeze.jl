@@ -28,6 +28,7 @@ export
     # Radiation (implemented by extensions)
     RadiativeTransferModel,
     RRTMGPGasOptics,
+    BackgroundAtmosphericComposition,
 
     # Diagnostics (re-exported from Diagnostics submodule)
     PotentialTemperature,
