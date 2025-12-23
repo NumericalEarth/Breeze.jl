@@ -163,6 +163,4 @@ Legend(fig[1, 1:3], component_handles, component_labels; orientation=:horizontal
 title = "Single Column Radiation: gray vs clear-sky full-spectrum"
 fig[0, :] = Label(fig, title, fontsize=18, tellwidth=false)
 
-save(joinpath(@__DIR__, "single_column_radiation_gray_vs_clear_sky.png"), fig)
-
 fig
