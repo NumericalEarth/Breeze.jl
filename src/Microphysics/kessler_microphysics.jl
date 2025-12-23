@@ -490,7 +490,7 @@ and cached in the microphysical fields.
 
 where the rates Cₖ, Eₖ, Aₖ, Kₖ are in mixing ratio space.
 """
-@inline function microphysical_tendency(i, j, k, grid, km::KM, ::Val{:ρqᶜˡ}, formulation, μ, 𝒰, constants)
+@inline function microphysical_tendency(i, j, k, grid, km::KM, ::Val{:ρqᶜˡ}, ρᵣ, μ, 𝒰, constants)
     # Get thermodynamic quantities
     ρ = density(𝒰, constants)
     qᵗ = total_specific_moisture(𝒰)
@@ -526,13 +526,10 @@ and cached in the microphysical fields. Sedimentation is included using upstream
 
 where S is the sedimentation term.
 """
-@inline function microphysical_tendency(i, j, k, grid, km::KM, ::Val{:ρqʳ}, formulation, μ, 𝒰, constants)
+@inline function microphysical_tendency(i, j, k, grid, km::KM, ::Val{:ρqʳ}, ρᵣ, μ, 𝒰, constants)
     # Get thermodynamic quantities
     ρ = density(𝒰, constants)
     qᵗ = total_specific_moisture(𝒰)
-    
-    # Reference density profile for sedimentation (allows access to k+1 in local kernel)
-    ρᵣ = formulation.reference_state.density
     
     # Get cached rates (computed in update_microphysical_fields!)
     @inbounds begin
@@ -554,7 +551,7 @@ where S is the sedimentation term.
 end
 
 # Default: no tendency for other variables
-@inline microphysical_tendency(i, j, k, grid, ::KM, name, formulation, μ, 𝒰, constants) = zero(grid)
+@inline microphysical_tendency(i, j, k, grid, ::KM, name, ρ, μ, 𝒰, constants) = zero(grid)
 
 #####
 ##### Potential temperature tendency
@@ -587,14 +584,11 @@ This ensures:
 - When rain leaves a cell (∂qʳ/∂t < 0): θˡⁱ increases to maintain T
 - Rain falling out at the surface warms the air (removes "cold" liquid)
 """
-@inline function microphysical_tendency(i, j, k, grid, ::KM, ::Val{:ρθ}, formulation, μ, 𝒰, constants)
+@inline function microphysical_tendency(i, j, k, grid, ::KM, ::Val{:ρθ}, ρᵣ, μ, 𝒰, constants)
     # Get thermodynamic quantities
     ρ = density(𝒰, constants)
     qᵗ = total_specific_moisture(𝒰)
     T = temperature(𝒰, constants)
-    
-    # Reference density profile for sedimentation (allows access to k+1 in local kernel)
-    ρᵣ = formulation.reference_state.density
     
     # Sedimentation tendency for rain (in mixing ratio space)
     sed = sedimentation_tendency(i, j, k, grid, ρᵣ, μ)
