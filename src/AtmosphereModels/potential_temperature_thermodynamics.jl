@@ -12,7 +12,7 @@ Adapt.adapt_structure(to, thermo::LiquidIcePotentialTemperatureThermodynamics) =
                                        adapt(to, thermo.potential_temperature))
 
 function BoundaryConditions.fill_halo_regions!(thermo::LiquidIcePotentialTemperatureThermodynamics)
-    fill_halo_regions!(thermo.potential_temperature_density)
+    # fill_halo_regions!(thermo.potential_temperature_density)
     fill_halo_regions!(thermo.potential_temperature)
     return nothing
 end
@@ -86,8 +86,7 @@ function compute_thermodynamic_tendency!(model::LiquidIcePotentialTemperatureAne
         model.forcing.ρθ,
         model.forcing.ρe,
         model.advection.ρθ,
-        common_args...,
-        model.temperature)
+        common_args...)
 
     Gρθ = model.timestepper.Gⁿ.ρθ
     launch!(arch, grid, :xyz, compute_potential_temperature_tendency!, Gρθ, grid, ρθ_args)
@@ -108,8 +107,7 @@ end
                                                 closure,
                                                 closure_fields,
                                                 clock,
-                                                model_fields,
-                                                temperature)
+                                                model_fields)
 
     potential_temperature = formulation.thermodynamics.potential_temperature
     ρᵣ = formulation.reference_state.density
@@ -128,9 +126,10 @@ end
 
     return ( - div_ρUc(i, j, k, grid, advection, ρᵣ, velocities, potential_temperature)
              - ∇_dot_Jᶜ(i, j, k, grid, ρᵣ, closure, closure_fields, id, potential_temperature, clock, model_fields, closure_buoyancy)
-             + microphysical_tendency(i, j, k, grid, microphysics, Val(:ρθ), formulation, microphysical_fields, 𝒰, constants)
+             + microphysical_tendency(i, j, k, grid, microphysics, Val(:ρθ), ρᵣ, microphysical_fields, 𝒰, constants)
              + ρθ_forcing(i, j, k, grid, clock, model_fields)
-             + ρe_forcing(i, j, k, grid, clock, model_fields) / (cᵖᵐ * Π))
+             + ρe_forcing(i, j, k, grid, clock, model_fields) / (cᵖᵐ * Π)
+    )
 end
 
 #####
@@ -199,7 +198,7 @@ end
     z = znode(i, j, k, grid, c, c, c)
     q = compute_moisture_fractions(i, j, k, grid, microphysics, ρᵣ, qᵗ, microphysical_fields)
     𝒰e₀ = StaticEnergyState(e, q, z, pᵣ)
-    𝒰e₁ = maybe_adjust_thermodynamic_state(𝒰e₀, microphysics, microphysical_fields, qᵗ, constants)
+    𝒰e₁ = maybe_adjust_thermodynamic_state(i, j, k, 𝒰e₀, microphysics, ρᵣ, microphysical_fields, qᵗ, constants)
     T = temperature(𝒰e₁, constants)
 
     pˢᵗ = formulation.reference_state.standard_pressure
@@ -207,4 +206,73 @@ end
     𝒰θ = LiquidIcePotentialTemperatureState(zero(T), q₁, pˢᵗ, pᵣ)
     @inbounds potential_temperature[i, j, k] = with_temperature(𝒰θ, T, constants).potential_temperature
     @inbounds potential_temperature_density[i, j, k] = ρᵣ * with_temperature(𝒰θ, T, constants).potential_temperature
+end
+
+#####
+##### Setting temperature directly
+#####
+
+"""
+    $(TYPEDSIGNATURES)
+
+Set the thermodynamic state from in-situ temperature ``T``.
+
+The temperature is converted to liquid-ice potential temperature `θˡⁱ` using
+the relation between ``T`` and `θˡⁱ`` that accounts for the moisture distribution.
+
+For unsaturated air (no condensate), this simplifies to ``θ = T / Π`` where
+``Π`` is the Exner function.
+"""
+function set_thermodynamic_variable!(model::LiquidIcePotentialTemperatureAnelasticModel, ::Val{:T}, value)
+    T_field = model.temperature # use temperature field as scratch/storage
+    set!(T_field, value)
+
+    grid = model.grid
+    arch = grid.architecture
+    thermo = model.formulation.thermodynamics
+
+    launch!(arch, grid, :xyz,
+            _potential_temperature_from_temperature!,
+            thermo.potential_temperature_density,
+            thermo.potential_temperature,
+            grid,
+            T_field,
+            model.specific_moisture,
+            model.formulation,
+            model.microphysics,
+            model.microphysical_fields,
+            model.thermodynamic_constants)
+
+    return nothing
+end
+
+@kernel function _potential_temperature_from_temperature!(potential_temperature_density,
+                                                          potential_temperature,
+                                                          grid,
+                                                          temperature_field,
+                                                          specific_moisture,
+                                                          formulation,
+                                                          microphysics,
+                                                          microphysical_fields,
+                                                          constants)
+    i, j, k = @index(Global, NTuple)
+
+    @inbounds begin
+        pᵣ = formulation.reference_state.pressure[i, j, k]
+        ρᵣ = formulation.reference_state.density[i, j, k]
+        qᵗ = specific_moisture[i, j, k]
+        T = temperature_field[i, j, k]
+    end
+
+    # Get moisture fractions (vapor only for unsaturated air)
+    q = compute_moisture_fractions(i, j, k, grid, microphysics, ρᵣ, qᵗ, microphysical_fields)
+
+    # Convert temperature to potential temperature using the inverse of the T(θ) relation
+    pˢᵗ = formulation.reference_state.standard_pressure
+    𝒰₀ = LiquidIcePotentialTemperatureState(zero(T), q, pˢᵗ, pᵣ)
+    𝒰₁ = with_temperature(𝒰₀, T, constants)
+    θ = 𝒰₁.potential_temperature
+
+    @inbounds potential_temperature[i, j, k] = θ
+    @inbounds potential_temperature_density[i, j, k] = ρᵣ * θ
 end

@@ -10,12 +10,15 @@ export
     mean_pressure,
     pressure_anomaly,
     total_pressure,
+    formulation_density,
+    formulation_pressure,
     static_energy_density,
     static_energy,
     total_energy,
     liquid_ice_potential_temperature_density,
     liquid_ice_potential_temperature,
     precipitation_rate,
+    surface_precipitation_flux,
 
     # Interface functions (extended by BoundaryConditions and Forcings)
     regularize_atmosphere_model_boundary_conditions,

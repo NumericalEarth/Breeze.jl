@@ -24,7 +24,7 @@ $(TYPEDSIGNATURES)
 Construct an un-materialized "stub" `AnelasticFormulation` with `reference_state` and `thermodynamics`.
 The thermodynamics and pressure fields are materialized later in the model constructor.
 """
-AnelasticFormulation(reference_state; thermodynamics=:StaticEnergy) =
+AnelasticFormulation(reference_state; thermodynamics=:LiquidIcePotentialTemperature) =
     AnelasticFormulation(thermodynamics, reference_state, nothing)
 
 Adapt.adapt_structure(to, formulation::AnelasticFormulation) =
@@ -130,6 +130,30 @@ function total_pressure(formulation::AnelasticFormulation)
 end
 
 #####
+##### Density interface
+#####
+
+"""
+$(TYPEDSIGNATURES)
+
+Return the reference density field for `AnelasticFormulation`.
+
+For anelastic models, the formulation density is the time-independent
+reference state density `ρᵣ(z)`.
+"""
+formulation_density(formulation::AnelasticFormulation) = formulation.reference_state.density
+
+"""
+$(TYPEDSIGNATURES)
+
+Return the reference pressure field for `AnelasticFormulation`.
+
+For anelastic models, the formulation pressure is the time-independent
+hydrostatic reference state pressure `pᵣ(z)`.
+"""
+formulation_pressure(formulation::AnelasticFormulation) = formulation.reference_state.pressure
+
+#####
 ##### Show methods
 #####
 
@@ -167,5 +191,5 @@ function materialize_momentum_and_velocities(formulation::AnelasticFormulation, 
     w = ZFaceField(grid, boundary_conditions=velocity_bcs.w)
     velocities = (; u, v, w)
 
-    return velocities, momentum
+    return momentum, velocities
 end

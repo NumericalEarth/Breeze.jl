@@ -59,6 +59,7 @@ The following table also uses a few conventions that suffuse the source code and
 | ``pᵛ``                              | `pᵛ`   |                                     | Vapor pressure (partial pressure of water vapor), ``pᵛ = ρ qᵛ Rᵛ T``           |
 | ``pᵛ⁺``                             | `pᵛ⁺`  |                                     | Saturation vapor pressure                                                      |
 | ``\mathscr{H}``                     | `ℋ`    | `RelativeHumidity(model)`           | Relative humidity, ``ℋ = pᵛ / pᵛ⁺``                                            |
+| ``\mathscr{S}``                     | `𝒮`    | `supersaturation(T, ρ, q, c, surf)` | Supersaturation, ``𝒮 = pᵛ / pᵛ⁺ - 1``                                          |
 | ``g``                               | `g`    | `TC.gravitational_acceleration`     | Gravitational acceleration                                                     |
 | ``\mathcal{R}``                     | `ℛ`    | `TC.molar_gas_constant`             | Universal (molar) gas constant                                                 |
 | ``Tᵗʳ``                             | `Tᵗʳ`  | `TC.triple_point_temperature`       | Temperature at the vapor-liquid-ice triple point                               |

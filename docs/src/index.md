@@ -21,12 +21,28 @@ Breeze provides two ways to simulate moist atmospheres:
 
 ## Installation
 
-To use Breeze, install directly from GitHub:
+Breeze is a registered Julia package. First [install Julia](https://julialang.org/install/); suggested version 1.12. See [juliaup](https://github.com/JuliaLang/juliaup) README for how to install 1.12 and make that version the default.
+
+Then launch Julia and type
 
 ```julia
-using Pkg
-Pkg.add("https://github.com/NumericalEarth/Breeze.jl.git")
+julia> using Pkg
+
+julia> Pkg.add("Breeze")
 ```
+
+which will install the latest stable version of Breeze that's compatible with your current environment.
+
+You can check which version of Breeze you got via
+
+```julia
+Pkg.status("Breeze")
+```
+
+If you want to live on the cutting edge, you can use, e.g.,
+`Pkg.add(; url="https://github.com/NumericalEarth/Breeze.jl.git", rev="main")` to install the latest version of
+Breeze from `main` branch. For more information, see the
+[Pkg.jl documentation](https://pkgdocs.julialang.org).
 
 ## Quick Start
 

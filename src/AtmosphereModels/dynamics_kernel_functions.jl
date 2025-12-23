@@ -9,7 +9,7 @@ using Oceananigans.Utils: sum_of_velocities
 @inline div_ρUc(i, j, k, grid, args...) = zero(grid)
 
 """
-    ∇_dot_Jᶜ(i, j, k, grid, density, closure::AbstractTurbulenceClosure, closure_fields,
+    ∇_dot_Jᶜ(i, j, k, grid, ρ, closure::AbstractTurbulenceClosure, closure_fields,
              id, c, clock, model_fields, buoyancy)
 
 Return the discrete divergence of the dynamic scalar flux `Jᶜ = ρ jᶜ`,
@@ -134,11 +134,10 @@ end
                                  clock,
                                  model_fields)
 
-    # TODO fix this
-    Uᵖ = microphysical_velocities(microphysics, name)
+    Uᵖ = microphysical_velocities(microphysics, microphysical_fields, name)
     Uᵗ = sum_of_velocities(velocities, Uᵖ)
-    ρ = formulation.reference_state.density
-    diffusive_flux_buoyancy = AtmosphereModelBuoyancy(formulation, constants)
+    ρ = formulation_density(formulation)
+    closure_buoyancy = AtmosphereModelBuoyancy(formulation, constants)
 
     𝒰 = diagnose_thermodynamic_state(i, j, k, grid,
                                      formulation,
@@ -148,7 +147,7 @@ end
                                      specific_moisture)
 
     return ( - div_ρUc(i, j, k, grid, advection, ρ, Uᵗ, c)
-             - ∇_dot_Jᶜ(i, j, k, grid, ρ, closure, closure_fields, id, c, clock, model_fields, diffusive_flux_buoyancy)
-             + microphysical_tendency(i, j, k, grid, microphysics, name, formulation, microphysical_fields, 𝒰, constants)
+             - ∇_dot_Jᶜ(i, j, k, grid, ρ, closure, closure_fields, id, c, clock, model_fields, closure_buoyancy)
+             + microphysical_tendency(i, j, k, grid, microphysics, name, ρ, microphysical_fields, 𝒰, constants)
              + c_forcing(i, j, k, grid, clock, model_fields))
 end

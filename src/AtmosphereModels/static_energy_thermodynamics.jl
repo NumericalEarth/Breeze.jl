@@ -130,7 +130,7 @@ end
     return ( - div_ρUc(i, j, k, grid, advection, ρ, velocities, specific_energy)
              + buoyancy_flux
              - ∇_dot_Jᶜ(i, j, k, grid, ρ, closure, closure_fields, id, specific_energy, clock, model_fields, closure_buoyancy)
-             + microphysical_tendency(i, j, k, grid, microphysics, Val(:ρe), formulation, microphysical_fields, 𝒰, constants)
+             + microphysical_tendency(i, j, k, grid, microphysics, Val(:ρe), ρ, microphysical_fields, 𝒰, constants)
              + ρe_forcing(i, j, k, grid, clock, model_fields))
 end
 
@@ -196,7 +196,7 @@ end
     pˢᵗ = formulation.reference_state.standard_pressure
     q = compute_moisture_fractions(i, j, k, grid, microphysics, ρᵣ, qᵗ, microphysical_fields)
     𝒰θ₀ = LiquidIcePotentialTemperatureState(θ, q, pˢᵗ, pᵣ)
-    𝒰θ₁ = maybe_adjust_thermodynamic_state(𝒰θ₀, microphysics, microphysical_fields, qᵗ, constants)
+    𝒰θ₁ = maybe_adjust_thermodynamic_state(i, j, k, 𝒰θ₀, microphysics, ρᵣ, microphysical_fields, qᵗ, constants)
     T = temperature(𝒰θ₁, constants)
 
     z = znode(i, j, k, grid, c, c, c)
@@ -205,6 +205,75 @@ end
     𝒰e₁ = with_temperature(𝒰e₀, T, constants)
     e = 𝒰e₁.static_energy
 
+    @inbounds specific_energy[i, j, k] = e
+    @inbounds energy_density[i, j, k] = ρᵣ * e
+end
+
+#####
+##### Setting temperature directly
+#####
+
+"""
+    $(TYPEDSIGNATURES)
+
+Set the thermodynamic state from temperature ``T``.
+
+The temperature is converted to static energy ``e`` using the relation:
+
+```math
+e = cᵖᵐ T + g z - ℒˡ qˡ - ℒⁱ qⁱ .
+```
+"""
+function set_thermodynamic_variable!(model::StaticEnergyAnelasticModel, ::Val{:T}, value)
+    T_field = model.temperature # use temperature field as scratch/storage
+    set!(T_field, value)
+
+    grid = model.grid
+    arch = grid.architecture
+    thermo = model.formulation.thermodynamics
+
+    launch!(arch, grid, :xyz,
+            _energy_density_from_temperature!,
+            thermo.energy_density,
+            thermo.specific_energy,
+            grid,
+            T_field,
+            model.specific_moisture,
+            model.formulation,
+            model.microphysics,
+            model.microphysical_fields,
+            model.thermodynamic_constants)
+
+    return nothing
+end
+
+@kernel function _energy_density_from_temperature!(energy_density,
+                                                   specific_energy,
+                                                   grid,
+                                                   temperature_field,
+                                                   specific_moisture,
+                                                   formulation,
+                                                   microphysics,
+                                                   microphysical_fields,
+                                                   constants)
+    i, j, k = @index(Global, NTuple)
+
+    @inbounds begin
+        pᵣ = formulation.reference_state.pressure[i, j, k]
+        ρᵣ = formulation.reference_state.density[i, j, k]
+        qᵗ = specific_moisture[i, j, k]
+        T = temperature_field[i, j, k]
+    end
+
+    # Get moisture fractions (vapor only for unsaturated air)
+    q = compute_moisture_fractions(i, j, k, grid, microphysics, ρᵣ, qᵗ, microphysical_fields)
+
+    # Convert temperature to static energy
+    z = znode(i, j, k, grid, c, c, c)
+    𝒰₀ = StaticEnergyState(zero(T), q, z, pᵣ)
+    𝒰₁ = with_temperature(𝒰₀, T, constants)
+
+    e = 𝒰₁.static_energy
     @inbounds specific_energy[i, j, k] = e
     @inbounds energy_density[i, j, k] = ρᵣ * e
 end

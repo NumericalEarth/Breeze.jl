@@ -1,10 +1,9 @@
 using ..AtmosphereModels: AtmosphereModels
 using Oceananigans: Average, Field, set!, compute!
-using Oceananigans.BoundaryConditions: FieldBoundaryConditions, ImpenetrableBoundaryCondition,
-                                       fill_halo_regions!
+using Oceananigans.BoundaryConditions: fill_halo_regions!
 using Oceananigans.Fields: AbstractField
 using Oceananigans.Grids: Center, Face
-using Oceananigans.Operators: ∂zᶜᶜᶠ, ℑzᵃᵃᶜ
+using Oceananigans.Operators: ∂zᶜᶜᶠ
 using Oceananigans.Utils: prettysummary
 using Adapt: Adapt
 
@@ -14,13 +13,13 @@ using Adapt: Adapt
 
 struct SubsidenceForcing{W, R, A}
     subsidence_vertical_velocity :: W
-    reference_density :: R
+    density :: R
     averaged_field :: A
 end
 
 Adapt.adapt_structure(to, sf::SubsidenceForcing) =
     SubsidenceForcing(Adapt.adapt(to, sf.subsidence_vertical_velocity),
-                      Adapt.adapt(to, sf.reference_density),
+                      Adapt.adapt(to, sf.density),
                       Adapt.adapt(to, sf.averaged_field))
 
 """
@@ -51,11 +50,11 @@ grid = RectilinearGrid(size=(64, 64, 75), x=(0, 6400), y=(0, 6400), z=(0, 3000))
 
 wˢ(z) = z < 1500 ? -0.0065 * z / 1500 : -0.0065 * (1 - (z - 1500) / 600)
 subsidence = SubsidenceForcing(wˢ)
-forcing = (; ρe=subsidence, ρqᵗ=subsidence)
+forcing = (; ρθ=subsidence, ρqᵗ=subsidence)
 
 model = AtmosphereModel(grid; forcing)
 
-model.forcing.ρe
+model.forcing.ρθ
 
 # output
 SubsidenceForcing with wˢ: 1×1×76 Field{Nothing, Nothing, Face} reduced over dims = (1, 2) on RectilinearGrid on CPU
@@ -82,14 +81,23 @@ end
 #####
 
 # Kernel function for subsidence forcing
-@inline w_dz_ϕ(i, j, k, grid, w, ϕ) = @inbounds w[i, j, k] * ∂zᶜᶜᶠ(i, j, k, grid, ϕ)
+@inline w_dz_ϕᵃᵃᶠ(i, j, k, grid, w, ϕ) = @inbounds w[1, 1, k] * ∂zᶜᶜᶠ(1, 1, k, grid, ϕ)
 
-@inline function (forcing::SubsidenceForcing)(i, j, k, grid, clock, fields)
+@inline function ℑzbᵃᵃᶜ(i, j, k, grid, w_dz_ϕᵃᵃᶠ, wˢ, ϕ_avg)
+    w_dz_ϕ⁺ = w_dz_ϕᵃᵃᶠ(i, j, k+1, grid, wˢ, ϕ_avg)
+    w_dz_ϕᵏ = w_dz_ϕᵃᵃᶠ(i, j, k, grid, wˢ, ϕ_avg)
+    ℑz_w_dz_ϕ = (w_dz_ϕ⁺ + w_dz_ϕᵏ) / 2
+    top = k == grid.Nz
+    bottom = k == 1
+    return ifelse(top, w_dz_ϕᵏ, ifelse(bottom, w_dz_ϕ⁺, ℑz_w_dz_ϕ))
+end
+
+ function (forcing::SubsidenceForcing)(i, j, k, grid, clock, fields)
     wˢ = forcing.subsidence_vertical_velocity
     ϕ_avg = forcing.averaged_field
-    ρᵣ = forcing.reference_density
-    w_dz_ϕ_avg = ℑzᵃᵃᶜ(i, j, k, grid, w_dz_ϕ, wˢ, ϕ_avg)
-    return @inbounds - ρᵣ[i, j, k] * w_dz_ϕ_avg
+    ρ = @inbounds forcing.density[1, 1, k]
+    w_dz_ϕ_avg = ℑzbᵃᵃᶜ(i, j, k, grid, w_dz_ϕᵃᵃᶠ, wˢ, ϕ_avg)
+    return - ρ * w_dz_ϕ_avg
 end
 
 #####
@@ -102,34 +110,36 @@ end
 
 # Strip the ρ prefix from density variable names
 # e.g., :ρu → :u, :ρθ → :θ, :ρe → :e
-strip_density_prefix(name::Symbol) = Symbol(collect(string(name))[2:end]...)
+function strip_density_prefix(name::Symbol)
+    chars = string(name) |> collect 
+    prefix = popfirst!(chars)
+    return Symbol(chars...)
+end
 
-function AtmosphereModels.materialize_atmosphere_model_forcing(forcing::SubsidenceForcing, field, name, model_field_names, context)
+function AtmosphereModels.materialize_atmosphere_model_forcing(forcing::SubsidenceForcing, field, name,
+                                                               model_field_names, context::NamedTuple)
     grid = field.grid
 
     if forcing.subsidence_vertical_velocity isa AbstractField
         wˢ = forcing.subsidence_vertical_velocity
     else
-        ibc = ImpenetrableBoundaryCondition()
-        loc = (nothing, nothing, Face())
-        bcs = FieldBoundaryConditions(grid, loc, bottom=ibc, top=ibc)
-        wˢ = Field{Nothing, Nothing, Face}(grid, boundary_conditions=bcs)
+        wˢ = Field{Nothing, Nothing, Face}(grid)
         set!(wˢ, forcing.subsidence_vertical_velocity)
         fill_halo_regions!(wˢ)
     end
 
-    ρᵣ = context.reference_density
-
-    if name ∈ (:ρu, :ρv, :ρw, :ρθ, :ρe)
+    if name ∈ (:ρu, :ρv, :ρw, :ρθ, :ρe, :ρqᵗ)
         specific_name = strip_density_prefix(name)
         specific_field = context.specific_fields[specific_name]
     else
-        specific_field = field / ρᵣ |> Field
+        # Note that tracers are converted from density to specific within
+        # update_state!, before `compute_forcing!` is called.
+        specific_field = field
     end
 
     averaged_field = Average(specific_field, dims=(1, 2)) |> Field
-
-    return SubsidenceForcing(wˢ, ρᵣ, averaged_field)
+    ρ = context.density
+    return SubsidenceForcing(wˢ, ρ, averaged_field)
 end
 
 #####
