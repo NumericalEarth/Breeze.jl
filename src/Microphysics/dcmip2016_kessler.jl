@@ -11,6 +11,10 @@ using Oceananigans.Utils: launch!
 
 using KernelAbstractions: @kernel, @index
 
+using Oceananigans.AbstractOperations: KernelFunctionOperation
+
+using Adapt: Adapt, adapt
+
 using DocStringExtensions: TYPEDSIGNATURES
 
 """
@@ -79,7 +83,7 @@ Create and return the microphysical fields for the Kessler scheme.
 - `qᵛ`: Water vapor mass fraction, diagnosed as \$q^v = q^t - q^{cl} - q^r\$.
 - `qᶜˡ`: Cloud liquid mass fraction (\$kg/kg\$).
 - `qʳ`: Rain mass fraction (\$kg/kg\$).
-- `precipitation_rate`: Surface precipitation rate (\$m/s\$).
+- `precipitation_rate`: Surface precipitation rate (\$m/s\$), defined as \$q^r \times v^t_{rain}\$ to match one-moment microphysics.
 - `vᵗ_rain`: Rain terminal velocity (\$m/s\$).
 """
 function materialize_microphysical_fields(::DCMIP2016KM, grid, boundary_conditions)
@@ -148,6 +152,65 @@ All microphysical source/sink terms are applied directly to the prognostic field
 `microphysics_model_update!` kernel, bypassing the standard tendency interface.
 """
 @inline AtmosphereModels.microphysical_tendency(i, j, k, grid, ::DCMIP2016KM, name, ρ, μ, 𝒰, constants) = zero(grid)
+
+#####
+##### Precipitation rate and surface flux diagnostics
+#####
+
+"""
+$(TYPEDSIGNATURES)
+
+Return the liquid precipitation rate field for the DCMIP2016 Kessler microphysics scheme.
+
+The precipitation rate is computed internally by the Kessler kernel and stored in
+`μ.precipitation_rate`. It is defined as \$q^r \times v^t_{rain}\$ (rain mass fraction
+times terminal velocity), matching the one-moment microphysics definition. Units are m/s.
+
+This implements the Breeze `precipitation_rate(model, phase)` interface, allowing
+the DCMIP2016 Kessler scheme to integrate with Breeze's standard diagnostics.
+"""
+AtmosphereModels.precipitation_rate(model, ::DCMIP2016KM, ::Val{:liquid}) = model.microphysical_fields.precipitation_rate
+
+# Ice precipitation is not supported for this warm-phase Kessler scheme
+AtmosphereModels.precipitation_rate(model, ::DCMIP2016KM, ::Val{:ice}) = nothing
+
+"""
+$(TYPEDSIGNATURES)
+
+Return the surface precipitation flux field for the DCMIP2016 Kessler microphysics scheme.
+
+The surface precipitation flux is \$\rho q^r v^t_{rain}\$ at the surface, matching the
+one-moment microphysics definition. Units are kg/m²/s.
+
+This implements the Breeze `surface_precipitation_flux(model)` interface.
+"""
+function AtmosphereModels.surface_precipitation_flux(model, ::DCMIP2016KM)
+    grid = model.grid
+    μ = model.microphysical_fields
+    ρ = model.formulation.reference_state.density
+    # precipitation_rate = qʳ × vᵗ (m/s)
+    # surface_precipitation_flux = ρ × qʳ × vᵗ = ρ × precipitation_rate (kg/m²/s)
+    kernel = DCMIP2016KesslerSurfaceFluxKernel(μ.precipitation_rate, ρ)
+    op = KernelFunctionOperation{Center, Center, Nothing}(kernel, grid)
+    return Field(op)
+end
+
+struct DCMIP2016KesslerSurfaceFluxKernel{P, R}
+    precipitation_rate :: P
+    reference_density :: R
+end
+
+Adapt.adapt_structure(to, k::DCMIP2016KesslerSurfaceFluxKernel) =
+    DCMIP2016KesslerSurfaceFluxKernel(adapt(to, k.precipitation_rate),
+                                       adapt(to, k.reference_density))
+
+@inline function (kernel::DCMIP2016KesslerSurfaceFluxKernel)(i, j, k_idx, grid)
+    # precipitation_rate = qʳ × vᵗ at surface
+    # surface_precipitation_flux = ρ × precipitation_rate
+    @inbounds P = kernel.precipitation_rate[i, j]
+    @inbounds ρ = kernel.reference_density[i, j, 1]
+    return ρ * P
+end
 
 #####
 ##### Kessler scheme constants (from kessler.f90)
@@ -385,11 +448,15 @@ end
     #####
     for nt = 1:rainsplit
 
-        # Accumulate surface precipitation (using mixing ratio stored in qʳ_field)
+        # Accumulate surface precipitation as qʳ × vᵗ (matching one-moment definition)
+        # Need to convert mixing ratio to mass fraction first
         @inbounds begin
-            ρ_1 = ρᵣ[1]
+            rᵛ_1 = qᵛ_field[i, j, 1]
+            rᶜ_1 = qᶜˡ_field[i, j, 1]
             rʳ_1 = qʳ_field[i, j, 1]  # This is mixing ratio during physics loop
-            precipitation_rate[i, j] += ρ_1 * rʳ_1 * vᵗ_rain[i, j, 1] / kessler_rhoqr
+            rᵗ_1 = rᵛ_1 + rᶜ_1 + rʳ_1
+            qʳ_1 = mixing_ratio_to_mass_fraction(rʳ_1, rᵗ_1)  # Convert to mass fraction
+            precipitation_rate[i, j] += qʳ_1 * vᵗ_rain[i, j, 1]
         end
 
         #####
