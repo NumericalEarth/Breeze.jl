@@ -82,7 +82,7 @@ scalar_advection = WENO(order=5)
 # motion of the air and surface,
 #
 # ```math
-# τˣ = - Cᴰ |U| ρu, \\quad Jᵀ = - ρ₀ Cᵀ |U| (θ - θ₀), \\quad Jᵛ = - ρ₀ Cᵛ |U| (qᵗ - qᵛ₀)
+# τˣ = - Cᴰ |U| ρu, \quad Jᵀ = - ρ₀ Cᵀ |U| (θ - θ₀), \quad Jᵛ = - ρ₀ Cᵛ |U| (qᵗ - qᵛ₀),
 # ```
 #
 # where ``|U|`` is "total" the differential wind speed (including gustiness),
