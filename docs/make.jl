@@ -101,4 +101,5 @@ makedocs(
     ],
     linkcheck = true,
     draft = false,
+    doctest = true
 )
