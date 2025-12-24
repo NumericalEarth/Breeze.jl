@@ -25,7 +25,7 @@ Breeze is a registered Julia package. First [install Julia](https://julialang.or
 
 Then launch Julia and type
 
-```@example
+```julia
 julia> using Pkg
 
 julia> Pkg.add("Breeze")
