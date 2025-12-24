@@ -77,13 +77,13 @@ end
 #####
 
 """
-    diagnose_thermodynamic_state(i, j, k, grid, formulation::StaticEnergyFormulation, dynamics, q)
+$(TYPEDSIGNATURES)
 
 Build a `StaticEnergyState` at grid point `(i, j, k)` from the given `formulation`, `dynamics`,
 and pre-computed moisture mass fractions `q`.
 """
-function diagnose_thermodynamic_state(i, j, k, grid, 
-                                      formulation::StaticEnergyFormulation, 
+function diagnose_thermodynamic_state(i, j, k, grid,
+                                      formulation::StaticEnergyFormulation,
                                       dynamics,
                                       q)
 
@@ -125,4 +125,3 @@ function Base.show(io::IO, formulation::StaticEnergyFormulation)
         print(io, "└── specific_energy: ", prettysummary(formulation.specific_energy))
     end
 end
-

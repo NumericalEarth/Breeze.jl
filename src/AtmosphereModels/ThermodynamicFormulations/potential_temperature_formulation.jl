@@ -7,7 +7,7 @@ using Breeze.Thermodynamics: LiquidIcePotentialTemperatureState
 """
 $(TYPEDSIGNATURES)
 
-`LiquidIcePotentialTemperatureFormulation` uses liquid-ice potential temperature density `ρθ` 
+`LiquidIcePotentialTemperatureFormulation` uses liquid-ice potential temperature density `ρθ`
 as the prognostic thermodynamic variable.
 
 Liquid-ice potential temperature is a conserved quantity in moist adiabatic processes and is defined as:
@@ -76,16 +76,16 @@ end
 #####
 
 """
-    diagnose_thermodynamic_state(i, j, k, grid, formulation::LiquidIcePotentialTemperatureFormulation, dynamics, q)
+$(TYPEDSIGNATURES)
 
-Build a `LiquidIcePotentialTemperatureState` at grid point `(i, j, k)` from the given `formulation`, 
+Build a `LiquidIcePotentialTemperatureState` at grid point `(i, j, k)` from the given `formulation`,
 `dynamics`, and pre-computed moisture mass fractions `q`.
 """
 function diagnose_thermodynamic_state(i, j, k, grid,
                                       formulation::LiquidIcePotentialTemperatureFormulation,
                                       dynamics,
                                       q)
-  
+
     θ = @inbounds formulation.potential_temperature[i, j, k]
     pᵣ = @inbounds dynamics_pressure(dynamics)[i, j, k]
     pˢᵗ = dynamics.reference_state.standard_pressure
@@ -125,4 +125,3 @@ function Base.show(io::IO, formulation::LiquidIcePotentialTemperatureFormulation
         print(io, "└── potential_temperature: ", prettysummary(formulation.potential_temperature))
     end
 end
-
