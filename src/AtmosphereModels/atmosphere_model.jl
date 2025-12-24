@@ -62,7 +62,7 @@ end
 $(TYPEDSIGNATURES)
 
 Return an AtmosphereModel that uses the anelastic approximation following
-[Pauluis2008](@citet).
+[Pauluis (2008)](@citet Pauluis2008).
 
 Arguments
 =========

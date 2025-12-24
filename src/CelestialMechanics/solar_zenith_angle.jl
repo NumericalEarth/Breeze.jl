@@ -19,7 +19,7 @@ $(TYPEDSIGNATURES)
 
 Compute the solar declination angle (in radians) for a given day of year.
 
-Uses the approximation by [spencer1971fourier](@citet):
+Uses the approximation by [Spencer (1971)](@citet spencer1971fourier):
 
 ```math
 δ = 0.006918 - 0.399912 \\cos(γ) + 0.070257 \\sin(γ)
@@ -54,7 +54,7 @@ Compute the equation of time (in minutes) for a given day of year.
 This accounts for the difference between mean solar time and apparent solar time
 due to the eccentricity of Earth's orbit and the obliquity of the ecliptic.
 
-Uses the approximation by [spencer1971fourier](@citet); see [`solar_declination`](@ref).
+Uses the approximation by [Spencer (1971)](@citet spencer1971fourier); see [`solar_declination`](@ref).
 
 # References
 

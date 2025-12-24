@@ -344,7 +344,7 @@ end
 Compute the thermodynamic adjustment factor ``Γˡ`` for condensation/evaporation.
 
 This factor accounts for the temperature dependence of saturation vapor pressure
-during phase change, following [Morrison2015parameterization](@citet); eq. (A1),
+during phase change, following [Morrison and Milbrandt (2015)](@citet Morrison2015parameterization); eq. (A1),
 
 ```math
 Γˡ = 1 + \\frac{ℒˡ}{cᵖᵐ} \\frac{dqᵛ⁺}{dT}
