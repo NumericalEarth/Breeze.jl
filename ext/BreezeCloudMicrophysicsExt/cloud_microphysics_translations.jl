@@ -42,10 +42,10 @@ where ``𝒮`` is supersaturation and ``r`` is droplet radius.
 This is a translation of `CloudMicrophysics.Common.G_func_liquid`
 using Breeze's thermodynamics instead of Thermodynamics.jl.
 
-See Eq. (13.28) by [Pruppacher & Klett (2004)](@cite pruppacher2004microphysics).
+See Eq. (13.28) by [Pruppacher & Klett (2010)](@cite pruppacher2010microphysics).
 
 # References
-* Pruppacher, H. R., Klett, J. D. (1998). Microphysics of clouds and precipitation. Taylor and Francis.
+* Pruppacher, H. R., Klett, J. D. (2010). Microphysics of clouds and precipitation. Springer Netherlands. 2nd Edition
 """
 @inline function diffusional_growth_factor(aps::AirProperties{FT}, T, constants) where {FT}
     (; K_therm, D_vapor) = aps
