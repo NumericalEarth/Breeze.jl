@@ -42,7 +42,7 @@ where ``𝒮`` is supersaturation and ``r`` is droplet radius.
 This is a translation of `CloudMicrophysics.Common.G_func_liquid`
 using Breeze's thermodynamics instead of Thermodynamics.jl.
 
-See Eq. (13.28) by [Pruppacher & Klett (1998)](@cite pruppacher1998microphysics).
+See Eq. (13.28) by [Pruppacher & Klett (2004)](@cite pruppacher2004microphysics).
 
 # References
 * Pruppacher, H. R., Klett, J. D. (1998). Microphysics of clouds and precipitation. Taylor and Francis.
