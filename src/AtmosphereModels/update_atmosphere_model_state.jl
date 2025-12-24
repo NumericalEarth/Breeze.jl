@@ -102,7 +102,6 @@ function compute_auxiliary_variables!(model)
             model.formulation,
             model.momentum)
 
-    fill_halo_regions!(model.velocities)
     foreach(mask_immersed_field!, model.velocities)
 
     # Dispatch on thermodynamics type
