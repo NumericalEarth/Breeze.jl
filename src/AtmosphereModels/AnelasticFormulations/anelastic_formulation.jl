@@ -9,7 +9,7 @@ $(TYPEDSIGNATURES)
 small perturbations from a dry, hydrostatic, adiabatic `reference_state`.
 The prognostic energy variable is the moist static energy density.
 The energy density equation includes a buoyancy flux term, following
-[Pauluis (2008)](@citet Pauluis2008).
+[Pauluis (2008)](@cite Pauluis2008).
 """
 struct AnelasticFormulation{T, R, P}
     thermodynamics :: T

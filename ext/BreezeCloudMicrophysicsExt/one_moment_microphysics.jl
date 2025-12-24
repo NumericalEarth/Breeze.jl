@@ -49,9 +49,9 @@ The one-moment scheme uses CloudMicrophysics.jl 1M processes:
 - Terminal velocity for rain sedimentation
 
 By default, non-equilibrium cloud formation is used, where cloud liquid is a prognostic
-variable that evolves via condensation/evaporation tendencies following Morrison and
-Milbrandt (2015). The prognostic variables are `ρqᶜˡ` (cloud liquid mass density) and
-`ρqʳ` (rain mass density).
+variable that evolves via condensation/evaporation tendencies following
+[Morrison and Milbrandt (2015)](@cite Morrison2015parameterization).
+The prognostic variables are `ρqᶜˡ` (cloud liquid mass density) and `ρqʳ` (rain mass density).
 
 For equilibrium (saturation adjustment) cloud formation, pass:
 
@@ -69,6 +69,11 @@ SaturationAdjustment{WarmPhaseEquilibrium, Float64}(0.001, Inf, WarmPhaseEquilib
   - `ImpenetrableBoundaryCondition()`: Rain collects at the bottom (zero terminal velocity at surface)
 
 See the [CloudMicrophysics.jl documentation](https://clima.github.io/CloudMicrophysics.jl/dev/) for details.
+
+# References
+* Morrison, H., and J. A. Milbrandt (2015). Parameterization of cloud microphysics based on
+    the prediction of bulk ice particle properties. Part I: Scheme description and idealized
+    tests. J. Atmos. Sci., 72, 287–311. https://doi.org/10.1175/JAS-D-14-0065.1
 """
 function OneMomentCloudMicrophysics(FT::DataType = Oceananigans.defaults.FloatType;
                                     cloud_formation = NonEquilibriumCloudFormation(CloudLiquid(FT), nothing),
@@ -342,7 +347,7 @@ end
 Compute the thermodynamic adjustment factor ``Γˡ`` for condensation/evaporation.
 
 This factor accounts for the temperature dependence of saturation vapor pressure
-during phase change, following [Morrison and Milbrandt (2015)](@citet Morrison2015parameterization); eq. (A1),
+during phase change, following [Morrison and Milbrandt (2015)](@cite Morrison2015parameterization); eq. (A1),
 
 ```math
 Γˡ = 1 + \\frac{ℒˡ}{cᵖᵐ} \\frac{dqᵛ⁺}{dT}
@@ -375,7 +380,7 @@ Compute the condensation/evaporation rate for cloud liquid water.
 Returns the rate of change of cloud liquid mass fraction (kg/kg/s).
 Positive values indicate condensation, negative values indicate evaporation.
 
-The rate follows [Morrison and Milbrandt (2015)](@citet Morrison2015parameterization); Eq. (A1):
+The rate follows [Morrison and Milbrandt (2015)](@cite Morrison2015parameterization); Eq. (A1):
 
 ```math
 \\frac{dqᶜˡ}{dt} = \\frac{qᵛ - qᵛ⁺}{Γˡ τˡ}

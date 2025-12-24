@@ -303,7 +303,7 @@ and diagnosing moist instabilities. It is the temperature that a parcel would ha
 if all its moisture were condensed out and the resulting latent heat used to warm
 the parcel, followed by adiabatic expansion to a reference pressure.
 
-We use a formulation derived by [Emanuel (1994)](@citet Emanuel1994),
+We use a formulation derived by [Emanuel (1994)](@cite Emanuel1994),
 
 ```math
 θᵉ = T \\left( \\frac{p₀}{pᵈ} \\right)^{Rᵈ / cᵖᵐ}
@@ -314,8 +314,8 @@ where ``T`` is temperature, ``pᵈ`` is dry air pressure, ``p₀`` is the refere
 ``ℒˡ`` is the latent heat of vaporization, ``qᵛ`` is the vapor specific humidity,
 ``ℋ`` is the relative humidity, and ``cᵖᵐ`` is the heat capacity of the moist air mixture.
 
-The formulation follows equation (34) of the paper by [Bryan and Fritsch (2002)](@citet BryanFritsch2002),
-adapted from the derivation in the work by [Durran and Klemp (1982)](@citet DurranKlemp1982).
+The formulation follows equation (34) of the paper by [Bryan and Fritsch (2002)](@cite BryanFritsch2002),
+adapted from the derivation in the work by [Durran and Klemp (1982)](@cite DurranKlemp1982).
 
 # Arguments
 
@@ -382,11 +382,11 @@ Return a `KernelFunctionOperation` representing stability-equivalent potential t
 
 Stability-equivalent potential temperature is a moist-conservative variable suitable for
 computing the moist Brunt-Väisälä frequency. It follows from the derivation in the paper
-by [Durran and Klemp (1982)](@citet DurranKlemp1982), who show that the moist Brunt-Väisälä
+by [Durran and Klemp (1982)](@cite DurranKlemp1982), who show that the moist Brunt-Väisälä
 frequency ``Nᵐ`` is correctly expressed in terms of the vertical gradient of a
 moist-conservative variable.
 
-The formulation is based on equation (17) by [Durran and Klemp (1982)](@citet DurranKlemp1982):
+The formulation is based on equation (17) by [Durran and Klemp (1982)](@cite DurranKlemp1982):
 
 ```math
 θᵇ = θᵉ \\left( \\frac{T}{Tᵣ} \\right)^{cˡ qˡ / cᵖᵐ}

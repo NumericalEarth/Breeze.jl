@@ -23,18 +23,23 @@ struct NonEquilibriumCloudFormation{L, I}
     ice :: I
 
     @doc"""
-        $(TYPEDSIGNATURES)
+        NonEquilibriumCloudFormation(liquid, ice=nothing)
 
-        A cloud formation scheme where cloud liquid and ice are prognostic variables
-        that evolve via condensation/evaporation and deposition/sublimation tendencies,
-        rather than being diagnosed instantaneously via saturation adjustment.
+    A cloud formation scheme where cloud liquid and ice are prognostic variables
+    that evolve via condensation/evaporation and deposition/sublimation tendencies,
+    rather than being diagnosed instantaneously via saturation adjustment.
 
-        The condensation/evaporation rate follows Morrison and Milbrandt (2015),
-        relaxing toward saturation with timescale `τ_relax`.
+    The condensation/evaporation rate follows [Morrison and Milbrandt (2015)](@cite Morrison2015parameterization),
+    relaxing toward saturation with timescale `τ_relax`.
 
-        # Fields
-        - `liquid`: Parameters for cloud liquid (contains relaxation timescale `τ_relax`)
-        - `ice`: Parameters for cloud ice (contains relaxation timescale `τ_relax`), or `nothing` for warm-phase only
+    # Fields
+    - `liquid`: Parameters for cloud liquid (contains relaxation timescale `τ_relax`)
+    - `ice`: Parameters for cloud ice (contains relaxation timescale `τ_relax`), or `nothing` for warm-phase only
+
+    # References
+    * Morrison, H., and J. A. Milbrandt (2015). Parameterization of cloud microphysics based on
+        the prediction of bulk ice particle properties. Part I: Scheme description and idealized
+        tests. J. Atmos. Sci., 72, 287–311. https://doi.org/10.1175/JAS-D-14-0065.1
     """
     function NonEquilibriumCloudFormation(liquid, ice=nothing)
         return new{typeof(liquid), typeof(ice)}(liquid, ice)
