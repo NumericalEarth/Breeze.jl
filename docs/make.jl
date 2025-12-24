@@ -30,7 +30,8 @@ end
 examples = [
     Example("Stratified dry thermal bubble", "dry_thermal_bubble", true),
     Example("Cloudy thermal bubble", "cloudy_thermal_bubble", true),
-    Example("Cloudy Kelvin-Helmholtz instability", "cloudy_kelvin_helmholtz", true),
+    Example("Cloudy thermal bubble", "cloudy_thermal_bubble", true),
+    Example("Mountain waves", "mountain_wave", true),
     Example("Shallow cumulus convection (BOMEX)", "bomex", true),
     Example("Precipitating shallow cumulus (RICO)", "rico", true),
     Example("Convection over prescribed sea surface temperature (SST)", "prescribed_sea_surface_temperature", true),

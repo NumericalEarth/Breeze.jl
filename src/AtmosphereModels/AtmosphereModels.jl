@@ -56,6 +56,7 @@ using Oceananigans.Utils: prettysummary, launch!
 include("formulation_interface.jl")
 include("forcing_interface.jl")
 include("microphysics_interface.jl")
+include("boundary_mass_fluxes.jl")
 include("atmosphere_model.jl")
 include("set_atmosphere_model.jl")
 

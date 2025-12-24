@@ -30,7 +30,7 @@ end
 # to the AnelasticFormulation submodule.
 
 mutable struct AtmosphereModel{Frm, Arc, Tst, Grd, Clk, Thm, Mom, Moi, Mfr, Buy,
-                               Tmp, Sol, Vel, Trc, Adv, Cor, Frc, Mic, Cnd, Cls, Cfs, Rad} <: AbstractModel{Tst, Arc}
+                               Tmp, Sol, Vel, Trc, Adv, Cor, Frc, Mic, Cnd, Cls, Cfs, Rad, Bmf} <: AbstractModel{Tst, Arc}
     architecture :: Arc
     grid :: Grd
     clock :: Clk
@@ -53,6 +53,7 @@ mutable struct AtmosphereModel{Frm, Arc, Tst, Grd, Clk, Thm, Mom, Moi, Mfr, Buy,
     closure :: Cls
     closure_fields :: Cfs
     radiation :: Rad
+    boundary_mass_fluxes :: Bmf
 end
 
 # Note: Formulation-specific functions (default_formulation, materialize_formulation, etc.)
@@ -201,6 +202,9 @@ function AtmosphereModel(grid;
     advection = merge(momentum_advection_tuple, scalar_advection_tuple)
     advection = NamedTuple(name => adapt_advection_order(scheme, grid) for (name, scheme) in pairs(advection))
 
+    # Initialize boundary mass fluxes container for open boundary conditions
+    boundary_mass_fluxes = initialize_boundary_mass_fluxes(momentum)
+
     model = AtmosphereModel(arch,
                             grid,
                             clock,
@@ -222,7 +226,8 @@ function AtmosphereModel(grid;
                             timestepper,
                             closure,
                             closure_fields,
-                            radiation)
+                            radiation,
+                            boundary_mass_fluxes)
 
     θ₀ = formulation.reference_state.potential_temperature
     set!(model, θ=θ₀)

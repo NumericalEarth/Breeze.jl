@@ -29,6 +29,7 @@ using Oceananigans.Solvers: Solvers, solve!, FourierTridiagonalPoissonSolver, Ab
 using Oceananigans.TimeSteppers: TimeSteppers
 using Oceananigans.Utils: prettysummary, launch!
 
+using Breeze.AtmosphereModels: enforce_open_boundary_mass_conservation!
 using Breeze.Thermodynamics: ReferenceState
 
 # Import interface functions from parent module to extend them
