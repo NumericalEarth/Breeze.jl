@@ -48,7 +48,7 @@ Breeze from `main` branch. For more information, see the
 
 A basic free convection simulation with an `AtmosphereModel`:
 
-```julia
+```@example
 using Breeze
 using Oceananigans.Units
 using CairoMakie
