@@ -64,7 +64,7 @@ model = AtmosphereModel(grid; advection=WENO(order=5), microphysics)
 
 thermo = ThermodynamicConstants()
 g = thermo.gravitational_acceleration
-θ₀ = model.formulation.reference_state.potential_temperature
+θ₀ = model.dynamics.reference_state.potential_temperature
 N = 0.01                  # target dry Brunt–Väisälä frequency (s⁻¹)
 θᵇ(z) = θ₀ * exp(N^2 * z / g)
 

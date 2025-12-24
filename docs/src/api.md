@@ -28,10 +28,17 @@ Modules = [Breeze.AtmosphereModels]
 Private = false
 ```
 
-### AtmosphereModels.AnelasticFormulations
+### AtmosphereModels.Dynamics
 
 ```@autodocs
-Modules = [Breeze.AtmosphereModels.AnelasticFormulations]
+Modules = [Breeze.AtmosphereModels.Dynamics]
+Private = false
+```
+
+### AtmosphereModels.ThermodynamicFormulations
+
+```@autodocs
+Modules = [Breeze.AtmosphereModels.ThermodynamicFormulations]
 Private = false
 ```
 
@@ -119,10 +126,17 @@ Modules = [Breeze.AtmosphereModels]
 Public = false
 ```
 
-### AtmosphereModels.AnelasticFormulations
+### AtmosphereModels.Dynamics
 
 ```@autodocs
-Modules = [Breeze.AtmosphereModels.AnelasticFormulations]
+Modules = [Breeze.AtmosphereModels.Dynamics]
+Public = false
+```
+
+### AtmosphereModels.ThermodynamicFormulations
+
+```@autodocs
+Modules = [Breeze.AtmosphereModels.ThermodynamicFormulations]
 Public = false
 ```
 

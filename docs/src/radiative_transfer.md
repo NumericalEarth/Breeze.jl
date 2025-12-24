@@ -29,7 +29,7 @@ reference_state = ReferenceState(grid, constants;
                                  surface_pressure = 101325,
                                  potential_temperature = surface_temperature)
 
-formulation = AnelasticFormulation(reference_state)
+dynamics = AnelasticDynamics(reference_state)
 
 # Create gray radiation model
 optical_thickness = GrayOpticalThicknessOGorman2008(eltype(grid))
@@ -41,7 +41,7 @@ radiation = RadiativeTransferModel(grid, constants, optical_thickness;
 
 # Create atmosphere model with DateTime clock for solar position
 clock = Clock(time=DateTime(2024, 9, 27, 16, 0, 0))
-model = AtmosphereModel(grid; clock, formulation, radiation)
+model = AtmosphereModel(grid; clock, dynamics, radiation)
 ```
 
 When a `DateTime` clock is used, the solar zenith angle is computed automatically from the time and grid location (longitude and latitude).
@@ -53,13 +53,13 @@ The [`RadiativeTransferModel`](@ref) model computes:
 - **Longwave radiation**: Both upwelling and downwelling thermal radiation using RRTMGP's two-stream solver
 - **Shortwave radiation**: Direct beam solar radiation
 
-The gray atmosphere optical thickness for longwave follows the parameterization by [OGormanSchneider2008](@citet)š
+The gray atmosphere optical thickness for longwave follows the parameterization by [OGormanSchneider2008](@citet),
 
 ```math
 τ_{lw} = α \frac{Δp}{p_0} \left[ f_l + 4 (1 - f_l) \left(\frac{p}{p_0}\right)^3 \right] \left[ τ_e + (τ_p - τ_e) \sin^2 φ \right]
 ```
 
-where ``φ`` is latitude and ``α``, ``f_l``, ``τ_e``, ``τ_p`` are empirical parameters.
+where ``φ`` is latitude and ``α``, ``f_l``, ``τ_e``, and ``τ_p`` are empirical parameters.
 
 For shortwave:
 ```math

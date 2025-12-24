@@ -421,7 +421,7 @@ const τⁿᵘᵐ = 10  # seconds
 
 @inline function microphysical_tendency(i, j, k, grid, bμp::OneMomentLiquidRain, ::Val{:ρqʳ}, ρ, μ, 𝒰, constants)
     categories = bμp.categories
-    ρⁱʲᵏ = @inbounds ρ[i, j, k]
+    ρⁱʲᵏ = ρ
 
     @inbounds qᶜˡ = μ.qᶜˡ[i, j, k]
     @inbounds qʳ = μ.qʳ[i, j, k]
@@ -462,7 +462,7 @@ end
 @inline function microphysical_tendency(i, j, k, grid, bμp::WPNE1M, ::Val{:ρqᶜˡ}, ρ, μ, 𝒰, constants)
     categories = bμp.categories
     τᶜˡ = bμp.cloud_formation.liquid.τ_relax
-    ρⁱʲᵏ = @inbounds ρ[i, j, k]
+    ρⁱʲᵏ = ρ
 
     @inbounds qᶜˡ = μ.qᶜˡ[i, j, k]
     @inbounds qʳ = μ.qʳ[i, j, k]
@@ -498,7 +498,7 @@ end
 @inline function microphysical_tendency(i, j, k, grid, bμp::MPNE1M, ::Val{:ρqᶜˡ}, ρ, μ, 𝒰, constants)
     categories = bμp.categories
     τᶜˡ = bμp.cloud_formation.liquid.τ_relax
-    ρⁱʲᵏ = @inbounds ρ[i, j, k]
+    ρⁱʲᵏ = ρ
 
     @inbounds qᶜˡ = μ.qᶜˡ[i, j, k]
     @inbounds qʳ = μ.qʳ[i, j, k]
@@ -571,7 +571,7 @@ end
 
 @inline function microphysical_tendency(i, j, k, grid, bμp::MPNE1M, ::Val{:ρqᶜⁱ}, ρ, μ, 𝒰, constants)
     τᶜⁱ = bμp.cloud_formation.ice.τ_relax
-    ρⁱʲᵏ = @inbounds ρ[i, j, k]
+    ρⁱʲᵏ = ρ
 
     @inbounds qᶜⁱ = μ.qᶜⁱ[i, j, k]
 
