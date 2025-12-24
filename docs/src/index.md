@@ -64,7 +64,7 @@ grid = RectilinearGrid(size=(Nx, Nz), x=(0, 2Lz), z=(0, Lz), topology=(Periodic,
 
 p₀, θ₀ = 1e5, 288 # reference state parameters
 reference_state = ReferenceState(grid, surface_pressure=p₀, potential_temperature=θ₀)
-formulation = AnelasticFormulation(reference_state)
+formulation = AnelasticFormulation(reference_state, thermodynamics=:StaticEnergy)
 
 Q₀ = 1000 # heat flux in W / m²
 ρe_bcs = FieldBoundaryConditions(bottom=FluxBoundaryCondition(Q₀))
