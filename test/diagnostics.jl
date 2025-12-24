@@ -141,8 +141,8 @@ end
     pˢᵗ = FT(1e5) # standard pressure for potential temperature, Pa
     θ₀ = 288 # K
     reference_state = ReferenceState(grid, constants, surface_pressure=p₀, potential_temperature=θ₀)
-    formulation = AnelasticFormulation(reference_state)
-    model = AtmosphereModel(grid; thermodynamic_constants=constants, formulation)
+    dynamics = AnelasticDynamics(reference_state)
+    model = AtmosphereModel(grid; thermodynamic_constants=constants, dynamics)
 
     # Set up isothermal atmosphere: T = T₀ = constant
     # For constant T, we need: θ = T₀ * (pˢᵗ/pᵣ)^(Rᵈ/cᵖᵈ) using the standard pressure

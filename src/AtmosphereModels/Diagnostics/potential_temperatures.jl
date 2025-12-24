@@ -142,7 +142,7 @@ function PotentialTemperature(model::AtmosphereModel, flavor_symbol=:specific)
     end
 
     func = MoistPotentialTemperatureKernelFunction(flavor,
-                                                   model.formulation.reference_state,
+                                                   model.dynamics.reference_state,
                                                    model.microphysics,
                                                    model.microphysical_fields,
                                                    model.specific_moisture,
@@ -207,7 +207,7 @@ function VirtualPotentialTemperature(model::AtmosphereModel, flavor_symbol=:spec
     end
 
     func = MoistPotentialTemperatureKernelFunction(flavor,
-                                                   model.formulation.reference_state,
+                                                   model.dynamics.reference_state,
                                                    model.microphysics,
                                                    model.microphysical_fields,
                                                    model.specific_moisture,
@@ -282,7 +282,7 @@ function LiquidIcePotentialTemperature(model::AtmosphereModel, flavor_symbol=:sp
     end
 
     func = MoistPotentialTemperatureKernelFunction(flavor,
-                                                   model.formulation.reference_state,
+                                                   model.dynamics.reference_state,
                                                    model.microphysics,
                                                    model.microphysical_fields,
                                                    model.specific_moisture,
@@ -365,7 +365,7 @@ function EquivalentPotentialTemperature(model::AtmosphereModel, flavor_symbol=:s
     end
 
     func = MoistPotentialTemperatureKernelFunction(flavor,
-                                                   model.formulation.reference_state,
+                                                   model.dynamics.reference_state,
                                                    model.microphysics,
                                                    model.microphysical_fields,
                                                    model.specific_moisture,
@@ -443,7 +443,7 @@ function StabilityEquivalentPotentialTemperature(model::AtmosphereModel, flavor_
     end
 
     func = MoistPotentialTemperatureKernelFunction(flavor,
-                                                   model.formulation.reference_state,
+                                                   model.dynamics.reference_state,
                                                    model.microphysics,
                                                    model.microphysical_fields,
                                                    model.specific_moisture,
