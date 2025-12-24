@@ -7,15 +7,13 @@
 # cloud formation.
 #
 # References:
-#   - Morrison, H. and Milbrandt, J.A. (2015), Parameterization of Cloud Microphysics
-#     Based on the Prediction of Bulk Ice Particle Properties. Part I: Scheme Description
-#     and Idealized Tests. J. Atmos. Sci., 72, 287–311.
-#     https://doi.org/10.1175/JAS-D-14-0065.1
+#   - Morrison, H., and J. A. Milbrandt (2015). Parameterization of cloud microphysics
+#     based on the prediction of bulk ice particle properties. Part I: Scheme description
+#     and idealized tests. J. Atmos. Sci., 72, 287–311. https://doi.org/10.1175/JAS-D-14-0065.1
 #
-#   - Morrison, H. and Grabowski, W.W. (2008), A Novel Approach for Representing Ice
-#     Microphysics in Models: Description and Tests Using a Kinematic Framework.
-#     J. Atmos. Sci., 65, 1528–1548.
-#     https://doi.org/10.1175/2007JAS2491.1
+#   - Morrison, H. and Grabowski, W.W. (2008). A novel approach for representing ice
+#     microphysics in models: Description and tests using a kinematic framework.
+#     J. Atmos. Sci., 65, 1528–1548. https://doi.org/10.1175/2007JAS2491.1
 
 # This file contains common infrastructure for all 1M schemes.
 # Cloud liquid, rain, and tendency implementations are in one_moment_cloud_liquid_rain.jl
@@ -359,7 +357,7 @@ where the temperature derivative of saturation specific humidity is:
 # References
 * Morrison, H., and J. A. Milbrandt (2015). Parameterization of cloud microphysics based on
     the prediction of bulk ice particle properties. Part I: Scheme description and idealized
-    tests. J. Atmos. Sci., 72, 287–311.
+    tests. J. Atmos. Sci., 72, 287–311. https://doi.org/10.1175/JAS-D-14-0065.1
 """
 @inline function thermodynamic_adjustment_factor(qᵛ⁺, T, q, constants)
     ℒˡ = liquid_latent_heat(T, constants)
@@ -377,7 +375,7 @@ Compute the condensation/evaporation rate for cloud liquid water.
 Returns the rate of change of cloud liquid mass fraction (kg/kg/s).
 Positive values indicate condensation, negative values indicate evaporation.
 
-The rate follows [Morrison2015parameterization](@citet); Eq. (A1):
+The rate follows [Morrison and Milbrandt (2015)](@citet Morrison2015parameterization); Eq. (A1):
 
 ```math
 \\frac{dqᶜˡ}{dt} = \\frac{qᵛ - qᵛ⁺}{Γˡ τˡ}
@@ -388,7 +386,7 @@ Evaporation is limited to the available cloud liquid to prevent negative values.
 # References
 * Morrison, H., and J. A. Milbrandt (2015). Parameterization of cloud microphysics based on
     the prediction of bulk ice particle properties. Part I: Scheme description and idealized
-    tests. J. Atmos. Sci., 72, 287–311.
+    tests. J. Atmos. Sci., 72, 287–311. https://doi.org/10.1175/JAS-D-14-0065.1
 """
 @inline function condensation_rate(qᵛ, qᵛ⁺, qᶜˡ, T, ρ, q, τᶜˡ, constants)
     Γˡ = thermodynamic_adjustment_factor(qᵛ⁺, T, q, constants)
