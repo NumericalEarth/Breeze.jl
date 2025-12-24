@@ -12,7 +12,7 @@
 #     and Idealized Tests. J. Atmos. Sci., 72, 287–311.
 #     https://doi.org/10.1175/JAS-D-14-0065.1
 #
-#   - Morrison, H. and Grabowski, W.W. (2008), A Novel Approach for Representing Ice 
+#   - Morrison, H. and Grabowski, W.W. (2008), A Novel Approach for Representing Ice
 #     Microphysics in Models: Description and Tests Using a Kinematic Framework.
 #     J. Atmos. Sci., 65, 1528–1548.
 #     https://doi.org/10.1175/2007JAS2491.1
@@ -111,7 +111,7 @@ const IBC = BoundaryCondition{<:Open, Nothing}
 # Warm-phase saturation adjustment with 1M precipitation
 const WP1M = BulkMicrophysics{<:WarmPhaseSaturationAdjustment, <:CM1MCategories, <:Any}
 
-# Mixed-phase saturation adjustment with 1M precipitation  
+# Mixed-phase saturation adjustment with 1M precipitation
 const MP1M = BulkMicrophysics{<:MixedPhaseSaturationAdjustment, <:CM1MCategories, <:Any}
 
 # Warm-phase non-equilibrium with 1M precipitation
@@ -153,14 +153,14 @@ function materialize_microphysical_fields(bμp::OneMomentLiquidRain, grid, bcs)
     elseif bμp isa MPNE1M
         center_names = (:ρqᶜˡ, :ρqᶜⁱ, warm_phase_field_names..., ice_phase_field_names...)
     end
-    
+
     center_fields = center_field_tuple(grid, center_names...)
-    
+
     # Rain terminal velocity (negative = downward)
     # bottom = nothing ensures the kernel-set value is preserved during fill_halo_regions!
     wʳ_bcs = FieldBoundaryConditions(grid, (Center(), Center(), Face()); bottom=nothing)
     wʳ = ZFaceField(grid; boundary_conditions=wʳ_bcs)
-    
+
     return (; zip(center_names, center_fields)..., wʳ)
 end
 
@@ -335,16 +335,16 @@ end
 #
 #   dqᵛ⁺/dT = qᵛ⁺ ⋅ (ℒˡ / (Rᵛ T²) - 1/T)
 #
-# See Morrison and Grabowski (2008, JAS) Eq. (4) and Morrison and Milbrandt (2015) 
+# See Morrison and Grabowski (2008, JAS) Eq. (4) and Morrison and Milbrandt (2015)
 # Appendix A for derivation.
 #####
 """
     thermodynamic_adjustment_factor(qᵛ⁺, T, q, constants)
 
-Compute the thermodynamic adjustment factor Γˡ for condensation/evaporation.
+Compute the thermodynamic adjustment factor ``Γˡ`` for condensation/evaporation.
 
 This factor accounts for the temperature dependence of saturation vapor pressure
-during phase change, following Morrison and Milbrandt (2015, JAS), Eq. (A1):
+during phase change, following [Morrison2015parameterization](@citet),
 
 ```math
 Γˡ = 1 + \\frac{ℒˡ}{cᵖᵐ} \\frac{dqᵛ⁺}{dT}
@@ -357,10 +357,9 @@ where the temperature derivative of saturation specific humidity is:
 ```
 
 # References
-- Morrison, H. and Milbrandt, J.A. (2015), J. Atmos. Sci., 72, 287-311.
-  https://doi.org/10.1175/JAS-D-14-0065.1
-- Morrison, H. and Grabowski, W.W. (2008), J. Atmos. Sci., 65, 1528-1548.
-  https://doi.org/10.1175/2007JAS2491.1
+* Morrison, H., and J. A. Milbrandt (2015). Parameterization of cloud microphysics based on
+    the prediction of bulk ice particle properties. Part I: Scheme description and idealized
+    tests. J. Atmos. Sci., 72, 287–311.
 """
 @inline function thermodynamic_adjustment_factor(qᵛ⁺, T, q, constants)
     ℒˡ = liquid_latent_heat(T, constants)
@@ -378,7 +377,7 @@ Compute the condensation/evaporation rate for cloud liquid water.
 Returns the rate of change of cloud liquid mass fraction (kg/kg/s).
 Positive values indicate condensation, negative values indicate evaporation.
 
-The rate follows Morrison and Milbrandt (2015, JAS), Eq. (A1):
+The rate follows [Morrison2015parameterization](@citet); Eq. (A1):
 
 ```math
 \\frac{dqᶜˡ}{dt} = \\frac{qᵛ - qᵛ⁺}{Γˡ τˡ}
@@ -387,17 +386,18 @@ The rate follows Morrison and Milbrandt (2015, JAS), Eq. (A1):
 Evaporation is limited to the available cloud liquid to prevent negative values.
 
 # References
-- Morrison, H. and Milbrandt, J.A. (2015), J. Atmos. Sci., 72, 287-311.
-  https://doi.org/10.1175/JAS-D-14-0065.1
+* Morrison, H., and J. A. Milbrandt (2015). Parameterization of cloud microphysics based on
+    the prediction of bulk ice particle properties. Part I: Scheme description and idealized
+    tests. J. Atmos. Sci., 72, 287–311.
 """
 @inline function condensation_rate(qᵛ, qᵛ⁺, qᶜˡ, T, ρ, q, τᶜˡ, constants)
     Γˡ = thermodynamic_adjustment_factor(qᵛ⁺, T, q, constants)
     Sᶜᵒⁿᵈ = (qᵛ - qᵛ⁺) / (Γˡ * τᶜˡ)
-    
+
     # Limit evaporation to available cloud liquid
     Sᶜᵒⁿᵈ_min = -max(0, qᶜˡ) / τᶜˡ
     Sᶜᵒⁿᵈ = max(Sᶜᵒⁿᵈ, Sᶜᵒⁿᵈ_min)
-    
+
     return Sᶜᵒⁿᵈ
 end
 
@@ -407,7 +407,7 @@ end
 #
 # Rain mass evolves via:
 #   - Autoconversion: cloud liquid → rain (source)
-#   - Accretion: cloud liquid + rain → rain (source)  
+#   - Accretion: cloud liquid + rain → rain (source)
 #   - Evaporation: rain → vapor in subsaturated air (sink)
 #
 # This tendency is the same for equilibrium and non-equilibrium cloud formation.
@@ -527,16 +527,16 @@ end
 #
 #   dqⁱ/dt = (qᵛ - qᵛ⁺ⁱ) / (Γⁱ τⁱ)
 #
-# where qᵛ⁺ⁱ is the saturation specific humidity over ice, τⁱ is the ice relaxation 
+# where qᵛ⁺ⁱ is the saturation specific humidity over ice, τⁱ is the ice relaxation
 # timescale, and Γⁱ is the thermodynamic adjustment factor using ice latent heat.
 #####
 
 """
     ice_thermodynamic_adjustment_factor(qᵛ⁺ⁱ, T, q, constants)
 
-Compute the thermodynamic adjustment factor Γⁱ for deposition/sublimation.
+Compute the thermodynamic adjustment factor ``Γⁱ`` for deposition/sublimation.
 
-Same as `thermodynamic_adjustment_factor` but uses ice latent heat and 
+Same as `thermodynamic_adjustment_factor` but uses ice latent heat and
 saturation over ice surface.
 """
 @inline function ice_thermodynamic_adjustment_factor(qᵛ⁺ⁱ, T, q, constants)
@@ -558,11 +558,11 @@ Positive values indicate deposition, negative values indicate sublimation.
 @inline function deposition_rate(qᵛ, qᵛ⁺ⁱ, qᶜⁱ, T, ρ, q, τᶜⁱ, constants)
     Γⁱ = ice_thermodynamic_adjustment_factor(qᵛ⁺ⁱ, T, q, constants)
     Sᵈᵉᵖ = (qᵛ - qᵛ⁺ⁱ) / (Γⁱ * τᶜⁱ)
-    
+
     # Limit sublimation to available cloud ice
     Sᵈᵉᵖ_min = -max(0, qᶜⁱ) / τᶜⁱ
     Sᵈᵉᵖ = max(Sᵈᵉᵖ, Sᵈᵉᵖ_min)
-    
+
     return Sᵈᵉᵖ
 end
 
