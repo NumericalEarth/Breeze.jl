@@ -3,26 +3,27 @@ using Oceananigans.BuoyancyFormulations: BuoyancyFormulations as OceanBuoyancyFo
 using Oceananigans.Operators: ∂zᶜᶜᶠ
 
 """
-    AtmosphereModelBuoyancy{F, T}
+    AtmosphereModelBuoyancy{D, F, T}
 
 Wrapper struct for computing buoyancy for AtmosphereModel
 in the context of a turbulence closure. Used to interface with Oceananigans
 turbulence closures that require buoyancy gradients.
 """
-struct AtmosphereModelBuoyancy{F, T}
+struct AtmosphereModelBuoyancy{D, F, T}
+    dynamics :: D
     formulation :: F
     thermodynamic_constants :: T
 end
 
 Adapt.adapt_structure(to, b::AtmosphereModelBuoyancy) =
-    AtmosphereModelBuoyancy(adapt(to, b.formulation), adapt(to, b.thermodynamic_constants))
+    AtmosphereModelBuoyancy(adapt(to, b.dynamics), adapt(to, b.formulation), adapt(to, b.thermodynamic_constants))
 
 #####
 ##### Buoyancy interface for AtmosphereModel
 #####
 
 OceanTurbulenceClosures.buoyancy_force(model::AtmosphereModel) =
-    AtmosphereModelBuoyancy(model.formulation, model.thermodynamic_constants)
+    AtmosphereModelBuoyancy(model.dynamics, model.formulation, model.thermodynamic_constants)
 
 # buoyancy_tracers returns tracers needed for:
 # 1. Buoyancy computation (T, qᵗ) used in ∂z_b and AMD viscosity
@@ -43,14 +44,14 @@ end
 
 @inline function OceanBuoyancyFormulations.∂z_b(i, j, k, grid, b::AtmosphereModelBuoyancy, tracers)
     g = b.thermodynamic_constants.gravitational_acceleration
-    ∂z_ϑ = ∂zᶜᶜᶠ(i, j, k, grid, virtual_potential_temperature, b.thermodynamic_constants, b.formulation, tracers.T, tracers.qᵗ)
-    ϑ = virtual_potential_temperature(i, j, k, grid, b.thermodynamic_constants, b.formulation, tracers.T, tracers.qᵗ)
+    ∂z_ϑ = ∂zᶜᶜᶠ(i, j, k, grid, virtual_potential_temperature, b.thermodynamic_constants, b.dynamics, tracers.T, tracers.qᵗ)
+    ϑ = virtual_potential_temperature(i, j, k, grid, b.thermodynamic_constants, b.dynamics, tracers.T, tracers.qᵗ)
     return g * ∂z_ϑ / ϑ
 end
 
-@inline function virtual_potential_temperature(i, j, k, grid, constants, formulation, T, qᵗ)
-    pᵣ = @inbounds formulation.reference_state.pressure[i, j, k]
-    p₀ = formulation.reference_state.surface_pressure
+@inline function virtual_potential_temperature(i, j, k, grid, constants, dynamics, T, qᵗ)
+    pᵣ = @inbounds dynamics.reference_state.pressure[i, j, k]
+    p₀ = dynamics.reference_state.surface_pressure
     q = @inbounds MoistureMassFractions(qᵗ[i, j, k])
     Rᵐ = mixture_gas_constant(q, constants)
     Rᵈ = dry_air_gas_constant(constants)

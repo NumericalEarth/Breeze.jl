@@ -131,7 +131,7 @@ function Fields.set!(model::AtmosphereModel; time=nothing, enforce_mass_conserva
         elseif name == :ρqᵗ
             set!(model.moisture_density, value)
             ρqᵗ = model.moisture_density
-            ρ = formulation_density(model.formulation)
+            ρ = dynamics_density(model.dynamics)
             set!(model.specific_moisture, ρqᵗ / ρ)
 
         elseif name ∈ prognostic_field_names(model.microphysics)
@@ -143,13 +143,13 @@ function Fields.set!(model::AtmosphereModel; time=nothing, enforce_mass_conserva
             density_name = specific_to_density_weighted(name)
             ρμ = model.microphysical_fields[density_name]
             set!(ρμ, value)
-            ρ = formulation_density(model.formulation)
+            ρ = dynamics_density(model.dynamics)
             set!(ρμ, ρ * ρμ)
 
         elseif name == :qᵗ
             qᵗ = model.specific_moisture
             set!(qᵗ, value)
-            ρ = formulation_density(model.formulation)
+            ρ = dynamics_density(model.dynamics)
             ρqᵗ = model.moisture_density
             set!(ρqᵗ, ρ * qᵗ)                
 
@@ -157,7 +157,7 @@ function Fields.set!(model::AtmosphereModel; time=nothing, enforce_mass_conserva
             u = model.velocities[name]
             set!(u, value)
 
-            ρ = formulation_density(model.formulation)
+            ρ = dynamics_density(model.dynamics)
             ϕ = model.momentum[Symbol(:ρ, name)]
             value = ρ * u
             set!(ϕ, value)    

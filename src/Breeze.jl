@@ -10,10 +10,10 @@ export
     MoistAirBuoyancy,
     ThermodynamicConstants,
     ReferenceState,
-    AnelasticFormulation,
+    AnelasticDynamics,
     AtmosphereModel,
-    StaticEnergyThermodynamics,
-    LiquidIcePotentialTemperatureThermodynamics,
+    StaticEnergyFormulation,
+    LiquidIcePotentialTemperatureFormulation,
     RadiativeTransferModel,
     BackgroundAtmosphere,
     TemperatureField,
@@ -21,6 +21,8 @@ export
     CondensedPhase,
     mixture_gas_constant,
     mixture_heat_capacity,
+    dynamics_density,
+    dynamics_pressure,
     
     # Diagnostics
     compute_hydrostatic_pressure!,

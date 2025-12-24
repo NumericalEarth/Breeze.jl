@@ -30,7 +30,7 @@ reference_state = ReferenceState(grid, constants;
                                  surface_pressure = 101325,
                                  potential_temperature = surface_temperature)
 
-formulation = AnelasticFormulation(reference_state)
+dynamics = AnelasticDynamics(reference_state)
 
 # ## Radiative transfer models
 #
@@ -59,16 +59,15 @@ clear_sky_radiation = RadiativeTransferModel(grid, :clear_sky, constants;
 clock = Clock(time=DateTime(1950, 11, 1, 12, 0, 0))
 microphysics = SaturationAdjustment(equilibrium = WarmPhaseEquilibrium())
 
-gray_model = AtmosphereModel(grid; clock, formulation, microphysics, radiation=gray_radiation)
-clear_sky_model = AtmosphereModel(grid; clock, formulation, microphysics, radiation=clear_sky_radiation)
+gray_model = AtmosphereModel(grid; clock, dynamics, microphysics, radiation=gray_radiation)
+clear_sky_model = AtmosphereModel(grid; clock, dynamics, microphysics, radiation=clear_sky_radiation)
 
 # ## Initial condition: idealized tropical profile with a cloud
 #
 # We prescribe a simple tropical-like temperature profile with a moist boundary
 # layer and a cloud between 1-2 km altitude.
 
-# Use a mildly stable profile so temperatures remain within RRTMGP's supported range.
-θᵢ(z) = surface_temperature + 5e-3 * z
+θ₀ = reference_state.potential_temperature
 q₀ = 0.015    # surface specific humidity (kg/kg)
 Hᵗ = 2500     # moisture scale height (m)
 qᵗᵢ(z) = q₀ * exp(-z / Hᵗ)

@@ -24,9 +24,9 @@ grid = RectilinearGrid(CPU();
 
 thermodynamic_constants = ThermodynamicConstants()
 reference_state = ReferenceState(grid, thermodynamic_constants, surface_pressure=1e5, potential_temperature=300)
-formulation = AnelasticFormulation(reference_state)
+dynamics = AnelasticDynamics(reference_state)
 advection = WENO(order=9)
-model = AtmosphereModel(grid; formulation, thermodynamic_constants, advection)
+model = AtmosphereModel(grid; dynamics, thermodynamic_constants, advection)
 
 # ## Potential temperature perturbation
 #
@@ -37,7 +37,7 @@ model = AtmosphereModel(grid; formulation, thermodynamic_constants, advection)
 r₀ = 2e3
 z₀ = 2e3
 Δθ = 2 # K
-θ₀ = model.formulation.reference_state.potential_temperature
+θ₀ = model.dynamics.reference_state.potential_temperature
 g = model.thermodynamic_constants.gravitational_acceleration
 
 function θᵢ(x, z)
@@ -154,7 +154,7 @@ nothing #hide
 # (We coudl have also used this model for the dry simulation):
 
 microphysics = SaturationAdjustment(equilibrium=WarmPhaseEquilibrium())
-moist_model = AtmosphereModel(grid; formulation, thermodynamic_constants, advection, microphysics)
+moist_model = AtmosphereModel(grid; dynamics, thermodynamic_constants, advection, microphysics)
 
 # ## Moist thermal bubble initial conditions
 #
