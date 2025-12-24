@@ -60,7 +60,7 @@ function tracer_specific_to_density!(tracers, density)
     return nothing
 end
 
-diagnostic_indices(::Bounded, N, H) = 0:N+1
+diagnostic_indices(::Bounded, N, H) = 1:N+1
 diagnostic_indices(::Periodic, N, H) = -H+1:N+H
 diagnostic_indices(::Flat, N, H) = 1:N
 
