@@ -15,12 +15,12 @@ radiation extensions (e.g., BreezeRRTMGPExt) to compute radiative transfer.
 """
 update_radiation!(radiation, model) = nothing
 
-struct RadiativeTransferModel{OT, FT, C, E, SP, AS, LW, SW, F}
-    optics :: OT
+struct RadiativeTransferModel{FT, C, E, SP, BA, AS, LW, SW, F}
     solar_constant :: FT # Scalar
     coordinate :: C # coordinates (for RectilinearGrid) for computing the solar zenith angle
     epoch :: E # optional epoch for computing time with floating-point clocks
     surface_properties :: SP
+    background_atmosphere :: BA # BackgroundAtmosphere or Nothing (for gray)
     atmospheric_state :: AS
     longwave_solver :: LW
     shortwave_solver :: SW
@@ -32,20 +32,40 @@ end
 """
 $(TYPEDSIGNATURES)
 
-Return a RadiativeTransferModel on `grid` using the `optics` configuration for radiative transfer.
-The `parameters` argument provides physical constants for the radiative transfer solver.
+Construct a `RadiativeTransferModel` on `grid` using the specified `optics_flavor`.
+
+Valid optics flavors are:
+- `:gray` - Gray atmosphere radiation (O'Gorman & Schneider 2008)
+- `:clear_sky` - Full-spectrum clear-sky radiation using RRTMGP gas optics
+
+The `constants` argument provides physical constants for the radiative transfer solver.
+
+# Example
+
+```julia
+rtm = RadiativeTransferModel(grid, :gray, constants;
+    surface_temperature = 300,
+    surface_albedo = 0.1)
+
+rtm = RadiativeTransferModel(grid, :clear_sky, constants;
+    surface_temperature = 300,
+    surface_albedo = 0.1,
+    background_atmosphere = BackgroundAtmosphere(CO₂ = 400e-6))
+```
 """
-function RadiativeTransferModel(grid, optics, parameters=nothing; kw...)
-    msg = "RadiativeTransferModel requires RRTMGP. Valid optics are:\n" *
-          "  - GrayOpticalThicknessOGorman2008(FT)\n" *
-          "  - RRTMGPGasOptics()\n" *
-          "Received: $optics"
+function RadiativeTransferModel(grid, optics_flavor::Symbol, args...; kw...)
+    RadiativeTransferModel(grid, Val(optics_flavor), args...; kw...)
+end
+
+# Fallback for unknown optics flavors or when extension is not loaded
+function RadiativeTransferModel(grid, ::Val{S}, args...; kw...) where S
+    msg = "Unknown optics flavor :$S. Valid options are :gray, :clear_sky.\n" *
+          "Make sure RRTMGP.jl is loaded (e.g., `using RRTMGP`)."
     throw(ArgumentError(msg))
-    return nothing
 end
 
 """
-    BackgroundAtmosphericComposition
+    BackgroundAtmosphere
 
 Constant (spatially uniform) volume mixing ratios (VMR) for radiatively active gases.
 All values are dimensionless molar fractions.
@@ -59,7 +79,7 @@ Defaults are approximate modern atmospheric values for major gases; halocarbons 
 
 Note: H₂O is computed from the model's prognostic moisture field, not specified here.
 """
-Base.@kwdef struct BackgroundAtmosphericComposition{FT}
+Base.@kwdef struct BackgroundAtmosphere{FT}
     # Major atmospheric constituents
     N₂  :: FT = 0.78084      # Nitrogen (~78%)
     O₂  :: FT = 0.20946      # Oxygen (~21%)
@@ -86,23 +106,6 @@ Base.@kwdef struct BackgroundAtmosphericComposition{FT}
     HFC₂₃   :: FT = 0.0      # Trifluoromethane
     HFC₃₂   :: FT = 0.0      # Difluoromethane
 end
-
-"""
-$(TYPEDSIGNATURES)
-
-Configuration for RRTMGP full-spectrum **gas optics** (clear-sky).
-
-This object is intentionally defined in Breeze (so users can configure it without importing
-RRTMGP internals), but it is **only usable** when the RRTMGP extension is active.
-
-The `background_composition` field specifies the gas volume mixing ratios for radiatively
-active species (except H₂O, which is computed from the model's moisture field).
-"""
-struct RRTMGPGasOptics{BA}
-    background_composition :: BA
-end
-
-RRTMGPGasOptics() = RRTMGPGasOptics(BackgroundAtmosphericComposition{Float64}())
 
 struct SurfaceRadiativeProperties{ST, SE, SA, DW}
     surface_temperature :: ST  # Scalar or 2D field

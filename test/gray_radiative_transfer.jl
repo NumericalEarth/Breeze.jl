@@ -8,7 +8,6 @@ using Test
 # Load RRTMGP to trigger the extension
 using ClimaComms
 using RRTMGP
-using RRTMGP.AtmosphericStates: GrayOpticalThicknessOGorman2008
 
 #####
 ##### Unit tests
@@ -22,10 +21,9 @@ using RRTMGP.AtmosphericStates: GrayOpticalThicknessOGorman2008
                                topology=(Flat, Flat, Bounded))
 
         constants = ThermodynamicConstants()
-        optical_thickness = GrayOpticalThicknessOGorman2008(FT)
 
         @testset "Number-based surface properties" begin
-            radiation = RadiativeTransferModel(grid, optical_thickness, constants;
+            radiation = RadiativeTransferModel(grid, :gray, constants;
                                                surface_temperature = 300,
                                                surface_emissivity = 0.98,
                                                surface_albedo = 0.1,
@@ -48,7 +46,7 @@ using RRTMGP.AtmosphericStates: GrayOpticalThicknessOGorman2008
             @test size(radiation.downwelling_longwave_flux) == (1, 1, Nz + 1)
             @test size(radiation.downwelling_shortwave_flux) == (1, 1, Nz + 1)
 
-            radiation = RadiativeTransferModel(grid, optical_thickness, constants;
+            radiation = RadiativeTransferModel(grid, :gray, constants;
                                                surface_temperature = 300,
                                                direct_surface_albedo = 0.15,
                                                diffuse_surface_albedo = 0.2)
@@ -62,7 +60,7 @@ using RRTMGP.AtmosphericStates: GrayOpticalThicknessOGorman2008
             α₀ = set!(CenterField(grid), 0.1)
             ε₀ = set!(CenterField(grid), 0.98)
 
-            radiation = RadiativeTransferModel(grid, optical_thickness, constants;
+            radiation = RadiativeTransferModel(grid, :gray, constants;
                                                surface_temperature = T₀,
                                                surface_emissivity = ε₀,
                                                surface_albedo = α₀)
@@ -79,13 +77,13 @@ using RRTMGP.AtmosphericStates: GrayOpticalThicknessOGorman2008
         end
 
         @testset "Invalid surface properties" begin
-            @test_throws ArgumentError RadiativeTransferModel(grid, optical_thickness, constants;
+            @test_throws ArgumentError RadiativeTransferModel(grid, :gray, constants;
                                                             surface_temperature = 300,
                                                             surface_albedo = 0.15,
                                                             direct_surface_albedo = 0.15,
                                                             diffuse_surface_albedo = 0.2)
 
-            @test_throws ArgumentError RadiativeTransferModel(grid, optical_thickness, constants;
+            @test_throws ArgumentError RadiativeTransferModel(grid, :gray, constants;
                                                             surface_temperature = 300,
                                                             surface_albedo = 0.15,
                                                             diffuse_surface_albedo = 0.2)
@@ -108,8 +106,7 @@ end
         formulation = AnelasticFormulation(reference_state,
                                            thermodynamics = :LiquidIcePotentialTemperature)
 
-        optical_thickness = GrayOpticalThicknessOGorman2008(FT)
-        radiation = RadiativeTransferModel(grid, optical_thickness, constants;
+        radiation = RadiativeTransferModel(grid, :gray, constants;
                                            surface_temperature = 300,
                                            surface_emissivity = 0.98,
                                            surface_albedo = 0.1,
@@ -135,8 +132,7 @@ end
         formulation = AnelasticFormulation(reference_state,
                                            thermodynamics = :LiquidIcePotentialTemperature)
 
-        optical_thickness = GrayOpticalThicknessOGorman2008(FT)
-        radiation = RadiativeTransferModel(grid, optical_thickness, constants;
+        radiation = RadiativeTransferModel(grid, :gray, constants;
                                            surface_temperature = 300,
                                            surface_emissivity = 0.98,
                                            surface_albedo = 0.1,

@@ -26,8 +26,7 @@ using RRTMGP
         formulation = AnelasticFormulation(reference_state,
                                            thermodynamics = :LiquidIcePotentialTemperature)
 
-        optics = RRTMGPGasOptics()
-        radiation = RadiativeTransferModel(grid, optics, constants;
+        radiation = RadiativeTransferModel(grid, :clear_sky, constants;
                                            surface_temperature = 300,
                                            surface_emissivity = 0.98,
                                            surface_albedo = 0.1,
@@ -60,5 +59,3 @@ using RRTMGP
         @test ℐ_lw_up[1, 1, 1] > 100
     end
 end
-
-

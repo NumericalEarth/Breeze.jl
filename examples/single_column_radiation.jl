@@ -11,7 +11,6 @@ using Oceananigans.Units
 using CairoMakie
 
 using RRTMGP
-using RRTMGP.AtmosphericStates: GrayOpticalThicknessOGorman2008
 
 # ## Grid and thermodynamics
 #
@@ -25,8 +24,9 @@ grid = RectilinearGrid(size=Nz, x=λ, y=φ, z=(0, 20kilometers),
 
 # Set up the thermodynamic constants and reference state.
 surface_temperature = 300
+constants = ThermodynamicConstants()
 
-reference_state = ReferenceState(grid;
+reference_state = ReferenceState(grid, constants;
                                  surface_pressure = 101325,
                                  potential_temperature = surface_temperature)
 
@@ -36,20 +36,17 @@ formulation = AnelasticFormulation(reference_state)
 #
 # We create a gray radiative transfer model using the [OGormanSchneider2008](@citet)
 # optical thickness parameterization. The solar zenith angle is computed from the
-# model clock and grid location. We also create a clear-sky full-spectrum model
-# using `RRTMGPGasOptics`.
+# model clock and grid location. We also create a clear-sky full-spectrum model.
 
 using Dates
 
-gray_optics = GrayOpticalThicknessOGorman2008(eltype(grid))
-gray_radiation = RadiativeTransferModel(grid, gray_optics;
+gray_radiation = RadiativeTransferModel(grid, :gray, constants;
                                         surface_temperature,
                                         surface_emissivity = 0.98,
                                         surface_albedo = 0.1,
                                         solar_constant = 1361)        # W/m²
 
-clear_sky_optics = RRTMGPGasOptics()
-clear_sky_radiation = RadiativeTransferModel(grid, clear_sky_optics;
+clear_sky_radiation = RadiativeTransferModel(grid, :clear_sky, constants;
                                              surface_temperature,
                                              surface_emissivity = 0.98,
                                              surface_albedo = 0.1,
@@ -70,7 +67,7 @@ clear_sky_model = AtmosphereModel(grid; clock, formulation, microphysics, radiat
 # We prescribe a simple tropical-like temperature profile with a moist boundary
 # layer and a cloud between 1-2 km altitude.
 
-# Use a mildly stable profile so temperatures remain within RRTMGP’s supported range.
+# Use a mildly stable profile so temperatures remain within RRTMGP's supported range.
 θᵢ(z) = surface_temperature + 5e-3 * z
 q₀ = 0.015    # surface specific humidity (kg/kg)
 Hᵗ = 2500     # moisture scale height (m)

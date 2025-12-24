@@ -18,7 +18,8 @@ using Dates: AbstractDateTime, Millisecond
 
 import Breeze.AtmosphereModels: RadiativeTransferModel
 
-const GrayRadiativeTransferModel = RadiativeTransferModel{<:GrayOpticalThicknessOGorman2008}
+# Dispatch on background_atmosphere = Nothing for gray radiation
+const GrayRadiativeTransferModel = RadiativeTransferModel{<:Any, <:Any, <:Any, <:Any, Nothing}
 
 materialize_surface_property(x::Number, grid) = convert(eltype(grid), x)
 materialize_surface_property(x::Field, grid) = x
@@ -41,22 +42,25 @@ $(TYPEDSIGNATURES)
 Construct a gray atmosphere radiative transfer model for the given grid.
 
 # Keyword Arguments
-- `latitude`: Latitude in degrees. If `nothing` (default), extracted from grid y-coordinate.
-              Can be a scalar (constant for all columns) or a 2D field.
-- `surface_temperature`: Surface temperature in Kelvin (default: 300).
-                         Can be a scalar or 2D field.
+- `optical_thickness`: Optical thickness parameterization (default: `GrayOpticalThicknessOGorman2008(FT)`).
+- `surface_temperature`: Surface temperature in Kelvin (required).
+- `coordinate`: Tuple of (longitude, latitude) in degrees. If `nothing` (default), 
+                extracted from grid coordinates.
+- `epoch`: Optional epoch for computing time with floating-point clocks.
 - `surface_emissivity`: Surface emissivity, 0-1 (default: 0.98). Scalar.
-- `direct_surface_albedo`: Direct surface albedo, 0-1 (default: 0.1). Can be scalar or 2D field.
-- `diffuse_surface_albedo`: Diffuse surface albedo, 0-1 (default: 0.1). Can be scalar or 2D field.
+- `surface_albedo`: Surface albedo, 0-1. Can be scalar or 2D field. 
+                    Alternatively, provide both `direct_surface_albedo` and `diffuse_surface_albedo`.
+- `direct_surface_albedo`: Direct surface albedo, 0-1. Can be scalar or 2D field.
+- `diffuse_surface_albedo`: Diffuse surface albedo, 0-1. Can be scalar or 2D field.
 - `solar_constant`: Top-of-atmosphere solar flux in W/m² (default: 1361)
 """
 function RadiativeTransferModel(grid,
-                                optics::GrayOpticalThicknessOGorman2008,
+                                ::Val{:gray},
                                 constants::ThermodynamicConstants;
+                                optical_thickness = GrayOpticalThicknessOGorman2008(eltype(grid)),
                                 surface_temperature,
                                 coordinate = nothing,
                                 epoch = nothing,
-                                latitude = nothing,
                                 surface_emissivity = 0.98,
                                 direct_surface_albedo = nothing,
                                 diffuse_surface_albedo = nothing,
@@ -118,7 +122,7 @@ function RadiativeTransferModel(grid,
                                              rrtmgp_Tᶠ,
                                              rrtmgp_zᶠ,
                                              rrtmgp_T₀,
-                                             optics)
+                                             optical_thickness)
 
     # Surface emissivity for the longwave solver
     rrtmgp_ε₀ = DA{FT}(undef, Nc)
@@ -176,11 +180,11 @@ function RadiativeTransferModel(grid,
                                                     direct_surface_albedo,
                                                     diffuse_surface_albedo)
 
-    return RadiativeTransferModel(optics,
-                                  convert(FT, solar_constant),
+    return RadiativeTransferModel(convert(FT, solar_constant),
                                   coordinate,
                                   epoch,
                                   surface_properties,
+                                  nothing,  # background_atmosphere = nothing for gray
                                   atmospheric_state,
                                   longwave_solver,
                                   shortwave_solver,
