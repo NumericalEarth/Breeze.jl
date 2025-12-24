@@ -29,7 +29,7 @@ reference_state = ReferenceState(grid, constants;
                                  surface_pressure = 101325,
                                  potential_temperature = surface_temperature)
 
-formulation = AnelasticFormulation(reference_state)
+dynamics = AnelasticDynamics(reference_state)
 
 # Create gray radiation model
 optical_thickness = GrayOpticalThicknessOGorman2008(eltype(grid))
@@ -41,7 +41,7 @@ radiation = RadiativeTransferModel(grid, constants, optical_thickness;
 
 # Create atmosphere model with DateTime clock for solar position
 clock = Clock(time=DateTime(2024, 9, 27, 16, 0, 0))
-model = AtmosphereModel(grid; clock, formulation, radiation)
+model = AtmosphereModel(grid; clock, dynamics, radiation)
 ```
 
 When a `DateTime` clock is used, the solar zenith angle is computed automatically from the time and grid location (longitude and latitude).

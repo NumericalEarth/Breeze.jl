@@ -84,8 +84,8 @@ params = (z0=grid.Lz, dz=grid.Lz/2, ω=1/60)
 # Atmosphere model setup
 constants = ThermodynamicConstants()
 reference_state = ReferenceState(grid, constants, base_pressure=p₀, potential_temperature=θ₀)
-formulation = AnelasticFormulation(reference_state, thermodynamics=:LiquidIcePotentialTemperature)
-model = AtmosphereModel(grid; formulation, advection = WENO(), forcing=(; ρw=ρw_forcing))
+dynamics = AnelasticDynamics(reference_state)
+model = AtmosphereModel(grid; dynamics, advection = WENO(), forcing=(; ρw=ρw_forcing))
 
 # Initial conditions and initialization
 θᵢ(x, z) = θ₀ * exp(N² * z / g) # background stratification for isothermal atmosphere

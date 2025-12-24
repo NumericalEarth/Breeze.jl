@@ -8,8 +8,8 @@ end
 
 Solvers.tridiagonal_direction(formulation::AnelasticTridiagonalSolverFormulation) = ZDirection()
 
-function formulation_pressure_solver(anelastic_formulation::AnelasticFormulation, grid)
-    reference_density = anelastic_formulation.reference_state.density
+function dynamics_pressure_solver(dynamics::AnelasticDynamics, grid)
+    reference_density = dynamics.reference_state.density
     tridiagonal_formulation = AnelasticTridiagonalSolverFormulation(reference_density)
 
     solver = if grid isa Oceananigans.ImmersedBoundaries.ImmersedBoundaryGrid
@@ -102,15 +102,4 @@ end
     δ = divᶜᶜᶜ(i, j, k, grid, ρu, ρv, ρw)
     @inbounds rhs[i, j, k] = active * Δzᶜᶜᶜ(i, j, k, grid) * δ / Δt
 end
-
-#=
-function compute_source_term!(solver::DistributedFourierTridiagonalPoissonSolver, Ũ)
-    rhs = solver.storage.zfield
-    arch = architecture(solver)
-    grid = solver.local_grid
-    tdir = solver.batched_tridiagonal_solver.tridiagonal_direction
-    launch!(arch, grid, :xyz, _fourier_tridiagonal_source_term!, rhs, tdir, grid, Ũ)
-    return nothing
-end
-=#
 

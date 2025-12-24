@@ -10,10 +10,10 @@ using Oceananigans
     constants = ThermodynamicConstants(FT)
     reference_state = ReferenceState(grid, constants)
 
-    formulation = AnelasticFormulation(reference_state)
-    parent(formulation.reference_state.density) .= 1
+    dynamics = AnelasticDynamics(reference_state)
+    parent(dynamics.reference_state.density) .= 1
 
-    anelastic = AtmosphereModel(grid; thermodynamic_constants=constants, formulation)
+    anelastic = AtmosphereModel(grid; thermodynamic_constants=constants, dynamics)
     boussinesq = NonhydrostaticModel(; grid)
 
     uᵢ = rand(size(grid)...)
@@ -43,5 +43,5 @@ using Oceananigans
     @test maximum(abs, δᵃ) < prod(size(grid)) * eps(FT)
     @test maximum(abs, δᵇ) < prod(size(grid)) * eps(FT)
     # When ρᵣ == 1, the kinematic pressure p'/ρᵣ equals the Boussinesq non-hydrostatic pressure
-    @test anelastic.formulation.pressure_anomaly == boussinesq.pressures.pNHS
+    @test anelastic.dynamics.pressure_anomaly == boussinesq.pressures.pNHS
 end

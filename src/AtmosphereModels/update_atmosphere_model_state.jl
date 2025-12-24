@@ -9,7 +9,7 @@ using Oceananigans.ImmersedBoundaries: mask_immersed_field!
 using Oceananigans.TimeSteppers: TimeSteppers
 using Oceananigans.Utils: launch!
 
-# AnelasticModel type alias imported from AnelasticFormulation submodule
+# AnelasticModel type alias imported from Dynamics submodule
 
 function TimeSteppers.update_state!(model::AnelasticModel, callbacks=[]; compute_tendencies=true)
     tracer_density_to_specific!(model) # convert tracer density to specific tracer distribution
@@ -40,8 +40,8 @@ function compute_forcings!(model)
     return nothing
 end
 
-tracer_density_to_specific!(model) = tracer_density_to_specific!(model.tracers, formulation_density(model.formulation))
-tracer_specific_to_density!(model) = tracer_specific_to_density!(model.tracers, formulation_density(model.formulation))
+tracer_density_to_specific!(model) = tracer_density_to_specific!(model.tracers, dynamics_density(model.dynamics))
+tracer_specific_to_density!(model) = tracer_specific_to_density!(model.tracers, dynamics_density(model.dynamics))
 
 function tracer_density_to_specific!(tracers, density)
     # TODO: do all tracers a single kernel
@@ -79,13 +79,13 @@ function compute_auxiliary_variables!(model)
             _compute_velocities!,
             model.velocities,
             grid,
-            model.formulation,
+            model.dynamics,
             model.momentum)
 
     fill_halo_regions!(model.velocities)
     foreach(mask_immersed_field!, model.velocities)
 
-    # Dispatch on thermodynamics type
+    # Dispatch on thermodynamic formulation type
     compute_auxiliary_thermodynamic_variables!(model)
 
     # Compute diffusivities
@@ -105,6 +105,7 @@ function compute_auxiliary_thermodynamic_variables!(model::AtmosphereModel)
             model.temperature,
             model.specific_moisture,
             model.formulation,
+            model.dynamics,
             grid,
             model.thermodynamic_constants,
             model.microphysics,
@@ -114,15 +115,15 @@ function compute_auxiliary_thermodynamic_variables!(model::AtmosphereModel)
     fill_halo_regions!(model.temperature)
     fill_halo_regions!(model.specific_moisture)
     fill_halo_regions!(model.microphysical_fields)
-    fill_halo_regions!(model.formulation.thermodynamics)
+    fill_halo_regions!(model.formulation)
 
     return nothing
 end
 
-@kernel function _compute_velocities!(velocities, grid, formulation, momentum)
+@kernel function _compute_velocities!(velocities, grid, dynamics, momentum)
     i, j, k = @index(Global, NTuple)
 
-    ρ = formulation_density(formulation)
+    ρ = dynamics_density(dynamics)
 
     @inbounds begin
         ρu = momentum.ρu[i, j, k]
@@ -141,6 +142,7 @@ end
 @kernel function _compute_auxiliary_thermodynamic_variables!(temperature,
                                                              specific_moisture,
                                                              formulation,
+                                                             dynamics,
                                                              grid,
                                                              constants,
                                                              microphysics,
@@ -148,9 +150,9 @@ end
                                                              moisture_density)
     i, j, k = @index(Global, NTuple)
 
-    compute_auxiliary_thermodynamic_variables!(formulation, i, j, k, grid)
+    compute_auxiliary_thermodynamic_variables!(formulation, dynamics, i, j, k, grid)
 
-    ρ_field = formulation_density(formulation)
+    ρ_field = dynamics_density(dynamics)
     @inbounds begin
         ρ = ρ_field[i, j, k]
         ρqᵗ = moisture_density[i, j, k]
@@ -158,55 +160,10 @@ end
         specific_moisture[i, j, k] = qᵗ
     end
 
-    𝒰₀ = diagnose_thermodynamic_state(i, j, k, grid,
-                                      formulation,
-                                      microphysics,
-                                      microphysical_fields,
-                                      constants,
-                                      specific_moisture)
+    # Compute moisture fractions first (needed by diagnose_thermodynamic_state)
+    q = compute_moisture_fractions(i, j, k, grid, microphysics, ρ, qᵗ, microphysical_fields)
 
-    # Adjust the thermodynamic state if using a microphysics scheme
-    # that invokes saturation adjustment
-    𝒰₁ = maybe_adjust_thermodynamic_state(i, j, k, 𝒰₀, microphysics, ρ, microphysical_fields, qᵗ, constants)
-
-    update_microphysical_fields!(microphysical_fields, microphysics,
-                                 i, j, k, grid,
-                                 ρ, 𝒰₁, constants)
-
-    T = Thermodynamics.temperature(𝒰₁, constants)
-    @inbounds temperature[i, j, k] = T
-end
-
-@kernel function _compute_potential_temperature_auxiliary_variables!(temperature,
-                                                                     potential_temperature,
-                                                                     specific_moisture,
-                                                                     grid,
-                                                                     constants,
-                                                                     formulation,
-                                                                     microphysics,
-                                                                     microphysical_fields,
-                                                                     liquid_ice_potential_temperature_density,
-                                                                     moisture_density)
-    i, j, k = @index(Global, NTuple)
-
-    ρ_field = formulation_density(formulation)
-    @inbounds begin
-        ρθ = liquid_ice_potential_temperature_density[i, j, k]
-        ρqᵗ = moisture_density[i, j, k]
-        ρ = ρ_field[i, j, k]
-
-        θ = ρθ / ρ
-        qᵗ = ρqᵗ / ρ
-        potential_temperature[i, j, k] = θ
-        specific_moisture[i, j, k] = qᵗ
-    end
-
-    𝒰₀ = diagnose_thermodynamic_state(i, j, k, grid,
-                                      formulation,
-                                      microphysics,
-                                      microphysical_fields,
-                                      constants,
-                                      specific_moisture)
+    𝒰₀ = diagnose_thermodynamic_state(i, j, k, grid, formulation, dynamics, q)
 
     # Adjust the thermodynamic state if using a microphysics scheme
     # that invokes saturation adjustment
@@ -234,7 +191,7 @@ function compute_tendencies!(model::AnelasticModel)
     #####
 
     momentum_args = (
-        formulation_density(model.formulation),
+        dynamics_density(model.dynamics),
         model.advection.momentum,
         model.velocities,
         model.closure,
@@ -250,6 +207,7 @@ function compute_tendencies!(model::AnelasticModel)
     # Extra arguments for vertical velocity are required to compute
     # buoyancy:
     w_args = tuple(momentum_args..., model.forcing.ρw,
+                   model.dynamics,
                    model.formulation,
                    model.temperature,
                    model.specific_moisture,
@@ -263,6 +221,7 @@ function compute_tendencies!(model::AnelasticModel)
 
     # Arguments common to energy density, moisture density, and tracer density tendencies:
     common_args = (
+        model.dynamics,
         model.formulation,
         model.thermodynamic_constants,
         model.specific_moisture,
@@ -275,7 +234,7 @@ function compute_tendencies!(model::AnelasticModel)
         model_fields)
 
     #####
-    ##### Thermodynamic density tendency (dispatches on thermodynamics type)
+    ##### Thermodynamic density tendency (dispatches on thermodynamic formulation type)
     #####
 
     compute_thermodynamic_tendency!(model, common_args)
