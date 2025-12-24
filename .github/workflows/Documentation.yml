@@ -13,9 +13,8 @@ on:
       - "Project.toml"
       - "CHANGELOG.md"
   pull_request:
-    types: [labeled, unlabeled, opened, reopened, edited, synchronize]
+    types: [labeled, opened, reopened, synchronize]
     paths: *paths
-  release:
 
 concurrency:
   # Skip intermediate builds: always.
@@ -23,8 +22,13 @@ concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
   cancel-in-progress: true
 
+env:
+  BREEZE_LABEL_BUILD_ALL_EXAMPLES: 'build all examples 🏗️'
+
 jobs:
   build-docs:
+    # Don't run the docs build if the trigger isn't a label event on a PR which isn't adding special label.
+    if: ${{ github.event.action != 'labeled' || github.event.label.name == 'build all examples 🏗️' }}
     permissions:
       actions: write
       contents: write
@@ -40,12 +44,12 @@ jobs:
       - name: Set BREEZE_BUILD_ALL_EXAMPLES
         shell: bash
         run: |
-          if [[ ('${{ github.event_name }}' == 'push' && ('${{ github.ref }}' == 'refs/heads/main') || '${{ github.ref }}' == refs/tags/v*) || ('${{ github.event_name }}' == 'release') || ('${{ github.event_name }}' == 'pull_request' && '${{ github.event.label.name }}' == 'build all examples 🏗️') ]]; then
+          if [[ ('${{ github.event_name }}' == 'push' && ('${{ github.ref }}' == 'refs/heads/main') || '${{ github.ref }}' == refs/tags/v*) || ('${{ github.event_name }}' == 'release') || ('${{ github.event_name }}' == 'pull_request' && ${{ contains(github.event.pull_request.labels.*.name,  env.BREEZE_LABEL_BUILD_ALL_EXAMPLES) }} == true) ]]; then
               BREEZE_BUILD_ALL_EXAMPLES=true
           else
               BREEZE_BUILD_ALL_EXAMPLES=false
           fi
-          echo "BREEZE_BUILD_ALL_EXAMPLES=${BREEZE_BUILD_ALL_EXAMPLES}" >> "${GITHUB_ENV}"
+          echo "BREEZE_BUILD_ALL_EXAMPLES=${BREEZE_BUILD_ALL_EXAMPLES}" | tee "${GITHUB_ENV}"
       - name: Instantiate docs environment
         shell: julia --color=yes --project=docs {0}
         run: |
