@@ -16,6 +16,13 @@ struct BulkMicrophysics{N, C, B}
     precipitation_boundary_condition :: B
 end
 
+# Bulk microphysics schemes (including those from extensions like CloudMicrophysics)
+# use the standard tendency interface, so the model-wide microphysics update is a no-op.
+# We forward to the cloud_formation / saturation-adjustment component to allow specialized
+# cloud formation schemes to hook into the update cycle.
+AtmosphereModels.microphysics_model_update!(bμp::BulkMicrophysics, model) =
+    AtmosphereModels.microphysics_model_update!(bμp.cloud_formation, model)
+
 Base.summary(bμp::BulkMicrophysics) = "BulkMicrophysics"
 
 struct NonEquilibriumCloudFormation{L, I}
@@ -42,6 +49,10 @@ struct NonEquilibriumCloudFormation{L, I}
 end
 
 Base.summary(::NonEquilibriumCloudFormation) = "NonEquilibriumCloudFormation"
+
+# NonEquilibriumCloudFormation uses the standard tendency interface,
+# so the model-wide microphysics update is a no-op.
+AtmosphereModels.microphysics_model_update!(::NonEquilibriumCloudFormation, model) = nothing
 
 struct FourCategories{L, I, R, S, C, V, A}
     cloud_liquid :: L
