@@ -10,7 +10,6 @@ using Breeze
 using Oceananigans.Units
 using CairoMakie
 
-using NCDatasets # required to load RRTMGP lookup tables for full-spectrum optics
 using RRTMGP
 using RRTMGP.AtmosphericStates: GrayOpticalThicknessOGorman2008
 
