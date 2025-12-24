@@ -68,7 +68,7 @@ dynamics = AnelasticDynamics(reference_state)
 
 Q₀ = 1000 # heat flux in W / m²
 thermodynamic_constants = ThermodynamicConstants()
-cᵖᵈ = constants.dry_air.heat_capacity
+cᵖᵈ = thermodynamic_constants.dry_air.heat_capacity
 ρθ_bcs = FieldBoundaryConditions(bottom=FluxBoundaryCondition(Q₀ / cᵖᵈ))
 ρqᵗ_bcs = FieldBoundaryConditions(bottom=FluxBoundaryCondition(1e-2))
 
