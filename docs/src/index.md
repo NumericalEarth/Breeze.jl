@@ -64,14 +64,14 @@ grid = RectilinearGrid(size=(Nx, Nz), x=(0, 2Lz), z=(0, Lz), topology=(Periodic,
 
 p₀, θ₀ = 1e5, 288 # reference state parameters
 reference_state = ReferenceState(grid, surface_pressure=p₀, potential_temperature=θ₀)
-formulation = AnelasticFormulation(reference_state, thermodynamics=:StaticEnergy)
+dynamics = AnelasticDynamics(reference_state)
 
 Q₀ = 1000 # heat flux in W / m²
 ρe_bcs = FieldBoundaryConditions(bottom=FluxBoundaryCondition(Q₀))
 ρqᵗ_bcs = FieldBoundaryConditions(bottom=FluxBoundaryCondition(1e-2))
 
 advection = WENO()
-model = AtmosphereModel(grid; advection, formulation, boundary_conditions = (ρe=ρe_bcs, ρqᵗ=ρqᵗ_bcs))
+model = AtmosphereModel(grid; advection, dynamics, boundary_conditions = (ρe=ρe_bcs, ρqᵗ=ρqᵗ_bcs))
 
 Δθ = 2 # ᵒK
 Tₛ = reference_state.potential_temperature # K

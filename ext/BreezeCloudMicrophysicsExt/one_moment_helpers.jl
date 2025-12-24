@@ -6,7 +6,7 @@ function precipitation_rate(model, microphysics::OneMomentLiquidRain, ::Val{:liq
     grid = model.grid
     qᶜˡ = model.microphysical_fields.qᶜˡ
     ρqʳ = model.microphysical_fields.ρqʳ
-    ρ = model.formulation.reference_state.density
+    ρ = model.dynamics.reference_state.density
     kernel = OneMomentPrecipitationRateKernel(microphysics.categories, qᶜˡ, ρqʳ, ρ)
     op = KernelFunctionOperation{Center, Center, Center}(kernel, grid)
     return Field(op)

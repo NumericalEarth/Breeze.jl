@@ -97,7 +97,7 @@ p₀ = 100000  # Pa - surface pressure
 θ₀ = 300     # K - reference potential temperature
 constants = ThermodynamicConstants()
 reference_state = ReferenceState(grid, constants, surface_pressure=p₀, potential_temperature=θ₀)
-formulation = AnelasticFormulation(reference_state)
+dynamics = AnelasticDynamics(reference_state)
 
 # ## Background atmosphere profiles
 #
@@ -243,7 +243,7 @@ fig_bubble
 microphysics = BreezeOneMomentCloudMicrophysics()
 advection = WENO(order=9, minimum_buffer_upwind_order=3)
 closure = AnisotropicMinimumDissipation()
-model = AtmosphereModel(grid; formulation, closure, microphysics, advection)
+model = AtmosphereModel(grid; dynamics, closure, microphysics, advection)
 
 # Initialize with background potential temperature to compute hydrostatic pressure:
 
