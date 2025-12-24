@@ -45,6 +45,7 @@ end
 
 """
     ZeroMomentCloudMicrophysics(FT = Oceananigans.defaults.FloatType;
+                                cloud_formation = SaturationAdjustment(FT),
                                 τ_precip = 1000,
                                 qc_0 = 5e-4,
                                 S_0 = 0)
@@ -115,4 +116,3 @@ end
 
 # Ice precipitation not supported for zero-moment warm-phase scheme
 precipitation_rate(model, ::ZMCM, ::Val{:ice}) = nothing
-

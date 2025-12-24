@@ -51,4 +51,3 @@ include("static_energy_formulation.jl")
 include("potential_temperature_formulation.jl")
 
 end # module
-

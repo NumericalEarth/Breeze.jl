@@ -87,4 +87,3 @@ For anelastic dynamics, returns the reference pressure (hydrostatic background s
 For compressible dynamics, returns the prognostic pressure field.
 """
 function dynamics_pressure end
-
