@@ -302,10 +302,10 @@ end
         # Clamp temperatures to avoid extrapolation that can yield tiny negative source values
         # and trigger DomainErrors in geometric means.
         # TODO: This clamping should ideally be done internally in RRTMGP.jl.
-        Tₘᵢₙ = one(Tᶜ) * 160
-        Tₘₐₓ = one(Tᶜ) * 355
-        Tᶜ = clamp(Tᶜ, Tₘᵢₙ, Tₘₐₓ)
-        Tᶠₖ = clamp(Tᶠₖ, Tₘᵢₙ, Tₘₐₓ)
+        Tmin = 160
+        Tmax = 355
+        Tᶜ = clamp(Tᶜ, Tmin, Tmax)
+        Tᶠₖ = clamp(Tᶠₖ, Tmin, Tmax)
 
         # Store level values
         pᶠ[k, col] = pᶠₖ
@@ -314,16 +314,17 @@ end
         # Topmost level (once)
         if k == 1
             pᶠ[Nz+1, col] = ℑzᵃᵃᶠ(i, j, Nz+1, grid, pᵣ)
-            Tₜₒₚ = ℑzᵃᵃᶠ(i, j, Nz+1, grid, T)
-            Tᶠ[Nz+1, col] = clamp(Tₜₒₚ, Tₘᵢₙ, Tₘₐₓ)
-            T₀[col] = clamp(surface_temperature[i, j, 1], Tₘᵢₙ, Tₘₐₓ)
+            Tᴺ⁺¹ = ℑzᵃᵃᶠ(i, j, Nz+1, grid, T)
+            Tᶠ[Nz+1, col] = clamp(Tᴺ⁺¹, Tmin, Tmax)
+            T₀[col] = clamp(surface_temperature[i, j, 1], Tmin, Tmax)
         end
 
         # Column dry air mass: molecules / cm² of dry air
         Δp = max(pᶠₖ - pᶠₖ₊₁, zero(pᶠₖ))
-        dry_mass_fraction = one(qᵛₖ) - qᵛₖ
+        dry_mass_fraction = 1 - qᵛₖ
         dry_mass_per_area = (Δp / g) * dry_mass_fraction
-        col_dry = dry_mass_per_area / mᵈ * ℕᴬ / (one(dry_mass_per_area) * 1e4)  # (molecules / m²) -> (molecules / cm²)
+        m⁻²_to_cm⁻² = convert(FT, 1e4)
+        col_dry = dry_mass_per_area / mᵈ * ℕᴬ / m⁻²_to_cm⁻² # (molecules / m²) -> (molecules / cm²)
 
         # Populate layerdata: (col_dry, pᶜ, Tᶜ, relative_humidity)
         layerdata[1, k, col] = col_dry
