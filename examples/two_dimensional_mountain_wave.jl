@@ -27,20 +27,19 @@
 # h(x) = h_0 \exp\left(-\frac{x^2}{a^2}\right) \cos^2\left(\frac{\pi x}{\lambda}\right)
 # ```
 #
-# where ``h_0 = 250 \, {\rm m}`` is the peak height, ``a = 5 \, {\rm km}`` is the
-# Gaussian half-width, and ``\lambda = 4 \, {\rm km}`` is the wavelength of the
-# terrain corrugations.
+# where ``h_0`` is the peak height, ``a`` is the Gaussian half-width, and ``\lambda`` is the
+# wavelength of the terrain corrugations.
 #
 # ### Constant stratification base state
 #
-# The background atmosphere has constant Brunt–Väisälä frequency ``N = 0.01 \, {\rm s}^{-1}``.
-# Using a reference temperature ``T_0 = 300 \, {\rm K}``, this gives:
+# For a reference temperature ``T_0``, the background atmosphere corresponds to a constant
+# Brunt–Väisälä frequency ``N``:
 #
 # ```math
 # N^2 = \frac{g^2}{c_p^d T_0}
 # ```
 #
-# The density scale height parameter is:
+# The density-scale height parameter is:
 #
 # ```math
 # \beta = \frac{g}{R^d T_0}
@@ -69,7 +68,7 @@
 # ```
 #
 # !!! note "Current limitations"
-#     This validation case requires high resolution to properly resolve the low-elevation
+#     This example requires high resolution to properly resolve the low-elevation
 #     terrain corrugations with the immersed boundary method. Additionally, open lateral
 #     boundary conditions have not been implemented; periodic boundaries are used instead,
 #     which is not ideal for this test case.
@@ -87,7 +86,8 @@ using CUDA
 # ## Thermodynamic parameters
 #
 # We define the base state with surface pressure ``p_0 = 1000 \, {\rm hPa}``
-# and reference temperature ``T_0 = 300 \, {\rm K}``:
+# and reference temperature ``T_0 = 300 \, {\rm K}``. We also set the backgrround wind
+# at ``U = 20 \, {\rm m/s}``:
 
 constants = ThermodynamicConstants()
 g = constants.gravitational_acceleration
@@ -107,12 +107,14 @@ N  = sqrt(N²)               # s⁻¹ - Brunt–Väisälä frequency
 
 # ## Schär mountain parameters
 #
-# The mountain profile parameters following [Schar2002](@citet):
+# The mountain profile with the parameters used by [Schar2002](@citet) is:
 
 h₀ = 250                    # m - peak mountain height (use 25 m for strict linearity)
 a  = 5000                   # m - Gaussian half-width parameter
 λ  = 4000                   # m - terrain corrugation wavelength
 K  = 2π / λ                 # rad m⁻¹ - terrain wavenumber
+
+hill(x) = h₀ * exp(-(x / a)^2) * cos(π * x / λ)^2
 
 # ## Grid configuration
 #
@@ -121,11 +123,11 @@ K  = 2π / λ                 # rad m⁻¹ - terrain wavenumber
 # transitioning to uniform 500 m spacing above 1 km altitude.
 
 Nx, Nz = 200, 75
-L, H = 100kilometers, 20kilometers
+L, H = 200kilometers, 20kilometers
 
 # Vertical grid stretching parameters:
 
-z_transition = 500         # m - transition height to uniform spacing
+z_transition = 1000         # m - transition height to uniform spacing
 dz_top = 500                # m - constant spacing above transition
 
 # Calculate grid distribution:
@@ -142,19 +144,18 @@ nothing #hide
 
 # Create the underlying rectilinear grid:
 
-underlying_grid = RectilinearGrid(GPU(),
+underlying_grid = RectilinearGrid(CPU(),
                                   size = (Nx, Nz),
                                   halo = (4, 4),
-                                  x = (-L, L),
+                                  x = (-L/2, L/2),
                                   z = z_faces,
                                   topology = (Periodic, Flat, Bounded))
 
 # ## Mountain profile and immersed boundary
 #
-# Define the Schär mountain profile and create an immersed boundary grid using the
-# partial cell method for terrain representation:
+# We create an immersed boundary grid with the Schär mountain, using the partial cell method for
+# terrain representation:
 
-hill(x) = h₀ * exp(-(x / a)^2) * cos(π * x / λ)^2
 grid = ImmersedBoundaryGrid(underlying_grid, PartialCellBottom(hill))
 
 # ## Plot: Mountain profile and vertical grid
@@ -163,7 +164,7 @@ grid = ImmersedBoundaryGrid(underlying_grid, PartialCellBottom(hill))
 # representation:
 
 # The hill profile on a high-resolution grid:
-x_finegrid = -L/3:L/1000:L/3
+x_finegrid = -L/6:L/1000:L/6
 h_finegrid = hill.(x_finegrid)
 nothing #hide
 
@@ -212,13 +213,13 @@ sponge_params = (z0 = grid.Lz, dz = grid.Lz / 2, ω = 1/60)
 
 # ## Model initialization
 #
-# Create the atmosphere model with the anelastic formulation, 5th-order WENO advection,
+# Create the atmosphere model with the anelastic dynamics, 5th-order WENO advection,
 # and the Rayleigh damping layer:
 reference_state = ReferenceState(grid, constants, surface_pressure=p₀, potential_temperature=θ₀)
-formulation = AnelasticFormulation(reference_state)
+dynamics = AnelasticDynamics(reference_state)
 
 advection = WENO(order=5)
-model = AtmosphereModel(grid; formulation, advection, forcing=(; ρw=ρw_forcing))
+model = AtmosphereModel(grid; dynamics, advection, forcing=(; ρw=ρw_forcing))
 
 # ## Initial conditions
 #
@@ -330,7 +331,7 @@ function w_linear(x, z; nk=100)
                                    sin(m_abs * z + k * x),
                                    exp(-m_abs * z) * sin(k * x))
 
-    ## Numerical integration using trapezoidal rule:   
+    ## Numerical integration using trapezoidal rule:
     Δk = step(k)
     integral = Δk * (sum(integrand) - (first(integrand) + last(integrand)) / 2)
     return -(U / π) * exp(β * z / 2) * integral
