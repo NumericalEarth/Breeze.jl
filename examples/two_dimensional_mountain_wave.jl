@@ -7,12 +7,10 @@
 #
 # ## References
 #
-# - [Schar2002](@cite) Schär, C., Leuenberger, D., Fuhrer, O., Lüthi, D., & Girard, C. (2002).
-#   "A new terrain-following vertical coordinate formulation for atmospheric prediction models."
-#   Monthly Weather Review, 130(10), 2459–2480.
-# - [KlempEtAl2015](@cite) Klemp, J. B., Skamarock, W. C., & Park, S.-H. (2015).
-#   "Idealized global nonhydrostatic atmospheric test cases on a reduced-radius sphere."
-#   Journal of Advances in Modeling Earth Systems, 7(3), 1155–1177.
+# ```@bibliography
+# Pages = ["two_dimensional_mountain_wave.md"]
+# Canonical = false
+# ```
 #
 # ## Physical setup
 #
@@ -23,7 +21,7 @@
 #
 # ### Mountain profile
 #
-# The terrain follows the Schär mountain profile (Equation 46 in [Schar2002](@cite)):
+# The terrain follows the Schär mountain profile (Equation 46 by [Schar2002](@citet)):
 #
 # ```math
 # h(x) = h_0 \exp\left(-\frac{x^2}{a^2}\right) \cos^2\left(\frac{\pi x}{\lambda}\right)
@@ -57,7 +55,7 @@
 # ### Linear wave theory
 #
 # For the linearized mountain wave problem, vertical wavenumber ``m`` satisfies the
-# dispersion relation (Appendix A of [KlempEtAl2015](@cite)):
+# dispersion relation (Appendix A of [KlempEtAl2015](@citet)):
 #
 # ```math
 # m^2 = \frac{N^2}{U^2} - \frac{\beta^2}{4} - k^2
@@ -109,7 +107,7 @@ N  = sqrt(N²)               # s⁻¹ - Brunt–Väisälä frequency
 
 # ## Schär mountain parameters
 #
-# The mountain profile parameters following [Schar2002](@cite):
+# The mountain profile parameters following [Schar2002](@citet):
 
 h₀ = 250                    # m - peak mountain height (use 25 m for strict linearity)
 a  = 5000                   # m - Gaussian half-width parameter
@@ -122,12 +120,12 @@ K  = 2π / λ                 # rad m⁻¹ - terrain wavenumber
 # vertical grid with exponential refinement near the surface to resolve the terrain,
 # transitioning to uniform 500 m spacing above 1 km altitude.
 
-Nx, Nz = 200, 100
+Nx, Nz = 200, 75
 L, H = 100kilometers, 20kilometers
 
 # Vertical grid stretching parameters:
 
-z_transition = 1000         # m - transition height to uniform spacing
+z_transition = 500         # m - transition height to uniform spacing
 dz_top = 500                # m - constant spacing above transition
 
 # Calculate grid distribution:
@@ -137,9 +135,10 @@ Nz_bottom = Nz - Nz_top                             # cells in stretched region
 
 # Construct hybrid vertical grid:
 
-z_stretched = ExponentialDiscretization(Nz_bottom, 0, z_transition, scale = z_transition / 8, bias=:left)
+z_stretched = ExponentialDiscretization(Nz_bottom, 0, z_transition, scale = z_transition / 4, bias=:left)
 z_uniform = range(z_transition + dz_top, H; length=Nz_top)
 z_faces = vcat(z_stretched.faces, collect(z_uniform))
+nothing #hide
 
 # Create the underlying rectilinear grid:
 
@@ -163,33 +162,27 @@ grid = ImmersedBoundaryGrid(underlying_grid, PartialCellBottom(hill))
 # Visualize the terrain comparing the analytical profile with the model's discretized
 # representation:
 
-# Analytical profile on a high-resolution grid:
-analytical_grid = RectilinearGrid(CPU(), size=500, x=(-30e3, 30e3), topology=(Periodic, Flat, Flat))
-h_analytical = Field{Center, Nothing, Nothing}(analytical_grid)
-set!(h_analytical, hill)
+# The hill profile on a high-resolution grid:
+x_finegrid = -L/3:L/1000:L/3
+h_finegrid = hill.(x_finegrid)
+nothing #hide
 
 # Discretized profile as represented in the model:
 h_model = grid.immersed_boundary.bottom_height
 
-fig_terrain = Figure(size=(900, 400))
-ax_terrain = Axis(fig_terrain[1, 1],
-                  xlabel = "x (m)",
-                  ylabel = "Height (m)",
-                  title = "Schär Mountain Profile")
-lines!(ax_terrain, h_analytical, linewidth = 1, color = :black, 
-       label = "Analytical")
-lines!(ax_terrain, h_model, linewidth = 2, color = :brown, linestyle = :dash,
-       label = "Model")
+fig = Figure(size=(900, 400))
+ax = Axis(fig[1, 1],
+          xlabel = "x (m)",
+          ylabel = "Height (m)",
+          title = "Schär Mountain Profile")
 
-# band! requires arrays, not Fields
-x_ana = xnodes(h_analytical)
-h_ana = interior(h_analytical, :, 1, 1)
-band!(ax_terrain, x_ana, zeros(length(x_ana)), h_ana, color = (:brown, 0.2))
-xlims!(ax_terrain, -30e3, 30e3)
-axislegend(ax_terrain, position = :rt)
+lines!(ax, x_finegrid, h_finegrid, linewidth = 1, color = :black, label = "Analytical")
+scatterlines!(ax, h_model, linewidth = 2, color = :brown, linestyle = :dash, label = "Model")
+band!(ax, x_finegrid, zeros(length(x_finegrid)), h_finegrid, color = (:brown, 0.2))
 
-save("mountain_wave_terrain.png", fig_terrain)
-fig_terrain
+axislegend(ax, position = :rt)
+xlims!(ax, extrema(x_finegrid)...)
+fig
 
 # ## Rayleigh damping layer
 #
@@ -283,7 +276,7 @@ run!(simulation)
 # ## Analytical solution
 #
 # The linear analytical solution for mountain waves provides a validation benchmark.
-# Following Appendix A of [KlempEtAl2015](@cite), the vertical velocity field is computed
+# Following Appendix A of [KlempEtAl2015](@citet), the vertical velocity field is computed
 # via Fourier integration over wavenumber space.
 #
 # ### Fourier transform of terrain
@@ -309,12 +302,12 @@ k★ = sqrt(N² / U^2 - β^2 / 4)
 
 # ### Linear vertical velocity
 #
-# Compute the analytical vertical velocity ``w(x, z)`` from Equation A10:
+# Compute the analytical vertical velocity ``w(x, z)`` from Equation A10 by [KlempEtAl2015](@citet):
 #
 # ```math
 # w(x, z) = -\frac{U}{\pi} e^{\beta z/2} \left[
-#     \int_0^{k^*} k \hat{h}(k) \sin(m z + k x) \, dk +
-#     \int_{k^*}^{\infty} k \hat{h}(k) e^{-|m| z} \sin(k x) \, dk
+#     \int_0^{k^*} k \hat{h}(k) \sin(m z + k x) \, \mathrm{d}k +
+#     \int_{k^*}^{\infty} k \hat{h}(k) e^{-|m| z} \sin(k x) \, \mathrm{d}k
 # \right]
 # ```
 #
@@ -342,6 +335,7 @@ function w_linear(x, z; nk=100)
     integral = Δk * (sum(integrand) - (first(integrand) + last(integrand)) / 2)
     return -(U / π) * exp(β * z / 2) * integral
 end
+nothing #hide
 
 # ## Results: Comparison with analytical solution
 #
@@ -350,37 +344,27 @@ end
 # pattern, noticeable discrepancies in wavenumber appear. The immersed boundary
 # method struggles to resolve the low-amplitude, fine-scale terrain corrugations
 # at this resolution.
-
-# Create comparison figure with simulated and analytical vertical velocity:
-
-fig = Figure(size=(900, 800), fontsize=14)
-
-# Plot simulated field:
-
-w_simulated = model.velocities.w
-
-ax1 = Axis(fig[1, 1],
-           xlabel = "x (m)",
-           ylabel = "z (m)",
-           title = "Simulated w at t = 2 hours")
-hm1 = heatmap!(ax1, w_simulated, colormap = :balance, colorrange = (-1, 1))
-ax1.limits = ((-30000, 30000), (0, 10000))
-
-# Compute analytical solution on the same grid as the simulation:
+#
+# First, we compute analytical vertical velocity ``w`` on the same grid as the
+# simulation and then we plot both of them.
 
 w_analytical = Field{Center, Nothing, Face}(grid)
 set!(w_analytical, w_linear)
 
-ax2 = Axis(fig[2, 1],
-           xlabel = "x (m)",
-           ylabel = "z (m)",
-           title = "Linear Analytical w")
-hm2 = heatmap!(ax2, w_analytical, colormap = :balance, colorrange = (-1, 1))
-ax2.limits = ((-30000, 30000), (0, 10000))
+w_simulated = model.velocities.w
 
-# Shared colorbar:
+fig = Figure(size=(900, 800), fontsize=14)
+
+ax1 = Axis(fig[1, 1], xlabel = "x (m)", ylabel = "z (m)", title = "Simulated w at t = 2 hours")
+ax2 = Axis(fig[2, 1], xlabel = "x (m)", ylabel = "z (m)", title = "Linear Analytical w")
+
+hm1 = heatmap!(ax1, w_simulated, colormap = :balance, colorrange = (-1, 1))
+hm2 = heatmap!(ax2, w_analytical, colormap = :balance, colorrange = (-1, 1))
 
 Colorbar(fig[1:2, 2], hm1, label = "w (m s⁻¹)")
 
-save("mountain_wave_w_comparison.png", fig)
+for ax in (ax1, ax2)
+    ax.limits = ((-30e3, 30e3), (0, 10e3))
+end
+
 fig
