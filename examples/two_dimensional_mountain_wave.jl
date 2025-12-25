@@ -54,7 +54,7 @@
 # ### Linear wave theory
 #
 # For the linearized mountain wave problem, vertical wavenumber ``m`` satisfies the
-# dispersion relation (Appendix A of [KlempEtAl2015](@citet)):
+# dispersion relation (Appendix A of [Klemp2015idealized](@citet)):
 #
 # ```math
 # m^2 = \frac{N^2}{U^2} - \frac{\beta^2}{4} - k^2
@@ -122,12 +122,12 @@ hill(x) = h₀ * exp(-(x / a)^2) * cos(π * x / λ)^2
 # vertical grid with exponential refinement near the surface to resolve the terrain,
 # transitioning to uniform 500 m spacing above 1 km altitude.
 
-Nx, Nz = 200, 75
+Nx, Nz = 200, 100
 L, H = 200kilometers, 20kilometers
 
 # Vertical grid stretching parameters:
 
-z_transition = 1000         # m - transition height to uniform spacing
+z_transition = 500          # m - transition height to uniform spacing
 dz_top = 500                # m - constant spacing above transition
 
 # Calculate grid distribution:
@@ -137,14 +137,15 @@ Nz_bottom = Nz - Nz_top                             # cells in stretched region
 
 # Construct hybrid vertical grid:
 
-z_stretched = ExponentialDiscretization(Nz_bottom, 0, z_transition, scale = z_transition / 4, bias=:left)
+z_stretched = ExponentialDiscretization(Nz_bottom, 0, z_transition;
+                                        scale = z_transition / 2, bias=:left)
 z_uniform = range(z_transition + dz_top, H; length=Nz_top)
 z_faces = vcat(z_stretched.faces, collect(z_uniform))
 nothing #hide
 
 # Create the underlying rectilinear grid:
 
-underlying_grid = RectilinearGrid(CPU(),
+underlying_grid = RectilinearGrid(GPU(),
                                   size = (Nx, Nz),
                                   halo = (4, 4),
                                   x = (-L/2, L/2),
@@ -153,8 +154,8 @@ underlying_grid = RectilinearGrid(CPU(),
 
 # ## Mountain profile and immersed boundary
 #
-# We create an immersed boundary grid with the Schär mountain, using the partial cell method for
-# terrain representation:
+# We create an immersed boundary grid with the Schär mountain, using the partial cells
+# for better terrain representation:
 
 grid = ImmersedBoundaryGrid(underlying_grid, PartialCellBottom(hill))
 
@@ -269,7 +270,7 @@ add_callback!(simulation, progress, name=:progress, IterationInterval(200))
 filename = "mountain_waves"
 simulation.output_writers[:fields] = JLD2Writer(model, model.velocities;
                                                 filename,
-                                                schedule = TimeInterval(100),
+                                                schedule = TimeInterval(2minutes),
                                                 overwrite_existing = true)
 
 run!(simulation)
@@ -277,7 +278,7 @@ run!(simulation)
 # ## Analytical solution
 #
 # The linear analytical solution for mountain waves provides a validation benchmark.
-# Following Appendix A of [KlempEtAl2015](@citet), the vertical velocity field is computed
+# Following Appendix A of [Klemp2015idealized](@citet), the vertical velocity field is computed
 # via Fourier integration over wavenumber space.
 #
 # ### Fourier transform of terrain
@@ -290,29 +291,31 @@ run!(simulation)
 # \right]
 # ```
 
-hhat(k) = sqrt(π) * h₀ * a / 4 * (exp(-a^2 * (K + k)^2 / 4) +
-                                   exp(-a^2 * (K - k)^2 / 4) +
-                                   2exp(-a^2 * k^2 / 4))
+ĥ(k) = sqrt(π) * h₀ * a / 4 * (exp(-a^2 * (K + k)^2 / 4) +
+                                exp(-a^2 * (K - k)^2 / 4) +
+                                2exp(-a^2 * k^2 / 4))
 
 # ### Dispersion relation
 #
-# Vertical wavenumber squared (Equation A5) and critical wavenumber (Equation A11):
+# Vertical wavenumber squared (Equation A5) and critical wavenumber (Equation A11)
+# by [Klemp2015idealized](@citet):
 
 m²(k) = (N² / U^2 - β^2 / 4) - k^2
 k★ = sqrt(N² / U^2 - β^2 / 4)
 
 # ### Linear vertical velocity
 #
-# Compute the analytical vertical velocity ``w(x, z)`` from Equation A10 by [KlempEtAl2015](@citet):
+# Compute the analytical vertical velocity ``w(x, z)`` via Equation A10
+# by [Klemp2015idealized](@citet):
 #
 # ```math
-# w(x, z) = -\frac{U}{\pi} e^{\beta z/2} \left[
+# w(x, z) = -\frac{U}{π} e^{\beta z/2} \left[
 #     \int_0^{k^*} k \hat{h}(k) \sin(m z + k x) \, \mathrm{d}k +
 #     \int_{k^*}^{\infty} k \hat{h}(k) e^{-|m| z} \sin(k x) \, \mathrm{d}k
 # \right]
 # ```
 #
-# where the first integral represents propagating waves and the second represents
+# Above, the first integral represents propagating waves and the second represents
 # evanescent waves.
 
 """
