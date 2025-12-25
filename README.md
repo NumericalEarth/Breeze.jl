@@ -92,7 +92,6 @@ https://github.com/user-attachments/assets/c9a0c9c3-c199-48b8-9850-f967bdcc4bed
 
 ### Citing
 
-
 If you use Breeze for research, teaching, or fun, we'd be grateful if you give credit by citing the corresponding Zenodo record, e.g.,
 
 > Wagner, G. L. et al. (2025). NumericalEarth/Breeze.jl. Zenodo. DOI:[10.5281/zenodo.18050353](https://doi.org/10.5281/zenodo.18050353)
