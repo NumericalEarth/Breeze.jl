@@ -9,7 +9,7 @@ using Oceananigans.Utils: sum_of_velocities
 @inline div_ρUc(i, j, k, grid, args...) = zero(grid)
 
 """
-    ∇_dot_Jᶜ(i, j, k, grid, density, closure::AbstractTurbulenceClosure, closure_fields,
+    ∇_dot_Jᶜ(i, j, k, grid, ρ, closure::AbstractTurbulenceClosure, closure_fields,
              id, c, clock, model_fields, buoyancy)
 
 Return the discrete divergence of the dynamic scalar flux `Jᶜ = ρ jᶜ`,
@@ -24,7 +24,8 @@ Oceananigans `qᶜ` is the kinematic tracer flux.
 #####
 
 @inline function ρ_bᶜᶜᶜ(i, j, k, grid,
-                        formulation::AnelasticFormulation,
+                        dynamics::AnelasticDynamics,
+                        formulation,
                         reference_density,
                         temperature,
                         specific_moisture,
@@ -34,7 +35,7 @@ Oceananigans `qᶜ` is the kinematic tracer flux.
 
     @inbounds begin
         qᵗ = specific_moisture[i, j, k]
-        pᵣ = formulation.reference_state.pressure[i, j, k]
+        pᵣ = dynamics.reference_state.pressure[i, j, k]
         T = temperature[i, j, k]
         ρᵣ = reference_density[i, j, k]
     end
@@ -102,6 +103,7 @@ end
                                      clock,
                                      model_fields,
                                      ρw_forcing,
+                                     dynamics,
                                      formulation,
                                      temperature,
                                      specific_moisture,
@@ -110,7 +112,7 @@ end
                                      constants)
 
     return ( - div_𝐯w(i, j, k, grid, advection, momentum, velocities.w)
-             + ρ_bᶜᶜᶠ(i, j, k, grid, formulation, density, temperature,
+             + ρ_bᶜᶜᶠ(i, j, k, grid, dynamics, formulation, density, temperature,
                       specific_moisture, microphysics, microphysical_fields, constants)
              - z_f_cross_U(i, j, k, grid, coriolis, momentum)
              - ∂ⱼ_𝒯₃ⱼ(i, j, k, grid, density, closure, closure_fields, clock, model_fields, nothing)
@@ -123,6 +125,7 @@ end
                                  name,
                                  c_forcing,
                                  advection,
+                                 dynamics,
                                  formulation,
                                  constants,
                                  specific_moisture,
@@ -136,18 +139,17 @@ end
 
     Uᵖ = microphysical_velocities(microphysics, microphysical_fields, name)
     Uᵗ = sum_of_velocities(velocities, Uᵖ)
-    ρ = formulation_density(formulation)
-    closure_buoyancy = AtmosphereModelBuoyancy(formulation, constants)
+    ρ_field = dynamics_density(dynamics)
+    @inbounds ρ = ρ_field[i, j, k]
+    @inbounds qᵗ = specific_moisture[i, j, k]
+    closure_buoyancy = AtmosphereModelBuoyancy(dynamics, formulation, constants)
 
-    𝒰 = diagnose_thermodynamic_state(i, j, k, grid,
-                                     formulation,
-                                     microphysics,
-                                     microphysical_fields,
-                                     constants,
-                                     specific_moisture)
+    # Compute moisture fractions first
+    q = compute_moisture_fractions(i, j, k, grid, microphysics, ρ, qᵗ, microphysical_fields)
+    𝒰 = diagnose_thermodynamic_state(i, j, k, grid, formulation, dynamics, q)
 
-    return ( - div_ρUc(i, j, k, grid, advection, ρ, Uᵗ, c)
-             - ∇_dot_Jᶜ(i, j, k, grid, ρ, closure, closure_fields, id, c, clock, model_fields, closure_buoyancy)
+    return ( - div_ρUc(i, j, k, grid, advection, ρ_field, Uᵗ, c)
+             - ∇_dot_Jᶜ(i, j, k, grid, ρ_field, closure, closure_fields, id, c, clock, model_fields, closure_buoyancy)
              + microphysical_tendency(i, j, k, grid, microphysics, name, ρ, microphysical_fields, 𝒰, constants)
              + c_forcing(i, j, k, grid, clock, model_fields))
 end

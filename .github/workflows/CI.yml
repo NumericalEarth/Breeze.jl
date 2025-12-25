@@ -4,20 +4,14 @@ on:
   push:
     branches:
       - "main"
-    paths:
+    paths: &paths
       - ".github/workflows/CI.yml"
       - "ext/**"
       - "src/**"
       - "test/**"
       - "Project.toml"
   pull_request:
-    paths:
-      - ".github/workflows/CI.yml"
-      - "ext/**"
-      - "src/**"
-      - "test/**"
-      - "Project.toml"
-  release:
+    paths: *paths
   workflow_dispatch:
 
 concurrency:
@@ -35,7 +29,10 @@ jobs:
   test:
     name: Julia ${{ matrix.version }} - ${{ matrix.os }} - ${{ matrix.arch }} - ${{ github.event_name }}
     runs-on: ${{ matrix.os }}
-    timeout-minutes: 60
+    timeout-minutes: 90
+    container:
+      image: ${{ (startsWith(matrix.os, 'aws-linux-nvidia-gpu-') && 'ghcr.io/numericalearth/breeze-docker-images:test' ) || '' }}
+      options: --gpus=all
     strategy:
       fail-fast: false
       matrix:
@@ -53,11 +50,13 @@ jobs:
             os: windows-latest
         include:
           - version: "1.12.2"
-            os: aws-linux-nvidia-gpu-t4
+            os: aws-linux-nvidia-gpu-l4
             arch: "default"
     steps:
       - uses: actions/checkout@v6
       - uses: julia-actions/setup-julia@v2
+        # On the self-hosted GPU runners we use a Docker image with Julia pre-installed.
+        if: ${{ ! startsWith(matrix.os, 'aws-linux-nvidia-gpu-') }}
         with:
           version: ${{ matrix.version }}
           arch: ${{ matrix.arch }}
@@ -65,7 +64,7 @@ jobs:
         id: julia-cache
         # On self-hosted runners we don't use the cache: in re-use mode we run on a machine
         # which has just run another job, which would conflict with the existing cache.
-        if: ${{ matrix.os != 'aws-linux-nvidia-gpu-t4' }}
+        if: ${{ ! startsWith(matrix.os, 'aws-linux-nvidia-gpu-') }}
       - name: "Set test arguments and other environment variables"
         shell: bash
         run: |
@@ -84,21 +83,30 @@ jobs:
               TEST_ARGS+=(--jobs=2)
           fi
           echo "runtest_test_args=${TEST_ARGS[@]}" >> "${GITHUB_ENV}"
-      - name: Install early-oom
-        if: ${{ matrix.os == 'aws-linux-nvidia-gpu-t4' }}
+      - name: Prepare test environment
+        if: ${{ startsWith(matrix.os, 'aws-linux-nvidia-gpu-') }}
+        shell: bash
         run: |
-          git clone --depth=1 --branch=v1.9.0 https://github.com/rfjakob/earlyoom
-          cd earlyoom
-          make -j
-          sudo make install
+          # Running doctests need to run `git` commands in this directory, but `git`
+          # complains about dubious ownership when using the Docker image.
+          git config --global --add safe.directory ${PWD}
+
+          # Little complication: we built the Docker images on a non-GPU system and so we
+          # had to use a `LocalPreferences.toml` file to force the CUDA runtime, but this
+          # means that we have to use the same preferences also for the tests environment,
+          # because running the tests clears up the load path.  Let's copy the global
+          # preference file to test directory (the global one will be ignored during the
+          # tests), and add `CUDA_Runtime_jll` to the env to make the preference effective.
+          cp /usr/local/share/julia/environments/breeze/LocalPreferences.toml test/.
+          julia --project=test --color=yes --check-bounds=yes -e 'using Pkg; Pkg.add("CUDA_Runtime_jll")'
       - name: Run tests
         shell: bash
         run: |
           if [[ ${{ matrix.os }} == aws-linux-nvidia-gpu* ]]; then
               # We use earlyoom only on the GPU machines
-              sudo earlyoom -m 3 -s 100 -r 300 --prefer 'julia' &
+              earlyoom -m 3 -s 100 -r 300 --prefer 'julia' &
           fi
-          julia --project --color=yes -e 'using Pkg; Pkg.test(; coverage=true, julia_args=["--check-bounds=yes", "--compiled-modules=yes", "--depwarn=yes"], test_args=`${{ env.runtest_test_args }}`, force_latest_compatible_version=false, allow_reresolve=true)'
+          julia --project --color=yes --check-bounds=yes -e 'using Pkg; Pkg.test(; coverage=true, julia_args=["--check-bounds=yes", "--compiled-modules=yes", "--depwarn=yes"], test_args=`${{ env.runtest_test_args }}`, force_latest_compatible_version=false, allow_reresolve=true)'
       - uses: julia-actions/julia-processcoverage@v1
       - uses: codecov/codecov-action@v5
         with:
@@ -107,7 +115,7 @@ jobs:
         continue-on-error: true
       - name: Save Julia depot cache on cancel or failure
         id: julia-cache-save
-        if: ${{ matrix.os != 'aws-linux-nvidia-gpu-t4' && (cancelled() || failure()) }}
+        if: ${{ ! startsWith(matrix.os, 'aws-linux-nvidia-gpu-') && (cancelled() || failure()) }}
         uses: actions/cache/save@v5
         with:
           path: |

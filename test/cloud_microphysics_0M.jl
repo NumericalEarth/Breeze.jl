@@ -32,10 +32,10 @@ end
 
     constants = ThermodynamicConstants()
     reference_state = ReferenceState(grid, constants, surface_pressure=101325, potential_temperature=300)
-    formulation = AnelasticFormulation(reference_state; thermodynamics=:LiquidIcePotentialTemperature)
+    dynamics = AnelasticDynamics(reference_state)
     microphysics = ZeroMomentCloudMicrophysics()
 
-    model = AtmosphereModel(grid; formulation, microphysics)
+    model = AtmosphereModel(grid; dynamics, microphysics)
 
     # Set initial conditions with some moisture
     set!(model; θ=300, qᵗ=0.01)
@@ -52,10 +52,10 @@ end
 
     constants = ThermodynamicConstants()
     reference_state = ReferenceState(grid, constants, surface_pressure=101325, potential_temperature=300)
-    formulation = AnelasticFormulation(reference_state; thermodynamics=:LiquidIcePotentialTemperature)
+    dynamics = AnelasticDynamics(reference_state)
     microphysics = ZeroMomentCloudMicrophysics()
 
-    model = AtmosphereModel(grid; formulation, microphysics)
+    model = AtmosphereModel(grid; dynamics, microphysics)
     set!(model; θ=300, qᵗ=0.01)
 
     # Get precipitation rate diagnostic
