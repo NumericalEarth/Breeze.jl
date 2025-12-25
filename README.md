@@ -8,6 +8,7 @@
   <strong>🌪 Fast and friendly Julia software for atmospheric fluid dynamics on CPUs and GPUs. https://numericalearth.github.io/BreezeDocumentation/stable</strong>
 </p>
 
+
 <p align="center">
   <a href="https://numericalearth.github.io/BreezeDocumentation/stable/">
     <img alt="Documentation" src="https://img.shields.io/badge/documentation-stable-blue?style=flat-square">
@@ -15,14 +16,18 @@
   <a href="https://numericalearth.github.io/BreezeDocumentation/dev/">
     <img alt="Documentation" src="https://img.shields.io/badge/documentation-in%20development-orange?style=flat-square">
   </a>
-    <a href="https://github.com/NumericalEarth/Breeze.jl/discussions">
+  <a href="https://doi.org/10.5281/zenodo.18050353">
+    <img src="https://zenodo.org/badge/DOI/10.5281/zenodo.18050353.svg" alt="DOI">
+  </a>
+  <a href="https://codecov.io/gh/NumericalEarth/Breeze.jl" >
+    <img src="https://codecov.io/gh/NumericalEarth/Breeze.jl/graph/badge.svg?token=09TZGWKUPV"/>
+  </a>
+  </br>
+  <a href="https://github.com/NumericalEarth/Breeze.jl/discussions">
     <img alt="Ask us anything" src="https://img.shields.io/badge/Ask%20us-anything-1abc9c.svg?style=flat-square">
   </a>
   <a href="https://github.com/SciML/ColPrac">
     <img alt="ColPrac: Contributor's Guide on Collaborative Practices for Community Packages" src="https://img.shields.io/badge/ColPrac-Contributor's%20Guide-blueviolet?style=flat-square">
-  </a>
-  <a href="https://codecov.io/gh/NumericalEarth/Breeze.jl" >
-    <img src="https://codecov.io/gh/NumericalEarth/Breeze.jl/graph/badge.svg?token=09TZGWKUPV"/>
   </a>
   <a href="https://github.com/JuliaTesting/Aqua.jl" >
     <img src="https://raw.githubusercontent.com/JuliaTesting/Aqua.jl/master/badge.svg"/>
@@ -84,3 +89,10 @@ julia> include("examples/dry_thermal_bubble.jl")
 we get
 
 https://github.com/user-attachments/assets/c9a0c9c3-c199-48b8-9850-f967bdcc4bed
+
+### Citing
+
+
+If you use Breeze for research, teaching, or fun, we'd be grateful if you give credit by citing the corresponding Zenodo record, e.g.,
+
+> Wagner, G. L. et al. (2025). NumericalEarth/Breeze.jl. Zenodo. DOI:[10.5281/zenodo.18050353](https://doi.org/10.5281/zenodo.18050353)
