@@ -275,7 +275,7 @@ function update_rrtmgp_clear_sky_state!(as::AtmosphericState, model, surface_tem
     grid = model.grid
     arch = architecture(grid)
 
-    pᵣ = model.formulation.reference_state.pressure
+    pᵣ = model.dynamics.reference_state.pressure
     T = model.temperature
     qᵛ = specific_humidity(model)
 
@@ -339,7 +339,7 @@ end
         Δp = max(pᶠₖ - pᶠₖ₊₁, zero(pᶠₖ))
         dry_mass_fraction = 1 - qᵛₖ
         dry_mass_per_area = (Δp / g) * dry_mass_fraction
-        m⁻²_to_cm⁻² = convert(FT, 1e4)
+        m⁻²_to_cm⁻² = convert(eltype(pᶜ), 1e4)
         col_dry = dry_mass_per_area / mᵈ * ℕᴬ / m⁻²_to_cm⁻² # (molecules / m²) -> (molecules / cm²)
 
         # Populate layerdata: (col_dry, pᶜ, Tᶜ, relative_humidity)
@@ -361,7 +361,7 @@ function copy_clear_sky_fluxes_to_fields!(rtm::ClearSkyRadiativeTransferModel, s
 
     lw_flux_up = solver.lws.flux.flux_up
     lw_flux_dn = solver.lws.flux.flux_dn
-    sw_flux_dn_dir = solver.sws.flux.flux_dn_dir
+    sw_flux_dn = solver.sws.flux.flux_dn  # Total SW (direct + diffuse)
 
     ℐ_lw_up = rtm.upwelling_longwave_flux
     ℐ_lw_dn = rtm.downwelling_longwave_flux
@@ -369,13 +369,13 @@ function copy_clear_sky_fluxes_to_fields!(rtm::ClearSkyRadiativeTransferModel, s
 
     Nx, Ny, Nz = size(grid)
     launch!(arch, grid, (Nx, Ny, Nz+1), _copy_clear_sky_fluxes!,
-            ℐ_lw_up, ℐ_lw_dn, ℐ_sw_dn, lw_flux_up, lw_flux_dn, sw_flux_dn_dir, grid)
+            ℐ_lw_up, ℐ_lw_dn, ℐ_sw_dn, lw_flux_up, lw_flux_dn, sw_flux_dn, grid)
 
     return nothing
 end
 
 @kernel function _copy_clear_sky_fluxes!(ℐ_lw_up, ℐ_lw_dn, ℐ_sw_dn,
-                                        lw_flux_up, lw_flux_dn, sw_flux_dn_dir, grid)
+                                        lw_flux_up, lw_flux_dn, sw_flux_dn, grid)
     i, j, k = @index(Global, NTuple)
 
     col = rrtmgp_column_index(i, j, grid.Nx)
@@ -383,6 +383,6 @@ end
     @inbounds begin
         ℐ_lw_up[i, j, k] = lw_flux_up[k, col]
         ℐ_lw_dn[i, j, k] = -lw_flux_dn[k, col]
-        ℐ_sw_dn[i, j, k] = -sw_flux_dn_dir[k, col]
+        ℐ_sw_dn[i, j, k] = -sw_flux_dn[k, col]
     end
 end
