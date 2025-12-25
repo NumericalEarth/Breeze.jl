@@ -28,15 +28,15 @@ struct Example
 end
 
 examples = [
-    Example("Stratified dry thermal bubble", "dry_thermal_bubble", true),
-    Example("Cloudy thermal bubble", "cloudy_thermal_bubble", true),
-    Example("Cloudy Kelvin-Helmholtz instability", "cloudy_kelvin_helmholtz", true),
-    Example("Shallow cumulus convection (BOMEX)", "bomex", true),
-    Example("Precipitating shallow cumulus (RICO)", "rico", true),
-    Example("Convection over prescribed sea surface temperature (SST)", "prescribed_sea_surface_temperature", true),
-    Example("Inertia gravity wave", "inertia_gravity_wave", true),
-    Example("Single column gray radiation", "single_column_radiation", true),
-    Example("Stationary parcel model", "stationary_parcel_model", true),
+    # Example("Stratified dry thermal bubble", "dry_thermal_bubble", true),
+    # Example("Cloudy thermal bubble", "cloudy_thermal_bubble", true),
+    # Example("Cloudy Kelvin-Helmholtz instability", "cloudy_kelvin_helmholtz", true),
+    # Example("Shallow cumulus convection (BOMEX)", "bomex", true),
+    # Example("Precipitating shallow cumulus (RICO)", "rico", true),
+    # Example("Convection over prescribed sea surface temperature (SST)", "prescribed_sea_surface_temperature", true),
+    # Example("Inertia gravity wave", "inertia_gravity_wave", true),
+    # Example("Single column gray radiation", "single_column_radiation", true),
+    # Example("Stationary parcel model", "stationary_parcel_model", true),
 ]
 
 # Filter out long-running example if necessary
