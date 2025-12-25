@@ -1,0 +1,51 @@
+# This CITATION.cff file was generated with cffinit.
+# Visit https://bit.ly/cffinit to generate yours today!
+
+cff-version: 1.2.0
+title: Breeze.jl
+message: >
+  If you use Breeze.jl in your research, teaching, or for
+  fun, please cite it using the metadata below.
+type: software
+authors:
+  - family-names: Wagner
+    given-names: Gregory L.
+    orcid: 'https://orcid.org/0000-0001-5317-2445'
+    affiliation:
+      - Aeolus Labs
+      - Massachusetts Institute of Technology
+  - family-names: Constantinou
+    given-names: Navid C.
+    orcid: 'https://orcid.org/0000-0002-8149-4094'
+    affiliation:
+      - University of Melbourne
+  - family-names: Giordano
+    given-names: Mosè
+    orcid: 'https://orcid.org/0000-0002-7218-2873'
+    affiliation:
+      - University College London
+  - given-names: Kai-Yuan
+    family-names: Cheng
+    affiliation: Aeolus Labs
+    orcid: 'https://orcid.org/0000-0002-4246-7659'
+  - given-names: Madelaine G.
+    family-names: Rosevear
+    affiliation: University of Tasmania
+    orcid: 'https://orcid.org/0000-0003-4254-843X'
+  - given-names: Tobias
+    orcid: 'https://orcid.org/0000-0003-3930-2762'
+    family-names: Bischoff
+    affiliation: Aeolus Labs
+identifiers:
+  - type: doi
+    value: 10.5281/zenodo.18050353
+repository-code: 'https://github.com/NumericalEarth/Breeze.jl'
+url: 'https://github.com/NumericalEarth/Breeze.jl'
+keywords:
+  - atmospheric modelling
+  - large-eddy simulation
+  - Julia
+  - geophysical fluid dynamics
+  - GPU computing
+  - climate modelling
+license: MIT
