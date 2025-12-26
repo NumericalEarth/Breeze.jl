@@ -38,7 +38,7 @@ To illustrate the development of a new microphysics scheme, we implement a
 simple microphysics scheme that represents droplet and ice particle nucleation
 with constant-rate relaxation of specific humidity to saturation.
 
-```@example microphysics_interface
+```julia
 using Breeze
 
 struct ExplicitMicrophysics{FT}
@@ -52,7 +52,7 @@ end
 This scheme is fully prognostic, which means we must carry around vapor, liquid
 and ice density as prognostic variables,
 
-```@example microphysics_interface
+```julia
 import Breeze.AtmosphereModels: prognostic_field_names
 
 prognostic_field_names(::ExplicitMicrophysics) = (:ρqᵛ, :ρqˡ, :ρqⁱ)
@@ -67,7 +67,7 @@ prognostic_field_names(::ExplicitMicrophysics) = (:ρqᵛ, :ρqˡ, :ρqⁱ)
 When we materialize the microphysics fields, we must include all of the prognostic fields
 in addition to diagnostic fields (this behavior may change in the future):
 
-```@example microphysics_interface
+```julia
 import Breeze.AtmosphereModels: materialize_microphysical_fields
 
 function materialize_microphysical_fields(::ExplicitMicrophysics, grid, boundary_conditions)
@@ -80,7 +80,7 @@ end
 ```
 The tendencies for 
 
-```@example microphysics_interface
+```julia
 import Breeze.AtmosphereModels: microphysical_tendency
 
 using Breeze.Thermodynamics:
@@ -123,7 +123,7 @@ in addition to the three prognostic fields representing vapor, liquid and ice de
 
 ### Prognostic field names and materializing prognostic + diagnostic fields
 
-```@example microphysics_interface
+```julia
 import Breeze.AtmosphereModels:
     update_microphysical_fields!,
     compute_moisture_fraction
@@ -146,7 +146,7 @@ end
 
 This is a fully prognostic  scheme, so there is no adjustment,
 
-```@example microphysics_interface
+```julia
 import Breeze.AtmosphereModels: maybe_adjust_thermodynamic_state
 
 @inline maybe_adjust_thermodynamic_state(state, ::ExplicitMicrophysics, μ, qᵗ, constants) = state

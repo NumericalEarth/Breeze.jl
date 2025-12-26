@@ -84,7 +84,7 @@ where ``r`` is the "residual", using a secant method.
 As an example, we consider an air parcel at sea level within a reference state with base pressure of 101325 Pa and a surface temperature ``T₀ = 288``ᵒK.
 We first compute the saturation specific humidity assuming a dry-air density,
 
-```@example microphysics
+```julia
 using Breeze
 using Breeze.Thermodynamics: saturation_specific_humidity
 
@@ -100,7 +100,7 @@ qᵛ⁺₀ = saturation_specific_humidity(T, ρ, thermo, thermo.liquid)
 Next, we compute the saturation specific humidity for moist air with
 a carefully chosen moist air mass fraction,
 
-```@example microphysics
+```julia
 using Breeze.Microphysics: equilibrium_saturation_specific_humidity, WarmPhaseEquilibrium
 
 qᵗ = 0.012   # [kg kg⁻¹] total specific humidity
@@ -116,14 +116,14 @@ under the assumption of a saturated state.
 In equilibrium (and thus under the assumptions of saturation adjustment), the specific humidity is
 ``qᵛ = qᵛ⁺``, while the liquid mass fraction is
 
-```@example microphysics
+```julia
 qˡ = qᵗ - qᵛ⁺
 ```
 
 It is small but greater than zero → the typical situation in clouds on Earth.
 We are now ready to compute moist static energy,
 
-```@example microphysics
+```julia
 using Breeze.Thermodynamics: MoistureMassFractions
 
 q = MoistureMassFractions(qᵛ⁺, qˡ)
@@ -138,7 +138,7 @@ Moist static energy has units ``\mathrm{m^2 / s^2}``, or ``\mathrm{J} / \mathrm{
 Next we show that the saturation adjustment solver recovers the input temperature
 by passing it an "unadjusted" moisture mass fraction into [`Breeze.Microphysics.compute_temperature`](@ref),
 
-```@example microphysics
+```julia
 using Breeze.Microphysics: compute_temperature
 
 microphysics = SaturationAdjustment(equilibrium=WarmPhaseEquilibrium())
@@ -151,7 +151,7 @@ T★ = compute_temperature(𝒰, microphysics, thermo)
 Finally, we note that the saturation adjustment solver is initialized with a guess corresponding
 to the temperature in unsaturated conditions,
 
-```@example microphysics
+```julia
 cᵖᵐ₁ = mixture_heat_capacity(q₀, thermo)
 T₁ = (e - g * z) / cᵖᵐ₁
 ```
@@ -163,7 +163,7 @@ In other words, ``T₁`` represents a lower bound.
 To generate a second guess for the secant solver, we start by estimating
 the liquid mass fraction using the guess ``T = T₁``,
 
-```@example microphysics
+```julia
 qᵛ⁺₂ = equilibrium_saturation_specific_humidity(T₁, p, qᵗ, thermo, WarmPhaseEquilibrium())
 qˡ₁ = qᵗ - qᵛ⁺₂
 ```
@@ -173,7 +173,7 @@ because ``qᵛ⁺₂`` is underestimated by the too-low temperature ``T₁``.
 We thus increment the first guess by half of the difference implied by the
 estimate ``qˡ₁``,
 
-```@example  microphysics
+```julia
 q₂ = MoistureMassFractions(qᵛ⁺₂, qˡ₁)
 cᵖᵐ₂ = mixture_heat_capacity(q₂, thermo)
 ΔT = ℒˡᵣ * qˡ₁ / cᵖᵐ₂
@@ -182,7 +182,7 @@ T₂ = T₁ + ΔT / 2
 
 The residual looks like
 
-```@example microphysics
+```julia
 using Breeze.Microphysics: saturation_adjustment_residual
 using CairoMakie
 
@@ -209,7 +209,7 @@ There is a kink at the temperature wherein the estimated liquid mass fraction bo
 As a second example, we examine the dependence of temperature on total specific humidity
 when the moist static energy is held fixed.
 
-```@example microphysics
+```julia
 using Breeze.Thermodynamics: StaticEnergyState
 
 T₀ = 288
@@ -261,7 +261,7 @@ For a third example, we consider a state with constant moist static energy and t
 (equivalently, a constant ``θ`` in this reference state),
 but at varying heights:
 
-```@example microphysics
+```julia
 using Breeze
 
 grid = RectilinearGrid(size=100, z=(0, 1e4), topology=(Flat, Flat, Bounded))

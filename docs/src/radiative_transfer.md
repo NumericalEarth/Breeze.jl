@@ -10,7 +10,7 @@ The simplest radiative transfer option is gray atmosphere radiation, which uses 
 
 To use gray radiation in a Breeze simulation, create a `GrayRadiativeTransferModel` model and pass it to the [`AtmosphereModel`](@ref) constructor:
 
-```@example
+```julia
 using Breeze
 using Oceananigans.Units
 using Dates

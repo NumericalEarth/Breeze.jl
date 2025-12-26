@@ -16,7 +16,7 @@ constant [molar mass](https://en.wikipedia.org/wiki/Molar_mass).
 Dry air on Earth's is mostly nitrogen, oxygen, and argon, whose combination produces the typical
 (and Breeze's default) dry air molar mass
 
-```@example thermo
+```julia
 using Breeze
 thermo = ThermodynamicConstants()
 thermo.dry_air.molar_mass
@@ -25,7 +25,7 @@ thermo.dry_air.molar_mass
 The vapor, liquid, and ice components are ``\mathrm{H_2 O}``, also known as "water".
 Water vapor, which in Breeze has the default molar mass
 
-```@example thermo
+```julia
 thermo.vapor.molar_mass
 ```
 
@@ -86,25 +86,25 @@ The sometimes tedious bookkeeping required to correctly diagnose the effective m
 of moist air are facilitated by Breeze's handy [`MoistureMassFractions`](@ref Breeze.Thermodynamics.MoistureMassFractions) abstraction.
 For example,
 
-```@example thermo
+```julia
 q = Breeze.Thermodynamics.MoistureMassFractions(0.01, 0.002, 1e-5)
 ```
 
 from which we can compute the total moisture mass fraction,
 
-```@example thermo
+```julia
 qᵗ = Breeze.Thermodynamics.total_specific_moisture(q)
 ```
 
 And the dry as well,
 
-```@example thermo
+```julia
 qᵈ = Breeze.Thermodynamics.dry_air_mass_fraction(q)
 ```
 
 To be sure,
 
-```@example thermo
+```julia
 qᵈ + qᵗ
 ```
 
@@ -161,7 +161,7 @@ where ``cᵖ`` is the specific heat capacity at constant pressure of the gas in 
 For example, to represent dry air typical for Earth, with molar mass ``m = 0.029 \; \mathrm{kg} \, \mathrm{mol}^{-1}`` and constant-pressure heat capacity ``c^p = 1005 \; \mathrm{J} \, \mathrm{kg}^{-1} \, \mathrm{K}^{-1}``,
 we write
 
-```@example thermo
+```julia
 using Breeze.Thermodynamics: IdealGas
 dry_air = IdealGas(molar_mass=0.029, heat_capacity=1005)
 ```
@@ -169,7 +169,7 @@ dry_air = IdealGas(molar_mass=0.029, heat_capacity=1005)
 We can also change the properties of dry air by specifying new values
 when constructing `ThermodynamicConstants`,
 
-```@example thermo
+```julia
 weird_thermo = ThermodynamicConstants(dry_air_molar_mass=0.042, dry_air_heat_capacity=420)
 weird_thermo.dry_air
 ```
@@ -228,7 +228,7 @@ Hydrostatic balance requires
 
 where ``g`` is gravitational acceleration, naturally by default
 
-```@example thermo
+```julia
 thermo.gravitational_acceleration
 ```
 
@@ -264,7 +264,7 @@ utilities (which assume a dry reference state) on a one-dimensional [`Rectilinea
 In the following code, the superscript ``d`` denotes dry air, e.g., an ideal gas
 with ``Rᵈ = 286.71 \; \mathrm{J} \, \mathrm{K}^{-1}``:
 
-```@example reference_state
+```julia
 using Breeze
 using CairoMakie
 
@@ -323,7 +323,7 @@ where ``T`` is temperature, ``Rⁱ = ℛ / m^β`` is the specific gas constant f
 ``m^β`` is the molar mass of component ``β``, and
 ``ℛ``  is the [molar or "universal" gas constant](https://en.wikipedia.org/wiki/Gas_constant),
 
-```@example thermo
+```julia
 thermo = ThermodynamicConstants()
 thermo.molar_gas_constant
 ```
@@ -331,7 +331,7 @@ thermo.molar_gas_constant
 [`ThermodynamicConstants`](@ref), which is central to Breeze's implementation of moist thermodynamics.
 holds constants like the molar gas constant and molar masses, latent heats, gravitational acceleration, and more,
 
-```@example thermo
+```julia
 thermo
 ```
 
@@ -340,7 +340,7 @@ for example, the molar masses of dry air (itself a mixture of mostly nitrogen, o
 and water vapor are ``mᵈ = 0.029 \; \mathrm{kg} \, \mathrm{mol}^{-1}`` and ``mᵛ = 0.018 \; \mathrm{kg} \, \mathrm{mol}^{-1}``.
 And even more interesting, the triple point temperature and pressure of water vapor are
 
-```@example thermo
+```julia
 thermo.triple_point_temperature, thermo.triple_point_pressure
 ```
 
@@ -358,7 +358,7 @@ p = ρ Rᵐ T, \qquad \text{where} \qquad Rᵐ ≡ qᵈ Rᵈ + qᵛ Rᵛ .
 To illustrate, let's compute the mixture gas constant ``Rᵐ`` for air with a small amount of water vapor.
 The contribution of vapor increases ``Rᵐ`` above the dry air value:
 
-```@example thermo
+```julia
 q = Breeze.Thermodynamics.MoistureMassFractions(0.01, 0.0, 0.0) # 1% vapor by mass
 Rᵈ = Breeze.Thermodynamics.dry_air_gas_constant(thermo)
 Rᵐ = Breeze.Thermodynamics.mixture_gas_constant(q, thermo)
@@ -384,7 +384,7 @@ We call ``cᵖᵐ`` the "mixture heat capacity", and because with default parame
 heat capacity of dry air is the smallest of either vapor, liquid, or ice,
 any moisture at all tends to increase the mixture heat capacity,
 
-```@example thermo
+```julia
 q = Breeze.Thermodynamics.MoistureMassFractions(0.01, 0.0, 0.0)
 cᵖᵈ = thermo.dry_air.heat_capacity
 cᵖᵐ = Breeze.Thermodynamics.mixture_heat_capacity(q, thermo)
@@ -458,14 +458,14 @@ pᵛ⁺(T) = p^{tr} \left ( \frac{T}{T^{tr}} \right )^{\Delta c^β / Rᵛ} \exp 
 
 Consider parameters for liquid water,
 
-```@example thermo
+```julia
 using Breeze.Thermodynamics: CondensedPhase
 liquid_water = CondensedPhase(reference_latent_heat=2500800, heat_capacity=4181)
 ```
 
 and water ice,
 
-```@example thermo
+```julia
 water_ice = CondensedPhase(reference_latent_heat=2834000, heat_capacity=2108)
 ```
 
@@ -473,7 +473,7 @@ These represent the latent heat of vaporization at the reference temperature and
 the specific heat capacity of each condensed phase. We can compute the specific heat
 difference ``\Delta c^β`` for liquid water:
 
-```@example thermo
+```julia
 using Breeze.Thermodynamics: vapor_gas_constant
 cᵖᵛ = thermo.vapor.heat_capacity
 cˡ = thermo.liquid.heat_capacity
@@ -506,7 +506,7 @@ thermodynamic consistency and smooth transitions between pure liquid and pure ic
 We can illustrate this by computing the mixed-phase specific heat difference for a
 50/50 mixture:
 
-```@example thermo
+```julia
 Δcⁱ = thermo.vapor.heat_capacity - thermo.ice.heat_capacity
 λ = 0.5
 Δcˡⁱ = λ * Δcˡ + (1 - λ) * Δcⁱ
@@ -517,7 +517,7 @@ We can illustrate this by computing the mixed-phase specific heat difference for
 The saturation vapor pressure over liquid, ice, and mixed-phase surfaces can be computed
 and visualized:
 
-```@example
+```julia
 using Breeze
 using Breeze.Thermodynamics: saturation_vapor_pressure, PlanarMixedPhaseSurface
 
@@ -566,7 +566,7 @@ We can visualize how both saturation vapor pressure and saturation specific humi
 vary with temperature for different liquid fractions, demonstrating the smooth
 interpolation provided by the mixed-phase model:
 
-```@example
+```julia
 using Breeze
 using Breeze.Thermodynamics: saturation_vapor_pressure, saturation_specific_humidity, PlanarMixedPhaseSurface
 

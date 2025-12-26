@@ -30,7 +30,7 @@ difference that are linear blends of the pure-phase values, consistent with [Pre
 In Breeze, the equilibrium surface is constructed internally via `PlanarMixedPhaseSurface(λ)` using
 [`MixedPhaseEquilibrium`](@ref Breeze.Microphysics.MixedPhaseEquilibrium), and is accessed by
 
-```@example mixed_phase
+```julia
 using Breeze
 using Breeze.Microphysics: MixedPhaseEquilibrium
 
@@ -46,7 +46,7 @@ eq = MixedPhaseEquilibrium(FT)
 We can compute the saturation specific humidity across the entire range from homogeneous
 ice nucleation up to freezing using the equilibrium model above:
 
-```@example mixed_phase
+```julia
 using Breeze.Microphysics: equilibrium_saturation_specific_humidity
 
 p = 101325.0
@@ -61,7 +61,7 @@ qᵛ⁺ = [equilibrium_saturation_specific_humidity(Tʲ, p, qᵗ, thermo, eq) fo
 
 Optionally, we can visualize how `qᵛ⁺` varies with temperature:
 
-```@example mixed_phase
+```julia
 using CairoMakie
 
 fig = Figure()
@@ -82,7 +82,7 @@ q^l = \lambda(T) q^{\mathrm{cond}} , \quad
 q^i = [1 - \lambda(T)] q^{\mathrm{cond}} .
 ```
 
-```@example mixed_phase
+```julia
 # Compute partitioning across temperature range
 T′ = clamp.(T, Tʰ, Tᶠ)
 λ = @. (T′ - Tᶠ) / (Tʰ - Tᶠ)
