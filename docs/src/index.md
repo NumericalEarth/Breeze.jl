@@ -81,7 +81,7 @@ Tₛ = reference_state.potential_temperature # K
 θᵢ(x, z) = Tₛ + Δθ * z / grid.Lz + 2e-2 * Δθ * (rand() - 0.5)
 set!(model, θ=θᵢ)
 
-simulation = Simulation(model, Δt=10, stop_time=1hours)
+simulation = Simulation(model, Δt=10, stop_time=2hours)
 conjure_time_step_wizard!(simulation, cfl=0.7)
 
 run!(simulation)
