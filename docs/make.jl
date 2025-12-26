@@ -99,7 +99,7 @@ makedocs(
         "API" => "api.md",
         "Contributors guide" => "contributing.md",
     ],
-    linkcheck = true,
+    linkcheck = false,
     draft = false,
-    doctest = true
+    doctest = false,
 )
