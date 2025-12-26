@@ -23,8 +23,7 @@ using RRTMGP
         reference_state = ReferenceState(grid, constants;
                                          surface_pressure = 101325,
                                          potential_temperature = 300)
-        formulation = AnelasticFormulation(reference_state,
-                                           thermodynamics = :LiquidIcePotentialTemperature)
+        dynamics = AnelasticDynamics(reference_state)
 
         radiation = RadiativeTransferModel(grid, :clear_sky, constants;
                                            surface_temperature = 300,
@@ -34,7 +33,7 @@ using RRTMGP
 
         # Use noon on summer solstice at 45°N for good solar illumination
         clock = Clock(time=DateTime(2024, 6, 21, 16, 0, 0))
-        model = AtmosphereModel(grid; clock, formulation, radiation)
+        model = AtmosphereModel(grid; clock, dynamics, formulation=:LiquidIcePotentialTemperature, radiation)
 
         θ(z) = 300 + 0.01 * z / 1000
         qᵗ(z) = 0.015 * exp(-z / 2500)

@@ -177,3 +177,5 @@ scheme_labels = ["Gray", "Clear-sky (420 ppm)", "2×CO₂ (840 ppm)"]
 Legend(fig[0, :], scheme_handles, scheme_labels; orientation=:horizontal, framevisible=false, tellwidth=false)
 
 fig
+
+save("single_column_radiation.png", fig)
