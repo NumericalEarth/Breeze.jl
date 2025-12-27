@@ -2,9 +2,7 @@
 ##### Microphysics interface (default implementations)
 #####
 
-using ..Thermodynamics:
-    temperature,
-    MoistureMassFractions
+using ..Thermodynamics: MoistureMassFractions
 
 #####
 ##### Definition of the microphysics interface, with methods for "Nothing" microphysics

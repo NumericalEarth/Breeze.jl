@@ -55,5 +55,12 @@ import Breeze.AtmosphereModels: materialize_formulation,
 include("static_energy_formulation_type.jl")
 include("static_energy_tendency.jl")
 
+# Kernel wrapper for launching static_energy_tendency
+# (needs to be defined after static_energy_tendency is defined)
+@kernel function compute_static_energy_tendency!(Gρe, grid, args)
+    i, j, k = @index(Global, NTuple)
+    @inbounds Gρe[i, j, k] = static_energy_tendency(i, j, k, grid, args...)
+end
+
 end # module
 

@@ -52,5 +52,12 @@ import Breeze.AtmosphereModels: materialize_formulation,
 include("potential_temperature_formulation_type.jl")
 include("potential_temperature_tendency.jl")
 
+# Kernel wrapper for launching potential_temperature_tendency
+# (needs to be defined after potential_temperature_tendency is defined)
+@kernel function compute_potential_temperature_tendency!(Gρθ, grid, args)
+    i, j, k = @index(Global, NTuple)
+    @inbounds Gρθ[i, j, k] = potential_temperature_tendency(i, j, k, grid, args...)
+end
+
 end # module
 

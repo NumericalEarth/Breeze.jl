@@ -301,15 +301,8 @@ end
     @inbounds Gc[i, j, k] = scalar_tendency(i, j, k, grid, args...)
 end
 
-@kernel function compute_static_energy_tendency!(Gρe, grid, args)
-    i, j, k = @index(Global, NTuple)
-    @inbounds Gρe[i, j, k] = static_energy_tendency(i, j, k, grid, args...)
-end
-
-@kernel function compute_potential_temperature_tendency!(Gρθ, grid, args)
-    i, j, k = @index(Global, NTuple)
-    @inbounds Gρθ[i, j, k] = potential_temperature_tendency(i, j, k, grid, args...)
-end
+# Note: compute_static_energy_tendency! and compute_potential_temperature_tendency!
+# are now defined in their respective formulation submodules
 
 @kernel function compute_x_momentum_tendency!(Gρu, grid, args)
     i, j, k = @index(Global, NTuple)
