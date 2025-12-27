@@ -28,20 +28,6 @@ Modules = [Breeze.AtmosphereModels]
 Private = false
 ```
 
-### AtmosphereModels.Dynamics
-
-```@autodocs
-Modules = [Breeze.AtmosphereModels.Dynamics]
-Private = false
-```
-
-### AtmosphereModels.ThermodynamicFormulations
-
-```@autodocs
-Modules = [Breeze.AtmosphereModels.ThermodynamicFormulations]
-Private = false
-```
-
 ### AtmosphereModels.Diagnostics
 
 ```@autodocs
@@ -123,20 +109,6 @@ Public = false
 
 ```@autodocs
 Modules = [Breeze.AtmosphereModels]
-Public = false
-```
-
-### AtmosphereModels.Dynamics
-
-```@autodocs
-Modules = [Breeze.AtmosphereModels.Dynamics]
-Public = false
-```
-
-### AtmosphereModels.ThermodynamicFormulations
-
-```@autodocs
-Modules = [Breeze.AtmosphereModels.ThermodynamicFormulations]
 Public = false
 ```
 
