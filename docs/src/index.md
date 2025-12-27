@@ -88,3 +88,8 @@ run!(simulation)
 
 heatmap(PotentialTemperature(model), colormap=:thermal)
 ```
+
+!!! note "Note about reproducibility"
+
+    Due to their [chaotic nature](https://en.wikipedia.org/wiki/Chaos_theory), even the smallest numerical differences can cause nonlinear systems, such as atmospheric models, not to be reproducible on different systems, therefore the figures you will get by running the simulations in this manual may not match the figures shown here.
+    For more information about this, see the [section about reproducibility](@ref reproducibility).
