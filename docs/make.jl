@@ -97,6 +97,7 @@ makedocs(
         ],
         "References" => "references.md",
         "API" => "api.md",
+        "Reproducibility of Breeze.jl models" => "reproducibility.md",
         "Contributors guide" => "contributing.md",
     ],
     linkcheck = true,
