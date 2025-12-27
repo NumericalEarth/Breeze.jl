@@ -15,13 +15,11 @@ authors:
   - family-names: Constantinou
     given-names: Navid C.
     orcid: 'https://orcid.org/0000-0002-8149-4094'
-    affiliation:
-      - University of Melbourne
+    affiliation: University of Melbourne
   - family-names: Giordano
     given-names: Mosè
     orcid: 'https://orcid.org/0000-0002-7218-2873'
-    affiliation:
-      - University College London
+    affiliation: University College London
   - given-names: Kai-Yuan
     family-names: Cheng
     affiliation: Aeolus Labs
