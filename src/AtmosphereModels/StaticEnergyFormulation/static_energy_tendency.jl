@@ -2,8 +2,17 @@
 ##### Static energy tendency and helper functions for StaticEnergyFormulation
 #####
 
-using Breeze.Thermodynamics: StaticEnergyState, with_temperature, LiquidIcePotentialTemperatureState, temperature
-using Oceananigans.Operators: ℑzᵃᵃᶜ
+# Import AtmosphereModel after it has been defined in the parent module
+import Breeze.AtmosphereModels: AtmosphereModel
+
+# Import Diagnostics after it has been defined in the parent module
+import Breeze.AtmosphereModels.Diagnostics
+
+# Import set! from Oceananigans
+using Oceananigans.Fields: set!
+
+# Import temperature from Thermodynamics for state conversion
+using Breeze.Thermodynamics: temperature
 
 #####
 ##### Type alias for models with StaticEnergyFormulation
@@ -55,7 +64,7 @@ end
                                         closure_fields,
                                         clock,
                                         model_fields,
-                                        temperature)
+                                        temperature_field)
 
     specific_energy = formulation.specific_energy
     ρ_field = dynamics_density(dynamics)
@@ -67,8 +76,8 @@ end
     𝒰 = diagnose_thermodynamic_state(i, j, k, grid, formulation, dynamics, q)
 
     # Compute the buoyancy flux term, ρᵣ w b
-    buoyancy_flux = ℑzᵃᵃᶜ(i, j, k, grid, ρ_w_bᶜᶜᶠ,
-                          velocities.w, dynamics, formulation, ρ_field, temperature, specific_moisture,
+    buoyancy_flux = ℑzᵃᵃᶜ(i, j, k, grid, w_buoyancy_forceᶜᶜᶠ,
+                          velocities.w, dynamics, formulation, temperature_field, specific_moisture,
                           microphysics, microphysical_fields, constants)
 
     closure_buoyancy = AtmosphereModelBuoyancy(dynamics, formulation, constants)
@@ -138,7 +147,7 @@ end
         θ = potential_temperature[i, j, k]
     end
 
-    pˢᵗ = dynamics.reference_state.standard_pressure
+    pˢᵗ = dynamics_standard_pressure(dynamics)
     q = compute_moisture_fractions(i, j, k, grid, microphysics, ρᵣ, qᵗ, microphysical_fields)
     𝒰θ₀ = LiquidIcePotentialTemperatureState(θ, q, pˢᵗ, pᵣ)
     𝒰θ₁ = maybe_adjust_thermodynamic_state(i, j, k, 𝒰θ₀, microphysics, ρᵣ, microphysical_fields, qᵗ, constants)

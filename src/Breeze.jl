@@ -11,6 +11,7 @@ export
     ThermodynamicConstants,
     ReferenceState,
     AnelasticDynamics,
+    CompressibleDynamics,
     AtmosphereModel,
     StaticEnergyFormulation,
     LiquidIcePotentialTemperatureFormulation,

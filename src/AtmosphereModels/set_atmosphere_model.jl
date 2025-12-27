@@ -1,17 +1,12 @@
 using Oceananigans.Fields: Fields, set!
-using Oceananigans.Grids: znode, Center
 using Oceananigans.TimeSteppers: update_state!
 using Oceananigans.BoundaryConditions: fill_halo_regions!
 using Oceananigans.TimeSteppers: compute_pressure_correction!, make_pressure_correction!, update_state!
 
 using ..Thermodynamics:
-    LiquidIcePotentialTemperatureState,
     MoistureMassFractions,
     mixture_heat_capacity,
-    mixture_gas_constant,
-    temperature
-
-const c = Center()
+    mixture_gas_constant
 
 move_to_front(names, name) = tuple(name, filter(n -> n != name, names)...)
 

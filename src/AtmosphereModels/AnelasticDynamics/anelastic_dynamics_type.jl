@@ -2,6 +2,19 @@
 ##### AnelasticDynamics definition
 #####
 
+"""
+    AnelasticDynamics{R, P}
+
+Represents anelastic dynamics expanded about a hydrostatic reference state.
+
+The anelastic approximation filters acoustic waves by assuming density and pressure
+are small perturbations from a reference state `(ρᵣ(z), pᵣ(z))` with constant
+reference potential temperature `θᵣ`.
+
+# Fields
+- `reference_state`: The hydrostatic, adiabatic reference state
+- `pressure_anomaly`: The non-hydrostatic pressure perturbation field (kinematic, `p'/ρᵣ`)
+"""
 struct AnelasticDynamics{R, P}
     reference_state :: R
     pressure_anomaly :: P
@@ -16,7 +29,7 @@ AnelasticDynamics(reference_state) = AnelasticDynamics(reference_state, nothing)
 
 Adapt.adapt_structure(to, dynamics::AnelasticDynamics) =
     AnelasticDynamics(adapt(to, dynamics.reference_state),
-                      adapt(to, dynamics.pressure_anomaly))
+                          adapt(to, dynamics.pressure_anomaly))
 
 #####
 ##### Default dynamics and materialization
@@ -105,6 +118,28 @@ hydrostatic reference state pressure `pᵣ(z)`.
 dynamics_pressure(dynamics::AnelasticDynamics) = dynamics.reference_state.pressure
 
 #####
+##### Prognostic fields
+#####
+
+# Anelastic dynamics has no prognostic density - the density is the fixed reference state
+prognostic_dynamics_field_names(::AnelasticDynamics) = ()
+additional_dynamics_field_names(::AnelasticDynamics) = ()
+
+"""
+$(TYPEDSIGNATURES)
+
+Return the surface pressure from the reference state for boundary condition regularization.
+"""
+dynamics_surface_pressure(dynamics::AnelasticDynamics) = dynamics.reference_state.surface_pressure
+
+"""
+$(TYPEDSIGNATURES)
+
+Return the standard pressure from the reference state for potential temperature calculations.
+"""
+dynamics_standard_pressure(dynamics::AnelasticDynamics) = dynamics.reference_state.standard_pressure
+
+#####
 ##### Show methods
 #####
 
@@ -142,3 +177,4 @@ function materialize_momentum_and_velocities(dynamics::AnelasticDynamics, grid, 
 
     return momentum, velocities
 end
+

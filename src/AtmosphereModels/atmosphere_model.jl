@@ -148,7 +148,7 @@ function AtmosphereModel(grid;
     boundary_conditions = merge(default_boundary_conditions, boundary_conditions)
 
     # Pre-regularize AtmosphereModel boundary conditions (fill in reference_density, compute saturation humidity, etc.)
-    surface_pressure = dynamics.reference_state.surface_pressure
+    surface_pressure = dynamics_surface_pressure(dynamics)
     boundary_conditions = regularize_atmosphere_model_boundary_conditions(boundary_conditions, grid, surface_pressure, thermodynamic_constants)
 
     all_names = field_names(dynamics, formulation, microphysics, tracers)
@@ -229,8 +229,8 @@ function AtmosphereModel(grid;
                             closure_fields,
                             radiation)
 
-    θ₀ = dynamics.reference_state.potential_temperature
-    set!(model, θ=θ₀)
+    # Initialize thermodynamics (dynamics-specific)
+    initialize_model_thermodynamics!(model)
 
     return model
 end
@@ -351,11 +351,12 @@ function Oceananigans.fields(model::AtmosphereModel)
 end
 
 function Oceananigans.prognostic_fields(model::AtmosphereModel)
+    dynamics_fields = dynamics_prognostic_fields(model.dynamics)
     prognostic_formulation_fields = prognostic_fields(model.formulation)
     thermodynamic_fields = merge(prognostic_formulation_fields, (; ρqᵗ=model.moisture_density))
     μ_names = prognostic_field_names(model.microphysics)
     μ_fields= NamedTuple{μ_names}(model.microphysical_fields[name] for name in μ_names)
-    return merge(model.momentum, thermodynamic_fields, μ_fields, model.tracers)
+    return merge(dynamics_fields, model.momentum, thermodynamic_fields, μ_fields, model.tracers)
 end
 
 Models.boundary_condition_args(model::AtmosphereModel) = (model.clock, fields(model))
