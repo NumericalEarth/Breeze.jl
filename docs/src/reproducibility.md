@@ -1,6 +1,7 @@
 # [Reproducibility of Breeze.jl models](@id reproducibility)
 
-`Breeze.jl` cannot guarantee full reproducibility of its atmospheric models, especially for long-running simulations, due to their [chaotic nature](https://en.wikipedia.org/wiki/Chaos_theory).
+`Breeze.jl` cannot guarantee _bitwise_ reproducibility of atmospheric simulations across Julia versions and machine architectures.
+For [chaotic](https://en.wikipedia.org/wiki/Chaos_theory) simulations, bitwise differences between two initially identical solutions can amplify, leading to qualitatively different trajectories after long simulation times.
 In this page we analyze some sources of non-reproducibility, and how to control them.
 
 ## Sources of non-reproducibility
