@@ -88,3 +88,18 @@ run!(simulation)
 
 heatmap(PotentialTemperature(model), colormap=:thermal)
 ```
+
+!!! note "Note about reproducibility"
+
+    Due to their [chaotic nature](https://en.wikipedia.org/wiki/Chaos_theory), even the smallest numerical differences can cause atmospheric simulations not to be reproducible on different systems, therefore the figures you will get by running the simulations in this manual may not match the figures shown here.
+    Sources of non-reproducibility include
+
+    * some special functions in Julia `Base` may have different rounding errors on different CPU architectures (e.g. `aarch64` vs `x86-64`), even though they are usually consistent within very few [ULPs](https://en.wikipedia.org/wiki/Unit_in_the_last_place)
+    * in general, the compiler can generate different code on different CPUs, even within the same architecture, and sometimes even on the same CPU but across different versions of Julia (if, for example, a newer version of LLVM introduced different optimizations).
+      This is particularly evident when using aggressive optimization levels (like `-O2`, which is the default in Julia), which lead to different vectorization optimizations.
+      When running simulations on the CPU, using lower optimization levels (e.g. `-O0`) can reduce these numerical differences, but it also generates very slow code
+    * multi-threaded `for` loops can further cause differences, when the order of the loops is important to exactly reproduce the same results
+    * using randomly generated numbers withing the simulations, if not fixing the seed, will result in different output.
+      Running multi-threaded simulations can lead to different results even when fixing the random-number generator (RNG) seed if the random numbers are used inside threaded loops, because the scheduler may reorder the loops differently, falling in the point above
+    * when a fast Fourier transform (FFT) is involved, certain FFTW flags may not produce consistent results (see discussion in [CliMA/Oceananigans.jl#2790](https://github.com/CliMA/Oceananigans.jl/discussions/2790))
+    * running simulations on completely different devices (e.g. CPU vs GPU) will also cause very different results because of the all the points above.
