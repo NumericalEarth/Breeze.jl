@@ -10,7 +10,7 @@ using Oceananigans.TimeSteppers: TimeSteppers
 using Oceananigans.TurbulenceClosures: compute_diffusivities!
 using Oceananigans.Utils: launch!, KernelParameters
 
-# AnelasticModel type alias imported from Dynamics submodule
+# AnelasticModel type alias defined in AtmosphereModels.jl
 
 function TimeSteppers.update_state!(model::AnelasticModel, callbacks=[]; compute_tendencies=true)
     tracer_density_to_specific!(model) # convert tracer density to specific tracer distribution
@@ -98,6 +98,7 @@ function compute_auxiliary_variables!(model)
             model.momentum)
 
     foreach(mask_immersed_field!, model.velocities)
+    fill_halo_regions!(model.velocities)
 
     # Dispatch on thermodynamic formulation type
     compute_auxiliary_thermodynamic_variables!(model)
@@ -300,15 +301,8 @@ end
     @inbounds Gc[i, j, k] = scalar_tendency(i, j, k, grid, args...)
 end
 
-@kernel function compute_static_energy_tendency!(Gρe, grid, args)
-    i, j, k = @index(Global, NTuple)
-    @inbounds Gρe[i, j, k] = static_energy_tendency(i, j, k, grid, args...)
-end
-
-@kernel function compute_potential_temperature_tendency!(Gρθ, grid, args)
-    i, j, k = @index(Global, NTuple)
-    @inbounds Gρθ[i, j, k] = potential_temperature_tendency(i, j, k, grid, args...)
-end
+# Note: compute_static_energy_tendency! and compute_potential_temperature_tendency!
+# are now defined in their respective formulation submodules
 
 @kernel function compute_x_momentum_tendency!(Gρu, grid, args)
     i, j, k = @index(Global, NTuple)

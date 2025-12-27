@@ -9,7 +9,7 @@ using Oceananigans.BoundaryConditions: fill_halo_regions!
 @kernel function _compute_hydrostatic_pressure!(ph, grid, dynamics, temperature, constants)
     i, j = @index(Global, NTuple)
 
-    p₀ = dynamics.reference_state.surface_pressure
+    p₀ = dynamics_surface_pressure(dynamics)
     Nz = grid.Nz
     g = constants.gravitational_acceleration
     Rᵈ = dry_air_gas_constant(constants)

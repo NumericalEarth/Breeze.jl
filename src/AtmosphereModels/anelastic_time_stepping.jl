@@ -9,6 +9,22 @@ using Oceananigans.TimeSteppers: TimeSteppers
 using Oceananigans.Utils: launch!
 using KernelAbstractions: @kernel, @index
 
+#####
+##### Model initialization
+#####
+
+"""
+$(TYPEDSIGNATURES)
+
+Initialize thermodynamic state for anelastic models.
+Sets the initial potential temperature to the reference state value.
+"""
+function initialize_model_thermodynamics!(model::AnelasticModel)
+    θ₀ = model.dynamics.reference_state.potential_temperature
+    set!(model, θ=θ₀)
+    return nothing
+end
+
 function TimeSteppers.compute_pressure_correction!(model::AnelasticModel, Δt)
     # Mask immersed velocities
     foreach(mask_immersed_field!, model.momentum)
