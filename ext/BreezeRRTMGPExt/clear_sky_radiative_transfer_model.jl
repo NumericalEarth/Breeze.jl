@@ -219,7 +219,8 @@ const RRTMGP_GAS_NAME_MAP = Dict{String, Symbol}(
         end
     end
 
-    vmr.vmr .= host
+    # Use copyto! for proper CPU→GPU transfer
+    copyto!(vmr.vmr, host)
     return nothing
 end
 

@@ -215,20 +215,6 @@ end
     @inbounds rrtmgp_latitude[col] = φ
 end
 
-"""
-$(TYPEDSIGNATURES)
-
-Create an RRTMGP-compatible ClimaComms context from an Oceananigans architecture.
-"""
-function rrtmgp_context(arch::CPU)
-    device = Threads.nthreads() > 1 ? ClimaComms.CPUMultiThreaded() : ClimaComms.CPUSingleThreaded()
-    return ClimaComms.context(device)
-end
-
-function rrtmgp_context(arch::GPU)
-    return ClimaComms.context(ClimaComms.CUDADevice())
-end
-
 #####
 ##### Update radiation fluxes from model state
 #####
@@ -243,9 +229,6 @@ end
 #     - RadiativeTransferModel: wrapper containing RRTMGP solvers and Oceananigans flux fields
 #     - SingleColumnGrid type alias
 #
-
-compute_datetime(dt::AbstractDateTime, epoch) = dt
-compute_datetime(t::Number, epoch::AbstractDateTime) = epoch + Millisecond(round(Int, 1000t))
 
 """
 $(TYPEDSIGNATURES)
@@ -285,18 +268,10 @@ function AtmosphereModels.update_radiation!(rtm::GrayRadiativeTransferModel, mod
     # Solve longwave RTE (RRTMGP external call)
     solve_lw!(rtm.longwave_solver, rrtmgp_state)
 
-    # Solve shortwave RTE (only if sun is above horizon)
-    cos_θz = rtm.shortwave_solver.bcs.cos_zenith[1]
-
-    if cos_θz > 0
-        solve_sw!(rtm.shortwave_solver, rrtmgp_state)
-    else
-        # Sun below horizon - zero shortwave fluxes
-        rtm.shortwave_solver.flux.flux_up .= 0
-        rtm.shortwave_solver.flux.flux_dn .= 0
-        rtm.shortwave_solver.flux.flux_net .= 0
-        rtm.shortwave_solver.flux.flux_dn_dir .= 0
-    end
+    # Solve shortwave RTE
+    # Note: RRTMGP handles the case when sun is below horizon (cos_zenith <= 0)
+    # by producing zero fluxes internally
+    solve_sw!(rtm.shortwave_solver, rrtmgp_state)
 
     # Copy RRTMGP flux arrays to Oceananigans fields with sign convention
     copy_fluxes_to_fields!(rtm, grid)

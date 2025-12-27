@@ -5,11 +5,11 @@ using Breeze
 using Breeze.Thermodynamics: ThermodynamicConstants
 using RRTMGP: RRTMGP
 
-using Dates: DateTime
+using Dates: AbstractDateTime, DateTime, Millisecond
 using DocStringExtensions: TYPEDSIGNATURES
 
 # Oceananigans imports
-using Oceananigans.Architectures: architecture, CPU
+using Oceananigans.Architectures: architecture, CPU, GPU
 using Oceananigans.Fields: ZFaceField
 
 # RRTMGP imports (external types - cannot modify)
@@ -52,6 +52,23 @@ function RRTMGPParameters(constants::ThermodynamicConstants{FT};
         avogad         = convert(FT, avogadro_number),   # mol⁻¹
     )
 end
+
+"""
+$(TYPEDSIGNATURES)
+
+Create an RRTMGP-compatible ClimaComms context from an Oceananigans architecture.
+"""
+function rrtmgp_context(arch::CPU)
+    device = Threads.nthreads() > 1 ? ClimaComms.CPUMultiThreaded() : ClimaComms.CPUSingleThreaded()
+    return ClimaComms.context(device)
+end
+
+function rrtmgp_context(arch::GPU)
+    return ClimaComms.context(ClimaComms.CUDADevice())
+end
+
+compute_datetime(dt::AbstractDateTime, epoch) = dt
+compute_datetime(t::Number, epoch::AbstractDateTime) = epoch + Millisecond(round(Int, 1000t))
 
 include("gray_radiative_transfer_model.jl")
 include("clear_sky_radiative_transfer_model.jl")
