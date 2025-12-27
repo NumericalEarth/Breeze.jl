@@ -361,41 +361,6 @@ end
 
 Models.boundary_condition_args(model::AtmosphereModel) = (model.clock, fields(model))
 
-#####
-##### Helper functions for accessing thermodynamic fields
-#####
-
-"""
-    static_energy_density(model::AtmosphereModel)
-
-Return an `AbstractField` representing static energy density for `model`.
-"""
-function static_energy_density end
-
-"""
-    static_energy(model::AtmosphereModel)
-
-Return an `AbstractField` representing the (specific) static energy
-for `model`.
-"""
-function static_energy end
-
-"""
-    liquid_ice_potential_temperature_density(model::AtmosphereModel)
-
-Return an `AbstractField` representing potential temperature density
-for `model`.
-"""
-function liquid_ice_potential_temperature_density end
-
-"""
-    liquid_ice_potential_temperature(model::AtmosphereModel)
-
-Return an `AbstractField` representing potential temperature `θ`
-for `model`.
-"""
-function liquid_ice_potential_temperature end
-
 function total_energy(model)
     u, v, w = model.velocities
     k = @at (Center, Center, Center) (u^2 + v^2 + w^2) / 2 |> Field
