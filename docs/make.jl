@@ -94,6 +94,7 @@ makedocs(
         "Dycore equations and algorithms" => "dycore_equations_algorithms.md",
         "Appendix" => Any[
             "Notation" => "appendix/notation.md",
+            "Reproducibility of Breeze.jl models" => "reproducibility.md",
         ],
         "References" => "references.md",
         "API" => "api.md",
