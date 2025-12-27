@@ -13,6 +13,19 @@ using ..Thermodynamics:
 """
 $(TYPEDSIGNATURES)
 
+Return the specific humidity (vapor mass fraction) field for the given `model`.
+
+For `Nothing` microphysics (no condensate), the vapor mass fraction equals the total
+specific moisture. For microphysics schemes with prognostic vapor (e.g., where `qᵛ`
+is tracked explicitly), this function returns the appropriate vapor field.
+"""
+specific_humidity(model) = specific_humidity(model.microphysics, model)
+
+specific_humidity(::Nothing, model) = model.specific_moisture
+
+"""
+$(TYPEDSIGNATURES)
+
 Possibly apply saturation adjustment. If a `microphysics` scheme does not invoke saturation adjustment,
 just return the `state` unmodified. In contrast to `adjust_thermodynamic_state`, this function
 ingests the entire `microphysics` formulation and the `microphysical_fields`.

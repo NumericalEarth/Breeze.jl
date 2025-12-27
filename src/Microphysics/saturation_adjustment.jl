@@ -135,6 +135,10 @@ const MPSA = MixedPhaseSaturationAdjustment
 AtmosphereModels.prognostic_field_names(::WPSA) = tuple()
 AtmosphereModels.prognostic_field_names(::MPSA) = tuple()
 
+# For SaturationAdjustment, the vapor specific humidity is stored diagnostically
+# in the microphysical fields (μ.qᵛ), computed during update_state!
+AtmosphereModels.specific_humidity(::SA, model) = model.microphysical_fields.qᵛ
+
 center_field_tuple(grid, names...) = NamedTuple{names}(CenterField(grid) for name in names)
 AtmosphereModels.materialize_microphysical_fields(::WPSA, grid, bcs) = center_field_tuple(grid, :qᵛ, :qˡ)
 AtmosphereModels.materialize_microphysical_fields(::MPSA, grid, bcs) = center_field_tuple(grid, :qᵛ, :qˡ, :qⁱ)
