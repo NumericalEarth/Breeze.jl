@@ -1,7 +1,7 @@
 using Breeze
 using Dates
+using GPUArraysCore: @allowscalar
 using Oceananigans
-using Oceananigans.Architectures: CPU
 using Oceananigans.Units
 using Test
 
@@ -15,8 +15,7 @@ using RRTMGP
         Oceananigans.defaults.FloatType = FT
 
         Nz = 8
-        # TODO: GPU support for clear-sky radiation needs to be fixed
-        grid = RectilinearGrid(CPU(); size=Nz, x=0.0, y=45.0, z=(0, 10kilometers),
+        grid = RectilinearGrid(default_arch; size=Nz, x=0.0, y=45.0, z=(0, 10kilometers),
                                topology=(Flat, Flat, Bounded))
 
         constants = ThermodynamicConstants()
@@ -55,6 +54,6 @@ using RRTMGP
         @test all(interior(ℐ_sw_dn) .<= ε)
 
         # Surface upwelling LW should be significant
-        @test ℐ_lw_up[1, 1, 1] > 100
+        @allowscalar @test ℐ_lw_up[1, 1, 1] > 100
     end
 end

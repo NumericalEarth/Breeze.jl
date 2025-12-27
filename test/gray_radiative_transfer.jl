@@ -17,7 +17,7 @@ using RRTMGP
     @testset "Single column grid [$(FT)]" for FT in (Float32, Float64)
         Oceananigans.defaults.FloatType = FT
         Nz = 16
-        grid = RectilinearGrid(size=Nz, x=0.0, y=45.0, z=(0, 10kilometers),
+        grid = RectilinearGrid(default_arch; size=Nz, x=0.0, y=45.0, z=(0, 10kilometers),
                                topology=(Flat, Flat, Bounded))
 
         constants = ThermodynamicConstants()
@@ -96,7 +96,7 @@ end
     @testset "Model construction [$(FT)]" for FT in (Float32, Float64)
         Oceananigans.defaults.FloatType = FT
         Nz = 16
-        grid = RectilinearGrid(size=Nz, x=0.0, y=45.0, z=(0, 10kilometers),
+        grid = RectilinearGrid(default_arch; size=Nz, x=0.0, y=45.0, z=(0, 10kilometers),
                                topology=(Flat, Flat, Bounded))
 
         constants = ThermodynamicConstants()
@@ -121,7 +121,7 @@ end
     @testset "Radiatiative transfer basic tests [$(FT)]" for FT in (Float32, Float64)
         Oceananigans.defaults.FloatType = FT
         Nz = 16
-        grid = RectilinearGrid(size=Nz, x=0.0, y=45.0, z=(0, 10kilometers),
+        grid = RectilinearGrid(default_arch; size=Nz, x=0.0, y=45.0, z=(0, 10kilometers),
                                topology=(Flat, Flat, Bounded))
 
         constants = ThermodynamicConstants()
