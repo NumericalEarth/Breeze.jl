@@ -11,19 +11,15 @@ authors:
   - family-names: Wagner
     given-names: Gregory L.
     orcid: 'https://orcid.org/0000-0001-5317-2445'
-    affiliation:
-      - Aeolus Labs
-      - Massachusetts Institute of Technology
+    affiliation: 'Aeolus Labs, Massachusetts Institute of Technology'
   - family-names: Constantinou
     given-names: Navid C.
     orcid: 'https://orcid.org/0000-0002-8149-4094'
-    affiliation:
-      - University of Melbourne
+    affiliation: University of Melbourne
   - family-names: Giordano
     given-names: Mosè
     orcid: 'https://orcid.org/0000-0002-7218-2873'
-    affiliation:
-      - University College London
+    affiliation: University College London
   - given-names: Kai-Yuan
     family-names: Cheng
     affiliation: Aeolus Labs
@@ -33,12 +29,13 @@ authors:
     affiliation: University of Tasmania
     orcid: 'https://orcid.org/0000-0003-4254-843X'
   - given-names: Tobias
-    orcid: 'https://orcid.org/0000-0003-3930-2762'
     family-names: Bischoff
+    orcid: 'https://orcid.org/0000-0003-3930-2762'
     affiliation: Aeolus Labs
 identifiers:
   - type: doi
     value: 10.5281/zenodo.18050353
+    description: The concept DOI of the work
 repository-code: 'https://github.com/NumericalEarth/Breeze.jl'
 url: 'https://github.com/NumericalEarth/Breeze.jl'
 keywords:
@@ -48,4 +45,4 @@ keywords:
   - geophysical fluid dynamics
   - GPU computing
   - climate modelling
-license: Apache
+license: Apache-2.0
