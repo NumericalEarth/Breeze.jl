@@ -34,3 +34,6 @@ Manifest.toml
 *.DS_Store
 *.vscode
 *.code-workspace
+
+# LLMs
+.cursor
