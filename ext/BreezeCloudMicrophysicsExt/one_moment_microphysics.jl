@@ -7,10 +7,6 @@
 # cloud formation.
 #
 # References:
-#   - Morrison, H., and J. A. Milbrandt (2015). Parameterization of cloud microphysics
-#     based on the prediction of bulk ice particle properties. Part I: Scheme description
-#     and idealized tests. J. Atmos. Sci., 72, 287–311. https://doi.org/10.1175/JAS-D-14-0065.1
-#
 #   - Morrison, H. and Grabowski, W.W. (2008). A novel approach for representing ice
 #     microphysics in models: Description and tests using a kinematic framework.
 #     J. Atmos. Sci., 65, 1528–1548. https://doi.org/10.1175/2007JAS2491.1
@@ -50,7 +46,7 @@ The one-moment scheme uses CloudMicrophysics.jl 1M processes:
 
 By default, non-equilibrium cloud formation is used, where cloud liquid is a prognostic
 variable that evolves via condensation/evaporation tendencies following
-[Morrison and Milbrandt (2015)](@cite Morrison2015parameterization).
+[Morrison and Grabowski (2008)](@cite Morrison2008novel) (see Appendix A).
 The prognostic variables are `ρqᶜˡ` (cloud liquid mass density) and `ρqʳ` (rain mass density).
 
 For equilibrium (saturation adjustment) cloud formation, pass:
@@ -71,9 +67,9 @@ SaturationAdjustment{WarmPhaseEquilibrium, Float64}(0.001, Inf, WarmPhaseEquilib
 See the [CloudMicrophysics.jl documentation](https://clima.github.io/CloudMicrophysics.jl/dev/) for details.
 
 # References
-* Morrison, H., and J. A. Milbrandt (2015). Parameterization of cloud microphysics based on
-    the prediction of bulk ice particle properties. Part I: Scheme description and idealized
-    tests. J. Atmos. Sci., 72, 287–311. https://doi.org/10.1175/JAS-D-14-0065.1
+* Morrison, H. and Grabowski, W. W. (2008). A novel approach for representing ice
+    microphysics in models: Description and tests using a kinematic framework.
+    J. Atmos. Sci., 65, 1528–1548. https://doi.org/10.1175/2007JAS2491.1
 """
 function OneMomentCloudMicrophysics(FT::DataType = Oceananigans.defaults.FloatType;
                                     cloud_formation = NonEquilibriumCloudFormation(CloudLiquid(FT), nothing),

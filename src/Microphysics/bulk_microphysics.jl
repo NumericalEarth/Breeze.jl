@@ -29,17 +29,22 @@ struct NonEquilibriumCloudFormation{L, I}
     that evolve via condensation/evaporation and deposition/sublimation tendencies,
     rather than being diagnosed instantaneously via saturation adjustment.
 
-    The condensation/evaporation rate follows [Morrison and Milbrandt (2015)](@cite Morrison2015parameterization),
-    relaxing toward saturation with timescale `τ_relax`.
+    The condensation/evaporation and deposition/sublimation tendencies are commonly modeled as **relaxation toward
+    saturation** with timescale `τ_relax`, including a latent-heat (psychrometric/thermal) correction factor; see
+    [Morrison and Grabowski (2008)](@cite Morrison2008novel), Appendix Eq. (A3), and standard cloud microphysics
+    texts such as [Pruppacher and Klett (2010)](@cite pruppacher2010microphysics) or
+    [Rogers and Yau (1989)](@cite rogers1989short).
 
     # Fields
     - `liquid`: Parameters for cloud liquid (contains relaxation timescale `τ_relax`)
     - `ice`: Parameters for cloud ice (contains relaxation timescale `τ_relax`), or `nothing` for warm-phase only
 
     # References
-    * Morrison, H., and J. A. Milbrandt (2015). Parameterization of cloud microphysics based on
-        the prediction of bulk ice particle properties. Part I: Scheme description and idealized
-        tests. J. Atmos. Sci., 72, 287–311. https://doi.org/10.1175/JAS-D-14-0065.1
+    * Morrison, H. and Grabowski, W. W. (2008). A novel approach for representing ice
+        microphysics in models: Description and tests using a kinematic framework.
+        J. Atmos. Sci., 65, 1528–1548. https://doi.org/10.1175/2007JAS2491.1
+    * Pruppacher, H. R. and Klett, J. D. (2010). Microphysics of Clouds and Precipitation (2nd ed.).
+    * Rogers, R. R. and Yau, M. K. (1989). A Short Course in Cloud Physics (3rd ed.).
     """
     function NonEquilibriumCloudFormation(liquid, ice=nothing)
         return new{typeof(liquid), typeof(ice)}(liquid, ice)
