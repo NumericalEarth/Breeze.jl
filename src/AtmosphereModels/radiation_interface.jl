@@ -63,7 +63,7 @@ end
 function RadiativeTransferModel(grid::AbstractGrid, ::Val{S}, args...; kw...) where S
     msg = "Unknown optics flavor :$S. Valid options are :gray, :clear_sky.\n" *
           "Make sure RRTMGP.jl is loaded (e.g., `using RRTMGP`)."
-    throw(ArgumentError(msg))
+    return throw(ArgumentError(msg))
 end
 
 """
