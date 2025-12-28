@@ -31,7 +31,7 @@ using RRTMGP
                                            solar_constant = 1361)
 
         # Use noon on summer solstice at 45°N for good solar illumination
-        clock = Clock(time=DateTime(2024, 6, 21, 16, 0, 0))
+        clock = Clock(time=DateTime(2024, 6, 21, 12, 0, 0))
         model = AtmosphereModel(grid; clock, dynamics, formulation=:LiquidIcePotentialTemperature, radiation)
 
         θ(z) = 300 + 0.01 * z / 1000
