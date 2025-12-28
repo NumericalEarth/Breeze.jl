@@ -32,7 +32,7 @@ const OneMomentCloudMicrophysics = BulkMicrophysics{<:Any, <:CM1MCategories, <:A
 
 """
     OneMomentCloudMicrophysics(FT = Oceananigans.defaults.FloatType;
-                               cloud_formation = NonEquilibriumCloudFormation(CloudLiquid(FT), nothing),
+                               cloud_formation = NonEquilibriumCloudFormation(nothing, nothing),
                                categories = one_moment_cloud_microphysics_categories(FT),
                                precipitation_boundary_condition = nothing)
 
@@ -72,7 +72,7 @@ See the [CloudMicrophysics.jl documentation](https://clima.github.io/CloudMicrop
     J. Atmos. Sci., 65, 1528–1548. https://doi.org/10.1175/2007JAS2491.1
 """
 function OneMomentCloudMicrophysics(FT::DataType = Oceananigans.defaults.FloatType;
-                                    cloud_formation = NonEquilibriumCloudFormation(CloudLiquid(FT), nothing),
+                                    cloud_formation = NonEquilibriumCloudFormation(nothing, nothing),
                                     categories = one_moment_cloud_microphysics_categories(FT),
                                     precipitation_boundary_condition = nothing)
 
@@ -114,17 +114,32 @@ const WP1M = BulkMicrophysics{<:WarmPhaseSaturationAdjustment, <:CM1MCategories,
 const MP1M = BulkMicrophysics{<:MixedPhaseSaturationAdjustment, <:CM1MCategories, <:Any}
 
 # Warm-phase non-equilibrium with 1M precipitation
-const WarmPhaseNonEquilibrium1M = BulkMicrophysics{<:NonEquilibriumCloudFormation{<:CloudLiquid, Nothing}, <:CM1MCategories, <:Any}
+const WarmPhaseNonEquilibrium1M = BulkMicrophysics{<:NonEquilibriumCloudFormation{<:Any, Nothing}, <:CM1MCategories, <:Any}
 const WPNE1M = WarmPhaseNonEquilibrium1M
 
 # Mixed-phase non-equilibrium with 1M precipitation
-const MixedPhaseNonEquilibrium1M = BulkMicrophysics{<:NonEquilibriumCloudFormation{<:CloudLiquid, <:CloudIce}, <:CM1MCategories, <:Any}
+const MixedPhaseNonEquilibrium1M = BulkMicrophysics{<:NonEquilibriumCloudFormation{<:Any, <:CloudIce}, <:CM1MCategories, <:Any}
 const MPNE1M = MixedPhaseNonEquilibrium1M
 
 # Union types for dispatch
 const WarmPhase1M = Union{WP1M, WPNE1M}
 const NonEquilibrium1M = Union{WPNE1M, MPNE1M}
 const OneMomentLiquidRain = Union{WP1M, WPNE1M, MP1M, MPNE1M}
+
+#####
+##### Relaxation timescales for non-equilibrium schemes
+#####
+
+# In 1M, we source `τ_relax` from `bμp.categories` so `NonEquilibriumCloudFormation` can be an "empty marker"
+# (e.g. `NonEquilibriumCloudFormation(nothing, nothing)`), while still allowing older configurations where
+# `cloud_formation.liquid` / `cloud_formation.ice` contain the relevant parameters.
+@inline liquid_relaxation_timescale(cloud_formation, categories) = cloud_formation.liquid.τ_relax
+@inline liquid_relaxation_timescale(cloud_formation::NonEquilibriumCloudFormation{Nothing, <:Any}, categories) = categories.cloud_liquid.τ_relax
+
+@inline ice_relaxation_timescale(cloud_formation, categories) = cloud_formation.ice.τ_relax
+@inline ice_relaxation_timescale(cloud_formation::NonEquilibriumCloudFormation{<:Any, Nothing}, categories) = nothing
+@inline ice_relaxation_timescale(cloud_formation::NonEquilibriumCloudFormation{<:Any, Nothing}, categories, default) = default
+@inline ice_relaxation_timescale(cloud_formation::NonEquilibriumCloudFormation{Nothing, <:CloudIce}, categories) = categories.cloud_ice.τ_relax
 
 #####
 ##### Prognostic field names
@@ -462,7 +477,7 @@ end
 
 @inline function microphysical_tendency(i, j, k, grid, bμp::WPNE1M, ::Val{:ρqᶜˡ}, ρ, μ, 𝒰, constants)
     categories = bμp.categories
-    τᶜˡ = bμp.cloud_formation.liquid.τ_relax
+    τᶜˡ = liquid_relaxation_timescale(bμp.cloud_formation, categories)
     ρⁱʲᵏ = ρ
 
     @inbounds qᶜˡ = μ.qᶜˡ[i, j, k]
@@ -498,7 +513,7 @@ end
 # Mixed-phase non-equilibrium: same as warm-phase for cloud liquid
 @inline function microphysical_tendency(i, j, k, grid, bμp::MPNE1M, ::Val{:ρqᶜˡ}, ρ, μ, 𝒰, constants)
     categories = bμp.categories
-    τᶜˡ = bμp.cloud_formation.liquid.τ_relax
+    τᶜˡ = liquid_relaxation_timescale(bμp.cloud_formation, categories)
     ρⁱʲᵏ = ρ
 
     @inbounds qᶜˡ = μ.qᶜˡ[i, j, k]
@@ -578,7 +593,8 @@ saturation over ice.
 end
 
 @inline function microphysical_tendency(i, j, k, grid, bμp::MPNE1M, ::Val{:ρqᶜⁱ}, ρ, μ, 𝒰, constants)
-    τᶜⁱ = bμp.cloud_formation.ice.τ_relax
+    categories = bμp.categories
+    τᶜⁱ = ice_relaxation_timescale(bμp.cloud_formation, categories)
     ρⁱʲᵏ = ρ
 
     @inbounds qᶜⁱ = μ.qᶜⁱ[i, j, k]

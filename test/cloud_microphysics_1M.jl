@@ -21,7 +21,7 @@ using Oceananigans.BoundaryConditions: ImpenetrableBoundaryCondition
     μ1 = OneMomentCloudMicrophysics()
     @test μ1 isa BulkMicrophysics
     @test μ1.cloud_formation isa NonEquilibriumCloudFormation
-    @test μ1.cloud_formation.liquid isa CloudLiquid
+    @test μ1.cloud_formation.liquid === nothing
     @test μ1.cloud_formation.ice === nothing
 
     # Check prognostic fields for non-equilibrium
@@ -203,7 +203,7 @@ end
     # Build full microphysics with non-equilibrium cloud formation
     μ1 = OneMomentCloudMicrophysics(FT; cloud_formation=cloud_formation_default)
     @test μ1.cloud_formation isa NonEquilibriumCloudFormation
-    @test μ1.cloud_formation.liquid.τ_relax == FT(10.0)
+    @test μ1.categories.cloud_liquid.τ_relax == FT(10.0)
 end
 
 @testset "Setting specific microphysical variables [$(FT)]" for FT in (Float32, Float64)
@@ -294,7 +294,7 @@ end
     set!(model; θ=300, qᵗ=FT(0.050))
 
     # First, run to condensation equilibrium (~20τ)
-    τ = microphysics.cloud_formation.liquid.τ_relax
+    τ = microphysics.categories.cloud_liquid.τ_relax
     simulation = Simulation(model; Δt=τ/10, stop_time=10τ, verbose=false)
     run!(simulation)
 
@@ -347,7 +347,7 @@ end
     set!(model; θ=300, qᵗ=FT(0.050))
 
     # Run to condensation equilibrium and beyond for autoconversion
-    τ = microphysics.cloud_formation.liquid.τ_relax
+    τ = microphysics.categories.cloud_liquid.τ_relax
     simulation = Simulation(model; Δt=τ/10, stop_time=10τ, verbose=false)
     run!(simulation)
 

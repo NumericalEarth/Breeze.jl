@@ -34,7 +34,7 @@ OneMomentCloudMicrophysics = BreezeCloudMicrophysicsExt.OneMomentCloudMicrophysi
 # ImpenetrableBoundaryCondition ensures rain collects in the parcel rather than exiting
 microphysics = OneMomentCloudMicrophysics(precipitation_boundary_condition = ImpenetrableBoundaryCondition())
 
-τ = microphysics.cloud_formation.liquid.τ_relax  # Condensation timescale (~10 s)
+τ = microphysics.categories.cloud_liquid.τ_relax  # Condensation timescale (~10 s)
 
 # ## Simulation helper
 
