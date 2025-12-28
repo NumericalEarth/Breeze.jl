@@ -55,7 +55,7 @@ rtm = RadiativeTransferModel(grid, :clear_sky, constants;
     background_atmosphere = BackgroundAtmosphere(CO₂ = 400e-6))
 ```
 """
-function RadiativeTransferModel(grid, optics_flavor::Symbol, args...; kw...)
+function RadiativeTransferModel(grid::AbstractGrid, optics_flavor::Symbol, args...; kw...)
     RadiativeTransferModel(grid, Val(optics_flavor), args...; kw...)
 end
 
