@@ -126,7 +126,7 @@ The compressible formulation advances density ``ρ`` as a prognostic variable al
 Pressure is computed from the ideal gas law using prognostic density and potential temperature:
 
 ```math
-p = p_0 \left( \frac{ρ R^m θ}{p_0} \right)^{c^{pm} / (c^{pm} - R^m)}
+p = ρ R^m T
 ```
 
 where ``p_0`` is a reference pressure (typically 10⁵ Pa), ``R^m`` is the mixture gas constant, ``θ`` is potential temperature, and ``c^{pm}`` is the mixture heat capacity at constant pressure.
