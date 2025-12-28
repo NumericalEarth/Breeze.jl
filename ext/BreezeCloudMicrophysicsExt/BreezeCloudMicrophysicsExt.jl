@@ -36,7 +36,13 @@ using Breeze.Microphysics:
     SaturationAdjustment,
     WarmPhaseSaturationAdjustment,
     MixedPhaseSaturationAdjustment,
+    AbstractCondensateFormation,
+    ConstantRateCondensateFormation,
     NonEquilibriumCloudFormation,
+    thermodynamic_adjustment_factor,
+    ice_thermodynamic_adjustment_factor,
+    condensation_rate,
+    deposition_rate,
     adjust_thermodynamic_state
 
 using Oceananigans: Oceananigans

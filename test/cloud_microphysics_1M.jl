@@ -7,6 +7,7 @@ using Test
 
 BreezeCloudMicrophysicsExt = Base.get_extension(Breeze, :BreezeCloudMicrophysicsExt)
 using .BreezeCloudMicrophysicsExt: OneMomentCloudMicrophysics
+using Breeze.Microphysics: ConstantRateCondensateFormation
 
 using Oceananigans.BoundaryConditions: ImpenetrableBoundaryCondition
 
@@ -21,8 +22,14 @@ using Oceananigans.BoundaryConditions: ImpenetrableBoundaryCondition
     μ1 = OneMomentCloudMicrophysics()
     @test μ1 isa BulkMicrophysics
     @test μ1.cloud_formation isa NonEquilibriumCloudFormation
-    @test μ1.cloud_formation.liquid === nothing
+    @test μ1.cloud_formation.liquid isa ConstantRateCondensateFormation
     @test μ1.cloud_formation.ice === nothing
+
+    # Mixed-phase non-equilibrium is signaled by `ice isa AbstractCondensateFormation`.
+    # We use a placeholder `ConstantRateCondensateFormation` and the constructor materializes
+    # relaxation parameters from `categories.cloud_ice`.
+    μ1_mixed = OneMomentCloudMicrophysics(cloud_formation = NonEquilibriumCloudFormation(nothing, ConstantRateCondensateFormation(FT(0))))
+    @test μ1_mixed.cloud_formation.ice isa ConstantRateCondensateFormation
 
     # Check prognostic fields for non-equilibrium
     prog_fields = Breeze.AtmosphereModels.prognostic_field_names(μ1)
