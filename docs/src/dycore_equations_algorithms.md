@@ -129,7 +129,7 @@ Pressure is computed from the ideal gas law using prognostic density and potenti
 p = ρ R^m T
 ```
 
-where ``p_0`` is a reference pressure (typically 10⁵ Pa), ``R^m`` is the mixture gas constant, ``θ`` is potential temperature, and ``c^{pm}`` is the mixture heat capacity at constant pressure.
+where ``ρ`` is density, ``R^m`` is the mixture gas constant, and ``T`` is temperature.
 
 For dry air, this simplifies to the classic Poisson equation relating pressure, density, and potential temperature.
 
