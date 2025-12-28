@@ -5,6 +5,8 @@
 ##### (e.g., BreezeRRTMGPExt).
 #####
 
+using Oceananigans.Grids: AbstractGrid
+
 """
 $(TYPEDSIGNATURES)
 
@@ -15,7 +17,7 @@ radiation extensions (e.g., BreezeRRTMGPExt) to compute radiative transfer.
 """
 update_radiation!(radiation, model) = nothing
 
-struct RadiativeTransferModel{FT, C, E, SP, BA, AS, LW, SW, F}
+struct RadiativeTransferModel{FT<:Number, C, E, SP, BA, AS, LW, SW, F}
     solar_constant :: FT # Scalar
     coordinate :: C # coordinates (for RectilinearGrid) for computing the solar zenith angle
     epoch :: E # optional epoch for computing time with floating-point clocks
@@ -58,7 +60,7 @@ function RadiativeTransferModel(grid, optics_flavor::Symbol, args...; kw...)
 end
 
 # Fallback for unknown optics flavors or when extension is not loaded
-function RadiativeTransferModel(grid, ::Val{S}, args...; kw...) where S
+function RadiativeTransferModel(grid::AbstractGrid, ::Val{S}, args...; kw...) where S
     msg = "Unknown optics flavor :$S. Valid options are :gray, :clear_sky.\n" *
           "Make sure RRTMGP.jl is loaded (e.g., `using RRTMGP`)."
     throw(ArgumentError(msg))
