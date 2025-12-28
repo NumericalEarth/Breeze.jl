@@ -321,7 +321,7 @@ end
 ##### Condensation/evaporation for non-equilibrium cloud formation
 #####
 #
-# The condensation rate follows Morrison and Milbrandt (2015, JAS), Eq. (A1):
+# The condensation rate follows Morrison and Grabowski (2008, JAS), Appendix Eq. (A3):
 #
 #   dqˡ/dt = (qᵛ - qᵛ⁺) / (Γˡ τˡ)
 #
@@ -338,8 +338,7 @@ end
 #
 #   dqᵛ⁺/dT = qᵛ⁺ ⋅ (ℒˡ / (Rᵛ T²) - 1/T)
 #
-# See Morrison and Grabowski (2008, JAS) Eq. (4) and Morrison and Milbrandt (2015)
-# Appendix A for derivation.
+# See Morrison and Grabowski (2008, JAS), Appendix A, especially Eq. (A3).
 #####
 """
     thermodynamic_adjustment_factor(qᵛ⁺, T, q, constants)
@@ -347,7 +346,11 @@ end
 Compute the thermodynamic adjustment factor ``Γˡ`` for condensation/evaporation.
 
 This factor accounts for the temperature dependence of saturation vapor pressure
-during phase change, following [Morrison and Milbrandt (2015)](@cite Morrison2015parameterization); eq. (A1),
+during phase change, following [Morrison and Grabowski (2008)](@cite Morrison2008novel), Appendix Eq. (A3).
+
+In cloud microphysics texts this is often described as the **psychrometric / thermal (latent-heat) correction**
+that slows diffusional growth because latent heating warms air and increases ``qᵛ⁺``; see
+[Pruppacher and Klett (2010)](@cite pruppacher2010microphysics) or [Rogers and Yau (1989)](@cite rogers1989short).
 
 ```math
 Γˡ = 1 + \\frac{ℒˡ}{cᵖᵐ} \\frac{dqᵛ⁺}{dT}
@@ -360,9 +363,11 @@ where the temperature derivative of saturation specific humidity is:
 ```
 
 # References
-* Morrison, H., and J. A. Milbrandt (2015). Parameterization of cloud microphysics based on
-    the prediction of bulk ice particle properties. Part I: Scheme description and idealized
-    tests. J. Atmos. Sci., 72, 287–311. https://doi.org/10.1175/JAS-D-14-0065.1
+* Morrison, H. and Grabowski, W. W. (2008). A novel approach for representing ice
+    microphysics in models: Description and tests using a kinematic framework.
+    J. Atmos. Sci., 65, 1528–1548. https://doi.org/10.1175/2007JAS2491.1
+* Pruppacher, H. R. and Klett, J. D. (2010). Microphysics of Clouds and Precipitation (2nd ed.).
+* Rogers, R. R. and Yau, M. K. (1989). A Short Course in Cloud Physics (3rd ed.).
 """
 @inline function thermodynamic_adjustment_factor(qᵛ⁺, T, q, constants)
     ℒˡ = liquid_latent_heat(T, constants)
@@ -380,7 +385,7 @@ Compute the condensation/evaporation rate for cloud liquid water.
 Returns the rate of change of cloud liquid mass fraction (kg/kg/s).
 Positive values indicate condensation, negative values indicate evaporation.
 
-The rate follows [Morrison and Milbrandt (2015)](@cite Morrison2015parameterization); Eq. (A1):
+The rate follows [Morrison and Grabowski (2008)](@cite Morrison2008novel), Appendix Eq. (A3):
 
 ```math
 \\frac{dqᶜˡ}{dt} = \\frac{qᵛ - qᵛ⁺}{Γˡ τˡ}
@@ -389,9 +394,9 @@ The rate follows [Morrison and Milbrandt (2015)](@cite Morrison2015parameterizat
 Evaporation is limited to the available cloud liquid to prevent negative values.
 
 # References
-* Morrison, H., and J. A. Milbrandt (2015). Parameterization of cloud microphysics based on
-    the prediction of bulk ice particle properties. Part I: Scheme description and idealized
-    tests. J. Atmos. Sci., 72, 287–311. https://doi.org/10.1175/JAS-D-14-0065.1
+* Morrison, H. and Grabowski, W. W. (2008). A novel approach for representing ice
+    microphysics in models: Description and tests using a kinematic framework.
+    J. Atmos. Sci., 65, 1528–1548. https://doi.org/10.1175/2007JAS2491.1
 """
 @inline function condensation_rate(qᵛ, qᵛ⁺, qᶜˡ, T, ρ, q, τᶜˡ, constants)
     Γˡ = thermodynamic_adjustment_factor(qᵛ⁺, T, q, constants)
@@ -526,7 +531,7 @@ end
 ##### Cloud ice tendency (non-equilibrium mixed-phase only)
 #####
 #
-# The deposition rate follows Morrison and Milbrandt (2015, JAS), Eq. (A1) but for ice:
+# The deposition rate follows Morrison and Grabowski (2008, JAS), Appendix Eq. (A3), but for ice:
 #
 #   dqⁱ/dt = (qᵛ - qᵛ⁺ⁱ) / (Γⁱ τⁱ)
 #
@@ -541,6 +546,9 @@ Compute the thermodynamic adjustment factor ``Γⁱ`` for deposition/sublimation
 
 Same as `thermodynamic_adjustment_factor` but uses ice latent heat and
 saturation over ice surface.
+
+See [Morrison and Grabowski (2008)](@cite Morrison2008novel), Appendix A, for the derivation of this
+kind of latent-heat (psychrometric/thermal) correction in relaxation formulations.
 """
 @inline function ice_thermodynamic_adjustment_factor(qᵛ⁺ⁱ, T, q, constants)
     ℒⁱ = ice_latent_heat(T, constants)
@@ -557,6 +565,10 @@ Compute the deposition/sublimation rate for cloud ice.
 
 Returns the rate of change of cloud ice mass fraction (kg/kg/s).
 Positive values indicate deposition, negative values indicate sublimation.
+
+This is the ice analogue of `condensation_rate`, following
+[Morrison and Grabowski (2008)](@cite Morrison2008novel), Appendix Eq. (A3), with ice latent heat and
+saturation over ice.
 """
 @inline function deposition_rate(qᵛ, qᵛ⁺ⁱ, qᶜⁱ, T, ρ, q, τᶜⁱ, constants)
     Γⁱ = ice_thermodynamic_adjustment_factor(qᵛ⁺ⁱ, T, q, constants)
