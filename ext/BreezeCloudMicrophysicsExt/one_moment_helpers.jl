@@ -190,8 +190,8 @@ prettysummary(vel::Blk1MVelTypeRain) = "Blk1MVelTypeRain(...)"
 prettysummary(vel::Blk1MVelTypeSnow) = "Blk1MVelTypeSnow(...)"
 
 function prettysummary(ne::NonEquilibriumCloudFormation)
-    liquid_str = isnothing(ne.liquid) ? "nothing" : "CloudLiquid(τ_relax=$(ne.liquid.τ_relax))"
-    ice_str = isnothing(ne.ice) ? "nothing" : "CloudIce(τ_relax=$(ne.ice.τ_relax))"
+    liquid_str = isnothing(ne.liquid) ? "nothing" : "liquid(τ=$(prettysummary(1/ne.liquid.rate)))"
+    ice_str = isnothing(ne.ice) ? "nothing" : "ice(τ=$(prettysummary(1/ne.ice.rate)))"
     return "NonEquilibriumCloudFormation($liquid_str, $ice_str)"
 end
 

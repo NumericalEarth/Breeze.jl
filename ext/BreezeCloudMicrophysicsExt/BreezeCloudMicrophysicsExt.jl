@@ -25,9 +25,7 @@ using Breeze.Thermodynamics:
     saturation_specific_humidity,
     supersaturation,
     liquid_latent_heat,
-    ice_latent_heat,
-    vapor_gas_constant,
-    mixture_heat_capacity
+    vapor_gas_constant
 
 using Breeze.Microphysics:
     center_field_tuple,
@@ -36,7 +34,11 @@ using Breeze.Microphysics:
     SaturationAdjustment,
     WarmPhaseSaturationAdjustment,
     MixedPhaseSaturationAdjustment,
+    AbstractCondensateFormation,
+    ConstantRateCondensateFormation,
     NonEquilibriumCloudFormation,
+    condensation_rate,
+    deposition_rate,
     adjust_thermodynamic_state
 
 using Oceananigans: Oceananigans
