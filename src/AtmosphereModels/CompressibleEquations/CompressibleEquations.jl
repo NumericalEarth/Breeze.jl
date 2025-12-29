@@ -1,5 +1,5 @@
 """
-    CompressibleDynamicses
+    CompressibleEquations
 
 Submodule implementing fully compressible dynamics for atmosphere models.
 
@@ -23,7 +23,7 @@ p = \\rho R^m T
 ```
 where ``R^m`` is the mixture gas constant.
 """
-module CompressibleDynamicses
+module CompressibleEquations
 
 export
     CompressibleDynamics
