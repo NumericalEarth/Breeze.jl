@@ -5,7 +5,7 @@
 using Oceananigans.Utils: launch!
 using Oceananigans.Operators: ℑzᵃᵃᶠ
 using Oceananigans.Grids: xnode, ynode, λnode, φnode, znodes
-using Oceananigans.Grids: Center, Face
+using Oceananigans.Grids: AbstractGrid, Center, Face
 using Oceananigans.Fields: ConstantField
 
 using Breeze.AtmosphereModels: AtmosphereModels, SurfaceRadiativeProperties, specific_humidity, BackgroundAtmosphere
@@ -45,7 +45,7 @@ RRTMGP loads lookup tables from netCDF via an extension.
 - `diffuse_surface_albedo`: Diffuse surface albedo, 0-1. Can be scalar or 2D field.
 - `solar_constant`: Top-of-atmosphere solar flux in W/m² (default: 1361)
 """
-function RadiativeTransferModel(grid,
+function RadiativeTransferModel(grid::AbstractGrid,
                                 ::Val{:clear_sky},
                                 constants::ThermodynamicConstants;
                                 background_atmosphere = BackgroundAtmosphere{eltype(grid)}(),
