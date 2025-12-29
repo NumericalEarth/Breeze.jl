@@ -26,6 +26,7 @@ struct CompressibleDynamics{D, P, FT}
     density :: D              # ρ (prognostic)
     pressure :: P             # p = ρ R^m T (diagnostic)
     standard_pressure :: FT   # pˢᵗ (reference pressure for potential temperature)
+    surface_pressure :: FT    # p₀ (mean pressure at the bottom of the atmosphere)
 end
 
 """
@@ -34,12 +35,13 @@ $(TYPEDSIGNATURES)
 Construct `CompressibleDynamics` with optional `standard_pressure` (default 10⁵ Pa).
 The density and pressure fields are materialized later in the model constructor.
 """
-CompressibleDynamics(; standard_pressure=1e5) = CompressibleDynamics(nothing, nothing, standard_pressure)
+CompressibleDynamics(; standard_pressure=1e5, surface_pressure=101325) = CompressibleDynamics(nothing, nothing, standard_pressure, surface_pressure)
 
 Adapt.adapt_structure(to, dynamics::CompressibleDynamics) =
     CompressibleDynamics(adapt(to, dynamics.density),
                          adapt(to, dynamics.pressure),
-                         dynamics.standard_pressure)
+                         dynamics.standard_pressure,
+                         dynamics.surface_pressure)
 
 #####
 ##### Materialization
@@ -57,8 +59,14 @@ function materialize_dynamics(dynamics::CompressibleDynamics, grid, boundary_con
     else
         density = CenterField(grid)  # Use default for grid topology
     end
+
     pressure = CenterField(grid)  # Diagnostic pressure from equation of state
-    return CompressibleDynamics(density, pressure, dynamics.standard_pressure)
+
+    FT = eltype(grid)
+    standard_pressure = convert(FT, dynamics.standard_pressure)
+    surface_pressure = convert(FT, dynamics.surface_pressure)
+
+    return CompressibleDynamics(density, pressure, standard_pressure, surface_pressure)
 end
 
 #####
@@ -129,7 +137,7 @@ $(TYPEDSIGNATURES)
 Return a standard surface pressure for boundary condition regularization.
 For compressible dynamics, uses the standard atmospheric pressure (101325 Pa).
 """
-surface_pressure(dynamics::CompressibleDynamics) = 101325
+surface_pressure(dynamics::CompressibleDynamics) = dynamics.surface_pressure
 
 """
 $(TYPEDSIGNATURES)
