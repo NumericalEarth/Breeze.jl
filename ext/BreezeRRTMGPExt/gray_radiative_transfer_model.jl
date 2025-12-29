@@ -8,7 +8,7 @@
 using Oceananigans.Utils: launch!
 using Oceananigans.Operators: ℑzᵃᵃᶠ
 using Oceananigans.Grids: xnode, ynode, λnode, φnode, znodes
-using Oceananigans.Grids: RectilinearGrid, Center, Face, Flat, Bounded
+using Oceananigans.Grids: AbstractGrid, RectilinearGrid, Center, Face, Flat, Bounded
 using Oceananigans.Fields: ConstantField
 using Breeze.AtmosphereModels: AtmosphereModels, SurfaceRadiativeProperties
 
@@ -54,7 +54,7 @@ Construct a gray atmosphere radiative transfer model for the given grid.
 - `diffuse_surface_albedo`: Diffuse surface albedo, 0-1. Can be scalar or 2D field.
 - `solar_constant`: Top-of-atmosphere solar flux in W/m² (default: 1361)
 """
-function RadiativeTransferModel(grid,
+function RadiativeTransferModel(grid::AbstractGrid,
                                 ::Val{:gray},
                                 constants::ThermodynamicConstants;
                                 optical_thickness = GrayOpticalThicknessOGorman2008(eltype(grid)),
