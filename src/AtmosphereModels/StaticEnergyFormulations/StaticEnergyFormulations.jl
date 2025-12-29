@@ -1,5 +1,5 @@
 """
-    StaticEnergyFormulationModule
+    StaticEnergyFormulations
 
 Submodule defining the static energy thermodynamic formulation for atmosphere models.
 
@@ -7,7 +7,7 @@ Submodule defining the static energy thermodynamic formulation for atmosphere mo
 Moist static energy is a conserved quantity in adiabatic, frictionless flow that combines
 sensible heat, gravitational potential energy, and latent heat.
 """
-module StaticEnergyFormulationModule
+module StaticEnergyFormulations
 
 export StaticEnergyFormulation
 
@@ -52,7 +52,7 @@ import Breeze.AtmosphereModels: materialize_formulation,
                                 AtmosphereModelBuoyancy,
                                 microphysical_tendency
 
-include("static_energy_formulation_type.jl")
+include("static_energy_formulation.jl")
 include("static_energy_tendency.jl")
 
 # Kernel wrapper for launching static_energy_tendency

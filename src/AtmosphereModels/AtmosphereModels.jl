@@ -112,12 +112,12 @@ using .Diagnostics
 ##### Thermodynamic formulation submodules
 #####
 
-include("StaticEnergyFormulation/StaticEnergyFormulation.jl")
-using .StaticEnergyFormulationModule:
+include("StaticEnergyFormulations/StaticEnergyFormulations.jl")
+using .StaticEnergyFormulations:
     StaticEnergyFormulation
 
-include("PotentialTemperatureFormulation/PotentialTemperatureFormulation.jl")
-using .PotentialTemperatureFormulationModule:
+include("PotentialTemperatureFormulations/PotentialTemperatureFormulations.jl")
+using .PotentialTemperatureFormulations:
     LiquidIcePotentialTemperatureFormulation
 
 # Note: Type aliases StaticEnergyModel and PotentialTemperatureModel are defined

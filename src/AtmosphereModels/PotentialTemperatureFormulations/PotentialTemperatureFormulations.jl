@@ -1,12 +1,12 @@
 """
-    PotentialTemperatureFormulationModule
+    PotentialTemperatureFormulations
 
 Submodule defining the liquid-ice potential temperature thermodynamic formulation for atmosphere models.
 
 `LiquidIcePotentialTemperatureFormulation` uses liquid-ice potential temperature density `ρθ`
 as the prognostic thermodynamic variable.
 """
-module PotentialTemperatureFormulationModule
+module PotentialTemperatureFormulations
 
 export LiquidIcePotentialTemperatureFormulation
 
@@ -49,7 +49,7 @@ import Breeze.AtmosphereModels: materialize_formulation,
                                 AtmosphereModelBuoyancy,
                                 microphysical_tendency
 
-include("potential_temperature_formulation_type.jl")
+include("potential_temperature_formulation.jl")
 include("potential_temperature_tendency.jl")
 
 # Kernel wrapper for launching potential_temperature_tendency
