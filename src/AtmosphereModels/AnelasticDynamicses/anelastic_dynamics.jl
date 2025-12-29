@@ -29,7 +29,7 @@ AnelasticDynamics(reference_state) = AnelasticDynamics(reference_state, nothing)
 
 Adapt.adapt_structure(to, dynamics::AnelasticDynamics) =
     AnelasticDynamics(adapt(to, dynamics.reference_state),
-                          adapt(to, dynamics.pressure_anomaly))
+                      adapt(to, dynamics.pressure_anomaly))
 
 #####
 ##### Default dynamics and materialization
@@ -137,7 +137,7 @@ $(TYPEDSIGNATURES)
 
 Return the standard pressure from the reference state for potential temperature calculations.
 """
-dynamics_standard_pressure(dynamics::AnelasticDynamics) = dynamics.reference_state.standard_pressure
+standard_pressure(dynamics::AnelasticDynamics) = dynamics.reference_state.standard_pressure
 
 #####
 ##### Show methods

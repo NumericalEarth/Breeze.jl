@@ -86,7 +86,7 @@ function diagnose_thermodynamic_state(i, j, k, grid,
 
     θ = @inbounds formulation.potential_temperature[i, j, k]
     pᵣ = @inbounds dynamics_pressure(dynamics)[i, j, k]
-    pˢᵗ = dynamics_standard_pressure(dynamics)
+    pˢᵗ = standard_pressure(dynamics)
 
     return LiquidIcePotentialTemperatureState(θ, q, pˢᵗ, pᵣ)
 end

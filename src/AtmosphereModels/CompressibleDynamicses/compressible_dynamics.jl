@@ -136,7 +136,7 @@ $(TYPEDSIGNATURES)
 
 Return the standard pressure for potential temperature calculations.
 """
-dynamics_standard_pressure(dynamics::CompressibleDynamics) = dynamics.standard_pressure
+standard_pressure(dynamics::CompressibleDynamics) = dynamics.standard_pressure
 
 #####
 ##### Pressure solver (none needed for compressible dynamics)

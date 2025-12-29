@@ -156,7 +156,7 @@ end
     𝒰e₁ = maybe_adjust_thermodynamic_state(i, j, k, 𝒰e₀, microphysics, ρᵣ, microphysical_fields, qᵗ, constants)
     T = temperature(𝒰e₁, constants)
 
-    pˢᵗ = dynamics_standard_pressure(dynamics)
+    pˢᵗ = standard_pressure(dynamics)
     q₁ = 𝒰e₁.moisture_mass_fractions
     𝒰θ = LiquidIcePotentialTemperatureState(zero(T), q₁, pˢᵗ, pᵣ)
     𝒰θ = with_temperature(𝒰θ, T, constants)
@@ -225,7 +225,7 @@ end
     q = compute_moisture_fractions(i, j, k, grid, microphysics, ρᵣ, qᵗ, microphysical_fields)
 
     # Convert temperature to potential temperature using the inverse of the T(θ) relation
-    pˢᵗ = dynamics_standard_pressure(dynamics)
+    pˢᵗ = standard_pressure(dynamics)
     𝒰₀ = LiquidIcePotentialTemperatureState(zero(T), q, pˢᵗ, pᵣ)
     𝒰₁ = with_temperature(𝒰₀, T, constants)
     θ = 𝒰₁.potential_temperature

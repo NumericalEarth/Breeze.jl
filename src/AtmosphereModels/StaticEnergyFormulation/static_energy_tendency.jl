@@ -147,7 +147,7 @@ end
         θ = potential_temperature[i, j, k]
     end
 
-    pˢᵗ = dynamics_standard_pressure(dynamics)
+    pˢᵗ = standard_pressure(dynamics)
     q = compute_moisture_fractions(i, j, k, grid, microphysics, ρᵣ, qᵗ, microphysical_fields)
     𝒰θ₀ = LiquidIcePotentialTemperatureState(θ, q, pˢᵗ, pᵣ)
     𝒰θ₁ = maybe_adjust_thermodynamic_state(i, j, k, 𝒰θ₀, microphysics, ρᵣ, microphysical_fields, qᵗ, constants)

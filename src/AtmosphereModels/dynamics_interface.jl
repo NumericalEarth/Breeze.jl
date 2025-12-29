@@ -120,12 +120,12 @@ For compressible dynamics, this may be a constant or computed value.
 function dynamics_surface_pressure end
 
 """
-    dynamics_standard_pressure(dynamics)
+    standard_pressure(dynamics)
 
 Return the standard pressure used for potential temperature calculations.
 Default is 100000 Pa (1000 hPa).
 """
-dynamics_standard_pressure(dynamics) = 100000.0  # Pa
+standard_pressure(dynamics) = 100000.0  # Pa
 
 """
     initialize_model_thermodynamics!(model)

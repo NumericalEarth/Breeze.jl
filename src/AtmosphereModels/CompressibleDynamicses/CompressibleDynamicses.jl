@@ -44,7 +44,7 @@ import Breeze.AtmosphereModels:
     dynamics_density,
     dynamics_pressure,
     dynamics_surface_pressure,
-    dynamics_standard_pressure,
+    standard_pressure,
     mean_pressure,
     pressure_anomaly,
     total_pressure,
