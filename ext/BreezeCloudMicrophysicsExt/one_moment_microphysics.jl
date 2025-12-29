@@ -7,10 +7,6 @@
 # cloud formation.
 #
 # References:
-#   - Morrison, H., and J. A. Milbrandt (2015). Parameterization of cloud microphysics
-#     based on the prediction of bulk ice particle properties. Part I: Scheme description
-#     and idealized tests. J. Atmos. Sci., 72, 287–311. https://doi.org/10.1175/JAS-D-14-0065.1
-#
 #   - Morrison, H. and Grabowski, W.W. (2008). A novel approach for representing ice
 #     microphysics in models: Description and tests using a kinematic framework.
 #     J. Atmos. Sci., 65, 1528–1548. https://doi.org/10.1175/2007JAS2491.1
@@ -36,7 +32,7 @@ const OneMomentCloudMicrophysics = BulkMicrophysics{<:Any, <:CM1MCategories, <:A
 
 """
     OneMomentCloudMicrophysics(FT = Oceananigans.defaults.FloatType;
-                               cloud_formation = NonEquilibriumCloudFormation(CloudLiquid(FT), nothing),
+                               cloud_formation = NonEquilibriumCloudFormation(nothing, nothing),
                                categories = one_moment_cloud_microphysics_categories(FT),
                                precipitation_boundary_condition = nothing)
 
@@ -50,7 +46,7 @@ The one-moment scheme uses CloudMicrophysics.jl 1M processes:
 
 By default, non-equilibrium cloud formation is used, where cloud liquid is a prognostic
 variable that evolves via condensation/evaporation tendencies following
-[Morrison and Milbrandt (2015)](@cite Morrison2015parameterization).
+[Morrison and Grabowski (2008)](@cite Morrison2008novel) (see Appendix A).
 The prognostic variables are `ρqᶜˡ` (cloud liquid mass density) and `ρqʳ` (rain mass density).
 
 For equilibrium (saturation adjustment) cloud formation, pass:
@@ -71,17 +67,44 @@ SaturationAdjustment{WarmPhaseEquilibrium, Float64}(0.001, Inf, WarmPhaseEquilib
 See the [CloudMicrophysics.jl documentation](https://clima.github.io/CloudMicrophysics.jl/dev/) for details.
 
 # References
-* Morrison, H., and J. A. Milbrandt (2015). Parameterization of cloud microphysics based on
-    the prediction of bulk ice particle properties. Part I: Scheme description and idealized
-    tests. J. Atmos. Sci., 72, 287–311. https://doi.org/10.1175/JAS-D-14-0065.1
+* Morrison, H. and Grabowski, W. W. (2008). A novel approach for representing ice
+    microphysics in models: Description and tests using a kinematic framework.
+    J. Atmos. Sci., 65, 1528–1548. https://doi.org/10.1175/2007JAS2491.1
 """
 function OneMomentCloudMicrophysics(FT::DataType = Oceananigans.defaults.FloatType;
-                                    cloud_formation = NonEquilibriumCloudFormation(CloudLiquid(FT), nothing),
+                                    cloud_formation = NonEquilibriumCloudFormation(nothing, nothing),
                                     categories = one_moment_cloud_microphysics_categories(FT),
                                     precipitation_boundary_condition = nothing)
 
+    # If `cloud_formation` is a `NonEquilibriumCloudFormation`, materialize `ConstantRateCondensateFormation`
+    # models from the category parameters. The `rate` field stores `1/τ_relax`.
+    # This allows users to pass:
+    #   - `nothing` as a placeholder → replaced with rate from categories
+    #   - `CloudLiquid` / `CloudIce` → replaced with rate from categories (ignoring the CM1M struct)
+    #   - An `AbstractCondensateFormation` → used as-is
+    if cloud_formation isa NonEquilibriumCloudFormation
+        liquid = cloud_formation.liquid
+        ice = cloud_formation.ice
+
+        # Liquid: always materialize unless already an AbstractCondensateFormation
+        liquid = materialize_condensate_formation(liquid, categories.cloud_liquid)
+
+        # Ice: `nothing` → warm-phase (no ice), otherwise materialize
+        ice = ifelse(ice === nothing,
+                     nothing,
+                     materialize_condensate_formation(ice, categories.cloud_ice))
+
+        cloud_formation = NonEquilibriumCloudFormation(liquid, ice)
+    end
+
     return BulkMicrophysics(cloud_formation, categories, precipitation_boundary_condition)
 end
+
+# Materialize a condensate-formation model from a placeholder or category parameter.
+# If already an AbstractCondensateFormation, return as-is.
+materialize_condensate_formation(cf::AbstractCondensateFormation, category) = cf
+materialize_condensate_formation(::Nothing, category) = ConstantRateCondensateFormation(1 / category.τ_relax)
+materialize_condensate_formation(::Any, category) = ConstantRateCondensateFormation(1 / category.τ_relax)
 
 #####
 ##### Default fallbacks for OneMomentCloudMicrophysics
@@ -111,24 +134,41 @@ const IBC = BoundaryCondition{<:Open, Nothing}
 ##### Type aliases
 #####
 
+# Shorthand for AbstractCondensateFormation (used in type constraints below)
+const ACF = AbstractCondensateFormation
+
 # Warm-phase saturation adjustment with 1M precipitation
 const WP1M = BulkMicrophysics{<:WarmPhaseSaturationAdjustment, <:CM1MCategories, <:Any}
 
 # Mixed-phase saturation adjustment with 1M precipitation
 const MP1M = BulkMicrophysics{<:MixedPhaseSaturationAdjustment, <:CM1MCategories, <:Any}
 
+# Non-equilibrium cloud formation type aliases (liquid only vs liquid + ice)
+const WarmPhaseNE = NonEquilibriumCloudFormation{<:ACF, Nothing}
+const MixedPhaseNE = NonEquilibriumCloudFormation{<:ACF, <:ACF}
+
 # Warm-phase non-equilibrium with 1M precipitation
-const WarmPhaseNonEquilibrium1M = BulkMicrophysics{<:NonEquilibriumCloudFormation{<:CloudLiquid, Nothing}, <:CM1MCategories, <:Any}
+const WarmPhaseNonEquilibrium1M = BulkMicrophysics{<:WarmPhaseNE, <:CM1MCategories, <:Any}
 const WPNE1M = WarmPhaseNonEquilibrium1M
 
 # Mixed-phase non-equilibrium with 1M precipitation
-const MixedPhaseNonEquilibrium1M = BulkMicrophysics{<:NonEquilibriumCloudFormation{<:CloudLiquid, <:CloudIce}, <:CM1MCategories, <:Any}
+const MixedPhaseNonEquilibrium1M = BulkMicrophysics{<:MixedPhaseNE, <:CM1MCategories, <:Any}
 const MPNE1M = MixedPhaseNonEquilibrium1M
 
 # Union types for dispatch
 const WarmPhase1M = Union{WP1M, WPNE1M}
 const NonEquilibrium1M = Union{WPNE1M, MPNE1M}
 const OneMomentLiquidRain = Union{WP1M, WPNE1M, MP1M, MPNE1M}
+
+#####
+##### Relaxation timescales for non-equilibrium schemes
+#####
+#
+# The `ConstantRateCondensateFormation.rate` field stores `1/τ_relax`, so we invert it.
+
+@inline liquid_relaxation_timescale(cloud_formation, categories) = 1 / cloud_formation.liquid.rate
+@inline ice_relaxation_timescale(cloud_formation::NonEquilibriumCloudFormation{<:Any, Nothing}, categories) = nothing
+@inline ice_relaxation_timescale(cloud_formation, categories) = 1 / cloud_formation.ice.rate
 
 #####
 ##### Prognostic field names
@@ -321,7 +361,7 @@ end
 ##### Condensation/evaporation for non-equilibrium cloud formation
 #####
 #
-# The condensation rate follows Morrison and Milbrandt (2015, JAS), Eq. (A1):
+# The condensation rate follows Morrison and Grabowski (2008, JAS), Appendix Eq. (A3):
 #
 #   dqˡ/dt = (qᵛ - qᵛ⁺) / (Γˡ τˡ)
 #
@@ -338,71 +378,11 @@ end
 #
 #   dqᵛ⁺/dT = qᵛ⁺ ⋅ (ℒˡ / (Rᵛ T²) - 1/T)
 #
-# See Morrison and Grabowski (2008, JAS) Eq. (4) and Morrison and Milbrandt (2015)
-# Appendix A for derivation.
+# See Morrison and Grabowski (2008, JAS), Appendix A, especially Eq. (A3).
 #####
-"""
-    thermodynamic_adjustment_factor(qᵛ⁺, T, q, constants)
-
-Compute the thermodynamic adjustment factor ``Γˡ`` for condensation/evaporation.
-
-This factor accounts for the temperature dependence of saturation vapor pressure
-during phase change, following [Morrison and Milbrandt (2015)](@cite Morrison2015parameterization); eq. (A1),
-
-```math
-Γˡ = 1 + \\frac{ℒˡ}{cᵖᵐ} \\frac{dqᵛ⁺}{dT}
-```
-
-where the temperature derivative of saturation specific humidity is:
-
-```math
-\\frac{dqᵛ⁺}{dT} = qᵛ⁺ \\left( \\frac{ℒˡ}{Rᵛ T²} - \\frac{1}{T} \\right)
-```
-
-# References
-* Morrison, H., and J. A. Milbrandt (2015). Parameterization of cloud microphysics based on
-    the prediction of bulk ice particle properties. Part I: Scheme description and idealized
-    tests. J. Atmos. Sci., 72, 287–311. https://doi.org/10.1175/JAS-D-14-0065.1
-"""
-@inline function thermodynamic_adjustment_factor(qᵛ⁺, T, q, constants)
-    ℒˡ = liquid_latent_heat(T, constants)
-    cᵖᵐ = mixture_heat_capacity(q, constants)
-    Rᵛ = vapor_gas_constant(constants)
-    dqᵛ⁺_dT = qᵛ⁺ * (ℒˡ / (Rᵛ * T^2) - 1 / T)
-    return 1 + (ℒˡ / cᵖᵐ) * dqᵛ⁺_dT
-end
-
-"""
-    condensation_rate(qᵛ, qᵛ⁺, qᶜˡ, T, ρ, q, τᶜˡ, constants)
-
-Compute the condensation/evaporation rate for cloud liquid water.
-
-Returns the rate of change of cloud liquid mass fraction (kg/kg/s).
-Positive values indicate condensation, negative values indicate evaporation.
-
-The rate follows [Morrison and Milbrandt (2015)](@cite Morrison2015parameterization); Eq. (A1):
-
-```math
-\\frac{dqᶜˡ}{dt} = \\frac{qᵛ - qᵛ⁺}{Γˡ τˡ}
-```
-
-Evaporation is limited to the available cloud liquid to prevent negative values.
-
-# References
-* Morrison, H., and J. A. Milbrandt (2015). Parameterization of cloud microphysics based on
-    the prediction of bulk ice particle properties. Part I: Scheme description and idealized
-    tests. J. Atmos. Sci., 72, 287–311. https://doi.org/10.1175/JAS-D-14-0065.1
-"""
-@inline function condensation_rate(qᵛ, qᵛ⁺, qᶜˡ, T, ρ, q, τᶜˡ, constants)
-    Γˡ = thermodynamic_adjustment_factor(qᵛ⁺, T, q, constants)
-    Sᶜᵒⁿᵈ = (qᵛ - qᵛ⁺) / (Γˡ * τᶜˡ)
-
-    # Limit evaporation to available cloud liquid
-    Sᶜᵒⁿᵈ_min = -max(0, qᶜˡ) / τᶜˡ
-    Sᶜᵒⁿᵈ = max(Sᶜᵒⁿᵈ, Sᶜᵒⁿᵈ_min)
-
-    return Sᶜᵒⁿᵈ
-end
+#
+# `thermodynamic_adjustment_factor` and `condensation_rate` are defined in `Breeze.Microphysics`
+# so they can be shared by multiple bulk microphysics schemes.
 
 #####
 ##### Rain tendency (shared by all 1M schemes)
@@ -461,7 +441,7 @@ end
 
 @inline function microphysical_tendency(i, j, k, grid, bμp::WPNE1M, ::Val{:ρqᶜˡ}, ρ, μ, 𝒰, constants)
     categories = bμp.categories
-    τᶜˡ = bμp.cloud_formation.liquid.τ_relax
+    τᶜˡ = liquid_relaxation_timescale(bμp.cloud_formation, categories)
     ρⁱʲᵏ = ρ
 
     @inbounds qᶜˡ = μ.qᶜˡ[i, j, k]
@@ -497,7 +477,7 @@ end
 # Mixed-phase non-equilibrium: same as warm-phase for cloud liquid
 @inline function microphysical_tendency(i, j, k, grid, bμp::MPNE1M, ::Val{:ρqᶜˡ}, ρ, μ, 𝒰, constants)
     categories = bμp.categories
-    τᶜˡ = bμp.cloud_formation.liquid.τ_relax
+    τᶜˡ = liquid_relaxation_timescale(bμp.cloud_formation, categories)
     ρⁱʲᵏ = ρ
 
     @inbounds qᶜˡ = μ.qᶜˡ[i, j, k]
@@ -526,51 +506,20 @@ end
 ##### Cloud ice tendency (non-equilibrium mixed-phase only)
 #####
 #
-# The deposition rate follows Morrison and Milbrandt (2015, JAS), Eq. (A1) but for ice:
+# The deposition rate follows Morrison and Grabowski (2008, JAS), Appendix Eq. (A3), but for ice:
 #
 #   dqⁱ/dt = (qᵛ - qᵛ⁺ⁱ) / (Γⁱ τⁱ)
 #
 # where qᵛ⁺ⁱ is the saturation specific humidity over ice, τⁱ is the ice relaxation
 # timescale, and Γⁱ is the thermodynamic adjustment factor using ice latent heat.
 #####
-
-"""
-    ice_thermodynamic_adjustment_factor(qᵛ⁺ⁱ, T, q, constants)
-
-Compute the thermodynamic adjustment factor ``Γⁱ`` for deposition/sublimation.
-
-Same as `thermodynamic_adjustment_factor` but uses ice latent heat and
-saturation over ice surface.
-"""
-@inline function ice_thermodynamic_adjustment_factor(qᵛ⁺ⁱ, T, q, constants)
-    ℒⁱ = ice_latent_heat(T, constants)
-    cᵖᵐ = mixture_heat_capacity(q, constants)
-    Rᵛ = vapor_gas_constant(constants)
-    dqᵛ⁺ⁱ_dT = qᵛ⁺ⁱ * (ℒⁱ / (Rᵛ * T^2) - 1 / T)
-    return 1 + (ℒⁱ / cᵖᵐ) * dqᵛ⁺ⁱ_dT
-end
-
-"""
-    deposition_rate(qᵛ, qᵛ⁺ⁱ, qᶜⁱ, T, ρ, q, τᶜⁱ, constants)
-
-Compute the deposition/sublimation rate for cloud ice.
-
-Returns the rate of change of cloud ice mass fraction (kg/kg/s).
-Positive values indicate deposition, negative values indicate sublimation.
-"""
-@inline function deposition_rate(qᵛ, qᵛ⁺ⁱ, qᶜⁱ, T, ρ, q, τᶜⁱ, constants)
-    Γⁱ = ice_thermodynamic_adjustment_factor(qᵛ⁺ⁱ, T, q, constants)
-    Sᵈᵉᵖ = (qᵛ - qᵛ⁺ⁱ) / (Γⁱ * τᶜⁱ)
-
-    # Limit sublimation to available cloud ice
-    Sᵈᵉᵖ_min = -max(0, qᶜⁱ) / τᶜⁱ
-    Sᵈᵉᵖ = max(Sᵈᵉᵖ, Sᵈᵉᵖ_min)
-
-    return Sᵈᵉᵖ
-end
+#
+# `ice_thermodynamic_adjustment_factor` and `deposition_rate` are defined in `Breeze.Microphysics`
+# so they can be shared by multiple bulk microphysics schemes.
 
 @inline function microphysical_tendency(i, j, k, grid, bμp::MPNE1M, ::Val{:ρqᶜⁱ}, ρ, μ, 𝒰, constants)
-    τᶜⁱ = bμp.cloud_formation.ice.τ_relax
+    categories = bμp.categories
+    τᶜⁱ = ice_relaxation_timescale(bμp.cloud_formation, categories)
     ρⁱʲᵏ = ρ
 
     @inbounds qᶜⁱ = μ.qᶜⁱ[i, j, k]
