@@ -123,7 +123,7 @@ function compute_pressure_from_prognostics!(model::CompressibleModel)
     grid = model.grid
     arch = grid.architecture
 
-    p₀ = dynamics_surface_pressure(model.dynamics)
+    p₀ = surface_pressure(model.dynamics)
 
     launch!(arch, grid, :xyz,
             _compute_pressure_from_potential_temperature!,

@@ -111,13 +111,13 @@ function buoyancy_forceᶜᶜᶜ end
 #####
 
 """
-    dynamics_surface_pressure(dynamics)
+    surface_pressure(dynamics)
 
 Return the surface pressure used for boundary condition regularization.
 For anelastic dynamics, this is the reference state surface pressure.
 For compressible dynamics, this may be a constant or computed value.
 """
-function dynamics_surface_pressure end
+function surface_pressure end
 
 """
     standard_pressure(dynamics)
@@ -125,7 +125,7 @@ function dynamics_surface_pressure end
 Return the standard pressure used for potential temperature calculations.
 Default is 100000 Pa (1000 hPa).
 """
-standard_pressure(dynamics) = 100000.0  # Pa
+function standard_pressure end
 
 """
     initialize_model_thermodynamics!(model)

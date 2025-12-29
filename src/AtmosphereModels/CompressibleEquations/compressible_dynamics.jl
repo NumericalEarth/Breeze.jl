@@ -129,7 +129,7 @@ $(TYPEDSIGNATURES)
 Return a standard surface pressure for boundary condition regularization.
 For compressible dynamics, uses the standard atmospheric pressure (101325 Pa).
 """
-dynamics_surface_pressure(dynamics::CompressibleDynamics) = 101325.0
+surface_pressure(dynamics::CompressibleDynamics) = 101325
 
 """
 $(TYPEDSIGNATURES)
