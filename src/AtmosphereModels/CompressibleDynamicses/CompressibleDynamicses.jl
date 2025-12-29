@@ -1,5 +1,5 @@
 """
-    CompressibleDynamicsModule
+    CompressibleDynamicses
 
 Submodule implementing fully compressible dynamics for atmosphere models.
 
@@ -23,7 +23,7 @@ p = \\rho R^m T
 ```
 where ``R^m`` is the mixture gas constant.
 """
-module CompressibleDynamicsModule
+module CompressibleDynamicses
 
 export
     CompressibleDynamics
@@ -44,6 +44,7 @@ import Breeze.AtmosphereModels:
     dynamics_density,
     dynamics_pressure,
     dynamics_surface_pressure,
+    dynamics_standard_pressure,
     mean_pressure,
     pressure_anomaly,
     total_pressure,
@@ -52,7 +53,7 @@ import Breeze.AtmosphereModels:
     additional_dynamics_field_names,
     dynamics_prognostic_fields
 
-include("compressible_dynamics_type.jl")
+include("compressible_dynamics.jl")
 include("compressible_buoyancy.jl")
 
 end # module

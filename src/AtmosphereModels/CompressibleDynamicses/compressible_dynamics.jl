@@ -3,7 +3,7 @@
 #####
 
 """
-    CompressibleDynamics{D, P, C}
+    CompressibleDynamics{D, P, FT}
 
 Represents fully compressible dynamics with prognostic density.
 
@@ -14,7 +14,7 @@ explicit time-stepping with appropriate CFL conditions.
 # Fields
 - `density`: Prognostic density field `ρ`
 - `pressure`: Pressure field computed from ideal gas law `p = ρ R^m T`
-- `constants`: Thermodynamic constants used for pressure computation
+- `standard_pressure`: Reference pressure for potential temperature calculations (pˢᵗ, default 10⁵ Pa)
 
 # Key differences from AnelasticDynamics
 - Density `ρ` is prognostic (time-stepped), not a fixed reference state
@@ -22,24 +22,24 @@ explicit time-stepping with appropriate CFL conditions.
 - No pressure solver is required
 - Acoustic waves are resolved (not filtered)
 """
-struct CompressibleDynamics{D, P, C}
-    density :: D     # ρ (prognostic)
-    pressure :: P    # p = ρ R^m T (diagnostic)
-    constants :: C   # Thermodynamic constants for equation of state
+struct CompressibleDynamics{D, P, FT}
+    density :: D              # ρ (prognostic)
+    pressure :: P             # p = ρ R^m T (diagnostic)
+    standard_pressure :: FT   # pˢᵗ (reference pressure for potential temperature)
 end
 
 """
 $(TYPEDSIGNATURES)
 
-Construct `CompressibleDynamics` with thermodynamic constants.
+Construct `CompressibleDynamics` with optional `standard_pressure` (default 10⁵ Pa).
 The density and pressure fields are materialized later in the model constructor.
 """
-CompressibleDynamics(; constants=nothing) = CompressibleDynamics(nothing, nothing, constants)
+CompressibleDynamics(; standard_pressure=1e5) = CompressibleDynamics(nothing, nothing, standard_pressure)
 
 Adapt.adapt_structure(to, dynamics::CompressibleDynamics) =
     CompressibleDynamics(adapt(to, dynamics.density),
                          adapt(to, dynamics.pressure),
-                         adapt(to, dynamics.constants))
+                         dynamics.standard_pressure)
 
 #####
 ##### Materialization
@@ -58,7 +58,7 @@ function materialize_dynamics(dynamics::CompressibleDynamics, grid, boundary_con
         density = CenterField(grid)  # Use default for grid topology
     end
     pressure = CenterField(grid)  # Diagnostic pressure from equation of state
-    return CompressibleDynamics(density, pressure, dynamics.constants)
+    return CompressibleDynamics(density, pressure, dynamics.standard_pressure)
 end
 
 #####
@@ -130,6 +130,13 @@ Return a standard surface pressure for boundary condition regularization.
 For compressible dynamics, uses the standard atmospheric pressure (101325 Pa).
 """
 dynamics_surface_pressure(dynamics::CompressibleDynamics) = 101325.0
+
+"""
+$(TYPEDSIGNATURES)
+
+Return the standard pressure for potential temperature calculations.
+"""
+dynamics_standard_pressure(dynamics::CompressibleDynamics) = dynamics.standard_pressure
 
 #####
 ##### Pressure solver (none needed for compressible dynamics)

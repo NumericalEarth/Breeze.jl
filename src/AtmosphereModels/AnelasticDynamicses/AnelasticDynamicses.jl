@@ -1,5 +1,5 @@
 """
-    AnelasticDynamicsModule
+    AnelasticDynamicses
 
 Submodule implementing anelastic dynamics for atmosphere models.
 
@@ -7,7 +7,7 @@ The anelastic approximation filters acoustic waves by assuming density and press
 are small perturbations from a dry, hydrostatic, adiabatic reference state.
 The key constraint is that mass flux divergence vanishes: `∇⋅(ρᵣ u) = 0`.
 """
-module AnelasticDynamicsModule
+module AnelasticDynamicses
 
 export
     AnelasticDynamics,
@@ -48,7 +48,7 @@ import Breeze.AtmosphereModels:
 # Import microphysics interface for buoyancy computation
 import Breeze.AtmosphereModels: compute_moisture_fractions
 
-include("anelastic_dynamics_type.jl")
+include("anelastic_dynamics.jl")
 include("anelastic_pressure_solver.jl")
 include("anelastic_buoyancy.jl")
 

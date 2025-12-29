@@ -52,10 +52,10 @@ end
 @inline function virtual_potential_temperature(i, j, k, grid, constants, dynamics, T, qᵗ)
     pᵣ_field = dynamics_pressure(dynamics)
     @inbounds pᵣ = pᵣ_field[i, j, k]
-    p₀ = dynamics_surface_pressure(dynamics)
+    pˢᵗ = dynamics_standard_pressure(dynamics)
     q = @inbounds MoistureMassFractions(qᵗ[i, j, k])
     Rᵐ = mixture_gas_constant(q, constants)
     Rᵈ = dry_air_gas_constant(constants)
     cᵖᵐ = mixture_heat_capacity(q, constants)
-    return @inbounds Rᵐ / Rᵈ * T[i, j, k] * (p₀ / pᵣ)^(Rᵐ / cᵖᵐ)
+    return @inbounds Rᵐ / Rᵈ * T[i, j, k] * (pˢᵗ / pᵣ)^(Rᵐ / cᵖᵐ)
 end

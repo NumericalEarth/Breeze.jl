@@ -28,17 +28,17 @@ Modules = [Breeze.AtmosphereModels]
 Private = false
 ```
 
-### AtmosphereModels.AnelasticDynamicsModule
+### AtmosphereModels.AnelasticDynamicses
 
 ```@autodocs
-Modules = [Breeze.AtmosphereModels.AnelasticDynamicsModule]
+Modules = [Breeze.AtmosphereModels.AnelasticDynamicses]
 Private = false
 ```
 
-### AtmosphereModels.CompressibleDynamicsModule
+### AtmosphereModels.CompressibleDynamicses
 
 ```@autodocs
-Modules = [Breeze.AtmosphereModels.CompressibleDynamicsModule]
+Modules = [Breeze.AtmosphereModels.CompressibleDynamicses]
 Private = false
 ```
 
@@ -140,17 +140,17 @@ Modules = [Breeze.AtmosphereModels]
 Public = false
 ```
 
-### AtmosphereModels.AnelasticDynamicsModule
+### AtmosphereModels.AnelasticDynamicses
 
 ```@autodocs
-Modules = [Breeze.AtmosphereModels.AnelasticDynamicsModule]
+Modules = [Breeze.AtmosphereModels.AnelasticDynamicses]
 Public = false
 ```
 
-### AtmosphereModels.CompressibleDynamicsModule
+### AtmosphereModels.CompressibleDynamicses
 
 ```@autodocs
-Modules = [Breeze.AtmosphereModels.CompressibleDynamicsModule]
+Modules = [Breeze.AtmosphereModels.CompressibleDynamicses]
 Public = false
 ```
 

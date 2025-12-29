@@ -71,13 +71,13 @@ include("formulation_interface.jl")
 ##### Dynamics submodules
 #####
 
-include("AnelasticDynamics/AnelasticDynamics.jl")
-using .AnelasticDynamicsModule:
+include("AnelasticDynamicses/AnelasticDynamicses.jl")
+using .AnelasticDynamicses:
     AnelasticDynamics,
     solve_for_anelastic_pressure!
 
-include("CompressibleDynamics/CompressibleDynamics.jl")
-using .CompressibleDynamicsModule:
+include("CompressibleDynamicses/CompressibleDynamicses.jl")
+using .CompressibleDynamicses:
     CompressibleDynamics
 
 #####
