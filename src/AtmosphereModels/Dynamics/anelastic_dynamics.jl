@@ -142,4 +142,3 @@ function materialize_momentum_and_velocities(dynamics::AnelasticDynamics, grid, 
 
     return momentum, velocities
 end
-

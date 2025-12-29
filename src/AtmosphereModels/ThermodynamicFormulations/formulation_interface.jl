@@ -12,7 +12,7 @@
 """
     materialize_formulation(formulation, dynamics, grid, boundary_conditions)
 
-Materialize a thermodynamic formulation from a Symbol (or formulation struct) into a 
+Materialize a thermodynamic formulation from a Symbol (or formulation struct) into a
 complete formulation with all required fields.
 
 Valid symbols:
@@ -85,7 +85,7 @@ function compute_auxiliary_thermodynamic_variables! end
 """
     diagnose_thermodynamic_state(i, j, k, grid, formulation, dynamics, q)
 
-Diagnose the thermodynamic state at grid point `(i, j, k)` from the given `formulation`, 
+Diagnose the thermodynamic state at grid point `(i, j, k)` from the given `formulation`,
 `dynamics`, and pre-computed moisture mass fractions `q`.
 
 Note: This function does NOT compute moisture fractions internally to avoid circular dependencies.
@@ -103,4 +103,3 @@ function diagnose_thermodynamic_state end
 Compute the thermodynamic tendency. Dispatches on the thermodynamic formulation type.
 """
 function compute_thermodynamic_tendency! end
-
