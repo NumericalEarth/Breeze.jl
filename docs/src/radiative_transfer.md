@@ -8,10 +8,11 @@ The simplest radiative transfer option is gray atmosphere radiation, which uses 
 
 ### Basic Usage
 
-To use gray radiation in a Breeze simulation, create a [`RadiativeTransferModel`](@ref) model with the `:gray` optics flavor and pass it to the [`AtmosphereModel`](@ref) constructor:
+To use gray radiation in a Breeze simulation, create a [`RadiativeTransferModel`](@ref) model with the [`GrayOptics`](@ref) optics flavor and pass it to the [`AtmosphereModel`](@ref) constructor:
 
 ```@example
 using Breeze
+using Breeze.AtmosphereModels
 using Oceananigans.Units
 using Dates
 using RRTMGP
@@ -32,7 +33,7 @@ reference_state = ReferenceState(grid, constants;
 dynamics = AnelasticDynamics(reference_state)
 
 # Create gray radiation model
-radiation = RadiativeTransferModel(grid, :gray, constants;
+radiation = RadiativeTransferModel(grid, GrayOptics(), constants;
                                    surface_temperature,
                                    surface_emissivity = 0.98,
                                    surface_albedo = 0.1,
@@ -100,12 +101,12 @@ The calculation accounts for:
 
 ## Clear-sky Full-spectrum Radiation
 
-For more accurate radiative transfer calculations, use the `:clear_sky` optics flavor which computes full-spectrum gas optics using RRTMGP's lookup tables:
+For more accurate radiative transfer calculations, use the [`ClearSkyOptics`](@ref) optics flavor which computes full-spectrum gas optics using RRTMGP's lookup tables:
 
 ```julia
 using NCDatasets  # Required for RRTMGP lookup tables
 
-radiation = RadiativeTransferModel(grid, :clear_sky, constants;
+radiation = RadiativeTransferModel(grid, ClearSkyOptics(), constants;
                                    surface_temperature,
                                    surface_emissivity = 0.98,
                                    surface_albedo = 0.1,
