@@ -47,7 +47,7 @@ export
     StaticEnergy,
     compute_hydrostatic_pressure!
 
-using DocStringExtensions: TYPEDSIGNATURES
+using DocStringExtensions: TYPEDSIGNATURES, TYPEDEF
 using Adapt: Adapt, adapt
 using KernelAbstractions: @kernel, @index
 

@@ -31,8 +31,23 @@ struct RadiativeTransferModel{FT<:Number, C, E, SP, BA, AS, LW, SW, F}
     downwelling_shortwave_flux :: F
 end
 
+"""
+$(TYPEDEF)
+
+Abstract type representing optics for [`RadiativeTransferModel`](@ref).
+"""
 abstract type AbstractOptics end
+"""
+$(TYPEDEF)
+
+Type representing gray atmosphere radiation ([O'Gorman & Schneider 2008](@cite OGormanSchneider2008)), can be used as optics argument in [`RadiativeTransferModel`](@ref).
+"""
 struct GrayOptics <: AbstractOptics end
+"""
+$(TYPEDEF)
+
+Type representing full-spectrum clear-sky radiation using RRTMGP gas optics, can be used as optics argument in [`RadiativeTransferModel`](@ref).
+"""
 struct ClearSkyOptics <: AbstractOptics end
 
 """
@@ -41,8 +56,8 @@ $(TYPEDSIGNATURES)
 Construct a `RadiativeTransferModel` on `grid` using the specified `optics`.
 
 Valid optics types are:
-- `GrayOptics()` - Gray atmosphere radiation (O'Gorman & Schneider 2008)
-- `ClearSkyOptics()` - Full-spectrum clear-sky radiation using RRTMGP gas optics
+- [`GrayOptics()`](@ref) - Gray atmosphere radiation ([O'Gorman & Schneider 2008](@cite OGormanSchneider2008))
+- [`ClearSkyOptics()`](@ref) - Full-spectrum clear-sky radiation using RRTMGP gas optics
 
 The `constants` argument provides physical constants for the radiative transfer solver.
 
