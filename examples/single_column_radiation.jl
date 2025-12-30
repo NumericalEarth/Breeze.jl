@@ -121,6 +121,7 @@ z_ticks_km = 0:5:20
 z_ticks_m = ((z_ticks_km .* 1000), string.(z_ticks_km))
 
 fig = Figure(size=(1400, 800), fontsize=14)
+nothing #hide
 
 # Atmospheric state panels (top row)
 ax_T = Axis(fig[1, 1]; xlabel="Temperature (K)", ylabel="Altitude (km)",
