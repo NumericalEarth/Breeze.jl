@@ -77,7 +77,7 @@ end
 
     # Compute the buoyancy flux term, ρᵣ w b
     buoyancy_flux = ℑzᵃᵃᶜ(i, j, k, grid, w_buoyancy_forceᶜᶜᶠ,
-                          velocities.w, dynamics, formulation, temperature_field, specific_moisture,
+                          velocities.w, dynamics, temperature_field, specific_moisture,
                           microphysics, microphysical_fields, constants)
 
     closure_buoyancy = AtmosphereModelBuoyancy(dynamics, formulation, constants)
