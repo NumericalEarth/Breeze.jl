@@ -32,7 +32,8 @@ import ..AtmosphereModels:
     microphysical_tendency,
     update_microphysical_fields!,
     precipitation_rate,
-    surface_precipitation_flux
+    surface_precipitation_flux,
+    maybe_adjust_thermodynamic_state
 
 using ..Thermodynamics:
     MoistureMassFractions,
@@ -248,7 +249,7 @@ end
 end
 
 # No saturation adjustment for explicit Kessler scheme
-@inline maybe_adjust_thermodynamic_state(𝒰, ::KM, μ, qᵗ, constants) = 𝒰
+@inline maybe_adjust_thermodynamic_state(i, j, k, 𝒰, ::KM, ρ, μ, qᵗ, constants) = 𝒰
 
 #####
 ##### Terminal velocity for rain sedimentation
