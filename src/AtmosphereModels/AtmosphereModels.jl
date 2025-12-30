@@ -25,6 +25,7 @@ export
     liquid_ice_potential_temperature,
     precipitation_rate,
     surface_precipitation_flux,
+    specific_humidity,
 
     # Interface functions (extended by BoundaryConditions and Forcings)
     regularize_atmosphere_model_boundary_conditions,
@@ -33,6 +34,9 @@ export
 
     # Radiation (implemented by extensions)
     RadiativeTransferModel,
+    BackgroundAtmosphere,
+    GrayOptics,
+    ClearSkyOptics,
 
     # Diagnostics (re-exported from Diagnostics submodule)
     PotentialTemperature,
@@ -43,7 +47,7 @@ export
     StaticEnergy,
     compute_hydrostatic_pressure!
 
-using DocStringExtensions: TYPEDSIGNATURES
+using DocStringExtensions: TYPEDSIGNATURES, TYPEDEF
 using Adapt: Adapt, adapt
 using KernelAbstractions: @kernel, @index
 
