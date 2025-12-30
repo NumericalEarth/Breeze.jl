@@ -7,7 +7,6 @@
 # gas optics. We also demonstrate the effect of doubling CO₂ concentration.
 
 using Breeze
-using Breeze.AtmosphereModels: GrayOptics, ClearSkyOptics
 using Oceananigans.Units
 using CairoMakie
 
