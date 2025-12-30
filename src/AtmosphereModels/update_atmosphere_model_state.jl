@@ -101,6 +101,9 @@ function compute_auxiliary_variables!(model)
     # Dispatch on thermodynamic formulation type
     compute_auxiliary_thermodynamic_variables!(model)
 
+    # Dispatch on dynamics type (computes pressure for compressible dynamics)
+    compute_auxiliary_dynamics_variables!(model)
+
     # Compute diffusivities
     compute_diffusivities!(model.closure_fields, model.closure, model)
 

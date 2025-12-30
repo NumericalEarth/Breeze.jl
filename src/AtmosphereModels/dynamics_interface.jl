@@ -3,7 +3,7 @@
 #####
 ##### This file defines the interface that all dynamics implementations must provide.
 ##### These functions are called by the AtmosphereModel constructor and
-##### must be extended by specific dynamics implementations.
+##### must be extended by specific dynamics implementations (AnelasticEquations, CompressibleEquations).
 #####
 
 #####
@@ -185,3 +185,24 @@ For compressible dynamics, this computes the density tendency from the continuit
 """
 compute_dynamics_tendency!(model) = nothing  # default: no dynamics-specific tendencies
 
+#####
+##### Auxiliary dynamics variables interface
+#####
+
+"""
+    compute_auxiliary_dynamics_variables!(model)
+
+Compute auxiliary (diagnostic) variables specific to the dynamics formulation.
+
+For anelastic dynamics, this is a no-op (pressure is computed during time-stepping
+via the pressure Poisson equation).
+
+For compressible dynamics, this computes the pressure field from the equation of state:
+
+```math
+p = ρ R^m T
+```
+
+where ``R^m`` is the mixture gas constant.
+"""
+compute_auxiliary_dynamics_variables!(model) = nothing  # default: no-op

@@ -1,130 +1,143 @@
-# # Acoustic Wave in Compressible Dynamics
+# # Acoustic Wave Refraction by Wind Shear
 #
-# This example demonstrates the propagation of an acoustic wave using
-# the fully compressible Euler equations. Acoustic waves are pressure/density
-# perturbations that propagate at the speed of sound.
+# This example demonstrates how wind shear refracts acoustic waves using
+# the fully compressible Euler equations. When wind speed increases with height,
+# sound waves traveling with the wind are bent downward toward the surface,
+# while sound traveling against the wind is bent upward and away.
 #
-# The compressible dynamics directly time-steps density as a prognostic variable
-# and computes pressure from the Poisson equation for potential temperature.
+# This phenomenon explains why sounds carry farther downwind than upwind —
+# the refraction traps acoustic energy near the surface in the downwind direction.
 #
 # ## Physics
 #
-# In a compressible atmosphere, small perturbations in pressure and density
-# propagate as acoustic waves with speed:
+# The effective sound speed for a wave traveling in direction ``\hat{n}`` is
 #
 # ```math
-# c_s = \sqrt{\gamma R^d T}
+# c_{\rm eff} = c_s + \mathbf{u} \cdot \hat{n}
 # ```
 #
-# where `γ ≈ 1.4` is the heat capacity ratio for dry air.
-# For `T = 300 K`, the speed of sound is approximately 347 m/s.
+# where ``c_s = \sqrt{\gamma R^d T}`` is the thermodynamic sound speed
+# and ``\mathbf{u}`` is the wind velocity. When wind speed increases with height,
+# ``c_{\rm eff}`` increases with height for downwind propagation. By Snell's law,
+# wavefronts tilt and rays bend toward regions of lower effective sound speed —
+# i.e., downward for downwind propagation.
 
 using Oceananigans
 using Breeze
 using CairoMakie
 
-# ## Model setup
+# ## Model Setup
 #
-# We use a quasi-1D domain to simulate acoustic wave propagation.
+# We use a 2D domain (x-z plane) large enough to observe the refraction effect.
 
-Nx = 64
-Nz = 4
-Lx = 1000  # m
-Lz = 100   # m
+Nx = 256
+Nz = 64
+Lx = 2000  # m
+Lz = 500   # m
 
 grid = RectilinearGrid(CPU(),
-                       size = (Nx, 1, Nz),
+                       size = (Nx, Nz),
                        x = (0, Lx),
-                       y = (0, 10),
                        z = (0, Lz),
-                       topology = (Periodic, Periodic, Bounded))
+                       topology = (Periodic, Flat, Bounded))
 
 # ## Compressible Dynamics
-#
-# We create a `CompressibleDynamics` model which time-steps density
-# directly and computes pressure from the Poisson equation.
 
 dynamics = CompressibleDynamics()
 model = AtmosphereModel(grid; dynamics)
 
-println("Model created: ", typeof(model.dynamics))
-
-# ## Initial conditions
+# ## Initial Conditions
 #
-# We initialize with a uniform background state plus a small
-# Gaussian density perturbation.
+# We set up a logarithmic wind profile (typical of the atmospheric surface layer)
+# with wind increasing from zero at the surface. The sound source is a localized
+# Gaussian pressure/density pulse near the left side of the domain.
 
-T₀ = 300.0   # Background temperature (K)
-ρ₀ = 1.2     # Background density (kg/m³)
-δρ = 0.001   # Small density perturbation (kg/m³)
-x₀ = Lx / 2  # Center of perturbation
-σ = 30.0     # Width of Gaussian perturbation (m)
+T₀ = 300    # Background temperature (K)
+ρ₀ = 1.2    # Background density (kg/m³)
+θ₀ = T₀    # Potential temperature ≈ temperature for weak pressure perturbations
 
-# For dry air at T = 300 K, the potential temperature is approximately equal
-# to the temperature (since p ≈ p₀ at the surface). 
-# θ ≈ T for small pressure deviations from p₀.
-θ₀ = T₀
+# Wind profile parameters
+u★ = 2.0     # Friction velocity (m/s)
+z₀ = 0.1     # Roughness length (m)
+κ = 0.4      # von Kármán constant
 
-# Gaussian density perturbation (uniform in y and z)
-ρᵢ(x, y, z) = ρ₀ + δρ * exp(-(x - x₀)^2 / (2σ^2))
+# Logarithmic wind profile: u(z) = (u★/κ) * log((z + z₀) / z₀)
+# This gives ~20 m/s wind at z = 500 m
 
-# Set prognostic fields
-set!(model, ρ=ρᵢ, θ=θ₀)
-ρᵢ_field = deepcopy(model.dynamics.density)
+# Acoustic pulse parameters
+δρ = 0.01    # Density perturbation amplitude (kg/m³)
+x₀ = 200     # Pulse center x-position (m)
+z₀_pulse = 100  # Pulse center z-position (m)
+σ = 30       # Pulse width (m)
 
-println("Initial density range: ", extrema(model.dynamics.density))
+# Initial conditions as functions
+uᵢ(x, z) = (u★ / κ) * log((z + z₀) / z₀)
+ρᵢ(x, z) = ρ₀ + δρ * exp(-((x - x₀)^2 + (z - z₀_pulse)^2) / (2σ^2))
 
-# ## Time stepping
+set!(model, u=uᵢ, ρ=ρᵢ, θ=θ₀)
+
+# Save initial density for comparison
+ρ_initial = deepcopy(model.dynamics.density)
+
+# ## Time Stepping
 #
-# For acoustic wave propagation, we need a time step that satisfies
-# the acoustic CFL condition: `Δt < Δx / c_s`
+# For acoustic waves, we need a small time step satisfying the CFL condition
+# for sound speed plus the maximum wind speed.
 
 Δx = Lx / Nx
-c_s = 347.0  # Speed of sound (approximate)
-Δt = 0.05 * Δx / c_s  # CFL = 0.05 for stability
+Δz = Lz / Nz
 
-simulation = Simulation(model, Δt=Δt, stop_iteration=1000)
+constants = model.thermodynamic_constants
+Rᵈ = constants.molar_gas_constant / constants.dry_air.molar_mass
+cₚ = constants.dry_air.heat_capacity
+γ = cₚ / (cₚ - Rᵈ)
+c_s = sqrt(γ * Rᵈ * T₀)
 
-println("Time step: ", Δt, " s")
-println("Acoustic CFL: ", Δt * c_s / Δx)
+u_max = uᵢ(0, Lz)  # Maximum wind speed at domain top
+c_eff_max = c_s + u_max
 
-# Run a few time steps
+Δt = 0.1 * min(Δx, Δz) / c_eff_max
+
+# Run long enough for the wave to propagate across a significant portion of the domain
+stop_time = 3.0  # seconds
+
+simulation = Simulation(model; Δt, stop_time)
+
+@info "Sound speed: $(round(c_s, digits=1)) m/s"
+@info "Max wind speed: $(round(u_max, digits=1)) m/s"
+@info "Max effective sound speed: $(round(c_eff_max, digits=1)) m/s"
+@info "Time step: $(round(Δt * 1000, digits=3)) ms"
+
 run!(simulation)
 
-println("Simulation completed after ", simulation.model.clock.iteration, " iterations!")
-println("Final time: ", prettytime(simulation.model.clock.time))
-
-# Check for NaNs
-if any(isnan, interior(model.dynamics.density))
-    println("WARNING: NaN detected in density field!")
-else
-    println("Density field OK, range: ", extrema(model.dynamics.density))
-end
-
-if any(isnan, interior(model.momentum.ρu))
-    println("WARNING: NaN detected in ρu field!")
-else
-    println("ρu field OK, range: ", extrema(model.momentum.ρu))
-end
-
-println("Pressure range: ", extrema(model.dynamics.pressure))
+@info "Simulation completed at t = $(prettytime(model.clock.time))"
 
 # ## Visualization
 #
-# Let's visualize the density perturbation.
+# We plot the density perturbation to visualize how the acoustic wave
+# has been refracted by the wind shear. The wave traveling to the right
+# (with the wind) should curve downward, while the wave traveling left
+# (against the wind) curves upward and away from the surface.
 
-fig = Figure(size=(800, 400))
+ρ′ = model.dynamics.density .- ρ₀  # Density perturbation
+
+fig = Figure(size=(900, 500), fontsize=14)
+
 ax = Axis(fig[1, 1],
-          xlabel="x (m)",
-          ylabel="Density (kg/m³)",
-          title="Acoustic wave after $(prettytime(model.clock.time))")
+          xlabel = "x (m)",
+          ylabel = "z (m)",
+          title = "Acoustic wave refraction by wind shear (t = $(prettytime(model.clock.time)))",
+          aspect = Lx / Lz)
 
-lines!(ax, view(model.dynamics.density, :, 1, 1), color=:dodgerblue, linewidth=2, label="Final")
+# Plot density perturbation
+hm = heatmap!(ax, view(ρ′, :, 1, :),
+              colormap = :balance,
+              colorrange = (-δρ/2, δρ/2))
 
-# Initial condition for comparison
-lines!(ax, view(ρᵢ_field, :, 1, 1), color=:gray, linewidth=1, linestyle=:dash, label="Initial")
+Colorbar(fig[1, 2], hm, label = "ρ′ (kg/m³)")
 
-axislegend(ax)
+# Add annotation for wind direction
+text!(ax, Lx - 200, Lz - 50, text = "wind →", fontsize = 16)
 
 save("acoustic_wave.png", fig)
-println("Figure saved to acoustic_wave.png")
+@info "Figure saved to acoustic_wave.png"

@@ -4,11 +4,7 @@ export
     # AtmosphereModel core
     AtmosphereModel,
     AtmosphereModelBuoyancy,
-    # Dynamics
-    AnelasticDynamics,
-    AnelasticModel,
-    CompressibleDynamics,
-    CompressibleModel,
+    # Dynamics interface (dynamics types exported by their respective modules)
     dynamics_density,
     dynamics_pressure,
     mean_pressure,
@@ -59,7 +55,7 @@ using Oceananigans.TimeSteppers: TimeSteppers
 using Oceananigans.Utils: prettysummary, launch!
 
 #####
-##### Interfaces
+##### Interfaces (define the contract that dynamics implementations must fulfill)
 #####
 
 include("forcing_interface.jl")
@@ -68,28 +64,11 @@ include("dynamics_interface.jl")
 include("formulation_interface.jl")
 
 #####
-##### Dynamics submodules
-#####
-
-include("AnelasticEquations/AnelasticEquations.jl")
-using .AnelasticEquations:
-    AnelasticDynamics,
-    solve_for_anelastic_pressure!
-
-include("CompressibleEquations/CompressibleEquations.jl")
-using .CompressibleEquations:
-    CompressibleDynamics
-
-#####
-##### AtmosphereModel core (needed before formulation submodules for type aliases)
+##### AtmosphereModel core
 #####
 
 include("atmosphere_model.jl")
 include("set_atmosphere_model.jl")
-
-# Define model type aliases after AtmosphereModel is defined
-const AnelasticModel = AtmosphereModel{<:AnelasticDynamics}
-const CompressibleModel = AtmosphereModel{<:CompressibleDynamics}
 
 #####
 ##### Remaining AtmosphereModel components
@@ -123,13 +102,5 @@ using .PotentialTemperatureFormulations:
 # Note: Type aliases StaticEnergyModel and PotentialTemperatureModel are defined
 # in their respective formulation submodules and used internally for dispatch.
 # They are not exported from AtmosphereModels.
-
-#####
-##### Dynamics-specific components (after AtmosphereModel and type aliases are defined)
-#####
-
-include("anelastic_time_stepping.jl")
-include("compressible_time_stepping.jl")
-include("compressible_density_tendency.jl")
 
 end

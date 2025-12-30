@@ -8,9 +8,6 @@
 ##### Gρ = -∇·(ρu) = -(∂(ρu)/∂x + ∂(ρv)/∂y + ∂(ρw)/∂z)
 #####
 
-using Oceananigans.Operators: divᶜᶜᶜ
-using Oceananigans.Utils: launch!
-
 """
 $(TYPEDSIGNATURES)
 
