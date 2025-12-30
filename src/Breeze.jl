@@ -16,6 +16,8 @@ export
     LiquidIcePotentialTemperatureFormulation,
     RadiativeTransferModel,
     BackgroundAtmosphere,
+    GrayOptics,
+    ClearSkyOptics,
     TemperatureField,
     IdealGas,
     CondensedPhase,

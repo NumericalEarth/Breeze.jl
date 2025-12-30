@@ -2,6 +2,7 @@ module BreezeRRTMGPExt
 
 using Breeze
 
+using Breeze.AtmosphereModels: GrayOptics, ClearSkyOptics
 using Breeze.Thermodynamics: ThermodynamicConstants
 using RRTMGP: RRTMGP
 

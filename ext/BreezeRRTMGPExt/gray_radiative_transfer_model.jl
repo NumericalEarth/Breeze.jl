@@ -55,7 +55,7 @@ Construct a gray atmosphere radiative transfer model for the given grid.
 - `solar_constant`: Top-of-atmosphere solar flux in W/m² (default: 1361)
 """
 function RadiativeTransferModel(grid::AbstractGrid,
-                                ::Val{:gray},
+                                ::GrayOptics,
                                 constants::ThermodynamicConstants;
                                 optical_thickness = GrayOpticalThicknessOGorman2008(eltype(grid)),
                                 surface_temperature,

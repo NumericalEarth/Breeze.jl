@@ -35,6 +35,8 @@ export
     # Radiation (implemented by extensions)
     RadiativeTransferModel,
     BackgroundAtmosphere,
+    GrayOptics,
+    ClearSkyOptics,
 
     # Diagnostics (re-exported from Diagnostics submodule)
     PotentialTemperature,

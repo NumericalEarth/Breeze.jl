@@ -8,7 +8,7 @@ using Oceananigans.Grids: xnode, ynode, λnode, φnode, znodes
 using Oceananigans.Grids: AbstractGrid, Center, Face
 using Oceananigans.Fields: ConstantField
 
-using Breeze.AtmosphereModels: AtmosphereModels, SurfaceRadiativeProperties, specific_humidity, BackgroundAtmosphere
+using Breeze.AtmosphereModels: AtmosphereModels, SurfaceRadiativeProperties, specific_humidity, BackgroundAtmosphere, ClearSkyOptics
 using Breeze.Thermodynamics: ThermodynamicConstants
 import Breeze.AtmosphereModels: RadiativeTransferModel
 
@@ -46,7 +46,7 @@ RRTMGP loads lookup tables from netCDF via an extension.
 - `solar_constant`: Top-of-atmosphere solar flux in W/m² (default: 1361)
 """
 function RadiativeTransferModel(grid::AbstractGrid,
-                                ::Val{:clear_sky},
+                                ::ClearSkyOptics,
                                 constants::ThermodynamicConstants;
                                 background_atmosphere = BackgroundAtmosphere{eltype(grid)}(),
                                 surface_temperature,

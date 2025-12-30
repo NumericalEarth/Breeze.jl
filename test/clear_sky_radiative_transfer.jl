@@ -11,6 +11,49 @@ using NCDatasets
 using RRTMGP
 
 @testset "Clear-sky full-spectrum RadiativeTransferModel" begin
+
+    @testset "Constructor argument errors" begin
+        FT = Float64
+        Oceananigans.defaults.FloatType = FT
+
+        Nz = 4
+        grid = RectilinearGrid(default_arch; size=Nz, x=0.0, y=45.0, z=(0, 10kilometers),
+                               topology=(Flat, Flat, Bounded))
+        constants = ThermodynamicConstants()
+
+        # Error: providing surface_albedo along with direct_surface_albedo
+        @test_throws ArgumentError RadiativeTransferModel(grid, ClearSkyOptics(), constants;
+                                                          surface_temperature = 300,
+                                                          surface_albedo = 0.1,
+                                                          direct_surface_albedo = 0.1)
+
+        # Error: providing surface_albedo along with diffuse_surface_albedo
+        @test_throws ArgumentError RadiativeTransferModel(grid, ClearSkyOptics(), constants;
+                                                          surface_temperature = 300,
+                                                          surface_albedo = 0.1,
+                                                          diffuse_surface_albedo = 0.1)
+
+        # Error: providing surface_albedo along with both direct and diffuse
+        @test_throws ArgumentError RadiativeTransferModel(grid, ClearSkyOptics(), constants;
+                                                          surface_temperature = 300,
+                                                          surface_albedo = 0.1,
+                                                          direct_surface_albedo = 0.1,
+                                                          diffuse_surface_albedo = 0.1)
+
+        # Error: providing only direct_surface_albedo without diffuse
+        @test_throws ArgumentError RadiativeTransferModel(grid, ClearSkyOptics(), constants;
+                                                          surface_temperature = 300,
+                                                          direct_surface_albedo = 0.1)
+
+        # Error: providing only diffuse_surface_albedo without direct
+        @test_throws ArgumentError RadiativeTransferModel(grid, ClearSkyOptics(), constants;
+                                                          surface_temperature = 300,
+                                                          diffuse_surface_albedo = 0.1)
+
+        # Error: providing no albedo at all
+        @test_throws ArgumentError RadiativeTransferModel(grid, ClearSkyOptics(), constants;
+                                                          surface_temperature = 300)
+    end
     @testset "Single column grid [$(FT)]" for FT in (Float32, Float64)
         Oceananigans.defaults.FloatType = FT
 
@@ -24,7 +67,7 @@ using RRTMGP
                                          potential_temperature = 300)
         dynamics = AnelasticDynamics(reference_state)
 
-        radiation = RadiativeTransferModel(grid, :clear_sky, constants;
+        radiation = RadiativeTransferModel(grid, ClearSkyOptics(), constants;
                                            surface_temperature = 300,
                                            surface_emissivity = 0.98,
                                            surface_albedo = 0.1,

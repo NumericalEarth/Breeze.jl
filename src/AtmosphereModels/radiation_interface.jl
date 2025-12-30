@@ -31,37 +31,36 @@ struct RadiativeTransferModel{FT<:Number, C, E, SP, BA, AS, LW, SW, F}
     downwelling_shortwave_flux :: F
 end
 
+abstract type AbstractOptics end
+struct GrayOptics <: AbstractOptics end
+struct ClearSkyOptics <: AbstractOptics end
+
 """
 $(TYPEDSIGNATURES)
 
-Construct a `RadiativeTransferModel` on `grid` using the specified `optics_flavor`.
+Construct a `RadiativeTransferModel` on `grid` using the specified `optics`.
 
-Valid optics flavors are:
-- `:gray` - Gray atmosphere radiation (O'Gorman & Schneider 2008)
-- `:clear_sky` - Full-spectrum clear-sky radiation using RRTMGP gas optics
+Valid optics types are:
+- `GrayOptics()` - Gray atmosphere radiation (O'Gorman & Schneider 2008)
+- `ClearSkyOptics()` - Full-spectrum clear-sky radiation using RRTMGP gas optics
 
 The `constants` argument provides physical constants for the radiative transfer solver.
 
 # Example
 
 ```julia
-rtm = RadiativeTransferModel(grid, :gray, constants;
+rtm = RadiativeTransferModel(grid, GrayOptics(), constants;
     surface_temperature = 300,
     surface_albedo = 0.1)
 
-rtm = RadiativeTransferModel(grid, :clear_sky, constants;
+rtm = RadiativeTransferModel(grid, ClearSkyOptics(), constants;
     surface_temperature = 300,
     surface_albedo = 0.1,
     background_atmosphere = BackgroundAtmosphere(CO₂ = 400e-6))
 ```
 """
-function RadiativeTransferModel(grid::AbstractGrid, optics_flavor::Symbol, args...; kw...)
-    RadiativeTransferModel(grid, Val(optics_flavor), args...; kw...)
-end
-
-# Fallback for unknown optics flavors or when extension is not loaded
-function RadiativeTransferModel(grid::AbstractGrid, ::Val{S}, args...; kw...) where S
-    msg = "Unknown optics flavor :$S. Valid options are :gray, :clear_sky.\n" *
+function RadiativeTransferModel(grid::AbstractGrid, unknown_optics, args...; kw...)
+    msg = "Unknown optics $unknown_optics. Valid options are GrayOptics(), ClearSkyOptics().\n" *
           "Make sure RRTMGP.jl is loaded (e.g., `using RRTMGP`)."
     return throw(ArgumentError(msg))
 end
