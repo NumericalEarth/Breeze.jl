@@ -7,6 +7,7 @@
 # gas optics. We also demonstrate the effect of doubling CO₂ concentration.
 
 using Breeze
+using Breeze.AtmosphereModels: GrayOptics, ClearSkyOptics
 using Oceananigans.Units
 using CairoMakie
 
@@ -42,14 +43,14 @@ dynamics = AnelasticDynamics(reference_state)
 
 using Dates
 
-gray_radiation = RadiativeTransferModel(grid, :gray, constants;
+gray_radiation = RadiativeTransferModel(grid, GrayOptics(), constants;
                                         surface_temperature,
                                         surface_emissivity = 0.98,
                                         surface_albedo = 0.1,
                                         solar_constant = 1361)        # W/m²
 
 # Clear-sky with default CO₂ (~420 ppm)
-clear_sky_radiation = RadiativeTransferModel(grid, :clear_sky, constants;
+clear_sky_radiation = RadiativeTransferModel(grid, ClearSkyOptics(), constants;
                                              surface_temperature,
                                              surface_emissivity = 0.98,
                                              surface_albedo = 0.1,
@@ -57,7 +58,7 @@ clear_sky_radiation = RadiativeTransferModel(grid, :clear_sky, constants;
 
 # Clear-sky with doubled CO₂ (~840 ppm) to show the radiative forcing effect
 high_co2_atmosphere = BackgroundAtmosphere(CO₂ = 840e-6)
-high_co2_radiation = RadiativeTransferModel(grid, :clear_sky, constants;
+high_co2_radiation = RadiativeTransferModel(grid, ClearSkyOptics(), constants;
                                             background_atmosphere = high_co2_atmosphere,
                                             surface_temperature,
                                             surface_emissivity = 0.98,
