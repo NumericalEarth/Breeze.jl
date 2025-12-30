@@ -359,7 +359,7 @@ text!(axuv, -8.5, 2200, text="solid: u\ndashed: v", fontsize=12)
 
 fig[0, :] = Label(fig, "BOMEX: Mean profile evolution (Siebesma et al., 2003)", fontsize=18, tellwidth=false)
 
-save("bomex_profiles.png", fig)
+save("bomex_profiles.png", fig) #src
 fig
 
 # The simulation shows the development of a cloudy boundary layer with:
