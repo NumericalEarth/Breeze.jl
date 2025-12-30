@@ -607,10 +607,9 @@ $(TYPEDSIGNATURES)
 
 Compute the tendency for potential temperature density (ρθˡⁱ) due to rain sedimentation.
 
-Sedimentation removes rain water ($q_r$) from the control volume. Since liquid-ice potential
-temperature is defined as $\\theta_{li} \\approx \\theta - \\frac{L}{c_p \\Pi} q_l$, removing
-liquid water ($q_l$) while maintaining air temperature ($\\theta$) results in an increase
-in $\\theta_{li}$.
+Sedimentation removes rain water (qʳ) from the control volume. Since liquid-ice potential
+temperature is defined as θˡⁱ ≈ θ - L/(cₚ Π) qˡ, removing liquid water (qˡ) while 
+maintaining air temperature (θ) results in an increase in θˡⁱ.
 
 ```math
 \\frac{∂(ρθ)}{∂t} = -ρ \\cdot \\frac{L}{cₚ Π} \\cdot \\left(\\frac{∂q_r}{∂t}\\right)_{sed}
