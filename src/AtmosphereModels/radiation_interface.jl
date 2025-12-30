@@ -66,7 +66,7 @@ The `constants` argument provides physical constants for the radiative transfer 
 ```jldoctest
 julia> using Breeze, Oceananigans.Units, RRTMGP, NCDatasets
 
-julia> grid = RectilinearGrid(CPU(); size=16, x=0.0, y=45.0, z=(0, 10kilometers),
+julia> grid = RectilinearGrid(; size=16, x=0, y=45, z=(0, 10kilometers),
                               topology=(Flat, Flat, Bounded));
 
 julia> RadiativeTransferModel(grid, GrayOptics(), ThermodynamicConstants();
