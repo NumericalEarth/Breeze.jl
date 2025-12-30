@@ -89,12 +89,12 @@ set!(model, u=uᵢ, ρ=ρᵢ, θ=θ₀)
 
 constants = model.thermodynamic_constants
 Rᵈ = constants.molar_gas_constant / constants.dry_air.molar_mass
-cₚ = constants.dry_air.heat_capacity
-γ = cₚ / (cₚ - Rᵈ)
-c_s = sqrt(γ * Rᵈ * T₀)
+cᵖᵈ = constants.dry_air.heat_capacity
+γ = cᵖᵈ / (cᵖᵈ - Rᵈ)
+cₛ = sqrt(γ * Rᵈ * T₀)
 
 u_max = uᵢ(0, Lz)  # Maximum wind speed at domain top
-c_eff_max = c_s + u_max
+c_eff_max = cₛ + u_max
 
 Δt = 0.1 * min(Δx, Δz) / c_eff_max
 
@@ -103,7 +103,7 @@ stop_time = 3.0  # seconds
 
 simulation = Simulation(model; Δt, stop_time)
 
-@info "Sound speed: $(round(c_s, digits=1)) m/s"
+@info "Sound speed: $(round(cₛ, digits=1)) m/s"
 @info "Max wind speed: $(round(u_max, digits=1)) m/s"
 @info "Max effective sound speed: $(round(c_eff_max, digits=1)) m/s"
 @info "Time step: $(round(Δt * 1000, digits=3)) ms"

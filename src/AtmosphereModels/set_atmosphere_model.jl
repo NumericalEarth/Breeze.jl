@@ -11,7 +11,10 @@ using ..Thermodynamics:
 move_to_front(names, name) = tuple(name, filter(n -> n != name, names)...)
 
 function prioritize_names(names)
-    for n in (:w, :ρw, :v, :ρv, :u, :ρu, :qᵗ, :ρqᵗ)
+    # Priority order (first items applied last, so reverse order of priority):
+    # 1. ρ must be set first for compressible dynamics (density needed for momentum)
+    # 2. Then velocities/momentum and moisture
+    for n in (:w, :ρw, :v, :ρv, :u, :ρu, :qᵗ, :ρqᵗ, :ρ)
         if n ∈ names
             names = move_to_front(names, n)
         end
