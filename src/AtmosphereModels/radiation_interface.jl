@@ -101,7 +101,7 @@ Base.@kwdef struct BackgroundAtmosphere{FT}
     O₂  :: FT = 0.20946      # Oxygen (~21%)
     CO₂ :: FT = 420e-6       # Carbon dioxide (~420 ppm)
     CH₄ :: FT = 1.8e-6       # Methane (~1.8 ppm)
-    N₂O :: FT = 0.33e-6      # Nitrous oxide (~330 ppb)
+    N₂O :: FT = 330e-9       # Nitrous oxide (~330 ppb)
     CO  :: FT = 0.0          # Carbon monoxide
     NO₂ :: FT = 0.0          # Nitrogen dioxide
     O₃  :: FT = 0.0          # Ozone (often specified as a profile)
