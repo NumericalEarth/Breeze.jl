@@ -93,7 +93,7 @@ function dynamics_pressure end
 #####
 
 """
-    buoyancy_forceᶜᶜᶜ(i, j, k, grid, dynamics, formulation, temperature,
+    buoyancy_forceᶜᶜᶜ(i, j, k, grid, dynamics, temperature,
                       specific_moisture, microphysics, microphysical_fields, constants)
 
 Compute the buoyancy force density `ρ b` at cell center `(i, j, k)`.

@@ -26,7 +26,6 @@ where `pᵣ` is the reference pressure, `Rᵐ` is the mixture gas constant, and 
 """
 @inline function buoyancy_forceᶜᶜᶜ(i, j, k, grid,
                                    dynamics::AnelasticDynamics,
-                                   formulation,
                                    temperature,
                                    specific_moisture,
                                    microphysics,

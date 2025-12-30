@@ -22,7 +22,6 @@ in the momentum equation without subtraction of a reference state.
 """
 @inline function buoyancy_forceᶜᶜᶜ(i, j, k, grid,
                                    dynamics::CompressibleDynamics,
-                                   formulation,
                                    temperature,
                                    specific_moisture,
                                    microphysics,
