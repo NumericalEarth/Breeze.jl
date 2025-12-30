@@ -602,6 +602,52 @@ end
 # Phase changes (condensation/evaporation of cloud and rain) conserve liquid-ice potential temperature by design.
 @inline microphysical_tendency(i, j, k, grid, ::KM, name, ρ, μ, 𝒰, constants) = zero(grid)
 
+"""
+$(TYPEDSIGNATURES)
+
+Compute the tendency for potential temperature density (ρθˡⁱ) due to rain sedimentation.
+
+Sedimentation removes rain water ($q_r$) from the control volume. Since liquid-ice potential
+temperature is defined as $\\theta_{li} \\approx \\theta - \\frac{L}{c_p \\Pi} q_l$, removing
+liquid water ($q_l$) while maintaining air temperature ($\\theta$) results in an increase
+in $\\theta_{li}$.
+
+```math
+\\frac{∂(ρθ)}{∂t} = -ρ \\cdot \\frac{L}{cₚ Π} \\cdot \\left(\\frac{∂q_r}{∂t}\\right)_{sed}
+```
+"""
+@inline function microphysical_tendency(i, j, k, grid, km::KM, ::Val{:ρθ}, ρᵣ, μ, 𝒰, constants)
+    # Get thermodynamic quantities
+    ρ = density(𝒰, constants)
+    T = temperature(𝒰, constants)
+    qᵗ = total_specific_moisture(𝒰)
+    
+    # Get moisture fractions for heat capacity calculation
+    @inbounds qᵛ = μ.qᵛ[i, j, k]
+    @inbounds qᶜˡ = μ.qᶜˡ[i, j, k]
+    @inbounds qʳ = μ.qʳ[i, j, k]
+    q = MoistureMassFractions(qᵛ, qᶜˡ + qʳ)
+    
+    # Calculate sedimentation tendency for rain (in mixing ratio space)
+    drʳdt_sed = sedimentation_tendency(i, j, k, grid, ρᵣ, μ)
+    
+    # Convert to mass fraction tendency
+    dqʳdt_sed = mixing_ratio_to_mass_fraction(drʳdt_sed, qᵗ)
+    
+    # Latent heat and heat capacity
+    L = liquid_latent_heat(T, constants)
+    cₚ = mixture_heat_capacity(q, constants)
+    
+    # Exner function
+    Π = exner_function(𝒰, constants)
+    
+    # Tendency for θ_li
+    # Note: dqʳdt_sed is negative for removal. The term -L/(Cp*Π) * dq makes the result positive.
+    dθdt = -L / (cₚ * Π) * dqʳdt_sed
+    
+    return ρ * dθdt
+end
+
 #####
 ##### Precipitation rate diagnostics
 #####
