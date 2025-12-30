@@ -1,7 +1,7 @@
 # # Supercell thunderstorm
 #
 # This example simulates the development of a splitting supercell thunderstorm, following the idealized
-# test case described by [KlempEtAl2015](@citet) ("Idealized global nonhydrostatic atmospheric
+# test case described by [Klemp2015idealized](@citet) ("Idealized global nonhydrostatic atmospheric
 # test cases on a reduced-radius sphere"). This benchmark evaluates the model's ability to
 # capture deep moist convection with cloud microphysics, and strong updrafts.
 #
@@ -31,7 +31,7 @@
 #
 # ### Warm bubble perturbation
 #
-# A localized warm bubble triggers convection (Equations 17–18 in [KlempEtAl2015](@cite)):
+# A localized warm bubble triggers convection (Equations 17–18 in [Klemp2015idealized](@cite)):
 #
 # ```math
 # θ'(x, y, z) = \begin{cases}
@@ -119,7 +119,7 @@ g = constants.gravitational_acceleration
 cᵖᵈ = constants.dry_air.heat_capacity
 Rᵈ = dry_air_gas_constant(constants)
 
-# Background potential temperature profile (Equation 14 in [KlempEtAl2015](@cite)):
+# Background potential temperature profile (Equation 14 in [Klemp2015idealized](@cite)):
 
 function θᵇᵍ(x, y, z)
     θ_troposphere = θ₀ + (θₜᵣ - θ₀) * (z / zₜᵣ)^(5/4)
@@ -193,7 +193,7 @@ fig_wind
 
 # ## Warm bubble initial perturbation
 #
-# The warm bubble parameters following Equations 17–18 in [KlempEtAl2015](@cite):
+# The warm bubble parameters following Equations 17–18 in [Klemp2015idealized](@cite):
 
 Δθ = 3              # K - perturbation amplitude
 rₕ = 10kilometers   # m - bubble horizontal radius
