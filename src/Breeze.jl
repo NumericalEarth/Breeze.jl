@@ -18,6 +18,9 @@ export
     StaticEnergyFormulation,
     LiquidIcePotentialTemperatureFormulation,
     RadiativeTransferModel,
+    BackgroundAtmosphere,
+    GrayOptics,
+    ClearSkyOptics,
     TemperatureField,
     IdealGas,
     CondensedPhase,
@@ -42,6 +45,7 @@ export
     precipitation_rate,
     surface_precipitation_flux,
     total_pressure,
+    specific_humidity,
 
     # Microphysics
     SaturationAdjustment,

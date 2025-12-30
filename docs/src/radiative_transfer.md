@@ -8,13 +8,14 @@ The simplest radiative transfer option is gray atmosphere radiation, which uses 
 
 ### Basic Usage
 
-To use gray radiation in a Breeze simulation, create a `GrayRadiativeTransferModel` model and pass it to the [`AtmosphereModel`](@ref) constructor:
+To use gray radiation in a Breeze simulation, create a [`RadiativeTransferModel`](@ref) model with the [`GrayOptics`](@ref) optics flavor and pass it to the [`AtmosphereModel`](@ref) constructor:
 
 ```@example
 using Breeze
+using Breeze.AtmosphereModels
 using Oceananigans.Units
 using Dates
-using RRTMGP.AtmosphericStates: GrayOpticalThicknessOGorman2008
+using RRTMGP
 
 Nz = 64
 λ, φ = -70.9, 42.5  # longitude, latitude
@@ -32,8 +33,7 @@ reference_state = ReferenceState(grid, constants;
 dynamics = AnelasticDynamics(reference_state)
 
 # Create gray radiation model
-optical_thickness = GrayOpticalThicknessOGorman2008(eltype(grid))
-radiation = RadiativeTransferModel(grid, constants, optical_thickness;
+radiation = RadiativeTransferModel(grid, GrayOptics(), constants;
                                    surface_temperature,
                                    surface_emissivity = 0.98,
                                    surface_albedo = 0.1,
@@ -99,9 +99,25 @@ The calculation accounts for:
 - Hour angle (based on solar time)
 - Latitude (for observer position)
 
+## Clear-sky Full-spectrum Radiation
+
+For more accurate radiative transfer calculations, use the [`ClearSkyOptics`](@ref) optics flavor which computes full-spectrum gas optics using RRTMGP's lookup tables:
+
+```julia
+using NCDatasets  # Required for RRTMGP lookup tables
+
+radiation = RadiativeTransferModel(grid, ClearSkyOptics(), constants;
+                                   surface_temperature,
+                                   surface_emissivity = 0.98,
+                                   surface_albedo = 0.1,
+                                   background_atmosphere = BackgroundAtmosphere(CO₂ = 400e-6))
+```
+
+The [`BackgroundAtmosphere`](@ref) struct specifies volume mixing ratios for radiatively active gases (CO₂, CH₄, N₂O, O₃, etc.). Water vapor is computed from the model's prognostic moisture field.
+
 ## Surface Properties
 
-The `RadiativeTransferModel` model requires surface properties:
+The [`RadiativeTransferModel`](@ref) model requires surface properties:
 
 | Property | Description | Typical Values |
 |----------|-------------|----------------|
