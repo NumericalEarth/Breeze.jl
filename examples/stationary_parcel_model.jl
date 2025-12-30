@@ -26,7 +26,7 @@ grid = RectilinearGrid(CPU(); size=(1, 1, 1), x=(0, 1), y=(0, 1), z=(0, 1),
 
 constants = ThermodynamicConstants()
 reference_state = ReferenceState(grid, constants; surface_pressure=101325, potential_temperature=300)
-formulation = AnelasticFormulation(reference_state; thermodynamics=:LiquidIcePotentialTemperature)
+dynamics = AnelasticDynamics(reference_state)
 
 BreezeCloudMicrophysicsExt = Base.get_extension(Breeze, :BreezeCloudMicrophysicsExt)
 OneMomentCloudMicrophysics = BreezeCloudMicrophysicsExt.OneMomentCloudMicrophysics
@@ -34,12 +34,12 @@ OneMomentCloudMicrophysics = BreezeCloudMicrophysicsExt.OneMomentCloudMicrophysi
 # ImpenetrableBoundaryCondition ensures rain collects in the parcel rather than exiting
 microphysics = OneMomentCloudMicrophysics(precipitation_boundary_condition = ImpenetrableBoundaryCondition())
 
-τ = microphysics.cloud_formation.liquid.τ_relax  # Condensation timescale (~10 s)
+τ = microphysics.categories.cloud_liquid.τ_relax  # Condensation timescale (~10 s)
 
 # ## Simulation helper
 
 function run_parcel_simulation(; θ=300, qᵗ=0.020, qᶜˡ=0, qʳ=0, stop_time=65τ, Δt=1)
-    model = AtmosphereModel(grid; formulation, thermodynamic_constants=constants, microphysics)
+    model = AtmosphereModel(grid; dynamics, thermodynamic_constants=constants, microphysics)
     set!(model; θ, qᵗ, qᶜˡ, qʳ)
     simulation = Simulation(model; Δt, stop_time, verbose=false)
 

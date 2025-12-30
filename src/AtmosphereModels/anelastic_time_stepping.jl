@@ -1,16 +1,23 @@
 #####
-##### Pressure correction time stepping for AnelasticModel
+##### Pressure correction time stepping for AnelasticDynamics
 #####
+
+using Oceananigans.BoundaryConditions: fill_halo_regions!
+using Oceananigans.ImmersedBoundaries: mask_immersed_field!
+using Oceananigans.Operators: ℑzᵃᵃᶠ, ∂xᶠᶜᶜ, ∂yᶜᶠᶜ, ∂zᶜᶜᶠ
+using Oceananigans.TimeSteppers: TimeSteppers
+using Oceananigans.Utils: launch!
+using KernelAbstractions: @kernel, @index
 
 function TimeSteppers.compute_pressure_correction!(model::AnelasticModel, Δt)
     # Mask immersed velocities
     foreach(mask_immersed_field!, model.momentum)
     fill_halo_regions!(model.momentum, model.clock, fields(model))
 
-    ρᵣ = model.formulation.reference_state.density
+    ρᵣ = model.dynamics.reference_state.density
     ρŨ = model.momentum
     solver = model.pressure_solver
-    αᵣp′ = model.formulation.pressure_anomaly  # kinematic pressure p'/ρᵣ
+    αᵣp′ = model.dynamics.pressure_anomaly  # kinematic pressure p'/ρᵣ
     solve_for_anelastic_pressure!(αᵣp′, solver, ρŨ, Δt)
     fill_halo_regions!(αᵣp′)
 
@@ -48,8 +55,8 @@ function TimeSteppers.make_pressure_correction!(model::AnelasticModel, Δt)
             model.momentum,
             model.grid,
             Δt,
-            model.formulation.pressure_anomaly,  # kinematic pressure p'/ρᵣ
-            model.formulation.reference_state.density)
+            model.dynamics.pressure_anomaly,  # kinematic pressure p'/ρᵣ
+            model.dynamics.reference_state.density)
 
     return nothing
 end
