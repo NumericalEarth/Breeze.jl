@@ -98,7 +98,7 @@ end
 
     return ( - div_𝐯w(i, j, k, grid, advection, momentum, velocities.w)
              + z_pressure_gradient(i, j, k, grid, dynamics)
-             + buoyancy_forceᶜᶜᶠ(i, j, k, grid, dynamics, formulation, temperature,
+             + buoyancy_forceᶜᶜᶠ(i, j, k, grid, dynamics, temperature,
                                  specific_moisture, microphysics, microphysical_fields, constants)
              - z_f_cross_U(i, j, k, grid, coriolis, momentum)
              - ∂ⱼ_𝒯₃ⱼ(i, j, k, grid, density, closure, closure_fields, clock, model_fields, nothing)
