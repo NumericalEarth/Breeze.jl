@@ -189,7 +189,7 @@ function AtmosphereModel(grid;
                                        grid, coriolis, density,
                                        velocities, dynamics, formulation, specific_moisture)
 
-    # Include thermodynamic density (ρe or ρθ), ρqᵗ plus user tracers for closure field construction
+    # Include thermodynamic density (ρe or ρθ), ρqᵗ, microphysical prognostic fields, plus user tracers
     closure_thermo_name = thermodynamic_density_name(formulation)
     microphysical_names = prognostic_field_names(microphysics)
     scalar_names = tuple(closure_thermo_name, :ρqᵗ, microphysical_names..., tracer_names...)
