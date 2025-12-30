@@ -380,7 +380,7 @@ text!(axuw, 0.01, 2500, text="solid: uw\ndashed: vw", fontsize=14)
 
 fig[0, :] = Label(fig, "RICO: Horizontally-averaged profiles", fontsize=18, tellwidth=false)
 
-save("rico_profiles.png", fig)
+save("rico_profiles.png", fig) #src
 fig
 
 # The simulation shows the development of a cloudy, precipitating boundary layer with:
