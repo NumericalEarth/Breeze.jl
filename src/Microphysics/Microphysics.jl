@@ -17,8 +17,11 @@ export
     RelativeHumidityField,
     KesslerMicrophysics
 
-using ..AtmosphereModels: AtmosphereModels, compute_moisture_fractions,
-    materialize_microphysical_fields, update_microphysical_fields!
+import ..AtmosphereModels: compute_moisture_fractions,
+    materialize_microphysical_fields, update_microphysical_fields!,
+    maybe_adjust_thermodynamic_state
+
+using ..AtmosphereModels: AtmosphereModels
 
 include("saturation_adjustment.jl")
 include("bulk_microphysics.jl")
