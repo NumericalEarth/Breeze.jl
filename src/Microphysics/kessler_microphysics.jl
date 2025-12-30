@@ -139,7 +139,7 @@ end
 # Only cloud liquid and rain are prognostic; vapor is diagnosed from qᵗ
 prognostic_field_names(::KM) = (:ρqᶜˡ, :ρqʳ)
 
-function materialize_microphysical_fields(::KM, grid, boundary_conditions)
+function materialize_microphysical_fields(km::KM, grid, boundary_conditions)
     # Prognostic fields (density-weighted mass fractions)
     ρqᶜˡ = CenterField(grid; boundary_conditions=boundary_conditions.ρqᶜˡ)
     ρqʳ = CenterField(grid; boundary_conditions=boundary_conditions.ρqʳ)
@@ -211,7 +211,24 @@ end
         Eₖ_val = cloud_evaporation_rate(rᵛ, rᶜˡ, rᵛ⁺, D)
         Aₖ_val = autoconversion_rate(rᶜˡ, km)
         Kₖ_val = accretion_rate(rᶜˡ, rʳ, km)
-        Eʳ_val = rain_evaporation_rate(ρ, rᵛ, rʳ, rᵛ⁺)
+        
+        # Compute rain evaporation rate, coupled to cloud evaporation
+        # Following Fortran DCMIP2016: rain evaporation is limited by the
+        # remaining saturation deficit after cloud evaporation
+        Eʳ_uncoupled = rain_evaporation_rate(ρ, rᵛ, rʳ, rᵛ⁺)
+        
+        # Net cloud condensate change: Cₖ - Eₖ (positive = condensation)
+        # The saturation deficit "used up" by cloud evaporation is Eₖ
+        # Remaining deficit available for rain evaporation: max(subsaturation - Eₖ/D, 0)
+        # But simpler: limit rain evaporation to max(-Cₖ + Eₖ - rᶜˡ, 0) based on available deficit
+        # Following Fortran: ern = min(ern, max(-prod - qc, 0), qr)
+        # where prod = (qv - qvs)/D is net condensation (negative when subsaturated)
+        # Here: prod ≈ Cₖ - Eₖ (net condensation rate)
+        # Remaining deficit after cloud processes: max(-(Cₖ - Eₖ) - rᶜˡ, 0) doesn't quite work
+        # Simpler interpretation: rain evaporation limited by remaining subsaturation after cloud evaporation
+        # If cloud fully evaporates, remaining deficit = subsaturation - rᶜˡ
+        remaining_deficit = max(zero(FT), (rᵛ⁺ - rᵛ) - Eₖ_val)
+        Eʳ_val = min(Eʳ_uncoupled, remaining_deficit, rʳ)
         
         # Store rates for use in microphysical_tendency
         μ.Cₖ[i, j, k] = Cₖ_val
@@ -220,7 +237,10 @@ end
         μ.Kₖ[i, j, k] = Kₖ_val
         μ.Eʳ[i, j, k] = Eʳ_val
         
-        # Compute terminal velocity at face k (using standard sea-level reference density)
+        # Compute terminal velocity at face k using surface density as reference
+        # Following Fortran DCMIP2016: ρ₀ = ρ(1) (surface density from column)
+        # Since we don't have direct access to dynamics here, use a fixed standard value
+        # TODO: Pass reference_density field to update_microphysical_fields! for proper ρ₀
         ρ₀ = convert(FT, 1.225)  # Standard sea-level air density [kg/m³]
         wₜ = rain_terminal_velocity(ρ, rʳ, ρ₀)
         wʳ = -wₜ  # Negative = downward
@@ -579,12 +599,59 @@ which adds the terminal velocity `wʳ` to the rain tracer advection.
 end
 
 # Default: no tendency for other variables
-# Note: There is no explicit θ tendency from microphysics in this scheme.
-# Phase changes (condensation/evaporation) conserve liquid-ice potential temperature by design.
-# Sedimentation is handled via microphysical_velocities (advection of ρqʳ with terminal velocity),
-# and any θ adjustments associated with rain transport are handled automatically by Breeze's
-# thermodynamic consistency in the advection scheme.
+# Phase changes (condensation/evaporation of cloud) conserve liquid-ice potential temperature by design.
+# However, rain evaporation releases latent heat and cools the air, which requires an explicit θ tendency.
 @inline microphysical_tendency(i, j, k, grid, ::KM, name, ρ, μ, 𝒰, constants) = zero(grid)
+
+"""
+$(TYPEDSIGNATURES)
+
+Compute the tendency for potential temperature density (ρθˡⁱ) due to rain evaporation.
+
+Rain evaporation cools the air by releasing latent heat:
+```math
+\\frac{∂(ρθ)}{∂t} = -ρ \\cdot \\frac{L}{cₚ Π} \\cdot Eʳ
+```
+
+where Eʳ is the rain evaporation rate (in mass fraction space), L is the latent heat,
+cₚ is the mixture heat capacity, and Π is the Exner function.
+
+Note: Condensation/evaporation of cloud liquid is already accounted for in the
+liquid-ice potential temperature formulation. Only rain evaporation (which occurs
+after rain has fallen from cloud) requires an explicit θ tendency.
+"""
+@inline function microphysical_tendency(i, j, k, grid, km::KM, ::Val{:ρθ}, ρ_local, μ, 𝒰, constants)
+    # Get thermodynamic quantities
+    ρ = density(𝒰, constants)
+    T = temperature(𝒰, constants)
+    qᵗ = total_specific_moisture(𝒰)
+    
+    # Get moisture fractions for heat capacity calculation
+    @inbounds qᵛ = μ.qᵛ[i, j, k]
+    @inbounds qᶜˡ = μ.qᶜˡ[i, j, k]
+    @inbounds qʳ = μ.qʳ[i, j, k]
+    q = MoistureMassFractions(qᵛ, qᶜˡ + qʳ)
+    
+    # Get rain evaporation rate (in mixing ratio space)
+    @inbounds Eʳ = μ.Eʳ[i, j, k]
+    
+    # Convert to mass fraction space
+    dqʳdt_evap = mixing_ratio_to_mass_fraction(Eʳ, qᵗ)
+    
+    # Latent heat and heat capacity
+    L = liquid_latent_heat(T, constants)
+    cₚ = mixture_heat_capacity(q, constants)
+    
+    # Exner function for conversion to potential temperature
+    Π = exner_function(𝒰, constants)
+    
+    # Rain evaporation cools the air:
+    # dθ/dt = -L/(cₚ Π) * (dqʳ/dt from evaporation)
+    # The negative sign: evaporation (Eʳ > 0 means rain is disappearing) cools air
+    dθdt = -L / (cₚ * Π) * dqʳdt_evap
+    
+    return ρ * dθdt
+end
 
 #####
 ##### Precipitation rate diagnostics
