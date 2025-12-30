@@ -168,6 +168,40 @@ For compressible dynamics, returns `(ρ=density_field,)`.
 dynamics_prognostic_fields(dynamics) = NamedTuple()
 
 #####
+##### Pressure gradient interface
+#####
+
+"""
+    x_pressure_gradient(i, j, k, grid, dynamics)
+
+Return the x-component of the pressure gradient force at (Face, Center, Center).
+
+For anelastic dynamics, returns zero (pressure is handled via projection).
+For compressible dynamics, returns `-∂p/∂x`.
+"""
+@inline x_pressure_gradient(i, j, k, grid, dynamics) = zero(grid)
+
+"""
+    y_pressure_gradient(i, j, k, grid, dynamics)
+
+Return the y-component of the pressure gradient force at (Center, Face, Center).
+
+For anelastic dynamics, returns zero (pressure is handled via projection).
+For compressible dynamics, returns `-∂p/∂y`.
+"""
+@inline y_pressure_gradient(i, j, k, grid, dynamics) = zero(grid)
+
+"""
+    z_pressure_gradient(i, j, k, grid, dynamics)
+
+Return the z-component of the pressure gradient force at (Center, Center, Face).
+
+For anelastic dynamics, returns zero (pressure is handled via projection).
+For compressible dynamics, returns `-∂p/∂z`.
+"""
+@inline z_pressure_gradient(i, j, k, grid, dynamics) = zero(grid)
+
+#####
 ##### Tendency computation interface
 #####
 

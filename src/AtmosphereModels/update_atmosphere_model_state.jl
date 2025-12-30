@@ -9,6 +9,7 @@ using Oceananigans.ImmersedBoundaries: mask_immersed_field!
 using Oceananigans.TimeSteppers: TimeSteppers
 using Oceananigans.TurbulenceClosures: compute_diffusivities!
 using Oceananigans.Utils: launch!, KernelParameters
+using Oceananigans.Operators: ℑxᶠᵃᵃ, ℑyᵃᶠᵃ, ℑzᵃᵃᶠ
 
 function TimeSteppers.update_state!(model::AtmosphereModel, callbacks=[]; compute_tendencies=true)
     tracer_density_to_specific!(model) # convert tracer density to specific tracer distribution
@@ -88,6 +89,12 @@ function compute_auxiliary_variables!(model)
 
     kp = KernelParameters(ii, jj, kk)
 
+    # Ensure halos are filled before velocity computation
+    # (prognostic field halo fill in update_state! is async)
+    density = dynamics_density(model.dynamics)
+    fill_halo_regions!(density)
+    fill_halo_regions!(model.momentum)
+
     launch!(arch, grid, kp,
             _compute_velocities!,
             model.velocities,
@@ -146,12 +153,13 @@ end
         ρv = momentum.ρv[i, j, k]
         ρw = momentum.ρw[i, j, k]
 
-        ρᶜ = ρ[i, j, k]
-        ρᶠ = ℑzᵃᵃᶠ(i, j, k, grid, ρ)
+        ρᶠᶜᶜ = ℑxᶠᵃᵃ(i, j, k, grid, ρ)
+        ρᶜᶠᶜ = ℑyᵃᶠᵃ(i, j, k, grid, ρ)
+        ρᶜᶜᶠ = ℑzᵃᵃᶠ(i, j, k, grid, ρ)
 
-        velocities.u[i, j, k] = ρu / ρᶜ
-        velocities.v[i, j, k] = ρv / ρᶜ
-        velocities.w[i, j, k] = ρw / ρᶠ
+        velocities.u[i, j, k] = ρu / ρᶠᶜᶜ
+        velocities.v[i, j, k] = ρv / ρᶜᶠᶜ
+        velocities.w[i, j, k] = ρw / ρᶜᶜᶠ
     end
 end
 
@@ -217,8 +225,8 @@ function compute_tendencies!(model::AtmosphereModel)
         model.clock,
         model_fields)
 
-    u_args = tuple(momentum_args..., model.forcing.ρu)
-    v_args = tuple(momentum_args..., model.forcing.ρv)
+    u_args = tuple(momentum_args..., model.forcing.ρu, model.dynamics)
+    v_args = tuple(momentum_args..., model.forcing.ρv, model.dynamics)
 
     # Extra arguments for vertical velocity are required to compute
     # buoyancy:

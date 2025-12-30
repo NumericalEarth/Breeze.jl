@@ -47,9 +47,11 @@ end
                                      coriolis,
                                      clock,
                                      model_fields,
-                                     ρu_forcing)
+                                     ρu_forcing,
+                                     dynamics)
 
     return ( - div_𝐯u(i, j, k, grid, advection, momentum, velocities.u)
+             + x_pressure_gradient(i, j, k, grid, dynamics)
              - x_f_cross_U(i, j, k, grid, coriolis, momentum)
              - ∂ⱼ_𝒯₁ⱼ(i, j, k, grid, reference_density, closure, closure_fields, clock, model_fields, nothing)
              + ρu_forcing(i, j, k, grid, clock, model_fields))
@@ -65,9 +67,11 @@ end
                                      coriolis,
                                      clock,
                                      model_fields,
-                                     ρv_forcing)
+                                     ρv_forcing,
+                                     dynamics)
 
     return ( - div_𝐯v(i, j, k, grid, advection, momentum, velocities.v)
+             + y_pressure_gradient(i, j, k, grid, dynamics)
              - y_f_cross_U(i, j, k, grid, coriolis, momentum)
              - ∂ⱼ_𝒯₂ⱼ(i, j, k, grid, reference_density, closure, closure_fields, clock, model_fields, nothing)
              + ρv_forcing(i, j, k, grid, clock, model_fields))
@@ -93,6 +97,7 @@ end
                                      constants)
 
     return ( - div_𝐯w(i, j, k, grid, advection, momentum, velocities.w)
+             + z_pressure_gradient(i, j, k, grid, dynamics)
              + buoyancy_forceᶜᶜᶠ(i, j, k, grid, dynamics, formulation, temperature,
                                  specific_moisture, microphysics, microphysical_fields, constants)
              - z_f_cross_U(i, j, k, grid, coriolis, momentum)

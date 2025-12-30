@@ -1,11 +1,56 @@
 #####
-##### Density tendency for CompressibleDynamics
+##### Tendencies for CompressibleDynamics
 #####
-##### The continuity equation in conservation form:
-##### ∂ρ/∂t + ∇·(ρu) = 0
+##### The compressible Euler equations in conservation form include:
 #####
-##### The tendency is:
-##### Gρ = -∇·(ρu) = -(∂(ρu)/∂x + ∂(ρv)/∂y + ∂(ρw)/∂z)
+##### Continuity: ∂ρ/∂t + ∇·(ρu) = 0
+##### Momentum:   ∂(ρu)/∂t + ... + ∇p = ...
+#####
+##### The pressure gradient is added to the momentum equations via the
+##### x/y/z_pressure_gradient interface functions.
+#####
+
+using Oceananigans.Operators: ∂xᶠᶜᶜ, ∂yᶜᶠᶜ, ∂zᶜᶜᶠ
+
+#####
+##### Pressure gradient for compressible dynamics
+#####
+
+"""
+    x_pressure_gradient(i, j, k, grid, dynamics::CompressibleDynamics)
+
+Return the x-component of the pressure gradient force at (Face, Center, Center).
+
+For compressible dynamics, returns `-∂p/∂x`.
+"""
+@inline function x_pressure_gradient(i, j, k, grid, dynamics::CompressibleDynamics)
+    return -∂xᶠᶜᶜ(i, j, k, grid, dynamics.pressure)
+end
+
+"""
+    y_pressure_gradient(i, j, k, grid, dynamics::CompressibleDynamics)
+
+Return the y-component of the pressure gradient force at (Center, Face, Center).
+
+For compressible dynamics, returns `-∂p/∂y`.
+"""
+@inline function y_pressure_gradient(i, j, k, grid, dynamics::CompressibleDynamics)
+    return -∂yᶜᶠᶜ(i, j, k, grid, dynamics.pressure)
+end
+
+"""
+    z_pressure_gradient(i, j, k, grid, dynamics::CompressibleDynamics)
+
+Return the z-component of the pressure gradient force at (Center, Center, Face).
+
+For compressible dynamics, returns `-∂p/∂z`.
+"""
+@inline function z_pressure_gradient(i, j, k, grid, dynamics::CompressibleDynamics)
+    return -∂zᶜᶜᶠ(i, j, k, grid, dynamics.pressure)
+end
+
+#####
+##### Density tendency from continuity equation
 #####
 
 """

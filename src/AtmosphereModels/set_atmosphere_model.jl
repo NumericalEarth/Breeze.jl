@@ -167,6 +167,8 @@ function Fields.set!(model::AtmosphereModel; time=nothing, enforce_mass_conserva
             # Set density for compressible dynamics
             ρ = dynamics_density(model.dynamics)
             set!(ρ, value)
+            # Fill halos immediately - needed for velocity→momentum conversion
+            fill_halo_regions!(ρ)
 
         else
             prognostic_names = keys(prognostic_fields(model))

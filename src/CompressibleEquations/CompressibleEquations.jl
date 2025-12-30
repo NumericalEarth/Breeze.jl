@@ -33,7 +33,7 @@ using DocStringExtensions: TYPEDSIGNATURES
 using Adapt: Adapt, adapt
 using KernelAbstractions: @kernel, @index
 
-using Oceananigans: Oceananigans, CenterField, XFaceField, YFaceField, ZFaceField
+using Oceananigans: Oceananigans, CenterField, XFaceField, YFaceField, ZFaceField, prognostic_fields
 using Oceananigans.BoundaryConditions: FieldBoundaryConditions, regularize_field_boundary_conditions, fill_halo_regions!
 using Oceananigans.Operators: divᶜᶜᶜ
 using Oceananigans.TimeSteppers: TimeSteppers
@@ -62,7 +62,10 @@ import Breeze.AtmosphereModels:
     dynamics_prognostic_fields,
     initialize_model_thermodynamics!,
     compute_dynamics_tendency!,
-    compute_auxiliary_dynamics_variables!
+    compute_auxiliary_dynamics_variables!,
+    x_pressure_gradient,
+    y_pressure_gradient,
+    z_pressure_gradient
 
 include("compressible_dynamics.jl")
 include("compressible_buoyancy.jl")

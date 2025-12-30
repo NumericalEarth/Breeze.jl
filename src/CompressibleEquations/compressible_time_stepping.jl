@@ -72,6 +72,11 @@ function compute_auxiliary_dynamics_variables!(model::CompressibleModel)
     arch = grid.architecture
     dynamics = model.dynamics
 
+    # Ensure halos are filled (may have been async from update_state!)
+    # These fields are needed for pressure computation via equation of state
+    fill_halo_regions!(dynamics.density)
+    fill_halo_regions!(prognostic_fields(model.formulation))
+
     launch!(arch, grid, :xyz,
             _compute_temperature_and_pressure!,
             model.temperature,
@@ -123,7 +128,9 @@ end
 @inline function temperature_and_pressure(i, j, k,
                                           formulation::LiquidIcePotentialTemperatureFormulation,
                                           dynamics, ρ, Rᵐ, γ, q, constants)
-    θ = @inbounds formulation.potential_temperature[i, j, k]
+    # Note: potential_temperature_density is ρθ (prognostic), potential_temperature is θ (diagnostic)
+    ρθ = @inbounds formulation.potential_temperature_density[i, j, k]
+    θ = ρθ / ρ
     p₀ = standard_pressure(dynamics)
 
     # Direct formula: T = θ^γ (ρ Rᵐ / p₀)^(γ-1)
