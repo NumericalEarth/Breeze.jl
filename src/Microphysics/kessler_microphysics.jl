@@ -18,7 +18,7 @@ Diagnostic variable:
 Reference: Kessler (1969), "On the Distribution and Continuity of Water Substance in Atmospheric Circulations"
 """
 
-using Oceananigans: Oceananigans, CenterField, Field, Center, Face, Nothing as ONothing
+using Oceananigans: Oceananigans, CenterField, Field, Center, Face
 using Oceananigans.BoundaryConditions: FieldBoundaryConditions
 using Oceananigans.Fields: ZFaceField, ZeroField
 using Oceananigans.Operators: Δzᶜᶜᶜ
@@ -164,7 +164,7 @@ function materialize_microphysical_fields(km::KM, grid, boundary_conditions)
 
     # Surface precipitation rate (2D field, m/s)
     # This is the volume flux of rain at the surface: wʳ * qʳ (positive = precipitation out of domain)
-    precipitation_rate = Field{Center, Center, ONothing}(grid)
+    precipitation_rate = Field{Center, Center, Nothing}(grid)
 
     return (; ρqᶜˡ, ρqʳ, qᵛ, qᶜˡ, qʳ, Cₖ, Eₖ, Aₖ, Kₖ, Eʳ, wʳ, precipitation_rate)
 end
@@ -685,7 +685,7 @@ function surface_precipitation_flux(model, ::KM)
     μ = model.microphysical_fields
     ρᵣ = model.formulation.reference_state.density
     kernel = KesslerSurfacePrecipitationFluxKernel(μ.wʳ, μ.ρqʳ, ρᵣ)
-    op = KernelFunctionOperation{Center, Center, ONothing}(kernel, grid)
+    op = KernelFunctionOperation{Center, Center, Nothing}(kernel, grid)
     return Field(op)
 end
 
