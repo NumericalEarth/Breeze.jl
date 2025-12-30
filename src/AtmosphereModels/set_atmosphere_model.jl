@@ -160,6 +160,11 @@ function Fields.set!(model::AtmosphereModel; time=nothing, enforce_mass_conserva
         elseif name ∈ settable_thermodynamic_variables
             set_thermodynamic_variable!(model, Val(name), value)
 
+        elseif name == :ρ
+            # Set density for compressible dynamics
+            ρ = dynamics_density(model.dynamics)
+            set!(ρ, value)
+
         else
             prognostic_names = keys(prognostic_fields(model))
             settable_diagnostic_variables = (:qᵗ, :u, :v, :w)

@@ -44,13 +44,8 @@ grid = RectilinearGrid(CPU(),
 # We create a `CompressibleDynamics` model which time-steps density
 # directly and computes pressure from the Poisson equation.
 
-constants = ThermodynamicConstants(Float64)
-dynamics = CompressibleDynamics(constants=constants)
-
-model = AtmosphereModel(grid,
-                        dynamics = dynamics,
-                        coriolis = nothing,
-                        closure = nothing)
+dynamics = CompressibleDynamics()
+model = AtmosphereModel(grid; dynamics)
 
 println("Model created: ", typeof(model.dynamics))
 
@@ -71,13 +66,13 @@ x₀ = Lx / 2  # Center of perturbation
 θ₀ = T₀
 
 # Gaussian density perturbation (uniform in y and z)
-ρ_initial(x, y, z) = ρ₀ + δρ * exp(-(x - x₀)^2 / (2σ^2))
+ρᵢ(x, y, z) = ρ₀ + δρ * exp(-(x - x₀)^2 / (2σ^2))
 
 # Set prognostic fields
-set!(model.dynamics.density, ρ_initial)
-set!(model.formulation.potential_temperature_density, (x, y, z) -> ρ_initial(x, y, z) * θ₀)
+set!(model, ρ=ρᵢ, θ=θ₀)
+ρᵢ_field = deepcopy(model.dynamics.density)
 
-println("Initial density range: ", extrema(interior(model.dynamics.density)))
+println("Initial density range: ", extrema(model.dynamics.density))
 
 # ## Time stepping
 #
@@ -88,7 +83,7 @@ println("Initial density range: ", extrema(interior(model.dynamics.density)))
 c_s = 347.0  # Speed of sound (approximate)
 Δt = 0.05 * Δx / c_s  # CFL = 0.05 for stability
 
-simulation = Simulation(model, Δt=Δt, stop_iteration=100)
+simulation = Simulation(model, Δt=Δt, stop_iteration=1000)
 
 println("Time step: ", Δt, " s")
 println("Acoustic CFL: ", Δt * c_s / Δx)
@@ -103,23 +98,20 @@ println("Final time: ", prettytime(simulation.model.clock.time))
 if any(isnan, interior(model.dynamics.density))
     println("WARNING: NaN detected in density field!")
 else
-    println("Density field OK, range: ", extrema(interior(model.dynamics.density)))
+    println("Density field OK, range: ", extrema(model.dynamics.density))
 end
 
 if any(isnan, interior(model.momentum.ρu))
     println("WARNING: NaN detected in ρu field!")
 else
-    println("ρu field OK, range: ", extrema(interior(model.momentum.ρu)))
+    println("ρu field OK, range: ", extrema(model.momentum.ρu))
 end
 
-println("Pressure range: ", extrema(interior(model.dynamics.pressure)))
+println("Pressure range: ", extrema(model.dynamics.pressure))
 
 # ## Visualization
 #
 # Let's visualize the density perturbation.
-
-x = xnodes(model.dynamics.density)
-ρ_final = interior(model.dynamics.density, :, 1, 2)
 
 fig = Figure(size=(800, 400))
 ax = Axis(fig[1, 1],
@@ -127,11 +119,10 @@ ax = Axis(fig[1, 1],
           ylabel="Density (kg/m³)",
           title="Acoustic wave after $(prettytime(model.clock.time))")
 
-lines!(ax, x, ρ_final, color=:dodgerblue, linewidth=2, label="Final")
+lines!(ax, view(model.dynamics.density, :, 1, 1), color=:dodgerblue, linewidth=2, label="Final")
 
 # Initial condition for comparison
-ρ_init = [ρ₀ + δρ * exp(-(xi - x₀)^2 / (2σ^2)) for xi in x]
-lines!(ax, x, ρ_init, color=:gray, linewidth=1, linestyle=:dash, label="Initial")
+lines!(ax, view(ρᵢ_field, :, 1, 1), color=:gray, linewidth=1, linestyle=:dash, label="Initial")
 
 axislegend(ax)
 

@@ -2,12 +2,8 @@
 ##### Pressure correction time stepping for AnelasticDynamics
 #####
 
-using Oceananigans.BoundaryConditions: fill_halo_regions!
-using Oceananigans.ImmersedBoundaries: mask_immersed_field!
-using Oceananigans.Operators: ℑzᵃᵃᶠ, ∂xᶠᶜᶜ, ∂yᶜᶠᶜ, ∂zᶜᶜᶠ
-using Oceananigans.TimeSteppers: TimeSteppers
-using Oceananigans.Utils: launch!
-using KernelAbstractions: @kernel, @index
+using Oceananigans.Fields: set!
+using Oceananigans.Operators: ∂xᶠᶜᶜ, ∂yᶜᶠᶜ, ∂zᶜᶜᶠ
 
 #####
 ##### Model initialization

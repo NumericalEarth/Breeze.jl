@@ -10,9 +10,7 @@ using Oceananigans.TimeSteppers: TimeSteppers
 using Oceananigans.TurbulenceClosures: compute_diffusivities!
 using Oceananigans.Utils: launch!, KernelParameters
 
-# AnelasticModel type alias defined in AtmosphereModels.jl
-
-function TimeSteppers.update_state!(model::AnelasticModel, callbacks=[]; compute_tendencies=true)
+function TimeSteppers.update_state!(model::AtmosphereModel, callbacks=[]; compute_tendencies=true)
     tracer_density_to_specific!(model) # convert tracer density to specific tracer distribution
     fill_halo_regions!(prognostic_fields(model), model.clock, fields(model), async=true)
     compute_auxiliary_variables!(model)
@@ -192,7 +190,7 @@ end
     @inbounds temperature[i, j, k] = T
 end
 
-function compute_tendencies!(model::AnelasticModel)
+function compute_tendencies!(model::AtmosphereModel)
     grid = model.grid
     arch = grid.architecture
     Gρu = model.timestepper.Gⁿ.ρu
@@ -291,6 +289,12 @@ function compute_tendencies!(model::AnelasticModel)
         Gρc = getproperty(model.timestepper.Gⁿ, name)
         launch!(arch, grid, :xyz, compute_scalar_tendency!, Gρc, grid, scalar_args)
     end
+
+    #####
+    ##### Dynamics-specific tendencies (e.g., density for compressible dynamics)
+    #####
+
+    compute_dynamics_tendency!(model)
 
     return nothing
 end

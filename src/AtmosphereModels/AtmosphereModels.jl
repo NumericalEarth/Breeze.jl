@@ -125,10 +125,11 @@ using .PotentialTemperatureFormulations:
 # They are not exported from AtmosphereModels.
 
 #####
-##### Include dynamics-specific time stepping after formulations
+##### Dynamics-specific components (after AtmosphereModel and type aliases are defined)
 #####
 
 include("anelastic_time_stepping.jl")
 include("compressible_time_stepping.jl")
+include("compressible_density_tendency.jl")
 
 end

@@ -35,7 +35,10 @@ $(TYPEDSIGNATURES)
 Construct `CompressibleDynamics` with optional `standard_pressure` (default 10⁵ Pa).
 The density and pressure fields are materialized later in the model constructor.
 """
-CompressibleDynamics(; standard_pressure=1e5, surface_pressure=101325) = CompressibleDynamics(nothing, nothing, standard_pressure, surface_pressure)
+function CompressibleDynamics(; standard_pressure=1e5, surface_pressure=101325.0)
+    FT = promote_type(typeof(standard_pressure), typeof(surface_pressure))
+    return CompressibleDynamics(nothing, nothing, convert(FT, standard_pressure), convert(FT, surface_pressure))
+end
 
 Adapt.adapt_structure(to, dynamics::CompressibleDynamics) =
     CompressibleDynamics(adapt(to, dynamics.density),
