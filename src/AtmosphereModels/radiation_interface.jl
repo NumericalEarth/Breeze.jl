@@ -74,8 +74,8 @@ rtm = RadiativeTransferModel(grid, ClearSkyOptics(), constants;
     background_atmosphere = BackgroundAtmosphere(CO₂ = 400e-6))
 ```
 """
-function RadiativeTransferModel(grid::AbstractGrid, unknown_optics, args...; kw...)
-    msg = "Unknown optics $unknown_optics. Valid options are GrayOptics(), ClearSkyOptics().\n" *
+function RadiativeTransferModel(grid::AbstractGrid, optics, args...; kw...)
+    msg = "Unknown optics $(optics). Valid options are GrayOptics(), ClearSkyOptics().\n" *
           "Make sure RRTMGP.jl is loaded (e.g., `using RRTMGP`)."
     return throw(ArgumentError(msg))
 end
