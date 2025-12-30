@@ -599,59 +599,8 @@ which adds the terminal velocity `wʳ` to the rain tracer advection.
 end
 
 # Default: no tendency for other variables
-# Phase changes (condensation/evaporation of cloud) conserve liquid-ice potential temperature by design.
-# However, rain evaporation releases latent heat and cools the air, which requires an explicit θ tendency.
+# Phase changes (condensation/evaporation of cloud and rain) conserve liquid-ice potential temperature by design.
 @inline microphysical_tendency(i, j, k, grid, ::KM, name, ρ, μ, 𝒰, constants) = zero(grid)
-
-"""
-$(TYPEDSIGNATURES)
-
-Compute the tendency for potential temperature density (ρθˡⁱ) due to rain evaporation.
-
-Rain evaporation cools the air by releasing latent heat:
-```math
-\\frac{∂(ρθ)}{∂t} = -ρ \\cdot \\frac{L}{cₚ Π} \\cdot Eʳ
-```
-
-where Eʳ is the rain evaporation rate (in mass fraction space), L is the latent heat,
-cₚ is the mixture heat capacity, and Π is the Exner function.
-
-Note: Condensation/evaporation of cloud liquid is already accounted for in the
-liquid-ice potential temperature formulation. Only rain evaporation (which occurs
-after rain has fallen from cloud) requires an explicit θ tendency.
-"""
-@inline function microphysical_tendency(i, j, k, grid, km::KM, ::Val{:ρθ}, ρ_local, μ, 𝒰, constants)
-    # Get thermodynamic quantities
-    ρ = density(𝒰, constants)
-    T = temperature(𝒰, constants)
-    qᵗ = total_specific_moisture(𝒰)
-    
-    # Get moisture fractions for heat capacity calculation
-    @inbounds qᵛ = μ.qᵛ[i, j, k]
-    @inbounds qᶜˡ = μ.qᶜˡ[i, j, k]
-    @inbounds qʳ = μ.qʳ[i, j, k]
-    q = MoistureMassFractions(qᵛ, qᶜˡ + qʳ)
-    
-    # Get rain evaporation rate (in mixing ratio space)
-    @inbounds Eʳ = μ.Eʳ[i, j, k]
-    
-    # Convert to mass fraction space
-    dqʳdt_evap = mixing_ratio_to_mass_fraction(Eʳ, qᵗ)
-    
-    # Latent heat and heat capacity
-    L = liquid_latent_heat(T, constants)
-    cₚ = mixture_heat_capacity(q, constants)
-    
-    # Exner function for conversion to potential temperature
-    Π = exner_function(𝒰, constants)
-    
-    # Rain evaporation cools the air:
-    # dθ/dt = -L/(cₚ Π) * (dqʳ/dt from evaporation)
-    # The negative sign: evaporation (Eʳ > 0 means rain is disappearing) cools air
-    dθdt = -L / (cₚ * Π) * dqʳdt_evap
-    
-    return ρ * dθdt
-end
 
 #####
 ##### Precipitation rate diagnostics
