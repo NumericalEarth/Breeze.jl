@@ -154,13 +154,7 @@ function Fields.set!(model::AtmosphereModel; time=nothing, enforce_mass_conserva
             ρ = dynamics_density(model.dynamics)
             ρqᵗ = model.moisture_density
             set!(ρqᵗ, ρ * qᵗ)
-
-        elseif name == :ℋ
-            # Set total moisture from relative humidity
-            # Compute qᵛ⁺ (saturation specific humidity at the current temperature)
-            # then set qᵗ = ℋ * qᵛ⁺
-            set_total_moisture_from_relative_humidity!(model, value)
-
+        
         elseif name ∈ (:u, :v, :w)
             u = model.velocities[name]
             set!(u, value)
@@ -179,6 +173,21 @@ function Fields.set!(model::AtmosphereModel; time=nothing, enforce_mass_conserva
             set!(ρ, value)
             # Fill halos immediately - needed for velocity→momentum conversion
             fill_halo_regions!(ρ)
+
+        elseif name == :ℋ
+            # Call update_state! to ensure temperature is computed from thermodynamic variables
+            update_state!(model, compute_tendencies=false)
+
+            # Use SaturationSpecificHumidity which works on GPU
+            qᵛ⁺ = SaturationSpecificHumidity(model, :equilibrium)
+
+            # Set qᵗ = ℋ * qᵛ⁺
+            qᵗ = model.specific_moisture
+            set!(qᵗ, value * qᵛ⁺)
+
+            ρ = dynamics_density(model.dynamics)
+            ρqᵗ = model.moisture_density
+            set!(ρqᵗ, ρ * qᵗ)
 
         else
             prognostic_names = keys(prognostic_fields(model))
@@ -210,140 +219,4 @@ function Fields.set!(model::AtmosphereModel; time=nothing, enforce_mass_conserva
     end
 
     return nothing
-end
-
-"""
-    set_total_moisture_from_relative_humidity!(model, ℋ)
-
-Set the total moisture content from relative humidity `ℋ`.
-
-Computes `qᵗ = ℋ * qᵛ⁺` where `qᵛ⁺` is the saturation specific humidity
-at the current temperature. Relative humidity `ℋ` can be any non-negative value.
-Values greater than 1 represent supersaturated conditions.
-
-Note: For models with saturation adjustment microphysics, supersaturated air
-(ℋ > 1) will be adjusted to saturation after `update_state!` is called.
-"""
-function set_total_moisture_from_relative_humidity!(model, ℋ_value)
-    # Call update_state! to ensure temperature is computed from thermodynamic variables
-    update_state!(model, compute_tendencies=false)
-
-    # Compute saturation specific humidity and then qᵗ = ℋ * qᵛ⁺
-    compute_moisture_from_relative_humidity!(model, ℋ_value)
-
-    return nothing
-end
-
-# Handle scalar/number relative humidity
-function compute_moisture_from_relative_humidity!(model, ℋ::Number)
-    ρ = dynamics_density(model.dynamics)
-
-    # Use SaturationSpecificHumidityField which works on GPU
-    qᵛ⁺ = saturation_specific_humidity_for_setting(model)
-
-    qᵗ = model.specific_moisture
-    set!(qᵗ, ℋ * qᵛ⁺)
-
-    ρqᵗ = model.moisture_density
-    set!(ρqᵗ, ρ * qᵗ)
-
-    return nothing
-end
-
-# Handle function relative humidity: need to evaluate the function first
-function compute_moisture_from_relative_humidity!(model, ℋ_func::Function)
-    ρ = dynamics_density(model.dynamics)
-    grid = model.grid
-
-    # Use SaturationSpecificHumidityField which works on GPU
-    qᵛ⁺ = saturation_specific_humidity_for_setting(model)
-
-    # Create a temporary field to hold ℋ values
-    ℋ_field = CenterField(grid)
-    set!(ℋ_field, ℋ_func)
-
-    qᵗ = model.specific_moisture
-    set!(qᵗ, ℋ_field * qᵛ⁺)
-
-    ρqᵗ = model.moisture_density
-    set!(ρqᵗ, ρ * qᵗ)
-
-    return nothing
-end
-
-# Handle array/field relative humidity
-function compute_moisture_from_relative_humidity!(model, ℋ_array::AbstractArray)
-    ρ = dynamics_density(model.dynamics)
-
-    # Use SaturationSpecificHumidityField which works on GPU
-    qᵛ⁺ = saturation_specific_humidity_for_setting(model)
-
-    qᵗ = model.specific_moisture
-    set!(qᵗ, ℋ_array .* qᵛ⁺)
-
-    ρqᵗ = model.moisture_density
-    set!(ρqᵗ, ρ * qᵗ)
-
-    return nothing
-end
-
-using Oceananigans.AbstractOperations: KernelFunctionOperation
-using Oceananigans.Fields: Field, Center
-using Oceananigans.Utils: Utils
-
-using ..Thermodynamics:
-    saturation_vapor_pressure,
-    vapor_gas_constant,
-    PlanarLiquidSurface
-
-"""
-Kernel function for computing saturation specific humidity at the current temperature.
-Used for setting relative humidity in a GPU-compatible way.
-"""
-struct SaturationHumidityForSettingKernelFunction{T, R, TH}
-    temperature :: T
-    reference_state :: R
-    thermodynamic_constants :: TH
-end
-
-Utils.prettysummary(::SaturationHumidityForSettingKernelFunction) = "SaturationHumidityForSettingKernelFunction"
-
-Adapt.adapt_structure(to, k::SaturationHumidityForSettingKernelFunction) =
-    SaturationHumidityForSettingKernelFunction(adapt(to, k.temperature),
-                                                adapt(to, k.reference_state),
-                                                adapt(to, k.thermodynamic_constants))
-
-@inline function (d::SaturationHumidityForSettingKernelFunction)(i, j, k, grid)
-    @inbounds begin
-        ρᵣ = d.reference_state.density[i, j, k]
-        T = d.temperature[i, j, k]
-    end
-
-    constants = d.thermodynamic_constants
-    surface = PlanarLiquidSurface()
-    
-    # Compute saturation vapor pressure
-    pᵛ⁺ = saturation_vapor_pressure(T, constants, surface)
-    
-    # Saturation specific humidity: qᵛ⁺ = pᵛ⁺ / (ρ Rᵛ T)
-    # Using reference density ρᵣ as the original code did
-    Rᵛ = vapor_gas_constant(constants)
-    return pᵛ⁺ / (ρᵣ * Rᵛ * T)
-end
-
-"""
-    saturation_specific_humidity_for_setting(model)
-
-Return a Field containing the saturation specific humidity at the current
-temperature, assuming dry air (no condensate). This is used for setting
-relative humidity.
-
-Uses a GPU-compatible kernel to compute saturation specific humidity.
-"""
-function saturation_specific_humidity_for_setting(model)
-    func = SaturationHumidityForSettingKernelFunction(model.temperature,
-                                                       model.dynamics.reference_state,
-                                                       model.thermodynamic_constants)
-    op = KernelFunctionOperation{Center, Center, Center}(func, model.grid)
-    return Field(op)
 end

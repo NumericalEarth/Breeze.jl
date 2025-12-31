@@ -130,7 +130,7 @@ T = 288.0 # Room temperature (K)
 p = 101325.0 # Mean sea-level pressure
 Rᵈ = Breeze.Thermodynamics.dry_air_gas_constant(constants)
 q = zero(Breeze.Thermodynamics.MoistureMassFractions{Float64})
-ρ = Breeze.Thermodynamics.density(p, T, q, constants)
+ρ = Breeze.Thermodynamics.density(T, p, q, constants)
 qᵛ⁺ˡ = Breeze.Thermodynamics.saturation_specific_humidity(T, ρ, constants, PlanarLiquidSurface())
 
 # output

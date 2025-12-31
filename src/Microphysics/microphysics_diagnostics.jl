@@ -57,7 +57,7 @@ over a planar liquid surface.
 
 * `:equilibrium`
 
-  Return the *saturation specific humidity* in saturated conditions, using the
+  Return the *saturation specific humidity* in potentially-saturated conditions, using the
   `model.specific_moisture`. This is equivalent to the `:total_moisture` flavor
   under saturated conditions with no condensate; or in other words, if `model.specific_moisture` happens
   to be equal to the saturation specific humidity.
@@ -151,6 +151,57 @@ function SaturationSpecificHumidity(model, flavor_symbol=:prognostic)
     return KernelFunctionOperation{Center, Center, Center}(func, model.grid)
 end
 
+"""
+    saturation_total_specific_moisture(T, pᵣ, constants, equilibrium)
+
+Return the *saturation total specific moisture* ``qᵗ⁺`` — the total specific
+moisture when air is exactly saturated with no condensate (i.e., ``qᵗ = qᵛ⁺``).
+
+This is useful for manufacturing perfectly saturated initial conditions.
+
+## Derivation
+
+Starting from the equilibrium saturation specific humidity (see
+[`saturated_equilibrium_saturation_specific_humidity`](@ref)),
+
+```math
+qᵛ⁺ = \\frac{Rᵈ}{Rᵛ} (1 - qᵗ) \\frac{pᵛ⁺}{pᵣ - pᵛ⁺} = ϵᵈᵛ (1 - qᵗ) \\frac{pᵛ⁺}{pᵣ - pᵛ⁺} ,
+```
+
+we seek the special case where ``qᵗ = qᵛ⁺`` (all moisture is vapor, no condensate).
+Setting ``qᵗ = qᵛ⁺`` and solving for ``qᵗ``:
+
+```math
+qᵗ = ϵᵈᵛ (1 - qᵗ) \\frac{pᵛ⁺}{pᵣ - pᵛ⁺} .
+```
+
+Multiplying both sides by ``(pᵣ - pᵛ⁺)`` and expanding:
+
+```math
+qᵗ (pᵣ - pᵛ⁺) = ϵᵈᵛ pᵛ⁺ - ϵᵈᵛ qᵗ pᵛ⁺ .
+```
+
+Collecting terms in ``qᵗ``:
+
+```math
+qᵗ (pᵣ - pᵛ⁺ + ϵᵈᵛ pᵛ⁺) = ϵᵈᵛ pᵛ⁺ .
+```
+
+Since ``ϵᵈᵛ = Rᵈ / Rᵛ``, we have ``-1 + ϵᵈᵛ = δᵈᵛ``, leading to:
+
+```math
+qᵗ = \\frac{ϵᵈᵛ pᵛ⁺}{pᵣ + δᵈᵛ pᵛ⁺} = \\frac{pᵛ⁺}{pᵣ + δᵈᵛ pᵛ⁺} ,
+```
+
+where ``δᵈᵛ = Rᵈ / Rᵛ - 1 ≈ -0.378``.
+
+## Notes
+
+- This expression gives the saturation specific humidity in terms of reference
+  pressure ``pᵣ`` rather than density, avoiding iteration.
+- The equilibrium surface (liquid, ice, or mixed-phase) is determined by
+  temperature via `equilibrated_surface(equilibrium, T)`.
+"""
 @inline function saturation_total_specific_moisture(T, pᵣ, constants, equil)
     surface = equilibrated_surface(equil, T)
     pᵛ⁺ = saturation_vapor_pressure(T, constants, surface)
@@ -158,6 +209,20 @@ end
     Rᵛ = vapor_gas_constant(constants)
     δᵈᵛ = Rᵈ / Rᵛ - 1
     return pᵛ⁺ / (pᵣ + δᵈᵛ * pᵛ⁺)
+end
+
+@inline function equilibrium_saturation_specific_humidity(T, pᵣ, qᵗ, constants, equil)
+    surface = equilibrated_surface(equil, T)
+    pᵛ⁺ = saturation_vapor_pressure(T, constants, surface)
+    Rᵈ = dry_air_gas_constant(constants)
+    Rᵛ = vapor_gas_constant(constants)
+    ϵᵈᵛ = Rᵈ / Rᵛ
+    qᵛ⁺₁ = ϵᵈᵛ * (1 - qᵗ) * pᵛ⁺ / (pᵣ - pᵛ⁺)
+
+    ρ = density(T, pᵣ, qᵗ, constants)
+    qᵛ⁺₀ = pᵛ⁺ / (ρ * Rᵛ * T)
+
+    return max(qᵛ⁺₀, qᵛ⁺₁)
 end
 
 const AdjustmentSH = SaturationSpecificHumidityKernelFunction{<:SaturationAdjustment}
@@ -175,7 +240,7 @@ function (d::AdjustmentSH)(i, j, k, grid)
     if d.flavor isa Prognostic
         qᵗ = @inbounds d.specific_moisture[i, j, k]
         q = compute_moisture_fractions(i, j, k, grid, d.microphysics, ρᵣ, qᵗ, d.microphysical_fields)
-        ρ = density(pᵣ, T, q, constants)
+        ρ = density(T, pᵣ, q, constants)
         surface = equilibrated_surface(equil, T)
         return saturation_specific_humidity(T, ρ, constants, surface)
 
@@ -319,7 +384,7 @@ function (d::AdjustmentRH)(i, j, k, grid)
     qᵛ = q.vapor
 
     # Compute actual density from equation of state
-    ρ = density(pᵣ, T, q, constants)
+    ρ = density(T, pᵣ, q, constants)
 
     # Vapor pressure from ideal gas law: pᵛ = ρᵛ Rᵛ T = ρ qᵛ Rᵛ T
     Rᵛ = vapor_gas_constant(constants)

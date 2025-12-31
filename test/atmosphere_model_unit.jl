@@ -49,7 +49,7 @@ end
 
             # Check that interpolating to the first face (k=1) recovers surface values
             q₀ = Breeze.Thermodynamics.MoistureMassFractions{FT} |> zero
-            ρ₀ = Breeze.Thermodynamics.density(p₀, θ₀, q₀, constants)
+            ρ₀ = Breeze.Thermodynamics.density(θ₀, p₀, q₀, constants)
             for i = 1:Nx, j = 1:Ny
                 @test p₀ ≈ @allowscalar ℑzᵃᵃᶠ(i, j, 1, grid, reference_state.pressure)
                 @test ρ₀ ≈ @allowscalar ℑzᵃᵃᶠ(i, j, 1, grid, reference_state.density)
@@ -95,7 +95,7 @@ end
     Tᵢ = @allowscalar model.temperature[1, 1, k]
     pᵣᵢ = @allowscalar model.dynamics.reference_state.pressure[1, 1, k]
     q = Breeze.Thermodynamics.MoistureMassFractions{FT} |> zero
-    ρᵢ = Breeze.Thermodynamics.density(pᵣᵢ, Tᵢ, q, constants)
+    ρᵢ = Breeze.Thermodynamics.density(Tᵢ, pᵣᵢ, q, constants)
     qᵛ⁺_expected = Breeze.Thermodynamics.saturation_specific_humidity(Tᵢ, ρᵢ, constants, constants.liquid)
     qᵛ⁺k = @allowscalar qᵛ⁺[1, 1, k]
 
