@@ -17,7 +17,7 @@ radiation extensions (e.g., BreezeRRTMGPExt) to compute radiative transfer.
 """
 update_radiation!(radiation, model) = nothing
 
-struct RadiativeTransferModel{FT<:Number, C, E, SP, BA, AS, LW, SW, F}
+struct RadiativeTransferModel{FT<:Number, C, E, SP, BA, AS, LW, SW, F, LER, IER}
     solar_constant :: FT # Scalar
     coordinate :: C # coordinates (for RectilinearGrid) for computing the solar zenith angle
     epoch :: E # optional epoch for computing time with floating-point clocks
@@ -29,6 +29,8 @@ struct RadiativeTransferModel{FT<:Number, C, E, SP, BA, AS, LW, SW, F}
     upwelling_longwave_flux :: F
     downwelling_longwave_flux :: F
     downwelling_shortwave_flux :: F
+    liquid_effective_radius :: LER # Model for cloud liquid effective radius (Nothing for gray/clear-sky)
+    ice_effective_radius :: IER    # Model for cloud ice effective radius (Nothing for gray/clear-sky)
 end
 
 """
@@ -166,6 +168,13 @@ function Base.show(io::IO, radiation::RadiativeTransferModel)
           "├── solar_constant: ", prettysummary(radiation.solar_constant), " W m⁻²\n",
           "├── surface_temperature: ", radiation.surface_properties.surface_temperature, " K\n",
           "├── surface_emissivity: ", radiation.surface_properties.surface_emissivity, "\n",
-          "├── direct_surface_albedo: ", radiation.surface_properties.direct_surface_albedo, "\n",
-          "└── diffuse_surface_albedo: ", radiation.surface_properties.diffuse_surface_albedo)
+          "├── direct_surface_albedo: ", radiation.surface_properties.direct_surface_albedo, "\n")
+
+    # Show effective radius models if present (for all-sky optics)
+    if !isnothing(radiation.liquid_effective_radius)
+        print(io, "├── liquid_effective_radius: ", radiation.liquid_effective_radius, "\n",
+                  "├── ice_effective_radius: ", radiation.ice_effective_radius, "\n")
+    end
+
+    print(io, "└── diffuse_surface_albedo: ", radiation.surface_properties.diffuse_surface_albedo)
 end

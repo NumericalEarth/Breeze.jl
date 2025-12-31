@@ -190,7 +190,9 @@ function RadiativeTransferModel(grid::AbstractGrid,
                                   shortwave_solver,
                                   upwelling_longwave_flux,
                                   downwelling_longwave_flux,
-                                  downwelling_shortwave_flux)
+                                  downwelling_shortwave_flux,
+                                  nothing,  # liquid_effective_radius = nothing for gray
+                                  nothing)  # ice_effective_radius = nothing for gray
 end
 
 @inline rrtmgp_column_index(i, j, Nx) = i + (j - 1) * Nx

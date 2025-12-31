@@ -182,7 +182,9 @@ function RadiativeTransferModel(grid::AbstractGrid,
                                   nothing,
                                   upwelling_longwave_flux,
                                   downwelling_longwave_flux,
-                                  downwelling_shortwave_flux)
+                                  downwelling_shortwave_flux,
+                                  nothing,  # liquid_effective_radius = nothing for clear-sky
+                                  nothing)  # ice_effective_radius = nothing for clear-sky
 end
 
 # Mapping from RRTMGP's internal gas names to BackgroundAtmosphere field names
