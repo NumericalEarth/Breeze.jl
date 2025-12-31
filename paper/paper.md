@@ -1,5 +1,5 @@
 ---
-title: 'Breeze.jl: A Julia Package for Simulating Atmospheric Flows'
+title: 'Breeze.jl: A Julia package for simulating atmospheric flows'
 tags:
   - Julia
   - atmospheric science
@@ -33,9 +33,9 @@ authors:
 affiliations:
   - name: Aeolus Labs, CA, USA and Massachusetts Institute of Technology, Cambridge, MA, USA
     index: 1
-  - name: Australian National University, Canberra, Australia
+  - name: University of Melbourne, Parkville, VIC, Australia
     index: 2
-  - name: University of Tasmania, Hobart, Australia
+  - name: University of Tasmania, Hobart, TAS, Australia
     index: 3
   - name: Aeolus Labs, CA, USA
     index: 4
@@ -43,7 +43,7 @@ affiliations:
     index: 5
   - name: The Hebrew University of Jerusalem, Jerusalem, Israel
     index: 6
-date: 31 December 2024
+date: 31 December 2025
 bibliography: paper.bib
 ---
 
