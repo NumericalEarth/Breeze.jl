@@ -63,15 +63,32 @@ The `constants` argument provides physical constants for the radiative transfer 
 
 # Example
 
-```julia
-rtm = RadiativeTransferModel(grid, GrayOptics(), constants;
-    surface_temperature = 300,
-    surface_albedo = 0.1)
+```jldoctest
+julia> using Breeze, Oceananigans.Units, RRTMGP, NCDatasets
 
-rtm = RadiativeTransferModel(grid, ClearSkyOptics(), constants;
-    surface_temperature = 300,
-    surface_albedo = 0.1,
-    background_atmosphere = BackgroundAtmosphere(CO₂ = 400e-6))
+julia> grid = RectilinearGrid(; size=16, x=0, y=45, z=(0, 10kilometers),
+                              topology=(Flat, Flat, Bounded));
+
+julia> RadiativeTransferModel(grid, GrayOptics(), ThermodynamicConstants();
+                              surface_temperature = 300,
+                              surface_albedo = 0.1)
+RadiativeTransferModel
+├── solar_constant: 1361.0 W m⁻²
+├── surface_temperature: ConstantField(300.0) K
+├── surface_emissivity: ConstantField(0.98)
+├── direct_surface_albedo: ConstantField(0.1)
+└── diffuse_surface_albedo: ConstantField(0.1)
+
+julia> RadiativeTransferModel(grid, ClearSkyOptics(), ThermodynamicConstants();
+                              surface_temperature = 300,
+                              surface_albedo = 0.1,
+                              background_atmosphere = BackgroundAtmosphere(CO₂ = 400e-6))
+RadiativeTransferModel
+├── solar_constant: 1361.0 W m⁻²
+├── surface_temperature: ConstantField(300.0) K
+├── surface_emissivity: ConstantField(0.98)
+├── direct_surface_albedo: ConstantField(0.1)
+└── diffuse_surface_albedo: ConstantField(0.1)
 ```
 """
 function RadiativeTransferModel(grid::AbstractGrid, optics, args...; kw...)

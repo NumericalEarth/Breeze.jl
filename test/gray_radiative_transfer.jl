@@ -22,6 +22,8 @@ using RRTMGP
 
         constants = ThermodynamicConstants()
 
+        @test_throws ArgumentError RadiativeTransferModel(grid, nothing, constants)
+
         @testset "Number-based surface properties" begin
             radiation = RadiativeTransferModel(grid, GrayOptics(), constants;
                                                surface_temperature = 300,

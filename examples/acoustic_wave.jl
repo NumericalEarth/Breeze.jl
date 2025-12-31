@@ -1,7 +1,7 @@
 # # Acoustic wave refraction by wind shear
 #
 # This example simulates an acoustic pulse propagating through a wind shear layer
-# using the fully compressible Euler equations. When wind speed increases with height,
+# using the fully compressible [Euler equations](https://en.wikipedia.org/wiki/Euler_equations_(fluid_dynamics)). When wind speed increases with height,
 # sound waves are refracted: waves traveling **with** the wind bend **downward**
 # (trapped near the surface), while waves traveling **against** the wind bend **upward**.
 #
@@ -14,10 +14,13 @@
 #
 # This phenomenon explains why distant sounds are often heard more clearly downwind
 # of a source, as sound energy is "ducted" along the surface. For more on this topic, see
-# * Ostashev and Wilson (2015), *Acoustics in Moving Inhomogeneous Media*, CRC Press.
-# * Pierce (2019), *Acoustics: An Introduction to Its Physical Principles and Applications*, Springer.
 #
-# We use stable stratification to suppress Kelvin-Helmholtz instability and a logarithmic
+# ```@bibliography
+# ostashev2015acoustics
+# pierce2019acoustics
+# ```
+#
+# We use stable stratification to suppress [Kelvin-Helmholtz instability](https://en.wikipedia.org/wiki/Kelvin%E2%80%93Helmholtz_instability) and a logarithmic
 # wind profile consistent with the atmospheric surface layer.
 
 using Breeze
@@ -38,7 +41,7 @@ model = AtmosphereModel(grid; dynamics = CompressibleDynamics())
 
 # ## Background state
 #
-# We build a hydrostatically balanced reference state using `ReferenceState`.
+# We build a hydrostatically balanced reference state using [`ReferenceState`](@ref).
 # This provides the background density and pressure profiles.
 
 constants = model.thermodynamic_constants
@@ -83,7 +86,7 @@ set!(model, ρ=ρᵢ, θ=θ₀, u=uᵢ)
 # ## Simulation setup
 #
 # Acoustic waves travel fast (``𝕌ˢⁱ ≈ 347`` m/s), so we need a small time step.
-# The CFL condition is based on the effective sound speed ``𝕌ˢ = 𝕌ˢⁱ + max(U)``.
+# The [Courant–Friedrichs–Lewy (CFL) condition](https://en.wikipedia.org/wiki/Courant%E2%80%93Friedrichs%E2%80%93Lewy_condition) is based on the effective sound speed ``𝕌ˢ = 𝕌ˢⁱ + \mathrm{max}(U)``.
 
 Δx, Δz = Lx / Nx, Lz / Nz
 𝕌ˢ = 𝕌ˢⁱ + Uᵢ(Lz)
