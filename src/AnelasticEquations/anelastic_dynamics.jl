@@ -2,19 +2,6 @@
 ##### AnelasticDynamics definition
 #####
 
-"""
-    AnelasticDynamics{R, P}
-
-Represents anelastic dynamics expanded about a hydrostatic reference state.
-
-The anelastic approximation filters acoustic waves by assuming density and pressure
-are small perturbations from a reference state `(ρᵣ(z), pᵣ(z))` with constant
-reference potential temperature `θᵣ`.
-
-# Fields
-- `reference_state`: The hydrostatic, adiabatic reference state
-- `pressure_anomaly`: The non-hydrostatic pressure perturbation field (kinematic, `p'/ρᵣ`)
-"""
 struct AnelasticDynamics{R, P}
     reference_state :: R
     pressure_anomaly :: P

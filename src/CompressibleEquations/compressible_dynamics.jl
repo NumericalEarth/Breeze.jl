@@ -2,26 +2,6 @@
 ##### CompressibleDynamics definition
 #####
 
-"""
-    CompressibleDynamics{D, P, FT}
-
-Represents fully compressible dynamics with prognostic density.
-
-The compressible formulation directly time-steps density and computes pressure
-from the ideal gas law. This formulation resolves acoustic waves and requires
-explicit time-stepping with appropriate CFL conditions.
-
-# Fields
-- `density`: Prognostic density field `ρ`
-- `pressure`: Pressure field computed from ideal gas law `p = ρ R^m T`
-- `standard_pressure`: Reference pressure for potential temperature calculations (pˢᵗ, default 10⁵ Pa)
-
-# Key differences from AnelasticDynamics
-- Density `ρ` is prognostic (time-stepped), not a fixed reference state
-- Pressure is computed from the equation of state, not from a projection
-- No pressure solver is required
-- Acoustic waves are resolved (not filtered)
-"""
 struct CompressibleDynamics{D, P, FT}
     density :: D              # ρ (prognostic)
     pressure :: P             # p = ρ R^m T (diagnostic)
