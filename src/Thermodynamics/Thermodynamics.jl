@@ -15,6 +15,7 @@ export ThermodynamicConstants, ReferenceState, IdealGas,
        equilibrated_surface
 
 using DocStringExtensions: TYPEDSIGNATURES, TYPEDEF
+using Oceananigans: Oceananigans
 
 include("thermodynamics_constants.jl")
 include("vapor_saturation.jl")

@@ -218,7 +218,7 @@ struct MixedPhaseEquilibrium{FT} <: AbstractPhaseEquilibrium
     homogeneous_ice_nucleation_temperature :: FT
 end
 
-function MixedPhaseEquilibrium(FT::DataType = Float64;
+function MixedPhaseEquilibrium(FT::DataType = Oceananigans.defaults.FloatType;
                                freezing_temperature = 273.15,
                                homogeneous_ice_nucleation_temperature = 233.15)
 
