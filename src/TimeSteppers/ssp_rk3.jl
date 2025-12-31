@@ -7,7 +7,6 @@ using Oceananigans.TimeSteppers:
     AbstractTimeStepper,
     tick!,
     update_state!,
-    compute_tendencies!,
     compute_flux_bc_tendencies!,
     compute_pressure_correction!,
     make_pressure_correction!,
