@@ -4,14 +4,13 @@ export
     # AtmosphereModel core
     AtmosphereModel,
     AtmosphereModelBuoyancy,
-    # Dynamics
-    AnelasticDynamics,
-    AnelasticModel,
+    # Dynamics interface (dynamics types exported by their respective modules)
     dynamics_density,
     dynamics_pressure,
     mean_pressure,
     pressure_anomaly,
     total_pressure,
+    buoyancy_forceᶜᶜᶜ,
     # Thermodynamic formulations
     StaticEnergyFormulation,
     LiquidIcePotentialTemperatureFormulation,
@@ -60,48 +59,13 @@ using Oceananigans.TimeSteppers: TimeSteppers
 using Oceananigans.Utils: prettysummary, launch!
 
 #####
-##### Interfaces
+##### Interfaces (define the contract that dynamics implementations must fulfill)
 #####
 
 include("forcing_interface.jl")
 include("microphysics_interface.jl")
-
-#####
-##### Dynamics submodule
-#####
-
-include("Dynamics/Dynamics.jl")
-using .Dynamics:
-    AnelasticDynamics,
-    default_dynamics,
-    materialize_dynamics,
-    materialize_momentum_and_velocities,
-    dynamics_pressure_solver,
-    dynamics_density,
-    dynamics_pressure,
-    mean_pressure,
-    pressure_anomaly,
-    total_pressure,
-    solve_for_anelastic_pressure!
-
-#####
-##### Thermodynamic formulations submodule
-#####
-
-include("ThermodynamicFormulations/ThermodynamicFormulations.jl")
-using .ThermodynamicFormulations:
-    StaticEnergyFormulation,
-    LiquidIcePotentialTemperatureFormulation,
-    materialize_formulation,
-    prognostic_thermodynamic_field_names,
-    additional_thermodynamic_field_names,
-    thermodynamic_density_name,
-    thermodynamic_density,
-    collect_prognostic_fields,
-    diagnose_thermodynamic_state
-
-# Import with `import` (not `using`) to allow extension
-import .ThermodynamicFormulations: compute_auxiliary_thermodynamic_variables!, compute_thermodynamic_tendency!
+include("dynamics_interface.jl")
+include("formulation_interface.jl")
 
 #####
 ##### AtmosphereModel core
@@ -109,12 +73,6 @@ import .ThermodynamicFormulations: compute_auxiliary_thermodynamic_variables!, c
 
 include("atmosphere_model.jl")
 include("set_atmosphere_model.jl")
-
-# Define AnelasticModel type alias after AtmosphereModel is defined
-const AnelasticModel = AtmosphereModel{<:AnelasticDynamics}
-
-# Include anelastic time stepping after AnelasticModel is defined
-include("anelastic_time_stepping.jl")
 
 #####
 ##### Remaining AtmosphereModel components
@@ -127,17 +85,23 @@ include("update_atmosphere_model_state.jl")
 include("compute_hydrostatic_pressure.jl")
 
 #####
-##### Thermodynamics tendencies and set! implementations
-#####
-
-include("static_energy_tendency.jl")
-include("potential_temperature_tendency.jl")
-
-#####
-##### Diagnostics submodule
+##### Diagnostics submodule (needed before formulation submodules for helper accessors)
 #####
 
 include("Diagnostics/Diagnostics.jl")
 using .Diagnostics
+
+#####
+##### Thermodynamic formulation submodules
+#####
+
+include("StaticEnergyFormulations/StaticEnergyFormulations.jl")
+using .StaticEnergyFormulations:
+    StaticEnergyFormulation
+
+include("PotentialTemperatureFormulations/PotentialTemperatureFormulations.jl")
+using .PotentialTemperatureFormulations:
+    LiquidIcePotentialTemperatureFormulation
+
 
 end

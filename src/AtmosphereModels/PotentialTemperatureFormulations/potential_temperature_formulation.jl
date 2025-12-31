@@ -2,8 +2,6 @@
 ##### LiquidIcePotentialTemperatureFormulation
 #####
 
-using Breeze.Thermodynamics: LiquidIcePotentialTemperatureState
-
 """
 $(TYPEDSIGNATURES)
 
@@ -88,7 +86,7 @@ function diagnose_thermodynamic_state(i, j, k, grid,
 
     θ = @inbounds formulation.potential_temperature[i, j, k]
     pᵣ = @inbounds dynamics_pressure(dynamics)[i, j, k]
-    pˢᵗ = dynamics.reference_state.standard_pressure
+    pˢᵗ = standard_pressure(dynamics)
 
     return LiquidIcePotentialTemperatureState(θ, q, pˢᵗ, pᵣ)
 end
@@ -106,7 +104,8 @@ function collect_prognostic_fields(formulation::LiquidIcePotentialTemperatureFor
 
     ρθ = formulation.potential_temperature_density
     thermodynamic_variables = (ρθ=ρθ, ρqᵗ=moisture_density)
-    return merge(momentum, thermodynamic_variables, microphysical_fields, tracers)
+    dynamics_fields = dynamics_prognostic_fields(dynamics)
+    return merge(dynamics_fields, momentum, thermodynamic_variables, microphysical_fields, tracers)
 end
 
 #####
@@ -125,3 +124,4 @@ function Base.show(io::IO, formulation::LiquidIcePotentialTemperatureFormulation
         print(io, "└── potential_temperature: ", prettysummary(formulation.potential_temperature))
     end
 end
+
