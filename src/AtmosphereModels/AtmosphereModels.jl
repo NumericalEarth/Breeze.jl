@@ -36,6 +36,10 @@ export
     BackgroundAtmosphere,
     GrayOptics,
     ClearSkyOptics,
+    AllSkyOptics,
+
+    # Cloud effective radius
+    ConstantRadiusParticles,
 
     # Diagnostics (re-exported from Diagnostics submodule)
     PotentialTemperature,

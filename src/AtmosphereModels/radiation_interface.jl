@@ -51,6 +51,17 @@ Type representing full-spectrum clear-sky radiation using RRTMGP gas optics, can
 struct ClearSkyOptics <: AbstractOptics end
 
 """
+$(TYPEDEF)
+
+Type representing full-spectrum all-sky (cloudy) radiation using RRTMGP gas and cloud optics,
+can be used as optics argument in [`RadiativeTransferModel`](@ref).
+
+All-sky radiation includes scattering by cloud liquid and ice particles, requiring
+cloud water path, cloud fraction, and effective radius inputs from the microphysics scheme.
+"""
+struct AllSkyOptics <: AbstractOptics end
+
+"""
 $(TYPEDSIGNATURES)
 
 Construct a `RadiativeTransferModel` on `grid` using the specified `optics`.
@@ -58,6 +69,7 @@ Construct a `RadiativeTransferModel` on `grid` using the specified `optics`.
 Valid optics types are:
 - [`GrayOptics()`](@ref) - Gray atmosphere radiation ([O'Gorman & Schneider 2008](@cite OGormanSchneider2008))
 - [`ClearSkyOptics()`](@ref) - Full-spectrum clear-sky radiation using RRTMGP gas optics
+- [`AllSkyOptics()`](@ref) - Full-spectrum all-sky (cloudy) radiation using RRTMGP gas and cloud optics
 
 The `constants` argument provides physical constants for the radiative transfer solver.
 
@@ -92,7 +104,7 @@ RadiativeTransferModel
 ```
 """
 function RadiativeTransferModel(grid::AbstractGrid, optics, args...; kw...)
-    msg = "Unknown optics $(optics). Valid options are GrayOptics(), ClearSkyOptics().\n" *
+    msg = "Unknown optics $(optics). Valid options are GrayOptics(), ClearSkyOptics(), AllSkyOptics().\n" *
           "Make sure RRTMGP.jl is loaded (e.g., `using RRTMGP`)."
     return throw(ArgumentError(msg))
 end

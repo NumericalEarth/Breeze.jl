@@ -2,7 +2,7 @@ module BreezeRRTMGPExt
 
 using Breeze
 
-using Breeze.AtmosphereModels: GrayOptics, ClearSkyOptics
+using Breeze.AtmosphereModels: GrayOptics, ClearSkyOptics, AllSkyOptics, ConstantRadiusParticles
 using Breeze.Thermodynamics: ThermodynamicConstants
 using RRTMGP: RRTMGP
 
@@ -73,6 +73,7 @@ compute_datetime(t::Number, epoch::AbstractDateTime) = epoch + Millisecond(round
 
 include("gray_radiative_transfer_model.jl")
 include("clear_sky_radiative_transfer_model.jl")
+include("all_sky_radiative_transfer_model.jl")
 
 end # module
 
