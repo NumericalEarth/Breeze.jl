@@ -77,6 +77,13 @@ Modules = [Breeze.TurbulenceClosures]
 Private = false
 ```
 
+### TimeSteppers
+
+```@autodocs
+Modules = [Breeze.TimeSteppers]
+Private = false
+```
+
 ### Forcings
 
 ```@autodocs
@@ -186,6 +193,13 @@ Public = false
 
 ```@autodocs
 Modules = [Breeze.Forcings]
+Public = false
+```
+
+### TimeSteppers
+
+```@autodocs
+Modules = [Breeze.TimeSteppers]
 Public = false
 ```
 
