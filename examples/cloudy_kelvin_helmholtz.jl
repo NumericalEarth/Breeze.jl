@@ -1,6 +1,6 @@
 # # Cloudy Kelvin-Helmholtz instability
 #
-# This example sets up a two-dimensional (``x``–``z``) Kelvin–Helmholtz instability
+# This example sets up a two-dimensional (``x``–``z``) [Kelvin–Helmholtz instability](https://en.wikipedia.org/wiki/Kelvin%E2%80%93Helmholtz_instability)
 # in a moist, stably stratified atmosphere.
 #
 # The configuration is intentionally simple but reasonably "meteorological":
