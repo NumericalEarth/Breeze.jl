@@ -183,3 +183,58 @@ Compute the supersaturation ``𝒮 = pᵛ/pᵛ⁺ - 1`` over a given `surface`.
     pᵛ = vapor_pressure(ρ, T, q.vapor, constants)
     return pᵛ / pᵛ⁺ - 1
 end
+
+#####
+##### Phase equilibrium types
+#####
+
+abstract type AbstractPhaseEquilibrium end
+
+"""
+    WarmPhaseEquilibrium()
+
+Represents a warm-phase equilibrium where only liquid water condensate is considered.
+The equilibrated surface is always a planar liquid surface.
+"""
+struct WarmPhaseEquilibrium <: AbstractPhaseEquilibrium end
+
+"""
+    equilibrated_surface(equilibrium, T)
+
+Return the appropriate surface type for computing saturation vapor pressure
+given the phase `equilibrium` model and temperature `T`.
+"""
+@inline equilibrated_surface(::WarmPhaseEquilibrium, T) = PlanarLiquidSurface()
+
+"""
+    MixedPhaseEquilibrium(; freezing_temperature=273.15, homogeneous_ice_nucleation_temperature=233.15)
+
+Represents a mixed-phase equilibrium where both liquid and ice condensates are considered.
+The liquid fraction varies linearly with temperature between the freezing temperature
+and the homogeneous ice nucleation temperature.
+"""
+struct MixedPhaseEquilibrium{FT} <: AbstractPhaseEquilibrium
+    freezing_temperature :: FT
+    homogeneous_ice_nucleation_temperature :: FT
+end
+
+function MixedPhaseEquilibrium(FT::DataType = Float64;
+                               freezing_temperature = 273.15,
+                               homogeneous_ice_nucleation_temperature = 233.15)
+
+    if freezing_temperature < homogeneous_ice_nucleation_temperature
+        throw(ArgumentError("`freezing_temperature` must be greater than `homogeneous_ice_nucleation_temperature`"))
+    end
+
+    freezing_temperature = convert(FT, freezing_temperature)
+    homogeneous_ice_nucleation_temperature = convert(FT, homogeneous_ice_nucleation_temperature)
+    return MixedPhaseEquilibrium(freezing_temperature, homogeneous_ice_nucleation_temperature)
+end
+
+@inline function equilibrated_surface(equilibrium::MixedPhaseEquilibrium, T)
+    Tᶠ = equilibrium.freezing_temperature
+    Tʰ = equilibrium.homogeneous_ice_nucleation_temperature
+    T′ = clamp(T, Tʰ, Tᶠ)
+    λ = (T′ - Tʰ) / (Tᶠ - Tʰ)
+    return PlanarMixedPhaseSurface(λ)
+end

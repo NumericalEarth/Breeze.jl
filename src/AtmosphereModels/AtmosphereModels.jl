@@ -72,7 +72,6 @@ include("formulation_interface.jl")
 #####
 
 include("atmosphere_model.jl")
-include("set_atmosphere_model.jl")
 
 #####
 ##### Remaining AtmosphereModel components
@@ -90,6 +89,9 @@ include("compute_hydrostatic_pressure.jl")
 
 include("Diagnostics/Diagnostics.jl")
 using .Diagnostics
+
+# set_atmosphere_model requires Diagnostics for SaturationSpecificHumidity
+include("set_atmosphere_model.jl")
 
 #####
 ##### Thermodynamic formulation submodules

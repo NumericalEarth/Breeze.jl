@@ -3,7 +3,7 @@ using Oceananigans.TimeSteppers: update_state!
 using Oceananigans.BoundaryConditions: fill_halo_regions!
 using Oceananigans.TimeSteppers: compute_pressure_correction!, make_pressure_correction!, update_state!
 
-using Breeze.Microphysics: SaturationSpecificHumidity
+using .Diagnostics: SaturationSpecificHumidity
 
 using ..Thermodynamics:
     MoistureMassFractions,
@@ -180,7 +180,7 @@ function Fields.set!(model::AtmosphereModel; time=nothing, enforce_mass_conserva
             # Call update_state! to ensure temperature is computed from thermodynamic variables
             update_state!(model, compute_tendencies=false)
 
-            # Use SaturationSpecificHumidity which works on GPU
+            # Compute saturation specific humidity using GPU-compatible kernel
             qᵛ⁺ = SaturationSpecificHumidity(model, :equilibrium)
 
             # Set qᵗ = ℋ * qᵛ⁺
