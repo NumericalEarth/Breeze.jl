@@ -10,10 +10,9 @@ using ClimaComms
 using NCDatasets
 using RRTMGP
 
-@testset "All-sky full-spectrum RadiativeTransferModel" begin
+@testset "All-sky full-spectrum RadiativeTransferModel [$FT]" for FT in (Float64, Float32)
 
     @testset "Constructor argument errors" begin
-        FT = Float64
         Oceananigans.defaults.FloatType = FT
 
         Nz = 4
