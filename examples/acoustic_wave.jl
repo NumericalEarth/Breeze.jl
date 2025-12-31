@@ -28,7 +28,7 @@ using CairoMakie
 
 # ## Grid and model setup
 
-Nx, Nz = 256, 128
+Nx, Nz = 128, 64
 Lx, Lz = 1000, 200  # meters
 
 grid = RectilinearGrid(size = (Nx, Nz), x = (-Lx/2, Lx/2), z = (0, Lz),
@@ -100,7 +100,7 @@ function progress(sim)
     @info msg
 end
 
-add_callback!(simulation, progress, IterationInterval(500))
+add_callback!(simulation, progress, IterationInterval(100))
 
 # ## Output
 #
