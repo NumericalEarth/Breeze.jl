@@ -5,22 +5,6 @@
 using ..Thermodynamics: MoistureMassFractions
 
 #####
-##### Traits for microphysics schemes
-#####
-
-"""
-    is_saturation_adjustment(microphysics)
-
-Return `true` if `microphysics` is a saturation adjustment scheme.
-
-This trait is used to determine if relative humidity should be validated
-when setting initial conditions. With saturation adjustment, setting ℋ > 1
-is an error because the adjustment would immediately reduce it to 1.
-"""
-is_saturation_adjustment(::Nothing) = false
-is_saturation_adjustment(::Any) = false
-
-#####
 ##### Definition of the microphysics interface, with methods for "Nothing" microphysics
 #####
 

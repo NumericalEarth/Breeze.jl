@@ -222,19 +222,13 @@ end
 Set the total moisture content from relative humidity `ℋ`.
 
 Computes `qᵗ = ℋ * qᵛ⁺` where `qᵛ⁺` is the saturation specific humidity
-at the current temperature. Relative humidity `ℋ` should be in the range [0, 1].
+at the current temperature. Relative humidity `ℋ` can be any non-negative value.
+Values greater than 1 represent supersaturated conditions.
 
-For models with saturation adjustment microphysics (as determined by
-`is_saturation_adjustment`), throws an error if any value of `ℋ` exceeds 1,
-since the saturation adjustment would immediately reduce the relative humidity to 1.
+Note: For models with saturation adjustment microphysics, supersaturated air
+(ℋ > 1) will be adjusted to saturation after `update_state!` is called.
 """
 function set_total_moisture_from_relative_humidity!(model, ℋ_value)
-    # First, check if we have saturation adjustment microphysics
-    # If so, we need to validate that ℋ ≤ 1 everywhere
-    if is_saturation_adjustment(model.microphysics)
-        validate_relative_humidity_for_saturation_adjustment(ℋ_value)
-    end
-
     # Call update_state! to ensure temperature is computed from thermodynamic variables
     update_state!(model, compute_tendencies=false)
 
@@ -273,11 +267,6 @@ function compute_moisture_from_relative_humidity!(model, ℋ_func::Function)
     # Create a temporary field to hold ℋ values
     ℋ_field = CenterField(grid)
     set!(ℋ_field, ℋ_func)
-
-    # Now we can check for supersaturation with saturation adjustment
-    if is_saturation_adjustment(model.microphysics)
-        validate_relative_humidity_for_saturation_adjustment(interior(ℋ_field))
-    end
 
     qᵗ = model.specific_moisture
     set!(qᵗ, ℋ_field * qᵛ⁺)
@@ -328,30 +317,4 @@ function saturation_specific_humidity_field(T, ρ, constants)
     qᵛ⁺ = pᵛ⁺ ./ (ρ .* Rᵛ .* T)
 
     return qᵛ⁺
-end
-
-# Validation for constant/scalar relative humidity
-function validate_relative_humidity_for_saturation_adjustment(ℋ::Number)
-    if ℋ > 1
-        throw(ArgumentError("Cannot set relative humidity ℋ = $ℋ > 1 with " *
-                            "SaturationAdjustment microphysics. The saturation adjustment " *
-                            "would immediately reduce the relative humidity to 1. " *
-                            "Use qᵗ instead if you want to set supersaturated conditions."))
-    end
-    return nothing
-end
-
-# Validation for functions: we can't validate until it's evaluated, so skip
-validate_relative_humidity_for_saturation_adjustment(ℋ::Function) = nothing
-
-# Validation for arrays/fields: check max value
-function validate_relative_humidity_for_saturation_adjustment(ℋ::AbstractArray)
-    ℋ_max = maximum(ℋ)
-    if ℋ_max > 1
-        throw(ArgumentError("Cannot set relative humidity with maximum value ℋ = $ℋ_max > 1 with " *
-                            "SaturationAdjustment microphysics. The saturation adjustment " *
-                            "would immediately reduce the relative humidity to 1. " *
-                            "Use qᵗ instead if you want to set supersaturated conditions."))
-    end
-    return nothing
 end
