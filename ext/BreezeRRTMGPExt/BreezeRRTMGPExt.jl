@@ -72,6 +72,7 @@ compute_datetime(dt::AbstractDateTime, epoch) = dt
 compute_datetime(t::Number, epoch::AbstractDateTime) = epoch + Millisecond(round(Int, 1000t))
 
 include("gray_radiative_transfer_model.jl")
+include("rrtmgp_shared_utilities.jl")
 include("clear_sky_radiative_transfer_model.jl")
 include("all_sky_radiative_transfer_model.jl")
 
