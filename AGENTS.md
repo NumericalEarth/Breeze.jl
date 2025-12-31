@@ -109,7 +109,10 @@ Breeze interfaces with ClimaOcean for coupled atmosphere-ocean simulations.
     determined on one line rather than spread out over many lines.
   - Follow the style of existing examples, not the source code
   - Remember that initial condition functions act _pointwise_, there should be no broadcasting inside an initial condition function
-  - Do not convert between units. Always keep the units the same for calculations, unless plotting coordinates into the functions.
+  - **CRITICAL - Do not convert units**: Never multiply or divide by conversion factors (e.g., `* 1000` to convert
+    kg/kg to g/kg). Always keep units consistent with the source code. If plotting requires different scales,
+    consider plotting differences from initial conditions or using scientific notation in axis labels.
+    The only exception is converting spatial coordinates to kilometers for axis labels.
   - If possible, avoid long underscore names. Use concise evocative names like `z = znodes(grid, Center())`.
   - Use unicode that is consistent with the source code. Do not be afraid of unicode for intermediate variables.
   - Make sure that all notation in examples is consistent with `docs/src/appendix/notation.md`
@@ -149,6 +152,14 @@ Breeze interfaces with ClimaOcean for coupled atmosphere-ocean simulations.
     ```
   - In examples, use the suffix `ts` (no underscore) for "time series" and the suffix `n` (no underscore)
     to refer to `FieldTimeSeries` indexed at time-index `n`.
+  - **Preferred color palette**: Use bright, colorblind-friendly colors for plots:
+    ```julia
+    c_vapor = :dodgerblue      # Bright blue for vapor/moisture
+    c_cloud = :lime            # Vivid green for cloud liquid
+    c_rain = :orangered        # Bright orange-red for rain/precipitation
+    c_temp = :magenta          # Vibrant magenta for temperature
+    ```
+    These colors are distinct, high-contrast, and accessible for colorblind viewers.
 
 4. **Documentation Style**
   - Mathematical notation in `docs/src/appendix/notation.md`
@@ -185,7 +196,7 @@ Breeze interfaces with ClimaOcean for coupled atmosphere-ocean simulations.
 
 ### Naming Conventions
 - **Files**: snake_case (e.g., `atmosphere_model.jl`, `update_atmosphere_model_state.jl`)
-- **Types**: PascalCase (e.g., `AtmosphereModel`, `AnelasticFormulation`, `MoistAirBuoyancy`)
+- **Types**: PascalCase (e.g., `AtmosphereModel`, `AnelasticDynamics`, `MoistAirBuoyancy`)
 - **Functions**: snake_case (e.g., `update_atmosphere_model!`, `compute_pressure!`)
 - **Kernels**: "Kernels" (functions prefixed with `@kernel`) may be prefixed with an underscore (e.g., `_kernel_function`)
 - **Variables**: Use _either_ an English long name, or mathematical notation with readable unicode. Variable names should be taken from `docs/src/appendix/notation.md` in the docs. If a new variable is created (or if one doesn't exist), it should be added to the table in notation.md
@@ -211,12 +222,28 @@ These are also planned:
 ### Breeze formulations
 
 Breeze uses "formulations" to express different equation sets that encode conservation of mass, momentum, and energy.
-Currently Breeze always uses `AnelasticFormulation` in conservation form. In conservation form, all prognostic
+Currently Breeze always uses `AnelasticDynamics` in conservation form. In conservation form, all prognostic
 variables are "densities". There are currently two anelastic thermodynamic formulations:
   - `LiquidIcePotentialTemperatureThermodynamics` with prognostic potential temperature density `ρθ`.
   - `StaticEnergyThermodynamics` with prognostic static energy density `ρe`.
 Eventually there will also be a fully compressible formulation with prognostic total energy density.
 We may also implement `EntropyThermodynamics` which prognostics entropy density `ρη`.
+
+### Microphysics implementation guidelines
+
+Breeze has a microphysics interface in `src/AtmosphereModels/microphysics_interface.jl` that defines
+the functions that microphysics schemes must implement. Key functions include:
+
+- `maybe_adjust_thermodynamic_state`: Adjusts the thermodynamic state based on the microphysics scheme.
+  - For **saturation adjustment** schemes (equilibrium cloud formation): this function performs iterative
+    saturation adjustment to partition moisture between vapor and condensate.
+  - For **non-equilibrium** schemes (prognostic cloud condensate): this function should be **trivial**
+    (just return the input state unchanged). Non-equilibrium schemes have fully prognostic cloud
+    liquid/ice, so there is no adjustment to perform. The moisture partition is already determined
+    by the prognostic fields.
+- `microphysical_tendency`: Computes tendencies for prognostic microphysical variables.
+- `compute_moisture_fractions`: Computes moisture mass fractions from prognostic fields.
+- `update_microphysical_fields!`: Updates diagnostic microphysical fields after state update.
 
 ## Testing Guidelines
 
@@ -301,6 +328,13 @@ serve(dir="docs/build")
   (which will launch kernels under the hood) instead.
 - Be conservative about developing examples and tutorials. Do not write extensive example code unless asked.
   Instead, produce skeletons or outlines with minimum viable code.
+- **Debugging literated examples**: When a specific example fails during doc builds, comment out
+  all other examples in `docs/make.jl` except the failing one to isolate the error. This speeds up
+  iteration dramatically since you only build one example at a time.
+- **Literate.jl comment syntax**: In literated examples, lines starting with `# ` (hash + space)
+  at column 1 are converted to markdown. Comments inside functions that start with `#` at the
+  beginning of a line will prematurely end code blocks. Either remove such comments or use `##`
+  to keep them as code comments.
 
 ## Important Files to Know
 

@@ -5,7 +5,7 @@ using Test
 
 function setup_forcing_model(grid, forcing)
     model = AtmosphereModel(grid; tracers=:ρc, forcing)
-    θ₀ = model.formulation.reference_state.potential_temperature
+    θ₀ = model.dynamics.reference_state.potential_temperature
     set!(model; θ=θ₀)
     return model
 end
@@ -93,7 +93,7 @@ end
         boundary_conditions = (; ρu=ρu_bcs, ρv=ρv_bcs)
         model = AtmosphereModel(grid; boundary_conditions)
 
-        θ₀ = model.formulation.reference_state.potential_temperature
+        θ₀ = model.dynamics.reference_state.potential_temperature
         set!(model; θ=θ₀)
 
         # Model should build and run without error
@@ -116,7 +116,7 @@ end
         boundary_conditions = (; ρθ=ρθ_bcs)
         model = AtmosphereModel(grid; boundary_conditions)
 
-        θ₀ = model.formulation.reference_state.potential_temperature
+        θ₀ = model.dynamics.reference_state.potential_temperature
         set!(model; θ=θ₀)
 
         # Model should build and run without error
@@ -139,7 +139,7 @@ end
         boundary_conditions = (; ρqᵗ=ρqᵗ_bcs)
         model = AtmosphereModel(grid; boundary_conditions)
 
-        θ₀ = model.formulation.reference_state.potential_temperature
+        θ₀ = model.dynamics.reference_state.potential_temperature
         set!(model; θ=θ₀)
 
         # Model should build and run without error
@@ -159,7 +159,7 @@ end
         boundary_conditions = (; ρu=ρu_bcs, ρv=ρv_bcs, ρθ=ρθ_bcs, ρqᵗ=ρqᵗ_bcs)
         model = AtmosphereModel(grid; boundary_conditions)
 
-        θ₀ = model.formulation.reference_state.potential_temperature
+        θ₀ = model.dynamics.reference_state.potential_temperature
         set!(model; θ=θ₀)
 
         # Model should build and run without error

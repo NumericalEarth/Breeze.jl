@@ -87,32 +87,31 @@ using Breeze.Thermodynamics:
     PlanarLiquidSurface,
     PlanarIceSurface
 
-@inline function microphysical_tendency(i, j, k, grid, em::ExplicitMicrophysics, ::Val{:ρqˡ}, μ, 𝒰, constants)
-    ρ = 1.2 # density
+@inline function microphysical_tendency(i, j, k, grid, em::ExplicitMicrophysics, ::Val{:ρqˡ}, ρ, μ, 𝒰, constants)
+    ρⁱʲᵏ = @inbounds ρ[i, j, k]
     T = temperature(𝒰, constants)
-    q⁺ˡ = saturation_specific_humidity(T, ρ, constants, PlanarLiquidSurface())
+    q⁺ˡ = saturation_specific_humidity(T, ρⁱʲᵏ, constants, PlanarLiquidSurface())
     τᵛˡ = em.vapor_to_liquid
-    return @inbounds ρ * (μ.qᵛ[i, j, k] - q⁺ˡ) / τᵛˡ
+    return @inbounds ρⁱʲᵏ * (μ.qᵛ[i, j, k] - q⁺ˡ) / τᵛˡ
 end
 
 @inline function microphysical_tendency(i, j, k, grid,
-    em::ExplicitMicrophysics, ::Val{:ρqⁱ}, μ, 𝒰, constants)
+    em::ExplicitMicrophysics, ::Val{:ρqⁱ}, ρ, μ, 𝒰, constants)
 
-    ρ = 1.2 # density
-    q = MoistureMassFractions(qᵛ, qˡ, qⁱ)
+    ρⁱʲᵏ = @inbounds ρ[i, j, k]
     T = temperature(𝒰, constants)
-    q⁺ⁱ = saturation_specific_humidity(T, ρ, constants, PlanarIceSurface())
+    q⁺ⁱ = saturation_specific_humidity(T, ρⁱʲᵏ, constants, PlanarIceSurface())
     τᵛⁱ = em.vapor_to_ice
     qᵛ = @inbounds μ.qᵛ[i, j, k]
 
-    return ρ * (qᵛ - q⁺ⁱ) / τᵛⁱ
+    return ρⁱʲᵏ * (qᵛ - q⁺ⁱ) / τᵛⁱ
 end
 
 @inline function microphysical_tendency(i, j, k, grid,
-    em::ExplicitMicrophysics, ::Val{:ρqᵛ}, μ, 𝒰, constants)
+    em::ExplicitMicrophysics, ::Val{:ρqᵛ}, ρ, μ, 𝒰, constants)
 
-    Sᵛˡ = microphysical_tendency(i, j, k, grid, em, Val(:ρvˡ), μ, 𝒰, constants)
-    Sᵛⁱ = microphysical_tendency(i, j, k, grid, em, Val(:ρvⁱ), μ, 𝒰, constants)
+    Sᵛˡ = microphysical_tendency(i, j, k, grid, em, Val(:ρvˡ), ρ, μ, 𝒰, constants)
+    Sᵛⁱ = microphysical_tendency(i, j, k, grid, em, Val(:ρvⁱ), ρ, μ, 𝒰, constants)
     return - Sᵛˡ - Sᵛⁱ
 end
 

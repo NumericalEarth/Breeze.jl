@@ -13,7 +13,7 @@ The saturation adjustment solver (specific to our anelastic formulation) takes f
 * reference pressure ``pᵣ``.
 
 Note that moist static energy density ``ρᵣ e`` and moisture density ``ρᵣ qᵗ``
-are prognostic variables for [`AtmosphereModel`](@ref) when using [`AnelasticFormulation`](@ref),
+are prognostic variables for [`AtmosphereModel`](@ref) when using [`AnelasticDynamics`](@ref),
 where ``ρᵣ`` is the reference density.
 With warm-phase microphysics, the moist static energy ``e`` is related to temperature ``T``,
 height ``z``, and liquid mass fraction ``qˡ`` by

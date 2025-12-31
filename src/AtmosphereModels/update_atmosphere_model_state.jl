@@ -3,21 +3,19 @@ using ..Thermodynamics:
     mixture_heat_capacity,
     mixture_gas_constant
 
-using Oceananigans.Architectures: architecture
 using Oceananigans.BoundaryConditions: fill_halo_regions!, compute_x_bcs!, compute_y_bcs!, compute_z_bcs!
-using Oceananigans.TurbulenceClosures: compute_diffusivities!
+using Oceananigans.Grids: Bounded, Periodic, Flat, topology, halo_size
 using Oceananigans.ImmersedBoundaries: mask_immersed_field!
-using Oceananigans.Utils: launch!
+using Oceananigans.TimeSteppers: TimeSteppers
+using Oceananigans.TurbulenceClosures: compute_diffusivities!
+using Oceananigans.Utils: launch!, KernelParameters
+using Oceananigans.Operators: ℑxᶠᵃᵃ, ℑyᵃᶠᵃ, ℑzᵃᵃᶠ
 
-import Oceananigans.TimeSteppers: update_state!, compute_flux_bc_tendencies!
-
-const AnelasticModel = AtmosphereModel{<:AnelasticFormulation}
-
-function update_state!(model::AnelasticModel, callbacks=[]; compute_tendencies=true)
+function TimeSteppers.update_state!(model::AtmosphereModel, callbacks=[]; compute_tendencies=true)
     tracer_density_to_specific!(model) # convert tracer density to specific tracer distribution
     fill_halo_regions!(prognostic_fields(model), model.clock, fields(model), async=true)
     compute_auxiliary_variables!(model)
-    update_radiation!(model.radiative_transfer, model)
+    update_radiation!(model.radiation, model)
     compute_forcings!(model)
     compute_tendencies && compute_tendencies!(model)
     tracer_specific_to_density!(model) # convert specific tracer distribution to tracer density
@@ -42,8 +40,8 @@ function compute_forcings!(model)
     return nothing
 end
 
-tracer_density_to_specific!(model) = tracer_density_to_specific!(model.tracers, model.formulation.reference_state.density)
-tracer_specific_to_density!(model) = tracer_specific_to_density!(model.tracers, model.formulation.reference_state.density)
+tracer_density_to_specific!(model) = tracer_density_to_specific!(model.tracers, dynamics_density(model.dynamics))
+tracer_specific_to_density!(model) = tracer_specific_to_density!(model.tracers, dynamics_density(model.dynamics))
 
 function tracer_density_to_specific!(tracers, density)
     # TODO: do all tracers a single kernel
@@ -61,6 +59,10 @@ function tracer_specific_to_density!(tracers, density)
     return nothing
 end
 
+diagnostic_indices(::Bounded, N, H) = 1:N+1
+diagnostic_indices(::Periodic, N, H) = -H+1:N+H
+diagnostic_indices(::Flat, N, H) = 1:N
+
 """
 $(TYPEDSIGNATURES)
 
@@ -77,18 +79,37 @@ function compute_auxiliary_variables!(model)
     grid = model.grid
     arch = grid.architecture
 
-    launch!(arch, grid, :xyz,
+    TX, TY, TZ = topology(grid)
+    Nx, Ny, Nz = size(grid)
+    Hx, Hy, Hz = halo_size(grid)
+
+    ii = diagnostic_indices(TX(), Nx, Hx)
+    jj = diagnostic_indices(TY(), Ny, Hy)
+    kk = diagnostic_indices(TZ(), Nz, Hz)
+
+    kp = KernelParameters(ii, jj, kk)
+
+    # Ensure halos are filled before velocity computation
+    # (prognostic field halo fill in update_state! is async)
+    density = dynamics_density(model.dynamics)
+    fill_halo_regions!(density)
+    fill_halo_regions!(model.momentum)
+
+    launch!(arch, grid, kp,
             _compute_velocities!,
             model.velocities,
             grid,
-            model.formulation,
+            model.dynamics,
             model.momentum)
 
-    fill_halo_regions!(model.velocities)
     foreach(mask_immersed_field!, model.velocities)
+    fill_halo_regions!(model.velocities)
 
-    # Dispatch on thermodynamics type
+    # Dispatch on thermodynamic formulation type
     compute_auxiliary_thermodynamic_variables!(model)
+
+    # Dispatch on dynamics type (computes pressure for compressible dynamics)
+    compute_auxiliary_dynamics_variables!(model)
 
     # Compute diffusivities
     compute_diffusivities!(model.closure_fields, model.closure, model)
@@ -107,6 +128,7 @@ function compute_auxiliary_thermodynamic_variables!(model::AtmosphereModel)
             model.temperature,
             model.specific_moisture,
             model.formulation,
+            model.dynamics,
             grid,
             model.thermodynamic_constants,
             model.microphysics,
@@ -116,31 +138,35 @@ function compute_auxiliary_thermodynamic_variables!(model::AtmosphereModel)
     fill_halo_regions!(model.temperature)
     fill_halo_regions!(model.specific_moisture)
     fill_halo_regions!(model.microphysical_fields)
-    fill_halo_regions!(model.formulation.thermodynamics)
+    fill_halo_regions!(model.formulation)
 
     return nothing
 end
 
-@kernel function _compute_velocities!(velocities, grid, formulation, momentum)
+@kernel function _compute_velocities!(velocities, grid, dynamics, momentum)
     i, j, k = @index(Global, NTuple)
+
+    ρ = dynamics_density(dynamics)
 
     @inbounds begin
         ρu = momentum.ρu[i, j, k]
         ρv = momentum.ρv[i, j, k]
         ρw = momentum.ρw[i, j, k]
 
-        ρᶜ = formulation.reference_state.density[i, j, k]
-        ρᶠ = ℑzᵃᵃᶠ(i, j, k, grid, formulation.reference_state.density)
+        ρᶠᶜᶜ = ℑxᶠᵃᵃ(i, j, k, grid, ρ)
+        ρᶜᶠᶜ = ℑyᵃᶠᵃ(i, j, k, grid, ρ)
+        ρᶜᶜᶠ = ℑzᵃᵃᶠ(i, j, k, grid, ρ)
 
-        velocities.u[i, j, k] = ρu / ρᶜ
-        velocities.v[i, j, k] = ρv / ρᶜ
-        velocities.w[i, j, k] = ρw / ρᶠ
+        velocities.u[i, j, k] = ρu / ρᶠᶜᶜ
+        velocities.v[i, j, k] = ρv / ρᶜᶠᶜ
+        velocities.w[i, j, k] = ρw / ρᶜᶜᶠ
     end
 end
 
 @kernel function _compute_auxiliary_thermodynamic_variables!(temperature,
                                                              specific_moisture,
                                                              formulation,
+                                                             dynamics,
                                                              grid,
                                                              constants,
                                                              microphysics,
@@ -148,25 +174,24 @@ end
                                                              moisture_density)
     i, j, k = @index(Global, NTuple)
 
-    compute_auxiliary_thermodynamic_variables!(formulation, i, j, k, grid)
+    compute_auxiliary_thermodynamic_variables!(formulation, dynamics, i, j, k, grid)
 
+    ρ_field = dynamics_density(dynamics)
     @inbounds begin
-        ρ = formulation.reference_state.density[i, j, k]
+        ρ = ρ_field[i, j, k]
         ρqᵗ = moisture_density[i, j, k]
         qᵗ = ρqᵗ / ρ
         specific_moisture[i, j, k] = qᵗ
     end
 
-    𝒰₀ = diagnose_thermodynamic_state(i, j, k, grid,
-                                      formulation,
-                                      microphysics,
-                                      microphysical_fields,
-                                      constants,
-                                      specific_moisture)
+    # Compute moisture fractions first (needed by diagnose_thermodynamic_state)
+    q = compute_moisture_fractions(i, j, k, grid, microphysics, ρ, qᵗ, microphysical_fields)
+
+    𝒰₀ = diagnose_thermodynamic_state(i, j, k, grid, formulation, dynamics, q)
 
     # Adjust the thermodynamic state if using a microphysics scheme
     # that invokes saturation adjustment
-    𝒰₁ = maybe_adjust_thermodynamic_state(𝒰₀, microphysics, microphysical_fields, qᵗ, constants)
+    𝒰₁ = maybe_adjust_thermodynamic_state(i, j, k, 𝒰₀, microphysics, ρ, microphysical_fields, qᵗ, constants)
 
     update_microphysical_fields!(microphysical_fields, microphysics,
                                  i, j, k, grid,
@@ -176,49 +201,7 @@ end
     @inbounds temperature[i, j, k] = T
 end
 
-@kernel function _compute_potential_temperature_auxiliary_variables!(temperature,
-                                                                     potential_temperature,
-                                                                     specific_moisture,
-                                                                     grid,
-                                                                     constants,
-                                                                     formulation,
-                                                                     microphysics,
-                                                                     microphysical_fields,
-                                                                     liquid_ice_potential_temperature_density,
-                                                                     moisture_density)
-    i, j, k = @index(Global, NTuple)
-
-    @inbounds begin
-        ρθ = liquid_ice_potential_temperature_density[i, j, k]
-        ρqᵗ = moisture_density[i, j, k]
-        ρ = formulation.reference_state.density[i, j, k]
-
-        θ = ρθ / ρ
-        qᵗ = ρqᵗ / ρ
-        potential_temperature[i, j, k] = θ
-        specific_moisture[i, j, k] = qᵗ
-    end
-
-    𝒰₀ = diagnose_thermodynamic_state(i, j, k, grid,
-                                      formulation,
-                                      microphysics,
-                                      microphysical_fields,
-                                      constants,
-                                      specific_moisture)
-
-    # Adjust the thermodynamic state if using a microphysics scheme
-    # that invokes saturation adjustment
-    𝒰₁ = maybe_adjust_thermodynamic_state(𝒰₀, microphysics, microphysical_fields, qᵗ, constants)
-
-    update_microphysical_fields!(microphysical_fields, microphysics,
-                                 i, j, k, grid,
-                                 ρ, 𝒰₁, constants)
-
-    T = Thermodynamics.temperature(𝒰₁, constants)
-    @inbounds temperature[i, j, k] = T
-end
-
-function compute_tendencies!(model::AnelasticModel)
+function compute_tendencies!(model::AtmosphereModel)
     grid = model.grid
     arch = grid.architecture
     Gρu = model.timestepper.Gⁿ.ρu
@@ -232,7 +215,7 @@ function compute_tendencies!(model::AnelasticModel)
     #####
 
     momentum_args = (
-        model.formulation.reference_state.density,
+        dynamics_density(model.dynamics),
         model.advection.momentum,
         model.velocities,
         model.closure,
@@ -242,12 +225,13 @@ function compute_tendencies!(model::AnelasticModel)
         model.clock,
         model_fields)
 
-    u_args = tuple(momentum_args..., model.forcing.ρu)
-    v_args = tuple(momentum_args..., model.forcing.ρv)
+    u_args = tuple(momentum_args..., model.forcing.ρu, model.dynamics)
+    v_args = tuple(momentum_args..., model.forcing.ρv, model.dynamics)
 
     # Extra arguments for vertical velocity are required to compute
     # buoyancy:
     w_args = tuple(momentum_args..., model.forcing.ρw,
+                   model.dynamics,
                    model.formulation,
                    model.temperature,
                    model.specific_moisture,
@@ -261,6 +245,7 @@ function compute_tendencies!(model::AnelasticModel)
 
     # Arguments common to energy density, moisture density, and tracer density tendencies:
     common_args = (
+        model.dynamics,
         model.formulation,
         model.thermodynamic_constants,
         model.specific_moisture,
@@ -273,7 +258,7 @@ function compute_tendencies!(model::AnelasticModel)
         model_fields)
 
     #####
-    ##### Thermodynamic density tendency (dispatches on thermodynamics type)
+    ##### Thermodynamic density tendency (dispatches on thermodynamic formulation type)
     #####
 
     compute_thermodynamic_tendency!(model, common_args)
@@ -297,8 +282,12 @@ function compute_tendencies!(model::AnelasticModel)
     ##### Tracer density tendencies
     #####
 
-    for (i, name) in enumerate(keys(model.tracers))
-        ρc = model.tracers[name]
+    prognostic_microphysical_fields = NamedTuple(name => model.microphysical_fields[name]
+                                                 for name in prognostic_field_names(model.microphysics))
+
+    scalars = merge(prognostic_microphysical_fields, model.tracers)
+    for (i, name) in enumerate(keys(scalars))
+        ρc = scalars[name]
 
         scalar_args = (
             ρc,
@@ -312,6 +301,12 @@ function compute_tendencies!(model::AnelasticModel)
         launch!(arch, grid, :xyz, compute_scalar_tendency!, Gρc, grid, scalar_args)
     end
 
+    #####
+    ##### Dynamics-specific tendencies (e.g., density for compressible dynamics)
+    #####
+
+    compute_dynamics_tendency!(model)
+
     return nothing
 end
 
@@ -321,15 +316,8 @@ end
     @inbounds Gc[i, j, k] = scalar_tendency(i, j, k, grid, args...)
 end
 
-@kernel function compute_static_energy_tendency!(Gρe, grid, args)
-    i, j, k = @index(Global, NTuple)
-    @inbounds Gρe[i, j, k] = static_energy_tendency(i, j, k, grid, args...)
-end
-
-@kernel function compute_potential_temperature_tendency!(Gρθ, grid, args)
-    i, j, k = @index(Global, NTuple)
-    @inbounds Gρθ[i, j, k] = potential_temperature_tendency(i, j, k, grid, args...)
-end
+# Note: compute_static_energy_tendency! and compute_potential_temperature_tendency!
+# are now defined in their respective formulation submodules
 
 @kernel function compute_x_momentum_tendency!(Gρu, grid, args)
     i, j, k = @index(Global, NTuple)
@@ -351,7 +339,7 @@ $(TYPEDSIGNATURES)
 
 Apply boundary conditions by adding flux divergences to the right-hand-side.
 """
-function compute_flux_bc_tendencies!(model::AtmosphereModel)
+function TimeSteppers.compute_flux_bc_tendencies!(model::AtmosphereModel)
 
     Gⁿ = model.timestepper.Gⁿ
     arch  = model.architecture
