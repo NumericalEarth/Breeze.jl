@@ -49,17 +49,17 @@ Modules = [Breeze.AtmosphereModels.Diagnostics]
 Private = false
 ```
 
-### AtmosphereModels.PotentialTemperatureFormulations
+### PotentialTemperatureFormulations
 
 ```@autodocs
-Modules = [Breeze.AtmosphereModels.PotentialTemperatureFormulations]
+Modules = [Breeze.PotentialTemperatureFormulations]
 Private = false
 ```
 
-### AtmosphereModels.StaticEnergyFormulations
+### StaticEnergyFormulations
 
 ```@autodocs
-Modules = [Breeze.AtmosphereModels.StaticEnergyFormulations]
+Modules = [Breeze.StaticEnergyFormulations]
 Private = false
 ```
 
@@ -168,17 +168,17 @@ Modules = [Breeze.AtmosphereModels.Diagnostics]
 Public = false
 ```
 
-### AtmosphereModels.PotentialTemperatureFormulations
+### PotentialTemperatureFormulations
 
 ```@autodocs
-Modules = [Breeze.AtmosphereModels.PotentialTemperatureFormulations]
+Modules = [Breeze.PotentialTemperatureFormulations]
 Public = false
 ```
 
-### AtmosphereModels.StaticEnergyFormulations
+### StaticEnergyFormulations
 
 ```@autodocs
-Modules = [Breeze.AtmosphereModels.StaticEnergyFormulations]
+Modules = [Breeze.StaticEnergyFormulations]
 Public = false
 ```
 

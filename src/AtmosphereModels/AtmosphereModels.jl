@@ -11,9 +11,7 @@ export
     pressure_anomaly,
     total_pressure,
     buoyancy_forceᶜᶜᶜ,
-    # Thermodynamic formulations
-    StaticEnergyFormulation,
-    LiquidIcePotentialTemperatureFormulation,
+    # Thermodynamic formulation interface (formulation types exported by their respective modules)
     thermodynamic_density_name,
     thermodynamic_density,
     # Helpers
@@ -92,18 +90,5 @@ using .Diagnostics
 
 # set_atmosphere_model requires Diagnostics for SaturationSpecificHumidity
 include("set_atmosphere_model.jl")
-
-#####
-##### Thermodynamic formulation submodules
-#####
-
-include("StaticEnergyFormulations/StaticEnergyFormulations.jl")
-using .StaticEnergyFormulations:
-    StaticEnergyFormulation
-
-include("PotentialTemperatureFormulations/PotentialTemperatureFormulations.jl")
-using .PotentialTemperatureFormulations:
-    LiquidIcePotentialTemperatureFormulation
-
 
 end
