@@ -12,7 +12,7 @@
 
 Breeze has working Reactant integration with several workarounds in `ext/BreezeReactantExt/BreezeReactantExt.jl`. All 20 tests pass (see `test/reactant_enzyme.jl`).
 
-**Performance (December 2025)**: Reactant is **3.4× faster** than CPU at 256×128 grid size. Crossover point is ~128×128 — below this, CPU is faster. Compilation takes ~150-200s (one-time).
+**Performance (December 2025)**: Reactant is **~1.6-2.9× slower** than native execution due to workaround overhead. Compilation takes ~150-200s (one-time). The value is for AD/differentiation, not raw performance.
 
 ### Why Breeze Needs More Workarounds Than GB-25
 
@@ -172,37 +172,35 @@ Reactant + Enzyme AD |   20     20  15m25.7s
 
 ### Benchmark Results (December 2025)
 
-Using `test/benchmark_reactant.jl` on CPU backend (XLA CPU vs native Julia):
+Using `test/benchmark_reactant.jl` and `test/benchmark_reactant_gpu.jl` with proper synchronization:
 
-| Grid Size | CPU (ms/step) | Reactant (ms/step) | Speedup | Compile Time | Steps to Amortize |
-|-----------|---------------|---------------------|---------|--------------|-------------------|
-| 32×32 | 2.55 | 7.51 | **0.34×** (slower) | 149s | — |
-| 64×64 | 4.65 | 7.62 | **0.61×** (slower) | 167s | — |
-| 128×128 | 11.89 | 9.16 | **1.3×** | 194s | 70,884 |
-| 256×128 | 39.62 | 11.73 | **3.4×** | 196s | 7,025 |
+| Comparison | Grid Size | Native (ms/step) | Reactant (ms/step) | Result |
+|------------|-----------|------------------|---------------------|--------|
+| CPU | 64×64 | 2.5 | 7.3 | **2.9× slower** |
+| GPU | 128×128 | 4.1 | 6.6 | **1.6× slower** |
 
 ### Key Findings
 
-1. **Crossover point**: Reactant becomes faster than CPU around **128×128** grid size
-2. **Scaling advantage**: Reactant scales better with grid size (sublinear vs linear)
+1. **Reactant is slower than native execution** on both CPU and GPU
+2. **Workarounds add overhead**: Pure-Julia broadcasts vs optimized CUDA kernels
 3. **Compilation cost**: ~150-200 seconds regardless of grid size (one-time)
-4. **Variance**: Reactant has lower variance (more consistent timing)
+4. **Value proposition**: Reactant enables AD/differentiation at the cost of forward performance
 
 ### Interpretation
 
 | Observation | Implication |
 |-------------|-------------|
-| Small grids are slower | Reactant overhead dominates; use CPU for prototyping |
-| Large grids are faster | XLA optimizations pay off; use Reactant for production |
-| Sublinear scaling | Suggests good parallelization in compiled code |
-| High compile time | Compilation is a one-time cost; amortizes over long runs |
+| Reactant slower on CPU | Workarounds replace optimized code paths |
+| Reactant slower on GPU | XLA cannot match cuFFT/cuBLAS optimizations |
+| Consistent slowdown | ~1.6-2.9× overhead from broadcast workarounds |
+| High compile time | Only worthwhile for AD, not raw performance |
 
 ### Recommendations Based on Benchmarks
 
-1. **For development**: Use CPU (`RectilinearGrid(CPU(); ...)`) — faster iteration
-2. **For production**: Use Reactant for grids ≥ 128×128
-3. **GPU backend**: Expected to show even larger speedups (not yet tested)
-4. **Compilation caching**: Investigate if XLA caches compiled kernels between sessions
+1. **For forward simulation**: Use native CPU or GPU — faster execution
+2. **For AD/differentiation**: Use Reactant — enables gradient computation
+3. **For development**: Use CPU — no compilation overhead
+4. **Future optimization**: Upstream Reactant fixes could eliminate workarounds
 
 ### Benchmark Script Location
 
@@ -637,7 +635,8 @@ Useful for complex models like `AtmosphereModel` with deeply nested fields.
 | Purpose | File |
 |---------|------|
 | Main test suite | `test/reactant_enzyme.jl` |
-| **Benchmark script** | `test/benchmark_reactant.jl` |
+| **CPU benchmark** | `test/benchmark_reactant.jl` |
+| **GPU benchmark** | `test/benchmark_reactant_gpu.jl` |
 | **In-place FFT MWE** | `test/mwe_reactant_inplace_fft.jl` |
 | **Reduction caching MWE** | `test/mwe_reactant_reduction_caching.jl` |
 | **Grid specialization MWE** | `test/mwe_reactant_grid_specialization.jl` |
@@ -667,9 +666,9 @@ Useful for complex models like `AtmosphereModel` with deeply nested fields.
    - 2× faster tridiagonal solve, 0 allocations (was 4)
 
 2. **Improvement #2** (profile and benchmark) — **DONE** (December 2025)
-   - Benchmark script created at `test/benchmark_reactant.jl`
-   - Key finding: Reactant is **3.4× faster** than CPU at 256×128 grid size
-   - Crossover point: ~128×128 (below this, CPU is faster)
+   - Benchmark scripts: `test/benchmark_reactant.jl` (CPU) and `test/benchmark_reactant_gpu.jl` (GPU)
+   - Key finding: Reactant is **~1.6-2.9× slower** than native due to workaround overhead
+   - Value proposition: Enables AD/differentiation, not raw performance
    - Compilation time: ~150-200s (one-time cost)
 
 3. **Improvement #3** (in-place FFT) — **DONE** (December 2025)
@@ -692,7 +691,7 @@ Useful for complex models like `AtmosphereModel` with deeply nested fields.
 ### Short-Term (This Month)
 
 - **Test basic sharding** — verify Breeze works with `Distributed(ReactantState())`
-- **Test GPU backend** — expected to show even larger speedups
+- ✅ **GPU backend tested** — Reactant GPU is ~1.6× slower than native CUDA (workaround overhead)
 
 ### Medium-Term (This Quarter)
 

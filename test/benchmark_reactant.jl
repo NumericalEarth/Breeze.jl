@@ -4,10 +4,20 @@ Benchmark: Reactant vs CPU Performance for Breeze AtmosphereModel
 This script profiles and benchmarks the Reactant-compiled time stepping
 against CPU execution to identify bottlenecks and quantify performance.
 
+## Requirements
+
+- **Julia 1.10.x** (Julia 1.12 has MLIR/LLVM lowering issues with KA kernels)
+
 ## How to Run
 
 ```bash
-julia --project=test test/benchmark_reactant.jl
+julia +1.10 --project=test test/benchmark_reactant.jl
+```
+
+## Custom Grid Size
+
+```bash
+BENCH_NX=128 BENCH_NZ=128 julia +1.10 --project=test test/benchmark_reactant.jl
 ```
 
 ## What This Measures
@@ -57,6 +67,7 @@ println("-"^80)
 # For Flat topology, don't specify size or extent in that dimension
 cpu_grid = RectilinearGrid(CPU();
     size = (Nx, Nz),
+    halo = (5, 5),  # Match AtmosphereModel requirements
     x = (0, Lx),
     z = (0, Lz),
     topology = (Periodic, Flat, Bounded)
@@ -110,6 +121,7 @@ println("-"^80)
 
 reactant_grid = RectilinearGrid(ReactantState();
     size = (Nx, Nz),
+    halo = (5, 5),  # Match AtmosphereModel requirements
     x = (0, Lx),
     z = (0, Lz),
     topology = (Periodic, Flat, Bounded)
@@ -200,11 +212,10 @@ if reactant_mean < cpu_mean
     println()
     println("Reactant is worth it for simulations with > $steps_to_amortize time steps")
 else
-    println("Reactant is currently slower than CPU for this grid size.")
-    println("Consider:")
-    println("  - Larger grid sizes (more parallelism)")
-    println("  - GPU backend instead of CPU backend")
-    println("  - Profiling to identify bottlenecks")
+    println("Reactant is currently slower than native CPU.")
+    println("This is expected due to workaround overhead in BreezeReactantExt.")
+    println("Reactant's value is for AD/differentiation, not raw performance.")
+    println("See test/REACTANT_ISSUES.md for details.")
 end
 
 println()

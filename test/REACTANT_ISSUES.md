@@ -368,6 +368,54 @@ This ensures the velocity field is divergence-free after `set!()`, even with non
 
 ---
 
+### 2. GPU Benchmarking: Julia Version Requirement
+
+| Field | Details |
+|-------|---------|
+| **Status** | ✅ **RESOLVED** (requires Julia 1.10) |
+| **Issue** | Julia 1.12 has MLIR/LLVM lowering issues with KA kernels |
+| **Solution** | Use Julia 1.10.10 for Reactant benchmarks |
+
+**Working Configuration (December 2025)**:
+
+| Component | Version |
+|-----------|---------|
+| Julia | 1.10.10 |
+| Reactant | 0.2.190 |
+| KernelAbstractions | 0.9.39 |
+| Oceananigans | 0.102.5 |
+| Platform | Linux x86_64 with NVIDIA A100 |
+
+**Benchmark Results (A100 GPU, December 2025)**:
+
+| Grid Size | Native CPU | Reactant CPU | Native CUDA | Reactant GPU |
+|-----------|------------|--------------|-------------|--------------|
+| 64×64 | 2.5 ms | 7.3 ms (2.9× slower) | - | - |
+| 128×128 | - | - | 4.1 ms | 6.6 ms (1.6× slower) |
+
+**Key findings**:
+1. **Reactant is slower than native execution** on both CPU and GPU
+2. **Native CUDA is ~1.6× faster** than Reactant GPU at 128×128
+3. **Native CPU is ~2.9× faster** than Reactant CPU at 64×64
+4. **Compilation overhead** (~150-200 sec) requires many steps to amortize
+5. **Reactant's value** is for AD/differentiation, not raw performance
+
+**Why Reactant is slower**:
+- The `BreezeReactantExt` workarounds use pure-Julia broadcasts instead of optimized CUDA kernels
+- XLA's GPU backend cannot match cuFFT/cuBLAS optimizations
+- The workarounds enable Reactant to *work* for AD, but add overhead for forward execution
+
+**Important setup notes**:
+- Do NOT call `Reactant.set_default_backend("cpu")` before model construction when targeting GPU
+- With CUDA.jl loaded, Reactant automatically uses GPU client for array creation
+- Set `Reactant.set_default_backend("gpu")` only before `@compile` for GPU targeting
+
+**Benchmark files**:
+- `test/benchmark_reactant.jl` - CPU vs Reactant (XLA CPU) - ✅ **working with Julia 1.10**
+- `test/benchmark_reactant_gpu.jl` - Native CUDA vs Reactant (XLA GPU) - ✅ **working with Julia 1.10**
+
+---
+
 ## ❌ OUTSTANDING ISSUES
 
 ### 1. Reactant @trace Loop with Grid Type Conversion (MAY BE RESOLVED)
@@ -431,7 +479,14 @@ This would remove the need for Breeze-level method overrides.
 
 The authoritative status is `test/reactant_enzyme.jl`. 
 
-**Current test results (December 2025)**: 20 passed, all tests passing
+**Current test results (December 2025)**: All tests passing with Julia 1.10.10
+
+⚠️ **Julia version requirement**: Julia 1.10.x is required. Julia 1.12 has MLIR/LLVM lowering
+issues with KernelAbstractions kernels that cause model construction to fail.
+
+**Benchmarks verified working (December 31, 2025)**:
+- CPU benchmark (`test/benchmark_reactant.jl`): ✅ Works with Julia 1.10
+- GPU benchmark (`test/benchmark_reactant_gpu.jl`): ✅ Works with Julia 1.10
 
 **What works**:
 - ✅ Model construction on `ReactantState` (CPU fallback for pressure correction)
@@ -459,6 +514,7 @@ This ensures the velocity field is divergence-free after `set!()`, even with non
 **Known limitations**:
 - ⚠️ Numerical differences between CPU and Reactant (under investigation)
 - ⚠️ Only 2D grids (Flat y) with regular spacing currently supported in workarounds
+- ⚠️ Reactant is ~1.6-2.9× slower than native execution (workarounds add overhead)
 
 **Why GB-25 doesn't have these issues**: GB-25 uses `HydrostaticFreeSurfaceModel` with `SplitExplicitFreeSurface`, which does NOT require FFT-based pressure solves. The free surface uses an explicit solver that only involves real numbers and simpler KA kernels that Reactant can handle.
 
@@ -468,6 +524,10 @@ This ensures the velocity field is divergence-free after `set!()`, even with non
 
 ### Main Test Suite
 - `test/reactant_enzyme.jl` - Full test suite for Reactant+Enzyme integration
+
+### Benchmark Scripts
+- `test/benchmark_reactant.jl` - CPU vs Reactant (XLA CPU) performance comparison
+- `test/benchmark_reactant_gpu.jl` - Native CUDA vs Reactant (XLA GPU) performance comparison
 
 ### Minimum Working Examples (MWEs)
 
