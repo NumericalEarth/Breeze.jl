@@ -187,7 +187,7 @@ This implements the Breeze `surface_precipitation_flux(model)` interface.
 function AtmosphereModels.surface_precipitation_flux(model, ::DCMIP2016KM)
     grid = model.grid
     μ = model.microphysical_fields
-    ρ = model.formulation.reference_state.density
+    ρ = model.dynamics.reference_state.density
     # precipitation_rate = qʳ × vᵗ (m/s)
     # surface_precipitation_flux = ρ × qʳ × vᵗ = ρ × precipitation_rate (kg/m²/s)
     kernel = DCMIP2016KesslerSurfaceFluxKernel(μ.precipitation_rate, ρ)
@@ -286,18 +286,18 @@ function AtmosphereModels.microphysics_model_update!(::DCMIP2016KM, model)
     (isnan(Δt) || isinf(Δt) || Δt ≤ 0) && return nothing
 
     # Reference state - use interior() for reduced fields to get GPU-compatible arrays
-    ρᵣ = interior(model.formulation.reference_state.density, 1, 1, :)
-    pᵣ = interior(model.formulation.reference_state.pressure, 1, 1, :)
+    ρᵣ = interior(model.dynamics.reference_state.density, 1, 1, :)
+    pᵣ = interior(model.dynamics.reference_state.pressure, 1, 1, :)
 
     # Surface pressure for Exner function
-    p₀ = model.formulation.reference_state.surface_pressure
+    p₀ = model.dynamics.reference_state.surface_pressure
 
     # Thermodynamic constants for liquid-ice potential temperature conversion
     constants = model.thermodynamic_constants
 
     # Thermodynamic fields (liquid-ice potential temperature, NOT regular potential temperature)
-    θˡⁱ  = model.formulation.thermodynamics.potential_temperature
-    ρθˡⁱ = model.formulation.thermodynamics.potential_temperature_density
+    θˡⁱ  = model.formulation.potential_temperature
+    ρθˡⁱ = model.formulation.potential_temperature_density
 
     # Total moisture density (prognostic variable of AtmosphereModel)
     ρqᵗ = model.moisture_density
