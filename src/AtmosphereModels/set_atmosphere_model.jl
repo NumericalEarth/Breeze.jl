@@ -30,13 +30,13 @@ function set_thermodynamic_variable! end
     specific_to_density_weighted(name::Symbol)
 
 Convert a specific microphysical variable name to its density-weighted counterpart.
-For example, `:qᶜˡ` → `:ρqᶜˡ`, `:qʳ` → `:ρqʳ`.
+For example, `:qᶜˡ` → `:ρqᶜˡ`, `:qʳ` → `:ρqʳ`, `:nᶜˡ` → `:ρnᶜˡ`.
 
-Returns `nothing` if the name doesn't start with 'q'.
+Returns `nothing` if the name doesn't start with 'q' or 'n'.
 """
 function specific_to_density_weighted(name::Symbol)
     str = string(name)
-    if startswith(str, "q")
+    if startswith(str, "q") || startswith(str, "n")
         return Symbol("ρ" * str)
     else
         return nothing
@@ -49,13 +49,16 @@ end
 Return a tuple of specific (non-density-weighted) names that can be set
 for the given microphysics scheme. These are derived from the prognostic
 field names by removing the 'ρ' prefix.
+
+For mass fields (e.g., `ρqᶜˡ` → `qᶜˡ`) and number fields (e.g., `ρnᶜˡ` → `nᶜˡ`).
 """
 function settable_specific_microphysical_names(microphysics)
     prog_names = prognostic_field_names(microphysics)
     specific_names = Symbol[]
     for name in prog_names
         str = string(name)
-        if startswith(str, "ρq")
+        # Handle both mass fields (ρq*) and number fields (ρn*)
+        if startswith(str, "ρq") || startswith(str, "ρn")
             push!(specific_names, Symbol(str[nextind(str, 1):end]))  # Remove 'ρ' prefix
         end
     end
@@ -95,6 +98,8 @@ Variables are set via keyword arguments. Supported variables include:
 **Specific microphysical variables** (automatically converted to density-weighted):
 - `qᶜˡ`: specific cloud liquid (sets `ρqᶜˡ = ρᵣ * qᶜˡ`)
 - `qʳ`: specific rain (sets `ρqʳ = ρᵣ * qʳ`)
+- `nᶜˡ`: specific cloud liquid number [1/kg] (sets `ρnᶜˡ = ρᵣ * nᶜˡ`)
+- `nʳ`: specific rain number [1/kg] (sets `ρnʳ = ρᵣ * nʳ`)
 - Other prognostic microphysical variables with the `ρ` prefix removed
 
 !!! note "The meaning of `θ`"
