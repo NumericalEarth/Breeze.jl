@@ -87,7 +87,7 @@ AtmosphereModel{CPU, RectilinearGrid}(time = 0 seconds, iteration = 0)
 ├── grid: 8×8×8 RectilinearGrid{Float64, Periodic, Periodic, Bounded} on CPU with 3×3×3 halo
 ├── dynamics: AnelasticDynamics(p₀=101325.0, θ₀=288.0)
 ├── formulation: LiquidIcePotentialTemperatureFormulation
-├── timestepper: RungeKutta3TimeStepper
+├── timestepper: SSPRungeKutta3
 ├── advection scheme:
 │   ├── momentum: Centered(order=2)
 │   ├── ρθ: Centered(order=2)
@@ -117,7 +117,7 @@ function AtmosphereModel(grid;
                          scalar_advection = DefaultValue(),
                          closure = nothing,
                          microphysics = nothing,
-                         timestepper = :RungeKutta3,
+                         timestepper = :SSPRungeKutta3,
                          radiation = nothing)
 
     # Use default dynamics if not specified

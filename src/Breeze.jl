@@ -65,7 +65,10 @@ export
 
     # Forcing utilities
     geostrophic_forcings,
-    SubsidenceForcing
+    SubsidenceForcing,
+
+    # TimeSteppers
+    SSPRungeKutta3
 
 using Oceananigans: Oceananigans, @at, AnisotropicMinimumDissipation, Average,
                     AveragedTimeInterval, BackgroundField, BetaPlane, Bounded,
@@ -154,5 +157,8 @@ using .BoundaryConditions
 
 include("Forcings/Forcings.jl")
 using .Forcings
+
+include("TimeSteppers/TimeSteppers.jl")
+using .TimeSteppers
 
 end # module Breeze
