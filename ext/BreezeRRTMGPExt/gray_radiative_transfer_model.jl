@@ -190,7 +190,9 @@ function RadiativeTransferModel(grid::AbstractGrid,
                                   shortwave_solver,
                                   upwelling_longwave_flux,
                                   downwelling_longwave_flux,
-                                  downwelling_shortwave_flux)
+                                  downwelling_shortwave_flux,
+                                  nothing,  # liquid_effective_radius = nothing for gray
+                                  nothing)  # ice_effective_radius = nothing for gray
 end
 
 @inline rrtmgp_column_index(i, j, Nx) = i + (j - 1) * Nx
@@ -469,14 +471,14 @@ function copy_fluxes_to_fields!(rtm::GrayRadiativeTransferModel, grid)
     ℐ_sw_dn = rtm.downwelling_shortwave_flux
 
     Nx, Ny, Nz = size(grid)
-    launch!(arch, grid, (Nx, Ny, Nz+1), _copy_rrtmgp_fluxes!,
+    launch!(arch, grid, (Nx, Ny, Nz+1), _copy_gray_fluxes!,
             ℐ_lw_up, ℐ_lw_dn, ℐ_sw_dn, lw_flux_up, lw_flux_dn, sw_flux_dn_dir, grid)
 
     return nothing
 end
 
-@kernel function _copy_rrtmgp_fluxes!(ℐ_lw_up, ℐ_lw_dn, ℐ_sw_dn,
-                                      lw_flux_up, lw_flux_dn, sw_flux_dn_dir, grid)
+@kernel function _copy_gray_fluxes!(ℐ_lw_up, ℐ_lw_dn, ℐ_sw_dn,
+                                    lw_flux_up, lw_flux_dn, sw_flux_dn_dir, grid)
     i, j, k = @index(Global, NTuple)
 
     # RRTMGP uses (nlev, ncol), we use (i, j, k) for ZFaceField

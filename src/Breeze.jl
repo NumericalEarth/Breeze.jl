@@ -21,6 +21,8 @@ export
     BackgroundAtmosphere,
     GrayOptics,
     ClearSkyOptics,
+    AllSkyOptics,
+    ConstantRadiusParticles,
     TemperatureField,
     IdealGas,
     CondensedPhase,
