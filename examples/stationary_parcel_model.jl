@@ -36,22 +36,14 @@ BreezeCloudMicrophysicsExt = Base.get_extension(Breeze, :BreezeCloudMicrophysics
 OneMomentCloudMicrophysics = BreezeCloudMicrophysicsExt.OneMomentCloudMicrophysics
 TwoMomentCloudMicrophysics = BreezeCloudMicrophysicsExt.TwoMomentCloudMicrophysics
 
-τ = 10.0  # Reference condensation timescale (~10 s)
-
 # ## Unified simulation helper
 #
 # A single function runs parcel simulations with either microphysics scheme.
 # The function dynamically tracks number concentrations when using 2M microphysics.
 
-function run_parcel_simulation(; microphysics,
-                                 θ = 300,
-                                 qᵗ = 0.020,
-                                 qᶜˡ = 0,
-                                 qʳ = 0,
-                                 nᶜˡ = 0,
-                                 nʳ = 0,
-                                 stop_time = 65τ,
-                                 Δt = 1)
+function run_parcel_simulation(; microphysics, θ = 300, stop_time = 2000, Δt = 1,
+                                 qᵗ = 0.020, qᶜˡ = 0, qʳ = 0,
+                                 nᶜˡ = 0, nʳ = 0)
 
     model = AtmosphereModel(grid; dynamics, thermodynamic_constants=constants, microphysics)
     is_two_moment = microphysics isa TwoMomentCloudMicrophysics
@@ -108,45 +100,39 @@ nothing #hide
 
 import CloudMicrophysics.Parameters as CMP
 one_moment_cloud_microphysics_categories = BreezeCloudMicrophysicsExt.one_moment_cloud_microphysics_categories
+precipitation_boundary_condition = ImpenetrableBoundaryCondition()
 
-## One-moment: default (τ_relax = 10 s) and faster condensation (τ_relax = 2 s)
-microphysics_1m_default = OneMomentCloudMicrophysics(
-    precipitation_boundary_condition = ImpenetrableBoundaryCondition()
-)
+## First, a slow scheme
+cloud_liquid_slow = CMP.CloudLiquid{Float64}(τ_relax=20.0, ρw=1000.0, r_eff=10e-6)
+categories = one_moment_cloud_microphysics_categories(cloud_liquid = cloud_liquid_slow)
+microphysics_1m_slow = OneMomentCloudMicrophysics(; categories, precipitation_boundary_condition)
 
-## Create custom CloudLiquid with faster relaxation
+# Then a fast scheme
 cloud_liquid_fast = CMP.CloudLiquid{Float64}(τ_relax=2.0, ρw=1000.0, r_eff=10e-6)
-categories_fast = one_moment_cloud_microphysics_categories(cloud_liquid = cloud_liquid_fast)
+categories = one_moment_cloud_microphysics_categories(cloud_liquid = cloud_liquid_fast)
+microphysics_1m_fast = OneMomentCloudMicrophysics(; categories, precipitation_boundary_condition)
 
-microphysics_1m_fast = OneMomentCloudMicrophysics(
-    categories = categories_fast,
-    precipitation_boundary_condition = ImpenetrableBoundaryCondition()
-)
-
-## Two-moment: uses SB2006 scheme (droplet number affects rates)
-microphysics_2m = TwoMomentCloudMicrophysics(
-    precipitation_boundary_condition = ImpenetrableBoundaryCondition()
-)
-nothing #hide
+# And now a default two-moment scheme with SB2006 scheme (droplet number affects rates)
+microphysics_2m = TwoMomentCloudMicrophysics(; precipitation_boundary_condition)
 
 # ## Run four comparison cases
 #
 # All cases start with the same supersaturated conditions (qᵗ = 0.030).
 
 ## One-moment cases: varying condensation timescale
-case_1m_slow = run_parcel_simulation(microphysics = microphysics_1m_default, qᵗ = 0.030, stop_time = 500τ)
-case_1m_fast = run_parcel_simulation(microphysics = microphysics_1m_fast, qᵗ = 0.030, stop_time = 500τ)
+stop_time = 1000
+case_1m_slow = run_parcel_simulation(; microphysics = microphysics_1m_slow, qᵗ = 0.030, stop_time)
+case_1m_fast = run_parcel_simulation(; microphysics = microphysics_1m_fast, qᵗ = 0.030, stop_time)
 
 ## Two-moment cases: varying initial droplet number
-case_2m_few  = run_parcel_simulation(microphysics = microphysics_2m, qᵗ = 0.030, nᶜˡ = 100e6, stop_time = 500τ)
-case_2m_many = run_parcel_simulation(microphysics = microphysics_2m, qᵗ = 0.030, nᶜˡ = 300e6, stop_time = 500τ)
+stop_time = 4000
+case_2m_few  = run_parcel_simulation(; microphysics = microphysics_2m, qᵗ = 0.030, nᶜˡ = 100e6, stop_time)
+case_2m_many = run_parcel_simulation(; microphysics = microphysics_2m, qᵗ = 0.030, nᶜˡ = 300e6, stop_time)
 nothing #hide
 
 # ## Visualization
 #
 # We compare all four cases side-by-side to highlight the key differences.
-
-norm(t) = t ./ τ  # Normalize time by reference condensation timescale
 
 ## Colorblind-friendly colors
 c_cloud = :limegreen
@@ -154,54 +140,41 @@ c_rain  = :orangered
 c_cloud_n = :purple
 c_rain_n = :gold
 
-fig = Figure(size=(1000, 700), fontsize=16)
+fig = Figure(size=(1000, 700))
+set_theme!(linewidth=2.5, fontsize=16)
 
 ## Row 1: One-moment comparison
-Label(fig[1, 1:2], "One-moment microphysics: effect of condensation timescale";
-      fontsize=18, halign=:center)
+Label(fig[1, 1:2], "One-moment microphysics: effect of condensation timescale")
+ax1_q = Axis(fig[2, 1]; xlabel="t (s)", ylabel="q (kg/kg)", title="Mass mixing ratios")
 
-ax1_q = Axis(fig[2, 1]; xlabel="t / τ", ylabel="q (kg/kg)", title="Mass mixing ratios")
-lines!(ax1_q, norm(case_1m_slow.t), case_1m_slow.qᶜˡ; color=c_cloud, linewidth=2.5,
-       label="qᶜˡ (τ = 10 s)")
-lines!(ax1_q, norm(case_1m_slow.t), case_1m_slow.qʳ; color=c_rain, linewidth=2.5,
-       label="qʳ (τ = 10 s)")
-lines!(ax1_q, norm(case_1m_fast.t), case_1m_fast.qᶜˡ; color=c_cloud, linewidth=2.5,
-       linestyle=:dash, label="qᶜˡ (τ = 2 s)")
-lines!(ax1_q, norm(case_1m_fast.t), case_1m_fast.qʳ; color=c_rain, linewidth=2.5,
-       linestyle=:dash, label="qʳ (τ = 2 s)")
+t = case_1m_slow.t
+lines!(ax1_q, t, case_1m_slow.qᶜˡ; color=c_cloud, label="qᶜˡ (τ = 10 s)")
+lines!(ax1_q, t, case_1m_slow.qʳ; color=c_rain, label="qʳ (τ = 10 s)")
+lines!(ax1_q, t, case_1m_fast.qᶜˡ; color=c_cloud, linestyle=:dash, label="qᶜˡ (τ = 2 s)")
+lines!(ax1_q, t, case_1m_fast.qʳ; color=c_rain, linestyle=:dash, label="qʳ (τ = 2 s)")
 axislegend(ax1_q; position=:rc, labelsize=11)
 
-ax1_T = Axis(fig[2, 2]; xlabel="t / τ", ylabel="T (K)", title="Temperature")
-lines!(ax1_T, norm(case_1m_slow.t), case_1m_slow.T; color=:magenta, linewidth=2.5,
-       label="τ = 10 s")
-lines!(ax1_T, norm(case_1m_fast.t), case_1m_fast.T; color=:magenta, linewidth=2.5,
-       linestyle=:dash, label="τ = 2 s")
+ax1_T = Axis(fig[2, 2]; xlabel="t (s)", ylabel="T (K)", title="Temperature")
+lines!(ax1_T, t, case_1m_slow.T; color=:magenta, label="τ = 10 s")
+lines!(ax1_T, t, case_1m_fast.T; color=:magenta, linestyle=:dash, label="τ = 2 s")
 axislegend(ax1_T; position=:rb, labelsize=11)
+xlims!(ax1_T, 0, 200)
 
 ## Row 2: Two-moment comparison
-Label(fig[3, 1:2], "Two-moment microphysics: effect of initial droplet number";
-      fontsize=18, halign=:center)
-
-ax2_q = Axis(fig[4, 1]; xlabel="t / τ", ylabel="q (kg/kg)", title="Mass mixing ratios")
-lines!(ax2_q, norm(case_2m_few.t), case_2m_few.qᶜˡ; color=c_cloud, linewidth=2.5,
-       label="qᶜˡ (nᶜˡ₀ = 100/mg)")
-lines!(ax2_q, norm(case_2m_few.t), case_2m_few.qʳ; color=c_rain, linewidth=2.5,
-       label="qʳ (nᶜˡ₀ = 100/mg)")
-lines!(ax2_q, norm(case_2m_many.t), case_2m_many.qᶜˡ; color=c_cloud, linewidth=2.5,
-       linestyle=:dash, label="qᶜˡ (nᶜˡ₀ = 300/mg)")
-lines!(ax2_q, norm(case_2m_many.t), case_2m_many.qʳ; color=c_rain, linewidth=2.5,
-       linestyle=:dash, label="qʳ (nᶜˡ₀ = 300/mg)")
+Label(fig[3, 1:2], "Two-moment microphysics: effect of initial droplet number")
+ax2_q = Axis(fig[4, 1]; xlabel="t (s)", ylabel="q (kg/kg)", title="Mass mixing ratios")
+t = case_2m_few.t
+lines!(ax2_q, t, case_2m_few.qᶜˡ; color=c_cloud, label="qᶜˡ (nᶜˡ₀ = 100/mg)")
+lines!(ax2_q, t, case_2m_few.qʳ; color=c_rain, label="qʳ (nᶜˡ₀ = 100/mg)")
+lines!(ax2_q, t, case_2m_many.qᶜˡ; color=c_cloud, linestyle=:dash, label="qᶜˡ (nᶜˡ₀ = 300/mg)")
+lines!(ax2_q, t, case_2m_many.qʳ; color=c_rain, linestyle=:dash, label="qʳ (nᶜˡ₀ = 300/mg)")
 axislegend(ax2_q; position=:rc, labelsize=11)
 
-ax2_n = Axis(fig[4, 2]; xlabel="t / τ", ylabel="n (1/kg)", title="Number concentrations")
-lines!(ax2_n, norm(case_2m_few.t), case_2m_few.nᶜˡ; color=c_cloud_n, linewidth=2.5,
-       label="nᶜˡ (nᶜˡ₀ = 100/mg)")
-lines!(ax2_n, norm(case_2m_few.t), case_2m_few.nʳ .* 1e6; color=c_rain_n, linewidth=2.5,
-       label="nʳ × 10⁶ (nᶜˡ₀ = 100/mg)")
-lines!(ax2_n, norm(case_2m_many.t), case_2m_many.nᶜˡ; color=c_cloud_n, linewidth=2.5,
-       linestyle=:dash, label="nᶜˡ (nᶜˡ₀ = 300/mg)")
-lines!(ax2_n, norm(case_2m_many.t), case_2m_many.nʳ .* 1e6; color=c_rain_n, linewidth=2.5,
-       linestyle=:dash, label="nʳ × 10⁶ (nᶜˡ₀ = 300/mg)")
+ax2_n = Axis(fig[4, 2]; xlabel="t (s)", ylabel="n (1/kg)", title="Number concentrations")
+lines!(ax2_n, t, case_2m_few.nᶜˡ; color=c_cloud_n, label="nᶜˡ (nᶜˡ₀ = 100/mg)")
+lines!(ax2_n, t, case_2m_few.nʳ .* 1e6; color=c_rain_n, label="nʳ × 10⁶ (nᶜˡ₀ = 100/mg)")
+lines!(ax2_n, t, case_2m_many.nᶜˡ; color=c_cloud_n, linestyle=:dash, label="nᶜˡ (nᶜˡ₀ = 300/mg)")
+lines!(ax2_n, t, case_2m_many.nʳ .* 1e6; color=c_rain_n, linestyle=:dash, label="nʳ × 10⁶ (nᶜˡ₀ = 300/mg)")
 axislegend(ax2_n; position=:rt, labelsize=11)
 
 rowsize!(fig.layout, 1, Relative(0.05))
