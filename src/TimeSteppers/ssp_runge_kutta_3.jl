@@ -42,7 +42,7 @@ Fields
 - `Gⁿ`: Tendency fields at current stage
 - `implicit_solver`: Optional implicit solver for diffusion
 """
-struct SSPRungeKutta3TimeStepper{FT, U0, TG, TI} <: AbstractTimeStepper
+struct SSPRungeKutta3{FT, U0, TG, TI} <: AbstractTimeStepper
     α¹ :: FT
     α² :: FT
     α³ :: FT
@@ -52,11 +52,11 @@ struct SSPRungeKutta3TimeStepper{FT, U0, TG, TI} <: AbstractTimeStepper
 end
 
 """
-    SSPRungeKutta3TimeStepper(grid, prognostic_fields;
+    SSPRungeKutta3(grid, prognostic_fields;
                                implicit_solver = nothing,
                                Gⁿ = map(similar, prognostic_fields))
 
-Construct an `SSPRungeKutta3TimeStepper` on `grid` with `prognostic_fields`.
+Construct an `SSPRungeKutta3` on `grid` with `prognostic_fields`.
 
 Keyword Arguments
 =================
@@ -70,7 +70,7 @@ References
 Shu, C.-W., & Osher, S. (1988). Efficient implementation of essentially non-oscillatory
     shock-capturing schemes. Journal of Computational Physics, 77(2), 439-471.
 """
-function SSPRungeKutta3TimeStepper(grid, prognostic_fields;
+function SSPRungeKutta3(grid, prognostic_fields;
                                     implicit_solver::TI = nothing,
                                     Gⁿ::TG = map(similar, prognostic_fields)) where {TI, TG}
 
@@ -85,7 +85,7 @@ function SSPRungeKutta3TimeStepper(grid, prognostic_fields;
     U⁰ = map(similar, prognostic_fields)
     U0 = typeof(U⁰)
 
-    return SSPRungeKutta3TimeStepper{FT, U0, TG, TI}(α¹, α², α³, U⁰, Gⁿ, implicit_solver)
+    return SSPRungeKutta3{FT, U0, TG, TI}(α¹, α², α³, U⁰, Gⁿ, implicit_solver)
 end
 
 #####
@@ -128,7 +128,7 @@ $(TYPEDSIGNATURES)
 
 Copy prognostic fields to U⁰ storage for use in later SSP RK3 stages.
 """
-function store_initial_state!(model::AbstractModel{<:SSPRungeKutta3TimeStepper})
+function store_initial_state!(model::AbstractModel{<:SSPRungeKutta3})
     U⁰ = model.timestepper.U⁰
     for (u⁰, u) in zip(U⁰, prognostic_fields(model))
         parent(u⁰) .= parent(u)
@@ -152,7 +152,7 @@ u^(2) = 3/4 u^(0) + 1/4 u^(1) + 1/4 Δt L(u^(1))
 u^(3) = 1/3 u^(0) + 2/3 u^(2) + 2/3 Δt L(u^(2))
 ```
 """
-function OceananigansTimeSteppers.time_step!(model::AbstractModel{<:SSPRungeKutta3TimeStepper}, Δt; callbacks=[])
+function OceananigansTimeSteppers.time_step!(model::AbstractModel{<:SSPRungeKutta3}, Δt; callbacks=[])
     Δt == 0 && @warn "Δt == 0 may cause model blowup!"
 
     # Be paranoid and update state at iteration 0, in case run! is not used:

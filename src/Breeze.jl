@@ -68,7 +68,7 @@ export
     SubsidenceForcing,
 
     # TimeSteppers
-    SSPRungeKutta3TimeStepper
+    SSPRungeKutta3
 
 using Oceananigans: Oceananigans, @at, AnisotropicMinimumDissipation, Average,
                     AveragedTimeInterval, BackgroundField, BetaPlane, Bounded,

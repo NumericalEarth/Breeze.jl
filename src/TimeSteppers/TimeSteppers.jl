@@ -6,14 +6,16 @@ which is TVD (total variation diminishing) with CFL coefficient = 1.
 """
 module TimeSteppers
 
-export SSPRungeKutta3TimeStepper
+export SSPRungeKutta3
 
 using DocStringExtensions: TYPEDSIGNATURES, TYPEDEF
 
-include("ssp_rk3.jl")
+import Oceananigans.TimeSteppers: TimeStepper
+
+include("ssp_runge_kutta_3.jl")
 
 # Extend TimeStepper to support SSPRK3 via Symbol
-TimeStepper(::Val{:SSPRK3}, args...; kwargs...) =
-    SSPRungeKutta3TimeStepper(args...; kwargs...)
+TimeStepper(::Val{:SSPRungeKutta3}, args...; kwargs...) =
+    SSPRungeKutta3(args...; kwargs...)
 
 end # module
