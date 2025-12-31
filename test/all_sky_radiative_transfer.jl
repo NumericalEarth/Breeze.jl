@@ -14,10 +14,8 @@ using RRTMGP
 
     @testset "Constructor argument errors" begin
         Oceananigans.defaults.FloatType = FT
-
-        Nz = 4
-        grid = RectilinearGrid(default_arch; size=Nz, x=0.0, y=45.0, z=(0, 10kilometers),
-                               topology=(Flat, Flat, Bounded))
+        topology = (Flat, Flat, Bounded)
+        grid = RectilinearGrid(default_arch; size=4, x=0, y=45, z=(0, 10kilometers), topology)
         constants = ThermodynamicConstants()
 
         # Error: providing surface_albedo along with direct_surface_albedo
@@ -39,11 +37,8 @@ using RRTMGP
 
     @testset "Single column grid with clouds [$(FT)]" for FT in (Float32, Float64)
         Oceananigans.defaults.FloatType = FT
-
-        Nz = 16
-        grid = RectilinearGrid(default_arch; size=Nz, x=0.0, y=45.0, z=(0, 10kilometers),
-                               topology=(Flat, Flat, Bounded))
-
+        topology = (Flat, Flat, Bounded)
+        grid = RectilinearGrid(default_arch; size=16, x=0, y=45, z=(0, 10kilometers), topology)
         constants = ThermodynamicConstants()
         reference_state = ReferenceState(grid, constants;
                                          surface_pressure = 101325,
@@ -125,13 +120,10 @@ using RRTMGP
         @test (lw_up_diff > 0) || (sw_dn_diff > 0)
     end
 
-    @testset "Custom effective radius models [$(FT)]" for FT in (Float64,)
+    @testset "Custom effective radius models [$FT]" for FT in (Float64, Float32)
         Oceananigans.defaults.FloatType = FT
-
-        Nz = 8
-        grid = RectilinearGrid(default_arch; size=Nz, x=0.0, y=45.0, z=(0, 10kilometers),
-                               topology=(Flat, Flat, Bounded))
-
+        topology = (Flat, Flat, Bounded)
+        grid = RectilinearGrid(default_arch; size=8, x=0, y=45, z=(0, 10kilometers), topology)
         constants = ThermodynamicConstants()
         reference_state = ReferenceState(grid, constants;
                                          surface_pressure = 101325,
