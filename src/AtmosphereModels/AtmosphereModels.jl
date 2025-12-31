@@ -4,14 +4,17 @@ export
     # AtmosphereModel core
     AtmosphereModel,
     AtmosphereModelBuoyancy,
-    AnelasticFormulation,
-    StaticEnergyThermodynamics,
-    LiquidIcePotentialTemperatureThermodynamics,
+    # Dynamics interface (dynamics types exported by their respective modules)
+    dynamics_density,
+    dynamics_pressure,
     mean_pressure,
     pressure_anomaly,
     total_pressure,
-    formulation_density,
-    formulation_pressure,
+    buoyancy_forceᶜᶜᶜ,
+    # Thermodynamic formulation interface (formulation types exported by their respective modules)
+    thermodynamic_density_name,
+    thermodynamic_density,
+    # Helpers
     static_energy_density,
     static_energy,
     total_energy,
@@ -19,6 +22,7 @@ export
     liquid_ice_potential_temperature,
     precipitation_rate,
     surface_precipitation_flux,
+    specific_humidity,
 
     # Interface functions (extended by BoundaryConditions and Forcings)
     regularize_atmosphere_model_boundary_conditions,
@@ -27,6 +31,9 @@ export
 
     # Radiation (implemented by extensions)
     RadiativeTransferModel,
+    BackgroundAtmosphere,
+    GrayOptics,
+    ClearSkyOptics,
 
     # Diagnostics (re-exported from Diagnostics submodule)
     PotentialTemperature,
@@ -37,7 +44,7 @@ export
     StaticEnergy,
     compute_hydrostatic_pressure!
 
-using DocStringExtensions: TYPEDSIGNATURES
+using DocStringExtensions: TYPEDSIGNATURES, TYPEDEF
 using Adapt: Adapt, adapt
 using KernelAbstractions: @kernel, @index
 
@@ -50,30 +57,20 @@ using Oceananigans.TimeSteppers: TimeSteppers
 using Oceananigans.Utils: prettysummary, launch!
 
 #####
-##### Formulation interface and AtmosphereModel
+##### Interfaces (define the contract that dynamics implementations must fulfill)
 #####
 
-include("formulation_interface.jl")
 include("forcing_interface.jl")
 include("microphysics_interface.jl")
+include("dynamics_interface.jl")
+include("formulation_interface.jl")
+
+#####
+##### AtmosphereModel core
+#####
+
 include("atmosphere_model.jl")
 include("set_atmosphere_model.jl")
-
-#####
-##### AnelasticFormulation submodule
-#####
-
-include("AnelasticFormulations/AnelasticFormulations.jl")
-using .AnelasticFormulations:
-    AnelasticFormulation,
-    AnelasticModel
-
-#####
-##### Thermodynamics implementations
-#####
-
-include("static_energy_thermodynamics.jl")
-include("potential_temperature_thermodynamics.jl")
 
 #####
 ##### Remaining AtmosphereModel components
@@ -86,7 +83,7 @@ include("update_atmosphere_model_state.jl")
 include("compute_hydrostatic_pressure.jl")
 
 #####
-##### Diagnostics submodule
+##### Diagnostics submodule (needed before formulation submodules for helper accessors)
 #####
 
 include("Diagnostics/Diagnostics.jl")

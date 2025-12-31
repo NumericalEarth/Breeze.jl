@@ -34,7 +34,7 @@ The ``G`` factor combines the effects of thermal conductivity and vapor diffusiv
 on phase change. It appears in the Mason equation for droplet growth:
 
 ```math
-dm/dt = 4π r G 𝒮
+\\frac{dm}{dt} = 4π r G 𝒮
 ```
 
 where ``𝒮`` is supersaturation and ``r`` is droplet radius.
@@ -42,7 +42,10 @@ where ``𝒮`` is supersaturation and ``r`` is droplet radius.
 This is a translation of `CloudMicrophysics.Common.G_func_liquid`
 using Breeze's thermodynamics instead of Thermodynamics.jl.
 
-Reference: Eq. (13.28) in Pruppacher & Klett (1997)
+See Eq. (13.28) by [Pruppacher & Klett (2010)](@cite pruppacher2010microphysics).
+
+# References
+* Pruppacher, H. R., Klett, J. D. (2010). Microphysics of clouds and precipitation. Springer Netherlands. 2nd Edition
 """
 @inline function diffusional_growth_factor(aps::AirProperties{FT}, T, constants) where {FT}
     (; K_therm, D_vapor) = aps

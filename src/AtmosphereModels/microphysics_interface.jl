@@ -2,13 +2,24 @@
 ##### Microphysics interface (default implementations)
 #####
 
-using ..Thermodynamics:
-    temperature,
-    MoistureMassFractions
+using ..Thermodynamics: MoistureMassFractions
 
 #####
 ##### Definition of the microphysics interface, with methods for "Nothing" microphysics
 #####
+
+"""
+$(TYPEDSIGNATURES)
+
+Return the specific humidity (vapor mass fraction) field for the given `model`.
+
+For `Nothing` microphysics (no condensate), the vapor mass fraction equals the total
+specific moisture. For microphysics schemes with prognostic vapor (e.g., where `qᵛ`
+is tracked explicitly), this function returns the appropriate vapor field.
+"""
+specific_humidity(model) = specific_humidity(model.microphysics, model)
+
+specific_humidity(::Nothing, model) = model.specific_moisture
 
 """
 $(TYPEDSIGNATURES)

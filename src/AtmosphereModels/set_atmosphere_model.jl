@@ -1,22 +1,20 @@
 using Oceananigans.Fields: Fields, set!
-using Oceananigans.Grids: znode, Center
 using Oceananigans.TimeSteppers: update_state!
 using Oceananigans.BoundaryConditions: fill_halo_regions!
 using Oceananigans.TimeSteppers: compute_pressure_correction!, make_pressure_correction!, update_state!
 
 using ..Thermodynamics:
-    LiquidIcePotentialTemperatureState,
     MoistureMassFractions,
     mixture_heat_capacity,
-    mixture_gas_constant,
-    temperature
-
-const c = Center()
+    mixture_gas_constant
 
 move_to_front(names, name) = tuple(name, filter(n -> n != name, names)...)
 
 function prioritize_names(names)
-    for n in (:w, :ρw, :v, :ρv, :u, :ρu, :qᵗ, :ρqᵗ)
+    # Priority order (first items applied last, so reverse order of priority):
+    # 1. ρ must be set first for compressible dynamics (density needed for momentum)
+    # 2. Then velocities/momentum and moisture
+    for n in (:w, :ρw, :v, :ρv, :u, :ρu, :qᵗ, :ρqᵗ, :ρ)
         if n ∈ names
             names = move_to_front(names, n)
         end
@@ -131,7 +129,7 @@ function Fields.set!(model::AtmosphereModel; time=nothing, enforce_mass_conserva
         elseif name == :ρqᵗ
             set!(model.moisture_density, value)
             ρqᵗ = model.moisture_density
-            ρ = formulation_density(model.formulation)
+            ρ = dynamics_density(model.dynamics)
             set!(model.specific_moisture, ρqᵗ / ρ)
 
         elseif name ∈ prognostic_field_names(model.microphysics)
@@ -143,13 +141,13 @@ function Fields.set!(model::AtmosphereModel; time=nothing, enforce_mass_conserva
             density_name = specific_to_density_weighted(name)
             ρμ = model.microphysical_fields[density_name]
             set!(ρμ, value)
-            ρ = formulation_density(model.formulation)
+            ρ = dynamics_density(model.dynamics)
             set!(ρμ, ρ * ρμ)
 
         elseif name == :qᵗ
             qᵗ = model.specific_moisture
             set!(qᵗ, value)
-            ρ = formulation_density(model.formulation)
+            ρ = dynamics_density(model.dynamics)
             ρqᵗ = model.moisture_density
             set!(ρqᵗ, ρ * qᵗ)                
 
@@ -157,13 +155,20 @@ function Fields.set!(model::AtmosphereModel; time=nothing, enforce_mass_conserva
             u = model.velocities[name]
             set!(u, value)
 
-            ρ = formulation_density(model.formulation)
+            ρ = dynamics_density(model.dynamics)
             ϕ = model.momentum[Symbol(:ρ, name)]
             value = ρ * u
             set!(ϕ, value)    
 
         elseif name ∈ settable_thermodynamic_variables
             set_thermodynamic_variable!(model, Val(name), value)
+
+        elseif name == :ρ
+            # Set density for compressible dynamics
+            ρ = dynamics_density(model.dynamics)
+            set!(ρ, value)
+            # Fill halos immediately - needed for velocity→momentum conversion
+            fill_halo_regions!(ρ)
 
         else
             prognostic_names = keys(prognostic_fields(model))

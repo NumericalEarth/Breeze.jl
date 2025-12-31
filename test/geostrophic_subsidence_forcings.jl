@@ -1,5 +1,5 @@
 using Breeze
-using Breeze: ReferenceState, AnelasticFormulation, GeostrophicForcing
+using Breeze: ReferenceState, AnelasticDynamics, LiquidIcePotentialTemperatureFormulation, GeostrophicForcing
 using Oceananigans: Oceananigans, prognostic_fields
 using Oceananigans.Fields: interior
 using Oceananigans.Grids: znodes, Center
@@ -73,11 +73,11 @@ end
 
     # Use LiquidIcePotentialTemperature thermodynamics
     reference_state = ReferenceState(grid)
-    formulation = AnelasticFormulation(reference_state; thermodynamics=:LiquidIcePotentialTemperature)
-    model = AtmosphereModel(grid; formulation, forcing=(; ρqᵗ=subsidence))
+    dynamics = AnelasticDynamics(reference_state)
+    model = AtmosphereModel(grid; dynamics, formulation=:LiquidIcePotentialTemperature, forcing=(; ρqᵗ=subsidence))
 
     # Set potential temperature to reference state
-    θ₀ = model.formulation.reference_state.potential_temperature
+    θ₀ = model.dynamics.reference_state.potential_temperature
 
     # Set up a linear moisture profile with known gradient
     q₀ = FT(0.015)  # 15 g/kg at surface
@@ -115,17 +115,17 @@ end
     Oceananigans.defaults.FloatType = FT
     grid = RectilinearGrid(default_arch; size=(4, 4, 4), x=(0, 100), y=(0, 100), z=(0, 100))
     reference_state = ReferenceState(grid)
-    formulation = AnelasticFormulation(reference_state; thermodynamics=:StaticEnergy)
-    model = AtmosphereModel(grid; formulation)
+    dynamics = AnelasticDynamics(reference_state)
+    model = AtmosphereModel(grid; dynamics, formulation=:StaticEnergy)
 
     # Get the reference potential temperature
-    θ₀ = model.formulation.reference_state.potential_temperature
+    θ₀ = model.dynamics.reference_state.potential_temperature
 
     # This should work without error (tests the maybe_adjust_thermodynamic_state fix)
     set!(model, θ=θ₀)
 
     # Verify energy was set to a non-zero value
-    @test sum(abs, model.formulation.thermodynamics.energy_density) > 0
+    @test sum(abs, model.formulation.energy_density) > 0
 
     # Time step should work
     Δt = 1e-6
@@ -181,7 +181,7 @@ end
     Oceananigans.defaults.FloatType = FT
     grid = RectilinearGrid(default_arch; size=(1, 1, 4), x=(0, 10), y=(0, 10), z=(0, 16))
     reference_state = ReferenceState(grid)
-    formulation = AnelasticFormulation(reference_state, thermodynamics=:LiquidIcePotentialTemperature)
+    dynamics = AnelasticDynamics(reference_state)
 
     wˢ = 1
     Γ = 1e-2
@@ -200,11 +200,11 @@ end
                     forcing = (; name => (subsidence, zero_forcing))
                 end
 
-                kw = (; advection=nothing, timestepper=:QuasiAdamsBashforth2, formulation, forcing)
+                kw = (; advection=nothing, timestepper=:QuasiAdamsBashforth2, dynamics, formulation=:LiquidIcePotentialTemperature, forcing)
                 model = AtmosphereModel(grid; tracers=:ρc, kw...)
-                θ₀ = model.formulation.reference_state.potential_temperature
+                θ₀ = model.dynamics.reference_state.potential_temperature
 
-                ρᵣ = model.formulation.reference_state.density
+                ρᵣ = model.dynamics.reference_state.density
                 ρϕ = CenterField(grid)
                 set!(ρϕ, ϕᵢ)
                 set!(ρϕ, ρᵣ * ρϕ)

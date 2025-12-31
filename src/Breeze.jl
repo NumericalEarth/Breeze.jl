@@ -10,16 +10,24 @@ export
     MoistAirBuoyancy,
     ThermodynamicConstants,
     ReferenceState,
-    AnelasticFormulation,
+    AnelasticDynamics,
+    AnelasticModel,
+    CompressibleDynamics,
+    CompressibleModel,
     AtmosphereModel,
-    StaticEnergyThermodynamics,
-    LiquidIcePotentialTemperatureThermodynamics,
+    StaticEnergyFormulation,
+    LiquidIcePotentialTemperatureFormulation,
     RadiativeTransferModel,
+    BackgroundAtmosphere,
+    GrayOptics,
+    ClearSkyOptics,
     TemperatureField,
     IdealGas,
     CondensedPhase,
     mixture_gas_constant,
     mixture_heat_capacity,
+    dynamics_density,
+    dynamics_pressure,
     
     # Diagnostics
     compute_hydrostatic_pressure!,
@@ -37,6 +45,7 @@ export
     precipitation_rate,
     surface_precipitation_flux,
     total_pressure,
+    specific_humidity,
 
     # Microphysics
     SaturationAdjustment,
@@ -58,7 +67,10 @@ export
 
     # Forcing utilities
     geostrophic_forcings,
-    SubsidenceForcing
+    SubsidenceForcing,
+
+    # TimeSteppers
+    SSPRungeKutta3
 
 using Oceananigans: Oceananigans, @at, AnisotropicMinimumDissipation, Average,
                     AveragedTimeInterval, BackgroundField, BetaPlane, Bounded,
@@ -123,6 +135,20 @@ using .MoistAirBuoyancies
 include("AtmosphereModels/AtmosphereModels.jl")
 using .AtmosphereModels
 
+# Thermodynamic formulation modules (included after AtmosphereModels so they can dispatch on AtmosphereModel)
+include("StaticEnergyFormulations/StaticEnergyFormulations.jl")
+using .StaticEnergyFormulations: StaticEnergyFormulation
+
+include("PotentialTemperatureFormulations/PotentialTemperatureFormulations.jl")
+using .PotentialTemperatureFormulations: LiquidIcePotentialTemperatureFormulation
+
+# Dynamics modules (included after AtmosphereModels so they can dispatch on AtmosphereModel)
+include("AnelasticEquations/AnelasticEquations.jl")
+using .AnelasticEquations: AnelasticDynamics, AnelasticModel
+
+include("CompressibleEquations/CompressibleEquations.jl")
+using .CompressibleEquations: CompressibleDynamics, CompressibleModel
+
 include("Microphysics/Microphysics.jl")
 using .Microphysics
 
@@ -140,5 +166,8 @@ using .BoundaryConditions
 
 include("Forcings/Forcings.jl")
 using .Forcings
+
+include("TimeSteppers/TimeSteppers.jl")
+using .TimeSteppers
 
 end # module Breeze

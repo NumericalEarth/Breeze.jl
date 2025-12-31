@@ -1,3 +1,11 @@
+using DocStringExtensions: TYPEDSIGNATURES
+
+using ..Thermodynamics:
+    liquid_latent_heat,
+    ice_latent_heat,
+    vapor_gas_constant,
+    mixture_heat_capacity
+
 """
     BulkMicrophysics{N, C, B}
 
@@ -30,18 +38,32 @@ struct NonEquilibriumCloudFormation{L, I}
     ice :: I
 
     @doc"""
-        $(TYPEDSIGNATURES)
+        NonEquilibriumCloudFormation(liquid, ice=nothing)
 
-        A cloud formation scheme where cloud liquid and ice are prognostic variables
-        that evolve via condensation/evaporation and deposition/sublimation tendencies,
-        rather than being diagnosed instantaneously via saturation adjustment.
+    A cloud formation scheme where cloud liquid and ice are prognostic variables
+    that evolve via condensation/evaporation and deposition/sublimation tendencies,
+    rather than being diagnosed instantaneously via saturation adjustment.
 
-        The condensation/evaporation rate follows Morrison and Milbrandt (2015),
-        relaxing toward saturation with timescale `τ_relax`.
+    The condensation/evaporation and deposition/sublimation tendencies are commonly modeled as **relaxation toward
+    saturation** with timescale `τ_relax`, including a latent-heat (psychrometric/thermal) correction factor; see
+    [Morrison and Grabowski (2008)](@cite Morrison2008novel), Appendix Eq. (A3), and standard cloud microphysics
+    texts such as [Pruppacher and Klett (2010)](@cite pruppacher2010microphysics) or
+    [Rogers and Yau (1989)](@cite rogers1989short).
 
-        # Fields
-        - `liquid`: Parameters for cloud liquid (contains relaxation timescale `τ_relax`)
-        - `ice`: Parameters for cloud ice (contains relaxation timescale `τ_relax`), or `nothing` for warm-phase only
+    For some bulk schemes (e.g. the CloudMicrophysics 1M extension), `liquid` and `ice` may be set to `nothing`
+    and used purely as **phase indicators** (warm-phase vs mixed-phase), with any relaxation timescales sourced
+    from the scheme's precipitation/category parameters instead.
+
+    # Fields
+    - `liquid`: Parameters for cloud liquid (contains relaxation timescale `τ_relax`)
+    - `ice`: Parameters for cloud ice (contains relaxation timescale `τ_relax`), or `nothing` for warm-phase only
+
+    # References
+    * Morrison, H. and Grabowski, W. W. (2008). A novel approach for representing ice
+        microphysics in models: Description and tests using a kinematic framework.
+        J. Atmos. Sci., 65, 1528–1548. https://doi.org/10.1175/2007JAS2491.1
+    * Pruppacher, H. R. and Klett, J. D. (2010). Microphysics of Clouds and Precipitation (2nd ed.).
+    * Rogers, R. R. and Yau, M. K. (1989). A Short Course in Cloud Physics (3rd ed.).
     """
     function NonEquilibriumCloudFormation(liquid, ice=nothing)
         return new{typeof(liquid), typeof(ice)}(liquid, ice)
@@ -53,6 +75,91 @@ Base.summary(::NonEquilibriumCloudFormation) = "NonEquilibriumCloudFormation"
 # NonEquilibriumCloudFormation uses the standard tendency interface,
 # so the model-wide microphysics update is a no-op.
 AtmosphereModels.microphysics_model_update!(::NonEquilibriumCloudFormation, model) = nothing
+#####
+##### Condensate formation models (for non-equilibrium schemes)
+#####
+
+abstract type AbstractCondensateFormation end
+
+"""
+$(TYPEDSIGNATURES)
+
+Return a condensate formation model that applies a **constant** phase-change rate.
+
+This type is intended to be usable for both liquid (condensation/evaporation) and ice
+(deposition/sublimation).
+"""
+struct ConstantRateCondensateFormation{FT} <: AbstractCondensateFormation
+    rate :: FT
+end
+
+Base.summary(::ConstantRateCondensateFormation) = "ConstantRateCondensateFormation"
+
+#####
+##### Shared helpers for relaxation-to-saturation phase change (liquid + ice)
+#####
+
+"""
+$(TYPEDSIGNATURES)
+
+Compute the thermodynamic adjustment factor `Γ` used in relaxation-to-saturation
+condensation/evaporation tendencies.
+"""
+@inline function thermodynamic_adjustment_factor(qᵛ⁺, T, q, constants)
+    ℒˡ = liquid_latent_heat(T, constants)
+    cᵖᵐ = mixture_heat_capacity(q, constants)
+    Rᵛ = vapor_gas_constant(constants)
+    dqᵛ⁺_dT = qᵛ⁺ * (ℒˡ / (Rᵛ * T^2) - 1 / T)
+    return 1 + (ℒˡ / cᵖᵐ) * dqᵛ⁺_dT
+end
+
+"""
+$(TYPEDSIGNATURES)
+
+Compute the thermodynamic adjustment factor `Γ` used in relaxation-to-saturation
+deposition/sublimation tendencies (ice analogue of `thermodynamic_adjustment_factor`).
+"""
+@inline function ice_thermodynamic_adjustment_factor(qᵛ⁺ⁱ, T, q, constants)
+    ℒⁱ = ice_latent_heat(T, constants)
+    cᵖᵐ = mixture_heat_capacity(q, constants)
+    Rᵛ = vapor_gas_constant(constants)
+    dqᵛ⁺ⁱ_dT = qᵛ⁺ⁱ * (ℒⁱ / (Rᵛ * T^2) - 1 / T)
+    return 1 + (ℒⁱ / cᵖᵐ) * dqᵛ⁺ⁱ_dT
+end
+
+"""
+$(TYPEDSIGNATURES)
+
+Compute the condensation/evaporation rate for cloud liquid water in a relaxation-to-saturation model.
+
+This returns the rate of change of cloud liquid mass fraction (kg/kg/s). Positive values indicate
+condensation; negative values indicate evaporation. Evaporation is limited by the available cloud liquid.
+"""
+@inline function condensation_rate(qᵛ, qᵛ⁺, qᶜˡ, T, ρ, q, τᶜˡ, constants)
+    Γˡ = thermodynamic_adjustment_factor(qᵛ⁺, T, q, constants)
+    Sᶜᵒⁿᵈ = (qᵛ - qᵛ⁺) / (Γˡ * τᶜˡ)
+
+    # Limit evaporation to available cloud liquid
+    Sᶜᵒⁿᵈ_min = -max(0, qᶜˡ) / τᶜˡ
+    return max(Sᶜᵒⁿᵈ, Sᶜᵒⁿᵈ_min)
+end
+
+"""
+$(TYPEDSIGNATURES)
+
+Compute the deposition/sublimation rate for cloud ice in a relaxation-to-saturation model.
+
+This returns the rate of change of cloud ice mass fraction (kg/kg/s). Positive values indicate
+deposition; negative values indicate sublimation. Sublimation is limited by the available cloud ice.
+"""
+@inline function deposition_rate(qᵛ, qᵛ⁺ⁱ, qᶜⁱ, T, ρ, q, τᶜⁱ, constants)
+    Γⁱ = ice_thermodynamic_adjustment_factor(qᵛ⁺ⁱ, T, q, constants)
+    Sᵈᵉᵖ = (qᵛ - qᵛ⁺ⁱ) / (Γⁱ * τᶜⁱ)
+
+    # Limit sublimation to available cloud ice
+    Sᵈᵉᵖ_min = -max(0, qᶜⁱ) / τᶜⁱ
+    return max(Sᵈᵉᵖ, Sᵈᵉᵖ_min)
+end
 
 struct FourCategories{L, I, R, S, C, V, A}
     cloud_liquid :: L
@@ -76,7 +183,7 @@ $(TYPEDSIGNATURES)
 Return a `BulkMicrophysics` microphysics scheme.
 
 # Keyword arguments
-- `categories`: Precipitation categories (e.g., rain, snow) or `nothing` for non-precipitating
+- `categories`: Microphysical categories (e.g., cloud liquid, cloud ice, rain, snow) or `nothing` for non-precipitating
 - `cloud_formation`: Cloud formation scheme (default: `SaturationAdjustment`)
 - `precipitation_boundary_condition`: Bottom boundary condition for precipitation sedimentation.
   - `nothing` (default): Precipitation passes through the bottom

@@ -1,6 +1,6 @@
 # # Cloudy Kelvin-Helmholtz instability
 #
-# This example sets up a two-dimensional (``x``–``z``) Kelvin–Helmholtz instability
+# This example sets up a two-dimensional (``x``–``z``) [Kelvin–Helmholtz instability](https://en.wikipedia.org/wiki/Kelvin%E2%80%93Helmholtz_instability)
 # in a moist, stably stratified atmosphere.
 #
 # The configuration is intentionally simple but reasonably "meteorological":
@@ -64,7 +64,7 @@ model = AtmosphereModel(grid; advection=WENO(order=5), microphysics)
 
 thermo = ThermodynamicConstants()
 g = thermo.gravitational_acceleration
-θ₀ = model.formulation.reference_state.potential_temperature
+θ₀ = model.dynamics.reference_state.potential_temperature
 N = 0.01                  # target dry Brunt–Väisälä frequency (s⁻¹)
 θᵇ(z) = θ₀ * exp(N^2 * z / g)
 

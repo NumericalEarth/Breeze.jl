@@ -32,11 +32,12 @@ examples = [
     Example("Cloudy thermal bubble", "cloudy_thermal_bubble", true),
     Example("Cloudy Kelvin-Helmholtz instability", "cloudy_kelvin_helmholtz", true),
     Example("Shallow cumulus convection (BOMEX)", "bomex", true),
-    Example("Precipitating shallow cumulus (RICO)", "rico", true),
+    Example("Precipitating shallow cumulus (RICO)", "rico", false),
     Example("Convection over prescribed sea surface temperature (SST)", "prescribed_sea_surface_temperature", true),
     Example("Inertia gravity wave", "inertia_gravity_wave", true),
-    Example("Single column gray radiation", "single_column_radiation", true),
+    Example("Single column radiation", "single_column_radiation", true),
     Example("Stationary parcel model", "stationary_parcel_model", true),
+    Example("Acoustic wave in shear layer", "acoustic_wave", true),
 ]
 
 # Filter out long-running example if necessary
@@ -94,6 +95,7 @@ makedocs(
         "Dycore equations and algorithms" => "dycore_equations_algorithms.md",
         "Appendix" => Any[
             "Notation" => "appendix/notation.md",
+            "Reproducibility of Breeze.jl models" => "reproducibility.md",
         ],
         "References" => "references.md",
         "API" => "api.md",
@@ -101,4 +103,5 @@ makedocs(
     ],
     linkcheck = true,
     draft = false,
+    doctest = true
 )

@@ -1,18 +1,17 @@
 """
-    AnelasticFormulations
+    AnelasticEquations
 
-Submodule defining the anelastic dynamical formulation for atmosphere models.
+Module implementing anelastic dynamics for atmosphere models.
 
-The anelastic formulation filters acoustic waves by assuming density and pressure
+The anelastic approximation filters acoustic waves by assuming density and pressure
 are small perturbations from a dry, hydrostatic, adiabatic reference state.
+The key constraint is that mass flux divergence vanishes: `∇⋅(ρᵣ u) = 0`.
 """
-module AnelasticFormulations
+module AnelasticEquations
 
 export
-    # Types
-    AnelasticFormulation,
+    AnelasticDynamics,
     AnelasticModel,
-    # Solver function
     solve_for_anelastic_pressure!
 
 using DocStringExtensions: TYPEDSIGNATURES
@@ -22,6 +21,7 @@ using KernelAbstractions: @kernel, @index
 using Oceananigans: Oceananigans, CenterField, XFaceField, YFaceField, ZFaceField, fields
 using Oceananigans.Architectures: architecture
 using Oceananigans.BoundaryConditions: FieldBoundaryConditions, regularize_field_boundary_conditions, fill_halo_regions!
+using Oceananigans.Fields: set!
 using Oceananigans.Grids: ZDirection, inactive_cell
 using Oceananigans.ImmersedBoundaries: mask_immersed_field!
 using Oceananigans.Operators: Δzᵃᵃᶜ, Δzᵃᵃᶠ, divᶜᶜᶜ, Δzᶜᶜᶜ, ℑzᵃᵃᶠ, ∂xᶠᶜᶜ, ∂yᶜᶠᶜ, ∂zᶜᶜᶠ
@@ -29,32 +29,39 @@ using Oceananigans.Solvers: Solvers, solve!, FourierTridiagonalPoissonSolver, Ab
 using Oceananigans.TimeSteppers: TimeSteppers
 using Oceananigans.Utils: prettysummary, launch!
 
-using Breeze.Thermodynamics: ReferenceState
+using Breeze.Thermodynamics: ReferenceState, mixture_gas_constant
 
-# Import interface functions from parent module to extend them
+using Breeze.AtmosphereModels: AtmosphereModel
+
+# Import interface functions to extend
 import Breeze.AtmosphereModels:
-    default_formulation,
-    materialize_formulation,
-    materialize_thermodynamics,
+    default_dynamics,
+    materialize_dynamics,
     materialize_momentum_and_velocities,
-    formulation_pressure_solver,
-    prognostic_field_names,
-    additional_field_names,
+    dynamics_pressure_solver,
+    dynamics_density,
+    dynamics_pressure,
+    surface_pressure,
+    standard_pressure,
     mean_pressure,
     pressure_anomaly,
     total_pressure,
-    formulation_density,
-    formulation_pressure
+    buoyancy_forceᶜᶜᶜ,
+    prognostic_dynamics_field_names,
+    additional_dynamics_field_names,
+    initialize_model_thermodynamics!
 
-# Import AtmosphereModel for type alias
-using Breeze.AtmosphereModels: AtmosphereModel
+# Import microphysics interface for buoyancy computation
+import Breeze.AtmosphereModels: compute_moisture_fractions
 
-include("anelastic_formulation.jl")
+include("anelastic_dynamics.jl")
 include("anelastic_pressure_solver.jl")
+include("anelastic_buoyancy.jl")
 
-# Define type alias for AnelasticModel
-const AnelasticModel = AtmosphereModel{<:AnelasticFormulation}
+# Define type alias after AnelasticDynamics is defined
+const AnelasticModel = AtmosphereModel{<:AnelasticDynamics}
 
 include("anelastic_time_stepping.jl")
 
 end # module
+

@@ -61,7 +61,7 @@ reference_state = ReferenceState(grid, constants,
                                  surface_pressure = 101540,
                                  potential_temperature = 297.9)
 
-formulation = AnelasticFormulation(reference_state)
+dynamics = AnelasticDynamics(reference_state)
 
 # ## Surface fluxes
 #
@@ -133,7 +133,7 @@ geostrophic = geostrophic_forcings(z -> uᵍ(z), z -> vᵍ(z))
 # A prescribed large-scale moisture tendency represents the effects of advection
 # by the large-scale circulation [vanZanten2011](@cite).
 
-ρᵣ = formulation.reference_state.density
+ρᵣ = reference_state.density
 ∂t_ρqᵗ_large_scale = Field{Nothing, Nothing, Center}(grid)
 dqdt_profile = AtmosphericProfilesLibrary.Rico_dqtdt(FT)
 set!(∂t_ρqᵗ_large_scale, z -> dqdt_profile(z))
@@ -187,7 +187,7 @@ scalar_advection = (ρθ = weno,
                     ρqᶜˡ = bounds_preserving_weno,
                     ρqʳ = bounds_preserving_weno)
 
-model = AtmosphereModel(grid; formulation, coriolis, microphysics,
+model = AtmosphereModel(grid; dynamics, coriolis, microphysics,
                         momentum_advection, scalar_advection, forcing, boundary_conditions)
 
 # ## Initial conditions
@@ -380,7 +380,7 @@ text!(axuw, 0.01, 2500, text="solid: uw\ndashed: vw", fontsize=14)
 
 fig[0, :] = Label(fig, "RICO: Horizontally-averaged profiles", fontsize=18, tellwidth=false)
 
-save("rico_profiles.png", fig)
+save("rico_profiles.png", fig) #src
 fig
 
 # The simulation shows the development of a cloudy, precipitating boundary layer with:

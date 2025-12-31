@@ -19,9 +19,9 @@ grid = RectilinearGrid(CPU(); size = (128, 128), halo = (5, 5),
 # default LiquidIcePotentialTemperature thermodynamics. StaticEnergy is useful
 # for dry simulations that don't require potential temperature diagnostics.
 reference_state = ReferenceState(grid, ThermodynamicConstants(eltype(grid)))
-formulation = AnelasticFormulation(reference_state, thermodynamics=:StaticEnergy)
+dynamics = AnelasticDynamics(reference_state)
 advection = WENO(order=9)
-model = AtmosphereModel(grid; formulation, advection)
+model = AtmosphereModel(grid; dynamics, formulation=:StaticEnergy, advection)
 
 # ## Moist static energy perturbation
 #
@@ -31,7 +31,7 @@ model = AtmosphereModel(grid; formulation, advection)
 r₀ = 2e3
 Δθ = 10 # K
 N² = 1e-6
-θ₀ = model.formulation.reference_state.potential_temperature
+θ₀ = model.dynamics.reference_state.potential_temperature
 g = model.thermodynamic_constants.gravitational_acceleration
 
 function θᵢ(x, z;

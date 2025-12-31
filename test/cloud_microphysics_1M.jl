@@ -7,6 +7,7 @@ using Test
 
 BreezeCloudMicrophysicsExt = Base.get_extension(Breeze, :BreezeCloudMicrophysicsExt)
 using .BreezeCloudMicrophysicsExt: OneMomentCloudMicrophysics
+using Breeze.Microphysics: ConstantRateCondensateFormation
 
 using Oceananigans.BoundaryConditions: ImpenetrableBoundaryCondition
 
@@ -21,8 +22,14 @@ using Oceananigans.BoundaryConditions: ImpenetrableBoundaryCondition
     μ1 = OneMomentCloudMicrophysics()
     @test μ1 isa BulkMicrophysics
     @test μ1.cloud_formation isa NonEquilibriumCloudFormation
-    @test μ1.cloud_formation.liquid isa CloudLiquid
+    @test μ1.cloud_formation.liquid isa ConstantRateCondensateFormation
     @test μ1.cloud_formation.ice === nothing
+
+    # Mixed-phase non-equilibrium is signaled by `ice isa AbstractCondensateFormation`.
+    # We use a placeholder `ConstantRateCondensateFormation` and the constructor materializes
+    # relaxation parameters from `categories.cloud_ice`.
+    μ1_mixed = OneMomentCloudMicrophysics(cloud_formation = NonEquilibriumCloudFormation(nothing, ConstantRateCondensateFormation(FT(0))))
+    @test μ1_mixed.cloud_formation.ice isa ConstantRateCondensateFormation
 
     # Check prognostic fields for non-equilibrium
     prog_fields = Breeze.AtmosphereModels.prognostic_field_names(μ1)
@@ -60,11 +67,11 @@ end
 
     constants = ThermodynamicConstants()
     reference_state = ReferenceState(grid, constants, surface_pressure=101325, potential_temperature=300)
-    formulation = AnelasticFormulation(reference_state; thermodynamics=:LiquidIcePotentialTemperature)
+    dynamics = AnelasticDynamics(reference_state)
 
     # Non-equilibrium (default)
     microphysics = OneMomentCloudMicrophysics()
-    model = AtmosphereModel(grid; formulation, microphysics)
+    model = AtmosphereModel(grid; dynamics, microphysics)
 
     # Set initial conditions with some moisture
     set!(model; θ=300, qᵗ=0.015)
@@ -93,12 +100,12 @@ end
 
     constants = ThermodynamicConstants()
     reference_state = ReferenceState(grid, constants, surface_pressure=101325, potential_temperature=300)
-    formulation = AnelasticFormulation(reference_state; thermodynamics=:LiquidIcePotentialTemperature)
+    dynamics = AnelasticDynamics(reference_state)
 
     # Warm-phase saturation adjustment
     cloud_formation = SaturationAdjustment(FT; equilibrium=WarmPhaseEquilibrium())
     microphysics = OneMomentCloudMicrophysics(FT; cloud_formation)
-    model = AtmosphereModel(grid; formulation, microphysics)
+    model = AtmosphereModel(grid; dynamics, microphysics)
 
     set!(model; θ=300, qᵗ=0.015)
 
@@ -124,12 +131,12 @@ end
 
     constants = ThermodynamicConstants()
     reference_state = ReferenceState(grid, constants, surface_pressure=101325, potential_temperature=300)
-    formulation = AnelasticFormulation(reference_state; thermodynamics=:LiquidIcePotentialTemperature)
+    dynamics = AnelasticDynamics(reference_state)
 
     # Mixed-phase saturation adjustment
     cloud_formation = SaturationAdjustment(FT; equilibrium=MixedPhaseEquilibrium(FT))
     microphysics = OneMomentCloudMicrophysics(FT; cloud_formation)
-    model = AtmosphereModel(grid; formulation, microphysics)
+    model = AtmosphereModel(grid; dynamics, microphysics)
 
     set!(model; θ=300, qᵗ=0.015)
 
@@ -156,11 +163,11 @@ end
 
     constants = ThermodynamicConstants()
     reference_state = ReferenceState(grid, constants, surface_pressure=101325, potential_temperature=300)
-    formulation = AnelasticFormulation(reference_state; thermodynamics=:LiquidIcePotentialTemperature)
+    dynamics = AnelasticDynamics(reference_state)
 
     # Test for non-equilibrium scheme
     microphysics_ne = OneMomentCloudMicrophysics()
-    model_ne = AtmosphereModel(grid; formulation, microphysics=microphysics_ne)
+    model_ne = AtmosphereModel(grid; dynamics, microphysics=microphysics_ne)
     set!(model_ne; θ=300, qᵗ=0.015)
     time_step!(model_ne, 1)
 
@@ -172,7 +179,7 @@ end
     # Test for saturation adjustment scheme
     cloud_formation = SaturationAdjustment(FT; equilibrium=WarmPhaseEquilibrium())
     microphysics_sa = OneMomentCloudMicrophysics(FT; cloud_formation)
-    model_sa = AtmosphereModel(grid; formulation, microphysics=microphysics_sa)
+    model_sa = AtmosphereModel(grid; dynamics, microphysics=microphysics_sa)
     set!(model_sa; θ=300, qᵗ=0.015)
     time_step!(model_sa, 1)
 
@@ -203,7 +210,7 @@ end
     # Build full microphysics with non-equilibrium cloud formation
     μ1 = OneMomentCloudMicrophysics(FT; cloud_formation=cloud_formation_default)
     @test μ1.cloud_formation isa NonEquilibriumCloudFormation
-    @test μ1.cloud_formation.liquid.τ_relax == FT(10.0)
+    @test μ1.categories.cloud_liquid.τ_relax == FT(10.0)
 end
 
 @testset "Setting specific microphysical variables [$(FT)]" for FT in (Float32, Float64)
@@ -212,11 +219,11 @@ end
 
     constants = ThermodynamicConstants()
     reference_state = ReferenceState(grid, constants, surface_pressure=101325, potential_temperature=300)
-    formulation = AnelasticFormulation(reference_state; thermodynamics=:LiquidIcePotentialTemperature)
+    dynamics = AnelasticDynamics(reference_state)
 
     # Non-equilibrium scheme has both qᶜˡ and qʳ as prognostic
     microphysics = OneMomentCloudMicrophysics()
-    model = AtmosphereModel(grid; formulation, microphysics)
+    model = AtmosphereModel(grid; dynamics, microphysics)
 
     # Get reference density
     ρᵣ = @allowscalar reference_state.density[1, 1, 1]
@@ -245,10 +252,10 @@ end
 
     constants = ThermodynamicConstants()
     reference_state = ReferenceState(grid, constants, surface_pressure=101325, potential_temperature=300)
-    formulation = AnelasticFormulation(reference_state; thermodynamics=:LiquidIcePotentialTemperature)
+    dynamics = AnelasticDynamics(reference_state)
 
     microphysics = OneMomentCloudMicrophysics()
-    model = AtmosphereModel(grid; formulation, microphysics)
+    model = AtmosphereModel(grid; dynamics, microphysics)
 
     # Set some rain
     set!(model; θ=300, qᵗ=0.020, qᶜˡ=0, qʳ=0.001)
@@ -284,17 +291,17 @@ end
 
     constants = ThermodynamicConstants()
     reference_state = ReferenceState(grid, constants; surface_pressure=101325, potential_temperature=300)
-    formulation = AnelasticFormulation(reference_state; thermodynamics=:LiquidIcePotentialTemperature)
+    dynamics = AnelasticDynamics(reference_state)
 
     microphysics = OneMomentCloudMicrophysics()
-    model = AtmosphereModel(grid; formulation, thermodynamic_constants=constants, microphysics)
+    model = AtmosphereModel(grid; dynamics, thermodynamic_constants=constants, microphysics)
 
     # Set initial conditions with cloud liquid present (at saturation or above)
     # High qᵗ ensures supersaturation → cloud forms
     set!(model; θ=300, qᵗ=FT(0.050))
 
     # First, run to condensation equilibrium (~20τ)
-    τ = microphysics.cloud_formation.liquid.τ_relax
+    τ = microphysics.categories.cloud_liquid.τ_relax
     simulation = Simulation(model; Δt=τ/10, stop_time=10τ, verbose=false)
     run!(simulation)
 
@@ -337,17 +344,17 @@ end
 
     constants = ThermodynamicConstants()
     reference_state = ReferenceState(grid, constants; surface_pressure=101325, potential_temperature=300)
-    formulation = AnelasticFormulation(reference_state; thermodynamics=:LiquidIcePotentialTemperature)
+    dynamics = AnelasticDynamics(reference_state)
 
     # Use ImpenetrableBoundaryCondition to prevent rain from exiting
     microphysics = OneMomentCloudMicrophysics(; precipitation_boundary_condition=ImpenetrableBoundaryCondition())
-    model = AtmosphereModel(grid; formulation, thermodynamic_constants=constants, microphysics)
+    model = AtmosphereModel(grid; dynamics, thermodynamic_constants=constants, microphysics)
 
     # Set initial conditions with cloud liquid present
     set!(model; θ=300, qᵗ=FT(0.050))
 
     # Run to condensation equilibrium and beyond for autoconversion
-    τ = microphysics.cloud_formation.liquid.τ_relax
+    τ = microphysics.categories.cloud_liquid.τ_relax
     simulation = Simulation(model; Δt=τ/10, stop_time=10τ, verbose=false)
     run!(simulation)
 
@@ -369,12 +376,12 @@ end
 
     constants = ThermodynamicConstants()
     reference_state = ReferenceState(grid, constants, surface_pressure=101325, potential_temperature=260)
-    formulation = AnelasticFormulation(reference_state; thermodynamics=:LiquidIcePotentialTemperature)
+    dynamics = AnelasticDynamics(reference_state)
 
     # Mixed-phase non-equilibrium (both cloud liquid and ice are prognostic)
     cloud_formation = NonEquilibriumCloudFormation(CloudLiquid(FT), CloudIce(FT))
     microphysics = OneMomentCloudMicrophysics(FT; cloud_formation)
-    model = AtmosphereModel(grid; formulation, microphysics)
+    model = AtmosphereModel(grid; dynamics, microphysics)
 
     prog_fields = Breeze.AtmosphereModels.prognostic_field_names(microphysics)
     @test :ρqᶜˡ in prog_fields
@@ -412,10 +419,10 @@ end
 
     constants = ThermodynamicConstants()
     reference_state = ReferenceState(grid, constants, surface_pressure=101325, potential_temperature=300)
-    formulation = AnelasticFormulation(reference_state; thermodynamics=:LiquidIcePotentialTemperature)
+    dynamics = AnelasticDynamics(reference_state)
 
     microphysics = OneMomentCloudMicrophysics()
-    model = AtmosphereModel(grid; formulation, microphysics)
+    model = AtmosphereModel(grid; dynamics, microphysics)
     set!(model; θ=300, qᵗ=0.015, qʳ=0.001)
 
     # Rain should have sedimentation velocity

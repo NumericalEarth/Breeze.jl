@@ -146,7 +146,7 @@ function SaturationSpecificHumidity(model, flavor_symbol=:prognostic)
                                                     model.microphysical_fields,
                                                     model.specific_moisture,
                                                     model.temperature,
-                                                    model.formulation.reference_state,
+                                                    model.dynamics.reference_state,
                                                     model.thermodynamic_constants)
 
     return KernelFunctionOperation{Center, Center, Center}(func, model.grid)
@@ -294,7 +294,7 @@ function RelativeHumidity(model)
                                           model.microphysical_fields,
                                           model.specific_moisture,
                                           model.temperature,
-                                          model.formulation.reference_state,
+                                          model.dynamics.reference_state,
                                           model.thermodynamic_constants)
 
     return KernelFunctionOperation{Center, Center, Center}(func, model.grid)
