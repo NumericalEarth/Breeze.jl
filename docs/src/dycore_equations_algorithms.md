@@ -151,7 +151,7 @@ is the adiabatic sound speed (approximately 340 m/s at standard conditions).
 | Density | Reference ``ρᵣ(z)`` only | Prognostic ``ρ(x,y,z,t)`` |
 | Pressure | Solved from Poisson equation | Computed from equation of state |
 | Time step | Limited by advective CFL | Limited by acoustic CFL |
-| Typical applications | LES, mesoscale simulations | Acoustic problems, validation |
+| Typical applications | LES, mesoscale simulations | _Under development_ |
 
 ## Time discretization and pressure correction (Anelastic)
 
