@@ -6,11 +6,7 @@ using Oceananigans.TimeSteppers: compute_pressure_correction!, make_pressure_cor
 using ..Thermodynamics:
     MoistureMassFractions,
     mixture_heat_capacity,
-    mixture_gas_constant,
-    saturation_vapor_pressure,
-    dry_air_gas_constant,
-    vapor_gas_constant,
-    PlanarLiquidSurface
+    mixture_gas_constant
 
 move_to_front(names, name) = tuple(name, filter(n -> n != name, names)...)
 
@@ -240,11 +236,10 @@ end
 
 # Handle scalar/number relative humidity
 function compute_moisture_from_relative_humidity!(model, ℋ::Number)
-    T = model.temperature
     ρ = dynamics_density(model.dynamics)
-    constants = model.thermodynamic_constants
 
-    qᵛ⁺ = saturation_specific_humidity_field(T, ρ, constants)
+    # Use SaturationSpecificHumidityField which works on GPU
+    qᵛ⁺ = saturation_specific_humidity_for_setting(model)
 
     qᵗ = model.specific_moisture
     set!(qᵗ, ℋ * qᵛ⁺)
@@ -257,12 +252,11 @@ end
 
 # Handle function relative humidity: need to evaluate the function first
 function compute_moisture_from_relative_humidity!(model, ℋ_func::Function)
-    T = model.temperature
     ρ = dynamics_density(model.dynamics)
-    constants = model.thermodynamic_constants
     grid = model.grid
 
-    qᵛ⁺ = saturation_specific_humidity_field(T, ρ, constants)
+    # Use SaturationSpecificHumidityField which works on GPU
+    qᵛ⁺ = saturation_specific_humidity_for_setting(model)
 
     # Create a temporary field to hold ℋ values
     ℋ_field = CenterField(grid)
@@ -279,11 +273,10 @@ end
 
 # Handle array/field relative humidity
 function compute_moisture_from_relative_humidity!(model, ℋ_array::AbstractArray)
-    T = model.temperature
     ρ = dynamics_density(model.dynamics)
-    constants = model.thermodynamic_constants
 
-    qᵛ⁺ = saturation_specific_humidity_field(T, ρ, constants)
+    # Use SaturationSpecificHumidityField which works on GPU
+    qᵛ⁺ = saturation_specific_humidity_for_setting(model)
 
     qᵗ = model.specific_moisture
     set!(qᵗ, ℋ_array .* qᵛ⁺)
@@ -294,27 +287,63 @@ function compute_moisture_from_relative_humidity!(model, ℋ_array::AbstractArra
     return nothing
 end
 
-"""
-    saturation_specific_humidity_field(T, ρ, constants)
+using Oceananigans.AbstractOperations: KernelFunctionOperation
+using Oceananigans.Fields: Field, Center
+using Oceananigans.Utils: Utils
 
-Compute an array containing the saturation specific humidity using the formula:
-```math
-qᵛ⁺ = pᵛ⁺ / (ρ Rᵛ T)
-```
-where `pᵛ⁺` is the saturation vapor pressure.
+using ..Thermodynamics:
+    saturation_vapor_pressure,
+    vapor_gas_constant,
+    PlanarLiquidSurface
 
-This is consistent with the relative humidity diagnostic which computes
-`ℋ = pᵛ / pᵛ⁺ = (ρ qᵛ Rᵛ T) / pᵛ⁺`.
 """
-function saturation_specific_humidity_field(T, ρ, constants)
-    Rᵛ = vapor_gas_constant(constants)
+Kernel function for computing saturation specific humidity at the current temperature.
+Used for setting relative humidity in a GPU-compatible way.
+"""
+struct SaturationHumidityForSettingKernelFunction{T, R, TH}
+    temperature :: T
+    reference_state :: R
+    thermodynamic_constants :: TH
+end
+
+Utils.prettysummary(::SaturationHumidityForSettingKernelFunction) = "SaturationHumidityForSettingKernelFunction"
+
+Adapt.adapt_structure(to, k::SaturationHumidityForSettingKernelFunction) =
+    SaturationHumidityForSettingKernelFunction(adapt(to, k.temperature),
+                                                adapt(to, k.reference_state),
+                                                adapt(to, k.thermodynamic_constants))
+
+@inline function (d::SaturationHumidityForSettingKernelFunction)(i, j, k, grid)
+    @inbounds begin
+        ρᵣ = d.reference_state.density[i, j, k]
+        T = d.temperature[i, j, k]
+    end
+
+    constants = d.thermodynamic_constants
     surface = PlanarLiquidSurface()
-
+    
     # Compute saturation vapor pressure
-    pᵛ⁺ = saturation_vapor_pressure.(T, Ref(constants), Ref(surface))
+    pᵛ⁺ = saturation_vapor_pressure(T, constants, surface)
     
     # Saturation specific humidity: qᵛ⁺ = pᵛ⁺ / (ρ Rᵛ T)
-    qᵛ⁺ = pᵛ⁺ ./ (ρ .* Rᵛ .* T)
+    # Using reference density ρᵣ as the original code did
+    Rᵛ = vapor_gas_constant(constants)
+    return pᵛ⁺ / (ρᵣ * Rᵛ * T)
+end
 
-    return qᵛ⁺
+"""
+    saturation_specific_humidity_for_setting(model)
+
+Return a Field containing the saturation specific humidity at the current
+temperature, assuming dry air (no condensate). This is used for setting
+relative humidity.
+
+Uses a GPU-compatible kernel to compute saturation specific humidity.
+"""
+function saturation_specific_humidity_for_setting(model)
+    func = SaturationHumidityForSettingKernelFunction(model.temperature,
+                                                       model.dynamics.reference_state,
+                                                       model.thermodynamic_constants)
+    op = KernelFunctionOperation{Center, Center, Center}(func, model.grid)
+    return Field(op)
 end
