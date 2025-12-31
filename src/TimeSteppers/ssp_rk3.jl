@@ -143,7 +143,7 @@ end
 #####
 
 """
-    time_step!(model::AbstractModel{<:SSPRungeKutta3TimeStepper}, Δt; callbacks=[])
+$(TYPEDSIGNATURES)
 
 Step forward `model` one time step `Δt` with the SSP RK3 method.
 
