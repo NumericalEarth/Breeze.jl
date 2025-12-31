@@ -1,4 +1,4 @@
-using Oceananigans.Fields: Fields, set!
+using Oceananigans.Fields: Fields, set!, interior
 using Oceananigans.TimeSteppers: update_state!
 using Oceananigans.BoundaryConditions: fill_halo_regions!
 using Oceananigans.TimeSteppers: compute_pressure_correction!, make_pressure_correction!, update_state!
@@ -6,7 +6,11 @@ using Oceananigans.TimeSteppers: compute_pressure_correction!, make_pressure_cor
 using ..Thermodynamics:
     MoistureMassFractions,
     mixture_heat_capacity,
-    mixture_gas_constant
+    mixture_gas_constant,
+    saturation_vapor_pressure,
+    dry_air_gas_constant,
+    vapor_gas_constant,
+    PlanarLiquidSurface
 
 move_to_front(names, name) = tuple(name, filter(n -> n != name, names)...)
 
@@ -91,6 +95,10 @@ Variables are set via keyword arguments. Supported variables include:
 **Diagnostic variables** (specific, i.e., per unit mass):
 - `u`, `v`, `w`: velocity components (sets both velocity and momentum)
 - `qᵗ`: total specific moisture (sets both specific and density-weighted moisture)
+- `ℋ`: relative humidity (sets total moisture via `qᵗ = ℋ * qᵛ⁺`, where `qᵛ⁺` is the
+  saturation specific humidity at the current temperature). Relative humidity is in
+  the range [0, 1]. For models with saturation adjustment microphysics, `ℋ > 1` throws
+  an error since the saturation adjustment would immediately reduce it to 1.
 
 **Specific microphysical variables** (automatically converted to density-weighted):
 - `qᶜˡ`: specific cloud liquid (sets `ρqᶜˡ = ρᵣ * qᶜˡ`)
@@ -149,7 +157,13 @@ function Fields.set!(model::AtmosphereModel; time=nothing, enforce_mass_conserva
             set!(qᵗ, value)
             ρ = dynamics_density(model.dynamics)
             ρqᵗ = model.moisture_density
-            set!(ρqᵗ, ρ * qᵗ)                
+            set!(ρqᵗ, ρ * qᵗ)
+
+        elseif name == :ℋ
+            # Set total moisture from relative humidity
+            # Compute qᵛ⁺ (saturation specific humidity at the current temperature)
+            # then set qᵗ = ℋ * qᵛ⁺
+            set_total_moisture_from_relative_humidity!(model, value)
 
         elseif name ∈ (:u, :v, :w)
             u = model.velocities[name]
@@ -172,7 +186,7 @@ function Fields.set!(model::AtmosphereModel; time=nothing, enforce_mass_conserva
 
         else
             prognostic_names = keys(prognostic_fields(model))
-            settable_diagnostic_variables = (:qᵗ, :u, :v, :w)
+            settable_diagnostic_variables = (:qᵗ, :ℋ, :u, :v, :w)
             specific_microphysical = settable_specific_microphysical_names(model.microphysics)
 
             msg = "Cannot set! $name in AtmosphereModel because $name is neither a
@@ -199,5 +213,145 @@ function Fields.set!(model::AtmosphereModel; time=nothing, enforce_mass_conserva
         update_state!(model, compute_tendencies=false)
     end
 
+    return nothing
+end
+
+"""
+    set_total_moisture_from_relative_humidity!(model, ℋ)
+
+Set the total moisture content from relative humidity `ℋ`.
+
+Computes `qᵗ = ℋ * qᵛ⁺` where `qᵛ⁺` is the saturation specific humidity
+at the current temperature. Relative humidity `ℋ` should be in the range [0, 1].
+
+For models with saturation adjustment microphysics (as determined by
+`is_saturation_adjustment`), throws an error if any value of `ℋ` exceeds 1,
+since the saturation adjustment would immediately reduce the relative humidity to 1.
+"""
+function set_total_moisture_from_relative_humidity!(model, ℋ_value)
+    # First, check if we have saturation adjustment microphysics
+    # If so, we need to validate that ℋ ≤ 1 everywhere
+    if is_saturation_adjustment(model.microphysics)
+        validate_relative_humidity_for_saturation_adjustment(ℋ_value)
+    end
+
+    # Call update_state! to ensure temperature is computed from thermodynamic variables
+    update_state!(model, compute_tendencies=false)
+
+    # Compute saturation specific humidity and then qᵗ = ℋ * qᵛ⁺
+    compute_moisture_from_relative_humidity!(model, ℋ_value)
+
+    return nothing
+end
+
+# Handle scalar/number relative humidity
+function compute_moisture_from_relative_humidity!(model, ℋ::Number)
+    T = model.temperature
+    ρ = dynamics_density(model.dynamics)
+    constants = model.thermodynamic_constants
+
+    qᵛ⁺ = saturation_specific_humidity_field(T, ρ, constants)
+
+    qᵗ = model.specific_moisture
+    set!(qᵗ, ℋ * qᵛ⁺)
+
+    ρqᵗ = model.moisture_density
+    set!(ρqᵗ, ρ * qᵗ)
+
+    return nothing
+end
+
+# Handle function relative humidity: need to evaluate the function first
+function compute_moisture_from_relative_humidity!(model, ℋ_func::Function)
+    T = model.temperature
+    ρ = dynamics_density(model.dynamics)
+    constants = model.thermodynamic_constants
+    grid = model.grid
+
+    qᵛ⁺ = saturation_specific_humidity_field(T, ρ, constants)
+
+    # Create a temporary field to hold ℋ values
+    ℋ_field = CenterField(grid)
+    set!(ℋ_field, ℋ_func)
+
+    # Now we can check for supersaturation with saturation adjustment
+    if is_saturation_adjustment(model.microphysics)
+        validate_relative_humidity_for_saturation_adjustment(interior(ℋ_field))
+    end
+
+    qᵗ = model.specific_moisture
+    set!(qᵗ, ℋ_field * qᵛ⁺)
+
+    ρqᵗ = model.moisture_density
+    set!(ρqᵗ, ρ * qᵗ)
+
+    return nothing
+end
+
+# Handle array/field relative humidity
+function compute_moisture_from_relative_humidity!(model, ℋ_array::AbstractArray)
+    T = model.temperature
+    ρ = dynamics_density(model.dynamics)
+    constants = model.thermodynamic_constants
+
+    qᵛ⁺ = saturation_specific_humidity_field(T, ρ, constants)
+
+    qᵗ = model.specific_moisture
+    set!(qᵗ, ℋ_array .* qᵛ⁺)
+
+    ρqᵗ = model.moisture_density
+    set!(ρqᵗ, ρ * qᵗ)
+
+    return nothing
+end
+
+"""
+    saturation_specific_humidity_field(T, ρ, constants)
+
+Compute an array containing the saturation specific humidity using the formula:
+```math
+qᵛ⁺ = pᵛ⁺ / (ρ Rᵛ T)
+```
+where `pᵛ⁺` is the saturation vapor pressure.
+
+This is consistent with the relative humidity diagnostic which computes
+`ℋ = pᵛ / pᵛ⁺ = (ρ qᵛ Rᵛ T) / pᵛ⁺`.
+"""
+function saturation_specific_humidity_field(T, ρ, constants)
+    Rᵛ = vapor_gas_constant(constants)
+    surface = PlanarLiquidSurface()
+
+    # Compute saturation vapor pressure
+    pᵛ⁺ = saturation_vapor_pressure.(T, Ref(constants), Ref(surface))
+    
+    # Saturation specific humidity: qᵛ⁺ = pᵛ⁺ / (ρ Rᵛ T)
+    qᵛ⁺ = pᵛ⁺ ./ (ρ .* Rᵛ .* T)
+
+    return qᵛ⁺
+end
+
+# Validation for constant/scalar relative humidity
+function validate_relative_humidity_for_saturation_adjustment(ℋ::Number)
+    if ℋ > 1
+        throw(ArgumentError("Cannot set relative humidity ℋ = $ℋ > 1 with " *
+                            "SaturationAdjustment microphysics. The saturation adjustment " *
+                            "would immediately reduce the relative humidity to 1. " *
+                            "Use qᵗ instead if you want to set supersaturated conditions."))
+    end
+    return nothing
+end
+
+# Validation for functions: we can't validate until it's evaluated, so skip
+validate_relative_humidity_for_saturation_adjustment(ℋ::Function) = nothing
+
+# Validation for arrays/fields: check max value
+function validate_relative_humidity_for_saturation_adjustment(ℋ::AbstractArray)
+    ℋ_max = maximum(ℋ)
+    if ℋ_max > 1
+        throw(ArgumentError("Cannot set relative humidity with maximum value ℋ = $ℋ_max > 1 with " *
+                            "SaturationAdjustment microphysics. The saturation adjustment " *
+                            "would immediately reduce the relative humidity to 1. " *
+                            "Use qᵗ instead if you want to set supersaturated conditions."))
+    end
     return nothing
 end

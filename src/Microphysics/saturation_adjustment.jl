@@ -27,6 +27,9 @@ end
 
 const SA = SaturationAdjustment
 
+# Override the trait to indicate this is a saturation adjustment scheme
+AtmosphereModels.is_saturation_adjustment(::SA) = true
+
 """
 $(TYPEDSIGNATURES)
 
