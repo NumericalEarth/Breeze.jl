@@ -1,4 +1,4 @@
-using Oceananigans.Fields: Fields, set!, interior
+using Oceananigans.Fields: Fields, set!
 using Oceananigans.TimeSteppers: update_state!
 using Oceananigans.BoundaryConditions: fill_halo_regions!
 using Oceananigans.TimeSteppers: compute_pressure_correction!, make_pressure_correction!, update_state!
