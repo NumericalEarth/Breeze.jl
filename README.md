@@ -5,9 +5,8 @@
 
 <!-- description -->
 <p align="center">
-  <strong>🌪 Fast and friendly Julia software for atmospheric fluid dynamics on CPUs and GPUs. https://numericalearth.github.io/BreezeDocumentation/stable</strong>
+  <strong>🌪 Fast and friendly Julia software for atmospheric fluid dynamics on CPUs and GPUs</strong>
 </p>
-
 
 <p align="center">
   <a href="https://numericalearth.github.io/BreezeDocumentation/stable/">
@@ -40,7 +39,119 @@ Right now, `Breeze.AtmosphereModel` is in an early stage of development, and sup
 But we're working feverishly towards a future with bulk, bin and superdroplet microphysics, radiation, and a fully compressible formulation with acoustic substepping (and note, the roadmap and vision for Breeze is still something of a work in progress).
 Check out [the documentation](https://numericalearth.github.io/BreezeDocumentation/stable/) to see what we can do now, and watch this space (or get in touch to [discuss](https://github.com/NumericalEarth/Breeze.jl/discussions)!) its crystallization.
 
-### Installation
+## Gallery
+
+<table>
+  <tr>
+    <th width="25%">
+      <a href="https://numericalearth.github.io/BreezeDocumentation/stable/literated/dry_thermal_bubble/">
+        <img src="docs/src/assets/dry_thermal_bubble.png" alt="Dry thermal bubble">
+        <br><em>Dry thermal bubble</em>
+      </a>
+    </th>
+    <th width="25%">
+      <a href="https://numericalearth.github.io/BreezeDocumentation/stable/literated/cloudy_thermal_bubble/">
+        <img src="docs/src/assets/cloudy_thermal_bubble.png" alt="Cloudy thermal bubble">
+        <br><em>Cloudy thermal bubble</em>
+      </a>
+    </th>
+    <th width="25%">
+      <a href="https://numericalearth.github.io/BreezeDocumentation/stable/literated/cloudy_kelvin_helmholtz/">
+        <img src="docs/src/assets/cloudy_kelvin_helmholtz.png" alt="Cloudy Kelvin-Helmholtz">
+        <br><em>Cloudy Kelvin-Helmholtz</em>
+      </a>
+    </th>
+    <th width="25%">
+      <a href="examples/mountain_wave.jl">
+        <img src="docs/src/assets/mountain_wave.png" alt="Mountain waves">
+        <br><em>Mountain waves</em>
+      </a>
+    </th>
+  </tr>
+  <tr>
+    <th width="25%">
+      <a href="https://numericalearth.github.io/BreezeDocumentation/stable/literated/bomex/">
+        <img src="docs/src/assets/bomex.png" alt="BOMEX shallow cumulus">
+        <br><em>BOMEX shallow cumulus</em>
+      </a>
+    </th>
+    <th width="25%">
+      <a href="examples/rico.jl">
+        <img src="docs/src/assets/rico.png" alt="RICO precipitating cumulus">
+        <br><em>RICO precipitating cumulus</em>
+      </a>
+    </th>
+    <th width="25%">
+      <a href="https://numericalearth.github.io/BreezeDocumentation/stable/literated/single_column_radiation/">
+        <img src="docs/src/assets/single_column_radiation.png" alt="Single column radiation">
+        <br><em>Single column radiation</em>
+      </a>
+    </th>
+    <th width="25%">
+      <a href="examples/supercell.jl">
+        <img src="docs/src/assets/supercell.png" alt="Supercell thunderstorm">
+        <br><em>Supercell thunderstorm</em>
+      </a>
+    </th>
+  </tr>
+</table>
+
+### Simulations in motion
+
+<details>
+<summary>🌊 <strong>Cloudy Kelvin-Helmholtz instability</strong> — wave clouds rolling through a moist shear layer</summary>
+<br>
+
+Kelvin-Helmholtz billows in a stably-stratified, moist atmosphere. As the shear layer rolls up, a moist layer is advected and deformed, producing billow-like patterns reminiscent of observed "wave clouds".
+
+https://github.com/user-attachments/assets/f47ff268-b2e4-401c-a114-a0aaf0c7ead3
+
+</details>
+
+<details>
+<summary>🔥 <strong>Dry thermal bubble</strong> — a warm bubble rising through stable stratification</summary>
+<br>
+
+A classic test case: a localized warm perturbation rises buoyantly through a stably-stratified dry atmosphere, demonstrating the model's ability to capture buoyancy-driven convection.
+
+https://github.com/user-attachments/assets/c9a0c9c3-c199-48b8-9850-f967bdcc4bed
+
+</details>
+
+<details>
+<summary>☁️ <strong>Cloudy thermal bubble</strong> — moist convection with cloud formation</summary>
+<br>
+
+A moist thermal bubble rises and cools adiabatically. As the air reaches saturation, cloud condensate forms, releasing latent heat that further enhances the buoyancy.
+
+<!-- TODO: Upload cloudy_thermal_bubble.mp4 to GitHub and replace with video link -->
+![Cloudy thermal bubble](docs/src/literated/cloudy_thermal_bubble.mp4)
+
+</details>
+
+<details>
+<summary>⛰️ <strong>Mountain waves</strong> — gravity waves excited by flow over topography</summary>
+<br>
+
+Flow over an idealized mountain ridge generates internal gravity waves that propagate upward through the stratified atmosphere.
+
+<!-- TODO: Upload mountain_wave.mp4 to GitHub and replace with video link -->
+![Mountain waves](mountain_wave.mp4)
+
+</details>
+
+<details>
+<summary>🌀 <strong>Inertia-gravity waves</strong> — rotating stratified dynamics</summary>
+<br>
+
+Inertia-gravity waves in a rotating, stratified atmosphere, demonstrating the model's ability to capture geostrophic adjustment.
+
+<!-- TODO: Upload inertia_gravity_wave.mp4 to GitHub and replace with video link -->
+![Inertia-gravity waves](docs/src/literated/inertia_gravity_wave.mp4)
+
+</details>
+
+## Installation
 
 Breeze is a registered Julia package. First [install Julia](https://julialang.org/install/); suggested version 1.12. See [juliaup](https://github.com/JuliaLang/juliaup) README for how to install 1.12 and make that version the default.
 
@@ -65,32 +176,17 @@ If you want to live on the cutting edge, you can use, e.g.,
 Breeze from `main` branch. For more information, see the
 [Pkg.jl documentation](https://pkgdocs.julialang.org).
 
-### Using Breeze
+## Using Breeze
 
-Now we are ready to run any of the examples!
-
-For instance, by increasing the resolution of the cloudy Kelvin-Helmholtz instability
-to `Nx=1536` and `Nz=1024`, decrease the timestep to `Δt = 0.1`, and running
+Now we are ready to run any of the examples! For instance:
 
 ```julia
 julia> include("examples/cloudy_kelvin_helmholtz.jl")
 ```
 
-to get
+or dive into the [documentation](https://numericalearth.github.io/BreezeDocumentation/stable/) for tutorials and API reference.
 
-https://github.com/user-attachments/assets/f47ff268-b2e4-401c-a114-a0aaf0c7ead3
-
-Or cranking up the spatial resolution of the thermal bubble example to to `size = (1024, 512)` and running
-
-```julia
-julia> include("examples/dry_thermal_bubble.jl")
-```
-
-we get
-
-https://github.com/user-attachments/assets/c9a0c9c3-c199-48b8-9850-f967bdcc4bed
-
-### Citing
+## Citing
 
 If you use Breeze for research, teaching, or fun, we'd be grateful if you give credit by citing the corresponding Zenodo record, e.g.,
 
