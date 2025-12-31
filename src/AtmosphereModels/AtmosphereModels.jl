@@ -103,8 +103,5 @@ include("PotentialTemperatureFormulations/PotentialTemperatureFormulations.jl")
 using .PotentialTemperatureFormulations:
     LiquidIcePotentialTemperatureFormulation
 
-# Note: Type aliases StaticEnergyModel and PotentialTemperatureModel are defined
-# in their respective formulation submodules and used internally for dispatch.
-# They are not exported from AtmosphereModels.
 
 end
