@@ -42,7 +42,7 @@ using Oceananigans.Utils: prettysummary, launch!
 using Breeze.Thermodynamics: mixture_gas_constant, mixture_heat_capacity
 
 using Breeze.AtmosphereModels: AtmosphereModel, compute_moisture_fractions
-using Breeze.AtmosphereModels.PotentialTemperatureFormulations: LiquidIcePotentialTemperatureFormulation
+using Breeze.PotentialTemperatureFormulations: LiquidIcePotentialTemperatureFormulation
 
 # Import interface functions to extend
 import Breeze.AtmosphereModels:
