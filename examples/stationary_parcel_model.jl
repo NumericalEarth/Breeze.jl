@@ -9,8 +9,10 @@
 # - **Rain evaporation**: Subsaturated rain → vapor
 #
 # We compare **one-moment** (mass only) and **two-moment** (mass + number)
-# microphysics schemes, showing how tracking droplet number concentration
-# enables realistic representation of aerosol-cloud interactions.
+# microphysics schemes. For two-moment, we use the [SeifertBeheng2006](@citet)
+# scheme, which derives process rates from the evolving particle size distribution.
+# Tracking droplet number concentration enables realistic representation of
+# aerosol-cloud interactions.
 #
 # Stationary parcel models are classic tools in cloud physics, isolating microphysics
 # from dynamics; see [rogers1989short](@citet).
@@ -112,7 +114,7 @@ cloud_liquid_fast = CMP.CloudLiquid{Float64}(τ_relax=2.0, ρw=1000.0, r_eff=10e
 categories = one_moment_cloud_microphysics_categories(cloud_liquid = cloud_liquid_fast)
 microphysics_1m_fast = OneMomentCloudMicrophysics(; categories, precipitation_boundary_condition)
 
-# And now a default two-moment scheme with SB2006 scheme (droplet number affects rates)
+# And now a default two-moment scheme using Seifert and Beheng (2006)
 microphysics_2m = TwoMomentCloudMicrophysics(; precipitation_boundary_condition)
 
 # ## Run four comparison cases
