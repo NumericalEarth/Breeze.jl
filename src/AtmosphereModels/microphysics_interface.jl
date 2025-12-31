@@ -162,7 +162,7 @@ surface_precipitation_flux(model, ::Nothing) = Field{Center, Center, Nothing}(mo
 #####
 
 """
-    ConstantRadiusParticles{FT}
+$(TYPEDEF)
 
 Represents cloud particles with a constant effective radius.
 
