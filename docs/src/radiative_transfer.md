@@ -103,11 +103,15 @@ The calculation accounts for:
 
 For more accurate radiative transfer calculations, use the [`ClearSkyOptics`](@ref) optics flavor which computes full-spectrum gas optics using RRTMGP's lookup tables:
 
-```julia
-using NCDatasets  # Required for RRTMGP lookup tables
+```@example
+using Breeze, Oceananigans.Units
+using RRTMGP, NCDatasets # Required for RRTMGP lookup tables
 
+grid = RectilinearGrid(; size=16, x=0, y=45, z=(0, 10kilometers),
+                       topology=(Flat, Flat, Bounded))
+constants = ThermodynamicConstants()
 radiation = RadiativeTransferModel(grid, ClearSkyOptics(), constants;
-                                   surface_temperature,
+                                   surface_temperature = 300,
                                    surface_emissivity = 0.98,
                                    surface_albedo = 0.1,
                                    background_atmosphere = BackgroundAtmosphere(CO₂ = 400e-6))
