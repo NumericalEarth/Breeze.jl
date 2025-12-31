@@ -10,8 +10,6 @@ export SSPRungeKutta3
 
 using DocStringExtensions: TYPEDSIGNATURES, TYPEDEF
 
-import Oceananigans.TimeSteppers: TimeStepper
-
 include("ssp_runge_kutta_3.jl")
 
 # Extend TimeStepper to support SSPRK3 via Symbol
