@@ -15,7 +15,7 @@ using Oceananigans.TimeSteppers:
 import Oceananigans.TimeSteppers: time_step!
 
 """
-    SSPRungeKutta3TimeStepper{FT, U0, TG, TI} <: AbstractTimeStepper
+$(TYPEDEF)
 
 A strong stability preserving (SSP) third-order Runge-Kutta time stepper.
 
@@ -94,7 +94,7 @@ end
 #####
 
 """
-    ssp_rk3_substep!(model, Δt, α)
+$(TYPEDSIGNATURES)
 
 Apply an SSP RK3 substep with coefficient α:
 ```
@@ -125,7 +125,7 @@ end
 end
 
 """
-    store_initial_state!(model)
+$(TYPEDSIGNATURES)
 
 Copy prognostic fields to U⁰ storage for use in later SSP RK3 stages.
 """
