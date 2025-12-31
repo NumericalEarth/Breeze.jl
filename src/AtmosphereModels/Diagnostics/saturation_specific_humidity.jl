@@ -107,7 +107,10 @@ end
     ϵᵈᵛ = Rᵈ / Rᵛ
     qᵛ⁺₁ = ϵᵈᵛ * (1 - qᵗ) * pᵛ⁺ / (pᵣ - pᵛ⁺)
 
-    ρ = density(T, pᵣ, qᵗ, constants)
+    # In unsaturated conditions, all moisture is vapor (qᵛ = qᵗ)
+    # Compute density using mixture gas constant for this case
+    Rᵐ = Rᵈ * (1 - qᵗ) + Rᵛ * qᵗ
+    ρ = pᵣ / (Rᵐ * T)
     qᵛ⁺₀ = pᵛ⁺ / (ρ * Rᵛ * T)
 
     return max(qᵛ⁺₀, qᵛ⁺₁)
