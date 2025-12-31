@@ -26,10 +26,6 @@ using ..AtmosphereModels: AtmosphereModels, div_ρUc
 @inline tracer_mass_flux_z(i, j, k, grid, ρ, args...) =
     ℑzᵃᵃᶠ(i, j, k, grid, ρ) * _advective_tracer_flux_z(i, j, k, grid, args...)
 
-@inline tracer_mass_flux_x(i, j, k, grid, ρ, advection::BoundsPreservingWENO, args...) = zero(grid)
-@inline tracer_mass_flux_y(i, j, k, grid, ρ, advection::BoundsPreservingWENO, args...) = zero(grid)
-@inline tracer_mass_flux_z(i, j, k, grid, ρ, advection::BoundsPreservingWENO, args...) = zero(grid)
-
 # Main operator
 @inline function AtmosphereModels.div_ρUc(i, j, k, grid, advection, ρ, U, c)
     return V⁻¹ᶜᶜᶜ(i, j, k, grid) * (
