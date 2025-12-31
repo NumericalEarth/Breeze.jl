@@ -8,7 +8,7 @@ module TimeSteppers
 
 export SSPRungeKutta3TimeStepper
 
-import Oceananigans.TimeSteppers: TimeStepper
+using DocStringExtensions: TYPEDSIGNATURES, TYPEDEF
 
 include("ssp_rk3.jl")
 

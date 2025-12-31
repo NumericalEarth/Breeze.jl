@@ -5,6 +5,7 @@ using Oceananigans.Utils: launch!, time_difference_seconds
 
 using Oceananigans.TimeSteppers:
     AbstractTimeStepper,
+    TimeSteppers as OceananigansTimeSteppers,
     tick!,
     update_state!,
     compute_flux_bc_tendencies!,
@@ -12,10 +13,8 @@ using Oceananigans.TimeSteppers:
     make_pressure_correction!,
     step_lagrangian_particles!
 
-import Oceananigans.TimeSteppers: time_step!
-
 """
-    SSPRungeKutta3TimeStepper{FT, U0, TG, TI} <: AbstractTimeStepper
+$(TYPEDEF)
 
 A strong stability preserving (SSP) third-order Runge-Kutta time stepper.
 
@@ -94,7 +93,7 @@ end
 #####
 
 """
-    ssp_rk3_substep!(model, Δt, α)
+$(TYPEDSIGNATURES)
 
 Apply an SSP RK3 substep with coefficient α:
 ```
@@ -125,7 +124,7 @@ end
 end
 
 """
-    store_initial_state!(model)
+$(TYPEDSIGNATURES)
 
 Copy prognostic fields to U⁰ storage for use in later SSP RK3 stages.
 """
@@ -142,7 +141,7 @@ end
 #####
 
 """
-    time_step!(model::AbstractModel{<:SSPRungeKutta3TimeStepper}, Δt; callbacks=[])
+$(TYPEDSIGNATURES)
 
 Step forward `model` one time step `Δt` with the SSP RK3 method.
 
@@ -153,7 +152,7 @@ u^(2) = 3/4 u^(0) + 1/4 u^(1) + 1/4 Δt L(u^(1))
 u^(3) = 1/3 u^(0) + 2/3 u^(2) + 2/3 Δt L(u^(2))
 ```
 """
-function time_step!(model::AbstractModel{<:SSPRungeKutta3TimeStepper}, Δt; callbacks=[])
+function OceananigansTimeSteppers.time_step!(model::AbstractModel{<:SSPRungeKutta3TimeStepper}, Δt; callbacks=[])
     Δt == 0 && @warn "Δt == 0 may cause model blowup!"
 
     # Be paranoid and update state at iteration 0, in case run! is not used:
