@@ -64,7 +64,7 @@ model = AtmosphereModel(grid; advection=WENO(order=5), microphysics)
 
 thermo = ThermodynamicConstants()
 g = thermo.gravitational_acceleration
-θ₀ = model.formulation.reference_state.potential_temperature
+θ₀ = model.dynamics.reference_state.potential_temperature
 N = 0.01                  # target dry Brunt–Väisälä frequency (s⁻¹)
 θᵇ(z) = θ₀ * exp(N^2 * z / g)
 
@@ -168,7 +168,7 @@ function progress(sim)
     return nothing
 end
 
-add_callback!(simulation, progress, TimeInterval(1minute))
+add_callback!(simulation, progress, IterationInterval(200))
 
 # ## Output
 # We save the model velocities, the cross-stream component of vorticity, ``ξ = ∂_z u - ∂_x w``,

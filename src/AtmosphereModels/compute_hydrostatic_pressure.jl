@@ -6,10 +6,10 @@ using ..Thermodynamics: dry_air_gas_constant
 using Oceananigans.Operators: Δzᶜᶜᶜ
 using Oceananigans.BoundaryConditions: fill_halo_regions!
 
-@kernel function _compute_hydrostatic_pressure!(ph, grid, formulation, temperature, constants)
+@kernel function _compute_hydrostatic_pressure!(ph, grid, dynamics, temperature, constants)
     i, j = @index(Global, NTuple)
 
-    p₀ = formulation.reference_state.surface_pressure
+    p₀ = surface_pressure(dynamics)
     Nz = grid.Nz
     g = constants.gravitational_acceleration
     Rᵈ = dry_air_gas_constant(constants)
@@ -38,7 +38,7 @@ function compute_hydrostatic_pressure!(ph, model)
     arch = grid.architecture
 
     launch!(arch, grid, :xy, _compute_hydrostatic_pressure!,
-            ph, grid, model.formulation, model.temperature, model.thermodynamic_constants)
+            ph, grid, model.dynamics, model.temperature, model.thermodynamic_constants)
 
     fill_halo_regions!(ph)
 

@@ -257,7 +257,7 @@ function progress(sim)
     return nothing
 end
 
-add_callback!(simulation, progress, IterationInterval(10))
+add_callback!(simulation, progress, IterationInterval(100))
 
 # The commented out lines below diagnose the forcing applied to model.tracers.q
 # using Oceananigans.Models: ForcingOperation

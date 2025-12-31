@@ -161,3 +161,25 @@ qᵛ⁺ᵐ = Breeze.Thermodynamics.saturation_specific_humidity(T, ρ, constants
     Rᵛ = vapor_gas_constant(constants)
     return pᵛ⁺ / (ρ * Rᵛ * T)
 end
+
+"""
+$(TYPEDSIGNATURES)
+
+Compute the supersaturation ``𝒮 = pᵛ/pᵛ⁺ - 1`` over a given `surface`.
+
+- ``𝒮 < 0`` indicates subsaturation (evaporation conditions)
+- ``𝒮 = 0`` indicates saturation (equilibrium)
+- ``𝒮 > 0`` indicates supersaturation (condensation conditions)
+
+# Arguments
+- `T`: Temperature
+- `ρ`: Total air density  
+- `q`: `MoistureMassFractions` containing vapor, liquid, and ice mass fractions
+- `constants`: `ThermodynamicConstants`
+- `surface`: Surface type (e.g., `PlanarLiquidSurface()`, `PlanarIceSurface()`)
+"""
+@inline function supersaturation(T, ρ, q::MoistureMassFractions, constants, surface)
+    pᵛ⁺ = saturation_vapor_pressure(T, constants, surface)
+    pᵛ = vapor_pressure(ρ, T, q.vapor, constants)
+    return pᵛ / pᵛ⁺ - 1
+end

@@ -28,10 +28,38 @@ Modules = [Breeze.AtmosphereModels]
 Private = false
 ```
 
+### AnelasticEquations
+
+```@autodocs
+Modules = [Breeze.AnelasticEquations]
+Private = false
+```
+
+### CompressibleEquations
+
+```@autodocs
+Modules = [Breeze.CompressibleEquations]
+Private = false
+```
+
 ### AtmosphereModels.Diagnostics
 
 ```@autodocs
 Modules = [Breeze.AtmosphereModels.Diagnostics]
+Private = false
+```
+
+### AtmosphereModels.PotentialTemperatureFormulations
+
+```@autodocs
+Modules = [Breeze.AtmosphereModels.PotentialTemperatureFormulations]
+Private = false
+```
+
+### AtmosphereModels.StaticEnergyFormulations
+
+```@autodocs
+Modules = [Breeze.AtmosphereModels.StaticEnergyFormulations]
 Private = false
 ```
 
@@ -112,10 +140,45 @@ Modules = [Breeze.AtmosphereModels]
 Public = false
 ```
 
+### AnelasticEquations
+
+```@autodocs
+Modules = [Breeze.AnelasticEquations]
+Public = false
+```
+
+### CompressibleEquations
+
+```@autodocs
+Modules = [Breeze.CompressibleEquations]
+Public = false
+```
+
 ### AtmosphereModels.Diagnostics
 
 ```@autodocs
 Modules = [Breeze.AtmosphereModels.Diagnostics]
+Public = false
+```
+
+### AtmosphereModels.PotentialTemperatureFormulations
+
+```@autodocs
+Modules = [Breeze.AtmosphereModels.PotentialTemperatureFormulations]
+Public = false
+```
+
+### AtmosphereModels.StaticEnergyFormulations
+
+```@autodocs
+Modules = [Breeze.AtmosphereModels.StaticEnergyFormulations]
+Public = false
+```
+
+### Microphysics
+
+```@autodocs
+Modules = [Breeze.Microphysics]
 Public = false
 ```
 

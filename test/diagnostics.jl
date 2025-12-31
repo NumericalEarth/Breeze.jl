@@ -137,13 +137,15 @@ end
     grid = RectilinearGrid(default_arch; size=(1, 1, 20), x=(0, 1000), y=(0, 1000), z=(0, 10000))
     constants = ThermodynamicConstants()
 
-    p₀, θ₀ = 101325, 288
+    p₀ = FT(101325) # surface pressure, Pa
+    pˢᵗ = FT(1e5) # standard pressure for potential temperature, Pa
+    θ₀ = 288 # K
     reference_state = ReferenceState(grid, constants, surface_pressure=p₀, potential_temperature=θ₀)
-    formulation = AnelasticFormulation(reference_state)
-    model = AtmosphereModel(grid; thermodynamic_constants=constants, formulation)
+    dynamics = AnelasticDynamics(reference_state)
+    model = AtmosphereModel(grid; thermodynamic_constants=constants, dynamics)
 
     # Set up isothermal atmosphere: T = T₀ = constant
-    # For constant T, we need: θ = T₀ * (p₀/pᵣ)^(Rᵈ/cᵖᵈ)
+    # For constant T, we need: θ = T₀ * (pˢᵗ/pᵣ)^(Rᵈ/cᵖᵈ) using the standard pressure
     T₀ = θ₀
     Rᵈ = dry_air_gas_constant(constants)
     cᵖᵈ = constants.dry_air.heat_capacity
@@ -152,7 +154,7 @@ end
     θ_field = CenterField(grid)
     set!(θ_field, (x, y, z) -> begin
         pᵣ_z = adiabatic_hydrostatic_pressure(z, p₀, θ₀, constants)
-        T₀ * (p₀ / pᵣ_z)^(Rᵈ / cᵖᵈ)
+        T₀ * (pˢᵗ / pᵣ_z)^(Rᵈ / cᵖᵈ)
     end)
 
     set!(model; θ = θ_field)

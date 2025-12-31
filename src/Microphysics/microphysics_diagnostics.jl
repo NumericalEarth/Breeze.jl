@@ -8,8 +8,7 @@ using Breeze.Thermodynamics:
     vapor_gas_constant,
     density,
     saturation_vapor_pressure
-
-import Oceananigans.Utils: prettysummary
+using Oceananigans.Utils: Utils
 
 struct SaturationSpecificHumidityKernelFunction{μ, FL, M, MF, T, R, TH}
     flavor :: FL
@@ -21,7 +20,7 @@ struct SaturationSpecificHumidityKernelFunction{μ, FL, M, MF, T, R, TH}
     thermodynamic_constants :: TH
 end
 
-prettysummary(kf::SaturationSpecificHumidityKernelFunction) = "$(kf.flavor) SaturationSpecificHumidityKernelFunction"
+Utils.prettysummary(kf::SaturationSpecificHumidityKernelFunction) = "$(kf.flavor) SaturationSpecificHumidityKernelFunction"
 
 Adapt.adapt_structure(to, k::SaturationSpecificHumidityKernelFunction) =
     SaturationSpecificHumidityKernelFunction(adapt(to, k.flavor),
@@ -101,7 +100,7 @@ qᵛ = SaturationSpecificHumidity(model, :equilibrium) |> Field
 ├── operand: KernelFunctionOperation at (Center, Center, Center)
 ├── status: time=0.0
 └── data: 3×3×134 OffsetArray(::Array{Float64, 3}, 0:2, 0:2, -2:131) with eltype Float64 with indices 0:2×0:2×-2:131
-    └── max=0.0361828, min=0.0224965, mean=0.028878
+    └── max=0.0386926, min=0.0240914, mean=0.0308998
 ```
 
 We also provide a constructor and type alias for the `Field` itself.
@@ -119,7 +118,7 @@ qᵗ = SaturationSpecificHumidityField(model, :total_moisture)
 ├── operand: KernelFunctionOperation at (Center, Center, Center)
 ├── status: time=0.0
 └── data: 3×3×134 OffsetArray(::Array{Float64, 3}, 0:2, 0:2, -2:131) with eltype Float64 with indices 0:2×0:2×-2:131
-    └── max=0.0561539, min=0.0353807, mean=0.0451121
+    └── max=0.0599039, min=0.0378301, mean=0.0481743
 ```
 """
 function SaturationSpecificHumidity(model, flavor_symbol=:prognostic)
@@ -146,7 +145,7 @@ function SaturationSpecificHumidity(model, flavor_symbol=:prognostic)
                                                     model.microphysical_fields,
                                                     model.specific_moisture,
                                                     model.temperature,
-                                                    model.formulation.reference_state,
+                                                    model.dynamics.reference_state,
                                                     model.thermodynamic_constants)
 
     return KernelFunctionOperation{Center, Center, Center}(func, model.grid)
@@ -206,7 +205,7 @@ struct RelativeHumidityKernelFunction{μ, M, MF, T, R, TH}
     thermodynamic_constants :: TH
 end
 
-prettysummary(kf::RelativeHumidityKernelFunction) = "RelativeHumidityKernelFunction"
+Utils.prettysummary(kf::RelativeHumidityKernelFunction) = "RelativeHumidityKernelFunction"
 
 Adapt.adapt_structure(to, k::RelativeHumidityKernelFunction) =
     RelativeHumidityKernelFunction(adapt(to, k.microphysics),
@@ -264,7 +263,7 @@ As with other diagnostics, `RelativeHumidity` may be wrapped in `Field` to store
 ├── operand: KernelFunctionOperation at (Center, Center, Center)
 ├── status: time=0.0
 └── data: 3×3×134 OffsetArray(::Array{Float64, 3}, 0:2, 0:2, -2:131) with eltype Float64 with indices 0:2×0:2×-2:131
-    └── max=0.2296, min=0.145879, mean=0.184014
+    └── max=0.214947, min=0.136946, mean=0.172492
 ```
 
 We also provide a convenience constructor for the Field:
@@ -280,7 +279,7 @@ We also provide a convenience constructor for the Field:
 ├── operand: KernelFunctionOperation at (Center, Center, Center)
 ├── status: time=0.0
 └── data: 3×3×134 OffsetArray(::Array{Float64, 3}, 0:2, 0:2, -2:131) with eltype Float64 with indices 0:2×0:2×-2:131
-    └── max=0.2296, min=0.145879, mean=0.184014
+    └── max=0.214947, min=0.136946, mean=0.172492
 ```
 """
 function RelativeHumidity(model)
@@ -294,7 +293,7 @@ function RelativeHumidity(model)
                                           model.microphysical_fields,
                                           model.specific_moisture,
                                           model.temperature,
-                                          model.formulation.reference_state,
+                                          model.dynamics.reference_state,
                                           model.thermodynamic_constants)
 
     return KernelFunctionOperation{Center, Center, Center}(func, model.grid)
