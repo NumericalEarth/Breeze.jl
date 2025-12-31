@@ -53,8 +53,8 @@ end
 
 """
     SSPRungeKutta3(grid, prognostic_fields;
-                               implicit_solver = nothing,
-                               Gⁿ = map(similar, prognostic_fields))
+                   implicit_solver = nothing,
+                   Gⁿ = map(similar, prognostic_fields))
 
 Construct an `SSPRungeKutta3` on `grid` with `prognostic_fields`.
 
@@ -71,8 +71,8 @@ Shu, C.-W., & Osher, S. (1988). Efficient implementation of essentially non-osci
     shock-capturing schemes. Journal of Computational Physics, 77(2), 439-471.
 """
 function SSPRungeKutta3(grid, prognostic_fields;
-                                    implicit_solver::TI = nothing,
-                                    Gⁿ::TG = map(similar, prognostic_fields)) where {TI, TG}
+                        implicit_solver::TI = nothing,
+                        Gⁿ::TG = map(similar, prognostic_fields)) where {TI, TG}
 
     FT = eltype(grid)
     
