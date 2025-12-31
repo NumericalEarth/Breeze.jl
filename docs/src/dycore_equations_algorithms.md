@@ -155,7 +155,7 @@ is the adiabatic sound speed (approximately 340 m/s at standard conditions).
 
 ## Time discretization and pressure correction (Anelastic)
 
-The anelastic formulation uses an explicit multi-stage time integrator for advection, Coriolis, buoyancy, forcing, and tracer terms, coupled with a projection step to enforce the anelastic constraint at each substep. Denote the predicted momentum by ``\widetilde{(ρᵣ \boldsymbol{u})}``. The projection is
+The anelastic formulation uses a multi-stage time integrator for advection, Coriolis, buoyancy, forcing, and tracer terms, coupled with a projection step to enforce the anelastic constraint at each substep. Denote the predicted momentum by ``\widetilde{(ρᵣ \boldsymbol{u})}``. The projection is
 
 1. Solve the variable-coefficient Poisson problem for the pressure correction potential ``\phi``:
 
