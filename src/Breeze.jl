@@ -11,6 +11,9 @@ export
     ThermodynamicConstants,
     ReferenceState,
     AnelasticDynamics,
+    AnelasticModel,
+    CompressibleDynamics,
+    CompressibleModel,
     AtmosphereModel,
     StaticEnergyFormulation,
     LiquidIcePotentialTemperatureFormulation,
@@ -126,6 +129,13 @@ using .MoistAirBuoyancies
 
 include("AtmosphereModels/AtmosphereModels.jl")
 using .AtmosphereModels
+
+# Dynamics modules (included after AtmosphereModels so they can dispatch on AtmosphereModel)
+include("AnelasticEquations/AnelasticEquations.jl")
+using .AnelasticEquations: AnelasticDynamics, AnelasticModel
+
+include("CompressibleEquations/CompressibleEquations.jl")
+using .CompressibleEquations: CompressibleDynamics, CompressibleModel
 
 include("Microphysics/Microphysics.jl")
 using .Microphysics

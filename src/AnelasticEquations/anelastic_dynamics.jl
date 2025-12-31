@@ -105,6 +105,28 @@ hydrostatic reference state pressure `pᵣ(z)`.
 dynamics_pressure(dynamics::AnelasticDynamics) = dynamics.reference_state.pressure
 
 #####
+##### Prognostic fields
+#####
+
+# Anelastic dynamics has no prognostic density - the density is the fixed reference state
+prognostic_dynamics_field_names(::AnelasticDynamics) = ()
+additional_dynamics_field_names(::AnelasticDynamics) = ()
+
+"""
+$(TYPEDSIGNATURES)
+
+Return the surface pressure from the reference state for boundary condition regularization.
+"""
+surface_pressure(dynamics::AnelasticDynamics) = dynamics.reference_state.surface_pressure
+
+"""
+$(TYPEDSIGNATURES)
+
+Return the standard pressure from the reference state for potential temperature calculations.
+"""
+standard_pressure(dynamics::AnelasticDynamics) = dynamics.reference_state.standard_pressure
+
+#####
 ##### Show methods
 #####
 
@@ -142,3 +164,4 @@ function materialize_momentum_and_velocities(dynamics::AnelasticDynamics, grid, 
 
     return momentum, velocities
 end
+

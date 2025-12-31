@@ -1,13 +1,8 @@
-#####
-##### Static energy tendency and helper functions for StaticEnergyFormulation
-#####
+import Breeze.AtmosphereModels.Diagnostics
+import Breeze.AtmosphereModels: AtmosphereModel
 
-using Breeze.Thermodynamics: StaticEnergyState, with_temperature, LiquidIcePotentialTemperatureState, temperature
-using Oceananigans.Operators: ℑzᵃᵃᶜ
-
-#####
-##### Type alias for models with StaticEnergyFormulation
-#####
+using Oceananigans.Fields: set!
+using Breeze.Thermodynamics: temperature
 
 const StaticEnergyModel = AtmosphereModel{<:Any, <:StaticEnergyFormulation}
 
@@ -55,7 +50,7 @@ end
                                         closure_fields,
                                         clock,
                                         model_fields,
-                                        temperature)
+                                        temperature_field)
 
     specific_energy = formulation.specific_energy
     ρ_field = dynamics_density(dynamics)
@@ -67,8 +62,8 @@ end
     𝒰 = diagnose_thermodynamic_state(i, j, k, grid, formulation, dynamics, q)
 
     # Compute the buoyancy flux term, ρᵣ w b
-    buoyancy_flux = ℑzᵃᵃᶜ(i, j, k, grid, ρ_w_bᶜᶜᶠ,
-                          velocities.w, dynamics, formulation, ρ_field, temperature, specific_moisture,
+    buoyancy_flux = ℑzᵃᵃᶜ(i, j, k, grid, w_buoyancy_forceᶜᶜᶠ,
+                          velocities.w, dynamics, temperature_field, specific_moisture,
                           microphysics, microphysical_fields, constants)
 
     closure_buoyancy = AtmosphereModelBuoyancy(dynamics, formulation, constants)
@@ -138,7 +133,7 @@ end
         θ = potential_temperature[i, j, k]
     end
 
-    pˢᵗ = dynamics.reference_state.standard_pressure
+    pˢᵗ = standard_pressure(dynamics)
     q = compute_moisture_fractions(i, j, k, grid, microphysics, ρᵣ, qᵗ, microphysical_fields)
     𝒰θ₀ = LiquidIcePotentialTemperatureState(θ, q, pˢᵗ, pᵣ)
     𝒰θ₁ = maybe_adjust_thermodynamic_state(i, j, k, 𝒰θ₀, microphysics, ρᵣ, microphysical_fields, qᵗ, constants)

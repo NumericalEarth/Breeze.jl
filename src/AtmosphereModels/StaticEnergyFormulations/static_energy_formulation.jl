@@ -2,8 +2,6 @@
 ##### StaticEnergyFormulation
 #####
 
-using Breeze.Thermodynamics: StaticEnergyState
-
 """
 $(TYPEDSIGNATURES)
 
@@ -106,7 +104,8 @@ function collect_prognostic_fields(formulation::StaticEnergyFormulation,
                                    tracers)
     ρe = formulation.energy_density
     thermodynamic_variables = (ρe=ρe, ρqᵗ=moisture_density)
-    return merge(momentum, thermodynamic_variables, microphysical_fields, tracers)
+    dynamics_fields = dynamics_prognostic_fields(dynamics)
+    return merge(dynamics_fields, momentum, thermodynamic_variables, microphysical_fields, tracers)
 end
 
 #####
@@ -125,3 +124,4 @@ function Base.show(io::IO, formulation::StaticEnergyFormulation)
         print(io, "└── specific_energy: ", prettysummary(formulation.specific_energy))
     end
 end
+

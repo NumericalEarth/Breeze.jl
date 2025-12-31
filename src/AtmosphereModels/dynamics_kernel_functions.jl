@@ -20,39 +20,20 @@ Oceananigans `qᶜ` is the kinematic tracer flux.
 @inline ∇_dot_Jᶜ(i, j, k, grid, args...) = zero(grid)
 
 #####
-##### Some key functions
+##### Buoyancy force interpolation and products
 #####
 
-@inline function ρ_bᶜᶜᶜ(i, j, k, grid,
-                        dynamics::AnelasticDynamics,
-                        formulation,
-                        reference_density,
-                        temperature,
-                        specific_moisture,
-                        microphysics,
-                        microphysical_fields,
-                        constants)
+"""
+Interpolate buoyancy force to z-face location.
+"""
+@inline buoyancy_forceᶜᶜᶠ(i, j, k, grid, args...) = ℑzᵃᵃᶠ(i, j, k, grid, buoyancy_forceᶜᶜᶜ, args...)
 
-    @inbounds begin
-        qᵗ = specific_moisture[i, j, k]
-        pᵣ = dynamics.reference_state.pressure[i, j, k]
-        T = temperature[i, j, k]
-        ρᵣ = reference_density[i, j, k]
-    end
-
-    q = compute_moisture_fractions(i, j, k, grid, microphysics, ρᵣ, qᵗ, microphysical_fields)
-    Rᵐ = mixture_gas_constant(q, constants)
-    ρ = pᵣ / (Rᵐ * T)
-    g = constants.gravitational_acceleration
-    ρ′ = ρ - ρᵣ
-
-    return - g * ρ′
-end
-
-@inline ρ_bᶜᶜᶠ(i, j, k, grid, args...) = ℑzᵃᵃᶠ(i, j, k, grid, ρ_bᶜᶜᶜ, args...)
-
-@inline function ρ_w_bᶜᶜᶠ(i, j, k, grid, w, args...)
-    ρ_b = ρ_bᶜᶜᶠ(i, j, k, grid, args...)
+"""
+Compute the product of vertical velocity and buoyancy force at z-face location.
+Used for the buoyancy flux term in the energy equation.
+"""
+@inline function w_buoyancy_forceᶜᶜᶠ(i, j, k, grid, w, args...)
+    ρ_b = buoyancy_forceᶜᶜᶠ(i, j, k, grid, args...)
     return @inbounds ρ_b * w[i, j, k]
 end
 
@@ -66,9 +47,11 @@ end
                                      coriolis,
                                      clock,
                                      model_fields,
-                                     ρu_forcing)
+                                     ρu_forcing,
+                                     dynamics)
 
     return ( - div_𝐯u(i, j, k, grid, advection, momentum, velocities.u)
+             - x_pressure_gradient(i, j, k, grid, dynamics)
              - x_f_cross_U(i, j, k, grid, coriolis, momentum)
              - ∂ⱼ_𝒯₁ⱼ(i, j, k, grid, reference_density, closure, closure_fields, clock, model_fields, nothing)
              + ρu_forcing(i, j, k, grid, clock, model_fields))
@@ -84,9 +67,11 @@ end
                                      coriolis,
                                      clock,
                                      model_fields,
-                                     ρv_forcing)
+                                     ρv_forcing,
+                                     dynamics)
 
     return ( - div_𝐯v(i, j, k, grid, advection, momentum, velocities.v)
+             - y_pressure_gradient(i, j, k, grid, dynamics)
              - y_f_cross_U(i, j, k, grid, coriolis, momentum)
              - ∂ⱼ_𝒯₂ⱼ(i, j, k, grid, reference_density, closure, closure_fields, clock, model_fields, nothing)
              + ρv_forcing(i, j, k, grid, clock, model_fields))
@@ -112,8 +97,9 @@ end
                                      constants)
 
     return ( - div_𝐯w(i, j, k, grid, advection, momentum, velocities.w)
-             + ρ_bᶜᶜᶠ(i, j, k, grid, dynamics, formulation, density, temperature,
-                      specific_moisture, microphysics, microphysical_fields, constants)
+             - z_pressure_gradient(i, j, k, grid, dynamics)
+             + buoyancy_forceᶜᶜᶠ(i, j, k, grid, dynamics, temperature,
+                                 specific_moisture, microphysics, microphysical_fields, constants)
              - z_f_cross_U(i, j, k, grid, coriolis, momentum)
              - ∂ⱼ_𝒯₃ⱼ(i, j, k, grid, density, closure, closure_fields, clock, model_fields, nothing)
              + ρw_forcing(i, j, k, grid, clock, model_fields))

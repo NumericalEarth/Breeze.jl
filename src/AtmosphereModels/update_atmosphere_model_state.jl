@@ -9,10 +9,9 @@ using Oceananigans.ImmersedBoundaries: mask_immersed_field!
 using Oceananigans.TimeSteppers: TimeSteppers
 using Oceananigans.TurbulenceClosures: compute_diffusivities!
 using Oceananigans.Utils: launch!, KernelParameters
+using Oceananigans.Operators: ℑxᶠᵃᵃ, ℑyᵃᶠᵃ, ℑzᵃᵃᶠ
 
-# AnelasticModel type alias imported from Dynamics submodule
-
-function TimeSteppers.update_state!(model::AnelasticModel, callbacks=[]; compute_tendencies=true)
+function TimeSteppers.update_state!(model::AtmosphereModel, callbacks=[]; compute_tendencies=true)
     tracer_density_to_specific!(model) # convert tracer density to specific tracer distribution
     fill_halo_regions!(prognostic_fields(model), model.clock, fields(model), async=true)
     compute_auxiliary_variables!(model)
@@ -90,6 +89,12 @@ function compute_auxiliary_variables!(model)
 
     kp = KernelParameters(ii, jj, kk)
 
+    # Ensure halos are filled before velocity computation
+    # (prognostic field halo fill in update_state! is async)
+    density = dynamics_density(model.dynamics)
+    fill_halo_regions!(density)
+    fill_halo_regions!(model.momentum)
+
     launch!(arch, grid, kp,
             _compute_velocities!,
             model.velocities,
@@ -98,9 +103,13 @@ function compute_auxiliary_variables!(model)
             model.momentum)
 
     foreach(mask_immersed_field!, model.velocities)
+    fill_halo_regions!(model.velocities)
 
     # Dispatch on thermodynamic formulation type
     compute_auxiliary_thermodynamic_variables!(model)
+
+    # Dispatch on dynamics type (computes pressure for compressible dynamics)
+    compute_auxiliary_dynamics_variables!(model)
 
     # Compute diffusivities
     compute_diffusivities!(model.closure_fields, model.closure, model)
@@ -144,12 +153,13 @@ end
         ρv = momentum.ρv[i, j, k]
         ρw = momentum.ρw[i, j, k]
 
-        ρᶜ = ρ[i, j, k]
-        ρᶠ = ℑzᵃᵃᶠ(i, j, k, grid, ρ)
+        ρᶠᶜᶜ = ℑxᶠᵃᵃ(i, j, k, grid, ρ)
+        ρᶜᶠᶜ = ℑyᵃᶠᵃ(i, j, k, grid, ρ)
+        ρᶜᶜᶠ = ℑzᵃᵃᶠ(i, j, k, grid, ρ)
 
-        velocities.u[i, j, k] = ρu / ρᶜ
-        velocities.v[i, j, k] = ρv / ρᶜ
-        velocities.w[i, j, k] = ρw / ρᶠ
+        velocities.u[i, j, k] = ρu / ρᶠᶜᶜ
+        velocities.v[i, j, k] = ρv / ρᶜᶠᶜ
+        velocities.w[i, j, k] = ρw / ρᶜᶜᶠ
     end
 end
 
@@ -191,7 +201,7 @@ end
     @inbounds temperature[i, j, k] = T
 end
 
-function compute_tendencies!(model::AnelasticModel)
+function compute_tendencies!(model::AtmosphereModel)
     grid = model.grid
     arch = grid.architecture
     Gρu = model.timestepper.Gⁿ.ρu
@@ -215,8 +225,8 @@ function compute_tendencies!(model::AnelasticModel)
         model.clock,
         model_fields)
 
-    u_args = tuple(momentum_args..., model.forcing.ρu)
-    v_args = tuple(momentum_args..., model.forcing.ρv)
+    u_args = tuple(momentum_args..., model.forcing.ρu, model.dynamics)
+    v_args = tuple(momentum_args..., model.forcing.ρv, model.dynamics)
 
     # Extra arguments for vertical velocity are required to compute
     # buoyancy:
@@ -291,6 +301,12 @@ function compute_tendencies!(model::AnelasticModel)
         launch!(arch, grid, :xyz, compute_scalar_tendency!, Gρc, grid, scalar_args)
     end
 
+    #####
+    ##### Dynamics-specific tendencies (e.g., density for compressible dynamics)
+    #####
+
+    compute_dynamics_tendency!(model)
+
     return nothing
 end
 
@@ -300,15 +316,8 @@ end
     @inbounds Gc[i, j, k] = scalar_tendency(i, j, k, grid, args...)
 end
 
-@kernel function compute_static_energy_tendency!(Gρe, grid, args)
-    i, j, k = @index(Global, NTuple)
-    @inbounds Gρe[i, j, k] = static_energy_tendency(i, j, k, grid, args...)
-end
-
-@kernel function compute_potential_temperature_tendency!(Gρθ, grid, args)
-    i, j, k = @index(Global, NTuple)
-    @inbounds Gρθ[i, j, k] = potential_temperature_tendency(i, j, k, grid, args...)
-end
+# Note: compute_static_energy_tendency! and compute_potential_temperature_tendency!
+# are now defined in their respective formulation submodules
 
 @kernel function compute_x_momentum_tendency!(Gρu, grid, args)
     i, j, k = @index(Global, NTuple)
