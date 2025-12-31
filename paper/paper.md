@@ -54,12 +54,15 @@ bibliography: paper.bib
 - Statement of Need
 - Key Features
   - Dynamics equations sets
+    - AnelasticDynamics
+    - CompressibleDynamics
+    - [ ] ParcelDynamics  
+  - Thermodynamic Formulations
     - Static energy
     - Liquid-ice potential temperature
     - [ ] Conservative potential temperature (Bryan and Fritsch 2002)
     - [ ] Total energy (Romps 2008, Yatunin 2025)
     - [ ] Entropy for non-phase-equilibrium (?)
-  - Thermodynamic Formulations
   - Radiative Transfer
     - Gray radiation
     - Clear sky radiation
