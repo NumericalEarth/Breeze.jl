@@ -1,28 +1,19 @@
 """
 TimeSteppers module for Breeze.jl
 
-Provides time stepping schemes for AtmosphereModel, including a positivity-preserving
-variant that uses directionally-split advection to maintain tracer bounds.
+Provides time stepping schemes for AtmosphereModel, including the SSP RK3 scheme
+which is TVD (total variation diminishing) with CFL coefficient = 1.
 """
 module TimeSteppers
 
-export
-    PositivityPreservingRK3TimeStepper,
-    compute_split_advection_tendency!
-
-using KernelAbstractions: @kernel, @index
-
-using Oceananigans.Architectures: architecture
-using Oceananigans.Grids: AbstractGrid
-using Oceananigans.Utils: launch!
+export SSPRungeKutta3TimeStepper
 
 import Oceananigans.TimeSteppers: TimeStepper
 
-include("positivity_preserving_rk3.jl")
+include("ssp_rk3.jl")
 
-# Extend TimeStepper to support PositivityPreservingRK3 via Symbol
-TimeStepper(::Val{:PositivityPreservingRK3}, args...; split_advection=NamedTuple(), kwargs...) =
-    PositivityPreservingRK3TimeStepper(args...; split_advection, kwargs...)
+# Extend TimeStepper to support SSPRK3 via Symbol
+TimeStepper(::Val{:SSPRK3}, args...; kwargs...) =
+    SSPRungeKutta3TimeStepper(args...; kwargs...)
 
 end # module
-

@@ -68,8 +68,7 @@ export
     SubsidenceForcing,
 
     # TimeSteppers
-    PositivityPreservingRK3TimeStepper,
-    compute_split_advection_tendency!
+    SSPRungeKutta3TimeStepper
 
 using Oceananigans: Oceananigans, @at, AnisotropicMinimumDissipation, Average,
                     AveragedTimeInterval, BackgroundField, BetaPlane, Bounded,
