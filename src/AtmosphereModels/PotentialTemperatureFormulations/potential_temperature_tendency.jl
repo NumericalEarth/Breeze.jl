@@ -1,22 +1,8 @@
-#####
-##### Potential temperature tendency and helper functions for LiquidIcePotentialTemperatureFormulation
-#####
-
-# Import AtmosphereModel after it has been defined in the parent module
+import Breeze.AtmosphereModels.Diagnostics
 import Breeze.AtmosphereModels: AtmosphereModel
 
-# Import Diagnostics after it has been defined in the parent module
-import Breeze.AtmosphereModels.Diagnostics
-
-# Import set! from Oceananigans
 using Oceananigans.Fields: set!
-
-# Import temperature from Thermodynamics for state conversion
 using Breeze.Thermodynamics: temperature
-
-#####
-##### Type alias for models with LiquidIcePotentialTemperatureFormulation
-#####
 
 const PotentialTemperatureModel = AtmosphereModel{<:Any, <:LiquidIcePotentialTemperatureFormulation}
 

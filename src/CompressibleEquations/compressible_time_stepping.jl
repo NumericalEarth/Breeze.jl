@@ -110,12 +110,12 @@ end
     # Compute moisture fractions
     q = compute_moisture_fractions(i, j, k, grid, microphysics, ρ, qᵗ, microphysical_fields)
     Rᵐ = mixture_gas_constant(q, constants)
-    cₚᵐ = mixture_heat_capacity(q, constants)
-    cᵥᵐ = cₚᵐ - Rᵐ
-    γ = cₚᵐ / cᵥᵐ
+    cᵖᵐ = mixture_heat_capacity(q, constants)
+    cᵛᵐ = cᵖᵐ - Rᵐ
+    γ = cᵖᵐ / cᵛᵐ
 
     # Compute temperature and pressure jointly
-    T, p = temperature_and_pressure(i, j, k, formulation, dynamics, ρ, Rᵐ, γ, q, constants)
+    T, p = temperature_and_pressure(i, j, k, grid, formulation, dynamics, ρ, Rᵐ, γ, q, constants)
 
     @inbounds begin
         temperature_field[i, j, k] = T
@@ -125,25 +125,25 @@ end
 
 # Dispatch on formulation type for the coupled temperature-pressure computation
 
-@inline function temperature_and_pressure(i, j, k,
+@inline function temperature_and_pressure(i, j, k, grid,
                                           formulation::LiquidIcePotentialTemperatureFormulation,
                                           dynamics, ρ, Rᵐ, γ, q, constants)
     # Note: potential_temperature_density is ρθ (prognostic), potential_temperature is θ (diagnostic)
     ρθ = @inbounds formulation.potential_temperature_density[i, j, k]
     θ = ρθ / ρ
-    p₀ = standard_pressure(dynamics)
+    pˢᵗ = standard_pressure(dynamics)
 
-    # Direct formula: T = θ^γ (ρ Rᵐ / p₀)^(γ-1)
+    # Direct formula: T = θ^γ (ρ Rᵐ / pˢᵗ)^(γ-1)
     # For moist air with condensate, adjust for latent heat
     qˡ = q.liquid
     qⁱ = q.ice
     ℒˡᵣ = constants.liquid.reference_latent_heat
     ℒⁱᵣ = constants.ice.reference_latent_heat
-    cₚᵐ = mixture_heat_capacity(q, constants)
+    cᵖᵐ = mixture_heat_capacity(q, constants)
 
-    # T = θ^γ (ρ Rᵐ / p₀)^(γ-1) + latent heat correction
-    T_dry = θ^γ * (ρ * Rᵐ / p₀)^(γ - 1)
-    T = T_dry + (ℒˡᵣ * qˡ + ℒⁱᵣ * qⁱ) / cₚᵐ
+    # T = θ^γ (ρ Rᵐ / pˢᵗ)^(γ-1) + latent heat correction
+    T_dry = θ^γ * (ρ * Rᵐ / pˢᵗ)^(γ - 1)
+    T = T_dry + (ℒˡᵣ * qˡ + ℒⁱᵣ * qⁱ) / cᵖᵐ
 
     # Ideal gas law: p = ρ Rᵐ T
     p = ρ * Rᵐ * T

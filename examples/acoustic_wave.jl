@@ -29,7 +29,7 @@ using CairoMakie
 # ## Grid and model setup
 
 Nx, Nz = 256, 128
-Lx, Lz = 2000, 200  # meters
+Lx, Lz = 1000, 200  # meters
 
 grid = RectilinearGrid(size = (Nx, Nz), x = (-Lx/2, Lx/2), z = (0, Lz),
                        topology = (Periodic, Flat, Bounded))
@@ -57,11 +57,10 @@ cᵖᵈ = constants.dry_air.heat_capacity
 
 # The wind profile follows the classic log-law of the atmospheric surface layer.
 
-u★ = 10 # Friction velocity (m/s)
-κ = 0.4  # von Kármán constant
-ℓ = 1.0  # Roughness length [m] -- like, shrubs and stuff
+U₀ = 20 # Surface velocity (m/s, u★ / κ)
+ℓ = 1  # Roughness length [m] -- like, shrubs and stuff
 
-Uᵢ(z) = (u★ / κ) * log((z + ℓ) / ℓ)
+Uᵢ(z) = U₀ * log((z + ℓ) / ℓ)
 
 # ## Initial conditions
 #
@@ -76,7 +75,7 @@ gaussian(x, z) = exp(-(x^2 + z^2) / 2σ^2)
 ρ₀ = interior(reference.density, 1, 1, 1)[]
 
 ρᵢ(x, z) = adiabatic_hydrostatic_density(z, p₀, θ₀, constants) + δρ * gaussian(x, z)
-uᵢ(x, z) = Uᵢ(z) + (𝕌ˢⁱ / ρ₀) * δρ * gaussian(x, z)
+uᵢ(x, z) = Uᵢ(z) #+ (𝕌ˢⁱ / ρ₀) * δρ * gaussian(x, z)
 
 set!(model, ρ=ρᵢ, θ=θ₀, u=uᵢ)
 
@@ -88,7 +87,7 @@ set!(model, ρ=ρᵢ, θ=θ₀, u=uᵢ)
 
 Δx, Δz = Lx / Nx, Lz / Nz
 𝕌ˢ = 𝕌ˢⁱ + Uᵢ(Lz)
-Δt = 0.1 * min(Δx, Δz) / 𝕌ˢ
+Δt = 0.5 * min(Δx, Δz) / 𝕌ˢ
 stop_time = 1  # seconds
 
 simulation = Simulation(model; Δt, stop_time)
@@ -127,7 +126,7 @@ filename = "acoustic_wave.jld2"
 outputs = (; ρ′, u′, w, U, R, W²)
 
 simulation.output_writers[:jld2] = JLD2Writer(model, outputs; filename,
-                                              schedule = TimeInterval(0.005),
+                                              schedule = TimeInterval(0.01),
                                               overwrite_existing = true)
 
 run!(simulation)
@@ -148,42 +147,44 @@ Nt = length(times)
 
 fig = Figure(size = (900, 600), fontsize = 12)
 
-axρ = Axis(fig[1, 2]; aspect = 10, ylabel = "z (m)", title = "Density perturbation ρ′",
-            xticklabelsvisible = false)
-axw = Axis(fig[2, 2]; aspect = 10, xlabel = "x (m)", ylabel = "z (m)", title = "Vertical velocity w")
-axu = Axis(fig[3, 2]; aspect = 10, xlabel = "x (m)", ylabel = "z (m)", title = "Velocity perturbation u′")
-axR = Axis(fig[1, 1]; width = Relative(0.2), xlabel = "x (m)", ylabel = "z (m)", title = "Horizontal average of density ρ")
-axW² = Axis(fig[2, 1]; width = Relative(0.2), xlabel = "x (m)", ylabel = "z (m)", title = "Horizontal average of vertical velocity squared W²")
-axU = Axis(fig[3, 1]; width = Relative(0.2), xlabel = "x (m)", ylabel = "z (m)", title = "Horizontal average of velocity u")
+axρ = Axis(fig[1, 2]; aspect = 5, ylabel = "z (m)")
+axw = Axis(fig[2, 2]; aspect = 5, ylabel = "z (m)")
+axu = Axis(fig[3, 2]; aspect = 5, xlabel = "x (m)", ylabel = "z (m)")
+axR = Axis(fig[1, 1]; xlabel = "⟨ρ⟩ (kg/m³)")
+axW = Axis(fig[2, 1]; xlabel = "⟨w²⟩ (m²/s²)")
+axU = Axis(fig[3, 1]; xlabel = "⟨u⟩ (m/s)")
+
+hidexdecorations!(axρ)
+hidexdecorations!(axw)
+colsize!(fig.layout, 1, Relative(0.1))
 
 n = Observable(Nt)
 ρ′n = @lift ρ′ts[$n]
 u′n = @lift u′ts[$n]
+wn = @lift wts[$n]
 Un = @lift Uts[$n]
 Rn = @lift Rts[$n]
 W²n = @lift W²ts[$n]
 
-ρlim = δρ / 2
-ulim = 1.5
-wlim = 1.5
+ρlim = δρ / 4
+ulim = 1
 
 hmρ = heatmap!(axρ, ρ′n; colormap = :balance, colorrange = (-ρlim, ρlim))
-hmw = heatmap!(axw, wn; colormap = :balance, colorrange = (-wlim, wlim))
+hmw = heatmap!(axw, wn; colormap = :balance, colorrange = (-ulim, ulim))
 hmu = heatmap!(axu, u′n; colormap = :balance, colorrange = (-ulim, ulim))
 
-lines(axU, Un; colormap = :balance, colorrange = (-Ulim, Ulim))
-lines(axR, Rn; colormap = :balance, colorrange = (-Rlim, Rlim))
-lines(axW², W²n; colormap = :balance, colorrange = (-W²lim, W²lim))
+lines!(axU, Un)
+lines!(axR, Rn)
+lines!(axW, W²n)
 
-Colorbar(fig[1, 3], hmρ; label = "ρ′ (kg/m³)", height = Relative(0.2))
-Colorbar(fig[2, 3], hmw; label = "w (m/s)", height = Relative(0.2))
-Colorbar(fig[3, 3], hmu; label = "u′ (m/s)", height = Relative(0.2))
+Colorbar(fig[1, 3], hmρ; label = "ρ′ (kg/m³)")
+Colorbar(fig[2, 3], hmw; label = "w (m/s)")
+Colorbar(fig[3, 3], hmu; label = "u′ (m/s)")
 
-title = @lift "Acoustic wave with log-layer shear — t = $(prettytime(times[$n]))"
+title = @lift "Acoustic wave in log-layer shear — t = $(prettytime(times[$n]))"
 fig[0, :] = Label(fig, title, fontsize = 16, tellwidth = false)
 
 CairoMakie.record(fig, "acoustic_wave.mp4", 1:Nt, framerate = 18) do nn
-    @info "Drawing frame $nn of $Nt..."
     n[] = nn
 end
 nothing #hide
