@@ -4,7 +4,7 @@ tags:
   - Julia
   - atmospheric science
   - large-eddy simulation
-  - cloud dynamics
+  - cloud physics
   - computational fluid dynamics
   - GPU computing
 authors:
@@ -27,6 +27,9 @@ authors:
   - name: Mosè Giordano
     orcid: 0000-0002-7218-2873
     affiliation: 5
+  - name: Daniel Rosenfeld
+    orcid: 0000-0002-0784-7656
+    affiliation: 6
 affiliations:
   - name: Aeolus Labs, CA, USA and Massachusetts Institute of Technology, Cambridge, MA, USA
     index: 1
@@ -38,6 +41,8 @@ affiliations:
     index: 4
   - name: University College London, London, UK
     index: 5
+  - name: The Hebrew University of Jerusalem, Jerusalem, Israel
+    index: 6
 date: 31 December 2024
 bibliography: paper.bib
 ---
@@ -150,8 +155,7 @@ Breeze.jl includes documented examples demonstrating its capabilities:
 
 # Acknowledgements
 
-We acknowledge contributions from the Climate Modeling Alliance (CliMA) and the broader Julia community.
-This work is supported by Aeolus Labs and [additional funding sources].
+We acknowledge contributions from the Climate Modeling Alliance (CliMA) and the broader Julia community. This work was supported by [funding sources].
 
 # References
 
