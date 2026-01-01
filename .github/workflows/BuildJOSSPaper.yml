@@ -5,6 +5,12 @@ on:
     branches:
       - "paper"
 
+concurrency:
+  # Skip intermediate builds: always.
+  # Cancel intermediate builds: always.
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
 jobs:
   paper:
     runs-on: ubuntu-latest
