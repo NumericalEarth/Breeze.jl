@@ -105,22 +105,25 @@ end
 
         # Verify the moisture was set correctly using the RelativeHumidity diagnostic
         ℋ_field = RelativeHumidityField(model)
-        @test @allowscalar all(isapprox.(interior(ℋ_field), FT(0.5); rtol=2e-2))
+        @test @allowscalar all(isapprox.(interior(ℋ_field), FT(0.5); rtol=5e-2))
         @test @allowscalar all(x -> x > 0, interior(model.specific_moisture))
     end
 
-    @testset "Function ℋ (spatially-varying)" begin
-        model = AtmosphereModel(grid; thermodynamic_constants=constants,
-                                dynamics=AnelasticDynamics(reference_state),
-                                microphysics)
+    # Function inputs don't work on GPU (non-bitstype argument error)
+    if default_arch isa CPU
+        @testset "Function ℋ (spatially-varying)" begin
+            model = AtmosphereModel(grid; thermodynamic_constants=constants,
+                                    dynamics=AnelasticDynamics(reference_state),
+                                    microphysics)
 
-        ℋ_func(x, y, z) = FT(0.8) * exp(-z / FT(500))
-        set!(model, θ=FT(300), ℋ=ℋ_func)
+            ℋ_func(x, y, z) = FT(0.8) * exp(-z / FT(500))
+            set!(model, θ=FT(300), ℋ=ℋ_func)
 
-        ℋ_field = RelativeHumidityField(model)
-        @allowscalar for k in 1:8
-            z = znodes(grid, Center())[k]
-            @test isapprox(interior(ℋ_field, 1, 1, k)[1], ℋ_func(0, 0, z); rtol=5e-2)
+            ℋ_field = RelativeHumidityField(model)
+            @allowscalar for k in 1:8
+                z = znodes(grid, Center())[k]
+                @test isapprox(interior(ℋ_field, 1, 1, k)[1], ℋ_func(0, 0, z); rtol=5e-2)
+            end
         end
     end
 

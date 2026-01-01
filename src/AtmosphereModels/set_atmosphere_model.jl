@@ -181,6 +181,7 @@ function Fields.set!(model::AtmosphereModel; time=nothing, enforce_mass_conserva
             update_state!(model, compute_tendencies=false)
 
             # Compute saturation specific humidity using GPU-compatible kernel
+            # Use :equilibrium flavor which handles both saturated and unsaturated conditions
             qᵛ⁺ = SaturationSpecificHumidity(model, :equilibrium)
 
             # Set qᵗ = ℋ * qᵛ⁺
