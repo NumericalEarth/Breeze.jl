@@ -45,5 +45,5 @@ jobs:
           state = "success"
           target_url = "${{ steps.upload-paper.outputs.artifact-url }}"
           description = "Download PDF"
-          context = "Paper Preview"
+          context = "${{ github.workflow }} / Preview"
           repo.create_status(sha, state, target_url, description, context)
