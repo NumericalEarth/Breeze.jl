@@ -64,6 +64,8 @@ for m in [Breeze, BreezeRRTMGPExt, BreezeCloudMicrophysicsExt]
     end
 end
 
+# Automatically generate file with docstrings for all modules
+
 function walk_submodules!(result, visited, mod::Module)
     for name in sort(names(mod; all=true, imported=false))
         isdefined(mod, name) || continue
@@ -135,6 +137,10 @@ function write_api_md()
     # Remove multiple trailing whitespaces, but keep the final one.
     write(joinpath(@__DIR__, "src", "api.md"), strip(String(take!(io))) * "\n")
 end
+
+write_api_md()
+
+# Let's build the docs!
 
 makedocs(
     ;
