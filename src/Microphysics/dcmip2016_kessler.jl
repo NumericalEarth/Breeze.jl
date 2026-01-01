@@ -334,18 +334,24 @@ end
 
     # Dry air heat capacity for latent heating calculation
     cᵖᵈ = constants.dry_air.heat_capacity
+    inv_cᵖᵈ = inv(cᵖᵈ)  # Precompute inverse for efficiency
 
     # Compute Kessler scheme constants from Breeze thermodynamic constants
     # κ = Rᵈ / cᵖᵈ (Poisson constant for dry air)
     Rᵈ = dry_air_gas_constant(constants)
-    κ = Rᵈ / cᵖᵈ
+    κ = Rᵈ * inv_cᵖᵈ
+    inv_κ = cᵖᵈ / Rᵈ  # Precompute 1/κ to avoid division in loop
 
     # Get scheme-specific parameters from microphysics struct
     f2x = microphysics.f2x
     p₀_kessler = microphysics.p₀
+    inv_p₀_kessler = inv(p₀_kessler)  # Precompute inverse
 
     # Compute f5 = 237.3 × f2x × ℒˡᵣ / cᵖᵈ (saturation adjustment coefficient)
-    f5 = 237.3 * f2x * ℒˡᵣ / cᵖᵈ
+    f5 = 237.3 * f2x * ℒˡᵣ * inv_cᵖᵈ
+
+    # Precompute latent heating factor
+    ℒˡᵣ_over_cᵖᵈ = ℒˡᵣ * inv_cᵖᵈ
 
     # Reference density at surface for terminal velocity (KW eq. 2.15)
     @inbounds ρ_bottom = ρᵣ[1]
@@ -358,34 +364,35 @@ end
     for k = 1:Nz
         @inbounds begin
             ρ = ρᵣ[k]
+            inv_ρ = inv(ρ)  # Precompute inverse density
 
-            qᵗ = ρqᵗ[i, j, k] / ρ
-            qᶜˡ = max(ρqᶜˡ[i, j, k] / ρ, zero(FT))
-            qʳ  = max(ρqʳ[i, j, k] / ρ, zero(FT))
-            qᵗ = max(qᵗ, qᶜˡ + qʳ)  # Prevent negative vapor
-            qᵛ = qᵗ - qᶜˡ - qʳ        # Diagnose vapor
+            qᵗ = ρqᵗ[i, j, k] * inv_ρ
+            qᶜˡ = max(ρqᶜˡ[i, j, k] * inv_ρ, zero(FT))
+            qʳ  = max(ρqʳ[i, j, k] * inv_ρ, zero(FT))
+            qˡ_sum = qᶜˡ + qʳ
+            qᵗ = max(qᵗ, qˡ_sum)  # Prevent negative vapor
+            qᵛ = qᵗ - qˡ_sum       # Diagnose vapor
 
             # Convert to mixing ratios for Kessler physics
-            rʳ = mass_fraction_to_mixing_ratio(qʳ, qᵗ)
+            # Precompute common denominator: 1/(1 - qᵗ)
+            inv_one_minus_qᵗ = inv(1 - qᵗ)
+            rᵛ = qᵛ * inv_one_minus_qᵗ
+            rᶜ = qᶜˡ * inv_one_minus_qᵗ
+            rʳ = qʳ * inv_one_minus_qᵗ
+
             velqr = kessler_terminal_velocity(rʳ, ρ, ρ_bottom)
             vᵗ_rain[i, j, k] = velqr
-
-            rᵛ = mass_fraction_to_mixing_ratio(qᵛ, qᵗ)
-            rᶜ = mass_fraction_to_mixing_ratio(qᶜˡ, qᵗ)
 
             # Store mixing ratios in diagnostic fields during physics
             qᵛ_field[i, j, k]  = rᵛ
             qᶜˡ_field[i, j, k] = rᶜ
             qʳ_field[i, j, k]  = rʳ
-        end
 
-        # CFL check for sedimentation
-        if k < Nz
-            @inbounds begin
+            # CFL check for sedimentation (fused into main loop to avoid extra znode call)
+            if k < Nz
                 z_k   = znode(i, j, k, grid, Center(), Center(), Center())
                 z_kp1 = znode(i, j, k+1, grid, Center(), Center(), Center())
                 dz = z_kp1 - z_k
-                velqr = vᵗ_rain[i, j, k]
                 if velqr > 0
                     dt_max = min(dt_max, 0.8 * dz / velqr)
                 end
@@ -395,8 +402,9 @@ end
 
     # Subcycling for CFL constraint on rain sedimentation
     rainsplit = max(1, ceil(Int, Δt / dt_max))
-    dt0 = Δt / rainsplit
-    @inbounds precipitation_rate[i, j] = zero(FT)
+    inv_rainsplit = inv(FT(rainsplit))  # Precompute for final averaging
+    dt0 = Δt * inv_rainsplit
+    precip_accum = zero(FT)  # Local accumulator to reduce global memory writes
 
     #####
     ##### PHASE 2: Subcycle microphysics (in mixing ratio space)
@@ -410,8 +418,9 @@ end
             rᶜ_1 = qᶜˡ_field[i, j, 1]
             rʳ_1 = qʳ_field[i, j, 1]
             rᵗ_1 = rᵛ_1 + rᶜ_1 + rʳ_1
-            qʳ_1 = mixing_ratio_to_mass_fraction(rʳ_1, rᵗ_1)
-            precipitation_rate[i, j] += qʳ_1 * vᵗ_rain[i, j, 1]
+            # qʳ = rʳ / (1 + rᵗ)
+            qʳ_1 = rʳ_1 / (1 + rᵗ_1)
+            precip_accum += qʳ_1 * vᵗ_rain[i, j, 1]
         end
         for k = 1:Nz
             @inbounds begin
@@ -425,18 +434,21 @@ end
 
                 # Convert to mass fractions for thermodynamic calculation
                 rᵗ = rᵛ + rᶜ + rʳ
-                qᵛ_current = mixing_ratio_to_mass_fraction(rᵛ, rᵗ)
-                qˡ_current = mixing_ratio_to_mass_fraction(rᶜ + rʳ, rᵗ)
+                rˡ = rᶜ + rʳ
+                inv_one_plus_rᵗ = inv(1 + rᵗ)
+                qᵛ_current = rᵛ * inv_one_plus_rᵗ
+                qˡ_current = rˡ * inv_one_plus_rᵗ
 
                 # Moist thermodynamics: T = Π θˡⁱ + ℒˡᵣ qˡ / cᵖᵐ
                 q = MoistureMassFractions(qᵛ_current, qˡ_current)
                 cᵖᵐ = mixture_heat_capacity(q, constants)
                 Rᵐ  = mixture_gas_constant(q, constants)
                 Π = (p / p₀)^(Rᵐ / cᵖᵐ)
-                T_k = Π * θˡⁱ_k + ℒˡᵣ * qˡ_current / cᵖᵐ
+                inv_cᵖᵐ = inv(cᵖᵐ)
+                T_k = Π * θˡⁱ_k + ℒˡᵣ * qˡ_current * inv_cᵖᵐ
 
                 # Exner-like pressure ratio for Kessler scheme
-                pk = (p / p₀_kessler)^κ
+                pk = (p * inv_p₀_kessler)^κ
 
                 # Rain sedimentation (upstream differencing)
                 r_k = 0.001 * ρ
@@ -479,12 +491,15 @@ end
                 # Rain evaporation (KW eq. 2.14)
                 # Note: The evaporation formula uses empirical constants from DCMIP2016
                 # We compute pc for the evaporation denominator (scheme-specific factor)
-                pc = 3.8 / (pk^(1 / κ) * p₀_kessler)
+                # pc = 3.8 / (pk^(1/κ) * p₀_kessler) = 3.8 / (p/p₀_kessler * p₀_kessler) = 3.8 / p
+                # Since pk^(1/κ) = (p/p₀_kessler)^(κ/κ) = p/p₀_kessler
+                pc = 3.8 * inv(pk^inv_κ * p₀_kessler)
                 rrr = r_k * rʳ_new
                 ern_num = (1.6 + 124.9 * rrr^0.2046) * rrr^0.525
-                ern_den = 2550000 * pc / (3.8 * rᵛˢ) + 540000
+                inv_rᵛˢ = inv(rᵛˢ)
+                ern_den = 2550000 * pc * inv_rᵛˢ / 3.8 + 540000
                 subsaturation = max(rᵛˢ - rᵛ, 0)
-                ern_rate = ern_num / ern_den * subsaturation / (r_k * rᵛˢ + 1e-20)
+                ern_rate = ern_num / ern_den * subsaturation / (r_k * rᵛˢ + FT(1e-20))
                 ern = min(dt0 * ern_rate, max(-prod - rᶜ_new, 0), rʳ_new)
 
                 # Apply adjustments
@@ -500,21 +515,24 @@ end
                 # Update θˡⁱ from latent heating
                 # Uses Breeze's thermodynamic constants for consistency
                 net_phase_change = condensation - ern
-                ΔT_phase = ℒˡᵣ * net_phase_change / cᵖᵈ
+                ΔT_phase = ℒˡᵣ_over_cᵖᵈ * net_phase_change
                 T_new = T_k + ΔT_phase
 
                 # Convert back to θˡⁱ with updated moisture
                 rᵗ_new = rᵛ_new + rᶜ_final + rʳ_final
-                qᵛ_new_mf = mixing_ratio_to_mass_fraction(rᵛ_new, rᵗ_new)
-                qˡ_new = mixing_ratio_to_mass_fraction(rᶜ_final + rʳ_final, rᵗ_new)
+                rˡ_new = rᶜ_final + rʳ_final
+                inv_one_plus_rᵗ_new = inv(1 + rᵗ_new)
+                qᵛ_new_mf = rᵛ_new * inv_one_plus_rᵗ_new
+                qˡ_new = rˡ_new * inv_one_plus_rᵗ_new
 
                 q_new = MoistureMassFractions(qᵛ_new_mf, qˡ_new)
                 cᵖᵐ_new = mixture_heat_capacity(q_new, constants)
                 Rᵐ_new  = mixture_gas_constant(q_new, constants)
-                Π_new = (p / p₀)^(Rᵐ_new / cᵖᵐ_new)
+                inv_cᵖᵐ_new = inv(cᵖᵐ_new)
+                Π_new = (p / p₀)^(Rᵐ_new * inv_cᵖᵐ_new)
 
                 # θˡⁱ = (T - ℒˡᵣ qˡ / cᵖᵐ) / Π
-                θˡⁱ_new = (T_new - ℒˡᵣ * qˡ_new / cᵖᵐ_new) / Π_new
+                θˡⁱ_new = (T_new - ℒˡᵣ * qˡ_new * inv_cᵖᵐ_new) / Π_new
 
                 θˡⁱ[i, j, k]  = θˡⁱ_new
                 ρθˡⁱ[i, j, k] = ρ * θˡⁱ_new
@@ -533,7 +551,7 @@ end
         end
     end
 
-    @inbounds precipitation_rate[i, j] /= rainsplit
+    @inbounds precipitation_rate[i, j] = precip_accum * inv_rainsplit
 
     #####
     ##### PHASE 3: Convert mixing ratio → mass fraction
@@ -547,10 +565,13 @@ end
             rʳ = qʳ_field[i, j, k]
 
             rᵗ = rᵛ + rᶜ + rʳ
-            qᵛ  = mixing_ratio_to_mass_fraction(rᵛ, rᵗ)
-            qᶜˡ = mixing_ratio_to_mass_fraction(rᶜ, rᵗ)
-            qʳ  = mixing_ratio_to_mass_fraction(rʳ, rᵗ)
-            qᵗ  = qᵛ + qᶜˡ + qʳ
+            # Precompute common factor for all conversions
+            inv_one_plus_rᵗ = inv(1 + rᵗ)
+            qᵛ  = rᵛ * inv_one_plus_rᵗ
+            qᶜˡ = rᶜ * inv_one_plus_rᵗ
+            qʳ  = rʳ * inv_one_plus_rᵗ
+            # qᵗ = (rᵛ + rᶜ + rʳ) / (1 + rᵗ) = rᵗ / (1 + rᵗ)
+            qᵗ  = rᵗ * inv_one_plus_rᵗ
 
             # Update prognostic fields (density-weighted)
             ρqᵗ[i, j, k]  = ρ * qᵗ
