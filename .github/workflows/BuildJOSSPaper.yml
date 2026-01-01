@@ -20,9 +20,30 @@ jobs:
           paper-path: paper/paper.md
       - name: Upload
         uses: actions/upload-artifact@v6
+        id: upload-paper
         with:
           name: paper
           # This is the output path where Pandoc will write the compiled
           # PDF. Note, this should be the same directory as the input
           # paper.md
           path: paper/paper.pdf
+      - name: Install Python dependencies
+        run: pip install github3.py
+      - name: Create custom status
+        shell: python {0}
+        run: |
+          import os
+          from github3 import login
+
+          token = "${{ github.token }}"
+          gh = login(token=token)
+
+          owner, repo_name = "${{ github.repository }}".split('/')
+          repo = gh.repository(owner, repo_name)
+
+          sha = "${{ github.event.pull_request.head.sha }}"
+          state = "success"
+          target_url = "${{ steps.upload-paper.outputs.artifact-url }}"
+          description = "Download PDF"
+          context = "Paper Preview"
+          repo.create_status(sha, state, target_url, description, context)
