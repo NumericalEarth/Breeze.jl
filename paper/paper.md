@@ -107,7 +107,7 @@ Existing atmospheric models face several challenges. Many legacy codes are writt
 
 Breeze.jl addresses these challenges by combining high performance with accessibility. Key design principles include:
 
-1. **GPU-first architecture**: Breeze.jl is designed from the ground up for GPU computing. Leveraging KernelAbstractions.jl, the same code runs efficiently on both CPUs and GPUs, enabling researchers to utilize modern accelerated hardware without code modifications. This approach follows the successful model demonstrated by Oceananigans.jl [@OceananigansArxiv], which showed that high-level Julia code can achieve excellent performance across heterogeneous architectures.
+1. **GPU-first architecture**: Breeze.jl is designed from the ground up for GPU computing. Leveraging KernelAbstractions.jl [@Churavy_KernelAbstractions_jl], the same code runs efficiently on both CPUs and GPUs, enabling researchers to utilize modern accelerated hardware without code modifications. This approach follows the successful model demonstrated by Oceananigans.jl [@OceananigansArxiv], which showed that high-level Julia code can achieve excellent performance across heterogeneous architectures.
 
 2. **Julia scripting paradigm**: Written entirely in Julia [@Bezanson2017], Breeze.jl offers a scripting-based workflow where simulations are configured through human-readable Julia scripts rather than configuration files or compiled executables. This design accelerates the research cycle by enabling rapid prototyping, inline visualization, and interactive exploration of results. The same scripts serve as self-documenting examples for education.
 
