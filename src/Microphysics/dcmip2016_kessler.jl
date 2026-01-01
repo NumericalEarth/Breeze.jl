@@ -301,7 +301,7 @@ function AtmosphereModels.microphysics_model_update!(microphysics::DCMIP2016KM, 
     # Use interior() for 2D field to avoid GPU indexing issues
     precipitation_rate_data = interior(μ.precipitation_rate, :, :, 1)
 
-    launch!(arch, grid, :xy, _kessler_microphysical_update!,
+    launch!(arch, grid, :xy, _microphysical_update!,
             microphysics, grid, Nz, Δt, ρᵣ, pᵣ, p₀, constants, θˡⁱ, ρθˡⁱ,
             ρqᵗ, μ.ρqᶜˡ, μ.ρqʳ,
             μ.qᵛ, μ.qᶜˡ, μ.qʳ,
@@ -322,7 +322,7 @@ end
 # Note: Breeze uses liquid-ice potential temperature (θˡⁱ), related to T by:
 #   T = Π θˡⁱ + ℒˡᵣ qˡ / cᵖᵐ
 
-@kernel function _kessler_microphysical_update!(microphysics, grid, Nz, Δt, ρᵣ, pᵣ, p₀, constants, θˡⁱ, ρθˡⁱ,
+@kernel function _microphysical_update!(microphysics, grid, Nz, Δt, ρᵣ, pᵣ, p₀, constants, θˡⁱ, ρθˡⁱ,
                                                  ρqᵗ, ρqᶜˡ, ρqʳ,
                                                  qᵛ_field, qᶜˡ_field, qʳ_field,
                                                  precipitation_rate, vᵗ_rain)
@@ -340,12 +340,10 @@ end
     # κ = Rᵈ / cᵖᵈ (Poisson constant for dry air)
     Rᵈ = dry_air_gas_constant(constants)
     κ = Rᵈ * inv_cᵖᵈ
-    inv_κ = cᵖᵈ / Rᵈ  # Precompute 1/κ to avoid division in loop
 
     # Get scheme-specific parameters from microphysics struct
     f2x = microphysics.f2x
     p₀_kessler = microphysics.p₀
-    inv_p₀_kessler = inv(p₀_kessler)  # Precompute inverse
 
     # Compute f5 = 237.3 × f2x × ℒˡᵣ / cᵖᵈ (saturation adjustment coefficient)
     f5 = 237.3 * f2x * ℒˡᵣ * inv_cᵖᵈ
@@ -444,11 +442,10 @@ end
                 cᵖᵐ = mixture_heat_capacity(q, constants)
                 Rᵐ  = mixture_gas_constant(q, constants)
                 Π = (p / p₀)^(Rᵐ / cᵖᵐ)
-                inv_cᵖᵐ = inv(cᵖᵐ)
-                T_k = Π * θˡⁱ_k + ℒˡᵣ * qˡ_current * inv_cᵖᵐ
+                T_k = Π * θˡⁱ_k + ℒˡᵣ * qˡ_current / cᵖᵐ
 
                 # Exner-like pressure ratio for Kessler scheme
-                pk = (p * inv_p₀_kessler)^κ
+                pk = (p / p₀_kessler)^κ
 
                 # Rain sedimentation (upstream differencing)
                 r_k = 0.001 * ρ
@@ -491,13 +488,10 @@ end
                 # Rain evaporation (KW eq. 2.14)
                 # Note: The evaporation formula uses empirical constants from DCMIP2016
                 # We compute pc for the evaporation denominator (scheme-specific factor)
-                # pc = 3.8 / (pk^(1/κ) * p₀_kessler) = 3.8 / (p/p₀_kessler * p₀_kessler) = 3.8 / p
-                # Since pk^(1/κ) = (p/p₀_kessler)^(κ/κ) = p/p₀_kessler
-                pc = 3.8 * inv(pk^inv_κ * p₀_kessler)
+                pc = 3.8 / (pk^(1 / κ) * p₀_kessler)
                 rrr = r_k * rʳ_new
                 ern_num = (1.6 + 124.9 * rrr^0.2046) * rrr^0.525
-                inv_rᵛˢ = inv(rᵛˢ)
-                ern_den = 2550000 * pc * inv_rᵛˢ / 3.8 + 540000
+                ern_den = 2550000 * pc / (3.8 * rᵛˢ) + 540000
                 subsaturation = max(rᵛˢ - rᵛ, 0)
                 ern_rate = ern_num / ern_den * subsaturation / (r_k * rᵛˢ + FT(1e-20))
                 ern = min(dt0 * ern_rate, max(-prod - rᶜ_new, 0), rʳ_new)
@@ -528,11 +522,10 @@ end
                 q_new = MoistureMassFractions(qᵛ_new_mf, qˡ_new)
                 cᵖᵐ_new = mixture_heat_capacity(q_new, constants)
                 Rᵐ_new  = mixture_gas_constant(q_new, constants)
-                inv_cᵖᵐ_new = inv(cᵖᵐ_new)
-                Π_new = (p / p₀)^(Rᵐ_new * inv_cᵖᵐ_new)
+                Π_new = (p / p₀)^(Rᵐ_new / cᵖᵐ_new)
 
                 # θˡⁱ = (T - ℒˡᵣ qˡ / cᵖᵐ) / Π
-                θˡⁱ_new = (T_new - ℒˡᵣ * qˡ_new * inv_cᵖᵐ_new) / Π_new
+                θˡⁱ_new = (T_new - ℒˡᵣ * qˡ_new / cᵖᵐ_new) / Π_new
 
                 θˡⁱ[i, j, k]  = θˡⁱ_new
                 ρθˡⁱ[i, j, k] = ρ * θˡⁱ_new
