@@ -2,7 +2,10 @@ using ..Thermodynamics:
     MoistureMassFractions,
     mixture_heat_capacity,
     mixture_gas_constant,
-    total_specific_moisture
+    dry_air_gas_constant,
+    total_specific_moisture,
+    saturation_specific_humidity,
+    PlanarLiquidSurface
 
 using Oceananigans: CenterField, Field, interior
 using Oceananigans.Architectures: architecture
@@ -54,8 +57,18 @@ instead, it is diagnosed from the total specific moisture `qᵗ` and the liquid 
 - The microphysics update is applied via a GPU-compatible kernel launched from `microphysics_model_update!`.
 - Rain sedimentation uses subcycling to satisfy CFL constraints, following the Fortran implementation.
 - All microphysical updates are applied directly to the state variables in the kernel.
+
+# Parameters
+- `f2x :: FT = 17.27`: Clausius-Clapeyron exponent coefficient (empirical constant for saturation)
+- `p₀ :: FT = 100000.0`: Reference sea level pressure in Pascals
+
+The saturation adjustment coefficient `f5 = 237.3 × f2x × ℒˡᵣ / cᵖᵈ` is computed dynamically
+from `f2x` and the thermodynamic constants.
 """
-struct DCMIP2016KesslerMicrophysics end
+Base.@kwdef struct DCMIP2016KesslerMicrophysics{FT}
+    f2x :: FT = 17.27
+    p₀  :: FT = 100000.0
+end
 
 const DCMIP2016KM = DCMIP2016KesslerMicrophysics
 
@@ -213,26 +226,6 @@ Adapt.adapt_structure(to, k::DCMIP2016KesslerSurfaceFluxKernel) =
 end
 
 #####
-##### Kessler scheme constants (from kessler.f90)
-#####
-
-# Clausius-Clapeyron coefficient for saturation vapor pressure
-const kessler_f2x = 17.27
-
-# Saturation adjustment coefficient: \$237.3 \cdot f2x \cdot ℒᵛ_Kessler / cᵖᵈ_Kessler\$
-# where \$ℒᵛ_Kessler = 2.5 \times 10^6 J/kg\$ (latent heat of vaporization) and \$cᵖᵈ_Kessler = 1003 J/(kg \cdot K)\$
-const kessler_f5 = 237.3 * kessler_f2x * 2500000.0 / 1003.0
-
-# Kappa = \$R_d/cᵖᵈ_Kessler\$ (ratio of dry air gas constant to specific heat)
-const kessler_xk = 0.2875
-
-# Reference sea level pressure (millibars)
-const kessler_psl = 1000.0
-
-# Density of liquid water (\$kg/m^3\$)
-const kessler_rhoqr = 1000.0
-
-#####
 ##### Mass fraction ↔ mixing ratio conversion
 #####
 
@@ -275,7 +268,7 @@ This function launches a kernel that processes each column independently, with r
 The kernel handles conversion between mass fractions (Breeze) and mixing ratios (Kessler)
 internally for efficiency. Water vapor is diagnosed from \$q^v = q^t - q^{cl} - q^r\$.
 """
-function AtmosphereModels.microphysics_model_update!(::DCMIP2016KM, model)
+function AtmosphereModels.microphysics_model_update!(microphysics::DCMIP2016KM, model)
     grid = model.grid
     arch = architecture(grid)
     Nz = grid.Nz
@@ -309,7 +302,7 @@ function AtmosphereModels.microphysics_model_update!(::DCMIP2016KM, model)
     precipitation_rate_data = interior(μ.precipitation_rate, :, :, 1)
 
     launch!(arch, grid, :xy, _kessler_microphysical_update!,
-            grid, Nz, Δt, ρᵣ, pᵣ, p₀, constants, θˡⁱ, ρθˡⁱ,
+            microphysics, grid, Nz, Δt, ρᵣ, pᵣ, p₀, constants, θˡⁱ, ρθˡⁱ,
             ρqᵗ, μ.ρqᶜˡ, μ.ρqʳ,
             μ.qᵛ, μ.qᶜˡ, μ.qʳ,
             precipitation_rate_data, μ.vᵗ_rain)
@@ -329,7 +322,7 @@ end
 # Note: Breeze uses liquid-ice potential temperature (θˡⁱ), related to T by:
 #   T = Π θˡⁱ + ℒˡᵣ qˡ / cᵖᵐ
 
-@kernel function _kessler_microphysical_update!(grid, Nz, Δt, ρᵣ, pᵣ, p₀, constants, θˡⁱ, ρθˡⁱ,
+@kernel function _kessler_microphysical_update!(microphysics, grid, Nz, Δt, ρᵣ, pᵣ, p₀, constants, θˡⁱ, ρθˡⁱ,
                                                  ρqᵗ, ρqᶜˡ, ρqʳ,
                                                  qᵛ_field, qᶜˡ_field, qʳ_field,
                                                  precipitation_rate, vᵗ_rain)
@@ -338,6 +331,21 @@ end
 
     # Latent heat of vaporization for θˡⁱ ↔ T conversion
     ℒˡᵣ = constants.liquid.reference_latent_heat
+
+    # Dry air heat capacity for latent heating calculation
+    cᵖᵈ = constants.dry_air.heat_capacity
+
+    # Compute Kessler scheme constants from Breeze thermodynamic constants
+    # κ = Rᵈ / cᵖᵈ (Poisson constant for dry air)
+    Rᵈ = dry_air_gas_constant(constants)
+    κ = Rᵈ / cᵖᵈ
+
+    # Get scheme-specific parameters from microphysics struct
+    f2x = microphysics.f2x
+    p₀_kessler = microphysics.p₀
+
+    # Compute f5 = 237.3 × f2x × ℒˡᵣ / cᵖᵈ (saturation adjustment coefficient)
+    f5 = 237.3 * f2x * ℒˡᵣ / cᵖᵈ
 
     # Reference density at surface for terminal velocity (KW eq. 2.15)
     @inbounds ρ_bottom = ρᵣ[1]
@@ -427,8 +435,8 @@ end
                 Π = (p / p₀)^(Rᵐ / cᵖᵐ)
                 T_k = Π * θˡⁱ_k + ℒˡᵣ * qˡ_current / cᵖᵐ
 
-                p_mb = p / 100
-                pk = (p_mb / kessler_psl)^kessler_xk
+                # Exner-like pressure ratio for Kessler scheme
+                pk = (p / p₀_kessler)^κ
 
                 # Rain sedimentation (upstream differencing)
                 r_k = 0.001 * ρ
@@ -459,14 +467,19 @@ end
                 rᶜ_new = max(rᶜ - rrprod, 0)
                 rʳ_new = max(rʳ + rrprod + sed, 0)
 
-                # Saturation mixing ratio (KW eq. 2.11)
-                pc = 3.8 / (pk^(1 / kessler_xk) * kessler_psl)
-                rᵛˢ = pc * exp(kessler_f2x * (T_k - 273) / (T_k - 36))
+                # Saturation specific humidity using Breeze thermodynamics
+                # qᵛ⁺ = pᵛ⁺ / (ρ Rᵛ T) is the saturation mass fraction
+                qᵛ⁺ = saturation_specific_humidity(T_k, ρ, constants, PlanarLiquidSurface())
+                # Convert to saturation mixing ratio: rᵛˢ = qᵛ⁺ / (1 - qᵛ⁺)
+                rᵛˢ = qᵛ⁺ / (1 - qᵛ⁺)
 
                 # Saturation adjustment
-                prod = (rᵛ - rᵛˢ) / (1 + rᵛˢ * kessler_f5 / (T_k - 36)^2)
+                prod = (rᵛ - rᵛˢ) / (1 + rᵛˢ * f5 / (T_k - 36)^2)
 
                 # Rain evaporation (KW eq. 2.14)
+                # Note: The evaporation formula uses empirical constants from DCMIP2016
+                # We compute pc for the evaporation denominator (scheme-specific factor)
+                pc = 3.8 / (pk^(1 / κ) * p₀_kessler)
                 rrr = r_k * rʳ_new
                 ern_num = (1.6 + 124.9 * rrr^0.2046) * rrr^0.525
                 ern_den = 2550000 * pc / (3.8 * rᵛˢ) + 540000
@@ -485,10 +498,9 @@ end
                 qʳ_field[i, j, k]  = rʳ_final
 
                 # Update θˡⁱ from latent heating
-                # Uses Kessler's hardcoded constants (ℒᵛ = 2.5e6 J/kg, cᵖᵈ = 1003 J/kg/K)
-                # to match DCMIP2016 Fortran implementation exactly
+                # Uses Breeze's thermodynamic constants for consistency
                 net_phase_change = condensation - ern
-                ΔT_phase = 2500000.0 * net_phase_change / 1003.0
+                ΔT_phase = ℒˡᵣ * net_phase_change / cᵖᵈ
                 T_new = T_k + ΔT_phase
 
                 # Convert back to θˡⁱ with updated moisture
