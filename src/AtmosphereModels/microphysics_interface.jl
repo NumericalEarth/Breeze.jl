@@ -167,3 +167,54 @@ surface_precipitation_flux(model) = surface_precipitation_flux(model, model.micr
 
 # Default: zero flux for Nothing microphysics
 surface_precipitation_flux(model, ::Nothing) = Field{Center, Center, Nothing}(model.grid) 
+
+#####
+##### Cloud effective radius interface
+#####
+
+"""
+$(TYPEDEF)
+
+Represents cloud particles with a constant effective radius.
+
+# Fields
+- `radius`: The effective radius in microns (μm).
+
+# Example
+
+```julia
+liquid_radius = ConstantRadiusParticles(10.0)  # 10 μm droplets
+ice_radius = ConstantRadiusParticles(30.0)     # 30 μm ice crystals
+```
+"""
+struct ConstantRadiusParticles{FT}
+    radius :: FT
+end
+
+"""
+$(TYPEDSIGNATURES)
+
+Return the effective radius of cloud liquid droplets in microns (μm).
+
+This function dispatches on the `effective_radius_model` argument. The default
+implementation for `ConstantRadiusParticles` returns a constant value.
+
+Microphysics schemes can extend this function to provide diagnosed effective radii
+based on cloud properties.
+"""
+@inline cloud_liquid_effective_radius(i, j, k, grid, effective_radius_model::ConstantRadiusParticles, args...) =
+    effective_radius_model.radius
+
+"""
+$(TYPEDSIGNATURES)
+
+Return the effective radius of cloud ice particles in microns (μm).
+
+This function dispatches on the `effective_radius_model` argument. The default
+implementation for `ConstantRadiusParticles` returns a constant value.
+
+Microphysics schemes can extend this function to provide diagnosed effective radii
+based on cloud properties.
+"""
+@inline cloud_ice_effective_radius(i, j, k, grid, effective_radius_model::ConstantRadiusParticles, args...) =
+    effective_radius_model.radius

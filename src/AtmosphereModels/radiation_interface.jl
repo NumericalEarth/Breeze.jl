@@ -17,7 +17,7 @@ radiation extensions (e.g., BreezeRRTMGPExt) to compute radiative transfer.
 """
 update_radiation!(radiation, model) = nothing
 
-struct RadiativeTransferModel{FT<:Number, C, E, SP, BA, AS, LW, SW, F}
+struct RadiativeTransferModel{FT<:Number, C, E, SP, BA, AS, LW, SW, F, LER, IER}
     solar_constant :: FT # Scalar
     coordinate :: C # coordinates (for RectilinearGrid) for computing the solar zenith angle
     epoch :: E # optional epoch for computing time with floating-point clocks
@@ -29,6 +29,8 @@ struct RadiativeTransferModel{FT<:Number, C, E, SP, BA, AS, LW, SW, F}
     upwelling_longwave_flux :: F
     downwelling_longwave_flux :: F
     downwelling_shortwave_flux :: F
+    liquid_effective_radius :: LER # Model for cloud liquid effective radius (Nothing for gray/clear-sky)
+    ice_effective_radius :: IER    # Model for cloud ice effective radius (Nothing for gray/clear-sky)
 end
 
 """
@@ -51,6 +53,17 @@ Type representing full-spectrum clear-sky radiation using RRTMGP gas optics, can
 struct ClearSkyOptics <: AbstractOptics end
 
 """
+$(TYPEDEF)
+
+Type representing full-spectrum all-sky (cloudy) radiation using RRTMGP gas and cloud optics,
+can be used as optics argument in [`RadiativeTransferModel`](@ref).
+
+All-sky radiation includes scattering by cloud liquid and ice particles, requiring
+cloud water path, cloud fraction, and effective radius inputs from the microphysics scheme.
+"""
+struct AllSkyOptics <: AbstractOptics end
+
+"""
 $(TYPEDSIGNATURES)
 
 Construct a `RadiativeTransferModel` on `grid` using the specified `optics`.
@@ -58,6 +71,7 @@ Construct a `RadiativeTransferModel` on `grid` using the specified `optics`.
 Valid optics types are:
 - [`GrayOptics()`](@ref) - Gray atmosphere radiation ([O'Gorman & Schneider 2008](@cite OGormanSchneider2008))
 - [`ClearSkyOptics()`](@ref) - Full-spectrum clear-sky radiation using RRTMGP gas optics
+- [`AllSkyOptics()`](@ref) - Full-spectrum all-sky (cloudy) radiation using RRTMGP gas and cloud optics
 
 The `constants` argument provides physical constants for the radiative transfer solver.
 
@@ -92,7 +106,7 @@ RadiativeTransferModel
 ```
 """
 function RadiativeTransferModel(grid::AbstractGrid, optics, args...; kw...)
-    msg = "Unknown optics $(optics). Valid options are GrayOptics(), ClearSkyOptics().\n" *
+    msg = "Unknown optics $(optics). Valid options are GrayOptics(), ClearSkyOptics(), AllSkyOptics().\n" *
           "Make sure RRTMGP.jl is loaded (e.g., `using RRTMGP`)."
     return throw(ArgumentError(msg))
 end
@@ -154,6 +168,13 @@ function Base.show(io::IO, radiation::RadiativeTransferModel)
           "├── solar_constant: ", prettysummary(radiation.solar_constant), " W m⁻²\n",
           "├── surface_temperature: ", radiation.surface_properties.surface_temperature, " K\n",
           "├── surface_emissivity: ", radiation.surface_properties.surface_emissivity, "\n",
-          "├── direct_surface_albedo: ", radiation.surface_properties.direct_surface_albedo, "\n",
-          "└── diffuse_surface_albedo: ", radiation.surface_properties.diffuse_surface_albedo)
+          "├── direct_surface_albedo: ", radiation.surface_properties.direct_surface_albedo, "\n")
+
+    # Show effective radius models if present (for all-sky optics)
+    if !isnothing(radiation.liquid_effective_radius)
+        print(io, "├── liquid_effective_radius: ", radiation.liquid_effective_radius, "\n",
+                  "├── ice_effective_radius: ", radiation.ice_effective_radius, "\n")
+    end
+
+    print(io, "└── diffuse_surface_albedo: ", radiation.surface_properties.diffuse_surface_albedo)
 end
