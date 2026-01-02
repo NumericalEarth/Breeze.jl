@@ -20,7 +20,7 @@ using ..Thermodynamics:
 using Oceananigans: Oceananigans, CenterField
 using DocStringExtensions: TYPEDSIGNATURES
 
-using ..Thermodynamics: Thermodynamics, saturation_specific_humidity
+using ..Thermodynamics: Thermodynamics, saturation_specific_humidity, equilibrium_saturation_specific_humidity
 
 struct SaturationAdjustment{E, FT}
     tolerance :: FT
@@ -138,77 +138,10 @@ end
     return saturation_specific_humidity(T, ρ, constants, surface)
 end
 
-"""
-    saturated_equilibrium_saturation_specific_humidity(T, pᵣ, qᵗ, constants, equilibrium)
-
-Return the *equilibrium saturation specific humidity* ``qᵛ⁺`` for air at
-temperature `T`, reference pressure `pᵣ`, and total specific moisture `qᵗ`,
-using the equilibrium model `equilibrium` to determine the condensation surface.
-
-## Derivation
-
-The fundamental definition of saturation specific humidity is
-
-```math
-qᵛ⁺ ≡ \\frac{ρᵛ⁺}{ρ} = \\frac{pᵛ⁺}{ρ Rᵛ T} ,
-```
-
-where ``ρᵛ⁺ = pᵛ⁺ / (Rᵛ T)`` is the saturation vapor density and ``pᵛ⁺`` is
-the saturation vapor pressure. The total density ``ρ`` follows from the
-ideal gas law under the anelastic approximation:
-
-```math
-ρ = \\frac{pᵣ}{Rᵐ T} = \\frac{pᵣ}{(qᵈ Rᵈ + qᵛ Rᵛ) T} ,
-```
-
-where ``qᵈ = 1 - qᵗ`` is the dry air mass fraction.
-
-In saturated conditions, ``qᵛ = qᵛ⁺`` by definition. Substituting the expression
-for ``ρ`` into the definition of ``qᵛ⁺``:
-
-```math
-qᵛ⁺ = \\frac{Rᵐ}{Rᵛ} \\frac{pᵛ⁺}{pᵣ}
-    = \\frac{(1 - qᵗ) Rᵈ + qᵛ⁺ Rᵛ}{Rᵛ} \\frac{pᵛ⁺}{pᵣ}
-    = \\frac{Rᵈ}{Rᵛ} (1 - qᵗ) \\frac{pᵛ⁺}{pᵣ} + qᵛ⁺ \\frac{pᵛ⁺}{pᵣ} .
-```
-
-Rearranging for ``qᵛ⁺``:
-
-```math
-qᵛ⁺ \\left(1 - \\frac{pᵛ⁺}{pᵣ}\\right) = \\frac{Rᵈ}{Rᵛ} (1 - qᵗ) \\frac{pᵛ⁺}{pᵣ} ,
-```
-
-yields the equilibrium saturation specific humidity,
-
-```math
-qᵛ⁺ = \\frac{Rᵈ}{Rᵛ} (1 - qᵗ) \\frac{pᵛ⁺}{pᵣ - pᵛ⁺} = ϵᵈᵛ (1 - qᵗ) \\frac{pᵛ⁺}{pᵣ - pᵛ⁺} ,
-```
-
-where ``ϵᵈᵛ = Rᵈ / Rᵛ ≈ 0.622``.
-
-This expression is valid only in saturated conditions under the saturation
-adjustment approximation, and corresponds to equation (37) in Pressel et al. (2015).
-
-## Notes
-
-- This formulation accounts for how moisture content affects total density,
-  providing a self-consistent value for saturated air.
-- The equilibrium surface (liquid, ice, or mixed-phase) is determined by
-  temperature via `equilibrated_surface(equilibrium, T)`.
-"""
-@inline function saturated_equilibrium_saturation_specific_humidity(T, pᵣ, qᵗ, constants, equil)
-    surface = equilibrated_surface(equil, T)
-    pᵛ⁺ = saturation_vapor_pressure(T, constants, surface)
-    Rᵈ = dry_air_gas_constant(constants)
-    Rᵛ = vapor_gas_constant(constants)
-    ϵᵈᵛ = Rᵈ / Rᵛ
-    return ϵᵈᵛ * (1 - qᵗ) * pᵛ⁺ / (pᵣ - pᵛ⁺)
-end
-
 @inline function adjust_state(𝒰₀, T, constants, equilibrium)
     pᵣ = 𝒰₀.reference_pressure
     qᵗ = total_specific_moisture(𝒰₀)
-    qᵛ⁺ = saturated_equilibrium_saturation_specific_humidity(T, pᵣ, qᵗ, constants, equilibrium)
+    qᵛ⁺ = equilibrium_saturation_specific_humidity(T, pᵣ, qᵗ, constants, equilibrium)
     q₁ = equilibrated_moisture_mass_fractions(T, qᵗ, qᵛ⁺, equilibrium)
     return with_moisture(𝒰₀, q₁)
 end

@@ -98,24 +98,6 @@ end
     return pᵛ⁺ / (pᵣ + δᵈᵛ * pᵛ⁺)
 end
 
-# Compute equilibrium saturation specific humidity for :equilibrium flavor
-# Returns max of unsaturated and saturated formulas to handle both cases
-@inline function equilibrium_saturation_specific_humidity(T, pᵣ, qᵗ, constants, surface)
-    pᵛ⁺ = saturation_vapor_pressure(T, constants, surface)
-    Rᵈ = dry_air_gas_constant(constants)
-    Rᵛ = vapor_gas_constant(constants)
-    ϵᵈᵛ = Rᵈ / Rᵛ
-    qᵛ⁺₁ = ϵᵈᵛ * (1 - qᵗ) * pᵛ⁺ / (pᵣ - pᵛ⁺)
-
-    # In unsaturated conditions, all moisture is vapor (qᵛ = qᵗ)
-    # Compute density using mixture gas constant for this case
-    Rᵐ = Rᵈ * (1 - qᵗ) + Rᵛ * qᵗ
-    ρ = pᵣ / (Rᵐ * T)
-    qᵛ⁺₀ = pᵛ⁺ / (ρ * Rᵛ * T)
-
-    return max(qᵛ⁺₀, qᵛ⁺₁)
-end
-
 #####
 ##### Kernel function implementation
 #####

@@ -238,3 +238,52 @@ end
     λ = (T′ - Tʰ) / (Tᶠ - Tʰ)
     return PlanarMixedPhaseSurface(λ)
 end
+
+#####
+##### Equilibrium saturation specific humidity
+#####
+
+"""
+$(TYPEDSIGNATURES)
+
+Compute the *equilibrium saturation specific humidity* ``qᵛ⁺`` for air at
+temperature `T`, reference pressure `pᵣ`, and total specific moisture `qᵗ`,
+over a given `surface`.
+
+This function returns the correct saturation specific humidity in both saturated
+and unsaturated conditions:
+
+- In **unsaturated conditions** (``qᵗ < qᵛ⁺``), all moisture is vapor and the
+  density is computed assuming ``qᵛ = qᵗ``.
+
+- In **saturated conditions** (``qᵗ ≥ qᵛ⁺``), the vapor specific humidity equals
+  the saturation value and the density is computed assuming ``qᵛ = qᵛ⁺``.
+
+The saturated formula corresponds to equation (37) in Pressel et al. (2015).
+"""
+@inline function equilibrium_saturation_specific_humidity(T, pᵣ, qᵗ, constants, surface)
+    pᵛ⁺ = saturation_vapor_pressure(T, constants, surface)
+    Rᵈ = dry_air_gas_constant(constants)
+    Rᵛ = vapor_gas_constant(constants)
+    ϵᵈᵛ = Rᵈ / Rᵛ
+    qᵛ⁺₁ = ϵᵈᵛ * (1 - qᵗ) * pᵛ⁺ / (pᵣ - pᵛ⁺)
+
+    # In unsaturated conditions, all moisture is vapor (qᵛ = qᵗ)
+    # Compute density using mixture gas constant for this case
+    Rᵐ = Rᵈ * (1 - qᵗ) + Rᵛ * qᵗ
+    ρ = pᵣ / (Rᵐ * T)
+    qᵛ⁺₀ = pᵛ⁺ / (ρ * Rᵛ * T)
+
+    return ifelse(qᵗ >= qᵛ⁺₀, qᵛ⁺₁, qᵛ⁺₀)
+end
+
+"""
+$(TYPEDSIGNATURES)
+
+Compute the equilibrium saturation specific humidity using a phase `equilibrium`
+model to determine the condensation surface based on temperature `T`.
+"""
+@inline function equilibrium_saturation_specific_humidity(T, pᵣ, qᵗ, constants, equilibrium::AbstractPhaseEquilibrium)
+    surface = equilibrated_surface(equilibrium, T)
+    return equilibrium_saturation_specific_humidity(T, pᵣ, qᵗ, constants, surface)
+end

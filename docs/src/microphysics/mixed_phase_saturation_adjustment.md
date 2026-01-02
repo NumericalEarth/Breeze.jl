@@ -47,7 +47,7 @@ We can compute the saturation specific humidity across the entire range from hom
 ice nucleation up to freezing using the equilibrium model above:
 
 ```@example mixed_phase
-using Breeze.Microphysics: saturated_equilibrium_saturation_specific_humidity
+using Breeze: equilibrium_saturation_specific_humidity
 
 p = 101325.0
 qᵗ = 0.012
@@ -56,7 +56,7 @@ Tᶠ = eq.freezing_temperature
 Tʰ = eq.homogeneous_ice_nucleation_temperature
 T = range(Tʰ - 10, Tᶠ + 10; length=81) # slightly beyond the mixed-phase range
 
-qᵛ⁺ = [saturated_equilibrium_saturation_specific_humidity(Tʲ, p, qᵗ, thermo, eq) for Tʲ in T]
+qᵛ⁺ = [equilibrium_saturation_specific_humidity(Tʲ, p, qᵗ, thermo, eq) for Tʲ in T]
 ```
 
 Optionally, we can visualize how `qᵛ⁺` varies with temperature:

@@ -9,6 +9,7 @@ export
     StaticEnergy,
     SaturationSpecificHumidity,
     SaturationSpecificHumidityField,
+    equilibrium_saturation_specific_humidity,
     # Interface functions extended by Microphysics
     microphysics_phase_equilibrium
 
@@ -24,6 +25,7 @@ using Breeze.Thermodynamics:
     relative_humidity,
     saturation_specific_humidity,
     saturation_vapor_pressure,
+    equilibrium_saturation_specific_humidity,
     density,
     PlanarLiquidSurface,
     # Phase equilibrium types
