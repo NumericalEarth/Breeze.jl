@@ -488,7 +488,7 @@ end
                 # Rain evaporation (KW eq. 2.14)
                 # Note: The evaporation formula uses empirical constants from DCMIP2016
                 # We compute pc for the evaporation denominator (scheme-specific factor)
-                pc = 3.8 / (pk^(1 / κ) * p₀_kessler)
+                pc = 380 / (pk^(1 / κ) * p₀_kessler)
                 rrr = r_k * rʳ_new
                 ern_num = (1.6 + 124.9 * rrr^0.2046) * rrr^0.525
                 ern_den = 2550000 * pc / (3.8 * rᵛˢ) + 540000
