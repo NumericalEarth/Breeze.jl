@@ -479,11 +479,11 @@ end
                 # Saturation specific humidity using Breeze thermodynamics
                 # qᵛ⁺ = pᵛ⁺ / (ρ Rᵛ T) is the saturation mass fraction
                 qᵛ⁺ = saturation_specific_humidity(T_k, ρ, constants, PlanarLiquidSurface())
-                # Convert to saturation mixing ratio: rᵛˢ = qᵛ⁺ / (1 - qᵛ⁺)
-                rᵛˢ = qᵛ⁺ / (1 - qᵛ⁺)
+                # Convert to saturation mixing ratio: rᵛ⁺ = qᵛ⁺ / (1 - qᵛ⁺)
+                rᵛ⁺ = qᵛ⁺ / (1 - qᵛ⁺)
 
                 # Saturation adjustment
-                prod = (rᵛ - rᵛˢ) / (1 + rᵛˢ * f5 / (T_k - 36)^2)
+                prod = (rᵛ - rᵛ⁺) / (1 + rᵛ⁺ * f5 / (T_k - 36)^2)
 
                 # Rain evaporation (KW eq. 2.14)
                 # Note: The evaporation formula uses empirical constants from DCMIP2016
@@ -491,9 +491,9 @@ end
                 pc = 380 / (pk^(1 / κ) * p₀_kessler)
                 rrr = r_k * rʳ_new
                 ern_num = (1.6 + 124.9 * rrr^0.2046) * rrr^0.525
-                ern_den = 2550000 * pc / (3.8 * rᵛˢ) + 540000
-                subsaturation = max(rᵛˢ - rᵛ, 0)
-                ern_rate = ern_num / ern_den * subsaturation / (r_k * rᵛˢ + FT(1e-20))
+                ern_den = 2550000 * pc / (3.8 * rᵛ⁺) + 540000
+                subsaturation = max(rᵛ⁺ - rᵛ, 0)
+                ern_rate = ern_num / ern_den * subsaturation / (r_k * rᵛ⁺ + FT(1e-20))
                 ern = min(dt0 * ern_rate, max(-prod - rᶜ_new, 0), rʳ_new)
 
                 # Apply adjustments
