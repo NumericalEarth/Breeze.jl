@@ -64,6 +64,84 @@ for m in [Breeze, BreezeRRTMGPExt, BreezeCloudMicrophysicsExt]
     end
 end
 
+# Automatically generate file with docstrings for all modules
+
+function walk_submodules!(result, visited, mod::Module)
+    for name in sort(names(mod; all=true, imported=false))
+        isdefined(mod, name) || continue
+        value = getproperty(mod, name)
+        if value isa Module &&
+            parentmodule(value) === mod &&
+            !(value in visited) &&
+            value !== mod
+
+            push!(visited, value)
+            push!(result, value)
+            walk_submodules!(result, visited, value)
+        end
+    end
+end
+
+function get_submodules(mod::Module)
+    result = Module[]
+    visited = Set{Module}()
+
+    walk_submodules!(result, visited, mod)
+    return result
+end
+
+function write_api_md()
+    modules = get_submodules(Breeze)
+    append!(modules, [BreezeRRTMGPExt, BreezeCloudMicrophysicsExt])
+    io = IOBuffer()
+
+    println(io, """
+            # API Documentation
+
+            ## Public API
+
+            ```@autodocs
+            Modules = [Breeze]
+            Private = false
+            ```
+            """)
+    for mod in modules
+        println(io, """
+                ### $(chopprefix(string(mod), "Breeze."))
+
+                ```@autodocs
+                Modules = [$(mod)]
+                Private = false
+                ```
+                """)
+    end
+    println(io, """
+            ## Private API
+
+            ```@autodocs
+            Modules = [Breeze]
+            Public = false
+            ```
+            """)
+    for mod in modules
+        println(io, """
+                ### $(chopprefix(string(mod), "Breeze."))
+
+                ```@autodocs
+                Modules = [$(mod)]
+                Public = false
+                ```
+                """)
+    end
+
+    # Remove multiple trailing whitespaces, but keep the final one.
+    write(joinpath(@__DIR__, "src", "api.md"), strip(String(take!(io))) * "\n")
+end
+
+write_api_md()
+
+# Let's build the docs!
+
 makedocs(
     ;
     modules,
