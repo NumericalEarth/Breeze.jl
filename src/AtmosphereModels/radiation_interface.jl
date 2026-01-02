@@ -6,6 +6,7 @@
 #####
 
 using Oceananigans.Grids: AbstractGrid
+using InteractiveUtils: subtypes
 
 """
 $(TYPEDSIGNATURES)
@@ -106,7 +107,7 @@ RadiativeTransferModel
 ```
 """
 function RadiativeTransferModel(grid::AbstractGrid, optics, args...; kw...)
-    msg = "Unknown optics $(optics). Valid options are GrayOptics(), ClearSkyOptics(), AllSkyOptics().\n" *
+    msg = "Unknown optics $(optics). Valid options are $(join(string.(subtypes(AbstractOptics)) .* "()", ", ")).\n" *
           "Make sure RRTMGP.jl is loaded (e.g., `using RRTMGP`)."
     return throw(ArgumentError(msg))
 end
