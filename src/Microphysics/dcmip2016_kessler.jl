@@ -60,14 +60,12 @@ instead, it is diagnosed from the total specific moisture `qᵗ` and the liquid 
 
 # Parameters
 - `f2x :: FT = 17.27`: Clausius-Clapeyron exponent coefficient (empirical constant for saturation)
-- `p₀ :: FT = 100000.0`: Reference sea level pressure in Pascals
 
 The saturation adjustment coefficient `f5 = 237.3 × f2x × ℒˡᵣ / cᵖᵈ` is computed dynamically
 from `f2x` and the thermodynamic constants.
 """
 Base.@kwdef struct DCMIP2016KesslerMicrophysics{FT}
     f2x :: FT = 17.27
-    p₀  :: FT = 100000.0
 end
 
 const DCMIP2016KM = DCMIP2016KesslerMicrophysics
@@ -343,7 +341,6 @@ end
 
     # Get scheme-specific parameters from microphysics struct
     f2x = microphysics.f2x
-    p₀_kessler = microphysics.p₀
 
     # Compute f5 = 237.3 × f2x × ℒˡᵣ / cᵖᵈ (saturation adjustment coefficient)
     f5 = 237.3 * f2x * ℒˡᵣ * inv_cᵖᵈ
@@ -444,8 +441,6 @@ end
                 Π = (p / p₀)^(Rᵐ / cᵖᵐ)
                 T_k = Π * θˡⁱ_k + ℒˡᵣ * qˡ_current / cᵖᵐ
 
-                # Exner-like pressure ratio for Kessler scheme
-                pk = (p / p₀_kessler)^κ
 
                 # Rain sedimentation (upstream differencing)
                 r_k = 0.001 * ρ
@@ -488,7 +483,7 @@ end
                 # Rain evaporation (KW eq. 2.14)
                 # Note: The evaporation formula uses empirical constants from DCMIP2016
                 # We compute pc for the evaporation denominator (scheme-specific factor)
-                pc = 380 / (pk^(1 / κ) * p₀_kessler)
+                pc = 380 / p
                 rrr = r_k * rʳ_new
                 ern_num = (1.6 + 124.9 * rrr^0.2046) * rrr^0.525
                 ern_den = 2550000 * pc / (3.8 * rᵛ⁺) + 540000
