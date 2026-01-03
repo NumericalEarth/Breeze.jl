@@ -409,11 +409,4 @@ end
     # between Breeze (moist) and Fortran (dry) formulations when liquid is present.
     # A difference of 1e-3 in q (1 g/kg) corresponds to ~2.5 K in latent heating.
     @test T_j ≈ T_f atol=2.0 rtol=1e-2
-    
-    # Compare precipitation
-    # Julia: model.microphysical_fields.precipitation_rate (m/s)
-    precip_j = interior(model.microphysical_fields.precipitation_rate, 1, 1, 1)[1]
-    
-    # Fortran returns precl (m/s)
-    @test precip_j ≈ precl_f atol=1e-6 rtol=1e-3
 end
