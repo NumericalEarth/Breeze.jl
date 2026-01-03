@@ -95,6 +95,11 @@ Breeze.jl is an open-source Julia package for simulating atmospheric flows, with
 
 # Statement of Need
 
+Atmospheric simulation and weather prediction prevent disaster, help plan and help people plan their day.
+Weather prediction is currently undergoing a revolution due to the emergence of cheap and accurate machine-learning-based emulators.
+Yet despite a gathering quroum of conditions, including increasingly powerful modern software tools and increasingly capable hardware tailored specifically to numerical computation, no such revolution has transformed "traditional" numerical weather prediction (NWP) systems.
+With modern software and hardware, we now have the technology to develop an instantly installable, easily learnable, blazingly fast, ML-integrated and differentiable NWP system that is orders of magnitude more efficient than traditional systems. Breeze represents an attempt to realize this goal.
+
 Numerical simulation of atmospheric flows spans scales from meters to thousands of kilometers, requiring diverse computational tools with distinct capabilities. At the smallest scales, large-eddy simulation (LES) models resolve turbulent eddies in the atmospheric boundary layer and have become essential for understanding cloud processes and convective dynamics. Existing LES codes include DALES [@DALES], microHH [@MicroHH], PyCLES [@PyCLES], PTerodaC³TILES [@PTerodaC3TILES], and the System for Atmospheric Modeling (SAM) [@SAM]. At larger scales, mesoscale models simulate weather systems from a few kilometers to regional scales, with prominent examples including Cloud Model 1 (CM1) [@CM1], the Weather Research and Forecasting model (WRF) [@WRF], Meso-NH [@MesoNH], and the ICON nonhydrostatic model [@ICON]. Some models, notably SAM and CM1, bridge these scales by operating in both LES and cloud-resolving configurations.
 
 At the global convection-permitting end of this spectrum, the Simple Convection-Permitting E3SM Atmosphere Model (SCREAM) has also been adapted into a doubly-periodic configuration (DP-SCREAM), enabling efficient studies of horizontal-resolution sensitivity and scale awareness in a controlled setting [@DPSCREAM]. At the global-model end more broadly, modern efforts include the CliMA atmospheric dycore, a spectral-element dynamical core designed for climate and global simulations [@ClimaCore; @ClimaAtmos], simplified Julia-first global models such as SpeedyWeather.jl [@SpeedyWeather], and differentiable / machine-learning-oriented global modeling frameworks such as JAX GCM [@JAXGCM] and NeuralGCM [@NeuralGCM].
@@ -103,7 +108,10 @@ The Weather Research and Forecasting model (WRF) exemplifies a "dual mandate" ap
 
 An atmosphere model built on Oceananigans is ideally suited to this approach. First, Oceananigans employs relatively simple C-grid numerical methods and sits within a well-established Julia ecosystem that supports powerful usability patterns for model configuration, simulation, visualization, and post-processing [@Oceananigans]. Second, Oceananigans has demonstrated world-leading performance for ocean simulations, including recent GPU-based mesoscale-resolving climate simulations, with reported speedups of \(O(10\text{--}100\times)\) relative to existing Fortran-based codes in comparable regimes [@OceananigansArxiv; @Silvestri2025]. As a result, an atmosphere model based on Oceananigans also has the potential to become a world-class code for regional weather forecasting applications.
 
-Existing atmospheric models face several challenges. Many legacy codes are written in Fortran and can be difficult to extend, modify, or learn for new users. While these codes achieve excellent performance, their complexity often creates barriers to entry for students and researchers from adjacent fields. Modern codes may offer improved usability but sometimes lack either the physical fidelity or computational performance required for production simulations.
+Existing atmospheric models face several challenges. Many legacy codes are written in Fortran and can be difficult to extend, modify, or learn for new users.
+Such legacy codes are not easily ported to new accelerators, especially when portability across vendors (Nvidia, AMD) is needed.
+While these codes achieve excellent performance, their complexity often creates barriers to entry for students and researchers from adjacent fields.
+Modern codes may offer improved usability but sometimes lack either the physical fidelity or computational performance required for production simulations.
 
 Breeze.jl addresses these challenges by combining high performance with accessibility. Key design principles include:
 
