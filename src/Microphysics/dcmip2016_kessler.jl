@@ -481,12 +481,9 @@ end
                 prod = (rᵛ - rᵛ⁺) / (1 + rᵛ⁺ * f5 / (T_k - 36)^2)
 
                 # Rain evaporation (KW eq. 2.14)
-                # Note: The evaporation formula uses empirical constants from DCMIP2016
-                # We compute pc for the evaporation denominator (scheme-specific factor)
-                pc = 380 / p
                 rrr = r_k * rʳ_new
                 ern_num = (1.6 + 124.9 * rrr^0.2046) * rrr^0.525
-                ern_den = 2550000 * pc / (3.8 * rᵛ⁺) + 540000
+                ern_den = 255000000 / (p * rᵛ⁺) + 540000
                 subsaturation = max(rᵛ⁺ - rᵛ, 0)
                 ern_rate = ern_num / ern_den * subsaturation / (r_k * rᵛ⁺ + FT(1e-20))
                 ern = min(dt0 * ern_rate, max(-prod - rᶜ_new, 0), rʳ_new)
