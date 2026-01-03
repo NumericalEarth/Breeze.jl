@@ -1,15 +1,15 @@
 using Adapt: Adapt, adapt
+
 using Oceananigans.AbstractOperations: KernelFunctionOperation
 using Oceananigans.Fields: Field, Center
+using Oceananigans.Utils: Utils
 
 using Breeze.Thermodynamics:
     saturation_specific_humidity,
-    dry_air_gas_constant,
     vapor_gas_constant,
     density,
     saturation_vapor_pressure,
     equilibrated_surface
-using Oceananigans.Utils: Utils
 
 # Import SaturationSpecificHumidity from AtmosphereModels.Diagnostics
 using ..AtmosphereModels.Diagnostics:

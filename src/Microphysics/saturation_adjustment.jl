@@ -9,8 +9,6 @@ using ..Thermodynamics:
     with_moisture,
     total_specific_moisture,
     AbstractThermodynamicState,
-    # Phase equilibrium types from Thermodynamics
-    AbstractPhaseEquilibrium,
     WarmPhaseEquilibrium,
     MixedPhaseEquilibrium,
     equilibrated_surface
