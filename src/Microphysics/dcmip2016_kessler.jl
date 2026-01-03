@@ -392,6 +392,8 @@ end
                                                  precipitation_rate, vᵗ_rain)
     i, j = @index(Global, NTuple)
     FT = eltype(grid)
+    one_FT = one(FT)
+    surface = PlanarLiquidSurface()
 
     # Latent heat of vaporization for θˡⁱ ↔ T conversion
     ℒˡᵣ = constants.liquid.reference_latent_heat
@@ -399,11 +401,6 @@ end
     # Dry air heat capacity for latent heating calculation
     cᵖᵈ = constants.dry_air.heat_capacity
     inv_cᵖᵈ = inv(cᵖᵈ)  # Precompute inverse for efficiency
-
-    # Compute Kessler scheme constants from Breeze thermodynamic constants
-    # κ = Rᵈ / cᵖᵈ (Poisson constant for dry air)
-    Rᵈ = dry_air_gas_constant(constants)
-    κ = Rᵈ * inv_cᵖᵈ
 
     # Get scheme-specific parameters from microphysics struct
     f₂ₓ      = microphysics.f₂ₓ
@@ -419,6 +416,21 @@ end
     # Precompute latent heating factor
     ℒˡᵣ_over_cᵖᵈ = ℒˡᵣ * inv_cᵖᵈ
 
+    # Parameters from microphysics struct (hoisted out of the inner vertical loops)
+    ρ_scale = microphysics.ρ_scale
+
+    k₁      = microphysics.k₁
+    rᶜ_crit = microphysics.rᶜ_crit
+    k₂      = microphysics.k₂
+    β_acc   = microphysics.β_acc
+
+    Cᵉᵛ₁   = microphysics.Cᵉᵛ₁
+    Cᵉᵛ₂   = microphysics.Cᵉᵛ₂
+    βᵉᵛ₁   = microphysics.βᵉᵛ₁
+    βᵉᵛ₂   = microphysics.βᵉᵛ₂
+    Cᵈⁱᶠᶠ  = microphysics.Cᵈⁱᶠᶠ
+    Cᵗʰᵉʳᵐ = microphysics.Cᵗʰᵉʳᵐ
+
     # Reference density at surface for terminal velocity (KW eq. 2.15)
     @inbounds ρ_bottom = ρᵣ[1]
 
@@ -427,7 +439,11 @@ end
     #####
 
     dt_max = Δt
-    for k = 1:Nz
+
+    # Avoid a branch in the vertical loop and cut down `znode` calls:
+    # we only need `dz` for k = 1:Nz-1.
+    z_k = znode(i, j, 1, grid, Center(), Center(), Center())
+    for k = 1:(Nz-1)
         @inbounds begin
             ρ = ρᵣ[k]
             inv_ρ = inv(ρ)  # Precompute inverse density
@@ -441,7 +457,7 @@ end
 
             # Convert to mixing ratios for Kessler physics
             # Precompute common denominator: 1/(1 - qᵗ)
-            inv_one_minus_qᵗ = inv(1 - qᵗ)
+            inv_one_minus_qᵗ = inv(one_FT - qᵗ)
             rᵛ = qᵛ * inv_one_minus_qᵗ
             rᶜ = qᶜˡ * inv_one_minus_qᵗ
             rʳ = qʳ * inv_one_minus_qᵗ
@@ -454,16 +470,37 @@ end
             qᶜˡ_field[i, j, k] = rᶜ
             qʳ_field[i, j, k]  = rʳ
 
-            # CFL check for sedimentation (fused into main loop to avoid extra znode call)
-            if k < Nz
-                z_k   = znode(i, j, k, grid, Center(), Center(), Center())
-                z_kp1 = znode(i, j, k+1, grid, Center(), Center(), Center())
-                dz = z_kp1 - z_k
-                if velqr > 0
-                    dt_max = min(dt_max, CFL_factor * dz / velqr)
-                end
-            end
+            # CFL check for sedimentation
+            z_kp1 = znode(i, j, k+1, grid, Center(), Center(), Center())
+            dz = z_kp1 - z_k
+            (velqr > 0) && (dt_max = min(dt_max, CFL_factor * dz / velqr))
+            z_k = z_kp1
         end
+    end
+
+    # k = Nz (no `dz` / CFL update needed)
+    @inbounds begin
+        ρ = ρᵣ[Nz]
+        inv_ρ = inv(ρ)
+
+        qᵗ = ρqᵗ[i, j, Nz] * inv_ρ
+        qᶜˡ = max(ρqᶜˡ[i, j, Nz] * inv_ρ, zero(FT))
+        qʳ  = max(ρqʳ[i, j, Nz] * inv_ρ, zero(FT))
+        qˡ_sum = qᶜˡ + qʳ
+        qᵗ = max(qᵗ, qˡ_sum)
+        qᵛ = qᵗ - qˡ_sum
+
+        inv_one_minus_qᵗ = inv(one_FT - qᵗ)
+        rᵛ = qᵛ * inv_one_minus_qᵗ
+        rᶜ = qᶜˡ * inv_one_minus_qᵗ
+        rʳ = qʳ * inv_one_minus_qᵗ
+
+        velqr = kessler_terminal_velocity(rʳ, ρ, ρ_bottom, microphysics)
+        vᵗ_rain[i, j, Nz] = velqr
+
+        qᵛ_field[i, j, Nz]  = rᵛ
+        qᶜˡ_field[i, j, Nz] = rᶜ
+        qʳ_field[i, j, Nz]  = rʳ
     end
 
     # Subcycling for CFL constraint on rain sedimentation
@@ -485,10 +522,13 @@ end
             rʳ_1 = qʳ_field[i, j, 1]
             rᵗ_1 = rᵛ_1 + rᶜ_1 + rʳ_1
             # qʳ = rʳ / (1 + rᵗ)
-            qʳ_1 = rʳ_1 / (1 + rᵗ_1)
+            qʳ_1 = rʳ_1 / (one_FT + rᵗ_1)
             precip_accum += qʳ_1 * vᵗ_rain[i, j, 1]
         end
-        for k = 1:Nz
+
+        # Rolling z-coordinate to reduce `znode` calls (and avoid a branch in the loop body)
+        z_k = znode(i, j, 1, grid, Center(), Center(), Center())
+        for k = 1:(Nz-1)
             @inbounds begin
                 ρ = ρᵣ[k]
                 p = pᵣ[k]
@@ -501,7 +541,7 @@ end
                 # Convert to mass fractions for thermodynamic calculation
                 rᵗ = rᵛ + rᶜ + rʳ
                 rˡ = rᶜ + rʳ
-                inv_one_plus_rᵗ = inv(1 + rᵗ)
+                inv_one_plus_rᵗ = inv(one_FT + rᵗ)
                 qᵛ_current = rᵛ * inv_one_plus_rᵗ
                 qˡ_current = rˡ * inv_one_plus_rᵗ
 
@@ -514,36 +554,21 @@ end
 
 
                 # Rain sedimentation (upstream differencing)
-                ρ_scale = microphysics.ρ_scale
                 r_k = ρ_scale * ρ
                 velqr_k = vᵗ_rain[i, j, k]
 
-                if k < Nz
-                    z_k   = znode(i, j, k, grid, Center(), Center(), Center())
-                    z_kp1 = znode(i, j, k+1, grid, Center(), Center(), Center())
-                    dz = z_kp1 - z_k
+                z_kp1 = znode(i, j, k+1, grid, Center(), Center(), Center())
+                dz = z_kp1 - z_k
 
-                    ρ_kp1 = ρᵣ[k+1]
-                    r_kp1 = ρ_scale * ρ_kp1
-                    rʳ_kp1 = qʳ_field[i, j, k+1]  # Mixing ratio
-                    velqr_kp1 = vᵗ_rain[i, j, k+1]
+                ρ_kp1 = ρᵣ[k+1]
+                r_kp1 = ρ_scale * ρ_kp1
+                rʳ_kp1 = qʳ_field[i, j, k+1]  # Mixing ratio
+                velqr_kp1 = vᵗ_rain[i, j, k+1]
 
-                    sed = dt0 * (r_kp1 * rʳ_kp1 * velqr_kp1 - r_k * rʳ * velqr_k) / (r_k * dz)
-                else
-                    # Top boundary: rain falls out
-                    z_k   = znode(i, j, k, grid, Center(), Center(), Center())
-                    z_km1 = znode(i, j, k-1, grid, Center(), Center(), Center())
-                    dz_half = 0.5 * (z_k - z_km1)
-                    sed = -dt0 * rʳ * velqr_k / dz_half
-                end
+                sed = dt0 * (r_kp1 * rʳ_kp1 * velqr_kp1 - r_k * rʳ * velqr_k) / (r_k * dz)
+                z_k = z_kp1
 
                 # Autoconversion + accretion (KW eq. 2.13)
-                # Parameters from microphysics struct
-                k₁      = microphysics.k₁
-                rᶜ_crit = microphysics.rᶜ_crit
-                k₂      = microphysics.k₂
-                β_acc   = microphysics.β_acc
-
                 rrprod = rᶜ - (rᶜ - dt0 * max(k₁ * (rᶜ - rᶜ_crit), zero(FT))) /
                          (1 + dt0 * k₂ * rʳ^β_acc)
                 rᶜ_new = max(rᶜ - rrprod, zero(FT))
@@ -551,28 +576,21 @@ end
 
                 # Saturation specific humidity using Breeze thermodynamics
                 # qᵛ⁺ = pᵛ⁺ / (ρ Rᵛ T) is the saturation mass fraction
-                qᵛ⁺ = saturation_specific_humidity(T_k, ρ, constants, PlanarLiquidSurface())
+                qᵛ⁺ = saturation_specific_humidity(T_k, ρ, constants, surface)
                 # Convert to saturation mixing ratio: rᵛ⁺ = qᵛ⁺ / (1 - qᵛ⁺)
-                rᵛ⁺ = qᵛ⁺ / (1 - qᵛ⁺)
+                rᵛ⁺ = qᵛ⁺ / (one_FT - qᵛ⁺)
 
                 # Saturation adjustment
                 prod = (rᵛ - rᵛ⁺) / (1 + rᵛ⁺ * f₅ / (T_k - T_offset)^2)
 
                 # Rain evaporation (KW eq. 2.14)
-                # Parameters from microphysics struct
-                Cᵉᵛ₁   = microphysics.Cᵉᵛ₁
-                Cᵉᵛ₂   = microphysics.Cᵉᵛ₂
-                βᵉᵛ₁   = microphysics.βᵉᵛ₁
-                βᵉᵛ₂   = microphysics.βᵉᵛ₂
-                Cᵈⁱᶠᶠ  = microphysics.Cᵈⁱᶠᶠ
-                Cᵗʰᵉʳᵐ = microphysics.Cᵗʰᵉʳᵐ
-
                 rrr = r_k * rʳ_new
                 ern_num = (Cᵉᵛ₁ + Cᵉᵛ₂ * rrr^βᵉᵛ₁) * rrr^βᵉᵛ₂
                 ern_den = Cᵈⁱᶠᶠ / (p * rᵛ⁺) + Cᵗʰᵉʳᵐ
                 subsaturation = max(rᵛ⁺ - rᵛ, zero(FT))
                 ern_rate = ern_num / ern_den * subsaturation / (r_k * rᵛ⁺ + FT(1e-20))
-                ern = min(dt0 * ern_rate, max(-prod - rᶜ_new, zero(FT)), rʳ_new)
+                ern_limit = max(-prod - rᶜ_new, zero(FT))
+                ern = min(min(dt0 * ern_rate, ern_limit), rʳ_new)
 
                 # Apply adjustments
                 condensation = max(prod, -rᶜ_new)
@@ -593,7 +611,7 @@ end
                 # Convert back to θˡⁱ with updated moisture
                 rᵗ_new = rᵛ_new + rᶜ_final + rʳ_final
                 rˡ_new = rᶜ_final + rʳ_final
-                inv_one_plus_rᵗ_new = inv(1 + rᵗ_new)
+                inv_one_plus_rᵗ_new = inv(one_FT + rᵗ_new)
                 qᵛ_new_mf = rᵛ_new * inv_one_plus_rᵗ_new
                 qˡ_new = rˡ_new * inv_one_plus_rᵗ_new
 
@@ -608,6 +626,85 @@ end
                 θˡⁱ[i, j, k]  = θˡⁱ_new
                 ρθˡⁱ[i, j, k] = ρ * θˡⁱ_new
             end
+        end
+
+        # k = Nz (top boundary: rain falls out)
+        @inbounds begin
+            k = Nz
+            ρ = ρᵣ[k]
+            p = pᵣ[k]
+            θˡⁱ_k = θˡⁱ[i, j, k]
+
+            rᵛ = qᵛ_field[i, j, k]
+            rᶜ = qᶜˡ_field[i, j, k]
+            rʳ = qʳ_field[i, j, k]
+
+            rᵗ = rᵛ + rᶜ + rʳ
+            rˡ = rᶜ + rʳ
+            inv_one_plus_rᵗ = inv(one_FT + rᵗ)
+            qᵛ_current = rᵛ * inv_one_plus_rᵗ
+            qˡ_current = rˡ * inv_one_plus_rᵗ
+
+            q = MoistureMassFractions(qᵛ_current, qˡ_current)
+            cᵖᵐ = mixture_heat_capacity(q, constants)
+            Rᵐ  = mixture_gas_constant(q, constants)
+            Π = (p / p₀)^(Rᵐ / cᵖᵐ)
+            T_k = Π * θˡⁱ_k + ℒˡᵣ * qˡ_current / cᵖᵐ
+
+            # Top boundary: rain falls out
+            r_k = ρ_scale * ρ
+            velqr_k = vᵗ_rain[i, j, k]
+            z_k = znode(i, j, k, grid, Center(), Center(), Center())
+            z_km1 = znode(i, j, k-1, grid, Center(), Center(), Center())
+            dz_half = 0.5 * (z_k - z_km1)
+            sed = -dt0 * rʳ * velqr_k / dz_half
+
+            rrprod = rᶜ - (rᶜ - dt0 * max(k₁ * (rᶜ - rᶜ_crit), zero(FT))) /
+                     (1 + dt0 * k₂ * rʳ^β_acc)
+            rᶜ_new = max(rᶜ - rrprod, zero(FT))
+            rʳ_new = max(rʳ + rrprod + sed, zero(FT))
+
+            qᵛ⁺ = saturation_specific_humidity(T_k, ρ, constants, surface)
+            rᵛ⁺ = qᵛ⁺ / (one_FT - qᵛ⁺)
+
+            prod = (rᵛ - rᵛ⁺) / (1 + rᵛ⁺ * f₅ / (T_k - T_offset)^2)
+
+            rrr = r_k * rʳ_new
+            ern_num = (Cᵉᵛ₁ + Cᵉᵛ₂ * rrr^βᵉᵛ₁) * rrr^βᵉᵛ₂
+            ern_den = Cᵈⁱᶠᶠ / (p * rᵛ⁺) + Cᵗʰᵉʳᵐ
+            subsaturation = max(rᵛ⁺ - rᵛ, zero(FT))
+            ern_rate = ern_num / ern_den * subsaturation / (r_k * rᵛ⁺ + FT(1e-20))
+            ern_limit = max(-prod - rᶜ_new, zero(FT))
+            ern = min(min(dt0 * ern_rate, ern_limit), rʳ_new)
+
+            condensation = max(prod, -rᶜ_new)
+            rᵛ_new = max(rᵛ - condensation + ern, zero(FT))
+            rᶜ_final = rᶜ_new + condensation
+            rʳ_final = rʳ_new - ern
+
+            qᵛ_field[i, j, k]  = rᵛ_new
+            qᶜˡ_field[i, j, k] = rᶜ_final
+            qʳ_field[i, j, k]  = rʳ_final
+
+            net_phase_change = condensation - ern
+            ΔT_phase = ℒˡᵣ_over_cᵖᵈ * net_phase_change
+            T_new = T_k + ΔT_phase
+
+            rᵗ_new = rᵛ_new + rᶜ_final + rʳ_final
+            rˡ_new = rᶜ_final + rʳ_final
+            inv_one_plus_rᵗ_new = inv(one_FT + rᵗ_new)
+            qᵛ_new_mf = rᵛ_new * inv_one_plus_rᵗ_new
+            qˡ_new = rˡ_new * inv_one_plus_rᵗ_new
+
+            q_new = MoistureMassFractions(qᵛ_new_mf, qˡ_new)
+            cᵖᵐ_new = mixture_heat_capacity(q_new, constants)
+            Rᵐ_new  = mixture_gas_constant(q_new, constants)
+            Π_new = (p / p₀)^(Rᵐ_new / cᵖᵐ_new)
+
+            θˡⁱ_new = (T_new - ℒˡᵣ * qˡ_new / cᵖᵐ_new) / Π_new
+
+            θˡⁱ[i, j, k]  = θˡⁱ_new
+            ρθˡⁱ[i, j, k] = ρ * θˡⁱ_new
         end
 
         # Recalculate terminal velocities for next subcycle
@@ -637,7 +734,7 @@ end
 
             rᵗ = rᵛ + rᶜ + rʳ
             # Precompute common factor for all conversions
-            inv_one_plus_rᵗ = inv(1 + rᵗ)
+            inv_one_plus_rᵗ = inv(one_FT + rᵗ)
             qᵛ  = rᵛ * inv_one_plus_rᵗ
             qᶜˡ = rᶜ * inv_one_plus_rᵗ
             qʳ  = rʳ * inv_one_plus_rᵗ
