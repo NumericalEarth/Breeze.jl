@@ -10,10 +10,7 @@ using ..Thermodynamics:
     LiquidIcePotentialTemperatureState,
     MoistureMassFractions,
     total_specific_moisture,
-    dry_air_gas_constant,
-    vapor_gas_constant,
     with_moisture,
-    saturation_vapor_pressure,
     density,
     exner_function
 
