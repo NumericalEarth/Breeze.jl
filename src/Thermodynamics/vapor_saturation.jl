@@ -162,6 +162,11 @@ qᵛ⁺ᵐ = Breeze.Thermodynamics.saturation_specific_humidity(T, ρ, constants
     return pᵛ⁺ / (ρ * Rᵛ * T)
 end
 
+@inline function saturation_specific_humidity(T, ρ, constants, equilibrium::AbstractPhaseEquilibrium)
+    surface = equilibrated_surface(equilibrium, T)
+    return saturation_specific_humidity(T, ρ, constants, surface)
+end
+
 """
 $(TYPEDSIGNATURES)
 

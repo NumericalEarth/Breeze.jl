@@ -1,11 +1,9 @@
 using ..Thermodynamics:
+    Thermodynamics,
     MoistureMassFractions,
     mixture_heat_capacity,
-    dry_air_gas_constant,
-    vapor_gas_constant,
-    PlanarLiquidSurface,
-    PlanarMixedPhaseSurface,
-    saturation_vapor_pressure,
+    saturation_specific_humidity,
+    adjustment_saturation_specific_humidity,
     temperature,
     is_absolute_zero,
     with_moisture,
@@ -19,8 +17,6 @@ using ..Thermodynamics:
 
 using Oceananigans: Oceananigans, CenterField
 using DocStringExtensions: TYPEDSIGNATURES
-
-using ..Thermodynamics: Thermodynamics, saturation_specific_humidity, adjustment_saturation_specific_humidity
 
 struct SaturationAdjustment{E, FT}
     tolerance :: FT
@@ -132,11 +128,6 @@ end
 #####
 ##### Saturation adjustment utilities
 #####
-
-@inline function Thermodynamics.saturation_specific_humidity(T, ρ, constants, equilibrium::AbstractPhaseEquilibrium)
-    surface = equilibrated_surface(equilibrium, T)
-    return saturation_specific_humidity(T, ρ, constants, surface)
-end
 
 @inline function adjust_state(𝒰₀, T, constants, equilibrium)
     pᵣ = 𝒰₀.reference_pressure
