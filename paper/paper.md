@@ -16,13 +16,13 @@ authors:
     orcid: 0000-0002-8149-4094
     affiliation: "3, 4"
   - name: Madelaine Gamble Rosevear
-    orcid: 0000-0002-3825-0462
+    orcid: 0000-0003-4254-843X
     affiliation: "4, 5"
   - name: Tobias Bischoff
     orcid: 0000-0002-5629-5765
     affiliation: 1
   - name: Kaiyuan Cheng
-    orcid: 0000-0000-0000-0000
+    orcid: 0000-0002-4246-7659
     affiliation: 1
   - name: Mosè Giordano
     orcid: 0000-0002-7218-2873
