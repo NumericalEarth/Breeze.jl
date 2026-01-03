@@ -10,20 +10,20 @@ tags:
 authors:
   - name: Gregory L. Wagner
     orcid: 0000-0001-5317-2445
-    affiliation: 1
+    affiliation: "1, 2"
     corresponding: true
   - name: Navid C. Constantinou
     orcid: 0000-0002-8149-4094
-    affiliation: 2
+    affiliation: 3
   - name: Madelaine Gamble Rosevear
     orcid: 0000-0002-3825-0462
-    affiliation: 3
+    affiliation: 4
   - name: Tobias Bischoff
     orcid: 0000-0002-5629-5765
-    affiliation: 4
+    affiliation: 1
   - name: Kaiyuan Cheng
     orcid: 0000-0000-0000-0000
-    affiliation: 4
+    affiliation: 1
   - name: Mosè Giordano
     orcid: 0000-0002-7218-2873
     affiliation: 5
@@ -31,13 +31,13 @@ authors:
     orcid: 0000-0002-0784-7656
     affiliation: 6
 affiliations:
-  - name: Aeolus Labs, CA, USA and Massachusetts Institute of Technology, Cambridge, MA, USA
-    index: 1
-  - name: University of Melbourne, Parkville, VIC, Australia
-    index: 2
-  - name: University of Tasmania, Hobart, TAS, Australia
-    index: 3
   - name: Aeolus Labs, CA, USA
+    index: 1
+  - name: Massachusetts Institute of Technology, Cambridge, MA, USA
+    index: 2
+  - name: University of Melbourne, Parkville, VIC, Australia
+    index: 3
+  - name: University of Tasmania, Hobart, TAS, Australia
     index: 4
   - name: University College London, London, UK
     index: 5
@@ -56,7 +56,7 @@ bibliography: paper.bib
   - Dynamics equations sets
     - AnelasticDynamics
     - CompressibleDynamics
-    - [ ] ParcelDynamics  
+    - [ ] ParcelDynamics
   - Thermodynamic Formulations
     - Static energy
     - Liquid-ice potential temperature
