@@ -97,7 +97,7 @@ Breeze.jl is an open-source Julia package for simulating atmospheric flows, with
 
 Atmospheric simulation and weather prediction prevent disaster, help plan and help people plan their day.
 Weather prediction is currently undergoing a revolution due to the emergence of cheap and accurate machine-learning-based emulators.
-Yet despite a gathering quroum of conditions, including increasingly powerful modern software tools and increasingly capable hardware tailored specifically to numerical computation, no such revolution has transformed "traditional" numerical weather prediction (NWP) systems.
+Yet despite a gathering quorum of conditions, including increasingly powerful modern software tools and increasingly capable hardware tailored specifically to numerical computation, no such revolution has transformed "traditional" numerical weather prediction (NWP) systems.
 With modern software and hardware, we now have the technology to develop an instantly installable, easily learnable, blazingly fast, ML-integrated and differentiable NWP system that is orders of magnitude more efficient than traditional systems. Breeze represents an attempt to realize this goal.
 
 Numerical simulation of atmospheric flows spans scales from meters to thousands of kilometers, requiring diverse computational tools with distinct capabilities. At the smallest scales, large-eddy simulation (LES) models resolve turbulent eddies in the atmospheric boundary layer and have become essential for understanding cloud processes and convective dynamics. Existing LES codes include DALES [@DALES], microHH [@MicroHH], PyCLES [@PyCLES], PTerodaC³TILES [@PTerodaC3TILES], and the System for Atmospheric Modeling (SAM) [@SAM]. At larger scales, mesoscale models simulate weather systems from a few kilometers to regional scales, with prominent examples including Cloud Model 1 (CM1) [@CM1], the Weather Research and Forecasting model (WRF) [@WRF], Meso-NH [@MesoNH], and the ICON nonhydrostatic model [@ICON]. Some models, notably SAM and CM1, bridge these scales by operating in both LES and cloud-resolving configurations.
@@ -169,7 +169,6 @@ Breeze.jl includes documented examples demonstrating its capabilities:
 
 # Acknowledgements
 
-We acknowledge contributions from the Climate Modeling Alliance (CliMA) and the broader Julia community. This work was supported by [funding sources].
+We acknowledge contributions from the Climate Modeling Alliance (CliMA) and the broader Julia community. N.C.C. and M.G.R. are supported by the Australian Research Council Center of Excellence for the Weather of the 21st Century CE230100012. N.C.C. was further supported by the Australian Reasearch Council Discovery Project DP240101274.
 
 # References
-
