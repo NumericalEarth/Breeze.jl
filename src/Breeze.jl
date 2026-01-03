@@ -58,6 +58,8 @@ export
     RelativeHumidity,
     RelativeHumidityField,
     BulkMicrophysics,
+    DCMIP2016KesslerMicrophysics,
+    compute_hydrostatic_pressure!,
     NonEquilibriumCloudFormation,
 
     # BoundaryConditions

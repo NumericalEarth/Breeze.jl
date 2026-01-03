@@ -13,14 +13,20 @@ export
     FourCategories,
     SaturationSpecificHumidity,
     SaturationSpecificHumidityField,
+    DCMIP2016KesslerMicrophysics,
     RelativeHumidity,
     RelativeHumidityField
 
-using ..AtmosphereModels: AtmosphereModels, compute_moisture_fractions,
-    materialize_microphysical_fields, update_microphysical_fields!
+using ..AtmosphereModels: AtmosphereModels
+
+import ..AtmosphereModels:
+    compute_moisture_fractions,
+    materialize_microphysical_fields,
+    update_microphysical_fields!
 
 include("saturation_adjustment.jl")
 include("bulk_microphysics.jl")
 include("microphysics_diagnostics.jl")
+include("dcmip2016_kessler.jl")
 
 end # module Microphysics
