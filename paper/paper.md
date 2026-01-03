@@ -14,10 +14,10 @@ authors:
     corresponding: true
   - name: Navid C. Constantinou
     orcid: 0000-0002-8149-4094
-    affiliation: 3
+    affiliation: "3, 4"
   - name: Madelaine Gamble Rosevear
     orcid: 0000-0002-3825-0462
-    affiliation: 4
+    affiliation: "4, 5"
   - name: Tobias Bischoff
     orcid: 0000-0002-5629-5765
     affiliation: 1
@@ -26,10 +26,10 @@ authors:
     affiliation: 1
   - name: Mosè Giordano
     orcid: 0000-0002-7218-2873
-    affiliation: 5
+    affiliation: 6
   - name: Daniel Rosenfeld
     orcid: 0000-0002-0784-7656
-    affiliation: 6
+    affiliation: 7
 affiliations:
   - name: Aeolus Labs, CA, USA
     index: 1
@@ -37,12 +37,14 @@ affiliations:
     index: 2
   - name: University of Melbourne, Parkville, VIC, Australia
     index: 3
-  - name: University of Tasmania, Hobart, TAS, Australia
+  - name: Australian Research Council Center of Excellence for the Weather of the 21st Century, Australia
     index: 4
-  - name: University College London, London, UK
+  - name: University of Tasmania, Hobart, TAS, Australia
     index: 5
-  - name: The Hebrew University of Jerusalem, Jerusalem, Israel
+  - name: University College London, London, UK
     index: 6
+  - name: The Hebrew University of Jerusalem, Jerusalem, Israel
+    index: 7
 date: 31 December 2025
 bibliography: paper.bib
 ---
