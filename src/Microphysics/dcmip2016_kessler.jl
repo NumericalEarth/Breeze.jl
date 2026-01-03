@@ -59,13 +59,69 @@ instead, it is diagnosed from the total specific moisture `qᵗ` and the liquid 
 - All microphysical updates are applied directly to the state variables in the kernel.
 
 # Parameters
-- `f2x :: FT = 17.27`: Clausius-Clapeyron exponent coefficient (empirical constant for saturation)
 
-The saturation adjustment coefficient `f5 = 237.3 × f2x × ℒˡᵣ / cᵖᵈ` is computed dynamically
-from `f2x` and the thermodynamic constants.
+## Saturation (Tetens/Clausius-Clapeyron formula)
+- `f₂ₓ`: Clausius-Clapeyron exponent coefficient (default: 17.27)
+- `T_f`: Clausius-Clapeyron denominator coefficient in K (default: 237.3)
+- `T_offset`: Temperature offset in saturation adjustment in K (default: 36.0)
+
+The saturation adjustment coefficient is computed as `f₅ = T_f × f₂ₓ × ℒˡᵣ / cᵖᵈ`.
+
+## Rain Terminal Velocity (Klemp & Wilhelmson 1978, eq. 2.15)
+Terminal velocity: `vᵗ = a_vᵗ × (ρ × rʳ × ρ_scale)^β_vᵗ × √(ρ₀/ρ)`
+- `a_vᵗ`: Terminal velocity coefficient in m/s (default: 36.34)
+- `ρ_scale`: Density scale factor for unit conversion (default: 0.001)
+- `β_vᵗ`: Terminal velocity exponent (default: 0.1364)
+
+## Autoconversion
+- `k₁`: Autoconversion rate coefficient in s⁻¹ (default: 0.001)
+- `rᶜ_crit`: Critical cloud water mixing ratio threshold in kg/kg (default: 0.001)
+
+## Accretion
+- `k₂`: Accretion rate coefficient in s⁻¹ (default: 2.2)
+- `β_acc`: Accretion exponent for rain mixing ratio (default: 0.875)
+
+## Rain Evaporation (Klemp & Wilhelmson 1978, eq. 2.14)
+Ventilation: `(Cᵉᵛ₁ + Cᵉᵛ₂ × (ρ rʳ)^βᵉᵛ₁) × (ρ rʳ)^βᵉᵛ₂`
+- `Cᵉᵛ₁`: Evaporation ventilation coefficient 1 (default: 1.6)
+- `Cᵉᵛ₂`: Evaporation ventilation coefficient 2 (default: 124.9)
+- `βᵉᵛ₁`: Evaporation ventilation exponent 1 (default: 0.2046)
+- `βᵉᵛ₂`: Evaporation ventilation exponent 2 (default: 0.525)
+- `Cᵈⁱᶠᶠ`: Diffusivity-related denominator coefficient (default: 2.55e8)
+- `Cᵗʰᵉʳᵐ`: Thermal conductivity-related denominator coefficient (default: 5.4e5)
+
+## Numerical
+- `CFL_factor`: CFL safety factor for sedimentation subcycling (default: 0.8)
 """
 Base.@kwdef struct DCMIP2016KesslerMicrophysics{FT}
-    f2x :: FT = 17.27
+    # Saturation (Tetens/Clausius-Clapeyron)
+    f₂ₓ      :: FT = 17.27
+    T_f      :: FT = 237.3
+    T_offset :: FT = 36.0
+
+    # Rain terminal velocity (Klemp & Wilhelmson 1978)
+    a_vᵗ    :: FT = 36.34
+    ρ_scale :: FT = 0.001
+    β_vᵗ    :: FT = 0.1364
+
+    # Autoconversion
+    k₁      :: FT = 0.001
+    rᶜ_crit :: FT = 0.001
+
+    # Accretion
+    k₂    :: FT = 2.2
+    β_acc :: FT = 0.875
+
+    # Rain evaporation (Klemp & Wilhelmson 1978)
+    Cᵉᵛ₁   :: FT = 1.6
+    Cᵉᵛ₂   :: FT = 124.9
+    βᵉᵛ₁   :: FT = 0.2046
+    βᵉᵛ₂   :: FT = 0.525
+    Cᵈⁱᶠᶠ  :: FT = 2.55e8
+    Cᵗʰᵉʳᵐ :: FT = 5.4e5
+
+    # Numerical
+    CFL_factor :: FT = 0.8
 end
 
 const DCMIP2016KM = DCMIP2016KesslerMicrophysics
@@ -243,13 +299,23 @@ Convert mixing ratio `r` to mass fraction: `q = r / (1 + rᵗ)`.
 
 
 """
-    kessler_terminal_velocity(rʳ, ρ, ρ_bottom)
+    kessler_terminal_velocity(rʳ, ρ, ρ_bottom, microphysics)
 
 Compute rain terminal velocity (m/s) following Klemp and Wilhelmson (1978) eq. 2.15.
+
+The terminal velocity is computed as:
+```math
+vᵗ = a_{vᵗ} × (ρ × rʳ × ρ_{scale})^{β_{vᵗ}} × \\sqrt{ρ₀/ρ}
+```
+
+where the parameters `a_vᵗ`, `ρ_scale`, and `β_vᵗ` are taken from the `microphysics` struct.
 """
-@inline function kessler_terminal_velocity(rʳ, ρ, ρ_bottom)
+@inline function kessler_terminal_velocity(rʳ, ρ, ρ_bottom, microphysics)
+    a_vᵗ    = microphysics.a_vᵗ
+    ρ_scale = microphysics.ρ_scale
+    β_vᵗ    = microphysics.β_vᵗ
     rhalf = sqrt(ρ_bottom / ρ)
-    return 36.34 * (rʳ * 0.001 * ρ)^0.1364 * rhalf
+    return a_vᵗ * (rʳ * ρ_scale * ρ)^β_vᵗ * rhalf
 end
 
 #####
@@ -340,10 +406,15 @@ end
     κ = Rᵈ * inv_cᵖᵈ
 
     # Get scheme-specific parameters from microphysics struct
-    f2x = microphysics.f2x
+    f₂ₓ      = microphysics.f₂ₓ
+    T_f      = microphysics.T_f
+    T_offset = microphysics.T_offset
 
-    # Compute f5 = 237.3 × f2x × ℒˡᵣ / cᵖᵈ (saturation adjustment coefficient)
-    f5 = 237.3 * f2x * ℒˡᵣ * inv_cᵖᵈ
+    # Compute f₅ = T_f × f₂ₓ × ℒˡᵣ / cᵖᵈ (saturation adjustment coefficient)
+    f₅ = T_f * f₂ₓ * ℒˡᵣ * inv_cᵖᵈ
+
+    # CFL safety factor for sedimentation
+    CFL_factor = microphysics.CFL_factor
 
     # Precompute latent heating factor
     ℒˡᵣ_over_cᵖᵈ = ℒˡᵣ * inv_cᵖᵈ
@@ -375,7 +446,7 @@ end
             rᶜ = qᶜˡ * inv_one_minus_qᵗ
             rʳ = qʳ * inv_one_minus_qᵗ
 
-            velqr = kessler_terminal_velocity(rʳ, ρ, ρ_bottom)
+            velqr = kessler_terminal_velocity(rʳ, ρ, ρ_bottom, microphysics)
             vᵗ_rain[i, j, k] = velqr
 
             # Store mixing ratios in diagnostic fields during physics
@@ -389,7 +460,7 @@ end
                 z_kp1 = znode(i, j, k+1, grid, Center(), Center(), Center())
                 dz = z_kp1 - z_k
                 if velqr > 0
-                    dt_max = min(dt_max, 0.8 * dz / velqr)
+                    dt_max = min(dt_max, CFL_factor * dz / velqr)
                 end
             end
         end
@@ -443,7 +514,8 @@ end
 
 
                 # Rain sedimentation (upstream differencing)
-                r_k = 0.001 * ρ
+                ρ_scale = microphysics.ρ_scale
+                r_k = ρ_scale * ρ
                 velqr_k = vᵗ_rain[i, j, k]
 
                 if k < Nz
@@ -452,7 +524,7 @@ end
                     dz = z_kp1 - z_k
 
                     ρ_kp1 = ρᵣ[k+1]
-                    r_kp1 = 0.001 * ρ_kp1
+                    r_kp1 = ρ_scale * ρ_kp1
                     rʳ_kp1 = qʳ_field[i, j, k+1]  # Mixing ratio
                     velqr_kp1 = vᵗ_rain[i, j, k+1]
 
@@ -466,10 +538,16 @@ end
                 end
 
                 # Autoconversion + accretion (KW eq. 2.13)
-                rrprod = rᶜ - (rᶜ - dt0 * max(0.001 * (rᶜ - 0.001), 0)) /
-                         (1 + dt0 * 2.2 * rʳ^0.875)
-                rᶜ_new = max(rᶜ - rrprod, 0)
-                rʳ_new = max(rʳ + rrprod + sed, 0)
+                # Parameters from microphysics struct
+                k₁      = microphysics.k₁
+                rᶜ_crit = microphysics.rᶜ_crit
+                k₂      = microphysics.k₂
+                β_acc   = microphysics.β_acc
+
+                rrprod = rᶜ - (rᶜ - dt0 * max(k₁ * (rᶜ - rᶜ_crit), zero(FT))) /
+                         (1 + dt0 * k₂ * rʳ^β_acc)
+                rᶜ_new = max(rᶜ - rrprod, zero(FT))
+                rʳ_new = max(rʳ + rrprod + sed, zero(FT))
 
                 # Saturation specific humidity using Breeze thermodynamics
                 # qᵛ⁺ = pᵛ⁺ / (ρ Rᵛ T) is the saturation mass fraction
@@ -478,19 +556,27 @@ end
                 rᵛ⁺ = qᵛ⁺ / (1 - qᵛ⁺)
 
                 # Saturation adjustment
-                prod = (rᵛ - rᵛ⁺) / (1 + rᵛ⁺ * f5 / (T_k - 36)^2)
+                prod = (rᵛ - rᵛ⁺) / (1 + rᵛ⁺ * f₅ / (T_k - T_offset)^2)
 
                 # Rain evaporation (KW eq. 2.14)
+                # Parameters from microphysics struct
+                Cᵉᵛ₁   = microphysics.Cᵉᵛ₁
+                Cᵉᵛ₂   = microphysics.Cᵉᵛ₂
+                βᵉᵛ₁   = microphysics.βᵉᵛ₁
+                βᵉᵛ₂   = microphysics.βᵉᵛ₂
+                Cᵈⁱᶠᶠ  = microphysics.Cᵈⁱᶠᶠ
+                Cᵗʰᵉʳᵐ = microphysics.Cᵗʰᵉʳᵐ
+
                 rrr = r_k * rʳ_new
-                ern_num = (1.6 + 124.9 * rrr^0.2046) * rrr^0.525
-                ern_den = 255000000 / (p * rᵛ⁺) + 540000
-                subsaturation = max(rᵛ⁺ - rᵛ, 0)
+                ern_num = (Cᵉᵛ₁ + Cᵉᵛ₂ * rrr^βᵉᵛ₁) * rrr^βᵉᵛ₂
+                ern_den = Cᵈⁱᶠᶠ / (p * rᵛ⁺) + Cᵗʰᵉʳᵐ
+                subsaturation = max(rᵛ⁺ - rᵛ, zero(FT))
                 ern_rate = ern_num / ern_den * subsaturation / (r_k * rᵛ⁺ + FT(1e-20))
-                ern = min(dt0 * ern_rate, max(-prod - rᶜ_new, 0), rʳ_new)
+                ern = min(dt0 * ern_rate, max(-prod - rᶜ_new, zero(FT)), rʳ_new)
 
                 # Apply adjustments
                 condensation = max(prod, -rᶜ_new)
-                rᵛ_new = max(rᵛ - condensation + ern, 0)
+                rᵛ_new = max(rᵛ - condensation + ern, zero(FT))
                 rᶜ_final = rᶜ_new + condensation
                 rʳ_final = rʳ_new - ern
 
@@ -530,7 +616,7 @@ end
                 @inbounds begin
                     ρ = ρᵣ[k]
                     rʳ = qʳ_field[i, j, k]
-                    vᵗ_rain[i, j, k] = kessler_terminal_velocity(rʳ, ρ, ρ_bottom)
+                    vᵗ_rain[i, j, k] = kessler_terminal_velocity(rʳ, ρ, ρ_bottom, microphysics)
                 end
             end
         end

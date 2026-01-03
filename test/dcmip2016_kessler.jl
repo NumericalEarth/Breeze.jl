@@ -142,17 +142,18 @@ end
         ρ = 1.0         # kg/m³
         ρ_bottom = 1.2  # kg/m³
         rʳ = 0.001      # 1 g/kg rain mixing ratio
+        microphysics = DCMIP2016KesslerMicrophysics()
 
-        vt = kessler_terminal_velocity(rʳ, ρ, ρ_bottom)
+        vt = kessler_terminal_velocity(rʳ, ρ, ρ_bottom, microphysics)
         @test vt > 0
         @test vt < 20  # Reasonable terminal velocity (m/s)
 
         # Zero rain should give zero velocity
-        vt_zero = kessler_terminal_velocity(0.0, ρ, ρ_bottom)
+        vt_zero = kessler_terminal_velocity(0.0, ρ, ρ_bottom, microphysics)
         @test vt_zero == 0.0
 
         # Higher rain content should give higher velocity
-        vt_high = kessler_terminal_velocity(0.005, ρ, ρ_bottom)
+        vt_high = kessler_terminal_velocity(0.005, ρ, ρ_bottom, microphysics)
         @test vt_high > vt
     end
 
@@ -282,7 +283,7 @@ end
 
     # 3. Run Julia Implementation
     
-    microphysics = DCMIP2016KesslerMicrophysics(f2x = 17.27)
+    microphysics = DCMIP2016KesslerMicrophysics(f₂ₓ = 17.27)
     
     # Reference State
     # We construct a reference state that matches the profile's density/pressure
