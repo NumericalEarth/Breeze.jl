@@ -17,7 +17,7 @@ using Breeze.Thermodynamics:
 using Breeze.MoistAirBuoyancies: compute_boussinesq_adjustment_temperature
 using Breeze.Microphysics: compute_temperature
 
-using Breeze: equilibrium_saturation_specific_humidity
+using Breeze: adjustment_saturation_specific_humidity
 
 solver_tol(::Type{Float64}) = 1e-6
 solver_tol(::Type{Float32}) = 1e-3
@@ -69,7 +69,7 @@ test_thermodynamics = (:StaticEnergy, :LiquidIcePotentialTemperature)
             @testset let T₂=T₂, qᵗ₂=qᵗ₂
                 T₂ = convert(FT, T₂)
                 qᵗ₂ = convert(FT, qᵗ₂)
-                qᵛ⁺₂ = equilibrium_saturation_specific_humidity(T₂, pᵣ, qᵗ₂, constants, microphysics.equilibrium)
+                qᵛ⁺₂ = adjustment_saturation_specific_humidity(T₂, pᵣ, qᵗ₂, constants, microphysics.equilibrium)
                 @test qᵛ⁺₂ isa FT
 
                 if qᵗ₂ > qᵛ⁺₂ # saturated conditions

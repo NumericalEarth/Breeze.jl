@@ -20,7 +20,7 @@ using ..Thermodynamics:
 using Oceananigans: Oceananigans, CenterField
 using DocStringExtensions: TYPEDSIGNATURES
 
-using ..Thermodynamics: Thermodynamics, saturation_specific_humidity, equilibrium_saturation_specific_humidity
+using ..Thermodynamics: Thermodynamics, saturation_specific_humidity, adjustment_saturation_specific_humidity
 
 struct SaturationAdjustment{E, FT}
     tolerance :: FT
@@ -141,7 +141,7 @@ end
 @inline function adjust_state(𝒰₀, T, constants, equilibrium)
     pᵣ = 𝒰₀.reference_pressure
     qᵗ = total_specific_moisture(𝒰₀)
-    qᵛ⁺ = equilibrium_saturation_specific_humidity(T, pᵣ, qᵗ, constants, equilibrium)
+    qᵛ⁺ = adjustment_saturation_specific_humidity(T, pᵣ, qᵗ, constants, equilibrium)
     q₁ = equilibrated_moisture_mass_fractions(T, qᵗ, qᵛ⁺, equilibrium)
     return with_moisture(𝒰₀, q₁)
 end

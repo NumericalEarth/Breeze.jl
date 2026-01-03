@@ -375,7 +375,7 @@ Compute the relative humidity as the ratio of vapor pressure to saturation vapor
     return pᵛ / pᵛ⁺
 end
 
-@inline function relative_humidity(T, p, q::MMF, constants, surface=PlanarLiquidSurface())
+@inline function relative_humidity(p, T, q::MMF, constants, surface=PlanarLiquidSurface())
     ρ = density(T, p, q, constants)
     pᵛ = vapor_pressure(T, ρ, q.vapor, constants)
     pᵛ⁺ = saturation_vapor_pressure(T, constants, surface)

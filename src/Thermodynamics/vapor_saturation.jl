@@ -280,6 +280,32 @@ end
 """
 $(TYPEDSIGNATURES)
 
+Compute the *saturation specific humidity* ``qᵛ⁺`` for use in saturation adjustment,
+assuming **saturated conditions** where condensate is present.
+
+This function always uses the saturated formula (equation 37 in Pressel et al. 2015):
+
+```math
+qᵛ⁺ = ϵᵈᵛ (1 - qᵗ) \\frac{pᵛ⁺}{pᵣ - pᵛ⁺}
+```
+
+where ``ϵᵈᵛ = Rᵈ / Rᵛ ≈ 0.622``.
+
+Unlike [`equilibrium_saturation_specific_humidity`](@ref), this function does not
+check whether the air is actually saturated. It is intended for use within the
+saturation adjustment iteration where we assume saturated conditions throughout.
+"""
+@inline function adjustment_saturation_specific_humidity(T, pᵣ, qᵗ, constants, surface)
+    pᵛ⁺ = saturation_vapor_pressure(T, constants, surface)
+    Rᵈ = dry_air_gas_constant(constants)
+    Rᵛ = vapor_gas_constant(constants)
+    ϵᵈᵛ = Rᵈ / Rᵛ
+    return ϵᵈᵛ * (1 - qᵗ) * pᵛ⁺ / (pᵣ - pᵛ⁺)
+end
+
+"""
+$(TYPEDSIGNATURES)
+
 Compute the equilibrium saturation specific humidity using a phase `equilibrium`
 model to determine the condensation surface based on temperature `T`.
 """
@@ -287,3 +313,15 @@ model to determine the condensation surface based on temperature `T`.
     surface = equilibrated_surface(equilibrium, T)
     return equilibrium_saturation_specific_humidity(T, pᵣ, qᵗ, constants, surface)
 end
+
+"""
+$(TYPEDSIGNATURES)
+
+Compute the adjustment saturation specific humidity using a phase `equilibrium`
+model to determine the condensation surface based on temperature `T`.
+"""
+@inline function adjustment_saturation_specific_humidity(T, pᵣ, qᵗ, constants, equilibrium::AbstractPhaseEquilibrium)
+    surface = equilibrated_surface(equilibrium, T)
+    return adjustment_saturation_specific_humidity(T, pᵣ, qᵗ, constants, surface)
+end
+

@@ -32,7 +32,7 @@ using ..Thermodynamics:
     mixture_heat_capacity,
     mixture_gas_constant,
     saturation_specific_humidity,
-    equilibrium_saturation_specific_humidity
+    adjustment_saturation_specific_humidity
 
 struct MoistAirBuoyancy{RS, AT} <: AbstractBuoyancyFormulation{Nothing}
     reference_state :: RS
@@ -195,7 +195,7 @@ Solution of ``r(T) = 0`` is found via the [secant method](https://en.wikipedia.o
     # has to be modified to consistently include the liquid mass fraction.
     # Subsequent computations will assume that the specific humidity
     # is given by the saturation specific humidity, eg ``qᵛ = qᵛ⁺``.
-    qᵛ⁺₁ = equilibrium_saturation_specific_humidity(T₁, pᵣ, qᵗ, constants, constants.liquid)
+    qᵛ⁺₁ = adjustment_saturation_specific_humidity(T₁, pᵣ, qᵗ, constants, constants.liquid)
     qˡ₁ = qᵗ - qᵛ⁺₁
     q₁ = MoistureMassFractions(qᵛ⁺₁, qˡ₁)
     𝒰₁ = with_moisture(𝒰₀, q₁)
@@ -239,7 +239,7 @@ end
 @inline function adjust_state(𝒰₀, T, constants)
     pᵣ = 𝒰₀.reference_pressure
     qᵗ = total_specific_moisture(𝒰₀)
-    qᵛ⁺ = equilibrium_saturation_specific_humidity(T, pᵣ, qᵗ, constants, constants.liquid)
+    qᵛ⁺ = adjustment_saturation_specific_humidity(T, pᵣ, qᵗ, constants, constants.liquid)
     qˡ = max(0, qᵗ - qᵛ⁺)
     qᵛ = qᵗ - qˡ
     q₁ = MoistureMassFractions(qᵛ, qˡ)
@@ -357,7 +357,7 @@ Adapt.adapt_structure(to, ck::CondensateKernel) = CondensateKernel(adapt(to, ck.
 
     # Next assume a saturation value
     constants = mb.thermodynamic_constants
-    qᵛ⁺ = equilibrium_saturation_specific_humidity(Tᵢ, pᵣ, qᵗᵢ, constants, constants.liquid)
+    qᵛ⁺ = adjustment_saturation_specific_humidity(Tᵢ, pᵣ, qᵗᵢ, constants, constants.liquid)
     return max(0, qᵗᵢ - qᵛ⁺)
 end
 
