@@ -19,8 +19,10 @@ Breeze interfaces with ClimaOcean for coupled atmosphere-ocean simulations.
 ### Julia practices and information
 
 1. **Explicit Imports**: Use `ExplicitImports.jl` style - explicitly import all used functions/types
-   - Import from Oceananigans explicitly (already done in src/Breeze.jl)
+   - Import from Oceananigans explicitly (already done in `src/Breeze.jl`)
    - Tests automatically check for proper imports
+   - Never use the `import` keyword for.
+     To extend functions from other modules always use the syntax `Module.function_name(...) = ...` or `function Module.function_name() ... end`, not `import Module: function_name; function_name(...) = ...`
 
 2. **Type Stability**: Prioritize type-stable code for performance
    - All structs must be concretely typed
