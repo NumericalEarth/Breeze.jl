@@ -288,7 +288,7 @@ $(TYPEDSIGNATURES)
 Compute the *saturation specific humidity* ``qᵛ⁺`` for use in saturation adjustment,
 assuming **saturated conditions** where condensate is present.
 
-This function always uses the saturated formula (equation 37 in [Pressel et al. 2015](@cite Pressel2015)):
+This function always uses the saturated formula (equation 37 in paper by [Pressel et al. 2015](@cite Pressel2015)):
 
 ```math
 qᵛ⁺ = ϵᵈᵛ (1 - qᵗ) \\frac{pᵛ⁺}{pᵣ - pᵛ⁺}
