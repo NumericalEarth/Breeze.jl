@@ -7,7 +7,7 @@
 #####
 
 # No default initialization for compressible models
-initialize_model_thermodynamics!(model::CompressibleModel) = nothing
+AtmosphereModels.initialize_model_thermodynamics!(model::CompressibleModel) = nothing
 
 #####
 ##### Pressure correction (no-op for compressible dynamics)
@@ -67,7 +67,7 @@ This joint computation is necessary because, unlike anelastic dynamics where pre
 comes from a reference state, compressible dynamics requires solving for both
 temperature and pressure simultaneously.
 """
-function compute_auxiliary_dynamics_variables!(model::CompressibleModel)
+function AtmosphereModels.compute_auxiliary_dynamics_variables!(model::CompressibleModel)
     grid = model.grid
     arch = grid.architecture
     dynamics = model.dynamics

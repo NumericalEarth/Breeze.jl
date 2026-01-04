@@ -34,14 +34,14 @@ end
 ##### Field naming interface
 #####
 
-prognostic_thermodynamic_field_names(::StaticEnergyFormulation) = tuple(:ρe)
-additional_thermodynamic_field_names(::StaticEnergyFormulation) = tuple(:e)
-thermodynamic_density_name(::StaticEnergyFormulation) = :ρe
-thermodynamic_density(formulation::StaticEnergyFormulation) = formulation.energy_density
+AtmosphereModels.prognostic_thermodynamic_field_names(::StaticEnergyFormulation) = tuple(:ρe)
+AtmosphereModels.additional_thermodynamic_field_names(::StaticEnergyFormulation) = tuple(:e)
+AtmosphereModels.thermodynamic_density_name(::StaticEnergyFormulation) = :ρe
+AtmosphereModels.thermodynamic_density(formulation::StaticEnergyFormulation) = formulation.energy_density
 
-prognostic_thermodynamic_field_names(::Val{:StaticEnergy}) = tuple(:ρe)
-additional_thermodynamic_field_names(::Val{:StaticEnergy}) = tuple(:e)
-thermodynamic_density_name(::Val{:StaticEnergy}) = :ρe
+AtmosphereModels.prognostic_thermodynamic_field_names(::Val{:StaticEnergy}) = tuple(:ρe)
+AtmosphereModels.additional_thermodynamic_field_names(::Val{:StaticEnergy}) = tuple(:e)
+AtmosphereModels.thermodynamic_density_name(::Val{:StaticEnergy}) = :ρe
 
 Oceananigans.fields(formulation::StaticEnergyFormulation) = (; e=formulation.specific_energy)
 Oceananigans.prognostic_fields(formulation::StaticEnergyFormulation) = (; ρe=formulation.energy_density)
@@ -50,7 +50,7 @@ Oceananigans.prognostic_fields(formulation::StaticEnergyFormulation) = (; ρe=fo
 ##### Materialization
 #####
 
-function materialize_formulation(::Val{:StaticEnergy}, dynamics, grid, boundary_conditions)
+function AtmosphereModels.materialize_formulation(::Val{:StaticEnergy}, dynamics, grid, boundary_conditions)
     energy_density = CenterField(grid, boundary_conditions=boundary_conditions.ρe)
     specific_energy = CenterField(grid)  # e = ρe / ρ (diagnostic per-mass energy)
     return StaticEnergyFormulation(energy_density, specific_energy)
@@ -60,7 +60,7 @@ end
 ##### Auxiliary variable computation
 #####
 
-function compute_auxiliary_thermodynamic_variables!(formulation::StaticEnergyFormulation, dynamics, i, j, k, grid)
+function AtmosphereModels.compute_auxiliary_thermodynamic_variables!(formulation::StaticEnergyFormulation, dynamics, i, j, k, grid)
     ρ = dynamics_density(dynamics)
     @inbounds begin
         ρᵢ = ρ[i, j, k]
@@ -80,10 +80,10 @@ $(TYPEDSIGNATURES)
 Build a `StaticEnergyState` at grid point `(i, j, k)` from the given `formulation`, `dynamics`,
 and pre-computed moisture mass fractions `q`.
 """
-function diagnose_thermodynamic_state(i, j, k, grid,
-                                      formulation::StaticEnergyFormulation,
-                                      dynamics,
-                                      q)
+function AtmosphereModels.diagnose_thermodynamic_state(i, j, k, grid,
+                                                       formulation::StaticEnergyFormulation,
+                                                       dynamics,
+                                                       q)
 
     e = @inbounds formulation.specific_energy[i, j, k]
     pᵣ = @inbounds dynamics_pressure(dynamics)[i, j, k]
@@ -96,12 +96,12 @@ end
 ##### Prognostic field collection
 #####
 
-function collect_prognostic_fields(formulation::StaticEnergyFormulation,
-                                   dynamics,
-                                   momentum,
-                                   moisture_density,
-                                   microphysical_fields,
-                                   tracers)
+function AtmosphereModels.collect_prognostic_fields(formulation::StaticEnergyFormulation,
+                                                    dynamics,
+                                                    momentum,
+                                                    moisture_density,
+                                                    microphysical_fields,
+                                                    tracers)
     ρe = formulation.energy_density
     thermodynamic_variables = (ρe=ρe, ρqᵗ=moisture_density)
     dynamics_fields = dynamics_prognostic_fields(dynamics)

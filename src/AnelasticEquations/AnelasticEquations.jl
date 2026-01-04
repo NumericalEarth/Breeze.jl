@@ -30,29 +30,10 @@ using Oceananigans.TimeSteppers: TimeSteppers
 using Oceananigans.Utils: prettysummary, launch!
 
 using Breeze.Thermodynamics: ReferenceState, mixture_gas_constant
-
-using Breeze.AtmosphereModels: AtmosphereModel
-
-# Import interface functions to extend
-import Breeze.AtmosphereModels:
-    default_dynamics,
-    materialize_dynamics,
-    materialize_momentum_and_velocities,
-    dynamics_pressure_solver,
-    dynamics_density,
-    dynamics_pressure,
-    surface_pressure,
-    standard_pressure,
-    mean_pressure,
-    pressure_anomaly,
-    total_pressure,
-    buoyancy_forceᶜᶜᶜ,
-    prognostic_dynamics_field_names,
-    additional_dynamics_field_names,
-    initialize_model_thermodynamics!
+using Breeze.AtmosphereModels: AtmosphereModels, AtmosphereModel, mean_pressure, pressure_anomaly
 
 # Import microphysics interface for buoyancy computation
-import Breeze.AtmosphereModels: compute_moisture_fractions
+using Breeze.AtmosphereModels: compute_moisture_fractions
 
 include("anelastic_dynamics.jl")
 include("anelastic_pressure_solver.jl")
