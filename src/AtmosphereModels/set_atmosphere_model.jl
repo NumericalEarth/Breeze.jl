@@ -3,6 +3,8 @@ using Oceananigans.TimeSteppers: update_state!
 using Oceananigans.BoundaryConditions: fill_halo_regions!
 using Oceananigans.TimeSteppers: compute_pressure_correction!, make_pressure_correction!, update_state!
 
+using .Diagnostics: SaturationSpecificHumidity
+
 using ..Thermodynamics:
     MoistureMassFractions,
     mixture_heat_capacity,
@@ -94,6 +96,10 @@ Variables are set via keyword arguments. Supported variables include:
 **Diagnostic variables** (specific, i.e., per unit mass):
 - `u`, `v`, `w`: velocity components (sets both velocity and momentum)
 - `qᵗ`: total specific moisture (sets both specific and density-weighted moisture)
+- `ℋ`: relative humidity (sets total moisture via `qᵗ = ℋ * qᵛ⁺`, where `qᵛ⁺` is the
+  saturation specific humidity at the current temperature). Relative humidity is in
+  the range [0, 1]. For models with saturation adjustment microphysics, `ℋ > 1` throws
+  an error since the saturation adjustment would immediately reduce it to 1.
 
 **Specific microphysical variables** (automatically converted to density-weighted):
 - `qᶜˡ`: specific cloud liquid (sets `ρqᶜˡ = ρᵣ * qᶜˡ`)
@@ -154,8 +160,8 @@ function Fields.set!(model::AtmosphereModel; time=nothing, enforce_mass_conserva
             set!(qᵗ, value)
             ρ = dynamics_density(model.dynamics)
             ρqᵗ = model.moisture_density
-            set!(ρqᵗ, ρ * qᵗ)                
-
+            set!(ρqᵗ, ρ * qᵗ)
+        
         elseif name ∈ (:u, :v, :w)
             u = model.velocities[name]
             set!(u, value)
@@ -175,9 +181,25 @@ function Fields.set!(model::AtmosphereModel; time=nothing, enforce_mass_conserva
             # Fill halos immediately - needed for velocity→momentum conversion
             fill_halo_regions!(ρ)
 
+        elseif name == :ℋ
+            # Call update_state! to ensure temperature is computed from thermodynamic variables
+            update_state!(model, compute_tendencies=false)
+
+            # Compute saturation specific humidity using GPU-compatible kernel
+            # Use :equilibrium flavor which handles both saturated and unsaturated conditions
+            qᵛ⁺ = SaturationSpecificHumidity(model, :equilibrium)
+
+            # Set qᵗ = ℋ * qᵛ⁺
+            qᵗ = model.specific_moisture
+            set!(qᵗ, value * qᵛ⁺)
+
+            ρ = dynamics_density(model.dynamics)
+            ρqᵗ = model.moisture_density
+            set!(ρqᵗ, ρ * qᵗ)
+
         else
             prognostic_names = keys(prognostic_fields(model))
-            settable_diagnostic_variables = (:qᵗ, :u, :v, :w)
+            settable_diagnostic_variables = (:qᵗ, :ℋ, :u, :v, :w)
             specific_microphysical = settable_specific_microphysical_names(model.microphysics)
 
             msg = "Cannot set! $name in AtmosphereModel because $name is neither a

@@ -341,7 +341,7 @@ end
 ##### Equation of state
 #####
 
-@inline function density(p, T, q::MMF, constants::TC)
+@inline function density(T, p, q::MMF, constants::TC)
     Rᵐ = mixture_gas_constant(q, constants)
     return p / (Rᵐ * T)
 end
@@ -376,7 +376,7 @@ Compute the relative humidity as the ratio of vapor pressure to saturation vapor
 end
 
 @inline function relative_humidity(p, T, q::MMF, constants, surface=PlanarLiquidSurface())
-    ρ = density(p, T, q, constants)
+    ρ = density(T, p, q, constants)
     pᵛ = vapor_pressure(T, ρ, q.vapor, constants)
     pᵛ⁺ = saturation_vapor_pressure(T, constants, surface)
     return pᵛ / pᵛ⁺

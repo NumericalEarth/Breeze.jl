@@ -74,7 +74,7 @@ N = 0.01                  # target dry Brunt–Väisälä frequency (s⁻¹)
 #
 # - A shear layer centered at height ``z₀`` with the zonal flow transitioning from a lower
 #   speed ``U_{\rm bot}`` to an upper speed ``U_{\rm top}``.
-# - A moist layer centered at the same height with a Gaussian profile.
+# - A moist layer centered at the same height with a Gaussian relative humidity profile.
 #
 # The above  mimics a moist, stably stratified layer embedded in stronger flow
 # above and weaker flow below.
@@ -87,24 +87,25 @@ U₀  =  5   # base wind speed (m/s)
 ΔU  = 20   # upper-layer wind (m/s)
 uᵇ(z) = U₀ + ΔU * (1 + tanh((z - z₀) / Δzᵘ)) / 2
 
-# For the moisture layer, we use a Gaussian in ``z`` centered at ``z₀``:
+# For the moisture layer, we specify a Gaussian relative humidity profile centered at ``z₀``.
+# The peak relative humidity is ``ℋ₀ = 1`` (exactly saturated), so any upward motion
+# or mixing will trigger cloud formation.
 
-qᵗ₀ = 0.012  # peak specific humidity (kg/kg)
-Δzᵗ = 200     # moist layer half-width (m)
-qᵇ(z) = qᵗ₀ * exp(-(z - z₀)^2 / 2Δzᵗ^2)
+ℋ₀  = 1.0    # peak relative humidity (saturated)
+Δzℋ = 200    # moist layer half-width (m)
+ℋᵇ(x, z) = ℋ₀ * exp(-(z - z₀)^2 / 2Δzℋ^2)
 
 # We initialize the model via Oceananigans `set!`, adding also a bit of random noise.
+# Note that we use the `ℋ` keyword argument to set moisture via relative humidity.
 
 δθ = 0.01
 δu = 1e-3
-δq = 0.05 * qᵗ₀
 
 ϵ() = rand() - 1/2
 θᵢ(x, z) = θᵇ(z) + δθ * ϵ()
-qᵗᵢ(x, z) = qᵇ(z) + δq * ϵ()
 uᵢ(x, z) = uᵇ(z) + δu * ϵ()
 
-set!(model; u=uᵢ, qᵗ=qᵗᵢ, θ=θᵢ)
+set!(model; u=uᵢ, θ=θᵢ, ℋ=ℋᵇ)
 
 # ## The Kelvin-Helmholtz instability
 #
@@ -118,23 +119,26 @@ set!(model; u=uᵢ, qᵗ=qᵗᵢ, θ=θᵢ)
 # is less than 1/4 [Miles1961, Howard1961](@cite). With the parameters chosen
 # above this is the case.
 #
-# Let's plot the initial state as well as the Richardson number.
+# Let's plot the initial state as well as the Richardson number and relative humidity.
 
 U = Field(Average(model.velocities.u, dims=(1, 2)))
 Ri = N^2 / ∂z(U)^2
 
 Qᵗ = Field(Average(model.specific_moisture, dims=1))
 θ = Field(Average(liquid_ice_potential_temperature(model), dims=1))
+ℋ = Field(Average(RelativeHumidity(model), dims=1))
 
-fig = Figure(size=(800, 500))
+fig = Figure(size=(1000, 500))
 
 axu = Axis(fig[1, 1], xlabel = "uᵇ (m/s)", ylabel = "z (m)", title = "Zonal velocity")
-axq = Axis(fig[1, 2], xlabel = "qᵇ (kg/kg)", title="Total liquid")
-axθ = Axis(fig[1, 3], xlabel = "θᵇ (K)", title="Potential temperature")
-axR = Axis(fig[1, 4], xlabel = "Ri", ylabel="z (m)", title="Richardson number")
+axq = Axis(fig[1, 2], xlabel = "qᵗ (kg/kg)", title="Total moisture")
+axℋ = Axis(fig[1, 3], xlabel = "ℋ", title="Relative humidity")
+axθ = Axis(fig[1, 4], xlabel = "θ (K)", title="Potential temperature")
+axR = Axis(fig[1, 5], xlabel = "Ri", title="Richardson number")
 
 lines!(axu, U)
 lines!(axq, Qᵗ)
+lines!(axℋ, ℋ)
 lines!(axθ, θ)
 lines!(axR, Ri)
 lines!(axR, [1/4, 1/4], [0, Lz], linestyle = :dash, color = :black)
@@ -142,7 +146,7 @@ lines!(axR, [1/4, 1/4], [0, Lz], linestyle = :dash, color = :black)
 xlims!(axR, 0, 0.8)
 axR.xticks = 0:0.25:1
 
-for ax in (axq, axθ, axR)
+for ax in (axq, axℋ, axθ, axR)
     ax.yticksvisible = false
     ax.yticklabelsvisible = false
     ax.ylabelvisible = false

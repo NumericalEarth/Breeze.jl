@@ -55,6 +55,7 @@ export
     WarmPhaseEquilibrium,
     SaturationSpecificHumidity,
     SaturationSpecificHumidityField,
+    equilibrium_saturation_specific_humidity,
     RelativeHumidity,
     RelativeHumidityField,
     BulkMicrophysics,
