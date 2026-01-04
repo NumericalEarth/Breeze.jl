@@ -91,7 +91,7 @@ uᵇ(z) = U₀ + ΔU * (1 + tanh((z - z₀) / Δzᵘ)) / 2
 # The peak relative humidity is ``ℋ₀ = 1`` (exactly saturated), so any upward motion
 # or mixing will trigger cloud formation.
 
-ℋ₀  = 1.0    # peak relative humidity (saturated)
+ℋ₀  = 1.2    # peak relative humidity (saturated)
 Δzℋ = 200    # moist layer half-width (m)
 ℋᵇ(x, z) = ℋ₀ * exp(-(z - z₀)^2 / 2Δzℋ^2)
 
