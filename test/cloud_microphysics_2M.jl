@@ -1,4 +1,5 @@
 using Breeze
+using Breeze.AtmosphereModels: microphysical_velocities
 using CloudMicrophysics
 using GPUArraysCore: @allowscalar
 using Oceananigans
@@ -8,8 +9,7 @@ BreezeCloudMicrophysicsExt = Base.get_extension(Breeze, :BreezeCloudMicrophysics
 using .BreezeCloudMicrophysicsExt:
     TwoMomentCloudMicrophysics,
     TwoMomentCategories,
-    two_moment_cloud_microphysics_categories,
-    microphysical_velocities
+    two_moment_cloud_microphysics_categories
 
 using Breeze.Microphysics: ConstantRateCondensateFormation
 using Oceananigans.BoundaryConditions: ImpenetrableBoundaryCondition
