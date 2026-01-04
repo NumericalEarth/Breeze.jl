@@ -88,10 +88,10 @@ U₀  =  5   # base wind speed (m/s)
 uᵇ(z) = U₀ + ΔU * (1 + tanh((z - z₀) / Δzᵘ)) / 2
 
 # For the moisture layer, we specify a Gaussian relative humidity profile centered at ``z₀``.
-# The peak relative humidity is ``ℋ₀ = 1`` (exactly saturated), so any upward motion
-# or mixing will trigger cloud formation.
+# The peak relative humidity is supersaturated (``ℋ₀ > 1``), which triggers immediate cloud
+# formation via saturation adjustment.
 
-ℋ₀  = 1.2    # peak relative humidity (saturated)
+ℋ₀  = 1.5    # peak relative humidity (supersaturated)
 Δzℋ = 200    # moist layer half-width (m)
 ℋᵇ(x, z) = ℋ₀ * exp(-(z - z₀)^2 / 2Δzℋ^2)
 
