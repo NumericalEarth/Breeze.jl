@@ -113,7 +113,7 @@ function RadiativeTransferModel(grid::AbstractGrid, optics, args...; kw...)
 end
 
 """
-    BackgroundAtmosphere
+$(TYPEDEF)
 
 Constant (spatially uniform) volume mixing ratios (VMR) for radiatively active gases.
 All values are dimensionless molar fractions.

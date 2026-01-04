@@ -347,7 +347,7 @@ end
 end
 
 """
-    vapor_pressure(T, ρ, qᵛ, constants)
+$(TYPEDSIGNATURES)
 
 Compute the vapor pressure from the ideal gas law:
 
@@ -361,7 +361,7 @@ pᵛ = ρ qᵛ Rᵛ T
 end
 
 """
-    relative_humidity(T, ρ, qᵛ, constants, surface=PlanarLiquidSurface())
+$(TYPEDSIGNATURES)
 
 Compute the relative humidity as the ratio of vapor pressure to saturation vapor pressure:
 

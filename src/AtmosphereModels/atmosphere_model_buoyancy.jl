@@ -3,9 +3,9 @@ using Oceananigans.BuoyancyFormulations: BuoyancyFormulations as OceanBuoyancyFo
 using Oceananigans.Operators: ∂zᶜᶜᶠ
 
 """
-    AtmosphereModelBuoyancy{D, F, T}
+$(TYPEDEF)
 
-Wrapper struct for computing buoyancy for AtmosphereModel
+Wrapper struct for computing buoyancy for [`AtmosphereModel`](@ref)
 in the context of a turbulence closure. Used to interface with Oceananigans
 turbulence closures that require buoyancy gradients.
 """

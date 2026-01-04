@@ -32,7 +32,7 @@ TimeSteppers.make_pressure_correction!(model::CompressibleModel, Δt) = nothing
 #####
 
 """
-    solve_for_pressure!(model::CompressibleModel)
+$(TYPEDSIGNATURES)
 
 No-op for `CompressibleDynamics` - pressure is computed from the equation of state, not solved.
 """

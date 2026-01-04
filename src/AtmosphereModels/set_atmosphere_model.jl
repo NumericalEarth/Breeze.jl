@@ -29,7 +29,7 @@ const settable_thermodynamic_variables = (:ρθ, :θ, :ρθˡⁱ, :θˡⁱ, :ρe
 function set_thermodynamic_variable! end
 
 """
-    specific_to_density_weighted(name::Symbol)
+$(TYPEDSIGNATURES)
 
 Convert a specific microphysical variable name to its density-weighted counterpart.
 For example, `:qᶜˡ` → `:ρqᶜˡ`, `:qʳ` → `:ρqʳ`, `:nᶜˡ` → `:ρnᶜˡ`.
@@ -46,7 +46,7 @@ function specific_to_density_weighted(name::Symbol)
 end
 
 """
-    settable_specific_microphysical_names(microphysics)
+$(TYPEDSIGNATURES)
 
 Return a tuple of specific (non-density-weighted) names that can be set
 for the given microphysics scheme. These are derived from the prognostic
@@ -72,7 +72,7 @@ settable_specific_microphysical_names(::Nothing) = ()
 """
     set!(model::AtmosphereModel; enforce_mass_conservation=true, kw...)
 
-Set variables in an `AtmosphereModel`.
+Set variables in an [`AtmosphereModel`](@ref).
 
 # Keyword Arguments
 
@@ -91,7 +91,7 @@ Variables are set via keyword arguments. Supported variables include:
 - `e`: static energy
 - `ρθ`: potential temperature density
 - `ρθˡⁱ`: liquid-ice potential temperature density
-- `ρe`: static energy density (for `StaticEnergyThermodynamics`)
+- `ρe`: static energy density (for [`StaticEnergyThermodynamics`](@ref))
 
 **Diagnostic variables** (specific, i.e., per unit mass):
 - `u`, `v`, `w`: velocity components (sets both velocity and momentum)
@@ -161,7 +161,7 @@ function Fields.set!(model::AtmosphereModel; time=nothing, enforce_mass_conserva
             ρ = dynamics_density(model.dynamics)
             ρqᵗ = model.moisture_density
             set!(ρqᵗ, ρ * qᵗ)
-        
+
         elseif name ∈ (:u, :v, :w)
             u = model.velocities[name]
             set!(u, value)
@@ -169,7 +169,7 @@ function Fields.set!(model::AtmosphereModel; time=nothing, enforce_mass_conserva
             ρ = dynamics_density(model.dynamics)
             ϕ = model.momentum[Symbol(:ρ, name)]
             value = ρ * u
-            set!(ϕ, value)    
+            set!(ϕ, value)
 
         elseif name ∈ settable_thermodynamic_variables
             set_thermodynamic_variable!(model, Val(name), value)
@@ -217,7 +217,7 @@ function Fields.set!(model::AtmosphereModel; time=nothing, enforce_mass_conserva
     # Apply a mask
     foreach(mask_immersed_field!, prognostic_fields(model))
     update_state!(model, compute_tendencies=false)
-    
+
     if enforce_mass_conservation
         FT = eltype(model.grid)
         Δt = one(FT)

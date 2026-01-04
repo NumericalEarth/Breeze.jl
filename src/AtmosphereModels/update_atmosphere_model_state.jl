@@ -27,10 +27,10 @@ end
 #####
 
 """
-    compute_forcings!(model)
+$(TYPEDSIGNATURES)
 
 Compute forcing-specific quantities needed before tendency calculation.
-For example, `SubsidenceForcing` requires horizontal averages of the
+For example, [`SubsidenceForcing`](@ref) requires horizontal averages of the
 fields being advected.
 """
 function compute_forcings!(model)
