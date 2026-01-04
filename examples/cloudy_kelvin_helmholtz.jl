@@ -100,12 +100,14 @@ uᵇ(z) = U₀ + ΔU * (1 + tanh((z - z₀) / Δzu)) / 2
 
 δθ = 0.01
 δu = 1e-3
+δℋ = 0.05
 
 ϵ() = rand() - 1/2
 θᵢ(x, z) = θᵇ(z) + δθ * ϵ()
 uᵢ(x, z) = uᵇ(z) + δu * ϵ()
+ℋᵢ(x, z) = ℋᵇ(x, z) + δℋ * ϵ()
 
-set!(model; u=uᵢ, θ=θᵢ, ℋ=ℋᵇ)
+set!(model; u=uᵢ, θ=θᵢ, ℋ=ℋᵢ)
 
 # ## The Kelvin-Helmholtz instability
 #
