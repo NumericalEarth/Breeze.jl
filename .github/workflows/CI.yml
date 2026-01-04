@@ -37,8 +37,8 @@ jobs:
       fail-fast: false
       matrix:
         version:
-          - "min"
-          - "1.12.2"
+          - "1.11"
+          # - "1.12.2"
         os:
           - ubuntu-latest
           - macOS-latest
@@ -46,12 +46,12 @@ jobs:
         arch:
           - "default"
         exclude:
-          - version: "min"
+          - version: "1.11"
             os: windows-latest
-        include:
-          - version: "1.12.2"
-            os: aws-linux-nvidia-gpu-l4
-            arch: "default"
+        # include:
+        #   - version: "1.12.2"
+        #     os: aws-linux-nvidia-gpu-l4
+        #     arch: "default"
     steps:
       - uses: actions/checkout@v6
       - uses: julia-actions/setup-julia@v2
