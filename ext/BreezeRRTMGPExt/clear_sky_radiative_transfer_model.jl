@@ -8,9 +8,8 @@ using Oceananigans.Grids: xnode, ynode, λnode, φnode, znodes
 using Oceananigans.Grids: AbstractGrid, Center, Face
 using Oceananigans.Fields: ConstantField
 
-using Breeze.AtmosphereModels: AtmosphereModels, SurfaceRadiativeProperties, specific_humidity, BackgroundAtmosphere, ClearSkyOptics
+using Breeze.AtmosphereModels: AtmosphereModels, SurfaceRadiativeProperties, specific_humidity, BackgroundAtmosphere, ClearSkyOptics, RadiativeTransferModel
 using Breeze.Thermodynamics: ThermodynamicConstants
-import Breeze.AtmosphereModels: RadiativeTransferModel
 
 using Dates: AbstractDateTime, Millisecond
 using KernelAbstractions: @kernel, @index
@@ -45,18 +44,18 @@ RRTMGP loads lookup tables from netCDF via an extension.
 - `diffuse_surface_albedo`: Diffuse surface albedo, 0-1. Can be scalar or 2D field.
 - `solar_constant`: Top-of-atmosphere solar flux in W/m² (default: 1361)
 """
-function RadiativeTransferModel(grid::AbstractGrid,
-                                ::ClearSkyOptics,
-                                constants::ThermodynamicConstants;
-                                background_atmosphere = BackgroundAtmosphere{eltype(grid)}(),
-                                surface_temperature,
-                                coordinate = nothing,
-                                epoch = nothing,
-                                surface_emissivity = 0.98,
-                                direct_surface_albedo = nothing,
-                                diffuse_surface_albedo = nothing,
-                                surface_albedo = nothing,
-                                solar_constant = 1361)
+function AtmosphereModels.RadiativeTransferModel(grid::AbstractGrid,
+                                                 ::ClearSkyOptics,
+                                                 constants::ThermodynamicConstants;
+                                                 background_atmosphere = BackgroundAtmosphere{eltype(grid)}(),
+                                                 surface_temperature,
+                                                 coordinate = nothing,
+                                                 epoch = nothing,
+                                                 surface_emissivity = 0.98,
+                                                 direct_surface_albedo = nothing,
+                                                 diffuse_surface_albedo = nothing,
+                                                 surface_albedo = nothing,
+                                                 solar_constant = 1361)
 
     FT = eltype(grid)
     parameters = RRTMGPParameters(constants)

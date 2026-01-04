@@ -20,10 +20,9 @@ using Oceananigans.Fields: ZFaceField
 #   RRTMGPParameters: physical constants for RRTMGP
 
 using RRTMGP: RRTMGPGridParams
+using RRTMGP.Parameters: Parameters
 using RRTMGP.RTE: NoScatLWRTE, NoScatSWRTE
 using RRTMGP.RTESolver: solve_lw!, solve_sw!
-
-import RRTMGP.Parameters: RRTMGPParameters
 
 using ClimaComms: ClimaComms
 
@@ -37,13 +36,13 @@ const DateTimeClock = Clock{DateTime}
 
 Construct `RRTMGPParameters` from Breeze's `ThermodynamicConstants`.
 """
-function RRTMGPParameters(constants::ThermodynamicConstants{FT};
-                          stefan_bolzmann_constant = 5.670374419e-8,  # W m⁻² K⁻⁴
-                          avogadro_number = 6.02214076e23) where FT  # mol⁻¹
+function Parameters.RRTMGPParameters(constants::ThermodynamicConstants{FT};
+                                     stefan_bolzmann_constant = 5.670374419e-8,  # W m⁻² K⁻⁴
+                                     avogadro_number = 6.02214076e23) where FT  # mol⁻¹
 
     ϰᵈ = constants.dry_air.heat_capacity / constants.dry_air.molar_mass
 
-    return RRTMGPParameters(
+    return Parameters.RRTMGPParameters(
         grav           = convert(FT, constants.gravitational_acceleration),
         molmass_dryair = convert(FT, constants.dry_air.molar_mass),
         molmass_water  = convert(FT, constants.vapor.molar_mass),

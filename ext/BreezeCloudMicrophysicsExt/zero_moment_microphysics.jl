@@ -14,21 +14,21 @@ Interface is identical to non-precipitating microphysics except that
 const ZeroMomentCloudMicrophysics = BulkMicrophysics{<:Any, <:Parameters0M, <:Any}
 const ZMCM = ZeroMomentCloudMicrophysics
 
-prognostic_field_names(::ZMCM) = tuple()
-materialize_microphysical_fields(bμp::ZMCM, grid, bcs) = materialize_microphysical_fields(bμp.cloud_formation, grid, bcs)
-@inline update_microphysical_fields!(μ, bμp::ZMCM, i, j, k, grid, ρ, 𝒰, constants) = update_microphysical_fields!(μ, bμp.cloud_formation, i, j, k, grid, ρ, 𝒰, constants)
-@inline compute_moisture_fractions(i, j, k, grid, bμp::ZMCM, ρ, qᵗ, μ) = compute_moisture_fractions(i, j, k, grid, bμp.cloud_formation, ρ, qᵗ, μ)
-@inline microphysical_tendency(i, j, k, grid, bμp::ZMCM, args...) = zero(grid)
-@inline microphysical_velocities(bμp::ZMCM, μ, name) = nothing
+AtmosphereModels.prognostic_field_names(::ZMCM) = tuple()
+AtmosphereModels.materialize_microphysical_fields(bμp::ZMCM, grid, bcs) = materialize_microphysical_fields(bμp.cloud_formation, grid, bcs)
+@inline AtmosphereModels.update_microphysical_fields!(μ, bμp::ZMCM, i, j, k, grid, ρ, 𝒰, constants) = update_microphysical_fields!(μ, bμp.cloud_formation, i, j, k, grid, ρ, 𝒰, constants)
+@inline AtmosphereModels.compute_moisture_fractions(i, j, k, grid, bμp::ZMCM, ρ, qᵗ, μ) = compute_moisture_fractions(i, j, k, grid, bμp.cloud_formation, ρ, qᵗ, μ)
+@inline AtmosphereModels.microphysical_tendency(i, j, k, grid, bμp::ZMCM, args...) = zero(grid)
+@inline AtmosphereModels.microphysical_velocities(bμp::ZMCM, μ, name) = nothing
 
-@inline function maybe_adjust_thermodynamic_state(i, j, k, 𝒰₀, bμp::ZMCM, ρᵣ, μ, qᵗ, constants)
+@inline function AtmosphereModels.maybe_adjust_thermodynamic_state(i, j, k, 𝒰₀, bμp::ZMCM, ρᵣ, μ, qᵗ, constants)
     # Initialize moisture state from total moisture qᵗ (not from stale microphysical fields)
     q₀ = MoistureMassFractions(qᵗ)
     𝒰₁ = with_moisture(𝒰₀, q₀)
     return adjust_thermodynamic_state(𝒰₁, bμp.cloud_formation, constants)
 end
 
-@inline function microphysical_tendency(i, j, k, grid, bμp::ZMCM, ::Val{:ρqᵗ}, ρ, μ, 𝒰, constants)
+@inline function AtmosphereModels.microphysical_tendency(i, j, k, grid, bμp::ZMCM, ::Val{:ρqᵗ}, ρ, μ, 𝒰, constants)
     # Get cloud liquid water from microphysical fields
     q = 𝒰.moisture_mass_fractions
     qˡ = q.liquid
@@ -99,14 +99,14 @@ Adapt.adapt_structure(to, k::ZeroMomentPrecipitationRateKernel) =
 end
 
 """
-    precipitation_rate(model, microphysics::ZeroMomentCloudMicrophysics, ::Val{:liquid})
+$(TYPEDSIGNATURES)
 
 Return a `Field` representing the liquid precipitation rate (rain rate) in kg/kg/s.
 
 For zero-moment microphysics, this is the rate at which cloud liquid water
 is removed by precipitation: `-dqᵗ/dt` from the `remove_precipitation` function.
 """
-function precipitation_rate(model, microphysics::ZMCM, ::Val{:liquid})
+function AtmosphereModels.precipitation_rate(model, microphysics::ZMCM, ::Val{:liquid})
     grid = model.grid
     qˡ = model.microphysical_fields.qˡ
     kernel = ZeroMomentPrecipitationRateKernel(microphysics.categories, qˡ)
@@ -115,4 +115,4 @@ function precipitation_rate(model, microphysics::ZMCM, ::Val{:liquid})
 end
 
 # Ice precipitation not supported for zero-moment warm-phase scheme
-precipitation_rate(model, ::ZMCM, ::Val{:ice}) = nothing
+AtmosphereModels.precipitation_rate(model, ::ZMCM, ::Val{:ice}) = nothing
