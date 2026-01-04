@@ -20,7 +20,7 @@ using Oceananigans.Fields: ZFaceField
 #   RRTMGPParameters: physical constants for RRTMGP
 
 using RRTMGP: RRTMGPGridParams
-using RRTMGP.Parameters: Parameters
+using RRTMGP.Parameters: Parameters, RRTMGPParameters
 using RRTMGP.RTE: NoScatLWRTE, NoScatSWRTE
 using RRTMGP.RTESolver: solve_lw!, solve_sw!
 
