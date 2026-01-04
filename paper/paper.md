@@ -27,9 +27,6 @@ authors:
   - name: Mosè Giordano
     orcid: 0000-0002-7218-2873
     affiliation: 6
-  - name: Daniel Rosenfeld
-    orcid: 0000-0002-0784-7656
-    affiliation: 7
 affiliations:
   - name: Aeolus Labs, CA, USA
     index: 1
@@ -43,8 +40,6 @@ affiliations:
     index: 5
   - name: University College London, London, UK
     index: 6
-  - name: The Hebrew University of Jerusalem, Jerusalem, Israel
-    index: 7
 date: 31 December 2025
 bibliography: paper.bib
 ---
