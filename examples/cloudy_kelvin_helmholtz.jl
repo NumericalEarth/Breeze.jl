@@ -82,16 +82,16 @@ N = 0.01                  # target dry Brunt–Väisälä frequency (s⁻¹)
 # First, we set up the shear layer using a ``\tanh`` profile:
 
 z₀  = 1e3  # center of shear & moist layer (m)
-Δzᵘ = 150  # shear layer half-thickness (m)
+Δzu = 150  # shear layer half-thickness (m)
 U₀  =  5   # base wind speed (m/s)
 ΔU  = 20   # upper-layer wind (m/s)
-uᵇ(z) = U₀ + ΔU * (1 + tanh((z - z₀) / Δzᵘ)) / 2
+uᵇ(z) = U₀ + ΔU * (1 + tanh((z - z₀) / Δzu)) / 2
 
 # For the moisture layer, we specify a Gaussian relative humidity profile centered at ``z₀``.
-# The peak relative humidity is ``ℋ₀ = 1`` (exactly saturated), so any upward motion
-# or mixing will trigger cloud formation.
+# The peak relative humidity is supersaturated (``ℋ₀ > 1``), which triggers immediate cloud
+# formation via saturation adjustment.
 
-ℋ₀  = 1.0    # peak relative humidity (saturated)
+ℋ₀  = 1.6    # peak relative humidity (supersaturated)
 Δzℋ = 200    # moist layer half-width (m)
 ℋᵇ(x, z) = ℋ₀ * exp(-(z - z₀)^2 / 2Δzℋ^2)
 
@@ -100,12 +100,14 @@ uᵇ(z) = U₀ + ΔU * (1 + tanh((z - z₀) / Δzᵘ)) / 2
 
 δθ = 0.01
 δu = 1e-3
+δℋ = 0.05
 
 ϵ() = rand() - 1/2
 θᵢ(x, z) = θᵇ(z) + δθ * ϵ()
 uᵢ(x, z) = uᵇ(z) + δu * ϵ()
+ℋᵢ(x, z) = ℋᵇ(x, z) + δℋ * ϵ()
 
-set!(model; u=uᵢ, θ=θᵢ, ℋ=ℋᵇ)
+set!(model; u=uᵢ, θ=θᵢ, ℋ=ℋᵢ)
 
 # ## The Kelvin-Helmholtz instability
 #
