@@ -2,7 +2,7 @@
 
 This section summarizes the governing equations behind Breeze's atmospheric dynamics used by [`AtmosphereModel`](@ref). Breeze supports two dynamical formulations:
 
-- **[`AnelasticDynamics`](@ref)**: Filters acoustic waves by linearizing about a hydrostatic reference state, following the thermodynamically consistent framework of [Pauluis2008](@citet). Suitable for most large-eddy simulations and mesoscale applications.
+- **[`AnelasticDynamics`](@ref Breeze.AnelasticEquations.AnelasticDynamics)**: Filters acoustic waves by linearizing about a hydrostatic reference state, following the thermodynamically consistent framework of [Pauluis2008](@citet). Suitable for most large-eddy simulations and mesoscale applications.
 
 - **[`CompressibleDynamics`](@ref)**: Solves the fully compressible Euler equations with prognostic density. Retains acoustic waves and is useful for validation, acoustic studies, and problems where full compressibility is important.
 
@@ -89,10 +89,10 @@ Breeze advances a conservative moist static energy density
 where ``c^{p m}`` is the mixture heat capacity, ``T`` is temperature, ``g`` is gravitational acceleration,
 ``z`` is height,
 ``\mathscr{L}^l_r`` is the latent heat of condensation (vapor to liquid) at the energy reference temperature,
-and 
+and
 ``\mathscr{L}^i_r`` is the latent heat of deposition (vapor to ice) at the energy reference temperature,
 
-According to [Pauluis2008](@citet), the moist static energy obeys 
+According to [Pauluis2008](@citet), the moist static energy obeys
 
 ```math
 \partial_t(ρᵣ e) + \boldsymbol{\nabla \cdot}\, (ρᵣ e \boldsymbol{u}) = ρᵣ w b + S_e ,

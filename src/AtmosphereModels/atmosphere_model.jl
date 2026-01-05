@@ -62,7 +62,7 @@ Return an `AtmosphereModel` that uses the anelastic approximation following
 Arguments
 =========
 
-   * The default `dynamics` is [`AnelasticDynamics`](@ref).
+   * The default `dynamics` is [`AnelasticDynamics`](@ref Breeze.AnelasticEquations.AnelasticDynamics).
 
    * The default `formulation` is `:LiquidIcePotentialTemperature`.
 

@@ -77,8 +77,8 @@ end
 """
 $(TYPEDSIGNATURES)
 
-Build a [`StaticEnergyState`](@ref) at grid point `(i, j, k)` from the given `formulation`, `dynamics`,
-and pre-computed moisture mass fractions `q`.
+Build a `StaticEnergyState` at grid point `(i, j, k)` from the given
+`formulation`, `dynamics`, and pre-computed moisture mass fractions `q`.
 """
 function diagnose_thermodynamic_state(i, j, k, grid,
                                       formulation::StaticEnergyFormulation,

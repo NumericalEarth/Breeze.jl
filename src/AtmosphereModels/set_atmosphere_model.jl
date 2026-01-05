@@ -91,7 +91,7 @@ Variables are set via keyword arguments. Supported variables include:
 - `e`: static energy
 - `ρθ`: potential temperature density
 - `ρθˡⁱ`: liquid-ice potential temperature density
-- `ρe`: static energy density (for [`StaticEnergyThermodynamics`](@ref))
+- `ρe`: static energy density (for `StaticEnergyThermodynamics`)
 
 **Diagnostic variables** (specific, i.e., per unit mass):
 - `u`, `v`, `w`: velocity components (sets both velocity and momentum)
