@@ -6,7 +6,14 @@ export
     EquivalentPotentialTemperature,
     StabilityEquivalentPotentialTemperature,
     LiquidIcePotentialTemperature,
-    StaticEnergy
+    StaticEnergy,
+    SaturationSpecificHumidity,
+    SaturationSpecificHumidityField,
+    equilibrium_saturation_specific_humidity,
+    # Interface functions extended by Microphysics
+    microphysics_phase_equilibrium
+
+using DocStringExtensions: TYPEDSIGNATURES
 
 using Breeze.Thermodynamics:
     Thermodynamics,
@@ -16,13 +23,21 @@ using Breeze.Thermodynamics:
     mixture_gas_constant,
     mixture_heat_capacity,
     relative_humidity,
-    PlanarLiquidSurface
+    saturation_specific_humidity,
+    saturation_vapor_pressure,
+    equilibrium_saturation_specific_humidity,
+    density,
+    PlanarLiquidSurface,
+    # Phase equilibrium types
+    WarmPhaseEquilibrium,
+    equilibrated_surface
 
 using Breeze.AtmosphereModels: AtmosphereModel, compute_moisture_fractions
 
 using Adapt: Adapt, adapt
-using Oceananigans: Center
+using Oceananigans: Oceananigans, Center
 using Oceananigans.AbstractOperations: KernelFunctionOperation
+using Oceananigans.Fields: Field
 using Oceananigans.Grids: znode
 
 # Flavor types for specific vs density-weighted diagnostics
@@ -34,5 +49,6 @@ const c = Center()
 
 include("potential_temperatures.jl")
 include("static_energy.jl")
+include("saturation_specific_humidity.jl")
 
 end # module

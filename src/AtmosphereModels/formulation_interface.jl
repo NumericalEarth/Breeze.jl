@@ -12,7 +12,7 @@
 """
     materialize_formulation(formulation, dynamics, grid, boundary_conditions)
 
-Materialize a thermodynamic formulation from a Symbol (or formulation struct) into a
+Materialize a thermodynamic formulation from a `Symbol` (or formulation struct) into a
 complete formulation with all required fields.
 
 Valid symbols:
@@ -32,7 +32,7 @@ materialize_formulation(formulation_name::Symbol, args...) =
     prognostic_thermodynamic_field_names(formulation)
 
 Return a tuple of prognostic field names for the given thermodynamic formulation.
-Accepts a Symbol, Val(Symbol), or formulation struct.
+Accepts a `Symbol`, `Val(Symbol)`, or formulation struct.
 """
 function prognostic_thermodynamic_field_names end
 
@@ -43,7 +43,7 @@ prognostic_thermodynamic_field_names(formulation_name::Symbol) =
     additional_thermodynamic_field_names(formulation)
 
 Return a tuple of additional (diagnostic) field names for the given thermodynamic formulation.
-Accepts a Symbol, Val(Symbol), or formulation struct.
+Accepts a `Symbol`, `Val(Symbol)`, or formulation struct.
 """
 function additional_thermodynamic_field_names end
 
@@ -54,7 +54,7 @@ additional_thermodynamic_field_names(formulation_name::Symbol) =
     thermodynamic_density_name(formulation)
 
 Return the name of the thermodynamic density field (e.g., `:ρθ`, `:ρe`, `:ρE`).
-Accepts a Symbol, Val(Symbol), or formulation struct.
+Accepts a `Symbol`, `Val(Symbol)`, or formulation struct.
 """
 function thermodynamic_density_name end
 

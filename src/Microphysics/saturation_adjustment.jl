@@ -1,23 +1,20 @@
 using ..Thermodynamics:
+    Thermodynamics,
     MoistureMassFractions,
     mixture_heat_capacity,
-    dry_air_gas_constant,
-    vapor_gas_constant,
-    PlanarLiquidSurface,
-    PlanarMixedPhaseSurface,
-    saturation_vapor_pressure,
+    saturation_specific_humidity,
+    adjustment_saturation_specific_humidity,
     temperature,
     is_absolute_zero,
     with_moisture,
     total_specific_moisture,
-    AbstractThermodynamicState
+    AbstractThermodynamicState,
+    WarmPhaseEquilibrium,
+    MixedPhaseEquilibrium,
+    equilibrated_surface
 
 using Oceananigans: Oceananigans, CenterField
 using DocStringExtensions: TYPEDSIGNATURES
-
-using ..Thermodynamics: Thermodynamics, saturation_specific_humidity
-
-abstract type AbstractEquilibrium end
 
 struct SaturationAdjustment{E, FT}
     tolerance :: FT
@@ -62,16 +59,8 @@ end
 AtmosphereModels.microphysics_model_update!(microphysics::SaturationAdjustment, model) = nothing
 
 #####
-##### Warm-phase equilibrium
+##### Warm-phase equilibrium moisture fractions
 #####
-
-"""
-$(TYPEDSIGNATURES)
-
-Return `WarmPhaseEquilibrium` representing an equilibrium between water vapor and liquid water.
-"""
-struct WarmPhaseEquilibrium <: AbstractEquilibrium end
-@inline equilibrated_surface(::WarmPhaseEquilibrium, T) = PlanarLiquidSurface()
 
 @inline function equilibrated_moisture_mass_fractions(T, qᵗ, qᵛ⁺, ::WarmPhaseEquilibrium)
     qˡ = max(0, qᵗ - qᵛ⁺)
@@ -80,45 +69,8 @@ struct WarmPhaseEquilibrium <: AbstractEquilibrium end
 end
 
 #####
-##### Mixed-phase equilibrium
+##### Mixed-phase equilibrium moisture fractions
 #####
-
-struct MixedPhaseEquilibrium{FT} <: AbstractEquilibrium
-    freezing_temperature :: FT
-    homogeneous_ice_nucleation_temperature :: FT
-end
-
-"""
-$(TYPEDSIGNATURES)
-
-Return `MixedPhaseEquilibrium` representing a temperature-dependent equilibrium between
-water vapor, possibly supercooled liquid water, and ice.
-
-The equilibrium state is modeled as a linear variation of the equilibrium liquid fraction with temperature,
-between the freezing temperature (e.g. 273.15 K) below which liquid water is supercooled,
-and the temperature of homogeneous ice nucleation temperature (e.g. 233.15 K) at which
-the supercooled liquid fraction vanishes.
-"""
-function MixedPhaseEquilibrium(FT = Oceananigans.defaults.FloatType;
-                               freezing_temperature = 273.15,
-                               homogeneous_ice_nucleation_temperature = 233.15)
-
-    if freezing_temperature < homogeneous_ice_nucleation_temperature
-        throw(ArgumentError("`freezing_temperature` must be greater than `homogeneous_ice_nucleation_temperature`"))
-    end
-
-    freezing_temperature = convert(FT, freezing_temperature)
-    homogeneous_ice_nucleation_temperature = convert(FT, homogeneous_ice_nucleation_temperature)
-    return MixedPhaseEquilibrium(freezing_temperature, homogeneous_ice_nucleation_temperature)
-end
-
-@inline function equilibrated_surface(equilibrium::MixedPhaseEquilibrium, T)
-    Tᶠ = equilibrium.freezing_temperature
-    Tʰ = equilibrium.homogeneous_ice_nucleation_temperature
-    T′ = clamp(T, Tʰ, Tᶠ)
-    λ = (T′ - Tʰ) / (Tᶠ - Tʰ)
-    return PlanarMixedPhaseSurface(λ)
-end
 
 @inline function equilibrated_moisture_mass_fractions(T, qᵗ, qᵛ⁺, equilibrium::MixedPhaseEquilibrium)
     surface = equilibrated_surface(equilibrium, T)
@@ -179,24 +131,10 @@ end
 ##### Saturation adjustment utilities
 #####
 
-@inline function Thermodynamics.saturation_specific_humidity(T, ρ, constants, equilibrium::AbstractEquilibrium)
-    surface = equilibrated_surface(equilibrium, T)
-    return saturation_specific_humidity(T, ρ, constants, surface)
-end
-
-@inline function equilibrium_saturation_specific_humidity(T, pᵣ, qᵗ, constants, equil)
-    surface = equilibrated_surface(equil, T)
-    pᵛ⁺ = saturation_vapor_pressure(T, constants, surface)
-    Rᵈ = dry_air_gas_constant(constants)
-    Rᵛ = vapor_gas_constant(constants)
-    ϵᵈᵛ = Rᵈ / Rᵛ
-    return ϵᵈᵛ * (1 - qᵗ) * pᵛ⁺ / (pᵣ - pᵛ⁺)
-end
-
 @inline function adjust_state(𝒰₀, T, constants, equilibrium)
     pᵣ = 𝒰₀.reference_pressure
     qᵗ = total_specific_moisture(𝒰₀)
-    qᵛ⁺ = equilibrium_saturation_specific_humidity(T, pᵣ, qᵗ, constants, equilibrium)
+    qᵛ⁺ = adjustment_saturation_specific_humidity(T, pᵣ, qᵗ, constants, equilibrium)
     q₁ = equilibrated_moisture_mass_fractions(T, qᵗ, qᵛ⁺, equilibrium)
     return with_moisture(𝒰₀, q₁)
 end

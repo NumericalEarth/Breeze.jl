@@ -56,13 +56,13 @@ end
 """
 $(TYPEDSIGNATURES)
 
-Return an AtmosphereModel that uses the anelastic approximation following
+Return an `AtmosphereModel` that uses the anelastic approximation following
 [Pauluis (2008)](@cite Pauluis2008).
 
 Arguments
 =========
 
-   * The default `dynamics` is `AnelasticDynamics`.
+   * The default `dynamics` is [`AnelasticDynamics`](@ref Breeze.AnelasticEquations.AnelasticDynamics).
 
    * The default `formulation` is `:LiquidIcePotentialTemperature`.
 

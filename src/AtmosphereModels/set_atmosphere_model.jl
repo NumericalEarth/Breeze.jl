@@ -3,6 +3,8 @@ using Oceananigans.TimeSteppers: update_state!
 using Oceananigans.BoundaryConditions: fill_halo_regions!
 using Oceananigans.TimeSteppers: compute_pressure_correction!, make_pressure_correction!, update_state!
 
+using .Diagnostics: SaturationSpecificHumidity
+
 using ..Thermodynamics:
     MoistureMassFractions,
     mixture_heat_capacity,
@@ -27,7 +29,7 @@ const settable_thermodynamic_variables = (:ρθ, :θ, :ρθˡⁱ, :θˡⁱ, :ρe
 function set_thermodynamic_variable! end
 
 """
-    specific_to_density_weighted(name::Symbol)
+$(TYPEDSIGNATURES)
 
 Convert a specific microphysical variable name to its density-weighted counterpart.
 For example, `:qᶜˡ` → `:ρqᶜˡ`, `:qʳ` → `:ρqʳ`, `:nᶜˡ` → `:ρnᶜˡ`.
@@ -44,7 +46,7 @@ function specific_to_density_weighted(name::Symbol)
 end
 
 """
-    settable_specific_microphysical_names(microphysics)
+$(TYPEDSIGNATURES)
 
 Return a tuple of specific (non-density-weighted) names that can be set
 for the given microphysics scheme. These are derived from the prognostic
@@ -70,7 +72,7 @@ settable_specific_microphysical_names(::Nothing) = ()
 """
     set!(model::AtmosphereModel; enforce_mass_conservation=true, kw...)
 
-Set variables in an `AtmosphereModel`.
+Set variables in an [`AtmosphereModel`](@ref).
 
 # Keyword Arguments
 
@@ -94,6 +96,10 @@ Variables are set via keyword arguments. Supported variables include:
 **Diagnostic variables** (specific, i.e., per unit mass):
 - `u`, `v`, `w`: velocity components (sets both velocity and momentum)
 - `qᵗ`: total specific moisture (sets both specific and density-weighted moisture)
+- `ℋ`: relative humidity (sets total moisture via `qᵗ = ℋ * qᵛ⁺`, where `qᵛ⁺` is the
+  saturation specific humidity at the current temperature). Relative humidity is in
+  the range [0, 1]. For models with saturation adjustment microphysics, `ℋ > 1` throws
+  an error since the saturation adjustment would immediately reduce it to 1.
 
 **Specific microphysical variables** (automatically converted to density-weighted):
 - `qᶜˡ`: specific cloud liquid (sets `ρqᶜˡ = ρᵣ * qᶜˡ`)
@@ -154,7 +160,7 @@ function Fields.set!(model::AtmosphereModel; time=nothing, enforce_mass_conserva
             set!(qᵗ, value)
             ρ = dynamics_density(model.dynamics)
             ρqᵗ = model.moisture_density
-            set!(ρqᵗ, ρ * qᵗ)                
+            set!(ρqᵗ, ρ * qᵗ)
 
         elseif name ∈ (:u, :v, :w)
             u = model.velocities[name]
@@ -163,7 +169,7 @@ function Fields.set!(model::AtmosphereModel; time=nothing, enforce_mass_conserva
             ρ = dynamics_density(model.dynamics)
             ϕ = model.momentum[Symbol(:ρ, name)]
             value = ρ * u
-            set!(ϕ, value)    
+            set!(ϕ, value)
 
         elseif name ∈ settable_thermodynamic_variables
             set_thermodynamic_variable!(model, Val(name), value)
@@ -175,9 +181,25 @@ function Fields.set!(model::AtmosphereModel; time=nothing, enforce_mass_conserva
             # Fill halos immediately - needed for velocity→momentum conversion
             fill_halo_regions!(ρ)
 
+        elseif name == :ℋ
+            # Call update_state! to ensure temperature is computed from thermodynamic variables
+            update_state!(model, compute_tendencies=false)
+
+            # Compute saturation specific humidity using GPU-compatible kernel
+            # Use :equilibrium flavor which handles both saturated and unsaturated conditions
+            qᵛ⁺ = SaturationSpecificHumidity(model, :equilibrium)
+
+            # Set qᵗ = ℋ * qᵛ⁺
+            qᵗ = model.specific_moisture
+            set!(qᵗ, value * qᵛ⁺)
+
+            ρ = dynamics_density(model.dynamics)
+            ρqᵗ = model.moisture_density
+            set!(ρqᵗ, ρ * qᵗ)
+
         else
             prognostic_names = keys(prognostic_fields(model))
-            settable_diagnostic_variables = (:qᵗ, :u, :v, :w)
+            settable_diagnostic_variables = (:qᵗ, :ℋ, :u, :v, :w)
             specific_microphysical = settable_specific_microphysical_names(model.microphysics)
 
             msg = "Cannot set! $name in AtmosphereModel because $name is neither a
@@ -195,7 +217,7 @@ function Fields.set!(model::AtmosphereModel; time=nothing, enforce_mass_conserva
     # Apply a mask
     foreach(mask_immersed_field!, prognostic_fields(model))
     update_state!(model, compute_tendencies=false)
-    
+
     if enforce_mass_conservation
         FT = eltype(model.grid)
         Δt = one(FT)
