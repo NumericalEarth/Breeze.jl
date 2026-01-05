@@ -152,7 +152,7 @@ Create and return the microphysical fields for the Kessler scheme.
 - `precipitation_rate`: Surface precipitation rate (\$m/s\$), defined as \$q^r \times v^t_{rain}\$ to match one-moment microphysics.
 - `vᵗ_rain`: Rain terminal velocity (\$m/s\$).
 """
-function materialize_microphysical_fields(::DCMIP2016KM, grid, boundary_conditions)
+function AtmosphereModels.materialize_microphysical_fields(::DCMIP2016KM, grid, boundary_conditions)
     # Prognostic fields (density-weighted)
     ρqᶜˡ = CenterField(grid, boundary_conditions=boundary_conditions.ρqᶜˡ)
     ρqʳ  = CenterField(grid, boundary_conditions=boundary_conditions.ρqʳ)
