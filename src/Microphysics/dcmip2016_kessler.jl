@@ -2,7 +2,6 @@ using ..Thermodynamics:
     MoistureMassFractions,
     mixture_heat_capacity,
     mixture_gas_constant,
-    dry_air_gas_constant,
     total_specific_moisture,
     saturation_specific_humidity,
     PlanarLiquidSurface
