@@ -1,12 +1,8 @@
-#####
-##### Potential temperature tendency and helper functions for LiquidIcePotentialTemperatureFormulation
-#####
+using Breeze.AtmosphereModels.Diagnostics: Diagnostics
+using Breeze.AtmosphereModels: AtmosphereModel
 
-using Breeze.Thermodynamics: LiquidIcePotentialTemperatureState, StaticEnergyState, with_temperature, exner_function, mixture_heat_capacity, temperature
-
-#####
-##### Type alias for models with LiquidIcePotentialTemperatureFormulation
-#####
+using Oceananigans.Fields: set!
+using Breeze.Thermodynamics: temperature
 
 const PotentialTemperatureModel = AtmosphereModel{<:Any, <:LiquidIcePotentialTemperatureFormulation}
 
@@ -14,16 +10,16 @@ const PotentialTemperatureModel = AtmosphereModel{<:Any, <:LiquidIcePotentialTem
 ##### Helper accessors
 #####
 
-liquid_ice_potential_temperature_density(model::PotentialTemperatureModel) = model.formulation.potential_temperature_density
-liquid_ice_potential_temperature(model::PotentialTemperatureModel) = model.formulation.potential_temperature
-static_energy(model::PotentialTemperatureModel) = Diagnostics.StaticEnergy(model, :specific)
-static_energy_density(model::PotentialTemperatureModel) = Diagnostics.StaticEnergy(model, :density)
+AtmosphereModels.liquid_ice_potential_temperature_density(model::PotentialTemperatureModel) = model.formulation.potential_temperature_density
+AtmosphereModels.liquid_ice_potential_temperature(model::PotentialTemperatureModel) = model.formulation.potential_temperature
+AtmosphereModels.static_energy(model::PotentialTemperatureModel) = Diagnostics.StaticEnergy(model, :specific)
+AtmosphereModels.static_energy_density(model::PotentialTemperatureModel) = Diagnostics.StaticEnergy(model, :density)
 
 #####
 ##### Tendency computation
 #####
 
-function compute_thermodynamic_tendency!(model::PotentialTemperatureModel, common_args)
+function AtmosphereModels.compute_thermodynamic_tendency!(model::PotentialTemperatureModel, common_args)
     grid = model.grid
     arch = grid.architecture
 
@@ -81,10 +77,10 @@ end
 ##### Set thermodynamic variables
 #####
 
-set_thermodynamic_variable!(model::PotentialTemperatureModel, ::Union{Val{:ρθ}, Val{:ρθˡⁱ}}, value) =
+AtmosphereModels.set_thermodynamic_variable!(model::PotentialTemperatureModel, ::Union{Val{:ρθ}, Val{:ρθˡⁱ}}, value) =
     set!(model.formulation.potential_temperature_density, value)
 
-function set_thermodynamic_variable!(model::PotentialTemperatureModel, ::Union{Val{:θ}, Val{:θˡⁱ}}, value)
+function AtmosphereModels.set_thermodynamic_variable!(model::PotentialTemperatureModel, ::Union{Val{:θ}, Val{:θˡⁱ}}, value)
     set!(model.formulation.potential_temperature, value)
     ρ = dynamics_density(model.dynamics)
     θˡⁱ = model.formulation.potential_temperature
@@ -93,7 +89,7 @@ function set_thermodynamic_variable!(model::PotentialTemperatureModel, ::Union{V
 end
 
 # Setting from static energy
-function set_thermodynamic_variable!(model::PotentialTemperatureModel, ::Val{:e}, value)
+function AtmosphereModels.set_thermodynamic_variable!(model::PotentialTemperatureModel, ::Val{:e}, value)
     formulation = model.formulation
     e = model.temperature # scratch space
     set!(e, value)
@@ -115,7 +111,7 @@ function set_thermodynamic_variable!(model::PotentialTemperatureModel, ::Val{:e}
     return nothing
 end
 
-function set_thermodynamic_variable!(model::PotentialTemperatureModel, ::Val{:ρe}, value)
+function AtmosphereModels.set_thermodynamic_variable!(model::PotentialTemperatureModel, ::Val{:ρe}, value)
     ρe = model.temperature # scratch space
     set!(ρe, value)
     ρ = dynamics_density(model.dynamics)
@@ -146,7 +142,7 @@ end
     𝒰e₁ = maybe_adjust_thermodynamic_state(i, j, k, 𝒰e₀, microphysics, ρᵣ, microphysical_fields, qᵗ, constants)
     T = temperature(𝒰e₁, constants)
 
-    pˢᵗ = dynamics.reference_state.standard_pressure
+    pˢᵗ = standard_pressure(dynamics)
     q₁ = 𝒰e₁.moisture_mass_fractions
     𝒰θ = LiquidIcePotentialTemperatureState(zero(T), q₁, pˢᵗ, pᵣ)
     𝒰θ = with_temperature(𝒰θ, T, constants)
@@ -170,7 +166,7 @@ the relation between ``T`` and `θˡⁱ`` that accounts for the moisture distrib
 For unsaturated air (no condensate), this simplifies to ``θ = T / Π`` where
 ``Π`` is the Exner function.
 """
-function set_thermodynamic_variable!(model::PotentialTemperatureModel, ::Val{:T}, value)
+function AtmosphereModels.set_thermodynamic_variable!(model::PotentialTemperatureModel, ::Val{:T}, value)
     T_field = model.temperature # use temperature field as scratch/storage
     set!(T_field, value)
 
@@ -215,7 +211,7 @@ end
     q = compute_moisture_fractions(i, j, k, grid, microphysics, ρᵣ, qᵗ, microphysical_fields)
 
     # Convert temperature to potential temperature using the inverse of the T(θ) relation
-    pˢᵗ = dynamics.reference_state.standard_pressure
+    pˢᵗ = standard_pressure(dynamics)
     𝒰₀ = LiquidIcePotentialTemperatureState(zero(T), q, pˢᵗ, pᵣ)
     𝒰₁ = with_temperature(𝒰₀, T, constants)
     θ = 𝒰₁.potential_temperature

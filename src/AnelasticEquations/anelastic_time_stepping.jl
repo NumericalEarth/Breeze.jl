@@ -2,22 +2,36 @@
 ##### Pressure correction time stepping for AnelasticDynamics
 #####
 
-using Oceananigans.BoundaryConditions: fill_halo_regions!
-using Oceananigans.ImmersedBoundaries: mask_immersed_field!
-using Oceananigans.Operators: ℑzᵃᵃᶠ, ∂xᶠᶜᶜ, ∂yᶜᶠᶜ, ∂zᶜᶜᶠ
-using Oceananigans.TimeSteppers: TimeSteppers
-using Oceananigans.Utils: launch!
-using KernelAbstractions: @kernel, @index
+#####
+##### Model initialization
+#####
 
+"""
+$(TYPEDSIGNATURES)
+
+Initialize thermodynamic state for anelastic models.
+Sets the initial potential temperature to the reference state value.
+"""
+function AtmosphereModels.initialize_model_thermodynamics!(model::AnelasticModel)
+    θ₀ = model.dynamics.reference_state.potential_temperature
+    set!(model, θ=θ₀)
+    return nothing
+end
+
+"""
+$(TYPEDSIGNATURES)
+
+Compute the pressure correction for anelastic dynamics by solving the pressure Poisson equation.
+"""
 function TimeSteppers.compute_pressure_correction!(model::AnelasticModel, Δt)
     # Mask immersed velocities
     foreach(mask_immersed_field!, model.momentum)
     fill_halo_regions!(model.momentum, model.clock, fields(model))
 
-    ρᵣ = model.dynamics.reference_state.density
+    dynamics = model.dynamics
     ρŨ = model.momentum
     solver = model.pressure_solver
-    αᵣp′ = model.dynamics.pressure_anomaly  # kinematic pressure p'/ρᵣ
+    αᵣp′ = dynamics.pressure_anomaly  # kinematic pressure p'/ρᵣ
     solve_for_anelastic_pressure!(αᵣp′, solver, ρŨ, Δt)
     fill_halo_regions!(αᵣp′)
 
@@ -49,14 +63,16 @@ Update the predictor momentum ``(ρu, ρv, ρw)`` with the non-hydrostatic press
 ```
 """
 function TimeSteppers.make_pressure_correction!(model::AnelasticModel, Δt)
+    dynamics = model.dynamics
 
     launch!(model.architecture, model.grid, :xyz,
             _pressure_correct_momentum!,
             model.momentum,
             model.grid,
             Δt,
-            model.dynamics.pressure_anomaly,  # kinematic pressure p'/ρᵣ
-            model.dynamics.reference_state.density)
+            dynamics.pressure_anomaly,  # kinematic pressure p'/ρᵣ
+            dynamics.reference_state.density)
 
     return nothing
 end
+

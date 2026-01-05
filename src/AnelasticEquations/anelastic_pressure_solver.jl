@@ -8,7 +8,7 @@ end
 
 Solvers.tridiagonal_direction(formulation::AnelasticTridiagonalSolverFormulation) = ZDirection()
 
-function dynamics_pressure_solver(dynamics::AnelasticDynamics, grid)
+function AtmosphereModels.dynamics_pressure_solver(dynamics::AnelasticDynamics, grid)
     reference_density = dynamics.reference_state.density
     tridiagonal_formulation = AnelasticTridiagonalSolverFormulation(reference_density)
 

@@ -32,12 +32,13 @@ examples = [
     Example("Cloudy thermal bubble", "cloudy_thermal_bubble", true),
     Example("Cloudy Kelvin-Helmholtz instability", "cloudy_kelvin_helmholtz", true),
     Example("Shallow cumulus convection (BOMEX)", "bomex", true),
-    Example("Precipitating shallow cumulus (RICO)", "rico", true),
+    Example("Precipitating shallow cumulus (RICO)", "rico", false),
     Example("Convection over prescribed sea surface temperature (SST)", "prescribed_sea_surface_temperature", true),
     Example("Inertia gravity wave", "inertia_gravity_wave", true),
     Example("Two-dimensional mountain wave", "two_dimensional_mountain_wave", true),
-    Example("Single column gray radiation", "single_column_radiation", true),
+    Example("Single column radiation", "single_column_radiation", true),
     Example("Stationary parcel model", "stationary_parcel_model", true),
+    Example("Acoustic wave in shear layer", "acoustic_wave", true),
 ]
 
 # Filter out long-running example if necessary
@@ -63,6 +64,84 @@ for m in [Breeze, BreezeRRTMGPExt, BreezeCloudMicrophysicsExt]
         push!(modules, m)
     end
 end
+
+# Automatically generate file with docstrings for all modules
+
+function walk_submodules!(result, visited, mod::Module)
+    for name in sort(names(mod; all=true, imported=false))
+        isdefined(mod, name) || continue
+        value = getproperty(mod, name)
+        if value isa Module &&
+            parentmodule(value) === mod &&
+            !(value in visited) &&
+            value !== mod
+
+            push!(visited, value)
+            push!(result, value)
+            walk_submodules!(result, visited, value)
+        end
+    end
+end
+
+function get_submodules(mod::Module)
+    result = Module[]
+    visited = Set{Module}()
+
+    walk_submodules!(result, visited, mod)
+    return result
+end
+
+function write_api_md()
+    modules = get_submodules(Breeze)
+    append!(modules, [BreezeRRTMGPExt, BreezeCloudMicrophysicsExt])
+    io = IOBuffer()
+
+    println(io, """
+            # API Documentation
+
+            ## Public API
+
+            ```@autodocs
+            Modules = [Breeze]
+            Private = false
+            ```
+            """)
+    for mod in modules
+        println(io, """
+                ### $(chopprefix(string(mod), "Breeze."))
+
+                ```@autodocs
+                Modules = [$(mod)]
+                Private = false
+                ```
+                """)
+    end
+    println(io, """
+            ## Private API
+
+            ```@autodocs
+            Modules = [Breeze]
+            Public = false
+            ```
+            """)
+    for mod in modules
+        println(io, """
+                ### $(chopprefix(string(mod), "Breeze."))
+
+                ```@autodocs
+                Modules = [$(mod)]
+                Public = false
+                ```
+                """)
+    end
+
+    # Remove multiple trailing whitespaces, but keep the final one.
+    write(joinpath(@__DIR__, "src", "api.md"), strip(String(take!(io))) * "\n")
+end
+
+write_api_md()
+
+# Let's build the docs!
 
 makedocs(
     ;
@@ -95,6 +174,7 @@ makedocs(
         "Dycore equations and algorithms" => "dycore_equations_algorithms.md",
         "Appendix" => Any[
             "Notation" => "appendix/notation.md",
+            "Reproducibility of Breeze.jl models" => "reproducibility.md",
         ],
         "References" => "references.md",
         "API" => "api.md",

@@ -153,7 +153,7 @@ ax_rh = Axis(fig_thermo[1, 2],
              title = "Relative Humidity Profile")
 lines!(ax_rh, RH_profile, collect(z_plot), linewidth = 2, color = :blue)
 
-save("supercell_thermo_profiles.png", fig_thermo)
+save("supercell_thermo_profiles.png", fig_thermo) #src
 fig_thermo
 
 # Zonal wind profile with linear shear below ``z_s`` and smooth transition (Equation 15-16):
@@ -188,7 +188,7 @@ lines!(ax_wind, u_profile, collect(z_plot), label = "u (zonal)", linewidth = 2)
 lines!(ax_wind, v_profile, collect(z_plot), label = "v (meridional)", linewidth = 2, linestyle = :dash)
 axislegend(ax_wind, position = :rb)
 
-save("supercell_wind_profile.png", fig_wind)
+save("supercell_wind_profile.png", fig_wind) #src
 fig_wind
 
 # ## Warm bubble initial perturbation
@@ -232,7 +232,7 @@ hm = heatmap!(ax_bubble, collect(x_slice) ./ 1000, collect(z_slice), θ_pert_sli
               colormap = :thermal, colorrange = (0, Δθ))
 Colorbar(fig_bubble[1, 2], hm, label = "θ' (K)")
 
-save("supercell_warm_bubble.png", fig_bubble)
+save("supercell_warm_bubble.png", fig_bubble) #src
 fig_bubble
 
 # ## Model initialization
@@ -360,7 +360,8 @@ ax = Axis(fig[1, 1],
           xticks = 0:900:maximum(times))
 lines!(ax, times, max_w)
 
-save("max_w_timeseries.png", fig)
+save("max_w_timeseries.png", fig) #src
+fig
 
 # ## Animation: horizontal slices at 5 km
 #

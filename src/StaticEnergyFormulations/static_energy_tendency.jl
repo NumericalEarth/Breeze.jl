@@ -1,13 +1,8 @@
-#####
-##### Static energy tendency and helper functions for StaticEnergyFormulation
-#####
+using Breeze.AtmosphereModels.Diagnostics: Diagnostics
+using Breeze.AtmosphereModels: AtmosphereModel
 
-using Breeze.Thermodynamics: StaticEnergyState, with_temperature, LiquidIcePotentialTemperatureState, temperature
-using Oceananigans.Operators: ℑzᵃᵃᶜ
-
-#####
-##### Type alias for models with StaticEnergyFormulation
-#####
+using Oceananigans.Fields: set!
+using Breeze.Thermodynamics: temperature
 
 const StaticEnergyModel = AtmosphereModel{<:Any, <:StaticEnergyFormulation}
 
@@ -15,16 +10,16 @@ const StaticEnergyModel = AtmosphereModel{<:Any, <:StaticEnergyFormulation}
 ##### Helper accessors
 #####
 
-liquid_ice_potential_temperature(model::StaticEnergyModel) = Diagnostics.LiquidIcePotentialTemperature(model, :specific)
-liquid_ice_potential_temperature_density(model::StaticEnergyModel) = Diagnostics.LiquidIcePotentialTemperature(model, :density)
-static_energy(model::StaticEnergyModel) = model.formulation.specific_energy
-static_energy_density(model::StaticEnergyModel) = model.formulation.energy_density
+AtmosphereModels.liquid_ice_potential_temperature(model::StaticEnergyModel) = Diagnostics.LiquidIcePotentialTemperature(model, :specific)
+AtmosphereModels.liquid_ice_potential_temperature_density(model::StaticEnergyModel) = Diagnostics.LiquidIcePotentialTemperature(model, :density)
+AtmosphereModels.static_energy(model::StaticEnergyModel) = model.formulation.specific_energy
+AtmosphereModels.static_energy_density(model::StaticEnergyModel) = model.formulation.energy_density
 
 #####
 ##### Tendency computation
 #####
 
-function compute_thermodynamic_tendency!(model::StaticEnergyModel, common_args)
+function AtmosphereModels.compute_thermodynamic_tendency!(model::StaticEnergyModel, common_args)
     grid = model.grid
     arch = grid.architecture
 
@@ -55,7 +50,7 @@ end
                                         closure_fields,
                                         clock,
                                         model_fields,
-                                        temperature)
+                                        temperature_field)
 
     specific_energy = formulation.specific_energy
     ρ_field = dynamics_density(dynamics)
@@ -67,8 +62,8 @@ end
     𝒰 = diagnose_thermodynamic_state(i, j, k, grid, formulation, dynamics, q)
 
     # Compute the buoyancy flux term, ρᵣ w b
-    buoyancy_flux = ℑzᵃᵃᶜ(i, j, k, grid, ρ_w_bᶜᶜᶠ,
-                          velocities.w, dynamics, formulation, ρ_field, temperature, specific_moisture,
+    buoyancy_flux = ℑzᵃᵃᶜ(i, j, k, grid, w_buoyancy_forceᶜᶜᶠ,
+                          velocities.w, dynamics, temperature_field, specific_moisture,
                           microphysics, microphysical_fields, constants)
 
     closure_buoyancy = AtmosphereModelBuoyancy(dynamics, formulation, constants)
@@ -84,10 +79,10 @@ end
 ##### Set thermodynamic variables
 #####
 
-set_thermodynamic_variable!(model::StaticEnergyModel, ::Val{:ρe}, value) =
+AtmosphereModels.set_thermodynamic_variable!(model::StaticEnergyModel, ::Val{:ρe}, value) =
     set!(model.formulation.energy_density, value)
 
-function set_thermodynamic_variable!(model::StaticEnergyModel, ::Val{:e}, value)
+function AtmosphereModels.set_thermodynamic_variable!(model::StaticEnergyModel, ::Val{:e}, value)
     set!(model.formulation.specific_energy, value)
     ρ = dynamics_density(model.dynamics)
     e = model.formulation.specific_energy
@@ -98,7 +93,7 @@ end
 # Setting :θ (potential temperature)
 const PotentialTemperatureNames = Union{Val{:θ}, Val{:θˡⁱ}}
 
-function set_thermodynamic_variable!(model::StaticEnergyModel, ::PotentialTemperatureNames, value)
+function AtmosphereModels.set_thermodynamic_variable!(model::StaticEnergyModel, ::PotentialTemperatureNames, value)
     formulation = model.formulation
     θ = model.temperature # scratch space
     set!(θ, value)
@@ -138,7 +133,7 @@ end
         θ = potential_temperature[i, j, k]
     end
 
-    pˢᵗ = dynamics.reference_state.standard_pressure
+    pˢᵗ = standard_pressure(dynamics)
     q = compute_moisture_fractions(i, j, k, grid, microphysics, ρᵣ, qᵗ, microphysical_fields)
     𝒰θ₀ = LiquidIcePotentialTemperatureState(θ, q, pˢᵗ, pᵣ)
     𝒰θ₁ = maybe_adjust_thermodynamic_state(i, j, k, 𝒰θ₀, microphysics, ρᵣ, microphysical_fields, qᵗ, constants)
@@ -169,7 +164,7 @@ The temperature is converted to static energy ``e`` using the relation:
 e = cᵖᵐ T + g z - ℒˡ qˡ - ℒⁱ qⁱ .
 ```
 """
-function set_thermodynamic_variable!(model::StaticEnergyModel, ::Val{:T}, value)
+function AtmosphereModels.set_thermodynamic_variable!(model::StaticEnergyModel, ::Val{:T}, value)
     T_field = model.temperature # use temperature field as scratch/storage
     set!(T_field, value)
 

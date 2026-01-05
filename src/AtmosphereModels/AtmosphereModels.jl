@@ -4,17 +4,14 @@ export
     # AtmosphereModel core
     AtmosphereModel,
     AtmosphereModelBuoyancy,
-    # Dynamics
-    AnelasticDynamics,
-    AnelasticModel,
+    # Dynamics interface (dynamics types exported by their respective modules)
     dynamics_density,
     dynamics_pressure,
     mean_pressure,
     pressure_anomaly,
     total_pressure,
-    # Thermodynamic formulations
-    StaticEnergyFormulation,
-    LiquidIcePotentialTemperatureFormulation,
+    buoyancy_forceᶜᶜᶜ,
+    # Thermodynamic formulation interface (formulation types exported by their respective modules)
     thermodynamic_density_name,
     thermodynamic_density,
     # Helpers
@@ -25,6 +22,7 @@ export
     liquid_ice_potential_temperature,
     precipitation_rate,
     surface_precipitation_flux,
+    specific_humidity,
 
     # Interface functions (extended by BoundaryConditions and Forcings)
     regularize_atmosphere_model_boundary_conditions,
@@ -33,6 +31,13 @@ export
 
     # Radiation (implemented by extensions)
     RadiativeTransferModel,
+    BackgroundAtmosphere,
+    GrayOptics,
+    ClearSkyOptics,
+    AllSkyOptics,
+
+    # Cloud effective radius
+    ConstantRadiusParticles,
 
     # Diagnostics (re-exported from Diagnostics submodule)
     PotentialTemperature,
@@ -43,7 +48,7 @@ export
     StaticEnergy,
     compute_hydrostatic_pressure!
 
-using DocStringExtensions: TYPEDSIGNATURES
+using DocStringExtensions: TYPEDSIGNATURES, TYPEDEF
 using Adapt: Adapt, adapt
 using KernelAbstractions: @kernel, @index
 
@@ -56,61 +61,19 @@ using Oceananigans.TimeSteppers: TimeSteppers
 using Oceananigans.Utils: prettysummary, launch!
 
 #####
-##### Interfaces
+##### Interfaces (define the contract that dynamics implementations must fulfill)
 #####
 
 include("forcing_interface.jl")
 include("microphysics_interface.jl")
-
-#####
-##### Dynamics submodule
-#####
-
-include("Dynamics/Dynamics.jl")
-using .Dynamics:
-    AnelasticDynamics,
-    default_dynamics,
-    materialize_dynamics,
-    materialize_momentum_and_velocities,
-    dynamics_pressure_solver,
-    dynamics_density,
-    dynamics_pressure,
-    mean_pressure,
-    pressure_anomaly,
-    total_pressure,
-    solve_for_anelastic_pressure!
-
-#####
-##### Thermodynamic formulations submodule
-#####
-
-include("ThermodynamicFormulations/ThermodynamicFormulations.jl")
-using .ThermodynamicFormulations:
-    StaticEnergyFormulation,
-    LiquidIcePotentialTemperatureFormulation,
-    materialize_formulation,
-    prognostic_thermodynamic_field_names,
-    additional_thermodynamic_field_names,
-    thermodynamic_density_name,
-    thermodynamic_density,
-    collect_prognostic_fields,
-    diagnose_thermodynamic_state
-
-# Import with `import` (not `using`) to allow extension
-import .ThermodynamicFormulations: compute_auxiliary_thermodynamic_variables!, compute_thermodynamic_tendency!
+include("dynamics_interface.jl")
+include("formulation_interface.jl")
 
 #####
 ##### AtmosphereModel core
 #####
 
 include("atmosphere_model.jl")
-include("set_atmosphere_model.jl")
-
-# Define AnelasticModel type alias after AtmosphereModel is defined
-const AnelasticModel = AtmosphereModel{<:AnelasticDynamics}
-
-# Include anelastic time stepping after AnelasticModel is defined
-include("anelastic_time_stepping.jl")
 
 #####
 ##### Remaining AtmosphereModel components
@@ -123,17 +86,13 @@ include("update_atmosphere_model_state.jl")
 include("compute_hydrostatic_pressure.jl")
 
 #####
-##### Thermodynamics tendencies and set! implementations
-#####
-
-include("static_energy_tendency.jl")
-include("potential_temperature_tendency.jl")
-
-#####
-##### Diagnostics submodule
+##### Diagnostics submodule (needed before formulation submodules for helper accessors)
 #####
 
 include("Diagnostics/Diagnostics.jl")
 using .Diagnostics
+
+# set_atmosphere_model requires Diagnostics for SaturationSpecificHumidity
+include("set_atmosphere_model.jl")
 
 end

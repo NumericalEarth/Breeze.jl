@@ -1,22 +1,22 @@
 using Oceananigans.Fields: Fields, set!
-using Oceananigans.Grids: znode, Center
 using Oceananigans.TimeSteppers: update_state!
 using Oceananigans.BoundaryConditions: fill_halo_regions!
 using Oceananigans.TimeSteppers: compute_pressure_correction!, make_pressure_correction!, update_state!
 
+using .Diagnostics: SaturationSpecificHumidity
+
 using ..Thermodynamics:
-    LiquidIcePotentialTemperatureState,
     MoistureMassFractions,
     mixture_heat_capacity,
-    mixture_gas_constant,
-    temperature
-
-const c = Center()
+    mixture_gas_constant
 
 move_to_front(names, name) = tuple(name, filter(n -> n != name, names)...)
 
 function prioritize_names(names)
-    for n in (:w, :ρw, :v, :ρv, :u, :ρu, :qᵗ, :ρqᵗ)
+    # Priority order (first items applied last, so reverse order of priority):
+    # 1. ρ must be set first for compressible dynamics (density needed for momentum)
+    # 2. Then velocities/momentum and moisture
+    for n in (:w, :ρw, :v, :ρv, :u, :ρu, :qᵗ, :ρqᵗ, :ρ)
         if n ∈ names
             names = move_to_front(names, n)
         end
@@ -29,16 +29,16 @@ const settable_thermodynamic_variables = (:ρθ, :θ, :ρθˡⁱ, :θˡⁱ, :ρe
 function set_thermodynamic_variable! end
 
 """
-    specific_to_density_weighted(name::Symbol)
+$(TYPEDSIGNATURES)
 
 Convert a specific microphysical variable name to its density-weighted counterpart.
-For example, `:qᶜˡ` → `:ρqᶜˡ`, `:qʳ` → `:ρqʳ`.
+For example, `:qᶜˡ` → `:ρqᶜˡ`, `:qʳ` → `:ρqʳ`, `:nᶜˡ` → `:ρnᶜˡ`.
 
-Returns `nothing` if the name doesn't start with 'q'.
+Returns `nothing` if the name doesn't start with 'q' or 'n'.
 """
 function specific_to_density_weighted(name::Symbol)
     str = string(name)
-    if startswith(str, "q")
+    if startswith(str, "q") || startswith(str, "n")
         return Symbol("ρ" * str)
     else
         return nothing
@@ -46,18 +46,21 @@ function specific_to_density_weighted(name::Symbol)
 end
 
 """
-    settable_specific_microphysical_names(microphysics)
+$(TYPEDSIGNATURES)
 
 Return a tuple of specific (non-density-weighted) names that can be set
 for the given microphysics scheme. These are derived from the prognostic
 field names by removing the 'ρ' prefix.
+
+For mass fields (e.g., `ρqᶜˡ` → `qᶜˡ`) and number fields (e.g., `ρnᶜˡ` → `nᶜˡ`).
 """
 function settable_specific_microphysical_names(microphysics)
     prog_names = prognostic_field_names(microphysics)
     specific_names = Symbol[]
     for name in prog_names
         str = string(name)
-        if startswith(str, "ρq")
+        # Handle both mass fields (ρq*) and number fields (ρn*)
+        if startswith(str, "ρq") || startswith(str, "ρn")
             push!(specific_names, Symbol(str[nextind(str, 1):end]))  # Remove 'ρ' prefix
         end
     end
@@ -69,7 +72,7 @@ settable_specific_microphysical_names(::Nothing) = ()
 """
     set!(model::AtmosphereModel; enforce_mass_conservation=true, kw...)
 
-Set variables in an `AtmosphereModel`.
+Set variables in an [`AtmosphereModel`](@ref).
 
 # Keyword Arguments
 
@@ -93,10 +96,16 @@ Variables are set via keyword arguments. Supported variables include:
 **Diagnostic variables** (specific, i.e., per unit mass):
 - `u`, `v`, `w`: velocity components (sets both velocity and momentum)
 - `qᵗ`: total specific moisture (sets both specific and density-weighted moisture)
+- `ℋ`: relative humidity (sets total moisture via `qᵗ = ℋ * qᵛ⁺`, where `qᵛ⁺` is the
+  saturation specific humidity at the current temperature). Relative humidity is in
+  the range [0, 1]. For models with saturation adjustment microphysics, `ℋ > 1` throws
+  an error since the saturation adjustment would immediately reduce it to 1.
 
 **Specific microphysical variables** (automatically converted to density-weighted):
 - `qᶜˡ`: specific cloud liquid (sets `ρqᶜˡ = ρᵣ * qᶜˡ`)
 - `qʳ`: specific rain (sets `ρqʳ = ρᵣ * qʳ`)
+- `nᶜˡ`: specific cloud liquid number [1/kg] (sets `ρnᶜˡ = ρᵣ * nᶜˡ`)
+- `nʳ`: specific rain number [1/kg] (sets `ρnʳ = ρᵣ * nʳ`)
 - Other prognostic microphysical variables with the `ρ` prefix removed
 
 !!! note "The meaning of `θ`"
@@ -151,7 +160,7 @@ function Fields.set!(model::AtmosphereModel; time=nothing, enforce_mass_conserva
             set!(qᵗ, value)
             ρ = dynamics_density(model.dynamics)
             ρqᵗ = model.moisture_density
-            set!(ρqᵗ, ρ * qᵗ)                
+            set!(ρqᵗ, ρ * qᵗ)
 
         elseif name ∈ (:u, :v, :w)
             u = model.velocities[name]
@@ -160,14 +169,37 @@ function Fields.set!(model::AtmosphereModel; time=nothing, enforce_mass_conserva
             ρ = dynamics_density(model.dynamics)
             ϕ = model.momentum[Symbol(:ρ, name)]
             value = ρ * u
-            set!(ϕ, value)    
+            set!(ϕ, value)
 
         elseif name ∈ settable_thermodynamic_variables
             set_thermodynamic_variable!(model, Val(name), value)
 
+        elseif name == :ρ
+            # Set density for compressible dynamics
+            ρ = dynamics_density(model.dynamics)
+            set!(ρ, value)
+            # Fill halos immediately - needed for velocity→momentum conversion
+            fill_halo_regions!(ρ)
+
+        elseif name == :ℋ
+            # Call update_state! to ensure temperature is computed from thermodynamic variables
+            update_state!(model, compute_tendencies=false)
+
+            # Compute saturation specific humidity using GPU-compatible kernel
+            # Use :equilibrium flavor which handles both saturated and unsaturated conditions
+            qᵛ⁺ = SaturationSpecificHumidity(model, :equilibrium)
+
+            # Set qᵗ = ℋ * qᵛ⁺
+            qᵗ = model.specific_moisture
+            set!(qᵗ, value * qᵛ⁺)
+
+            ρ = dynamics_density(model.dynamics)
+            ρqᵗ = model.moisture_density
+            set!(ρqᵗ, ρ * qᵗ)
+
         else
             prognostic_names = keys(prognostic_fields(model))
-            settable_diagnostic_variables = (:qᵗ, :u, :v, :w)
+            settable_diagnostic_variables = (:qᵗ, :ℋ, :u, :v, :w)
             specific_microphysical = settable_specific_microphysical_names(model.microphysics)
 
             msg = "Cannot set! $name in AtmosphereModel because $name is neither a
@@ -185,7 +217,7 @@ function Fields.set!(model::AtmosphereModel; time=nothing, enforce_mass_conserva
     # Apply a mask
     foreach(mask_immersed_field!, prognostic_fields(model))
     update_state!(model, compute_tendencies=false)
-    
+
     if enforce_mass_conservation
         FT = eltype(model.grid)
         Δt = one(FT)

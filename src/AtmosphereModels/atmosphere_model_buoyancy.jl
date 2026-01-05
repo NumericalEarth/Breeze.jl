@@ -3,9 +3,9 @@ using Oceananigans.BuoyancyFormulations: BuoyancyFormulations as OceanBuoyancyFo
 using Oceananigans.Operators: ∂zᶜᶜᶠ
 
 """
-    AtmosphereModelBuoyancy{D, F, T}
+$(TYPEDEF)
 
-Wrapper struct for computing buoyancy for AtmosphereModel
+Wrapper struct for computing buoyancy for [`AtmosphereModel`](@ref)
 in the context of a turbulence closure. Used to interface with Oceananigans
 turbulence closures that require buoyancy gradients.
 """
@@ -50,11 +50,12 @@ end
 end
 
 @inline function virtual_potential_temperature(i, j, k, grid, constants, dynamics, T, qᵗ)
-    pᵣ = @inbounds dynamics.reference_state.pressure[i, j, k]
-    p₀ = dynamics.reference_state.surface_pressure
+    pᵣ_field = dynamics_pressure(dynamics)
+    @inbounds pᵣ = pᵣ_field[i, j, k]
+    pˢᵗ = standard_pressure(dynamics)
     q = @inbounds MoistureMassFractions(qᵗ[i, j, k])
     Rᵐ = mixture_gas_constant(q, constants)
     Rᵈ = dry_air_gas_constant(constants)
     cᵖᵐ = mixture_heat_capacity(q, constants)
-    return @inbounds Rᵐ / Rᵈ * T[i, j, k] * (p₀ / pᵣ)^(Rᵐ / cᵖᵐ)
+    return @inbounds Rᵐ / Rᵈ * T[i, j, k] * (pˢᵗ / pᵣ)^(Rᵐ / cᵖᵐ)
 end

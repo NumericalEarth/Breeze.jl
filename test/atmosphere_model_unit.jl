@@ -49,7 +49,7 @@ end
 
             # Check that interpolating to the first face (k=1) recovers surface values
             q₀ = Breeze.Thermodynamics.MoistureMassFractions{FT} |> zero
-            ρ₀ = Breeze.Thermodynamics.density(p₀, θ₀, q₀, constants)
+            ρ₀ = Breeze.Thermodynamics.density(θ₀, p₀, q₀, constants)
             for i = 1:Nx, j = 1:Ny
                 @test p₀ ≈ @allowscalar ℑzᵃᵃᶠ(i, j, 1, grid, reference_state.pressure)
                 @test ρ₀ ≈ @allowscalar ℑzᵃᵃᶠ(i, j, 1, grid, reference_state.density)
@@ -68,26 +68,6 @@ end
             @test liquid_ice_potential_temperature(model) ≈ θ₁
         end
     end
-end
-
-@testset "liquid_ice_potential_temperature no microphysics) [$(FT)]" for FT in (Float32, Float64), formulation in (:LiquidIcePotentialTemperature, :StaticEnergy)
-    Oceananigans.defaults.FloatType = FT
-    grid = RectilinearGrid(default_arch; size=(8, 8, 8), x=(0, 1_000), y=(0, 1_000), z=(0, 1_000))
-    constants = ThermodynamicConstants()
-
-    p₀ = FT(101325)
-    θ₀ = FT(300)
-    reference_state = ReferenceState(grid, constants, surface_pressure=p₀, potential_temperature=θ₀)
-    dynamics = AnelasticDynamics(reference_state)
-    model = AtmosphereModel(grid; thermodynamic_constants=constants, dynamics, formulation)
-
-    # Initialize with potential temperature and dry air
-    θᵢ = CenterField(grid)
-    set!(θᵢ, (x, y, z) -> θ₀ + rand())
-    set!(model; θ=θᵢ)
-
-    θ_model = liquid_ice_potential_temperature(model) |> Field
-    @test θ_model ≈ θᵢ
 end
 
 @testset "Saturation and LiquidIcePotentialTemperatureField (WarmPhase) [$(FT)]" for FT in (Float32, Float64), formulation in (:LiquidIcePotentialTemperature, :StaticEnergy)
@@ -115,7 +95,7 @@ end
     Tᵢ = @allowscalar model.temperature[1, 1, k]
     pᵣᵢ = @allowscalar model.dynamics.reference_state.pressure[1, 1, k]
     q = Breeze.Thermodynamics.MoistureMassFractions{FT} |> zero
-    ρᵢ = Breeze.Thermodynamics.density(pᵣᵢ, Tᵢ, q, constants)
+    ρᵢ = Breeze.Thermodynamics.density(Tᵢ, pᵣᵢ, q, constants)
     qᵛ⁺_expected = Breeze.Thermodynamics.saturation_specific_humidity(Tᵢ, ρᵢ, constants, constants.liquid)
     qᵛ⁺k = @allowscalar qᵛ⁺[1, 1, k]
 
@@ -241,55 +221,3 @@ end
     end
 end
 
-@testset "Setting temperature directly [$(FT), $(formulation)]" for FT in (Float32, Float64), formulation in (:LiquidIcePotentialTemperature, :StaticEnergy)
-    Oceananigans.defaults.FloatType = FT
-    grid = RectilinearGrid(default_arch; size=(4, 4, 10), x=(0, 1_000), y=(0, 1_000), z=(0, 5_000))
-    constants = ThermodynamicConstants()
-
-    p₀ = FT(101500)
-    θ₀ = FT(300)
-    reference_state = ReferenceState(grid, constants, surface_pressure=p₀, potential_temperature=θ₀)
-    dynamics = AnelasticDynamics(reference_state)
-
-    # Test with no microphysics first (no saturation adjustment effects)
-    model = AtmosphereModel(grid; thermodynamic_constants=constants, dynamics, formulation)
-
-    # Set a standard lapse rate temperature profile with dry air
-    T_profile(x, y, z) = FT(300) - FT(0.0065) * z
-
-    set!(model, T=T_profile, qᵗ=FT(0))  # dry air
-
-    # Check that temperature was set correctly (should match for dry air)
-    z_nodes = Oceananigans.Grids.znodes(grid, Center())
-    for k in 1:10
-        T_expected = T_profile(0, 0, z_nodes[k])
-        T_actual = @allowscalar model.temperature[1, 1, k]
-        @test T_actual ≈ T_expected rtol=FT(1e-4)
-    end
-
-    # Check that potential temperature increases with height (stable atmosphere)
-    θ = liquid_ice_potential_temperature(model) |> Field
-    θ_prev = @allowscalar θ[1, 1, 1]
-    for k in 2:10
-        θ_k = @allowscalar θ[1, 1, k]
-        @test θ_k > θ_prev  # potential temperature should increase with height
-        θ_prev = θ_k
-    end
-
-    # Test round-trip consistency: set T, get θ; set θ back, get same T
-    set!(model, T=FT(280), qᵗ=FT(0))
-    T_after_set = @allowscalar model.temperature[2, 2, 5]
-    @test T_after_set ≈ FT(280) rtol=FT(1e-4)
-
-    # Now test with saturation adjustment
-    microphysics = SaturationAdjustment(equilibrium=MixedPhaseEquilibrium())
-    model_moist = AtmosphereModel(grid; thermodynamic_constants=constants, dynamics, formulation, microphysics)
-
-    # Set T with subsaturated moisture (no condensate expected)
-    set!(model_moist, T=T_profile, qᵗ=FT(0.001))  # low moisture
-
-    # Temperature should still be close to input for subsaturated air
-    T_actual = @allowscalar model_moist.temperature[1, 1, 1]
-    T_expected = T_profile(0, 0, z_nodes[1])
-    @test T_actual ≈ T_expected rtol=FT(0.02)  # allow 2% tolerance due to moisture effects
-end

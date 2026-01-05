@@ -2,13 +2,24 @@
 ##### Microphysics interface (default implementations)
 #####
 
-using ..Thermodynamics:
-    temperature,
-    MoistureMassFractions
+using ..Thermodynamics: MoistureMassFractions
 
 #####
 ##### Definition of the microphysics interface, with methods for "Nothing" microphysics
 #####
+
+"""
+$(TYPEDSIGNATURES)
+
+Return the specific humidity (vapor mass fraction) field for the given `model`.
+
+For `Nothing` microphysics (no condensate), the vapor mass fraction equals the total
+specific moisture. For microphysics schemes with prognostic vapor (e.g., where `qᵛ`
+is tracked explicitly), this function returns the appropriate vapor field.
+"""
+specific_humidity(model) = specific_humidity(model.microphysics, model)
+
+specific_humidity(::Nothing, model) = model.specific_moisture
 
 """
 $(TYPEDSIGNATURES)
@@ -126,7 +137,7 @@ precipitation_rate(model, microphysics, phase) = CenterField(model.grid)
 #####
 
 """
-    surface_precipitation_flux(model)
+$(TYPEDSIGNATURES)
 
 Return a 2D `Field` representing the flux of precipitating moisture at the bottom boundary.
 
@@ -136,7 +147,7 @@ the rate at which rain mass leaves the domain through the bottom boundary.
 Units: kg/m²/s (positive = downward flux out of domain)
 
 Arguments:
-- `model`: An `AtmosphereModel` with a microphysics scheme
+- `model`: An [`AtmosphereModel`](@ref) with a microphysics scheme
 
 Returns a 2D `Field` that can be computed and visualized.
 Specific microphysics schemes must extend this function.
@@ -145,3 +156,54 @@ surface_precipitation_flux(model) = surface_precipitation_flux(model, model.micr
 
 # Default: zero flux for Nothing microphysics
 surface_precipitation_flux(model, ::Nothing) = Field{Center, Center, Nothing}(model.grid) 
+
+#####
+##### Cloud effective radius interface
+#####
+
+"""
+$(TYPEDEF)
+
+Represents cloud particles with a constant effective radius.
+
+# Fields
+- `radius`: The effective radius in microns (μm).
+
+# Example
+
+```julia
+liquid_radius = ConstantRadiusParticles(10.0)  # 10 μm droplets
+ice_radius = ConstantRadiusParticles(30.0)     # 30 μm ice crystals
+```
+"""
+struct ConstantRadiusParticles{FT}
+    radius :: FT
+end
+
+"""
+$(TYPEDSIGNATURES)
+
+Return the effective radius of cloud liquid droplets in microns (μm).
+
+This function dispatches on the `effective_radius_model` argument. The default
+implementation for `ConstantRadiusParticles` returns a constant value.
+
+Microphysics schemes can extend this function to provide diagnosed effective radii
+based on cloud properties.
+"""
+@inline cloud_liquid_effective_radius(i, j, k, grid, effective_radius_model::ConstantRadiusParticles, args...) =
+    effective_radius_model.radius
+
+"""
+$(TYPEDSIGNATURES)
+
+Return the effective radius of cloud ice particles in microns (μm).
+
+This function dispatches on the `effective_radius_model` argument. The default
+implementation for [`ConstantRadiusParticles`](@ref) returns a constant value.
+
+Microphysics schemes can extend this function to provide diagnosed effective radii
+based on cloud properties.
+"""
+@inline cloud_ice_effective_radius(i, j, k, grid, effective_radius_model::ConstantRadiusParticles, args...) =
+    effective_radius_model.radius

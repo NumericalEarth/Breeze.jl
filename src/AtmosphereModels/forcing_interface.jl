@@ -25,7 +25,7 @@ such as grid, reference state, and thermodynamic constants.
 function materialize_atmosphere_model_forcing end
 
 """
-    compute_forcing!(forcing)
+$(TYPEDSIGNATURES)
 
 Compute any fields or quantities needed by a forcing before it is applied.
 This function is extended by the `Forcings` module for forcing types that

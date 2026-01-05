@@ -8,17 +8,16 @@
 using Oceananigans.Utils: launch!
 using Oceananigans.Operators: ℑzᵃᵃᶠ
 using Oceananigans.Grids: xnode, ynode, λnode, φnode, znodes
-using Oceananigans.Grids: RectilinearGrid, Center, Face, Flat, Bounded
+using Oceananigans.Grids: AbstractGrid, RectilinearGrid, Center, Face, Flat, Bounded
 using Oceananigans.Fields: ConstantField
-using Breeze.AtmosphereModels: AtmosphereModels, SurfaceRadiativeProperties
+using Breeze.AtmosphereModels: AtmosphereModels, SurfaceRadiativeProperties, RadiativeTransferModel
 
 using RRTMGP.AtmosphericStates: GrayAtmosphericState, GrayOpticalThicknessOGorman2008
 using KernelAbstractions: @kernel, @index
-using Dates: AbstractDateTime
+using Dates: AbstractDateTime, Millisecond
 
-import Breeze.AtmosphereModels: RadiativeTransferModel
-
-const GrayRadiativeTransferModel = RadiativeTransferModel{<:GrayOpticalThicknessOGorman2008}
+# Dispatch on background_atmosphere = Nothing for gray radiation
+const GrayRadiativeTransferModel = RadiativeTransferModel{<:Any, <:Any, <:Any, <:Any, Nothing}
 
 materialize_surface_property(x::Number, grid) = convert(eltype(grid), x)
 materialize_surface_property(x::Field, grid) = x
@@ -41,30 +40,33 @@ $(TYPEDSIGNATURES)
 Construct a gray atmosphere radiative transfer model for the given grid.
 
 # Keyword Arguments
-- `latitude`: Latitude in degrees. If `nothing` (default), extracted from grid y-coordinate.
-              Can be a scalar (constant for all columns) or a 2D field.
-- `surface_temperature`: Surface temperature in Kelvin (default: 300).
-                         Can be a scalar or 2D field.
+- `optical_thickness`: Optical thickness parameterization (default: `GrayOpticalThicknessOGorman2008(FT)`).
+- `surface_temperature`: Surface temperature in Kelvin (required).
+- `coordinate`: Tuple of (longitude, latitude) in degrees. If `nothing` (default), 
+                extracted from grid coordinates.
+- `epoch`: Optional epoch for computing time with floating-point clocks.
 - `surface_emissivity`: Surface emissivity, 0-1 (default: 0.98). Scalar.
-- `direct_surface_albedo`: Direct surface albedo, 0-1 (default: 0.1). Can be scalar or 2D field.
-- `diffuse_surface_albedo`: Diffuse surface albedo, 0-1 (default: 0.1). Can be scalar or 2D field.
+- `surface_albedo`: Surface albedo, 0-1. Can be scalar or 2D field. 
+                    Alternatively, provide both `direct_surface_albedo` and `diffuse_surface_albedo`.
+- `direct_surface_albedo`: Direct surface albedo, 0-1. Can be scalar or 2D field.
+- `diffuse_surface_albedo`: Diffuse surface albedo, 0-1. Can be scalar or 2D field.
 - `solar_constant`: Top-of-atmosphere solar flux in W/m² (default: 1361)
 """
-function RadiativeTransferModel(grid, constants,
-                                optical_thickness::GrayOpticalThicknessOGorman2008;
-                                surface_temperature,
-                                coordinate = nothing,
-                                epoch = nothing,
-                                stefan_boltzmann_constant = 5.670374419e-8,
-                                avogadro_number = 6.02214076e23,
-                                latitude = nothing,
-                                surface_emissivity = 0.98,
-                                direct_surface_albedo = nothing,
-                                diffuse_surface_albedo = nothing,
-                                surface_albedo = nothing,
-                                solar_constant = 1361)
+function AtmosphereModels.RadiativeTransferModel(grid::AbstractGrid,
+                                                 ::GrayOptics,
+                                                 constants::ThermodynamicConstants;
+                                                 optical_thickness = GrayOpticalThicknessOGorman2008(eltype(grid)),
+                                                 surface_temperature,
+                                                 coordinate = nothing,
+                                                 epoch = nothing,
+                                                 surface_emissivity = 0.98,
+                                                 direct_surface_albedo = nothing,
+                                                 diffuse_surface_albedo = nothing,
+                                                 surface_albedo = nothing,
+                                                 solar_constant = 1361)
 
     FT = eltype(grid)
+    parameters = RRTMGPParameters(constants)
 
     error_msg = "Must either provide surface_albedo or *both* of
                  direct_surface_albedo and diffuse_surface_albedo"
@@ -94,19 +96,6 @@ function RadiativeTransferModel(grid, constants,
     # Set up RRTMGP grid parameters
     context = rrtmgp_context(arch)
     DA = ClimaComms.array_type(context.device)
-
-    # Create RRTMGP parameters with default values
-    kappa_d = constants.dry_air.heat_capacity / constants.dry_air.molar_mass
-
-    radiative_transfer_parameters = RRTMGPParameters(;
-        grav = FT(constants.gravitational_acceleration),
-        molmass_dryair = FT(constants.dry_air.molar_mass),
-        molmass_water = FT(constants.vapor.molar_mass),
-        gas_constant = FT(constants.molar_gas_constant),
-        kappa_d = FT(kappa_d),
-        Stefan = FT(stefan_boltzmann_constant),
-        avogad = FT(avogadro_number),
-    )
 
     # Allocate RRTMGP arrays: (nlay/nlev, ncol)
     # Note: RRTMGP uses "lat" internally for its GrayAtmosphericState struct
@@ -168,7 +157,7 @@ function RadiativeTransferModel(grid, constants,
     grid_parameters = RRTMGPGridParams(FT; context, nlay=Nz, ncol=Nc)
 
     longwave_solver = NoScatLWRTE(grid_parameters;
-                                  params = radiative_transfer_parameters,
+                                  params = parameters,
                                   sfc_emis = rrtmgp_ε₀,
                                   inc_flux = nothing)
 
@@ -189,17 +178,19 @@ function RadiativeTransferModel(grid, constants,
                                                     direct_surface_albedo,
                                                     diffuse_surface_albedo)
 
-    return RadiativeTransferModel(optical_thickness,
-                                  convert(FT, solar_constant),
+    return RadiativeTransferModel(convert(FT, solar_constant),
                                   coordinate,
                                   epoch,
                                   surface_properties,
+                                  nothing,  # background_atmosphere = nothing for gray
                                   atmospheric_state,
                                   longwave_solver,
                                   shortwave_solver,
                                   upwelling_longwave_flux,
                                   downwelling_longwave_flux,
-                                  downwelling_shortwave_flux)
+                                  downwelling_shortwave_flux,
+                                  nothing,  # liquid_effective_radius = nothing for gray
+                                  nothing)  # ice_effective_radius = nothing for gray
 end
 
 @inline rrtmgp_column_index(i, j, Nx) = i + (j - 1) * Nx
@@ -224,20 +215,6 @@ end
     @inbounds rrtmgp_latitude[col] = φ
 end
 
-"""
-$(TYPEDSIGNATURES)
-
-Create an RRTMGP-compatible ClimaComms context from an Oceananigans architecture.
-"""
-function rrtmgp_context(arch::CPU)
-    device = Threads.nthreads() > 1 ? ClimaComms.CPUMultiThreaded() : ClimaComms.CPUSingleThreaded()
-    return ClimaComms.context(device)
-end
-
-function rrtmgp_context(arch::GPU)
-    return ClimaComms.context(ClimaComms.CUDADevice())
-end
-
 #####
 ##### Update radiation fluxes from model state
 #####
@@ -252,9 +229,6 @@ end
 #     - RadiativeTransferModel: wrapper containing RRTMGP solvers and Oceananigans flux fields
 #     - SingleColumnGrid type alias
 #
-
-compute_datetime(dt::AbstractDateTime, epoch) = dt
-compute_datetime(t::Number, epoch::AbstractDateTime) = epoch + Seconds(t)
 
 """
 $(TYPEDSIGNATURES)
@@ -294,18 +268,10 @@ function AtmosphereModels.update_radiation!(rtm::GrayRadiativeTransferModel, mod
     # Solve longwave RTE (RRTMGP external call)
     solve_lw!(rtm.longwave_solver, rrtmgp_state)
 
-    # Solve shortwave RTE (only if sun is above horizon)
-    cos_θz = rtm.shortwave_solver.bcs.cos_zenith[1]
-
-    if cos_θz > 0
-        solve_sw!(rtm.shortwave_solver, rrtmgp_state)
-    else
-        # Sun below horizon - zero shortwave fluxes
-        rtm.shortwave_solver.flux.flux_up .= 0
-        rtm.shortwave_solver.flux.flux_dn .= 0
-        rtm.shortwave_solver.flux.flux_net .= 0
-        rtm.shortwave_solver.flux.flux_dn_dir .= 0
-    end
+    # Solve shortwave RTE
+    # Note: RRTMGP handles the case when sun is below horizon (cos_zenith <= 0)
+    # by producing zero fluxes internally
+    solve_sw!(rtm.shortwave_solver, rrtmgp_state)
 
     # Copy RRTMGP flux arrays to Oceananigans fields with sign convention
     copy_fluxes_to_fields!(rtm, grid)
@@ -458,12 +424,9 @@ function update_solar_zenith_angle!(sw_solver, coordinate::Tuple, grid, datetime
     return nothing
 end
 
-function update_solar_zenith_angle!(sw_solver, ::Nothing, grid)
+function update_solar_zenith_angle!(sw_solver, ::Nothing, grid, datetime)
     arch = architecture(grid)
-    launch!(arch, grid, :xy, _update_solar_zenith_angle_from_grid!, sw_solver.bcs.cos_zenith, grid)
-    datetime = epoch + Seconds(clock.time)
-    cos_θz = cos_solar_zenith_angle(1, 1, grid, datetime)
-    sw_solver.bcs.cos_zenith[1] = max(cos_θz, 0)  # Clamp to positive (sun above horizon)
+    launch!(arch, grid, :xy, _update_solar_zenith_angle_from_grid!, sw_solver.bcs.cos_zenith, grid, datetime)
     return nothing
 end
 
@@ -506,14 +469,14 @@ function copy_fluxes_to_fields!(rtm::GrayRadiativeTransferModel, grid)
     ℐ_sw_dn = rtm.downwelling_shortwave_flux
 
     Nx, Ny, Nz = size(grid)
-    launch!(arch, grid, (Nx, Ny, Nz+1), _copy_rrtmgp_fluxes!,
+    launch!(arch, grid, (Nx, Ny, Nz+1), _copy_gray_fluxes!,
             ℐ_lw_up, ℐ_lw_dn, ℐ_sw_dn, lw_flux_up, lw_flux_dn, sw_flux_dn_dir, grid)
 
     return nothing
 end
 
-@kernel function _copy_rrtmgp_fluxes!(ℐ_lw_up, ℐ_lw_dn, ℐ_sw_dn,
-                                      lw_flux_up, lw_flux_dn, sw_flux_dn_dir, grid)
+@kernel function _copy_gray_fluxes!(ℐ_lw_up, ℐ_lw_dn, ℐ_sw_dn,
+                                    lw_flux_up, lw_flux_dn, sw_flux_dn_dir, grid)
     i, j, k = @index(Global, NTuple)
 
     # RRTMGP uses (nlev, ncol), we use (i, j, k) for ZFaceField

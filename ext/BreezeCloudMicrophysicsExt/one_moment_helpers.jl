@@ -2,7 +2,7 @@
 ##### Precipitation rate diagnostic
 #####
 
-function precipitation_rate(model, microphysics::OneMomentLiquidRain, ::Val{:liquid})
+function AtmosphereModels.precipitation_rate(model, microphysics::OneMomentLiquidRain, ::Val{:liquid})
     grid = model.grid
     qᶜˡ = model.microphysical_fields.qᶜˡ
     ρqʳ = model.microphysical_fields.ρqʳ
@@ -13,7 +13,7 @@ function precipitation_rate(model, microphysics::OneMomentLiquidRain, ::Val{:liq
 end
 
 # Ice precipitation not yet implemented for one-moment scheme
-precipitation_rate(model, ::OneMomentCloudMicrophysics, ::Val{:ice}) = nothing
+AtmosphereModels.precipitation_rate(model, ::OneMomentCloudMicrophysics, ::Val{:ice}) = nothing
 
 #####
 ##### Precipitation rate kernel (shared by all 1M schemes)
@@ -69,7 +69,7 @@ Units: kg/m²/s (positive = downward, out of domain)
 Note: The returned value is positive when rain is falling out of the domain
 (the terminal velocity `wʳ` is negative, and we flip the sign).
 """
-function surface_precipitation_flux(model, microphysics::OneMomentCloudMicrophysics)
+function AtmosphereModels.surface_precipitation_flux(model, microphysics::OneMomentCloudMicrophysics)
     grid = model.grid
     wʳ = model.microphysical_fields.wʳ
     ρqʳ = model.microphysical_fields.ρqʳ
@@ -101,16 +101,16 @@ end
 ##### show methods
 #####
 
-import Oceananigans.Utils: prettysummary
+using Oceananigans.Utils: Utils, prettysummary
 
-function prettysummary(cl::CloudLiquid)
+function Utils.prettysummary(cl::CloudLiquid)
     return string("CloudLiquid(",
                   "ρw=", prettysummary(cl.ρw), ", ",
                   "r_eff=", prettysummary(cl.r_eff), ", ",
                   "τ_relax=", prettysummary(cl.τ_relax))
 end
 
-function prettysummary(ci::CloudIce)
+function Utils.prettysummary(ci::CloudIce)
     return string("CloudIce(",
                   "r0=", prettysummary(ci.r0), ", ",
                   "r_eff=", prettysummary(ci.r_eff), ", ",
@@ -121,7 +121,7 @@ function prettysummary(ci::CloudIce)
                   "pdf=", prettysummary(ci.pdf), ")")
 end
 
-function prettysummary(mass::CloudMicrophysics.Parameters.ParticleMass)
+function Utils.prettysummary(mass::CloudMicrophysics.Parameters.ParticleMass)
     return string("ParticleMass(",
                   "r0=", prettysummary(mass.r0), ", ",
                   "m0=", prettysummary(mass.m0), ", ",
@@ -130,11 +130,11 @@ function prettysummary(mass::CloudMicrophysics.Parameters.ParticleMass)
                   "χm=", prettysummary(mass.χm), ")")
 end
 
-function prettysummary(pdf::CloudMicrophysics.Parameters.ParticlePDFIceRain)
+function Utils.prettysummary(pdf::CloudMicrophysics.Parameters.ParticlePDFIceRain)
     return string("ParticlePDFIceRain(n0=", prettysummary(pdf.n0), ")")
 end
 
-function prettysummary(eff::CloudMicrophysics.Parameters.CollisionEff)
+function Utils.prettysummary(eff::CloudMicrophysics.Parameters.CollisionEff)
     return string("CollisionEff(",
                   "e_lcl_rai=", prettysummary(eff.e_lcl_rai), ", ",
                   "e_lcl_sno=", prettysummary(eff.e_lcl_sno), ", ",
@@ -143,11 +143,11 @@ function prettysummary(eff::CloudMicrophysics.Parameters.CollisionEff)
                   "e_rai_sno=", prettysummary(eff.e_rai_sno), ")")
 end
 
-prettysummary(rain::CloudMicrophysics.Parameters.Rain) = "CloudMicrophysics.Parameters.Rain"
-prettysummary(snow::CloudMicrophysics.Parameters.Snow) = "CloudMicrophysics.Parameters.Snow"
+Utils.prettysummary(rain::CloudMicrophysics.Parameters.Rain) = "CloudMicrophysics.Parameters.Rain"
+Utils.prettysummary(snow::CloudMicrophysics.Parameters.Snow) = "CloudMicrophysics.Parameters.Snow"
 
 #=
-function prettysummary(rain::CloudMicrophysics.Parameters.Rain)
+function Utils.prettysummary(rain::CloudMicrophysics.Parameters.Rain)
     return string("Rain(",
                   "acnv1M=", prettysummary(rain.acnv1M), ", ",
                   "area=", prettysummary(rain.area), ", ",
@@ -158,14 +158,14 @@ function prettysummary(rain::CloudMicrophysics.Parameters.Rain)
 end
 =#
 
-function prettysummary(acnv::CloudMicrophysics.Parameters.Acnv1M)
+function Utils.prettysummary(acnv::CloudMicrophysics.Parameters.Acnv1M)
     return string("Acnv1M(",
                   "τ=", prettysummary(acnv.τ), ", ",
                   "q_threshold=", prettysummary(acnv.q_threshold), ", ",
                   "k=", prettysummary(acnv.k), ")")
 end
 
-function prettysummary(area::CloudMicrophysics.Parameters.ParticleArea)
+function Utils.prettysummary(area::CloudMicrophysics.Parameters.ParticleArea)
     return string("ParticleArea(",
                   "a0=", prettysummary(area.a0), ", ",
                   "ae=", prettysummary(area.ae), ", ",
@@ -173,25 +173,25 @@ function prettysummary(area::CloudMicrophysics.Parameters.ParticleArea)
                   "χa=", prettysummary(area.χa), ")")
 end
 
-function prettysummary(vent::CloudMicrophysics.Parameters.Ventilation)
+function Utils.prettysummary(vent::CloudMicrophysics.Parameters.Ventilation)
     return string("Ventilation(",
                   "a=", prettysummary(vent.a), ", ",
                   "b=", prettysummary(vent.b), ")")
 end
 
-function prettysummary(aspr::CloudMicrophysics.Parameters.SnowAspectRatio)
+function Utils.prettysummary(aspr::CloudMicrophysics.Parameters.SnowAspectRatio)
     return string("SnowAspectRatio(",
                   "ϕ=", prettysummary(aspr.ϕ), ", ",
                   "κ=", prettysummary(aspr.κ), ")")
 end
 
-prettysummary(vel::Blk1MVelType) = "Blk1MVelType(...)"
-prettysummary(vel::Blk1MVelTypeRain) = "Blk1MVelTypeRain(...)"
-prettysummary(vel::Blk1MVelTypeSnow) = "Blk1MVelTypeSnow(...)"
+Utils.prettysummary(vel::Blk1MVelType) = "Blk1MVelType(...)"
+Utils.prettysummary(vel::Blk1MVelTypeRain) = "Blk1MVelTypeRain(...)"
+Utils.prettysummary(vel::Blk1MVelTypeSnow) = "Blk1MVelTypeSnow(...)"
 
-function prettysummary(ne::NonEquilibriumCloudFormation)
-    liquid_str = isnothing(ne.liquid) ? "nothing" : "CloudLiquid(τ_relax=$(ne.liquid.τ_relax))"
-    ice_str = isnothing(ne.ice) ? "nothing" : "CloudIce(τ_relax=$(ne.ice.τ_relax))"
+function Utils.prettysummary(ne::NonEquilibriumCloudFormation)
+    liquid_str = isnothing(ne.liquid) ? "nothing" : "liquid(τ=$(prettysummary(1/ne.liquid.rate)))"
+    ice_str = isnothing(ne.ice) ? "nothing" : "ice(τ=$(prettysummary(1/ne.ice.rate)))"
     return "NonEquilibriumCloudFormation($liquid_str, $ice_str)"
 end
 

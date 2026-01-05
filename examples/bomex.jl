@@ -78,7 +78,7 @@ FT = eltype(grid)
 p₀ = reference_state.surface_pressure
 θ₀ = reference_state.potential_temperature
 q₀ = Breeze.Thermodynamics.MoistureMassFractions{FT} |> zero
-ρ₀ = Breeze.Thermodynamics.density(p₀, θ₀, q₀, constants)
+ρ₀ = Breeze.Thermodynamics.density(θ₀, p₀, q₀, constants)
 
 ρθ_bcs = FieldBoundaryConditions(bottom=FluxBoundaryCondition(ρ₀ * w′θ′))
 ρqᵗ_bcs = FieldBoundaryConditions(bottom=FluxBoundaryCondition(ρ₀ * w′qᵗ′))
@@ -359,7 +359,7 @@ text!(axuv, -8.5, 2200, text="solid: u\ndashed: v", fontsize=12)
 
 fig[0, :] = Label(fig, "BOMEX: Mean profile evolution (Siebesma et al., 2003)", fontsize=18, tellwidth=false)
 
-save("bomex_profiles.png", fig)
+save("bomex_profiles.png", fig) #src
 fig
 
 # The simulation shows the development of a cloudy boundary layer with:

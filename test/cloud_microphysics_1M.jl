@@ -1,4 +1,5 @@
 using Breeze
+using Breeze.AtmosphereModels: microphysical_velocities
 using CloudMicrophysics
 using CloudMicrophysics.Parameters: CloudLiquid, CloudIce
 using GPUArraysCore: @allowscalar
@@ -7,6 +8,7 @@ using Test
 
 BreezeCloudMicrophysicsExt = Base.get_extension(Breeze, :BreezeCloudMicrophysicsExt)
 using .BreezeCloudMicrophysicsExt: OneMomentCloudMicrophysics
+using Breeze.Microphysics: ConstantRateCondensateFormation
 
 using Oceananigans.BoundaryConditions: ImpenetrableBoundaryCondition
 
@@ -21,8 +23,14 @@ using Oceananigans.BoundaryConditions: ImpenetrableBoundaryCondition
     μ1 = OneMomentCloudMicrophysics()
     @test μ1 isa BulkMicrophysics
     @test μ1.cloud_formation isa NonEquilibriumCloudFormation
-    @test μ1.cloud_formation.liquid isa CloudLiquid
+    @test μ1.cloud_formation.liquid isa ConstantRateCondensateFormation
     @test μ1.cloud_formation.ice === nothing
+
+    # Mixed-phase non-equilibrium is signaled by `ice isa AbstractCondensateFormation`.
+    # We use a placeholder `ConstantRateCondensateFormation` and the constructor materializes
+    # relaxation parameters from `categories.cloud_ice`.
+    μ1_mixed = OneMomentCloudMicrophysics(cloud_formation = NonEquilibriumCloudFormation(nothing, ConstantRateCondensateFormation(FT(0))))
+    @test μ1_mixed.cloud_formation.ice isa ConstantRateCondensateFormation
 
     # Check prognostic fields for non-equilibrium
     prog_fields = Breeze.AtmosphereModels.prognostic_field_names(μ1)
@@ -203,7 +211,7 @@ end
     # Build full microphysics with non-equilibrium cloud formation
     μ1 = OneMomentCloudMicrophysics(FT; cloud_formation=cloud_formation_default)
     @test μ1.cloud_formation isa NonEquilibriumCloudFormation
-    @test μ1.cloud_formation.liquid.τ_relax == FT(10.0)
+    @test μ1.categories.cloud_liquid.τ_relax == FT(10.0)
 end
 
 @testset "Setting specific microphysical variables [$(FT)]" for FT in (Float32, Float64)
@@ -294,7 +302,7 @@ end
     set!(model; θ=300, qᵗ=FT(0.050))
 
     # First, run to condensation equilibrium (~20τ)
-    τ = microphysics.cloud_formation.liquid.τ_relax
+    τ = microphysics.categories.cloud_liquid.τ_relax
     simulation = Simulation(model; Δt=τ/10, stop_time=10τ, verbose=false)
     run!(simulation)
 
@@ -347,7 +355,7 @@ end
     set!(model; θ=300, qᵗ=FT(0.050))
 
     # Run to condensation equilibrium and beyond for autoconversion
-    τ = microphysics.cloud_formation.liquid.τ_relax
+    τ = microphysics.categories.cloud_liquid.τ_relax
     simulation = Simulation(model; Δt=τ/10, stop_time=10τ, verbose=false)
     run!(simulation)
 
@@ -419,7 +427,6 @@ end
     set!(model; θ=300, qᵗ=0.015, qʳ=0.001)
 
     # Rain should have sedimentation velocity
-    using .BreezeCloudMicrophysicsExt: microphysical_velocities
     μ = model.microphysical_fields
     vel_rain = microphysical_velocities(microphysics, μ, Val(:ρqʳ))
     @test vel_rain !== nothing
