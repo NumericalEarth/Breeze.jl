@@ -200,7 +200,7 @@ end
     z_max = FT(4000)
     
     # Create grid
-    grid = RectilinearGrid(CPU(), size=(1, 1, nz), x=(0, 100), y=(0, 100), z=(z_min, z_max), topology=(Periodic, Periodic, Bounded))
+    grid = RectilinearGrid(default_arch, size=(1, 1, nz), x=(0, 100), y=(0, 100), z=(z_min, z_max), topology=(Periodic, Periodic, Bounded))
     z_centers = collect(znodes(grid, Center()))
     
     # Atmospheric profile
