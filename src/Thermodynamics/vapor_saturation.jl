@@ -76,7 +76,7 @@ struct PlanarLiquidSurface end
 struct PlanarIceSurface end
 
 """
-$(TYPEDSIGNATURES)
+$(TYPEDEF)
 
 Return `PlanarMixedPhaseSurface` for computing the saturation vapor pressure over
 a surface composed of a mixture of liquid and ice, with a given `liquid_fraction`.
@@ -199,7 +199,7 @@ The equilibrated surface is always a planar liquid surface.
 struct WarmPhaseEquilibrium <: AbstractPhaseEquilibrium end
 
 """
-    equilibrated_surface(equilibrium, T)
+$(TYPEDSIGNATURES)
 
 Return the appropriate surface type for computing saturation vapor pressure
 given the phase `equilibrium` model and temperature `T`.
@@ -264,7 +264,7 @@ and unsaturated conditions:
 - In **saturated conditions** (``qᵗ ≥ qᵛ⁺``), the vapor specific humidity equals
   the saturation value and the density is computed assuming ``qᵛ = qᵛ⁺``.
 
-The saturated formula corresponds to equation (37) in Pressel et al. (2015).
+The saturated formula corresponds to equation (37) in [Pressel et al. (2015)](@cite Pressel2015).
 """
 @inline function equilibrium_saturation_specific_humidity(T, pᵣ, qᵗ, constants, surface)
     pᵛ⁺ = saturation_vapor_pressure(T, constants, surface)
@@ -288,7 +288,7 @@ $(TYPEDSIGNATURES)
 Compute the *saturation specific humidity* ``qᵛ⁺`` for use in saturation adjustment,
 assuming **saturated conditions** where condensate is present.
 
-This function always uses the saturated formula (equation 37 in Pressel et al. 2015):
+This function always uses the saturated formula (equation 37 in paper by [Pressel et al. 2015](@cite Pressel2015)):
 
 ```math
 qᵛ⁺ = ϵᵈᵛ (1 - qᵗ) \\frac{pᵛ⁺}{pᵣ - pᵛ⁺}

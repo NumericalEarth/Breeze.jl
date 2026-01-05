@@ -137,7 +137,7 @@ precipitation_rate(model, microphysics, phase) = CenterField(model.grid)
 #####
 
 """
-    surface_precipitation_flux(model)
+$(TYPEDSIGNATURES)
 
 Return a 2D `Field` representing the flux of precipitating moisture at the bottom boundary.
 
@@ -147,7 +147,7 @@ the rate at which rain mass leaves the domain through the bottom boundary.
 Units: kg/m²/s (positive = downward flux out of domain)
 
 Arguments:
-- `model`: An `AtmosphereModel` with a microphysics scheme
+- `model`: An [`AtmosphereModel`](@ref) with a microphysics scheme
 
 Returns a 2D `Field` that can be computed and visualized.
 Specific microphysics schemes must extend this function.
@@ -200,7 +200,7 @@ $(TYPEDSIGNATURES)
 Return the effective radius of cloud ice particles in microns (μm).
 
 This function dispatches on the `effective_radius_model` argument. The default
-implementation for `ConstantRadiusParticles` returns a constant value.
+implementation for [`ConstantRadiusParticles`](@ref) returns a constant value.
 
 Microphysics schemes can extend this function to provide diagnosed effective radii
 based on cloud properties.

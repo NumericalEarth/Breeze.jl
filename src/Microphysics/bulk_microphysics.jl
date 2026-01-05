@@ -1,4 +1,4 @@
-using DocStringExtensions: TYPEDSIGNATURES
+using DocStringExtensions: TYPEDSIGNATURES, TYPEDEF
 
 using ..Thermodynamics:
     liquid_latent_heat,
@@ -7,7 +7,7 @@ using ..Thermodynamics:
     mixture_heat_capacity
 
 """
-    BulkMicrophysics{N, C, B}
+$(TYPEDEF)
 
 Bulk microphysics scheme with cloud formation and precipitation categories.
 

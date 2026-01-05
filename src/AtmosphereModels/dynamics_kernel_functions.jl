@@ -24,11 +24,15 @@ Oceananigans `qᶜ` is the kinematic tracer flux.
 #####
 
 """
+$(TYPEDSIGNATURES)
+
 Interpolate buoyancy force to z-face location.
 """
 @inline buoyancy_forceᶜᶜᶠ(i, j, k, grid, args...) = ℑzᵃᵃᶠ(i, j, k, grid, buoyancy_forceᶜᶜᶜ, args...)
 
 """
+$(TYPEDSIGNATURES)
+
 Compute the product of vertical velocity and buoyancy force at z-face location.
 Used for the buoyancy flux term in the energy equation.
 """
