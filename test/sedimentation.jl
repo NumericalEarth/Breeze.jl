@@ -46,22 +46,7 @@ end
 """Get θˡⁱ at the bottom cell"""
 bottom_cell_theta(model) = @allowscalar model.formulation.potential_temperature[1, 1, 1]
 
-"""Compute total precipitation flux exiting domain: ∫ surface_precipitation_flux dA"""
-function total_surface_precip_flux(model)
-    # Use the surface_precipitation_flux from the extension (returns a 2D Field)
-    precip_field = surface_precipitation_flux(model, model.microphysics)
-    compute!(precip_field)
-    
-    grid = model.grid
-    Nx, Ny = size(grid)[1:2]
-    Δx, Δy = grid.Lx / Nx, grid.Ly / Ny
-    
-    total = zero(eltype(grid))
-    for j in 1:Ny, i in 1:Nx
-        total += @allowscalar(precip_field[i, j, 1]) * Δx * Δy
-    end
-    return total
-end
+
 
 #####
 ##### Test setup helper
