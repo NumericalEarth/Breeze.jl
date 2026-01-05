@@ -758,7 +758,7 @@ end
 #####
 
 # Update diagnostic mass fraction fields from prognostic density-weighted fields
-@inline function update_microphysical_fields!(μ, ::DCMIP2016KM, i, j, k, grid, ρ, 𝒰, constants)
+@inline function AtmosphereModels.update_microphysical_fields!(μ, ::DCMIP2016KM, i, j, k, grid, ρ, 𝒰, constants)
     qᵗ = total_specific_moisture(𝒰)
     @inbounds begin
         μ.qᶜˡ[i, j, k] = μ.ρqᶜˡ[i, j, k] / ρ
