@@ -2,7 +2,7 @@
 ##### Precipitation rate diagnostic for two-moment microphysics
 #####
 
-function precipitation_rate(model, microphysics::TwoMomentCloudMicrophysics, ::Val{:liquid})
+function AtmosphereModels.precipitation_rate(model, microphysics::TwoMomentCloudMicrophysics, ::Val{:liquid})
     grid = model.grid
     qᶜˡ = model.microphysical_fields.qᶜˡ
     nᶜˡ = model.microphysical_fields.nᶜˡ
@@ -14,7 +14,7 @@ function precipitation_rate(model, microphysics::TwoMomentCloudMicrophysics, ::V
 end
 
 # Ice precipitation not yet implemented for two-moment scheme
-precipitation_rate(model, ::TwoMomentCloudMicrophysics, ::Val{:ice}) = nothing
+AtmosphereModels.precipitation_rate(model, ::TwoMomentCloudMicrophysics, ::Val{:ice}) = nothing
 
 #####
 ##### Precipitation rate kernel for 2M scheme
@@ -72,7 +72,7 @@ Units: kg/m²/s (positive = downward, out of domain)
 Note: The returned value is positive when rain is falling out of the domain
 (the terminal velocity `wʳ` is negative, and we flip the sign).
 """
-function surface_precipitation_flux(model, microphysics::TwoMomentCloudMicrophysics)
+function AtmosphereModels.surface_precipitation_flux(model, microphysics::TwoMomentCloudMicrophysics)
     grid = model.grid
     wʳ = model.microphysical_fields.wʳ
     ρqʳ = model.microphysical_fields.ρqʳ
@@ -104,25 +104,25 @@ end
 ##### show methods for two-moment microphysics
 #####
 
-import Oceananigans.Utils: prettysummary
+using Oceananigans.Utils: Utils
 
-function prettysummary(tc::TwoMomentCategories)
+function Utils.prettysummary(tc::TwoMomentCategories)
     return "TwoMomentCategories(SB2006)"
 end
 
-function prettysummary(sb::SB2006)
+function Utils.prettysummary(sb::SB2006)
     return "SB2006"
 end
 
-function prettysummary(vel::StokesRegimeVelType)
+function Utils.prettysummary(vel::StokesRegimeVelType)
     return "StokesRegimeVelType"
 end
 
-function prettysummary(vel::SB2006VelType)
+function Utils.prettysummary(vel::SB2006VelType)
     return "SB2006VelType"
 end
 
-function prettysummary(vel::Chen2022VelTypeRain)
+function Utils.prettysummary(vel::Chen2022VelTypeRain)
     return "Chen2022VelTypeRain"
 end
 

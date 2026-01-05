@@ -1,5 +1,5 @@
-import Breeze.AtmosphereModels.Diagnostics
-import Breeze.AtmosphereModels: AtmosphereModel
+using Breeze.AtmosphereModels.Diagnostics: Diagnostics
+using Breeze.AtmosphereModels: AtmosphereModel
 
 using Oceananigans.Fields: set!
 using Breeze.Thermodynamics: temperature
@@ -10,16 +10,16 @@ const StaticEnergyModel = AtmosphereModel{<:Any, <:StaticEnergyFormulation}
 ##### Helper accessors
 #####
 
-liquid_ice_potential_temperature(model::StaticEnergyModel) = Diagnostics.LiquidIcePotentialTemperature(model, :specific)
-liquid_ice_potential_temperature_density(model::StaticEnergyModel) = Diagnostics.LiquidIcePotentialTemperature(model, :density)
-static_energy(model::StaticEnergyModel) = model.formulation.specific_energy
-static_energy_density(model::StaticEnergyModel) = model.formulation.energy_density
+AtmosphereModels.liquid_ice_potential_temperature(model::StaticEnergyModel) = Diagnostics.LiquidIcePotentialTemperature(model, :specific)
+AtmosphereModels.liquid_ice_potential_temperature_density(model::StaticEnergyModel) = Diagnostics.LiquidIcePotentialTemperature(model, :density)
+AtmosphereModels.static_energy(model::StaticEnergyModel) = model.formulation.specific_energy
+AtmosphereModels.static_energy_density(model::StaticEnergyModel) = model.formulation.energy_density
 
 #####
 ##### Tendency computation
 #####
 
-function compute_thermodynamic_tendency!(model::StaticEnergyModel, common_args)
+function AtmosphereModels.compute_thermodynamic_tendency!(model::StaticEnergyModel, common_args)
     grid = model.grid
     arch = grid.architecture
 
@@ -79,10 +79,10 @@ end
 ##### Set thermodynamic variables
 #####
 
-set_thermodynamic_variable!(model::StaticEnergyModel, ::Val{:ρe}, value) =
+AtmosphereModels.set_thermodynamic_variable!(model::StaticEnergyModel, ::Val{:ρe}, value) =
     set!(model.formulation.energy_density, value)
 
-function set_thermodynamic_variable!(model::StaticEnergyModel, ::Val{:e}, value)
+function AtmosphereModels.set_thermodynamic_variable!(model::StaticEnergyModel, ::Val{:e}, value)
     set!(model.formulation.specific_energy, value)
     ρ = dynamics_density(model.dynamics)
     e = model.formulation.specific_energy
@@ -93,7 +93,7 @@ end
 # Setting :θ (potential temperature)
 const PotentialTemperatureNames = Union{Val{:θ}, Val{:θˡⁱ}}
 
-function set_thermodynamic_variable!(model::StaticEnergyModel, ::PotentialTemperatureNames, value)
+function AtmosphereModels.set_thermodynamic_variable!(model::StaticEnergyModel, ::PotentialTemperatureNames, value)
     formulation = model.formulation
     θ = model.temperature # scratch space
     set!(θ, value)
@@ -164,7 +164,7 @@ The temperature is converted to static energy ``e`` using the relation:
 e = cᵖᵐ T + g z - ℒˡ qˡ - ℒⁱ qⁱ .
 ```
 """
-function set_thermodynamic_variable!(model::StaticEnergyModel, ::Val{:T}, value)
+function AtmosphereModels.set_thermodynamic_variable!(model::StaticEnergyModel, ::Val{:T}, value)
     T_field = model.temperature # use temperature field as scratch/storage
     set!(T_field, value)
 

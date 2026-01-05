@@ -14,8 +14,8 @@
 
 # Import CloudMicrophysics internals that we need
 # (these don't depend on Thermodynamics.jl)
-import CloudMicrophysics.Common: ϵ_numerics
-import CloudMicrophysics.Microphysics1M: lambda_inverse, get_n0, get_v0, SF
+using CloudMicrophysics.Common: ϵ_numerics
+using CloudMicrophysics.Microphysics1M: lambda_inverse, get_n0, get_v0, SF
 
 # gamma function from SpecialFunctions (via CloudMicrophysics)
 const Γ = SF.gamma
@@ -131,7 +131,7 @@ end
 #####
 
 # Import SB2006 PDF helper functions from CloudMicrophysics.Microphysics2M
-import CloudMicrophysics.Microphysics2M: pdf_rain_parameters, Γ_incl
+using CloudMicrophysics.Microphysics2M: pdf_rain_parameters, Γ_incl
 
 """
     rain_evaporation_2m(sb, aps, q, qʳ, ρ, Nʳ, T, constants)

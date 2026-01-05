@@ -13,13 +13,13 @@ using Breeze.Thermodynamics:
 
 # Import SaturationSpecificHumidity from AtmosphereModels.Diagnostics
 using ..AtmosphereModels.Diagnostics:
+    Diagnostics,
     SaturationSpecificHumidity,
-    SaturationSpecificHumidityField
-
-import ..AtmosphereModels.Diagnostics: microphysics_phase_equilibrium
+    SaturationSpecificHumidityField,
+    microphysics_phase_equilibrium
 
 # Extend microphysics_phase_equilibrium for SaturationAdjustment
-@inline microphysics_phase_equilibrium(μ::SaturationAdjustment) = μ.equilibrium
+@inline Diagnostics.microphysics_phase_equilibrium(μ::SaturationAdjustment) = μ.equilibrium
 
 const C = Center
 
