@@ -298,7 +298,7 @@ Convert mixing ratio `r` to mass fraction: `q = r / (1 + rᵗ)`.
 
 
 """
-    kessler_terminal_velocity(rʳ, ρ, ρ_bottom, microphysics)
+$(TYPEDSIGNATURES)
 
 Compute rain terminal velocity (m/s) following Klemp and Wilhelmson (1978) eq. 2.15.
 
