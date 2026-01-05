@@ -291,7 +291,7 @@ run!(simulation)
 # \right]
 # ```
 
-ĥ(k) = sqrt(π) * h₀ * a / 4 * (exp(-a^2 * (K + k)^2 / 4) +
+hhat(k) = sqrt(π) * h₀ * a / 4 * (exp(-a^2 * (K + k)^2 / 4) +
                                 exp(-a^2 * (K - k)^2 / 4) +
                                 2exp(-a^2 * k^2 / 4))
 
