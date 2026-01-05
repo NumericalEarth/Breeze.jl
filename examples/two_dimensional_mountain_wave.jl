@@ -291,7 +291,7 @@ run!(simulation)
 # \right]
 # ```
 
-hhat(k) = sqrt(π) * h₀ * a / 4 * (exp(-a^2 * (K + k)^2 / 4) +
+ĥ(k) = sqrt(π) * h₀ * a / 4 * (exp(-a^2 * (K + k)^2 / 4) +
                                 exp(-a^2 * (K - k)^2 / 4) +
                                 2exp(-a^2 * k^2 / 4))
 
@@ -326,11 +326,8 @@ Compute the 2-D linear vertical velocity `w(x,z)` from the analytical solution
 """
 function w_linear(x, z; nk=100)
     k = range(0, 10k★; length=nk)
-    m2 = m².(k)
-    ĥ = hhat.(k)
-
-    m_abs = sqrt.(abs.(m2))
-    integrand = @. k * ĥ * ifelse(m2 ≥ 0,
+    m_abs = @. sqrt(abs(m²(k)))
+    integrand = @. k * ĥ(k) * ifelse(m²(k) ≥ 0,
                                    sin(m_abs * z + k * x),
                                    exp(-m_abs * z) * sin(k * x))
 
