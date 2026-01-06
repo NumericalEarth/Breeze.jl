@@ -43,6 +43,10 @@ Breeze interfaces with ClimaOcean for coupled atmosphere-ocean simulations.
    - Use `$(TYPEDSIGNATURES)` for automatic typed signature documentation (preferred over `$(SIGNATURES)`)
    - Never write explicit function signatures in docstrings; always use `$(TYPEDSIGNATURES)`
    - Add examples in docstrings when helpful
+   - **Citations in docstrings**: Use inline citations with `[Key](@citet)` syntax (renders as "Author (Year)" with link).
+     Avoid separate "References" sections with bare `[Key](@cite)` - these just show citation keys in the REPL
+     without context, which is not helpful. Instead, weave citations naturally into the prose, e.g.:
+     "Tetens' formula [Tetens1930](@citet) is an empirical formula..."
 
 5. **Memory leanness**
    - Favor doing computations inline versus allocating temporary memory
