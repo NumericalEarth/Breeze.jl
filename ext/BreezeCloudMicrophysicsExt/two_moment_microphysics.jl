@@ -27,7 +27,7 @@ using CloudMicrophysics.Parameters:
 """
     TwoMomentCategories{W, AP, LV, RV}
 
-Parameters for two-moment (Seifert-Beheng 2006) warm-rain microphysics.
+Parameters for two-moment ([Seifert and Beheng, 2006](@cite SeifertBeheng2006)) warm-rain microphysics.
 
 # Fields
 - `warm_processes`: `SB2006` parameters bundling autoconversion, accretion, self-collection,
@@ -91,7 +91,7 @@ const WPNE2M = WarmPhaseNonEquilibrium2M
                                 precipitation_boundary_condition = nothing)
 
 Return a `TwoMomentCloudMicrophysics` microphysics scheme for warm-rain precipitation
-using the Seifert-Beheng (2006) two-moment parameterization.
+using the [Seifert and Beheng (2006)](@cite SeifertBeheng2006) two-moment parameterization.
 
 The two-moment scheme tracks both mass and number concentration for cloud liquid and rain,
 using CloudMicrophysics.jl 2M processes:
@@ -121,7 +121,7 @@ The prognostic variables are:
   - `ImpenetrableBoundaryCondition()`: Rain collects at the bottom (zero terminal velocity at surface)
 
 See the [CloudMicrophysics.jl 2M documentation](https://clima.github.io/CloudMicrophysics.jl/dev/Microphysics2M/)
-for details on the Seifert-Beheng 2006 scheme.
+for details on the [Seifert and Beheng (2006)](@cite SeifertBeheng2006) scheme.
 
 # References
 * Seifert, A. and Beheng, K. D. (2006). A two-moment cloud microphysics
