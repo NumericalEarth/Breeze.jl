@@ -66,36 +66,3 @@ pᵛ⁺(T) = pᵗʳ (T / Tᵗʳ)^{Δcᵝ / Rᵛ} \\exp \\left [ (1/Tᵗʳ - 1/T)
 
     return pᵗʳ * (T / Tᵗʳ)^(Δcᵝ / Rᵛ) * exp((1/Tᵗʳ - 1/T) * ℒ₀ / Rᵛ)
 end
-
-@inline function specific_heat_difference(constants, phase::CondensedPhase)
-    cᵖᵛ = constants.vapor.heat_capacity
-    cᵝ = phase.heat_capacity
-    return cᵖᵛ - cᵝ
-end
-
-@inline function absolute_zero_latent_heat(constants, phase::CondensedPhase)
-    ℒᵣ = phase.reference_latent_heat # at constants.energy_reference_temperature
-    Δcᵝ = specific_heat_difference(constants, phase)
-    Tᵣ = constants.energy_reference_temperature
-    return ℒᵣ - Δcᵝ * Tᵣ
-end
-
-@inline specific_heat_difference(constants, ::PlanarLiquidSurface) = specific_heat_difference(constants, constants.liquid)
-@inline specific_heat_difference(constants, ::PlanarIceSurface) = specific_heat_difference(constants, constants.ice)
-@inline absolute_zero_latent_heat(constants, ::PlanarLiquidSurface) = absolute_zero_latent_heat(constants, constants.liquid)
-@inline absolute_zero_latent_heat(constants, ::PlanarIceSurface) = absolute_zero_latent_heat(constants, constants.ice)
-
-@inline function specific_heat_difference(constants, surf::PlanarMixedPhaseSurface)
-    Δcˡ = specific_heat_difference(constants, constants.liquid)
-    Δcⁱ = specific_heat_difference(constants, constants.ice)
-    λ = surf.liquid_fraction
-    return λ * Δcˡ + (1 - λ) * Δcⁱ
-end
-
-@inline function absolute_zero_latent_heat(constants, surf::PlanarMixedPhaseSurface)
-    ℒˡ₀ = absolute_zero_latent_heat(constants, constants.liquid)
-    ℒⁱ₀ = absolute_zero_latent_heat(constants, constants.ice)
-    λ = surf.liquid_fraction
-    return λ * ℒˡ₀ + (1 - λ) * ℒⁱ₀
-end
-

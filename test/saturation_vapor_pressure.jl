@@ -65,9 +65,9 @@ end
     tetens = TetensFormula(FT)
     thermo = ThermodynamicConstants(FT; saturation_vapor_pressure=tetens)
 
-    # Test at reference temperature (273 K): should return reference pressure
-    T₀ = FT(273)
-    pᵛ⁺_ref = saturation_vapor_pressure(T₀, thermo, PlanarLiquidSurface())
+    # Test at reference temperature (273.15 K): should return reference pressure
+    Tᵣ = FT(273.15)
+    pᵛ⁺_ref = saturation_vapor_pressure(Tᵣ, thermo, PlanarLiquidSurface())
     @test pᵛ⁺_ref ≈ FT(610) rtol=eps(FT)
 
     # Test at higher temperature: pressure should increase
@@ -81,13 +81,13 @@ end
     @test pᵛ⁺_cold < pᵛ⁺_ref
 
     # Verify the formula matches the expected analytic expression
-    # pᵛ⁺(T) = p₀ * exp(a * (T - T₀) / (T - b))
-    p₀ = FT(610)
-    a = FT(17.27)
-    T₀_param = FT(273)
-    b = FT(36)
+    # pᵛ⁺(T) = pᵣ * exp(a * (T - Tᵣ) / (T - δT))
+    pᵣ = FT(610)
+    aˡ = FT(17.27)
+    Tᵣ_param = FT(273.15)
+    δTˡ = FT(35.85)
     T_test = FT(288)
-    expected = p₀ * exp(a * (T_test - T₀_param) / (T_test - b))
+    expected = pᵣ * exp(aˡ * (T_test - Tᵣ_param) / (T_test - δTˡ))
     computed = saturation_vapor_pressure(T_test, thermo, PlanarLiquidSurface())
     @test computed ≈ expected rtol=eps(FT)
 end
