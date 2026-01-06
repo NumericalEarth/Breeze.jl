@@ -83,7 +83,7 @@ Terminal velocity: `vᵗ = a_vᵗ × (ρ × rʳ × ρ_scale)^β_vᵗ × √(ρ�
 
 ## Autoconversion
 - `k₁`: Autoconversion rate coefficient in s⁻¹ (default: 0.001)
-- `rᶜ_crit`: Critical cloud water mixing ratio threshold in kg/kg (default: 0.001)
+- `rᶜˡ★`: Critical cloud water mixing ratio threshold in kg/kg (default: 0.001)
 
 ## Accretion
 - `k₂`: Accretion rate coefficient in s⁻¹ (default: 2.2)
@@ -114,7 +114,7 @@ Base.@kwdef struct DCMIP2016KesslerMicrophysics{FT}
 
     # Autoconversion
     k₁      :: FT = 0.001
-    rᶜ_crit :: FT = 0.001
+    rᶜˡ★ :: FT = 0.001
 
     # Accretion
     k₂    :: FT = 2.2
@@ -326,6 +326,24 @@ where the parameters `a_vᵗ`, `ρ_scale`, and `β_vᵗ` are taken from the `mic
     return a_vᵗ * (rʳ * ρ_scale * ρ)^β_vᵗ * rhalf
 end
 
+"""
+    cloud_to_rain_production(rᶜˡ, rʳ, Δt, k₁, k₂, rᶜˡ★, β_acc, FT)
+
+Compute cloud-to-rain production rate from autoconversion and accretion (Klemp & Wilhelmson 1978, eq. 2.13).
+
+This implements the combined effect of:
+- **Autoconversion**: Cloud water spontaneously converting to rain when `rᶜˡ > rᶜˡ★`
+- **Accretion**: Rain collecting cloud water as it falls
+
+The formula uses an implicit time integration for numerical stability.
+"""
+@inline function cloud_to_rain_production(rᶜˡ, rʳ, Δt, k₁, k₂, rᶜˡ★, β_acc, FT)
+    Aʳ = max(0, k₁ * (rᶜˡ - rᶜˡ★))  # Autoconversion rate
+    denom = 1 + Δt * k₂ * rʳ^β_acc             # Implicit accretion factor
+    Pʳ = rᶜˡ - (rᶜˡ - Δt * Aʳ) / denom
+    return Pʳ
+end
+
 #####
 ##### Main update function - launches GPU kernel
 #####
@@ -337,7 +355,7 @@ Apply the Kessler microphysics to the model.
 
 This function launches a kernel that processes each column independently, with rain sedimentation subcycling.
 
-The kernel handles conversion between mass fractions (Breeze) and mixing ratios (Kessler)
+The kernel handles conversion between mass fractions and mixing ratios
 internally for efficiency. Water vapor is diagnosed from \$q^v = q^t - q^{cl} - q^r\$.
 """
 function AtmosphereModels.microphysics_model_update!(microphysics::DCMIP2016KM, model)
@@ -428,7 +446,7 @@ end
     ρ_scale = microphysics.ρ_scale
 
     k₁      = microphysics.k₁
-    rᶜ_crit = microphysics.rᶜ_crit
+    rᶜˡ★ = microphysics.rᶜˡ★
     k₂      = microphysics.k₂
     β_acc   = microphysics.β_acc
 
@@ -457,8 +475,8 @@ end
             inv_ρ = inv(ρ)  # Precompute inverse density
 
             qᵗ = ρqᵗ[i, j, k] * inv_ρ
-            qᶜˡ = max(ρqᶜˡ[i, j, k] * inv_ρ, zero(FT))
-            qʳ  = max(ρqʳ[i, j, k] * inv_ρ, zero(FT))
+            qᶜˡ = max(0, ρqᶜˡ[i, j, k] * inv_ρ)
+            qʳ  = max(0, ρqʳ[i, j, k] * inv_ρ)
             qˡ_sum = qᶜˡ + qʳ
             qᵗ = max(qᵗ, qˡ_sum)  # Prevent negative vapor
             qᵛ = qᵗ - qˡ_sum       # Diagnose vapor
@@ -468,12 +486,11 @@ end
             r = MoistureMixingRatio(q)
             rᵛ = r.vapor
             rᵗ = total_mixing_ratio(r)
-            inv_qᵈ = one_FT + rᵗ
-            rᶜˡ = qᶜˡ * inv_qᵈ
-            rʳ  = qʳ * inv_qᵈ
+            rᶜˡ = qᶜˡ * (1 + rᵗ)
+            rʳ  = qʳ * (1 + rᵗ)
 
-            𝕍ʳ_ijk = kessler_terminal_velocity(rʳ, ρ, ρ₁, microphysics)
-            𝕍ʳ[i, j, k] = 𝕍ʳ_ijk
+            𝕍ʳᵏ = kessler_terminal_velocity(rʳ, ρ, ρ₁, microphysics)
+            𝕍ʳ[i, j, k] = 𝕍ʳᵏ
 
             # Store mixing ratios in diagnostic fields during physics
             qᵛ_field[i, j, k]  = rᵛ
@@ -483,7 +500,7 @@ end
             # CFL check for sedimentation
             zᵏ⁺¹ = znode(i, j, k+1, grid, Center(), Center(), Center())
             Δz = zᵏ⁺¹ - zᵏ
-            max_Δt = min(max_Δt, substep_cfl * Δz / 𝕍ʳ_ijk)
+            max_Δt = min(max_Δt, substep_cfl * Δz / 𝕍ʳᵏ)
             zᵏ = zᵏ⁺¹
         end
     end
@@ -494,8 +511,8 @@ end
         inv_ρ = inv(ρ)
 
         qᵗ = ρqᵗ[i, j, Nz] * inv_ρ
-        qᶜˡ = max(ρqᶜˡ[i, j, Nz] * inv_ρ, zero(FT))
-        qʳ  = max(ρqʳ[i, j, Nz] * inv_ρ, zero(FT))
+        qᶜˡ = max(0, ρqᶜˡ[i, j, Nz] * inv_ρ)
+        qʳ  = max(0, ρqʳ[i, j, Nz] * inv_ρ)
         qˡ_sum = qᶜˡ + qʳ
         qᵗ = max(qᵗ, qˡ_sum)
         qᵛ = qᵗ - qˡ_sum
@@ -504,9 +521,8 @@ end
         r = MoistureMixingRatio(q)
         rᵛ = r.vapor
         rᵗ = total_mixing_ratio(r)
-        inv_qᵈ = one_FT + rᵗ
-        rᶜˡ = qᶜˡ * inv_qᵈ
-        rʳ  = qʳ * inv_qᵈ
+        rᶜˡ = qᶜˡ * (1 + rᵗ)
+        rʳ  = qʳ * (1 + rᵗ)
 
         velqr = kessler_terminal_velocity(rʳ, ρ, ρ₁, microphysics)
         𝕍ʳ[i, j, Nz] = velqr
@@ -530,13 +546,13 @@ end
 
         # Accumulate surface precipitation (qʳ × vᵗ)
         @inbounds begin
-            rᵛ_1 = qᵛ_field[i, j, 1]
-            rᶜ_1 = qᶜˡ_field[i, j, 1]
-            rʳ_1 = qʳ_field[i, j, 1]
-            rᵗ_1 = rᵛ_1 + rᶜ_1 + rʳ_1
+            rᵛ₁ = qᵛ_field[i, j, 1]
+            rᶜˡ₁ = qᶜˡ_field[i, j, 1]
+            rʳ₁ = qʳ_field[i, j, 1]
+            rᵗ₁ = rᵛ₁ + rᶜˡ₁ + rʳ₁
             # qʳ = rʳ / (1 + rᵗ)
-            qʳ_1 = rʳ_1 / (one_FT + rᵗ_1)
-            precip_accum += qʳ_1 * 𝕍ʳ[i, j, 1]
+            qʳ₁ = rʳ₁ / (1 + rᵗ₁)
+            precip_accum += qʳ₁ * 𝕍ʳ[i, j, 1]
         end
 
         # Rolling z-coordinate to reduce `znode` calls (and avoid a branch in the loop body)
@@ -545,7 +561,7 @@ end
             @inbounds begin
                 ρ = ρ_field[i, j, k]
                 p = p_field[i, j, k]
-                θˡⁱ_k = θˡⁱ[i, j, k]
+                θˡⁱᵏ = θˡⁱ[i, j, k]
 
                 rᵛ = qᵛ_field[i, j, k]
                 rᶜˡ = qᶜˡ_field[i, j, k]
@@ -559,11 +575,11 @@ end
                 q = MoistureMassFractions(r)
                 qˡ_current = q.liquid
                 Π = (p / p₀)^(Rᵐ / cᵖᵐ)
-                T_k = Π * θˡⁱ_k + ℒˡᵣ * qˡ_current / cᵖᵐ
+                Tᵏ = Π * θˡⁱᵏ + ℒˡᵣ * qˡ_current / cᵖᵐ
 
                 # Rain sedimentation (upstream differencing)
                 rᵏ = ρ_scale * ρ
-                velqrᵏ = 𝕍ʳ[i, j, k]
+                𝕍ʳᵏ = 𝕍ʳ[i, j, k]
 
                 zᵏ⁺¹ = znode(i, j, k+1, grid, Center(), Center(), Center())
                 Δz = zᵏ⁺¹ - zᵏ
@@ -571,40 +587,40 @@ end
                 ρᵏ⁺¹ = ρ_field[i, j, k+1]
                 rᵏ⁺¹ = ρ_scale * ρᵏ⁺¹
                 rʳᵏ⁺¹ = qʳ_field[i, j, k+1]  # Mixing ratio
-                velqrᵏ⁺¹ = 𝕍ʳ[i, j, k+1]
+                𝕍ʳᵏ⁺¹ = 𝕍ʳ[i, j, k+1]
 
-                sed = Δtₛ * (rᵏ⁺¹ * rʳᵏ⁺¹ * velqrᵏ⁺¹ - rᵏ * rʳ * velqrᵏ) / (rᵏ * Δz)
+                sed = Δtₛ * (rᵏ⁺¹ * rʳᵏ⁺¹ * 𝕍ʳᵏ⁺¹ - rᵏ * rʳ * 𝕍ʳᵏ) / (rᵏ * Δz)
                 zᵏ = zᵏ⁺¹
 
                 # Autoconversion + accretion (KW eq. 2.13)
-                rrprod = rᶜˡ - (rᶜˡ - Δtₛ * max(k₁ * (rᶜˡ - rᶜ_crit), zero(FT))) /
-                         (1 + Δtₛ * k₂ * rʳ^β_acc)
-                rᶜˡ_new = max(rᶜˡ - rrprod, zero(FT))
-                rʳ_new = max(rʳ + rrprod + sed, zero(FT))
+                # Pʳ is the cloud-to-rain production from autoconversion and accretion
+                Pʳ = cloud_to_rain_production(rᶜˡ, rʳ, Δtₛ, k₁, k₂, rᶜˡ★, β_acc, FT)
+                rᶜˡ_new = max(0, rᶜˡ - Pʳ)
+                rʳ_new = max(0, rʳ + Pʳ + sed)
 
                 # Saturation specific humidity using Breeze thermodynamics
                 # qᵛ⁺ = pᵛ⁺ / (ρ Rᵛ T) is the saturation mass fraction
-                qᵛ⁺ = saturation_specific_humidity(T_k, ρ, constants, surface)
+                qᵛ⁺ = saturation_specific_humidity(Tᵏ, ρ, constants, surface)
                 # Convert to saturation mixing ratio: rᵛ⁺ = qᵛ⁺ / (1 - qᵛ⁺)
-                rᵛ⁺ = qᵛ⁺ / (one_FT - qᵛ⁺)
+                rᵛ⁺ = qᵛ⁺ / (1 - qᵛ⁺)
 
                 # Saturation adjustment
-                prod = (rᵛ - rᵛ⁺) / (1 + rᵛ⁺ * f₅ / (T_k - T_offset)^2)
+                prod = (rᵛ - rᵛ⁺) / (1 + rᵛ⁺ * f₅ / (Tᵏ - T_offset)^2)
 
                 # Rain evaporation (KW eq. 2.14)
-                rrr = rᵏ * rʳ_new
-                ern_num = (Cᵉᵛ₁ + Cᵉᵛ₂ * rrr^βᵉᵛ₁) * rrr^βᵉᵛ₂
-                ern_den = Cᵈⁱᶠᶠ / (p * rᵛ⁺) + Cᵗʰᵉʳᵐ
-                subsaturation = max(rᵛ⁺ - rᵛ, zero(FT))
-                ern_rate = ern_num / ern_den * subsaturation / (rᵏ * rᵛ⁺ + FT(1e-20))
-                ern_limit = max(-prod - rᶜˡ_new, zero(FT))
-                ern = min(min(Δtₛ * ern_rate, ern_limit), rʳ_new)
+                ρrʳ = rᵏ * rʳ_new                                        # Scaled rain water content
+                Vᵉᵛ = (Cᵉᵛ₁ + Cᵉᵛ₂ * ρrʳ^βᵉᵛ₁) * ρrʳ^βᵉᵛ₂               # Ventilation factor
+                Dᵗʰ = Cᵈⁱᶠᶠ / (p * rᵛ⁺) + Cᵗʰᵉʳᵐ                        # Diffusion-thermal term
+                Δrᵛ⁺ = max(0, rᵛ⁺ - rᵛ)                                  # Subsaturation
+                Ėʳ = Vᵉᵛ / Dᵗʰ * Δrᵛ⁺ / (rᵏ * rᵛ⁺ + FT(1e-20))          # Rain evaporation rate
+                Eʳₘₐₓ = max(0, -prod - rᶜˡ_new)                          # Maximum evaporation
+                Eʳ = min(min(Δtₛ * Ėʳ, Eʳₘₐₓ), rʳ_new)                   # Limited evaporation
 
                 # Apply adjustments
                 condensation = max(prod, -rᶜˡ_new)
-                rᵛ_new = max(rᵛ - condensation + ern, zero(FT))
+                rᵛ_new = max(0, rᵛ - condensation + Eʳ)
                 rᶜˡ_final = rᶜˡ_new + condensation
-                rʳ_final = rʳ_new - ern
+                rʳ_final = rʳ_new - Eʳ
 
                 qᵛ_field[i, j, k]  = rᵛ_new
                 qᶜˡ_field[i, j, k] = rᶜˡ_final
@@ -612,9 +628,9 @@ end
 
                 # Update θˡⁱ from latent heating
                 # Uses Breeze's thermodynamic constants for consistency
-                net_phase_change = condensation - ern
+                net_phase_change = condensation - Eʳ
                 ΔT_phase = ℒˡᵣ_over_cᵖᵈ * net_phase_change
-                T_new = T_k + ΔT_phase
+                T_new = Tᵏ + ΔT_phase
 
                 # Convert back to θˡⁱ with updated moisture
                 rˡ_new = rᶜˡ_final + rʳ_final
@@ -638,7 +654,7 @@ end
             k = Nz
             ρ = ρ_field[i, j, k]
             p = p_field[i, j, k]
-            θˡⁱ_k = θˡⁱ[i, j, k]
+            θˡⁱᵏ = θˡⁱ[i, j, k]
 
             rᵛ = qᵛ_field[i, j, k]
             rᶜˡ = qᶜˡ_field[i, j, k]
@@ -652,46 +668,48 @@ end
             q = MoistureMassFractions(r)
             qˡ_current = q.liquid
             Π = (p / p₀)^(Rᵐ / cᵖᵐ)
-            T_k = Π * θˡⁱ_k + ℒˡᵣ * qˡ_current / cᵖᵐ
+            Tᵏ = Π * θˡⁱᵏ + ℒˡᵣ * qˡ_current / cᵖᵐ
 
             # Top boundary: rain falls out
             rᵏ = ρ_scale * ρ
-            velqrᵏ = 𝕍ʳ[i, j, k]
+            𝕍ʳᵏ = 𝕍ʳ[i, j, k]
             zᵏ = znode(i, j, k, grid, Center(), Center(), Center())
             zᵏ⁻¹ = znode(i, j, k-1, grid, Center(), Center(), Center())
             Δz_half = 0.5 * (zᵏ - zᵏ⁻¹)
-            sed = -Δtₛ * rʳ * velqrᵏ / Δz_half
+            sed = -Δtₛ * rʳ * 𝕍ʳᵏ / Δz_half
 
-            rrprod = rᶜˡ - (rᶜˡ - Δtₛ * max(k₁ * (rᶜˡ - rᶜ_crit), zero(FT))) /
-                     (1 + Δtₛ * k₂ * rʳ^β_acc)
-            rᶜˡ_new = max(rᶜˡ - rrprod, zero(FT))
-            rʳ_new = max(rʳ + rrprod + sed, zero(FT))
+            # Autoconversion + accretion (KW eq. 2.13)
+            # Pʳ is the cloud-to-rain production from autoconversion and accretion
+            Pʳ = cloud_to_rain_production(rᶜˡ, rʳ, Δtₛ, k₁, k₂, rᶜˡ★, β_acc, FT)
+            rᶜˡ_new = max(0, rᶜˡ - Pʳ)
+            rʳ_new = max(0, rʳ + Pʳ + sed)
 
-            qᵛ⁺ = saturation_specific_humidity(T_k, ρ, constants, surface)
+            qᵛ⁺ = saturation_specific_humidity(Tᵏ, ρ, constants, surface)
             rᵛ⁺ = qᵛ⁺ / (one_FT - qᵛ⁺)
 
-            prod = (rᵛ - rᵛ⁺) / (1 + rᵛ⁺ * f₅ / (T_k - T_offset)^2)
+            prod = (rᵛ - rᵛ⁺) / (1 + rᵛ⁺ * f₅ / (Tᵏ - T_offset)^2)
 
-            rrr = rᵏ * rʳ_new
-            ern_num = (Cᵉᵛ₁ + Cᵉᵛ₂ * rrr^βᵉᵛ₁) * rrr^βᵉᵛ₂
-            ern_den = Cᵈⁱᶠᶠ / (p * rᵛ⁺) + Cᵗʰᵉʳᵐ
-            subsaturation = max(rᵛ⁺ - rᵛ, zero(FT))
-            ern_rate = ern_num / ern_den * subsaturation / (rᵏ * rᵛ⁺ + FT(1e-20))
-            ern_limit = max(-prod - rᶜˡ_new, zero(FT))
-            ern = min(min(Δtₛ * ern_rate, ern_limit), rʳ_new)
+            # Rain evaporation (KW eq. 2.14)
+            ρrʳ = rᵏ * rʳ_new                                        # Scaled rain water content
+            Vᵉᵛ = (Cᵉᵛ₁ + Cᵉᵛ₂ * ρrʳ^βᵉᵛ₁) * ρrʳ^βᵉᵛ₂               # Ventilation factor
+            Dᵗʰ = Cᵈⁱᶠᶠ / (p * rᵛ⁺) + Cᵗʰᵉʳᵐ                        # Diffusion-thermal term
+            Δrᵛ⁺ = max(0, rᵛ⁺ - rᵛ)                                  # Subsaturation
+            Ėʳ = Vᵉᵛ / Dᵗʰ * Δrᵛ⁺ / (rᵏ * rᵛ⁺ + FT(1e-20))          # Rain evaporation rate
+            Eʳₘₐₓ = max(0, -prod - rᶜˡ_new)                          # Maximum evaporation
+            Eʳ = min(min(Δtₛ * Ėʳ, Eʳₘₐₓ), rʳ_new)                   # Limited evaporation
 
             condensation = max(prod, -rᶜˡ_new)
-            rᵛ_new = max(rᵛ - condensation + ern, zero(FT))
+            rᵛ_new = max(0, rᵛ - condensation + Eʳ)
             rᶜˡ_final = rᶜˡ_new + condensation
-            rʳ_final = rʳ_new - ern
+            rʳ_final = rʳ_new - Eʳ
 
             qᵛ_field[i, j, k]  = rᵛ_new
             qᶜˡ_field[i, j, k] = rᶜˡ_final
             qʳ_field[i, j, k]  = rʳ_final
 
-            net_phase_change = condensation - ern
+            net_phase_change = condensation - Eʳ
             ΔT_phase = ℒˡᵣ_over_cᵖᵈ * net_phase_change
-            T_new = T_k + ΔT_phase
+            T_new = Tᵏ + ΔT_phase
 
             rˡ_new = rᶜˡ_final + rʳ_final
             r_new = MoistureMixingRatio(rᵛ_new, rˡ_new)

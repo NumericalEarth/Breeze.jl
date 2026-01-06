@@ -35,6 +35,8 @@ Breeze interfaces with ClimaOcean for coupled atmosphere-ocean simulations.
    - Mark functions inside kernels with `@inline`.
    - **Never use loops outside kernels**: Always replace `for` loops that iterate over grid points
      with kernels launched via `launch!`. This ensures code works on both CPU and GPU.
+   - **Use literal zeros**: Write `max(0, a)` instead of `max(zero(FT), a)`. Julia handles type
+     promotion automatically, and `0` is more readable. The same applies to `min`, `clamp`, etc.
 
 4. **Documentation**:
    - Use DocStringExtensions.jl for consistent docstrings
