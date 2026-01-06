@@ -41,10 +41,8 @@ for the saturation vapor pressure,
 pᵛ⁺(T) = pᵛ⁺ᵣ \\exp \\left( a \\frac{T - Tᵣ}{T - δT} \\right) ,
 ```
 
-where ``pᵛ⁺ᵣ`` is `reference_saturation_vapor_pressure`,
-``Tᵣ`` is `reference_temperature`,
-``a`` is an empirical coefficient, and
-``δT`` is a temperature offset.
+where ``pᵛ⁺ᵣ`` is `reference_saturation_vapor_pressure`, ``Tᵣ`` is `reference_temperature`,
+``a`` is an empirical coefficient, and ``δT`` is a temperature offset.
 
 See also the [wikipedia article on "Tetens equation"](https://en.wikipedia.org/wiki/Tetens_equation).
 Different coefficients are used for liquid water and ice surfaces. Default values
