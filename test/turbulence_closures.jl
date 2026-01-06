@@ -20,7 +20,7 @@ test_thermodynamics = (:StaticEnergy, :LiquidIcePotentialTemperature)
     @testset "Implicit scalar diffusion smooths vertical gradients" begin
         κ = FT(10)
         closure = VerticalScalarDiffusivity(vitd; κ)
-        model = @test_logs match_mode=:any AtmosphereModel(grid; closure, advection=nothing, tracers=:ρc)
+        model = AtmosphereModel(grid; closure, advection=nothing, tracers=:ρc)
 
         # Set tracer with vertical gradient
         set!(model; ρc = (x, y, z) -> gaussian(z))
@@ -48,8 +48,8 @@ test_thermodynamics = (:StaticEnergy, :LiquidIcePotentialTemperature)
         implicit_closure = VerticalScalarDiffusivity(vitd; κ)
         explicit_closure = VerticalScalarDiffusivity(etd; κ)
 
-        implicit_model = @test_logs match_mode=:any AtmosphereModel(grid; closure=implicit_closure, advection=nothing, tracers=:ρc)
-        explicit_model = @test_logs match_mode=:any AtmosphereModel(grid; closure=explicit_closure, advection=nothing, tracers=:ρc)
+        implicit_model = AtmosphereModel(grid; closure=implicit_closure, advection=nothing, tracers=:ρc)
+        explicit_model = AtmosphereModel(grid; closure=explicit_closure, advection=nothing, tracers=:ρc)
 
         # Set same initial condition
         set!(implicit_model; ρc = (x, y, z) -> gaussian(z))
@@ -64,13 +64,13 @@ test_thermodynamics = (:StaticEnergy, :LiquidIcePotentialTemperature)
         # Results should be similar (within numerical tolerance)
         ρc_implicit = Array(interior(implicit_model.tracers.ρc))
         ρc_explicit = Array(interior(explicit_model.tracers.ρc))
-        @test isapprox(ρc_implicit, ρc_explicit, rtol=0.1)
+        @test isapprox(ρc_implicit, ρc_explicit, rtol=0.01)
     end
 
     @testset "Implicit viscosity smooths momentum gradients" begin
         ν = FT(10)
         closure = VerticalScalarDiffusivity(vitd; ν)
-        model = @test_logs match_mode=:any AtmosphereModel(grid; closure, advection=nothing)
+        model = AtmosphereModel(grid; closure, advection=nothing)
 
         # Set momentum with vertical gradient (ρu varies with z)
         set!(model; ρu = (x, y, z) -> gaussian(z))
@@ -93,7 +93,7 @@ test_thermodynamics = (:StaticEnergy, :LiquidIcePotentialTemperature)
         ν = FT(5)
         κ = FT(10)
         closure = VerticalScalarDiffusivity(vitd; ν, κ)
-        model = @test_logs match_mode=:any AtmosphereModel(grid; closure, advection=nothing, tracers=:ρc)
+        model = AtmosphereModel(grid; closure, advection=nothing, tracers=:ρc)
 
         # Set both momentum and tracer with gradients
         set!(model; ρu = (x, y, z) -> gaussian(z), ρc = (x, y, z) -> gaussian(z))
@@ -136,7 +136,7 @@ end
 
     for closure in closures
         @testset let closure=closure
-            model = @test_logs match_mode=:any AtmosphereModel(grid; closure)
+            model = AtmosphereModel(grid; closure)
             time_step!(model, 1)
             @test true
         end
@@ -152,7 +152,7 @@ end
 
         @testset "Implicit diffusion solver with ScalarDiffusivity [$formulation, $(FT), $(typeof(disc))]" for disc in discretizations
             closure = ScalarDiffusivity(disc, ν=1, κ=1)
-            model = @test_logs match_mode=:any AtmosphereModel(grid; dynamics, formulation, closure, tracers=:ρc)
+            model = AtmosphereModel(grid; dynamics, formulation, closure, tracers=:ρc)
             # Set uniform specific energy for no diffusion
             θ₀ = model.dynamics.reference_state.potential_temperature
             cᵖᵈ = model.thermodynamic_constants.dry_air.heat_capacity
