@@ -29,7 +29,7 @@ using CairoMakie
 using Adapt: Adapt
 
 function Adapt.adapt_structure(to, bckf::Oceananigans.Models.BoundaryConditionKernelFunction{Side}) where Side
-    bc = adapt(to, bckf.bc)
+    bc = Adapt.adapt(to, bckf.bc)
     BC = typeof(bc)
     return Oceananigans.Models.BoundaryConditionKernelFunction{Side, BC}(bc)
 end
