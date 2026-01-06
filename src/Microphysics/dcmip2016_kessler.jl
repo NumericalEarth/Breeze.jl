@@ -449,7 +449,7 @@ end
     max_Δt = Δt
 
     # Avoid a branch in the vertical loop and cut down `znode` calls:
-    # we only need `dz` for k = 1:Nz-1.
+    # we only need `Δz` for k = 1:Nz-1.
     zᵏ = znode(i, j, 1, grid, Center(), Center(), Center())
     for k = 1:(Nz-1)
         @inbounds begin
@@ -488,7 +488,7 @@ end
         end
     end
 
-    # k = Nz (no `dz` / CFL update needed)
+    # k = Nz (no `Δz` / CFL update needed)
     @inbounds begin
         ρ = ρ_field[i, j, Nz]
         inv_ρ = inv(ρ)
@@ -519,7 +519,7 @@ end
     # Subcycling for CFL constraint on rain sedimentation
     Ns = max(1, ceil(Int, Δt / max_Δt))
     inv_Ns = inv(FT(Ns))  # Precompute for final averaging
-    dt0 = Δt * inv_Ns
+    Δtₛ = Δt * inv_Ns
     precip_accum = zero(FT)  # Local accumulator to reduce global memory writes
 
     #####
@@ -566,19 +566,19 @@ end
                 velqr_k = 𝕍ʳ[i, j, k]
 
                 zᵏ⁺¹ = znode(i, j, k+1, grid, Center(), Center(), Center())
-                dz = zᵏ⁺¹ - zᵏ
+                Δz = zᵏ⁺¹ - zᵏ
 
-                ρ_kp1 = ρ_field[i, j, k+1]
-                r_kp1 = ρ_scale * ρ_kp1
-                rʳ_kp1 = qʳ_field[i, j, k+1]  # Mixing ratio
-                velqr_kp1 = 𝕍ʳ[i, j, k+1]
+                ρᵏ⁺¹ = ρ_field[i, j, k+1]
+                rᵏ⁺¹ = ρ_scale * ρᵏ⁺¹
+                rʳᵏ⁺¹ = qʳ_field[i, j, k+1]  # Mixing ratio
+                velqrᵏ⁺¹ = 𝕍ʳ[i, j, k+1]
 
-                sed = dt0 * (r_kp1 * rʳ_kp1 * velqr_kp1 - r_k * rʳ * velqr_k) / (r_k * dz)
+                sed = Δtₛ * (rᵏ⁺¹ * rʳᵏ⁺¹ * velqrᵏ⁺¹ - r_k * rʳ * velqr_k) / (r_k * Δz)
                 zᵏ = zᵏ⁺¹
 
                 # Autoconversion + accretion (KW eq. 2.13)
-                rrprod = rᶜˡ - (rᶜˡ - dt0 * max(k₁ * (rᶜˡ - rᶜ_crit), zero(FT))) /
-                         (1 + dt0 * k₂ * rʳ^β_acc)
+                rrprod = rᶜˡ - (rᶜˡ - Δtₛ * max(k₁ * (rᶜˡ - rᶜ_crit), zero(FT))) /
+                         (1 + Δtₛ * k₂ * rʳ^β_acc)
                 rᶜˡ_new = max(rᶜˡ - rrprod, zero(FT))
                 rʳ_new = max(rʳ + rrprod + sed, zero(FT))
 
@@ -598,7 +598,7 @@ end
                 subsaturation = max(rᵛ⁺ - rᵛ, zero(FT))
                 ern_rate = ern_num / ern_den * subsaturation / (r_k * rᵛ⁺ + FT(1e-20))
                 ern_limit = max(-prod - rᶜˡ_new, zero(FT))
-                ern = min(min(dt0 * ern_rate, ern_limit), rʳ_new)
+                ern = min(min(Δtₛ * ern_rate, ern_limit), rʳ_new)
 
                 # Apply adjustments
                 condensation = max(prod, -rᶜˡ_new)
@@ -658,12 +658,12 @@ end
             r_k = ρ_scale * ρ
             velqr_k = 𝕍ʳ[i, j, k]
             zᵏ = znode(i, j, k, grid, Center(), Center(), Center())
-            zᵏm1 = znode(i, j, k-1, grid, Center(), Center(), Center())
-            dz_half = 0.5 * (zᵏ - zᵏm1)
-            sed = -dt0 * rʳ * velqr_k / dz_half
+            zᵏ⁻¹ = znode(i, j, k-1, grid, Center(), Center(), Center())
+            Δz_half = 0.5 * (zᵏ - zᵏ⁻¹)
+            sed = -Δtₛ * rʳ * velqr_k / Δz_half
 
-            rrprod = rᶜˡ - (rᶜˡ - dt0 * max(k₁ * (rᶜˡ - rᶜ_crit), zero(FT))) /
-                     (1 + dt0 * k₂ * rʳ^β_acc)
+            rrprod = rᶜˡ - (rᶜˡ - Δtₛ * max(k₁ * (rᶜˡ - rᶜ_crit), zero(FT))) /
+                     (1 + Δtₛ * k₂ * rʳ^β_acc)
             rᶜˡ_new = max(rᶜˡ - rrprod, zero(FT))
             rʳ_new = max(rʳ + rrprod + sed, zero(FT))
 
@@ -678,7 +678,7 @@ end
             subsaturation = max(rᵛ⁺ - rᵛ, zero(FT))
             ern_rate = ern_num / ern_den * subsaturation / (r_k * rᵛ⁺ + FT(1e-20))
             ern_limit = max(-prod - rᶜˡ_new, zero(FT))
-            ern = min(min(dt0 * ern_rate, ern_limit), rʳ_new)
+            ern = min(min(Δtₛ * ern_rate, ern_limit), rʳ_new)
 
             condensation = max(prod, -rᶜˡ_new)
             rᵛ_new = max(rᵛ - condensation + ern, zero(FT))
