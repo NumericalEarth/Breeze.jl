@@ -30,7 +30,7 @@ using CloudMicrophysics.Parameters:
 Parameters for two-moment ([Seifert and Beheng, 2006](@cite SeifertBeheng2006)) warm-rain microphysics.
 
 # Fields
-- `warm_processes`: `SB2006` parameters bundling autoconversion, accretion, self-collection,
+- `warm_processes`: [Seifert and Beheng (2006)](@cite SeifertBeheng2006) parameters bundling autoconversion, accretion, self-collection,
   breakup, evaporation, number adjustment, and size distribution parameters
 - `air_properties`: `AirProperties` for thermodynamic calculations
 - `cloud_liquid_fall_velocity`: `StokesRegimeVelType` for cloud droplet terminal velocity
@@ -52,10 +52,10 @@ Base.summary(::TwoMomentCategories) = "TwoMomentCategories"
 
 """
     two_moment_cloud_microphysics_categories(FT = Oceananigans.defaults.FloatType;
-                                              warm_processes = SB2006(FT),
-                                              air_properties = AirProperties(FT),
-                                              cloud_liquid_fall_velocity = StokesRegimeVelType(FT),
-                                              rain_fall_velocity = SB2006VelType(FT))
+                                             warm_processes = SB2006(FT),
+                                             air_properties = AirProperties(FT),
+                                             cloud_liquid_fall_velocity = StokesRegimeVelType(FT),
+                                             rain_fall_velocity = SB2006VelType(FT))
 
 Construct `TwoMomentCategories` with default Seifert-Beheng 2006 parameters.
 
@@ -65,12 +65,11 @@ Construct `TwoMomentCategories` with default Seifert-Beheng 2006 parameters.
 - `cloud_liquid_fall_velocity`: Terminal velocity parameters for cloud droplets (Stokes regime)
 - `rain_fall_velocity`: Terminal velocity parameters for rain drops
 """
-function two_moment_cloud_microphysics_categories(
-    FT::DataType = Oceananigans.defaults.FloatType;
-    warm_processes = SB2006(FT),
-    air_properties = AirProperties(FT),
-    cloud_liquid_fall_velocity = StokesRegimeVelType(FT),
-    rain_fall_velocity = SB2006VelType(FT))
+function two_moment_cloud_microphysics_categories(FT::DataType = Oceananigans.defaults.FloatType;
+                                                  warm_processes = SB2006(FT),
+                                                  air_properties = AirProperties(FT),
+                                                  cloud_liquid_fall_velocity = StokesRegimeVelType(FT),
+                                                  rain_fall_velocity = SB2006VelType(FT))
 
     return TwoMomentCategories(warm_processes, air_properties,
                                cloud_liquid_fall_velocity, rain_fall_velocity)
@@ -86,9 +85,9 @@ const WPNE2M = WarmPhaseNonEquilibrium2M
 
 """
     TwoMomentCloudMicrophysics(FT = Oceananigans.defaults.FloatType;
-                                cloud_formation = NonEquilibriumCloudFormation(nothing, nothing),
-                                categories = two_moment_cloud_microphysics_categories(FT),
-                                precipitation_boundary_condition = nothing)
+                               cloud_formation = NonEquilibriumCloudFormation(nothing, nothing),
+                               categories = two_moment_cloud_microphysics_categories(FT),
+                               precipitation_boundary_condition = nothing)
 
 Return a `TwoMomentCloudMicrophysics` microphysics scheme for warm-rain precipitation
 using the [Seifert and Beheng (2006)](@cite SeifertBeheng2006) two-moment parameterization.
@@ -129,9 +128,9 @@ for details on the [Seifert and Beheng (2006)](@cite SeifertBeheng2006) scheme.
     Meteorol. Atmos. Phys., 92, 45-66. https://doi.org/10.1007/s00703-005-0112-4
 """
 function TwoMomentCloudMicrophysics(FT::DataType = Oceananigans.defaults.FloatType;
-                                     cloud_formation = NonEquilibriumCloudFormation(nothing, nothing),
-                                     categories = two_moment_cloud_microphysics_categories(FT),
-                                     precipitation_boundary_condition = nothing)
+                                    cloud_formation = NonEquilibriumCloudFormation(nothing, nothing),
+                                    categories = two_moment_cloud_microphysics_categories(FT),
+                                    precipitation_boundary_condition = nothing)
 
     # Two-moment scheme requires non-equilibrium cloud formation
     if !(cloud_formation isa NonEquilibriumCloudFormation)
@@ -512,4 +511,3 @@ end
 
     return ifelse(nʳ >= 0, Σ_dNʳ, Sⁿᵘᵐ)
 end
-
