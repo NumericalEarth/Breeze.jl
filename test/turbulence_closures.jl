@@ -4,6 +4,33 @@ using Test
 
 test_thermodynamics = (:StaticEnergy, :LiquidIcePotentialTemperature)
 
+@testset "Vertically implicit diffusion with SSPRungeKutta3 [$(FT)]" for FT in (Float32, Float64)
+    Oceananigans.defaults.FloatType = FT
+    grid = RectilinearGrid(default_arch; size=(4, 4, 4), x=(0, 100), y=(0, 100), z=(0, 100))
+    vitd = VerticallyImplicitTimeDiscretization()
+
+    @testset "VerticalScalarDiffusivity with implicit diffusivity" begin
+        closure = VerticalScalarDiffusivity(vitd; κ=1)
+        model = @test_logs match_mode=:any AtmosphereModel(grid; closure)
+        time_step!(model, 1)
+        @test true
+    end
+
+    @testset "VerticalScalarDiffusivity with implicit viscosity" begin
+        closure = VerticalScalarDiffusivity(vitd; ν=1)
+        model = @test_logs match_mode=:any AtmosphereModel(grid; closure)
+        time_step!(model, 1)
+        @test true
+    end
+
+    @testset "VerticalScalarDiffusivity with implicit viscosity and diffusivity" begin
+        closure = VerticalScalarDiffusivity(vitd; ν=1, κ=2)
+        model = @test_logs match_mode=:any AtmosphereModel(grid; closure)
+        time_step!(model, 1)
+        @test true
+    end
+end
+
 @testset "Time stepping with TurbulenceClosures [$(FT)]" for FT in (Float32, Float64)
     Oceananigans.defaults.FloatType = FT
     grid = RectilinearGrid(default_arch; size=(8, 8, 8), x=(0, 100), y=(0, 100), z=(0, 100))
