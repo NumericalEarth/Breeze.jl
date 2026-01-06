@@ -2,7 +2,8 @@ using Breeze
 using Test
 using Oceananigans
 using Oceananigans.TimeSteppers: update_state!
-using Breeze.Microphysics: kessler_terminal_velocity,
+using Breeze.Microphysics: DCMIP2016KesslerMicrophysics,
+                           kessler_terminal_velocity,
                            mass_fraction_to_mixing_ratio, mixing_ratio_to_mass_fraction
 using Breeze.Thermodynamics: MoistureMassFractions, saturation_specific_humidity, PlanarLiquidSurface
 
@@ -140,20 +141,20 @@ end
     @testset "Terminal velocity" begin
         # Test at typical atmospheric conditions
         ρ = 1.0         # kg/m³
-        ρ_bottom = 1.2  # kg/m³
+        ρ₁ = 1.2  # kg/m³
         rʳ = 0.001      # 1 g/kg rain mixing ratio
         microphysics = DCMIP2016KesslerMicrophysics()
 
-        vt = kessler_terminal_velocity(rʳ, ρ, ρ_bottom, microphysics)
+        vt = kessler_terminal_velocity(rʳ, ρ, ρ₁, microphysics)
         @test vt > 0
         @test vt < 20  # Reasonable terminal velocity (m/s)
 
         # Zero rain should give zero velocity
-        vt_zero = kessler_terminal_velocity(0.0, ρ, ρ_bottom, microphysics)
+        vt_zero = kessler_terminal_velocity(0.0, ρ, ρ₁, microphysics)
         @test vt_zero == 0.0
 
         # Higher rain content should give higher velocity
-        vt_high = kessler_terminal_velocity(0.005, ρ, ρ_bottom, microphysics)
+        vt_high = kessler_terminal_velocity(0.005, ρ, ρ₁, microphysics)
         @test vt_high > vt
     end
 

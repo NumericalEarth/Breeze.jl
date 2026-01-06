@@ -1,10 +1,17 @@
 using ..Thermodynamics:
     MoistureMassFractions,
+    MoistureMixingRatio,
     mixture_heat_capacity,
     mixture_gas_constant,
+    total_mixing_ratio,
     total_specific_moisture,
     saturation_specific_humidity,
     PlanarLiquidSurface
+
+using ..AtmosphereModels:
+    dynamics_density,
+    dynamics_pressure,
+    surface_pressure
 
 using Oceananigans: CenterField, Field, interior
 using Oceananigans.Architectures: architecture
@@ -71,6 +78,8 @@ Terminal velocity: `vᵗ = a_vᵗ × (ρ × rʳ × ρ_scale)^β_vᵗ × √(ρ�
 - `a_vᵗ`: Terminal velocity coefficient in m/s (default: 36.34)
 - `ρ_scale`: Density scale factor for unit conversion (default: 0.001)
 - `β_vᵗ`: Terminal velocity exponent (default: 0.1364)
+- `ρ`: Density
+- `ρ₀`: Density at z=0
 
 ## Autoconversion
 - `k₁`: Autoconversion rate coefficient in s⁻¹ (default: 0.001)
@@ -90,7 +99,7 @@ Ventilation: `(Cᵉᵛ₁ + Cᵉᵛ₂ × (ρ rʳ)^βᵉᵛ₁) × (ρ rʳ)^β�
 - `Cᵗʰᵉʳᵐ`: Thermal conductivity-related denominator coefficient (default: 5.4e5)
 
 ## Numerical
-- `CFL_factor`: CFL safety factor for sedimentation subcycling (default: 0.8)
+- `substep_cfl`: CFL safety factor for sedimentation subcycling (default: 0.8)
 """
 Base.@kwdef struct DCMIP2016KesslerMicrophysics{FT}
     # Saturation (Tetens/Clausius-Clapeyron)
@@ -120,7 +129,7 @@ Base.@kwdef struct DCMIP2016KesslerMicrophysics{FT}
     Cᵗʰᵉʳᵐ :: FT = 5.4e5
 
     # Numerical
-    CFL_factor :: FT = 0.8
+    substep_cfl :: FT = 0.8
 end
 
 const DCMIP2016KM = DCMIP2016KesslerMicrophysics
@@ -150,7 +159,7 @@ Create and return the microphysical fields for the Kessler scheme.
 - `qᶜˡ`: Cloud liquid mass fraction (\$kg/kg\$).
 - `qʳ`: Rain mass fraction (\$kg/kg\$).
 - `precipitation_rate`: Surface precipitation rate (\$m/s\$), defined as \$q^r \times v^t_{rain}\$ to match one-moment microphysics.
-- `vᵗ_rain`: Rain terminal velocity (\$m/s\$).
+- `𝕍ʳ`: Rain terminal velocity (\$m/s\$).
 """
 function AtmosphereModels.materialize_microphysical_fields(::DCMIP2016KM, grid, boundary_conditions)
     # Prognostic fields (density-weighted)
@@ -164,9 +173,9 @@ function AtmosphereModels.materialize_microphysical_fields(::DCMIP2016KM, grid, 
 
     # Precipitation and velocity diagnostics
     precipitation_rate = Field{Center, Center, Nothing}(grid)
-    vᵗ_rain = CenterField(grid)
+    𝕍ʳ = CenterField(grid)
 
-    return (; ρqᶜˡ, ρqʳ, qᵛ, qᶜˡ, qʳ, precipitation_rate, vᵗ_rain)
+    return (; ρqᶜˡ, ρqʳ, qᵛ, qᶜˡ, qʳ, precipitation_rate, 𝕍ʳ)
 end
 
 #####
@@ -309,11 +318,11 @@ vᵗ = a_{vᵗ} × (ρ × rʳ × ρ_{scale})^{β_{vᵗ}} × \\sqrt{ρ₀/ρ}
 
 where the parameters `a_vᵗ`, `ρ_scale`, and `β_vᵗ` are taken from the `microphysics` struct.
 """
-@inline function kessler_terminal_velocity(rʳ, ρ, ρ_bottom, microphysics)
+@inline function kessler_terminal_velocity(rʳ, ρ, ρ₁, microphysics)
     a_vᵗ    = microphysics.a_vᵗ
     ρ_scale = microphysics.ρ_scale
     β_vᵗ    = microphysics.β_vᵗ
-    rhalf = sqrt(ρ_bottom / ρ)
+    rhalf = sqrt(ρ₁ / ρ)
     return a_vᵗ * (rʳ * ρ_scale * ρ)^β_vᵗ * rhalf
 end
 
@@ -341,12 +350,12 @@ function AtmosphereModels.microphysics_model_update!(microphysics::DCMIP2016KM, 
     # (e.g., during model construction before any time step has been taken)
     (isnan(Δt) || isinf(Δt) || Δt ≤ 0) && return nothing
 
-    # Reference state - use interior() for reduced fields to get GPU-compatible arrays
-    ρᵣ = interior(model.dynamics.reference_state.density, 1, 1, :)
-    pᵣ = interior(model.dynamics.reference_state.pressure, 1, 1, :)
+    # Density and pressure fields (compatible with both Anelastic and Compressible dynamics)
+    ρ = dynamics_density(model.dynamics)
+    p = dynamics_pressure(model.dynamics)
 
     # Surface pressure for Exner function
-    p₀ = model.dynamics.reference_state.surface_pressure
+    p₀ = surface_pressure(model.dynamics)
 
     # Thermodynamic constants for liquid-ice potential temperature conversion
     constants = model.thermodynamic_constants
@@ -361,14 +370,9 @@ function AtmosphereModels.microphysics_model_update!(microphysics::DCMIP2016KM, 
     # Microphysical fields
     μ = model.microphysical_fields
 
-    # Use interior() for 2D field to avoid GPU indexing issues
-    precipitation_rate_data = interior(μ.precipitation_rate, :, :, 1)
-
     launch!(arch, grid, :xy, _microphysical_update!,
-            microphysics, grid, Nz, Δt, ρᵣ, pᵣ, p₀, constants, θˡⁱ, ρθˡⁱ,
-            ρqᵗ, μ.ρqᶜˡ, μ.ρqʳ,
-            μ.qᵛ, μ.qᶜˡ, μ.qʳ,
-            precipitation_rate_data, μ.vᵗ_rain)
+            microphysics, grid, Nz, Δt, ρ, p, p₀, constants, θˡⁱ, ρθˡⁱ,
+            ρqᵗ, μ.ρqᶜˡ, μ.ρqʳ, μ.qᵛ, μ.qᶜˡ, μ.qʳ, μ.precipitation_rate, μ.𝕍ʳ)
 
     return nothing
 end
@@ -385,10 +389,10 @@ end
 # Note: Breeze uses liquid-ice potential temperature (θˡⁱ), related to T by:
 #   T = Π θˡⁱ + ℒˡᵣ qˡ / cᵖᵐ
 
-@kernel function _microphysical_update!(microphysics, grid, Nz, Δt, ρᵣ, pᵣ, p₀, constants, θˡⁱ, ρθˡⁱ,
-                                                 ρqᵗ, ρqᶜˡ, ρqʳ,
-                                                 qᵛ_field, qᶜˡ_field, qʳ_field,
-                                                 precipitation_rate, vᵗ_rain)
+@kernel function _microphysical_update!(microphysics, grid, Nz, Δt, ρ_field, p_field, p₀, constants, θˡⁱ, ρθˡⁱ,
+                                        ρqᵗ, ρqᶜˡ, ρqʳ,
+                                        qᵛ_field, qᶜˡ_field, qʳ_field,
+                                        precipitation_rate, 𝕍ʳ)
     i, j = @index(Global, NTuple)
     FT = eltype(grid)
     one_FT = one(FT)
@@ -410,7 +414,7 @@ end
     f₅ = T_f * f₂ₓ * ℒˡᵣ * inv_cᵖᵈ
 
     # CFL safety factor for sedimentation
-    CFL_factor = microphysics.CFL_factor
+    substep_cfl = microphysics.substep_cfl
 
     # Precompute latent heating factor
     ℒˡᵣ_over_cᵖᵈ = ℒˡᵣ * inv_cᵖᵈ
@@ -431,20 +435,20 @@ end
     Cᵗʰᵉʳᵐ = microphysics.Cᵗʰᵉʳᵐ
 
     # Reference density at surface for terminal velocity (KW eq. 2.15)
-    @inbounds ρ_bottom = ρᵣ[1]
+    @inbounds ρ₁ = ρ_field[i, j, 1]
 
     #####
     ##### PHASE 1: Convert mass fraction → mixing ratio
     #####
 
-    dt_max = Δt
+    max_Δt = Δt
 
     # Avoid a branch in the vertical loop and cut down `znode` calls:
     # we only need `dz` for k = 1:Nz-1.
-    z_k = znode(i, j, 1, grid, Center(), Center(), Center())
+    zᵏ = znode(i, j, 1, grid, Center(), Center(), Center())
     for k = 1:(Nz-1)
         @inbounds begin
-            ρ = ρᵣ[k]
+            ρ = ρ_field[i, j, k]
             inv_ρ = inv(ρ)  # Precompute inverse density
 
             qᵗ = ρqᵗ[i, j, k] * inv_ρ
@@ -455,31 +459,33 @@ end
             qᵛ = qᵗ - qˡ_sum       # Diagnose vapor
 
             # Convert to mixing ratios for Kessler physics
-            # Precompute common denominator: 1/(1 - qᵗ)
-            inv_one_minus_qᵗ = inv(one_FT - qᵗ)
-            rᵛ = qᵛ * inv_one_minus_qᵗ
-            rᶜ = qᶜˡ * inv_one_minus_qᵗ
-            rʳ = qʳ * inv_one_minus_qᵗ
+            q = MoistureMassFractions(qᵛ, qˡ_sum)
+            r = MoistureMixingRatio(q)
+            rᵛ = r.vapor
+            rᵗ = total_mixing_ratio(r)
+            inv_qᵈ = one_FT + rᵗ
+            rᶜˡ = qᶜˡ * inv_qᵈ
+            rʳ  = qʳ * inv_qᵈ
 
-            velqr = kessler_terminal_velocity(rʳ, ρ, ρ_bottom, microphysics)
-            vᵗ_rain[i, j, k] = velqr
+            𝕍ʳ_ijk = kessler_terminal_velocity(rʳ, ρ, ρ₁, microphysics)
+            𝕍ʳ[i, j, k] = 𝕍ʳ_ijk
 
             # Store mixing ratios in diagnostic fields during physics
             qᵛ_field[i, j, k]  = rᵛ
-            qᶜˡ_field[i, j, k] = rᶜ
+            qᶜˡ_field[i, j, k] = rᶜˡ
             qʳ_field[i, j, k]  = rʳ
 
             # CFL check for sedimentation
-            z_kp1 = znode(i, j, k+1, grid, Center(), Center(), Center())
-            dz = z_kp1 - z_k
-            (velqr > 0) && (dt_max = min(dt_max, CFL_factor * dz / velqr))
-            z_k = z_kp1
+            zᵏ⁺¹ = znode(i, j, k+1, grid, Center(), Center(), Center())
+            Δz = zᵏ⁺¹ - zᵏ
+            max_Δt = min(max_Δt, substep_cfl * Δz / 𝕍ʳ_ijk)
+            zᵏ = zᵏ⁺¹
         end
     end
 
     # k = Nz (no `dz` / CFL update needed)
     @inbounds begin
-        ρ = ρᵣ[Nz]
+        ρ = ρ_field[i, j, Nz]
         inv_ρ = inv(ρ)
 
         qᵗ = ρqᵗ[i, j, Nz] * inv_ρ
@@ -489,30 +495,33 @@ end
         qᵗ = max(qᵗ, qˡ_sum)
         qᵛ = qᵗ - qˡ_sum
 
-        inv_one_minus_qᵗ = inv(one_FT - qᵗ)
-        rᵛ = qᵛ * inv_one_minus_qᵗ
-        rᶜ = qᶜˡ * inv_one_minus_qᵗ
-        rʳ = qʳ * inv_one_minus_qᵗ
+        q = MoistureMassFractions(qᵛ, qˡ_sum)
+        r = MoistureMixingRatio(q)
+        rᵛ = r.vapor
+        rᵗ = total_mixing_ratio(r)
+        inv_qᵈ = one_FT + rᵗ
+        rᶜˡ = qᶜˡ * inv_qᵈ
+        rʳ  = qʳ * inv_qᵈ
 
-        velqr = kessler_terminal_velocity(rʳ, ρ, ρ_bottom, microphysics)
-        vᵗ_rain[i, j, Nz] = velqr
+        velqr = kessler_terminal_velocity(rʳ, ρ, ρ₁, microphysics)
+        𝕍ʳ[i, j, Nz] = velqr
 
         qᵛ_field[i, j, Nz]  = rᵛ
-        qᶜˡ_field[i, j, Nz] = rᶜ
+        qᶜˡ_field[i, j, Nz] = rᶜˡ
         qʳ_field[i, j, Nz]  = rʳ
     end
 
     # Subcycling for CFL constraint on rain sedimentation
-    rainsplit = max(1, ceil(Int, Δt / dt_max))
-    inv_rainsplit = inv(FT(rainsplit))  # Precompute for final averaging
-    dt0 = Δt * inv_rainsplit
+    Ns = max(1, ceil(Int, Δt / max_Δt))
+    inv_Ns = inv(FT(Ns))  # Precompute for final averaging
+    dt0 = Δt * inv_Ns
     precip_accum = zero(FT)  # Local accumulator to reduce global memory writes
 
     #####
     ##### PHASE 2: Subcycle microphysics (in mixing ratio space)
     #####
 
-    for nt = 1:rainsplit
+    for m = 1:Ns
 
         # Accumulate surface precipitation (qʳ × vᵗ)
         @inbounds begin
@@ -522,55 +531,50 @@ end
             rᵗ_1 = rᵛ_1 + rᶜ_1 + rʳ_1
             # qʳ = rʳ / (1 + rᵗ)
             qʳ_1 = rʳ_1 / (one_FT + rᵗ_1)
-            precip_accum += qʳ_1 * vᵗ_rain[i, j, 1]
+            precip_accum += qʳ_1 * 𝕍ʳ[i, j, 1]
         end
 
         # Rolling z-coordinate to reduce `znode` calls (and avoid a branch in the loop body)
-        z_k = znode(i, j, 1, grid, Center(), Center(), Center())
+        zᵏ = znode(i, j, 1, grid, Center(), Center(), Center())
         for k = 1:(Nz-1)
             @inbounds begin
-                ρ = ρᵣ[k]
-                p = pᵣ[k]
+                ρ = ρ_field[i, j, k]
+                p = p_field[i, j, k]
                 θˡⁱ_k = θˡⁱ[i, j, k]
 
                 rᵛ = qᵛ_field[i, j, k]
-                rᶜ = qᶜˡ_field[i, j, k]
+                rᶜˡ = qᶜˡ_field[i, j, k]
                 rʳ = qʳ_field[i, j, k]
 
-                # Convert to mass fractions for thermodynamic calculation
-                rᵗ = rᵛ + rᶜ + rʳ
-                rˡ = rᶜ + rʳ
-                inv_one_plus_rᵗ = inv(one_FT + rᵗ)
-                qᵛ_current = rᵛ * inv_one_plus_rᵗ
-                qˡ_current = rˡ * inv_one_plus_rᵗ
-
-                # Moist thermodynamics: T = Π θˡⁱ + ℒˡᵣ qˡ / cᵖᵐ
-                q = MoistureMassFractions(qᵛ_current, qˡ_current)
-                cᵖᵐ = mixture_heat_capacity(q, constants)
-                Rᵐ  = mixture_gas_constant(q, constants)
+                # Moist thermodynamics using mixing ratio abstraction
+                rˡ = rᶜˡ + rʳ
+                r = MoistureMixingRatio(rᵛ, rˡ)
+                cᵖᵐ = mixture_heat_capacity(r, constants)
+                Rᵐ  = mixture_gas_constant(r, constants)
+                q = MoistureMassFractions(r)
+                qˡ_current = q.liquid
                 Π = (p / p₀)^(Rᵐ / cᵖᵐ)
                 T_k = Π * θˡⁱ_k + ℒˡᵣ * qˡ_current / cᵖᵐ
 
-
                 # Rain sedimentation (upstream differencing)
                 r_k = ρ_scale * ρ
-                velqr_k = vᵗ_rain[i, j, k]
+                velqr_k = 𝕍ʳ[i, j, k]
 
-                z_kp1 = znode(i, j, k+1, grid, Center(), Center(), Center())
-                dz = z_kp1 - z_k
+                zᵏ⁺¹ = znode(i, j, k+1, grid, Center(), Center(), Center())
+                dz = zᵏ⁺¹ - zᵏ
 
-                ρ_kp1 = ρᵣ[k+1]
+                ρ_kp1 = ρ_field[i, j, k+1]
                 r_kp1 = ρ_scale * ρ_kp1
                 rʳ_kp1 = qʳ_field[i, j, k+1]  # Mixing ratio
-                velqr_kp1 = vᵗ_rain[i, j, k+1]
+                velqr_kp1 = 𝕍ʳ[i, j, k+1]
 
                 sed = dt0 * (r_kp1 * rʳ_kp1 * velqr_kp1 - r_k * rʳ * velqr_k) / (r_k * dz)
-                z_k = z_kp1
+                zᵏ = zᵏ⁺¹
 
                 # Autoconversion + accretion (KW eq. 2.13)
-                rrprod = rᶜ - (rᶜ - dt0 * max(k₁ * (rᶜ - rᶜ_crit), zero(FT))) /
+                rrprod = rᶜˡ - (rᶜˡ - dt0 * max(k₁ * (rᶜˡ - rᶜ_crit), zero(FT))) /
                          (1 + dt0 * k₂ * rʳ^β_acc)
-                rᶜ_new = max(rᶜ - rrprod, zero(FT))
+                rᶜˡ_new = max(rᶜˡ - rrprod, zero(FT))
                 rʳ_new = max(rʳ + rrprod + sed, zero(FT))
 
                 # Saturation specific humidity using Breeze thermodynamics
@@ -588,17 +592,17 @@ end
                 ern_den = Cᵈⁱᶠᶠ / (p * rᵛ⁺) + Cᵗʰᵉʳᵐ
                 subsaturation = max(rᵛ⁺ - rᵛ, zero(FT))
                 ern_rate = ern_num / ern_den * subsaturation / (r_k * rᵛ⁺ + FT(1e-20))
-                ern_limit = max(-prod - rᶜ_new, zero(FT))
+                ern_limit = max(-prod - rᶜˡ_new, zero(FT))
                 ern = min(min(dt0 * ern_rate, ern_limit), rʳ_new)
 
                 # Apply adjustments
-                condensation = max(prod, -rᶜ_new)
+                condensation = max(prod, -rᶜˡ_new)
                 rᵛ_new = max(rᵛ - condensation + ern, zero(FT))
-                rᶜ_final = rᶜ_new + condensation
+                rᶜˡ_final = rᶜˡ_new + condensation
                 rʳ_final = rʳ_new - ern
 
                 qᵛ_field[i, j, k]  = rᵛ_new
-                qᶜˡ_field[i, j, k] = rᶜ_final
+                qᶜˡ_field[i, j, k] = rᶜˡ_final
                 qʳ_field[i, j, k]  = rʳ_final
 
                 # Update θˡⁱ from latent heating
@@ -608,15 +612,12 @@ end
                 T_new = T_k + ΔT_phase
 
                 # Convert back to θˡⁱ with updated moisture
-                rᵗ_new = rᵛ_new + rᶜ_final + rʳ_final
-                rˡ_new = rᶜ_final + rʳ_final
-                inv_one_plus_rᵗ_new = inv(one_FT + rᵗ_new)
-                qᵛ_new_mf = rᵛ_new * inv_one_plus_rᵗ_new
-                qˡ_new = rˡ_new * inv_one_plus_rᵗ_new
-
-                q_new = MoistureMassFractions(qᵛ_new_mf, qˡ_new)
-                cᵖᵐ_new = mixture_heat_capacity(q_new, constants)
-                Rᵐ_new  = mixture_gas_constant(q_new, constants)
+                rˡ_new = rᶜˡ_final + rʳ_final
+                r_new = MoistureMixingRatio(rᵛ_new, rˡ_new)
+                cᵖᵐ_new = mixture_heat_capacity(r_new, constants)
+                Rᵐ_new  = mixture_gas_constant(r_new, constants)
+                q_new = MoistureMassFractions(r_new)
+                qˡ_new = q_new.liquid
                 Π_new = (p / p₀)^(Rᵐ_new / cᵖᵐ_new)
 
                 # θˡⁱ = (T - ℒˡᵣ qˡ / cᵖᵐ) / Π
@@ -630,37 +631,35 @@ end
         # k = Nz (top boundary: rain falls out)
         @inbounds begin
             k = Nz
-            ρ = ρᵣ[k]
-            p = pᵣ[k]
+            ρ = ρ_field[i, j, k]
+            p = p_field[i, j, k]
             θˡⁱ_k = θˡⁱ[i, j, k]
 
             rᵛ = qᵛ_field[i, j, k]
-            rᶜ = qᶜˡ_field[i, j, k]
+            rᶜˡ = qᶜˡ_field[i, j, k]
             rʳ = qʳ_field[i, j, k]
 
-            rᵗ = rᵛ + rᶜ + rʳ
-            rˡ = rᶜ + rʳ
-            inv_one_plus_rᵗ = inv(one_FT + rᵗ)
-            qᵛ_current = rᵛ * inv_one_plus_rᵗ
-            qˡ_current = rˡ * inv_one_plus_rᵗ
-
-            q = MoistureMassFractions(qᵛ_current, qˡ_current)
-            cᵖᵐ = mixture_heat_capacity(q, constants)
-            Rᵐ  = mixture_gas_constant(q, constants)
+            # Moist thermodynamics using mixing ratio abstraction
+            rˡ = rᶜˡ + rʳ
+            r = MoistureMixingRatio(rᵛ, rˡ)
+            cᵖᵐ = mixture_heat_capacity(r, constants)
+            Rᵐ  = mixture_gas_constant(r, constants)
+            q = MoistureMassFractions(r)
+            qˡ_current = q.liquid
             Π = (p / p₀)^(Rᵐ / cᵖᵐ)
             T_k = Π * θˡⁱ_k + ℒˡᵣ * qˡ_current / cᵖᵐ
 
             # Top boundary: rain falls out
             r_k = ρ_scale * ρ
-            velqr_k = vᵗ_rain[i, j, k]
-            z_k = znode(i, j, k, grid, Center(), Center(), Center())
-            z_km1 = znode(i, j, k-1, grid, Center(), Center(), Center())
-            dz_half = 0.5 * (z_k - z_km1)
+            velqr_k = 𝕍ʳ[i, j, k]
+            zᵏ = znode(i, j, k, grid, Center(), Center(), Center())
+            zᵏm1 = znode(i, j, k-1, grid, Center(), Center(), Center())
+            dz_half = 0.5 * (zᵏ - zᵏm1)
             sed = -dt0 * rʳ * velqr_k / dz_half
 
-            rrprod = rᶜ - (rᶜ - dt0 * max(k₁ * (rᶜ - rᶜ_crit), zero(FT))) /
+            rrprod = rᶜˡ - (rᶜˡ - dt0 * max(k₁ * (rᶜˡ - rᶜ_crit), zero(FT))) /
                      (1 + dt0 * k₂ * rʳ^β_acc)
-            rᶜ_new = max(rᶜ - rrprod, zero(FT))
+            rᶜˡ_new = max(rᶜˡ - rrprod, zero(FT))
             rʳ_new = max(rʳ + rrprod + sed, zero(FT))
 
             qᵛ⁺ = saturation_specific_humidity(T_k, ρ, constants, surface)
@@ -673,31 +672,28 @@ end
             ern_den = Cᵈⁱᶠᶠ / (p * rᵛ⁺) + Cᵗʰᵉʳᵐ
             subsaturation = max(rᵛ⁺ - rᵛ, zero(FT))
             ern_rate = ern_num / ern_den * subsaturation / (r_k * rᵛ⁺ + FT(1e-20))
-            ern_limit = max(-prod - rᶜ_new, zero(FT))
+            ern_limit = max(-prod - rᶜˡ_new, zero(FT))
             ern = min(min(dt0 * ern_rate, ern_limit), rʳ_new)
 
-            condensation = max(prod, -rᶜ_new)
+            condensation = max(prod, -rᶜˡ_new)
             rᵛ_new = max(rᵛ - condensation + ern, zero(FT))
-            rᶜ_final = rᶜ_new + condensation
+            rᶜˡ_final = rᶜˡ_new + condensation
             rʳ_final = rʳ_new - ern
 
             qᵛ_field[i, j, k]  = rᵛ_new
-            qᶜˡ_field[i, j, k] = rᶜ_final
+            qᶜˡ_field[i, j, k] = rᶜˡ_final
             qʳ_field[i, j, k]  = rʳ_final
 
             net_phase_change = condensation - ern
             ΔT_phase = ℒˡᵣ_over_cᵖᵈ * net_phase_change
             T_new = T_k + ΔT_phase
 
-            rᵗ_new = rᵛ_new + rᶜ_final + rʳ_final
-            rˡ_new = rᶜ_final + rʳ_final
-            inv_one_plus_rᵗ_new = inv(one_FT + rᵗ_new)
-            qᵛ_new_mf = rᵛ_new * inv_one_plus_rᵗ_new
-            qˡ_new = rˡ_new * inv_one_plus_rᵗ_new
-
-            q_new = MoistureMassFractions(qᵛ_new_mf, qˡ_new)
-            cᵖᵐ_new = mixture_heat_capacity(q_new, constants)
-            Rᵐ_new  = mixture_gas_constant(q_new, constants)
+            rˡ_new = rᶜˡ_final + rʳ_final
+            r_new = MoistureMixingRatio(rᵛ_new, rˡ_new)
+            cᵖᵐ_new = mixture_heat_capacity(r_new, constants)
+            Rᵐ_new  = mixture_gas_constant(r_new, constants)
+            q_new = MoistureMassFractions(r_new)
+            qˡ_new = q_new.liquid
             Π_new = (p / p₀)^(Rᵐ_new / cᵖᵐ_new)
 
             θˡⁱ_new = (T_new - ℒˡᵣ * qˡ_new / cᵖᵐ_new) / Π_new
@@ -707,18 +703,18 @@ end
         end
 
         # Recalculate terminal velocities for next subcycle
-        if nt < rainsplit
+        if m < Ns
             for k = 1:Nz
                 @inbounds begin
-                    ρ = ρᵣ[k]
+                    ρ = ρ_field[i, j, k]
                     rʳ = qʳ_field[i, j, k]
-                    vᵗ_rain[i, j, k] = kessler_terminal_velocity(rʳ, ρ, ρ_bottom, microphysics)
+                    𝕍ʳ[i, j, k] = kessler_terminal_velocity(rʳ, ρ, ρ₁, microphysics)
                 end
             end
         end
     end
 
-    @inbounds precipitation_rate[i, j] = precip_accum * inv_rainsplit
+    @inbounds precipitation_rate[i, j] = precip_accum * inv_Ns
 
     #####
     ##### PHASE 3: Convert mixing ratio → mass fraction
@@ -726,19 +722,24 @@ end
 
     for k = 1:Nz
         @inbounds begin
-            ρ = ρᵣ[k]
+            ρ = ρ_field[i, j, k]
             rᵛ = qᵛ_field[i, j, k]
-            rᶜ = qᶜˡ_field[i, j, k]
+            rᶜˡ = qᶜˡ_field[i, j, k]
             rʳ = qʳ_field[i, j, k]
 
-            rᵗ = rᵛ + rᶜ + rʳ
-            # Precompute common factor for all conversions
+            # Convert mixing ratios to mass fractions
+            rˡ = rᶜˡ + rʳ
+            r = MoistureMixingRatio(rᵛ, rˡ)
+            q = MoistureMassFractions(r)
+            qᵛ = q.vapor
+            qˡ = q.liquid
+            qᵗ = total_specific_moisture(q)
+
+            # Compute cloud and rain mass fractions using the same conversion factor
+            rᵗ = total_mixing_ratio(r)
             inv_one_plus_rᵗ = inv(one_FT + rᵗ)
-            qᵛ  = rᵛ * inv_one_plus_rᵗ
-            qᶜˡ = rᶜ * inv_one_plus_rᵗ
+            qᶜˡ = rᶜˡ * inv_one_plus_rᵗ
             qʳ  = rʳ * inv_one_plus_rᵗ
-            # qᵗ = (rᵛ + rᶜ + rʳ) / (1 + rᵗ) = rᵗ / (1 + rᵗ)
-            qᵗ  = rᵗ * inv_one_plus_rᵗ
 
             # Update prognostic fields (density-weighted)
             ρqᵗ[i, j, k]  = ρ * qᵗ
