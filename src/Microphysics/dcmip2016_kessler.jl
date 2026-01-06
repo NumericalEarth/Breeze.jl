@@ -504,8 +504,7 @@ end
         rᶜˡ = qᶜˡ * (1 + rᵗ)
         rʳ  = qʳ * (1 + rᵗ)
 
-        velqr = kessler_terminal_velocity(rʳ, ρ, ρ₁, microphysics)
-        𝕍ʳ_field[i, j, Nz] = velqr
+        𝕍ʳ_field[i, j, Nz] = kessler_terminal_velocity(rʳ, ρ, ρ₁, microphysics)
 
         qᵛ_field[i, j, Nz]  = rᵛ
         qᶜˡ_field[i, j, Nz] = rᶜˡ
@@ -558,18 +557,18 @@ end
                 Tᵏ = Π * θˡⁱᵏ + ℒˡᵣ * qˡ_current / cᵖᵐ
 
                 # Rain sedimentation (upstream differencing)
-                rᵏ = ρ_scale * ρ
+                ρᵏ = ρ_scale * ρ
                 𝕍ʳᵏ = 𝕍ʳ_field[i, j, k]
 
                 zᵏ⁺¹ = znode(i, j, k+1, grid, Center(), Center(), Center())
                 Δz = zᵏ⁺¹ - zᵏ
 
                 ρᵏ⁺¹ = ρ_field[i, j, k+1]
-                rᵏ⁺¹ = ρ_scale * ρᵏ⁺¹
+                ρᵏ⁺¹ = ρ_scale * ρᵏ⁺¹
                 rʳᵏ⁺¹ = qʳ_field[i, j, k+1]  # Mixing ratio
                 𝕍ʳᵏ⁺¹ = 𝕍ʳ_field[i, j, k+1]
 
-                sed = Δtₛ * (rᵏ⁺¹ * rʳᵏ⁺¹ * 𝕍ʳᵏ⁺¹ - rᵏ * rʳ * 𝕍ʳᵏ) / (rᵏ * Δz)
+                sed = Δtₛ * (ρᵏ⁺¹ * rʳᵏ⁺¹ * 𝕍ʳᵏ⁺¹ - ρᵏ * rʳ * 𝕍ʳᵏ) / (ρᵏ * Δz)
                 zᵏ = zᵏ⁺¹
 
                 # Autoconversion + accretion (KW eq. 2.13)
@@ -588,11 +587,11 @@ end
                 prod = (rᵛ - rᵛ⁺) / (1 + rᵛ⁺ * f₅ / (Tᵏ - T_offset)^2)
 
                 # Rain evaporation (KW eq. 2.14)
-                ρrʳ = rᵏ * rʳ_new                                        # Scaled rain water content
+                ρrʳ = ρᵏ * rʳ_new                                        # Scaled rain water content
                 Vᵉᵛ = (Cᵉᵛ₁ + Cᵉᵛ₂ * ρrʳ^βᵉᵛ₁) * ρrʳ^βᵉᵛ₂               # Ventilation factor
                 Dᵗʰ = Cᵈⁱᶠᶠ / (p * rᵛ⁺) + Cᵗʰᵉʳᵐ                        # Diffusion-thermal term
                 Δrᵛ⁺ = max(0, rᵛ⁺ - rᵛ)                                  # Subsaturation
-                Ėʳ = Vᵉᵛ / Dᵗʰ * Δrᵛ⁺ / (rᵏ * rᵛ⁺ + FT(1e-20))          # Rain evaporation rate
+                Ėʳ = Vᵉᵛ / Dᵗʰ * Δrᵛ⁺ / (ρᵏ * rᵛ⁺ + FT(1e-20))          # Rain evaporation rate
                 Eʳₘₐₓ = max(0, -prod - rᶜˡ_new)                          # Maximum evaporation
                 Eʳ = min(min(Δtₛ * Ėʳ, Eʳₘₐₓ), rʳ_new)                   # Limited evaporation
 
@@ -651,7 +650,7 @@ end
             Tᵏ = Π * θˡⁱᵏ + ℒˡᵣ * qˡ_current / cᵖᵐ
 
             # Top boundary: rain falls out
-            rᵏ = ρ_scale * ρ
+            ρᵏ = ρ_scale * ρ
             𝕍ʳᵏ = 𝕍ʳ_field[i, j, k]
             zᵏ = znode(i, j, k, grid, Center(), Center(), Center())
             zᵏ⁻¹ = znode(i, j, k-1, grid, Center(), Center(), Center())
@@ -670,11 +669,11 @@ end
             prod = (rᵛ - rᵛ⁺) / (1 + rᵛ⁺ * f₅ / (Tᵏ - T_offset)^2)
 
             # Rain evaporation (KW eq. 2.14)
-            ρrʳ = rᵏ * rʳ_new                                        # Scaled rain water content
+            ρrʳ = ρᵏ * rʳ_new                                        # Scaled rain water content
             Vᵉᵛ = (Cᵉᵛ₁ + Cᵉᵛ₂ * ρrʳ^βᵉᵛ₁) * ρrʳ^βᵉᵛ₂               # Ventilation factor
             Dᵗʰ = Cᵈⁱᶠᶠ / (p * rᵛ⁺) + Cᵗʰᵉʳᵐ                        # Diffusion-thermal term
             Δrᵛ⁺ = max(0, rᵛ⁺ - rᵛ)                                  # Subsaturation
-            Ėʳ = Vᵉᵛ / Dᵗʰ * Δrᵛ⁺ / (rᵏ * rᵛ⁺ + FT(1e-20))          # Rain evaporation rate
+            Ėʳ = Vᵉᵛ / Dᵗʰ * Δrᵛ⁺ / (ρᵏ * rᵛ⁺ + FT(1e-20))          # Rain evaporation rate
             Eʳₘₐₓ = max(0, -prod - rᶜˡ_new)                          # Maximum evaporation
             Eʳ = min(min(Δtₛ * Ėʳ, Eʳₘₐₓ), rʳ_new)                   # Limited evaporation
 
