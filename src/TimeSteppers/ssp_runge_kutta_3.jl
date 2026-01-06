@@ -17,19 +17,23 @@ $(TYPEDEF)
 
 A strong stability preserving (SSP) third-order Runge-Kutta time stepper.
 
-This time stepper uses the classic SSP RK3 scheme ([Shu-Osher](@cite Shu1988Efficient) form):
+This time stepper uses the classic SSP RK3 scheme ([Shu-Osher 2006](@cite Shu1988Efficient) form):
 
 ```math
+\\begin{align}
 u^{(1)} &= u^{(0)} + Δt L(u^{(0)}) \\\\
 u^{(2)} &= \\frac{3}{4} u^{(0)} + \\frac{1}{4} u^{(1)} + \\frac{1}{4} Δt L(u^{(1)}) \\\\
 u^{(3)} &= \\frac{1}{3} u^{(0)} + \\frac{2}{3} u^{(2)} + \\frac{2}{3} Δt L(u^{(2)})
+\\end{align}
 ```
+
+where ``L`` above is the right-hand-side, e.g., ``\\partial_t u = L(u)``.
 
 Each stage can be written in the form:
 ```math
-u^{(m)} = (1 - α) u^{(0)} + α (u^{(m-1)} + Δt L(u^{(m-1)}))
+u^{(m)} = (1 - α) u^{(0)} + α [u^{(m-1)} + Δt L(u^{(m-1)})]
 ```
-with α = 1, 1/4, 2/3 for stages 1, 2, 3 respectively.
+with ``α = 1, 1/4, 2/3`` for stages 1, 2, 3 respectively.
 
 This scheme has CFL coefficient = 1 and is TVD (total variation diminishing).
 
@@ -151,6 +155,8 @@ u^(1) = u^(0) + Δt L(u^(0))
 u^(2) = 3/4 u^(0) + 1/4 u^(1) + 1/4 Δt L(u^(1))
 u^(3) = 1/3 u^(0) + 2/3 u^(2) + 2/3 Δt L(u^(2))
 ```
+
+where `L` above is the right-hand-side, e.g., `∂u/∂t = L(u)`.
 """
 function OceananigansTimeSteppers.time_step!(model::AbstractModel{<:SSPRungeKutta3}, Δt; callbacks=[])
     Δt == 0 && @warn "Δt == 0 may cause model blowup!"
