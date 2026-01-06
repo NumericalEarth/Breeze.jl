@@ -12,8 +12,8 @@ The fully compressible Euler equations in conservation form are:
 
 ```math
 \\begin{aligned}
-&\\text{Mass:} && \\partial_t \\rho + \\nabla \\cdot (\\rho \\mathbf{u}) = 0 \\\\
-&\\text{Momentum:} && \\partial_t (\\rho \\mathbf{u}) + \\nabla \\cdot (\\rho \\mathbf{u} \\mathbf{u}) + \\nabla p = -\\rho g \\hat{\\mathbf{z}} + \\rho \\mathbf{f} + \\nabla \\cdot \\boldsymbol{\\mathcal{T}}
+&\\text{Mass:} && \\partial_t \\rho + \\boldsymbol{\\nabla \\cdot} (\\rho \\boldsymbol{u}) = 0 \\\\
+&\\text{Momentum:} && \\partial_t (\\rho \\boldsymbol{u}) + \\boldsymbol{\\nabla \\cdot} (\\rho \\boldsymbol{u} \\boldsymbol{u}) + \\boldsymbol{\\nabla} p = -\\rho g \\hat{\\boldsymbol{z}} + \\rho \\boldsymbol{f} + \\boldsymbol{\\nabla \\cdot \\mathcal{T}}
 \\end{aligned}
 ```
 
@@ -54,4 +54,3 @@ include("compressible_density_tendency.jl")
 include("compressible_time_stepping.jl")
 
 end # module
-
