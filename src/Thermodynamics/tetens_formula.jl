@@ -34,7 +34,7 @@ end
 $(TYPEDSIGNATURES)
 
 Construct a `TetensFormula` saturation vapor pressure formulation.
-Tetens' formula is an empirical formula for the saturation vapor pressure,
+Tetens' formula [Tetens1930](@citet) is an empirical formula for the saturation vapor pressure,
 
 ```math
 pᵛ⁺(T) = pᵛ⁺ᵣ \\exp \\left( a \\frac{T - Tᵣ}{T - δT} \\right) ,
@@ -45,8 +45,9 @@ where ``pᵛ⁺ᵣ`` is `reference_saturation_vapor_pressure`,
 ``a`` is an empirical coefficient, and
 ``δT`` is a temperature offset.
 
+See also the [wikipedia article on "Tetens equation"](https://en.wikipedia.org/wiki/Tetens_equation).
 Different coefficients are used for liquid water and ice surfaces. Default values
-for the liquid formula are from [Monteith and Unsworth (2008)](@cite MonteithUnsworth2008), and default values
+for the liquid formula are from [Monteith and Unsworth (2014)](@cite MonteithUnsworth2014), and default values
 for the ice formula are from [Murray (1967)](@cite):
 
 **Liquid water** (T > 0°C):

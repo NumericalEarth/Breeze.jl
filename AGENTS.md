@@ -43,6 +43,10 @@ Breeze interfaces with ClimaOcean for coupled atmosphere-ocean simulations.
    - Use `$(TYPEDSIGNATURES)` for automatic typed signature documentation (preferred over `$(SIGNATURES)`)
    - Never write explicit function signatures in docstrings; always use `$(TYPEDSIGNATURES)`
    - Add examples in docstrings when helpful
+   - **Citations in docstrings**: Use inline citations with `[Key](@citet)` syntax (renders as "Author (Year)" with link).
+     Avoid separate "References" sections with bare `[Key](@cite)` - these just show citation keys in the REPL
+     without context, which is not helpful. Instead, weave citations naturally into the prose, e.g.:
+     "Tetens' formula [Tetens1930](@citet) is an empirical formula..."
 
 5. **Memory leanness**
    - Favor doing computations inline versus allocating temporary memory
@@ -333,6 +337,10 @@ serve(dir="docs/build")
 - **Debugging literated examples**: When a specific example fails during doc builds, comment out
   all other examples in `docs/make.jl` except the failing one to isolate the error. This speeds up
   iteration dramatically since you only build one example at a time.
+- **Testing documentation pages efficiently**: When testing changes to documentation pages (like
+  `thermodynamics.md`), comment out ALL examples in the `examples` array in `docs/make.jl` to skip
+  the slow literation step. This allows rapid iteration on `@example` blocks in the documentation
+  markdown files.
 - **Literate.jl comment syntax**: In literated examples, lines starting with `# ` (hash + space)
   at column 1 are converted to markdown. Comments inside functions that start with `#` at the
   beginning of a line will prematurely end code blocks. Either remove such comments or use `##`
