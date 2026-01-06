@@ -34,7 +34,8 @@ end
 $(TYPEDSIGNATURES)
 
 Construct a `TetensFormula` saturation vapor pressure formulation.
-Tetens' formula [Tetens1930](@citet) is an empirical formula for the saturation vapor pressure,
+[Tetens's (1930)](@citet Tetens1930) formula is an empirical relationship
+for the saturation vapor pressure,
 
 ```math
 pᵛ⁺(T) = pᵛ⁺ᵣ \\exp \\left( a \\frac{T - Tᵣ}{T - δT} \\right) ,
