@@ -2,10 +2,12 @@ using Breeze
 using Test
 using Oceananigans
 using Oceananigans.TimeSteppers: update_state!
-using Breeze.Microphysics: DCMIP2016KesslerMicrophysics,
-                           kessler_terminal_velocity,
-                           mass_fraction_to_mixing_ratio, mixing_ratio_to_mass_fraction
+using Breeze.Microphysics: DCMIP2016KesslerMicrophysics, kessler_terminal_velocity
 using Breeze.Thermodynamics: MoistureMassFractions, saturation_specific_humidity, PlanarLiquidSurface
+
+# Helper functions for mass fraction ↔ mixing ratio conversion
+mass_fraction_to_mixing_ratio(q, qᵗ) = q / (1 - qᵗ)
+mixing_ratio_to_mass_fraction(r, rᵗ) = r / (1 + rᵗ)
 
 #####
 ##### Reference Fortran Kessler implementation (translated to Julia)
