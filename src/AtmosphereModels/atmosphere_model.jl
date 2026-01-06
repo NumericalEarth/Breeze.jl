@@ -1,4 +1,3 @@
-using ..AnelasticEquations: AnelasticEquations
 using ..Thermodynamics: Thermodynamics, ThermodynamicConstants
 
 using Oceananigans: Oceananigans, AbstractModel, Center, CenterField, Clock, Field,
@@ -63,7 +62,7 @@ Return an `AtmosphereModel` that uses the anelastic approximation following
 Arguments
 =========
 
-   * The default `dynamics` is [`AnelasticDynamics`](@ref AnelasticEquations.AnelasticDynamics).
+   * The default `dynamics` is [`AnelasticDynamics`](@ref Breeze.AnelasticEquations.AnelasticDynamics).
 
    * The default `formulation` is `:LiquidIcePotentialTemperature`.
 
