@@ -99,8 +99,8 @@ Apply an SSP RK3 substep with coefficient α:
 ```
 u^(m) = (1 - α) * u^(0) + α * (u^(m-1) + Δt * G)
 ```
-where u^(0) is stored in the time stepper, u^(m-1) is the current field value,
-and G is the current tendency.
+where `u^(0)` is stored in the time stepper, `u^(m-1)` is the current field value,
+and `G` is the current tendency.
 """
 function ssp_rk3_substep!(model, Δt, α)
     grid = model.grid
@@ -126,7 +126,7 @@ end
 """
 $(TYPEDSIGNATURES)
 
-Copy prognostic fields to U⁰ storage for use in later SSP RK3 stages.
+Copy prognostic fields to `U⁰` storage for use in later SSP RK3 stages.
 """
 function store_initial_state!(model::AbstractModel{<:SSPRungeKutta3})
     U⁰ = model.timestepper.U⁰
