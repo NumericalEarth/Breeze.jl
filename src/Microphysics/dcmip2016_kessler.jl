@@ -736,7 +736,7 @@ end
         end
     end
 
-    @inbounds precipitation_rate[i, j] = precip_accum * inv_Ns
+    @inbounds precipitation_rate[i, j, 1] = precip_accum * inv_Ns
 
     #####
     ##### PHASE 3: Convert mixing ratio → mass fraction
