@@ -25,15 +25,6 @@ using Printf
 using CUDA
 using CairoMakie
 
-# We need to adapt the `BoundaryConditionKernelFunction` for the GPU. Until [Oceananigans#5100 ](https://github.com/CliMA/Oceananigans.jl/pull/5100) is included in a tagged release, we can do that via Adapt.jl.
-using Adapt: Adapt
-
-function Adapt.adapt_structure(to, bckf::Oceananigans.Models.BoundaryConditionKernelFunction{Side}) where Side
-    bc = Adapt.adapt(to, bckf.bc)
-    BC = typeof(bc)
-    return Oceananigans.Models.BoundaryConditionKernelFunction{Side, BC}(bc)
-end
-
 # ## Grid setup
 #
 # We use a 2D domain (x-z plane) with periodic horizontal boundaries and a bounded
@@ -198,6 +189,18 @@ qᵗ = model.specific_moisture
 # values from the boundary conditions. These 1D fields (varying only in x)
 # represent the actual flux values applied at the ocean-atmosphere interface.
 #
+# We need to adapt the `BoundaryConditionKernelFunction` for the GPU.
+# Until [Oceananigans PR#5100](https://github.com/CliMA/Oceananigans.jl/pull/5100) is included
+# in a tagged release, we can use Adapt here directly.
+
+using Adapt: Adapt
+
+function Adapt.adapt_structure(to, bckf::Oceananigans.Models.BoundaryConditionKernelFunction{Side}) where Side
+    bc = Adapt.adapt(to, bckf.bc)
+    BC = typeof(bc)
+    return Oceananigans.Models.BoundaryConditionKernelFunction{Side, BC}(bc)
+end
+
 # The surface fluxes are:
 #
 # - ``τˣ``: momentum flux (stress), in kg m⁻¹ s⁻²
