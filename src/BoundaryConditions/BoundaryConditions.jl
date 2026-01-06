@@ -416,7 +416,7 @@ field_location(::Val) = (Center(), Center(), Center())  # default for scalars
 """
 $(TYPEDSIGNATURES)
 
-Regularize boundary conditions for [`AtmosphereModel`](@ref Breeze.AtmosphereModels.AtmosphereModel).
+Regularize boundary conditions for [`AtmosphereModel`](@ref AtmosphereModels.AtmosphereModel).
 This function walks through all boundary conditions and calls
 `regularize_atmosphere_boundary_condition` on each one, allowing specialized handling for
 bulk flux boundary conditions and other atmosphere-specific boundary condition types.
