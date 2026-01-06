@@ -62,7 +62,7 @@ for the ice formula are from [Murray (1967)](@cite Murray1967):
 * Tetens, O. (1930). Über einige meteorologische Begriffe. Zeitschrift für Geophysik 6, 297–309.
 * Monteith, J. L. and Unsworth, M. H. (2014). Principles of Environmental Physics. 4th Edition (Academic Press).
 * Murray, F. W. (1967). On the computation of saturation vapor pressure. Journal of Applied Meteorology 6, 203–204.
-* Wikipedia: Tetens equation; https://en.wikipedia.org/wiki/Tetens_equation
+* Wikipedia: Tetens equation; [https://en.wikipedia.org/wiki/Tetens_equation](https://en.wikipedia.org/wiki/Tetens_equation)
 
 # Example
 
@@ -152,4 +152,3 @@ based on the liquid fraction.
     λ = surface.liquid_fraction
     return λ * pᵛ⁺ˡ + (1 - λ) * pᵛ⁺ⁱ
 end
-
