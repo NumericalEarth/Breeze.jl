@@ -531,6 +531,7 @@ pᵛⁱ⁺ = [saturation_vapor_pressure(Tⁱ, thermo, thermo.ice) for Tⁱ in T]
 mixed_surface = PlanarMixedPhaseSurface(0.5)
 pᵛᵐ⁺ = [saturation_vapor_pressure(Tⁱ, thermo, mixed_surface) for Tⁱ in T]
 
+# Mask ice and mixed-phase pressures above the freezing point
 freezing_temperature = 273.15
 pᵛⁱ⁺[T .> freezing_temperature] .= NaN
 pᵛᵐ⁺[T .> 273.15] .= NaN
