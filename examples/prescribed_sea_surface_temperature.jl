@@ -22,6 +22,7 @@ using Oceananigans
 using Oceananigans.Units
 using Oceananigans.Models: BoundaryConditionOperation
 using Printf
+using CUDA
 using CairoMakie
 
 # ## Grid setup
