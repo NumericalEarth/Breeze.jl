@@ -17,12 +17,12 @@ $(TYPEDEF)
 
 A strong stability preserving (SSP) third-order Runge-Kutta time stepper.
 
-This time stepper uses the classic SSP RK3 scheme (Shu-Osher form):
+This time stepper uses the classic SSP RK3 scheme ([Shu-Osher](@cite Shu1988Efficient) form):
 
 ```math
-u^{(1)} = u^{(0)} + Δt L(u^{(0)})
-u^{(2)} = \\frac{3}{4} u^{(0)} + \\frac{1}{4} u^{(1)} + \\frac{1}{4} Δt L(u^{(1)})
-u^{(3)} = \\frac{1}{3} u^{(0)} + \\frac{2}{3} u^{(2)} + \\frac{2}{3} Δt L(u^{(2)})
+u^{(1)} &= u^{(0)} + Δt L(u^{(0)}) \\\\
+u^{(2)} &= \\frac{3}{4} u^{(0)} + \\frac{1}{4} u^{(1)} + \\frac{1}{4} Δt L(u^{(1)}) \\\\
+u^{(3)} &= \\frac{1}{3} u^{(0)} + \\frac{2}{3} u^{(2)} + \\frac{2}{3} Δt L(u^{(2)})
 ```
 
 Each stage can be written in the form:
@@ -55,7 +55,8 @@ end
                    implicit_solver = nothing,
                    Gⁿ = map(similar, prognostic_fields))
 
-Construct an `SSPRungeKutta3` on `grid` with `prognostic_fields`.
+Construct an `SSPRungeKutta3` on `grid` with `prognostic_fields` as described
+by [Shu and Osher (1988)](@cite Shu1988Efficient).
 
 Keyword Arguments
 =================
@@ -74,7 +75,7 @@ function SSPRungeKutta3(grid, prognostic_fields;
                         Gⁿ::TG = map(similar, prognostic_fields)) where {TI, TG}
 
     FT = eltype(grid)
-    
+
     # SSP RK3 stage coefficients
     α¹ = FT(1)
     α² = FT(1//4)
@@ -106,11 +107,11 @@ function ssp_rk3_substep!(model, Δt, α)
     arch = grid.architecture
     U⁰ = model.timestepper.U⁰
     Gⁿ = model.timestepper.Gⁿ
-    
+
     for (u, u⁰, G) in zip(prognostic_fields(model), U⁰, Gⁿ)
         launch!(arch, grid, :xyz, _ssp_rk3_substep!, u, u⁰, G, Δt, α)
     end
-    
+
     return nothing
 end
 
