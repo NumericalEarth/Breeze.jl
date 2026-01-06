@@ -67,7 +67,7 @@ Construct a `TetensFormula` saturation vapor pressure formulation.
 # Example
 
 ```jldoctest
-julia> using Breeze
+julia> using Breeze.Thermodynamics
 
 julia> tf = TetensFormula()
 TetensFormula{Float64}(p₀=610.0, a=17.27, T₀=273.0, b=36.0)
