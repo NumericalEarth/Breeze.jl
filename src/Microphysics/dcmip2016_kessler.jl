@@ -562,8 +562,8 @@ end
                 T_k = Π * θˡⁱ_k + ℒˡᵣ * qˡ_current / cᵖᵐ
 
                 # Rain sedimentation (upstream differencing)
-                r_k = ρ_scale * ρ
-                velqr_k = 𝕍ʳ[i, j, k]
+                rᵏ = ρ_scale * ρ
+                velqrᵏ = 𝕍ʳ[i, j, k]
 
                 zᵏ⁺¹ = znode(i, j, k+1, grid, Center(), Center(), Center())
                 Δz = zᵏ⁺¹ - zᵏ
@@ -573,7 +573,7 @@ end
                 rʳᵏ⁺¹ = qʳ_field[i, j, k+1]  # Mixing ratio
                 velqrᵏ⁺¹ = 𝕍ʳ[i, j, k+1]
 
-                sed = Δtₛ * (rᵏ⁺¹ * rʳᵏ⁺¹ * velqrᵏ⁺¹ - r_k * rʳ * velqr_k) / (r_k * Δz)
+                sed = Δtₛ * (rᵏ⁺¹ * rʳᵏ⁺¹ * velqrᵏ⁺¹ - rᵏ * rʳ * velqrᵏ) / (rᵏ * Δz)
                 zᵏ = zᵏ⁺¹
 
                 # Autoconversion + accretion (KW eq. 2.13)
@@ -592,11 +592,11 @@ end
                 prod = (rᵛ - rᵛ⁺) / (1 + rᵛ⁺ * f₅ / (T_k - T_offset)^2)
 
                 # Rain evaporation (KW eq. 2.14)
-                rrr = r_k * rʳ_new
+                rrr = rᵏ * rʳ_new
                 ern_num = (Cᵉᵛ₁ + Cᵉᵛ₂ * rrr^βᵉᵛ₁) * rrr^βᵉᵛ₂
                 ern_den = Cᵈⁱᶠᶠ / (p * rᵛ⁺) + Cᵗʰᵉʳᵐ
                 subsaturation = max(rᵛ⁺ - rᵛ, zero(FT))
-                ern_rate = ern_num / ern_den * subsaturation / (r_k * rᵛ⁺ + FT(1e-20))
+                ern_rate = ern_num / ern_den * subsaturation / (rᵏ * rᵛ⁺ + FT(1e-20))
                 ern_limit = max(-prod - rᶜˡ_new, zero(FT))
                 ern = min(min(Δtₛ * ern_rate, ern_limit), rʳ_new)
 
@@ -655,12 +655,12 @@ end
             T_k = Π * θˡⁱ_k + ℒˡᵣ * qˡ_current / cᵖᵐ
 
             # Top boundary: rain falls out
-            r_k = ρ_scale * ρ
-            velqr_k = 𝕍ʳ[i, j, k]
+            rᵏ = ρ_scale * ρ
+            velqrᵏ = 𝕍ʳ[i, j, k]
             zᵏ = znode(i, j, k, grid, Center(), Center(), Center())
             zᵏ⁻¹ = znode(i, j, k-1, grid, Center(), Center(), Center())
             Δz_half = 0.5 * (zᵏ - zᵏ⁻¹)
-            sed = -Δtₛ * rʳ * velqr_k / Δz_half
+            sed = -Δtₛ * rʳ * velqrᵏ / Δz_half
 
             rrprod = rᶜˡ - (rᶜˡ - Δtₛ * max(k₁ * (rᶜˡ - rᶜ_crit), zero(FT))) /
                      (1 + Δtₛ * k₂ * rʳ^β_acc)
@@ -672,11 +672,11 @@ end
 
             prod = (rᵛ - rᵛ⁺) / (1 + rᵛ⁺ * f₅ / (T_k - T_offset)^2)
 
-            rrr = r_k * rʳ_new
+            rrr = rᵏ * rʳ_new
             ern_num = (Cᵉᵛ₁ + Cᵉᵛ₂ * rrr^βᵉᵛ₁) * rrr^βᵉᵛ₂
             ern_den = Cᵈⁱᶠᶠ / (p * rᵛ⁺) + Cᵗʰᵉʳᵐ
             subsaturation = max(rᵛ⁺ - rᵛ, zero(FT))
-            ern_rate = ern_num / ern_den * subsaturation / (r_k * rᵛ⁺ + FT(1e-20))
+            ern_rate = ern_num / ern_den * subsaturation / (rᵏ * rᵛ⁺ + FT(1e-20))
             ern_limit = max(-prod - rᶜˡ_new, zero(FT))
             ern = min(min(Δtₛ * ern_rate, ern_limit), rʳ_new)
 
