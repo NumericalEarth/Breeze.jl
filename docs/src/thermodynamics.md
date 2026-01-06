@@ -561,8 +561,8 @@ pᵛ⁺(T) = pᵛ⁺_r \exp \left( a \frac{T - T_0}{T - b} \right) ,
 ```
 
 where the coefficients ``a`` and ``b`` differ for liquid and ice surfaces.
-Default values for liquid are from Monteith and Unsworth (2008), and for ice
-from Murray (1967).
+Default values for liquid are from [MonteithUnsworth2008](@citet), and for ice
+from [Murray1967](@citet).
 
 Let's compare the two formulations over atmospheric temperatures:
 

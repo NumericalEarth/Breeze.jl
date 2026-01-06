@@ -41,28 +41,28 @@ pᵛ⁺(T) = pᵛ⁺ᵣ \\exp \\left( a \\frac{T - Tᵣ}{T - δT} \\right) ,
 ```
 
 where ``pᵛ⁺ᵣ`` is `reference_saturation_vapor_pressure`,
-``Tᵣ`` is `reference_temperature`, 
+``Tᵣ`` is `reference_temperature`,
 ``a`` is an empirical coefficient, and
 ``δT`` is a temperature offset.
 
 Different coefficients are used for liquid water and ice surfaces. Default values
-for the liquid formula are from Monteith and Unsworth (2008), and default values
-for the ice formula are from Murray (1967):
+for the liquid formula are from [Monteith and Unsworth (2008)](@cite MonteithUnsworth2008), and default values
+for the ice formula are from [Murray (1967)](@cite):
 
 **Liquid water** (T > 0°C):
 - `liquid_coefficient`: 17.27
 - `liquid_temperature_offset`: 35.85 K (corresponding to 237.3 K offset from 0°C)
 
 **Ice** (T < 0°C):
-- `ice_coefficient`: 21.875  
+- `ice_coefficient`: 21.875
 - `ice_temperature_offset`: 7.65 K (corresponding to 265.5 K offset from 0°C)
 
 # References
 
-- [Tetens1930](@cite)
-- [MonteithUnsworth2008](@cite)
-- [Murray1967](@cite)
-- [Wikipedia: Tetens equation](https://en.wikipedia.org/wiki/Tetens_equation)
+* Tetens, O. (1930). Über einige meteorologische Begriffe. Zeitschrift für Geophysik 6, 297–309.
+* Monteith, J. L. and Unsworth, M. H. (2014). Principles of Environmental Physics. 4th Edition (Academic Press).
+* Murray, F. W. (1967). On the computation of saturation vapor pressure. Journal of Applied Meteorology 6, 203–204.
+* Wikipedia: Tetens equation; https://en.wikipedia.org/wiki/Tetens_equation
 
 # Example
 
@@ -120,11 +120,16 @@ end
 $(TYPEDSIGNATURES)
 
 Compute the saturation vapor pressure over a planar ice surface
-using Tetens' empirical formula with ice coefficients from Murray (1967):
+using [Tetens'](@cite Tetens1930) empirical formula with ice coefficients from [Murray (1967)](@cite):
 
 ```math
 pᵛ⁺(T) = pᵛ⁺ᵣ \\exp \\left( aⁱ \\frac{T - Tᵣ}{T - δTⁱ} \\right)
 ```
+
+# References
+* Tetens, O. (1930). Über einige meteorologische Begriffe. Zeitschrift für Geophysik 6, 297–309.
+* Murray, F. W. (1967). On the computation of saturation vapor pressure. Journal of Applied Meteorology 6, 203–204.
+
 """
 @inline function saturation_vapor_pressure(T, constants::TetensFormulaThermodynamicConstants, ::PlanarIceSurface)
     tf = constants.saturation_vapor_pressure
