@@ -605,7 +605,7 @@ c_liquid = :darkblue
 c_ice = :darkorange
 c_mixed = :green
 
-fig = Figure(size=(600, 600))
+fig = Figure(size=(1000, 400))
 
 # Saturation vapor pressure comparison
 ax1 = Axis(fig[1, 1], xlabel="Temperature (K)", ylabel="Saturation vapor pressure (Pa)",
@@ -622,7 +622,7 @@ lines!(ax1, T, pᵛⁱ⁺_tf, linewidth=2, color=c_ice, linestyle=:dash, label="
 axislegend(ax1, position=:rb)
 
 # Relative difference (Tetens - C-C) / C-C
-ax2 = Axis(fig[2, 1], xlabel="Temperature (K)", ylabel="Relative difference (%)",
+ax2 = Axis(fig[1, 2], xlabel="Temperature (K)", ylabel="Relative difference (%)",
            title="(Tetens - C-C) / C-C × 100")
 
 rel_diff_liquid = @. 100 * (pᵛˡ⁺_tf - pᵛˡ⁺_cc) / pᵛˡ⁺_cc
