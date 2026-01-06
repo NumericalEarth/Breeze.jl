@@ -12,7 +12,7 @@ pᵛ⁺(T) = pᵛ⁺₀ \\exp \\left( a \\frac{T - T₀}{T - b} \\right)
 where ``pᵛ⁺₀`` is the reference saturation vapor pressure, ``a`` is an empirical coefficient,
 ``T₀`` is the reference temperature, and ``b`` is a temperature offset.
 
-Default parameter values are derived from equation 2.11 in [Klemp1978](@cite):
+Default parameter values are derived from equation 2.11 by [Klemp and Wilhelmson (1978)](@cite Klemp1978):
 
 - `reference_saturation_vapor_pressure`: 610 Pa
 - `coefficient`: 17.27
@@ -21,9 +21,9 @@ Default parameter values are derived from equation 2.11 in [Klemp1978](@cite):
 
 # Reference
 
-Klemp, J. B., & Wilhelmson, R. B. (1978). The Simulation of Three-Dimensional 
-Convective Storm Dynamics. *Journal of the Atmospheric Sciences*, 35(6), 1070-1096.
-[DOI: 10.1175/1520-0469(1978)035<1070:TSOTDC>2.0.CO;2](https://doi.org/10.1175/1520-0469(1978)035<1070:TSOTDC>2.0.CO;2)
+Klemp, J. B. and Wilhelmson, R. B. (1978). The simulation of three-dimensional
+convective storm dynamics. Journal of the Atmospheric Sciences, 35(6), 1070-1096.
+doi:[10.1175/1520-0469(1978)035<1070:TSOTDC>2.0.CO;2](https://doi.org/10.1175/1520-0469(1978)035<1070:TSOTDC>2.0.CO;2)
 """
 struct TetensFormula{FT}
     reference_saturation_vapor_pressure :: FT
