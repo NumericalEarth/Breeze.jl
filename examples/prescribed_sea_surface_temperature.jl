@@ -25,7 +25,7 @@ using Printf
 using CUDA
 using CairoMakie
 
-# until https://github.com/CliMA/Oceananigans.jl/pull/5100 is merged
+# until https://github.com/CliMA/Oceananigans.jl/pull/5100 is included in a tagged release
 using Adapt: Adapt
 
 function Adapt.adapt_structure(to, bckf::Oceananigans.Models.BoundaryConditionKernelFunction{Side}) where Side
