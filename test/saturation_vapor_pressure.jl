@@ -3,6 +3,7 @@ using Test
 
 using Breeze.Thermodynamics:
     ThermodynamicConstants,
+    TetensFormula,
     saturation_vapor_pressure,
     PlanarLiquidSurface,
     PlanarIceSurface,
@@ -57,4 +58,36 @@ end
             end
         end
     end
+end
+
+@testset "Tetens formula saturation vapor pressure [$FT]" for FT in (Float32, Float64)
+    # Smoke test: verify Tetens formula computes saturation vapor pressure
+    tetens = TetensFormula(FT)
+    thermo = ThermodynamicConstants(FT; saturation_vapor_pressure=tetens)
+
+    # Test at reference temperature (273 K): should return reference pressure
+    T₀ = FT(273)
+    pᵛ⁺_ref = saturation_vapor_pressure(T₀, thermo, PlanarLiquidSurface())
+    @test pᵛ⁺_ref ≈ FT(610) rtol=eps(FT)
+
+    # Test at higher temperature: pressure should increase
+    T_warm = FT(300)
+    pᵛ⁺_warm = saturation_vapor_pressure(T_warm, thermo, PlanarLiquidSurface())
+    @test pᵛ⁺_warm > pᵛ⁺_ref
+
+    # Test at lower temperature: pressure should decrease
+    T_cold = FT(250)
+    pᵛ⁺_cold = saturation_vapor_pressure(T_cold, thermo, PlanarLiquidSurface())
+    @test pᵛ⁺_cold < pᵛ⁺_ref
+
+    # Verify the formula matches the expected analytic expression
+    # pᵛ⁺(T) = p₀ * exp(a * (T - T₀) / (T - b))
+    p₀ = FT(610)
+    a = FT(17.27)
+    T₀_param = FT(273)
+    b = FT(36)
+    T_test = FT(288)
+    expected = p₀ * exp(a * (T_test - T₀_param) / (T_test - b))
+    computed = saturation_vapor_pressure(T_test, thermo, PlanarLiquidSurface())
+    @test computed ≈ expected rtol=eps(FT)
 end

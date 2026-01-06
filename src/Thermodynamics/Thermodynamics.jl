@@ -2,6 +2,8 @@ module Thermodynamics
 
 export ThermodynamicConstants, ReferenceState, IdealGas,
        CondensedPhase,
+       ClausiusClapeyron, ClausiusClapeyronThermodynamicConstants,
+       TetensFormula, TetensFormulaThermodynamicConstants,
        MoistureMassFractions,
        vapor_gas_constant, dry_air_gas_constant,
        mixture_gas_constant, mixture_heat_capacity,
@@ -19,6 +21,7 @@ using DocStringExtensions: TYPEDSIGNATURES, TYPEDEF
 using Oceananigans: Oceananigans
 
 include("thermodynamics_constants.jl")
+include("tetens_formula_saturation_vapor_pressure.jl")
 include("vapor_saturation.jl")
 include("reference_states.jl")
 include("dynamic_states.jl")
