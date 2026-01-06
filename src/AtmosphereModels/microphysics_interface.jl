@@ -86,9 +86,8 @@ For example, the terminal velocity of falling rain.
 """
 $(TYPEDSIGNATURES)
 
-Return the tendency of the microphysical field `name` associated with `microphysics` and `thermo`dynamic constants.
-
-TODO: add the function signature when it is stable
+Return the tendency of the microphysical field `name` associated with `microphysics`
+and thermodynamic `constants`.
 """
 @inline microphysical_tendency(i, j, k, grid, microphysics::Nothing, name, ρ, μ, 𝒰, constants) = zero(grid)
 
@@ -166,7 +165,7 @@ Specific microphysics schemes must extend this function.
 surface_precipitation_flux(model) = surface_precipitation_flux(model, model.microphysics)
 
 # Default: zero flux for Nothing microphysics
-surface_precipitation_flux(model, ::Nothing) = Field{Center, Center, Nothing}(model.grid) 
+surface_precipitation_flux(model, ::Nothing) = Field{Center, Center, Nothing}(model.grid)
 
 #####
 ##### Cloud effective radius interface
