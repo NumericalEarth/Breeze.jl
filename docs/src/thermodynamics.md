@@ -526,11 +526,14 @@ thermo = ThermodynamicConstants()
 T = collect(200:0.1:320)
 pᵛˡ⁺ = [saturation_vapor_pressure(Tⁱ, thermo, thermo.liquid) for Tⁱ in T]
 pᵛⁱ⁺ = [saturation_vapor_pressure(Tⁱ, thermo, thermo.ice) for Tⁱ in T]
-pᵛⁱ⁺[T .> thermo.triple_point_temperature] .= NaN
 
 # Mixed-phase surface with 50% liquid, 50% ice
 mixed_surface = PlanarMixedPhaseSurface(0.5)
 pᵛᵐ⁺ = [saturation_vapor_pressure(Tⁱ, thermo, mixed_surface) for Tⁱ in T]
+
+freezing_temperature = 273.15
+pᵛⁱ⁺[T .> freezing_temperature] .= NaN
+pᵛᵐ⁺[T .> 273.15] .= NaN
 
 using CairoMakie
 
