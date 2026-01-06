@@ -371,8 +371,7 @@ function AtmosphereModels.microphysics_model_update!(microphysics::DCMIP2016KM, 
     μ = model.microphysical_fields
 
     launch!(arch, grid, :xy, _microphysical_update!,
-            microphysics, grid, Nz, Δt, ρ, p, p₀, constants, θˡⁱ, ρθˡⁱ,
-            ρqᵗ, μ.ρqᶜˡ, μ.ρqʳ, μ.qᵛ, μ.qᶜˡ, μ.qʳ, μ.precipitation_rate, μ.𝕍ʳ)
+            microphysics, grid, Nz, Δt, ρ, p, p₀, constants, θˡⁱ, ρθˡⁱ, ρqᵗ, μ)
 
     return nothing
 end
@@ -389,14 +388,20 @@ end
 # Note: Breeze uses liquid-ice potential temperature (θˡⁱ), related to T by:
 #   T = Π θˡⁱ + ℒˡᵣ qˡ / cᵖᵐ
 
-@kernel function _microphysical_update!(microphysics, grid, Nz, Δt, ρ_field, p_field, p₀, constants, θˡⁱ, ρθˡⁱ,
-                                        ρqᵗ, ρqᶜˡ, ρqʳ,
-                                        qᵛ_field, qᶜˡ_field, qʳ_field,
-                                        precipitation_rate, 𝕍ʳ)
+@kernel function _microphysical_update!(microphysics, grid, Nz, Δt, ρ_field, p_field, p₀, constants, θˡⁱ, ρθˡⁱ, ρqᵗ, μ)
     i, j = @index(Global, NTuple)
     FT = eltype(grid)
     one_FT = one(FT)
     surface = PlanarLiquidSurface()
+
+    # Extract microphysical fields from μ
+    ρqᶜˡ = μ.ρqᶜˡ
+    ρqʳ = μ.ρqʳ
+    qᵛ_field = μ.qᵛ
+    qᶜˡ_field = μ.qᶜˡ
+    qʳ_field = μ.qʳ
+    precipitation_rate = μ.precipitation_rate
+    𝕍ʳ = μ.𝕍ʳ
 
     # Latent heat of vaporization for θˡⁱ ↔ T conversion
     ℒˡᵣ = constants.liquid.reference_latent_heat
