@@ -214,7 +214,7 @@ For anelastic dynamics, this is a no-op (no prognostic density).
 For compressible dynamics, this computes the density tendency from the continuity equation:
 
 ```math
-\\frac{\\partial \\rho}{\\partial t} = -\\nabla \\cdot (\\rho \\mathbf{u})
+\\partial_t \\rho = -\\boldsymbol{\\nabla \\cdot} (\\rho \\boldsymbol{u})
 ```
 """
 compute_dynamics_tendency!(model) = nothing  # default: no dynamics-specific tendencies
