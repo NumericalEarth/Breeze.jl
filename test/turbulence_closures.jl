@@ -4,30 +4,121 @@ using Test
 
 test_thermodynamics = (:StaticEnergy, :LiquidIcePotentialTemperature)
 
-@testset "Vertically implicit diffusion with SSPRungeKutta3 [$(FT)]" for FT in (Float32, Float64)
+@testset "Vertically implicit diffusion correctness [$(FT)]" for FT in (Float32, Float64)
     Oceananigans.defaults.FloatType = FT
-    grid = RectilinearGrid(default_arch; size=(4, 4, 4), x=(0, 100), y=(0, 100), z=(0, 100))
+    Nz = 16
+    Lz = 100
+    grid = RectilinearGrid(default_arch; size=(4, 4, Nz), x=(0, 100), y=(0, 100), z=(0, Lz))
     vitd = VerticallyImplicitTimeDiscretization()
+    etd = Oceananigans.TurbulenceClosures.ExplicitTimeDiscretization()
 
-    @testset "VerticalScalarDiffusivity with implicit diffusivity" begin
-        closure = VerticalScalarDiffusivity(vitd; κ=1)
-        model = @test_logs match_mode=:any AtmosphereModel(grid; closure)
-        time_step!(model, 1)
-        @test true
+    # Use a Gaussian profile centered in the domain for testing diffusion
+    z₀ = Lz / 2
+    σ = Lz / 8
+    gaussian(z) = exp(-(z - z₀)^2 / (2σ^2))
+
+    @testset "Implicit scalar diffusion smooths vertical gradients" begin
+        κ = FT(10)
+        closure = VerticalScalarDiffusivity(vitd; κ)
+        model = @test_logs match_mode=:any AtmosphereModel(grid; closure, advection=nothing, tracers=:ρc)
+
+        # Set tracer with vertical gradient
+        set!(model; ρc = (x, y, z) -> gaussian(z))
+        ρc = model.tracers.ρc
+
+        # Measure initial variance
+        var₀ = sum(interior(ρc) .^ 2)
+
+        # Take several time steps
+        for _ in 1:10
+            time_step!(model, 1)
+        end
+
+        # Variance should decrease due to diffusion
+        var₁ = sum(interior(ρc) .^ 2)
+        @test var₁ < var₀
     end
 
-    @testset "VerticalScalarDiffusivity with implicit viscosity" begin
-        closure = VerticalScalarDiffusivity(vitd; ν=1)
-        model = @test_logs match_mode=:any AtmosphereModel(grid; closure)
-        time_step!(model, 1)
-        @test true
+    @testset "Implicit and explicit diffusion produce similar results" begin
+        κ = FT(1)
+        Δt = FT(0.1)  # Small timestep for stability with explicit
+        Nt = 5
+
+        # Create models with implicit and explicit discretization
+        implicit_closure = VerticalScalarDiffusivity(vitd; κ)
+        explicit_closure = VerticalScalarDiffusivity(etd; κ)
+
+        implicit_model = @test_logs match_mode=:any AtmosphereModel(grid; closure=implicit_closure, advection=nothing, tracers=:ρc)
+        explicit_model = @test_logs match_mode=:any AtmosphereModel(grid; closure=explicit_closure, advection=nothing, tracers=:ρc)
+
+        # Set same initial condition
+        set!(implicit_model; ρc = (x, y, z) -> gaussian(z))
+        set!(explicit_model; ρc = (x, y, z) -> gaussian(z))
+
+        # Step both models
+        for _ in 1:Nt
+            time_step!(implicit_model, Δt)
+            time_step!(explicit_model, Δt)
+        end
+
+        # Results should be similar (within numerical tolerance)
+        ρc_implicit = Array(interior(implicit_model.tracers.ρc))
+        ρc_explicit = Array(interior(explicit_model.tracers.ρc))
+        @test isapprox(ρc_implicit, ρc_explicit, rtol=0.1)
     end
 
-    @testset "VerticalScalarDiffusivity with implicit viscosity and diffusivity" begin
-        closure = VerticalScalarDiffusivity(vitd; ν=1, κ=2)
-        model = @test_logs match_mode=:any AtmosphereModel(grid; closure)
-        time_step!(model, 1)
-        @test true
+    @testset "Implicit viscosity smooths momentum gradients" begin
+        ν = FT(10)
+        closure = VerticalScalarDiffusivity(vitd; ν)
+        model = @test_logs match_mode=:any AtmosphereModel(grid; closure, advection=nothing)
+
+        # Set momentum with vertical gradient (ρu varies with z)
+        set!(model; ρu = (x, y, z) -> gaussian(z))
+        ρu = model.momentum.ρu
+
+        # Measure initial variance
+        var₀ = sum(interior(ρu) .^ 2)
+
+        # Take several time steps
+        for _ in 1:10
+            time_step!(model, 1)
+        end
+
+        # Variance should decrease due to diffusion
+        var₁ = sum(interior(ρu) .^ 2)
+        @test var₁ < var₀
+    end
+
+    @testset "Implicit diffusion with both ν and κ" begin
+        ν = FT(5)
+        κ = FT(10)
+        closure = VerticalScalarDiffusivity(vitd; ν, κ)
+        model = @test_logs match_mode=:any AtmosphereModel(grid; closure, advection=nothing, tracers=:ρc)
+
+        # Set both momentum and tracer with gradients
+        set!(model; ρu = (x, y, z) -> gaussian(z), ρc = (x, y, z) -> gaussian(z))
+        ρu = model.momentum.ρu
+        ρc = model.tracers.ρc
+
+        var_u₀ = sum(interior(ρu) .^ 2)
+        var_c₀ = sum(interior(ρc) .^ 2)
+
+        for _ in 1:10
+            time_step!(model, 1)
+        end
+
+        var_u₁ = sum(interior(ρu) .^ 2)
+        var_c₁ = sum(interior(ρc) .^ 2)
+
+        # Both should decrease
+        @test var_u₁ < var_u₀
+        @test var_c₁ < var_c₀
+
+        # Tracer should diffuse more (κ > ν)
+        # Relative change should be larger for tracer
+        rel_change_u = (var_u₀ - var_u₁) / var_u₀
+        rel_change_c = (var_c₀ - var_c₁) / var_c₀
+        @test rel_change_c > rel_change_u
     end
 end
 
