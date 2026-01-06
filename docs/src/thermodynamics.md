@@ -589,7 +589,7 @@ T = collect(220:0.5:320)
 
 # Clausius-Clapeyron: liquid, ice, and mixed-phase (λ=0.5)
 pᵛˡ⁺_cc = [saturation_vapor_pressure(Tⁱ, clausius_clapeyron, liquid) for Tⁱ in T]
-pᵛⁱ⁺_cc = [saturation_vapor_pressure(Tⁱ, clausius_clapeyron, ice for Tⁱ in T]
+pᵛⁱ⁺_cc = [saturation_vapor_pressure(Tⁱ, clausius_clapeyron, ice) for Tⁱ in T]
 
 # Tetens formula: liquid and ice
 pᵛˡ⁺_tf = [saturation_vapor_pressure(Tⁱ, tetens, liquid) for Tⁱ in T]
