@@ -409,7 +409,6 @@ end
 @kernel function _microphysical_update!(microphysics, grid, Nz, Δt, ρ_field, p_field, p₀, constants, θˡⁱ, ρθˡⁱ, ρqᵗ, μ)
     i, j = @index(Global, NTuple)
     FT = eltype(grid)
-    one_FT = one(FT)
     surface = PlanarLiquidSurface()
 
     # Extract microphysical fields from μ
@@ -446,7 +445,7 @@ end
     ρ_scale = microphysics.ρ_scale
 
     k₁      = microphysics.k₁
-    rᶜˡ★ = microphysics.rᶜˡ★
+    rᶜˡ★    = microphysics.rᶜˡ★
     k₂      = microphysics.k₂
     β_acc   = microphysics.β_acc
 
@@ -685,7 +684,7 @@ end
             rʳ_new = max(0, rʳ + Pʳ + sed)
 
             qᵛ⁺ = saturation_specific_humidity(Tᵏ, ρ, constants, surface)
-            rᵛ⁺ = qᵛ⁺ / (one_FT - qᵛ⁺)
+            rᵛ⁺ = qᵛ⁺ / (1 - qᵛ⁺)
 
             prod = (rᵛ - rᵛ⁺) / (1 + rᵛ⁺ * f₅ / (Tᵏ - T_offset)^2)
 
@@ -760,9 +759,8 @@ end
 
             # Compute cloud and rain mass fractions using the same conversion factor
             rᵗ = total_mixing_ratio(r)
-            inv_one_plus_rᵗ = inv(one_FT + rᵗ)
-            qᶜˡ = rᶜˡ * inv_one_plus_rᵗ
-            qʳ  = rʳ * inv_one_plus_rᵗ
+            qᶜˡ = rᶜˡ / (1 + rᵗ)
+            qʳ  = rʳ / (1 + rᵗ)
 
             # Update prognostic fields (density-weighted)
             ρqᵗ[i, j, k]  = ρ * qᵗ
