@@ -25,7 +25,7 @@ using Printf
 using CUDA
 using CairoMakie
 
-# until https://github.com/CliMA/Oceananigans.jl/pull/5100 is included in a tagged release
+# We need to adapt the `BoundaryConditionKernelFunction` for the GPU. Until [Oceananigans#5100 ](https://github.com/CliMA/Oceananigans.jl/pull/5100) is included in a tagged release, we can do that via Adapt.jl.
 using Adapt: Adapt
 
 function Adapt.adapt_structure(to, bckf::Oceananigans.Models.BoundaryConditionKernelFunction{Side}) where Side
