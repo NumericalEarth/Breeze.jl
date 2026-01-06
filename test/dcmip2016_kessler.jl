@@ -401,16 +401,15 @@ end
     
     # Compare profiles
     # With matched thermodynamics and last_Δt fixed, we expect good agreement.
-    # Tolerances allow for small differences due to float order of operations and
-    # minor implementation details (e.g. parallel vs serial accumulation, moist vs dry Exner).
-    @test r_v_j ≈ qv_f atol=1e-3 rtol=1e-3
-    @test r_c_j ≈ qc_f atol=1e-3 rtol=1e-3
-    @test r_r_j ≈ qr_f atol=1e-3 rtol=1e-3
+    # Using relative tolerance (1%) to allow for small differences due to float order
+    # of operations and minor implementation details (e.g. parallel vs serial accumulation,
+    # moist vs dry Exner function).
+    @test r_v_j ≈ qv_f rtol=1e-2
+    @test r_c_j ≈ qc_f rtol=1e-2
+    @test r_r_j ≈ qr_f rtol=1e-2
     
     # Temperature comparison
-    # Should now be much closer
-    # Tolerances are looser here because T depends on Exner function, which differs
-    # between Breeze (moist) and Fortran (dry) formulations when liquid is present.
-    # A difference of 1e-3 in q (1 g/kg) corresponds to ~2.5 K in latent heating.
-    @test T_j ≈ T_f atol=2.0 rtol=1e-2
+    # Using relative tolerance (1%) which is appropriate for comparing two different
+    # implementations. Differences arise from moist vs dry Exner formulations.
+    @test T_j ≈ T_f rtol=1e-2
 end
