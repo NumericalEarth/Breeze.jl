@@ -1,4 +1,5 @@
 using Breeze
+using Breeze.AtmosphereModels: microphysical_velocities
 using CloudMicrophysics
 using CloudMicrophysics.Parameters: CloudLiquid, CloudIce
 using GPUArraysCore: @allowscalar
@@ -426,7 +427,6 @@ end
     set!(model; θ=300, qᵗ=0.015, qʳ=0.001)
 
     # Rain should have sedimentation velocity
-    using .BreezeCloudMicrophysicsExt: microphysical_velocities
     μ = model.microphysical_fields
     vel_rain = microphysical_velocities(microphysics, μ, Val(:ρqʳ))
     @test vel_rain !== nothing

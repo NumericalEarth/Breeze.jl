@@ -10,13 +10,11 @@ using Oceananigans.Operators: ℑzᵃᵃᶠ
 using Oceananigans.Grids: xnode, ynode, λnode, φnode, znodes
 using Oceananigans.Grids: AbstractGrid, RectilinearGrid, Center, Face, Flat, Bounded
 using Oceananigans.Fields: ConstantField
-using Breeze.AtmosphereModels: AtmosphereModels, SurfaceRadiativeProperties
+using Breeze.AtmosphereModels: AtmosphereModels, SurfaceRadiativeProperties, RadiativeTransferModel
 
 using RRTMGP.AtmosphericStates: GrayAtmosphericState, GrayOpticalThicknessOGorman2008
 using KernelAbstractions: @kernel, @index
 using Dates: AbstractDateTime, Millisecond
-
-import Breeze.AtmosphereModels: RadiativeTransferModel
 
 # Dispatch on background_atmosphere = Nothing for gray radiation
 const GrayRadiativeTransferModel = RadiativeTransferModel{<:Any, <:Any, <:Any, <:Any, Nothing}
@@ -54,18 +52,18 @@ Construct a gray atmosphere radiative transfer model for the given grid.
 - `diffuse_surface_albedo`: Diffuse surface albedo, 0-1. Can be scalar or 2D field.
 - `solar_constant`: Top-of-atmosphere solar flux in W/m² (default: 1361)
 """
-function RadiativeTransferModel(grid::AbstractGrid,
-                                ::GrayOptics,
-                                constants::ThermodynamicConstants;
-                                optical_thickness = GrayOpticalThicknessOGorman2008(eltype(grid)),
-                                surface_temperature,
-                                coordinate = nothing,
-                                epoch = nothing,
-                                surface_emissivity = 0.98,
-                                direct_surface_albedo = nothing,
-                                diffuse_surface_albedo = nothing,
-                                surface_albedo = nothing,
-                                solar_constant = 1361)
+function AtmosphereModels.RadiativeTransferModel(grid::AbstractGrid,
+                                                 ::GrayOptics,
+                                                 constants::ThermodynamicConstants;
+                                                 optical_thickness = GrayOpticalThicknessOGorman2008(eltype(grid)),
+                                                 surface_temperature,
+                                                 coordinate = nothing,
+                                                 epoch = nothing,
+                                                 surface_emissivity = 0.98,
+                                                 direct_surface_albedo = nothing,
+                                                 diffuse_surface_albedo = nothing,
+                                                 surface_albedo = nothing,
+                                                 solar_constant = 1361)
 
     FT = eltype(grid)
     parameters = RRTMGPParameters(constants)

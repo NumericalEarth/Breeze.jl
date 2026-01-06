@@ -17,10 +17,10 @@ using Breeze.AtmosphereModels:
     ConstantRadiusParticles,
     cloud_liquid_effective_radius,
     cloud_ice_effective_radius,
-    compute_moisture_fractions
+    compute_moisture_fractions,
+    RadiativeTransferModel
 
 using Breeze.Thermodynamics: ThermodynamicConstants
-import Breeze.AtmosphereModels: RadiativeTransferModel
 
 using Dates: AbstractDateTime, Millisecond
 using KernelAbstractions: @kernel, @index
@@ -64,21 +64,21 @@ RRTMGP loads lookup tables from netCDF via an extension.
 - `ice_effective_radius`: Model for cloud ice effective radius in μm (default: `ConstantRadiusParticles(30.0)`)
 - `ice_roughness`: Ice crystal roughness for cloud optics (1=smooth, 2=medium, 3=rough; default: 2)
 """
-function RadiativeTransferModel(grid::AbstractGrid,
-                                ::AllSkyOptics,
-                                constants::ThermodynamicConstants;
-                                background_atmosphere = BackgroundAtmosphere{eltype(grid)}(),
-                                surface_temperature,
-                                coordinate = nothing,
-                                epoch = nothing,
-                                surface_emissivity = 0.98,
-                                direct_surface_albedo = nothing,
-                                diffuse_surface_albedo = nothing,
-                                surface_albedo = nothing,
-                                solar_constant = 1361,
-                                liquid_effective_radius = ConstantRadiusParticles(10.0),
-                                ice_effective_radius = ConstantRadiusParticles(30.0),
-                                ice_roughness = 2)
+function AtmosphereModels.RadiativeTransferModel(grid::AbstractGrid,
+                                                 ::AllSkyOptics,
+                                                 constants::ThermodynamicConstants;
+                                                 background_atmosphere = BackgroundAtmosphere{eltype(grid)}(),
+                                                 surface_temperature,
+                                                 coordinate = nothing,
+                                                 epoch = nothing,
+                                                 surface_emissivity = 0.98,
+                                                 direct_surface_albedo = nothing,
+                                                 diffuse_surface_albedo = nothing,
+                                                 surface_albedo = nothing,
+                                                 solar_constant = 1361,
+                                                 liquid_effective_radius = ConstantRadiusParticles(10.0),
+                                                 ice_effective_radius = ConstantRadiusParticles(30.0),
+                                                 ice_roughness = 2)
 
     FT = eltype(grid)
     parameters = RRTMGPParameters(constants)

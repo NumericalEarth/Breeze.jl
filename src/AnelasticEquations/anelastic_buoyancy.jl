@@ -24,13 +24,13 @@ The density is computed as:
 ```
 where `pᵣ` is the reference pressure, `Rᵐ` is the mixture gas constant, and `T` is temperature.
 """
-@inline function buoyancy_forceᶜᶜᶜ(i, j, k, grid,
-                                   dynamics::AnelasticDynamics,
-                                   temperature,
-                                   specific_moisture,
-                                   microphysics,
-                                   microphysical_fields,
-                                   constants)
+@inline function AtmosphereModels.buoyancy_forceᶜᶜᶜ(i, j, k, grid,
+                                                    dynamics::AnelasticDynamics,
+                                                    temperature,
+                                                    specific_moisture,
+                                                    microphysics,
+                                                    microphysical_fields,
+                                                    constants)
 
     @inbounds begin
         qᵗ = specific_moisture[i, j, k]
