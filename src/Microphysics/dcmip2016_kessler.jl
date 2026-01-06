@@ -303,8 +303,7 @@ where the parameters `a_vᵗ`, `ρ_scale`, and `β_vᵗ` are taken from the `mic
     a_vᵗ    = microphysics.a_vᵗ
     ρ_scale = microphysics.ρ_scale
     β_vᵗ    = microphysics.β_vᵗ
-    rhalf = sqrt(ρ₁ / ρ)
-    return a_vᵗ * (rʳ * ρ_scale * ρ)^β_vᵗ * rhalf
+    return a_vᵗ * (rʳ * ρ_scale * ρ)^β_vᵗ * sqrt(ρ₁ / ρ)
 end
 
 """
