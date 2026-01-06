@@ -1,4 +1,12 @@
 """
+    ClausiusClapeyronThermodynamicConstants{FT, C, I}
+
+Type alias for `ThermodynamicConstants` using the Clausius-Clapeyron formulation
+for saturation vapor pressure calculations.
+"""
+const ClausiusClapeyronThermodynamicConstants{FT, C, I} = ThermodynamicConstants{FT, C, I, ClausiusClapeyron}
+
+"""
 $(TYPEDSIGNATURES)
 
 Compute the [saturation vapor pressure](https://en.wikipedia.org/wiki/Vapor_pressure)

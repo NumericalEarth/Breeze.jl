@@ -213,14 +213,6 @@ end
 
 const TC = ThermodynamicConstants
 
-"""
-    ClausiusClapeyronThermodynamicConstants{FT, C, I}
-
-Type alias for `ThermodynamicConstants` using the Clausius-Clapeyron formulation
-for saturation vapor pressure calculations.
-"""
-const ClausiusClapeyronThermodynamicConstants{FT, C, I} = ThermodynamicConstants{FT, C, I, ClausiusClapeyron}
-
 @inline vapor_gas_constant(constants::TC)   = constants.molar_gas_constant / constants.vapor.molar_mass
 @inline dry_air_gas_constant(constants::TC) = constants.molar_gas_constant / constants.dry_air.molar_mass
 
@@ -267,6 +259,20 @@ where ``ℒⁱᵣ`` is the reference latent heat at the energy reference tempera
     Tᵣ = constants.energy_reference_temperature
     return ℒⁱᵣ + (cᵖᵛ - cⁱ) * (T - Tᵣ)
 end
+
+@inline function specific_heat_difference(constants, phase::CondensedPhase)
+    cᵖᵛ = constants.vapor.heat_capacity
+    cᵝ = phase.heat_capacity
+    return cᵖᵛ - cᵝ
+end
+
+@inline function absolute_zero_latent_heat(constants, phase::CondensedPhase)
+    ℒᵣ = phase.reference_latent_heat # at constants.energy_reference_temperature
+    Δcᵝ = specific_heat_difference(constants, phase)
+    Tᵣ = constants.energy_reference_temperature
+    return ℒᵣ - Δcᵝ * Tᵣ
+end
+
 
 #####
 ##### Mixtures of dry air with vapor, liquid, and ice
@@ -388,7 +394,7 @@ Compute the vapor pressure from the ideal gas law:
 pᵛ = ρ qᵛ Rᵛ T
 ```
 """
-@inline function vapor_pressure(ρ, T, qᵛ, constants)
+@inline function vapor_pressure(T, ρ, qᵛ, constants)
     Rᵛ = vapor_gas_constant(constants)
     return ρ * qᵛ * Rᵛ * T
 end
@@ -402,13 +408,13 @@ Compute the relative humidity as the ratio of vapor pressure to saturation vapor
 ℋ = pᵛ / pᵛ⁺ = qᵛ / qᵛ⁺
 ```
 """
-@inline function relative_humidity(ρ, T, qᵛ, constants, surface=PlanarLiquidSurface())
+@inline function relative_humidity(T, ρ, qᵛ, constants, surface=PlanarLiquidSurface())
     pᵛ = vapor_pressure(T, ρ, qᵛ, constants)
     pᵛ⁺ = saturation_vapor_pressure(T, constants, surface)
     return pᵛ / pᵛ⁺
 end
 
-@inline function relative_humidity(p, T, q::MMF, constants, surface=PlanarLiquidSurface())
+@inline function relative_humidity(T, p, q::MMF, constants, surface=PlanarLiquidSurface())
     ρ = density(T, p, q, constants)
     pᵛ = vapor_pressure(T, ρ, q.vapor, constants)
     pᵛ⁺ = saturation_vapor_pressure(T, constants, surface)

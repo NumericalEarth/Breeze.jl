@@ -15,6 +15,25 @@ struct PlanarMixedPhaseSurface{FT}
     liquid_fraction :: FT
 end
 
+@inline specific_heat_difference(constants, ::PlanarLiquidSurface) = specific_heat_difference(constants, constants.liquid)
+@inline specific_heat_difference(constants, ::PlanarIceSurface) = specific_heat_difference(constants, constants.ice)
+@inline absolute_zero_latent_heat(constants, ::PlanarLiquidSurface) = absolute_zero_latent_heat(constants, constants.liquid)
+@inline absolute_zero_latent_heat(constants, ::PlanarIceSurface) = absolute_zero_latent_heat(constants, constants.ice)
+
+@inline function specific_heat_difference(constants, surf::PlanarMixedPhaseSurface)
+    Δcˡ = specific_heat_difference(constants, constants.liquid)
+    Δcⁱ = specific_heat_difference(constants, constants.ice)
+    λ = surf.liquid_fraction
+    return λ * Δcˡ + (1 - λ) * Δcⁱ
+end
+
+@inline function absolute_zero_latent_heat(constants, surf::PlanarMixedPhaseSurface)
+    ℒˡ₀ = absolute_zero_latent_heat(constants, constants.liquid)
+    ℒⁱ₀ = absolute_zero_latent_heat(constants, constants.ice)
+    λ = surf.liquid_fraction
+    return λ * ℒˡ₀ + (1 - λ) * ℒⁱ₀
+end
+
 #####
 ##### Saturation specific humidity
 #####
@@ -95,7 +114,7 @@ Compute the supersaturation ``𝒮 = pᵛ/pᵛ⁺ - 1`` over a given `surface`.
 """
 @inline function supersaturation(T, ρ, q::MoistureMassFractions, constants, surface)
     pᵛ⁺ = saturation_vapor_pressure(T, constants, surface)
-    pᵛ = vapor_pressure(ρ, T, q.vapor, constants)
+    pᵛ = vapor_pressure(T, ρ, q.vapor, constants)
     return pᵛ / pᵛ⁺ - 1
 end
 
@@ -181,17 +200,17 @@ and unsaturated conditions:
 
 The saturated formula corresponds to equation (37) in [Pressel et al. (2015)](@cite Pressel2015).
 """
-@inline function equilibrium_saturation_specific_humidity(T, pᵣ, qᵗ, constants, surface)
+@inline function equilibrium_saturation_specific_humidity(T, p, qᵗ, constants, surface)
     pᵛ⁺ = saturation_vapor_pressure(T, constants, surface)
     Rᵈ = dry_air_gas_constant(constants)
     Rᵛ = vapor_gas_constant(constants)
     ϵᵈᵛ = Rᵈ / Rᵛ
-    qᵛ⁺₁ = ϵᵈᵛ * (1 - qᵗ) * pᵛ⁺ / (pᵣ - pᵛ⁺)
+    qᵛ⁺₁ = ϵᵈᵛ * (1 - qᵗ) * pᵛ⁺ / (p - pᵛ⁺)
 
     # In unsaturated conditions, all moisture is vapor (qᵛ = qᵗ)
     # Compute density using mixture gas constant for this case
     Rᵐ = Rᵈ * (1 - qᵗ) + Rᵛ * qᵗ
-    ρ = pᵣ / (Rᵐ * T)
+    ρ = p / (Rᵐ * T)
     qᵛ⁺₀ = pᵛ⁺ / (ρ * Rᵛ * T)
 
     return ifelse(qᵗ >= qᵛ⁺₀, qᵛ⁺₁, qᵛ⁺₀)
