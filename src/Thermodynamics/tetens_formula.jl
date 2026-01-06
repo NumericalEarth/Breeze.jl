@@ -48,7 +48,7 @@ where ``pᵛ⁺ᵣ`` is `reference_saturation_vapor_pressure`,
 See also the [wikipedia article on "Tetens equation"](https://en.wikipedia.org/wiki/Tetens_equation).
 Different coefficients are used for liquid water and ice surfaces. Default values
 for the liquid formula are from [Monteith and Unsworth (2014)](@cite MonteithUnsworth2014), and default values
-for the ice formula are from [Murray (1967)](@cite):
+for the ice formula are from [Murray (1967)](@cite Murray1967):
 
 **Liquid water** (T > 0°C):
 - `liquid_coefficient`: 17.27
@@ -120,8 +120,8 @@ end
 """
 $(TYPEDSIGNATURES)
 
-Compute the saturation vapor pressure over a planar ice surface
-using [Tetens'](@cite Tetens1930) empirical formula with ice coefficients from [Murray (1967)](@cite):
+Compute the saturation vapor pressure over a planar ice surface using [Tetens'](@cite Tetens1930)
+empirical formula with ice coefficients from [Murray (1967)](@cite  Murray1967):
 
 ```math
 pᵛ⁺(T) = pᵛ⁺ᵣ \\exp \\left( aⁱ \\frac{T - Tᵣ}{T - δTⁱ} \\right)
@@ -130,7 +130,6 @@ pᵛ⁺(T) = pᵛ⁺ᵣ \\exp \\left( aⁱ \\frac{T - Tᵣ}{T - δTⁱ} \\right)
 # References
 * Tetens, O. (1930). Über einige meteorologische Begriffe. Zeitschrift für Geophysik 6, 297–309.
 * Murray, F. W. (1967). On the computation of saturation vapor pressure. Journal of Applied Meteorology 6, 203–204.
-
 """
 @inline function saturation_vapor_pressure(T, constants::TetensFormulaThermodynamicConstants, ::PlanarIceSurface)
     tf = constants.saturation_vapor_pressure
