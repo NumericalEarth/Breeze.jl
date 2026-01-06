@@ -34,7 +34,7 @@ end
 $(TYPEDSIGNATURES)
 
 Construct a `TetensFormula` saturation vapor pressure formulation.
-[Tetens's (1930)](@citet Tetens1930) formula is an empirical relationship
+[Tetens's (1930)](@cite Tetens1930) formula is an empirical relationship
 for the saturation vapor pressure,
 
 ```math
