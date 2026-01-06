@@ -607,22 +607,22 @@ c_mixed = :green
 
 fig = Figure(size=(600, 600))
 
-# Left panel: Saturation vapor pressure comparison
+# Saturation vapor pressure comparison
 ax1 = Axis(fig[1, 1], xlabel="Temperature (K)", ylabel="Saturation vapor pressure (Pa)",
            yscale=log10, title="Saturation vapor pressure comparison")
 
-# Clausius-Clapeyron: thick solid lines with transparency
+# Clausius-Clapeyron
 lines!(ax1, T, pᵛˡ⁺_cc, linewidth=4, color=(c_liquid, 0.6), label="C-C liquid")
 lines!(ax1, T, pᵛⁱ⁺_cc, linewidth=4, color=(c_ice, 0.6), label="C-C ice")
 
-# Tetens formula: dashed lines
+# Tetens formula
 lines!(ax1, T, pᵛˡ⁺_tf, linewidth=2, color=c_liquid, linestyle=:dash, label="Tetens liquid")
 lines!(ax1, T, pᵛⁱ⁺_tf, linewidth=2, color=c_ice, linestyle=:dash, label="Tetens ice")
 
 axislegend(ax1, position=:rb)
 
-# Right panel: Relative difference (Tetens - C-C) / C-C
-ax2 = Axis(fig[1, 1], xlabel="Temperature (K)", ylabel="Relative difference (%)",
+# Relative difference (Tetens - C-C) / C-C
+ax2 = Axis(fig[2, 1], xlabel="Temperature (K)", ylabel="Relative difference (%)",
            title="(Tetens - C-C) / C-C × 100")
 
 rel_diff_liquid = @. 100 * (pᵛˡ⁺_tf - pᵛˡ⁺_cc) / pᵛˡ⁺_cc
