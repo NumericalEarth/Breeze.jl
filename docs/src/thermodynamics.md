@@ -547,12 +547,12 @@ fig
 The mixed-phase saturation vapor pressure lies between the liquid and ice curves,
 providing a smooth interpolation between the two pure phases.
 
-### Comparing Clausius-Clapeyron and Tetens formulas
+### The Tetens formula for saturation vapor pressure
 
-Breeze provides two saturation vapor pressure formulations:
-[`ClausiusClapeyron`](@ref Breeze.Thermodynamics.ClausiusClapeyron), which derives from
-first principles, and [`TetensFormula`](@ref Breeze.Thermodynamics.TetensFormula),
-an empirical formula that is simpler to compute.
+In addition to the first-principles [`ClausiusClapeyron`](@ref Breeze.Thermodynamics.ClausiusClapeyron),
+Breeze also supports the empirical [`TetensFormula`](@ref Breeze.Thermodynamics.TetensFormula),
+which was used in early atmosphere models due to its simplicity. We include `TetensFormula` solely
+for the purpose of model intercomparisons.
 
 The Tetens formula approximates saturation vapor pressure as:
 
@@ -577,35 +577,31 @@ using Breeze.Thermodynamics: saturation_vapor_pressure,
 
 using CairoMakie
 
-# Clausius-Clapeyron thermodynamic constants (default)
 clausius_clapeyron = ThermodynamicConstants()
-
-# Tetens formula thermodynamic constants
-tetens = ThermodynamicConstants(saturation_vapor_pressure = TetensFormula())
+tetens = ThermodynamicConstants(saturation_vapor_pressure=TetensFormula())
+liquid, ice = PlanarLiquidSurface(), PlanarIceSurface()
 
 T = collect(220:0.5:320)
 
 # Clausius-Clapeyron: liquid, ice, and mixed-phase (λ=0.5)
-pᵛˡ⁺_cc = [saturation_vapor_pressure(Tⁱ, clausius_clapeyron, PlanarLiquidSurface()) for Tⁱ in T]
-pᵛⁱ⁺_cc = [saturation_vapor_pressure(Tⁱ, clausius_clapeyron, PlanarIceSurface()) for Tⁱ in T]
-pᵛᵐ⁺_cc = [saturation_vapor_pressure(Tⁱ, clausius_clapeyron, PlanarMixedPhaseSurface(0.5)) for Tⁱ in T]
+pᵛˡ⁺_cc = [saturation_vapor_pressure(Tⁱ, clausius_clapeyron, liquid) for Tⁱ in T]
+pᵛⁱ⁺_cc = [saturation_vapor_pressure(Tⁱ, clausius_clapeyron, ice for Tⁱ in T]
 
 # Tetens formula: liquid and ice
-pᵛˡ⁺_tf = [saturation_vapor_pressure(Tⁱ, tetens, PlanarLiquidSurface()) for Tⁱ in T]
-pᵛⁱ⁺_tf = [saturation_vapor_pressure(Tⁱ, tetens, PlanarIceSurface()) for Tⁱ in T]
+pᵛˡ⁺_tf = [saturation_vapor_pressure(Tⁱ, tetens, liquid) for Tⁱ in T]
+pᵛⁱ⁺_tf = [saturation_vapor_pressure(Tⁱ, tetens, ice) for Tⁱ in T]
 
 # Mask ice above triple point for clarity
 Tᵗʳ = clausius_clapeyron.triple_point_temperature
 pᵛⁱ⁺_cc[T .> Tᵗʳ] .= NaN
 pᵛⁱ⁺_tf[T .> Tᵗʳ] .= NaN
-pᵛᵐ⁺_cc[T .> Tᵗʳ] .= NaN
 
 # Phase colors: dark blue for liquid, orange for ice, green for mixed
 c_liquid = :darkblue
 c_ice = :darkorange
 c_mixed = :green
 
-fig = Figure(size=(900, 400))
+fig = Figure(size=(600, 600))
 
 # Left panel: Saturation vapor pressure comparison
 ax1 = Axis(fig[1, 1], xlabel="Temperature (K)", ylabel="Saturation vapor pressure (Pa)",
@@ -614,7 +610,6 @@ ax1 = Axis(fig[1, 1], xlabel="Temperature (K)", ylabel="Saturation vapor pressur
 # Clausius-Clapeyron: thick solid lines with transparency
 lines!(ax1, T, pᵛˡ⁺_cc, linewidth=4, color=(c_liquid, 0.6), label="C-C liquid")
 lines!(ax1, T, pᵛⁱ⁺_cc, linewidth=4, color=(c_ice, 0.6), label="C-C ice")
-lines!(ax1, T, pᵛᵐ⁺_cc, linewidth=4, color=(c_mixed, 0.6), label="C-C mixed (λ=0.5)")
 
 # Tetens formula: dashed lines
 lines!(ax1, T, pᵛˡ⁺_tf, linewidth=2, color=c_liquid, linestyle=:dash, label="Tetens liquid")
@@ -623,7 +618,7 @@ lines!(ax1, T, pᵛⁱ⁺_tf, linewidth=2, color=c_ice, linestyle=:dash, label="
 axislegend(ax1, position=:rb)
 
 # Right panel: Relative difference (Tetens - C-C) / C-C
-ax2 = Axis(fig[1, 2], xlabel="Temperature (K)", ylabel="Relative difference (%)",
+ax2 = Axis(fig[1, 1], xlabel="Temperature (K)", ylabel="Relative difference (%)",
            title="(Tetens - C-C) / C-C × 100")
 
 rel_diff_liquid = @. 100 * (pᵛˡ⁺_tf - pᵛˡ⁺_cc) / pᵛˡ⁺_cc
@@ -633,7 +628,7 @@ lines!(ax2, T, rel_diff_liquid, linewidth=2, color=c_liquid, label="liquid")
 lines!(ax2, T, rel_diff_ice, linewidth=2, color=c_ice, label="ice")
 hlines!(ax2, [0], color=:gray, linestyle=:dot)
 
-axislegend(ax2, position=:rt)
+axislegend(ax2, position=:rb)
 
 fig
 ```
