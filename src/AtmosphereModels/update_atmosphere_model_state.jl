@@ -1,7 +1,5 @@
-using ..Thermodynamics:
-    Thermodynamics,
-    mixture_heat_capacity,
-    mixture_gas_constant
+using ..Forcings: Forcings
+using ..Thermodynamics: Thermodynamics, mixture_heat_capacity, mixture_gas_constant
 
 using Oceananigans.BoundaryConditions: fill_halo_regions!, compute_x_bcs!, compute_y_bcs!, compute_z_bcs!
 using Oceananigans.Grids: Bounded, Periodic, Flat, topology, halo_size
@@ -30,7 +28,7 @@ end
 $(TYPEDSIGNATURES)
 
 Compute forcing-specific quantities needed before tendency calculation.
-For example, [`SubsidenceForcing`](@ref Breeze.Forcings.SubsidenceForcing)
+For example, [`SubsidenceForcing`](@ref Forcings.SubsidenceForcing)
 requires horizontal averages of the fields being advected.
 """
 function compute_forcings!(model)
