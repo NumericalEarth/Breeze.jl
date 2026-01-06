@@ -557,19 +557,22 @@ an empirical formula that is simpler to compute.
 The Tetens formula approximates saturation vapor pressure as:
 
 ```math
-pᵛ⁺(T) = pᵛ⁺_r \exp \left( a \frac{T - T_0}{T - b} \right) ,
+pᵛ⁺(T) = pᵛ⁺_r \exp \left( a \frac{T - T_r}{T - δT} \right) ,
 ```
 
-where the coefficients ``a`` and ``b`` differ for liquid and ice surfaces.
+where ``Tᵣ`` is a reference temperature, ``δT`` is a temperature offset, and
+the coefficients ``a`` and ``δT`` differ for liquid and ice surfaces.
 Default values for liquid are from Monteith and Unsworth (2008), and for ice
 from Murray (1967).
 
-Let's compare the two formulations over atmospheric temperatures:
+Let's compare the two formulations over atmospheric temperatures. We use the
+Clausius-Clapeyron formulation for liquid, ice, and mixed-phase surfaces, and
+compare with the Tetens formula for liquid and ice:
 
 ```@example
 using Breeze
 using Breeze.Thermodynamics: saturation_vapor_pressure,
-                             PlanarLiquidSurface, PlanarIceSurface,
+                             PlanarLiquidSurface, PlanarIceSurface, PlanarMixedPhaseSurface,
                              TetensFormula
 
 using CairoMakie
@@ -582,9 +585,10 @@ tetens = ThermodynamicConstants(saturation_vapor_pressure = TetensFormula())
 
 T = collect(220:0.5:320)
 
-# Clausius-Clapeyron: liquid and ice
+# Clausius-Clapeyron: liquid, ice, and mixed-phase (λ=0.5)
 pᵛˡ⁺_cc = [saturation_vapor_pressure(Tⁱ, clausius_clapeyron, PlanarLiquidSurface()) for Tⁱ in T]
 pᵛⁱ⁺_cc = [saturation_vapor_pressure(Tⁱ, clausius_clapeyron, PlanarIceSurface()) for Tⁱ in T]
+pᵛᵐ⁺_cc = [saturation_vapor_pressure(Tⁱ, clausius_clapeyron, PlanarMixedPhaseSurface(0.5)) for Tⁱ in T]
 
 # Tetens formula: liquid and ice
 pᵛˡ⁺_tf = [saturation_vapor_pressure(Tⁱ, tetens, PlanarLiquidSurface()) for Tⁱ in T]
@@ -594,29 +598,39 @@ pᵛⁱ⁺_tf = [saturation_vapor_pressure(Tⁱ, tetens, PlanarIceSurface()) for
 Tᵗʳ = clausius_clapeyron.triple_point_temperature
 pᵛⁱ⁺_cc[T .> Tᵗʳ] .= NaN
 pᵛⁱ⁺_tf[T .> Tᵗʳ] .= NaN
+pᵛᵐ⁺_cc[T .> Tᵗʳ] .= NaN
+
+# Phase colors: dark blue for liquid, orange for ice, green for mixed
+c_liquid = :darkblue
+c_ice = :darkorange
+c_mixed = :green
 
 fig = Figure(size=(900, 400))
 
-# Left panel: Absolute values
+# Left panel: Saturation vapor pressure comparison
 ax1 = Axis(fig[1, 1], xlabel="Temperature (K)", ylabel="Saturation vapor pressure (Pa)",
            yscale=log10, title="Saturation vapor pressure comparison")
 
-lines!(ax1, T, pᵛˡ⁺_cc, label="C-C liquid", linewidth=2.5, color=:royalblue)
-lines!(ax1, T, pᵛⁱ⁺_cc, label="C-C ice", linewidth=2.5, color=:royalblue, linestyle=:dash)
-lines!(ax1, T, pᵛˡ⁺_tf, label="Tetens liquid", linewidth=2, color=:orangered)
-lines!(ax1, T, pᵛⁱ⁺_tf, label="Tetens ice", linewidth=2, color=:orangered, linestyle=:dash)
+# Clausius-Clapeyron: thick solid lines with transparency
+lines!(ax1, T, pᵛˡ⁺_cc, linewidth=4, color=(c_liquid, 0.6), label="C-C liquid")
+lines!(ax1, T, pᵛⁱ⁺_cc, linewidth=4, color=(c_ice, 0.6), label="C-C ice")
+lines!(ax1, T, pᵛᵐ⁺_cc, linewidth=4, color=(c_mixed, 0.6), label="C-C mixed (λ=0.5)")
+
+# Tetens formula: dashed lines
+lines!(ax1, T, pᵛˡ⁺_tf, linewidth=2, color=c_liquid, linestyle=:dash, label="Tetens liquid")
+lines!(ax1, T, pᵛⁱ⁺_tf, linewidth=2, color=c_ice, linestyle=:dash, label="Tetens ice")
 
 axislegend(ax1, position=:rb)
 
-# Right panel: Relative difference
+# Right panel: Relative difference (Tetens - C-C) / C-C
 ax2 = Axis(fig[1, 2], xlabel="Temperature (K)", ylabel="Relative difference (%)",
            title="(Tetens - C-C) / C-C × 100")
 
 rel_diff_liquid = @. 100 * (pᵛˡ⁺_tf - pᵛˡ⁺_cc) / pᵛˡ⁺_cc
 rel_diff_ice = @. 100 * (pᵛⁱ⁺_tf - pᵛⁱ⁺_cc) / pᵛⁱ⁺_cc
 
-lines!(ax2, T, rel_diff_liquid, label="liquid", linewidth=2, color=:royalblue)
-lines!(ax2, T, rel_diff_ice, label="ice", linewidth=2, color=:cyan, linestyle=:dash)
+lines!(ax2, T, rel_diff_liquid, linewidth=2, color=c_liquid, label="liquid")
+lines!(ax2, T, rel_diff_ice, linewidth=2, color=c_ice, label="ice")
 hlines!(ax2, [0], color=:gray, linestyle=:dot)
 
 axislegend(ax2, position=:rt)

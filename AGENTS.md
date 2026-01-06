@@ -333,6 +333,10 @@ serve(dir="docs/build")
 - **Debugging literated examples**: When a specific example fails during doc builds, comment out
   all other examples in `docs/make.jl` except the failing one to isolate the error. This speeds up
   iteration dramatically since you only build one example at a time.
+- **Testing documentation pages efficiently**: When testing changes to documentation pages (like
+  `thermodynamics.md`), comment out ALL examples in the `examples` array in `docs/make.jl` to skip
+  the slow literation step. This allows rapid iteration on `@example` blocks in the documentation
+  markdown files.
 - **Literate.jl comment syntax**: In literated examples, lines starting with `# ` (hash + space)
   at column 1 are converted to markdown. Comments inside functions that start with `#` at the
   beginning of a line will prematurely end code blocks. Either remove such comments or use `##`
