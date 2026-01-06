@@ -20,11 +20,11 @@ A strong stability preserving (SSP) third-order Runge-Kutta time stepper.
 This time stepper uses the classic SSP RK3 scheme ([Shu-Osher 2006](@cite Shu1988Efficient) form):
 
 ```math
-\\begin{align}
+\\begin{align*}
 u^{(1)} &= u^{(0)} + Δt L(u^{(0)}) \\\\
 u^{(2)} &= \\frac{3}{4} u^{(0)} + \\frac{1}{4} u^{(1)} + \\frac{1}{4} Δt L(u^{(1)}) \\\\
 u^{(3)} &= \\frac{1}{3} u^{(0)} + \\frac{2}{3} u^{(2)} + \\frac{2}{3} Δt L(u^{(2)})
-\\end{align}
+\\end{align*}
 ```
 
 where ``L`` above is the right-hand-side, e.g., ``\\partial_t u = L(u)``.
