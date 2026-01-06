@@ -13,7 +13,7 @@ using ..AtmosphereModels:
     dynamics_pressure,
     surface_pressure
 
-using Oceananigans: CenterField, Field, interior
+using Oceananigans: CenterField, Field
 using Oceananigans.Architectures: architecture
 using Oceananigans.Grids: znode, Center
 using Oceananigans.Utils: launch!
@@ -286,7 +286,6 @@ Adapt.adapt_structure(to, k::DCMIP2016KesslerSurfaceFluxKernel) =
     @inbounds ρ = kernel.reference_density[i, j, 1]
     return ρ * P
 end
-
 
 """
 $(TYPEDSIGNATURES)
