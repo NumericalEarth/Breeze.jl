@@ -94,7 +94,7 @@ end
 """
     TetensFormulaThermodynamicConstants{FT, C, I}
 
-Type alias for `ThermodynamicConstants` using the Tetens formula
+Type alias for `ThermodynamicConstants` using the [Tetens formula](@ref Breeze.Thermodynamics.TetensFormula)
 for saturation vapor pressure calculations.
 """
 const TetensFormulaThermodynamicConstants{FT, C, I, TF<:TetensFormula} = ThermodynamicConstants{FT, C, I, TF}
