@@ -2,13 +2,14 @@ using Breeze
 using Test
 using Oceananigans
 using Oceananigans.TimeSteppers: update_state!
-using Breeze.Microphysics: DCMIP2016KesslerMicrophysics, kessler_terminal_velocity
+using Breeze.Microphysics: DCMIP2016KesslerMicrophysics, kessler_terminal_velocity, saturation_adjustment_coefficient
 using Breeze.Thermodynamics:
     MoistureMassFractions,
     mixture_heat_capacity,
     mixture_gas_constant,
     saturation_specific_humidity,
-    PlanarLiquidSurface
+    PlanarLiquidSurface,
+    TetensFormula
 
 #####
 ##### Helper functions
@@ -39,10 +40,8 @@ function dcmip2016_klemp_wilhelmson_kessler!(T, qᵛ, qᶜˡ, qʳ, ρ, p, Δt, z
     cᵖᵈ = constants.dry_air.heat_capacity
 
     # Saturation adjustment parameters
-    f₂ₓ = microphysics.f₂ₓ
-    T_f = microphysics.T_f
-    T_offset = microphysics.T_offset
-    f₅ = T_f * f₂ₓ * ℒˡᵣ / cᵖᵈ
+    f₅ = saturation_adjustment_coefficient(microphysics.T_DCMIP2016, constants)
+    T_offset = constants.saturation_vapor_pressure.liquid_temperature_offset
 
     # Autoconversion and accretion parameters
     k₁ = microphysics.k₁
@@ -138,7 +137,7 @@ function dcmip2016_klemp_wilhelmson_kessler!(T, qᵛ, qᶜˡ, qʳ, ρ, p, Δt, z
             # Saturation adjustment
             qᵛ⁺ = saturation_specific_humidity(T[k], ρ[k], constants, PlanarLiquidSurface())
             rᵛ⁺ = qᵛ⁺ / (1 - qᵛ⁺)
-            prod = (rᵛ[k] - rᵛ⁺) / (1.0 + rᵛ⁺ * f₅ / (T[k] - T_offset)^2)
+            prod = (rᵛ[k] - rᵛ⁺) / (1 + rᵛ⁺ * f₅ / (T[k] - T_offset)^2)
 
             # Rain evaporation (KW eq. 2.14)
             ρ_scaled = ρ[k] * ρ_scale
@@ -304,11 +303,14 @@ end
     Mᵈ = ℛ / 287.0
     cᵖ = 1003.0
 
+    DCMIP2016_tetens_formula = TetensFormula(liquid_temperature_offset=36)
+
     constants = ThermodynamicConstants(FT;
         dry_air_heat_capacity = cᵖ,
         vapor_heat_capacity = cᵖ,
         dry_air_molar_mass = Mᵈ,
         vapor_molar_mass = Mᵈ,
+        saturation_vapor_pressure = DCMIP2016_tetens_formula,
         liquid = Breeze.Thermodynamics.CondensedPhase(FT;
             reference_latent_heat = 2500000.0,
             heat_capacity = cᵖ),
@@ -316,7 +318,7 @@ end
             reference_latent_heat = 2834000.0,
             heat_capacity = cᵖ))
 
-    microphysics = DCMIP2016KesslerMicrophysics(f₂ₓ=17.27)
+    microphysics = DCMIP2016KesslerMicrophysics{FT}()
 
     # Convert to mass fractions
     rᵗ_init = rᵛ_init .+ rᶜˡ_init .+ rʳ_init

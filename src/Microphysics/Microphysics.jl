@@ -14,6 +14,8 @@ export
     SaturationSpecificHumidity,
     SaturationSpecificHumidityField,
     DCMIP2016KesslerMicrophysics,
+    kessler_terminal_velocity,
+    saturation_adjustment_coefficient,
     RelativeHumidity,
     RelativeHumidityField
 
