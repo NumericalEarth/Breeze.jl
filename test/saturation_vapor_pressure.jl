@@ -61,8 +61,8 @@ end
 end
 
 @testset "Tetens formula saturation vapor pressure [$FT]" for FT in (Float32, Float64)
-    tetens = TetensFormula(FT)
-    thermo = ThermodynamicConstants(FT; saturation_vapor_pressure=tetens)
+    tetens = TetensFormula()
+    thermo = ThermodynamicConstants(; saturation_vapor_pressure=tetens)
 
     # Test at reference temperature (273.15 K): should return reference pressure
     Tᵣ = FT(273.15)
@@ -98,6 +98,15 @@ end
     δTⁱ = FT(7.65)
     expected_ice = pᵣ * exp(aⁱ * (T_test - Tᵣ) / (T_test - δTⁱ))
     @test saturation_vapor_pressure(T_test, thermo, PlanarIceSurface()) ≈ expected_ice rtol=eps(FT)
+
+    # Test mixed-phase surface: linear interpolation between liquid and ice
+    for λ in (FT(0), FT(0.5), FT(1))
+        surface = PlanarMixedPhaseSurface(λ)
+        pˡ = saturation_vapor_pressure(T_test, thermo, PlanarLiquidSurface())
+        pⁱ = saturation_vapor_pressure(T_test, thermo, PlanarIceSurface())
+        expected_mixed = λ * pˡ + (1 - λ) * pⁱ
+        @test saturation_vapor_pressure(T_test, thermo, surface) ≈ expected_mixed rtol=eps(FT)
+    end
 end
 
 @testset "Tetens vs Clausius-Clapeyron comparison [$FT]" for FT in (Float32, Float64)

@@ -76,8 +76,8 @@ end
     grid = RectilinearGrid(default_arch; size=(8, 8, 8), x=(0, 1_000), y=(0, 1_000), z=(0, 1_000))
     constants = ThermodynamicConstants()
 
-    p₀ = FT(101325)
-    θ₀ = FT(300)
+    p₀ = 101325
+    θ₀ = 300
     reference_state = ReferenceState(grid, constants, surface_pressure=p₀, potential_temperature=θ₀)
     dynamics = AnelasticDynamics(reference_state)
     microphysics = SaturationAdjustment()
@@ -107,11 +107,11 @@ end
 @testset "AtmosphereModel with TetensFormula [$(FT)]" for FT in (Float32, Float64)
     Oceananigans.defaults.FloatType = FT
     grid = RectilinearGrid(default_arch; size=(4, 4, 4), x=(0, 1_000), y=(0, 1_000), z=(0, 1_000))
-    tetens = TetensFormula(FT)
-    constants = ThermodynamicConstants(FT; saturation_vapor_pressure=tetens)
+    tetens = TetensFormula()
+    constants = ThermodynamicConstants(; saturation_vapor_pressure=tetens)
 
-    p₀ = FT(101325)
-    θ₀ = FT(300)
+    p₀ = 101325
+    θ₀ = 300
     reference_state = ReferenceState(grid, constants, surface_pressure=p₀, potential_temperature=θ₀)
     dynamics = AnelasticDynamics(reference_state)
 
