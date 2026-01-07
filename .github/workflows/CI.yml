@@ -38,7 +38,7 @@ jobs:
       matrix:
         version:
           - "min"
-          - "1.12.2"
+          - "1.12.4"
         os:
           - ubuntu-latest
           - macOS-latest
@@ -49,7 +49,7 @@ jobs:
           - version: "min"
             os: windows-latest
         include:
-          - version: "1.12.2"
+          - version: "1.12.4"
             os: aws-linux-nvidia-gpu-l4
             arch: "default"
     steps:
