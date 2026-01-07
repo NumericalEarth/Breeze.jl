@@ -21,7 +21,7 @@ authors:
   - name: Tobias Bischoff
     orcid: 0000-0002-5629-5765
     affiliation: 1
-  - name: Kaiyuan Cheng
+  - name: Kai-Yuan Cheng
     orcid: 0000-0002-4246-7659
     affiliation: 1
   - name: Mosè Giordano
