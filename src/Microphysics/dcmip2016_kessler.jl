@@ -67,8 +67,8 @@ instead, it is diagnosed from the total specific moisture `qᵗ` and the liquid 
 # Parameters
 
 ## Saturation (Tetens/Clausius-Clapeyron formula)
-- `T_DCMIP2016`: A parameter of uncertain provenance that appears in the DCMIP2016 implementation
-                 of the Kessler scheme (line 105 of https://gitlab.in2p3.fr/ipsl/projets/dynamico/dynamico/-/blob/master/src/dcmip2016_kessler_physic.f90)
+- `dcmip_temperature_scale`: A parameter of uncertain provenance that appears in the DCMIP2016 implementation
+                             of the Kessler scheme (line 105 of https://gitlab.in2p3.fr/ipsl/projets/dynamico/dynamico/-/blob/master/src/dcmip2016_kessler_physic.f90)
 
 The "saturation adjustment coefficient" `f₅` is then computed as
 
@@ -80,29 +80,29 @@ where `a` is the liquid_coefficient for Tetens' saturation vapor pressure formul
 `ℒˡᵣ` is the latent heat of vaporization of liquid water, and `cᵖᵈ` is the heat capacity of dry air.
 
 ## Rain Terminal Velocity (Klemp & Wilhelmson 1978, eq. 2.15)
-Terminal velocity: `vᵗ = a_vᵗ × (ρ × rʳ × ρ_scale)^β_vᵗ × √(ρ₀/ρ)`
-- `a_vᵗ`: Terminal velocity coefficient in m/s (default: 36.34)
-- `ρ_scale`: Density scale factor for unit conversion (default: 0.001)
-- `β_vᵗ`: Terminal velocity exponent (default: 0.1364)
+Terminal velocity: `𝕎ʳ = a𝕎 × (ρ × rʳ × Cᵨ)^β𝕎 × √(ρ₀/ρ)`
+- `terminal_velocity_coefficient` (`a𝕎`): Terminal velocity coefficient in m/s (default: 36.34)
+- `density_scale` (`Cᵨ`): Density scale factor for unit conversion (default: 0.001)
+- `terminal_velocity_exponent` (`β𝕎`): Terminal velocity exponent (default: 0.1364)
 - `ρ`: Density
 - `ρ₀`: Density at z=0
 
 ## Autoconversion
-- `k₁`: Autoconversion rate coefficient in s⁻¹ (default: 0.001)
-- `rᶜˡ★`: Critical cloud water mixing ratio threshold in kg/kg (default: 0.001)
+- `autoconversion_rate` (`k₁`): Autoconversion rate coefficient in s⁻¹ (default: 0.001)
+- `autoconversion_threshold` (`rᶜˡ★`): Critical cloud water mixing ratio threshold in kg/kg (default: 0.001)
 
 ## Accretion
-- `k₂`: Accretion rate coefficient in s⁻¹ (default: 2.2)
-- `β_acc`: Accretion exponent for rain mixing ratio (default: 0.875)
+- `accretion_rate` (`k₂`): Accretion rate coefficient in s⁻¹ (default: 2.2)
+- `accretion_exponent` (`βᵃᶜᶜ`): Accretion exponent for rain mixing ratio (default: 0.875)
 
 ## Rain Evaporation (Klemp & Wilhelmson 1978, eq. 2.14)
 Ventilation: `(Cᵉᵛ₁ + Cᵉᵛ₂ × (ρ rʳ)^βᵉᵛ₁) × (ρ rʳ)^βᵉᵛ₂`
-- `Cᵉᵛ₁`: Evaporation ventilation coefficient 1 (default: 1.6)
-- `Cᵉᵛ₂`: Evaporation ventilation coefficient 2 (default: 124.9)
-- `βᵉᵛ₁`: Evaporation ventilation exponent 1 (default: 0.2046)
-- `βᵉᵛ₂`: Evaporation ventilation exponent 2 (default: 0.525)
-- `Cᵈⁱᶠᶠ`: Diffusivity-related denominator coefficient (default: 2.55e8)
-- `Cᵗʰᵉʳᵐ`: Thermal conductivity-related denominator coefficient (default: 5.4e5)
+- `evaporation_ventilation_coefficient_1` (`Cᵉᵛ₁`): Evaporation ventilation coefficient 1 (default: 1.6)
+- `evaporation_ventilation_coefficient_2` (`Cᵉᵛ₂`): Evaporation ventilation coefficient 2 (default: 124.9)
+- `evaporation_ventilation_exponent_1` (`βᵉᵛ₁`): Evaporation ventilation exponent 1 (default: 0.2046)
+- `evaporation_ventilation_exponent_2` (`βᵉᵛ₂`): Evaporation ventilation exponent 2 (default: 0.525)
+- `diffusivity_coefficient` (`Cᵈⁱᶠᶠ`): Diffusivity-related denominator coefficient (default: 2.55e8)
+- `thermal_conductivity_coefficient` (`Cᵗʰᵉʳᵐ`): Thermal conductivity-related denominator coefficient (default: 5.4e5)
 
 ## Numerical
 - `substep_cfl`: CFL safety factor for sedimentation subcycling (default: 0.8)
@@ -110,28 +110,28 @@ Ventilation: `(Cᵉᵛ₁ + Cᵉᵛ₂ × (ρ rʳ)^βᵉᵛ₁) × (ρ rʳ)^β�
 Base.@kwdef struct DCMIP2016KesslerMicrophysics{FT}
     # DCMIP2016 parameter (appears to be related to Tetens' saturation vapor pressure formula,
     # but cannot be reconciled with other parameters in a consistent application of that formula.)
-    T_DCMIP2016 :: FT = 237.3
+    dcmip_temperature_scale :: FT = 237.3
 
     # Rain terminal velocity (Klemp & Wilhelmson 1978)
-    a_vᵗ    :: FT = 36.34
-    ρ_scale :: FT = 0.001
-    β_vᵗ    :: FT = 0.1364
+    terminal_velocity_coefficient :: FT = 36.34
+    density_scale                 :: FT = 0.001
+    terminal_velocity_exponent    :: FT = 0.1364
 
     # Autoconversion
-    k₁      :: FT = 0.001
-    rᶜˡ★ :: FT = 0.001
+    autoconversion_rate      :: FT = 0.001
+    autoconversion_threshold :: FT = 0.001
 
     # Accretion
-    k₂    :: FT = 2.2
-    β_acc :: FT = 0.875
+    accretion_rate     :: FT = 2.2
+    accretion_exponent :: FT = 0.875
 
     # Rain evaporation (Klemp & Wilhelmson 1978)
-    Cᵉᵛ₁   :: FT = 1.6
-    Cᵉᵛ₂   :: FT = 124.9
-    βᵉᵛ₁   :: FT = 0.2046
-    βᵉᵛ₂   :: FT = 0.525
-    Cᵈⁱᶠᶠ  :: FT = 2.55e8
-    Cᵗʰᵉʳᵐ :: FT = 5.4e5
+    evaporation_ventilation_coefficient_1 :: FT = 1.6
+    evaporation_ventilation_coefficient_2 :: FT = 124.9
+    evaporation_ventilation_exponent_1    :: FT = 0.2046
+    evaporation_ventilation_exponent_2    :: FT = 0.525
+    diffusivity_coefficient               :: FT = 2.55e8
+    thermal_conductivity_coefficient      :: FT = 5.4e5
 
     # Numerical
     substep_cfl :: FT = 0.8
@@ -164,7 +164,7 @@ Create and return the microphysical fields for the Kessler scheme.
 - `qᶜˡ`: Cloud liquid mass fraction (\$kg/kg\$).
 - `qʳ`: Rain mass fraction (\$kg/kg\$).
 - `precipitation_rate`: Surface precipitation rate (\$m/s\$), defined as \$q^r \times v^t_{rain}\$ to match one-moment microphysics.
-- `𝕍ʳ`: Rain terminal velocity (\$m/s\$).
+- `𝕎ʳ`: Rain terminal velocity (\$m/s\$).
 """
 function AtmosphereModels.materialize_microphysical_fields(::DCMIP2016KM, grid, boundary_conditions)
     # Prognostic fields (density-weighted)
@@ -178,9 +178,9 @@ function AtmosphereModels.materialize_microphysical_fields(::DCMIP2016KM, grid, 
 
     # Precipitation and velocity diagnostics
     precipitation_rate = Field{Center, Center, Nothing}(grid)
-    𝕍ʳ = CenterField(grid)
+    𝕎ʳ = CenterField(grid)
 
-    return (; ρqᶜˡ, ρqʳ, qᵛ, qᶜˡ, qʳ, precipitation_rate, 𝕍ʳ)
+    return (; ρqᶜˡ, ρqʳ, qᵛ, qᶜˡ, qʳ, precipitation_rate, 𝕎ʳ)
 end
 
 #####
@@ -282,7 +282,7 @@ end
 
 Adapt.adapt_structure(to, k::DCMIP2016KesslerSurfaceFluxKernel) =
     DCMIP2016KesslerSurfaceFluxKernel(adapt(to, k.precipitation_rate),
-                                       adapt(to, k.reference_density))
+                                      adapt(to, k.reference_density))
 
 @inline function (kernel::DCMIP2016KesslerSurfaceFluxKernel)(i, j, k_idx, grid)
     # precipitation_rate = qʳ × vᵗ at surface
@@ -299,20 +299,21 @@ Compute rain terminal velocity (m/s) following Klemp and Wilhelmson (1978) eq. 2
 
 The terminal velocity is computed as:
 ```math
-vᵗ = a_{vᵗ} × (ρ × rʳ × ρ_{scale})^{β_{vᵗ}} × \\sqrt{ρ₀/ρ}
+𝕎ʳ = a^𝕎 × (ρ × rʳ × Cᵨ)^{β^𝕎} × \\sqrt{ρ₀/ρ}
 ```
 
-where the parameters `a_vᵗ`, `ρ_scale`, and `β_vᵗ` are taken from the `microphysics` struct.
+where `a^𝕎` is `terminal_velocity_coefficient`, `Cᵨ` is `density_scale`,
+and `β^𝕎` is `terminal_velocity_exponent`.
 """
 @inline function kessler_terminal_velocity(rʳ, ρ, ρ₁, microphysics)
-    a_vᵗ    = microphysics.a_vᵗ
-    ρ_scale = microphysics.ρ_scale
-    β_vᵗ    = microphysics.β_vᵗ
-    return a_vᵗ * (rʳ * ρ_scale * ρ)^β_vᵗ * sqrt(ρ₁ / ρ)
+    a𝕎 = microphysics.terminal_velocity_coefficient
+    Cᵨ = microphysics.density_scale
+    β𝕎 = microphysics.terminal_velocity_exponent
+    return a𝕎 * (rʳ * Cᵨ * ρ)^β𝕎 * sqrt(ρ₁ / ρ)
 end
 
 """
-    cloud_to_rain_production(rᶜˡ, rʳ, Δt, k₁, k₂, rᶜˡ★, β_acc, FT)
+    cloud_to_rain_production(rᶜˡ, rʳ, Δt, microphysics)
 
 Compute cloud-to-rain production rate from autoconversion and accretion (Klemp & Wilhelmson 1978, eq. 2.13).
 
@@ -322,11 +323,16 @@ This implements the combined effect of:
 
 The formula uses an implicit time integration for numerical stability.
 """
-@inline function cloud_to_rain_production(rᶜˡ, rʳ, Δt, k₁, k₂, rᶜˡ★, β_acc, FT)
-    Aʳ = max(0, k₁ * (rᶜˡ - rᶜˡ★))  # Autoconversion rate
-    denom = 1 + Δt * k₂ * rʳ^β_acc             # Implicit accretion factor
-    Pʳ = rᶜˡ - (rᶜˡ - Δt * Aʳ) / denom
-    return Pʳ
+@inline function cloud_to_rain_production(rᶜˡ, rʳ, Δt, microphysics)
+    k₁   = microphysics.autoconversion_rate
+    rᶜˡ★ = microphysics.autoconversion_threshold
+    k₂   = microphysics.accretion_rate
+    βᵃᶜᶜ = microphysics.accretion_exponent
+
+    Aʳ = max(0, k₁ * (rᶜˡ - rᶜˡ★))    # Autoconversion rate
+    denom = 1 + Δt * k₂ * rʳ^βᵃᶜᶜ       # Implicit accretion factor
+    Δrᴾ = rᶜˡ - (rᶜˡ - Δt * Aʳ) / denom
+    return Δrᴾ
 end
 
 #####
@@ -415,29 +421,23 @@ end
     cᵖᵈ = constants.dry_air.heat_capacity
 
     # Saturation adjustment coefficient: f₅ = a × T_DCMIP2016 × ℒˡᵣ / cᵖᵈ
-    T_DCMIP2016 = microphysics.T_DCMIP2016
+    T_DCMIP2016 = microphysics.dcmip_temperature_scale
     f₅ = saturation_adjustment_coefficient(T_DCMIP2016, constants)
 
     # Temperature offset for saturation adjustment (from TetensFormula)
     δT = constants.saturation_vapor_pressure.liquid_temperature_offset
 
     # CFL safety factor for sedimentation
-    substep_cfl = microphysics.substep_cfl
+    cfl = microphysics.substep_cfl
 
     # Parameters from microphysics struct (hoisted out of the inner vertical loops)
-    ρ_scale = microphysics.ρ_scale
-
-    k₁      = microphysics.k₁
-    rᶜˡ★    = microphysics.rᶜˡ★
-    k₂      = microphysics.k₂
-    β_acc   = microphysics.β_acc
-
-    Cᵉᵛ₁   = microphysics.Cᵉᵛ₁
-    Cᵉᵛ₂   = microphysics.Cᵉᵛ₂
-    βᵉᵛ₁   = microphysics.βᵉᵛ₁
-    βᵉᵛ₂   = microphysics.βᵉᵛ₂
-    Cᵈⁱᶠᶠ  = microphysics.Cᵈⁱᶠᶠ
-    Cᵗʰᵉʳᵐ = microphysics.Cᵗʰᵉʳᵐ
+    Cᵨ     = microphysics.density_scale
+    Cᵉᵛ₁   = microphysics.evaporation_ventilation_coefficient_1
+    Cᵉᵛ₂   = microphysics.evaporation_ventilation_coefficient_2
+    βᵉᵛ₁   = microphysics.evaporation_ventilation_exponent_1
+    βᵉᵛ₂   = microphysics.evaporation_ventilation_exponent_2
+    Cᵈⁱᶠᶠ  = microphysics.diffusivity_coefficient
+    Cᵗʰᵉʳᵐ = microphysics.thermal_conductivity_coefficient
 
     # Reference density at surface for terminal velocity (KW eq. 2.15)
     @inbounds ρ₁ = density[i, j, 1]
@@ -470,8 +470,8 @@ end
             rᶜˡ = qᶜˡ * (1 + rᵗ)
             rʳ  = qʳ * (1 + rᵗ)
 
-            𝕍ʳᵏ = kessler_terminal_velocity(rʳ, ρ, ρ₁, microphysics)
-            μ.𝕍ʳ[i, j, k] = 𝕍ʳᵏ
+            𝕎ʳᵏ = kessler_terminal_velocity(rʳ, ρ, ρ₁, microphysics)
+            μ.𝕎ʳ[i, j, k] = 𝕎ʳᵏ
 
             # Store mixing ratios in diagnostic fields during physics
             μ.qᵛ[i, j, k]  = rᵛ
@@ -481,7 +481,7 @@ end
             # CFL check for sedimentation
             zᵏ⁺¹ = znode(i, j, k+1, grid, Center(), Center(), Center())
             Δz = zᵏ⁺¹ - zᵏ
-            max_Δt = min(max_Δt, substep_cfl * Δz / 𝕍ʳᵏ)
+            max_Δt = min(max_Δt, cfl * Δz / 𝕎ʳᵏ)
             zᵏ = zᵏ⁺¹
         end
     end
@@ -504,7 +504,7 @@ end
         rᶜˡ = qᶜˡ * (1 + rᵗ)
         rʳ  = qʳ * (1 + rᵗ)
 
-        μ.𝕍ʳ[i, j, Nz] = kessler_terminal_velocity(rʳ, ρ, ρ₁, microphysics)
+        μ.𝕎ʳ[i, j, Nz] = kessler_terminal_velocity(rʳ, ρ, ρ₁, microphysics)
 
         μ.qᵛ[i, j, Nz]  = rᵛ
         μ.qᶜˡ[i, j, Nz] = rᶜˡ
@@ -515,7 +515,8 @@ end
     Ns = max(1, ceil(Int, Δt / max_Δt))
     inv_Ns = inv(FT(Ns))  # Precompute for final averaging
     Δtₛ = Δt * inv_Ns
-    precip_accum = zero(FT)  # Local accumulator to reduce global memory writes
+    # Pˢᵘʳᶠ: accumulated surface precipitation rate (qʳ × 𝕎ʳ) over subcycles
+    Pˢᵘʳᶠ = zero(FT)
 
     #####
     ##### PHASE 2: Subcycle microphysics (in mixing ratio space)
@@ -529,9 +530,8 @@ end
             rᶜˡ₁ = μ.qᶜˡ[i, j, 1]
             rʳ₁ = μ.qʳ[i, j, 1]
             rᵗ₁ = rᵛ₁ + rᶜˡ₁ + rʳ₁
-            # qʳ = rʳ / (1 + rᵗ)
             qʳ₁ = rʳ₁ / (1 + rᵗ₁)
-            precip_accum += qʳ₁ * μ.𝕍ʳ[i, j, 1]
+            Pˢᵘʳᶠ += qʳ₁ * μ.𝕎ʳ[i, j, 1]
         end
 
         # Rolling z-coordinate to reduce `znode` calls (and avoid a branch in the loop body)
@@ -557,25 +557,25 @@ end
                 Tᵏ = Π * θˡⁱᵏ + ℒˡᵣ * qˡ_current / cᵖᵐ
 
                 # Rain sedimentation (upstream differencing)
-                ρᵏ = ρ_scale * ρ
-                𝕍ʳᵏ = μ.𝕍ʳ[i, j, k]
+                ρᵏ = Cᵨ * ρ
+                𝕎ʳᵏ = μ.𝕎ʳ[i, j, k]
 
                 zᵏ⁺¹ = znode(i, j, k+1, grid, Center(), Center(), Center())
                 Δz = zᵏ⁺¹ - zᵏ
 
                 ρᵏ⁺¹ = density[i, j, k+1]
-                ρᵏ⁺¹ = ρ_scale * ρᵏ⁺¹
+                ρᵏ⁺¹ = Cᵨ * ρᵏ⁺¹
                 rʳᵏ⁺¹ = μ.qʳ[i, j, k+1]  # Mixing ratio
-                𝕍ʳᵏ⁺¹ = μ.𝕍ʳ[i, j, k+1]
+                𝕎ʳᵏ⁺¹ = μ.𝕎ʳ[i, j, k+1]
 
-                sed = Δtₛ * (ρᵏ⁺¹ * rʳᵏ⁺¹ * 𝕍ʳᵏ⁺¹ - ρᵏ * rʳ * 𝕍ʳᵏ) / (ρᵏ * Δz)
+                # Δr𝕎: change in rain mixing ratio due to sedimentation (upstream differencing)
+                Δr𝕎 = Δtₛ * (ρᵏ⁺¹ * rʳᵏ⁺¹ * 𝕎ʳᵏ⁺¹ - ρᵏ * rʳ * 𝕎ʳᵏ) / (ρᵏ * Δz)
                 zᵏ = zᵏ⁺¹
 
-                # Autoconversion + accretion (KW eq. 2.13)
-                # Pʳ is the cloud-to-rain production from autoconversion and accretion
-                Pʳ = cloud_to_rain_production(rᶜˡ, rʳ, Δtₛ, k₁, k₂, rᶜˡ★, β_acc, FT)
-                rᶜˡ_new = max(0, rᶜˡ - Pʳ)
-                rʳ_new = max(0, rʳ + Pʳ + sed)
+                # Δrᴾ: cloud-to-rain production from autoconversion + accretion (KW eq. 2.13)
+                Δrᴾ = cloud_to_rain_production(rᶜˡ, rʳ, Δtₛ, microphysics)
+                rᶜˡ_new = max(0, rᶜˡ - Δrᴾ)
+                rʳ_new = max(0, rʳ + Δrᴾ + Δr𝕎)
 
                 # Saturation specific humidity using Breeze thermodynamics
                 # qᵛ⁺ = pᵛ⁺ / (ρ Rᵛ T) is the saturation mass fraction
@@ -583,24 +583,24 @@ end
                 # Convert to saturation mixing ratio: rᵛ⁺ = qᵛ⁺ / (1 - qᵛ⁺)
                 rᵛ⁺ = qᵛ⁺ / (1 - qᵛ⁺)
 
-                # Saturation adjustment
+                # Δrˢᵃᵗ: mixing ratio adjustment to restore saturation equilibrium
                 δT = constants.saturation_vapor_pressure.liquid_temperature_offset
-                prod = (rᵛ - rᵛ⁺) / (1 + rᵛ⁺ * f₅ / (Tᵏ - δT)^2)
+                Δrˢᵃᵗ = (rᵛ - rᵛ⁺) / (1 + rᵛ⁺ * f₅ / (Tᵏ - δT)^2)
 
-                # Rain evaporation (KW eq. 2.14)
-                ρrʳ = ρᵏ * rʳ_new                                        # Scaled rain water content
-                Vᵉᵛ = (Cᵉᵛ₁ + Cᵉᵛ₂ * ρrʳ^βᵉᵛ₁) * ρrʳ^βᵉᵛ₂               # Ventilation factor
-                Dᵗʰ = Cᵈⁱᶠᶠ / (p * rᵛ⁺) + Cᵗʰᵉʳᵐ                        # Diffusion-thermal term
-                Δrᵛ⁺ = max(0, rᵛ⁺ - rᵛ)                                  # Subsaturation
-                Ėʳ = Vᵉᵛ / Dᵗʰ * Δrᵛ⁺ / (ρᵏ * rᵛ⁺ + FT(1e-20))          # Rain evaporation rate
-                Eʳₘₐₓ = max(0, -prod - rᶜˡ_new)                          # Maximum evaporation
-                Eʳ = min(min(Δtₛ * Ėʳ, Eʳₘₐₓ), rʳ_new)                   # Limited evaporation
+                # Δrᴱ: rain evaporation into subsaturated air (KW eq. 2.14)
+                ρrʳ = ρᵏ * rʳ_new                                  # Scaled rain water content
+                Vᵉᵛ = (Cᵉᵛ₁ + Cᵉᵛ₂ * ρrʳ^βᵉᵛ₁) * ρrʳ^βᵉᵛ₂          # Ventilation factor
+                Dᵗʰ = Cᵈⁱᶠᶠ / (p * rᵛ⁺) + Cᵗʰᵉʳᵐ                   # Diffusion-thermal term
+                Δrᵛ⁺ = max(0, rᵛ⁺ - rᵛ)                            # Subsaturation
+                Ėʳ = Vᵉᵛ / Dᵗʰ * Δrᵛ⁺ / (ρᵏ * rᵛ⁺ + FT(1e-20))     # Rain evaporation rate
+                Δrᴱmax = max(0, -Δrˢᵃᵗ - rᶜˡ_new)                   # Maximum evaporation
+                Δrᴱ = min(min(Δtₛ * Ėʳ, Δrᴱmax), rʳ_new)            # Limited evaporation
 
-                # Apply adjustments
-                condensation = max(prod, -rᶜˡ_new)
-                rᵛ_new = max(0, rᵛ - condensation + Eʳ)
-                rᶜˡ_final = rᶜˡ_new + condensation
-                rʳ_final = rʳ_new - Eʳ
+                # Δrᶜ: condensation of vapor to cloud liquid (limited by available cloud water)
+                Δrᶜ = max(Δrˢᵃᵗ, -rᶜˡ_new)
+                rᵛ_new = max(0, rᵛ - Δrᶜ + Δrᴱ)
+                rᶜˡ_final = rᶜˡ_new + Δrᶜ
+                rʳ_final = rʳ_new - Δrᴱ
 
                 μ.qᵛ[i, j, k]  = rᵛ_new
                 μ.qᶜˡ[i, j, k] = rᶜˡ_final
@@ -608,7 +608,7 @@ end
 
                 # Update θˡⁱ from latent heating
                 # Uses Breeze's thermodynamic constants for consistency
-                net_phase_change = condensation - Eʳ
+                net_phase_change = Δrᶜ - Δrᴱ
                 ΔT_phase = ℒˡᵣ / cᵖᵈ * net_phase_change
                 T_new = Tᵏ + ΔT_phase
 
@@ -650,44 +650,44 @@ end
             Π = (p / p₀)^(Rᵐ / cᵖᵐ)
             Tᵏ = Π * θˡⁱᵏ + ℒˡᵣ * qˡ_current / cᵖᵐ
 
-            # Top boundary: rain falls out
-            ρᵏ = ρ_scale * ρ
-            𝕍ʳᵏ = μ.𝕍ʳ[i, j, k]
+            # Δr𝕎: sedimentation at top boundary (rain falls out of domain)
+            ρᵏ = Cᵨ * ρ
+            𝕎ʳᵏ = μ.𝕎ʳ[i, j, k]
             zᵏ = znode(i, j, k, grid, Center(), Center(), Center())
             zᵏ⁻¹ = znode(i, j, k-1, grid, Center(), Center(), Center())
-            Δz_half = 0.5 * (zᵏ - zᵏ⁻¹)
-            sed = -Δtₛ * rʳ * 𝕍ʳᵏ / Δz_half
+            Δz_half = (zᵏ - zᵏ⁻¹) / 2
+            Δr𝕎 = -Δtₛ * rʳ * 𝕎ʳᵏ / Δz_half
 
-            # Autoconversion + accretion (KW eq. 2.13)
-            # Pʳ is the cloud-to-rain production from autoconversion and accretion
-            Pʳ = cloud_to_rain_production(rᶜˡ, rʳ, Δtₛ, k₁, k₂, rᶜˡ★, β_acc, FT)
-            rᶜˡ_new = max(0, rᶜˡ - Pʳ)
-            rʳ_new = max(0, rʳ + Pʳ + sed)
+            # Δrᴾ: cloud-to-rain production (KW eq. 2.13)
+            Δrᴾ = cloud_to_rain_production(rᶜˡ, rʳ, Δtₛ, microphysics)
+            rᶜˡ_new = max(0, rᶜˡ - Δrᴾ)
+            rʳ_new = max(0, rʳ + Δrᴾ + Δr𝕎)
 
+            # Δrˢᵃᵗ: saturation adjustment
             qᵛ⁺ = saturation_specific_humidity(Tᵏ, ρ, constants, surface)
             rᵛ⁺ = qᵛ⁺ / (1 - qᵛ⁺)
+            Δrˢᵃᵗ = (rᵛ - rᵛ⁺) / (1 + rᵛ⁺ * f₅ / (Tᵏ - δT)^2)
 
-            prod = (rᵛ - rᵛ⁺) / (1 + rᵛ⁺ * f₅ / (Tᵏ - δT)^2)
+            # Δrᴱ: rain evaporation (KW eq. 2.14)
+            ρrʳ = ρᵏ * rʳ_new                                          # Scaled rain water content
+            Vᵉᵛ = (Cᵉᵛ₁ + Cᵉᵛ₂ * ρrʳ^βᵉᵛ₁) * ρrʳ^βᵉᵛ₂                 # Ventilation factor
+            Dᵗʰ = Cᵈⁱᶠᶠ / (p * rᵛ⁺) + Cᵗʰᵉʳᵐ                          # Diffusion-thermal term
+            Δrᵛ⁺ = max(0, rᵛ⁺ - rᵛ)                                    # Subsaturation
+            Ėʳ = Vᵉᵛ / Dᵗʰ * Δrᵛ⁺ / (ρᵏ * rᵛ⁺ + FT(1e-20))            # Rain evaporation rate
+            Δrᴱmax = max(0, -Δrˢᵃᵗ - rᶜˡ_new)                          # Maximum evaporation
+            Δrᴱ = min(min(Δtₛ * Ėʳ, Δrᴱmax), rʳ_new)                   # Limited evaporation
 
-            # Rain evaporation (KW eq. 2.14)
-            ρrʳ = ρᵏ * rʳ_new                                        # Scaled rain water content
-            Vᵉᵛ = (Cᵉᵛ₁ + Cᵉᵛ₂ * ρrʳ^βᵉᵛ₁) * ρrʳ^βᵉᵛ₂               # Ventilation factor
-            Dᵗʰ = Cᵈⁱᶠᶠ / (p * rᵛ⁺) + Cᵗʰᵉʳᵐ                        # Diffusion-thermal term
-            Δrᵛ⁺ = max(0, rᵛ⁺ - rᵛ)                                  # Subsaturation
-            Ėʳ = Vᵉᵛ / Dᵗʰ * Δrᵛ⁺ / (ρᵏ * rᵛ⁺ + FT(1e-20))          # Rain evaporation rate
-            Eʳₘₐₓ = max(0, -prod - rᶜˡ_new)                          # Maximum evaporation
-            Eʳ = min(min(Δtₛ * Ėʳ, Eʳₘₐₓ), rʳ_new)                   # Limited evaporation
-
-            condensation = max(prod, -rᶜˡ_new)
-            rᵛ_new = max(0, rᵛ - condensation + Eʳ)
-            rᶜˡ_final = rᶜˡ_new + condensation
-            rʳ_final = rʳ_new - Eʳ
+            # Δrᶜ: condensation
+            Δrᶜ = max(Δrˢᵃᵗ, -rᶜˡ_new)
+            rᵛ_new = max(0, rᵛ - Δrᶜ + Δrᴱ)
+            rᶜˡ_final = rᶜˡ_new + Δrᶜ
+            rʳ_final = rʳ_new - Δrᴱ
 
             μ.qᵛ[i, j, k]  = rᵛ_new
             μ.qᶜˡ[i, j, k] = rᶜˡ_final
             μ.qʳ[i, j, k]  = rʳ_final
 
-            net_phase_change = condensation - Eʳ
+            net_phase_change = Δrᶜ - Δrᴱ
             ΔT_phase = ℒˡᵣ / cᵖᵈ * net_phase_change
             T_new = Tᵏ + ΔT_phase
 
@@ -711,13 +711,13 @@ end
                 @inbounds begin
                     ρ = density[i, j, k]
                     rʳ = μ.qʳ[i, j, k]
-                    μ.𝕍ʳ[i, j, k] = kessler_terminal_velocity(rʳ, ρ, ρ₁, microphysics)
+                    μ.𝕎ʳ[i, j, k] = kessler_terminal_velocity(rʳ, ρ, ρ₁, microphysics)
                 end
             end
         end
     end
 
-    @inbounds precipitation_rate_field[i, j, 1] = precip_accum * inv_Ns
+    @inbounds precipitation_rate_field[i, j, 1] = Pˢᵘʳᶠ * inv_Ns
 
     #####
     ##### PHASE 3: Convert mixing ratio → mass fraction

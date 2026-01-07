@@ -40,25 +40,25 @@ function dcmip2016_klemp_wilhelmson_kessler!(T, qᵛ, qᶜˡ, qʳ, ρ, p, Δt, z
     cᵖᵈ = constants.dry_air.heat_capacity
 
     # Saturation adjustment parameters
-    f₅ = saturation_adjustment_coefficient(microphysics.T_DCMIP2016, constants)
+    f₅ = saturation_adjustment_coefficient(microphysics.dcmip_temperature_scale, constants)
     T_offset = constants.saturation_vapor_pressure.liquid_temperature_offset
 
     # Autoconversion and accretion parameters
-    k₁ = microphysics.k₁
-    rᶜˡ★ = microphysics.rᶜˡ★
-    k₂ = microphysics.k₂
-    β_acc = microphysics.β_acc
-    ρ_scale = microphysics.ρ_scale
+    k₁   = microphysics.autoconversion_rate
+    rᶜˡ★ = microphysics.autoconversion_threshold
+    k₂   = microphysics.accretion_rate
+    βᵃᶜᶜ = microphysics.accretion_exponent
+    Cᵨ   = microphysics.density_scale
 
     # Evaporation parameters
-    Cᵉᵛ₁ = microphysics.Cᵉᵛ₁
-    Cᵉᵛ₂ = microphysics.Cᵉᵛ₂
-    βᵉᵛ₁ = microphysics.βᵉᵛ₁
-    βᵉᵛ₂ = microphysics.βᵉᵛ₂
-    Cᵈⁱᶠᶠ = microphysics.Cᵈⁱᶠᶠ
-    Cᵗʰᵉʳᵐ = microphysics.Cᵗʰᵉʳᵐ
+    Cᵉᵛ₁   = microphysics.evaporation_ventilation_coefficient_1
+    Cᵉᵛ₂   = microphysics.evaporation_ventilation_coefficient_2
+    βᵉᵛ₁   = microphysics.evaporation_ventilation_exponent_1
+    βᵉᵛ₂   = microphysics.evaporation_ventilation_exponent_2
+    Cᵈⁱᶠᶠ  = microphysics.diffusivity_coefficient
+    Cᵗʰᵉʳᵐ = microphysics.thermal_conductivity_coefficient
 
-    substep_cfl = microphysics.substep_cfl
+    cfl = microphysics.substep_cfl
     p₀ = 100000.0
 
     # Initialize θˡⁱ from T
@@ -76,7 +76,7 @@ function dcmip2016_klemp_wilhelmson_kessler!(T, qᵛ, qᶜˡ, qʳ, ρ, p, Δt, z
     rᵛ = zeros(FT, Nz)
     rᶜˡ = zeros(FT, Nz)
     rʳ = zeros(FT, Nz)
-    𝕍ʳ = zeros(FT, Nz)
+    𝕎ʳ = zeros(FT, Nz)
 
     ρ₁ = ρ[1]
     max_Δt = Δt
@@ -86,11 +86,11 @@ function dcmip2016_klemp_wilhelmson_kessler!(T, qᵛ, qᶜˡ, qʳ, ρ, p, Δt, z
         rᵛ[k] = qᵛ[k] / (1 - qᵗ)
         rᶜˡ[k] = qᶜˡ[k] / (1 - qᵗ)
         rʳ[k] = qʳ[k] / (1 - qᵗ)
-        𝕍ʳ[k] = kessler_terminal_velocity(rʳ[k], ρ[k], ρ₁, microphysics)
+        𝕎ʳ[k] = kessler_terminal_velocity(rʳ[k], ρ[k], ρ₁, microphysics)
 
-        if k < Nz && 𝕍ʳ[k] > 0
+        if k < Nz && 𝕎ʳ[k] > 0
             Δz = z[k+1] - z[k]
-            max_Δt = min(max_Δt, substep_cfl * Δz / 𝕍ʳ[k])
+            max_Δt = min(max_Δt, cfl * Δz / 𝕎ʳ[k])
         end
     end
 
@@ -117,48 +117,48 @@ function dcmip2016_klemp_wilhelmson_kessler!(T, qᵛ, qᶜˡ, qʳ, ρ, p, Δt, z
             if k < Nz
                 zᵏ⁺¹ = z[k+1]
                 Δz = zᵏ⁺¹ - zᵏ
-                flux_out = ρ[k+1] * rʳ[k+1] * 𝕍ʳ[k+1]
-                flux_in = ρ[k] * rʳ[k] * 𝕍ʳ[k]
-                sed = Δtₛ * (flux_out - flux_in) / (ρ[k] * Δz)
+                flux_out = ρ[k+1] * rʳ[k+1] * 𝕎ʳ[k+1]
+                flux_in = ρ[k] * rʳ[k] * 𝕎ʳ[k]
+                Δr𝕎 = Δtₛ * (flux_out - flux_in) / (ρ[k] * Δz)
                 zᵏ = zᵏ⁺¹
             else
                 Δz_half = 0.5 * (z[k] - z[k-1])
-                sed = -Δtₛ * rʳ[k] * 𝕍ʳ[k] / Δz_half
+                Δr𝕎 = -Δtₛ * rʳ[k] * 𝕎ʳ[k] / Δz_half
             end
 
             # Autoconversion and accretion (KW eq. 2.13)
             Aʳ = max(0.0, k₁ * (rᶜˡ[k] - rᶜˡ★))
-            denom = 1.0 + Δtₛ * k₂ * rʳ[k]^β_acc
-            Pʳ = rᶜˡ[k] - (rᶜˡ[k] - Δtₛ * Aʳ) / denom
+            denom = 1.0 + Δtₛ * k₂ * rʳ[k]^βᵃᶜᶜ
+            Δrᴾ = rᶜˡ[k] - (rᶜˡ[k] - Δtₛ * Aʳ) / denom
 
-            rᶜˡ_new = max(0.0, rᶜˡ[k] - Pʳ)
-            rʳ_new = max(0.0, rʳ[k] + Pʳ + sed)
+            rᶜˡ_new = max(0.0, rᶜˡ[k] - Δrᴾ)
+            rʳ_new = max(0.0, rʳ[k] + Δrᴾ + Δr𝕎)
 
             # Saturation adjustment
             qᵛ⁺ = saturation_specific_humidity(T[k], ρ[k], constants, PlanarLiquidSurface())
             rᵛ⁺ = qᵛ⁺ / (1 - qᵛ⁺)
-            prod = (rᵛ[k] - rᵛ⁺) / (1 + rᵛ⁺ * f₅ / (T[k] - T_offset)^2)
+            Δrˢᵃᵗ = (rᵛ[k] - rᵛ⁺) / (1 + rᵛ⁺ * f₅ / (T[k] - T_offset)^2)
 
             # Rain evaporation (KW eq. 2.14)
-            ρ_scaled = ρ[k] * ρ_scale
-            ρrʳ = ρ_scaled * rʳ_new
+            ρᵏ = ρ[k] * Cᵨ
+            ρrʳ = ρᵏ * rʳ_new
             Vᵉᵛ = (Cᵉᵛ₁ + Cᵉᵛ₂ * ρrʳ^βᵉᵛ₁) * ρrʳ^βᵉᵛ₂
             Dᵗʰ = Cᵈⁱᶠᶠ / (p[k] * rᵛ⁺) + Cᵗʰᵉʳᵐ
 
             Δrᵛ⁺ = max(0.0, rᵛ⁺ - rᵛ[k])
-            Ėʳ = Vᵉᵛ / Dᵗʰ * Δrᵛ⁺ / (ρ_scaled * rᵛ⁺ + 1e-20)
-            Eʳₘₐₓ = max(0.0, -prod - rᶜˡ_new)
-            Eʳ = min(min(Δtₛ * Ėʳ, Eʳₘₐₓ), rʳ_new)
+            Ėʳ = Vᵉᵛ / Dᵗʰ * Δrᵛ⁺ / (ρᵏ * rᵛ⁺ + 1e-20)
+            Δrᴱmax = max(0.0, -Δrˢᵃᵗ - rᶜˡ_new)
+            Δrᴱ = min(min(Δtₛ * Ėʳ, Δrᴱmax), rʳ_new)
 
-            condensation = max(prod, -rᶜˡ_new)
+            Δrᶜ = max(Δrˢᵃᵗ, -rᶜˡ_new)
 
             # Update mixing ratios
-            rᵛ_new = max(0.0, rᵛ[k] - condensation + Eʳ)
-            rᶜˡ_final = rᶜˡ_new + condensation
-            rʳ_final = rʳ_new - Eʳ
+            rᵛ_new = max(0.0, rᵛ[k] - Δrᶜ + Δrᴱ)
+            rᶜˡ_final = rᶜˡ_new + Δrᶜ
+            rʳ_final = rʳ_new - Δrᴱ
 
             # Update θˡⁱ via latent heating
-            ΔT = (ℒˡᵣ / cᵖᵈ) * (condensation - Eʳ)
+            ΔT = (ℒˡᵣ / cᵖᵈ) * (Δrᶜ - Δrᴱ)
             T_new = T[k] + ΔT
 
             rᵗ_new = rᵛ_new + rᶜˡ_final + rʳ_final
@@ -179,7 +179,7 @@ function dcmip2016_klemp_wilhelmson_kessler!(T, qᵛ, qᶜˡ, qʳ, ρ, p, Δt, z
         # Recalculate terminal velocities for next subcycle
         if s < Ns
             for k = 1:Nz
-                𝕍ʳ[k] = kessler_terminal_velocity(rʳ[k], ρ[k], ρ₁, microphysics)
+                𝕎ʳ[k] = kessler_terminal_velocity(rʳ[k], ρ[k], ρ₁, microphysics)
             end
         end
     end
@@ -210,15 +210,15 @@ end
         rʳ = 0.001
         microphysics = DCMIP2016KesslerMicrophysics()
 
-        𝕍ʳ = kessler_terminal_velocity(rʳ, ρ, ρ₁, microphysics)
-        @test 𝕍ʳ > 0
-        @test 𝕍ʳ < 20
+        𝕎ʳ = kessler_terminal_velocity(rʳ, ρ, ρ₁, microphysics)
+        @test 𝕎ʳ > 0
+        @test 𝕎ʳ < 20
 
-        𝕍ʳ_zero = kessler_terminal_velocity(0.0, ρ, ρ₁, microphysics)
-        @test 𝕍ʳ_zero == 0.0
+        𝕎ʳ_zero = kessler_terminal_velocity(0.0, ρ, ρ₁, microphysics)
+        @test 𝕎ʳ_zero == 0.0
 
-        𝕍ʳ_high = kessler_terminal_velocity(0.005, ρ, ρ₁, microphysics)
-        @test 𝕍ʳ_high > 𝕍ʳ
+        𝕎ʳ_high = kessler_terminal_velocity(0.005, ρ, ρ₁, microphysics)
+        @test 𝕎ʳ_high > 𝕎ʳ
     end
 
     @testset "Mass fraction ↔ mixing ratio conversion" begin
