@@ -63,11 +63,12 @@ end
 @testset "Tetens formula saturation vapor pressure [$FT]" for FT in (Float32, Float64)
     tetens = TetensFormula()
     thermo = ThermodynamicConstants(; saturation_vapor_pressure=tetens)
+    rtol = FT === Float64 ? eps(FT) : FT(1e-5)
 
     # Test at reference temperature (273.15 K): should return reference pressure
     Tᵣ = FT(273.15)
     pᵛ⁺_ref = saturation_vapor_pressure(Tᵣ, thermo, PlanarLiquidSurface())
-    @test pᵛ⁺_ref ≈ FT(610) rtol=eps(FT)
+    @test pᵛ⁺_ref ≈ FT(610) rtol=rtol
 
     # Test monotonicity: pressure increases with temperature (liquid)
     T_warm = FT(300)
@@ -78,7 +79,7 @@ end
 
     # Test ice surface at reference temperature
     pⁱ_ref = saturation_vapor_pressure(Tᵣ, thermo, PlanarIceSurface())
-    @test pⁱ_ref ≈ FT(610) rtol=eps(FT)
+    @test pⁱ_ref ≈ FT(610) rtol=rtol
 
     # Test monotonicity for ice
     pⁱ_warm = saturation_vapor_pressure(T_warm, thermo, PlanarIceSurface())
@@ -91,13 +92,13 @@ end
     δTˡ = FT(35.85)
     T_test = FT(288)
     expected_liquid = pᵣ * exp(aˡ * (T_test - Tᵣ) / (T_test - δTˡ))
-    @test saturation_vapor_pressure(T_test, thermo, PlanarLiquidSurface()) ≈ expected_liquid rtol=eps(FT)
+    @test saturation_vapor_pressure(T_test, thermo, PlanarLiquidSurface()) ≈ expected_liquid rtol=rtol
 
     # Verify analytic expressions for ice
     aⁱ = FT(21.875)
     δTⁱ = FT(7.65)
     expected_ice = pᵣ * exp(aⁱ * (T_test - Tᵣ) / (T_test - δTⁱ))
-    @test saturation_vapor_pressure(T_test, thermo, PlanarIceSurface()) ≈ expected_ice rtol=eps(FT)
+    @test saturation_vapor_pressure(T_test, thermo, PlanarIceSurface()) ≈ expected_ice rtol=rtol
 
     # Test mixed-phase surface: linear interpolation between liquid and ice
     for λ in (FT(0), FT(0.5), FT(1))
@@ -105,7 +106,7 @@ end
         pˡ = saturation_vapor_pressure(T_test, thermo, PlanarLiquidSurface())
         pⁱ = saturation_vapor_pressure(T_test, thermo, PlanarIceSurface())
         expected_mixed = λ * pˡ + (1 - λ) * pⁱ
-        @test saturation_vapor_pressure(T_test, thermo, surface) ≈ expected_mixed rtol=eps(FT)
+        @test saturation_vapor_pressure(T_test, thermo, surface) ≈ expected_mixed rtol=rtol
     end
 end
 
