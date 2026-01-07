@@ -1,6 +1,6 @@
 using KernelAbstractions: @kernel, @index
 
-using Oceananigans: AbstractModel, prognostic_fields
+using Oceananigans: AbstractModel, prognostic_fields, fields
 using Oceananigans.Utils: launch!, time_difference_seconds
 
 using Oceananigans.TimeSteppers:
@@ -10,7 +10,8 @@ using Oceananigans.TimeSteppers:
     compute_flux_bc_tendencies!,
     compute_pressure_correction!,
     make_pressure_correction!,
-    step_lagrangian_particles!
+    step_lagrangian_particles!,
+    implicit_step!
 
 """
 $(TYPEDEF)
@@ -112,8 +113,23 @@ function ssp_rk3_substep!(model, Δt, α)
     U⁰ = model.timestepper.U⁰
     Gⁿ = model.timestepper.Gⁿ
 
-    for (u, u⁰, G) in zip(prognostic_fields(model), U⁰, Gⁿ)
+    for (i, (u, u⁰, G)) in enumerate(zip(prognostic_fields(model), U⁰, Gⁿ))
         launch!(arch, grid, :xyz, _ssp_rk3_substep!, u, u⁰, G, Δt, α)
+
+        # Field index for implicit solver:
+        # - indices 1, 2, 3 are momentum (ρu, ρv, ρw)
+        # - indices 4+ are scalars (ρθ/ρe, ρqᵗ, microphysics, tracers)
+        # For scalars, we use Val(i - 3) to get Val(1), Val(2), etc.
+        field_index = Val(i - 3)
+
+        implicit_step!(u,
+                       model.timestepper.implicit_solver,
+                       model.closure,
+                       model.closure_fields,
+                       field_index,
+                       model.clock,
+                       fields(model),
+                       α * Δt)
     end
 
     return nothing
