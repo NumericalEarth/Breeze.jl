@@ -37,6 +37,6 @@ include("prescribed_dynamics.jl")
 # Type alias for kinematic models
 const KinematicModel = AtmosphereModel{<:PrescribedDynamics}
 
-include("prescribed_velocity_time_stepping.jl")
+include("kinematic_driver_time_stepping.jl")
 
 end # module
