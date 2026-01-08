@@ -18,18 +18,15 @@ export
 using DocStringExtensions: TYPEDSIGNATURES
 using Adapt: Adapt, adapt
 
-using Oceananigans: Oceananigans, CenterField, XFaceField, YFaceField, ZFaceField, fields
-using Oceananigans.Architectures: architecture, on_architecture
-using Oceananigans.BoundaryConditions: fill_halo_regions!
+using Oceananigans: Oceananigans, XFaceField, YFaceField, ZFaceField
+using Oceananigans.Architectures: on_architecture
 using Oceananigans.Fields: FunctionField, ZeroField, field
 using Oceananigans.Grids: Face, Center
 using Oceananigans.TimeSteppers: Clock, TimeSteppers
-using Oceananigans.Utils: prettysummary
 
 # Import PrescribedVelocityFields from Oceananigans
 using Oceananigans.Models.HydrostaticFreeSurfaceModels: PrescribedVelocityFields
 
-using Breeze.Thermodynamics: ReferenceState
 using Breeze.AtmosphereModels: AtmosphereModels, AtmosphereModel
 
 include("prescribed_dynamics.jl")
