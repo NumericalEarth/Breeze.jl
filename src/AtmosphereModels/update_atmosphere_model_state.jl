@@ -68,12 +68,8 @@ diagnostic_indices(::Flat, N, H) = 1:N
 $(TYPEDSIGNATURES)
 
 Compute velocities from momentum: `u = ρu / ρ` for each velocity component.
-This is a no-op for kinematic models (velocities are FunctionFields).
 """
 function compute_velocities!(model::AtmosphereModel)
-    # Skip for kinematic dynamics (velocities are FunctionFields, not computed from momentum)
-    has_prescribed_velocities(model.dynamics) && return nothing
-
     grid = model.grid
     arch = grid.architecture
 
@@ -107,9 +103,6 @@ function compute_velocities!(model::AtmosphereModel)
 end
 
 function compute_momentum_tendencies!(model::AtmosphereModel, model_fields)
-    # Skip momentum tendencies if velocities are prescribed
-    has_prescribed_velocities(model.dynamics) && return nothing
-
     grid = model.grid
     arch = grid.architecture
     Gρu = model.timestepper.Gⁿ.ρu

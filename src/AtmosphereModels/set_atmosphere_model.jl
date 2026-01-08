@@ -28,6 +28,36 @@ end
 const settable_thermodynamic_variables = (:ρθ, :θ, :ρθˡⁱ, :θˡⁱ, :ρe, :e, :T)
 function set_thermodynamic_variable! end
 
+#####
+##### Velocity and momentum setting (extensible for kinematic models)
+#####
+
+"""
+    set_velocity!(model, name, value)
+
+Set the velocity component `name` (`:u`, `:v`, or `:w`) to `value`.
+Also updates the corresponding momentum field.
+"""
+function set_velocity!(model::AtmosphereModel, name::Symbol, value)
+    u = model.velocities[name]
+    set!(u, value)
+    ρ = dynamics_density(model.dynamics)
+    ϕ = model.momentum[Symbol(:ρ, name)]
+    set!(ϕ, ρ * u)
+    return nothing
+end
+
+"""
+    set_momentum!(model, name, value)
+
+Set the momentum component `name` (`:ρu`, `:ρv`, or `:ρw`) to `value`.
+"""
+function set_momentum!(model::AtmosphereModel, name::Symbol, value)
+    ρu = getproperty(model.momentum, name)
+    set!(ρu, value)
+    return nothing
+end
+
 """
 $(TYPEDSIGNATURES)
 
@@ -130,12 +160,7 @@ function Fields.set!(model::AtmosphereModel; time=nothing, enforce_mass_conserva
 
         # Prognostic variables
         if name ∈ propertynames(model.momentum)
-            # Check if velocities are prescribed (kinematic mode)
-            if has_prescribed_velocities(model.dynamics)
-                throw(ArgumentError("Cannot set momentum for PrescribedVelocityFields dynamics. Velocities are prescribed by functions."))
-            end
-            ρu = getproperty(model.momentum, name)
-            set!(ρu, value)
+            set_momentum!(model, name, value)
 
         elseif name ∈ propertynames(model.tracers)
             c = getproperty(model.tracers, name)
@@ -167,18 +192,7 @@ function Fields.set!(model::AtmosphereModel; time=nothing, enforce_mass_conserva
             set!(ρqᵗ, ρ * qᵗ)
 
         elseif name ∈ (:u, :v, :w)
-            # Check if velocities are prescribed (kinematic mode)
-            if has_prescribed_velocities(model.dynamics)
-                throw(ArgumentError("Cannot set velocities for PrescribedVelocityFields dynamics. Velocities are prescribed by functions."))
-            end
-
-            u = model.velocities[name]
-            set!(u, value)
-
-            ρ = dynamics_density(model.dynamics)
-            ϕ = model.momentum[Symbol(:ρ, name)]
-            value = ρ * u
-            set!(ϕ, value)
+            set_velocity!(model, name, value)
 
         elseif name ∈ settable_thermodynamic_variables
             set_thermodynamic_variable!(model, Val(name), value)

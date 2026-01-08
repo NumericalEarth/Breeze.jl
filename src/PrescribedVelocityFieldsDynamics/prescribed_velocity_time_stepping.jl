@@ -1,5 +1,5 @@
 #####
-##### Time stepping for PrescribedVelocityFields (kinematic dynamics)
+##### Time stepping for PrescribedDynamics (kinematic dynamics)
 #####
 
 using Oceananigans.Fields: set!
@@ -8,33 +8,25 @@ using Oceananigans.Fields: set!
 ##### Model initialization
 #####
 
-"""
-$(TYPEDSIGNATURES)
+AtmosphereModels.initialize_model_thermodynamics!(m::KinematicModel) = set!(m, θ=m.dynamics.reference_state.potential_temperature)
 
-Initialize thermodynamic state for kinematic models.
-Sets the initial potential temperature to the reference state value.
-"""
-function AtmosphereModels.initialize_model_thermodynamics!(model::KinematicModel)
-    θ₀ = model.dynamics.reference_state.potential_temperature
-    set!(model, θ=θ₀)
-    return nothing
-end
+#####
+##### Velocity and momentum: no-ops (velocities are FunctionFields, no momentum)
+#####
+
+compute_velocities!(::KinematicModel) = nothing
+compute_momentum_tendencies!(::KinematicModel, model_fields) = nothing
+
+#####
+##### Setting velocities/momentum throws for kinematic models
+#####
+
+set_velocity!(::KinematicModel, name, value) = throw(ArgumentError("Cannot set velocities for KinematicModel. Velocities are prescribed."))
+set_momentum!(::KinematicModel, name, value) = throw(ArgumentError("Cannot set momentum for KinematicModel. Velocities are prescribed."))
 
 #####
 ##### Pressure correction: no-op for kinematic dynamics
 #####
 
-"""
-$(TYPEDSIGNATURES)
-
-No pressure correction needed for kinematic dynamics (velocities are prescribed).
-"""
-TimeSteppers.compute_pressure_correction!(model::KinematicModel, Δt) = nothing
-
-"""
-$(TYPEDSIGNATURES)
-
-No pressure correction needed for kinematic dynamics (velocities are prescribed).
-"""
-TimeSteppers.make_pressure_correction!(model::KinematicModel, Δt) = nothing
-
+TimeSteppers.compute_pressure_correction!(::KinematicModel, Δt) = nothing
+TimeSteppers.make_pressure_correction!(::KinematicModel, Δt) = nothing
