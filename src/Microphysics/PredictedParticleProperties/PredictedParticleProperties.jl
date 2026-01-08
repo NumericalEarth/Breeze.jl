@@ -15,15 +15,40 @@ rather than multiple discrete ice categories.
 - Rime fraction and rime density evolution
 - Compatible with both quadrature and lookup table evaluation
 
-# References
+# Complete Reference List
 
-- Morrison and Milbrandt (2015), J. Atmos. Sci. - Original P3 scheme
-- Milbrandt and Morrison (2016), J. Atmos. Sci. - 3-moment ice
-- Milbrandt et al. (2024), J. Adv. Model. Earth Syst. - Predicted liquid fraction
+This implementation is based on the following P3 papers:
+
+1. **Morrison & Milbrandt (2015a)** - Original P3: m(D), A(D), V(D), process rates
+   [Morrison2015parameterization](@citet)
+
+2. **Morrison et al. (2015b)** - Part II: Case study validation
+   [Morrison2015part2](@citet)
+
+3. **Milbrandt & Morrison (2016)** - Part III: Multiple ice categories (NOT implemented)
+   [MilbrandtMorrison2016](@citet)
+
+4. **Milbrandt et al. (2021)** - Three-moment ice: Z as prognostic, size sorting
+   [MilbrandtEtAl2021](@citet)
+
+5. **Milbrandt et al. (2024)** - Updated triple-moment formulation
+   [MilbrandtEtAl2024](@citet)
+
+6. **Milbrandt et al. (2025)** - Predicted liquid fraction: shedding, refreezing
+   [MilbrandtEtAl2025liquidfraction](@citet)
+
+7. **Morrison et al. (2025)** - Complete three-moment implementation
+   [Morrison2025complete3moment](@citet)
 
 # Source Code
 
 Based on [P3-microphysics v5.5.0](https://github.com/P3-microphysics/P3-microphysics)
+
+# Not Implemented
+
+- Multiple free ice categories from Milbrandt & Morrison (2016)
+- Full process rate tendency functions (infrastructure is ready, rates are TODO)
+- Three-moment λ solver using Z/N constraint (currently uses μ-λ relationship)
 """
 module PredictedParticleProperties
 

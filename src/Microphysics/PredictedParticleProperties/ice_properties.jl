@@ -5,34 +5,9 @@
 #####
 
 """
-    IceProperties{FT, FS, DP, BP, CL, M6, LL, IR}
+    IceProperties
 
-Complete ice particle properties for the P3 scheme.
-
-This container combines all ice-related concepts: fall speed, deposition,
-bulk properties, collection, sixth moment evolution, lambda limiting,
-and ice-rain collection.
-
-# Fields
-
-## Top-level parameters
-- `minimum_rime_density`: Minimum rime density ρ_rim,min [kg/m³]
-- `maximum_rime_density`: Maximum rime density ρ_rim,max [kg/m³]
-- `maximum_shape_parameter`: Maximum shape parameter μ_max [-]
-- `minimum_reflectivity`: Minimum reflectivity for 3-moment [m⁶/m³]
-
-## Concept containers (each with parameters + integrals)
-- `fall_speed`: [`IceFallSpeed`](@ref) - terminal velocity integrals
-- `deposition`: [`IceDeposition`](@ref) - vapor diffusion integrals
-- `bulk_properties`: [`IceBulkProperties`](@ref) - population averages
-- `collection`: [`IceCollection`](@ref) - collision-coalescence
-- `sixth_moment`: [`IceSixthMoment`](@ref) - M₆ tendencies (3-moment)
-- `lambda_limiter`: [`IceLambdaLimiter`](@ref) - PSD constraints
-- `ice_rain`: [`IceRainCollection`](@ref) - ice collecting rain
-
-# References
-
-Morrison and Milbrandt (2015), Milbrandt and Morrison (2016), Milbrandt et al. (2024)
+Ice particle properties for P3. See [`IceProperties()`](@ref) constructor.
 """
 struct IceProperties{FT, FS, DP, BP, CL, M6, LL, IR}
     # Top-level parameters
@@ -51,11 +26,38 @@ struct IceProperties{FT, FS, DP, BP, CL, M6, LL, IR}
 end
 
 """
-    IceProperties(FT=Float64)
+$(TYPEDSIGNATURES)
 
-Construct `IceProperties` with default parameters and all concept containers.
+Construct ice particle properties with parameters and integrals for the P3 scheme.
 
-Default parameters from Morrison and Milbrandt (2015).
+Ice particles in P3 span a continuum from small pristine crystals to large
+heavily-rimed graupel. The particle mass ``m(D)`` follows a piecewise power
+law depending on size ``D``, rime fraction ``Fᶠ``, and rime density ``ρᶠ``.
+
+# Physical Concepts
+
+This container organizes all ice-related computations:
+
+- **Fall speed**: Terminal velocity integrals for sedimentation
+  (number-weighted, mass-weighted, reflectivity-weighted)
+- **Deposition**: Ventilation integrals for vapor diffusion growth
+- **Bulk properties**: Population-averaged diameter, density, reflectivity
+- **Collection**: Integrals for aggregation and riming rates
+- **Sixth moment**: Z-tendency integrals for three-moment ice
+- **Lambda limiter**: Constraints on size distribution slope
+
+# Key Parameters
+
+- **Rime density bounds** [50, 900] kg/m³: Physical range for rime layer density
+- **Maximum shape parameter** μmax = 10: Upper limit on PSD shape
+- **Minimum reflectivity** 10⁻²² m⁶/m³: Numerical floor for 3-moment ice
+
+# References
+
+The mass-diameter relationship is from 
+[Morrison and Milbrandt (2015a)](@citet Morrison2015parameterization),
+with sixth moment formulations from 
+[Milbrandt et al. (2021)](@citet MilbrandtEtAl2021).
 """
 function IceProperties(FT::Type{<:AbstractFloat} = Float64)
     return IceProperties(

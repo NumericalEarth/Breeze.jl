@@ -3,6 +3,12 @@
 This section provides worked examples demonstrating P3 microphysics concepts
 through visualization and analysis.
 
+The examples illustrate key concepts from the P3 papers:
+- Mass-diameter relationships from [Morrison & Milbrandt (2015a)](@cite Morrison2015parameterization)
+- Size distribution from [Morrison & Milbrandt (2015a)](@cite Morrison2015parameterization) and [Field et al. (2007)](@cite FieldEtAl2007)
+- Fall speed integrals from [Morrison & Milbrandt (2015a)](@cite Morrison2015parameterization) Table 3
+- μ-λ relationship from [Morrison & Milbrandt (2015a)](@cite Morrison2015parameterization) Eq. 27
+
 ## Ice Particle Property Explorer
 
 Let's explore how ice particle properties vary with size and riming state.

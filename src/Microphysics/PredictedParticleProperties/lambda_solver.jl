@@ -4,6 +4,14 @@
 ##### Given prognostic moments (L_ice, N_ice) and ice properties (rime fraction, rime density),
 ##### solve for the gamma distribution parameters (N₀, λ, μ).
 #####
+##### The solver handles the piecewise mass-diameter relationship with four regimes
+##### from Morrison & Milbrandt (2015a) Equations 1-5. The μ-λ relationship is from
+##### Morrison & Milbrandt (2015a) Equation 27, based on Field et al. (2007) observations.
+#####
+##### For three-moment ice (Milbrandt et al. 2021, 2024), the sixth moment Z can provide
+##### an additional constraint to determine μ independently of the μ-λ relationship.
+##### This is a TODO for future implementation.
+#####
 
 using SpecialFunctions: loggamma, gamma_inc
 
@@ -12,12 +20,9 @@ using SpecialFunctions: loggamma, gamma_inc
 #####
 
 """
-    IceMassPowerLaw{FT}
+    IceMassPowerLaw
 
-Power law parameters for ice particle mass: m(D) = α D^β.
-
-Default values from [Morrison2015parameterization](@citet) for vapor-grown aggregates:
-α = 0.0121 kg/m^β, β = 1.9.
+Power law for ice particle mass. See [`IceMassPowerLaw()`](@ref) constructor.
 """
 struct IceMassPowerLaw{FT}
     coefficient :: FT
@@ -28,7 +33,32 @@ end
 """
 $(TYPEDSIGNATURES)
 
-Construct `IceMassPowerLaw` with default Morrison and Milbrandt (2015) parameters.
+Construct power law parameters for ice particle mass: ``m(D) = α D^β``.
+
+For vapor-grown aggregates (regime 2 in P3), the mass-diameter relationship
+follows a power law with empirically-determined coefficients. This captures
+the fractal nature of ice crystal aggregates, which have effective densities
+much lower than pure ice.
+
+# Physical Interpretation
+
+The exponent ``β ≈ 1.9`` (less than 3) means density decreases with size:
+- Small particles: closer to solid ice density
+- Large aggregates: fluffy, low effective density
+
+This is the key to P3's smooth transitions—as particles grow and aggregate,
+their properties evolve continuously without discrete category jumps.
+
+# Keyword Arguments
+
+- `coefficient`: α in m(D) = α D^β [kg/m^β], default 0.0121
+- `exponent`: β in m(D) = α D^β [-], default 1.9
+- `ice_density`: Pure ice density [kg/m³], default 917
+
+# References
+
+Default parameters from [Morrison and Milbrandt (2015a)](@citet Morrison2015parameterization)
+supplementary material, based on aircraft observations.
 """
 function IceMassPowerLaw(FT = Oceananigans.defaults.FloatType;
                          coefficient = 0.0121,
@@ -42,12 +72,9 @@ end
 #####
 
 """
-    ShapeParameterRelation{FT}
+    ShapeParameterRelation
 
-Relates shape parameter μ to slope parameter λ via power law:
-μ = clamp(a λ^b - c, 0, μmax)
-
-From [Morrison2015parameterization](@citet).
+μ-λ closure for two-moment PSD. See [`ShapeParameterRelation()`](@ref) constructor.
 """
 struct ShapeParameterRelation{FT}
     a :: FT
@@ -59,7 +86,44 @@ end
 """
 $(TYPEDSIGNATURES)
 
-Construct `ShapeParameterRelation` with Morrison and Milbrandt (2015) defaults.
+Construct the μ-λ relationship for gamma size distribution closure.
+
+With only two prognostic moments (mass and number), we need a closure
+to determine the three-parameter gamma distribution (N₀, μ, λ). P3 uses
+an empirical power-law relating shape parameter μ to slope parameter λ:
+
+```math
+μ = \\text{clamp}(a λ^b - c, 0, μ_{max})
+```
+
+This relationship was fitted to aircraft observations of ice particle
+size distributions by [Field et al. (2007)](@citet FieldEtAl2007).
+
+# Physical Interpretation
+
+- **Small λ** (large particles): μ → 0, giving an exponential distribution
+- **Large λ** (small particles): μ increases, narrowing the distribution
+
+The clamping to [0, μmax] ensures physical distributions with non-negative
+shape parameter and prevents unrealistically narrow distributions.
+
+# Three-Moment Alternative
+
+With three-moment ice (tracking reflectivity Z), μ can be diagnosed
+independently from the Z/N ratio, making this closure unnecessary.
+See [Milbrandt et al. (2021)](@citet MilbrandtEtAl2021).
+
+# Keyword Arguments
+
+- `a`: Coefficient in μ = a λ^b - c, default 0.00191
+- `b`: Exponent in μ = a λ^b - c, default 0.8
+- `c`: Offset in μ = a λ^b - c, default 2
+- `μmax`: Maximum shape parameter, default 6
+
+# References
+
+From [Morrison and Milbrandt (2015a)](@citet Morrison2015parameterization) Eq. 27,
+based on [Field et al. (2007)](@citet FieldEtAl2007) observations.
 """
 function ShapeParameterRelation(FT = Oceananigans.defaults.FloatType;
                                  a = 0.00191,
@@ -123,13 +187,9 @@ function graupel_density(rime_fraction, rime_density, deposited_density)
 end
 
 """
-    IceRegimeThresholds{FT}
+    IceRegimeThresholds
 
-Diameter thresholds separating ice particle regimes:
-- `spherical`: below this, particles are small spheres
-- `graupel`: above this (for rimed ice), particles are graupel
-- `partial_rime`: above this, graupel transitions to partially rimed aggregates
-- `ρ_graupel`: bulk density of graupel
+Diameter thresholds between P3 ice regimes. See [`ice_regime_thresholds`](@ref).
 """
 struct IceRegimeThresholds{FT}
     spherical :: FT
@@ -139,9 +199,38 @@ struct IceRegimeThresholds{FT}
 end
 
 """
-    ice_regime_thresholds(mass, rime_fraction, rime_density)
+$(TYPEDSIGNATURES)
 
-Compute diameter thresholds for all ice particle regimes.
+Compute diameter thresholds separating the four P3 ice particle regimes.
+
+P3's key innovation is a piecewise mass-diameter relationship that
+transitions smoothly between ice particle types:
+
+1. **Small spherical** (D < D_th): Dense, nearly solid ice crystals
+2. **Vapor-grown aggregates** (D_th ≤ D < D_gr): Fractal aggregates, m ∝ D^β
+3. **Graupel** (D_gr ≤ D < D_cr): Compact, heavily rimed particles
+4. **Partially rimed** (D ≥ D_cr): Large aggregates with rimed cores
+
+The thresholds depend on rime fraction and rime density, so they evolve
+as particles rime—no ad-hoc category conversions needed.
+
+# Arguments
+
+- `mass`: Power law parameters for vapor-grown aggregates
+- `rime_fraction`: Fraction of particle mass that is rime (0 to 1)
+- `rime_density`: Density of rime layer [kg/m³]
+
+# Returns
+
+[`IceRegimeThresholds`](@ref) with fields:
+- `spherical`: D_th threshold [m]
+- `graupel`: D_gr threshold [m]
+- `partial_rime`: D_cr threshold [m]
+- `ρ_graupel`: Bulk density of graupel [kg/m³]
+
+# References
+
+See [Morrison and Milbrandt (2015a)](@citet Morrison2015parameterization) Equations 12-14.
 """
 function ice_regime_thresholds(mass::IceMassPowerLaw, rime_fraction, rime_density)
     α = mass.coefficient
@@ -382,9 +471,9 @@ function log_intercept_parameter(N_ice, μ, logλ)
 end
 
 """
-    IceDistributionParameters{FT}
+    IceDistributionParameters
 
-Gamma distribution parameters for ice particle size distribution.
+Result of [`distribution_parameters`](@ref). Fields: `N₀`, `λ`, `μ`.
 """
 struct IceDistributionParameters{FT}
     N₀ :: FT
@@ -393,9 +482,57 @@ struct IceDistributionParameters{FT}
 end
 
 """
-    distribution_parameters(L_ice, N_ice, rime_fraction, rime_density; kwargs...)
+$(TYPEDSIGNATURES)
 
-Solve for all gamma distribution parameters (N₀, λ, μ).
+Solve for gamma size distribution parameters from prognostic moments.
+
+This is the core closure for P3: given the prognostic ice mass ``L`` and 
+number ``N`` concentrations, plus the predicted rime properties, compute
+the complete gamma distribution:
+
+```math
+N'(D) = N₀ D^μ e^{-λD}
+```
+
+The solution proceeds in three steps:
+
+1. **Solve for λ**: Secant method finds the slope parameter satisfying
+   the L/N ratio constraint with piecewise m(D)
+2. **Compute μ**: Shape parameter from μ-λ relationship
+3. **Compute N₀**: Intercept from number normalization
+
+# Arguments
+
+- `L_ice`: Ice mass concentration [kg/m³]
+- `N_ice`: Ice number concentration [1/m³]
+- `rime_fraction`: Mass fraction of rime [-] (0 = unrimed, 1 = fully rimed)
+- `rime_density`: Density of the rime layer [kg/m³]
+
+# Keyword Arguments
+
+- `mass`: Power law parameters (default: `IceMassPowerLaw()`)
+- `shape_relation`: μ-λ relationship (default: `ShapeParameterRelation()`)
+
+# Returns
+
+[`IceDistributionParameters`](@ref) with fields `N₀`, `λ`, `μ`.
+
+# Example
+
+```julia
+using Breeze.Microphysics.PredictedParticleProperties
+
+# Typical ice cloud conditions
+L_ice = 1e-4  # 0.1 g/m³
+N_ice = 1e5   # 100,000 particles/m³
+
+params = distribution_parameters(L_ice, N_ice, 0.0, 400.0)
+# IceDistributionParameters(N₀=..., λ=..., μ=...)
+```
+
+# References
+
+See [Morrison and Milbrandt (2015a)](@citet Morrison2015parameterization) Section 2b.
 """
 function distribution_parameters(L_ice, N_ice, rime_fraction, rime_density;
                                   mass = IceMassPowerLaw(),

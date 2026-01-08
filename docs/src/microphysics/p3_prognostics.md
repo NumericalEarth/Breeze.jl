@@ -4,6 +4,13 @@ P3 tracks 9 prognostic variables that together describe the complete microphysic
 state of the atmosphere. This section documents each variable, its physical meaning,
 and the tendency equations governing its evolution.
 
+The prognostic variable formulation has evolved through the P3 papers:
+- [Morrison & Milbrandt (2015a)](@cite Morrison2015parameterization): Original 4 ice variables
+- [Milbrandt et al. (2021)](@cite MilbrandtEtAl2021): Added ``ρz^i`` for 3-moment ice
+- [Milbrandt et al. (2025)](@cite MilbrandtEtAl2025liquidfraction): Added ``ρq^{wi}`` for liquid fraction
+
+Our implementation follows P3 v5.5 with all 6 ice prognostic variables.
+
 ## Variable Definitions
 
 ### Cloud Liquid
@@ -276,4 +283,12 @@ println("\nNumerical thresholds:")
 println("  Minimum mass mixing ratio: ", p3.minimum_mass_mixing_ratio, " kg/kg")
 println("  Minimum number mixing ratio: ", p3.minimum_number_mixing_ratio, " 1/kg")
 ```
+
+## References for This Section
+
+- [Morrison2015parameterization](@cite): Original prognostic variables and tendencies (Section 2)
+- [MilbrandtEtAl2021](@cite): Sixth moment prognostic (``ρz^i``) for three-moment ice
+- [MilbrandtEtAl2025liquidfraction](@cite): Liquid fraction prognostic (``ρq^{wi}``)
+- [Morrison2025complete3moment](@cite): Complete tendency equations with all six ice variables
+- [MilbrandtYau2005](@cite): Multi-moment microphysics and sedimentation
 

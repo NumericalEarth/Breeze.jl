@@ -53,25 +53,71 @@ P3 v5.5 uses three prognostic moments for ice:
 3. **Reflectivity** (``ρzⁱ``): Sixth moment, proportional to radar reflectivity
 
 The third moment provides additional constraint on the size distribution, improving
-representation of precipitation-sized particles.
+representation of precipitation-sized particles. This was introduced in
+[Milbrandt et al. (2021)](@cite MilbrandtEtAl2021) and further refined in
+[Milbrandt et al. (2024)](@cite MilbrandtEtAl2024) and
+[Morrison et al. (2025)](@cite Morrison2025complete3moment).
 
 ### Predicted Liquid Fraction
 
-[Milbrandt et al. (2024)](@cite MilbrandtEtAl2024) extended P3 to track liquid water on ice particles.
+[Milbrandt et al. (2025)](@cite MilbrandtEtAl2025liquidfraction) extended P3 to track liquid water on ice particles.
 This is crucial for:
 - **Wet growth**: Melting particles with liquid coatings
 - **Shedding**: Liquid water dripping from large ice
 - **Refreezing**: Coating that freezes into rime
 
-## Scheme Evolution
+## Scheme Evolution and Citation Guide
 
-| Version | Reference | Key Addition |
-|---------|-----------|--------------|
-| P3 v1 | [Morrison & Milbrandt (2015)](@cite Morrison2015parameterization) | Single ice category, predicted rime |
-| P3 v2 | [Milbrandt & Morrison (2016)](@cite MilbrandtMorrison2016) | Three-moment ice (reflectivity) |
-| P3 v5.5 | [Milbrandt et al. (2024)](@cite MilbrandtEtAl2024) | Predicted liquid fraction |
+The P3 scheme has evolved through multiple papers. Here we document what each paper contributes
+and which equations from each paper are implemented:
+
+| Version | Reference | Key Contributions | Status |
+|---------|-----------|-------------------|--------|
+| P3 v1.0 | [Morrison & Milbrandt (2015a)](@cite Morrison2015parameterization) | Single ice category, predicted rime, m(D) relationships | ✓ Implemented |
+| P3 v1.0 | [Morrison et al. (2015b)](@cite Morrison2015part2) | Case study validation | For reference only |
+| P3 v2.0 | [Milbrandt & Morrison (2016)](@cite MilbrandtMorrison2016) | Multiple free ice categories | ⚠ Not implemented |
+| P3 v3.0 | [Milbrandt et al. (2021)](@cite MilbrandtEtAl2021) | Three-moment ice (Z prognostic) | ✓ Implemented |
+| P3 v4.0 | [Milbrandt et al. (2024)](@cite MilbrandtEtAl2024) | Updated triple-moment formulation | ✓ Implemented |
+| P3 v5.0 | [Milbrandt et al. (2025)](@cite MilbrandtEtAl2025liquidfraction) | Predicted liquid fraction | ✓ Implemented |
+| P3 v5.5 | [Morrison et al. (2025)](@cite Morrison2025complete3moment) | Complete three-moment implementation | ✓ Reference implementation |
 
 Our implementation follows **P3 v5.5** from the official [P3-microphysics repository](https://github.com/P3-microphysics/P3-microphysics).
+
+### What We Implement
+
+From [Morrison & Milbrandt (2015a)](@cite Morrison2015parameterization):
+- Mass-diameter relationship with four regimes (Equations 1-5)
+- Area-diameter relationship (Equations 6-8)
+- Terminal velocity parameterization (Equations 9-11)
+- Rime density parameterization
+- μ-λ relationship for size distribution closure
+
+From [Milbrandt et al. (2021)](@cite MilbrandtEtAl2021) and [Milbrandt et al. (2024)](@cite MilbrandtEtAl2024):
+- Sixth moment (reflectivity) as prognostic variable
+- Reflectivity-weighted fall speed
+- Z-tendency from each microphysical process
+
+From [Milbrandt et al. (2025)](@cite MilbrandtEtAl2025liquidfraction):
+- Liquid fraction prognostic variable (``ρqʷⁱ``)
+- Shedding process
+- Refreezing process
+
+### What We Do NOT Implement (Future Work)
+
+!!! note "Multiple Ice Categories"
+    [Milbrandt & Morrison (2016)](@cite MilbrandtMorrison2016) introduced **multiple free ice categories**
+    that can coexist and interact. Our implementation uses a single ice category. Multiple categories
+    may be added in a future version to better represent environments with distinct ice populations
+    (e.g., anvil ice vs. convective ice).
+
+!!! note "Full Process Rate Parameterizations"
+    The full process rate formulations from the P3 papers are documented in [Microphysical Processes](@ref p3_processes)
+    but are not yet all implemented as tendency functions. Current implementation provides the
+    integral infrastructure for computing bulk rates; the complete tendency equations are a TODO.
+
+!!! note "Saturation Adjustment-Free Approach"
+    The E3SM implementation includes modifications for saturation adjustment-free supersaturation
+    evolution. Our implementation currently uses saturation adjustment for cloud liquid.
 
 ## Prognostic Variables
 
@@ -126,11 +172,24 @@ The following sections provide detailed documentation of the P3 scheme:
 4. **[Microphysical Processes](@ref p3_processes)**: Process rate formulations
 5. **[Prognostic Equations](@ref p3_prognostics)**: Tendency equations and model coupling
 
-## References
+## Complete References
 
-The P3 scheme is described in detail in:
+The P3 scheme is described in detail in the following papers:
 
-- [Morrison2015parameterization](@cite): Original P3 formulation with predicted rime
-- [MilbrandtMorrison2016](@cite): Extension to three-moment ice  
-- [MilbrandtEtAl2024](@cite): Predicted liquid fraction on ice
+### Core P3 Papers
+
+- [Morrison2015parameterization](@cite): Original P3 formulation with predicted rime (Part I)
+- [Morrison2015part2](@cite): Case study comparisons with observations (Part II)
+- [MilbrandtMorrison2016](@cite): Extension to multiple free ice categories (Part III)
+- [MilbrandtEtAl2021](@cite): Original three-moment ice in JAS
+- [MilbrandtEtAl2024](@cite): Updated triple-moment formulation in JAMES
+- [MilbrandtEtAl2025liquidfraction](@cite): Predicted liquid fraction on ice
+- [Morrison2025complete3moment](@cite): Complete three-moment implementation
+
+### Related Papers
+
+- [MilbrandtYau2005](@cite): Multimoment microphysics and spectral shape parameter
+- [SeifertBeheng2006](@cite): Two-moment cloud microphysics for mixed-phase clouds
+- [KhairoutdinovKogan2000](@cite): Warm rain autoconversion parameterization
+- [pruppacher2010microphysics](@cite): Microphysics of clouds and precipitation (textbook)
 

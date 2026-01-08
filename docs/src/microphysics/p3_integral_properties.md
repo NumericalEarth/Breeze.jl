@@ -4,6 +4,13 @@ Bulk microphysical rates require population-averaged quantities computed by inte
 over the particle size distribution. P3 defines numerous integral properties organized
 by physical concept.
 
+These integrals are pre-computed and stored in lookup tables in the Fortran P3 code
+(see `create_p3_lookupTable_1.f90` in the [P3-microphysics repository](https://github.com/P3-microphysics/P3-microphysics)).
+The integral formulations are from:
+- [Morrison & Milbrandt (2015a)](@cite Morrison2015parameterization): Fall speed, ventilation, collection
+- [Milbrandt et al. (2021)](@cite MilbrandtEtAl2021): Sixth moment integrals for 3-moment ice
+- [Morrison et al. (2025)](@cite Morrison2025complete3moment): Complete 3-moment lookup tables
+
 ## General Form
 
 All integral properties have the form:
@@ -17,11 +24,13 @@ where ``X(D)`` is the quantity of interest and ``W(D)`` is a weighting function
 
 ## Fall Speed Integrals
 
-Terminal velocity determines sedimentation rates. P3 computes three weighted fall speeds.
+Terminal velocity determines sedimentation rates. P3 computes three weighted fall speeds,
+corresponding to `uns`, `ums`, `uzs` in the Fortran lookup tables
+([Morrison & Milbrandt (2015a)](@cite Morrison2015parameterization) Table 3).
 
 ### Terminal Velocity Power Law
 
-Individual particle fall speed follows:
+Individual particle fall speed follows ([Morrison & Milbrandt (2015a)](@cite Morrison2015parameterization) Eq. 9):
 
 ```math
 V(D) = a_V \left(\frac{ρ₀}{ρ}\right)^{1/2} D^{b_V}
@@ -215,8 +224,12 @@ println("  Rain collection      = $(round(n_rain, sigdigits=3))")
 
 ## Sixth Moment Integrals
 
-For 3-moment ice, P3 tracks the 6th moment ``Z`` which requires additional integrals
-for each process affecting reflectivity.
+For 3-moment ice ([Milbrandt et al. (2021)](@cite MilbrandtEtAl2021),
+[Milbrandt et al. (2024)](@cite MilbrandtEtAl2024)),
+P3 tracks the 6th moment ``Z`` which requires additional integrals
+for each process affecting reflectivity. These are documented in
+[Morrison et al. (2025)](@cite Morrison2025complete3moment) and stored
+in the 3-moment lookup table (`p3_lookupTable_1.dat-v*_3momI`).
 
 | Process | Integral | Physical Meaning |
 |---------|----------|------------------|
@@ -339,4 +352,12 @@ P3 uses 29+ integral properties organized by concept:
 
 All integrals use the same infrastructure: define the integrand, then call
 `evaluate(integral_type, state)` with optional quadrature settings.
+
+## References for This Section
+
+- [Morrison2015parameterization](@cite): Fall speed, ventilation, collection integrals (Table 3, Section 2)
+- [HallPruppacher1976](@cite): Ventilation factor coefficients
+- [MilbrandtEtAl2021](@cite): Sixth moment integrals for three-moment ice (Table 1)
+- [MilbrandtEtAl2024](@cite): Updated three-moment formulation
+- [Morrison2025complete3moment](@cite): Complete three-moment lookup table (29 quantities)
 

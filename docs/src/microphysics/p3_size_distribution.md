@@ -6,7 +6,7 @@ determined from prognostic moments and empirical closure relations.
 ## Gamma Size Distribution
 
 The number concentration of ice particles per unit volume, as a function of
-maximum dimension ``D``, follows:
+maximum dimension ``D``, follows ([Morrison & Milbrandt (2015a)](@cite Morrison2015parameterization) Eq. 19):
 
 ```math
 N'(D) = N₀ D^μ e^{-λD}
@@ -21,6 +21,9 @@ where:
 The shape parameter ``μ`` controls the distribution width:
 - ``μ = 0``: Exponential (Marshall-Palmer) distribution
 - ``μ > 0``: Narrower distribution with a mode at ``D = μ/λ``
+
+This form is standard in cloud microphysics and is discussed in
+[Milbrandt & Yau (2005)](@cite MilbrandtYau2005) for multi-moment schemes.
 
 ## Moments of the Distribution
 
@@ -50,7 +53,8 @@ N = M_0 = N₀ \frac{Γ(μ + 1)}{λ^{μ+1}}
 \bar{D} = \frac{M_1}{M_0} = \frac{μ + 1}{λ}
 ```
 
-**Reflectivity** (6th moment):
+**Reflectivity** (6th moment) — this is the third prognostic variable in three-moment P3
+([Milbrandt et al. (2021)](@cite MilbrandtEtAl2021)):
 
 ```math
 Z ∝ M_6 = N₀ \frac{Γ(μ + 7)}{λ^{μ+7}}
@@ -59,19 +63,27 @@ Z ∝ M_6 = N₀ \frac{Γ(μ + 7)}{λ^{μ+7}}
 ## Shape-Slope (μ-λ) Relationship
 
 To close the system with only two prognostic moments (mass and number), P3 relates
-the shape parameter ``μ`` to the slope parameter ``λ``:
+the shape parameter ``μ`` to the slope parameter ``λ``
+([Morrison & Milbrandt (2015a)](@cite Morrison2015parameterization) Eq. 27):
 
 ```math
 μ = \text{clamp}\left( a λ^b - c,\, 0,\, μ_{max} \right)
 ```
 
-with empirical coefficients from [Morrison2015parameterization](@cite):
+with empirical coefficients from [Morrison & Milbrandt (2015a)](@cite Morrison2015parameterization):
 - ``a = 0.00191``
 - ``b = 0.8``
 - ``c = 2``
 - ``μ_{max} = 6``
 
-This relationship is based on aircraft observations of ice particle size distributions.
+This relationship is based on aircraft observations of ice particle size distributions
+compiled by [Field et al. (2007)](@cite FieldEtAl2007).
+
+!!! note "Three-Moment Mode"
+    When using three-moment ice ([Milbrandt et al. (2021)](@cite MilbrandtEtAl2021),
+    [Milbrandt et al. (2024)](@cite MilbrandtEtAl2024)), the sixth moment ``Z``
+    provides an additional constraint, allowing ``μ`` to be diagnosed independently
+    of the μ-λ relationship. This is discussed in [Three-Moment Extension](#three-moment-extension).
 
 ```@example p3_psd
 using Breeze.Microphysics.PredictedParticleProperties
@@ -87,10 +99,10 @@ ax = Axis(fig[1, 1],
     xlabel = "Slope parameter λ [m⁻¹]",
     ylabel = "Shape parameter μ",
     xscale = log10,
-    title = "μ-λ Relationship")
+    title = "μ-λ Relationship (Morrison & Milbrandt 2015a)")
 
 lines!(ax, λ_values, μ_values, linewidth=2)
-hlines!(ax, [relation.μmax], linestyle=:dash, color=:gray, label="μmax")
+hlines!(ax, [relation.maximum_shape_parameter], linestyle=:dash, color=:gray, label="μmax")
 
 fig
 ```
@@ -115,8 +127,9 @@ For a power-law mass relationship ``m(D) = α D^β``, this simplifies to:
 \frac{L}{N} = α \frac{Γ(β + μ + 1)}{λ^β Γ(μ + 1)}
 ```
 
-However, P3 uses a **piecewise** mass-diameter relationship with four regimes,
-so the integral must be computed over each regime separately.
+However, P3 uses a **piecewise** mass-diameter relationship with four regimes
+(see [Particle Properties](@ref p3_particle_properties)), so the integral must
+be computed over each regime separately.
 
 ### Lambda Solver
 
@@ -127,7 +140,9 @@ Finding ``λ`` requires solving:
 ```
 
 This is a nonlinear equation in ``λ`` (since ``μ = μ(λ)``), solved numerically
-using the secant method.
+using the secant method. The implementation follows the approach in
+[Morrison & Milbrandt (2015a)](@cite Morrison2015parameterization) Section 2b,
+adapted for the piecewise m(D) relationship.
 
 ```@example p3_psd
 # Solve for distribution parameters
@@ -139,9 +154,9 @@ rime_density = 400.0
 params = distribution_parameters(L_ice, N_ice, rime_fraction, rime_density)
 
 println("Distribution parameters:")
-println("  N₀ = $(round(params.N₀, sigdigits=3)) m⁻⁵⁻μ")
-println("  λ  = $(round(params.λ, sigdigits=3)) m⁻¹")
-println("  μ  = $(round(params.μ, digits=2))")
+println("  N₀ = $(round(params.intercept, sigdigits=3)) m⁻⁵⁻μ")
+println("  λ  = $(round(params.slope, sigdigits=3)) m⁻¹")
+println("  μ  = $(round(params.shape, digits=2))")
 ```
 
 ### Computing ``N₀``
@@ -173,7 +188,7 @@ for (L, label, color) in [(1e-5, "L = 10⁻⁵ kg/m³", :blue),
                            (1e-4, "L = 10⁻⁴ kg/m³", :green),
                            (1e-3, "L = 10⁻³ kg/m³", :red)]
     params = distribution_parameters(L, N_ice, 0.0, 400.0)
-    N_D = @. params.N₀ * D_m^params.μ * exp(-params.λ * D_m)
+    N_D = @. params.intercept * D_m^params.shape * exp(-params.slope * D_m)
     lines!(ax, D_mm, N_D, label=label, color=color)
 end
 
@@ -201,7 +216,7 @@ for (Ff, label, color) in [(0.0, "Fᶠ = 0 (unrimed)", :blue),
                             (0.3, "Fᶠ = 0.3", :green),
                             (0.6, "Fᶠ = 0.6", :orange)]
     params = distribution_parameters(L_ice, N_ice, Ff, 500.0)
-    N_D = @. params.N₀ * D_m^params.μ * exp(-params.λ * D_m)
+    N_D = @. params.intercept * D_m^params.shape * exp(-params.slope * D_m)
     lines!(ax, D_mm, N_D, label=label, color=color)
 end
 
@@ -212,7 +227,8 @@ fig
 
 ## Mass Integrals with Piecewise m(D)
 
-The challenge in P3 is that the mass-diameter relationship is piecewise:
+The challenge in P3 is that the mass-diameter relationship is piecewise
+(see [Morrison & Milbrandt (2015a)](@cite Morrison2015parameterization) Eqs. 1-4):
 
 ```math
 \int_0^∞ m(D) N'(D)\, dD = \sum_{i=1}^{4} \int_{D_{i-1}}^{D_i} a_i D^{b_i} N'(D)\, dD
@@ -245,7 +261,10 @@ where ``q_i = Γ(k+1, λD_i) / Γ(k+1)`` is the regularized incomplete gamma fun
 
 ## Three-Moment Extension
 
-With three-moment ice, the 6th moment ``Z`` provides an additional constraint.
+With three-moment ice ([Milbrandt et al. (2021)](@cite MilbrandtEtAl2021),
+[Milbrandt et al. (2024)](@cite MilbrandtEtAl2024),
+[Morrison et al. (2025)](@cite Morrison2025complete3moment)),
+the 6th moment ``Z`` provides an additional constraint.
 This allows independent determination of ``μ`` rather than using the μ-λ relationship:
 
 ```math
@@ -253,6 +272,16 @@ This allows independent determination of ``μ`` rather than using the μ-λ rela
 ```
 
 Combined with the L/N ratio, this gives two equations for two unknowns (``μ`` and ``λ``).
+
+The benefit of three-moment ice is improved representation of:
+- **Size sorting**: Large particles fall faster and separate from small ones
+- **Hail formation**: Accurate simulation of heavily rimed particles
+- **Radar reflectivity**: Direct prognostic variable rather than diagnosed
+
+!!! note "Implementation Status"
+    Our lambda solver currently uses the two-moment closure (μ-λ relationship).
+    The three-moment solver using Z/N is a TODO for future implementation.
+    The prognostic Z field is tracked for use in diagnostics and future process rates.
 
 ## Summary
 
@@ -265,4 +294,13 @@ The P3 size distribution closure proceeds as:
 5. **Normalization**: Intercept ``N₀`` from number conservation
 
 This provides the complete size distribution needed for computing microphysical rates.
+
+## References for This Section
+
+- [Morrison2015parameterization](@cite): PSD formulation and μ-λ relationship (Sec. 2b)
+- [MilbrandtYau2005](@cite): Multimoment bulk microphysics and shape parameter analysis
+- [FieldEtAl2007](@cite): Snow size distribution observations used for μ-λ fit
+- [MilbrandtEtAl2021](@cite): Three-moment ice with Z as prognostic
+- [MilbrandtEtAl2024](@cite): Updated three-moment formulation
+- [Morrison2025complete3moment](@cite): Complete three-moment implementation
 

@@ -5,51 +5,10 @@
 #####
 
 """
-    PredictedParticlePropertiesMicrophysics{FT, ICE, RAIN, CLOUD, BC}
+    PredictedParticlePropertiesMicrophysics
 
-The Predicted Particle Properties (P3) microphysics scheme.
-
-P3 uses a single ice category with predicted properties (rime fraction,
-rime density, liquid fraction) rather than multiple discrete categories
-(cloud ice, snow, graupel, hail). This allows continuous evolution of
-ice particle characteristics.
-
-# Prognostic Variables
-
-Cloud liquid:
-- `ρqᶜˡ`: Cloud liquid mass density [kg/m³]
-- `ρnᶜˡ`: Cloud droplet number density [1/m³] (if prognostic)
-
-Rain:
-- `ρqʳ`: Rain mass density [kg/m³]
-- `ρnʳ`: Rain number density [1/m³]
-
-Ice (single category with predicted properties):
-- `ρqⁱ`: Total ice mass density [kg/m³]
-- `ρnⁱ`: Ice number density [1/m³]
-- `ρqᶠ`: Frost/rime mass density [kg/m³]
-- `ρbᶠ`: Frost/rime volume density [m³/m³]
-- `ρzⁱ`: Ice 6th moment (reflectivity) [m⁶/m³] (3-moment)
-- `ρqʷⁱ`: Water on ice mass density [kg/m³] (liquid fraction)
-
-# Fields
-
-## Top-level parameters
-- `water_density`: Liquid water density ρʷ [kg/m³] (shared by cloud and rain)
-- `minimum_mass_mixing_ratio`: Threshold below which hydrometeor is ignored [kg/kg]
-- `minimum_number_mixing_ratio`: Threshold for number concentration [1/kg]
-
-## Property containers
-- `ice`: [`IceProperties`](@ref) - ice particle properties and integrals
-- `rain`: [`RainProperties`](@ref) - rain properties and integrals
-- `cloud`: [`CloudDropletProperties`](@ref) - cloud droplet properties
-- `precipitation_boundary_condition`: Boundary condition for precipitation at surface
-
-# References
-
-- Morrison and Milbrandt (2015), J. Atmos. Sci. - Original P3 scheme
-- Milbrandt and Morrison (2016), J. Atmos. Sci. - 3-moment ice
-- Milbrandt et al. (2024), J. Adv. Model. Earth Syst. - Predicted liquid fraction
+The Predicted Particle Properties (P3) microphysics scheme. See the constructor
+[`PredictedParticlePropertiesMicrophysics()`](@ref) for usage and documentation.
 """
 struct PredictedParticlePropertiesMicrophysics{FT, ICE, RAIN, CLOUD, BC}
     # Shared physical constants
@@ -68,25 +27,81 @@ end
 """
 $(TYPEDSIGNATURES)
 
-Construct a `PredictedParticlePropertiesMicrophysics` scheme with default parameters.
+Construct the Predicted Particle Properties (P3) microphysics scheme.
 
-This creates the full P3 v5.5 scheme with:
-- 3-moment ice (mass, number, reflectivity)
-- Predicted liquid fraction on ice
-- Predicted rime fraction and density
+P3 is a bulk microphysics scheme that uses a **single ice category** with
+continuously predicted properties, rather than discrete categories like
+cloud ice, snow, graupel, and hail. As ice particles grow and rime, their
+properties evolve smoothly without artificial category conversions.
+
+# Physical Concept
+
+Traditional schemes force growing ice particles through discrete transitions:
+
+    cloud ice → snow → graupel → hail
+
+Each transition requires ad-hoc conversion parameters. P3 instead tracks:
+
+- **Rime fraction** ``Fᶠ``: What fraction of mass is rime?
+- **Rime density** ``ρᶠ``: How dense is the rime layer?
+- **Liquid fraction** ``Fˡ``: Liquid water coating from partial melting
+
+From these, particle characteristics (mass, fall speed, collection efficiency)
+are diagnosed continuously.
+
+# Three-Moment Ice
+
+P3 v5.5 carries three prognostic moments for ice particles:
+1. **Mass** (``qⁱ``): Total ice mass
+2. **Number** (``nⁱ``): Ice particle number concentration  
+3. **Reflectivity** (``zⁱ``): Sixth moment of size distribution
+
+The third moment improves representation of precipitation-sized particles
+and enables better simulation of radar reflectivity.
+
+# Prognostic Variables
+
+The scheme tracks 9 prognostic densities:
+
+| Variable | Description |
+|----------|-------------|
+| ``ρqᶜˡ`` | Cloud liquid mass |
+| ``ρqʳ``, ``ρnʳ`` | Rain mass and number |
+| ``ρqⁱ``, ``ρnⁱ`` | Ice mass and number |
+| ``ρqᶠ``, ``ρbᶠ`` | Rime mass and volume |
+| ``ρzⁱ`` | Ice 6th moment (reflectivity) |
+| ``ρqʷⁱ`` | Liquid water on ice |
 
 # Keyword Arguments
-- `water_density`: Liquid water density [kg/m³], default 1000
-- `precipitation_boundary_condition`: Boundary condition at surface for precipitation.
-  Default is `nothing` which uses open boundary (precipitation exits domain).
+
+- `water_density`: Liquid water density [kg/m³] (default 1000)
+- `precipitation_boundary_condition`: Boundary condition for surface precipitation
+  (default `nothing` = open boundary, precipitation exits domain)
 
 # Example
 
 ```julia
 using Breeze
 
+# Create P3 scheme with default parameters
 microphysics = PredictedParticlePropertiesMicrophysics()
+
+# Get prognostic field names for model setup
+fields = prognostic_field_names(microphysics)
 ```
+
+# References
+
+This implementation follows P3 v5.5 from the 
+[P3-microphysics repository](https://github.com/P3-microphysics/P3-microphysics).
+
+Key papers describing P3:
+- [Morrison and Milbrandt (2015a)](@citet Morrison2015parameterization): Original scheme
+- [Milbrandt et al. (2021)](@citet MilbrandtEtAl2021): Three-moment ice
+- [Milbrandt et al. (2025)](@citet MilbrandtEtAl2025liquidfraction): Predicted liquid fraction
+- [Morrison et al. (2025)](@citet Morrison2025complete3moment): Complete implementation
+
+See also the [P3 documentation](@ref p3_overview) for detailed physics.
 """
 function PredictedParticlePropertiesMicrophysics(FT::Type{<:AbstractFloat} = Float64;
                                                   water_density = 1000,

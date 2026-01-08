@@ -7,6 +7,14 @@
 ##### Each integral type can be evaluated via quadrature or tabulated for efficiency.
 ##### The type hierarchy groups integrals by physical concept.
 #####
+##### References:
+##### - Fall speed integrals: Morrison & Milbrandt (2015a) Table 3
+##### - Deposition/ventilation integrals: Morrison & Milbrandt (2015a) Eqs. 30-32
+##### - Collection integrals: Morrison & Milbrandt (2015a) Eqs. 36-42
+##### - Sixth moment integrals: Milbrandt et al. (2021) Table 1, Morrison et al. (2025) 
+##### - Lambda limiter integrals: Morrison & Milbrandt (2015a) Section 2b
+##### - Rain integrals: Morrison & Milbrandt (2015a) Eqs. 46-47
+#####
 
 #####
 ##### Abstract hierarchy
