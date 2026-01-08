@@ -21,19 +21,20 @@ AtmosphereModels.compute_momentum_tendencies!(::KinematicModel, model_fields) = 
 ##### Setting velocities for kinematic models
 #####
 
-# For regular fields: just set the velocity (no momentum to update)
-function AtmosphereModels.set_velocity!(model::KinematicModel, name::Symbol, value)
-    u = model.velocities[name]
-    if u isa FunctionField
-        throw(ArgumentError("Cannot set velocity '$name': it is a FunctionField (prescribed). Use regular velocity fields if you need to set velocities."))
-    end
-    set!(u, value)
-    return nothing
-end
+# Dispatch on velocity field type
+AtmosphereModels.set_velocity!(model::KinematicModel, name::Symbol, value) =
+    set_velocity!(model.velocities, name, value)
+
+# Regular fields: just set directly
+set_velocity!(velocities, name, value) = set!(velocities[name], value)
+
+# FunctionFields: cannot be set
+set_velocity!(::PrescribedVelocityFields, name, value) = 
+    throw(ArgumentError("Cannot set velocity component '$name' of PrescribedVelocityFields."))
 
 # No momentum in kinematic models
 AtmosphereModels.set_momentum!(::KinematicModel, name::Symbol, value) = 
-    throw(ArgumentError("KinematicModel has no momentum fields. Set velocities directly."))
+    throw(ArgumentError("Cannot set momentum component '$name' of a KinematicModel."))
 
 #####
 ##### Pressure correction: no-op for kinematic dynamics

@@ -1,8 +1,9 @@
 using Breeze
-using Breeze: PrescribedDynamics, PrescribedVelocityFields, KinematicModel
+using Breeze: PrescribedDynamics, KinematicModel
 using GPUArraysCore: @allowscalar
 using Oceananigans
 using Oceananigans.Fields: ZeroField
+using Oceananigans.Models.HydrostaticFreeSurfaceModels: PrescribedVelocityFields
 using Test
 
 @testset "PrescribedDynamics construction [$(FT)]" for FT in (Float32, Float64)
