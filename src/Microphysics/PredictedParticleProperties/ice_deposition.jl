@@ -74,6 +74,6 @@ Base.summary(::IceDeposition) = "IceDeposition"
 function Base.show(io::IO, d::IceDeposition)
     print(io, summary(d), "(")
     print(io, "κ=", d.thermal_conductivity, ", ")
-    print(io, "D_v=", d.vapor_diffusivity, ")")
+    print(io, "Dᵥ=", d.vapor_diffusivity, ")")
 end
 

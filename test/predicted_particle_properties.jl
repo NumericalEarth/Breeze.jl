@@ -17,6 +17,7 @@ using Oceananigans: CPU
         # Test main scheme construction
         p3 = PredictedParticlePropertiesMicrophysics()
         @test p3 isa PredictedParticlePropertiesMicrophysics
+        @test p3.water_density == 1000.0
         @test p3.minimum_mass_mixing_ratio == 1e-14
         @test p3.minimum_number_mixing_ratio == 1e-16
 
@@ -26,6 +27,7 @@ using Oceananigans: CPU
 
         # Test with Float32
         p3_f32 = PredictedParticlePropertiesMicrophysics(Float32)
+        @test p3_f32.water_density isa Float32
         @test p3_f32.minimum_mass_mixing_ratio isa Float32
         @test p3_f32.ice.fall_speed.reference_air_density isa Float32
     end
@@ -122,7 +124,6 @@ using Oceananigans: CPU
 
     @testset "Rain properties" begin
         rain = RainProperties()
-        @test rain.density ≈ 1000.0
         @test rain.maximum_mean_diameter ≈ 6e-3
         @test rain.fall_speed_coefficient ≈ 4854.0
         @test rain.fall_speed_exponent ≈ 1.0
@@ -133,17 +134,25 @@ using Oceananigans: CPU
         @test rain.evaporation isa RainEvaporation
     end
 
-    @testset "Cloud properties" begin
-        cloud = CloudProperties()
-        @test cloud.density ≈ 1000.0
-        @test cloud.number_mode == :prescribed
-        @test cloud.prescribed_number_concentration ≈ 100e6
+    @testset "Cloud droplet properties" begin
+        cloud = CloudDropletProperties()
+        @test cloud.number_concentration ≈ 100e6
         @test cloud.autoconversion_threshold ≈ 25e-6
         @test cloud.condensation_timescale ≈ 1.0
         
-        # Test prognostic mode
-        cloud_prog = CloudProperties(Float64; number_mode=:prognostic)
-        @test cloud_prog.number_mode == :prognostic
+        # Test custom parameters
+        cloud_custom = CloudDropletProperties(Float64; number_concentration=50e6)
+        @test cloud_custom.number_concentration ≈ 50e6
+    end
+    
+    @testset "Water density is shared" begin
+        # Water density should be at top level, shared by cloud and rain
+        p3 = PredictedParticlePropertiesMicrophysics()
+        @test p3.water_density ≈ 1000.0
+        
+        # Custom water density
+        p3_custom = PredictedParticlePropertiesMicrophysics(Float64; water_density=998.0)
+        @test p3_custom.water_density ≈ 998.0
     end
 
     @testset "Prognostic field names" begin
@@ -931,6 +940,140 @@ using Oceananigans: CPU
         
         # D_mean_2 should be ~2x D_mean_1 for exponential (μ=0) distribution
         @test D_mean_2 > D_mean_1
+    end
+
+    #####
+    ##### Lambda solver tests
+    #####
+    
+    @testset "IceMassPowerLaw construction" begin
+        mass = IceMassPowerLaw()
+        @test mass.coefficient ≈ 0.0121
+        @test mass.exponent ≈ 1.9
+        @test mass.ice_density ≈ 917.0
+        
+        mass32 = IceMassPowerLaw(Float32)
+        @test mass32.coefficient isa Float32
+    end
+    
+    @testset "ShapeParameterRelation construction" begin
+        relation = ShapeParameterRelation()
+        @test relation.a ≈ 0.00191
+        @test relation.b ≈ 0.8
+        @test relation.c ≈ 2.0
+        @test relation.μmax ≈ 6.0
+        
+        # Test shape parameter computation
+        μ = shape_parameter(relation, log(1000.0))
+        @test μ ≥ 0
+        @test μ ≤ relation.μmax
+    end
+    
+    @testset "Ice regime thresholds" begin
+        mass = IceMassPowerLaw()
+        
+        # Unrimed ice
+        thresholds_unrimed = ice_regime_thresholds(mass, 0.0, 400.0)
+        @test thresholds_unrimed.spherical > 0
+        @test thresholds_unrimed.graupel == Inf
+        @test thresholds_unrimed.partial_rime == Inf
+        
+        # Rimed ice
+        thresholds_rimed = ice_regime_thresholds(mass, 0.5, 400.0)
+        @test thresholds_rimed.spherical > 0
+        @test thresholds_rimed.graupel > thresholds_rimed.spherical
+        @test thresholds_rimed.partial_rime > thresholds_rimed.graupel
+        @test thresholds_rimed.ρ_graupel > 0
+    end
+    
+    @testset "Ice mass computation" begin
+        mass = IceMassPowerLaw()
+        
+        # Small particles should have spherical mass
+        D_small = 1e-5  # 10 μm
+        m_small = ice_mass(mass, 0.0, 400.0, D_small)
+        m_sphere = mass.ice_density * π / 6 * D_small^3
+        @test m_small ≈ m_sphere
+        
+        # Mass should increase with diameter
+        D_large = 1e-3  # 1 mm
+        m_large = ice_mass(mass, 0.0, 400.0, D_large)
+        @test m_large > m_small
+    end
+    
+    @testset "Lambda solver - basic functionality" begin
+        # Create a test case with known parameters
+        L_ice = 1e-4   # 0.1 g/m³
+        N_ice = 1e5    # 100,000 particles/m³
+        rime_fraction = 0.0
+        rime_density = 400.0
+        
+        logλ = solve_lambda(L_ice, N_ice, rime_fraction, rime_density)
+        
+        @test isfinite(logλ)
+        @test logλ > log(10)    # Within bounds
+        @test logλ < log(1e7)
+        
+        λ = exp(logλ)
+        @test λ > 0
+    end
+    
+    @testset "Lambda solver - consistency" begin
+        # Solve for λ, then verify the L/N ratio is recovered
+        L_ice = 1e-4
+        N_ice = 1e5
+        rime_fraction = 0.0
+        rime_density = 400.0
+        
+        mass = IceMassPowerLaw()
+        shape_relation = ShapeParameterRelation()
+        
+        params = distribution_parameters(L_ice, N_ice, rime_fraction, rime_density;
+                                          mass, shape_relation)
+        
+        @test params.N₀ > 0
+        @test params.λ > 0
+        @test params.μ ≥ 0
+        
+        # The solved parameters should be consistent
+        @test isfinite(params.N₀)
+        @test isfinite(params.λ)
+        @test isfinite(params.μ)
+    end
+    
+    @testset "Lambda solver - rimed ice" begin
+        L_ice = 1e-4
+        N_ice = 1e5
+        rime_fraction = 0.5
+        rime_density = 500.0
+        
+        logλ = solve_lambda(L_ice, N_ice, rime_fraction, rime_density)
+        
+        @test isfinite(logλ)
+        @test exp(logλ) > 0
+    end
+    
+    @testset "Lambda solver - edge cases" begin
+        # Zero mass should return log(0)
+        logλ_zero_L = solve_lambda(0.0, 1e5, 0.0, 400.0)
+        @test logλ_zero_L == log(0.0)
+        
+        # Zero number should return log(0)
+        logλ_zero_N = solve_lambda(1e-4, 0.0, 0.0, 400.0)
+        @test logλ_zero_N == log(0.0)
+    end
+    
+    @testset "Lambda solver - L/N dependence" begin
+        # Higher L/N ratio means larger particles, hence smaller λ
+        N_ice = 1e5
+        rime_fraction = 0.0
+        rime_density = 400.0
+        
+        logλ_small = solve_lambda(1e-5, N_ice, rime_fraction, rime_density)  # Small L/N
+        logλ_large = solve_lambda(1e-3, N_ice, rime_fraction, rime_density)  # Large L/N
+        
+        # Larger mean mass → smaller λ (larger characteristic diameter)
+        @test logλ_large < logλ_small
     end
 end
 

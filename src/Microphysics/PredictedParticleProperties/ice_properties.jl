@@ -79,8 +79,8 @@ Base.summary(::IceProperties) = "IceProperties"
 
 function Base.show(io::IO, ice::IceProperties)
     print(io, summary(ice), '\n')
-    print(io, "├── ρ_rim: [", ice.minimum_rime_density, ", ", ice.maximum_rime_density, "] kg/m³\n")
-    print(io, "├── μ_max: ", ice.maximum_shape_parameter, "\n")
+    print(io, "├── ρᶠ: [", ice.minimum_rime_density, ", ", ice.maximum_rime_density, "] kg/m³\n")
+    print(io, "├── μmax: ", ice.maximum_shape_parameter, "\n")
     print(io, "├── ", ice.fall_speed, "\n")
     print(io, "├── ", ice.deposition, "\n")
     print(io, "├── ", ice.bulk_properties, "\n")

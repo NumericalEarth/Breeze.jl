@@ -69,7 +69,7 @@ Base.summary(::IceBulkProperties) = "IceBulkProperties"
 
 function Base.show(io::IO, bp::IceBulkProperties)
     print(io, summary(bp), "(")
-    print(io, "D_max=", bp.maximum_mean_diameter, ", ")
-    print(io, "D_min=", bp.minimum_mean_diameter, ")")
+    print(io, "Dmax=", bp.maximum_mean_diameter, ", ")
+    print(io, "Dmin=", bp.minimum_mean_diameter, ")")
 end
 

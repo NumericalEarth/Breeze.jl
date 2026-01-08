@@ -35,13 +35,14 @@ Ice (single category with predicted properties):
 # Fields
 
 ## Top-level parameters
+- `water_density`: Liquid water density ρʷ [kg/m³] (shared by cloud and rain)
 - `minimum_mass_mixing_ratio`: Threshold below which hydrometeor is ignored [kg/kg]
 - `minimum_number_mixing_ratio`: Threshold for number concentration [1/kg]
 
 ## Property containers
 - `ice`: [`IceProperties`](@ref) - ice particle properties and integrals
 - `rain`: [`RainProperties`](@ref) - rain properties and integrals
-- `cloud`: [`CloudProperties`](@ref) - cloud droplet properties
+- `cloud`: [`CloudDropletProperties`](@ref) - cloud droplet properties
 - `precipitation_boundary_condition`: Boundary condition for precipitation at surface
 
 # References
@@ -51,6 +52,8 @@ Ice (single category with predicted properties):
 - Milbrandt et al. (2024), J. Adv. Model. Earth Syst. - Predicted liquid fraction
 """
 struct PredictedParticlePropertiesMicrophysics{FT, ICE, RAIN, CLOUD, BC}
+    # Shared physical constants
+    water_density :: FT
     # Top-level thresholds
     minimum_mass_mixing_ratio :: FT
     minimum_number_mixing_ratio :: FT
@@ -63,7 +66,7 @@ struct PredictedParticlePropertiesMicrophysics{FT, ICE, RAIN, CLOUD, BC}
 end
 
 """
-    PredictedParticlePropertiesMicrophysics(FT=Float64; precipitation_boundary_condition=nothing)
+$(TYPEDSIGNATURES)
 
 Construct a `PredictedParticlePropertiesMicrophysics` scheme with default parameters.
 
@@ -73,6 +76,7 @@ This creates the full P3 v5.5 scheme with:
 - Predicted rime fraction and density
 
 # Keyword Arguments
+- `water_density`: Liquid water density [kg/m³], default 1000
 - `precipitation_boundary_condition`: Boundary condition at surface for precipitation.
   Default is `nothing` which uses open boundary (precipitation exits domain).
 
@@ -85,13 +89,15 @@ microphysics = PredictedParticlePropertiesMicrophysics()
 ```
 """
 function PredictedParticlePropertiesMicrophysics(FT::Type{<:AbstractFloat} = Float64;
+                                                  water_density = 1000,
                                                   precipitation_boundary_condition = nothing)
     return PredictedParticlePropertiesMicrophysics(
+        FT(water_density),
         FT(1e-14),   # minimum_mass_mixing_ratio [kg/kg]
         FT(1e-16),   # minimum_number_mixing_ratio [1/kg]
         IceProperties(FT),
         RainProperties(FT),
-        CloudProperties(FT),
+        CloudDropletProperties(FT),
         precipitation_boundary_condition
     )
 end
@@ -103,7 +109,8 @@ Base.summary(::PredictedParticlePropertiesMicrophysics) = "PredictedParticleProp
 
 function Base.show(io::IO, p3::PredictedParticlePropertiesMicrophysics)
     print(io, summary(p3), '\n')
-    print(io, "├── q_min: ", p3.minimum_mass_mixing_ratio, " kg/kg\n")
+    print(io, "├── ρʷ: ", p3.water_density, " kg/m³\n")
+    print(io, "├── qmin: ", p3.minimum_mass_mixing_ratio, " kg/kg\n")
     print(io, "├── ice: ", summary(p3.ice), "\n")
     print(io, "├── rain: ", summary(p3.rain), "\n")
     print(io, "└── cloud: ", summary(p3.cloud))
@@ -118,19 +125,14 @@ end
 
 Return prognostic field names for the P3 scheme.
 
-P3 v5.5 with 3-moment ice and predicted liquid fraction has 10 prognostic fields:
-- Cloud: ρqᶜˡ, ρnᶜˡ (if prognostic)
+P3 v5.5 with 3-moment ice and predicted liquid fraction has 9 prognostic fields:
+- Cloud: ρqᶜˡ (number is prescribed, not prognostic)
 - Rain: ρqʳ, ρnʳ
 - Ice: ρqⁱ, ρnⁱ, ρqᶠ, ρbᶠ, ρzⁱ, ρqʷⁱ
 """
-function prognostic_field_names(p3::PredictedParticlePropertiesMicrophysics)
-    # Cloud fields depend on number_mode
-    if p3.cloud.number_mode == :prognostic
-        cloud_names = (:ρqᶜˡ, :ρnᶜˡ)
-    else
-        cloud_names = (:ρqᶜˡ,)
-    end
-    
+function prognostic_field_names(::PredictedParticlePropertiesMicrophysics)
+    # Cloud number is prescribed (not prognostic) in this implementation
+    cloud_names = (:ρqᶜˡ,)
     rain_names = (:ρqʳ, :ρnʳ)
     ice_names = (:ρqⁱ, :ρnⁱ, :ρqᶠ, :ρbᶠ, :ρzⁱ, :ρqʷⁱ)
     

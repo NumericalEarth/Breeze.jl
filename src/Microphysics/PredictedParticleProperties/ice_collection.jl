@@ -55,7 +55,7 @@ Base.summary(::IceCollection) = "IceCollection"
 
 function Base.show(io::IO, c::IceCollection)
     print(io, summary(c), "(")
-    print(io, "E_ic=", c.ice_cloud_collection_efficiency, ", ")
-    print(io, "E_ir=", c.ice_rain_collection_efficiency, ")")
+    print(io, "Eⁱᶜ=", c.ice_cloud_collection_efficiency, ", ")
+    print(io, "Eⁱʳ=", c.ice_rain_collection_efficiency, ")")
 end
 

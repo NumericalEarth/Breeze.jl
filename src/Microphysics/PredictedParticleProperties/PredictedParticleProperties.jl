@@ -42,9 +42,9 @@ export
     IceLambdaLimiter,
     IceRainCollection,
     
-    # Rain and cloud properties
+    # Rain and cloud droplet properties
     RainProperties,
-    CloudProperties,
+    CloudDropletProperties,
     
     # Integral types (abstract)
     AbstractP3Integral,
@@ -122,7 +122,24 @@ export
     
     # Tabulation
     tabulate,
-    TabulationParameters
+    TabulationParameters,
+    
+    # Lambda solver
+    IceMassPowerLaw,
+    ShapeParameterRelation,
+    IceRegimeThresholds,
+    IceDistributionParameters,
+    solve_lambda,
+    distribution_parameters,
+    shape_parameter,
+    ice_regime_thresholds,
+    ice_mass,
+    ice_mass_coefficients,
+    intercept_parameter
+
+using DocStringExtensions: TYPEDFIELDS, TYPEDSIGNATURES
+
+using Oceananigans: Oceananigans
 
 #####
 ##### Integral types (must be first - no dependencies)
@@ -163,6 +180,12 @@ include("p3_scheme.jl")
 include("size_distribution.jl")
 include("quadrature.jl")
 include("tabulation.jl")
+
+#####
+##### Lambda solver (depends on mass-diameter relationship)
+#####
+
+include("lambda_solver.jl")
 
 end # module PredictedParticleProperties
 

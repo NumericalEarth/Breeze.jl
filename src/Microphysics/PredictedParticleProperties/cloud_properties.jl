@@ -1,67 +1,68 @@
 #####
-##### Cloud Properties
+##### Cloud Droplet Properties
 #####
 ##### Cloud droplet properties for the P3 scheme.
 #####
 
 """
-    CloudProperties{FT}
+    CloudDropletProperties{FT}
 
-Cloud droplet properties.
+Cloud droplet properties for prescribed cloud droplet number concentration.
 
 Cloud droplets are typically small enough that terminal velocity is negligible.
-The number concentration can be prescribed or diagnosed.
+In this implementation, cloud droplet number concentration is prescribed
+(not prognostic), which is appropriate for many applications and simplifies
+the scheme.
+
+Note: liquid water density is stored in `PredictedParticlePropertiesMicrophysics`
+as it is shared between cloud and rain.
 
 # Fields
-- `density`: Cloud water density [kg/m³]
-- `number_mode`: How to determine cloud droplet number: `:prescribed` or `:prognostic`
-- `prescribed_number_concentration`: Fixed N_c if `number_mode == :prescribed` [1/m³]
-- `autoconversion_threshold`: Threshold diameter for autoconversion to rain [m]
-- `condensation_timescale`: Relaxation timescale for saturation adjustment [s]
+$(TYPEDFIELDS)
 
 # References
 
-Morrison and Milbrandt (2015), Khairoutdinov and Kogan (2000)
+[Morrison2015parameterization](@cite), [KhairoutdinovKogan2000](@cite)
 """
-struct CloudProperties{FT}
-    density :: FT
-    number_mode :: Symbol
-    prescribed_number_concentration :: FT
+struct CloudDropletProperties{FT}
+    "Prescribed cloud droplet number concentration [1/m³]"
+    number_concentration :: FT
+    "Threshold diameter for autoconversion to rain [m]"
     autoconversion_threshold :: FT
+    "Relaxation timescale for saturation adjustment [s]"
     condensation_timescale :: FT
 end
 
 """
-    CloudProperties(FT=Float64; number_mode=:prescribed, prescribed_number_concentration=100e6)
+$(TYPEDSIGNATURES)
 
-Construct `CloudProperties` with default parameters.
+Construct `CloudDropletProperties` with specified parameters.
 
 # Keyword Arguments
-- `number_mode`: `:prescribed` (default) or `:prognostic`
-- `prescribed_number_concentration`: Default 100×10⁶ m⁻³ (continental)
+- `number_concentration`: Prescribed cloud droplet number concentration [1/m³], 
+   default 100×10⁶ (typical for continental clouds; marine ~50×10⁶)
+- `autoconversion_threshold`: Threshold diameter for autoconversion to rain [m],
+   default 25×10⁻⁶ (25 μm)
+- `condensation_timescale`: Relaxation timescale for saturation adjustment [s],
+   default 1.0
 
-Default parameters from Morrison and Milbrandt (2015).
+Default parameters from [Morrison2015parameterization](@cite).
 """
-function CloudProperties(FT::Type{<:AbstractFloat} = Float64;
-                         number_mode::Symbol = :prescribed,
-                         prescribed_number_concentration = FT(100e6))
-    return CloudProperties(
-        FT(1000.0),      # density [kg/m³]
-        number_mode,
-        prescribed_number_concentration,
-        FT(25e-6),       # autoconversion_threshold [m] = 25 μm
-        FT(1.0)          # condensation_timescale [s]
+function CloudDropletProperties(FT = Oceananigans.defaults.FloatType;
+                                number_concentration = 100e6,
+                                autoconversion_threshold = 25e-6,
+                                condensation_timescale = 1)
+    return CloudDropletProperties(
+        FT(number_concentration),
+        FT(autoconversion_threshold),
+        FT(condensation_timescale)
     )
 end
 
-Base.summary(::CloudProperties) = "CloudProperties"
+Base.summary(::CloudDropletProperties) = "CloudDropletProperties"
 
-function Base.show(io::IO, c::CloudProperties)
+function Base.show(io::IO, c::CloudDropletProperties)
     print(io, summary(c), "(")
-    print(io, "mode=", c.number_mode, ", ")
-    if c.number_mode == :prescribed
-        print(io, "N_c=", c.prescribed_number_concentration, " m⁻³")
-    end
+    print(io, "nᶜˡ=", c.number_concentration, " m⁻³")
     print(io, ")")
 end
-

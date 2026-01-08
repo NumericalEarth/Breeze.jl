@@ -14,7 +14,7 @@
 # This exploration builds intuition for how P3 represents the full spectrum
 # from delicate dendritic snowflakes to dense graupel hailstones.
 #
-# Reference: [Milbrandt and Morrison (2016)](@citet) for the 3-moment P3 formulation.
+# Reference: [MilbrandtMorrison2016](@citet) for the 3-moment P3 formulation.
 
 using Breeze.Microphysics.PredictedParticleProperties
 using CairoMakie
