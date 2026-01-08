@@ -30,6 +30,9 @@ to match Breeze's thermodynamic state (liquid-ice potential temperature `θˡⁱ
 
 Applies one microphysics time step to column arrays, including subcycling
 for rain sedimentation CFL constraints.
+
+References: DCMIP2016 Fortran implementation (`kessler.f90` in [DOI: 10.5281/zenodo.1298671](https://doi.org/10.5281/zenodo.1298671))
+
 """
 function dcmip2016_klemp_wilhelmson_kessler!(T, qᵛ, qᶜˡ, qʳ, ρ, p, Δt, z, constants, microphysics)
     Nz = length(T)
