@@ -162,7 +162,7 @@ export
     ice_mass_coefficients,
     intercept_parameter
 
-using DocStringExtensions: TYPEDFIELDS, TYPEDSIGNATURES
+using DocStringExtensions: TYPEDSIGNATURES
 using SpecialFunctions: loggamma, gamma_inc
 
 using Oceananigans: Oceananigans
