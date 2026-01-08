@@ -16,18 +16,17 @@ For time-dependent velocities, pass `velocities = PrescribedVelocityFields(...)`
 
 # Example
 
-```julia
+```jldoctest
+using Oceananigans
+using Breeze
+
+grid = RectilinearGrid(size=(4, 4, 8), extent=(1000, 1000, 2000))
 reference_state = ReferenceState(grid, ThermodynamicConstants())
+dynamics = PrescribedDynamics(reference_state)
 
-# Constant velocity (settable)
-model = AtmosphereModel(grid; dynamics = PrescribedDynamics(reference_state))
-set!(model, θ=300, qᵗ=0.01, w=1)
-
-# Time-dependent velocity
-w_func(x, y, z, t) = sin(π * z / 2000) * (1 - exp(-t / 100))
-model = AtmosphereModel(grid;
-    dynamics = PrescribedDynamics(reference_state),
-    velocities = PrescribedVelocityFields(w = w_func))
+# output
+PrescribedDynamics
+├── reference_state: ReferenceState{Float64}
 ```
 """
 struct PrescribedDynamics{R}
@@ -35,6 +34,11 @@ struct PrescribedDynamics{R}
 end
 
 Base.summary(::PrescribedDynamics) = "PrescribedDynamics"
+
+function Base.show(io::IO, d::PrescribedDynamics)
+    print(io, "PrescribedDynamics\n")
+    print(io, "└── reference_state: ", summary(d.reference_state))
+end
 
 #####
 ##### PrescribedVelocityFields definition
@@ -50,14 +54,19 @@ When `parameters !== nothing`, velocity functions have signature `f(x, y, z, t, 
 
 # Example
 
-```julia
-# Simple time-dependent updraft
-w_func(x, y, z, t) = 2 * sin(π * z / 2000) * min(1, t / 100)
+```jldoctest
+using Oceananigans.Fields: ZeroField
+using Breeze
+
+w_func(x, y, z, t) = 2 * sin(π * z / 2000)
 velocities = PrescribedVelocityFields(w = w_func)
 
-# With parameters
-w_param(x, y, z, t, p) = p.w_max * sin(π * z / p.H)
-velocities = PrescribedVelocityFields(w = w_param, parameters = (; w_max=5, H=2000))
+# output
+PrescribedVelocityFields
+├── u: ZeroField
+├── v: ZeroField
+├── w: w_func
+└── parameters: nothing
 ```
 """
 struct PrescribedVelocityFields{U, V, W, P}
@@ -75,6 +84,19 @@ function PrescribedVelocityFields(; u = ZeroField(),
 end
 
 Base.summary(::PrescribedVelocityFields) = "PrescribedVelocityFields"
+
+function Base.show(io::IO, v::PrescribedVelocityFields)
+    print(io, "PrescribedVelocityFields\n")
+    print(io, "├── u: ", prettysummary(v.u), "\n")
+    print(io, "├── v: ", prettysummary(v.v), "\n")
+    print(io, "├── w: ", prettysummary(v.w), "\n")
+    print(io, "└── parameters: ", prettysummary(v.parameters))
+end
+
+prettysummary(::Nothing) = "nothing"
+prettysummary(::ZeroField) = "ZeroField"
+prettysummary(f::Function) = nameof(f)
+prettysummary(x) = summary(x)
 
 #####
 ##### Dynamics interface implementation
