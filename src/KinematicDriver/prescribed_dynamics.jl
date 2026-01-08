@@ -26,7 +26,7 @@ dynamics = PrescribedDynamics(reference_state)
 
 # output
 PrescribedDynamics
-└── reference_state: ReferenceState{Float64}
+└── reference_state: ReferenceState{Float64}(p₀=101325.0, θ₀=288.0, pˢᵗ=100000.0)
 ```
 """
 struct PrescribedDynamics{R, V}
