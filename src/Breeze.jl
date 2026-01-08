@@ -153,7 +153,7 @@ include("CompressibleEquations/CompressibleEquations.jl")
 using .CompressibleEquations: CompressibleDynamics, CompressibleModel
 
 include("KinematicDriver/KinematicDriver.jl")
-using .KinematicDriver: PrescribedDynamics, PrescribedVelocityFields, KinematicModel
+using .KinematicDriver: PrescribedDynamics, KinematicModel
 
 include("Microphysics/Microphysics.jl")
 using .Microphysics
