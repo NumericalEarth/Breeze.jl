@@ -6,58 +6,60 @@
 #####
 
 """
-    IceFallSpeed{FT, N, M, Z}
+    IceFallSpeed
 
-Ice particle fall speed properties and integrals.
-
-The terminal velocity of ice particles follows a power law:
-
-```math
-V(D) = a_V \\left(\\frac{\\rho_0}{\\rho}\\right)^{0.5} D^{b_V}
-```
-
-where `a_V` is the `fall_speed_coefficient`, `b_V` is the `fall_speed_exponent`,
-`ρ_0` is the `reference_air_density`, and `ρ` is the local air density.
-
-# Fields
-
-## Parameters
-- `reference_air_density`: Reference air density ρ₀ for fall speed correction [kg/m³]
-- `fall_speed_coefficient`: Coefficient a_V in V(D) = a_V D^{b_V} [m^{1-b_V}/s]
-- `fall_speed_exponent`: Exponent b_V in V(D) = a_V D^{b_V} [-]
-
-## Integrals (or `TabulatedIntegral` after tabulation)
-- `number_weighted`: Number-weighted fall speed V_n
-- `mass_weighted`: Mass-weighted fall speed V_m
-- `reflectivity_weighted`: Reflectivity-weighted fall speed V_z (3-moment)
-
-# References
-
-Morrison and Milbrandt (2015), Milbrandt and Morrison (2016)
+Ice terminal velocity power law parameters and weighted fall speed integrals.
+See [`IceFallSpeed`](@ref) constructor for details.
 """
 struct IceFallSpeed{FT, N, M, Z}
-    # Parameters
     reference_air_density :: FT
     fall_speed_coefficient :: FT
     fall_speed_exponent :: FT
-    # Integrals
     number_weighted :: N
     mass_weighted :: M
     reflectivity_weighted :: Z
 end
 
 """
-    IceFallSpeed(FT=Float64)
+$(TYPEDSIGNATURES)
 
-Construct `IceFallSpeed` with default parameters and quadrature-based integrals.
+Construct `IceFallSpeed` with parameters and quadrature-based integrals.
 
-Default parameters from Morrison and Milbrandt (2015).
+Ice particle terminal velocity follows a power law with air density correction:
+
+```math
+V(D) = a_V \\left(\\frac{ρ_0}{ρ}\\right)^{0.5} D^{b_V}
+```
+
+where ``a_V`` is `fall_speed_coefficient`, ``b_V`` is `fall_speed_exponent`,
+and ``ρ_0`` is `reference_air_density`. The density correction accounts for 
+reduced drag at higher altitudes where air is less dense.
+
+Three weighted fall speeds are computed by integrating over the size distribution:
+
+- **Number-weighted** ``V_n``: For number flux (sedimentation of particle count)
+- **Mass-weighted** ``V_m``: For mass flux (precipitation rate)  
+- **Reflectivity-weighted** ``V_z``: For 3-moment scheme (6th moment flux)
+
+# Keyword Arguments
+
+- `reference_air_density`: Reference ρ₀ [kg/m³], default 1.225 (sea level)
+- `fall_speed_coefficient`: Coefficient aᵥ [m^{1-b}/s], default 11.72
+- `fall_speed_exponent`: Exponent bᵥ [-], default 0.41
+
+# References
+
+[Morrison and Milbrandt (2015a)](@citet Morrison2015parameterization) Eq. 20,
+[Milbrandt et al. (2021)](@citet MilbrandtEtAl2021) for reflectivity weighting.
 """
-function IceFallSpeed(FT::Type{<:AbstractFloat} = Float64)
+function IceFallSpeed(FT::Type{<:AbstractFloat} = Float64;
+                      reference_air_density = 1.225,
+                      fall_speed_coefficient = 11.72,
+                      fall_speed_exponent = 0.41)
     return IceFallSpeed(
-        FT(1.225),   # reference_air_density [kg/m³] at sea level
-        FT(11.72),   # fall_speed_coefficient [m^{1-b}/s]
-        FT(0.41),    # fall_speed_exponent [-]
+        FT(reference_air_density),
+        FT(fall_speed_coefficient),
+        FT(fall_speed_exponent),
         NumberWeightedFallSpeed(),
         MassWeightedFallSpeed(),
         ReflectivityWeightedFallSpeed()

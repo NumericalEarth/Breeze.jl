@@ -7,57 +7,53 @@
 #####
 
 """
-    IceSixthMoment{RI, DP, D1, M1, M2, AG, SH, SB, S1}
+    IceSixthMoment
 
-Sixth moment (Z, reflectivity) tendency integrals for 3-moment ice.
-
-The 6th moment M₆ = ∫ D⁶ N'(D) dD is proportional to radar reflectivity.
-Tracking M₆ as a prognostic variable allows better representation of
-particle size distribution evolution.
-
-# Fields (all integrals)
-
-Growth processes:
-- `rime`: Sixth moment tendency from riming (m6rime)
-- `deposition`: Sixth moment tendency from vapor deposition (m6dep)
-- `deposition1`: Sixth moment deposition with enhanced ventilation (m6dep1)
-
-Melting processes:
-- `melt1`: Sixth moment tendency from melting, term 1 (m6mlt1)
-- `melt2`: Sixth moment tendency from melting, term 2 (m6mlt2)
-- `shedding`: Sixth moment tendency from meltwater shedding (m6shd)
-
-Collection processes:
-- `aggregation`: Sixth moment tendency from aggregation (m6agg)
-
-Sublimation:
-- `sublimation`: Sixth moment tendency from sublimation (m6sub)
-- `sublimation1`: Sixth moment sublimation with enhanced ventilation (m6sub1)
-
-# References
-
-Milbrandt and Morrison (2016), Milbrandt et al. (2024)
+Sixth moment (reflectivity) tendency integrals for 3-moment ice.
+See [`IceSixthMoment`](@ref) constructor for details.
 """
 struct IceSixthMoment{RI, DP, D1, M1, M2, AG, SH, SB, S1}
-    # Growth
     rime :: RI
     deposition :: DP
     deposition1 :: D1
-    # Melting
     melt1 :: M1
     melt2 :: M2
     shedding :: SH
-    # Collection
     aggregation :: AG
-    # Sublimation
     sublimation :: SB
     sublimation1 :: S1
 end
 
 """
-    IceSixthMoment()
+$(TYPEDSIGNATURES)
 
 Construct `IceSixthMoment` with quadrature-based integrals.
+
+The sixth moment ``M_6 = ∫ D^6 N'(D) dD`` is proportional to radar 
+reflectivity Z. Prognosing M₆ (or equivalently Z) as a third moment
+provides an independent constraint on the shape of the size distribution,
+improving representation of differential fall speeds and collection.
+
+Each microphysical process that affects ice mass also affects M₆:
+
+**Growth:**
+- `rime`: Riming adds mass preferentially to larger particles
+- `deposition`, `deposition1`: Vapor deposition with/without ventilation
+
+**Melting:**
+- `melt1`, `melt2`: Two terms in the melting tendency
+- `shedding`: Meltwater that leaves the ice particle
+
+**Collection:**
+- `aggregation`: Aggregation shifts mass to larger sizes, increasing Z
+
+**Sublimation:**
+- `sublimation`, `sublimation1`: Mass loss with/without ventilation
+
+# References
+
+[Milbrandt et al. (2021)](@citet MilbrandtEtAl2021) introduced 3-moment ice,
+[Milbrandt et al. (2024)](@citet MilbrandtEtAl2024) refined the approach.
 """
 function IceSixthMoment()
     return IceSixthMoment(

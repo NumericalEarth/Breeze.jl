@@ -5,39 +5,15 @@
 #####
 
 """
-    RainProperties{FT, MU, VN, VM, EV}
+    RainProperties
 
-Rain particle properties and integrals.
-
-Rain follows a gamma size distribution with diagnosed shape parameter μ_r.
-Terminal velocity follows a power law similar to ice.
-
-Note: liquid water density is stored in `PredictedParticlePropertiesMicrophysics`
-as it is shared between cloud and rain.
-
-# Fields
-
-## Parameters
-- `maximum_mean_diameter`: Maximum mean raindrop diameter [m]
-- `fall_speed_coefficient`: Coefficient aᵥ in V(D) = aᵥ D^{bᵥ} [m^{1-bᵥ}/s]
-- `fall_speed_exponent`: Exponent bᵥ in V(D) = aᵥ D^{bᵥ} [-]
-
-## Integrals
-- `shape_parameter`: Diagnosed shape parameter μʳ
-- `velocity_number`: Number-weighted fall speed
-- `velocity_mass`: Mass-weighted fall speed
-- `evaporation`: Evaporation rate integral
-
-# References
-
-[Morrison2015parameterization](@cite), Seifert and Beheng (2006)
+Rain particle size distribution and fall speed parameters.
+See [`RainProperties`](@ref) constructor for details.
 """
 struct RainProperties{FT, MU, VN, VM, EV}
-    # Parameters
     maximum_mean_diameter :: FT
     fall_speed_coefficient :: FT
     fall_speed_exponent :: FT
-    # Integrals
     shape_parameter :: MU
     velocity_number :: VN
     velocity_mass :: VM
@@ -47,14 +23,42 @@ end
 """
 $(TYPEDSIGNATURES)
 
-Construct `RainProperties` with specified parameters and quadrature-based integrals.
+Construct `RainProperties` with parameters and quadrature-based integrals.
+
+Rain in P3 follows a gamma size distribution similar to ice:
+
+```math
+N'(D) = N₀ D^{μ_r} e^{-λ_r D}
+```
+
+The shape parameter ``μ_r`` is diagnosed from the rain mass and number
+concentrations following [Milbrandt and Yau (2005)](@citet MilbrandtYau2005).
+
+**Terminal velocity:**
+
+```math
+V(D) = a_V D^{b_V}
+```
+
+Default coefficients give fall speeds in m/s for D in meters.
+
+**Integrals:**
+
+- `shape_parameter`: Diagnosed μ_r from q_r, N_r
+- `velocity_number`, `velocity_mass`: Weighted fall speeds  
+- `evaporation`: Rate integral for rain evaporation
 
 # Keyword Arguments
-- `maximum_mean_diameter`: Maximum mean raindrop diameter [m], default 6×10⁻³ (6 mm)
-- `fall_speed_coefficient`: Coefficient aᵥ in V(D) = aᵥ D^{bᵥ} [m^{1-bᵥ}/s], default 4854
-- `fall_speed_exponent`: Exponent bᵥ in V(D) = aᵥ D^{bᵥ} [-], default 1.0
 
-Default parameters from [Morrison2015parameterization](@cite).
+- `maximum_mean_diameter`: Upper Dm limit [m], default 6×10⁻³ (6 mm)
+- `fall_speed_coefficient`: aᵥ [m^{1-b}/s], default 4854
+- `fall_speed_exponent`: bᵥ [-], default 1.0
+
+# References
+
+[Morrison and Milbrandt (2015a)](@citet Morrison2015parameterization),
+[Milbrandt and Yau (2005)](@citet MilbrandtYau2005),
+[Seifert and Beheng (2006)](@citet SeifertBeheng2006).
 """
 function RainProperties(FT::Type{<:AbstractFloat} = Float64;
                         maximum_mean_diameter = 6e-3,

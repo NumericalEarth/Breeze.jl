@@ -13,8 +13,6 @@
 ##### This is a TODO for future implementation.
 #####
 
-using SpecialFunctions: loggamma, gamma_inc
-
 #####
 ##### Mass-diameter relationship parameters
 #####

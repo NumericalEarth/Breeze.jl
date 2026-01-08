@@ -163,6 +163,7 @@ export
     intercept_parameter
 
 using DocStringExtensions: TYPEDFIELDS, TYPEDSIGNATURES
+using SpecialFunctions: loggamma, gamma_inc
 
 using Oceananigans: Oceananigans
 
@@ -190,7 +191,7 @@ include("ice_properties.jl")
 #####
 
 include("rain_properties.jl")
-include("cloud_properties.jl")
+include("cloud_droplet_properties.jl")
 
 #####
 ##### Main scheme type

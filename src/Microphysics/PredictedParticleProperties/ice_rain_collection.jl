@@ -6,22 +6,10 @@
 #####
 
 """
-    IceRainCollection{QR, NR, ZR}
+    IceRainCollection
 
-Ice-rain collection integrals.
-
-When ice particles collect rain drops, mass, number, and (for 3-moment)
-sixth moment are transferred from rain to ice. These integrals are
-computed for multiple rain size bins.
-
-# Fields
-- `mass`: Mass collection rate (rain mass → ice mass)
-- `number`: Number collection rate (rain number reduction)
-- `sixth_moment`: Sixth moment collection rate (3-moment ice)
-
-# References
-
-Morrison and Milbrandt (2015), Milbrandt and Morrison (2016)
+Ice collecting rain integrals for mass, number, and sixth moment.
+See [`IceRainCollection`](@ref) constructor for details.
 """
 struct IceRainCollection{QR, NR, ZR}
     mass :: QR
@@ -30,9 +18,33 @@ struct IceRainCollection{QR, NR, ZR}
 end
 
 """
-    IceRainCollection()
+$(TYPEDSIGNATURES)
 
 Construct `IceRainCollection` with quadrature-based integrals.
+
+When ice particles collect rain drops through gravitational sweepout,
+the rain freezes on contact (riming). This transfers mass, number, and
+reflectivity from rain to ice.
+
+**Conservation:**
+- Mass: ``dq_r/dt < 0``, ``dq_i/dt > 0``
+- Number: Rain number decreases as drops are absorbed
+- Sixth moment: Transferred to ice (3-moment scheme)
+
+The collection rate depends on the collision kernel integrating over
+both size distributions. P3 uses a simplified approach with rain
+binned into discrete size categories.
+
+# Integrals
+
+- `mass`: Rate of rain mass transfer to ice
+- `number`: Rate of rain drop removal  
+- `sixth_moment`: Rate of Z transfer (3-moment)
+
+# References
+
+[Morrison and Milbrandt (2015a)](@citet Morrison2015parameterization),
+[Milbrandt et al. (2021)](@citet MilbrandtEtAl2021) for sixth moment.
 """
 function IceRainCollection()
     return IceRainCollection(

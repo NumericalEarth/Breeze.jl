@@ -9,26 +9,9 @@
 export tabulate, TabulationParameters
 
 """
-    TabulationParameters{FT}
+    TabulationParameters
 
-Parameters defining the lookup table grid for P3 integrals.
-
-The lookup table is indexed by:
-1. Normalized ice mass: Q_norm = q_i / N_i (mass per particle)
-2. Rime fraction: F_r ∈ [0, 1]
-3. Liquid fraction: F_l ∈ [0, 1]
-
-# Fields
-- `n_Qnorm`: Number of grid points in Q_norm dimension
-- `n_Fr`: Number of grid points in rime fraction dimension  
-- `n_Fl`: Number of grid points in liquid fraction dimension
-- `Qnorm_min`: Minimum normalized mass [kg]
-- `Qnorm_max`: Maximum normalized mass [kg]
-- `n_quadrature`: Number of quadrature points for integration
-
-# References
-
-P3 lookup table structure from `create_p3_lookupTable_1.f90`
+Lookup table grid configuration. See [`TabulationParameters`](@ref) constructor.
 """
 struct TabulationParameters{FT}
     n_Qnorm :: Int
@@ -40,14 +23,31 @@ struct TabulationParameters{FT}
 end
 
 """
-    TabulationParameters(FT=Float64; 
-        n_Qnorm=50, n_Fr=4, n_Fl=4,
-        Qnorm_min=1e-18, Qnorm_max=1e-5,
-        n_quadrature=64)
+$(TYPEDSIGNATURES)
 
-Construct tabulation parameters.
+Configure the lookup table grid for P3 integrals.
 
-Default values follow the P3 Fortran implementation.
+The P3 Fortran code pre-computes bulk integrals on a 3D grid indexed by:
+
+1. **Normalized mass** `Qnorm = q/N` [kg]: Mean mass per particle
+2. **Rime fraction** `Fr ∈ [0, 1]`: Mass fraction that is rime
+3. **Liquid fraction** `Fl ∈ [0, 1]`: Mass fraction that is liquid water on ice
+
+During simulation, integral values are interpolated from this table rather
+than computed via quadrature, which is much faster.
+
+# Keyword Arguments
+
+- `n_Qnorm`: Grid points in Qnorm (log-spaced), default 50
+- `n_Fr`: Grid points in rime fraction (linear), default 4
+- `n_Fl`: Grid points in liquid fraction (linear), default 4
+- `Qnorm_min`: Minimum Qnorm [kg], default 10⁻¹⁸
+- `Qnorm_max`: Maximum Qnorm [kg], default 10⁻⁵
+- `n_quadrature`: Quadrature points for filling table, default 64
+
+# References
+
+Table structure follows `create_p3_lookupTable_1.f90` in P3-microphysics.
 """
 function TabulationParameters(FT::Type{<:AbstractFloat} = Float64;
                                n_Qnorm::Int = 50,
@@ -135,17 +135,22 @@ function state_from_Qnorm(FT, Qnorm, Fr, Fl; ρ_rim=FT(400), μ=FT(0))
 end
 
 """
-    tabulate(integral::AbstractP3Integral, arch, params::TabulationParameters)
+    tabulate(integral, arch, params)
 
-Generate a lookup table for a single integral type.
+Generate a lookup table for a single P3 integral.
+
+This pre-computes integral values on a 3D grid of (Qnorm, Fr, Fl) so that
+during simulation, values can be interpolated rather than computed.
 
 # Arguments
-- `integral`: The integral type to tabulate
-- `arch`: Architecture (CPU() or GPU())
-- `params`: TabulationParameters defining the table grid
+
+- `integral`: Integral type to tabulate (e.g., `MassWeightedFallSpeed()`)
+- `arch`: `CPU()` or `GPU()` - determines where table is stored
+- `params`: [`TabulationParameters`](@ref) defining the grid
 
 # Returns
-A `TabulatedIntegral` containing the 3D lookup table.
+
+[`TabulatedIntegral`](@ref) wrapping the lookup table array.
 """
 function tabulate(integral::AbstractP3Integral, arch, 
                   params::TabulationParameters{FT} = TabulationParameters(FT)) where FT
@@ -225,27 +230,38 @@ function tabulate(dep::IceDeposition{FT}, arch,
 end
 
 """
-    tabulate(microphysics::PredictedParticlePropertiesMicrophysics, property::Symbol, arch; kwargs...)
+    tabulate(microphysics, property, arch; kwargs...)
 
-Tabulate a specific property of the microphysics scheme.
+Tabulate specific integrals within a P3 microphysics scheme.
+
+This provides an interface to selectively tabulate subsets of integrals,
+returning a new microphysics struct with the specified integrals replaced
+by lookup tables.
 
 # Arguments
-- `microphysics`: The P3 microphysics scheme
-- `property`: Symbol specifying which property to tabulate
-  - `:ice_fall_speed`: Tabulate fall speed integrals
-  - `:ice_deposition`: Tabulate deposition integrals
-  - `:ice`: Tabulate all ice integrals
-- `arch`: Architecture (CPU() or GPU())
-- `kwargs`: Passed to TabulationParameters
+
+- `microphysics`: [`PredictedParticlePropertiesMicrophysics`](@ref)
+- `property`: Which integrals to tabulate
+  - `:ice_fall_speed`: All fall speed integrals
+  - `:ice_deposition`: All deposition/ventilation integrals
+- `arch`: `CPU()` or `GPU()`
+
+# Keyword Arguments
+
+Passed to [`TabulationParameters`](@ref): `n_Qnorm`, `n_Fr`, etc.
 
 # Returns
-A new PredictedParticlePropertiesMicrophysics with tabulated integrals.
+
+New `PredictedParticlePropertiesMicrophysics` with tabulated integrals.
 
 # Example
 
 ```julia
+using Oceananigans
+using Breeze.Microphysics.PredictedParticleProperties
+
 p3 = PredictedParticlePropertiesMicrophysics()
-p3_tabulated = tabulate(p3, :ice_fall_speed, CPU())
+p3_fast = tabulate(p3, :ice_fall_speed, CPU(); n_Qnorm=100)
 ```
 """
 function tabulate(p3::PredictedParticlePropertiesMicrophysics{FT}, 
@@ -271,6 +287,7 @@ function tabulate(p3::PredictedParticlePropertiesMicrophysics{FT},
             p3.ice.ice_rain
         )
         return PredictedParticlePropertiesMicrophysics(
+            p3.water_density,
             p3.minimum_mass_mixing_ratio,
             p3.minimum_number_mixing_ratio,
             new_ice,
@@ -295,6 +312,7 @@ function tabulate(p3::PredictedParticlePropertiesMicrophysics{FT},
             p3.ice.ice_rain
         )
         return PredictedParticlePropertiesMicrophysics(
+            p3.water_density,
             p3.minimum_mass_mixing_ratio,
             p3.minimum_number_mixing_ratio,
             new_ice,

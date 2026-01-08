@@ -7,44 +7,16 @@
 #####
 
 """
-    IceDeposition{FT, V, V1, SC, SR, LC, LR}
+    IceDeposition
 
-Ice vapor deposition/sublimation properties and integrals.
-
-The deposition rate depends on the vapor diffusion equation with ventilation
-enhancement. The ventilation factor accounts for enhanced vapor transport
-due to particle motion through air, following Hall and Pruppacher (1976).
-
-# Fields
-
-## Parameters
-- `thermal_conductivity`: Thermal conductivity of air [W/(m·K)]
-- `vapor_diffusivity`: Diffusivity of water vapor in air [m²/s]
-
-## Integrals
-
-Basic ventilation:
-- `ventilation`: Basic ventilation factor (vdep in Fortran)
-- `ventilation_enhanced`: Enhanced ventilation for particles > 100 μm (vdep1)
-
-Size-regime-specific ventilation for melting/liquid accumulation:
-- `small_ice_ventilation_constant`: D ≤ D_crit, constant term → rain (vdepm1)
-- `small_ice_ventilation_reynolds`: D ≤ D_crit, Re^0.5 term → rain (vdepm2)
-- `large_ice_ventilation_constant`: D > D_crit, constant term → liquid on ice (vdepm3)
-- `large_ice_ventilation_reynolds`: D > D_crit, Re^0.5 term → liquid on ice (vdepm4)
-
-# References
-
-Hall and Pruppacher (1976), Morrison and Milbrandt (2015)
+Vapor deposition/sublimation parameters and ventilation integrals.
+See [`IceDeposition`](@ref) constructor for details.
 """
 struct IceDeposition{FT, V, V1, SC, SR, LC, LR}
-    # Parameters
     thermal_conductivity :: FT
     vapor_diffusivity :: FT
-    # Basic ventilation integrals
     ventilation :: V
     ventilation_enhanced :: V1
-    # Size-regime ventilation integrals
     small_ice_ventilation_constant :: SC
     small_ice_ventilation_reynolds :: SR
     large_ice_ventilation_constant :: LC
@@ -52,14 +24,47 @@ struct IceDeposition{FT, V, V1, SC, SR, LC, LR}
 end
 
 """
-    IceDeposition(FT=Float64)
+$(TYPEDSIGNATURES)
 
-Construct `IceDeposition` with default parameters and quadrature-based integrals.
+Construct `IceDeposition` with parameters and quadrature-based integrals.
+
+Ice growth/decay by vapor deposition/sublimation follows the diffusion equation
+with ventilation enhancement. The ventilation factor ``f_v`` accounts for 
+enhanced vapor transport due to particle motion through air:
+
+```math
+f_v = a + b \\cdot Sc^{1/3} Re^{1/2}
+```
+
+where ``Sc`` is the Schmidt number and ``Re`` is the Reynolds number. 
+[Hall and Pruppacher (1976)](@citet HallPruppacher1976) showed that falling
+particles have significantly enhanced vapor exchange compared to stationary
+particles.
+
+**Basic ventilation integrals:**
+- `ventilation`: Integrated over full size spectrum
+- `ventilation_enhanced`: For larger particles (D > 100 μm)
+
+**Size-regime ventilation** (for melting with liquid fraction):
+- `small_ice_ventilation_*`: D ≤ Dcrit, meltwater → rain
+- `large_ice_ventilation_*`: D > Dcrit, meltwater → liquid on ice
+
+# Keyword Arguments
+
+- `thermal_conductivity`: κ [W/(m·K)], default 0.024 (~273K)
+- `vapor_diffusivity`: Dᵥ [m²/s], default 2.2×10⁻⁵ (~273K)
+
+# References
+
+[Hall and Pruppacher (1976)](@citet HallPruppacher1976),
+[Morrison and Milbrandt (2015a)](@citet Morrison2015parameterization) Eq. 34.
 """
-function IceDeposition(FT::Type{<:AbstractFloat} = Float64)
+function IceDeposition(FT::Type{<:AbstractFloat} = Float64;
+                       thermal_conductivity = 0.024,
+                       vapor_diffusivity = 2.2e-5)
     return IceDeposition(
-        FT(0.024),   # thermal_conductivity [W/(m·K)] at ~273K
-        FT(2.2e-5),  # vapor_diffusivity [m²/s] at ~273K
+        FT(thermal_conductivity),
+        FT(vapor_diffusivity),
         Ventilation(),
         VentilationEnhanced(),
         SmallIceVentilationConstant(),

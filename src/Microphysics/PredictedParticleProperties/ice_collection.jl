@@ -6,46 +6,52 @@
 #####
 
 """
-    IceCollection{FT, AG, RW}
+    IceCollection
 
-Ice collection (collision-coalescence) properties and integrals.
-
-Collection processes include:
-- Aggregation: ice particles collecting other ice particles
-- Rain collection: ice particles collecting rain drops (riming of rain)
-
-# Fields
-
-## Parameters
-- `ice_cloud_collection_efficiency`: Collection efficiency for ice-cloud collisions [-]
-- `ice_rain_collection_efficiency`: Collection efficiency for ice-rain collisions [-]
-
-## Integrals
-- `aggregation`: Number tendency from ice-ice aggregation
-- `rain_collection`: Number tendency from rain collection by ice
-
-# References
-
-Morrison and Milbrandt (2015), Milbrandt and Yau (2005)
+Ice collision-coalescence efficiencies and collection integrals.
+See [`IceCollection`](@ref) constructor for details.
 """
 struct IceCollection{FT, AG, RW}
-    # Parameters
     ice_cloud_collection_efficiency :: FT
     ice_rain_collection_efficiency :: FT
-    # Integrals
     aggregation :: AG
     rain_collection :: RW
 end
 
 """
-    IceCollection(FT=Float64)
+$(TYPEDSIGNATURES)
 
-Construct `IceCollection` with default parameters and quadrature-based integrals.
+Construct `IceCollection` with parameters and quadrature-based integrals.
+
+Collection processes describe ice particles sweeping up other hydrometeors
+through gravitational settling. Two main processes are parameterized:
+
+**Aggregation** (ice + ice → larger ice):
+Ice particles collide and stick together to form larger aggregates.
+This is the dominant growth mechanism for snow. The aggregation rate
+depends on the differential fall speeds of particles of different sizes.
+
+**Rain collection** (ice + rain → rime on ice):
+When ice particles collect rain drops, the liquid freezes on contact
+forming rime. This is a key riming pathway along with cloud droplet
+collection (handled separately in the scheme).
+
+# Keyword Arguments
+
+- `ice_cloud_collection_efficiency`: Eⁱᶜ [-], default 0.1
+- `ice_rain_collection_efficiency`: Eⁱʳ [-], default 1.0
+
+# References
+
+[Morrison and Milbrandt (2015a)](@citet Morrison2015parameterization) Sections 2d-e,
+[Milbrandt and Yau (2005)](@citet MilbrandtYau2005).
 """
-function IceCollection(FT::Type{<:AbstractFloat} = Float64)
+function IceCollection(FT::Type{<:AbstractFloat} = Float64;
+                       ice_cloud_collection_efficiency = 0.1,
+                       ice_rain_collection_efficiency = 1.0)
     return IceCollection(
-        FT(0.1),   # ice_cloud_collection_efficiency [-]
-        FT(1.0),   # ice_rain_collection_efficiency [-]
+        FT(ice_cloud_collection_efficiency),
+        FT(ice_rain_collection_efficiency),
         AggregationNumber(),
         RainCollectionNumber()
     )

@@ -6,37 +6,14 @@
 #####
 
 """
-    IceBulkProperties{FT, EF, DM, RH, RF, LA, MU, SH}
+    IceBulkProperties
 
-Ice bulk property integrals over the size distribution.
-
-These integrals compute population-averaged quantities used for
-radiation, radar reflectivity, and diagnostics.
-
-# Fields
-
-## Parameters
-- `maximum_mean_diameter`: Upper limit on mean diameter D_m [m]
-- `minimum_mean_diameter`: Lower limit on mean diameter D_m [m]
-
-## Integrals
-- `effective_radius`: Effective radius for radiation [m]
-- `mean_diameter`: Mass-weighted mean diameter [m]
-- `mean_density`: Mass-weighted mean particle density [kg/m³]
-- `reflectivity`: Radar reflectivity factor Z [m⁶/m³]
-- `slope`: Slope parameter λ of gamma distribution [1/m]
-- `shape`: Shape parameter μ of gamma distribution [-]
-- `shedding`: Meltwater shedding rate [kg/kg/s]
-
-# References
-
-Morrison and Milbrandt (2015), Field et al. (2007)
+Population-averaged ice properties and diagnostic integrals.
+See [`IceBulkProperties`](@ref) constructor for details.
 """
 struct IceBulkProperties{FT, EF, DM, RH, RF, LA, MU, SH}
-    # Parameters
     maximum_mean_diameter :: FT
     minimum_mean_diameter :: FT
-    # Integrals
     effective_radius :: EF
     mean_diameter :: DM
     mean_density :: RH
@@ -47,14 +24,45 @@ struct IceBulkProperties{FT, EF, DM, RH, RF, LA, MU, SH}
 end
 
 """
-    IceBulkProperties(FT=Float64)
+$(TYPEDSIGNATURES)
 
-Construct `IceBulkProperties` with default parameters and quadrature-based integrals.
+Construct `IceBulkProperties` with parameters and quadrature-based integrals.
+
+These integrals compute bulk properties by averaging over the particle 
+size distribution. They are used for radiation, radar, and diagnostics.
+
+**Diagnostic integrals:**
+
+- `effective_radius`: Radiation-weighted radius ``r_e = ∫A·N'dD / ∫N'dD``
+- `mean_diameter`: Mass-weighted diameter ``D_m = ∫D·m·N'dD / ∫m·N'dD``
+- `mean_density`: Mass-weighted density ``ρ̄ = ∫ρ·m·N'dD / ∫m·N'dD``
+- `reflectivity`: Radar reflectivity ``Z = ∫D^6·N'dD``
+
+**Distribution parameters (for λ-limiting):**
+
+- `slope`: Slope parameter λ from prognostic constraints
+- `shape`: Shape parameter μ from empirical μ-λ relationship
+
+**Process integrals:**
+
+- `shedding`: Rate at which meltwater sheds from large particles
+
+# Keyword Arguments
+
+- `maximum_mean_diameter`: Upper Dm limit [m], default 0.02 (2 cm)
+- `minimum_mean_diameter`: Lower Dm limit [m], default 1×10⁻⁵ (10 μm)
+
+# References
+
+[Morrison and Milbrandt (2015a)](@citet Morrison2015parameterization),
+[Field et al. (2007)](@citet FieldEtAl2007) for μ-λ relationship.
 """
-function IceBulkProperties(FT::Type{<:AbstractFloat} = Float64)
+function IceBulkProperties(FT::Type{<:AbstractFloat} = Float64;
+                           maximum_mean_diameter = 2e-2,
+                           minimum_mean_diameter = 1e-5)
     return IceBulkProperties(
-        FT(2e-2),    # maximum_mean_diameter [m] = 2 cm
-        FT(1e-5),    # minimum_mean_diameter [m] = 10 μm
+        FT(maximum_mean_diameter),
+        FT(minimum_mean_diameter),
         EffectiveRadius(),
         MeanDiameter(),
         MeanDensity(),

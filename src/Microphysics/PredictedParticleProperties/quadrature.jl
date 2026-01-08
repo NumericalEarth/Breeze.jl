@@ -16,21 +16,18 @@ export evaluate, chebyshev_gauss_nodes_weights
 
 Compute Chebyshev-Gauss quadrature nodes and weights for n points.
 
-Returns nodes xᵢ ∈ [-1, 1] and weights wᵢ for approximating:
+Chebyshev-Gauss quadrature is particularly well-suited for smooth
+integrands over unbounded domains after transformation. The nodes
+cluster near the boundaries, which helps capture rapidly-varying
+contributions near D = 0.
+
+Returns `(nodes, weights)` for approximating:
 
 ```math
-\\int_{-1}^{1} f(x) \\, dx \\approx \\sum_{i=1}^{n} w_i f(x_i)
+∫_{-1}^{1} f(x) dx ≈ ∑ᵢ wᵢ f(xᵢ)
 ```
 
-The Chebyshev-Gauss nodes are:
-```math
-x_i = \\cos\\left(\\frac{(2i-1)\\pi}{2n}\\right), \\quad i = 1, \\ldots, n
-```
-
-with weights:
-```math
-w_i = \\frac{\\pi}{n}
-```
+These are then transformed to diameter space using [`transform_to_diameter`](@ref).
 """
 function chebyshev_gauss_nodes_weights(FT::Type{<:AbstractFloat}, n::Int)
     nodes = zeros(FT, n)
@@ -85,17 +82,39 @@ end
 #####
 
 """
-    evaluate(integral::AbstractP3Integral, state::IceSizeDistributionState; n_quadrature=64)
+    evaluate(integral, state; n_quadrature=64)
 
 Evaluate a P3 integral over the ice size distribution using quadrature.
 
+This is the core numerical integration routine for computing bulk properties
+and process rates from the gamma size distribution. Each integral type
+dispatches to its own `integrand` function.
+
+**Algorithm:**
+
+1. Generate Chebyshev-Gauss nodes on [-1, 1]
+2. Transform to diameter space D ∈ [0, ∞) using exponential mapping
+3. Evaluate integrand at each quadrature point
+4. Sum weighted contributions with Jacobian correction
+
 # Arguments
-- `integral`: The integral type to evaluate
-- `state`: Ice size distribution state (N₀, μ, λ, F_r, F_l, ρ_rim)
-- `n_quadrature`: Number of quadrature points (default 64)
+
+- `integral`: Integral type (e.g., `MassWeightedFallSpeed()`)
+- `state`: [`IceSizeDistributionState`](@ref) with N₀, μ, λ and rime properties
+- `n_quadrature`: Number of quadrature points (default 64, sufficient for most integrals)
 
 # Returns
-The evaluated integral value.
+
+The evaluated integral value with the same floating-point type as `state.slope`.
+
+# Example
+
+```julia
+using Breeze.Microphysics.PredictedParticleProperties
+
+state = IceSizeDistributionState(Float64; intercept=1e6, shape=0.0, slope=1000.0)
+Vn = evaluate(NumberWeightedFallSpeed(), state)
+```
 """
 function evaluate(integral::AbstractP3Integral, state::IceSizeDistributionState; 
                   n_quadrature::Int = 64)

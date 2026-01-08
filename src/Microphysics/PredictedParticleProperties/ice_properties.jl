@@ -46,11 +46,12 @@ This container organizes all ice-related computations:
 - **Sixth moment**: Z-tendency integrals for three-moment ice
 - **Lambda limiter**: Constraints on size distribution slope
 
-# Key Parameters
+# Keyword Arguments
 
-- **Rime density bounds** [50, 900] kg/m³: Physical range for rime layer density
-- **Maximum shape parameter** μmax = 10: Upper limit on PSD shape
-- **Minimum reflectivity** 10⁻²² m⁶/m³: Numerical floor for 3-moment ice
+- `minimum_rime_density`: Lower bound for ρᶠ [kg/m³], default 50
+- `maximum_rime_density`: Upper bound for ρᶠ [kg/m³], default 900 (pure ice)
+- `maximum_shape_parameter`: Upper limit on μ [-], default 10
+- `minimum_reflectivity`: Numerical floor for Z [m⁶/m³], default 10⁻²²
 
 # References
 
@@ -59,14 +60,16 @@ The mass-diameter relationship is from
 with sixth moment formulations from 
 [Milbrandt et al. (2021)](@citet MilbrandtEtAl2021).
 """
-function IceProperties(FT::Type{<:AbstractFloat} = Float64)
+function IceProperties(FT::Type{<:AbstractFloat} = Float64;
+                       minimum_rime_density = 50,
+                       maximum_rime_density = 900,
+                       maximum_shape_parameter = 10,
+                       minimum_reflectivity = 1e-22)
     return IceProperties(
-        # Top-level parameters
-        FT(50.0),    # minimum_rime_density [kg/m³]
-        FT(900.0),   # maximum_rime_density [kg/m³] (pure ice)
-        FT(10.0),    # maximum_shape_parameter [-]
-        FT(1e-22),   # minimum_reflectivity [m⁶/m³]
-        # Concept containers
+        FT(minimum_rime_density),
+        FT(maximum_rime_density),
+        FT(maximum_shape_parameter),
+        FT(minimum_reflectivity),
         IceFallSpeed(FT),
         IceDeposition(FT),
         IceBulkProperties(FT),

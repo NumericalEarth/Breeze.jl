@@ -5,48 +5,61 @@
 #####
 
 """
-    IceSizeDistributionState{FT}
+    IceSizeDistributionState
 
-State variables for evaluating integrals over the ice size distribution.
+State container for ice size distribution integration.
+See [`IceSizeDistributionState`](@ref) constructor for details.
+"""
+struct IceSizeDistributionState{FT}
+    intercept :: FT
+    shape :: FT
+    slope :: FT
+    rime_fraction :: FT
+    liquid_fraction :: FT
+    rime_density :: FT
+end
+
+"""
+$(TYPEDSIGNATURES)
+
+Construct an `IceSizeDistributionState` for quadrature evaluation.
 
 The ice particle size distribution follows a generalized gamma form:
 
 ```math
-N'(D) = N_0 D^\\mu \\exp(-\\lambda D)
+N'(D) = N_0 D^μ e^{-λD}
 ```
 
-where:
-- `N_0` is the intercept parameter [m^{-(4+μ)}]
-- `μ` is the shape parameter (dimensionless)
-- `λ` is the slope parameter [1/m]
-- `D` is the particle diameter [m]
+The gamma distribution is parameterized by three quantities:
 
-# Fields
-- `intercept`: N_0, intercept parameter [m^{-(4+μ)}]
-- `shape`: μ, shape parameter [-]
-- `slope`: λ, slope parameter [1/m]
-- `rime_fraction`: F_r, mass fraction that is rime [-]
-- `liquid_fraction`: F_l, mass fraction that is liquid water on ice [-]
-- `rime_density`: ρ_rim, density of rime [kg/m³]
+- **N₀** (intercept): Sets the total number of particles
+- **μ** (shape): Controls the relative abundance of small vs. large particles
+- **λ** (slope): Sets the characteristic inverse diameter
 
-# Derived quantities (computed from prognostic variables)
-- `total_mass`: Total ice mass mixing ratio q_i [kg/kg]
-- `number_concentration`: Ice number concentration N_i [1/kg]
-"""
-struct IceSizeDistributionState{FT}
-    intercept :: FT          # N_0
-    shape :: FT              # μ
-    slope :: FT              # λ
-    rime_fraction :: FT      # F_r
-    liquid_fraction :: FT    # F_l
-    rime_density :: FT       # ρ_rim
-end
+For P3, these are determined from prognostic moments using the 
+[`distribution_parameters`](@ref) function.
 
-"""
-    IceSizeDistributionState(; intercept, shape, slope, 
-                               rime_fraction=0, liquid_fraction=0, rime_density=400)
+**Rime and liquid properties** affect the mass-diameter relationship:
 
-Construct an `IceSizeDistributionState` with given parameters.
+- `rime_fraction`: Fraction of mass that is rime (0 = pristine, 1 = graupel)
+- `rime_density`: Density of the accreted rime layer
+- `liquid_fraction`: Liquid water coating from partial melting
+
+# Required Keyword Arguments
+
+- `intercept`: N₀ [m^{-(4+μ)}]
+- `shape`: μ [-]
+- `slope`: λ [1/m]
+
+# Optional Keyword Arguments
+
+- `rime_fraction`: Fᶠ [-], default 0 (unrimed)
+- `liquid_fraction`: Fˡ [-], default 0 (no meltwater)
+- `rime_density`: ρᶠ [kg/m³], default 400
+
+# References
+
+[Morrison and Milbrandt (2015a)](@citet Morrison2015parameterization) Section 2b.
 """
 function IceSizeDistributionState(FT::Type{<:AbstractFloat} = Float64;
                                    intercept,
@@ -68,11 +81,15 @@ end
 """
     size_distribution(D, state::IceSizeDistributionState)
 
-Evaluate the ice size distribution N'(D) at diameter D.
+Evaluate the ice size distribution ``N'(D)`` at diameter D.
+
+Returns the number density of particles per unit diameter interval:
 
 ```math
-N'(D) = N_0 D^\\mu \\exp(-\\lambda D)
+N'(D) = N_0 D^μ e^{-λD}
 ```
+
+The total number concentration is ``N = ∫_0^∞ N'(D) dD``.
 """
 @inline function size_distribution(D, state::IceSizeDistributionState)
     N₀ = state.intercept
@@ -88,31 +105,38 @@ end
 """
     critical_diameter_small_ice(rime_fraction)
 
-Critical diameter D_crit separating small spherical ice from larger ice.
-For unrimed ice (F_r = 0), this is approximately 15-20 μm.
+Threshold diameter below which ice particles are treated as small spheres.
+
+!!! note
+    This is a simplified placeholder. The full P3 formulation computes
+    this threshold dynamically from the mass-diameter relationship.
+    See [`ice_regime_thresholds`](@ref) for the complete implementation.
 """
 @inline function critical_diameter_small_ice(rime_fraction)
-    # Simplified form - actual P3 uses more complex formulation
-    return 15e-6  # 15 μm
+    return 15e-6  # 15 μm (placeholder)
 end
 
 """
     critical_diameter_unrimed(rime_fraction, rime_density)
 
-Critical diameter D_crit_s separating unrimed aggregates from partially rimed particles.
+Threshold diameter separating unrimed aggregates from partially rimed particles.
+
+!!! note
+    This is a simplified placeholder. See [`ice_regime_thresholds`](@ref).
 """
 @inline function critical_diameter_unrimed(rime_fraction, rime_density)
-    # Simplified form
-    return 100e-6  # 100 μm
+    return 100e-6  # 100 μm (placeholder)
 end
 
 """
     critical_diameter_graupel(rime_fraction, rime_density)
 
-Critical diameter D_crit_r separating partially rimed from fully rimed (graupel).
+Threshold diameter separating partially rimed ice from dense graupel.
+
+!!! note
+    This is a simplified placeholder. See [`ice_regime_thresholds`](@ref).
 """
 @inline function critical_diameter_graupel(rime_fraction, rime_density)
-    # Simplified form  
-    return 500e-6  # 500 μm
+    return 500e-6  # 500 μm (placeholder)
 end
 
