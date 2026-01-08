@@ -39,6 +39,14 @@ Create velocity fields from a velocity specification (e.g., `PrescribedVelocityF
 function materialize_velocities end
 
 """
+    update_dynamics_with_velocities(dynamics, velocities)
+
+Update dynamics with velocity specification. Default is a no-op.
+For `PrescribedDynamics`, stores the `PrescribedVelocityFields` for dispatch.
+"""
+update_dynamics_with_velocities(dynamics, velocities) = dynamics
+
+"""
     dynamics_pressure_solver(dynamics, grid)
 
 Create the pressure solver for the given dynamics.

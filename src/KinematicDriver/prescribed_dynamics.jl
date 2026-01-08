@@ -29,9 +29,13 @@ PrescribedDynamics
 └── reference_state: ReferenceState{Float64}
 ```
 """
-struct PrescribedDynamics{R}
+struct PrescribedDynamics{R, V}
     reference_state :: R
+    velocity_specification :: V
 end
+
+# Default constructor: no prescribed velocity functions
+PrescribedDynamics(reference_state) = PrescribedDynamics(reference_state, nothing)
 
 Base.summary(::PrescribedDynamics) = "PrescribedDynamics"
 
@@ -48,6 +52,10 @@ AtmosphereModels.prognostic_momentum_field_names(::PrescribedDynamics) = ()
 AtmosphereModels.prognostic_dynamics_field_names(::PrescribedDynamics) = ()
 AtmosphereModels.additional_dynamics_field_names(::PrescribedDynamics) = ()
 AtmosphereModels.materialize_dynamics(d::PrescribedDynamics, grid, bcs) = d
+
+# Store velocity specification in dynamics for dispatch
+AtmosphereModels.update_dynamics_with_velocities(d::PrescribedDynamics, v::PrescribedVelocityFields) =
+    PrescribedDynamics(d.reference_state, v)
 AtmosphereModels.dynamics_pressure_solver(::PrescribedDynamics, grid) = nothing
 AtmosphereModels.dynamics_density(d::PrescribedDynamics) = d.reference_state.density
 AtmosphereModels.dynamics_pressure(d::PrescribedDynamics) = d.reference_state.pressure
@@ -91,7 +99,8 @@ wrap_prescribed_field(X, Y, Z, f, grid; kwargs...) = field((X, Y, Z), f, grid)
 ##### Adapt and on_architecture
 #####
 
-Adapt.adapt_structure(to, d::PrescribedDynamics) = PrescribedDynamics(adapt(to, d.reference_state))
+Adapt.adapt_structure(to, d::PrescribedDynamics) = 
+    PrescribedDynamics(adapt(to, d.reference_state), adapt(to, d.velocity_specification))
 
 Oceananigans.Architectures.on_architecture(to, d::PrescribedDynamics) = 
-    PrescribedDynamics(on_architecture(to, d.reference_state))
+    PrescribedDynamics(on_architecture(to, d.reference_state), on_architecture(to, d.velocity_specification))

@@ -164,6 +164,8 @@ function AtmosphereModel(grid;
     if isnothing(velocities)
         momentum, velocities = materialize_momentum_and_velocities(dynamics, grid, boundary_conditions)
     else
+        # Store velocity specification in dynamics for dispatch (e.g., PrescribedVelocityFields)
+        dynamics = update_dynamics_with_velocities(dynamics, velocities)
         momentum, _ = materialize_momentum_and_velocities(dynamics, grid, boundary_conditions)
         velocities = materialize_velocities(velocities, grid)
     end
