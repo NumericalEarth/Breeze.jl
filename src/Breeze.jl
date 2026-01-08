@@ -6,29 +6,80 @@ are based on Oceananigans.
 module Breeze
 
 export
+    # AtmosphereModel
     MoistAirBuoyancy,
     ThermodynamicConstants,
     ReferenceState,
-    AnelasticFormulation,
+    AnelasticDynamics,
+    AnelasticModel,
+    CompressibleDynamics,
+    CompressibleModel,
     AtmosphereModel,
-    PotentialTemperature,
-    PotentialTemperatureField,
+    StaticEnergyFormulation,
+    LiquidIcePotentialTemperatureFormulation,
+    RadiativeTransferModel,
+    BackgroundAtmosphere,
+    GrayOptics,
+    ClearSkyOptics,
+    AllSkyOptics,
+    ConstantRadiusParticles,
     TemperatureField,
     IdealGas,
     CondensedPhase,
     mixture_gas_constant,
     mixture_heat_capacity,
+    dynamics_density,
+    dynamics_pressure,
+    
+    # Diagnostics
+    compute_hydrostatic_pressure!,
+    PotentialTemperature,
+    VirtualPotentialTemperature,
+    EquivalentPotentialTemperature,
+    StabilityEquivalentPotentialTemperature,
+    LiquidIcePotentialTemperature,
+    StaticEnergy,
+    static_energy_density,
+    static_energy,
+    total_energy,
+    liquid_ice_potential_temperature_density,
+    liquid_ice_potential_temperature,
+    precipitation_rate,
+    surface_precipitation_flux,
+    total_pressure,
+    specific_humidity,
+
+    # Microphysics
     SaturationAdjustment,
     MixedPhaseEquilibrium,
     WarmPhaseEquilibrium,
-    BulkMicrophysics
+    SaturationSpecificHumidity,
+    SaturationSpecificHumidityField,
+    equilibrium_saturation_specific_humidity,
+    RelativeHumidity,
+    RelativeHumidityField,
+    BulkMicrophysics,
+    NonEquilibriumCloudFormation,
+
+    # BoundaryConditions
+    BulkDrag,
+    BulkSensibleHeatFlux,
+    BulkVaporFlux,
+
+    # Forcing utilities
+    geostrophic_forcings,
+    SubsidenceForcing,
+
+    # TimeSteppers
+    SSPRungeKutta3
 
 using Oceananigans: Oceananigans, @at, AnisotropicMinimumDissipation, Average,
                     AveragedTimeInterval, BackgroundField, BetaPlane, Bounded,
-                    CPU, Callback, Center, CenterField, Centered, Checkpointer,
-                    ConstantCartesianCoriolis, Distributed, FPlane, Face,
-                    Field, FieldBoundaryConditions, FieldDataset,
-                    FieldTimeSeries, Flat, FluxBoundaryCondition, Forcing, GPU,
+                    CPU, Callback, Center, CenterField, Centered, Checkpointer, Clock,
+                    ConstantCartesianCoriolis, Distributed, DynamicSmagorinsky,
+                    ExponentialDiscretization, FPlane, Face, Field, FieldBoundaryConditions,
+                    FieldDataset, FieldTimeSeries, Flat, FluxBoundaryCondition, Forcing,
+                    Relaxation, GaussianMask, GPU,
                     GradientBoundaryCondition, GridFittedBottom,
                     ImmersedBoundaryCondition, ImmersedBoundaryGrid, InMemory,
                     Integral, IterationInterval, JLD2Writer,
@@ -37,7 +88,7 @@ using Oceananigans: Oceananigans, @at, AnisotropicMinimumDissipation, Average,
                     PartialCellBottom, Partition, Periodic,
                     PerturbationAdvection, RectilinearGrid, Simulation,
                     SmagorinskyLilly, SpecifiedTimes, TimeInterval,
-                    UpwindBiased, ValueBoundaryCondition, WENO,
+                    UpwindBiased, ValueBoundaryCondition, WENO, FluxFormAdvection,
                     WallTimeInterval, XFaceField, YFaceField, ZFaceField,
                     add_callback!, compute!, conjure_time_step_wizard!,
                     interior, iteration, minimum_xspacing, minimum_yspacing,
@@ -46,26 +97,27 @@ using Oceananigans: Oceananigans, @at, AnisotropicMinimumDissipation, Average,
                     zspacings, ∂x, ∂y, ∂z
 
 using Oceananigans.Grids: znode
+using Oceananigans.BoundaryConditions: ImpenetrableBoundaryCondition
 
 export
     CPU, GPU,
     Center, Face, Periodic, Bounded, Flat,
-    RectilinearGrid,
+    RectilinearGrid, ExponentialDiscretization, Clock,
     nodes, xnodes, ynodes, znodes,
     znode,
     xspacings, yspacings, zspacings,
     minimum_xspacing, minimum_yspacing, minimum_zspacing,
     ImmersedBoundaryGrid, GridFittedBottom, PartialCellBottom, ImmersedBoundaryCondition,
     Distributed, Partition,
-    Centered, UpwindBiased, WENO,
-    FluxBoundaryCondition, ValueBoundaryCondition, GradientBoundaryCondition,
+    Centered, UpwindBiased, WENO, FluxFormAdvection,
+    FluxBoundaryCondition, ValueBoundaryCondition, GradientBoundaryCondition, ImpenetrableBoundaryCondition,
     OpenBoundaryCondition, PerturbationAdvection, FieldBoundaryConditions,
     Field, CenterField, XFaceField, YFaceField, ZFaceField,
     Average, Integral,
     BackgroundField, interior, set!, compute!, regrid!,
-    Forcing,
+    Forcing, Relaxation, GaussianMask,
     FPlane, ConstantCartesianCoriolis, BetaPlane, NonTraditionalBetaPlane,
-    SmagorinskyLilly, AnisotropicMinimumDissipation,
+    SmagorinskyLilly, AnisotropicMinimumDissipation, DynamicSmagorinsky,
     LagrangianParticles,
     conjure_time_step_wizard!,
     time_step!, Simulation, run!, Callback, add_callback!, iteration,
@@ -84,10 +136,39 @@ using .MoistAirBuoyancies
 include("AtmosphereModels/AtmosphereModels.jl")
 using .AtmosphereModels
 
+# Thermodynamic formulation modules (included after AtmosphereModels so they can dispatch on AtmosphereModel)
+include("StaticEnergyFormulations/StaticEnergyFormulations.jl")
+using .StaticEnergyFormulations: StaticEnergyFormulation
+
+include("PotentialTemperatureFormulations/PotentialTemperatureFormulations.jl")
+using .PotentialTemperatureFormulations: LiquidIcePotentialTemperatureFormulation
+
+# Dynamics modules (included after AtmosphereModels so they can dispatch on AtmosphereModel)
+include("AnelasticEquations/AnelasticEquations.jl")
+using .AnelasticEquations: AnelasticDynamics, AnelasticModel
+
+include("CompressibleEquations/CompressibleEquations.jl")
+using .CompressibleEquations: CompressibleDynamics, CompressibleModel
+
 include("Microphysics/Microphysics.jl")
 using .Microphysics
 
 include("TurbulenceClosures/TurbulenceClosures.jl")
 using .TurbulenceClosures
+
+include("Advection.jl")
+using .Advection
+
+include("CelestialMechanics/CelestialMechanics.jl")
+using .CelestialMechanics
+
+include("BoundaryConditions/BoundaryConditions.jl")
+using .BoundaryConditions
+
+include("Forcings/Forcings.jl")
+using .Forcings
+
+include("TimeSteppers/TimeSteppers.jl")
+using .TimeSteppers
 
 end # module Breeze

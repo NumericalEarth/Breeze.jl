@@ -1,4 +1,5 @@
-using Oceananigans: Oceananigans, Center, Field, set!, fill_halo_regions!, ∂z
+using Oceananigans: Oceananigans, Center, Field, set!, fill_halo_regions!
+using Oceananigans.BoundaryConditions: FieldBoundaryConditions, ValueBoundaryCondition
 
 using Adapt: Adapt, adapt
 using KernelAbstractions: @kernel, @index
@@ -8,15 +9,17 @@ using KernelAbstractions: @kernel, @index
 #####
 
 struct ReferenceState{FT, F}
-    base_pressure :: FT # base pressure: reference pressure at z=0
+    surface_pressure :: FT # base pressure: reference pressure at z=0
     potential_temperature :: FT  # constant reference potential temperature
+    standard_pressure :: FT # pˢᵗ: reference pressure for potential temperature (default 1e5)
     pressure :: F
     density :: F
 end
 
 Adapt.adapt_structure(to, ref::ReferenceState) =
-    ReferenceState(adapt(to, ref.base_pressure),
+    ReferenceState(adapt(to, ref.surface_pressure),
                    adapt(to, ref.potential_temperature),
+                   adapt(to, ref.standard_pressure),
                    adapt(to, ref.pressure),
                    adapt(to, ref.density))
 
@@ -24,8 +27,9 @@ Base.eltype(::ReferenceState{FT}) where FT = FT
 
 function Base.summary(ref::ReferenceState)
     FT = eltype(ref)
-    return string("ReferenceState{$FT}(p₀=", prettysummary(ref.base_pressure),
-                  ", θ₀=", prettysummary(ref.potential_temperature), ")")
+    return string("ReferenceState{$FT}(p₀=", prettysummary(ref.surface_pressure),
+                  ", θ₀=", prettysummary(ref.potential_temperature),
+                  ", pˢᵗ=", prettysummary(ref.standard_pressure), ")")
 end
 
 Base.show(io::IO, ref::ReferenceState) = print(io, summary(ref))
@@ -34,8 +38,8 @@ Base.show(io::IO, ref::ReferenceState) = print(io, summary(ref))
 ##### How to compute the reference state
 #####
 
-@inline function base_density(p₀, θ₀, thermo)
-    Rᵈ = dry_air_gas_constant(thermo)
+@inline function surface_density(p₀, θ₀, constants)
+    Rᵈ = dry_air_gas_constant(constants)
     return p₀ / (Rᵈ * θ₀)
 end
 
@@ -46,10 +50,10 @@ Compute the reference pressure at height `z` that associated with the reference 
 potential temperature `θ₀`. The reference pressure is defined as the pressure of dry air at the
 reference pressure and temperature.
 """
-@inline function adiabatic_hydrostatic_pressure(z, p₀, θ₀, thermo)
-    cᵖᵈ = thermo.dry_air.heat_capacity
-    Rᵈ = dry_air_gas_constant(thermo)
-    g = thermo.gravitational_acceleration
+@inline function adiabatic_hydrostatic_pressure(z, p₀, θ₀, constants)
+    cᵖᵈ = constants.dry_air.heat_capacity
+    Rᵈ = dry_air_gas_constant(constants)
+    g = constants.gravitational_acceleration
     return p₀ * (1 - g * z / (cᵖᵈ * θ₀))^(cᵖᵈ / Rᵈ)
 end
 
@@ -60,47 +64,54 @@ Compute the reference density at height `z` that associated with the reference p
 potential temperature `θ₀`. The reference density is defined as the density of dry air at the
 reference pressure and temperature.
 """
-@inline function adiabatic_hydrostatic_density(z, p₀, θ₀, thermo)
-    Rᵈ = dry_air_gas_constant(thermo)
-    cᵖᵈ = thermo.dry_air.heat_capacity
-    pᵣ = adiabatic_hydrostatic_pressure(z, p₀, θ₀, thermo)
-    ρ₀ = base_density(p₀, θ₀, thermo)
+@inline function adiabatic_hydrostatic_density(z, p₀, θ₀, constants)
+    Rᵈ = dry_air_gas_constant(constants)
+    cᵖᵈ = constants.dry_air.heat_capacity
+    pᵣ = adiabatic_hydrostatic_pressure(z, p₀, θ₀, constants)
+    ρ₀ = surface_density(p₀, θ₀, constants)
     return ρ₀ * (pᵣ / p₀)^(1 - Rᵈ / cᵖᵈ)
 end
 
 """
 $(TYPEDSIGNATURES)
 
-Return a `ReferenceState` on `grid`, with [`ThermodynamicConstants`](@ref) `thermo`
+Return a `ReferenceState` on `grid`, with [`ThermodynamicConstants`](@ref) `constants`
 that includes the adiabatic hydrostatic reference pressure and reference density
-for a `base_pressure` and `potential_temperature`.
+for a `surface_pressure` and `potential_temperature`.
 
 Arguments
 =========
 - `grid`: The grid.
-- `thermo :: ThermodynamicConstants`: By default, `ThermodynamicConstants(eltype(grid))`.
+- `constants :: ThermodynamicConstants`: By default, `ThermodynamicConstants(eltype(grid))`.
 
 Keyword arguments
 =================
-- `base_pressure`: By default, 101325.
+- `surface_pressure`: By default, 101325.
 - `potential_temperature`: By default, 288.
+- `standard_pressure`: Reference pressure for potential temperature (pˢᵗ). By default, 1e5.
 """
-function ReferenceState(grid, thermo=ThermodynamicConstants(eltype(grid));
-                        base_pressure = 101325,
-                        potential_temperature = 288)
+function ReferenceState(grid, constants=ThermodynamicConstants(eltype(grid));
+                        surface_pressure = 101325,
+                        potential_temperature = 288,
+                        standard_pressure = 1e5)
 
     FT = eltype(grid)
-    p₀ = convert(FT, base_pressure)
+    p₀ = convert(FT, surface_pressure)
     θ₀ = convert(FT, potential_temperature)
-
-    pᵣ = Field{Nothing, Nothing, Center}(grid)
-    set!(pᵣ, z -> adiabatic_hydrostatic_pressure(z, p₀, θ₀, thermo))
+    pˢᵗ = convert(FT, standard_pressure)
+    loc = (nothing, nothing, Center())
+  
+    p_bcs = FieldBoundaryConditions(grid, loc, bottom=ValueBoundaryCondition(p₀))
+    pᵣ = Field{Nothing, Nothing, Center}(grid, boundary_conditions=p_bcs)
+    set!(pᵣ, z -> adiabatic_hydrostatic_pressure(z, p₀, θ₀, constants))
     fill_halo_regions!(pᵣ)
-
-    ρᵣ = Field{Nothing, Nothing, Center}(grid)
+  
+    ρ₀ = surface_density(p₀, θ₀, constants)
+    ρ_bcs = FieldBoundaryConditions(grid, loc, bottom=ValueBoundaryCondition(ρ₀))
+    ρᵣ = Field{Nothing, Nothing, Center}(grid, boundary_conditions=ρ_bcs)
     g = thermo.gravitational_acceleration
     set!(ρᵣ, - ∂z(pᵣ) / g)
     fill_halo_regions!(ρᵣ)
 
-    return ReferenceState(p₀, θ₀, pᵣ, ρᵣ)
+    return ReferenceState(p₀, θ₀, pˢᵗ, pᵣ, ρᵣ)
 end

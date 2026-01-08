@@ -61,7 +61,7 @@ prognostic_field_names(::ExplicitMicrophysics) = (:ρqᵛ, :ρqˡ, :ρqⁱ)
 !!! note
     The names of prognostic fields defined by `prognostic_field_names` 
     **are crucial to the user interface**, because users can interact them and
-    `set!` their initial conditions. The names of variables should be carefully
+    [`set!`](https://clima.github.io/OceananigansDocumentation/stable/appendix/library/#Oceananigans.Fields.set!) their initial conditions. The names of variables should be carefully
     chosen to be concise, mathematical forms that are consistent with Breeze conventions.
 
 When we materialize the microphysics fields, we must include all of the prognostic fields
@@ -87,31 +87,31 @@ using Breeze.Thermodynamics:
     PlanarLiquidSurface,
     PlanarIceSurface
 
-@inline function microphysical_tendency(i, j, k, grid, em::ExplicitMicrophysics, ::Val{:ρqˡ}, μ, 𝒰, thermo)
-    ρ = 1.2 # density
-    T = temperature(𝒰, thermo)
-    q⁺ˡ = saturation_specific_humidity(T, ρ, thermo, PlanarLiquidSurface())
+@inline function microphysical_tendency(i, j, k, grid, em::ExplicitMicrophysics, ::Val{:ρqˡ}, ρ, μ, 𝒰, constants)
+    ρⁱʲᵏ = @inbounds ρ[i, j, k]
+    T = temperature(𝒰, constants)
+    q⁺ˡ = saturation_specific_humidity(T, ρⁱʲᵏ, constants, PlanarLiquidSurface())
     τᵛˡ = em.vapor_to_liquid
-    return @inbounds ρ * (μ.qᵛ[i, j, k] - q⁺ˡ) / τᵛˡ
+    return @inbounds ρⁱʲᵏ * (μ.qᵛ[i, j, k] - q⁺ˡ) / τᵛˡ
 end
 
-@inline @inbounds function microphysical_tendency(i, j, k, grid,
-    em::ExplicitMicrophysics, ::Val{:ρqⁱ}, μ, 𝒰, thermo)
+@inline function microphysical_tendency(i, j, k, grid,
+    em::ExplicitMicrophysics, ::Val{:ρqⁱ}, ρ, μ, 𝒰, constants)
 
-    ρ = 1.2 # density
-    q = MoistureMassFractions(qᵛ, qˡ, qⁱ)
-    T = temperature(𝒰, thermo)
-    q⁺ⁱ = saturation_specific_humidity(T, ρ, thermo, PlanarIceSurface())
+    ρⁱʲᵏ = @inbounds ρ[i, j, k]
+    T = temperature(𝒰, constants)
+    q⁺ⁱ = saturation_specific_humidity(T, ρⁱʲᵏ, constants, PlanarIceSurface())
     τᵛⁱ = em.vapor_to_ice
+    qᵛ = @inbounds μ.qᵛ[i, j, k]
 
-    return ρ * (μ.qᵛ[i, j, k] - q⁺ⁱ) / τᵛⁱ
+    return ρⁱʲᵏ * (qᵛ - q⁺ⁱ) / τᵛⁱ
 end
 
-@inline @inbounds function microphysical_tendency(
-    i, j, k, grid, em::ExplicitMicrophysics, ::Val{:ρqᵛ}, μ, 𝒰, thermo)
+@inline function microphysical_tendency(i, j, k, grid,
+    em::ExplicitMicrophysics, ::Val{:ρqᵛ}, ρ, μ, 𝒰, constants)
 
-    Sᵛˡ = microphysical_tendency(i, j, k, grid, em, Val(:ρvˡ), μ, 𝒰, thermo)
-    Sᵛⁱ = microphysical_tendency(i, j, k, grid, em, Val(:ρvⁱ), μ, 𝒰, thermo)
+    Sᵛˡ = microphysical_tendency(i, j, k, grid, em, Val(:ρvˡ), ρ, μ, 𝒰, constants)
+    Sᵛⁱ = microphysical_tendency(i, j, k, grid, em, Val(:ρvⁱ), ρ, μ, 𝒰, constants)
     return - Sᵛˡ - Sᵛⁱ
 end
 
@@ -128,15 +128,17 @@ import Breeze.AtmosphereModels:
     update_microphysical_fields!,
     compute_moisture_fraction
 
-@inline update_microphysical_fields!(μ, em::ExplicitMicrophysics, i, j, k, grid, ρ, state, thermo) =
+@inline update_microphysical_fields!(μ, em::ExplicitMicrophysics, i, j, k, grid, ρ, state, constants) =
     @inbounds μ.qᵛ[i, j, k] = state.moisture_mass_fractions.vapor
 
-@inline @inbounds function compute_moisture_fractions(i, j, k, grid,
+@inline function compute_moisture_fractions(i, j, k, grid,
     ::ExplicitMicrophysics, ρ, qᵗ, microphysical_fields)
 
-    qᵛ = microphysical_fields.qᵛ[i, j, k]
-    ρqˡ = microphysical_fields.ρqˡ[i, j, k] / ρ
-    ρqⁱ = microphysical_fields.ρqⁱ[i, j, k] / ρ
+    @inbounds begin
+        qᵛ = microphysical_fields.qᵛ[i, j, k]
+        qˡ = microphysical_fields.ρqˡ[i, j, k] / ρ
+        qⁱ = microphysical_fields.ρqⁱ[i, j, k] / ρ
+    end
 
     return MoistureMassFractions(qᵛ, qˡ, qⁱ)
 end
@@ -147,5 +149,5 @@ This is a fully prognostic  scheme, so there is no adjustment,
 ```@example microphysics_interface
 import Breeze.AtmosphereModels: maybe_adjust_thermodynamic_state
 
-@inline maybe_adjust_thermodynamic_state(state, ::ExplicitMicrophysics, μ, qᵗ, thermo) = state
+@inline maybe_adjust_thermodynamic_state(state, ::ExplicitMicrophysics, μ, qᵗ, constants) = state
 ```

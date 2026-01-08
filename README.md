@@ -5,21 +5,29 @@
 
 <!-- description -->
 <p align="center">
-  <strong>🌪 Fast and friendly Julia software for atmospheric fluid dynamics on CPUs and GPUs. https://numericalearth.github.io/BreezeDocumentation/dev/</strong>
+  <strong>🌪 Fast and friendly Julia software for atmospheric fluid dynamics on CPUs and GPUs. https://numericalearth.github.io/BreezeDocumentation/stable</strong>
 </p>
 
+
 <p align="center">
-    <a href="https://numericalearth.github.io/BreezeDocumentation/dev/">
+  <a href="https://numericalearth.github.io/BreezeDocumentation/stable/">
+    <img alt="Documentation" src="https://img.shields.io/badge/documentation-stable-blue?style=flat-square">
+  </a>
+  <a href="https://numericalearth.github.io/BreezeDocumentation/dev/">
     <img alt="Documentation" src="https://img.shields.io/badge/documentation-in%20development-orange?style=flat-square">
-    </a>
-    <a href="https://github.com/NumericalEarth/Breeze.jl/discussions">
+  </a>
+  <a href="https://doi.org/10.5281/zenodo.18050353">
+    <img src="https://zenodo.org/badge/DOI/10.5281/zenodo.18050353.svg" alt="DOI">
+  </a>
+  <a href="https://codecov.io/gh/NumericalEarth/Breeze.jl" >
+    <img src="https://codecov.io/gh/NumericalEarth/Breeze.jl/graph/badge.svg?token=09TZGWKUPV"/>
+  </a>
+  </br>
+  <a href="https://github.com/NumericalEarth/Breeze.jl/discussions">
     <img alt="Ask us anything" src="https://img.shields.io/badge/Ask%20us-anything-1abc9c.svg?style=flat-square">
   </a>
   <a href="https://github.com/SciML/ColPrac">
     <img alt="ColPrac: Contributor's Guide on Collaborative Practices for Community Packages" src="https://img.shields.io/badge/ColPrac-Contributor's%20Guide-blueviolet?style=flat-square">
-  </a>
-  <a href="https://codecov.io/gh/NumericalEarth/Breeze.jl" >
-    <img src="https://codecov.io/gh/NumericalEarth/Breeze.jl/graph/badge.svg?token=09TZGWKUPV"/>
   </a>
   <a href="https://github.com/JuliaTesting/Aqua.jl" >
     <img src="https://raw.githubusercontent.com/JuliaTesting/Aqua.jl/master/badge.svg"/>
@@ -30,34 +38,39 @@ Breeze is a library for simulating atmospheric flows, convection, clouds, weathe
 Much of Breeze's power flows from [Oceananigans](https://github.com/CliMA/Oceananigans.jl), which provides a user interface, grids, fields, solvers, advection schemes, Lagrangian particles, physics, and more.
 Right now, `Breeze.AtmosphereModel` is in an early stage of development, and supports simple simulations that use the anelastic formulation of the Euler equations on `RectilinearGrid`.
 But we're working feverishly towards a future with bulk, bin and superdroplet microphysics, radiation, and a fully compressible formulation with acoustic substepping (and note, the roadmap and vision for Breeze is still something of a work in progress).
-Check out [the documentation](https://numericalearth.github.io/BreezeDocumentation/dev/) to see what we can do now, and watch this space (or get in touch to discuss!) its crystallization.
+Check out [the documentation](https://numericalearth.github.io/BreezeDocumentation/stable/) to see what we can do now, and watch this space (or get in touch to [discuss](https://github.com/NumericalEarth/Breeze.jl/discussions)!) its crystallization.
 
-### Installing and using Breeze
+### Installation
 
-First [install Julia](https://julialang.org/install/); suggested version 1.12. See [juliaup](https://github.com/JuliaLang/juliaup) README for how to install 1.12 and make that version the default.
+Breeze is a registered Julia package. First [install Julia](https://julialang.org/install/); suggested version 1.12. See [juliaup](https://github.com/JuliaLang/juliaup) README for how to install 1.12 and make that version the default.
 
-Then clone this repository
-
-```bash
-git clone git@github.com:NumericalEarth/Breeze.jl.git
-```
-
-Open Julia from within the local directory of the repo via:
-
-```bash
-julia --project
-```
-
-The first time, we need to install any dependencies:
+Then launch Julia and type
 
 ```julia
-julia> using Pkg; Pkg.instantiate()
+julia> using Pkg
+
+julia> Pkg.add("Breeze")
 ```
+
+which will install the latest stable version of Breeze that's compatible with your current environment.
+
+You can check which version of Breeze you got via
+
+```julia
+Pkg.status("Breeze")
+```
+
+If you want to live on the cutting edge, you can use, e.g.,
+`Pkg.add(; url="https://github.com/NumericalEarth/Breeze.jl.git", rev="main")` to install the latest version of
+Breeze from `main` branch. For more information, see the
+[Pkg.jl documentation](https://pkgdocs.julialang.org).
+
+### Using Breeze
 
 Now we are ready to run any of the examples!
 
 For instance, by increasing the resolution of the cloudy Kelvin-Helmholtz instability
-to `Nx=1536` and `Nz=1024` and running
+to `Nx=1536` and `Nz=1024`, decrease the timestep to `Δt = 0.1`, and running
 
 ```julia
 julia> include("examples/cloudy_kelvin_helmholtz.jl")
@@ -65,14 +78,20 @@ julia> include("examples/cloudy_kelvin_helmholtz.jl")
 
 to get
 
-https://github.com/user-attachments/assets/010766c6-ed86-445f-87dc-e3b90c626589
+https://github.com/user-attachments/assets/f47ff268-b2e4-401c-a114-a0aaf0c7ead3
 
 Or cranking up the spatial resolution of the thermal bubble example to to `size = (1024, 512)` and running
 
 ```julia
-julia> include("examples/thermal_bubble.jl")
+julia> include("examples/dry_thermal_bubble.jl")
 ```
 
 we get
 
-https://github.com/user-attachments/assets/aaca693c-57fe-46bf-8ff7-6646f6e5eebe
+https://github.com/user-attachments/assets/c9a0c9c3-c199-48b8-9850-f967bdcc4bed
+
+### Citing
+
+If you use Breeze for research, teaching, or fun, we'd be grateful if you give credit by citing the corresponding Zenodo record, e.g.,
+
+> Wagner, G. L. et al. (2025). NumericalEarth/Breeze.jl. Zenodo. DOI:[10.5281/zenodo.18050353](https://doi.org/10.5281/zenodo.18050353)

@@ -24,12 +24,16 @@ using Oceananigans.TurbulenceClosures:
     _viscous_flux_wx, _viscous_flux_wy, _viscous_flux_wz,
     _diffusive_flux_x, _diffusive_flux_y, _diffusive_flux_z
 
-import ..AtmosphereModels: ∂ⱼ_𝒯₁ⱼ, ∂ⱼ_𝒯₂ⱼ, ∂ⱼ_𝒯₃ⱼ, ∇_dot_Jᶜ
+using ..AtmosphereModels: AtmosphereModels
 
-@inline ∂ⱼ_𝒯₁ⱼ(i, j, k, grid, ρ, ::Nothing, args...) = zero(grid)
-@inline ∂ⱼ_𝒯₂ⱼ(i, j, k, grid, ρ, ::Nothing, args...) = zero(grid)
-@inline ∂ⱼ_𝒯₃ⱼ(i, j, k, grid, ρ, ::Nothing, args...) = zero(grid)
-@inline ∇_dot_Jᶜ(i, j, k, grid, ρ, ::Nothing, args...) = zero(grid)
+#####
+##### Fallbacks for closure = nothing
+#####
+
+@inline AtmosphereModels.∂ⱼ_𝒯₁ⱼ(i, j, k, grid, ρ, ::Nothing, args...) = zero(grid)
+@inline AtmosphereModels.∂ⱼ_𝒯₂ⱼ(i, j, k, grid, ρ, ::Nothing, args...) = zero(grid)
+@inline AtmosphereModels.∂ⱼ_𝒯₃ⱼ(i, j, k, grid, ρ, ::Nothing, args...) = zero(grid)
+@inline AtmosphereModels.∇_dot_Jᶜ(i, j, k, grid, ρ, ::Nothing, args...) = zero(grid)
 
 #####
 ##### Scalar (tracer) dynamic fluxes: J = ρᵣ τ
@@ -37,17 +41,19 @@ import ..AtmosphereModels: ∂ⱼ_𝒯₁ⱼ, ∂ⱼ_𝒯₂ⱼ, ∂ⱼ_𝒯₃�
 
 # Face flux wrappers that call Oceananigans' kinematic diffusive fluxes and
 # multiply by ρᵣ at the appropriate face.
+# Note: args must include (disc, closure, closure_fields, id, c, clock, model_fields, buoyancy)
+# where id is the tracer index (Val(n)) and c is the tracer field.
 
 @inline Jᶜx(i, j, k, grid, ρ, args...) = ℑxᶠᵃᵃ(i, j, k, grid, ρ) * _diffusive_flux_x(i, j, k, grid, args...)
 @inline Jᶜy(i, j, k, grid, ρ, args...) = ℑyᵃᶠᵃ(i, j, k, grid, ρ) * _diffusive_flux_y(i, j, k, grid, args...)
 @inline Jᶜz(i, j, k, grid, ρ, args...) = ℑzᵃᵃᶠ(i, j, k, grid, ρ) * _diffusive_flux_z(i, j, k, grid, args...)
 
-@inline function ∇_dot_Jᶜ(i, j, k, grid, ρᵣ, closure::AbstractTurbulenceClosure, closure_fields, clock, model_fields, buoyancy)
+@inline function AtmosphereModels.∇_dot_Jᶜ(i, j, k, grid, ρᵣ, closure::AbstractTurbulenceClosure, closure_fields, id, c, clock, model_fields, buoyancy)
     disc = time_discretization(closure)
     return V⁻¹ᶜᶜᶜ(i, j, k, grid) * (
-          δxᶜᵃᵃ(i, j, k, grid, Ax_qᶠᶜᶜ, Jᶜx, ρᵣ, disc, closure, closure_fields, clock, model_fields, buoyancy)
-        + δyᵃᶜᵃ(i, j, k, grid, Ay_qᶜᶠᶜ, Jᶜy, ρᵣ, disc, closure, closure_fields, clock, model_fields, buoyancy)
-        + δzᵃᵃᶜ(i, j, k, grid, Az_qᶜᶜᶠ, Jᶜz, ρᵣ, disc, closure, closure_fields, clock, model_fields, buoyancy))
+          δxᶜᵃᵃ(i, j, k, grid, Ax_qᶠᶜᶜ, Jᶜx, ρᵣ, disc, closure, closure_fields, id, c, clock, model_fields, buoyancy)
+        + δyᵃᶜᵃ(i, j, k, grid, Ay_qᶜᶠᶜ, Jᶜy, ρᵣ, disc, closure, closure_fields, id, c, clock, model_fields, buoyancy)
+        + δzᵃᵃᶜ(i, j, k, grid, Az_qᶜᶜᶠ, Jᶜz, ρᵣ, disc, closure, closure_fields, id, c, clock, model_fields, buoyancy))
 end
 
 #####
@@ -67,7 +73,7 @@ end
 @inline 𝒯_wy(i, j, k, grid, ρ, args...) = ℑyzᵃᶠᶠ(i, j, k, grid, ρ) * _viscous_flux_wy(i, j, k, grid, args...)
 @inline 𝒯_wz(i, j, k, grid, ρ, args...) = @inbounds ρ[i, j, k]     * _viscous_flux_wz(i, j, k, grid, args...)
 
-@inline function ∂ⱼ_𝒯₁ⱼ(i, j, k, grid, ρᵣ, closure::AbstractTurbulenceClosure, closure_fields, clock, model_fields, buoyancy)
+@inline function AtmosphereModels.∂ⱼ_𝒯₁ⱼ(i, j, k, grid, ρᵣ, closure::AbstractTurbulenceClosure, closure_fields, clock, model_fields, buoyancy)
     disc = time_discretization(closure)
     return V⁻¹ᶠᶜᶜ(i, j, k, grid) * (
           δxᶠᵃᵃ(i, j, k, grid, Ax_qᶜᶜᶜ, 𝒯_ux, ρᵣ, disc, closure, closure_fields, clock, model_fields, buoyancy)
@@ -75,7 +81,7 @@ end
         + δzᵃᵃᶜ(i, j, k, grid, Az_qᶠᶜᶠ, 𝒯_uz, ρᵣ, disc, closure, closure_fields, clock, model_fields, buoyancy))
 end
 
-@inline function ∂ⱼ_𝒯₂ⱼ(i, j, k, grid, ρᵣ, closure::AbstractTurbulenceClosure, closure_fields, clock, model_fields, buoyancy)
+@inline function AtmosphereModels.∂ⱼ_𝒯₂ⱼ(i, j, k, grid, ρᵣ, closure::AbstractTurbulenceClosure, closure_fields, clock, model_fields, buoyancy)
     disc = time_discretization(closure)
     return V⁻¹ᶜᶠᶜ(i, j, k, grid) * (
           δxᶜᵃᵃ(i, j, k, grid, Ax_qᶠᶠᶜ, 𝒯_vx, ρᵣ, disc, closure, closure_fields, clock, model_fields, buoyancy)
@@ -85,7 +91,7 @@ end
 
 # Face stress wrappers for w-momentum
 
-@inline function ∂ⱼ_𝒯₃ⱼ(i, j, k, grid, ρᵣ, closure::AbstractTurbulenceClosure, closure_fields, clock, model_fields, buoyancy)
+@inline function AtmosphereModels.∂ⱼ_𝒯₃ⱼ(i, j, k, grid, ρᵣ, closure::AbstractTurbulenceClosure, closure_fields, clock, model_fields, buoyancy)
     disc = time_discretization(closure)
     return V⁻¹ᶜᶜᶠ(i, j, k, grid) * (
           δxᶜᵃᵃ(i, j, k, grid, Ax_qᶠᶜᶠ, 𝒯_wx, ρᵣ, disc, closure, closure_fields, clock, model_fields, buoyancy)
