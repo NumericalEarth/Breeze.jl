@@ -67,8 +67,8 @@ instead, it is diagnosed from the total specific moisture `qᵗ` and the liquid 
 # Parameters
 
 ## Saturation (Tetens/Clausius-Clapeyron formula)
-- `dcmip_temperature_scale`: A parameter of uncertain provenance that appears in the DCMIP2016 implementation
-                             of the Kessler scheme (line 105 of https://gitlab.in2p3.fr/ipsl/projets/dynamico/dynamico/-/blob/master/src/dcmip2016_kessler_physic.f90)
+- `dcmip_temperature_scale` (`T_DCMIP2016`): A parameter of uncertain provenance that appears in the DCMIP2016 implementation
+                             of the Kessler scheme (line 105 of `kessler.f90` in [DOI: 10.5281/zenodo.1298671](https://doi.org/10.5281/zenodo.1298671))
 
 The "saturation adjustment coefficient" `f₅` is then computed as
 
@@ -85,7 +85,7 @@ Terminal velocity: `𝕎ʳ = a𝕎 × (ρ × rʳ × Cᵨ)^β𝕎 × √(ρ₀/ρ
 - `density_scale` (`Cᵨ`): Density scale factor for unit conversion (default: 0.001)
 - `terminal_velocity_exponent` (`β𝕎`): Terminal velocity exponent (default: 0.1364)
 - `ρ`: Density
-- `ρ₀`: Density at z=0
+- `ρ₀`: Reference density at z=0
 
 ## Autoconversion
 - `autoconversion_rate` (`k₁`): Autoconversion rate coefficient in s⁻¹ (default: 0.001)
@@ -410,27 +410,20 @@ end
     i, j = @index(Global, NTuple)
     FT = eltype(grid)
     surface = PlanarLiquidSurface()
-
-    # Extract microphysical fields from μ
     precipitation_rate_field = μ.precipitation_rate
 
-    # Latent heat of vaporization for θˡⁱ ↔ T conversion
+    # Thermodynamic constants
     ℒˡᵣ = constants.liquid.reference_latent_heat
-
-    # Dry air heat capacity for latent heating calculation
     cᵖᵈ = constants.dry_air.heat_capacity
-
     # Saturation adjustment coefficient: f₅ = a × T_DCMIP2016 × ℒˡᵣ / cᵖᵈ
     T_DCMIP2016 = microphysics.dcmip_temperature_scale
     f₅ = saturation_adjustment_coefficient(T_DCMIP2016, constants)
 
     # Temperature offset for saturation adjustment (from TetensFormula)
     δT = constants.saturation_vapor_pressure.liquid_temperature_offset
-
-    # CFL safety factor for sedimentation
-    cfl = microphysics.substep_cfl
-
-    # Parameters from microphysics struct (hoisted out of the inner vertical loops)
+    
+    # Microphysics parameters
+    cfl    = microphysics.substep_cfl
     Cᵨ     = microphysics.density_scale
     Cᵉᵛ₁   = microphysics.evaporation_ventilation_coefficient_1
     Cᵉᵛ₂   = microphysics.evaporation_ventilation_coefficient_2
@@ -447,21 +440,18 @@ end
     #####
 
     max_Δt = Δt
-
-    # Avoid a branch in the vertical loop and cut down `znode` calls:
-    # we only need `Δz` for k = 1:Nz-1.
     zᵏ = znode(i, j, 1, grid, Center(), Center(), Center())
+
     for k = 1:(Nz-1)
         @inbounds begin
             ρ = density[i, j, k]
-
             qᵗ = ρqᵗ[i, j, k] / ρ
             qᶜˡ = max(0, μ.ρqᶜˡ[i, j, k] / ρ)
             qʳ  = max(0, μ.ρqʳ[i, j, k] / ρ)
             qˡ_sum = qᶜˡ + qʳ
-            qᵗ = max(qᵗ, qˡ_sum)  # Prevent negative vapor
-            qᵛ = qᵗ - qˡ_sum       # Diagnose vapor
-
+            qᵗ = max(qᵗ, qˡ_sum)
+            qᵛ = qᵗ - qˡ_sum
+            
             # Convert to mixing ratios for Kessler physics
             q = MoistureMassFractions(qᵛ, qˡ_sum)
             r = MoistureMixingRatio(q)
@@ -486,10 +476,9 @@ end
         end
     end
 
-    # k = Nz (no `Δz` / CFL update needed)
+    # k = Nz: no CFL update needed
     @inbounds begin
         ρ = density[i, j, Nz]
-
         qᵗ = ρqᵗ[i, j, Nz] / ρ
         qᶜˡ = max(0, μ.ρqᶜˡ[i, j, Nz] / ρ)
         qʳ  = max(0, μ.ρqʳ[i, j, Nz] / ρ)
@@ -505,7 +494,6 @@ end
         rʳ  = qʳ * (1 + rᵗ)
 
         μ.𝕎ʳ[i, j, Nz] = kessler_terminal_velocity(rʳ, ρ, ρ₁, microphysics)
-
         μ.qᵛ[i, j, Nz]  = rᵛ
         μ.qᶜˡ[i, j, Nz] = rᶜˡ
         μ.qʳ[i, j, Nz]  = rʳ
@@ -513,7 +501,7 @@ end
 
     # Subcycling for CFL constraint on rain sedimentation
     Ns = max(1, ceil(Int, Δt / max_Δt))
-    inv_Ns = inv(FT(Ns))  # Precompute for final averaging
+    inv_Ns = inv(FT(Ns))
     Δtₛ = Δt * inv_Ns
     # Pˢᵘʳᶠ: accumulated surface precipitation rate (qʳ × 𝕎ʳ) over subcycles
     Pˢᵘʳᶠ = zero(FT)
@@ -534,19 +522,18 @@ end
             Pˢᵘʳᶠ += qʳ₁ * μ.𝕎ʳ[i, j, 1]
         end
 
-        # Rolling z-coordinate to reduce `znode` calls (and avoid a branch in the loop body)
         zᵏ = znode(i, j, 1, grid, Center(), Center(), Center())
+
         for k = 1:(Nz-1)
             @inbounds begin
                 ρ = density[i, j, k]
                 p = pressure[i, j, k]
                 θˡⁱᵏ = θˡⁱ[i, j, k]
-
                 rᵛ = μ.qᵛ[i, j, k]
                 rᶜˡ = μ.qᶜˡ[i, j, k]
                 rʳ = μ.qʳ[i, j, k]
 
-                # Moist thermodynamics using mixing ratio abstraction
+                # Compute temperature from θˡⁱ
                 rˡ = rᶜˡ + rʳ
                 r = MoistureMixingRatio(rᵛ, rˡ)
                 cᵖᵐ = mixture_heat_capacity(r, constants)
@@ -556,16 +543,13 @@ end
                 Π = (p / p₀)^(Rᵐ / cᵖᵐ)
                 Tᵏ = Π * θˡⁱᵏ + ℒˡᵣ * qˡ_current / cᵖᵐ
 
-                # Rain sedimentation (upstream differencing)
+                # Rain sedimentation
                 ρᵏ = Cᵨ * ρ
                 𝕎ʳᵏ = μ.𝕎ʳ[i, j, k]
-
                 zᵏ⁺¹ = znode(i, j, k+1, grid, Center(), Center(), Center())
                 Δz = zᵏ⁺¹ - zᵏ
-
-                ρᵏ⁺¹ = density[i, j, k+1]
-                ρᵏ⁺¹ = Cᵨ * ρᵏ⁺¹
-                rʳᵏ⁺¹ = μ.qʳ[i, j, k+1]  # Mixing ratio
+                ρᵏ⁺¹ = Cᵨ * density[i, j, k+1]
+                rʳᵏ⁺¹ = μ.qʳ[i, j, k+1]
                 𝕎ʳᵏ⁺¹ = μ.𝕎ʳ[i, j, k+1]
 
                 # Δr𝕎: change in rain mixing ratio due to sedimentation (upstream differencing)
@@ -578,23 +562,21 @@ end
                 rʳ_new = max(0, rʳ + Δrᴾ + Δr𝕎)
 
                 # Saturation specific humidity using Breeze thermodynamics
-                # qᵛ⁺ = pᵛ⁺ / (ρ Rᵛ T) is the saturation mass fraction
                 qᵛ⁺ = saturation_specific_humidity(Tᵏ, ρ, constants, surface)
                 # Convert to saturation mixing ratio: rᵛ⁺ = qᵛ⁺ / (1 - qᵛ⁺)
                 rᵛ⁺ = qᵛ⁺ / (1 - qᵛ⁺)
 
                 # Δrˢᵃᵗ: mixing ratio adjustment to restore saturation equilibrium
-                δT = constants.saturation_vapor_pressure.liquid_temperature_offset
                 Δrˢᵃᵗ = (rᵛ - rᵛ⁺) / (1 + rᵛ⁺ * f₅ / (Tᵏ - δT)^2)
 
                 # Δrᴱ: rain evaporation into subsaturated air (KW eq. 2.14)
-                ρrʳ = ρᵏ * rʳ_new                                  # Scaled rain water content
-                Vᵉᵛ = (Cᵉᵛ₁ + Cᵉᵛ₂ * ρrʳ^βᵉᵛ₁) * ρrʳ^βᵉᵛ₂          # Ventilation factor
-                Dᵗʰ = Cᵈⁱᶠᶠ / (p * rᵛ⁺) + Cᵗʰᵉʳᵐ                   # Diffusion-thermal term
-                Δrᵛ⁺ = max(0, rᵛ⁺ - rᵛ)                            # Subsaturation
-                Ėʳ = Vᵉᵛ / Dᵗʰ * Δrᵛ⁺ / (ρᵏ * rᵛ⁺ + FT(1e-20))     # Rain evaporation rate
-                Δrᴱmax = max(0, -Δrˢᵃᵗ - rᶜˡ_new)                   # Maximum evaporation
-                Δrᴱ = min(min(Δtₛ * Ėʳ, Δrᴱmax), rʳ_new)            # Limited evaporation
+                ρrʳ = ρᵏ * rʳ_new
+                Vᵉᵛ = (Cᵉᵛ₁ + Cᵉᵛ₂ * ρrʳ^βᵉᵛ₁) * ρrʳ^βᵉᵛ₂
+                Dᵗʰ = Cᵈⁱᶠᶠ / (p * rᵛ⁺) + Cᵗʰᵉʳᵐ
+                Δrᵛ⁺ = max(0, rᵛ⁺ - rᵛ)
+                Ėʳ = Vᵉᵛ / Dᵗʰ * Δrᵛ⁺ / (ρᵏ * rᵛ⁺ + FT(1e-20))
+                Δrᴱmax = max(0, -Δrˢᵃᵗ - rᶜˡ_new)
+                Δrᴱ = min(min(Δtₛ * Ėʳ, Δrᴱmax), rʳ_new)
 
                 # Δrᶜ: condensation of vapor to cloud liquid (limited by available cloud water)
                 Δrᶜ = max(Δrˢᵃᵗ, -rᶜˡ_new)
@@ -607,12 +589,10 @@ end
                 μ.qʳ[i, j, k]  = rʳ_final
 
                 # Update θˡⁱ from latent heating
-                # Uses Breeze's thermodynamic constants for consistency
                 net_phase_change = Δrᶜ - Δrᴱ
                 ΔT_phase = ℒˡᵣ / cᵖᵈ * net_phase_change
                 T_new = Tᵏ + ΔT_phase
 
-                # Convert back to θˡⁱ with updated moisture
                 rˡ_new = rᶜˡ_final + rʳ_final
                 r_new = MoistureMixingRatio(rᵛ_new, rˡ_new)
                 cᵖᵐ_new = mixture_heat_capacity(r_new, constants)
@@ -620,8 +600,6 @@ end
                 q_new = MoistureMassFractions(r_new)
                 qˡ_new = q_new.liquid
                 Π_new = (p / p₀)^(Rᵐ_new / cᵖᵐ_new)
-
-                # θˡⁱ = (T - ℒˡᵣ qˡ / cᵖᵐ) / Π
                 θˡⁱ_new = (T_new - ℒˡᵣ * qˡ_new / cᵖᵐ_new) / Π_new
 
                 θˡⁱ[i, j, k]  = θˡⁱ_new
@@ -629,18 +607,17 @@ end
             end
         end
 
-        # k = Nz (top boundary: rain falls out)
+        # k = Nz: top boundary, rain falls out
         @inbounds begin
             k = Nz
             ρ = density[i, j, k]
             p = pressure[i, j, k]
             θˡⁱᵏ = θˡⁱ[i, j, k]
-
             rᵛ = μ.qᵛ[i, j, k]
             rᶜˡ = μ.qᶜˡ[i, j, k]
             rʳ = μ.qʳ[i, j, k]
 
-            # Moist thermodynamics using mixing ratio abstraction
+            # Compute temperature from θˡⁱ
             rˡ = rᶜˡ + rʳ
             r = MoistureMixingRatio(rᵛ, rˡ)
             cᵖᵐ = mixture_heat_capacity(r, constants)
@@ -650,7 +627,7 @@ end
             Π = (p / p₀)^(Rᵐ / cᵖᵐ)
             Tᵏ = Π * θˡⁱᵏ + ℒˡᵣ * qˡ_current / cᵖᵐ
 
-            # Δr𝕎: sedimentation at top boundary (rain falls out of domain)
+            # Rain sedimentation at top boundary
             ρᵏ = Cᵨ * ρ
             𝕎ʳᵏ = μ.𝕎ʳ[i, j, k]
             zᵏ = znode(i, j, k, grid, Center(), Center(), Center())
@@ -669,13 +646,13 @@ end
             Δrˢᵃᵗ = (rᵛ - rᵛ⁺) / (1 + rᵛ⁺ * f₅ / (Tᵏ - δT)^2)
 
             # Δrᴱ: rain evaporation (KW eq. 2.14)
-            ρrʳ = ρᵏ * rʳ_new                                          # Scaled rain water content
-            Vᵉᵛ = (Cᵉᵛ₁ + Cᵉᵛ₂ * ρrʳ^βᵉᵛ₁) * ρrʳ^βᵉᵛ₂                 # Ventilation factor
-            Dᵗʰ = Cᵈⁱᶠᶠ / (p * rᵛ⁺) + Cᵗʰᵉʳᵐ                          # Diffusion-thermal term
-            Δrᵛ⁺ = max(0, rᵛ⁺ - rᵛ)                                    # Subsaturation
-            Ėʳ = Vᵉᵛ / Dᵗʰ * Δrᵛ⁺ / (ρᵏ * rᵛ⁺ + FT(1e-20))            # Rain evaporation rate
-            Δrᴱmax = max(0, -Δrˢᵃᵗ - rᶜˡ_new)                          # Maximum evaporation
-            Δrᴱ = min(min(Δtₛ * Ėʳ, Δrᴱmax), rʳ_new)                   # Limited evaporation
+            ρrʳ = ρᵏ * rʳ_new
+            Vᵉᵛ = (Cᵉᵛ₁ + Cᵉᵛ₂ * ρrʳ^βᵉᵛ₁) * ρrʳ^βᵉᵛ₂
+            Dᵗʰ = Cᵈⁱᶠᶠ / (p * rᵛ⁺) + Cᵗʰᵉʳᵐ
+            Δrᵛ⁺ = max(0, rᵛ⁺ - rᵛ)
+            Ėʳ = Vᵉᵛ / Dᵗʰ * Δrᵛ⁺ / (ρᵏ * rᵛ⁺ + FT(1e-20))
+            Δrᴱmax = max(0, -Δrˢᵃᵗ - rᶜˡ_new)
+            Δrᴱ = min(min(Δtₛ * Ėʳ, Δrᴱmax), rʳ_new)
 
             # Δrᶜ: condensation
             Δrᶜ = max(Δrˢᵃᵗ, -rᶜˡ_new)
@@ -687,6 +664,7 @@ end
             μ.qᶜˡ[i, j, k] = rᶜˡ_final
             μ.qʳ[i, j, k]  = rʳ_final
 
+            # Update θˡⁱ from latent heating
             net_phase_change = Δrᶜ - Δrᴱ
             ΔT_phase = ℒˡᵣ / cᵖᵈ * net_phase_change
             T_new = Tᵏ + ΔT_phase
@@ -698,14 +676,13 @@ end
             q_new = MoistureMassFractions(r_new)
             qˡ_new = q_new.liquid
             Π_new = (p / p₀)^(Rᵐ_new / cᵖᵐ_new)
-
             θˡⁱ_new = (T_new - ℒˡᵣ * qˡ_new / cᵖᵐ_new) / Π_new
 
             θˡⁱ[i, j, k]  = θˡⁱ_new
             ρθˡⁱ[i, j, k] = ρ * θˡⁱ_new
         end
 
-        # Recalculate terminal velocities for next subcycle
+        # Update terminal velocities for next subcycle
         if m < Ns
             for k = 1:Nz
                 @inbounds begin
@@ -730,28 +707,21 @@ end
             rᶜˡ = μ.qᶜˡ[i, j, k]
             rʳ = μ.qʳ[i, j, k]
 
-            # Convert mixing ratios to mass fractions
             rˡ = rᶜˡ + rʳ
             r = MoistureMixingRatio(rᵛ, rˡ)
             q = MoistureMassFractions(r)
             qᵛ = q.vapor
-            qˡ = q.liquid
             qᵗ = total_specific_moisture(q)
-
-            # Compute cloud and rain mass fractions using the same conversion factor
             rᵗ = total_mixing_ratio(r)
             qᶜˡ = rᶜˡ / (1 + rᵗ)
             qʳ  = rʳ / (1 + rᵗ)
 
-            # Update prognostic fields (density-weighted)
-            ρqᵗ[i, j, k]  = ρ * qᵗ
+            ρqᵗ[i, j, k]    = ρ * qᵗ
             μ.ρqᶜˡ[i, j, k] = ρ * qᶜˡ
             μ.ρqʳ[i, j, k]  = ρ * qʳ
-
-            # Update diagnostic fields (mass fractions)
-            μ.qᵛ[i, j, k]  = qᵛ
-            μ.qᶜˡ[i, j, k] = qᶜˡ
-            μ.qʳ[i, j, k]  = qʳ
+            μ.qᵛ[i, j, k]   = qᵛ
+            μ.qᶜˡ[i, j, k]  = qᶜˡ
+            μ.qʳ[i, j, k]   = qʳ
         end
     end
 end
@@ -759,8 +729,6 @@ end
 #####
 ##### Diagnostic field update
 #####
-
-# Update diagnostic mass fraction fields from prognostic density-weighted fields
 @inline function AtmosphereModels.update_microphysical_fields!(μ, ::DCMIP2016KM, i, j, k, grid, ρ, 𝒰, constants)
     qᵗ = total_specific_moisture(𝒰)
     @inbounds begin
