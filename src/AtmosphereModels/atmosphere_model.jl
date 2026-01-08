@@ -107,6 +107,7 @@ function AtmosphereModel(grid;
                          thermodynamic_constants = ThermodynamicConstants(eltype(grid)),
                          formulation = :LiquidIcePotentialTemperature,
                          dynamics = nothing,
+                         velocities = nothing,
                          moisture_density = DefaultValue(),
                          tracers = tuple(),
                          coriolis = nothing,
@@ -158,7 +159,15 @@ function AtmosphereModel(grid;
     dynamics = materialize_dynamics(dynamics, grid, boundary_conditions)
     formulation = materialize_formulation(formulation, dynamics, grid, boundary_conditions)
 
-    momentum, velocities = materialize_momentum_and_velocities(dynamics, grid, boundary_conditions)
+    # Materialize momentum and velocities
+    # If velocities is provided (e.g., PrescribedVelocityFields), use it
+    if isnothing(velocities)
+        momentum, velocities = materialize_momentum_and_velocities(dynamics, grid, boundary_conditions)
+    else
+        momentum, _ = materialize_momentum_and_velocities(dynamics, grid, boundary_conditions)
+        velocities = materialize_velocities(velocities, grid)
+    end
+
     microphysical_fields = materialize_microphysical_fields(microphysics, grid, boundary_conditions)
 
     tracers = NamedTuple(name => CenterField(grid, boundary_conditions=boundary_conditions[name]) for name in tracer_names)

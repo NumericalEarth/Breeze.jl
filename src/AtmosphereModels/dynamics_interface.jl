@@ -32,6 +32,13 @@ Create momentum and velocity fields for the given dynamics.
 function materialize_momentum_and_velocities end
 
 """
+    materialize_velocities(velocities, grid)
+
+Create velocity fields from a velocity specification (e.g., `PrescribedVelocityFields`).
+"""
+function materialize_velocities end
+
+"""
     dynamics_pressure_solver(dynamics, grid)
 
 Create the pressure solver for the given dynamics.

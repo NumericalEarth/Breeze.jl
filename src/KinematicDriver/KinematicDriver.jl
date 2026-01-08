@@ -13,6 +13,7 @@ module KinematicDriver
 
 export
     PrescribedDynamics,
+    PrescribedVelocityFields,
     KinematicModel
 
 using DocStringExtensions: TYPEDSIGNATURES

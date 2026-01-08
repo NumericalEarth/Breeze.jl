@@ -15,6 +15,7 @@ export
     CompressibleDynamics,
     CompressibleModel,
     PrescribedDynamics,
+    PrescribedVelocityFields,
     KinematicModel,
     AtmosphereModel,
     StaticEnergyFormulation,
@@ -153,7 +154,7 @@ include("CompressibleEquations/CompressibleEquations.jl")
 using .CompressibleEquations: CompressibleDynamics, CompressibleModel
 
 include("KinematicDriver/KinematicDriver.jl")
-using .KinematicDriver: PrescribedDynamics, KinematicModel
+using .KinematicDriver: PrescribedDynamics, PrescribedVelocityFields, KinematicModel
 
 include("Microphysics/Microphysics.jl")
 using .Microphysics
