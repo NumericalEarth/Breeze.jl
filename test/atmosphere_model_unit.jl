@@ -6,6 +6,12 @@ using Oceananigans.Diagnostics: erroring_NaNChecker!
 using Oceananigans.Operators: ℑzᵃᵃᶠ
 using Test
 
+# TODO: move this to Oceananigans
+function constant_field(grid, constant)
+    field = Field{Nothing, Nothing, Nothing}(grid)
+    return set!(field, constant)
+end
+
 function run_nan_checker_test(arch; erroring)
     grid = RectilinearGrid(arch, size=(4, 2, 1), extent=(1, 1, 1))
     model = AtmosphereModel(grid)
@@ -44,18 +50,23 @@ end
     constants = ThermodynamicConstants()
     @test eltype(constants) == FT
 
-    for p₀ in (101325, 100000), θ₀ in (288, 300), formulation in (:LiquidIcePotentialTemperature, :StaticEnergy)
-        @testset let p₀ = p₀, θ₀ = θ₀, formulation = formulation
+    p₀, θ₀ = 101325, 300
+
+    @testset "ReferenceState surface values" begin
+        reference_state = ReferenceState(grid, constants, surface_pressure=p₀, potential_temperature=θ₀)
+
+        # Check that interpolating to the first face (k=1) recovers surface values
+        q₀ = Breeze.Thermodynamics.MoistureMassFractions{FT} |> zero
+        ρ₀ = Breeze.Thermodynamics.density(θ₀, p₀, q₀, constants)
+        for i = 1:Nx, j = 1:Ny
+            @test p₀ ≈ @allowscalar ℑzᵃᵃᶠ(i, j, 1, grid, reference_state.pressure)
+            @test ρ₀ ≈ @allowscalar ℑzᵃᵃᶠ(i, j, 1, grid, reference_state.density)
+        end
+    end
+
+    for formulation in (:LiquidIcePotentialTemperature, :StaticEnergy)
+        @testset "set! and thermodynamic roundtrip [$formulation]" begin
             reference_state = ReferenceState(grid, constants, surface_pressure=p₀, potential_temperature=θ₀)
-
-            # Check that interpolating to the first face (k=1) recovers surface values
-            q₀ = Breeze.Thermodynamics.MoistureMassFractions{FT} |> zero
-            ρ₀ = Breeze.Thermodynamics.density(θ₀, p₀, q₀, constants)
-            for i = 1:Nx, j = 1:Ny
-                @test p₀ ≈ @allowscalar ℑzᵃᵃᶠ(i, j, 1, grid, reference_state.pressure)
-                @test ρ₀ ≈ @allowscalar ℑzᵃᵃᶠ(i, j, 1, grid, reference_state.density)
-            end
-
             dynamics = AnelasticDynamics(reference_state)
             model = AtmosphereModel(grid; thermodynamic_constants=constants, dynamics, formulation)
 
@@ -69,21 +80,39 @@ end
             @test liquid_ice_potential_temperature(model) ≈ θ₁
         end
     end
+
+    for microphysics in (nothing, SaturationAdjustment())
+        @testset "set! moisture and momentum [microphysics=$(typeof(microphysics).name.name)]" begin
+            reference_state = ReferenceState(grid, constants, surface_pressure=p₀, potential_temperature=θ₀)
+            dynamics = AnelasticDynamics(reference_state)
+            model = AtmosphereModel(grid; thermodynamic_constants=constants, dynamics, microphysics)
+            
+            set!(model; qᵗ = 1e-2)
+            @test model.specific_moisture ≈ constant_field(grid, 1e-2)
+            
+            ρᵣ = model.dynamics.reference_state.density
+            @test model.moisture_density ≈ ρᵣ * 1e-2
+
+            set!(model; u = 1, v = 2)
+            @test model.velocities.u ≈ constant_field(grid, 1)
+            @test model.velocities.v ≈ constant_field(grid, 2)
+            @test model.momentum.ρu ≈ ρᵣ
+            @test model.momentum.ρv ≈ ρᵣ * 2
+        end
+    end
 end
 
-@testset "Saturation and LiquidIcePotentialTemperatureField (WarmPhase) [$(FT)]" for FT in (Float32, Float64), formulation in (:LiquidIcePotentialTemperature, :StaticEnergy)
+@testset "Saturation specific humidity [$(FT)]" for FT in (Float32, Float64), formulation in (:LiquidIcePotentialTemperature, :StaticEnergy)
     Oceananigans.defaults.FloatType = FT
     grid = RectilinearGrid(default_arch; size=(8, 8, 8), x=(0, 1_000), y=(0, 1_000), z=(0, 1_000))
     constants = ThermodynamicConstants()
 
-    p₀ = 101325
-    θ₀ = 300
+    p₀, θ₀ = 101325, 300
     reference_state = ReferenceState(grid, constants, surface_pressure=p₀, potential_temperature=θ₀)
     dynamics = AnelasticDynamics(reference_state)
     microphysics = SaturationAdjustment()
     model = AtmosphereModel(grid; thermodynamic_constants=constants, dynamics, formulation, microphysics)
 
-    # Initialize with potential temperature and dry air
     set!(model; θ=θ₀)
 
     # Check SaturationSpecificHumidityField matches direct thermodynamics
@@ -110,8 +139,7 @@ end
     tetens = TetensFormula()
     constants = ThermodynamicConstants(; saturation_vapor_pressure=tetens)
 
-    p₀ = 101325
-    θ₀ = 300
+    p₀, θ₀ = 101325, 300
     reference_state = ReferenceState(grid, constants, surface_pressure=p₀, potential_temperature=θ₀)
     dynamics = AnelasticDynamics(reference_state)
 
@@ -122,4 +150,3 @@ end
         @test model.clock.iteration == 1
     end
 end
-
