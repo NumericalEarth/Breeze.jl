@@ -13,7 +13,6 @@ module KinematicDriver
 
 export
     PrescribedDynamics,
-    PrescribedVelocityFields,
     KinematicModel
 
 using DocStringExtensions: TYPEDSIGNATURES
@@ -27,10 +26,13 @@ using Oceananigans.Grids: Face, Center
 using Oceananigans.TimeSteppers: Clock, TimeSteppers
 using Oceananigans.Utils: prettysummary
 
+# Import PrescribedVelocityFields from Oceananigans
+using Oceananigans.Models.HydrostaticFreeSurfaceModels: PrescribedVelocityFields
+
 using Breeze.Thermodynamics: ReferenceState
 using Breeze.AtmosphereModels: AtmosphereModels, AtmosphereModel
 
-include("prescribed_velocity_fields.jl")
+include("prescribed_dynamics.jl")
 
 # Type alias for kinematic models
 const KinematicModel = AtmosphereModel{<:PrescribedDynamics}

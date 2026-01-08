@@ -15,7 +15,6 @@ export
     CompressibleDynamics,
     CompressibleModel,
     PrescribedDynamics,
-    PrescribedVelocityFields,
     KinematicModel,
     AtmosphereModel,
     StaticEnergyFormulation,
