@@ -130,6 +130,10 @@ function Fields.set!(model::AtmosphereModel; time=nothing, enforce_mass_conserva
 
         # Prognostic variables
         if name ∈ propertynames(model.momentum)
+            # Check if velocities are prescribed (kinematic mode)
+            if has_prescribed_velocities(model.dynamics)
+                throw(ArgumentError("Cannot set momentum for PrescribedVelocityFields dynamics. Velocities are prescribed by functions."))
+            end
             ρu = getproperty(model.momentum, name)
             set!(ρu, value)
 
@@ -163,6 +167,11 @@ function Fields.set!(model::AtmosphereModel; time=nothing, enforce_mass_conserva
             set!(ρqᵗ, ρ * qᵗ)
 
         elseif name ∈ (:u, :v, :w)
+            # Check if velocities are prescribed (kinematic mode)
+            if has_prescribed_velocities(model.dynamics)
+                throw(ArgumentError("Cannot set velocities for PrescribedVelocityFields dynamics. Velocities are prescribed by functions."))
+            end
+
             u = model.velocities[name]
             set!(u, value)
 

@@ -202,6 +202,18 @@ For compressible dynamics, returns `-∂p/∂z`.
 @inline z_pressure_gradient(i, j, k, grid, dynamics) = zero(grid)
 
 #####
+##### Prescribed velocities interface
+#####
+
+"""
+    has_prescribed_velocities(dynamics)
+
+Return `true` if the dynamics uses prescribed velocities (kinematic mode).
+Default is `false` for prognostic dynamics like `AnelasticDynamics`.
+"""
+has_prescribed_velocities(::Any) = false
+
+#####
 ##### Tendency computation interface
 #####
 
