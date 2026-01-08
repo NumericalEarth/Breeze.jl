@@ -54,6 +54,10 @@ end
 
 @inline AtmosphereModels.microphysical_velocities(::SaturationAdjustment, μ, name) = nothing
 
+# SaturationAdjustment operates through the thermodynamic state adjustment pathway,
+# so no explicit model update is needed.
+AtmosphereModels.microphysics_model_update!(microphysics::SaturationAdjustment, model) = nothing
+
 #####
 ##### Warm-phase equilibrium moisture fractions
 #####
