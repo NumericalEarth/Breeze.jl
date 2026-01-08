@@ -1,4 +1,4 @@
-using Oceananigans: Oceananigans, Center, Field, set!, fill_halo_regions!
+using Oceananigans: Oceananigans, Center, Field, set!, fill_halo_regions!, ∂z
 using Oceananigans.BoundaryConditions: FieldBoundaryConditions, ValueBoundaryCondition
 
 using Adapt: Adapt, adapt
