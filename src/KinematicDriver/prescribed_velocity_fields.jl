@@ -134,11 +134,12 @@ wrap_prescribed_field(X, Y, Z, f, grid; kwargs...) = field((X, Y, Z), f, grid)
 
 Adapt.adapt_structure(to, d::PrescribedDynamics) = PrescribedDynamics(adapt(to, d.reference_state))
 
-on_architecture(to, d::PrescribedDynamics) = PrescribedDynamics(on_architecture(to, d.reference_state))
+Oceananigans.Architectures.on_architecture(to, d::PrescribedDynamics) = 
+    PrescribedDynamics(on_architecture(to, d.reference_state))
 
 Adapt.adapt_structure(to, v::PrescribedVelocityFields) =
     PrescribedVelocityFields(adapt(to, v.u), adapt(to, v.v), adapt(to, v.w), adapt(to, v.parameters))
 
-on_architecture(to, v::PrescribedVelocityFields) =
+Oceananigans.Architectures.on_architecture(to, v::PrescribedVelocityFields) =
     PrescribedVelocityFields(on_architecture(to, v.u), on_architecture(to, v.v),
                              on_architecture(to, v.w), on_architecture(to, v.parameters))
