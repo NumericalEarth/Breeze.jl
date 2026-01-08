@@ -51,6 +51,12 @@ end
 AtmosphereModels.prognostic_momentum_field_names(::PrescribedDynamics) = ()
 AtmosphereModels.prognostic_dynamics_field_names(::PrescribedDynamics) = ()
 AtmosphereModels.additional_dynamics_field_names(::PrescribedDynamics) = ()
+
+# PrescribedDynamics allows velocity boundary conditions (velocities are regular fields)
+AtmosphereModels.validate_velocity_boundary_conditions(::PrescribedDynamics, user_boundary_conditions) = nothing
+
+# PrescribedDynamics needs default boundary conditions for velocities
+AtmosphereModels.velocity_boundary_condition_names(::PrescribedDynamics) = (:u, :v, :w)
 AtmosphereModels.materialize_dynamics(d::PrescribedDynamics, grid, bcs) = d
 
 # Store velocity specification in dynamics for dispatch
@@ -73,9 +79,9 @@ AtmosphereModels.dynamics_prognostic_fields(::PrescribedDynamics) = NamedTuple()
 # For PrescribedDynamics with default velocities (regular fields)
 function AtmosphereModels.materialize_momentum_and_velocities(::PrescribedDynamics, grid, bcs)
     momentum = (;)
-    u = XFaceField(grid)
-    v = YFaceField(grid)
-    w = ZFaceField(grid)
+    u = XFaceField(grid, boundary_conditions=bcs.u)
+    v = YFaceField(grid, boundary_conditions=bcs.v)
+    w = ZFaceField(grid, boundary_conditions=bcs.w)
     velocities = (; u, v, w)
     return momentum, velocities
 end

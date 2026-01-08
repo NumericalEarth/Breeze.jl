@@ -2,6 +2,7 @@ using Breeze
 using Breeze: PrescribedDynamics, KinematicModel
 using GPUArraysCore: @allowscalar
 using Oceananigans
+using Oceananigans.BoundaryConditions: FieldBoundaryConditions, OpenBoundaryCondition
 using Oceananigans.Fields: ZeroField
 using Oceananigans.Models.HydrostaticFreeSurfaceModels: PrescribedVelocityFields
 using Test
@@ -119,4 +120,23 @@ end
 
     error = @allowscalar maximum(abs, interior(model.tracers.c) .- interior(c_truth))
     @test error < FT(0.05)
+end
+
+@testset "Velocity boundary conditions [$(FT)]" for FT in (Float32, Float64)
+    Oceananigans.defaults.FloatType = FT
+    grid = RectilinearGrid(default_arch; size=(4, 4, 8), extent=(1000, 1000, 2000))
+    reference_state = ReferenceState(grid, ThermodynamicConstants())
+    dynamics = PrescribedDynamics(reference_state)
+
+    # PrescribedDynamics allows velocity boundary conditions
+    w_inlet(x, y, t) = FT(0.5)
+    w_bcs = FieldBoundaryConditions(bottom=OpenBoundaryCondition(w_inlet))
+    boundary_conditions = (; w = w_bcs)
+    
+    model = AtmosphereModel(grid; dynamics, boundary_conditions)
+    @test model isa KinematicModel
+    @test model.velocities.w.boundary_conditions.bottom isa Oceananigans.BoundaryConditions.BoundaryCondition
+
+    # AnelasticDynamics (default) does not allow velocity boundary conditions
+    @test_throws ArgumentError AtmosphereModel(grid; boundary_conditions)
 end

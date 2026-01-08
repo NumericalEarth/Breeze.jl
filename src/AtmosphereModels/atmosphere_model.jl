@@ -124,6 +124,9 @@ function AtmosphereModel(grid;
     # Use default dynamics if not specified
     isnothing(dynamics) && (dynamics = default_dynamics(grid, thermodynamic_constants))
 
+    # Validate that velocity boundary conditions are only provided for dynamics that support them
+    validate_velocity_boundary_conditions(dynamics, boundary_conditions)
+
     if !(advection isa DefaultValue)
         # TODO: check that tracer+momentum advection were not independently set.
         scalar_advection = momentum_advection = advection
@@ -145,7 +148,9 @@ function AtmosphereModel(grid;
 
     # Get field names from dynamics and formulation
     prognostic_names = prognostic_field_names(dynamics, formulation, microphysics, tracers)
-    default_boundary_conditions = NamedTuple{prognostic_names}(FieldBoundaryConditions() for _ in prognostic_names)
+    velocity_bc_names = velocity_boundary_condition_names(dynamics)
+    default_bc_names = tuple(prognostic_names..., velocity_bc_names...)
+    default_boundary_conditions = NamedTuple{default_bc_names}(FieldBoundaryConditions() for _ in default_bc_names)
     boundary_conditions = merge(default_boundary_conditions, boundary_conditions)
 
     # Pre-regularize AtmosphereModel boundary conditions (fill in reference_density, compute saturation humidity, etc.)
