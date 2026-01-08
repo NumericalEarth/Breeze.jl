@@ -142,7 +142,7 @@ function PotentialTemperature(model::AtmosphereModel, flavor_symbol=:specific)
     end
 
     func = MoistPotentialTemperatureKernelFunction(flavor,
-                                                   model.formulation.reference_state,
+                                                   model.dynamics.reference_state,
                                                    model.microphysics,
                                                    model.microphysical_fields,
                                                    model.specific_moisture,
@@ -207,7 +207,7 @@ function VirtualPotentialTemperature(model::AtmosphereModel, flavor_symbol=:spec
     end
 
     func = MoistPotentialTemperatureKernelFunction(flavor,
-                                                   model.formulation.reference_state,
+                                                   model.dynamics.reference_state,
                                                    model.microphysics,
                                                    model.microphysical_fields,
                                                    model.specific_moisture,
@@ -282,7 +282,7 @@ function LiquidIcePotentialTemperature(model::AtmosphereModel, flavor_symbol=:sp
     end
 
     func = MoistPotentialTemperatureKernelFunction(flavor,
-                                                   model.formulation.reference_state,
+                                                   model.dynamics.reference_state,
                                                    model.microphysics,
                                                    model.microphysical_fields,
                                                    model.specific_moisture,
@@ -303,7 +303,7 @@ and diagnosing moist instabilities. It is the temperature that a parcel would ha
 if all its moisture were condensed out and the resulting latent heat used to warm
 the parcel, followed by adiabatic expansion to a reference pressure.
 
-We use a formulation derived by [Emanuel1994](@citet),
+We use a formulation derived by [Emanuel (1994)](@cite Emanuel1994),
 
 ```math
 θᵉ = T \\left( \\frac{p₀}{pᵈ} \\right)^{Rᵈ / cᵖᵐ}
@@ -314,8 +314,8 @@ where ``T`` is temperature, ``pᵈ`` is dry air pressure, ``p₀`` is the refere
 ``ℒˡ`` is the latent heat of vaporization, ``qᵛ`` is the vapor specific humidity,
 ``ℋ`` is the relative humidity, and ``cᵖᵐ`` is the heat capacity of the moist air mixture.
 
-The formulation follows equation (34) of the paper by [BryanFritsch2002](@citet),
-adapted from the derivation in the work by [DurranKlemp1982](@citet).
+The formulation follows equation (34) of the paper by [Bryan and Fritsch (2002)](@cite BryanFritsch2002),
+adapted from the derivation in the work by [Durran and Klemp (1982)](@cite DurranKlemp1982).
 
 # Arguments
 
@@ -342,7 +342,7 @@ Field(θᵉ)
 ├── operand: KernelFunctionOperation at (Center, Center, Center)
 ├── status: time=0.0
 └── data: 3×3×14 OffsetArray(::Array{Float64, 3}, 0:2, 0:2, -2:11) with eltype Float64 with indices 0:2×0:2×-2:11
-    └── max=326.183, min=325.87, mean=326.026
+    └── max=326.162, min=325.849, mean=326.005
 ```
 
 # References
@@ -365,7 +365,7 @@ function EquivalentPotentialTemperature(model::AtmosphereModel, flavor_symbol=:s
     end
 
     func = MoistPotentialTemperatureKernelFunction(flavor,
-                                                   model.formulation.reference_state,
+                                                   model.dynamics.reference_state,
                                                    model.microphysics,
                                                    model.microphysical_fields,
                                                    model.specific_moisture,
@@ -382,10 +382,11 @@ Return a `KernelFunctionOperation` representing stability-equivalent potential t
 
 Stability-equivalent potential temperature is a moist-conservative variable suitable for
 computing the moist Brunt-Väisälä frequency. It follows from the derivation in the paper
-by [DurranKlemp1982](@citet), who show that the moist Brunt-Väisälä frequency ``Nᵐ`` is
-correctly expressed in terms of the vertical gradient of a moist-conservative variable.
+by [Durran and Klemp (1982)](@cite DurranKlemp1982), who show that the moist Brunt-Väisälä
+frequency ``Nᵐ`` is correctly expressed in terms of the vertical gradient of a
+moist-conservative variable.
 
-The formulation is based on equation (17) in the paper by [DurranKlemp1982](@citet):
+The formulation is based on equation (17) by [Durran and Klemp (1982)](@cite DurranKlemp1982):
 
 ```math
 θᵇ = θᵉ \\left( \\frac{T}{Tᵣ} \\right)^{cˡ qˡ / cᵖᵐ}
@@ -423,7 +424,7 @@ Field(θᵇ)
 ├── operand: KernelFunctionOperation at (Center, Center, Center)
 ├── status: time=0.0
 └── data: 3×3×14 OffsetArray(::Array{Float64, 3}, 0:2, 0:2, -2:11) with eltype Float64 with indices 0:2×0:2×-2:11
-    └── max=326.183, min=325.87, mean=326.026
+    └── max=326.162, min=325.849, mean=326.005
 ```
 
 # References
@@ -443,7 +444,7 @@ function StabilityEquivalentPotentialTemperature(model::AtmosphereModel, flavor_
     end
 
     func = MoistPotentialTemperatureKernelFunction(flavor,
-                                                   model.formulation.reference_state,
+                                                   model.dynamics.reference_state,
                                                    model.microphysics,
                                                    model.microphysical_fields,
                                                    model.specific_moisture,
@@ -462,7 +463,7 @@ function (d::MoistPotentialTemperatureKernelFunction)(i, j, k, grid)
         pᵣ = d.reference_state.pressure[i, j, k]
         ρᵣ = d.reference_state.density[i, j, k]
         qᵗ = d.specific_moisture[i, j, k]
-        p₀ = d.reference_state.surface_pressure
+        pˢᵗ = d.reference_state.standard_pressure
         T = d.temperature[i, j, k]
     end
 
@@ -481,7 +482,7 @@ function (d::MoistPotentialTemperatureKernelFunction)(i, j, k, grid)
     # Plain properties
     Rᵐ = mixture_gas_constant(q, constants)
     cᵖᵐ = mixture_heat_capacity(q, constants)
-    Πᵐ = (pᵣ / p₀)^(Rᵐ / cᵖᵐ)
+    Πᵐ = (pᵣ / pˢᵗ)^(Rᵐ / cᵖᵐ)
 
     # Plain potential temperature (used as a base for several others)
     θ = T / Πᵐ
@@ -504,7 +505,7 @@ function (d::MoistPotentialTemperatureKernelFunction)(i, j, k, grid)
     elseif d.flavor isa AbstractEquivalentFlavor
         # Saturation specific humidity over a liquid surface
         surface = PlanarLiquidSurface()
-        ℋ = relative_humidity(pᵣ, T, q, constants, surface)
+        ℋ = relative_humidity(T, pᵣ, q, constants, surface)
         γ = - Rᵛ * qᵛ / cᵖᵐ
 
         # Latent heat of vaporization at temperature T
@@ -518,7 +519,7 @@ function (d::MoistPotentialTemperatureKernelFunction)(i, j, k, grid)
         #   of mass fractions.
         # - When this is verified, the math should be written in the documentation.
         # - Could this also be written θᵉ = θ * exp(ℒˡ * qᵛ / (cᵖᵐ * T)) * ℋ^γ ?
-        θᵉ = T * (p₀ / pᵣ)^(Rᵈ / cᵖᵐ) * exp(ℒˡ * qᵛ / (cᵖᵐ * T)) * ℋ^γ
+        θᵉ = T * (pˢᵗ / pᵣ)^(Rᵈ / cᵖᵐ) * exp(ℒˡ * qᵛ / (cᵖᵐ * T)) * ℋ^γ
 
         if d.flavor isa AbstractStabilityEquivalentFlavor
             # Equation 16, Durran & Klemp 1982

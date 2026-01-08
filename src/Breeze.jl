@@ -10,11 +10,19 @@ export
     MoistAirBuoyancy,
     ThermodynamicConstants,
     ReferenceState,
-    AnelasticFormulation,
+    AnelasticDynamics,
+    AnelasticModel,
+    CompressibleDynamics,
+    CompressibleModel,
     AtmosphereModel,
-    StaticEnergyThermodynamics,
-    LiquidIcePotentialTemperatureThermodynamics,
+    StaticEnergyFormulation,
+    LiquidIcePotentialTemperatureFormulation,
     RadiativeTransferModel,
+    BackgroundAtmosphere,
+    GrayOptics,
+    ClearSkyOptics,
+    AllSkyOptics,
+    ConstantRadiusParticles,
     TemperatureField,
     ThermodynamicConstants,
     IdealGas,
@@ -25,8 +33,11 @@ export
     WarmPhaseSaturationAdjustment,
     mixture_gas_constant,
     mixture_heat_capacity,
-
+    dynamics_density,
+    dynamics_pressure,
+    
     # Diagnostics
+    compute_hydrostatic_pressure!,
     PotentialTemperature,
     VirtualPotentialTemperature,
     EquivalentPotentialTemperature,
@@ -39,6 +50,9 @@ export
     liquid_ice_potential_temperature_density,
     liquid_ice_potential_temperature,
     precipitation_rate,
+    surface_precipitation_flux,
+    total_pressure,
+    specific_humidity,
 
     # Microphysics
     SaturationAdjustment,
@@ -46,10 +60,11 @@ export
     WarmPhaseEquilibrium,
     SaturationSpecificHumidity,
     SaturationSpecificHumidityField,
+    equilibrium_saturation_specific_humidity,
     RelativeHumidity,
     RelativeHumidityField,
     BulkMicrophysics,
-    compute_hydrostatic_pressure!,
+    NonEquilibriumCloudFormation,
 
     # BoundaryConditions
     BulkDrag,
@@ -58,14 +73,18 @@ export
 
     # Forcing utilities
     geostrophic_forcings,
-    SubsidenceForcing
+    SubsidenceForcing,
+
+    # TimeSteppers
+    SSPRungeKutta3
 
 using Oceananigans: Oceananigans, @at, AnisotropicMinimumDissipation, Average,
                     AveragedTimeInterval, BackgroundField, BetaPlane, Bounded,
                     CPU, Callback, Center, CenterField, Centered, Checkpointer, Clock,
-                    ConstantCartesianCoriolis, Distributed, FPlane, Face,
-                    Field, FieldBoundaryConditions, FieldDataset,
-                    FieldTimeSeries, Flat, FluxBoundaryCondition, Forcing, GPU,
+                    ConstantCartesianCoriolis, Distributed, DynamicSmagorinsky,
+                    ExponentialDiscretization, FPlane, Face, Field, FieldBoundaryConditions,
+                    FieldDataset, FieldTimeSeries, Flat, FluxBoundaryCondition, Forcing,
+                    Relaxation, GaussianMask, GPU,
                     GradientBoundaryCondition, GridFittedBottom,
                     ImmersedBoundaryCondition, ImmersedBoundaryGrid, InMemory,
                     Integral, IterationInterval, JLD2Writer,
@@ -83,11 +102,12 @@ using Oceananigans: Oceananigans, @at, AnisotropicMinimumDissipation, Average,
                     zspacings, ∂x, ∂y, ∂z
 
 using Oceananigans.Grids: znode
+using Oceananigans.BoundaryConditions: ImpenetrableBoundaryCondition
 
 export
     CPU, GPU,
     Center, Face, Periodic, Bounded, Flat,
-    RectilinearGrid, Clock,
+    RectilinearGrid, ExponentialDiscretization, Clock,
     nodes, xnodes, ynodes, znodes,
     znode,
     xspacings, yspacings, zspacings,
@@ -95,14 +115,14 @@ export
     ImmersedBoundaryGrid, GridFittedBottom, PartialCellBottom, ImmersedBoundaryCondition,
     Distributed, Partition,
     Centered, UpwindBiased, WENO, FluxFormAdvection,
-    FluxBoundaryCondition, ValueBoundaryCondition, GradientBoundaryCondition,
+    FluxBoundaryCondition, ValueBoundaryCondition, GradientBoundaryCondition, ImpenetrableBoundaryCondition,
     OpenBoundaryCondition, PerturbationAdvection, FieldBoundaryConditions,
     Field, CenterField, XFaceField, YFaceField, ZFaceField,
     Average, Integral,
     BackgroundField, interior, set!, compute!, regrid!,
-    Forcing,
+    Forcing, Relaxation, GaussianMask,
     FPlane, ConstantCartesianCoriolis, BetaPlane, NonTraditionalBetaPlane,
-    SmagorinskyLilly, AnisotropicMinimumDissipation,
+    SmagorinskyLilly, AnisotropicMinimumDissipation, DynamicSmagorinsky,
     LagrangianParticles,
     conjure_time_step_wizard!,
     time_step!, Simulation, run!, Callback, add_callback!, iteration,
@@ -121,6 +141,20 @@ using .MoistAirBuoyancies
 include("AtmosphereModels/AtmosphereModels.jl")
 using .AtmosphereModels
 
+# Thermodynamic formulation modules (included after AtmosphereModels so they can dispatch on AtmosphereModel)
+include("StaticEnergyFormulations/StaticEnergyFormulations.jl")
+using .StaticEnergyFormulations: StaticEnergyFormulation
+
+include("PotentialTemperatureFormulations/PotentialTemperatureFormulations.jl")
+using .PotentialTemperatureFormulations: LiquidIcePotentialTemperatureFormulation
+
+# Dynamics modules (included after AtmosphereModels so they can dispatch on AtmosphereModel)
+include("AnelasticEquations/AnelasticEquations.jl")
+using .AnelasticEquations: AnelasticDynamics, AnelasticModel
+
+include("CompressibleEquations/CompressibleEquations.jl")
+using .CompressibleEquations: CompressibleDynamics, CompressibleModel
+
 include("Microphysics/Microphysics.jl")
 using .Microphysics
 
@@ -138,5 +172,8 @@ using .BoundaryConditions
 
 include("Forcings/Forcings.jl")
 using .Forcings
+
+include("TimeSteppers/TimeSteppers.jl")
+using .TimeSteppers
 
 end # module Breeze

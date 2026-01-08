@@ -58,8 +58,7 @@ reference_state = ReferenceState(grid, constants,
                                  surface_pressure = 101500,
                                  potential_temperature = 299.1)
 
-formulation = AnelasticFormulation(reference_state,
-                                   thermodynamics = :LiquidIcePotentialTemperature)
+dynamics = AnelasticDynamics(reference_state)
 
 # ## Surface fluxes
 #
@@ -79,7 +78,7 @@ FT = eltype(grid)
 p₀ = reference_state.surface_pressure
 θ₀ = reference_state.potential_temperature
 q₀ = Breeze.Thermodynamics.MoistureMassFractions{FT} |> zero
-ρ₀ = Breeze.Thermodynamics.density(p₀, θ₀, q₀, constants)
+ρ₀ = Breeze.Thermodynamics.density(θ₀, p₀, q₀, constants)
 
 ρθ_bcs = FieldBoundaryConditions(bottom=FluxBoundaryCondition(ρ₀ * w′θ′))
 ρqᵗ_bcs = FieldBoundaryConditions(bottom=FluxBoundaryCondition(ρ₀ * w′qᵗ′))
@@ -148,7 +147,7 @@ geostrophic = geostrophic_forcings(z -> uᵍ(z), z -> vᵍ(z))
 # ([Siebesma2003](@citet); Appendix B, Eq. B4). This represents the effects of
 # advection by the large-scale circulation.
 
-ρᵣ = formulation.reference_state.density
+ρᵣ = reference_state.density
 drying = Field{Nothing, Nothing, Center}(grid)
 dqdt_profile = AtmosphericProfilesLibrary.Bomex_dqtdt(FT)
 set!(drying, z -> dqdt_profile(z))
@@ -189,7 +188,7 @@ set!(Fρe_field, ρᵣ * cᵖᵈ * Fρe_field)
 
 ρu_forcing = (subsidence, geostrophic.ρu)
 ρv_forcing = (subsidence, geostrophic.ρv)
-ρqᵗ_forcing = (ρqᵗ_drying_forcing, subsidence)
+ρqᵗ_forcing = (subsidence, ρqᵗ_drying_forcing)
 ρθ_forcing = subsidence
 ρe_forcing = ρe_radiation_forcing
 
@@ -204,7 +203,7 @@ nothing #hide
 microphysics = SaturationAdjustment(equilibrium=WarmPhaseEquilibrium())
 advection = WENO(order=9)
 
-model = AtmosphereModel(grid; formulation, coriolis, microphysics, advection, forcing,
+model = AtmosphereModel(grid; dynamics, coriolis, microphysics, advection, forcing,
                         boundary_conditions = (ρθ=ρθ_bcs, ρqᵗ=ρqᵗ_bcs, ρu=ρu_bcs, ρv=ρv_bcs))
 
 # ## Initial conditions
@@ -225,20 +224,6 @@ FT = eltype(grid)
 qᵗ₀ = AtmosphericProfilesLibrary.Bomex_q_tot(FT)
 u₀ = AtmosphericProfilesLibrary.Bomex_u(FT)
 
-# Breeze's current definition of the Exner function derives its reference
-# pressure from the base pressure of the reference profile, rather than using
-# the standard ``10^5`` Pa. Because of this, we need to apply a correction to
-# the initial condition: without this correction, our results do not match
-# [Siebesma2003](@citet) (and note that our outputted potential temperature
-# is displaced from [Siebesma2003](@citet)'s by precisely the factor ``χ`` below).
-
-using Breeze.Thermodynamics: dry_air_gas_constant, vapor_gas_constant
-
-Rᵈ = dry_air_gas_constant(constants)
-cᵖᵈ = constants.dry_air.heat_capacity
-p₀ = reference_state.surface_pressure
-χ = (p₀ / 1e5)^(Rᵈ/  cᵖᵈ)
-
 # The initial profiles are perturbed with random noise below 1600 m to trigger
 # convection. The perturbation amplitudes are specified by [Siebesma2003](@citet);
 # Appendix B (third paragraph after Eq. B6):
@@ -254,8 +239,8 @@ p₀ = reference_state.surface_pressure
 zδ = 1600     # m
 
 ϵ() = rand() - 1/2
-θᵢ(x, y, z) = χ * θˡⁱ₀(z) + δθ  * ϵ() * (z < zδ)
-qᵢ(x, y, z) = qᵗ₀(z)  + δqᵗ * ϵ() * (z < zδ)
+θᵢ(x, y, z) = θˡⁱ₀(z) + δθ * ϵ() * (z < zδ)
+qᵢ(x, y, z) = qᵗ₀(z) + δqᵗ * ϵ() * (z < zδ)
 uᵢ(x, y, z) = u₀(z)
 
 set!(model, θ=θᵢ, qᵗ=qᵢ, u=uᵢ)
@@ -276,31 +261,23 @@ conjure_time_step_wizard!(simulation, cfl=0.7)
 qˡ = model.microphysical_fields.qˡ
 qᵛ = model.microphysical_fields.qᵛ
 
-u_avg = Field(Average(model.velocities.u, dims=(1, 2)))
-v_avg = Field(Average(model.velocities.v, dims=(1, 2)))
-
 function progress(sim)
-    compute!(u_avg)
-    compute!(v_avg)
     qˡmax = maximum(qˡ)
     qᵗmax = maximum(sim.model.specific_moisture)
-    umax = maximum(abs, u_avg)
-    vmax = maximum(abs, v_avg)
-
-    msg = @sprintf("Iter: %d, t: %s, Δt: %s, max|ū|: (%.2e, %.2e), max(qᵗ): %.2e, max(qˡ): %.2e",
-                   iteration(sim), prettytime(sim), prettytime(sim.Δt),
-                   umax, vmax, qᵗmax, qˡmax)
+    wmax = maximum(abs, sim.model.velocities.w)
+    msg = @sprintf("Iter: %d, t: % 12s, Δt: %s, max|w|: %.2e m/s, max(qᵗ): %.2e, max(qˡ): %.2e",
+                   iteration(sim), prettytime(sim), prettytime(sim.Δt), wmax, qᵗmax, qˡmax)
     @info msg
     return nothing
 end
 
-add_callback!(simulation, progress, TimeInterval(1hour))
+add_callback!(simulation, progress, IterationInterval(1000))
 
 outputs = merge(model.velocities, model.tracers, (; θ, qˡ, qᵛ))
-averaged_outputs = NamedTuple(name => Average(outputs[name], dims=(1, 2)) for name in keys(outputs))
+avg_outputs = NamedTuple(name => Average(outputs[name], dims=(1, 2)) for name in keys(outputs))
 
 filename = "bomex.jld2"
-simulation.output_writers[:averages] = JLD2Writer(model, averaged_outputs; filename,
+simulation.output_writers[:averages] = JLD2Writer(model, avg_outputs; filename,
                                                   schedule = AveragedTimeInterval(1hour),
                                                   overwrite_existing = true)
 
@@ -382,7 +359,7 @@ text!(axuv, -8.5, 2200, text="solid: u\ndashed: v", fontsize=12)
 
 fig[0, :] = Label(fig, "BOMEX: Mean profile evolution (Siebesma et al., 2003)", fontsize=18, tellwidth=false)
 
-save("bomex_profiles.png", fig)
+save("bomex_profiles.png", fig) #src
 fig
 
 # The simulation shows the development of a cloudy boundary layer with:
@@ -409,16 +386,16 @@ x = xnodes(grid, Center())
 z = znodes(grid, Center())
 
 # Create animation
-fig = Figure(size=(900, 750), fontsize=14)
+fig = Figure(size=(900, 700), fontsize=14)
 
-axwxz = Axis(fig[1, 2], aspect=2, xlabel="x (m)", ylabel="z (m)", title="Vertical velocity w")
-axqxz = Axis(fig[1, 3], aspect=2, xlabel="x (m)", ylabel="z (m)", title="Liquid water qˡ")
-axwxy = Axis(fig[2, 2], aspect=1, xlabel="x (m)", ylabel="y (m)", title="@ z = $(z[k]) m")
-axqxy = Axis(fig[2, 3], aspect=1, xlabel="x (m)", ylabel="y (m)", title="@ z = $(z[k]) m")
+axwxz = Axis(fig[2, 2], aspect=2, xaxisposition=:top, xlabel="x (m)", ylabel="z (m)", title="Vertical velocity w")
+axqxz = Axis(fig[2, 3], aspect=2, xaxisposition=:top, xlabel="x (m)", ylabel="z (m)", title="Liquid water qˡ")
+axwxy = Axis(fig[3, 2], aspect=1, xlabel="x (m)", ylabel="y (m)", title="@ z = $(z[k]) m")
+axqxy = Axis(fig[3, 3], aspect=1, xlabel="x (m)", ylabel="y (m)", title="@ z = $(z[k]) m")
 
 # Determine color limits from the data
-wmax = maximum(abs, wxz_ts)
-qˡmax = maximum(qˡxz_ts)
+wlim = maximum(abs, wxz_ts) / 4
+qˡlim = maximum(qˡxz_ts) / 4
 
 n = Observable(1)
 wxz_n = @lift wxz_ts[$n]
@@ -427,23 +404,25 @@ wxy_n = @lift wxy_ts[$n]
 qˡxy_n = @lift qˡxy_ts[$n]
 title = @lift "BOMEX slices at t = " * prettytime(times[$n])
 
-hmw = heatmap!(axwxz, wxz_n, colormap=:balance, colorrange=(-wmax, wmax))
-hmq = heatmap!(axqxz, qˡxz_n, colormap=Reverse(:Blues_4), colorrange=(0, qˡmax))
-hmw = heatmap!(axwxy, wxy_n, colormap=:balance, colorrange=(-wmax, wmax))
-hmq = heatmap!(axqxy, qˡxy_n, colormap=Reverse(:Blues_4), colorrange=(0, qˡmax))
+hmw = heatmap!(axwxz, wxz_n, colormap=:balance, colorrange=(-wlim, wlim))
+hmq = heatmap!(axqxz, qˡxz_n, colormap=Reverse(:Blues_4), colorrange=(0, qˡlim))
+hmw = heatmap!(axwxy, wxy_n, colormap=:balance, colorrange=(-wlim, wlim))
+hmq = heatmap!(axqxy, qˡxy_n, colormap=Reverse(:Blues_4), colorrange=(0, qˡlim))
 
 for ax in (axwxz, axqxz)
     lines!(ax, x, fill(z[k], length(x)), color=:grey, linestyle=:dash)
 end
 
-Colorbar(fig[1:2, 1], hmw, label="w (m/s)", tellheight = false, height = Relative(0.5), flipaxis=false)
-Colorbar(fig[1:2, 4], hmq, label="qˡ (kg/kg)", tellheight = false, height = Relative(0.5))
+Colorbar(fig[2:3, 1], hmw, label="w (m/s)", tellheight=false, height=Relative(0.7), flipaxis=false)
+Colorbar(fig[2:3, 4], hmq, label="qˡ (kg/kg)", tellheight=false, height=Relative(0.7))
 
-fig[0, :] = Label(fig, title, fontsize=18, tellwidth=false)
+fig[1, :] = Label(fig, title, fontsize=18, tellwidth=false)
+
+rowgap!(fig.layout, 1, -50)
+rowgap!(fig.layout, 2, -50)
 
 # Record animation
-N2 = ceil(Int, Nt/3)
-CairoMakie.record(fig, "bomex_slices.mp4", 1:N2, framerate=12) do nn
+CairoMakie.record(fig, "bomex_slices.mp4", 1:Nt, framerate=12) do nn
     n[] = nn
 end
 nothing #hide

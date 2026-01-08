@@ -1,9 +1,13 @@
 # [Dycore equations and algorithms](@id Dycore-section)
 
-This section summarizes the governing equations behind Breeze’s atmospheric dynamics and the anelastic formulation used by [`AtmosphereModel`](@ref), following the thermodynamically consistent framework of [Pauluis2008](@citet).
+This section summarizes the governing equations behind Breeze's atmospheric dynamics used by [`AtmosphereModel`](@ref). Breeze supports two dynamical formulations:
+
+- **[`AnelasticDynamics`](@ref Breeze.AnelasticEquations.AnelasticDynamics)**: Filters acoustic waves by linearizing about a hydrostatic reference state, following the thermodynamically consistent framework of [Pauluis2008](@citet). Suitable for most large-eddy simulations and mesoscale applications.
+
+- **[`CompressibleDynamics`](@ref)**: Solves the fully compressible Euler equations with prognostic density. Retains acoustic waves and is useful for validation, acoustic studies, and problems where full compressibility is important.
 
 We begin with the compressible Navier-Stokes momentum equations and reduce them to an anelastic, conservative form.
-We then introduce the moist static energy equation and outline the time-discretized pressure correction used to enforce the anelastic constraint.
+We then describe the fully compressible formulation, and finally outline the time-discretized pressure correction used to enforce the anelastic constraint.
 
 ## Compressible momentum equations
 
@@ -85,10 +89,10 @@ Breeze advances a conservative moist static energy density
 where ``c^{p m}`` is the mixture heat capacity, ``T`` is temperature, ``g`` is gravitational acceleration,
 ``z`` is height,
 ``\mathscr{L}^l_r`` is the latent heat of condensation (vapor to liquid) at the energy reference temperature,
-and 
+and
 ``\mathscr{L}^i_r`` is the latent heat of deposition (vapor to ice) at the energy reference temperature,
 
-According to [Pauluis2008](@citet), the moist static energy obeys 
+According to [Pauluis2008](@citet), the moist static energy obeys
 
 ```math
 \partial_t(ρᵣ e) + \boldsymbol{\nabla \cdot}\, (ρᵣ e \boldsymbol{u}) = ρᵣ w b + S_e ,
@@ -99,9 +103,59 @@ The ``ρᵣ w b`` term is the buoyancy flux that links the energy and momentum b
 
 Thermodynamic closures needed for ``R^m``, ``c^{pm}`` and the Exner function ``Π = (pᵣ / p_0)^{R^m / c^{pm}}`` are given in [Thermodynamics](@ref Thermodynamics-section) section.
 
-## Time discretization and pressure correction
+## Compressible dynamics
 
-Breeze uses an explicit multi-stage time integrator for advection, Coriolis, buoyancy, forcing, and tracer terms, coupled with a projection step to enforce the anelastic constraint at each substep. Denote the predicted momentum by ``\widetilde{(ρᵣ \boldsymbol{u})}``. The projection is
+Breeze also supports fully compressible dynamics via [`CompressibleDynamics`](@ref), which directly time-steps the density without an anelastic constraint. This formulation retains acoustic waves and is suitable for problems where compressibility effects are important, such as:
+- Acoustic wave propagation
+- Shock-resolving simulations
+- Validation against fully compressible reference solutions
+
+### Prognostic equations
+
+The compressible formulation advances density ``ρ`` as a prognostic variable alongside momentum:
+
+```math
+\begin{aligned}
+&\text{Mass:} && \partial_t ρ + \boldsymbol{\nabla \cdot}\, (ρ \boldsymbol{u}) = 0 ,\\
+&\text{Momentum:} && \partial_t(ρ \boldsymbol{u}) + \boldsymbol{\nabla \cdot}\, (ρ \boldsymbol{u} \boldsymbol{u}) + \boldsymbol{\nabla} p = - ρ g \hat{\boldsymbol{z}} + ρ \boldsymbol{f} + \boldsymbol{\nabla \cdot}\, \boldsymbol{\mathcal{T}} .
+\end{aligned}
+```
+
+### Equation of state
+
+Pressure is computed from the ideal gas law using prognostic density and potential temperature:
+
+```math
+p = ρ R^m T
+```
+
+where ``ρ`` is density, ``R^m`` is the mixture gas constant, and ``T`` is temperature.
+
+For dry air, this simplifies to the classic Poisson equation relating pressure, density, and potential temperature.
+
+### Time stepping
+
+`CompressibleDynamics` uses fully explicit time integration without a pressure correction step. This permits acoustic waves to propagate and requires a CFL condition based on the sound speed:
+
+```math
+Δt < \frac{Δx}{c_s}, \quad \text{where} \quad c_s = \sqrt{\frac{c^{pm}}{c^{vm}} R^m T}
+```
+
+is the adiabatic sound speed (approximately 340 m/s at standard conditions).
+
+### Comparison with anelastic dynamics
+
+| Property | AnelasticDynamics | CompressibleDynamics |
+|----------|-------------------|----------------------|
+| Acoustic waves | Filtered | Resolved |
+| Density | Reference ``ρᵣ(z)`` only | Prognostic ``ρ(x,y,z,t)`` |
+| Pressure | Solved from Poisson equation | Computed from equation of state |
+| Time step | Limited by advective CFL | Limited by acoustic CFL |
+| Typical applications | LES, mesoscale simulations | _Under development_ |
+
+## Time discretization and pressure correction (Anelastic)
+
+The anelastic formulation uses a multi-stage time integrator for advection, Coriolis, buoyancy, forcing, and tracer terms, coupled with a projection step to enforce the anelastic constraint at each substep. Denote the predicted momentum by ``\widetilde{(ρᵣ \boldsymbol{u})}``. The projection is
 
 1. Solve the variable-coefficient Poisson problem for the pressure correction potential ``\phi``:
 
@@ -121,6 +175,7 @@ In Breeze this projection is implemented as a Fourier–tridiagonal solve in the
 
 ## Symbols and closures used here
 
+### Anelastic dynamics
 - ``ρᵣ(z)``, ``pᵣ(z)``: Reference density and pressure satisfying hydrostatic balance for a constant ``θᵣ``.
 - ``α = R^m T / pᵣ``, ``αᵣ = R^d θᵣ / pᵣ``: Specific volume and its reference value.
 - ``b = g (α - αᵣ) / αᵣ``: Buoyancy.
@@ -128,8 +183,14 @@ In Breeze this projection is implemented as a Fourier–tridiagonal solve in the
 - ``q^t``: Total specific humidity (vapor + condensates).
 - ``\phi``: Nonhydrostatic pressure correction potential used by the projection.
 
-Diffusion and turbulence closure notation:
+### Compressible dynamics
+- ``ρ``: Prognostic density field.
+- ``p``: Pressure computed from equation of state.
+- ``θ``: Potential temperature.
+- ``c_s``: Sound speed.
+
+### Diffusion and turbulence closure notation
 - ``\boldsymbol{\tau}``: Kinematic (per-mass) subgrid/viscous stress tensor returned by Oceananigans closures.
-- ``\boldsymbol{\mathcal{T}} = ρᵣ \, \boldsymbol{\tau}``: Dynamic (per-volume) stress used in the anelastic momentum equation; Breeze computes flux divergences as ``\boldsymbol{\nabla\cdot}\, \boldsymbol{\mathcal{T}}``.
+- ``\boldsymbol{\mathcal{T}} = ρ \, \boldsymbol{\tau}``: Dynamic (per-volume) stress used in the momentum equation; Breeze computes flux divergences as ``\boldsymbol{\nabla\cdot}\, \boldsymbol{\mathcal{T}}``.
 
 See [Thermodynamics](@ref Thermodynamics-section) section for definitions of ``R^m(q)``, ``c^{pm}(q)``, and ``Π``.

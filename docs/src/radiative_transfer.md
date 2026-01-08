@@ -8,13 +8,14 @@ The simplest radiative transfer option is gray atmosphere radiation, which uses 
 
 ### Basic Usage
 
-To use gray radiation in a Breeze simulation, create a `GrayRadiativeTransferModel` model and pass it to the [`AtmosphereModel`](@ref) constructor:
+To use gray radiation in a Breeze simulation, create a [`RadiativeTransferModel`](@ref) model with the [`GrayOptics`](@ref) optics flavor and pass it to the [`AtmosphereModel`](@ref) constructor:
 
 ```@example
 using Breeze
+using Breeze.AtmosphereModels
 using Oceananigans.Units
 using Dates
-using RRTMGP.AtmosphericStates: GrayOpticalThicknessOGorman2008
+using RRTMGP
 
 Nz = 64
 λ, φ = -70.9, 42.5  # longitude, latitude
@@ -29,12 +30,10 @@ reference_state = ReferenceState(grid, constants;
                                  surface_pressure = 101325,
                                  potential_temperature = surface_temperature)
 
-formulation = AnelasticFormulation(reference_state,
-                                   thermodynamics = :LiquidIcePotentialTemperature)
+dynamics = AnelasticDynamics(reference_state)
 
 # Create gray radiation model
-optical_thickness = GrayOpticalThicknessOGorman2008(eltype(grid))
-radiation = RadiativeTransferModel(grid, constants, optical_thickness;
+radiation = RadiativeTransferModel(grid, GrayOptics(), constants;
                                    surface_temperature,
                                    surface_emissivity = 0.98,
                                    surface_albedo = 0.1,
@@ -42,7 +41,7 @@ radiation = RadiativeTransferModel(grid, constants, optical_thickness;
 
 # Create atmosphere model with DateTime clock for solar position
 clock = Clock(time=DateTime(2024, 9, 27, 16, 0, 0))
-model = AtmosphereModel(grid; clock, formulation, radiation)
+model = AtmosphereModel(grid; clock, dynamics, radiation)
 ```
 
 When a `DateTime` clock is used, the solar zenith angle is computed automatically from the time and grid location (longitude and latitude).
@@ -54,20 +53,22 @@ The [`RadiativeTransferModel`](@ref) model computes:
 - **Longwave radiation**: Both upwelling and downwelling thermal radiation using RRTMGP's two-stream solver
 - **Shortwave radiation**: Direct beam solar radiation
 
-The gray atmosphere optical thickness follows the parameterization by [OGormanSchneider2008](@citet):
+The gray atmosphere optical thickness for longwave follows the parameterization by [OGormanSchneider2008](@citet),
 
 ```math
-τ_{lw} = α \frac{Δp}{p} \left[ f_l \frac{p}{p_0} + 4 (1 - f_l) \left(\frac{p}{p_0}\right)^4 \right] \left[ τ_e + (τ_p - τ_e) \sin^2 φ \right]
+τ_{lw} = α \frac{Δp}{p_0} \left[ f_l + 4 (1 - f_l) \left(\frac{p}{p_0}\right)^3 \right] \left[ τ_e + (τ_p - τ_e) \sin^2 φ \right]
 ```
 
-where ``φ`` is latitude and ``α``, ``f_l``, ``τ_e``, ``τ_p`` are empirical parameters.
+where ``φ`` is latitude and ``α``, ``f_l``, ``τ_e``, and ``τ_p`` are empirical parameters.
 
 For shortwave:
 ```math
-τ_{sw} = 2 τ_0 \frac{p}{p_0} \frac{Δp}{p_0}
+τ_{sw} = 2 τ_0 \frac{Δp}{p_0} \frac{p}{p_0}
 ```
 
 where ``τ_0 = 0.22`` is the shortwave optical depth parameter.
+
+The above two expressions are identical to those in the [RRTMGP documentation](https://clima.github.io/RRTMGP.jl/latest/Optics/#Gray-atmosphere-optics).
 
 ### Radiative Fluxes
 
@@ -98,9 +99,29 @@ The calculation accounts for:
 - Hour angle (based on solar time)
 - Latitude (for observer position)
 
+## Clear-sky Full-spectrum Radiation
+
+For more accurate radiative transfer calculations, use the [`ClearSkyOptics`](@ref) optics flavor which computes full-spectrum gas optics using RRTMGP's lookup tables:
+
+```@example
+using Breeze, Oceananigans.Units
+using RRTMGP, NCDatasets # Required for RRTMGP lookup tables
+
+grid = RectilinearGrid(; size=16, x=0, y=45, z=(0, 10kilometers),
+                       topology=(Flat, Flat, Bounded))
+constants = ThermodynamicConstants()
+radiation = RadiativeTransferModel(grid, ClearSkyOptics(), constants;
+                                   surface_temperature = 300,
+                                   surface_emissivity = 0.98,
+                                   surface_albedo = 0.1,
+                                   background_atmosphere = BackgroundAtmosphere(CO₂ = 400e-6))
+```
+
+The [`BackgroundAtmosphere`](@ref) struct specifies volume mixing ratios for radiatively active gases (CO₂, CH₄, N₂O, O₃, etc.). Water vapor is computed from the model's prognostic moisture field.
+
 ## Surface Properties
 
-The `RadiativeTransferModel` model requires surface properties:
+The [`RadiativeTransferModel`](@ref) model requires surface properties:
 
 | Property | Description | Typical Values |
 |----------|-------------|----------------|

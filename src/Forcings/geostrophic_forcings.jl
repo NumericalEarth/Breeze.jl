@@ -1,3 +1,4 @@
+using ..AtmosphereModels: AtmosphereModels
 using Oceananigans: Field, set!, compute!
 using Oceananigans.Grids: Center, XDirection, YDirection
 using Oceananigans.Utils: prettysummary
@@ -123,7 +124,7 @@ end
 ##### Materialization functions for geostrophic forcings
 #####
 
-function materialize_atmosphere_model_forcing(forcing::GeostrophicForcing, field, name, model_field_names, context)
+function AtmosphereModels.materialize_atmosphere_model_forcing(forcing::GeostrophicForcing, field, name, model_field_names, context)
     grid = field.grid
 
     forcing_uᵍ = forcing.geostrophic_momentum
@@ -135,9 +136,9 @@ function materialize_atmosphere_model_forcing(forcing::GeostrophicForcing, field
         set!(uᵍ, forcing_uᵍ)
     end
 
-    # Compute the geostrophic momentum density field ρᵣ * vᵍ
-    ρᵣ = context.reference_density
-    set!(uᵍ, ρᵣ * uᵍ)
+    # Compute the geostrophic momentum density field ρ * vᵍ
+    ρ = context.density
+    set!(uᵍ, ρ * uᵍ)
 
     FT = eltype(grid)
     f = context.coriolis.f |> FT

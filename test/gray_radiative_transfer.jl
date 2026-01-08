@@ -8,7 +8,6 @@ using Test
 # Load RRTMGP to trigger the extension
 using ClimaComms
 using RRTMGP
-using RRTMGP.AtmosphericStates: GrayOpticalThicknessOGorman2008
 
 #####
 ##### Unit tests
@@ -18,14 +17,15 @@ using RRTMGP.AtmosphericStates: GrayOpticalThicknessOGorman2008
     @testset "Single column grid [$(FT)]" for FT in (Float32, Float64)
         Oceananigans.defaults.FloatType = FT
         Nz = 16
-        grid = RectilinearGrid(size=Nz, x=0.0, y=45.0, z=(0, 10kilometers),
+        grid = RectilinearGrid(default_arch; size=Nz, x=0.0, y=45.0, z=(0, 10kilometers),
                                topology=(Flat, Flat, Bounded))
 
         constants = ThermodynamicConstants()
-        optical_thickness = GrayOpticalThicknessOGorman2008(FT)
+
+        @test_throws ArgumentError RadiativeTransferModel(grid, nothing, constants)
 
         @testset "Number-based surface properties" begin
-            radiation = RadiativeTransferModel(grid, constants, optical_thickness;
+            radiation = RadiativeTransferModel(grid, GrayOptics(), constants;
                                                surface_temperature = 300,
                                                surface_emissivity = 0.98,
                                                surface_albedo = 0.1,
@@ -48,7 +48,7 @@ using RRTMGP.AtmosphericStates: GrayOpticalThicknessOGorman2008
             @test size(radiation.downwelling_longwave_flux) == (1, 1, Nz + 1)
             @test size(radiation.downwelling_shortwave_flux) == (1, 1, Nz + 1)
 
-            radiation = RadiativeTransferModel(grid, constants, optical_thickness;
+            radiation = RadiativeTransferModel(grid, GrayOptics(), constants;
                                                surface_temperature = 300,
                                                direct_surface_albedo = 0.15,
                                                diffuse_surface_albedo = 0.2)
@@ -62,7 +62,7 @@ using RRTMGP.AtmosphericStates: GrayOpticalThicknessOGorman2008
             α₀ = set!(CenterField(grid), 0.1)
             ε₀ = set!(CenterField(grid), 0.98)
 
-            radiation = RadiativeTransferModel(grid, constants, optical_thickness;
+            radiation = RadiativeTransferModel(grid, GrayOptics(), constants;
                                                surface_temperature = T₀,
                                                surface_emissivity = ε₀,
                                                surface_albedo = α₀)
@@ -79,13 +79,13 @@ using RRTMGP.AtmosphericStates: GrayOpticalThicknessOGorman2008
         end
 
         @testset "Invalid surface properties" begin
-            @test_throws ArgumentError RadiativeTransferModel(grid, constants, optical_thickness;
+            @test_throws ArgumentError RadiativeTransferModel(grid, GrayOptics(), constants;
                                                             surface_temperature = 300,
                                                             surface_albedo = 0.15,
                                                             direct_surface_albedo = 0.15,
                                                             diffuse_surface_albedo = 0.2)
 
-            @test_throws ArgumentError RadiativeTransferModel(grid, constants, optical_thickness;
+            @test_throws ArgumentError RadiativeTransferModel(grid, GrayOptics(), constants;
                                                             surface_temperature = 300,
                                                             surface_albedo = 0.15,
                                                             diffuse_surface_albedo = 0.2)
@@ -98,45 +98,41 @@ end
     @testset "Model construction [$(FT)]" for FT in (Float32, Float64)
         Oceananigans.defaults.FloatType = FT
         Nz = 16
-        grid = RectilinearGrid(size=Nz, x=0.0, y=45.0, z=(0, 10kilometers),
+        grid = RectilinearGrid(default_arch; size=Nz, x=0.0, y=45.0, z=(0, 10kilometers),
                                topology=(Flat, Flat, Bounded))
 
         constants = ThermodynamicConstants()
         reference_state = ReferenceState(grid, constants;
                                          surface_pressure = 101325,
                                          potential_temperature = 300)
-        formulation = AnelasticFormulation(reference_state,
-                                           thermodynamics = :LiquidIcePotentialTemperature)
+        dynamics = AnelasticDynamics(reference_state)
 
-        optical_thickness = GrayOpticalThicknessOGorman2008(FT)
-        radiation = RadiativeTransferModel(grid, constants, optical_thickness;
+        radiation = RadiativeTransferModel(grid, GrayOptics(), constants;
                                            surface_temperature = 300,
                                            surface_emissivity = 0.98,
                                            surface_albedo = 0.1,
                                            solar_constant = 1361)
 
         clock = Clock(time=DateTime(2024, 6, 21, 12, 0, 0))
-        model = AtmosphereModel(grid; clock, formulation, radiation)
+        model = AtmosphereModel(grid; clock, dynamics, formulation=:LiquidIcePotentialTemperature, radiation)
 
-        @test model.radiative_transfer !== nothing
-        @test model.radiative_transfer === radiation
+        @test model.radiation !== nothing
+        @test model.radiation === radiation
     end
 
     @testset "Radiatiative transfer basic tests [$(FT)]" for FT in (Float32, Float64)
         Oceananigans.defaults.FloatType = FT
         Nz = 16
-        grid = RectilinearGrid(size=Nz, x=0.0, y=45.0, z=(0, 10kilometers),
+        grid = RectilinearGrid(default_arch; size=Nz, x=0.0, y=45.0, z=(0, 10kilometers),
                                topology=(Flat, Flat, Bounded))
 
         constants = ThermodynamicConstants()
         reference_state = ReferenceState(grid, constants;
                                          surface_pressure = 101325,
                                          potential_temperature = 300)
-        formulation = AnelasticFormulation(reference_state,
-                                           thermodynamics = :LiquidIcePotentialTemperature)
+        dynamics = AnelasticDynamics(reference_state)
 
-        optical_thickness = GrayOpticalThicknessOGorman2008(FT)
-        radiation = RadiativeTransferModel(grid, constants, optical_thickness;
+        radiation = RadiativeTransferModel(grid, GrayOptics(), constants;
                                            surface_temperature = 300,
                                            surface_emissivity = 0.98,
                                            surface_albedo = 0.1,
@@ -144,7 +140,7 @@ end
 
         # Use noon on summer solstice at 45°N for good solar illumination
         clock = Clock(time=DateTime(2024, 6, 21, 16, 0, 0))
-        model = AtmosphereModel(grid; clock, formulation, radiation)
+        model = AtmosphereModel(grid; clock, dynamics, formulation=:LiquidIcePotentialTemperature, radiation)
 
         # Set initial condition - this should trigger radiation update
         θ(z) = 300 + 0.01 * z / 1000

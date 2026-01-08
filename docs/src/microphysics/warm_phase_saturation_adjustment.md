@@ -13,7 +13,7 @@ The saturation adjustment solver (specific to our anelastic formulation) takes f
 * reference pressure ``pᵣ``.
 
 Note that moist static energy density ``ρᵣ e`` and moisture density ``ρᵣ qᵗ``
-are prognostic variables for [`AtmosphereModel`](@ref) when using [`AnelasticFormulation`](@ref),
+are prognostic variables for [`AtmosphereModel`](@ref) when using [`AnelasticDynamics`](@ref),
 where ``ρᵣ`` is the reference density.
 With warm-phase microphysics, the moist static energy ``e`` is related to temperature ``T``,
 height ``z``, and liquid mass fraction ``qˡ`` by
@@ -101,10 +101,10 @@ Next, we compute the saturation specific humidity for moist air with
 a carefully chosen moist air mass fraction,
 
 ```@example microphysics
-using Breeze.Microphysics: equilibrium_saturation_specific_humidity, WarmPhaseEquilibrium
+using Breeze: equilibrium_saturation_specific_humidity, WarmPhaseEquilibrium
 
 qᵗ = 0.012   # [kg kg⁻¹] total specific humidity
-qᵛ⁺ = Breeze.Microphysics.equilibrium_saturation_specific_humidity(T, p, qᵗ, thermo, WarmPhaseEquilibrium())
+qᵛ⁺ = equilibrium_saturation_specific_humidity(T, p, qᵗ, thermo, WarmPhaseEquilibrium())
 ```
 
 There are two facts of note. First is that we have identified a situation in which ``qᵗ > qᵛ⁺``,
@@ -228,7 +228,7 @@ for (i, qᵗⁱ) in enumerate(qᵗ)
     q = MoistureMassFractions(qᵗⁱ)
     𝒰 = StaticEnergyState(e₀, q, z, p)
     T[i] = compute_temperature(𝒰, microphysics, thermo)
-    qᵛ⁺ = Breeze.Microphysics.equilibrium_saturation_specific_humidity(T[i], p, qᵗⁱ, thermo, WarmPhaseEquilibrium())
+    qᵛ⁺ = equilibrium_saturation_specific_humidity(T[i], p, qᵗⁱ, thermo, WarmPhaseEquilibrium())
     qˡ[i] = max(0, qᵗⁱ - qᵛ⁺)
 end
 
@@ -295,7 +295,7 @@ for k = 1:grid.Nz
     T[k] = compute_temperature(𝒰, microphysics, thermo)
 
     # Saturation specific humidity via adjustment formula using T[k], pᵣ, and qᵗ
-    qᵛ⁺[k] = Breeze.Microphysics.equilibrium_saturation_specific_humidity(T[k], pᵣ, qᵗ, thermo, WarmPhaseEquilibrium())
+    qᵛ⁺[k] = equilibrium_saturation_specific_humidity(T[k], pᵣ, qᵗ, thermo, WarmPhaseEquilibrium())
     qˡ[k] = max(0, qᵗ - qᵛ⁺[k])
     rh[k] = 100 * min(qᵗ, qᵛ⁺[k]) / qᵛ⁺[k]
 end

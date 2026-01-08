@@ -92,7 +92,25 @@ end
 liquid_water(FT) = CondensedPhase(FT; reference_latent_heat=2500800, heat_capacity=4181)
 water_ice(FT)    = CondensedPhase(FT; reference_latent_heat=2834000, heat_capacity=2108)
 
-struct ThermodynamicConstants{FT, C, I}
+"""
+$(TYPEDEF)
+
+A saturation vapor pressure formulation based on the Clausius-Clapeyron relation.
+
+The Clausius-Clapeyron equation describes how saturation vapor pressure varies with
+temperature based on thermodynamic principles. This formulation uses thermodynamic
+constants (latent heats, heat capacities, triple point values) to compute
+saturation vapor pressure analytically.
+
+See [`saturation_vapor_pressure`](@ref) for the implementation details.
+"""
+struct ClausiusClapeyron end
+
+Base.summary(::ClausiusClapeyron) = "ClausiusClapeyron()"
+Base.show(io::IO, cc::ClausiusClapeyron) = print(io, summary(cc))
+Adapt.adapt_structure(to, cc::ClausiusClapeyron) = cc
+
+struct ThermodynamicConstants{FT, C, I, SVP}
     molar_gas_constant :: FT
     gravitational_acceleration :: FT
     energy_reference_temperature :: FT
@@ -102,6 +120,7 @@ struct ThermodynamicConstants{FT, C, I}
     vapor :: IdealGas{FT}
     liquid :: C
     ice :: I
+    saturation_vapor_pressure :: SVP
 end
 
 Base.summary(at::ThermodynamicConstants{FT}) where FT = "ThermodynamicConstants{$FT}"
@@ -116,7 +135,8 @@ function Base.show(io::IO, at::ThermodynamicConstants)
         "├── dry_air: ", at.dry_air, "\n",
         "├── vapor: ", at.vapor, "\n",
         "├── liquid: ", at.liquid, "\n",
-        "└── ice: ", at.ice)
+        "├── ice: ", at.ice, "\n",
+        "└── saturation_vapor_pressure: ", at.saturation_vapor_pressure)
 end
 
 Base.eltype(::ThermodynamicConstants{FT}) where FT = FT
@@ -131,18 +151,21 @@ function Adapt.adapt_structure(to, constants::ThermodynamicConstants)
     triple_point_pressure = adapt(to, constants.triple_point_pressure)
     liquid = adapt(to, constants.liquid)
     ice = adapt(to, constants.ice)
+    saturation_vapor_pressure = adapt(to, constants.saturation_vapor_pressure)
     FT = typeof(molar_gas_constant)
     C = typeof(liquid)
     I = typeof(ice)
-    return ThermodynamicConstants{FT, C, I}(molar_gas_constant,
-                                            gravitational_acceleration,
-                                            energy_reference_temperature,
-                                            triple_point_temperature,
-                                            triple_point_pressure,
-                                            dry_air,
-                                            vapor,
-                                            liquid,
-                                            ice)
+    SVP = typeof(saturation_vapor_pressure)
+    return ThermodynamicConstants{FT, C, I, SVP}(molar_gas_constant,
+                                                 gravitational_acceleration,
+                                                 energy_reference_temperature,
+                                                 triple_point_temperature,
+                                                 triple_point_pressure,
+                                                 dry_air,
+                                                 vapor,
+                                                 liquid,
+                                                 ice,
+                                                 saturation_vapor_pressure)
 end
 
 """
@@ -167,7 +190,8 @@ function ThermodynamicConstants(FT = Oceananigans.defaults.FloatType;
                                 vapor_molar_mass = 0.018015,
                                 vapor_heat_capacity = 1850,
                                 liquid = liquid_water(FT),
-                                ice = water_ice(FT))
+                                ice = water_ice(FT),
+                                saturation_vapor_pressure = ClausiusClapeyron())
 
     dry_air = IdealGas(FT; molar_mass = dry_air_molar_mass,
                            heat_capacity = dry_air_heat_capacity)
@@ -183,7 +207,8 @@ function ThermodynamicConstants(FT = Oceananigans.defaults.FloatType;
                                   dry_air,
                                   vapor,
                                   liquid,
-                                  ice)
+                                  ice,
+                                  saturation_vapor_pressure)
 end
 
 const TC = ThermodynamicConstants
@@ -234,6 +259,20 @@ where ``ℒⁱᵣ`` is the reference latent heat at the energy reference tempera
     Tᵣ = constants.energy_reference_temperature
     return ℒⁱᵣ + (cᵖᵛ - cⁱ) * (T - Tᵣ)
 end
+
+@inline function specific_heat_difference(constants, phase::CondensedPhase)
+    cᵖᵛ = constants.vapor.heat_capacity
+    cᵝ = phase.heat_capacity
+    return cᵖᵛ - cᵝ
+end
+
+@inline function absolute_zero_latent_heat(constants, phase::CondensedPhase)
+    ℒᵣ = phase.reference_latent_heat # at constants.energy_reference_temperature
+    Δcᵝ = specific_heat_difference(constants, phase)
+    Tᵣ = constants.energy_reference_temperature
+    return ℒᵣ - Δcᵝ * Tᵣ
+end
+
 
 #####
 ##### Mixtures of dry air with vapor, liquid, and ice
@@ -341,13 +380,13 @@ end
 ##### Equation of state
 #####
 
-@inline function density(p, T, q::MMF, constants::TC)
+@inline function density(T, p, q::MMF, constants::TC)
     Rᵐ = mixture_gas_constant(q, constants)
     return p / (Rᵐ * T)
 end
 
 """
-    vapor_pressure(T, ρ, qᵛ, constants)
+$(TYPEDSIGNATURES)
 
 Compute the vapor pressure from the ideal gas law:
 
@@ -355,13 +394,13 @@ Compute the vapor pressure from the ideal gas law:
 pᵛ = ρ qᵛ Rᵛ T
 ```
 """
-@inline function vapor_pressure(ρ, T, qᵛ, constants)
+@inline function vapor_pressure(T, ρ, qᵛ, constants)
     Rᵛ = vapor_gas_constant(constants)
     return ρ * qᵛ * Rᵛ * T
 end
 
 """
-    relative_humidity(T, ρ, qᵛ, constants, surface=PlanarLiquidSurface())
+$(TYPEDSIGNATURES)
 
 Compute the relative humidity as the ratio of vapor pressure to saturation vapor pressure:
 
@@ -369,14 +408,14 @@ Compute the relative humidity as the ratio of vapor pressure to saturation vapor
 ℋ = pᵛ / pᵛ⁺ = qᵛ / qᵛ⁺
 ```
 """
-@inline function relative_humidity(ρ, T, qᵛ, constants, surface=PlanarLiquidSurface())
+@inline function relative_humidity(T, ρ, qᵛ, constants, surface=PlanarLiquidSurface())
     pᵛ = vapor_pressure(T, ρ, qᵛ, constants)
     pᵛ⁺ = saturation_vapor_pressure(T, constants, surface)
     return pᵛ / pᵛ⁺
 end
 
-@inline function relative_humidity(p, T, q::MMF, constants, surface=PlanarLiquidSurface())
-    ρ = density(p, T, q, constants)
+@inline function relative_humidity(T, p, q::MMF, constants, surface=PlanarLiquidSurface())
+    ρ = density(T, p, q, constants)
     pᵛ = vapor_pressure(T, ρ, q.vapor, constants)
     pᵛ⁺ = saturation_vapor_pressure(T, constants, surface)
     return pᵛ / pᵛ⁺

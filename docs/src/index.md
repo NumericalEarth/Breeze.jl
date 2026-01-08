@@ -21,12 +21,28 @@ Breeze provides two ways to simulate moist atmospheres:
 
 ## Installation
 
-To use Breeze, install directly from GitHub:
+Breeze is a registered Julia package. First [install Julia](https://julialang.org/install/); suggested version 1.12. See [juliaup](https://github.com/JuliaLang/juliaup) README for how to install 1.12 and make that version the default.
+
+Then launch Julia and type
 
 ```julia
-using Pkg
-Pkg.add("https://github.com/NumericalEarth/Breeze.jl.git")
+julia> using Pkg
+
+julia> Pkg.add("Breeze")
 ```
+
+which will install the latest stable version of Breeze that's compatible with your current environment.
+
+You can check which version of Breeze you got via
+
+```julia
+Pkg.status("Breeze")
+```
+
+If you want to live on the cutting edge, you can use, e.g.,
+`Pkg.add(; url="https://github.com/NumericalEarth/Breeze.jl.git", rev="main")` to install the latest version of
+Breeze from `main` branch. For more information, see the
+[Pkg.jl documentation](https://pkgdocs.julialang.org).
 
 ## Quick Start
 
@@ -48,14 +64,17 @@ grid = RectilinearGrid(size=(Nx, Nz), x=(0, 2Lz), z=(0, Lz), topology=(Periodic,
 
 p₀, θ₀ = 1e5, 288 # reference state parameters
 reference_state = ReferenceState(grid, surface_pressure=p₀, potential_temperature=θ₀)
-formulation = AnelasticFormulation(reference_state)
+dynamics = AnelasticDynamics(reference_state)
 
 Q₀ = 1000 # heat flux in W / m²
-ρe_bcs = FieldBoundaryConditions(bottom=FluxBoundaryCondition(Q₀))
+thermodynamic_constants = ThermodynamicConstants()
+cᵖᵈ = thermodynamic_constants.dry_air.heat_capacity
+ρθ_bcs = FieldBoundaryConditions(bottom=FluxBoundaryCondition(Q₀ / cᵖᵈ))
 ρqᵗ_bcs = FieldBoundaryConditions(bottom=FluxBoundaryCondition(1e-2))
 
 advection = WENO()
-model = AtmosphereModel(grid; advection, formulation, boundary_conditions = (ρe=ρe_bcs, ρqᵗ=ρqᵗ_bcs))
+model = AtmosphereModel(grid; advection, dynamics, thermodynamic_constants,
+                              boundary_conditions = (ρθ=ρθ_bcs, ρqᵗ=ρqᵗ_bcs))
 
 Δθ = 2 # ᵒK
 Tₛ = reference_state.potential_temperature # K
@@ -67,5 +86,10 @@ conjure_time_step_wizard!(simulation, cfl=0.7)
 
 run!(simulation)
 
-heatmap(model.temperature, colormap=:thermal)
+heatmap(PotentialTemperature(model), colormap=:thermal)
 ```
+
+!!! note "Note about reproducibility"
+
+    Due to their [chaotic nature](https://en.wikipedia.org/wiki/Chaos_theory), even the smallest numerical differences can cause nonlinear systems, such as atmospheric models, not to be reproducible on different systems, therefore the figures you will get by running the simulations in this manual may not match the figures shown here.
+    For more information about this, see the [section about reproducibility](@ref reproducibility).
