@@ -68,6 +68,7 @@ include("forcing_interface.jl")
 include("microphysics_interface.jl")
 include("dynamics_interface.jl")
 include("formulation_interface.jl")
+include("boundary_mass_fluxes.jl")
 
 #####
 ##### AtmosphereModel core

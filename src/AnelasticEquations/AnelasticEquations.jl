@@ -35,6 +35,12 @@ using Breeze.AtmosphereModels: AtmosphereModels, AtmosphereModel, mean_pressure,
 # Import microphysics interface for buoyancy computation
 using Breeze.AtmosphereModels: compute_moisture_fractions
 
+# Import open boundary mass conservation
+using Breeze.AtmosphereModels: enforce_open_boundary_mass_conservation!
+
+# Import thermodynamic formulation interface
+using Breeze.AtmosphereModels: thermodynamic_density
+
 include("anelastic_dynamics.jl")
 include("anelastic_pressure_solver.jl")
 include("anelastic_buoyancy.jl")

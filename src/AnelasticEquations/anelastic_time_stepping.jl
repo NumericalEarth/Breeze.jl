@@ -2,6 +2,8 @@
 ##### Pressure correction time stepping for AnelasticDynamics
 #####
 
+using Oceananigans.Fields: set!
+
 #####
 ##### Model initialization
 #####
@@ -11,10 +13,21 @@ $(TYPEDSIGNATURES)
 
 Initialize thermodynamic state for anelastic models.
 Sets the initial potential temperature to the reference state value.
+
+Note: This only initializes the thermodynamic density field without calling
+`update_state!`. This avoids issues with open boundary conditions filling
+halos into zero-momentum fields before the user has set the initial conditions.
+The user's subsequent `set!(model, ...)` call will trigger the full state update.
 """
 function AtmosphereModels.initialize_model_thermodynamics!(model::AnelasticModel)
     θ₀ = model.dynamics.reference_state.potential_temperature
-    set!(model, θ=θ₀)
+    ρθ = thermodynamic_density(model.formulation)
+    ρᵣ = model.dynamics.reference_state.density
+    
+    # Directly set the thermodynamic density field to ρᵣ * θ₀
+    # without triggering update_state! to avoid issues with open BCs
+    set!(ρθ, ρᵣ * θ₀)
+    
     return nothing
 end
 
@@ -27,6 +40,9 @@ function TimeSteppers.compute_pressure_correction!(model::AnelasticModel, Δt)
     # Mask immersed velocities
     foreach(mask_immersed_field!, model.momentum)
     fill_halo_regions!(model.momentum, model.clock, fields(model))
+
+    # Enforce mass conservation at open boundaries
+    enforce_open_boundary_mass_conservation!(model, model.boundary_mass_fluxes)
 
     dynamics = model.dynamics
     ρŨ = model.momentum

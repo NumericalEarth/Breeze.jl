@@ -149,13 +149,47 @@ end
 ##### Momentum and velocity materialization
 #####
 
+"""
+$(TYPEDSIGNATURES)
+
+Inherit boundary conditions from momentum fields to velocity fields.
+This ensures that open boundary conditions on momentum are also applied to velocities.
+"""
+function inherit_momentum_bcs(velocity_bcs::FieldBoundaryConditions, momentum_bcs::FieldBoundaryConditions)
+    return FieldBoundaryConditions(; west = momentum_bcs.west,
+                                     east = momentum_bcs.east,
+                                     south = momentum_bcs.south,
+                                     north = momentum_bcs.north,
+                                     bottom = momentum_bcs.bottom,
+                                     top = momentum_bcs.top,
+                                     immersed = velocity_bcs.immersed)
+end
+
+"""
+$(TYPEDSIGNATURES)
+
+Get velocity boundary conditions if they exist in the named tuple, otherwise return default.
+"""
+@inline function maybe_velocity_bcs(boundary_conditions::NamedTuple, name::Symbol)
+    if hasproperty(boundary_conditions, name)
+        return getproperty(boundary_conditions, name)
+    else
+        return FieldBoundaryConditions()
+    end
+end
+
 function AtmosphereModels.materialize_momentum_and_velocities(dynamics::AnelasticDynamics, grid, boundary_conditions)
     ρu = XFaceField(grid, boundary_conditions=boundary_conditions.ρu)
     ρv = YFaceField(grid, boundary_conditions=boundary_conditions.ρv)
     ρw = ZFaceField(grid, boundary_conditions=boundary_conditions.ρw)
     momentum = (; ρu, ρv, ρw)
 
-    velocity_bcs = NamedTuple(name => FieldBoundaryConditions() for name in (:u, :v, :w))
+    velocity_bcs = (; u = maybe_velocity_bcs(boundary_conditions, :u),
+                      v = maybe_velocity_bcs(boundary_conditions, :v),
+                      w = maybe_velocity_bcs(boundary_conditions, :w))
+    velocity_bcs = (; u = inherit_momentum_bcs(velocity_bcs.u, boundary_conditions.ρu),
+                      v = inherit_momentum_bcs(velocity_bcs.v, boundary_conditions.ρv),
+                      w = inherit_momentum_bcs(velocity_bcs.w, boundary_conditions.ρw))
     velocity_bcs = regularize_field_boundary_conditions(velocity_bcs, grid, (:u, :v, :w))
     u = XFaceField(grid, boundary_conditions=velocity_bcs.u)
     v = YFaceField(grid, boundary_conditions=velocity_bcs.v)
