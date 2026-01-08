@@ -1,12 +1,12 @@
 using ..Thermodynamics:
     MoistureMassFractions,
     MoistureMixingRatio,
-    mixture_heat_capacity,
+    PlanarLiquidSurface,
     mixture_gas_constant,
-    total_mixing_ratio,
-    total_specific_moisture,
+    mixture_heat_capacity,
     saturation_specific_humidity,
-    PlanarLiquidSurface
+    total_mixing_ratio,
+    total_specific_moisture
 
 using ..AtmosphereModels:
     dynamics_density,
@@ -14,17 +14,14 @@ using ..AtmosphereModels:
     surface_pressure
 
 using Oceananigans: CenterField, Field
+using Oceananigans.AbstractOperations: KernelFunctionOperation
 using Oceananigans.Architectures: architecture
-using Oceananigans.Grids: znode, Center
+using Oceananigans.Grids: Center, znode
 using Oceananigans.Utils: launch!
 
-using KernelAbstractions: @kernel, @index
-
-using Oceananigans.AbstractOperations: KernelFunctionOperation
-
 using Adapt: Adapt, adapt
-
 using DocStringExtensions: TYPEDSIGNATURES
+using KernelAbstractions: @index, @kernel
 
 """
     struct DCMIP2016KesslerMicrophysics
