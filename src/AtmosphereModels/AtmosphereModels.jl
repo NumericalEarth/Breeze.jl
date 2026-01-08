@@ -46,7 +46,14 @@ export
     StabilityEquivalentPotentialTemperature,
     LiquidIcePotentialTemperature,
     StaticEnergy,
-    compute_hydrostatic_pressure!
+    compute_hydrostatic_pressure!,
+
+    # Internal methods (for extension by kinematic dynamics)
+    compute_velocities!,
+    compute_momentum_tendencies!,
+    set_velocity!,
+    set_momentum!,
+    prognostic_momentum_field_names
 
 using DocStringExtensions: TYPEDSIGNATURES, TYPEDEF
 using Adapt: Adapt, adapt

@@ -14,15 +14,15 @@ AtmosphereModels.initialize_model_thermodynamics!(m::KinematicModel) = set!(m, Î
 ##### Velocity and momentum: no-ops (velocities are FunctionFields, no momentum)
 #####
 
-compute_velocities!(::KinematicModel) = nothing
-compute_momentum_tendencies!(::KinematicModel, model_fields) = nothing
+AtmosphereModels.compute_velocities!(::KinematicModel) = nothing
+AtmosphereModels.compute_momentum_tendencies!(::KinematicModel, model_fields) = nothing
 
 #####
 ##### Setting velocities/momentum throws for kinematic models
 #####
 
-set_velocity!(::KinematicModel, name, value) = throw(ArgumentError("Cannot set velocities for KinematicModel. Velocities are prescribed."))
-set_momentum!(::KinematicModel, name, value) = throw(ArgumentError("Cannot set momentum for KinematicModel. Velocities are prescribed."))
+AtmosphereModels.set_velocity!(::KinematicModel, name, value) = throw(ArgumentError("Cannot set velocities for KinematicModel. Velocities are prescribed."))
+AtmosphereModels.set_momentum!(::KinematicModel, name, value) = throw(ArgumentError("Cannot set momentum for KinematicModel. Velocities are prescribed."))
 
 #####
 ##### Pressure correction: no-op for kinematic dynamics

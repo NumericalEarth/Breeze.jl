@@ -1,13 +1,15 @@
 """
-    PrescribedVelocityFieldsDynamics
+    KinematicDriver
 
 Module implementing kinematic dynamics for atmosphere models.
 
 Kinematic dynamics prescribes the velocity field rather than solving for it,
 enabling isolated testing of microphysics, thermodynamics, and other physics
 without the complexity of solving the momentum equations.
+
+This is analogous to the `kin1d` driver in P3-microphysics.
 """
-module PrescribedVelocityFieldsDynamics
+module KinematicDriver
 
 export
     PrescribedDynamics,
@@ -25,13 +27,7 @@ using Oceananigans.TimeSteppers: Clock, TimeSteppers
 using Oceananigans.Utils: prettysummary
 
 using Breeze.Thermodynamics: ReferenceState
-using Breeze.AtmosphereModels:
-    AtmosphereModels,
-    AtmosphereModel,
-    compute_velocities!,
-    compute_momentum_tendencies!,
-    set_velocity!,
-    set_momentum!
+using Breeze.AtmosphereModels: AtmosphereModels, AtmosphereModel
 
 include("prescribed_velocity_fields.jl")
 

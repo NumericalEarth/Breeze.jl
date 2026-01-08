@@ -141,6 +141,16 @@ initialize_model_thermodynamics!(model) = nothing  # default: do nothing
 #####
 
 """
+    prognostic_momentum_field_names(dynamics)
+
+Return a tuple of prognostic momentum field names.
+
+For prognostic dynamics (anelastic, compressible), returns `(:ρu, :ρv, :ρw)`.
+For kinematic dynamics (prescribed velocities), returns an empty tuple.
+"""
+prognostic_momentum_field_names(::Any) = (:ρu, :ρv, :ρw)
+
+"""
     prognostic_dynamics_field_names(dynamics)
 
 Return a tuple of prognostic field names specific to the dynamics formulation.

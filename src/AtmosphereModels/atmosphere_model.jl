@@ -272,10 +272,10 @@ Advection.cell_advection_timescale(model::AtmosphereModel) = cell_advection_time
 
 # Prognostic field names from dynamics + thermodynamic formulation + microphysics + tracers
 function prognostic_field_names(dynamics, formulation, microphysics, tracer_names)
-    default_names = (:ρu, :ρv, :ρw, :ρqᵗ)
+    momentum_names = prognostic_momentum_field_names(dynamics)
     formulation_names = prognostic_thermodynamic_field_names(formulation)
     microphysical_names = prognostic_field_names(microphysics)
-    return tuple(default_names..., formulation_names..., microphysical_names..., tracer_names...)
+    return tuple(momentum_names..., :ρqᵗ, formulation_names..., microphysical_names..., tracer_names...)
 end
 
 function field_names(dynamics, formulation, microphysics, tracer_names)

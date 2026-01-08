@@ -152,8 +152,8 @@ using .AnelasticEquations: AnelasticDynamics, AnelasticModel
 include("CompressibleEquations/CompressibleEquations.jl")
 using .CompressibleEquations: CompressibleDynamics, CompressibleModel
 
-include("PrescribedVelocityFieldsDynamics/PrescribedVelocityFieldsDynamics.jl")
-using .PrescribedVelocityFieldsDynamics: PrescribedDynamics, KinematicModel
+include("KinematicDriver/KinematicDriver.jl")
+using .KinematicDriver: PrescribedDynamics, KinematicModel
 
 include("Microphysics/Microphysics.jl")
 using .Microphysics
