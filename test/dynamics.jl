@@ -93,7 +93,7 @@ end
     ∫ρu = Field(Integral(model.momentum.ρu))
     ∫ρw = Field(Integral(model.momentum.ρw))
     Px₀ = @allowscalar first(∫ρu)
-    Pz₀ = @allowscalar first(∫ρz)
+    Pz₀ = @allowscalar first(∫ρw)
 
     # Time step the model
     Nt = 10
