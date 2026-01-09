@@ -268,6 +268,7 @@ end
 
 qᵛ_init = CenterField(grid)
 copyto!(parent(qᵛ_init), qᵛ_host)
+nothing #hide
 
 # Set the full initial conditions (water vapor, potential temperature with bubble, and wind):
 
