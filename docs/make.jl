@@ -28,16 +28,16 @@ struct Example
 end
 
 examples = [
-    Example("Stratified dry thermal bubble", "dry_thermal_bubble", true),
-    Example("Cloudy thermal bubble", "cloudy_thermal_bubble", true),
-    Example("Cloudy Kelvin-Helmholtz instability", "cloudy_kelvin_helmholtz", true),
-    Example("Shallow cumulus convection (BOMEX)", "bomex", true),
-    Example("Precipitating shallow cumulus (RICO)", "rico", false),
-    Example("Convection over prescribed sea surface temperature (SST)", "prescribed_sea_surface_temperature", true),
-    Example("Inertia gravity wave", "inertia_gravity_wave", true),
-    Example("Single column radiation", "single_column_radiation", true),
-    Example("Stationary parcel model", "stationary_parcel_model", true),
-    Example("Acoustic wave in shear layer", "acoustic_wave", true),
+    # Example("Stratified dry thermal bubble", "dry_thermal_bubble", true),
+    # Example("Cloudy thermal bubble", "cloudy_thermal_bubble", true),
+    # Example("Cloudy Kelvin-Helmholtz instability", "cloudy_kelvin_helmholtz", true),
+    # Example("Shallow cumulus convection (BOMEX)", "bomex", true),
+    # Example("Precipitating shallow cumulus (RICO)", "rico", false),
+    # Example("Convection over prescribed sea surface temperature (SST)", "prescribed_sea_surface_temperature", true),
+    # Example("Inertia gravity wave", "inertia_gravity_wave", true),
+    # Example("Single column radiation", "single_column_radiation", true),
+    # Example("Stationary parcel model", "stationary_parcel_model", true),
+    # Example("Acoustic wave in shear layer", "acoustic_wave", true),
 ]
 
 # Filter out long-running example if necessary
@@ -154,7 +154,7 @@ makedocs(
     ),
     pages=[
         "Home" => "index.md",
-        "Examples" => example_pages,
+        # "Examples" => example_pages,
         "Thermodynamics" => "thermodynamics.md",
         "AtmosphereModel" => Any[
             "Diagnostics" => "atmosphere_model/diagnostics.md",

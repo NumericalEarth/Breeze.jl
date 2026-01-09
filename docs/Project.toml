@@ -13,6 +13,7 @@ Oceananigans = "9e8cae18-63c1-5223-a75c-80ca9d6e9a09"
 Pkg = "44cfe95a-1eb2-52ea-b672-e2afdf69b78f"
 RRTMGP = "a01a1ee8-cea4-48fc-987c-fc7878d79da1"
 Random = "9a3f8284-a2c9-5f02-9a11-845980a1fd5c"
+SpecialFunctions = "276daf66-3868-5448-9aa4-cd146d93841b"
 
 [sources]
 Breeze = {path = ".."}
@@ -29,3 +30,4 @@ NCDatasets = "0.14"
 Oceananigans = "0.102, 0.103"
 Pkg = "<0.0.1, 1"
 Random = "<0.0.1, 1"
+SpecialFunctions = "2.6"
