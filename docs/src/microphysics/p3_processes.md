@@ -121,8 +121,8 @@ From [Morrison2015parameterization](@citet) Section 2f:
 \frac{dN^i}{dt}\bigg|_{het} = n_{INP}(T) \frac{d T}{dt}\bigg|_{neg}
 ```
 
-where ``n_{INP}(T)`` follows parameterizations like [DeMott et al. (2010)](@cite)
-or [Meyers et al. (1992)](@cite).
+where ``n_{INP}(T)`` follows parameterizations like [DeMottEtAl2010icenuclei](@citet)
+or [MeyerEtAl1992icenucleation](@citet).
 
 !!! note "INP Parameterization"
     The specific INP parameterization is configurable in P3. Our implementation
@@ -216,7 +216,7 @@ where ``ρ^f`` is the rime density, which depends on impact velocity and tempera
 
 #### Rime Density Parameterization
 
-From [Heymsfield & Pflaum (1985)](@cite) as used in
+From [HeymsfieldPflaum1985graupelgrowth](@citet) as used in
 [Morrison2015parameterization](@citet):
 
 ```math

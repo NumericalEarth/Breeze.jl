@@ -184,7 +184,7 @@ A(D) = γ D^σ
 ```
 
 where ``γ`` and ``σ`` are empirical coefficients from
-[Mitchell (1996)](@cite) (see [Morrison2015parameterization](@citet) Table 1).
+[Mitchell1996powerlaws](@citet) (see [Morrison2015parameterization](@citet) Table 1).
 
 **Graupel**:
 
