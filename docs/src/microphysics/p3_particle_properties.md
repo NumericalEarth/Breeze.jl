@@ -5,13 +5,13 @@ The mass-diameter and area-diameter relationships vary across this spectrum, dep
 particle size and riming state.
 
 The foundational particle property relationships are from
-[Morrison & Milbrandt (2015a)](@cite Morrison2015parameterization), Section 2.
+[Morrison & Milbrandt (2015a])(@citet), Section 2.
 
 ## Mass-Diameter Relationship
 
 The particle mass ``m(D)`` follows a piecewise power law that depends on maximum dimension ``D``,
 rime fraction ``Fᶠ``, and rime density ``ρᶠ``. This formulation is given in
-[Morrison & Milbrandt (2015a)](@cite Morrison2015parameterization) Equations 1-5.
+[Morrison2015parameterization](@citet) Equations 1-5.
 
 ### The Four Regimes
 
@@ -20,7 +20,7 @@ P3 defines four diameter regimes with distinct mass-diameter relationships:
 **Regime 1: Small Spherical Ice** (``D < D_{th}``)
 
 Small ice particles are assumed spherical with pure ice density
-([Morrison & Milbrandt (2015a)](@cite Morrison2015parameterization) Eq. 1):
+([Morrison2015parameterization](@citet) Eq. 1):
 
 ```math
 m(D) = \frac{π}{6} ρᵢ D³
@@ -31,27 +31,27 @@ where ``ρᵢ = 917`` kg/m³ is pure ice density.
 **Regime 2: Vapor-Grown Aggregates** (``D_{th} ≤ D < D_{gr}`` or unrimed)
 
 Larger particles follow an empirical power law based on aircraft observations
-of ice crystals and aggregates ([Morrison & Milbrandt (2015a)](@cite Morrison2015parameterization) Eq. 2):
+of ice crystals and aggregates ([Morrison2015parameterization](@citet) Eq. 2):
 
 ```math
 m(D) = α D^β
 ```
 
 where ``α = 0.0121`` kg/m^β and ``β = 1.9`` are based on observations compiled in the
-supplementary material of [Morrison & Milbrandt (2015a)](@cite Morrison2015parameterization).
+supplementary material of [Morrison2015parameterization](@citet).
 This relationship captures the fractal nature of aggregated crystals.
 
 **Regime 3: Graupel** (``D_{gr} ≤ D < D_{cr}``)
 
 When particles acquire sufficient rime, they become compact graupel
-with density ``ρ_g`` ([Morrison & Milbrandt (2015a)](@cite Morrison2015parameterization) Eq. 3):
+with density ``ρ_g`` ([Morrison2015parameterization](@cite) Eq. 3):
 
 ```math
 m(D) = \frac{π}{6} ρ_g D³
 ```
 
 The graupel density ``ρ_g`` depends on the rime fraction and rime density
-([Morrison & Milbrandt (2015a)](@cite Morrison2015parameterization) Eq. 17):
+([Morrison2015parameterization](@citet) Eq. 17):
 
 ```math
 ρ_g = Fᶠ ρᶠ + (1 - Fᶠ) ρ_d
@@ -62,7 +62,7 @@ where ``ρ_d`` is the density of the deposited (vapor-grown) ice component.
 **Regime 4: Partially Rimed** (``D ≥ D_{cr}``)
 
 The largest particles have a rimed core with unrimed aggregate extensions
-([Morrison & Milbrandt (2015a)](@cite Morrison2015parameterization) Eq. 4):
+([Morrison2015parameterization](@citet) Eq. 4):
 
 ```math
 m(D) = \frac{α}{1 - Fᶠ} D^β
@@ -71,7 +71,7 @@ m(D) = \frac{α}{1 - Fᶠ} D^β
 ### Threshold Diameters
 
 The transitions between regimes occur at critical diameters determined by
-equating masses ([Morrison & Milbrandt (2015a)](@cite Morrison2015parameterization) Eqs. 12-14):
+equating masses ([Morrison2015parameterization](@citet) Eqs. 12-14):
 
 **Spherical-Aggregate Threshold** ``D_{th}``:
 
@@ -101,7 +101,7 @@ D_{cr} = \left( \frac{6α}{π ρ_g (1 - Fᶠ)} \right)^{1/(3-β)}
 
 The density of the vapor-deposited (unrimed) component ``ρ_d`` is derived from
 the constraint that total mass equals rime mass plus deposited mass.
-From [Morrison & Milbrandt (2015a)](@cite Morrison2015parameterization) Equation 16:
+From [Morrison2015parameterization](@citet) Equation 16:
 
 ```math
 ρ_d = \frac{Fᶠ ρᶠ}{(β - 2) \frac{k - 1}{(1 - Fᶠ)k - 1} - (1 - Fᶠ)}
@@ -168,7 +168,7 @@ println("  ρ_g (graupel)    = $(round(thresholds.ρ_graupel, digits=1)) kg/m³"
 ## Area-Diameter Relationship
 
 The projected cross-sectional area ``A(D)`` determines collection rates and fall speed.
-These relationships are from [Morrison & Milbrandt (2015a)](@cite Morrison2015parameterization)
+These relationships are from [Morrison2015parameterization](@citet)
 Equations 6-8.
 
 **Small Spherical Ice** (``D < D_{th}``):
@@ -184,7 +184,7 @@ A(D) = γ D^σ
 ```
 
 where ``γ`` and ``σ`` are empirical coefficients from
-[Mitchell (1996)](@cite) (see [Morrison & Milbrandt (2015a)](@cite Morrison2015parameterization) Table 1).
+[Mitchell (1996)](@cite) (see [Morrison2015parameterization](@citet) Table 1).
 
 **Graupel**:
 
@@ -205,23 +205,23 @@ A(D) = Fᶠ \frac{π}{4} D² + (1 - Fᶠ) γ D^σ
 ## Terminal Velocity
 
 The terminal velocity ``V(D)`` for ice particles follows a power law with density correction
-([Morrison & Milbrandt (2015a)](@cite Morrison2015parameterization) Eq. 9):
+([Morrison2015parameterization](@citet) Eq. 9):
 
 ```math
 V(D) = a_v D^{b_v} \left(\frac{ρ₀}{ρ}\right)^{0.5}
 ```
 
 where:
-- ``a_v, b_v`` are regime-dependent coefficients (Table 2 of [Morrison & Milbrandt (2015a)](@cite Morrison2015parameterization))
+- ``a_v, b_v`` are regime-dependent coefficients (Table 2 of [Morrison2015parameterization](@citet))
 - ``ρ₀ = 1.225`` kg/m³ is reference air density
 - ``ρ`` is local air density
 
 The velocity coefficients also depend on the m(D) regime and are documented in the supplementary
-material of [Morrison & Milbrandt (2015a)](@cite Morrison2015parameterization).
+material of [Morrison2015parameterization](@citet).
 
 !!! note "Velocity Coefficients"
     The velocity-diameter coefficients (a_v, b_v) vary by regime and can be updated
-    with new observational data. See [Morrison & Milbrandt (2015a)](@cite Morrison2015parameterization)
+    with new observational data. See [Morrison2015parameterization](@citet)
     supplementary material for derivation details.
 
 ## Particle Density
@@ -260,7 +260,7 @@ fig
 
 Riming dramatically affects particle properties. This is the key insight of P3 that enables
 continuous evolution without discrete category conversions
-([Morrison & Milbrandt (2015a)](@cite Morrison2015parameterization) Section 2d):
+([Morrison2015parameterization](@citet) Section 2d):
 
 | Property | Unrimed Aggregate | Heavily Rimed Graupel |
 |----------|-------------------|----------------------|
@@ -295,8 +295,8 @@ fig
 ## Rime Density Parameterization
 
 The rime density ``ρᶠ`` depends on the collection conditions during riming. From
-[Heymsfield and Pflaum (1985)](@cite) as implemented in
-[Morrison & Milbrandt (2015a)](@cite Morrison2015parameterization):
+[HeymsfieldPflaum1985graupelgrowth](@cite) as implemented in
+[Morrison2015parameterization](@citet):
 
 ```math
 ρᶠ = \min\left(ρᵢ, \max\left(ρ_{min}, a_ρ + b_ρ T_c\right)\right)
