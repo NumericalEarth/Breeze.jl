@@ -209,13 +209,13 @@ uᵢ(x, y, z) = u_background(z)
 # Visualize the warm bubble perturbation on a vertical slice through the domain center:
 
 x_slice = range(0, Lx, length=200)
-z_slice = range(0, 5000, length=100)
+z_slice = range(0, Lz, length=200)
 
 θ′_slice = [θᵢ(x, yᵦ, z) - θ_background(z) for x in x_slice, z in z_slice]
 
-fig = Figure(size=(800, 400), fontsize=14)
+fig = Figure(size=(800, 300), fontsize=14)
 ax = Axis(fig[1, 1], xlabel="x (km)", ylabel="z (km)",
-          title="Warm bubble perturbation θ′ (K) at y = Ly/2", aspect=2)
+          title="Warm bubble perturbation θ′ (K) at y = Ly/2", aspect=DataAspect())
 
 hm = heatmap!(ax, x_slice ./ 1000, z_slice ./ 1000, θ′_slice,
               colormap=:thermal, colorrange=(0, Δθ))
@@ -282,17 +282,19 @@ conjure_time_step_wizard!(simulation, cfl=0.7)
 
 # ## Output and progress
 #
-# We set up a progress callback to monitor simulation health.
+# We set up callbacks to monitor simulation health and collect diagnostics.
+# The maximum vertical velocity is tracked during the simulation to avoid
+# saving large 3D datasets.
 
 θˡⁱ = liquid_ice_potential_temperature(model)
 qᶜˡ = model.microphysical_fields.qᶜˡ
 qʳ = model.microphysical_fields.qʳ
 qᵛ = model.microphysical_fields.qᵛ
+u, v, w = model.velocities
 
 wall_clock = Ref(time_ns())
 
 function progress(sim)
-    u, v, w = sim.model.velocities
     elapsed = 1e-9 * (time_ns() - wall_clock[])
 
     msg = @sprintf("Iter: %d, t: %s, Δt: %s, wall time: %s, max|u|: %.2f m/s, max w: %.2f m/s, min w: %.2f m/s",
@@ -308,19 +310,20 @@ end
 
 add_callback!(simulation, progress, IterationInterval(100))
 
-# ## Output
-#
-# Save full 3D fields for post-processing analysis.
+# Collect maximum vertical velocity time series during simulation:
 
-u, v, w = model.velocities
-outputs = merge(model.velocities, model.tracers, (; θˡⁱ, qᶜˡ, qʳ, qᵛ))
+max_w_timeseries = Float64[]
+max_w_times = Float64[]
 
-filename = "splitting_supercell.jld2"
-simulation.output_writers[:jld2] = JLD2Writer(model, outputs; filename,
-                                              schedule = TimeInterval(1minutes),
-                                              overwrite_existing = true)
+function collect_max_w(sim)
+    push!(max_w_times, time(sim))
+    push!(max_w_timeseries, maximum(w))
+    return nothing
+end
 
-# Save horizontal slices at z ≈ 5 km for efficient animation:
+add_callback!(simulation, collect_max_w, TimeInterval(1minutes))
+
+# Save horizontal slices at z ≈ 5 km for animation:
 
 z = znodes(grid, Center())
 k_5km = searchsortedfirst(z, 5000)
@@ -344,13 +347,9 @@ run!(simulation)
 # The maximum updraft velocity is a key diagnostic for supercell intensity.
 # Strong supercells typically develop updrafts exceeding 30–50 m/s.
 
-w_ts = FieldTimeSeries(filename, "w")
-times = w_ts.times
-max_w = [maximum(w_ts[n]) for n in 1:length(times)]
-
 fig = Figure(size=(700, 400), fontsize=14)
 ax = Axis(fig[1, 1], xlabel="Time (s)", ylabel="Maximum w (m/s)", title="Maximum Vertical Velocity")
-lines!(ax, times, max_w, linewidth=2)
+lines!(ax, max_w_times, max_w_timeseries, linewidth=2)
 
 save("supercell_max_w.png", fig) #src
 fig
