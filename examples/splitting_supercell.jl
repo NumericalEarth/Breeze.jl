@@ -1,13 +1,13 @@
 # # Splitting supercell
 #
 # This example simulates the development of a splitting supercell thunderstorm, following the
-# idealized test case described by [Klemp et al. (2015)](@cite KlempEtAl2015) and the DCMIP2016
-# supercell intercomparison by [Zarzycki et al. (2019)](@cite Zarzycki2019). This benchmark evaluates the model's
+# idealized test case described by [KlempEtAl2015](@citet) and the DCMIP2016
+# supercell intercomparison by [Zarzycki2019](@citet). This benchmark evaluates the model's
 # ability to capture deep moist convection with warm-rain microphysics and strong updrafts.
 #
 # For microphysics we use the Kessler scheme, which includes prognostic cloud water
 # and rain water with autoconversion, accretion, rain evaporation, and sedimentation processes.
-# This is the same scheme used in the DCMIP2016 supercell intercomparison [Zarzycki et al. (2019)](@cite Zarzycki2019).
+# This is the same scheme used in the DCMIP2016 supercell intercomparison [Zarzycki2019](@cite).
 #
 # ## Physical setup
 #
@@ -20,7 +20,7 @@
 # ### Potential temperature profile
 #
 # The background potential temperature follows a piecewise profile
-# (Equation 14 in [Klemp et al. (2015)](@cite KlempEtAl2015)):
+# (Equation 14 in [KlempEtAl2015](@citet)):
 #
 # ```math
 # θ(z) = \begin{cases}
@@ -36,7 +36,7 @@
 #
 # ### Warm bubble perturbation
 #
-# A localized warm bubble triggers convection (Equations 17–18 in [Klemp et al. (2015)](@cite KlempEtAl2015)):
+# A localized warm bubble triggers convection (Equations 17–18 in [KlempEtAl2015](@citet)):
 #
 # ```math
 # θ'(x, y, z) = \begin{cases}
@@ -54,7 +54,7 @@
 #
 # The zonal wind increases linearly with height up to the shear layer ``z_s = 5 \, {\rm km}``,
 # with a smooth transition zone, providing the environmental shear necessary for supercell
-# development and mesocyclone formation (Equations 15-16 in [Klemp et al. (2015)](@cite KlempEtAl2015)).
+# development and mesocyclone formation (Equations 15-16 in [KlempEtAl2015](@citet)).
 
 using Breeze
 using Breeze: DCMIP2016KesslerMicrophysics, TetensFormula
@@ -120,7 +120,7 @@ uᶜ = 15           # m/s - storm motion (Galilean translation speed)
 g = constants.gravitational_acceleration
 cᵖᵈ = constants.dry_air.heat_capacity
 
-# Background potential temperature profile (Equation 14 in [Klemp et al. (2015)](@cite KlempEtAl2015)):
+# Background potential temperature profile (Equation 14 in [KlempEtAl2015](@citet)):
 
 function θ_background(z)
     θ_troposphere = θ₀ + (θₜᵣ - θ₀) * (z / zₜᵣ)^(5/4)
@@ -184,7 +184,7 @@ fig
 
 # ## Warm bubble perturbation
 #
-# The warm bubble parameters following Equations 17–18 in [Klemp et al. (2015)](@cite KlempEtAl2015):
+# The warm bubble parameters following Equations 17–18 in [KlempEtAl2015](@citet):
 
 Δθ = 3              # K - perturbation amplitude
 rₕ = 10kilometers   # m - bubble horizontal radius
@@ -349,9 +349,9 @@ run!(simulation)
 # Strong supercells typically develop updrafts exceeding 30–50 m/s.
 #
 # Our simulated storm intensity is notably stronger than the DCMIP2016 intercomparison
-# results reported by [Zarzycki et al. (2019)](@cite Zarzycki2019). One explanation is that
+# results reported by [Zarzycki2019](@citet). One explanation is that
 # no explicit numerical diffusion is applied in this simulation. As noted by
-# [Klemp et al. (2015)](@cite KlempEtAl2015), the simulated storm intensity and structure
+# [KlempEtAl2015](@citet), the simulated storm intensity and structure
 # are highly sensitive to numerical diffusion.
 
 fig = Figure(size=(700, 400), fontsize=14)
@@ -371,7 +371,7 @@ fig
 #
 # The simulated supercell exhibits splitting behavior, with the initial storm
 # dividing into right-moving and left-moving cells, consistent with the
-# DCMIP2016 intercomparison results [Zarzycki et al. (2019)](@cite Zarzycki2019).
+# DCMIP2016 intercomparison results [Zarzycki2019](@cite).
 
 wxy_ts = FieldTimeSeries(slices_filename, "wxy")
 qʳxy_ts = FieldTimeSeries(slices_filename, "qʳxy")
