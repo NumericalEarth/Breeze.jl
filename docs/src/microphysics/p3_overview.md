@@ -178,18 +178,18 @@ The P3 scheme is described in detail in the following papers:
 
 ### Core P3 Papers
 
-- [Morrison2015parameterization](@cite): Original P3 formulation with predicted rime (Part I)
-- [Morrison2015part2](@cite): Case study comparisons with observations (Part II)
-- [MilbrandtMorrison2016](@cite): Extension to multiple free ice categories (Part III)
-- [MilbrandtEtAl2021](@cite): Original three-moment ice in JAS
-- [MilbrandtEtAl2024](@cite): Updated triple-moment formulation in JAMES
-- [MilbrandtEtAl2025liquidfraction](@cite): Predicted liquid fraction on ice
-- [Morrison2025complete3moment](@cite): Complete three-moment implementation
+- [Morrison2015parameterization](@citet): Original P3 formulation with predicted rime (Part I)
+- [Morrison2015part2](@citet): Case study comparisons with observations (Part II)
+- [MilbrandtMorrison2016](@citet): Extension to multiple free ice categories (Part III)
+- [MilbrandtEtAl2021](@citet): Original three-moment ice in JAS
+- [MilbrandtEtAl2024](@citet): Updated triple-moment formulation in JAMES
+- [MilbrandtEtAl2025liquidfraction](@citet): Predicted liquid fraction on ice
+- [Morrison2025complete3moment](@citet): Complete three-moment implementation
 
 ### Related Papers
 
-- [MilbrandtYau2005](@cite): Multimoment microphysics and spectral shape parameter
-- [SeifertBeheng2006](@cite): Two-moment cloud microphysics for mixed-phase clouds
-- [KhairoutdinovKogan2000](@cite): Warm rain autoconversion parameterization
-- [pruppacher2010microphysics](@cite): Microphysics of clouds and precipitation (textbook)
+- [MilbrandtYau2005](@citet): Multimoment microphysics and spectral shape parameter
+- [SeifertBeheng2006](@citet): Two-moment cloud microphysics for mixed-phase clouds
+- [KhairoutdinovKogan2000](@citet): Warm rain autoconversion parameterization
+- [pruppacher2010microphysics](@citet): Microphysics of clouds and precipitation (textbook)
 
