@@ -382,30 +382,27 @@ wlim = maximum(abs, wxy_ts) / 2
 qʳlim = maximum(qʳxy_ts) / 4
 qᶜˡlim = maximum(qᶜˡxy_ts) / 4
 
-fig = Figure(size=(1000, 900), fontsize=14)
+fig = Figure(size=(1200, 500), fontsize=14)
 
-axw = Axis(fig[2, 1], aspect=1, xlabel="x (m)", ylabel="y (m)")
-axqᶜˡ = Axis(fig[2, 2], aspect=1, xlabel="x (m)", ylabel="y (m)", yaxisposition=:right)
-axqʳ = Axis(fig[4, 1], aspect=1, xlabel="x (m)", ylabel="y (m)")
+axw = Axis(fig[1, 1], aspect=1, xlabel="x (m)", ylabel="y (m)", title="Vertical velocity w (m/s)")
+axqᶜˡ = Axis(fig[1, 2], aspect=1, xlabel="x (m)", ylabel="y (m)", title="Cloud water qᶜˡ (kg/kg)")
+axqʳ = Axis(fig[1, 3], aspect=1, xlabel="x (m)", ylabel="y (m)", title="Rain qʳ (kg/kg)")
 
 n = Observable(1)
 wxy_n = @lift wxy_ts[$n]
 qᶜˡxy_n = @lift qᶜˡxy_ts[$n]
 qʳxy_n = @lift qʳxy_ts[$n]
-title = @lift "Supercell at z ≈ 5 km, t = " * prettytime(times[$n])
+title = @lift "Splitting supercell at z ≈ 5 km, t = " * prettytime(times[$n])
 
 hmw = heatmap!(axw, wxy_n, colormap=:balance, colorrange=(-wlim, wlim))
 hmqᶜˡ = heatmap!(axqᶜˡ, qᶜˡxy_n, colormap=:dense, colorrange=(0, qᶜˡlim))
 hmqʳ = heatmap!(axqʳ, qʳxy_n, colormap=:amp, colorrange=(0, qʳlim))
 
-Colorbar(fig[3, 1], hmw, label="w (m/s)", vertical=false, flipaxis=false)
-Colorbar(fig[3, 2], hmqᶜˡ, label="qᶜˡ (kg/kg)", vertical=false, flipaxis=false)
-Colorbar(fig[5, 1], hmqʳ, label="qʳ (kg/kg)", vertical=false, flipaxis=false)
+Colorbar(fig[2, 1], hmw, vertical=false)
+Colorbar(fig[2, 2], hmqᶜˡ, vertical=false)
+Colorbar(fig[2, 3], hmqʳ, vertical=false)
 
-fig[1, :] = Label(fig, title, fontsize=18, tellwidth=false)
-
-rowgap!(fig.layout, 2, -50)
-rowgap!(fig.layout, 4, -50)
+fig[0, :] = Label(fig, title, fontsize=18, tellwidth=false)
 
 CairoMakie.record(fig, "splitting_supercell_slices.mp4", 1:Nt, framerate=10) do nn
     n[] = nn
