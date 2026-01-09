@@ -1,4 +1,4 @@
-# Predicted Particle Properties (P3) Microphysics
+# [Predicted Particle Properties (P3) Microphysics](@id p3_overview)
 
 The Predicted Particle Properties (P3) scheme represents a paradigm shift in bulk microphysics parameterization.
 Rather than using discrete hydrometeor categories (cloud ice, snow, graupel, hail), P3 uses a **single ice category**
