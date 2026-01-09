@@ -1,4 +1,4 @@
-# # Supercell thunderstorm
+# # Splitting supercell
 #
 # This example simulates the development of a splitting supercell thunderstorm, following the
 # idealized test case described by [Klemp et al. (2015)](@cite KlempEtAl2015) and the DCMIP2016
@@ -7,7 +7,7 @@
 #
 # For microphysics we use the Kessler scheme, which includes prognostic cloud water
 # and rain water with autoconversion, accretion, rain evaporation, and sedimentation processes.
-# This is the same scheme used in the DCMIP2016 supercell intercomparison [Zarzycki2019](@citet).
+# This is the same scheme used in the DCMIP2016 supercell intercomparison [Zarzycki et al. (2019)](@cite Zarzycki2019).
 #
 # ## Physical setup
 #
@@ -20,7 +20,7 @@
 # ### Potential temperature profile
 #
 # The background potential temperature follows a piecewise profile
-# (Equation 14 in [KlempEtAl2015](@cite)):
+# (Equation 14 in [Klemp et al. (2015)](@cite KlempEtAl2015)):
 #
 # ```math
 # θ(z) = \begin{cases}
@@ -36,7 +36,7 @@
 #
 # ### Warm bubble perturbation
 #
-# A localized warm bubble triggers convection (Equations 17–18 in [KlempEtAl2015](@cite)):
+# A localized warm bubble triggers convection (Equations 17–18 in [Klemp et al. (2015)](@cite KlempEtAl2015)):
 #
 # ```math
 # θ'(x, y, z) = \begin{cases}
@@ -54,7 +54,7 @@
 #
 # The zonal wind increases linearly with height up to the shear layer ``z_s = 5 \, {\rm km}``,
 # with a smooth transition zone, providing the environmental shear necessary for supercell
-# development and mesocyclone formation (Equations 15-16 in [KlempEtAl2015](@cite)).
+# development and mesocyclone formation (Equations 15-16 in [Klemp et al. (2015)](@cite KlempEtAl2015)).
 
 using Breeze
 using Breeze: DCMIP2016KesslerMicrophysics, TetensFormula
@@ -120,7 +120,7 @@ uᶜ = 15           # m/s - storm motion (Galilean translation speed)
 g = constants.gravitational_acceleration
 cᵖᵈ = constants.dry_air.heat_capacity
 
-# Background potential temperature profile (Equation 14 in [KlempEtAl2015](@cite)):
+# Background potential temperature profile (Equation 14 in [Klemp et al. (2015)](@cite KlempEtAl2015)):
 
 function θ_background(z)
     θ_troposphere = θ₀ + (θₜᵣ - θ₀) * (z / zₜᵣ)^(5/4)
@@ -152,24 +152,18 @@ z_plot = range(0, Lz, length=200)
 θ_profile = [θ_background(z) for z in z_plot]
 ℋ_profile = [ℋ_background(z) * 100 for z in z_plot]
 
-fig_profiles = Figure(size=(900, 500), fontsize=14)
+fig = Figure(size=(900, 500), fontsize=14)
 
-ax_θ = Axis(fig_profiles[1, 1],
-            xlabel = "Potential temperature θ (K)",
-            ylabel = "Height (km)",
-            title = "Background potential temperature")
-lines!(ax_θ, θ_profile, collect(z_plot) ./ 1000, linewidth=2, color=:magenta)
-hlines!(ax_θ, [zₜᵣ / 1000], color=:gray, linestyle=:dash, label="Tropopause")
+axθ = Axis(fig[1, 1], xlabel="θ (K)", ylabel="z (km)", title="Background potential temperature")
+lines!(axθ, θ_profile, z_plot ./ 1000, linewidth=2, color=:magenta)
+hlines!(axθ, [zₜᵣ / 1000], color=:gray, linestyle=:dash, label="Tropopause")
 
-ax_ℋ = Axis(fig_profiles[1, 2],
-            xlabel = "Relative humidity ℋ (%)",
-            ylabel = "Height (km)",
-            title = "Relative humidity profile")
-lines!(ax_ℋ, ℋ_profile, collect(z_plot) ./ 1000, linewidth=2, color=:dodgerblue)
-hlines!(ax_ℋ, [zₜᵣ / 1000], color=:gray, linestyle=:dash)
+axℋ = Axis(fig[1, 2], xlabel="ℋ (%)", ylabel="z (km)", title="Relative humidity profile")
+lines!(axℋ, ℋ_profile, z_plot ./ 1000, linewidth=2, color=:dodgerblue)
+hlines!(axℋ, [zₜᵣ / 1000], color=:gray, linestyle=:dash)
 
-save("supercell_thermodynamic_profiles.png", fig_profiles) #src
-fig_profiles
+save("supercell_thermodynamic_profiles.png", fig) #src
+fig
 
 # ## Background wind profile
 #
@@ -179,21 +173,18 @@ fig_profiles
 
 u_profile = [u_background(z) for z in z_plot]
 
-fig_wind = Figure(size=(500, 500), fontsize=14)
-ax_u = Axis(fig_wind[1, 1],
-            xlabel = "Zonal wind u (m/s)",
-            ylabel = "Height (km)",
-            title = "Background wind profile")
-lines!(ax_u, u_profile, collect(z_plot) ./ 1000, linewidth=2, color=:orangered)
-hlines!(ax_u, [zₛ / 1000], color=:gray, linestyle=:dash, label="Shear layer top")
-vlines!(ax_u, [0], color=:black, linestyle=:dot)
+fig = Figure(size=(500, 500), fontsize=14)
+axu = Axis(fig[1, 1], xlabel="u (m/s)", ylabel="z (km)", title="Background wind profile")
+lines!(axu, u_profile, z_plot ./ 1000, linewidth=2, color=:orangered)
+hlines!(axu, [zₛ / 1000], color=:gray, linestyle=:dash, label="Shear layer top")
+vlines!(axu, [0], color=:black, linestyle=:dot)
 
-save("supercell_wind_profile.png", fig_wind) #src
-fig_wind
+save("supercell_wind_profile.png", fig) #src
+fig
 
 # ## Warm bubble perturbation
 #
-# The warm bubble parameters following Equations 17–18 in [KlempEtAl2015](@cite):
+# The warm bubble parameters following Equations 17–18 in [Klemp et al. (2015)](@cite KlempEtAl2015):
 
 Δθ = 3              # K - perturbation amplitude
 rₕ = 10kilometers   # m - bubble horizontal radius
@@ -222,19 +213,16 @@ z_slice = range(0, 5000, length=100)
 
 θ′_slice = [θᵢ(x, yᵦ, z) - θ_background(z) for x in x_slice, z in z_slice]
 
-fig_bubble = Figure(size=(800, 400), fontsize=14)
-ax_bubble = Axis(fig_bubble[1, 1],
-                 xlabel = "x (km)",
-                 ylabel = "Height (km)",
-                 title = "Warm bubble perturbation θ′ (K) at y = Ly/2",
-                 aspect = 2)
+fig = Figure(size=(800, 400), fontsize=14)
+ax = Axis(fig[1, 1], xlabel="x (km)", ylabel="z (km)",
+          title="Warm bubble perturbation θ′ (K) at y = Ly/2", aspect=2)
 
-hm = heatmap!(ax_bubble, collect(x_slice) ./ 1000, collect(z_slice) ./ 1000, θ′_slice,
+hm = heatmap!(ax, x_slice ./ 1000, z_slice ./ 1000, θ′_slice,
               colormap=:thermal, colorrange=(0, Δθ))
-Colorbar(fig_bubble[1, 2], hm, label="θ′ (K)")
+Colorbar(fig[1, 2], hm, label="θ′ (K)")
 
-save("supercell_warm_bubble.png", fig_bubble) #src
-fig_bubble
+save("supercell_warm_bubble.png", fig) #src
+fig
 
 # ## Model setup
 #
@@ -271,11 +259,11 @@ T_host = Array(parent(T))
 qᵛ_host = similar(pₕ_host)
 
 for k in axes(qᵛ_host, 3), j in axes(qᵛ_host, 2), i in axes(qᵛ_host, 1)
-    z = znode(i, j, k, grid, Center(), Center(), Center())
+    zᵢⱼₖ = znode(i, j, k, grid, Center(), Center(), Center())
     Tᵢⱼₖ = @inbounds T_host[i, j, k]
     pᵢⱼₖ = @inbounds pₕ_host[i, j, k]
     qᵛ⁺ = 380 / pᵢⱼₖ * exp(17.27 * ((Tᵢⱼₖ - 273) / (Tᵢⱼₖ - 36)))
-    @inbounds qᵛ_host[i, j, k] = ℋ_background(z) * qᵛ⁺
+    @inbounds qᵛ_host[i, j, k] = ℋ_background(zᵢⱼₖ) * qᵛ⁺
 end
 
 qᵛ_init = CenterField(grid)
@@ -327,7 +315,7 @@ add_callback!(simulation, progress, IterationInterval(100))
 u, v, w = model.velocities
 outputs = merge(model.velocities, model.tracers, (; θˡⁱ, qᶜˡ, qʳ, qᵛ))
 
-filename = "supercell.jld2"
+filename = "splitting_supercell.jld2"
 simulation.output_writers[:jld2] = JLD2Writer(model, outputs; filename,
                                               schedule = TimeInterval(1minutes),
                                               overwrite_existing = true)
@@ -344,7 +332,7 @@ slice_outputs = (
     qᶜˡxy = view(qᶜˡ, :, :, k_5km),
 )
 
-slices_filename = "supercell_slices.jld2"
+slices_filename = "splitting_supercell_slices.jld2"
 simulation.output_writers[:slices] = JLD2Writer(model, slice_outputs; filename=slices_filename,
                                                 schedule = TimeInterval(1minutes),
                                                 overwrite_existing = true)
@@ -356,15 +344,12 @@ run!(simulation)
 # The maximum updraft velocity is a key diagnostic for supercell intensity.
 # Strong supercells typically develop updrafts exceeding 30–50 m/s.
 
-wts = FieldTimeSeries(filename, "w")
-times = wts.times
-max_w = [maximum(wts[n]) for n in 1:length(times)]
+w_ts = FieldTimeSeries(filename, "w")
+times = w_ts.times
+max_w = [maximum(w_ts[n]) for n in 1:length(times)]
 
 fig = Figure(size=(700, 400), fontsize=14)
-ax = Axis(fig[1, 1],
-          xlabel = "Time (s)",
-          ylabel = "Maximum w (m/s)",
-          title = "Maximum Vertical Velocity")
+ax = Axis(fig[1, 1], xlabel="Time (s)", ylabel="Maximum w (m/s)", title="Maximum Vertical Velocity")
 lines!(ax, times, max_w, linewidth=2)
 
 save("supercell_max_w.png", fig) #src
@@ -388,35 +373,35 @@ wlim = maximum(abs, wxy_ts) / 2
 qʳlim = maximum(qʳxy_ts) / 4
 qᶜˡlim = maximum(qᶜˡxy_ts) / 4
 
-slices_fig = Figure(size=(1000, 900), fontsize=14)
+fig = Figure(size=(1000, 900), fontsize=14)
 
-axw = Axis(slices_fig[2, 1], aspect=1, xlabel="x (m)", ylabel="y (m)")
-axqᶜˡ = Axis(slices_fig[2, 2], aspect=1, xlabel="x (m)", ylabel="y (m)", yaxisposition=:right)
-axqʳ = Axis(slices_fig[4, 1], aspect=1, xlabel="x (m)", ylabel="y (m)")
+axw = Axis(fig[2, 1], aspect=1, xlabel="x (m)", ylabel="y (m)")
+axqᶜˡ = Axis(fig[2, 2], aspect=1, xlabel="x (m)", ylabel="y (m)", yaxisposition=:right)
+axqʳ = Axis(fig[4, 1], aspect=1, xlabel="x (m)", ylabel="y (m)")
 
 n = Observable(1)
 wxy_n = @lift wxy_ts[$n]
 qᶜˡxy_n = @lift qᶜˡxy_ts[$n]
 qʳxy_n = @lift qʳxy_ts[$n]
-title_text = @lift "Supercell at z ≈ 5 km, t = " * prettytime(times[$n])
+title = @lift "Supercell at z ≈ 5 km, t = " * prettytime(times[$n])
 
 hmw = heatmap!(axw, wxy_n, colormap=:balance, colorrange=(-wlim, wlim))
 hmqᶜˡ = heatmap!(axqᶜˡ, qᶜˡxy_n, colormap=:dense, colorrange=(0, qᶜˡlim))
 hmqʳ = heatmap!(axqʳ, qʳxy_n, colormap=:amp, colorrange=(0, qʳlim))
 
-Colorbar(slices_fig[3, 1], hmw, label="w (m/s)", vertical=false, flipaxis=false)
-Colorbar(slices_fig[3, 2], hmqᶜˡ, label="qᶜˡ (kg/kg)", vertical=false, flipaxis=false)
-Colorbar(slices_fig[5, 1], hmqʳ, label="qʳ (kg/kg)", vertical=false, flipaxis=false)
+Colorbar(fig[3, 1], hmw, label="w (m/s)", vertical=false, flipaxis=false)
+Colorbar(fig[3, 2], hmqᶜˡ, label="qᶜˡ (kg/kg)", vertical=false, flipaxis=false)
+Colorbar(fig[5, 1], hmqʳ, label="qʳ (kg/kg)", vertical=false, flipaxis=false)
 
-slices_fig[1, :] = Label(slices_fig, title_text, fontsize=18, tellwidth=false)
+fig[1, :] = Label(fig, title, fontsize=18, tellwidth=false)
 
-rowgap!(slices_fig.layout, 2, -50)
-rowgap!(slices_fig.layout, 4, -50)
+rowgap!(fig.layout, 2, -50)
+rowgap!(fig.layout, 4, -50)
 
-CairoMakie.record(slices_fig, "supercell_slices.mp4", 1:Nt, framerate=10) do nn
+CairoMakie.record(fig, "splitting_supercell_slices.mp4", 1:Nt, framerate=10) do nn
     n[] = nn
 end
 
-@info "Animation saved to supercell_slices.mp4"
+@info "Animation saved to splitting_supercell_slices.mp4"
 
-# ![](supercell_slices.mp4)
+# ![](splitting_supercell_slices.mp4)
