@@ -337,7 +337,7 @@ slice_outputs = (
 
 slices_filename = "splitting_supercell_slices.jld2"
 simulation.output_writers[:slices] = JLD2Writer(model, slice_outputs; filename=slices_filename,
-                                                schedule = TimeInterval(1minutes),
+                                                schedule = TimeInterval(5minutes),
                                                 overwrite_existing = true)
 
 run!(simulation)
@@ -383,11 +383,11 @@ wlim = maximum(abs, wxy_ts) / 2
 qʳlim = maximum(qʳxy_ts) / 4
 qᶜˡlim = maximum(qᶜˡxy_ts) / 4
 
-fig = Figure(size=(1200, 500), fontsize=14)
+fig = Figure(size=(900, 400), fontsize=12)
 
-axw = Axis(fig[1, 1], aspect=1, xlabel="x (m)", ylabel="y (m)", title="Vertical velocity w (m/s)")
-axqᶜˡ = Axis(fig[1, 2], aspect=1, xlabel="x (m)", ylabel="y (m)", title="Cloud water qᶜˡ (kg/kg)")
-axqʳ = Axis(fig[1, 3], aspect=1, xlabel="x (m)", ylabel="y (m)", title="Rain qʳ (kg/kg)")
+axw = Axis(fig[1, 1], aspect=1, xlabel="x (m)", ylabel="y (m)", title="w (m/s)")
+axqᶜˡ = Axis(fig[1, 2], aspect=1, xlabel="x (m)", ylabel="y (m)", title="qᶜˡ (kg/kg)")
+axqʳ = Axis(fig[1, 3], aspect=1, xlabel="x (m)", ylabel="y (m)", title="qʳ (kg/kg)")
 
 n = Observable(1)
 wxy_n = @lift wxy_ts[$n]
@@ -403,12 +403,11 @@ Colorbar(fig[2, 1], hmw, vertical=false)
 Colorbar(fig[2, 2], hmqᶜˡ, vertical=false)
 Colorbar(fig[2, 3], hmqʳ, vertical=false)
 
-fig[0, :] = Label(fig, title, fontsize=18, tellwidth=false)
+fig[0, :] = Label(fig, title, fontsize=14, tellwidth=false)
 
 CairoMakie.record(fig, "splitting_supercell_slices.mp4", 1:Nt, framerate=10) do nn
     n[] = nn
 end
-
-@info "Animation saved to splitting_supercell_slices.mp4"
+nothing #hide
 
 # ![](splitting_supercell_slices.mp4)
