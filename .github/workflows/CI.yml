@@ -31,7 +31,7 @@ jobs:
     runs-on: ${{ matrix.os }}
     timeout-minutes: 90
     container:
-      image: ${{ (startsWith(matrix.os, 'aws-linux-nvidia-gpu-') && 'ghcr.io/numericalearth/breeze-docker-images:test' ) || '' }}
+      image: ${{ (startsWith(matrix.os, 'aws-linux-nvidia-gpu-') && format('ghcr.io/numericalearth/breeze-docker-images:test-julia_{0}', matrix.version) ) || '' }}
       options: --gpus=all
     strategy:
       fail-fast: false
