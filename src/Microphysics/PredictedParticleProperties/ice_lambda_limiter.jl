@@ -39,7 +39,7 @@ sensible even when the prognostic constraints become degenerate.
 
 # References
 
-[Morrison and Milbrandt (2015a)](@citet Morrison2015parameterization) Section 2b.
+[Morrison and Milbrandt (2015a)](@cite Morrison2015parameterization) Section 2b.
 """
 function IceLambdaLimiter()
     return IceLambdaLimiter(

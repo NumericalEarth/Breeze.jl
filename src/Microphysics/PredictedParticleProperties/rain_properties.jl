@@ -32,7 +32,7 @@ N'(D) = N₀ D^{μ_r} e^{-λ_r D}
 ```
 
 The shape parameter ``μ_r`` is diagnosed from the rain mass and number
-concentrations following [Milbrandt and Yau (2005)](@citet MilbrandtYau2005).
+concentrations following [Milbrandt and Yau (2005)](@cite MilbrandtYau2005).
 
 **Terminal velocity:**
 
@@ -56,9 +56,9 @@ Default coefficients give fall speeds in m/s for D in meters.
 
 # References
 
-[Morrison and Milbrandt (2015a)](@citet Morrison2015parameterization),
-[Milbrandt and Yau (2005)](@citet MilbrandtYau2005),
-[Seifert and Beheng (2006)](@citet SeifertBeheng2006).
+[Morrison and Milbrandt (2015a)](@cite Morrison2015parameterization),
+[Milbrandt and Yau (2005)](@cite MilbrandtYau2005),
+[Seifert and Beheng (2006)](@cite SeifertBeheng2006).
 """
 function RainProperties(FT::Type{<:AbstractFloat} = Float64;
                         maximum_mean_diameter = 6e-3,

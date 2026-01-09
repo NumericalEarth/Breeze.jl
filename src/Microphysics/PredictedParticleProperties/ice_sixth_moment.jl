@@ -52,8 +52,8 @@ Each microphysical process that affects ice mass also affects M₆:
 
 # References
 
-[Milbrandt et al. (2021)](@citet MilbrandtEtAl2021) introduced 3-moment ice,
-[Milbrandt et al. (2024)](@citet MilbrandtEtAl2024) refined the approach.
+[Milbrandt et al. (2021)](@cite MilbrandtEtAl2021) introduced 3-moment ice,
+[Milbrandt et al. (2024)](@cite MilbrandtEtAl2024) refined the approach.
 """
 function IceSixthMoment()
     return IceSixthMoment(

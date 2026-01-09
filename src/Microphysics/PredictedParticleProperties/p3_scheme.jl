@@ -96,10 +96,10 @@ This implementation follows P3 v5.5 from the
 [P3-microphysics repository](https://github.com/P3-microphysics/P3-microphysics).
 
 Key papers describing P3:
-- [Morrison and Milbrandt (2015a)](@citet Morrison2015parameterization): Original scheme
-- [Milbrandt et al. (2021)](@citet MilbrandtEtAl2021): Three-moment ice
-- [Milbrandt et al. (2025)](@citet MilbrandtEtAl2025liquidfraction): Predicted liquid fraction
-- [Morrison et al. (2025)](@citet Morrison2025complete3moment): Complete implementation
+- [Morrison and Milbrandt (2015a)](@cite Morrison2015parameterization): Original scheme
+- [Milbrandt et al. (2021)](@cite MilbrandtEtAl2021): Three-moment ice
+- [Milbrandt et al. (2025)](@cite MilbrandtEtAl2025liquidfraction): Predicted liquid fraction
+- [Morrison et al. (2025)](@cite Morrison2025complete3moment): Complete implementation
 
 See also the [P3 documentation](@ref p3_overview) for detailed physics.
 """

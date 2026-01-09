@@ -55,7 +55,7 @@ their properties evolve continuously without discrete category jumps.
 
 # References
 
-Default parameters from [Morrison and Milbrandt (2015a)](@citet Morrison2015parameterization)
+Default parameters from [Morrison and Milbrandt (2015a)](@cite Morrison2015parameterization)
 supplementary material, based on aircraft observations.
 """
 function IceMassPowerLaw(FT = Oceananigans.defaults.FloatType;
@@ -95,7 +95,7 @@ an empirical power-law relating shape parameter μ to slope parameter λ:
 ```
 
 This relationship was fitted to aircraft observations of ice particle
-size distributions by [Field et al. (2007)](@citet FieldEtAl2007).
+size distributions by [Field et al. (2007)](@cite FieldEtAl2007).
 
 # Physical Interpretation
 
@@ -109,7 +109,7 @@ shape parameter and prevents unrealistically narrow distributions.
 
 With three-moment ice (tracking reflectivity Z), μ can be diagnosed
 independently from the Z/N ratio, making this closure unnecessary.
-See [Milbrandt et al. (2021)](@citet MilbrandtEtAl2021).
+See [Milbrandt et al. (2021)](@cite MilbrandtEtAl2021).
 
 # Keyword Arguments
 
@@ -120,8 +120,8 @@ See [Milbrandt et al. (2021)](@citet MilbrandtEtAl2021).
 
 # References
 
-From [Morrison and Milbrandt (2015a)](@citet Morrison2015parameterization) Eq. 27,
-based on [Field et al. (2007)](@citet FieldEtAl2007) observations.
+From [Morrison and Milbrandt (2015a)](@cite Morrison2015parameterization) Eq. 27,
+based on [Field et al. (2007)](@cite FieldEtAl2007) observations.
 """
 function ShapeParameterRelation(FT = Oceananigans.defaults.FloatType;
                                  a = 0.00191,
@@ -228,7 +228,7 @@ as particles rime—no ad-hoc category conversions needed.
 
 # References
 
-See [Morrison and Milbrandt (2015a)](@citet Morrison2015parameterization) Equations 12-14.
+See [Morrison and Milbrandt (2015a)](@cite Morrison2015parameterization) Equations 12-14.
 """
 function ice_regime_thresholds(mass::IceMassPowerLaw, rime_fraction, rime_density)
     α = mass.coefficient
@@ -530,7 +530,7 @@ params = distribution_parameters(L_ice, N_ice, 0.0, 400.0)
 
 # References
 
-See [Morrison and Milbrandt (2015a)](@citet Morrison2015parameterization) Section 2b.
+See [Morrison and Milbrandt (2015a)](@cite Morrison2015parameterization) Section 2b.
 """
 function distribution_parameters(L_ice, N_ice, rime_fraction, rime_density;
                                   mass = IceMassPowerLaw(),

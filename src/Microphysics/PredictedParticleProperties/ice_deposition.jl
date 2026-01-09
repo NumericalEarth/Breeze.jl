@@ -37,7 +37,7 @@ f_v = a + b \\cdot Sc^{1/3} Re^{1/2}
 ```
 
 where ``Sc`` is the Schmidt number and ``Re`` is the Reynolds number. 
-[Hall and Pruppacher (1976)](@citet HallPruppacher1976) showed that falling
+[Hall and Pruppacher (1976)](@cite HallPruppacher1976) showed that falling
 particles have significantly enhanced vapor exchange compared to stationary
 particles.
 
@@ -56,8 +56,8 @@ particles.
 
 # References
 
-[Hall and Pruppacher (1976)](@citet HallPruppacher1976),
-[Morrison and Milbrandt (2015a)](@citet Morrison2015parameterization) Eq. 34.
+[Hall and Pruppacher (1976)](@cite HallPruppacher1976),
+[Morrison and Milbrandt (2015a)](@cite Morrison2015parameterization) Eq. 34.
 """
 function IceDeposition(FT::Type{<:AbstractFloat} = Float64;
                        thermal_conductivity = 0.024,

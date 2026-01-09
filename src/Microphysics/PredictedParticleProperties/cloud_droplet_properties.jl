@@ -39,7 +39,7 @@ on ice processes or bulk precipitation, prescribed Nc is sufficient.
 **Autoconversion:**
 Cloud droplets that grow past `autoconversion_threshold` are converted
 to rain via collision-coalescence, following 
-[Khairoutdinov and Kogan (2000)](@citet KhairoutdinovKogan2000).
+[Khairoutdinov and Kogan (2000)](@cite KhairoutdinovKogan2000).
 
 # Keyword Arguments
 
@@ -49,8 +49,8 @@ to rain via collision-coalescence, following
 
 # References
 
-[Morrison and Milbrandt (2015a)](@citet Morrison2015parameterization),
-[Khairoutdinov and Kogan (2000)](@citet KhairoutdinovKogan2000).
+[Morrison and Milbrandt (2015a)](@cite Morrison2015parameterization),
+[Khairoutdinov and Kogan (2000)](@cite KhairoutdinovKogan2000).
 """
 function CloudDropletProperties(FT = Oceananigans.defaults.FloatType;
                                 number_concentration = 100e6,

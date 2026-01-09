@@ -59,7 +59,7 @@ For P3, these are determined from prognostic moments using the
 
 # References
 
-[Morrison and Milbrandt (2015a)](@citet Morrison2015parameterization) Section 2b.
+[Morrison and Milbrandt (2015a)](@cite Morrison2015parameterization) Section 2b.
 """
 function IceSizeDistributionState(FT::Type{<:AbstractFloat} = Float64;
                                    intercept,

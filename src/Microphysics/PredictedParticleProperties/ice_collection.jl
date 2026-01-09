@@ -43,8 +43,8 @@ collection (handled separately in the scheme).
 
 # References
 
-[Morrison and Milbrandt (2015a)](@citet Morrison2015parameterization) Sections 2d-e,
-[Milbrandt and Yau (2005)](@citet MilbrandtYau2005).
+[Morrison and Milbrandt (2015a)](@cite Morrison2015parameterization) Sections 2d-e,
+[Milbrandt and Yau (2005)](@cite MilbrandtYau2005).
 """
 function IceCollection(FT::Type{<:AbstractFloat} = Float64;
                        ice_cloud_collection_efficiency = 0.1,

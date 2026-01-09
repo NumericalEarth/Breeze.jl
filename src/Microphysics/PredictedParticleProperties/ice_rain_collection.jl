@@ -43,8 +43,8 @@ binned into discrete size categories.
 
 # References
 
-[Morrison and Milbrandt (2015a)](@citet Morrison2015parameterization),
-[Milbrandt et al. (2021)](@citet MilbrandtEtAl2021) for sixth moment.
+[Morrison and Milbrandt (2015a)](@cite Morrison2015parameterization),
+[Milbrandt et al. (2021)](@cite MilbrandtEtAl2021) for sixth moment.
 """
 function IceRainCollection()
     return IceRainCollection(

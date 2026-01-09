@@ -56,9 +56,9 @@ This container organizes all ice-related computations:
 # References
 
 The mass-diameter relationship is from 
-[Morrison and Milbrandt (2015a)](@citet Morrison2015parameterization),
+[Morrison and Milbrandt (2015a)](@cite Morrison2015parameterization),
 with sixth moment formulations from 
-[Milbrandt et al. (2021)](@citet MilbrandtEtAl2021).
+[Milbrandt et al. (2021)](@cite MilbrandtEtAl2021).
 """
 function IceProperties(FT::Type{<:AbstractFloat} = Float64;
                        minimum_rime_density = 50,

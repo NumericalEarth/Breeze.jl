@@ -54,8 +54,8 @@ size distribution. They are used for radiation, radar, and diagnostics.
 
 # References
 
-[Morrison and Milbrandt (2015a)](@citet Morrison2015parameterization),
-[Field et al. (2007)](@citet FieldEtAl2007) for μ-λ relationship.
+[Morrison and Milbrandt (2015a)](@cite Morrison2015parameterization),
+[Field et al. (2007)](@cite FieldEtAl2007) for μ-λ relationship.
 """
 function IceBulkProperties(FT::Type{<:AbstractFloat} = Float64;
                            maximum_mean_diameter = 2e-2,

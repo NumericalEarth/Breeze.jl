@@ -49,8 +49,8 @@ Three weighted fall speeds are computed by integrating over the size distributio
 
 # References
 
-[Morrison and Milbrandt (2015a)](@citet Morrison2015parameterization) Eq. 20,
-[Milbrandt et al. (2021)](@citet MilbrandtEtAl2021) for reflectivity weighting.
+[Morrison and Milbrandt (2015a)](@cite Morrison2015parameterization) Eq. 20,
+[Milbrandt et al. (2021)](@cite MilbrandtEtAl2021) for reflectivity weighting.
 """
 function IceFallSpeed(FT::Type{<:AbstractFloat} = Float64;
                       reference_air_density = 1.225,
