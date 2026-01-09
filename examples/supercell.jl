@@ -1,9 +1,13 @@
 # # Supercell thunderstorm
 #
-# This example simulates the development of a splitting supercell thunderstorm, following the idealized
-# test case described by [KlempEtAl2015](@citet) ("Idealized global nonhydrostatic atmospheric
-# test cases on a reduced-radius sphere"). This benchmark evaluates the model's ability to
-# capture deep moist convection with cloud microphysics, and strong updrafts.
+# This example simulates the development of a splitting supercell thunderstorm, following the
+# idealized test case described by [Klemp et al. (2015)](@cite KlempEtAl2015) and the DCMIP2016
+# supercell intercomparison by [Zarzycki et al. (2019)](@cite Zarzycki2019). This benchmark evaluates the model's
+# ability to capture deep moist convection with warm-rain microphysics and strong updrafts.
+#
+# For microphysics we use the Kessler scheme, which includes prognostic cloud water
+# and rain water with autoconversion, accretion, rain evaporation, and sedimentation processes.
+# This is the same scheme used in the DCMIP2016 supercell intercomparison [Zarzycki2019](@citet).
 #
 # ## Physical setup
 #
@@ -15,10 +19,11 @@
 #
 # ### Potential temperature profile
 #
-# The background potential temperature follows a piecewise profile:
+# The background potential temperature follows a piecewise profile
+# (Equation 14 in [KlempEtAl2015](@cite)):
 #
 # ```math
-# θ^{\rm bg}(z) = \begin{cases}
+# θ(z) = \begin{cases}
 #     θ_0 + (θ_{\rm tr} - θ_0) \left(\frac{z}{z_{\rm tr}}\right)^{5/4} & z \leq z_{\rm tr} \\
 #     θ_{\rm tr} \exp\left(\frac{g}{c_p^d T_{\rm tr}} (z - z_{\rm tr})\right) & z > z_{\rm tr}
 # \end{cases}
@@ -49,33 +54,25 @@
 #
 # The zonal wind increases linearly with height up to the shear layer ``z_s = 5 \, {\rm km}``,
 # with a smooth transition zone, providing the environmental shear necessary for supercell
-# development and mesocyclone formation.
+# development and mesocyclone formation (Equations 15-16 in [KlempEtAl2015](@cite)).
 
 using Breeze
+using Breeze: DCMIP2016KesslerMicrophysics, TetensFormula
+using Oceananigans: Oceananigans
 using Oceananigans.Units
-using Statistics
-using Printf
+using Oceananigans.Grids: znode, znodes
+
 using CairoMakie
-
-using Oceananigans.Grids: znode
-using Oceananigans: Center, Face
-using Oceananigans.Operators: Δzᶜᶜᶜ, Δzᶜᶜᶠ, ℑzᵃᵃᶠ
-using Breeze.Thermodynamics: dry_air_gas_constant
 using CUDA
+using Printf
 
-using CloudMicrophysics
-import Breeze: Breeze
-
-# Access extension module and define aliases to avoid namespace conflicts:
-
-const BreezeCloudMicrophysicsExt = Base.get_extension(Breeze, :BreezeCloudMicrophysicsExt)
-const BreezeOneMomentCloudMicrophysics = BreezeCloudMicrophysicsExt.OneMomentCloudMicrophysics
-
-# ## Grid configuration
+# ## Domain and grid
 #
 # The domain is 168 km × 168 km × 20 km with 168 × 168 × 40 grid points, giving
 # 1 km horizontal resolution and 500 m vertical resolution. The grid uses periodic
 # lateral boundary conditions and bounded top/bottom boundaries.
+
+Oceananigans.defaults.FloatType = Float32
 
 Nx, Ny, Nz = 168, 168, 40
 Lx, Ly, Lz = 168kilometers, 168kilometers, 20kilometers
@@ -88,40 +85,44 @@ grid = RectilinearGrid(GPU(),
                        halo = (5, 5, 5),
                        topology = (Periodic, Periodic, Bounded))
 
-# ## Thermodynamic parameters
+# ## Reference state and dynamics
 #
-# We define the reference state with surface pressure ``p_0 = 1000 \, {\rm hPa}`` and
-# reference potential temperature ``θ_0 = 300 \, {\rm K}``:
+# We define the anelastic reference state with surface pressure ``p_0 = 1000 \, {\rm hPa}``
+# and reference potential temperature ``θ_0 = 300 \, {\rm K}``.
 
-p₀ = 100000  # Pa - surface pressure
-θ₀ = 300     # K - reference potential temperature
-constants = ThermodynamicConstants()
-reference_state = ReferenceState(grid, constants, surface_pressure=p₀, potential_temperature=θ₀)
+constants = ThermodynamicConstants(saturation_vapor_pressure = TetensFormula())
+
+reference_state = ReferenceState(grid, constants,
+                                 surface_pressure = 100000,
+                                 potential_temperature = 300)
+
 dynamics = AnelasticDynamics(reference_state)
 
 # ## Background atmosphere profiles
 #
-# The atmospheric stratification parameters define the troposphere-stratosphere transition:
+# The atmospheric stratification parameters define the troposphere-stratosphere transition.
 
-θₜᵣ = 343           # K - tropopause potential temperature
-zₜᵣ = 12000         # m - tropopause height
-Tₜᵣ = 213           # K - tropopause temperature
+FT = eltype(grid)
+
+θ₀ = 300        # K - surface potential temperature
+θₜᵣ = 343       # K - tropopause potential temperature
+zₜᵣ = 12000     # m - tropopause height
+Tₜᵣ = 213       # K - tropopause temperature
 
 # Wind shear parameters control the low-level environmental wind profile:
 
-zₛ = 5kilometers    # m - shear layer height
-uₛ = 30             # m/s - maximum shear wind speed
-u_c = 15            # m/s - storm motion (Galilean translation speed)
+zₛ = 5kilometers  # m - shear layer height
+uₛ = 30           # m/s - maximum shear wind speed
+uᶜ = 15           # m/s - storm motion (Galilean translation speed)
 
 # Extract thermodynamic constants for profile calculations:
 
 g = constants.gravitational_acceleration
 cᵖᵈ = constants.dry_air.heat_capacity
-Rᵈ = dry_air_gas_constant(constants)
 
 # Background potential temperature profile (Equation 14 in [KlempEtAl2015](@cite)):
 
-function θᵇᵍ(x, y, z)
+function θ_background(z)
     θ_troposphere = θ₀ + (θₜᵣ - θ₀) * (z / zₜᵣ)^(5/4)
     θ_stratosphere = θₜᵣ * exp(g / (cᵖᵈ * Tₜᵣ) * (z - zₜᵣ))
     return (z <= zₜᵣ) * θ_troposphere + (z > zₜᵣ) * θ_stratosphere
@@ -129,69 +130,68 @@ end
 
 # Relative humidity profile (decreases with height, 25% above tropopause):
 
-RHᵇᵍ(z) = (1 - 3/4 * (z / zₜᵣ)^(5/4)) * (z <= zₜᵣ) + 1/4 * (z > zₜᵣ)
+ℋ_background(z) = (1 - 3/4 * (z / zₜᵣ)^(5/4)) * (z <= zₜᵣ) + 1/4 * (z > zₜᵣ)
 
-# ## Plot: Initial thermodynamic profiles
-#
-# Visualize the background potential temperature and relative humidity profiles:
+# Zonal wind profile with linear shear below ``z_s`` and smooth transition (Equations 15-16):
 
-z_plot = range(0, Lz, length=200)
-θ_profile = [θᵇᵍ(0, 0, z) for z in z_plot]
-RH_profile = [RHᵇᵍ(z) * 100 for z in z_plot]  # Convert to percentage
-
-fig_thermo = Figure(size=(900, 600))
-
-ax_theta = Axis(fig_thermo[1, 1],
-                xlabel = "Potential temperature θ (K)",
-                ylabel = "Height (m)",
-                title = "Background Potential Temperature")
-lines!(ax_theta, θ_profile, collect(z_plot), linewidth = 2, color = :red)
-
-ax_rh = Axis(fig_thermo[1, 2],
-             xlabel = "Relative humidity (%)",
-             ylabel = "Height (m)",
-             title = "Relative Humidity Profile")
-lines!(ax_rh, RH_profile, collect(z_plot), linewidth = 2, color = :blue)
-
-save("supercell_thermo_profiles.png", fig_thermo) #src
-fig_thermo
-
-# Zonal wind profile with linear shear below ``z_s`` and smooth transition (Equation 15-16):
-
-function uᵢ(x, y, z)
-    u_lower = uₛ * (z / zₛ) - u_c
-    u_transition = (-4/5 + 3 * (z / zₛ) - 5/4 * (z / zₛ)^2) * uₛ - u_c
-    u_upper = uₛ - u_c
+function u_background(z)
+    u_lower = uₛ * (z / zₛ) - uᶜ
+    u_transition = (-4/5 + 3 * (z / zₛ) - 5/4 * (z / zₛ)^2) * uₛ - uᶜ
+    u_upper = uₛ - uᶜ
     return (z < (zₛ - 1000)) * u_lower +
            (abs(z - zₛ) <= 1000) * u_transition +
            (z > (zₛ + 1000)) * u_upper
 end
 
-# Meridional wind is zero (no cross-flow):
-
-vᵢ(x, y, z) = 0.0
-
-# ## Plot: Background wind profile
+# ## Initial thermodynamic profiles
 #
-# Visualize the environmental wind shear that promotes supercell rotation:
+# Visualize the background potential temperature and relative humidity profiles
+# that define the environmental stratification:
 
-u_profile = [uᵢ(0, 0, z) for z in z_plot]
-v_profile = [vᵢ(0, 0, z) for z in z_plot]
+z_plot = range(0, Lz, length=200)
+θ_profile = [θ_background(z) for z in z_plot]
+ℋ_profile = [ℋ_background(z) * 100 for z in z_plot]
 
-fig_wind = Figure(size=(500, 600))
-ax_wind = Axis(fig_wind[1, 1],
-               xlabel = "Wind speed (m/s)",
-               ylabel = "Height (m)",
-               title = "Background Wind Profile")
+fig_profiles = Figure(size=(900, 500), fontsize=14)
 
-lines!(ax_wind, u_profile, collect(z_plot), label = "u (zonal)", linewidth = 2)
-lines!(ax_wind, v_profile, collect(z_plot), label = "v (meridional)", linewidth = 2, linestyle = :dash)
-axislegend(ax_wind, position = :rb)
+ax_θ = Axis(fig_profiles[1, 1],
+            xlabel = "Potential temperature θ (K)",
+            ylabel = "Height (km)",
+            title = "Background potential temperature")
+lines!(ax_θ, θ_profile, collect(z_plot) ./ 1000, linewidth=2, color=:magenta)
+hlines!(ax_θ, [zₜᵣ / 1000], color=:gray, linestyle=:dash, label="Tropopause")
+
+ax_ℋ = Axis(fig_profiles[1, 2],
+            xlabel = "Relative humidity ℋ (%)",
+            ylabel = "Height (km)",
+            title = "Relative humidity profile")
+lines!(ax_ℋ, ℋ_profile, collect(z_plot) ./ 1000, linewidth=2, color=:dodgerblue)
+hlines!(ax_ℋ, [zₜᵣ / 1000], color=:gray, linestyle=:dash)
+
+save("supercell_thermodynamic_profiles.png", fig_profiles) #src
+fig_profiles
+
+# ## Background wind profile
+#
+# The environmental wind shear promotes supercell rotation and mesocyclone formation.
+# The zonal wind increases from -15 m/s at the surface to +15 m/s at 5 km (in a frame
+# moving with the storm at 15 m/s):
+
+u_profile = [u_background(z) for z in z_plot]
+
+fig_wind = Figure(size=(500, 500), fontsize=14)
+ax_u = Axis(fig_wind[1, 1],
+            xlabel = "Zonal wind u (m/s)",
+            ylabel = "Height (km)",
+            title = "Background wind profile")
+lines!(ax_u, u_profile, collect(z_plot) ./ 1000, linewidth=2, color=:orangered)
+hlines!(ax_u, [zₛ / 1000], color=:gray, linestyle=:dash, label="Shear layer top")
+vlines!(ax_u, [0], color=:black, linestyle=:dot)
 
 save("supercell_wind_profile.png", fig_wind) #src
 fig_wind
 
-# ## Warm bubble initial perturbation
+# ## Warm bubble perturbation
 #
 # The warm bubble parameters following Equations 17–18 in [KlempEtAl2015](@cite):
 
@@ -206,124 +206,115 @@ yᵦ = Ly / 2         # m - bubble center y-coordinate
 # cosine-squared warm bubble perturbation:
 
 function θᵢ(x, y, z)
-    θ_base = θᵇᵍ(x, y, z)
+    θ_base = θ_background(z)
     r = sqrt((x - xᵦ)^2 + (y - yᵦ)^2)
     R = sqrt((r / rₕ)^2 + ((z - zᵦ) / rᵥ)^2)
     θ_pert = ifelse(R < 1, Δθ * cos((π / 2) * R)^2, 0.0)
     return θ_base + θ_pert
 end
 
-# ## Plot: Warm bubble perturbation
-#
+uᵢ(x, y, z) = u_background(z)
+
 # Visualize the warm bubble perturbation on a vertical slice through the domain center:
 
 x_slice = range(0, Lx, length=200)
-z_slice = range(0, Lz, length=200)  # Focus on lower atmosphere where bubble is located
+z_slice = range(0, 5000, length=100)
 
-θ_pert_slice = [θᵢ(x, yᵦ, z) - θᵇᵍ(x, yᵦ, z) for x in x_slice, z in z_slice]
+θ′_slice = [θᵢ(x, yᵦ, z) - θ_background(z) for x in x_slice, z in z_slice]
 
-fig_bubble = Figure(size=(800, 400))
+fig_bubble = Figure(size=(800, 400), fontsize=14)
 ax_bubble = Axis(fig_bubble[1, 1],
                  xlabel = "x (km)",
-                 ylabel = "Height (m)",
-                 title = "Warm Bubble Perturbation θ' (K) at y = Ly/2")
+                 ylabel = "Height (km)",
+                 title = "Warm bubble perturbation θ′ (K) at y = Ly/2",
+                 aspect = 2)
 
-hm = heatmap!(ax_bubble, collect(x_slice) ./ 1000, collect(z_slice), θ_pert_slice,
-              colormap = :thermal, colorrange = (0, Δθ))
-Colorbar(fig_bubble[1, 2], hm, label = "θ' (K)")
+hm = heatmap!(ax_bubble, collect(x_slice) ./ 1000, collect(z_slice) ./ 1000, θ′_slice,
+              colormap=:thermal, colorrange=(0, Δθ))
+Colorbar(fig_bubble[1, 2], hm, label="θ′ (K)")
 
 save("supercell_warm_bubble.png", fig_bubble) #src
 fig_bubble
 
-# ## Model initialization
+# ## Model setup
 #
-# Create the atmosphere model with one-moment cloud microphysics from CloudMicrophysics.jl,
-# high-order WENO advection, and anisotropic minimum dissipation turbulence closure:
+# We use the DCMIP2016 Kessler microphysics scheme with high-order WENO advection
+# and anisotropic minimum dissipation turbulence closure. The Kessler scheme includes
+# prognostic cloud water and rain water with autoconversion, accretion, rain evaporation,
+# and sedimentation processes.
 
-microphysics = BreezeOneMomentCloudMicrophysics()
+microphysics = DCMIP2016KesslerMicrophysics()
 advection = WENO(order=9, minimum_buffer_upwind_order=3)
 closure = AnisotropicMinimumDissipation()
-model = AtmosphereModel(grid; dynamics, closure, microphysics, advection)
 
-# Initialize with background potential temperature to compute hydrostatic pressure:
-
-set!(model, θ = θᵇᵍ)
+model = AtmosphereModel(grid; dynamics, closure, microphysics, advection, thermodynamic_constants=constants)
 
 # ## Water vapor initialization
 #
-# Compute the initial water vapor mixing ratio from the saturation mixing ratio
-# and relative humidity profile. The saturation mixing ratio uses the Tetens formula:
+# We initialize the model with the background potential temperature to compute
+# the hydrostatic pressure, then compute initial water vapor from relative humidity
+# and saturation specific humidity using the Tetens formula:
 #
 # ```math
 # q_v^* = \frac{380}{p} \exp\left(17.27 \frac{T - 273}{T - 36}\right)
 # ```
 
-ph = Breeze.AtmosphereModels.compute_hydrostatic_pressure!(CenterField(grid), model)
-T = model.temperature
+set!(model, θ = (x, y, z) -> θ_background(z))
 
-qᵛᵢ = Field{Center, Center, Center}(grid)
+pₕ = Breeze.AtmosphereModels.compute_hydrostatic_pressure!(CenterField(grid), model)
+T = model.temperature
 
 # Transfer to CPU for scalar indexing (required when using GPU arrays):
 
-ph_host = Array(parent(ph))
+pₕ_host = Array(parent(pₕ))
 T_host = Array(parent(T))
-qᵛᵢ_host = similar(ph_host)
+qᵛ_host = similar(pₕ_host)
 
-# Compute initial water vapor from relative humidity and saturation mixing ratio:
-
-for k in axes(qᵛᵢ_host, 3), j in axes(qᵛᵢ_host, 2), i in axes(qᵛᵢ_host, 1)
+for k in axes(qᵛ_host, 3), j in axes(qᵛ_host, 2), i in axes(qᵛ_host, 1)
     z = znode(i, j, k, grid, Center(), Center(), Center())
-    T_eq = @inbounds T_host[i, j, k]
-    p_eq = @inbounds ph_host[i, j, k]
-    qᵛ_sat = 380 / p_eq * exp(17.27 * ((T_eq - 273) / (T_eq - 36)))
-    @inbounds qᵛᵢ_host[i, j, k] = RHᵇᵍ(z) * qᵛ_sat
+    Tᵢⱼₖ = @inbounds T_host[i, j, k]
+    pᵢⱼₖ = @inbounds pₕ_host[i, j, k]
+    qᵛ⁺ = 380 / pᵢⱼₖ * exp(17.27 * ((Tᵢⱼₖ - 273) / (Tᵢⱼₖ - 36)))
+    @inbounds qᵛ_host[i, j, k] = ℋ_background(z) * qᵛ⁺
 end
 
-copyto!(parent(qᵛᵢ), qᵛᵢ_host)
+qᵛ_init = CenterField(grid)
+copyto!(parent(qᵛ_init), qᵛ_host)
 
 # Set the full initial conditions (water vapor, potential temperature with bubble, and wind):
 
-set!(model, qᵗ = qᵛᵢ, θ = θᵢ, u = uᵢ)
-
-# Compute potential temperature perturbation for diagnostics:
-
-θ = Breeze.AtmosphereModels.liquid_ice_potential_temperature(model)
-θᵇᵍf = CenterField(grid)
-set!(θᵇᵍf, (x, y, z) -> θᵇᵍ(x, y, z))
-θ′ = θ - θᵇᵍf
-
-# Extract microphysical fields for output:
-
-qᶜˡ = model.microphysical_fields.qᶜˡ
-qᶜⁱ = model.microphysical_fields.qᶜⁱ
-qᵛ = model.microphysical_fields.qᵛ
+set!(model, qᵗ=qᵛ_init, θ=θᵢ, u=uᵢ)
 
 # ## Simulation
 #
-# Run for 2 hours with adaptive time stepping (CFL = 0.7) starting from Δt = 2 s:
+# Run for 2 hours with adaptive time stepping (CFL = 0.7):
 
 simulation = Simulation(model; Δt=2, stop_time=2hours)
 conjure_time_step_wizard!(simulation, cfl=0.7)
 
-# Progress callback to monitor simulation health:
+# ## Output and progress
+#
+# We set up a progress callback to monitor simulation health.
+
+θˡⁱ = liquid_ice_potential_temperature(model)
+qᶜˡ = model.microphysical_fields.qᶜˡ
+qʳ = model.microphysical_fields.qʳ
+qᵛ = model.microphysical_fields.qᵛ
+
+wall_clock = Ref(time_ns())
 
 function progress(sim)
     u, v, w = sim.model.velocities
-    qᵛ = model.microphysical_fields.qᵛ
-    qᶜˡ = model.microphysical_fields.qᶜˡ
-    qᶜⁱ = model.microphysical_fields.qᶜⁱ
+    elapsed = 1e-9 * (time_ns() - wall_clock[])
 
-    ρe = Breeze.AtmosphereModels.static_energy_density(sim.model)
-    ρemean = mean(ρe)
-
-    msg = @sprintf("Iter: %d, t: %s, Δt: %s, mean(ρe): %.6e J/kg, max|u|: %.5f m/s, max w: %.5f m/s, min w: %.5f m/s",
-                   iteration(sim), prettytime(sim), prettytime(sim.Δt), ρemean,
+    msg = @sprintf("Iter: %d, t: %s, Δt: %s, wall time: %s, max|u|: %.2f m/s, max w: %.2f m/s, min w: %.2f m/s",
+                   iteration(sim), prettytime(sim), prettytime(sim.Δt), prettytime(elapsed),
                    maximum(abs, u), maximum(w), minimum(w))
+
+    msg *= @sprintf(", max(qᵛ): %.2e, max(qᶜˡ): %.2e, max(qʳ): %.2e",
+                    maximum(qᵛ), maximum(qᶜˡ), maximum(qʳ))
     @info msg
 
-    msg *= @sprintf(", max(qᵛ): %.5e, max(qᶜˡ): %.5e, max(qᶜⁱ): %.5e",
-                    maximum(qᵛ), maximum(qᶜˡ), maximum(qᶜⁱ))
-    @info msg
     return nothing
 end
 
@@ -331,92 +322,101 @@ add_callback!(simulation, progress, IterationInterval(100))
 
 # ## Output
 #
-# Save full 3D fields for post-processing analysis:
+# Save full 3D fields for post-processing analysis.
 
-outputs = merge(model.velocities, model.tracers, (; θ, θ′, qᶜˡ, qᶜⁱ, qᵛ))
+u, v, w = model.velocities
+outputs = merge(model.velocities, model.tracers, (; θˡⁱ, qᶜˡ, qʳ, qᵛ))
 
 filename = "supercell.jld2"
-ow = JLD2Writer(model, outputs; filename,
-                schedule = TimeInterval(1minutes),
-                overwrite_existing = true)
-simulation.output_writers[:jld2] = ow
+simulation.output_writers[:jld2] = JLD2Writer(model, outputs; filename,
+                                              schedule = TimeInterval(1minutes),
+                                              overwrite_existing = true)
+
+# Save horizontal slices at z ≈ 5 km for efficient animation:
+
+z = znodes(grid, Center())
+k_5km = searchsortedfirst(z, 5000)
+@info "Saving xy slices at z = $(z[k_5km]) m (k = $k_5km)"
+
+slice_outputs = (
+    wxy = view(w, :, :, k_5km),
+    qʳxy = view(qʳ, :, :, k_5km),
+    qᶜˡxy = view(qᶜˡ, :, :, k_5km),
+)
+
+slices_filename = "supercell_slices.jld2"
+simulation.output_writers[:slices] = JLD2Writer(model, slice_outputs; filename=slices_filename,
+                                                schedule = TimeInterval(1minutes),
+                                                overwrite_existing = true)
 
 run!(simulation)
 
 # ## Results: maximum vertical velocity time series
 #
 # The maximum updraft velocity is a key diagnostic for supercell intensity.
-# Strong supercells typically develop updrafts exceeding 30–50 m/s:
+# Strong supercells typically develop updrafts exceeding 30–50 m/s.
 
-wt = FieldTimeSeries(filename, "w")
-times = wt.times
-max_w = [maximum(wt[n]) for n in 1:length(times)]
+wts = FieldTimeSeries(filename, "w")
+times = wts.times
+max_w = [maximum(wts[n]) for n in 1:length(times)]
 
-fig = Figure()
+fig = Figure(size=(700, 400), fontsize=14)
 ax = Axis(fig[1, 1],
-          xlabel = "Time [s]",
-          ylabel = "Max w [m/s]",
-          title = "Maximum Vertical Velocity",
-          xticks = 0:900:maximum(times))
-lines!(ax, times, max_w)
+          xlabel = "Time (s)",
+          ylabel = "Maximum w (m/s)",
+          title = "Maximum Vertical Velocity")
+lines!(ax, times, max_w, linewidth=2)
 
-save("max_w_timeseries.png", fig) #src
+save("supercell_max_w.png", fig) #src
 fig
 
-# ## Animation: horizontal slices at 5 km
+# ## Animation: horizontal slices at z ≈ 5 km
 #
-# We create a 3-panel animation showing the storm structure at mid-levels (z ≈ 5 km):
+# We create a 3-panel animation showing the storm structure at mid-levels:
 # - Vertical velocity ``w``: reveals the updraft/downdraft structure
-# - Cloud water ``q^{cl}``: shows the cloud boundaries
-# - Rain water ``q^r``: indicates precipitation regions
+# - Cloud liquid ``qᶜˡ``: shows the cloud boundaries
+# - Rain ``qʳ``: indicates precipitation regions
 
-wxy_ts = FieldTimeSeries("supercell_slices.jld2", "wxy")
-qʳxy_ts = FieldTimeSeries("supercell_slices.jld2", "qʳxy")
-qᶜˡxy_ts = FieldTimeSeries("supercell_slices.jld2", "qᶜˡxy")
+wxy_ts = FieldTimeSeries(slices_filename, "wxy")
+qʳxy_ts = FieldTimeSeries(slices_filename, "qʳxy")
+qᶜˡxy_ts = FieldTimeSeries(slices_filename, "qᶜˡxy")
 
 times = wxy_ts.times
 Nt = length(times)
 
-# Set color limits for visualization:
+wlim = maximum(abs, wxy_ts) / 2
+qʳlim = maximum(qʳxy_ts) / 4
+qᶜˡlim = maximum(qᶜˡxy_ts) / 4
 
-wlim = 25       # m/s - vertical velocity range
-qʳlim = 0.01    # kg/kg - rain water range
-qᶜˡlim = 0.001  # kg/kg - cloud water range
+slices_fig = Figure(size=(1000, 900), fontsize=14)
 
-# Create the figure with 3 panels:
-
-slices_fig = Figure(size=(900, 1000), fontsize=14)
-
-axw = Axis(slices_fig[1, 1], xlabel="x (m)", ylabel="y (m)", title="Vertical velocity w")
-axqᶜˡ = Axis(slices_fig[1, 2], xlabel="x (m)", ylabel="y (m)", title="Cloud water qᶜˡ")
-axqʳ = Axis(slices_fig[3, 1], xlabel="x (m)", ylabel="y (m)", title="Rain water qʳ")
-
-# Set up observables for animation:
+axw = Axis(slices_fig[2, 1], aspect=1, xlabel="x (m)", ylabel="y (m)")
+axqᶜˡ = Axis(slices_fig[2, 2], aspect=1, xlabel="x (m)", ylabel="y (m)", yaxisposition=:right)
+axqʳ = Axis(slices_fig[4, 1], aspect=1, xlabel="x (m)", ylabel="y (m)")
 
 n = Observable(1)
 wxy_n = @lift wxy_ts[$n]
 qᶜˡxy_n = @lift qᶜˡxy_ts[$n]
 qʳxy_n = @lift qʳxy_ts[$n]
-title_text = @lift "Supercell: Horizontal slices at z ≈ 5 km, t = " * prettytime(times[$n])
-
-# Create heatmaps and colorbars:
+title_text = @lift "Supercell at z ≈ 5 km, t = " * prettytime(times[$n])
 
 hmw = heatmap!(axw, wxy_n, colormap=:balance, colorrange=(-wlim, wlim))
-hmqᶜˡ = heatmap!(axqᶜˡ, qᶜˡxy_n, colormap=:viridis, colorrange=(0, qᶜˡlim))
-hmqʳ = heatmap!(axqʳ, qʳxy_n, colormap=:viridis, colorrange=(0, qʳlim))
+hmqᶜˡ = heatmap!(axqᶜˡ, qᶜˡxy_n, colormap=:dense, colorrange=(0, qᶜˡlim))
+hmqʳ = heatmap!(axqʳ, qʳxy_n, colormap=:amp, colorrange=(0, qʳlim))
 
-Colorbar(slices_fig[2, 1], hmw, label="w (m/s)", vertical=false, flipaxis=false)
-Colorbar(slices_fig[2, 2], hmqᶜˡ, label="qᶜˡ (kg/kg)", vertical=false, flipaxis=false)
-Colorbar(slices_fig[4, 1], hmqʳ, label="qʳ (kg/kg)", vertical=false, flipaxis=false)
+Colorbar(slices_fig[3, 1], hmw, label="w (m/s)", vertical=false, flipaxis=false)
+Colorbar(slices_fig[3, 2], hmqᶜˡ, label="qᶜˡ (kg/kg)", vertical=false, flipaxis=false)
+Colorbar(slices_fig[5, 1], hmqʳ, label="qʳ (kg/kg)", vertical=false, flipaxis=false)
 
-slices_fig[0, :] = Label(slices_fig, title_text, fontsize=18, tellwidth=false)
+slices_fig[1, :] = Label(slices_fig, title_text, fontsize=18, tellwidth=false)
 
-# Record the animation:
+rowgap!(slices_fig.layout, 2, -50)
+rowgap!(slices_fig.layout, 4, -50)
 
-CairoMakie.record(slices_fig, "supercell_horizontal_5km.mp4", 1:Nt, framerate=10) do nn
+CairoMakie.record(slices_fig, "supercell_slices.mp4", 1:Nt, framerate=10) do nn
     n[] = nn
 end
 
-@info "Animation saved to supercell_horizontal_5km.mp4"
+@info "Animation saved to supercell_slices.mp4"
 
-# ![](supercell_horizontal_5km.mp4)
+# ![](supercell_slices.mp4)
