@@ -38,6 +38,7 @@ examples = [
     Example("Single column radiation", "single_column_radiation", true),
     Example("Stationary parcel model", "stationary_parcel_model", true),
     Example("Acoustic wave in shear layer", "acoustic_wave", true),
+    Example("Supercell thunderstorm", "supercell", false),
 ]
 
 # Filter out long-running example if necessary
