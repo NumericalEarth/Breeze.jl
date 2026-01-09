@@ -346,6 +346,12 @@ run!(simulation)
 #
 # The maximum updraft velocity is a key diagnostic for supercell intensity.
 # Strong supercells typically develop updrafts exceeding 30–50 m/s.
+#
+# Our simulated storm intensity is notably stronger than the DCMIP2016 intercomparison
+# results reported by [Zarzycki et al. (2019)](@cite Zarzycki2019). One explanation is that
+# no explicit numerical diffusion is applied in this simulation. As noted by
+# [Klemp et al. (2015)](@cite KlempEtAl2015), the simulated storm intensity and structure
+# are highly sensitive to numerical diffusion.
 
 fig = Figure(size=(700, 400), fontsize=14)
 ax = Axis(fig[1, 1], xlabel="Time (s)", ylabel="Maximum w (m/s)", title="Maximum Vertical Velocity")
@@ -360,6 +366,10 @@ fig
 # - Vertical velocity ``w``: reveals the updraft/downdraft structure
 # - Cloud liquid ``qᶜˡ``: shows the cloud boundaries
 # - Rain ``qʳ``: indicates precipitation regions
+#
+# The simulated supercell exhibits splitting behavior, with the initial storm
+# dividing into right-moving and left-moving cells, consistent with the
+# DCMIP2016 intercomparison results [Zarzycki et al. (2019)](@cite Zarzycki2019).
 
 wxy_ts = FieldTimeSeries(slices_filename, "wxy")
 qʳxy_ts = FieldTimeSeries(slices_filename, "qʳxy")
