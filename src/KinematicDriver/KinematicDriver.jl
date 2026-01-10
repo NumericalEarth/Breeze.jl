@@ -20,12 +20,15 @@ using DocStringExtensions: TYPEDSIGNATURES
 using Adapt: Adapt, adapt
 
 using Oceananigans: Oceananigans, CenterField, XFaceField, YFaceField, ZFaceField
-using Oceananigans.BoundaryConditions: FieldBoundaryConditions, fill_halo_regions!
+using Oceananigans.BoundaryConditions: FieldBoundaryConditions, ValueBoundaryCondition, fill_halo_regions!
 using Oceananigans.Architectures: on_architecture
 using Oceananigans.Fields: AbstractField, FunctionField, ZeroField, field, set!
 using Oceananigans.Grids: Face, Center
+using Oceananigans.Operators: Δzᶜᶜᶜ
 using Oceananigans.TimeSteppers: Clock, TimeSteppers
-using Oceananigans.Utils: prettysummary
+using Oceananigans.Utils: launch!, prettysummary
+
+using KernelAbstractions: @kernel, @index
 
 # Import PrescribedVelocityFields from Oceananigans
 using Oceananigans.Models.HydrostaticFreeSurfaceModels: PrescribedVelocityFields

@@ -1,5 +1,8 @@
 using Oceananigans: Oceananigans, Center, Field, set!, fill_halo_regions!
 using Oceananigans.BoundaryConditions: FieldBoundaryConditions, ValueBoundaryCondition
+using Oceananigans.Operators: ℑzᵃᵃᶠ
+
+using GPUArraysCore: @allowscalar
 
 using Adapt: Adapt, adapt
 using KernelAbstractions: @kernel, @index
@@ -38,7 +41,19 @@ Base.show(io::IO, ref::ReferenceState) = print(io, summary(ref))
 ##### How to compute the reference state
 #####
 
-@inline function surface_density(p₀, θ₀, constants)
+"""
+    surface_density(reference_state)
+
+Return the density at z=0 by interpolating the reference density field to the surface.
+"""
+function surface_density(ref::ReferenceState)
+    ρ = ref.density
+    grid = ρ.grid
+    return @allowscalar ℑzᵃᵃᶠ(1, 1, 1, grid, ρ)
+end
+
+# Internal helper for computing ρ₀ during ReferenceState construction
+@inline function _surface_density(p₀, θ₀, constants)
     Rᵈ = dry_air_gas_constant(constants)
     return p₀ / (Rᵈ * θ₀)
 end
@@ -68,7 +83,7 @@ reference pressure and temperature.
     Rᵈ = dry_air_gas_constant(constants)
     cᵖᵈ = constants.dry_air.heat_capacity
     pᵣ = adiabatic_hydrostatic_pressure(z, p₀, θ₀, constants)
-    ρ₀ = surface_density(p₀, θ₀, constants)
+    ρ₀ = _surface_density(p₀, θ₀, constants)
     return ρ₀ * (pᵣ / p₀)^(1 - Rᵈ / cᵖᵈ)
 end
 
@@ -101,7 +116,7 @@ function ReferenceState(grid, constants=ThermodynamicConstants(eltype(grid));
     pˢᵗ = convert(FT, standard_pressure)
     loc = (nothing, nothing, Center())
 
-    ρ₀ = surface_density(p₀, θ₀, constants)
+    ρ₀ = _surface_density(p₀, θ₀, constants)
     ρ_bcs = FieldBoundaryConditions(grid, loc, bottom=ValueBoundaryCondition(ρ₀))
     ρᵣ = Field{Nothing, Nothing, Center}(grid, boundary_conditions=ρ_bcs)
     set!(ρᵣ, z -> adiabatic_hydrostatic_density(z, p₀, θ₀, constants))

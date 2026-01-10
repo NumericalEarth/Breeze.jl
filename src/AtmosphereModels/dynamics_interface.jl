@@ -18,7 +18,7 @@ Return the default dynamics for the given grid and thermodynamic constants.
 function default_dynamics end
 
 """
-    materialize_dynamics(dynamics_stub, grid, boundary_conditions)
+    materialize_dynamics(dynamics_stub, grid, boundary_conditions, thermodynamic_constants)
 
 Materialize a dynamics stub into a complete dynamics object with all required fields.
 """

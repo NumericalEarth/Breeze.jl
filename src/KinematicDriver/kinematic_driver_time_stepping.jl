@@ -9,9 +9,6 @@ using Oceananigans.Fields: set!, FunctionField
 using Oceananigans.Operators: V⁻¹ᶜᶜᶜ, δxᶜᵃᵃ, δyᵃᶜᵃ, δzᵃᵃᶜ, ℑxᶠᵃᵃ, ℑyᵃᶠᵃ, ℑzᵃᵃᶠ
 using Oceananigans.Utils: launch!
 
-using Breeze.AtmosphereModels: compute_moisture_fractions
-using Breeze.Thermodynamics: mixture_gas_constant
-
 #####
 ##### Model initialization
 #####
@@ -71,15 +68,12 @@ end
 @inline AtmosphereModels.c_div_ρU(i, j, k, grid, ::PrescribedDynamics, velocities, c) = zero(grid)
 
 # With divergence correction: c * ∇·(ρU)
-@inline function AtmosphereModels.c_div_ρU(i, j, k, grid,
-                                           dynamics::DivergenceCorrectedPrescribedDynamics,
-                                           velocities,
-                                           c)
+@inline function AtmosphereModels.c_div_ρU(i, j, k, grid, dynamics::PrescribedDynamics{true}, velocities, c)
     return @inbounds c[i, j, k] * div_ρU(i, j, k, grid, dynamics_density(dynamics), velocities)
 end
 
 # Fixed density: no tendency to compute
-AtmosphereModels.compute_dynamics_tendency!(::AtmosphereModel{<:FixedDensityPrescribedDynamics}) = nothing
+AtmosphereModels.compute_dynamics_tendency!(::AtmosphereModel{<:PrescribedDynamics{<:Any, <:PrescribedDensity}}) = nothing
 
 # Prognostic density: compute tendency from continuity equation
 function AtmosphereModels.compute_dynamics_tendency!(model::KinematicModel)

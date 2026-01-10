@@ -161,7 +161,7 @@ function AtmosphereModel(grid;
     boundary_conditions = regularize_field_boundary_conditions(boundary_conditions, grid, all_names)
 
     # Materialize dynamics and formulation
-    dynamics = materialize_dynamics(dynamics, grid, boundary_conditions)
+    dynamics = materialize_dynamics(dynamics, grid, boundary_conditions, thermodynamic_constants)
     formulation = materialize_formulation(formulation, dynamics, grid, boundary_conditions)
 
     # Materialize momentum and velocities
