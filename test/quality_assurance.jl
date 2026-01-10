@@ -35,10 +35,6 @@ end
     end
 end
 
-@testset "No Core.Box" begin
-    @test check_no_boxes()
-end
-
 ################################################################################
 
 # Code for detecting `Core.Box`es adapted from
@@ -170,4 +166,10 @@ function check_no_boxes()
     end
 
     return isempty(lines)
+end
+
+################################################################################
+
+@testset "No Core.Box" begin
+    @test check_no_boxes()
 end
