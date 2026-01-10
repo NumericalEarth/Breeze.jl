@@ -2,10 +2,9 @@ using Oceananigans: Oceananigans, Center, Field, set!, fill_halo_regions!
 using Oceananigans.BoundaryConditions: FieldBoundaryConditions, ValueBoundaryCondition
 using Oceananigans.Operators: ℑzᵃᵃᶠ
 
-using GPUArraysCore: @allowscalar
-
 using Adapt: Adapt, adapt
 using KernelAbstractions: @kernel, @index
+using GPUArraysCore: @allowscalar
 
 #####
 ##### Reference state computations for Boussinesq and Anelastic models
