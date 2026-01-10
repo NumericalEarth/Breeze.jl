@@ -152,7 +152,7 @@ function check_no_boxes()
                 if !isempty(last_mod)
                     println()
                 end
-                println("## `Core.Box`es detected in module `", entry.mod, "`")
+                println("## $(length(lines)) `Core.Box`es detected in module `", entry.mod, "`")
                 println("| var | func | sig | location |")
                 println("| --- | --- | --- | --- |")
                 last_mod = entry.mod
