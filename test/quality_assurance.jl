@@ -35,6 +35,10 @@ end
     end
 end
 
+@testset "No Core.Box" begin
+    @test check_no_boxes()
+end
+
 ################################################################################
 
 # Code for detecting `Core.Box`es adapted from
@@ -128,25 +132,9 @@ function scan_method!(lines, m::Method, modules)
     end
 end
 
-function stdlib_modules()
-    stdlib_dir = Sys.STDLIB
-    mods = String[]
-    for entry in readdir(stdlib_dir)
-        path = joinpath(stdlib_dir, entry)
-        if isdir(path) && isfile(joinpath(path, "src", entry * ".jl"))
-            push!(mods, entry)
-        end
-    end
-    return Set(mods)
-end
-
-function test_no_boxes()
+function check_no_boxes()
     modules = Set(["Breeze"])
     format = "markdown"
-    if "stdlibs" in modules
-        delete!(modules, "stdlibs")
-        union!(modules, stdlib_modules())
-    end
     lines = Vector{NamedTuple}()
     Base.visit(Core.methodtable) do m
         scan_method!(lines, m, modules)
@@ -182,8 +170,4 @@ function test_no_boxes()
     end
 
     return isempty(lines)
-end
-
-@testset "No Core.Box" begin
-    @test test_no_boxes()
 end
