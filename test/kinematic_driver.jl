@@ -1,5 +1,5 @@
 using Breeze
-using Breeze: PrescribedDynamics, KinematicModel
+using Breeze: PrescribedDensity, PrescribedDynamics, KinematicModel
 using GPUArraysCore: @allowscalar
 using Oceananigans
 using Oceananigans.BoundaryConditions: FieldBoundaryConditions, OpenBoundaryCondition
@@ -7,13 +7,31 @@ using Oceananigans.Fields: ZeroField
 using Oceananigans.Models.HydrostaticFreeSurfaceModels: PrescribedVelocityFields
 using Test
 
+# Helper to create PrescribedDynamics from ReferenceState
+prescribed_dynamics(reference_state) = PrescribedDynamics(reference_state)
+
 @testset "PrescribedDynamics construction [$(FT)]" for FT in (Float32, Float64)
     Oceananigans.defaults.FloatType = FT
     grid = RectilinearGrid(default_arch; size=(4, 4, 8), extent=(1000, 1000, 2000))
     reference_state = ReferenceState(grid, ThermodynamicConstants())
 
     dynamics = PrescribedDynamics(reference_state)
-    @test dynamics.reference_state === reference_state
+    @test dynamics.density isa PrescribedDensity
+    @test dynamics_density(dynamics) === reference_state.density
+
+    dynamics_div = PrescribedDynamics(reference_state; divergence_correction=true)
+    @test dynamics_div isa PrescribedDynamics{true}
+end
+
+@testset "KinematicModel with prognostic density [$(FT)]" for FT in (Float32, Float64)
+    Oceananigans.defaults.FloatType = FT
+    grid = RectilinearGrid(default_arch; size=(4, 4, 8), extent=(1000, 1000, 2000))
+
+    ρ = CenterField(grid)
+    set!(ρ, FT(1))
+
+    model = AtmosphereModel(grid; dynamics=PrescribedDynamics(ρ))
+    @test haskey(Oceananigans.prognostic_fields(model), :ρ)
 end
 
 @testset "PrescribedVelocityFields construction" begin
@@ -35,7 +53,7 @@ end
     reference_state = ReferenceState(grid, ThermodynamicConstants())
 
     # Default velocities (regular fields, settable)
-    model = AtmosphereModel(grid; dynamics=PrescribedDynamics(reference_state))
+    model = AtmosphereModel(grid; dynamics=prescribed_dynamics(reference_state))
     @test model isa KinematicModel
     @test model.pressure_solver === nothing
     
@@ -57,7 +75,7 @@ end
     w_evolving(x, y, z, t) = (1 - exp(-t / 100)) * sin(π * z / 2000)
     
     model = AtmosphereModel(grid;
-        dynamics = PrescribedDynamics(reference_state),
+        dynamics = prescribed_dynamics(reference_state),
         velocities = PrescribedVelocityFields(w=w_evolving))
     
     @test model isa KinematicModel
@@ -74,7 +92,7 @@ end
 @testset "KinematicModel momentum restriction [$(FT)]" for FT in (Float32, Float64)
     Oceananigans.defaults.FloatType = FT
     grid = RectilinearGrid(default_arch; size=(4, 4, 8), extent=(1000, 1000, 2000))
-    model = AtmosphereModel(grid; dynamics=PrescribedDynamics(ReferenceState(grid, ThermodynamicConstants())))
+    model = AtmosphereModel(grid; dynamics=prescribed_dynamics(ReferenceState(grid, ThermodynamicConstants())))
     
     # No momentum in kinematic models
     @test_throws ArgumentError set!(model, ρu=1)
@@ -85,7 +103,7 @@ end
     grid = RectilinearGrid(default_arch; size=(4, 4, 16), extent=(1000, 1000, 2000))
     
     model = AtmosphereModel(grid;
-        dynamics = PrescribedDynamics(ReferenceState(grid, ThermodynamicConstants())),
+        dynamics = prescribed_dynamics(ReferenceState(grid, ThermodynamicConstants())),
         microphysics = SaturationAdjustment())
     
     set!(model, θ=300, qᵗ=0.015, w=2)
@@ -100,7 +118,7 @@ end
     grid = RectilinearGrid(default_arch; size=(4, 4, Nz), x=(0, 100), y=(0, 100), z=(0, Lz), halo=(3, 3, 3))
 
     model = AtmosphereModel(grid;
-        dynamics = PrescribedDynamics(ReferenceState(grid, ThermodynamicConstants())),
+        dynamics = prescribed_dynamics(ReferenceState(grid, ThermodynamicConstants())),
         tracers = :c,
         advection = WENO())
 
@@ -126,7 +144,7 @@ end
     Oceananigans.defaults.FloatType = FT
     grid = RectilinearGrid(default_arch; size=(4, 4, 8), extent=(1000, 1000, 2000))
     reference_state = ReferenceState(grid, ThermodynamicConstants())
-    dynamics = PrescribedDynamics(reference_state)
+    dynamics = prescribed_dynamics(reference_state)
 
     # PrescribedDynamics allows velocity boundary conditions
     w_inlet(x, y, t) = FT(0.5)

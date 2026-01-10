@@ -12,22 +12,26 @@ This is analogous to the `kin1d` driver in P3-microphysics.
 module KinematicDriver
 
 export
+    PrescribedDensity,
     PrescribedDynamics,
     KinematicModel
 
 using DocStringExtensions: TYPEDSIGNATURES
 using Adapt: Adapt, adapt
 
-using Oceananigans: Oceananigans, XFaceField, YFaceField, ZFaceField
+using Oceananigans: Oceananigans, CenterField, XFaceField, YFaceField, ZFaceField
+using Oceananigans.BoundaryConditions: FieldBoundaryConditions, fill_halo_regions!
 using Oceananigans.Architectures: on_architecture
-using Oceananigans.Fields: FunctionField, ZeroField, field
+using Oceananigans.Fields: AbstractField, FunctionField, ZeroField, field, set!
 using Oceananigans.Grids: Face, Center
 using Oceananigans.TimeSteppers: Clock, TimeSteppers
+using Oceananigans.Utils: prettysummary
 
 # Import PrescribedVelocityFields from Oceananigans
 using Oceananigans.Models.HydrostaticFreeSurfaceModels: PrescribedVelocityFields
 
-using Breeze.AtmosphereModels: AtmosphereModels, AtmosphereModel
+using Breeze.AtmosphereModels: AtmosphereModels, AtmosphereModel, dynamics_density
+using Breeze.Thermodynamics: ReferenceState
 
 include("prescribed_dynamics.jl")
 
