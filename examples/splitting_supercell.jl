@@ -108,17 +108,20 @@ FT = eltype(grid)
 θₜᵣ = 343       # K - tropopause potential temperature
 zₜᵣ = 12000     # m - tropopause height
 Tₜᵣ = 213       # K - tropopause temperature
+nothing #hide
 
 # Wind shear parameters control the low-level environmental wind profile:
 
 zₛ = 5kilometers  # m - shear layer height
 uₛ = 30           # m/s - maximum shear wind speed
 uᶜ = 15           # m/s - storm motion (Galilean translation speed)
+nothing #hide
 
 # Extract thermodynamic constants for profile calculations:
 
 g = constants.gravitational_acceleration
 cᵖᵈ = constants.dry_air.heat_capacity
+nothing #hide
 
 # Background potential temperature profile (Equation 14 in [KlempEtAl2015](@citet)):
 
@@ -167,7 +170,7 @@ end
 
 uᵢ(x, y, z) = u_background(z)
 
-# ## Initial conditions
+# ## Visualization of initial conditions and warm bubble perturbation
 #
 # We visualize the background potential temperature, relative humidity, and wind shear profiles
 # that define the environmental stratification:
@@ -219,42 +222,12 @@ advection = WENO(order=9, minimum_buffer_upwind_order=3)
 
 model = AtmosphereModel(grid; dynamics, microphysics, advection, thermodynamic_constants=constants)
 
-# ## Water vapor initialization
+# ## Model initialization
 #
-# We initialize the model with the background potential temperature to compute
-# the hydrostatic pressure, then compute initial water vapor from relative humidity
-# and saturation specific humidity using the Tetens formula:
-#
-# ```math
-# q_v^* = \frac{380}{p} \exp\left(17.27 \frac{T - 273}{T - 36}\right)
-# ```
+# We set the initial potential temperature (with warm bubble), relative humidity,
+# and wind profile.
 
-set!(model, θ = (x, y, z) -> θ_background(z))
-
-pₕ = Breeze.AtmosphereModels.compute_hydrostatic_pressure!(CenterField(grid), model)
-T = model.temperature
-
-# Transfer to CPU for scalar indexing (required when using GPU arrays):
-
-pₕ_host = Array(parent(pₕ))
-T_host = Array(parent(T))
-qᵛ_host = similar(pₕ_host)
-
-for k in axes(qᵛ_host, 3), j in axes(qᵛ_host, 2), i in axes(qᵛ_host, 1)
-    zᵢⱼₖ = znode(i, j, k, grid, Center(), Center(), Center())
-    Tᵢⱼₖ = @inbounds T_host[i, j, k]
-    pᵢⱼₖ = @inbounds pₕ_host[i, j, k]
-    qᵛ⁺ = 380 / pᵢⱼₖ * exp(17.27 * ((Tᵢⱼₖ - 273) / (Tᵢⱼₖ - 36)))
-    @inbounds qᵛ_host[i, j, k] = ℋ_background(zᵢⱼₖ) * qᵛ⁺
-end
-
-qᵛ_init = CenterField(grid)
-copyto!(parent(qᵛ_init), qᵛ_host)
-nothing #hide
-
-# Set the full initial conditions (water vapor, potential temperature with bubble, and wind):
-
-set!(model, qᵗ=qᵛ_init, θ=θᵢ, u=uᵢ)
+set!(model, θ=θᵢ, ℋ=(x, y, z) -> ℋ_background(z), u=uᵢ)
 
 # ## Simulation
 #
