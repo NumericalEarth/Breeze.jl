@@ -172,23 +172,22 @@ uᵢ(x, y, z) = u_background(z)
 # We visualize the background potential temperature, relative humidity, and wind shear profiles
 # that define the environmental stratification:
 
-z_plot = range(0, Lz, length=200)
-θ_profile = [θ_background(z) for z in z_plot]
-ℋ_profile = [ℋ_background(z) * 100 for z in z_plot]
-u_profile = [u_background(z) for z in z_plot]
+θ_profile = set!(Field{Nothing, Nothing, Center}(grid), z -> θ_background(z))
+ℋ_profile = set!(Field{Nothing, Nothing, Center}(grid), z -> ℋ_background(z) * 100)
+u_profile = set!(Field{Nothing, Nothing, Center}(grid), z -> u_background(z))
 
 fig = Figure(size=(1000, 400), fontsize=14)
 
 axθ = Axis(fig[1, 1], xlabel="θ (K)", ylabel="z (km)", title="Potential temperature")
-lines!(axθ, θ_profile, z_plot ./ 1000, linewidth=2, color=:magenta)
+lines!(axθ, θ_profile, linewidth=2, color=:magenta)
 hlines!(axθ, [zₜᵣ / 1000], color=:gray, linestyle=:dash)
 
 axℋ = Axis(fig[1, 2], xlabel="ℋ (%)", ylabel="z (km)", title="Relative humidity")
-lines!(axℋ, ℋ_profile, z_plot ./ 1000, linewidth=2, color=:dodgerblue)
+lines!(axℋ, ℋ_profile, linewidth=2, color=:dodgerblue)
 hlines!(axℋ, [zₜᵣ / 1000], color=:gray, linestyle=:dash)
 
 axu = Axis(fig[1, 3], xlabel="u (m/s)", ylabel="z (km)", title="Wind profile")
-lines!(axu, u_profile, z_plot ./ 1000, linewidth=2, color=:orangered)
+lines!(axu, u_profile, linewidth=2, color=:orangered)
 hlines!(axu, [zₛ / 1000], color=:gray, linestyle=:dash)
 vlines!(axu, [0], color=:black, linestyle=:dot)
 
@@ -197,16 +196,13 @@ fig
 
 # Visualize the warm bubble perturbation on a vertical slice through the domain center:
 
-x_slice = range(0, Lx, length=200)
-z_slice = range(0, Lz, length=200)
-θ′_slice = [θᵢ(x, yᵦ, z) - θ_background(z) for x in x_slice, z in z_slice]
+θ′_slice = set!(Field{Center, Nothing, Center}(grid), (x, z) -> θᵢ(x, yᵦ, z) - θ_background(z))
 
 fig = Figure(size=(700, 400), fontsize=14)
 ax = Axis(fig[1, 1], xlabel="x (km)", ylabel="z (km)",
           title="Warm bubble perturbation θ′")
 
-hm = heatmap!(ax, x_slice ./ 1000, z_slice ./ 1000, θ′_slice,
-              colormap=:thermal, colorrange=(0, Δθ))
+hm = heatmap!(ax, θ′_slice, colormap=:thermal, colorrange=(0, Δθ))
 Colorbar(fig[1, 2], hm, label="θ′ (K)")
 
 save("supercell_warm_bubble.png", fig) #src
