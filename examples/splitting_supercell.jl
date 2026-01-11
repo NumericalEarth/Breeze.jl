@@ -223,7 +223,7 @@ model = AtmosphereModel(grid; dynamics, microphysics, advection, thermodynamic_c
 
 # ## Model initialization
 #
-# We initialize the model with the previously described initial conditions, including a warm-bubble perturbation
+# We initialize the model with the previously described initial conditions, including a warm-bubble perturbation.
 # We precompute the RH field to ensure GPU compatibility.
 
 ℋᵢ = set!(CenterField(grid), (x, y, z) -> ℋ_background(z))
