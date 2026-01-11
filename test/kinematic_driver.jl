@@ -1,7 +1,9 @@
+using Adapt: adapt
 using Breeze
 using Breeze: PrescribedDensity, PrescribedDynamics, KinematicModel
 using GPUArraysCore: @allowscalar
 using Oceananigans
+using Oceananigans.Architectures: on_architecture
 using Oceananigans.BoundaryConditions: FieldBoundaryConditions, OpenBoundaryCondition
 using Oceananigans.Fields: ZeroField
 using Oceananigans.Models.HydrostaticFreeSurfaceModels: PrescribedVelocityFields
@@ -20,6 +22,18 @@ using Test
 
         dynamics_div = PrescribedDynamics(reference_state; divergence_correction=true)
         @test dynamics_div isa PrescribedDynamics{true}
+    end
+
+    @testset "PrescribedDensity adapt and on_architecture" begin
+        pd = PrescribedDensity(reference_state.density)
+
+        # Test adapt_structure
+        adapted_pd = adapt(CPU(), pd)
+        @test adapted_pd isa PrescribedDensity
+
+        # Test on_architecture
+        transferred_pd = on_architecture(CPU(), pd)
+        @test transferred_pd isa PrescribedDensity
     end
 
     @testset "KinematicModel with prognostic density" begin

@@ -35,10 +35,6 @@ struct PrescribedDynamics{Div, D, P, FT}
     pressure :: P
     surface_pressure :: FT
     standard_pressure :: FT
-
-    function PrescribedDynamics{Div}(ρ::D, p::P, p₀::FT, pˢᵗ::FT) where {Div, D, P, FT}
-        return new{Div, D, P, FT}(ρ, p, p₀, pˢᵗ)
-    end
 end
 
 """
