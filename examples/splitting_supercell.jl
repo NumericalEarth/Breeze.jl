@@ -210,16 +210,14 @@ fig
 
 # ## Model setup
 #
-# We use the DCMIP2016 Kessler microphysics scheme with high-order WENO advection
-# and anisotropic minimum dissipation turbulence closure. The Kessler scheme includes
-# prognostic cloud water and rain water with autoconversion, accretion, rain evaporation,
-# and sedimentation processes.
+# We use the DCMIP2016 Kessler microphysics scheme with high-order WENO advection.
+# The Kessler scheme includes prognostic cloud water and rain water with autoconversion,
+# accretion, rain evaporation, and sedimentation processes.
 
 microphysics = DCMIP2016KesslerMicrophysics()
 advection = WENO(order=9, minimum_buffer_upwind_order=3)
-closure = AnisotropicMinimumDissipation()
 
-model = AtmosphereModel(grid; dynamics, closure, microphysics, advection, thermodynamic_constants=constants)
+model = AtmosphereModel(grid; dynamics, microphysics, advection, thermodynamic_constants=constants)
 
 # ## Water vapor initialization
 #
