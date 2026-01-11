@@ -156,6 +156,7 @@ rᵥ = 1500           # m - bubble vertical radius
 zᵦ = 1500           # m - bubble center height
 xᵦ = Lx / 2         # m - bubble center x-coordinate
 yᵦ = Ly / 2         # m - bubble center y-coordinate
+nothing #hide
 
 # The total initial potential temperature combines the background profile with the
 # cosine-squared warm bubble perturbation:
