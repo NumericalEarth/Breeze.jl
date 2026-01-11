@@ -143,45 +143,6 @@ function u_background(z)
            (z > (zₛ + 1000)) * u_upper
 end
 
-# ## Initial thermodynamic profiles
-#
-# Visualize the background potential temperature and relative humidity profiles
-# that define the environmental stratification:
-
-z_plot = range(0, Lz, length=200)
-θ_profile = [θ_background(z) for z in z_plot]
-ℋ_profile = [ℋ_background(z) * 100 for z in z_plot]
-
-fig = Figure(size=(900, 500), fontsize=14)
-
-axθ = Axis(fig[1, 1], xlabel="θ (K)", ylabel="z (km)", title="Background potential temperature")
-lines!(axθ, θ_profile, z_plot ./ 1000, linewidth=2, color=:magenta)
-hlines!(axθ, [zₜᵣ / 1000], color=:gray, linestyle=:dash, label="Tropopause")
-
-axℋ = Axis(fig[1, 2], xlabel="ℋ (%)", ylabel="z (km)", title="Relative humidity profile")
-lines!(axℋ, ℋ_profile, z_plot ./ 1000, linewidth=2, color=:dodgerblue)
-hlines!(axℋ, [zₜᵣ / 1000], color=:gray, linestyle=:dash)
-
-save("supercell_thermodynamic_profiles.png", fig) #src
-fig
-
-# ## Background wind profile
-#
-# The environmental wind shear promotes supercell rotation and mesocyclone formation.
-# The zonal wind increases from -15 m/s at the surface to +15 m/s at 5 km (in a frame
-# moving with the storm at 15 m/s):
-
-u_profile = [u_background(z) for z in z_plot]
-
-fig = Figure(size=(500, 500), fontsize=14)
-axu = Axis(fig[1, 1], xlabel="u (m/s)", ylabel="z (km)", title="Background wind profile")
-lines!(axu, u_profile, z_plot ./ 1000, linewidth=2, color=:orangered)
-hlines!(axu, [zₛ / 1000], color=:gray, linestyle=:dash, label="Shear layer top")
-vlines!(axu, [0], color=:black, linestyle=:dot)
-
-save("supercell_wind_profile.png", fig) #src
-fig
-
 # ## Warm bubble perturbation
 #
 # The warm bubble parameters following Equations 17–18 in [KlempEtAl2015](@citet):
@@ -206,16 +167,43 @@ end
 
 uᵢ(x, y, z) = u_background(z)
 
+# ## Initial conditions
+#
+# We visualize the background potential temperature, relative humidity, and wind shear profiles
+# that define the environmental stratification:
+
+z_plot = range(0, Lz, length=200)
+θ_profile = [θ_background(z) for z in z_plot]
+ℋ_profile = [ℋ_background(z) * 100 for z in z_plot]
+u_profile = [u_background(z) for z in z_plot]
+
+fig = Figure(size=(1000, 400), fontsize=14)
+
+axθ = Axis(fig[1, 1], xlabel="θ (K)", ylabel="z (km)", title="Potential temperature")
+lines!(axθ, θ_profile, z_plot ./ 1000, linewidth=2, color=:magenta)
+hlines!(axθ, [zₜᵣ / 1000], color=:gray, linestyle=:dash)
+
+axℋ = Axis(fig[1, 2], xlabel="ℋ (%)", ylabel="z (km)", title="Relative humidity")
+lines!(axℋ, ℋ_profile, z_plot ./ 1000, linewidth=2, color=:dodgerblue)
+hlines!(axℋ, [zₜᵣ / 1000], color=:gray, linestyle=:dash)
+
+axu = Axis(fig[1, 3], xlabel="u (m/s)", ylabel="z (km)", title="Wind profile")
+lines!(axu, u_profile, z_plot ./ 1000, linewidth=2, color=:orangered)
+hlines!(axu, [zₛ / 1000], color=:gray, linestyle=:dash)
+vlines!(axu, [0], color=:black, linestyle=:dot)
+
+save("supercell_initial_conditions.png", fig) #src
+fig
+
 # Visualize the warm bubble perturbation on a vertical slice through the domain center:
 
 x_slice = range(0, Lx, length=200)
 z_slice = range(0, Lz, length=200)
-
 θ′_slice = [θᵢ(x, yᵦ, z) - θ_background(z) for x in x_slice, z in z_slice]
 
-fig = Figure(size=(800, 300), fontsize=14)
+fig = Figure(size=(700, 400), fontsize=14)
 ax = Axis(fig[1, 1], xlabel="x (km)", ylabel="z (km)",
-          title="Warm bubble perturbation θ′ (K) at y = Ly/2", aspect=DataAspect())
+          title="Warm bubble perturbation θ′")
 
 hm = heatmap!(ax, x_slice ./ 1000, z_slice ./ 1000, θ′_slice,
               colormap=:thermal, colorrange=(0, Δθ))
