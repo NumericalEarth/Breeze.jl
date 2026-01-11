@@ -325,25 +325,6 @@ simulation.output_writers[:slices] = JLD2Writer(model, slice_outputs; filename=s
 
 run!(simulation)
 
-# ## Results: maximum vertical velocity time series
-#
-# The maximum updraft velocity is a key diagnostic for supercell intensity.
-# Strong supercells typically develop updrafts exceeding 30–50 m/s.
-#
-# Our simulated storm intensity is notably stronger than the DCMIP2016 intercomparison
-# results reported by [Zarzycki2019](@citet). One explanation is that
-# no explicit numerical diffusion is applied in this simulation. As noted by
-# [KlempEtAl2015](@citet), the simulated storm intensity and structure
-# are highly sensitive to numerical diffusion.
-
-fig = Figure(size=(700, 400), fontsize=14)
-ax = Axis(fig[1, 1], xlabel="Time (s)", ylabel="Maximum w (m/s)", title="Maximum Vertical Velocity",
-          xticks=0:1800:7200)
-lines!(ax, max_w_times, max_w_timeseries, linewidth=2)
-
-save("supercell_max_w.png", fig) #src
-fig
-
 # ## Animation: horizontal slices at z ≈ 5 km
 #
 # We create a 3-panel animation showing the storm structure at mid-levels:
@@ -394,3 +375,24 @@ end
 nothing #hide
 
 # ![](splitting_supercell_slices.mp4)
+
+# ## Results: maximum vertical velocity time series
+#
+# The maximum updraft velocity is a key diagnostic for supercell intensity.
+# Strong supercells typically develop updrafts exceeding 30–50 m/s.
+#
+# Our simulated storm intensity is notably stronger than the DCMIP2016 intercomparison
+# results reported by [Zarzycki2019](@citet). One explanation is that
+# no explicit numerical diffusion is applied in this simulation. As noted by
+# [KlempEtAl2015](@citet), the simulated storm intensity and structure
+# are highly sensitive to numerical diffusion.
+
+fig = Figure(size=(700, 400), fontsize=14)
+ax = Axis(fig[1, 1], xlabel="Time (s)", ylabel="Maximum w (m/s)", title="Maximum Vertical Velocity",
+          xticks=0:1800:7200)
+lines!(ax, max_w_times, max_w_timeseries, linewidth=2)
+
+save("supercell_max_w.png", fig) #src
+fig
+
+
