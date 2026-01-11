@@ -57,8 +57,7 @@
 # development and mesocyclone formation (Equations 15-16 in [KlempEtAl2015](@citet)).
 
 using Breeze
-using Breeze: DCMIP2016KesslerMicrophysics, TetensFormula, dynamics_density
-using Breeze.Thermodynamics: saturation_specific_humidity, PlanarLiquidSurface
+using Breeze: DCMIP2016KesslerMicrophysics, TetensFormula
 using Oceananigans: Oceananigans
 using Oceananigans.Units
 using Oceananigans.Grids: znodes
@@ -102,8 +101,6 @@ dynamics = AnelasticDynamics(reference_state)
 # ## Background atmosphere profiles
 #
 # The atmospheric stratification parameters define the troposphere-stratosphere transition.
-
-FT = eltype(grid)
 
 θ₀ = 300        # K - surface potential temperature
 θₜᵣ = 343       # K - tropopause potential temperature
@@ -224,23 +221,14 @@ advection = WENO(order=9, minimum_buffer_upwind_order=3)
 
 model = AtmosphereModel(grid; dynamics, microphysics, advection, thermodynamic_constants=constants)
 
-# ## Water vapor initialization
+# ## Model initialization
 #
-# We initialize the model with the background potential temperature to compute
-# temperature, then compute initial water vapor from relative humidity and
-# saturation specific humidity using the Tetens formula.
+# We initialize the model with the previously described initial conditions, including a warm-bubble perturbation
+# We precompute the RH field to ensure GPU compatibility.
 
-set!(model, θ = (x, y, z) -> θ_background(z))
+ℋᵢ = set!(CenterField(grid), (x, y, z) -> ℋ_background(z))
 
-T = model.temperature
-ρᵣ = dynamics_density(model.dynamics)
-ℋ = set!(CenterField(grid), (x, y, z) -> ℋ_background(z))
-qᵛ⁺ = Field(saturation_specific_humidity(T, ρᵣ, constants, PlanarLiquidSurface()))
-qᵛᵢ = Field(ℋ * qᵛ⁺)
-
-# Initialize the model with the initial conditions:
-
-set!(model, qᵗ=qᵛᵢ, θ=θᵢ, u=uᵢ)
+set!(model, θ=θᵢ, ℋ=ℋᵢ, u=uᵢ)
 
 # ## Simulation
 #
