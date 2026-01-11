@@ -11,9 +11,7 @@ export
     pressure_anomaly,
     total_pressure,
     buoyancy_forceᶜᶜᶜ,
-    # Thermodynamic formulations
-    StaticEnergyFormulation,
-    LiquidIcePotentialTemperatureFormulation,
+    # Thermodynamic formulation interface (formulation types exported by their respective modules)
     thermodynamic_density_name,
     thermodynamic_density,
     # Helpers
@@ -36,6 +34,10 @@ export
     BackgroundAtmosphere,
     GrayOptics,
     ClearSkyOptics,
+    AllSkyOptics,
+
+    # Cloud effective radius
+    ConstantRadiusParticles,
 
     # Diagnostics (re-exported from Diagnostics submodule)
     PotentialTemperature,
@@ -72,7 +74,6 @@ include("formulation_interface.jl")
 #####
 
 include("atmosphere_model.jl")
-include("set_atmosphere_model.jl")
 
 #####
 ##### Remaining AtmosphereModel components
@@ -91,17 +92,7 @@ include("compute_hydrostatic_pressure.jl")
 include("Diagnostics/Diagnostics.jl")
 using .Diagnostics
 
-#####
-##### Thermodynamic formulation submodules
-#####
-
-include("StaticEnergyFormulations/StaticEnergyFormulations.jl")
-using .StaticEnergyFormulations:
-    StaticEnergyFormulation
-
-include("PotentialTemperatureFormulations/PotentialTemperatureFormulations.jl")
-using .PotentialTemperatureFormulations:
-    LiquidIcePotentialTemperatureFormulation
-
+# set_atmosphere_model requires Diagnostics for SaturationSpecificHumidity
+include("set_atmosphere_model.jl")
 
 end

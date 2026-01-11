@@ -56,13 +56,13 @@ end
 """
 $(TYPEDSIGNATURES)
 
-Return an AtmosphereModel that uses the anelastic approximation following
+Return an `AtmosphereModel` that uses the anelastic approximation following
 [Pauluis (2008)](@cite Pauluis2008).
 
 Arguments
 =========
 
-   * The default `dynamics` is `AnelasticDynamics`.
+   * The default `dynamics` is [`AnelasticDynamics`](@ref Breeze.AnelasticEquations.AnelasticDynamics).
 
    * The default `formulation` is `:LiquidIcePotentialTemperature`.
 
@@ -87,7 +87,7 @@ AtmosphereModel{CPU, RectilinearGrid}(time = 0 seconds, iteration = 0)
 ├── grid: 8×8×8 RectilinearGrid{Float64, Periodic, Periodic, Bounded} on CPU with 3×3×3 halo
 ├── dynamics: AnelasticDynamics(p₀=101325.0, θ₀=288.0)
 ├── formulation: LiquidIcePotentialTemperatureFormulation
-├── timestepper: RungeKutta3TimeStepper
+├── timestepper: SSPRungeKutta3
 ├── advection scheme:
 │   ├── momentum: Centered(order=2)
 │   ├── ρθ: Centered(order=2)
@@ -117,7 +117,7 @@ function AtmosphereModel(grid;
                          scalar_advection = DefaultValue(),
                          closure = nothing,
                          microphysics = nothing,
-                         timestepper = :RungeKutta3,
+                         timestepper = :SSPRungeKutta3,
                          radiation = nothing)
 
     # Use default dynamics if not specified
@@ -189,7 +189,7 @@ function AtmosphereModel(grid;
                                        grid, coriolis, density,
                                        velocities, dynamics, formulation, specific_moisture)
 
-    # Include thermodynamic density (ρe or ρθ), ρqᵗ plus user tracers for closure field construction
+    # Include thermodynamic density (ρe or ρθ), ρqᵗ, microphysical prognostic fields, plus user tracers
     closure_thermo_name = thermodynamic_density_name(formulation)
     microphysical_names = prognostic_field_names(microphysics)
     scalar_names = tuple(closure_thermo_name, :ρqᵗ, microphysical_names..., tracer_names...)

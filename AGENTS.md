@@ -19,8 +19,10 @@ Breeze interfaces with ClimaOcean for coupled atmosphere-ocean simulations.
 ### Julia practices and information
 
 1. **Explicit Imports**: Use `ExplicitImports.jl` style - explicitly import all used functions/types
-   - Import from Oceananigans explicitly (already done in src/Breeze.jl)
+   - Import from Oceananigans explicitly (already done in `src/Breeze.jl`)
    - Tests automatically check for proper imports
+   - Never use the `import` keyword for.
+     To extend functions from other modules always use the syntax `Module.function_name(...) = ...` or `function Module.function_name() ... end`, not `import Module: function_name; function_name(...) = ...`
 
 2. **Type Stability**: Prioritize type-stable code for performance
    - All structs must be concretely typed
@@ -35,12 +37,18 @@ Breeze interfaces with ClimaOcean for coupled atmosphere-ocean simulations.
    - Mark functions inside kernels with `@inline`.
    - **Never use loops outside kernels**: Always replace `for` loops that iterate over grid points
      with kernels launched via `launch!`. This ensures code works on both CPU and GPU.
+   - **Use literal zeros**: Write `max(0, a)` instead of `max(zero(FT), a)`. Julia handles type
+     promotion automatically, and `0` is more readable. The same applies to `min`, `clamp`, etc.
 
 4. **Documentation**:
    - Use DocStringExtensions.jl for consistent docstrings
    - Use `$(TYPEDSIGNATURES)` for automatic typed signature documentation (preferred over `$(SIGNATURES)`)
    - Never write explicit function signatures in docstrings; always use `$(TYPEDSIGNATURES)`
    - Add examples in docstrings when helpful
+   - **Citations in docstrings**: Use inline citations with `[Author1 and Author2 (year)](@cite Key)` or `[Author1 et al. (Year)](@cite Key)` syntax.
+     Avoid separate "References" sections with bare `[Key](@cite)` - these just show citation keys in the REPL
+     without context, which is not helpful. Instead, weave citations naturally into the prose, e.g.:
+     "Tetens' formula [Tetens1930](@citet) is an empirical formula..."
 
 5. **Memory leanness**
    - Favor doing computations inline versus allocating temporary memory
@@ -331,6 +339,10 @@ serve(dir="docs/build")
 - **Debugging literated examples**: When a specific example fails during doc builds, comment out
   all other examples in `docs/make.jl` except the failing one to isolate the error. This speeds up
   iteration dramatically since you only build one example at a time.
+- **Testing documentation pages efficiently**: When testing changes to documentation pages (like
+  `thermodynamics.md`), comment out ALL examples in the `examples` array in `docs/make.jl` to skip
+  the slow literation step. This allows rapid iteration on `@example` blocks in the documentation
+  markdown files.
 - **Literate.jl comment syntax**: In literated examples, lines starting with `# ` (hash + space)
   at column 1 are converted to markdown. Comments inside functions that start with `#` at the
   beginning of a line will prematurely end code blocks. Either remove such comments or use `##`
@@ -366,16 +378,75 @@ serve(dir="docs/build")
 - Hydrostatic pressure computed diagnostically
 
 ### Numerical Methods
-- Finite volume on structured grids
+- Finite volume on structured grids (Arakawa C-grid)
+- Staggered grid locations: velocities at cell faces, tracers at cell centers
 - Take care of staggered grid location when writing operators or designing diagnostics.
 - Favor WENO advection schemes.
 - Pressure Poisson solver for anelastic divergence constraint
+- Time stepping: RungeKutta3 (default), Adams-Bashforth, Quasi-Adams-Bashforth
+
+## Implementing Validation Cases / Reproducing Paper Results
+
+When implementing a simulation from a published paper:
+
+### 1. Parameter Extraction
+- **Read the paper carefully** and extract ALL parameters: domain size, resolution, physical constants, 
+  boundary conditions, initial conditions, forcing, closure parameters
+- Look for parameter tables (often "Table 1" or similar)
+- Check figure captions for additional details
+- Note the coordinate system and conventions used
+
+### 2. Geometry Verification (BEFORE running long simulations)
+- **Always visualize the grid/domain geometry first**
+- Check that:
+  - Domain extents match the paper
+  - Topography/immersed boundaries are correct
+  - Coordinate orientations match (which direction is "downslope"?)
+- Compare your geometry plot to figures in the paper
+
+### 3. Initial Condition Verification
+- After setting initial conditions, check:
+  - `minimum(field)` and `maximum(field)` make physical sense
+  - Spatial distribution looks correct (visualize if needed)
+  - Dense water is where it should be, stratification is correct, etc.
+
+### 4. Short Test Runs
+Before running a long simulation:
+- Run for a few timesteps on CPU at low resolution
+- Verify:
+  - No NaNs appear (check `maximum(abs, u)` etc.)
+  - Flow is developing as expected (velocities increasing from zero)
+  - Output files contain meaningful data
+- Then test on GPU to catch GPU-specific issues
+
+### 5. Progressive Validation
+- Run a short simulation (e.g., 1 hour sim time) and visualize
+- Check that the physics looks right:
+  - Dense water flowing in the correct direction?
+  - Velocities reasonable magnitude?
+  - Mixing/entrainment happening where expected?
+- Compare to early-time figures in the paper if available
+
+### 6. Comparison to Paper Figures
+- Create visualizations that match the paper's figure format
+- Use the same colormaps, axis ranges, and time snapshots if possible
+- Quantitative comparison: compute the same diagnostics as the paper
+
+### 7. Common Issues
+- **NaN blowups**: Usually from timestep too large, unstable initial conditions, 
+  or if-else statements on GPU (use `ifelse` instead)
+- **Nothing happening**: Check that buoyancy anomaly has the right sign, 
+  that initial conditions are actually applied, that forcing is active
+- **Wrong direction of flow**: Check coordinate conventions (is y increasing 
+  upslope or downslope?)
+- **GPU issues**: Avoid branching, ensure type stability, use `randn()` carefully
 
 ## Common Pitfalls
 
 1. **Type Instability**: Especially in kernel functions - ruins GPU performance
 2. **Overconstraining types**: Julia compiler can infer types. Type annotations should be used primarily for _multiple dispatch_, not for documentation.
 3. **Forgetting Explicit Imports**: Tests will fail - add to using statements
+4. **Using plain `julia` blocks in docstrings**: NEVER do this. ALWAYS use `jldoctest` blocks so examples are tested and verified to work. Plain `julia` blocks are not tested and will become stale.
 
 ## Git Workflow
 - Follow ColPrac (Collaborative Practices for Community Packages)
@@ -394,6 +465,8 @@ serve(dir="docs/build")
 - Enzyme.jl: https://github.com/EnzymeAD/Enzyme.jl
 - Enzyme.jl docs: https://enzyme.mit.edu/julia/dev
 - YASGuide: https://github.com/jrevels/YASGuide
+- ColPrac: https://github.com/SciML/ColPrac
+- MCPRepl.jl: https://github.com/kahliburke/MCPRepl.jl
 
 ## When Unsure
 1. Check existing examples in `examples/` directory
@@ -410,6 +483,103 @@ serve(dir="docs/build")
 - Consider both CPU and GPU architectures
 - Reference physics equations in comments when implementing dynamics
 - Maintain consistency with Oceananigans.jl patterns
+
+## Interactive Julia REPL for AI Agents (MCPRepl.jl)
+
+[MCPRepl.jl](https://github.com/kahliburke/MCPRepl.jl) exposes a Julia REPL via the Model Context Protocol (MCP),
+allowing AI agents to execute Julia code, run tests, and iterate quickly during development.
+
+### Installation
+
+If MCPRepl.jl is not already installed, add it to your global Julia environment:
+
+```julia
+using Pkg
+Pkg.activate()  # Activate global environment
+Pkg.add(url="https://github.com/kahliburke/MCPRepl.jl")
+```
+
+Then run the security setup (one-time):
+
+```julia
+using MCPRepl
+MCPRepl.quick_setup(:lax)  # For local development (localhost only, no API key)
+```
+
+### Starting the MCP Server
+
+Before the AI agent can use the REPL, start the server in Julia:
+
+```julia
+using MCPRepl
+MCPRepl.start_proxy(port=3000)  # Recommended: persistent proxy with dashboard
+# OR
+MCPRepl.start!(port=3000)       # Direct REPL backend
+```
+
+The dashboard is available at `http://localhost:3000/dashboard` when using the proxy.
+
+### Cursor Configuration
+
+Create `.cursor/mcp.json` in your project root:
+
+```json
+{
+  "mcpServers": {
+    "julia-repl": {
+      "url": "http://localhost:3000",
+      "transport": "http",
+      "headers": {
+        "X-MCPRepl-Target": "Breeze.jl"
+      }
+    }
+  }
+}
+```
+
+After creating this file, reload Cursor (Cmd+Shift+P → "Reload Window").
+
+### Speeding Up Development with Revise.jl
+
+For rapid iteration, use Revise.jl alongside MCPRepl. This allows code changes to be
+reflected immediately without restarting Julia:
+
+```julia
+using Revise
+using MCPRepl
+using Oceananigans
+using Breeze
+
+MCPRepl.start_proxy(port=3000)
+```
+
+With this setup:
+1. The AI agent can execute code via the REPL
+2. Source code edits are automatically picked up by Revise
+3. No need to restart Julia or re-import packages after editing source files
+4. Tests can be run interactively with immediate feedback
+
+### Available MCP Tools
+
+Once connected, the AI agent has access to:
+- **`julia_eval`** — Execute Julia code in the REPL
+- **`lsp_goto_definition`** — Navigate to symbol definitions
+- **`lsp_find_references`** — Find all usages of a symbol
+- **`lsp_rename`** — Rename symbols across the codebase
+- **`lsp_document_symbols`** — Get file structure/outline
+- **`lsp_code_actions`** — Get available quick fixes
+
+### Workflow Example
+
+A typical development workflow:
+
+1. Start Julia with Revise and MCPRepl
+2. AI agent makes code changes via file editing
+3. Revise automatically loads the changes
+4. AI agent tests changes via MCPRepl without restarting
+5. Iterate rapidly until the feature/fix is complete
+
+This eliminates the slow compile-restart cycle and enables interactive debugging.
 
 ## Roadmap
 

@@ -26,6 +26,7 @@ using Oceananigans.BoundaryConditions: BoundaryConditions as OceananigansBC,
 using Oceananigans.Operators: ℑxyᶠᶜᵃ, ℑxyᶜᶠᵃ, ℑxᶜᵃᵃ, ℑyᵃᶜᵃ
 
 using Adapt: Adapt
+using DocStringExtensions: TYPEDSIGNATURES
 
 #####
 ##### Helper function for surface values
@@ -413,12 +414,12 @@ field_location(::Val{:ρw}) = (Center(), Center(), Face())
 field_location(::Val) = (Center(), Center(), Center())  # default for scalars
 
 """
-    regularize_atmosphere_model_boundary_conditions(boundary_conditions, grid, surface_pressure, thermodynamic_constants)
+$(TYPEDSIGNATURES)
 
-Regularize boundary conditions for `AtmosphereModel`. This function walks through
-all boundary conditions and calls `regularize_atmosphere_boundary_condition` on each one,
-allowing specialized handling for bulk flux boundary conditions and other atmosphere-specific
-boundary condition types.
+Regularize boundary conditions for [`AtmosphereModel`](@ref AtmosphereModels.AtmosphereModel).
+This function walks through all boundary conditions and calls
+`regularize_atmosphere_boundary_condition` on each one, allowing specialized handling for
+bulk flux boundary conditions and other atmosphere-specific boundary condition types.
 """
 function AtmosphereModels.regularize_atmosphere_model_boundary_conditions(boundary_conditions, grid, surface_pressure, thermodynamic_constants)
     regularized = Dict{Symbol, Any}()
@@ -441,7 +442,7 @@ function regularize_atmosphere_field_bcs(fbcs::FieldBoundaryConditions, loc, gri
     bottom   = regularize_atmosphere_boundary_condition(fbcs.bottom, loc, grid, surface_pressure, constants)
     top      = regularize_atmosphere_boundary_condition(fbcs.top, loc, grid, surface_pressure, constants)
     immersed = regularize_atmosphere_boundary_condition(fbcs.immersed, loc, grid, surface_pressure, constants)
-    
+
     return FieldBoundaryConditions(; west, east, south, north, bottom, top, immersed)
 end
 

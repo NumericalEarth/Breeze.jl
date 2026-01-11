@@ -17,8 +17,7 @@ using Breeze.Thermodynamics:
 using Breeze.MoistAirBuoyancies: compute_boussinesq_adjustment_temperature
 using Breeze.Microphysics: compute_temperature
 
-using Breeze.Microphysics:
-    equilibrium_saturation_specific_humidity
+using Breeze: adjustment_saturation_specific_humidity
 
 solver_tol(::Type{Float64}) = 1e-6
 solver_tol(::Type{Float32}) = 1e-3
@@ -48,7 +47,7 @@ test_thermodynamics = (:StaticEnergy, :LiquidIcePotentialTemperature)
 
     # Second unsaturated test: choose T, pick qᵗ well below saturation
     T₁ = FT(300)
-    ρ₁ = density(pᵣ, T₁, q₀, constants)
+    ρ₁ = density(T₁, pᵣ, q₀, constants)
     qᵛ⁺ = saturation_specific_humidity(T₁, ρ₁, constants, constants.liquid)
     qᵗ = qᵛ⁺ / 2 # comfortably unsaturated
 
@@ -70,7 +69,7 @@ test_thermodynamics = (:StaticEnergy, :LiquidIcePotentialTemperature)
             @testset let T₂=T₂, qᵗ₂=qᵗ₂
                 T₂ = convert(FT, T₂)
                 qᵗ₂ = convert(FT, qᵗ₂)
-                qᵛ⁺₂ = equilibrium_saturation_specific_humidity(T₂, pᵣ, qᵗ₂, constants, microphysics.equilibrium)
+                qᵛ⁺₂ = adjustment_saturation_specific_humidity(T₂, pᵣ, qᵗ₂, constants, microphysics.equilibrium)
                 @test qᵛ⁺₂ isa FT
 
                 if qᵗ₂ > qᵛ⁺₂ # saturated conditions
@@ -377,7 +376,7 @@ end
     T_dry₂ = Π₂ * θ₂
 
     # Choose qᵗ well below saturation at T_dry₂
-    ρ₂ = density(pᵣ, T_dry₂, q₂, constants)
+    ρ₂ = density(T_dry₂, pᵣ, q₂, constants)
     qᵛ⁺₂ = saturation_specific_humidity(T_dry₂, ρ₂, constants, constants.liquid)
     qᵗ₂ = qᵛ⁺₂ / 2
     q₂ = MoistureMassFractions(qᵗ₂)
@@ -393,7 +392,7 @@ end
     qᵗ = FT(0.025)
     q̃ = MoistureMassFractions(qᵗ)
     𝒰 = LiquidIcePotentialTemperatureState(θ̃, q̃, p₀, pᵣ)
-    qᵛ⁺ = Breeze.MoistAirBuoyancies.equilibrium_saturation_specific_humidity(T₃, 𝒰, constants)
+    qᵛ⁺ = equilibrium_saturation_specific_humidity(T₃, pᵣ, qᵗ, constants, constants.liquid)
     @test qᵗ > qᵛ⁺ # otherwise the test is wrong
 
     qˡ = qᵗ - qᵛ⁺

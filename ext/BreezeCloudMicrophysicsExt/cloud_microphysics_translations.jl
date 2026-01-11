@@ -14,8 +14,8 @@
 
 # Import CloudMicrophysics internals that we need
 # (these don't depend on Thermodynamics.jl)
-import CloudMicrophysics.Common: ϵ_numerics
-import CloudMicrophysics.Microphysics1M: lambda_inverse, get_n0, get_v0, SF
+using CloudMicrophysics.Common: ϵ_numerics
+using CloudMicrophysics.Microphysics1M: lambda_inverse, get_n0, get_v0, SF
 
 # gamma function from SpecialFunctions (via CloudMicrophysics)
 const Γ = SF.gamma
@@ -124,4 +124,90 @@ Rate of change of rain specific humidity (negative = evaporation)
 
     # Only evaporation (negative tendency) is considered for rain
     return ifelse(evaporating, min(zero(FT), evap_rate), zero(FT))
+end
+
+#####
+##### Two-moment rain evaporation (TRANSLATION: SB2006 evaporation using Breeze thermodynamics)
+#####
+
+# Import SB2006 PDF helper functions from CloudMicrophysics.Microphysics2M
+using CloudMicrophysics.Microphysics2M: pdf_rain_parameters, Γ_incl
+
+"""
+    rain_evaporation_2m(sb, aps, q, qʳ, ρ, Nʳ, T, constants)
+
+Compute the two-moment rain evaporation rate returning both number and mass tendencies.
+
+This is a translation of `CloudMicrophysics.Microphysics2M.rain_evaporation`
+that uses Breeze's internal thermodynamics instead of Thermodynamics.jl.
+
+# Arguments
+- `sb`: SB2006 parameters containing pdf_r and evap
+- `aps`: Air properties (kinematic viscosity, vapor diffusivity, thermal conductivity)
+- `q`: `MoistureMassFractions` containing vapor, liquid, and ice mass fractions
+- `qʳ`: Rain specific humidity [kg/kg]
+- `ρ`: Air density [kg/m³]
+- `Nʳ`: Rain number concentration [1/m³]
+- `T`: Temperature [K]
+- `constants`: Breeze ThermodynamicConstants
+
+# Returns
+Named tuple `(; evap_rate_0, evap_rate_1)` where:
+- `evap_rate_0`: Rate of change of number concentration [1/(m³·s)], negative for evaporation
+- `evap_rate_1`: Rate of change of mass mixing ratio [kg/kg/s], negative for evaporation
+"""
+@inline function rain_evaporation_2m(
+    (; pdf_r, evap)::SB2006{FT},
+    aps::AirProperties{FT},
+    q::MoistureMassFractions{FT},
+    qʳ::FT,
+    ρ::FT,
+    Nʳ::FT,
+    T::FT,
+    constants,
+) where {FT}
+
+    evap_rate_0 = zero(FT)
+    evap_rate_1 = zero(FT)
+
+    # Compute supersaturation over liquid (negative means subsaturated)
+    𝒮 = supersaturation(T, ρ, q, constants, PlanarLiquidSurface())
+
+    # Only evaporate if there's rain and air is subsaturated
+    if (Nʳ > ϵ_numerics(FT)) && (𝒮 < zero(FT))
+        (; ν_air, D_vapor) = aps
+        (; av, bv, α, β, ρ0) = evap
+        x_star = pdf_r.xr_min
+        ρw = pdf_r.ρw
+
+        # Diffusional growth factor (G function)
+        G = diffusional_growth_factor(aps, T, constants)
+
+        # Mean rain drop mass and diameter
+        (; xr_mean) = pdf_rain_parameters(pdf_r, qʳ, ρ, Nʳ)
+        Dr = cbrt(6 * xr_mean / (π * ρw))
+
+        # Ventilation factors for number and mass tendencies
+        t_star = cbrt(6 * x_star / xr_mean)
+        a_vent_0 = av * Γ_incl(FT(-1), t_star) / FT(6)^(-2 // 3)
+        b_vent_0 = bv * Γ_incl(-1 // 2 + 3 // 2 * β, t_star) / FT(6)^(β / 2 - 1 // 2)
+
+        a_vent_1 = av * Γ(FT(2)) / cbrt(FT(6))
+        b_vent_1 = bv * Γ(5 // 2 + 3 // 2 * β) / 6^(β / 2 + 1 // 2)
+
+        # Reynolds number
+        N_Re = α * xr_mean^β * sqrt(ρ0 / ρ) * Dr / ν_air
+        Fv0 = a_vent_0 + b_vent_0 * cbrt(ν_air / D_vapor) * sqrt(N_Re)
+        Fv1 = a_vent_1 + b_vent_1 * cbrt(ν_air / D_vapor) * sqrt(N_Re)
+
+        # Evaporation rates (negative for evaporation)
+        evap_rate_0 = min(zero(FT), FT(2) * FT(π) * G * 𝒮 * Nʳ * Dr * Fv0 / xr_mean)
+        evap_rate_1 = min(zero(FT), FT(2) * FT(π) * G * 𝒮 * Nʳ * Dr * Fv1 / ρ)
+
+        # Handle edge cases where xr_mean approaches zero
+        evap_rate_0 = ifelse(xr_mean / x_star < eps(FT), zero(FT), evap_rate_0)
+        evap_rate_1 = ifelse(qʳ < eps(FT), zero(FT), evap_rate_1)
+    end
+
+    return (; evap_rate_0, evap_rate_1)
 end

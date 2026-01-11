@@ -6,7 +6,7 @@ abstract type AbstractThermodynamicState{FT} end
     pᵣ = 𝒰.reference_pressure
     T = temperature(𝒰, constants)
     q = 𝒰.moisture_mass_fractions
-    return density(pᵣ, T, q, constants)
+    return density(T, pᵣ, q, constants)
 end
 
 @inline function saturation_specific_humidity(𝒰::AbstractThermodynamicState, constants, equil)
@@ -75,7 +75,7 @@ end
     pᵣ = 𝒰.reference_pressure
     T = temperature(𝒰, constants)
     q = 𝒰.moisture_mass_fractions
-    return density(pᵣ, T, q, constants)
+    return density(T, pᵣ, q, constants)
 end
 
 #####

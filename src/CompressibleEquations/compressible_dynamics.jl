@@ -35,7 +35,7 @@ $(TYPEDSIGNATURES)
 
 Materialize a stub `CompressibleDynamics` into a full dynamics object with density and pressure fields.
 """
-function materialize_dynamics(dynamics::CompressibleDynamics, grid, boundary_conditions)
+function AtmosphereModels.materialize_dynamics(dynamics::CompressibleDynamics, grid, boundary_conditions)
     # Get density boundary conditions if provided
     if haskey(boundary_conditions, :ρ)
         density = CenterField(grid, boundary_conditions=boundary_conditions.ρ)
@@ -62,7 +62,7 @@ $(TYPEDSIGNATURES)
 Return the mean (reference) pressure for `CompressibleDynamics`.
 For compressible dynamics, there is no separate mean pressure - returns the full pressure field.
 """
-mean_pressure(dynamics::CompressibleDynamics) = dynamics.pressure
+AtmosphereModels.mean_pressure(dynamics::CompressibleDynamics) = dynamics.pressure
 
 """
 $(TYPEDSIGNATURES)
@@ -70,14 +70,14 @@ $(TYPEDSIGNATURES)
 Return the pressure anomaly for `CompressibleDynamics`.
 For compressible dynamics, there is no decomposition - returns zero.
 """
-pressure_anomaly(dynamics::CompressibleDynamics) = 0
+AtmosphereModels.pressure_anomaly(dynamics::CompressibleDynamics) = 0
 
 """
 $(TYPEDSIGNATURES)
 
 Return the total pressure for `CompressibleDynamics`, in Pa.
 """
-total_pressure(dynamics::CompressibleDynamics) = dynamics.pressure
+AtmosphereModels.total_pressure(dynamics::CompressibleDynamics) = dynamics.pressure
 
 #####
 ##### Density and pressure access interface
@@ -88,7 +88,7 @@ $(TYPEDSIGNATURES)
 
 Return the prognostic density field for `CompressibleDynamics`.
 """
-dynamics_density(dynamics::CompressibleDynamics) = dynamics.density
+AtmosphereModels.dynamics_density(dynamics::CompressibleDynamics) = dynamics.density
 
 """
 $(TYPEDSIGNATURES)
@@ -96,15 +96,15 @@ $(TYPEDSIGNATURES)
 Return the pressure field for `CompressibleDynamics`.
 Pressure is computed diagnostically from the equation of state.
 """
-dynamics_pressure(dynamics::CompressibleDynamics) = dynamics.pressure
+AtmosphereModels.dynamics_pressure(dynamics::CompressibleDynamics) = dynamics.pressure
 
 #####
 ##### Prognostic fields
 #####
 
 # Compressible dynamics has prognostic density
-prognostic_dynamics_field_names(::CompressibleDynamics) = (:ρ,)
-additional_dynamics_field_names(::CompressibleDynamics) = ()
+AtmosphereModels.prognostic_dynamics_field_names(::CompressibleDynamics) = (:ρ,)
+AtmosphereModels.additional_dynamics_field_names(::CompressibleDynamics) = ()
 
 """
 $(TYPEDSIGNATURES)
@@ -112,7 +112,7 @@ $(TYPEDSIGNATURES)
 Return prognostic fields specific to compressible dynamics.
 Returns the density field as a prognostic variable.
 """
-dynamics_prognostic_fields(dynamics::CompressibleDynamics) = (; ρ=dynamics.density)
+AtmosphereModels.dynamics_prognostic_fields(dynamics::CompressibleDynamics) = (; ρ=dynamics.density)
 
 """
 $(TYPEDSIGNATURES)
@@ -120,14 +120,14 @@ $(TYPEDSIGNATURES)
 Return a standard surface pressure for boundary condition regularization.
 For compressible dynamics, uses the standard atmospheric pressure (101325 Pa).
 """
-surface_pressure(dynamics::CompressibleDynamics) = dynamics.surface_pressure
+AtmosphereModels.surface_pressure(dynamics::CompressibleDynamics) = dynamics.surface_pressure
 
 """
 $(TYPEDSIGNATURES)
 
 Return the standard pressure for potential temperature calculations.
 """
-standard_pressure(dynamics::CompressibleDynamics) = dynamics.standard_pressure
+AtmosphereModels.standard_pressure(dynamics::CompressibleDynamics) = dynamics.standard_pressure
 
 #####
 ##### Pressure solver (none needed for compressible dynamics)
@@ -139,7 +139,7 @@ $(TYPEDSIGNATURES)
 Return `nothing` for `CompressibleDynamics` - no pressure solver is needed.
 Pressure is computed directly from the equation of state.
 """
-dynamics_pressure_solver(dynamics::CompressibleDynamics, grid) = nothing
+AtmosphereModels.dynamics_pressure_solver(dynamics::CompressibleDynamics, grid) = nothing
 
 #####
 ##### Show methods
@@ -164,7 +164,7 @@ end
 ##### Momentum and velocity materialization
 #####
 
-function materialize_momentum_and_velocities(dynamics::CompressibleDynamics, grid, boundary_conditions)
+function AtmosphereModels.materialize_momentum_and_velocities(dynamics::CompressibleDynamics, grid, boundary_conditions)
     ρu = XFaceField(grid, boundary_conditions=boundary_conditions.ρu)
     ρv = YFaceField(grid, boundary_conditions=boundary_conditions.ρv)
     ρw = ZFaceField(grid, boundary_conditions=boundary_conditions.ρw)

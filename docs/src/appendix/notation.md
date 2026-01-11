@@ -13,7 +13,7 @@ A few notes about the following table:
 * `TC` stands for [`ThermodynamicConstants`](@ref)
 * `AM` stands for [`AtmosphereModel`](@ref)
 * `RS` stands for [`ReferenceState`](@ref Breeze.Thermodynamics.ReferenceState)
-* Note that there are independent concepts of "reference". For example, [`AnelasticDynamics`](@ref) involves
+* Note that there are independent concepts of "reference". For example, [`AnelasticDynamics`](@ref Breeze.AnelasticEquations.AnelasticDynamics) involves
   a "reference state", which is an adiabatic, hydrostatic solution to the equations of motion. But there is also an
   "energy reference temperature" and "reference latent heat", which are thermodynamic constants required to define
   the internal energy of moist atmospheric constituents.
@@ -53,6 +53,10 @@ The following table also uses a few conventions that suffuse the source code and
 | ``ρqᶜⁱ``                            | `ρqᶜⁱ` |                                     | Cloud ice density                                                              |
 | ``ρqʳ``                             | `ρqʳ`  | `AM.microphysical_fields.ρqʳ`       | Rain density                                                                   |
 | ``ρqˢ``                             | `ρqˢ`  | `AM.microphysical_fields.ρqˢ`       | Snow density                                                                   |
+| ``\mathbb{W}^{cl}``                 | `𝕎ᶜˡ`  |                                     | Terminal velocity of cloud liquid (scalar, positive downward)                  |
+| ``\mathbb{W}^{ci}``                 | `𝕎ᶜⁱ`  |                                     | Terminal velocity of cloud ice (scalar, positive downward)                     |
+| ``\mathbb{W}^r``                    | `𝕎ʳ`   |                                     | Terminal velocity of rain (scalar, positive downward)                          |
+| ``\mathbb{W}^s``                    | `𝕎ˢ`   |                                     | Terminal velocity of snow (scalar, positive downward)                          |
 | ``qᵛ⁺``                             | `qᵛ⁺`  |                                     | Saturation specific humidity over a surface                                    |
 | ``qᵛ⁺ˡ``                            | `qᵛ⁺ˡ` |                                     | Saturation specific humidity over a planar liquid surface                      |
 | ``qᵛ⁺ⁱ``                            | `qᵛ⁺ⁱ` |                                     | Saturation specific humidity over a planar ice surface                         |

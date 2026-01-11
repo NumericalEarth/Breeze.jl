@@ -505,7 +505,7 @@ function (d::MoistPotentialTemperatureKernelFunction)(i, j, k, grid)
     elseif d.flavor isa AbstractEquivalentFlavor
         # Saturation specific humidity over a liquid surface
         surface = PlanarLiquidSurface()
-        ℋ = relative_humidity(pᵣ, T, q, constants, surface)
+        ℋ = relative_humidity(T, pᵣ, q, constants, surface)
         γ = - Rᵛ * qᵛ / cᵖᵐ
 
         # Latent heat of vaporization at temperature T

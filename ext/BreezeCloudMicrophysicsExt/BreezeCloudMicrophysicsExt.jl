@@ -4,6 +4,9 @@ using CloudMicrophysics: CloudMicrophysics
 using CloudMicrophysics.Parameters: Parameters0M, Rain, Snow, CloudIce, CloudLiquid, CollisionEff
 using CloudMicrophysics.Parameters: Blk1MVelType, Blk1MVelTypeRain, Blk1MVelTypeSnow
 using CloudMicrophysics.Parameters: AirProperties
+# Two-moment parameters
+using CloudMicrophysics.Parameters: SB2006, StokesRegimeVelType, SB2006VelType, Chen2022VelTypeRain
+
 using CloudMicrophysics.Microphysics0M: remove_precipitation
 
 using CloudMicrophysics.Microphysics1M:
@@ -11,8 +14,14 @@ using CloudMicrophysics.Microphysics1M:
     accretion,
     terminal_velocity
 
+# Two-moment microphysics
+using CloudMicrophysics: Microphysics2M as CM2
+
 using Breeze
-using Breeze.AtmosphereModels
+using Breeze.AtmosphereModels: AtmosphereModels,
+    materialize_microphysical_fields,
+    update_microphysical_fields!,
+    compute_moisture_fractions
 
 using Breeze.Thermodynamics:
     MoistureMassFractions,
@@ -50,20 +59,11 @@ using Oceananigans.Fields: ZeroField, ZFaceField
 using Oceananigans.BoundaryConditions: FieldBoundaryConditions, BoundaryCondition, Open
 using Adapt: Adapt, adapt
 
-import Breeze.AtmosphereModels:
-    maybe_adjust_thermodynamic_state,
-    prognostic_field_names,
-    materialize_microphysical_fields,
-    update_microphysical_fields!,
-    compute_moisture_fractions,
-    microphysical_tendency,
-    microphysical_velocities,
-    precipitation_rate,
-    surface_precipitation_flux
-
 include("cloud_microphysics_translations.jl")
 include("zero_moment_microphysics.jl")
 include("one_moment_microphysics.jl")
 include("one_moment_helpers.jl")
+include("two_moment_microphysics.jl")
+include("two_moment_helpers.jl")
 
 end # module BreezeCloudMicrophysicsExt

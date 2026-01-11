@@ -1,4 +1,4 @@
-using DocStringExtensions: TYPEDSIGNATURES
+using DocStringExtensions: TYPEDSIGNATURES, TYPEDEF
 
 using ..Thermodynamics:
     liquid_latent_heat,
@@ -7,7 +7,7 @@ using ..Thermodynamics:
     mixture_heat_capacity
 
 """
-    BulkMicrophysics{N, C, B}
+$(TYPEDEF)
 
 Bulk microphysics scheme with cloud formation and precipitation categories.
 
@@ -23,6 +23,13 @@ struct BulkMicrophysics{N, C, B}
     categories :: C
     precipitation_boundary_condition :: B
 end
+
+# Bulk microphysics schemes (including those from extensions like CloudMicrophysics)
+# use the standard tendency interface, so the model-wide microphysics update is a no-op.
+# We forward to the cloud_formation / saturation-adjustment component to allow specialized
+# cloud formation schemes to hook into the update cycle.
+AtmosphereModels.microphysics_model_update!(bμp::BulkMicrophysics, model) =
+    AtmosphereModels.microphysics_model_update!(bμp.cloud_formation, model)
 
 Base.summary(bμp::BulkMicrophysics) = "BulkMicrophysics"
 
@@ -65,6 +72,9 @@ end
 
 Base.summary(::NonEquilibriumCloudFormation) = "NonEquilibriumCloudFormation"
 
+# NonEquilibriumCloudFormation uses the standard tendency interface,
+# so the model-wide microphysics update is a no-op.
+AtmosphereModels.microphysics_model_update!(::NonEquilibriumCloudFormation, model) = nothing
 #####
 ##### Condensate formation models (for non-equilibrium schemes)
 #####

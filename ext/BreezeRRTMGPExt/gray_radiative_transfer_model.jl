@@ -10,13 +10,11 @@ using Oceananigans.Operators: ℑzᵃᵃᶠ
 using Oceananigans.Grids: xnode, ynode, λnode, φnode, znodes
 using Oceananigans.Grids: AbstractGrid, RectilinearGrid, Center, Face, Flat, Bounded
 using Oceananigans.Fields: ConstantField
-using Breeze.AtmosphereModels: AtmosphereModels, SurfaceRadiativeProperties
+using Breeze.AtmosphereModels: AtmosphereModels, SurfaceRadiativeProperties, RadiativeTransferModel
 
 using RRTMGP.AtmosphericStates: GrayAtmosphericState, GrayOpticalThicknessOGorman2008
 using KernelAbstractions: @kernel, @index
 using Dates: AbstractDateTime, Millisecond
-
-import Breeze.AtmosphereModels: RadiativeTransferModel
 
 # Dispatch on background_atmosphere = Nothing for gray radiation
 const GrayRadiativeTransferModel = RadiativeTransferModel{<:Any, <:Any, <:Any, <:Any, Nothing}
@@ -54,18 +52,18 @@ Construct a gray atmosphere radiative transfer model for the given grid.
 - `diffuse_surface_albedo`: Diffuse surface albedo, 0-1. Can be scalar or 2D field.
 - `solar_constant`: Top-of-atmosphere solar flux in W/m² (default: 1361)
 """
-function RadiativeTransferModel(grid::AbstractGrid,
-                                ::GrayOptics,
-                                constants::ThermodynamicConstants;
-                                optical_thickness = GrayOpticalThicknessOGorman2008(eltype(grid)),
-                                surface_temperature,
-                                coordinate = nothing,
-                                epoch = nothing,
-                                surface_emissivity = 0.98,
-                                direct_surface_albedo = nothing,
-                                diffuse_surface_albedo = nothing,
-                                surface_albedo = nothing,
-                                solar_constant = 1361)
+function AtmosphereModels.RadiativeTransferModel(grid::AbstractGrid,
+                                                 ::GrayOptics,
+                                                 constants::ThermodynamicConstants;
+                                                 optical_thickness = GrayOpticalThicknessOGorman2008(eltype(grid)),
+                                                 surface_temperature,
+                                                 coordinate = nothing,
+                                                 epoch = nothing,
+                                                 surface_emissivity = 0.98,
+                                                 direct_surface_albedo = nothing,
+                                                 diffuse_surface_albedo = nothing,
+                                                 surface_albedo = nothing,
+                                                 solar_constant = 1361)
 
     FT = eltype(grid)
     parameters = RRTMGPParameters(constants)
@@ -190,7 +188,9 @@ function RadiativeTransferModel(grid::AbstractGrid,
                                   shortwave_solver,
                                   upwelling_longwave_flux,
                                   downwelling_longwave_flux,
-                                  downwelling_shortwave_flux)
+                                  downwelling_shortwave_flux,
+                                  nothing,  # liquid_effective_radius = nothing for gray
+                                  nothing)  # ice_effective_radius = nothing for gray
 end
 
 @inline rrtmgp_column_index(i, j, Nx) = i + (j - 1) * Nx
@@ -469,14 +469,14 @@ function copy_fluxes_to_fields!(rtm::GrayRadiativeTransferModel, grid)
     ℐ_sw_dn = rtm.downwelling_shortwave_flux
 
     Nx, Ny, Nz = size(grid)
-    launch!(arch, grid, (Nx, Ny, Nz+1), _copy_rrtmgp_fluxes!,
+    launch!(arch, grid, (Nx, Ny, Nz+1), _copy_gray_fluxes!,
             ℐ_lw_up, ℐ_lw_dn, ℐ_sw_dn, lw_flux_up, lw_flux_dn, sw_flux_dn_dir, grid)
 
     return nothing
 end
 
-@kernel function _copy_rrtmgp_fluxes!(ℐ_lw_up, ℐ_lw_dn, ℐ_sw_dn,
-                                      lw_flux_up, lw_flux_dn, sw_flux_dn_dir, grid)
+@kernel function _copy_gray_fluxes!(ℐ_lw_up, ℐ_lw_dn, ℐ_sw_dn,
+                                    lw_flux_up, lw_flux_dn, sw_flux_dn_dir, grid)
     i, j, k = @index(Global, NTuple)
 
     # RRTMGP uses (nlev, ncol), we use (i, j, k) for ZFaceField

@@ -86,11 +86,21 @@ For example, the terminal velocity of falling rain.
 """
 $(TYPEDSIGNATURES)
 
-Return the tendency of the microphysical field `name` associated with `microphysics` and `thermo`dynamic constants.
-
-TODO: add the function signature when it is stable
+Return the tendency of the microphysical field `name` associated with `microphysics`
+and thermodynamic `constants`.
 """
 @inline microphysical_tendency(i, j, k, grid, microphysics::Nothing, name, ρ, μ, 𝒰, constants) = zero(grid)
+
+"""
+$(TYPEDSIGNATURES)
+
+Apply microphysics model update for the given `microphysics` scheme.
+
+This function is called during `update_state!` to apply microphysics processes
+that operate on the full model state (not the tendency fields).
+Specific microphysics schemes should extend this function.
+"""
+microphysics_model_update!(microphysics::Nothing, model) = nothing
 
 """
 $(TYPEDSIGNATURES)
@@ -137,7 +147,7 @@ precipitation_rate(model, microphysics, phase) = CenterField(model.grid)
 #####
 
 """
-    surface_precipitation_flux(model)
+$(TYPEDSIGNATURES)
 
 Return a 2D `Field` representing the flux of precipitating moisture at the bottom boundary.
 
@@ -147,7 +157,7 @@ the rate at which rain mass leaves the domain through the bottom boundary.
 Units: kg/m²/s (positive = downward flux out of domain)
 
 Arguments:
-- `model`: An `AtmosphereModel` with a microphysics scheme
+- `model`: An [`AtmosphereModel`](@ref) with a microphysics scheme
 
 Returns a 2D `Field` that can be computed and visualized.
 Specific microphysics schemes must extend this function.
@@ -155,4 +165,55 @@ Specific microphysics schemes must extend this function.
 surface_precipitation_flux(model) = surface_precipitation_flux(model, model.microphysics)
 
 # Default: zero flux for Nothing microphysics
-surface_precipitation_flux(model, ::Nothing) = Field{Center, Center, Nothing}(model.grid) 
+surface_precipitation_flux(model, ::Nothing) = Field{Center, Center, Nothing}(model.grid)
+
+#####
+##### Cloud effective radius interface
+#####
+
+"""
+$(TYPEDEF)
+
+Represents cloud particles with a constant effective radius.
+
+# Fields
+- `radius`: The effective radius in microns (μm).
+
+# Example
+
+```julia
+liquid_radius = ConstantRadiusParticles(10.0)  # 10 μm droplets
+ice_radius = ConstantRadiusParticles(30.0)     # 30 μm ice crystals
+```
+"""
+struct ConstantRadiusParticles{FT}
+    radius :: FT
+end
+
+"""
+$(TYPEDSIGNATURES)
+
+Return the effective radius of cloud liquid droplets in microns (μm).
+
+This function dispatches on the `effective_radius_model` argument. The default
+implementation for `ConstantRadiusParticles` returns a constant value.
+
+Microphysics schemes can extend this function to provide diagnosed effective radii
+based on cloud properties.
+"""
+@inline cloud_liquid_effective_radius(i, j, k, grid, effective_radius_model::ConstantRadiusParticles, args...) =
+    effective_radius_model.radius
+
+"""
+$(TYPEDSIGNATURES)
+
+Return the effective radius of cloud ice particles in microns (μm).
+
+This function dispatches on the `effective_radius_model` argument. The default
+implementation for [`ConstantRadiusParticles`](@ref) returns a constant value.
+
+Microphysics schemes can extend this function to provide diagnosed effective radii
+based on cloud properties.
+"""
+@inline cloud_ice_effective_radius(i, j, k, grid, effective_radius_model::ConstantRadiusParticles, args...) =
+    effective_radius_model.radius

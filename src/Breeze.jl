@@ -21,6 +21,8 @@ export
     BackgroundAtmosphere,
     GrayOptics,
     ClearSkyOptics,
+    AllSkyOptics,
+    ConstantRadiusParticles,
     TemperatureField,
     IdealGas,
     CondensedPhase,
@@ -53,9 +55,11 @@ export
     WarmPhaseEquilibrium,
     SaturationSpecificHumidity,
     SaturationSpecificHumidityField,
+    equilibrium_saturation_specific_humidity,
     RelativeHumidity,
     RelativeHumidityField,
     BulkMicrophysics,
+    compute_hydrostatic_pressure!,
     NonEquilibriumCloudFormation,
 
     # BoundaryConditions
@@ -65,7 +69,10 @@ export
 
     # Forcing utilities
     geostrophic_forcings,
-    SubsidenceForcing
+    SubsidenceForcing,
+
+    # TimeSteppers
+    SSPRungeKutta3
 
 using Oceananigans: Oceananigans, @at, AnisotropicMinimumDissipation, Average,
                     AveragedTimeInterval, BackgroundField, BetaPlane, Bounded,
@@ -130,6 +137,13 @@ using .MoistAirBuoyancies
 include("AtmosphereModels/AtmosphereModels.jl")
 using .AtmosphereModels
 
+# Thermodynamic formulation modules (included after AtmosphereModels so they can dispatch on AtmosphereModel)
+include("StaticEnergyFormulations/StaticEnergyFormulations.jl")
+using .StaticEnergyFormulations: StaticEnergyFormulation
+
+include("PotentialTemperatureFormulations/PotentialTemperatureFormulations.jl")
+using .PotentialTemperatureFormulations: LiquidIcePotentialTemperatureFormulation
+
 # Dynamics modules (included after AtmosphereModels so they can dispatch on AtmosphereModel)
 include("AnelasticEquations/AnelasticEquations.jl")
 using .AnelasticEquations: AnelasticDynamics, AnelasticModel
@@ -154,5 +168,8 @@ using .BoundaryConditions
 
 include("Forcings/Forcings.jl")
 using .Forcings
+
+include("TimeSteppers/TimeSteppers.jl")
+using .TimeSteppers
 
 end # module Breeze

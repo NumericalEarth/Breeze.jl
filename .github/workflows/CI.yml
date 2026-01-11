@@ -31,14 +31,14 @@ jobs:
     runs-on: ${{ matrix.os }}
     timeout-minutes: 90
     container:
-      image: ${{ (startsWith(matrix.os, 'aws-linux-nvidia-gpu-') && 'ghcr.io/numericalearth/breeze-docker-images:test' ) || '' }}
+      image: ${{ (startsWith(matrix.os, 'aws-linux-nvidia-gpu-') && format('ghcr.io/numericalearth/breeze-docker-images:test-julia_{0}', matrix.version) ) || '' }}
       options: --gpus=all
     strategy:
       fail-fast: false
       matrix:
         version:
           - "min"
-          - "1.12.2"
+          - "1.12.4"
         os:
           - ubuntu-latest
           - macOS-latest
@@ -49,7 +49,7 @@ jobs:
           - version: "min"
             os: windows-latest
         include:
-          - version: "1.12.2"
+          - version: "1.12.4"
             os: aws-linux-nvidia-gpu-l4
             arch: "default"
     steps:
@@ -62,9 +62,17 @@ jobs:
           arch: ${{ matrix.arch }}
       - uses: julia-actions/cache@v2
         id: julia-cache
-        # On self-hosted runners we don't use the cache: in re-use mode we run on a machine
-        # which has just run another job, which would conflict with the existing cache.
-        if: ${{ ! startsWith(matrix.os, 'aws-linux-nvidia-gpu-') }}
+        with:
+          # On self-hosted runners we use the prebuilt Docker container, which already
+          # caches pkgimages and such, so we don't need to cache here most things.  Only
+          # useful thing is the scratchspaces, in particular ParallelTestRunner's to make
+          # scheduling of test jobs more efficients.
+          cache-artifacts: ${{ ! startsWith(matrix.os, 'aws-linux-nvidia-gpu-') }}
+          cache-packages: ${{ ! startsWith(matrix.os, 'aws-linux-nvidia-gpu-') }}
+          cache-registries: ${{ ! startsWith(matrix.os, 'aws-linux-nvidia-gpu-') }}
+          cache-compiled: ${{ ! startsWith(matrix.os, 'aws-linux-nvidia-gpu-') }}
+          cache-scratchspaces: true
+          cache-logs: ${{ ! startsWith(matrix.os, 'aws-linux-nvidia-gpu-') }}
       - name: "Set test arguments and other environment variables"
         shell: bash
         run: |
@@ -75,6 +83,10 @@ jobs:
               # When running the tests on a GPU node we always want to make sure
               # CUDA is functional.
               echo "BREEZE_ENSURE_CUDA_FUNCTIONAL=true" >> "${GITHUB_ENV}"
+              # On the GPU runners we sometimes run out-of-memory because we have several
+              # concurrent jobs, some of them reaching a large memory usage.  We reduce the
+              # number of jobs to avoid memory issues.
+              TEST_ARGS+=(--jobs=$(($(nproc) - 1)))
           fi
 
           if [[ ${{ runner.os }} == "macOS" ]]; then
@@ -82,7 +94,7 @@ jobs:
               # than the single one it'd use by default.
               TEST_ARGS+=(--jobs=2)
           fi
-          echo "runtest_test_args=${TEST_ARGS[@]}" >> "${GITHUB_ENV}"
+          echo "runtest_test_args=${TEST_ARGS[@]}" | tee "${GITHUB_ENV}"
       - name: Prepare test environment
         if: ${{ startsWith(matrix.os, 'aws-linux-nvidia-gpu-') }}
         shell: bash
@@ -115,7 +127,7 @@ jobs:
         continue-on-error: true
       - name: Save Julia depot cache on cancel or failure
         id: julia-cache-save
-        if: ${{ ! startsWith(matrix.os, 'aws-linux-nvidia-gpu-') && (cancelled() || failure()) }}
+        if: ${{ (cancelled() || failure()) }}
         uses: actions/cache/save@v5
         with:
           path: |

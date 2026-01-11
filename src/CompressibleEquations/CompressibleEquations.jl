@@ -12,8 +12,8 @@ The fully compressible Euler equations in conservation form are:
 
 ```math
 \\begin{aligned}
-&\\text{Mass:} && \\partial_t \\rho + \\nabla \\cdot (\\rho \\mathbf{u}) = 0 \\\\
-&\\text{Momentum:} && \\partial_t (\\rho \\mathbf{u}) + \\nabla \\cdot (\\rho \\mathbf{u} \\mathbf{u}) + \\nabla p = -\\rho g \\hat{\\mathbf{z}} + \\rho \\mathbf{f} + \\nabla \\cdot \\boldsymbol{\\mathcal{T}}
+&\\text{Mass:} && \\partial_t \\rho + \\boldsymbol{\\nabla \\cdot} (\\rho \\boldsymbol{u}) = 0 \\\\
+&\\text{Momentum:} && \\partial_t (\\rho \\boldsymbol{u}) + \\boldsymbol{\\nabla \\cdot} (\\rho \\boldsymbol{u} \\boldsymbol{u}) + \\boldsymbol{\\nabla} p = -\\rho g \\hat{\\boldsymbol{z}} + \\rho \\boldsymbol{f} + \\boldsymbol{\\nabla \\cdot \\mathcal{T}}
 \\end{aligned}
 ```
 
@@ -41,31 +41,8 @@ using Oceananigans.Utils: prettysummary, launch!
 
 using Breeze.Thermodynamics: mixture_gas_constant, mixture_heat_capacity
 
-using Breeze.AtmosphereModels: AtmosphereModel, compute_moisture_fractions
-using Breeze.AtmosphereModels.PotentialTemperatureFormulations: LiquidIcePotentialTemperatureFormulation
-
-# Import interface functions to extend
-import Breeze.AtmosphereModels:
-    materialize_dynamics,
-    materialize_momentum_and_velocities,
-    dynamics_pressure_solver,
-    dynamics_density,
-    dynamics_pressure,
-    surface_pressure,
-    standard_pressure,
-    mean_pressure,
-    pressure_anomaly,
-    total_pressure,
-    buoyancy_forceᶜᶜᶜ,
-    prognostic_dynamics_field_names,
-    additional_dynamics_field_names,
-    dynamics_prognostic_fields,
-    initialize_model_thermodynamics!,
-    compute_dynamics_tendency!,
-    compute_auxiliary_dynamics_variables!,
-    x_pressure_gradient,
-    y_pressure_gradient,
-    z_pressure_gradient
+using Breeze.AtmosphereModels: AtmosphereModels, AtmosphereModel, compute_moisture_fractions, dynamics_density, standard_pressure
+using Breeze.PotentialTemperatureFormulations: LiquidIcePotentialTemperatureFormulation
 
 include("compressible_dynamics.jl")
 include("compressible_buoyancy.jl")
@@ -77,4 +54,3 @@ include("compressible_density_tendency.jl")
 include("compressible_time_stepping.jl")
 
 end # module
-
