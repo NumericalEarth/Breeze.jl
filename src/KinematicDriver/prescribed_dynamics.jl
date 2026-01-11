@@ -15,6 +15,11 @@ Base.summary(::PrescribedDensity) = "PrescribedDensity"
 Base.eltype(pd::PrescribedDensity) = eltype(pd.density)
 Base.show(io::IO, d::PrescribedDensity) = print(io, "PrescribedDensity(", summary(d.density), ")")
 
+Adapt.adapt_structure(to, pd::PrescribedDensity) = PrescribedDensity(adapt(to, pd.density))
+
+Oceananigans.Architectures.on_architecture(to, pd::PrescribedDensity) =
+    PrescribedDensity(on_architecture(to, pd.density))
+
 #####
 ##### PrescribedDynamics: kinematic model dynamics
 #####
