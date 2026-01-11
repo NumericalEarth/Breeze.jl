@@ -162,6 +162,7 @@ nothing #hide
     in_upper = z > FT(6000)   # zₛ + 1000
     return ifelse(in_lower, u_lower, ifelse(in_upper, u_upper, u_transition))
 end
+nothing #hide
 
 # ## Initial thermodynamic profiles
 #
