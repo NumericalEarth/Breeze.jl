@@ -51,8 +51,13 @@ function surface_density(ref::ReferenceState)
     return @allowscalar ℑzᵃᵃᶠ(1, 1, 1, grid, ρ)
 end
 
-# Internal helper for computing ρ₀ during ReferenceState construction
-@inline function _surface_density(p₀, θ₀, constants)
+"""
+    surface_density(p₀, θ₀, constants)
+
+Compute the surface air density from surface pressure `p₀`, surface temperature `θ₀`,
+and thermodynamic `constants` using the ideal gas law for dry air.
+"""
+@inline function surface_density(p₀, θ₀, constants)
     Rᵈ = dry_air_gas_constant(constants)
     return p₀ / (Rᵈ * θ₀)
 end
@@ -82,7 +87,7 @@ reference pressure and temperature.
     Rᵈ = dry_air_gas_constant(constants)
     cᵖᵈ = constants.dry_air.heat_capacity
     pᵣ = adiabatic_hydrostatic_pressure(z, p₀, θ₀, constants)
-    ρ₀ = _surface_density(p₀, θ₀, constants)
+    ρ₀ = surface_density(p₀, θ₀, constants)
     return ρ₀ * (pᵣ / p₀)^(1 - Rᵈ / cᵖᵈ)
 end
 
@@ -115,7 +120,7 @@ function ReferenceState(grid, constants=ThermodynamicConstants(eltype(grid));
     pˢᵗ = convert(FT, standard_pressure)
     loc = (nothing, nothing, Center())
 
-    ρ₀ = _surface_density(p₀, θ₀, constants)
+    ρ₀ = surface_density(p₀, θ₀, constants)
     ρ_bcs = FieldBoundaryConditions(grid, loc, bottom=ValueBoundaryCondition(ρ₀))
     ρᵣ = Field{Nothing, Nothing, Center}(grid, boundary_conditions=ρ_bcs)
     set!(ρᵣ, z -> adiabatic_hydrostatic_density(z, p₀, θ₀, constants))
