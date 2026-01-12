@@ -92,7 +92,7 @@ end
     
     total_moisture_final = total_moisture_mass(model)
     
-    rtol = FT == Float32 ? FT(1e-3) : FT(1e-6)
+    rtol = FT == Float32 ? 1f-3 : 1e-6
     @test isapprox(total_moisture_final, total_moisture_initial; rtol)
     
     # Verify terminal velocity is zero at bottom (impenetrable)
