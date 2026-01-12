@@ -164,7 +164,7 @@ end
     Oceananigans.defaults.FloatType = FT
     model, _ = setup_test_model(FT; precipitation_boundary_condition=ImpenetrableBoundaryCondition())
     
-    set!(model; θ=FT(300), qᵗ=FT(0.015), qᶜˡ=FT(0.001), qʳ=FT(0.001))
+    set!(model; θ=300, qᵗ=0.015, qᶜˡ=0.001, qʳ=0.001)
     
     ρθ_column_initial = column_integrated_rho_theta(model)
     
