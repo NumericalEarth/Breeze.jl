@@ -32,15 +32,15 @@ end
 ##### Field naming interface
 #####
 
-prognostic_thermodynamic_field_names(::LiquidIcePotentialTemperatureFormulation) = tuple(:ρθ)
-additional_thermodynamic_field_names(::LiquidIcePotentialTemperatureFormulation) = tuple(:θ)
-thermodynamic_density_name(::LiquidIcePotentialTemperatureFormulation) = :ρθ
-thermodynamic_density(formulation::LiquidIcePotentialTemperatureFormulation) = formulation.potential_temperature_density
+AtmosphereModels.prognostic_thermodynamic_field_names(::LiquidIcePotentialTemperatureFormulation) = tuple(:ρθ)
+AtmosphereModels.additional_thermodynamic_field_names(::LiquidIcePotentialTemperatureFormulation) = tuple(:θ)
+AtmosphereModels.thermodynamic_density_name(::LiquidIcePotentialTemperatureFormulation) = :ρθ
+AtmosphereModels.thermodynamic_density(formulation::LiquidIcePotentialTemperatureFormulation) = formulation.potential_temperature_density
 
 # Val-based versions for pre-materialization (called via Symbol fallback in interface)
-prognostic_thermodynamic_field_names(::Val{:LiquidIcePotentialTemperature}) = tuple(:ρθ)
-additional_thermodynamic_field_names(::Val{:LiquidIcePotentialTemperature}) = tuple(:θ)
-thermodynamic_density_name(::Val{:LiquidIcePotentialTemperature}) = :ρθ
+AtmosphereModels.prognostic_thermodynamic_field_names(::Val{:LiquidIcePotentialTemperature}) = tuple(:ρθ)
+AtmosphereModels.additional_thermodynamic_field_names(::Val{:LiquidIcePotentialTemperature}) = tuple(:θ)
+AtmosphereModels.thermodynamic_density_name(::Val{:LiquidIcePotentialTemperature}) = :ρθ
 
 Oceananigans.fields(formulation::LiquidIcePotentialTemperatureFormulation) = (; θ=formulation.potential_temperature)
 Oceananigans.prognostic_fields(formulation::LiquidIcePotentialTemperatureFormulation) = (; ρθ=formulation.potential_temperature_density)
@@ -49,7 +49,7 @@ Oceananigans.prognostic_fields(formulation::LiquidIcePotentialTemperatureFormula
 ##### Materialization
 #####
 
-function materialize_formulation(::Val{:LiquidIcePotentialTemperature}, dynamics, grid, boundary_conditions)
+function AtmosphereModels.materialize_formulation(::Val{:LiquidIcePotentialTemperature}, dynamics, grid, boundary_conditions)
     potential_temperature_density = CenterField(grid, boundary_conditions=boundary_conditions.ρθ)
     potential_temperature = CenterField(grid)  # θ = ρθ / ρ (diagnostic)
     return LiquidIcePotentialTemperatureFormulation(potential_temperature_density, potential_temperature)
@@ -59,7 +59,7 @@ end
 ##### Auxiliary variable computation
 #####
 
-function compute_auxiliary_thermodynamic_variables!(formulation::LiquidIcePotentialTemperatureFormulation, dynamics, i, j, k, grid)
+function AtmosphereModels.compute_auxiliary_thermodynamic_variables!(formulation::LiquidIcePotentialTemperatureFormulation, dynamics, i, j, k, grid)
     ρ = dynamics_density(dynamics)
     @inbounds begin
         ρᵢ = ρ[i, j, k]
@@ -79,10 +79,10 @@ $(TYPEDSIGNATURES)
 Build a `LiquidIcePotentialTemperatureState` at grid point `(i, j, k)` from the
 given `formulation`, `dynamics`, and pre-computed moisture mass fractions `q`.
 """
-function diagnose_thermodynamic_state(i, j, k, grid,
-                                      formulation::LiquidIcePotentialTemperatureFormulation,
-                                      dynamics,
-                                      q)
+function AtmosphereModels.diagnose_thermodynamic_state(i, j, k, grid,
+                                                       formulation::LiquidIcePotentialTemperatureFormulation,
+                                                       dynamics,
+                                                       q)
 
     θ = @inbounds formulation.potential_temperature[i, j, k]
     pᵣ = @inbounds dynamics_pressure(dynamics)[i, j, k]
@@ -95,12 +95,12 @@ end
 ##### Prognostic field collection
 #####
 
-function collect_prognostic_fields(formulation::LiquidIcePotentialTemperatureFormulation,
-                                   dynamics,
-                                   momentum,
-                                   moisture_density,
-                                   microphysical_fields,
-                                   tracers)
+function AtmosphereModels.collect_prognostic_fields(formulation::LiquidIcePotentialTemperatureFormulation,
+                                                    dynamics,
+                                                    momentum,
+                                                    moisture_density,
+                                                    microphysical_fields,
+                                                    tracers)
 
     ρθ = formulation.potential_temperature_density
     thermodynamic_variables = (ρθ=ρθ, ρqᵗ=moisture_density)

@@ -12,7 +12,7 @@ $(TYPEDSIGNATURES)
 Initialize thermodynamic state for anelastic models.
 Sets the initial potential temperature to the reference state value.
 """
-function initialize_model_thermodynamics!(model::AnelasticModel)
+function AtmosphereModels.initialize_model_thermodynamics!(model::AnelasticModel)
     θ₀ = model.dynamics.reference_state.potential_temperature
     set!(model, θ=θ₀)
     return nothing

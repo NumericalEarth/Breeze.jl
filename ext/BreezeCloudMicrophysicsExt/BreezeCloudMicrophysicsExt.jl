@@ -15,10 +15,13 @@ using CloudMicrophysics.Microphysics1M:
     terminal_velocity
 
 # Two-moment microphysics
-import CloudMicrophysics.Microphysics2M as CM2
+using CloudMicrophysics: Microphysics2M as CM2
 
 using Breeze
-using Breeze.AtmosphereModels
+using Breeze.AtmosphereModels: AtmosphereModels,
+    materialize_microphysical_fields,
+    update_microphysical_fields!,
+    compute_moisture_fractions
 
 using Breeze.Thermodynamics:
     MoistureMassFractions,
@@ -55,17 +58,6 @@ using Oceananigans.AbstractOperations: KernelFunctionOperation
 using Oceananigans.Fields: ZeroField, ZFaceField
 using Oceananigans.BoundaryConditions: FieldBoundaryConditions, BoundaryCondition, Open
 using Adapt: Adapt, adapt
-
-import Breeze.AtmosphereModels:
-    maybe_adjust_thermodynamic_state,
-    prognostic_field_names,
-    materialize_microphysical_fields,
-    update_microphysical_fields!,
-    compute_moisture_fractions,
-    microphysical_tendency,
-    microphysical_velocities,
-    precipitation_rate,
-    surface_precipitation_flux
 
 include("cloud_microphysics_translations.jl")
 include("zero_moment_microphysics.jl")

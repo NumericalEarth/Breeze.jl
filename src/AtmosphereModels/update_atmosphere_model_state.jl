@@ -1,7 +1,4 @@
-using ..Thermodynamics:
-    Thermodynamics,
-    mixture_heat_capacity,
-    mixture_gas_constant
+using ..Thermodynamics: Thermodynamics, mixture_heat_capacity, mixture_gas_constant
 
 using Oceananigans.BoundaryConditions: fill_halo_regions!, compute_x_bcs!, compute_y_bcs!, compute_z_bcs!
 using Oceananigans.Grids: Bounded, Periodic, Flat, topology, halo_size
@@ -13,12 +10,16 @@ using Oceananigans.Operators: ℑxᶠᵃᵃ, ℑyᵃᶠᵃ, ℑzᵃᵃᶠ
 
 function TimeSteppers.update_state!(model::AtmosphereModel, callbacks=[]; compute_tendencies=true)
     tracer_density_to_specific!(model) # convert tracer density to specific tracer distribution
+
     fill_halo_regions!(prognostic_fields(model), model.clock, fields(model), async=true)
     compute_auxiliary_variables!(model)
     update_radiation!(model.radiation, model)
     compute_forcings!(model)
+    microphysics_model_update!(model.microphysics, model)
     compute_tendencies && compute_tendencies!(model)
+
     tracer_specific_to_density!(model) # convert specific tracer distribution to tracer density
+
     return nothing
 end
 

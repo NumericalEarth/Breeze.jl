@@ -28,7 +28,7 @@ $(TYPEDSIGNATURES)
 Construct a "stub" `AnelasticDynamics` with just the `reference_state`.
 The pressure anomaly field is materialized later in the model constructor.
 """
-function default_dynamics(grid, constants)
+function AtmosphereModels.default_dynamics(grid, constants)
     reference_state = ReferenceState(grid, constants)
     return AnelasticDynamics(reference_state)
 end
@@ -38,7 +38,7 @@ $(TYPEDSIGNATURES)
 
 Materialize a stub `AnelasticDynamics` into a full dynamics object with the pressure anomaly field.
 """
-function materialize_dynamics(dynamics::AnelasticDynamics, grid, boundary_conditions)
+function AtmosphereModels.materialize_dynamics(dynamics::AnelasticDynamics, grid, boundary_conditions)
     pressure_anomaly = CenterField(grid)
     return AnelasticDynamics(dynamics.reference_state, pressure_anomaly)
 end
@@ -52,7 +52,7 @@ $(TYPEDSIGNATURES)
 
 Return the mean (reference) pressure field for `AnelasticDynamics`, in Pa.
 """
-mean_pressure(dynamics::AnelasticDynamics) = dynamics.reference_state.pressure
+AtmosphereModels.mean_pressure(dynamics::AnelasticDynamics) = dynamics.reference_state.pressure
 
 """
 $(TYPEDSIGNATURES)
@@ -61,7 +61,7 @@ Return the non-hydrostatic pressure anomaly for `AnelasticDynamics`, in Pa.
 Note: the internal field stores the kinematic pressure `p'/ρᵣ`; this function
 returns `ρᵣ * p'/ρᵣ = p'` in Pa.
 """
-function pressure_anomaly(dynamics::AnelasticDynamics)
+function AtmosphereModels.pressure_anomaly(dynamics::AnelasticDynamics)
     ρᵣ = dynamics.reference_state.density
     p′_over_ρᵣ = dynamics.pressure_anomaly
     return ρᵣ * p′_over_ρᵣ
@@ -74,7 +74,7 @@ Return the total pressure for `AnelasticDynamics`, in Pa.
 This is `p = p̄ + p'`, where `p̄` is the hydrostatic reference pressure
 and `p'` is the non-hydrostatic pressure anomaly.
 """
-function total_pressure(dynamics::AnelasticDynamics)
+function AtmosphereModels.total_pressure(dynamics::AnelasticDynamics)
     p̄ = mean_pressure(dynamics)
     p′ = pressure_anomaly(dynamics)
     return p̄ + p′
@@ -92,7 +92,7 @@ Return the reference density field for `AnelasticDynamics`.
 For anelastic models, the dynamics density is the time-independent
 reference state density `ρᵣ(z)`.
 """
-dynamics_density(dynamics::AnelasticDynamics) = dynamics.reference_state.density
+AtmosphereModels.dynamics_density(dynamics::AnelasticDynamics) = dynamics.reference_state.density
 
 """
 $(TYPEDSIGNATURES)
@@ -102,29 +102,29 @@ Return the reference pressure field for `AnelasticDynamics`.
 For anelastic models, the dynamics pressure is the time-independent
 hydrostatic reference state pressure `pᵣ(z)`.
 """
-dynamics_pressure(dynamics::AnelasticDynamics) = dynamics.reference_state.pressure
+AtmosphereModels.dynamics_pressure(dynamics::AnelasticDynamics) = dynamics.reference_state.pressure
 
 #####
 ##### Prognostic fields
 #####
 
 # Anelastic dynamics has no prognostic density - the density is the fixed reference state
-prognostic_dynamics_field_names(::AnelasticDynamics) = ()
-additional_dynamics_field_names(::AnelasticDynamics) = ()
+AtmosphereModels.prognostic_dynamics_field_names(::AnelasticDynamics) = ()
+AtmosphereModels.additional_dynamics_field_names(::AnelasticDynamics) = ()
 
 """
 $(TYPEDSIGNATURES)
 
 Return the surface pressure from the reference state for boundary condition regularization.
 """
-surface_pressure(dynamics::AnelasticDynamics) = dynamics.reference_state.surface_pressure
+AtmosphereModels.surface_pressure(dynamics::AnelasticDynamics) = dynamics.reference_state.surface_pressure
 
 """
 $(TYPEDSIGNATURES)
 
 Return the standard pressure from the reference state for potential temperature calculations.
 """
-standard_pressure(dynamics::AnelasticDynamics) = dynamics.reference_state.standard_pressure
+AtmosphereModels.standard_pressure(dynamics::AnelasticDynamics) = dynamics.reference_state.standard_pressure
 
 #####
 ##### Show methods
@@ -149,7 +149,7 @@ end
 ##### Momentum and velocity materialization
 #####
 
-function materialize_momentum_and_velocities(dynamics::AnelasticDynamics, grid, boundary_conditions)
+function AtmosphereModels.materialize_momentum_and_velocities(dynamics::AnelasticDynamics, grid, boundary_conditions)
     ρu = XFaceField(grid, boundary_conditions=boundary_conditions.ρu)
     ρv = YFaceField(grid, boundary_conditions=boundary_conditions.ρv)
     ρw = ZFaceField(grid, boundary_conditions=boundary_conditions.ρw)

@@ -13,13 +13,13 @@ using Breeze.Thermodynamics:
 
 # Import SaturationSpecificHumidity from AtmosphereModels.Diagnostics
 using ..AtmosphereModels.Diagnostics:
+    Diagnostics,
     SaturationSpecificHumidity,
-    SaturationSpecificHumidityField
-
-import ..AtmosphereModels.Diagnostics: microphysics_phase_equilibrium
+    SaturationSpecificHumidityField,
+    microphysics_phase_equilibrium
 
 # Extend microphysics_phase_equilibrium for SaturationAdjustment
-@inline microphysics_phase_equilibrium(μ::SaturationAdjustment) = μ.equilibrium
+@inline Diagnostics.microphysics_phase_equilibrium(μ::SaturationAdjustment) = μ.equilibrium
 
 const C = Center
 
@@ -53,13 +53,15 @@ $(TYPEDSIGNATURES)
 
 Return a `KernelFunctionOperation` representing the *relative humidity* ``ℋ``,
 defined as the ratio of vapor pressure to saturation vapor pressure:
-
 ```math
 ℋ = \\frac{pᵛ}{pᵛ⁺}
 ```
-
 where ``pᵛ`` is the vapor pressure (partial pressure of water vapor) computed from
-the ideal gas law ``pᵛ = ρ qᵛ Rᵛ T``, and ``pᵛ⁺`` is the saturation vapor pressure.
+the ideal gas law
+```math
+pᵛ = ρ qᵛ Rᵛ T
+```
+and ``pᵛ⁺`` is the saturation vapor pressure.
 
 For unsaturated conditions, ``ℋ < 1``. For saturated conditions with saturation
 adjustment microphysics, ``ℋ = 1`` (or very close to it due to numerical precision).
@@ -145,7 +147,7 @@ function (d::AdjustmentRH)(i, j, k, grid)
 
     # Compute moisture fractions (vapor, liquid, ice)
     q = compute_moisture_fractions(i, j, k, grid, d.microphysics, ρᵣ, qᵗ, d.microphysical_fields)
-    
+
     # Vapor specific humidity
     qᵛ = q.vapor
 

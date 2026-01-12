@@ -16,9 +16,9 @@ using Oceananigans.Operators: ∂xᶠᶜᶜ, ∂yᶜᶠᶜ, ∂zᶜᶜᶠ
 ##### Pressure gradient for compressible dynamics
 #####
 
-@inline x_pressure_gradient(i, j, k, grid, d::CompressibleDynamics) = ∂xᶠᶜᶜ(i, j, k, grid, d.pressure)
-@inline y_pressure_gradient(i, j, k, grid, d::CompressibleDynamics) = ∂yᶜᶠᶜ(i, j, k, grid, d.pressure)
-@inline z_pressure_gradient(i, j, k, grid, d::CompressibleDynamics) = ∂zᶜᶜᶠ(i, j, k, grid, d.pressure)
+@inline AtmosphereModels.x_pressure_gradient(i, j, k, grid, d::CompressibleDynamics) = ∂xᶠᶜᶜ(i, j, k, grid, d.pressure)
+@inline AtmosphereModels.y_pressure_gradient(i, j, k, grid, d::CompressibleDynamics) = ∂yᶜᶠᶜ(i, j, k, grid, d.pressure)
+@inline AtmosphereModels.z_pressure_gradient(i, j, k, grid, d::CompressibleDynamics) = ∂zᶜᶜᶠ(i, j, k, grid, d.pressure)
 
 #####
 ##### Density tendency from continuity equation
@@ -31,12 +31,12 @@ Compute the density tendency for compressible dynamics using the continuity equa
 
 The density evolves according to:
 ```math
-\\frac{\\partial \\rho}{\\partial t} = -\\nabla \\cdot (\\rho \\mathbf{u})
+\\partial_t \\rho = -\\boldsymbol{\\nabla \\cdot} (\\rho \\boldsymbol{u})
 ```
 
 Since momentum `ρu` is already available, this is simply the negative divergence of momentum.
 """
-function compute_dynamics_tendency!(model::CompressibleModel)
+function AtmosphereModels.compute_dynamics_tendency!(model::CompressibleModel)
     grid = model.grid
     arch = grid.architecture
     Gρ = model.timestepper.Gⁿ.ρ

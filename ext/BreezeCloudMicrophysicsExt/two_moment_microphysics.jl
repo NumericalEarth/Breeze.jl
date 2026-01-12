@@ -27,10 +27,10 @@ using CloudMicrophysics.Parameters:
 """
     TwoMomentCategories{W, AP, LV, RV}
 
-Parameters for two-moment (Seifert-Beheng 2006) warm-rain microphysics.
+Parameters for two-moment ([Seifert and Beheng, 2006](@cite SeifertBeheng2006)) warm-rain microphysics.
 
 # Fields
-- `warm_processes`: `SB2006` parameters bundling autoconversion, accretion, self-collection,
+- `warm_processes`: [Seifert and Beheng (2006)](@cite SeifertBeheng2006) parameters bundling autoconversion, accretion, self-collection,
   breakup, evaporation, number adjustment, and size distribution parameters
 - `air_properties`: `AirProperties` for thermodynamic calculations
 - `cloud_liquid_fall_velocity`: `StokesRegimeVelType` for cloud droplet terminal velocity
@@ -52,10 +52,10 @@ Base.summary(::TwoMomentCategories) = "TwoMomentCategories"
 
 """
     two_moment_cloud_microphysics_categories(FT = Oceananigans.defaults.FloatType;
-                                              warm_processes = SB2006(FT),
-                                              air_properties = AirProperties(FT),
-                                              cloud_liquid_fall_velocity = StokesRegimeVelType(FT),
-                                              rain_fall_velocity = SB2006VelType(FT))
+                                             warm_processes = SB2006(FT),
+                                             air_properties = AirProperties(FT),
+                                             cloud_liquid_fall_velocity = StokesRegimeVelType(FT),
+                                             rain_fall_velocity = SB2006VelType(FT))
 
 Construct `TwoMomentCategories` with default Seifert-Beheng 2006 parameters.
 
@@ -65,12 +65,11 @@ Construct `TwoMomentCategories` with default Seifert-Beheng 2006 parameters.
 - `cloud_liquid_fall_velocity`: Terminal velocity parameters for cloud droplets (Stokes regime)
 - `rain_fall_velocity`: Terminal velocity parameters for rain drops
 """
-function two_moment_cloud_microphysics_categories(
-    FT::DataType = Oceananigans.defaults.FloatType;
-    warm_processes = SB2006(FT),
-    air_properties = AirProperties(FT),
-    cloud_liquid_fall_velocity = StokesRegimeVelType(FT),
-    rain_fall_velocity = SB2006VelType(FT))
+function two_moment_cloud_microphysics_categories(FT::DataType = Oceananigans.defaults.FloatType;
+                                                  warm_processes = SB2006(FT),
+                                                  air_properties = AirProperties(FT),
+                                                  cloud_liquid_fall_velocity = StokesRegimeVelType(FT),
+                                                  rain_fall_velocity = SB2006VelType(FT))
 
     return TwoMomentCategories(warm_processes, air_properties,
                                cloud_liquid_fall_velocity, rain_fall_velocity)
@@ -86,12 +85,12 @@ const WPNE2M = WarmPhaseNonEquilibrium2M
 
 """
     TwoMomentCloudMicrophysics(FT = Oceananigans.defaults.FloatType;
-                                cloud_formation = NonEquilibriumCloudFormation(nothing, nothing),
-                                categories = two_moment_cloud_microphysics_categories(FT),
-                                precipitation_boundary_condition = nothing)
+                               cloud_formation = NonEquilibriumCloudFormation(nothing, nothing),
+                               categories = two_moment_cloud_microphysics_categories(FT),
+                               precipitation_boundary_condition = nothing)
 
 Return a `TwoMomentCloudMicrophysics` microphysics scheme for warm-rain precipitation
-using the Seifert-Beheng (2006) two-moment parameterization.
+using the [Seifert and Beheng (2006)](@cite SeifertBeheng2006) two-moment parameterization.
 
 The two-moment scheme tracks both mass and number concentration for cloud liquid and rain,
 using CloudMicrophysics.jl 2M processes:
@@ -121,7 +120,7 @@ The prognostic variables are:
   - `ImpenetrableBoundaryCondition()`: Rain collects at the bottom (zero terminal velocity at surface)
 
 See the [CloudMicrophysics.jl 2M documentation](https://clima.github.io/CloudMicrophysics.jl/dev/Microphysics2M/)
-for details on the Seifert-Beheng 2006 scheme.
+for details on the [Seifert and Beheng (2006)](@cite SeifertBeheng2006) scheme.
 
 # References
 * Seifert, A. and Beheng, K. D. (2006). A two-moment cloud microphysics
@@ -129,9 +128,9 @@ for details on the Seifert-Beheng 2006 scheme.
     Meteorol. Atmos. Phys., 92, 45-66. https://doi.org/10.1007/s00703-005-0112-4
 """
 function TwoMomentCloudMicrophysics(FT::DataType = Oceananigans.defaults.FloatType;
-                                     cloud_formation = NonEquilibriumCloudFormation(nothing, nothing),
-                                     categories = two_moment_cloud_microphysics_categories(FT),
-                                     precipitation_boundary_condition = nothing)
+                                    cloud_formation = NonEquilibriumCloudFormation(nothing, nothing),
+                                    categories = two_moment_cloud_microphysics_categories(FT),
+                                    precipitation_boundary_condition = nothing)
 
     # Two-moment scheme requires non-equilibrium cloud formation
     if !(cloud_formation isa NonEquilibriumCloudFormation)
@@ -171,10 +170,10 @@ materialize_2m_condensate_formation(::Any, categories) = ConstantRateCondensateF
 #####
 
 # Default fallback for tendencies that are not explicitly implemented
-@inline microphysical_tendency(i, j, k, grid, bμp::TwoMomentCloudMicrophysics, args...) = zero(grid)
+@inline AtmosphereModels.microphysical_tendency(i, j, k, grid, bμp::TwoMomentCloudMicrophysics, args...) = zero(grid)
 
 # Default fallback for velocities
-@inline microphysical_velocities(bμp::TwoMomentCloudMicrophysics, μ, name) = nothing
+@inline AtmosphereModels.microphysical_velocities(bμp::TwoMomentCloudMicrophysics, μ, name) = nothing
 
 #####
 ##### Relaxation timescale for non-equilibrium cloud formation
@@ -186,7 +185,7 @@ materialize_2m_condensate_formation(::Any, categories) = ConstantRateCondensateF
 ##### Prognostic field names
 #####
 
-prognostic_field_names(::WPNE2M) = (:ρqᶜˡ, :ρnᶜˡ, :ρqʳ, :ρnʳ)
+AtmosphereModels.prognostic_field_names(::WPNE2M) = (:ρqᶜˡ, :ρnᶜˡ, :ρqʳ, :ρnʳ)
 
 #####
 ##### Field materialization
@@ -194,7 +193,7 @@ prognostic_field_names(::WPNE2M) = (:ρqᶜˡ, :ρnᶜˡ, :ρqʳ, :ρnʳ)
 
 const two_moment_center_field_names = (:ρqᶜˡ, :ρnᶜˡ, :ρqʳ, :ρnʳ, :qᵛ, :qˡ, :qᶜˡ, :qʳ, :nᶜˡ, :nʳ)
 
-function materialize_microphysical_fields(bμp::WPNE2M, grid, bcs)
+function AtmosphereModels.materialize_microphysical_fields(bμp::WPNE2M, grid, bcs)
     center_fields = center_field_tuple(grid, two_moment_center_field_names...)
 
     # Terminal velocities (negative = downward)
@@ -217,7 +216,7 @@ end
 ##### Update microphysical fields (diagnostics + terminal velocities)
 #####
 
-@inline function update_microphysical_fields!(μ, bμp::WPNE2M, i, j, k, grid, ρ, 𝒰, constants)
+@inline function AtmosphereModels.update_microphysical_fields!(μ, bμp::WPNE2M, i, j, k, grid, ρ, 𝒰, constants)
     q = 𝒰.moisture_mass_fractions
     categories = bμp.categories
 
@@ -286,7 +285,7 @@ end
 ##### Moisture fraction computation
 #####
 
-@inline function compute_moisture_fractions(i, j, k, grid, bμp::WPNE2M, ρ, qᵗ, μ)
+@inline function AtmosphereModels.compute_moisture_fractions(i, j, k, grid, bμp::WPNE2M, ρ, qᵗ, μ)
     qᶜˡ = @inbounds μ.ρqᶜˡ[i, j, k] / ρ
     qʳ = @inbounds μ.ρqʳ[i, j, k] / ρ
     qˡ = qᶜˡ + qʳ
@@ -299,32 +298,32 @@ end
 #####
 
 # Non-equilibrium: no adjustment (cloud liquid is prognostic)
-@inline maybe_adjust_thermodynamic_state(i, j, k, 𝒰₀, bμp::WPNE2M, args...) = 𝒰₀
+@inline AtmosphereModels.maybe_adjust_thermodynamic_state(i, j, k, 𝒰₀, bμp::WPNE2M, args...) = 𝒰₀
 
 #####
 ##### Microphysical velocities for advection
 #####
 
 # Cloud liquid mass: use mass-weighted terminal velocity
-@inline function microphysical_velocities(bμp::WPNE2M, μ, ::Val{:ρqᶜˡ})
+@inline function AtmosphereModels.microphysical_velocities(bμp::WPNE2M, μ, ::Val{:ρqᶜˡ})
     wᶜˡ = μ.wᶜˡ
     return (; u = ZeroField(), v = ZeroField(), w = wᶜˡ)
 end
 
 # Cloud liquid number: use number-weighted terminal velocity
-@inline function microphysical_velocities(bμp::WPNE2M, μ, ::Val{:ρnᶜˡ})
+@inline function AtmosphereModels.microphysical_velocities(bμp::WPNE2M, μ, ::Val{:ρnᶜˡ})
     wᶜˡₙ = μ.wᶜˡₙ
     return (; u = ZeroField(), v = ZeroField(), w = wᶜˡₙ)
 end
 
 # Rain mass: use mass-weighted terminal velocity
-@inline function microphysical_velocities(bμp::WPNE2M, μ, ::Val{:ρqʳ})
+@inline function AtmosphereModels.microphysical_velocities(bμp::WPNE2M, μ, ::Val{:ρqʳ})
     wʳ = μ.wʳ
     return (; u = ZeroField(), v = ZeroField(), w = wʳ)
 end
 
 # Rain number: use number-weighted terminal velocity
-@inline function microphysical_velocities(bμp::WPNE2M, μ, ::Val{:ρnʳ})
+@inline function AtmosphereModels.microphysical_velocities(bμp::WPNE2M, μ, ::Val{:ρnʳ})
     wʳₙ = μ.wʳₙ
     return (; u = ZeroField(), v = ZeroField(), w = wʳₙ)
 end
@@ -340,7 +339,7 @@ const τⁿᵘᵐ_2m = 10.0  # seconds
 ##### Cloud liquid mass tendency (ρqᶜˡ)
 #####
 
-@inline function microphysical_tendency(i, j, k, grid, bμp::WPNE2M, ::Val{:ρqᶜˡ}, ρ, μ, 𝒰, constants)
+@inline function AtmosphereModels.microphysical_tendency(i, j, k, grid, bμp::WPNE2M, ::Val{:ρqᶜˡ}, ρ, μ, 𝒰, constants)
     categories = bμp.categories
     sb = categories.warm_processes
     τᶜˡ = liquid_relaxation_timescale(bμp.cloud_formation, categories)
@@ -385,7 +384,7 @@ end
 ##### Cloud liquid number tendency (ρnᶜˡ)
 #####
 
-@inline function microphysical_tendency(i, j, k, grid, bμp::WPNE2M, ::Val{:ρnᶜˡ}, ρ, μ, 𝒰, constants)
+@inline function AtmosphereModels.microphysical_tendency(i, j, k, grid, bμp::WPNE2M, ::Val{:ρnᶜˡ}, ρ, μ, 𝒰, constants)
     categories = bμp.categories
     sb = categories.warm_processes
 
@@ -425,7 +424,7 @@ end
 ##### Rain mass tendency (ρqʳ)
 #####
 
-@inline function microphysical_tendency(i, j, k, grid, bμp::WPNE2M, ::Val{:ρqʳ}, ρ, μ, 𝒰, constants)
+@inline function AtmosphereModels.microphysical_tendency(i, j, k, grid, bμp::WPNE2M, ::Val{:ρqʳ}, ρ, μ, 𝒰, constants)
     categories = bμp.categories
     sb = categories.warm_processes
 
@@ -470,7 +469,7 @@ end
 ##### Rain number tendency (ρnʳ)
 #####
 
-@inline function microphysical_tendency(i, j, k, grid, bμp::WPNE2M, ::Val{:ρnʳ}, ρ, μ, 𝒰, constants)
+@inline function AtmosphereModels.microphysical_tendency(i, j, k, grid, bμp::WPNE2M, ::Val{:ρnʳ}, ρ, μ, 𝒰, constants)
     categories = bμp.categories
     sb = categories.warm_processes
 
@@ -512,4 +511,3 @@ end
 
     return ifelse(nʳ >= 0, Σ_dNʳ, Sⁿᵘᵐ)
 end
-

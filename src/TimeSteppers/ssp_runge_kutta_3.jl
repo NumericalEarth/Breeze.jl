@@ -1,6 +1,6 @@
 using KernelAbstractions: @kernel, @index
 
-using Oceananigans: AbstractModel, prognostic_fields
+using Oceananigans: AbstractModel, prognostic_fields, fields
 using Oceananigans.Utils: launch!, time_difference_seconds
 
 using Oceananigans.TimeSteppers:
@@ -10,26 +10,31 @@ using Oceananigans.TimeSteppers:
     compute_flux_bc_tendencies!,
     compute_pressure_correction!,
     make_pressure_correction!,
-    step_lagrangian_particles!
+    step_lagrangian_particles!,
+    implicit_step!
 
 """
 $(TYPEDEF)
 
 A strong stability preserving (SSP) third-order Runge-Kutta time stepper.
 
-This time stepper uses the classic SSP RK3 scheme (Shu-Osher form):
+This time stepper uses the classic SSP RK3 scheme ([Shu-Osher 2006](@cite Shu1988Efficient) form):
 
 ```math
-u^{(1)} = u^{(0)} + Δt L(u^{(0)})
-u^{(2)} = \\frac{3}{4} u^{(0)} + \\frac{1}{4} u^{(1)} + \\frac{1}{4} Δt L(u^{(1)})
-u^{(3)} = \\frac{1}{3} u^{(0)} + \\frac{2}{3} u^{(2)} + \\frac{2}{3} Δt L(u^{(2)})
+\\begin{align*}
+u^{(1)} &= u^{(0)} + Δt L(u^{(0)}) \\\\
+u^{(2)} &= \\frac{3}{4} u^{(0)} + \\frac{1}{4} u^{(1)} + \\frac{1}{4} Δt L(u^{(1)}) \\\\
+u^{(3)} &= \\frac{1}{3} u^{(0)} + \\frac{2}{3} u^{(2)} + \\frac{2}{3} Δt L(u^{(2)})
+\\end{align*}
 ```
+
+where ``L`` above is the right-hand-side, e.g., ``\\partial_t u = L(u)``.
 
 Each stage can be written in the form:
 ```math
-u^{(m)} = (1 - α) u^{(0)} + α (u^{(m-1)} + Δt L(u^{(m-1)}))
+u^{(m)} = (1 - α) u^{(0)} + α [u^{(m-1)} + Δt L(u^{(m-1)})]
 ```
-with α = 1, 1/4, 2/3 for stages 1, 2, 3 respectively.
+with ``α = 1, 1/4, 2/3`` for stages 1, 2, 3 respectively.
 
 This scheme has CFL coefficient = 1 and is TVD (total variation diminishing).
 
@@ -55,7 +60,8 @@ end
                    implicit_solver = nothing,
                    Gⁿ = map(similar, prognostic_fields))
 
-Construct an `SSPRungeKutta3` on `grid` with `prognostic_fields`.
+Construct an `SSPRungeKutta3` on `grid` with `prognostic_fields` as described
+by [Shu and Osher (1988)](@cite Shu1988Efficient).
 
 Keyword Arguments
 =================
@@ -74,7 +80,7 @@ function SSPRungeKutta3(grid, prognostic_fields;
                         Gⁿ::TG = map(similar, prognostic_fields)) where {TI, TG}
 
     FT = eltype(grid)
-    
+
     # SSP RK3 stage coefficients
     α¹ = FT(1)
     α² = FT(1//4)
@@ -98,19 +104,34 @@ Apply an SSP RK3 substep with coefficient α:
 ```
 u^(m) = (1 - α) * u^(0) + α * (u^(m-1) + Δt * G)
 ```
-where u^(0) is stored in the time stepper, u^(m-1) is the current field value,
-and G is the current tendency.
+where `u^(0)` is stored in the time stepper, `u^(m-1)` is the current field value,
+and `G` is the current tendency.
 """
 function ssp_rk3_substep!(model, Δt, α)
     grid = model.grid
     arch = grid.architecture
     U⁰ = model.timestepper.U⁰
     Gⁿ = model.timestepper.Gⁿ
-    
-    for (u, u⁰, G) in zip(prognostic_fields(model), U⁰, Gⁿ)
+
+    for (i, (u, u⁰, G)) in enumerate(zip(prognostic_fields(model), U⁰, Gⁿ))
         launch!(arch, grid, :xyz, _ssp_rk3_substep!, u, u⁰, G, Δt, α)
+
+        # Field index for implicit solver:
+        # - indices 1, 2, 3 are momentum (ρu, ρv, ρw)
+        # - indices 4+ are scalars (ρθ/ρe, ρqᵗ, microphysics, tracers)
+        # For scalars, we use Val(i - 3) to get Val(1), Val(2), etc.
+        field_index = Val(i - 3)
+
+        implicit_step!(u,
+                       model.timestepper.implicit_solver,
+                       model.closure,
+                       model.closure_fields,
+                       field_index,
+                       model.clock,
+                       fields(model),
+                       α * Δt)
     end
-    
+
     return nothing
 end
 
@@ -125,7 +146,7 @@ end
 """
 $(TYPEDSIGNATURES)
 
-Copy prognostic fields to U⁰ storage for use in later SSP RK3 stages.
+Copy prognostic fields to `U⁰` storage for use in later SSP RK3 stages.
 """
 function store_initial_state!(model::AbstractModel{<:SSPRungeKutta3})
     U⁰ = model.timestepper.U⁰
@@ -150,6 +171,8 @@ u^(1) = u^(0) + Δt L(u^(0))
 u^(2) = 3/4 u^(0) + 1/4 u^(1) + 1/4 Δt L(u^(1))
 u^(3) = 1/3 u^(0) + 2/3 u^(2) + 2/3 Δt L(u^(2))
 ```
+
+where `L` above is the right-hand-side, e.g., `∂u/∂t = L(u)`.
 """
 function OceananigansTimeSteppers.time_step!(model::AbstractModel{<:SSPRungeKutta3}, Δt; callbacks=[])
     Δt == 0 && @warn "Δt == 0 may cause model blowup!"
