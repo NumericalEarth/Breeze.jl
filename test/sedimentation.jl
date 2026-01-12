@@ -84,7 +84,7 @@ end
     total_moisture_initial = total_moisture_mass(model)
     
     for _ in 1:100
-        time_step!(model, FT(2.0))
+        time_step!(model, 2.0)
     end
     
     total_moisture_final = total_moisture_mass(model)
@@ -115,7 +115,7 @@ end
     qʳ_final = @allowscalar model.microphysical_fields.qʳ[1, 1, 1]
     
     # Verify precipitation can exit (open BC)
-    @test @allowscalar(model.microphysical_fields.wʳ[1, 1, 1]) < FT(0)
+    @test @allowscalar(model.microphysical_fields.wʳ[1, 1, 1]) < 0
     
     # Check θˡⁱ response to rain change
     Δqʳ = qʳ_final - qʳ_initial
@@ -129,7 +129,7 @@ end
     
     # Temperature should remain physical
     T_final = @allowscalar model.temperature[1, 1, 1]
-    @test FT(250) < T_final < FT(350)
+    @test 250 < T_final < 350
 end
 
 @testset "Column-integrated θˡⁱ conservation with ImpenetrableBoundaryCondition [$(FT)]" for FT in (Float32, Float64)
@@ -150,6 +150,6 @@ end
     
     ρθ_column_final = column_integrated_rho_theta(model)
     
-    rtol = FT == Float32 ? FT(1e-2) : FT(1e-4)
+    rtol = FT == Float32 ? 1e-2 : 1e-4
     @test isapprox(ρθ_column_final, ρθ_column_initial; rtol)
 end
