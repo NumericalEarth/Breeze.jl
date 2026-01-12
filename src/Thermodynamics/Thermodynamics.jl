@@ -11,7 +11,7 @@ export ThermodynamicConstants, ReferenceState, IdealGas,
        saturation_vapor_pressure, saturation_specific_humidity, supersaturation,
        equilibrium_saturation_specific_humidity, adjustment_saturation_specific_humidity,
        vapor_pressure, relative_humidity,
-       adiabatic_hydrostatic_pressure, adiabatic_hydrostatic_density,
+       adiabatic_hydrostatic_pressure, adiabatic_hydrostatic_density, surface_density,
        PlanarLiquidSurface, PlanarIceSurface, PlanarMixedPhaseSurface,
        # Phase equilibrium types
        AbstractPhaseEquilibrium, WarmPhaseEquilibrium, MixedPhaseEquilibrium,

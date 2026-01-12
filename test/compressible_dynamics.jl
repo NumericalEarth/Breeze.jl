@@ -18,7 +18,8 @@ using Test
 
     @testset "materialize_dynamics" begin
         dynamics_stub = CompressibleDynamics()
-        dynamics = materialize_dynamics(dynamics_stub, grid, NamedTuple())
+        constants = ThermodynamicConstants()
+        dynamics = materialize_dynamics(dynamics_stub, grid, NamedTuple(), constants)
 
         @test dynamics isa CompressibleDynamics
         @test dynamics.density isa Field

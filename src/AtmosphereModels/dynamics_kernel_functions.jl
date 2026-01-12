@@ -7,6 +7,7 @@ using Oceananigans.Utils: sum_of_velocities
 @inline ∂ⱼ_𝒯₂ⱼ(i, j, k, grid, args...) = zero(grid)
 @inline ∂ⱼ_𝒯₃ⱼ(i, j, k, grid, args...) = zero(grid)
 @inline div_ρUc(i, j, k, grid, args...) = zero(grid)
+@inline c_div_ρU(i, j, k, grid, args...) = zero(grid)
 
 """
     ∇_dot_Jᶜ(i, j, k, grid, ρ, closure::AbstractTurbulenceClosure, closure_fields,
@@ -139,6 +140,7 @@ end
     𝒰 = diagnose_thermodynamic_state(i, j, k, grid, formulation, dynamics, q)
 
     return ( - div_ρUc(i, j, k, grid, advection, ρ_field, Uᵗ, c)
+             + c_div_ρU(i, j, k, grid, dynamics, velocities, c) # for PrescribedDynamics
              - ∇_dot_Jᶜ(i, j, k, grid, ρ_field, closure, closure_fields, id, c, clock, model_fields, closure_buoyancy)
              + microphysical_tendency(i, j, k, grid, microphysics, name, ρ, microphysical_fields, 𝒰, constants)
              + c_forcing(i, j, k, grid, clock, model_fields))

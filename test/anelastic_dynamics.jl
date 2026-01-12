@@ -33,7 +33,7 @@ using Test
         dynamics_stub = AnelasticDynamics(reference_state)
         boundary_conditions = NamedTuple()
         
-        dynamics = materialize_dynamics(dynamics_stub, grid, boundary_conditions)
+        dynamics = materialize_dynamics(dynamics_stub, grid, boundary_conditions, constants)
 
         @test dynamics isa AnelasticDynamics
         @test dynamics.reference_state === reference_state
@@ -43,7 +43,7 @@ using Test
     @testset "Pressure utilities" begin
         reference_state = ReferenceState(grid, constants; surface_pressure=101325, potential_temperature=300)
         dynamics_stub = AnelasticDynamics(reference_state)
-        dynamics = materialize_dynamics(dynamics_stub, grid, NamedTuple())
+        dynamics = materialize_dynamics(dynamics_stub, grid, NamedTuple(), constants)
 
         # Test mean_pressure
         p̄ = mean_pressure(dynamics)
