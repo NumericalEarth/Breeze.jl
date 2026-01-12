@@ -100,7 +100,7 @@ function ReferenceState(grid, constants=ThermodynamicConstants(eltype(grid));
     θ₀ = convert(FT, potential_temperature)
     pˢᵗ = convert(FT, standard_pressure)
     loc = (nothing, nothing, Center())
-  
+
     p_bcs = FieldBoundaryConditions(grid, loc, bottom=ValueBoundaryCondition(p₀))
     pᵣ = Field{Nothing, Nothing, Center}(grid, boundary_conditions=p_bcs)
     set!(pᵣ, z -> adiabatic_hydrostatic_pressure(z, p₀, θ₀, constants))
@@ -109,7 +109,7 @@ function ReferenceState(grid, constants=ThermodynamicConstants(eltype(grid));
     ρ₀ = surface_density(p₀, θ₀, constants)
     ρ_bcs = FieldBoundaryConditions(grid, loc, bottom=ValueBoundaryCondition(ρ₀))
     ρᵣ = Field{Nothing, Nothing, Center}(grid, boundary_conditions=ρ_bcs)
-    g = thermo.gravitational_acceleration
+    g = constants.gravitational_acceleration
     set!(ρᵣ, - ∂z(pᵣ) / g)
     fill_halo_regions!(ρᵣ)
 
