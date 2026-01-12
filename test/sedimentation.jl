@@ -133,7 +133,7 @@ end
     qʳ_initial = @allowscalar model.microphysical_fields.qʳ[1, 1, 1]
     
     for _ in 1:50
-        time_step!(model, FT(2.0))
+        time_step!(model, 2)
     end
     
     θ_final = bottom_cell_theta(model)
