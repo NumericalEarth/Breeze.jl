@@ -13,35 +13,10 @@ using .BreezeCloudMicrophysicsExt: OneMomentCloudMicrophysics, surface_precipita
 #####
 
 """Compute total moisture mass: ∫ρqᵗ dV"""
-function total_moisture_mass(model)
-    grid = model.grid
-    ρᵣ = model.dynamics.reference_state.density
-    qᵗ = model.specific_moisture
-    
-    Nx, Ny, Nz = size(grid)
-    Δx, Δy, Δz = grid.Lx / Nx, grid.Ly / Ny, grid.Lz / Nz
-    
-    total = zero(eltype(grid))
-    for k in 1:Nz, j in 1:Ny, i in 1:Nx
-        total += @allowscalar(ρᵣ[i, j, k] * qᵗ[i, j, k]) * Δx * Δy * Δz
-    end
-    return total
-end
+total_moisture_mass(model) = @allowscalar Field(Integral(model.moisture_density))[]
 
 """Compute column-integrated potential temperature density: ∫ρθ dV"""
-function column_integrated_rho_theta(model)
-    grid = model.grid
-    ρθ = model.formulation.potential_temperature_density
-    
-    Nx, Ny, Nz = size(grid)
-    Δx, Δy, Δz = grid.Lx / Nx, grid.Ly / Ny, grid.Lz / Nz
-    
-    total = zero(eltype(grid))
-    for k in 1:Nz, j in 1:Ny, i in 1:Nx
-        total += @allowscalar(ρθ[i, j, k]) * Δx * Δy * Δz
-    end
-    return total
-end
+column_integrated_rho_theta(model) = @allowscalar Field(Integral(model.formulation.potential_temperature_density))[]
 
 """Get θˡⁱ at the bottom cell"""
 bottom_cell_theta(model) = @allowscalar model.formulation.potential_temperature[1, 1, 1]
@@ -82,7 +57,7 @@ end
     Oceananigans.defaults.FloatType = FT
     model, _ = setup_test_model(FT; precipitation_boundary_condition=ImpenetrableBoundaryCondition())
     
-    set!(model; θ=FT(300), qᵗ=FT(0.020), qᶜˡ=FT(0.002), qʳ=FT(0.001))
+    set!(model; θ=300, qᵗ=0.020, qᶜˡ=0.002, qʳ=0.001)
     total_moisture_initial = total_moisture_mass(model)
     
     τ = model.microphysics.categories.cloud_liquid.τ_relax
@@ -105,7 +80,7 @@ end
     Oceananigans.defaults.FloatType = FT
     model, _ = setup_test_model(FT)
     
-    set!(model; θ=FT(300), qᵗ=FT(0.020), qᶜˡ=FT(0.000), qʳ=FT(0.005))
+    set!(model; θ=300, qᵗ=0.020, qᶜˡ=0.000, qʳ=0.005)
     total_moisture_initial = total_moisture_mass(model)
     
     for _ in 1:100
@@ -127,7 +102,7 @@ end
     Oceananigans.defaults.FloatType = FT
     model, constants = setup_test_model(FT)
     
-    set!(model; θ=FT(300), qᵗ=FT(0.020), qᶜˡ=FT(0.000), qʳ=FT(0.005))
+    set!(model; θ=300, qᵗ=0.020, qᶜˡ=0.000, qʳ=0.005)
     
     θ_initial = bottom_cell_theta(model)
     qʳ_initial = @allowscalar model.microphysical_fields.qʳ[1, 1, 1]
