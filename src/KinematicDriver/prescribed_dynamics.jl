@@ -37,6 +37,15 @@ struct PrescribedDynamics{Div, D, P, FT}
     standard_pressure :: FT
 end
 
+# Convenient method for letting the user specify only the divergence parameter
+# and infer the others.
+function PrescribedDynamics{Div}(density::D,
+                                 pressure::P,
+                                 surface_pressure::FT,
+                                 standard_pressure::FT) where {Div, D, P, FT}
+    return PrescribedDynamics{Div, D, P, FT}(density, pressure, surface_pressure, standard_pressure)
+end
+
 """
 $(TYPEDSIGNATURES)
 
