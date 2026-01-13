@@ -25,7 +25,7 @@ Oceananigans.Architectures.on_architecture(to, pd::PrescribedDensity) =
 #####
 
 """
-    PrescribedDynamics{Div}
+$(TYPEDEF)
 
 Dynamics for kinematic atmosphere models where velocity is prescribed.
 The type parameter `Div` indicates whether divergence correction is applied.
