@@ -3,7 +3,6 @@ using Oceananigans.BoundaryConditions: FieldBoundaryConditions, ValueBoundaryCon
 using Oceananigans.Operators: ℑzᵃᵃᶠ
 
 using Adapt: Adapt, adapt
-using KernelAbstractions: @kernel, @index
 using GPUArraysCore: @allowscalar
 
 #####
