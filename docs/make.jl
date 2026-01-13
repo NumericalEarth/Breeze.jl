@@ -39,7 +39,6 @@ examples = [
     Example("Stationary parcel model", "stationary_parcel_model", true),
     Example("Acoustic wave in shear layer", "acoustic_wave", true),
 ]
- 
 # Filter out long-running example if necessary
 filter!(x -> x.build_always || get(ENV, "BREEZE_BUILD_ALL_EXAMPLES", "false") == "true", examples)
  
