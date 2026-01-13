@@ -16,7 +16,7 @@ export
     PrescribedDynamics,
     KinematicModel
 
-using DocStringExtensions: TYPEDSIGNATURES
+using DocStringExtensions: TYPEDSIGNATURES, TYPEDEF
 using Adapt: Adapt, adapt
 
 using Oceananigans: Oceananigans, CenterField, XFaceField, YFaceField, ZFaceField
