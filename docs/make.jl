@@ -44,7 +44,6 @@ examples = [
 filter!(x -> x.build_always || get(ENV, "BREEZE_BUILD_ALL_EXAMPLES", "false") == "true", examples)
  
 example_pages = [ex.title => joinpath("literated", ex.basename * ".md") for ex in examples]
- 
 semaphore = Base.Semaphore(Threads.nthreads(:interactive))
 @time "literate" @sync for example in examples
     script_file = example.basename * ".jl"
