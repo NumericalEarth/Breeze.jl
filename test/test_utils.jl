@@ -5,8 +5,8 @@
 """
     test_float_types()
 
-Returns the float types to test. By default returns `(Float64,)` for faster tests.
-Set environment variable `BREEZE_TEST_FLOAT64=true` to include Float32 testing.
+Returns the float types to test. By default returns `(Float32,)` for faster tests.
+Set environment variable `BREEZE_TEST_FLOAT64=true` to also test with Float64.
 
 This reduces test time by ~50% while still catching float-type-specific issues
 in nightly/full CI runs.

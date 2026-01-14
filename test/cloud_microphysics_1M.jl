@@ -355,9 +355,9 @@ end
     # Set initial conditions with cloud liquid present
     set!(model; θ=300, qᵗ=FT(0.050))
 
-    # Run to condensation equilibrium and beyond for autoconversion (reduced from 10τ to 5τ)
+    # Run to condensation equilibrium and beyond for autoconversion
     τ = microphysics.categories.cloud_liquid.τ_relax
-    simulation = Simulation(model; Δt=τ/5, stop_time=5τ, verbose=false)
+    simulation = Simulation(model; Δt=τ/10, stop_time=10τ, verbose=false)
     run!(simulation)
 
     # With ImpenetrableBoundaryCondition, rain should accumulate in the domain
