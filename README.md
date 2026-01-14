@@ -38,7 +38,7 @@ Much of Breeze's power flows from [Oceananigans](https://github.com/CliMA/Oceana
 
 Breeze's AtmosphereModel features anelastic, compressible, and prescribed (kinematic) dynamics, closures for large eddy simulation, saturation adjustment microphysics, Kessler microphysics, and one- and two-moment bulk schemes via an extension to the [Climate Modeling Alliance's](clima.caltech.edu) [CloudMicrophysics.jl](https://github.com/CliMA/CloudMicrophysics.jl).
 An extension to [RRTMGP.jl](https://github.com/CliMA/RRTMGP.jl) provides solvers for gray, clear-sky, and all-sky radiative transfer.
-Breeze's examples include single column radiation, idealized thermal bubbles and inertia-gravity waves and Kelvin-Helmholtz, BOMEX shallow convection, RICO trade-wind cumulus, supercells, mountain waves, and more.
+Breeze's examples include single column radiation, idealized thermal bubbles and inertia-gravity waves and Kelvin-Helmholtz, [BOMEX](https://doi.org/10.1175/1520-0469(2003)60<1201:ALESIS>2.0.CO;2) shallow convection, [RICO](https://doi.org/10.1029/2011MS000056) trade-wind cumulus, [supercells](https://doi.org/10.1002/2015MS000435), mountain waves, and more.
 
 Check out [the documentation](https://numericalearth.github.io/BreezeDocumentation/stable/) and [examples](https://github.com/NumericalEarth/Breeze.jl/tree/main/examples).
 Don't hesitate to get in touch on the [NumericalEarth slack](https://join.slack.com/t/numericalearth/shared_invite/zt-3kjcowmpg-B0s3nalWkvZg8IBc~BIJEA) or by opening a new [discussion](https://github.com/NumericalEarth/Breeze.jl/discussions)!
@@ -54,9 +54,8 @@ Model development is hard, but rewarding and builds useful skills for a myriad o
 Right now, the goals of the current group of model developers is to implement
 
 - ⛈️ **Advanced microphysics**: Predicted Particle Property (P3) bulk microphysics, spectral bin schemes, and Lagrangian superdroplet methods for high-fidelity cloud and precipitation modeling
-- 🌊 **Acoustic substepping**: A fully compressible dynamical core that resolves sound waves, for applications from convective dynamics to acoustic propagation
-- 🏔️ **Terrain-following coordinates**: Flow over complex topography with smooth sigma coordinates
-- 🔬 **Nesting**: Two-way nesting from turbulence-resolving to mesoscales
+- ️🏔 **Acoustic substepping and terrain-following coordinates**: A compressible dynamical core with horizontally explicit, vertically-implicit acoustic substepping that efficiently resolves sound waves in flow over complex topography with smooth sigma coordinates
+- 🔬 **Nesting**: Two-way nesting to support multi-level nested simulations embedded in global atmosphere simulations
 - 🌀 **Coupled atmosphere-ocean simulations**: Support for high-resolution coupled atmosphere-ocean simulations via [ClimaOcean.jl](https://github.com/CliMA/ClimaOcean.jl)
 
 If you have ideas, dreams, or criticisms that can make Breeze and it's future better, don't hesitate to speak up.
