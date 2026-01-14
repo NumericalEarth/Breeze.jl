@@ -9,8 +9,6 @@ using Breeze
 using Oceananigans
 using Test
 
-include("test_utils.jl")
-
 #####
 ##### AnelasticDynamics
 #####

@@ -3,8 +3,6 @@ using GPUArraysCore: @allowscalar
 using Oceananigans
 using Test
 
-include("test_utils.jl")
-
 #####
 ##### Setting potential temperature
 #####

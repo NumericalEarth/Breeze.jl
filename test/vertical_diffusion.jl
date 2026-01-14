@@ -2,8 +2,6 @@ using Breeze
 using Oceananigans
 using Test
 
-include("test_utils.jl")
-
 @testset "Vertically implicit diffusion correctness [$(FT)]" for FT in test_float_types()
     Oceananigans.defaults.FloatType = FT
     Nz = 32

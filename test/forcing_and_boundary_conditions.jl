@@ -3,8 +3,6 @@ using Oceananigans: Oceananigans
 using Oceananigans.BoundaryConditions: BoundaryCondition
 using Test
 
-include("test_utils.jl")
-
 function setup_forcing_model(grid, forcing)
     model = AtmosphereModel(grid; tracers=:ρc, forcing)
     θ₀ = model.dynamics.reference_state.potential_temperature

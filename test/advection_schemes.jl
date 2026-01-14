@@ -2,8 +2,6 @@ using Breeze
 using Oceananigans
 using Test
 
-include("test_utils.jl")
-
 @testset "Advection scheme configuration [$(FT)]" for FT in test_float_types()
     Oceananigans.defaults.FloatType = FT
     grid = RectilinearGrid(default_arch; size=(8, 8, 8), x=(0, 1_000), y=(0, 1_000), z=(0, 1_000))

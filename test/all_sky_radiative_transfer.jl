@@ -10,8 +10,6 @@ using ClimaComms
 using NCDatasets
 using RRTMGP
 
-include("test_utils.jl")
-
 @testset "All-sky full-spectrum RadiativeTransferModel [$FT]" for FT in test_float_types()
 
     @testset "Constructor argument errors" begin

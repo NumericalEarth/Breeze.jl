@@ -6,8 +6,6 @@ using GPUArraysCore: @allowscalar
 using Oceananigans
 using Test
 
-include("test_utils.jl")
-
 BreezeCloudMicrophysicsExt = Base.get_extension(Breeze, :BreezeCloudMicrophysicsExt)
 using .BreezeCloudMicrophysicsExt: OneMomentCloudMicrophysics
 using Breeze.Microphysics: ConstantRateCondensateFormation

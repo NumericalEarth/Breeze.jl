@@ -9,8 +9,6 @@ using Test
 using ClimaComms
 using RRTMGP
 
-include("test_utils.jl")
-
 #####
 ##### Unit tests
 #####

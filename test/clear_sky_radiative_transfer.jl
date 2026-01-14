@@ -10,8 +10,6 @@ using ClimaComms
 using NCDatasets
 using RRTMGP
 
-include("test_utils.jl")
-
 @testset "Clear-sky full-spectrum RadiativeTransferModel" begin
 
     @testset "Constructor argument errors" begin

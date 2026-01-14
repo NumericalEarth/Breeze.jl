@@ -9,8 +9,6 @@ using Oceananigans.Fields: ZeroField
 using Oceananigans.Models.HydrostaticFreeSurfaceModels: PrescribedVelocityFields
 using Test
 
-include("test_utils.jl")
-
 @testset "KinematicDriver [$(FT)]" for FT in test_float_types()
     Oceananigans.defaults.FloatType = FT
     grid = RectilinearGrid(default_arch; size=(4, 4, 8), extent=(1000, 1000, 2000))

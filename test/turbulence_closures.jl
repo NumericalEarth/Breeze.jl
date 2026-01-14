@@ -2,8 +2,6 @@ using Breeze
 using Oceananigans
 using Test
 
-include("test_utils.jl")
-
 test_thermodynamics = (:StaticEnergy, :LiquidIcePotentialTemperature)
 
 @testset "Time stepping with TurbulenceClosures [$(FT)]" for FT in test_float_types()

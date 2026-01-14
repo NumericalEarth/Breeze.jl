@@ -2,8 +2,6 @@ using Test
 using Breeze
 using Oceananigans
 
-include("test_utils.jl")
-
 @testset "Pressure solver matches NonhydrostaticModel with ρᵣ == 1 [$FT]" for FT in test_float_types()
     Oceananigans.defaults.FloatType = FT
     Nx = Ny = Nz = 32
