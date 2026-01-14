@@ -5,7 +5,7 @@ using Oceananigans
 using Oceananigans.Operators: Δzᶜᶜᶜ
 using GPUArraysCore: @allowscalar
 
-@testset "Potential temperature diagnostics [$(FT)]" for FT in (Float32, Float64)
+@testset "Potential temperature diagnostics [$(FT)]" for FT in test_float_types()
     Oceananigans.defaults.FloatType = FT
     grid = RectilinearGrid(default_arch; size=(2, 2, 8), extent=(100, 100, 1000))
     model = AtmosphereModel(grid)
@@ -78,7 +78,7 @@ using GPUArraysCore: @allowscalar
     @test all(interior(θᵇ_density_field) .> 0)
 end
 
-@testset "Static energy diagnostics [$(FT)]" for FT in (Float32, Float64)
+@testset "Static energy diagnostics [$(FT)]" for FT in test_float_types()
     Oceananigans.defaults.FloatType = FT
     grid = RectilinearGrid(default_arch; size=(2, 2, 8), extent=(100, 100, 1000))
     model = AtmosphereModel(grid)
@@ -98,7 +98,7 @@ end
     @test all(interior(e_density_field) .> 0)
 end
 
-@testset "Relative humidity diagnostics [$(FT)]" for FT in (Float32, Float64)
+@testset "Relative humidity diagnostics [$(FT)]" for FT in test_float_types()
     Oceananigans.defaults.FloatType = FT
     grid = RectilinearGrid(default_arch; size=(2, 2, 8), extent=(100, 100, 1000))
     microphysics = SaturationAdjustment()
@@ -132,7 +132,7 @@ end
     end
 end
 
-@testset "Hydrostatic pressure computation [$(FT)]" for FT in (Float32, Float64)
+@testset "Hydrostatic pressure computation [$(FT)]" for FT in test_float_types()
     Oceananigans.defaults.FloatType = FT
     grid = RectilinearGrid(default_arch; size=(1, 1, 20), x=(0, 1000), y=(0, 1000), z=(0, 10000))
     constants = ThermodynamicConstants()

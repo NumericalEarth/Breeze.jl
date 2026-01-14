@@ -6,7 +6,7 @@ using Oceananigans.Grids: znodes, Center
 using Statistics: mean
 using Test
 
-@testset "GeostrophicForcing smoke test [$(FT)]" for FT in (Float32, Float64)
+@testset "GeostrophicForcing smoke test [$(FT)]" for FT in test_float_types()
     Oceananigans.defaults.FloatType = FT
     grid = RectilinearGrid(default_arch; size=(4, 4, 4), x=(0, 100), y=(0, 100), z=(0, 100))
 
@@ -36,7 +36,7 @@ using Test
     @test minimum(model.momentum.ρv) < 0
 end
 
-@testset "SubsidenceForcing smoke test [$(FT)]" for FT in (Float32, Float64)
+@testset "SubsidenceForcing smoke test [$(FT)]" for FT in test_float_types()
     Oceananigans.defaults.FloatType = FT
     grid = RectilinearGrid(default_arch; size=(4, 4, 4), x=(0, 100), y=(0, 100), z=(0, 100))
 
@@ -59,7 +59,7 @@ end
     time_step!(model, Δt)
 end
 
-@testset "SubsidenceForcing with LiquidIcePotentialTemperature [$(FT)]" for FT in (Float32, Float64)
+@testset "SubsidenceForcing with LiquidIcePotentialTemperature [$(FT)]" for FT in test_float_types()
     Oceananigans.defaults.FloatType = FT
     
     Nz = 10
@@ -109,7 +109,7 @@ end
     @test ρqᵗ_final < ρqᵗ_initial
 end
 
-@testset "θ → e conversion in StaticEnergy model [$(FT)]" for FT in (Float32, Float64)
+@testset "θ → e conversion in StaticEnergy model [$(FT)]" for FT in test_float_types()
     # This test verifies that set!(model, θ=...) works correctly for StaticEnergy models
     # by converting potential temperature to energy density
     Oceananigans.defaults.FloatType = FT
@@ -132,7 +132,7 @@ end
     time_step!(model, Δt)
 end
 
-@testset "Combined GeostrophicForcing and SubsidenceForcing [$(FT)]" for FT in (Float32, Float64)
+@testset "Combined GeostrophicForcing and SubsidenceForcing [$(FT)]" for FT in test_float_types()
     Oceananigans.defaults.FloatType = FT
     grid = RectilinearGrid(default_arch; size=(4, 4, 4), x=(0, 100), y=(0, 100), z=(0, 100))
     coriolis = FPlane(f=1e-4)
@@ -177,7 +177,7 @@ end
 # the subsidence forcing is: F_{ρϕ} = -ρᵣ * wˢ * ∂z(ϕ) = -ρᵣ * wˢ * Γ
 # After one time step Δt, the change in the specific field is: Δϕ = -Δt * wˢ * Γ
 
-@testset "Subsidence forcing gradient [$FT]" for FT in (Float32, Float64)
+@testset "Subsidence forcing gradient [$FT]" for FT in test_float_types()
     Oceananigans.defaults.FloatType = FT
     grid = RectilinearGrid(default_arch; size=(1, 1, 4), x=(0, 10), y=(0, 10), z=(0, 16))
     reference_state = ReferenceState(grid)
