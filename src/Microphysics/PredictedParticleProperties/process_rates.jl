@@ -1087,3 +1087,246 @@ Liquid on ice:
     return -ρ * (rates.shedding + rates.refreezing)
 end
 
+#####
+##### Phase 3: Terminal velocities
+#####
+##### Terminal velocity calculations for rain and ice sedimentation.
+##### Uses power-law relationships with air density correction.
+#####
+
+"""
+    rain_terminal_velocity_mass_weighted(qʳ, nʳ, ρ; a=842.0, b=0.8, ρ₀=1.225)
+
+Compute mass-weighted terminal velocity for rain.
+
+Uses the power-law relationship from Klemp & Wilhelmson (1978) and
+Seifert & Beheng (2006):
+
+    v(D) = a × D^b × √(ρ₀/ρ)
+
+The mass-weighted velocity is computed assuming a gamma size distribution:
+
+    Vₘ = a × D̄ₘ^b × √(ρ₀/ρ)
+
+where D̄ₘ is the mass-weighted mean diameter.
+
+# Arguments
+- `qʳ`: Rain mass fraction [kg/kg]
+- `nʳ`: Rain number concentration [1/kg]
+- `ρ`: Air density [kg/m³]
+- `a`: Velocity coefficient [m^(1-b)/s]
+- `b`: Velocity exponent
+- `ρ₀`: Reference air density [kg/m³]
+
+# Returns
+- Mass-weighted fall speed [m/s] (positive downward)
+
+# Reference
+Seifert, A. and Beheng, K. D. (2006). A two-moment cloud microphysics
+parameterization for mixed-phase clouds. Meteor. Atmos. Phys.
+"""
+@inline function rain_terminal_velocity_mass_weighted(qʳ, nʳ, ρ;
+                                                       a = 842.0,
+                                                       b = 0.8,
+                                                       ρ₀ = 1.225)
+    FT = typeof(qʳ)
+    
+    qʳ_eff = clamp_positive(qʳ)
+    nʳ_eff = max(nʳ, FT(1))  # Avoid division by zero
+    
+    # Mean rain drop mass
+    m̄ = qʳ_eff / nʳ_eff
+    
+    # Mass-weighted mean diameter (assuming spherical drops)
+    # m = (π/6) ρʷ D³ → D = (6m / (π ρʷ))^(1/3)
+    D̄ₘ = cbrt(6 * m̄ / (FT(π) * FT(ρʷ)))
+    
+    # Density correction factor
+    ρ_correction = sqrt(FT(ρ₀) / ρ)
+    
+    # Clamp diameter to physical range [0.1 mm, 5 mm]
+    D̄ₘ_clamped = clamp(D̄ₘ, FT(1e-4), FT(5e-3))
+    
+    # Terminal velocity
+    vₜ = a * D̄ₘ_clamped^b * ρ_correction
+    
+    # Clamp to reasonable range [0.1, 15] m/s
+    return clamp(vₜ, FT(0.1), FT(15))
+end
+
+"""
+    rain_terminal_velocity_number_weighted(qʳ, nʳ, ρ; a=842.0, b=0.8, ρ₀=1.225)
+
+Compute number-weighted terminal velocity for rain.
+
+Similar to mass-weighted but uses number-weighted mean diameter.
+
+# Arguments
+- `qʳ`: Rain mass fraction [kg/kg]
+- `nʳ`: Rain number concentration [1/kg]
+- `ρ`: Air density [kg/m³]
+
+# Returns
+- Number-weighted fall speed [m/s] (positive downward)
+"""
+@inline function rain_terminal_velocity_number_weighted(qʳ, nʳ, ρ;
+                                                         a = 842.0,
+                                                         b = 0.8,
+                                                         ρ₀ = 1.225)
+    FT = typeof(qʳ)
+    
+    qʳ_eff = clamp_positive(qʳ)
+    nʳ_eff = max(nʳ, FT(1))
+    
+    # Mean rain drop mass
+    m̄ = qʳ_eff / nʳ_eff
+    
+    # Number-weighted mean diameter is smaller than mass-weighted
+    # For gamma distribution: D̄ₙ ≈ D̄ₘ × (μ+1)/(μ+4) where μ is shape parameter
+    # Simplified: use D̄ₘ with factor ~0.6
+    D̄ₘ = cbrt(6 * m̄ / (FT(π) * FT(ρʷ)))
+    D̄ₙ = FT(0.6) * D̄ₘ
+    
+    ρ_correction = sqrt(FT(ρ₀) / ρ)
+    D̄ₙ_clamped = clamp(D̄ₙ, FT(1e-4), FT(5e-3))
+    
+    vₜ = a * D̄ₙ_clamped^b * ρ_correction
+    
+    return clamp(vₜ, FT(0.1), FT(15))
+end
+
+"""
+    ice_terminal_velocity_mass_weighted(qⁱ, nⁱ, Fᶠ, ρᶠ, ρ; ρ₀=1.225)
+
+Compute mass-weighted terminal velocity for ice.
+
+Uses regime-dependent fall speeds following Mitchell (1996) and
+the P3 particle property model.
+
+# Arguments
+- `qⁱ`: Ice mass fraction [kg/kg]
+- `nⁱ`: Ice number concentration [1/kg]
+- `Fᶠ`: Rime mass fraction (qᶠ/qⁱ)
+- `ρᶠ`: Rime density [kg/m³]
+- `ρ`: Air density [kg/m³]
+- `ρ₀`: Reference air density [kg/m³]
+
+# Returns
+- Mass-weighted fall speed [m/s] (positive downward)
+
+# Reference
+Morrison, H. and Milbrandt, J. A. (2015). Parameterization of cloud
+microphysics based on the prediction of bulk ice particle properties.
+Part I: Scheme description and idealized tests. J. Atmos. Sci.
+"""
+@inline function ice_terminal_velocity_mass_weighted(qⁱ, nⁱ, Fᶠ, ρᶠ, ρ;
+                                                      ρ₀ = 1.225)
+    FT = typeof(qⁱ)
+    
+    qⁱ_eff = clamp_positive(qⁱ)
+    nⁱ_eff = max(nⁱ, FT(1))
+    
+    # Mean ice particle mass
+    m̄ = qⁱ_eff / nⁱ_eff
+    
+    # Effective ice density depends on riming
+    # Unrimed: ρ_eff ≈ 100-200 kg/m³ (aggregates/dendrites)
+    # Heavily rimed: ρ_eff ≈ ρᶠ ≈ 400-900 kg/m³ (graupel)
+    Fᶠ_clamped = clamp(Fᶠ, FT(0), FT(1))
+    ρᶠ_clamped = clamp(ρᶠ, FT(50), FT(900))
+    ρ_eff_unrimed = FT(100)  # Aggregate effective density
+    ρ_eff = ρ_eff_unrimed + Fᶠ_clamped * (ρᶠ_clamped - ρ_eff_unrimed)
+    
+    # Effective diameter assuming spherical with effective density
+    D̄ₘ = cbrt(6 * m̄ / (FT(π) * ρ_eff))
+    
+    # Fall speed depends on particle type:
+    # - Small ice (D < 100 μm): v ≈ 700 D² (Stokes regime)
+    # - Large unrimed (D > 100 μm): v ≈ 11.7 D^0.41 (Mitchell 1996)
+    # - Rimed/graupel: v ≈ 19.3 D^0.37
+    
+    D_clamped = clamp(D̄ₘ, FT(1e-5), FT(0.02))  # 10 μm to 20 mm
+    D_threshold = FT(100e-6)  # 100 μm
+    
+    # Coefficients interpolated based on riming
+    # Unrimed: a=11.7, b=0.41 (aggregates)
+    # Rimed: a=19.3, b=0.37 (graupel-like)
+    a_unrimed = FT(11.7)
+    b_unrimed = FT(0.41)
+    a_rimed = FT(19.3)
+    b_rimed = FT(0.37)
+    
+    a = a_unrimed + Fᶠ_clamped * (a_rimed - a_unrimed)
+    b = b_unrimed + Fᶠ_clamped * (b_rimed - b_unrimed)
+    
+    # Density correction
+    ρ_correction = sqrt(FT(ρ₀) / ρ)
+    
+    # Terminal velocity (large particle regime)
+    vₜ_large = a * D_clamped^b * ρ_correction
+    
+    # Small particle (Stokes) regime
+    vₜ_small = FT(700) * D_clamped^2 * ρ_correction
+    
+    # Blend between regimes
+    vₜ = ifelse(D_clamped < D_threshold, vₜ_small, vₜ_large)
+    
+    # Clamp to reasonable range [0.01, 8] m/s
+    return clamp(vₜ, FT(0.01), FT(8))
+end
+
+"""
+    ice_terminal_velocity_number_weighted(qⁱ, nⁱ, Fᶠ, ρᶠ, ρ; ρ₀=1.225)
+
+Compute number-weighted terminal velocity for ice.
+
+# Arguments
+- `qⁱ`: Ice mass fraction [kg/kg]
+- `nⁱ`: Ice number concentration [1/kg]
+- `Fᶠ`: Rime mass fraction (qᶠ/qⁱ)
+- `ρᶠ`: Rime density [kg/m³]
+- `ρ`: Air density [kg/m³]
+
+# Returns
+- Number-weighted fall speed [m/s] (positive downward)
+"""
+@inline function ice_terminal_velocity_number_weighted(qⁱ, nⁱ, Fᶠ, ρᶠ, ρ;
+                                                        ρ₀ = 1.225)
+    FT = typeof(qⁱ)
+    
+    # Number-weighted velocity is smaller than mass-weighted
+    # Approximate ratio: Vₙ/Vₘ ≈ 0.6 for typical distributions
+    vₘ = ice_terminal_velocity_mass_weighted(qⁱ, nⁱ, Fᶠ, ρᶠ, ρ; ρ₀)
+    
+    return FT(0.6) * vₘ
+end
+
+"""
+    ice_terminal_velocity_reflectivity_weighted(qⁱ, nⁱ, zⁱ, Fᶠ, ρᶠ, ρ; ρ₀=1.225)
+
+Compute reflectivity-weighted (Z-weighted) terminal velocity for ice.
+
+Needed for the sixth moment (reflectivity) sedimentation in 3-moment P3.
+
+# Arguments
+- `qⁱ`: Ice mass fraction [kg/kg]
+- `nⁱ`: Ice number concentration [1/kg]
+- `zⁱ`: Ice sixth moment (reflectivity proxy) [m⁶/kg]
+- `Fᶠ`: Rime mass fraction (qᶠ/qⁱ)
+- `ρᶠ`: Rime density [kg/m³]
+- `ρ`: Air density [kg/m³]
+
+# Returns
+- Reflectivity-weighted fall speed [m/s] (positive downward)
+"""
+@inline function ice_terminal_velocity_reflectivity_weighted(qⁱ, nⁱ, zⁱ, Fᶠ, ρᶠ, ρ;
+                                                              ρ₀ = 1.225)
+    FT = typeof(qⁱ)
+    
+    # Z-weighted velocity is larger than mass-weighted (biased toward large particles)
+    # Approximate ratio: Vᵤ/Vₘ ≈ 1.2 for typical distributions
+    vₘ = ice_terminal_velocity_mass_weighted(qⁱ, nⁱ, Fᶠ, ρᶠ, ρ; ρ₀)
+    
+    return FT(1.2) * vₘ
+end
+

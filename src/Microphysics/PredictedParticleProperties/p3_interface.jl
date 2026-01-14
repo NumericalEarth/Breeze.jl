@@ -161,12 +161,179 @@ $(TYPEDSIGNATURES)
 Return terminal velocity for precipitating species.
 
 P3 has separate fall speeds for rain and ice particles.
-Currently returns `nothing` (no sedimentation) - full implementation TODO.
+Returns a NamedTuple with `(u=0, v=0, w=-vₜ)` where `vₜ` is the terminal velocity.
+
+For mass fields (ρqʳ, ρqⁱ, ρqᶠ, ρqʷⁱ), uses mass-weighted velocity.
+For number fields (ρnʳ, ρnⁱ), uses number-weighted velocity.
+For reflectivity (ρzⁱ), uses reflectivity-weighted velocity.
 """
-@inline function AtmosphereModels.microphysical_velocities(p3::P3, μ, name)
-    # TODO: Implement fall speed calculations
-    # This requires computing mass-weighted fall speeds from the size distribution
-    return nothing
+@inline AtmosphereModels.microphysical_velocities(p3::P3, μ, name) = nothing  # Default: no sedimentation
+
+# Rain mass: mass-weighted fall speed
+@inline function AtmosphereModels.microphysical_velocities(p3::P3, μ, ::Val{:ρqʳ})
+    return RainMassSedimentationVelocity(μ)
+end
+
+# Rain number: number-weighted fall speed
+@inline function AtmosphereModels.microphysical_velocities(p3::P3, μ, ::Val{:ρnʳ})
+    return RainNumberSedimentationVelocity(μ)
+end
+
+# Ice mass: mass-weighted fall speed
+@inline function AtmosphereModels.microphysical_velocities(p3::P3, μ, ::Val{:ρqⁱ})
+    return IceMassSedimentationVelocity(μ)
+end
+
+# Ice number: number-weighted fall speed
+@inline function AtmosphereModels.microphysical_velocities(p3::P3, μ, ::Val{:ρnⁱ})
+    return IceNumberSedimentationVelocity(μ)
+end
+
+# Rime mass: same as ice mass (rime falls with ice)
+@inline function AtmosphereModels.microphysical_velocities(p3::P3, μ, ::Val{:ρqᶠ})
+    return IceMassSedimentationVelocity(μ)
+end
+
+# Rime volume: same as ice mass
+@inline function AtmosphereModels.microphysical_velocities(p3::P3, μ, ::Val{:ρbᶠ})
+    return IceMassSedimentationVelocity(μ)
+end
+
+# Ice reflectivity: reflectivity-weighted fall speed
+@inline function AtmosphereModels.microphysical_velocities(p3::P3, μ, ::Val{:ρzⁱ})
+    return IceReflectivitySedimentationVelocity(μ)
+end
+
+# Liquid on ice: same as ice mass
+@inline function AtmosphereModels.microphysical_velocities(p3::P3, μ, ::Val{:ρqʷⁱ})
+    return IceMassSedimentationVelocity(μ)
+end
+
+#####
+##### Sedimentation velocity types
+#####
+##### These are callable structs that compute terminal velocities at (i, j, k).
+#####
+
+"""
+Callable struct for rain mass sedimentation velocity.
+"""
+struct RainMassSedimentationVelocity{M}
+    microphysical_fields :: M
+end
+
+@inline function (v::RainMassSedimentationVelocity)(i, j, k, grid, ρ)
+    FT = eltype(grid)
+    μ = v.microphysical_fields
+    
+    @inbounds begin
+        qʳ = μ.ρqʳ[i, j, k] / ρ
+        nʳ = μ.ρnʳ[i, j, k] / ρ
+    end
+    
+    vₜ = rain_terminal_velocity_mass_weighted(qʳ, nʳ, ρ)
+    
+    return (u = zero(FT), v = zero(FT), w = -vₜ)
+end
+
+"""
+Callable struct for rain number sedimentation velocity.
+"""
+struct RainNumberSedimentationVelocity{M}
+    microphysical_fields :: M
+end
+
+@inline function (v::RainNumberSedimentationVelocity)(i, j, k, grid, ρ)
+    FT = eltype(grid)
+    μ = v.microphysical_fields
+    
+    @inbounds begin
+        qʳ = μ.ρqʳ[i, j, k] / ρ
+        nʳ = μ.ρnʳ[i, j, k] / ρ
+    end
+    
+    vₜ = rain_terminal_velocity_number_weighted(qʳ, nʳ, ρ)
+    
+    return (u = zero(FT), v = zero(FT), w = -vₜ)
+end
+
+"""
+Callable struct for ice mass sedimentation velocity.
+"""
+struct IceMassSedimentationVelocity{M}
+    microphysical_fields :: M
+end
+
+@inline function (v::IceMassSedimentationVelocity)(i, j, k, grid, ρ)
+    FT = eltype(grid)
+    μ = v.microphysical_fields
+    
+    @inbounds begin
+        qⁱ = μ.ρqⁱ[i, j, k] / ρ
+        nⁱ = μ.ρnⁱ[i, j, k] / ρ
+        qᶠ = μ.ρqᶠ[i, j, k] / ρ
+        bᶠ = μ.ρbᶠ[i, j, k] / ρ
+    end
+    
+    Fᶠ = safe_divide(qᶠ, qⁱ, zero(FT))
+    ρᶠ = safe_divide(qᶠ, bᶠ, FT(400))
+    
+    vₜ = ice_terminal_velocity_mass_weighted(qⁱ, nⁱ, Fᶠ, ρᶠ, ρ)
+    
+    return (u = zero(FT), v = zero(FT), w = -vₜ)
+end
+
+"""
+Callable struct for ice number sedimentation velocity.
+"""
+struct IceNumberSedimentationVelocity{M}
+    microphysical_fields :: M
+end
+
+@inline function (v::IceNumberSedimentationVelocity)(i, j, k, grid, ρ)
+    FT = eltype(grid)
+    μ = v.microphysical_fields
+    
+    @inbounds begin
+        qⁱ = μ.ρqⁱ[i, j, k] / ρ
+        nⁱ = μ.ρnⁱ[i, j, k] / ρ
+        qᶠ = μ.ρqᶠ[i, j, k] / ρ
+        bᶠ = μ.ρbᶠ[i, j, k] / ρ
+    end
+    
+    Fᶠ = safe_divide(qᶠ, qⁱ, zero(FT))
+    ρᶠ = safe_divide(qᶠ, bᶠ, FT(400))
+    
+    vₜ = ice_terminal_velocity_number_weighted(qⁱ, nⁱ, Fᶠ, ρᶠ, ρ)
+    
+    return (u = zero(FT), v = zero(FT), w = -vₜ)
+end
+
+"""
+Callable struct for ice reflectivity sedimentation velocity.
+"""
+struct IceReflectivitySedimentationVelocity{M}
+    microphysical_fields :: M
+end
+
+@inline function (v::IceReflectivitySedimentationVelocity)(i, j, k, grid, ρ)
+    FT = eltype(grid)
+    μ = v.microphysical_fields
+    
+    @inbounds begin
+        qⁱ = μ.ρqⁱ[i, j, k] / ρ
+        nⁱ = μ.ρnⁱ[i, j, k] / ρ
+        zⁱ = μ.ρzⁱ[i, j, k] / ρ
+        qᶠ = μ.ρqᶠ[i, j, k] / ρ
+        bᶠ = μ.ρbᶠ[i, j, k] / ρ
+    end
+    
+    Fᶠ = safe_divide(qᶠ, qⁱ, zero(FT))
+    ρᶠ = safe_divide(qᶠ, bᶠ, FT(400))
+    
+    vₜ = ice_terminal_velocity_reflectivity_weighted(qⁱ, nⁱ, zⁱ, Fᶠ, ρᶠ, ρ)
+    
+    return (u = zero(FT), v = zero(FT), w = -vₜ)
 end
 
 #####
