@@ -10,7 +10,7 @@ using .BreezeCloudMicrophysicsExt: ZeroMomentCloudMicrophysics
 ##### Zero-moment microphysics tests
 #####
 
-@testset "ZeroMomentCloudMicrophysics construction [$(FT)]" for FT in (Float32, Float64)
+@testset "ZeroMomentCloudMicrophysics construction [$(FT)]" for FT in test_float_types()
     Oceananigans.defaults.FloatType = FT
 
     # Default construction
@@ -26,7 +26,7 @@ using .BreezeCloudMicrophysicsExt: ZeroMomentCloudMicrophysics
     @test μ0_custom.categories.S_0 == FT(0.01)
 end
 
-@testset "ZeroMomentCloudMicrophysics time-stepping [$(FT)]" for FT in (Float32, Float64)
+@testset "ZeroMomentCloudMicrophysics time-stepping [$(FT)]" for FT in test_float_types()
     Oceananigans.defaults.FloatType = FT
     grid = RectilinearGrid(default_arch; size=(4, 4, 4), x=(0, 1_000), y=(0, 1_000), z=(0, 1_000))
 
@@ -46,7 +46,7 @@ end
     @test model.clock.iteration == 1
 end
 
-@testset "ZeroMomentCloudMicrophysics precipitation rate diagnostic [$(FT)]" for FT in (Float32, Float64)
+@testset "ZeroMomentCloudMicrophysics precipitation rate diagnostic [$(FT)]" for FT in test_float_types()
     Oceananigans.defaults.FloatType = FT
     grid = RectilinearGrid(default_arch; size=(4, 4, 4), x=(0, 1_000), y=(0, 1_000), z=(0, 1_000))
 
