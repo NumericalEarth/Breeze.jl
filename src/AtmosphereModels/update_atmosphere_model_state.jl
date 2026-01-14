@@ -64,19 +64,16 @@ diagnostic_indices(::Bounded, N, H) = 1:N+1
 diagnostic_indices(::Periodic, N, H) = -H+1:N+H
 diagnostic_indices(::Flat, N, H) = 1:N
 
+#####
+##### Velocity and momentum computation
+#####
+
 """
 $(TYPEDSIGNATURES)
 
-Compute auxiliary model variables:
-
-- velocities from momentum and density (eg ``u = ρu / ρ``)
-
-- thermodynamic variables from the prognostic thermodynamic state,
-    * temperature ``T``, possibly involving saturation adjustment
-    * specific thermodynamic variable (``e = ρe / ρ`` or ``θ = ρθ / ρ``)
-    * moisture mass fraction ``qᵗ = ρqᵗ / ρ``
+Compute velocities from momentum: `u = ρu / ρ` for each velocity component.
 """
-function compute_auxiliary_variables!(model)
+function compute_velocities!(model::AtmosphereModel)
     grid = model.grid
     arch = grid.architecture
 
@@ -105,6 +102,66 @@ function compute_auxiliary_variables!(model)
 
     foreach(mask_immersed_field!, model.velocities)
     fill_halo_regions!(model.velocities)
+
+    return nothing
+end
+
+function compute_momentum_tendencies!(model::AtmosphereModel, model_fields)
+    grid = model.grid
+    arch = grid.architecture
+    Gρu = model.timestepper.Gⁿ.ρu
+    Gρv = model.timestepper.Gⁿ.ρv
+    Gρw = model.timestepper.Gⁿ.ρw
+
+    momentum_args = (
+        dynamics_density(model.dynamics),
+        model.advection.momentum,
+        model.velocities,
+        model.closure,
+        model.closure_fields,
+        model.momentum,
+        model.coriolis,
+        model.clock,
+        model_fields)
+
+    u_args = tuple(momentum_args..., model.forcing.ρu, model.dynamics)
+    v_args = tuple(momentum_args..., model.forcing.ρv, model.dynamics)
+
+    # Extra arguments for vertical velocity are required to compute buoyancy
+    w_args = tuple(momentum_args..., model.forcing.ρw,
+                   model.dynamics,
+                   model.formulation,
+                   model.temperature,
+                   model.specific_moisture,
+                   model.microphysics,
+                   model.microphysical_fields,
+                   model.thermodynamic_constants)
+
+    launch!(arch, grid, :xyz, compute_x_momentum_tendency!, Gρu, grid, u_args)
+    launch!(arch, grid, :xyz, compute_y_momentum_tendency!, Gρv, grid, v_args)
+    launch!(arch, grid, :xyz, compute_z_momentum_tendency!, Gρw, grid, w_args)
+
+    return nothing
+end
+
+"""
+$(TYPEDSIGNATURES)
+
+Compute auxiliary model variables:
+
+- velocities from momentum and density (eg ``u = ρu / ρ``)
+
+- thermodynamic variables from the prognostic thermodynamic state,
+    * temperature ``T``, possibly involving saturation adjustment
+    * specific thermodynamic variable (``e = ρe / ρ`` or ``θ = ρθ / ρ``)
+    * moisture mass fraction ``qᵗ = ρqᵗ / ρ``
+"""
+function compute_auxiliary_variables!(model)
+    grid = model.grid
+    arch = grid.architecture
+
+    # Compute velocities from momentum (skip for kinematic dynamics with prescribed velocities)
+    compute_velocities!(model)
 
     # Dispatch on thermodynamic formulation type
     compute_auxiliary_thermodynamic_variables!(model)
@@ -205,44 +262,14 @@ end
 function compute_tendencies!(model::AtmosphereModel)
     grid = model.grid
     arch = grid.architecture
-    Gρu = model.timestepper.Gⁿ.ρu
-    Gρv = model.timestepper.Gⁿ.ρv
-    Gρw = model.timestepper.Gⁿ.ρw
 
     model_fields = fields(model)
 
     #####
-    ##### Momentum tendencies
+    ##### Momentum tendencies (skip for kinematic dynamics)
     #####
 
-    momentum_args = (
-        dynamics_density(model.dynamics),
-        model.advection.momentum,
-        model.velocities,
-        model.closure,
-        model.closure_fields,
-        model.momentum,
-        model.coriolis,
-        model.clock,
-        model_fields)
-
-    u_args = tuple(momentum_args..., model.forcing.ρu, model.dynamics)
-    v_args = tuple(momentum_args..., model.forcing.ρv, model.dynamics)
-
-    # Extra arguments for vertical velocity are required to compute
-    # buoyancy:
-    w_args = tuple(momentum_args..., model.forcing.ρw,
-                   model.dynamics,
-                   model.formulation,
-                   model.temperature,
-                   model.specific_moisture,
-                   model.microphysics,
-                   model.microphysical_fields,
-                   model.thermodynamic_constants)
-
-    launch!(arch, grid, :xyz, compute_x_momentum_tendency!, Gρu, grid, u_args)
-    launch!(arch, grid, :xyz, compute_y_momentum_tendency!, Gρv, grid, v_args)
-    launch!(arch, grid, :xyz, compute_z_momentum_tendency!, Gρw, grid, w_args)
+    compute_momentum_tendencies!(model, model_fields)
 
     # Arguments common to energy density, moisture density, and tracer density tendencies:
     common_args = (

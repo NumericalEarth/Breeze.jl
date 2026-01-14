@@ -35,7 +35,7 @@ $(TYPEDSIGNATURES)
 
 Materialize a stub `CompressibleDynamics` into a full dynamics object with density and pressure fields.
 """
-function AtmosphereModels.materialize_dynamics(dynamics::CompressibleDynamics, grid, boundary_conditions)
+function AtmosphereModels.materialize_dynamics(dynamics::CompressibleDynamics, grid, boundary_conditions, thermodynamic_constants)
     # Get density boundary conditions if provided
     if haskey(boundary_conditions, :ρ)
         density = CenterField(grid, boundary_conditions=boundary_conditions.ρ)

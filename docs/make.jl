@@ -38,13 +38,12 @@ examples = [
     Example("Single column radiation", "single_column_radiation", true),
     Example("Stationary parcel model", "stationary_parcel_model", true),
     Example("Acoustic wave in shear layer", "acoustic_wave", true),
+    Example("Cloud formation in prescribed updraft", "kinematic_driver", true),
 ]
 
 # Filter out long-running example if necessary
 filter!(x -> x.build_always || get(ENV, "BREEZE_BUILD_ALL_EXAMPLES", "false") == "true", examples)
-
 example_pages = [ex.title => joinpath("literated", ex.basename * ".md") for ex in examples]
-
 semaphore = Base.Semaphore(Threads.nthreads(:interactive))
 @time "literate" @sync for example in examples
     script_file = example.basename * ".jl"
