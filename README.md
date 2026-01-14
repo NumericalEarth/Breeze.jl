@@ -53,7 +53,7 @@ We're working feverishly to build
 - 🔬 **Nesting**: Two-way nesting from turbulence-resolving to mesoscales
 - 🌀 **Coupled atmosphere-ocean simulations**: Support for high-resolution coupled atmosphere-ocean simulations via [ClimaOcean.jl](https://github.com/CliMA/ClimaOcean.jl)
 
-### Gallery
+### Selected examples
 
 <table style="background-color:#FFFFFF;">
   <tr>
@@ -94,7 +94,7 @@ We're working feverishly to build
     <th width="33%">
       <a href="https://numericalearth.github.io/BreezeDocumentation/dev/literated/inertia_gravity_wave/">
         <figure>
-          <img src="https://github.com/user-attachments/assets/e6af5eb2-d745-4351-9fca-bc4ab94d40a5">
+          <img src="https://github.com/user-attachments/assets/54837848-c1b5-4ffc-943b-ba3f1755b6ee">
           <figcaption>Inertia-gravity wave</figcaption>
         </figure>
       </a>
