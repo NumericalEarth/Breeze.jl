@@ -55,58 +55,46 @@ We're working feverishly to build
 
 ### Selected examples
 
-<table style="background-color:#FFFFFF;">
+<table>
   <tr>
-    <th width="33%">
+    <td width="33%" align="center" valign="top">
       <a href="https://numericalearth.github.io/BreezeDocumentation/dev/literated/cloudy_thermal_bubble/">
-        <figure>
-          <img src="https://github.com/user-attachments/assets/1ebc76bd-0ec5-4930-9d12-970caf3c8036">
-          <figcaption>Cloudy thermal bubble</figcaption>
-        </figure>
+        <img src="https://github.com/user-attachments/assets/1ebc76bd-0ec5-4930-9d12-970caf3c8036" width="100%"><br>
+        Cloudy thermal bubble
       </a>
-    </th>
-    <th width="33%">
+    </td>
+    <td width="33%" align="center" valign="top">
       <a href="https://numericalearth.github.io/BreezeDocumentation/dev/literated/bomex/">
-        <figure>
-          <img src="https://github.com/user-attachments/assets/89876fed-c2d0-43da-aa54-ab69b97e0283">
-          <figcaption>BOMEX shallow convection</figcaption>
-        </figure>
+        <img src="https://github.com/user-attachments/assets/89876fed-c2d0-43da-aa54-ab69b97e0283" width="100%"><br>
+        BOMEX shallow convection
       </a>
-    </th>
-    <th width="33%">
+    </td>
+    <td width="33%" align="center" valign="top">
       <a href="https://numericalearth.github.io/BreezeDocumentation/dev/literated/rico/">
-        <figure>
-          <img src="https://github.com/user-attachments/assets/6a041b42-a828-41e5-91fd-b4bc89e0f63a">
-          <figcaption>RICO trade-wind cumulus</figcaption>
-        </figure>
+        <img src="https://github.com/user-attachments/assets/6a041b42-a828-41e5-91fd-b4bc89e0f63a" width="100%"><br>
+        RICO trade-wind cumulus
       </a>
-    </th>
+    </td>
   </tr>
   <tr>
-    <th width="33%">
+    <td width="33%" align="center" valign="top">
       <a href="https://numericalearth.github.io/BreezeDocumentation/dev/literated/prescribed_sea_surface_temperature/">
-        <figure>
-          <img src="https://github.com/user-attachments/assets/44a4b21c-23a6-401d-b938-e4ec00f24704">
-          <figcaption>Prescribed SST convection</figcaption>
-        </figure>
+        <img src="https://github.com/user-attachments/assets/44a4b21c-23a6-401d-b938-e4ec00f24704" width="100%"><br>
+        Prescribed SST convection
       </a>
-    </th>
-    <th width="33%">
+    </td>
+    <td width="33%" align="center" valign="top">
       <a href="https://numericalearth.github.io/BreezeDocumentation/dev/literated/inertia_gravity_wave/">
-        <figure>
-          <img src="https://github.com/user-attachments/assets/54837848-c1b5-4ffc-943b-ba3f1755b6ee">
-          <figcaption>Inertia-gravity wave</figcaption>
-        </figure>
+        <img src="https://github.com/user-attachments/assets/54837848-c1b5-4ffc-943b-ba3f1755b6ee" width="100%"><br>
+        Inertia-gravity wave
       </a>
-    </th>
-    <th width="33%">
+    </td>
+    <td width="33%" align="center" valign="top">
       <a href="https://numericalearth.github.io/BreezeDocumentation/dev/literated/acoustic_wave/">
-        <figure>
-          <img src="https://github.com/user-attachments/assets/fa2992d0-a289-4de7-aeb3-f59df7cbef28">
-          <figcaption>Acoustic wave</figcaption>
-        </figure>
+        <img src="https://github.com/user-attachments/assets/fa2992d0-a289-4de7-aeb3-f59df7cbef28" width="100%"><br>
+        Acoustic wave
       </a>
-    </th>
+    </td>
   </tr>
 </table>
 
