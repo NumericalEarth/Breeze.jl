@@ -21,7 +21,8 @@ using Breeze
 using Breeze.AtmosphereModels: AtmosphereModels,
     materialize_microphysical_fields,
     update_microphysical_fields!,
-    compute_moisture_fractions
+    compute_moisture_fractions,
+    microphysical_tendency
 
 using Breeze.Thermodynamics:
     MoistureMassFractions,
@@ -65,5 +66,6 @@ include("one_moment_microphysics.jl")
 include("one_moment_helpers.jl")
 include("two_moment_microphysics.jl")
 include("two_moment_helpers.jl")
+include("parcel_microphysics.jl")
 
 end # module BreezeCloudMicrophysicsExt

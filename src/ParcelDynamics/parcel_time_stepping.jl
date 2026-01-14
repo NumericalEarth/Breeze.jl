@@ -2,6 +2,10 @@
 ##### Time stepping for parcel evolution
 #####
 
+using Breeze.Thermodynamics: AbstractThermodynamicState, MoistureMassFractions,
+    LiquidIcePotentialTemperatureState, StaticEnergyState,
+    temperature, with_moisture, mixture_heat_capacity
+
 """
 $(TYPEDSIGNATURES)
 
@@ -56,24 +60,55 @@ function step_parcel!(state::ParcelState, model::ParcelModel, Δt)
     y_new = y + v * Δt
     z_new = z + w * Δt
 
-    # 3. Get environmental pressure at new height for adiabatic adjustment
+    # 3. Get environmental conditions at new height
     p_new = environmental_pressure(profile, z_new)
     ρ_new = environmental_density(profile, z_new)
 
-    # 4. Compute microphysics tendencies for all prognostic microphysical variables
-    # The tendency functions operate on the scalar state ℳ (no grid indexing)
-    ℳ_new = step_microphysics(microphysics, ℳ, ρ, 𝒰, constants, Δt)
+    # 4. Adiabatic adjustment of thermodynamic state
+    𝒰_new = adiabatic_adjustment(𝒰, z_new, p_new, constants)
 
-    # 5. Adiabatic adjustment of thermodynamic state
-    # TODO: Implement adiabatic expansion for different thermodynamic formulations
-    # For now, we keep the same thermodynamic state (isothermal approximation)
-    𝒰_new = 𝒰  # Placeholder: proper adiabatic adjustment needed
+    # 5. Compute microphysics tendencies and update state
+    ℳ_new = step_microphysics(microphysics, ℳ, ρ_new, 𝒰_new, constants, Δt)
 
-    # 6. Update moisture from microphysical evolution
-    # Total water is conserved (no precipitation fallout in simple case)
-    qᵗ_new = qᵗ
+    # 6. Update moisture fractions in thermodynamic state based on new microphysics
+    q_new = compute_moisture_fractions(ℳ_new, qᵗ)
+    𝒰_new = with_moisture(𝒰_new, q_new)
 
-    return ParcelState(x_new, y_new, z_new, ρ_new, qᵗ_new, 𝒰_new, ℳ_new)
+    return ParcelState(x_new, y_new, z_new, ρ_new, qᵗ, 𝒰_new, ℳ_new)
+end
+
+#####
+##### Adiabatic adjustment for different thermodynamic formulations
+#####
+
+"""
+$(TYPEDSIGNATURES)
+
+Adjust the thermodynamic state for adiabatic ascent/descent to a new height.
+
+For `StaticEnergyState`: The moist static energy is conserved, so we update
+the height and reference pressure while keeping `e` constant.
+
+For `LiquidIcePotentialTemperatureState`: The liquid-ice potential temperature
+is conserved, so we update the reference pressure while keeping `θˡⁱ` constant.
+"""
+function adiabatic_adjustment end
+
+# StaticEnergyState: conserve static energy, update height and pressure
+@inline function adiabatic_adjustment(𝒰::StaticEnergyState{FT}, z_new, p_new, constants) where FT
+    # Static energy is conserved during adiabatic processes
+    return StaticEnergyState{FT}(𝒰.static_energy, 𝒰.moisture_mass_fractions, z_new, p_new)
+end
+
+# LiquidIcePotentialTemperatureState: conserve θˡⁱ, update pressure
+@inline function adiabatic_adjustment(𝒰::LiquidIcePotentialTemperatureState{FT}, z_new, p_new, constants) where FT
+    # Liquid-ice potential temperature is conserved during moist adiabatic processes
+    return LiquidIcePotentialTemperatureState{FT}(
+        𝒰.potential_temperature,
+        𝒰.moisture_mass_fractions,
+        𝒰.standard_pressure,
+        p_new
+    )
 end
 
 #####
@@ -83,15 +118,34 @@ end
 """
 $(TYPEDSIGNATURES)
 
-Advance the microphysical state by one time step.
+Advance the microphysical state by one time step using Forward Euler.
 
-This function applies Forward Euler integration to the microphysics tendencies.
-For more robust evolution, sub-stepping or implicit methods may be needed.
+This function computes tendencies for all prognostic microphysical variables
+and integrates them forward in time.
 """
-function step_microphysics(microphysics, ℳ::AbstractMicrophysicalState, ρ, 𝒰, constants, Δt)
-    # Default: no microphysical evolution for abstract state
-    return ℳ
+function step_microphysics end
+
+# Default: no microphysical evolution for abstract or trivial state
+step_microphysics(microphysics, ℳ::Nothing, ρ, 𝒰, constants, Δt) = nothing
+step_microphysics(microphysics::Nothing, ℳ, ρ, 𝒰, constants, Δt) = ℳ
+
+#####
+##### Compute moisture fractions from microphysical state
+#####
+
+"""
+$(TYPEDSIGNATURES)
+
+Compute moisture mass fractions from the microphysical state.
+"""
+function compute_moisture_fractions end
+
+# Trivial state: all moisture is vapor
+@inline function compute_moisture_fractions(ℳ::Nothing, qᵗ)
+    return MoistureMassFractions(qᵗ)
 end
 
-# Trivial state: no evolution
-step_microphysics(microphysics, ℳ::Nothing, ρ, 𝒰, constants, Δt) = nothing
+# TrivialMicrophysicalState: all moisture is vapor
+@inline function compute_moisture_fractions(ℳ::TrivialMicrophysicalState, qᵗ)
+    return MoistureMassFractions(qᵗ)
+end

@@ -11,7 +11,8 @@ export
 
 using DocStringExtensions: TYPEDSIGNATURES, TYPEDEF, TYPEDFIELDS
 
-using Breeze.AtmosphereModels: AbstractMicrophysicalState, microphysical_tendency
+using Breeze.AtmosphereModels: AbstractMicrophysicalState, TrivialMicrophysicalState,
+    microphysical_tendency
 using Breeze.Thermodynamics: temperature, saturation_specific_humidity, MoistureMassFractions
 
 include("environmental_profile.jl")
