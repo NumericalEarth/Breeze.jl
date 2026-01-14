@@ -94,9 +94,9 @@ Check out the [documentation](https://numericalearth.github.io/BreezeDocumentati
       </a>
     </td>
     <td width="33%" align="center" valign="top">
-      <a href="https://numericalearth.github.io/BreezeDocumentation/dev/literated/inertia_gravity_wave/">
-        <img src="https://github.com/user-attachments/assets/54837848-c1b5-4ffc-943b-ba3f1755b6ee" width="100%"><br>
-        Inertia-gravity wave
+      <a href="https://numericalearth.github.io/BreezeDocumentation/dev/literated/cloudy_kelvin_helmholtz/">
+        <img src="https://github.com/user-attachments/assets/1bcc787a-5b29-4bb7-b686-2d4465374b7d" width="100%"><br>
+        Cloudy Kelvin-Helmholtz instability
       </a>
     </td>
     <td width="33%" align="center" valign="top">
