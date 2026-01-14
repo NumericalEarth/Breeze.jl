@@ -36,9 +36,80 @@
 
 Breeze is a library for simulating atmospheric flows, convection, clouds, weather, and hurricanes on CPUs and GPUs.
 Much of Breeze's power flows from [Oceananigans](https://github.com/CliMA/Oceananigans.jl), which provides a user interface, grids, fields, solvers, advection schemes, Lagrangian particles, physics, and more.
-Right now, `Breeze.AtmosphereModel` is in an early stage of development, and supports simple simulations that use the anelastic formulation of the Euler equations on `RectilinearGrid`.
-But we're working feverishly towards a future with bulk, bin and superdroplet microphysics, radiation, and a fully compressible formulation with acoustic substepping (and note, the roadmap and vision for Breeze is still something of a work in progress).
-Check out [the documentation](https://numericalearth.github.io/BreezeDocumentation/stable/) to see what we can do now, and watch this space (or get in touch to [discuss](https://github.com/NumericalEarth/Breeze.jl/discussions)!) its crystallization.
+
+Breeze's AtmosphereModel features anelastic, compressible, and prescribed (kinematic) dynamics, closures for large eddy simulation, saturation adjustment microphysics, Kessler microphysics, and one- and two-moment bulk schemes via an extension to the [Climate Modeling Alliance's](clima.caltech.edu) [CloudMicrophysics.jl](https://github.com/CliMA/CloudMicrophysics.jl).
+An extension to [RRTMGP.jl](https://github.com/CliMA/RRTMGP.jl) provides solvers for gray, clear-sky, and all-sky radiative transfer.
+Breeze's examples include single column radiation, idealized thermal bubbles and inertia-gravity waves and Kelvin-Helmholtz, BOMEX shallow convection, RICO trade-wind cumulus, supercells, mountain waves, and more.
+
+Check out [the documentation](https://numericalearth.github.io/BreezeDocumentation/stable/) and [examples](https://github.com/NumericalEarth/Breeze.jl/tree/main/examples).
+Don't hesitate to get in touch on the [NumericalEarth slack](https://join.slack.com/t/numericalearth/shared_invite/zt-3kjcowmpg-B0s3nalWkvZg8IBc~BIJEA) or by opening a new [discussion](https://github.com/NumericalEarth/Breeze.jl/discussions)!
+
+### Roadmap
+
+We're working feverishly to build
+
+- ⛈️ **Advanced microphysics**: Predicted Particle Property (P3) bulk microphysics, spectral bin schemes, and Lagrangian superdroplet methods for high-fidelity cloud and precipitation modeling
+- 🌊 **Acoustic substepping**: A fully compressible dynamical core that resolves sound waves, for applications from convective dynamics to acoustic propagation
+- 🏔️ **Terrain-following coordinates**: Flow over complex topography with smooth sigma coordinates
+- 🔬 **Nesting**: Two-way nesting from turbulence-resolving to mesoscales
+- 🌀 **Coupled atmosphere-ocean simulations**: Support for high-resolution coupled atmosphere-ocean simulations via [ClimaOcean.jl](https://github.com/CliMA/ClimaOcean.jl)
+
+### Gallery
+
+<table style="background-color:#FFFFFF;">
+  <tr>
+    <th width="33%">
+      <a href="https://numericalearth.github.io/BreezeDocumentation/dev/literated/cloudy_thermal_bubble/">
+        <figure>
+          <img src="">
+          <figcaption>Cloudy thermal bubble</figcaption>
+        </figure>
+      </a>
+    </th>
+    <th width="33%">
+      <a href="https://numericalearth.github.io/BreezeDocumentation/dev/literated/bomex/">
+        <figure>
+          <img src="">
+          <figcaption>BOMEX shallow convection</figcaption>
+        </figure>
+      </a>
+    </th>
+    <th width="33%">
+      <a href="https://numericalearth.github.io/BreezeDocumentation/dev/literated/rico/">
+        <figure>
+          <img src="">
+          <figcaption>RICO trade-wind cumulus</figcaption>
+        </figure>
+      </a>
+    </th>
+  </tr>
+  <tr>
+    <th width="33%">
+      <a href="https://numericalearth.github.io/BreezeDocumentation/dev/literated/prescribed_sea_surface_temperature/">
+        <figure>
+          <img src="">
+          <figcaption>Prescribed SST convection</figcaption>
+        </figure>
+      </a>
+    </th>
+    <th width="33%">
+      <a href="https://numericalearth.github.io/BreezeDocumentation/dev/literated/inertia_gravity_wave/">
+        <figure>
+          <img src="">
+          <figcaption>Inertia-gravity wave</figcaption>
+        </figure>
+      </a>
+    </th>
+    <th width="33%">
+      <a href="https://numericalearth.github.io/BreezeDocumentation/dev/literated/acoustic_wave/">
+        <figure>
+          <img src="">
+          <figcaption>Acoustic wave</figcaption>
+        </figure>
+      </a>
+    </th>
+  </tr>
+</table>
 
 ### Installation
 
