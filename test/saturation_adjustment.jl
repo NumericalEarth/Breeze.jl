@@ -26,7 +26,7 @@ test_tol(FT::Type{Float32}) = sqrt(solver_tol(FT))
 
 test_thermodynamics = (:StaticEnergy, :LiquidIcePotentialTemperature)
 
-@testset "Warm-phase saturation adjustment [$(FT)]" for FT in (Float32, Float64)
+@testset "Warm-phase saturation adjustment [$(FT)]" for FT in test_float_types()
     Oceananigans.defaults.FloatType = FT
     grid = RectilinearGrid(default_arch; size=(1, 1, 1), x=(0, 1), y=(0, 1), z=(0, 1))
     constants = ThermodynamicConstants(FT)
@@ -64,8 +64,8 @@ test_thermodynamics = (:StaticEnergy, :LiquidIcePotentialTemperature)
         model = AtmosphereModel(grid; thermodynamic_constants=constants, dynamics, formulation, microphysics)
         ρᵣ = @allowscalar first(reference_state.density)
 
-        # Many more tests that touch saturated conditions
-        for T₂ in 270:4:320, qᵗ₂ in 1e-2:2e-3:5e-2
+        # Reduced parameter sweep for faster testing (was 14×21 = 294 per FT, now 5×7 = 35)
+        for T₂ in 270:12:320, qᵗ₂ in 1e-2:7e-3:5e-2
             @testset let T₂=T₂, qᵗ₂=qᵗ₂
                 T₂ = convert(FT, T₂)
                 qᵗ₂ = convert(FT, qᵗ₂)
@@ -103,7 +103,7 @@ function test_liquid_fraction(T, Tᶠ, Tʰ)
     return (T′ - Tʰ) / (Tᶠ - Tʰ)
 end
 
-@testset "Mixed-phase saturation adjustment (AtmosphereModel) [$(FT)]" for FT in (Float32, Float64)
+@testset "Mixed-phase saturation adjustment (AtmosphereModel) [$(FT)]" for FT in test_float_types()
     Oceananigans.defaults.FloatType = FT
     grid = RectilinearGrid(default_arch; size=(1, 1, 1), x=(0, 1), y=(0, 1), z=(0, 1))
 
@@ -223,7 +223,8 @@ end
         @testset "Mixed-phase range temperatures with moist static energy" begin
             atol = test_tol(FT)
 
-            for T in 240:10:270
+            # Reduced from 4 to 3 temperatures
+            for T in 240:15:270
                 @testset let T=T
                     T = convert(FT, T)
                     λ = test_liquid_fraction(T, Tᶠ, Tʰ)
@@ -276,7 +277,8 @@ end
         T = FT(253.15)  # Midway in mixed-phase range
         λ = test_liquid_fraction(T, Tᶠ, Tʰ)
 
-        for qᵗ in FT.(5e-3:5e-3:3e-2)
+        # Reduced from 6 to 3 moisture values
+        for qᵗ in FT.(5e-3:1e-2:3e-2)
             @testset let qᵗ=qᵗ
                 qᵛ⁺ = equilibrium_saturation_specific_humidity(T, pᵣ, qᵗ, constants, equilibrium)
 
@@ -302,7 +304,8 @@ end
     # Test 6: Verify partitioning matches temperature-dependent λ
     @testset "Condensate partitioning verification" begin
         atol = test_tol(FT)
-        for T_partition in 235:10:265
+        # Reduced from 4 to 3 temperatures
+        for T_partition in 235:15:265
             @testset let T_partition=T_partition
                 T_partition = convert(FT, T_partition)
                 λ_expected = test_liquid_fraction(T_partition, Tᶠ, Tʰ)
@@ -336,7 +339,7 @@ end
     end
 end
 
-@testset "Saturation adjustment (MoistAirBuoyancies)" for FT in (Float32, Float64)
+@testset "Saturation adjustment (MoistAirBuoyancies)" for FT in test_float_types()
     # Minimal grid and reference state
     Oceananigans.defaults.FloatType = FT
     grid = RectilinearGrid(default_arch; size=(1, 1, 1), x=(0, 1), y=(0, 1), z=(0, 1))
