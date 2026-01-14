@@ -158,7 +158,7 @@ we get
 
 https://github.com/user-attachments/assets/c9a0c9c3-c199-48b8-9850-f967bdcc4bed
 
-We ran the [BOMEX example](https://numericalearth.github.io/BreezeDocumentation/dev/literated/bomex/) at 25 m resolution and a 2x bigger grid, and used the data to produce a visuzliation of the resulting clouds:
+We ran the [BOMEX example](https://numericalearth.github.io/BreezeDocumentation/dev/literated/bomex/) at 25 m resolution and a 2x bigger grid, and used the data to produce a visualization of the resulting clouds:
 
 https://github.com/user-attachments/assets/3c378cc7-c71b-420d-b301-33d45c7521e2
 
