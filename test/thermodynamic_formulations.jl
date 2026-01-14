@@ -14,7 +14,7 @@ using Test
     constants = ThermodynamicConstants()
     reference_state = ReferenceState(grid, constants)
     dynamics_stub = AnelasticDynamics(reference_state)
-    dynamics = materialize_dynamics(dynamics_stub, grid, NamedTuple())
+    dynamics = materialize_dynamics(dynamics_stub, grid, NamedTuple(), constants)
 
     # Boundary conditions needed for materialization (must pass grid to respect topology)
     ccc = (Center(), Center(), Center())
