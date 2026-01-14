@@ -45,13 +45,20 @@ Don't hesitate to get in touch on the [NumericalEarth slack](https://join.slack.
 
 ### Roadmap
 
-We're working feverishly to build
+Our goal is to build the world's fastest, easiest to use, most productive tool for weather research and forecasting, atmospheric model development, cloud physics, and more.
+This won't be the effort of a single group or even a single community.
+It can only be achieved by a wide-ranging and sustained collaboration of passionate people.
+Maybe that includes you.
+
+Right now, the goals of the current group of model developers is to implement
 
 - ⛈️ **Advanced microphysics**: Predicted Particle Property (P3) bulk microphysics, spectral bin schemes, and Lagrangian superdroplet methods for high-fidelity cloud and precipitation modeling
 - 🌊 **Acoustic substepping**: A fully compressible dynamical core that resolves sound waves, for applications from convective dynamics to acoustic propagation
 - 🏔️ **Terrain-following coordinates**: Flow over complex topography with smooth sigma coordinates
 - 🔬 **Nesting**: Two-way nesting from turbulence-resolving to mesoscales
 - 🌀 **Coupled atmosphere-ocean simulations**: Support for high-resolution coupled atmosphere-ocean simulations via [ClimaOcean.jl](https://github.com/CliMA/ClimaOcean.jl)
+
+If you have ideas, dreams, or criticisms that can make Breeze and it's future better, don't hesitate to speak up.
 
 ### Selected examples
 
