@@ -28,23 +28,24 @@ struct Example
 end
 
 examples = [
-    # Example("Stratified dry thermal bubble", "dry_thermal_bubble", true),
-    # Example("Cloudy thermal bubble", "cloudy_thermal_bubble", true),
-    # Example("Cloudy Kelvin-Helmholtz instability", "cloudy_kelvin_helmholtz", true),
-    # Example("Shallow cumulus convection (BOMEX)", "bomex", true),
-    # Example("Precipitating shallow cumulus (RICO)", "rico", false),
-    # Example("Convection over prescribed sea surface temperature (SST)", "prescribed_sea_surface_temperature", true),
-    # Example("Inertia gravity wave", "inertia_gravity_wave", true),
-    # Example("Single column radiation", "single_column_radiation", true),
-    # Example("Stationary parcel model", "stationary_parcel_model", true),
-    # Example("Acoustic wave in shear layer", "acoustic_wave", true),
+    Example("Stratified dry thermal bubble", "dry_thermal_bubble", true),
+    Example("Cloudy thermal bubble", "cloudy_thermal_bubble", true),
+    Example("Cloudy Kelvin-Helmholtz instability", "cloudy_kelvin_helmholtz", true),
+    Example("Shallow cumulus convection (BOMEX)", "bomex", true),
+    Example("Precipitating shallow cumulus (RICO)", "rico", false),
+    Example("Convection over prescribed sea surface temperature (SST)", "prescribed_sea_surface_temperature", true),
+    Example("Inertia gravity wave", "inertia_gravity_wave", true),
+    Example("Single column radiation", "single_column_radiation", true),
+    Example("Stationary parcel model", "stationary_parcel_model", true),
+    Example("Acoustic wave in shear layer", "acoustic_wave", true),
+    Example("Cloud formation in prescribed updraft", "kinematic_driver", true),
 ]
+
+examples = []
 
 # Filter out long-running example if necessary
 filter!(x -> x.build_always || get(ENV, "BREEZE_BUILD_ALL_EXAMPLES", "false") == "true", examples)
-
 example_pages = [ex.title => joinpath("literated", ex.basename * ".md") for ex in examples]
-
 semaphore = Base.Semaphore(Threads.nthreads(:interactive))
 @time "literate" @sync for example in examples
     script_file = example.basename * ".jl"

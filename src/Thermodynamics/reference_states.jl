@@ -1,8 +1,9 @@
 using Oceananigans: Oceananigans, Center, Field, set!, fill_halo_regions!
 using Oceananigans.BoundaryConditions: FieldBoundaryConditions, ValueBoundaryCondition
+using Oceananigans.Operators: ℑzᵃᵃᶠ
 
 using Adapt: Adapt, adapt
-using KernelAbstractions: @kernel, @index
+using GPUArraysCore: @allowscalar
 
 #####
 ##### Reference state computations for Boussinesq and Anelastic models
@@ -38,6 +39,23 @@ Base.show(io::IO, ref::ReferenceState) = print(io, summary(ref))
 ##### How to compute the reference state
 #####
 
+"""
+    surface_density(reference_state)
+
+Return the density at z=0 by interpolating the reference density field to the surface.
+"""
+function surface_density(ref::ReferenceState)
+    ρ = ref.density
+    grid = ρ.grid
+    return @allowscalar ℑzᵃᵃᶠ(1, 1, 1, grid, ρ)
+end
+
+"""
+    surface_density(p₀, θ₀, constants)
+
+Compute the surface air density from surface pressure `p₀`, surface temperature `θ₀`,
+and thermodynamic `constants` using the ideal gas law for dry air.
+"""
 @inline function surface_density(p₀, θ₀, constants)
     Rᵈ = dry_air_gas_constant(constants)
     return p₀ / (Rᵈ * θ₀)
