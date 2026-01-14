@@ -168,6 +168,7 @@ using DocStringExtensions: TYPEDSIGNATURES
 using SpecialFunctions: loggamma, gamma_inc
 
 using Oceananigans: Oceananigans
+using Breeze.AtmosphereModels: prognostic_field_names
 
 #####
 ##### Integral types (must be first - no dependencies)

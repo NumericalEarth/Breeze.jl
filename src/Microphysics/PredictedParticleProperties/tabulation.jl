@@ -10,7 +10,6 @@ export tabulate, TabulationParameters
 
 using KernelAbstractions: @kernel, @index
 using Oceananigans.Architectures: device, CPU
-using Oceananigans.Utils: launch!
 
 """
     TabulationParameters
@@ -76,7 +75,7 @@ function Qnorm_grid(params::TabulationParameters{FT}) where FT
     n = params.n_Qnorm
     log_min = log10(params.Qnorm_min)
     log_max = log10(params.Qnorm_max)
-    
+
     return [FT(10^(log_min + (i-1) * (log_max - log_min) / (n - 1))) for i in 1:n]
 end
 
@@ -117,22 +116,22 @@ The ratio gives Q_norm ∝ Γ(μ+4) / (Γ(μ+1) λ³)
 function state_from_Qnorm(FT, Qnorm, Fᶠ, Fˡ; ρᶠ=FT(400), μ=FT(0))
     # For μ=0: Q_norm ≈ 6 / λ³ * (some density factor)
     # Invert to get λ from Q_norm
-    
+
     # Simplified: assume particle mass m ~ ρ_eff D³
     # Q_norm ~ D³ means λ ~ 1/D ~ Q_norm^{-1/3}
-    
+
     ρⁱ = FT(917)  # pure ice density
     ρ_eff = (1 - Fᶠ) * ρⁱ * FT(0.1) + Fᶠ * ρᶠ
-    
+
     # Characteristic diameter from Q_norm = (π/6) ρ_eff D³
     D_char = cbrt(6 * Qnorm / (FT(π) * ρ_eff))
-    
+
     # λ ~ 4 / D for exponential distribution
     λ = FT(4) / max(D_char, FT(1e-8))
-    
+
     # N₀ from normalization (set to give reasonable number concentration)
     N₀ = FT(1e6)  # Placeholder
-    
+
     return IceSizeDistributionState(
         N₀, μ, λ, Fᶠ, Fˡ, ρᶠ
     )
@@ -141,18 +140,18 @@ end
 @kernel function _fill_integral_table!(table, integral, Qnorm_vals, Fᶠ_vals, Fˡ_vals,
                                        quadrature_nodes, quadrature_weights)
     i, j, k = @index(Global, NTuple)
-    
+
     Qnorm = @inbounds Qnorm_vals[i]
     Fᶠ = @inbounds Fᶠ_vals[j]
     Fˡ = @inbounds Fˡ_vals[k]
-    
+
     # Create state for this grid point
     FT = eltype(table)
     state = state_from_Qnorm(FT, Qnorm, Fᶠ, Fˡ)
-    
+
     # Evaluate integral using pre-computed quadrature nodes/weights
-    @inbounds table[i, j, k] = evaluate_with_quadrature(integral, state, 
-                                                         quadrature_nodes, 
+    @inbounds table[i, j, k] = evaluate_with_quadrature(integral, state,
+                                                         quadrature_nodes,
                                                          quadrature_weights)
 end
 
@@ -162,25 +161,25 @@ end
 Evaluate a P3 integral using pre-computed quadrature nodes and weights.
 This avoids allocation inside kernels.
 """
-@inline function evaluate_with_quadrature(integral::AbstractP3Integral, 
+@inline function evaluate_with_quadrature(integral::AbstractP3Integral,
                                           state::IceSizeDistributionState,
                                           nodes, weights)
     FT = typeof(state.slope)
     λ = state.slope
     result = zero(FT)
     n_quadrature = length(nodes)
-    
+
     for i in 1:n_quadrature
         x = @inbounds nodes[i]
         w = @inbounds weights[i]
-        
+
         D = transform_to_diameter(x, λ)
         J = jacobian_diameter_transform(x, λ)
         f = integrand(integral, D, state)
-        
+
         result += w * f * J
     end
-    
+
     return result
 end
 
@@ -202,31 +201,31 @@ during simulation, values can be interpolated rather than computed.
 
 [`TabulatedIntegral`](@ref) wrapping the lookup table array.
 """
-function tabulate(integral::AbstractP3Integral, arch, 
+function tabulate(integral::AbstractP3Integral, arch,
                   params::TabulationParameters{FT} = TabulationParameters(FT)) where FT
-    
+
     Qnorm_vals = Qnorm_grid(params)
     Fᶠ_vals = Fr_grid(params)
     Fˡ_vals = Fl_grid(params)
-    
+
     n_Q = params.n_Qnorm
     n_Fᶠ = params.n_Fr
     n_Fˡ = params.n_Fl
     n_quad = params.n_quadrature
-    
+
     # Pre-compute quadrature nodes and weights
     nodes, weights = chebyshev_gauss_nodes_weights(FT, n_quad)
-    
+
     # Allocate table on CPU first
     table = zeros(FT, n_Q, n_Fᶠ, n_Fˡ)
-    
+
     # Launch kernel to fill table
     # Note: tabulation is always done on CPU since quadrature uses a for loop
     # The resulting table is then transferred to GPU if needed
     kernel! = _fill_integral_table!(device(CPU()), min(256, n_Q * n_Fᶠ * n_Fˡ))
     kernel!(table, integral, Qnorm_vals, Fᶠ_vals, Fˡ_vals, nodes, weights;
             ndrange = (n_Q, n_Fᶠ, n_Fˡ))
-    
+
     # TODO: Transfer table to GPU architecture if arch != CPU()
     # For now, just return CPU array
     return TabulatedIntegral(table)
@@ -239,9 +238,9 @@ Tabulate all integrals in an IceFallSpeed container.
 
 Returns a new IceFallSpeed with TabulatedIntegral fields.
 """
-function tabulate(fs::IceFallSpeed{FT}, arch, 
+function tabulate(fs::IceFallSpeed{FT}, arch,
                   params::TabulationParameters{FT} = TabulationParameters(FT)) where FT
-    
+
     return IceFallSpeed(
         fs.reference_air_density,
         fs.fall_speed_coefficient,
@@ -259,7 +258,7 @@ Tabulate all integrals in an IceDeposition container.
 """
 function tabulate(dep::IceDeposition{FT}, arch,
                   params::TabulationParameters{FT} = TabulationParameters(FT)) where FT
-    
+
     return IceDeposition(
         dep.thermal_conductivity,
         dep.vapor_diffusivity,
@@ -307,13 +306,13 @@ p3 = PredictedParticlePropertiesMicrophysics()
 p3_fast = tabulate(p3, :ice_fall_speed, CPU(); n_Qnorm=100)
 ```
 """
-function tabulate(p3::PredictedParticlePropertiesMicrophysics{FT}, 
-                  property::Symbol, 
+function tabulate(p3::PredictedParticlePropertiesMicrophysics{FT},
+                  property::Symbol,
                   arch;
                   kwargs...) where FT
-    
+
     params = TabulationParameters(FT; kwargs...)
-    
+
     if property == :ice_fall_speed
         new_fall_speed = tabulate(p3.ice.fall_speed, arch, params)
         new_ice = IceProperties(
@@ -338,7 +337,7 @@ function tabulate(p3::PredictedParticlePropertiesMicrophysics{FT},
             p3.cloud,
             p3.precipitation_boundary_condition
         )
-        
+
     elseif property == :ice_deposition
         new_deposition = tabulate(p3.ice.deposition, arch, params)
         new_ice = IceProperties(
@@ -363,10 +362,9 @@ function tabulate(p3::PredictedParticlePropertiesMicrophysics{FT},
             p3.cloud,
             p3.precipitation_boundary_condition
         )
-        
+
     else
         throw(ArgumentError("Unknown property to tabulate: $property. " *
                            "Supported: :ice_fall_speed, :ice_deposition"))
     end
 end
-

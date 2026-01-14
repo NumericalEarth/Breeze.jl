@@ -5,8 +5,7 @@
 ##### allowing it to be used as a drop-in microphysics scheme.
 #####
 
-using Oceananigans: CenterField, Field, Center
-using Oceananigans.Grids: topology
+using Oceananigans: CenterField
 using DocStringExtensions: TYPEDSIGNATURES
 
 using Breeze.AtmosphereModels: AtmosphereModels
@@ -35,7 +34,7 @@ function AtmosphereModels.prognostic_field_names(::P3)
     cloud_names = (:ρqᶜˡ,)
     rain_names = (:ρqʳ, :ρnʳ)
     ice_names = (:ρqⁱ, :ρnⁱ, :ρqᶠ, :ρbᶠ, :ρzⁱ, :ρqʷⁱ)
-    
+
     return tuple(cloud_names..., rain_names..., ice_names...)
 end
 
@@ -89,10 +88,10 @@ function AtmosphereModels.materialize_microphysical_fields(::P3, grid, bcs)
     ρbᶠ  = CenterField(grid)  # Rime volume
     ρzⁱ  = CenterField(grid)  # Ice 6th moment
     ρqʷⁱ = CenterField(grid)  # Liquid on ice
-    
+
     # Diagnostic field for vapor
     qᵛ = CenterField(grid)
-    
+
     return (; ρqᶜˡ, ρqʳ, ρnʳ, ρqⁱ, ρnⁱ, ρqᶠ, ρbᶠ, ρzⁱ, ρqʷⁱ, qᵛ)
 end
 
@@ -110,16 +109,16 @@ For P3, we compute vapor as the residual: qᵛ = qᵗ - qᶜˡ - qʳ - qⁱ - q�
 @inline function AtmosphereModels.update_microphysical_fields!(μ, ::P3, i, j, k, grid, ρ, 𝒰, constants)
     # Get total moisture from thermodynamic state
     qᵗ = 𝒰.moisture_mass_fractions.vapor + 𝒰.moisture_mass_fractions.liquid + 𝒰.moisture_mass_fractions.ice
-    
+
     # Get condensate mass fractions from prognostic fields
     qᶜˡ = @inbounds μ.ρqᶜˡ[i, j, k] / ρ
     qʳ  = @inbounds μ.ρqʳ[i, j, k] / ρ
     qⁱ  = @inbounds μ.ρqⁱ[i, j, k] / ρ
     qʷⁱ = @inbounds μ.ρqʷⁱ[i, j, k] / ρ
-    
+
     # Vapor is residual
     qᵛ = max(0, qᵗ - qᶜˡ - qʳ - qⁱ - qʷⁱ)
-    
+
     @inbounds μ.qᵛ[i, j, k] = qᵛ
     return nothing
 end
@@ -141,13 +140,13 @@ Returns `MoistureMassFractions` with vapor, liquid (cloud + rain), and ice compo
     qʳ  = @inbounds μ.ρqʳ[i, j, k] / ρ
     qⁱ  = @inbounds μ.ρqⁱ[i, j, k] / ρ
     qʷⁱ = @inbounds μ.ρqʷⁱ[i, j, k] / ρ
-    
+
     # Total liquid = cloud + rain + liquid on ice
     qˡ = qᶜˡ + qʳ + qʷⁱ
-    
+
     # Vapor is residual (ensuring non-negative)
     qᵛ = max(0, qᵗ - qˡ - qⁱ)
-    
+
     return MoistureMassFractions(qᵛ, qˡ, qⁱ)
 end
 
@@ -343,20 +342,20 @@ end
 # Helper to compute P3 rates and extract ice properties
 @inline function p3_rates_and_properties(i, j, k, grid, p3, μ, ρ, 𝒰, constants)
     FT = eltype(grid)
-    
+
     # Compute all process rates
     rates = compute_p3_process_rates(i, j, k, grid, p3, μ, ρ, 𝒰, constants)
-    
+
     # Extract fields for ratio calculations
     qⁱ = @inbounds μ.ρqⁱ[i, j, k] / ρ
     nⁱ = @inbounds μ.ρnⁱ[i, j, k] / ρ
     qᶠ = @inbounds μ.ρqᶠ[i, j, k] / ρ
     bᶠ = @inbounds μ.ρbᶠ[i, j, k] / ρ
     zⁱ = @inbounds μ.ρzⁱ[i, j, k] / ρ
-    
+
     Fᶠ = safe_divide(qᶠ, qⁱ, zero(FT))
     ρᶠ = safe_divide(qᶠ * ρ, bᶠ * ρ, FT(400))
-    
+
     return rates, qⁱ, nⁱ, zⁱ, Fᶠ, ρᶠ
 end
 
