@@ -2,7 +2,6 @@ using Oceananigans: Oceananigans, Center, Field, set!, fill_halo_regions!
 using Oceananigans.BoundaryConditions: FieldBoundaryConditions, ValueBoundaryCondition
 
 using Adapt: Adapt, adapt
-using KernelAbstractions: @kernel, @index
 
 #####
 ##### Reference state computations for Boussinesq and Anelastic models
