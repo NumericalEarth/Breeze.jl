@@ -131,26 +131,6 @@ function Base.show(io::IO, p3::PredictedParticlePropertiesMicrophysics)
     print(io, "└── cloud: ", summary(p3.cloud))
 end
 
-#####
-##### Prognostic field names
-#####
-
-"""
-    prognostic_field_names(::PredictedParticlePropertiesMicrophysics)
-
-Return prognostic field names for the P3 scheme.
-
-P3 v5.5 with 3-moment ice and predicted liquid fraction has 9 prognostic fields:
-- Cloud: ρqᶜˡ (number is prescribed, not prognostic)
-- Rain: ρqʳ, ρnʳ
-- Ice: ρqⁱ, ρnⁱ, ρqᶠ, ρbᶠ, ρzⁱ, ρqʷⁱ
-"""
-function prognostic_field_names(::PredictedParticlePropertiesMicrophysics)
-    # Cloud number is prescribed (not prognostic) in this implementation
-    cloud_names = (:ρqᶜˡ,)
-    rain_names = (:ρqʳ, :ρnʳ)
-    ice_names = (:ρqⁱ, :ρnⁱ, :ρqᶠ, :ρbᶠ, :ρzⁱ, :ρqʷⁱ)
-    
-    return tuple(cloud_names..., rain_names..., ice_names...)
-end
+# Note: prognostic_field_names is implemented in p3_interface.jl to extend
+# AtmosphereModels.prognostic_field_names
 

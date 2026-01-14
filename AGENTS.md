@@ -39,6 +39,8 @@ Breeze interfaces with ClimaOcean for coupled atmosphere-ocean simulations.
      with kernels launched via `launch!`. This ensures code works on both CPU and GPU.
    - **Use literal zeros**: Write `max(0, a)` instead of `max(zero(FT), a)`. Julia handles type
      promotion automatically, and `0` is more readable. The same applies to `min`, `clamp`, etc.
+   - **Use `sqrt` and `cbrt`**: Never use `^(1/2)` or `^(1/3)` for square roots or cube roots.
+     Always use `sqrt(x)` and `cbrt(x)` instead. These are faster, more precise, and more readable.
 
 4. **Documentation**:
    - Use DocStringExtensions.jl for consistent docstrings

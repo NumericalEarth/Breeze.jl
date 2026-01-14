@@ -29,11 +29,11 @@ $(TYPEDSIGNATURES)
 Construct `IceDeposition` with parameters and quadrature-based integrals.
 
 Ice growth/decay by vapor deposition/sublimation follows the diffusion equation
-with ventilation enhancement. The ventilation factor ``f_v`` accounts for 
+with ventilation enhancement. The ventilation factor ``fᵛᵉ`` accounts for 
 enhanced vapor transport due to particle motion through air:
 
 ```math
-f_v = a + b \\cdot Sc^{1/3} Re^{1/2}
+fᵛᵉ = a + b \\cdot Sc^{1/3} Re^{1/2}
 ```
 
 where ``Sc`` is the Schmidt number and ``Re`` is the Reynolds number. 

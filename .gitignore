@@ -29,9 +29,12 @@ Manifest.toml
 *.jld2
 *.png
 *.mp4
+*.nc
 
 # other files we don't want
 *.swp
 *.DS_Store
 *.vscode
 *.code-workspace
+*.juliaup*
+

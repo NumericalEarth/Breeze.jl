@@ -2,11 +2,15 @@
 ##### Tabulation of P3 Integrals
 #####
 ##### Generate lookup tables for efficient evaluation during simulation.
-##### Tables are indexed by normalized ice mass (Q_norm), rime fraction (F_r),
-##### and liquid fraction (F_l).
+##### Tables are indexed by normalized ice mass (Qnorm), rime fraction (Fᶠ),
+##### and liquid fraction (Fˡ).
 #####
 
 export tabulate, TabulationParameters
+
+using KernelAbstractions: @kernel, @index
+using Oceananigans.Architectures: device, CPU
+using Oceananigans.Utils: launch!
 
 """
     TabulationParameters
@@ -29,9 +33,9 @@ Configure the lookup table grid for P3 integrals.
 
 The P3 Fortran code pre-computes bulk integrals on a 3D grid indexed by:
 
-1. **Normalized mass** `Qnorm = q/N` [kg]: Mean mass per particle
-2. **Rime fraction** `Fr ∈ [0, 1]`: Mass fraction that is rime
-3. **Liquid fraction** `Fl ∈ [0, 1]`: Mass fraction that is liquid water on ice
+1. **Normalized mass** `Qnorm = qⁱ/Nⁱ` [kg]: Mean mass per particle
+2. **Rime fraction** `Fᶠ ∈ [0, 1]`: Mass fraction that is rime (frozen accretion)
+3. **Liquid fraction** `Fˡ ∈ [0, 1]`: Mass fraction that is liquid water on ice
 
 During simulation, integral values are interpolated from this table rather
 than computed via quadrature, which is much faster.
@@ -97,11 +101,11 @@ function Fl_grid(params::TabulationParameters{FT}) where FT
 end
 
 """
-    state_from_Qnorm(Qnorm, Fr, Fl; ρ_rim=400)
+    state_from_Qnorm(Qnorm, Fᶠ, Fˡ; ρᶠ=400)
 
 Create an IceSizeDistributionState from normalized quantities.
 
-Given Q_norm = q_i/N_i (mass per particle), we need to determine
+Given Q_norm = qⁱ/Nⁱ (mass per particle), we need to determine
 the size distribution parameters (N₀, μ, λ).
 
 Using the gamma distribution moments:
@@ -110,18 +114,18 @@ Using the gamma distribution moments:
 
 The ratio gives Q_norm ∝ Γ(μ+4) / (Γ(μ+1) λ³)
 """
-function state_from_Qnorm(FT, Qnorm, Fr, Fl; ρ_rim=FT(400), μ=FT(0))
+function state_from_Qnorm(FT, Qnorm, Fᶠ, Fˡ; ρᶠ=FT(400), μ=FT(0))
     # For μ=0: Q_norm ≈ 6 / λ³ * (some density factor)
     # Invert to get λ from Q_norm
     
     # Simplified: assume particle mass m ~ ρ_eff D³
     # Q_norm ~ D³ means λ ~ 1/D ~ Q_norm^{-1/3}
     
-    ρ_ice = FT(917)
-    ρ_eff = (1 - Fr) * ρ_ice * FT(0.1) + Fr * ρ_rim
+    ρⁱ = FT(917)  # pure ice density
+    ρ_eff = (1 - Fᶠ) * ρⁱ * FT(0.1) + Fᶠ * ρᶠ
     
     # Characteristic diameter from Q_norm = (π/6) ρ_eff D³
-    D_char = (6 * Qnorm / (π * ρ_eff))^(1/3)
+    D_char = cbrt(6 * Qnorm / (FT(π) * ρ_eff))
     
     # λ ~ 4 / D for exponential distribution
     λ = FT(4) / max(D_char, FT(1e-8))
@@ -130,8 +134,54 @@ function state_from_Qnorm(FT, Qnorm, Fr, Fl; ρ_rim=FT(400), μ=FT(0))
     N₀ = FT(1e6)  # Placeholder
     
     return IceSizeDistributionState(
-        N₀, μ, λ, Fr, Fl, ρ_rim
+        N₀, μ, λ, Fᶠ, Fˡ, ρᶠ
     )
+end
+
+@kernel function _fill_integral_table!(table, integral, Qnorm_vals, Fᶠ_vals, Fˡ_vals,
+                                       quadrature_nodes, quadrature_weights)
+    i, j, k = @index(Global, NTuple)
+    
+    Qnorm = @inbounds Qnorm_vals[i]
+    Fᶠ = @inbounds Fᶠ_vals[j]
+    Fˡ = @inbounds Fˡ_vals[k]
+    
+    # Create state for this grid point
+    FT = eltype(table)
+    state = state_from_Qnorm(FT, Qnorm, Fᶠ, Fˡ)
+    
+    # Evaluate integral using pre-computed quadrature nodes/weights
+    @inbounds table[i, j, k] = evaluate_with_quadrature(integral, state, 
+                                                         quadrature_nodes, 
+                                                         quadrature_weights)
+end
+
+"""
+    evaluate_with_quadrature(integral, state, nodes, weights)
+
+Evaluate a P3 integral using pre-computed quadrature nodes and weights.
+This avoids allocation inside kernels.
+"""
+@inline function evaluate_with_quadrature(integral::AbstractP3Integral, 
+                                          state::IceSizeDistributionState,
+                                          nodes, weights)
+    FT = typeof(state.slope)
+    λ = state.slope
+    result = zero(FT)
+    n_quadrature = length(nodes)
+    
+    for i in 1:n_quadrature
+        x = @inbounds nodes[i]
+        w = @inbounds weights[i]
+        
+        D = transform_to_diameter(x, λ)
+        J = jacobian_diameter_transform(x, λ)
+        f = integrand(integral, D, state)
+        
+        result += w * f * J
+    end
+    
+    return result
 end
 
 """
@@ -139,7 +189,7 @@ end
 
 Generate a lookup table for a single P3 integral.
 
-This pre-computes integral values on a 3D grid of (Qnorm, Fr, Fl) so that
+This pre-computes integral values on a 3D grid of (Qnorm, Fᶠ, Fˡ) so that
 during simulation, values can be interpolated rather than computed.
 
 # Arguments
@@ -156,35 +206,28 @@ function tabulate(integral::AbstractP3Integral, arch,
                   params::TabulationParameters{FT} = TabulationParameters(FT)) where FT
     
     Qnorm_vals = Qnorm_grid(params)
-    Fr_vals = Fr_grid(params)
-    Fl_vals = Fl_grid(params)
+    Fᶠ_vals = Fr_grid(params)
+    Fˡ_vals = Fl_grid(params)
     
     n_Q = params.n_Qnorm
-    n_Fr = params.n_Fr
-    n_Fl = params.n_Fl
+    n_Fᶠ = params.n_Fr
+    n_Fˡ = params.n_Fl
     n_quad = params.n_quadrature
     
-    # Allocate table
-    table = zeros(FT, n_Q, n_Fr, n_Fl)
+    # Pre-compute quadrature nodes and weights
+    nodes, weights = chebyshev_gauss_nodes_weights(FT, n_quad)
     
-    # Fill table
-    for k in 1:n_Fl
-        Fl = Fl_vals[k]
-        for j in 1:n_Fr
-            Fr = Fr_vals[j]
-            for i in 1:n_Q
-                Qnorm = Qnorm_vals[i]
-                
-                # Create state for this grid point
-                state = state_from_Qnorm(FT, Qnorm, Fr, Fl)
-                
-                # Evaluate integral
-                table[i, j, k] = evaluate(integral, state; n_quadrature=n_quad)
-            end
-        end
-    end
+    # Allocate table on CPU first
+    table = zeros(FT, n_Q, n_Fᶠ, n_Fˡ)
     
-    # Move to architecture if needed
+    # Launch kernel to fill table
+    # Note: tabulation is always done on CPU since quadrature uses a for loop
+    # The resulting table is then transferred to GPU if needed
+    kernel! = _fill_integral_table!(device(CPU()), min(256, n_Q * n_Fᶠ * n_Fˡ))
+    kernel!(table, integral, Qnorm_vals, Fᶠ_vals, Fˡ_vals, nodes, weights;
+            ndrange = (n_Q, n_Fᶠ, n_Fˡ))
+    
+    # TODO: Transfer table to GPU architecture if arch != CPU()
     # For now, just return CPU array
     return TabulatedIntegral(table)
 end

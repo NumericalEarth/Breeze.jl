@@ -48,7 +48,6 @@ Based on [P3-microphysics v5.5.0](https://github.com/P3-microphysics/P3-microphy
 
 - Multiple free ice categories from Milbrandt & Morrison (2016)
 - Full process rate tendency functions (infrastructure is ready, rates are TODO)
-- Three-moment λ solver using Z/N constraint (currently uses μ-λ relationship)
 """
 module PredictedParticleProperties
 
@@ -120,8 +119,8 @@ export
     SixthMomentSublimation1,
     
     # Integral types (concrete) - Lambda limiter
-    SmallQLambdaLimit,
-    LargeQLambdaLimit,
+    NumberMomentLambdaLimit,
+    MassMomentLambdaLimit,
     
     # Integral types (concrete) - Rain
     RainShapeParameter,
@@ -151,10 +150,13 @@ export
     
     # Lambda solver
     IceMassPowerLaw,
-    ShapeParameterRelation,
+    TwoMomentClosure,
+    ThreeMomentClosure,
+    ShapeParameterRelation,  # alias for TwoMomentClosure
     IceRegimeThresholds,
     IceDistributionParameters,
     solve_lambda,
+    solve_shape_parameter,
     distribution_parameters,
     shape_parameter,
     ice_regime_thresholds,
@@ -212,6 +214,18 @@ include("tabulation.jl")
 #####
 
 include("lambda_solver.jl")
+
+#####
+##### Process rates (Phase 1: rain, deposition, melting)
+#####
+
+include("process_rates.jl")
+
+#####
+##### AtmosphereModel interface (must be last - depends on all types)
+#####
+
+include("p3_interface.jl")
 
 end # module PredictedParticleProperties
 

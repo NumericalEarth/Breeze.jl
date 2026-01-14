@@ -335,20 +335,24 @@ struct SixthMomentSublimation1 <: AbstractSixthMomentIntegral end
 #####
 
 """
-    SmallQLambdaLimit <: AbstractLambdaLimiterIntegral
+    NumberMomentLambdaLimit <: AbstractLambdaLimiterIntegral
 
-Lambda limiter for small ice mass mixing ratios.
+Number moment integral for lambda limiting: ``∫ N'(D) \\, dD``.
+
+Used to constrain ``λ`` when ice mass mixing ratio is small.
 Corresponds to `i_qsmall` in P3 Fortran code.
 """
-struct SmallQLambdaLimit <: AbstractLambdaLimiterIntegral end
+struct NumberMomentLambdaLimit <: AbstractLambdaLimiterIntegral end
 
 """
-    LargeQLambdaLimit <: AbstractLambdaLimiterIntegral
+    MassMomentLambdaLimit <: AbstractLambdaLimiterIntegral
 
-Lambda limiter for large ice mass mixing ratios.
+Mass moment integral for lambda limiting: ``∫ m(D) N'(D) \\, dD``.
+
+Used to constrain ``λ`` when ice mass mixing ratio is large.
 Corresponds to `i_qlarge` in P3 Fortran code.
 """
-struct LargeQLambdaLimit <: AbstractLambdaLimiterIntegral end
+struct MassMomentLambdaLimit <: AbstractLambdaLimiterIntegral end
 
 #####
 ##### Rain integrals

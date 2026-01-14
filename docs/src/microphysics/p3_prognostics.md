@@ -265,7 +265,7 @@ n_min = microphysics.minimum_number_mixing_ratio  # Default: 1e-16 1/kg
 ## Code Example
 
 ```@example p3_prognostics
-using Breeze.Microphysics.PredictedParticleProperties
+using Breeze
 
 p3 = PredictedParticlePropertiesMicrophysics()
 

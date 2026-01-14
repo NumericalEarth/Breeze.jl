@@ -102,7 +102,7 @@ ax = Axis(fig[1, 1],
     title = "μ-λ Relationship (Morrison & Milbrandt 2015a)")
 
 lines!(ax, λ_values, μ_values, linewidth=2)
-hlines!(ax, [relation.maximum_shape_parameter], linestyle=:dash, color=:gray, label="μmax")
+hlines!(ax, [relation.μmax], linestyle=:dash, color=:gray, label="μmax")
 
 fig
 ```
@@ -154,9 +154,9 @@ rime_density = 400.0
 params = distribution_parameters(L_ice, N_ice, rime_fraction, rime_density)
 
 println("Distribution parameters:")
-println("  N₀ = $(round(params.intercept, sigdigits=3)) m⁻⁵⁻μ")
-println("  λ  = $(round(params.slope, sigdigits=3)) m⁻¹")
-println("  μ  = $(round(params.shape, digits=2))")
+println("  N₀ = $(round(params.N₀, sigdigits=3)) m⁻⁵⁻μ")
+println("  λ  = $(round(params.λ, sigdigits=3)) m⁻¹")
+println("  μ  = $(round(params.μ, digits=2))")
 ```
 
 ### Computing ``N₀``
@@ -188,7 +188,7 @@ for (L, label, color) in [(1e-5, "L = 10⁻⁵ kg/m³", :blue),
                            (1e-4, "L = 10⁻⁴ kg/m³", :green),
                            (1e-3, "L = 10⁻³ kg/m³", :red)]
     params = distribution_parameters(L, N_ice, 0.0, 400.0)
-    N_D = @. params.intercept * D_m^params.shape * exp(-params.slope * D_m)
+    N_D = @. params.N₀ * D_m^params.μ * exp(-params.λ * D_m)
     lines!(ax, D_mm, N_D, label=label, color=color)
 end
 
@@ -216,7 +216,7 @@ for (Ff, label, color) in [(0.0, "Fᶠ = 0 (unrimed)", :blue),
                             (0.3, "Fᶠ = 0.3", :green),
                             (0.6, "Fᶠ = 0.6", :orange)]
     params = distribution_parameters(L_ice, N_ice, Ff, 500.0)
-    N_D = @. params.intercept * D_m^params.shape * exp(-params.slope * D_m)
+    N_D = @. params.N₀ * D_m^params.μ * exp(-params.λ * D_m)
     lines!(ax, D_mm, N_D, label=label, color=color)
 end
 
@@ -278,10 +278,10 @@ The benefit of three-moment ice is improved representation of:
 - **Hail formation**: Accurate simulation of heavily rimed particles
 - **Radar reflectivity**: Direct prognostic variable rather than diagnosed
 
-!!! note "Implementation Status"
-    Our lambda solver currently uses the two-moment closure (μ-λ relationship).
-    The three-moment solver using Z/N is a TODO for future implementation.
-    The prognostic Z field is tracked for use in diagnostics and future process rates.
+Both two-moment and three-moment solvers are implemented:
+
+- **Two-moment**: Use `distribution_parameters(L, N, Fᶠ, ρᶠ)` with `TwoMomentClosure`
+- **Three-moment**: Use `distribution_parameters(L, N, Z, Fᶠ, ρᶠ)` with `ThreeMomentClosure`
 
 ## Summary
 

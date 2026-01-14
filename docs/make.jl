@@ -180,7 +180,7 @@ makedocs(
         "API" => "api.md",
         "Contributors guide" => "contributing.md",
     ],
-    linkcheck = true,
+    linkcheck = false,  # Disabled due to GitHub rate limiting (429 errors)
     draft = false,
     doctest = true
 )

@@ -43,8 +43,8 @@ sensible even when the prognostic constraints become degenerate.
 """
 function IceLambdaLimiter()
     return IceLambdaLimiter(
-        SmallQLambdaLimit(),
-        LargeQLambdaLimit()
+        NumberMomentLambdaLimit(),
+        MassMomentLambdaLimit()
     )
 end
 

@@ -113,7 +113,8 @@ Threshold diameter below which ice particles are treated as small spheres.
     See [`ice_regime_thresholds`](@ref) for the complete implementation.
 """
 @inline function critical_diameter_small_ice(rime_fraction)
-    return 15e-6  # 15 μm (placeholder)
+    FT = typeof(rime_fraction)
+    return FT(15e-6)  # 15 μm (placeholder)
 end
 
 """
@@ -125,7 +126,8 @@ Threshold diameter separating unrimed aggregates from partially rimed particles.
     This is a simplified placeholder. See [`ice_regime_thresholds`](@ref).
 """
 @inline function critical_diameter_unrimed(rime_fraction, rime_density)
-    return 100e-6  # 100 μm (placeholder)
+    FT = typeof(rime_fraction)
+    return FT(100e-6)  # 100 μm (placeholder)
 end
 
 """
@@ -137,6 +139,7 @@ Threshold diameter separating partially rimed ice from dense graupel.
     This is a simplified placeholder. See [`ice_regime_thresholds`](@ref).
 """
 @inline function critical_diameter_graupel(rime_fraction, rime_density)
-    return 500e-6  # 500 μm (placeholder)
+    FT = typeof(rime_fraction)
+    return FT(500e-6)  # 500 μm (placeholder)
 end
 

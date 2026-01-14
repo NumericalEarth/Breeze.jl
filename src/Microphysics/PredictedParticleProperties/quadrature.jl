@@ -163,7 +163,8 @@ with adjustments for particle regime (small ice, unrimed, rimed, graupel).
                                     b_V = 0.41)
     # Simplified power law for now
     # Full P3 uses regime-dependent coefficients
-    return a_V * D^b_V
+    FT = typeof(D)
+    return FT(a_V) * D^FT(b_V)
 end
 
 # Number-weighted fall speed: ∫ V(D) N'(D) dD
@@ -196,22 +197,23 @@ end
 Particle mass m(D) as a function of diameter.
 
 The mass-dimension relationship depends on the particle regime:
-- Small spherical ice: m = (π/6) ρ_ice D³
-- Unrimed aggregates: m = α_agg D^β_agg
+- Small spherical ice: m = (π/6) ρⁱ D³
+- Unrimed aggregates: m = α D^β
 - Partially rimed: interpolation
-- Fully rimed (graupel): m = (π/6) ρ_rim D³
+- Fully rimed (graupel): m = (π/6) ρᶠ D³
 """
 @inline function particle_mass(D, state::IceSizeDistributionState)
     # Simplified form using effective density
     # Full P3 uses regime-dependent formulation
-    ρ_ice = 917.0  # kg/m³
-    ρ_rim = state.rime_density
-    F_r = state.rime_fraction
+    FT = typeof(D)
+    ρⁱ = FT(917)  # kg/m³, pure ice density
+    ρᶠ = state.rime_density
+    Fᶠ = state.rime_fraction
     
     # Effective density: interpolate between ice and rime
-    ρ_eff = (1 - F_r) * ρ_ice * 0.1 + F_r * ρ_rim  # 0.1 factor for aggregate density
+    ρ_eff = (1 - Fᶠ) * ρⁱ * FT(0.1) + Fᶠ * ρᶠ  # 0.1 factor for aggregate density
     
-    return π / 6 * ρ_eff * D^3
+    return FT(π) / 6 * ρ_eff * D^3
 end
 
 #####
@@ -219,88 +221,75 @@ end
 #####
 
 """
-Ventilation factor for vapor diffusion enhancement.
+Ventilation factor ``fᵛᵉ`` for vapor diffusion enhancement.
 
 Following Hall and Pruppacher (1976):
-- For D ≤ 100 μm: f_v = 1.0
-- For D > 100 μm: f_v = 0.65 + 0.44 * (V*D)^0.5
+- For D ≤ 100 μm: fᵛᵉ = 1.0
+- For D > 100 μm: fᵛᵉ = 0.65 + 0.44 * (V*D)^0.5
 """
 @inline function ventilation_factor(D, state; constant_term=true)
     V = terminal_velocity(D, state)
+    D_threshold = typeof(D)(100e-6)
+    is_small = D ≤ D_threshold
     
-    if D ≤ 100e-6
-        return constant_term ? one(D) : zero(D)
-    else
-        if constant_term
-            return 0.65
-        else
-            return 0.44 * sqrt(V * D)
-        end
-    end
+    # Small particles: constant_term → 1, otherwise → 0
+    small_value = ifelse(constant_term, one(D), zero(D))
+    # Large particles: constant_term → 0.65, otherwise → 0.44 * sqrt(V * D)
+    large_value = ifelse(constant_term, typeof(D)(0.65), typeof(D)(0.44) * sqrt(V * D))
+    
+    return ifelse(is_small, small_value, large_value)
 end
 
-# Basic ventilation: ∫ f_v(D) C(D) N'(D) dD
+# Basic ventilation: ∫ fᵛᵉ(D) C(D) N'(D) dD
 @inline function integrand(::Ventilation, D, state::IceSizeDistributionState)
-    f_v = ventilation_factor(D, state; constant_term=true)
+    fᵛᵉ = ventilation_factor(D, state; constant_term=true)
     C = capacitance(D, state)
     Np = size_distribution(D, state)
-    return f_v * C * Np
+    return fᵛᵉ * C * Np
 end
 
 @inline function integrand(::VentilationEnhanced, D, state::IceSizeDistributionState)
-    f_v = ventilation_factor(D, state; constant_term=false)
+    fᵛᵉ = ventilation_factor(D, state; constant_term=false)
     C = capacitance(D, state)
     Np = size_distribution(D, state)
-    return f_v * C * Np
+    return fᵛᵉ * C * Np
 end
 
 # Size-regime-specific ventilation for melting
 @inline function integrand(::SmallIceVentilationConstant, D, state::IceSizeDistributionState)
     D_crit = critical_diameter_small_ice(state.rime_fraction)
-    if D ≤ D_crit
-        f_v = ventilation_factor(D, state; constant_term=true)
-        C = capacitance(D, state)
-        Np = size_distribution(D, state)
-        return f_v * C * Np
-    else
-        return zero(D)
-    end
+    fᵛᵉ = ventilation_factor(D, state; constant_term=true)
+    C = capacitance(D, state)
+    Np = size_distribution(D, state)
+    contribution = fᵛᵉ * C * Np
+    return ifelse(D ≤ D_crit, contribution, zero(D))
 end
 
 @inline function integrand(::SmallIceVentilationReynolds, D, state::IceSizeDistributionState)
     D_crit = critical_diameter_small_ice(state.rime_fraction)
-    if D ≤ D_crit
-        f_v = ventilation_factor(D, state; constant_term=false)
-        C = capacitance(D, state)
-        Np = size_distribution(D, state)
-        return f_v * C * Np
-    else
-        return zero(D)
-    end
+    fᵛᵉ = ventilation_factor(D, state; constant_term=false)
+    C = capacitance(D, state)
+    Np = size_distribution(D, state)
+    contribution = fᵛᵉ * C * Np
+    return ifelse(D ≤ D_crit, contribution, zero(D))
 end
 
 @inline function integrand(::LargeIceVentilationConstant, D, state::IceSizeDistributionState)
     D_crit = critical_diameter_small_ice(state.rime_fraction)
-    if D > D_crit
-        f_v = ventilation_factor(D, state; constant_term=true)
-        C = capacitance(D, state)
-        Np = size_distribution(D, state)
-        return f_v * C * Np
-    else
-        return zero(D)
-    end
+    fᵛᵉ = ventilation_factor(D, state; constant_term=true)
+    C = capacitance(D, state)
+    Np = size_distribution(D, state)
+    contribution = fᵛᵉ * C * Np
+    return ifelse(D > D_crit, contribution, zero(D))
 end
 
 @inline function integrand(::LargeIceVentilationReynolds, D, state::IceSizeDistributionState)
     D_crit = critical_diameter_small_ice(state.rime_fraction)
-    if D > D_crit
-        f_v = ventilation_factor(D, state; constant_term=false)
-        C = capacitance(D, state)
-        Np = size_distribution(D, state)
-        return f_v * C * Np
-    else
-        return zero(D)
-    end
+    fᵛᵉ = ventilation_factor(D, state; constant_term=false)
+    C = capacitance(D, state)
+    Np = size_distribution(D, state)
+    contribution = fᵛᵉ * C * Np
+    return ifelse(D > D_crit, contribution, zero(D))
 end
 
 """
@@ -311,11 +300,9 @@ For non-spherical particles: C ≈ 0.48 * D (plates/dendrites)
 """
 @inline function capacitance(D, state::IceSizeDistributionState)
     D_crit = critical_diameter_small_ice(state.rime_fraction)
-    if D ≤ D_crit
-        return D / 2  # sphere
-    else
-        return 0.48 * D  # non-spherical
-    end
+    sphere_capacitance = D / 2
+    nonspherical_capacitance = typeof(D)(0.48) * D
+    return ifelse(D ≤ D_crit, sphere_capacitance, nonspherical_capacitance)
 end
 
 #####
@@ -360,20 +347,21 @@ end
 @inline function integrand(::SheddingRate, D, state::IceSizeDistributionState)
     m = particle_mass(D, state)
     Np = size_distribution(D, state)
-    F_l = state.liquid_fraction
-    return F_l * m * Np  # Simplified: liquid fraction times mass
+    Fˡ = state.liquid_fraction
+    return Fˡ * m * Np  # Simplified: liquid fraction times mass
 end
 
 """
 Particle density ρ(D) as a function of diameter.
 """
 @inline function particle_density(D, state::IceSizeDistributionState)
-    ρ_ice = 917.0  # kg/m³
-    F_r = state.rime_fraction
-    ρ_rim = state.rime_density
+    FT = typeof(D)
+    ρⁱ = FT(917)  # kg/m³, pure ice density
+    Fᶠ = state.rime_fraction
+    ρᶠ = state.rime_density
     
     # Effective density: interpolate
-    return (1 - F_r) * ρ_ice * 0.1 + F_r * ρ_rim
+    return (1 - Fᶠ) * ρⁱ * FT(0.1) + Fᶠ * ρᶠ
 end
 
 #####
@@ -401,7 +389,8 @@ end
 Particle cross-sectional area A(D).
 """
 @inline function particle_area(D, state::IceSizeDistributionState)
-    return π / 4 * D^2  # Simplified: sphere
+    FT = typeof(D)
+    return FT(π) / 4 * D^2  # Simplified: sphere
 end
 
 #####
@@ -416,17 +405,17 @@ end
 
 # Sixth moment deposition tendencies
 @inline function integrand(::SixthMomentDeposition, D, state::IceSizeDistributionState)
-    f_v = ventilation_factor(D, state; constant_term=true)
+    fᵛᵉ = ventilation_factor(D, state; constant_term=true)
     C = capacitance(D, state)
     Np = size_distribution(D, state)
-    return 6 * D^5 * f_v * C * Np
+    return 6 * D^5 * fᵛᵉ * C * Np
 end
 
 @inline function integrand(::SixthMomentDeposition1, D, state::IceSizeDistributionState)
-    f_v = ventilation_factor(D, state; constant_term=false)
+    fᵛᵉ = ventilation_factor(D, state; constant_term=false)
     C = capacitance(D, state)
     Np = size_distribution(D, state)
-    return 6 * D^5 * f_v * C * Np
+    return 6 * D^5 * fᵛᵉ * C * Np
 end
 
 # Sixth moment melting tendencies
@@ -452,35 +441,35 @@ end
 # Sixth moment shedding
 @inline function integrand(::SixthMomentShedding, D, state::IceSizeDistributionState)
     Np = size_distribution(D, state)
-    F_l = state.liquid_fraction
-    return F_l * D^6 * Np
+    Fˡ = state.liquid_fraction
+    return Fˡ * D^6 * Np
 end
 
 # Sixth moment sublimation tendencies
 @inline function integrand(::SixthMomentSublimation, D, state::IceSizeDistributionState)
-    f_v = ventilation_factor(D, state; constant_term=true)
+    fᵛᵉ = ventilation_factor(D, state; constant_term=true)
     C = capacitance(D, state)
     Np = size_distribution(D, state)
-    return 6 * D^5 * f_v * C * Np
+    return 6 * D^5 * fᵛᵉ * C * Np
 end
 
 @inline function integrand(::SixthMomentSublimation1, D, state::IceSizeDistributionState)
-    f_v = ventilation_factor(D, state; constant_term=false)
+    fᵛᵉ = ventilation_factor(D, state; constant_term=false)
     C = capacitance(D, state)
     Np = size_distribution(D, state)
-    return 6 * D^5 * f_v * C * Np
+    return 6 * D^5 * fᵛᵉ * C * Np
 end
 
 #####
 ##### Lambda limiter integrals
 #####
 
-@inline function integrand(::SmallQLambdaLimit, D, state::IceSizeDistributionState)
+@inline function integrand(::NumberMomentLambdaLimit, D, state::IceSizeDistributionState)
     Np = size_distribution(D, state)
     return Np
 end
 
-@inline function integrand(::LargeQLambdaLimit, D, state::IceSizeDistributionState)
+@inline function integrand(::MassMomentLambdaLimit, D, state::IceSizeDistributionState)
     m = particle_mass(D, state)
     Np = size_distribution(D, state)
     return m * Np

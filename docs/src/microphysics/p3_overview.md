@@ -146,7 +146,7 @@ From these, diagnostic properties are computed:
 ## Quick Start
 
 ```@example p3_overview
-using Breeze.Microphysics.PredictedParticleProperties
+using Breeze
 
 # Create P3 scheme with default parameters
 microphysics = PredictedParticlePropertiesMicrophysics()
