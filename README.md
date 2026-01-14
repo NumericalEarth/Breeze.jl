@@ -75,7 +75,7 @@ Check out the [documentation](https://numericalearth.github.io/BreezeDocumentati
     </td>
     <td width="33%" align="center" valign="top">
       <a href="https://numericalearth.github.io/BreezeDocumentation/dev/literated/bomex/">
-        <img src="https://github.com/user-attachments/assets/89876fed-c2d0-43da-aa54-ab69b97e0283" width="100%"><br>
+        <img src="https://github.com/user-attachments/assets/0264d13f-31a7-4ca1-830d-2aa05f27ec4a" width="100%"><br>
         BOMEX shallow convection
       </a>
     </td>
