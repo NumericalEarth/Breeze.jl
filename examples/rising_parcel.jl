@@ -1,34 +1,29 @@
-# # Rising parcel with cloud formation
+# # Rising parcel: dry adiabatic ascent
 #
-# This example demonstrates the new `ParcelDynamics` module, which simulates
+# This example demonstrates the `ParcelDynamics` module, which simulates
 # Lagrangian air parcels rising through a prescribed atmospheric sounding.
-# As the parcel ascends, it cools adiabatically and eventually reaches
-# saturation, triggering cloud formation.
-#
-# The key insight is that **microphysics tendencies are purely local** -
-# they depend only on the parcel's thermodynamic state, not on neighboring
-# grid cells. This enables the same microphysics code to work for both
-# grid-based LES and Lagrangian parcel models without duplication.
+# As the parcel ascends, it cools adiabatically following the dry adiabatic
+# lapse rate.
 #
 # ## Physics overview
 #
-# A rising parcel undergoes:
-# 1. **Adiabatic cooling**: Temperature decreases as pressure drops (~10 K/km)
-# 2. **Supersaturation**: As T drops, saturation vapor pressure drops faster than actual vapor pressure
-# 3. **Condensation**: Excess vapor condenses onto cloud droplets (relaxation timescale τ ~ 10 s)
-# 4. **Latent heating**: Condensation releases heat, partially offsetting cooling
-# 5. **Precipitation formation**: Cloud droplets grow and eventually rain out
+# A rising parcel undergoes adiabatic expansion as pressure decreases with
+# height. For a dry adiabat, temperature decreases at approximately 9.8 K/km
+# (the dry adiabatic lapse rate). The parcel conserves its potential temperature
+# or static energy during this process.
 #
-# This is the classic "adiabatic parcel model" used to understand cloud microphysics,
-# dating back to the foundational work of [Köhler1921](@citet).
+# This example shows how `ParcelDynamics` correctly:
+# 1. Evolves parcel position through the environmental velocity field
+# 2. Applies adiabatic adjustment as pressure changes
+# 3. Tracks thermodynamic state through the ascent
 
 using Breeze
-using Breeze.ParcelDynamics: ParcelModel, ParcelState, EnvironmentalProfile,
-    step_parcel!, adiabatic_adjustment, compute_moisture_fractions
-using Breeze.Thermodynamics: StaticEnergyState, LiquidIcePotentialTemperatureState,
-    MoistureMassFractions, temperature, density, saturation_specific_humidity,
-    PlanarLiquidSurface, mixture_heat_capacity
-using CloudMicrophysics
+using Breeze.ParcelDynamics: ParcelDynamics, ParcelState, EnvironmentalProfile,
+    adiabatic_adjustment, environmental_velocity, environmental_pressure, environmental_density
+using Breeze.Thermodynamics: StaticEnergyState, MoistureMassFractions,
+    temperature, density, saturation_specific_humidity,
+    PlanarLiquidSurface, mixture_heat_capacity, with_moisture
+using Breeze.AtmosphereModels: NothingMicrophysicalState
 using CairoMakie
 
 # ## Environmental sounding
@@ -36,32 +31,31 @@ using CairoMakie
 # We prescribe a simple environmental profile:
 # - Temperature: Standard atmosphere lapse rate (6.5 K/km)
 # - Pressure: Hydrostatic pressure from ideal gas
-# - Humidity: Decreasing with height (relative humidity ~ 80% at surface)
+# - Humidity: Decreasing with height
 # - Updraft: Constant 1 m/s vertical velocity
 
-const g = 9.81
-const Rᵈ = 287.0
-const T₀ = 288.15  # Surface temperature [K]
-const p₀ = 101325.0  # Surface pressure [Pa]
-const Γ = 0.0065  # Temperature lapse rate [K/m]
-const qᵗ₀ = 0.015  # Surface specific humidity [kg/kg]
-const H_q = 2500.0  # Humidity scale height [m]
-const w_updraft = 1.0  # Updraft velocity [m/s]
+g = 9.81
+Rᵈ = 287.0
+T₀ = 288.15      # Surface temperature [K]
+p₀ = 101325.0    # Surface pressure [Pa]
+Γ = 0.0065       # Environmental temperature lapse rate [K/m]
+qᵗ₀ = 0.015      # Surface specific humidity [kg/kg]
+Hq = 2500.0      # Humidity scale height [m]
+w_updraft = 1.0  # Updraft velocity [m/s]
 
 # Temperature profile (standard atmosphere)
 T_env(z) = T₀ - Γ * z
 
 # Pressure profile (hypsometric equation for constant lapse rate)
-# p(z) = p₀ * (T(z)/T₀)^(g/(Rᵈ*Γ))
 p_env(z) = p₀ * (T_env(z) / T₀)^(g / (Rᵈ * Γ))
 
-# Density from ideal gas law (dry approximation for environmental profile)
+# Density from ideal gas law
 ρ_env(z) = p_env(z) / (Rᵈ * T_env(z))
 
 # Humidity profile (exponential decay)
-qᵗ_env(z) = qᵗ₀ * exp(-z / H_q)
+qᵗ_env(z) = qᵗ₀ * exp(-z / Hq)
 
-# Calm horizontal winds, constant updraft
+# Create the environmental profile
 profile = EnvironmentalProfile(
     temperature = T_env,
     pressure = p_env,
@@ -72,22 +66,12 @@ profile = EnvironmentalProfile(
     w = z -> w_updraft
 )
 
-# ## Microphysics scheme
-#
-# We use the one-moment warm-phase non-equilibrium scheme.
-# Cloud liquid and rain are prognostic; condensation uses relaxation toward saturation.
-
-BreezeCloudMicrophysicsExt = Base.get_extension(Breeze, :BreezeCloudMicrophysicsExt)
-OneMomentCloudMicrophysics = BreezeCloudMicrophysicsExt.OneMomentCloudMicrophysics
-WarmPhaseOneMomentState = BreezeCloudMicrophysicsExt.WarmPhaseOneMomentState
-
-microphysics = OneMomentCloudMicrophysics()
-constants = ThermodynamicConstants()
-
 # ## Initialize parcel at surface
 #
 # The parcel starts at z = 0 with environmental conditions.
 # We use `StaticEnergyState` for the thermodynamic formulation.
+
+constants = ThermodynamicConstants()
 
 z₀ = 0.0
 T_init = T_env(z₀)
@@ -95,90 +79,101 @@ p_init = p_env(z₀)
 ρ_init = ρ_env(z₀)
 qᵗ_init = qᵗ_env(z₀)
 
-# Initial moisture: all vapor, no cloud or rain
+# Initial moisture: all vapor (no condensate)
 q_init = MoistureMassFractions(qᵗ_init)
 
-# Static energy: e = cᵖᵐ * T + g * z - ℒˡᵣ * qˡ - ℒⁱᵣ * qⁱ
+# Static energy: e = cᵖᵐ * T + g * z
 cᵖᵐ = mixture_heat_capacity(q_init, constants)
 e_init = cᵖᵐ * T_init + g * z₀
 
 # Create thermodynamic state
 𝒰_init = StaticEnergyState(e_init, q_init, z₀, p_init)
 
-# Initial microphysical state: no cloud or rain
-ℳ_init = WarmPhaseOneMomentState(0.0, 0.0)
+# No microphysics for this dry example
+ℳ_init = NothingMicrophysicalState(Float64)
 
-# Create parcel state
-parcel = ParcelState(0.0, 0.0, z₀, ρ_init, qᵗ_init, 𝒰_init, ℳ_init)
+# Create initial parcel state
+state₀ = ParcelState(0.0, 0.0, z₀, ρ_init, qᵗ_init, 𝒰_init, ℳ_init)
 
-# ## Create parcel model
+# ## Create ParcelDynamics with initial state
 
-model = ParcelModel(profile, microphysics, constants)
+dynamics = ParcelDynamics(profile, state₀)
 
 # ## Run the parcel simulation
 #
 # We integrate for 30 minutes with a 1 second time step.
 
-Δt = 1.0  # Time step [s]
+Δt = 1.0         # Time step [s]
 stop_time = 1800.0  # 30 minutes
 
 # Storage for time series
 times = Float64[0.0]
-heights = Float64[parcel.z]
-temperatures = Float64[temperature(parcel.thermodynamic_state, constants)]
-qᵛ_series = Float64[parcel.thermodynamic_state.moisture_mass_fractions.vapor]
-qᶜˡ_series = Float64[parcel.microphysical_state.qᶜˡ]
-qʳ_series = Float64[parcel.microphysical_state.qʳ]
-supersaturations = Float64[]
+heights = Float64[dynamics.state.z]
+T_initial = temperature(dynamics.state.𝒰, constants)
+temperatures = Float64[T_initial]
 
 # Compute initial supersaturation
-T_curr = temperature(parcel.thermodynamic_state, constants)
-ρ_curr = density(parcel.thermodynamic_state, constants)
-qᵛ⁺ = saturation_specific_humidity(T_curr, ρ_curr, constants, PlanarLiquidSurface())
-S_init = (parcel.thermodynamic_state.moisture_mass_fractions.vapor / qᵛ⁺) - 1
-push!(supersaturations, S_init)
+ρ_initial = density(dynamics.state.𝒰, constants)
+qᵛ⁺_initial = saturation_specific_humidity(T_initial, ρ_initial, constants, PlanarLiquidSurface())
+S_initial = (dynamics.state.𝒰.moisture_mass_fractions.vapor / qᵛ⁺_initial) - 1
+supersaturations = Float64[S_initial]
+
+# Time stepping function for dry adiabatic parcel
+function step_dry_parcel!(dynamics, Δt, constants)
+    state = dynamics.state
+    profile = dynamics.profile
+
+    x, y, z = state.x, state.y, state.z
+    qᵗ = state.qᵗ
+    𝒰 = state.𝒰
+    ℳ = state.ℳ
+
+    # Get environmental velocity
+    u, v, w = environmental_velocity(profile, z)
+
+    # Update position (Forward Euler)
+    x_new = x + u * Δt
+    y_new = y + v * Δt
+    z_new = z + w * Δt
+
+    # Environmental conditions at new height
+    p_new = environmental_pressure(profile, z_new)
+    ρ_new = environmental_density(profile, z_new)
+
+    # Adiabatic adjustment of thermodynamic state
+    𝒰_new = adiabatic_adjustment(𝒰, z_new, p_new, constants)
+
+    # Update state
+    dynamics.state = ParcelState(x_new, y_new, z_new, ρ_new, qᵗ, 𝒰_new, ℳ)
+    return nothing
+end
 
 # Time loop
-t = 0.0
-current_parcel = parcel
-
-while t < stop_time
-    global t, current_parcel
-
-    # Step the parcel forward
-    current_parcel = step_parcel!(current_parcel, model, Δt)
-    t += Δt
+for n in 1:Int(stop_time / Δt)
+    step_dry_parcel!(dynamics, Δt, constants)
 
     # Record state
-    push!(times, t)
-    push!(heights, current_parcel.z)
+    push!(times, n * Δt)
+    push!(heights, dynamics.state.z)
 
-    T_curr = temperature(current_parcel.thermodynamic_state, constants)
-    ρ_curr = density(current_parcel.thermodynamic_state, constants)
-    push!(temperatures, T_curr)
-
-    q = current_parcel.thermodynamic_state.moisture_mass_fractions
-    push!(qᵛ_series, q.vapor)
-    push!(qᶜˡ_series, current_parcel.microphysical_state.qᶜˡ)
-    push!(qʳ_series, current_parcel.microphysical_state.qʳ)
+    T = temperature(dynamics.state.𝒰, constants)
+    ρ = density(dynamics.state.𝒰, constants)
+    push!(temperatures, T)
 
     # Supersaturation
-    qᵛ⁺ = saturation_specific_humidity(T_curr, ρ_curr, constants, PlanarLiquidSurface())
-    S = (q.vapor / qᵛ⁺) - 1
+    qᵛ⁺ = saturation_specific_humidity(T, ρ, constants, PlanarLiquidSurface())
+    S = (dynamics.state.𝒰.moisture_mass_fractions.vapor / qᵛ⁺) - 1
     push!(supersaturations, S)
 end
 
 # Convert heights to km for plotting
 heights_km = heights ./ 1000
+times_min = times ./ 60
 
 # ## Visualization
-#
-# We plot the parcel's journey through thermodynamic space:
-# height vs temperature (showing adiabatic cooling), and
-# the evolution of moisture and supersaturation.
 
 set_theme!(fontsize=14, linewidth=2)
-fig = Figure(size=(1000, 800))
+fig = Figure(size=(900, 400))
 
 # Panel 1: Height vs Temperature
 ax1 = Axis(fig[1, 1];
@@ -195,65 +190,37 @@ lines!(ax1, T_env_profile, z_range./1000; color=:gray, linestyle=:dash, label="E
 
 axislegend(ax1; position=:lt)
 
-# Panel 2: Moisture evolution with height
+# Panel 2: Supersaturation evolution
 ax2 = Axis(fig[1, 2];
-    xlabel = "Mixing ratio (g/kg)",
-    ylabel = "Height (km)",
-    title = "Moisture partition")
-
-lines!(ax2, qᵛ_series .* 1000, heights_km; color=:dodgerblue, label="qᵛ (vapor)")
-lines!(ax2, qᶜˡ_series .* 1000, heights_km; color=:lime, label="qᶜˡ (cloud)")
-lines!(ax2, qʳ_series .* 1000, heights_km; color=:orangered, label="qʳ (rain)")
-
-axislegend(ax2; position=:rt)
-
-# Panel 3: Time series of moisture
-ax3 = Axis(fig[2, 1];
-    xlabel = "Time (min)",
-    ylabel = "Mixing ratio (g/kg)",
-    title = "Moisture evolution")
-
-times_min = times ./ 60
-lines!(ax3, times_min, qᵛ_series .* 1000; color=:dodgerblue, label="qᵛ")
-lines!(ax3, times_min, qᶜˡ_series .* 1000; color=:lime, label="qᶜˡ")
-lines!(ax3, times_min, qʳ_series .* 1000; color=:orangered, label="qʳ")
-
-axislegend(ax3; position=:rt)
-
-# Panel 4: Supersaturation
-ax4 = Axis(fig[2, 2];
-    xlabel = "Time (min)",
+    xlabel = "Height (km)",
     ylabel = "Supersaturation (%)",
-    title = "Supersaturation evolution")
+    title = "Approach to saturation")
 
-lines!(ax4, times_min, supersaturations .* 100; color=:purple)
-hlines!(ax4, [0]; color=:gray, linestyle=:dash)
+lines!(ax2, heights_km, supersaturations .* 100; color=:purple)
+hlines!(ax2, [0]; color=:gray, linestyle=:dash, label="Saturation")
+
+axislegend(ax2; position=:lb)
 
 fig
 
 # ## Discussion
 #
-# The parcel rises at 1 m/s, cooling adiabatically at roughly 10 K/km.
-# Initially, all moisture is vapor. As temperature drops, the saturation
-# vapor pressure decreases, and eventually the parcel becomes supersaturated.
+# The parcel rises at 1 m/s through the environmental profile.
+# As it ascends, pressure drops and the parcel cools adiabatically.
 #
-# Once supersaturated, vapor condenses onto cloud droplets following the
-# non-equilibrium relaxation:
+# For a dry adiabat with static energy conservation, the temperature
+# decreases at the dry adiabatic lapse rate:
 #
 # ```math
-# \frac{dq^{cl}}{dt} = \frac{q^v - q^{v*}}{\Gamma \tau}
+# \Gamma_d = \frac{g}{c_p^m} \approx 9.8 \text{ K/km}
 # ```
 #
-# where τ ≈ 10 s is the relaxation timescale and Γ is a thermodynamic
-# adjustment factor accounting for latent heating.
+# Since the environmental lapse rate (6.5 K/km) is less steep than
+# the dry adiabatic lapse rate, the parcel becomes increasingly
+# cooler than its environment as it rises. This would make it
+# negatively buoyant in a real atmosphere.
 #
-# The supersaturation panel shows the parcel becoming increasingly
-# supersaturated as it rises, with condensation working to bring
-# supersaturation back toward zero.
-#
-# This simple parcel model demonstrates that the new `ParcelDynamics`
-# infrastructure correctly:
-# 1. Evolves parcel position through the environmental profile
-# 2. Applies adiabatic adjustment as pressure changes
-# 3. Computes microphysics tendencies using the same scalar-state functions
-#    used by the grid-based `AtmosphereModel`
+# The supersaturation panel shows that as the parcel cools, it
+# approaches saturation (S → 0). With microphysics enabled,
+# condensation would begin once S > 0, releasing latent heat
+# and slowing the cooling rate.
