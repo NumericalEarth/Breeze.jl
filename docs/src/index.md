@@ -7,7 +7,7 @@ Much of Breeze's power flows from [Oceananigans](https://github.com/CliMA/Oceana
 
 Breeze's [`AtmosphereModel`](@ref Breeze.AtmosphereModels.AtmosphereModel) features anelastic, compressible, and prescribed (kinematic) dynamics, closures for large eddy simulation, saturation adjustment microphysics, Kessler microphysics, and one- and two-moment bulk schemes via an extension to the [Climate Modeling Alliance's](clima.caltech.edu) [CloudMicrophysics.jl](https://github.com/CliMA/CloudMicrophysics.jl).
 An extension to [RRTMGP.jl](https://github.com/CliMA/RRTMGP.jl) provides solvers for gray, clear-sky, and all-sky radiative transfer.
-Breeze's examples include single column radiation, idealized thermal bubbles and inertia-gravity waves and Kelvin-Helmholtz, [BOMEX](@cite Siebesma2003) shallow convection, [RICO](@cite vanZanten2011) trade-wind cumulus, [supercells](@cite KlempEtAl2015), mountain waves, and more.
+Breeze's examples include single column radiation, idealized thermal bubbles and inertia-gravity waves and Kelvin-Helmholtz, [BOMEX](@cite Siebesma2003) shallow convection, [RICO](@cite vanZanten2011) trade-wind cumulus, mountain waves, and more.
 
 Don't hesitate to get in touch on the [NumericalEarth slack](https://join.slack.com/t/numericalearth/shared_invite/zt-3kjcowmpg-B0s3nalWkvZg8IBc~BIJEA) or by opening a new [discussion](https://github.com/NumericalEarth/Breeze.jl/discussions)!
 
