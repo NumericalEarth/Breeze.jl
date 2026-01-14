@@ -15,14 +15,11 @@
 # (the dry adiabatic lapse rate). The parcel conserves its potential temperature
 # or static energy during this process.
 
+using Oceananigans
+using Oceananigans.Units
 using Breeze
-using Breeze.ParcelDynamics: ParcelDynamics, ParcelState, EnvironmentalProfile
-using Breeze.Thermodynamics: StaticEnergyState, MoistureMassFractions,
-    temperature, density, saturation_specific_humidity,
-    PlanarLiquidSurface, mixture_heat_capacity
-using Breeze.AtmosphereModels: NothingMicrophysicalState
-using Oceananigans: set!
-using Oceananigans.TimeSteppers: time_step!
+using Breeze.ParcelDynamics: ParcelDynamics
+using Breeze.Thermodynamics: temperature, density, saturation_specific_humidity, PlanarLiquidSurface
 using CairoMakie
 
 # ## Environmental sounding
@@ -43,67 +40,34 @@ Hq = 2500.0      # Humidity scale height [m]
 w_updraft = 1.0  # Updraft velocity [m/s]
 
 # Temperature profile (standard atmosphere)
-T_env(z) = T₀ - Γ * z
+T(z) = T₀ - Γ * z
 
 # Pressure profile (hypsometric equation for constant lapse rate)
-p_env(z) = p₀ * (T_env(z) / T₀)^(g / (Rᵈ * Γ))
+p(z) = p₀ * (T(z) / T₀)^(g / (Rᵈ * Γ))
 
 # Density from ideal gas law
-ρ_env(z) = p_env(z) / (Rᵈ * T_env(z))
+ρ(z) = p(z) / (Rᵈ * T(z))
 
 # Humidity profile (exponential decay)
-qᵗ_env(z) = qᵗ₀ * exp(-z / Hq)
+qᵗ(z) = qᵗ₀ * exp(-z / Hq)
 
-# Create the environmental profile
-profile = EnvironmentalProfile(
-    temperature = T_env,
-    pressure = p_env,
-    density = ρ_env,
-    specific_humidity = qᵗ_env,
-    u = z -> 0.0,
-    v = z -> 0.0,
-    w = z -> w_updraft
-)
-
-# ## Initialize parcel at surface
+# ## Create the model
 #
-# The parcel starts at z = 0 with environmental conditions.
-# We use `StaticEnergyState` for the thermodynamic formulation.
+# The grid defines the vertical domain for the parcel trajectory.
+# ParcelDynamics works with the standard AtmosphereModel interface.
 
-constants = ThermodynamicConstants()
+grid = RectilinearGrid(size=100, z=(0, 10kilometers), topology=(Flat, Flat, Bounded))
 
-z₀ = 0.0
-T_init = T_env(z₀)
-p_init = p_env(z₀)
-ρ_init = ρ_env(z₀)
-qᵗ_init = qᵗ_env(z₀)
+model = AtmosphereModel(grid; dynamics=ParcelDynamics())
 
-# Initial moisture: all vapor (no condensate)
-q_init = MoistureMassFractions(qᵗ_init)
-
-# Static energy: e = cᵖᵐ * T + g * z
-cᵖᵐ = mixture_heat_capacity(q_init, constants)
-e_init = cᵖᵐ * T_init + g * z₀
-
-# Create thermodynamic state
-𝒰_init = StaticEnergyState(e_init, q_init, z₀, p_init)
-
-# No microphysics for this dry example
-ℳ_init = NothingMicrophysicalState(Float64)
-
-# Create initial parcel state
-state₀ = ParcelState(0.0, 0.0, z₀, ρ_init, qᵗ_init, 𝒰_init, ℳ_init)
-
-# ## Create AtmosphereModel with ParcelDynamics
+# ## Set environmental profiles and initial parcel position
 #
-# ParcelDynamics works with AtmosphereModel, enabling the use of
-# `set!` to initialize the state and `time_step!` to evolve it.
+# The `set!` function configures the environmental sounding and
+# initializes the parcel at the specified height.
 
-dynamics = ParcelDynamics(profile, state₀)
-model = AtmosphereModel(dynamics; thermodynamic_constants=constants)
+set!(model, T=T, p=p, ρ=ρ, qᵗ=qᵗ, z=0.0, w=w_updraft)
 
-# Check the model type
-@info "Created model" typeof(model) model.dynamics
+@info "Model created" model.dynamics
 
 # ## Run the parcel simulation
 #
@@ -113,6 +77,8 @@ model = AtmosphereModel(dynamics; thermodynamic_constants=constants)
 Δt = 1.0         # Time step [s]
 stop_time = 1800.0  # 30 minutes
 n_steps = Int(stop_time / Δt)
+
+constants = model.thermodynamic_constants
 
 # Storage for time series
 times = Float64[0.0]
@@ -134,12 +100,12 @@ for n in 1:n_steps
     push!(times, model.clock.time)
     push!(heights, model.dynamics.state.z)
 
-    T = temperature(model.dynamics.state.𝒰, constants)
-    ρ = density(model.dynamics.state.𝒰, constants)
-    push!(temperatures, T)
+    Tₙ = temperature(model.dynamics.state.𝒰, constants)
+    ρₙ = density(model.dynamics.state.𝒰, constants)
+    push!(temperatures, Tₙ)
 
     # Supersaturation
-    qᵛ⁺ = saturation_specific_humidity(T, ρ, constants, PlanarLiquidSurface())
+    qᵛ⁺ = saturation_specific_humidity(Tₙ, ρₙ, constants, PlanarLiquidSurface())
     S = (model.dynamics.state.𝒰.moisture_mass_fractions.vapor / qᵛ⁺) - 1
     push!(supersaturations, S)
 end
@@ -165,7 +131,7 @@ lines!(ax1, temperatures, heights_km; color=:magenta, label="Parcel T")
 
 # Add environmental temperature for comparison
 z_range = range(0, stop=maximum(heights), length=100)
-T_env_profile = T_env.(z_range)
+T_env_profile = T.(z_range)
 lines!(ax1, T_env_profile, z_range./1000; color=:gray, linestyle=:dash, label="Environment T")
 
 axislegend(ax1; position=:lt)
@@ -191,12 +157,15 @@ fig
 # 1. **AtmosphereModel integration**: ParcelDynamics works with AtmosphereModel,
 #    using the same `time_step!` function as grid-based simulations.
 #
-# 2. **Adiabatic cooling**: As the parcel ascends, pressure drops and temperature
+# 2. **Grid defines the domain**: The grid specifies the vertical extent
+#    through which the parcel can travel.
+#
+# 3. **set! interface**: Environmental profiles and initial conditions are
+#    set using the familiar `set!` function.
+#
+# 4. **Adiabatic cooling**: As the parcel ascends, pressure drops and temperature
 #    decreases following the dry adiabatic lapse rate (~9.8 K/km).
 #
-# 3. **Approach to saturation**: The supersaturation panel shows the parcel
+# 5. **Approach to saturation**: The supersaturation panel shows the parcel
 #    becoming increasingly supersaturated as it cools. With microphysics enabled,
 #    condensation would begin once S > 0.
-#
-# 4. **Clock tracking**: The model's clock automatically tracks simulation time,
-#    just like grid-based AtmosphereModels.

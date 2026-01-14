@@ -2,16 +2,13 @@
 ##### Unit tests for ParcelDynamics module
 #####
 
+using Oceananigans
 using Breeze
 using Breeze.ParcelDynamics:
     ParcelDynamics,
     ParcelModel,
     ParcelState,
-    EnvironmentalProfile,
-    adiabatic_adjustment,
-    environmental_velocity,
-    environmental_pressure,
-    environmental_density
+    adiabatic_adjustment
 
 using Breeze.Thermodynamics:
     StaticEnergyState,
@@ -22,43 +19,7 @@ using Breeze.Thermodynamics:
 
 using Breeze.AtmosphereModels: NothingMicrophysicalState
 
-using Oceananigans.TimeSteppers: time_step!
-
 using Test
-
-#####
-##### EnvironmentalProfile tests
-#####
-
-@testset "EnvironmentalProfile construction" begin
-    # Minimal profile with constants
-    profile = EnvironmentalProfile(
-        temperature = z -> 300.0,
-        pressure = z -> 1e5,
-        density = z -> 1.2,
-        specific_humidity = z -> 0.01
-    )
-
-    @test environmental_velocity(profile, 0.0) == (0.0, 0.0, 0.0)
-    @test environmental_pressure(profile, 500.0) == 1e5
-    @test environmental_density(profile, 1000.0) == 1.2
-
-    # Profile with 3D velocities
-    profile_3d = EnvironmentalProfile(
-        temperature = z -> 288.0 - 0.0065 * z,
-        pressure = z -> 101325.0 * exp(-z / 8500),
-        density = z -> 1.225 * exp(-z / 8500),
-        specific_humidity = z -> 0.015 * exp(-z / 2500),
-        u = z -> 5.0,
-        v = z -> 2.0,
-        w = z -> 1.0 + 0.001 * z
-    )
-
-    u, v, w = environmental_velocity(profile_3d, 1000.0)
-    @test u == 5.0
-    @test v == 2.0
-    @test w ≈ 2.0  # 1.0 + 0.001 * 1000
-end
 
 #####
 ##### ParcelState tests
@@ -92,65 +53,66 @@ end
 end
 
 #####
-##### ParcelDynamics tests
+##### ParcelDynamics construction tests
 #####
 
 @testset "ParcelDynamics construction" begin
-    profile = EnvironmentalProfile(
-        temperature = z -> 288.0,
-        pressure = z -> 101325.0,
-        density = z -> 1.2,
-        specific_humidity = z -> 0.01
-    )
+    dynamics = ParcelDynamics()
 
-    dynamics = ParcelDynamics(profile)
-
-    @test dynamics.profile === profile
+    @test dynamics.temperature === nothing
+    @test dynamics.pressure === nothing
+    @test dynamics.density === nothing
     @test dynamics.state === nothing
+    @test dynamics.surface_pressure == 101325.0
+    @test dynamics.standard_pressure == 1e5
 end
 
 #####
 ##### AtmosphereModel with ParcelDynamics tests
 #####
 
-@testset "AtmosphereModel(ParcelDynamics) construction and time_step!" begin
-    # Create environmental profile
-    profile = EnvironmentalProfile(
-        temperature = z -> 288.0 - 0.0065 * z,
-        pressure = z -> 101325.0 * exp(-z / 8500),
-        density = z -> 1.225 * exp(-z / 8500),
-        specific_humidity = z -> 0.015 * exp(-z / 2500),
-        w = z -> 1.0  # 1 m/s updraft
-    )
+@testset "AtmosphereModel(grid; dynamics=ParcelDynamics()) and set!" begin
+    grid = RectilinearGrid(size=10, z=(0, 1000), topology=(Flat, Flat, Bounded))
+    model = AtmosphereModel(grid; dynamics=ParcelDynamics())
 
-    # Create parcel state
-    constants = ThermodynamicConstants()
-    g = constants.gravitational_acceleration
-    z₀ = 0.0
-    qᵗ = 0.015
-    q = MoistureMassFractions(qᵗ)
-    cᵖᵐ = mixture_heat_capacity(q, constants)
-    e_init = cᵖᵐ * 288.0 + g * z₀
-    𝒰 = StaticEnergyState(e_init, q, z₀, 101325.0)
-    ℳ = NothingMicrophysicalState(Float64)
-    state = ParcelState(0.0, 0.0, z₀, 1.225, qᵗ, 𝒰, ℳ)
-
-    # Create model using AtmosphereModel constructor
-    dynamics = ParcelDynamics(profile, state)
-    model = AtmosphereModel(dynamics; thermodynamic_constants=constants)
-
-    # Check model type
     @test model isa ParcelModel
-    @test model.dynamics === dynamics
-    @test model.thermodynamic_constants === constants
-    @test model.clock.time == 0.0
+    @test model.dynamics isa ParcelDynamics
+    @test model.dynamics.state === nothing
 
-    # Test time_step!
+    # Define environmental profiles
+    T(z) = 288.0 - 0.0065 * z
+    p(z) = 101325.0 * exp(-z / 8500)
+    ρ(z) = p(z) / (287.0 * T(z))
+
+    # Set profiles and initial position
+    set!(model, T=T, p=p, ρ=ρ, z=0.0, w=1.0)
+
+    @test model.dynamics.temperature !== nothing
+    @test model.dynamics.pressure !== nothing
+    @test model.dynamics.density !== nothing
+    @test model.dynamics.w !== nothing
+    @test model.dynamics.state !== nothing
+    @test model.dynamics.state.z ≈ 0.0
+end
+
+@testset "time_step! for ParcelModel" begin
+    grid = RectilinearGrid(size=10, z=(0, 1000), topology=(Flat, Flat, Bounded))
+    model = AtmosphereModel(grid; dynamics=ParcelDynamics())
+
+    T(z) = 288.0 - 0.0065 * z
+    p(z) = 101325.0 * exp(-z / 8500)
+    ρ(z) = p(z) / (287.0 * T(z))
+
+    set!(model, T=T, p=p, ρ=ρ, z=0.0, w=1.0)
+
+    @test model.clock.time == 0.0
+    @test model.clock.iteration == 0
+
+    # Step forward
     Δt = 10.0
     time_step!(model, Δt)
 
-    # Parcel should have moved up by w * Δt = 10 m
-    @test model.dynamics.state.z ≈ 10.0
+    @test model.dynamics.state.z ≈ 10.0  # w=1 m/s × 10s = 10m
     @test model.clock.time ≈ Δt
     @test model.clock.iteration == 1
 
@@ -159,7 +121,6 @@ end
         time_step!(model, Δt)
     end
 
-    # After 10 steps of 10s each, parcel should be at 100 m
     @test model.dynamics.state.z ≈ 100.0
     @test model.clock.time ≈ 100.0
     @test model.clock.iteration == 10
