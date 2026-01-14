@@ -49,7 +49,7 @@ Our goal is to build a very fast, easy to learn, productive tool for atmospheric
 This won't be the effort of a single group, project, or even a single community.
 Such a lofty aim can only be realized by a wide-ranging and sustained collaboration of passionate people.
 Maybe that includes you - consider it!
-Model development is hard, but rewarding, and builds useful skills for a myriad of pursuits.
+Model development is hard but rewarding, and builds useful skills for a myriad of pursuits.
 
 The goals of the current group of model developers include developing
 
