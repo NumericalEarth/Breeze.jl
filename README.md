@@ -63,6 +63,9 @@ If you have ideas, dreams, or criticisms that can make Breeze and it's future be
 
 ## Selected examples
 
+Below we've included thumbnails that link to a few of Breeze's examples.
+Check out the [documentation](https://numericalearth.github.io/BreezeDocumentation/dev/) for the full list.
+
 <table>
   <tr>
     <td width="33%" align="center" valign="top">
