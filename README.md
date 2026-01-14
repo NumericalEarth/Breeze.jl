@@ -43,7 +43,7 @@ Breeze's examples include single column radiation, idealized thermal bubbles and
 Check out [the documentation](https://numericalearth.github.io/BreezeDocumentation/stable/) and [examples](https://github.com/NumericalEarth/Breeze.jl/tree/main/examples).
 Don't hesitate to get in touch on the [NumericalEarth slack](https://join.slack.com/t/numericalearth/shared_invite/zt-3kjcowmpg-B0s3nalWkvZg8IBc~BIJEA) or by opening a new [discussion](https://github.com/NumericalEarth/Breeze.jl/discussions)!
 
-### Roadmap
+## Roadmap and a call to action
 
 Our goal is to build the world's fastest, easiest to use, most productive tool for weather research and forecasting, atmospheric model development, cloud physics, and more.
 This won't be the effort of a single group or even a single community.
@@ -61,7 +61,7 @@ Right now, the goals of the current group of model developers is to implement
 
 If you have ideas, dreams, or criticisms that can make Breeze and it's future better, don't hesitate to speak up.
 
-### Selected examples
+## Selected examples
 
 <table>
   <tr>
@@ -106,7 +106,7 @@ If you have ideas, dreams, or criticisms that can make Breeze and it's future be
   </tr>
 </table>
 
-### Installation
+## Installation
 
 Breeze is a registered Julia package. First [install Julia](https://julialang.org/install/); suggested version 1.12. See [juliaup](https://github.com/JuliaLang/juliaup) README for how to install 1.12 and make that version the default.
 
@@ -131,7 +131,7 @@ If you want to live on the cutting edge, you can use, e.g.,
 Breeze from `main` branch. For more information, see the
 [Pkg.jl documentation](https://pkgdocs.julialang.org).
 
-### Using Breeze
+## Using Breeze
 
 Now we are ready to run any of the examples!
 
@@ -156,7 +156,7 @@ we get
 
 https://github.com/user-attachments/assets/c9a0c9c3-c199-48b8-9850-f967bdcc4bed
 
-### Citing
+## Citing
 
 If you use Breeze for research, teaching, or fun, we'd be grateful if you give credit by citing the corresponding Zenodo record, e.g.,
 
