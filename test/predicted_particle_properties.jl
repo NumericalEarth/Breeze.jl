@@ -111,8 +111,8 @@ using Oceananigans: CPU
 
     @testset "Ice lambda limiter" begin
         ll = IceLambdaLimiter()
-        @test ll.small_q isa SmallQLambdaLimit
-        @test ll.large_q isa LargeQLambdaLimit
+        @test ll.small_q isa NumberMomentLambdaLimit
+        @test ll.large_q isa MassMomentLambdaLimit
     end
 
     @testset "Ice-rain collection" begin
@@ -184,7 +184,7 @@ using Oceananigans: CPU
         @test EffectiveRadius <: AbstractBulkPropertyIntegral
         @test AggregationNumber <: AbstractCollectionIntegral
         @test SixthMomentRime <: AbstractSixthMomentIntegral
-        @test SmallQLambdaLimit <: AbstractLambdaLimiterIntegral
+        @test NumberMomentLambdaLimit <: AbstractLambdaLimiterIntegral
         
         @test RainShapeParameter <: AbstractRainIntegral
         @test AbstractRainIntegral <: AbstractP3Integral
@@ -392,11 +392,11 @@ using Oceananigans: CPU
             shape = 0.0,
             slope = 1000.0)
         
-        i_small = evaluate(SmallQLambdaLimit(), state)
+        i_small = evaluate(NumberMomentLambdaLimit(), state)
         @test i_small > 0
         @test isfinite(i_small)
         
-        i_large = evaluate(LargeQLambdaLimit(), state)
+        i_large = evaluate(MassMomentLambdaLimit(), state)
         @test i_large > 0
         @test isfinite(i_large)
     end
@@ -597,7 +597,7 @@ using Oceananigans: CPU
             slope = λ)
         
         # Number integral (0th moment proxy)
-        n_int = evaluate(SmallQLambdaLimit(), state)  # This is just ∫ N'(D) dD
+        n_int = evaluate(NumberMomentLambdaLimit(), state)  # This is just ∫ N'(D) dD
         @test n_int > 0
         @test isfinite(n_int)
         
@@ -817,8 +817,8 @@ using Oceananigans: CPU
         state = IceSizeDistributionState(Float64;
             intercept = N₀, shape = μ, slope = λ)
         
-        # Test SmallQLambdaLimit (which integrates the full PSD)
-        small_q_lim = evaluate(SmallQLambdaLimit(), state; n_quadrature=128)
+        # Test NumberMomentLambdaLimit (which integrates the full PSD)
+        small_q_lim = evaluate(NumberMomentLambdaLimit(), state; n_quadrature=128)
         @test small_q_lim > 0
         @test isfinite(small_q_lim)
         
@@ -860,8 +860,8 @@ using Oceananigans: CPU
         state = IceSizeDistributionState(Float64;
             intercept = 1e6, shape = 0.0, slope = 1000.0)
         
-        small_q = evaluate(SmallQLambdaLimit(), state)
-        large_q = evaluate(LargeQLambdaLimit(), state)
+        small_q = evaluate(NumberMomentLambdaLimit(), state)
+        large_q = evaluate(MassMomentLambdaLimit(), state)
         
         @test small_q > 0
         @test large_q > 0
