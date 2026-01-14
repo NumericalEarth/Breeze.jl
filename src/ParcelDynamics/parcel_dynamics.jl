@@ -1,10 +1,109 @@
-#####
-##### Time stepping for parcel evolution
-#####
-
 using Breeze.Thermodynamics: AbstractThermodynamicState, MoistureMassFractions,
     LiquidIcePotentialTemperatureState, StaticEnergyState,
     temperature, with_moisture, mixture_heat_capacity
+
+#####
+##### ParcelState: state of a rising parcel
+#####
+
+"""
+$(TYPEDEF)
+
+The complete state of a Lagrangian air parcel.
+
+The parcel state contains all variables needed to evolve the parcel through
+an atmospheric profile. Position `(x, y, z)` tracks the parcel location,
+while thermodynamic variables describe the parcel's internal state.
+
+The thermodynamic state `𝒰` and microphysical state `ℳ` use the same scalar
+struct abstractions as the grid-based `AtmosphereModel`, enabling code reuse
+for tendency calculations.
+
+# Fields
+$(TYPEDFIELDS)
+
+# Notes
+
+The parcel evolves adiabatically (conserving entropy/potential temperature)
+as it moves through the environmental profile. Microphysics tendencies modify
+the moisture partition while conserving total water.
+
+For warm-phase microphysics, the prognostic variables are typically:
+- `qᶜˡ`: cloud liquid mixing ratio
+- `qʳ`: rain mixing ratio
+
+The vapor mixing ratio `qᵛ = qᵗ - qˡ - qⁱ` is diagnostic.
+"""
+struct ParcelState{FT, TH, MI}
+    x :: FT
+    y :: FT
+    z :: FT
+    ρ :: FT
+    qᵗ :: FT
+    𝒰 :: TH
+    ℳ :: MI
+end
+
+# Accessors
+@inline position(state::ParcelState) = (state.x, state.y, state.z)
+@inline height(state::ParcelState) = state.z
+@inline density(state::ParcelState) = state.ρ
+@inline total_moisture(state::ParcelState) = state.qᵗ
+
+Base.eltype(::ParcelState{FT}) where FT = FT
+
+function Base.show(io::IO, state::ParcelState{FT}) where FT
+    print(io, "ParcelState{$FT}(")
+    print(io, "x=", state.x, ", ")
+    print(io, "y=", state.y, ", ")
+    print(io, "z=", state.z, ", ")
+    print(io, "ρ=", round(state.ρ, digits=4), ", ")
+    print(io, "qᵗ=", round(state.qᵗ * 1000, digits=2), " g/kg)")
+end
+
+"""
+$(TYPEDSIGNATURES)
+
+Create a new `ParcelState` with updated fields.
+
+This is the primary way to evolve the parcel state, returning a new
+immutable state with modified values while preserving unspecified fields.
+"""
+function with_state(state::ParcelState;
+                    x = state.x,
+                    y = state.y,
+                    z = state.z,
+                    ρ = state.ρ,
+                    qᵗ = state.qᵗ,
+                    𝒰 = state.𝒰,
+                    ℳ = state.ℳ)
+    return ParcelState(x, y, z, ρ, qᵗ, 𝒰, ℳ)
+end
+
+#####
+##### ParcelDynamics: rules for evolving the parcel state
+#####
+
+struct ParcelDynamics{S}
+    state :: S
+end
+
+ParcelDynamics(state::ParcelState) = ParcelDynamics(state)
+
+Adapt.adapt_structure(to, dynamics::ParcelDynamics) =
+    ParcelDynamics(adapt(to, dynamics.state))
+
+AtmosphereModels.default_dynamics(grid, constants) =
+    ParcelDynamics(ParcelState(grid, constants))
+
+AtmosphereModels.materialize_dynamics(dynamics::ParcelDynamics, grid, boundary_conditions, thermodynamic_constants) =
+    ParcelDynamics(dynamics.state)
+
+const ParcelModel = AtmosphereModel{<:ParcelDynamics}
+
+#####
+##### Time stepping for parcel evolution
+#####
 
 """
 $(TYPEDSIGNATURES)
@@ -40,7 +139,8 @@ The parcel conserves its potential temperature (dry) or equivalent potential
 temperature (moist) during adiabatic ascent, while microphysics processes
 modify the moisture partition.
 """
-function step_parcel!(state::ParcelState, model::ParcelModel, Δt)
+function time_step!(model::ParcelModel, Δt)
+    state = model.dynamics.state
     profile = model.profile
     microphysics = model.microphysics
     constants = model.constants
@@ -145,7 +245,7 @@ function compute_moisture_fractions end
     return MoistureMassFractions(qᵗ)
 end
 
-# TrivialMicrophysicalState: all moisture is vapor
-@inline function compute_moisture_fractions(ℳ::TrivialMicrophysicalState, qᵗ)
+# NothingMicrophysicalState: all moisture is vapor
+@inline function compute_moisture_fractions(ℳ::NothingMicrophysicalState, qᵗ)
     return MoistureMassFractions(qᵗ)
 end

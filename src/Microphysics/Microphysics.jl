@@ -23,7 +23,7 @@ export
 using ..AtmosphereModels: AtmosphereModels, compute_moisture_fractions,
     materialize_microphysical_fields, update_microphysical_fields!,
     microphysical_state, microphysical_tendency,
-    AbstractMicrophysicalState, TrivialMicrophysicalState
+    AbstractMicrophysicalState, NothingMicrophysicalState
 
 include("saturation_adjustment.jl")
 include("bulk_microphysics.jl")

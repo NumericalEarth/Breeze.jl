@@ -26,7 +26,7 @@ export
 
     # Microphysics interface
     AbstractMicrophysicalState,
-    TrivialMicrophysicalState,
+    NothingMicrophysicalState,
     microphysical_state,
     microphysical_tendency,
 

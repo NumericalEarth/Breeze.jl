@@ -59,7 +59,7 @@ abstract type AbstractMicrophysicalState{FT} end
 @inline Base.eltype(::AbstractMicrophysicalState{FT}) where FT = FT
 
 """
-    TrivialMicrophysicalState{FT}
+    NothingMicrophysicalState{FT}
 
 A microphysical state with no prognostic variables.
 
@@ -67,9 +67,9 @@ Used for `Nothing` microphysics and `SaturationAdjustment` schemes where
 cloud condensate is diagnosed from the thermodynamic state rather than
 being prognostic.
 """
-struct TrivialMicrophysicalState{FT} <: AbstractMicrophysicalState{FT} end
+struct NothingMicrophysicalState{FT} <: AbstractMicrophysicalState{FT} end
 
-TrivialMicrophysicalState(FT::DataType) = TrivialMicrophysicalState{FT}()
+NothingMicrophysicalState(FT::DataType) = NothingMicrophysicalState{FT}()
 
 #####
 ##### MicrophysicalState interface
@@ -102,7 +102,7 @@ An `AbstractMicrophysicalState` subtype containing the local microphysical varia
 See also [`microphysical_tendency`](@ref), [`AbstractMicrophysicalState`](@ref).
 """
 @inline microphysical_state(i, j, k, grid, microphysics::Nothing, fields, ρ, 𝒰) =
-    TrivialMicrophysicalState(eltype(grid))
+    NothingMicrophysicalState(eltype(grid))
 
 """
     microphysical_tendency(microphysics, name, ρ, ℳ, 𝒰, constants)

@@ -21,7 +21,7 @@ using Breeze.Thermodynamics:
     temperature,
     mixture_heat_capacity
 
-using Breeze.AtmosphereModels: TrivialMicrophysicalState
+using Breeze.AtmosphereModels: NothingMicrophysicalState
 
 using CloudMicrophysics
 using Test
@@ -85,7 +85,7 @@ end
     e_init = cᵖᵐ * T_init + g * z_init
 
     𝒰 = StaticEnergyState(e_init, q, z_init, p_init)
-    ℳ = TrivialMicrophysicalState(FT)
+    ℳ = NothingMicrophysicalState(FT)
 
     parcel = ParcelState(FT(0), FT(0), z_init, FT(1.2), qᵗ, 𝒰, ℳ)
 
@@ -183,7 +183,7 @@ end
     qᵗ = 0.020
 
     # Trivial state: all vapor
-    ℳ_trivial = TrivialMicrophysicalState(Float64)
+    ℳ_trivial = NothingMicrophysicalState(Float64)
     q_trivial = compute_moisture_fractions(ℳ_trivial, qᵗ)
     @test q_trivial.vapor ≈ qᵗ
     @test q_trivial.liquid ≈ 0
