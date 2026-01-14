@@ -102,7 +102,7 @@ Check out the [documentation](https://numericalearth.github.io/BreezeDocumentati
     <td width="33%" align="center" valign="top">
       <a href="https://numericalearth.github.io/BreezeDocumentation/dev/literated/acoustic_wave/">
         <img src="https://github.com/user-attachments/assets/fa2992d0-a289-4de7-aeb3-f59df7cbef28" width="100%"><br>
-        Acoustic wave
+        Acoustic wave in shear flow
       </a>
     </td>
   </tr>
