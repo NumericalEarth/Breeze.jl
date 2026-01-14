@@ -38,7 +38,9 @@ examples = [
     Example("Single column radiation", "single_column_radiation", true),
     Example("Stationary parcel model", "stationary_parcel_model", true),
     Example("Acoustic wave in shear layer", "acoustic_wave", true),
+    Example("Cloud formation in prescribed updraft", "kinematic_driver", true),
 ]
+
 # Filter out long-running example if necessary
 filter!(x -> x.build_always || get(ENV, "BREEZE_BUILD_ALL_EXAMPLES", "false") == "true", examples)
 example_pages = [ex.title => joinpath("literated", ex.basename * ".md") for ex in examples]
@@ -50,8 +52,6 @@ semaphore = Base.Semaphore(Threads.nthreads(:interactive))
         run(`$(Base.julia_cmd()) --color=yes --project=$(dirname(Base.active_project())) $(joinpath(@__DIR__, "literate.jl")) $(script_path) $(literated_dir)`)
     end
 end
-
-example_pages = [] # Empty for fast builds
 
 modules = Module[]
 BreezeRRTMGPExt = isdefined(Base, :get_extension) ? Base.get_extension(Breeze, :BreezeRRTMGPExt) : Breeze.BreezeRRTMGPExt
