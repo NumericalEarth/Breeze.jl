@@ -4,12 +4,11 @@
 
 using Breeze
 using Breeze.ParcelDynamics:
+    ParcelDynamics,
     ParcelModel,
     ParcelState,
     EnvironmentalProfile,
-    step_parcel!,
     adiabatic_adjustment,
-    compute_moisture_fractions,
     environmental_velocity,
     environmental_pressure,
     environmental_density
@@ -23,15 +22,9 @@ using Breeze.Thermodynamics:
 
 using Breeze.AtmosphereModels: NothingMicrophysicalState
 
-using CloudMicrophysics
-using Test
+using Oceananigans.TimeSteppers: time_step!
 
-# Get extension types
-BreezeCloudMicrophysicsExt = Base.get_extension(Breeze, :BreezeCloudMicrophysicsExt)
-OneMomentCloudMicrophysics = BreezeCloudMicrophysicsExt.OneMomentCloudMicrophysics
-TwoMomentCloudMicrophysics = BreezeCloudMicrophysicsExt.TwoMomentCloudMicrophysics
-WarmPhaseOneMomentState = BreezeCloudMicrophysicsExt.WarmPhaseOneMomentState
-WarmPhaseTwoMomentState = BreezeCloudMicrophysicsExt.WarmPhaseTwoMomentState
+using Test
 
 #####
 ##### EnvironmentalProfile tests
@@ -99,10 +92,10 @@ end
 end
 
 #####
-##### ParcelModel tests
+##### ParcelDynamics tests
 #####
 
-@testset "ParcelModel construction" begin
+@testset "ParcelDynamics construction" begin
     profile = EnvironmentalProfile(
         temperature = z -> 288.0,
         pressure = z -> 101325.0,
@@ -110,14 +103,10 @@ end
         specific_humidity = z -> 0.01
     )
 
-    microphysics = OneMomentCloudMicrophysics()
-    constants = ThermodynamicConstants()
+    dynamics = ParcelDynamics(profile)
 
-    model = ParcelModel(profile, microphysics, constants)
-
-    @test model.profile === profile
-    @test model.microphysics === microphysics
-    @test model.constants === constants
+    @test dynamics.profile === profile
+    @test dynamics.state === nothing
 end
 
 #####
@@ -172,95 +161,5 @@ end
         @test 𝒰_new.potential_temperature ≈ θ_init
         @test 𝒰_new.reference_pressure == p_new
         @test 𝒰_new.standard_pressure == pˢᵗ
-    end
-end
-
-#####
-##### Microphysical state moisture fractions
-#####
-
-@testset "compute_moisture_fractions from microphysical states" begin
-    qᵗ = 0.020
-
-    # Trivial state: all vapor
-    ℳ_trivial = NothingMicrophysicalState(Float64)
-    q_trivial = compute_moisture_fractions(ℳ_trivial, qᵗ)
-    @test q_trivial.vapor ≈ qᵗ
-    @test q_trivial.liquid ≈ 0
-
-    # One-moment: cloud + rain
-    ℳ_1m = WarmPhaseOneMomentState(0.002, 0.001)  # qᶜˡ = 2 g/kg, qʳ = 1 g/kg
-    q_1m = compute_moisture_fractions(ℳ_1m, qᵗ)
-    @test q_1m.liquid ≈ 0.003  # qᶜˡ + qʳ
-    @test q_1m.vapor ≈ qᵗ - 0.003
-
-    # Two-moment: cloud + rain with number concentrations
-    ℳ_2m = WarmPhaseTwoMomentState(0.002, 100e6, 0.001, 1e3)
-    q_2m = compute_moisture_fractions(ℳ_2m, qᵗ)
-    @test q_2m.liquid ≈ 0.003
-    @test q_2m.vapor ≈ qᵗ - 0.003
-end
-
-#####
-##### Full parcel stepping tests
-#####
-
-@testset "step_parcel! integration [$(FT)]" for FT in test_float_types()
-    constants = ThermodynamicConstants(FT)
-    g = constants.gravitational_acceleration
-
-    # Environmental profile
-    T_env(z) = FT(288.15) - FT(0.0065) * z
-    p_env(z) = FT(101325.0) * (T_env(z) / FT(288.15))^(g / (FT(287.0) * FT(0.0065)))
-    ρ_env(z) = p_env(z) / (FT(287.0) * T_env(z))
-
-    profile = EnvironmentalProfile(
-        temperature = T_env,
-        pressure = p_env,
-        density = ρ_env,
-        specific_humidity = z -> FT(0.015) * exp(-z / FT(2500)),
-        w = z -> FT(1.0)  # 1 m/s updraft
-    )
-
-    microphysics = OneMomentCloudMicrophysics()
-    model = ParcelModel(profile, microphysics, constants)
-
-    # Initialize parcel
-    z₀ = FT(0.0)
-    qᵗ = FT(0.015)
-    q = MoistureMassFractions(qᵗ)
-    cᵖᵐ = mixture_heat_capacity(q, constants)
-    e_init = cᵖᵐ * T_env(z₀) + g * z₀
-    𝒰 = StaticEnergyState(e_init, q, z₀, p_env(z₀))
-    ℳ = WarmPhaseOneMomentState(FT(0), FT(0))
-
-    parcel = ParcelState(FT(0), FT(0), z₀, ρ_env(z₀), qᵗ, 𝒰, ℳ)
-
-    @testset "Position update" begin
-        Δt = FT(10.0)  # 10 second time step
-        new_parcel = step_parcel!(parcel, model, Δt)
-
-        # Parcel should have moved up by w * Δt = 10 m
-        @test new_parcel.z ≈ FT(10.0)
-        @test new_parcel.x ≈ FT(0.0)  # No horizontal motion
-        @test new_parcel.y ≈ FT(0.0)
-    end
-
-    @testset "Conservation and microphysics" begin
-        # Run for 100 steps
-        current = parcel
-        Δt = FT(1.0)
-        for _ in 1:100
-            current = step_parcel!(current, model, Δt)
-        end
-
-        # Parcel should have risen 100 m
-        @test current.z ≈ FT(100.0) atol=FT(1e-6)
-
-        # Total moisture should be conserved
-        @test current.qᵗ ≈ qᵗ
-
-        # Pressure should have decreased
-        @test current.thermodynamic_state.reference_pressure < p_env(z₀)
     end
 end

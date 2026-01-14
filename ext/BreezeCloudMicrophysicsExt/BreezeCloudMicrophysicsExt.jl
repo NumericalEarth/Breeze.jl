@@ -66,6 +66,5 @@ include("one_moment_microphysics.jl")
 include("one_moment_helpers.jl")
 include("two_moment_microphysics.jl")
 include("two_moment_helpers.jl")
-include("parcel_microphysics.jl")
 
 end # module BreezeCloudMicrophysicsExt

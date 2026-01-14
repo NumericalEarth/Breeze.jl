@@ -4,14 +4,10 @@
 #
 # This file defines the interface that all microphysics implementations must provide.
 # The key abstraction is the MicrophysicalState (ℳ), which enables the same tendency
-# functions to work for both grid-based LES and Lagrangian parcel models.
+# functions to work for any dynamics (grid-based LES, parcel models, etc.).
 #
-# For grid-based models:
+# The workflow is:
 #   ℳ = microphysical_state(i, j, k, grid, microphysics, fields, ρ, 𝒰)
-#   tendency = microphysical_tendency(microphysics, name, ρ, ℳ, 𝒰, constants)
-#
-# For parcel models:
-#   ℳ = parcel.ℳ  # stored directly as parcel state
 #   tendency = microphysical_tendency(microphysics, name, ρ, ℳ, 𝒰, constants)
 #
 # The grid-indexed interface provides a default fallback that builds ℳ and dispatches
