@@ -5,25 +5,24 @@
 # As the parcel ascends, it cools adiabatically following the dry adiabatic
 # lapse rate.
 #
+# The key feature is that `ParcelDynamics` works with `AtmosphereModel`,
+# using the same `time_step!` interface as grid-based simulations.
+#
 # ## Physics overview
 #
 # A rising parcel undergoes adiabatic expansion as pressure decreases with
 # height. For a dry adiabat, temperature decreases at approximately 9.8 K/km
 # (the dry adiabatic lapse rate). The parcel conserves its potential temperature
 # or static energy during this process.
-#
-# This example shows how `ParcelDynamics` correctly:
-# 1. Evolves parcel position through the environmental velocity field
-# 2. Applies adiabatic adjustment as pressure changes
-# 3. Tracks thermodynamic state through the ascent
 
 using Breeze
-using Breeze.ParcelDynamics: ParcelDynamics, ParcelState, EnvironmentalProfile,
-    adiabatic_adjustment, environmental_velocity, environmental_pressure, environmental_density
+using Breeze.ParcelDynamics: ParcelDynamics, ParcelState, EnvironmentalProfile
 using Breeze.Thermodynamics: StaticEnergyState, MoistureMassFractions,
     temperature, density, saturation_specific_humidity,
-    PlanarLiquidSurface, mixture_heat_capacity, with_moisture
+    PlanarLiquidSurface, mixture_heat_capacity
 using Breeze.AtmosphereModels: NothingMicrophysicalState
+using Oceananigans: set!
+using Oceananigans.TimeSteppers: time_step!
 using CairoMakie
 
 # ## Environmental sounding
@@ -95,76 +94,57 @@ e_init = cᵖᵐ * T_init + g * z₀
 # Create initial parcel state
 state₀ = ParcelState(0.0, 0.0, z₀, ρ_init, qᵗ_init, 𝒰_init, ℳ_init)
 
-# ## Create ParcelDynamics with initial state
+# ## Create AtmosphereModel with ParcelDynamics
+#
+# ParcelDynamics works with AtmosphereModel, enabling the use of
+# `set!` to initialize the state and `time_step!` to evolve it.
 
 dynamics = ParcelDynamics(profile, state₀)
+model = AtmosphereModel(dynamics; thermodynamic_constants=constants)
+
+# Check the model type
+@info "Created model" typeof(model) model.dynamics
 
 # ## Run the parcel simulation
 #
-# We integrate for 30 minutes with a 1 second time step.
+# We integrate for 30 minutes with a 1 second time step,
+# using the standard `time_step!` interface.
 
 Δt = 1.0         # Time step [s]
 stop_time = 1800.0  # 30 minutes
+n_steps = Int(stop_time / Δt)
 
 # Storage for time series
 times = Float64[0.0]
-heights = Float64[dynamics.state.z]
-T_initial = temperature(dynamics.state.𝒰, constants)
+heights = Float64[model.dynamics.state.z]
+T_initial = temperature(model.dynamics.state.𝒰, constants)
 temperatures = Float64[T_initial]
 
 # Compute initial supersaturation
-ρ_initial = density(dynamics.state.𝒰, constants)
+ρ_initial = density(model.dynamics.state.𝒰, constants)
 qᵛ⁺_initial = saturation_specific_humidity(T_initial, ρ_initial, constants, PlanarLiquidSurface())
-S_initial = (dynamics.state.𝒰.moisture_mass_fractions.vapor / qᵛ⁺_initial) - 1
+S_initial = (model.dynamics.state.𝒰.moisture_mass_fractions.vapor / qᵛ⁺_initial) - 1
 supersaturations = Float64[S_initial]
 
-# Time stepping function for dry adiabatic parcel
-function step_dry_parcel!(dynamics, Δt, constants)
-    state = dynamics.state
-    profile = dynamics.profile
-
-    x, y, z = state.x, state.y, state.z
-    qᵗ = state.qᵗ
-    𝒰 = state.𝒰
-    ℳ = state.ℳ
-
-    # Get environmental velocity
-    u, v, w = environmental_velocity(profile, z)
-
-    # Update position (Forward Euler)
-    x_new = x + u * Δt
-    y_new = y + v * Δt
-    z_new = z + w * Δt
-
-    # Environmental conditions at new height
-    p_new = environmental_pressure(profile, z_new)
-    ρ_new = environmental_density(profile, z_new)
-
-    # Adiabatic adjustment of thermodynamic state
-    𝒰_new = adiabatic_adjustment(𝒰, z_new, p_new, constants)
-
-    # Update state
-    dynamics.state = ParcelState(x_new, y_new, z_new, ρ_new, qᵗ, 𝒰_new, ℳ)
-    return nothing
-end
-
-# Time loop
-for n in 1:Int(stop_time / Δt)
-    step_dry_parcel!(dynamics, Δt, constants)
+# Time loop using the standard time_step! interface
+for n in 1:n_steps
+    time_step!(model, Δt)
 
     # Record state
-    push!(times, n * Δt)
-    push!(heights, dynamics.state.z)
+    push!(times, model.clock.time)
+    push!(heights, model.dynamics.state.z)
 
-    T = temperature(dynamics.state.𝒰, constants)
-    ρ = density(dynamics.state.𝒰, constants)
+    T = temperature(model.dynamics.state.𝒰, constants)
+    ρ = density(model.dynamics.state.𝒰, constants)
     push!(temperatures, T)
 
     # Supersaturation
     qᵛ⁺ = saturation_specific_humidity(T, ρ, constants, PlanarLiquidSurface())
-    S = (dynamics.state.𝒰.moisture_mass_fractions.vapor / qᵛ⁺) - 1
+    S = (model.dynamics.state.𝒰.moisture_mass_fractions.vapor / qᵛ⁺) - 1
     push!(supersaturations, S)
 end
+
+@info "Simulation complete" model.clock.time model.dynamics.state.z
 
 # Convert heights to km for plotting
 heights_km = heights ./ 1000
@@ -205,22 +185,18 @@ fig
 
 # ## Discussion
 #
-# The parcel rises at 1 m/s through the environmental profile.
-# As it ascends, pressure drops and the parcel cools adiabatically.
+# The parcel rises at 1 m/s through the environmental profile, using the
+# standard `time_step!` interface. The key points demonstrated:
 #
-# For a dry adiabat with static energy conservation, the temperature
-# decreases at the dry adiabatic lapse rate:
+# 1. **AtmosphereModel integration**: ParcelDynamics works with AtmosphereModel,
+#    using the same `time_step!` function as grid-based simulations.
 #
-# ```math
-# \Gamma_d = \frac{g}{c_p^m} \approx 9.8 \text{ K/km}
-# ```
+# 2. **Adiabatic cooling**: As the parcel ascends, pressure drops and temperature
+#    decreases following the dry adiabatic lapse rate (~9.8 K/km).
 #
-# Since the environmental lapse rate (6.5 K/km) is less steep than
-# the dry adiabatic lapse rate, the parcel becomes increasingly
-# cooler than its environment as it rises. This would make it
-# negatively buoyant in a real atmosphere.
+# 3. **Approach to saturation**: The supersaturation panel shows the parcel
+#    becoming increasingly supersaturated as it cools. With microphysics enabled,
+#    condensation would begin once S > 0.
 #
-# The supersaturation panel shows that as the parcel cools, it
-# approaches saturation (S → 0). With microphysics enabled,
-# condensation would begin once S > 0, releasing latent heat
-# and slowing the cooling rate.
+# 4. **Clock tracking**: The model's clock automatically tracks simulation time,
+#    just like grid-based AtmosphereModels.

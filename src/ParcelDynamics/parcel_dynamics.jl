@@ -1,9 +1,10 @@
 using Adapt: Adapt, adapt
 
+using Oceananigans: Oceananigans, Clock
 using Oceananigans.TimeSteppers: TimeSteppers
 
 using Breeze.Thermodynamics: AbstractThermodynamicState, MoistureMassFractions,
-    LiquidIcePotentialTemperatureState, StaticEnergyState,
+    LiquidIcePotentialTemperatureState, StaticEnergyState, ThermodynamicConstants,
     temperature, with_moisture, mixture_heat_capacity
 
 using Breeze.AtmosphereModels: AtmosphereModels, AtmosphereModel
@@ -114,6 +115,91 @@ end
 
 # Type alias for AtmosphereModel with ParcelDynamics
 const ParcelModel = AtmosphereModel{<:ParcelDynamics}
+
+#####
+##### AtmosphereModel constructor for ParcelDynamics
+#####
+
+"""
+$(TYPEDSIGNATURES)
+
+Construct an [`AtmosphereModel`](@ref) for Lagrangian parcel dynamics.
+
+This constructor creates a minimal `AtmosphereModel` suitable for parcel simulations.
+Grid-based fields are set to `nothing` since parcel models don't use spatial grids.
+
+# Arguments
+- `dynamics::ParcelDynamics`: The parcel dynamics containing the environmental profile and state
+
+# Keyword Arguments
+- `microphysics`: Microphysics scheme (default: `nothing`)
+- `thermodynamic_constants`: Thermodynamic constants (default: `ThermodynamicConstants()`)
+
+# Example
+
+```julia
+using Breeze
+using Breeze.ParcelDynamics
+
+profile = EnvironmentalProfile(...)
+state = ParcelState(...)
+dynamics = ParcelDynamics(profile, state)
+
+model = AtmosphereModel(dynamics)
+time_step!(model, 1.0)
+```
+"""
+function AtmosphereModels.AtmosphereModel(dynamics::ParcelDynamics;
+                                          microphysics = nothing,
+                                          thermodynamic_constants = ThermodynamicConstants())
+    
+    clock = Clock(time=0.0)
+    
+    # ParcelModel doesn't use grid-based fields
+    return AtmosphereModel(
+        nothing,  # architecture
+        nothing,  # grid
+        clock,
+        dynamics,
+        nothing,  # formulation
+        thermodynamic_constants,
+        nothing,  # momentum
+        nothing,  # moisture_density
+        nothing,  # specific_moisture
+        nothing,  # temperature
+        nothing,  # pressure_solver
+        nothing,  # velocities
+        nothing,  # tracers
+        nothing,  # buoyancy
+        nothing,  # advection
+        nothing,  # coriolis
+        nothing,  # forcing
+        microphysics,
+        nothing,  # microphysical_fields
+        nothing,  # timestepper
+        nothing,  # closure
+        nothing,  # closure_fields
+        nothing   # radiation
+    )
+end
+
+#####
+##### set! for ParcelModel
+#####
+
+"""
+$(TYPEDSIGNATURES)
+
+Set the parcel state for a [`ParcelModel`](@ref).
+
+# Arguments
+- `model::ParcelModel`: The parcel model
+- `state::ParcelState`: The new parcel state
+"""
+function Oceananigans.set!(model::ParcelModel, state::ParcelState)
+    model.dynamics.state = state
+    return nothing
+end
 
 #####
 ##### Dynamics interface implementation

@@ -110,6 +110,62 @@ end
 end
 
 #####
+##### AtmosphereModel with ParcelDynamics tests
+#####
+
+@testset "AtmosphereModel(ParcelDynamics) construction and time_step!" begin
+    # Create environmental profile
+    profile = EnvironmentalProfile(
+        temperature = z -> 288.0 - 0.0065 * z,
+        pressure = z -> 101325.0 * exp(-z / 8500),
+        density = z -> 1.225 * exp(-z / 8500),
+        specific_humidity = z -> 0.015 * exp(-z / 2500),
+        w = z -> 1.0  # 1 m/s updraft
+    )
+
+    # Create parcel state
+    constants = ThermodynamicConstants()
+    g = constants.gravitational_acceleration
+    z₀ = 0.0
+    qᵗ = 0.015
+    q = MoistureMassFractions(qᵗ)
+    cᵖᵐ = mixture_heat_capacity(q, constants)
+    e_init = cᵖᵐ * 288.0 + g * z₀
+    𝒰 = StaticEnergyState(e_init, q, z₀, 101325.0)
+    ℳ = NothingMicrophysicalState(Float64)
+    state = ParcelState(0.0, 0.0, z₀, 1.225, qᵗ, 𝒰, ℳ)
+
+    # Create model using AtmosphereModel constructor
+    dynamics = ParcelDynamics(profile, state)
+    model = AtmosphereModel(dynamics; thermodynamic_constants=constants)
+
+    # Check model type
+    @test model isa ParcelModel
+    @test model.dynamics === dynamics
+    @test model.thermodynamic_constants === constants
+    @test model.clock.time == 0.0
+
+    # Test time_step!
+    Δt = 10.0
+    time_step!(model, Δt)
+
+    # Parcel should have moved up by w * Δt = 10 m
+    @test model.dynamics.state.z ≈ 10.0
+    @test model.clock.time ≈ Δt
+    @test model.clock.iteration == 1
+
+    # Run more steps
+    for _ in 1:9
+        time_step!(model, Δt)
+    end
+
+    # After 10 steps of 10s each, parcel should be at 100 m
+    @test model.dynamics.state.z ≈ 100.0
+    @test model.clock.time ≈ 100.0
+    @test model.clock.iteration == 10
+end
+
+#####
 ##### Adiabatic adjustment tests
 #####
 
