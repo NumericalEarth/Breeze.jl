@@ -54,7 +54,7 @@ Model development is hard, but rewarding, and builds useful skills for a myriad 
 The goals of the current group of model developers include developing
 
 - ⛈️ **Advanced microphysics**: Predicted Particle Property (P3) bulk microphysics, spectral bin schemes, and Lagrangian superdroplet methods for high-fidelity cloud and precipitation modeling
-- ️🏔 **Acoustic substepping and terrain-following coordinates**: A compressible dynamical core with horizontally explicit, vertically-implicit acoustic substepping that efficiently resolves sound waves in flow over complex topography with smooth sigma coordinates
+- ️🏔 **Acoustic substepping and terrain-following coordinates**: A compressible dynamical core with horizontally explicit, vertically-implicit acoustic substepping that efficiently resolves sound waves in flow over complex topography with smooth [sigma coordinates](https://en.wikipedia.org/wiki/Sigma_coordinate_system)
 - 🔬 **Open boundaries and nesting**: Two-way nesting to support multi-level nested simulations embedded in global atmosphere simulations
 - 🌀 **Coupled atmosphere-ocean simulations**: Support for high-resolution coupled atmosphere-ocean simulations via [ClimaOcean.jl](https://github.com/CliMA/ClimaOcean.jl)
 
