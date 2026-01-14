@@ -59,10 +59,9 @@ end
 @testset "ParcelDynamics construction" begin
     dynamics = ParcelDynamics()
 
-    @test dynamics.temperature === nothing
-    @test dynamics.pressure === nothing
-    @test dynamics.density === nothing
     @test dynamics.state === nothing
+    @test dynamics.density === nothing
+    @test dynamics.pressure === nothing
     @test dynamics.surface_pressure == 101325.0
     @test dynamics.standard_pressure == 1e5
 end
@@ -85,12 +84,10 @@ end
     ρ(z) = p(z) / (287.0 * T(z))
 
     # Set profiles and initial position
-    set!(model, T=T, p=p, ρ=ρ, z=0.0, w=1.0)
+    set!(model, T=T, p=p, ρ=ρ, parcel_z=0.0, w=1.0)
 
-    @test model.dynamics.temperature !== nothing
-    @test model.dynamics.pressure !== nothing
     @test model.dynamics.density !== nothing
-    @test model.dynamics.w !== nothing
+    @test model.dynamics.pressure !== nothing
     @test model.dynamics.state !== nothing
     @test model.dynamics.state.z ≈ 0.0
 end
@@ -103,7 +100,7 @@ end
     p(z) = 101325.0 * exp(-z / 8500)
     ρ(z) = p(z) / (287.0 * T(z))
 
-    set!(model, T=T, p=p, ρ=ρ, z=0.0, w=1.0)
+    set!(model, T=T, p=p, ρ=ρ, parcel_z=0.0, w=1.0)
 
     @test model.clock.time == 0.0
     @test model.clock.iteration == 0
