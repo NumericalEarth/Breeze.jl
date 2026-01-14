@@ -1,8 +1,162 @@
 #####
 ##### Microphysics interface (default implementations)
 #####
+#
+# This file defines the interface that all microphysics implementations must provide.
+# The key abstraction is the MicrophysicalState (ℳ), which enables the same tendency
+# functions to work for both grid-based LES and Lagrangian parcel models.
+#
+# For grid-based models:
+#   ℳ = microphysical_state(i, j, k, grid, microphysics, fields, ρ, 𝒰)
+#   tendency = microphysical_tendency(microphysics, name, ρ, ℳ, 𝒰, constants)
+#
+# For parcel models:
+#   ℳ = parcel.ℳ  # stored directly as parcel state
+#   tendency = microphysical_tendency(microphysics, name, ρ, ℳ, 𝒰, constants)
+#
+# The grid-indexed interface provides a default fallback that builds ℳ and dispatches
+# to the state-based tendency. Schemes needing full grid access can override directly.
+#####
 
 using ..Thermodynamics: MoistureMassFractions
+
+#####
+##### MicrophysicalState abstraction
+#####
+#
+# The AbstractMicrophysicalState type hierarchy enables microphysics schemes
+# to work seamlessly in both grid-based LES and Lagrangian parcel models.
+#
+# Notation: ℳ (mathcal M) denotes a microphysical state, paralleling 𝒰 for
+# thermodynamic state.
+#####
+
+"""
+    AbstractMicrophysicalState{FT}
+
+Abstract supertype for microphysical state structs.
+
+Microphysical states encapsulate the local microphysical variables (e.g., cloud liquid,
+rain, droplet number) needed to compute tendencies. This abstraction enables the same
+tendency functions to work for both grid-based LES and Lagrangian parcel models.
+
+Concrete subtypes should be immutable structs containing the relevant mixing ratios
+and number concentrations for a given microphysics scheme.
+
+# Example
+
+```julia
+struct WarmPhaseOneMomentState{FT} <: AbstractMicrophysicalState{FT}
+    qᶜˡ :: FT  # cloud liquid mixing ratio
+    qʳ  :: FT  # rain mixing ratio
+end
+```
+
+See also [`microphysical_state`](@ref), [`microphysical_tendency`](@ref).
+"""
+abstract type AbstractMicrophysicalState{FT} end
+
+@inline Base.eltype(::AbstractMicrophysicalState{FT}) where FT = FT
+
+"""
+    TrivialMicrophysicalState{FT}
+
+A microphysical state with no prognostic variables.
+
+Used for `Nothing` microphysics and `SaturationAdjustment` schemes where
+cloud condensate is diagnosed from the thermodynamic state rather than
+being prognostic.
+"""
+struct TrivialMicrophysicalState{FT} <: AbstractMicrophysicalState{FT} end
+
+TrivialMicrophysicalState(FT::DataType) = TrivialMicrophysicalState{FT}()
+
+#####
+##### MicrophysicalState interface
+#####
+
+"""
+    microphysical_state(i, j, k, grid, microphysics, fields, ρ, 𝒰)
+
+Build a [`MicrophysicalState`](@ref) (ℳ) at grid point `(i, j, k)` from the
+microphysical `fields`, density `ρ`, and thermodynamic state `𝒰`.
+
+This function isolates all grid indexing to one place, enabling the tendency
+functions to operate on scalar state structs. For parcel models, the state
+is stored directly rather than being built from fields.
+
+Microphysics schemes should extend this function to return their specific
+state type (e.g., `WarmPhaseOneMomentState`).
+
+# Arguments
+- `i, j, k`: Grid indices
+- `grid`: The computational grid
+- `microphysics`: The microphysics scheme
+- `fields`: NamedTuple of microphysical fields
+- `ρ`: Local density (scalar)
+- `𝒰`: Thermodynamic state
+
+# Returns
+An `AbstractMicrophysicalState` subtype containing the local microphysical variables.
+
+See also [`microphysical_tendency`](@ref), [`AbstractMicrophysicalState`](@ref).
+"""
+@inline microphysical_state(i, j, k, grid, microphysics::Nothing, fields, ρ, 𝒰) =
+    TrivialMicrophysicalState(eltype(grid))
+
+"""
+    microphysical_tendency(microphysics, name, ρ, ℳ, 𝒰, constants)
+
+Compute the tendency for microphysical variable `name` from the microphysical
+state `ℳ` and thermodynamic state `𝒰`.
+
+This is the **state-based** tendency interface that operates on scalar states
+without grid indexing. It works identically for grid-based LES and parcel models.
+
+# Arguments
+- `microphysics`: The microphysics scheme
+- `name`: Variable name as `Val(:name)` (e.g., `Val(:ρqᶜˡ)`)
+- `ρ`: Local density (scalar)
+- `ℳ`: Microphysical state (e.g., `WarmPhaseOneMomentState`)
+- `𝒰`: Thermodynamic state
+- `constants`: Thermodynamic constants
+
+# Returns
+The tendency value (scalar, units depend on variable).
+
+See also [`microphysical_state`](@ref), [`AbstractMicrophysicalState`](@ref).
+"""
+@inline microphysical_tendency(microphysics::Nothing, name, ρ, ℳ, 𝒰, constants) = zero(ρ)
+
+#####
+##### Grid-indexed tendency interface (default fallback)
+#####
+
+"""
+    microphysical_tendency(i, j, k, grid, microphysics, name, ρ, fields, 𝒰, constants)
+
+Compute the tendency for microphysical variable `name` at grid point `(i, j, k)`.
+
+This is the **grid-indexed** interface used by the tendency kernels. The default
+implementation builds the microphysical state ℳ via [`microphysical_state`](@ref)
+and dispatches to the state-based [`microphysical_tendency`](@ref).
+
+Schemes that need full grid access (e.g., for non-local operations) can override
+this method directly without using `microphysical_state`.
+
+# Default implementation
+```julia
+ℳ = microphysical_state(i, j, k, grid, microphysics, fields, ρ, 𝒰)
+return microphysical_tendency(microphysics, name, ρ, ℳ, 𝒰, constants)
+```
+"""
+@inline function microphysical_tendency(i, j, k, grid, microphysics, name, ρ, fields, 𝒰, constants)
+    ℳ = microphysical_state(i, j, k, grid, microphysics, fields, ρ, 𝒰)
+    return microphysical_tendency(microphysics, name, ρ, ℳ, 𝒰, constants)
+end
+
+# Explicit Nothing fallback (for backward compatibility)
+@inline microphysical_tendency(i, j, k, grid, microphysics::Nothing, name, ρ, μ, 𝒰, constants) = zero(grid)
 
 #####
 ##### Definition of the microphysics interface, with methods for "Nothing" microphysics
@@ -83,13 +237,8 @@ For example, the terminal velocity of falling rain.
 """
 @inline microphysical_velocities(microphysics::Nothing, microphysical_fields, name) = nothing
 
-"""
-$(TYPEDSIGNATURES)
-
-Return the tendency of the microphysical field `name` associated with `microphysics`
-and thermodynamic `constants`.
-"""
-@inline microphysical_tendency(i, j, k, grid, microphysics::Nothing, name, ρ, μ, 𝒰, constants) = zero(grid)
+# NOTE: The grid-indexed fallback for Nothing microphysics is defined above (line 159)
+# via the generic fallback mechanism which calls the state-based method.
 
 """
 $(TYPEDSIGNATURES)

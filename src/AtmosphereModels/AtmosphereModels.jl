@@ -24,6 +24,12 @@ export
     surface_precipitation_flux,
     specific_humidity,
 
+    # Microphysics interface
+    AbstractMicrophysicalState,
+    TrivialMicrophysicalState,
+    microphysical_state,
+    microphysical_tendency,
+
     # Interface functions (extended by BoundaryConditions and Forcings)
     regularize_atmosphere_model_boundary_conditions,
     materialize_atmosphere_model_forcing,

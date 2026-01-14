@@ -76,7 +76,13 @@ export
     SubsidenceForcing,
 
     # TimeSteppers
-    SSPRungeKutta3
+    SSPRungeKutta3,
+
+    # ParcelDynamics
+    ParcelModel,
+    ParcelState,
+    EnvironmentalProfile,
+    step_parcel!
 
 using Oceananigans: Oceananigans, @at, AnisotropicMinimumDissipation, Average,
                     AveragedTimeInterval, BackgroundField, BetaPlane, Bounded,
@@ -178,5 +184,8 @@ using .Forcings
 
 include("TimeSteppers/TimeSteppers.jl")
 using .TimeSteppers
+
+include("ParcelDynamics/ParcelDynamics.jl")
+using .ParcelDynamics
 
 end # module Breeze
