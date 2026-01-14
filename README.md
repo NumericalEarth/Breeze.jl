@@ -8,7 +8,6 @@
   <strong>🌪 Fast and friendly Julia software for atmospheric fluid dynamics on CPUs and GPUs. https://numericalearth.github.io/BreezeDocumentation/stable</strong>
 </p>
 
-
 <p align="center">
   <a href="https://numericalearth.github.io/BreezeDocumentation/stable/">
     <img alt="Documentation" src="https://img.shields.io/badge/documentation-stable-blue?style=flat-square">
@@ -61,7 +60,7 @@ We're working feverishly to build
     <th width="33%">
       <a href="https://numericalearth.github.io/BreezeDocumentation/dev/literated/cloudy_thermal_bubble/">
         <figure>
-          <img src="">
+          <img src="https://github.com/user-attachments/assets/1ebc76bd-0ec5-4930-9d12-970caf3c8036">
           <figcaption>Cloudy thermal bubble</figcaption>
         </figure>
       </a>
@@ -69,7 +68,7 @@ We're working feverishly to build
     <th width="33%">
       <a href="https://numericalearth.github.io/BreezeDocumentation/dev/literated/bomex/">
         <figure>
-          <img src="">
+          <img src="https://github.com/user-attachments/assets/89876fed-c2d0-43da-aa54-ab69b97e0283">
           <figcaption>BOMEX shallow convection</figcaption>
         </figure>
       </a>
@@ -77,7 +76,7 @@ We're working feverishly to build
     <th width="33%">
       <a href="https://numericalearth.github.io/BreezeDocumentation/dev/literated/rico/">
         <figure>
-          <img src="">
+          <img src="https://github.com/user-attachments/assets/6a041b42-a828-41e5-91fd-b4bc89e0f63a">
           <figcaption>RICO trade-wind cumulus</figcaption>
         </figure>
       </a>
@@ -87,7 +86,7 @@ We're working feverishly to build
     <th width="33%">
       <a href="https://numericalearth.github.io/BreezeDocumentation/dev/literated/prescribed_sea_surface_temperature/">
         <figure>
-          <img src="">
+          <img src="https://github.com/user-attachments/assets/44a4b21c-23a6-401d-b938-e4ec00f24704">
           <figcaption>Prescribed SST convection</figcaption>
         </figure>
       </a>
@@ -95,7 +94,7 @@ We're working feverishly to build
     <th width="33%">
       <a href="https://numericalearth.github.io/BreezeDocumentation/dev/literated/inertia_gravity_wave/">
         <figure>
-          <img src="">
+          <img src="https://github.com/user-attachments/assets/e6af5eb2-d745-4351-9fca-bc4ab94d40a5">
           <figcaption>Inertia-gravity wave</figcaption>
         </figure>
       </a>
@@ -103,7 +102,7 @@ We're working feverishly to build
     <th width="33%">
       <a href="https://numericalearth.github.io/BreezeDocumentation/dev/literated/acoustic_wave/">
         <figure>
-          <img src="">
+          <img src="https://github.com/user-attachments/assets/fa2992d0-a289-4de7-aeb3-f59df7cbef28">
           <figcaption>Acoustic wave</figcaption>
         </figure>
       </a>
