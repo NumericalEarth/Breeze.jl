@@ -342,7 +342,6 @@ Apply boundary conditions by adding flux divergences to the right-hand-side.
 """
 function TimeSteppers.compute_flux_bc_tendencies!(model::AtmosphereModel)
 
-    Gⁿ = model.timestepper.Gⁿ
     arch  = model.architecture
 
     # Compute boundary flux contributions

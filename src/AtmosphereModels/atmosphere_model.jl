@@ -152,19 +152,19 @@ function AtmosphereModel(grid;
     boundary_conditions = regularize_atmosphere_model_boundary_conditions(boundary_conditions, grid, p₀, thermodynamic_constants)
 
     all_names = field_names(dynamics, formulation, microphysics, tracers)
-    boundary_conditions = regularize_field_boundary_conditions(boundary_conditions, grid, all_names)
+    regularized_boundary_conditions = regularize_field_boundary_conditions(boundary_conditions, grid, all_names)
 
     # Materialize dynamics and formulation
-    dynamics = materialize_dynamics(dynamics, grid, boundary_conditions)
-    formulation = materialize_formulation(formulation, dynamics, grid, boundary_conditions)
+    dynamics = materialize_dynamics(dynamics, grid, regularized_boundary_conditions)
+    formulation = materialize_formulation(formulation, dynamics, grid, regularized_boundary_conditions)
 
-    momentum, velocities = materialize_momentum_and_velocities(dynamics, grid, boundary_conditions)
-    microphysical_fields = materialize_microphysical_fields(microphysics, grid, boundary_conditions)
+    momentum, velocities = materialize_momentum_and_velocities(dynamics, grid, regularized_boundary_conditions)
+    microphysical_fields = materialize_microphysical_fields(microphysics, grid, regularized_boundary_conditions)
 
-    tracers = NamedTuple(name => CenterField(grid, boundary_conditions=boundary_conditions[name]) for name in tracer_names)
+    tracers = NamedTuple(name => CenterField(grid, boundary_conditions=regularized_boundary_conditions[name]) for name in tracer_names)
 
     if moisture_density isa DefaultValue
-        moisture_density = CenterField(grid, boundary_conditions=boundary_conditions.ρqᵗ)
+        moisture_density = CenterField(grid, boundary_conditions=regularized_boundary_conditions.ρqᵗ)
     end
 
     # Diagnostic fields
@@ -194,7 +194,7 @@ function AtmosphereModel(grid;
     microphysical_names = prognostic_field_names(microphysics)
     scalar_names = tuple(closure_thermo_name, :ρqᵗ, microphysical_names..., tracer_names...)
     closure = Oceananigans.Utils.with_tracers(scalar_names, closure)
-    closure_fields = build_closure_fields(nothing, grid, clock, scalar_names, boundary_conditions, closure)
+    closure_fields = build_closure_fields(nothing, grid, clock, scalar_names, regularized_boundary_conditions, closure)
 
     # Generate tracer advection scheme for each tracer
     # scalar_advection is always a NamedTuple after validate_tracer_advection (either user's partial NamedTuple or empty)

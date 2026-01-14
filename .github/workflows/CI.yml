@@ -127,7 +127,9 @@ jobs:
         continue-on-error: true
       - name: Save Julia depot cache on cancel or failure
         id: julia-cache-save
-        if: ${{ (cancelled() || failure()) }}
+        # Avoid wasting time saving the cache on Windows, it takes long to both
+        # save it and fetch it back.
+        if: ${{ (runner.os != 'Windows') && (cancelled() || failure()) }}
         uses: actions/cache/save@v5
         with:
           path: |
