@@ -9,12 +9,14 @@ using Test
 using ClimaComms
 using RRTMGP
 
+include("test_utils.jl")
+
 #####
 ##### Unit tests
 #####
 
 @testset "GrayRadiativeTransferModel construction" begin
-    @testset "Single column grid [$(FT)]" for FT in (Float32, Float64)
+    @testset "Single column grid [$(FT)]" for FT in test_float_types()
         Oceananigans.defaults.FloatType = FT
         Nz = 16
         grid = RectilinearGrid(default_arch; size=Nz, x=0.0, y=45.0, z=(0, 10kilometers),
@@ -95,7 +97,7 @@ using RRTMGP
 end
 
 @testset "GrayRadiativeTransferModel with AtmosphereModel" begin
-    @testset "Model construction [$(FT)]" for FT in (Float32, Float64)
+    @testset "Model construction [$(FT)]" for FT in test_float_types()
         Oceananigans.defaults.FloatType = FT
         Nz = 16
         grid = RectilinearGrid(default_arch; size=Nz, x=0.0, y=45.0, z=(0, 10kilometers),
@@ -120,7 +122,7 @@ end
         @test model.radiation === radiation
     end
 
-    @testset "Radiatiative transfer basic tests [$(FT)]" for FT in (Float32, Float64)
+    @testset "Radiatiative transfer basic tests [$(FT)]" for FT in test_float_types()
         Oceananigans.defaults.FloatType = FT
         Nz = 16
         grid = RectilinearGrid(default_arch; size=Nz, x=0.0, y=45.0, z=(0, 10kilometers),

@@ -3,6 +3,8 @@ using Oceananigans: Oceananigans
 using Oceananigans.BoundaryConditions: BoundaryCondition
 using Test
 
+include("test_utils.jl")
+
 function setup_forcing_model(grid, forcing)
     model = AtmosphereModel(grid; tracers=:ρc, forcing)
     θ₀ = model.dynamics.reference_state.potential_temperature
@@ -13,7 +15,7 @@ end
 increment_tolerance(::Type{Float32}) = 1f-5
 increment_tolerance(::Type{Float64}) = 1e-10
 
-@testset "AtmosphereModel forcing increments prognostic fields [$(FT)]" for FT in (Float32, Float64)
+@testset "AtmosphereModel forcing increments prognostic fields [$(FT)]" for FT in test_float_types()
     Oceananigans.defaults.FloatType = FT
     grid = RectilinearGrid(default_arch; size=(4, 4, 4), x=(0, 100), y=(0, 100), z=(0, 100))
 
@@ -71,7 +73,7 @@ end
 ##### Bulk boundary condition tests
 #####
 
-@testset "Bulk boundary conditions [$FT]" for FT in (Float32, Float64)
+@testset "Bulk boundary conditions [$FT]" for FT in test_float_types()
     Oceananigans.defaults.FloatType = FT
     grid = RectilinearGrid(default_arch; size=(4, 4, 4), x=(0, 100), y=(0, 100), z=(0, 100))
     Cᴰ = 1e-3

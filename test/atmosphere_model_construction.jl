@@ -6,6 +6,8 @@ using Oceananigans.Diagnostics: erroring_NaNChecker!
 using Oceananigans.Operators: ℑzᵃᵃᶠ
 using Test
 
+include("test_utils.jl")
+
 function run_nan_checker_test(arch; erroring)
     grid = RectilinearGrid(arch, size=(4, 2, 1), extent=(1, 1, 1))
     model = AtmosphereModel(grid)
@@ -23,7 +25,7 @@ function run_nan_checker_test(arch; erroring)
     return nothing
 end
 
-@testset "AtmosphereModel [$(FT)]" for FT in (Float32, Float64)
+@testset "AtmosphereModel [$(FT)]" for FT in test_float_types()
     Oceananigans.defaults.FloatType = FT
     Nx = Ny = 3
     grid = RectilinearGrid(default_arch; size=(Nx, Ny, 8), x=(0, 1_000), y=(0, 1_000), z=(0, 1_000))
@@ -71,7 +73,7 @@ end
     end
 end
 
-@testset "Saturation and LiquidIcePotentialTemperatureField (WarmPhase) [$(FT)]" for FT in (Float32, Float64), formulation in (:LiquidIcePotentialTemperature, :StaticEnergy)
+@testset "Saturation and LiquidIcePotentialTemperatureField (WarmPhase) [$(FT)]" for FT in test_float_types(), formulation in (:LiquidIcePotentialTemperature, :StaticEnergy)
     Oceananigans.defaults.FloatType = FT
     grid = RectilinearGrid(default_arch; size=(8, 8, 8), x=(0, 1_000), y=(0, 1_000), z=(0, 1_000))
     constants = ThermodynamicConstants()
@@ -104,7 +106,7 @@ end
     @test qᵛ⁺k ≈ qᵛ⁺_expected rtol=FT(1e-5)
 end
 
-@testset "AtmosphereModel with TetensFormula [$(FT)]" for FT in (Float32, Float64)
+@testset "AtmosphereModel with TetensFormula [$(FT)]" for FT in test_float_types()
     Oceananigans.defaults.FloatType = FT
     grid = RectilinearGrid(default_arch; size=(4, 4, 4), x=(0, 1_000), y=(0, 1_000), z=(0, 1_000))
     tetens = TetensFormula()

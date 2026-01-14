@@ -4,7 +4,9 @@ using Oceananigans
 using Oceananigans.Fields: fill_halo_regions!
 using Statistics: mean
 
-@testset "Anelastic pressure solver recovers analytic solution [$FT]" for FT in (Float32, Float64)
+include("test_utils.jl")
+
+@testset "Anelastic pressure solver recovers analytic solution [$FT]" for FT in test_float_types()
     Oceananigans.defaults.FloatType = FT
     grid = RectilinearGrid(default_arch; size=48, z=(0, 1), topology=(Flat, Flat, Bounded))
     constants = ThermodynamicConstants()

@@ -3,11 +3,13 @@ using GPUArraysCore: @allowscalar
 using Oceananigans
 using Test
 
+include("test_utils.jl")
+
 #####
 ##### Setting potential temperature
 #####
 
-@testset "Setting potential temperature (no microphysics) [$(FT)]" for FT in (Float32, Float64), formulation in (:LiquidIcePotentialTemperature, :StaticEnergy)
+@testset "Setting potential temperature (no microphysics) [$(FT)]" for FT in test_float_types(), formulation in (:LiquidIcePotentialTemperature, :StaticEnergy)
     Oceananigans.defaults.FloatType = FT
     grid = RectilinearGrid(default_arch; size=(8, 8, 8), x=(0, 1_000), y=(0, 1_000), z=(0, 1_000))
     constants = ThermodynamicConstants()
@@ -31,7 +33,7 @@ end
 ##### Setting temperature directly
 #####
 
-@testset "Setting temperature directly [$(FT), $(formulation)]" for FT in (Float32, Float64), formulation in (:LiquidIcePotentialTemperature, :StaticEnergy)
+@testset "Setting temperature directly [$(FT), $(formulation)]" for FT in test_float_types(), formulation in (:LiquidIcePotentialTemperature, :StaticEnergy)
     Oceananigans.defaults.FloatType = FT
     grid = RectilinearGrid(default_arch; size=(4, 4, 10), x=(0, 1_000), y=(0, 1_000), z=(0, 5_000))
     constants = ThermodynamicConstants()
@@ -88,7 +90,7 @@ end
 ##### Setting relative humidity
 #####
 
-@testset "Setting relative humidity [$(FT)]" for FT in (Float32, Float64)
+@testset "Setting relative humidity [$(FT)]" for FT in test_float_types()
     Oceananigans.defaults.FloatType = FT
 
     grid = RectilinearGrid(default_arch; size=(1, 1, 8), x=(0, 1e3), y=(0, 1e3), z=(0, 1e3))

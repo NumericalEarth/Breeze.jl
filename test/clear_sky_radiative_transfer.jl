@@ -10,6 +10,8 @@ using ClimaComms
 using NCDatasets
 using RRTMGP
 
+include("test_utils.jl")
+
 @testset "Clear-sky full-spectrum RadiativeTransferModel" begin
 
     @testset "Constructor argument errors" begin
@@ -54,7 +56,7 @@ using RRTMGP
         @test_throws ArgumentError RadiativeTransferModel(grid, ClearSkyOptics(), constants;
                                                           surface_temperature = 300)
     end
-    @testset "Single column grid [$(FT)]" for FT in (Float32, Float64)
+    @testset "Single column grid [$(FT)]" for FT in test_float_types()
         Oceananigans.defaults.FloatType = FT
 
         Nz = 8

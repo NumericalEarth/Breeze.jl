@@ -10,7 +10,9 @@ using ClimaComms
 using NCDatasets
 using RRTMGP
 
-@testset "All-sky full-spectrum RadiativeTransferModel [$FT]" for FT in (Float32, Float64)
+include("test_utils.jl")
+
+@testset "All-sky full-spectrum RadiativeTransferModel [$FT]" for FT in test_float_types()
 
     @testset "Constructor argument errors" begin
         Oceananigans.defaults.FloatType = FT
@@ -35,7 +37,7 @@ using RRTMGP
                                                           surface_temperature = 300)
     end
 
-    @testset "Single column grid with clouds [$(FT)]" for FT in (Float32, Float64)
+    @testset "Single column grid with clouds [$(FT)]" for FT in test_float_types()
         Oceananigans.defaults.FloatType = FT
         topology = (Flat, Flat, Bounded)
         grid = RectilinearGrid(default_arch; size=16, x=0, y=45, z=(0, 10kilometers), topology)
@@ -120,7 +122,7 @@ using RRTMGP
         @test (lw_up_diff > 0) || (sw_dn_diff > 0)
     end
 
-    @testset "Custom effective radius models [$FT]" for FT in (Float32, Float64)
+    @testset "Custom effective radius models [$FT]" for FT in test_float_types()
         Oceananigans.defaults.FloatType = FT
         topology = (Flat, Flat, Bounded)
         grid = RectilinearGrid(default_arch; size=8, x=0, y=45, z=(0, 10kilometers), topology)

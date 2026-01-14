@@ -2,9 +2,11 @@ using Breeze
 using Oceananigans
 using Test
 
+include("test_utils.jl")
+
 test_thermodynamics = (:StaticEnergy, :LiquidIcePotentialTemperature)
 
-@testset "Time stepping with TurbulenceClosures [$(FT)]" for FT in (Float32, Float64)
+@testset "Time stepping with TurbulenceClosures [$(FT)]" for FT in test_float_types()
     Oceananigans.defaults.FloatType = FT
     grid = RectilinearGrid(default_arch; size=(8, 8, 8), x=(0, 100), y=(0, 100), z=(0, 100))
     vitd = VerticallyImplicitTimeDiscretization()
