@@ -423,7 +423,7 @@ end
 
 #####
 ##### Moisture mixing ratios
-##### 
+#####
 
 struct MoistureMixingRatio{FT}
     vapor :: FT
@@ -517,4 +517,3 @@ Converts mixing ratios to mass fractions and calls `mixture_heat_capacity(q::MMF
 @inline function mixture_heat_capacity(r::MR, constants::TC)
     return mixture_heat_capacity(MoistureMassFractions(r), constants)
 end
-

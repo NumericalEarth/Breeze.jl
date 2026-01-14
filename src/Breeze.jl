@@ -34,7 +34,7 @@ export
     mixture_heat_capacity,
     dynamics_density,
     dynamics_pressure,
-    
+
     # Diagnostics
     compute_hydrostatic_pressure!,
     PotentialTemperature,

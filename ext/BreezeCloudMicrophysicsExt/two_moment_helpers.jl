@@ -138,4 +138,3 @@ function Base.show(io::IO, bμp::BulkMicrophysics{<:Any, <:CM2MCategories})
 end
 
 Base.summary(bμp::TwoMomentCloudMicrophysics) = "TwoMomentCloudMicrophysics"
-

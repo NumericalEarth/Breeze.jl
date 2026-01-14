@@ -44,7 +44,7 @@ using Breeze.AtmosphereModels: dynamics_density, dynamics_pressure
         reference_state = ReferenceState(grid, constants)
         dynamics_stub = AnelasticDynamics(reference_state)
         boundary_conditions = NamedTuple()
-        
+
         dynamics = materialize_dynamics(dynamics_stub, grid, boundary_conditions, constants)
 
         @test dynamics isa AnelasticDynamics
