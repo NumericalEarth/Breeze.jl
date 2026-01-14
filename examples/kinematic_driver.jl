@@ -221,7 +221,3 @@ fig
 # - Testing and validating microphysics schemes in isolation
 # - Understanding sensitivities to initial moisture and temperature
 # - Pedagogical demonstrations of cloud formation physics
-#
-# For more complex microphysics including rain formation, see the
-# [`BulkMicrophysics`](@ref) schemes available through the CloudMicrophysics extension,
-# or the [`stationary_parcel_model.jl`](@ref) example.
