@@ -3,7 +3,7 @@ using Adapt: Adapt, adapt
 using Oceananigans: Oceananigans, Clock, CenterField
 using Oceananigans.Architectures: on_architecture
 using Oceananigans.BoundaryConditions: fill_halo_regions!
-using Oceananigans.Fields: ZeroField, set!, interpolate
+using Oceananigans.Fields: ZeroField, set!
 using Oceananigans.Grids: znodes, Center
 using Oceananigans.TimeSteppers: TimeSteppers
 
@@ -267,10 +267,10 @@ function Oceananigans.set!(model::ParcelModel;
         z₀ = convert(FT, parcel_z)
         
         # Interpolate environmental conditions at parcel height
-        T₀ = interpolate_at_height(model.temperature, z₀, grid)
-        ρ₀ = interpolate_at_height(dynamics.density, z₀, grid)
-        p₀ = interpolate_at_height(dynamics.pressure, z₀, grid)
-        qᵗ₀ = interpolate_at_height(model.specific_moisture, z₀, grid)
+        T₀ = interpolate(model.temperature, 0.0, 0.0, z₀)
+        ρ₀ = interpolate(dynamics.density, 0.0, 0.0, z₀)
+        p₀ = interpolate(dynamics.pressure, 0.0, 0.0, z₀)
+        qᵗ₀ = interpolate(model.specific_moisture, 0.0, 0.0, z₀)
 
         # Create moisture fractions (all vapor initially)
         q = MoistureMassFractions(qᵗ₀)
@@ -290,33 +290,6 @@ function Oceananigans.set!(model::ParcelModel;
     return nothing
 end
 
-# Helper to interpolate a field at a given height
-# For 1D columns, we use linear interpolation between grid points
-function interpolate_at_height(field, z, grid)
-    # Get z nodes
-    zc = znodes(grid, Center())
-    
-    # Find the grid cell containing z
-    k = 1
-    for i in 1:length(zc)-1
-        if zc[i] <= z <= zc[i+1]
-            k = i
-            break
-        end
-    end
-    k = clamp(k, 1, length(zc)-1)
-    
-    # Linear interpolation
-    z_lo = zc[k]
-    z_hi = zc[k+1]
-    α = (z - z_lo) / (z_hi - z_lo)
-    
-    # Get field values at neighboring points
-    f_lo = field[1, 1, k]
-    f_hi = field[1, 1, k+1]
-    
-    return f_lo + α * (f_hi - f_lo)
-end
 
 #####
 ##### Time stepping for ParcelModel
@@ -344,9 +317,9 @@ function TimeSteppers.time_step!(model::ParcelModel, Δt; callbacks=nothing)
     ℳ = state.ℳ
 
     # Get environmental velocity at current position (interpolate from fields)
-    u_env = interpolate_at_height(model.velocities.u, z, grid)
-    v_env = interpolate_at_height(model.velocities.v, z, grid)
-    w_env = interpolate_at_height(model.velocities.w, z, grid)
+    u_env = interpolate(model.velocities.u, 0.0, 0.0, z)
+    v_env = interpolate(model.velocities.v, 0.0, 0.0, z)
+    w_env = interpolate(model.velocities.w, 0.0, 0.0, z)
 
     # Update position (Forward Euler)
     x_new = x + u_env * Δt
@@ -354,8 +327,8 @@ function TimeSteppers.time_step!(model::ParcelModel, Δt; callbacks=nothing)
     z_new = z + w_env * Δt
 
     # Get environmental conditions at new height (interpolate from fields)
-    p_new = interpolate_at_height(dynamics.pressure, z_new, grid)
-    ρ_new = interpolate_at_height(dynamics.density, z_new, grid)
+    p_new = interpolate(dynamics.pressure, 0.0, 0.0, z_new)
+    ρ_new = interpolate(dynamics.density, 0.0, 0.0, z_new)
 
     # Adiabatic adjustment of thermodynamic state
     𝒰_new = adiabatic_adjustment(𝒰, z_new, p_new, constants)
