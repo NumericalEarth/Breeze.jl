@@ -48,7 +48,8 @@ Don't hesitate to get in touch on the [NumericalEarth slack](https://join.slack.
 Our goal is to build the world's fastest, easiest to use, most productive tool for weather research and forecasting, atmospheric model development, cloud physics, and more.
 This won't be the effort of a single group or even a single community.
 It can only be achieved by a wide-ranging and sustained collaboration of passionate people.
-Maybe that includes you.
+Maybe that includes you --- consider it!
+Model development is hard, but rewarding and builds useful skills for a myriad of pursuits.
 
 Right now, the goals of the current group of model developers is to implement
 
