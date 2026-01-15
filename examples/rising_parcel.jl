@@ -65,7 +65,7 @@ model = AtmosphereModel(grid; dynamics=ParcelDynamics())
 # The `set!` function configures the environmental sounding and
 # initializes the parcel at the specified height.
 
-set!(model, T=T, p=p, ρ=ρ, qᵗ=qᵗ, parcel_z=0.0, w=w_updraft)
+set!(model, T=T, p=p, ρ=ρ, qᵗ=qᵗ, z=0.0, w=w_updraft)
 
 @info "Model created" model.dynamics
 

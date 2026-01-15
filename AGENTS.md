@@ -26,6 +26,15 @@ Breeze interfaces with ClimaOcean for coupled atmosphere-ocean simulations.
 
 2. **Type Stability**: Prioritize type-stable code for performance
    - All structs must be concretely typed
+   - **Never use `Any` as a type parameter or field type**. This destroys type inference and performance.
+   - Use the **materialization pattern**: define a user-facing constructor that creates a "skeleton" 
+     struct with placeholder types (like `Nothing`), then `materialize_*` functions create the 
+     fully-typed version with concrete field types. This allows deferred type resolution while 
+     maintaining concrete types in the final object.
+   - For mutable state within an immutable struct, use a `mutable struct` as the field type.
+     The outer struct remains immutable with concrete types, while the inner mutable struct's
+     fields can be updated. Example: `ParcelDynamics` contains a `ParcelState` (mutable) that
+     gets its fields updated during time-stepping.
 
 3. **Kernel Functions**: For GPU compatibility:
    - Use KernelAbstractions.jl syntax for kernels, eg `@kernel`, `@index`

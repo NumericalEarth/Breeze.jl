@@ -49,7 +49,7 @@ using Test
     @test parcel.ρ == FT(1.2)
     @test parcel.qᵗ == qᵗ
     @test parcel.thermodynamic_state === 𝒰
-    @test parcel.microphysical_state === ℳ
+    @test parcel.microphysics_prognostics === ℳ
 end
 
 #####
@@ -76,7 +76,8 @@ end
 
     @test model isa ParcelModel
     @test model.dynamics isa ParcelDynamics
-    @test model.dynamics.state === nothing
+    # After materialization, state is a ParcelState (mutable, so fields can be updated)
+    @test model.dynamics.state isa ParcelState
 
     # Define environmental profiles
     T(z) = 288.0 - 0.0065 * z
@@ -84,11 +85,11 @@ end
     ρ(z) = p(z) / (287.0 * T(z))
 
     # Set profiles and initial position
-    set!(model, T=T, p=p, ρ=ρ, parcel_z=0.0, w=1.0)
+    set!(model, T=T, p=p, ρ=ρ, z=0.0, w=1.0)
 
     @test model.dynamics.density !== nothing
     @test model.dynamics.pressure !== nothing
-    @test model.dynamics.state !== nothing
+    @test model.dynamics.state isa ParcelState
     @test model.dynamics.state.z ≈ 0.0
 end
 
@@ -100,7 +101,7 @@ end
     p(z) = 101325.0 * exp(-z / 8500)
     ρ(z) = p(z) / (287.0 * T(z))
 
-    set!(model, T=T, p=p, ρ=ρ, parcel_z=0.0, w=1.0)
+    set!(model, T=T, p=p, ρ=ρ, z=0.0, w=1.0)
 
     @test model.clock.time == 0.0
     @test model.clock.iteration == 0
