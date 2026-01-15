@@ -6,7 +6,7 @@
 # lapse rate.
 #
 # The key feature is that `ParcelDynamics` works with `AtmosphereModel`,
-# using the same `time_step!` interface as grid-based simulations.
+# using the same `Simulation` interface as grid-based simulations.
 #
 # ## Physics overview
 #
@@ -18,7 +18,7 @@
 using Oceananigans
 using Oceananigans.Units
 using Breeze
-using Breeze.ParcelDynamics: ParcelDynamics
+using Breeze.ParcelModels: ParcelDynamics
 using Breeze.Thermodynamics: temperature, density, saturation_specific_humidity, PlanarLiquidSurface
 using CairoMakie
 
@@ -69,46 +69,42 @@ set!(model, T=T, p=p, ρ=ρ, qᵗ=qᵗ, z=0.0, w=w_updraft)
 
 @info "Model created" model.dynamics
 
-# ## Run the parcel simulation
+# ## Set up the simulation
 #
-# We integrate for 30 minutes with a 1 second time step,
-# using the standard `time_step!` interface.
+# We create a `Simulation` and use a callback to record parcel state.
 
-Δt = 1.0         # Time step [s]
-stop_time = 1800.0  # 30 minutes
-n_steps = Int(stop_time / Δt)
-
-constants = model.thermodynamic_constants
+simulation = Simulation(model; Δt=1.0, stop_time=30minutes)
 
 # Storage for time series
-times = Float64[0.0]
-heights = Float64[model.dynamics.state.z]
-T_initial = temperature(model.dynamics.state.𝒰, constants)
-temperatures = Float64[T_initial]
+times = Float64[]
+heights = Float64[]
+temperatures = Float64[]
+supersaturations = Float64[]
 
-# Compute initial supersaturation
-ρ_initial = density(model.dynamics.state.𝒰, constants)
-qᵛ⁺_initial = saturation_specific_humidity(T_initial, ρ_initial, constants, PlanarLiquidSurface())
-S_initial = (model.dynamics.state.𝒰.moisture_mass_fractions.vapor / qᵛ⁺_initial) - 1
-supersaturations = Float64[S_initial]
+# Callback to record parcel state at each iteration
+function record_parcel_state!(sim)
+    model = sim.model
+    constants = model.thermodynamic_constants
+    state = model.dynamics.state
 
-# Time loop using the standard time_step! interface
-for n in 1:n_steps
-    time_step!(model, Δt)
-
-    # Record state
     push!(times, model.clock.time)
-    push!(heights, model.dynamics.state.z)
+    push!(heights, state.z)
 
-    Tₙ = temperature(model.dynamics.state.𝒰, constants)
-    ρₙ = density(model.dynamics.state.𝒰, constants)
+    Tₙ = temperature(state.𝒰, constants)
+    ρₙ = density(state.𝒰, constants)
     push!(temperatures, Tₙ)
 
-    # Supersaturation
     qᵛ⁺ = saturation_specific_humidity(Tₙ, ρₙ, constants, PlanarLiquidSurface())
-    S = (model.dynamics.state.𝒰.moisture_mass_fractions.vapor / qᵛ⁺) - 1
+    S = (state.𝒰.moisture_mass_fractions.vapor / qᵛ⁺) - 1
     push!(supersaturations, S)
+
+    return nothing
 end
+
+add_callback!(simulation, record_parcel_state!, IterationInterval(1))
+
+# Run the simulation
+run!(simulation)
 
 @info "Simulation complete" model.clock.time model.dynamics.state.z
 

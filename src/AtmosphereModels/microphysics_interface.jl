@@ -39,14 +39,8 @@ tendency functions to work for both grid-based LES and Lagrangian parcel models.
 Concrete subtypes should be immutable structs containing the relevant mixing ratios
 and number concentrations for a given microphysics scheme.
 
-# Example
-
-```julia
-struct WarmPhaseOneMomentState{FT} <: AbstractMicrophysicalState{FT}
-    qᶜˡ :: FT  # cloud liquid mixing ratio
-    qʳ  :: FT  # rain mixing ratio
-end
-```
+For example, a warm-phase one-moment scheme might define a state with cloud liquid
+and rain mixing ratios (`qᶜˡ`, `qʳ`).
 
 See also [`microphysical_state`](@ref), [`microphysical_tendency`](@ref).
 """
