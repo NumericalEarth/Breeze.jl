@@ -220,3 +220,16 @@ end
 @inline function AtmosphereModels.moisture_fractions(bμp::NPBM, ℳ, qᵗ)
     return moisture_fractions(bμp.cloud_formation, ℳ, qᵗ)
 end
+
+# Disambiguation for specific state types
+@inline function AtmosphereModels.moisture_fractions(bμp::NPBM, ℳ::WarmRainState, qᵗ)
+    return moisture_fractions(bμp.cloud_formation, ℳ, qᵗ)
+end
+
+@inline function AtmosphereModels.moisture_fractions(bμp::NPBM, ℳ::NothingMicrophysicalState, qᵗ)
+    return moisture_fractions(bμp.cloud_formation, ℳ, qᵗ)
+end
+
+@inline function AtmosphereModels.moisture_fractions(bμp::NPBM, ℳ::NamedTuple, qᵗ)
+    return moisture_fractions(bμp.cloud_formation, ℳ, qᵗ)
+end

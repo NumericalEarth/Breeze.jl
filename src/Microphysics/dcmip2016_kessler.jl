@@ -155,6 +155,16 @@ AtmosphereModels.prognostic_field_names(::DCMIP2016KM) = (:ρqᶜˡ, :ρqʳ)
     return AtmosphereModels.WarmRainState(qᶜˡ, qʳ)
 end
 
+# Disambiguation for μ::Nothing (no prognostics yet)
+@inline function AtmosphereModels.microphysical_state(::DCMIP2016KM, ρ, ::Nothing, 𝒰)
+    return AtmosphereModels.NothingMicrophysicalState(typeof(ρ))
+end
+
+# Disambiguation for empty NamedTuple
+@inline function AtmosphereModels.microphysical_state(::DCMIP2016KM, ρ, ::NamedTuple{(), Tuple{}}, 𝒰)
+    return AtmosphereModels.NothingMicrophysicalState(typeof(ρ))
+end
+
 """
 $(TYPEDSIGNATURES)
 

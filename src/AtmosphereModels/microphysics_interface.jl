@@ -145,6 +145,8 @@ See also [`microphysical_tendency`](@ref), [`AbstractMicrophysicalState`](@ref).
 @inline microphysical_state(::Nothing, ρ, ::Nothing, 𝒰) = NothingMicrophysicalState(typeof(ρ))
 @inline microphysical_state(microphysics, ρ, ::Nothing, 𝒰) = NothingMicrophysicalState(typeof(ρ))
 @inline microphysical_state(microphysics, ρ, ::NamedTuple{(), Tuple{}}, 𝒰) = NothingMicrophysicalState(typeof(ρ))
+# Disambiguation for Nothing microphysics + empty NamedTuple
+@inline microphysical_state(::Nothing, ρ, ::NamedTuple{(), Tuple{}}, 𝒰) = NothingMicrophysicalState(typeof(ρ))
 
 """
     grid_microphysical_state(i, j, k, grid, microphysics, μ_fields, ρ, 𝒰)
@@ -305,7 +307,18 @@ Schemes should write all auxiliary fields in one function. This includes:
 
 See [`WarmRainState`](@ref) implementation below for an example.
 """
+# Nothing microphysics: do nothing for any state
 @inline function update_microphysical_auxiliaries!(μ, i, j, k, grid, microphysics::Nothing, ℳ, ρ, 𝒰, constants)
+    return nothing
+end
+
+# Explicit disambiguation: Nothing microphysics + WarmRainState
+@inline function update_microphysical_auxiliaries!(μ, i, j, k, grid, microphysics::Nothing, ℳ::WarmRainState, ρ, 𝒰, constants)
+    return nothing
+end
+
+# Explicit disambiguation: Nothing microphysics + NothingMicrophysicalState
+@inline function update_microphysical_auxiliaries!(μ, i, j, k, grid, microphysics::Nothing, ℳ::NothingMicrophysicalState, ρ, 𝒰, constants)
     return nothing
 end
 
@@ -364,6 +377,10 @@ The default implementation for `Nothing` microphysics assumes all moisture is va
 @inline moisture_fractions(::Nothing, ℳ, qᵗ) = MoistureMassFractions(qᵗ)
 @inline moisture_fractions(microphysics, ::NothingMicrophysicalState, qᵗ) = MoistureMassFractions(qᵗ)
 @inline moisture_fractions(::Nothing, ::NothingMicrophysicalState, qᵗ) = MoistureMassFractions(qᵗ)
+
+# Disambiguation for Nothing microphysics + specific state types
+@inline moisture_fractions(::Nothing, ℳ::WarmRainState, qᵗ) = MoistureMassFractions(qᵗ)
+@inline moisture_fractions(::Nothing, ℳ::NamedTuple, qᵗ) = MoistureMassFractions(qᵗ)
 
 # WarmRainState: cloud liquid + rain
 @inline function moisture_fractions(microphysics, ℳ::WarmRainState, qᵗ)

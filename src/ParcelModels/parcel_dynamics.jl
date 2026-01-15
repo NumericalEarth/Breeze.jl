@@ -1,15 +1,15 @@
 using Adapt: Adapt, adapt
 
-using Oceananigans: Oceananigans, Clock, CenterField
+using Oceananigans: Oceananigans, CenterField
 using Oceananigans.Architectures: on_architecture
 using Oceananigans.BoundaryConditions: fill_halo_regions!
 using Oceananigans.Fields: ZeroField, set!, interpolate
 using Oceananigans.Grids: Center
 using Oceananigans.TimeSteppers: TimeSteppers, tick!
 
-using Breeze.Thermodynamics: AbstractThermodynamicState, MoistureMassFractions,
-    LiquidIcePotentialTemperatureState, StaticEnergyState, ThermodynamicConstants,
-    temperature, with_moisture, mixture_heat_capacity
+using Breeze.Thermodynamics: MoistureMassFractions,
+    LiquidIcePotentialTemperatureState, StaticEnergyState,
+    with_moisture, mixture_heat_capacity
 
 using Breeze.AtmosphereModels: AtmosphereModels, AtmosphereModel
 
@@ -536,6 +536,8 @@ end
 compute_microphysics_prognostic_tendencies(microphysics, ρ, μ::Nothing, ℳ, 𝒰, constants) = nothing
 compute_microphysics_prognostic_tendencies(::Nothing, ρ, μ, ℳ, 𝒰, constants) = μ
 compute_microphysics_prognostic_tendencies(::Nothing, ρ, μ::Nothing, ℳ, 𝒰, constants) = nothing
+# Disambiguation for Nothing microphysics + NamedTuple
+compute_microphysics_prognostic_tendencies(::Nothing, ρ, μ::NamedTuple, ℳ, 𝒰, constants) = μ
 
 # For NamedTuple prognostics, compute tendencies for each field via microphysical_tendency
 function compute_microphysics_prognostic_tendencies(microphysics, ρ, μ::NamedTuple, ℳ, 𝒰, constants)

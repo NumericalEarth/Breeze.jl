@@ -24,8 +24,7 @@ using DocStringExtensions: TYPEDSIGNATURES, TYPEDEF, TYPEDFIELDS
 
 using Oceananigans.Grids: znode, Center
 
-using Breeze.AtmosphereModels: NothingMicrophysicalState,
-                               microphysical_state,
+using Breeze.AtmosphereModels: microphysical_state,
                                microphysical_tendency,
                                moisture_fractions
 

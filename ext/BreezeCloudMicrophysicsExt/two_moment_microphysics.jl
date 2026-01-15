@@ -121,6 +121,16 @@ const WPNE2M = WarmPhaseNonEquilibrium2M
 ##### MicrophysicalState construction from fields
 #####
 
+# Gridless version: takes a NamedTuple of density-weighted scalars
+@inline function AtmosphereModels.microphysical_state(bμp::WPNE2M, ρ, μ, 𝒰)
+    qᶜˡ = μ.ρqᶜˡ / ρ
+    nᶜˡ = μ.ρnᶜˡ / ρ
+    qʳ = μ.ρqʳ / ρ
+    nʳ = μ.ρnʳ / ρ
+    return WarmPhaseTwoMomentState(qᶜˡ, nᶜˡ, qʳ, nʳ)
+end
+
+# Grid-indexed version: extracts from Fields
 @inline function AtmosphereModels.grid_microphysical_state(i, j, k, grid, bμp::WPNE2M, μ, ρ, 𝒰)
     @inbounds qᶜˡ = μ.qᶜˡ[i, j, k]
     @inbounds nᶜˡ = μ.nᶜˡ[i, j, k]
@@ -331,10 +341,17 @@ end
 ##### Moisture fraction computation
 #####
 
-@inline function AtmosphereModels.moisture_fractions(i, j, k, grid, bμp::WPNE2M, ρ, qᵗ, μ)
+@inline function AtmosphereModels.grid_moisture_fractions(i, j, k, grid, bμp::WPNE2M, ρ, qᵗ, μ)
     qᶜˡ = @inbounds μ.ρqᶜˡ[i, j, k] / ρ
     qʳ = @inbounds μ.ρqʳ[i, j, k] / ρ
     qˡ = qᶜˡ + qʳ
+    qᵛ = qᵗ - qˡ
+    return MoistureMassFractions(qᵛ, qˡ)
+end
+
+# Gridless version for parcel models
+@inline function AtmosphereModels.moisture_fractions(bμp::WPNE2M, ℳ::WarmPhaseTwoMomentState, qᵗ)
+    qˡ = ℳ.qᶜˡ + ℳ.qʳ
     qᵛ = qᵗ - qˡ
     return MoistureMassFractions(qᵛ, qˡ)
 end
