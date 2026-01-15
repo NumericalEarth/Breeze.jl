@@ -50,4 +50,3 @@ end
 
 Base.summary(::IceLambdaLimiter) = "IceLambdaLimiter"
 Base.show(io::IO, ::IceLambdaLimiter) = print(io, "IceLambdaLimiter(2 integrals)")
-

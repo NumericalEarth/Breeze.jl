@@ -7,7 +7,7 @@ This document outlines the comprehensive documentation needed for the Predicted 
 ```
 docs/src/microphysics/
 ├── p3_overview.md              # Introduction and motivation
-├── p3_particle_properties.md   # Mass, area, density relationships  
+├── p3_particle_properties.md   # Mass, area, density relationships
 ├── p3_size_distribution.md     # Gamma PSD and parameter determination
 ├── p3_integral_properties.md   # Bulk properties from PSD integrals
 ├── p3_processes.md             # Microphysical process rates
@@ -175,7 +175,7 @@ f_v = a_v + b_v \text{Re}^{0.5} \text{Sc}^{1/3}
 
 ### Code Examples
 ```julia
-state = IceSizeDistributionState(Float64; 
+state = IceSizeDistributionState(Float64;
     intercept = 1e6, shape = 0.0, slope = 1000.0)
 
 V_n = evaluate(NumberWeightedFallSpeed(), state)
@@ -320,4 +320,3 @@ All equations should cite:
 - Milbrandt, J. A., et al. (2024). ...Predicted liquid fraction...
 - Hall, W. D., & Pruppacher, H. R. (1976). Ventilation...
 - Khairoutdinov, M., & Kogan, Y. (2000). Autoconversion...
-

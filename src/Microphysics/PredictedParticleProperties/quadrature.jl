@@ -32,11 +32,11 @@ These are then transformed to diameter space using [`transform_to_diameter`](@re
 function chebyshev_gauss_nodes_weights(FT::Type{<:AbstractFloat}, n::Int)
     nodes = zeros(FT, n)
     weights = fill(FT(π / n), n)
-    
+
     for i in 1:n
         nodes[i] = cos(FT((2i - 1) * π / (2n)))
     end
-    
+
     return nodes, weights
 end
 
@@ -116,27 +116,27 @@ state = IceSizeDistributionState(Float64; intercept=1e6, shape=0.0, slope=1000.0
 Vn = evaluate(NumberWeightedFallSpeed(), state)
 ```
 """
-function evaluate(integral::AbstractP3Integral, state::IceSizeDistributionState; 
+function evaluate(integral::AbstractP3Integral, state::IceSizeDistributionState;
                   n_quadrature::Int = 64)
     FT = typeof(state.slope)
     nodes, weights = chebyshev_gauss_nodes_weights(FT, n_quadrature)
-    
+
     λ = state.slope
     result = zero(FT)
-    
+
     for i in 1:n_quadrature
         x = nodes[i]
         w = weights[i]
-        
+
         D = transform_to_diameter(x, λ)
         J = jacobian_diameter_transform(x, λ)
-        
+
         # Compute integrand at this diameter
         f = integrand(integral, D, state)
-        
+
         result += w * f * J
     end
-    
+
     return result
 end
 
@@ -158,8 +158,8 @@ Follows power law: V(D) = a_V * D^b_V
 
 with adjustments for particle regime (small ice, unrimed, rimed, graupel).
 """
-@inline function terminal_velocity(D, state; 
-                                    a_V = 11.72, 
+@inline function terminal_velocity(D, state;
+                                    a_V = 11.72,
                                     b_V = 0.41)
     # Simplified power law for now
     # Full P3 uses regime-dependent coefficients
@@ -209,10 +209,10 @@ The mass-dimension relationship depends on the particle regime:
     ρⁱ = FT(917)  # kg/m³, pure ice density
     ρᶠ = state.rime_density
     Fᶠ = state.rime_fraction
-    
+
     # Effective density: interpolate between ice and rime
     ρ_eff = (1 - Fᶠ) * ρⁱ * FT(0.1) + Fᶠ * ρᶠ  # 0.1 factor for aggregate density
-    
+
     return FT(π) / 6 * ρ_eff * D^3
 end
 
@@ -231,12 +231,12 @@ Following Hall and Pruppacher (1976):
     V = terminal_velocity(D, state)
     D_threshold = typeof(D)(100e-6)
     is_small = D ≤ D_threshold
-    
+
     # Small particles: constant_term → 1, otherwise → 0
     small_value = ifelse(constant_term, one(D), zero(D))
     # Large particles: constant_term → 0.65, otherwise → 0.44 * sqrt(V * D)
     large_value = ifelse(constant_term, typeof(D)(0.65), typeof(D)(0.44) * sqrt(V * D))
-    
+
     return ifelse(is_small, small_value, large_value)
 end
 
@@ -359,7 +359,7 @@ Particle density ρ(D) as a function of diameter.
     ρⁱ = FT(917)  # kg/m³, pure ice density
     Fᶠ = state.rime_fraction
     ρᶠ = state.rime_density
-    
+
     # Effective density: interpolate
     return (1 - Fᶠ) * ρⁱ * FT(0.1) + Fᶠ * ρᶠ
 end
@@ -509,4 +509,3 @@ end
     Np = size_distribution(D, state)
     return D^6 * V * A * Np
 end
-

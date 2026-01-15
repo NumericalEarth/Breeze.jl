@@ -360,4 +360,3 @@ All integrals use the same infrastructure: define the integrand, then call
 - [MilbrandtEtAl2021](@cite): Sixth moment integrals for three-moment ice (Table 1)
 - [MilbrandtEtAl2024](@cite): Updated three-moment formulation
 - [Morrison2025complete3moment](@cite): Complete three-moment lookup table (29 quantities)
-

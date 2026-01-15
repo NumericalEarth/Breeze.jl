@@ -55,9 +55,9 @@ This container organizes all ice-related computations:
 
 # References
 
-The mass-diameter relationship is from 
+The mass-diameter relationship is from
 [Morrison and Milbrandt (2015a)](@cite Morrison2015parameterization),
-with sixth moment formulations from 
+with sixth moment formulations from
 [Milbrandt et al. (2021)](@cite MilbrandtEtAl2021).
 """
 function IceProperties(FT::Type{<:AbstractFloat} = Float64;
@@ -94,4 +94,3 @@ function Base.show(io::IO, ice::IceProperties)
     print(io, "├── ", ice.lambda_limiter, "\n")
     print(io, "└── ", ice.ice_rain)
 end
-

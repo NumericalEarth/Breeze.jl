@@ -61,7 +61,7 @@ saturation specific humidity.
 
 ### Autoconversion
 
-Cloud droplets grow to rain through collision-coalescence. The 
+Cloud droplets grow to rain through collision-coalescence. The
 [KhairoutdinovKogan2000](@citet)
 parameterization expresses autoconversion as:
 
@@ -361,7 +361,7 @@ Many processes have strong temperature dependence:
 ```
 T < 235 K:  Homogeneous freezing (cloud → ice)
 235-268 K:  Heterogeneous nucleation, deposition growth
-265-273 K:  Hallett-Mossop ice multiplication  
+265-273 K:  Hallett-Mossop ice multiplication
 268-273 K:  Maximum aggregation efficiency
 T > 273 K:  Melting, shedding
 ```
@@ -393,4 +393,3 @@ where:
 - [MilbrandtYau2005](@cite): Multimoment sedimentation
 - [pruppacher2010microphysics](@cite): Cloud physics fundamentals
 - [rogers1989short](@cite): Cloud physics textbook
-

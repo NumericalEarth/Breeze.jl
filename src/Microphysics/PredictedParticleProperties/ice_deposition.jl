@@ -29,14 +29,14 @@ $(TYPEDSIGNATURES)
 Construct `IceDeposition` with parameters and quadrature-based integrals.
 
 Ice growth/decay by vapor deposition/sublimation follows the diffusion equation
-with ventilation enhancement. The ventilation factor ``fᵛᵉ`` accounts for 
+with ventilation enhancement. The ventilation factor ``fᵛᵉ`` accounts for
 enhanced vapor transport due to particle motion through air:
 
 ```math
 fᵛᵉ = a + b \\cdot Sc^{1/3} Re^{1/2}
 ```
 
-where ``Sc`` is the Schmidt number and ``Re`` is the Reynolds number. 
+where ``Sc`` is the Schmidt number and ``Re`` is the Reynolds number.
 [Hall and Pruppacher (1976)](@cite HallPruppacher1976) showed that falling
 particles have significantly enhanced vapor exchange compared to stationary
 particles.
@@ -81,4 +81,3 @@ function Base.show(io::IO, d::IceDeposition)
     print(io, "κ=", d.thermal_conductivity, ", ")
     print(io, "Dᵥ=", d.vapor_diffusivity, ")")
 end
-

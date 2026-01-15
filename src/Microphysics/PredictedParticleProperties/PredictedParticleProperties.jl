@@ -55,7 +55,7 @@ export
     # Main scheme type
     PredictedParticlePropertiesMicrophysics,
     P3Microphysics,
-    
+
     # Ice properties
     IceProperties,
     IceFallSpeed,
@@ -65,11 +65,11 @@ export
     IceSixthMoment,
     IceLambdaLimiter,
     IceRainCollection,
-    
+
     # Rain and cloud droplet properties
     RainProperties,
     CloudDropletProperties,
-    
+
     # Integral types (abstract)
     AbstractP3Integral,
     AbstractIceIntegral,
@@ -80,12 +80,12 @@ export
     AbstractCollectionIntegral,
     AbstractSixthMomentIntegral,
     AbstractLambdaLimiterIntegral,
-    
+
     # Integral types (concrete) - Fall speed
     NumberWeightedFallSpeed,
     MassWeightedFallSpeed,
     ReflectivityWeightedFallSpeed,
-    
+
     # Integral types (concrete) - Deposition
     Ventilation,
     VentilationEnhanced,
@@ -93,7 +93,7 @@ export
     SmallIceVentilationReynolds,
     LargeIceVentilationConstant,
     LargeIceVentilationReynolds,
-    
+
     # Integral types (concrete) - Bulk properties
     EffectiveRadius,
     MeanDiameter,
@@ -102,11 +102,11 @@ export
     SlopeParameter,
     ShapeParameter,
     SheddingRate,
-    
+
     # Integral types (concrete) - Collection
     AggregationNumber,
     RainCollectionNumber,
-    
+
     # Integral types (concrete) - Sixth moment
     SixthMomentRime,
     SixthMomentDeposition,
@@ -117,37 +117,37 @@ export
     SixthMomentShedding,
     SixthMomentSublimation,
     SixthMomentSublimation1,
-    
+
     # Integral types (concrete) - Lambda limiter
     NumberMomentLambdaLimit,
     MassMomentLambdaLimit,
-    
+
     # Integral types (concrete) - Rain
     RainShapeParameter,
     RainVelocityNumber,
     RainVelocityMass,
     RainEvaporation,
-    
+
     # Integral types (concrete) - Ice-rain collection
     IceRainMassCollection,
     IceRainNumberCollection,
     IceRainSixthMomentCollection,
-    
+
     # Tabulated wrapper
     TabulatedIntegral,
-    
+
     # Interface functions
     prognostic_field_names,
-    
+
     # Quadrature
     evaluate,
     IceSizeDistributionState,
     chebyshev_gauss_nodes_weights,
-    
+
     # Tabulation
     tabulate,
     TabulationParameters,
-    
+
     # Lambda solver
     IceMassPowerLaw,
     TwoMomentClosure,
@@ -229,4 +229,3 @@ include("process_rates.jl")
 include("p3_interface.jl")
 
 end # module PredictedParticleProperties
-

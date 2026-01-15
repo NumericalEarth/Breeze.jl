@@ -57,7 +57,7 @@ for λ in λ_values
         intercept = N₀,
         shape = 0.0,
         slope = λ)
-    
+
     push!(V_number, evaluate(NumberWeightedFallSpeed(), state))
     push!(V_mass, evaluate(MassWeightedFallSpeed(), state))
     push!(V_reflectivity, evaluate(ReflectivityWeightedFallSpeed(), state))
@@ -108,11 +108,11 @@ for (i, ρ_rime) in enumerate(rime_densities)
             slope = 1000.0,  # Fixed size distribution
             rime_fraction = F_rim,
             rime_density = ρ_rime)
-        
+
         push!(V_rimed, evaluate(MassWeightedFallSpeed(), state))
     end
-    lines!(ax2, rime_fractions, V_rimed; 
-           color=colors[i], linewidth=3, 
+    lines!(ax2, rime_fractions, V_rimed;
+           color=colors[i], linewidth=3,
            label="ρ_rime = $(Int(ρ_rime)) kg/m³")
 end
 
@@ -142,14 +142,14 @@ for λ in λ_values
         intercept = N₀,
         shape = 0.0,
         slope = λ)
-    
+
     push!(V_vent, evaluate(Ventilation(), state))
     push!(V_vent_enhanced, evaluate(VentilationEnhanced(), state))
 end
 
-lines!(ax3, mean_diameter_mm, V_vent; 
+lines!(ax3, mean_diameter_mm, V_vent;
        color=:purple, linewidth=3, label="Basic ventilation")
-lines!(ax3, mean_diameter_mm, V_vent_enhanced; 
+lines!(ax3, mean_diameter_mm, V_vent_enhanced;
        color=:magenta, linewidth=3, linestyle=:dash, label="Enhanced (D > 100 μm)")
 
 axislegend(ax3; position=:lt)
@@ -180,10 +180,10 @@ for (i, λ) in enumerate(λ_test)
             shape = 0.0,
             slope = λ,
             liquid_fraction = F_liq)
-        
+
         push!(shedding, evaluate(SheddingRate(), state))
     end
-    lines!(ax4, liquid_fractions, shedding; 
+    lines!(ax4, liquid_fractions, shedding;
            color=colors[i], linewidth=3, label=D_labels[i])
 end
 
@@ -216,18 +216,18 @@ for λ in λ_values
     state_pristine = IceSizeDistributionState(Float64;
         intercept = 1e6, shape = 0.0, slope = λ,
         rime_fraction = 0.0)
-    
+
     state_rimed = IceSizeDistributionState(Float64;
         intercept = 1e6, shape = 0.0, slope = λ,
         rime_fraction = 0.7, rime_density = 700.0)
-    
+
     push!(Z_pristine, evaluate(Reflectivity(), state_pristine))
     push!(Z_rimed, evaluate(Reflectivity(), state_rimed))
 end
 
-lines!(ax5, mean_diameter_mm, Z_pristine; 
+lines!(ax5, mean_diameter_mm, Z_pristine;
        color=:cyan, linewidth=3, label="Pristine ice")
-lines!(ax5, mean_diameter_mm, Z_rimed; 
+lines!(ax5, mean_diameter_mm, Z_rimed;
        color=:red, linewidth=3, label="Heavily rimed (graupel)")
 
 axislegend(ax5; position=:lt)
@@ -251,14 +251,14 @@ Z_vs_mu = Float64[]
 for μ in μ_values
     state = IceSizeDistributionState(Float64;
         intercept = 1e6, shape = μ, slope = λ_fixed)
-    
+
     push!(V_vs_mu, evaluate(MassWeightedFallSpeed(), state))
     push!(Z_vs_mu, evaluate(Reflectivity(), state))
 end
 
-lines!(ax6, μ_values, V_vs_mu ./ maximum(V_vs_mu); 
+lines!(ax6, μ_values, V_vs_mu ./ maximum(V_vs_mu);
        color=:teal, linewidth=3, label="Mass-weighted velocity")
-lines!(ax6, μ_values, Z_vs_mu ./ maximum(Z_vs_mu); 
+lines!(ax6, μ_values, Z_vs_mu ./ maximum(Z_vs_mu);
        color=:gold, linewidth=3, label="Reflectivity")
 
 axislegend(ax6; position=:rt)
@@ -303,4 +303,3 @@ fig2
 # and understanding how P3's predicted properties evolve in time.
 
 nothing #hide
-

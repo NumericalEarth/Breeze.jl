@@ -29,7 +29,7 @@ $(TYPEDSIGNATURES)
 
 Construct `IceSixthMoment` with quadrature-based integrals.
 
-The sixth moment ``M_6 = ∫ D^6 N'(D) dD`` is proportional to radar 
+The sixth moment ``M_6 = ∫ D^6 N'(D) dD`` is proportional to radar
 reflectivity Z. Prognosing M₆ (or equivalently Z) as a third moment
 provides an independent constraint on the shape of the size distribution,
 improving representation of differential fall speeds and collection.
@@ -71,4 +71,3 @@ end
 
 Base.summary(::IceSixthMoment) = "IceSixthMoment"
 Base.show(io::IO, ::IceSixthMoment) = print(io, "IceSixthMoment(9 integrals)")
-

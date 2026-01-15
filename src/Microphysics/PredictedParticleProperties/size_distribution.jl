@@ -36,7 +36,7 @@ The gamma distribution is parameterized by three quantities:
 - **μ** (shape): Controls the relative abundance of small vs. large particles
 - **λ** (slope): Sets the characteristic inverse diameter
 
-For P3, these are determined from prognostic moments using the 
+For P3, these are determined from prognostic moments using the
 [`distribution_parameters`](@ref) function.
 
 **Rime and liquid properties** affect the mass-diameter relationship:
@@ -142,4 +142,3 @@ Threshold diameter separating partially rimed ice from dense graupel.
     FT = typeof(rime_fraction)
     return FT(500e-6)  # 500 μm (placeholder)
 end
-
