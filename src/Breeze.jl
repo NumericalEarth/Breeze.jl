@@ -79,6 +79,7 @@ export
     SSPRungeKutta3,
 
     # ParcelDynamics
+    ParcelDynamics,
     ParcelModel,
     ParcelState
 
@@ -183,7 +184,7 @@ using .Forcings
 include("TimeSteppers/TimeSteppers.jl")
 using .TimeSteppers
 
-include("ParcelDynamics/ParcelDynamics.jl")
-using .ParcelDynamics
+include("ParcelModels/ParcelModels.jl")
+using .ParcelModels
 
 end # module Breeze

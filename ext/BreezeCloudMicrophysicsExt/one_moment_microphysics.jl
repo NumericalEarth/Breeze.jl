@@ -213,6 +213,7 @@ const MPNE1M = MixedPhaseNonEquilibrium1M
 
 # Union types for dispatch
 const WarmPhase1M = Union{WP1M, WPNE1M}
+const MixedPhase1M = Union{MP1M, MPNE1M}
 const NonEquilibrium1M = Union{WPNE1M, MPNE1M}
 const OneMomentLiquidRain = Union{WP1M, WPNE1M, MP1M, MPNE1M}
 
@@ -242,6 +243,28 @@ end
     @inbounds qᶜⁱ = μ.qᶜⁱ[i, j, k]
     @inbounds qʳ = μ.qʳ[i, j, k]
     @inbounds qˢ = μ.qˢ[i, j, k]
+    return MixedPhaseOneMomentState(qᶜˡ, qᶜⁱ, qʳ, qˢ)
+end
+
+#####
+##### Gridless MicrophysicalState construction from ρ-weighted prognostics
+#####
+# For parcel models: μ is a NamedTuple of density-weighted prognostic variables.
+# Convert to specific quantities and return the proper state type.
+
+# Warm-phase schemes
+@inline function AtmosphereModels.microphysical_state(bμp::WarmPhase1M, ρ, μ::NamedTuple)
+    qᶜˡ = μ.ρqᶜˡ / ρ
+    qʳ = μ.ρqʳ / ρ
+    return WarmPhaseOneMomentState(qᶜˡ, qʳ)
+end
+
+# Mixed-phase schemes
+@inline function AtmosphereModels.microphysical_state(bμp::MixedPhase1M, ρ, μ::NamedTuple)
+    qᶜˡ = μ.ρqᶜˡ / ρ
+    qᶜⁱ = μ.ρqᶜⁱ / ρ
+    qʳ = μ.ρqʳ / ρ
+    qˢ = μ.ρqˢ / ρ
     return MixedPhaseOneMomentState(qᶜˡ, qᶜⁱ, qʳ, qˢ)
 end
 
@@ -384,8 +407,25 @@ end
 ##### Moisture fraction computation
 #####
 
+# State-based (gridless) moisture fraction computation for warm-phase 1M microphysics.
+# Works with WarmPhaseOneMomentState which contains specific quantities (qᶜˡ, qʳ).
+@inline function AtmosphereModels.compute_moisture_fractions(bμp::WarmPhase1M, ℳ::WarmPhaseOneMomentState, qᵗ)
+    qˡ = ℳ.qᶜˡ + ℳ.qʳ
+    qᵛ = qᵗ - qˡ
+    return MoistureMassFractions(qᵛ, qˡ)
+end
+
+# State-based moisture fraction computation for mixed-phase 1M microphysics.
+@inline function AtmosphereModels.compute_moisture_fractions(bμp::MixedPhase1M, ℳ::MixedPhaseOneMomentState, qᵗ)
+    qˡ = ℳ.qᶜˡ + ℳ.qʳ
+    qⁱ = ℳ.qᶜⁱ + ℳ.qˢ
+    qᵛ = qᵗ - qˡ - qⁱ
+    return MoistureMassFractions(qᵛ, qˡ, qⁱ)
+end
+
+# Grid-indexed moisture fraction computation (for tendency kernels).
 # Non-equilibrium warm-phase: cloud liquid is prognostic
-@inline function AtmosphereModels.compute_moisture_fractions(i, j, k, grid, bμp::WPNE1M, ρ, qᵗ, μ)
+@inline function AtmosphereModels.grid_compute_moisture_fractions(i, j, k, grid, bμp::WPNE1M, ρ, qᵗ, μ)
     qᶜˡ = @inbounds μ.ρqᶜˡ[i, j, k] / ρ
     qʳ = @inbounds μ.ρqʳ[i, j, k] / ρ
     qˡ = qᶜˡ + qʳ
@@ -394,7 +434,7 @@ end
 end
 
 # Non-equilibrium mixed-phase: cloud liquid and ice are prognostic
-@inline function AtmosphereModels.compute_moisture_fractions(i, j, k, grid, bμp::MPNE1M, ρ, qᵗ, μ)
+@inline function AtmosphereModels.grid_compute_moisture_fractions(i, j, k, grid, bμp::MPNE1M, ρ, qᵗ, μ)
     qᶜˡ = @inbounds μ.ρqᶜˡ[i, j, k] / ρ
     qᶜⁱ = @inbounds μ.ρqᶜⁱ[i, j, k] / ρ
     qʳ = @inbounds μ.ρqʳ[i, j, k] / ρ
@@ -407,7 +447,7 @@ end
 
 # Saturation adjustment: read moisture partition from diagnostic fields (set in previous timestep).
 # maybe_adjust_thermodynamic_state will then adjust to equilibrium for the current state.
-@inline function AtmosphereModels.compute_moisture_fractions(i, j, k, grid, bμp::WP1M, ρ, qᵗ, μ)
+@inline function AtmosphereModels.grid_compute_moisture_fractions(i, j, k, grid, bμp::WP1M, ρ, qᵗ, μ)
     qᶜˡ = @inbounds μ.qᶜˡ[i, j, k]
     qʳ = @inbounds μ.ρqʳ[i, j, k] / ρ
     qˡ = qᶜˡ + qʳ
@@ -416,7 +456,7 @@ end
 end
 
 # Mixed-phase saturation adjustment: read moisture partition from diagnostic fields.
-@inline function AtmosphereModels.compute_moisture_fractions(i, j, k, grid, bμp::MP1M, ρ, qᵗ, μ)
+@inline function AtmosphereModels.grid_compute_moisture_fractions(i, j, k, grid, bμp::MP1M, ρ, qᵗ, μ)
     qᶜˡ = @inbounds μ.qᶜˡ[i, j, k]
     qᶜⁱ = @inbounds μ.qᶜⁱ[i, j, k]
     qʳ = @inbounds μ.ρqʳ[i, j, k] / ρ

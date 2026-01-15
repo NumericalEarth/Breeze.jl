@@ -243,7 +243,7 @@ end
     end
 
     # Compute moisture fractions first (needed by diagnose_thermodynamic_state)
-    q = compute_moisture_fractions(i, j, k, grid, microphysics, ρ, qᵗ, microphysical_fields)
+    q = grid_compute_moisture_fractions(i, j, k, grid, microphysics, ρ, qᵗ, microphysical_fields)
 
     𝒰₀ = diagnose_thermodynamic_state(i, j, k, grid, formulation, dynamics, q)
 

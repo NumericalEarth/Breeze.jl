@@ -147,6 +147,13 @@ Return the names of prognostic microphysical fields for the Kessler scheme.
 """
 AtmosphereModels.prognostic_field_names(::DCMIP2016KM) = (:ρqᶜˡ, :ρqʳ)
 
+# Gridless microphysical state for parcel models
+@inline function AtmosphereModels.microphysical_state(::DCMIP2016KM, ρ, μ::NamedTuple)
+    qᶜˡ = μ.ρqᶜˡ / ρ
+    qʳ = μ.ρqʳ / ρ
+    return AtmosphereModels.WarmRainState(qᶜˡ, qʳ)
+end
+
 """
 $(TYPEDSIGNATURES)
 
@@ -192,7 +199,7 @@ Compute moisture mass fractions at grid point `(i, j, k)` for the thermodynamic 
 Water vapor is diagnosed as \$q^v = q^t - q^{cl} - q^r\$.
 Returns `MoistureMassFractions(qᵛ, qˡ)` where \$q^l = q^{cl} + q^r\$ is the total liquid mass fraction.
 """
-@inline function AtmosphereModels.compute_moisture_fractions(i, j, k, grid, ::DCMIP2016KM, ρ, qᵗ, μ)
+@inline function AtmosphereModels.grid_compute_moisture_fractions(i, j, k, grid, ::DCMIP2016KM, ρ, qᵗ, μ)
     @inbounds begin
         qᶜˡ = μ.ρqᶜˡ[i, j, k] / ρ
         qʳ  = μ.ρqʳ[i, j, k] / ρ

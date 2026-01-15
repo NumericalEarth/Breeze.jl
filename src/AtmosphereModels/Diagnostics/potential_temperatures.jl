@@ -468,7 +468,7 @@ function (d::MoistPotentialTemperatureKernelFunction)(i, j, k, grid)
     end
 
     constants = d.thermodynamic_constants
-    q = compute_moisture_fractions(i, j, k, grid, d.microphysics, ρᵣ, qᵗ, d.microphysical_fields)
+    q = grid_compute_moisture_fractions(i, j, k, grid, d.microphysics, ρᵣ, qᵗ, d.microphysical_fields)
     qᵛ = q.vapor
     qˡ = q.liquid
     qⁱ = q.ice

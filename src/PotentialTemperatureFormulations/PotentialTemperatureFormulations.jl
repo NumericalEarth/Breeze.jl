@@ -20,7 +20,7 @@ using Oceananigans.Utils: prettysummary, launch!
 
 using Breeze.AtmosphereModels: AtmosphereModels, diagnose_thermodynamic_state,
     set_thermodynamic_variable!, dynamics_density, dynamics_pressure, standard_pressure,
-    dynamics_prognostic_fields, compute_moisture_fractions, maybe_adjust_thermodynamic_state,
+    dynamics_prognostic_fields, grid_compute_moisture_fractions, maybe_adjust_thermodynamic_state,
     div_ρUc, c_div_ρU, ∇_dot_Jᶜ, AtmosphereModelBuoyancy, microphysical_tendency
 using Breeze.Thermodynamics: LiquidIcePotentialTemperatureState, StaticEnergyState, with_temperature, exner_function, mixture_heat_capacity
 

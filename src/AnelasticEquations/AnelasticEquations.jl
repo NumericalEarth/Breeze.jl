@@ -33,7 +33,7 @@ using Breeze.Thermodynamics: ReferenceState, mixture_gas_constant
 using Breeze.AtmosphereModels: AtmosphereModels, AtmosphereModel, mean_pressure, pressure_anomaly
 
 # Import microphysics interface for buoyancy computation
-using Breeze.AtmosphereModels: compute_moisture_fractions
+using Breeze.AtmosphereModels: grid_compute_moisture_fractions
 
 include("anelastic_dynamics.jl")
 include("anelastic_pressure_solver.jl")

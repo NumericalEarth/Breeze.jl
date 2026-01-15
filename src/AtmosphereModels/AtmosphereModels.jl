@@ -27,6 +27,7 @@ export
     # Microphysics interface
     AbstractMicrophysicalState,
     NothingMicrophysicalState,
+    WarmRainState,
     microphysical_state,
     microphysical_tendency,
     grid_microphysical_tendency,
@@ -55,7 +56,7 @@ export
     StaticEnergy,
     compute_hydrostatic_pressure!
 
-using DocStringExtensions: TYPEDSIGNATURES, TYPEDEF
+using DocStringExtensions: TYPEDSIGNATURES, TYPEDEF, TYPEDFIELDS
 using Adapt: Adapt, adapt
 using KernelAbstractions: @kernel, @index
 

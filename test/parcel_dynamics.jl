@@ -4,11 +4,11 @@
 
 using Oceananigans
 using Breeze
-using Breeze.ParcelDynamics:
+using Breeze.ParcelModels:
     ParcelDynamics,
     ParcelModel,
     ParcelState,
-    adiabatic_adjustment,
+    adjust_adiabatically,
     compute_parcel_tendencies!
 
 using Breeze.Thermodynamics:
@@ -41,17 +41,23 @@ using Test
     e_init = cᵖᵐ * T_init + g * z_init
 
     𝒰 = StaticEnergyState(e_init, q, z_init, p_init)
-    ℳ = NothingMicrophysicalState(FT)
+    μ = NothingMicrophysicalState(FT)
 
-    parcel = ParcelState(FT(0), FT(0), z_init, FT(1.2), qᵗ, 𝒰, ℳ)
+    ρ = FT(1.2)
+    ρqᵗ = ρ * qᵗ
+    ρℰ = ρ * e_init
+    parcel = ParcelState(FT(0), FT(0), z_init, ρ, qᵗ, ρqᵗ, e_init, ρℰ, 𝒰, μ)
 
     @test parcel.x == 0
     @test parcel.y == 0
     @test parcel.z == z_init
-    @test parcel.ρ == FT(1.2)
+    @test parcel.ρ == ρ
     @test parcel.qᵗ == qᵗ
-    @test parcel.thermodynamic_state === 𝒰
-    @test parcel.microphysics_prognostics === ℳ
+    @test parcel.ρqᵗ == ρqᵗ
+    @test parcel.ℰ == e_init
+    @test parcel.ρℰ == ρℰ
+    @test parcel.𝒰 === 𝒰
+    @test parcel.μ === μ
 end
 
 #####
@@ -148,7 +154,7 @@ end
         # Adjust to new height
         z_new = FT(1000.0)
         p_new = FT(90000.0)
-        𝒰_new = adiabatic_adjustment(𝒰_init, z_new, p_new, constants)
+        𝒰_new = adjust_adiabatically(𝒰_init, z_new, p_new, constants)
 
         # Static energy should be conserved
         @test 𝒰_new.static_energy ≈ e_init
@@ -172,7 +178,7 @@ end
         # Adjust to new pressure
         z_new = FT(1000.0)
         p_new = FT(90000.0)
-        𝒰_new = adiabatic_adjustment(𝒰_init, z_new, p_new, constants)
+        𝒰_new = adjust_adiabatically(𝒰_init, z_new, p_new, constants)
 
         # Potential temperature should be conserved
         @test 𝒰_new.potential_temperature ≈ θ_init
@@ -199,7 +205,7 @@ end
     compute_parcel_tendencies!(model)
 
     # Check tendencies are computed
-    tendencies = model.dynamics.tendencies
+    tendencies = model.dynamics.timestepper.G
     @test tendencies.Gz ≈ 1.0  # w = 1 m/s
     @test tendencies.Ge ≈ 0.0  # No microphysics
     @test tendencies.Gqᵗ ≈ 0.0  # No microphysics
@@ -236,7 +242,7 @@ end
     # Compute tendencies (this calls microphysical_tendency internally)
     compute_parcel_tendencies!(model)
 
-    tendencies = model.dynamics.tendencies
+    tendencies = model.dynamics.timestepper.G
     @test tendencies.Gz ≈ 1.0  # w = 1 m/s
     @test tendencies.Ge ≈ 0.0  # SaturationAdjustment operates via state adjustment
     @test tendencies.Gqᵗ ≈ 0.0
@@ -273,7 +279,7 @@ end
     # Compute tendencies (this calls microphysical_tendency internally)
     compute_parcel_tendencies!(model)
 
-    tendencies = model.dynamics.tendencies
+    tendencies = model.dynamics.timestepper.G
     @test tendencies.Gz ≈ 1.0  # w = 1 m/s
     @test tendencies.Ge ≈ 0.0  # DCMIP2016Kessler operates via microphysics_model_update!
     @test tendencies.Gqᵗ ≈ 0.0

@@ -19,17 +19,18 @@ using Breeze.AtmosphereModels: AtmosphereModels, AtmosphereModel
 
 """
 $(TYPEDEF)
+$(TYPEDFIELDS)
 
-State of a Lagrangian air parcel.
+State of a Lagrangian air parcel with position, thermodynamic state, and microphysics.
 
-# Prognostic variables
-- Position: `x`, `y`, `z` [m]
-- Total moisture: `qᵗ` [kg/kg]
-- Thermodynamic state: `𝒰` (contains static energy or potential temperature)
-- Microphysics prognostic variables: `μ` (scheme-dependent, e.g., cloud liquid, rain)
+Prognostic variables are stored in both specific and density-weighted forms:
+- `qᵗ`: specific total moisture [kg/kg]
+- `ρqᵗ`: density-weighted total moisture [kg/m³]
+- `ℰ`: specific conserved thermodynamic variable (static energy or potential temperature)
+- `ρℰ`: density-weighted conserved thermodynamic variable
 
-# Diagnostic variables
-- Density: `ρ` [kg/m³] (from environmental profile)
+The density-weighted forms (`ρqᵗ`, `ρℰ`, `μ`) are stepped forward in time.
+The specific forms are derived from the density-weighted forms after each time step.
 """
 mutable struct ParcelState{FT, TH, MP}
     x :: FT
@@ -37,6 +38,9 @@ mutable struct ParcelState{FT, TH, MP}
     z :: FT
     ρ :: FT
     qᵗ :: FT
+    ρqᵗ :: FT
+    ℰ :: FT
+    ρℰ :: FT
     𝒰 :: TH
     μ :: MP
 end
@@ -48,12 +52,6 @@ end
 @inline total_moisture(state::ParcelState) = state.qᵗ
 
 Base.eltype(::ParcelState{FT}) where FT = FT
-
-# Property accessors for readable names
-Base.getproperty(state::ParcelState, name::Symbol) =
-    name === :thermodynamic_state ? getfield(state, :𝒰) :
-    name === :microphysics_prognostics ? getfield(state, :μ) :
-    getfield(state, name)
 
 function Base.show(io::IO, state::ParcelState{FT}) where FT
     print(io, "ParcelState{$FT}(z=", state.z, ", ρ=", round(state.ρ, digits=4),
@@ -67,11 +65,13 @@ end
 """
 $(TYPEDEF)
 
-Tendencies (time derivatives) for parcel prognostic variables:
-- Position: `Gx`, `Gy`, `Gz` [m/s]
-- Static energy: `Ge` [J/kg/s] (from microphysics, zero for adiabatic)
-- Total moisture: `Gqᵗ` [kg/kg/s] (from microphysics, typically zero)
-- Microphysics prognostics: `Gμ` (same structure as `μ`, storing tendencies)
+Tendencies (time derivatives) for parcel prognostic variables.
+
+# Fields
+- `Gx`, `Gy`, `Gz`: position tendencies [m/s]
+- `Ge`: energy tendency [J/m³/s] (density-weighted)
+- `Gqᵗ`: total moisture tendency [kg/m³/s] (density-weighted)
+- `Gμ`: microphysics prognostic tendencies
 """
 mutable struct ParcelTendencies{FT, GM}
     Gx :: FT
@@ -94,20 +94,17 @@ $(TYPEDEF)
 
 Lagrangian parcel dynamics for [`AtmosphereModel`](@ref).
 
-Stores parcel `state`, `tendencies`, environmental `density` and `pressure` fields,
-and reference pressures (`surface_pressure`, `standard_pressure`).
-
-# Example
-
-```julia
-grid = RectilinearGrid(size=100, z=(0, 10000), topology=(Flat, Flat, Bounded))
-model = AtmosphereModel(grid; dynamics=ParcelDynamics())
-set!(model, T=z->288-0.0065z, ρ=z->1.2*exp(-z/8500), w=1.0, z=0.0)
-```
+# Fields
+- `state`: parcel state (position, thermodynamics, microphysics)
+- `timestepper`: SSP RK3 timestepper with tendencies
+- `density`: environmental density field [kg/m³]
+- `pressure`: environmental pressure field [Pa]
+- `surface_pressure`: surface pressure [Pa]
+- `standard_pressure`: standard pressure for potential temperature [Pa]
 """
-struct ParcelDynamics{S, G, D, P, FT}
+struct ParcelDynamics{S, TS, D, P, FT}
     state :: S
-    tendencies :: G
+    timestepper :: TS
     density :: D
     pressure :: P
     surface_pressure :: FT
@@ -126,10 +123,10 @@ function ParcelDynamics(FT::DataType=Oceananigans.defaults.FloatType;
                         surface_pressure = 101325,
                         standard_pressure = 1e5)
     return ParcelDynamics{Nothing, Nothing, Nothing, Nothing, FT}(
-        nothing,  # state (placeholder, materialized to ParcelState)
-        nothing,  # tendencies (placeholder, materialized to ParcelTendencies)
-        nothing,  # density
-        nothing,  # pressure
+        nothing,
+        nothing,
+        nothing,
+        nothing,
         convert(FT, surface_pressure),
         convert(FT, standard_pressure)
     )
@@ -142,6 +139,7 @@ function Base.show(io::IO, d::ParcelDynamics)
     state_str = d.state isa ParcelState ? d.state : "uninitialized"
     print(io, "├── state: ", state_str, '\n')
     print(io, "├── tendencies: ", isnothing(d.tendencies) ? "uninitialized" : "ParcelTendencies", '\n')
+    print(io, "├── timestepper: ", isnothing(d.timestepper) ? "uninitialized" : "ParcelTimestepper (SSP RK3)", '\n')
     print(io, "├── density: ", isnothing(d.density) ? "unset" : summary(d.density), '\n')
     print(io, "├── pressure: ", isnothing(d.pressure) ? "unset" : summary(d.pressure), '\n')
     print(io, "├── surface_pressure: ", d.surface_pressure, '\n')
@@ -197,22 +195,29 @@ function AtmosphereModels.materialize_dynamics(d::ParcelDynamics, grid, bcs, con
     # Microphysics prognostic variables based on the microphysics scheme
     μ = materialize_parcel_microphysics_prognostics(FT, microphysics)
 
-    state = ParcelState(zero(FT), zero(FT), z_default, FT(1.2), zero(FT), 𝒰, μ)
+    # Initialize state with default values
+    ρ_default = FT(1.2)
+    qᵗ_default = zero(FT)
+    ρqᵗ_default = ρ_default * qᵗ_default
+    ℰ_default = e_default  # static energy for default formulation
+    ρℰ_default = ρ_default * ℰ_default
+    state = ParcelState(zero(FT), zero(FT), z_default, ρ_default, qᵗ_default, ρqᵗ_default,
+                        ℰ_default, ρℰ_default, 𝒰, μ)
 
-    # Microphysics prognostic tendencies (same structure as μ)
+    # SSP RK3 timestepper with tendencies
     Gμ = zero_microphysics_prognostic_tendencies(μ)
-    tendencies = ParcelTendencies(FT, Gμ)
+    timestepper = ParcelTimestepper(state, Gμ)
 
-    return ParcelDynamics(state, tendencies, ρ, p, p₀, pˢᵗ)
+    return ParcelDynamics(state, timestepper, ρ, p, p₀, pˢᵗ)
 end
 
 """
-    materialize_parcel_microphysics_prognostics(FT, microphysics)
+$(TYPEDSIGNATURES)
 
 Create the parcel microphysics prognostic variables for the given microphysics scheme.
 
 Returns `nothing` for microphysics schemes without explicit prognostic variables
-(e.g., `Nothing`, `SaturationAdjustment`), or a NamedTuple containing the prognostic
+(e.g., `Nothing`, `SaturationAdjustment`), or a `NamedTuple` containing the prognostic
 density-weighted scalars for schemes with prognostic microphysics.
 
 The prognostic variables use the same ρ-weighted names as the grid-based model
@@ -225,8 +230,10 @@ function materialize_parcel_microphysics_prognostics(FT, microphysics)
 end
 
 function AtmosphereModels.materialize_momentum_and_velocities(::ParcelDynamics, grid, bcs)
-    # Parcel models use velocity fields for the environmental wind
-    u = CenterField(grid)  # Use CenterField for simplicity in 1D interpolation
+    # Parcel models use CenterFields for environmental velocity profiles.
+    # This avoids boundary issues when interpolating at arbitrary parcel positions,
+    # since cell centers are always in the domain interior.
+    u = CenterField(grid)
     v = CenterField(grid)
     w = CenterField(grid)
     return NamedTuple(), (; u, v, w)
@@ -237,14 +244,20 @@ end
 #####
 
 Adapt.adapt_structure(to, d::ParcelDynamics) =
-    ParcelDynamics(adapt(to, d.state), adapt(to, d.tendencies),
-                   adapt(to, d.density), adapt(to, d.pressure),
-                   d.surface_pressure, d.standard_pressure)
+    ParcelDynamics(adapt(to, d.state),
+                   adapt(to, d.timestepper),
+                   adapt(to, d.density),
+                   adapt(to, d.pressure),
+                   d.surface_pressure,
+                   d.standard_pressure)
 
 Oceananigans.Architectures.on_architecture(to, d::ParcelDynamics) =
-    ParcelDynamics(on_architecture(to, d.state), on_architecture(to, d.tendencies),
-                   on_architecture(to, d.density), on_architecture(to, d.pressure),
-                   d.surface_pressure, d.standard_pressure)
+    ParcelDynamics(on_architecture(to, d.state),
+                   on_architecture(to, d.timestepper),
+                   on_architecture(to, d.density),
+                   on_architecture(to, d.pressure),
+                   d.surface_pressure,
+                   d.standard_pressure)
 
 #####
 ##### set! for ParcelModel
@@ -270,25 +283,10 @@ conditions interpolated at that height.
 - `x`: Initial parcel x-position [m] (default: 0)
 - `y`: Initial parcel y-position [m] (default: 0)
 - `z`: Initial parcel height [m] (required to initialize parcel state)
-
-# Example
-
-```julia
-set!(model, T=z->288-0.0065z, ρ=z->1.2*exp(-z/8500), z=0.0, w=1.0)
-```
 """
-function Oceananigans.set!(model::ParcelModel;
-                           T = nothing,
-                           ρ = nothing,
-                           p = nothing,
-                           qᵗ = 0,
-                           u = 0,
-                           v = 0,
-                           w = 0,
-                           x = 0,
-                           y = 0,
-                           z = nothing)
-
+function Oceananigans.set!(model::ParcelModel; T = nothing, ρ = nothing, p = nothing, qᵗ = 0,
+                           u = 0, v = 0, w = 0, x = 0, y = 0, z = nothing)
+                           
     grid = model.grid
     dynamics = model.dynamics
     constants = model.thermodynamic_constants
@@ -336,11 +334,14 @@ function Oceananigans.set!(model::ParcelModel;
         state.z = z₀
         state.ρ = ρ₀
         state.qᵗ = qᵗ₀
+        state.ρqᵗ = ρ₀ * qᵗ₀
 
         # Update thermodynamic state
         q = MoistureMassFractions(qᵗ₀)
         cᵖᵐ = mixture_heat_capacity(q, constants)
         e = cᵖᵐ * T₀ + g * z₀
+        state.ℰ = e
+        state.ρℰ = ρ₀ * e
         state.𝒰 = StaticEnergyState(e, q, z₀, p₀)
     end
 
@@ -382,7 +383,7 @@ Thermodynamic, moisture, and microphysical tendencies come from the microphysics
 function compute_parcel_tendencies!(model::ParcelModel)
     dynamics = model.dynamics
     state = dynamics.state
-    tendencies = dynamics.tendencies
+    tendencies = dynamics.timestepper.G
     microphysics = model.microphysics
     constants = model.thermodynamic_constants
 
@@ -393,7 +394,7 @@ function compute_parcel_tendencies!(model::ParcelModel)
     μ = state.μ
 
     # Build diagnostic microphysical state from prognostic variables
-    ℳ = parcel_microphysical_state(microphysics, ρ, qᵗ, μ, 𝒰, constants)
+    ℳ = microphysical_state(microphysics, ρ, μ)
 
     # Position tendencies = environmental velocity at current height
     tendencies.Gx = interpolate((z,), model.velocities.u)
@@ -415,16 +416,6 @@ end
 #####
 # These functions implement the parcel-specific microphysics interface.
 # The default fallbacks work for schemes with no explicit prognostic microphysics.
-
-# Build diagnostic microphysical state from prognostic variables
-# Fallback: return NothingMicrophysicalState for schemes without prognostic microphysics
-parcel_microphysical_state(microphysics, ρ, qᵗ, μ::Nothing, 𝒰, constants) = NothingMicrophysicalState(typeof(ρ))
-parcel_microphysical_state(::Nothing, ρ, qᵗ, μ, 𝒰, constants) = μ
-parcel_microphysical_state(::Nothing, ρ, qᵗ, μ::Nothing, 𝒰, constants) = NothingMicrophysicalState(typeof(ρ))
-
-# For NamedTuple prognostics, the state is the prognostic values themselves
-# TODO: Add scheme-specific state construction if needed (e.g., for two-moment with number concentrations)
-parcel_microphysical_state(microphysics, ρ, qᵗ, μ::NamedTuple, 𝒰, constants) = NothingMicrophysicalState(typeof(ρ))
 
 # Compute tendencies for microphysics prognostic variables
 # Fallback: return nothing for schemes without prognostic microphysics
@@ -457,56 +448,164 @@ function apply_microphysical_tendencies(μ::NamedTuple, Gμ::NamedTuple, Δt)
 end
 
 #####
-##### State stepping
+##### ParcelTimestepper: SSP RK3 time-stepping for parcel models
+#####
+
+"""
+$(TYPEDEF)
+
+SSP RK3 time-stepper for [`ParcelModel`](@ref).
+
+Stores tendencies, the initial state at the beginning of a time step,
+and the SSP RK3 stage coefficients.
+
+# Fields
+- `G`: tendencies for prognostic variables
+- `U⁰`: initial state storage (position, moisture, thermodynamics, microphysics)
+- `α¹`, `α²`, `α³`: SSP RK3 stage coefficients (1, 1/4, 2/3)
+"""
+struct ParcelTimestepper{GT, U0, FT}
+    G :: GT
+    U⁰ :: U0
+    α¹ :: FT
+    α² :: FT
+    α³ :: FT
+end
+
+"""
+$(TYPEDSIGNATURES)
+
+Construct a `ParcelTimestepper` for SSP RK3 time-stepping.
+"""
+function ParcelTimestepper(state::ParcelState{FT}, Gμ) where FT
+    α¹ = FT(1)
+    α² = FT(1//4)
+    α³ = FT(2//3)
+    G = ParcelTendencies(FT, Gμ)
+    U⁰ = ParcelInitialState(state)
+    return ParcelTimestepper(G, U⁰, α¹, α², α³)
+end
+
+"""
+$(TYPEDEF)
+
+Storage for the initial parcel prognostic state at the beginning of a time step.
+Used by SSP RK3 to combine the initial state with intermediate states.
+
+# Fields
+- `x`, `y`, `z`: initial position [m]
+- `ρ`: initial density [kg/m³] (needed for density-weighted stepping)
+- `ρqᵗ`: initial total moisture density [kg/m³] (density-weighted)
+- `ρℰ`: initial energy density [J/m³] or potential temperature density [K kg/m³]
+- `μ`: initial microphysics prognostics (ρ-weighted)
+"""
+mutable struct ParcelInitialState{FT, MP}
+    x :: FT
+    y :: FT
+    z :: FT
+    ρ :: FT
+    ρqᵗ :: FT
+    ρℰ :: FT
+    μ :: MP
+end
+
+function ParcelInitialState(state::ParcelState{FT, TH, MP}) where {FT, TH, MP}
+    return ParcelInitialState{FT, MP}(
+        state.x, state.y, state.z, state.ρ, state.ρqᵗ, state.ρℰ, state.μ
+    )
+end
+
+"""
+$(TYPEDSIGNATURES)
+
+Copy current prognostic state values to the initial state storage.
+"""
+function store_initial_parcel_state!(U⁰::ParcelInitialState, state::ParcelState)
+    U⁰.x = state.x
+    U⁰.y = state.y
+    U⁰.z = state.z
+    U⁰.ρ = state.ρ
+    U⁰.ρqᵗ = state.ρqᵗ
+    U⁰.ρℰ = state.ρℰ
+    U⁰.μ = copy_microphysics_prognostics(state.μ)
+    return nothing
+end
+
+copy_microphysics_prognostics(::Nothing) = nothing
+copy_microphysics_prognostics(μ::NamedTuple) = deepcopy(μ)
+
+#####
+##### SSP RK3 substep
 #####
 
 """
 $(TYPEDSIGNATURES)
 
-Step the parcel state forward using the computed tendencies.
-
-This applies Forward Euler: `x^(n+1) = x^n + Δt * G^n`
-
-After updating position, the thermodynamic state is adjusted for the
-new height (adiabatic adjustment) and environmental conditions are
-updated from the profiles.
+Extract the conserved thermodynamic variable from a thermodynamic state.
+Returns static energy for `StaticEnergyState` or potential temperature for
+`LiquidIcePotentialTemperatureState`.
 """
-function step_parcel_state!(model::ParcelModel, Δt)
+conserved_thermodynamic_variable(𝒰::StaticEnergyState) = 𝒰.static_energy
+conserved_thermodynamic_variable(𝒰::LiquidIcePotentialTemperatureState) = 𝒰.potential_temperature
+
+"""
+$(TYPEDSIGNATURES)
+
+Apply an SSP RK3 substep with coefficient `α`:
+
+```math
+u^{(m)} = (1 - α) u^{(0)} + α (u^{(m-1)} + Δt G^{(m-1)})
+```
+
+where `u^{(0)}` is the initial state, `u^{(m-1)}` is the current state,
+and `G^{(m-1)}` is the tendency at the current state.
+
+For conservation, density-weighted quantities (ρqᵗ, ρe or ρθ, μ) are stepped
+directly, then converted back to specific quantities.
+"""
+function ssp_rk3_parcel_substep!(model::ParcelModel, U⁰::ParcelInitialState, Δt, α)
+    # Compute tendencies at current state
+    compute_parcel_tendencies!(model)
+
     dynamics = model.dynamics
     state = dynamics.state
-    tendencies = dynamics.tendencies
+    tendencies = dynamics.timestepper.G
     constants = model.thermodynamic_constants
-    ρ = state.ρ
 
-    # Step position forward (Forward Euler)
-    state.x += Δt * tendencies.Gx
-    state.y += Δt * tendencies.Gy
-    state.z += Δt * tendencies.Gz
+    # Step position (not density-weighted)
+    state.x = (1 - α) * U⁰.x + α * (state.x + Δt * tendencies.Gx)
+    state.y = (1 - α) * U⁰.y + α * (state.y + Δt * tendencies.Gy)
+    state.z = (1 - α) * U⁰.z + α * (state.z + Δt * tendencies.Gz)
 
-    # Step moisture forward (tendency is for ρqᵗ, convert to specific)
-    state.qᵗ += Δt * tendencies.Gqᵗ / ρ
+    # Step density-weighted moisture: (ρqᵗ)^new = (1-α)*(ρqᵗ)⁰ + α*((ρqᵗ)^(m-1) + Δt*Gρqᵗ)
+    state.ρqᵗ = (1 - α) * U⁰.ρqᵗ + α * (state.ρqᵗ + Δt * tendencies.Gqᵗ)
+
+    # Step density-weighted energy: (ρℰ)^new = (1-α)*(ρℰ)⁰ + α*((ρℰ)^(m-1) + Δt*Gρℰ)
+    state.ρℰ = (1 - α) * U⁰.ρℰ + α * (state.ρℰ + Δt * tendencies.Ge)
 
     # Get environmental conditions at new height
-    z_new = state.z
-    p_new = interpolate((z_new,), dynamics.pressure)
-    ρ_new = interpolate((z_new,), dynamics.density)
+    z⁺ = state.z
+    p⁺ = interpolate((z⁺,), dynamics.pressure)
+    ρ⁺ = interpolate((z⁺,), dynamics.density)
 
     # Update density from environmental profile
-    state.ρ = ρ_new
+    state.ρ = ρ⁺
 
-    # Adiabatic adjustment of thermodynamic state (updates z and p)
-    # Then apply energy tendency from microphysics (tendency is for ρe, convert to specific)
-    𝒰_adjusted = adiabatic_adjustment(state.𝒰, z_new, p_new, constants)
-    𝒰_with_tendency = apply_energy_tendency(𝒰_adjusted, tendencies.Ge, ρ, Δt)
-    state.𝒰 = 𝒰_with_tendency
+    # Convert density-weighted quantities to specific
+    state.qᵗ = state.ρqᵗ / ρ⁺
+    state.ℰ = state.ρℰ / ρ⁺
 
-    # Step microphysics prognostics forward using tendencies (both are ρ-weighted)
-    state.μ = apply_microphysical_tendencies(state.μ, tendencies.Gμ, Δt)
+    # Reconstruct thermodynamic state with new specific energy and updated p, z
+    state.𝒰 = reconstruct_thermodynamic_state(state.𝒰, state.ℰ, z⁺, p⁺)
+
+    # Step microphysics prognostics with SSP RK3 formula (already density-weighted)
+    state.μ = ssp_rk3_microphysics_substep(U⁰.μ, state.μ, tendencies.Gμ, Δt, α)
 
     # Update moisture fractions in thermodynamic state
-    # μ contains ρ-weighted values, so divide by new density to get specific
-    q_new = compute_parcel_moisture_fractions(state.μ, state.ρ, state.qᵗ)
-    state.𝒰 = with_moisture(state.𝒰, q_new)
+    microphysics = model.microphysics
+    ℳ = microphysical_state(microphysics, state.ρ, state.μ)
+    q⁺ = compute_moisture_fractions(microphysics, ℳ, state.qᵗ)
+    state.𝒰 = with_moisture(state.𝒰, q⁺)
 
     return nothing
 end
@@ -514,27 +613,92 @@ end
 """
 $(TYPEDSIGNATURES)
 
-Apply energy tendency to thermodynamic state.
-The tendency `Ge` is for ρe (density-weighted), so we convert to specific: de/dt = Ge/ρ.
+Reconstruct a thermodynamic state with a new conserved variable value and updated z, p.
 """
-function apply_energy_tendency end
+function reconstruct_thermodynamic_state end
 
-@inline function apply_energy_tendency(𝒰::StaticEnergyState{FT}, Ge, ρ, Δt) where FT
-    e_new = 𝒰.static_energy + Δt * Ge / ρ
-    return StaticEnergyState{FT}(e_new, 𝒰.moisture_mass_fractions, 𝒰.height, 𝒰.reference_pressure)
+@inline function reconstruct_thermodynamic_state(𝒰::StaticEnergyState{FT}, e⁺, z⁺, p⁺) where FT
+    return StaticEnergyState{FT}(e⁺, 𝒰.moisture_mass_fractions, z⁺, p⁺)
 end
 
-@inline function apply_energy_tendency(𝒰::LiquidIcePotentialTemperatureState{FT}, Ge, ρ, Δt) where FT
-    # For potential temperature formulation, Ge would be tendency for ρθ
-    # θ_new = θ + Δt * Gθ / ρ
-    θ_new = 𝒰.potential_temperature + Δt * Ge / ρ
-    return LiquidIcePotentialTemperatureState{FT}(
-        θ_new,
-        𝒰.moisture_mass_fractions,
-        𝒰.standard_pressure,
-        𝒰.pressure
-    )
+@inline function reconstruct_thermodynamic_state(𝒰::LiquidIcePotentialTemperatureState{FT}, θ⁺, z⁺, p⁺) where FT
+    return LiquidIcePotentialTemperatureState{FT}(θ⁺, 𝒰.moisture_mass_fractions, 𝒰.standard_pressure, p⁺)
 end
+
+"""
+$(TYPEDSIGNATURES)
+
+Apply SSP RK3 substep formula to microphysics prognostic variables.
+"""
+ssp_rk3_microphysics_substep(::Nothing, ::Nothing, ::Nothing, Δt, α) = nothing
+
+function ssp_rk3_microphysics_substep(μ⁰::NamedTuple, μᵐ::NamedTuple, Gμ::NamedTuple, Δt, α)
+    names = keys(μᵐ)
+    μ⁺_values = map(names) do name
+        (1 - α) * μ⁰[name] + α * (μᵐ[name] + Δt * Gμ[name])
+    end
+    return NamedTuple{names}(μ⁺_values)
+end
+
+#####
+##### State stepping (Forward Euler - used as fallback)
+#####
+
+"""
+$(TYPEDSIGNATURES)
+
+Step the parcel state forward using Forward Euler: `x^(n+1) = x^n + Δt * G^n`.
+
+Computes tendencies at the current state, then advances all prognostic variables.
+After updating position, the thermodynamic state is adjusted for the
+new height (adiabatic adjustment) and environmental conditions are
+updated from the profiles.
+"""
+function step_parcel_state!(model::ParcelModel, Δt)
+    # Compute tendencies at current state
+    compute_parcel_tendencies!(model)
+
+    dynamics = model.dynamics
+    state = dynamics.state
+    tendencies = dynamics.timestepper.G
+    constants = model.thermodynamic_constants
+
+    # Step position forward (Forward Euler)
+    state.x += Δt * tendencies.Gx
+    state.y += Δt * tendencies.Gy
+    state.z += Δt * tendencies.Gz
+
+    # Step density-weighted quantities forward
+    state.ρqᵗ += Δt * tendencies.Gqᵗ
+    state.ρℰ += Δt * tendencies.Ge
+
+    # Get environmental conditions at new height
+    z⁺ = state.z
+    p⁺ = interpolate((z⁺,), dynamics.pressure)
+    ρ⁺ = interpolate((z⁺,), dynamics.density)
+
+    # Update density from environmental profile
+    state.ρ = ρ⁺
+
+    # Convert density-weighted quantities to specific
+    state.qᵗ = state.ρqᵗ / ρ⁺
+    state.ℰ = state.ρℰ / ρ⁺
+
+    # Reconstruct thermodynamic state with new specific energy and updated p, z
+    state.𝒰 = reconstruct_thermodynamic_state(state.𝒰, state.ℰ, z⁺, p⁺)
+
+    # Step microphysics prognostics forward using tendencies (both are ρ-weighted)
+    state.μ = apply_microphysical_tendencies(state.μ, tendencies.Gμ, Δt)
+
+    # Update moisture fractions in thermodynamic state
+    microphysics = model.microphysics
+    ℳ = microphysical_state(microphysics, state.ρ, state.μ)
+    q⁺ = compute_moisture_fractions(microphysics, ℳ, state.qᵗ)
+    state.𝒰 = with_moisture(state.𝒰, q⁺)
+
+    return nothing
+end
+
 
 #####
 ##### Time stepping for ParcelModel
@@ -543,55 +707,45 @@ end
 """
 $(TYPEDSIGNATURES)
 
-Advance the parcel model by one time step `Δt` using Forward Euler.
+Advance the parcel model by one time step `Δt` using SSP RK3.
 
-The algorithm is:
-1. Update state (compute tendencies): `G = L(u^n)`
-2. Step forward: `u^(n+1) = u^n + Δt * G`
-3. Update state for new position
-4. Advance clock
+The SSP RK3 scheme [Shu and Osher (1988)](@cite Shu1988Efficient) is:
+```math
+u^{(1)} = u^{(0)} + Δt L(u^{(0)})
+u^{(2)} = \\frac{3}{4} u^{(0)} + \\frac{1}{4} u^{(1)} + \\frac{1}{4} Δt L(u^{(1)})
+u^{(3)} = \\frac{1}{3} u^{(0)} + \\frac{2}{3} u^{(2)} + \\frac{2}{3} Δt L(u^{(2)})
+```
 
-This follows the standard pattern used by all dynamics types:
-1. `update_state!` to compute tendencies
-2. Step forward prognostic variables
-3. `update_state!` to recompute auxiliary variables
+This scheme has CFL coefficient = 1 and is TVD (total variation diminishing).
 """
 function TimeSteppers.time_step!(model::ParcelModel, Δt; callbacks=nothing)
-    # Compute tendencies at current state
-    TimeSteppers.update_state!(model, callbacks; compute_tendencies=true)
+    dynamics = model.dynamics
+    ts = dynamics.timestepper
+    state = dynamics.state
+    U⁰ = ts.U⁰
 
-    # Step forward prognostic variables
-    step_parcel_state!(model, Δt)
+    # Store initial state for SSP RK3 stages
+    store_initial_parcel_state!(U⁰, state)
 
-    # Advance clock
-    tick!(model.clock, Δt)
+    # Stage 1: u^(1) = u^(0) + Δt * L(u^(0))
+    ssp_rk3_parcel_substep!(model, U⁰, Δt, ts.α¹)
+    tick!(model.clock, Δt; stage=true)
 
-    # Update state for new position (no tendencies needed at end of step)
-    TimeSteppers.update_state!(model, callbacks; compute_tendencies=false)
+    # Stage 2: u^(2) = 3/4 u^(0) + 1/4 (u^(1) + Δt * L(u^(1)))
+    ssp_rk3_parcel_substep!(model, U⁰, Δt, ts.α²)
+    # Don't tick - still at t + Δt for time-dependent forcing
+
+    # Stage 3: u^(3) = 1/3 u^(0) + 2/3 (u^(2) + Δt * L(u^(2)))
+    ssp_rk3_parcel_substep!(model, U⁰, Δt, ts.α³)
+
+    # Final clock update (adjust for floating point error)
+    tⁿ⁺¹ = model.clock.time + Δt * (1 - ts.α¹)  # Already advanced by α¹*Δt in stage 1
+    corrected_Δt = tⁿ⁺¹ - model.clock.time
+    tick!(model.clock, corrected_Δt)
 
     return nothing
 end
 
-#####
-##### Compute moisture fractions from microphysical state
-#####
-
-compute_parcel_moisture_fractions(::Nothing, ρ, qᵗ) = MoistureMassFractions(qᵗ)
-compute_parcel_moisture_fractions(::NothingMicrophysicalState, ρ, qᵗ) = MoistureMassFractions(qᵗ)
-
-# For NamedTuple prognostics (ρ-weighted: ρqᶜˡ, ρqʳ), convert to specific and compute vapor as residual
-function compute_parcel_moisture_fractions(μ::NamedTuple, ρ, qᵗ)
-    # Sum all condensate (convert from ρ-weighted to specific)
-    qᶜ = sum(values(μ)) / ρ
-    qᵛ = max(zero(qᵗ), qᵗ - qᶜ)
-    
-    # Partition condensate (for now, assume all is liquid)
-    # TODO: Support ice when schemes have ρqⁱ
-    qˡ = haskey(μ, :ρqᶜˡ) ? μ.ρqᶜˡ / ρ : zero(qᵗ)
-    qˡ += haskey(μ, :ρqʳ) ? μ.ρqʳ / ρ : zero(qᵗ)
-    
-    return MoistureMassFractions(qᵛ, qˡ)
-end
 
 #####
 ##### Adiabatic adjustment
@@ -602,17 +756,13 @@ $(TYPEDSIGNATURES)
 
 Adjust the thermodynamic state for adiabatic ascent/descent to a new height.
 """
-function adiabatic_adjustment end
+function adjust_adiabatically end
 
-@inline function adiabatic_adjustment(𝒰::StaticEnergyState{FT}, z_new, p_new, constants) where FT
-    return StaticEnergyState{FT}(𝒰.static_energy, 𝒰.moisture_mass_fractions, z_new, p_new)
-end
+@inline adjust_adiabatically(𝒰::StaticEnergyState{FT}, z⁺, p⁺, constants) where FT =
+    StaticEnergyState{FT}(𝒰.static_energy, 𝒰.moisture_mass_fractions, z⁺, p⁺)
 
-@inline function adiabatic_adjustment(𝒰::LiquidIcePotentialTemperatureState{FT}, z_new, p_new, constants) where FT
-    return LiquidIcePotentialTemperatureState{FT}(
-        𝒰.potential_temperature,
-        𝒰.moisture_mass_fractions,
-        𝒰.standard_pressure,
-        p_new
-    )
-end
+@inline adjust_adiabatically(𝒰::LiquidIcePotentialTemperatureState{FT}, z⁺, p⁺, constants) where FT = 
+    LiquidIcePotentialTemperatureState{FT}(𝒰.potential_temperature,
+                                           𝒰.moisture_mass_fractions,
+                                           𝒰.standard_pressure,
+                                           p⁺)

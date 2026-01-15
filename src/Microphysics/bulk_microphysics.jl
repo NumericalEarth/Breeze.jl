@@ -211,6 +211,12 @@ AtmosphereModels.materialize_microphysical_fields(bμp::NPBM, grid, bcs) = mater
     return update_microphysical_fields!(μ, bμp.cloud_formation, i, j, k, grid, ρ, 𝒰, constants)
 end
 
-@inline function AtmosphereModels.compute_moisture_fractions(i, j, k, grid, bμp::NPBM, ρ, qᵗ, μ)
-    return compute_moisture_fractions(i, j, k, grid, bμp.cloud_formation, ρ, qᵗ, μ)
+# Forward grid_compute_moisture_fractions to cloud_formation scheme
+@inline function AtmosphereModels.grid_compute_moisture_fractions(i, j, k, grid, bμp::NPBM, ρ, qᵗ, μ)
+    return grid_compute_moisture_fractions(i, j, k, grid, bμp.cloud_formation, ρ, qᵗ, μ)
+end
+
+# Forward state-based compute_moisture_fractions to cloud_formation scheme
+@inline function AtmosphereModels.compute_moisture_fractions(bμp::NPBM, ℳ, qᵗ)
+    return compute_moisture_fractions(bμp.cloud_formation, ℳ, qᵗ)
 end

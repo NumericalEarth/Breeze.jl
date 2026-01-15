@@ -136,7 +136,7 @@ end
     closure_buoyancy = AtmosphereModelBuoyancy(dynamics, formulation, constants)
 
     # Compute moisture fractions first
-    q = compute_moisture_fractions(i, j, k, grid, microphysics, ρ, qᵗ, microphysical_fields)
+    q = grid_compute_moisture_fractions(i, j, k, grid, microphysics, ρ, qᵗ, microphysical_fields)
     𝒰 = diagnose_thermodynamic_state(i, j, k, grid, formulation, dynamics, q)
 
     return ( - div_ρUc(i, j, k, grid, advection, ρ_field, Uᵗ, c)

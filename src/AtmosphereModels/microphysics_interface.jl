@@ -61,6 +61,21 @@ struct NothingMicrophysicalState{FT} <: AbstractMicrophysicalState{FT} end
 
 NothingMicrophysicalState(FT::DataType) = NothingMicrophysicalState{FT}()
 
+"""
+    WarmRainState{FT} <: AbstractMicrophysicalState{FT}
+
+A simple microphysical state for warm-rain schemes with cloud liquid and rain.
+
+# Fields
+$(TYPEDFIELDS)
+"""
+struct WarmRainState{FT} <: AbstractMicrophysicalState{FT}
+    "Specific cloud liquid water content [kg/kg]"
+    qᶜˡ :: FT
+    "Specific rain water content [kg/kg]"
+    qʳ :: FT
+end
+
 #####
 ##### MicrophysicalState interface
 #####
@@ -93,6 +108,31 @@ See also [`microphysical_tendency`](@ref), [`AbstractMicrophysicalState`](@ref).
 """
 @inline microphysical_state(i, j, k, grid, microphysics::Nothing, fields, ρ, 𝒰) =
     NothingMicrophysicalState(eltype(grid))
+
+"""
+    microphysical_state(microphysics, ρ, μ)
+
+Build a [`MicrophysicalState`](@ref) (ℳ) from density-weighted prognostic
+microphysical variables `μ` (a NamedTuple) and density `ρ`.
+
+This is the **gridless** version of `microphysical_state` for use with parcel
+models and other Lagrangian formulations. It converts density-weighted prognostics
+to the scheme-specific `AbstractMicrophysicalState` type.
+
+Microphysics schemes should extend this function to return their specific state type.
+The default implementation returns `NothingMicrophysicalState`.
+
+# Arguments
+- `microphysics`: The microphysics scheme
+- `ρ`: Local density (scalar)
+- `μ`: NamedTuple of density-weighted prognostic variables (e.g., `(ρqᶜˡ=..., ρqʳ=...)`)
+
+# Returns
+An `AbstractMicrophysicalState` subtype containing the local specific microphysical variables.
+"""
+@inline microphysical_state(::Nothing, ρ, μ) = NothingMicrophysicalState(typeof(ρ))
+@inline microphysical_state(::Nothing, ρ, ::Nothing) = NothingMicrophysicalState(typeof(ρ))
+@inline microphysical_state(microphysics, ρ, ::Nothing) = NothingMicrophysicalState(typeof(ρ))
 
 """
     microphysical_tendency(microphysics, name, ρ, ℳ, 𝒰, constants)
@@ -128,17 +168,11 @@ See also [`microphysical_state`](@ref), [`AbstractMicrophysicalState`](@ref).
 Compute the tendency for microphysical variable `name` at grid point `(i, j, k)`.
 
 This is the **grid-indexed** interface used by the tendency kernels. The default
-implementation builds the microphysical state ℳ via [`microphysical_state`](@ref)
+implementation builds the microphysical state `ℳ` via [`microphysical_state`](@ref)
 and dispatches to the state-based [`microphysical_tendency`](@ref).
 
 Schemes that need full grid access (e.g., for non-local operations) can override
 this method directly without using `microphysical_state`.
-
-# Default implementation
-```julia
-ℳ = microphysical_state(i, j, k, grid, microphysics, fields, ρ, 𝒰)
-return microphysical_tendency(microphysics, name, ρ, ℳ, 𝒰, constants)
-```
 """
 @inline function grid_microphysical_tendency(i, j, k, grid, microphysics, name, ρ, fields, 𝒰, constants)
     ℳ = microphysical_state(i, j, k, grid, microphysics, fields, ρ, 𝒰)
@@ -205,16 +239,52 @@ Update microphysical fields for `microphysics_scheme` given the thermodynamic `s
 """
 $(TYPEDSIGNATURES)
 
-Build and return [`MoistureMassFractions`](@ref) at `(i, j, k)` for the given `grid`,
-`microphysics`, `microphysical_fields`, and total moisture mass fraction `qᵗ`.
+Compute [`MoistureMassFractions`](@ref) from a microphysical state `ℳ` and total moisture `qᵗ`.
 
-Dispatch is provided for `::Nothing` microphysics here. Specific microphysics
-schemes may extend this method to provide tailored behavior.
+This is the state-based (gridless) interface for computing moisture fractions.
+Microphysics schemes should extend this method to partition moisture based on
+their prognostic variables.
 
-Note: while ρ and qᵗ are scalars, the microphysical fields `μ` are `NamedTuple` of `Field`.
-This may be changed in the future.
+The default implementation for `Nothing` microphysics assumes all moisture is vapor.
 """
-@inline compute_moisture_fractions(i, j, k, grid, microphysics::Nothing, ρ, qᵗ, μ) = MoistureMassFractions(qᵗ)
+@inline compute_moisture_fractions(::Nothing, ℳ, qᵗ) = MoistureMassFractions(qᵗ)
+@inline compute_moisture_fractions(microphysics, ::NothingMicrophysicalState, qᵗ) = MoistureMassFractions(qᵗ)
+@inline compute_moisture_fractions(::Nothing, ::NothingMicrophysicalState, qᵗ) = MoistureMassFractions(qᵗ)
+
+# WarmRainState: cloud liquid + rain
+@inline function compute_moisture_fractions(microphysics, ℳ::WarmRainState, qᵗ)
+    qˡ = ℳ.qᶜˡ + ℳ.qʳ
+    qᵛ = max(zero(qᵗ), qᵗ - qˡ)
+    return MoistureMassFractions(qᵛ, qˡ)
+end
+
+# Fallback for NamedTuple microphysical state (used by parcel models with prognostic microphysics).
+# NamedTuple contains specific moisture fractions computed from ρ-weighted prognostics.
+# Assumes warm-phase: all condensate is liquid.
+@inline function compute_moisture_fractions(microphysics, ℳ::NamedTuple, qᵗ)
+    # ℳ is assumed to contain specific quantities (already divided by ρ)
+    qˡ = zero(qᵗ)
+    qˡ += haskey(ℳ, :qᶜˡ) ? ℳ.qᶜˡ : zero(qᵗ)
+    qˡ += haskey(ℳ, :qʳ) ? ℳ.qʳ : zero(qᵗ)
+    qᵛ = max(zero(qᵗ), qᵗ - qˡ)
+    return MoistureMassFractions(qᵛ, qˡ)
+end
+
+"""
+$(TYPEDSIGNATURES)
+
+Grid-indexed version of [`compute_moisture_fractions`](@ref).
+
+Builds the microphysical state at `(i, j, k)` from `microphysical_fields` and calls
+the state-based `compute_moisture_fractions`.
+"""
+@inline function grid_compute_moisture_fractions(i, j, k, grid, microphysics, ρ, qᵗ, microphysical_fields)
+    ℳ = microphysical_state(i, j, k, grid, microphysics, ρ, microphysical_fields)
+    return compute_moisture_fractions(microphysics, ℳ, qᵗ)
+end
+
+# Fallback for Nothing microphysics (no fields to index)
+@inline grid_compute_moisture_fractions(i, j, k, grid, microphysics::Nothing, ρ, qᵗ, μ) = MoistureMassFractions(qᵗ)
 
 """
 $(TYPEDSIGNATURES)
@@ -312,20 +382,12 @@ surface_precipitation_flux(model, ::Nothing) = Field{Center, Center, Nothing}(mo
 
 """
 $(TYPEDEF)
+$(TYPEDFIELDS)
 
-Represents cloud particles with a constant effective radius.
-
-# Fields
-- `radius`: The effective radius in microns (μm).
-
-# Example
-
-```julia
-liquid_radius = ConstantRadiusParticles(10.0)  # 10 μm droplets
-ice_radius = ConstantRadiusParticles(30.0)     # 30 μm ice crystals
-```
+Represents cloud particles with a constant effective radius in microns (μm).
 """
 struct ConstantRadiusParticles{FT}
+    "Effective radius [μm]"
     radius :: FT
 end
 
