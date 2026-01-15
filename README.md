@@ -33,7 +33,7 @@
   </a>
 </p>
 
-Breeze is a library for simulating atmospheric flows and weather phenomena, such as clouds and hurricanes, on both CPUs and GPUs.
+Breeze is a library for simulating atmospheric flows, clouds, hurricanes, and other weather phenomena on both CPUs and GPUs.
 Much of Breeze's power flows from [Oceananigans](https://github.com/CliMA/Oceananigans.jl), which provides a user interface, grids, fields, solvers, advection schemes, Lagrangian particles, physics, and more.
 
 Breeze's AtmosphereModel supports anelastic dynamics, compressible dynamics, a kinematic driver, and a parcel model, all with strong-stability-preserving (SSP) RK3 time stepping.
