@@ -394,7 +394,7 @@ function compute_parcel_tendencies!(model::ParcelModel)
     μ = state.μ
 
     # Build diagnostic microphysical state from prognostic variables
-    ℳ = microphysical_state(microphysics, ρ, μ)
+    ℳ = microphysical_state(microphysics, ρ, μ, 𝒰)
 
     # Position tendencies = environmental velocity at current height
     tendencies.Gx = interpolate((z,), model.velocities.u)
@@ -603,8 +603,8 @@ function ssp_rk3_parcel_substep!(model::ParcelModel, U⁰::ParcelInitialState, �
 
     # Update moisture fractions in thermodynamic state
     microphysics = model.microphysics
-    ℳ = microphysical_state(microphysics, state.ρ, state.μ)
-    q⁺ = compute_moisture_fractions(microphysics, ℳ, state.qᵗ)
+    ℳ = microphysical_state(microphysics, state.ρ, state.μ, state.𝒰)
+    q⁺ = moisture_fractions(microphysics, ℳ, state.qᵗ)
     state.𝒰 = with_moisture(state.𝒰, q⁺)
 
     return nothing
@@ -692,8 +692,8 @@ function step_parcel_state!(model::ParcelModel, Δt)
 
     # Update moisture fractions in thermodynamic state
     microphysics = model.microphysics
-    ℳ = microphysical_state(microphysics, state.ρ, state.μ)
-    q⁺ = compute_moisture_fractions(microphysics, ℳ, state.qᵗ)
+    ℳ = microphysical_state(microphysics, state.ρ, state.μ, state.𝒰)
+    q⁺ = moisture_fractions(microphysics, ℳ, state.qᵗ)
     state.𝒰 = with_moisture(state.𝒰, q⁺)
 
     return nothing

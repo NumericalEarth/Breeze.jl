@@ -21,7 +21,7 @@
 # LES and Lagrangian parcel models.
 #
 # For parcel models, the state is stored directly as `parcel.ℳ`.
-# For grid models, the state is built via `microphysical_state(i, j, k, grid, ...)`.
+# For grid models, the state is built via `grid_microphysical_state(i, j, k, grid, ...)`.
 #####
 
 using Breeze.AtmosphereModels: AbstractMicrophysicalState
@@ -218,49 +218,44 @@ const NonEquilibrium1M = Union{WPNE1M, MPNE1M}
 const OneMomentLiquidRain = Union{WP1M, WPNE1M, MP1M, MPNE1M}
 
 #####
-##### MicrophysicalState construction from fields
+##### Gridless MicrophysicalState construction
 #####
+#
+# Microphysics schemes implement the gridless microphysical_state(microphysics, ρ, μ, 𝒰)
+# which takes density-weighted prognostic variables μ (NamedTuple of scalars) and
+# thermodynamic state 𝒰. The grid-indexed version is a generic wrapper that extracts
+# μ from fields and calls this.
+#
+# For saturation adjustment: cloud condensate comes from 𝒰.moisture_mass_fractions
+# For non-equilibrium: cloud condensate comes from prognostic μ
 
-# Warm-phase (saturation adjustment or non-equilibrium)
-@inline function AtmosphereModels.microphysical_state(i, j, k, grid, bμp::WarmPhase1M, μ, ρ, 𝒰)
-    @inbounds qᶜˡ = μ.qᶜˡ[i, j, k]
-    @inbounds qʳ = μ.qʳ[i, j, k]
+# Warm-phase saturation adjustment: cloud liquid from thermodynamic state, rain from prognostic
+@inline function AtmosphereModels.microphysical_state(bμp::WP1M, ρ, μ, 𝒰)
+    q = 𝒰.moisture_mass_fractions
+    qʳ = μ.ρqʳ / ρ
+    qᶜˡ = max(zero(qʳ), q.liquid - qʳ)  # cloud liquid = total liquid - rain
     return WarmPhaseOneMomentState(qᶜˡ, qʳ)
 end
 
-# Mixed-phase saturation adjustment
-@inline function AtmosphereModels.microphysical_state(i, j, k, grid, bμp::MP1M, μ, ρ, 𝒰)
-    @inbounds qᶜˡ = μ.qᶜˡ[i, j, k]
-    @inbounds qᶜⁱ = μ.qᶜⁱ[i, j, k]
-    @inbounds qʳ = μ.qʳ[i, j, k]
-    @inbounds qˢ = μ.qˢ[i, j, k]
-    return MixedPhaseOneMomentState(qᶜˡ, qᶜⁱ, qʳ, qˢ)
-end
-
-# Mixed-phase non-equilibrium
-@inline function AtmosphereModels.microphysical_state(i, j, k, grid, bμp::MPNE1M, μ, ρ, 𝒰)
-    @inbounds qᶜˡ = μ.qᶜˡ[i, j, k]
-    @inbounds qᶜⁱ = μ.qᶜⁱ[i, j, k]
-    @inbounds qʳ = μ.qʳ[i, j, k]
-    @inbounds qˢ = μ.qˢ[i, j, k]
-    return MixedPhaseOneMomentState(qᶜˡ, qᶜⁱ, qʳ, qˢ)
-end
-
-#####
-##### Gridless MicrophysicalState construction from ρ-weighted prognostics
-#####
-# For parcel models: μ is a NamedTuple of density-weighted prognostic variables.
-# Convert to specific quantities and return the proper state type.
-
-# Warm-phase schemes
-@inline function AtmosphereModels.microphysical_state(bμp::WarmPhase1M, ρ, μ::NamedTuple)
+# Warm-phase non-equilibrium: all from prognostic μ
+@inline function AtmosphereModels.microphysical_state(bμp::WPNE1M, ρ, μ, 𝒰)
     qᶜˡ = μ.ρqᶜˡ / ρ
     qʳ = μ.ρqʳ / ρ
     return WarmPhaseOneMomentState(qᶜˡ, qʳ)
 end
 
-# Mixed-phase schemes
-@inline function AtmosphereModels.microphysical_state(bμp::MixedPhase1M, ρ, μ::NamedTuple)
+# Mixed-phase saturation adjustment: cloud condensate from thermodynamic state
+@inline function AtmosphereModels.microphysical_state(bμp::MP1M, ρ, μ, 𝒰)
+    q = 𝒰.moisture_mass_fractions
+    qʳ = μ.ρqʳ / ρ
+    qˢ = μ.ρqˢ / ρ
+    qᶜˡ = max(zero(qʳ), q.liquid - qʳ)  # cloud liquid = total liquid - rain
+    qᶜⁱ = max(zero(qˢ), q.ice - qˢ)     # cloud ice = total ice - snow
+    return MixedPhaseOneMomentState(qᶜˡ, qᶜⁱ, qʳ, qˢ)
+end
+
+# Mixed-phase non-equilibrium: all from prognostic μ
+@inline function AtmosphereModels.microphysical_state(bμp::MPNE1M, ρ, μ, 𝒰)
     qᶜˡ = μ.ρqᶜˡ / ρ
     qᶜⁱ = μ.ρqᶜⁱ / ρ
     qʳ = μ.ρqʳ / ρ
@@ -316,90 +311,58 @@ function AtmosphereModels.materialize_microphysical_fields(bμp::OneMomentLiquid
 end
 
 #####
-##### Update microphysical fields (diagnostics + terminal velocity)
+##### update_microphysical_auxiliaries! for one-moment schemes
 #####
+#
+# This single function updates all auxiliary (non-prognostic) microphysical fields.
+# Grid indices (i, j, k) are needed because:
+# 1. Fields must be written at specific grid points
+# 2. Terminal velocity needs k == 1 check for bottom boundary condition
 
-# Saturation adjustment: total liquid from thermodynamic state, cloud liquid = total - rain
-@inline function AtmosphereModels.update_microphysical_fields!(μ, bμp::Union{WP1M, MP1M}, i, j, k, grid, ρ, 𝒰, constants)
-    q = 𝒰.moisture_mass_fractions
+# Warm-phase one-moment schemes
+@inline function AtmosphereModels.update_microphysical_auxiliaries!(μ, i, j, k, grid, bμp::WarmPhase1M, ℳ::WarmPhaseOneMomentState, ρ, 𝒰, constants)
+    # State fields
+    @inbounds μ.qᶜˡ[i, j, k] = ℳ.qᶜˡ
+    @inbounds μ.qʳ[i, j, k] = ℳ.qʳ
+    
+    # Vapor from thermodynamic state
+    @inbounds μ.qᵛ[i, j, k] = 𝒰.moisture_mass_fractions.vapor
+    
+    # Derived: total liquid
+    @inbounds μ.qˡ[i, j, k] = ℳ.qᶜˡ + ℳ.qʳ
+    
+    # Terminal velocity with bottom boundary condition
     categories = bμp.categories
-
-    @inbounds begin
-        qʳ = μ.ρqʳ[i, j, k] / ρ
-        μ.qᵛ[i, j, k] = q.vapor
-        μ.qˡ[i, j, k] = q.liquid                 # total liquid from saturation adjustment
-        μ.qᶜˡ[i, j, k] = max(0, q.liquid - qʳ)  # cloud liquid = total liquid - rain (clamped)
-        μ.qʳ[i, j, k] = qʳ
-    end
-
-    maybe_update_ice_fields!(μ, bμp, i, j, k, grid, ρ, 𝒰, constants)
-    update_rain_terminal_velocity!(μ, bμp, categories, i, j, k, ρ)
-
-    return nothing
-end
-
-# Non-equilibrium warm-phase: cloud liquid from prognostic field
-@inline function AtmosphereModels.update_microphysical_fields!(μ, bμp::WPNE1M, i, j, k, grid, ρ, 𝒰, constants)
-    q = 𝒰.moisture_mass_fractions
-    categories = bμp.categories
-
-    @inbounds begin
-        qᶜˡ = μ.ρqᶜˡ[i, j, k] / ρ  # cloud liquid from prognostic field
-        qʳ = μ.ρqʳ[i, j, k] / ρ
-        μ.qᵛ[i, j, k] = q.vapor
-        μ.qᶜˡ[i, j, k] = qᶜˡ
-        μ.qʳ[i, j, k] = qʳ
-        μ.qˡ[i, j, k] = qᶜˡ + qʳ  # total liquid = cloud + rain
-    end
-
-    update_rain_terminal_velocity!(μ, bμp, categories, i, j, k, ρ)
-
-    return nothing
-end
-
-# Non-equilibrium mixed-phase: cloud liquid and ice from prognostic fields
-@inline function AtmosphereModels.update_microphysical_fields!(μ, bμp::MPNE1M, i, j, k, grid, ρ, 𝒰, constants)
-    q = 𝒰.moisture_mass_fractions
-    categories = bμp.categories
-
-    @inbounds begin
-        qᶜˡ = μ.ρqᶜˡ[i, j, k] / ρ  # cloud liquid from prognostic field
-        qᶜⁱ = μ.ρqᶜⁱ[i, j, k] / ρ  # cloud ice from prognostic field
-        qʳ = μ.ρqʳ[i, j, k] / ρ
-        qˢ = μ.ρqˢ[i, j, k] / ρ
-        μ.qᵛ[i, j, k] = q.vapor
-        μ.qᶜˡ[i, j, k] = qᶜˡ
-        μ.qᶜⁱ[i, j, k] = qᶜⁱ
-        μ.qʳ[i, j, k] = qʳ
-        μ.qˢ[i, j, k] = qˢ
-        μ.qˡ[i, j, k] = qᶜˡ + qʳ  # total liquid
-        μ.qⁱ[i, j, k] = qᶜⁱ + qˢ  # total ice
-    end
-
-    update_rain_terminal_velocity!(μ, bμp, categories, i, j, k, ρ)
-
-    return nothing
-end
-
-# Fallback for warm-phase schemes (no ice fields to update)
-@inline maybe_update_ice_fields!(μ, bμp, i, j, k, grid, ρ, 𝒰, constants) = nothing
-
-@inline function maybe_update_ice_fields!(μ, bμp::MP1M, i, j, k, grid, ρ, 𝒰, constants)
-    q = 𝒰.moisture_mass_fractions
-    @inbounds begin
-        μ.qᶜⁱ[i, j, k] = q.ice
-        qˢ = μ.ρqˢ[i, j, k] / ρ
-        μ.qˢ[i, j, k] = qˢ
-    end
-    return nothing
-end
-
-@inline function update_rain_terminal_velocity!(μ, bμp, categories, i, j, k, ρ)
-    qʳ = @inbounds μ.qʳ[i, j, k]
-    V = terminal_velocity(categories.rain, categories.hydrometeor_velocities.rain, ρ, qʳ)
-    wʳ = -V # negative = downward
+    𝕎 = terminal_velocity(categories.rain, categories.hydrometeor_velocities.rain, ρ, ℳ.qʳ)
+    wʳ = -𝕎 # negative = downward
     wʳ₀ = bottom_terminal_velocity(bμp.precipitation_boundary_condition, wʳ)
     @inbounds μ.wʳ[i, j, k] = ifelse(k == 1, wʳ₀, wʳ)
+    
+    return nothing
+end
+
+# Mixed-phase one-moment schemes
+@inline function AtmosphereModels.update_microphysical_auxiliaries!(μ, i, j, k, grid, bμp::MixedPhase1M, ℳ::MixedPhaseOneMomentState, ρ, 𝒰, constants)
+    # State fields
+    @inbounds μ.qᶜˡ[i, j, k] = ℳ.qᶜˡ
+    @inbounds μ.qᶜⁱ[i, j, k] = ℳ.qᶜⁱ
+    @inbounds μ.qʳ[i, j, k] = ℳ.qʳ
+    @inbounds μ.qˢ[i, j, k] = ℳ.qˢ
+    
+    # Vapor from thermodynamic state
+    @inbounds μ.qᵛ[i, j, k] = 𝒰.moisture_mass_fractions.vapor
+    
+    # Derived: total liquid and ice
+    @inbounds μ.qˡ[i, j, k] = ℳ.qᶜˡ + ℳ.qʳ
+    @inbounds μ.qⁱ[i, j, k] = ℳ.qᶜⁱ + ℳ.qˢ
+    
+    # Terminal velocity with bottom boundary condition
+    categories = bμp.categories
+    𝕎 = terminal_velocity(categories.rain, categories.hydrometeor_velocities.rain, ρ, ℳ.qʳ)
+    wʳ = -𝕎 # negative = downward
+    wʳ₀ = bottom_terminal_velocity(bμp.precipitation_boundary_condition, wʳ)
+    @inbounds μ.wʳ[i, j, k] = ifelse(k == 1, wʳ₀, wʳ)
+    
     return nothing
 end
 
@@ -409,45 +372,26 @@ end
 
 # State-based (gridless) moisture fraction computation for warm-phase 1M microphysics.
 # Works with WarmPhaseOneMomentState which contains specific quantities (qᶜˡ, qʳ).
-@inline function AtmosphereModels.compute_moisture_fractions(bμp::WarmPhase1M, ℳ::WarmPhaseOneMomentState, qᵗ)
+@inline function AtmosphereModels.moisture_fractions(bμp::WarmPhase1M, ℳ::WarmPhaseOneMomentState, qᵗ)
     qˡ = ℳ.qᶜˡ + ℳ.qʳ
     qᵛ = qᵗ - qˡ
     return MoistureMassFractions(qᵛ, qˡ)
 end
 
 # State-based moisture fraction computation for mixed-phase 1M microphysics.
-@inline function AtmosphereModels.compute_moisture_fractions(bμp::MixedPhase1M, ℳ::MixedPhaseOneMomentState, qᵗ)
+@inline function AtmosphereModels.moisture_fractions(bμp::MixedPhase1M, ℳ::MixedPhaseOneMomentState, qᵗ)
     qˡ = ℳ.qᶜˡ + ℳ.qʳ
     qⁱ = ℳ.qᶜⁱ + ℳ.qˢ
     qᵛ = qᵗ - qˡ - qⁱ
     return MoistureMassFractions(qᵛ, qˡ, qⁱ)
 end
 
-# Grid-indexed moisture fraction computation (for tendency kernels).
-# Non-equilibrium warm-phase: cloud liquid is prognostic
-@inline function AtmosphereModels.grid_compute_moisture_fractions(i, j, k, grid, bμp::WPNE1M, ρ, qᵗ, μ)
-    qᶜˡ = @inbounds μ.ρqᶜˡ[i, j, k] / ρ
-    qʳ = @inbounds μ.ρqʳ[i, j, k] / ρ
-    qˡ = qᶜˡ + qʳ
-    qᵛ = qᵗ - qˡ
-    return MoistureMassFractions(qᵛ, qˡ)
-end
-
-# Non-equilibrium mixed-phase: cloud liquid and ice are prognostic
-@inline function AtmosphereModels.grid_compute_moisture_fractions(i, j, k, grid, bμp::MPNE1M, ρ, qᵗ, μ)
-    qᶜˡ = @inbounds μ.ρqᶜˡ[i, j, k] / ρ
-    qᶜⁱ = @inbounds μ.ρqᶜⁱ[i, j, k] / ρ
-    qʳ = @inbounds μ.ρqʳ[i, j, k] / ρ
-    qˢ = @inbounds μ.ρqˢ[i, j, k] / ρ
-    qˡ = qᶜˡ + qʳ
-    qⁱ = qᶜⁱ + qˢ
-    qᵛ = qᵗ - qˡ - qⁱ
-    return MoistureMassFractions(qᵛ, qˡ, qⁱ)
-end
-
-# Saturation adjustment: read moisture partition from diagnostic fields (set in previous timestep).
+#####
+##### grid_moisture_fractions for saturation adjustment schemes
+#####
+# Saturation adjustment schemes read cloud condensate from diagnostic fields (set in previous timestep).
 # maybe_adjust_thermodynamic_state will then adjust to equilibrium for the current state.
-@inline function AtmosphereModels.grid_compute_moisture_fractions(i, j, k, grid, bμp::WP1M, ρ, qᵗ, μ)
+@inline function AtmosphereModels.grid_moisture_fractions(i, j, k, grid, bμp::WP1M, ρ, qᵗ, μ)
     qᶜˡ = @inbounds μ.qᶜˡ[i, j, k]
     qʳ = @inbounds μ.ρqʳ[i, j, k] / ρ
     qˡ = qᶜˡ + qʳ
@@ -456,7 +400,7 @@ end
 end
 
 # Mixed-phase saturation adjustment: read moisture partition from diagnostic fields.
-@inline function AtmosphereModels.grid_compute_moisture_fractions(i, j, k, grid, bμp::MP1M, ρ, qᵗ, μ)
+@inline function AtmosphereModels.grid_moisture_fractions(i, j, k, grid, bμp::MP1M, ρ, qᵗ, μ)
     qᶜˡ = @inbounds μ.qᶜˡ[i, j, k]
     qᶜⁱ = @inbounds μ.qᶜⁱ[i, j, k]
     qʳ = @inbounds μ.ρqʳ[i, j, k] / ρ
@@ -472,10 +416,10 @@ end
 #####
 
 # Non-equilibrium: no adjustment (cloud liquid and ice are prognostic)
-@inline AtmosphereModels.maybe_adjust_thermodynamic_state(i, j, k, 𝒰₀, bμp::NonEquilibrium1M, args...) = 𝒰₀
+@inline AtmosphereModels.maybe_adjust_thermodynamic_state(𝒰₀, bμp::NonEquilibrium1M, qᵗ, constants) = 𝒰₀
 
 # Saturation adjustment (warm-phase and mixed-phase)
-@inline function AtmosphereModels.maybe_adjust_thermodynamic_state(i, j, k, 𝒰₀, bμp::Union{WP1M, MP1M}, ρᵣ, μ, qᵗ, constants)
+@inline function AtmosphereModels.maybe_adjust_thermodynamic_state(𝒰₀, bμp::Union{WP1M, MP1M}, qᵗ, constants)
     q₁ = MoistureMassFractions(qᵗ)
     𝒰₁ = with_moisture(𝒰₀, q₁)
     𝒰′ = adjust_thermodynamic_state(𝒰₁, bμp.cloud_formation, constants)

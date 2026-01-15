@@ -115,7 +115,7 @@ function (d::SaturationSpecificHumidityKernelFunction)(i, j, k, grid)
 
     if d.flavor isa PrognosticFlavor
         qᵗ = @inbounds d.specific_moisture[i, j, k]
-        q = grid_compute_moisture_fractions(i, j, k, grid, d.microphysics, ρᵣ, qᵗ, d.microphysical_fields)
+        q = grid_moisture_fractions(i, j, k, grid, d.microphysics, ρᵣ, qᵗ, d.microphysical_fields)
         ρ = density(T, pᵣ, q, constants)
         return saturation_specific_humidity(T, ρ, constants, surface)
 

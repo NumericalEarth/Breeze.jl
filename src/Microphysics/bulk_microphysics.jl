@@ -201,22 +201,22 @@ end
 const NCBM = BulkMicrophysics{<:Any, Nothing, <:Any}
 const NPBM = NCBM  # Alias: Non-Precipitating Bulk Microphysics
 
-maybe_adjust_thermodynamic_state(i, j, k, 𝒰₀, bμp::NCBM, ρᵣ, microphysical_fields, qᵗ, constants) =
+maybe_adjust_thermodynamic_state(𝒰₀, bμp::NCBM, qᵗ, constants) =
     AtmosphereModels.adjust_thermodynamic_state(𝒰₀, bμp.cloud_formation, constants)
 
 AtmosphereModels.prognostic_field_names(::NPBM) = tuple()
 AtmosphereModels.materialize_microphysical_fields(bμp::NPBM, grid, bcs) = materialize_microphysical_fields(bμp.cloud_formation, grid, bcs)
 
-@inline function AtmosphereModels.update_microphysical_fields!(μ, bμp::NPBM, i, j, k, grid, ρ, 𝒰, constants)
-    return update_microphysical_fields!(μ, bμp.cloud_formation, i, j, k, grid, ρ, 𝒰, constants)
+@inline function AtmosphereModels.update_microphysical_fields!(μ, i, j, k, grid, bμp::NPBM, ρ, 𝒰, constants)
+    return update_microphysical_fields!(μ, i, j, k, grid, bμp.cloud_formation, ρ, 𝒰, constants)
 end
 
-# Forward grid_compute_moisture_fractions to cloud_formation scheme
-@inline function AtmosphereModels.grid_compute_moisture_fractions(i, j, k, grid, bμp::NPBM, ρ, qᵗ, μ)
-    return grid_compute_moisture_fractions(i, j, k, grid, bμp.cloud_formation, ρ, qᵗ, μ)
+# Forward grid_moisture_fractions to cloud_formation scheme
+@inline function AtmosphereModels.grid_moisture_fractions(i, j, k, grid, bμp::NPBM, ρ, qᵗ, μ)
+    return grid_moisture_fractions(i, j, k, grid, bμp.cloud_formation, ρ, qᵗ, μ)
 end
 
-# Forward state-based compute_moisture_fractions to cloud_formation scheme
-@inline function AtmosphereModels.compute_moisture_fractions(bμp::NPBM, ℳ, qᵗ)
-    return compute_moisture_fractions(bμp.cloud_formation, ℳ, qᵗ)
+# Forward state-based moisture_fractions to cloud_formation scheme
+@inline function AtmosphereModels.moisture_fractions(bμp::NPBM, ℳ, qᵗ)
+    return moisture_fractions(bμp.cloud_formation, ℳ, qᵗ)
 end

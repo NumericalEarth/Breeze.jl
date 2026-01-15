@@ -21,7 +21,7 @@ a microphysics implementation in `AtmosphereModel`:
 * [`Breeze.AtmosphereModels.maybe_adjust_thermodynamic_state`](@ref)
     - Possibly adjust the thermodynamic state according to some constraint, such as
       saturation adjustment.
-* [`Breeze.AtmosphereModels.compute_moisture_fractions`](@ref)
+* [`Breeze.AtmosphereModels.moisture_fractions`](@ref)
     - Given the model state, return a `MoistureMassFractions` object
 * [`Breeze.AtmosphereModels.microphysical_velocities`](@ref)
     - Build the differential velocity field that microphysical tracers
@@ -131,7 +131,7 @@ import Breeze.AtmosphereModels:
 @inline update_microphysical_fields!(μ, em::ExplicitMicrophysics, i, j, k, grid, ρ, state, constants) =
     @inbounds μ.qᵛ[i, j, k] = state.moisture_mass_fractions.vapor
 
-@inline function compute_moisture_fractions(i, j, k, grid,
+@inline function moisture_fractions(i, j, k, grid,
     ::ExplicitMicrophysics, ρ, qᵗ, microphysical_fields)
 
     @inbounds begin

@@ -25,7 +25,7 @@ using DocStringExtensions: TYPEDSIGNATURES, TYPEDEF, TYPEDFIELDS
 using Breeze.AtmosphereModels: NothingMicrophysicalState,
                                microphysical_state,
                                microphysical_tendency,
-                               compute_moisture_fractions
+                               moisture_fractions
 using Breeze.Thermodynamics: MoistureMassFractions
 
 include("parcel_dynamics.jl")

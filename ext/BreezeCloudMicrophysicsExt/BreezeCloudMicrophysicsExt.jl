@@ -21,7 +21,8 @@ using Breeze
 using Breeze.AtmosphereModels: AtmosphereModels,
     materialize_microphysical_fields,
     update_microphysical_fields!,
-    compute_moisture_fractions,
+    update_microphysical_auxiliaries!,
+    moisture_fractions,
     microphysical_tendency
 
 using Breeze.Thermodynamics:

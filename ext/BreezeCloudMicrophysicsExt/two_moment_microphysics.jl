@@ -121,7 +121,7 @@ const WPNE2M = WarmPhaseNonEquilibrium2M
 ##### MicrophysicalState construction from fields
 #####
 
-@inline function AtmosphereModels.microphysical_state(i, j, k, grid, bμp::WPNE2M, μ, ρ, 𝒰)
+@inline function AtmosphereModels.grid_microphysical_state(i, j, k, grid, bμp::WPNE2M, μ, ρ, 𝒰)
     @inbounds qᶜˡ = μ.qᶜˡ[i, j, k]
     @inbounds nᶜˡ = μ.nᶜˡ[i, j, k]
     @inbounds qʳ = μ.qʳ[i, j, k]
@@ -262,7 +262,7 @@ end
 ##### Update microphysical fields (diagnostics + terminal velocities)
 #####
 
-@inline function AtmosphereModels.update_microphysical_fields!(μ, bμp::WPNE2M, i, j, k, grid, ρ, 𝒰, constants)
+@inline function AtmosphereModels.update_microphysical_fields!(μ, i, j, k, grid, bμp::WPNE2M, ρ, 𝒰, constants)
     q = 𝒰.moisture_mass_fractions
     categories = bμp.categories
 
@@ -281,12 +281,12 @@ end
         μ.nʳ[i, j, k] = nʳ
     end
 
-    update_2m_terminal_velocities!(μ, bμp, categories, i, j, k, ρ)
+    update_2m_terminal_velocities!(μ, i, j, k, bμp, categories, ρ)
 
     return nothing
 end
 
-@inline function update_2m_terminal_velocities!(μ, bμp, categories, i, j, k, ρ)
+@inline function update_2m_terminal_velocities!(μ, i, j, k, bμp, categories, ρ)
     @inbounds qᶜˡ = μ.qᶜˡ[i, j, k]
     @inbounds nᶜˡ = μ.nᶜˡ[i, j, k]
     @inbounds qʳ = μ.qʳ[i, j, k]
@@ -331,7 +331,7 @@ end
 ##### Moisture fraction computation
 #####
 
-@inline function AtmosphereModels.compute_moisture_fractions(i, j, k, grid, bμp::WPNE2M, ρ, qᵗ, μ)
+@inline function AtmosphereModels.moisture_fractions(i, j, k, grid, bμp::WPNE2M, ρ, qᵗ, μ)
     qᶜˡ = @inbounds μ.ρqᶜˡ[i, j, k] / ρ
     qʳ = @inbounds μ.ρqʳ[i, j, k] / ρ
     qˡ = qᶜˡ + qʳ
@@ -344,7 +344,7 @@ end
 #####
 
 # Non-equilibrium: no adjustment (cloud liquid is prognostic)
-@inline AtmosphereModels.maybe_adjust_thermodynamic_state(i, j, k, 𝒰₀, bμp::WPNE2M, args...) = 𝒰₀
+@inline AtmosphereModels.maybe_adjust_thermodynamic_state(𝒰₀, bμp::WPNE2M, qᵗ, constants) = 𝒰₀
 
 #####
 ##### Microphysical velocities for advection

@@ -108,7 +108,7 @@ end
     end
 
     # Compute moisture fractions
-    q = grid_compute_moisture_fractions(i, j, k, grid, microphysics, ρ, qᵗ, microphysical_fields)
+    q = grid_moisture_fractions(i, j, k, grid, microphysics, ρ, qᵗ, microphysical_fields)
     Rᵐ = mixture_gas_constant(q, constants)
     cᵖᵐ = mixture_heat_capacity(q, constants)
     cᵛᵐ = cᵖᵐ - Rᵐ

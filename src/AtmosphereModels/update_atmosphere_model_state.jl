@@ -243,17 +243,16 @@ end
     end
 
     # Compute moisture fractions first (needed by diagnose_thermodynamic_state)
-    q = grid_compute_moisture_fractions(i, j, k, grid, microphysics, ρ, qᵗ, microphysical_fields)
+    q = grid_moisture_fractions(i, j, k, grid, microphysics, ρ, qᵗ, microphysical_fields)
 
     𝒰₀ = diagnose_thermodynamic_state(i, j, k, grid, formulation, dynamics, q)
 
     # Adjust the thermodynamic state if using a microphysics scheme
     # that invokes saturation adjustment
-    𝒰₁ = maybe_adjust_thermodynamic_state(i, j, k, 𝒰₀, microphysics, ρ, microphysical_fields, qᵗ, constants)
+    𝒰₁ = maybe_adjust_thermodynamic_state(𝒰₀, microphysics, qᵗ, constants)
 
-    update_microphysical_fields!(microphysical_fields, microphysics,
-                                 i, j, k, grid,
-                                 ρ, 𝒰₁, constants)
+    update_microphysical_fields!(microphysical_fields, i, j, k, grid,
+                                 microphysics, ρ, 𝒰₁, constants)
 
     T = Thermodynamics.temperature(𝒰₁, constants)
     @inbounds temperature[i, j, k] = T

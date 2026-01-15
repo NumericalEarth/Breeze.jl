@@ -20,8 +20,9 @@ export
     RelativeHumidity,
     RelativeHumidityField
 
-using ..AtmosphereModels: AtmosphereModels, compute_moisture_fractions, grid_compute_moisture_fractions,
-    materialize_microphysical_fields, update_microphysical_fields!, NothingMicrophysicalState
+using ..AtmosphereModels: AtmosphereModels, moisture_fractions, grid_moisture_fractions,
+    materialize_microphysical_fields, update_microphysical_fields!, update_microphysical_auxiliaries!,
+    NothingMicrophysicalState
 
 include("saturation_adjustment.jl")
 include("bulk_microphysics.jl")

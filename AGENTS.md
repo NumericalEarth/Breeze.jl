@@ -259,7 +259,7 @@ the functions that microphysics schemes must implement. Key functions include:
     liquid/ice, so there is no adjustment to perform. The moisture partition is already determined
     by the prognostic fields.
 - `microphysical_tendency`: Computes tendencies for prognostic microphysical variables.
-- `compute_moisture_fractions`: Computes moisture mass fractions from prognostic fields.
+- `moisture_fractions`: Computes moisture mass fractions from prognostic fields.
 - `update_microphysical_fields!`: Updates diagnostic microphysical fields after state update.
 
 ## Testing Guidelines

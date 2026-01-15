@@ -58,7 +58,7 @@ end
     @inbounds qᵗ = specific_moisture[i, j, k]
 
     # Compute moisture fractions first
-    q = grid_compute_moisture_fractions(i, j, k, grid, microphysics, ρ, qᵗ, microphysical_fields)
+    q = grid_moisture_fractions(i, j, k, grid, microphysics, ρ, qᵗ, microphysical_fields)
     𝒰 = diagnose_thermodynamic_state(i, j, k, grid, formulation, dynamics, q)
 
     Π = exner_function(𝒰, constants)
@@ -138,9 +138,9 @@ end
     end
 
     z = znode(i, j, k, grid, c, c, c)
-    q = grid_compute_moisture_fractions(i, j, k, grid, microphysics, ρᵣ, qᵗ, microphysical_fields)
+    q = grid_moisture_fractions(i, j, k, grid, microphysics, ρᵣ, qᵗ, microphysical_fields)
     𝒰e₀ = StaticEnergyState(e, q, z, pᵣ)
-    𝒰e₁ = maybe_adjust_thermodynamic_state(i, j, k, 𝒰e₀, microphysics, ρᵣ, microphysical_fields, qᵗ, constants)
+    𝒰e₁ = maybe_adjust_thermodynamic_state(𝒰e₀, microphysics, qᵗ, constants)
     T = temperature(𝒰e₁, constants)
 
     pˢᵗ = standard_pressure(dynamics)
@@ -209,7 +209,7 @@ end
     end
 
     # Get moisture fractions (vapor only for unsaturated air)
-    q = grid_compute_moisture_fractions(i, j, k, grid, microphysics, ρᵣ, qᵗ, microphysical_fields)
+    q = grid_moisture_fractions(i, j, k, grid, microphysics, ρᵣ, qᵗ, microphysical_fields)
 
     # Convert temperature to potential temperature using the inverse of the T(θ) relation
     pˢᵗ = standard_pressure(dynamics)
