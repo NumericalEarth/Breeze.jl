@@ -272,100 +272,192 @@ velocities). The parcel is initialized at the specified position with environmen
 conditions interpolated at that height.
 
 # Keyword Arguments
+
+**Thermodynamic profiles** (provide one of `T` or `θ`):
 - `T`: Temperature profile T(z) [K] - function, array, Field, or constant
 - `θ`: Potential temperature profile θ(z) [K] - function, array, or constant.
-       If provided, `T` is computed from `θ` and `p` using the Poisson relation.
+       If provided, `T` is computed from `θ` and `p` using thermodynamic relations.
 - `ρ`: Density profile ρ(z) [kg/m³] - function, array, Field, or constant
 - `p`: Pressure profile p(z) [Pa] - function, array, Field, or constant
+
+**Moisture** (provide one of `qᵗ` or `ℋ`):
 - `qᵗ`: Specific humidity profile qᵗ(z) [kg/kg] - function, array, or constant (default: 0)
+- `ℋ`: Relative humidity profile ℋ(z) [0-1] - function, array, or constant.
+       If provided, `qᵗ` is computed as `qᵗ = ℋ * qᵛ⁺(T, ρ)`.
+
+**Velocities**:
 - `u`: Zonal velocity u(z) [m/s] - function, array, or constant (default: 0)
 - `v`: Meridional velocity v(z) [m/s] - function, array, or constant (default: 0)
 - `w`: Vertical velocity w(z) [m/s] - function, array, or constant (default: 0)
+
+**Parcel position**:
 - `x`: Initial parcel x-position [m] (default: 0)
 - `y`: Initial parcel y-position [m] (default: 0)
 - `z`: Initial parcel height [m] (required to initialize parcel state)
 """
-function Oceananigans.set!(model::ParcelModel; T = nothing, θ = nothing, ρ = nothing, p = nothing, qᵗ = 0,
-                           u = 0, v = 0, w = 0, x = 0, y = 0, z = nothing)
+function Oceananigans.set!(model::ParcelModel; T = nothing, θ = nothing,
+                           ρ = nothing, p = nothing,
+                           qᵗ = nothing, ℋ = nothing,
+                           u = 0, v = 0, w = 0,
+                           x = 0, y = 0, z = nothing)
                            
     grid = model.grid
     dynamics = model.dynamics
     constants = model.thermodynamic_constants
+    pˢᵗ = dynamics.standard_pressure
     g = constants.gravitational_acceleration
 
-    # Set pressure and density first (needed if computing T from θ)
+    # Set pressure and density first (needed for T from θ and qᵗ from ℋ)
     !isnothing(ρ) && set!(dynamics.density, ρ)
     !isnothing(p) && set!(dynamics.pressure, p)
+    fill_halo_regions!(dynamics.density)
+    fill_halo_regions!(dynamics.pressure)
 
-    # Compute temperature from potential temperature if θ is provided
+    # Compute temperature from potential temperature using thermodynamic functions
     if !isnothing(θ) && isnothing(T)
         isnothing(p) && error("Pressure `p` must be provided when setting potential temperature `θ`")
-        Rᵈ = dry_air_gas_constant(constants)
-        cᵖᵈ = constants.dry_air.heat_capacity
-        κ = Rᵈ / cᵖᵈ
-        pˢᵗ = dynamics.standard_pressure
-        # Compute T = θ * (p/pˢᵗ)^κ
-        # θ can be a scalar, p can be a Field
-        T_field = model.temperature
-        if θ isa Number
-            # θ is constant, p is a Field
-            T_op = θ .* (dynamics.pressure ./ pˢᵗ) .^ κ
-            set!(T_field, T_op)
-        else
-            # θ is a function or field - compute pointwise
-            set!(T_field, (x, y, z) -> θ(z) * (dynamics.pressure[1, 1, z] / pˢᵗ)^κ)
-        end
+        set_temperature_from_potential_temperature!(model.temperature, θ, dynamics.pressure, pˢᵗ, constants)
     elseif !isnothing(T)
         set!(model.temperature, T)
     end
+    fill_halo_regions!(model.temperature)
 
     # Set velocities
     set!(model.velocities.u, u)
     set!(model.velocities.v, v)
     set!(model.velocities.w, w)
-
-    # Set moisture
-    set!(model.specific_moisture, qᵗ)
-
-    # Fill halo regions
-    fill_halo_regions!(model.temperature)
-    fill_halo_regions!(dynamics.density)
-    fill_halo_regions!(dynamics.pressure)
     fill_halo_regions!(model.velocities.u)
     fill_halo_regions!(model.velocities.v)
     fill_halo_regions!(model.velocities.w)
+
+    # Compute specific humidity from relative humidity if ℋ is provided
+    if !isnothing(ℋ) && isnothing(qᵗ)
+        set_moisture_from_relative_humidity!(model.specific_moisture, ℋ, 
+                                              model.temperature, dynamics.density, constants)
+    elseif !isnothing(qᵗ)
+        set!(model.specific_moisture, qᵗ)
+    else
+        # Default to zero moisture
+        set!(model.specific_moisture, 0)
+    end
     fill_halo_regions!(model.specific_moisture)
 
     # Initialize parcel state if z is provided
     if !isnothing(z)
-        FT = eltype(grid)
-        x₀ = convert(FT, x)
-        y₀ = convert(FT, y)
-        z₀ = convert(FT, z)
-
-        # Interpolate environmental conditions at parcel height
-        T₀ = interpolate((z₀,), model.temperature)
-        ρ₀ = interpolate((z₀,), dynamics.density)
-        p₀ = interpolate((z₀,), dynamics.pressure)
-        qᵗ₀ = interpolate((z₀,), model.specific_moisture)
-
-        # Mutate the existing ParcelState fields directly
-        state = dynamics.state
-        state.x = x₀
-        state.y = y₀
-        state.z = z₀
-        state.ρ = ρ₀
-        state.qᵗ = qᵗ₀
-        state.ρqᵗ = ρ₀ * qᵗ₀
-
-        # Update thermodynamic state
-        q = MoistureMassFractions(qᵗ₀)
-        cᵖᵐ = mixture_heat_capacity(q, constants)
-        e = cᵖᵐ * T₀ + g * z₀
-        state.ℰ = e
-        state.ρℰ = ρ₀ * e
-        state.𝒰 = StaticEnergyState(e, q, z₀, p₀)
+        initialize_parcel_state!(dynamics.state, z, x, y, model)
     end
+
+    return nothing
+end
+
+#####
+##### Helper functions for set!
+#####
+
+"""
+Set temperature field from potential temperature, using proper thermodynamic relations.
+"""
+function set_temperature_from_potential_temperature!(T_field, θ, p_field, pˢᵗ, constants)
+    grid = T_field.grid
+    if θ isa Number
+        # θ is constant - loop over grid and compute T at each point
+        for k in 1:size(grid, 3)
+            for j in 1:size(grid, 2)
+                for i in 1:size(grid, 1)
+                    pₖ = p_field[i, j, k]
+                    T_field[i, j, k] = temperature_from_potential_temperature(θ, pₖ, constants; pˢᵗ)
+                end
+            end
+        end
+    else
+        # θ is a function of z
+        for k in 1:size(grid, 3)
+            zₖ = znode(1, 1, k, grid, Center(), Center(), Center())
+            θₖ = θ(zₖ)
+            for j in 1:size(grid, 2)
+                for i in 1:size(grid, 1)
+                    pₖ = p_field[i, j, k]
+                    T_field[i, j, k] = temperature_from_potential_temperature(θₖ, pₖ, constants; pˢᵗ)
+                end
+            end
+        end
+    end
+    return nothing
+end
+
+"""
+Set specific humidity field from relative humidity, computing qᵗ = ℋ * qᵛ⁺(T, ρ).
+"""
+function set_moisture_from_relative_humidity!(qᵗ_field, ℋ, T_field, ρ_field, constants)
+    grid = qᵗ_field.grid
+    if ℋ isa Number
+        for k in 1:size(grid, 3)
+            for j in 1:size(grid, 2)
+                for i in 1:size(grid, 1)
+                    Tₖ = T_field[i, j, k]
+                    ρₖ = ρ_field[i, j, k]
+                    qᵛ⁺ = saturation_specific_humidity(Tₖ, ρₖ, constants, PlanarLiquidSurface())
+                    qᵗ_field[i, j, k] = ℋ * qᵛ⁺
+                end
+            end
+        end
+    else
+        # ℋ is a function of z
+        for k in 1:size(grid, 3)
+            zₖ = znode(1, 1, k, grid, Center(), Center(), Center())
+            ℋₖ = ℋ(zₖ)
+            for j in 1:size(grid, 2)
+                for i in 1:size(grid, 1)
+                    Tₖ = T_field[i, j, k]
+                    ρₖ = ρ_field[i, j, k]
+                    qᵛ⁺ = saturation_specific_humidity(Tₖ, ρₖ, constants, PlanarLiquidSurface())
+                    qᵗ_field[i, j, k] = ℋₖ * qᵛ⁺
+                end
+            end
+        end
+    end
+    return nothing
+end
+
+"""
+$(TYPEDSIGNATURES)
+
+Initialize the parcel state by interpolating environmental conditions at the given position.
+"""
+function initialize_parcel_state!(state, z₀, x₀, y₀, model)
+    grid = model.grid
+    dynamics = model.dynamics
+    constants = model.thermodynamic_constants
+    g = constants.gravitational_acceleration
+    FT = eltype(grid)
+
+    x₀ = convert(FT, x₀)
+    y₀ = convert(FT, y₀)
+    z₀ = convert(FT, z₀)
+
+    # Interpolate environmental conditions at parcel height
+    T₀ = interpolate((z₀,), model.temperature)
+    ρ₀ = interpolate((z₀,), dynamics.density)
+    p₀ = interpolate((z₀,), dynamics.pressure)
+    qᵗ₀ = interpolate((z₀,), model.specific_moisture)
+
+    # Set position
+    state.x = x₀
+    state.y = y₀
+    state.z = z₀
+
+    # Set density and moisture
+    state.ρ = ρ₀
+    state.qᵗ = qᵗ₀
+    state.ρqᵗ = ρ₀ * qᵗ₀
+
+    # Compute static energy and thermodynamic state
+    q = MoistureMassFractions(qᵗ₀)
+    cᵖᵐ = mixture_heat_capacity(q, constants)
+    e = cᵖᵐ * T₀ + g * z₀
+    state.ℰ = e
+    state.ρℰ = ρ₀ * e
+    state.𝒰 = StaticEnergyState(e, q, z₀, p₀)
 
     return nothing
 end

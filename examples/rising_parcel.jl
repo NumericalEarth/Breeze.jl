@@ -76,16 +76,16 @@ function record_parcel_state!(sim)
     push!(heights, state.z)
 
     Tn = temperature(state.𝒰, constants)
-    ρn = density(state.𝒰, constants)
     push!(T_parcel, Tn)
 
     z = state.z
     Te = interpolate((z,), model.temperature)
     push!(T_environment, Te)
 
+    ρn = density(state.𝒰, constants)
     qᵛ⁺ = saturation_specific_humidity(Tn, ρn, constants, PlanarLiquidSurface())
-    S = (state.𝒰.moisture_mass_fractions.vapor / qᵛ⁺) - 1
-    push!(supersaturations, S)
+    Sn = (state.𝒰.moisture_mass_fractions.vapor / qᵛ⁺) - 1
+    push!(supersaturations, Sn)
 
     return nothing
 end

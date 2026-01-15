@@ -22,11 +22,17 @@ export
 
 using DocStringExtensions: TYPEDSIGNATURES, TYPEDEF, TYPEDFIELDS
 
+using Oceananigans.Grids: znode, Center
+
 using Breeze.AtmosphereModels: NothingMicrophysicalState,
                                microphysical_state,
                                microphysical_tendency,
                                moisture_fractions
-using Breeze.Thermodynamics: MoistureMassFractions, dry_air_gas_constant
+
+using Breeze.Thermodynamics: MoistureMassFractions,
+                             temperature_from_potential_temperature,
+                             saturation_specific_humidity,
+                             PlanarLiquidSurface
 
 include("parcel_dynamics.jl")
 
