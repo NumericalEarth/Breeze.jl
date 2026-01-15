@@ -26,7 +26,7 @@ using Breeze.AtmosphereModels: NothingMicrophysicalState,
                                microphysical_state,
                                microphysical_tendency,
                                moisture_fractions
-using Breeze.Thermodynamics: MoistureMassFractions
+using Breeze.Thermodynamics: MoistureMassFractions, dry_air_gas_constant
 
 include("parcel_dynamics.jl")
 

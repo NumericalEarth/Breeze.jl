@@ -177,12 +177,24 @@ Schemes may define their own state types inheriting from `AbstractMicrophysicalS
 ## Design Principles
 
 1. **Gridless core**: Tendency and moisture fraction computations are gridless (state-based).
-   Grid-indexed wrappers handle field extraction.
+   Grid-indexed wrappers handle field extraction. This enables parcel model support with
+   minimal implementation.
 
-2. **Generic wrappers**: Most grid-indexed functions are generic and don't need scheme-specific
+2. **Layered complexity**: The interface is structured so that:
+   - **Minimal implementation** (4 functions) → parcel model support
+   - **Full implementation** (7+ functions) → Eulerian LES support
+   
+   This allows rapid prototyping of new schemes in parcel models before investing in
+   full grid infrastructure.
+
+3. **Generic wrappers**: Most grid-indexed functions are generic and don't need scheme-specific
    implementations. Schemes only implement the gridless versions.
 
-3. **Consistent argument ordering**: Mutating functions place the mutated object first, then
+4. **Consistent argument ordering**: Mutating functions place the mutated object first, then
    grid indices, then other arguments.
 
-4. **Explicit returns**: All mutating functions `return nothing`.
+5. **Explicit returns**: All mutating functions `return nothing`.
+
+6. **Sedimentation is Eulerian**: Terminal velocities (`microphysical_velocities`) are only
+   meaningful for grid-based simulations where tracers advect through space. In parcel models,
+   precipitation loss should be modeled as a sink term in `microphysical_tendency`.

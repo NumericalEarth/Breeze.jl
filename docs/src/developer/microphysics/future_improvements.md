@@ -86,7 +86,27 @@ in `update_microphysical_auxiliaries!` is unclear.
 - `update_microphysical_auxiliaries!` writes velocity values to fields (e.g., `μ.wʳ[i,j,k] = ...`)
 - `microphysical_velocities(scheme, μ, name)` returns the velocity field for a given tracer
 
-**Questions to resolve**:
+### Key Insight: Sedimentation is Eulerian-Only
+
+Analysis of parcel models (`pyrcel`, `PySDM`) reveals that:
+
+| Model | Type | Sedimentation handling |
+|-------|------|----------------------|
+| `pyrcel` | 0D parcel | **None** — droplets stay within parcel |
+| `PySDM` (0D) | 0D parcel | Could be mass sink, but typically not used |
+| `PySDM` (1D/2D) | Kinematic grid | Particle displacement through spatial mesh |
+| Breeze `ParcelModel` | 0D parcel | **None** (currently) |
+| Breeze `AtmosphereModel` | Eulerian LES | Tracer advection with terminal velocity |
+
+**Implications**:
+- `microphysical_velocities` is fundamentally an **Eulerian concept** — it provides velocities 
+  for advecting tracer fields through a spatial grid
+- In parcel models, sedimentation should be modeled as a **mass sink term** in 
+  `microphysical_tendency`, not as spatial transport
+- This means `microphysical_velocities` should remain Eulerian-only and not be part of the 
+  minimal parcel interface
+
+### Questions to resolve
 
 1. **Separation of concerns**: Should velocity computation be separated from field writing?
    Currently, both happen in `update_microphysical_auxiliaries!`.
@@ -99,6 +119,10 @@ in `update_microphysical_auxiliaries!` is unclear.
 
 4. **Advection coupling**: How does the velocity field connect to the advection machinery
    in `AtmosphereModel`?
+
+5. **Parcel precipitation loss**: Should we add a standard pattern for precipitation removal
+   in parcel models? This would be a sink term based on threshold size or collection efficiency,
+   implemented in `microphysical_tendency`.
 
 **Status**: Needs comprehensive review. This blocks automation of `materialize_microphysical_fields`.
 

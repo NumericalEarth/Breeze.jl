@@ -16,40 +16,12 @@
 # or static energy during this process.
 
 using Oceananigans
+using Oceananigans: interpolate
 using Oceananigans.Units
 using Breeze
 using Breeze.ParcelModels: ParcelDynamics
 using Breeze.Thermodynamics: temperature, density, saturation_specific_humidity, PlanarLiquidSurface
 using CairoMakie
-
-# ## Environmental sounding
-#
-# We prescribe a simple environmental profile:
-# - Temperature: Standard atmosphere lapse rate (6.5 K/km)
-# - Pressure: Hydrostatic pressure from ideal gas
-# - Humidity: Decreasing with height
-# - Updraft: Constant 1 m/s vertical velocity
-
-g = 9.81
-Rᵈ = 287.0
-T₀ = 288.15      # Surface temperature [K]
-p₀ = 101325.0    # Surface pressure [Pa]
-Γ = 0.0065       # Environmental temperature lapse rate [K/m]
-qᵗ₀ = 0.015      # Surface specific humidity [kg/kg]
-Hq = 2500.0      # Humidity scale height [m]
-w_updraft = 1.0  # Updraft velocity [m/s]
-
-# Temperature profile (standard atmosphere)
-T(z) = T₀ - Γ * z
-
-# Pressure profile (hypsometric equation for constant lapse rate)
-p(z) = p₀ * (T(z) / T₀)^(g / (Rᵈ * Γ))
-
-# Density from ideal gas law
-ρ(z) = p(z) / (Rᵈ * T(z))
-
-# Humidity profile (exponential decay)
-qᵗ(z) = qᵗ₀ * exp(-z / Hq)
 
 # ## Create the model
 #
@@ -57,7 +29,6 @@ qᵗ(z) = qᵗ₀ * exp(-z / Hq)
 # ParcelDynamics works with the standard AtmosphereModel interface.
 
 grid = RectilinearGrid(size=100, z=(0, 10kilometers), topology=(Flat, Flat, Bounded))
-
 model = AtmosphereModel(grid; dynamics=ParcelDynamics())
 
 # ## Set environmental profiles and initial parcel position
@@ -65,7 +36,20 @@ model = AtmosphereModel(grid; dynamics=ParcelDynamics())
 # The `set!` function configures the environmental sounding and
 # initializes the parcel at the specified height.
 
-set!(model, T=T, p=p, ρ=ρ, qᵗ=qᵗ, z=0.0, w=w_updraft)
+reference_state = ReferenceState(grid, model.thermodynamic_constants,
+                                 surface_pressure = 101325,
+                                 potential_temperature = 300)
+
+p = reference_state.pressure
+ρ = reference_state.density
+θ₀ = reference_state.potential_temperature
+
+# Humidity profile (exponential decay with height)
+qᵗ₀ = 0.015    # Surface specific humidity [kg/kg]
+Hq = 2500      # Humidity scale height [m]
+qᵗ(z) = qᵗ₀ * exp(-z / Hq)
+
+set!(model, θ=θ₀, p=p, ρ=ρ, qᵗ=qᵗ, z=0, w=1)
 
 @info "Model created" model.dynamics
 
@@ -78,7 +62,8 @@ simulation = Simulation(model; Δt=1.0, stop_time=30minutes)
 # Storage for time series
 times = Float64[]
 heights = Float64[]
-temperatures = Float64[]
+T_parcel = Float64[]
+T_environment = Float64[]
 supersaturations = Float64[]
 
 # Callback to record parcel state at each iteration
@@ -90,11 +75,15 @@ function record_parcel_state!(sim)
     push!(times, model.clock.time)
     push!(heights, state.z)
 
-    Tₙ = temperature(state.𝒰, constants)
-    ρₙ = density(state.𝒰, constants)
-    push!(temperatures, Tₙ)
+    Tn = temperature(state.𝒰, constants)
+    ρn = density(state.𝒰, constants)
+    push!(T_parcel, Tn)
 
-    qᵛ⁺ = saturation_specific_humidity(Tₙ, ρₙ, constants, PlanarLiquidSurface())
+    z = state.z
+    Te = interpolate((z,), model.temperature)
+    push!(T_environment, Te)
+
+    qᵛ⁺ = saturation_specific_humidity(Tn, ρn, constants, PlanarLiquidSurface())
     S = (state.𝒰.moisture_mass_fractions.vapor / qᵛ⁺) - 1
     push!(supersaturations, S)
 
@@ -123,12 +112,10 @@ ax1 = Axis(fig[1, 1];
     ylabel = "Height (km)",
     title = "Parcel ascent: adiabatic cooling")
 
-lines!(ax1, temperatures, heights_km; color=:magenta, label="Parcel T")
+lines!(ax1, T_parcel, heights_km; color=:magenta, label="Parcel T")
 
 # Add environmental temperature for comparison
-z_range = range(0, stop=maximum(heights), length=100)
-T_env_profile = T.(z_range)
-lines!(ax1, T_env_profile, z_range./1000; color=:gray, linestyle=:dash, label="Environment T")
+lines!(ax1, T_environment, heights_km; color=:gray, linestyle=:dash, label="Environment T")
 
 axislegend(ax1; position=:lt)
 

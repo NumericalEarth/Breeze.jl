@@ -138,7 +138,6 @@ function Base.show(io::IO, d::ParcelDynamics)
     print(io, "ParcelDynamics\n")
     state_str = d.state isa ParcelState ? d.state : "uninitialized"
     print(io, "├── state: ", state_str, '\n')
-    print(io, "├── tendencies: ", isnothing(d.tendencies) ? "uninitialized" : "ParcelTendencies", '\n')
     print(io, "├── timestepper: ", isnothing(d.timestepper) ? "uninitialized" : "ParcelTimestepper (SSP RK3)", '\n')
     print(io, "├── density: ", isnothing(d.density) ? "unset" : summary(d.density), '\n')
     print(io, "├── pressure: ", isnothing(d.pressure) ? "unset" : summary(d.pressure), '\n')
@@ -273,9 +272,11 @@ velocities). The parcel is initialized at the specified position with environmen
 conditions interpolated at that height.
 
 # Keyword Arguments
-- `T`: Temperature profile T(z) [K] - function, array, or constant
-- `ρ`: Density profile ρ(z) [kg/m³] - function, array, or constant
-- `p`: Pressure profile p(z) [Pa] - function, array, or constant
+- `T`: Temperature profile T(z) [K] - function, array, Field, or constant
+- `θ`: Potential temperature profile θ(z) [K] - function, array, or constant.
+       If provided, `T` is computed from `θ` and `p` using the Poisson relation.
+- `ρ`: Density profile ρ(z) [kg/m³] - function, array, Field, or constant
+- `p`: Pressure profile p(z) [Pa] - function, array, Field, or constant
 - `qᵗ`: Specific humidity profile qᵗ(z) [kg/kg] - function, array, or constant (default: 0)
 - `u`: Zonal velocity u(z) [m/s] - function, array, or constant (default: 0)
 - `v`: Meridional velocity v(z) [m/s] - function, array, or constant (default: 0)
@@ -284,7 +285,7 @@ conditions interpolated at that height.
 - `y`: Initial parcel y-position [m] (default: 0)
 - `z`: Initial parcel height [m] (required to initialize parcel state)
 """
-function Oceananigans.set!(model::ParcelModel; T = nothing, ρ = nothing, p = nothing, qᵗ = 0,
+function Oceananigans.set!(model::ParcelModel; T = nothing, θ = nothing, ρ = nothing, p = nothing, qᵗ = 0,
                            u = 0, v = 0, w = 0, x = 0, y = 0, z = nothing)
                            
     grid = model.grid
@@ -292,10 +293,31 @@ function Oceananigans.set!(model::ParcelModel; T = nothing, ρ = nothing, p = no
     constants = model.thermodynamic_constants
     g = constants.gravitational_acceleration
 
-    # Set environmental fields on the model
-    !isnothing(T) && set!(model.temperature, T)
+    # Set pressure and density first (needed if computing T from θ)
     !isnothing(ρ) && set!(dynamics.density, ρ)
     !isnothing(p) && set!(dynamics.pressure, p)
+
+    # Compute temperature from potential temperature if θ is provided
+    if !isnothing(θ) && isnothing(T)
+        isnothing(p) && error("Pressure `p` must be provided when setting potential temperature `θ`")
+        Rᵈ = dry_air_gas_constant(constants)
+        cᵖᵈ = constants.dry_air.heat_capacity
+        κ = Rᵈ / cᵖᵈ
+        pˢᵗ = dynamics.standard_pressure
+        # Compute T = θ * (p/pˢᵗ)^κ
+        # θ can be a scalar, p can be a Field
+        T_field = model.temperature
+        if θ isa Number
+            # θ is constant, p is a Field
+            T_op = θ .* (dynamics.pressure ./ pˢᵗ) .^ κ
+            set!(T_field, T_op)
+        else
+            # θ is a function or field - compute pointwise
+            set!(T_field, (x, y, z) -> θ(z) * (dynamics.pressure[1, 1, z] / pˢᵗ)^κ)
+        end
+    elseif !isnothing(T)
+        set!(model.temperature, T)
+    end
 
     # Set velocities
     set!(model.velocities.u, u)
