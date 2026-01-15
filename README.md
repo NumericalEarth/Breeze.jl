@@ -36,7 +36,7 @@
 Breeze is a library for simulating atmospheric flows, clouds, hurricanes, and other weather phenomena on both CPUs and GPUs.
 Much of Breeze's power flows from [Oceananigans](https://github.com/CliMA/Oceananigans.jl), which provides a user interface, grids, fields, solvers, advection schemes, Lagrangian particles, physics, and more.
 
-Breeze's AtmosphereModel supports anelastic dynamics, compressible dynamics, a kinematic driver, and a parcel model, all with strong-stability-preserving (SSP) RK3 time stepping.
+Breeze's AtmosphereModel currently supports anelastic dynamics, compressible dynamics, a kinematic driver, and a parcel model, all with strong-stability-preserving (SSP) RK3 time stepping.
 The anelastic and compressible dynamics can be used with a liquid-ice potential temperature formulation or static energy formulation and a variety of advection schemes including high-order and bounds-preserving WENO.
 Breeze provides abstractions for Coriolis forces, simple bulk drags, heat and moisture fluxes, and closures for large-eddy simulation.
 A main focus of Breeze development is to facilitate the prototyping and implementation of microphysics schemes through streamlined internal interfaces and automatic kinematic driver and parcel model capabilities. 
