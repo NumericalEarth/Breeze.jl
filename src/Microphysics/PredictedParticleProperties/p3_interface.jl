@@ -416,11 +416,11 @@ Rime volume tendency: gains from new rime; loses with melting.
 end
 
 """
-Ice sixth moment tendency: changes with deposition, melting, and riming.
+Ice sixth moment tendency: changes with deposition, melting, riming, and nucleation.
 """
 @inline function AtmosphereModels.microphysical_tendency(i, j, k, grid, p3::P3, ::Val{:ρzⁱ}, ρ, μ, 𝒰, constants)
-    rates, qⁱ, _, zⁱ, _, _ = p3_rates_and_properties(i, j, k, grid, p3, μ, ρ, 𝒰, constants)
-    return tendency_ρzⁱ(rates, ρ, qⁱ, zⁱ)
+    rates, qⁱ, nⁱ, zⁱ, _, _ = p3_rates_and_properties(i, j, k, grid, p3, μ, ρ, 𝒰, constants)
+    return tendency_ρzⁱ(rates, ρ, qⁱ, nⁱ, zⁱ)
 end
 
 """

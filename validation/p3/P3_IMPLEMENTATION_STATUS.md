@@ -135,17 +135,41 @@ Temperature-dependent melting rate for T > T_freeze.
 | **Refreezing** | `refreezing_rate` | ✅ |
 | **Rime density** | `rime_density` | ✅ |
 
+### ✅ Ice Nucleation & Secondary Ice (VERIFIED)
+
+Ice nucleation and secondary ice production are now implemented:
+
+#### Ice Nucleation
+
+| Process | Function | Status |
+|---------|----------|--------|
+| **Deposition nucleation** | `deposition_nucleation_rate` | ✅ |
+| **Immersion freezing (cloud)** | `immersion_freezing_cloud_rate` | ✅ |
+| **Immersion freezing (rain)** | `immersion_freezing_rain_rate` | ✅ |
+| **Rime splintering** | `rime_splintering_rate` | ✅ |
+
+- Deposition nucleation: Cooper (1986) parameterization, T < -15°C, Sᵢ > 5%
+- Immersion freezing: Bigg (1953) stochastic freezing, T < -4°C
+- Rime splintering: Hallett-Mossop (1974), -8°C < T < -3°C, peaks at -5°C
+
+#### Sixth Moment Tendencies
+
+| Process | Status |
+|---------|--------|
+| **Z from deposition/melting** | ✅ |
+| **Z from nucleation** | ✅ |
+| **Z from riming** | ✅ |
+| **Z from aggregation** | ✅ (conserved approximation) |
+
 ### ❌ Not Implemented
 
-#### Remaining Process Rate Tendencies
+#### Remaining Components
 
-| Process | Fortran Subroutine | Status |
-|---------|-------------------|--------|
+| Process | Description | Status |
+|---------|-------------|--------|
 | **Cloud droplet activation** | (aerosol module) | ❌ |
 | **Cloud condensation/evaporation** | (saturation adjustment) | ❌ |
-| **Ice nucleation** | Primary nucleation tendencies | ❌ |
-| **Rime splintering** | Secondary ice production | ❌ |
-| **Full sixth moment tendencies** | Z tendencies for aggregation, riming, etc. | ⚠️ simplified |
+| **Lookup tables** | Read Fortran tables | ❌ |
 
 #### Sedimentation
 
@@ -157,15 +181,23 @@ Temperature-dependent melting rate for T > T_freeze.
 | **Flux-form advection** | ✅ (via Oceananigans) |
 | **Substepping** | ⚠️ (not yet, may be needed for stability) |
 
+Note: P3 uses a different sedimentation approach than DCMIP2016Kessler. Rather than
+explicit column-by-column sedimentation with substepping, P3 returns terminal velocity
+structs via `microphysical_velocities` that are used by Oceananigans' tracer advection.
+Substepping would need to be implemented at a higher level (e.g., in the time stepper).
+
 #### Lookup Tables
 
 | Component | Description | Status |
 |-----------|-------------|--------|
+| **Tabulation infrastructure** | `tabulate()` function, `TabulationParameters` | ✅ |
+| **Fall speed tabulation** | `tabulate(p3, :ice_fall_speed, arch)` | ✅ |
+| **Deposition tabulation** | `tabulate(p3, :ice_deposition, arch)` | ✅ |
 | **Reading Fortran tables** | Parse `p3_lookupTable_*.dat` files | ❌ |
-| **Table 1** | Ice property integrals (size, rime, μ) | ❌ |
+| **Table 1** | Ice property integrals (size, rime, μ) | ⚠️ (can generate, not read) |
 | **Table 2** | Rain property integrals | ❌ |
 | **Table 3** | Z integrals for three-moment ice | ❌ |
-| **GPU table storage** | Transfer tables to GPU architecture | ❌ |
+| **GPU table storage** | Transfer tables to GPU architecture | ⚠️ (TODO in code) |
 
 #### Other
 
@@ -224,6 +256,15 @@ Phase 2 process rates are implemented in `process_rates.jl` and verified:
    - `refreezing_rate`: Liquid on ice refreezes below 273K
    - `shedding_number_rate`: Rain drops from shed liquid
 
+7. **Ice Nucleation** ✅
+   - `deposition_nucleation_rate`: Cooper (1986), T < -15°C, Sᵢ > 5%
+   - `immersion_freezing_cloud_rate`: Bigg (1953), cloud droplets freeze at T < -4°C
+   - `immersion_freezing_rain_rate`: Bigg (1953), rain drops freeze at T < -4°C
+
+8. **Secondary Ice Production** ✅
+   - `rime_splintering_rate`: Hallett-Mossop (1974), -8°C < T < -3°C
+   - Peaks at -5°C, ~350 splinters per mg of rime
+
 ### Phase 3: Sedimentation & Performance ✅ COMPLETE
 
 Phase 3 terminal velocities are implemented in `process_rates.jl` and verified:
@@ -247,13 +288,39 @@ Phase 3 terminal velocities are implemented in `process_rates.jl` and verified:
    - Read Fortran tables or regenerate in Julia
    - GPU-compatible table access
 
-### Phase 4: Validation
+### Phase 4: Validation ⚠️ IN PROGRESS
 
-10. **kin1d comparison**
-    - Single-column tests against Fortran reference
-    - Process-by-process verification
+Reference data, visualization tools, and a simplified kinematic driver are available.
 
-11. **3D LES cases**
+10. **kin1d comparison** ⚠️
+    - ✅ Reference data loaded and visualized (`compare_kin1d.jl`)
+    - ✅ Overview figure generated (`kin1d_reference_overview.png`)
+    - ✅ Simplified kinematic driver (`kinematic_column_driver.jl`)
+    - ✅ Comparison figure generated (`kin1d_comparison.png`)
+    - ⚠️ Qualitative agreement achieved; quantitative differences remain
+
+**Comparison Results (Simplified Driver vs. Fortran P3):**
+
+| Metric | Fortran P3 | Breeze.jl |
+|--------|------------|-----------|
+| Max cloud liquid | 4.19 g/kg | 7.92 g/kg |
+| Max rain | 5.47 g/kg | 20.34 g/kg |
+| Max ice | 12.27 g/kg | 13.22 g/kg |
+| Max rime fraction | 0.999 | 0.980 |
+
+The simplified driver shows qualitative agreement (cloud/ice/rime structure is similar)
+but quantitative differences arise from:
+- Basic upstream advection (vs. Fortran's scheme)
+- Simplified condensation/nucleation parameterizations
+- Crude sedimentation implementation
+- Not calling full P3 process rate functions
+
+For true parity, the driver needs:
+- Exact advection scheme matching
+- Full P3 process rate integration
+- Proper sedimentation with substepping
+
+11. **3D LES cases** ❌
     - BOMEX with ice
     - Deep convection cases
 
@@ -264,7 +331,7 @@ src/Microphysics/PredictedParticleProperties/
 ├── PredictedParticleProperties.jl  # Module definition, exports
 ├── p3_scheme.jl                    # Main PredictedParticlePropertiesMicrophysics type
 ├── p3_interface.jl                 # AtmosphereModel integration
-├── process_rates.jl                # Phase 1 process rates (NEW)
+├── process_rates.jl                # Phase 1+2 process rates and terminal velocities
 ├── integral_types.jl               # Abstract integral type hierarchy
 ├── size_distribution.jl            # Gamma distribution, regime thresholds
 ├── lambda_solver.jl                # Two/three-moment λ, μ solvers

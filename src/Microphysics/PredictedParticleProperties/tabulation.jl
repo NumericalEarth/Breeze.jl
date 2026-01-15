@@ -2,14 +2,13 @@
 ##### Tabulation of P3 Integrals
 #####
 ##### Generate lookup tables for efficient evaluation during simulation.
-##### Tables are indexed by normalized ice mass (Qnorm), rime fraction (Fᶠ),
-##### and liquid fraction (Fˡ).
+##### Tables are indexed by mean particle mass, rime fraction, and liquid fraction.
 #####
 
 export tabulate, TabulationParameters
 
 using KernelAbstractions: @kernel, @index
-using Oceananigans.Architectures: device, CPU
+using Oceananigans.Architectures: device, on_architecture
 
 """
     TabulationParameters
@@ -17,12 +16,12 @@ using Oceananigans.Architectures: device, CPU
 Lookup table grid configuration. See [`TabulationParameters`](@ref) constructor.
 """
 struct TabulationParameters{FT}
-    n_Qnorm :: Int
-    n_Fr :: Int
-    n_Fl :: Int
-    Qnorm_min :: FT
-    Qnorm_max :: FT
-    n_quadrature :: Int
+    number_of_mass_points :: Int
+    number_of_rime_fraction_points :: Int
+    number_of_liquid_fraction_points :: Int
+    minimum_mean_particle_mass :: FT
+    maximum_mean_particle_mass :: FT
+    number_of_quadrature_points :: Int
 end
 
 """
@@ -32,127 +31,143 @@ Configure the lookup table grid for P3 integrals.
 
 The P3 Fortran code pre-computes bulk integrals on a 3D grid indexed by:
 
-1. **Normalized mass** `Qnorm = qⁱ/Nⁱ` [kg]: Mean mass per particle
-2. **Rime fraction** `Fᶠ ∈ [0, 1]`: Mass fraction that is rime (frozen accretion)
-3. **Liquid fraction** `Fˡ ∈ [0, 1]`: Mass fraction that is liquid water on ice
+1. **Mean particle mass** `qⁱ/Nⁱ` [kg]: Mass per particle (log-spaced)
+2. **Rime fraction** `∈ [0, 1]`: Mass fraction that is rime (frozen accretion)
+3. **Liquid fraction** `∈ [0, 1]`: Mass fraction that is liquid water on ice
 
 During simulation, integral values are interpolated from this table rather
 than computed via quadrature, which is much faster.
 
 # Keyword Arguments
 
-- `n_Qnorm`: Grid points in Qnorm (log-spaced), default 50
-- `n_Fr`: Grid points in rime fraction (linear), default 4
-- `n_Fl`: Grid points in liquid fraction (linear), default 4
-- `Qnorm_min`: Minimum Qnorm [kg], default 10⁻¹⁸
-- `Qnorm_max`: Maximum Qnorm [kg], default 10⁻⁵
-- `n_quadrature`: Quadrature points for filling table, default 64
+- `number_of_mass_points`: Grid points in mean particle mass (log-spaced), default 50
+- `number_of_rime_fraction_points`: Grid points in rime fraction (linear), default 4
+- `number_of_liquid_fraction_points`: Grid points in liquid fraction (linear), default 4
+- `minimum_mean_particle_mass`: Minimum mean particle mass [kg], default 10⁻¹⁸
+- `maximum_mean_particle_mass`: Maximum mean particle mass [kg], default 10⁻⁵
+- `number_of_quadrature_points`: Quadrature points for filling table, default 64
 
 # References
 
 Table structure follows `create_p3_lookupTable_1.f90` in P3-microphysics.
 """
 function TabulationParameters(FT::Type{<:AbstractFloat} = Float64;
-                               n_Qnorm::Int = 50,
-                               n_Fr::Int = 4,
-                               n_Fl::Int = 4,
-                               Qnorm_min = FT(1e-18),
-                               Qnorm_max = FT(1e-5),
-                               n_quadrature::Int = 64)
+                               number_of_mass_points::Int = 50,
+                               number_of_rime_fraction_points::Int = 4,
+                               number_of_liquid_fraction_points::Int = 4,
+                               minimum_mean_particle_mass = FT(1e-18),
+                               maximum_mean_particle_mass = FT(1e-5),
+                               number_of_quadrature_points::Int = 64)
     return TabulationParameters(
-        n_Qnorm, n_Fr, n_Fl,
-        FT(Qnorm_min), FT(Qnorm_max),
-        n_quadrature
+        number_of_mass_points,
+        number_of_rime_fraction_points,
+        number_of_liquid_fraction_points,
+        FT(minimum_mean_particle_mass),
+        FT(maximum_mean_particle_mass),
+        number_of_quadrature_points
     )
 end
 
 """
-    Qnorm_grid(params::TabulationParameters)
+    mean_particle_mass_grid(params::TabulationParameters)
 
-Generate the normalized mass grid points (logarithmically spaced).
+Generate the mean particle mass grid points (logarithmically spaced).
 """
-function Qnorm_grid(params::TabulationParameters{FT}) where FT
-    n = params.n_Qnorm
-    log_min = log10(params.Qnorm_min)
-    log_max = log10(params.Qnorm_max)
+function mean_particle_mass_grid(params::TabulationParameters{FT}) where FT
+    n = params.number_of_mass_points
+    log_min = log10(params.minimum_mean_particle_mass)
+    log_max = log10(params.maximum_mean_particle_mass)
 
     return [FT(10^(log_min + (i-1) * (log_max - log_min) / (n - 1))) for i in 1:n]
 end
 
 """
-    Fr_grid(params::TabulationParameters)
+    rime_fraction_grid(params::TabulationParameters)
 
-Generate the rime fraction grid points (linearly spaced).
+Generate the rime fraction grid points (linearly spaced from 0 to 1).
 """
-function Fr_grid(params::TabulationParameters{FT}) where FT
-    n = params.n_Fr
+function rime_fraction_grid(params::TabulationParameters{FT}) where FT
+    n = params.number_of_rime_fraction_points
     return [FT((i-1) / (n - 1)) for i in 1:n]
 end
 
 """
-    Fl_grid(params::TabulationParameters)
+    liquid_fraction_grid(params::TabulationParameters)
 
-Generate the liquid fraction grid points (linearly spaced).
+Generate the liquid fraction grid points (linearly spaced from 0 to 1).
 """
-function Fl_grid(params::TabulationParameters{FT}) where FT
-    n = params.n_Fl
+function liquid_fraction_grid(params::TabulationParameters{FT}) where FT
+    n = params.number_of_liquid_fraction_points
     return [FT((i-1) / (n - 1)) for i in 1:n]
 end
 
 """
-    state_from_Qnorm(Qnorm, Fᶠ, Fˡ; ρᶠ=400)
+    state_from_mean_particle_mass(FT, mean_particle_mass, rime_fraction, liquid_fraction; rime_density=400)
 
-Create an IceSizeDistributionState from normalized quantities.
+Create an IceSizeDistributionState from physical quantities.
 
-Given Q_norm = qⁱ/Nⁱ (mass per particle), we need to determine
+Given mean particle mass = qⁱ/Nⁱ (mass per particle), we need to determine
 the size distribution parameters (N₀, μ, λ).
 
 Using the gamma distribution moments:
 - M₀ = N = N₀ Γ(μ+1) / λ^{μ+1}
 - M₃ = q/ρ = N₀ Γ(μ+4) / λ^{μ+4}
 
-The ratio gives Q_norm ∝ Γ(μ+4) / (Γ(μ+1) λ³)
+The ratio gives mean_particle_mass ∝ Γ(μ+4) / (Γ(μ+1) λ³)
 """
-function state_from_Qnorm(FT, Qnorm, Fᶠ, Fˡ; ρᶠ=FT(400), μ=FT(0))
-    # For μ=0: Q_norm ≈ 6 / λ³ * (some density factor)
-    # Invert to get λ from Q_norm
+function state_from_mean_particle_mass(FT, mean_particle_mass, rime_fraction, liquid_fraction;
+                                        rime_density = FT(400),
+                                        shape_parameter = FT(0))
+    # For μ=0: mean_particle_mass ≈ 6 / λ³ * (some density factor)
+    # Invert to get λ from mean_particle_mass
 
     # Simplified: assume particle mass m ~ ρ_eff D³
-    # Q_norm ~ D³ means λ ~ 1/D ~ Q_norm^{-1/3}
+    # mean_particle_mass ~ D³ means λ ~ 1/D ~ mean_particle_mass^{-1/3}
 
-    ρⁱ = FT(917)  # pure ice density
-    ρ_eff = (1 - Fᶠ) * ρⁱ * FT(0.1) + Fᶠ * ρᶠ
+    pure_ice_density = FT(917)
+    unrimed_effective_density_factor = FT(0.1)  # Aggregates have ~10% bulk density of pure ice
+    effective_density = (1 - rime_fraction) * pure_ice_density * unrimed_effective_density_factor + 
+                        rime_fraction * rime_density
 
-    # Characteristic diameter from Q_norm = (π/6) ρ_eff D³
-    D_char = cbrt(6 * Qnorm / (FT(π) * ρ_eff))
+    # Characteristic diameter from mean_particle_mass = (π/6) ρ_eff D³
+    characteristic_diameter = cbrt(6 * mean_particle_mass / (FT(π) * effective_density))
 
-    # λ ~ 4 / D for exponential distribution
-    λ = FT(4) / max(D_char, FT(1e-8))
+    # λ ~ 4 / D for exponential distribution (μ = 0)
+    slope_parameter = FT(4) / max(characteristic_diameter, FT(1e-8))
 
-    # N₀ from normalization (set to give reasonable number concentration)
-    N₀ = FT(1e6)  # Placeholder
+    # N₀ from normalization (placeholder value for reasonable number concentration)
+    intercept_parameter = FT(1e6)
 
     return IceSizeDistributionState(
-        N₀, μ, λ, Fᶠ, Fˡ, ρᶠ
+        intercept_parameter,
+        shape_parameter,
+        slope_parameter,
+        rime_fraction,
+        liquid_fraction,
+        rime_density
     )
 end
 
-@kernel function _fill_integral_table!(table, integral, Qnorm_vals, Fᶠ_vals, Fˡ_vals,
-                                       quadrature_nodes, quadrature_weights)
-    i, j, k = @index(Global, NTuple)
+@kernel function _fill_integral_table!(table, integral,
+                                       mean_particle_mass_values,
+                                       rime_fraction_values,
+                                       liquid_fraction_values,
+                                       quadrature_nodes,
+                                       quadrature_weights)
+    i_mass, i_rime, i_liquid = @index(Global, NTuple)
 
-    Qnorm = @inbounds Qnorm_vals[i]
-    Fᶠ = @inbounds Fᶠ_vals[j]
-    Fˡ = @inbounds Fˡ_vals[k]
+    mean_particle_mass = @inbounds mean_particle_mass_values[i_mass]
+    rime_fraction = @inbounds rime_fraction_values[i_rime]
+    liquid_fraction = @inbounds liquid_fraction_values[i_liquid]
 
-    # Create state for this grid point
+    # Create size distribution state for this grid point
     FT = eltype(table)
-    state = state_from_Qnorm(FT, Qnorm, Fᶠ, Fˡ)
+    state = state_from_mean_particle_mass(FT, mean_particle_mass, rime_fraction, liquid_fraction)
 
     # Evaluate integral using pre-computed quadrature nodes/weights
-    @inbounds table[i, j, k] = evaluate_with_quadrature(integral, state,
-                                                         quadrature_nodes,
-                                                         quadrature_weights)
+    @inbounds table[i_mass, i_rime, i_liquid] = evaluate_with_quadrature(
+        integral, state, quadrature_nodes, quadrature_weights
+    )
 end
 
 """
@@ -165,19 +180,19 @@ This avoids allocation inside kernels.
                                           state::IceSizeDistributionState,
                                           nodes, weights)
     FT = typeof(state.slope)
-    λ = state.slope
+    slope_parameter = state.slope
     result = zero(FT)
-    n_quadrature = length(nodes)
+    number_of_quadrature_points = length(nodes)
 
-    for i in 1:n_quadrature
+    for i in 1:number_of_quadrature_points
         x = @inbounds nodes[i]
         w = @inbounds weights[i]
 
-        D = transform_to_diameter(x, λ)
-        J = jacobian_diameter_transform(x, λ)
-        f = integrand(integral, D, state)
+        diameter = transform_to_diameter(x, slope_parameter)
+        jacobian = jacobian_diameter_transform(x, slope_parameter)
+        integrand_value = integrand(integral, diameter, state)
 
-        result += w * f * J
+        result += w * integrand_value * jacobian
     end
 
     return result
@@ -188,13 +203,13 @@ end
 
 Generate a lookup table for a single P3 integral.
 
-This pre-computes integral values on a 3D grid of (Qnorm, Fᶠ, Fˡ) so that
-during simulation, values can be interpolated rather than computed.
+This pre-computes integral values on a 3D grid of (mean_particle_mass, rime_fraction, 
+liquid_fraction) so that during simulation, values can be interpolated rather than computed.
 
 # Arguments
 
 - `integral`: Integral type to tabulate (e.g., `MassWeightedFallSpeed()`)
-- `arch`: `CPU()` or `GPU()` - determines where table is stored
+- `arch`: `CPU()` or `GPU()` - determines where table is stored and computed
 - `params`: [`TabulationParameters`](@ref) defining the grid
 
 # Returns
@@ -204,30 +219,33 @@ during simulation, values can be interpolated rather than computed.
 function tabulate(integral::AbstractP3Integral, arch,
                   params::TabulationParameters{FT} = TabulationParameters(FT)) where FT
 
-    Qnorm_vals = Qnorm_grid(params)
-    Fᶠ_vals = Fr_grid(params)
-    Fˡ_vals = Fl_grid(params)
+    mean_particle_mass_values = mean_particle_mass_grid(params)
+    rime_fraction_values = rime_fraction_grid(params)
+    liquid_fraction_values = liquid_fraction_grid(params)
 
-    n_Q = params.n_Qnorm
-    n_Fᶠ = params.n_Fr
-    n_Fˡ = params.n_Fl
-    n_quad = params.n_quadrature
+    n_mass = params.number_of_mass_points
+    n_rime = params.number_of_rime_fraction_points
+    n_liquid = params.number_of_liquid_fraction_points
+    n_quadrature = params.number_of_quadrature_points
 
     # Pre-compute quadrature nodes and weights
-    nodes, weights = chebyshev_gauss_nodes_weights(FT, n_quad)
+    nodes, weights = chebyshev_gauss_nodes_weights(FT, n_quadrature)
 
-    # Allocate table on CPU first
-    table = zeros(FT, n_Q, n_Fᶠ, n_Fˡ)
+    # Allocate table and transfer grid arrays to target architecture
+    table = on_architecture(arch, zeros(FT, n_mass, n_rime, n_liquid))
+    mass_values_on_arch = on_architecture(arch, mean_particle_mass_values)
+    rime_values_on_arch = on_architecture(arch, rime_fraction_values)
+    liquid_values_on_arch = on_architecture(arch, liquid_fraction_values)
+    nodes_on_arch = on_architecture(arch, nodes)
+    weights_on_arch = on_architecture(arch, weights)
 
-    # Launch kernel to fill table
-    # Note: tabulation is always done on CPU since quadrature uses a for loop
-    # The resulting table is then transferred to GPU if needed
-    kernel! = _fill_integral_table!(device(CPU()), min(256, n_Q * n_Fᶠ * n_Fˡ))
-    kernel!(table, integral, Qnorm_vals, Fᶠ_vals, Fˡ_vals, nodes, weights;
-            ndrange = (n_Q, n_Fᶠ, n_Fˡ))
+    # Launch kernel to fill table on the target architecture
+    kernel! = _fill_integral_table!(device(arch), min(256, n_mass * n_rime * n_liquid))
+    kernel!(table, integral,
+            mass_values_on_arch, rime_values_on_arch, liquid_values_on_arch,
+            nodes_on_arch, weights_on_arch;
+            ndrange = (n_mass, n_rime, n_liquid))
 
-    # TODO: Transfer table to GPU architecture if arch != CPU()
-    # For now, just return CPU array
     return TabulatedIntegral(table)
 end
 
@@ -238,16 +256,16 @@ Tabulate all integrals in an IceFallSpeed container.
 
 Returns a new IceFallSpeed with TabulatedIntegral fields.
 """
-function tabulate(fs::IceFallSpeed{FT}, arch,
+function tabulate(fall_speed::IceFallSpeed{FT}, arch,
                   params::TabulationParameters{FT} = TabulationParameters(FT)) where FT
 
     return IceFallSpeed(
-        fs.reference_air_density,
-        fs.fall_speed_coefficient,
-        fs.fall_speed_exponent,
-        tabulate(fs.number_weighted, arch, params),
-        tabulate(fs.mass_weighted, arch, params),
-        tabulate(fs.reflectivity_weighted, arch, params)
+        fall_speed.reference_air_density,
+        fall_speed.fall_speed_coefficient,
+        fall_speed.fall_speed_exponent,
+        tabulate(fall_speed.number_weighted, arch, params),
+        tabulate(fall_speed.mass_weighted, arch, params),
+        tabulate(fall_speed.reflectivity_weighted, arch, params)
     )
 end
 
@@ -256,18 +274,18 @@ end
 
 Tabulate all integrals in an IceDeposition container.
 """
-function tabulate(dep::IceDeposition{FT}, arch,
+function tabulate(deposition::IceDeposition{FT}, arch,
                   params::TabulationParameters{FT} = TabulationParameters(FT)) where FT
 
     return IceDeposition(
-        dep.thermal_conductivity,
-        dep.vapor_diffusivity,
-        tabulate(dep.ventilation, arch, params),
-        tabulate(dep.ventilation_enhanced, arch, params),
-        tabulate(dep.small_ice_ventilation_constant, arch, params),
-        tabulate(dep.small_ice_ventilation_reynolds, arch, params),
-        tabulate(dep.large_ice_ventilation_constant, arch, params),
-        tabulate(dep.large_ice_ventilation_reynolds, arch, params)
+        deposition.thermal_conductivity,
+        deposition.vapor_diffusivity,
+        tabulate(deposition.ventilation, arch, params),
+        tabulate(deposition.ventilation_enhanced, arch, params),
+        tabulate(deposition.small_ice_ventilation_constant, arch, params),
+        tabulate(deposition.small_ice_ventilation_reynolds, arch, params),
+        tabulate(deposition.large_ice_ventilation_constant, arch, params),
+        tabulate(deposition.large_ice_ventilation_reynolds, arch, params)
     )
 end
 
@@ -290,7 +308,8 @@ by lookup tables.
 
 # Keyword Arguments
 
-Passed to [`TabulationParameters`](@ref): `n_Qnorm`, `n_Fr`, etc.
+Passed to [`TabulationParameters`](@ref): `number_of_mass_points`, 
+`number_of_rime_fraction_points`, etc.
 
 # Returns
 
@@ -303,7 +322,7 @@ using Oceananigans
 using Breeze.Microphysics.PredictedParticleProperties
 
 p3 = PredictedParticlePropertiesMicrophysics()
-p3_fast = tabulate(p3, :ice_fall_speed, CPU(); n_Qnorm=100)
+p3_fast = tabulate(p3, :ice_fall_speed, CPU(); number_of_mass_points=100)
 ```
 """
 function tabulate(p3::PredictedParticlePropertiesMicrophysics{FT},

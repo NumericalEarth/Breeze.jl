@@ -85,7 +85,7 @@ Breeze interfaces with ClimaOcean for coupled atmosphere-ocean simulations.
     long_function(a = 1,
                   b = 2)
     ```
-    * Variables should be declared `const` _only when necessary_, and not otherwise. This helps interpret the meaning and usage of variables. Do not overuse `const`.
+    * **NEVER use `const` in examples or scripts.** Variables should be declared `const` _only when necessary_ in source code (e.g., for performance-critical global variables in modules), and not otherwise. In examples and validation scripts, just use regular variable assignment. This helps interpret the meaning and usage of variables and avoids unnecessary complexity.
   - `TitleCase` style is reserved for types, type aliases, and constructors.
   - `snake_case` style should be used for functions and variables (instances of types)
   - "Number variables" (`Nx`, `Ny`) should start with capital `N`. For number of time steps use `Nt`.
