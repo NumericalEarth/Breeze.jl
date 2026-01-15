@@ -112,3 +112,9 @@ To learn these foundational components of Breeze, please see the [Oceananigans d
 
 If you're familiar with Oceananigans, you'll feel right at home with Breeze.
 If you're new to both, Breeze is a great entry point—and the skills you develop transfer directly to ocean and climate modeling with Oceananigans and [ClimaOcean.jl](https://github.com/CliMA/ClimaOcean.jl).
+
+## Citing
+
+If you use Breeze for research, teaching, or fun, we'd be grateful if you give credit by citing the corresponding Zenodo record, e.g.,
+
+> Wagner, G. L. et al. (2026). NumericalEarth/Breeze.jl. Zenodo. DOI:[10.5281/zenodo.18050353](https://doi.org/10.5281/zenodo.18050353)
