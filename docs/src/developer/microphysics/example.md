@@ -161,7 +161,7 @@ import Breeze.AtmosphereModels: maybe_adjust_thermodynamic_state
 
 ## Summary
 
-To implement a new microphysics scheme, you need to:
+To implement a new microphysics scheme, we need to:
 
 1. **Define a struct** to hold scheme parameters
 2. **Implement `prognostic_field_names`** to list density-weighted prognostic variables
