@@ -17,7 +17,7 @@ without modification.
 
 | Function | Arguments | Description |
 |----------|-----------|-------------|
-| [`microphysical_state`](@ref) | `(microphysics, ρ, μ, 𝒰)` | **Primary interface**. Build scheme-specific state from scalars. |
+| `microphysical_state` | `(microphysics, ρ, μ, 𝒰)` | **Primary interface**. Build scheme-specific state from scalars. |
 | `grid_microphysical_state` | `(i, j, k, grid, microphysics, μ_fields, ρ, 𝒰)` | **Generic wrapper**. Extracts prognostics then calls gridless version. |
 
 **Design principle**: Schemes implement the gridless `microphysical_state`; the grid-indexed version is generic.
@@ -32,8 +32,8 @@ Arguments:
 
 | Function | Arguments | Description |
 |----------|-----------|-------------|
-| [`microphysical_tendency`](@ref) | `(microphysics, name, ρ, ℳ, 𝒰, constants)` | **State-based**. Compute tendency for variable `name`. |
-| [`grid_microphysical_tendency`](@ref) | `(i, j, k, grid, microphysics, name, ρ, fields, 𝒰, constants)` | **Generic wrapper**. Builds `ℳ` and dispatches to state-based version. |
+| `microphysical_tendency` | `(microphysics, name, ρ, ℳ, 𝒰, constants)` | **State-based**. Compute tendency for variable `name`. |
+| `grid_microphysical_tendency` | `(i, j, k, grid, microphysics, name, ρ, fields, 𝒰, constants)` | **Generic wrapper**. Builds `ℳ` and dispatches to state-based version. |
 
 **Design principle**: Schemes implement the state-based version; grid-indexed is generic.
 
@@ -43,8 +43,8 @@ The `name` argument is a `Val` type (e.g., `Val(:ρqᶜˡ)`) that dispatches to 
 
 | Function | Arguments | Description |
 |----------|-----------|-------------|
-| [`moisture_fractions`](@ref) | `(microphysics, ℳ, qᵗ)` | **State-based**. Partition moisture into vapor, liquid, ice. |
-| [`grid_moisture_fractions`](@ref) | `(i, j, k, grid, microphysics, ρ, qᵗ, μ_fields)` | **Generic wrapper**. Builds state and dispatches. |
+| `moisture_fractions` | `(microphysics, ℳ, qᵗ)` | **State-based**. Partition moisture into vapor, liquid, ice. |
+| `grid_moisture_fractions` | `(i, j, k, grid, microphysics, ρ, qᵗ, μ_fields)` | **Generic wrapper**. Builds state and dispatches. |
 
 **Note**: Non-equilibrium schemes don't need `𝒰` to build their state (they use prognostic fields).
 Saturation adjustment schemes override `grid_moisture_fractions` directly since they read cloud
@@ -54,7 +54,7 @@ condensate from diagnostic fields.
 
 | Function | Arguments | Description |
 |----------|-----------|-------------|
-| [`maybe_adjust_thermodynamic_state`](@ref) | `(𝒰, microphysics, qᵗ, constants)` | Apply saturation adjustment if scheme uses it. |
+| `maybe_adjust_thermodynamic_state` | `(𝒰, microphysics, qᵗ, constants)` | Apply saturation adjustment if scheme uses it. |
 
 This function is fully gridless—it takes only scalar thermodynamic arguments.
 Non-equilibrium schemes simply return `𝒰` unchanged. Saturation adjustment schemes perform
@@ -64,8 +64,8 @@ iterative adjustment to partition moisture between vapor and condensate.
 
 | Function | Arguments | Description |
 |----------|-----------|-------------|
-| [`update_microphysical_auxiliaries!`](@ref) | `(μ, i, j, k, grid, microphysics, ℳ, ρ, 𝒰, constants)` | **Single interface** for writing all auxiliary fields. |
-| [`update_microphysical_fields!`](@ref) | `(μ, i, j, k, grid, microphysics, ρ, 𝒰, constants)` | **Orchestrating function**. Builds `ℳ` and calls the above. |
+| `update_microphysical_auxiliaries!` | `(μ, i, j, k, grid, microphysics, ℳ, ρ, 𝒰, constants)` | **Single interface** for writing all auxiliary fields. |
+| `update_microphysical_fields!` | `(μ, i, j, k, grid, microphysics, ρ, 𝒰, constants)` | **Orchestrating function**. Builds `ℳ` and calls the above. |
 
 **Why `i, j, k` is needed**: Grid indices cannot be eliminated because:
 1. Fields must be written at specific grid points
@@ -79,8 +79,8 @@ iterative adjustment to partition moisture between vapor and condensate.
 
 | Function | Arguments | Description |
 |----------|-----------|-------------|
-| [`prognostic_field_names`](@ref) | `(microphysics)` | Return tuple of prognostic field names (e.g., `(:ρqᶜˡ, :ρqʳ)`) |
-| [`materialize_microphysical_fields`](@ref) | `(microphysics, grid, bcs)` | Create all microphysical fields (prognostic + auxiliary) |
+| `prognostic_field_names` | `(microphysics)` | Return tuple of prognostic field names (e.g., `(:ρqᶜˡ, :ρqʳ)`) |
+| `materialize_microphysical_fields` | `(microphysics, grid, bcs)` | Create all microphysical fields (prognostic + auxiliary) |
 
 **Field categories created by `materialize_microphysical_fields`**:
 
@@ -94,33 +94,74 @@ iterative adjustment to partition moisture between vapor and condensate.
 
 | Function | Arguments | Description |
 |----------|-----------|-------------|
-| [`microphysical_velocities`](@ref) | `(microphysics, μ_fields, name)` | Return terminal velocities for advection of tracer `name` |
-| [`specific_humidity`](@ref) | `(microphysics, model)` | Return vapor mass fraction field |
+| `microphysical_velocities` | `(microphysics, μ_fields, name)` | Return terminal velocities for advection of tracer `name` |
+| `specific_humidity` | `(microphysics, model)` | Return vapor mass fraction field |
 
 ## Scheme Implementation Checklist
 
-### Required Functions
+The interface is designed so that a **minimal implementation** enables parcel model support,
+while **additional functions** are needed for full Eulerian (grid-based LES) support.
+
+### Core Functions (Parcel Model)
+
+These functions are sufficient to use a microphysics scheme with [`ParcelModel`](@ref):
 
 | Function | Purpose |
 |----------|---------|
 | `microphysical_state(microphysics, ρ, μ, 𝒰)` | Build state from prognostics |
 | `microphysical_tendency(microphysics, name, ρ, ℳ, 𝒰, constants)` | Compute tendencies |
+| `moisture_fractions(microphysics, ℳ, qᵗ)` | Partition moisture (if generic doesn't work) |
 | `prognostic_field_names(microphysics)` | List prognostic variables |
-| `materialize_microphysical_fields(microphysics, grid, bcs)` | Create fields |
-| `update_microphysical_auxiliaries!(μ, i, j, k, grid, microphysics, ℳ, ρ, 𝒰, constants)` | Update auxiliary fields |
 
-### Often Needed
+**Why this works**: Parcel models operate on scalar states at a single point.
+They don't need grid indexing, field materialization, or auxiliary field updates.
+The gridless interface is exactly what parcel dynamics requires.
 
-| Function | When to implement |
-|----------|-------------------|
-| `moisture_fractions(microphysics, ℳ, qᵗ)` | If generic version doesn't work for your scheme |
+### Eulerian-Only Functions (Grid-Based LES)
 
-### Saturation Adjustment Schemes Only
+These additional functions are required for full [`AtmosphereModel`](@ref) support:
+
+| Function | Purpose |
+|----------|---------|
+| `materialize_microphysical_fields(microphysics, grid, bcs)` | Create prognostic + auxiliary fields |
+| `update_microphysical_auxiliaries!(μ, i, j, k, grid, microphysics, ℳ, ρ, 𝒰, constants)` | Update auxiliary fields at grid points |
+| `microphysical_velocities(microphysics, μ_fields, name)` | Terminal velocities for tracer advection |
+
+**Why these are Eulerian-only**:
+- **Field materialization**: Parcel models don't have fields; they store scalars directly in `ParcelState`.
+- **Auxiliary updates**: Parcel models recompute derived quantities on-the-fly; they don't store them in fields.
+- **Terminal velocities**: Sedimentation is a grid-based concept (advection through space). In parcel models, 
+  sedimentation would be modeled as a mass sink in `microphysical_tendency`, not as spatial transport.
+
+### Summary Table
+
+| Function | Parcel | Eulerian | Notes |
+|----------|:------:|:--------:|-------|
+| `microphysical_state` | ✓ | ✓ | Core interface |
+| `microphysical_tendency` | ✓ | ✓ | Core interface |
+| `moisture_fractions` | ✓ | ✓ | Often use generic fallback |
+| `prognostic_field_names` | ✓ | ✓ | Required for both |
+| `materialize_microphysical_fields` | — | ✓ | Fields for grid storage |
+| `update_microphysical_auxiliaries!` | — | ✓ | Write to diagnostic fields |
+| `microphysical_velocities` | — | ✓ | Sedimentation advection |
+| `grid_microphysical_state` | — | — | Generic wrapper (don't override) |
+| `grid_microphysical_tendency` | — | — | Generic wrapper (don't override) |
+| `grid_moisture_fractions` | — | ✓* | Override for saturation adjustment |
+| `maybe_adjust_thermodynamic_state` | — | ✓* | Override for saturation adjustment |
+
+*Only needed for saturation adjustment schemes.
+
+### Saturation Adjustment Schemes
+
+Saturation adjustment schemes have some additional requirements:
 
 | Function | Purpose |
 |----------|---------|
 | `grid_moisture_fractions(...)` | Override to read from diagnostic fields |
 | `maybe_adjust_thermodynamic_state(...)` | Perform saturation adjustment |
+
+These are needed because saturation adjustment schemes diagnose cloud condensate from 
+thermodynamic state rather than prognosing it.
 
 ## State Types
 

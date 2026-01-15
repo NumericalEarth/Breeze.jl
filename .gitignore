@@ -29,6 +29,7 @@ Manifest.toml
 *.jld2
 *.png
 *.mp4
+*.svg
 
 # other files we don't want
 *.swp
