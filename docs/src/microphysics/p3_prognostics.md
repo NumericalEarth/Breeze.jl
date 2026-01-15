@@ -83,7 +83,7 @@ where:
 ### Cloud Liquid Tendency
 
 ```math
-\frac{\partial ρq^{cl}}{\partial t}\bigg|_{src} = \underbrace{COND}_{\text{condensation}} 
+\frac{\partial ρq^{cl}}{\partial t}\bigg|_{src} = \underbrace{COND}_{\text{condensation}}
 - \underbrace{EVAP}_{\text{evaporation}}
 - \underbrace{AUTO}_{\text{autoconversion}}
 - \underbrace{ACCR}_{\text{accretion by rain}}
@@ -291,4 +291,3 @@ println("  Minimum number mixing ratio: ", p3.minimum_number_mixing_ratio, " 1/k
 - [MilbrandtEtAl2025liquidfraction](@cite): Liquid fraction prognostic (``ρq^{wi}``)
 - [Morrison2025complete3moment](@cite): Complete tendency equations with all six ice variables
 - [MilbrandtYau2005](@cite): Multi-moment microphysics and sedimentation
-

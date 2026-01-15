@@ -45,7 +45,7 @@ Default coefficients give fall speeds in m/s for D in meters.
 **Integrals:**
 
 - `shape_parameter`: Diagnosed μ_r from q_r, N_r
-- `velocity_number`, `velocity_mass`: Weighted fall speeds  
+- `velocity_number`, `velocity_mass`: Weighted fall speeds
 - `evaporation`: Rate integral for rain evaporation
 
 # Keyword Arguments
@@ -83,4 +83,3 @@ function Base.show(io::IO, r::RainProperties)
     print(io, "aᵥ=", r.fall_speed_coefficient, ", ")
     print(io, "bᵥ=", r.fall_speed_exponent, ")")
 end
-

@@ -64,4 +64,3 @@ function Base.show(io::IO, c::IceCollection)
     print(io, "Eⁱᶜ=", c.ice_cloud_collection_efficiency, ", ")
     print(io, "Eⁱʳ=", c.ice_rain_collection_efficiency, ")")
 end
-

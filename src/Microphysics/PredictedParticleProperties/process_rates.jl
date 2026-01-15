@@ -70,21 +70,21 @@ in a large-eddy simulation model of marine stratocumulus. Mon. Wea. Rev.
                                            k₁ = 2.47e-2,
                                            q_threshold = 1e-4)
     FT = typeof(qᶜˡ)
-    
+
     # No autoconversion below threshold
     qᶜˡ_eff = clamp_positive(qᶜˡ - q_threshold)
-    
+
     # Khairoutdinov-Kogan (2000) autoconversion: ∂qʳ/∂t = k₁ * qᶜˡ^α * Nc^β
     # With α ≈ 2.47, β ≈ -1.79, simplified here to:
     # ∂qʳ/∂t = k₁ * qᶜˡ^2.47 * (Nc/1e8)^(-1.79)
     Nc_scaled = Nc / FT(1e8)  # Reference concentration 100/cm³
-    
+
     # Avoid division by zero
     Nc_scaled = max(Nc_scaled, FT(0.01))
-    
+
     α = FT(2.47)
     β = FT(-1.79)
-    
+
     return k₁ * qᶜˡ_eff^α * Nc_scaled^β
 end
 
@@ -110,13 +110,13 @@ Khairoutdinov, M. and Kogan, Y. (2000). Mon. Wea. Rev.
 @inline function rain_accretion_rate(qᶜˡ, qʳ, ρ;
                                       k₂ = 67.0)
     FT = typeof(qᶜˡ)
-    
+
     qᶜˡ_eff = clamp_positive(qᶜˡ)
     qʳ_eff = clamp_positive(qʳ)
-    
+
     # KK2000: ∂qʳ/∂t = k₂ * (qᶜˡ * qʳ)^1.15
     α = FT(1.15)
-    
+
     return k₂ * (qᶜˡ_eff * qʳ_eff)^α
 end
 
@@ -137,13 +137,13 @@ Large rain drops collect smaller ones, reducing number but conserving mass.
 """
 @inline function rain_self_collection_rate(qʳ, nʳ, ρ)
     FT = typeof(qʳ)
-    
+
     qʳ_eff = clamp_positive(qʳ)
     nʳ_eff = clamp_positive(nʳ)
-    
+
     # Seifert & Beheng (2001) self-collection
     k_rr = FT(4.33)  # Collection kernel coefficient
-    
+
     # ∂nʳ/∂t = -k_rr * ρ * qʳ * nʳ
     return -k_rr * ρ * qʳ_eff * nʳ_eff
 end
@@ -170,22 +170,22 @@ Rain drops evaporate when the ambient air is subsaturated (qᵛ < qᵛ⁺).
 @inline function rain_evaporation_rate(qʳ, qᵛ, qᵛ⁺, T, ρ, nʳ;
                                         τ_evap = 10.0)
     FT = typeof(qʳ)
-    
+
     qʳ_eff = clamp_positive(qʳ)
-    
+
     # Subsaturation
     S = qᵛ - qᵛ⁺
-    
+
     # Only evaporate in subsaturated conditions
     S_sub = min(S, zero(FT))
-    
+
     # Simplified relaxation: ∂qʳ/∂t = S / τ
     # Limited by available rain
     evap_rate = S_sub / τ_evap
-    
+
     # Cannot evaporate more than available
     max_evap = -qʳ_eff / τ_evap
-    
+
     return max(evap_rate, max_evap)
 end
 
@@ -216,19 +216,19 @@ and sublimates when subsaturated.
 @inline function ice_deposition_rate(qⁱ, qᵛ, qᵛ⁺ⁱ, T, ρ, nⁱ;
                                       τ_dep = 10.0)
     FT = typeof(qⁱ)
-    
+
     qⁱ_eff = clamp_positive(qⁱ)
-    
+
     # Supersaturation with respect to ice
     Sⁱ = qᵛ - qᵛ⁺ⁱ
-    
+
     # Relaxation toward saturation
     dep_rate = Sⁱ / τ_dep
-    
+
     # Limit sublimation to available ice
     is_sublimation = Sⁱ < 0
     max_sublim = -qⁱ_eff / τ_dep
-    
+
     return ifelse(is_sublimation, max(dep_rate, max_sublim), dep_rate)
 end
 
@@ -265,41 +265,41 @@ integrals over the size distribution with regime-dependent ventilation.
                                                   Kᵗʰ = Kᵗʰ_ref,
                                                   ℒⁱ = 2.834e6)  # Latent heat [J/kg]
     FT = typeof(qⁱ)
-    
+
     qⁱ_eff = clamp_positive(qⁱ)
     nⁱ_eff = clamp_positive(nⁱ)
-    
+
     # Mean mass and diameter (simplified)
     m_mean = safe_divide(qⁱ_eff, nⁱ_eff, FT(1e-12))
-    
+
     # Estimate mean diameter from mass assuming ρ_eff
     ρ_eff = (1 - Fᶠ) * FT(ρⁱ) * FT(0.1) + Fᶠ * ρᶠ  # Effective density
     D_mean = cbrt(6 * m_mean / (FT(π) * ρ_eff))
-    
+
     # Capacitance (sphere for small, 0.48*D for large)
     D_threshold = FT(100e-6)
     C = ifelse(D_mean < D_threshold, D_mean / 2, FT(0.48) * D_mean)
-    
+
     # Supersaturation with respect to ice
     Sⁱ = (qᵛ - qᵛ⁺ⁱ) / max(qᵛ⁺ⁱ, FT(1e-10))
-    
+
     # Vapor diffusion coefficient (simplified)
     G = 4 * FT(π) * C * Dᵛ * ρ
-    
+
     # Ventilation factor (simplified average)
     fᵛ = FT(1.0) + FT(0.5) * sqrt(D_mean / FT(100e-6))
-    
+
     # Deposition rate per particle
     dm_dt = G * fᵛ * Sⁱ * qᵛ⁺ⁱ
-    
+
     # Total rate
     dep_rate = nⁱ_eff * dm_dt
-    
+
     # Limit sublimation
     is_sublimation = Sⁱ < 0
     τ_sub = FT(10.0)
     max_sublim = -qⁱ_eff / τ_sub
-    
+
     return ifelse(is_sublimation, max(dep_rate, max_sublim), dep_rate)
 end
 
@@ -330,20 +330,20 @@ The melting rate depends on the temperature excess and particle surface area.
                                    T_freeze = 273.15,
                                    τ_melt = 60.0)
     FT = typeof(qⁱ)
-    
+
     qⁱ_eff = clamp_positive(qⁱ)
-    
+
     # Temperature excess above freezing
     ΔT = T - FT(T_freeze)
     ΔT_pos = clamp_positive(ΔT)
-    
+
     # Melting rate proportional to temperature excess
     # Faster melting for larger ΔT
     rate_factor = ΔT_pos / FT(1.0)  # Normalize to 1K
-    
+
     # Melt rate
     melt_rate = qⁱ_eff * rate_factor / τ_melt
-    
+
     return melt_rate
 end
 
@@ -364,14 +364,14 @@ Number of melted particles equals number of rain drops produced.
 """
 @inline function ice_melting_number_rate(qⁱ, nⁱ, qⁱ_melt_rate)
     FT = typeof(qⁱ)
-    
+
     qⁱ_eff = clamp_positive(qⁱ)
     nⁱ_eff = clamp_positive(nⁱ)
-    
+
     # Number rate proportional to mass rate
     # ∂nⁱ/∂t = (nⁱ/qⁱ) * ∂qⁱ_melt/∂t
     ratio = safe_divide(nⁱ_eff, qⁱ_eff, zero(FT))
-    
+
     return -ratio * qⁱ_melt_rate
 end
 
@@ -407,35 +407,35 @@ integrals over the size distribution. Here we use a simplified relaxation form.
                                        τ_agg = 600.0)
     FT = typeof(qⁱ)
     T_freeze = FT(273.15)
-    
+
     qⁱ_eff = clamp_positive(qⁱ)
     nⁱ_eff = clamp_positive(nⁱ)
-    
+
     # No aggregation for small ice content
     qⁱ_threshold = FT(1e-8)
     nⁱ_threshold = FT(1e2)  # per kg
-    
+
     # Temperature-dependent sticking efficiency (P3 uses linear ramp)
     # E_ii = 0.1 at T < 253 K, linear ramp to 1.0 at T > 268 K
     T_low = FT(253.15)
     T_high = FT(268.15)
-    
+
     Eᵢᵢ = ifelse(T < T_low,
                   FT(0.1),
                   ifelse(T > T_high,
                          Eᵢᵢ_max,
                          FT(0.1) + (T - T_low) * FT(0.9) / (T_high - T_low)))
-    
+
     # Aggregation rate: collision kernel ∝ n² × collection efficiency
     # Simplified: ∂n/∂t = -E_ii × n² / (τ × n_ref)
     # The rate scales with n² because it's a binary collision process
     n_ref = FT(1e4)  # Reference number concentration [1/kg]
-    
+
     # Only aggregate above thresholds
     rate = ifelse(qⁱ_eff > qⁱ_threshold && nⁱ_eff > nⁱ_threshold,
                    -Eᵢᵢ * nⁱ_eff^2 / (τ_agg * n_ref),
                    zero(FT))
-    
+
     return rate
 end
 
@@ -471,23 +471,23 @@ P3 uses lookup table integrals. Here we use simplified continuous collection.
                                     τ_rim = 300.0)
     FT = typeof(qᶜˡ)
     T_freeze = FT(273.15)
-    
+
     qᶜˡ_eff = clamp_positive(qᶜˡ)
     qⁱ_eff = clamp_positive(qⁱ)
     nⁱ_eff = clamp_positive(nⁱ)
-    
+
     # Thresholds
     q_threshold = FT(1e-8)
-    
+
     # Only rime below freezing
     below_freezing = T < T_freeze
-    
+
     # Simplified riming rate: ∂qᶜˡ/∂t = -E × qᶜˡ × qⁱ / τ
     # Rate increases with both cloud and ice content
     rate = ifelse(below_freezing && qᶜˡ_eff > q_threshold && qⁱ_eff > q_threshold,
                    Eᶜⁱ * qᶜˡ_eff * qⁱ_eff / τ_rim,
                    zero(FT))
-    
+
     return rate
 end
 
@@ -506,10 +506,10 @@ Compute cloud droplet number sink from riming.
 """
 @inline function cloud_riming_number_rate(qᶜˡ, Nc, riming_rate)
     FT = typeof(qᶜˡ)
-    
+
     # Number rate proportional to mass rate
     ratio = safe_divide(Nc, qᶜˡ, zero(FT))
-    
+
     return -ratio * riming_rate
 end
 
@@ -538,21 +538,21 @@ This increases ice mass and rime mass.
                                    τ_rim = 200.0)
     FT = typeof(qʳ)
     T_freeze = FT(273.15)
-    
+
     qʳ_eff = clamp_positive(qʳ)
     qⁱ_eff = clamp_positive(qⁱ)
-    
+
     # Thresholds
     q_threshold = FT(1e-8)
-    
+
     # Only rime below freezing
     below_freezing = T < T_freeze
-    
+
     # Simplified riming rate
     rate = ifelse(below_freezing && qʳ_eff > q_threshold && qⁱ_eff > q_threshold,
                    Eʳⁱ * qʳ_eff * qⁱ_eff / τ_rim,
                    zero(FT))
-    
+
     return rate
 end
 
@@ -571,10 +571,10 @@ Compute rain number sink from riming.
 """
 @inline function rain_riming_number_rate(qʳ, nʳ, riming_rate)
     FT = typeof(qʳ)
-    
+
     # Number rate proportional to mass rate
     ratio = safe_divide(nʳ, qʳ, zero(FT))
-    
+
     return -ratio * riming_rate
 end
 
@@ -603,20 +603,20 @@ P3 uses empirical relations from Cober & List (1993).
                                ρ_rim_max = 900.0)
     FT = typeof(T)
     T_freeze = FT(273.15)
-    
+
     # Temperature factor: denser rime at warmer T
     Tc = T - T_freeze  # Celsius
     Tc_clamped = clamp(Tc, FT(-40), FT(0))
-    
+
     # Linear interpolation: 100 kg/m³ at -40°C, 400 kg/m³ at 0°C
     ρ_T = FT(100) + (FT(400) - FT(100)) * (Tc_clamped + FT(40)) / FT(40)
-    
+
     # Velocity factor: denser rime at higher fall speeds
     vᵢ_clamped = clamp(vᵢ, FT(0.1), FT(5))
     ρ_v = FT(1) + FT(0.5) * (vᵢ_clamped - FT(0.1))
-    
+
     ρ_rim = ρ_T * ρ_v
-    
+
     return clamp(ρ_rim, ρ_rim_min, ρ_rim_max)
 end
 
@@ -651,24 +651,24 @@ Milbrandt et al. (2025). Liquid shedding above a threshold fraction.
                                 qʷⁱ_max_frac = 0.3)
     FT = typeof(qʷⁱ)
     T_freeze = FT(273.15)
-    
+
     qʷⁱ_eff = clamp_positive(qʷⁱ)
     qⁱ_eff = clamp_positive(qⁱ)
-    
+
     # Total particle mass
     qᵗᵒᵗ = qⁱ_eff + qʷⁱ_eff
-    
+
     # Maximum liquid that can be retained
     qʷⁱ_max = qʷⁱ_max_frac * qᵗᵒᵗ
-    
+
     # Excess liquid sheds
     qʷⁱ_excess = clamp_positive(qʷⁱ_eff - qʷⁱ_max)
-    
+
     # Enhanced shedding above freezing
     T_factor = ifelse(T > T_freeze, FT(3), FT(1))
-    
+
     rate = T_factor * qʷⁱ_excess / τ_shed
-    
+
     return rate
 end
 
@@ -688,7 +688,7 @@ Shed liquid forms rain drops of approximately 1 mm diameter.
 """
 @inline function shedding_number_rate(shed_rate; m_shed = 5.2e-7)
     FT = typeof(shed_rate)
-    
+
     # Number of drops formed
     return shed_rate / m_shed
 end
@@ -717,20 +717,20 @@ Milbrandt et al. (2025). Refreezing in the liquid fraction scheme.
                                   τ_frz = 30.0)
     FT = typeof(qʷⁱ)
     T_freeze = FT(273.15)
-    
+
     qʷⁱ_eff = clamp_positive(qʷⁱ)
-    
+
     # Only refreeze below freezing
     below_freezing = T < T_freeze
-    
+
     # Faster refreezing at colder temperatures
     ΔT = clamp_positive(T_freeze - T)
     T_factor = FT(1) + FT(0.1) * ΔT  # Faster at colder T
-    
+
     rate = ifelse(below_freezing && qʷⁱ_eff > FT(1e-10),
                    T_factor * qʷⁱ_eff / τ_frz,
                    zero(FT))
-    
+
     return rate
 end
 
@@ -750,22 +750,22 @@ struct P3ProcessRates{FT}
     accretion :: FT                # Cloud → rain mass (via rain sweep-out) [kg/kg/s]
     rain_evaporation :: FT         # Rain → vapor mass [kg/kg/s]
     rain_self_collection :: FT     # Rain number reduction [1/kg/s]
-    
+
     # Phase 1: Ice tendencies
     deposition :: FT               # Vapor → ice mass [kg/kg/s]
     melting :: FT                  # Ice → rain mass [kg/kg/s]
     melting_number :: FT           # Ice number reduction from melting [1/kg/s]
-    
+
     # Phase 2: Ice aggregation
     aggregation :: FT              # Ice number reduction from self-collection [1/kg/s]
-    
+
     # Phase 2: Riming
     cloud_riming :: FT             # Cloud → ice via riming [kg/kg/s]
     cloud_riming_number :: FT      # Cloud number reduction [1/kg/s]
     rain_riming :: FT              # Rain → ice via riming [kg/kg/s]
     rain_riming_number :: FT       # Rain number reduction [1/kg/s]
     rime_density_new :: FT         # Density of new rime [kg/m³]
-    
+
     # Phase 2: Shedding and refreezing
     shedding :: FT                 # Liquid on ice → rain [kg/kg/s]
     shedding_number :: FT          # Rain number from shedding [1/kg/s]
@@ -789,7 +789,7 @@ Compute all P3 process rates (Phase 1 and Phase 2).
 """
 @inline function compute_p3_process_rates(i, j, k, grid, p3, μ, ρ, 𝒰, constants)
     FT = eltype(grid)
-    
+
     # Extract fields (density-weighted → specific)
     qᶜˡ = @inbounds μ.ρqᶜˡ[i, j, k] / ρ
     qʳ = @inbounds μ.ρqʳ[i, j, k] / ρ
@@ -799,23 +799,23 @@ Compute all P3 process rates (Phase 1 and Phase 2).
     qᶠ = @inbounds μ.ρqᶠ[i, j, k] / ρ
     bᶠ = @inbounds μ.ρbᶠ[i, j, k] / ρ
     qʷⁱ = @inbounds μ.ρqʷⁱ[i, j, k] / ρ
-    
+
     # Rime properties
     Fᶠ = safe_divide(qᶠ, qⁱ, zero(FT))  # Rime fraction
     ρᶠ_current = safe_divide(qᶠ, bᶠ, FT(400))  # Current rime density
-    
+
     # Thermodynamic state - temperature is computed from the state
     T = temperature(𝒰, constants)
     qᵛ = 𝒰.moisture_mass_fractions.vapor
-    
+
     # Saturation vapor mixing ratios (from thermodynamic state or compute)
     # For now, use simple approximations - will be replaced with proper thermo interface
     T_freeze = FT(273.15)
-    
+
     # Clausius-Clapeyron approximation for saturation
     eₛ_liquid = FT(611.2) * exp(FT(17.67) * (T - T_freeze) / (T - FT(29.65)))
     eₛ_ice = FT(611.2) * exp(FT(21.87) * (T - T_freeze) / (T - FT(7.66)))
-    
+
     # Convert to mass fractions (approximate)
     Rᵈ = FT(287.0)
     Rᵛ = FT(461.5)
@@ -823,10 +823,10 @@ Compute all P3 process rates (Phase 1 and Phase 2).
     p = ρ * Rᵈ * T  # Approximate pressure
     qᵛ⁺ = ε * eₛ_liquid / (p - (1 - ε) * eₛ_liquid)
     qᵛ⁺ⁱ = ε * eₛ_ice / (p - (1 - ε) * eₛ_ice)
-    
+
     # Cloud droplet properties
     Nc = p3.cloud.number_concentration
-    
+
     # =========================================================================
     # Phase 1: Rain processes
     # =========================================================================
@@ -834,41 +834,41 @@ Compute all P3 process rates (Phase 1 and Phase 2).
     accr = rain_accretion_rate(qᶜˡ, qʳ, ρ)
     rain_evap = rain_evaporation_rate(qʳ, qᵛ, qᵛ⁺, T, ρ, nʳ)
     rain_self = rain_self_collection_rate(qʳ, nʳ, ρ)
-    
+
     # =========================================================================
     # Phase 1: Ice deposition/sublimation and melting
     # =========================================================================
     dep = ice_deposition_rate(qⁱ, qᵛ, qᵛ⁺ⁱ, T, ρ, nⁱ)
     melt = ice_melting_rate(qⁱ, nⁱ, T, ρ)
     melt_n = ice_melting_number_rate(qⁱ, nⁱ, melt)
-    
+
     # =========================================================================
     # Phase 2: Ice aggregation
     # =========================================================================
     agg = ice_aggregation_rate(qⁱ, nⁱ, T, ρ)
-    
+
     # =========================================================================
     # Phase 2: Riming
     # =========================================================================
     # Cloud droplet collection by ice
     cloud_rim = cloud_riming_rate(qᶜˡ, qⁱ, nⁱ, T, ρ)
     cloud_rim_n = cloud_riming_number_rate(qᶜˡ, Nc, cloud_rim)
-    
+
     # Rain collection by ice
     rain_rim = rain_riming_rate(qʳ, qⁱ, nⁱ, T, ρ)
     rain_rim_n = rain_riming_number_rate(qʳ, nʳ, rain_rim)
-    
+
     # Rime density for new rime (simplified: use terminal velocity proxy)
     vᵢ = FT(1.0)  # Placeholder fall speed [m/s], will use lookup table later
     ρ_rim_new = rime_density(T, vᵢ)
-    
+
     # =========================================================================
     # Phase 2: Shedding and refreezing
     # =========================================================================
     shed = shedding_rate(qʷⁱ, qⁱ, T, ρ)
     shed_n = shedding_number_rate(shed)
     refrz = refreezing_rate(qʷⁱ, T, ρ)
-    
+
     return P3ProcessRates(
         # Phase 1: Rain
         autoconv, accr, rain_evap, rain_self,
@@ -947,20 +947,20 @@ Rain number loses from:
 @inline function tendency_ρnʳ(rates::P3ProcessRates, ρ, nⁱ, qⁱ;
                                m_rain_init = 5e-10)  # Initial rain drop mass [kg]
     FT = typeof(ρ)
-    
+
     # Phase 1: New drops from autoconversion
     n_from_autoconv = rates.autoconversion / m_rain_init
-    
+
     # Phase 1: New drops from melting (conserve number)
     n_from_melt = safe_divide(nⁱ * rates.melting, qⁱ, zero(FT))
-    
+
     # Phase 1: Self-collection reduces number (already negative)
     # Phase 2: Shedding creates new drops
     # Phase 2: Riming removes rain drops (already negative)
-    
-    return ρ * (n_from_autoconv + n_from_melt + 
-                rates.rain_self_collection + 
-                rates.shedding_number + 
+
+    return ρ * (n_from_autoconv + n_from_melt +
+                rates.rain_self_collection +
+                rates.shedding_number +
                 rates.rain_riming_number)
 end
 
@@ -1031,18 +1031,18 @@ Rime volume changes with rime mass: ∂bᶠ/∂t = ∂qᶠ/∂t / ρ_rime
 """
 @inline function tendency_ρbᶠ(rates::P3ProcessRates, ρ, Fᶠ, ρᶠ)
     FT = typeof(ρ)
-    
+
     ρᶠ_safe = max(ρᶠ, FT(100))
     ρ_rim_new_safe = max(rates.rime_density_new, FT(100))
-    
+
     # Phase 2: Volume gain from new rime (cloud + rain riming + refreezing)
     # Use density of new rime for fresh rime, current density for refreezing
-    volume_gain = (rates.cloud_riming + rates.rain_riming) / ρ_rim_new_safe + 
+    volume_gain = (rates.cloud_riming + rates.rain_riming) / ρ_rim_new_safe +
                    rates.refreezing / ρᶠ_safe
-    
+
     # Phase 1: Volume loss from melting (proportional to rime fraction)
     volume_loss = Fᶠ * rates.melting / ρᶠ_safe
-    
+
     return ρ * (volume_gain - volume_loss)
 end
 
@@ -1058,15 +1058,15 @@ The sixth moment (reflectivity) changes with:
 """
 @inline function tendency_ρzⁱ(rates::P3ProcessRates, ρ, qⁱ, zⁱ)
     FT = typeof(ρ)
-    
+
     # Simplified: Z changes proportionally to mass changes
     # More accurate version would use full integral formulation
     ratio = safe_divide(zⁱ, qⁱ, zero(FT))
-    
+
     # Net mass change for ice
-    mass_change = rates.deposition - rates.melting + 
+    mass_change = rates.deposition - rates.melting +
                   rates.cloud_riming + rates.rain_riming + rates.refreezing
-    
+
     return ρ * ratio * mass_change
 end
 
@@ -1130,26 +1130,26 @@ parameterization for mixed-phase clouds. Meteor. Atmos. Phys.
                                                        b = 0.8,
                                                        ρ₀ = 1.225)
     FT = typeof(qʳ)
-    
+
     qʳ_eff = clamp_positive(qʳ)
     nʳ_eff = max(nʳ, FT(1))  # Avoid division by zero
-    
+
     # Mean rain drop mass
     m̄ = qʳ_eff / nʳ_eff
-    
+
     # Mass-weighted mean diameter (assuming spherical drops)
     # m = (π/6) ρʷ D³ → D = (6m / (π ρʷ))^(1/3)
     D̄ₘ = cbrt(6 * m̄ / (FT(π) * FT(ρʷ)))
-    
+
     # Density correction factor
     ρ_correction = sqrt(FT(ρ₀) / ρ)
-    
+
     # Clamp diameter to physical range [0.1 mm, 5 mm]
     D̄ₘ_clamped = clamp(D̄ₘ, FT(1e-4), FT(5e-3))
-    
+
     # Terminal velocity
     vₜ = a * D̄ₘ_clamped^b * ρ_correction
-    
+
     # Clamp to reasonable range [0.1, 15] m/s
     return clamp(vₜ, FT(0.1), FT(15))
 end
@@ -1174,24 +1174,24 @@ Similar to mass-weighted but uses number-weighted mean diameter.
                                                          b = 0.8,
                                                          ρ₀ = 1.225)
     FT = typeof(qʳ)
-    
+
     qʳ_eff = clamp_positive(qʳ)
     nʳ_eff = max(nʳ, FT(1))
-    
+
     # Mean rain drop mass
     m̄ = qʳ_eff / nʳ_eff
-    
+
     # Number-weighted mean diameter is smaller than mass-weighted
     # For gamma distribution: D̄ₙ ≈ D̄ₘ × (μ+1)/(μ+4) where μ is shape parameter
     # Simplified: use D̄ₘ with factor ~0.6
     D̄ₘ = cbrt(6 * m̄ / (FT(π) * FT(ρʷ)))
     D̄ₙ = FT(0.6) * D̄ₘ
-    
+
     ρ_correction = sqrt(FT(ρ₀) / ρ)
     D̄ₙ_clamped = clamp(D̄ₙ, FT(1e-4), FT(5e-3))
-    
+
     vₜ = a * D̄ₙ_clamped^b * ρ_correction
-    
+
     return clamp(vₜ, FT(0.1), FT(15))
 end
 
@@ -1222,13 +1222,13 @@ Part I: Scheme description and idealized tests. J. Atmos. Sci.
 @inline function ice_terminal_velocity_mass_weighted(qⁱ, nⁱ, Fᶠ, ρᶠ, ρ;
                                                       ρ₀ = 1.225)
     FT = typeof(qⁱ)
-    
+
     qⁱ_eff = clamp_positive(qⁱ)
     nⁱ_eff = max(nⁱ, FT(1))
-    
+
     # Mean ice particle mass
     m̄ = qⁱ_eff / nⁱ_eff
-    
+
     # Effective ice density depends on riming
     # Unrimed: ρ_eff ≈ 100-200 kg/m³ (aggregates/dendrites)
     # Heavily rimed: ρ_eff ≈ ρᶠ ≈ 400-900 kg/m³ (graupel)
@@ -1236,18 +1236,18 @@ Part I: Scheme description and idealized tests. J. Atmos. Sci.
     ρᶠ_clamped = clamp(ρᶠ, FT(50), FT(900))
     ρ_eff_unrimed = FT(100)  # Aggregate effective density
     ρ_eff = ρ_eff_unrimed + Fᶠ_clamped * (ρᶠ_clamped - ρ_eff_unrimed)
-    
+
     # Effective diameter assuming spherical with effective density
     D̄ₘ = cbrt(6 * m̄ / (FT(π) * ρ_eff))
-    
+
     # Fall speed depends on particle type:
     # - Small ice (D < 100 μm): v ≈ 700 D² (Stokes regime)
     # - Large unrimed (D > 100 μm): v ≈ 11.7 D^0.41 (Mitchell 1996)
     # - Rimed/graupel: v ≈ 19.3 D^0.37
-    
+
     D_clamped = clamp(D̄ₘ, FT(1e-5), FT(0.02))  # 10 μm to 20 mm
     D_threshold = FT(100e-6)  # 100 μm
-    
+
     # Coefficients interpolated based on riming
     # Unrimed: a=11.7, b=0.41 (aggregates)
     # Rimed: a=19.3, b=0.37 (graupel-like)
@@ -1255,22 +1255,22 @@ Part I: Scheme description and idealized tests. J. Atmos. Sci.
     b_unrimed = FT(0.41)
     a_rimed = FT(19.3)
     b_rimed = FT(0.37)
-    
+
     a = a_unrimed + Fᶠ_clamped * (a_rimed - a_unrimed)
     b = b_unrimed + Fᶠ_clamped * (b_rimed - b_unrimed)
-    
+
     # Density correction
     ρ_correction = sqrt(FT(ρ₀) / ρ)
-    
+
     # Terminal velocity (large particle regime)
     vₜ_large = a * D_clamped^b * ρ_correction
-    
+
     # Small particle (Stokes) regime
     vₜ_small = FT(700) * D_clamped^2 * ρ_correction
-    
+
     # Blend between regimes
     vₜ = ifelse(D_clamped < D_threshold, vₜ_small, vₜ_large)
-    
+
     # Clamp to reasonable range [0.01, 8] m/s
     return clamp(vₜ, FT(0.01), FT(8))
 end
@@ -1293,11 +1293,11 @@ Compute number-weighted terminal velocity for ice.
 @inline function ice_terminal_velocity_number_weighted(qⁱ, nⁱ, Fᶠ, ρᶠ, ρ;
                                                         ρ₀ = 1.225)
     FT = typeof(qⁱ)
-    
+
     # Number-weighted velocity is smaller than mass-weighted
     # Approximate ratio: Vₙ/Vₘ ≈ 0.6 for typical distributions
     vₘ = ice_terminal_velocity_mass_weighted(qⁱ, nⁱ, Fᶠ, ρᶠ, ρ; ρ₀)
-    
+
     return FT(0.6) * vₘ
 end
 
@@ -1322,11 +1322,10 @@ Needed for the sixth moment (reflectivity) sedimentation in 3-moment P3.
 @inline function ice_terminal_velocity_reflectivity_weighted(qⁱ, nⁱ, zⁱ, Fᶠ, ρᶠ, ρ;
                                                               ρ₀ = 1.225)
     FT = typeof(qⁱ)
-    
+
     # Z-weighted velocity is larger than mass-weighted (biased toward large particles)
     # Approximate ratio: Vᵤ/Vₘ ≈ 1.2 for typical distributions
     vₘ = ice_terminal_velocity_mass_weighted(qⁱ, nⁱ, Fᶠ, ρᶠ, ρ; ρ₀)
-    
+
     return FT(1.2) * vₘ
 end
-

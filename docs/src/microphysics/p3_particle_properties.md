@@ -280,7 +280,7 @@ ax = Axis(fig[1, 1],
 D_mm = range(0.1, 5, length=50)
 D_m = D_mm .* 1e-3
 
-for (Ff, label, color) in [(0.0, "Fᶠ = 0", :blue), 
+for (Ff, label, color) in [(0.0, "Fᶠ = 0", :blue),
                             (0.25, "Fᶠ = 0.25", :green),
                             (0.5, "Fᶠ = 0.5", :orange),
                             (0.75, "Fᶠ = 0.75", :red)]
@@ -327,4 +327,3 @@ predicted rime fraction and rime density—no arbitrary conversion terms require
 - [Morrison2015parameterization](@cite): Primary source for m(D), A(D), V(D) relationships
 - [Morrison2015part2](@cite): Validation of particle property parameterizations
 - [pruppacher2010microphysics](@cite): Background on ice particle physics
-

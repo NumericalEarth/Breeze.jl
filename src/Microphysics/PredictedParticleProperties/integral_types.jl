@@ -11,7 +11,7 @@
 ##### - Fall speed integrals: Morrison & Milbrandt (2015a) Table 3
 ##### - Deposition/ventilation integrals: Morrison & Milbrandt (2015a) Eqs. 30-32
 ##### - Collection integrals: Morrison & Milbrandt (2015a) Eqs. 36-42
-##### - Sixth moment integrals: Milbrandt et al. (2021) Table 1, Morrison et al. (2025) 
+##### - Sixth moment integrals: Milbrandt et al. (2021) Table 1, Morrison et al. (2025)
 ##### - Lambda limiter integrals: Morrison & Milbrandt (2015a) Section 2b
 ##### - Rain integrals: Morrison & Milbrandt (2015a) Eqs. 46-47
 #####
@@ -432,4 +432,3 @@ end
 # Allow indexing into tabulated integrals
 Base.getindex(t::TabulatedIntegral, args...) = getindex(t.data, args...)
 Base.size(t::TabulatedIntegral) = size(t.data)
-

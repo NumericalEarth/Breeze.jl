@@ -253,7 +253,7 @@ where ``Γ(a, x) = \int_x^∞ t^{a-1} e^{-t} dt`` is the upper incomplete gamma 
 All computations are performed in **log space** for numerical stability:
 
 ```math
-\log\left(\int_{D_1}^{D_2} D^k e^{-λD}\, dD\right) = 
+\log\left(\int_{D_1}^{D_2} D^k e^{-λD}\, dD\right) =
 -(k+1)\log(λ) + \log Γ(k+1) + \log(q_1 - q_2)
 ```
 
@@ -303,4 +303,3 @@ This provides the complete size distribution needed for computing microphysical 
 - [MilbrandtEtAl2021](@cite): Three-moment ice with Z as prognostic
 - [MilbrandtEtAl2024](@cite): Updated three-moment formulation
 - [Morrison2025complete3moment](@cite): Complete three-moment implementation
-

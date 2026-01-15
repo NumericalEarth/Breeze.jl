@@ -38,7 +38,7 @@ on ice processes or bulk precipitation, prescribed Nc is sufficient.
 
 **Autoconversion:**
 Cloud droplets that grow past `autoconversion_threshold` are converted
-to rain via collision-coalescence, following 
+to rain via collision-coalescence, following
 [Khairoutdinov and Kogan (2000)](@cite KhairoutdinovKogan2000).
 
 # Keyword Arguments

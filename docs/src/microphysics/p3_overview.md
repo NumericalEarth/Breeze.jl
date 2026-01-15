@@ -49,7 +49,7 @@ to heavily rimed graupel.
 
 P3 v5.5 uses three prognostic moments for ice:
 1. **Mass** (``ρqⁱ``): Total ice mass concentration
-2. **Number** (``ρnⁱ``): Ice particle number concentration  
+2. **Number** (``ρnⁱ``): Ice particle number concentration
 3. **Reflectivity** (``ρzⁱ``): Sixth moment, proportional to radar reflectivity
 
 The third moment provides additional constraint on the size distribution, improving
@@ -192,4 +192,3 @@ The P3 scheme is described in detail in the following papers:
 - [SeifertBeheng2006](@citet): Two-moment cloud microphysics for mixed-phase clouds
 - [KhairoutdinovKogan2000](@citet): Warm rain autoconversion parameterization
 - [pruppacher2010microphysics](@citet): Microphysics of clouds and precipitation (textbook)
-

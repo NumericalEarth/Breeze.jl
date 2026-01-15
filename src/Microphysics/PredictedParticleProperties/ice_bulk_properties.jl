@@ -28,7 +28,7 @@ $(TYPEDSIGNATURES)
 
 Construct `IceBulkProperties` with parameters and quadrature-based integrals.
 
-These integrals compute bulk properties by averaging over the particle 
+These integrals compute bulk properties by averaging over the particle
 size distribution. They are used for radiation, radar, and diagnostics.
 
 **Diagnostic integrals:**
@@ -80,4 +80,3 @@ function Base.show(io::IO, bp::IceBulkProperties)
     print(io, "Dmax=", bp.maximum_mean_diameter, ", ")
     print(io, "Dmin=", bp.minimum_mean_diameter, ")")
 end
-

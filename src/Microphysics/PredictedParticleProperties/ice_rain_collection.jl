@@ -38,7 +38,7 @@ binned into discrete size categories.
 # Integrals
 
 - `mass`: Rate of rain mass transfer to ice
-- `number`: Rate of rain drop removal  
+- `number`: Rate of rain drop removal
 - `sixth_moment`: Rate of Z transfer (3-moment)
 
 # References
@@ -56,4 +56,3 @@ end
 
 Base.summary(::IceRainCollection) = "IceRainCollection"
 Base.show(io::IO, ::IceRainCollection) = print(io, "IceRainCollection(3 integrals)")
-

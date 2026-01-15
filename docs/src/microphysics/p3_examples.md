@@ -205,7 +205,7 @@ Ff_range = range(0, 0.9, length=20)
 V_m_values = Float64[]
 
 for Ff in Ff_range
-    state = IceSizeDistributionState(Float64; 
+    state = IceSizeDistributionState(Float64;
         intercept=1e6, shape=0.0, slope=λ,
         rime_fraction=Ff, rime_density=500.0)
     push!(V_m_values, evaluate(MassWeightedFallSpeed(), state))
@@ -225,7 +225,7 @@ Rimed particles fall faster due to higher density.
 
 ```@example p3_examples
 # Compare different integral types at a fixed state
-state = IceSizeDistributionState(Float64; 
+state = IceSizeDistributionState(Float64;
     intercept=1e6, shape=2.0, slope=1500.0,
     rime_fraction=0.3, rime_density=500.0)
 
@@ -288,7 +288,7 @@ because their higher mass-per-particle requires smaller particles to match the r
 ### Convergence with Number of Points
 
 ```@example p3_examples
-state = IceSizeDistributionState(Float64; 
+state = IceSizeDistributionState(Float64;
     intercept=1e6, shape=0.0, slope=1000.0)
 
 n_points = [8, 16, 32, 64, 128, 256]
@@ -357,9 +357,9 @@ ax3 = Axis(fig[2, 1],
     xscale = log10, title = "Fall Speed Integrals")
 
 λ_vals = 10 .^ range(2.5, 4.5, length=30)
-V_n = [evaluate(NumberWeightedFallSpeed(), 
+V_n = [evaluate(NumberWeightedFallSpeed(),
        IceSizeDistributionState(Float64; intercept=1e6, shape=0.0, slope=λ)) for λ in λ_vals]
-V_m = [evaluate(MassWeightedFallSpeed(), 
+V_m = [evaluate(MassWeightedFallSpeed(),
        IceSizeDistributionState(Float64; intercept=1e6, shape=0.0, slope=λ)) for λ in λ_vals]
 
 lines!(ax3, λ_vals, V_n, label="Vₙ")
@@ -386,4 +386,3 @@ This figure summarizes the key relationships in P3:
 2. **Top right**: Size distribution shifts with mass content
 3. **Bottom left**: Fall speed decreases with λ (smaller particles)
 4. **Bottom right**: Shape parameter μ increases with λ up to a maximum
-

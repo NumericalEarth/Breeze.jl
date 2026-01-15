@@ -32,13 +32,13 @@ V(D) = a_V \\left(\\frac{ρ_0}{ρ}\\right)^{0.5} D^{b_V}
 ```
 
 where ``a_V`` is `fall_speed_coefficient`, ``b_V`` is `fall_speed_exponent`,
-and ``ρ_0`` is `reference_air_density`. The density correction accounts for 
+and ``ρ_0`` is `reference_air_density`. The density correction accounts for
 reduced drag at higher altitudes where air is less dense.
 
 Three weighted fall speeds are computed by integrating over the size distribution:
 
 - **Number-weighted** ``V_n``: For number flux (sedimentation of particle count)
-- **Mass-weighted** ``V_m``: For mass flux (precipitation rate)  
+- **Mass-weighted** ``V_m``: For mass flux (precipitation rate)
 - **Reflectivity-weighted** ``V_z``: For 3-moment scheme (6th moment flux)
 
 # Keyword Arguments
@@ -74,4 +74,3 @@ function Base.show(io::IO, fs::IceFallSpeed)
     print(io, "aᵥ=", fs.fall_speed_coefficient, ", ")
     print(io, "bᵥ=", fs.fall_speed_exponent, ")")
 end
-

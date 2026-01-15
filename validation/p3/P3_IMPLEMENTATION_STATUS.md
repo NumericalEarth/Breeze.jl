@@ -80,7 +80,7 @@ and hail. The implementation follows:
 Phase 1 process rates are implemented in `process_rates.jl` and have been verified to work
 in a parcel model test. After 100 seconds of simulation:
 - Cloud liquid: 5.0 → 3.0 g/kg (autoconversion/accretion)
-- Rain: 1.0 → 0.002 g/kg (evaporation in subsaturated air)  
+- Rain: 1.0 → 0.002 g/kg (evaporation in subsaturated air)
 - Ice: 2.0 → 0.0 g/kg (melting at T > 273 K)
 
 #### Rain Processes
@@ -215,7 +215,7 @@ Phase 2 process rates are implemented in `process_rates.jl` and verified:
 
 5. **Riming** ✅
    - `cloud_riming_rate`: Cloud droplet collection by ice
-   - `rain_riming_rate`: Rain collection by ice  
+   - `rain_riming_rate`: Rain collection by ice
    - `rime_density`: Temperature/velocity-dependent rime density
    - Rime mass/volume tendency updates
 

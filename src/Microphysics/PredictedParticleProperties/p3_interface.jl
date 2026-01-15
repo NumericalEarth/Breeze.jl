@@ -224,14 +224,14 @@ end
 @inline function (v::RainMassSedimentationVelocity)(i, j, k, grid, ρ)
     FT = eltype(grid)
     μ = v.microphysical_fields
-    
+
     @inbounds begin
         qʳ = μ.ρqʳ[i, j, k] / ρ
         nʳ = μ.ρnʳ[i, j, k] / ρ
     end
-    
+
     vₜ = rain_terminal_velocity_mass_weighted(qʳ, nʳ, ρ)
-    
+
     return (u = zero(FT), v = zero(FT), w = -vₜ)
 end
 
@@ -245,14 +245,14 @@ end
 @inline function (v::RainNumberSedimentationVelocity)(i, j, k, grid, ρ)
     FT = eltype(grid)
     μ = v.microphysical_fields
-    
+
     @inbounds begin
         qʳ = μ.ρqʳ[i, j, k] / ρ
         nʳ = μ.ρnʳ[i, j, k] / ρ
     end
-    
+
     vₜ = rain_terminal_velocity_number_weighted(qʳ, nʳ, ρ)
-    
+
     return (u = zero(FT), v = zero(FT), w = -vₜ)
 end
 
@@ -266,19 +266,19 @@ end
 @inline function (v::IceMassSedimentationVelocity)(i, j, k, grid, ρ)
     FT = eltype(grid)
     μ = v.microphysical_fields
-    
+
     @inbounds begin
         qⁱ = μ.ρqⁱ[i, j, k] / ρ
         nⁱ = μ.ρnⁱ[i, j, k] / ρ
         qᶠ = μ.ρqᶠ[i, j, k] / ρ
         bᶠ = μ.ρbᶠ[i, j, k] / ρ
     end
-    
+
     Fᶠ = safe_divide(qᶠ, qⁱ, zero(FT))
     ρᶠ = safe_divide(qᶠ, bᶠ, FT(400))
-    
+
     vₜ = ice_terminal_velocity_mass_weighted(qⁱ, nⁱ, Fᶠ, ρᶠ, ρ)
-    
+
     return (u = zero(FT), v = zero(FT), w = -vₜ)
 end
 
@@ -292,19 +292,19 @@ end
 @inline function (v::IceNumberSedimentationVelocity)(i, j, k, grid, ρ)
     FT = eltype(grid)
     μ = v.microphysical_fields
-    
+
     @inbounds begin
         qⁱ = μ.ρqⁱ[i, j, k] / ρ
         nⁱ = μ.ρnⁱ[i, j, k] / ρ
         qᶠ = μ.ρqᶠ[i, j, k] / ρ
         bᶠ = μ.ρbᶠ[i, j, k] / ρ
     end
-    
+
     Fᶠ = safe_divide(qᶠ, qⁱ, zero(FT))
     ρᶠ = safe_divide(qᶠ, bᶠ, FT(400))
-    
+
     vₜ = ice_terminal_velocity_number_weighted(qⁱ, nⁱ, Fᶠ, ρᶠ, ρ)
-    
+
     return (u = zero(FT), v = zero(FT), w = -vₜ)
 end
 
@@ -318,7 +318,7 @@ end
 @inline function (v::IceReflectivitySedimentationVelocity)(i, j, k, grid, ρ)
     FT = eltype(grid)
     μ = v.microphysical_fields
-    
+
     @inbounds begin
         qⁱ = μ.ρqⁱ[i, j, k] / ρ
         nⁱ = μ.ρnⁱ[i, j, k] / ρ
@@ -326,12 +326,12 @@ end
         qᶠ = μ.ρqᶠ[i, j, k] / ρ
         bᶠ = μ.ρbᶠ[i, j, k] / ρ
     end
-    
+
     Fᶠ = safe_divide(qᶠ, qⁱ, zero(FT))
     ρᶠ = safe_divide(qᶠ, bᶠ, FT(400))
-    
+
     vₜ = ice_terminal_velocity_reflectivity_weighted(qⁱ, nⁱ, zⁱ, Fᶠ, ρᶠ, ρ)
-    
+
     return (u = zero(FT), v = zero(FT), w = -vₜ)
 end
 

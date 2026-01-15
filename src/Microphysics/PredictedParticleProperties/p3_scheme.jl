@@ -53,7 +53,7 @@ are diagnosed continuously.
 
 P3 v5.5 carries three prognostic moments for ice particles:
 1. **Mass** (``qⁱ``): Total ice mass
-2. **Number** (``nⁱ``): Ice particle number concentration  
+2. **Number** (``nⁱ``): Ice particle number concentration
 3. **Reflectivity** (``zⁱ``): Sixth moment of size distribution
 
 The third moment improves representation of precipitation-sized particles
@@ -92,7 +92,7 @@ fields = prognostic_field_names(microphysics)
 
 # References
 
-This implementation follows P3 v5.5 from the 
+This implementation follows P3 v5.5 from the
 [P3-microphysics repository](https://github.com/P3-microphysics/P3-microphysics).
 
 Key papers describing P3:
@@ -133,4 +133,3 @@ end
 
 # Note: prognostic_field_names is implemented in p3_interface.jl to extend
 # AtmosphereModels.prognostic_field_names
-
