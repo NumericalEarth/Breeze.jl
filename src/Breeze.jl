@@ -80,9 +80,7 @@ export
 
     # ParcelDynamics
     ParcelModel,
-    ParcelState,
-    EnvironmentalProfile,
-    step_parcel!
+    ParcelState
 
 using Oceananigans: Oceananigans, @at, AnisotropicMinimumDissipation, Average,
                     AveragedTimeInterval, BackgroundField, BetaPlane, Bounded,
