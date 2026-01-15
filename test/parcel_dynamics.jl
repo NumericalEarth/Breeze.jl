@@ -8,7 +8,8 @@ using Breeze.ParcelDynamics:
     ParcelDynamics,
     ParcelModel,
     ParcelState,
-    adiabatic_adjustment
+    adiabatic_adjustment,
+    compute_parcel_tendencies!
 
 using Breeze.Thermodynamics:
     StaticEnergyState,
@@ -17,7 +18,8 @@ using Breeze.Thermodynamics:
     temperature,
     mixture_heat_capacity
 
-using Breeze.AtmosphereModels: NothingMicrophysicalState
+using Breeze.AtmosphereModels: NothingMicrophysicalState, microphysical_tendency
+using Breeze.Microphysics: SaturationAdjustment, DCMIP2016KesslerMicrophysics
 
 using Test
 
@@ -177,4 +179,106 @@ end
         @test 𝒰_new.reference_pressure == p_new
         @test 𝒰_new.standard_pressure == pˢᵗ
     end
+end
+
+#####
+##### ParcelModel with microphysics schemes
+#####
+
+@testset "ParcelModel with Nothing microphysics" begin
+    grid = RectilinearGrid(size=10, z=(0, 1000), topology=(Flat, Flat, Bounded))
+    model = AtmosphereModel(grid; dynamics=ParcelDynamics(), microphysics=nothing)
+
+    T(z) = 288.0 - 0.0065 * z
+    p(z) = 101325.0 * exp(-z / 8500)
+    ρ(z) = p(z) / (287.0 * T(z))
+
+    set!(model, T=T, p=p, ρ=ρ, z=0.0, w=1.0)
+
+    # Compute tendencies (this calls microphysical_tendency)
+    compute_parcel_tendencies!(model)
+
+    # Check tendencies are computed
+    tendencies = model.dynamics.tendencies
+    @test tendencies.Gz ≈ 1.0  # w = 1 m/s
+    @test tendencies.Ge ≈ 0.0  # No microphysics
+    @test tendencies.Gqᵗ ≈ 0.0  # No microphysics
+
+    # Time step should work
+    time_step!(model, 10.0)
+    @test model.dynamics.state.z ≈ 10.0
+end
+
+@testset "ParcelModel with SaturationAdjustment microphysics" begin
+    grid = RectilinearGrid(size=10, z=(0, 1000), topology=(Flat, Flat, Bounded))
+    microphysics = SaturationAdjustment()
+    model = AtmosphereModel(grid; dynamics=ParcelDynamics(), microphysics)
+
+    T(z) = 288.0 - 0.0065 * z
+    p(z) = 101325.0 * exp(-z / 8500)
+    ρ(z) = p(z) / (287.0 * T(z))
+
+    set!(model, T=T, p=p, ρ=ρ, z=0.0, w=1.0)
+
+    # Verify state-based microphysical_tendency is callable
+    constants = model.thermodynamic_constants
+    state = model.dynamics.state
+    ρ_val = state.ρ
+    𝒰 = state.𝒰
+    ℳ = NothingMicrophysicalState(typeof(ρ_val))
+
+    # This tests that the state-based interface exists for SaturationAdjustment
+    tendency_e = microphysical_tendency(microphysics, Val(:ρe), ρ_val, ℳ, 𝒰, constants)
+    tendency_qt = microphysical_tendency(microphysics, Val(:ρqᵗ), ρ_val, ℳ, 𝒰, constants)
+    @test tendency_e == 0.0
+    @test tendency_qt == 0.0
+
+    # Compute tendencies (this calls microphysical_tendency internally)
+    compute_parcel_tendencies!(model)
+
+    tendencies = model.dynamics.tendencies
+    @test tendencies.Gz ≈ 1.0  # w = 1 m/s
+    @test tendencies.Ge ≈ 0.0  # SaturationAdjustment operates via state adjustment
+    @test tendencies.Gqᵗ ≈ 0.0
+
+    # Time step should work
+    time_step!(model, 10.0)
+    @test model.dynamics.state.z ≈ 10.0
+end
+
+@testset "ParcelModel with DCMIP2016KesslerMicrophysics" begin
+    grid = RectilinearGrid(size=10, z=(0, 1000), topology=(Flat, Flat, Bounded))
+    microphysics = DCMIP2016KesslerMicrophysics()
+    model = AtmosphereModel(grid; dynamics=ParcelDynamics(), microphysics)
+
+    T(z) = 288.0 - 0.0065 * z
+    p(z) = 101325.0 * exp(-z / 8500)
+    ρ(z) = p(z) / (287.0 * T(z))
+
+    set!(model, T=T, p=p, ρ=ρ, z=0.0, w=1.0)
+
+    # Verify state-based microphysical_tendency is callable
+    constants = model.thermodynamic_constants
+    state = model.dynamics.state
+    ρ_val = state.ρ
+    𝒰 = state.𝒰
+    ℳ = NothingMicrophysicalState(typeof(ρ_val))
+
+    # This tests that the state-based interface exists for DCMIP2016Kessler
+    tendency_e = microphysical_tendency(microphysics, Val(:ρe), ρ_val, ℳ, 𝒰, constants)
+    tendency_qt = microphysical_tendency(microphysics, Val(:ρqᵗ), ρ_val, ℳ, 𝒰, constants)
+    @test tendency_e == 0.0
+    @test tendency_qt == 0.0
+
+    # Compute tendencies (this calls microphysical_tendency internally)
+    compute_parcel_tendencies!(model)
+
+    tendencies = model.dynamics.tendencies
+    @test tendencies.Gz ≈ 1.0  # w = 1 m/s
+    @test tendencies.Ge ≈ 0.0  # DCMIP2016Kessler operates via microphysics_model_update!
+    @test tendencies.Gqᵗ ≈ 0.0
+
+    # Time step should work
+    time_step!(model, 10.0)
+    @test model.dynamics.state.z ≈ 10.0
 end

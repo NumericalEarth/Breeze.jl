@@ -206,9 +206,6 @@ function AtmosphereModels.materialize_dynamics(d::ParcelDynamics, grid, bcs, con
     return ParcelDynamics(state, tendencies, ρ, p, p₀, pˢᵗ)
 end
 
-# Create zero-valued microphysics prognostic tendencies
-zero_microphysics_prognostic_tendencies(::Nothing) = nothing
-
 function AtmosphereModels.materialize_momentum_and_velocities(::ParcelDynamics, grid, bcs)
     # Parcel models use velocity fields for the environmental wind
     u = CenterField(grid)  # Use CenterField for simplicity in 1D interpolation
@@ -395,13 +392,27 @@ function compute_parcel_tendencies!(model::ParcelModel)
     return nothing
 end
 
+#####
+##### Parcel microphysics interface
+#####
+# These functions implement the parcel-specific microphysics interface.
+# The default fallbacks work for schemes with no explicit prognostic microphysics.
+
 # Build diagnostic microphysical state from prognostic variables
+# Fallback: return NothingMicrophysicalState for schemes without prognostic microphysics
+parcel_microphysical_state(microphysics, ρ, qᵗ, μ::Nothing, 𝒰, constants) = NothingMicrophysicalState(typeof(ρ))
 parcel_microphysical_state(::Nothing, ρ, qᵗ, μ, 𝒰, constants) = μ
 parcel_microphysical_state(::Nothing, ρ, qᵗ, μ::Nothing, 𝒰, constants) = NothingMicrophysicalState(typeof(ρ))
 
 # Compute tendencies for microphysics prognostic variables
+# Fallback: return nothing for schemes without prognostic microphysics
+compute_microphysics_prognostic_tendencies(microphysics, ρ, μ::Nothing, ℳ, 𝒰, constants) = nothing
 compute_microphysics_prognostic_tendencies(::Nothing, ρ, μ, ℳ, 𝒰, constants) = μ
 compute_microphysics_prognostic_tendencies(::Nothing, ρ, μ::Nothing, ℳ, 𝒰, constants) = nothing
+
+# Zero tendencies for microphysics prognostics
+# Fallback: return nothing for schemes without prognostic microphysics
+zero_microphysics_prognostic_tendencies(::Nothing) = nothing
 
 #####
 ##### State stepping
