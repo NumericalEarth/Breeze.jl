@@ -164,4 +164,3 @@ function AtmosphereModels.materialize_momentum_and_velocities(dynamics::Anelasti
 
     return momentum, velocities
 end
-

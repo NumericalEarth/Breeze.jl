@@ -34,4 +34,3 @@ in the momentum equation without subtraction of a reference state.
 
     return -g * ρ
 end
-

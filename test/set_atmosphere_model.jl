@@ -141,4 +141,3 @@ end
         @test @allowscalar all(x -> x ≤ 1.01, interior(ℋ_field))
     end
 end
-

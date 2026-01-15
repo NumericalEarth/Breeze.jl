@@ -34,11 +34,11 @@ AtmosphereModels.set_velocity!(model::KinematicModel, name::Symbol, value) =
 set_velocity!(velocity::AbstractField, value) = set!(velocity, value)
 
 # FunctionFields (from PrescribedVelocityFields): cannot be set
-set_velocity!(::FunctionField, value) = 
+set_velocity!(::FunctionField, value) =
     throw(ArgumentError("Cannot set velocity component of PrescribedVelocityFields."))
 
 # No momentum in kinematic models
-AtmosphereModels.set_momentum!(::KinematicModel, name::Symbol, value) = 
+AtmosphereModels.set_momentum!(::KinematicModel, name::Symbol, value) =
     throw(ArgumentError("Cannot set momentum component '$name' of a KinematicModel."))
 
 #####
