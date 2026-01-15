@@ -29,6 +29,7 @@ export
     NothingMicrophysicalState,
     microphysical_state,
     microphysical_tendency,
+    grid_microphysical_tendency,
 
     # Interface functions (extended by BoundaryConditions and Forcings)
     regularize_atmosphere_model_boundary_conditions,

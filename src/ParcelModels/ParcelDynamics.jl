@@ -14,7 +14,8 @@ export
     parcel_microphysical_state,
     compute_microphysics_prognostic_tendencies,
     apply_microphysical_tendencies,
-    zero_microphysics_prognostic_tendencies
+    zero_microphysics_prognostic_tendencies,
+    materialize_parcel_microphysics_prognostics
 
 using DocStringExtensions: TYPEDSIGNATURES, TYPEDEF, TYPEDFIELDS
 

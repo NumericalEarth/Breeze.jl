@@ -129,7 +129,7 @@ See also [`microphysical_state`](@ref), [`AbstractMicrophysicalState`](@ref).
 #####
 
 """
-    microphysical_tendency(i, j, k, grid, microphysics, name, ρ, fields, 𝒰, constants)
+    grid_microphysical_tendency(i, j, k, grid, microphysics, name, ρ, fields, 𝒰, constants)
 
 Compute the tendency for microphysical variable `name` at grid point `(i, j, k)`.
 
@@ -146,13 +146,13 @@ this method directly without using `microphysical_state`.
 return microphysical_tendency(microphysics, name, ρ, ℳ, 𝒰, constants)
 ```
 """
-@inline function microphysical_tendency(i, j, k, grid, microphysics, name, ρ, fields, 𝒰, constants)
+@inline function grid_microphysical_tendency(i, j, k, grid, microphysics, name, ρ, fields, 𝒰, constants)
     ℳ = microphysical_state(i, j, k, grid, microphysics, fields, ρ, 𝒰)
     return microphysical_tendency(microphysics, name, ρ, ℳ, 𝒰, constants)
 end
 
 # Explicit Nothing fallback (for backward compatibility)
-@inline microphysical_tendency(i, j, k, grid, microphysics::Nothing, name, ρ, μ, 𝒰, constants) = zero(grid)
+@inline grid_microphysical_tendency(i, j, k, grid, microphysics::Nothing, name, ρ, μ, 𝒰, constants) = zero(grid)
 
 #####
 ##### Definition of the microphysics interface, with methods for "Nothing" microphysics
