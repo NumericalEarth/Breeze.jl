@@ -1,15 +1,16 @@
 # # Acoustic wave refraction by wind shear
 #
 # This example simulates an acoustic pulse propagating through a wind shear layer
-# using the fully compressible [Euler equations](https://en.wikipedia.org/wiki/Euler_equations_(fluid_dynamics)). When wind speed increases with height,
-# sound waves are refracted: waves traveling **with** the wind bend **downward**
-# (trapped near the surface), while waves traveling **against** the wind bend **upward**.
+# using the fully compressible [Euler equations](https://en.wikipedia.org/wiki/Euler_equations_(fluid_dynamics)).
+# When wind speed increases with height, sound waves are refracted: waves traveling **with**
+# the wind bend **downward** (trapped near the surface), while waves traveling **against**
+# the wind bend **upward**.
 #
-# The sound speed for a wave traveling in direction ``\hat{n}`` is
+# The sound speed for a wave traveling in direction ``\hat{\boldsymbol{n}}`` is
 # ```math
-# 𝕌ˢ = 𝕌ˢⁱ + \mathbf{u} \cdot \hat{n}
+# 𝕌ˢ = 𝕌ˢⁱ + \boldsymbol{u} \cdot \hat{\boldsymbol{n}}
 # ```
-# where ``𝕌ˢⁱ`` is the intrinsic wave speed and ``\mathbf{u}`` is the wind velocity.
+# where ``𝕌ˢⁱ`` is the intrinsic sound speed and ``\boldsymbol{u}`` is the wind velocity.
 # This causes wavefronts to tilt toward regions of lower effective sound speed.
 #
 # This phenomenon explains why distant sounds are often heard more clearly downwind
@@ -20,8 +21,8 @@
 # pierce2019acoustics
 # ```
 #
-# We use stable stratification to suppress [Kelvin-Helmholtz instability](https://en.wikipedia.org/wiki/Kelvin%E2%80%93Helmholtz_instability) and a logarithmic
-# wind profile consistent with the atmospheric surface layer.
+# We use stable stratification to suppress [Kelvin-Helmholtz instability](https://en.wikipedia.org/wiki/Kelvin%E2%80%93Helmholtz_instability)
+# and a logarithmic wind profile consistent with the atmospheric surface layer.
 
 using Breeze
 using Breeze.Thermodynamics: adiabatic_hydrostatic_density
