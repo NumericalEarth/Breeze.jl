@@ -165,7 +165,9 @@ makedocs(
         ],
         "Developers" => Any[
             "Microphysics" => Any[
-                "Microphysics Interface" => "developer/microphysics_interface.md",
+                "Overview" => "developer/microphysics/overview.md",
+                "Example implementation" => "developer/microphysics/example.md",
+                "Future improvements" => "developer/microphysics/future_improvements.md",
             ],
         ],
         "Radiative Transfer" => "radiative_transfer.md",
