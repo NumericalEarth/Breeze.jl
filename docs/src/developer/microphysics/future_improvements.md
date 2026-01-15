@@ -62,13 +62,6 @@ end
 
 **Issue**: The interface has ~12 functions, some of which may be redundant or could be combined.
 
-**Recent progress**: The consolidation of `write_state_to_fields!`, `update_derived_diagnostics!`,
-and `update_microphysical_velocities!` into a single `update_microphysical_auxiliaries!` function
-reduced complexity.
-
-**Recommendation**: Continue looking for consolidation opportunities. The goal is a minimal
-interface that's easy to implement correctly.
-
 ## 4. Document the Saturation Adjustment Exception
 
 **Issue**: Saturation adjustment schemes have a fundamentally different structure:
