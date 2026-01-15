@@ -122,4 +122,3 @@ end
         @test model.clock.iteration == 1
     end
 end
-

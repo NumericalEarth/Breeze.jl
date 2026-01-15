@@ -134,4 +134,3 @@ end
         ℐ_sw_dn[i, j, k] = -sw_flux_dn[k, col]
     end
 end
-

@@ -135,4 +135,3 @@ using Test
         @test isapprox(numerical_decay_c, expected_decay_c, rtol=0.05)
     end
 end
-
