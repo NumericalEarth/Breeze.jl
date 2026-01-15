@@ -284,7 +284,7 @@ end
     # rain sedimentation (terminal velocity) creates a flux divergence that
     # exactly cancels the autoconversion tendency. With multiple levels,
     # rain can accumulate in the domain before sedimenting out.
-    
+
     Oceananigans.defaults.FloatType = FT
     Nz = 10
     grid = RectilinearGrid(default_arch; size=(1, 1, Nz), x=(0, 1), y=(0, 1), z=(0, 1000),
@@ -326,7 +326,7 @@ end
     # Rain should exist somewhere in the domain
     # (Even if some has sedimented out, there should be rain in upper cells)
     @test qʳ_max_final > FT(1e-8)  # At least some rain exists
-    
+
     # Check that autoconversion is happening by verifying rain increases initially
     # before sedimentation can remove it all. We'll check the top cell which
     # should accumulate rain without losing it to sedimentation as quickly.
@@ -337,7 +337,7 @@ end
 @testset "ImpenetrableBoundaryCondition prevents rain from exiting domain [$(FT)]" for FT in test_float_types()
     # This test verifies that ImpenetrableBoundaryCondition allows rain to accumulate
     # in a single-cell domain where it would otherwise sediment out.
-    
+
     Oceananigans.defaults.FloatType = FT
     grid = RectilinearGrid(default_arch; size=(1, 1, 1), x=(0, 1), y=(0, 1), z=(0, 1),
                            topology=(Periodic, Periodic, Bounded))
@@ -361,7 +361,7 @@ end
     # With ImpenetrableBoundaryCondition, rain should accumulate in the domain
     # because it can't sediment out through the bottom
     qʳ_final = @allowscalar model.microphysical_fields.qʳ[1, 1, 1]
-    
+
     # Check terminal velocity at bottom is zero (impenetrable)
     wʳ_bottom = @allowscalar model.microphysical_fields.wʳ[1, 1, 1]
     @test wʳ_bottom == 0  # Terminal velocity should be zero at impenetrable bottom

@@ -124,4 +124,3 @@ function Base.show(io::IO, formulation::StaticEnergyFormulation)
         print(io, "└── specific_energy: ", prettysummary(formulation.specific_energy))
     end
 end
-

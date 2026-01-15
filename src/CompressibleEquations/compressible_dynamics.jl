@@ -179,4 +179,3 @@ function AtmosphereModels.materialize_momentum_and_velocities(dynamics::Compress
 
     return momentum, velocities
 end
-

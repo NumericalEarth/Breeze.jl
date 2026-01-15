@@ -148,7 +148,7 @@ set!(∂t_ρqᵗ_large_scale, ρᵣ * ∂t_ρqᵗ_large_scale)
 # This is the key simplification that allows us to avoid interactive radiation.
 
 ∂t_ρθ_large_scale = Field{Nothing, Nothing, Center}(grid)
-∂t_θ_large_scale = - 2.5 / day # K / day
+∂t_θ_large_scale = - 2.5 / day # K / day
 set!(∂t_ρθ_large_scale, ρᵣ * ∂t_θ_large_scale)
 ρθ_large_scale_forcing = Forcing(∂t_ρθ_large_scale)
 

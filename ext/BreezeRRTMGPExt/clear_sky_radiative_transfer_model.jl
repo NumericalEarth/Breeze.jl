@@ -34,7 +34,7 @@ RRTMGP loads lookup tables from netCDF via an extension.
 # Keyword Arguments
 - `background_atmosphere`: Background atmospheric gas composition (default: `BackgroundAtmosphere{FT}()`).
 - `surface_temperature`: Surface temperature in Kelvin (required).
-- `coordinate`: Tuple of (longitude, latitude) in degrees. If `nothing` (default), 
+- `coordinate`: Tuple of (longitude, latitude) in degrees. If `nothing` (default),
                 extracted from grid coordinates.
 - `epoch`: Optional epoch for computing time with floating-point clocks.
 - `surface_emissivity`: Surface emissivity, 0-1 (default: 0.98). Scalar.

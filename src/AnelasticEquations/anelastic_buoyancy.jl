@@ -47,4 +47,3 @@ where `pᵣ` is the reference pressure, `Rᵐ` is the mixture gas constant, and 
 
     return - g * ρ′
 end
-

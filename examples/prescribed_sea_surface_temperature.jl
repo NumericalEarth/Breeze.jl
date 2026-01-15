@@ -111,9 +111,9 @@ Uᵍ = 1e-2  # Minimum wind speed (m/s)
 #
 # For `BulkVaporFlux`, the saturation specific humidity is computed from the surface
 # temperature. Surface temperature can be provided as a `Field`, a `Function`, or a `Number`.
-# 
+#
 # In this example, we specify the sea surface temperature as a top hat function
-# i.e. representing a pair of ocean fronts in a periodic domain, with a 
+# i.e. representing a pair of ocean fronts in a periodic domain, with a
 # difference of 4 degrees K,
 
 ΔT = 4 # K
