@@ -5,9 +5,8 @@
 
 <!-- description -->
 <p align="center">
-  <strong>🌪 Fast and friendly Julia software for atmospheric fluid dynamics on CPUs and GPUs. https://numericalearth.github.io/BreezeDocumentation/stable</strong>
+  <strong>🌪 Fast and friendly Julia software for atmospheric fluid dynamics on CPUs and GPUs. https://numericalearth.github.io/BreezeDocumentation/dev</strong>
 </p>
-
 
 <p align="center">
   <a href="https://numericalearth.github.io/BreezeDocumentation/stable/">
@@ -34,13 +33,86 @@
   </a>
 </p>
 
-Breeze is a library for simulating atmospheric flows, convection, clouds, weather, and hurricanes on CPUs and GPUs.
+Breeze is a library for simulating atmospheric flows, clouds, hurricanes, and other weather phenomena on both CPUs and GPUs.
 Much of Breeze's power flows from [Oceananigans](https://github.com/CliMA/Oceananigans.jl), which provides a user interface, grids, fields, solvers, advection schemes, Lagrangian particles, physics, and more.
-Right now, `Breeze.AtmosphereModel` is in an early stage of development, and supports simple simulations that use the anelastic formulation of the Euler equations on `RectilinearGrid`.
-But we're working feverishly towards a future with bulk, bin and superdroplet microphysics, radiation, and a fully compressible formulation with acoustic substepping (and note, the roadmap and vision for Breeze is still something of a work in progress).
-Check out [the documentation](https://numericalearth.github.io/BreezeDocumentation/stable/) to see what we can do now, and watch this space (or get in touch to [discuss](https://github.com/NumericalEarth/Breeze.jl/discussions)!) its crystallization.
 
-### Installation
+Breeze's AtmosphereModel currently supports anelastic dynamics, compressible dynamics, a kinematic driver, and a parcel model, all with strong-stability-preserving (SSP) RK3 time stepping.
+The anelastic and compressible dynamics can be used with a liquid-ice potential temperature formulation or static energy formulation and a variety of advection schemes including high-order and bounds-preserving WENO.
+Breeze provides abstractions for Coriolis forces, simple bulk drags, heat and moisture fluxes, and closures for large-eddy simulation.
+A main focus of Breeze development is to facilitate the prototyping and implementation of microphysics schemes through streamlined internal interfaces and automatic kinematic driver and parcel model capabilities. 
+Breeze's current suite of schemes includes saturation adjustment, a Kessler scheme, one- and two-moment bulk microphysics schemes through an extension to the [Climate Modeling Alliance's](https://clima.caltech.edu/) excellent [CloudMicrophysics.jl](https://github.com/CliMA/CloudMicrophysics.jl) package; several other schemes are under development.
+An extension to [RRTMGP.jl](https://github.com/CliMA/RRTMGP.jl) provides solvers for gray, clear-sky, and all-sky radiative transfer.
+Breeze's examples include single column radiation, idealized thermal bubbles and inertia-gravity waves and Kelvin-Helmholtz, [BOMEX](https://doi.org/10.1175/1520-0469(2003)60<1201:ALESIS>2.0.CO;2) shallow convection, [RICO](https://doi.org/10.1029/2011MS000056) trade-wind cumulus, [supercells](https://doi.org/10.1002/2015MS000435), mountain waves, and more.
+
+Learn more by reading on or checking out [the documentation](https://numericalearth.github.io/BreezeDocumentation/dev/) and [examples](https://github.com/NumericalEarth/Breeze.jl/tree/main/examples).
+And don't hesitate to get in touch on the [NumericalEarth slack](https://join.slack.com/t/numericalearth/shared_invite/zt-3kjcowmpg-B0s3nalWkvZg8IBc~BIJEA) or by opening a new [discussion](https://github.com/NumericalEarth/Breeze.jl/discussions)!
+
+## Roadmap and a call to action
+
+Our goal is to build a very fast, easy-to-learn, productive tool for atmospheric research, teaching, and forecasting, as well as a platform for the development of algorithms, numerical methods, parameterizations, microphysical schemes, and atmosphere model components.
+This goal can't be achieved by the efforts of a single group, project, or even a single community.
+Such a lofty aim can only be realized by a wide-ranging and sustained collaboration of passionate people.
+Maybe that includes you - consider it!
+Model development is hard but rewarding, and builds useful skills for a myriad of pursuits.
+
+The goals of the current group of model developers include developing
+
+- ⛈️ **Advanced microphysics**: Predicted Particle Property (P3) bulk microphysics, spectral bin schemes, and Lagrangian superdroplet methods for high-fidelity cloud and precipitation modeling.
+- ️🏔 **Acoustic substepping and terrain-following coordinates**: A compressible dynamical core with horizontally explicit, vertically-implicit acoustic substepping that efficiently resolves sound waves in flow over complex topography with smooth [sigma coordinates](https://en.wikipedia.org/wiki/Sigma_coordinate_system)
+- 🔬 **Open boundaries and nesting**: Open boundary conditions are useful for both idealized simulations and realistic one- and two-way nested simulations for high-resolution downscaling.
+- 🌀 **Coupled atmosphere-ocean simulations**: Support for high-resolution coupled atmosphere-ocean simulations via [ClimaOcean.jl](https://github.com/CliMA/ClimaOcean.jl)
+
+If you have ideas, dreams, or criticisms that can make Breeze and its future better, don't hesitate to speak up by [opening issues](https://github.com/NumericalEarth/Breeze.jl/issues/new/choose) and contributing pull requests.
+
+## Selected examples
+
+Below we've included thumbnails that link to a few of Breeze's examples.
+Check out the [documentation](https://numericalearth.github.io/BreezeDocumentation/dev/) for the full list.
+
+<table>
+  <tr>
+    <td width="33%" align="center" valign="top">
+      <a href="https://numericalearth.github.io/BreezeDocumentation/dev/literated/cloudy_thermal_bubble/">
+        <img src="https://github.com/user-attachments/assets/1ebc76bd-0ec5-4930-9d12-970caf3c8036" width="100%"><br>
+        Cloudy thermal bubble
+      </a>
+    </td>
+    <td width="33%" align="center" valign="top">
+      <a href="https://numericalearth.github.io/BreezeDocumentation/dev/literated/bomex/">
+        <img src="https://github.com/user-attachments/assets/0264d13f-31a7-4ca1-830d-2aa05f27ec4a" width="100%"><br>
+        BOMEX shallow convection
+      </a>
+    </td>
+    <td width="33%" align="center" valign="top">
+      <a href="https://numericalearth.github.io/BreezeDocumentation/dev/literated/rico/">
+        <img src="https://github.com/user-attachments/assets/6a041b42-a828-41e5-91fd-b4bc89e0f63a" width="100%"><br>
+        RICO trade-wind cumulus
+      </a>
+    </td>
+  </tr>
+  <tr>
+    <td width="33%" align="center" valign="top">
+      <a href="https://numericalearth.github.io/BreezeDocumentation/dev/literated/prescribed_sea_surface_temperature/">
+        <img src="https://github.com/user-attachments/assets/44a4b21c-23a6-401d-b938-e4ec00f24704" width="100%"><br>
+        Prescribed SST convection
+      </a>
+    </td>
+    <td width="33%" align="center" valign="top">
+      <a href="https://numericalearth.github.io/BreezeDocumentation/dev/literated/cloudy_kelvin_helmholtz/">
+        <img src="https://github.com/user-attachments/assets/1bcc787a-5b29-4bb7-b686-2d4465374b7d" width="100%"><br>
+        Cloudy Kelvin-Helmholtz instability
+      </a>
+    </td>
+    <td width="33%" align="center" valign="top">
+      <a href="https://numericalearth.github.io/BreezeDocumentation/dev/literated/acoustic_wave/">
+        <img src="https://github.com/user-attachments/assets/fa2992d0-a289-4de7-aeb3-f59df7cbef28" width="100%"><br>
+        Acoustic wave in shear flow
+      </a>
+    </td>
+  </tr>
+</table>
+
+## Installation
 
 Breeze is a registered Julia package. First [install Julia](https://julialang.org/install/); suggested version 1.12. See [juliaup](https://github.com/JuliaLang/juliaup) README for how to install 1.12 and make that version the default.
 
@@ -65,7 +137,7 @@ If you want to live on the cutting edge, you can use, e.g.,
 Breeze from `main` branch. For more information, see the
 [Pkg.jl documentation](https://pkgdocs.julialang.org).
 
-### Using Breeze
+## Using Breeze
 
 Now we are ready to run any of the examples!
 
@@ -90,7 +162,21 @@ we get
 
 https://github.com/user-attachments/assets/c9a0c9c3-c199-48b8-9850-f967bdcc4bed
 
-### Citing
+We ran the [BOMEX example](https://numericalearth.github.io/BreezeDocumentation/dev/literated/bomex/) at 25 m resolution and a 2x bigger grid, and used the data to produce a visualization of the resulting clouds:
+
+https://github.com/user-attachments/assets/3c378cc7-c71b-420d-b301-33d45c7521e2
+
+## Relationship to Oceananigans
+
+Breeze is built on [Oceananigans.jl](https://github.com/CliMA/Oceananigans.jl), an ocean modeling package that provides grids, fields, operators, advection schemes, time-steppers, turbulence closures, and output infrastructure.
+Breeze extends Oceananigans with atmospheric dynamics, thermodynamics, microphysics, and radiation to create a complete atmosphere simulation capability.
+The two packages share a common philosophy: fast, flexible, GPU-native Julia code with a user interface designed for productivity and experimentation.
+To learn these foundational components of Breeze, please see the [Oceananigans documentation](https://clima.github.io/OceananigansDocumentation/stable/).
+
+If you're familiar with Oceananigans, you'll feel right at home with Breeze.
+If you're new to both, Breeze is a great entry point—and the skills you develop transfer directly to ocean and climate modeling with Oceananigans and [ClimaOcean.jl](https://github.com/CliMA/ClimaOcean.jl).
+
+## Citing
 
 If you use Breeze for research, teaching, or fun, we'd be grateful if you give credit by citing the corresponding Zenodo record, e.g.,
 
