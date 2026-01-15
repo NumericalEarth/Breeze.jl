@@ -15,7 +15,7 @@ using Test
     @testset "Default advection schemes" begin
         static_energy_model = AtmosphereModel(grid; thermodynamic_constants=constants, dynamics,
                                               formulation=:StaticEnergy)
-        potential_temperature_model = AtmosphereModel(grid; thermodynamic_constants=constants, dynamics, 
+        potential_temperature_model = AtmosphereModel(grid; thermodynamic_constants=constants, dynamics,
                                                       formulation=:LiquidIcePotentialTemperature)
 
         @test static_energy_model.advection.ρe isa Centered
@@ -119,4 +119,3 @@ using Test
         end
     end
 end
-

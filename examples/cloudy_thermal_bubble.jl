@@ -149,7 +149,7 @@ nothing #hide
 # following the methodology described by Bryan and Fritsch (2002). This simulation
 # includes moisture processes, where excess water vapor condenses to liquid water,
 # releasing latent heat that enhances the buoyancy of the rising bubble.
-# 
+#
 # For pedagogical purposes, we build a new model with warm-phase saturation adjustment microphysics.
 # (We coudl have also used this model for the dry simulation):
 

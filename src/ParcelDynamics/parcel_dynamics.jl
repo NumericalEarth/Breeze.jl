@@ -28,7 +28,7 @@ State of a Lagrangian air parcel.
 - Thermodynamic state: `𝒰` (contains static energy or potential temperature)
 - Microphysics prognostic variables: `μ` (scheme-dependent, e.g., cloud liquid, rain)
 
-# Diagnostic variables  
+# Diagnostic variables
 - Density: `ρ` [kg/m³] (from environmental profile)
 """
 mutable struct ParcelState{FT, TH, MP}
@@ -56,7 +56,7 @@ Base.getproperty(state::ParcelState, name::Symbol) =
     getfield(state, name)
 
 function Base.show(io::IO, state::ParcelState{FT}) where FT
-    print(io, "ParcelState{$FT}(z=", state.z, ", ρ=", round(state.ρ, digits=4), 
+    print(io, "ParcelState{$FT}(z=", state.z, ", ρ=", round(state.ρ, digits=4),
           ", qᵗ=", round(state.qᵗ * 1000, digits=2), " g/kg)")
 end
 
@@ -82,7 +82,7 @@ mutable struct ParcelTendencies{FT, GM}
     Gμ :: GM
 end
 
-ParcelTendencies(FT::DataType, Gμ::GM) where GM = 
+ParcelTendencies(FT::DataType, Gμ::GM) where GM =
     ParcelTendencies{FT, GM}(zero(FT), zero(FT), zero(FT), zero(FT), zero(FT), Gμ)
 
 #####
@@ -180,11 +180,11 @@ function AtmosphereModels.materialize_dynamics(d::ParcelDynamics, grid, bcs, con
     p₀ = convert(FT, d.surface_pressure)
     pˢᵗ = convert(FT, d.standard_pressure)
     g = constants.gravitational_acceleration
-    
+
     # Create density and pressure fields
     ρ = CenterField(grid)
     p = CenterField(grid)
-    
+
     # Create default parcel state (will be overwritten by set!)
     # Use StaticEnergyState as the default thermodynamic formulation
     q = MoistureMassFractions(zero(FT))
@@ -193,16 +193,16 @@ function AtmosphereModels.materialize_dynamics(d::ParcelDynamics, grid, bcs, con
     z_default = zero(FT)
     e_default = cᵖᵐ * T_default + g * z_default
     𝒰 = StaticEnergyState(e_default, q, z_default, p₀)
-    
+
     # Microphysics prognostic variables (nothing for no microphysics)
     μ = nothing
-    
+
     state = ParcelState(zero(FT), zero(FT), z_default, FT(1.2), zero(FT), 𝒰, μ)
-    
+
     # Microphysics prognostic tendencies (same structure as μ)
     Gμ = zero_microphysics_prognostic_tendencies(μ)
     tendencies = ParcelTendencies(FT, Gμ)
-    
+
     return ParcelDynamics(state, tendencies, ρ, p, p₀, pˢᵗ)
 end
 
@@ -280,7 +280,7 @@ function Oceananigans.set!(model::ParcelModel;
     !isnothing(T) && set!(model.temperature, T)
     !isnothing(ρ) && set!(dynamics.density, ρ)
     !isnothing(p) && set!(dynamics.pressure, p)
-    
+
     # Set velocities
     set!(model.velocities.u, u)
     set!(model.velocities.v, v)
@@ -304,7 +304,7 @@ function Oceananigans.set!(model::ParcelModel;
         x₀ = convert(FT, x)
         y₀ = convert(FT, y)
         z₀ = convert(FT, z)
-        
+
         # Interpolate environmental conditions at parcel height
         T₀ = interpolate((z₀,), model.temperature)
         ρ₀ = interpolate((z₀,), dynamics.density)
@@ -367,13 +367,13 @@ function compute_parcel_tendencies!(model::ParcelModel)
     tendencies = dynamics.tendencies
     microphysics = model.microphysics
     constants = model.thermodynamic_constants
-    
+
     z = state.z
     ρ = state.ρ
     qᵗ = state.qᵗ
     𝒰 = state.𝒰
     μ = state.μ
-    
+
     # Build diagnostic microphysical state from prognostic variables
     ℳ = parcel_microphysical_state(microphysics, ρ, qᵗ, μ, 𝒰, constants)
 
@@ -448,7 +448,7 @@ function step_parcel_state!(model::ParcelModel, Δt)
     z_new = state.z
     p_new = interpolate((z_new,), dynamics.pressure)
     ρ_new = interpolate((z_new,), dynamics.density)
-    
+
     # Update density from environmental profile
     state.ρ = ρ_new
 
@@ -520,7 +520,7 @@ This follows the standard pattern used by all dynamics types:
 function TimeSteppers.time_step!(model::ParcelModel, Δt; callbacks=nothing)
     # Compute tendencies at current state
     TimeSteppers.update_state!(model, callbacks; compute_tendencies=true)
-    
+
     # Step forward prognostic variables
     step_parcel_state!(model, Δt)
 

@@ -118,4 +118,3 @@ function (d::StaticEnergyKernelFunction)(i, j, k, grid)
         return ρᵣ * e
     end
 end
-

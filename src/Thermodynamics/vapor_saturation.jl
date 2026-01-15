@@ -107,7 +107,7 @@ Compute the supersaturation ``𝒮 = pᵛ/pᵛ⁺ - 1`` over a given `surface`.
 
 # Arguments
 - `T`: Temperature
-- `ρ`: Total air density  
+- `ρ`: Total air density
 - `q`: `MoistureMassFractions` containing vapor, liquid, and ice mass fractions
 - `constants`: `ThermodynamicConstants`
 - `surface`: Surface type (e.g., `PlanarLiquidSurface()`, `PlanarIceSurface()`)

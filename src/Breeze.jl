@@ -34,7 +34,7 @@ export
     mixture_heat_capacity,
     dynamics_density,
     dynamics_pressure,
-    
+
     # Diagnostics
     compute_hydrostatic_pressure!,
     PotentialTemperature,
@@ -80,9 +80,7 @@ export
 
     # ParcelDynamics
     ParcelModel,
-    ParcelState,
-    EnvironmentalProfile,
-    step_parcel!
+    ParcelState
 
 using Oceananigans: Oceananigans, @at, AnisotropicMinimumDissipation, Average,
                     AveragedTimeInterval, BackgroundField, BetaPlane, Bounded,

@@ -61,7 +61,7 @@ end
 
 @testset "SubsidenceForcing with LiquidIcePotentialTemperature [$(FT)]" for FT in test_float_types()
     Oceananigans.defaults.FloatType = FT
-    
+
     Nz = 10
     Hz = 1000  # 1 km domain height
     grid = RectilinearGrid(default_arch; size=(4, 4, Nz), x=(0, 100), y=(0, 100), z=(0, Hz))
@@ -99,10 +99,10 @@ end
     end
 
     ρqᵗ_final = sum(model.moisture_density)
-    
+
     # Check simulation didn't produce NaN
     @test !isnan(ρqᵗ_final)
-    
+
     # With downward subsidence (wˢ < 0) and moisture decreasing with height (∂qᵗ/∂z < 0),
     # the subsidence forcing is: F_ρqᵗ = -ρᵣ * wˢ * ∂qᵗ/∂z = -ρᵣ * (-0.01) * (-Γq) < 0
     # So moisture should DECREASE

@@ -27,9 +27,9 @@ Breeze interfaces with ClimaOcean for coupled atmosphere-ocean simulations.
 2. **Type Stability**: Prioritize type-stable code for performance
    - All structs must be concretely typed
    - **Never use `Any` as a type parameter or field type**. This destroys type inference and performance.
-   - Use the **materialization pattern**: define a user-facing constructor that creates a "skeleton" 
-     struct with placeholder types (like `Nothing`), then `materialize_*` functions create the 
-     fully-typed version with concrete field types. This allows deferred type resolution while 
+   - Use the **materialization pattern**: define a user-facing constructor that creates a "skeleton"
+     struct with placeholder types (like `Nothing`), then `materialize_*` functions create the
+     fully-typed version with concrete field types. This allows deferred type resolution while
      maintaining concrete types in the final object.
    - For mutable state within an immutable struct, use a `mutable struct` as the field type.
      The outer struct remains immutable with concrete types, while the inner mutable struct's
@@ -399,7 +399,7 @@ serve(dir="docs/build")
 When implementing a simulation from a published paper:
 
 ### 1. Parameter Extraction
-- **Read the paper carefully** and extract ALL parameters: domain size, resolution, physical constants, 
+- **Read the paper carefully** and extract ALL parameters: domain size, resolution, physical constants,
   boundary conditions, initial conditions, forcing, closure parameters
 - Look for parameter tables (often "Table 1" or similar)
 - Check figure captions for additional details
@@ -442,11 +442,11 @@ Before running a long simulation:
 - Quantitative comparison: compute the same diagnostics as the paper
 
 ### 7. Common Issues
-- **NaN blowups**: Usually from timestep too large, unstable initial conditions, 
+- **NaN blowups**: Usually from timestep too large, unstable initial conditions,
   or if-else statements on GPU (use `ifelse` instead)
-- **Nothing happening**: Check that buoyancy anomaly has the right sign, 
+- **Nothing happening**: Check that buoyancy anomaly has the right sign,
   that initial conditions are actually applied, that forcing is active
-- **Wrong direction of flow**: Check coordinate conventions (is y increasing 
+- **Wrong direction of flow**: Check coordinate conventions (is y increasing
   upslope or downslope?)
 - **GPU issues**: Avoid branching, ensure type stability, use `randn()` carefully
 

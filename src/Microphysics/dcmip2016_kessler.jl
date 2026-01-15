@@ -418,7 +418,7 @@ end
 
     # Temperature offset for saturation adjustment (from TetensFormula)
     δT = constants.saturation_vapor_pressure.liquid_temperature_offset
-    
+
     # Microphysics parameters
     cfl    = microphysics.substep_cfl
     Cᵨ     = microphysics.density_scale
@@ -448,7 +448,7 @@ end
             qˡ_sum = qᶜˡ + qʳ
             qᵗ = max(qᵗ, qˡ_sum)
             qᵛ = qᵗ - qˡ_sum
-            
+
             # Convert to mixing ratios for Kessler physics
             q = MoistureMassFractions(qᵛ, qˡ_sum)
             r = MoistureMixingRatio(q)

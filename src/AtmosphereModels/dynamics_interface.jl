@@ -140,7 +140,7 @@ function validate_velocity_boundary_conditions(dynamics, user_boundary_condition
     velocity_names = (:u, :v, :w)
     user_bc_names = keys(user_boundary_conditions)
     provided_velocity_bcs = filter(name -> name ∈ user_bc_names, velocity_names)
-    
+
     if !isempty(provided_velocity_bcs)
         throw(ArgumentError(
             "Boundary conditions for velocity components $(provided_velocity_bcs) are not supported " *

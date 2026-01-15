@@ -111,7 +111,7 @@ end
 # Strip the ρ prefix from density variable names
 # e.g., :ρu → :u, :ρθ → :θ, :ρe → :e
 function strip_density_prefix(name::Symbol)
-    chars = string(name) |> collect 
+    chars = string(name) |> collect
     prefix = popfirst!(chars)
     return Symbol(chars...)
 end

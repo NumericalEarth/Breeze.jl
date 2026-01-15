@@ -42,11 +42,11 @@ Construct a gray atmosphere radiative transfer model for the given grid.
 # Keyword Arguments
 - `optical_thickness`: Optical thickness parameterization (default: `GrayOpticalThicknessOGorman2008(FT)`).
 - `surface_temperature`: Surface temperature in Kelvin (required).
-- `coordinate`: Tuple of (longitude, latitude) in degrees. If `nothing` (default), 
+- `coordinate`: Tuple of (longitude, latitude) in degrees. If `nothing` (default),
                 extracted from grid coordinates.
 - `epoch`: Optional epoch for computing time with floating-point clocks.
 - `surface_emissivity`: Surface emissivity, 0-1 (default: 0.98). Scalar.
-- `surface_albedo`: Surface albedo, 0-1. Can be scalar or 2D field. 
+- `surface_albedo`: Surface albedo, 0-1. Can be scalar or 2D field.
                     Alternatively, provide both `direct_surface_albedo` and `diffuse_surface_albedo`.
 - `direct_surface_albedo`: Direct surface albedo, 0-1. Can be scalar or 2D field.
 - `diffuse_surface_albedo`: Diffuse surface albedo, 0-1. Can be scalar or 2D field.
