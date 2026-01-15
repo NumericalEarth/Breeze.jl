@@ -55,6 +55,7 @@ export
     # Main scheme type
     PredictedParticlePropertiesMicrophysics,
     P3Microphysics,
+    ProcessRateParameters,
 
     # Ice properties
     IceProperties,
@@ -195,6 +196,12 @@ include("ice_properties.jl")
 
 include("rain_properties.jl")
 include("cloud_droplet_properties.jl")
+
+#####
+##### Process rate parameters
+#####
+
+include("process_rate_parameters.jl")
 
 #####
 ##### Main scheme type

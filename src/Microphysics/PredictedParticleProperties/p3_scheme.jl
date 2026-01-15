@@ -10,7 +10,7 @@
 The Predicted Particle Properties (P3) microphysics scheme. See the constructor
 [`PredictedParticlePropertiesMicrophysics()`](@ref) for usage and documentation.
 """
-struct PredictedParticlePropertiesMicrophysics{FT, ICE, RAIN, CLOUD, BC}
+struct PredictedParticlePropertiesMicrophysics{FT, ICE, RAIN, CLOUD, PRP, BC}
     # Shared physical constants
     water_density :: FT
     # Top-level thresholds
@@ -20,6 +20,8 @@ struct PredictedParticlePropertiesMicrophysics{FT, ICE, RAIN, CLOUD, BC}
     ice :: ICE
     rain :: RAIN
     cloud :: CLOUD
+    # Process rate parameters
+    process_rates :: PRP
     # Boundary condition
     precipitation_boundary_condition :: BC
 end
@@ -113,6 +115,7 @@ function PredictedParticlePropertiesMicrophysics(FT::Type{<:AbstractFloat} = Flo
         IceProperties(FT),
         RainProperties(FT),
         CloudDropletProperties(FT),
+        ProcessRateParameters(FT),
         precipitation_boundary_condition
     )
 end
@@ -128,7 +131,8 @@ function Base.show(io::IO, p3::PredictedParticlePropertiesMicrophysics)
     print(io, "├── qmin: ", p3.minimum_mass_mixing_ratio, " kg/kg\n")
     print(io, "├── ice: ", summary(p3.ice), "\n")
     print(io, "├── rain: ", summary(p3.rain), "\n")
-    print(io, "└── cloud: ", summary(p3.cloud))
+    print(io, "├── cloud: ", summary(p3.cloud), "\n")
+    print(io, "└── process_rates: ", summary(p3.process_rates))
 end
 
 # Note: prognostic_field_names is implemented in p3_interface.jl to extend

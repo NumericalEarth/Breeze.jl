@@ -30,6 +30,8 @@ Breeze interfaces with ClimaOcean for coupled atmosphere-ocean simulations.
 3. **Kernel Functions**: For GPU compatibility:
    - Use KernelAbstractions.jl syntax for kernels, eg `@kernel`, `@index`
    - Keep kernels type-stable and allocation-free
+   - **Functions called from GPU kernels CANNOT have keyword arguments.** All parameters must be positional.
+     This includes microphysics rate functions, thermodynamic functions, and any `@inline` helper called from a kernel.
    - Short-circuiting if-statements should be avoided if possible. This includes
      `if`... `else`, as well as the ternary operator `?` ... `:`. The function `ifelse` should be used for logic instead.
    - Do not put error messages inside kernels.
