@@ -115,7 +115,7 @@ Analysis of parcel models (`pyrcel`, `PySDM`) reveals that:
    are stored with predictable names based on tracer names?
 
 3. **Multi-moment schemes**: How should schemes handle different velocities for mass vs.
-   number concentration (e.g., `wʳ` for rain mass, `wʳₙ` for rain number)?
+   number concentration (e.g., `wʳ` for rain mass, `wʳₙ` for rain number concentration)?
 
 4. **Advection coupling**: How does the velocity field connect to the advection machinery
    in `AtmosphereModel`?
