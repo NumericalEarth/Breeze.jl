@@ -207,9 +207,10 @@ end
     # Check tendencies are computed
     tendencies = model.dynamics.timestepper.G
     @test tendencies.Gz ≈ 1.0  # w = 1 m/s
-    # Note: Ge and Gqᵗ include "expansion" terms (e * dρ/dt and qᵗ * dρ/dt) to conserve
-    # specific quantities as the parcel moves through regions of different environmental density.
-    # These are not zero even without microphysics.
+    # With specific quantity evolution, tendencies for e and qᵗ are zero
+    # (no microphysical sources) giving exact conservation
+    @test tendencies.Ge ≈ 0.0
+    @test tendencies.Gqᵗ ≈ 0.0
 
     # Time step should work
     time_step!(model, 10.0)
@@ -246,7 +247,9 @@ end
 
     tendencies = model.dynamics.timestepper.G
     @test tendencies.Gz ≈ 1.0  # w = 1 m/s
-    # Note: Ge and Gqᵗ include expansion terms, not just microphysical sources
+    # Tendencies are zero (SaturationAdjustment operates via state adjustment, not tendencies)
+    @test tendencies.Ge ≈ 0.0
+    @test tendencies.Gqᵗ ≈ 0.0
 
     # Time step should work
     time_step!(model, 10.0)
@@ -283,7 +286,9 @@ end
 
     tendencies = model.dynamics.timestepper.G
     @test tendencies.Gz ≈ 1.0  # w = 1 m/s
-    # Note: Ge and Gqᵗ include expansion terms, not just microphysical sources
+    # Tendencies are zero (DCMIP2016Kessler operates via microphysics_model_update!, not tendencies)
+    @test tendencies.Ge ≈ 0.0
+    @test tendencies.Gqᵗ ≈ 0.0
 
     # Time step should work
     time_step!(model, 10.0)
@@ -344,10 +349,8 @@ using Oceananigans.Units: kilometers, minutes
     # Allow 1 K tolerance for numerical errors
     @test abs(T_parcel - T_environment) < 1.0
 
-    # Specific quantities should be conserved (< 0.5% change)
-    # Note: qᵗ = 0 for dry air, so we skip the moisture check
-    e_relative_change = abs(e_final - e_initial) / abs(e_initial)
-    @test e_relative_change < 0.005  # < 0.5% change in static energy
+    # Specific static energy should be EXACTLY conserved (specific quantity evolution)
+    @test e_final == e_initial
 
     # Parcel should have risen to expected height
     @test z_final ≈ 1200.0 atol=1.0
@@ -385,11 +388,10 @@ end
     qᵗ_final = model.dynamics.state.qᵗ
     e_final = model.dynamics.state.ℰ
 
-    # Specific moisture should be conserved (< 0.5% change)
-    qᵗ_relative_change = abs(qᵗ_final - qᵗ_initial) / qᵗ_initial
-    @test qᵗ_relative_change < 0.005
+    # Specific quantities should be EXACTLY conserved (specific quantity evolution)
+    # Static energy is exactly conserved
+    @test e_final == e_initial
 
-    # Specific static energy should also be conserved
-    e_relative_change = abs(e_final - e_initial) / abs(e_initial)
-    @test e_relative_change < 0.005
+    # Moisture conserved to floating-point precision (minor rounding in RK3)
+    @test isapprox(qᵗ_final, qᵗ_initial, rtol=1e-14)
 end

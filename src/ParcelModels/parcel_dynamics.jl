@@ -23,14 +23,8 @@ $(TYPEDFIELDS)
 
 State of a Lagrangian air parcel with position, thermodynamic state, and microphysics.
 
-Prognostic variables are stored in both specific and density-weighted forms:
-- `qᵗ`: specific total moisture [kg/kg]
-- `ρqᵗ`: density-weighted total moisture [kg/m³]
-- `ℰ`: specific conserved thermodynamic variable (static energy or potential temperature)
-- `ρℰ`: density-weighted conserved thermodynamic variable
-
-The density-weighted forms (`ρqᵗ`, `ρℰ`, `μ`) are stepped forward in time.
-The specific forms are derived from the density-weighted forms after each time step.
+The parcel model evolves **specific quantities** (qᵗ, ℰ) directly for exact conservation.
+Density-weighted forms (ρqᵗ, ρℰ) are also stored for consistency with the microphysics interface.
 """
 mutable struct ParcelState{FT, TH, MP}
     x :: FT
@@ -69,9 +63,9 @@ Tendencies (time derivatives) for parcel prognostic variables.
 
 # Fields
 - `Gx`, `Gy`, `Gz`: position tendencies [m/s]
-- `Ge`: energy tendency [J/m³/s] (density-weighted)
-- `Gqᵗ`: total moisture tendency [kg/m³/s] (density-weighted)
-- `Gμ`: microphysics prognostic tendencies
+- `Ge`: specific energy tendency [J/kg/s]
+- `Gqᵗ`: specific moisture tendency [kg/kg/s]
+- `Gμ`: microphysics prognostic tendencies (density-weighted)
 """
 mutable struct ParcelTendencies{FT, GM}
     Gx :: FT
@@ -523,7 +517,6 @@ function compute_parcel_tendencies!(model::ParcelModel)
 
     z = state.z
     ρ = state.ρ
-    qᵗ = state.qᵗ
     𝒰 = state.𝒰
     μ = state.μ
 
@@ -671,16 +664,6 @@ copy_microphysics_prognostics(μ::NamedTuple) = deepcopy(μ)
 #####
 ##### SSP RK3 substep
 #####
-
-"""
-$(TYPEDSIGNATURES)
-
-Extract the conserved thermodynamic variable from a thermodynamic state.
-Returns static energy for `StaticEnergyState` or potential temperature for
-`LiquidIcePotentialTemperatureState`.
-"""
-conserved_thermodynamic_variable(𝒰::StaticEnergyState) = 𝒰.static_energy
-conserved_thermodynamic_variable(𝒰::LiquidIcePotentialTemperatureState) = 𝒰.potential_temperature
 
 """
 $(TYPEDSIGNATURES)
@@ -886,14 +869,12 @@ end
 $(TYPEDSIGNATURES)
 
 Adjust the thermodynamic state for adiabatic ascent/descent to a new height.
+Conserves the thermodynamic variable (static energy or potential temperature).
 """
 function adjust_adiabatically end
 
-@inline adjust_adiabatically(𝒰::StaticEnergyState{FT}, z⁺, p⁺, constants) where FT =
-    StaticEnergyState{FT}(𝒰.static_energy, 𝒰.moisture_mass_fractions, z⁺, p⁺)
+@inline adjust_adiabatically(𝒰::StaticEnergyState, z⁺, p⁺, constants) =
+    reconstruct_thermodynamic_state(𝒰, 𝒰.static_energy, z⁺, p⁺)
 
-@inline adjust_adiabatically(𝒰::LiquidIcePotentialTemperatureState{FT}, z⁺, p⁺, constants) where FT =
-    LiquidIcePotentialTemperatureState{FT}(𝒰.potential_temperature,
-                                           𝒰.moisture_mass_fractions,
-                                           𝒰.standard_pressure,
-                                           p⁺)
+@inline adjust_adiabatically(𝒰::LiquidIcePotentialTemperatureState, z⁺, p⁺, constants) =
+    reconstruct_thermodynamic_state(𝒰, 𝒰.potential_temperature, z⁺, p⁺)
