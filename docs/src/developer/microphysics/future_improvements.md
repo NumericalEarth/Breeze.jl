@@ -36,18 +36,18 @@ function materialize_microphysical_fields(microphysics, grid, bcs)
         bc = get(bcs, name, nothing)
         CenterField(grid; boundary_conditions=bc)
     end
-    
+
     # Auxiliary center fields (no BCs needed)
     aux_names = auxiliary_field_names(microphysics)
     aux_fields = center_field_tuple(grid, aux_names...)
-    
+
     # Velocity face fields (with bottom=nothing for sedimentation)
     vel_names = velocity_field_names(microphysics)
     w_bcs = FieldBoundaryConditions(grid, (Center(), Center(), Face()); bottom=nothing)
     vel_fields = map(n -> ZFaceField(grid; boundary_conditions=w_bcs), vel_names)
-    
-    return (; zip(prog_names, prog_fields)..., 
-              zip(aux_names, aux_fields)..., 
+
+    return (; zip(prog_names, prog_fields)...,
+              zip(aux_names, aux_fields)...,
               zip(vel_names, vel_fields)...)
 end
 ```
@@ -99,11 +99,11 @@ Analysis of parcel models (`pyrcel`, `PySDM`) reveals that:
 | Breeze `AtmosphereModel` | Eulerian LES | Tracer advection with terminal velocity |
 
 **Implications**:
-- `microphysical_velocities` is fundamentally an **Eulerian concept** — it provides velocities 
+- `microphysical_velocities` is fundamentally an **Eulerian concept** — it provides velocities
   for advecting tracer fields through a spatial grid
-- In parcel models, sedimentation should be modeled as a **mass sink term** in 
+- In parcel models, sedimentation should be modeled as a **mass sink term** in
   `microphysical_tendency`, not as spatial transport
-- This means `microphysical_velocities` should remain Eulerian-only and not be part of the 
+- This means `microphysical_velocities` should remain Eulerian-only and not be part of the
   minimal parcel interface
 
 ### Questions to resolve

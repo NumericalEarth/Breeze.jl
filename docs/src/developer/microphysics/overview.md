@@ -130,7 +130,7 @@ These additional functions are required for full [`AtmosphereModel`](@ref) suppo
 **Why these are Eulerian-only**:
 - **Field materialization**: Parcel models don't have fields; they store scalars directly in `ParcelState`.
 - **Auxiliary updates**: Parcel models recompute derived quantities on-the-fly; they don't store them in fields.
-- **Terminal velocities**: Sedimentation is a grid-based concept (advection through space). In parcel models, 
+- **Terminal velocities**: Sedimentation is a grid-based concept (advection through space). In parcel models,
   sedimentation would be modeled as a mass sink in `microphysical_tendency`, not as spatial transport.
 
 ### Summary Table
@@ -160,7 +160,7 @@ Saturation adjustment schemes have some additional requirements:
 | `grid_moisture_fractions(...)` | Override to read from diagnostic fields |
 | `maybe_adjust_thermodynamic_state(...)` | Perform saturation adjustment |
 
-These are needed because saturation adjustment schemes diagnose cloud condensate from 
+These are needed because saturation adjustment schemes diagnose cloud condensate from
 thermodynamic state rather than prognosing it.
 
 ## State Types
@@ -183,7 +183,7 @@ Schemes may define their own state types inheriting from `AbstractMicrophysicalS
 2. **Layered complexity**: The interface is structured so that:
    - **Minimal implementation** (4 functions) → parcel model support
    - **Full implementation** (7+ functions) → Eulerian LES support
-   
+
    This allows rapid prototyping of new schemes in parcel models before investing in
    full grid infrastructure.
 

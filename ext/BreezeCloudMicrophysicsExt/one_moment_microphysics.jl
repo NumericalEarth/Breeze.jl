@@ -324,20 +324,20 @@ end
     # State fields
     @inbounds μ.qᶜˡ[i, j, k] = ℳ.qᶜˡ
     @inbounds μ.qʳ[i, j, k] = ℳ.qʳ
-    
+
     # Vapor from thermodynamic state
     @inbounds μ.qᵛ[i, j, k] = 𝒰.moisture_mass_fractions.vapor
-    
+
     # Derived: total liquid
     @inbounds μ.qˡ[i, j, k] = ℳ.qᶜˡ + ℳ.qʳ
-    
+
     # Terminal velocity with bottom boundary condition
     categories = bμp.categories
     𝕎 = terminal_velocity(categories.rain, categories.hydrometeor_velocities.rain, ρ, ℳ.qʳ)
     wʳ = -𝕎 # negative = downward
     wʳ₀ = bottom_terminal_velocity(bμp.precipitation_boundary_condition, wʳ)
     @inbounds μ.wʳ[i, j, k] = ifelse(k == 1, wʳ₀, wʳ)
-    
+
     return nothing
 end
 
@@ -348,21 +348,21 @@ end
     @inbounds μ.qᶜⁱ[i, j, k] = ℳ.qᶜⁱ
     @inbounds μ.qʳ[i, j, k] = ℳ.qʳ
     @inbounds μ.qˢ[i, j, k] = ℳ.qˢ
-    
+
     # Vapor from thermodynamic state
     @inbounds μ.qᵛ[i, j, k] = 𝒰.moisture_mass_fractions.vapor
-    
+
     # Derived: total liquid and ice
     @inbounds μ.qˡ[i, j, k] = ℳ.qᶜˡ + ℳ.qʳ
     @inbounds μ.qⁱ[i, j, k] = ℳ.qᶜⁱ + ℳ.qˢ
-    
+
     # Terminal velocity with bottom boundary condition
     categories = bμp.categories
     𝕎 = terminal_velocity(categories.rain, categories.hydrometeor_velocities.rain, ρ, ℳ.qʳ)
     wʳ = -𝕎 # negative = downward
     wʳ₀ = bottom_terminal_velocity(bμp.precipitation_boundary_condition, wʳ)
     @inbounds μ.wʳ[i, j, k] = ifelse(k == 1, wʳ₀, wʳ)
-    
+
     return nothing
 end
 

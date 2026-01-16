@@ -738,12 +738,12 @@ end
     # State fields
     @inbounds μ.qᶜˡ[i, j, k] = ℳ.qᶜˡ
     @inbounds μ.qʳ[i, j, k] = ℳ.qʳ
-    
+
     # Vapor from thermodynamic state
     @inbounds μ.qᵛ[i, j, k] = 𝒰.moisture_mass_fractions.vapor
-    
+
     # Note: DCMIP2016 does NOT have a qˡ (total liquid) field
     # Rain sedimentation is handled internally, not via microphysical_velocities
-    
+
     return nothing
 end

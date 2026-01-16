@@ -329,13 +329,13 @@ end
     # Write state fields
     @inbounds μ.qᶜˡ[i, j, k] = ℳ.qᶜˡ
     @inbounds μ.qʳ[i, j, k] = ℳ.qʳ
-    
+
     # Vapor from thermodynamic state
     @inbounds μ.qᵛ[i, j, k] = 𝒰.moisture_mass_fractions.vapor
-    
+
     # Derived: total liquid
     @inbounds μ.qˡ[i, j, k] = ℳ.qᶜˡ + ℳ.qʳ
-    
+
     return nothing
 end
 

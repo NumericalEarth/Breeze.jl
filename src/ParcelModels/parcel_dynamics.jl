@@ -315,7 +315,7 @@ function Oceananigans.set!(model::ParcelModel; T = nothing, θ = nothing,
                            qᵗ = nothing, ℋ = nothing,
                            u = 0, v = 0, w = 0,
                            x = 0, y = 0, z = nothing)
-                           
+
     grid = model.grid
     dynamics = model.dynamics
     constants = model.thermodynamic_constants
@@ -347,7 +347,7 @@ function Oceananigans.set!(model::ParcelModel; T = nothing, θ = nothing,
 
     # Compute specific humidity from relative humidity if ℋ is provided
     if !isnothing(ℋ) && isnothing(qᵗ)
-        set_moisture_from_relative_humidity!(model.specific_moisture, ℋ, 
+        set_moisture_from_relative_humidity!(model.specific_moisture, ℋ,
                                               model.temperature, dynamics.density, constants)
     elseif !isnothing(qᵗ)
         set!(model.specific_moisture, qᵗ)
@@ -565,7 +565,7 @@ end
 
 # Zero tendencies for microphysics prognostics
 zero_microphysics_prognostic_tendencies(::Nothing) = nothing
-zero_microphysics_prognostic_tendencies(μ::NamedTuple{names, T}) where {names, T} = 
+zero_microphysics_prognostic_tendencies(μ::NamedTuple{names, T}) where {names, T} =
     NamedTuple{names}(ntuple(_ -> zero(eltype(T)), length(names)))
 
 # Apply tendencies to update microphysics prognostic variables
@@ -892,7 +892,7 @@ function adjust_adiabatically end
 @inline adjust_adiabatically(𝒰::StaticEnergyState{FT}, z⁺, p⁺, constants) where FT =
     StaticEnergyState{FT}(𝒰.static_energy, 𝒰.moisture_mass_fractions, z⁺, p⁺)
 
-@inline adjust_adiabatically(𝒰::LiquidIcePotentialTemperatureState{FT}, z⁺, p⁺, constants) where FT = 
+@inline adjust_adiabatically(𝒰::LiquidIcePotentialTemperatureState{FT}, z⁺, p⁺, constants) where FT =
     LiquidIcePotentialTemperatureState{FT}(𝒰.potential_temperature,
                                            𝒰.moisture_mass_fractions,
                                            𝒰.standard_pressure,
