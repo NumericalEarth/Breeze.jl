@@ -97,29 +97,26 @@ run!(simulation)
 
 @info "Simulation complete" model.clock.time model.dynamics.state.z
 
-# Convert heights to km for plotting
+# ## Visualization
+
+## Convert heights to km for plotting
 heights_km = heights ./ 1000
 times_min = times ./ 60
-
-# ## Visualization
 
 set_theme!(fontsize=14, linewidth=2)
 fig = Figure(size=(900, 400))
 
-# Panel 1: Height vs Temperature
+## Panel 1: Height vs Temperature
 ax1 = Axis(fig[1, 1];
     xlabel = "Temperature (K)",
     ylabel = "Height (km)",
     title = "Parcel ascent: adiabatic cooling")
 
 lines!(ax1, T_parcel, heights_km; color=:magenta, label="Parcel T")
-
-# Add environmental temperature for comparison
 lines!(ax1, T_environment, heights_km; color=:gray, linestyle=:dash, label="Environment T")
-
 axislegend(ax1; position=:lt)
 
-# Panel 2: Supersaturation evolution
+## Panel 2: Supersaturation evolution
 ax2 = Axis(fig[1, 2];
     xlabel = "Height (km)",
     ylabel = "Supersaturation (%)",
@@ -127,7 +124,6 @@ ax2 = Axis(fig[1, 2];
 
 lines!(ax2, heights_km, supersaturations .* 100; color=:purple)
 hlines!(ax2, [0]; color=:gray, linestyle=:dash, label="Saturation")
-
 axislegend(ax2; position=:lb)
 
 fig
