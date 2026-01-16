@@ -116,3 +116,76 @@ The following table also uses a few conventions that suffuse the source code and
 | ``τˡʷ``                             | `τˡʷ`  |                                     | Atmosphere optical thickness for longwave                                      |
 | ``τˢʷ``                             | `τˢʷ`  |                                     | Atmosphere optical thickness for shortwave                                     |
 | ``N_A``                             | `ℕᴬ`   |                                     | Avogadro's number, molecules per mole                                          |
+
+## P3 Microphysics Notation
+
+The following notation is specific to the [Predicted Particle Properties (P3)](@ref Breeze.Microphysics.PredictedParticleProperties) microphysics scheme.
+
+### Size Distribution Parameters
+
+| math symbol                         | code   | property name                       | description                                                                    |
+| ----------------------------------- | ------ | ----------------------------------- | ------------------------------------------------------------------------------ |
+| ``N_0``                             | `N₀`   | `intercept`                         | Intercept parameter of gamma size distribution [m⁻⁴⁻μ]                         |
+| ``\mu``                             | `μ`    | `shape`                             | Shape parameter of gamma size distribution [-]                                 |
+| ``\lambda``                         | `λ`    | `slope`                             | Slope parameter of gamma size distribution [1/m]                               |
+| ``N'(D)``                           | `Np`   |                                     | Number size distribution, ``N'(D) = N_0 D^\mu e^{-\lambda D}``                 |
+| ``D``                               | `D`    |                                     | Particle diameter [m]                                                          |
+
+### Ice Particle Properties
+
+| math symbol                         | code   | property name                       | description                                                                    |
+| ----------------------------------- | ------ | ----------------------------------- | ------------------------------------------------------------------------------ |
+| ``F^f``                             | `Fᶠ`   | `rime_fraction`                     | Rime (frozen accretion) mass fraction [-], 0 = unrimed, 1 = fully rimed        |
+| ``\rho^f``                          | `ρᶠ`   | `rime_density`                      | Density of rime layer [kg/m³]                                                  |
+| ``F^l``                             | `Fˡ`   | `liquid_fraction`                   | Liquid water fraction on ice particles [-]                                     |
+| ``m(D)``                            | `m`    |                                     | Particle mass as function of diameter [kg]                                     |
+| ``V(D)``                            | `V`    |                                     | Terminal velocity as function of diameter [m/s]                                |
+| ``A(D)``                            | `A`    |                                     | Particle cross-sectional area [m²]                                             |
+| ``C(D)``                            | `C`    |                                     | Particle capacitance for vapor diffusion [m]                                   |
+| ``\alpha``                          | `α`    | `coefficient`                       | Mass-diameter power law coefficient, ``m(D) = \alpha D^\beta`` [kg/m^β]        |
+| ``\beta``                           | `β`    | `exponent`                          | Mass-diameter power law exponent [-]                                           |
+| ``\rho^i``                          | `ρⁱ`   |                                     | Pure ice density [kg/m³], typically 917                                        |
+
+### Fall Speed
+
+| math symbol                         | code   | property name                       | description                                                                    |
+| ----------------------------------- | ------ | ----------------------------------- | ------------------------------------------------------------------------------ |
+| ``a_V``                             | `a_V`  | `fall_speed_coefficient`            | Fall speed power law coefficient [m^{1-b}/s]                                   |
+| ``b_V``                             | `b_V`  | `fall_speed_exponent`               | Fall speed power law exponent [-]                                              |
+| ``V_n``                             | `Vn`   |                                     | Number-weighted mean fall speed [m/s]                                          |
+| ``V_m``                             | `Vm`   |                                     | Mass-weighted mean fall speed [m/s]                                            |
+| ``V_z``                             | `Vz`   |                                     | Reflectivity-weighted mean fall speed [m/s]                                    |
+
+### Ice Concentrations and Moments
+
+| math symbol                         | code   | property name                       | description                                                                    |
+| ----------------------------------- | ------ | ----------------------------------- | ------------------------------------------------------------------------------ |
+| ``N_i``                             | `N_ice`, `Nᵢ` |                                | Ice number concentration [1/m³]                                                |
+| ``L_i``                             | `L_ice`, `Lᵢ` |                                | Ice mass concentration [kg/m³]                                                 |
+| ``Z_i``                             | `Z_ice`, `Zᵢ` |                                | Ice reflectivity / sixth moment [m⁶/m³]                                        |
+| ``Q_{norm}``                        | `Qnorm` |                                    | Normalized ice mass = ``L_i / N_i`` [kg]                                       |
+
+### Rain Properties
+
+| math symbol                         | code   | property name                       | description                                                                    |
+| ----------------------------------- | ------ | ----------------------------------- | ------------------------------------------------------------------------------ |
+| ``N_r``                             | `N_rain`, `Nʳ` |                               | Rain number concentration [1/m³]                                               |
+| ``L_r``                             | `L_rain`, `Lʳ` |                               | Rain mass concentration [kg/m³]                                                |
+| ``\mu_r``                           | `μ_r`  |                                     | Rain shape parameter [-]                                                       |
+
+### Collection and Ventilation
+
+| math symbol                         | code   | property name                       | description                                                                    |
+| ----------------------------------- | ------ | ----------------------------------- | ------------------------------------------------------------------------------ |
+| ``E^{ic}``                          | `Eⁱᶜ`  | `ice_cloud_collection_efficiency`   | Ice-cloud droplet collection efficiency [-]                                    |
+| ``E^{ir}``                          | `Eⁱʳ`  | `ice_rain_collection_efficiency`    | Ice-rain collection efficiency [-]                                             |
+| ``f^{ve}``                          | `fᵛᵉ`  |                                     | Ventilation factor for vapor diffusion enhancement [-]                         |
+
+### Diameter Thresholds
+
+| math symbol                         | code   | property name                       | description                                                                    |
+| ----------------------------------- | ------ | ----------------------------------- | ------------------------------------------------------------------------------ |
+| ``D_{th}``                          | `D_spherical` |                              | Threshold between small spherical ice and aggregates [m]                       |
+| ``D_{gr}``                          | `D_graupel` |                                | Threshold between aggregates and graupel [m]                                   |
+| ``D_{cr}``                          | `D_partial` |                                | Threshold between graupel and partially rimed ice [m]                          |
+| ``D_{crit}``                        | `D_crit` |                                   | Critical diameter separating small and large ice for melting [m]               |

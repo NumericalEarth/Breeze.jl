@@ -8,11 +8,14 @@
 # - **Autoconversion**: Cloud liquid → rain (timescale τ ≈ 1000 s)
 # - **Rain evaporation**: Subsaturated rain → vapor
 #
-# We compare **one-moment** (mass only) and **two-moment** (mass + number)
-# microphysics schemes. For two-moment, we use the [SeifertBeheng2006](@citet)
-# scheme, which derives process rates from the evolving particle size distribution.
+# We compare three microphysics schemes of increasing complexity:
+# - **One-moment**: Mass only, prescribed process timescales
+# - **Two-moment**: Mass + number, [SeifertBeheng2006](@citet) process rates
+# - **Predicted Particle Properties (P3)**: Three-moment ice with continuously predicted properties
+#
 # Tracking droplet number concentration enables realistic representation of
-# aerosol-cloud interactions.
+# aerosol-cloud interactions. P3 takes this further by predicting ice particle
+# properties (rime fraction, rime density) rather than using discrete categories.
 #
 # Stationary parcel models are classic tools in cloud physics, isolating microphysics
 # from dynamics; see [rogers1989short](@citet).
@@ -45,12 +48,16 @@ TwoMomentCloudMicrophysics = BreezeCloudMicrophysicsExt.TwoMomentCloudMicrophysi
 
 function run_parcel_simulation(; microphysics, θ = 300, stop_time = 2000, Δt = 1,
                                  qᵗ = 0.020, qᶜˡ = 0, qʳ = 0,
-                                 nᶜˡ = 0, nʳ = 0)
+                                 nᶜˡ = 0, nʳ = 0,
+                                 qⁱ = 0, nⁱ = 0)
 
     model = AtmosphereModel(grid; dynamics, thermodynamic_constants=constants, microphysics)
     is_two_moment = microphysics isa TwoMomentCloudMicrophysics
+    is_p3 = microphysics isa PredictedParticlePropertiesMicrophysics
 
-    if is_two_moment
+    if is_p3
+        set!(model; θ, qᵗ, qᶜˡ, qʳ, nʳ, qⁱ, nⁱ)
+    elseif is_two_moment
         set!(model; θ, qᵗ, qᶜˡ, nᶜˡ, qʳ, nʳ)
     else
         set!(model; θ, qᵗ, qᶜˡ, qʳ)
@@ -60,30 +67,44 @@ function run_parcel_simulation(; microphysics, θ = 300, stop_time = 2000, Δt =
 
     ## Time series storage
     t = Float64[]
-    qᵛ, qᶜˡ, qʳ = Float64[], Float64[], Float64[]
-    nᶜˡ, nʳ = Float64[], Float64[]
-    T = Float64[]
+    qᵛ_ts, qᶜˡ_ts, qʳ_ts = Float64[], Float64[], Float64[]
+    nᶜˡ_ts, nʳ_ts = Float64[], Float64[]
+    qⁱ_ts, nⁱ_ts = Float64[], Float64[]
+    T_ts = Float64[]
 
     function record_time_series(sim)
         μ = sim.model.microphysical_fields
         push!(t, time(sim))
-        push!(qᵛ, first(μ.qᵛ))
-        push!(qᶜˡ, first(μ.qᶜˡ))
-        push!(qʳ, first(μ.qʳ))
-        push!(T, first(sim.model.temperature))
-        if is_two_moment
-            push!(nᶜˡ, first(μ.nᶜˡ))
-            push!(nʳ, first(μ.nʳ))
+        push!(T_ts, first(sim.model.temperature))
+        push!(qᵛ_ts, first(μ.qᵛ))
+
+        if is_p3
+            # P3 stores density-weighted fields; divide by reference density
+            ρᵣ = first(sim.model.dynamics.reference_state.density)
+            push!(qᶜˡ_ts, first(μ.ρqᶜˡ) / ρᵣ)
+            push!(qʳ_ts, first(μ.ρqʳ) / ρᵣ)
+            push!(nʳ_ts, first(μ.ρnʳ) / ρᵣ)
+            push!(qⁱ_ts, first(μ.ρqⁱ) / ρᵣ)
+            push!(nⁱ_ts, first(μ.ρnⁱ) / ρᵣ)
+        else
+            push!(qᶜˡ_ts, first(μ.qᶜˡ))
+            push!(qʳ_ts, first(μ.qʳ))
+            if is_two_moment
+                push!(nᶜˡ_ts, first(μ.nᶜˡ))
+                push!(nʳ_ts, first(μ.nʳ))
+            end
         end
     end
 
     add_callback!(simulation, record_time_series)
     run!(simulation)
 
-    if is_two_moment
-        return (; t, qᵛ, qᶜˡ, qʳ, nᶜˡ, nʳ, T)
+    if is_p3
+        return (; t, qᵛ=qᵛ_ts, qᶜˡ=qᶜˡ_ts, qʳ=qʳ_ts, nʳ=nʳ_ts, qⁱ=qⁱ_ts, nⁱ=nⁱ_ts, T=T_ts)
+    elseif is_two_moment
+        return (; t, qᵛ=qᵛ_ts, qᶜˡ=qᶜˡ_ts, qʳ=qʳ_ts, nᶜˡ=nᶜˡ_ts, nʳ=nʳ_ts, T=T_ts)
     else
-        return (; t, qᵛ, qᶜˡ, qʳ, T)
+        return (; t, qᵛ=qᵛ_ts, qᶜˡ=qᶜˡ_ts, qʳ=qʳ_ts, T=T_ts)
     end
 end
 nothing #hide
@@ -117,6 +138,10 @@ microphysics_1m_fast = OneMomentCloudMicrophysics(; categories, precipitation_bo
 # And now a default two-moment scheme using Seifert and Beheng (2006)
 microphysics_2m = TwoMomentCloudMicrophysics(; precipitation_boundary_condition)
 
+# Finally, the Predicted Particle Properties (P3) scheme - a three-moment scheme
+# with continuously predicted ice particle properties
+microphysics_p3 = PredictedParticlePropertiesMicrophysics(; precipitation_boundary_condition)
+
 # ## Run four comparison cases
 #
 # All cases start with the same supersaturated conditions (qᵗ = 0.030).
@@ -130,19 +155,28 @@ case_1m_fast = run_parcel_simulation(; microphysics = microphysics_1m_fast, qᵗ
 stop_time = 4000
 case_2m_few  = run_parcel_simulation(; microphysics = microphysics_2m, qᵗ = 0.030, nᶜˡ = 100e6, stop_time)
 case_2m_many = run_parcel_simulation(; microphysics = microphysics_2m, qᵗ = 0.030, nᶜˡ = 300e6, stop_time)
+
+## P3 case: three-moment ice scheme with predicted particle properties
+## Note: P3 process rates are under development - here we demonstrate initialization
+stop_time = 100
+case_p3 = run_parcel_simulation(; microphysics = microphysics_p3, qᵗ = 0.020,
+                                  qᶜˡ = 0.005, qʳ = 0.001, nʳ = 1000,
+                                  qⁱ = 0.002, nⁱ = 10000, stop_time)
 nothing #hide
 
 # ## Visualization
 #
-# We compare all four cases side-by-side to highlight the key differences.
+# We compare all cases side-by-side to highlight the key differences.
 
 ## Colorblind-friendly colors
 c_cloud = :limegreen
 c_rain  = :orangered
+c_ice = :dodgerblue
 c_cloud_n = :purple
 c_rain_n = :gold
+c_ice_n = :cyan
 
-fig = Figure(size=(1000, 700))
+fig = Figure(size=(1000, 950))
 set_theme!(linewidth=2.5, fontsize=16)
 
 ## Row 1: One-moment comparison
@@ -179,8 +213,23 @@ lines!(ax2_n, t, case_2m_many.nᶜˡ; color=c_cloud_n, linestyle=:dash, label="n
 lines!(ax2_n, t, case_2m_many.nʳ .* 1e6; color=c_rain_n, linestyle=:dash, label="nʳ × 10⁶ (nᶜˡ₀ = 300/mg)")
 axislegend(ax2_n; position=:rt, labelsize=11)
 
-rowsize!(fig.layout, 1, Relative(0.05))
-rowsize!(fig.layout, 3, Relative(0.05))
+## Row 3: P3 microphysics
+Label(fig[5, 1:2], "P3 microphysics: three-moment ice with predicted particle properties")
+ax3_q = Axis(fig[6, 1]; xlabel="t (s)", ylabel="q (kg/kg)", title="Mass mixing ratios")
+t = case_p3.t
+lines!(ax3_q, t, case_p3.qᶜˡ; color=c_cloud, label="qᶜˡ (cloud)")
+lines!(ax3_q, t, case_p3.qʳ; color=c_rain, label="qʳ (rain)")
+lines!(ax3_q, t, case_p3.qⁱ; color=c_ice, label="qⁱ (ice)")
+axislegend(ax3_q; position=:rt, labelsize=11)
+
+ax3_n = Axis(fig[6, 2]; xlabel="t (s)", ylabel="n (1/kg)", title="Number concentrations")
+lines!(ax3_n, t, case_p3.nʳ; color=c_rain_n, label="nʳ (rain)")
+lines!(ax3_n, t, case_p3.nⁱ; color=c_ice_n, label="nⁱ (ice)")
+axislegend(ax3_n; position=:rt, labelsize=11)
+
+rowsize!(fig.layout, 1, Relative(0.04))
+rowsize!(fig.layout, 3, Relative(0.04))
+rowsize!(fig.layout, 5, Relative(0.04))
 
 fig
 
@@ -195,7 +244,7 @@ fig
 # This illustrates a key limitation: **1M schemes prescribe process rates
 # rather than deriving them from the microphysical state**.
 #
-# ### Two-moment microphysics (bottom row)
+# ### Two-moment microphysics (middle row)
 #
 # Initial droplet number dramatically affects precipitation timing:
 #
@@ -215,3 +264,24 @@ fig
 # This sensitivity to droplet number is why **two-moment schemes are essential
 # for studying aerosol effects on precipitation**. More aerosols → more CCN →
 # more cloud droplets → smaller drops → less rain (the Twomey effect).
+#
+# ### P3 microphysics (bottom row)
+#
+# The Predicted Particle Properties (P3) scheme represents ice differently
+# than traditional schemes. Instead of discrete categories (cloud ice, snow,
+# graupel, hail), P3 uses a **single ice category** with continuously predicted
+# properties:
+#
+# - **Rime fraction**: What fraction of ice mass is rimed?
+# - **Rime density**: How dense is the rime layer?
+# - **Liquid fraction**: Liquid water coating from partial melting
+#
+# P3 tracks 9 prognostic variables total: cloud liquid mass; rain mass and
+# number; ice mass, number, rime mass, rime volume, reflectivity (6th moment),
+# and liquid-on-ice mass.
+#
+# !!! note "P3 process rates are under development"
+#     The P3 scheme infrastructure is complete, but process rate tendencies
+#     (nucleation, deposition, riming, aggregation, melting) are not yet
+#     implemented. The constant values shown here confirm the scheme initializes
+#     correctly and integrates with AtmosphereModel.
