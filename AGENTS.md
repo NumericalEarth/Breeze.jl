@@ -464,6 +464,41 @@ Before running a long simulation:
 - Update tests and documentation with code changes
 - Check CI passes before merging
 
+## Code Formatting and Whitespace
+
+**PRs will fail CI unless trailing whitespace is cleared.** Before committing, clean up whitespace in all `.jl`, `.md`, and `.sh` files.
+
+### Shell-based cleanup (recommended for agents)
+
+```bash
+# Remove trailing whitespace from all .jl, .md, .sh files
+find /path/to/Breeze -type f \( -name "*.jl" -o -name "*.md" -o -name "*.sh" \) \
+  -exec sed -i '' 's/[[:space:]]*$//' {} \;
+
+# Ensure files end with exactly one newline (macOS)
+find /path/to/Breeze -type f \( -name "*.jl" -o -name "*.md" -o -name "*.sh" \) \
+  -exec sh -c 'printf "%s\n" "$(cat "$1")" > "$1"' _ {} \;
+```
+
+### Emacs Lisp cleanup
+
+```elisp
+(dolist (file (directory-files-recursively "/path/to/Breeze" "\\.\\(jl\\|md\\|sh\\)$"))
+  (when (file-regular-p file)
+    (with-temp-buffer
+      (insert-file-contents file)
+      (set-buffer-file-coding-system 'unix)
+      (goto-char (point-max))
+      (insert "\n")
+      (save-excursion
+        (goto-char (point-min))
+        (while (search-forward " " nil t)
+          (replace-match " " nil t)))
+      (untabify (point-min) (point-max))
+      (delete-trailing-whitespace)
+      (write-region (point-min) (point-max) file))))
+```
+
 ## Helpful Resources
 - Oceananigans docs: https://clima.github.io/OceananigansDocumentation/stable/
 - Breeze docs: https://numericalearth.github.io/BreezeDocumentation/dev/
