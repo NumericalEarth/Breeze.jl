@@ -8,7 +8,7 @@
 #
 # 2. **Cloudy ascent with precipitation**: A moist parcel rises through the
 #    lifting condensation level, forming cloud via condensation, then rain via
-#    autoconversion. We use two-moment microphysics [(Seifert and Beheng, 2006)](@citet SeifertBeheng2006)
+#    autoconversion. We use two-moment microphysics [SeifertBeheng2006](@citet)
 #    to track both mass and number concentration.
 #
 # The parcel model works with `AtmosphereModel`, using the standard `Simulation` interface.
@@ -269,7 +269,7 @@ fig
 #    self-collection (droplets merging).
 #
 # 3. **Precipitation formation**: When cloud droplets grow large enough,
-#    autoconversion transfers mass from cloud to rain. The [Seifert and Beheng (2006)](@citet SeifertBeheng2006)
+#    autoconversion transfers mass from cloud to rain. The [SeifertBeheng2006](@citet)
 #    scheme derives autoconversion rates from the evolving size distribution:
 #    - Fewer, larger droplets → faster autoconversion
 #    - Many small droplets → suppressed precipitation
