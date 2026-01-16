@@ -307,6 +307,8 @@ Schemes should write all auxiliary fields in one function. This includes:
 
 See [`WarmRainState`](@ref) implementation below for an example.
 """
+function update_microphysical_auxiliaries! end
+
 # Nothing microphysics: do nothing for any state
 @inline function update_microphysical_auxiliaries!(μ, i, j, k, grid, microphysics::Nothing, ℳ, ρ, 𝒰, constants)
     return nothing
