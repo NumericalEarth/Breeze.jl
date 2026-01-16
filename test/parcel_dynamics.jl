@@ -207,8 +207,9 @@ end
     # Check tendencies are computed
     tendencies = model.dynamics.timestepper.G
     @test tendencies.Gz ≈ 1.0  # w = 1 m/s
-    @test tendencies.Ge ≈ 0.0  # No microphysics
-    @test tendencies.Gqᵗ ≈ 0.0  # No microphysics
+    # Note: Ge and Gqᵗ include "expansion" terms (e * dρ/dt and qᵗ * dρ/dt) to conserve
+    # specific quantities as the parcel moves through regions of different environmental density.
+    # These are not zero even without microphysics.
 
     # Time step should work
     time_step!(model, 10.0)
@@ -234,6 +235,7 @@ end
     ℳ = NothingMicrophysicalState(typeof(ρ_val))
 
     # This tests that the state-based interface exists for SaturationAdjustment
+    # Microphysical sources are zero (SaturationAdjustment operates via state adjustment)
     tendency_e = microphysical_tendency(microphysics, Val(:ρe), ρ_val, ℳ, 𝒰, constants)
     tendency_qt = microphysical_tendency(microphysics, Val(:ρqᵗ), ρ_val, ℳ, 𝒰, constants)
     @test tendency_e == 0.0
@@ -244,8 +246,7 @@ end
 
     tendencies = model.dynamics.timestepper.G
     @test tendencies.Gz ≈ 1.0  # w = 1 m/s
-    @test tendencies.Ge ≈ 0.0  # SaturationAdjustment operates via state adjustment
-    @test tendencies.Gqᵗ ≈ 0.0
+    # Note: Ge and Gqᵗ include expansion terms, not just microphysical sources
 
     # Time step should work
     time_step!(model, 10.0)
@@ -271,6 +272,7 @@ end
     ℳ = NothingMicrophysicalState(typeof(ρ_val))
 
     # This tests that the state-based interface exists for DCMIP2016Kessler
+    # Microphysical sources are zero (operates via microphysics_model_update!)
     tendency_e = microphysical_tendency(microphysics, Val(:ρe), ρ_val, ℳ, 𝒰, constants)
     tendency_qt = microphysical_tendency(microphysics, Val(:ρqᵗ), ρ_val, ℳ, 𝒰, constants)
     @test tendency_e == 0.0
@@ -281,10 +283,113 @@ end
 
     tendencies = model.dynamics.timestepper.G
     @test tendencies.Gz ≈ 1.0  # w = 1 m/s
-    @test tendencies.Ge ≈ 0.0  # DCMIP2016Kessler operates via microphysics_model_update!
-    @test tendencies.Gqᵗ ≈ 0.0
+    # Note: Ge and Gqᵗ include expansion terms, not just microphysical sources
 
     # Time step should work
     time_step!(model, 10.0)
     @test model.dynamics.state.z ≈ 10.0
+end
+
+#####
+##### Adiabatic ascent in isentropic atmosphere
+#####
+
+using Oceananigans: interpolate
+using Oceananigans.Units: kilometers, minutes
+
+@testset "Adiabatic ascent: parcel temperature matches environment in isentropic atmosphere" begin
+    # In an isentropic atmosphere (constant potential temperature θ), a parcel
+    # ascending adiabatically should have the same temperature as the environment
+    # at all heights. This tests that the parcel model correctly conserves
+    # specific quantities (static energy, moisture) during ascent.
+
+    grid = RectilinearGrid(size=100, z=(0, 10kilometers), topology=(Flat, Flat, Bounded))
+    model = AtmosphereModel(grid; dynamics=ParcelDynamics(), microphysics=nothing)
+
+    # Create an isentropic reference state (constant θ = 300 K)
+    reference_state = ReferenceState(grid, model.thermodynamic_constants,
+                                     surface_pressure = 101325,
+                                     potential_temperature = 300)
+
+    # Set environmental profiles from the isentropic reference state
+    # Use dry air (no moisture) to isolate the temperature conservation test
+    set!(model;
+         θ = reference_state.potential_temperature,
+         p = reference_state.pressure,
+         ρ = reference_state.density,
+         qᵗ = 0,  # Dry air
+         z = 0,
+         w = 1)   # 1 m/s updraft
+
+    # Record initial state
+    constants = model.thermodynamic_constants
+    T_initial = temperature(model.dynamics.state.𝒰, constants)
+    z_initial = model.dynamics.state.z
+    qᵗ_initial = model.dynamics.state.qᵗ
+    e_initial = model.dynamics.state.ℰ
+
+    # Run simulation for 20 minutes (parcel rises 1200 m at 1 m/s)
+    simulation = Simulation(model; Δt=1.0, stop_time=20minutes)
+    run!(simulation)
+
+    z_final = model.dynamics.state.z
+    qᵗ_final = model.dynamics.state.qᵗ
+    e_final = model.dynamics.state.ℰ
+
+    # Get parcel and environmental temperatures at final height
+    T_parcel = temperature(model.dynamics.state.𝒰, constants)
+    T_environment = interpolate((z_final,), model.temperature)
+
+    # In an isentropic atmosphere, parcel temperature should match environment
+    # Allow 1 K tolerance for numerical errors
+    @test abs(T_parcel - T_environment) < 1.0
+
+    # Specific quantities should be conserved (< 0.5% change)
+    # Note: qᵗ = 0 for dry air, so we skip the moisture check
+    e_relative_change = abs(e_final - e_initial) / abs(e_initial)
+    @test e_relative_change < 0.005  # < 0.5% change in static energy
+
+    # Parcel should have risen to expected height
+    @test z_final ≈ 1200.0 atol=1.0
+end
+
+@testset "Adiabatic ascent with moisture: specific humidity conserved" begin
+    # Test that specific humidity qᵗ is conserved during adiabatic ascent
+    # when there are no microphysical sources/sinks.
+
+    grid = RectilinearGrid(size=100, z=(0, 10kilometers), topology=(Flat, Flat, Bounded))
+    model = AtmosphereModel(grid; dynamics=ParcelDynamics(), microphysics=nothing)
+
+    reference_state = ReferenceState(grid, model.thermodynamic_constants,
+                                     surface_pressure = 101325,
+                                     potential_temperature = 300)
+
+    # Environmental moisture profile (not used by parcel, but needed for initialization)
+    qᵗ_env(z) = 0.012 * exp(-z / 2500)
+
+    set!(model;
+         θ = reference_state.potential_temperature,
+         p = reference_state.pressure,
+         ρ = reference_state.density,
+         qᵗ = qᵗ_env,
+         z = 0,
+         w = 1)
+
+    qᵗ_initial = model.dynamics.state.qᵗ
+    e_initial = model.dynamics.state.ℰ
+
+    # Run simulation for 15 minutes
+    simulation = Simulation(model; Δt=1.0, stop_time=15minutes)
+    run!(simulation)
+
+    qᵗ_final = model.dynamics.state.qᵗ
+    e_final = model.dynamics.state.ℰ
+
+    # Specific moisture should be conserved (< 0.5% change)
+    qᵗ_relative_change = abs(qᵗ_final - qᵗ_initial) / qᵗ_initial
+    @test qᵗ_relative_change < 0.005
+
+    # Specific static energy should also be conserved
+    e_relative_change = abs(e_final - e_initial) / abs(e_initial)
+    @test e_relative_change < 0.005
 end

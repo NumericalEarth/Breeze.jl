@@ -507,7 +507,12 @@ $(TYPEDSIGNATURES)
 Compute tendencies for the parcel prognostic variables.
 
 Position tendencies are interpolated from environmental velocity fields.
-Thermodynamic, moisture, and microphysical tendencies come from the microphysics scheme.
+Thermodynamic and moisture tendencies come from microphysical sources/sinks.
+
+The parcel model evolves **specific quantities** (e, qᵗ) directly, not
+density-weighted quantities. For adiabatic ascent with no microphysics,
+specific static energy and moisture are exactly conserved (de/dt = dqᵗ/dt = 0).
+This is simpler and more accurate than stepping density-weighted quantities.
 """
 function compute_parcel_tendencies!(model::ParcelModel)
     dynamics = model.dynamics
@@ -530,9 +535,10 @@ function compute_parcel_tendencies!(model::ParcelModel)
     tendencies.Gy = interpolate((z,), model.velocities.v)
     tendencies.Gz = interpolate((z,), model.velocities.w)
 
-    # Thermodynamic and moisture tendencies from microphysics
-    tendencies.Ge = microphysical_tendency(microphysics, Val(:ρe), ρ, ℳ, 𝒰, constants)
-    tendencies.Gqᵗ = microphysical_tendency(microphysics, Val(:ρqᵗ), ρ, ℳ, 𝒰, constants)
+    # Thermodynamic and moisture tendencies from microphysics (specific, not density-weighted)
+    # For adiabatic (no microphysics): both are zero, giving exact conservation
+    tendencies.Ge = microphysical_tendency(microphysics, Val(:e), ρ, ℳ, 𝒰, constants)
+    tendencies.Gqᵗ = microphysical_tendency(microphysics, Val(:qᵗ), ρ, ℳ, 𝒰, constants)
 
     # Microphysics prognostic tendencies (scheme-dependent)
     tendencies.Gμ = compute_microphysics_prognostic_tendencies(microphysics, ρ, μ, ℳ, 𝒰, constants)
@@ -625,24 +631,22 @@ Used by SSP RK3 to combine the initial state with intermediate states.
 
 # Fields
 - `x`, `y`, `z`: initial position [m]
-- `ρ`: initial density [kg/m³] (needed for density-weighted stepping)
-- `ρqᵗ`: initial total moisture density [kg/m³] (density-weighted)
-- `ρℰ`: initial energy density [J/m³] or potential temperature density [K kg/m³]
-- `μ`: initial microphysics prognostics (ρ-weighted)
+- `qᵗ`: initial specific total moisture [kg/kg]
+- `ℰ`: initial specific static energy [J/kg] or potential temperature [K]
+- `μ`: initial microphysics prognostics (density-weighted)
 """
 mutable struct ParcelInitialState{FT, MP}
     x :: FT
     y :: FT
     z :: FT
-    ρ :: FT
-    ρqᵗ :: FT
-    ρℰ :: FT
+    qᵗ :: FT
+    ℰ :: FT
     μ :: MP
 end
 
 function ParcelInitialState(state::ParcelState{FT, TH, MP}) where {FT, TH, MP}
     return ParcelInitialState{FT, MP}(
-        state.x, state.y, state.z, state.ρ, state.ρqᵗ, state.ρℰ, state.μ
+        state.x, state.y, state.z, state.qᵗ, state.ℰ, state.μ
     )
 end
 
@@ -655,9 +659,8 @@ function store_initial_parcel_state!(U⁰::ParcelInitialState, state::ParcelStat
     U⁰.x = state.x
     U⁰.y = state.y
     U⁰.z = state.z
-    U⁰.ρ = state.ρ
-    U⁰.ρqᵗ = state.ρqᵗ
-    U⁰.ρℰ = state.ρℰ
+    U⁰.qᵗ = state.qᵗ
+    U⁰.ℰ = state.ℰ
     U⁰.μ = copy_microphysics_prognostics(state.μ)
     return nothing
 end
@@ -691,8 +694,9 @@ u^{(m)} = (1 - α) u^{(0)} + α (u^{(m-1)} + Δt G^{(m-1)})
 where `u^{(0)}` is the initial state, `u^{(m-1)}` is the current state,
 and `G^{(m-1)}` is the tendency at the current state.
 
-For conservation, density-weighted quantities (ρqᵗ, ρe or ρθ, μ) are stepped
-directly, then converted back to specific quantities.
+The parcel model steps specific quantities (e, qᵗ) directly for exact conservation.
+For adiabatic ascent with no microphysics sources, de/dt = dqᵗ/dt = 0, so these
+quantities remain exactly constant throughout the simulation.
 """
 function ssp_rk3_parcel_substep!(model::ParcelModel, U⁰::ParcelInitialState, Δt, α)
     # Compute tendencies at current state
@@ -701,18 +705,15 @@ function ssp_rk3_parcel_substep!(model::ParcelModel, U⁰::ParcelInitialState, �
     dynamics = model.dynamics
     state = dynamics.state
     tendencies = dynamics.timestepper.G
-    constants = model.thermodynamic_constants
 
-    # Step position (not density-weighted)
+    # Step position
     state.x = (1 - α) * U⁰.x + α * (state.x + Δt * tendencies.Gx)
     state.y = (1 - α) * U⁰.y + α * (state.y + Δt * tendencies.Gy)
     state.z = (1 - α) * U⁰.z + α * (state.z + Δt * tendencies.Gz)
 
-    # Step density-weighted moisture: (ρqᵗ)^new = (1-α)*(ρqᵗ)⁰ + α*((ρqᵗ)^(m-1) + Δt*Gρqᵗ)
-    state.ρqᵗ = (1 - α) * U⁰.ρqᵗ + α * (state.ρqᵗ + Δt * tendencies.Gqᵗ)
-
-    # Step density-weighted energy: (ρℰ)^new = (1-α)*(ρℰ)⁰ + α*((ρℰ)^(m-1) + Δt*Gρℰ)
-    state.ρℰ = (1 - α) * U⁰.ρℰ + α * (state.ρℰ + Δt * tendencies.Ge)
+    # Step specific quantities directly (exact conservation for adiabatic)
+    state.qᵗ = (1 - α) * U⁰.qᵗ + α * (state.qᵗ + Δt * tendencies.Gqᵗ)
+    state.ℰ = (1 - α) * U⁰.ℰ + α * (state.ℰ + Δt * tendencies.Ge)
 
     # Get environmental conditions at new height
     z⁺ = state.z
@@ -722,14 +723,14 @@ function ssp_rk3_parcel_substep!(model::ParcelModel, U⁰::ParcelInitialState, �
     # Update density from environmental profile
     state.ρ = ρ⁺
 
-    # Convert density-weighted quantities to specific
-    state.qᵗ = state.ρqᵗ / ρ⁺
-    state.ℰ = state.ρℰ / ρ⁺
+    # Update density-weighted quantities for consistency
+    state.ρqᵗ = ρ⁺ * state.qᵗ
+    state.ρℰ = ρ⁺ * state.ℰ
 
-    # Reconstruct thermodynamic state with new specific energy and updated p, z
+    # Reconstruct thermodynamic state with conserved specific energy and updated p, z
     state.𝒰 = reconstruct_thermodynamic_state(state.𝒰, state.ℰ, z⁺, p⁺)
 
-    # Step microphysics prognostics with SSP RK3 formula (already density-weighted)
+    # Step microphysics prognostics with SSP RK3 formula (density-weighted)
     state.μ = ssp_rk3_microphysics_substep(U⁰.μ, state.μ, tendencies.Gμ, Δt, α)
 
     # Update moisture fractions in thermodynamic state
@@ -792,16 +793,15 @@ function step_parcel_state!(model::ParcelModel, Δt)
     dynamics = model.dynamics
     state = dynamics.state
     tendencies = dynamics.timestepper.G
-    constants = model.thermodynamic_constants
 
     # Step position forward (Forward Euler)
     state.x += Δt * tendencies.Gx
     state.y += Δt * tendencies.Gy
     state.z += Δt * tendencies.Gz
 
-    # Step density-weighted quantities forward
-    state.ρqᵗ += Δt * tendencies.Gqᵗ
-    state.ρℰ += Δt * tendencies.Ge
+    # Step specific quantities forward (exact conservation for adiabatic)
+    state.qᵗ += Δt * tendencies.Gqᵗ
+    state.ℰ += Δt * tendencies.Ge
 
     # Get environmental conditions at new height
     z⁺ = state.z
@@ -811,14 +811,14 @@ function step_parcel_state!(model::ParcelModel, Δt)
     # Update density from environmental profile
     state.ρ = ρ⁺
 
-    # Convert density-weighted quantities to specific
-    state.qᵗ = state.ρqᵗ / ρ⁺
-    state.ℰ = state.ρℰ / ρ⁺
+    # Update density-weighted quantities for consistency
+    state.ρqᵗ = ρ⁺ * state.qᵗ
+    state.ρℰ = ρ⁺ * state.ℰ
 
-    # Reconstruct thermodynamic state with new specific energy and updated p, z
+    # Reconstruct thermodynamic state with conserved specific energy and updated p, z
     state.𝒰 = reconstruct_thermodynamic_state(state.𝒰, state.ℰ, z⁺, p⁺)
 
-    # Step microphysics prognostics forward using tendencies (both are ρ-weighted)
+    # Step microphysics prognostics forward using tendencies (density-weighted)
     state.μ = apply_microphysical_tendencies(state.μ, tendencies.Gμ, Δt)
 
     # Update moisture fractions in thermodynamic state

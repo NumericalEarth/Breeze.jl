@@ -466,18 +466,27 @@ Before running a long simulation:
 
 ## Code Formatting and Whitespace
 
-**PRs will fail CI unless trailing whitespace is cleared.** Before committing, clean up whitespace in all `.jl`, `.md`, and `.sh` files.
+**PRs will fail CI unless trailing whitespace and trailing blank lines are cleared.**
+Before committing, clean up whitespace in all `.jl`, `.md`, and `.sh` files.
+
+The cleanup must:
+1. Remove trailing whitespace from each line
+2. Remove trailing blank lines at end of file
+3. Ensure file ends with exactly one newline
 
 ### Shell-based cleanup (recommended for agents)
 
 ```bash
-# Remove trailing whitespace from all .jl, .md, .sh files
-find /path/to/Breeze -type f \( -name "*.jl" -o -name "*.md" -o -name "*.sh" \) \
-  -exec sed -i '' 's/[[:space:]]*$//' {} \;
-
-# Ensure files end with exactly one newline (macOS)
-find /path/to/Breeze -type f \( -name "*.jl" -o -name "*.md" -o -name "*.sh" \) \
-  -exec sh -c 'printf "%s\n" "$(cat "$1")" > "$1"' _ {} \;
+# Combined cleanup: trailing whitespace, trailing blank lines, ensure final newline
+for file in $(find /path/to/Breeze -type f \( -name "*.jl" -o -name "*.md" -o -name "*.sh" \) ! -path "*/.git/*"); do
+  # Remove trailing whitespace from each line
+  sed -i '' 's/[[:space:]]*$//' "$file"
+  # Remove trailing blank lines and ensure exactly one final newline
+  # This uses awk to skip trailing empty lines and adds one newline at end
+  awk 'NF {p=1} p' "$file" | awk '{print}' > "$file.tmp" && mv "$file.tmp" "$file"
+  # Ensure file ends with newline (in case awk produced empty output)
+  [ -s "$file" ] && [ "$(tail -c1 "$file" | wc -l)" -eq 0 ] && echo >> "$file"
+done
 ```
 
 ### Emacs Lisp cleanup
@@ -487,14 +496,19 @@ find /path/to/Breeze -type f \( -name "*.jl" -o -name "*.md" -o -name "*.sh" \) 
   (when (file-regular-p file)
     (with-temp-buffer
       (insert-file-contents file)
+      ;; Force LF line ending
       (set-buffer-file-coding-system 'unix)
+      ;; Add final newline in case it's missing (will be cleaned if extra)
       (goto-char (point-max))
       (insert "\n")
+      ;; Replace non-breaking spaces with regular spaces
       (save-excursion
         (goto-char (point-min))
         (while (search-forward " " nil t)
           (replace-match " " nil t)))
+      ;; Convert tabs to spaces
       (untabify (point-min) (point-max))
+      ;; Remove trailing whitespace (includes trailing blank lines)
       (delete-trailing-whitespace)
       (write-region (point-min) (point-max) file))))
 ```

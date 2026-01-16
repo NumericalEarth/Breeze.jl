@@ -37,6 +37,7 @@ examples = [
     Example("Inertia gravity wave", "inertia_gravity_wave", true),
     Example("Single column radiation", "single_column_radiation", true),
     Example("Stationary parcel model", "stationary_parcel_model", true),
+    Example("Rising parcel: adiabatic ascent", "rising_parcel", true),
     Example("Acoustic wave in shear layer", "acoustic_wave", true),
     Example("Cloud formation in prescribed updraft", "kinematic_driver", true),
 ]
