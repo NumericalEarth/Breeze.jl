@@ -145,7 +145,22 @@ function Base.show(io::IO, d::ParcelDynamics)
     print(io, "└── standard_pressure: ", d.standard_pressure)
 end
 
-# Type alias for AtmosphereModel with ParcelDynamics
+"""
+    ParcelModel
+
+Type alias for `AtmosphereModel{<:ParcelDynamics}`.
+
+A `ParcelModel` represents a Lagrangian adiabatic parcel that rises through a
+prescribed environmental atmosphere. The parcel is characterized by its position
+`(x, y, z)`, thermodynamic state, and moisture content. The environmental profiles
+(temperature, pressure, density, velocities) are defined on a 1D vertical grid.
+
+The parcel's motion is determined by interpolating environmental velocities to the
+parcel position, and its thermodynamic evolution follows adiabatic processes with
+optional microphysical interactions.
+
+See also [`ParcelDynamics`](@ref), [`AtmosphereModel`](@ref).
+"""
 const ParcelModel = AtmosphereModel{<:ParcelDynamics}
 
 #####

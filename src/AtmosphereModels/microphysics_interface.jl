@@ -119,7 +119,7 @@ end
 """
     microphysical_state(microphysics, ρ, μ, 𝒰)
 
-Build a [`MicrophysicalState`](@ref) (ℳ) from density-weighted prognostic
+Build an [`AbstractMicrophysicalState`](@ref) (ℳ) from density-weighted prognostic
 microphysical variables `μ`, density `ρ`, and thermodynamic state `𝒰`.
 
 This is the **primary interface** that microphysics schemes must implement.
@@ -151,7 +151,7 @@ See also [`microphysical_tendency`](@ref), [`AbstractMicrophysicalState`](@ref).
 """
     grid_microphysical_state(i, j, k, grid, microphysics, μ_fields, ρ, 𝒰)
 
-Build a [`MicrophysicalState`](@ref) (ℳ) at grid point `(i, j, k)`.
+Build an [`AbstractMicrophysicalState`](@ref) (ℳ) at grid point `(i, j, k)`.
 
 This is the **grid-indexed wrapper** that:
 1. Extracts prognostic values from `μ_fields` via [`extract_microphysical_prognostics`](@ref)
