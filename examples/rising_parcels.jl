@@ -165,38 +165,39 @@ lines!(ax1a, dry_Tₑ, dry_z / 1000; color=:gray, linestyle=:dash, label="Enviro
 axislegend(ax1a; position=:lt)
 
 ax1b = Axis(fig[2, 2];
-    xlabel = "Height (km)",
-    ylabel = "Supersaturation",
+    xlabel = "Supersaturation",
+    ylabel = "Height (km)",
     title = "Approach to saturation")
-lines!(ax1b, dry_z / 1000, dry_S; color=c_vapor)
-hlines!(ax1b, [0]; color=:gray, linestyle=:dash)
+lines!(ax1b, dry_S, dry_z / 1000; color=c_vapor)
+vlines!(ax1b, [0]; color=:gray, linestyle=:dash)
 
 ## Row 2: Cloudy parcel - condensation and cloud formation
 Label(fig[3, 1:2], "Cloudy ascent with two-moment microphysics", fontsize=16)
 
 ax2a = Axis(fig[4, 1];
-    xlabel = "Height (km)",
-    ylabel = "Mixing ratio (kg/kg)",
+    xlabel = "Mixing ratio (kg/kg)",
+    ylabel = "Height (km)",
     title = "Moisture evolution")
-lines!(ax2a, cloudy_z / 1000, cloudy_qᵛ; color=c_vapor, label="Vapor qᵛ")
-lines!(ax2a, cloudy_z / 1000, cloudy_qᶜˡ; color=c_cloud, label="Cloud qᶜˡ")
-lines!(ax2a, cloudy_z / 1000, cloudy_qʳ; color=c_rain, label="Rain qʳ")
+lines!(ax2a, cloudy_qᵛ, cloudy_z / 1000; color=c_vapor, label="Vapor qᵛ")
+lines!(ax2a, cloudy_qᶜˡ, cloudy_z / 1000; color=c_cloud, label="Cloud qᶜˡ")
+lines!(ax2a, cloudy_qʳ, cloudy_z / 1000; color=c_rain, label="Rain qʳ")
 axislegend(ax2a; position=:rt)
 
 ax2b = Axis(fig[4, 2];
-    xlabel = "Height (km)",
-    ylabel = "Supersaturation",
+    xlabel = "Supersaturation",
+    ylabel = "Height (km)",
     title = "Supersaturation evolution")
-lines!(ax2b, cloudy_z / 1000, cloudy_S; color=c_vapor)
-hlines!(ax2b, [0]; color=:gray, linestyle=:dash)
+lines!(ax2b, cloudy_S, cloudy_z / 1000; color=c_vapor)
+vlines!(ax2b, [0]; color=:gray, linestyle=:dash)
 
 ## Row 3: Number concentrations and mean droplet size
 ax3a = Axis(fig[5, 1];
-    xlabel = "Height (km)",
-    ylabel = "Number concentration (1/kg)",
-    title = "Droplet number evolution")
-lines!(ax3a, cloudy_z / 1000, cloudy_nᶜˡ; color=c_cloud, label="Cloud nᶜˡ")
-lines!(ax3a, cloudy_z / 1000, cloudy_nʳ; color=c_rain, label="Rain nʳ")
+    xlabel = "Number concentration (1/kg)",
+    ylabel = "Height (km)",
+    xscale = log10,
+    title = "Number concentration evolution")
+lines!(ax3a, cloudy_nᶜˡ, cloudy_z / 1000; color=c_cloud, label="Cloud nᶜˡ")
+lines!(ax3a, cloudy_nʳ, cloudy_z / 1000; color=c_rain, label="Rain nʳ")
 axislegend(ax3a; position=:rt)
 
 # Mean droplet mass: q/n gives mass per droplet (kg)
@@ -204,18 +205,18 @@ mean_cloud_mass = cloudy_qᶜˡ ./ max.(cloudy_nᶜˡ, 1e-20)
 mean_rain_mass = cloudy_qʳ ./ max.(cloudy_nʳ, 1e-20)
 
 ax3b = Axis(fig[5, 2];
-    xlabel = "Height (km)",
-    ylabel = "Mean droplet mass (kg)",
+    xlabel = "Mean droplet mass (kg)",
+    ylabel = "Height (km)",
     title = "Mean droplet size evolution")
 
 cloud_mask = cloudy_qᶜˡ .> 1e-10
 rain_mask = cloudy_qʳ .> 1e-10
 
 if any(cloud_mask)
-    lines!(ax3b, cloudy_z[cloud_mask] / 1000, mean_cloud_mass[cloud_mask]; color=c_cloud, label="Cloud")
+    lines!(ax3b, mean_cloud_mass[cloud_mask], cloudy_z[cloud_mask] / 1000; color=c_cloud, label="Cloud")
 end
 if any(rain_mask)
-    lines!(ax3b, cloudy_z[rain_mask] / 1000, mean_rain_mass[rain_mask]; color=c_rain, label="Rain")
+    lines!(ax3b, mean_rain_mass[rain_mask], cloudy_z[rain_mask] / 1000; color=c_rain, label="Rain")
 end
 axislegend(ax3b; position=:rt)
 
