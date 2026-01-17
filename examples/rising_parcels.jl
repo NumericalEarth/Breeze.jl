@@ -233,8 +233,6 @@ fig
 # 1. Temperature drops, reducing the saturation vapor pressure
 # 2. Total moisture is conserved (in the absence of microphysics)
 #
-# The parcel approaches but does not reach saturation (S = 0) because we
-# stop before the lifting condensation level (LCL).
 #
 # ### Cloudy ascent (middle and bottom rows)
 #
