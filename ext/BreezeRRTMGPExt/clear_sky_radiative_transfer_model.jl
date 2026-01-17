@@ -34,8 +34,11 @@ RRTMGP loads lookup tables from netCDF via an extension.
 # Keyword Arguments
 - `background_atmosphere`: Background atmospheric gas composition (default: `BackgroundAtmosphere{FT}()`).
 - `surface_temperature`: Surface temperature in Kelvin (required).
-- `coordinate`: Tuple of (longitude, latitude) in degrees. If `nothing` (default),
-                extracted from grid coordinates.
+- `coordinate`: Solar geometry specification. Can be:
+  - `nothing` (default): extracts location from grid coordinates for time-varying zenith angle
+  - `(longitude, latitude)` tuple in degrees: uses DateTime clock for time-varying zenith angle
+  - A `Number` representing fixed `cos(zenith_angle)`: perpetual insolation for RCE experiments
+    (e.g., `cosd(42.04) ≈ 0.743` for RCEMIP protocol)
 - `epoch`: Optional epoch for computing time with floating-point clocks.
 - `surface_emissivity`: Surface emissivity, 0-1 (default: 0.98). Scalar.
 - `surface_albedo`: Surface albedo, 0-1. Can be scalar or 2D field.
@@ -228,6 +231,18 @@ end
 @inline function set_longitude!(rrtmgp_λ, coordinate::Tuple, grid)
     λ = coordinate[1]
     rrtmgp_λ .= λ
+    return nothing
+end
+
+# When coordinate is a Number (fixed cos zenith), we don't need real lon/lat
+# Fill with zeros since RRTMGP still needs valid arrays
+@inline function set_longitude!(rrtmgp_λ, ::Number, grid)
+    rrtmgp_λ .= 0
+    return nothing
+end
+
+@inline function set_latitude!(rrtmgp_φ, ::Number, grid)
+    rrtmgp_φ .= 0
     return nothing
 end
 
