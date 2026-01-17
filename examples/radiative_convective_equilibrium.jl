@@ -59,8 +59,8 @@ surface_albedo = 0.07        # Ocean surface albedo
 # For production runs, a stretched grid with higher resolution near the surface
 # would be preferable.
 
-Nx = Ny = 64
-Lx = Ly = 64000  # 64 km horizontal domain (1 km grid spacing)
+Nx = Ny = 128
+Lx = Ly = 128000 # 64 km horizontal domain (1 km grid spacing)
 zᵗ = 20000       # 20 km model top (captures troposphere)
 Nz = 80          # 80 vertical levels (250 m resolution)
 
@@ -105,9 +105,7 @@ dynamics = AnelasticDynamics(reference_state)
 # - Interactive water vapor from model moisture field
 # - Fixed solar zenith angle (perpetual insolation)
 
-FT = eltype(grid)
-
-background = BackgroundAtmosphere{FT}(
+background = BackgroundAtmosphere(;
     CO₂ = 348e-6,      # Pre-industrial CO₂ (~348 ppm)
     CH₄ = 1650e-9,     # Methane
     N₂O = 306e-9,      # Nitrous oxide
@@ -119,6 +117,7 @@ radiation = RadiativeTransferModel(grid, AllSkyOptics(), constants;
                                    surface_emissivity = 0.98,
                                    surface_albedo,
                                    solar_constant,
+                                   schedule = TimeInterval(1hour),
                                    background_atmosphere = background,
                                    coordinate = cos_zenith,  # Fixed zenith angle!
                                    liquid_effective_radius = ConstantRadiusParticles(10.0),
@@ -164,7 +163,7 @@ sponge = Forcing(sponge_damping, discrete_form=true, parameters=(; λ, zˢ, zᵗ
 # mixed-phase microphysics would be more realistic, but warm-phase is sufficient
 # to demonstrate the RCE state.
 
-microphysics = SaturationAdjustment(equilibrium=WarmPhaseEquilibrium())
+microphysics = SaturationAdjustment(equilibrium=MixedPhaseEquilibrium())
 advection = WENO(order=5)
 
 model = AtmosphereModel(grid;
@@ -323,14 +322,14 @@ wts = FieldTimeSeries(filename, "w")
 times = θts.times
 Nt = length(times)
 
-# Mean profile evolution
+# ## Mean Profile Evolution
+#
+# Plot the evolution of horizontally-averaged profiles.
 fig = Figure(size=(1000, 400), fontsize=14)
 
 axθ = Axis(fig[1, 1], xlabel="θ (K)", ylabel="z (km)")
 axq = Axis(fig[1, 2], xlabel="qᵛ (g/kg)")
 axw = Axis(fig[1, 3], xlabel="w (m/s)")
-
-z_km = znodes(grid, Center()) ./ 1000
 
 default_colours = Makie.wong_colors()
 colors = [default_colours[mod1(i, length(default_colours))] for i in 1:Nt]
@@ -339,17 +338,10 @@ for n in 1:Nt
     t_min = Int(times[n] / 60)
     label = n == 1 ? "initial" : "t = $(t_min) min"
     
-    θ_profile = interior(θts[n], 1, 1, :)
-    qᵛ_profile = interior(qᵛts[n], 1, 1, :) .* 1000  # Convert to g/kg
-    w_profile = interior(wts[n], 1, 1, :)
-    
-    lines!(axθ, θ_profile, z_km, color=colors[n], label=label)
-    lines!(axq, qᵛ_profile, z_km, color=colors[n])
-    lines!(axw, w_profile, z_km, color=colors[n])
-end
-
-for ax in (axθ, axq, axw)
-    ylims!(ax, 0, 20)
+    # Use Field plotting directly (no explicit coordinates)
+    lines!(axθ, θts[n], color=colors[n], label=label)
+    lines!(axq, qᵛts[n], color=colors[n])
+    lines!(axw, wts[n], color=colors[n])
 end
 
 hideydecorations!(axq, grid=false)
@@ -361,54 +353,65 @@ fig[0, 1:3] = Label(fig, "RCE Mean Profile Evolution (SST = $(SST) K)", fontsize
 save("rce_profiles.png", fig)
 fig
 
-# Animation of cloud structure (xz and xy slices)
+# Animation of cloud structure (xz slices and horizontal mean profiles)
 
 wxz_ts = FieldTimeSeries(slices_filename, "wxz")
 qˡxz_ts = FieldTimeSeries(slices_filename, "qˡxz")
-wxy_ts = FieldTimeSeries(slices_filename, "wxy")
-qˡxy_ts = FieldTimeSeries(slices_filename, "qˡxy")
+
+# Also load horizontal averages for profile evolution
+θavg_ts = FieldTimeSeries(filename, "θ")
+qˡavg_ts = FieldTimeSeries(filename, "qˡ")
 
 slice_times = wxz_ts.times
 Nt_slices = length(slice_times)
 
 # Set color limits based on maximum values
-wlim = max(maximum(abs, wxz_ts), maximum(abs, wxy_ts)) / 2
-qˡlim = max(maximum(qˡxz_ts), maximum(qˡxy_ts)) / 2
+wlim = maximum(abs, wxz_ts) / 2
+qˡlim = maximum(qˡxz_ts) / 2
 
-# Create 2x2 figure: top row = xz slices, bottom row = xy slices
-fig = Figure(size=(1200, 1000), fontsize=14)
+# Create figure: top row = xz slices, bottom row = horizontal mean profiles
+fig = Figure(size=(1400, 900), fontsize=14)
 
 # xz slices (vertical cross-sections)
-axwxz = Axis(fig[2, 1], ylabel="z (km)", title="w (xz slice, y=0)")
-axqxz = Axis(fig[2, 2], ylabel="z (km)", title="qˡ (xz slice, y=0)")
+axwxz = Axis(fig[2, 1], title="w (xz slice)")
+axqxz = Axis(fig[2, 2], title="qˡ (xz slice)")
 
-# xy slices (horizontal at ~5 km)
-z_slice_km = round(k_slice * zᵗ / Nz / 1000, digits=1)
-axwxy = Axis(fig[3, 1], xlabel="x (km)", ylabel="y (km)", title="w (xy slice, z=$(z_slice_km) km)")
-axqxy = Axis(fig[3, 2], xlabel="x (km)", ylabel="y (km)", title="qˡ (xy slice, z=$(z_slice_km) km)")
+# Horizontal mean profiles
+axθ = Axis(fig[2, 3], xlabel="θ (K)", title="Mean θ")
+axqˡ = Axis(fig[2, 4], xlabel="qˡ (kg/kg)", title="Mean qˡ")
 
 n = Observable(Nt_slices)
 wxz_n = @lift wxz_ts[$n]
 qˡxz_n = @lift qˡxz_ts[$n]
-wxy_n = @lift wxy_ts[$n]
-qˡxy_n = @lift qˡxy_ts[$n]
 title = @lift "Radiative-Convective Equilibrium at t = " * prettytime(slice_times[$n])
 
-# xz heatmaps
+# xz heatmaps (Field plotting, no explicit coordinates)
 hmwxz = heatmap!(axwxz, wxz_n, colormap=:balance, colorrange=(-wlim, wlim))
 hmqxz = heatmap!(axqxz, qˡxz_n, colormap=:dense, colorrange=(0, qˡlim))
 
-# xy heatmaps  
-hmwxy = heatmap!(axwxy, wxy_n, colormap=:balance, colorrange=(-wlim, wlim))
-hmqxy = heatmap!(axqxy, qˡxy_n, colormap=:dense, colorrange=(0, qˡlim))
+# Mean profile lines - find corresponding times in the averaged output
+# We'll plot all saved profiles, highlighting the current one
+n_avg = Observable(length(θavg_ts.times))
+
+for i in 1:length(θavg_ts.times)
+    α = i / length(θavg_ts.times)
+    lines!(axθ, θavg_ts[i], color=(:gray, 0.3 + 0.5 * α))
+    lines!(axqˡ, qˡavg_ts[i], color=(:gray, 0.3 + 0.5 * α))
+end
+
+# Latest profile highlighted
+θavg_n = @lift θavg_ts[min($n_avg, length(θavg_ts.times))]
+qˡavg_n = @lift qˡavg_ts[min($n_avg, length(qˡavg_ts.times))]
+lines!(axθ, θavg_n, color=:orangered, linewidth=2)
+lines!(axqˡ, qˡavg_n, color=:dodgerblue, linewidth=2)
+
+hideydecorations!(axqxz, grid=false)
+hideydecorations!(axθ, grid=false)
+hideydecorations!(axqˡ, grid=false)
 
 # Colorbars
-Colorbar(fig[4, 1], hmwxy, vertical=false, label="w (m/s)")
-Colorbar(fig[4, 2], hmqxy, vertical=false, label="qˡ (kg/kg)")
-
-# Hide x-axis labels on top row
-hidexdecorations!(axwxz, grid=false)
-hidexdecorations!(axqxz, grid=false)
+Colorbar(fig[3, 1], hmwxz, vertical=false, label="w (m/s)")
+Colorbar(fig[3, 2], hmqxz, vertical=false, label="qˡ (kg/kg)")
 
 # Title
 fig[1, :] = Label(fig, title, fontsize=18, tellwidth=false)
@@ -419,6 +422,10 @@ fig
 # Create animation
 CairoMakie.record(fig, "rce.mp4", 1:Nt_slices, framerate=12) do nn
     n[] = nn
+    # Update profile index based on time correspondence
+    t = slice_times[nn]
+    avg_times = θavg_ts.times
+    n_avg[] = findlast(τ -> τ <= t, avg_times)
 end
 nothing #hide
 

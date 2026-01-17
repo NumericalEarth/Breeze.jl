@@ -79,6 +79,7 @@ function AtmosphereModels.RadiativeTransferModel(grid::AbstractGrid,
                                                  diffuse_surface_albedo = nothing,
                                                  surface_albedo = nothing,
                                                  solar_constant = 1361,
+                                                 schedule = IterationInterval(1),
                                                  liquid_effective_radius = ConstantRadiusParticles(10.0),
                                                  ice_effective_radius = ConstantRadiusParticles(30.0),
                                                  ice_roughness = 2)
@@ -247,7 +248,8 @@ function AtmosphereModels.RadiativeTransferModel(grid::AbstractGrid,
                                   downwelling_longwave_flux,
                                   downwelling_shortwave_flux,
                                   liquid_eff_radius,
-                                  ice_eff_radius)
+                                  ice_eff_radius,
+                                  schedule)
 end
 
 #####
@@ -259,7 +261,7 @@ $(TYPEDSIGNATURES)
 
 Update the all-sky (gas + cloud) full-spectrum radiative fluxes from the current model state.
 """
-function AtmosphereModels.update_radiation!(rtm::AllSkyRadiativeTransferModel, model)
+function AtmosphereModels._update_radiation!(rtm::AllSkyRadiativeTransferModel, model)
     grid = model.grid
     clock = model.clock
     solver = rtm.longwave_solver
@@ -286,6 +288,7 @@ function AtmosphereModels.update_radiation!(rtm::AllSkyRadiativeTransferModel, m
     update_sw_fluxes!(solver)
 
     copy_rrtmgp_fluxes_to_fields!(rtm, solver, grid)
+
     return nothing
 end
 

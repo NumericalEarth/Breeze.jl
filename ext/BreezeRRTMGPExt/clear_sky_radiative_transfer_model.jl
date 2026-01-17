@@ -58,7 +58,8 @@ function AtmosphereModels.RadiativeTransferModel(grid::AbstractGrid,
                                                  direct_surface_albedo = nothing,
                                                  diffuse_surface_albedo = nothing,
                                                  surface_albedo = nothing,
-                                                 solar_constant = 1361)
+                                                 solar_constant = 1361,
+                                                 schedule = IterationInterval(1))
 
     FT = eltype(grid)
     parameters = RRTMGPParameters(constants)
@@ -186,7 +187,8 @@ function AtmosphereModels.RadiativeTransferModel(grid::AbstractGrid,
                                   downwelling_longwave_flux,
                                   downwelling_shortwave_flux,
                                   nothing,  # liquid_effective_radius = nothing for clear-sky
-                                  nothing)  # ice_effective_radius = nothing for clear-sky
+                                  nothing,  # ice_effective_radius = nothing for clear-sky
+                                  schedule)
 end
 
 # Mapping from RRTMGP's internal gas names to BackgroundAtmosphere field names
@@ -264,7 +266,7 @@ $(TYPEDSIGNATURES)
 
 Update the clear-sky full-spectrum radiative fluxes from the current model state.
 """
-function AtmosphereModels.update_radiation!(rtm::ClearSkyRadiativeTransferModel, model)
+function AtmosphereModels._update_radiation!(rtm::ClearSkyRadiativeTransferModel, model)
     grid = model.grid
     clock = model.clock
     solver = rtm.longwave_solver
@@ -285,5 +287,6 @@ function AtmosphereModels.update_radiation!(rtm::ClearSkyRadiativeTransferModel,
     update_sw_fluxes!(solver)
 
     copy_rrtmgp_fluxes_to_fields!(rtm, solver, grid)
+
     return nothing
 end
