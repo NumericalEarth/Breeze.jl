@@ -23,6 +23,7 @@ using Oceananigans.Grids: Center, Face, XDirection, YDirection, AbstractGrid
 using Oceananigans.Fields: Field, set!
 using Oceananigans.BoundaryConditions: BoundaryConditions as OceananigansBC,
                                        BoundaryCondition,
+                                       DefaultBoundaryCondition,
                                        Flux,
                                        FieldBoundaryConditions,
                                        Bottom, Top, West, East, South, North
@@ -318,10 +319,10 @@ dividing by the local mixture heat capacity `cᵖᵐ`.
 
 The relationship is:
 ```math
-Jᶿ = Jᵉ / cᵖᵐ
+Jᶿ = 𝒬 / cᵖᵐ
 ```
 
-where `Jᵉ` is the energy flux and `Jᶿ` is the potential temperature flux.
+where `𝒬` is the energy flux and `Jᶿ` is the potential temperature flux.
 """
 struct EnergyFluxBoundaryConditionFunction{C, S, TC}
     condition :: C                    # underlying BC (function, number, or Oceananigans BC type)
@@ -346,96 +347,56 @@ function Base.summary(ef::EnergyFluxBoundaryConditionFunction)
 end
 
 # Type aliases for dispatch
-const BottomEnergyFluxBC = EnergyFluxBoundaryConditionFunction{<:Any, <:Bottom}
-const TopEnergyFluxBC = EnergyFluxBoundaryConditionFunction{<:Any, <:Top}
-const WestEnergyFluxBC = EnergyFluxBoundaryConditionFunction{<:Any, <:West}
-const EastEnergyFluxBC = EnergyFluxBoundaryConditionFunction{<:Any, <:East}
-const SouthEnergyFluxBC = EnergyFluxBoundaryConditionFunction{<:Any, <:South}
-const NorthEnergyFluxBC = EnergyFluxBoundaryConditionFunction{<:Any, <:North}
+const EFBCF = EnergyFluxBoundaryConditionFunction
+const BEFBC = EFBCF{<:Any, <:Bottom}
+const TEFBC = EFBCF{<:Any, <:Top}
+const WEFBC = EFBCF{<:Any, <:West}
+const EEFBC = EFBCF{<:Any, <:East}
+const SEFBC = EFBCF{<:Any, <:South}
+const NEFBC = EFBCF{<:Any, <:North}
 
-# Helper to get underlying boundary condition value
-@inline _get_energy_flux(condition::Number, args...) = condition
-@inline _get_energy_flux(condition, args...) = OceananigansBC.getbc(condition, args...)
+# Helper to get underlying energy flux value
+@inline _get_𝒬(c::Number, args...) = c
+@inline _get_𝒬(c, args...) = OceananigansBC.getbc(c, args...)
 
-# getbc for bottom boundary (k = 1)
-@inline function OceananigansBC.getbc(ef::BottomEnergyFluxBC, i::Integer, j::Integer,
-                                      grid::AbstractGrid, clock, fields)
-    Jᵉ = _get_energy_flux(ef.condition, i, j, grid, clock, fields)
-    
-    k = 1
-    qᵗ = @inbounds fields.qᵗ[i, j, k]
-    q = MoistureMassFractions(qᵗ)
-    cᵖᵐ = mixture_heat_capacity(q, ef.thermodynamic_constants)
-    
-    return Jᵉ / cᵖᵐ
+# Convert energy flux to potential temperature flux: Jᶿ = 𝒬 / cᵖᵐ
+@inline function _energy_to_θ_flux(𝒬, qᵗ, constants)
+    cᵖᵐ = mixture_heat_capacity(MoistureMassFractions(qᵗ), constants)
+    return 𝒬 / cᵖᵐ
 end
 
-# getbc for top boundary (k = Nz)
-@inline function OceananigansBC.getbc(ef::TopEnergyFluxBC, i::Integer, j::Integer,
-                                      grid::AbstractGrid, clock, fields)
-    Jᵉ = _get_energy_flux(ef.condition, i, j, grid, clock, fields)
-    
-    k = grid.Nz
-    qᵗ = @inbounds fields.qᵗ[i, j, k]
-    q = MoistureMassFractions(qᵗ)
-    cᵖᵐ = mixture_heat_capacity(q, ef.thermodynamic_constants)
-    
-    return Jᵉ / cᵖᵐ
+# getbc implementations for each boundary face
+@inline function OceananigansBC.getbc(ef::BEFBC, i::Integer, j::Integer, grid::AbstractGrid, clock, fields)
+    𝒬 = _get_𝒬(ef.condition, i, j, grid, clock, fields)
+    return _energy_to_θ_flux(𝒬, @inbounds(fields.qᵗ[i, j, 1]), ef.thermodynamic_constants)
 end
 
-# getbc for west boundary (i = 1)
-@inline function OceananigansBC.getbc(ef::WestEnergyFluxBC, j::Integer, k::Integer,
-                                      grid::AbstractGrid, clock, fields)
-    Jᵉ = _get_energy_flux(ef.condition, j, k, grid, clock, fields)
-    
-    i = 1
-    qᵗ = @inbounds fields.qᵗ[i, j, k]
-    q = MoistureMassFractions(qᵗ)
-    cᵖᵐ = mixture_heat_capacity(q, ef.thermodynamic_constants)
-    
-    return Jᵉ / cᵖᵐ
+@inline function OceananigansBC.getbc(ef::TEFBC, i::Integer, j::Integer, grid::AbstractGrid, clock, fields)
+    𝒬 = _get_𝒬(ef.condition, i, j, grid, clock, fields)
+    return _energy_to_θ_flux(𝒬, @inbounds(fields.qᵗ[i, j, grid.Nz]), ef.thermodynamic_constants)
 end
 
-# getbc for east boundary (i = Nx)
-@inline function OceananigansBC.getbc(ef::EastEnergyFluxBC, j::Integer, k::Integer,
-                                      grid::AbstractGrid, clock, fields)
-    Jᵉ = _get_energy_flux(ef.condition, j, k, grid, clock, fields)
-    
-    i = grid.Nx
-    qᵗ = @inbounds fields.qᵗ[i, j, k]
-    q = MoistureMassFractions(qᵗ)
-    cᵖᵐ = mixture_heat_capacity(q, ef.thermodynamic_constants)
-    
-    return Jᵉ / cᵖᵐ
+@inline function OceananigansBC.getbc(ef::WEFBC, j::Integer, k::Integer, grid::AbstractGrid, clock, fields)
+    𝒬 = _get_𝒬(ef.condition, j, k, grid, clock, fields)
+    return _energy_to_θ_flux(𝒬, @inbounds(fields.qᵗ[1, j, k]), ef.thermodynamic_constants)
 end
 
-# getbc for south boundary (j = 1)
-@inline function OceananigansBC.getbc(ef::SouthEnergyFluxBC, i::Integer, k::Integer,
-                                      grid::AbstractGrid, clock, fields)
-    Jᵉ = _get_energy_flux(ef.condition, i, k, grid, clock, fields)
-    
-    j = 1
-    qᵗ = @inbounds fields.qᵗ[i, j, k]
-    q = MoistureMassFractions(qᵗ)
-    cᵖᵐ = mixture_heat_capacity(q, ef.thermodynamic_constants)
-    
-    return Jᵉ / cᵖᵐ
+@inline function OceananigansBC.getbc(ef::EEFBC, j::Integer, k::Integer, grid::AbstractGrid, clock, fields)
+    𝒬 = _get_𝒬(ef.condition, j, k, grid, clock, fields)
+    return _energy_to_θ_flux(𝒬, @inbounds(fields.qᵗ[grid.Nx, j, k]), ef.thermodynamic_constants)
 end
 
-# getbc for north boundary (j = Ny)
-@inline function OceananigansBC.getbc(ef::NorthEnergyFluxBC, i::Integer, k::Integer,
-                                      grid::AbstractGrid, clock, fields)
-    Jᵉ = _get_energy_flux(ef.condition, i, k, grid, clock, fields)
-    
-    j = grid.Ny
-    qᵗ = @inbounds fields.qᵗ[i, j, k]
-    q = MoistureMassFractions(qᵗ)
-    cᵖᵐ = mixture_heat_capacity(q, ef.thermodynamic_constants)
-    
-    return Jᵉ / cᵖᵐ
+@inline function OceananigansBC.getbc(ef::SEFBC, i::Integer, k::Integer, grid::AbstractGrid, clock, fields)
+    𝒬 = _get_𝒬(ef.condition, i, k, grid, clock, fields)
+    return _energy_to_θ_flux(𝒬, @inbounds(fields.qᵗ[i, 1, k]), ef.thermodynamic_constants)
 end
 
-const EnergyFluxBoundaryConditionType = BoundaryCondition{<:Flux, <:EnergyFluxBoundaryConditionFunction}
+@inline function OceananigansBC.getbc(ef::NEFBC, i::Integer, k::Integer, grid::AbstractGrid, clock, fields)
+    𝒬 = _get_𝒬(ef.condition, i, k, grid, clock, fields)
+    return _energy_to_θ_flux(𝒬, @inbounds(fields.qᵗ[i, grid.Ny, k]), ef.thermodynamic_constants)
+end
+
+const EnergyFluxBC = BoundaryCondition{<:Flux, <:EFBCF}
 
 #####
 ##### Convenient constructors
@@ -545,43 +506,19 @@ end
 """
     EnergyFluxBoundaryCondition(flux)
 
-Create a boundary condition wrapper that converts an energy flux to a potential temperature flux.
+Internal function to create a boundary condition wrapper that converts an energy flux to a
+potential temperature flux. Users should specify `ρe` boundary conditions instead, which
+are automatically converted to `ρθ` boundary conditions when using potential temperature
+formulations.
 
-Use this when specifying surface heat fluxes in energy units (W/m² or J/(m²·s)) with the
-`LiquidIcePotentialTemperatureFormulation`. The energy flux is divided by the local mixture
-heat capacity `cᵖᵐ` to obtain the potential temperature flux:
+The energy flux is divided by the local mixture heat capacity `cᵖᵐ` to obtain the
+potential temperature flux:
 
 ```math
-Jᶿ = Jᵉ / cᵖᵐ
+Jᶿ = 𝒬 / cᵖᵐ
 ```
 
 The mixture heat capacity is computed at the boundary using the local specific humidity `qᵗ`.
-
-# Arguments
-
-- `flux`: The energy flux value. Can be a `Number`, a `Function`, or any boundary condition type
-          that returns an energy flux when evaluated via `getbc`.
-
-# Example
-
-```jldoctest
-using Breeze
-
-# Specify sensible heat flux in W/m² (positive = upward into atmosphere)
-Q = 100  # W/m²
-ρθ_bc = EnergyFluxBoundaryCondition(Q)
-ρθ_bcs = FieldBoundaryConditions(bottom=ρθ_bc)
-
-# output
-Oceananigans.FieldBoundaryConditions, with boundary conditions
-├── west: DefaultBoundaryCondition (FluxBoundaryCondition: Nothing)
-├── east: DefaultBoundaryCondition (FluxBoundaryCondition: Nothing)
-├── south: DefaultBoundaryCondition (FluxBoundaryCondition: Nothing)
-├── north: DefaultBoundaryCondition (FluxBoundaryCondition: Nothing)
-├── bottom: FluxBoundaryCondition: EnergyFluxBoundaryConditionFunction(100)
-├── top: DefaultBoundaryCondition (FluxBoundaryCondition: Nothing)
-└── immersed: DefaultBoundaryCondition (FluxBoundaryCondition: Nothing)
-```
 """
 function EnergyFluxBoundaryCondition(flux)
     # side and thermodynamic_constants are filled in during regularization
@@ -606,8 +543,14 @@ Regularize boundary conditions for [`AtmosphereModel`](@ref AtmosphereModels.Atm
 This function walks through all boundary conditions and calls
 `regularize_atmosphere_boundary_condition` on each one, allowing specialized handling for
 bulk flux boundary conditions and other atmosphere-specific boundary condition types.
+
+If `formulation` is `:LiquidIcePotentialTemperature` and `ρe` boundary conditions are provided,
+they are automatically converted to `ρθ` boundary conditions using `EnergyFluxBoundaryCondition`.
 """
-function AtmosphereModels.regularize_atmosphere_model_boundary_conditions(boundary_conditions, grid, surface_pressure, thermodynamic_constants)
+function AtmosphereModels.regularize_atmosphere_model_boundary_conditions(boundary_conditions, grid, formulation, surface_pressure, thermodynamic_constants)
+    # Convert ρe boundary conditions to ρθ for potential temperature formulations
+    boundary_conditions = convert_energy_to_theta_bcs(boundary_conditions, formulation, thermodynamic_constants)
+
     regularized = Dict{Symbol, Any}()
     for (name, fbcs) in pairs(boundary_conditions)
         loc = field_location(Val(name))
@@ -615,6 +558,72 @@ function AtmosphereModels.regularize_atmosphere_model_boundary_conditions(bounda
     end
     return NamedTuple(regularized)
 end
+
+#####
+##### Convert ρe boundary conditions to ρθ for potential temperature formulations
+#####
+
+const θFormulation = Union{Val{:LiquidIcePotentialTemperature}, Val{:θ}}
+
+# Check if FieldBoundaryConditions has any non-default values
+has_nondefault_bcs(::Nothing) = false
+has_nondefault_bcs(fbcs) = false
+function has_nondefault_bcs(fbcs::FieldBoundaryConditions)
+    for side in (:west, :east, :south, :north, :bottom, :top, :immersed)
+        bc = getproperty(fbcs, side)
+        bc isa Nothing && continue
+        bc isa BoundaryCondition{<:Flux, Nothing} && continue
+        bc isa DefaultBoundaryCondition && continue
+        return true
+    end
+    return false
+end
+
+# Validate: error if BOTH ρθ and ρe have non-default BCs
+function validate_thermodynamic_bcs(bcs)
+    has_ρθ = :ρθ ∈ keys(bcs) && has_nondefault_bcs(bcs.ρθ)
+    has_ρe = :ρe ∈ keys(bcs) && has_nondefault_bcs(bcs.ρe)
+    if has_ρθ && has_ρe
+        throw(ArgumentError("Cannot specify boundary conditions on both ρθ and ρe. " *
+                            "Use ρe for energy fluxes or ρθ for potential temperature fluxes, but not both."))
+    end
+    return nothing
+end
+
+# Fallback: no conversion (but validate)
+function convert_energy_to_theta_bcs(bcs, formulation, constants)
+    validate_thermodynamic_bcs(bcs)
+    return bcs
+end
+
+# Convert ρe → ρθ for potential temperature formulations
+function convert_energy_to_theta_bcs(bcs, formulation::θFormulation, constants)
+    validate_thermodynamic_bcs(bcs)
+    :ρe ∈ keys(bcs) || return bcs
+    has_nondefault_bcs(bcs.ρe) || return bcs
+
+    ρθ_bcs = wrap_energy_field_bcs(bcs.ρe)
+    remaining = NamedTuple(k => v for (k, v) in pairs(bcs) if k !== :ρe)
+    return merge(remaining, (; ρθ=ρθ_bcs))
+end
+
+convert_energy_to_theta_bcs(bcs, f::Symbol, c) = convert_energy_to_theta_bcs(bcs, Val(f), c)
+
+# Wrap FieldBoundaryConditions with EnergyFluxBoundaryCondition
+function wrap_energy_field_bcs(fbcs::FieldBoundaryConditions)
+    return FieldBoundaryConditions(; west     = wrap_energy_bc(fbcs.west),
+                                     east     = wrap_energy_bc(fbcs.east),
+                                     south    = wrap_energy_bc(fbcs.south),
+                                     north    = wrap_energy_bc(fbcs.north),
+                                     bottom   = wrap_energy_bc(fbcs.bottom),
+                                     top      = wrap_energy_bc(fbcs.top),
+                                     immersed = wrap_energy_bc(fbcs.immersed))
+end
+
+wrap_energy_field_bcs(fbcs) = fbcs
+
+wrap_energy_bc(bc) = bc
+wrap_energy_bc(bc::BoundaryCondition{<:Flux}) = EnergyFluxBoundaryCondition(bc.condition)
 
 # Pass through non-FieldBoundaryConditions
 regularize_atmosphere_field_bcs(fbcs, loc, grid, surface_pressure, constants) = fbcs
@@ -680,9 +689,9 @@ function regularize_atmosphere_boundary_condition(bc::BulkVaporFluxBoundaryCondi
 end
 
 # Regularize EnergyFluxBoundaryCondition: populate side and thermodynamic_constants
-const UnregularizedEnergyFluxBC = BoundaryCondition{<:Flux, <:EnergyFluxBoundaryConditionFunction{<:Any, Nothing}}
+const UnregularizedEFBC = BoundaryCondition{<:Flux, <:EFBCF{<:Any, Nothing}}
 
-function regularize_atmosphere_boundary_condition(bc::UnregularizedEnergyFluxBC,
+function regularize_atmosphere_boundary_condition(bc::UnregularizedEFBC,
                                                   side, loc, grid, surface_pressure, constants)
     ef = bc.condition
     new_ef = EnergyFluxBoundaryConditionFunction(ef.condition, side, constants)

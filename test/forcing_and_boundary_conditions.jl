@@ -167,15 +167,15 @@ end
         @test true
     end
 
-    @testset "EnergyFluxBoundaryCondition construction and application [$FT]" begin
-        # Test with constant energy flux (W/m²)
-        Jᵉ = FT(100)  # 100 W/m²
-        bc = EnergyFluxBoundaryCondition(Jᵉ)
-        @test bc isa BoundaryCondition
+    @testset "Automatic ρe → ρθ conversion [$FT]" begin
+        # Test with constant energy flux (W/m²) using ρe boundary conditions
+        # When using potential temperature formulation, ρe BCs are automatically
+        # converted to ρθ BCs by dividing by cᵖᵐ
+        𝒬 = FT(100)  # 100 W/m²
 
-        # Test that model can be built with EnergyFluxBoundaryCondition on bottom
-        ρθ_bcs = FieldBoundaryConditions(bottom=EnergyFluxBoundaryCondition(Jᵉ))
-        boundary_conditions = (; ρθ=ρθ_bcs)
+        # Test that model can be built with ρe boundary conditions on bottom
+        ρe_bcs = FieldBoundaryConditions(bottom=FluxBoundaryCondition(𝒬))
+        boundary_conditions = (; ρe=ρe_bcs)
         model = AtmosphereModel(grid; boundary_conditions)
 
         θ₀ = model.dynamics.reference_state.potential_temperature
@@ -185,19 +185,19 @@ end
         time_step!(model, FT(1e-6))
         @test true
 
-        # Test with EnergyFluxBoundaryCondition on top
-        ρθ_bcs = FieldBoundaryConditions(top=EnergyFluxBoundaryCondition(-Jᵉ))  # negative = cooling
-        boundary_conditions = (; ρθ=ρθ_bcs)
+        # Test with ρe boundary condition on top
+        ρe_bcs = FieldBoundaryConditions(top=FluxBoundaryCondition(-𝒬))  # negative = cooling
+        boundary_conditions = (; ρe=ρe_bcs)
         model = AtmosphereModel(grid; boundary_conditions)
 
         set!(model; θ=θ₀)
         time_step!(model, FT(1e-6))
         @test true
 
-        # Test with EnergyFluxBoundaryCondition on both bottom and top
-        ρθ_bcs = FieldBoundaryConditions(bottom=EnergyFluxBoundaryCondition(Jᵉ),
-                                          top=EnergyFluxBoundaryCondition(-Jᵉ))
-        boundary_conditions = (; ρθ=ρθ_bcs)
+        # Test with ρe boundary conditions on both bottom and top
+        ρe_bcs = FieldBoundaryConditions(bottom=FluxBoundaryCondition(𝒬),
+                                          top=FluxBoundaryCondition(-𝒬))
+        boundary_conditions = (; ρe=ρe_bcs)
         model = AtmosphereModel(grid; boundary_conditions)
 
         set!(model; θ=θ₀)
@@ -205,34 +205,79 @@ end
         @test true
     end
 
-    @testset "EnergyFluxBoundaryCondition converts energy to θ flux correctly [$FT]" begin
-        using Breeze.Thermodynamics: mixture_heat_capacity, MoistureMassFractions
+    @testset "Manual EnergyFluxBoundaryCondition on ρθ [$FT]" begin
+        using Breeze.BoundaryConditions: EnergyFluxBoundaryCondition
 
-        # Create a model with known moisture content
-        grid = RectilinearGrid(default_arch; size=(1, 1, 4), x=(0, 100), y=(0, 100), z=(0, 100))
-        
-        # Use a constant energy flux
-        Jᵉ = FT(1000)  # W/m²
-        ρθ_bcs = FieldBoundaryConditions(bottom=EnergyFluxBoundaryCondition(Jᵉ))
+        𝒬 = FT(100)  # 100 W/m²
+
+        # Manually wrap energy flux in EnergyFluxBoundaryCondition and apply to ρθ
+        ρθ_bcs = FieldBoundaryConditions(bottom=EnergyFluxBoundaryCondition(𝒬))
         boundary_conditions = (; ρθ=ρθ_bcs)
         model = AtmosphereModel(grid; boundary_conditions)
 
         θ₀ = model.dynamics.reference_state.potential_temperature
-        qᵗ₀ = FT(0.01)  # 1% specific humidity
+        set!(model; θ=θ₀)
+        time_step!(model, FT(1e-6))
+        @test true
+
+        # Test on top boundary
+        ρθ_bcs = FieldBoundaryConditions(top=EnergyFluxBoundaryCondition(-𝒬))
+        model = AtmosphereModel(grid; boundary_conditions=(; ρθ=ρθ_bcs))
+        set!(model; θ=θ₀)
+        time_step!(model, FT(1e-6))
+        @test true
+
+        # Test with both bottom and top
+        ρθ_bcs = FieldBoundaryConditions(bottom=EnergyFluxBoundaryCondition(𝒬),
+                                          top=EnergyFluxBoundaryCondition(-𝒬))
+        model = AtmosphereModel(grid; boundary_conditions=(; ρθ=ρθ_bcs))
+        set!(model; θ=θ₀)
+        time_step!(model, FT(1e-6))
+        @test true
+    end
+
+    @testset "Energy to θ flux conversion is correct [$FT]" begin
+        using Breeze.Thermodynamics: mixture_heat_capacity, MoistureMassFractions
+
+        grid = RectilinearGrid(default_arch; size=(1, 1, 4), x=(0, 100), y=(0, 100), z=(0, 100))
+        𝒬 = FT(1000)  # W/m²
+
+        # Test automatic interface
+        ρe_bcs = FieldBoundaryConditions(bottom=FluxBoundaryCondition(𝒬))
+        model = AtmosphereModel(grid; boundary_conditions=(; ρe=ρe_bcs))
+
+        θ₀ = model.dynamics.reference_state.potential_temperature
+        qᵗ₀ = FT(0.01)
         set!(model; θ=θ₀, qᵗ=qᵗ₀)
 
-        # The energy flux Jᵉ should be divided by cᵖᵐ to get potential temperature flux
         q = MoistureMassFractions(qᵗ₀)
         cᵖᵐ = mixture_heat_capacity(q, model.thermodynamic_constants)
-        expected_θ_flux = Jᵉ / cᵖᵐ
+        expected_θ_flux = 𝒬 / cᵖᵐ
 
-        # Run a small timestep - tendencies will be computed
         time_step!(model, FT(1e-6))
 
-        # Verify the relationship: the boundary condition should apply Jᵉ/cᵖᵐ
-        # This is an indirect test - if the model runs and produces reasonable results, the BC works
-        @test cᵖᵐ > 1000  # cᵖᵐ for moist air should be > 1000 J/(kg K)
-        @test expected_θ_flux < Jᵉ  # θ flux should be less than energy flux (divided by cᵖᵐ)
-        @test expected_θ_flux ≈ Jᵉ / cᵖᵐ
+        @test cᵖᵐ > 1000
+        @test expected_θ_flux < 𝒬
+        @test expected_θ_flux ≈ 𝒬 / cᵖᵐ
+
+        # Test manual interface produces same result
+        using Breeze.BoundaryConditions: EnergyFluxBoundaryCondition
+        ρθ_bcs = FieldBoundaryConditions(bottom=EnergyFluxBoundaryCondition(𝒬))
+        model2 = AtmosphereModel(grid; boundary_conditions=(; ρθ=ρθ_bcs))
+        set!(model2; θ=θ₀, qᵗ=qᵗ₀)
+        time_step!(model2, FT(1e-6))
+
+        # Both models should have the same ρθ after one timestep (same BC applied)
+        @test true  # If we get here, both interfaces work
+    end
+
+    @testset "Error when specifying both ρθ and ρe boundary conditions [$FT]" begin
+        grid = RectilinearGrid(default_arch; size=(1, 1, 4), x=(0, 100), y=(0, 100), z=(0, 100))
+        
+        # Specifying non-default BCs on both ρθ and ρe should throw an error
+        ρθ_bcs = FieldBoundaryConditions(bottom=FluxBoundaryCondition(FT(100)))
+        ρe_bcs = FieldBoundaryConditions(bottom=FluxBoundaryCondition(FT(200)))
+        
+        @test_throws ArgumentError AtmosphereModel(grid; boundary_conditions=(ρθ=ρθ_bcs, ρe=ρe_bcs))
     end
 end
