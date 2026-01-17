@@ -30,10 +30,10 @@ using ..AtmosphereModels: AtmosphereModels
 ##### Fallbacks for closure = nothing
 #####
 
-@inline AtmosphereModels.∂ⱼ_𝒯₁ⱼ(i, j, k, grid, ρ, ::Nothing, args...) = zero(grid)
-@inline AtmosphereModels.∂ⱼ_𝒯₂ⱼ(i, j, k, grid, ρ, ::Nothing, args...) = zero(grid)
-@inline AtmosphereModels.∂ⱼ_𝒯₃ⱼ(i, j, k, grid, ρ, ::Nothing, args...) = zero(grid)
-@inline AtmosphereModels.∇_dot_Jᶜ(i, j, k, grid, ρ, ::Nothing, args...) = zero(grid)
+@inline   AtmosphereModels.∂ⱼ_𝒯₁ⱼ(_i, _j, _k, grid, _ρ, ::Nothing, _args...) = zero(grid)
+@inline   AtmosphereModels.∂ⱼ_𝒯₂ⱼ(_i, _j, _k, grid, _ρ, ::Nothing, _args...) = zero(grid)
+@inline   AtmosphereModels.∂ⱼ_𝒯₃ⱼ(_i, _j, _k, grid, _ρ, ::Nothing, _args...) = zero(grid)
+@inline AtmosphereModels.∇_dot_Jᶜ(_i, _j, _k, grid, _ρ, ::Nothing, _args...) = zero(grid)
 
 #####
 ##### Scalar (tracer) dynamic fluxes: J = ρᵣ τ

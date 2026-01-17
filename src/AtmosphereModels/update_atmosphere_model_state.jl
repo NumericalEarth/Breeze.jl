@@ -8,7 +8,7 @@ using Oceananigans.TurbulenceClosures: compute_diffusivities!
 using Oceananigans.Utils: launch!, KernelParameters
 using Oceananigans.Operators: ℑxᶠᵃᵃ, ℑyᵃᶠᵃ, ℑzᵃᵃᶠ
 
-function TimeSteppers.update_state!(model::AtmosphereModel, callbacks=[]; compute_tendencies=true)
+function TimeSteppers.update_state!(model::AtmosphereModel, _callbacks=[]; compute_tendencies=true)
     tracer_density_to_specific!(model) # convert tracer density to specific tracer distribution
 
     fill_halo_regions!(prognostic_fields(model), model.clock, fields(model), async=true)
@@ -60,9 +60,9 @@ function tracer_specific_to_density!(tracers, density)
     return nothing
 end
 
-diagnostic_indices(::Bounded, N, H) = 1:N+1
+diagnostic_indices(::Bounded, N, _H) = 1:N+1
 diagnostic_indices(::Periodic, N, H) = -H+1:N+H
-diagnostic_indices(::Flat, N, H) = 1:N
+diagnostic_indices(::Flat, N, _H) = 1:N
 
 #####
 ##### Velocity and momentum computation
@@ -157,9 +157,6 @@ Compute auxiliary model variables:
     * moisture mass fraction ``qᵗ = ρqᵗ / ρ``
 """
 function compute_auxiliary_variables!(model)
-    grid = model.grid
-    arch = grid.architecture
-
     # Compute velocities from momentum (skip for kinematic dynamics with prescribed velocities)
     compute_velocities!(model)
 

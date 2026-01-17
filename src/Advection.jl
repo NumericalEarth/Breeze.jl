@@ -35,8 +35,8 @@ using ..AtmosphereModels: AtmosphereModels, div_ρUc
 end
 
 # Fallback for nothing advection
-@inline AtmosphereModels.div_ρUc(i, j, k, grid, ::Nothing, ρ, U, c) = zero(grid)
-@inline AtmosphereModels.div_ρUc(i, j, k, grid, advection::BoundsPreservingWENO, ρ, U, ::ZeroField) = zero(grid)
+@inline AtmosphereModels.div_ρUc(_i, _j, _k, grid, ::Nothing, _ρ, _U, _c) = zero(grid)
+@inline AtmosphereModels.div_ρUc(_i, _j, _k, grid, _advection::BoundsPreservingWENO, _ρ, _U, ::ZeroField) = zero(grid)
 
 # Is this immersed-boundary safe without having to extend it in ImmersedBoundaries.jl? I think so... (velocity on immmersed boundaries is masked to 0)
 @inline function AtmosphereModels.div_ρUc(i, j, k, grid, advection::BoundsPreservingWENO, ρ, U, c)

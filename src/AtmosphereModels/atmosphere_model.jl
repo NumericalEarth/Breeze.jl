@@ -17,7 +17,7 @@ struct DefaultValue end
 tupleit(t::Tuple) = t
 tupleit(t) = tuple(t)
 
-validate_tracers(tracers) = throw(ArgumentError("tracers for AtmosphereModel must be a tuple of symbols"))
+validate_tracers(_tracers) = throw(ArgumentError("tracers for AtmosphereModel must be a tuple of symbols"))
 
 function validate_tracers(tracers::Tuple)
     for name in tracers
@@ -214,7 +214,7 @@ function AtmosphereModel(grid;
     # Generate tracer advection scheme for each tracer
     # scalar_advection is always a NamedTuple after validate_tracer_advection (either user's partial NamedTuple or empty)
     # with_tracers fills in missing names using default_generator
-    default_generator(names, initial_tuple) = default_scalar_advection
+    default_generator(_names, _initial_tuple) = default_scalar_advection
     scalar_advection_tuple = with_tracers(scalar_names, scalar_advection, default_generator, with_velocities=false)
     momentum_advection_tuple = (; momentum = momentum_advection)
     advection = merge(momentum_advection_tuple, scalar_advection_tuple)
@@ -300,25 +300,25 @@ function field_names(dynamics, formulation, microphysics, tracer_names)
     return tuple(prog_names..., default_additional_names..., formulation_additional_names...)
 end
 
-function atmosphere_model_forcing(user_forcings, prognostic_fields, model_fields,
-                                  grid, coriolis, density,
-                                  velocities, dynamics, formulation, specific_moisture)
+function atmosphere_model_forcing(user_forcings, _prognostic_fields, _model_fields,
+                                  _grid, _coriolis, _density,
+                                  _velocities, _dynamics, _formulation, _specific_moisture)
     forcings_type = typeof(user_forcings)
     msg = string("AtmosphereModel forcing must be a NamedTuple, got $forcings_type")
     throw(ArgumentError(msg))
     return nothing
 end
 
-function atmosphere_model_forcing(::Nothing, prognostic_fields, model_fields,
-                                  grid, coriolis, density,
-                                  velocities, dynamics, formulation, specific_moisture)
+function atmosphere_model_forcing(::Nothing, prognostic_fields, _model_fields,
+                                  _grid, _coriolis, _density,
+                                  _velocities, _dynamics, _formulation, _specific_moisture)
     names = keys(prognostic_fields)
     return NamedTuple{names}(Returns(zero(eltype(prognostic_fields[name]))) for name in names)
 end
 
 function atmosphere_model_forcing(user_forcings::NamedTuple, prognostic_fields, model_fields,
-                                  grid, coriolis, density,
-                                  velocities, dynamics, formulation, specific_moisture)
+                                  _grid, coriolis, density,
+                                  velocities, _dynamics, formulation, specific_moisture)
 
     user_forcing_names = keys(user_forcings)
 

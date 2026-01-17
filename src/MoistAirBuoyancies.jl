@@ -98,7 +98,7 @@ function MoistAirBuoyancy(grid;
     return MoistAirBuoyancy(reference_state, thermodynamic_constants)
 end
 
-Base.summary(b::MoistAirBuoyancy) = "MoistAirBuoyancy"
+Base.summary(::MoistAirBuoyancy) = "MoistAirBuoyancy"
 
 function Base.show(io::IO, b::MoistAirBuoyancy)
     print(io, summary(b), ":\n",
@@ -110,7 +110,7 @@ BuoyancyFormulations.required_tracers(::MoistAirBuoyancy) = (:θ, :qᵗ)
 
 const c = Center()
 
-@inline function BuoyancyFormulations.buoyancy_perturbationᶜᶜᶜ(i, j, k, grid, mb::MoistAirBuoyancy, tracers)
+@inline function BuoyancyFormulations.buoyancy_perturbationᶜᶜᶜ(i, j, k, _grid, mb::MoistAirBuoyancy, tracers)
     @inbounds begin
         pᵣ = mb.reference_state.pressure[i, j, k]
         ρᵣ = mb.reference_state.density[i, j, k]
@@ -118,7 +118,6 @@ const c = Center()
         qᵗ = tracers.qᵗ[i, j, k]
     end
 
-    z = Oceananigans.Grids.znode(i, j, k, grid, c, c, c)
     pˢᵗ = mb.reference_state.standard_pressure
     q = MoistureMassFractions(qᵗ)
     𝒰 = LiquidIcePotentialTemperatureState(θ, q, pˢᵗ, pᵣ)
@@ -264,14 +263,12 @@ end
 const c = Center()
 
 # Temperature
-@inline function temperature(i, j, k, grid::AbstractGrid, mb::MoistAirBuoyancy, θ, qᵗ)
+@inline function temperature(i, j, k, _grid::AbstractGrid, mb::MoistAirBuoyancy, θ, qᵗ)
     @inbounds begin
         θᵢ = θ[i, j, k]
         qᵗᵢ = qᵗ[i, j, k]
         pᵣ = mb.reference_state.pressure[i, j, k]
-        ρᵣ = mb.reference_state.density[i, j, k]
     end
-    z = Oceananigans.Grids.znode(i, j, k, grid, c, c, c)
     pˢᵗ = mb.reference_state.standard_pressure
     q = MoistureMassFractions(qᵗᵢ)
     𝒰 = LiquidIcePotentialTemperatureState(θᵢ, q, pˢᵗ, pᵣ)
@@ -296,7 +293,7 @@ function TemperatureField(model)
 end
 
 # Saturation specific humidity
-@inline function Thermodynamics.saturation_specific_humidity(i, j, k, grid, mb::MoistAirBuoyancy, T, qᵗ, phase)
+@inline function Thermodynamics.saturation_specific_humidity(i, j, k, _grid, mb::MoistAirBuoyancy, T, qᵗ, phase)
     @inbounds begin
         Tᵢ = T[i, j, k]
         qᵗᵢ = qᵗ[i, j, k]
@@ -338,17 +335,15 @@ end
 
 Adapt.adapt_structure(to, ck::CondensateKernel) = CondensateKernel(adapt(to, ck.temperature))
 
-@inline function liquid_mass_fraction(i, j, k, grid, mb::MoistAirBuoyancy, T, θ, qᵗ)
+@inline function liquid_mass_fraction(i, j, k, _grid, mb::MoistAirBuoyancy, T, θ, qᵗ)
     @inbounds begin
         Tᵢ = T[i, j, k]
         θᵢ = θ[i, j, k]
         qᵗᵢ = qᵗ[i, j, k]
         pᵣ = mb.reference_state.pressure[i, j, k]
-        ρᵣ = mb.reference_state.density[i, j, k]
     end
 
     # First assume non-saturation.
-    z = Oceananigans.Grids.znode(i, j, k, grid, c, c, c)
     pˢᵗ = mb.reference_state.standard_pressure
     q = MoistureMassFractions(qᵗᵢ)
     𝒰 = LiquidIcePotentialTemperatureState(Tᵢ, q, pˢᵗ, pᵣ)
