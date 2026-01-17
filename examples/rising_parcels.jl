@@ -17,8 +17,6 @@ using Oceananigans
 using Oceananigans: interpolate
 using Oceananigans.Units
 using Breeze
-using Breeze.ParcelModels: ParcelDynamics
-using Breeze.Thermodynamics: temperature, density, saturation_specific_humidity, PlanarLiquidSurface
 using CloudMicrophysics
 using CairoMakie
 
@@ -49,27 +47,13 @@ set!(model,
 
 simulation = Simulation(model; Δt=1.0, stop_time=30minutes)
 
-# Record parcel trajectory
-dry_times = Float64[]
-dry_heights = Float64[]
-dry_T_parcel = Float64[]
-dry_T_environment = Float64[]
-dry_supersaturations = Float64[]
+# Store parcel snapshots: (time, height, thermodynamic state, density)
+dry_snapshots = []
 
 function record_dry_state!(sim)
     state = sim.model.dynamics.state
-    constants = sim.model.thermodynamic_constants
-    push!(dry_times, sim.model.clock.time)
-    push!(dry_heights, state.z)
-
-    T = temperature(state.𝒰, constants)
-    push!(dry_T_parcel, T)
-    push!(dry_T_environment, interpolate((state.z,), sim.model.temperature))
-
-    ρ = density(state.𝒰, constants)
-    qᵛ⁺ = saturation_specific_humidity(T, ρ, constants, PlanarLiquidSurface())
-    S = (state.𝒰.moisture_mass_fractions.vapor / qᵛ⁺) - 1
-    push!(dry_supersaturations, S)
+    t = sim.model.clock.time
+    push!(dry_snapshots, (; t, z=state.z, 𝒰=state.𝒰, ρ=state.ρ))
     return nothing
 end
 
@@ -77,6 +61,17 @@ add_callback!(simulation, record_dry_state!, IterationInterval(1))
 run!(simulation)
 
 @info "Dry parcel reached" model.dynamics.state.z
+
+# Extract time series from snapshots
+constants = model.thermodynamic_constants
+dry_t = [s.t for s in dry_snapshots]
+dry_z = [s.z for s in dry_snapshots]
+dry_T = [temperature(s.𝒰, constants) for s in dry_snapshots]
+dry_S = [supersaturation(temperature(s.𝒰, constants), s.ρ, s.𝒰.moisture_mass_fractions,
+                         constants, PlanarLiquidSurface()) for s in dry_snapshots]
+
+# Environmental temperature at each parcel height
+dry_Tₑ = [interpolate((s.z,), model.temperature) for s in dry_snapshots]
 
 # ## Part 2: Cloudy parcel with two-moment microphysics
 #
@@ -91,7 +86,7 @@ run!(simulation)
 BreezeCloudMicrophysicsExt = Base.get_extension(Breeze, :BreezeCloudMicrophysicsExt)
 TwoMomentCloudMicrophysics = BreezeCloudMicrophysicsExt.TwoMomentCloudMicrophysics
 
-microphysics = TwoMomentCloudMicrophysics(; precipitation_boundary_condition=ImpenetrableBoundaryCondition())
+microphysics = TwoMomentCloudMicrophysics()
 cloudy_model = AtmosphereModel(grid; dynamics=ParcelDynamics(), microphysics)
 
 # Use the same reference state
@@ -110,39 +105,13 @@ cloudy_model.dynamics.state.μ = (; ρqᶜˡ=0.0, ρnᶜˡ=1.2 * nᶜˡ₀, ρq�
 
 cloudy_simulation = Simulation(cloudy_model; Δt=1.0, stop_time=120minutes)
 
-# Storage for cloudy parcel trajectory
-cloudy_times = Float64[]
-cloudy_heights = Float64[]
-cloudy_T = Float64[]
-cloudy_qᵛ = Float64[]
-cloudy_qᶜˡ = Float64[]
-cloudy_qʳ = Float64[]
-cloudy_nᶜˡ = Float64[]
-cloudy_nʳ = Float64[]
-cloudy_supersaturations = Float64[]
+# Store cloudy parcel snapshots
+cloudy_snapshots = []
 
 function record_cloudy_state!(sim)
     state = sim.model.dynamics.state
-    constants = sim.model.thermodynamic_constants
-    μ = state.μ
-    ρ = state.ρ
-
-    push!(cloudy_times, sim.model.clock.time)
-    push!(cloudy_heights, state.z)
-
-    T = temperature(state.𝒰, constants)
-    push!(cloudy_T, T)
-
-    q = state.𝒰.moisture_mass_fractions
-    push!(cloudy_qᵛ, q.vapor)
-    push!(cloudy_qᶜˡ, μ.ρqᶜˡ / ρ)
-    push!(cloudy_qʳ, μ.ρqʳ / ρ)
-    push!(cloudy_nᶜˡ, μ.ρnᶜˡ / ρ)
-    push!(cloudy_nʳ, μ.ρnʳ / ρ)
-
-    qᵛ⁺ = saturation_specific_humidity(T, ρ, constants, PlanarLiquidSurface())
-    S = (q.vapor / qᵛ⁺) - 1
-    push!(cloudy_supersaturations, S)
+    t = sim.model.clock.time
+    push!(cloudy_snapshots, (; t, z=state.z, ρ=state.ρ, 𝒰=state.𝒰, μ=state.μ))
     return nothing
 end
 
@@ -150,6 +119,20 @@ add_callback!(cloudy_simulation, record_cloudy_state!, IterationInterval(10))
 run!(cloudy_simulation)
 
 @info "Cloudy parcel reached" cloudy_model.dynamics.state.z
+
+# Extract time series from cloudy snapshots
+cloudy_constants = cloudy_model.thermodynamic_constants
+cloudy_t = [s.t for s in cloudy_snapshots]
+cloudy_z = [s.z for s in cloudy_snapshots]
+cloudy_T = [temperature(s.𝒰, cloudy_constants) for s in cloudy_snapshots]
+cloudy_qᵛ = [s.𝒰.moisture_mass_fractions.vapor for s in cloudy_snapshots]
+cloudy_qᶜˡ = [s.μ.ρqᶜˡ / s.ρ for s in cloudy_snapshots]
+cloudy_qʳ = [s.μ.ρqʳ / s.ρ for s in cloudy_snapshots]
+cloudy_nᶜˡ = [s.μ.ρnᶜˡ / s.ρ for s in cloudy_snapshots]
+cloudy_nʳ = [s.μ.ρnʳ / s.ρ for s in cloudy_snapshots]
+cloudy_S = [supersaturation(temperature(s.𝒰, cloudy_constants), s.ρ,
+                            s.𝒰.moisture_mass_fractions, cloudy_constants,
+                            PlanarLiquidSurface()) for s in cloudy_snapshots]
 
 # ## Visualization
 #
@@ -165,77 +148,70 @@ c_vapor = :dodgerblue
 c_cloud = :lime
 c_rain = :orangered
 c_temp = :magenta
-c_number = :darkorchid
 
-## Row 1: Dry adiabatic ascent (condensed panels)
+## Row 1: Dry adiabatic ascent
 Label(fig[1, 1:2], "Dry adiabatic ascent", fontsize=16)
-
-heights_km = dry_heights ./ 1000
 
 ax1a = Axis(fig[2, 1];
     xlabel = "Temperature (K)",
     ylabel = "Height (km)",
     title = "Adiabatic cooling")
-lines!(ax1a, dry_T_parcel, heights_km; color=c_temp, label="Parcel")
-lines!(ax1a, dry_T_environment, heights_km; color=:gray, linestyle=:dash, label="Environment")
+lines!(ax1a, dry_T, dry_z / 1000; color=c_temp, label="Parcel")
+lines!(ax1a, dry_Tₑ, dry_z / 1000; color=:gray, linestyle=:dash, label="Environment")
 axislegend(ax1a; position=:lt)
 
 ax1b = Axis(fig[2, 2];
     xlabel = "Height (km)",
-    ylabel = "Supersaturation (%)",
+    ylabel = "Supersaturation",
     title = "Approach to saturation")
-lines!(ax1b, heights_km, dry_supersaturations .* 100; color=c_vapor)
+lines!(ax1b, dry_z / 1000, dry_S; color=c_vapor)
 hlines!(ax1b, [0]; color=:gray, linestyle=:dash)
-text!(ax1b, 1.2, -30; text="Saturation (S = 0)", fontsize=12, color=:gray)
 
 ## Row 2: Cloudy parcel - condensation and cloud formation
 Label(fig[3, 1:2], "Cloudy ascent with two-moment microphysics", fontsize=16)
 
-cloudy_heights_km = cloudy_heights ./ 1000
-
 ax2a = Axis(fig[4, 1];
     xlabel = "Height (km)",
-    ylabel = "Mixing ratio (g/kg)",
+    ylabel = "Mixing ratio (kg/kg)",
     title = "Moisture evolution")
-lines!(ax2a, cloudy_heights_km, cloudy_qᵛ .* 1000; color=c_vapor, label="Vapor qᵛ")
-lines!(ax2a, cloudy_heights_km, cloudy_qᶜˡ .* 1000; color=c_cloud, label="Cloud qᶜˡ")
-lines!(ax2a, cloudy_heights_km, cloudy_qʳ .* 1000; color=c_rain, label="Rain qʳ")
+lines!(ax2a, cloudy_z / 1000, cloudy_qᵛ; color=c_vapor, label="Vapor qᵛ")
+lines!(ax2a, cloudy_z / 1000, cloudy_qᶜˡ; color=c_cloud, label="Cloud qᶜˡ")
+lines!(ax2a, cloudy_z / 1000, cloudy_qʳ; color=c_rain, label="Rain qʳ")
 axislegend(ax2a; position=:rt)
 
 ax2b = Axis(fig[4, 2];
     xlabel = "Height (km)",
-    ylabel = "Supersaturation (%)",
+    ylabel = "Supersaturation",
     title = "Supersaturation evolution")
-lines!(ax2b, cloudy_heights_km, cloudy_supersaturations .* 100; color=c_vapor)
+lines!(ax2b, cloudy_z / 1000, cloudy_S; color=c_vapor)
 hlines!(ax2b, [0]; color=:gray, linestyle=:dash)
 
-## Row 3: Number concentrations and precipitation
+## Row 3: Number concentrations and mean droplet size
 ax3a = Axis(fig[5, 1];
     xlabel = "Height (km)",
-    ylabel = "Number (#/mg)",
+    ylabel = "Number concentration (1/kg)",
     title = "Droplet number evolution")
-lines!(ax3a, cloudy_heights_km, cloudy_nᶜˡ ./ 1e6; color=c_cloud, label="Cloud nᶜˡ")
-lines!(ax3a, cloudy_heights_km, cloudy_nʳ ./ 1e3; color=c_rain, label="Rain nʳ × 10³")
+lines!(ax3a, cloudy_z / 1000, cloudy_nᶜˡ; color=c_cloud, label="Cloud nᶜˡ")
+lines!(ax3a, cloudy_z / 1000, cloudy_nʳ; color=c_rain, label="Rain nʳ")
 axislegend(ax3a; position=:rt)
+
+# Mean droplet mass: q/n gives mass per droplet (kg)
+mean_cloud_mass = cloudy_qᶜˡ ./ max.(cloudy_nᶜˡ, 1e-20)
+mean_rain_mass = cloudy_qʳ ./ max.(cloudy_nʳ, 1e-20)
 
 ax3b = Axis(fig[5, 2];
     xlabel = "Height (km)",
-    ylabel = "Mean droplet mass (μg)",
+    ylabel = "Mean droplet mass (kg)",
     title = "Mean droplet size evolution")
 
-# Compute mean droplet mass: q/n gives mass per droplet
-mean_cloud_mass = cloudy_qᶜˡ ./ max.(cloudy_nᶜˡ, 1e-10) .* 1e12  # Convert to μg
-mean_rain_mass = cloudy_qʳ ./ max.(cloudy_nʳ, 1e-10) .* 1e9  # Convert to μg (rain drops are larger)
-
-# Mask out near-zero values
 cloud_mask = cloudy_qᶜˡ .> 1e-10
 rain_mask = cloudy_qʳ .> 1e-10
 
 if any(cloud_mask)
-    lines!(ax3b, cloudy_heights_km[cloud_mask], mean_cloud_mass[cloud_mask]; color=c_cloud, label="Cloud")
+    lines!(ax3b, cloudy_z[cloud_mask] / 1000, mean_cloud_mass[cloud_mask]; color=c_cloud, label="Cloud")
 end
 if any(rain_mask)
-    lines!(ax3b, cloudy_heights_km[rain_mask], mean_rain_mass[rain_mask] ./ 1e3; color=c_rain, label="Rain (mg)")
+    lines!(ax3b, cloudy_z[rain_mask] / 1000, mean_rain_mass[rain_mask]; color=c_rain, label="Rain")
 end
 axislegend(ax3b; position=:rt)
 
@@ -253,7 +229,7 @@ fig
 # 1. Temperature drops, reducing the saturation vapor pressure
 # 2. Total moisture is conserved (in the absence of microphysics)
 #
-# The parcel approaches but does not reach saturation (S = 0%) because we
+# The parcel approaches but does not reach saturation (S = 0) because we
 # stop before the lifting condensation level (LCL).
 #
 # ### Cloudy ascent (middle and bottom rows)

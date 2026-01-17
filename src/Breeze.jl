@@ -53,6 +53,13 @@ export
     total_pressure,
     specific_humidity,
 
+    # Thermodynamics
+    temperature,
+    supersaturation,
+    saturation_specific_humidity,
+    PlanarLiquidSurface,
+    PlanarIceSurface,
+
     # Microphysics
     SaturationAdjustment,
     MixedPhaseEquilibrium,
