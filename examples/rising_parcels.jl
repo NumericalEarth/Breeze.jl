@@ -69,11 +69,11 @@ dry_z = [s.z for s in dry_snapshots]
 dry_T = [temperature(s.𝒰, constants) for s in dry_snapshots]
 dry_S = [supersaturation(temperature(s.𝒰, constants), s.ρ, s.𝒰.moisture_mass_fractions,
                          constants, PlanarLiquidSurface()) for s in dry_snapshots]
-nothing
+nothing #hide
 
 # Environmental temperature at each parcel height
 dry_Tₑ = [interpolate((s.z,), model.temperature) for s in dry_snapshots]
-nothing
+nothing #hide
 
 # ## Part 2: Cloudy parcel with two-moment microphysics
 #
@@ -135,7 +135,7 @@ cloudy_nʳ = [s.μ.ρnʳ / s.ρ for s in cloudy_snapshots]
 cloudy_S = [supersaturation(temperature(s.𝒰, cloudy_constants), s.ρ,
                             s.𝒰.moisture_mass_fractions, cloudy_constants,
                             PlanarLiquidSurface()) for s in cloudy_snapshots]
-nothing
+nothing #hide
 
 # ## Visualization
 #
@@ -145,6 +145,7 @@ nothing
 
 set_theme!(fontsize=14, linewidth=2.5)
 fig = Figure(size=(1000, 800))
+nothing #hide
 
 # Color palette
 c_vapor = :dodgerblue
