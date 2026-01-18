@@ -158,15 +158,18 @@ end
 """
     BulkSensibleHeatFluxFunction(; coefficient, gustiness=0, surface_temperature)
 
-Create a bulk sensible heat flux function for computing surface heat fluxes.
+Create a bulk sensible heat flux function for computing surface potential temperature fluxes.
 The flux is computed as:
 
 ```math
-Jᵀ = - ρ₀ Cᵀ |U| (θ - θ₀)
+Jᶿ = - ρ₀ Cᵀ |U| (θ - θ₀)
 ```
 
 where `Cᵀ` is the transfer coefficient, `|U|` is the wind speed, `θ` is the atmospheric
 potential temperature at the surface, and `θ₀` is the surface temperature.
+
+This boundary condition returns a potential temperature flux (proportional to sensible heat
+flux ``𝒬ᵀ = cᵖᵐ Jᶿ``) and should be applied directly to `ρθ` boundary conditions.
 
 # Keyword Arguments
 
@@ -198,7 +201,7 @@ Base.summary(bf::BulkSensibleHeatFluxFunction) =
     string("BulkSensibleHeatFluxFunction(coefficient=", bf.coefficient,
            ", gustiness=", bf.gustiness, ")")
 
-# getbc for BulkSensibleHeatFluxFunction
+# getbc for BulkSensibleHeatFluxFunction: returns potential temperature flux Jᶿ
 @inline function OceananigansBC.getbc(bf::BulkSensibleHeatFluxFunction, i::Integer, j::Integer,
                                       grid::AbstractGrid, clock, fields)
     T₀ = surface_value(bf.surface_temperature, i, j)
@@ -449,7 +452,10 @@ end
 """
     BulkSensibleHeatFlux(; coefficient, gustiness=0, surface_temperature)
 
-Create a `FluxBoundaryCondition` for surface sensible heat flux.
+Create a `FluxBoundaryCondition` for surface potential temperature flux.
+
+This boundary condition returns a potential temperature flux `Jᶿ` (proportional to
+sensible heat flux) and should be applied directly to `ρθ` boundary conditions.
 
 See [`BulkSensibleHeatFluxFunction`](@ref) for details.
 
@@ -623,6 +629,11 @@ end
 wrap_energy_field_bcs(fbcs) = fbcs
 
 wrap_energy_bc(bc) = bc
+
+# BulkSensibleHeatFlux already returns a potential temperature flux, so pass it through directly
+wrap_energy_bc(bc::BulkSensibleHeatFluxBoundaryCondition) = bc
+
+# Other flux BCs get wrapped to convert energy → potential temperature
 wrap_energy_bc(bc::BoundaryCondition{<:Flux}) = EnergyFluxBoundaryCondition(bc.condition)
 
 # Pass through non-FieldBoundaryConditions

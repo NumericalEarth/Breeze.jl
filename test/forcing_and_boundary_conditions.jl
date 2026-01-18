@@ -111,15 +111,23 @@ end
         bc = BulkSensibleHeatFlux(surface_temperature=T₀_func, coefficient=Cᴰ, gustiness=gustiness)
         @test bc isa BoundaryCondition
 
-        # Test that model can be built with BulkSensibleHeatFlux
+        # Test that model can be built with BulkSensibleHeatFlux on ρθ
         ρθ_bcs = FieldBoundaryConditions(bottom=bc)
         boundary_conditions = (; ρθ=ρθ_bcs)
         model = AtmosphereModel(grid; boundary_conditions)
 
         θ₀ = model.dynamics.reference_state.potential_temperature
         set!(model; θ=θ₀)
+        time_step!(model, 1e-6)
+        @test true
 
-        # Model should build and run without error
+        # Test that model can also be built with BulkSensibleHeatFlux on ρe
+        # (interface "just works" - BulkSensibleHeatFlux is passed through without conversion)
+        ρe_bcs = FieldBoundaryConditions(bottom=bc)
+        boundary_conditions = (; ρe=ρe_bcs)
+        model = AtmosphereModel(grid; boundary_conditions)
+
+        set!(model; θ=θ₀)
         time_step!(model, 1e-6)
         @test true
     end
@@ -273,11 +281,11 @@ end
 
     @testset "Error when specifying both ρθ and ρe boundary conditions [$FT]" begin
         grid = RectilinearGrid(default_arch; size=(1, 1, 4), x=(0, 100), y=(0, 100), z=(0, 100))
-        
+
         # Specifying non-default BCs on both ρθ and ρe should throw an error
         ρθ_bcs = FieldBoundaryConditions(bottom=FluxBoundaryCondition(FT(100)))
         ρe_bcs = FieldBoundaryConditions(bottom=FluxBoundaryCondition(FT(200)))
-        
+
         @test_throws ArgumentError AtmosphereModel(grid; boundary_conditions=(ρθ=ρθ_bcs, ρe=ρe_bcs))
     end
 end
