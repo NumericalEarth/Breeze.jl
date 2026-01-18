@@ -27,7 +27,8 @@ module CompressibleEquations
 
 export
     CompressibleDynamics,
-    CompressibleModel
+    CompressibleModel,
+    AcousticSubstepper
 
 using DocStringExtensions: TYPEDSIGNATURES
 using Adapt: Adapt, adapt
@@ -52,5 +53,6 @@ const CompressibleModel = AtmosphereModel{<:CompressibleDynamics}
 
 include("compressible_density_tendency.jl")
 include("compressible_time_stepping.jl")
+include("acoustic_substepping.jl")
 
 end # module
