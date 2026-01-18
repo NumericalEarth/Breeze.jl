@@ -723,4 +723,148 @@ function materialize_surface_field(f::Function, grid)
     return field
 end
 
+#####
+##### EnergyFluxOperation: extract energy flux from EnergyFluxBoundaryCondition
+#####
+
+using Oceananigans.AbstractOperations: KernelFunctionOperation
+using Oceananigans.Fields: location
+using Oceananigans.Models: BoundaryConditionOperation
+using Oceananigans: fields
+
+export EnergyFluxOperation
+
+"""
+    EnergyFluxKernelFunction
+
+Kernel function that extracts the energy flux `𝒬` from an `EnergyFluxBoundaryConditionFunction`.
+Unlike the default `getbc` which returns the converted potential temperature flux `Jᶿ = 𝒬/cᵖᵐ`,
+this returns the original energy flux `𝒬`.
+"""
+struct EnergyFluxKernelFunction{S, C}
+    side :: S
+    condition :: C  # The underlying condition (number, function, or BC type)
+end
+
+Adapt.adapt_structure(to, ef::EnergyFluxKernelFunction) =
+    EnergyFluxKernelFunction(Adapt.adapt(to, ef.side), Adapt.adapt(to, ef.condition))
+
+# Dispatch on side to get correct indices for getbc
+@inline function (kf::EnergyFluxKernelFunction{<:Bottom})(i, j, k, grid, clock, model_fields)
+    return _get_𝒬(kf.condition, i, j, grid, clock, model_fields)
+end
+
+@inline function (kf::EnergyFluxKernelFunction{<:Top})(i, j, k, grid, clock, model_fields)
+    return _get_𝒬(kf.condition, i, j, grid, clock, model_fields)
+end
+
+@inline function (kf::EnergyFluxKernelFunction{<:West})(i, j, k, grid, clock, model_fields)
+    return _get_𝒬(kf.condition, j, k, grid, clock, model_fields)
+end
+
+@inline function (kf::EnergyFluxKernelFunction{<:East})(i, j, k, grid, clock, model_fields)
+    return _get_𝒬(kf.condition, j, k, grid, clock, model_fields)
+end
+
+@inline function (kf::EnergyFluxKernelFunction{<:South})(i, j, k, grid, clock, model_fields)
+    return _get_𝒬(kf.condition, i, k, grid, clock, model_fields)
+end
+
+@inline function (kf::EnergyFluxKernelFunction{<:North})(i, j, k, grid, clock, model_fields)
+    return _get_𝒬(kf.condition, i, k, grid, clock, model_fields)
+end
+
+"""
+$(TYPEDSIGNATURES)
+
+Create a `KernelFunctionOperation` that returns the energy flux `𝒬` from the boundary condition
+on the thermodynamic field (e.g., `ρθ` or `ρe`).
+
+If the boundary condition is an `EnergyFluxBoundaryCondition`, this returns the underlying
+energy flux before conversion to potential temperature flux. Otherwise, it returns the
+flux value multiplied by the mixture heat capacity `cᵖᵐ` to convert to energy flux.
+
+# Example
+
+```julia
+using Breeze
+using Oceananigans
+
+grid = RectilinearGrid(size=(16, 16, 16), extent=(1000, 1000, 1000))
+𝒬₀ = 100  # W/m²
+
+model = AtmosphereModel(grid; boundary_conditions=(ρe=FieldBoundaryConditions(bottom=FluxBoundaryCondition(𝒬₀)),))
+
+# Get the energy flux at the bottom boundary
+𝒬 = EnergyFluxOperation(model, :bottom)
+```
+"""
+function EnergyFluxOperation end
+
+function energy_flux_location(side, LX, LY, LZ)
+    if side === :top || side === :bottom
+        return LX, LY, Nothing
+    elseif side === :west || side === :east
+        return Nothing, LY, LZ
+    elseif side === :south || side === :north
+        return LX, Nothing, LZ
+    end
+end
+
+function side_type(side::Symbol)
+    side === :bottom && return Bottom()
+    side === :top    && return Top()
+    side === :west   && return West()
+    side === :east   && return East()
+    side === :south  && return South()
+    side === :north  && return North()
+    throw(ArgumentError("Unknown side: $side"))
+end
+
+using Breeze.AtmosphereModels: thermodynamic_density
+
+# For EnergyFluxBoundaryCondition, extract the underlying condition
+function EnergyFluxOperation(model, side::Symbol)
+    # Get the thermodynamic field - ρθ for potential temperature formulation
+    ρθ = thermodynamic_density(model.formulation)
+    bc = getproperty(ρθ.boundary_conditions, side)
+    return _energy_flux_operation(bc, ρθ, side, model)
+end
+
+# For EnergyFluxBoundaryCondition: extract underlying condition and return energy flux
+function _energy_flux_operation(bc::EnergyFluxBC, field, side, model)
+    ef = bc.condition
+    grid = field.grid
+    LX, LY, LZ = energy_flux_location(side, location(field)...)
+    side_t = side_type(side)
+    kernel_func = EnergyFluxKernelFunction(side_t, ef.condition)
+    return KernelFunctionOperation{LX, LY, LZ}(kernel_func, grid, model.clock, fields(model))
+end
+
+# Helper kernel functions for cᵖᵐ at boundaries
+@inline _cᵖᵐ_bottom(i, j, k, grid, qᵗ, constants) =
+    mixture_heat_capacity(MoistureMassFractions(@inbounds qᵗ[i, j, 1]), constants)
+
+@inline _cᵖᵐ_top(i, j, k, grid, qᵗ, constants, Nz) =
+    mixture_heat_capacity(MoistureMassFractions(@inbounds qᵗ[i, j, Nz]), constants)
+
+# For other boundary conditions: multiply by cᵖᵐ to get energy flux
+function _energy_flux_operation(bc::BoundaryCondition, field, side, model)
+    # Fall back to BoundaryConditionOperation and multiply by cᵖᵐ
+    Jᶿ = BoundaryConditionOperation(field, side, model)
+    constants = model.thermodynamic_constants
+    qᵗ = model.specific_moisture
+    # Project cᵖᵐ to boundary location
+    if side === :bottom
+        cᵖᵐ_bc = KernelFunctionOperation{Center, Center, Nothing}(_cᵖᵐ_bottom, field.grid, qᵗ, constants)
+        return cᵖᵐ_bc * Jᶿ
+    elseif side === :top
+        Nz = field.grid.Nz
+        cᵖᵐ_bc = KernelFunctionOperation{Center, Center, Nothing}(_cᵖᵐ_top, field.grid, qᵗ, constants, Nz)
+        return cᵖᵐ_bc * Jᶿ
+    else
+        throw(ArgumentError("EnergyFluxOperation for side $side not yet implemented"))
+    end
+end
+
 end # module BoundaryConditions

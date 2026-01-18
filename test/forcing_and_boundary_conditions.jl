@@ -213,6 +213,24 @@ end
         @test true
     end
 
+    @testset "BulkSensibleHeatFlux on ρe passes through correctly [$FT]" begin
+        # BulkSensibleHeatFlux already returns a potential temperature flux,
+        # so when applied to ρe, it should pass through directly without wrapping
+        T₀ = FT(300)
+        Cᵀ = FT(1e-3)
+
+        ρe_bcs = FieldBoundaryConditions(bottom=BulkSensibleHeatFlux(surface_temperature=T₀,
+                                                                     coefficient=Cᵀ, gustiness=FT(0.1)))
+        model = AtmosphereModel(grid; boundary_conditions=(ρe=ρe_bcs,))
+
+        θ₀ = model.dynamics.reference_state.potential_temperature
+        set!(model; θ=θ₀)
+
+        # Model should build and run without error
+        time_step!(model, FT(1e-6))
+        @test true
+    end
+
     @testset "Manual EnergyFluxBoundaryCondition on ρθ [$FT]" begin
         using Breeze.BoundaryConditions: EnergyFluxBoundaryCondition
 
@@ -287,5 +305,114 @@ end
         ρe_bcs = FieldBoundaryConditions(bottom=FluxBoundaryCondition(FT(200)))
 
         @test_throws ArgumentError AtmosphereModel(grid; boundary_conditions=(ρθ=ρθ_bcs, ρe=ρe_bcs))
+    end
+
+    @testset "EnergyFluxOperation returns energy flux [$FT]" begin
+        grid = RectilinearGrid(default_arch; size=(4, 4, 4), x=(0, 100), y=(0, 100), z=(0, 100))
+
+        # Test 1: Bottom boundary with ρe BC (EnergyFluxBoundaryCondition path)
+        𝒬₀ = FT(500)  # W/m²
+        ρe_bcs = FieldBoundaryConditions(bottom=FluxBoundaryCondition(𝒬₀))
+        model = AtmosphereModel(grid; boundary_conditions=(ρe=ρe_bcs,))
+
+        θ₀ = model.dynamics.reference_state.potential_temperature
+        qᵗ₀ = FT(0.01)  # 10 g/kg moisture
+        set!(model; θ=θ₀, qᵗ=qᵗ₀)
+
+        𝒬_op = EnergyFluxOperation(model, :bottom)
+        𝒬_field = Field(𝒬_op)
+        compute!(𝒬_field)
+        @test all(interior(𝒬_field) .≈ 𝒬₀)
+
+        # Test 2: Top boundary with ρe BC
+        𝒬_top = FT(-100)  # W/m² (cooling)
+        ρe_bcs_top = FieldBoundaryConditions(top=FluxBoundaryCondition(𝒬_top))
+        model_top = AtmosphereModel(grid; boundary_conditions=(ρe=ρe_bcs_top,))
+        set!(model_top; θ=θ₀, qᵗ=qᵗ₀)
+
+        𝒬_top_op = EnergyFluxOperation(model_top, :top)
+        𝒬_top_field = Field(𝒬_top_op)
+        compute!(𝒬_top_field)
+        @test all(interior(𝒬_top_field) .≈ 𝒬_top)
+
+        # Test 3: Both bottom and top
+        ρe_bcs_both = FieldBoundaryConditions(bottom=FluxBoundaryCondition(𝒬₀),
+                                               top=FluxBoundaryCondition(𝒬_top))
+        model_both = AtmosphereModel(grid; boundary_conditions=(ρe=ρe_bcs_both,))
+        set!(model_both; θ=θ₀, qᵗ=qᵗ₀)
+
+        𝒬_bottom_op = EnergyFluxOperation(model_both, :bottom)
+        𝒬_top_op2 = EnergyFluxOperation(model_both, :top)
+
+        𝒬_bottom_field = Field(𝒬_bottom_op)
+        𝒬_top_field2 = Field(𝒬_top_op2)
+        compute!(𝒬_bottom_field)
+        compute!(𝒬_top_field2)
+
+        @test all(interior(𝒬_bottom_field) .≈ 𝒬₀)
+        @test all(interior(𝒬_top_field2) .≈ 𝒬_top)
+
+        # Test 4: Regular ρθ BC at bottom (fallback path that multiplies by cᵖᵐ)
+        Jᶿ₀ = FT(0.5)  # K·kg/(m²·s) - potential temperature flux
+        ρθ_bcs = FieldBoundaryConditions(bottom=FluxBoundaryCondition(Jᶿ₀))
+        model_theta = AtmosphereModel(grid; boundary_conditions=(ρθ=ρθ_bcs,))
+        set!(model_theta; θ=θ₀, qᵗ=qᵗ₀)
+
+        𝒬_from_θ_op = EnergyFluxOperation(model_theta, :bottom)
+        𝒬_from_θ_field = Field(𝒬_from_θ_op)
+        compute!(𝒬_from_θ_field)
+
+        # Energy flux should be Jᶿ × cᵖᵐ
+        q = MoistureMassFractions(qᵗ₀)
+        cᵖᵐ = mixture_heat_capacity(q, model_theta.thermodynamic_constants)
+        expected_𝒬 = Jᶿ₀ * cᵖᵐ
+        @test all(interior(𝒬_from_θ_field) .≈ expected_𝒬)
+
+        # Test 5: Regular ρθ BC at top (fallback path for top boundary)
+        ρθ_bcs_top = FieldBoundaryConditions(top=FluxBoundaryCondition(-Jᶿ₀))
+        model_theta_top = AtmosphereModel(grid; boundary_conditions=(ρθ=ρθ_bcs_top,))
+        set!(model_theta_top; θ=θ₀, qᵗ=qᵗ₀)
+
+        𝒬_from_θ_top_op = EnergyFluxOperation(model_theta_top, :top)
+        𝒬_from_θ_top_field = Field(𝒬_from_θ_top_op)
+        compute!(𝒬_from_θ_top_field)
+
+        expected_𝒬_top = -Jᶿ₀ * cᵖᵐ
+        @test all(interior(𝒬_from_θ_top_field) .≈ expected_𝒬_top)
+    end
+
+    @testset "Varying energy flux values [$FT]" begin
+        grid = RectilinearGrid(default_arch; size=(4, 4, 4), x=(0, 100), y=(0, 100), z=(0, 100))
+        θ₀ = FT(290)
+        qᵗ₀ = FT(0.01)
+
+        # Test different energy flux values
+        for 𝒬 in [FT(0), FT(100), FT(-50), FT(1000)]
+            ρe_bcs = FieldBoundaryConditions(bottom=FluxBoundaryCondition(𝒬))
+            model = AtmosphereModel(grid; boundary_conditions=(ρe=ρe_bcs,))
+            set!(model; θ=θ₀, qᵗ=qᵗ₀)
+            time_step!(model, FT(1e-6))
+            @test true
+
+            𝒬_op = EnergyFluxOperation(model, :bottom)
+            𝒬_field = Field(𝒬_op)
+            compute!(𝒬_field)
+            @test all(interior(𝒬_field) .≈ 𝒬)
+        end
+    end
+
+    @testset "EnergyFluxBoundaryConditionFunction summary [$FT]" begin
+        using Breeze.BoundaryConditions: EnergyFluxBoundaryConditionFunction
+
+        # Test summary for number condition
+        ef_number = EnergyFluxBoundaryConditionFunction(FT(500), nothing, nothing)
+        s = summary(ef_number)
+        @test occursin("500", s) || occursin("5", s)  # Float formatting may vary
+
+        # Test summary for function condition
+        𝒬_func(x, y, t) = FT(100)
+        ef_func = EnergyFluxBoundaryConditionFunction(𝒬_func, nothing, nothing)
+        s_func = summary(ef_func)
+        @test occursin("Function", s_func) || occursin("function", s_func)
     end
 end
