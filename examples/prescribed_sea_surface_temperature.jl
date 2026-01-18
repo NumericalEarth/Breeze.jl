@@ -23,6 +23,7 @@ using Oceananigans.Units
 using Oceananigans.Models: BoundaryConditionOperation
 using Printf
 using CairoMakie
+using CUDA
 
 # ## Grid setup
 #
@@ -36,7 +37,7 @@ using CairoMakie
 # energy-containing scales of convective turbulence while remaining computationally
 # tractable for this demonstration.
 
-grid = RectilinearGrid(size = (128, 128), halo = (5, 5),
+grid = RectilinearGrid(GPU(), size = (128, 128), halo = (5, 5),
                        x = (-10kilometers, 10kilometers),
                        z = (0, 10kilometers),
                        topology = (Periodic, Flat, Bounded))
