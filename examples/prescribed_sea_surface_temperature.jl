@@ -22,6 +22,7 @@ using Oceananigans
 using Oceananigans.Units
 using Oceananigans.Models: BoundaryConditionOperation
 using Printf
+using CUDA
 using CairoMakie
 
 # ## Grid setup
@@ -36,7 +37,7 @@ using CairoMakie
 # energy-containing scales of convective turbulence while remaining computationally
 # tractable for this demonstration.
 
-grid = RectilinearGrid(size = (128, 128), halo = (5, 5),
+grid = RectilinearGrid(GPU(), size = (128, 128), halo = (5, 5),
                        x = (-10kilometers, 10kilometers),
                        z = (0, 10kilometers),
                        topology = (Periodic, Flat, Bounded))
@@ -188,6 +189,18 @@ qᵗ = model.specific_moisture
 # values from the boundary conditions. These 1D fields (varying only in x)
 # represent the actual flux values applied at the ocean-atmosphere interface.
 #
+# We need to adapt the `BoundaryConditionKernelFunction` for the GPU.
+# Until [Oceananigans PR#5100](https://github.com/CliMA/Oceananigans.jl/pull/5100) is included
+# in a tagged release, we can use Adapt here directly.
+
+using Adapt: Adapt
+
+function Adapt.adapt_structure(to, bckf::Oceananigans.Models.BoundaryConditionKernelFunction{Side}) where Side
+    bc = Adapt.adapt(to, bckf.bc)
+    BC = typeof(bc)
+    return Oceananigans.Models.BoundaryConditionKernelFunction{Side, BC}(bc)
+end
+
 # The surface fluxes are:
 #
 # - ``τˣ``: momentum flux (stress), in kg m⁻¹ s⁻²
