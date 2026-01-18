@@ -49,8 +49,8 @@ This constructor requires that `NCDatasets` is loadable in the user environment 
 RRTMGP loads lookup tables from netCDF via an extension.
 
 # Keyword Arguments
-- `background_atmosphere`: Background atmospheric gas composition (default: `BackgroundAtmosphere(FT)`).
-  Each gas can be a constant (wrapped in `ConstantField`) or a `Field` for spatially varying profiles.
+- `background_atmosphere`: Background atmospheric gas composition (default: `BackgroundAtmosphere(grid)`).
+  O₃ can be a Number, Function, or Field; other gases are global mean constants.
 - `surface_temperature`: Surface temperature in Kelvin (required).
 - `coordinate`: Solar geometry specification. Can be:
   - `nothing` (default): extracts location from grid coordinates for time-varying zenith angle
@@ -71,7 +71,7 @@ RRTMGP loads lookup tables from netCDF via an extension.
 function AtmosphereModels.RadiativeTransferModel(grid::AbstractGrid,
                                                  ::AllSkyOptics,
                                                  constants::ThermodynamicConstants;
-                                                 background_atmosphere = BackgroundAtmosphere(eltype(grid)),
+                                                 background_atmosphere = BackgroundAtmosphere(grid),
                                                  surface_temperature,
                                                  coordinate = nothing,
                                                  epoch = nothing,

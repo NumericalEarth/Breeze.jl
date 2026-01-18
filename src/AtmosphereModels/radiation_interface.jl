@@ -139,70 +139,72 @@ $(TYPEDEF)
 Volume mixing ratios (VMR) for radiatively active gases.
 All values are dimensionless molar fractions.
 
-Each gas can be specified as:
-- A `Number` (automatically wrapped in `ConstantField`)
-- A `ConstantField` for uniform mixing ratios
-- A `Field` for spatially varying profiles (e.g., ozone with height dependence)
+RRTMGP supports spatially-varying VMR only for H₂O (computed from model moisture)
+and O₃. All other gases use global mean values.
 
 # Fields
-- Major atmospheric constituents: `N₂`, `O₂`, `CO₂`, `CH₄`, `N₂O`, `CO`, `NO₂`, `O₃`
-- Halocarbons: `CFC₁₁`, `CFC₁₂`, `CFC₂₂`, `CCl₄`, `CF₄`
-- Hydrofluorocarbons: `HFC₁₂₅`, `HFC₁₃₄ₐ`, `HFC₁₄₃ₐ`, `HFC₂₃`, `HFC₃₂`
+- **Constant gases** (global mean only): `N₂`, `O₂`, `CO₂`, `CH₄`, `N₂O`, `CO`, `NO₂`
+- **Halocarbons**: `CFC₁₁`, `CFC₁₂`, `CFC₂₂`, `CCl₄`, `CF₄`
+- **Hydrofluorocarbons**: `HFC₁₂₅`, `HFC₁₃₄ₐ`, `HFC₁₄₃ₐ`, `HFC₂₃`, `HFC₃₂`
+- **Spatially-varying**: `O₃` - can be a constant or a `Field` for height-dependent profiles
 
 Defaults are approximate modern atmospheric values for major gases; halocarbons default to zero.
 
 Note: H₂O is computed from the model's prognostic moisture field, not specified here.
 """
-struct BackgroundAtmosphere{N2, O2, CO2, CH4, N2O, CO, NO2, O3, CFC11, CFC12, CFC22, CCL4, CF4, HFC125, HFC134A, HFC143A, HFC23, HFC32}
-    # Major atmospheric constituents
-    N₂  :: N2
-    O₂  :: O2
-    CO₂ :: CO2
-    CH₄ :: CH4
-    N₂O :: N2O
-    CO  :: CO
-    NO₂ :: NO2
+struct BackgroundAtmosphere{FT, O3}
+    # Major atmospheric constituents (constant - RRTMGP only supports global mean)
+    N₂  :: FT
+    O₂  :: FT
+    CO₂ :: FT
+    CH₄ :: FT
+    N₂O :: FT
+    CO  :: FT
+    NO₂ :: FT
+
+    # Ozone - can vary spatially (RRTMGP supports per-layer O₃)
     O₃  :: O3
 
     # Chlorofluorocarbons (CFCs)
-    CFC₁₁ :: CFC11
-    CFC₁₂ :: CFC12
-    CFC₂₂ :: CFC22
+    CFC₁₁ :: FT
+    CFC₁₂ :: FT
+    CFC₂₂ :: FT
 
     # Other halocarbons
-    CCl₄ :: CCL4
-    CF₄  :: CF4
+    CCl₄ :: FT
+    CF₄  :: FT
 
     # Hydrofluorocarbons (HFCs)
-    HFC₁₂₅  :: HFC125
-    HFC₁₃₄ₐ :: HFC134A
-    HFC₁₄₃ₐ :: HFC143A
-    HFC₂₃   :: HFC23
-    HFC₃₂   :: HFC32
+    HFC₁₂₅  :: FT
+    HFC₁₃₄ₐ :: FT
+    HFC₁₄₃ₐ :: FT
+    HFC₂₃   :: FT
+    HFC₃₂   :: FT
 end
 
+using Oceananigans.Fields: field
+
 """
-    BackgroundAtmosphere(FT=Oceananigans.defaults.FloatType; kwargs...)
+    BackgroundAtmosphere(grid; kwargs...)
 
 Construct a `BackgroundAtmosphere` with volume mixing ratios for radiatively active gases.
 All values are dimensionless molar fractions.
 
-Each gas can be specified as:
-- A `Number` (automatically wrapped in `ConstantField`)
-- A `ConstantField` for uniform mixing ratios
-- A `Field` for spatially varying profiles (e.g., ozone with height dependence)
+RRTMGP supports spatially-varying VMR only for H₂O and O₃. Other gases use global means.
 
-Uses `Oceananigans.defaults.FloatType` by default for numeric constants.
+- **Constant gases**: Specify as numbers (will be converted to grid's float type)
+- **O₃**: Can be a Number, Function, or Field for height-dependent profiles
 
 # Keyword Arguments
-- Major atmospheric constituents: `N₂`, `O₂`, `CO₂`, `CH₄`, `N₂O`, `CO`, `NO₂`, `O₃`
+- Constant gases: `N₂`, `O₂`, `CO₂`, `CH₄`, `N₂O`, `CO`, `NO₂`
 - Halocarbons: `CFC₁₁`, `CFC₁₂`, `CFC₂₂`, `CCl₄`, `CF₄`
 - Hydrofluorocarbons: `HFC₁₂₅`, `HFC₁₃₄ₐ`, `HFC₁₄₃ₐ`, `HFC₂₃`, `HFC₃₂`
+- Spatially-varying: `O₃` (can be Number, Function, or Field)
 
-Defaults are approximate modern atmospheric values for major gases; halocarbons default to zero.
-Note: H₂O is computed from the model's prognostic moisture field, not specified here.
+Defaults are approximate modern atmospheric values; halocarbons default to zero.
+Note: H₂O is computed from the model's prognostic moisture field.
 """
-function BackgroundAtmosphere(FT::DataType = Oceananigans.defaults.FloatType;
+function BackgroundAtmosphere(grid;
                               N₂  = 0.78084,      # Nitrogen (~78%)
                               O₂  = 0.20946,      # Oxygen (~21%)
                               CO₂ = 420e-6,       # Carbon dioxide (~420 ppm)
@@ -210,42 +212,44 @@ function BackgroundAtmosphere(FT::DataType = Oceananigans.defaults.FloatType;
                               N₂O = 330e-9,       # Nitrous oxide (~330 ppb)
                               CO  = 0.0,          # Carbon monoxide
                               NO₂ = 0.0,          # Nitrogen dioxide
-                              O₃  = 0.0,          # Ozone (often specified as a profile)
+                              O₃  = 0.0,          # Ozone (can be profile)
                               CFC₁₁ = 0.0,        # Trichlorofluoromethane
                               CFC₁₂ = 0.0,        # Dichlorodifluoromethane
                               CFC₂₂ = 0.0,        # Chlorodifluoromethane
                               CCl₄ = 0.0,         # Carbon tetrachloride
                               CF₄  = 0.0,         # Carbon tetrafluoride
                               HFC₁₂₅  = 0.0,      # Pentafluoroethane
-                              HFC₁₃₄ₐ = 0.0,      # 1,1,1,2-Tetrafluoromethane
+                              HFC₁₃₄ₐ = 0.0,      # 1,1,1,2-Tetrafluoroethane
                               HFC₁₄₃ₐ = 0.0,      # 1,1,1-Trifluoroethane
                               HFC₂₃   = 0.0,      # Trifluoromethane
                               HFC₃₂   = 0.0)      # Difluoromethane
 
-    return BackgroundAtmosphere(
-        wrap_vmr(FT, N₂),
-        wrap_vmr(FT, O₂),
-        wrap_vmr(FT, CO₂),
-        wrap_vmr(FT, CH₄),
-        wrap_vmr(FT, N₂O),
-        wrap_vmr(FT, CO),
-        wrap_vmr(FT, NO₂),
-        wrap_vmr(FT, O₃),
-        wrap_vmr(FT, CFC₁₁),
-        wrap_vmr(FT, CFC₁₂),
-        wrap_vmr(FT, CFC₂₂),
-        wrap_vmr(FT, CCl₄),
-        wrap_vmr(FT, CF₄),
-        wrap_vmr(FT, HFC₁₂₅),
-        wrap_vmr(FT, HFC₁₃₄ₐ),
-        wrap_vmr(FT, HFC₁₄₃ₐ),
-        wrap_vmr(FT, HFC₂₃),
-        wrap_vmr(FT, HFC₃₂))
-end
+    FT = eltype(grid)
 
-# Wrap numbers in ConstantField, pass fields through unchanged
-wrap_vmr(FT, x::Number) = ConstantField(convert(FT, x))
-wrap_vmr(FT, f) = f  # Already a field
+    # O₃ can be Number, Function, or Field - use `field` to wrap appropriately
+    # Location (Nothing, Nothing, Center) for z-varying profiles
+    O₃_field = field((Nothing, Nothing, Center), O₃, grid)
+
+    return BackgroundAtmosphere{FT, typeof(O₃_field)}(
+        convert(FT, N₂),
+        convert(FT, O₂),
+        convert(FT, CO₂),
+        convert(FT, CH₄),
+        convert(FT, N₂O),
+        convert(FT, CO),
+        convert(FT, NO₂),
+        O₃_field,
+        convert(FT, CFC₁₁),
+        convert(FT, CFC₁₂),
+        convert(FT, CFC₂₂),
+        convert(FT, CCl₄),
+        convert(FT, CF₄),
+        convert(FT, HFC₁₂₅),
+        convert(FT, HFC₁₃₄ₐ),
+        convert(FT, HFC₁₄₃ₐ),
+        convert(FT, HFC₂₃),
+        convert(FT, HFC₃₂))
+end
 
 struct SurfaceRadiativeProperties{ST, SE, SA, DW}
     surface_temperature :: ST  # Scalar or 2D field

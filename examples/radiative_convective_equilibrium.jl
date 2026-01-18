@@ -86,9 +86,8 @@ surface_albedo = 0.07  # Ocean surface albedo — Wing et al. (2018), Table 1
 # > "CH₄ and N₂O are specified as in Table 1."
 # > "Ozone is either specified from a tropical mean profile or computed interactively."
 #
-# **Note**: The RCEMIP protocol specifies ozone as a vertical profile from the
-# tropical mean of the CMIP5 pre-industrial control. For simplicity, we use a
-# constant approximation. Strict RCEMIP compliance would require the full profile.
+# We use an analytical approximation of the tropical ozone profile that captures
+# the key features: low tropospheric values and a stratospheric peak around 25 km.
 
 # ## Domain and Grid
 #
@@ -163,16 +162,38 @@ dynamics = AnelasticDynamics(reference_state)
 # - CO₂: 348 ppmv
 # - CH₄: 1650 ppbv
 # - N₂O: 306 ppbv
-# - O₃: tropical mean profile (we approximate with constant)
+# - O₃: tropical mean profile
 #
-# **Note on ozone**: The protocol specifies the tropical mean ozone profile from
-# the CMIP5 pre-industrial control. A constant approximation is used here.
+# > "Ozone is specified from the tropical mean of the CMIP5 pre-industrial control."
+#
+# We approximate the tropical ozone profile with an analytical function that:
+# - Is low in the troposphere (~20-40 ppbv)
+# - Peaks in the stratosphere around 25 km (~8 ppmv)
+# - Decreases above the peak
+#
+# Since O₃ is the only gas that RRTMGP supports as spatially varying (besides H₂O),
+# we can pass a function directly to `BackgroundAtmosphere`.
 
-background = BackgroundAtmosphere(;
-    CO₂ = 348e-6,      # 348 ppmv — Wing et al. (2018), Table 1
-    CH₄ = 1650e-9,     # 1650 ppbv — Wing et al. (2018), Table 1
-    N₂O = 306e-9,      # 306 ppbv — Wing et al. (2018), Table 1
-    O₃ = 30e-9         # Approximate tropical mean (should be profile)
+# Tropical ozone profile approximation (Chapman-like with tropospheric minimum)
+# Note: For z-only profiles, the function takes just z (not x, y, z)
+@inline function tropical_ozone(z)
+    z_km = z / 1000
+    ## Tropospheric ozone: ~30 ppbv near surface, increasing slowly
+    O₃_trop = 30e-9 * (1 + 0.5 * z_km / 10)
+    ## Stratospheric ozone: peaks around 25 km at ~8 ppmv
+    z_peak = 25.0  # km
+    H_strat = 5.0  # scale height in km
+    O₃_strat = 8e-6 * exp(-((z_km - z_peak) / H_strat)^2)
+    ## Smooth transition using a sigmoid
+    transition = 1 / (1 + exp(-(z_km - 15) / 2))
+    return O₃_trop * (1 - transition) + O₃_strat * transition
+end
+
+background = BackgroundAtmosphere(grid;
+    CO₂ = 348e-6,       # 348 ppmv — Wing et al. (2018), Table 1
+    CH₄ = 1650e-9,      # 1650 ppbv — Wing et al. (2018), Table 1
+    N₂O = 306e-9,       # 306 ppbv — Wing et al. (2018), Table 1
+    O₃ = tropical_ozone # Tropical profile function — Wing et al. (2018), Section 3.5
 )
 
 # ## All-Sky Radiation
@@ -541,7 +562,7 @@ nothing #hide
 # | CO₂ | 348 ppmv | 348 ppmv ✓ | Table 1 |
 # | CH₄ | 1650 ppbv | 1650 ppbv ✓ | Table 1 |
 # | N₂O | 306 ppbv | 306 ppbv ✓ | Table 1 |
-# | Ozone | Tropical profile | Constant ⚠ | Table 1 |
+# | Ozone | Tropical profile | z-profile ✓ | Table 1 |
 # | Domain (RCE_small) | 96-100 km | 128 km ✓ | Table 2 |
 # | Model top | ≥33 km | 33 km ✓ | Table 2 |
 # | Duration | ≥50 days | 6 hours ⚠ | Section 3.7 |
