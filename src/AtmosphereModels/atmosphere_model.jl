@@ -8,7 +8,7 @@ using Oceananigans.BoundaryConditions: FieldBoundaryConditions, regularize_field
 using Oceananigans.Diagnostics: Diagnostics as OceananigansDiagnostics, NaNChecker
 using Oceananigans.Models: Models, validate_model_halo, validate_tracer_advection
 using Oceananigans.Models.HydrostaticFreeSurfaceModels: validate_momentum_advection
-using Oceananigans.Models.NonhydrostaticModels: NonhydrostaticModel
+using Oceananigans.Models.NonhydrostaticModels: NonhydrostaticModels
 using Oceananigans.TimeSteppers: TimeStepper, TimeSteppers as OceananigansTimeSteppers
 using Oceananigans.TurbulenceClosures: implicit_diffusion_solver, time_discretization, build_closure_fields
 using Oceananigans.Utils: launch!, prettytime, prettykeys, with_tracers
@@ -402,8 +402,8 @@ end
 ##### `AtmosphereModel` extensions for the Oceananigans TimeSteppers
 #####
 
-OceananigansTimeSteppers.ab2_step!(model::AtmosphereModel, Δt, callbacks) = NonhydrostaticModel.pressure_correction_ab2_step!(model, Δt, callbacks)
-OceananigansTimeSteppers.rk3_substep!(model::AtmosphereModel, Δt, γⁿ, ζⁿ, callbacks) = NonhydrostaticModel.pressure_correction_rk3_substep!(model, Δt, γⁿ, ζⁿ, callbacks)
+OceananigansTimeSteppers.ab2_step!(model::AtmosphereModel, Δt, callbacks) = NonhydrostaticModels.pressure_correction_ab2_step!(model, Δt, callbacks)
+OceananigansTimeSteppers.rk3_substep!(model::AtmosphereModel, Δt, γⁿ, ζⁿ, callbacks) = NonhydrostaticModels.pressure_correction_rk3_substep!(model, Δt, γⁿ, ζⁿ, callbacks)
 
 function OceananigansTimeSteppers.cache_previous_tendencies!(model::AtmosphereModel)
     model_fields = prognostic_fields(model)
