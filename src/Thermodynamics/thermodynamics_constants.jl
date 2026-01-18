@@ -420,3 +420,100 @@ end
     pᵛ⁺ = saturation_vapor_pressure(T, constants, surface)
     return pᵛ / pᵛ⁺
 end
+
+#####
+##### Moisture mixing ratios
+#####
+
+struct MoistureMixingRatio{FT}
+    vapor :: FT
+    liquid :: FT
+    ice :: FT
+end
+
+@inline MoistureMixingRatio(vapor::FT) where FT = MoistureMixingRatio(vapor, zero(vapor), zero(vapor))
+@inline MoistureMixingRatio(vapor::FT, liquid::FT) where FT = MoistureMixingRatio(vapor, liquid, zero(vapor))
+
+const MR = MoistureMixingRatio
+Base.zero(::Type{MR{FT}}) where FT = MoistureMixingRatio(zero(FT), zero(FT), zero(FT))
+
+function Base.summary(q::MoistureMixingRatio{FT}) where FT
+    return string("MoistureMixingRatio{$FT}(vapor=", prettysummary(q.vapor),
+                  ", liquid=", prettysummary(q.liquid), ", ice=", prettysummary(q.ice), ")")
+end
+
+function Base.show(io::IO, q::MoistureMixingRatio{FT}) where FT
+    println(io, "MoistureMixingRatio{$FT}: \n",
+                "├── vapor:  ", prettysummary(q.vapor), "\n",
+                "├── liquid: ", prettysummary(q.liquid), "\n",
+                "└── ice:    ", prettysummary(q.ice))
+end
+
+@inline total_mixing_ratio(r::MR) = r.vapor + r.liquid + r.ice
+
+@inline function total_specific_moisture(r::MR)
+    rᵗ = total_mixing_ratio(r)
+    return rᵗ / (1 + rᵗ)
+end
+
+@inline dry_air_mass_fraction(r::MR) = 1 - total_specific_moisture(r)
+
+#####
+##### Conversions between MoistureMassFractions and MoistureMixingRatio
+#####
+
+"""
+$(TYPEDSIGNATURES)
+
+Convert `MoistureMassFractions` to `MoistureMixingRatio`.
+
+Mixing ratios are defined as mass of constituent per mass of dry air:
+```math
+r = q / (1 - qᵗ) = q / qᵈ
+```
+where `qᵗ` is the total specific moisture and `qᵈ = 1 - qᵗ` is the dry air mass fraction.
+"""
+@inline function MoistureMixingRatio(q::MoistureMassFractions)
+    qᵗ = total_specific_moisture(q)
+    inv_qᵈ = inv(1 - qᵗ)
+    return MoistureMixingRatio(q.vapor * inv_qᵈ, q.liquid * inv_qᵈ, q.ice * inv_qᵈ)
+end
+
+"""
+$(TYPEDSIGNATURES)
+
+Convert `MoistureMixingRatio` to `MoistureMassFractions`.
+
+Mass fractions are defined as mass of constituent per total mass:
+```math
+q = r / (1 + rᵗ)
+```
+where `rᵗ` is the total mixing ratio.
+"""
+@inline function MoistureMassFractions(r::MoistureMixingRatio)
+    rᵗ = total_mixing_ratio(r)
+    inv_factor = inv(1 + rᵗ)
+    return MoistureMassFractions(r.vapor * inv_factor, r.liquid * inv_factor, r.ice * inv_factor)
+end
+
+"""
+$(TYPEDSIGNATURES)
+
+Compute the gas constant of a moist air mixture given moisture mixing ratios.
+
+Converts mixing ratios to mass fractions and calls `mixture_gas_constant(q::MMF, constants)`.
+"""
+@inline function mixture_gas_constant(r::MR, constants::TC)
+    return mixture_gas_constant(MoistureMassFractions(r), constants)
+end
+
+"""
+$(TYPEDSIGNATURES)
+
+Compute the heat capacity of a moist air mixture given moisture mixing ratios.
+
+Converts mixing ratios to mass fractions and calls `mixture_heat_capacity(q::MMF, constants)`.
+"""
+@inline function mixture_heat_capacity(r::MR, constants::TC)
+    return mixture_heat_capacity(MoistureMassFractions(r), constants)
+end

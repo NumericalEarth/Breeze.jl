@@ -1,6 +1,6 @@
 name = "Breeze"
 uuid = "660aa2fb-d4c8-4359-a52c-9c057bc511da"
-version = "0.2.1"
+version = "0.3.0"
 authors = ["NumericalEarth organization (github.com/NumericalEarth) and lovely contributors"]
 
 [workspace]
@@ -10,6 +10,7 @@ projects = ["docs", "test"]
 Adapt = "79e6a3ab-5dfb-504d-930d-738a2a938a0e"
 Dates = "ade2ca70-3891-5945-98fb-dc099432e06a"
 DocStringExtensions = "ffbed154-4ef7-542d-bbb7-c09d3a79fcae"
+GPUArraysCore = "46192b85-c4d5-4398-a991-12ede77f4527"
 InteractiveUtils = "b77e0a4c-d291-57a0-90e8-8db25a27a240"
 JLD2 = "033835bb-8acc-5ee8-8aae-3f567f8a3819"
 KernelAbstractions = "63c18a36-062a-441e-b654-da1e3ab1ce7c"
@@ -31,6 +32,7 @@ ClimaComms = "0.6"
 CloudMicrophysics = "0.29.0"
 Dates = "<0.0.1, 1"
 DocStringExtensions = "0.9.5"
+GPUArraysCore = "0.2"
 InteractiveUtils = "<0.0.1, 1"
 JLD2 = "0.5.13, 0.6"
 KernelAbstractions = "0.9"

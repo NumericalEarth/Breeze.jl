@@ -37,6 +37,8 @@ Breeze interfaces with ClimaOcean for coupled atmosphere-ocean simulations.
    - Mark functions inside kernels with `@inline`.
    - **Never use loops outside kernels**: Always replace `for` loops that iterate over grid points
      with kernels launched via `launch!`. This ensures code works on both CPU and GPU.
+   - **Use literal zeros**: Write `max(0, a)` instead of `max(zero(FT), a)`. Julia handles type
+     promotion automatically, and `0` is more readable. The same applies to `min`, `clamp`, etc.
 
 4. **Documentation**:
    - Use DocStringExtensions.jl for consistent docstrings
@@ -388,7 +390,7 @@ serve(dir="docs/build")
 When implementing a simulation from a published paper:
 
 ### 1. Parameter Extraction
-- **Read the paper carefully** and extract ALL parameters: domain size, resolution, physical constants, 
+- **Read the paper carefully** and extract ALL parameters: domain size, resolution, physical constants,
   boundary conditions, initial conditions, forcing, closure parameters
 - Look for parameter tables (often "Table 1" or similar)
 - Check figure captions for additional details
@@ -431,11 +433,11 @@ Before running a long simulation:
 - Quantitative comparison: compute the same diagnostics as the paper
 
 ### 7. Common Issues
-- **NaN blowups**: Usually from timestep too large, unstable initial conditions, 
+- **NaN blowups**: Usually from timestep too large, unstable initial conditions,
   or if-else statements on GPU (use `ifelse` instead)
-- **Nothing happening**: Check that buoyancy anomaly has the right sign, 
+- **Nothing happening**: Check that buoyancy anomaly has the right sign,
   that initial conditions are actually applied, that forcing is active
-- **Wrong direction of flow**: Check coordinate conventions (is y increasing 
+- **Wrong direction of flow**: Check coordinate conventions (is y increasing
   upslope or downslope?)
 - **GPU issues**: Avoid branching, ensure type stability, use `randn()` carefully
 

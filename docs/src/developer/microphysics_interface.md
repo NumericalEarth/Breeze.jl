@@ -34,7 +34,7 @@ a microphysics implementation in `AtmosphereModel`:
 
 ## Example implementation
 
-To illustrate the development of a new microphysics scheme, we implement a 
+To illustrate the development of a new microphysics scheme, we implement a
 simple microphysics scheme that represents droplet and ice particle nucleation
 with constant-rate relaxation of specific humidity to saturation.
 
@@ -59,7 +59,7 @@ prognostic_field_names(::ExplicitMicrophysics) = (:ρqᵛ, :ρqˡ, :ρqⁱ)
 ```
 
 !!! note
-    The names of prognostic fields defined by `prognostic_field_names` 
+    The names of prognostic fields defined by `prognostic_field_names`
     **are crucial to the user interface**, because users can interact them and
     [`set!`](https://clima.github.io/OceananigansDocumentation/stable/appendix/library/#Oceananigans.Fields.set!) their initial conditions. The names of variables should be carefully
     chosen to be concise, mathematical forms that are consistent with Breeze conventions.
@@ -78,7 +78,7 @@ function materialize_microphysical_fields(::ExplicitMicrophysics, grid, boundary
     return (; ρqˡ, ρqⁱ, ρqᵛ, qᵛ)
 end
 ```
-The tendencies for 
+The tendencies for
 
 ```@example microphysics_interface
 import Breeze.AtmosphereModels: microphysical_tendency

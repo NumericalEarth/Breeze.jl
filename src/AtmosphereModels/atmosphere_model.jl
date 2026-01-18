@@ -107,6 +107,7 @@ function AtmosphereModel(grid;
                          thermodynamic_constants = ThermodynamicConstants(eltype(grid)),
                          formulation = :LiquidIcePotentialTemperature,
                          dynamics = nothing,
+                         velocities = nothing,
                          moisture_density = DefaultValue(),
                          tracers = tuple(),
                          coriolis = nothing,
@@ -122,6 +123,9 @@ function AtmosphereModel(grid;
 
     # Use default dynamics if not specified
     isnothing(dynamics) && (dynamics = default_dynamics(grid, thermodynamic_constants))
+
+    # Validate that velocity boundary conditions are only provided for dynamics that support them
+    validate_velocity_boundary_conditions(dynamics, boundary_conditions)
 
     if !(advection isa DefaultValue)
         # TODO: check that tracer+momentum advection were not independently set.
@@ -144,7 +148,9 @@ function AtmosphereModel(grid;
 
     # Get field names from dynamics and formulation
     prognostic_names = prognostic_field_names(dynamics, formulation, microphysics, tracers)
-    default_boundary_conditions = NamedTuple{prognostic_names}(FieldBoundaryConditions() for _ in prognostic_names)
+    velocity_bc_names = velocity_boundary_condition_names(dynamics)
+    default_bc_names = tuple(prognostic_names..., velocity_bc_names...)
+    default_boundary_conditions = NamedTuple{default_bc_names}(FieldBoundaryConditions() for _ in default_bc_names)
     boundary_conditions = merge(default_boundary_conditions, boundary_conditions)
 
     # Pre-regularize AtmosphereModel boundary conditions (fill in reference_density, compute saturation humidity, etc.)
@@ -152,19 +158,28 @@ function AtmosphereModel(grid;
     boundary_conditions = regularize_atmosphere_model_boundary_conditions(boundary_conditions, grid, p₀, thermodynamic_constants)
 
     all_names = field_names(dynamics, formulation, microphysics, tracers)
-    boundary_conditions = regularize_field_boundary_conditions(boundary_conditions, grid, all_names)
+    regularized_boundary_conditions = regularize_field_boundary_conditions(boundary_conditions, grid, all_names)
 
     # Materialize dynamics and formulation
-    dynamics = materialize_dynamics(dynamics, grid, boundary_conditions)
-    formulation = materialize_formulation(formulation, dynamics, grid, boundary_conditions)
+    dynamics = materialize_dynamics(dynamics, grid, regularized_boundary_conditions, thermodynamic_constants)
+    formulation = materialize_formulation(formulation, dynamics, grid, regularized_boundary_conditions)
 
-    momentum, velocities = materialize_momentum_and_velocities(dynamics, grid, boundary_conditions)
-    microphysical_fields = materialize_microphysical_fields(microphysics, grid, boundary_conditions)
+    # Materialize momentum and velocities
+    # If velocities is provided (e.g., PrescribedVelocityFields), use it
+    if isnothing(velocities)
+        momentum, velocities = materialize_momentum_and_velocities(dynamics, grid, regularized_boundary_conditions)
+    else
+        # Store velocity specification in dynamics for dispatch (e.g., PrescribedVelocityFields)
+        dynamics = update_dynamics_with_velocities(dynamics, velocities)
+        momentum, _ = materialize_momentum_and_velocities(dynamics, grid, regularized_boundary_conditions)
+        velocities = materialize_velocities(velocities, grid)
+    end
+    microphysical_fields = materialize_microphysical_fields(microphysics, grid, regularized_boundary_conditions)
 
-    tracers = NamedTuple(name => CenterField(grid, boundary_conditions=boundary_conditions[name]) for name in tracer_names)
+    tracers = NamedTuple(name => CenterField(grid, boundary_conditions=regularized_boundary_conditions[name]) for name in tracer_names)
 
     if moisture_density isa DefaultValue
-        moisture_density = CenterField(grid, boundary_conditions=boundary_conditions.ρqᵗ)
+        moisture_density = CenterField(grid, boundary_conditions=regularized_boundary_conditions.ρqᵗ)
     end
 
     # Diagnostic fields
@@ -189,12 +204,12 @@ function AtmosphereModel(grid;
                                        grid, coriolis, density,
                                        velocities, dynamics, formulation, specific_moisture)
 
-    # Include thermodynamic density (ρe or ρθ), ρqᵗ plus user tracers for closure field construction
+    # Include thermodynamic density (ρe or ρθ), ρqᵗ, microphysical prognostic fields, plus user tracers
     closure_thermo_name = thermodynamic_density_name(formulation)
     microphysical_names = prognostic_field_names(microphysics)
     scalar_names = tuple(closure_thermo_name, :ρqᵗ, microphysical_names..., tracer_names...)
     closure = Oceananigans.Utils.with_tracers(scalar_names, closure)
-    closure_fields = build_closure_fields(nothing, grid, clock, scalar_names, boundary_conditions, closure)
+    closure_fields = build_closure_fields(nothing, grid, clock, scalar_names, regularized_boundary_conditions, closure)
 
     # Generate tracer advection scheme for each tracer
     # scalar_advection is always a NamedTuple after validate_tracer_advection (either user's partial NamedTuple or empty)
@@ -272,10 +287,10 @@ Advection.cell_advection_timescale(model::AtmosphereModel) = cell_advection_time
 
 # Prognostic field names from dynamics + thermodynamic formulation + microphysics + tracers
 function prognostic_field_names(dynamics, formulation, microphysics, tracer_names)
-    default_names = (:ρu, :ρv, :ρw, :ρqᵗ)
+    momentum_names = prognostic_momentum_field_names(dynamics)
     formulation_names = prognostic_thermodynamic_field_names(formulation)
     microphysical_names = prognostic_field_names(microphysics)
-    return tuple(default_names..., formulation_names..., microphysical_names..., tracer_names...)
+    return tuple(momentum_names..., :ρqᵗ, formulation_names..., microphysical_names..., tracer_names...)
 end
 
 function field_names(dynamics, formulation, microphysics, tracer_names)
