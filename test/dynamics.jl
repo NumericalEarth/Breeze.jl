@@ -22,8 +22,8 @@ The background state has a stable stratification with Brunt-Väisälä frequency
 function thermal_bubble_model(grid; Δθ=10, N²=1e-6, uᵢ=0, vᵢ=0, wᵢ=0, qᵗ=0, microphysics=nothing)
     model = AtmosphereModel(grid; advection=WENO(), microphysics)
     r₀ = 2e3
-    θ₀ = model.formulation.reference_state.potential_temperature
-    g = model.thermodynamics.gravitational_acceleration
+    θ₀ = model.dynamics.reference_state.potential_temperature
+    g = model.thermodynamic_constants.gravitational_acceleration
 
     function θᵢ(x, y, z)
         θ̄ = θ₀ * exp(N² * z / g)
@@ -78,7 +78,7 @@ end
 @testset "Vertical momentum conservation for neutral initial condition [$(FT)]" for FT in (Float32, Float64)
     Oceananigans.defaults.FloatType = FT
     grid = RectilinearGrid(default_arch;
-                           size = (16, 5, 16), 
+                           size = (16, 5, 16),
                            x = (-10e3, 10e3),
                            y = (-10e3, 10e3),
                            z = (-5e3, 5e3),
@@ -98,6 +98,10 @@ end
     # Time step the model
     Nt = 10
 
+    # Use absolute tolerance for comparisons with zero.
+    # Float32 has larger roundoff errors due to limited precision.
+    atol = FT == Float32 ? FT(1e-2) : FT(1e-6)
+
     for step in 1:Nt
         time_step!(model, Δt)
         compute!(∫ρu)
@@ -105,6 +109,6 @@ end
         Px = @allowscalar first(∫ρu)
         Pz = @allowscalar first(∫ρw)
         @test Px ≈ Px₀
-        @test Pz ≈ Pz₀
+        @test isapprox(Pz, Pz₀, atol=atol)
     end
 end
