@@ -24,9 +24,9 @@
 # additional verification of initial conditions and trace gas profiles.
 
 using Breeze
-using Oceananigans
 using Oceananigans.Units
 using Oceananigans.Grids: znode
+using CUDA
 
 using CairoMakie
 using Printf
@@ -112,11 +112,10 @@ Lx = Ly = 128000  # 128 km horizontal domain (similar to RCE_small)
 # > "The model top should be at least 33 km to include the stratosphere."
 # > "For CRMs, a sponge layer is recommended above the tropopause."
 #
-# **Deviation**: We use a 20 km domain top (captures troposphere only) for
-# computational efficiency. Strict RCEMIP compliance requires 33 km.
+# We use the RCEMIP-compliant 33 km domain with 100 vertical levels.
 
-zᵗ = 20000  # 20 km model top (RCEMIP specifies ≥33 km)
-Nz = 80     # 80 vertical levels (250 m mean resolution)
+zᵗ = 33000  # 33 km model top — Wing et al. (2018), Section 3.4
+Nz = 100    # 100 vertical levels (~330 m mean resolution)
 
 z_faces = range(0, zᵗ, length=Nz+1)
 
@@ -139,13 +138,16 @@ grid = RectilinearGrid(arch;
 # The RCEMIP protocol does not explicitly specify a reference state for anelastic
 # models. We use a dry adiabatic reference with:
 # - Surface pressure: 1013.25 hPa (standard atmosphere)
-# - Reference potential temperature: 300 K (matching SST)
+# - Reference potential temperature: 350 K
 #
-# This is a reasonable choice for tropical deep convection studies, though
-# the exact reference state may vary between models.
+# The elevated reference potential temperature (350 K instead of 300 K) is required
+# for the 33 km domain. A dry adiabatic reference with θ₀ = 300 K would produce
+# unphysical negative pressures in the upper stratosphere. The actual thermodynamic
+# state is determined by perturbations from this reference, so the SST of 300 K
+# is achieved through the initial conditions, not the reference state.
 
 p₀ = 101325  # Surface pressure [Pa] — standard atmosphere
-θ₀ = 300     # Reference potential temperature [K] — matches SST
+θ₀ = 350     # Reference potential temperature [K] — elevated for 33 km domain
 
 constants = ThermodynamicConstants()
 
@@ -227,9 +229,10 @@ Cᵛ = 1.2e-3  # Moisture transfer coefficient
 # > "For CRMs, a sponge layer is recommended above the tropopause to prevent
 # > spurious wave reflections from the model top."
 #
-# We apply Rayleigh damping above 16 km with a 1-minute damping timescale.
+# We apply Rayleigh damping in the upper 8 km (25-33 km) with a 1-minute
+# damping timescale. This is well above the tropopause (~15-17 km in the tropics).
 
-zˢ = 16000  # Sponge layer starts at 16 km
+zˢ = 25000  # Sponge layer starts at 25 km (above tropopause)
 λ = 1/60    # 1-minute damping timescale
 
 @inline function sponge_damping(i, j, k, grid, clock, fields, p)
@@ -395,7 +398,7 @@ simulation.output_writers[:averages] = JLD2Writer(model, avg_outputs;
                                                   overwrite_existing = true)
 
 # xz and xy slices for visualization
-k_slice = 20  # ~5 km height
+k_slice = 15  # ~5 km height (with 100 levels over 33 km)
 
 slice_outputs = (
     wxz = view(w, :, 1, :),
@@ -540,7 +543,7 @@ nothing #hide
 # | N₂O | 306 ppbv | 306 ppbv ✓ | Table 1 |
 # | Ozone | Tropical profile | Constant ⚠ | Table 1 |
 # | Domain (RCE_small) | 96-100 km | 128 km ✓ | Table 2 |
-# | Model top | ≥33 km | 20 km ⚠ | Table 2 |
+# | Model top | ≥33 km | 33 km ✓ | Table 2 |
 # | Duration | ≥50 days | 6 hours ⚠ | Section 3.7 |
 # | f (Coriolis) | 0 | 0 ✓ | Section 3.3 |
 #

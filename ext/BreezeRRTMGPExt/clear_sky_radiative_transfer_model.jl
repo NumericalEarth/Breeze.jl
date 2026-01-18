@@ -32,7 +32,8 @@ This constructor requires that `NCDatasets` is loadable in the user environment 
 RRTMGP loads lookup tables from netCDF via an extension.
 
 # Keyword Arguments
-- `background_atmosphere`: Background atmospheric gas composition (default: `BackgroundAtmosphere{FT}()`).
+- `background_atmosphere`: Background atmospheric gas composition (default: `BackgroundAtmosphere(FT)`).
+  Each gas can be a constant (wrapped in `ConstantField`) or a `Field` for spatially varying profiles.
 - `surface_temperature`: Surface temperature in Kelvin (required).
 - `coordinate`: Solar geometry specification. Can be:
   - `nothing` (default): extracts location from grid coordinates for time-varying zenith angle
@@ -50,7 +51,7 @@ RRTMGP loads lookup tables from netCDF via an extension.
 function AtmosphereModels.RadiativeTransferModel(grid::AbstractGrid,
                                                  ::ClearSkyOptics,
                                                  constants::ThermodynamicConstants;
-                                                 background_atmosphere = BackgroundAtmosphere{eltype(grid)}(),
+                                                 background_atmosphere = BackgroundAtmosphere(eltype(grid)),
                                                  surface_temperature,
                                                  coordinate = nothing,
                                                  epoch = nothing,
@@ -213,6 +214,15 @@ const RRTMGP_GAS_NAME_MAP = Dict{String, Symbol}(
     "hfc32"   => :HFC₃₂,
 )
 
+"""
+Extract the constant value from a VMR field for global mean gas setting.
+Works with ConstantField (extracts .constant) and Number types.
+"""
+@inline vmr_constant(f::ConstantField) = f.constant
+@inline vmr_constant(x::Number) = x
+@inline vmr_constant(f) = error("Cannot extract global mean from spatially varying field $f. " *
+                                 "Use ConstantField for globally uniform gases.")
+
 @inline function set_global_mean_gases!(vmr, idx_gases_sw, atm::BackgroundAtmosphere)
     FT = eltype(vmr.vmr)
     ngas = length(vmr.vmr)
@@ -221,7 +231,7 @@ const RRTMGP_GAS_NAME_MAP = Dict{String, Symbol}(
     for (name, ig) in idx_gases_sw
         sym = get(RRTMGP_GAS_NAME_MAP, name, nothing)
         if !isnothing(sym) && hasproperty(atm, sym)
-            host[ig] = getproperty(atm, sym)
+            host[ig] = vmr_constant(getproperty(atm, sym))
         end
     end
 

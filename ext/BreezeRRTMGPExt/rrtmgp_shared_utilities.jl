@@ -27,7 +27,7 @@ function update_rrtmgp_gas_state!(as::AtmosphericState, model, surface_temperatu
     mᵈ = params.molmass_dryair
     mᵛ = params.molmass_water
     ℕᴬ = params.avogad
-    O₃ = background_atmosphere.O₃
+    O₃ = background_atmosphere.O₃  # Can be ConstantField or Field
 
     launch!(arch, grid, :xyz, _update_rrtmgp_gas_state!, as, grid, pᵣ, T, qᵛ, surface_temperature, g, mᵈ, mᵛ, ℕᴬ, O₃)
     return nothing
@@ -95,7 +95,9 @@ end
         # H₂O volume mixing ratio from specific humidity
         r = qᵛₖ / dry_mass_fraction
         vmr_h2o[k, col] = r * (mᵈ / mᵛ)
-        vmr_o3[k, col] = O₃
+        
+        # O₃ volume mixing ratio - index into field (works for ConstantField or Field)
+        vmr_o3[k, col] = O₃[i, j, k]
     end
 end
 
