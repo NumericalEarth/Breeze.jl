@@ -1,4 +1,4 @@
-using Oceananigans: Oceananigans, Center, Field, set!, fill_halo_regions!
+using Oceananigans: Oceananigans, Center, Field, set!, fill_halo_regions!, ∂z
 using Oceananigans.BoundaryConditions: FieldBoundaryConditions, ValueBoundaryCondition
 using Oceananigans.Operators: ℑzᵃᵃᶠ
 
@@ -146,6 +146,13 @@ function ReferenceState(grid, constants=ThermodynamicConstants(eltype(grid));
     pᵣ = Field{Nothing, Nothing, Center}(grid, boundary_conditions=p_bcs)
     set!(pᵣ, z -> adiabatic_hydrostatic_pressure(z, p₀, θ₀, constants))
     fill_halo_regions!(pᵣ)
+
+    ρ₀ = surface_density(p₀, θ₀, constants)
+    ρ_bcs = FieldBoundaryConditions(grid, loc, bottom=ValueBoundaryCondition(ρ₀))
+    ρᵣ = Field{Nothing, Nothing, Center}(grid, boundary_conditions=ρ_bcs)
+    g = constants.gravitational_acceleration
+    set!(ρᵣ, - ∂z(pᵣ) / g)
+    fill_halo_regions!(ρᵣ)
 
     return ReferenceState(p₀, θ₀, pˢᵗ, pᵣ, ρᵣ)
 end
