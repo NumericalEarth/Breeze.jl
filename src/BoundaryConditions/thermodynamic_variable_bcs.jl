@@ -305,7 +305,7 @@ const UnregularizedEnergyFluxBC = BoundaryCondition{<:Flux, <:EnergyFluxBoundary
 function regularize_atmosphere_boundary_condition(bc::UnregularizedEnergyFluxBC,
                                                   side, loc, grid, microphysics, surface_pressure, constants)
     ef = bc.condition
-    new_ef = EnergyFluxBoundaryConditionFunction(ef.condition, side, microphysics, constants)
+    new_ef = EnergyFluxBoundaryConditionFunction(ef.condition, side, microphysics, constants, nothing)
     return BoundaryCondition(Flux(), new_ef)
 end
 

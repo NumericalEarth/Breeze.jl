@@ -388,13 +388,13 @@ end
         using Breeze.BoundaryConditions: EnergyFluxBoundaryConditionFunction
 
         # Test summary for number condition
-        ef_number = EnergyFluxBoundaryConditionFunction(FT(500), nothing, nothing, nothing)
+        ef_number = EnergyFluxBoundaryConditionFunction(FT(500), nothing, nothing, nothing, nothing)
         s = summary(ef_number)
         @test occursin("500", s) || occursin("5", s)  # Float formatting may vary
 
         # Test summary for function condition
         𝒬_func(x, y, t) = FT(100)
-        ef_func = EnergyFluxBoundaryConditionFunction(𝒬_func, nothing, nothing, nothing)
+        ef_func = EnergyFluxBoundaryConditionFunction(𝒬_func, nothing, nothing, nothing, nothing)
         s_func = summary(ef_func)
         @test occursin("Function", s_func) || occursin("function", s_func)
     end
