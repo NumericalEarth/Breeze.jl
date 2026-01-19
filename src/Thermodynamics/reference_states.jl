@@ -51,14 +51,31 @@ function surface_density(ref::ReferenceState)
 end
 
 """
-    surface_density(p₀, θ₀, constants)
+    surface_density(p₀, T₀, constants)
 
-Compute the surface air density from surface pressure `p₀`, surface temperature `θ₀`,
+Compute the surface air density from surface pressure `p₀`, surface temperature `T₀`,
 and thermodynamic `constants` using the ideal gas law for dry air.
 """
-@inline function surface_density(p₀, θ₀, constants)
+@inline function surface_density(p₀, T₀, constants)
     Rᵈ = dry_air_gas_constant(constants)
-    return p₀ / (Rᵈ * θ₀)
+    return p₀ / (Rᵈ * T₀)
+end
+
+"""
+    surface_density(p₀, θ₀, pˢᵗ, constants)
+
+Compute the surface air density from surface pressure `p₀`, potential temperature `θ₀`,
+standard pressure `pˢᵗ`, and thermodynamic `constants` using the ideal gas law for dry air.
+
+The temperature is computed from potential temperature using the Exner function:
+`T₀ = Π₀ * θ₀` where `Π₀ = (p₀ / pˢᵗ)^(Rᵈ/cᵖᵈ)`.
+"""
+@inline function surface_density(p₀, θ₀, pˢᵗ, constants)
+    Rᵈ = dry_air_gas_constant(constants)
+    cᵖᵈ = constants.dry_air.heat_capacity
+    Π₀ = (p₀ / pˢᵗ)^(Rᵈ / cᵖᵈ)
+    T₀ = Π₀ * θ₀
+    return p₀ / (Rᵈ * T₀)
 end
 
 """
@@ -78,15 +95,15 @@ end
 """
 $(TYPEDSIGNATURES)
 
-Compute the reference density at height `z` that associated with the reference pressure and
-potential temperature `θ₀`. The reference density is defined as the density of dry air at the
-reference pressure and temperature.
+Compute the reference density at height `z` that associated with the reference pressure `p₀`,
+potential temperature `θ₀`, and standard pressure `pˢᵗ`. The reference density is defined as
+the density of dry air at the reference pressure and temperature.
 """
-@inline function adiabatic_hydrostatic_density(z, p₀, θ₀, constants)
+@inline function adiabatic_hydrostatic_density(z, p₀, θ₀, pˢᵗ, constants)
     Rᵈ = dry_air_gas_constant(constants)
     cᵖᵈ = constants.dry_air.heat_capacity
     pᵣ = adiabatic_hydrostatic_pressure(z, p₀, θ₀, constants)
-    ρ₀ = surface_density(p₀, θ₀, constants)
+    ρ₀ = surface_density(p₀, θ₀, pˢᵗ, constants)
     return ρ₀ * (pᵣ / p₀)^(1 - Rᵈ / cᵖᵈ)
 end
 
@@ -119,10 +136,10 @@ function ReferenceState(grid, constants=ThermodynamicConstants(eltype(grid));
     pˢᵗ = convert(FT, standard_pressure)
     loc = (nothing, nothing, Center())
 
-    ρ₀ = surface_density(p₀, θ₀, constants)
+    ρ₀ = surface_density(p₀, θ₀, pˢᵗ, constants)
     ρ_bcs = FieldBoundaryConditions(grid, loc, bottom=ValueBoundaryCondition(ρ₀))
     ρᵣ = Field{Nothing, Nothing, Center}(grid, boundary_conditions=ρ_bcs)
-    set!(ρᵣ, z -> adiabatic_hydrostatic_density(z, p₀, θ₀, constants))
+    set!(ρᵣ, z -> adiabatic_hydrostatic_density(z, p₀, θ₀, pˢᵗ, constants))
     fill_halo_regions!(ρᵣ)
 
     p_bcs = FieldBoundaryConditions(grid, loc, bottom=ValueBoundaryCondition(p₀))
