@@ -280,6 +280,7 @@ averaged_outputs = NamedTuple(name => Average(outputs[name], dims=(1, 2)) for na
 
 filename = "rico.jld2"
 simulation.output_writers[:averages] = JLD2Writer(model, averaged_outputs; filename,
+                                                  including = [:grid],
                                                   schedule = AveragedTimeInterval(2hour),
                                                   overwrite_existing = true)
 

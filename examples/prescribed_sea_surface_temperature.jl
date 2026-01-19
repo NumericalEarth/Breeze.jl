@@ -262,6 +262,7 @@ outputs = (; s, ξ, T, θ, qˡ, qᵛ⁺, qᵗ, τˣ, 𝒬ᵀ, 𝒬ᵛ, Σ𝒬=�
 
 ow = JLD2Writer(model, outputs;
                 filename = output_filename,
+                including = [:grid],
                 schedule = TimeInterval(2minutes),
                 overwrite_existing = true)
 
