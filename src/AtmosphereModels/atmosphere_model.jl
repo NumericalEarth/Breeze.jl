@@ -157,7 +157,7 @@ function AtmosphereModel(grid;
     # Also converts ρe boundary conditions to ρθ for potential temperature formulations
     p₀ = surface_pressure(dynamics)
     boundary_conditions = regularize_atmosphere_model_boundary_conditions(boundary_conditions, grid, formulation,
-                                                                          microphysics, p₀, thermodynamic_constants)
+                                                                          dynamics, microphysics, p₀, thermodynamic_constants)
 
     all_names = field_names(dynamics, formulation, microphysics, tracers)
     regularized_boundary_conditions = regularize_field_boundary_conditions(boundary_conditions, grid, all_names)
@@ -363,7 +363,7 @@ end
 
 function Oceananigans.fields(model::AtmosphereModel)
     formulation_fields = fields(model.formulation)
-    auxiliary = (; T=model.temperature, qᵗ=model.specific_moisture, ρ=dynamics_density(model.dynamics))
+    auxiliary = (; T=model.temperature, qᵗ=model.specific_moisture)
     return merge(prognostic_fields(model), formulation_fields, model.velocities, auxiliary, model.microphysical_fields)
 end
 

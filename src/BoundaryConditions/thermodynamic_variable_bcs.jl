@@ -31,25 +31,28 @@ where `𝒬` is the energy flux and `Jᶿ` is the potential temperature flux.
 The mixture heat capacity is computed using moisture fractions from the microphysics scheme,
 which correctly accounts for liquid and ice condensate when present.
 """
-struct EnergyFluxBoundaryConditionFunction{C, S, M, TC}
+struct EnergyFluxBoundaryConditionFunction{C, S, M, TC, D}
     condition :: C
     side :: S
     microphysics :: M
     thermodynamic_constants :: TC
+    density :: D
 end
 
 function Adapt.adapt_structure(to, ef::EnergyFluxBoundaryConditionFunction)
     return EnergyFluxBoundaryConditionFunction(Adapt.adapt(to, ef.condition),
                                                Adapt.adapt(to, ef.side),
                                                Adapt.adapt(to, ef.microphysics),
-                                               Adapt.adapt(to, ef.thermodynamic_constants))
+                                               Adapt.adapt(to, ef.thermodynamic_constants),
+                                               Adapt.adapt(to, ef.density))
 end
 
 function Architectures.on_architecture(to, ef::EnergyFluxBoundaryConditionFunction)
     return EnergyFluxBoundaryConditionFunction(on_architecture(to, ef.condition),
                                                on_architecture(to, ef.side),
                                                on_architecture(to, ef.microphysics),
-                                               on_architecture(to, ef.thermodynamic_constants))
+                                               on_architecture(to, ef.thermodynamic_constants),
+                                               on_architecture(to, ef.density))
 end
 
 function Base.summary(ef::EnergyFluxBoundaryConditionFunction)
@@ -69,7 +72,7 @@ const NorthEnergyFluxBC  = EnergyFluxBoundaryConditionFunction{<:Any, <:North}
 # Convert energy flux to potential temperature flux: Jᶿ = 𝒬 / cᵖᵐ
 @inline function 𝒬_to_Jᶿ(i, j, k, grid, ef, 𝒬, fields)
     qᵗ = @inbounds fields.qᵗ[i, j, k]
-    ρ = @inbounds fields.ρ[i, j, k]
+    ρ = @inbounds ef.density[i, j, k]
     q = compute_moisture_fractions(i, j, k, grid, ef.microphysics, ρ, qᵗ, fields)
     cᵖᵐ = mixture_heat_capacity(q, ef.thermodynamic_constants)
     return 𝒬 / cᵖᵐ
@@ -129,7 +132,7 @@ The energy flux is divided by the local mixture heat capacity `cᵖᵐ` to obtai
 potential temperature flux: `Jᶿ = 𝒬 / cᵖᵐ`.
 """
 function EnergyFluxBoundaryCondition(flux)
-    ef = EnergyFluxBoundaryConditionFunction(flux, nothing, nothing, nothing)
+    ef = EnergyFluxBoundaryConditionFunction(flux, nothing, nothing, nothing, nothing)
     return BoundaryCondition(Flux(), ef)
 end
 
