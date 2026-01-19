@@ -49,7 +49,7 @@ Oceananigans.prognostic_fields(formulation::LiquidIcePotentialTemperatureFormula
 ##### Materialization
 #####
 
-function AtmosphereModels.materialize_formulation(::Val{:LiquidIcePotentialTemperature}, _dynamics, grid, boundary_conditions)
+function AtmosphereModels.materialize_formulation(::Val{:LiquidIcePotentialTemperature}, dynamics, grid, boundary_conditions)
     potential_temperature_density = CenterField(grid, boundary_conditions=boundary_conditions.ρθ)
     potential_temperature = CenterField(grid)  # θ = ρθ / ρ (diagnostic)
     return LiquidIcePotentialTemperatureFormulation(potential_temperature_density, potential_temperature)
@@ -59,7 +59,7 @@ end
 ##### Auxiliary variable computation
 #####
 
-function AtmosphereModels.compute_auxiliary_thermodynamic_variables!(formulation::LiquidIcePotentialTemperatureFormulation, dynamics, i, j, k, _grid)
+function AtmosphereModels.compute_auxiliary_thermodynamic_variables!(formulation::LiquidIcePotentialTemperatureFormulation, dynamics, i, j, k, grid)
     ρ = dynamics_density(dynamics)
     @inbounds begin
         ρᵢ = ρ[i, j, k]
@@ -79,7 +79,7 @@ $(TYPEDSIGNATURES)
 Build a `LiquidIcePotentialTemperatureState` at grid point `(i, j, k)` from the
 given `formulation`, `dynamics`, and pre-computed moisture mass fractions `q`.
 """
-function AtmosphereModels.diagnose_thermodynamic_state(i, j, k, _grid,
+function AtmosphereModels.diagnose_thermodynamic_state(i, j, k, grid,
                                                        formulation::LiquidIcePotentialTemperatureFormulation,
                                                        dynamics,
                                                        q)

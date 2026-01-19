@@ -6,7 +6,7 @@ struct AnelasticTridiagonalSolverFormulation{R} <: AbstractHomogeneousNeumannFor
     reference_density :: R
 end
 
-Solvers.tridiagonal_direction(_formulation::AnelasticTridiagonalSolverFormulation) = ZDirection()
+Solvers.tridiagonal_direction(formulation::AnelasticTridiagonalSolverFormulation) = ZDirection()
 
 function AtmosphereModels.dynamics_pressure_solver(dynamics::AnelasticDynamics, grid)
     reference_density = dynamics.reference_state.density

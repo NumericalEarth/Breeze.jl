@@ -86,7 +86,7 @@ end
 # Get phase equilibrium from microphysics
 # For microphysics without a specific equilibrium model, default to warm phase (liquid only)
 # SaturationAdjustment extends this in Microphysics to return μ.equilibrium
-@inline microphysics_phase_equilibrium(_μ) = WarmPhaseEquilibrium()
+@inline microphysics_phase_equilibrium(μ) = WarmPhaseEquilibrium()
 
 # Compute saturation specific humidity for :total_moisture flavor
 # This is the saturation specific humidity when qᵗ = qᵛ⁺ (all moisture is vapor)

@@ -140,7 +140,7 @@ given the phase `equilibrium` model and temperature `T`.
 """
 function equilibrated_surface end
 
-@inline equilibrated_surface(::WarmPhaseEquilibrium, _T) = PlanarLiquidSurface()
+@inline equilibrated_surface(::WarmPhaseEquilibrium, T) = PlanarLiquidSurface()
 
 """
     MixedPhaseEquilibrium(; freezing_temperature=273.15, homogeneous_ice_nucleation_temperature=233.15)

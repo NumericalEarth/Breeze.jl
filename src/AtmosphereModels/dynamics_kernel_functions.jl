@@ -94,7 +94,7 @@ end
                                      model_fields,
                                      ρw_forcing,
                                      dynamics,
-                                     _formulation,
+                                     formulation,
                                      temperature,
                                      specific_moisture,
                                      microphysics,

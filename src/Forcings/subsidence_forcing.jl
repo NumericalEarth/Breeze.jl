@@ -81,7 +81,7 @@ end
 #####
 
 # Kernel function for subsidence forcing
-@inline w_dz_ϕᵃᵃᶠ(_i, _j, k, grid, w, ϕ) = @inbounds w[1, 1, k] * ∂zᶜᶜᶠ(1, 1, k, grid, ϕ)
+@inline w_dz_ϕᵃᵃᶠ(i, j, k, grid, w, ϕ) = @inbounds w[1, 1, k] * ∂zᶜᶜᶠ(1, 1, k, grid, ϕ)
 
 @inline function ℑzbᵃᵃᶜ(i, j, k, grid, w_dz_ϕᵃᵃᶠ, wˢ, ϕ_avg)
     w_dz_ϕ⁺ = w_dz_ϕᵃᵃᶠ(i, j, k+1, grid, wˢ, ϕ_avg)
@@ -92,7 +92,7 @@ end
     return ifelse(top, w_dz_ϕᵏ, ifelse(bottom, w_dz_ϕ⁺, ℑz_w_dz_ϕ))
 end
 
- function (forcing::SubsidenceForcing)(i, j, k, grid, _clock, _fields)
+ function (forcing::SubsidenceForcing)(i, j, k, grid, clock, fields)
     wˢ = forcing.subsidence_vertical_velocity
     ϕ_avg = forcing.averaged_field
     ρ = @inbounds forcing.density[1, 1, k]
@@ -117,7 +117,7 @@ function strip_density_prefix(name::Symbol)
 end
 
 function AtmosphereModels.materialize_atmosphere_model_forcing(forcing::SubsidenceForcing, field, name,
-                                                               _model_field_names, context::NamedTuple)
+                                                               model_field_names, context::NamedTuple)
     grid = field.grid
 
     if forcing.subsidence_vertical_velocity isa AbstractField

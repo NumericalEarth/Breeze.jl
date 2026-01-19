@@ -74,7 +74,7 @@ Base.summary(::NonEquilibriumCloudFormation) = "NonEquilibriumCloudFormation"
 
 # NonEquilibriumCloudFormation uses the standard tendency interface,
 # so the model-wide microphysics update is a no-op.
-AtmosphereModels.microphysics_model_update!(::NonEquilibriumCloudFormation, _model) = nothing
+AtmosphereModels.microphysics_model_update!(::NonEquilibriumCloudFormation, model) = nothing
 #####
 ##### Condensate formation models (for non-equilibrium schemes)
 #####
@@ -135,7 +135,7 @@ Compute the condensation/evaporation rate for cloud liquid water in a relaxation
 This returns the rate of change of cloud liquid mass fraction (kg/kg/s). Positive values indicate
 condensation; negative values indicate evaporation. Evaporation is limited by the available cloud liquid.
 """
-@inline function condensation_rate(qᵛ, qᵛ⁺, qᶜˡ, T, _ρ, q, τᶜˡ, constants)
+@inline function condensation_rate(qᵛ, qᵛ⁺, qᶜˡ, T, ρ, q, τᶜˡ, constants)
     Γˡ = thermodynamic_adjustment_factor(qᵛ⁺, T, q, constants)
     Sᶜᵒⁿᵈ = (qᵛ - qᵛ⁺) / (Γˡ * τᶜˡ)
 
@@ -152,7 +152,7 @@ Compute the deposition/sublimation rate for cloud ice in a relaxation-to-saturat
 This returns the rate of change of cloud ice mass fraction (kg/kg/s). Positive values indicate
 deposition; negative values indicate sublimation. Sublimation is limited by the available cloud ice.
 """
-@inline function deposition_rate(qᵛ, qᵛ⁺ⁱ, qᶜⁱ, T, _ρ, q, τᶜⁱ, constants)
+@inline function deposition_rate(qᵛ, qᵛ⁺ⁱ, qᶜⁱ, T, ρ, q, τᶜⁱ, constants)
     Γⁱ = ice_thermodynamic_adjustment_factor(qᵛ⁺ⁱ, T, q, constants)
     Sᵈᵉᵖ = (qᵛ - qᵛ⁺ⁱ) / (Γⁱ * τᶜⁱ)
 
@@ -201,7 +201,7 @@ end
 const NCBM = BulkMicrophysics{<:Any, Nothing, <:Any}
 const NPBM = NCBM  # Alias: Non-Precipitating Bulk Microphysics
 
-maybe_adjust_thermodynamic_state(_i, _j, _k, 𝒰₀, bμp::NCBM, _ρᵣ, _microphysical_fields, _qᵗ, constants) =
+maybe_adjust_thermodynamic_state(i, j, k, 𝒰₀, bμp::NCBM, ρᵣ, microphysical_fields, qᵗ, constants) =
     AtmosphereModels.adjust_thermodynamic_state(𝒰₀, bμp.cloud_formation, constants)
 
 AtmosphereModels.prognostic_field_names(::NPBM) = tuple()

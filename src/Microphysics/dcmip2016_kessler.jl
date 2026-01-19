@@ -192,7 +192,7 @@ Compute moisture mass fractions at grid point `(i, j, k)` for the thermodynamic 
 Water vapor is diagnosed as \$q^v = q^t - q^{cl} - q^r\$.
 Returns `MoistureMassFractions(qᵛ, qˡ)` where \$q^l = q^{cl} + q^r\$ is the total liquid mass fraction.
 """
-@inline function AtmosphereModels.compute_moisture_fractions(i, j, k, _grid, ::DCMIP2016KM, ρ, qᵗ, μ)
+@inline function AtmosphereModels.compute_moisture_fractions(i, j, k, grid, ::DCMIP2016KM, ρ, qᵗ, μ)
     @inbounds begin
         qᶜˡ = μ.ρqᶜˡ[i, j, k] / ρ
         qʳ  = μ.ρqʳ[i, j, k] / ρ
@@ -209,7 +209,7 @@ Return the thermodynamic state without adjustment.
 
 The Kessler scheme performs its own saturation adjustment internally via the kernel.
 """
-@inline AtmosphereModels.maybe_adjust_thermodynamic_state(_i, _j, _k, 𝒰, ::DCMIP2016KM, _ρᵣ, _μ, _qᵗ, _constants) = 𝒰
+@inline AtmosphereModels.maybe_adjust_thermodynamic_state(i, j, k, 𝒰, ::DCMIP2016KM, ρᵣ, μ, qᵗ, constants) = 𝒰
 
 """
 $(TYPEDSIGNATURES)
@@ -218,7 +218,7 @@ Return `nothing`.
 
 Rain sedimentation is handled internally by the kernel rather than through the advection interface.
 """
-@inline AtmosphereModels.microphysical_velocities(::DCMIP2016KM, _μ, _name) = nothing
+@inline AtmosphereModels.microphysical_velocities(::DCMIP2016KM, μ, name) = nothing
 
 """
 $(TYPEDSIGNATURES)
@@ -228,7 +228,7 @@ Return zero tendency.
 All microphysical source/sink terms are applied directly to the prognostic fields via the
 `microphysics_model_update!` kernel, bypassing the standard tendency interface.
 """
-@inline AtmosphereModels.microphysical_tendency(_i, _j, _k, grid, ::DCMIP2016KM, _name, _ρ, _μ, _𝒰, _constants) = zero(grid)
+@inline AtmosphereModels.microphysical_tendency(i, j, k, grid, ::DCMIP2016KM, name, ρ, μ, 𝒰, constants) = zero(grid)
 
 #####
 ##### Precipitation rate and surface flux diagnostics
@@ -249,7 +249,7 @@ the DCMIP2016 Kessler scheme to integrate with Breeze's standard diagnostics.
 AtmosphereModels.precipitation_rate(model, ::DCMIP2016KM, ::Val{:liquid}) = model.microphysical_fields.precipitation_rate
 
 # Ice precipitation is not supported for this warm-phase Kessler scheme
-AtmosphereModels.precipitation_rate(_model, ::DCMIP2016KM, ::Val{:ice}) = nothing
+AtmosphereModels.precipitation_rate(model, ::DCMIP2016KM, ::Val{:ice}) = nothing
 
 """
 $(TYPEDSIGNATURES)
@@ -281,7 +281,7 @@ Adapt.adapt_structure(to, k::DCMIP2016KesslerSurfaceFluxKernel) =
     DCMIP2016KesslerSurfaceFluxKernel(adapt(to, k.precipitation_rate),
                                       adapt(to, k.reference_density))
 
-@inline function (kernel::DCMIP2016KesslerSurfaceFluxKernel)(i, j, _k_idx, _grid)
+@inline function (kernel::DCMIP2016KesslerSurfaceFluxKernel)(i, j, k_idx, grid)
     # precipitation_rate = qʳ × vᵗ at surface
     # surface_precipitation_flux = ρ × precipitation_rate
     @inbounds P = kernel.precipitation_rate[i, j]
@@ -726,7 +726,7 @@ end
 #####
 ##### Diagnostic field update
 #####
-@inline function AtmosphereModels.update_microphysical_fields!(μ, ::DCMIP2016KM, i, j, k, _grid, ρ, 𝒰, _constants)
+@inline function AtmosphereModels.update_microphysical_fields!(μ, ::DCMIP2016KM, i, j, k, grid, ρ, 𝒰, constants)
     qᵗ = total_specific_moisture(𝒰)
     @inbounds begin
         μ.qᶜˡ[i, j, k] = μ.ρqᶜˡ[i, j, k] / ρ

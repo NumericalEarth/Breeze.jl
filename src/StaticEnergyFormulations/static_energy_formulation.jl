@@ -50,7 +50,7 @@ Oceananigans.prognostic_fields(formulation::StaticEnergyFormulation) = (; ρe=fo
 ##### Materialization
 #####
 
-function AtmosphereModels.materialize_formulation(::Val{:StaticEnergy}, _dynamics, grid, boundary_conditions)
+function AtmosphereModels.materialize_formulation(::Val{:StaticEnergy}, dynamics, grid, boundary_conditions)
     energy_density = CenterField(grid, boundary_conditions=boundary_conditions.ρe)
     specific_energy = CenterField(grid)  # e = ρe / ρ (diagnostic per-mass energy)
     return StaticEnergyFormulation(energy_density, specific_energy)
@@ -60,7 +60,7 @@ end
 ##### Auxiliary variable computation
 #####
 
-function AtmosphereModels.compute_auxiliary_thermodynamic_variables!(formulation::StaticEnergyFormulation, dynamics, i, j, k, _grid)
+function AtmosphereModels.compute_auxiliary_thermodynamic_variables!(formulation::StaticEnergyFormulation, dynamics, i, j, k, grid)
     ρ = dynamics_density(dynamics)
     @inbounds begin
         ρᵢ = ρ[i, j, k]

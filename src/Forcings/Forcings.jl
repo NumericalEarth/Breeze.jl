@@ -21,7 +21,7 @@ include("subsidence_forcing.jl")
 #####
 
 # Fallback: standard forcings don't need context
-AtmosphereModels.materialize_atmosphere_model_forcing(forcing, field, name, model_field_names, _context) =
+AtmosphereModels.materialize_atmosphere_model_forcing(forcing, field, name, model_field_names, context) =
     materialize_forcing(forcing, field, name, model_field_names)
 
 # Handle tuples of forcings (multiple forcings on the same field)

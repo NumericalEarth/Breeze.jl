@@ -108,7 +108,7 @@ struct ClausiusClapeyron end
 
 Base.summary(::ClausiusClapeyron) = "ClausiusClapeyron()"
 Base.show(io::IO, cc::ClausiusClapeyron) = print(io, summary(cc))
-Adapt.adapt_structure(_to, cc::ClausiusClapeyron) = cc
+Adapt.adapt_structure(to, cc::ClausiusClapeyron) = cc
 
 struct ThermodynamicConstants{FT, C, I, SVP}
     molar_gas_constant :: FT
