@@ -11,7 +11,7 @@ using Test
 
 @testset "KinematicDriver [$(FT)]" for FT in test_float_types()
     Oceananigans.defaults.FloatType = FT
-    grid = RectilinearGrid(default_arch; size=(4, 4, 8), extent=(1000, 1000, 2000))
+    grid = RectilinearGrid(default_arch; size=(4, 4, 8), x=(0, 1000), y=(0, 1000), z=(0, 2000))
     constants = ThermodynamicConstants()
     reference_state = ReferenceState(grid, constants)
 

@@ -138,25 +138,26 @@ function ReferenceState(grid, constants=ThermodynamicConstants(eltype(grid));
     loc = (nothing, nothing, Center())
 
     # Get z-coordinate at the top cell center for the gradient boundary condition.
-    # At the top, we use GradientBoundaryCondition to ensure correct discrete
-    # hydrostatic balance (ρ = -∂z(p)/g). At the bottom, we use ValueBoundaryCondition
-    # with the known surface pressure p₀ so that interpolation to the surface is exact.
-    z_top = last(znodes(grid, Center()))
-    ρ_top = adiabatic_hydrostatic_density(z_top, p₀, θ₀, pˢᵗ, constants)
-    ∂p∂z_top = -ρ_top * g
+    zᵀ = last(znodes(grid, Center()))
+    ρᵀ = adiabatic_hydrostatic_density(zᵀ, p₀, θ₀, pˢᵗ, constants)
+    ∂p∂zᵀ = -ρᵀ * g
 
-    # Set up pressure with value BC at bottom (exact surface pressure) and
-    # gradient BC at top (correct discrete hydrostatic balance)
-    p_bcs = FieldBoundaryConditions(grid, loc,
-        bottom = ValueBoundaryCondition(p₀),
-        top = GradientBoundaryCondition(∂p∂z_top))
+    # For atmospheric grids, z=0 is the surface at the bottom of the domain.
+    # Use ValueBoundaryCondition(p₀) at the bottom for exact surface pressure
+    # and correct discrete gradient. Use GradientBoundaryCondition at the top.
+    pᴮ = ValueBoundaryCondition(p₀)
+    pᵀ = GradientBoundaryCondition(∂p∂zᵀ)
+    p_bcs = FieldBoundaryConditions(grid, loc, bottom=pᴮ, top=pᵀ)
     pᵣ = Field{Nothing, Nothing, Center}(grid, boundary_conditions=p_bcs)
     set!(pᵣ, z -> adiabatic_hydrostatic_pressure(z, p₀, θ₀, constants))
     fill_halo_regions!(pᵣ)
 
-    # Compute density from discrete pressure gradient for discrete hydrostatic balance
+    # Compute density from discrete pressure gradient for discrete hydrostatic balance.
+    # Use the analytical surface density at the bottom boundary.
     ρ₀ = surface_density(p₀, θ₀, pˢᵗ, constants)
-    ρ_bcs = FieldBoundaryConditions(grid, loc, bottom=ValueBoundaryCondition(ρ₀))
+    ρᴮ = ValueBoundaryCondition(ρ₀)
+    ρᵀ = GradientBoundaryCondition(zero(FT))
+    ρ_bcs = FieldBoundaryConditions(grid, loc, bottom=ρᴮ, top=ρᵀ)
     ρᵣ = Field{Nothing, Nothing, Center}(grid, boundary_conditions=ρ_bcs)
     set!(ρᵣ, - ∂z(pᵣ) / g)
     fill_halo_regions!(ρᵣ)
