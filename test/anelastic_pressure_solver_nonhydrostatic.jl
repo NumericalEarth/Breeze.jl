@@ -14,7 +14,7 @@ using Oceananigans
     parent(dynamics.reference_state.density) .= 1
 
     anelastic = AtmosphereModel(grid; thermodynamic_constants=constants, dynamics)
-    boussinesq = NonhydrostaticModel(; grid)
+    boussinesq = NonhydrostaticModel(grid)
 
     uᵢ = rand(size(grid)...)
     vᵢ = rand(size(grid)...)
