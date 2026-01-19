@@ -337,6 +337,7 @@ outputs = merge(model.velocities, model.tracers, (; θ, θ′, qᶜˡ, qᶜⁱ, 
 
 filename = "supercell.jld2"
 ow = JLD2Writer(model, outputs; filename,
+                including = [:grid],
                 schedule = TimeInterval(1minutes),
                 overwrite_existing = true)
 simulation.output_writers[:jld2] = ow
