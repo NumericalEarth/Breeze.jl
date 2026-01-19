@@ -97,7 +97,7 @@ function AtmosphereModels.RadiativeTransferModel(grid::AbstractGrid,
 
     # RRTMGP grid + context
     context = rrtmgp_context(arch)
-    DA = ClimaComms.array_type(context.device)
+    ArrayType = ClimaComms.array_type(context.device)
     grid_params = RRTMGPGridParams(FT; context, nlay=Nz, ncol=Nc)
 
     # Lookup tables (requires NCDatasets extension for RRTMGP)
@@ -117,34 +117,34 @@ function AtmosphereModels.RadiativeTransferModel(grid::AbstractGrid,
         end
     end
 
-    nbnd_lw = luts.lu_kwargs.nbnd_lw
-    nbnd_sw = luts.lu_kwargs.nbnd_sw
-    ngas = luts.lu_kwargs.ngas_sw
+    Nband_lw = luts.lu_kwargs.nbnd_lw
+    Nband_sw = luts.lu_kwargs.nbnd_sw
+    Ngas = luts.lu_kwargs.ngas_sw
 
     # Atmospheric state arrays
-    rrtmgp_λ = DA{FT}(undef, Nc)
-    rrtmgp_φ = DA{FT}(undef, Nc)
-    rrtmgp_layerdata = DA{FT}(undef, 4, Nz, Nc)
-    rrtmgp_pᶠ = DA{FT}(undef, Nz+1, Nc)
-    rrtmgp_Tᶠ = DA{FT}(undef, Nz+1, Nc)
-    rrtmgp_T₀ = DA{FT}(undef, Nc)
+    rrtmgp_λ = ArrayType{FT}(undef, Nc)
+    rrtmgp_φ = ArrayType{FT}(undef, Nc)
+    rrtmgp_layerdata = ArrayType{FT}(undef, 4, Nz, Nc)
+    rrtmgp_pᶠ = ArrayType{FT}(undef, Nz+1, Nc)
+    rrtmgp_Tᶠ = ArrayType{FT}(undef, Nz+1, Nc)
+    rrtmgp_T₀ = ArrayType{FT}(undef, Nc)
 
     set_longitude!(rrtmgp_λ, coordinate, grid)
     set_latitude!(rrtmgp_φ, coordinate, grid)
 
-    vmr = init_vmr(ngas, Nz, Nc, FT, DA; gm=true)
+    vmr = init_vmr(Ngas, Nz, Nc, FT, ArrayType; gm=true)
     set_global_mean_gases!(vmr, luts.lookups.idx_gases_sw, background_atmosphere)
 
     atmospheric_state = AtmosphericState(rrtmgp_λ, rrtmgp_φ, rrtmgp_layerdata, rrtmgp_pᶠ, rrtmgp_Tᶠ, rrtmgp_T₀, vmr, nothing, nothing)
 
     # Boundary conditions (bandwise emissivity/albedo; incident fluxes are unused here)
-    cos_zenith = DA{FT}(undef, Nc)
-    rrtmgp_ℐ₀ = DA{FT}(undef, Nc)
+    cos_zenith = ArrayType{FT}(undef, Nc)
+    rrtmgp_ℐ₀ = ArrayType{FT}(undef, Nc)
     rrtmgp_ℐ₀ .= convert(FT, solar_constant)
 
-    rrtmgp_ε₀ = DA{FT}(undef, nbnd_lw, Nc)
-    rrtmgp_αb₀ = DA{FT}(undef, nbnd_sw, Nc)
-    rrtmgp_αw₀ = DA{FT}(undef, nbnd_sw, Nc)
+    rrtmgp_ε₀ = ArrayType{FT}(undef, Nband_lw, Nc)
+    rrtmgp_αb₀ = ArrayType{FT}(undef, Nband_sw, Nc)
+    rrtmgp_αw₀ = ArrayType{FT}(undef, Nband_sw, Nc)
 
     if surface_emissivity isa Number
         surface_emissivity = ConstantField(convert(FT, surface_emissivity))
@@ -219,14 +219,14 @@ const RRTMGP_GAS_NAME_MAP = Dict{String, Symbol}(
     "hfc32"   => :HFC₃₂,
 )
 
-@inline function set_global_mean_gases!(vmr, idx_gases_sw, atm::BackgroundAtmosphere)
+@inline function set_global_mean_gases!(vmr, gas_indices, atm::BackgroundAtmosphere)
     FT = eltype(vmr.vmr)
-    ngas = length(vmr.vmr)
-    host = zeros(FT, ngas)
+    Ngas = length(vmr.vmr)
+    host = zeros(FT, Ngas)
 
     # All gases except O₃ are stored as numbers in BackgroundAtmosphere
     # O₃ is handled per-layer in the kernel via vmr_o3
-    for (name, ig) in idx_gases_sw
+    for (name, ig) in gas_indices
         name == "o3" && continue  # O₃ handled per-layer in kernel
         sym = get(RRTMGP_GAS_NAME_MAP, name, nothing)
         if !isnothing(sym) && hasproperty(atm, sym)
@@ -266,8 +266,8 @@ end
 @kernel function _set_longitude_from_grid!(rrtmgp_λ, grid)
     i, j = @index(Global, NTuple)
     λ = xnode(i, j, 1, grid, Center(), Center(), Center())
-    col = rrtmgp_column_index(i, j, grid.Nx)
-    @inbounds rrtmgp_λ[col] = λ
+    c = rrtmgp_column_index(i, j, grid.Nx)
+    @inbounds rrtmgp_λ[c] = λ
 end
 
 """
