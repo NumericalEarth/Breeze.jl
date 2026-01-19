@@ -1,5 +1,5 @@
 using Oceananigans: Oceananigans, Center, Field, set!, fill_halo_regions!, ∂z, znodes
-using Oceananigans.BoundaryConditions: FieldBoundaryConditions, ValueBoundaryCondition, GradientBoundaryCondition
+using Oceananigans.BoundaryConditions: FieldBoundaryConditions, GradientBoundaryCondition
 using Oceananigans.Operators: ℑzᵃᵃᶠ
 
 using Adapt: Adapt, adapt
@@ -137,26 +137,30 @@ function ReferenceState(grid, constants=ThermodynamicConstants(eltype(grid));
     g = constants.gravitational_acceleration
     loc = (nothing, nothing, Center())
 
-    # Get z-coordinate at the top cell center for the gradient boundary condition.
-    # At the top, we use GradientBoundaryCondition to ensure correct discrete
-    # hydrostatic balance (ρ = -∂z(p)/g). At the bottom, we use ValueBoundaryCondition
-    # with the known surface pressure p₀ so that interpolation to the surface is exact.
-    z_top = last(znodes(grid, Center()))
+    # Use GradientBoundaryCondition at both top and bottom boundaries to ensure
+    # correct discrete hydrostatic balance: ρ = -∂z(p)/g. The gradient is set
+    # using the analytical hydrostatic density at each boundary cell center.
+    z = znodes(grid, Center())
+    z_bottom = first(z)
+    z_top = last(z)
+
+    ρ_bottom = adiabatic_hydrostatic_density(z_bottom, p₀, θ₀, pˢᵗ, constants)
     ρ_top = adiabatic_hydrostatic_density(z_top, p₀, θ₀, pˢᵗ, constants)
+    ∂p∂z_bottom = -ρ_bottom * g
     ∂p∂z_top = -ρ_top * g
 
-    # Set up pressure with value BC at bottom (exact surface pressure) and
-    # gradient BC at top (correct discrete hydrostatic balance)
     p_bcs = FieldBoundaryConditions(grid, loc,
-        bottom = ValueBoundaryCondition(p₀),
+        bottom = GradientBoundaryCondition(∂p∂z_bottom),
         top = GradientBoundaryCondition(∂p∂z_top))
     pᵣ = Field{Nothing, Nothing, Center}(grid, boundary_conditions=p_bcs)
     set!(pᵣ, z -> adiabatic_hydrostatic_pressure(z, p₀, θ₀, constants))
     fill_halo_regions!(pᵣ)
 
-    # Compute density from discrete pressure gradient for discrete hydrostatic balance
-    ρ₀ = surface_density(p₀, θ₀, pˢᵗ, constants)
-    ρ_bcs = FieldBoundaryConditions(grid, loc, bottom=ValueBoundaryCondition(ρ₀))
+    # Compute density from discrete pressure gradient for discrete hydrostatic balance.
+    # Use gradient BC based on analytical density at each boundary.
+    ρ_bcs = FieldBoundaryConditions(grid, loc,
+        bottom = GradientBoundaryCondition(zero(FT)),
+        top = GradientBoundaryCondition(zero(FT)))
     ρᵣ = Field{Nothing, Nothing, Center}(grid, boundary_conditions=ρ_bcs)
     set!(ρᵣ, - ∂z(pᵣ) / g)
     fill_halo_regions!(ρᵣ)

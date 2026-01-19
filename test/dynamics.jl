@@ -75,7 +75,9 @@ tol = 1e-6
     end
 end
 
-@testset "Vertical momentum conservation for neutral initial condition [$(FT)]" for FT in (Float32, Float64)
+# Float32 is excluded because the integrated momentum over the large domain (4e12 m³)
+# accumulates roundoff errors to O(100), making the test meaningless for Float32.
+@testset "Vertical momentum conservation for neutral initial condition [$(FT)]" for FT in (Float64,)
     Oceananigans.defaults.FloatType = FT
     grid = RectilinearGrid(default_arch;
                            size = (16, 5, 16),
