@@ -200,11 +200,9 @@ qᵗ = model.specific_moisture
 ## Surface momentum flux
 τˣ = BoundaryConditionOperation(ρu, :bottom, model)
 
-## Sensible heat flux: 𝒬ᵀ = cᵖᵈ Jᵀ (using dry air heat capacity as approximation)
-ρθ = liquid_ice_potential_temperature_density(model)
-cᵖᵈ = constants.dry_air.heat_capacity
-Jᵀ = BoundaryConditionOperation(ρθ, :bottom, model)
-𝒬ᵀ = cᵖᵈ * Jᵀ
+## Sensible heat flux 𝒬ᵀ
+ρe = static_energy_density(model)
+𝒬ᵀ = BoundaryConditionOperation(ρe, :bottom, model)
 
 ## Latent heat flux: 𝒬ᵛ = ℒˡ Jᵛ (using reference θ₀ for latent heat)
 ρqᵗ = model.moisture_density

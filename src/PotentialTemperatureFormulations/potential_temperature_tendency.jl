@@ -1,8 +1,9 @@
 using Breeze.AtmosphereModels.Diagnostics: Diagnostics
 using Breeze.AtmosphereModels: AtmosphereModel
 
-using Oceananigans.Fields: set!
+using Oceananigans.Fields: Field, set!
 using Breeze.Thermodynamics: temperature
+using Breeze.BoundaryConditions: theta_to_energy_bcs, regularize_atmosphere_field_bcs
 
 const PotentialTemperatureModel = AtmosphereModel{<:Any, <:LiquidIcePotentialTemperatureFormulation}
 
@@ -13,7 +14,33 @@ const PotentialTemperatureModel = AtmosphereModel{<:Any, <:LiquidIcePotentialTem
 AtmosphereModels.liquid_ice_potential_temperature_density(model::PotentialTemperatureModel) = model.formulation.potential_temperature_density
 AtmosphereModels.liquid_ice_potential_temperature(model::PotentialTemperatureModel) = model.formulation.potential_temperature
 AtmosphereModels.static_energy(model::PotentialTemperatureModel) = Diagnostics.StaticEnergy(model, :specific)
-AtmosphereModels.static_energy_density(model::PotentialTemperatureModel) = Diagnostics.StaticEnergy(model, :density)
+
+"""
+    static_energy_density(model::PotentialTemperatureModel)
+
+Return the static energy density as a `Field` with boundary conditions that return
+energy fluxes when used with `BoundaryConditionOperation`.
+
+For `LiquidIcePotentialTemperatureFormulation`, the prognostic variable is potential
+temperature density `ρθ`. This function converts the `ρθ` boundary conditions to
+energy flux boundary conditions by multiplying by the mixture heat capacity `cᵖᵐ`.
+"""
+function AtmosphereModels.static_energy_density(model::PotentialTemperatureModel)
+    ρθ = model.formulation.potential_temperature_density
+    ρθ_bcs = ρθ.boundary_conditions
+
+    # Convert θ BCs to energy BCs
+    ρe_bcs = theta_to_energy_bcs(ρθ_bcs)
+
+    # Regularize the converted BCs (populate microphysics, constants, side)
+    loc = (Center(), Center(), Center())
+    ρe_bcs = regularize_atmosphere_field_bcs(ρe_bcs, loc, model.grid, model.microphysics,
+                                              nothing, model.thermodynamic_constants)
+
+    # Create the energy density operation and wrap in a Field with proper BCs
+    ρe_op = Diagnostics.StaticEnergy(model, :density)
+    return Field(ρe_op; boundary_conditions=ρe_bcs)
+end
 
 #####
 ##### Tendency computation

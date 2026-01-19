@@ -15,6 +15,7 @@ export
     thermodynamic_density_name,
     thermodynamic_density,
     # Helpers
+    energy_density,
     static_energy_density,
     static_energy,
     total_energy,
