@@ -18,7 +18,7 @@ export BulkDragFunction,
 
 using ..AtmosphereModels: AtmosphereModels, compute_moisture_fractions
 using ..Thermodynamics: saturation_specific_humidity, surface_density, PlanarLiquidSurface,
-                        MoistureMassFractions, mixture_heat_capacity
+                        mixture_heat_capacity
 
 using Oceananigans.Architectures: Architectures, on_architecture
 using Oceananigans.Grids: Center, Face, XDirection, YDirection, AbstractGrid
