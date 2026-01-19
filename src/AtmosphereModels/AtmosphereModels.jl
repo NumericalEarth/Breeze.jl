@@ -32,6 +32,7 @@ export
     # Radiation (implemented by extensions)
     RadiativeTransferModel,
     BackgroundAtmosphere,
+    materialize_background_atmosphere,
     GrayOptics,
     ClearSkyOptics,
     AllSkyOptics,

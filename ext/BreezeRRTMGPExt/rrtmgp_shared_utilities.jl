@@ -27,7 +27,7 @@ function update_rrtmgp_gas_state!(as::AtmosphericState, model, surface_temperatu
     mᵈ = params.molmass_dryair
     mᵛ = params.molmass_water
     ℕᴬ = params.avogad
-    O₃ = background_atmosphere.O₃
+    O₃ = background_atmosphere.O₃  # Can be ConstantField or Field
 
     launch!(arch, grid, :xyz, _update_rrtmgp_gas_state!, as, grid, pᵣ, T, qᵛ, surface_temperature, g, mᵈ, mᵛ, ℕᴬ, O₃)
     return nothing
@@ -37,7 +37,7 @@ end
     i, j, k = @index(Global, NTuple)
 
     Nz = size(grid, 3)
-    col = rrtmgp_column_index(i, j, grid.Nx)
+    c = rrtmgp_column_index(i, j, grid.Nx)
 
     layerdata = as.layerdata
     pᶠ = as.p_lev
@@ -68,15 +68,15 @@ end
         Tᶠₖ = clamp(Tᶠₖ, Tmin, Tmax)
 
         # Store level values
-        pᶠ[k, col] = pᶠₖ
-        Tᶠ[k, col] = Tᶠₖ
+        pᶠ[k, c] = pᶠₖ
+        Tᶠ[k, c] = Tᶠₖ
 
         # Topmost level (once)
         if k == 1
-            pᶠ[Nz+1, col] = ℑzᵃᵃᶠ(i, j, Nz+1, grid, pᵣ)
+            pᶠ[Nz+1, c] = ℑzᵃᵃᶠ(i, j, Nz+1, grid, pᵣ)
             Tᴺ⁺¹ = ℑzᵃᵃᶠ(i, j, Nz+1, grid, T)
-            Tᶠ[Nz+1, col] = clamp(Tᴺ⁺¹, Tmin, Tmax)
-            T₀[col] = clamp(surface_temperature[i, j, 1], Tmin, Tmax)
+            Tᶠ[Nz+1, c] = clamp(Tᴺ⁺¹, Tmin, Tmax)
+            T₀[c] = clamp(surface_temperature[i, j, 1], Tmin, Tmax)
         end
 
         # Column dry air mass: molecules / cm² of dry air
@@ -84,18 +84,20 @@ end
         dry_mass_fraction = 1 - qᵛₖ
         dry_mass_per_area = (Δp / g) * dry_mass_fraction
         m⁻²_to_cm⁻² = convert(eltype(pᶜ), 1e4)
-        col_dry = dry_mass_per_area / mᵈ * ℕᴬ / m⁻²_to_cm⁻² # (molecules / m²) -> (molecules / cm²)
+        column_dry = dry_mass_per_area / mᵈ * ℕᴬ / m⁻²_to_cm⁻² # (molecules / m²) -> (molecules / cm²)
 
-        # Populate layerdata: (col_dry, pᶜ, Tᶜ, relative_humidity)
-        layerdata[1, k, col] = col_dry
-        layerdata[2, k, col] = pᶜ
-        layerdata[3, k, col] = Tᶜ
-        layerdata[4, k, col] = zero(eltype(Tᶜ))
+        # Populate layerdata: (column_dry, pᶜ, Tᶜ, relative_humidity)
+        layerdata[1, k, c] = column_dry
+        layerdata[2, k, c] = pᶜ
+        layerdata[3, k, c] = Tᶜ
+        layerdata[4, k, c] = zero(eltype(Tᶜ))
 
         # H₂O volume mixing ratio from specific humidity
         r = qᵛₖ / dry_mass_fraction
-        vmr_h2o[k, col] = r * (mᵈ / mᵛ)
-        vmr_o3[k, col] = O₃
+        vmr_h2o[k, c] = r * (mᵈ / mᵛ)
+        
+        # O₃ volume mixing ratio - index into field (works for ConstantField or Field)
+        vmr_o3[k, c] = O₃[i, j, k]
     end
 end
 
@@ -126,11 +128,11 @@ end
                                       lw_flux_up, lw_flux_dn, sw_flux_dn, grid)
     i, j, k = @index(Global, NTuple)
 
-    col = rrtmgp_column_index(i, j, grid.Nx)
+    c = rrtmgp_column_index(i, j, grid.Nx)
 
     @inbounds begin
-        ℐ_lw_up[i, j, k] = lw_flux_up[k, col]
-        ℐ_lw_dn[i, j, k] = -lw_flux_dn[k, col]
-        ℐ_sw_dn[i, j, k] = -sw_flux_dn[k, col]
+        ℐ_lw_up[i, j, k] = lw_flux_up[k, c]
+        ℐ_lw_dn[i, j, k] = -lw_flux_dn[k, c]
+        ℐ_sw_dn[i, j, k] = -sw_flux_dn[k, c]
     end
 end
