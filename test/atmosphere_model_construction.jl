@@ -49,8 +49,8 @@ end
             reference_state = ReferenceState(grid, constants, surface_pressure=p₀, potential_temperature=θ₀)
 
             # Check that interpolating to the first face (k=1) recovers surface values
-            q₀ = Breeze.Thermodynamics.MoistureMassFractions{FT} |> zero
-            ρ₀ = Breeze.Thermodynamics.density(θ₀, p₀, q₀, constants)
+            # Note: surface_density correctly converts potential temperature to temperature using the Exner function
+            ρ₀ = surface_density(reference_state)
             for i = 1:Nx, j = 1:Ny
                 @test p₀ ≈ @allowscalar ℑzᵃᵃᶠ(i, j, 1, grid, reference_state.pressure)
                 @test ρ₀ ≈ @allowscalar ℑzᵃᵃᶠ(i, j, 1, grid, reference_state.density)
