@@ -154,8 +154,9 @@ function AtmosphereModel(grid;
     boundary_conditions = merge(default_boundary_conditions, boundary_conditions)
 
     # Pre-regularize AtmosphereModel boundary conditions (fill in reference_density, compute saturation humidity, etc.)
+    # Also converts ρe boundary conditions to ρθ for potential temperature formulations
     p₀ = surface_pressure(dynamics)
-    boundary_conditions = regularize_atmosphere_model_boundary_conditions(boundary_conditions, grid, p₀, thermodynamic_constants)
+    boundary_conditions = regularize_atmosphere_model_boundary_conditions(boundary_conditions, grid, formulation, p₀, thermodynamic_constants)
 
     all_names = field_names(dynamics, formulation, microphysics, tracers)
     regularized_boundary_conditions = regularize_field_boundary_conditions(boundary_conditions, grid, all_names)

@@ -76,14 +76,12 @@ reference_state = ReferenceState(grid, surface_pressure=p₀, potential_temperat
 dynamics = AnelasticDynamics(reference_state)
 
 Q₀ = 1000 # heat flux in W / m²
-thermodynamic_constants = ThermodynamicConstants()
-cᵖᵈ = thermodynamic_constants.dry_air.heat_capacity
-ρθ_bcs = FieldBoundaryConditions(bottom=FluxBoundaryCondition(Q₀ / cᵖᵈ))
+ρe_bcs = FieldBoundaryConditions(bottom=FluxBoundaryCondition(Q₀))
 ρqᵗ_bcs = FieldBoundaryConditions(bottom=FluxBoundaryCondition(1e-2))
 
 advection = WENO()
-model = AtmosphereModel(grid; advection, dynamics, thermodynamic_constants,
-                              boundary_conditions = (ρθ=ρθ_bcs, ρqᵗ=ρqᵗ_bcs))
+model = AtmosphereModel(grid; advection, dynamics,
+                              boundary_conditions = (ρe=ρe_bcs, ρqᵗ=ρqᵗ_bcs))
 
 Δθ = 2 # ᵒK
 Tₛ = reference_state.potential_temperature # K
