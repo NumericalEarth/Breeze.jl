@@ -305,39 +305,8 @@ Schemes should write all auxiliary fields in one function. This includes:
 - Vapor mass fraction `qᵛ` from the thermodynamic state
 - Terminal velocities for sedimentation
 
-See [`WarmRainState`](@ref) implementation below for an example.
 """
 function update_microphysical_auxiliaries! end
-
-# Nothing microphysics: do nothing for any state
-@inline function update_microphysical_auxiliaries!(μ, i, j, k, grid, microphysics::Nothing, ℳ, ρ, 𝒰, constants)
-    return nothing
-end
-
-# Explicit disambiguation: Nothing microphysics + WarmRainState
-@inline function update_microphysical_auxiliaries!(μ, i, j, k, grid, microphysics::Nothing, ℳ::WarmRainState, ρ, 𝒰, constants)
-    return nothing
-end
-
-# Explicit disambiguation: Nothing microphysics + NothingMicrophysicalState
-@inline function update_microphysical_auxiliaries!(μ, i, j, k, grid, microphysics::Nothing, ℳ::NothingMicrophysicalState, ρ, 𝒰, constants)
-    return nothing
-end
-
-# Default for WarmRainState (used by DCMIP2016Kessler and non-precipitating warm-rain schemes)
-@inline function update_microphysical_auxiliaries!(μ, i, j, k, grid, microphysics, ℳ::WarmRainState, ρ, 𝒰, constants)
-    # Write state fields
-    @inbounds μ.qᶜˡ[i, j, k] = ℳ.qᶜˡ
-    @inbounds μ.qʳ[i, j, k] = ℳ.qʳ
-
-    # Vapor from thermodynamic state
-    @inbounds μ.qᵛ[i, j, k] = 𝒰.moisture_mass_fractions.vapor
-
-    # Derived: total liquid
-    @inbounds μ.qˡ[i, j, k] = ℳ.qᶜˡ + ℳ.qʳ
-
-    return nothing
-end
 
 # Fallback for NothingMicrophysicalState
 @inline function update_microphysical_auxiliaries!(μ, i, j, k, grid, microphysics, ℳ::NothingMicrophysicalState, ρ, 𝒰, constants)
