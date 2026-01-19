@@ -142,7 +142,7 @@ set!(Fθ_field, z -> dTdt_bomex(1, z))
 θ_radiation_forcing = Forcing(Fθ_field)
 θ_forcing = (θ_radiation_forcing, θ_subsidence_forcing)
 
-model = NonhydrostaticModel(; grid, buoyancy, coriolis,
+model = NonhydrostaticModel(grid; buoyancy, coriolis,
                             advection = WENO(order=5),
                             tracers = (:θ, :qᵗ),
                             forcing = (; qᵗ=qᵗ_forcing, u=u_forcing, v=v_forcing, θ=θ_forcing),

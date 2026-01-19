@@ -110,7 +110,7 @@ jobs:
           # preference file to test directory (the global one will be ignored during the
           # tests), and add `CUDA_Runtime_jll` to the env to make the preference effective.
           cp /usr/local/share/julia/environments/breeze/LocalPreferences.toml test/.
-          julia --project=test --color=yes --check-bounds=yes -e 'using Pkg; Pkg.add("CUDA_Runtime_jll")'
+          julia --project=test --color=yes --check-bounds=yes -e 'using Pkg; Pkg.Registry.update(); Pkg.add("CUDA_Runtime_jll")'
       - name: Run tests
         shell: bash
         run: |

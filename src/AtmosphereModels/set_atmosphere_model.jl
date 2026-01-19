@@ -1,7 +1,7 @@
 using Oceananigans.Fields: Fields, set!
-using Oceananigans.TimeSteppers: update_state!
 using Oceananigans.BoundaryConditions: fill_halo_regions!
-using Oceananigans.TimeSteppers: compute_pressure_correction!, make_pressure_correction!, update_state!
+using Oceananigans.Models.NonhydrostaticModels: compute_pressure_correction!, make_pressure_correction!
+using Oceananigans.TimeSteppers: update_state!
 
 using .Diagnostics: SaturationSpecificHumidity
 

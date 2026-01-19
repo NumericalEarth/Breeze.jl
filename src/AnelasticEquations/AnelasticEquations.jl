@@ -24,9 +24,9 @@ using Oceananigans.BoundaryConditions: FieldBoundaryConditions, regularize_field
 using Oceananigans.Fields: set!
 using Oceananigans.Grids: ZDirection, inactive_cell
 using Oceananigans.ImmersedBoundaries: mask_immersed_field!
+using Oceananigans.Models.NonhydrostaticModels: NonhydrostaticModels
 using Oceananigans.Operators: Δzᵃᵃᶜ, Δzᵃᵃᶠ, divᶜᶜᶜ, Δzᶜᶜᶜ, ℑzᵃᵃᶠ, ∂xᶠᶜᶜ, ∂yᶜᶠᶜ, ∂zᶜᶜᶠ
 using Oceananigans.Solvers: Solvers, solve!, FourierTridiagonalPoissonSolver, AbstractHomogeneousNeumannFormulation
-using Oceananigans.TimeSteppers: TimeSteppers
 using Oceananigans.Utils: prettysummary, launch!
 
 using Breeze.Thermodynamics: ReferenceState, mixture_gas_constant
