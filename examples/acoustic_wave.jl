@@ -49,8 +49,9 @@ constants = model.thermodynamic_constants
 
 θ₀ = 300      # Reference potential temperature (K)
 p₀ = 101325   # Surface pressure (Pa)
+pˢᵗ = 1e5     # Standard pressure (Pa)
 
-reference = ReferenceState(grid, constants; surface_pressure=p₀, potential_temperature=θ₀)
+reference = ReferenceState(grid, constants; surface_pressure=p₀, potential_temperature=θ₀, standard_pressure=pˢᵗ)
 
 # The sound speed at the surface determines the acoustic wave propagation speed.
 
@@ -78,7 +79,7 @@ Uᵢ(z) = U₀ * log((z + ℓ) / ℓ)
 gaussian(x, z) = exp(-(x^2 + z^2) / 2σ^2)
 ρ₀ = interior(reference.density, 1, 1, 1)[]
 
-ρᵢ(x, z) = adiabatic_hydrostatic_density(z, p₀, θ₀, constants) + δρ * gaussian(x, z)
+ρᵢ(x, z) = adiabatic_hydrostatic_density(z, p₀, θ₀, pˢᵗ, constants) + δρ * gaussian(x, z)
 uᵢ(x, z) = Uᵢ(z) #+ (𝕌ˢⁱ / ρ₀) * δρ * gaussian(x, z)
 
 set!(model, ρ=ρᵢ, θ=θ₀, u=uᵢ)
@@ -116,7 +117,7 @@ u, v, w = model.velocities
 ρᵇᵍ = CenterField(grid)
 uᵇᵍ = XFaceField(grid)
 
-set!(ρᵇᵍ, (x, z) -> adiabatic_hydrostatic_density(z, p₀, θ₀, constants))
+set!(ρᵇᵍ, (x, z) -> adiabatic_hydrostatic_density(z, p₀, θ₀, pˢᵗ, constants))
 set!(uᵇᵍ, (x, z) -> Uᵢ(z))
 
 ρ′ = Field(ρ - ρᵇᵍ)
@@ -155,12 +156,12 @@ axρ = Axis(fig[1, 2]; aspect = 5, ylabel = "z (m)")
 axw = Axis(fig[2, 2]; aspect = 5, ylabel = "z (m)")
 axu = Axis(fig[3, 2]; aspect = 5, xlabel = "x (m)", ylabel = "z (m)")
 axR = Axis(fig[1, 1]; xlabel = "⟨ρ⟩ (kg/m³)")
-axW = Axis(fig[2, 1]; xlabel = "⟨w²⟩ (m²/s²)")
+axW = Axis(fig[2, 1]; xlabel = "⟨w²⟩ (m²/s²)", limits = (extrema(W²ts), nothing))
 axU = Axis(fig[3, 1]; xlabel = "⟨u⟩ (m/s)")
 
 hidexdecorations!(axρ)
 hidexdecorations!(axw)
-colsize!(fig.layout, 1, Relative(0.1))
+colsize!(fig.layout, 1, Relative(0.2))
 
 n = Observable(Nt)
 ρ′n = @lift ρ′ts[$n]
@@ -177,9 +178,9 @@ hmρ = heatmap!(axρ, ρ′n; colormap = :balance, colorrange = (-ρlim, ρlim))
 hmw = heatmap!(axw, wn; colormap = :balance, colorrange = (-ulim, ulim))
 hmu = heatmap!(axu, u′n; colormap = :balance, colorrange = (-ulim, ulim))
 
-lines!(axU, Un)
 lines!(axR, Rn)
 lines!(axW, W²n)
+lines!(axU, Un)
 
 Colorbar(fig[1, 3], hmρ; label = "ρ′ (kg/m³)")
 Colorbar(fig[2, 3], hmw; label = "w (m/s)")
