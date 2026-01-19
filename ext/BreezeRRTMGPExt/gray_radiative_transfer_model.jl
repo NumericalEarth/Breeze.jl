@@ -102,17 +102,17 @@ function AtmosphereModels.RadiativeTransferModel(grid::AbstractGrid,
 
     # Set up RRTMGP grid parameters
     context = rrtmgp_context(arch)
-    DA = ClimaComms.array_type(context.device)
+    ArrayType = ClimaComms.array_type(context.device)
 
-    # Allocate RRTMGP arrays: (nlay/nlev, ncol)
+    # Allocate RRTMGP arrays with dimensions (Nz, Nc) for layers or (Nz+1, Nc) for levels
     # Note: RRTMGP uses "lat" internally for its GrayAtmosphericState struct
-    rrtmgp_φ  = DA{FT}(undef, Nc)
-    rrtmgp_T₀ = DA{FT}(undef, Nc)
-    rrtmgp_pᶜ = DA{FT}(undef, Nz, Nc)
-    rrtmgp_Tᶜ = DA{FT}(undef, Nz, Nc)
-    rrtmgp_Tᶠ = DA{FT}(undef, Nz+1, Nc)
-    rrtmgp_pᶠ = DA{FT}(undef, Nz+1, Nc)
-    rrtmgp_zᶠ = DA{FT}(undef, Nz+1, Nc)
+    rrtmgp_φ  = ArrayType{FT}(undef, Nc)
+    rrtmgp_T₀ = ArrayType{FT}(undef, Nc)
+    rrtmgp_pᶜ = ArrayType{FT}(undef, Nz, Nc)
+    rrtmgp_Tᶜ = ArrayType{FT}(undef, Nz, Nc)
+    rrtmgp_Tᶠ = ArrayType{FT}(undef, Nz+1, Nc)
+    rrtmgp_pᶠ = ArrayType{FT}(undef, Nz+1, Nc)
+    rrtmgp_zᶠ = ArrayType{FT}(undef, Nz+1, Nc)
 
     set_latitude!(rrtmgp_φ, coordinate, grid)
 
@@ -130,14 +130,14 @@ function AtmosphereModels.RadiativeTransferModel(grid::AbstractGrid,
                                              optical_thickness)
 
     # Surface emissivity for the longwave solver
-    rrtmgp_ε₀ = DA{FT}(undef, Nc)
+    rrtmgp_ε₀ = ArrayType{FT}(undef, Nc)
 
     # Shortwave solver objects
-    cos_zenith = DA{FT}(undef, Nc) # Cosine of the solar zenith angle
-    rrtmgp_αb₀ = DA{FT}(undef, Nc)  # Direct surface albedo
-    rrtmgp_αw₀ = DA{FT}(undef, Nc)  # Diffuse surface albedo
-    rrtmgp_ℐ₀ = DA{FT}(undef, Nc)  # Top-of-atmosphere solar flux
-    rrtmgp_ε₀ = DA{FT}(undef, Nc)  # Surface emissivity
+    cos_zenith = ArrayType{FT}(undef, Nc) # Cosine of the solar zenith angle
+    rrtmgp_αb₀ = ArrayType{FT}(undef, Nc)  # Direct surface albedo
+    rrtmgp_αw₀ = ArrayType{FT}(undef, Nc)  # Diffuse surface albedo
+    rrtmgp_ℐ₀ = ArrayType{FT}(undef, Nc)  # Top-of-atmosphere solar flux
+    rrtmgp_ε₀ = ArrayType{FT}(undef, Nc)  # Surface emissivity
 
     rrtmgp_ℐ₀ .= convert(FT, solar_constant)  # Top-of-atmosphere solar flux
 
@@ -219,8 +219,8 @@ end
 @kernel function _set_latitude_from_grid!(rrtmgp_latitude, grid)
     i, j = @index(Global, NTuple)
     φ = ynode(i, j, 1, grid, Center(), Center(), Center())
-    col = rrtmgp_column_index(i, j, grid.Nx)
-    @inbounds rrtmgp_latitude[col] = φ
+    c = rrtmgp_column_index(i, j, grid.Nx)
+    @inbounds rrtmgp_latitude[c] = φ
 end
 
 #####
@@ -358,9 +358,8 @@ compared to the hydrostatic reference pressure. We use `reference_state.pressure
 at cell centers, computed via `adiabatic_hydrostatic_pressure(z, p₀, θ₀)`.
 
 # RRTMGP array layout
-- Layer arrays `(nlay, ncol)`: values at cell centers, layer 1 at bottom
-- Level arrays `(nlev, ncol)`: values at cell faces, level 1 at surface (z=0)
-- `nlev = nlay + 1`
+- Layer arrays `(Nz, Nc)`: values at cell centers, layer 1 at bottom
+- Level arrays `(Nz+1, Nc)`: values at cell faces, level 1 at surface (z=0)
 """
 function update_rrtmgp_state!(rrtmgp_state::GrayAtmosphericState, model, surface_temperature)
     grid = model.grid
@@ -393,21 +392,21 @@ end
     pᶠ = rrtmgp_state.p_lev  # Pressure at cell faces
     T₀ = rrtmgp_state.t_sfc  # Surface temperature
 
-    col = rrtmgp_column_index(i, j, grid.Nx)
+    c = rrtmgp_column_index(i, j, grid.Nx)
 
     @inbounds begin
         # Layer values (cell centers) - k runs from 1 to Nz
-        Tᶜ[k, col] = T[i, j, k]
-        pᶜ[k, col] = p[i, j, k]
-        pᶠ[k, col] = ℑzᵃᵃᶠ(i, j, k, grid, p)
-        Tᶠ[k, col] = ℑzᵃᵃᶠ(i, j, k, grid, T)
+        Tᶜ[k, c] = T[i, j, k]
+        pᶜ[k, c] = p[i, j, k]
+        pᶠ[k, c] = ℑzᵃᵃᶠ(i, j, k, grid, p)
+        Tᶠ[k, c] = ℑzᵃᵃᶠ(i, j, k, grid, T)
 
         # Special case setting the topmost level + surface temperature
         # Because kernel spans (Nx, Ny, Nz)
         if k == 1
-            T₀[col] = surface_temperature[i, j, 1]
-            pᶠ[Nz+1, col] = ℑzᵃᵃᶠ(i, j, Nz+1, grid, p)
-            Tᶠ[Nz+1, col] = ℑzᵃᵃᶠ(i, j, Nz+1, grid, T)
+            T₀[c] = surface_temperature[i, j, 1]
+            pᶠ[Nz+1, c] = ℑzᵃᵃᶠ(i, j, Nz+1, grid, p)
+            Tᶠ[Nz+1, c] = ℑzᵃᵃᶠ(i, j, Nz+1, grid, T)
         end
     end
 end
@@ -457,8 +456,8 @@ end
     λ = λnode(i, j, 1, grid, Center(), Center(), Center())
     φ = φnode(i, j, 1, grid, Center(), Center(), Center())
     cos_θz = cos_solar_zenith_angle(datetime, λ, φ)
-    col = rrtmgp_column_index(i, j, grid.Nx)
-    rrtmgp_cos_θz[col] = max(cos_θz, 0)  # Clamp to positive (sun above horizon)
+    c = rrtmgp_column_index(i, j, grid.Nx)
+    rrtmgp_cos_θz[c] = max(cos_θz, 0)  # Clamp to positive (sun above horizon)
 end
 
 #####
@@ -501,14 +500,14 @@ end
                                     lw_flux_up, lw_flux_dn, sw_flux_dn_dir, grid)
     i, j, k = @index(Global, NTuple)
 
-    # RRTMGP uses (nlev, ncol), we use (i, j, k) for ZFaceField
+    # RRTMGP uses (Nz+1, Nc), we use (i, j, k) for ZFaceField
     # Sign convention: upwelling positive, downwelling negative
-    col = rrtmgp_column_index(i, j, grid.Nx)
+    c = rrtmgp_column_index(i, j, grid.Nx)
 
     @inbounds begin
-        ℐ_lw_up[i, j, k] = lw_flux_up[k, col]
-        ℐ_lw_dn[i, j, k] = -lw_flux_dn[k, col]  # Negate for downward
-        ℐ_sw_dn[i, j, k] = -sw_flux_dn_dir[k, col]  # Negate for downward
+        ℐ_lw_up[i, j, k] = lw_flux_up[k, c]
+        ℐ_lw_dn[i, j, k] = -lw_flux_dn[k, c]  # Negate for downward
+        ℐ_sw_dn[i, j, k] = -sw_flux_dn_dir[k, c]  # Negate for downward
     end
 end
 
