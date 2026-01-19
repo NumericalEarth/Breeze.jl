@@ -14,7 +14,7 @@ export BulkDragFunction,
        EnergyFluxBoundaryConditionFunction,
        EnergyFluxBoundaryCondition
 
-using ..AtmosphereModels: AtmosphereModels
+using ..AtmosphereModels: AtmosphereModels, compute_moisture_fractions
 using ..Thermodynamics: saturation_specific_humidity, surface_density, PlanarLiquidSurface,
                         MoistureMassFractions, mixture_heat_capacity
 
@@ -326,22 +326,30 @@ Jᶿ = 𝒬 / cᵖᵐ
 ```
 
 where `𝒬` is the energy flux and `Jᶿ` is the potential temperature flux.
+
+The mixture heat capacity is computed using moisture fractions from the microphysics scheme,
+which correctly accounts for liquid and ice condensate when present.
 """
-struct EnergyFluxBoundaryConditionFunction{C, S, TC}
-    condition :: C                    # underlying BC (function, number, or Oceananigans BC type)
-    side :: S                         # Bottom(), Top(), etc. to determine which k index to use
+struct EnergyFluxBoundaryConditionFunction{C, S, M, TC}
+    condition :: C
+    side :: S
+    microphysics :: M
     thermodynamic_constants :: TC
 end
 
-Adapt.adapt_structure(to, ef::EnergyFluxBoundaryConditionFunction) =
-    EnergyFluxBoundaryConditionFunction(Adapt.adapt(to, ef.condition),
-                                        Adapt.adapt(to, ef.side),
-                                        Adapt.adapt(to, ef.thermodynamic_constants))
+function Adapt.adapt_structure(to, ef::EnergyFluxBoundaryConditionFunction)
+    return EnergyFluxBoundaryConditionFunction(Adapt.adapt(to, ef.condition),
+                                               Adapt.adapt(to, ef.side),
+                                               Adapt.adapt(to, ef.microphysics),
+                                               Adapt.adapt(to, ef.thermodynamic_constants))
+end
 
-Architectures.on_architecture(to, ef::EnergyFluxBoundaryConditionFunction) =
-    EnergyFluxBoundaryConditionFunction(on_architecture(to, ef.condition),
-                                        on_architecture(to, ef.side),
-                                        on_architecture(to, ef.thermodynamic_constants))
+function Architectures.on_architecture(to, ef::EnergyFluxBoundaryConditionFunction)
+    return EnergyFluxBoundaryConditionFunction(on_architecture(to, ef.condition),
+                                               on_architecture(to, ef.side),
+                                               on_architecture(to, ef.microphysics),
+                                               on_architecture(to, ef.thermodynamic_constants))
+end
 
 function Base.summary(ef::EnergyFluxBoundaryConditionFunction)
     cond = ef.condition
@@ -349,57 +357,86 @@ function Base.summary(ef::EnergyFluxBoundaryConditionFunction)
     return string("EnergyFluxBoundaryConditionFunction(", cond_str, ")")
 end
 
-# Type aliases for dispatch
-const EFBCF = EnergyFluxBoundaryConditionFunction
-const BEFBC = EFBCF{<:Any, <:Bottom}
-const TEFBC = EFBCF{<:Any, <:Top}
-const WEFBC = EFBCF{<:Any, <:West}
-const EEFBC = EFBCF{<:Any, <:East}
-const SEFBC = EFBCF{<:Any, <:South}
-const NEFBC = EFBCF{<:Any, <:North}
+# Type aliases for dispatch on boundary side
+const BottomEnergyFluxBC = EnergyFluxBoundaryConditionFunction{<:Any, <:Bottom}
+const TopEnergyFluxBC    = EnergyFluxBoundaryConditionFunction{<:Any, <:Top}
+const WestEnergyFluxBC   = EnergyFluxBoundaryConditionFunction{<:Any, <:West}
+const EastEnergyFluxBC   = EnergyFluxBoundaryConditionFunction{<:Any, <:East}
+const SouthEnergyFluxBC  = EnergyFluxBoundaryConditionFunction{<:Any, <:South}
+const NorthEnergyFluxBC  = EnergyFluxBoundaryConditionFunction{<:Any, <:North}
 
 # Helper to get underlying energy flux value
-@inline _get_𝒬(c::Number, args...) = c
-@inline _get_𝒬(c, args...) = OceananigansBC.getbc(c, args...)
+@inline get_energy_flux(condition::Number, args...) = condition
+@inline get_energy_flux(condition, args...) = OceananigansBC.getbc(condition, args...)
 
 # Convert energy flux to potential temperature flux: Jᶿ = 𝒬 / cᵖᵐ
-@inline function _energy_to_θ_flux(𝒬, qᵗ, constants)
-    cᵖᵐ = mixture_heat_capacity(MoistureMassFractions(qᵗ), constants)
+@inline function energy_to_θ_flux(i, j, k, grid, ef, 𝒬, qᵗ, ρ, fields)
+    q = compute_moisture_fractions(i, j, k, grid, ef.microphysics, ρ, qᵗ, fields)
+    cᵖᵐ = mixture_heat_capacity(q, ef.thermodynamic_constants)
     return 𝒬 / cᵖᵐ
 end
 
-# getbc implementations for each boundary face
-@inline function OceananigansBC.getbc(ef::BEFBC, i::Integer, j::Integer, grid::AbstractGrid, clock, fields)
-    𝒬 = _get_𝒬(ef.condition, i, j, grid, clock, fields)
-    return _energy_to_θ_flux(𝒬, @inbounds(fields.qᵗ[i, j, 1]), ef.thermodynamic_constants)
+# getbc for bottom boundary (k = 1)
+@inline function OceananigansBC.getbc(ef::BottomEnergyFluxBC, i::Integer, j::Integer,
+                                      grid::AbstractGrid, clock, fields)
+    𝒬 = get_energy_flux(ef.condition, i, j, grid, clock, fields)
+    k = 1
+    qᵗ = @inbounds fields.qᵗ[i, j, k]
+    ρ = @inbounds fields.ρ[i, j, k]
+    return energy_to_θ_flux(i, j, k, grid, ef, 𝒬, qᵗ, ρ, fields)
 end
 
-@inline function OceananigansBC.getbc(ef::TEFBC, i::Integer, j::Integer, grid::AbstractGrid, clock, fields)
-    𝒬 = _get_𝒬(ef.condition, i, j, grid, clock, fields)
-    return _energy_to_θ_flux(𝒬, @inbounds(fields.qᵗ[i, j, grid.Nz]), ef.thermodynamic_constants)
+# getbc for top boundary (k = Nz)
+@inline function OceananigansBC.getbc(ef::TopEnergyFluxBC, i::Integer, j::Integer,
+                                      grid::AbstractGrid, clock, fields)
+    𝒬 = get_energy_flux(ef.condition, i, j, grid, clock, fields)
+    k = grid.Nz
+    qᵗ = @inbounds fields.qᵗ[i, j, k]
+    ρ = @inbounds fields.ρ[i, j, k]
+    return energy_to_θ_flux(i, j, k, grid, ef, 𝒬, qᵗ, ρ, fields)
 end
 
-@inline function OceananigansBC.getbc(ef::WEFBC, j::Integer, k::Integer, grid::AbstractGrid, clock, fields)
-    𝒬 = _get_𝒬(ef.condition, j, k, grid, clock, fields)
-    return _energy_to_θ_flux(𝒬, @inbounds(fields.qᵗ[1, j, k]), ef.thermodynamic_constants)
+# getbc for west boundary (i = 1)
+@inline function OceananigansBC.getbc(ef::WestEnergyFluxBC, j::Integer, k::Integer,
+                                      grid::AbstractGrid, clock, fields)
+    𝒬 = get_energy_flux(ef.condition, j, k, grid, clock, fields)
+    i = 1
+    qᵗ = @inbounds fields.qᵗ[i, j, k]
+    ρ = @inbounds fields.ρ[i, j, k]
+    return energy_to_θ_flux(i, j, k, grid, ef, 𝒬, qᵗ, ρ, fields)
 end
 
-@inline function OceananigansBC.getbc(ef::EEFBC, j::Integer, k::Integer, grid::AbstractGrid, clock, fields)
-    𝒬 = _get_𝒬(ef.condition, j, k, grid, clock, fields)
-    return _energy_to_θ_flux(𝒬, @inbounds(fields.qᵗ[grid.Nx, j, k]), ef.thermodynamic_constants)
+# getbc for east boundary (i = Nx)
+@inline function OceananigansBC.getbc(ef::EastEnergyFluxBC, j::Integer, k::Integer,
+                                      grid::AbstractGrid, clock, fields)
+    𝒬 = get_energy_flux(ef.condition, j, k, grid, clock, fields)
+    i = grid.Nx
+    qᵗ = @inbounds fields.qᵗ[i, j, k]
+    ρ = @inbounds fields.ρ[i, j, k]
+    return energy_to_θ_flux(i, j, k, grid, ef, 𝒬, qᵗ, ρ, fields)
 end
 
-@inline function OceananigansBC.getbc(ef::SEFBC, i::Integer, k::Integer, grid::AbstractGrid, clock, fields)
-    𝒬 = _get_𝒬(ef.condition, i, k, grid, clock, fields)
-    return _energy_to_θ_flux(𝒬, @inbounds(fields.qᵗ[i, 1, k]), ef.thermodynamic_constants)
+# getbc for south boundary (j = 1)
+@inline function OceananigansBC.getbc(ef::SouthEnergyFluxBC, i::Integer, k::Integer,
+                                      grid::AbstractGrid, clock, fields)
+    𝒬 = get_energy_flux(ef.condition, i, k, grid, clock, fields)
+    j = 1
+    qᵗ = @inbounds fields.qᵗ[i, j, k]
+    ρ = @inbounds fields.ρ[i, j, k]
+    return energy_to_θ_flux(i, j, k, grid, ef, 𝒬, qᵗ, ρ, fields)
 end
 
-@inline function OceananigansBC.getbc(ef::NEFBC, i::Integer, k::Integer, grid::AbstractGrid, clock, fields)
-    𝒬 = _get_𝒬(ef.condition, i, k, grid, clock, fields)
-    return _energy_to_θ_flux(𝒬, @inbounds(fields.qᵗ[i, grid.Ny, k]), ef.thermodynamic_constants)
+# getbc for north boundary (j = Ny)
+@inline function OceananigansBC.getbc(ef::NorthEnergyFluxBC, i::Integer, k::Integer,
+                                      grid::AbstractGrid, clock, fields)
+    𝒬 = get_energy_flux(ef.condition, i, k, grid, clock, fields)
+    j = grid.Ny
+    qᵗ = @inbounds fields.qᵗ[i, j, k]
+    ρ = @inbounds fields.ρ[i, j, k]
+    return energy_to_θ_flux(i, j, k, grid, ef, 𝒬, qᵗ, ρ, fields)
 end
 
-const EnergyFluxBC = BoundaryCondition{<:Flux, <:EFBCF}
+const EnergyFluxBC = BoundaryCondition{<:Flux, <:EnergyFluxBoundaryConditionFunction}
 
 #####
 ##### Convenient constructors
@@ -524,11 +561,12 @@ potential temperature flux:
 Jᶿ = 𝒬 / cᵖᵐ
 ```
 
-The mixture heat capacity is computed at the boundary using the local specific humidity `qᵗ`.
+The mixture heat capacity is computed at the boundary using the local moisture fractions
+from the microphysics scheme.
 """
 function EnergyFluxBoundaryCondition(flux)
-    # side and thermodynamic_constants are filled in during regularization
-    ef = EnergyFluxBoundaryConditionFunction(flux, nothing, nothing)
+    # All fields except `flux` are filled in during regularization
+    ef = EnergyFluxBoundaryConditionFunction(flux, nothing, nothing, nothing)
     return BoundaryCondition(Flux(), ef)
 end
 
@@ -553,14 +591,17 @@ bulk flux boundary conditions and other atmosphere-specific boundary condition t
 If `formulation` is `:LiquidIcePotentialTemperature` and `ρe` boundary conditions are provided,
 they are automatically converted to `ρθ` boundary conditions using `EnergyFluxBoundaryCondition`.
 """
-function AtmosphereModels.regularize_atmosphere_model_boundary_conditions(boundary_conditions, grid, formulation, surface_pressure, thermodynamic_constants)
+function AtmosphereModels.regularize_atmosphere_model_boundary_conditions(boundary_conditions, grid, formulation,
+                                                                          microphysics, surface_pressure,
+                                                                          thermodynamic_constants)
     # Convert ρe boundary conditions to ρθ for potential temperature formulations
     boundary_conditions = convert_energy_to_theta_bcs(boundary_conditions, formulation, thermodynamic_constants)
 
     regularized = Dict{Symbol, Any}()
     for (name, fbcs) in pairs(boundary_conditions)
         loc = field_location(Val(name))
-        regularized[name] = regularize_atmosphere_field_bcs(fbcs, loc, grid, surface_pressure, thermodynamic_constants)
+        regularized[name] = regularize_atmosphere_field_bcs(fbcs, loc, grid, microphysics,
+                                                            surface_pressure, thermodynamic_constants)
     end
     return NamedTuple(regularized)
 end
@@ -637,27 +678,28 @@ wrap_energy_bc(bc::BulkSensibleHeatFluxBoundaryCondition) = bc
 wrap_energy_bc(bc::BoundaryCondition{<:Flux}) = EnergyFluxBoundaryCondition(bc.condition)
 
 # Pass through non-FieldBoundaryConditions
-regularize_atmosphere_field_bcs(fbcs, loc, grid, surface_pressure, constants) = fbcs
+regularize_atmosphere_field_bcs(fbcs, loc, grid, microphysics, surface_pressure, constants) = fbcs
 
 # Regularize FieldBoundaryConditions by walking through each boundary
-function regularize_atmosphere_field_bcs(fbcs::FieldBoundaryConditions, loc, grid, surface_pressure, constants)
-    west     = regularize_atmosphere_boundary_condition(fbcs.west, West(), loc, grid, surface_pressure, constants)
-    east     = regularize_atmosphere_boundary_condition(fbcs.east, East(), loc, grid, surface_pressure, constants)
-    south    = regularize_atmosphere_boundary_condition(fbcs.south, South(), loc, grid, surface_pressure, constants)
-    north    = regularize_atmosphere_boundary_condition(fbcs.north, North(), loc, grid, surface_pressure, constants)
-    bottom   = regularize_atmosphere_boundary_condition(fbcs.bottom, Bottom(), loc, grid, surface_pressure, constants)
-    top      = regularize_atmosphere_boundary_condition(fbcs.top, Top(), loc, grid, surface_pressure, constants)
-    immersed = regularize_atmosphere_boundary_condition(fbcs.immersed, nothing, loc, grid, surface_pressure, constants)
+function regularize_atmosphere_field_bcs(fbcs::FieldBoundaryConditions, loc, grid, microphysics,
+                                         surface_pressure, constants)
+    west     = regularize_atmosphere_boundary_condition(fbcs.west, West(), loc, grid, microphysics, surface_pressure, constants)
+    east     = regularize_atmosphere_boundary_condition(fbcs.east, East(), loc, grid, microphysics, surface_pressure, constants)
+    south    = regularize_atmosphere_boundary_condition(fbcs.south, South(), loc, grid, microphysics, surface_pressure, constants)
+    north    = regularize_atmosphere_boundary_condition(fbcs.north, North(), loc, grid, microphysics, surface_pressure, constants)
+    bottom   = regularize_atmosphere_boundary_condition(fbcs.bottom, Bottom(), loc, grid, microphysics, surface_pressure, constants)
+    top      = regularize_atmosphere_boundary_condition(fbcs.top, Top(), loc, grid, microphysics, surface_pressure, constants)
+    immersed = regularize_atmosphere_boundary_condition(fbcs.immersed, nothing, loc, grid, microphysics, surface_pressure, constants)
 
     return FieldBoundaryConditions(; west, east, south, north, bottom, top, immersed)
 end
 
 # Default: pass through unchanged
-regularize_atmosphere_boundary_condition(bc, side, loc, grid, surface_pressure, constants) = bc
+regularize_atmosphere_boundary_condition(bc, side, loc, grid, microphysics, surface_pressure, constants) = bc
 
 # Regularize BulkDrag: infer direction from field location if needed
 function regularize_atmosphere_boundary_condition(bc::BoundaryCondition{<:Flux, <:BulkDragFunction{Nothing}},
-                                                  side, loc, grid, surface_pressure, constants)
+                                                  side, loc, grid, microphysics, surface_pressure, constants)
     df = bc.condition
     LX, LY, LZ = loc
 
@@ -676,13 +718,13 @@ end
 
 # BulkDrag with direction already set: pass through
 regularize_atmosphere_boundary_condition(bc::BoundaryCondition{<:Flux, <:XDirectionBulkDragFunction},
-                                         side, loc, grid, surface_pressure, constants) = bc
+                                         side, loc, grid, microphysics, surface_pressure, constants) = bc
 regularize_atmosphere_boundary_condition(bc::BoundaryCondition{<:Flux, <:YDirectionBulkDragFunction},
-                                         side, loc, grid, surface_pressure, constants) = bc
+                                         side, loc, grid, microphysics, surface_pressure, constants) = bc
 
 # Regularize BulkSensibleHeatFlux: populate surface_pressure and thermodynamic_constants
 function regularize_atmosphere_boundary_condition(bc::BulkSensibleHeatFluxBoundaryCondition,
-                                                  side, loc, grid, surface_pressure, constants)
+                                                  side, loc, grid, microphysics, surface_pressure, constants)
     bf = bc.condition
     T₀ = materialize_surface_field(bf.surface_temperature, grid)
     new_bf = BulkSensibleHeatFluxFunction(bf.coefficient, bf.gustiness, T₀, surface_pressure, constants)
@@ -691,7 +733,7 @@ end
 
 # Regularize BulkVaporFlux: populate surface_pressure, thermodynamic_constants, and surface
 function regularize_atmosphere_boundary_condition(bc::BulkVaporFluxBoundaryCondition,
-                                                  side, loc, grid, surface_pressure, constants)
+                                                  side, loc, grid, microphysics, surface_pressure, constants)
     bf = bc.condition
     T₀ = materialize_surface_field(bf.surface_temperature, grid)
     surface = PlanarLiquidSurface()
@@ -699,13 +741,13 @@ function regularize_atmosphere_boundary_condition(bc::BulkVaporFluxBoundaryCondi
     return BoundaryCondition(Flux(), new_bf)
 end
 
-# Regularize EnergyFluxBoundaryCondition: populate side and thermodynamic_constants
-const UnregularizedEFBC = BoundaryCondition{<:Flux, <:EFBCF{<:Any, Nothing}}
+# Regularize EnergyFluxBoundaryCondition: populate side, microphysics, and thermodynamic_constants
+const UnregularizedEnergyFluxBC = BoundaryCondition{<:Flux, <:EnergyFluxBoundaryConditionFunction{<:Any, Nothing}}
 
-function regularize_atmosphere_boundary_condition(bc::UnregularizedEFBC,
-                                                  side, loc, grid, surface_pressure, constants)
+function regularize_atmosphere_boundary_condition(bc::UnregularizedEnergyFluxBC,
+                                                  side, loc, grid, microphysics, surface_pressure, constants)
     ef = bc.condition
-    new_ef = EnergyFluxBoundaryConditionFunction(ef.condition, side, constants)
+    new_ef = EnergyFluxBoundaryConditionFunction(ef.condition, side, microphysics, constants)
     return BoundaryCondition(Flux(), new_ef)
 end
 
@@ -751,27 +793,27 @@ Adapt.adapt_structure(to, ef::EnergyFluxKernelFunction) =
 
 # Dispatch on side to get correct indices for getbc
 @inline function (kf::EnergyFluxKernelFunction{<:Bottom})(i, j, k, grid, clock, model_fields)
-    return _get_𝒬(kf.condition, i, j, grid, clock, model_fields)
+    return get_energy_flux(kf.condition, i, j, grid, clock, model_fields)
 end
 
 @inline function (kf::EnergyFluxKernelFunction{<:Top})(i, j, k, grid, clock, model_fields)
-    return _get_𝒬(kf.condition, i, j, grid, clock, model_fields)
+    return get_energy_flux(kf.condition, i, j, grid, clock, model_fields)
 end
 
 @inline function (kf::EnergyFluxKernelFunction{<:West})(i, j, k, grid, clock, model_fields)
-    return _get_𝒬(kf.condition, j, k, grid, clock, model_fields)
+    return get_energy_flux(kf.condition, j, k, grid, clock, model_fields)
 end
 
 @inline function (kf::EnergyFluxKernelFunction{<:East})(i, j, k, grid, clock, model_fields)
-    return _get_𝒬(kf.condition, j, k, grid, clock, model_fields)
+    return get_energy_flux(kf.condition, j, k, grid, clock, model_fields)
 end
 
 @inline function (kf::EnergyFluxKernelFunction{<:South})(i, j, k, grid, clock, model_fields)
-    return _get_𝒬(kf.condition, i, k, grid, clock, model_fields)
+    return get_energy_flux(kf.condition, i, k, grid, clock, model_fields)
 end
 
 @inline function (kf::EnergyFluxKernelFunction{<:North})(i, j, k, grid, clock, model_fields)
-    return _get_𝒬(kf.condition, i, k, grid, clock, model_fields)
+    return get_energy_flux(kf.condition, i, k, grid, clock, model_fields)
 end
 
 """
