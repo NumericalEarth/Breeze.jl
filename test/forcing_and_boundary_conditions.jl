@@ -307,13 +307,12 @@ end
         @test_throws ArgumentError AtmosphereModel(grid; boundary_conditions=(ρθ=ρθ_bcs, ρe=ρe_bcs))
     end
 
-    @testset "BoundaryConditionOperation returns energy flux for EnergyFluxBC [$FT]" begin
+    @testset "static_energy_density returns Field with energy flux BCs [$FT]" begin
         using Oceananigans.Models: BoundaryConditionOperation
-        using Breeze.AtmosphereModels: thermodynamic_density
 
         grid = RectilinearGrid(default_arch; size=(4, 4, 4), x=(0, 100), y=(0, 100), z=(0, 100))
 
-        # Test 1: Bottom boundary with ρe BC (EnergyFluxBoundaryCondition path)
+        # Test 1: Bottom boundary with ρe BC
         𝒬₀ = FT(500)  # W/m²
         ρe_bcs = FieldBoundaryConditions(bottom=FluxBoundaryCondition(𝒬₀))
         model = AtmosphereModel(grid; boundary_conditions=(ρe=ρe_bcs,))
@@ -322,8 +321,9 @@ end
         qᵗ₀ = FT(0.01)  # 10 g/kg moisture
         set!(model; θ=θ₀, qᵗ=qᵗ₀)
 
-        ρθ = thermodynamic_density(model.formulation)
-        𝒬_op = BoundaryConditionOperation(ρθ, :bottom, model)
+        # static_energy_density returns a Field with energy flux BCs
+        ρe = static_energy_density(model)
+        𝒬_op = BoundaryConditionOperation(ρe, :bottom, model)
         𝒬_field = Field(𝒬_op)
         compute!(𝒬_field)
         @test all(interior(𝒬_field) .≈ 𝒬₀)
@@ -334,8 +334,8 @@ end
         model_top = AtmosphereModel(grid; boundary_conditions=(ρe=ρe_bcs_top,))
         set!(model_top; θ=θ₀, qᵗ=qᵗ₀)
 
-        ρθ_top = thermodynamic_density(model_top.formulation)
-        𝒬_top_op = BoundaryConditionOperation(ρθ_top, :top, model_top)
+        ρe_top = static_energy_density(model_top)
+        𝒬_top_op = BoundaryConditionOperation(ρe_top, :top, model_top)
         𝒬_top_field = Field(𝒬_top_op)
         compute!(𝒬_top_field)
         @test all(interior(𝒬_top_field) .≈ 𝒬_top)
@@ -346,9 +346,9 @@ end
         model_both = AtmosphereModel(grid; boundary_conditions=(ρe=ρe_bcs_both,))
         set!(model_both; θ=θ₀, qᵗ=qᵗ₀)
 
-        ρθ_both = thermodynamic_density(model_both.formulation)
-        𝒬_bottom_op = BoundaryConditionOperation(ρθ_both, :bottom, model_both)
-        𝒬_top_op2 = BoundaryConditionOperation(ρθ_both, :top, model_both)
+        ρe_both = static_energy_density(model_both)
+        𝒬_bottom_op = BoundaryConditionOperation(ρe_both, :bottom, model_both)
+        𝒬_top_op2 = BoundaryConditionOperation(ρe_both, :top, model_both)
 
         𝒬_bottom_field = Field(𝒬_bottom_op)
         𝒬_top_field2 = Field(𝒬_top_op2)
@@ -357,25 +357,10 @@ end
 
         @test all(interior(𝒬_bottom_field) .≈ 𝒬₀)
         @test all(interior(𝒬_top_field2) .≈ 𝒬_top)
-
-        # Test 4: Regular ρθ BC at bottom (returns Jᶿ directly, not energy flux)
-        Jᶿ₀ = FT(0.5)  # K·kg/(m²·s) - potential temperature flux
-        ρθ_bcs = FieldBoundaryConditions(bottom=FluxBoundaryCondition(Jᶿ₀))
-        model_theta = AtmosphereModel(grid; boundary_conditions=(ρθ=ρθ_bcs,))
-        set!(model_theta; θ=θ₀, qᵗ=qᵗ₀)
-
-        ρθ_field = thermodynamic_density(model_theta.formulation)
-        Jᶿ_op = BoundaryConditionOperation(ρθ_field, :bottom, model_theta)
-        Jᶿ_computed = Field(Jᶿ_op)
-        compute!(Jᶿ_computed)
-
-        # For regular ρθ BCs, BoundaryConditionOperation returns the flux directly
-        @test all(interior(Jᶿ_computed) .≈ Jᶿ₀)
     end
 
     @testset "Varying energy flux values [$FT]" begin
         using Oceananigans.Models: BoundaryConditionOperation
-        using Breeze.AtmosphereModels: thermodynamic_density
 
         grid = RectilinearGrid(default_arch; size=(4, 4, 4), x=(0, 100), y=(0, 100), z=(0, 100))
         θ₀ = FT(290)
@@ -389,8 +374,9 @@ end
             time_step!(model, FT(1e-6))
             @test true
 
-            ρθ = thermodynamic_density(model.formulation)
-            𝒬_op = BoundaryConditionOperation(ρθ, :bottom, model)
+            # static_energy_density returns a Field with energy flux BCs
+            ρe = static_energy_density(model)
+            𝒬_op = BoundaryConditionOperation(ρe, :bottom, model)
             𝒬_field = Field(𝒬_op)
             compute!(𝒬_field)
             @test all(interior(𝒬_field) .≈ 𝒬)
@@ -519,31 +505,6 @@ end
         @test has_nondefault_bcs(fbcs_nondefault) == true
     end
 
-    @testset "wrap_energy_field_bcs fallback [$FT]" begin
-        using Breeze.BoundaryConditions: wrap_energy_field_bcs
-
-        # Test that non-FieldBoundaryConditions pass through unchanged
-        result = wrap_energy_field_bcs(:not_a_fbc)
-        @test result === :not_a_fbc
-
-        result2 = wrap_energy_field_bcs(nothing)
-        @test result2 === nothing
-    end
-
-    @testset "side_type helper function [$FT]" begin
-        using Breeze.BoundaryConditions: side_type
-        using Oceananigans.BoundaryConditions: Bottom, Top, West, East, South, North
-
-        @test side_type(:bottom) isa Bottom
-        @test side_type(:top) isa Top
-        @test side_type(:west) isa West
-        @test side_type(:east) isa East
-        @test side_type(:south) isa South
-        @test side_type(:north) isa North
-
-        # Test error for unknown side
-        @test_throws ArgumentError side_type(:invalid)
-    end
 
     @testset "boundary_condition_location helper function [$FT]" begin
         using Oceananigans.Models: boundary_condition_location
@@ -570,9 +531,8 @@ end
         @test LY === Nothing
     end
 
-    @testset "BoundaryConditionOperation works for lateral EnergyFluxBC [$FT]" begin
+    @testset "static_energy_density works for lateral EnergyFluxBC [$FT]" begin
         using Oceananigans.Models: BoundaryConditionOperation
-        using Breeze.AtmosphereModels: thermodynamic_density
 
         # Test that EnergyFluxBC works correctly on lateral boundaries
         grid = RectilinearGrid(default_arch; size=(4, 4, 4), x=(0, 100), y=(0, 100), z=(0, 100),
@@ -585,8 +545,9 @@ end
         θ₀ = model.dynamics.reference_state.potential_temperature
         set!(model; θ=θ₀, qᵗ=FT(0.01))
 
-        ρθ = thermodynamic_density(model.formulation)
-        𝒬_op = BoundaryConditionOperation(ρθ, :west, model)
+        # static_energy_density returns a Field with energy flux BCs
+        ρe = static_energy_density(model)
+        𝒬_op = BoundaryConditionOperation(ρe, :west, model)
         𝒬_field = Field(𝒬_op)
         compute!(𝒬_field)
         @test all(interior(𝒬_field) .≈ 𝒬)
@@ -647,6 +608,81 @@ end
             # Verify the boundary condition produced a non-zero effect
             # (sign depends on outward normal direction for each face)
             @test Δρθ != 0
+        end
+    end
+
+    @testset "ThetaFluxBoundaryConditionFunction summary [$FT]" begin
+        using Breeze.BoundaryConditions: ThetaFluxBoundaryConditionFunction
+
+        # Test summary for number condition
+        tf_number = ThetaFluxBoundaryConditionFunction(FT(0.5), nothing, nothing, nothing)
+        s = summary(tf_number)
+        @test occursin("0.5", s) || occursin("5", s)  # Float formatting may vary
+
+        # Test summary for function condition
+        Jᶿ_func(x, y, t) = FT(0.1)
+        tf_func = ThetaFluxBoundaryConditionFunction(Jᶿ_func, nothing, nothing, nothing)
+        s_func = summary(tf_func)
+        @test occursin("Function", s_func) || occursin("function", s_func)
+    end
+
+    @testset "theta_to_energy_bcs correctly converts BCs [$FT]" begin
+        using Breeze.BoundaryConditions: theta_to_energy_bcs, EnergyFluxBoundaryCondition,
+                                         ThetaFluxBCType, EnergyFluxBCType
+
+        # Test 1: Regular flux BC gets wrapped in ThetaFluxBoundaryCondition
+        Jᶿ = FT(0.5)  # θ flux
+        ρθ_bcs = FieldBoundaryConditions(bottom=FluxBoundaryCondition(Jᶿ))
+        ρe_bcs = theta_to_energy_bcs(ρθ_bcs)
+        @test ρe_bcs.bottom isa ThetaFluxBCType
+
+        # Test 2: EnergyFluxBoundaryCondition extracts the original energy flux
+        𝒬 = FT(500)
+        ρθ_bcs_with_energy = FieldBoundaryConditions(bottom=EnergyFluxBoundaryCondition(𝒬))
+        ρe_bcs_extracted = theta_to_energy_bcs(ρθ_bcs_with_energy)
+        # The extracted BC should be a regular flux BC (not wrapped)
+        @test ρe_bcs_extracted.bottom.condition == 𝒬
+
+        # Test 3: Non-flux BCs pass through unchanged
+        ρθ_bcs_default = FieldBoundaryConditions()
+        ρe_bcs_default = theta_to_energy_bcs(ρθ_bcs_default)
+        @test typeof(ρe_bcs_default.bottom) == typeof(ρθ_bcs_default.bottom)
+    end
+
+    @testset "ThetaFluxBC getbc coverage for all boundaries [$FT]" begin
+        using Oceananigans.Models: BoundaryConditionOperation
+
+        # Use a 1×1×1 grid with Bounded topology so all faces are active
+        # Specify θ flux BC directly on ρθ - when we get static_energy_density,
+        # the θ fluxes should be converted to energy fluxes by theta_to_energy_bcs
+        grid = RectilinearGrid(default_arch; size=(1, 1, 1), x=(0, 100), y=(0, 100), z=(0, 100),
+                               topology=(Bounded, Bounded, Bounded))
+
+        Jᶿ = FT(0.5)  # θ flux K·kg/(m²·s)
+        θ₀ = FT(290)
+        qᵗ₀ = FT(0.01)
+
+        # Test each boundary face with a θ flux BC
+        boundary_sides = [:bottom, :top, :west, :east, :south, :north]
+
+        for side in boundary_sides
+            # Create ρθ BCs with a flux BC
+            kwargs = Dict{Symbol, Any}()
+            kwargs[side] = FluxBoundaryCondition(Jᶿ)
+            ρθ_bcs = FieldBoundaryConditions(; kwargs...)
+
+            model = AtmosphereModel(grid; boundary_conditions=(ρθ=ρθ_bcs,))
+            set!(model; θ=θ₀, qᵗ=qᵗ₀)
+
+            # static_energy_density should have ThetaFluxBCs that multiply by cᵖᵐ
+            ρe = static_energy_density(model)
+            𝒬_op = BoundaryConditionOperation(ρe, side, model)
+            𝒬_field = Field(𝒬_op)
+            compute!(𝒬_field)
+
+            # Verify the energy flux is approximately Jᶿ × cᵖᵐ (which is > Jᶿ)
+            # cᵖᵐ ≈ 1000-1100 J/(kg·K) for moist air, so 𝒬 ≈ 500-550 W/m²
+            @test all(interior(𝒬_field) .> Jᶿ * 500)  # rough lower bound
         end
     end
 end
