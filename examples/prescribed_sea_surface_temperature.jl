@@ -106,7 +106,7 @@ scalar_advection = WENO(order=5)
 Cᴰ = 1e-3  # Drag coefficient
 Uᵍ = 1e-2  # Minimum wind speed (m/s)
 
-ρu_surface_flux = ρv_surface_flux = BulkDrag(coefficient=Cᴰ, gustiness=Uᵍ)
+ρu_surface_flux = ρv_surface_flux = Breeze.BulkDrag(coefficient=Cᴰ, gustiness=Uᵍ)
 
 # ## Sensible heat flux and vapor fluxes
 #
@@ -261,6 +261,7 @@ outputs = (; s, ξ, T, θ, qˡ, qᵛ⁺, qᵗ, τˣ, 𝒬ᵀ, 𝒬ᵛ, Σ𝒬=�
 
 ow = JLD2Writer(model, outputs;
                 filename = output_filename,
+                including = [:grid],
                 schedule = TimeInterval(2minutes),
                 overwrite_existing = true)
 

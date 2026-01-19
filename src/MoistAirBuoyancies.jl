@@ -71,7 +71,7 @@ To build a model with `MoistAirBuoyancy`, we include potential temperature and t
 tracers `θ` and `qᵗ` to the model.
 
 ```jldoctest mab
-model = NonhydrostaticModel(; grid, buoyancy, tracers = (:θ, :qᵗ))
+model = NonhydrostaticModel(grid; buoyancy, tracers = (:θ, :qᵗ))
 
 # output
 NonhydrostaticModel{CPU, RectilinearGrid}(time = 0 seconds, iteration = 0)

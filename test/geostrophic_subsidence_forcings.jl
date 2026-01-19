@@ -200,7 +200,7 @@ end
                     forcing = (; name => (subsidence, zero_forcing))
                 end
 
-                kw = (; advection=nothing, timestepper=:QuasiAdamsBashforth2, dynamics, formulation=:LiquidIcePotentialTemperature, forcing)
+                kw = (; advection=nothing, dynamics, formulation=:LiquidIcePotentialTemperature, forcing)
                 model = AtmosphereModel(grid; tracers=:ρc, kw...)
                 θ₀ = model.dynamics.reference_state.potential_temperature
 
