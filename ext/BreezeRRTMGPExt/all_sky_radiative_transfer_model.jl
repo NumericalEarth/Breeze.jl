@@ -13,6 +13,7 @@ using Breeze.AtmosphereModels:
     SurfaceRadiativeProperties,
     specific_humidity,
     BackgroundAtmosphere,
+    materialize_background_atmosphere,
     AllSkyOptics,
     ConstantRadiusParticles,
     cloud_liquid_effective_radius,
@@ -49,7 +50,8 @@ This constructor requires that `NCDatasets` is loadable in the user environment 
 RRTMGP loads lookup tables from netCDF via an extension.
 
 # Keyword Arguments
-- `background_atmosphere`: Background atmospheric gas composition (default: `BackgroundAtmosphere(grid)`).
+- `background_atmosphere`: Background atmospheric gas composition (default: `BackgroundAtmosphere()`).
+  O₃ can be a Number or Function of `z`; other gases are global mean constants.
   O₃ can be a Number, Function, or Field; other gases are global mean constants.
 - `surface_temperature`: Surface temperature in Kelvin (required).
 - `coordinate`: Solar geometry specification. Can be:
@@ -71,7 +73,7 @@ RRTMGP loads lookup tables from netCDF via an extension.
 function AtmosphereModels.RadiativeTransferModel(grid::AbstractGrid,
                                                  ::AllSkyOptics,
                                                  constants::ThermodynamicConstants;
-                                                 background_atmosphere = BackgroundAtmosphere(grid),
+                                                 background_atmosphere = BackgroundAtmosphere(),
                                                  surface_temperature,
                                                  coordinate = nothing,
                                                  epoch = nothing,
@@ -92,6 +94,9 @@ function AtmosphereModels.RadiativeTransferModel(grid::AbstractGrid,
                  direct_surface_albedo and diffuse_surface_albedo"
 
     coordinate = maybe_infer_coordinate(coordinate, grid)
+
+    # Materialize background atmosphere (converts O₃ functions to fields)
+    background_atmosphere = materialize_background_atmosphere(background_atmosphere, grid)
 
     if !isnothing(surface_albedo)
         if !isnothing(direct_surface_albedo) || !isnothing(diffuse_surface_albedo)

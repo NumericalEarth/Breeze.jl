@@ -146,110 +146,141 @@ and O₃. All other gases use global mean values.
 - **Constant gases** (global mean only): `N₂`, `O₂`, `CO₂`, `CH₄`, `N₂O`, `CO`, `NO₂`
 - **Halocarbons**: `CFC₁₁`, `CFC₁₂`, `CFC₂₂`, `CCl₄`, `CF₄`
 - **Hydrofluorocarbons**: `HFC₁₂₅`, `HFC₁₃₄ₐ`, `HFC₁₄₃ₐ`, `HFC₂₃`, `HFC₃₂`
-- **Spatially-varying**: `O₃` - can be a constant or a `Field` for height-dependent profiles
+- **Spatially-varying**: `O₃` - can be a constant or a function for height-dependent profiles
 
 Defaults are approximate modern atmospheric values for major gases; halocarbons default to zero.
 
 Note: H₂O is computed from the model's prognostic moisture field, not specified here.
+
+The `BackgroundAtmosphere` constructor does not require a grid. When passed to
+[`RadiativeTransferModel`](@ref), the O₃ field is materialized using the grid.
+This allows users to seamlessly switch between constant and function-based concentrations.
 """
-struct BackgroundAtmosphere{FT, O3}
+struct BackgroundAtmosphere{N2, O2, CO2, CH4, N2O, CO, NO2, O3, CFC11, CFC12, CFC22, CCL4, CF4, HFC125, HFC134A, HFC143A, HFC23, HFC32}
     # Major atmospheric constituents (constant - RRTMGP only supports global mean)
-    N₂  :: FT
-    O₂  :: FT
-    CO₂ :: FT
-    CH₄ :: FT
-    N₂O :: FT
-    CO  :: FT
-    NO₂ :: FT
+    N₂  :: N2
+    O₂  :: O2
+    CO₂ :: CO2
+    CH₄ :: CH4
+    N₂O :: N2O
+    CO  :: CO
+    NO₂ :: NO2
 
     # Ozone - can vary spatially (RRTMGP supports per-layer O₃)
     O₃  :: O3
 
     # Chlorofluorocarbons (CFCs)
-    CFC₁₁ :: FT
-    CFC₁₂ :: FT
-    CFC₂₂ :: FT
+    CFC₁₁ :: CFC11
+    CFC₁₂ :: CFC12
+    CFC₂₂ :: CFC22
 
     # Other halocarbons
-    CCl₄ :: FT
-    CF₄  :: FT
+    CCl₄ :: CCL4
+    CF₄  :: CF4
 
     # Hydrofluorocarbons (HFCs)
-    HFC₁₂₅  :: FT
-    HFC₁₃₄ₐ :: FT
-    HFC₁₄₃ₐ :: FT
-    HFC₂₃   :: FT
-    HFC₃₂   :: FT
+    HFC₁₂₅  :: HFC125
+    HFC₁₃₄ₐ :: HFC134A
+    HFC₁₄₃ₐ :: HFC143A
+    HFC₂₃   :: HFC23
+    HFC₃₂   :: HFC32
 end
 
-using Oceananigans.Fields: field
-
 """
-    BackgroundAtmosphere(grid; kwargs...)
+    BackgroundAtmosphere(; kwargs...)
 
 Construct a `BackgroundAtmosphere` with volume mixing ratios for radiatively active gases.
 All values are dimensionless molar fractions.
 
 RRTMGP supports spatially-varying VMR only for H₂O and O₃. Other gases use global means.
 
-- **Constant gases**: Specify as numbers (will be converted to grid's float type)
-- **O₃**: Can be a Number, Function, or Field for height-dependent profiles
+- **Constant gases**: Specify as numbers
+- **O₃**: Can be a Number or Function for height-dependent profiles
 
 # Keyword Arguments
 - Constant gases: `N₂`, `O₂`, `CO₂`, `CH₄`, `N₂O`, `CO`, `NO₂`
 - Halocarbons: `CFC₁₁`, `CFC₁₂`, `CFC₂₂`, `CCl₄`, `CF₄`
 - Hydrofluorocarbons: `HFC₁₂₅`, `HFC₁₃₄ₐ`, `HFC₁₄₃ₐ`, `HFC₂₃`, `HFC₃₂`
-- Spatially-varying: `O₃` (can be Number, Function, or Field)
+- Spatially-varying: `O₃` (can be Number or Function)
 
 Defaults are approximate modern atmospheric values; halocarbons default to zero.
 Note: H₂O is computed from the model's prognostic moisture field.
-"""
-function BackgroundAtmosphere(grid;
-                              N₂  = 0.78084,      # Nitrogen (~78%)
-                              O₂  = 0.20946,      # Oxygen (~21%)
-                              CO₂ = 420e-6,       # Carbon dioxide (~420 ppm)
-                              CH₄ = 1.8e-6,       # Methane (~1.8 ppm)
-                              N₂O = 330e-9,       # Nitrous oxide (~330 ppb)
-                              CO  = 0.0,          # Carbon monoxide
-                              NO₂ = 0.0,          # Nitrogen dioxide
-                              O₃  = 0.0,          # Ozone (can be profile)
-                              CFC₁₁ = 0.0,        # Trichlorofluoromethane
-                              CFC₁₂ = 0.0,        # Dichlorodifluoromethane
-                              CFC₂₂ = 0.0,        # Chlorodifluoromethane
-                              CCl₄ = 0.0,         # Carbon tetrachloride
-                              CF₄  = 0.0,         # Carbon tetrafluoride
-                              HFC₁₂₅  = 0.0,      # Pentafluoroethane
-                              HFC₁₃₄ₐ = 0.0,      # 1,1,1,2-Tetrafluoroethane
-                              HFC₁₄₃ₐ = 0.0,      # 1,1,1-Trifluoroethane
-                              HFC₂₃   = 0.0,      # Trifluoromethane
-                              HFC₃₂   = 0.0)      # Difluoromethane
 
+# Example
+
+```julia
+# Constant ozone
+background = BackgroundAtmosphere(CO₂ = 400e-6)
+
+# Height-varying ozone (function of z in meters)
+tropical_ozone(z) = 30e-9 * (1 + z / 10000)
+background = BackgroundAtmosphere(CO₂ = 400e-6, O₃ = tropical_ozone)
+```
+"""
+function BackgroundAtmosphere(; N₂  = 0.78084,      # Nitrogen (~78%)
+                                O₂  = 0.20946,      # Oxygen (~21%)
+                                CO₂ = 420e-6,       # Carbon dioxide (~420 ppm)
+                                CH₄ = 1.8e-6,       # Methane (~1.8 ppm)
+                                N₂O = 330e-9,       # Nitrous oxide (~330 ppb)
+                                CO  = 0.0,          # Carbon monoxide
+                                NO₂ = 0.0,          # Nitrogen dioxide
+                                O₃  = 0.0,          # Ozone (can be profile function)
+                                CFC₁₁ = 0.0,        # Trichlorofluoromethane
+                                CFC₁₂ = 0.0,        # Dichlorodifluoromethane
+                                CFC₂₂ = 0.0,        # Chlorodifluoromethane
+                                CCl₄ = 0.0,         # Carbon tetrachloride
+                                CF₄  = 0.0,         # Carbon tetrafluoride
+                                HFC₁₂₅  = 0.0,      # Pentafluoroethane
+                                HFC₁₃₄ₐ = 0.0,      # 1,1,1,2-Tetrafluoroethane
+                                HFC₁₄₃ₐ = 0.0,      # 1,1,1-Trifluoroethane
+                                HFC₂₃   = 0.0,      # Trifluoromethane
+                                HFC₃₂   = 0.0)      # Difluoromethane
+
+    return BackgroundAtmosphere(N₂, O₂, CO₂, CH₄, N₂O, CO, NO₂, O₃,
+                                CFC₁₁, CFC₁₂, CFC₂₂, CCl₄, CF₄,
+                                HFC₁₂₅, HFC₁₃₄ₐ, HFC₁₄₃ₐ, HFC₂₃, HFC₃₂)
+end
+
+using Oceananigans.Fields: field
+
+"""
+    materialize_background_atmosphere(atm::BackgroundAtmosphere, grid)
+
+Materialize a `BackgroundAtmosphere` by converting O₃ functions to fields and
+converting constant gases to the grid's float type.
+
+This is called internally by [`RadiativeTransferModel`](@ref) constructors.
+"""
+function materialize_background_atmosphere(atm::BackgroundAtmosphere, grid)
     FT = eltype(grid)
 
     # O₃ can be Number, Function, or Field - use `field` to wrap appropriately
     # Location (Nothing, Nothing, Center) for z-varying profiles
-    O₃_field = field((Nothing, Nothing, Center), O₃, grid)
+    O₃_field = field((Nothing, Nothing, Center), atm.O₃, grid)
 
-    return BackgroundAtmosphere{FT, typeof(O₃_field)}(
-        convert(FT, N₂),
-        convert(FT, O₂),
-        convert(FT, CO₂),
-        convert(FT, CH₄),
-        convert(FT, N₂O),
-        convert(FT, CO),
-        convert(FT, NO₂),
+    return BackgroundAtmosphere(
+        convert(FT, atm.N₂),
+        convert(FT, atm.O₂),
+        convert(FT, atm.CO₂),
+        convert(FT, atm.CH₄),
+        convert(FT, atm.N₂O),
+        convert(FT, atm.CO),
+        convert(FT, atm.NO₂),
         O₃_field,
-        convert(FT, CFC₁₁),
-        convert(FT, CFC₁₂),
-        convert(FT, CFC₂₂),
-        convert(FT, CCl₄),
-        convert(FT, CF₄),
-        convert(FT, HFC₁₂₅),
-        convert(FT, HFC₁₃₄ₐ),
-        convert(FT, HFC₁₄₃ₐ),
-        convert(FT, HFC₂₃),
-        convert(FT, HFC₃₂))
+        convert(FT, atm.CFC₁₁),
+        convert(FT, atm.CFC₁₂),
+        convert(FT, atm.CFC₂₂),
+        convert(FT, atm.CCl₄),
+        convert(FT, atm.CF₄),
+        convert(FT, atm.HFC₁₂₅),
+        convert(FT, atm.HFC₁₃₄ₐ),
+        convert(FT, atm.HFC₁₄₃ₐ),
+        convert(FT, atm.HFC₂₃),
+        convert(FT, atm.HFC₃₂))
 end
+
+# Materialization is idempotent for already-materialized atmospheres
+materialize_background_atmosphere(::Nothing, grid) = nothing
 
 struct SurfaceRadiativeProperties{ST, SE, SA, DW}
     surface_temperature :: ST  # Scalar or 2D field

@@ -8,7 +8,9 @@ using Oceananigans.Grids: xnode, ynode, λnode, φnode, znodes
 using Oceananigans.Grids: AbstractGrid, Center, Face
 using Oceananigans.Fields: ConstantField
 
-using Breeze.AtmosphereModels: AtmosphereModels, SurfaceRadiativeProperties, specific_humidity, BackgroundAtmosphere, ClearSkyOptics, RadiativeTransferModel
+using Breeze.AtmosphereModels: AtmosphereModels, SurfaceRadiativeProperties, specific_humidity,
+                               BackgroundAtmosphere, materialize_background_atmosphere,
+                               ClearSkyOptics, RadiativeTransferModel
 using Breeze.Thermodynamics: ThermodynamicConstants
 
 using Dates: AbstractDateTime, Millisecond
@@ -32,8 +34,8 @@ This constructor requires that `NCDatasets` is loadable in the user environment 
 RRTMGP loads lookup tables from netCDF via an extension.
 
 # Keyword Arguments
-- `background_atmosphere`: Background atmospheric gas composition (default: `BackgroundAtmosphere(grid)`).
-  O₃ can be a Number, Function, or Field; other gases are global mean constants.
+- `background_atmosphere`: Background atmospheric gas composition (default: `BackgroundAtmosphere()`).
+  O₃ can be a Number or Function of `z`; other gases are global mean constants.
 - `surface_temperature`: Surface temperature in Kelvin (required).
 - `coordinate`: Solar geometry specification. Can be:
   - `nothing` (default): extracts location from grid coordinates for time-varying zenith angle
@@ -51,7 +53,7 @@ RRTMGP loads lookup tables from netCDF via an extension.
 function AtmosphereModels.RadiativeTransferModel(grid::AbstractGrid,
                                                  ::ClearSkyOptics,
                                                  constants::ThermodynamicConstants;
-                                                 background_atmosphere = BackgroundAtmosphere(grid),
+                                                 background_atmosphere = BackgroundAtmosphere(),
                                                  surface_temperature,
                                                  coordinate = nothing,
                                                  epoch = nothing,
@@ -69,6 +71,9 @@ function AtmosphereModels.RadiativeTransferModel(grid::AbstractGrid,
                  direct_surface_albedo and diffuse_surface_albedo"
 
     coordinate = maybe_infer_coordinate(coordinate, grid)
+
+    # Materialize background atmosphere (converts O₃ functions to fields)
+    background_atmosphere = materialize_background_atmosphere(background_atmosphere, grid)
 
     if !isnothing(surface_albedo)
         if !isnothing(direct_surface_albedo) || !isnothing(diffuse_surface_albedo)

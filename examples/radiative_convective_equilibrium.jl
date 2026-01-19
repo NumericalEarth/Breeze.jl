@@ -189,7 +189,7 @@ dynamics = AnelasticDynamics(reference_state)
     return O₃_trop * (1 - transition) + O₃_strat * transition
 end
 
-background = BackgroundAtmosphere(grid;
+background = BackgroundAtmosphere(
     CO₂ = 348e-6,       # 348 ppmv — Wing et al. (2018), Table 1
     CH₄ = 1650e-9,      # 1650 ppbv — Wing et al. (2018), Table 1
     N₂O = 306e-9,       # 306 ppbv — Wing et al. (2018), Table 1
