@@ -146,7 +146,7 @@ function ReferenceState(grid, constants=ThermodynamicConstants(eltype(grid));
     pᵣ = Field{Nothing, Nothing, Center}(grid, boundary_conditions=p_bcs)
     set!(pᵣ, z -> adiabatic_hydrostatic_pressure(z, p₀, θ₀, constants))
     fill_halo_regions!(pᵣ)
-  
+
     ρ₀ = surface_density(p₀, θ₀, constants)
     ρ_bcs = FieldBoundaryConditions(grid, loc, bottom=ValueBoundaryCondition(ρ₀))
     ρᵣ = Field{Nothing, Nothing, Center}(grid, boundary_conditions=ρ_bcs)
