@@ -1,4 +1,5 @@
 using Breeze
+using GPUArraysCore: @allowscalar
 using Oceananigans: Oceananigans
 using Oceananigans.BoundaryConditions: BoundaryCondition
 using Test
@@ -599,9 +600,9 @@ end
             set!(model; θ=θ₀, qᵗ=qᵗ₀)
 
             ρθ = thermodynamic_density(model.formulation)
-            ρθ_before = ρθ[1, 1, 1]
+            ρθ_before = @allowscalar ρθ[1, 1, 1]
             time_step!(model, Δt)
-            ρθ_after = ρθ[1, 1, 1]
+            ρθ_after = @allowscalar ρθ[1, 1, 1]
 
             Δρθ = ρθ_after - ρθ_before
 
