@@ -34,13 +34,13 @@ using DocStringExtensions: TYPEDSIGNATURES
 
 # Get surface value from a Field or a Number
 @inline surface_value(field::Field, i, j) = @inbounds field[i, j, 1]
-@inline surface_value(x::Number, i, j) = x
+@inline surface_value(x::Number, _i, _j) = x
 
 #####
 ##### Wind speed calculations at staggered locations
 #####
 
-@inline ϕ²(i, j, k, grid, ϕ) = @inbounds ϕ[i, j, k]^2
+@inline ϕ²(i, j, k, _grid, ϕ) = @inbounds ϕ[i, j, k]^2
 
 # Wind speed squared at (Face, Center, Center) - for x-momentum flux
 @inline function wind_speed²ᶠᶜᶜ(i, j, grid, fields)
@@ -120,7 +120,7 @@ Base.summary(df::BulkDragFunction) = string("BulkDragFunction(direction=", summa
 const XDBDF = XDirectionBulkDragFunction
 const YDBDF = YDirectionBulkDragFunction
 
-@inline function OceananigansBC.getbc(df::XDBDF, i::Integer, j::Integer, grid::AbstractGrid, clock, fields)
+@inline function OceananigansBC.getbc(df::XDBDF, i::Integer, j::Integer, grid::AbstractGrid, _clock, fields)
     ρu = @inbounds fields.ρu[i, j, 1]
     U² = wind_speed²ᶠᶜᶜ(i, j, grid, fields)
     U = sqrt(U²)
@@ -129,7 +129,7 @@ const YDBDF = YDirectionBulkDragFunction
     return - Cᴰ * Ũ² * ρu / U * (U > 0)
 end
 
-@inline function OceananigansBC.getbc(df::YDBDF, i::Integer, j::Integer, grid::AbstractGrid, clock, fields)
+@inline function OceananigansBC.getbc(df::YDBDF, i::Integer, j::Integer, grid::AbstractGrid, _clock, fields)
     ρv = @inbounds fields.ρv[i, j, 1]
     U² = wind_speed²ᶜᶠᶜ(i, j, grid, fields)
     U = sqrt(U²)
@@ -195,7 +195,7 @@ Base.summary(bf::BulkSensibleHeatFluxFunction) =
 
 # getbc for BulkSensibleHeatFluxFunction
 @inline function OceananigansBC.getbc(bf::BulkSensibleHeatFluxFunction, i::Integer, j::Integer,
-                                      grid::AbstractGrid, clock, fields)
+                                      grid::AbstractGrid, _clock, fields)
     T₀ = surface_value(bf.surface_temperature, i, j)
     θ = @inbounds fields.θ[i, j, 1]
     Δθ = θ - T₀
@@ -272,7 +272,7 @@ Base.summary(bf::BulkVaporFluxFunction) =
 const BVFF = BulkVaporFluxFunction
 
 # getbc for BulkVaporFluxFunction
-@inline function OceananigansBC.getbc(bf::BVFF, i::Integer, j::Integer, grid::AbstractGrid, clock, fields)
+@inline function OceananigansBC.getbc(bf::BVFF, i::Integer, j::Integer, grid::AbstractGrid, _clock, fields)
     constants = bf.thermodynamic_constants
     surface = bf.surface
     T₀ = surface_value(bf.surface_temperature, i, j)
@@ -447,13 +447,13 @@ function regularize_atmosphere_field_bcs(fbcs::FieldBoundaryConditions, loc, gri
 end
 
 # Default: pass through unchanged
-regularize_atmosphere_boundary_condition(bc, loc, grid, surface_pressure, constants) = bc
+regularize_atmosphere_boundary_condition(bc, _loc, _grid, _surface_pressure, _constants) = bc
 
 # Regularize BulkDrag: infer direction from field location if needed
 function regularize_atmosphere_boundary_condition(bc::BoundaryCondition{<:Flux, <:BulkDragFunction{Nothing}},
-                                                  loc, grid, surface_pressure, constants)
+                                                  loc, _grid, _surface_pressure, _constants)
     df = bc.condition
-    LX, LY, LZ = loc
+    LX, LY, _LZ = loc
 
     # Determine direction from location: Face in x means x-momentum, Face in y means y-momentum
     if LX isa Face
@@ -470,13 +470,13 @@ end
 
 # BulkDrag with direction already set: pass through
 regularize_atmosphere_boundary_condition(bc::BoundaryCondition{<:Flux, <:XDirectionBulkDragFunction},
-                                         loc, grid, surface_pressure, constants) = bc
+                                         _loc, _grid, _surface_pressure, _constants) = bc
 regularize_atmosphere_boundary_condition(bc::BoundaryCondition{<:Flux, <:YDirectionBulkDragFunction},
-                                         loc, grid, surface_pressure, constants) = bc
+                                         _loc, _grid, _surface_pressure, _constants) = bc
 
 # Regularize BulkSensibleHeatFlux: populate surface_pressure and thermodynamic_constants
 function regularize_atmosphere_boundary_condition(bc::BulkSensibleHeatFluxBoundaryCondition,
-                                                  loc, grid, surface_pressure, constants)
+                                                  _loc, grid, surface_pressure, constants)
     bf = bc.condition
     T₀ = materialize_surface_field(bf.surface_temperature, grid)
     new_bf = BulkSensibleHeatFluxFunction(bf.coefficient, bf.gustiness, T₀, surface_pressure, constants)
@@ -485,7 +485,7 @@ end
 
 # Regularize BulkVaporFlux: populate surface_pressure, thermodynamic_constants, and surface
 function regularize_atmosphere_boundary_condition(bc::BulkVaporFluxBoundaryCondition,
-                                                  loc, grid, surface_pressure, constants)
+                                                  _loc, grid, surface_pressure, constants)
     bf = bc.condition
     T₀ = materialize_surface_field(bf.surface_temperature, grid)
     surface = PlanarLiquidSurface()
@@ -498,8 +498,8 @@ end
 #####
 
 # Helper to convert functions to Fields
-materialize_surface_field(f::Field, grid) = f
-materialize_surface_field(f::Number, grid) = f
+materialize_surface_field(f::Field, _grid) = f
+materialize_surface_field(f::Number, _grid) = f
 
 function materialize_surface_field(f::Function, grid)
     field = Field{Center, Center, Nothing}(grid)

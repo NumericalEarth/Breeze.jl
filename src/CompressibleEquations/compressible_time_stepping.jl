@@ -7,7 +7,7 @@
 #####
 
 # No default initialization for compressible models
-AtmosphereModels.initialize_model_thermodynamics!(model::CompressibleModel) = nothing
+AtmosphereModels.initialize_model_thermodynamics!(::CompressibleModel) = nothing
 
 #####
 ##### Pressure correction (no-op for compressible dynamics)
@@ -18,14 +18,14 @@ $(TYPEDSIGNATURES)
 
 No-op for `CompressibleDynamics` - pressure is computed diagnostically from the equation of state.
 """
-TimeSteppers.compute_pressure_correction!(model::CompressibleModel, Δt) = nothing
+TimeSteppers.compute_pressure_correction!(_model::CompressibleModel, _Δt) = nothing
 
 """
 $(TYPEDSIGNATURES)
 
 No-op for `CompressibleDynamics` - no pressure projection is needed.
 """
-TimeSteppers.make_pressure_correction!(model::CompressibleModel, Δt) = nothing
+TimeSteppers.make_pressure_correction!(_model::CompressibleModel, _Δt) = nothing
 
 #####
 ##### Pressure solver (no-op)
@@ -36,7 +36,7 @@ $(TYPEDSIGNATURES)
 
 No-op for `CompressibleDynamics` - pressure is computed from the equation of state, not solved.
 """
-solve_for_pressure!(model::CompressibleModel) = nothing
+solve_for_pressure!(_model::CompressibleModel) = nothing
 
 #####
 ##### Auxiliary dynamics variables (temperature and pressure for compressible)
@@ -125,7 +125,7 @@ end
 
 # Dispatch on formulation type for the coupled temperature-pressure computation
 
-@inline function temperature_and_pressure(i, j, k, grid,
+@inline function temperature_and_pressure(i, j, k, _grid,
                                           formulation::LiquidIcePotentialTemperatureFormulation,
                                           dynamics, ρ, Rᵐ, γ, q, constants)
     # Note: potential_temperature_density is ρθ (prognostic), potential_temperature is θ (diagnostic)

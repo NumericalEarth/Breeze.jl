@@ -49,7 +49,7 @@ end
     return g * ∂z_ϑ / ϑ
 end
 
-@inline function virtual_potential_temperature(i, j, k, grid, constants, dynamics, T, qᵗ)
+@inline function virtual_potential_temperature(i, j, k, _grid, constants, dynamics, T, qᵗ)
     pᵣ_field = dynamics_pressure(dynamics)
     @inbounds pᵣ = pᵣ_field[i, j, k]
     pˢᵗ = standard_pressure(dynamics)

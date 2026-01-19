@@ -121,7 +121,7 @@ end
 
 AtmosphereModels.prognostic_momentum_field_names(::PrescribedDynamics) = ()
 AtmosphereModels.additional_dynamics_field_names(::PrescribedDynamics) = ()
-AtmosphereModels.validate_velocity_boundary_conditions(::PrescribedDynamics, bcs) = nothing
+AtmosphereModels.validate_velocity_boundary_conditions(::PrescribedDynamics, _bcs) = nothing
 AtmosphereModels.velocity_boundary_condition_names(::PrescribedDynamics) = (:u, :v, :w)
 
 # Prescribed density → no prognostic density; otherwise ρ is prognostic
@@ -132,7 +132,7 @@ AtmosphereModels.dynamics_prognostic_fields(::PrescribedDynamics{<:Any, <:Prescr
 AtmosphereModels.dynamics_prognostic_fields(d::PrescribedDynamics) = (; ρ=dynamics_density(d))
 
 # Pressure accessors
-AtmosphereModels.dynamics_pressure_solver(::PrescribedDynamics, grid) = nothing
+AtmosphereModels.dynamics_pressure_solver(::PrescribedDynamics, _grid) = nothing
 AtmosphereModels.dynamics_pressure(d::PrescribedDynamics) = d.pressure
 AtmosphereModels.mean_pressure(d::PrescribedDynamics) = d.pressure
 AtmosphereModels.pressure_anomaly(::PrescribedDynamics) = ZeroField()
@@ -154,8 +154,8 @@ function AtmosphereModels.materialize_dynamics(d::PrescribedDynamics{Div}, grid,
     return PrescribedDynamics{Div}(density, pressure, p₀, pˢᵗ)
 end
 
-materialize_density(density::AbstractField, grid, bcs) = density
-materialize_pressure(pressure::AbstractField, args...) = pressure
+materialize_density(density::AbstractField, _grid, _bcs) = density
+materialize_pressure(pressure::AbstractField, _args...) = pressure
 
 function materialize_density(density::PrescribedDensity, grid, bcs)
     ρ = materialize_density(density.density, grid, bcs)
@@ -223,7 +223,7 @@ function AtmosphereModels.materialize_velocities(velocities::PrescribedVelocityF
 end
 
 wrap_velocity(X, Y, Z, f::Function, grid; kwargs...) = FunctionField{X, Y, Z}(f, grid; kwargs...)
-wrap_velocity(X, Y, Z, f, grid; kwargs...) = field((X, Y, Z), f, grid)
+wrap_velocity(X, Y, Z, f, grid; _kwargs...) = field((X, Y, Z), f, grid)
 
 #####
 ##### Adapt and architecture transfer

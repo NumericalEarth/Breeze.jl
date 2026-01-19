@@ -65,13 +65,13 @@ function Base.show(io::IO, ft::NamedGeostrophicForcingTuple)
     print(io, "    └── geostrophic_momentum: ", prettysummary(forcing.geostrophic_momentum))
 end
 
-@inline function (forcing::XGeostrophicForcing)(i, j, k, grid, clock, fields)
+@inline function (forcing::XGeostrophicForcing)(i, j, k, _grid, _clock, _fields)
     f = forcing.coriolis_parameter
     ρvᵍ = @inbounds forcing.geostrophic_momentum[i, j, k]
     return - f * ρvᵍ
 end
 
-@inline function (forcing::YGeostrophicForcing)(i, j, k, grid, clock, fields)
+@inline function (forcing::YGeostrophicForcing)(i, j, k, _grid, _clock, _fields)
     f = forcing.coriolis_parameter
     ρuᵍ = @inbounds forcing.geostrophic_momentum[i, j, k]
     return + f * ρuᵍ
@@ -124,7 +124,7 @@ end
 ##### Materialization functions for geostrophic forcings
 #####
 
-function AtmosphereModels.materialize_atmosphere_model_forcing(forcing::GeostrophicForcing, field, name, model_field_names, context)
+function AtmosphereModels.materialize_atmosphere_model_forcing(forcing::GeostrophicForcing, field, _name, _model_field_names, context)
     grid = field.grid
 
     forcing_uᵍ = forcing.geostrophic_momentum

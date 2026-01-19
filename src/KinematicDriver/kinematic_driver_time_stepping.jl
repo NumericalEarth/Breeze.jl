@@ -20,7 +20,7 @@ AtmosphereModels.initialize_model_thermodynamics!(::KinematicModel) = nothing
 #####
 
 AtmosphereModels.compute_velocities!(::KinematicModel) = nothing
-AtmosphereModels.compute_momentum_tendencies!(::KinematicModel, model_fields) = nothing
+AtmosphereModels.compute_momentum_tendencies!(::KinematicModel, _model_fields) = nothing
 
 #####
 ##### Setting velocities for kinematic models
@@ -34,19 +34,19 @@ AtmosphereModels.set_velocity!(model::KinematicModel, name::Symbol, value) =
 set_velocity!(velocity::AbstractField, value) = set!(velocity, value)
 
 # FunctionFields (from PrescribedVelocityFields): cannot be set
-set_velocity!(::FunctionField, value) =
+set_velocity!(::FunctionField, _value) =
     throw(ArgumentError("Cannot set velocity component of PrescribedVelocityFields."))
 
 # No momentum in kinematic models
-AtmosphereModels.set_momentum!(::KinematicModel, name::Symbol, value) =
+AtmosphereModels.set_momentum!(::KinematicModel, name::Symbol, _value) =
     throw(ArgumentError("Cannot set momentum component '$name' of a KinematicModel."))
 
 #####
 ##### Pressure correction: no-op for kinematic dynamics
 #####
 
-TimeSteppers.compute_pressure_correction!(::KinematicModel, Δt) = nothing
-TimeSteppers.make_pressure_correction!(::KinematicModel, Δt) = nothing
+TimeSteppers.compute_pressure_correction!(::KinematicModel, _Δt) = nothing
+TimeSteppers.make_pressure_correction!(::KinematicModel, _Δt) = nothing
 
 #####
 ##### Density tendency (prognostic density only)
@@ -65,7 +65,7 @@ TimeSteppers.make_pressure_correction!(::KinematicModel, Δt) = nothing
 end
 
 # Default: no divergence correction
-@inline AtmosphereModels.c_div_ρU(i, j, k, grid, ::PrescribedDynamics, velocities, c) = zero(grid)
+@inline AtmosphereModels.c_div_ρU(_i, _j, _k, grid, ::PrescribedDynamics, _velocities, _c) = zero(grid)
 
 # With divergence correction: c * ∇·(ρU)
 @inline function AtmosphereModels.c_div_ρU(i, j, k, grid, dynamics::PrescribedDynamics{true}, velocities, c)

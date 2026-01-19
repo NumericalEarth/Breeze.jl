@@ -20,12 +20,12 @@ where `ρ` is the prognostic density field.
 Note: In the compressible formulation, the full gravitational force appears directly
 in the momentum equation without subtraction of a reference state.
 """
-@inline function AtmosphereModels.buoyancy_forceᶜᶜᶜ(i, j, k, grid,
+@inline function AtmosphereModels.buoyancy_forceᶜᶜᶜ(i, j, k, _grid,
                                                     dynamics::CompressibleDynamics,
-                                                    temperature,
-                                                    specific_moisture,
-                                                    microphysics,
-                                                    microphysical_fields,
+                                                    _temperature,
+                                                    _specific_moisture,
+                                                    _microphysics,
+                                                    _microphysical_fields,
                                                     constants)
 
     ρ_field = dynamics_density(dynamics)

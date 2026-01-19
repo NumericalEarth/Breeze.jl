@@ -133,12 +133,14 @@ The equilibrated surface is always a planar liquid surface.
 struct WarmPhaseEquilibrium <: AbstractPhaseEquilibrium end
 
 """
-$(TYPEDSIGNATURES)
+    equilibrated_surface(phase_equilibrium::AbstractPhaseEquilibrium, T)
 
 Return the appropriate surface type for computing saturation vapor pressure
 given the phase `equilibrium` model and temperature `T`.
 """
-@inline equilibrated_surface(::WarmPhaseEquilibrium, T) = PlanarLiquidSurface()
+function equilibrated_surface end
+
+@inline equilibrated_surface(::WarmPhaseEquilibrium, _T) = PlanarLiquidSurface()
 
 """
     MixedPhaseEquilibrium(; freezing_temperature=273.15, homogeneous_ice_nucleation_temperature=233.15)
