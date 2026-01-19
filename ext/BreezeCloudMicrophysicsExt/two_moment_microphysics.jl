@@ -13,6 +13,40 @@
 #   - Morrison, H. and Grabowski, W.W. (2008). A novel approach for representing ice
 #     microphysics in models: Description and tests using a kinematic framework.
 #     J. Atmos. Sci., 65, 1528–1548. https://doi.org/10.1175/2007JAS2491.1
+#
+# ## MicrophysicalState pattern
+#
+# Two-moment schemes use state structs (ℳ) to encapsulate local microphysical
+# variables. This enables the same tendency functions to work for both grid-based
+# LES and Lagrangian parcel models.
+#####
+
+using Breeze.AtmosphereModels: AbstractMicrophysicalState
+
+#####
+##### MicrophysicalState struct for two-moment warm-phase microphysics
+#####
+
+"""
+    WarmPhaseTwoMomentState{FT} <: AbstractMicrophysicalState{FT}
+
+Microphysical state for warm-phase two-moment bulk microphysics.
+
+Contains the local mixing ratios and number concentrations needed to compute
+tendencies for cloud liquid and rain following the Seifert-Beheng 2006 scheme.
+
+# Fields
+- `qᶜˡ`: Cloud liquid mixing ratio (kg/kg)
+- `nᶜˡ`: Cloud liquid number per unit mass (1/kg)
+- `qʳ`: Rain mixing ratio (kg/kg)
+- `nʳ`: Rain number per unit mass (1/kg)
+"""
+struct WarmPhaseTwoMomentState{FT} <: AbstractMicrophysicalState{FT}
+    qᶜˡ :: FT  # cloud liquid mixing ratio
+    nᶜˡ :: FT  # cloud liquid number per unit mass
+    qʳ  :: FT  # rain mixing ratio
+    nʳ  :: FT  # rain number per unit mass
+end
 
 using CloudMicrophysics.Parameters:
     SB2006,
@@ -82,6 +116,28 @@ const TwoMomentCloudMicrophysics = BulkMicrophysics{<:Any, <:CM2MCategories, <:A
 # Warm-phase non-equilibrium with 2M precipitation
 const WarmPhaseNonEquilibrium2M = BulkMicrophysics{<:WarmPhaseNE, <:CM2MCategories, <:Any}
 const WPNE2M = WarmPhaseNonEquilibrium2M
+
+#####
+##### MicrophysicalState construction from fields
+#####
+
+# Gridless version: takes a NamedTuple of density-weighted scalars
+@inline function AtmosphereModels.microphysical_state(bμp::WPNE2M, ρ, μ, 𝒰)
+    qᶜˡ = μ.ρqᶜˡ / ρ
+    nᶜˡ = μ.ρnᶜˡ / ρ
+    qʳ = μ.ρqʳ / ρ
+    nʳ = μ.ρnʳ / ρ
+    return WarmPhaseTwoMomentState(qᶜˡ, nᶜˡ, qʳ, nʳ)
+end
+
+# Grid-indexed version: extracts from Fields
+@inline function AtmosphereModels.grid_microphysical_state(i, j, k, grid, bμp::WPNE2M, μ, ρ, 𝒰)
+    @inbounds qᶜˡ = μ.qᶜˡ[i, j, k]
+    @inbounds nᶜˡ = μ.nᶜˡ[i, j, k]
+    @inbounds qʳ = μ.qʳ[i, j, k]
+    @inbounds nʳ = μ.nʳ[i, j, k]
+    return WarmPhaseTwoMomentState(qᶜˡ, nᶜˡ, qʳ, nʳ)
+end
 
 """
     TwoMomentCloudMicrophysics(FT = Oceananigans.defaults.FloatType;
@@ -169,8 +225,8 @@ materialize_2m_condensate_formation(::Any, categories) = ConstantRateCondensateF
 ##### Default fallbacks for TwoMomentCloudMicrophysics
 #####
 
-# Default fallback for tendencies that are not explicitly implemented
-@inline AtmosphereModels.microphysical_tendency(i, j, k, grid, bμp::TwoMomentCloudMicrophysics, args...) = zero(grid)
+# Default fallback for tendencies (state-based)
+@inline AtmosphereModels.microphysical_tendency(bμp::TwoMomentCloudMicrophysics, name, ρ, ℳ, 𝒰, constants) = zero(ρ)
 
 # Default fallback for velocities
 @inline AtmosphereModels.microphysical_velocities(bμp::TwoMomentCloudMicrophysics, μ, name) = nothing
@@ -216,7 +272,7 @@ end
 ##### Update microphysical fields (diagnostics + terminal velocities)
 #####
 
-@inline function AtmosphereModels.update_microphysical_fields!(μ, bμp::WPNE2M, i, j, k, grid, ρ, 𝒰, constants)
+@inline function AtmosphereModels.update_microphysical_fields!(μ, i, j, k, grid, bμp::WPNE2M, ρ, 𝒰, constants)
     q = 𝒰.moisture_mass_fractions
     categories = bμp.categories
 
@@ -235,12 +291,12 @@ end
         μ.nʳ[i, j, k] = nʳ
     end
 
-    update_2m_terminal_velocities!(μ, bμp, categories, i, j, k, ρ)
+    update_2m_terminal_velocities!(μ, i, j, k, bμp, categories, ρ)
 
     return nothing
 end
 
-@inline function update_2m_terminal_velocities!(μ, bμp, categories, i, j, k, ρ)
+@inline function update_2m_terminal_velocities!(μ, i, j, k, bμp, categories, ρ)
     @inbounds qᶜˡ = μ.qᶜˡ[i, j, k]
     @inbounds nᶜˡ = μ.nᶜˡ[i, j, k]
     @inbounds qʳ = μ.qʳ[i, j, k]
@@ -285,10 +341,17 @@ end
 ##### Moisture fraction computation
 #####
 
-@inline function AtmosphereModels.compute_moisture_fractions(i, j, k, grid, bμp::WPNE2M, ρ, qᵗ, μ)
+@inline function AtmosphereModels.grid_moisture_fractions(i, j, k, grid, bμp::WPNE2M, ρ, qᵗ, μ)
     qᶜˡ = @inbounds μ.ρqᶜˡ[i, j, k] / ρ
     qʳ = @inbounds μ.ρqʳ[i, j, k] / ρ
     qˡ = qᶜˡ + qʳ
+    qᵛ = qᵗ - qˡ
+    return MoistureMassFractions(qᵛ, qˡ)
+end
+
+# Gridless version for parcel models
+@inline function AtmosphereModels.moisture_fractions(bμp::WPNE2M, ℳ::WarmPhaseTwoMomentState, qᵗ)
+    qˡ = ℳ.qᶜˡ + ℳ.qʳ
     qᵛ = qᵗ - qˡ
     return MoistureMassFractions(qᵛ, qˡ)
 end
@@ -298,7 +361,7 @@ end
 #####
 
 # Non-equilibrium: no adjustment (cloud liquid is prognostic)
-@inline AtmosphereModels.maybe_adjust_thermodynamic_state(i, j, k, 𝒰₀, bμp::WPNE2M, args...) = 𝒰₀
+@inline AtmosphereModels.maybe_adjust_thermodynamic_state(𝒰₀, bμp::WPNE2M, qᵗ, constants) = 𝒰₀
 
 #####
 ##### Microphysical velocities for advection
@@ -336,17 +399,17 @@ end
 const τⁿᵘᵐ_2m = 10.0  # seconds
 
 #####
-##### Cloud liquid mass tendency (ρqᶜˡ)
+##### Cloud liquid mass tendency (ρqᶜˡ) - state-based
 #####
 
-@inline function AtmosphereModels.microphysical_tendency(i, j, k, grid, bμp::WPNE2M, ::Val{:ρqᶜˡ}, ρ, μ, 𝒰, constants)
+@inline function AtmosphereModels.microphysical_tendency(bμp::WPNE2M, ::Val{:ρqᶜˡ}, ρ, ℳ::WarmPhaseTwoMomentState, 𝒰, constants)
     categories = bμp.categories
     sb = categories.warm_processes
     τᶜˡ = liquid_relaxation_timescale(bμp.cloud_formation, categories)
 
-    @inbounds qᶜˡ = μ.qᶜˡ[i, j, k]
-    @inbounds qʳ = μ.qʳ[i, j, k]
-    @inbounds nᶜˡ = μ.nᶜˡ[i, j, k]
+    qᶜˡ = ℳ.qᶜˡ
+    qʳ = ℳ.qʳ
+    nᶜˡ = ℳ.nᶜˡ
 
     # Number density [1/m³]
     Nᶜˡ = ρ * max(0, nᶜˡ)
@@ -381,16 +444,16 @@ const τⁿᵘᵐ_2m = 10.0  # seconds
 end
 
 #####
-##### Cloud liquid number tendency (ρnᶜˡ)
+##### Cloud liquid number tendency (ρnᶜˡ) - state-based
 #####
 
-@inline function AtmosphereModels.microphysical_tendency(i, j, k, grid, bμp::WPNE2M, ::Val{:ρnᶜˡ}, ρ, μ, 𝒰, constants)
+@inline function AtmosphereModels.microphysical_tendency(bμp::WPNE2M, ::Val{:ρnᶜˡ}, ρ, ℳ::WarmPhaseTwoMomentState, 𝒰, constants)
     categories = bμp.categories
     sb = categories.warm_processes
 
-    @inbounds qᶜˡ = μ.qᶜˡ[i, j, k]
-    @inbounds qʳ = μ.qʳ[i, j, k]
-    @inbounds nᶜˡ = μ.nᶜˡ[i, j, k]
+    qᶜˡ = ℳ.qᶜˡ
+    qʳ = ℳ.qʳ
+    nᶜˡ = ℳ.nᶜˡ
 
     # Number density [1/m³]
     Nᶜˡ = ρ * max(0, nᶜˡ)
@@ -421,17 +484,17 @@ end
 end
 
 #####
-##### Rain mass tendency (ρqʳ)
+##### Rain mass tendency (ρqʳ) - state-based
 #####
 
-@inline function AtmosphereModels.microphysical_tendency(i, j, k, grid, bμp::WPNE2M, ::Val{:ρqʳ}, ρ, μ, 𝒰, constants)
+@inline function AtmosphereModels.microphysical_tendency(bμp::WPNE2M, ::Val{:ρqʳ}, ρ, ℳ::WarmPhaseTwoMomentState, 𝒰, constants)
     categories = bμp.categories
     sb = categories.warm_processes
 
-    @inbounds qᶜˡ = μ.qᶜˡ[i, j, k]
-    @inbounds qʳ = μ.qʳ[i, j, k]
-    @inbounds nᶜˡ = μ.nᶜˡ[i, j, k]
-    @inbounds nʳ = μ.nʳ[i, j, k]
+    qᶜˡ = ℳ.qᶜˡ
+    qʳ = ℳ.qʳ
+    nᶜˡ = ℳ.nᶜˡ
+    nʳ = ℳ.nʳ
 
     # Number densities [1/m³]
     Nᶜˡ = ρ * max(0, nᶜˡ)
@@ -466,17 +529,17 @@ end
 end
 
 #####
-##### Rain number tendency (ρnʳ)
+##### Rain number tendency (ρnʳ) - state-based
 #####
 
-@inline function AtmosphereModels.microphysical_tendency(i, j, k, grid, bμp::WPNE2M, ::Val{:ρnʳ}, ρ, μ, 𝒰, constants)
+@inline function AtmosphereModels.microphysical_tendency(bμp::WPNE2M, ::Val{:ρnʳ}, ρ, ℳ::WarmPhaseTwoMomentState, 𝒰, constants)
     categories = bμp.categories
     sb = categories.warm_processes
 
-    @inbounds qᶜˡ = μ.qᶜˡ[i, j, k]
-    @inbounds qʳ = μ.qʳ[i, j, k]
-    @inbounds nᶜˡ = μ.nᶜˡ[i, j, k]
-    @inbounds nʳ = μ.nʳ[i, j, k]
+    qᶜˡ = ℳ.qᶜˡ
+    qʳ = ℳ.qʳ
+    nᶜˡ = ℳ.nᶜˡ
+    nʳ = ℳ.nʳ
 
     # Number densities [1/m³]
     Nᶜˡ = ρ * max(0, nᶜˡ)

@@ -147,6 +147,24 @@ Return the names of prognostic microphysical fields for the Kessler scheme.
 """
 AtmosphereModels.prognostic_field_names(::DCMIP2016KM) = (:ρqᶜˡ, :ρqʳ)
 
+# Gridless microphysical state: convert density-weighted prognostics to specific quantities.
+# The grid-indexed version is a generic wrapper that extracts μ from fields and calls this.
+@inline function AtmosphereModels.microphysical_state(::DCMIP2016KM, ρ, μ, 𝒰)
+    qᶜˡ = μ.ρqᶜˡ / ρ
+    qʳ = μ.ρqʳ / ρ
+    return AtmosphereModels.WarmRainState(qᶜˡ, qʳ)
+end
+
+# Disambiguation for μ::Nothing (no prognostics yet)
+@inline function AtmosphereModels.microphysical_state(::DCMIP2016KM, ρ, ::Nothing, 𝒰)
+    return AtmosphereModels.NothingMicrophysicalState(typeof(ρ))
+end
+
+# Disambiguation for empty NamedTuple
+@inline function AtmosphereModels.microphysical_state(::DCMIP2016KM, ρ, ::NamedTuple{(), Tuple{}}, 𝒰)
+    return AtmosphereModels.NothingMicrophysicalState(typeof(ρ))
+end
+
 """
 $(TYPEDSIGNATURES)
 
@@ -184,23 +202,9 @@ end
 ##### Interface functions for AtmosphereModel integration
 #####
 
-"""
-$(TYPEDSIGNATURES)
-
-Compute moisture mass fractions at grid point `(i, j, k)` for the thermodynamic state.
-
-Water vapor is diagnosed as \$q^v = q^t - q^{cl} - q^r\$.
-Returns `MoistureMassFractions(qᵛ, qˡ)` where \$q^l = q^{cl} + q^r\$ is the total liquid mass fraction.
-"""
-@inline function AtmosphereModels.compute_moisture_fractions(i, j, k, grid, ::DCMIP2016KM, ρ, qᵗ, μ)
-    @inbounds begin
-        qᶜˡ = μ.ρqᶜˡ[i, j, k] / ρ
-        qʳ  = μ.ρqʳ[i, j, k] / ρ
-    end
-    qˡ = qᶜˡ + qʳ
-    qᵛ = qᵗ - qˡ
-    return MoistureMassFractions(qᵛ, qˡ)
-end
+# Note: grid_moisture_fractions uses the generic implementation.
+# microphysical_state is called with 𝒰 = nothing, which works because
+# DCMIP2016Kessler's microphysical_state doesn't use 𝒰.
 
 """
 $(TYPEDSIGNATURES)
@@ -209,7 +213,7 @@ Return the thermodynamic state without adjustment.
 
 The Kessler scheme performs its own saturation adjustment internally via the kernel.
 """
-@inline AtmosphereModels.maybe_adjust_thermodynamic_state(i, j, k, 𝒰, ::DCMIP2016KM, ρᵣ, μ, qᵗ, constants) = 𝒰
+@inline AtmosphereModels.maybe_adjust_thermodynamic_state(𝒰, ::DCMIP2016KM, qᵗ, constants) = 𝒰
 
 """
 $(TYPEDSIGNATURES)
@@ -228,7 +232,7 @@ Return zero tendency.
 All microphysical source/sink terms are applied directly to the prognostic fields via the
 `microphysics_model_update!` kernel, bypassing the standard tendency interface.
 """
-@inline AtmosphereModels.microphysical_tendency(i, j, k, grid, ::DCMIP2016KM, name, ρ, μ, 𝒰, constants) = zero(grid)
+@inline AtmosphereModels.microphysical_tendency(::DCMIP2016KM, name, ρ, ℳ, 𝒰, constants) = zero(ρ)
 
 #####
 ##### Precipitation rate and surface flux diagnostics
@@ -724,14 +728,22 @@ end
 end
 
 #####
-##### Diagnostic field update
+##### update_microphysical_auxiliaries! for DCMIP2016 Kessler
 #####
-@inline function AtmosphereModels.update_microphysical_fields!(μ, ::DCMIP2016KM, i, j, k, grid, ρ, 𝒰, constants)
-    qᵗ = total_specific_moisture(𝒰)
-    @inbounds begin
-        μ.qᶜˡ[i, j, k] = μ.ρqᶜˡ[i, j, k] / ρ
-        μ.qʳ[i, j, k]  = μ.ρqʳ[i, j, k] / ρ
-        μ.qᵛ[i, j, k]  = qᵗ - μ.qᶜˡ[i, j, k] - μ.qʳ[i, j, k]
-    end
+#
+# DCMIP2016 has specific auxiliary fields (no qˡ total liquid field).
+# Rain sedimentation is handled by the internal kernel, not microphysical_velocities.
+
+@inline function AtmosphereModels.update_microphysical_auxiliaries!(μ, i, j, k, grid, ::DCMIP2016KM, ℳ::AtmosphereModels.WarmRainState, ρ, 𝒰, constants)
+    # State fields
+    @inbounds μ.qᶜˡ[i, j, k] = ℳ.qᶜˡ
+    @inbounds μ.qʳ[i, j, k] = ℳ.qʳ
+
+    # Vapor from thermodynamic state
+    @inbounds μ.qᵛ[i, j, k] = 𝒰.moisture_mass_fractions.vapor
+
+    # Note: DCMIP2016 does NOT have a qˡ (total liquid) field
+    # Rain sedimentation is handled internally, not via microphysical_velocities
+
     return nothing
 end
