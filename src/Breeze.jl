@@ -76,7 +76,9 @@ export
     SubsidenceForcing,
 
     # TimeSteppers
-    SSPRungeKutta3
+    SSPRungeKutta3,
+    AcousticSSPRungeKutta3,
+    AcousticSubstepper
 
 using Oceananigans: Oceananigans, @at, AnisotropicMinimumDissipation, Average,
                     AveragedTimeInterval, BackgroundField, BetaPlane, Bounded,
@@ -153,7 +155,7 @@ include("AnelasticEquations/AnelasticEquations.jl")
 using .AnelasticEquations: AnelasticDynamics, AnelasticModel
 
 include("CompressibleEquations/CompressibleEquations.jl")
-using .CompressibleEquations: CompressibleDynamics, CompressibleModel
+using .CompressibleEquations: CompressibleDynamics, CompressibleModel, AcousticSubstepper
 
 include("KinematicDriver/KinematicDriver.jl")
 using .KinematicDriver: PrescribedDensity, PrescribedDynamics, KinematicModel
