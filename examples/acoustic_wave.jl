@@ -154,13 +154,13 @@ fig = Figure(size = (900, 600), fontsize = 12)
 axρ = Axis(fig[1, 2]; aspect = 5, ylabel = "z (m)")
 axw = Axis(fig[2, 2]; aspect = 5, ylabel = "z (m)")
 axu = Axis(fig[3, 2]; aspect = 5, xlabel = "x (m)", ylabel = "z (m)")
-axR = Axis(fig[1, 1]; xlabel = "⟨ρ⟩ (kg/m³)", limits = (extrema(Rts), nothing))
+axR = Axis(fig[1, 1]; xlabel = "⟨ρ⟩ (kg/m³)")
 axW = Axis(fig[2, 1]; xlabel = "⟨w²⟩ (m²/s²)", limits = (extrema(W²ts), nothing))
 axU = Axis(fig[3, 1]; xlabel = "⟨u⟩ (m/s)")
 
 hidexdecorations!(axρ)
 hidexdecorations!(axw)
-colsize!(fig.layout, 1, Relative(0.1))
+colsize!(fig.layout, 1, Relative(0.2))
 
 n = Observable(Nt)
 ρ′n = @lift ρ′ts[$n]
