@@ -306,6 +306,7 @@ slice_outputs = (
 filename = "rico_slices.jld2"
 output_interval = 20seconds
 simulation.output_writers[:slices] = JLD2Writer(model, slice_outputs; filename,
+                                                including = [:grid],
                                                 schedule = TimeInterval(output_interval),
                                                 overwrite_existing = true)
 
