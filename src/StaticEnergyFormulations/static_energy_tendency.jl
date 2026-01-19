@@ -69,6 +69,7 @@ end
     closure_buoyancy = AtmosphereModelBuoyancy(dynamics, formulation, constants)
 
     return ( - div_ρUc(i, j, k, grid, advection, ρ_field, velocities, specific_energy)
+             + c_div_ρU(i, j, k, grid, dynamics, velocities, specific_energy)
              + buoyancy_flux
              - ∇_dot_Jᶜ(i, j, k, grid, ρ_field, closure, closure_fields, id, specific_energy, clock, model_fields, closure_buoyancy)
              + microphysical_tendency(i, j, k, grid, microphysics, Val(:ρe), ρ, microphysical_fields, 𝒰, constants)
@@ -217,4 +218,3 @@ end
     @inbounds specific_energy[i, j, k] = e
     @inbounds energy_density[i, j, k] = ρᵣ * e
 end
-

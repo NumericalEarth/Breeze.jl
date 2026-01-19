@@ -2,22 +2,31 @@
 
 Fast, friendly atmosphere simulations on CPUs and GPUs.
 
-Breeze provides software for flexible software package for finite-volume atmosphere simulations on CPUs and GPUs, based on [Oceananigans](https://github.com/CliMA/Oceananigans.jl).
-Like Oceananigans, it provides a radically productive user interface that makes simple simulations easy, and complex, creative simulations possible.
+Breeze is a library for simulating atmospheric flows, convection, clouds, weather, and hurricanes on CPUs and GPUs.
+Much of Breeze's power flows from [Oceananigans](https://github.com/CliMA/Oceananigans.jl), which provides a user interface, grids, fields, solvers, advection schemes, Lagrangian particles, physics, and more.
 
-## Features
+Breeze's [`AtmosphereModel`](@ref Breeze.AtmosphereModels.AtmosphereModel) provides anelastic, compressible, and prescribed (kinematic) dynamics, closures for large eddy simulation, WENO advection schemes, strong stability preserving (SSP) RK3 time-stepping, saturation adjustment microphysics, Kessler microphysics, and one- and two-moment bulk microphysics schemes via an extension to the [Climate Modeling Alliance's](https://clima.caltech.edu/) excellent [CloudMicrophysics.jl](https://github.com/CliMA/CloudMicrophysics.jl) package.
+An extension to [RRTMGP.jl](https://github.com/CliMA/RRTMGP.jl) provides solvers for gray, clear-sky, and all-sky radiative transfer.
+Breeze's examples include single column radiation, idealized thermal bubbles and inertia-gravity waves and Kelvin-Helmholtz, [BOMEX](@cite Siebesma2003) shallow convection, [RICO](@cite vanZanten2011) trade-wind cumulus, mountain waves, and more.
 
-Breeze provides two ways to simulate moist atmospheres:
+Don't hesitate to get in touch on the [NumericalEarth slack](https://join.slack.com/t/numericalearth/shared_invite/zt-3kjcowmpg-B0s3nalWkvZg8IBc~BIJEA) or by opening a new [discussion](https://github.com/NumericalEarth/Breeze.jl/discussions)!
 
-1. An [`AtmosphereModel`](@ref Breeze.AtmosphereModels.AtmosphereModel) which currently supports anelastic approximation following [Pauluis2008](@citet):
-    * `AtmosphereModel` has simple warm-phase saturation adjustment microphysics
-    * `AtmosphereModel` is being rapidly developed and changes day-to-day!
-    * A roadmap is coming soon, and will include radiation, bulk, bin, and superdroplet microphysics, a fully compressible formulation, and more
+## Roadmap and a call to action
 
-2. A [`MoistAirBuoyancy`](@ref) buoyancy implementation that can be used with [Oceananigans](https://clima.github.io/OceananigansDocumentation/stable/)' [`NonhydrostaticModel`](https://clima.github.io/OceananigansDocumentation/stable/appendix/library/#Oceananigans.Models.NonhydrostaticModels.NonhydrostaticModel-Tuple{}) to simulate atmospheric flows with the [Boussinesq approximation](https://en.wikipedia.org/wiki/Boussinesq_approximation_(buoyancy)):
-    * `MoistAirBuoyancy` includes a warm-phase saturation adjustment implementation
-    * Note that our attention is focused on `AtmosphereModel`!
+Our goal is to build a very fast, easy to learn, productive tool for atmospheric research, teaching, and forecasting, as well as a platform for the development of algorithms, numerical methods, parameterizations, microphysical schemes, and atmosphere model components.
+This won't be the effort of a single group, project, or even a single community.
+Such a lofty aim can only be realized by a wide-ranging and sustained collaboration of passionate people.
+Maybe that includes you --- consider it!
+Model development is hard but rewarding, and builds useful skills for a myriad of pursuits.
 
+The goals of the current group of model developers include developing
+
+- ⛈️ **Advanced microphysics**: Predicted Particle Property (P3) bulk microphysics, spectral bin schemes, and Lagrangian superdroplet methods for high-fidelity cloud and precipitation modeling
+- ️🏔 **Acoustic substepping and terrain-following coordinates**: A compressible dynamical core with horizontally explicit, vertically-implicit acoustic substepping that efficiently resolves sound waves in flow over complex topography with smooth [sigma coordinates](https://en.wikipedia.org/wiki/Sigma_coordinate_system)
+- 🔬 **Open boundaries and nesting**: Two-way nesting to support multi-level nested simulations embedded in global atmosphere simulations
+- 🌀 **Coupled atmosphere-ocean simulations**: Support for high-resolution coupled atmosphere-ocean simulations via [ClimaOcean.jl](https://github.com/CliMA/ClimaOcean.jl)
+
+If you have ideas, dreams, or criticisms that can make Breeze and its future better, don't hesitate to speak up by [opening issues](https://github.com/NumericalEarth/Breeze.jl/issues/new/choose) and contributing pull requests.
 
 ## Installation
 
@@ -93,3 +102,19 @@ heatmap(PotentialTemperature(model), colormap=:thermal)
 
     Due to their [chaotic nature](https://en.wikipedia.org/wiki/Chaos_theory), even the smallest numerical differences can cause nonlinear systems, such as atmospheric models, not to be reproducible on different systems, therefore the figures you will get by running the simulations in this manual may not match the figures shown here.
     For more information about this, see the [section about reproducibility](@ref reproducibility).
+
+## Relationship to Oceananigans
+
+Breeze is built on [Oceananigans.jl](https://github.com/CliMA/Oceananigans.jl), an ocean modeling package that provides grids, fields, operators, advection schemes, time-steppers, turbulence closures, and output infrastructure.
+Breeze extends Oceananigans with atmospheric dynamics, thermodynamics, microphysics, and radiation to create a complete atmosphere simulation capability.
+The two packages share a common philosophy: fast, flexible, GPU-native Julia code with a user interface designed for productivity and experimentation.
+To learn these foundational components of Breeze, please see the [Oceananigans documentation](https://clima.github.io/OceananigansDocumentation/stable/).
+
+If you're familiar with Oceananigans, you'll feel right at home with Breeze.
+If you're new to both, Breeze is a great entry point—and the skills you develop transfer directly to ocean and climate modeling with Oceananigans and [ClimaOcean.jl](https://github.com/CliMA/ClimaOcean.jl).
+
+## Citing
+
+If you use Breeze for research, teaching, or fun, we'd be grateful if you give credit by citing the corresponding Zenodo record, e.g.,
+
+> Wagner, G. L. et al. (2026). NumericalEarth/Breeze.jl. Zenodo. DOI:[10.5281/zenodo.18050353](https://doi.org/10.5281/zenodo.18050353)

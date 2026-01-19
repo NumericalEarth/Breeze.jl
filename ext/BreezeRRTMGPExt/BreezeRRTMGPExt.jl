@@ -15,7 +15,7 @@ using Oceananigans.Fields: ZFaceField
 
 # RRTMGP imports (external types - cannot modify)
 #   GrayAtmosphericState: atmospheric state arrays (t_lay, p_lay, t_lev, p_lev, z_lev, t_sfc)
-#   NoScatLWRTE, NoScatSWRTE: longwave/shortwave RTE solvers  
+#   NoScatLWRTE, NoScatSWRTE: longwave/shortwave RTE solvers
 #   FluxLW, FluxSW: flux storage (flux_up, flux_dn, flux_net, flux_dn_dir)
 #   RRTMGPParameters: physical constants for RRTMGP
 
@@ -76,4 +76,3 @@ include("clear_sky_radiative_transfer_model.jl")
 include("all_sky_radiative_transfer_model.jl")
 
 end # module
-

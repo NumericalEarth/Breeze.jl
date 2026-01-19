@@ -10,10 +10,14 @@ export
     MoistAirBuoyancy,
     ThermodynamicConstants,
     ReferenceState,
+    surface_density,
     AnelasticDynamics,
     AnelasticModel,
     CompressibleDynamics,
     CompressibleModel,
+    PrescribedDensity,
+    PrescribedDynamics,
+    KinematicModel,
     AtmosphereModel,
     StaticEnergyFormulation,
     LiquidIcePotentialTemperatureFormulation,
@@ -30,7 +34,7 @@ export
     mixture_heat_capacity,
     dynamics_density,
     dynamics_pressure,
-    
+
     # Diagnostics
     compute_hydrostatic_pressure!,
     PotentialTemperature,
@@ -150,6 +154,9 @@ using .AnelasticEquations: AnelasticDynamics, AnelasticModel
 
 include("CompressibleEquations/CompressibleEquations.jl")
 using .CompressibleEquations: CompressibleDynamics, CompressibleModel
+
+include("KinematicDriver/KinematicDriver.jl")
+using .KinematicDriver: PrescribedDensity, PrescribedDynamics, KinematicModel
 
 include("Microphysics/Microphysics.jl")
 using .Microphysics

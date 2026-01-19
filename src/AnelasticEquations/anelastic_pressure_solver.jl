@@ -102,4 +102,3 @@ end
     δ = divᶜᶜᶜ(i, j, k, grid, ρu, ρv, ρw)
     @inbounds rhs[i, j, k] = active * Δzᶜᶜᶜ(i, j, k, grid) * δ / Δt
 end
-
