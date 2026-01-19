@@ -3,7 +3,9 @@
 #####
 
 using Oceananigans
+using Oceananigans.Units: kilometers, minutes
 using Breeze
+using CloudMicrophysics
 using Breeze.ParcelModels:
     ParcelDynamics,
     ParcelModel,
@@ -300,7 +302,6 @@ end
 #####
 
 using Oceananigans: interpolate
-using Oceananigans.Units: kilometers, minutes
 
 @testset "Adiabatic ascent: parcel temperature matches environment in isentropic atmosphere" begin
     # In an isentropic atmosphere (constant potential temperature θ), a parcel
@@ -394,4 +395,125 @@ end
 
     # Moisture conserved to floating-point precision (minor rounding in RK3)
     @test isapprox(qᵗ_final, qᵗ_initial, rtol=1e-14)
+end
+
+#####
+##### ParcelModel with OneMomentCloudMicrophysics
+#####
+
+BreezeCloudMicrophysicsExt = Base.get_extension(Breeze, :BreezeCloudMicrophysicsExt)
+OneMomentCloudMicrophysics = BreezeCloudMicrophysicsExt.OneMomentCloudMicrophysics
+
+@testset "ParcelModel with OneMomentCloudMicrophysics" begin
+    grid = RectilinearGrid(size=100, z=(0, 10kilometers), topology=(Flat, Flat, Bounded))
+    microphysics = OneMomentCloudMicrophysics()
+    model = AtmosphereModel(grid; dynamics=ParcelDynamics(), microphysics)
+
+    @test model isa ParcelModel
+    @test model.dynamics isa ParcelDynamics
+
+    reference_state = ReferenceState(grid, model.thermodynamic_constants,
+                                     surface_pressure = 101325,
+                                     potential_temperature = 300)
+
+    qᵗ₀ = 0.015
+    Hq = 2500
+    qᵗ(z) = qᵗ₀ * exp(-z / Hq)
+
+    set!(model,
+         θ = reference_state.potential_temperature,
+         p = reference_state.pressure,
+         ρ = reference_state.density,
+         qᵗ = qᵗ,
+         z = 0, w = 1)
+
+    @test model.dynamics.state isa ParcelState
+    @test model.dynamics.state.z ≈ 0.0
+    @test model.dynamics.state.μ !== nothing
+
+    # Check microphysical state is initialized correctly
+    μ = model.dynamics.state.μ
+    @test haskey(μ, :ρqᶜˡ)
+    @test haskey(μ, :ρqʳ)
+
+    # Time step should work
+    simulation = Simulation(model; Δt=1.0, stop_time=5minutes)
+    run!(simulation)
+
+    @test model.dynamics.state.z ≈ 300.0 atol=1.0  # 5 min at 1 m/s = 300m
+    @test model.clock.time ≈ 300.0
+end
+
+@testset "ParcelModel 1M microphysics forms cloud during ascent" begin
+    grid = RectilinearGrid(size=100, z=(0, 10kilometers), topology=(Flat, Flat, Bounded))
+    microphysics = OneMomentCloudMicrophysics()
+    model = AtmosphereModel(grid; dynamics=ParcelDynamics(), microphysics)
+
+    reference_state = ReferenceState(grid, model.thermodynamic_constants,
+                                     surface_pressure = 101325,
+                                     potential_temperature = 300)
+
+    # High initial moisture to ensure supersaturation during ascent
+    qᵗ₀ = 0.015
+    qᵗ(z) = qᵗ₀ * exp(-z / 2500)
+
+    set!(model,
+         θ = reference_state.potential_temperature,
+         p = reference_state.pressure,
+         ρ = reference_state.density,
+         qᵗ = qᵗ,
+         z = 0, w = 1)
+
+    # Verify initial state has zero cloud/rain
+    @test model.dynamics.state.μ.ρqᶜˡ ≈ 0.0
+    @test model.dynamics.state.μ.ρqʳ ≈ 0.0
+
+    # Run long enough for condensation to occur (above LCL)
+    simulation = Simulation(model; Δt=1.0, stop_time=60minutes)
+    run!(simulation)
+
+    # After rising through LCL, cloud liquid should form
+    qᶜˡ_final = model.dynamics.state.μ.ρqᶜˡ / model.dynamics.state.ρ
+    @test qᶜˡ_final > 0  # Cloud should have formed
+
+    # Check final height
+    @test model.dynamics.state.z ≈ 3600.0 atol=10.0  # 60 min at 1 m/s
+end
+
+@testset "ParcelModel 1M microphysics produces rain via autoconversion" begin
+    grid = RectilinearGrid(size=100, z=(0, 10kilometers), topology=(Flat, Flat, Bounded))
+    microphysics = OneMomentCloudMicrophysics()
+    model = AtmosphereModel(grid; dynamics=ParcelDynamics(), microphysics)
+
+    reference_state = ReferenceState(grid, model.thermodynamic_constants,
+                                     surface_pressure = 101325,
+                                     potential_temperature = 300)
+
+    qᵗ₀ = 0.015
+    qᵗ(z) = qᵗ₀ * exp(-z / 2500)
+
+    set!(model,
+         θ = reference_state.potential_temperature,
+         p = reference_state.pressure,
+         ρ = reference_state.density,
+         qᵗ = qᵗ,
+         z = 0, w = 1)
+
+    # Run long enough for cloud formation and autoconversion
+    simulation = Simulation(model; Δt=1.0, stop_time=120minutes)
+    run!(simulation)
+
+    # Extract final microphysical state
+    ρ_final = model.dynamics.state.ρ
+    qᶜˡ_final = model.dynamics.state.μ.ρqᶜˡ / ρ_final
+    qʳ_final = model.dynamics.state.μ.ρqʳ / ρ_final
+
+    # Both cloud and rain should be present after 2 hours of ascent
+    @test qᶜˡ_final > 0  # Cloud liquid present
+    @test qʳ_final > 0   # Rain produced via autoconversion
+
+    # Total water should be conserved (vapor + cloud + rain = initial qᵗ at parcel altitude)
+    q = model.dynamics.state.𝒰.moisture_mass_fractions
+    qᵗ_total = q.vapor + qᶜˡ_final + qʳ_final
+    @test qᵗ_total ≈ model.dynamics.state.qᵗ rtol=1e-10
 end

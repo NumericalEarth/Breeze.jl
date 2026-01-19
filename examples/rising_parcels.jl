@@ -8,8 +8,8 @@
 #
 # 2. **Cloudy ascent with precipitation**: A moist parcel rises through the
 #    lifting condensation level, forming cloud via condensation, then rain via
-#    autoconversion. We use two-moment microphysics [SeifertBeheng2006](@citet)
-#    to track both mass and number concentration.
+#    autoconversion. We use one-moment microphysics with non-equilibrium cloud
+#    formation [Morrison2008novel](@citet) to track cloud liquid and rain mass.
 #
 # The parcel model works with `AtmosphereModel`, using the standard `Simulation` interface.
 
@@ -75,35 +75,27 @@ nothing #hide
 dry_Tₑ = [interpolate((s.z,), model.temperature) for s in dry_snapshots]
 nothing #hide
 
-# ## Part 2: Cloudy parcel with two-moment microphysics
+# ## Part 2: Cloudy parcel with one-moment microphysics
 #
 # Now we simulate a moist parcel that rises through the lifting condensation level (LCL),
-# triggering condensation and eventually precipitation. The two-moment scheme tracks
-# both mass and number concentration, enabling realistic autoconversion rates
-# that depend on droplet size.
-#
-# We initialize with a high droplet number concentration (as if the parcel
-# formed on many CCN) to observe gradual cloud-to-rain conversion.
+# triggering condensation and eventually precipitation. The one-moment scheme tracks
+# cloud liquid and rain mass, using non-equilibrium cloud formation where
+# supersaturation relaxes toward zero on a characteristic timescale (~10 s).
 
 BreezeCloudMicrophysicsExt = Base.get_extension(Breeze, :BreezeCloudMicrophysicsExt)
-TwoMomentCloudMicrophysics = BreezeCloudMicrophysicsExt.TwoMomentCloudMicrophysics
+OneMomentCloudMicrophysics = BreezeCloudMicrophysicsExt.OneMomentCloudMicrophysics
 
-microphysics = TwoMomentCloudMicrophysics()
+microphysics = OneMomentCloudMicrophysics()
 cloudy_model = AtmosphereModel(grid; dynamics=ParcelDynamics(), microphysics)
 
-# Use the same reference state
+# Use the same reference state. The one-moment scheme initializes
+# with zero cloud liquid and rain; condensation begins when supersaturation develops.
 set!(cloudy_model,
      θ = reference_state.potential_temperature,
      p = reference_state.pressure,
      ρ = reference_state.density,
      qᵗ = qᵗ,
      z = 0, w = 1)
-
-# Activate droplets at the surface: the parcel carries potential CCN that activate
-# as it rises and supersaturation develops. We prescribe an initial droplet
-# number concentration that represents aerosol activation.
-nᶜˡ₀ = 100e6  # 100 droplets per mg of air [1/kg]
-cloudy_model.dynamics.state.μ = (; ρqᶜˡ=0.0, ρnᶜˡ=1.2 * nᶜˡ₀, ρqʳ=0.0, ρnʳ=0.0)
 
 cloudy_simulation = Simulation(cloudy_model; Δt=1.0, stop_time=120minutes)
 
@@ -130,8 +122,6 @@ cloudy_T = [temperature(s.𝒰, cloudy_constants) for s in cloudy_snapshots]
 cloudy_qᵛ = [s.𝒰.moisture_mass_fractions.vapor for s in cloudy_snapshots]
 cloudy_qᶜˡ = [s.μ.ρqᶜˡ / s.ρ for s in cloudy_snapshots]
 cloudy_qʳ = [s.μ.ρqʳ / s.ρ for s in cloudy_snapshots]
-cloudy_nᶜˡ = [s.μ.ρnᶜˡ / s.ρ for s in cloudy_snapshots]
-cloudy_nʳ = [s.μ.ρnʳ / s.ρ for s in cloudy_snapshots]
 cloudy_S = [supersaturation(temperature(s.𝒰, cloudy_constants), s.ρ,
                             s.𝒰.moisture_mass_fractions, cloudy_constants,
                             PlanarLiquidSurface()) for s in cloudy_snapshots]
@@ -139,12 +129,12 @@ nothing #hide
 
 # ## Visualization
 #
-# We create a comprehensive figure showing:
+# We create a figure showing:
 # - Dry ascent: adiabatic cooling and approach to saturation
 # - Cloudy ascent: condensation onset, cloud development, and precipitation formation
 
 set_theme!(fontsize=14, linewidth=2.5)
-fig = Figure(size=(1000, 800))
+fig = Figure(size=(1000, 600))
 nothing #hide
 
 # Color palette
@@ -172,7 +162,7 @@ lines!(ax1b, dry_S, dry_z / 1000; color=c_vapor)
 vlines!(ax1b, [0]; color=:gray, linestyle=:dash)
 
 ## Row 2: Cloudy parcel - condensation and cloud formation
-Label(fig[3, 1:2], "Cloudy ascent with two-moment microphysics", fontsize=16)
+Label(fig[3, 1:2], "Cloudy ascent with one-moment microphysics", fontsize=16)
 
 ax2a = Axis(fig[4, 1];
     xlabel = "Mixing ratio (kg/kg)",
@@ -190,38 +180,8 @@ ax2b = Axis(fig[4, 2];
 lines!(ax2b, cloudy_S, cloudy_z / 1000; color=c_vapor)
 vlines!(ax2b, [0]; color=:gray, linestyle=:dash)
 
-## Row 3: Number concentrations and mean droplet size
-ax3a = Axis(fig[5, 1];
-    xlabel = "Number concentration (1/kg)",
-    ylabel = "Height (km)",
-    xscale = log10,
-    title = "Number concentration evolution")
-lines!(ax3a, cloudy_nᶜˡ, cloudy_z / 1000; color=c_cloud, label="Cloud nᶜˡ")
-lines!(ax3a, cloudy_nʳ, cloudy_z / 1000; color=c_rain, label="Rain nʳ")
-axislegend(ax3a; position=:rt)
-
-# Mean droplet mass: q/n gives mass per droplet (kg)
-mean_cloud_mass = cloudy_qᶜˡ ./ max.(cloudy_nᶜˡ, 1e-20)
-mean_rain_mass = cloudy_qʳ ./ max.(cloudy_nʳ, 1e-20)
-
-ax3b = Axis(fig[5, 2];
-    xlabel = "Mean droplet mass (kg)",
-    ylabel = "Height (km)",
-    title = "Mean droplet size evolution")
-
-cloud_mask = cloudy_qᶜˡ .> 1e-10
-rain_mask = cloudy_qʳ .> 1e-10
-
-if any(cloud_mask)
-    lines!(ax3b, mean_cloud_mass[cloud_mask], cloudy_z[cloud_mask] / 1000; color=c_cloud, label="Cloud")
-end
-if any(rain_mask)
-    lines!(ax3b, mean_rain_mass[rain_mask], cloudy_z[rain_mask] / 1000; color=c_rain, label="Rain")
-end
-axislegend(ax3b; position=:rt)
-
-rowsize!(fig.layout, 1, Relative(0.04))
-rowsize!(fig.layout, 3, Relative(0.04))
+rowsize!(fig.layout, 1, Relative(0.05))
+rowsize!(fig.layout, 3, Relative(0.05))
 
 fig
 
@@ -235,28 +195,21 @@ fig
 # 2. Total moisture is conserved (in the absence of microphysics)
 #
 #
-# ### Cloudy ascent (middle and bottom rows)
+# ### Cloudy ascent (bottom row)
 #
-# With two-moment microphysics, the parcel exhibits rich cloud physics:
+# With one-moment non-equilibrium microphysics, the parcel exhibits key cloud physics:
 #
 # 1. **Condensation onset**: As the parcel rises and cools, supersaturation
 #    develops. The non-equilibrium scheme relaxes supersaturation by converting
-#    vapor to cloud liquid, with a timescale of ~10 s.
+#    vapor to cloud liquid, with a characteristic timescale (~10 s).
 #
 # 2. **Cloud development**: Cloud liquid water content grows as condensation
-#    continues. The droplet number concentration slowly decreases due to
-#    self-collection (droplets merging).
+#    continues. The one-moment scheme tracks only mass, not number concentration.
 #
-# 3. **Precipitation formation**: When cloud droplets grow large enough,
-#    autoconversion transfers mass from cloud to rain. The [SeifertBeheng2006](@citet)
-#    scheme derives autoconversion rates from the evolving size distribution:
-#    - Fewer, larger droplets → faster autoconversion
-#    - Many small droplets → suppressed precipitation
+# 3. **Precipitation formation**: Autoconversion transfers mass from cloud liquid
+#    to rain based on a parameterized rate that depends on the cloud liquid
+#    water content. Once rain forms, accretion (rain collecting cloud droplets)
+#    accelerates precipitation development.
 #
-# 4. **Mean droplet mass**: The ratio q/n reveals how droplet size evolves.
-#    Cloud droplets grow by condensation and self-collection. Rain drops
-#    form via autoconversion and grow via accretion (collecting cloud droplets).
-#
-# This example illustrates the fundamental connection between aerosols and
-# precipitation: more CCN → more cloud droplets → smaller drops → delayed
-# rain formation (the cloud lifetime effect).
+# This example demonstrates the basic thermodynamic and microphysical processes
+# governing cloud formation in a rising air parcel.
