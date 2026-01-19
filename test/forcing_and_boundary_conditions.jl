@@ -415,4 +415,195 @@ end
         s_func = summary(ef_func)
         @test occursin("Function", s_func) || occursin("function", s_func)
     end
+
+    @testset "EnergyFluxBoundaryCondition on lateral boundaries [$FT]" begin
+        # Test that EnergyFluxBoundaryCondition works on west/east/south/north boundaries
+        # Need a bounded topology to test lateral BCs
+        grid = RectilinearGrid(default_arch; size=(4, 4, 4), x=(0, 100), y=(0, 100), z=(0, 100),
+                               topology=(Bounded, Bounded, Bounded))
+
+        𝒬 = FT(100)  # W/m²
+        θ₀ = FT(290)
+        qᵗ₀ = FT(0.01)
+
+        # Test west boundary
+        ρe_bcs = FieldBoundaryConditions(west=FluxBoundaryCondition(𝒬))
+        model = AtmosphereModel(grid; boundary_conditions=(ρe=ρe_bcs,))
+        set!(model; θ=θ₀, qᵗ=qᵗ₀)
+        time_step!(model, FT(1e-6))
+        @test true
+
+        # Test east boundary
+        ρe_bcs = FieldBoundaryConditions(east=FluxBoundaryCondition(-𝒬))
+        model = AtmosphereModel(grid; boundary_conditions=(ρe=ρe_bcs,))
+        set!(model; θ=θ₀, qᵗ=qᵗ₀)
+        time_step!(model, FT(1e-6))
+        @test true
+
+        # Test south boundary
+        ρe_bcs = FieldBoundaryConditions(south=FluxBoundaryCondition(𝒬))
+        model = AtmosphereModel(grid; boundary_conditions=(ρe=ρe_bcs,))
+        set!(model; θ=θ₀, qᵗ=qᵗ₀)
+        time_step!(model, FT(1e-6))
+        @test true
+
+        # Test north boundary
+        ρe_bcs = FieldBoundaryConditions(north=FluxBoundaryCondition(-𝒬))
+        model = AtmosphereModel(grid; boundary_conditions=(ρe=ρe_bcs,))
+        set!(model; θ=θ₀, qᵗ=qᵗ₀)
+        time_step!(model, FT(1e-6))
+        @test true
+
+        # Test multiple lateral boundaries at once
+        ρe_bcs = FieldBoundaryConditions(west=FluxBoundaryCondition(𝒬),
+                                          east=FluxBoundaryCondition(-𝒬),
+                                          south=FluxBoundaryCondition(𝒬/2),
+                                          north=FluxBoundaryCondition(-𝒬/2))
+        model = AtmosphereModel(grid; boundary_conditions=(ρe=ρe_bcs,))
+        set!(model; θ=θ₀, qᵗ=qᵗ₀)
+        time_step!(model, FT(1e-6))
+        @test true
+    end
+
+    @testset "Manual EnergyFluxBoundaryCondition on lateral boundaries [$FT]" begin
+        using Breeze.BoundaryConditions: EnergyFluxBoundaryCondition
+
+        # Test manual interface on lateral boundaries
+        grid = RectilinearGrid(default_arch; size=(4, 4, 4), x=(0, 100), y=(0, 100), z=(0, 100),
+                               topology=(Bounded, Bounded, Bounded))
+
+        𝒬 = FT(200)
+        θ₀ = FT(290)
+        qᵗ₀ = FT(0.01)
+
+        # Test west boundary
+        ρθ_bcs = FieldBoundaryConditions(west=EnergyFluxBoundaryCondition(𝒬))
+        model = AtmosphereModel(grid; boundary_conditions=(ρθ=ρθ_bcs,))
+        set!(model; θ=θ₀, qᵗ=qᵗ₀)
+        time_step!(model, FT(1e-6))
+        @test true
+
+        # Test east boundary
+        ρθ_bcs = FieldBoundaryConditions(east=EnergyFluxBoundaryCondition(-𝒬))
+        model = AtmosphereModel(grid; boundary_conditions=(ρθ=ρθ_bcs,))
+        set!(model; θ=θ₀, qᵗ=qᵗ₀)
+        time_step!(model, FT(1e-6))
+        @test true
+
+        # Test south boundary
+        ρθ_bcs = FieldBoundaryConditions(south=EnergyFluxBoundaryCondition(𝒬))
+        model = AtmosphereModel(grid; boundary_conditions=(ρθ=ρθ_bcs,))
+        set!(model; θ=θ₀, qᵗ=qᵗ₀)
+        time_step!(model, FT(1e-6))
+        @test true
+
+        # Test north boundary
+        ρθ_bcs = FieldBoundaryConditions(north=EnergyFluxBoundaryCondition(-𝒬))
+        model = AtmosphereModel(grid; boundary_conditions=(ρθ=ρθ_bcs,))
+        set!(model; θ=θ₀, qᵗ=qᵗ₀)
+        time_step!(model, FT(1e-6))
+        @test true
+    end
+
+    @testset "has_nondefault_bcs helper function [$FT]" begin
+        using Breeze.BoundaryConditions: has_nondefault_bcs
+
+        # Test with nothing
+        @test has_nondefault_bcs(nothing) == false
+
+        # Test with non-FieldBoundaryConditions type
+        @test has_nondefault_bcs(:some_symbol) == false
+
+        # Test with empty FieldBoundaryConditions (all defaults)
+        fbcs_default = FieldBoundaryConditions()
+        @test has_nondefault_bcs(fbcs_default) == false
+
+        # Test with non-default BC
+        fbcs_nondefault = FieldBoundaryConditions(bottom=FluxBoundaryCondition(FT(100)))
+        @test has_nondefault_bcs(fbcs_nondefault) == true
+    end
+
+    @testset "wrap_energy_field_bcs fallback [$FT]" begin
+        using Breeze.BoundaryConditions: wrap_energy_field_bcs
+
+        # Test that non-FieldBoundaryConditions pass through unchanged
+        result = wrap_energy_field_bcs(:not_a_fbc)
+        @test result === :not_a_fbc
+
+        result2 = wrap_energy_field_bcs(nothing)
+        @test result2 === nothing
+    end
+
+    @testset "side_type helper function [$FT]" begin
+        using Breeze.BoundaryConditions: side_type
+        using Oceananigans.BoundaryConditions: Bottom, Top, West, East, South, North
+
+        @test side_type(:bottom) isa Bottom
+        @test side_type(:top) isa Top
+        @test side_type(:west) isa West
+        @test side_type(:east) isa East
+        @test side_type(:south) isa South
+        @test side_type(:north) isa North
+
+        # Test error for unknown side
+        @test_throws ArgumentError side_type(:invalid)
+    end
+
+    @testset "energy_flux_location helper function [$FT]" begin
+        using Breeze.BoundaryConditions: energy_flux_location
+
+        # Test bottom/top (2D slice in xy-plane)
+        LX, LY, LZ = energy_flux_location(:bottom, Center, Center, Center)
+        @test LZ === Nothing
+
+        LX, LY, LZ = energy_flux_location(:top, Center, Center, Center)
+        @test LZ === Nothing
+
+        # Test west/east (2D slice in yz-plane)
+        LX, LY, LZ = energy_flux_location(:west, Center, Center, Center)
+        @test LX === Nothing
+
+        LX, LY, LZ = energy_flux_location(:east, Center, Center, Center)
+        @test LX === Nothing
+
+        # Test south/north (2D slice in xz-plane)
+        LX, LY, LZ = energy_flux_location(:south, Center, Center, Center)
+        @test LY === Nothing
+
+        LX, LY, LZ = energy_flux_location(:north, Center, Center, Center)
+        @test LY === Nothing
+    end
+
+    @testset "EnergyFluxOperation error for unsupported lateral sides [$FT]" begin
+        # EnergyFluxOperation for regular ρθ BCs on lateral boundaries is not implemented
+        grid = RectilinearGrid(default_arch; size=(4, 4, 4), x=(0, 100), y=(0, 100), z=(0, 100),
+                               topology=(Bounded, Bounded, Bounded))
+
+        Jᶿ = FT(0.5)  # potential temperature flux
+        ρθ_bcs = FieldBoundaryConditions(west=FluxBoundaryCondition(Jᶿ))
+        model = AtmosphereModel(grid; boundary_conditions=(ρθ=ρθ_bcs,))
+
+        θ₀ = model.dynamics.reference_state.potential_temperature
+        set!(model; θ=θ₀, qᵗ=FT(0.01))
+
+        # EnergyFluxOperation for :west should throw (not yet implemented for lateral regular BCs)
+        @test_throws ArgumentError EnergyFluxOperation(model, :west)
+    end
+
+    @testset "convert_energy_to_theta_bcs with Symbol formulation [$FT]" begin
+        using Breeze.BoundaryConditions: convert_energy_to_theta_bcs
+
+        # Test that Symbol formulation is converted to Val and dispatches correctly
+        bcs = (; ρe=FieldBoundaryConditions(bottom=FluxBoundaryCondition(FT(100))))
+        constants = ThermodynamicConstants()
+
+        # Should not throw and should convert using the Symbol dispatch
+        result = convert_energy_to_theta_bcs(bcs, :LiquidIcePotentialTemperature, constants)
+        @test :ρθ ∈ keys(result)
+        @test :ρe ∉ keys(result)
+
+        # Also test with :θ formulation symbol
+        result2 = convert_energy_to_theta_bcs(bcs, :θ, constants)
+        @test :ρθ ∈ keys(result2)
+    end
 end
