@@ -405,13 +405,13 @@ end
         using Breeze.BoundaryConditions: EnergyFluxBoundaryConditionFunction
 
         # Test summary for number condition
-        ef_number = EnergyFluxBoundaryConditionFunction(FT(500), nothing, nothing)
+        ef_number = EnergyFluxBoundaryConditionFunction(FT(500), nothing, nothing, nothing)
         s = summary(ef_number)
         @test occursin("500", s) || occursin("5", s)  # Float formatting may vary
 
         # Test summary for function condition
         𝒬_func(x, y, t) = FT(100)
-        ef_func = EnergyFluxBoundaryConditionFunction(𝒬_func, nothing, nothing)
+        ef_func = EnergyFluxBoundaryConditionFunction(𝒬_func, nothing, nothing, nothing)
         s_func = summary(ef_func)
         @test occursin("Function", s_func) || occursin("function", s_func)
     end
@@ -605,5 +605,46 @@ end
         # Also test with :θ formulation symbol
         result2 = convert_energy_to_theta_bcs(bcs, :θ, constants)
         @test :ρθ ∈ keys(result2)
+    end
+
+    @testset "getbc coverage for all boundary faces [$FT]" begin
+        using Breeze.AtmosphereModels: thermodynamic_density
+
+        # Use a 1×1×1 grid with Bounded topology so all faces are active
+        # This test exercises getbc for EnergyFluxBoundaryConditionFunction on all 6 boundary faces
+        grid = RectilinearGrid(default_arch; size=(1, 1, 1), x=(0, 100), y=(0, 100), z=(0, 100),
+                               topology=(Bounded, Bounded, Bounded))
+
+        𝒬 = FT(1000)  # Energy flux W/m²
+        θ₀ = FT(290)
+        qᵗ₀ = FT(0.01)
+        Δt = FT(1e-6)
+
+        # Test each boundary face individually - this exercises getbc for BEFBC, TEFBC, WEFBC, EEFBC, SEFBC, NEFBC
+        flux_bc = FluxBoundaryCondition(𝒬)
+        boundary_configs = (
+            (:bottom, FieldBoundaryConditions(bottom=flux_bc)),
+            (:top,    FieldBoundaryConditions(top=flux_bc)),
+            (:west,   FieldBoundaryConditions(west=flux_bc)),
+            (:east,   FieldBoundaryConditions(east=flux_bc)),
+            (:south,  FieldBoundaryConditions(south=flux_bc)),
+            (:north,  FieldBoundaryConditions(north=flux_bc)),
+        )
+
+        for (side, ρe_bcs) in boundary_configs
+            model = AtmosphereModel(grid; boundary_conditions=(ρe=ρe_bcs,))
+            set!(model; θ=θ₀, qᵗ=qᵗ₀)
+
+            ρθ = thermodynamic_density(model.formulation)
+            ρθ_before = ρθ[1, 1, 1]
+            time_step!(model, Δt)
+            ρθ_after = ρθ[1, 1, 1]
+
+            Δρθ = ρθ_after - ρθ_before
+
+            # Verify the boundary condition produced a non-zero effect
+            # (sign depends on outward normal direction for each face)
+            @test Δρθ != 0
+        end
     end
 end
