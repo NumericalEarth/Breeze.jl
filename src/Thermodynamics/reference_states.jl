@@ -1,5 +1,5 @@
-using Oceananigans: Oceananigans, Center, Field, set!, fill_halo_regions!, ∂z
-using Oceananigans.BoundaryConditions: FieldBoundaryConditions, ValueBoundaryCondition
+using Oceananigans: Oceananigans, Center, Field, set!, fill_halo_regions!, ∂z, znodes
+using Oceananigans.BoundaryConditions: FieldBoundaryConditions, ValueBoundaryCondition, GradientBoundaryCondition
 using Oceananigans.Operators: ℑzᵃᵃᶠ
 
 using Adapt: Adapt, adapt
@@ -9,12 +9,12 @@ using GPUArraysCore: @allowscalar
 ##### Reference state computations for Boussinesq and Anelastic models
 #####
 
-struct ReferenceState{FT, F}
+struct ReferenceState{FT, P, R}
     surface_pressure :: FT # base pressure: reference pressure at z=0
     potential_temperature :: FT  # constant reference potential temperature
     standard_pressure :: FT # pˢᵗ: reference pressure for potential temperature (default 1e5)
-    pressure :: F
-    density :: F
+    pressure :: P
+    density :: R
 end
 
 Adapt.adapt_structure(to, ref::ReferenceState) =
@@ -134,23 +134,30 @@ function ReferenceState(grid, constants=ThermodynamicConstants(eltype(grid));
     p₀ = convert(FT, surface_pressure)
     θ₀ = convert(FT, potential_temperature)
     pˢᵗ = convert(FT, standard_pressure)
+    g = constants.gravitational_acceleration
     loc = (nothing, nothing, Center())
 
-    ρ₀ = surface_density(p₀, θ₀, pˢᵗ, constants)
-    ρ_bcs = FieldBoundaryConditions(grid, loc, bottom=ValueBoundaryCondition(ρ₀))
-    ρᵣ = Field{Nothing, Nothing, Center}(grid, boundary_conditions=ρ_bcs)
-    set!(ρᵣ, z -> adiabatic_hydrostatic_density(z, p₀, θ₀, pˢᵗ, constants))
-    fill_halo_regions!(ρᵣ)
+    # Get z-coordinate at the top cell center for the gradient boundary condition.
+    # At the top, we use GradientBoundaryCondition to ensure correct discrete
+    # hydrostatic balance (ρ = -∂z(p)/g). At the bottom, we use ValueBoundaryCondition
+    # with the known surface pressure p₀ so that interpolation to the surface is exact.
+    z_top = last(znodes(grid, Center()))
+    ρ_top = adiabatic_hydrostatic_density(z_top, p₀, θ₀, pˢᵗ, constants)
+    ∂p∂z_top = -ρ_top * g
 
-    p_bcs = FieldBoundaryConditions(grid, loc, bottom=ValueBoundaryCondition(p₀))
+    # Set up pressure with value BC at bottom (exact surface pressure) and
+    # gradient BC at top (correct discrete hydrostatic balance)
+    p_bcs = FieldBoundaryConditions(grid, loc,
+        bottom = ValueBoundaryCondition(p₀),
+        top = GradientBoundaryCondition(∂p∂z_top))
     pᵣ = Field{Nothing, Nothing, Center}(grid, boundary_conditions=p_bcs)
     set!(pᵣ, z -> adiabatic_hydrostatic_pressure(z, p₀, θ₀, constants))
     fill_halo_regions!(pᵣ)
 
-    ρ₀ = surface_density(p₀, θ₀, constants)
+    # Compute density from discrete pressure gradient for discrete hydrostatic balance
+    ρ₀ = surface_density(p₀, θ₀, pˢᵗ, constants)
     ρ_bcs = FieldBoundaryConditions(grid, loc, bottom=ValueBoundaryCondition(ρ₀))
     ρᵣ = Field{Nothing, Nothing, Center}(grid, boundary_conditions=ρ_bcs)
-    g = constants.gravitational_acceleration
     set!(ρᵣ, - ∂z(pᵣ) / g)
     fill_halo_regions!(ρᵣ)
 
