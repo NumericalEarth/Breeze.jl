@@ -164,19 +164,15 @@ end
 
 convert_energy_to_theta_bcs(bcs, f::Symbol, c) = convert_energy_to_theta_bcs(bcs, Val(f), c)
 
-# Pass through non-FieldBoundaryConditions
-regularize_atmosphere_field_bcs(fbcs, loc, grid, dynamics, microphysics, surface_pressure, constants) = fbcs
-
 # Regularize FieldBoundaryConditions by walking through each boundary
-function regularize_atmosphere_field_bcs(fbcs::FieldBoundaryConditions, loc, grid, dynamics, microphysics,
-                                         surface_pressure, constants)
-    west     = regularize_atmosphere_boundary_condition(fbcs.west, West(), loc, grid, dynamics, microphysics, surface_pressure, constants)
-    east     = regularize_atmosphere_boundary_condition(fbcs.east, East(), loc, grid, dynamics, microphysics, surface_pressure, constants)
-    south    = regularize_atmosphere_boundary_condition(fbcs.south, South(), loc, grid, dynamics, microphysics, surface_pressure, constants)
-    north    = regularize_atmosphere_boundary_condition(fbcs.north, North(), loc, grid, dynamics, microphysics, surface_pressure, constants)
-    bottom   = regularize_atmosphere_boundary_condition(fbcs.bottom, Bottom(), loc, grid, dynamics, microphysics, surface_pressure, constants)
-    top      = regularize_atmosphere_boundary_condition(fbcs.top, Top(), loc, grid, dynamics, microphysics, surface_pressure, constants)
-    immersed = regularize_atmosphere_boundary_condition(fbcs.immersed, nothing, loc, grid, dynamics, microphysics, surface_pressure, constants)
+function regularize_atmosphere_field_bcs(fbcs::FieldBoundaryConditions, loc, grid, dynam, micro, p₀, consts)
+    west     = regularize_atmosphere_boundary_condition(fbcs.west,     West(),   loc, grid, dynam, micro, p₀, consts)
+    east     = regularize_atmosphere_boundary_condition(fbcs.east,     East(),   loc, grid, dynam, micro, p₀, consts)
+    south    = regularize_atmosphere_boundary_condition(fbcs.south,    South(),  loc, grid, dynam, micro, p₀, consts)
+    north    = regularize_atmosphere_boundary_condition(fbcs.north,    North(),  loc, grid, dynam, micro, p₀, consts)
+    bottom   = regularize_atmosphere_boundary_condition(fbcs.bottom,   Bottom(), loc, grid, dynam, micro, p₀, consts)
+    top      = regularize_atmosphere_boundary_condition(fbcs.top,      Top(),    loc, grid, dynam, micro, p₀, consts)
+    immersed = regularize_atmosphere_boundary_condition(fbcs.immersed, nothing,  loc, grid, dynam, micro, p₀, consts)
 
     return FieldBoundaryConditions(; west, east, south, north, bottom, top, immersed)
 end
