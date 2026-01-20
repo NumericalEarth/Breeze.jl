@@ -61,12 +61,17 @@ end
 
             # Test round-trip consistency: set θ, get ρe; then set ρe, get back θ
             set!(model; θ = θ₀)
+
             ρe₁ = Field(static_energy_density(model))
+            e₁ = Field(static_energy(model))
+            ρθ₁ = Field(liquid_ice_potential_temperature_density(model))
             θ₁ = Field(liquid_ice_potential_temperature(model))
 
             set!(model; ρe = ρe₁)
-            @test static_energy_density(model) ≈ ρe₁
+            @test static_energy(model) ≈ e₁
             @test liquid_ice_potential_temperature(model) ≈ θ₁
+            @test static_energy_density(model) ≈ ρe₁
+            @test liquid_ice_potential_temperature_density(model) ≈ ρθ₁
         end
     end
 end

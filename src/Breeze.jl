@@ -77,7 +77,6 @@ export
     BulkDrag,
     BulkSensibleHeatFlux,
     BulkVaporFlux,
-    EnergyFluxOperation,
 
     # Forcing utilities
     geostrophic_forcings,
@@ -154,6 +153,10 @@ using .MoistAirBuoyancies
 include("AtmosphereModels/AtmosphereModels.jl")
 using .AtmosphereModels
 
+# BoundaryConditions is loaded early so formulation modules can use BC conversion utilities
+include("BoundaryConditions/BoundaryConditions.jl")
+using .BoundaryConditions
+
 # Thermodynamic formulation modules (included after AtmosphereModels so they can dispatch on AtmosphereModel)
 include("StaticEnergyFormulations/StaticEnergyFormulations.jl")
 using .StaticEnergyFormulations: StaticEnergyFormulation
@@ -182,9 +185,6 @@ using .Advection
 
 include("CelestialMechanics/CelestialMechanics.jl")
 using .CelestialMechanics
-
-include("BoundaryConditions/BoundaryConditions.jl")
-using .BoundaryConditions
 
 include("Forcings/Forcings.jl")
 using .Forcings
