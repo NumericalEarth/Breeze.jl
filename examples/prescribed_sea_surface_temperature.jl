@@ -76,28 +76,29 @@ scalar_advection = WENO(order=5)
 #
 # Breeze provides abstractions for specifying bulk surface fluxes.
 # The `BulkDrag`, `BulkSensibleHeatFlux`, and `BulkVaporFlux` boundary conditions
-# compute fluxes of momentum, temperature density (proportional to sensible heat flux),
-# and moisture density according to bulk aerodynamic formulae that relate turbulent fluxes
-# to the difference between atmosphere properties, surface properties, and the differential
+# compute fluxes of momentum, potential temperature density, and moisture density
+# according to bulk aerodynamic formulae that relate turbulent fluxes to the
+# difference between atmosphere properties, surface properties, and the differential
 # motion of the air and surface,
 #
 # ```math
-# τˣ = - Cᴰ |U| ρu, \quad Jᵀ = - ρ₀ Cᵀ |U| (θ - θ₀), \quad Jᵛ = - ρ₀ Cᵛ |U| (qᵗ - qᵛ₀),
+# τˣ = - Cᴰ |U| ρu, \quad Jᶿ = - ρ₀ Cᵀ |U| (θ - θ₀), \quad Jᵛ = - ρ₀ Cᵛ |U| (qᵗ - qᵛ₀),
 # ```
 #
 # where ``|U|`` is "total" the differential wind speed (including gustiness),
 # ``Cᴰ, Cᵀ, Cᵛ`` are transfer coefficients, and ``θ₀, qᵛ₀`` are the surface temperature
-# and surface specific humidity, which for wet surfaces is presumed to be the
-# saturation specific humidity over a planar liquid surface computed at the surface temperature.
-# ``τˣ`` is the surface momentum flux, ``Jᵀ`` is the surface temperature density flux, and
-# ``Jᵛ`` is the surface moisture density flux.
-# The surface density density ``ρ₀`` is computed from the model's reference state.
+# and surface specific humidity. For wet surfaces, ``qᵛ₀`` is the saturation specific
+# humidity over a planar liquid surface computed at the surface temperature.
+# ``τˣ`` is the surface momentum flux, ``Jᶿ`` is the potential temperature density flux,
+# and ``Jᵛ`` is the surface moisture density flux.
+# The surface density ``ρ₀`` is computed from the model's reference state.
 #
-# The temperature density flux is proportional to the sensible heat flux,
+# The potential temperature flux is proportional to the sensible heat flux,
 #
 # ```math
-# 𝒬ᵀ = - ρ₀ cᵖᵐ Cᵀ |U| (θ - θ₀) .
+# 𝒬ᵀ = cᵖᵐ Jᶿ
 # ```
+#
 # where ``cᵖᵐ`` is the mixture heat capacity.
 #
 # We start by defining the drag coefficient and gustiness parameter,
@@ -105,7 +106,7 @@ scalar_advection = WENO(order=5)
 Cᴰ = 1e-3  # Drag coefficient
 Uᵍ = 1e-2  # Minimum wind speed (m/s)
 
-ρu_surface_flux = ρv_surface_flux = BulkDrag(coefficient=Cᴰ, gustiness=Uᵍ)
+ρu_surface_flux = ρv_surface_flux = Breeze.BulkDrag(coefficient=Cᴰ, gustiness=Uᵍ)
 
 # ## Sensible heat flux and vapor fluxes
 #
@@ -127,14 +128,14 @@ Cᵛ = 1e-3  # Vapor transfer coefficient
 
 # and build the flux parameterizations
 
-ρθ_surface_flux = BulkSensibleHeatFlux(coefficient=Cᵀ, gustiness=Uᵍ, surface_temperature=T₀)
+ρe_surface_flux = BulkSensibleHeatFlux(coefficient=Cᵀ, gustiness=Uᵍ, surface_temperature=T₀)
 ρqᵗ_surface_flux = BulkVaporFlux(coefficient=Cᵛ, gustiness=Uᵍ, surface_temperature=T₀)
 
 # We finally assemble all of the boundary conditions,
 
 ρu_bcs = FieldBoundaryConditions(bottom=ρu_surface_flux)
 ρv_bcs = FieldBoundaryConditions(bottom=ρv_surface_flux)
-ρθ_bcs = FieldBoundaryConditions(bottom=ρθ_surface_flux)
+ρe_bcs = FieldBoundaryConditions(bottom=ρe_surface_flux)
 ρqᵗ_bcs = FieldBoundaryConditions(bottom=ρqᵗ_surface_flux)
 
 # ## Model construction
@@ -144,7 +145,7 @@ Cᵛ = 1e-3  # Vapor transfer coefficient
 # schemes, microphysics, and boundary conditions.
 
 model = AtmosphereModel(grid; momentum_advection, scalar_advection, microphysics, dynamics,
-                        boundary_conditions = (ρu=ρu_bcs, ρv=ρv_bcs, ρθ=ρθ_bcs, ρqᵗ=ρqᵗ_bcs))
+                        boundary_conditions = (ρu=ρu_bcs, ρv=ρv_bcs, ρe=ρe_bcs, ρqᵗ=ρqᵗ_bcs))
 
 # ## Initial conditions
 #
@@ -260,6 +261,7 @@ outputs = (; s, ξ, T, θ, qˡ, qᵛ⁺, qᵗ, τˣ, 𝒬ᵀ, 𝒬ᵛ, Σ𝒬=�
 
 ow = JLD2Writer(model, outputs;
                 filename = output_filename,
+                including = [:grid],
                 schedule = TimeInterval(2minutes),
                 overwrite_existing = true)
 

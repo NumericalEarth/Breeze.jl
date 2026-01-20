@@ -77,6 +77,7 @@ export
     BulkDrag,
     BulkSensibleHeatFlux,
     BulkVaporFlux,
+    EnergyFluxOperation,
 
     # Forcing utilities
     geostrophic_forcings,
