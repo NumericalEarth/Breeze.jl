@@ -294,6 +294,7 @@ slice_outputs = (
 
 slices_filename = "splitting_supercell_slices.jld2"
 simulation.output_writers[:slices] = JLD2Writer(model, slice_outputs; filename=slices_filename,
+                                                including = [:grid],
                                                 schedule = TimeInterval(2minutes),
                                                 overwrite_existing = true)
 
