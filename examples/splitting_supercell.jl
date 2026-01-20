@@ -103,15 +103,15 @@ dynamics = AnelasticDynamics(reference_state)
 # The atmospheric stratification parameters define the troposphere-stratosphere transition.
 
 θ₀ = 300        # K - surface potential temperature
-θₜᵣ = 343       # K - tropopause potential temperature
-zₜᵣ = 12000     # m - tropopause height
-Tₜᵣ = 213       # K - tropopause temperature
+θᵗʳ = 343       # K - tropopause potential temperature
+zᵗʳ = 12000     # m - tropopause height
+Tᵗʳ = 213       # K - tropopause temperature
 nothing #hide
 
 # Wind shear parameters control the low-level environmental wind profile:
 
-zₛ = 5kilometers  # m - shear layer height
-uₛ = 30           # m/s - maximum shear wind speed
+zˢ = 5kilometers  # m - shear layer height
+uˢ = 30           # m/s - maximum shear wind speed
 uᶜ = 15           # m/s - storm motion (Galilean translation speed)
 nothing #hide
 
@@ -124,24 +124,24 @@ nothing #hide
 # Background potential temperature profile (Equation 14 in [KlempEtAl2015](@citet)):
 
 function θ_background(z)
-    θ_troposphere = θ₀ + (θₜᵣ - θ₀) * (z / zₜᵣ)^(5/4)
-    θ_stratosphere = θₜᵣ * exp(g / (cᵖᵈ * Tₜᵣ) * (z - zₜᵣ))
-    return (z <= zₜᵣ) * θ_troposphere + (z > zₜᵣ) * θ_stratosphere
+    θᵗʳ = θ₀ + (θᵗʳ - θ₀) * (z / zᵗʳ)^(5/4)
+    θˢᵗ = θᵗʳ * exp(g / (cᵖᵈ * Tᵗʳ) * (z - zᵗʳ))
+    return (z <= zᵗʳ) * θᵗʳ + (z > zᵗʳ) * θˢᵗ
 end
 
 # Relative humidity profile (decreases with height, 25% above tropopause):
 
-ℋ_background(z) = (1 - 3/4 * (z / zₜᵣ)^(5/4)) * (z <= zₜᵣ) + 1/4 * (z > zₜᵣ)
+ℋ_background(z) = (1 - 3/4 * (z / zᵗʳ)^(5/4)) * (z <= zᵗʳ) + 1/4 * (z > zᵗʳ)
 
-# Zonal wind profile with linear shear below ``z_s`` and smooth transition (Equations 15-16):
+# Zonal wind profile with linear shear below ``zˢ`` and smooth transition (Equations 15-16):
 
 function u_background(z)
-    u_lower = uₛ * (z / zₛ) - uᶜ
-    u_transition = (-4/5 + 3 * (z / zₛ) - 5/4 * (z / zₛ)^2) * uₛ - uᶜ
-    u_upper = uₛ - uᶜ
-    return (z < (zₛ - 1000)) * u_lower +
-           (abs(z - zₛ) <= 1000) * u_transition +
-           (z > (zₛ + 1000)) * u_upper
+    uˡ = uˢ * (z / zˢ) - uᶜ
+    uᵗ = (-4/5 + 3 * (z / zˢ) - 5/4 * (z / zˢ)^2) * uˢ - uᶜ
+    uᵘ = uˢ - uᶜ
+    return (z < (zˢ - 1000)) * uˡ +
+           (abs(z - zˢ) <= 1000) * uᵗ +
+           (z > (zˢ + 1000)) * uᵘ
 end
 
 # ## Warm bubble perturbation
@@ -149,11 +149,11 @@ end
 # The warm bubble parameters following Equations 17–18 in [KlempEtAl2015](@citet):
 
 Δθ = 3              # K - perturbation amplitude
-rₕ = 10kilometers   # m - bubble horizontal radius
-rᵥ = 1500           # m - bubble vertical radius
-zᵦ = 1500           # m - bubble center height
-xᵦ = Lx / 2         # m - bubble center x-coordinate
-yᵦ = Ly / 2         # m - bubble center y-coordinate
+rᵇʰ = 10kilometers  # m - bubble horizontal radius
+rᵇᵛ = 1500          # m - bubble vertical radius
+zᵇ = 1500           # m - bubble center height
+xᵇ = Lx / 2         # m - bubble center x-coordinate
+yᵇ = Ly / 2         # m - bubble center y-coordinate
 nothing #hide
 
 # The total initial potential temperature combines the background profile with the
@@ -161,8 +161,8 @@ nothing #hide
 
 function θᵢ(x, y, z)
     θ̄ = θ_background(z)
-    r = sqrt((x - xᵦ)^2 + (y - yᵦ)^2)
-    R = sqrt((r / rₕ)^2 + ((z - zᵦ) / rᵥ)^2)
+    r = sqrt((x - xᵇ)^2 + (y - yᵇ)^2)
+    R = sqrt((r / rᵇʰ)^2 + ((z - zᵇ) / rᵇᵛ)^2)
     θ′ = ifelse(R < 1, Δθ * cos((π / 2) * R)^2, 0.0)
     return θ̄ + θ′
 end
@@ -182,15 +182,15 @@ fig = Figure(size=(1000, 400), fontsize=14)
 
 axθ = Axis(fig[1, 1], xlabel="θ (K)", ylabel="z (km)", title="Potential temperature")
 lines!(axθ, θ_profile, linewidth=2, color=:magenta)
-hlines!(axθ, [zₜᵣ / 1000], color=:gray, linestyle=:dash)
+hlines!(axθ, [zᵗʳ / 1000], color=:gray, linestyle=:dash)
 
 axℋ = Axis(fig[1, 2], xlabel="ℋ (%)", ylabel="z (km)", title="Relative humidity")
 lines!(axℋ, ℋ_profile, linewidth=2, color=:dodgerblue)
-hlines!(axℋ, [zₜᵣ / 1000], color=:gray, linestyle=:dash)
+hlines!(axℋ, [zᵗʳ / 1000], color=:gray, linestyle=:dash)
 
 axu = Axis(fig[1, 3], xlabel="u (m/s)", ylabel="z (km)", title="Wind profile")
 lines!(axu, u_profile, linewidth=2, color=:orangered)
-hlines!(axu, [zₛ / 1000], color=:gray, linestyle=:dash)
+hlines!(axu, [zˢ / 1000], color=:gray, linestyle=:dash)
 vlines!(axu, [0], color=:black, linestyle=:dot)
 
 save("supercell_initial_conditions.png", fig) #src
@@ -198,7 +198,7 @@ fig
 
 # Visualize the warm bubble perturbation on a vertical slice through the domain center:
 
-θ′_slice = set!(Field{Center, Nothing, Center}(grid), (x, z) -> θᵢ(x, yᵦ, z) - θ_background(z))
+θ′_slice = set!(Field{Center, Nothing, Center}(grid), (x, z) -> θᵢ(x, yᵇ, z) - θ_background(z))
 
 fig = Figure(size=(700, 400), fontsize=14)
 ax = Axis(fig[1, 1], xlabel="x (km)", ylabel="z (km)",
