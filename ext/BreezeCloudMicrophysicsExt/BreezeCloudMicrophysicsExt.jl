@@ -6,6 +6,11 @@ using CloudMicrophysics.Parameters: Blk1MVelType, Blk1MVelTypeRain, Blk1MVelType
 using CloudMicrophysics.Parameters: AirProperties
 # Two-moment parameters
 using CloudMicrophysics.Parameters: SB2006, StokesRegimeVelType, SB2006VelType, Chen2022VelTypeRain
+# Aerosol activation parameters
+using CloudMicrophysics.Parameters: AerosolActivationParameters, AerosolDistributionType
+
+# Aerosol activation and aerosol model (using CMAM to avoid conflict with AtmosphereModels alias AM)
+using CloudMicrophysics: AerosolActivation as CMAA, AerosolModel as CMAM
 
 using CloudMicrophysics.Microphysics0M: remove_precipitation
 
@@ -34,7 +39,8 @@ using Breeze.Thermodynamics:
     saturation_specific_humidity,
     supersaturation,
     liquid_latent_heat,
-    vapor_gas_constant
+    vapor_gas_constant,
+    dry_air_gas_constant
 
 using Breeze.Microphysics:
     center_field_tuple,

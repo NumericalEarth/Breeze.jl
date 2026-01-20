@@ -117,7 +117,7 @@ end
 #####
 
 """
-    microphysical_state(microphysics, ρ, μ, 𝒰)
+    microphysical_state(microphysics, ρ, μ, 𝒰, w=0)
 
 Build an [`AbstractMicrophysicalState`](@ref) (ℳ) from density-weighted prognostic
 microphysical variables `μ`, density `ρ`, and thermodynamic state `𝒰`.
@@ -135,18 +135,19 @@ while precipitation (rain, snow) still comes from `μ`.
 - `ρ`: Local density (scalar)
 - `μ`: NamedTuple of density-weighted prognostic variables (e.g., `(ρqᶜˡ=..., ρqʳ=...)`)
 - `𝒰`: Thermodynamic state
+- `w`: Updraft velocity [m/s] (default: 0). Used by schemes with aerosol activation.
 
 # Returns
 An `AbstractMicrophysicalState` subtype containing the local specific microphysical variables.
 
 See also [`microphysical_tendency`](@ref), [`AbstractMicrophysicalState`](@ref).
 """
-@inline microphysical_state(::Nothing, ρ, μ, 𝒰) = NothingMicrophysicalState(typeof(ρ))
-@inline microphysical_state(::Nothing, ρ, ::Nothing, 𝒰) = NothingMicrophysicalState(typeof(ρ))
-@inline microphysical_state(microphysics, ρ, ::Nothing, 𝒰) = NothingMicrophysicalState(typeof(ρ))
-@inline microphysical_state(microphysics, ρ, ::NamedTuple{(), Tuple{}}, 𝒰) = NothingMicrophysicalState(typeof(ρ))
+@inline microphysical_state(::Nothing, ρ, μ, 𝒰, w=0) = NothingMicrophysicalState(typeof(ρ))
+@inline microphysical_state(::Nothing, ρ, ::Nothing, 𝒰, w=0) = NothingMicrophysicalState(typeof(ρ))
+@inline microphysical_state(microphysics, ρ, ::Nothing, 𝒰, w=0) = NothingMicrophysicalState(typeof(ρ))
+@inline microphysical_state(microphysics, ρ, ::NamedTuple{(), Tuple{}}, 𝒰, w=0) = NothingMicrophysicalState(typeof(ρ))
 # Disambiguation for Nothing microphysics + empty NamedTuple
-@inline microphysical_state(::Nothing, ρ, ::NamedTuple{(), Tuple{}}, 𝒰) = NothingMicrophysicalState(typeof(ρ))
+@inline microphysical_state(::Nothing, ρ, ::NamedTuple{(), Tuple{}}, 𝒰, w=0) = NothingMicrophysicalState(typeof(ρ))
 
 """
     grid_microphysical_state(i, j, k, grid, microphysics, μ_fields, ρ, 𝒰)

@@ -520,13 +520,15 @@ function compute_parcel_tendencies!(model::ParcelModel)
     𝒰 = state.𝒰
     μ = state.μ
 
-    # Build diagnostic microphysical state from prognostic variables
-    ℳ = microphysical_state(microphysics, ρ, μ, 𝒰)
-
     # Position tendencies = environmental velocity at current height
     tendencies.Gx = interpolate((z,), model.velocities.u)
     tendencies.Gy = interpolate((z,), model.velocities.v)
     tendencies.Gz = interpolate((z,), model.velocities.w)
+
+    # Build diagnostic microphysical state from prognostic variables
+    # Pass updraft velocity explicitly for aerosol activation
+    w = tendencies.Gz
+    ℳ = microphysical_state(microphysics, ρ, μ, 𝒰, w)
 
     # Thermodynamic and moisture tendencies from microphysics (specific, not density-weighted)
     # For adiabatic (no microphysics): both are zero, giving exact conservation

@@ -9,7 +9,9 @@ BreezeCloudMicrophysicsExt = Base.get_extension(Breeze, :BreezeCloudMicrophysics
 using .BreezeCloudMicrophysicsExt:
     TwoMomentCloudMicrophysics,
     TwoMomentCategories,
-    two_moment_cloud_microphysics_categories
+    two_moment_cloud_microphysics_categories,
+    AerosolActivation,
+    default_aerosol_activation
 
 using Breeze.Microphysics: ConstantRateCondensateFormation
 using Oceananigans.BoundaryConditions: ImpenetrableBoundaryCondition
@@ -315,4 +317,71 @@ end
     # Cloud liquid should have increased due to condensation
     qᶜˡ_final = maximum(model.microphysical_fields.qᶜˡ)
     @test qᶜˡ_final > qᶜˡ_initial * FT(0.5)  # Allow for some evaporation depending on conditions
+end
+
+#####
+##### Aerosol activation tests
+#####
+
+@testset "AerosolActivation construction [$FT]" for FT in test_float_types()
+    Oceananigans.defaults.FloatType = FT
+
+    # Check default aerosol activation is created
+    aa = default_aerosol_activation(FT)
+    @test aa isa AerosolActivation
+    @test aa.activation_parameters isa CloudMicrophysics.Parameters.AerosolActivationParameters
+    @test aa.aerosol_distribution isa CloudMicrophysics.AerosolModel.AerosolDistribution
+
+    # Check aerosol activation is included in TwoMomentCategories
+    categories = two_moment_cloud_microphysics_categories(FT)
+    @test categories.aerosol_activation isa AerosolActivation
+
+    # Check aerosol activation is included in TwoMomentCloudMicrophysics
+    μ2 = TwoMomentCloudMicrophysics()
+    @test μ2.categories.aerosol_activation isa AerosolActivation
+
+    # Check that aerosol activation can be disabled
+    categories_no_act = two_moment_cloud_microphysics_categories(FT; aerosol_activation=nothing)
+    @test categories_no_act.aerosol_activation === nothing
+end
+
+@testset "AerosolActivation in parcel model [$FT]" for FT in test_float_types()
+    Oceananigans.defaults.FloatType = FT
+
+    grid = RectilinearGrid(CPU(); size=100, z=(0, 10_000), topology=(Flat, Flat, Bounded))
+    microphysics = TwoMomentCloudMicrophysics()
+    model = AtmosphereModel(grid; dynamics=ParcelDynamics(), microphysics)
+
+    constants = model.thermodynamic_constants
+    reference_state = ReferenceState(grid, constants; surface_pressure=101325, potential_temperature=300)
+
+    qᵗ(z) = 0.015 * exp(-z / 2500)
+
+    set!(model,
+         θ = reference_state.potential_temperature,
+         p = reference_state.pressure,
+         ρ = reference_state.density,
+         qᵗ = qᵗ,
+         z = 0, w = 1)
+
+    # Initially, cloud droplet number should be zero (no droplets before activation)
+    @test model.dynamics.state.μ.ρnᶜˡ == 0
+
+    # Run parcel simulation until it becomes supersaturated
+    simulation = Simulation(model; Δt=1.0, stop_iteration=500)
+    run!(simulation)
+
+    # After rising, parcel should have some cloud droplets from activation
+    # (if it reached supersaturation)
+    z_final = model.dynamics.state.z
+    nᶜˡ_final = model.dynamics.state.μ.ρnᶜˡ / model.dynamics.state.ρ
+    qᶜˡ_final = model.dynamics.state.μ.ρqᶜˡ / model.dynamics.state.ρ
+
+    # Parcel should have risen
+    @test z_final > 1000  # Should have risen at least 1 km
+
+    # If cloud formed (qᶜˡ > 0), droplet number should also be positive
+    if qᶜˡ_final > FT(1e-10)
+        @test nᶜˡ_final > 0  # Activation should have produced droplets
+    end
 end

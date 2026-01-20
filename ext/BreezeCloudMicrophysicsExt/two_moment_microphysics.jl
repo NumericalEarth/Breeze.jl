@@ -40,12 +40,14 @@ tendencies for cloud liquid and rain following the Seifert-Beheng 2006 scheme.
 - `nᶜˡ`: Cloud liquid number per unit mass (1/kg)
 - `qʳ`: Rain mixing ratio (kg/kg)
 - `nʳ`: Rain number per unit mass (1/kg)
+- `w`: Updraft velocity (m/s) - used for aerosol activation (0 if unknown)
 """
 struct WarmPhaseTwoMomentState{FT} <: AbstractMicrophysicalState{FT}
     qᶜˡ :: FT  # cloud liquid mixing ratio
     nᶜˡ :: FT  # cloud liquid number per unit mass
     qʳ  :: FT  # rain mixing ratio
     nʳ  :: FT  # rain number per unit mass
+    w   :: FT  # updraft velocity (for activation)
 end
 
 using CloudMicrophysics.Parameters:
@@ -53,13 +55,104 @@ using CloudMicrophysics.Parameters:
     AirProperties,
     StokesRegimeVelType,
     SB2006VelType,
-    Chen2022VelTypeRain
+    Chen2022VelTypeRain,
+    AerosolActivationParameters
 
 # Use qualified access to avoid conflicts with Microphysics1M
 # CM2 is imported as a module alias in BreezeCloudMicrophysicsExt.jl
+# CMAA (AerosolActivation) and CMAM (AerosolModel) are imported in BreezeCloudMicrophysicsExt.jl
+
+#####
+##### Aerosol activation for two-moment microphysics
+#####
+#
+# Aerosol activation provides the source term for cloud droplet number concentration.
+# Without activation, there is no physical mechanism to create cloud droplets.
+#
+# References:
+#   - Abdul-Razzak, H. and Ghan, S.J. (2000). A parameterization of aerosol activation:
+#     2. Multiple aerosol types. J. Geophys. Res., 105(D5), 6837-6844.
+#   - Petters, M.D. and Kreidenweis, S.M. (2007). A single parameter representation of
+#     hygroscopic growth and cloud condensation nucleus activity. Atmos. Chem. Phys., 7, 1961-1971.
+#####
 
 """
-    TwoMomentCategories{W, AP, LV, RV}
+    AerosolActivation{AP, AD}
+
+Aerosol activation parameters for two-moment microphysics.
+
+Aerosol activation is the physical process that creates cloud droplets from aerosol
+particles when air becomes supersaturated. This struct bundles the parameters needed
+to compute the activation source term for cloud droplet number concentration.
+
+# Fields
+- `activation_parameters`: [`AerosolActivationParameters`] from CloudMicrophysics.jl
+- `aerosol_distribution`: Aerosol size distribution (modes with number, size, hygroscopicity)
+
+# References
+* Abdul-Razzak, H. and Ghan, S.J. (2000). A parameterization of aerosol activation:
+  2. Multiple aerosol types. J. Geophys. Res., 105(D5), 6837-6844.
+"""
+struct AerosolActivation{AP, AD}
+    activation_parameters :: AP
+    aerosol_distribution :: AD
+end
+
+Base.summary(::AerosolActivation) = "AerosolActivation"
+
+"""
+    default_aerosol_activation(FT = Float64)
+
+Create a default `AerosolActivation` representing a typical continental aerosol population.
+
+The default distribution is a single mode with:
+- Mean dry radius: 0.05 μm (50 nm)
+- Geometric standard deviation: 2.0
+- Number concentration: 100 cm⁻³ (100 × 10⁶ m⁻³)
+- Hygroscopicity κ: 0.5 (typical for ammonium sulfate)
+
+This provides sensible out-of-the-box behavior for two-moment microphysics.
+Users can customize the aerosol population by constructing their own `AerosolActivation`.
+
+# Example
+
+```julia
+# Use default aerosol
+microphysics = TwoMomentCloudMicrophysics()
+
+# Custom aerosol: marine (fewer, larger particles)
+marine_mode = CMAM.Mode_κ(0.08e-6, 1.8, 50e6, (1.0,), (1.0,), (0.058,), (1.0,))
+marine_aerosol = AerosolActivation(
+    AerosolActivationParameters(Float64),
+    CMAM.AerosolDistribution((marine_mode,))
+)
+microphysics = TwoMomentCloudMicrophysics(aerosol_activation = marine_aerosol)
+
+# Disable aerosol activation (not recommended)
+microphysics = TwoMomentCloudMicrophysics(aerosol_activation = nothing)
+```
+"""
+function default_aerosol_activation(FT::DataType = Float64)
+    # Default continental aerosol mode using κ-Köhler theory
+    # Mode_κ(r_dry, stdev, N, vol_mix_ratio, mass_mix_ratio, molar_mass, kappa)
+    r_dry = FT(0.05e-6)           # 50 nm dry radius
+    stdev = FT(2.0)               # geometric standard deviation
+    N = FT(100e6)                 # 100 cm⁻³
+    vol_mix_ratio = (FT(1.0),)    # single component
+    mass_mix_ratio = (FT(1.0),)
+    molar_mass = (FT(0.132),)     # ammonium sulfate ~132 g/mol
+    kappa = (FT(0.5),)            # hygroscopicity
+
+    mode = CMAM.Mode_κ(r_dry, stdev, N, vol_mix_ratio, mass_mix_ratio, molar_mass, kappa)
+    aerosol_distribution = CMAM.AerosolDistribution((mode,))
+
+    activation_parameters = AerosolActivationParameters(FT)
+
+    return AerosolActivation(activation_parameters, aerosol_distribution)
+end
+
+"""
+    TwoMomentCategories{W, AP, LV, RV, AA}
 
 Parameters for two-moment ([Seifert and Beheng, 2006](@cite SeifertBeheng2006)) warm-rain microphysics.
 
@@ -69,17 +162,21 @@ Parameters for two-moment ([Seifert and Beheng, 2006](@cite SeifertBeheng2006)) 
 - `air_properties`: `AirProperties` for thermodynamic calculations
 - `cloud_liquid_fall_velocity`: `StokesRegimeVelType` for cloud droplet terminal velocity
 - `rain_fall_velocity`: `SB2006VelType` or `Chen2022VelTypeRain` for raindrop terminal velocity
+- `aerosol_activation`: `AerosolActivation` parameters for cloud droplet nucleation (or `nothing` to disable)
 
 # References
 * Seifert, A. and Beheng, K. D. (2006). A two-moment cloud microphysics
     parameterization for mixed-phase clouds. Part 1: Model description.
     Meteorol. Atmos. Phys., 92, 45-66. https://doi.org/10.1007/s00703-005-0112-4
+* Abdul-Razzak, H. and Ghan, S.J. (2000). A parameterization of aerosol activation:
+  2. Multiple aerosol types. J. Geophys. Res., 105(D5), 6837-6844.
 """
-struct TwoMomentCategories{W, AP, LV, RV}
+struct TwoMomentCategories{W, AP, LV, RV, AA}
     warm_processes :: W
     air_properties :: AP
     cloud_liquid_fall_velocity :: LV
     rain_fall_velocity :: RV
+    aerosol_activation :: AA
 end
 
 Base.summary(::TwoMomentCategories) = "TwoMomentCategories"
@@ -89,28 +186,33 @@ Base.summary(::TwoMomentCategories) = "TwoMomentCategories"
                                              warm_processes = SB2006(FT),
                                              air_properties = AirProperties(FT),
                                              cloud_liquid_fall_velocity = StokesRegimeVelType(FT),
-                                             rain_fall_velocity = SB2006VelType(FT))
+                                             rain_fall_velocity = SB2006VelType(FT),
+                                             aerosol_activation = default_aerosol_activation(FT))
 
-Construct `TwoMomentCategories` with default Seifert-Beheng 2006 parameters.
+Construct `TwoMomentCategories` with default Seifert-Beheng 2006 parameters and aerosol activation.
 
 # Keyword arguments
 - `warm_processes`: SB2006 parameters for warm-rain microphysics
 - `air_properties`: Air properties for thermodynamic calculations
 - `cloud_liquid_fall_velocity`: Terminal velocity parameters for cloud droplets (Stokes regime)
 - `rain_fall_velocity`: Terminal velocity parameters for rain drops
+- `aerosol_activation`: Aerosol activation parameters (default: continental aerosol).
+  Set to `nothing` to disable activation (not recommended for physical simulations).
 """
 function two_moment_cloud_microphysics_categories(FT::DataType = Oceananigans.defaults.FloatType;
                                                   warm_processes = SB2006(FT),
                                                   air_properties = AirProperties(FT),
                                                   cloud_liquid_fall_velocity = StokesRegimeVelType(FT),
-                                                  rain_fall_velocity = SB2006VelType(FT))
+                                                  rain_fall_velocity = SB2006VelType(FT),
+                                                  aerosol_activation = default_aerosol_activation(FT))
 
     return TwoMomentCategories(warm_processes, air_properties,
-                               cloud_liquid_fall_velocity, rain_fall_velocity)
+                               cloud_liquid_fall_velocity, rain_fall_velocity,
+                               aerosol_activation)
 end
 
 # Type aliases for two-moment microphysics
-const CM2MCategories = TwoMomentCategories{<:SB2006, <:AirProperties, <:StokesRegimeVelType}
+const CM2MCategories = TwoMomentCategories{<:SB2006, <:AirProperties, <:StokesRegimeVelType, <:Any, <:Any}
 const TwoMomentCloudMicrophysics = BulkMicrophysics{<:Any, <:CM2MCategories, <:Any}
 
 # Warm-phase non-equilibrium with 2M precipitation
@@ -121,22 +223,27 @@ const WPNE2M = WarmPhaseNonEquilibrium2M
 ##### MicrophysicalState construction from fields
 #####
 
-# Gridless version: takes a NamedTuple of density-weighted scalars
-@inline function AtmosphereModels.microphysical_state(bμp::WPNE2M, ρ, μ, 𝒰)
+# Gridless version: takes density, prognostic NamedTuple, thermodynamic state, and updraft velocity
+@inline function AtmosphereModels.microphysical_state(bμp::WPNE2M, ρ, μ, 𝒰, w=zero(ρ))
     qᶜˡ = μ.ρqᶜˡ / ρ
     nᶜˡ = μ.ρnᶜˡ / ρ
     qʳ = μ.ρqʳ / ρ
     nʳ = μ.ρnʳ / ρ
-    return WarmPhaseTwoMomentState(qᶜˡ, nᶜˡ, qʳ, nʳ)
+    return WarmPhaseTwoMomentState(qᶜˡ, nᶜˡ, qʳ, nʳ, w)
 end
 
 # Grid-indexed version: extracts from Fields
+# For grid-based models, w = 0 by default (can be overridden by specific schemes)
 @inline function AtmosphereModels.grid_microphysical_state(i, j, k, grid, bμp::WPNE2M, μ, ρ, 𝒰)
+    FT = typeof(ρ)
     @inbounds qᶜˡ = μ.qᶜˡ[i, j, k]
     @inbounds nᶜˡ = μ.nᶜˡ[i, j, k]
     @inbounds qʳ = μ.qʳ[i, j, k]
     @inbounds nʳ = μ.nʳ[i, j, k]
-    return WarmPhaseTwoMomentState(qᶜˡ, nᶜˡ, qʳ, nʳ)
+    # For grid-based models, updraft velocity would need to be passed separately
+    # Default to zero (activation disabled in tendency computation when w ≤ 0)
+    w = zero(FT)
+    return WarmPhaseTwoMomentState(qᶜˡ, nᶜˡ, qʳ, nʳ, w)
 end
 
 """
@@ -150,6 +257,7 @@ using the [Seifert and Beheng (2006)](@cite SeifertBeheng2006) two-moment parame
 
 The two-moment scheme tracks both mass and number concentration for cloud liquid and rain,
 using CloudMicrophysics.jl 2M processes:
+- **Aerosol activation**: Creates cloud droplets when supersaturation develops (enabled by default)
 - Condensation/evaporation of cloud liquid (relaxation toward saturation)
 - Autoconversion of cloud liquid to rain (mass and number)
 - Accretion of cloud liquid by rain (mass and number)
@@ -160,7 +268,7 @@ using CloudMicrophysics.jl 2M processes:
 - Terminal velocities (number-weighted and mass-weighted)
 
 Non-equilibrium cloud formation is used, where cloud liquid mass and number are prognostic
-variables that evolve via condensation/evaporation and microphysical tendencies.
+variables that evolve via condensation/evaporation, aerosol activation, and microphysical tendencies.
 
 The prognostic variables are:
 - `ρqᶜˡ`: cloud liquid mass density [kg/m³]
@@ -168,9 +276,28 @@ The prognostic variables are:
 - `ρqʳ`: rain mass density [kg/m³]
 - `ρnʳ`: rain number density [1/m³]
 
+## Aerosol Activation
+
+Aerosol activation is **enabled by default** and provides the physical source term for cloud
+droplet number concentration. Without activation, cloud droplets cannot form. The default
+aerosol population represents typical continental conditions (~100 cm⁻³).
+
+To customize the aerosol population, pass a custom `categories` with different `aerosol_activation`:
+
+```julia
+# Marine aerosol (fewer, more hygroscopic particles)
+marine_mode = CMAM.Mode_κ(0.08e-6, 1.8, 50e6, (1.0,), (1.0,), (0.058,), (1.0,))
+marine_activation = AerosolActivation(
+    AerosolActivationParameters(Float64),
+    CMAM.AerosolDistribution((marine_mode,))
+)
+categories = two_moment_cloud_microphysics_categories(aerosol_activation = marine_activation)
+microphysics = TwoMomentCloudMicrophysics(categories = categories)
+```
+
 # Keyword arguments
 - `cloud_formation`: Cloud formation scheme (default: `NonEquilibriumCloudFormation`)
-- `categories`: `TwoMomentCategories` containing SB2006 parameters
+- `categories`: `TwoMomentCategories` containing SB2006 and aerosol activation parameters
 - `precipitation_boundary_condition`: Controls whether precipitation passes through the bottom boundary.
   - `nothing` (default): Rain exits through the bottom (open boundary)
   - `ImpenetrableBoundaryCondition()`: Rain collects at the bottom (zero terminal velocity at surface)
@@ -182,6 +309,8 @@ for details on the [Seifert and Beheng (2006)](@cite SeifertBeheng2006) scheme.
 * Seifert, A. and Beheng, K. D. (2006). A two-moment cloud microphysics
     parameterization for mixed-phase clouds. Part 1: Model description.
     Meteorol. Atmos. Phys., 92, 45-66. https://doi.org/10.1007/s00703-005-0112-4
+* Abdul-Razzak, H. and Ghan, S.J. (2000). A parameterization of aerosol activation:
+  2. Multiple aerosol types. J. Geophys. Res., 105(D5), 6837-6844.
 """
 function TwoMomentCloudMicrophysics(FT::DataType = Oceananigans.defaults.FloatType;
                                     cloud_formation = NonEquilibriumCloudFormation(nothing, nothing),
@@ -447,6 +576,9 @@ end
 ##### Cloud liquid number tendency (ρnᶜˡ) - state-based
 #####
 
+# Activation timescale (seconds) - controls how quickly droplets form when supersaturated
+const τ_activation = 1.0
+
 @inline function AtmosphereModels.microphysical_tendency(bμp::WPNE2M, ::Val{:ρnᶜˡ}, ρ, ℳ::WarmPhaseTwoMomentState, 𝒰, constants)
     categories = bμp.categories
     sb = categories.warm_processes
@@ -454,6 +586,9 @@ end
     qᶜˡ = ℳ.qᶜˡ
     qʳ = ℳ.qʳ
     nᶜˡ = ℳ.nᶜˡ
+    w = ℳ.w
+
+    FT = typeof(ρ)
 
     # Number density [1/m³]
     Nᶜˡ = ρ * max(0, nᶜˡ)
@@ -473,14 +608,66 @@ end
     dNᶜˡ_adj_up = CM2.number_increase_for_mass_limit(sb.numadj, sb.pdf_c.xc_max, max(0, qᶜˡ), ρ, Nᶜˡ)
     dNᶜˡ_adj_dn = CM2.number_decrease_for_mass_limit(sb.numadj, sb.pdf_c.xc_min, max(0, qᶜˡ), ρ, Nᶜˡ)
 
-    # Total tendency (convert from [1/m³/s] to [1/kg/s] by dividing by ρ, then multiply back)
-    # Actually, we're computing ρnᶜˡ tendency, so we need [1/m³/s] which is already what we have
-    Σ_dNᶜˡ = dNᶜˡ_au + dNᶜˡ_sc + dNᶜˡ_ac + dNᶜˡ_adj_up + dNᶜˡ_adj_dn
+    # Aerosol activation: source of cloud droplet number
+    dNᶜˡ_act = aerosol_activation_tendency(categories.aerosol_activation, categories.air_properties,
+                                            ρ, Nᶜˡ, w, 𝒰, constants)
+
+    # Total tendency [1/m³/s]
+    Σ_dNᶜˡ = dNᶜˡ_au + dNᶜˡ_sc + dNᶜˡ_ac + dNᶜˡ_adj_up + dNᶜˡ_adj_dn + dNᶜˡ_act
 
     # Numerical relaxation for negative values
     Sⁿᵘᵐ = -Nᶜˡ / τⁿᵘᵐ_2m
 
     return ifelse(nᶜˡ >= 0, Σ_dNᶜˡ, Sⁿᵘᵐ)
+end
+
+#####
+##### Aerosol activation tendency
+#####
+
+# No activation when aerosol_activation is nothing
+@inline aerosol_activation_tendency(::Nothing, aps, ρ, Nᶜˡ, w, 𝒰, constants) = zero(ρ)
+
+# Compute activation tendency using Abdul-Razzak and Ghan (2000)
+@inline function aerosol_activation_tendency(
+    aerosol_activation::AerosolActivation,
+    aps::AirProperties{FT},
+    ρ::FT,
+    Nᶜˡ::FT,
+    w::FT,
+    𝒰,
+    constants,
+) where {FT}
+
+    # Only activate if there's updraft (positive w)
+    w_pos = max(zero(FT), w)
+
+    # Skip computation if w ≤ 0
+    if w_pos < eps(FT)
+        return zero(FT)
+    end
+
+    # Get thermodynamic properties
+    T = temperature(𝒰, constants)
+    p = 𝒰.reference_pressure
+    q = 𝒰.moisture_mass_fractions
+    qᵗ = q.vapor + q.liquid
+    qˡ = q.liquid
+
+    # Check supersaturation - activation ONLY occurs when air is supersaturated (S > 0)
+    S = supersaturation(T, ρ, q, constants, PlanarLiquidSurface())
+    if S <= zero(FT)
+        return zero(FT)  # No activation in subsaturated air
+    end
+
+    # Compute number of activated droplets
+    N_activated = activated_droplet_number(aerosol_activation, aps, T, p, w_pos, qᵗ, qˡ, ρ, constants)
+
+    # Activation source: relax toward activated number if current is less
+    # Only add droplets, never remove (activation is irreversible on short timescales)
+    dNᶜˡ_act = max(zero(FT), (N_activated - Nᶜˡ)) / FT(τ_activation)
+
+    return dNᶜˡ_act
 end
 
 #####
