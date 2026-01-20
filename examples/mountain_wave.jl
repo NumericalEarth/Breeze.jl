@@ -56,6 +56,7 @@ add_callback!(simulation, progress, name=:progress, IterationInterval(200))
 filename = "mountain_waves"
 outputs = merge(model.velocities, (; δ))
 simulation.output_writers[:fields] = JLD2Writer(model, outputs; filename,
+                                                including = [:grid],
                                                 schedule = IterationInterval(10),
                                                 overwrite_existing = true)
 

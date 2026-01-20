@@ -23,7 +23,7 @@ $(TYPEDSIGNATURES)
 
 Compute the pressure correction for anelastic dynamics by solving the pressure Poisson equation.
 """
-function TimeSteppers.compute_pressure_correction!(model::AnelasticModel, Δt)
+function NonhydrostaticModels.compute_pressure_correction!(model::AnelasticModel, Δt)
     # Mask immersed velocities
     foreach(mask_immersed_field!, model.momentum)
     fill_halo_regions!(model.momentum, model.clock, fields(model))
@@ -62,7 +62,7 @@ Update the predictor momentum ``(ρu, ρv, ρw)`` with the non-hydrostatic press
 (\\rho\\boldsymbol{u})^{n+1} = (\\rho\\boldsymbol{u})^n - \\Delta t \\, \\rho_r \\boldsymbol{\\nabla} \\left( \\alpha_r p_{nh} \\right)
 ```
 """
-function TimeSteppers.make_pressure_correction!(model::AnelasticModel, Δt)
+function NonhydrostaticModels.make_pressure_correction!(model::AnelasticModel, Δt)
     dynamics = model.dynamics
 
     launch!(model.architecture, model.grid, :xyz,
@@ -75,4 +75,3 @@ function TimeSteppers.make_pressure_correction!(model::AnelasticModel, Δt)
 
     return nothing
 end
-

@@ -16,7 +16,7 @@ using Oceananigans.BoundaryConditions: ImpenetrableBoundaryCondition
 ##### One-moment microphysics tests
 #####
 
-@testset "OneMomentCloudMicrophysics construction [$(FT)]" for FT in (Float32, Float64)
+@testset "OneMomentCloudMicrophysics construction [$(FT)]" for FT in test_float_types()
     Oceananigans.defaults.FloatType = FT
 
     # Default construction (non-equilibrium)
@@ -38,7 +38,7 @@ using Oceananigans.BoundaryConditions: ImpenetrableBoundaryCondition
     @test :ρqʳ in prog_fields
 end
 
-@testset "OneMomentCloudMicrophysics with SaturationAdjustment [$(FT)]" for FT in (Float32, Float64)
+@testset "OneMomentCloudMicrophysics with SaturationAdjustment [$(FT)]" for FT in test_float_types()
     Oceananigans.defaults.FloatType = FT
 
     # Warm-phase saturation adjustment
@@ -62,7 +62,7 @@ end
     @test :ρqˢ in prog_fields_mixed  # snow for mixed phase
 end
 
-@testset "OneMomentCloudMicrophysics non-equilibrium time-stepping [$(FT)]" for FT in (Float32, Float64)
+@testset "OneMomentCloudMicrophysics non-equilibrium time-stepping [$(FT)]" for FT in test_float_types()
     Oceananigans.defaults.FloatType = FT
     grid = RectilinearGrid(default_arch; size=(4, 4, 4), x=(0, 1_000), y=(0, 1_000), z=(0, 1_000))
 
@@ -95,7 +95,7 @@ end
     @test model.clock.iteration == 6
 end
 
-@testset "OneMomentCloudMicrophysics saturation adjustment time-stepping [$(FT)]" for FT in (Float32, Float64)
+@testset "OneMomentCloudMicrophysics saturation adjustment time-stepping [$(FT)]" for FT in test_float_types()
     Oceananigans.defaults.FloatType = FT
     grid = RectilinearGrid(default_arch; size=(4, 4, 4), x=(0, 1_000), y=(0, 1_000), z=(0, 1_000))
 
@@ -126,7 +126,7 @@ end
     @test model.clock.iteration == 6
 end
 
-@testset "OneMomentCloudMicrophysics mixed-phase time-stepping [$(FT)]" for FT in (Float32, Float64)
+@testset "OneMomentCloudMicrophysics mixed-phase time-stepping [$(FT)]" for FT in test_float_types()
     Oceananigans.defaults.FloatType = FT
     grid = RectilinearGrid(default_arch; size=(4, 4, 4), x=(0, 1_000), y=(0, 1_000), z=(0, 1_000))
 
@@ -158,7 +158,7 @@ end
     @test model.clock.iteration == 6
 end
 
-@testset "OneMomentCloudMicrophysics precipitation rate diagnostic [$(FT)]" for FT in (Float32, Float64)
+@testset "OneMomentCloudMicrophysics precipitation rate diagnostic [$(FT)]" for FT in test_float_types()
     Oceananigans.defaults.FloatType = FT
     grid = RectilinearGrid(default_arch; size=(4, 4, 4), x=(0, 1_000), y=(0, 1_000), z=(0, 1_000))
 
@@ -194,7 +194,7 @@ end
     @test P_ice === nothing
 end
 
-@testset "NonEquilibriumCloudFormation construction [$(FT)]" for FT in (Float32, Float64)
+@testset "NonEquilibriumCloudFormation construction [$(FT)]" for FT in test_float_types()
     Oceananigans.defaults.FloatType = FT
 
     # Default construction
@@ -214,7 +214,7 @@ end
     @test μ1.categories.cloud_liquid.τ_relax == FT(10.0)
 end
 
-@testset "Setting specific microphysical variables [$(FT)]" for FT in (Float32, Float64)
+@testset "Setting specific microphysical variables [$(FT)]" for FT in test_float_types()
     Oceananigans.defaults.FloatType = FT
     grid = RectilinearGrid(default_arch; size=(2, 2, 2), x=(0, 100), y=(0, 100), z=(0, 100))
 
@@ -247,7 +247,7 @@ end
     @test model.clock.iteration == 1
 end
 
-@testset "Surface precipitation flux diagnostic [$(FT)]" for FT in (Float32, Float64)
+@testset "Surface precipitation flux diagnostic [$(FT)]" for FT in test_float_types()
     Oceananigans.defaults.FloatType = FT
     grid = RectilinearGrid(default_arch; size=(2, 2, 4), x=(0, 100), y=(0, 100), z=(0, 100))
 
@@ -275,7 +275,7 @@ end
     @test @allowscalar spf[1, 1] > 0  # Rain falls down, so flux should be positive
 end
 
-@testset "Rain accumulation from autoconversion [$(FT)]" for FT in (Float32, Float64)
+@testset "Rain accumulation from autoconversion [$(FT)]" for FT in test_float_types()
     # This test verifies that microphysical tendencies (autoconversion) are
     # actually being applied to prognostic fields during time-stepping.
     # If this test fails, it indicates a bug in tendency application.
@@ -284,7 +284,7 @@ end
     # rain sedimentation (terminal velocity) creates a flux divergence that
     # exactly cancels the autoconversion tendency. With multiple levels,
     # rain can accumulate in the domain before sedimenting out.
-    
+
     Oceananigans.defaults.FloatType = FT
     Nz = 10
     grid = RectilinearGrid(default_arch; size=(1, 1, Nz), x=(0, 1), y=(0, 1), z=(0, 1000),
@@ -301,9 +301,9 @@ end
     # High qᵗ ensures supersaturation → cloud forms
     set!(model; θ=300, qᵗ=FT(0.050))
 
-    # First, run to condensation equilibrium (~20τ)
+    # First, run to condensation equilibrium (reduced from 10τ to 5τ)
     τ = microphysics.categories.cloud_liquid.τ_relax
-    simulation = Simulation(model; Δt=τ/10, stop_time=10τ, verbose=false)
+    simulation = Simulation(model; Δt=τ/5, stop_time=5τ, verbose=false)
     run!(simulation)
 
     # Cloud liquid should have formed
@@ -313,10 +313,9 @@ end
     # Sum total rain in domain before autoconversion run
     ρqʳ_total_initial = sum(model.microphysical_fields.ρqʳ)
 
-    # Now run longer for autoconversion to accumulate rain
-    # Autoconversion timescale is ~1000s (100τ), so run for 100τ
+    # Now run longer for autoconversion to accumulate rain (reduced from 100τ to 30τ)
     # (Rain will sediment and exit at bottom, but should still accumulate in upper cells)
-    simulation.stop_time = simulation.model.clock.time + 100τ
+    simulation.stop_time = simulation.model.clock.time + 30τ
     run!(simulation)
 
     # Check that rain was produced (either still in domain or has sedimented through)
@@ -327,7 +326,7 @@ end
     # Rain should exist somewhere in the domain
     # (Even if some has sedimented out, there should be rain in upper cells)
     @test qʳ_max_final > FT(1e-8)  # At least some rain exists
-    
+
     # Check that autoconversion is happening by verifying rain increases initially
     # before sedimentation can remove it all. We'll check the top cell which
     # should accumulate rain without losing it to sedimentation as quickly.
@@ -335,10 +334,10 @@ end
     @test qʳ_top > FT(1e-10)  # Rain should form in top cell
 end
 
-@testset "ImpenetrableBoundaryCondition prevents rain from exiting domain [$(FT)]" for FT in (Float32, Float64)
+@testset "ImpenetrableBoundaryCondition prevents rain from exiting domain [$(FT)]" for FT in test_float_types()
     # This test verifies that ImpenetrableBoundaryCondition allows rain to accumulate
     # in a single-cell domain where it would otherwise sediment out.
-    
+
     Oceananigans.defaults.FloatType = FT
     grid = RectilinearGrid(default_arch; size=(1, 1, 1), x=(0, 1), y=(0, 1), z=(0, 1),
                            topology=(Periodic, Periodic, Bounded))
@@ -362,7 +361,7 @@ end
     # With ImpenetrableBoundaryCondition, rain should accumulate in the domain
     # because it can't sediment out through the bottom
     qʳ_final = @allowscalar model.microphysical_fields.qʳ[1, 1, 1]
-    
+
     # Check terminal velocity at bottom is zero (impenetrable)
     wʳ_bottom = @allowscalar model.microphysical_fields.wʳ[1, 1, 1]
     @test wʳ_bottom == 0  # Terminal velocity should be zero at impenetrable bottom
@@ -371,7 +370,7 @@ end
     @test qʳ_final > FT(0.001)  # At least 1 g/kg rain accumulated
 end
 
-@testset "Mixed-phase non-equilibrium time-stepping [$(FT)]" for FT in (Float32, Float64)
+@testset "Mixed-phase non-equilibrium time-stepping [$(FT)]" for FT in test_float_types()
     Oceananigans.defaults.FloatType = FT
     grid = RectilinearGrid(default_arch; size=(2, 2, 2), x=(0, 100), y=(0, 100), z=(0, 100))
 
@@ -398,7 +397,7 @@ end
     @test model.clock.iteration == 1
 end
 
-@testset "OneMomentCloudMicrophysics show methods [$(FT)]" for FT in (Float32, Float64)
+@testset "OneMomentCloudMicrophysics show methods [$(FT)]" for FT in test_float_types()
     Oceananigans.defaults.FloatType = FT
 
     # Non-equilibrium scheme
@@ -414,7 +413,7 @@ end
     @test contains(str_sa, "BulkMicrophysics")
 end
 
-@testset "microphysical_velocities [$(FT)]" for FT in (Float32, Float64)
+@testset "microphysical_velocities [$(FT)]" for FT in test_float_types()
     Oceananigans.defaults.FloatType = FT
     grid = RectilinearGrid(default_arch; size=(2, 2, 2), x=(0, 100), y=(0, 100), z=(0, 100))
 

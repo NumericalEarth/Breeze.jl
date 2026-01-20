@@ -123,7 +123,7 @@ struct ThermodynamicConstants{FT, C, I, SVP}
     saturation_vapor_pressure :: SVP
 end
 
-Base.summary(at::ThermodynamicConstants{FT}) where FT = "ThermodynamicConstants{$FT}"
+Base.summary(::ThermodynamicConstants{FT}) where FT = "ThermodynamicConstants{$FT}"
 
 function Base.show(io::IO, at::ThermodynamicConstants)
     print(io, summary(at), ":", '\n',
@@ -423,7 +423,7 @@ end
 
 #####
 ##### Moisture mixing ratios
-##### 
+#####
 
 struct MoistureMixingRatio{FT}
     vapor :: FT
@@ -517,4 +517,3 @@ Converts mixing ratios to mass fractions and calls `mixture_heat_capacity(q::MMF
 @inline function mixture_heat_capacity(r::MR, constants::TC)
     return mixture_heat_capacity(MoistureMassFractions(r), constants)
 end
-

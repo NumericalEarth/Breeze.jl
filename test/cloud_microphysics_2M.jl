@@ -18,7 +18,7 @@ using Oceananigans.BoundaryConditions: ImpenetrableBoundaryCondition
 ##### Two-moment microphysics tests
 #####
 
-@testset "TwoMomentCloudMicrophysics construction [$FT]" for FT in (Float32, Float64)
+@testset "TwoMomentCloudMicrophysics construction [$FT]" for FT in test_float_types()
     Oceananigans.defaults.FloatType = FT
 
     # Default construction (non-equilibrium)
@@ -43,7 +43,7 @@ using Oceananigans.BoundaryConditions: ImpenetrableBoundaryCondition
     @test_throws ArgumentError TwoMomentCloudMicrophysics(cloud_formation = SaturationAdjustment(FT))
 end
 
-@testset "TwoMomentCategories construction [$FT]" for FT in (Float32, Float64)
+@testset "TwoMomentCategories construction [$FT]" for FT in test_float_types()
     Oceananigans.defaults.FloatType = FT
 
     categories = two_moment_cloud_microphysics_categories(FT)
@@ -54,7 +54,7 @@ end
     @test categories.rain_fall_velocity isa CloudMicrophysics.Parameters.SB2006VelType
 end
 
-@testset "TwoMomentCloudMicrophysics time-stepping [$FT]" for FT in (Float32, Float64)
+@testset "TwoMomentCloudMicrophysics time-stepping [$FT]" for FT in test_float_types()
     Oceananigans.defaults.FloatType = FT
     grid = RectilinearGrid(default_arch; size=(4, 4, 4), x=(0, 1_000), y=(0, 1_000), z=(0, 1_000))
 
@@ -92,7 +92,7 @@ end
     @test model.clock.iteration == 6
 end
 
-@testset "TwoMomentCloudMicrophysics setting initial conditions [$FT]" for FT in (Float32, Float64)
+@testset "TwoMomentCloudMicrophysics setting initial conditions [$FT]" for FT in test_float_types()
     Oceananigans.defaults.FloatType = FT
     grid = RectilinearGrid(default_arch; size=(2, 2, 2), x=(0, 100), y=(0, 100), z=(0, 100))
 
@@ -131,7 +131,7 @@ end
     @test model.clock.iteration == 1
 end
 
-@testset "TwoMomentCloudMicrophysics precipitation rate diagnostic [$FT]" for FT in (Float32, Float64)
+@testset "TwoMomentCloudMicrophysics precipitation rate diagnostic [$FT]" for FT in test_float_types()
     Oceananigans.defaults.FloatType = FT
     grid = RectilinearGrid(default_arch; size=(4, 4, 4), x=(0, 1_000), y=(0, 1_000), z=(0, 1_000))
 
@@ -154,7 +154,7 @@ end
     @test P_ice === nothing
 end
 
-@testset "TwoMomentCloudMicrophysics surface precipitation flux [$FT]" for FT in (Float32, Float64)
+@testset "TwoMomentCloudMicrophysics surface precipitation flux [$FT]" for FT in test_float_types()
     Oceananigans.defaults.FloatType = FT
     grid = RectilinearGrid(default_arch; size=(2, 2, 4), x=(0, 100), y=(0, 100), z=(0, 100))
 
@@ -182,7 +182,7 @@ end
     @test @allowscalar spf[1, 1] >= 0  # Rain falls down, so flux should be non-negative
 end
 
-@testset "TwoMomentCloudMicrophysics microphysical_velocities [$FT]" for FT in (Float32, Float64)
+@testset "TwoMomentCloudMicrophysics microphysical_velocities [$FT]" for FT in test_float_types()
     Oceananigans.defaults.FloatType = FT
     grid = RectilinearGrid(default_arch; size=(2, 2, 2), x=(0, 100), y=(0, 100), z=(0, 100))
 
@@ -217,7 +217,7 @@ end
     @test haskey(vel_cloud_num, :w)
 end
 
-@testset "TwoMomentCloudMicrophysics terminal velocities [$FT]" for FT in (Float32, Float64)
+@testset "TwoMomentCloudMicrophysics terminal velocities [$FT]" for FT in test_float_types()
     Oceananigans.defaults.FloatType = FT
     grid = RectilinearGrid(default_arch; size=(2, 2, 2), x=(0, 100), y=(0, 100), z=(0, 100))
 
@@ -249,7 +249,7 @@ end
     @test abs(wʳ) > abs(wᶜˡ)  # Rain falls faster than cloud
 end
 
-@testset "TwoMomentCloudMicrophysics ImpenetrableBoundaryCondition [$FT]" for FT in (Float32, Float64)
+@testset "TwoMomentCloudMicrophysics ImpenetrableBoundaryCondition [$FT]" for FT in test_float_types()
     Oceananigans.defaults.FloatType = FT
     grid = RectilinearGrid(default_arch; size=(1, 1, 1), x=(0, 1), y=(0, 1), z=(0, 1),
                            topology=(Periodic, Periodic, Bounded))
@@ -277,7 +277,7 @@ end
     @test wᶜˡₙ_bottom == 0
 end
 
-@testset "TwoMomentCloudMicrophysics show methods [$FT]" for FT in (Float32, Float64)
+@testset "TwoMomentCloudMicrophysics show methods [$FT]" for FT in test_float_types()
     Oceananigans.defaults.FloatType = FT
 
     μ2 = TwoMomentCloudMicrophysics()
@@ -287,7 +287,7 @@ end
     @test contains(str, "warm_processes")
 end
 
-@testset "TwoMomentCloudMicrophysics cloud condensation [$FT]" for FT in (Float32, Float64)
+@testset "TwoMomentCloudMicrophysics cloud condensation [$FT]" for FT in test_float_types()
     # Test that cloud liquid forms via condensation in supersaturated conditions
     Oceananigans.defaults.FloatType = FT
     Nz = 4
@@ -307,9 +307,9 @@ end
 
     qᶜˡ_initial = maximum(model.microphysical_fields.qᶜˡ)
 
-    # Run for condensation
+    # Run for condensation (reduced from 10τ to 5τ)
     τ_relax = 10.0  # Default relaxation timescale
-    simulation = Simulation(model; Δt=τ_relax/10, stop_time=10τ_relax, verbose=false)
+    simulation = Simulation(model; Δt=τ_relax/5, stop_time=5τ_relax, verbose=false)
     run!(simulation)
 
     # Cloud liquid should have increased due to condensation

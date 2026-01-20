@@ -107,7 +107,7 @@ Compute the supersaturation ``𝒮 = pᵛ/pᵛ⁺ - 1`` over a given `surface`.
 
 # Arguments
 - `T`: Temperature
-- `ρ`: Total air density  
+- `ρ`: Total air density
 - `q`: `MoistureMassFractions` containing vapor, liquid, and ice mass fractions
 - `constants`: `ThermodynamicConstants`
 - `surface`: Surface type (e.g., `PlanarLiquidSurface()`, `PlanarIceSurface()`)
@@ -133,11 +133,13 @@ The equilibrated surface is always a planar liquid surface.
 struct WarmPhaseEquilibrium <: AbstractPhaseEquilibrium end
 
 """
-$(TYPEDSIGNATURES)
+    equilibrated_surface(phase_equilibrium::AbstractPhaseEquilibrium, T)
 
 Return the appropriate surface type for computing saturation vapor pressure
 given the phase `equilibrium` model and temperature `T`.
 """
+function equilibrated_surface end
+
 @inline equilibrated_surface(::WarmPhaseEquilibrium, T) = PlanarLiquidSurface()
 
 """

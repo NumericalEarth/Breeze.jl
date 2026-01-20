@@ -2,7 +2,7 @@ using Breeze
 using Oceananigans
 using Test
 
-@testset "AtmosphereModel tracers advection [$(FT)]" for FT in (Float32, Float64)
+@testset "AtmosphereModel tracers advection [$(FT)]" for FT in test_float_types()
     Oceananigans.defaults.FloatType = FT
     grid = RectilinearGrid(default_arch; size=(16, 8, 8), x=(0, 1_000), y=(0, 500), z=(0, 500))
     model = AtmosphereModel(grid; tracers=(:a, :b))

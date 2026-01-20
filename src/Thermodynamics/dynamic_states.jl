@@ -54,7 +54,7 @@ end
     qˡ = q.liquid
     qⁱ = q.ice
 
-    return Π * θ + (ℒˡᵣ * qˡ + ℒⁱᵣ * qⁱ) / cᵖᵐ 
+    return Π * θ + (ℒˡᵣ * qˡ + ℒⁱᵣ * qⁱ) / cᵖᵐ
 end
 
 @inline function with_temperature(𝒰::LiquidIcePotentialTemperatureState, T, constants)

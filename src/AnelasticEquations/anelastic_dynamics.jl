@@ -38,7 +38,7 @@ $(TYPEDSIGNATURES)
 
 Materialize a stub `AnelasticDynamics` into a full dynamics object with the pressure anomaly field.
 """
-function AtmosphereModels.materialize_dynamics(dynamics::AnelasticDynamics, grid, boundary_conditions)
+function AtmosphereModels.materialize_dynamics(dynamics::AnelasticDynamics, grid, boundary_conditions, thermodynamic_constants)
     pressure_anomaly = CenterField(grid)
     return AnelasticDynamics(dynamics.reference_state, pressure_anomaly)
 end
@@ -164,4 +164,3 @@ function AtmosphereModels.materialize_momentum_and_velocities(dynamics::Anelasti
 
     return momentum, velocities
 end
-
