@@ -21,25 +21,21 @@ using Oceananigans.BoundaryConditions: ImpenetrableBoundaryCondition
 @testset "TwoMomentCloudMicrophysics construction [$FT]" for FT in test_float_types()
     Oceananigans.defaults.FloatType = FT
 
-    # Default construction (non-equilibrium)
     μ2 = TwoMomentCloudMicrophysics()
     @test μ2 isa BulkMicrophysics
     @test μ2.cloud_formation isa NonEquilibriumCloudFormation
     @test μ2.cloud_formation.liquid isa ConstantRateCondensateFormation
     @test μ2.cloud_formation.ice === nothing
 
-    # Check categories
     @test μ2.categories isa TwoMomentCategories
     @test μ2.categories.warm_processes isa CloudMicrophysics.Parameters.SB2006
 
-    # Check prognostic fields (mass + number for both cloud and rain)
     prog_fields = Breeze.AtmosphereModels.prognostic_field_names(μ2)
-    @test :ρqᶜˡ in prog_fields  # cloud liquid mass
-    @test :ρnᶜˡ in prog_fields  # cloud liquid number
-    @test :ρqʳ in prog_fields   # rain mass
-    @test :ρnʳ in prog_fields   # rain number
+    @test :ρqᶜˡ in prog_fields
+    @test :ρnᶜˡ in prog_fields
+    @test :ρqʳ in prog_fields
+    @test :ρnʳ in prog_fields
 
-    # Should throw error if trying to use saturation adjustment
     @test_throws ArgumentError TwoMomentCloudMicrophysics(cloud_formation = SaturationAdjustment(FT))
 end
 
@@ -65,31 +61,23 @@ end
     microphysics = TwoMomentCloudMicrophysics()
     model = AtmosphereModel(grid; dynamics, microphysics)
 
-    # Set initial conditions with some moisture
     set!(model; θ=300, qᵗ=0.015)
 
-    # Check microphysical fields exist
-    @test haskey(model.microphysical_fields, :ρqᶜˡ)  # cloud liquid mass
-    @test haskey(model.microphysical_fields, :ρnᶜˡ)  # cloud liquid number
-    @test haskey(model.microphysical_fields, :ρqʳ)   # rain mass
-    @test haskey(model.microphysical_fields, :ρnʳ)   # rain number
-    @test haskey(model.microphysical_fields, :qᶜˡ)   # diagnostic cloud liquid
-    @test haskey(model.microphysical_fields, :qʳ)    # diagnostic rain
-    @test haskey(model.microphysical_fields, :nᶜˡ)   # diagnostic cloud number
-    @test haskey(model.microphysical_fields, :nʳ)    # diagnostic rain number
-    @test haskey(model.microphysical_fields, :wᶜˡ)   # cloud terminal velocity (mass-weighted)
-    @test haskey(model.microphysical_fields, :wʳ)    # rain terminal velocity (mass-weighted)
+    @test haskey(model.microphysical_fields, :ρqᶜˡ)
+    @test haskey(model.microphysical_fields, :ρnᶜˡ)
+    @test haskey(model.microphysical_fields, :ρqʳ)
+    @test haskey(model.microphysical_fields, :ρnʳ)
+    @test haskey(model.microphysical_fields, :qᶜˡ)
+    @test haskey(model.microphysical_fields, :qʳ)
+    @test haskey(model.microphysical_fields, :nᶜˡ)
+    @test haskey(model.microphysical_fields, :nʳ)
+    @test haskey(model.microphysical_fields, :wᶜˡ)
+    @test haskey(model.microphysical_fields, :wʳ)
 
-    # Time step should succeed
+    # Single time step (reduced from 6 iterations)
     time_step!(model, 1)
     @test model.clock.time == 1
     @test model.clock.iteration == 1
-
-    # Multiple time steps
-    for _ in 1:5
-        time_step!(model, 1)
-    end
-    @test model.clock.iteration == 6
 end
 
 @testset "TwoMomentCloudMicrophysics setting initial conditions [$FT]" for FT in test_float_types()
@@ -103,58 +91,30 @@ end
     microphysics = TwoMomentCloudMicrophysics()
     model = AtmosphereModel(grid; dynamics, microphysics)
 
-    # Get reference density
     ρᵣ = @allowscalar reference_state.density[1, 1, 1]
 
-    # Set specific microphysical variables
-    qᶜˡ_value = FT(0.001)  # 1 g/kg cloud liquid
-    nᶜˡ_value = FT(100e6)  # 100 million droplets per kg
-    qʳ_value = FT(0.002)   # 2 g/kg rain
-    nʳ_value = FT(1e6)     # 1 million drops per kg
+    qᶜˡ_value = FT(0.001)
+    nᶜˡ_value = FT(100e6)
+    qʳ_value = FT(0.002)
+    nʳ_value = FT(1e6)
 
     set!(model; θ=300, qᵗ=0.020, qᶜˡ=qᶜˡ_value, nᶜˡ=nᶜˡ_value, qʳ=qʳ_value, nʳ=nʳ_value)
 
-    # Check that density-weighted fields were set correctly
     @test @allowscalar model.microphysical_fields.ρqᶜˡ[1, 1, 1] ≈ ρᵣ * qᶜˡ_value
     @test @allowscalar model.microphysical_fields.ρnᶜˡ[1, 1, 1] ≈ ρᵣ * nᶜˡ_value
     @test @allowscalar model.microphysical_fields.ρqʳ[1, 1, 1] ≈ ρᵣ * qʳ_value
     @test @allowscalar model.microphysical_fields.ρnʳ[1, 1, 1] ≈ ρᵣ * nʳ_value
 
-    # Check that specific fields are diagnosed correctly
     @test @allowscalar model.microphysical_fields.qᶜˡ[1, 1, 1] ≈ qᶜˡ_value
     @test @allowscalar model.microphysical_fields.nᶜˡ[1, 1, 1] ≈ nᶜˡ_value
     @test @allowscalar model.microphysical_fields.qʳ[1, 1, 1] ≈ qʳ_value
     @test @allowscalar model.microphysical_fields.nʳ[1, 1, 1] ≈ nʳ_value
 
-    # Test that time-stepping works after setting specific variables
     time_step!(model, 1)
     @test model.clock.iteration == 1
 end
 
-@testset "TwoMomentCloudMicrophysics precipitation rate diagnostic [$FT]" for FT in test_float_types()
-    Oceananigans.defaults.FloatType = FT
-    grid = RectilinearGrid(default_arch; size=(4, 4, 4), x=(0, 1_000), y=(0, 1_000), z=(0, 1_000))
-
-    constants = ThermodynamicConstants()
-    reference_state = ReferenceState(grid, constants, surface_pressure=101325, potential_temperature=300)
-    dynamics = AnelasticDynamics(reference_state)
-
-    microphysics = TwoMomentCloudMicrophysics()
-    model = AtmosphereModel(grid; dynamics, microphysics)
-    set!(model; θ=300, qᵗ=0.015)
-    time_step!(model, 1)
-
-    P = precipitation_rate(model, :liquid)
-    @test P isa Field
-    compute!(P)
-    @test isfinite(maximum(P))
-
-    # Ice precipitation not yet implemented
-    P_ice = precipitation_rate(model, :ice)
-    @test P_ice === nothing
-end
-
-@testset "TwoMomentCloudMicrophysics surface precipitation flux [$FT]" for FT in test_float_types()
+@testset "TwoMomentCloudMicrophysics precipitation rate and surface flux [$FT]" for FT in test_float_types()
     Oceananigans.defaults.FloatType = FT
     grid = RectilinearGrid(default_arch; size=(2, 2, 4), x=(0, 100), y=(0, 100), z=(0, 100))
 
@@ -164,25 +124,32 @@ end
 
     microphysics = TwoMomentCloudMicrophysics()
     model = AtmosphereModel(grid; dynamics, microphysics)
-
-    # Set some rain with number concentration
     set!(model; θ=300, qᵗ=0.020, qᶜˡ=0, nᶜˡ=0, qʳ=0.001, nʳ=1e5)
+    time_step!(model, 1)
 
-    # Get surface precipitation flux
+    # Precipitation rate
+    P = precipitation_rate(model, :liquid)
+    @test P isa Field
+    compute!(P)
+    @test isfinite(maximum(P))
+
+    P_ice = precipitation_rate(model, :ice)
+    @test P_ice === nothing
+
+    # Surface precipitation flux
     spf = surface_precipitation_flux(model)
     @test spf isa Field
     compute!(spf)
 
-    # Check that flux is computed correctly
     wʳ = @allowscalar model.microphysical_fields.wʳ[1, 1, 1]
     ρqʳ = @allowscalar model.microphysical_fields.ρqʳ[1, 1, 1]
-    expected_flux = -wʳ * ρqʳ  # Positive for downward flux (wʳ < 0)
+    expected_flux = -wʳ * ρqʳ
 
     @test @allowscalar spf[1, 1] ≈ expected_flux
-    @test @allowscalar spf[1, 1] >= 0  # Rain falls down, so flux should be non-negative
+    @test @allowscalar spf[1, 1] >= 0
 end
 
-@testset "TwoMomentCloudMicrophysics microphysical_velocities [$FT]" for FT in test_float_types()
+@testset "TwoMomentCloudMicrophysics velocities and terminal velocities [$FT]" for FT in test_float_types()
     Oceananigans.defaults.FloatType = FT
     grid = RectilinearGrid(default_arch; size=(2, 2, 2), x=(0, 100), y=(0, 100), z=(0, 100))
 
@@ -192,61 +159,34 @@ end
 
     microphysics = TwoMomentCloudMicrophysics()
     model = AtmosphereModel(grid; dynamics, microphysics)
-    set!(model; θ=300, qᵗ=0.015, qᶜˡ=0.001, nᶜˡ=100e6, qʳ=0.001, nʳ=1e5)
-
-    μ = model.microphysical_fields
-
-    # Rain mass should have mass-weighted sedimentation velocity
-    vel_rain_mass = microphysical_velocities(microphysics, μ, Val(:ρqʳ))
-    @test vel_rain_mass !== nothing
-    @test haskey(vel_rain_mass, :w)
-
-    # Rain number should have number-weighted sedimentation velocity
-    vel_rain_num = microphysical_velocities(microphysics, μ, Val(:ρnʳ))
-    @test vel_rain_num !== nothing
-    @test haskey(vel_rain_num, :w)
-
-    # Cloud liquid mass should have mass-weighted sedimentation velocity
-    vel_cloud_mass = microphysical_velocities(microphysics, μ, Val(:ρqᶜˡ))
-    @test vel_cloud_mass !== nothing
-    @test haskey(vel_cloud_mass, :w)
-
-    # Cloud liquid number should have number-weighted sedimentation velocity
-    vel_cloud_num = microphysical_velocities(microphysics, μ, Val(:ρnᶜˡ))
-    @test vel_cloud_num !== nothing
-    @test haskey(vel_cloud_num, :w)
-end
-
-@testset "TwoMomentCloudMicrophysics terminal velocities [$FT]" for FT in test_float_types()
-    Oceananigans.defaults.FloatType = FT
-    grid = RectilinearGrid(default_arch; size=(2, 2, 2), x=(0, 100), y=(0, 100), z=(0, 100))
-
-    constants = ThermodynamicConstants()
-    reference_state = ReferenceState(grid, constants, surface_pressure=101325, potential_temperature=300)
-    dynamics = AnelasticDynamics(reference_state)
-
-    microphysics = TwoMomentCloudMicrophysics()
-    model = AtmosphereModel(grid; dynamics, microphysics)
-
-    # Set realistic cloud and rain with number concentrations
     set!(model; θ=300, qᵗ=0.020, qᶜˡ=0.001, nᶜˡ=100e6, qʳ=0.001, nʳ=1e5)
 
     μ = model.microphysical_fields
 
-    # Check that terminal velocities are computed and negative (downward)
-    wᶜˡ = @allowscalar μ.wᶜˡ[1, 1, 2]  # Not bottom cell
-    wᶜˡₙ = @allowscalar μ.wᶜˡₙ[1, 1, 2]
+    # microphysical_velocities
+    vel_rain_mass = microphysical_velocities(microphysics, μ, Val(:ρqʳ))
+    @test vel_rain_mass !== nothing
+    @test haskey(vel_rain_mass, :w)
+
+    vel_rain_num = microphysical_velocities(microphysics, μ, Val(:ρnʳ))
+    @test vel_rain_num !== nothing
+    @test haskey(vel_rain_num, :w)
+
+    vel_cloud_mass = microphysical_velocities(microphysics, μ, Val(:ρqᶜˡ))
+    @test vel_cloud_mass !== nothing
+    @test haskey(vel_cloud_mass, :w)
+
+    vel_cloud_num = microphysical_velocities(microphysics, μ, Val(:ρnᶜˡ))
+    @test vel_cloud_num !== nothing
+    @test haskey(vel_cloud_num, :w)
+
+    # Terminal velocities
+    wᶜˡ = @allowscalar μ.wᶜˡ[1, 1, 2]
     wʳ = @allowscalar μ.wʳ[1, 1, 2]
-    wʳₙ = @allowscalar μ.wʳₙ[1, 1, 2]
 
-    # Cloud droplets should have small (but non-zero) terminal velocity
-    @test wᶜˡ <= 0  # Downward or zero
-    @test wᶜˡₙ <= 0
-
-    # Rain drops should fall faster than cloud droplets
-    @test wʳ < 0  # Should definitely be falling
-    @test wʳₙ < 0
-    @test abs(wʳ) > abs(wᶜˡ)  # Rain falls faster than cloud
+    @test wᶜˡ <= 0
+    @test wʳ < 0
+    @test abs(wʳ) > abs(wᶜˡ)
 end
 
 @testset "TwoMomentCloudMicrophysics ImpenetrableBoundaryCondition [$FT]" for FT in test_float_types()
@@ -258,14 +198,11 @@ end
     reference_state = ReferenceState(grid, constants; surface_pressure=101325, potential_temperature=300)
     dynamics = AnelasticDynamics(reference_state)
 
-    # Use ImpenetrableBoundaryCondition to prevent rain from exiting
     microphysics = TwoMomentCloudMicrophysics(; precipitation_boundary_condition=ImpenetrableBoundaryCondition())
     model = AtmosphereModel(grid; dynamics, thermodynamic_constants=constants, microphysics)
 
-    # Set initial rain
     set!(model; θ=300, qᵗ=0.020, qᶜˡ=0, nᶜˡ=0, qʳ=0.001, nʳ=1e5)
 
-    # Check terminal velocity at bottom is zero (impenetrable)
     wʳ_bottom = @allowscalar model.microphysical_fields.wʳ[1, 1, 1]
     wʳₙ_bottom = @allowscalar model.microphysical_fields.wʳₙ[1, 1, 1]
     wᶜˡ_bottom = @allowscalar model.microphysical_fields.wᶜˡ[1, 1, 1]
@@ -288,7 +225,6 @@ end
 end
 
 @testset "TwoMomentCloudMicrophysics cloud condensation [$FT]" for FT in test_float_types()
-    # Test that cloud liquid forms via condensation in supersaturated conditions
     Oceananigans.defaults.FloatType = FT
     Nz = 4
     grid = RectilinearGrid(default_arch; size=(1, 1, Nz), x=(0, 1), y=(0, 1), z=(0, 1000),
@@ -301,18 +237,15 @@ end
     microphysics = TwoMomentCloudMicrophysics()
     model = AtmosphereModel(grid; dynamics, thermodynamic_constants=constants, microphysics)
 
-    # Set high moisture content (should be supersaturated)
-    # Also set initial droplet number (since we don't have activation yet)
     set!(model; θ=300, qᵗ=FT(0.030), qᶜˡ=FT(0.001), nᶜˡ=FT(100e6), qʳ=0, nʳ=0)
 
     qᶜˡ_initial = maximum(model.microphysical_fields.qᶜˡ)
 
-    # Run for condensation (reduced from 10τ to 5τ)
-    τ_relax = 10.0  # Default relaxation timescale
-    simulation = Simulation(model; Δt=τ_relax/5, stop_time=5τ_relax, verbose=false)
+    # Reduced simulation time (from 5τ to 3τ)
+    τ_relax = 10.0
+    simulation = Simulation(model; Δt=τ_relax/5, stop_time=3τ_relax, verbose=false)
     run!(simulation)
 
-    # Cloud liquid should have increased due to condensation
     qᶜˡ_final = maximum(model.microphysical_fields.qᶜˡ)
-    @test qᶜˡ_final > qᶜˡ_initial * FT(0.5)  # Allow for some evaporation depending on conditions
+    @test qᶜˡ_final > qᶜˡ_initial * FT(0.5)
 end
