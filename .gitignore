@@ -27,6 +27,7 @@ Manifest.toml
 
 # output files
 *.jld2
+*.nc
 *.png
 *.mp4
 
