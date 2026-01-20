@@ -157,7 +157,7 @@ function AtmosphereModel(grid;
     # Also converts ρe boundary conditions to ρθ for potential temperature formulations
     p₀ = surface_pressure(dynamics)
     boundary_conditions = regularize_atmosphere_model_boundary_conditions(boundary_conditions, grid, formulation,
-                                                                          microphysics, p₀, thermodynamic_constants)
+                                                                          dynamics, microphysics, p₀, thermodynamic_constants)
 
     all_names = field_names(dynamics, formulation, microphysics, tracers)
     regularized_boundary_conditions = regularize_field_boundary_conditions(boundary_conditions, grid, all_names)

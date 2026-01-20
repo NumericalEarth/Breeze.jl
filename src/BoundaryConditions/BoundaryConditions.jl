@@ -16,7 +16,7 @@ export BulkDragFunction,
        ThetaFluxBoundaryConditionFunction,
        ThetaFluxBoundaryCondition
 
-using ..AtmosphereModels: AtmosphereModels, compute_moisture_fractions
+using ..AtmosphereModels: AtmosphereModels, compute_moisture_fractions, dynamics_density
 using ..Thermodynamics: saturation_specific_humidity, surface_density, PlanarLiquidSurface,
                         mixture_heat_capacity
 
@@ -100,7 +100,7 @@ If `formulation` is `:LiquidIcePotentialTemperature` and `ρe` boundary conditio
 they are automatically converted to `ρθ` boundary conditions using `EnergyFluxBoundaryCondition`.
 """
 function AtmosphereModels.regularize_atmosphere_model_boundary_conditions(boundary_conditions, grid, formulation,
-                                                                          microphysics, surface_pressure,
+                                                                          dynamics, microphysics, surface_pressure,
                                                                           thermodynamic_constants)
     # Convert ρe boundary conditions to ρθ for potential temperature formulations
     boundary_conditions = convert_energy_to_theta_bcs(boundary_conditions, formulation, thermodynamic_constants)
@@ -108,7 +108,7 @@ function AtmosphereModels.regularize_atmosphere_model_boundary_conditions(bounda
     regularized = Dict{Symbol, Any}()
     for (name, fbcs) in pairs(boundary_conditions)
         loc = field_location(Val(name))
-        regularized[name] = regularize_atmosphere_field_bcs(fbcs, loc, grid, microphysics,
+        regularized[name] = regularize_atmosphere_field_bcs(fbcs, loc, grid, dynamics, microphysics,
                                                             surface_pressure, thermodynamic_constants)
     end
     return NamedTuple(regularized)
@@ -165,28 +165,28 @@ end
 convert_energy_to_theta_bcs(bcs, f::Symbol, c) = convert_energy_to_theta_bcs(bcs, Val(f), c)
 
 # Pass through non-FieldBoundaryConditions
-regularize_atmosphere_field_bcs(fbcs, loc, grid, microphysics, surface_pressure, constants) = fbcs
+regularize_atmosphere_field_bcs(fbcs, loc, grid, dynamics, microphysics, surface_pressure, constants) = fbcs
 
 # Regularize FieldBoundaryConditions by walking through each boundary
-function regularize_atmosphere_field_bcs(fbcs::FieldBoundaryConditions, loc, grid, microphysics,
+function regularize_atmosphere_field_bcs(fbcs::FieldBoundaryConditions, loc, grid, dynamics, microphysics,
                                          surface_pressure, constants)
-    west     = regularize_atmosphere_boundary_condition(fbcs.west, West(), loc, grid, microphysics, surface_pressure, constants)
-    east     = regularize_atmosphere_boundary_condition(fbcs.east, East(), loc, grid, microphysics, surface_pressure, constants)
-    south    = regularize_atmosphere_boundary_condition(fbcs.south, South(), loc, grid, microphysics, surface_pressure, constants)
-    north    = regularize_atmosphere_boundary_condition(fbcs.north, North(), loc, grid, microphysics, surface_pressure, constants)
-    bottom   = regularize_atmosphere_boundary_condition(fbcs.bottom, Bottom(), loc, grid, microphysics, surface_pressure, constants)
-    top      = regularize_atmosphere_boundary_condition(fbcs.top, Top(), loc, grid, microphysics, surface_pressure, constants)
-    immersed = regularize_atmosphere_boundary_condition(fbcs.immersed, nothing, loc, grid, microphysics, surface_pressure, constants)
+    west     = regularize_atmosphere_boundary_condition(fbcs.west, West(), loc, grid, dynamics, microphysics, surface_pressure, constants)
+    east     = regularize_atmosphere_boundary_condition(fbcs.east, East(), loc, grid, dynamics, microphysics, surface_pressure, constants)
+    south    = regularize_atmosphere_boundary_condition(fbcs.south, South(), loc, grid, dynamics, microphysics, surface_pressure, constants)
+    north    = regularize_atmosphere_boundary_condition(fbcs.north, North(), loc, grid, dynamics, microphysics, surface_pressure, constants)
+    bottom   = regularize_atmosphere_boundary_condition(fbcs.bottom, Bottom(), loc, grid, dynamics, microphysics, surface_pressure, constants)
+    top      = regularize_atmosphere_boundary_condition(fbcs.top, Top(), loc, grid, dynamics, microphysics, surface_pressure, constants)
+    immersed = regularize_atmosphere_boundary_condition(fbcs.immersed, nothing, loc, grid, dynamics, microphysics, surface_pressure, constants)
 
     return FieldBoundaryConditions(; west, east, south, north, bottom, top, immersed)
 end
 
 # Default: pass through unchanged
-regularize_atmosphere_boundary_condition(bc, side, loc, grid, microphysics, surface_pressure, constants) = bc
+regularize_atmosphere_boundary_condition(bc, side, loc, grid, dynamics, microphysics, surface_pressure, constants) = bc
 
 # Regularize BulkDrag: infer direction from field location if needed
 function regularize_atmosphere_boundary_condition(bc::BoundaryCondition{<:Flux, <:BulkDragFunction{Nothing}},
-                                                  side, loc, grid, microphysics, surface_pressure, constants)
+                                                  side, loc, grid, dynamics, microphysics, surface_pressure, constants)
     df = bc.condition
     LX, LY, LZ = loc
 
@@ -205,13 +205,13 @@ end
 
 # BulkDrag with direction already set: pass through
 regularize_atmosphere_boundary_condition(bc::BoundaryCondition{<:Flux, <:XDirectionBulkDragFunction},
-                                         side, loc, grid, microphysics, surface_pressure, constants) = bc
+                                         side, loc, grid, dynamics, microphysics, surface_pressure, constants) = bc
 regularize_atmosphere_boundary_condition(bc::BoundaryCondition{<:Flux, <:YDirectionBulkDragFunction},
-                                         side, loc, grid, microphysics, surface_pressure, constants) = bc
+                                         side, loc, grid, dynamics, microphysics, surface_pressure, constants) = bc
 
 # Regularize BulkSensibleHeatFlux: populate surface_pressure and thermodynamic_constants
 function regularize_atmosphere_boundary_condition(bc::BulkSensibleHeatFluxBoundaryCondition,
-                                                  side, loc, grid, microphysics, surface_pressure, constants)
+                                                  side, loc, grid, dynamics, microphysics, surface_pressure, constants)
     bf = bc.condition
     T₀ = materialize_surface_field(bf.surface_temperature, grid)
     new_bf = BulkSensibleHeatFluxFunction(bf.coefficient, bf.gustiness, T₀, surface_pressure, constants)
@@ -220,7 +220,7 @@ end
 
 # Regularize BulkVaporFlux: populate surface_pressure, thermodynamic_constants, and surface
 function regularize_atmosphere_boundary_condition(bc::BulkVaporFluxBoundaryCondition,
-                                                  side, loc, grid, microphysics, surface_pressure, constants)
+                                                  side, loc, grid, dynamics, microphysics, surface_pressure, constants)
     bf = bc.condition
     T₀ = materialize_surface_field(bf.surface_temperature, grid)
     surface = PlanarLiquidSurface()

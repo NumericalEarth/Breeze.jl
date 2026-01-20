@@ -157,25 +157,31 @@ The relationship is:
 
 where `𝒬` is the energy flux and `Jᶿ` is the potential temperature flux.
 """
-struct ThetaFluxBoundaryConditionFunction{C, S, M, TC}
+struct ThetaFluxBoundaryConditionFunction{C, S, M, TC, D}
     condition :: C
     side :: S
     microphysics :: M
     thermodynamic_constants :: TC
+    density :: D
 end
+
+ThetaFluxBoundaryConditionFunction(condition, side, microphysics, thermodynamic_constants) =
+    ThetaFluxBoundaryConditionFunction(condition, side, microphysics, thermodynamic_constants, nothing)
 
 function Adapt.adapt_structure(to, tf::ThetaFluxBoundaryConditionFunction)
     return ThetaFluxBoundaryConditionFunction(Adapt.adapt(to, tf.condition),
                                               Adapt.adapt(to, tf.side),
                                               Adapt.adapt(to, tf.microphysics),
-                                              Adapt.adapt(to, tf.thermodynamic_constants))
+                                              Adapt.adapt(to, tf.thermodynamic_constants),
+                                              Adapt.adapt(to, tf.density))
 end
 
 function Architectures.on_architecture(to, tf::ThetaFluxBoundaryConditionFunction)
     return ThetaFluxBoundaryConditionFunction(on_architecture(to, tf.condition),
                                               on_architecture(to, tf.side),
                                               on_architecture(to, tf.microphysics),
-                                              on_architecture(to, tf.thermodynamic_constants))
+                                              on_architecture(to, tf.thermodynamic_constants),
+                                              on_architecture(to, tf.density))
 end
 
 function Base.summary(tf::ThetaFluxBoundaryConditionFunction)
@@ -195,7 +201,7 @@ const NorthThetaFluxBC  = ThetaFluxBoundaryConditionFunction{<:Any, <:North}
 # Convert potential temperature flux to energy flux: 𝒬 = Jᶿ × cᵖᵐ
 @inline function Jᶿ_to_𝒬(i, j, k, grid, tf, Jᶿ, fields)
     qᵗ = @inbounds fields.qᵗ[i, j, k]
-    ρ = @inbounds fields.ρ[i, j, k]
+    ρ = @inbounds tf.density[i, j, k]
     q = compute_moisture_fractions(i, j, k, grid, tf.microphysics, ρ, qᵗ, fields)
     cᵖᵐ = mixture_heat_capacity(q, tf.thermodynamic_constants)
     return Jᶿ * cᵖᵐ
@@ -303,9 +309,10 @@ end
 const UnregularizedEnergyFluxBC = BoundaryCondition{<:Flux, <:EnergyFluxBoundaryConditionFunction{<:Any, Nothing}}
 
 function regularize_atmosphere_boundary_condition(bc::UnregularizedEnergyFluxBC,
-                                                  side, loc, grid, microphysics, surface_pressure, constants)
+                                                  side, loc, grid, dynamics, microphysics, surface_pressure, constants)
     ef = bc.condition
-    new_ef = EnergyFluxBoundaryConditionFunction(ef.condition, side, microphysics, constants, nothing)
+    density = dynamics_density(dynamics)
+    new_ef = EnergyFluxBoundaryConditionFunction(ef.condition, side, microphysics, constants, density)
     return BoundaryCondition(Flux(), new_ef)
 end
 
@@ -313,8 +320,9 @@ end
 const UnregularizedThetaFluxBC = BoundaryCondition{<:Flux, <:ThetaFluxBoundaryConditionFunction{<:Any, Nothing}}
 
 function regularize_atmosphere_boundary_condition(bc::UnregularizedThetaFluxBC,
-                                                  side, loc, grid, microphysics, surface_pressure, constants)
+                                                  side, loc, grid, dynamics, microphysics, surface_pressure, constants)
     tf = bc.condition
-    new_tf = ThetaFluxBoundaryConditionFunction(tf.condition, side, microphysics, constants)
+    density = dynamics_density(dynamics)
+    new_tf = ThetaFluxBoundaryConditionFunction(tf.condition, side, microphysics, constants, density)
     return BoundaryCondition(Flux(), new_tf)
 end
