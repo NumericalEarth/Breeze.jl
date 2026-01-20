@@ -269,7 +269,7 @@ add_callback!(simulation, progress, IterationInterval(100))
 
 # Collect maximum vertical velocity time series during simulation:
 
-max_w_timeseries = []
+max_w_ts = []
 max_w_times = []
 
 function collect_max_w(sim)
