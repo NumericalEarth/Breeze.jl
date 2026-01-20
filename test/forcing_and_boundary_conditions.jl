@@ -319,7 +319,7 @@ end
         model = AtmosphereModel(grid; boundary_conditions=(ρe=ρe_bcs,))
 
         θ₀ = model.dynamics.reference_state.potential_temperature
-        qᵗ₀ = FT(0.01)  # 10 g/kg moisture
+        qᵗ₀ = FT(0.01)  # kg/kg moisture
         set!(model; θ=θ₀, qᵗ=qᵗ₀)
 
         # static_energy_density returns a Field with energy flux BCs
