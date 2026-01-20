@@ -43,7 +43,7 @@ set!(model, qᵗ = qᵗ, z = 0, w = 1,
      θ = reference_state.potential_temperature,
      p = reference_state.pressure,
      ρ = reference_state.density)
-     
+
 simulation = Simulation(model; Δt=1, stop_time=30minutes)
 
 # Store parcel snapshots: (time, height, thermodynamic state, density)
@@ -93,7 +93,7 @@ set!(cloudy_model, qᵗ = qᵗ, z = 0, w = 1,
      θ = reference_state.potential_temperature,
      p = reference_state.pressure,
      ρ = reference_state.density)
-     
+
 cloudy_simulation = Simulation(cloudy_model; Δt=1, stop_time=120minutes)
 
 # Store cloudy parcel snapshots
