@@ -16,7 +16,7 @@ export BulkDragFunction,
        ThetaFluxBoundaryConditionFunction,
        ThetaFluxBoundaryCondition
 
-using ..AtmosphereModels: AtmosphereModels, compute_moisture_fractions, dynamics_density
+using ..AtmosphereModels: AtmosphereModels, grid_moisture_fractions, dynamics_density
 using ..Thermodynamics: saturation_specific_humidity, surface_density, PlanarLiquidSurface,
                         mixture_heat_capacity
 
