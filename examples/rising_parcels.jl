@@ -125,6 +125,7 @@ cloudy_qʳ = [s.μ.ρqʳ / s.ρ for s in cloudy_snapshots]
 cloudy_S = [supersaturation(temperature(s.𝒰, cloudy_constants), s.ρ,
                             s.𝒰.moisture_mass_fractions, cloudy_constants,
                             PlanarLiquidSurface()) for s in cloudy_snapshots]
+nothing #hide
 
 # Environmental temperature at each parcel height
 cloudy_Tₑ = [interpolate((s.z,), cloudy_model.temperature) for s in cloudy_snapshots]
