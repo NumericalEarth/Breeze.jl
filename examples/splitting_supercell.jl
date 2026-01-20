@@ -368,5 +368,3 @@ lines!(ax, max_w_times, max_w_timeseries, linewidth=2)
 
 save("supercell_max_w.png", fig) #src
 fig
-
-
