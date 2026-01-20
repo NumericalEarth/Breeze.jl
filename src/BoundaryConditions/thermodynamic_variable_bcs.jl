@@ -47,13 +47,6 @@ function Adapt.adapt_structure(to, ef::EnergyFluxBoundaryConditionFunction)
                                                Adapt.adapt(to, ef.density))
 end
 
-function Architectures.on_architecture(to, ef::EnergyFluxBoundaryConditionFunction)
-    return EnergyFluxBoundaryConditionFunction(on_architecture(to, ef.condition),
-                                               on_architecture(to, ef.side),
-                                               on_architecture(to, ef.microphysics),
-                                               on_architecture(to, ef.thermodynamic_constants),
-                                               on_architecture(to, ef.density))
-end
 
 function Base.summary(ef::EnergyFluxBoundaryConditionFunction)
     cond = ef.condition

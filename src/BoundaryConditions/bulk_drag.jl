@@ -41,11 +41,6 @@ Adapt.adapt_structure(to, df::BulkDragFunction) =
                      Adapt.adapt(to, df.coefficient),
                      Adapt.adapt(to, df.gustiness))
 
-Architectures.on_architecture(to, df::BulkDragFunction) =
-    BulkDragFunction(on_architecture(to, df.direction),
-                     on_architecture(to, df.coefficient),
-                     on_architecture(to, df.gustiness))
-
 Base.summary(df::BulkDragFunction) = string("BulkDragFunction(direction=", summary(df.direction),
                                             ", coefficient=", df.coefficient,
                                             ", gustiness=", df.gustiness, ")")

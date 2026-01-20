@@ -43,13 +43,6 @@ Adapt.adapt_structure(to, bf::BulkSensibleHeatFluxFunction) =
                                  Adapt.adapt(to, bf.surface_pressure),
                                  Adapt.adapt(to, bf.thermodynamic_constants))
 
-Architectures.on_architecture(to, bf::BulkSensibleHeatFluxFunction) =
-    BulkSensibleHeatFluxFunction(on_architecture(to, bf.coefficient),
-                                 on_architecture(to, bf.gustiness),
-                                 on_architecture(to, bf.surface_temperature),
-                                 on_architecture(to, bf.surface_pressure),
-                                 on_architecture(to, bf.thermodynamic_constants))
-
 Base.summary(bf::BulkSensibleHeatFluxFunction) =
     string("BulkSensibleHeatFluxFunction(coefficient=", bf.coefficient,
            ", gustiness=", bf.gustiness, ")")
