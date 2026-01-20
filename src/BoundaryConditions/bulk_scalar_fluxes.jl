@@ -111,14 +111,6 @@ Adapt.adapt_structure(to, bf::BulkVaporFluxFunction) =
                           Adapt.adapt(to, bf.thermodynamic_constants),
                           Adapt.adapt(to, bf.surface))
 
-Architectures.on_architecture(to, bf::BulkVaporFluxFunction) =
-    BulkVaporFluxFunction(on_architecture(to, bf.coefficient),
-                          on_architecture(to, bf.gustiness),
-                          on_architecture(to, bf.surface_temperature),
-                          on_architecture(to, bf.surface_pressure),
-                          on_architecture(to, bf.thermodynamic_constants),
-                          on_architecture(to, bf.surface))
-
 Base.summary(bf::BulkVaporFluxFunction) =
     string("BulkVaporFluxFunction(coefficient=", bf.coefficient,
            ", gustiness=", bf.gustiness, ")")

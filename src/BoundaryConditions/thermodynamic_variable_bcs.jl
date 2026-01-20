@@ -47,7 +47,6 @@ function Adapt.adapt_structure(to, ef::EnergyFluxBoundaryConditionFunction)
                                                Adapt.adapt(to, ef.density))
 end
 
-
 function Base.summary(ef::EnergyFluxBoundaryConditionFunction)
     cond = ef.condition
     cond_str = cond isa Number ? string(cond) : summary(cond)
@@ -167,14 +166,6 @@ function Adapt.adapt_structure(to, tf::ThetaFluxBoundaryConditionFunction)
                                               Adapt.adapt(to, tf.microphysics),
                                               Adapt.adapt(to, tf.thermodynamic_constants),
                                               Adapt.adapt(to, tf.density))
-end
-
-function Architectures.on_architecture(to, tf::ThetaFluxBoundaryConditionFunction)
-    return ThetaFluxBoundaryConditionFunction(on_architecture(to, tf.condition),
-                                              on_architecture(to, tf.side),
-                                              on_architecture(to, tf.microphysics),
-                                              on_architecture(to, tf.thermodynamic_constants),
-                                              on_architecture(to, tf.density))
 end
 
 function Base.summary(tf::ThetaFluxBoundaryConditionFunction)

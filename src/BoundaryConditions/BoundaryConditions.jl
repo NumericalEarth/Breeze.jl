@@ -20,7 +20,7 @@ using ..AtmosphereModels: AtmosphereModels, compute_moisture_fractions, dynamics
 using ..Thermodynamics: saturation_specific_humidity, surface_density, PlanarLiquidSurface,
                         mixture_heat_capacity
 
-using Oceananigans.Architectures: Architectures, on_architecture
+using Oceananigans.Architectures: Architectures
 using Oceananigans.Grids: Center, Face, XDirection, YDirection, AbstractGrid
 using Oceananigans.Fields: Field, set!
 using Oceananigans.BoundaryConditions: BoundaryConditions as OceananigansBC,
