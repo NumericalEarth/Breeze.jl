@@ -274,7 +274,7 @@ max_w_times = []
 
 function collect_max_w(sim)
     push!(max_w_times, time(sim))
-    push!(max_w_timeseries, maximum(w))
+    push!(max_w_ts, maximum(w))
     return nothing
 end
 
@@ -364,7 +364,7 @@ nothing #hide
 fig = Figure(size=(700, 400), fontsize=14)
 ax = Axis(fig[1, 1], xlabel="Time (s)", ylabel="Maximum w (m/s)", title="Maximum Vertical Velocity",
           xticks=0:1800:7200)
-lines!(ax, max_w_times, max_w_timeseries, linewidth=2)
+lines!(ax, max_w_times, max_w_ts, linewidth=2)
 
 save("supercell_max_w.png", fig) #src
 fig
