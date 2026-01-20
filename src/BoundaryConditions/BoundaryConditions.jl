@@ -659,7 +659,7 @@ regularize_atmosphere_boundary_condition(bc, side, loc, grid, surface_pressure, 
 function regularize_atmosphere_boundary_condition(bc::BoundaryCondition{<:Flux, <:BulkDragFunction{Nothing}},
                                                   side, loc, grid, surface_pressure, constants)
     df = bc.condition
-    LX, LY, _LZ = loc
+    LX, LY, _ = loc
 
     # Determine direction from location: Face in x means x-momentum, Face in y means y-momentum
     if LX isa Face
