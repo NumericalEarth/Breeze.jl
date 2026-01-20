@@ -102,10 +102,10 @@ dynamics = AnelasticDynamics(reference_state)
 #
 # The atmospheric stratification parameters define the troposphere-stratosphere transition.
 
-θ₀ = 300        # K - surface potential temperature
-θᵗʳ = 343       # K - tropopause potential temperature
-zᵗʳ = 12000     # m - tropopause height
-Tᵗʳ = 213       # K - tropopause temperature
+θ₀ = 300       # K - surface potential temperature
+θᵖ = 343       # K - tropopause potential temperature
+zᵖ = 12000     # m - tropopause height
+Tᵖ = 213       # K - tropopause temperature
 nothing #hide
 
 # Wind shear parameters control the low-level environmental wind profile:
@@ -124,14 +124,14 @@ nothing #hide
 # Background potential temperature profile (Equation 14 in [KlempEtAl2015](@citet)):
 
 function θ_background(z)
-    θᵗʳ = θ₀ + (θᵗʳ - θ₀) * (z / zᵗʳ)^(5/4)
-    θˢᵗ = θᵗʳ * exp(g / (cᵖᵈ * Tᵗʳ) * (z - zᵗʳ))
-    return (z <= zᵗʳ) * θᵗʳ + (z > zᵗʳ) * θˢᵗ
+    θᵗ = θ₀ + (θᵖ - θ₀) * (z / zᵖ)^(5/4)
+    θˢ = θᵖ * exp(g / (cᵖᵈ * Tᵖ) * (z - zᵖ))
+    return (z <= zᵖ) * θᵗ + (z > zᵖ) * θˢ
 end
 
 # Relative humidity profile (decreases with height, 25% above tropopause):
 
-ℋ_background(z) = (1 - 3/4 * (z / zᵗʳ)^(5/4)) * (z <= zᵗʳ) + 1/4 * (z > zᵗʳ)
+ℋ_background(z) = (1 - 3/4 * (z / zᵖ)^(5/4)) * (z <= zᵖ) + 1/4 * (z > zᵖ)
 
 # Zonal wind profile with linear shear below ``zˢ`` and smooth transition (Equations 15-16):
 
@@ -182,11 +182,11 @@ fig = Figure(size=(1000, 400), fontsize=14)
 
 axθ = Axis(fig[1, 1], xlabel="θ (K)", ylabel="z (km)", title="Potential temperature")
 lines!(axθ, θ_profile, linewidth=2, color=:magenta)
-hlines!(axθ, [zᵗʳ / 1000], color=:gray, linestyle=:dash)
+hlines!(axθ, [zᵖ / 1000], color=:gray, linestyle=:dash)
 
 axℋ = Axis(fig[1, 2], xlabel="ℋ (%)", ylabel="z (km)", title="Relative humidity")
 lines!(axℋ, ℋ_profile, linewidth=2, color=:dodgerblue)
-hlines!(axℋ, [zᵗʳ / 1000], color=:gray, linestyle=:dash)
+hlines!(axℋ, [zᵖ / 1000], color=:gray, linestyle=:dash)
 
 axu = Axis(fig[1, 3], xlabel="u (m/s)", ylabel="z (km)", title="Wind profile")
 lines!(axu, u_profile, linewidth=2, color=:orangered)
