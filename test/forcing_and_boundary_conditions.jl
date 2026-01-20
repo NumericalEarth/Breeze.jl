@@ -388,12 +388,12 @@ end
         using Breeze.BoundaryConditions: EnergyFluxBoundaryConditionFunction
 
         # Test summary for number condition
-        ef_number = EnergyFluxBoundaryConditionFunction(FT(500), nothing, nothing, nothing, nothing)
+        ef_number = EnergyFluxBoundaryConditionFunction(500, nothing, nothing, nothing, nothing)
         s = summary(ef_number)
         @test occursin("500", s) || occursin("5", s)  # Float formatting may vary
 
         # Test summary for function condition
-        𝒬_func(x, y, t) = FT(100)
+        𝒬_func(x, y, t) = 100
         ef_func = EnergyFluxBoundaryConditionFunction(𝒬_func, nothing, nothing, nothing, nothing)
         s_func = summary(ef_func)
         @test occursin("Function", s_func) || occursin("function", s_func)
@@ -539,7 +539,7 @@ end
         grid = RectilinearGrid(default_arch; size=(4, 4, 4), x=(0, 100), y=(0, 100), z=(0, 100),
                                topology=(Bounded, Bounded, Bounded))
 
-        𝒬 = FT(200)  # Energy flux W/m²
+        𝒬 = 200  # Energy flux W/m²
         ρe_bcs = FieldBoundaryConditions(west=FluxBoundaryCondition(𝒬))
         model = AtmosphereModel(grid; boundary_conditions=(ρe=ρe_bcs,))
 
@@ -681,9 +681,10 @@ end
             𝒬_field = Field(𝒬_op)
             compute!(𝒬_field)
 
-            # Verify the energy flux is approximately Jᶿ × cᵖᵐ (which is > Jᶿ)
-            # cᵖᵐ ≈ 1000-1100 J/(kg·K) for moist air, so 𝒬 ≈ 500-550 W/m²
-            @test all(interior(𝒬_field) .> Jᶿ * 500)  # rough lower bound
+            # Energy flux = Jᶿ × cᵖᵐ where cᵖᵐ ≈ 1000-1100 J/(kg·K)
+            # For Jᶿ = 0.5, expect 𝒬 ≈ 500-550 W/m² (i.e. Jᶿ × cᵖᵐ >> Jᶿ)
+            # Check 𝒬 > 250 as a rough lower bound (half of expected minimum)
+            @test all(interior(𝒬_field) .> 250)
         end
     end
 end

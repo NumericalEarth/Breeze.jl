@@ -33,10 +33,8 @@ flux ``𝒬ᵀ = cᵖᵐ Jᶿ``) and should be applied directly to `ρθ` bounda
 - `surface_temperature`: The surface temperature. Can be a `Field`, a `Function`, or a `Number`.
                          Functions are converted to Fields during model construction.
 """
-function BulkSensibleHeatFluxFunction(; coefficient, gustiness=0, surface_temperature)
-    return BulkSensibleHeatFluxFunction(coefficient, gustiness,
-                                        surface_temperature, nothing, nothing)
-end
+BulkSensibleHeatFluxFunction(; coefficient, gustiness=0, surface_temperature) =
+    BulkSensibleHeatFluxFunction(coefficient, gustiness, surface_temperature, nothing, nothing)
 
 Adapt.adapt_structure(to, bf::BulkSensibleHeatFluxFunction) =
     BulkSensibleHeatFluxFunction(Adapt.adapt(to, bf.coefficient),
@@ -109,10 +107,8 @@ specific humidity, and `qᵛ₀` is the saturation specific humidity at the surf
 - `surface_temperature`: The surface temperature. Can be a `Field`, a `Function`, or a `Number`.
                          Used to compute saturation specific humidity at the surface.
 """
-function BulkVaporFluxFunction(; coefficient, gustiness=0, surface_temperature)
-    return BulkVaporFluxFunction(coefficient, gustiness,
-                                 surface_temperature, nothing, nothing, nothing)
-end
+BulkVaporFluxFunction(; coefficient, gustiness=0, surface_temperature) =
+    BulkVaporFluxFunction(coefficient, gustiness, surface_temperature, nothing, nothing, nothing)
 
 Adapt.adapt_structure(to, bf::BulkVaporFluxFunction) =
     BulkVaporFluxFunction(Adapt.adapt(to, bf.coefficient),
