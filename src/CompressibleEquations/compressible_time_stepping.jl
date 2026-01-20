@@ -7,7 +7,7 @@
 #####
 
 # No default initialization for compressible models
-AtmosphereModels.initialize_model_thermodynamics!(model::CompressibleModel) = nothing
+AtmosphereModels.initialize_model_thermodynamics!(::CompressibleModel) = nothing
 
 #####
 ##### Pressure correction (no-op for compressible dynamics)
@@ -18,14 +18,14 @@ $(TYPEDSIGNATURES)
 
 No-op for `CompressibleDynamics` - pressure is computed diagnostically from the equation of state.
 """
-NonhydrostaticModels.compute_pressure_correction!(model::CompressibleModel, Δt) = nothing
+NonhydrostaticModels.compute_pressure_correction!(::CompressibleModel, Δt) = nothing
 
 """
 $(TYPEDSIGNATURES)
 
 No-op for `CompressibleDynamics` - no pressure projection is needed.
 """
-NonhydrostaticModels.make_pressure_correction!(model::CompressibleModel, Δt) = nothing
+NonhydrostaticModels.make_pressure_correction!(::CompressibleModel, Δt) = nothing
 
 #####
 ##### Pressure solver (no-op)
@@ -36,7 +36,7 @@ $(TYPEDSIGNATURES)
 
 No-op for `CompressibleDynamics` - pressure is computed from the equation of state, not solved.
 """
-solve_for_pressure!(model::CompressibleModel) = nothing
+solve_for_pressure!(::CompressibleModel) = nothing
 
 #####
 ##### Auxiliary dynamics variables (temperature and pressure for compressible)

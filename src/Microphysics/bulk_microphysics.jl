@@ -31,7 +31,7 @@ end
 AtmosphereModels.microphysics_model_update!(bμp::BulkMicrophysics, model) =
     AtmosphereModels.microphysics_model_update!(bμp.cloud_formation, model)
 
-Base.summary(bμp::BulkMicrophysics) = "BulkMicrophysics"
+Base.summary(::BulkMicrophysics) = "BulkMicrophysics"
 
 struct NonEquilibriumCloudFormation{L, I}
     liquid :: L
@@ -175,7 +175,7 @@ FourCategories(cloud_liquid, cloud_ice, rain, snow, collisions, hydrometeor_velo
     FourCategories(cloud_liquid, cloud_ice, rain, snow, collisions, hydrometeor_velocities, nothing)
 
 const FourCategoryBulkMicrophysics = BulkMicrophysics{<:Any, <:FourCategories, <:Any}
-Base.summary(bμp::FourCategoryBulkMicrophysics) = "FourCategoryBulkMicrophysics"
+Base.summary(::FourCategoryBulkMicrophysics) = "FourCategoryBulkMicrophysics"
 
 """
 $(TYPEDSIGNATURES)

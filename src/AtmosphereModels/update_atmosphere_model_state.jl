@@ -157,9 +157,6 @@ Compute auxiliary model variables:
     * moisture mass fraction ``qᵗ = ρqᵗ / ρ``
 """
 function compute_auxiliary_variables!(model)
-    grid = model.grid
-    arch = grid.architecture
-
     # Compute velocities from momentum (skip for kinematic dynamics with prescribed velocities)
     compute_velocities!(model)
 
