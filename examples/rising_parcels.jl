@@ -1,12 +1,13 @@
-# # Rising parcels: from dry adiabats to precipitating clouds
+# # Rising dry and cloudy parcels
 #
-# This example demonstrates `ParcelDynamics`, which simulates Lagrangian air parcels
-# ascending through a prescribed atmospheric sounding. We explore two regimes:
+# This example demonstrates the `ParcelDynamics` mode for `AtmosphereModel`,
+# which enables Lagrangian simulations of air parcels moving through a
+# prescribed background atmosphere. The example simulates two parcels:
 #
-# 1. **Dry adiabatic ascent**: A rising parcel cools at ~9.8 K/km, conserving
+# 1. **Ascending dry adiabatic parcel**: A rising parcel cools at ~9.8 K/km, conserving
 #    potential temperature. Vapor increases toward saturation as temperature drops.
 #
-# 2. **Cloudy ascent with precipitation**: A moist parcel rises through the
+# 2. **Ascending cloudy precipitating parcel**: A moist parcel rises through the
 #    lifting condensation level, forming cloud via condensation, then rain via
 #    autoconversion. We use one-moment microphysics with non-equilibrium cloud
 #    formation [Morrison2008novel](@citet) to track cloud liquid and rain mass.
@@ -38,14 +39,12 @@ qᵗ₀ = 0.015    # Surface specific humidity [kg/kg]
 Hq = 2500      # Humidity scale height [m]
 qᵗ(z) = qᵗ₀ * exp(-z / Hq)
 
-set!(model,
+set!(model, qᵗ = qᵗ, z = 0, w = 1,
      θ = reference_state.potential_temperature,
      p = reference_state.pressure,
-     ρ = reference_state.density,
-     qᵗ = qᵗ,
-     z = 0, w = 1)
-
-simulation = Simulation(model; Δt=1.0, stop_time=30minutes)
+     ρ = reference_state.density)
+     
+simulation = Simulation(model; Δt=1, stop_time=30minutes)
 
 # Store parcel snapshots: (time, height, thermodynamic state, density)
 dry_snapshots = []
@@ -90,14 +89,12 @@ cloudy_model = AtmosphereModel(grid; dynamics=ParcelDynamics(), microphysics)
 
 # Use the same reference state. The one-moment scheme initializes
 # with zero cloud liquid and rain; condensation begins when supersaturation develops.
-set!(cloudy_model,
+set!(cloudy_model, qᵗ = qᵗ, z = 0, w = 1,
      θ = reference_state.potential_temperature,
      p = reference_state.pressure,
-     ρ = reference_state.density,
-     qᵗ = qᵗ,
-     z = 0, w = 1)
-
-cloudy_simulation = Simulation(cloudy_model; Δt=1.0, stop_time=120minutes)
+     ρ = reference_state.density)
+     
+cloudy_simulation = Simulation(cloudy_model; Δt=1, stop_time=120minutes)
 
 # Store cloudy parcel snapshots
 cloudy_snapshots = []
