@@ -125,6 +125,9 @@ cloudy_qʳ = [s.μ.ρqʳ / s.ρ for s in cloudy_snapshots]
 cloudy_S = [supersaturation(temperature(s.𝒰, cloudy_constants), s.ρ,
                             s.𝒰.moisture_mass_fractions, cloudy_constants,
                             PlanarLiquidSurface()) for s in cloudy_snapshots]
+
+# Environmental temperature at each parcel height
+cloudy_Tₑ = [interpolate((s.z,), cloudy_model.temperature) for s in cloudy_snapshots]
 nothing #hide
 
 # ## Visualization
@@ -134,7 +137,7 @@ nothing #hide
 # - Cloudy ascent: condensation onset, cloud development, and precipitation formation
 
 set_theme!(fontsize=14, linewidth=2.5)
-fig = Figure(size=(1000, 600))
+fig = Figure(size=(1200, 600))
 nothing #hide
 
 # Color palette
@@ -144,7 +147,7 @@ c_rain = :orangered
 c_temp = :magenta
 
 ## Row 1: Dry adiabatic ascent
-Label(fig[1, 1:2], "Dry adiabatic ascent", fontsize=16)
+Label(fig[1, 1:3], "Dry adiabatic ascent", fontsize=16)
 
 ax1a = Axis(fig[2, 1];
     xlabel = "Temperature (K)",
@@ -152,7 +155,7 @@ ax1a = Axis(fig[2, 1];
     title = "Adiabatic cooling")
 lines!(ax1a, dry_T, dry_z / 1000; color=c_temp, label="Parcel")
 lines!(ax1a, dry_Tₑ, dry_z / 1000; color=:gray, linestyle=:dash, label="Environment")
-axislegend(ax1a; position=:lt)
+axislegend(ax1a; position=:lb, backgroundcolor=(:white, 0.8))
 
 ax1b = Axis(fig[2, 2];
     xlabel = "Supersaturation",
@@ -162,16 +165,15 @@ lines!(ax1b, dry_S, dry_z / 1000; color=c_vapor)
 vlines!(ax1b, [0]; color=:gray, linestyle=:dash)
 
 ## Row 2: Cloudy parcel - condensation and cloud formation
-Label(fig[3, 1:2], "Cloudy ascent with one-moment microphysics", fontsize=16)
+Label(fig[3, 1:3], "Cloudy ascent with one-moment microphysics", fontsize=16)
 
 ax2a = Axis(fig[4, 1];
-    xlabel = "Mixing ratio (kg/kg)",
+    xlabel = "Temperature (K)",
     ylabel = "Height (km)",
-    title = "Moisture evolution")
-lines!(ax2a, cloudy_qᵛ, cloudy_z / 1000; color=c_vapor, label="Vapor qᵛ")
-lines!(ax2a, cloudy_qᶜˡ, cloudy_z / 1000; color=c_cloud, label="Cloud qᶜˡ")
-lines!(ax2a, cloudy_qʳ, cloudy_z / 1000; color=c_rain, label="Rain qʳ")
-axislegend(ax2a; position=:rt)
+    title = "Temperature evolution")
+lines!(ax2a, cloudy_T, cloudy_z / 1000; color=c_temp, label="Parcel")
+lines!(ax2a, cloudy_Tₑ, cloudy_z / 1000; color=:gray, linestyle=:dash, label="Environment")
+axislegend(ax2a; position=:lb, backgroundcolor=(:white, 0.8))
 
 ax2b = Axis(fig[4, 2];
     xlabel = "Supersaturation",
@@ -179,6 +181,15 @@ ax2b = Axis(fig[4, 2];
     title = "Supersaturation evolution")
 lines!(ax2b, cloudy_S, cloudy_z / 1000; color=c_vapor)
 vlines!(ax2b, [0]; color=:gray, linestyle=:dash)
+
+ax2c = Axis(fig[4, 3];
+    xlabel = "Mixing ratio (kg/kg)",
+    ylabel = "Height (km)",
+    title = "Moisture evolution")
+lines!(ax2c, cloudy_qᵛ, cloudy_z / 1000; color=c_vapor, label="Vapor qᵛ")
+lines!(ax2c, cloudy_qᶜˡ, cloudy_z / 1000; color=c_cloud, label="Cloud qᶜˡ")
+lines!(ax2c, cloudy_qʳ, cloudy_z / 1000; color=c_rain, label="Rain qʳ")
+axislegend(ax2c; position=:rt, backgroundcolor=(:white, 0.8))
 
 rowsize!(fig.layout, 1, Relative(0.05))
 rowsize!(fig.layout, 3, Relative(0.05))
@@ -199,14 +210,20 @@ fig
 #
 # With one-moment non-equilibrium microphysics, the parcel exhibits key cloud physics:
 #
-# 1. **Condensation onset**: As the parcel rises and cools, supersaturation
+# 1. **Dry to moist adiabatic transition**: Initially, the parcel cools at the
+#    dry adiabatic lapse rate (~9.8 K/km). Once the parcel reaches saturation,
+#    condensation releases latent heat, and the parcel transitions to the smaller
+#    moist adiabatic lapse rate (~6 K/km). This is visible in the temperature
+#    panel as a change in slope.
+#
+# 2. **Condensation onset**: As the parcel rises and cools, supersaturation
 #    develops. The non-equilibrium scheme relaxes supersaturation by converting
 #    vapor to cloud liquid, with a characteristic timescale (~10 s).
 #
-# 2. **Cloud development**: Cloud liquid water content grows as condensation
+# 3. **Cloud development**: Cloud liquid water content grows as condensation
 #    continues. The one-moment scheme tracks only mass, not number concentration.
 #
-# 3. **Precipitation formation**: Autoconversion transfers mass from cloud liquid
+# 4. **Precipitation formation**: Autoconversion transfers mass from cloud liquid
 #    to rain based on a parameterized rate that depends on the cloud liquid
 #    water content. Once rain forms, accretion (rain collecting cloud droplets)
 #    accelerates precipitation development.
