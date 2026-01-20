@@ -160,11 +160,11 @@ nothing #hide
 # cosine-squared warm bubble perturbation:
 
 function θᵢ(x, y, z)
-    θ_base = θ_background(z)
+    θ̄ = θ_background(z)
     r = sqrt((x - xᵦ)^2 + (y - yᵦ)^2)
     R = sqrt((r / rₕ)^2 + ((z - zᵦ) / rᵥ)^2)
-    θ_pert = ifelse(R < 1, Δθ * cos((π / 2) * R)^2, 0.0)
-    return θ_base + θ_pert
+    θ′ = ifelse(R < 1, Δθ * cos((π / 2) * R)^2, 0.0)
+    return θ̄ + θ′
 end
 
 uᵢ(x, y, z) = u_background(z)
