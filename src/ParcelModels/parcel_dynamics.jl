@@ -397,6 +397,8 @@ function set_temperature_from_potential_temperature!(T_field, θ, p_field, pˢ�
 end
 
 """
+$(TYPEDSIGNATURES)
+
 Set specific humidity field from relative humidity, computing qᵗ = ℋ * qᵛ⁺(T, ρ).
 """
 function set_moisture_from_relative_humidity!(qᵗ_field, ℋ, T_field, ρ_field, constants)
