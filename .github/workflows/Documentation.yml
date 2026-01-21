@@ -58,19 +58,19 @@ jobs:
           # Running doctests need to run `git` commands in this directory, but `git`
           # complains about dubious ownership when using the Docker image.
           git config --global --add safe.directory ${PWD}
-      - name: Build documentation
+      - name: Run example
         shell: bash
         timeout-minutes: 45
         run:
           earlyoom -m 3 -s 100 -r 300 --prefer 'julia' &
-          julia --color=yes --project=docs --threads 1,$(nproc) docs/make.jl
+          julia --color=yes --project=docs examples/splitting_supercell.jl
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-      - uses: actions/upload-artifact@v6
-        with:
-          name: documentation-build
-          path: docs/build
-          retention-days: 10
+      # - uses: actions/upload-artifact@v6
+      #   with:
+      #     name: documentation-build
+      #     path: docs/build
+      #     retention-days: 10
 
   deploy-docs:
     # We want to deploy docs if:
