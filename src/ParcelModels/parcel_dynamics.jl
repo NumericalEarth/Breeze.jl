@@ -364,6 +364,8 @@ end
 #####
 
 """
+$(TYPEDSIGNATURES)
+
 Set temperature field from potential temperature, using proper thermodynamic relations.
 """
 function set_temperature_from_potential_temperature!(T_field, θ, p_field, pˢᵗ, constants)
