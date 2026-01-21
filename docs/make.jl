@@ -32,7 +32,7 @@ examples = [
     Example("Cloudy thermal bubble", "cloudy_thermal_bubble", true),
     Example("Cloudy Kelvin-Helmholtz instability", "cloudy_kelvin_helmholtz", true),
     Example("Shallow cumulus convection (BOMEX)", "bomex", true),
-    Example("Precipitating shallow cumulus (RICO)", "rico", false),
+    # Example("Precipitating shallow cumulus (RICO)", "rico", false),
     Example("Convection over prescribed sea surface temperature (SST)", "prescribed_sea_surface_temperature", true),
     Example("Inertia gravity wave", "inertia_gravity_wave", true),
     Example("Single column radiation", "single_column_radiation", true),
