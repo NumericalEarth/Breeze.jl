@@ -48,7 +48,7 @@ jobs:
           fi
           echo "BREEZE_BUILD_ALL_EXAMPLES=${BREEZE_BUILD_ALL_EXAMPLES}" | tee "${GITHUB_ENV}"
       - name: Instantiate docs environment
-        shell: julia -g2 --color=yes --project=docs {0}
+        shell: julia --color=yes --project=docs {0}
         run: |
           using Pkg
           Pkg.instantiate()
@@ -63,7 +63,7 @@ jobs:
         timeout-minutes: 45
         run:
           earlyoom -m 3 -s 100 -r 300 --prefer 'julia' &
-          julia -g2 --color=yes --project=docs examples/splitting_supercell.jl
+          julia -O0 --color=yes --project=docs examples/splitting_supercell.jl
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
       # - uses: actions/upload-artifact@v6
