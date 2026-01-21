@@ -1,6 +1,7 @@
 using Breeze
 using Oceananigans: Oceananigans
 using Oceananigans.BoundaryConditions: BoundaryCondition
+using Oceananigans.Fields: location
 using Test
 
 function setup_forcing_model(grid, forcing)
@@ -99,6 +100,10 @@ end
         # Model should build and run without error
         time_step!(model, 1e-6)
         @test true  # If we get here, construction and time stepping worked
+
+        # Test that BulkDrag on a scalar field throws an error
+        ρθ_bcs = FieldBoundaryConditions(bottom=BulkDrag(coefficient=Cᴰ))
+        @test_throws ArgumentError AtmosphereModel(grid; boundary_conditions=(ρθ=ρθ_bcs,))
     end
 
     @testset "BulkSensibleHeatFlux construction and application [$FT]" begin
@@ -153,6 +158,29 @@ end
         # Model should build and run without error
         time_step!(model, 1e-6)
         @test true
+    end
+
+    @testset "materialize_surface_field [$FT]" begin
+        using Breeze.BoundaryConditions: materialize_surface_field
+
+        # Test Number passthrough
+        T_number = FT(300)
+        result = materialize_surface_field(T_number, grid)
+        @test result === T_number
+
+        # Test Field passthrough
+        T_field = Field{Center, Center, Nothing}(grid)
+        set!(T_field, FT(295))
+        result = materialize_surface_field(T_field, grid)
+        @test result === T_field
+
+        # Test Function → Field conversion
+        T_func(x, y) = FT(290) + FT(5) * sin(2π * x / 100)
+        result = materialize_surface_field(T_func, grid)
+        @test result isa Field
+        @test location(result) == (Center, Center, Nothing)
+        @test maximum(result) ≈ FT(295)
+        @test minimum(result) ≈ FT(285)
     end
 
     @testset "Combined bulk boundary conditions [$FT]" begin

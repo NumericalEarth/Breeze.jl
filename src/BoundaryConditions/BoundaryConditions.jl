@@ -38,8 +38,8 @@ using DocStringExtensions: TYPEDSIGNATURES
 #####
 
 # Get surface value from a Field or a Number
-@inline surface_value(field::Field, i, j) = @inbounds field[i, j, 1]
-@inline surface_value(x::Number, i, j) = x
+@inline surface_value(i, j, field::Field) = @inbounds field[i, j, 1]
+@inline surface_value(i, j, x::Number) = x
 
 #####
 ##### Wind speed calculations at staggered locations
@@ -49,7 +49,7 @@ using DocStringExtensions: TYPEDSIGNATURES
 
 # Wind speed squared at (Face, Center, Center) - for x-momentum flux
 @inline function wind_speed²ᶠᶜᶜ(i, j, grid, fields)
-    u² = @inbounds fields.u[i, j, 1]^2
+    u² = surface_value(i, j, fields.u)^2
     v² = ℑxyᶠᶜᵃ(i, j, 1, grid, ϕ², fields.v)
     return u² + v²
 end
@@ -57,7 +57,7 @@ end
 # Wind speed squared at (Center, Face, Center) - for y-momentum flux
 @inline function wind_speed²ᶜᶠᶜ(i, j, grid, fields)
     u² = ℑxyᶜᶠᵃ(i, j, 1, grid, ϕ², fields.u)
-    v² = @inbounds fields.v[i, j, 1]^2
+    v² = surface_value(i, j, fields.v)^2
     return u² + v²
 end
 
@@ -126,7 +126,7 @@ const XDBDF = XDirectionBulkDragFunction
 const YDBDF = YDirectionBulkDragFunction
 
 @inline function OceananigansBC.getbc(df::XDBDF, i::Integer, j::Integer, grid::AbstractGrid, clock, fields)
-    ρu = @inbounds fields.ρu[i, j, 1]
+    ρu = surface_value(i, j, fields.ρu)
     U² = wind_speed²ᶠᶜᶜ(i, j, grid, fields)
     U = sqrt(U²)
     Ũ² = U² + df.gustiness^2
@@ -135,7 +135,7 @@ const YDBDF = YDirectionBulkDragFunction
 end
 
 @inline function OceananigansBC.getbc(df::YDBDF, i::Integer, j::Integer, grid::AbstractGrid, clock, fields)
-    ρv = @inbounds fields.ρv[i, j, 1]
+    ρv = surface_value(i, j, fields.ρv)
     U² = wind_speed²ᶜᶠᶜ(i, j, grid, fields)
     U = sqrt(U²)
     Ũ² = U² + df.gustiness^2
@@ -204,8 +204,8 @@ Base.summary(bf::BulkSensibleHeatFluxFunction) =
 # getbc for BulkSensibleHeatFluxFunction: returns potential temperature flux Jᶿ
 @inline function OceananigansBC.getbc(bf::BulkSensibleHeatFluxFunction, i::Integer, j::Integer,
                                       grid::AbstractGrid, clock, fields)
-    T₀ = surface_value(bf.surface_temperature, i, j)
-    θ = @inbounds fields.θ[i, j, 1]
+    T₀ = surface_value(i, j, bf.surface_temperature)
+    θ = surface_value(i, j, fields.θ)
     Δθ = θ - T₀
 
     U² = wind_speed²ᶜᶜᶜ(i, j, grid, fields)
@@ -283,12 +283,12 @@ const BVFF = BulkVaporFluxFunction
 @inline function OceananigansBC.getbc(bf::BVFF, i::Integer, j::Integer, grid::AbstractGrid, clock, fields)
     constants = bf.thermodynamic_constants
     surface = bf.surface
-    T₀ = surface_value(bf.surface_temperature, i, j)
+    T₀ = surface_value(i, j, bf.surface_temperature)
     p₀ = bf.surface_pressure
     ρ₀ = surface_density(p₀, T₀, constants)
     qᵛ₀ = saturation_specific_humidity(T₀, ρ₀, constants, surface)
 
-    qᵗ = @inbounds fields.qᵗ[i, j, 1]
+    qᵗ = surface_value(i, j, fields.qᵗ)
     Δq = qᵗ - qᵛ₀ # neglecting condensate
 
     U² = wind_speed²ᶜᶜᶜ(i, j, grid, fields)
@@ -574,6 +574,7 @@ const θFormulation = Union{Val{:LiquidIcePotentialTemperature}, Val{:θ}}
 # Check if FieldBoundaryConditions has any non-default values
 has_nondefault_bcs(::Nothing) = false
 has_nondefault_bcs(fbcs) = false
+
 function has_nondefault_bcs(fbcs::FieldBoundaryConditions)
     for side in (:west, :east, :south, :north, :bottom, :top, :immersed)
         bc = getproperty(fbcs, side)
