@@ -139,6 +139,12 @@ function static_energy end
     static_energy_density(model)
 
 Return the static energy density field for the given model.
+
+For `LiquidIcePotentialTemperatureFormulation`, returns a `Field` with boundary conditions
+that convert potential temperature fluxes to energy fluxes. This allows users to use
+`BoundaryConditionOperation` to extract energy flux values from the model.
+
+For `StaticEnergyFormulation`, returns the prognostic energy density field directly.
 """
 function static_energy_density end
 
