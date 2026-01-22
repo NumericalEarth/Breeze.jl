@@ -3,7 +3,7 @@ using Oceananigans.Units
 using CUDA
 
 # Schär mountain wave test case
-# References: 
+# References:
 # Klemp et al. (2015) "Idealized global nonhydrostatic atmospheric test cases on a reduced-radius sphere"
 # Schär et al. (2002) "A New Terrain-Following Vertical Coordinate Formulation for Atmospheric Prediction Models"
 
@@ -12,7 +12,7 @@ using CUDA
 # 2) Open lateral boundary conditions have not been implemented yet; periodic boundaries are used instead, which is not ideal for this test case.
 
 
-# Problem parameters 
+# Problem parameters
 thermo = ThermodynamicConstants()
 g = thermo.gravitational_acceleration
 cᵖᵈ = thermo.dry_air.heat_capacity

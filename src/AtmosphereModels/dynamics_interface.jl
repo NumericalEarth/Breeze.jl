@@ -18,11 +18,17 @@ Return the default dynamics for the given grid and thermodynamic constants.
 function default_dynamics end
 
 """
-    materialize_dynamics(dynamics_stub, grid, boundary_conditions, thermodynamic_constants)
+    materialize_dynamics(dynamics_stub, grid, boundary_conditions, thermodynamic_constants, microphysics=nothing)
 
 Materialize a dynamics stub into a complete dynamics object with all required fields.
+
+The `microphysics` argument is optional and used by dynamics types that need to know
+the microphysics scheme to create appropriate prognostic state (e.g., `ParcelDynamics`).
 """
 function materialize_dynamics end
+
+# Default: ignore microphysics argument (for backward compatibility)
+materialize_dynamics(d, grid, bcs, constants, microphysics) = materialize_dynamics(d, grid, bcs, constants)
 
 """
     materialize_momentum_and_velocities(dynamics, grid, boundary_conditions)
@@ -140,7 +146,7 @@ function validate_velocity_boundary_conditions(dynamics, user_boundary_condition
     velocity_names = (:u, :v, :w)
     user_bc_names = keys(user_boundary_conditions)
     provided_velocity_bcs = filter(name -> name ∈ user_bc_names, velocity_names)
-    
+
     if !isempty(provided_velocity_bcs)
         throw(ArgumentError(
             "Boundary conditions for velocity components $(provided_velocity_bcs) are not supported " *

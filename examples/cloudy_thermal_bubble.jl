@@ -82,6 +82,7 @@ outputs = (; θ, w)
 
 filename = "dry_thermal_bubble.jld2"
 writer = JLD2Writer(model, outputs; filename,
+                    including = [:grid],
                     schedule = TimeInterval(10seconds),
                     overwrite_existing = true)
 
@@ -149,7 +150,7 @@ nothing #hide
 # following the methodology described by Bryan and Fritsch (2002). This simulation
 # includes moisture processes, where excess water vapor condenses to liquid water,
 # releasing latent heat that enhances the buoyancy of the rising bubble.
-# 
+#
 # For pedagogical purposes, we build a new model with warm-phase saturation adjustment microphysics.
 # (We coudl have also used this model for the dry simulation):
 
@@ -214,6 +215,7 @@ moist_outputs = (; θ, w, qˡ′)
 
 moist_filename = "cloudy_thermal_bubble.jld2"
 moist_writer = JLD2Writer(moist_model, moist_outputs; filename=moist_filename,
+                          including = [:grid],
                           schedule = TimeInterval(10seconds),
                           overwrite_existing = true)
 

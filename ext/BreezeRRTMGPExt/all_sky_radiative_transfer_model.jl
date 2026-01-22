@@ -17,7 +17,7 @@ using Breeze.AtmosphereModels:
     ConstantRadiusParticles,
     cloud_liquid_effective_radius,
     cloud_ice_effective_radius,
-    compute_moisture_fractions,
+    grid_moisture_fractions,
     RadiativeTransferModel
 
 using Breeze.Thermodynamics: ThermodynamicConstants
@@ -51,7 +51,7 @@ RRTMGP loads lookup tables from netCDF via an extension.
 # Keyword Arguments
 - `background_atmosphere`: Background atmospheric gas composition (default: `BackgroundAtmosphere{FT}()`).
 - `surface_temperature`: Surface temperature in Kelvin (required).
-- `coordinate`: Tuple of (longitude, latitude) in degrees. If `nothing` (default), 
+- `coordinate`: Tuple of (longitude, latitude) in degrees. If `nothing` (default),
                 extracted from grid coordinates.
 - `epoch`: Optional epoch for computing time with floating-point clocks.
 - `surface_emissivity`: Surface emissivity, 0-1 (default: 0.98). Scalar.
@@ -321,7 +321,7 @@ end
         qᵗ_ijk = qᵗ[i, j, k]
 
         # Get moisture fractions from microphysics
-        q = compute_moisture_fractions(i, j, k, grid, microphysics, ρ, qᵗ_ijk, microphysical_fields)
+        q = grid_moisture_fractions(i, j, k, grid, microphysics, ρ, qᵗ_ijk, microphysical_fields)
 
         # Extract liquid and ice mass fractions
         qˡ = q.liquid

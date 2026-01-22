@@ -47,25 +47,25 @@ using Test
         model = AtmosphereModel(grid; dynamics=PrescribedDynamics(reference_state))
         @test model isa KinematicModel
         @test model.pressure_solver === nothing
-        
+
         set!(model, θ=300, qᵗ=0.01, w=1)
         @test @allowscalar(model.velocities.w[1, 1, 4]) ≈ FT(1)
-        
+
         time_step!(model, 1)
         @test model.clock.iteration == 1
     end
 
     @testset "KinematicModel with PrescribedVelocityFields" begin
         w_evolving(x, y, z, t) = (1 - exp(-t / 100)) * sin(π * z / 2000)
-        
+
         model = AtmosphereModel(grid;
             dynamics = PrescribedDynamics(reference_state),
             velocities = PrescribedVelocityFields(w=w_evolving))
-        
+
         @test model isa KinematicModel
         set!(model, θ=300, qᵗ=0.01)
         @test_throws ArgumentError set!(model, w=1)
-        
+
         time_step!(model, 10)
         @test model.clock.time ≈ 10
     end
@@ -74,7 +74,7 @@ using Test
         w_inlet(x, y, t) = FT(0.5)
         w_bcs = FieldBoundaryConditions(bottom=OpenBoundaryCondition(w_inlet))
         boundary_conditions = (; w = w_bcs)
-        
+
         model = AtmosphereModel(grid; dynamics=PrescribedDynamics(reference_state), boundary_conditions)
         @test model isa KinematicModel
         @test model.velocities.w.boundary_conditions.bottom isa Oceananigans.BoundaryConditions.BoundaryCondition
@@ -87,10 +87,10 @@ end
 @testset "Gaussian advection (analytical solution) [Float64]" begin
     FT = Float64
     Oceananigans.defaults.FloatType = FT
-    
+
     Lz, Nz, w₀ = 4000, 64, 10  # Reduced resolution for faster test
     grid = RectilinearGrid(default_arch; size=(4, 4, Nz), x=(0, 100), y=(0, 100), z=(0, Lz))
-    
+
     model = AtmosphereModel(grid;
         dynamics = PrescribedDynamics(ReferenceState(grid, ThermodynamicConstants())),
         tracers = :c,

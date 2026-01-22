@@ -156,4 +156,3 @@ using RRTMGP
         @test all(isfinite, interior(radiation.upwelling_longwave_flux))
     end
 end
-

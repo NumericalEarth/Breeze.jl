@@ -124,4 +124,3 @@ function Base.show(io::IO, formulation::LiquidIcePotentialTemperatureFormulation
         print(io, "└── potential_temperature: ", prettysummary(formulation.potential_temperature))
     end
 end
-

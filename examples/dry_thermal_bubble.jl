@@ -90,6 +90,7 @@ outputs = merge(model.velocities, model.tracers, (; ρe′, ρe, T))
 
 filename = "thermal_bubble.jld2"
 writer = JLD2Writer(model, outputs; filename,
+                    including = [:grid],
                     schedule = TimeInterval(10seconds),
                     overwrite_existing = true)
 

@@ -122,6 +122,7 @@ outputs = merge(model.velocities, (; θ′))
 
 filename = "inertia_gravity_wave.jld2"
 simulation.output_writers[:jld2] = JLD2Writer(model, outputs; filename,
+                                              including = [:grid],
                                               schedule = TimeInterval(100),
                                               overwrite_existing = true)
 
@@ -169,7 +170,7 @@ ax = Axis(fig[1, 1], xlabel = "x (m)", ylabel = "z (m)")
 title = @lift "Potential temperature perturbation θ′ at t = $(prettytime(times[$n]))"
 fig[0, :] = Label(fig, title, fontsize=16, tellwidth=false)
 
-heatmap!(ax, θ′n, colormap = :balance, colorrange = (-Δθ/2, Δθ/2))
+contourf!(ax, θ′n; colormap = :balance, levels, extendhigh=:auto, extendlow=:auto)
 
 record(fig, "inertia_gravity_wave.mp4", 1:Nt, framerate=8) do nn
     n[] = nn

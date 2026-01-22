@@ -92,7 +92,7 @@ Adapt.adapt_structure(to, k::SurfacePrecipitationFluxKernel) =
     # wʳ < 0 (downward), so -wʳ * ρqʳ > 0 represents flux out of domain
     @inbounds wʳ = kernel.terminal_velocity[i, j, 1]
     @inbounds ρqʳ = kernel.rain_density[i, j, 1]
-    
+
     # Return positive flux for rain leaving domain (downward)
     return -wʳ * ρqʳ
 end

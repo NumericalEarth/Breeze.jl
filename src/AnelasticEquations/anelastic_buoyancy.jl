@@ -39,7 +39,7 @@ where `pᵣ` is the reference pressure, `Rᵐ` is the mixture gas constant, and 
         T = temperature[i, j, k]
     end
 
-    q = compute_moisture_fractions(i, j, k, grid, microphysics, ρᵣ, qᵗ, microphysical_fields)
+    q = grid_moisture_fractions(i, j, k, grid, microphysics, ρᵣ, qᵗ, microphysical_fields)
     Rᵐ = mixture_gas_constant(q, constants)
     ρ = pᵣ / (Rᵐ * T)
     g = constants.gravitational_acceleration
@@ -47,4 +47,3 @@ where `pᵣ` is the reference pressure, `Rᵐ` is the mixture gas constant, and 
 
     return - g * ρ′
 end
-

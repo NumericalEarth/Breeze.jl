@@ -26,6 +26,15 @@ Breeze interfaces with ClimaOcean for coupled atmosphere-ocean simulations.
 
 2. **Type Stability**: Prioritize type-stable code for performance
    - All structs must be concretely typed
+   - **Never use `Any` as a type parameter or field type**. This destroys type inference and performance.
+   - Use the **materialization pattern**: define a user-facing constructor that creates a "skeleton"
+     struct with placeholder types (like `Nothing`), then `materialize_*` functions create the
+     fully-typed version with concrete field types. This allows deferred type resolution while
+     maintaining concrete types in the final object.
+   - For mutable state within an immutable struct, use a `mutable struct` as the field type.
+     The outer struct remains immutable with concrete types, while the inner mutable struct's
+     fields can be updated. Example: `ParcelDynamics` contains a `ParcelState` (mutable) that
+     gets its fields updated during time-stepping.
 
 3. **Kernel Functions**: For GPU compatibility:
    - Use KernelAbstractions.jl syntax for kernels, eg `@kernel`, `@index`
@@ -255,7 +264,7 @@ the functions that microphysics schemes must implement. Key functions include:
     liquid/ice, so there is no adjustment to perform. The moisture partition is already determined
     by the prognostic fields.
 - `microphysical_tendency`: Computes tendencies for prognostic microphysical variables.
-- `compute_moisture_fractions`: Computes moisture mass fractions from prognostic fields.
+- `moisture_fractions`: Computes moisture mass fractions from prognostic fields.
 - `update_microphysical_fields!`: Updates diagnostic microphysical fields after state update.
 
 ## Testing Guidelines
@@ -395,7 +404,7 @@ serve(dir="docs/build")
 When implementing a simulation from a published paper:
 
 ### 1. Parameter Extraction
-- **Read the paper carefully** and extract ALL parameters: domain size, resolution, physical constants, 
+- **Read the paper carefully** and extract ALL parameters: domain size, resolution, physical constants,
   boundary conditions, initial conditions, forcing, closure parameters
 - Look for parameter tables (often "Table 1" or similar)
 - Check figure captions for additional details
@@ -438,11 +447,11 @@ Before running a long simulation:
 - Quantitative comparison: compute the same diagnostics as the paper
 
 ### 7. Common Issues
-- **NaN blowups**: Usually from timestep too large, unstable initial conditions, 
+- **NaN blowups**: Usually from timestep too large, unstable initial conditions,
   or if-else statements on GPU (use `ifelse` instead)
-- **Nothing happening**: Check that buoyancy anomaly has the right sign, 
+- **Nothing happening**: Check that buoyancy anomaly has the right sign,
   that initial conditions are actually applied, that forcing is active
-- **Wrong direction of flow**: Check coordinate conventions (is y increasing 
+- **Wrong direction of flow**: Check coordinate conventions (is y increasing
   upslope or downslope?)
 - **GPU issues**: Avoid branching, ensure type stability, use `randn()` carefully
 
@@ -459,6 +468,55 @@ Before running a long simulation:
 - Write descriptive commit messages
 - Update tests and documentation with code changes
 - Check CI passes before merging
+
+## Code Formatting and Whitespace
+
+**PRs will fail CI unless trailing whitespace and trailing blank lines are cleared.**
+Before committing, clean up whitespace in all `.jl`, `.md`, and `.sh` files.
+
+The cleanup must:
+1. Remove trailing whitespace from each line
+2. Remove trailing blank lines at end of file
+3. Ensure file ends with exactly one newline
+
+### Shell-based cleanup (recommended for agents)
+
+```bash
+# Combined cleanup: trailing whitespace, trailing blank lines, ensure final newline
+for file in $(find /path/to/Breeze -type f \( -name "*.jl" -o -name "*.md" -o -name "*.sh" \) ! -path "*/.git/*"); do
+  # Remove trailing whitespace from each line
+  sed -i '' 's/[[:space:]]*$//' "$file"
+  # Remove trailing blank lines and ensure exactly one final newline
+  # This uses awk to skip trailing empty lines and adds one newline at end
+  awk 'NF {p=1} p' "$file" | awk '{print}' > "$file.tmp" && mv "$file.tmp" "$file"
+  # Ensure file ends with newline (in case awk produced empty output)
+  [ -s "$file" ] && [ "$(tail -c1 "$file" | wc -l)" -eq 0 ] && echo >> "$file"
+done
+```
+
+### Emacs Lisp cleanup
+
+```elisp
+(dolist (file (directory-files-recursively "/path/to/Breeze" "\\.\\(jl\\|md\\|sh\\)$"))
+  (when (file-regular-p file)
+    (with-temp-buffer
+      (insert-file-contents file)
+      ;; Force LF line ending
+      (set-buffer-file-coding-system 'unix)
+      ;; Add final newline in case it's missing (will be cleaned if extra)
+      (goto-char (point-max))
+      (insert "\n")
+      ;; Replace non-breaking spaces with regular spaces
+      (save-excursion
+        (goto-char (point-min))
+        (while (search-forward " " nil t)
+          (replace-match " " nil t)))
+      ;; Convert tabs to spaces
+      (untabify (point-min) (point-max))
+      ;; Remove trailing whitespace (includes trailing blank lines)
+      (delete-trailing-whitespace)
+      (write-region (point-min) (point-max) file))))
+```
 
 ## Helpful Resources
 - Oceananigans docs: https://clima.github.io/OceananigansDocumentation/stable/
