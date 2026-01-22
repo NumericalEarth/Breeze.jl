@@ -491,6 +491,11 @@ end
             μ.qᵛ[i, j, k]  = rᵛ
             μ.qᶜˡ[i, j, k] = rᶜˡ
             μ.qʳ[i, j, k]  = rʳ
+            if !isfinite(μ.qʳ[i, j, k])
+                @cushow μ.qʳ[i, j, k]
+                @cushow rʳ
+                error()
+            end
 
             # CFL check for sedimentation
             zᵏ⁺¹ = znode(i, j, k+1, grid, Center(), Center(), Center())
@@ -525,6 +530,11 @@ end
         μ.qᵛ[i, j, Nz]  = rᵛ
         μ.qᶜˡ[i, j, Nz] = rᶜˡ
         μ.qʳ[i, j, Nz]  = rʳ
+        if !isfinite(μ.qʳ[i, j, Nz])
+            @cushow μ.qʳ[i, j, Nz]
+            @cushow rʳ
+            error()
+        end
     end
 
     # Subcycling for CFL constraint on rain sedimentation
@@ -618,6 +628,11 @@ end
                 μ.qᵛ[i, j, k]  = rᵛ_new
                 μ.qᶜˡ[i, j, k] = rᶜˡ_final
                 μ.qʳ[i, j, k]  = rʳ_final
+                if !isfinite(μ.qʳ[i, j, k])
+                    @cushow μ.qʳ[i, j, k]
+                    @cushow rʳ_final
+                    error()
+                end
 
                 # Update θˡⁱ from latent heating
                 net_phase_change = Δrᶜ - Δrᴱ
@@ -694,6 +709,11 @@ end
             μ.qᵛ[i, j, k]  = rᵛ_new
             μ.qᶜˡ[i, j, k] = rᶜˡ_final
             μ.qʳ[i, j, k]  = rʳ_final
+            if !isfinite(μ.qʳ[i, j, k])
+                @cushow μ.qʳ[i, j, k]
+                @cushow rʳ_final
+                error()
+            end
 
             # Update θˡⁱ from latent heating
             net_phase_change = Δrᶜ - Δrᴱ
@@ -770,6 +790,11 @@ end
             μ.qᵛ[i, j, k]   = qᵛ
             μ.qᶜˡ[i, j, k]  = qᶜˡ
             μ.qʳ[i, j, k]   = qʳ
+            if !isfinite(μ.qʳ[i, j, k])
+                @cushow μ.qʳ[i, j, k]
+                @cushow qʳ
+                error()
+            end
         end
     end
 end
