@@ -71,7 +71,7 @@ dry_S = [supersaturation(temperature(s.𝒰, constants), s.ρ, s.𝒰.moisture_m
 nothing #hide
 
 # Environmental temperature at each parcel height
-dry_Tₑ = [interpolate((s.z,), model.temperature) for s in dry_snapshots]
+dry_Tₑ = [interpolate(s.z, model.temperature) for s in dry_snapshots]
 nothing #hide
 
 # ## Part 2: Cloudy parcel with one-moment microphysics
@@ -125,7 +125,7 @@ cloudy_S = [supersaturation(temperature(s.𝒰, cloudy_constants), s.ρ,
 nothing #hide
 
 # Environmental temperature at each parcel height
-cloudy_Tₑ = [interpolate((s.z,), cloudy_model.temperature) for s in cloudy_snapshots]
+cloudy_Tₑ = [interpolate(s.z, cloudy_model.temperature) for s in cloudy_snapshots]
 nothing #hide
 
 # ## Visualization
