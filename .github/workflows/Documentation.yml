@@ -63,7 +63,7 @@ jobs:
         timeout-minutes: 45
         run:
           earlyoom -m 3 -s 100 -r 300 --prefer 'julia' &
-          julia --color=yes --project=docs -O0 examples/splitting_supercell.jl
+          julia --color=yes --project=docs -O1 examples/splitting_supercell.jl
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
       # - uses: actions/upload-artifact@v6
