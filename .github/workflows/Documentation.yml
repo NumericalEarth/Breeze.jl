@@ -3,7 +3,7 @@ name: Documentation
 on:
   push:
     branches:
-      - main
+      - '**'
     tags: "*"
     paths: &paths
       - ".github/workflows/Documentation.yml"
@@ -12,8 +12,8 @@ on:
       - "src/**"
       - "Project.toml"
       - "CHANGELOG.md"
-  pull_request:
-    paths: *paths
+  # pull_request:
+  #   paths: *paths
 
 concurrency:
   # Skip intermediate builds: always.
