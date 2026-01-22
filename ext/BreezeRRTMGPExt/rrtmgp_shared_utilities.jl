@@ -95,7 +95,7 @@ end
         # H₂O volume mixing ratio from specific humidity
         r = qᵛₖ / dry_mass_fraction
         vmr_h2o[k, c] = r * (mᵈ / mᵛ)
-        
+
         # O₃ volume mixing ratio - index into field (works for ConstantField or Field)
         vmr_o3[k, c] = O₃[i, j, k]
     end
