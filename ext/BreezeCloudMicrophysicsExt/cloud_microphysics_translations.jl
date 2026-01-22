@@ -56,6 +56,15 @@ See Eq. (13.28) by [Pruppacher & Klett (2010)](@cite pruppacher2010microphysics)
     return 1 / (ℒˡ / K_therm / T * (ℒˡ / Rᵛ / T - 1) + Rᵛ * T / D_vapor / pᵛ⁺)
 end
 
+@inline function diffusional_growth_factor_ice(aps::AirProperties{FT}, T, constants) where {FT}
+    (; K_therm, D_vapor) = aps
+    Rᵛ = vapor_gas_constant(constants)
+    ℒˢ = ice_latent_heat(T, constants)
+    pᵛ⁺ = saturation_vapor_pressure(T, constants, PlanarIceSurface())
+
+    return 1 / (ℒˢ / K_therm / T * (ℒˢ / Rᵛ / T - 1) + Rᵛ * T / D_vapor / pᵛ⁺)
+end
+
 #####
 ##### Rain evaporation (TRANSLATION: uses the above thermodynamics-dependent functions)
 #####
@@ -224,10 +233,10 @@ end
 #            activation: 2. Multiple aerosol types. J. Geophys. Res., 105(D5), 6837-6844.
 #####
 
-using CloudMicrophysics.AerosolModel: AerosolDistribution, Mode_κ, n_modes
+using CloudMicrophysics.AerosolModel: AerosolDistribution, Mode_B, Mode_κ, n_modes
 
 """
-    max_supersaturation_breeze(aerosol_activation, air_properties, T, p, w, qᵗ, qˡ, ρ, constants)
+    max_supersaturation_breeze(aerosol_activation, air_properties, T, p, w, qᵗ, qˡ, qⁱ, Nˡ, Nⁱ, ρ, constants)
 
 Compute the maximum supersaturation using the Abdul-Razzak and Ghan (2000) parameterization.
 
@@ -242,6 +251,9 @@ Breeze's thermodynamics instead of Thermodynamics.jl.
 - `w`: Updraft velocity [m/s]
 - `qᵗ`: Total specific humidity [kg/kg]
 - `qˡ`: Liquid water specific humidity [kg/kg]
+- `qⁱ`: Ice water specific humidity [kg/kg]
+- `Nˡ`: Liquid water number concentration [1/m³]
+- `Nⁱ`: Ice water number concentration [1/m³]
 - `ρ`: Air density [kg/m³]
 - `constants`: Breeze ThermodynamicConstants
 
@@ -256,6 +268,9 @@ Maximum supersaturation (dimensionless, e.g., 0.01 = 1% supersaturation)
     w::FT,
     qᵗ::FT,
     qˡ::FT,
+    qⁱ::FT,
+    Nˡ::FT,
+    Nⁱ::FT,
     ρ::FT,
     constants,
 ) where {FT}
@@ -270,19 +285,23 @@ Maximum supersaturation (dimensionless, e.g., 0.01 = 1% supersaturation)
     cᵖᵈ = constants.dry_air.heat_capacity
     cᵖᵛ = constants.vapor.heat_capacity
     cᵖˡ = constants.liquid.heat_capacity
+    cᵖⁱ = constants.ice.heat_capacity
     ℒˡ = liquid_latent_heat(T, constants)
+    ℒˢ = ice_latent_heat(T, constants)
     pᵛ⁺ = saturation_vapor_pressure(T, constants, PlanarLiquidSurface())
+    pᵛ⁺_ice = saturation_vapor_pressure(T, constants, PlanarIceSurface())
     g = constants.gravitational_acceleration
     ρw = ap.ρ_w  # water density
+    ρi = ap.ρ_i  # ice density
 
     # Vapor pressure
-    qᵛ = qᵗ - qˡ
+    qᵛ = qᵗ - qˡ - qⁱ
     pᵛ = qᵛ * ρ * Rᵛ * T
 
-    # Mixture properties (simplified, ignoring ice)
+    # Mixture properties
     qᵈ = 1 - qᵗ  # dry air fraction
     Rᵐ = qᵈ * Rᵈ + qᵛ * Rᵛ
-    cᵖᵐ = qᵈ * cᵖᵈ + qᵛ * cᵖᵛ + qˡ * cᵖˡ
+    cᵖᵐ = qᵈ * cᵖᵈ + qᵛ * cᵖᵛ + qˡ * cᵖˡ + qⁱ * cᵖⁱ
 
     # Diffusional growth factor G (Eq. 13.28 in Pruppacher & Klett)
     G = diffusional_growth_factor(aps, T, constants) / ρw
@@ -294,12 +313,62 @@ Maximum supersaturation (dimensionless, e.g., 0.01 = 1% supersaturation)
     γ = Rᵛ * T / pᵛ⁺ + pᵛ / pᵛ⁺ * Rᵐ * ℒˡ^2 / Rᵛ / cᵖᵐ / T / p
 
     # Curvature coefficient (Kelvin effect)
-    A = 2 * ap.σ * ap.M_w / ρw / Rᵛ / T
+    # Formula: A = 2σ / (ρw * R_v * T)
+    A = 2 * ap.σ / (ρw * Rᵛ * T)
 
     # Only compute if there's updraft
-    S_max = ifelse(w > eps(FT), _compute_smax_arg(ap, ad, A, α, γ, G, w, ρw), zero(FT))
+    S_max_ARG = _compute_smax_arg(ap, ad, A, α, γ, G, w, ρw)
 
-    return S_max
+    # Correction for existing liquid and ice (phase relaxation)
+    # See Eq. A13 in Korolev and Mazin (2003) or CloudMicrophysics implementation
+
+    # Liquid relaxation
+    r_liq = ifelse(Nˡ > eps(FT), cbrt(ρ * qˡ / Nˡ / ρw / (FT(4) / 3 * FT(π))), zero(FT))
+    K_liq = 4 * FT(π) * ρw * Nˡ * r_liq * G * γ
+
+    # Ice relaxation
+    γᵢ = Rᵛ * T / pᵛ⁺ + pᵛ / pᵛ⁺ * Rᵐ * ℒˡ * ℒˢ / Rᵛ / cᵖᵐ / T / p
+    r_ice = ifelse(Nⁱ > eps(FT), cbrt(ρ * qⁱ / Nⁱ / ρi / (FT(4) / 3 * FT(π))), zero(FT))
+    ρᵢGᵢ = diffusional_growth_factor_ice(aps, T, constants)
+    K_ice = 4 * FT(π) * Nⁱ * r_ice * ρᵢGᵢ * γᵢ
+    
+    ξ = pᵛ⁺ / pᵛ⁺_ice
+    
+    S_max = S_max_ARG * (α * w - K_ice * (ξ - 1)) / (α * w + (K_liq + K_ice * ξ) * S_max_ARG)
+
+    return max(zero(FT), S_max)
+end
+
+# Helper function to compute mean hygroscopicity
+@inline function _mean_hygroscopicity(ap, mode::Mode_κ{T, FT}) where {T <: Tuple, FT}
+    κ_mean = zero(FT)
+    @inbounds for j in 1:fieldcount(T)
+        κ_mean += mode.vol_mix_ratio[j] * mode.kappa[j]
+    end
+    return κ_mean
+end
+
+@inline _mean_hygroscopicity(ap, mode::Mode_κ{T, FT}) where {T <: Real, FT} = mode.vol_mix_ratio * mode.kappa
+
+@inline function _mean_hygroscopicity(ap, mode::Mode_B{T, FT}) where {T <: Tuple, FT}
+    nom = zero(FT)
+    @inbounds for j in 1:fieldcount(T)
+        nom += mode.mass_mix_ratio[j] * mode.dissoc[j] * mode.osmotic_coeff[j] *
+               mode.soluble_mass_frac[j] / mode.molar_mass[j]
+    end
+
+    den = zero(FT)
+    @inbounds for j in 1:fieldcount(T)
+        den += mode.mass_mix_ratio[j] / mode.aerosol_density[j]
+    end
+
+    return nom / den * ap.M_w / ap.ρ_w
+end
+
+@inline function _mean_hygroscopicity(ap, mode::Mode_B{T, FT}) where {T <: Real, FT}
+    nom = mode.mass_mix_ratio * mode.dissoc * mode.osmotic_coeff * mode.soluble_mass_frac / mode.molar_mass
+    den = mode.mass_mix_ratio / mode.aerosol_density
+    return nom / den * ap.M_w / ap.ρ_w
 end
 
 # Helper function to compute S_max using ARG parameterization
@@ -311,8 +380,8 @@ end
     @inbounds for i in 1:n_modes(ad)
         mode_i = ad.modes[i]
 
-        # Mean hygroscopicity for mode (simplified for Mode_κ)
-        κ_mean = mode_i.kappa[1]  # assume single component
+        # Mean hygroscopicity for mode (volume-weighted κ)
+        κ_mean = _mean_hygroscopicity(ap, mode_i)
 
         # Critical supersaturation (Eq. 9 in ARG 2000)
         Sm_i = 2 / sqrt(κ_mean) * (A / 3 / mode_i.r_dry)^(FT(3) / 2)
@@ -328,12 +397,11 @@ end
         tmp += 1 / Sm_i^2 * (f * (ζ / η)^ap.p1 + g_param * (Sm_i^2 / (η + 3 * ζ))^ap.p2)
     end
 
-    S_max = ifelse(tmp > eps(FT), 1 / sqrt(tmp), zero(FT))
-    return S_max
+    return 1 / sqrt(tmp)
 end
 
 """
-    activated_droplet_number(aerosol_activation, air_properties, T, p, w, qᵗ, qˡ, ρ, constants)
+    activated_droplet_number(aerosol_activation, air_properties, T, p, w, qᵗ, qˡ, qⁱ, Nˡ, Nⁱ, ρ, constants)
 
 Compute the number of cloud droplets that would form from aerosol activation.
 
@@ -353,6 +421,9 @@ Total number of activated droplets per unit volume [1/m³]
     w::FT,
     qᵗ::FT,
     qˡ::FT,
+    qⁱ::FT,
+    Nˡ::FT,
+    Nⁱ::FT,
     ρ::FT,
     constants,
 ) where {FT}
@@ -361,11 +432,12 @@ Total number of activated droplets per unit volume [1/m³]
     ad = aerosol_activation.aerosol_distribution
 
     # Compute maximum supersaturation
-    S_max = max_supersaturation_breeze(aerosol_activation, aps, T, p, w, qᵗ, qˡ, ρ, constants)
+    S_max = max_supersaturation_breeze(aerosol_activation, aps, T, p, w, qᵗ, qˡ, qⁱ, Nˡ, Nⁱ, ρ, constants)
 
     # Curvature coefficient
     Rᵛ = vapor_gas_constant(constants)
-    A = 2 * ap.σ * ap.M_w / ap.ρ_w / Rᵛ / T
+    # Formula: A = 2σ / (ρw * R_v * T)
+    A = 2 * ap.σ / (ap.ρ_w * Rᵛ * T)
 
     # Sum activated droplets from each mode
     N_act = zero(FT)
@@ -373,15 +445,13 @@ Total number of activated droplets per unit volume [1/m³]
         mode_i = ad.modes[i]
 
         # Critical supersaturation for this mode
-        κ_mean = mode_i.kappa[1]
+        κ_mean = _mean_hygroscopicity(ap, mode_i)
         Sm_i = 2 / sqrt(κ_mean) * (A / 3 / mode_i.r_dry)^(FT(3) / 2)
 
         # Fraction activated (Eq. 7 in ARG 2000)
-        # Uses error function approximation
         u_i = 2 * log(Sm_i / S_max) / 3 / sqrt(FT(2)) / log(mode_i.stdev)
 
-        # erf approximation for GPU compatibility
-        activated_fraction = FT(0.5) * (1 - _erf_approx(u_i))
+        activated_fraction = FT(0.5) * (1 - SF.erf(u_i))
 
         N_act += mode_i.N * activated_fraction
     end
@@ -389,22 +459,3 @@ Total number of activated droplets per unit volume [1/m³]
     return N_act
 end
 
-# Simple erf approximation for GPU compatibility (Abramowitz and Stegun)
-@inline function _erf_approx(x::FT) where FT
-    # Sign handling
-    sign_x = ifelse(x >= 0, one(FT), -one(FT))
-    x = abs(x)
-
-    # Approximation constants
-    a1 = FT(0.254829592)
-    a2 = FT(-0.284496736)
-    a3 = FT(1.421413741)
-    a4 = FT(-1.453152027)
-    a5 = FT(1.061405429)
-    p_coef = FT(0.3275911)
-
-    t = 1 / (1 + p_coef * x)
-    y = 1 - (((((a5 * t + a4) * t) + a3) * t + a2) * t + a1) * t * exp(-x * x)
-
-    return sign_x * y
-end

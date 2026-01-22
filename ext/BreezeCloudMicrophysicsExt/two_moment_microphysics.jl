@@ -661,7 +661,7 @@ end
     end
 
     # Compute number of activated droplets
-    N_activated = activated_droplet_number(aerosol_activation, aps, T, p, w_pos, qᵗ, qˡ, ρ, constants)
+    N_activated = activated_droplet_number(aerosol_activation, aps, T, p, w_pos, qᵗ, qˡ, zero(FT), Nᶜˡ, zero(FT), ρ, constants)
 
     # Activation source: relax toward activated number if current is less
     # Only add droplets, never remove (activation is irreversible on short timescales)

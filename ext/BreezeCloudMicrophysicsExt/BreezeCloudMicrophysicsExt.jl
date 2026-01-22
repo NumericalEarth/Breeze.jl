@@ -39,6 +39,7 @@ using Breeze.Thermodynamics:
     saturation_specific_humidity,
     supersaturation,
     liquid_latent_heat,
+    ice_latent_heat,
     vapor_gas_constant,
     dry_air_gas_constant
 
