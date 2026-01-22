@@ -83,11 +83,11 @@ using GPUCompiler
     if length(worksize) > 0
         # Show the kernel we are about to launch
         @info "Launching kernel" loop!
-        if contains(string(kernel!), "_microphysical_update!")
-            CUDA.@device_code dir="microphysical_update" loop!(first_kernel_arg, other_kernel_args...)
-        else
+        # if contains(string(kernel!), "_microphysical_update!")
+        #     CUDA.@device_code dir="microphysical_update" loop!(first_kernel_arg, other_kernel_args...)
+        # else
             loop!(first_kernel_arg, other_kernel_args...)
-        end
+        # end
     end
 
     return nothing
