@@ -762,7 +762,7 @@ end
             μ.ρqᶜˡ[i, j, k] = ρ * qᶜˡ
             μ.ρqʳ[i, j, k]  = ρ * qʳ
             if !isfinite(μ.ρqʳ[i, j, k])
-                @cushow μ.ρqʳ[i, j, k]
+                # @cushow μ.ρqʳ[i, j, k]
                 @cushow ρ
                 @cushow qʳ
                 error()
