@@ -81,8 +81,8 @@ jobs:
       - uses: actions/upload-artifact@v6
         if: always()
         with:
-          name: model-checkpoint
-          path: splitting_supercell_iteration*.jld2
+          name: arguments-dump
+          path: microphysical_update_arguments.jld2
           retention-days: 90
       # - uses: actions/upload-artifact@v6
       #   with:
