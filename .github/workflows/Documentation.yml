@@ -31,7 +31,13 @@ jobs:
       contents: write
       pull-requests: read
       statuses: write
-    runs-on: aws-linux-nvidia-gpu-l4
+    strategy:
+      fail-fast: false
+      matrix:
+        os:
+          # - aws-linux-nvidia-gpu-t4
+          - aws-linux-nvidia-gpu-l4
+    runs-on: ${{ matrix.os }}
     container:
       image: 'ghcr.io/numericalearth/breeze-docker-images:docs-julia_1.12.4'
       options: --gpus=all
