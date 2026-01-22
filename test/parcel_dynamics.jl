@@ -3,7 +3,9 @@
 #####
 
 using Oceananigans
+using Oceananigans.Units: kilometers, minutes
 using Breeze
+using CloudMicrophysics
 using Breeze.ParcelModels:
     ParcelDynamics,
     ParcelModel,
@@ -300,7 +302,6 @@ end
 #####
 
 using Oceananigans: interpolate
-using Oceananigans.Units: kilometers, minutes
 
 @testset "Adiabatic ascent: parcel temperature matches environment in isentropic atmosphere" begin
     # In an isentropic atmosphere (constant potential temperature θ), a parcel

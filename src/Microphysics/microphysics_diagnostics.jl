@@ -36,7 +36,7 @@ struct RelativeHumidityKernelFunction{μ, M, MF, T, R, TH}
     thermodynamic_constants :: TH
 end
 
-Utils.prettysummary(kf::RelativeHumidityKernelFunction) = "RelativeHumidityKernelFunction"
+Utils.prettysummary(::RelativeHumidityKernelFunction) = "RelativeHumidityKernelFunction"
 
 Adapt.adapt_structure(to, k::RelativeHumidityKernelFunction) =
     RelativeHumidityKernelFunction(adapt(to, k.microphysics),

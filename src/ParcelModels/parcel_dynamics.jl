@@ -129,13 +129,13 @@ end
 Base.summary(::ParcelDynamics) = "ParcelDynamics"
 
 function Base.show(io::IO, d::ParcelDynamics)
-    print(io, "ParcelDynamics\n")
+    println(io, "ParcelDynamics")
     state_str = d.state isa ParcelState ? d.state : "uninitialized"
-    print(io, "├── state: ", state_str, '\n')
-    print(io, "├── timestepper: ", isnothing(d.timestepper) ? "uninitialized" : "ParcelTimestepper (SSP RK3)", '\n')
-    print(io, "├── density: ", isnothing(d.density) ? "unset" : summary(d.density), '\n')
-    print(io, "├── pressure: ", isnothing(d.pressure) ? "unset" : summary(d.pressure), '\n')
-    print(io, "├── surface_pressure: ", d.surface_pressure, '\n')
+    println(io, "├── state: ", state_str)
+    println(io, "├── timestepper: ", isnothing(d.timestepper) ? "uninitialized" : "ParcelTimestepper (SSP RK3)")
+    println(io, "├── density: ", isnothing(d.density) ? "unset" : summary(d.density))
+    println(io, "├── pressure: ", isnothing(d.pressure) ? "unset" : summary(d.pressure))
+    println(io, "├── surface_pressure: ", d.surface_pressure)
     print(io, "└── standard_pressure: ", d.standard_pressure)
 end
 
@@ -364,6 +364,8 @@ end
 #####
 
 """
+$(TYPEDSIGNATURES)
+
 Set temperature field from potential temperature, using proper thermodynamic relations.
 """
 function set_temperature_from_potential_temperature!(T_field, θ, p_field, pˢᵗ, constants)
@@ -395,6 +397,8 @@ function set_temperature_from_potential_temperature!(T_field, θ, p_field, pˢ�
 end
 
 """
+$(TYPEDSIGNATURES)
+
 Set specific humidity field from relative humidity, computing qᵗ = ℋ * qᵛ⁺(T, ρ).
 """
 function set_moisture_from_relative_humidity!(qᵗ_field, ℋ, T_field, ρ_field, constants)
