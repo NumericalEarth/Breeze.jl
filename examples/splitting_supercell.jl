@@ -68,30 +68,32 @@ using Printf
 
 using GPUCompiler
 
-# @inline function Oceananigans.Utils._launch!(arch, grid, workspec, kernel!, first_kernel_arg, other_kernel_args...;
-#                                              exclude_periphery = false,
-#                                              reduced_dimensions = (),
-#                                              active_cells_map = nothing)
+@inline function Oceananigans.Utils._launch!(arch, grid, workspec, kernel!, first_kernel_arg, other_kernel_args...;
+                                             exclude_periphery = false,
+                                             reduced_dimensions = (),
+                                             active_cells_map = nothing)
 
-#     location = Oceananigans.location(first_kernel_arg)
+    location = Oceananigans.location(first_kernel_arg)
 
-#     loop!, worksize = Oceananigans.Utils.configure_kernel(arch, grid, workspec, kernel!, active_cells_map, Val(exclude_periphery);
-#                                                           location,
-#                                                           reduced_dimensions)
+    loop!, worksize = Oceananigans.Utils.configure_kernel(arch, grid, workspec, kernel!, active_cells_map, Val(exclude_periphery);
+                                                          location,
+                                                          reduced_dimensions)
 
-#     # Don't launch kernels with no size
-#     if length(worksize) > 0
-#         # Show the kernel we are about to launch
-#         # @info "Launching kernel" loop!
-#         # if contains(string(kernel!), "_microphysical_update!")
-#         #     CUDA.@device_code dir="microphysical_update" loop!(first_kernel_arg, other_kernel_args...)
-#         # else
-#             loop!(first_kernel_arg, other_kernel_args...)
-#         # end
-#     end
+    # Don't launch kernels with no size
+    if length(worksize) > 0
+        # Show the kernel we are about to launch
+        # @info "Launching kernel" loop!
+        dir = "microphysical_update"
+        if contains(string(kernel!), "_microphysical_update!") && !isdir(dir)
+            # Dump the LLVM IR for `_microphysical_update!`
+            CUDA.@device_code dir=dir loop!(first_kernel_arg, other_kernel_args...)
+        else
+            loop!(first_kernel_arg, other_kernel_args...)
+        end
+    end
 
-#     return nothing
-# end
+    return nothing
+end
 
 # Always enable exception reporting, not just when `-g2` is used
 @eval GPUCompiler function emit_exception!(builder, name, inst)
