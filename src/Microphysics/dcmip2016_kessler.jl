@@ -472,6 +472,12 @@ end
             rᵗ = total_mixing_ratio(r)
             rᶜˡ = qᶜˡ * (1 + rᵗ)
             rʳ  = qʳ * (1 + rᵗ)
+            if !isfinite(rʳ)
+                @cushow qʳ
+                @cushow rᵗ
+                @cushow rʳ
+                error()
+            end
 
             𝕎ʳᵏ = kessler_terminal_velocity(rʳ, ρ, ρ₁, microphysics)
             μ.𝕎ʳ[i, j, k] = 𝕎ʳᵏ
