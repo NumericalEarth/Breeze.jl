@@ -76,7 +76,7 @@ jobs:
         if: always()
         with:
           name: cuda-dump
-          path: examples/microphysical_update
+          path: microphysical_update
           retention-days: 90
       # - uses: actions/upload-artifact@v6
       #   with:
