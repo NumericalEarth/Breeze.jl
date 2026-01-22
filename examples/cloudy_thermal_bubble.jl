@@ -152,7 +152,7 @@ nothing #hide
 # releasing latent heat that enhances the buoyancy of the rising bubble.
 #
 # For pedagogical purposes, we build a new model with warm-phase saturation adjustment microphysics.
-# (We coudl have also used this model for the dry simulation):
+# (We could have also used this model for the dry simulation):
 
 microphysics = SaturationAdjustment(equilibrium=WarmPhaseEquilibrium())
 moist_model = AtmosphereModel(grid; dynamics, thermodynamic_constants, advection, microphysics)
@@ -259,16 +259,16 @@ nothing #hide
 
 # ![](cloudy_thermal_bubble.mp4)
 
-# ## Precipitating thermal bubble with one-moment microphysics
+# ## Moist thermal bubble with precipitating one-moment microphysics
 #
-# Now we extend to a precipitating case using `OneMomentCloudMicrophysics`, which adds
-# prognostic rain via autoconversion (cloud → rain) and accretion (rain collecting cloud
+# Next, we extend the moist thermal bubble example to a precipitating case using `OneMomentCloudMicrophysics`, which
+# adds prognostic rain via autoconversion (cloud droplets coalescing to form rain) and accretion (rain collecting cloud
 # droplets). This follows the CM1 benchmark configuration (`iinit=4`, `isnd=4`).
 #
 # Note: The one-moment microphysics requires the CloudMicrophysics.jl package to be loaded,
 # which activates the `BreezeCloudMicrophysicsExt` extension.
 
-using CloudMicrophysics  # Required to load the BreezeCloudMicrophysicsExt extension
+using CloudMicrophysics 
 BreezeCloudMicrophysicsExt = Base.get_extension(Breeze, :BreezeCloudMicrophysicsExt)
 using .BreezeCloudMicrophysicsExt: OneMomentCloudMicrophysics
 
@@ -358,9 +358,7 @@ w_range_p = maximum(abs, wts)
 qᶜˡ_range = (0, max(1e-6, maximum(qᶜˡts)))
 qʳ_range = (0, max(1e-6, maximum(qʳts)))
 
-fig = Figure(size=(1200, 900), fontsize=12)
-
-# Place panels in columns 2 and 3, with colorbars on either side
+fig = Figure(size=(1400, 700), fontsize=11)
 axθ = Axis(fig[1, 2], aspect=2, xlabel="x (m)", ylabel="z (m)", title="θ (K)")
 axw = Axis(fig[1, 3], aspect=2, xlabel="x (m)", ylabel="z (m)", title="w (m/s)")
 axqᶜˡ = Axis(fig[2, 2], aspect=2, xlabel="x (m)", ylabel="z (m)", title="Cloud liquid qᶜˡ (kg/kg)")
@@ -372,17 +370,18 @@ wn = @lift wts[$n]
 qᶜˡn = @lift qᶜˡts[$n]
 qʳn = @lift qʳts[$n]
 
-# Colorblind-friendly colormaps
-hmθ = heatmap!(axθ, θn, colorrange=θ_range_p, colormap=:viridis)
+hmθ = heatmap!(axθ, θn, colorrange=θ_range_p, colormap=:thermal)
 hmw = heatmap!(axw, wn, colorrange=(-w_range_p, w_range_p), colormap=:balance)
 hmqᶜˡ = heatmap!(axqᶜˡ, qᶜˡn, colorrange=qᶜˡ_range, colormap=:dense)
 hmqʳ = heatmap!(axqʳ, qʳn, colorrange=qʳ_range, colormap=:amp)
 
-# Colorbars on either side of each row
-Colorbar(fig[1, 1], hmθ, label="θ (K)", vertical=true)
-Colorbar(fig[1, 4], hmw, label="w (m/s)", vertical=true)
-Colorbar(fig[2, 1], hmqᶜˡ, label="qᶜˡ (kg/kg)", vertical=true)
-Colorbar(fig[2, 4], hmqʳ, label="qʳ (kg/kg)", vertical=true)
+Colorbar(fig[1, 1], hmθ, label="θ (K)", vertical=true, width=15)
+Colorbar(fig[1, 4], hmw, label="w (m/s)", vertical=true, width=15)
+Colorbar(fig[2, 1], hmqᶜˡ, label="qᶜˡ (kg/kg)", vertical=true, width=15)
+Colorbar(fig[2, 4], hmqʳ, label="qʳ (kg/kg)", vertical=true, width=15)
+
+colgap!(fig.layout, 10)
+rowgap!(fig.layout, 10)
 
 CairoMakie.record(fig, "precipitating_thermal_bubble.mp4", 1:Nt, framerate=12) do nn
     n[] = nn
