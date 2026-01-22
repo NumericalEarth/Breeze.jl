@@ -2,6 +2,7 @@ using Breeze
 using GPUArraysCore: @allowscalar
 using Oceananigans: Oceananigans
 using Oceananigans.BoundaryConditions: BoundaryCondition
+using Oceananigans.Fields: location
 using Test
 
 function setup_forcing_model(grid, forcing)
@@ -78,6 +79,10 @@ end
         set!(model; θ=θ₀)
         time_step!(model, 1e-6)
         @test true
+
+        # Test that BulkDrag on a scalar field throws an error
+        ρθ_bcs = FieldBoundaryConditions(bottom=BulkDrag(coefficient=Cᴰ))
+        @test_throws ArgumentError AtmosphereModel(grid; boundary_conditions=(ρθ=ρθ_bcs,))
     end
 
     @testset "BulkSensibleHeatFlux construction and application [$FT]" begin
@@ -103,6 +108,31 @@ end
         set!(model; θ=θ₀)
         time_step!(model, 1e-6)
         @test true
+    end
+
+    @testset "materialize_surface_field [$FT]" begin
+        using Breeze.BoundaryConditions: materialize_surface_field
+
+        # Test Number passthrough
+        T_number = FT(300)
+        result = materialize_surface_field(T_number, grid)
+        @test result === T_number
+
+        # Test Field passthrough
+        T_field = Field{Center, Center, Nothing}(grid)
+        set!(T_field, FT(295))
+        result = materialize_surface_field(T_field, grid)
+        @test result === T_field
+
+        # Test Function → Field conversion
+        # Note: With 4 cells in x ∈ [0, 100], centers are at x = 12.5, 37.5, 62.5, 87.5
+        # sin(2π * 12.5 / 100) = sin(π/4) ≈ 0.707, so max ≈ 290 + 5 * 0.707 ≈ 293.5
+        T_func(x, y) = FT(290) + FT(5) * sin(2π * x / 100)
+        result = materialize_surface_field(T_func, grid)
+        @test result isa Field
+        @test location(result) == (Center, Center, Nothing)
+        @test maximum(result) ≈ FT(290) + FT(5) * sin(π / 4)  # ≈ 293.54
+        @test minimum(result) ≈ FT(290) - FT(5) * sin(π / 4)  # ≈ 286.46
     end
 
     @testset "Combined bulk boundary conditions [$FT]" begin
@@ -148,9 +178,9 @@ end
         ]
             model = AtmosphereModel(grid; boundary_conditions=(ρe=bcs_config,))
             set!(model; θ=θ₀, qᵗ=qᵗ₀)
-            time_step!(model, FT(1e-6))
-            @test true
-        end
+        time_step!(model, FT(1e-6))
+        @test true
+    end
     end
 
     @testset "Manual EnergyFluxBoundaryCondition on ρθ [$FT]" begin
@@ -163,8 +193,8 @@ end
         ]
             model = AtmosphereModel(grid; boundary_conditions=(; ρθ=bc_config))
             set!(model; θ=θ₀, qᵗ=qᵗ₀)
-            time_step!(model, FT(1e-6))
-            @test true
+        time_step!(model, FT(1e-6))
+        @test true
         end
     end
 
@@ -212,8 +242,8 @@ end
         𝒬_field = Field(𝒬_op)
         compute!(𝒬_field)
         @test all(interior(𝒬_field) .≈ 𝒬₀)
+        end
     end
-end
 
 #####
 ##### Lateral boundary condition tests (consolidated - test one representative case per boundary)
@@ -224,12 +254,12 @@ end
     using Breeze.BoundaryConditions: EnergyFluxBoundaryCondition
     using Oceananigans.Models: BoundaryConditionOperation
 
-    grid = RectilinearGrid(default_arch; size=(4, 4, 4), x=(0, 100), y=(0, 100), z=(0, 100),
-                           topology=(Bounded, Bounded, Bounded))
+        grid = RectilinearGrid(default_arch; size=(4, 4, 4), x=(0, 100), y=(0, 100), z=(0, 100),
+                               topology=(Bounded, Bounded, Bounded))
 
     𝒬 = FT(100)
-    θ₀ = FT(290)
-    qᵗ₀ = FT(0.01)
+        θ₀ = FT(290)
+        qᵗ₀ = FT(0.01)
 
     # Test all lateral boundaries at once (more efficient than individual tests)
     @testset "Multiple lateral boundaries [$FT]" begin

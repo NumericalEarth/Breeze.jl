@@ -38,6 +38,7 @@ examples = [
     Example("Single column radiation", "single_column_radiation", true),
     Example("Radiative-convective equilibrium (RCEMIP)", "radiative_convective_equilibrium", false),
     Example("Stationary parcel model", "stationary_parcel_model", true),
+    Example("Rising parcel: adiabatic ascent", "rising_parcels", true),
     Example("Acoustic wave in shear layer", "acoustic_wave", true),
     Example("Cloud formation in prescribed updraft", "kinematic_driver", true),
     Example("Splitting supercell", "splitting_supercell", false),
@@ -167,7 +168,9 @@ makedocs(
         ],
         "Developers" => Any[
             "Microphysics" => Any[
-                "Microphysics Interface" => "developer/microphysics_interface.md",
+                "Overview" => "developer/microphysics/overview.md",
+                "Example implementation" => "developer/microphysics/example.md",
+                "Future improvements" => "developer/microphysics/future_improvements.md",
             ],
         ],
         "Radiative Transfer" => "radiative_transfer.md",
