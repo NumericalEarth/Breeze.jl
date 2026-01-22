@@ -474,7 +474,11 @@ end
             # CFL check for sedimentation
             zᵏ⁺¹ = znode(i, j, k+1, grid, Center(), Center(), Center())
             Δz = zᵏ⁺¹ - zᵏ
-            max_Δt = min(max_Δt, cfl * Δz / 𝕎ʳᵏ)
+            old_max_Δt = max_Δt
+            max_Δt = min(old_max_Δt, cfl * Δz / 𝕎ʳᵏ)
+            if iszero(max_Δt) || !isfinite(max_Δt)
+                @cushow Δt, old_max_Δt, cfl, Δz, 𝕎ʳᵏ, cfl * Δz / 𝕎ʳᵏ
+            end
             zᵏ = zᵏ⁺¹
         end
     end
