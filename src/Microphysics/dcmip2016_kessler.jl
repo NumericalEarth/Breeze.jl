@@ -320,6 +320,7 @@ and `β^𝕎` is `terminal_velocity_exponent`.
         @cushow ρ
         @cushow β𝕎
         @cushow ρ₁
+        error()
     end
     return out
 end
