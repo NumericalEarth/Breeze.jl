@@ -24,8 +24,8 @@
 # additional verification of initial conditions and trace gas profiles.
 
 using Breeze
+using Oceananigans: Oceananigans
 using Oceananigans.Units
-using Oceananigans.Grids: znode
 using CUDA
 
 using CairoMakie
@@ -121,7 +121,7 @@ z_faces = range(0, zᵗ, length=Nz+1)
 @info "RCE grid: $(Nx)×$(Ny)×$(Nz), Δz = $(zᵗ/Nz) m"
 
 # Select architecture and set precision
-arch = Oceananigans.GPU()
+arch = GPU()
 Oceananigans.defaults.FloatType = Float32
 
 grid = RectilinearGrid(arch;
@@ -177,19 +177,18 @@ dynamics = AnelasticDynamics(reference_state)
 # Tropical ozone profile approximation (Chapman-like with tropospheric minimum)
 # Note: For z-only profiles, the function takes just z (not x, y, z)
 @inline function tropical_ozone(z)
-    z_km = z / 1000
     ## Tropospheric ozone: ~30 ppbv near surface, increasing slowly
-    O₃_trop = 30e-9 * (1 + 0.5 * z_km / 10)
+    troposphere_O₃= 30e-9 * (1 + 0.5 * z / 10_000)
     ## Stratospheric ozone: peaks around 25 km at ~8 ppmv
-    z_peak = 25.0  # km
-    H_strat = 5.0  # scale height in km
-    O₃_strat = 8e-6 * exp(-((z_km - z_peak) / H_strat)^2)
+    zˢᵗ = 25e3  # km
+    Hˢᵗ = 5e3  # scale height in km
+    stratosphere_O₃ = 8e-6 * exp(-((z - zˢᵗ) / Hˢᵗ)^2)
     ## Smooth transition using a sigmoid
-    transition = 1 / (1 + exp(-(z_km - 15) / 2))
-    return O₃_trop * (1 - transition) + O₃_strat * transition
+    χˢᵗ = 1 / (1 + exp(-(z - 15e3) / 2))
+    return troposphere_O₃ * (1 - χˢᵗ) + stratosphere_O₃ * χˢᵗ
 end
 
-background = BackgroundAtmosphere(
+background_atmosphere = BackgroundAtmosphere(
     CO₂ = 348e-6,       # 348 ppmv — Wing et al. (2018), Table 1
     CH₄ = 1650e-9,      # 1650 ppbv — Wing et al. (2018), Table 1
     N₂O = 306e-9,       # 306 ppbv — Wing et al. (2018), Table 1
@@ -207,12 +206,12 @@ background = BackgroundAtmosphere(
 # we update every hour for computational efficiency.
 
 radiation = RadiativeTransferModel(grid, AllSkyOptics(), constants;
-                                   surface_temperature = SST,
-                                   surface_emissivity = 0.98,
                                    surface_albedo,
                                    solar_constant,
-                                   schedule = TimeInterval(1hour),
-                                   background_atmosphere = background,
+                                   background_atmosphere,
+                                   surface_temperature = SST,
+                                   surface_emissivity = 0.98,
+                                   schedule = TimeInterval(10minutes),
                                    coordinate = cos_zenith,  # Fixed zenith angle
                                    liquid_effective_radius = ConstantRadiusParticles(10.0),
                                    ice_effective_radius = ConstantRadiusParticles(30.0))
@@ -257,7 +256,7 @@ zˢ = 25000  # Sponge layer starts at 25 km (above tropopause)
 λ = 1/60    # 1-minute damping timescale
 
 @inline function sponge_damping(i, j, k, grid, clock, fields, p)
-    z = znode(i, j, k, grid, Center(), Center(), Face())
+    z = Oceananigans.Grids.znode(i, j, k, grid, Center(), Center(), Face())
     mask = clamp((z - p.zˢ) / (p.zᵗ - p.zˢ), 0, 1)
     @inbounds ρw = fields.ρw[i, j, k]
     return -p.λ * mask * ρw
@@ -274,17 +273,12 @@ sponge = Forcing(sponge_damping, discrete_form=true, parameters=(; λ, zˢ, zᵗ
 # We use saturation adjustment with mixed-phase equilibrium, which accounts
 # for both liquid water and ice in clouds.
 
+boundary_conditions = (; ρθ=ρθ_bcs, ρqᵗ=ρqᵗ_bcs, ρu=ρu_bcs, ρv=ρv_bcs)
 microphysics = SaturationAdjustment(equilibrium=MixedPhaseEquilibrium())
 advection = WENO(order=5)
 
-model = AtmosphereModel(grid;
-                        dynamics,
-                        microphysics,
-                        advection,
-                        radiation,
-                        forcing = (; ρw=sponge),
-                        boundary_conditions = (; ρθ=ρθ_bcs, ρqᵗ=ρqᵗ_bcs,
-                                                 ρu=ρu_bcs, ρv=ρv_bcs))
+model = AtmosphereModel(grid; dynamics, microphysics, advection, radiation,
+                        boundary_conditions, forcing = (; ρw=sponge))
 
 # ## Initial Conditions
 #
@@ -371,7 +365,7 @@ qˡ = model.microphysical_fields.qˡ
 # For this documentation example, we run for only 6 hours to demonstrate
 # the setup. Production runs should be 50+ days.
 
-simulation = Simulation(model; Δt=1, stop_time=6hour)
+simulation = Simulation(model; Δt=0.1, stop_time=6hour)
 conjure_time_step_wizard!(simulation, cfl=0.7)
 
 wall_clock = Ref(time_ns())
@@ -400,7 +394,7 @@ function progress(sim)
     return nothing
 end
 
-add_callback!(simulation, progress, IterationInterval(100))
+add_callback!(simulation, progress, IterationInterval(10))
 
 # ## Output
 #
