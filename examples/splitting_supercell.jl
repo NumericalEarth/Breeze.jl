@@ -66,6 +66,8 @@ using CairoMakie
 using CUDA
 using Printf
 
+using GPUCompiler
+
 @inline function Oceananigans.Utils._launch!(arch, grid, workspec, kernel!, first_kernel_arg, other_kernel_args...;
                                              exclude_periphery = false,
                                              reduced_dimensions = (),
@@ -89,6 +91,37 @@ using Printf
     end
 
     return nothing
+end
+
+# Always enable exception reporting, not just when `-g2` is used
+@eval GPUCompiler function emit_exception!(builder, name, inst)
+    job = current_job::CompilerJob
+    bb = position(builder)
+    fun = LLVM.parent(bb)
+    mod = LLVM.parent(fun)
+
+    # report the exception
+    name = globalstring_ptr!(builder, name, "exception")
+    call!(builder, Runtime.get(:report_exception_name), [name])
+
+    # report each frame
+    if Base.JLOptions().debug_level >= 2
+        rt = Runtime.get(:report_exception_frame)
+        ft = convert(LLVM.FunctionType, rt)
+        bt = backtrace(inst)
+        for (i,frame) in enumerate(bt)
+            idx = ConstantInt(parameters(ft)[1], i)
+            func = globalstring_ptr!(builder, String(frame.func), "di_func")
+            file = globalstring_ptr!(builder, String(frame.file), "di_file")
+            line = ConstantInt(parameters(ft)[4], frame.line)
+            call!(builder, rt, [idx, func, file, line])
+        end
+    end
+
+    # signal the exception
+    call!(builder, Runtime.get(:signal_exception))
+
+    emit_trap!(job, builder, mod, inst)
 end
 
 @eval CUDA function cudacall(f::F, types::Type{T}, args::Vararg{Any,N}; kwargs...) where {T,N,F}
