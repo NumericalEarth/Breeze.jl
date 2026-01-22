@@ -41,7 +41,9 @@ using Breeze.Thermodynamics:
     liquid_latent_heat,
     ice_latent_heat,
     vapor_gas_constant,
-    dry_air_gas_constant
+    dry_air_gas_constant,
+    mixture_gas_constant,
+    mixture_heat_capacity
 
 using Breeze.Microphysics:
     center_field_tuple,

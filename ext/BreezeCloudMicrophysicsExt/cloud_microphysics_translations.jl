@@ -187,14 +187,14 @@ Named tuple `(; evap_rate_0, evap_rate_1)` where:
         (; ν_air, D_vapor) = aps
         (; av, bv, α, β, ρ0) = evap
         x_star = pdf_r.xr_min
-        ρw = pdf_r.ρw
+        ρʷ = pdf_r.ρw
 
         # Diffusional growth factor (G function)
         G = diffusional_growth_factor(aps, T, constants)
 
         # Mean rain drop mass and diameter
         (; xr_mean) = pdf_rain_parameters(pdf_r, qʳ, ρ, Nʳ)
-        Dr = cbrt(6 * xr_mean / (π * ρw))
+        Dr = cbrt(6 * xr_mean / (π * ρʷ))
 
         # Ventilation factors for number and mass tendencies
         t_star = cbrt(6 * x_star / xr_mean)
@@ -279,32 +279,26 @@ Maximum supersaturation (dimensionless, e.g., 0.01 = 1% supersaturation)
     ad = aerosol_activation.aerosol_distribution
 
     # Thermodynamic properties from Breeze
-    # Use helper functions for gas constants (computed from molar_gas_constant / molar_mass)
     Rᵛ = vapor_gas_constant(constants)
-    Rᵈ = dry_air_gas_constant(constants)
-    cᵖᵈ = constants.dry_air.heat_capacity
-    cᵖᵛ = constants.vapor.heat_capacity
-    cᵖˡ = constants.liquid.heat_capacity
-    cᵖⁱ = constants.ice.heat_capacity
     ℒˡ = liquid_latent_heat(T, constants)
     ℒˢ = ice_latent_heat(T, constants)
     pᵛ⁺ = saturation_vapor_pressure(T, constants, PlanarLiquidSurface())
     pᵛ⁺_ice = saturation_vapor_pressure(T, constants, PlanarIceSurface())
     g = constants.gravitational_acceleration
-    ρw = ap.ρ_w  # water density
-    ρi = ap.ρ_i  # ice density
+    ρʷ = ap.ρ_w  # water density
+    ρⁱ = ap.ρ_i  # ice density
+
+    # Moisture mass fractions and mixture properties
+    qᵛ = qᵗ - qˡ - qⁱ
+    q = MoistureMassFractions(qᵛ, qˡ, qⁱ)
+    Rᵐ = mixture_gas_constant(q, constants)
+    cᵖᵐ = mixture_heat_capacity(q, constants)
 
     # Vapor pressure
-    qᵛ = qᵗ - qˡ - qⁱ
     pᵛ = qᵛ * ρ * Rᵛ * T
 
-    # Mixture properties
-    qᵈ = 1 - qᵗ  # dry air fraction
-    Rᵐ = qᵈ * Rᵈ + qᵛ * Rᵛ
-    cᵖᵐ = qᵈ * cᵖᵈ + qᵛ * cᵖᵛ + qˡ * cᵖˡ + qⁱ * cᵖⁱ
-
     # Diffusional growth factor G (Eq. 13.28 in Pruppacher & Klett)
-    G = diffusional_growth_factor(aps, T, constants) / ρw
+    G = diffusional_growth_factor(aps, T, constants) / ρʷ
 
     # ARG parameters (Eq. 11, 12 in Abdul-Razzak et al. 1998)
     # α = rate of change of saturation ratio due to adiabatic cooling
@@ -313,22 +307,22 @@ Maximum supersaturation (dimensionless, e.g., 0.01 = 1% supersaturation)
     γ = Rᵛ * T / pᵛ⁺ + pᵛ / pᵛ⁺ * Rᵐ * ℒˡ^2 / Rᵛ / cᵖᵐ / T / p
 
     # Curvature coefficient (Kelvin effect)
-    # Formula: A = 2σ / (ρw * R_v * T)
-    A = 2 * ap.σ / (ρw * Rᵛ * T)
+    # Formula: A = 2σ / (ρʷ * R_v * T)
+    A = 2 * ap.σ / (ρʷ * Rᵛ * T)
 
     # Only compute if there's updraft
-    S_max_ARG = _compute_smax_arg(ap, ad, A, α, γ, G, w, ρw)
+    S_max_ARG = _compute_smax_arg(ap, ad, A, α, γ, G, w, ρʷ)
 
     # Correction for existing liquid and ice (phase relaxation)
     # See Eq. A13 in Korolev and Mazin (2003) or CloudMicrophysics implementation
 
     # Liquid relaxation
-    r_liq = ifelse(Nˡ > eps(FT), cbrt(ρ * qˡ / Nˡ / ρw / (FT(4) / 3 * FT(π))), zero(FT))
-    K_liq = 4 * FT(π) * ρw * Nˡ * r_liq * G * γ
+    r_liq = ifelse(Nˡ > eps(FT), cbrt(ρ * qˡ / Nˡ / ρʷ / (FT(4) / 3 * FT(π))), zero(FT))
+    K_liq = 4 * FT(π) * ρʷ * Nˡ * r_liq * G * γ
 
     # Ice relaxation
     γᵢ = Rᵛ * T / pᵛ⁺ + pᵛ / pᵛ⁺ * Rᵐ * ℒˡ * ℒˢ / Rᵛ / cᵖᵐ / T / p
-    r_ice = ifelse(Nⁱ > eps(FT), cbrt(ρ * qⁱ / Nⁱ / ρi / (FT(4) / 3 * FT(π))), zero(FT))
+    r_ice = ifelse(Nⁱ > eps(FT), cbrt(ρ * qⁱ / Nⁱ / ρⁱ / (FT(4) / 3 * FT(π))), zero(FT))
     ρᵢGᵢ = diffusional_growth_factor_ice(aps, T, constants)
     K_ice = 4 * FT(π) * Nⁱ * r_ice * ρᵢGᵢ * γᵢ
     
@@ -372,7 +366,7 @@ end
 end
 
 # Helper function to compute S_max using ARG parameterization
-@inline function _compute_smax_arg(ap, ad, A::FT, α::FT, γ::FT, G::FT, w::FT, ρw::FT) where FT
+@inline function _compute_smax_arg(ap, ad, A::FT, α::FT, γ::FT, G::FT, w::FT, ρʷ::FT) where FT
     ζ = 2 * A / 3 * sqrt(α * w / G)
 
     # Compute critical supersaturation and contribution from each mode
@@ -391,7 +385,7 @@ end
         g_param = ap.g1 + ap.g2 * log(mode_i.stdev)
 
         # η parameter
-        η = (α * w / G)^(FT(3) / 2) / (FT(2π) * ρw * γ * mode_i.N)
+        η = (α * w / G)^(FT(3) / 2) / (FT(2π) * ρʷ * γ * mode_i.N)
 
         # Contribution to 1/S_max² (Eq. 6 in ARG 2000)
         tmp += 1 / Sm_i^2 * (f * (ζ / η)^ap.p1 + g_param * (Sm_i^2 / (η + 3 * ζ))^ap.p2)
@@ -436,7 +430,7 @@ Total number of activated droplets per unit volume [1/m³]
 
     # Curvature coefficient
     Rᵛ = vapor_gas_constant(constants)
-    # Formula: A = 2σ / (ρw * R_v * T)
+    # Formula: A = 2σ / (ρʷ * Rᵛ * T)
     A = 2 * ap.σ / (ap.ρ_w * Rᵛ * T)
 
     # Sum activated droplets from each mode
