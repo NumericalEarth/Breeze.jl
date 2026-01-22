@@ -312,7 +312,16 @@ and `β^𝕎` is `terminal_velocity_exponent`.
     a𝕎 = microphysics.terminal_velocity_coefficient
     Cᵨ = microphysics.density_scale
     β𝕎 = microphysics.terminal_velocity_exponent
-    return a𝕎 * (rʳ * Cᵨ * ρ)^β𝕎 * sqrt(ρ₁ / ρ)
+    out = a𝕎 * (rʳ * Cᵨ * ρ)^β𝕎 * sqrt(ρ₁ / ρ)
+    if !isfinite(out)
+        @cushow a𝕎
+        @cushow rʳ
+        @cushow Cᵨ
+        @cushow ρ
+        @cushow β𝕎
+        @cushow ρ₁
+    end
+    return out
 end
 
 """
@@ -464,9 +473,6 @@ end
             rʳ  = qʳ * (1 + rᵗ)
 
             𝕎ʳᵏ = kessler_terminal_velocity(rʳ, ρ, ρ₁, microphysics)
-            if !isfinite(𝕎ʳᵏ)
-                @cushow 𝕎ʳᵏ, rʳ, ρ, ρ₁, microphysics
-            end
             μ.𝕎ʳ[i, j, k] = 𝕎ʳᵏ
 
             # Store mixing ratios in diagnostic fields during physics
