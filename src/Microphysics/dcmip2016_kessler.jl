@@ -23,6 +23,8 @@ using Adapt: Adapt, adapt
 using DocStringExtensions: TYPEDSIGNATURES
 using KernelAbstractions: @index, @kernel
 
+using CUDA: @cushow
+
 """
     struct DCMIP2016KesslerMicrophysics{FT}
 
@@ -544,6 +546,9 @@ end
     end
 
     # Subcycling for CFL constraint on rain sedimentation
+    if iszero(max_Δt) || !isfinite(max_Δt)
+        @cushow Δt, max_Δt
+    end
     Ns = max(1, ceil(Int, Δt / max_Δt))
     inv_Ns = inv(FT(Ns))
     Δtₛ = Δt * inv_Ns
