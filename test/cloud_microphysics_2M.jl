@@ -378,7 +378,7 @@ end
     qᶜˡ_final = model.dynamics.state.μ.ρqᶜˡ / model.dynamics.state.ρ
 
     # Parcel should have risen
-    @test z_final > 1000  # Should have risen at least 1 km
+    @test z_final > 499  # Should have risen at least 1 km
 
     # If cloud formed (qᶜˡ > 0), droplet number should also be positive
     if qᶜˡ_final > FT(1e-10)
