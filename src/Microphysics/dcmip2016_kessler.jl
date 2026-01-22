@@ -24,7 +24,6 @@ using DocStringExtensions: TYPEDSIGNATURES
 using KernelAbstractions: @index, @kernel
 
 using CUDA: @cushow
-using JLD2: @save
 
 """
     struct DCMIP2016KesslerMicrophysics
@@ -393,7 +392,6 @@ function AtmosphereModels.microphysics_model_update!(microphysics::DCMIP2016KM, 
     # Microphysical fields
     μ = model.microphysical_fields
 
-    @save "microphysical_update_arguments.jld2" microphysics grid Nz Δt ρ p p₀ constants θˡⁱ ρθˡⁱ ρqᵗ μ
     launch!(arch, grid, :xy, _microphysical_update!,
             microphysics, grid, Nz, Δt, ρ, p, p₀, constants, θˡⁱ, ρθˡⁱ, ρqᵗ, μ)
 

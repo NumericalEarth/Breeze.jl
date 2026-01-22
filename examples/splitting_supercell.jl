@@ -302,7 +302,7 @@ set!(model, θ=θᵢ, ℋ=ℋᵢ, u=uᵢ)
 #
 # Run for 2 hours with adaptive time stepping (CFL = 0.7):
 
-simulation = Simulation(model; Δt=2, stop_time=2hours)
+simulation = Simulation(model; Δt=2, stop_time=2hours, stop_iteration=500)
 conjure_time_step_wizard!(simulation, cfl=0.7)
 
 # ## Output and progress
@@ -366,6 +366,9 @@ simulation.output_writers[:slices] = JLD2Writer(model, slice_outputs; filename=s
                                                 schedule = TimeInterval(2minutes),
                                                 overwrite_existing = true)
 
+run!(simulation)
+simulation.output_writers[:checkpointer] = Checkpointer(model, schedule=IterationInterval(1), prefix="splitting_supercell", cleanup=true)
+simulation.stop_iteration = Inf
 run!(simulation)
 
 # ## Animation: horizontal slices at z ≈ 5 km
