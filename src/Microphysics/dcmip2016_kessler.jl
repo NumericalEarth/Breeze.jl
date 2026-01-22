@@ -464,6 +464,9 @@ end
             rʳ  = qʳ * (1 + rᵗ)
 
             𝕎ʳᵏ = kessler_terminal_velocity(rʳ, ρ, ρ₁, microphysics)
+            if !isfinite(𝕎ʳᵏ)
+                @cushow 𝕎ʳᵏ, rʳ, ρ, ρ₁, microphysics
+            end
             μ.𝕎ʳ[i, j, k] = 𝕎ʳᵏ
 
             # Store mixing ratios in diagnostic fields during physics
@@ -476,9 +479,9 @@ end
             Δz = zᵏ⁺¹ - zᵏ
             old_max_Δt = max_Δt
             max_Δt = min(old_max_Δt, cfl * Δz / 𝕎ʳᵏ)
-            if iszero(max_Δt) || !isfinite(max_Δt)
-                @cushow Δt, old_max_Δt, cfl, Δz, 𝕎ʳᵏ, cfl * Δz / 𝕎ʳᵏ
-            end
+            # if iszero(max_Δt) || !isfinite(max_Δt)
+            #     @cushow Δt, old_max_Δt, cfl, Δz, 𝕎ʳᵏ, cfl * Δz / 𝕎ʳᵏ
+            # end
             zᵏ = zᵏ⁺¹
         end
     end
