@@ -461,6 +461,11 @@ end
             qᵗ = ρqᵗ[i, j, k] / ρ
             qᶜˡ = max(0, μ.ρqᶜˡ[i, j, k] / ρ)
             qʳ  = max(0, μ.ρqʳ[i, j, k] / ρ)
+            if !isfinite(qʳ)
+                @cushow μ.ρqʳ[i, j, k]
+                @cushow ρ
+                error()
+            end
             qˡ_sum = qᶜˡ + qʳ
             qᵗ = max(qᵗ, qˡ_sum)
             qᵛ = qᵗ - qˡ_sum
