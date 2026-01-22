@@ -40,7 +40,7 @@ using DocStringExtensions: TYPEDSIGNATURES
 #####
 
 # Get surface value from a Field or a Number
-@inline surface_value(i, j, field::Field) = @inbounds field[i, j, 1]
+@inline surface_value(i, j, field::AbstractArray) = @inbounds field[i, j, 1]
 @inline surface_value(i, j, x::Number) = x
 
 #####
