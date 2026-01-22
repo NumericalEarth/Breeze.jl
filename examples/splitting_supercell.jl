@@ -66,21 +66,26 @@ using CairoMakie
 using CUDA
 using Printf
 
-@eval Oceananigans.Utils @inline function _launch!(arch, grid, workspec, kernel!, first_kernel_arg, other_kernel_args...;
-                          exclude_periphery = false,
-                          reduced_dimensions = (),
-                          active_cells_map = nothing)
+@inline function Oceananigans.Utils._launch!(arch, grid, workspec, kernel!, first_kernel_arg, other_kernel_args...;
+                                             exclude_periphery = false,
+                                             reduced_dimensions = (),
+                                             active_cells_map = nothing)
 
     location = Oceananigans.location(first_kernel_arg)
 
-    loop!, worksize = configure_kernel(arch, grid, workspec, kernel!, active_cells_map, Val(exclude_periphery);
-                                       location,
-                                       reduced_dimensions)
+    loop!, worksize = Oceananigans.Utils.configure_kernel(arch, grid, workspec, kernel!, active_cells_map, Val(exclude_periphery);
+                                                          location,
+                                                          reduced_dimensions)
 
     # Don't launch kernels with no size
     if length(worksize) > 0
+        # Show the kernel we are about to launch
         @info "Launching kernel" loop!
-        loop!(first_kernel_arg, other_kernel_args...)
+        if contains(string(kernel!), "_microphysical_update!")
+            CUDA.@device_code dir="microphysical_update" loop!(first_kernel_arg, other_kernel_args...)
+        else
+            loop!(first_kernel_arg, other_kernel_args...)
+        end
     end
 
     return nothing
@@ -91,6 +96,7 @@ end
         launch(f, pointers...; kwargs...)
     end
     out = convert_arguments(launch_closure, types, args...)
+    # Forcibly synchronize to trip up early on the device exception.
     synchronize()
     return out
 end

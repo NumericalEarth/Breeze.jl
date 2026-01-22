@@ -72,6 +72,12 @@ jobs:
           julia --color=yes --project=docs examples/splitting_supercell.jl
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      - uses: actions/upload-artifact@v6
+        if: always()
+        with:
+          name: cuda-dump
+          path: examples/microphysical_update
+          retention-days: 90
       # - uses: actions/upload-artifact@v6
       #   with:
       #     name: documentation-build
