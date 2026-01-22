@@ -97,7 +97,7 @@ Diagnose the thermodynamic state at grid point `(i, j, k)` from the given `formu
 `dynamics`, and pre-computed moisture mass fractions `q`.
 
 Note: This function does NOT compute moisture fractions internally to avoid circular dependencies.
-The caller is responsible for computing `q = compute_moisture_fractions(...)` before calling.
+The caller is responsible for computing [`q = grid_moisture_fractions(...)`](@ref grid_moisture_fractions) before passing `q` to this function.
 """
 function diagnose_thermodynamic_state end
 

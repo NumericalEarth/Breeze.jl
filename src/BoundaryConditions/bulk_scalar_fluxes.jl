@@ -50,7 +50,7 @@ Base.summary(bf::BulkSensibleHeatFluxFunction) =
 # getbc for BulkSensibleHeatFluxFunction: returns potential temperature flux Jᶿ
 @inline function OceananigansBC.getbc(bf::BulkSensibleHeatFluxFunction, i::Integer, j::Integer,
                                       grid::AbstractGrid, clock, fields)
-    T₀ = surface_value(bf.surface_temperature, i, j)
+    T₀ = surface_value(i, j, bf.surface_temperature)
     θ = @inbounds fields.θ[i, j, 1]
     Δθ = θ - T₀
 
@@ -120,7 +120,7 @@ Base.summary(bf::BulkVaporFluxFunction) =
                                       grid::AbstractGrid, clock, fields)
     constants = bf.thermodynamic_constants
     surface = bf.surface
-    T₀ = surface_value(bf.surface_temperature, i, j)
+    T₀ = surface_value(i, j, bf.surface_temperature)
     p₀ = bf.surface_pressure
     ρ₀ = surface_density(p₀, T₀, constants)
     qᵛ₀ = saturation_specific_humidity(T₀, ρ₀, constants, surface)

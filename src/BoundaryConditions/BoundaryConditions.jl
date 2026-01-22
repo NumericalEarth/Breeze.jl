@@ -16,7 +16,7 @@ export BulkDragFunction,
        ThetaFluxBoundaryConditionFunction,
        ThetaFluxBoundaryCondition
 
-using ..AtmosphereModels: AtmosphereModels, compute_moisture_fractions, dynamics_density
+using ..AtmosphereModels: AtmosphereModels, grid_moisture_fractions, dynamics_density
 using ..Thermodynamics: saturation_specific_humidity, surface_density, PlanarLiquidSurface,
                         mixture_heat_capacity
 
@@ -40,8 +40,8 @@ using DocStringExtensions: TYPEDSIGNATURES
 #####
 
 # Get surface value from a Field or a Number
-@inline surface_value(field::Field, i, j) = @inbounds field[i, j, 1]
-@inline surface_value(x::Number, i, j) = x
+@inline surface_value(i, j, field::AbstractArray) = @inbounds field[i, j, 1]
+@inline surface_value(i, j, x::Number) = x
 
 #####
 ##### Wind speed calculations at staggered locations
@@ -51,7 +51,7 @@ using DocStringExtensions: TYPEDSIGNATURES
 
 # Wind speed squared at (Face, Center, Center) - for x-momentum flux
 @inline function wind_speed²ᶠᶜᶜ(i, j, grid, fields)
-    u² = @inbounds fields.u[i, j, 1]^2
+    u² = surface_value(i, j, fields.u)^2
     v² = ℑxyᶠᶜᵃ(i, j, 1, grid, ϕ², fields.v)
     return u² + v²
 end
@@ -59,7 +59,7 @@ end
 # Wind speed squared at (Center, Face, Center) - for y-momentum flux
 @inline function wind_speed²ᶜᶠᶜ(i, j, grid, fields)
     u² = ℑxyᶜᶠᵃ(i, j, 1, grid, ϕ², fields.u)
-    v² = @inbounds fields.v[i, j, 1]^2
+    v² = surface_value(i, j, fields.v)^2
     return u² + v²
 end
 
@@ -123,6 +123,7 @@ const θFormulation = Union{Val{:LiquidIcePotentialTemperature}, Val{:θ}}
 # Check if FieldBoundaryConditions has any non-default values
 has_nondefault_bcs(::Nothing) = false
 has_nondefault_bcs(fbcs) = false
+
 function has_nondefault_bcs(fbcs::FieldBoundaryConditions)
     for side in (:west, :east, :south, :north, :bottom, :top, :immersed)
         bc = getproperty(fbcs, side)

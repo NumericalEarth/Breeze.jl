@@ -36,7 +36,11 @@
 Breeze is a library for simulating atmospheric flows and weather phenomena, such as clouds and hurricanes, on both CPUs and GPUs.
 Much of Breeze's power flows from [Oceananigans](https://github.com/CliMA/Oceananigans.jl), which provides a user interface, grids, fields, solvers, advection schemes, Lagrangian particles, physics, and more.
 
-Breeze's AtmosphereModel supports anelastic, compressible, and prescribed (kinematic) dynamics, with strong-stability-preserving (SSP) RK3 time stepping and a variety of advection schemes, including high-order WENO. Breeze also includes closures for large-eddy simulation and a range of microphysics, such as saturation adjustment and the Kessler scheme. In addition, Breeze provides one- and two-moment bulk microphysics schemes through an extension to the [Climate Modeling Alliance's](https://clima.caltech.edu/) excellent [CloudMicrophysics.jl](https://github.com/CliMA/CloudMicrophysics.jl) package.
+Breeze's AtmosphereModel currently supports anelastic dynamics, compressible dynamics, a kinematic driver, and a parcel model, all with strong-stability-preserving (SSP) RK3 time stepping.
+The anelastic and compressible dynamics can be used with a liquid-ice potential temperature formulation or static energy formulation and a variety of advection schemes including high-order and bounds-preserving WENO.
+Breeze provides abstractions for Coriolis forces, simple bulk drags, heat and moisture fluxes, and closures for large-eddy simulation.
+A main focus of Breeze development is to facilitate the prototyping and implementation of physics schemes through streamlined internal interfaces and automatic kinematic driver and parcel model capabilities.
+Breeze's current suite of schemes includes saturation adjustment, a Kessler scheme, one- and two-moment bulk microphysics schemes through an extension to the [Climate Modeling Alliance's](https://clima.caltech.edu/) excellent [CloudMicrophysics.jl](https://github.com/CliMA/CloudMicrophysics.jl) package; several other schemes are under development.
 An extension to [RRTMGP.jl](https://github.com/CliMA/RRTMGP.jl) provides solvers for gray, clear-sky, and all-sky radiative transfer.
 Breeze's examples include single column radiation, idealized thermal bubbles and inertia-gravity waves and Kelvin-Helmholtz, [BOMEX](https://doi.org/10.1175/1520-0469(2003)60<1201:ALESIS>2.0.CO;2) shallow convection, [RICO](https://doi.org/10.1029/2011MS000056) trade-wind cumulus, [supercells](https://doi.org/10.1002/2015MS000435), mountain waves, and more.
 
@@ -46,14 +50,14 @@ And don't hesitate to get in touch on the [NumericalEarth slack](https://join.sl
 ## Roadmap and a call to action
 
 Our goal is to build a very fast, easy-to-learn, productive tool for atmospheric research, teaching, and forecasting, as well as a platform for the development of algorithms, numerical methods, parameterizations, microphysical schemes, and atmosphere model components.
-This won't be the effort of a single group, project, or even a single community.
+This goal can't be achieved by the efforts of a single group, project, or even a single community.
 Such a lofty aim can only be realized by a wide-ranging and sustained collaboration of passionate people.
 Maybe that includes you - consider it!
 Model development is hard but rewarding, and builds useful skills for a myriad of pursuits.
 
 The goals of the current group of model developers include developing
 
-- ⛈️ **Advanced microphysics**: Predicted Particle Property (P3) bulk microphysics, spectral bin schemes, and Lagrangian superdroplet methods for high-fidelity cloud and precipitation modeling
+- ⛈️ **Advanced microphysics**: Predicted Particle Property (P3) bulk microphysics, spectral bin schemes, and Lagrangian superdroplet methods for high-fidelity cloud and precipitation modeling.
 - ️🏔 **Acoustic substepping and terrain-following coordinates**: A compressible dynamical core with horizontally explicit, vertically-implicit acoustic substepping that efficiently resolves sound waves in flow over complex topography with smooth [sigma coordinates](https://en.wikipedia.org/wiki/Sigma_coordinate_system)
 - 🔬 **Open boundaries and nesting**: Open boundary conditions are useful for both idealized simulations and realistic one- and two-way nested simulations for high-resolution downscaling.
 - 🌀 **Coupled atmosphere-ocean simulations**: Support for high-resolution coupled atmosphere-ocean simulations via [ClimaOcean.jl](https://github.com/CliMA/ClimaOcean.jl)
