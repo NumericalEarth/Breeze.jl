@@ -8,7 +8,7 @@ using Oceananigans.Utils: launch!
 
 using RRTMGP.AtmosphericStates: AtmosphericState
 
-using Breeze.AtmosphereModels: BackgroundAtmosphere
+using Breeze.AtmosphereModels: BackgroundAtmosphere, specific_humidity
 
 #####
 ##### Gas state update (shared by clear-sky and all-sky)
