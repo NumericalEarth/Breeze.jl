@@ -737,6 +737,11 @@ end
             rᵛ = μ.qᵛ[i, j, k]
             rᶜˡ = μ.qᶜˡ[i, j, k]
             rʳ = μ.qʳ[i, j, k]
+            if !isfinite(rʳ)
+                @cushow rʳ
+                @cushow μ.qʳ[i, j, k]
+                error()
+            end
 
             rˡ = rᶜˡ + rʳ
             r = MoistureMixingRatio(rᵛ, rˡ)
@@ -746,10 +751,22 @@ end
             rᵗ = total_mixing_ratio(r)
             qᶜˡ = rᶜˡ / (1 + rᵗ)
             qʳ  = rʳ / (1 + rᵗ)
+            if !isfinite(qʳ)
+                @cushow qʳ
+                @cushow rʳ
+                @cushow rᵗ
+                error()
+            end
 
             ρqᵗ[i, j, k]    = ρ * qᵗ
             μ.ρqᶜˡ[i, j, k] = ρ * qᶜˡ
             μ.ρqʳ[i, j, k]  = ρ * qʳ
+            if !isfinite(μ.ρqʳ[i, j, k])
+                @cushow μ.ρqʳ[i, j, k]
+                @cushow ρ
+                @cushow qʳ
+                error()
+            end
             μ.qᵛ[i, j, k]   = qᵛ
             μ.qᶜˡ[i, j, k]  = qᶜˡ
             μ.qʳ[i, j, k]   = qʳ
