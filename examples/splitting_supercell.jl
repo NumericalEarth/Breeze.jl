@@ -105,17 +105,15 @@ end
     call!(builder, Runtime.get(:report_exception_name), [name])
 
     # report each frame
-    if Base.JLOptions().debug_level >= 2
-        rt = Runtime.get(:report_exception_frame)
-        ft = convert(LLVM.FunctionType, rt)
-        bt = backtrace(inst)
-        for (i,frame) in enumerate(bt)
-            idx = ConstantInt(parameters(ft)[1], i)
-            func = globalstring_ptr!(builder, String(frame.func), "di_func")
-            file = globalstring_ptr!(builder, String(frame.file), "di_file")
-            line = ConstantInt(parameters(ft)[4], frame.line)
-            call!(builder, rt, [idx, func, file, line])
-        end
+    rt = Runtime.get(:report_exception_frame)
+    ft = convert(LLVM.FunctionType, rt)
+    bt = backtrace(inst)
+    for (i,frame) in enumerate(bt)
+        idx = ConstantInt(parameters(ft)[1], i)
+        func = globalstring_ptr!(builder, String(frame.func), "di_func")
+        file = globalstring_ptr!(builder, String(frame.file), "di_file")
+        line = ConstantInt(parameters(ft)[4], frame.line)
+        call!(builder, rt, [idx, func, file, line])
     end
 
     # signal the exception
