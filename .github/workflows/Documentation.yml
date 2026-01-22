@@ -78,6 +78,12 @@ jobs:
           name: cuda-dump
           path: microphysical_update
           retention-days: 90
+      - uses: actions/upload-artifact@v6
+        if: always()
+        with:
+          name: arguments-dump
+          path: microphysical_update_arguments.jld2
+          retention-days: 90
       # - uses: actions/upload-artifact@v6
       #   with:
       #     name: documentation-build
