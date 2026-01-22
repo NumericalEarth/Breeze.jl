@@ -82,6 +82,7 @@ outputs = (; θ, w)
 
 filename = "dry_thermal_bubble.jld2"
 writer = JLD2Writer(model, outputs; filename,
+                    including = [:grid],
                     schedule = TimeInterval(10seconds),
                     overwrite_existing = true)
 
@@ -214,6 +215,7 @@ moist_outputs = (; θ, w, qˡ′)
 
 moist_filename = "cloudy_thermal_bubble.jld2"
 moist_writer = JLD2Writer(moist_model, moist_outputs; filename=moist_filename,
+                          including = [:grid],
                           schedule = TimeInterval(10seconds),
                           overwrite_existing = true)
 

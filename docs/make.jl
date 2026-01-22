@@ -40,6 +40,7 @@ examples = [
     Example("Stationary parcel model", "stationary_parcel_model", true),
     Example("Acoustic wave in shear layer", "acoustic_wave", true),
     Example("Cloud formation in prescribed updraft", "kinematic_driver", true),
+    Example("Splitting supercell", "splitting_supercell", false),
 ]
 
 # Filter out long-running example if necessary

@@ -70,17 +70,17 @@ dynamics = AnelasticDynamics(reference_state)
 # with constant transfer coefficients (see [vanZanten2011](@citet); text surrounding equations 1-4):
 
 Cᴰ = 1.229e-3 # Drag coefficient for momentum
-Cᵀ = 1.094e-3 # "Temperature" aka sensible heat transfer coefficient
+Cᵀ = 1.094e-3 # Sensible heat transfer coefficient
 Cᵛ = 1.133e-3 # Moisture flux transfer coefficient
 T₀ = 299.8    # Sea surface temperature (K)
 
 # We implement the specified bulk formula with Breeze utilities whose scope
 # currently extends only to constant coefficients (but could expand in the future),
 
-ρθ_flux = BulkSensibleHeatFlux(coefficient=Cᵀ, surface_temperature=T₀)
+ρe_flux = BulkSensibleHeatFlux(coefficient=Cᵀ, surface_temperature=T₀)
 ρqᵗ_flux = BulkVaporFlux(coefficient=Cᵛ, surface_temperature=T₀)
 
-ρθ_bcs = FieldBoundaryConditions(bottom=ρθ_flux)
+ρe_bcs = FieldBoundaryConditions(bottom=ρe_flux)
 ρqᵗ_bcs = FieldBoundaryConditions(bottom=ρqᵗ_flux)
 
 ρu_bcs = FieldBoundaryConditions(bottom=BulkDrag(coefficient=Cᴰ))
@@ -161,7 +161,7 @@ Fρqᵗ = (subsidence, ∂t_ρqᵗ_large_scale_forcing)
 Fρθ = (subsidence, ρθ_large_scale_forcing)
 
 forcing = (ρu=Fρu, ρv=Fρv, ρw=Fρw, ρqᵗ=Fρqᵗ, ρθ=Fρθ)
-boundary_conditions = (ρθ=ρθ_bcs, ρqᵗ=ρqᵗ_bcs, ρu=ρu_bcs, ρv=ρv_bcs)
+boundary_conditions = (ρe=ρe_bcs, ρqᵗ=ρqᵗ_bcs, ρu=ρu_bcs, ρv=ρv_bcs)
 nothing #hide
 
 # ## Model setup
@@ -280,6 +280,7 @@ averaged_outputs = NamedTuple(name => Average(outputs[name], dims=(1, 2)) for na
 
 filename = "rico.jld2"
 simulation.output_writers[:averages] = JLD2Writer(model, averaged_outputs; filename,
+                                                  including = [:grid],
                                                   schedule = AveragedTimeInterval(2hour),
                                                   overwrite_existing = true)
 
@@ -305,6 +306,7 @@ slice_outputs = (
 filename = "rico_slices.jld2"
 output_interval = 20seconds
 simulation.output_writers[:slices] = JLD2Writer(model, slice_outputs; filename,
+                                                including = [:grid],
                                                 schedule = TimeInterval(output_interval),
                                                 overwrite_existing = true)
 

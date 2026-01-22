@@ -289,7 +289,7 @@ struct SurfaceRadiativeProperties{ST, SE, SA, DW}
     diffuse_surface_albedo :: DW  # Scalar or 2D field
 end
 
-Base.summary(radiation::RadiativeTransferModel) = "RadiativeTransferModel"
+Base.summary(::RadiativeTransferModel) = "RadiativeTransferModel"
 
 function Base.show(io::IO, radiation::RadiativeTransferModel)
     print(io, summary(radiation), "\n",
