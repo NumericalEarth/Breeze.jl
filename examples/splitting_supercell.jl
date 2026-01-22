@@ -72,7 +72,7 @@ using Printf
 # 1 km horizontal resolution and 500 m vertical resolution. The grid uses periodic
 # lateral boundary conditions and bounded top/bottom boundaries.
 
-Oceananigans.defaults.FloatType = Float32
+Oceananigans.defaults.FloatType = Float64
 
 Nx, Ny, Nz = 168, 168, 40
 Lx, Ly, Lz = 168kilometers, 168kilometers, 20kilometers
