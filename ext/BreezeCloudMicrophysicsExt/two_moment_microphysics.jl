@@ -669,18 +669,9 @@ end
     constants,
 ) where {FT}
 
-    # No activation if no aerosol available
-    if Nᵃ < eps(FT)
-        return zero(FT)
-    end
-
-    # Only activate if there's updraft (positive w)
-    w_pos = max(zero(FT), w)
-
-    # Skip computation if w ≤ 0
-    if w_pos < eps(FT)
-        return zero(FT)
-    end
+    # Only activate if there's updraft (positive w) and aerosol available
+    w_pos = max(0, w)
+    Nᵃ_pos = max(0, Nᵃ)
 
     # Get thermodynamic properties
     T = temperature(𝒰, constants)
@@ -689,18 +680,17 @@ end
     qᵗ = q.vapor + q.liquid
     qˡ = q.liquid
 
-    # Check supersaturation - activation ONLY occurs when air is supersaturated (S > 0)
+    # Supersaturation - activation only occurs when air is supersaturated (S > 0)
     S = supersaturation(T, ρ, q, constants, PlanarLiquidSurface())
-    if S <= zero(FT)
-        return zero(FT)  # No activation in subsaturated air
-    end
 
     # Compute the activated fraction of aerosol based on current supersaturation
     # This gives the fraction that would activate given current conditions
     activated_fraction = aerosol_activated_fraction(aerosol_activation, aps, T, p, w_pos, qᵗ, qˡ, ρ, constants)
 
     # The activation rate is proportional to available aerosol and activated fraction
-    dNᶜˡ_act = activated_fraction * Nᵃ
+    # Zero activation if: no updraft (w ≤ 0), no aerosol (Nᵃ ≤ 0), or subsaturated (S ≤ 0)
+    is_active = (w_pos > 0) & (Nᵃ_pos > 0) & (S > 0)
+    dNᶜˡ_act = ifelse(is_active, activated_fraction * Nᵃ_pos, zero(FT))
 
     return dNᶜˡ_act
 end
