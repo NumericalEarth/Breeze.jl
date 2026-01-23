@@ -33,6 +33,7 @@ export
     grid_microphysical_tendency,
     update_microphysical_fields!,
     update_microphysical_auxiliaries!,
+    initial_aerosol_number,
 
     # Interface functions (extended by BoundaryConditions and Forcings)
     regularize_atmosphere_model_boundary_conditions,

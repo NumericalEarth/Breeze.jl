@@ -267,6 +267,19 @@ Return `tuple()` - zero-moment scheme has no prognostic variables.
 prognostic_field_names(::Nothing) = tuple()
 
 """
+    initial_aerosol_number(microphysics)
+
+Return the total initial aerosol number concentration [1/m³] from the microphysics scheme.
+
+For microphysics schemes with prognostic aerosol (e.g., two-moment with aerosol tracking),
+this returns the sum of aerosol number concentrations across all modes in the aerosol
+distribution. For schemes without aerosol, returns 0.
+
+This value should be used to initialize the density-weighted aerosol number `ρnᵃ`.
+"""
+initial_aerosol_number(::Nothing) = 0.0
+
+"""
 $(TYPEDSIGNATURES)
 
 Build microphysical fields associated with `microphysics` on `grid` and with

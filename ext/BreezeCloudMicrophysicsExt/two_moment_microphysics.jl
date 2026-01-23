@@ -40,6 +40,7 @@ tendencies for cloud liquid and rain following the Seifert-Beheng 2006 scheme.
 - `nᶜˡ`: Cloud liquid number per unit mass (1/kg)
 - `qʳ`: Rain mixing ratio (kg/kg)
 - `nʳ`: Rain number per unit mass (1/kg)
+- `nᵃ`: Aerosol number per unit mass (1/kg) - available CCN for activation
 - `w`: Updraft velocity (m/s) - used for aerosol activation (0 if unknown)
 """
 struct WarmPhaseTwoMomentState{FT} <: AbstractMicrophysicalState{FT}
@@ -47,6 +48,7 @@ struct WarmPhaseTwoMomentState{FT} <: AbstractMicrophysicalState{FT}
     nᶜˡ :: FT  # cloud liquid number per unit mass
     qʳ  :: FT  # rain mixing ratio
     nʳ  :: FT  # rain number per unit mass
+    nᵃ  :: FT  # aerosol number per unit mass (available CCN)
     w   :: FT  # updraft velocity (for activation)
 end
 
@@ -152,6 +154,24 @@ function default_aerosol_activation(FT::DataType = Float64)
 end
 
 """
+    initial_aerosol_number(aerosol_activation::AerosolActivation)
+
+Compute the total initial aerosol number concentration from the aerosol distribution.
+
+Returns the sum of `N` (number concentration in 1/m³) across all aerosol modes.
+"""
+function initial_aerosol_number_from_activation(aerosol_activation::AerosolActivation)
+    ad = aerosol_activation.aerosol_distribution
+    Nᵃ = zero(eltype(ad.modes[1].N))
+    for i in 1:n_modes(ad)
+        Nᵃ += ad.modes[i].N
+    end
+    return Nᵃ
+end
+
+initial_aerosol_number_from_activation(::Nothing) = 0.0
+
+"""
     TwoMomentCategories{W, AP, LV, RV, AA}
 
 Parameters for two-moment ([Seifert and Beheng, 2006](@cite SeifertBeheng2006)) warm-rain microphysics.
@@ -219,6 +239,11 @@ const TwoMomentCloudMicrophysics = BulkMicrophysics{<:Any, <:CM2MCategories, <:A
 const WarmPhaseNonEquilibrium2M = BulkMicrophysics{<:WarmPhaseNE, <:CM2MCategories, <:Any}
 const WPNE2M = WarmPhaseNonEquilibrium2M
 
+# Extend AtmosphereModels.initial_aerosol_number for two-moment microphysics
+function AtmosphereModels.initial_aerosol_number(microphysics::WPNE2M)
+    return initial_aerosol_number_from_activation(microphysics.categories.aerosol_activation)
+end
+
 #####
 ##### MicrophysicalState construction from fields
 #####
@@ -229,7 +254,8 @@ const WPNE2M = WarmPhaseNonEquilibrium2M
     nᶜˡ = μ.ρnᶜˡ / ρ
     qʳ = μ.ρqʳ / ρ
     nʳ = μ.ρnʳ / ρ
-    return WarmPhaseTwoMomentState(qᶜˡ, nᶜˡ, qʳ, nʳ, w)
+    nᵃ = μ.ρnᵃ / ρ
+    return WarmPhaseTwoMomentState(qᶜˡ, nᶜˡ, qʳ, nʳ, nᵃ, w)
 end
 
 # Grid-indexed version: extracts from Fields
@@ -240,10 +266,11 @@ end
     @inbounds nᶜˡ = μ.nᶜˡ[i, j, k]
     @inbounds qʳ = μ.qʳ[i, j, k]
     @inbounds nʳ = μ.nʳ[i, j, k]
+    @inbounds nᵃ = μ.nᵃ[i, j, k]
     # For grid-based models, updraft velocity would need to be passed separately
     # Default to zero (activation disabled in tendency computation when w ≤ 0)
     w = zero(FT)
-    return WarmPhaseTwoMomentState(qᶜˡ, nᶜˡ, qʳ, nʳ, w)
+    return WarmPhaseTwoMomentState(qᶜˡ, nᶜˡ, qʳ, nʳ, nᵃ, w)
 end
 
 """
@@ -370,13 +397,13 @@ materialize_2m_condensate_formation(::Any, categories) = ConstantRateCondensateF
 ##### Prognostic field names
 #####
 
-AtmosphereModels.prognostic_field_names(::WPNE2M) = (:ρqᶜˡ, :ρnᶜˡ, :ρqʳ, :ρnʳ)
+AtmosphereModels.prognostic_field_names(::WPNE2M) = (:ρqᶜˡ, :ρnᶜˡ, :ρqʳ, :ρnʳ, :ρnᵃ)
 
 #####
 ##### Field materialization
 #####
 
-const two_moment_center_field_names = (:ρqᶜˡ, :ρnᶜˡ, :ρqʳ, :ρnʳ, :qᵛ, :qˡ, :qᶜˡ, :qʳ, :nᶜˡ, :nʳ)
+const two_moment_center_field_names = (:ρqᶜˡ, :ρnᶜˡ, :ρqʳ, :ρnʳ, :ρnᵃ, :qᵛ, :qˡ, :qᶜˡ, :qʳ, :nᶜˡ, :nʳ, :nᵃ)
 
 function AtmosphereModels.materialize_microphysical_fields(bμp::WPNE2M, grid, bcs)
     center_fields = center_field_tuple(grid, two_moment_center_field_names...)
@@ -410,6 +437,7 @@ end
         nᶜˡ = μ.ρnᶜˡ[i, j, k] / ρ  # cloud liquid number per unit mass
         qʳ = μ.ρqʳ[i, j, k] / ρ
         nʳ = μ.ρnʳ[i, j, k] / ρ
+        nᵃ = μ.ρnᵃ[i, j, k] / ρ    # aerosol number per unit mass
 
         # Update diagnostic fields
         μ.qᵛ[i, j, k] = q.vapor
@@ -418,6 +446,7 @@ end
         μ.qˡ[i, j, k] = qᶜˡ + qʳ  # total liquid
         μ.nᶜˡ[i, j, k] = nᶜˡ
         μ.nʳ[i, j, k] = nʳ
+        μ.nᵃ[i, j, k] = nᵃ
     end
 
     update_2m_terminal_velocities!(μ, i, j, k, bμp, categories, ρ)
@@ -586,12 +615,14 @@ const τ_activation = 1.0
     qᶜˡ = ℳ.qᶜˡ
     qʳ = ℳ.qʳ
     nᶜˡ = ℳ.nᶜˡ
+    nᵃ = ℳ.nᵃ
     w = ℳ.w
 
     FT = typeof(ρ)
 
-    # Number density [1/m³]
+    # Number densities [1/m³]
     Nᶜˡ = ρ * max(0, nᶜˡ)
+    Nᵃ = ρ * max(0, nᵃ)
 
     # Autoconversion: reduces cloud droplet number
     au = CM2.autoconversion(sb.acnv, sb.pdf_c, max(0, qᶜˡ), max(0, qʳ), ρ, Nᶜˡ)
@@ -608,9 +639,9 @@ const τ_activation = 1.0
     dNᶜˡ_adj_up = CM2.number_increase_for_mass_limit(sb.numadj, sb.pdf_c.xc_max, max(0, qᶜˡ), ρ, Nᶜˡ)
     dNᶜˡ_adj_dn = CM2.number_decrease_for_mass_limit(sb.numadj, sb.pdf_c.xc_min, max(0, qᶜˡ), ρ, Nᶜˡ)
 
-    # Aerosol activation: source of cloud droplet number
+    # Aerosol activation: source of cloud droplet number (limited by available aerosol)
     dNᶜˡ_act = aerosol_activation_tendency(categories.aerosol_activation, categories.air_properties,
-                                            ρ, Nᶜˡ, w, 𝒰, constants)
+                                            ρ, Nᵃ, w, 𝒰, constants)
 
     # Total tendency [1/m³/s]
     Σ_dNᶜˡ = dNᶜˡ_au + dNᶜˡ_sc + dNᶜˡ_ac + dNᶜˡ_adj_up + dNᶜˡ_adj_dn + dNᶜˡ_act
@@ -626,18 +657,25 @@ end
 #####
 
 # No activation when aerosol_activation is nothing
-@inline aerosol_activation_tendency(::Nothing, aps, ρ, Nᶜˡ, w, 𝒰, constants) = zero(ρ)
+@inline aerosol_activation_tendency(::Nothing, aps, ρ, Nᵃ, w, 𝒰, constants) = zero(ρ)
 
 # Compute activation tendency using Abdul-Razzak and Ghan (2000)
+# With prognostic aerosol, activation is limited by available aerosol number Nᵃ.
+# As aerosol activates, Nᵃ decreases, naturally limiting further activation.
 @inline function aerosol_activation_tendency(
     aerosol_activation::AerosolActivation,
     aps::AirProperties{FT},
     ρ::FT,
-    Nᶜˡ::FT,
+    Nᵃ::FT,
     w::FT,
     𝒰,
     constants,
 ) where {FT}
+
+    # No activation if no aerosol available
+    if Nᵃ < eps(FT)
+        return zero(FT)
+    end
 
     # Only activate if there's updraft (positive w)
     w_pos = max(zero(FT), w)
@@ -660,14 +698,68 @@ end
         return zero(FT)  # No activation in subsaturated air
     end
 
-    # Compute number of activated droplets
-    N_activated = activated_droplet_number(aerosol_activation, aps, T, p, w_pos, qᵗ, qˡ, zero(FT), Nᶜˡ, zero(FT), ρ, constants)
+    # Compute the activated fraction of aerosol based on current supersaturation
+    # This gives the fraction that would activate given current conditions
+    activated_fraction = aerosol_activated_fraction(aerosol_activation, aps, T, p, w_pos, qᵗ, qˡ, ρ, constants)
 
-    # Activation source: relax toward activated number if current is less
-    # Only add droplets, never remove (activation is irreversible on short timescales)
-    dNᶜˡ_act = max(zero(FT), (N_activated - Nᶜˡ)) / FT(τ_activation)
+    # The activation rate is proportional to available aerosol and activated fraction
+    # Aerosol activates on the activation timescale
+    dNᶜˡ_act = activated_fraction * Nᵃ / FT(τ_activation)
 
     return dNᶜˡ_act
+end
+
+"""
+    aerosol_activated_fraction(aerosol_activation, aps, T, p, w, qᵗ, qˡ, ρ, constants)
+
+Compute the fraction of aerosol that activates given current thermodynamic conditions.
+Uses the maximum supersaturation to determine which aerosol modes activate.
+"""
+@inline function aerosol_activated_fraction(
+    aerosol_activation::AerosolActivation,
+    aps::AirProperties{FT},
+    T::FT,
+    p::FT,
+    w::FT,
+    qᵗ::FT,
+    qˡ::FT,
+    ρ::FT,
+    constants,
+) where {FT}
+
+    ap = aerosol_activation.activation_parameters
+    ad = aerosol_activation.aerosol_distribution
+
+    # Compute maximum supersaturation
+    S_max = max_supersaturation_breeze(aerosol_activation, aps, T, p, w, qᵗ, qˡ, zero(FT), zero(FT), zero(FT), ρ, constants)
+
+    # Curvature coefficient
+    Rᵛ = vapor_gas_constant(constants)
+    A = 2 * ap.σ / (ap.ρ_w * Rᵛ * T)
+
+    # Sum activated fraction from each mode
+    total_N = zero(FT)
+    activated_N = zero(FT)
+    @inbounds for i in 1:n_modes(ad)
+        mode_i = ad.modes[i]
+        N_mode = mode_i.N
+        total_N += N_mode
+
+        # Mean hygroscopicity for this mode
+        κ_mean = _mean_hygroscopicity(ap, mode_i)
+
+        # Critical supersaturation for mode i (Eq. 9 in ARG 2000)
+        Sm_i = 2 / sqrt(κ_mean) * (A / 3 / mode_i.r_dry)^(FT(3) / 2)
+
+        # Activated fraction for this mode (Eq. 7 in ARG 2000)
+        u = 2 * log(Sm_i / S_max) / 3 / sqrt(FT(2)) / log(mode_i.stdev)
+        f_activated = FT(0.5) * (1 - CMAA.SF.erf(u))
+
+        activated_N += f_activated * N_mode
+    end
+
+    # Return total activated fraction
+    return ifelse(total_N > zero(FT), activated_N / total_N, zero(FT))
 end
 
 #####
@@ -760,4 +852,32 @@ end
     Sⁿᵘᵐ = -Nʳ / τⁿᵘᵐ_2m
 
     return ifelse(nʳ >= 0, Σ_dNʳ, Sⁿᵘᵐ)
+end
+
+#####
+##### Aerosol number tendency (ρnᵃ) - state-based
+#####
+#
+# Aerosol number decreases when droplets are activated.
+# This is the sink term that mirrors the activation source for cloud droplet number.
+
+@inline function AtmosphereModels.microphysical_tendency(bμp::WPNE2M, ::Val{:ρnᵃ}, ρ, ℳ::WarmPhaseTwoMomentState, 𝒰, constants)
+    categories = bμp.categories
+
+    nᵃ = ℳ.nᵃ
+    w = ℳ.w
+
+    FT = typeof(ρ)
+
+    # Number density [1/m³]
+    Nᵃ = ρ * max(0, nᵃ)
+
+    # Aerosol activation: sink of aerosol number (same as source for cloud droplet number)
+    dNᵃ_act = -aerosol_activation_tendency(categories.aerosol_activation, categories.air_properties,
+                                            ρ, Nᵃ, w, 𝒰, constants)
+
+    # Numerical relaxation for negative values
+    Sⁿᵘᵐ = -Nᵃ / τⁿᵘᵐ_2m
+
+    return ifelse(nᵃ >= 0, dNᵃ_act, Sⁿᵘᵐ)
 end
