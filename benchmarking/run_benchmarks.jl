@@ -31,22 +31,40 @@ float_types = [
     ("F64", Float64),
 ]
 
-# Advection schemes to test
-advection_schemes = [
-    ("Centered2", Centered(order=2)),
-    ("WENO5", WENO(order=5)),
-]
+# Advection scheme names (schemes created inside loop to get correct float type)
+advection_names = ["Centered2", "WENO5"]
 
-# Closures to test
-closures = [
-    ("SmagorinskyLilly", SmagorinskyLilly()),
-    ("Nothing", nothing),
-]
+# Closure names (closures created inside loop to get correct float type)
+closure_names = ["SmagorinskyLilly", "Nothing"]
 
 # Benchmark parameters
 time_steps = 100
 Δt = 0.05  # seconds (from FastEddy paper)
 warmup_steps = 10
+
+#####
+##### Helper functions to create schemes with correct float type
+#####
+
+function make_advection(name, FT)
+    if name == "Centered2"
+        return Centered(FT; order=2)
+    elseif name == "WENO5"
+        return WENO(FT; order=5)
+    else
+        error("Unknown advection scheme: $name")
+    end
+end
+
+function make_closure(name, FT)
+    if name == "SmagorinskyLilly"
+        return SmagorinskyLilly(FT)
+    elseif name == "Nothing"
+        return nothing
+    else
+        error("Unknown closure: $name")
+    end
+end
 
 #####
 ##### Run benchmarks
@@ -66,13 +84,17 @@ println()
 
 for resolution in resolutions
     for (ft_name, float_type) in float_types
-        for (adv_name, advection) in advection_schemes
-            for (cls_name, closure) in closures
+        for adv_name in advection_names
+            for cls_name in closure_names
                 name = "CBL_$(resolution)_$(ft_name)_$(adv_name)_$(cls_name)"
 
                 println("-" ^ 70)
                 println("Running: $name")
                 println("-" ^ 70)
+
+                # Create advection and closure with correct float type
+                advection = make_advection(adv_name, float_type)
+                closure = make_closure(cls_name, float_type)
 
                 model = convective_boundary_layer(arch;
                     resolution,
@@ -81,13 +103,13 @@ for resolution in resolutions
                     closure
                 )
 
-            result = benchmark_time_stepping(model;
-                time_steps,
-                Δt,
-                warmup_steps,
-                name,
-                verbose = true
-            )
+                result = benchmark_time_stepping(model;
+                    time_steps,
+                    Δt,
+                    warmup_steps,
+                    name,
+                    verbose = true
+                )
 
                 push!(results, result)
                 println()

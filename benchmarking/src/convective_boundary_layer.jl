@@ -125,21 +125,22 @@ function convective_boundary_layer(arch = CPU();
     # Convert to mass flux: multiply by surface density
     FT = eltype(grid)
     q₀ = Breeze.Thermodynamics.MoistureMassFractions{FT} |> zero
-    ρ₀ = Breeze.Thermodynamics.density(θ₀, p₀, q₀, constants)
+    ρ₀ = Breeze.Thermodynamics.density(FT(θ₀), FT(p₀), q₀, constants)
 
-    w′θ′ = 0.35  # K⋅m/s (kinematic heat flux)
+    w′θ′ = FT(0.35)  # K⋅m/s (kinematic heat flux)
     ρθ_flux = ρ₀ * w′θ′
     ρθ_bcs = FieldBoundaryConditions(bottom = FluxBoundaryCondition(ρθ_flux))
 
     # Surface momentum flux (drag)
     # Using bulk drag with roughness length z₀ = 0.05 m
     # For simplicity, use a friction velocity approach similar to BOMEX
-    u★ = 0.4  # m/s (estimated from typical CBL conditions)
-    @inline ρu_drag(x, y, t, ρu, ρv, p) = -p.ρ₀ * p.u★^2 * ρu / sqrt(ρu^2 + ρv^2 + 1e-10)
-    @inline ρv_drag(x, y, t, ρu, ρv, p) = -p.ρ₀ * p.u★^2 * ρv / sqrt(ρu^2 + ρv^2 + 1e-10)
+    u★ = FT(0.4)  # m/s (estimated from typical CBL conditions)
+    ϵ = FT(1e-10)  # small number to avoid division by zero
+    @inline ρu_drag(x, y, t, ρu, ρv, p) = -p.ρ₀ * p.u★^2 * ρu / sqrt(ρu^2 + ρv^2 + p.ϵ)
+    @inline ρv_drag(x, y, t, ρu, ρv, p) = -p.ρ₀ * p.u★^2 * ρv / sqrt(ρu^2 + ρv^2 + p.ϵ)
 
-    ρu_drag_bc = FluxBoundaryCondition(ρu_drag, field_dependencies=(:ρu, :ρv), parameters=(; ρ₀, u★))
-    ρv_drag_bc = FluxBoundaryCondition(ρv_drag, field_dependencies=(:ρu, :ρv), parameters=(; ρ₀, u★))
+    ρu_drag_bc = FluxBoundaryCondition(ρu_drag, field_dependencies=(:ρu, :ρv), parameters=(; ρ₀, u★, ϵ))
+    ρv_drag_bc = FluxBoundaryCondition(ρv_drag, field_dependencies=(:ρu, :ρv), parameters=(; ρ₀, u★, ϵ))
     ρu_bcs = FieldBoundaryConditions(bottom = ρu_drag_bc)
     ρv_bcs = FieldBoundaryConditions(bottom = ρv_drag_bc)
 
