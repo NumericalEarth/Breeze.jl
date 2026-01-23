@@ -449,10 +449,10 @@ function initialize_parcel_state!(state, z₀, x₀, y₀, model)
     z₀ = convert(FT, z₀)
 
     # Interpolate environmental conditions at parcel height
-    T₀ = interpolate((z₀,), model.temperature)
-    ρ₀ = interpolate((z₀,), dynamics.density)
-    p₀ = interpolate((z₀,), dynamics.pressure)
-    qᵗ₀ = interpolate((z₀,), model.specific_moisture)
+    T₀ = interpolate(z₀, model.temperature)
+    ρ₀ = interpolate(z₀, dynamics.density)
+    p₀ = interpolate(z₀, dynamics.pressure)
+    qᵗ₀ = interpolate(z₀, model.specific_moisture)
 
     # Set position
     state.x = x₀
@@ -525,9 +525,9 @@ function compute_parcel_tendencies!(model::ParcelModel)
     μ = state.μ
 
     # Position tendencies = environmental velocity at current height
-    tendencies.Gx = interpolate((z,), model.velocities.u)
-    tendencies.Gy = interpolate((z,), model.velocities.v)
-    tendencies.Gz = interpolate((z,), model.velocities.w)
+    tendencies.Gx = interpolate(z, model.velocities.u)
+    tendencies.Gy = interpolate(z, model.velocities.v)
+    tendencies.Gz = interpolate(z, model.velocities.w)
 
     # Build diagnostic microphysical state from prognostic variables
     # Pass updraft velocity explicitly for aerosol activation
@@ -706,8 +706,8 @@ function ssp_rk3_parcel_substep!(model::ParcelModel, U⁰::ParcelInitialState, �
 
     # Get environmental conditions at new height
     z⁺ = state.z
-    p⁺ = interpolate((z⁺,), dynamics.pressure)
-    ρ⁺ = interpolate((z⁺,), dynamics.density)
+    p⁺ = interpolate(z⁺, dynamics.pressure)
+    ρ⁺ = interpolate(z⁺, dynamics.density)
 
     # Update density from environmental profile
     state.ρ = ρ⁺
@@ -794,8 +794,8 @@ function step_parcel_state!(model::ParcelModel, Δt)
 
     # Get environmental conditions at new height
     z⁺ = state.z
-    p⁺ = interpolate((z⁺,), dynamics.pressure)
-    ρ⁺ = interpolate((z⁺,), dynamics.density)
+    p⁺ = interpolate(z⁺, dynamics.pressure)
+    ρ⁺ = interpolate(z⁺, dynamics.density)
 
     # Update density from environmental profile
     state.ρ = ρ⁺
