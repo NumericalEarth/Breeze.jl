@@ -2,7 +2,7 @@
 #
 # This example sets up, runs, and visualizes simulations of "thermal bubbles"
 # (just circular regions of warm air) rising through a neutral background.
-# We run both a dry simulation and a "cloudy" simulation. In the cloudy case,
+# We run a dry simulation and two "cloudy" simulations, both with and without precipitation. In the cloudy cases,
 # we simulate a pocket of warm air rising in a saturated, condensate-laden environment.
 
 using Breeze
