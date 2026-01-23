@@ -59,10 +59,10 @@ end
 @inline function diffusional_growth_factor_ice(aps::AirProperties{FT}, T, constants) where {FT}
     (; K_therm, D_vapor) = aps
     Rᵛ = vapor_gas_constant(constants)
-    ℒˢ = ice_latent_heat(T, constants)
+    ℒⁱ = ice_latent_heat(T, constants)
     pᵛ⁺ = saturation_vapor_pressure(T, constants, PlanarIceSurface())
 
-    return 1 / (ℒˢ / K_therm / T * (ℒˢ / Rᵛ / T - 1) + Rᵛ * T / D_vapor / pᵛ⁺)
+    return 1 / (ℒⁱ / K_therm / T * (ℒⁱ / Rᵛ / T - 1) + Rᵛ * T / D_vapor / pᵛ⁺)
 end
 
 #####
@@ -194,7 +194,7 @@ Named tuple `(; evap_rate_0, evap_rate_1)` where:
 
         # Mean rain drop mass and diameter
         (; xr_mean) = pdf_rain_parameters(pdf_r, qʳ, ρ, Nʳ)
-        Dr = cbrt(6 * xr_mean / (π * ρʷ))
+        Dʳ = cbrt(6 * xr_mean / (π * ρʷ))
 
         # Ventilation factors for number and mass tendencies
         t_star = cbrt(6 * x_star / xr_mean)
@@ -205,13 +205,13 @@ Named tuple `(; evap_rate_0, evap_rate_1)` where:
         b_vent_1 = bv * Γ(5 // 2 + 3 // 2 * β) / 6^(β / 2 + 1 // 2)
 
         # Reynolds number
-        N_Re = α * xr_mean^β * sqrt(ρ0 / ρ) * Dr / ν_air
-        Fv0 = a_vent_0 + b_vent_0 * cbrt(ν_air / D_vapor) * sqrt(N_Re)
-        Fv1 = a_vent_1 + b_vent_1 * cbrt(ν_air / D_vapor) * sqrt(N_Re)
+        Re = α * xr_mean^β * sqrt(ρ0 / ρ) * Dʳ / ν_air
+        Fv0 = a_vent_0 + b_vent_0 * cbrt(ν_air / D_vapor) * sqrt(Re)
+        Fv1 = a_vent_1 + b_vent_1 * cbrt(ν_air / D_vapor) * sqrt(Re)
 
         # Evaporation rates (negative for evaporation)
-        evap_rate_0 = min(zero(FT), FT(2) * FT(π) * G * 𝒮 * Nʳ * Dr * Fv0 / xr_mean)
-        evap_rate_1 = min(zero(FT), FT(2) * FT(π) * G * 𝒮 * Nʳ * Dr * Fv1 / ρ)
+        evap_rate_0 = min(zero(FT), FT(2) * FT(π) * G * 𝒮 * Nʳ * Dʳ * Fv0 / xr_mean)
+        evap_rate_1 = min(zero(FT), FT(2) * FT(π) * G * 𝒮 * Nʳ * Dʳ * Fv1 / ρ)
 
         # Handle edge cases where xr_mean approaches zero
         evap_rate_0 = ifelse(xr_mean / x_star < eps(FT), zero(FT), evap_rate_0)
@@ -281,9 +281,9 @@ Maximum supersaturation (dimensionless, e.g., 0.01 = 1% supersaturation)
     # Thermodynamic properties from Breeze
     Rᵛ = vapor_gas_constant(constants)
     ℒˡ = liquid_latent_heat(T, constants)
-    ℒˢ = ice_latent_heat(T, constants)
+    ℒⁱ = ice_latent_heat(T, constants)
     pᵛ⁺ = saturation_vapor_pressure(T, constants, PlanarLiquidSurface())
-    pᵛ⁺_ice = saturation_vapor_pressure(T, constants, PlanarIceSurface())
+    pᵛ⁺ⁱ = saturation_vapor_pressure(T, constants, PlanarIceSurface())
     g = constants.gravitational_acceleration
     ρʷ = ap.ρ_w  # water density
     ρⁱ = ap.ρ_i  # ice density
@@ -317,18 +317,18 @@ Maximum supersaturation (dimensionless, e.g., 0.01 = 1% supersaturation)
     # See Eq. A13 in Korolev and Mazin (2003) or CloudMicrophysics implementation
 
     # Liquid relaxation
-    r_liq = ifelse(Nˡ > eps(FT), cbrt(ρ * qˡ / Nˡ / ρʷ / (FT(4) / 3 * FT(π))), zero(FT))
-    K_liq = 4 * FT(π) * ρʷ * Nˡ * r_liq * G * γ
+    rˡ = ifelse(Nˡ > eps(FT), cbrt(ρ * qˡ / Nˡ / ρʷ / (FT(4) / 3 * FT(π))), zero(FT))
+    Kˡ = 4 * FT(π) * ρʷ * Nˡ * rˡ * G * γ
 
     # Ice relaxation
-    γᵢ = Rᵛ * T / pᵛ⁺ + pᵛ / pᵛ⁺ * Rᵐ * ℒˡ * ℒˢ / Rᵛ / cᵖᵐ / T / p
-    r_ice = ifelse(Nⁱ > eps(FT), cbrt(ρ * qⁱ / Nⁱ / ρⁱ / (FT(4) / 3 * FT(π))), zero(FT))
-    ρᵢGᵢ = diffusional_growth_factor_ice(aps, T, constants)
-    K_ice = 4 * FT(π) * Nⁱ * r_ice * ρᵢGᵢ * γᵢ
-    
-    ξ = pᵛ⁺ / pᵛ⁺_ice
-    
-    S_max = S_max_ARG * (α * w - K_ice * (ξ - 1)) / (α * w + (K_liq + K_ice * ξ) * S_max_ARG)
+    γⁱ = Rᵛ * T / pᵛ⁺ + pᵛ / pᵛ⁺ * Rᵐ * ℒˡ * ℒⁱ / Rᵛ / cᵖᵐ / T / p
+    rⁱ = ifelse(Nⁱ > eps(FT), cbrt(ρ * qⁱ / Nⁱ / ρⁱ / (FT(4) / 3 * FT(π))), zero(FT))
+    Gⁱ = diffusional_growth_factor_ice(aps, T, constants)
+    Kⁱ = 4 * FT(π) * Nⁱ * rⁱ * Gⁱ * γⁱ
+
+    ξ = pᵛ⁺ / pᵛ⁺ⁱ
+
+    S_max = S_max_ARG * (α * w - Kⁱ * (ξ - 1)) / (α * w + (Kˡ + Kⁱ * ξ) * S_max_ARG)
 
     return max(zero(FT), S_max)
 end
@@ -345,24 +345,24 @@ end
 @inline mean_hygroscopicity(ap, mode::Mode_κ{T, FT}) where {T <: Real, FT} = mode.vol_mix_ratio * mode.kappa
 
 @inline function mean_hygroscopicity(ap, mode::Mode_B{T, FT}) where {T <: Tuple, FT}
-    nom = zero(FT)
+    numerator = zero(FT)
     @inbounds for j in 1:fieldcount(T)
-        nom += mode.mass_mix_ratio[j] * mode.dissoc[j] * mode.osmotic_coeff[j] *
-               mode.soluble_mass_frac[j] / mode.molar_mass[j]
+        numerator += mode.mass_mix_ratio[j] * mode.dissoc[j] * mode.osmotic_coeff[j] *
+                     mode.soluble_mass_frac[j] / mode.molar_mass[j]
     end
 
-    den = zero(FT)
+    denominator = zero(FT)
     @inbounds for j in 1:fieldcount(T)
-        den += mode.mass_mix_ratio[j] / mode.aerosol_density[j]
+        denominator += mode.mass_mix_ratio[j] / mode.aerosol_density[j]
     end
 
-    return nom / den * ap.M_w / ap.ρ_w
+    return numerator / denominator * ap.M_w / ap.ρ_w
 end
 
 @inline function mean_hygroscopicity(ap, mode::Mode_B{T, FT}) where {T <: Real, FT}
-    nom = mode.mass_mix_ratio * mode.dissoc * mode.osmotic_coeff * mode.soluble_mass_frac / mode.molar_mass
-    den = mode.mass_mix_ratio / mode.aerosol_density
-    return nom / den * ap.M_w / ap.ρ_w
+    numerator = mode.mass_mix_ratio * mode.dissoc * mode.osmotic_coeff * mode.soluble_mass_frac / mode.molar_mass
+    denominator = mode.mass_mix_ratio / mode.aerosol_density
+    return numerator / denominator * ap.M_w / ap.ρ_w
 end
 
 # Helper function to compute S_max using ARG parameterization
