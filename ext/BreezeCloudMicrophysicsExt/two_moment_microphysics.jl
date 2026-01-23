@@ -40,7 +40,7 @@ tendencies for cloud liquid and rain following the Seifert-Beheng 2006 scheme.
 - `nᶜˡ`: Cloud liquid number per unit mass (1/kg)
 - `qʳ`: Rain mixing ratio (kg/kg)
 - `nʳ`: Rain number per unit mass (1/kg)
-- `nᵃ`: Aerosol number per unit mass (1/kg) - available CCN for activation
+- `nᵃ`: Aerosol number per unit mass (1/kg)
 - `w`: Updraft velocity (m/s) - used for aerosol activation (0 if unknown)
 """
 struct WarmPhaseTwoMomentState{FT} <: AbstractMicrophysicalState{FT}
@@ -48,8 +48,8 @@ struct WarmPhaseTwoMomentState{FT} <: AbstractMicrophysicalState{FT}
     nᶜˡ :: FT  # cloud liquid number per unit mass
     qʳ  :: FT  # rain mixing ratio
     nʳ  :: FT  # rain number per unit mass
-    nᵃ  :: FT  # aerosol number per unit mass (available CCN)
-    w   :: FT  # updraft velocity (for activation)
+    nᵃ  :: FT  # aerosol number per unit mass
+    w   :: FT  # updraft velocity
 end
 
 using CloudMicrophysics.Parameters:
@@ -137,13 +137,13 @@ microphysics = TwoMomentCloudMicrophysics(aerosol_activation = nothing)
 function default_aerosol_activation(FT::DataType = Float64)
     # Default continental aerosol mode using κ-Köhler theory
     # Mode_κ(r_dry, stdev, N, vol_mix_ratio, mass_mix_ratio, molar_mass, kappa)
-    r_dry = FT(0.05e-6)           # 50 nm dry radius
-    stdev = FT(2.0)               # geometric standard deviation
-    N = FT(100e6)                 # 100 cm⁻³
-    vol_mix_ratio = (FT(1.0),)    # single component
-    mass_mix_ratio = (FT(1.0),)
-    molar_mass = (FT(0.132),)     # ammonium sulfate ~132 g/mol
-    kappa = (FT(0.5),)            # hygroscopicity
+    r_dry = 0.05e-6           # 50 nm dry radius
+    stdev = 2.0               # geometric standard deviation
+    N = 100e6                 # 100 cm⁻³
+    vol_mix_ratio = (1.0,)    # single component
+    mass_mix_ratio = (1.0,)
+    molar_mass = (0.132,)     # ammonium sulfate ~132 g/mol
+    kappa = (0.5,)            # hygroscopicity
 
     mode = CMAM.Mode_κ(r_dry, stdev, N, vol_mix_ratio, mass_mix_ratio, molar_mass, kappa)
     aerosol_distribution = CMAM.AerosolDistribution((mode,))
