@@ -154,7 +154,7 @@ function default_aerosol_activation(FT::DataType = Float64)
 end
 
 """
-    initial_aerosol_number(aerosol_activation::AerosolActivation)
+    initial_aerosol_number_from_activation(aerosol_activation::AerosolActivation)
 
 Compute the total initial aerosol number concentration from the aerosol distribution.
 
