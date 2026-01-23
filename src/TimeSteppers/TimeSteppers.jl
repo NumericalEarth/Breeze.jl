@@ -6,7 +6,9 @@ which is TVD (total variation diminishing) with CFL coefficient = 1.
 """
 module TimeSteppers
 
-export SSPRungeKutta3
+export SSPRungeKutta3,
+       store_initial_state!,
+       ssp_rk3_substep!
 
 using DocStringExtensions: TYPEDSIGNATURES, TYPEDEF
 using Oceananigans.TimeSteppers: TimeSteppers as OceananigansTimeSteppers
