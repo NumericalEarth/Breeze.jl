@@ -45,7 +45,7 @@ Reactant.set_default_backend("cpu")
     end
 
     Δt = 0.01
-    nsteps = 1
+    nsteps = 4
 
     @testset "Compilation succeeds" begin
         compiled = Reactant.@compile raise_first=true raise=true sync=true grad_loss(
