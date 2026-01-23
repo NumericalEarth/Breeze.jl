@@ -53,6 +53,13 @@ export
     total_pressure,
     specific_humidity,
 
+    # Thermodynamics
+    temperature,
+    supersaturation,
+    saturation_specific_humidity,
+    PlanarLiquidSurface,
+    PlanarIceSurface,
+
     # Microphysics
     SaturationAdjustment,
     MixedPhaseEquilibrium,
@@ -76,7 +83,12 @@ export
     SubsidenceForcing,
 
     # TimeSteppers
-    SSPRungeKutta3
+    SSPRungeKutta3,
+
+    # ParcelDynamics
+    ParcelDynamics,
+    ParcelModel,
+    ParcelState
 
 using Oceananigans: Oceananigans, @at, AnisotropicMinimumDissipation, Average,
                     AveragedTimeInterval, BackgroundField, BetaPlane, Bounded,
@@ -179,5 +191,8 @@ using .Forcings
 
 include("TimeSteppers/TimeSteppers.jl")
 using .TimeSteppers
+
+include("ParcelModels/ParcelModels.jl")
+using .ParcelModels
 
 end # module Breeze

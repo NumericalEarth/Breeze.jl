@@ -85,7 +85,7 @@ end
     @inbounds qᵗ = specific_moisture[i, j, k]
 
     # Compute moisture fractions first
-    q = compute_moisture_fractions(i, j, k, grid, microphysics, ρ, qᵗ, microphysical_fields)
+    q = grid_moisture_fractions(i, j, k, grid, microphysics, ρ, qᵗ, microphysical_fields)
     𝒰 = diagnose_thermodynamic_state(i, j, k, grid, formulation, dynamics, q)
 
     Π = exner_function(𝒰, constants)
@@ -95,7 +95,7 @@ end
     return ( - div_ρUc(i, j, k, grid, advection, ρ_field, velocities, potential_temperature)
              + c_div_ρU(i, j, k, grid, dynamics, velocities, potential_temperature)
              - ∇_dot_Jᶜ(i, j, k, grid, ρ_field, closure, closure_fields, id, potential_temperature, clock, model_fields, closure_buoyancy)
-             + microphysical_tendency(i, j, k, grid, microphysics, Val(:ρθ), ρ, microphysical_fields, 𝒰, constants)
+             + grid_microphysical_tendency(i, j, k, grid, microphysics, Val(:ρθ), ρ, microphysical_fields, 𝒰, constants)
              + ρθ_forcing(i, j, k, grid, clock, model_fields)
              + ρe_forcing(i, j, k, grid, clock, model_fields) / (cᵖᵐ * Π)
     )
@@ -165,9 +165,9 @@ end
     end
 
     z = znode(i, j, k, grid, c, c, c)
-    q = compute_moisture_fractions(i, j, k, grid, microphysics, ρᵣ, qᵗ, microphysical_fields)
+    q = grid_moisture_fractions(i, j, k, grid, microphysics, ρᵣ, qᵗ, microphysical_fields)
     𝒰e₀ = StaticEnergyState(e, q, z, pᵣ)
-    𝒰e₁ = maybe_adjust_thermodynamic_state(i, j, k, 𝒰e₀, microphysics, ρᵣ, microphysical_fields, qᵗ, constants)
+    𝒰e₁ = maybe_adjust_thermodynamic_state(𝒰e₀, microphysics, qᵗ, constants)
     T = temperature(𝒰e₁, constants)
 
     pˢᵗ = standard_pressure(dynamics)
@@ -236,7 +236,7 @@ end
     end
 
     # Get moisture fractions (vapor only for unsaturated air)
-    q = compute_moisture_fractions(i, j, k, grid, microphysics, ρᵣ, qᵗ, microphysical_fields)
+    q = grid_moisture_fractions(i, j, k, grid, microphysics, ρᵣ, qᵗ, microphysical_fields)
 
     # Convert temperature to potential temperature using the inverse of the T(θ) relation
     pˢᵗ = standard_pressure(dynamics)
