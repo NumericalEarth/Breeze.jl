@@ -13,7 +13,7 @@ using ..AtmosphereModels:
     dynamics_pressure,
     surface_pressure
 
-using Oceananigans: Oceananigans, CenterField, Field
+using Oceananigans: CenterField, Field
 using Oceananigans.AbstractOperations: KernelFunctionOperation
 using Oceananigans.Architectures: architecture
 using Oceananigans.Grids: Center, znode
@@ -23,52 +23,16 @@ using Adapt: Adapt, adapt
 using DocStringExtensions: TYPEDSIGNATURES
 using KernelAbstractions: @index, @kernel
 
+using CUDA: @cushow
+using JLD2: @save
+
 """
-    struct DCMIP2016KesslerMicrophysics{FT}
+    struct DCMIP2016KesslerMicrophysics
 
 DCMIP2016 implementation of the Kessler (1969) warm-rain bulk microphysics scheme.
-See the constructor [`DCMIP2016KesslerMicrophysics`](@ref) for full documentation.
-"""
-struct DCMIP2016KesslerMicrophysics{FT}
-    # DCMIP2016 parameter (appears to be related to Tetens' saturation vapor pressure formula,
-    # but cannot be reconciled with other parameters in a consistent application of that formula.)
-    dcmip_temperature_scale :: FT
-
-    # Rain terminal velocity (Klemp & Wilhelmson 1978)
-    terminal_velocity_coefficient :: FT
-    density_scale                 :: FT
-    terminal_velocity_exponent    :: FT
-
-    # Autoconversion
-    autoconversion_rate      :: FT
-    autoconversion_threshold :: FT
-
-    # Accretion
-    accretion_rate     :: FT
-    accretion_exponent :: FT
-
-    # Rain evaporation (Klemp & Wilhelmson 1978)
-    evaporation_ventilation_coefficient_1 :: FT
-    evaporation_ventilation_coefficient_2 :: FT
-    evaporation_ventilation_exponent_1    :: FT
-    evaporation_ventilation_exponent_2    :: FT
-    diffusivity_coefficient               :: FT
-    thermal_conductivity_coefficient      :: FT
-
-    # Numerical
-    substep_cfl :: FT
-end
-
-"""
-$(TYPEDSIGNATURES)
-
-Construct a DCMIP2016 implementation of the Kessler (1969) warm-rain bulk microphysics scheme.
 
 This implementation follows the DCMIP2016 test case specification, which is based on
 Klemp and Wilhelmson (1978).
-
-# Positional Arguments
-- `FT`: Floating-point type for all parameters (default: `Oceananigans.defaults.FloatType`).
 
 # References
 - Zarzycki, C. M., et al. (2019). DCMIP2016: the splitting supercell test case. Geoscientific Model Development, 12, 879–892.
@@ -100,11 +64,11 @@ instead, it is diagnosed from the total specific moisture `qᵗ` and the liquid 
 - Rain sedimentation uses subcycling to satisfy CFL constraints, following the Fortran implementation.
 - All microphysical updates are applied directly to the state variables in the kernel.
 
-# Keyword Arguments
+# Parameters
 
 ## Saturation (Tetens/Clausius-Clapeyron formula)
 - `dcmip_temperature_scale` (`T_DCMIP2016`): A parameter of uncertain provenance that appears in the DCMIP2016 implementation
-                            of the Kessler scheme (line 105 of `kessler.f90` in [DOI: 10.5281/zenodo.1298671](https://doi.org/10.5281/zenodo.1298671))
+                             of the Kessler scheme (line 105 of `kessler.f90` in [DOI: 10.5281/zenodo.1298671](https://doi.org/10.5281/zenodo.1298671))
 
 The "saturation adjustment coefficient" `f₅` is then computed as
 
@@ -143,38 +107,34 @@ Ventilation: `(Cᵉᵛ₁ + Cᵉᵛ₂ × (ρ rʳ)^βᵉᵛ₁) × (ρ rʳ)^β�
 ## Numerical
 - `substep_cfl`: CFL safety factor for sedimentation subcycling (default: 0.8)
 """
-function DCMIP2016KesslerMicrophysics(FT = Oceananigans.defaults.FloatType;
-                                      dcmip_temperature_scale               = 237.3,
-                                      terminal_velocity_coefficient         = 36.34,
-                                      density_scale                         = 0.001,
-                                      terminal_velocity_exponent            = 0.1364,
-                                      autoconversion_rate                   = 0.001,
-                                      autoconversion_threshold              = 0.001,
-                                      accretion_rate                        = 2.2,
-                                      accretion_exponent                    = 0.875,
-                                      evaporation_ventilation_coefficient_1 = 1.6,
-                                      evaporation_ventilation_coefficient_2 = 124.9,
-                                      evaporation_ventilation_exponent_1    = 0.2046,
-                                      evaporation_ventilation_exponent_2    = 0.525,
-                                      diffusivity_coefficient               = 2.55e8,
-                                      thermal_conductivity_coefficient      = 5.4e5,
-                                      substep_cfl                           = 0.8)
+Base.@kwdef struct DCMIP2016KesslerMicrophysics{FT}
+    # DCMIP2016 parameter (appears to be related to Tetens' saturation vapor pressure formula,
+    # but cannot be reconciled with other parameters in a consistent application of that formula.)
+    dcmip_temperature_scale :: FT = 237.3
 
-    return DCMIP2016KesslerMicrophysics{FT}(convert(FT, dcmip_temperature_scale),
-                                            convert(FT, terminal_velocity_coefficient),
-                                            convert(FT, density_scale),
-                                            convert(FT, terminal_velocity_exponent),
-                                            convert(FT, autoconversion_rate),
-                                            convert(FT, autoconversion_threshold),
-                                            convert(FT, accretion_rate),
-                                            convert(FT, accretion_exponent),
-                                            convert(FT, evaporation_ventilation_coefficient_1),
-                                            convert(FT, evaporation_ventilation_coefficient_2),
-                                            convert(FT, evaporation_ventilation_exponent_1),
-                                            convert(FT, evaporation_ventilation_exponent_2),
-                                            convert(FT, diffusivity_coefficient),
-                                            convert(FT, thermal_conductivity_coefficient),
-                                            convert(FT, substep_cfl))
+    # Rain terminal velocity (Klemp & Wilhelmson 1978)
+    terminal_velocity_coefficient :: FT = 36.34
+    density_scale                 :: FT = 0.001
+    terminal_velocity_exponent    :: FT = 0.1364
+
+    # Autoconversion
+    autoconversion_rate      :: FT = 0.001
+    autoconversion_threshold :: FT = 0.001
+
+    # Accretion
+    accretion_rate     :: FT = 2.2
+    accretion_exponent :: FT = 0.875
+
+    # Rain evaporation (Klemp & Wilhelmson 1978)
+    evaporation_ventilation_coefficient_1 :: FT = 1.6
+    evaporation_ventilation_coefficient_2 :: FT = 124.9
+    evaporation_ventilation_exponent_1    :: FT = 0.2046
+    evaporation_ventilation_exponent_2    :: FT = 0.525
+    diffusivity_coefficient               :: FT = 2.55e8
+    thermal_conductivity_coefficient      :: FT = 5.4e5
+
+    # Numerical
+    substep_cfl :: FT = 0.8
 end
 
 const DCMIP2016KM = DCMIP2016KesslerMicrophysics
@@ -353,7 +313,17 @@ and `β^𝕎` is `terminal_velocity_exponent`.
     a𝕎 = microphysics.terminal_velocity_coefficient
     Cᵨ = microphysics.density_scale
     β𝕎 = microphysics.terminal_velocity_exponent
-    return a𝕎 * (rʳ * Cᵨ * ρ)^β𝕎 * sqrt(ρ₁ / ρ)
+    out = a𝕎 * (rʳ * Cᵨ * ρ)^β𝕎 * sqrt(ρ₁ / ρ)
+    if !isfinite(out)
+        @cushow a𝕎
+        @cushow rʳ
+        @cushow Cᵨ
+        @cushow ρ
+        @cushow β𝕎
+        @cushow ρ₁
+        error()
+    end
+    return out
 end
 
 """
@@ -423,6 +393,7 @@ function AtmosphereModels.microphysics_model_update!(microphysics::DCMIP2016KM, 
     # Microphysical fields
     μ = model.microphysical_fields
 
+    @save "microphysical_update_arguments.jld2" microphysics grid Nz Δt ρ p p₀ constants θˡⁱ ρθˡⁱ ρqᵗ μ
     launch!(arch, grid, :xy, _microphysical_update!,
             microphysics, grid, Nz, Δt, ρ, p, p₀, constants, θˡⁱ, ρθˡⁱ, ρqᵗ, μ)
 
@@ -492,6 +463,11 @@ end
             qᵗ = ρqᵗ[i, j, k] / ρ
             qᶜˡ = max(0, μ.ρqᶜˡ[i, j, k] / ρ)
             qʳ  = max(0, μ.ρqʳ[i, j, k] / ρ)
+            if !isfinite(qʳ)
+                @cushow μ.ρqʳ[i, j, k]
+                @cushow ρ
+                error()
+            end
             qˡ_sum = qᶜˡ + qʳ
             qᵗ = max(qᵗ, qˡ_sum)
             qᵛ = qᵗ - qˡ_sum
@@ -503,6 +479,12 @@ end
             rᵗ = total_mixing_ratio(r)
             rᶜˡ = qᶜˡ * (1 + rᵗ)
             rʳ  = qʳ * (1 + rᵗ)
+            if !isfinite(rʳ)
+                @cushow qʳ
+                @cushow rᵗ
+                @cushow rʳ
+                error()
+            end
 
             𝕎ʳᵏ = kessler_terminal_velocity(rʳ, ρ, ρ₁, microphysics)
             μ.𝕎ʳ[i, j, k] = 𝕎ʳᵏ
@@ -511,11 +493,20 @@ end
             μ.qᵛ[i, j, k]  = rᵛ
             μ.qᶜˡ[i, j, k] = rᶜˡ
             μ.qʳ[i, j, k]  = rʳ
+            if !isfinite(μ.qʳ[i, j, k])
+                @cushow μ.qʳ[i, j, k]
+                @cushow rʳ
+                error()
+            end
 
             # CFL check for sedimentation
             zᵏ⁺¹ = znode(i, j, k+1, grid, Center(), Center(), Center())
             Δz = zᵏ⁺¹ - zᵏ
-            max_Δt = min(max_Δt, cfl * Δz / 𝕎ʳᵏ)
+            old_max_Δt = max_Δt
+            max_Δt = min(old_max_Δt, cfl * Δz / 𝕎ʳᵏ)
+            # if iszero(max_Δt) || !isfinite(max_Δt)
+            #     @cushow Δt, old_max_Δt, cfl, Δz, 𝕎ʳᵏ, cfl * Δz / 𝕎ʳᵏ
+            # end
             zᵏ = zᵏ⁺¹
         end
     end
@@ -541,9 +532,17 @@ end
         μ.qᵛ[i, j, Nz]  = rᵛ
         μ.qᶜˡ[i, j, Nz] = rᶜˡ
         μ.qʳ[i, j, Nz]  = rʳ
+        if !isfinite(μ.qʳ[i, j, Nz])
+            @cushow μ.qʳ[i, j, Nz]
+            @cushow rʳ
+            error()
+        end
     end
 
     # Subcycling for CFL constraint on rain sedimentation
+    if iszero(max_Δt) || !isfinite(max_Δt)
+        @cushow Δt, max_Δt
+    end
     Ns = max(1, ceil(Int, Δt / max_Δt))
     inv_Ns = inv(FT(Ns))
     Δtₛ = Δt * inv_Ns
@@ -631,6 +630,11 @@ end
                 μ.qᵛ[i, j, k]  = rᵛ_new
                 μ.qᶜˡ[i, j, k] = rᶜˡ_final
                 μ.qʳ[i, j, k]  = rʳ_final
+                if !isfinite(μ.qʳ[i, j, k])
+                    @cushow μ.qʳ[i, j, k]
+                    @cushow rʳ_final
+                    error()
+                end
 
                 # Update θˡⁱ from latent heating
                 net_phase_change = Δrᶜ - Δrᴱ
@@ -707,6 +711,11 @@ end
             μ.qᵛ[i, j, k]  = rᵛ_new
             μ.qᶜˡ[i, j, k] = rᶜˡ_final
             μ.qʳ[i, j, k]  = rʳ_final
+            if !isfinite(μ.qʳ[i, j, k])
+                @cushow μ.qʳ[i, j, k]
+                @cushow rʳ_final
+                error()
+            end
 
             # Update θˡⁱ from latent heating
             net_phase_change = Δrᶜ - Δrᴱ
@@ -750,6 +759,11 @@ end
             rᵛ = μ.qᵛ[i, j, k]
             rᶜˡ = μ.qᶜˡ[i, j, k]
             rʳ = μ.qʳ[i, j, k]
+            if !isfinite(rʳ)
+                @cushow rʳ
+                @cushow μ.qʳ[i, j, k]
+                error()
+            end
 
             rˡ = rᶜˡ + rʳ
             r = MoistureMixingRatio(rᵛ, rˡ)
@@ -759,13 +773,30 @@ end
             rᵗ = total_mixing_ratio(r)
             qᶜˡ = rᶜˡ / (1 + rᵗ)
             qʳ  = rʳ / (1 + rᵗ)
+            if !isfinite(qʳ)
+                @cushow qʳ
+                @cushow rʳ
+                @cushow rᵗ
+                error()
+            end
 
             ρqᵗ[i, j, k]    = ρ * qᵗ
             μ.ρqᶜˡ[i, j, k] = ρ * qᶜˡ
             μ.ρqʳ[i, j, k]  = ρ * qʳ
+            if !isfinite(μ.ρqʳ[i, j, k])
+                # @cushow μ.ρqʳ[i, j, k]
+                @cushow ρ
+                @cushow qʳ
+                error()
+            end
             μ.qᵛ[i, j, k]   = qᵛ
             μ.qᶜˡ[i, j, k]  = qᶜˡ
             μ.qʳ[i, j, k]   = qʳ
+            if !isfinite(μ.qʳ[i, j, k])
+                @cushow μ.qʳ[i, j, k]
+                @cushow qʳ
+                error()
+            end
         end
     end
 end

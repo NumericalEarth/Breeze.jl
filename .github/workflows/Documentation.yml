@@ -3,7 +3,7 @@ name: Documentation
 on:
   push:
     branches:
-      - main
+      - '**'
     tags: "*"
     paths: &paths
       - ".github/workflows/Documentation.yml"
@@ -12,8 +12,8 @@ on:
       - "src/**"
       - "Project.toml"
       - "CHANGELOG.md"
-  pull_request:
-    paths: *paths
+  # pull_request:
+  #   paths: *paths
 
 concurrency:
   # Skip intermediate builds: always.
@@ -31,7 +31,13 @@ jobs:
       contents: write
       pull-requests: read
       statuses: write
-    runs-on: aws-linux-nvidia-gpu-l4
+    strategy:
+      fail-fast: false
+      matrix:
+        os:
+          # - aws-linux-nvidia-gpu-t4
+          - aws-linux-nvidia-gpu-l4
+    runs-on: ${{ matrix.os }}
     container:
       image: 'ghcr.io/numericalearth/breeze-docker-images:docs-julia_1.12.4'
       options: --gpus=all
@@ -58,19 +64,31 @@ jobs:
           # Running doctests need to run `git` commands in this directory, but `git`
           # complains about dubious ownership when using the Docker image.
           git config --global --add safe.directory ${PWD}
-      - name: Build documentation
+      - name: Run example
         shell: bash
         timeout-minutes: 45
         run:
           earlyoom -m 3 -s 100 -r 300 --prefer 'julia' &
-          julia --color=yes --project=docs --threads 1,$(nproc) docs/make.jl
+          julia --color=yes --project=docs examples/splitting_supercell.jl
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
       - uses: actions/upload-artifact@v6
+        if: always()
         with:
-          name: documentation-build
-          path: docs/build
-          retention-days: 10
+          name: cuda-dump
+          path: microphysical_update
+          retention-days: 90
+      - uses: actions/upload-artifact@v6
+        if: always()
+        with:
+          name: arguments-dump
+          path: microphysical_update_arguments.jld2
+          retention-days: 90
+      # - uses: actions/upload-artifact@v6
+      #   with:
+      #     name: documentation-build
+      #     path: docs/build
+      #     retention-days: 10
 
   deploy-docs:
     # We want to deploy docs if:
