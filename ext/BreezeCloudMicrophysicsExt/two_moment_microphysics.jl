@@ -690,7 +690,7 @@ end
     # The activation rate is proportional to available aerosol and activated fraction
     # Zero activation if: no updraft (w ≤ 0), no aerosol (Nᵃ ≤ 0), or subsaturated (S ≤ 0)
     is_active = (w⁺ > 0) & (Nᵃ⁺ > 0) & (S > 0)
-    dNᶜˡ_act = ifelse(is_active, activated_fraction * Nᵃ⁺, zero(FT))
+    dNᶜˡ_act = ifelse(is_active, activated_fraction * Nᵃ⁺, zero(ρ))
 
     return dNᶜˡ_act
 end
@@ -735,17 +735,17 @@ Uses the maximum supersaturation to determine which aerosol modes activate.
         κ_mean = mean_hygroscopicity(ap, mode_i)
 
         # Critical supersaturation for mode i (Eq. 9 in ARG 2000)
-        Sm_i = 2 / sqrt(κ_mean) * (A / 3 / mode_i.r_dry)^(FT(3) / 2)
+        Sm_i = 2 / sqrt(κ_mean) * (A / 3 / mode_i.r_dry)^(3/2)
 
         # Activated fraction for this mode (Eq. 7 in ARG 2000)
-        u = 2 * log(Sm_i / S_max) / 3 / sqrt(FT(2)) / log(mode_i.stdev)
-        f_activated = FT(0.5) * (1 - CMAA.SF.erf(u))
+        u = 2 * log(Sm_i / S_max) / 3 / sqrt(2) / log(mode_i.stdev)
+        f_activated = (1 - CMAA.SF.erf(u)) / 2
 
         activated_N += f_activated * N_mode
     end
 
     # Return total activated fraction
-    return ifelse(total_N > zero(FT), activated_N / total_N, zero(FT))
+    return ifelse(total_N > 0, activated_N / total_N, zero(T))
 end
 
 #####
