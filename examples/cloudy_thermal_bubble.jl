@@ -274,33 +274,24 @@ using .BreezeCloudMicrophysicsExt: OneMomentCloudMicrophysics
 
 # Build a new model with one-moment microphysics. We use saturation adjustment for
 # cloud formation, but now rain is a prognostic variable that evolves via microphysical
-# processes.
+# processes. We also use the same initial conditions as the moist case, but with slightly lower total
+# water (qᵗ = 0.020) following the CM1 benchmark.
 
 precip_cloud_formation = SaturationAdjustment(equilibrium=WarmPhaseEquilibrium())
 precip_microphysics = OneMomentCloudMicrophysics(; cloud_formation=precip_cloud_formation)
 precip_model = AtmosphereModel(grid; dynamics, thermodynamic_constants, advection,
                                microphysics=precip_microphysics)
 
-# ## Precipitating bubble initial conditions
-#
-# We use the same initial conditions as the moist case, but with slightly lower total
-# water (qᵗ = 0.020) following the CM1 benchmark.
-
 qᵗ_precip = 0.020  # CM1 qt_mb value for saturated neutrally-stable sounding
 set!(precip_model, θ=θᵢ, qᵗ=qᵗ_precip)
 
 # ## Simulation
 #
-# We run for 60 minutes to allow precipitation to develop. The one-moment scheme
+# We run the simulation for 60 minutes to allow precipitation to develop. The one-moment scheme
 # requires time for cloud liquid to accumulate and autoconversion to produce rain.
 
 precip_simulation = Simulation(precip_model; Δt=2, stop_time=60minutes)
 conjure_time_step_wizard!(precip_simulation, cfl=0.7)
-
-# ## Diagnostics
-#
-# Track cloud liquid, rain, and precipitation rate to observe the microphysical
-# processes at work.
 
 θ_precip = liquid_ice_potential_temperature(precip_model)
 u_p, v_p, w_precip = precip_model.velocities
@@ -323,7 +314,6 @@ end
 
 add_callback!(precip_simulation, progress_precip, TimeInterval(5minutes))
 
-# Output fields for animation
 precip_outputs = (; θ=θ_precip, w=w_precip, qᶜˡ=qᶜˡ_precip, qʳ=qʳ_precip)
 
 precip_filename = "precipitating_thermal_bubble.jld2"
@@ -336,13 +326,7 @@ precip_simulation.output_writers[:jld2] = precip_writer
 
 run!(precip_simulation)
 
-# ## Visualization: 4-panel animation
-#
-# We create a 4-panel animation showing the evolution of:
-# - Potential temperature θ (thermal structure)
-# - Vertical velocity w (updraft dynamics)
-# - Cloud liquid qᶜˡ (cloud formation)
-# - Rain qʳ (precipitation development)
+# ## Visualization of a precipitating thermal bubble
 
 θts = FieldTimeSeries(precip_filename, "θ")
 wts = FieldTimeSeries(precip_filename, "w")
@@ -352,7 +336,6 @@ qʳts = FieldTimeSeries(precip_filename, "qʳ")
 times_precip = θts.times
 Nt = length(times_precip)
 
-# Compute color ranges
 θ_range_p = (minimum(θts), maximum(θts))
 w_range_p = maximum(abs, wts)
 qᶜˡ_range = (0, max(1e-6, maximum(qᶜˡts)))
