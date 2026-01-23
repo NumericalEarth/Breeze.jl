@@ -746,7 +746,7 @@ Uses the maximum supersaturation to determine which aerosol modes activate.
         total_N += N_mode
 
         # Mean hygroscopicity for this mode
-        κ_mean = _mean_hygroscopicity(ap, mode_i)
+        κ_mean = mean_hygroscopicity(ap, mode_i)
 
         # Critical supersaturation for mode i (Eq. 9 in ARG 2000)
         Sm_i = 2 / sqrt(κ_mean) * (A / 3 / mode_i.r_dry)^(FT(3) / 2)

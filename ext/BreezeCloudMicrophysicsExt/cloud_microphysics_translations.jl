@@ -334,7 +334,7 @@ Maximum supersaturation (dimensionless, e.g., 0.01 = 1% supersaturation)
 end
 
 # Helper function to compute mean hygroscopicity
-@inline function _mean_hygroscopicity(ap, mode::Mode_κ{T, FT}) where {T <: Tuple, FT}
+@inline function mean_hygroscopicity(ap, mode::Mode_κ{T, FT}) where {T <: Tuple, FT}
     κ_mean = zero(FT)
     @inbounds for j in 1:fieldcount(T)
         κ_mean += mode.vol_mix_ratio[j] * mode.kappa[j]
@@ -342,9 +342,9 @@ end
     return κ_mean
 end
 
-@inline _mean_hygroscopicity(ap, mode::Mode_κ{T, FT}) where {T <: Real, FT} = mode.vol_mix_ratio * mode.kappa
+@inline mean_hygroscopicity(ap, mode::Mode_κ{T, FT}) where {T <: Real, FT} = mode.vol_mix_ratio * mode.kappa
 
-@inline function _mean_hygroscopicity(ap, mode::Mode_B{T, FT}) where {T <: Tuple, FT}
+@inline function mean_hygroscopicity(ap, mode::Mode_B{T, FT}) where {T <: Tuple, FT}
     nom = zero(FT)
     @inbounds for j in 1:fieldcount(T)
         nom += mode.mass_mix_ratio[j] * mode.dissoc[j] * mode.osmotic_coeff[j] *
@@ -359,7 +359,7 @@ end
     return nom / den * ap.M_w / ap.ρ_w
 end
 
-@inline function _mean_hygroscopicity(ap, mode::Mode_B{T, FT}) where {T <: Real, FT}
+@inline function mean_hygroscopicity(ap, mode::Mode_B{T, FT}) where {T <: Real, FT}
     nom = mode.mass_mix_ratio * mode.dissoc * mode.osmotic_coeff * mode.soluble_mass_frac / mode.molar_mass
     den = mode.mass_mix_ratio / mode.aerosol_density
     return nom / den * ap.M_w / ap.ρ_w
@@ -375,7 +375,7 @@ end
         mode_i = ad.modes[i]
 
         # Mean hygroscopicity for mode (volume-weighted κ)
-        κ_mean = _mean_hygroscopicity(ap, mode_i)
+        κ_mean = mean_hygroscopicity(ap, mode_i)
 
         # Critical supersaturation (Eq. 9 in ARG 2000)
         Sm_i = 2 / sqrt(κ_mean) * (A / 3 / mode_i.r_dry)^(FT(3) / 2)
@@ -439,7 +439,7 @@ Total number of activated droplets per unit volume [1/m³]
         mode_i = ad.modes[i]
 
         # Critical supersaturation for this mode
-        κ_mean = _mean_hygroscopicity(ap, mode_i)
+        κ_mean = mean_hygroscopicity(ap, mode_i)
         Sm_i = 2 / sqrt(κ_mean) * (A / 3 / mode_i.r_dry)^(FT(3) / 2)
 
         # Fraction activated (Eq. 7 in ARG 2000)
