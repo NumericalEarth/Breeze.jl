@@ -605,9 +605,6 @@ end
 ##### Cloud liquid number tendency (ρnᶜˡ) - state-based
 #####
 
-# Activation timescale (seconds) - controls how quickly droplets form when supersaturated
-const τ_activation = 1.0
-
 @inline function AtmosphereModels.microphysical_tendency(bμp::WPNE2M, ::Val{:ρnᶜˡ}, ρ, ℳ::WarmPhaseTwoMomentState, 𝒰, constants)
     categories = bμp.categories
     sb = categories.warm_processes
@@ -703,8 +700,7 @@ end
     activated_fraction = aerosol_activated_fraction(aerosol_activation, aps, T, p, w_pos, qᵗ, qˡ, ρ, constants)
 
     # The activation rate is proportional to available aerosol and activated fraction
-    # Aerosol activates on the activation timescale
-    dNᶜˡ_act = activated_fraction * Nᵃ / FT(τ_activation)
+    dNᶜˡ_act = activated_fraction * Nᵃ
 
     return dNᶜˡ_act
 end
