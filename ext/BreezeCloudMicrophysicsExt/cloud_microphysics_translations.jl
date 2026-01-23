@@ -452,4 +452,3 @@ Total number of activated droplets per unit volume [1/m³]
 
     return N_act
 end
-
