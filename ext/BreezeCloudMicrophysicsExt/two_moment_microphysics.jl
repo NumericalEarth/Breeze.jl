@@ -670,8 +670,8 @@ end
 ) where {FT}
 
     # Only activate if there's updraft (positive w) and aerosol available
-    w_pos = max(0, w)
-    Nᵃ_pos = max(0, Nᵃ)
+    w⁺ = max(0, w)
+    Nᵃ⁺ = max(0, Nᵃ)
 
     # Get thermodynamic properties
     T = temperature(𝒰, constants)
@@ -685,12 +685,12 @@ end
 
     # Compute the activated fraction of aerosol based on current supersaturation
     # This gives the fraction that would activate given current conditions
-    activated_fraction = aerosol_activated_fraction(aerosol_activation, aps, T, p, w_pos, qᵗ, qˡ, ρ, constants)
+    activated_fraction = aerosol_activated_fraction(aerosol_activation, aps, T, p, w⁺, qᵗ, qˡ, ρ, constants)
 
     # The activation rate is proportional to available aerosol and activated fraction
     # Zero activation if: no updraft (w ≤ 0), no aerosol (Nᵃ ≤ 0), or subsaturated (S ≤ 0)
-    is_active = (w_pos > 0) & (Nᵃ_pos > 0) & (S > 0)
-    dNᶜˡ_act = ifelse(is_active, activated_fraction * Nᵃ_pos, zero(FT))
+    is_active = (w⁺ > 0) & (Nᵃ⁺ > 0) & (S > 0)
+    dNᶜˡ_act = ifelse(is_active, activated_fraction * Nᵃ⁺, zero(FT))
 
     return dNᶜˡ_act
 end
