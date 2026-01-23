@@ -588,7 +588,8 @@ end
 
     # Initialize with some droplet number (CCN activation)
     nᶜˡ₀ = 100e6  # 100 million droplets per kg
-    model.dynamics.state.μ = (; ρqᶜˡ=0.0, ρnᶜˡ=1.2 * nᶜˡ₀, ρqʳ=0.0, ρnʳ=0.0)
+    nᵃ₀ = initial_aerosol_number(microphysics)
+    model.dynamics.state.μ = (; ρqᶜˡ=0.0, ρnᶜˡ=1.2 * nᶜˡ₀, ρqʳ=0.0, ρnʳ=0.0, ρnᵃ=1.2 * nᵃ₀)
 
     # Run long enough for condensation to occur (above LCL)
     simulation = Simulation(model; Δt=1.0, stop_time=60minutes)
@@ -625,7 +626,8 @@ end
 
     # Initialize with droplet number for 2M scheme
     nᶜˡ₀ = 100e6
-    model.dynamics.state.μ = (; ρqᶜˡ=0.0, ρnᶜˡ=1.2 * nᶜˡ₀, ρqʳ=0.0, ρnʳ=0.0)
+    nᵃ₀ = initial_aerosol_number(microphysics)
+    model.dynamics.state.μ = (; ρqᶜˡ=0.0, ρnᶜˡ=1.2 * nᶜˡ₀, ρqʳ=0.0, ρnʳ=0.0, ρnᵃ=1.2 * nᵃ₀)
 
     # Run long enough for cloud formation and autoconversion
     simulation = Simulation(model; Δt=1.0, stop_time=120minutes)

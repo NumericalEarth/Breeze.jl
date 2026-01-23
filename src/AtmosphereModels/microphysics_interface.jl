@@ -117,7 +117,7 @@ end
 #####
 
 """
-    microphysical_state(microphysics, ρ, μ, 𝒰, w=0)
+    microphysical_state(microphysics, ρ, μ, 𝒰, w=0, Δt=1)
 
 Build an [`AbstractMicrophysicalState`](@ref) (ℳ) from density-weighted prognostic
 microphysical variables `μ`, density `ρ`, and thermodynamic state `𝒰`.
@@ -136,21 +136,22 @@ while precipitation (rain, snow) still comes from `μ`.
 - `μ`: NamedTuple of density-weighted prognostic variables (e.g., `(ρqᶜˡ=..., ρqʳ=...)`)
 - `𝒰`: Thermodynamic state
 - `w`: Updraft velocity [m/s] (default: 0). Used by schemes with aerosol activation.
+- `Δt`: Model timestep [s] (default: 1). Used for aerosol activation rate conversion.
 
 # Returns
 An `AbstractMicrophysicalState` subtype containing the local specific microphysical variables.
 
 See also [`microphysical_tendency`](@ref), [`AbstractMicrophysicalState`](@ref).
 """
-@inline microphysical_state(::Nothing, ρ, μ, 𝒰, w=0) = NothingMicrophysicalState(typeof(ρ))
-@inline microphysical_state(::Nothing, ρ, ::Nothing, 𝒰, w=0) = NothingMicrophysicalState(typeof(ρ))
-@inline microphysical_state(microphysics, ρ, ::Nothing, 𝒰, w=0) = NothingMicrophysicalState(typeof(ρ))
-@inline microphysical_state(microphysics, ρ, ::NamedTuple{(), Tuple{}}, 𝒰, w=0) = NothingMicrophysicalState(typeof(ρ))
+@inline microphysical_state(::Nothing, ρ, μ, 𝒰, w=0, Δt=1) = NothingMicrophysicalState(typeof(ρ))
+@inline microphysical_state(::Nothing, ρ, ::Nothing, 𝒰, w=0, Δt=1) = NothingMicrophysicalState(typeof(ρ))
+@inline microphysical_state(microphysics, ρ, ::Nothing, 𝒰, w=0, Δt=1) = NothingMicrophysicalState(typeof(ρ))
+@inline microphysical_state(microphysics, ρ, ::NamedTuple{(), Tuple{}}, 𝒰, w=0, Δt=1) = NothingMicrophysicalState(typeof(ρ))
 # Disambiguation for Nothing microphysics + empty NamedTuple
-@inline microphysical_state(::Nothing, ρ, ::NamedTuple{(), Tuple{}}, 𝒰, w=0) = NothingMicrophysicalState(typeof(ρ))
+@inline microphysical_state(::Nothing, ρ, ::NamedTuple{(), Tuple{}}, 𝒰, w=0, Δt=1) = NothingMicrophysicalState(typeof(ρ))
 
 """
-    grid_microphysical_state(i, j, k, grid, microphysics, μ_fields, ρ, 𝒰)
+    grid_microphysical_state(i, j, k, grid, microphysics, μ_fields, ρ, 𝒰, Δt=1)
 
 Build an [`AbstractMicrophysicalState`](@ref) (ℳ) at grid point `(i, j, k)`.
 
@@ -167,19 +168,20 @@ Microphysics schemes should implement the gridless version, not this one.
 - `μ_fields`: NamedTuple of microphysical fields
 - `ρ`: Local density (scalar)
 - `𝒰`: Thermodynamic state
+- `Δt`: Model timestep [s] (default: 1). Used for aerosol activation rate conversion.
 
 # Returns
 An `AbstractMicrophysicalState` subtype containing the local microphysical variables.
 
 See also [`microphysical_tendency`](@ref), [`AbstractMicrophysicalState`](@ref).
 """
-@inline function grid_microphysical_state(i, j, k, grid, microphysics, μ_fields, ρ, 𝒰)
+@inline function grid_microphysical_state(i, j, k, grid, microphysics, μ_fields, ρ, 𝒰, Δt=one(ρ))
     μ = extract_microphysical_prognostics(i, j, k, microphysics, μ_fields)
-    return microphysical_state(microphysics, ρ, μ, 𝒰)
+    return microphysical_state(microphysics, ρ, μ, 𝒰, zero(ρ), Δt)
 end
 
 # Explicit Nothing fallback
-@inline grid_microphysical_state(i, j, k, grid, microphysics::Nothing, μ_fields, ρ, 𝒰) =
+@inline grid_microphysical_state(i, j, k, grid, microphysics::Nothing, μ_fields, ρ, 𝒰, Δt=1) =
     NothingMicrophysicalState(eltype(grid))
 
 """
@@ -211,7 +213,7 @@ See also [`microphysical_state`](@ref), [`AbstractMicrophysicalState`](@ref).
 #####
 
 """
-    grid_microphysical_tendency(i, j, k, grid, microphysics, name, ρ, fields, 𝒰, constants)
+    grid_microphysical_tendency(i, j, k, grid, microphysics, name, ρ, fields, 𝒰, constants, Δt=1)
 
 Compute the tendency for microphysical variable `name` at grid point `(i, j, k)`.
 
@@ -221,14 +223,18 @@ and dispatches to the state-based [`microphysical_tendency`](@ref).
 
 Schemes that need full grid access (e.g., for non-local operations) can override
 this method directly without using `microphysical_state`.
+
+# Arguments
+- `Δt`: Model timestep [s] (default: 1). Passed to `grid_microphysical_state` for
+        aerosol activation rate conversion.
 """
-@inline function grid_microphysical_tendency(i, j, k, grid, microphysics, name, ρ, fields, 𝒰, constants)
-    ℳ = grid_microphysical_state(i, j, k, grid, microphysics, fields, ρ, 𝒰)
+@inline function grid_microphysical_tendency(i, j, k, grid, microphysics, name, ρ, fields, 𝒰, constants, Δt=one(ρ))
+    ℳ = grid_microphysical_state(i, j, k, grid, microphysics, fields, ρ, 𝒰, Δt)
     return microphysical_tendency(microphysics, name, ρ, ℳ, 𝒰, constants)
 end
 
 # Explicit Nothing fallback (for backward compatibility)
-@inline grid_microphysical_tendency(i, j, k, grid, microphysics::Nothing, name, ρ, μ, 𝒰, constants) = zero(grid)
+@inline grid_microphysical_tendency(i, j, k, grid, microphysics::Nothing, name, ρ, μ, 𝒰, constants, Δt=1) = zero(grid)
 
 #####
 ##### Definition of the microphysics interface, with methods for "Nothing" microphysics
