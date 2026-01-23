@@ -10,13 +10,14 @@ using Reactant
 using Enzyme
 using Statistics: mean
 using Test
+using CUDA
 
 Reactant.set_default_backend("cpu")
 
 @testset "Reactant/Enzyme differentiation with SSPRungeKutta3" begin
     grid = RectilinearGrid(ReactantState(); size=(4, 4), extent=(1000, 1000),
                            halo=(3, 3), topology=(Periodic, Periodic, Flat))
-    model = AtmosphereModel(grid; advection=WENO(order=5), dynamics=CompressibleDynamics())
+    model = AtmosphereModel(grid; dynamics=CompressibleDynamics())
     dmodel = Enzyme.make_zero(model)
 
     θ_init = CenterField(grid)
