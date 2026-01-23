@@ -268,7 +268,7 @@ nothing #hide
 # Note: The one-moment microphysics requires the CloudMicrophysics.jl package to be loaded,
 # which activates the `BreezeCloudMicrophysicsExt` extension.
 
-using CloudMicrophysics 
+using CloudMicrophysics
 BreezeCloudMicrophysicsExt = Base.get_extension(Breeze, :BreezeCloudMicrophysicsExt)
 using .BreezeCloudMicrophysicsExt: OneMomentCloudMicrophysics
 
