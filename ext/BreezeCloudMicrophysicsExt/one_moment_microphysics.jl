@@ -231,7 +231,8 @@ const OneMomentLiquidRain = Union{WP1M, WPNE1M, MP1M, MPNE1M}
 # For non-equilibrium: cloud condensate comes from prognostic μ
 
 # Warm-phase saturation adjustment: cloud liquid from thermodynamic state, rain from prognostic
-@inline function AM.microphysical_state(bμp::WP1M, ρ, μ, 𝒰)
+# The w and Δt arguments are accepted for interface compatibility but not used by one-moment schemes.
+@inline function AM.microphysical_state(bμp::WP1M, ρ, μ, 𝒰, w=zero(ρ), Δt=one(ρ))
     q = 𝒰.moisture_mass_fractions
     qʳ = μ.ρqʳ / ρ
     qᶜˡ = max(zero(qʳ), q.liquid - qʳ)  # cloud liquid = total liquid - rain
@@ -239,14 +240,14 @@ const OneMomentLiquidRain = Union{WP1M, WPNE1M, MP1M, MPNE1M}
 end
 
 # Warm-phase non-equilibrium: all from prognostic μ
-@inline function AM.microphysical_state(bμp::WPNE1M, ρ, μ, 𝒰)
+@inline function AM.microphysical_state(bμp::WPNE1M, ρ, μ, 𝒰, w=zero(ρ), Δt=one(ρ))
     qᶜˡ = μ.ρqᶜˡ / ρ
     qʳ = μ.ρqʳ / ρ
     return WarmPhaseOneMomentState(qᶜˡ, qʳ)
 end
 
 # Mixed-phase saturation adjustment: cloud condensate from thermodynamic state
-@inline function AM.microphysical_state(bμp::MP1M, ρ, μ, 𝒰)
+@inline function AM.microphysical_state(bμp::MP1M, ρ, μ, 𝒰, w=zero(ρ), Δt=one(ρ))
     q = 𝒰.moisture_mass_fractions
     qʳ = μ.ρqʳ / ρ
     qˢ = μ.ρqˢ / ρ
@@ -256,7 +257,7 @@ end
 end
 
 # Mixed-phase non-equilibrium: all from prognostic μ
-@inline function AM.microphysical_state(bμp::MPNE1M, ρ, μ, 𝒰)
+@inline function AM.microphysical_state(bμp::MPNE1M, ρ, μ, 𝒰, w=zero(ρ), Δt=one(ρ))
     qᶜˡ = μ.ρqᶜˡ / ρ
     qᶜⁱ = μ.ρqᶜⁱ / ρ
     qʳ = μ.ρqʳ / ρ

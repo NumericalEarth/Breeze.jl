@@ -64,7 +64,8 @@ using CloudMicrophysics.Parameters:
 
 # Use qualified access to avoid conflicts with Microphysics1M
 # CM2 is imported as a module alias in BreezeCloudMicrophysicsExt.jl
-# CMAA (AerosolActivation) and CMAM (AerosolModel) are imported in BreezeCloudMicrophysicsExt.jl
+# CMAM (AerosolModel) is imported in BreezeCloudMicrophysicsExt.jl
+# erf from SpecialFunctions is imported for aerosol activation calculations
 
 #####
 ##### Aerosol activation for two-moment microphysics
@@ -856,7 +857,7 @@ Uses the maximum supersaturation to determine which aerosol modes activate.
 
         # Activated fraction for this mode (Eq. 7 in ARG 2000)
         u = 2 * log(Sm_i / S_max) / 3 / sqrt(2) / log(mode_i.stdev)
-        f_activated = (1 - CMAA.SF.erf(u)) / 2
+        f_activated = (1 - erf(u)) / 2
 
         activated_N += f_activated * N_mode
     end
