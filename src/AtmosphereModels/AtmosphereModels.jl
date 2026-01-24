@@ -66,7 +66,7 @@ using KernelAbstractions: @kernel, @index
 using Oceananigans: Oceananigans, CenterField, fields
 using Oceananigans.BoundaryConditions: FieldBoundaryConditions, regularize_field_boundary_conditions, fill_halo_regions!
 using Oceananigans.ImmersedBoundaries: mask_immersed_field!
-using Oceananigans.Operators: Δzᶜᶜᶜ, ℑzᵃᵃᶠ
+using Oceananigans.Operators: Δzᶜᶜᶜ, ℑzᵃᵃᶜ, ℑzᵃᵃᶠ
 using Oceananigans.Solvers: Solvers
 using Oceananigans.TimeSteppers: TimeSteppers
 using Oceananigans.Utils: prettysummary, launch!

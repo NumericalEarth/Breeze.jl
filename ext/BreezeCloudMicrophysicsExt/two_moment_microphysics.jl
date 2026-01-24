@@ -263,18 +263,15 @@ end
 end
 
 # Grid-indexed version: extracts from Fields
-# For grid-based models, w = 0 by default (can be overridden by specific schemes)
+# Vertical velocity w is now passed from grid_microphysical_tendency (interpolated to cell center)
 # Δt comes from clock.last_Δt, with default 1.0 s for backwards compatibility
-@inline function AtmosphereModels.grid_microphysical_state(i, j, k, grid, bμp::WPNE2M, μ, ρ, 𝒰, Δt=one(ρ))
+@inline function AtmosphereModels.grid_microphysical_state(i, j, k, grid, bμp::WPNE2M, μ, ρ, 𝒰, w=zero(ρ), Δt=one(ρ))
     FT = typeof(ρ)
     @inbounds qᶜˡ = μ.qᶜˡ[i, j, k]
     @inbounds nᶜˡ = μ.nᶜˡ[i, j, k]
     @inbounds qʳ = μ.qʳ[i, j, k]
     @inbounds nʳ = μ.nʳ[i, j, k]
     @inbounds nᵃ = μ.nᵃ[i, j, k]
-    # For grid-based models, updraft velocity would need to be passed separately
-    # Default to zero (activation disabled in tendency computation when w ≤ 0)
-    w = zero(FT)
     return WarmPhaseTwoMomentState(qᶜˡ, nᶜˡ, qʳ, nʳ, nᵃ, w, FT(Δt))
 end
 
@@ -727,7 +724,7 @@ When aerosol particles activate to form cloud droplets, the newly formed droplet
 have a finite initial size given by the activation radius. This function computes
 the corresponding mass source term for cloud liquid water.
 
-The activation radius is derived from Köhler theory [Abdul-Razzak and Ghan (2000)](@cite ARG2000):
+The activation radius is derived from Köhler theory [Abdul-Razzak and Ghan (2000)](@cite AbdulRazzakGhan2000):
 ```math
 r_{act} = \\frac{A}{3 S_{max}}
 ```
