@@ -6,10 +6,7 @@
 #####
 
 using Oceananigans.Grids: AbstractGrid
-using Oceananigans.Fields: ConstantField
 using InteractiveUtils: subtypes
-
-using Oceananigans.Utils: IterationInterval
 
 """
 $(TYPEDSIGNATURES)
