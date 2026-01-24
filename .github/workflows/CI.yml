@@ -95,16 +95,6 @@ jobs:
               TEST_ARGS+=(--jobs=2)
           fi
           echo "runtest_test_args=${TEST_ARGS[@]}" | tee "${GITHUB_ENV}"
-      - name: Install dev version of ParallelTestRunner
-        # Until https://github.com/JuliaTesting/ParallelTestRunner.jl/pull/84
-        # makes it to a released version.
-        if: ${{ matrix.version == 'min' }}
-        shell: julia --project=test --color=yes --check-bounds=yes {0}
-        run: |
-          using Pkg
-          Pkg.instantiate()
-          Pkg.add(; url = "https://github.com/giordano/Malt.jl.git", rev = "4376a93e98a7f5ccd41594d909a79f9484f21662")
-          Pkg.add(; url = "https://github.com/JuliaTesting/ParallelTestRunner.jl", rev = "431743f5b7af350e0b02fb19fabf12af3af39166")
       - name: Prepare test environment
         if: ${{ startsWith(matrix.os, 'aws-linux-nvidia-gpu-') }}
         shell: bash
