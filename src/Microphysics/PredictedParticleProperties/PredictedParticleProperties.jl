@@ -55,6 +55,7 @@ export
     # Main scheme type
     PredictedParticlePropertiesMicrophysics,
     P3Microphysics,
+    P3MicrophysicalState,
     ProcessRateParameters,
 
     # Ice properties
@@ -148,6 +149,8 @@ export
     # Tabulation
     tabulate,
     TabulationParameters,
+    TabulatedFunction3D,
+    P3IntegralEvaluator,
 
     # Lambda solver
     IceMassPowerLaw,

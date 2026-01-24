@@ -4,16 +4,57 @@
 ##### These functions integrate the P3 scheme with AtmosphereModel,
 ##### allowing it to be used as a drop-in microphysics scheme.
 #####
+##### This file follows the MicrophysicalState abstraction pattern:
+##### - P3MicrophysicalState encapsulates local microphysical variables
+##### - Gridless microphysical_state(p3, ρ, μ, 𝒰) builds the state
+##### - State-based microphysical_tendency(p3, name, ρ, ℳ, 𝒰, constants) computes tendencies
+#####
 
 using Oceananigans: CenterField
 using DocStringExtensions: TYPEDSIGNATURES
 
-using Breeze.AtmosphereModels: AtmosphereModels
+using Breeze.AtmosphereModels: AtmosphereModels as AM
+using Breeze.AtmosphereModels: AbstractMicrophysicalState
 
-using Breeze.Thermodynamics:
-    MoistureMassFractions
+using Breeze.Thermodynamics: MoistureMassFractions
 
 const P3 = PredictedParticlePropertiesMicrophysics
+
+#####
+##### P3MicrophysicalState
+#####
+
+"""
+    P3MicrophysicalState{FT} <: AbstractMicrophysicalState{FT}
+
+Microphysical state for P3 (Predicted Particle Properties) microphysics.
+
+Contains the local mixing ratios and number concentrations needed to compute
+tendencies for cloud liquid, rain, ice, rime, and predicted liquid fraction.
+
+# Fields
+$(TYPEDFIELDS)
+"""
+struct P3MicrophysicalState{FT} <: AbstractMicrophysicalState{FT}
+    "Cloud liquid mixing ratio [kg/kg]"
+    qᶜˡ :: FT
+    "Rain mixing ratio [kg/kg]"
+    qʳ  :: FT
+    "Rain number concentration [1/kg]"
+    nʳ  :: FT
+    "Ice mixing ratio [kg/kg]"
+    qⁱ  :: FT
+    "Ice number concentration [1/kg]"
+    nⁱ  :: FT
+    "Rime mass mixing ratio [kg/kg]"
+    qᶠ  :: FT
+    "Rime volume [m³/kg]"
+    bᶠ  :: FT
+    "Ice sixth moment [m⁶/kg]"
+    zⁱ  :: FT
+    "Liquid water on ice mixing ratio [kg/kg]"
+    qʷⁱ :: FT
+end
 
 #####
 ##### Prognostic field names
@@ -29,12 +70,12 @@ P3 v5.5 with 3-moment ice and predicted liquid fraction has 9 prognostic fields:
 - Rain: ρqʳ, ρnʳ
 - Ice: ρqⁱ, ρnⁱ, ρqᶠ, ρbᶠ, ρzⁱ, ρqʷⁱ
 """
-function AtmosphereModels.prognostic_field_names(::P3)
+function AM.prognostic_field_names(::P3)
     # Cloud number is prescribed (not prognostic) in this implementation
     cloud_names = (:ρqᶜˡ,)
     rain_names = (:ρqʳ, :ρnʳ)
     ice_names = (:ρqⁱ, :ρnⁱ, :ρqᶠ, :ρbᶠ, :ρzⁱ, :ρqʷⁱ)
-    
+
     return tuple(cloud_names..., rain_names..., ice_names...)
 end
 
@@ -50,7 +91,7 @@ Return the vapor specific humidity field for P3 microphysics.
 For P3, vapor is diagnosed from total moisture minus all condensates:
 qᵛ = qᵗ - qᶜˡ - qʳ - qⁱ - qʷⁱ
 """
-function AtmosphereModels.specific_humidity(::P3, model)
+function AM.specific_humidity(::P3, model)
     # P3 stores vapor diagnostically
     return model.microphysical_fields.qᵛ
 end
@@ -77,7 +118,7 @@ The P3 scheme requires the following fields on `grid`:
 **Diagnostic:**
 - `qᵛ`: Vapor specific humidity (computed from total moisture)
 """
-function AtmosphereModels.materialize_microphysical_fields(::P3, grid, bcs)
+function AM.materialize_microphysical_fields(::P3, grid, bcs)
     # Create all prognostic fields
     ρqᶜˡ = CenterField(grid)  # Cloud liquid
     ρqʳ  = CenterField(grid)  # Rain mass
@@ -88,15 +129,42 @@ function AtmosphereModels.materialize_microphysical_fields(::P3, grid, bcs)
     ρbᶠ  = CenterField(grid)  # Rime volume
     ρzⁱ  = CenterField(grid)  # Ice 6th moment
     ρqʷⁱ = CenterField(grid)  # Liquid on ice
-    
+
     # Diagnostic field for vapor
     qᵛ = CenterField(grid)
-    
+
     return (; ρqᶜˡ, ρqʳ, ρnʳ, ρqⁱ, ρnⁱ, ρqᶠ, ρbᶠ, ρzⁱ, ρqʷⁱ, qᵛ)
 end
 
 #####
-##### Update microphysical fields
+##### Gridless MicrophysicalState construction
+#####
+#
+# P3 is a non-equilibrium scheme: all condensate comes from prognostic fields μ.
+
+"""
+$(TYPEDSIGNATURES)
+
+Build a [`P3MicrophysicalState`](@ref) from density-weighted prognostic variables.
+
+P3 is a non-equilibrium scheme, so all cloud and precipitation variables come
+from the prognostic fields `μ`, not from the thermodynamic state `𝒰`.
+"""
+@inline function AM.microphysical_state(::P3, ρ, μ, 𝒰)
+    qᶜˡ = μ.ρqᶜˡ / ρ
+    qʳ  = μ.ρqʳ / ρ
+    nʳ  = μ.ρnʳ / ρ
+    qⁱ  = μ.ρqⁱ / ρ
+    nⁱ  = μ.ρnⁱ / ρ
+    qᶠ  = μ.ρqᶠ / ρ
+    bᶠ  = μ.ρbᶠ / ρ
+    zⁱ  = μ.ρzⁱ / ρ
+    qʷⁱ = μ.ρqʷⁱ / ρ
+    return P3MicrophysicalState(qᶜˡ, qʳ, nʳ, qⁱ, nⁱ, qᶠ, bᶠ, zⁱ, qʷⁱ)
+end
+
+#####
+##### Update microphysical auxiliary fields
 #####
 
 """
@@ -106,47 +174,40 @@ Update diagnostic microphysical fields after state update.
 
 For P3, we compute vapor as the residual: qᵛ = qᵗ - qᶜˡ - qʳ - qⁱ - qʷⁱ
 """
-@inline function AtmosphereModels.update_microphysical_fields!(μ, ::P3, i, j, k, grid, ρ, 𝒰, constants)
+@inline function AM.update_microphysical_auxiliaries!(μ, i, j, k, grid, ::P3, ℳ::P3MicrophysicalState, ρ, 𝒰, constants)
     # Get total moisture from thermodynamic state
-    qᵗ = 𝒰.moisture_mass_fractions.vapor + 𝒰.moisture_mass_fractions.liquid + 𝒰.moisture_mass_fractions.ice
-    
-    # Get condensate mass fractions from prognostic fields
-    qᶜˡ = @inbounds μ.ρqᶜˡ[i, j, k] / ρ
-    qʳ  = @inbounds μ.ρqʳ[i, j, k] / ρ
-    qⁱ  = @inbounds μ.ρqⁱ[i, j, k] / ρ
-    qʷⁱ = @inbounds μ.ρqʷⁱ[i, j, k] / ρ
-    
-    # Vapor is residual
-    qᵛ = max(0, qᵗ - qᶜˡ - qʳ - qⁱ - qʷⁱ)
-    
+    q = 𝒰.moisture_mass_fractions
+    qᵗ = q.vapor + q.liquid + q.ice
+
+    # Vapor is residual (total - all condensates)
+    qᵛ = max(0, qᵗ - ℳ.qᶜˡ - ℳ.qʳ - ℳ.qⁱ - ℳ.qʷⁱ)
+
     @inbounds μ.qᵛ[i, j, k] = qᵛ
     return nothing
 end
 
 #####
-##### Compute moisture fractions
+##### Moisture fractions (state-based)
 #####
 
 """
 $(TYPEDSIGNATURES)
 
-Compute moisture mass fractions from P3 prognostic fields.
+Compute moisture mass fractions from P3 microphysical state.
 
-Returns `MoistureMassFractions` with vapor, liquid (cloud + rain), and ice components.
+Returns `MoistureMassFractions` with vapor, liquid (cloud + rain + liquid on ice),
+and ice components.
 """
-@inline function AtmosphereModels.compute_moisture_fractions(i, j, k, grid, ::P3, ρ, qᵗ, μ)
-    # Get condensate mass fractions
-    qᶜˡ = @inbounds μ.ρqᶜˡ[i, j, k] / ρ
-    qʳ  = @inbounds μ.ρqʳ[i, j, k] / ρ
-    qⁱ  = @inbounds μ.ρqⁱ[i, j, k] / ρ
-    qʷⁱ = @inbounds μ.ρqʷⁱ[i, j, k] / ρ
-    
+@inline function AM.moisture_fractions(::P3, ℳ::P3MicrophysicalState, qᵗ)
     # Total liquid = cloud + rain + liquid on ice
-    qˡ = qᶜˡ + qʳ + qʷⁱ
-    
+    qˡ = ℳ.qᶜˡ + ℳ.qʳ + ℳ.qʷⁱ
+
+    # Ice (frozen fraction)
+    qⁱ = ℳ.qⁱ
+
     # Vapor is residual (ensuring non-negative)
     qᵛ = max(0, qᵗ - qˡ - qⁱ)
-    
+
     return MoistureMassFractions(qᵛ, qˡ, qⁱ)
 end
 
@@ -166,45 +227,45 @@ For mass fields (ρqʳ, ρqⁱ, ρqᶠ, ρqʷⁱ), uses mass-weighted velocity.
 For number fields (ρnʳ, ρnⁱ), uses number-weighted velocity.
 For reflectivity (ρzⁱ), uses reflectivity-weighted velocity.
 """
-@inline AtmosphereModels.microphysical_velocities(p3::P3, μ, name) = nothing  # Default: no sedimentation
+@inline AM.microphysical_velocities(p3::P3, μ, name) = nothing  # Default: no sedimentation
 
 # Rain mass: mass-weighted fall speed
-@inline function AtmosphereModels.microphysical_velocities(p3::P3, μ, ::Val{:ρqʳ})
+@inline function AM.microphysical_velocities(p3::P3, μ, ::Val{:ρqʳ})
     return RainMassSedimentationVelocity(p3, μ)
 end
 
 # Rain number: number-weighted fall speed
-@inline function AtmosphereModels.microphysical_velocities(p3::P3, μ, ::Val{:ρnʳ})
+@inline function AM.microphysical_velocities(p3::P3, μ, ::Val{:ρnʳ})
     return RainNumberSedimentationVelocity(p3, μ)
 end
 
 # Ice mass: mass-weighted fall speed
-@inline function AtmosphereModels.microphysical_velocities(p3::P3, μ, ::Val{:ρqⁱ})
+@inline function AM.microphysical_velocities(p3::P3, μ, ::Val{:ρqⁱ})
     return IceMassSedimentationVelocity(p3, μ)
 end
 
 # Ice number: number-weighted fall speed
-@inline function AtmosphereModels.microphysical_velocities(p3::P3, μ, ::Val{:ρnⁱ})
+@inline function AM.microphysical_velocities(p3::P3, μ, ::Val{:ρnⁱ})
     return IceNumberSedimentationVelocity(p3, μ)
 end
 
 # Rime mass: same as ice mass (rime falls with ice)
-@inline function AtmosphereModels.microphysical_velocities(p3::P3, μ, ::Val{:ρqᶠ})
+@inline function AM.microphysical_velocities(p3::P3, μ, ::Val{:ρqᶠ})
     return IceMassSedimentationVelocity(p3, μ)
 end
 
 # Rime volume: same as ice mass
-@inline function AtmosphereModels.microphysical_velocities(p3::P3, μ, ::Val{:ρbᶠ})
+@inline function AM.microphysical_velocities(p3::P3, μ, ::Val{:ρbᶠ})
     return IceMassSedimentationVelocity(p3, μ)
 end
 
 # Ice reflectivity: reflectivity-weighted fall speed
-@inline function AtmosphereModels.microphysical_velocities(p3::P3, μ, ::Val{:ρzⁱ})
+@inline function AM.microphysical_velocities(p3::P3, μ, ::Val{:ρzⁱ})
     return IceReflectivitySedimentationVelocity(p3, μ)
 end
 
 # Liquid on ice: same as ice mass
-@inline function AtmosphereModels.microphysical_velocities(p3::P3, μ, ::Val{:ρqʷⁱ})
+@inline function AM.microphysical_velocities(p3::P3, μ, ::Val{:ρqʷⁱ})
     return IceMassSedimentationVelocity(p3, μ)
 end
 
@@ -346,106 +407,104 @@ end
 end
 
 #####
-##### Microphysical tendencies
+##### Microphysical tendencies (state-based)
 #####
+#
+# The new interface uses state-based tendencies: microphysical_tendency(p3, name, ρ, ℳ, 𝒰, constants)
+# where ℳ is the P3MicrophysicalState.
 
-# Helper to compute P3 rates and extract ice properties
-@inline function p3_rates_and_properties(i, j, k, grid, p3, μ, ρ, 𝒰, constants)
-    FT = eltype(grid)
+# Helper to compute P3 rates and extract ice properties from ℳ
+@inline function p3_rates_and_properties(p3, ρ, ℳ::P3MicrophysicalState, 𝒰, constants)
+    FT = typeof(ρ)
 
-    # Compute all process rates
-    rates = compute_p3_process_rates(i, j, k, grid, p3, μ, ρ, 𝒰, constants)
+    # TODO: Compute all process rates from ℳ and 𝒰
+    # For now, return placeholder rates structure
+    # rates = compute_p3_process_rates(p3, ρ, ℳ, 𝒰, constants)
+    rates = nothing  # Placeholder until process rates are fully implemented
 
-    # Extract fields for ratio calculations
-    qⁱ = @inbounds μ.ρqⁱ[i, j, k] / ρ
-    nⁱ = @inbounds μ.ρnⁱ[i, j, k] / ρ
-    qᶠ = @inbounds μ.ρqᶠ[i, j, k] / ρ
-    bᶠ = @inbounds μ.ρbᶠ[i, j, k] / ρ
-    zⁱ = @inbounds μ.ρzⁱ[i, j, k] / ρ
+    Fᶠ = safe_divide(ℳ.qᶠ, ℳ.qⁱ, zero(FT))
+    ρᶠ = safe_divide(ℳ.qᶠ, ℳ.bᶠ, FT(400))
 
-    Fᶠ = safe_divide(qᶠ, qⁱ, zero(FT))
-    ρᶠ = safe_divide(qᶠ * ρ, bᶠ * ρ, FT(400))
-
-    return rates, qⁱ, nⁱ, zⁱ, Fᶠ, ρᶠ
+    return rates, ℳ.qⁱ, ℳ.nⁱ, ℳ.zⁱ, Fᶠ, ρᶠ
 end
 
 """
 Cloud liquid tendency: loses mass to autoconversion, accretion, and riming.
 """
-@inline function AtmosphereModels.microphysical_tendency(i, j, k, grid, p3::P3, ::Val{:ρqᶜˡ}, ρ, μ, 𝒰, constants)
-    rates, _, _, _, _, _ = p3_rates_and_properties(i, j, k, grid, p3, μ, ρ, 𝒰, constants)
+@inline function AM.microphysical_tendency(p3::P3, ::Val{:ρqᶜˡ}, ρ, ℳ::P3MicrophysicalState, 𝒰, constants)
+    rates, _, _, _, _, _ = p3_rates_and_properties(p3, ρ, ℳ, 𝒰, constants)
     return tendency_ρqᶜˡ(rates, ρ)
 end
 
 """
 Rain mass tendency: gains from autoconversion, accretion, melting, shedding; loses to evaporation, riming.
 """
-@inline function AtmosphereModels.microphysical_tendency(i, j, k, grid, p3::P3, ::Val{:ρqʳ}, ρ, μ, 𝒰, constants)
-    rates, _, _, _, _, _ = p3_rates_and_properties(i, j, k, grid, p3, μ, ρ, 𝒰, constants)
+@inline function AM.microphysical_tendency(p3::P3, ::Val{:ρqʳ}, ρ, ℳ::P3MicrophysicalState, 𝒰, constants)
+    rates, _, _, _, _, _ = p3_rates_and_properties(p3, ρ, ℳ, 𝒰, constants)
     return tendency_ρqʳ(rates, ρ)
 end
 
 """
 Rain number tendency: gains from autoconversion, melting, shedding; loses to self-collection, riming.
 """
-@inline function AtmosphereModels.microphysical_tendency(i, j, k, grid, p3::P3, ::Val{:ρnʳ}, ρ, μ, 𝒰, constants)
-    rates, qⁱ, nⁱ, _, _, _ = p3_rates_and_properties(i, j, k, grid, p3, μ, ρ, 𝒰, constants)
+@inline function AM.microphysical_tendency(p3::P3, ::Val{:ρnʳ}, ρ, ℳ::P3MicrophysicalState, 𝒰, constants)
+    rates, qⁱ, nⁱ, _, _, _ = p3_rates_and_properties(p3, ρ, ℳ, 𝒰, constants)
     return tendency_ρnʳ(rates, ρ, nⁱ, qⁱ)
 end
 
 """
 Ice mass tendency: gains from deposition, riming, refreezing; loses to melting.
 """
-@inline function AtmosphereModels.microphysical_tendency(i, j, k, grid, p3::P3, ::Val{:ρqⁱ}, ρ, μ, 𝒰, constants)
-    rates, _, _, _, _, _ = p3_rates_and_properties(i, j, k, grid, p3, μ, ρ, 𝒰, constants)
+@inline function AM.microphysical_tendency(p3::P3, ::Val{:ρqⁱ}, ρ, ℳ::P3MicrophysicalState, 𝒰, constants)
+    rates, _, _, _, _, _ = p3_rates_and_properties(p3, ρ, ℳ, 𝒰, constants)
     return tendency_ρqⁱ(rates, ρ)
 end
 
 """
 Ice number tendency: loses from melting and aggregation.
 """
-@inline function AtmosphereModels.microphysical_tendency(i, j, k, grid, p3::P3, ::Val{:ρnⁱ}, ρ, μ, 𝒰, constants)
-    rates, _, _, _, _, _ = p3_rates_and_properties(i, j, k, grid, p3, μ, ρ, 𝒰, constants)
+@inline function AM.microphysical_tendency(p3::P3, ::Val{:ρnⁱ}, ρ, ℳ::P3MicrophysicalState, 𝒰, constants)
+    rates, _, _, _, _, _ = p3_rates_and_properties(p3, ρ, ℳ, 𝒰, constants)
     return tendency_ρnⁱ(rates, ρ)
 end
 
 """
 Rime mass tendency: gains from cloud/rain riming, refreezing; loses proportionally with melting.
 """
-@inline function AtmosphereModels.microphysical_tendency(i, j, k, grid, p3::P3, ::Val{:ρqᶠ}, ρ, μ, 𝒰, constants)
-    rates, _, _, _, Fᶠ, _ = p3_rates_and_properties(i, j, k, grid, p3, μ, ρ, 𝒰, constants)
+@inline function AM.microphysical_tendency(p3::P3, ::Val{:ρqᶠ}, ρ, ℳ::P3MicrophysicalState, 𝒰, constants)
+    rates, _, _, _, Fᶠ, _ = p3_rates_and_properties(p3, ρ, ℳ, 𝒰, constants)
     return tendency_ρqᶠ(rates, ρ, Fᶠ)
 end
 
 """
 Rime volume tendency: gains from new rime; loses with melting.
 """
-@inline function AtmosphereModels.microphysical_tendency(i, j, k, grid, p3::P3, ::Val{:ρbᶠ}, ρ, μ, 𝒰, constants)
-    rates, _, _, _, Fᶠ, ρᶠ = p3_rates_and_properties(i, j, k, grid, p3, μ, ρ, 𝒰, constants)
+@inline function AM.microphysical_tendency(p3::P3, ::Val{:ρbᶠ}, ρ, ℳ::P3MicrophysicalState, 𝒰, constants)
+    rates, _, _, _, Fᶠ, ρᶠ = p3_rates_and_properties(p3, ρ, ℳ, 𝒰, constants)
     return tendency_ρbᶠ(rates, ρ, Fᶠ, ρᶠ)
 end
 
 """
 Ice sixth moment tendency: changes with deposition, melting, riming, and nucleation.
 """
-@inline function AtmosphereModels.microphysical_tendency(i, j, k, grid, p3::P3, ::Val{:ρzⁱ}, ρ, μ, 𝒰, constants)
-    rates, qⁱ, nⁱ, zⁱ, _, _ = p3_rates_and_properties(i, j, k, grid, p3, μ, ρ, 𝒰, constants)
+@inline function AM.microphysical_tendency(p3::P3, ::Val{:ρzⁱ}, ρ, ℳ::P3MicrophysicalState, 𝒰, constants)
+    rates, qⁱ, nⁱ, zⁱ, _, _ = p3_rates_and_properties(p3, ρ, ℳ, 𝒰, constants)
     return tendency_ρzⁱ(rates, ρ, qⁱ, nⁱ, zⁱ)
 end
 
 """
 Liquid on ice tendency: loses from shedding and refreezing.
 """
-@inline function AtmosphereModels.microphysical_tendency(i, j, k, grid, p3::P3, ::Val{:ρqʷⁱ}, ρ, μ, 𝒰, constants)
-    rates, _, _, _, _, _ = p3_rates_and_properties(i, j, k, grid, p3, μ, ρ, 𝒰, constants)
+@inline function AM.microphysical_tendency(p3::P3, ::Val{:ρqʷⁱ}, ρ, ℳ::P3MicrophysicalState, 𝒰, constants)
+    rates, _, _, _, _, _ = p3_rates_and_properties(p3, ρ, ℳ, 𝒰, constants)
     return tendency_ρqʷⁱ(rates, ρ)
 end
 
 # Fallback for any unhandled field names - return zero tendency
-@inline AtmosphereModels.microphysical_tendency(i, j, k, grid, ::P3, name, ρ, μ, 𝒰, constants) = zero(grid)
+@inline AM.microphysical_tendency(::P3, name, ρ, ℳ::P3MicrophysicalState, 𝒰, constants) = zero(ρ)
 
 #####
-##### Saturation adjustment
+##### Thermodynamic state adjustment
 #####
 
 """
@@ -457,10 +516,7 @@ P3 is a non-equilibrium scheme - cloud formation and dissipation are handled
 by explicit process rates, not instantaneous saturation adjustment.
 Therefore, this function returns the state unchanged.
 """
-@inline function AtmosphereModels.maybe_adjust_thermodynamic_state(i, j, k, state, ::P3, ρᵣ, μ, qᵗ, thermo)
-    # P3 is non-equilibrium: no saturation adjustment
-    return state
-end
+@inline AM.maybe_adjust_thermodynamic_state(𝒰, ::P3, qᵗ, constants) = 𝒰
 
 #####
 ##### Model update
@@ -473,6 +529,6 @@ Apply P3 model update during state update phase.
 
 Currently does nothing - this is where substepping or implicit updates would go.
 """
-function AtmosphereModels.microphysics_model_update!(::P3, model)
+function AM.microphysics_model_update!(::P3, model)
     return nothing
 end
