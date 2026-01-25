@@ -298,7 +298,7 @@ model = AtmosphereModel(grid; dynamics, microphysics, advection, radiation,
 # - Moisture: Exponentially decreasing with 2.5 km scale height
 
 function Tᵢ(z)
-    # Moist adiabatic-like profile in troposphere, isothermal stratosphere
+    ## Moist adiabatic-like profile in troposphere, isothermal stratosphere
     T_surface = SST - 1  # Slight air-sea temperature difference
     Γ = 6.5e-3           # Lapse rate [K/m]
     z_trop = 15000       # Approximate tropopause height [m]
@@ -312,7 +312,7 @@ function Tᵢ(z)
 end
 
 function qᵗᵢ(z)
-    # Exponentially decreasing moisture — Wing et al. (2018), Appendix A
+    ## Exponentially decreasing moisture — Wing et al. (2018), Appendix A
     q₀ = 0.018           # Surface specific humidity (~80% RH at 300 K)
     Hq = 2500            # Moisture scale height [m] — RCEMIP uses ~2.5 km
     q_min = 1e-6         # Minimum humidity in stratosphere
@@ -377,7 +377,7 @@ function progress(sim)
     Tmin, Tmax = extrema(T)
     qˡmax = maximum(qˡ)
 
-    # Compute TOA radiative flux (energy balance diagnostic)
+    ## Compute TOA radiative flux (energy balance diagnostic)
     ℐ_lw_up = radiation.upwelling_longwave_flux
     ℐ_sw_dn = radiation.downwelling_shortwave_flux
     OLR = mean(view(ℐ_lw_up, :, :, Nz+1))
