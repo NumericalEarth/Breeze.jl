@@ -39,9 +39,9 @@ const acoustic_test_arch = Oceananigans.Architectures.CPU()
 
     @testset "Default construction" begin
         acoustic = AcousticSubstepper(grid)
-        @test acoustic.nsound == 6
+        @test acoustic.Nˢ == 6
         @test acoustic.α ≈ FT(0.5)
-        @test acoustic.kdiv ≈ FT(0.05)
+        @test acoustic.κᵈ ≈ FT(0.05)
         @test acoustic.ψ isa Oceananigans.Fields.Field
         @test acoustic.c² isa Oceananigans.Fields.Field
         @test acoustic.ū isa Oceananigans.Fields.Field
@@ -50,10 +50,10 @@ const acoustic_test_arch = Oceananigans.Architectures.CPU()
     end
 
     @testset "Custom parameters" begin
-        acoustic = AcousticSubstepper(grid; nsound=10, α=0.6, kdiv=0.1)
-        @test acoustic.nsound == 10
+        acoustic = AcousticSubstepper(grid; Nˢ=10, α=0.6, κᵈ=0.1)
+        @test acoustic.Nˢ == 10
         @test acoustic.α ≈ FT(0.6)
-        @test acoustic.kdiv ≈ FT(0.1)
+        @test acoustic.κᵈ ≈ FT(0.1)
     end
 
     @testset "Acoustic substeps per stage" begin
