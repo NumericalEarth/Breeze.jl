@@ -17,7 +17,7 @@ using Breeze.AtmosphereModels:
     ConstantRadiusParticles,
     cloud_liquid_effective_radius,
     cloud_ice_effective_radius,
-    compute_moisture_fractions,
+    grid_moisture_fractions,
     RadiativeTransferModel
 
 using Breeze.Thermodynamics: ThermodynamicConstants
@@ -321,7 +321,7 @@ end
         qᵗ_ijk = qᵗ[i, j, k]
 
         # Get moisture fractions from microphysics
-        q = compute_moisture_fractions(i, j, k, grid, microphysics, ρ, qᵗ_ijk, microphysical_fields)
+        q = grid_moisture_fractions(i, j, k, grid, microphysics, ρ, qᵗ_ijk, microphysical_fields)
 
         # Extract liquid and ice mass fractions
         qˡ = q.liquid

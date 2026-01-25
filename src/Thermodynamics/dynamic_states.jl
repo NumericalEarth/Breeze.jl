@@ -57,6 +57,29 @@ end
     return Π * θ + (ℒˡᵣ * qˡ + ℒⁱᵣ * qⁱ) / cᵖᵐ
 end
 
+"""
+    temperature_from_potential_temperature(θ, p, constants; pˢᵗ=1e5, qᵛ=0)
+
+Compute temperature from potential temperature and pressure.
+
+This is a convenience function that constructs a `LiquidIcePotentialTemperatureState`
+with no condensate and computes temperature using the standard thermodynamic relations.
+
+# Arguments
+- `θ`: Potential temperature [K]
+- `p`: Pressure [Pa]
+- `constants`: Thermodynamic constants
+
+# Keyword Arguments
+- `pˢᵗ`: Standard pressure for potential temperature definition [Pa] (default: 1e5)
+- `qᵛ`: Specific humidity [kg/kg] (default: 0, dry air)
+"""
+@inline function temperature_from_potential_temperature(θ, p, constants; pˢᵗ=1e5, qᵛ=zero(θ))
+    q = MoistureMassFractions(qᵛ)  # vapor only, no condensate
+    𝒰 = LiquidIcePotentialTemperatureState(θ, q, pˢᵗ, p)
+    return temperature(𝒰, constants)
+end
+
 @inline function with_temperature(𝒰::LiquidIcePotentialTemperatureState, T, constants)
     Π = exner_function(𝒰, constants)
     q = 𝒰.moisture_mass_fractions

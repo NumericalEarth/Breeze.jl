@@ -321,7 +321,7 @@ end
             reference_latent_heat = 2834000.0,
             heat_capacity = cᵖ))
 
-    microphysics = DCMIP2016KesslerMicrophysics{FT}()
+    microphysics = DCMIP2016KesslerMicrophysics(FT)
 
     # Convert to mass fractions
     rᵗ_init = rᵛ_init .+ rᶜˡ_init .+ rʳ_init

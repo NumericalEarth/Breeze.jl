@@ -123,7 +123,7 @@ struct ThermodynamicConstants{FT, C, I, SVP}
     saturation_vapor_pressure :: SVP
 end
 
-Base.summary(at::ThermodynamicConstants{FT}) where FT = "ThermodynamicConstants{$FT}"
+Base.summary(::ThermodynamicConstants{FT}) where FT = "ThermodynamicConstants{$FT}"
 
 function Base.show(io::IO, at::ThermodynamicConstants)
     print(io, summary(at), ":", '\n',

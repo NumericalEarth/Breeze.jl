@@ -1,8 +1,9 @@
 using Breeze.AtmosphereModels.Diagnostics: Diagnostics
 using Breeze.AtmosphereModels: AtmosphereModel
 
-using Oceananigans.Fields: set!
+using Oceananigans.Fields: Field, set!
 using Breeze.Thermodynamics: temperature
+using Breeze.BoundaryConditions: theta_to_energy_bcs, regularize_atmosphere_field_bcs
 
 const PotentialTemperatureModel = AtmosphereModel{<:Any, <:LiquidIcePotentialTemperatureFormulation}
 
@@ -13,7 +14,33 @@ const PotentialTemperatureModel = AtmosphereModel{<:Any, <:LiquidIcePotentialTem
 AtmosphereModels.liquid_ice_potential_temperature_density(model::PotentialTemperatureModel) = model.formulation.potential_temperature_density
 AtmosphereModels.liquid_ice_potential_temperature(model::PotentialTemperatureModel) = model.formulation.potential_temperature
 AtmosphereModels.static_energy(model::PotentialTemperatureModel) = Diagnostics.StaticEnergy(model, :specific)
-AtmosphereModels.static_energy_density(model::PotentialTemperatureModel) = Diagnostics.StaticEnergy(model, :density)
+
+"""
+    static_energy_density(model::PotentialTemperatureModel)
+
+Return the static energy density as a `Field` with boundary conditions that return
+energy fluxes when used with `BoundaryConditionOperation`.
+
+For `LiquidIcePotentialTemperatureFormulation`, the prognostic variable is potential
+temperature density `ρθ`. This function converts the `ρθ` boundary conditions to
+energy flux boundary conditions by multiplying by the mixture heat capacity `cᵖᵐ`.
+"""
+function AtmosphereModels.static_energy_density(model::PotentialTemperatureModel)
+    ρθ = model.formulation.potential_temperature_density
+    ρθ_bcs = ρθ.boundary_conditions
+
+    # Convert θ BCs to energy BCs
+    ρe_bcs = theta_to_energy_bcs(ρθ_bcs)
+
+    # Regularize the converted BCs (populate microphysics, constants, side)
+    loc = (Center(), Center(), Center())
+    ρe_bcs = regularize_atmosphere_field_bcs(ρe_bcs, loc, model.grid, model.dynamics, model.microphysics,
+                                             nothing, model.thermodynamic_constants)
+
+    # Create the energy density operation and wrap in a Field with proper BCs
+    ρe_op = Diagnostics.StaticEnergy(model, :density)
+    return Field(ρe_op; boundary_conditions=ρe_bcs)
+end
 
 #####
 ##### Tendency computation
@@ -58,7 +85,7 @@ end
     @inbounds qᵗ = specific_moisture[i, j, k]
 
     # Compute moisture fractions first
-    q = compute_moisture_fractions(i, j, k, grid, microphysics, ρ, qᵗ, microphysical_fields)
+    q = grid_moisture_fractions(i, j, k, grid, microphysics, ρ, qᵗ, microphysical_fields)
     𝒰 = diagnose_thermodynamic_state(i, j, k, grid, formulation, dynamics, q)
 
     Π = exner_function(𝒰, constants)
@@ -68,7 +95,7 @@ end
     return ( - div_ρUc(i, j, k, grid, advection, ρ_field, velocities, potential_temperature)
              + c_div_ρU(i, j, k, grid, dynamics, velocities, potential_temperature)
              - ∇_dot_Jᶜ(i, j, k, grid, ρ_field, closure, closure_fields, id, potential_temperature, clock, model_fields, closure_buoyancy)
-             + microphysical_tendency(i, j, k, grid, microphysics, Val(:ρθ), ρ, microphysical_fields, 𝒰, constants)
+             + grid_microphysical_tendency(i, j, k, grid, microphysics, Val(:ρθ), ρ, microphysical_fields, 𝒰, constants)
              + ρθ_forcing(i, j, k, grid, clock, model_fields)
              + ρe_forcing(i, j, k, grid, clock, model_fields) / (cᵖᵐ * Π)
     )
@@ -138,9 +165,9 @@ end
     end
 
     z = znode(i, j, k, grid, c, c, c)
-    q = compute_moisture_fractions(i, j, k, grid, microphysics, ρᵣ, qᵗ, microphysical_fields)
+    q = grid_moisture_fractions(i, j, k, grid, microphysics, ρᵣ, qᵗ, microphysical_fields)
     𝒰e₀ = StaticEnergyState(e, q, z, pᵣ)
-    𝒰e₁ = maybe_adjust_thermodynamic_state(i, j, k, 𝒰e₀, microphysics, ρᵣ, microphysical_fields, qᵗ, constants)
+    𝒰e₁ = maybe_adjust_thermodynamic_state(𝒰e₀, microphysics, qᵗ, constants)
     T = temperature(𝒰e₁, constants)
 
     pˢᵗ = standard_pressure(dynamics)
@@ -209,7 +236,7 @@ end
     end
 
     # Get moisture fractions (vapor only for unsaturated air)
-    q = compute_moisture_fractions(i, j, k, grid, microphysics, ρᵣ, qᵗ, microphysical_fields)
+    q = grid_moisture_fractions(i, j, k, grid, microphysics, ρᵣ, qᵗ, microphysical_fields)
 
     # Convert temperature to potential temperature using the inverse of the T(θ) relation
     pˢᵗ = standard_pressure(dynamics)
