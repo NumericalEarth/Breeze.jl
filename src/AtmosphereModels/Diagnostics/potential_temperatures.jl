@@ -468,7 +468,7 @@ function (d::MoistPotentialTemperatureKernelFunction)(i, j, k, grid)
     end
 
     constants = d.thermodynamic_constants
-    q = compute_moisture_fractions(i, j, k, grid, d.microphysics, ρᵣ, qᵗ, d.microphysical_fields)
+    q = grid_moisture_fractions(i, j, k, grid, d.microphysics, ρᵣ, qᵗ, d.microphysical_fields)
     qᵛ = q.vapor
     qˡ = q.liquid
     qⁱ = q.ice
@@ -487,21 +487,17 @@ function (d::MoistPotentialTemperatureKernelFunction)(i, j, k, grid)
     # Plain potential temperature (used as a base for several others)
     θ = T / Πᵐ
 
-    if d.flavor isa AbstractPlainFlavor
-        θ★ = θ
-
+    θ★ = if d.flavor isa AbstractPlainFlavor
+        θ
     elseif d.flavor isa AbstractLiquidIceFlavor || d.flavor isa AbstractVirtualFlavor
         # Liquid-ice potential temperature
         θˡⁱ = θ * (1 - (ℒˡᵣ * qˡ + ℒⁱᵣ * qⁱ) / (cᵖᵐ * T))
 
         if d.flavor isa AbstractLiquidIceFlavor
-            θ★ = θˡⁱ
-
+            θˡⁱ
         elseif d.flavor isa AbstractVirtualFlavor
-            θ★ = θˡⁱ * (1 + Rᵛ / Rᵈ * qᵛ)
-
+            θˡⁱ * (1 + Rᵛ / Rᵈ * qᵛ)
         end
-
     elseif d.flavor isa AbstractEquivalentFlavor
         # Saturation specific humidity over a liquid surface
         surface = PlanarLiquidSurface()
@@ -525,11 +521,9 @@ function (d::MoistPotentialTemperatureKernelFunction)(i, j, k, grid)
             # Equation 16, Durran & Klemp 1982
             Tᵣ = constants.energy_reference_temperature
             cˡ = constants.liquid.heat_capacity
-            θ★ = θᵉ * (T / Tᵣ)^(cˡ * qˡ / cᵖᵐ)
-
+            θᵉ * (T / Tᵣ)^(cˡ * qˡ / cᵖᵐ)
         else # d.flavor isa AbstractEquivalentFlavor (but not stability)
-            θ★ = θᵉ
-
+            θᵉ
         end
     end
 

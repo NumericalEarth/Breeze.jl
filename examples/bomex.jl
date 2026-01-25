@@ -278,6 +278,7 @@ avg_outputs = NamedTuple(name => Average(outputs[name], dims=(1, 2)) for name in
 
 filename = "bomex.jld2"
 simulation.output_writers[:averages] = JLD2Writer(model, avg_outputs; filename,
+                                                  including = [:grid],
                                                   schedule = AveragedTimeInterval(1hour),
                                                   overwrite_existing = true)
 
@@ -298,6 +299,7 @@ slice_outputs = (
 
 simulation.output_writers[:slices] = JLD2Writer(model, slice_outputs;
                                                 filename = "bomex_slices.jld2",
+                                                including = [:grid],
                                                 schedule = TimeInterval(30seconds),
                                                 overwrite_existing = true)
 

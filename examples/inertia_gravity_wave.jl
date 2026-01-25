@@ -232,7 +232,15 @@ setup_output(simulation_boussinesq, model_boussinesq, "igw_boussinesq.jld2")
 setup_output(simulation_compressible, model_compressible, "igw_compressible.jld2")
 setup_output(simulation_acoustic, model_acoustic, "igw_acoustic.jld2")
 
+<<<<<<< HEAD
 # Run all simulations:
+=======
+filename = "inertia_gravity_wave.jld2"
+simulation.output_writers[:jld2] = JLD2Writer(model, outputs; filename,
+                                              including = [:grid],
+                                              schedule = TimeInterval(100),
+                                              overwrite_existing = true)
+>>>>>>> 8cf519c0bb327e9eaf7ac7972196d309a315eb4d
 
 @info "Running anelastic simulation..."
 run!(simulation_anelastic)

@@ -112,7 +112,7 @@ end
 # e.g., :ρu → :u, :ρθ → :θ, :ρe → :e
 function strip_density_prefix(name::Symbol)
     chars = string(name) |> collect
-    prefix = popfirst!(chars)
+    popfirst!(chars)
     return Symbol(chars...)
 end
 

@@ -56,7 +56,7 @@ end
 
 # SaturationAdjustment operates through the thermodynamic state adjustment pathway,
 # so no explicit model update is needed.
-AtmosphereModels.microphysics_model_update!(microphysics::SaturationAdjustment, model) = nothing
+AtmosphereModels.microphysics_model_update!(::SaturationAdjustment, model) = nothing
 
 #####
 ##### Warm-phase equilibrium moisture fractions
@@ -99,33 +99,43 @@ center_field_tuple(grid, names...) = NamedTuple{names}(CenterField(grid) for nam
 AtmosphereModels.materialize_microphysical_fields(::WPSA, grid, bcs) = center_field_tuple(grid, :qᵛ, :qˡ)
 AtmosphereModels.materialize_microphysical_fields(::MPSA, grid, bcs) = center_field_tuple(grid, :qᵛ, :qˡ, :qⁱ)
 
-@inline function AtmosphereModels.update_microphysical_fields!(μ, ::WPSA, i, j, k, grid, ρ, 𝒰, constants)
+@inline function AtmosphereModels.update_microphysical_fields!(μ, i, j, k, grid, ::WPSA, ρ, 𝒰, constants)
     @inbounds μ.qᵛ[i, j, k] = 𝒰.moisture_mass_fractions.vapor
     @inbounds μ.qˡ[i, j, k] = 𝒰.moisture_mass_fractions.liquid
     return nothing
 end
 
-@inline function AtmosphereModels.update_microphysical_fields!(μ, ::MPSA, i, j, k, grid, ρ, 𝒰, constants)
+@inline function AtmosphereModels.update_microphysical_fields!(μ, i, j, k, grid, ::MPSA, ρ, 𝒰, constants)
     @inbounds μ.qᵛ[i, j, k] = 𝒰.moisture_mass_fractions.vapor
     @inbounds μ.qˡ[i, j, k] = 𝒰.moisture_mass_fractions.liquid
     @inbounds μ.qⁱ[i, j, k] = 𝒰.moisture_mass_fractions.ice
     return nothing
 end
 
-@inline function AtmosphereModels.compute_moisture_fractions(i, j, k, grid, ::WPSA, ρ, qᵗ, μ)
+# Grid-indexed moisture fractions for saturation adjustment schemes.
+# These read from diagnostic fields that are filled during update_microphysical_fields!.
+@inline function AtmosphereModels.grid_moisture_fractions(i, j, k, grid, ::WPSA, ρ, qᵗ, μ)
     qᵛ = @inbounds μ.qᵛ[i, j, k]
     qˡ = @inbounds μ.qˡ[i, j, k]
     return MoistureMassFractions(qᵛ, qˡ)
 end
 
-@inline function AtmosphereModels.compute_moisture_fractions(i, j, k, grid, ::MPSA, ρ, qᵗ, μ)
+@inline function AtmosphereModels.grid_moisture_fractions(i, j, k, grid, ::MPSA, ρ, qᵗ, μ)
     qᵛ = @inbounds μ.qᵛ[i, j, k]
     qˡ = @inbounds μ.qˡ[i, j, k]
     qⁱ = @inbounds μ.qⁱ[i, j, k]
     return MoistureMassFractions(qᵛ, qˡ, qⁱ)
 end
 
-@inline AtmosphereModels.microphysical_tendency(i, j, k, grid, ::SA, args...) = zero(grid)
+# State-based moisture fractions for saturation adjustment (used by parcel models).
+# The moisture fractions come from the thermodynamic state after adjustment.
+# Since NothingMicrophysicalState has no prognostic variables, we return all vapor.
+# The parcel model's saturation adjustment updates the thermodynamic state directly.
+@inline AtmosphereModels.moisture_fractions(::SA, ::NothingMicrophysicalState, qᵗ) = MoistureMassFractions(qᵗ)
+
+# State-based tendency (used by parcel models)
+# SaturationAdjustment operates through thermodynamic state adjustment, so explicit tendencies are zero
+@inline AtmosphereModels.microphysical_tendency(::SA, name, ρ, ℳ, 𝒰, constants) = zero(ρ)
 
 #####
 ##### Saturation adjustment utilities
@@ -148,7 +158,7 @@ end
 const ATS = AbstractThermodynamicState
 
 # This function allows saturation adjustment to be used as a microphysics scheme directly
-@inline function AtmosphereModels.maybe_adjust_thermodynamic_state(i, j, k, 𝒰₀, saturation_adjustment::SA, ρᵣ, microphysical_fields, qᵗ, constants)
+@inline function AtmosphereModels.maybe_adjust_thermodynamic_state(𝒰₀, saturation_adjustment::SA, qᵗ, constants)
     qᵃ = MoistureMassFractions(qᵗ) # compute moisture state to be adjusted
     𝒰ᵃ = with_moisture(𝒰₀, qᵃ)
     return adjust_thermodynamic_state(𝒰ᵃ, saturation_adjustment, constants)

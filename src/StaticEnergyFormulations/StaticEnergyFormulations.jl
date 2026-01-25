@@ -22,9 +22,9 @@ using Oceananigans.Utils: prettysummary, launch!
 
 using Breeze.AtmosphereModels: AtmosphereModels, diagnose_thermodynamic_state,
     dynamics_density, dynamics_pressure, standard_pressure, dynamics_prognostic_fields,
-    compute_moisture_fractions, maybe_adjust_thermodynamic_state, div_ρUc,
+    grid_moisture_fractions, maybe_adjust_thermodynamic_state, div_ρUc,
     c_div_ρU, ∇_dot_Jᶜ, w_buoyancy_forceᶜᶜᶠ,
-    AtmosphereModelBuoyancy, microphysical_tendency
+    AtmosphereModelBuoyancy, grid_microphysical_tendency
 
 using Breeze.Thermodynamics: StaticEnergyState, LiquidIcePotentialTemperatureState, with_temperature
 
