@@ -12,11 +12,10 @@ using KernelAbstractions: @kernel, @index
 
 using Oceananigans: CenterField, XFaceField, YFaceField, ZFaceField, architecture
 using Oceananigans.Grids: ZDirection
-using Oceananigans.Solvers: BatchedTridiagonalSolver, solve!
+using Oceananigans.Solvers: BatchedTridiagonalSolver
 using Oceananigans.Operators: ∂xᶠᶜᶜ, ∂yᶜᶠᶜ, ∂zᶜᶜᶠ, ℑxᶠᵃᵃ, ℑyᵃᶠᵃ, ℑzᵃᵃᶠ
-using Oceananigans.Operators: δxᶜᵃᵃ, δyᵃᶜᵃ, δzᵃᵃᶜ, Δxᶜᶜᶜ, Δyᶜᶜᶜ, Δzᶜᶜᶜ, volume
-using Oceananigans.Utils: launch!, KernelParameters
-using Oceananigans.Architectures: convert_to_device
+using Oceananigans.Operators: δxᶜᵃᵃ, δyᵃᶜᵃ, δzᵃᵃᶜ, Δxᶜᶜᶜ, Δyᶜᶜᶜ, Δzᶜᶜᶜ
+using Oceananigans.Utils: launch!
 
 using Adapt: Adapt, adapt
 

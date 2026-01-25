@@ -1,7 +1,6 @@
 using KernelAbstractions: @kernel, @index
 
 using Oceananigans: AbstractModel, prognostic_fields, fields, architecture
-using Oceananigans.BoundaryConditions: fill_halo_regions!
 using Oceananigans.Utils: launch!, time_difference_seconds
 
 using Oceananigans.TimeSteppers:
@@ -9,15 +8,12 @@ using Oceananigans.TimeSteppers:
     tick!,
     update_state!,
     compute_flux_bc_tendencies!,
-    compute_pressure_correction!,
-    make_pressure_correction!,
     step_lagrangian_particles!,
     implicit_step!
 
 using Breeze.CompressibleEquations:
     AcousticSubstepper,
-    acoustic_substep_loop!,
-    compute_acoustic_coefficients!
+    acoustic_substep_loop!
 
 """
 $(TYPEDEF)
