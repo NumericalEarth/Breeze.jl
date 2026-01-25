@@ -1,7 +1,7 @@
 #####
 ##### P3 kin1d comparison script
 #####
-##### This script compares Breeze.jl's P3 implementation against the 
+##### This script compares Breeze.jl's P3 implementation against the
 ##### Fortran P3-microphysics kin1d kinematic driver reference data.
 #####
 
@@ -81,57 +81,57 @@ fig = Figure(size=(1400, 1000), fontsize=12)
 # where x=time has 90 points and y=z has 41 points, and data is (90, 41)
 
 # Row 1: Hydrometeor mixing ratios
-ax1 = Axis(fig[1, 1], xlabel="Time [min]", ylabel="Height [km]", 
+ax1 = Axis(fig[1, 1], xlabel="Time [min]", ylabel="Height [km]",
            title="Cloud Liquid [g/kg]")
-hm1 = heatmap!(ax1, time_minutes, height_km, q_cloud .* 1000, 
+hm1 = heatmap!(ax1, time_minutes, height_km, q_cloud .* 1000,
                colormap=:blues, colorrange=(0, maximum(q_cloud)*1000))
 Colorbar(fig[1, 2], hm1)
 
-ax2 = Axis(fig[1, 3], xlabel="Time [min]", ylabel="Height [km]", 
+ax2 = Axis(fig[1, 3], xlabel="Time [min]", ylabel="Height [km]",
            title="Rain [g/kg]")
-hm2 = heatmap!(ax2, time_minutes, height_km, q_rain .* 1000, 
+hm2 = heatmap!(ax2, time_minutes, height_km, q_rain .* 1000,
                colormap=:greens, colorrange=(0, maximum(q_rain)*1000))
 Colorbar(fig[1, 4], hm2)
 
-ax3 = Axis(fig[1, 5], xlabel="Time [min]", ylabel="Height [km]", 
+ax3 = Axis(fig[1, 5], xlabel="Time [min]", ylabel="Height [km]",
            title="Ice [g/kg]")
-hm3 = heatmap!(ax3, time_minutes, height_km, q_ice .* 1000, 
+hm3 = heatmap!(ax3, time_minutes, height_km, q_ice .* 1000,
                colormap=:reds, colorrange=(0, maximum(q_ice)*1000))
 Colorbar(fig[1, 6], hm3)
 
 # Row 2: Ice properties
-ax4 = Axis(fig[2, 1], xlabel="Time [min]", ylabel="Height [km]", 
+ax4 = Axis(fig[2, 1], xlabel="Time [min]", ylabel="Height [km]",
            title="Rime Fraction")
-hm4 = heatmap!(ax4, time_minutes, height_km, rime_fraction, 
+hm4 = heatmap!(ax4, time_minutes, height_km, rime_fraction,
                colormap=:viridis, colorrange=(0, 1))
 Colorbar(fig[2, 2], hm4)
 
-ax5 = Axis(fig[2, 3], xlabel="Time [min]", ylabel="Height [km]", 
+ax5 = Axis(fig[2, 3], xlabel="Time [min]", ylabel="Height [km]",
            title="Liquid Fraction on Ice")
-hm5 = heatmap!(ax5, time_minutes, height_km, liquid_fraction, 
+hm5 = heatmap!(ax5, time_minutes, height_km, liquid_fraction,
                colormap=:plasma, colorrange=(0, 1))
 Colorbar(fig[2, 4], hm5)
 
-ax6 = Axis(fig[2, 5], xlabel="Time [min]", ylabel="Height [km]", 
+ax6 = Axis(fig[2, 5], xlabel="Time [min]", ylabel="Height [km]",
            title="Reflectivity [dBZ]")
-hm6 = heatmap!(ax6, time_minutes, height_km, reflectivity, 
+hm6 = heatmap!(ax6, time_minutes, height_km, reflectivity,
                colormap=:turbo, colorrange=(-10, 60))
 Colorbar(fig[2, 6], hm6)
 
 # Row 3: Dynamics and precip
-ax7 = Axis(fig[3, 1], xlabel="Time [min]", ylabel="Height [km]", 
+ax7 = Axis(fig[3, 1], xlabel="Time [min]", ylabel="Height [km]",
            title="Vertical Velocity [m/s]")
-hm7 = heatmap!(ax7, time_minutes, height_km, w, 
+hm7 = heatmap!(ax7, time_minutes, height_km, w,
                colormap=:RdBu, colorrange=(-5, 5))
 Colorbar(fig[3, 2], hm7)
 
-ax8 = Axis(fig[3, 3], xlabel="Time [min]", ylabel="Height [km]", 
+ax8 = Axis(fig[3, 3], xlabel="Time [min]", ylabel="Height [km]",
            title="Temperature [°C]")
-hm8 = heatmap!(ax8, time_minutes, height_km, temperature_C, 
+hm8 = heatmap!(ax8, time_minutes, height_km, temperature_C,
                colormap=:thermal, colorrange=(-70, 30))
 Colorbar(fig[3, 4], hm8)
 
-ax9 = Axis(fig[3, 5:6], xlabel="Time [min]", ylabel="Precip Rate [mm/h]", 
+ax9 = Axis(fig[3, 5:6], xlabel="Time [min]", ylabel="Precip Rate [mm/h]",
            title="Surface Precipitation")
 lines!(ax9, time_minutes, prt_liq, label="Liquid", color=:blue)
 lines!(ax9, time_minutes, prt_sol, label="Solid", color=:red)

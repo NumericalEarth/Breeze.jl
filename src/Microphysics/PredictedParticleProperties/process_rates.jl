@@ -915,7 +915,7 @@ struct P3ProcessRates{FT}
     shedding :: FT                 # Liquid on ice → rain [kg/kg/s]
     shedding_number :: FT          # Rain number from shedding [1/kg/s]
     refreezing :: FT               # Liquid on ice → rime [kg/kg/s]
-    
+
     # Ice nucleation (deposition + immersion freezing)
     nucleation_mass :: FT          # New ice mass from deposition nucleation [kg/kg/s]
     nucleation_number :: FT        # New ice number from deposition nucleation [1/kg/s]
@@ -923,7 +923,7 @@ struct P3ProcessRates{FT}
     cloud_freezing_number :: FT    # Cloud number to ice number [1/kg/s]
     rain_freezing_mass :: FT       # Rain → ice mass from immersion freezing [kg/kg/s]
     rain_freezing_number :: FT     # Rain number to ice number [1/kg/s]
-    
+
     # Rime splintering (Hallett-Mossop)
     splintering_mass :: FT         # New ice mass from splintering [kg/kg/s]
     splintering_number :: FT       # New ice number from splintering [1/kg/s]
@@ -1035,7 +1035,7 @@ Compute all P3 process rates (Phase 1 and Phase 2).
     # Rime splintering (Hallett-Mossop secondary ice production)
     # =========================================================================
     spl_q, spl_n = rime_splintering_rate(p3, cloud_rim, rain_rim, T)
-    
+
     return P3ProcessRates(
         # Phase 1: Rain
         autoconv, accr, rain_evap, rain_self,
@@ -1132,10 +1132,10 @@ Rain number loses from:
     # Phase 1: Self-collection reduces number (already negative)
     # Phase 2: Shedding creates new drops
     # Phase 2: Riming removes rain drops (already negative)
-    
-    return ρ * (n_from_autoconv + n_from_melt + 
-                rates.rain_self_collection + 
-                rates.shedding_number + 
+
+    return ρ * (n_from_autoconv + n_from_melt +
+                rates.rain_self_collection +
+                rates.shedding_number +
                 rates.rain_riming_number)
 end
 
@@ -1182,7 +1182,7 @@ Ice number loses from:
 """
 @inline function tendency_ρnⁱ(rates::P3ProcessRates, ρ)
     # Gains from nucleation, freezing, splintering
-    gain = rates.nucleation_number + rates.cloud_freezing_number + 
+    gain = rates.nucleation_number + rates.cloud_freezing_number +
            rates.rain_freezing_number + rates.splintering_number
     # melting_number and aggregation are already negative (represent losses)
     loss_rates = rates.melting_number + rates.aggregation
@@ -1225,12 +1225,12 @@ Rime volume changes with rime mass: ∂bᶠ/∂t = ∂qᶠ/∂t / ρ_rime
 
     ρᶠ_safe = max(ρᶠ, FT(100))
     ρ_rim_new_safe = max(rates.rime_density_new, FT(100))
-    
+
     # Phase 2: Volume gain from new rime (cloud + rain riming + refreezing)
     # Use density of new rime for fresh rime, current density for refreezing
-    volume_gain = (rates.cloud_riming + rates.rain_riming) / ρ_rim_new_safe + 
+    volume_gain = (rates.cloud_riming + rates.rain_riming) / ρ_rim_new_safe +
                    rates.refreezing / ρᶠ_safe
-    
+
     # Phase 1: Volume loss from melting (proportional to rime fraction)
     volume_loss = Fᶠ * rates.melting / ρᶠ_safe
 
@@ -1254,15 +1254,15 @@ size distribution integrals. This simplified version uses proportional scaling.
 """
 @inline function tendency_ρzⁱ(rates::P3ProcessRates, ρ, qⁱ, nⁱ, zⁱ)
     FT = typeof(ρ)
-    
+
     # Simplified: Z changes proportionally to mass changes
     # More accurate version would use full integral formulation
     ratio = safe_divide(zⁱ, qⁱ, zero(FT))
-    
+
     # Net mass change for ice
-    mass_change = rates.deposition - rates.melting + 
+    mass_change = rates.deposition - rates.melting +
                   rates.cloud_riming + rates.rain_riming + rates.refreezing
-    
+
     return ρ * ratio * mass_change
 end
 

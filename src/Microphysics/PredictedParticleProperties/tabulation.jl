@@ -544,7 +544,7 @@ integrals replaced by `TabulatedFunction3D` lookup tables.
 - `arch`: `CPU()` or `GPU()`
 
 # Keyword Arguments
-Passed to [`TabulationParameters`](@ref): `number_of_mass_points`, 
+Passed to [`TabulationParameters`](@ref): `number_of_mass_points`,
 `number_of_rime_fraction_points`, etc.
 
 # Example
