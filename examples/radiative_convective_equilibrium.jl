@@ -465,7 +465,7 @@ colors = [default_colours[mod1(i, length(default_colours))] for i in 1:Nt]
 for n in 1:Nt
     t_min = Int(times[n] / 60)
     label = n == 1 ? "initial" : "t = $(t_min) min"
-    
+
     lines!(axθ, θts[n], color=colors[n], label=label)
     lines!(axq, qᵛts[n], color=colors[n])
     lines!(axw, wts[n], color=colors[n])

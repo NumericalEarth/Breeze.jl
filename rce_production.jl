@@ -40,7 +40,7 @@ println("Resolution: Δx = Δy = $Δx m")
 println("Target: $(stop_time / day) days")
 println("="^70)
 
-grid = RectilinearGrid(arch; size=(Nx, Ny, Nz), x=(0, Lx), y=(0, Ly), z=z_faces, 
+grid = RectilinearGrid(arch; size=(Nx, Ny, Nz), x=(0, Lx), y=(0, Ly), z=z_faces,
                        halo=(5,5,5), topology=(Periodic,Periodic,Bounded))
 
 # Thermodynamics and dynamics
@@ -88,11 +88,11 @@ sponge = Forcing(sponge_damping, discrete_form=true, parameters=(; λ, zˢ, zᵗ
 # Mixed-phase microphysics with saturation adjustment
 microphysics = SaturationAdjustment(equilibrium=MixedPhaseEquilibrium())
 
-model = AtmosphereModel(grid; 
-    dynamics, 
-    microphysics, 
-    advection = WENO(order=5), 
-    radiation, 
+model = AtmosphereModel(grid;
+    dynamics,
+    microphysics,
+    advection = WENO(order=5),
+    radiation,
     forcing = (; ρw=sponge),
     boundary_conditions = (; ρθ=ρθ_bcs, ρqᵗ=ρqᵗ_bcs, ρu=ρu_bcs, ρv=ρv_bcs))
 
@@ -127,11 +127,11 @@ function progress(sim)
     sdpd = wall_elapsed > 0 ? sim_days / (wall_elapsed / 86400) : 0.0
     wall_days = wall_elapsed / 86400
     eta_days = (stop_time / day - sim_days) / sdpd
-    
+
     OLR = mean(view(radiation.upwelling_longwave_flux, :, :, Nz+1))
     SW_dn = mean(view(radiation.downwelling_shortwave_flux, :, :, Nz+1))
-    
-    @printf("[Day %.2f] Δt=%.1fs | SDPD=%.1f | ETA=%.1f days | max|w|=%.2f | qˡ=%.1e | OLR=%.1f\n", 
+
+    @printf("[Day %.2f] Δt=%.1fs | SDPD=%.1f | ETA=%.1f days | max|w|=%.2f | qˡ=%.1e | OLR=%.1f\n",
             sim_days, simulation.Δt, sdpd, eta_days, maximum(abs, w), maximum(qˡ), OLR)
 end
 add_callback!(simulation, progress, TimeInterval(1hour))
@@ -207,6 +207,6 @@ println(@sprintf("Mean Δt: %.2f s", time(simulation) / model.clock.iteration))
 OLR = mean(view(radiation.upwelling_longwave_flux, :, :, Nz+1))
 SW_dn = mean(view(radiation.downwelling_shortwave_flux, :, :, Nz+1))
 println(@sprintf("\nFinal radiation: OLR=%.1f W/m², SW_dn=%.1f W/m²", OLR, SW_dn))
-println(@sprintf("Final state: max|w|=%.2f m/s, max(qˡ)=%.2e, max(qⁱ)=%.2e", 
+println(@sprintf("Final state: max|w|=%.2f m/s, max(qˡ)=%.2e, max(qⁱ)=%.2e",
                  maximum(abs, w), maximum(qˡ), maximum(qⁱ)))
 println("="^70)
