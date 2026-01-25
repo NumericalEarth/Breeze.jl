@@ -76,9 +76,15 @@ surface_albedo = 0.07  # Ocean surface albedo — Wing et al. (2018), Table 1
 
 # ### Coriolis Parameter (Section 3.3)
 #
+# The baseline RCEMIP specification uses f = 0 (non-rotating):
 # > "All experiments are non-rotating (f = 0)."
 #
-# This is implicit in our setup — we do not include Coriolis forcing.
+# However, rotating RCE is an interesting extension that enables tropical cyclone
+# genesis and other phenomena. We use an f-plane at 20°N latitude, typical of
+# the Caribbean/tropical Atlantic region where tropical cyclones often develop.
+
+latitude = 20  # degrees North
+coriolis = FPlane(latitude=latitude)
 
 # ### Trace Gas Concentrations (Section 3.5, Table 1)
 #
@@ -274,10 +280,16 @@ sponge = Forcing(sponge_damping, discrete_form=true, parameters=(; λ, zˢ, zᵗ
 # for both liquid water and ice in clouds.
 
 boundary_conditions = (; ρθ=ρθ_bcs, ρqᵗ=ρqᵗ_bcs, ρu=ρu_bcs, ρv=ρv_bcs)
-microphysics = SaturationAdjustment(equilibrium=MixedPhaseEquilibrium())
+
+using CloudMicrophysics
+BreezeCloudMicrophysicsExt = Base.get_extension(Breeze, :BreezeCloudMicrophysicsExt)
+using .BreezeCloudMicrophysicsExt: OneMomentCloudMicrophysics
+
+cloud_formation = SaturationAdjustment(equilibrium=MixedPhaseEquilibrium())
+microphysics = OneMomentCloudMicrophysics(; cloud_formation)
 advection = WENO(order=5)
 
-model = AtmosphereModel(grid; dynamics, microphysics, advection, radiation,
+model = AtmosphereModel(grid; dynamics, coriolis, microphysics, advection, radiation,
                         boundary_conditions, forcing = (; ρw=sponge))
 
 # ## Initial Conditions
@@ -560,6 +572,6 @@ nothing #hide
 # | Domain (RCE_small) | 96-100 km | 128 km ✓ | Table 2 |
 # | Model top | ≥33 km | 33 km ✓ | Table 2 |
 # | Duration | ≥50 days | 6 hours ⚠ | Section 3.7 |
-# | f (Coriolis) | 0 | 0 ✓ | Section 3.3 |
+# | f (Coriolis) | 0 | f-plane at 20°N ⚠ | Section 3.3 |
 #
 # Legend: ✓ = compliant, ⚠ = deviation (noted for documentation example)

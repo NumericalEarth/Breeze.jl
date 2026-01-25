@@ -207,6 +207,10 @@ maybe_adjust_thermodynamic_state(𝒰₀, bμp::NCBM, qᵗ, constants) =
 AtmosphereModels.prognostic_field_names(::NPBM) = tuple()
 AtmosphereModels.materialize_microphysical_fields(bμp::NPBM, grid, bcs) = materialize_microphysical_fields(bμp.cloud_formation, grid, bcs)
 
+# Forward specific_humidity to cloud_formation scheme
+AtmosphereModels.specific_humidity(bμp::BulkMicrophysics, model) =
+    AtmosphereModels.specific_humidity(bμp.cloud_formation, model)
+
 @inline function AtmosphereModels.update_microphysical_fields!(μ, i, j, k, grid, bμp::NPBM, ρ, 𝒰, constants)
     return update_microphysical_fields!(μ, i, j, k, grid, bμp.cloud_formation, ρ, 𝒰, constants)
 end
