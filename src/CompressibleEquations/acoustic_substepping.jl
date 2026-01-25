@@ -258,18 +258,17 @@ Uses on-the-fly pressure gradient: ∂p/∂x = ψ ∂ρ/∂x where ψ = Rᵐ T.
 function acoustic_horizontal_momentum_step!(model, acoustic, Δts)
     grid = model.grid
     arch = architecture(grid)
-    
+
     launch!(arch, grid, :xyz, _acoustic_horizontal_momentum!,
             model.momentum.ρu, model.momentum.ρv, grid, Δts,
-            model.dynamics.density, acoustic.ψ,
-            acoustic.G_slow_ρu, acoustic.G_slow_ρv)
-    
+            model.dynamics.density, acoustic.ψ)
+
     return nothing
 end
 
-@kernel function _acoustic_horizontal_momentum!(ρu, ρv, grid, Δts, ρ, ψ, G_slow_ρu, G_slow_ρv)
+@kernel function _acoustic_horizontal_momentum!(ρu, ρv, grid, Δts, ρ, ψ)
     i, j, k = @index(Global, NTuple)
-    
+
     # Fast pressure gradient: (∂p/∂x)_fast = ψ ∂ρ/∂x where ψ = Rᵐ T
     # Note: ψ is at cell centers, must interpolate to faces
     @inbounds begin
@@ -277,16 +276,16 @@ end
         ψᶠᶜᶜ = ℑxᶠᵃᵃ(i, j, k, grid, ψ)
         ∂ρ_∂x = ∂xᶠᶜᶜ(i, j, k, grid, ρ)
         ∂p_∂x_fast = ψᶠᶜᶜ * ∂ρ_∂x
-        
-        # Total tendency = -fast pressure gradient + slow tendency
-        ρu[i, j, k] += Δts * (-∂p_∂x_fast + G_slow_ρu[i, j, k])
-        
+
+        # Only apply fast pressure gradient (slow tendencies applied separately)
+        ρu[i, j, k] -= Δts * ∂p_∂x_fast
+
         # v-component: pressure gradient at (Center, Face, Center)
         ψᶜᶠᶜ = ℑyᵃᶠᵃ(i, j, k, grid, ψ)
         ∂ρ_∂y = ∂yᶜᶠᶜ(i, j, k, grid, ρ)
         ∂p_∂y_fast = ψᶜᶠᶜ * ∂ρ_∂y
-        
-        ρv[i, j, k] += Δts * (-∂p_∂y_fast + G_slow_ρv[i, j, k])
+
+        ρv[i, j, k] -= Δts * ∂p_∂y_fast
     end
 end
 
@@ -303,24 +302,25 @@ The full implicit solve will be added in a future iteration.
 function acoustic_vertical_momentum_step!(model, acoustic, Δts)
     grid = model.grid
     arch = architecture(grid)
-    
+
     launch!(arch, grid, :xyz, _acoustic_vertical_momentum!,
             model.momentum.ρw, grid, Δts,
-            model.dynamics.density, acoustic.ψ, acoustic.G_slow_ρw)
-    
+            model.dynamics.density, acoustic.ψ)
+
     return nothing
 end
 
-@kernel function _acoustic_vertical_momentum!(ρw, grid, Δts, ρ, ψ, G_slow_ρw)
+@kernel function _acoustic_vertical_momentum!(ρw, grid, Δts, ρ, ψ)
     i, j, k = @index(Global, NTuple)
-    
+
     @inbounds begin
         # w-component: pressure gradient at (Center, Center, Face)
         ψᶜᶜᶠ = ℑzᵃᵃᶠ(i, j, k, grid, ψ)
         ∂ρ_∂z = ∂zᶜᶜᶠ(i, j, k, grid, ρ)
         ∂p_∂z_fast = ψᶜᶜᶠ * ∂ρ_∂z
-        
-        ρw[i, j, k] += Δts * (-∂p_∂z_fast + G_slow_ρw[i, j, k])
+
+        # Only apply fast pressure gradient (slow tendencies applied separately)
+        ρw[i, j, k] -= Δts * ∂p_∂z_fast
     end
 end
 
@@ -415,44 +415,79 @@ end
 Execute the acoustic substep loop for RK stage `nrk`.
 
 This function:
-1. Precomputes thermodynamic coefficients (ψ, c²)
-2. Initializes time-averaged velocities
-3. Loops over acoustic substeps, updating momentum and density
-4. Uses time-averaged velocities for scalar advection (handled in outer RK loop)
+1. Applies slow tendencies to momentum once (for the full RK stage)
+2. Precomputes thermodynamic coefficients (ψ, c²)
+3. Initializes time-averaged velocities
+4. Loops over acoustic substeps, updating momentum and density with fast (pressure) terms
+5. Uses time-averaged velocities for scalar advection (handled in outer RK loop)
 """
 function acoustic_substep_loop!(model, acoustic, nrk, Δt_rk)
     grid = model.grid
+    arch = architecture(grid)
     nsound = acoustic.nsound
-    
+
     # Number of substeps for this RK stage
     nloop = acoustic_substeps_per_stage(nrk, nsound)
     Δts = Δt_rk / nloop  # acoustic timestep
-    
+
     # === PRECOMPUTE PHASE (once per RK stage) ===
-    
+
+    # Apply slow tendencies to momentum ONCE for the full RK stage time step
+    # The slow tendencies (advection, Coriolis, buoyancy, diffusion - everything
+    # except pressure gradient) are integrated over Δt_rk.
+    apply_slow_momentum_tendencies!(model, acoustic, Δt_rk)
+
     # Compute thermodynamic coefficients: ψ = Rᵐ T, c² = γᵐ ψ
     compute_acoustic_coefficients!(acoustic, model)
-    
+
     # Store density reference for divergence damping
     parent(acoustic.ρ_ref) .= parent(model.dynamics.density)
-    
+
     # Initialize time-averaged velocities
     fill!(acoustic.ū, 0)
     fill!(acoustic.v̄, 0)
     fill!(acoustic.w̄, 0)
-    
+
     # === ACOUSTIC SUBSTEP LOOP ===
     for n = 1:nloop
-        # Update momentum from pressure gradient
+        # Update momentum from fast pressure gradient only
         acoustic_horizontal_momentum_step!(model, acoustic, Δts)
         acoustic_vertical_momentum_step!(model, acoustic, Δts)
-        
+
         # Update velocities from momentum
         update_velocities_from_momentum!(model)
-        
+
         # Update density from compression + accumulate averaged velocities
         acoustic_density_step!(model, acoustic, Δts, n, nloop)
     end
-    
+
     return nothing
+end
+
+"""
+Apply slow momentum tendencies once per RK stage.
+
+The slow tendencies (everything except pressure gradient) are integrated
+over the full RK stage time step Δt_rk.
+"""
+function apply_slow_momentum_tendencies!(model, acoustic, Δt_rk)
+    grid = model.grid
+    arch = architecture(grid)
+
+    launch!(arch, grid, :xyz, _apply_slow_momentum_tendencies!,
+            model.momentum.ρu, model.momentum.ρv, model.momentum.ρw,
+            acoustic.G_slow_ρu, acoustic.G_slow_ρv, acoustic.G_slow_ρw,
+            Δt_rk)
+
+    return nothing
+end
+
+@kernel function _apply_slow_momentum_tendencies!(ρu, ρv, ρw, G_slow_ρu, G_slow_ρv, G_slow_ρw, Δt)
+    i, j, k = @index(Global, NTuple)
+
+    @inbounds begin
+        ρu[i, j, k] += Δt * G_slow_ρu[i, j, k]
+        ρv[i, j, k] += Δt * G_slow_ρv[i, j, k]
+        ρw[i, j, k] += Δt * G_slow_ρw[i, j, k]
+    end
 end
