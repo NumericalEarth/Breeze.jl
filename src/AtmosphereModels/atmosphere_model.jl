@@ -118,11 +118,14 @@ function AtmosphereModel(grid;
                          scalar_advection = DefaultValue(),
                          closure = nothing,
                          microphysics = nothing,
-                         timestepper = :SSPRungeKutta3,
+                         timestepper = nothing,
                          radiation = nothing)
 
     # Use default dynamics if not specified
     isnothing(dynamics) && (dynamics = default_dynamics(grid, thermodynamic_constants))
+
+    # Use default timestepper for the dynamics if not specified
+    isnothing(timestepper) && (timestepper = default_timestepper(dynamics))
 
     # Validate that velocity boundary conditions are only provided for dynamics that support them
     validate_velocity_boundary_conditions(dynamics, boundary_conditions)

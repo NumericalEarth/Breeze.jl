@@ -54,6 +54,16 @@ Returns `nothing` for dynamics that do not require a pressure solver (e.g., comp
 """
 function dynamics_pressure_solver end
 
+"""
+    default_timestepper(dynamics)
+
+Return the default timestepper symbol for the given dynamics.
+
+For anelastic dynamics, returns `:SSPRungeKutta3`.
+For compressible dynamics, returns `:AcousticSSPRungeKutta3` (acoustic substepping).
+"""
+default_timestepper(dynamics) = :SSPRungeKutta3
+
 #####
 ##### Pressure interface
 #####

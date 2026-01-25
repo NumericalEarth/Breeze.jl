@@ -141,6 +141,14 @@ Pressure is computed directly from the equation of state.
 """
 AtmosphereModels.dynamics_pressure_solver(dynamics::CompressibleDynamics, grid) = nothing
 
+"""
+$(TYPEDSIGNATURES)
+
+Return the default timestepper for `CompressibleDynamics`.
+Uses acoustic substepping to allow larger advective time steps while substepping the fast acoustic modes.
+"""
+AtmosphereModels.default_timestepper(::CompressibleDynamics) = :AcousticSSPRungeKutta3
+
 #####
 ##### Show methods
 #####
