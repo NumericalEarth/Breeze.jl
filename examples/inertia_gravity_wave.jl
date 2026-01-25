@@ -84,6 +84,7 @@ x₀ = Lx / 3             # m - perturbation center in x
 
 constants = ThermodynamicConstants()
 g = constants.gravitational_acceleration
+pˢᵗ = 1e5  # Standard pressure for potential temperature (Pa)
 
 # The background potential temperature profile with a constant Brunt-Väisälä frequency:
 
@@ -95,7 +96,7 @@ g = constants.gravitational_acceleration
 
 # For compressible dynamics, we also need the background density:
 
-ρᵢ(x, z) = adiabatic_hydrostatic_density(z, p₀, θ₀, constants)
+ρᵢ(x, z) = adiabatic_hydrostatic_density(z, p₀, θ₀, pˢᵗ, constants)
 
 # ## Case 1: Anelastic dynamics
 #
@@ -116,7 +117,7 @@ set!(model_anelastic, θ=θᵢ, u=U)
 reference_state_const = ReferenceState(grid, constants; surface_pressure=p₀, potential_temperature=θ₀)
 
 # Get the surface density and set the entire reference density field to this constant value:
-ρ_surface = adiabatic_hydrostatic_density(0, p₀, θ₀, constants)
+ρ_surface = adiabatic_hydrostatic_density(0, p₀, θ₀, pˢᵗ, constants)
 set!(reference_state_const.density, ρ_surface)
 
 dynamics_boussinesq = AnelasticDynamics(reference_state_const)
@@ -190,17 +191,17 @@ simulation_acoustic = Simulation(model_acoustic; Δt=Δt_acoustic, stop_time)
 # Progress callbacks:
 
 function make_progress(name, model)
-    θ = PotentialTemperature(model)
-    θᵇᵍf = CenterField(grid)
-    set!(θᵇᵍf, (x, z) -> θᵇᵍ(z))
-    θ′ = θ - θᵇᵍf
-    
-    function progress(sim)
-        u, v, w = sim.model.velocities
+θ = PotentialTemperature(model)
+θᵇᵍf = CenterField(grid)
+set!(θᵇᵍf, (x, z) -> θᵇᵍ(z))
+θ′ = θ - θᵇᵍf
+
+function progress(sim)
+    u, v, w = sim.model.velocities
         msg = @sprintf("%s - Iter: % 4d, t: % 14s, max(θ′): %.4e, max|w|: %.4f",
                        name, iteration(sim), prettytime(sim), maximum(θ′), maximum(abs, w))
-        @info msg
-        return nothing
+    @info msg
+    return nothing
     end
     return progress
 end
@@ -219,11 +220,11 @@ function setup_output(simulation, model, filename)
     θᵇᵍf = CenterField(grid)
     set!(θᵇᵍf, (x, z) -> θᵇᵍ(z))
     θ′ = θ - θᵇᵍf
-    
-    outputs = merge(model.velocities, (; θ′))
-    simulation.output_writers[:jld2] = JLD2Writer(model, outputs; filename,
-                                                  schedule = TimeInterval(100),
-                                                  overwrite_existing = true)
+
+outputs = merge(model.velocities, (; θ′))
+simulation.output_writers[:jld2] = JLD2Writer(model, outputs; filename,
+                                              schedule = TimeInterval(100),
+                                              overwrite_existing = true)
     return nothing
 end
 
@@ -232,15 +233,7 @@ setup_output(simulation_boussinesq, model_boussinesq, "igw_boussinesq.jld2")
 setup_output(simulation_compressible, model_compressible, "igw_compressible.jld2")
 setup_output(simulation_acoustic, model_acoustic, "igw_acoustic.jld2")
 
-<<<<<<< HEAD
 # Run all simulations:
-=======
-filename = "inertia_gravity_wave.jld2"
-simulation.output_writers[:jld2] = JLD2Writer(model, outputs; filename,
-                                              including = [:grid],
-                                              schedule = TimeInterval(100),
-                                              overwrite_existing = true)
->>>>>>> 8cf519c0bb327e9eaf7ac7972196d309a315eb4d
 
 @info "Running anelastic simulation..."
 run!(simulation_anelastic)
