@@ -83,16 +83,16 @@ struct AcousticSSPRungeKutta3{FT, U0, TG, TI, AS} <: AbstractTimeStepper
     α¹ :: FT  # = 1
     α² :: FT  # = 1/4
     α³ :: FT  # = 2/3
-    
+
     # Storage for state at beginning of time step
     U⁰ :: U0
-    
+
     # Tendencies
     Gⁿ :: TG
-    
+
     # Implicit solver (for vertical diffusion, if any)
     implicit_solver :: TI
-    
+
     # Acoustic substepping infrastructure
     acoustic :: AS
 end
@@ -117,17 +117,17 @@ Using Oceananigans' `BatchedTridiagonalSolver` for GPU-compatible vertical solve
 function build_acoustic_vertical_solver(grid)
     # The tridiagonal system couples w and ρ in the vertical
     # Coefficients depend on sound speed and grid metrics
-    
+
     Nz = size(grid, 3)
     arch = architecture(grid)
     FT = eltype(grid)
-    
+
     # Preallocate coefficient arrays
     lower_diagonal = zeros(arch, FT, Nz)
     diagonal = zeros(arch, FT, grid.Nx, grid.Ny, Nz)
     upper_diagonal = zeros(arch, FT, Nz)
     scratch = zeros(arch, FT, grid.Nx, grid.Ny, Nz)
-    
+
     return BatchedTridiagonalSolver(grid;
                                     lower_diagonal,
                                     diagonal,
@@ -143,13 +143,13 @@ end
 
 ### Performance Strategy: On-the-Fly Pressure Computation
 
-**Key insight:** During acoustic substepping, temperature T and thermodynamic properties (Rᵐ, γᵐ) are 
+**Key insight:** During acoustic substepping, temperature T and thermodynamic properties (Rᵐ, γᵐ) are
 **held fixed** - they evolve via slow tendencies outside the acoustic loop.
 
 Since p = ρ Rᵐ T, the pressure gradient splits into fast and slow parts:
 ```math
-\frac{\partial p}{\partial x} = \frac{\partial (\rho R^m T)}{\partial x} = 
-    \underbrace{R^m T \frac{\partial \rho}{\partial x}}_{\text{fast (acoustic)}} + 
+\frac{\partial p}{\partial x} = \frac{\partial (\rho R^m T)}{\partial x} =
+    \underbrace{R^m T \frac{\partial \rho}{\partial x}}_{\text{fast (acoustic)}} +
     \underbrace{\rho \frac{\partial (R^m T)}{\partial x}}_{\text{slow (buoyancy)}}
 ```
 
@@ -172,33 +172,33 @@ for GPU performance.
 struct AcousticSubstepper{N, FT, F3D, F2D, TS}
     # Number of acoustic substeps per full time step
     nsound :: N
-    
+
     # Implicitness parameters (Crank-Nicolson: α = β = 0.5)
     α :: FT  # Implicit weight
     β :: FT  # Explicit weight (1 - α)
-    
+
     # Divergence damping coefficient
     kdiv :: FT
-    
+
     # Precomputed thermodynamic coefficients (computed once per RK stage)
     # ψ = Rᵐ T (pressure coefficient): p = ψ ρ
     # c² = γᵐ ψ (sound speed squared)
     ψ  :: F3D  # CenterField
     c² :: F3D  # CenterField
-    
+
     # Time-averaged velocities for scalar advection
     ū :: F3D  # XFaceField
     v̄ :: F3D  # YFaceField
     w̄ :: F3D  # ZFaceField
-    
+
     # Slow tendencies (computed once per RK stage, held fixed during acoustic loop)
     G_slow_ρu :: F3D
     G_slow_ρv :: F3D
     G_slow_ρw :: F3D
-    
+
     # Reference density at start of acoustic loop (for divergence damping)
     ρ_ref :: F3D
-    
+
     # Vertical tridiagonal solver for implicit w-ρ coupling
     vertical_solver :: TS
 end
@@ -214,58 +214,58 @@ function acoustic_substep_loop!(model, nrk, Δt_rk, nsound)
     grid = model.grid
     arch = architecture(grid)
     dynamics = model.dynamics
-    
+
     # Number of substeps for this RK stage
     nloop = acoustic_substeps_per_stage(nrk, nsound)
     Δts = Δt_rk / nloop
-    
+
     # === PRECOMPUTE PHASE (once per RK stage) ===
-    
+
     # Compute thermodynamic coefficients: ψ = Rᵐ T, c² = γᵐ ψ
     compute_acoustic_coefficients!(acoustic.ψ, acoustic.c², model)
-    
+
     # Store density reference for divergence damping
     parent(acoustic.ρ_ref) .= parent(dynamics.density)
-    
+
     # Initialize time-averaged velocities
     fill!(acoustic.ū, 0)
     fill!(acoustic.v̄, 0)
     fill!(acoustic.w̄, 0)
-    
+
     # === PRE-CONVERT KERNEL ARGUMENTS (GPU optimization) ===
     # Following Oceananigans.SplitExplicit pattern to minimize latency
-    
+
     momentum_args = (grid, Δts,
                      dynamics.ρu, dynamics.ρv, dynamics.density,
                      acoustic.ψ, acoustic.G_slow_ρu, acoustic.G_slow_ρv)
-    
+
     density_args = (grid, Δts,
                     dynamics.density, dynamics.u, dynamics.v, dynamics.w,
                     acoustic.c², acoustic.ρ_ref, acoustic.kdiv,
                     acoustic.ū, acoustic.v̄, acoustic.w̄)
-    
+
     GC.@preserve momentum_args density_args begin
         converted_momentum_args = convert_to_device(arch, momentum_args)
         converted_density_args = convert_to_device(arch, density_args)
-        
+
         # === ACOUSTIC SUBSTEP LOOP ===
         for n = 1:nloop
             weight = n == nloop ? 1 / nloop : 1 / nloop  # Averaging weight
-            
+
             # Horizontal momentum: ∂(ρu)/∂t = -ψ ∂ρ/∂x + G_slow
             acoustic_horizontal_momentum_kernel!(converted_momentum_args...)
-            
+
             # Vertical implicit solve for ρw and ρ
             acoustic_implicit_vertical_step!(model, Δts, acoustic.α, acoustic.β)
-            
+
             # Density update + damping + velocity averaging (combined kernel)
             acoustic_density_and_averaging_kernel!(weight, n, nloop, converted_density_args...)
         end
     end
-    
+
     # Diagnose pressure from final density for slow tendency computation
     compute_pressure_from_eos!(dynamics.pressure, model)
-    
+
     return nothing
 end
 ```
@@ -277,7 +277,7 @@ The fast pressure gradient ψ ∂ρ/∂x is computed on-the-fly using **topology
 ```julia
 @kernel function _acoustic_horizontal_momentum!(ρu, ρv, grid, Δts, ρ, ψ, G_slow_ρu, G_slow_ρv)
     i, j, k = @index(Global, NTuple)
-    
+
     # Fast pressure gradient: (∂p/∂x)_fast = ψ ∂ρ/∂x where ψ = Rᵐ T
     # Uses topology-aware operators (∂xTᶠᶜᶜ, ∂yTᶜᶠᶜ) to avoid halo accesses
     @inbounds begin
@@ -285,24 +285,24 @@ The fast pressure gradient ψ ∂ρ/∂x is computed on-the-fly using **topology
         ψᶠᶜᶜ = ℑxᶠᵃᵃ(i, j, k, grid, ψ)
         ∂ρ_∂x = ∂xTᶠᶜᶜ(i, j, k, grid, ρ)  # Topology-aware!
         ∂p_∂x_fast = ψᶠᶜᶜ * ∂ρ_∂x
-        
+
         # Total tendency = -fast pressure gradient + slow tendency
         ρu[i, j, k] += Δts * (-∂p_∂x_fast + G_slow_ρu[i, j, k])
-        
+
         # v-component: pressure gradient at (Center, Face, Center)
         ψᶜᶠᶜ = ℑyᵃᶠᵃ(i, j, k, grid, ψ)
         ∂ρ_∂y = ∂yTᶜᶠᶜ(i, j, k, grid, ρ)  # Topology-aware!
         ∂p_∂y_fast = ψᶜᶠᶜ * ∂ρ_∂y
-        
+
         ρv[i, j, k] += Δts * (-∂p_∂y_fast + G_slow_ρv[i, j, k])
     end
 end
 ```
 
 **Performance notes:**
-1. `∂xTᶠᶜᶜ` and `∂yTᶜᶠᶜ` are topology-aware operators that encode boundary conditions 
+1. `∂xTᶠᶜᶜ` and `∂yTᶜᶠᶜ` are topology-aware operators that encode boundary conditions
    based on grid type (Periodic, Bounded, etc.) - **no halo filling needed between substeps!**
-2. The interpolation ψᶠᶜᶜ = ℑxᶠᵃᵃ(i, j, k, grid, ψ) is a simple 2-point average, 
+2. The interpolation ψᶠᶜᶜ = ℑxᶠᵃᵃ(i, j, k, grid, ψ) is a simple 2-point average,
    much cheaper than storing/reading a full pressure field.
 
 ### Vertical Implicit Solve
@@ -324,13 +324,13 @@ Discretizing implicitly in the vertical gives a tridiagonal system for w:
 function acoustic_implicit_vertical_step!(model, Δts, α, β)
     # Build tridiagonal coefficients
     compute_vertical_tridiagonal_coefficients!(model, Δts, α)
-    
+
     # Compute RHS from current state
     compute_vertical_rhs!(model, Δts, α, β)
-    
+
     # Solve for w^{n+1}
     solve!(model.momentum.ρw, model.timestepper.acoustic.vertical_solver, rhs)
-    
+
     # Update density from new w
     update_density_from_w!(model, Δts, α, β)
 end
@@ -339,29 +339,29 @@ end
                                                               grid, c², ρ, Δts, α)
     i, j = @index(Global, NTuple)
     Nz = size(grid, 3)
-    
+
     α² = α * α
-    
+
     @inbounds for k = 2:Nz
         # Coefficients from linearized w-ρ coupling
-        # 
+        #
         # ρw equation: ∂(ρw)/∂t = -∂p/∂z ≈ -c² ∂ρ/∂z
         # ρ equation:  ∂ρ/∂t = -ρ ∂w/∂z  (vertical compression)
         #
         # Eliminating ρ gives a wave equation for w with tridiagonal structure
-        
+
         Δz_k = Δzᶜᶜᶠ(i, j, k, grid)
         Δz_km1 = Δzᶜᶜᶠ(i, j, k-1, grid)
         Δz_c = Δzᶜᶜᶜ(i, j, k, grid)
-        
+
         ρ_k = ρ[i, j, k]
         c²_k = c²[i, j, k]
-        
+
         # Coupling coefficients from second-order discretization
         # (derived from eliminating ρ between the two equations)
         coeff_upper = α² * Δts² * c²_k / (Δz_k * Δz_c)
         coeff_lower = α² * Δts² * c²_k / (Δz_km1 * Δz_c)
-        
+
         lower[i, j, k-1] = -coeff_lower
         upper[i, j, k] = -coeff_upper
         diag[i, j, k] = 1 + coeff_lower + coeff_upper
@@ -376,29 +376,29 @@ Compute both the pressure coefficient ψ = Rᵐ T and sound speed c² = γᵐ ψ
 ```julia
 @kernel function _compute_acoustic_coefficients!(ψ, c², grid, dynamics,
                                                   formulation, microphysics,
-                                                  microphysical_fields, 
+                                                  microphysical_fields,
                                                   temperature, constants)
     i, j, k = @index(Global, NTuple)
-    
+
     # Get moisture
     qᵗ = specific_moisture[i, j, k]
-    
+
     # Compute moisture fractions (liquid, ice, vapor)
     q = compute_moisture_fractions(i, j, k, grid, microphysics, qᵗ, microphysical_fields)
-    
+
     # Mixture thermodynamic properties
     Rᵐ = mixture_gas_constant(q, constants)
     cₚᵐ = mixture_heat_capacity(q, constants)
     cᵥᵐ = cₚᵐ - Rᵐ
     γᵐ = cₚᵐ / cᵥᵐ
-    
+
     # Temperature (already computed in update_state!)
     T = temperature[i, j, k]
-    
+
     @inbounds begin
         # Pressure coefficient: p = ψ ρ
         ψ[i, j, k] = Rᵐ * T
-        
+
         # Moist sound speed squared: c² = γᵐ ψ = γᵐ Rᵐ T
         c²[i, j, k] = γᵐ * ψ[i, j, k]
     end
@@ -411,7 +411,7 @@ end
 
 ### Combined Density Update + Damping + Velocity Averaging (Topology-Aware)
 
-Following Oceananigans.SplitExplicit, we combine multiple operations into a single kernel 
+Following Oceananigans.SplitExplicit, we combine multiple operations into a single kernel
 using **topology-aware operators** for divergence:
 
 ```julia
@@ -419,7 +419,7 @@ using **topology-aware operators** for divergence:
                                                    ρ, u, v, w, c², ρ_ref, kdiv,
                                                    ū, v̄, w̄)
     i, j, k = @index(Global, NTuple)
-    
+
     @inbounds begin
         # === Density update from compression ===
         # ∂ρ/∂t = -ρ ∇·u (fast/acoustic part of continuity)
@@ -427,13 +427,13 @@ using **topology-aware operators** for divergence:
         div_u = δxTᶜᵃᵃ(i, j, k, grid, Δy_qᶠᶜᶜ, u) * Ax⁻¹ᶜᶜᶜ(i, j, k, grid) +
                 δyTᵃᶜᵃ(i, j, k, grid, Δx_qᶜᶠᶜ, v) * Ay⁻¹ᶜᶜᶜ(i, j, k, grid) +
                 δzᵃᵃᶜ(i, j, k, grid, Az_qᶜᶜᶠ, w) * V⁻¹ᶜᶜᶜ(i, j, k, grid)
-        
+
         ρ[i, j, k] -= Δts * ρ[i, j, k] * div_u
-        
+
         # === Divergence damping ===
         # Damps spurious acoustic oscillations
         ρ[i, j, k] += kdiv * (ρ[i, j, k] - ρ_ref[i, j, k])
-        
+
         # === Accumulate time-averaged velocities ===
         # Following SplitExplicit pattern for scalar transport
         ū[i, j, k] += weight * u[i, j, k]
@@ -459,7 +459,7 @@ Pressure is diagnosed **only at the end of the acoustic loop** (not each substep
 ```julia
 @kernel function _compute_pressure_from_eos!(p, grid, ρ, ψ)
     i, j, k = @index(Global, NTuple)
-    
+
     # p = ρ ψ where ψ = Rᵐ T (precomputed)
     @inbounds p[i, j, k] = ρ[i, j, k] * ψ[i, j, k]
 end
@@ -648,7 +648,7 @@ For acoustic substepping, we need:
 - `δxTᶜᵃᵃ`, `δyTᵃᶜᵃ`, `δzTᵃᵃᶜ` - for divergence computation
 
 **Note:** Some 3D topology-aware operators (e.g., for the vertical direction with `Bounded` z-topology)
-may need to be added to Oceananigans or defined locally. The existing operators in 
+may need to be added to Oceananigans or defined locally. The existing operators in
 `topology_aware_operators.jl` focus on 2D barotropic operations; we may need to extend them.
 
 **Savings:** Eliminates ~100+ `fill_halo_regions!` calls per full time step!
@@ -664,7 +664,7 @@ Interface:
 ```julia
 solver = BatchedTridiagonalSolver(grid;
     lower_diagonal,   # 1D or 3D array
-    diagonal,         # 1D or 3D array  
+    diagonal,         # 1D or 3D array
     upper_diagonal,   # 1D or 3D array
     scratch,          # 3D working array
     tridiagonal_direction = ZDirection())
@@ -716,7 +716,7 @@ Time-averaged velocities from the acoustic loop are used for advecting scalars:
 # Accumulate during acoustic loop
 for n = 1:nloop
     # ... acoustic updates ...
-    
+
     if n < nloop
         ū .+= u
         v̄ .+= v
