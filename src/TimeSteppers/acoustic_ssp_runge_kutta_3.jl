@@ -1,6 +1,6 @@
 using KernelAbstractions: @kernel, @index
 
-using Oceananigans: AbstractModel, prognostic_fields, fields
+using Oceananigans: AbstractModel, prognostic_fields, fields, architecture
 using Oceananigans.BoundaryConditions: fill_halo_regions!
 using Oceananigans.Utils: launch!, time_difference_seconds
 
@@ -126,26 +126,43 @@ function compute_slow_momentum_tendencies!(model)
     # These include everything EXCEPT the pressure gradient
     acoustic = model.timestepper.acoustic
     grid = model.grid
-    arch = grid.architecture
-    
+    arch = architecture(grid)
+
     # Get the full tendencies computed by compute_tendencies!
     Gⁿ = model.timestepper.Gⁿ
-    
-    # The "slow" tendencies for acoustic substepping are the full tendencies
-    # minus the pressure gradient (which we compute on-the-fly during acoustics)
-    # For now, we just copy the full tendencies and note that the pressure
-    # gradient in those tendencies will be added again during acoustics.
-    # 
-    # TODO: Refactor tendency computation to separate pressure gradient from
-    # other terms. For now, we include pressure gradient in both slow and fast,
-    # which is equivalent to NOT having acoustic substepping for pressure.
-    # This is a starting point that should give same results as explicit SSPRK3.
-    
-    parent(acoustic.G_slow_ρu) .= parent(Gⁿ.ρu)
-    parent(acoustic.G_slow_ρv) .= parent(Gⁿ.ρv)
-    parent(acoustic.G_slow_ρw) .= parent(Gⁿ.ρw)
-    
+    dynamics = model.dynamics
+
+    # The full tendencies include the pressure gradient via x/y/z_pressure_gradient.
+    # For acoustic substepping, we need to SUBTRACT the pressure gradient from
+    # the full tendencies to get the slow tendencies. The fast pressure gradient
+    # will be computed on-the-fly during the acoustic substep loop.
+    launch!(arch, grid, :xyz, _compute_slow_momentum_tendencies!,
+            acoustic.G_slow_ρu, acoustic.G_slow_ρv, acoustic.G_slow_ρw,
+            Gⁿ.ρu, Gⁿ.ρv, Gⁿ.ρw,
+            dynamics, grid)
+
     return nothing
+end
+
+using Breeze.AtmosphereModels: x_pressure_gradient, y_pressure_gradient, z_pressure_gradient
+
+@kernel function _compute_slow_momentum_tendencies!(G_slow_ρu, G_slow_ρv, G_slow_ρw,
+                                                     Gρu, Gρv, Gρw,
+                                                     dynamics, grid)
+    i, j, k = @index(Global, NTuple)
+
+    # Full tendencies minus pressure gradient = slow tendencies
+    # The pressure gradient was added with a negative sign in the full tendency:
+    # Gρu = (...) - ∂p/∂x, so we need to ADD it back to remove it
+    ∂p∂x = x_pressure_gradient(i, j, k, grid, dynamics)
+    ∂p∂y = y_pressure_gradient(i, j, k, grid, dynamics)
+    ∂p∂z = z_pressure_gradient(i, j, k, grid, dynamics)
+
+    @inbounds begin
+        G_slow_ρu[i, j, k] = Gρu[i, j, k] + ∂p∂x
+        G_slow_ρv[i, j, k] = Gρv[i, j, k] + ∂p∂y
+        G_slow_ρw[i, j, k] = Gρw[i, j, k] + ∂p∂z
+    end
 end
 
 #####

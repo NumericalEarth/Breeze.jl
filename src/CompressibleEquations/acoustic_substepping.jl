@@ -229,7 +229,7 @@ end
     end
     
     # Compute moisture fractions
-    q = compute_moisture_fractions(i, j, k, grid, microphysics, ρ, qᵗ, microphysical_fields)
+    q = grid_moisture_fractions(i, j, k, grid, microphysics, ρ, qᵗ, microphysical_fields)
     
     # Mixture thermodynamic properties
     Rᵐ = mixture_gas_constant(q, constants)
@@ -360,9 +360,10 @@ end
         
         # Density update from compression: ∂ρ/∂t = -ρ ∇·u
         ρ[i, j, k] -= Δts * ρ[i, j, k] * div_u
-        
-        # Divergence damping
-        ρ[i, j, k] += kdiv * (ρ[i, j, k] - ρ_ref[i, j, k])
+
+        # Divergence damping: nudge density back toward reference
+        # If ρ > ρ_ref, we want to subtract; if ρ < ρ_ref, we want to add
+        ρ[i, j, k] -= kdiv * (ρ[i, j, k] - ρ_ref[i, j, k])
         
         # Accumulate time-averaged velocities
         ū[i, j, k] += weight * u[i, j, k]

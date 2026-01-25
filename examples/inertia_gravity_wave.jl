@@ -36,7 +36,7 @@
 # Following the CM1 test case comparisons, we compare four different formulations:
 #
 # 1. **Anelastic**: Filters acoustic waves via the anelastic approximation
-# 2. **Anelastic (Boussinesq-like)**: Anelastic with constant reference density
+# 2. **Boussinesq**: Anelastic with constant reference density
 # 3. **Compressible (explicit)**: Fully compressible with explicit time stepping
 # 4. **Compressible (acoustic substepping)**: Fully compressible with acoustic substepping
 #
@@ -102,19 +102,19 @@ pˢᵗ = 1e5  # Standard pressure for potential temperature (Pa)
 #
 # We use the anelastic formulation with liquid-ice potential temperature thermodynamics:
 
-reference_state = ReferenceState(grid, constants; surface_pressure=p₀, potential_temperature=θ₀)
+reference_state = ReferenceState(grid, constants; surface_pressure=p₀, potential_temperature=θ₀, standard_pressure=pˢᵗ)
 dynamics_anelastic = AnelasticDynamics(reference_state)
 advection = WENO(minimum_buffer_upwind_order=3)
 model_anelastic = AtmosphereModel(grid; dynamics=dynamics_anelastic, advection)
 
 set!(model_anelastic, θ=θᵢ, u=U)
 
-# ## Case 2: Anelastic (Boussinesq-like with constant reference density)
+# ## Case 2: Boussinesq (constant reference density)
 #
-# For the Boussinesq-like case, we set the reference density to a constant value.
+# For the Boussinesq case, we set the reference density to a constant value.
 # This tests how density variation in the reference state affects wave propagation.
 
-reference_state_const = ReferenceState(grid, constants; surface_pressure=p₀, potential_temperature=θ₀)
+reference_state_const = ReferenceState(grid, constants; surface_pressure=p₀, potential_temperature=θ₀, standard_pressure=pˢᵗ)
 
 # Get the surface density and set the entire reference density field to this constant value:
 ρ_surface = adiabatic_hydrostatic_density(0, p₀, θ₀, pˢᵗ, constants)
@@ -131,7 +131,7 @@ set!(model_boussinesq, θ=θᵢ, u=U)
 # This requires smaller time steps due to the acoustic CFL constraint.
 # We explicitly request `SSPRungeKutta3` to override the default acoustic substepping.
 
-dynamics_compressible = CompressibleDynamics(surface_pressure=p₀)
+dynamics_compressible = CompressibleDynamics(surface_pressure=p₀, standard_pressure=pˢᵗ)
 model_compressible = AtmosphereModel(grid;
                                      dynamics = dynamics_compressible,
                                      advection,
@@ -145,7 +145,7 @@ set!(model_compressible; θ=θᵢ, u=U, qᵗ=0, ρ=ρᵢ)
 # This is the default for `CompressibleDynamics` and allows larger advective time steps
 # by substepping the fast acoustic modes.
 
-dynamics_acoustic = CompressibleDynamics(surface_pressure=p₀)
+dynamics_acoustic = CompressibleDynamics(surface_pressure=p₀, standard_pressure=pˢᵗ)
 model_acoustic = AtmosphereModel(grid;
                                  dynamics = dynamics_acoustic,
                                  advection)  # Uses default AcousticSSPRungeKutta3
@@ -238,7 +238,7 @@ setup_output(simulation_acoustic, model_acoustic, "igw_acoustic.jld2")
 @info "Running anelastic simulation..."
 run!(simulation_anelastic)
 
-@info "Running Boussinesq-like simulation..."
+@info "Running Boussinesq simulation..."
 run!(simulation_boussinesq)
 
 @info "Running fully explicit compressible simulation..."
@@ -280,7 +280,7 @@ levels = range(-Δθ/2, stop=Δθ/2, length=21)
 θ′_ac = interior(θ′_acoustic[Nt], :, 1, :)
 
 ax1 = Axis(fig[1, 1], ylabel = "z (km)", title = "Anelastic")
-ax2 = Axis(fig[1, 2], title = "Anelastic (constant ρ)")
+ax2 = Axis(fig[1, 2], title = "Boussinesq")
 ax3 = Axis(fig[2, 1], xlabel = "x (km)", ylabel = "z (km)", title = "Compressible (explicit)")
 ax4 = Axis(fig[2, 2], xlabel = "x (km)", title = "Compressible (acoustic SS)")
 
@@ -316,7 +316,7 @@ n = Observable(1)
 fig_anim = Figure(size=(1200, 800))
 
 ax1 = Axis(fig_anim[1, 1], ylabel = "z (km)", title = "Anelastic")
-ax2 = Axis(fig_anim[1, 2], title = "Anelastic (constant ρ)")
+ax2 = Axis(fig_anim[1, 2], title = "Boussinesq")
 ax3 = Axis(fig_anim[2, 1], xlabel = "x (km)", ylabel = "z (km)", title = "Compressible (explicit)")
 ax4 = Axis(fig_anim[2, 2], xlabel = "x (km)", title = "Compressible (acoustic SS)")
 
@@ -353,7 +353,7 @@ ax = Axis(fig_cross[1, 1], xlabel = "x (km)", ylabel = "θ′ (K)",
           title = "Potential temperature perturbation at z = $(round(z_km[z_mid], digits=1)) km, t = $(prettytime(times[Nt]))")
 
 lines!(ax, x_km, θ′_an[:, z_mid], label = "Anelastic", linewidth=2)
-lines!(ax, x_km, θ′_bo[:, z_mid], label = "Anelastic (const ρ)", linewidth=2, linestyle=:dash)
+lines!(ax, x_km, θ′_bo[:, z_mid], label = "Boussinesq", linewidth=2, linestyle=:dash)
 lines!(ax, x_km, θ′_co[:, z_mid], label = "Compressible (explicit)", linewidth=2, linestyle=:dot)
 lines!(ax, x_km, θ′_ac[:, z_mid], label = "Compressible (acoustic SS)", linewidth=2, linestyle=:dashdot)
 
