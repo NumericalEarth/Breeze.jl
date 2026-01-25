@@ -177,33 +177,33 @@ function acoustic_ssp_rk3_substep!(model, Δt, α, nrk)
     U⁰ = model.timestepper.U⁰
     Gⁿ = model.timestepper.Gⁿ
     acoustic = model.timestepper.acoustic
-    
+
     # Compute slow momentum tendencies (everything except fast pressure gradient)
     compute_slow_momentum_tendencies!(model)
-    
+
     # Effective time step for this RK stage
     Δt_rk = α * Δt
-    
+
     # Execute acoustic substep loop for momentum and density
     acoustic_substep_loop!(model, acoustic, nrk, Δt_rk)
-    
+
     # For non-momentum fields (scalars), use standard SSP RK3 update
     # Start from index 4 (after ρu, ρv, ρw)
     for (i, (u, u⁰, G)) in enumerate(zip(prognostic_fields(model), U⁰, Gⁿ))
         if i <= 3  # Skip momentum (handled by acoustic loop)
             continue
         end
-        
+
         # Handle density specially - it's updated in acoustic loop
         if i == 4 + length(model.tracers) + 1  # This is a rough heuristic; need to check
             continue
         end
-        
+
         launch!(arch, grid, :xyz, _ssp_rk3_substep!, u, u⁰, G, Δt, α)
-        
+
         # Field index for implicit solver
         field_index = Val(i - 3)
-        
+
         implicit_step!(u,
                        model.timestepper.implicit_solver,
                        model.closure,
@@ -213,7 +213,7 @@ function acoustic_ssp_rk3_substep!(model, Δt, α, nrk)
                        fields(model),
                        α * Δt)
     end
-    
+
     return nothing
 end
 
@@ -233,20 +233,20 @@ function scalar_ssp_rk3_substep!(model, Δt, α)
     U⁰ = model.timestepper.U⁰
     Gⁿ = model.timestepper.Gⁿ
     acoustic = model.timestepper.acoustic
-    
+
     # Get indices for scalar fields (after momentum: ρu, ρv, ρw, and dynamics: ρ)
     prognostic = prognostic_fields(model)
     n_momentum = 3  # ρu, ρv, ρw
-    
+
     for (i, (u, u⁰, G)) in enumerate(zip(prognostic, U⁰, Gⁿ))
         # Skip momentum fields (handled by acoustic loop)
         if i <= n_momentum
             continue
         end
-        
+
         # Apply standard SSP RK3 update
         launch!(arch, grid, :xyz, _ssp_rk3_substep!, u, u⁰, G, Δt, α)
-        
+
         # Implicit diffusion step
         field_index = Val(i - n_momentum)
         implicit_step!(u,
@@ -258,7 +258,7 @@ function scalar_ssp_rk3_substep!(model, Δt, α)
                        fields(model),
                        α * Δt)
     end
-    
+
     return nothing
 end
 
@@ -324,7 +324,7 @@ function OceananigansTimeSteppers.time_step!(model::AbstractModel{<:AcousticSSPR
     acoustic_ssp_rk3_substep!(model, Δt, α¹, 1)
 
     # No pressure correction for compressible (done in acoustic loop)
-    
+
     tick!(model.clock, Δt; stage=true)
     update_state!(model, callbacks; compute_tendencies = true)
     step_lagrangian_particles!(model, Δt)
