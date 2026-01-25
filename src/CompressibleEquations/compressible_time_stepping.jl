@@ -18,14 +18,14 @@ $(TYPEDSIGNATURES)
 
 No-op for `CompressibleDynamics` - pressure is computed diagnostically from the equation of state.
 """
-NonhydrostaticModels.compute_pressure_correction!(::CompressibleModel, Δt) = nothing
+TimeSteppers.compute_pressure_correction!(::CompressibleModel, Δt) = nothing
 
 """
 $(TYPEDSIGNATURES)
 
 No-op for `CompressibleDynamics` - no pressure projection is needed.
 """
-NonhydrostaticModels.make_pressure_correction!(::CompressibleModel, Δt) = nothing
+TimeSteppers.make_pressure_correction!(::CompressibleModel, Δt) = nothing
 
 #####
 ##### Pressure solver (no-op)
