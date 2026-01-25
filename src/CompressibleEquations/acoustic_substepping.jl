@@ -40,7 +40,7 @@ Fields
 - `c²`: Moist sound speed squared c² = γᵐ ψ (CenterField)
 - `ū, v̄, w̄`: Time-averaged velocities for scalar advection
 - `Gˢρu, Gˢρv, Gˢρw`: Slow tendencies (fixed during acoustic loop)
-- `ρ₀`: Reference density at start of acoustic loop (for damping)
+- `ρᵣ`: Reference density at start of acoustic loop (for damping)
 - `vertical_solver`: BatchedTridiagonalSolver for w-ρ implicit coupling
 - `rhs`: Right-hand side storage for tridiagonal solve
 """
@@ -69,7 +69,7 @@ struct AcousticSubstepper{N, FT, CF, UF, VF, WF, TS, RHS}
     Gˢρw :: WF
 
     # Reference density at start of acoustic loop (for divergence damping)
-    ρ₀ :: CF
+    ρᵣ :: CF
 
     # Vertical tridiagonal solver for implicit w-ρ coupling
     vertical_solver :: TS
@@ -90,7 +90,7 @@ Adapt.adapt_structure(to, a::AcousticSubstepper) =
                        adapt(to, a.Gˢρu),
                        adapt(to, a.Gˢρv),
                        adapt(to, a.Gˢρw),
-                       adapt(to, a.ρ₀),
+                       adapt(to, a.ρᵣ),
                        adapt(to, a.vertical_solver),
                        adapt(to, a.rhs))
 
@@ -128,7 +128,7 @@ function AcousticSubstepper(grid; Nˢ::N=6, α=0.5, κᵈ=0.05) where N
     Gˢρw = ZFaceField(grid)
 
     # Reference density
-    ρ₀ = CenterField(grid)
+    ρᵣ = CenterField(grid)
 
     # Vertical tridiagonal solver
     vertical_solver = build_acoustic_vertical_solver(grid)
@@ -140,7 +140,7 @@ function AcousticSubstepper(grid; Nˢ::N=6, α=0.5, κᵈ=0.05) where N
                               ψ, c²,
                               ū, v̄, w̄,
                               Gˢρu, Gˢρv, Gˢρw,
-                              ρ₀,
+                              ρᵣ,
                               vertical_solver,
                               rhs)
 end
@@ -347,18 +347,18 @@ function acoustic_density_step!(model, acoustic, Δtˢ, n, Nˢₛₜₐgₑ)
     grid = model.grid
     arch = architecture(grid)
 
-    wᵗ = 1 / Nˢₛₜₐgₑ  # Uniform time-averaging weight
+    χᵗ = 1 / Nˢₛₜₐgₑ  # Uniform time-averaging weight
 
     launch!(arch, grid, :xyz, _acoustic_density_and_averaging!,
-            model.dynamics.density, grid, Δtˢ, wᵗ,
+            model.dynamics.density, grid, Δtˢ, χᵗ,
             model.velocities.u, model.velocities.v, model.velocities.w,
-            acoustic.ρ₀, acoustic.κᵈ,
+            acoustic.ρᵣ, acoustic.κᵈ,
             acoustic.ū, acoustic.v̄, acoustic.w̄)
 
     return nothing
 end
 
-@kernel function _acoustic_density_and_averaging!(ρ, grid, Δtˢ, wᵗ, u, v, w, ρ₀, κᵈ, ū, v̄, w̄)
+@kernel function _acoustic_density_and_averaging!(ρ, grid, Δtˢ, χᵗ, u, v, w, ρᵣ, κᵈ, ū, v̄, w̄)
     i, j, k = @index(Global, NTuple)
 
     @inbounds begin
@@ -369,12 +369,12 @@ end
         ρ[i, j, k] -= Δtˢ * ρ[i, j, k] * ∇u
 
         # Divergence damping: nudge density toward reference
-        ρ[i, j, k] -= κᵈ * (ρ[i, j, k] - ρ₀[i, j, k])
+        ρ[i, j, k] -= κᵈ * (ρ[i, j, k] - ρᵣ[i, j, k])
 
         # Accumulate time-averaged velocities
-        ū[i, j, k] += wᵗ * u[i, j, k]
-        v̄[i, j, k] += wᵗ * v[i, j, k]
-        w̄[i, j, k] += wᵗ * w[i, j, k]
+        ū[i, j, k] += χᵗ * u[i, j, k]
+        v̄[i, j, k] += χᵗ * v[i, j, k]
+        w̄[i, j, k] += χᵗ * w[i, j, k]
     end
 end
 
@@ -454,7 +454,7 @@ function acoustic_substep_loop!(model, acoustic, stage, Δt)
     compute_acoustic_coefficients!(acoustic, model)
 
     # Store density reference for divergence damping
-    parent(acoustic.ρ₀) .= parent(model.dynamics.density)
+    parent(acoustic.ρᵣ) .= parent(model.dynamics.density)
 
     # Initialize time-averaged velocities
     fill!(acoustic.ū, 0)
