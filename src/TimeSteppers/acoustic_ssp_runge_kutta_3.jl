@@ -30,8 +30,8 @@ This time stepper implements the Wicker-Skamarock scheme used in CM1:
 - Inner acoustic substep loop for fast tendencies (pressure gradient, compression)
 
 The acoustic substepping separates time scales:
-- Slow modes (advection, buoyancy): CFL ≈ 10-20 m/s → Δt_slow ~ 1-10 s
-- Fast modes (acoustic): CFL ≈ 340 m/s → Δt_fast ~ 0.1-0.3 s
+- Slow modes (advection, buoyancy): CFL ≈ 10-20 m/s → Δtˢˡᵒʷ ~ 1-10 s
+- Fast modes (acoustic): CFL ≈ 340 m/s → Δtˢ ~ 0.1-0.3 s
 
 By substepping the fast modes, we can use ~6 acoustic substeps per slow step
 instead of reducing the overall time step by a factor of ~30.
@@ -59,9 +59,9 @@ end
     AcousticSSPRungeKutta3(grid, prognostic_fields;
                           implicit_solver = nothing,
                           Gⁿ = map(similar, prognostic_fields),
-                          nsound = 6,
-                          acoustic_α = 0.5,
-                          kdiv = 0.05)
+                          Nˢ = 6,
+                          α = 0.5,
+                          κᵈ = 0.05)
 
 Construct an `AcousticSSPRungeKutta3` time stepper for fully compressible dynamics.
 
@@ -73,9 +73,9 @@ Keyword Arguments
 
 - `implicit_solver`: Optional implicit solver for diffusion. Default: `nothing`
 - `Gⁿ`: Tendency fields at current stage. Default: similar to `prognostic_fields`
-- `nsound`: Number of acoustic substeps per full time step. Default: 6
-- `acoustic_α`: Implicitness parameter for vertical acoustic solve. Default: 0.5
-- `kdiv`: Divergence damping coefficient. Default: 0.05
+- `Nˢ`: Number of acoustic substeps per full time step. Default: 6
+- `α`: Implicitness parameter for vertical acoustic solve. Default: 0.5
+- `κᵈ`: Divergence damping coefficient. Default: 0.05
 
 References
 ==========
@@ -89,9 +89,9 @@ Wicker, L.J. and Skamarock, W.C. (2002). Time-Splitting Methods for Elastic Mode
 function AcousticSSPRungeKutta3(grid, prognostic_fields;
                                 implicit_solver::TI = nothing,
                                 Gⁿ::TG = map(similar, prognostic_fields),
-                                nsound = 6,
-                                acoustic_α = 0.5,
-                                kdiv = 0.05) where {TI, TG}
+                                Nˢ = 6,
+                                α = 0.5,
+                                κᵈ = 0.05) where {TI, TG}
 
     FT = eltype(grid)
 
@@ -105,7 +105,7 @@ function AcousticSSPRungeKutta3(grid, prognostic_fields;
     U0 = typeof(U⁰)
 
     # Create acoustic substepping infrastructure
-    acoustic = AcousticSubstepper(grid; nsound, α=acoustic_α, kdiv)
+    acoustic = AcousticSubstepper(grid; Nˢ, α, κᵈ)
     AS = typeof(acoustic)
 
     return AcousticSSPRungeKutta3{FT, U0, TG, TI, AS}(α¹, α², α³, U⁰, Gⁿ, implicit_solver, acoustic)
@@ -118,50 +118,53 @@ end
 """
 Compute slow tendencies for momentum (advection, Coriolis, turbulence, forcing).
 
-The pressure gradient is NOT included here - it's computed on-the-fly
-during the acoustic substep loop using the current density.
+The pressure gradient and buoyancy are NOT included here - they are "fast" terms
+that are computed during the acoustic substep loop. In hydrostatic equilibrium,
+pressure gradient and buoyancy nearly cancel, so treating them together in the
+fast loop maintains stability.
 """
 function compute_slow_momentum_tendencies!(model)
-    # The slow tendencies are stored in acoustic.G_slow_ρu, G_slow_ρv, G_slow_ρw
-    # These include everything EXCEPT the pressure gradient
     acoustic = model.timestepper.acoustic
     grid = model.grid
     arch = architecture(grid)
 
-    # Get the full tendencies computed by compute_tendencies!
     Gⁿ = model.timestepper.Gⁿ
     dynamics = model.dynamics
 
-    # The full tendencies include the pressure gradient via x/y/z_pressure_gradient.
-    # For acoustic substepping, we need to SUBTRACT the pressure gradient from
-    # the full tendencies to get the slow tendencies. The fast pressure gradient
-    # will be computed on-the-fly during the acoustic substep loop.
+    # The full tendencies include pressure gradient and buoyancy.
+    # For acoustic substepping, we subtract both to get slow tendencies.
     launch!(arch, grid, :xyz, _compute_slow_momentum_tendencies!,
-            acoustic.G_slow_ρu, acoustic.G_slow_ρv, acoustic.G_slow_ρw,
+            acoustic.Gˢρu, acoustic.Gˢρv, acoustic.Gˢρw,
             Gⁿ.ρu, Gⁿ.ρv, Gⁿ.ρw,
-            dynamics, grid)
+            dynamics, grid, model.thermodynamic_constants)
 
     return nothing
 end
 
-using Breeze.AtmosphereModels: x_pressure_gradient, y_pressure_gradient, z_pressure_gradient
+using Oceananigans.Operators: ℑzᵃᵃᶠ
+using Breeze.AtmosphereModels: x_pressure_gradient, y_pressure_gradient, z_pressure_gradient, dynamics_density
 
-@kernel function _compute_slow_momentum_tendencies!(G_slow_ρu, G_slow_ρv, G_slow_ρw,
+@kernel function _compute_slow_momentum_tendencies!(Gˢρu, Gˢρv, Gˢρw,
                                                      Gρu, Gρv, Gρw,
-                                                     dynamics, grid)
+                                                     dynamics, grid, constants)
     i, j, k = @index(Global, NTuple)
 
-    # Full tendencies minus pressure gradient = slow tendencies
-    # The pressure gradient was added with a negative sign in the full tendency:
-    # Gρu = (...) - ∂p/∂x, so we need to ADD it back to remove it
-    ∂p∂x = x_pressure_gradient(i, j, k, grid, dynamics)
-    ∂p∂y = y_pressure_gradient(i, j, k, grid, dynamics)
-    ∂p∂z = z_pressure_gradient(i, j, k, grid, dynamics)
+    # Full tendencies minus (pressure gradient + buoyancy) = slow tendencies
+    ∂ₓp = x_pressure_gradient(i, j, k, grid, dynamics)
+    ∂ᵧp = y_pressure_gradient(i, j, k, grid, dynamics)
+    ∂zp = z_pressure_gradient(i, j, k, grid, dynamics)
+
+    # Buoyancy term: ρb = -gρ at cell faces
+    ρ = dynamics_density(dynamics)
+    g = constants.gravitational_acceleration
+    ρᶜᶜᶠ = ℑzᵃᵃᶠ(i, j, k, grid, ρ)
+    ρb = -g * ρᶜᶜᶠ
 
     @inbounds begin
-        G_slow_ρu[i, j, k] = Gρu[i, j, k] + ∂p∂x
-        G_slow_ρv[i, j, k] = Gρv[i, j, k] + ∂p∂y
-        G_slow_ρw[i, j, k] = Gρw[i, j, k] + ∂p∂z
+        Gˢρu[i, j, k] = Gρu[i, j, k] + ∂ₓp
+        Gˢρv[i, j, k] = Gρv[i, j, k] + ∂ᵧp
+        # Remove both pressure gradient AND buoyancy from vertical momentum
+        Gˢρw[i, j, k] = Gρw[i, j, k] + ∂zp - ρb
     end
 end
 
@@ -170,44 +173,43 @@ end
 #####
 
 """
-Apply an SSP RK3 substep with acoustic substepping:
+Apply an SSP RK3 substep with acoustic substepping.
 
 For momentum: acoustic substep loop handles the update
 For scalars: standard SSP RK3 update using time-averaged velocities
 """
-function acoustic_ssp_rk3_substep!(model, Δt, α, nrk)
+function acoustic_ssp_rk3_substep!(model, Δt, α, stage)
     grid = model.grid
     arch = grid.architecture
     U⁰ = model.timestepper.U⁰
     Gⁿ = model.timestepper.Gⁿ
     acoustic = model.timestepper.acoustic
-    
+
     # Compute slow momentum tendencies (everything except fast pressure gradient)
     compute_slow_momentum_tendencies!(model)
-    
+
     # Effective time step for this RK stage
-    Δt_rk = α * Δt
-    
+    Δtˢᵗᵃᵍᵉ = α * Δt
+
     # Execute acoustic substep loop for momentum and density
-    acoustic_substep_loop!(model, acoustic, nrk, Δt_rk)
-    
+    acoustic_substep_loop!(model, acoustic, stage, Δtˢᵗᵃᵍᵉ)
+
     # For non-momentum fields (scalars), use standard SSP RK3 update
-    # Start from index 4 (after ρu, ρv, ρw)
     for (i, (u, u⁰, G)) in enumerate(zip(prognostic_fields(model), U⁰, Gⁿ))
         if i <= 3  # Skip momentum (handled by acoustic loop)
             continue
         end
-        
+
         # Handle density specially - it's updated in acoustic loop
-        if i == 4 + length(model.tracers) + 1  # This is a rough heuristic; need to check
+        if i == 4 + length(model.tracers) + 1  # Rough heuristic; TODO: improve
             continue
         end
-        
+
         launch!(arch, grid, :xyz, _ssp_rk3_substep!, u, u⁰, G, Δt, α)
-        
+
         # Field index for implicit solver
         field_index = Val(i - 3)
-        
+
         implicit_step!(u,
                        model.timestepper.implicit_solver,
                        model.closure,
@@ -217,7 +219,7 @@ function acoustic_ssp_rk3_substep!(model, Δt, α, nrk)
                        fields(model),
                        α * Δt)
     end
-    
+
     return nothing
 end
 
@@ -237,20 +239,17 @@ function scalar_ssp_rk3_substep!(model, Δt, α)
     U⁰ = model.timestepper.U⁰
     Gⁿ = model.timestepper.Gⁿ
     acoustic = model.timestepper.acoustic
-    
-    # Get indices for scalar fields (after momentum: ρu, ρv, ρw, and dynamics: ρ)
+
     prognostic = prognostic_fields(model)
     n_momentum = 3  # ρu, ρv, ρw
-    
+
     for (i, (u, u⁰, G)) in enumerate(zip(prognostic, U⁰, Gⁿ))
-        # Skip momentum fields (handled by acoustic loop)
-        if i <= n_momentum
+        if i <= n_momentum  # Skip momentum (handled by acoustic loop)
             continue
         end
-        
-        # Apply standard SSP RK3 update
+
         launch!(arch, grid, :xyz, _ssp_rk3_substep!, u, u⁰, G, Δt, α)
-        
+
         # Implicit diffusion step
         field_index = Val(i - n_momentum)
         implicit_step!(u,
@@ -262,7 +261,7 @@ function scalar_ssp_rk3_substep!(model, Δt, α)
                        fields(model),
                        α * Δt)
     end
-    
+
     return nothing
 end
 
@@ -299,7 +298,7 @@ The algorithm is the Wicker-Skamarock scheme:
 - Inner loop: Acoustic substeps for fast (pressure) tendencies
 
 Each RK stage:
-1. Compute slow tendencies (advection, Coriolis, buoyancy, turbulence)
+1. Compute slow tendencies (advection, Coriolis, diffusion)
 2. Execute acoustic substep loop for momentum and density
 3. Update scalars using standard RK update with time-averaged velocities
 """
@@ -317,24 +316,22 @@ function OceananigansTimeSteppers.time_step!(model::AbstractModel{<:AcousticSSPR
     # Compute the next time step a priori
     tⁿ⁺¹ = model.clock.time + Δt
 
-    # Store u^(0) for use in stages 2 and 3
+    # Store u⁰ for use in stages 2 and 3
     store_initial_state!(model)
 
     #
-    # First stage: u^(1) = u^(0) + Δt * L(u^(0))
+    # Stage 1: u¹ = u⁰ + Δt L(u⁰)
     #
 
     compute_flux_bc_tendencies!(model)
     acoustic_ssp_rk3_substep!(model, Δt, α¹, 1)
 
-    # No pressure correction for compressible (done in acoustic loop)
-    
     tick!(model.clock, Δt; stage=true)
     update_state!(model, callbacks; compute_tendencies = true)
     step_lagrangian_particles!(model, Δt)
 
     #
-    # Second stage: u^(2) = 3/4 u^(0) + 1/4 (u^(1) + Δt * L(u^(1)))
+    # Stage 2: u² = ¾ u⁰ + ¼ (u¹ + Δt L(u¹))
     #
 
     compute_flux_bc_tendencies!(model)
@@ -344,7 +341,7 @@ function OceananigansTimeSteppers.time_step!(model::AbstractModel{<:AcousticSSPR
     step_lagrangian_particles!(model, α² * Δt)
 
     #
-    # Third stage: u^(3) = 1/3 u^(0) + 2/3 (u^(2) + Δt * L(u^(2)))
+    # Stage 3: u³ = ⅓ u⁰ + ⅔ (u² + Δt L(u²))
     #
 
     compute_flux_bc_tendencies!(model)
