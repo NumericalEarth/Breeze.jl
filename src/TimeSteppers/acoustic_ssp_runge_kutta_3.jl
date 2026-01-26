@@ -112,6 +112,8 @@ end
 #####
 
 """
+$(TYPEDSIGNATURES)
+
 Compute slow tendencies for momentum (advection, Coriolis, turbulence, forcing).
 
 The pressure gradient and buoyancy are NOT included here - they are "fast" terms
@@ -299,7 +301,7 @@ Each RK stage:
 2. Execute acoustic substep loop for momentum and density
 3. Update scalars using standard RK update with time-averaged velocities
 """
-function OceananigansTimeSteppers.time_step!(model::AbstractModel{<:AcousticSSPRungeKutta3}, Δt; callbacks=[])
+function OceananigansTimeSteppers.time_step!(model::AtmosphereModel{<:Any, <:Any, <:Any, <:AcousticSSPRungeKutta3}, Δt; callbacks=[])
     Δt == 0 && @warn "Δt == 0 may cause model blowup!"
 
     # Be paranoid and update state at iteration 0
