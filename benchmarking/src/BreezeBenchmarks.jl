@@ -61,19 +61,7 @@ function BenchmarkMetadata(arch)
     end
 
     # Get CPU model (platform-specific)
-    cpu_model = try
-        if Sys.isapple()
-            strip(read(`sysctl -n machdep.cpu.brand_string`, String))
-        elseif Sys.islinux()
-            lines = readlines("/proc/cpuinfo")
-            model_line = filter(l -> startswith(l, "model name"), lines)
-            isempty(model_line) ? "Unknown CPU" : split(model_line[1], ":")[2] |> strip
-        else
-            "Unknown CPU"
-        end
-    catch
-        "Unknown CPU"
-    end
+    cpu_model = "$(Sys.cpu_info()[1].model) ($(Sys.CPU_NAME))"
 
     return BenchmarkMetadata(
         string(VERSION),
