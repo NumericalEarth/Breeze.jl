@@ -85,7 +85,7 @@ end
                             timestepper = :AcousticSSPRungeKutta3)
 
     @test model.timestepper isa AcousticSSPRungeKutta3
-    @test model.timestepper.acoustic isa AcousticSubstepper
+    @test model.timestepper.substepper isa AcousticSubstepper
     @test model.timestepper.α¹ ≈ FT(1)
     @test model.timestepper.α² ≈ FT(1//4)
     @test model.timestepper.α³ ≈ FT(2//3)
@@ -115,8 +115,8 @@ end
     # The model.temperature field is computed via update_state!
     # which is automatically called after set!
     # Now compute acoustic coefficients
-    acoustic = model.timestepper.acoustic
-    compute_acoustic_coefficients!(acoustic, model)
+    substepper = model.timestepper.substepper
+    compute_acoustic_coefficients!(substepper, model)
 
     # Check temperature is reasonable
     T_value = @allowscalar model.temperature[2, 2, 4]
@@ -128,11 +128,11 @@ end
     # Sound speed c ≈ 347 m/s
     c²_expected = 1.4 * 287 * T_value  # Use actual temperature
 
-    @test @allowscalar acoustic.ψ[2, 2, 4] > 0  # ψ = R T should be positive
-    @test @allowscalar acoustic.c²[2, 2, 4] > 0  # c² should be positive
+    @test @allowscalar substepper.ψ[2, 2, 4] > 0  # ψ = R T should be positive
+    @test @allowscalar substepper.c²[2, 2, 4] > 0  # c² should be positive
 
     # c² should be roughly in the right ballpark (within 50%)
-    c²_value = @allowscalar acoustic.c²[2, 2, 4]
+    c²_value = @allowscalar substepper.c²[2, 2, 4]
     @test 0.5 * c²_expected < c²_value < 2.0 * c²_expected
 end
 

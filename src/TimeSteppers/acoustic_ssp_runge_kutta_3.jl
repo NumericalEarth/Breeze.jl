@@ -39,7 +39,7 @@ Fields
 - `U⁰`: Storage for state at beginning of time step
 - `Gⁿ`: Tendency fields at current stage
 - `implicit_solver`: Optional implicit solver for diffusion
-- `acoustic`: AcousticSubstepper for acoustic substepping infrastructure
+- `substepper`: AcousticSubstepper for acoustic substepping infrastructure
 """
 struct AcousticSSPRungeKutta3{FT, U0, TG, TI, AS} <: AbstractTimeStepper
     α¹ :: FT
@@ -48,7 +48,7 @@ struct AcousticSSPRungeKutta3{FT, U0, TG, TI, AS} <: AbstractTimeStepper
     U⁰ :: U0
     Gⁿ :: TG
     implicit_solver :: TI
-    acoustic :: AS
+    substepper :: AS
 end
 
 """
@@ -101,10 +101,10 @@ function AcousticSSPRungeKutta3(grid, prognostic_fields;
     U0 = typeof(U⁰)
 
     # Create acoustic substepping infrastructure
-    acoustic = AcousticSubstepper(grid; Ns, α, κᵈ)
-    AS = typeof(acoustic)
+    substepper = AcousticSubstepper(grid; Ns, α, κᵈ)
+    AS = typeof(substepper)
 
-    return AcousticSSPRungeKutta3{FT, U0, TG, TI, AS}(α¹, α², α³, U⁰, Gⁿ, implicit_solver, acoustic)
+    return AcousticSSPRungeKutta3{FT, U0, TG, TI, AS}(α¹, α², α³, U⁰, Gⁿ, implicit_solver, substepper)
 end
 
 #####
@@ -120,7 +120,7 @@ pressure gradient and buoyancy nearly cancel, so treating them together in the
 fast loop maintains stability.
 """
 function compute_slow_momentum_tendencies!(model)
-    acoustic = model.timestepper.acoustic
+    substepper = model.timestepper.substepper
     grid = model.grid
     arch = architecture(grid)
 
@@ -130,7 +130,7 @@ function compute_slow_momentum_tendencies!(model)
     # The full tendencies include pressure gradient and buoyancy.
     # For acoustic substepping, we subtract both to get slow tendencies.
     launch!(arch, grid, :xyz, _compute_slow_momentum_tendencies!,
-            acoustic.Gˢρu, acoustic.Gˢρv, acoustic.Gˢρw,
+            substepper.Gˢρu, substepper.Gˢρv, substepper.Gˢρw,
             Gⁿ.ρu, Gⁿ.ρv, Gⁿ.ρw,
             dynamics, grid, model.thermodynamic_constants)
 
@@ -179,7 +179,7 @@ function acoustic_ssp_rk3_substep!(model, Δt, α, stage)
     arch = grid.architecture
     U⁰ = model.timestepper.U⁰
     Gⁿ = model.timestepper.Gⁿ
-    acoustic = model.timestepper.acoustic
+    substepper = model.timestepper.substepper
 
     # Compute slow momentum tendencies (everything except fast pressure gradient)
     compute_slow_momentum_tendencies!(model)
@@ -188,7 +188,7 @@ function acoustic_ssp_rk3_substep!(model, Δt, α, stage)
     Δtˢᵗᵃᵍᵉ = α * Δt
 
     # Execute acoustic substep loop for momentum and density
-    acoustic_substep_loop!(model, acoustic, stage, Δtˢᵗᵃᵍᵉ)
+    acoustic_substep_loop!(model, substepper, stage, Δtˢᵗᵃᵍᵉ)
 
     # For non-momentum fields (scalars), use standard SSP RK3 update
     for (i, (u, u⁰, G)) in enumerate(zip(prognostic_fields(model), U⁰, Gⁿ))
@@ -234,7 +234,7 @@ function scalar_ssp_rk3_substep!(model, Δt, α)
     arch = grid.architecture
     U⁰ = model.timestepper.U⁰
     Gⁿ = model.timestepper.Gⁿ
-    acoustic = model.timestepper.acoustic
+    substepper = model.timestepper.substepper
 
     prognostic = prognostic_fields(model)
     n_momentum = 3  # ρu, ρv, ρw

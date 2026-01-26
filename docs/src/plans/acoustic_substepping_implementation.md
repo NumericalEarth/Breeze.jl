@@ -210,7 +210,7 @@ Following Oceananigans.SplitExplicit pattern with pre-converted kernel arguments
 
 ```julia
 function acoustic_substep_loop!(model, nrk, Δt_rk, nsound)
-    acoustic = model.timestepper.acoustic
+    substepper = model.timestepper.substepper
     grid = model.grid
     arch = architecture(grid)
     dynamics = model.dynamics
@@ -329,7 +329,7 @@ function acoustic_implicit_vertical_step!(model, Δts, α, β)
     compute_vertical_rhs!(model, Δts, α, β)
 
     # Solve for w^{n+1}
-    solve!(model.momentum.ρw, model.timestepper.acoustic.vertical_solver, rhs)
+    solve!(model.momentum.ρw, model.timestepper.substepper.vertical_solver, rhs)
 
     # Update density from new w
     update_density_from_w!(model, Δts, α, β)

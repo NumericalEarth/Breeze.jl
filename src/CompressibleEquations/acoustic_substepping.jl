@@ -207,12 +207,12 @@ Compute ψ = Rᵐ T and c² = γᵐ ψ for the acoustic substep loop.
 These coefficients are held fixed during acoustic substepping since
 temperature evolves via slow tendencies only.
 """
-function compute_acoustic_coefficients!(acoustic, model)
+function compute_acoustic_coefficients!(substepper, model)
     grid = model.grid
     arch = architecture(grid)
 
     launch!(arch, grid, :xyz, _compute_acoustic_coefficients!,
-            acoustic.ψ, acoustic.c²,
+            substepper.ψ, substepper.c²,
             model.dynamics.density,
             model.specific_moisture,
             model.temperature,
@@ -261,13 +261,13 @@ Update horizontal momentum with fast pressure gradient (explicit).
 
 Uses on-the-fly pressure gradient: ∂p/∂x = ψ ∂ρ/∂x where ψ = Rᵐ T.
 """
-function acoustic_horizontal_momentum_step!(model, acoustic, Δtˢ)
+function acoustic_horizontal_momentum_step!(model, substepper, Δtˢ)
     grid = model.grid
     arch = architecture(grid)
 
     launch!(arch, grid, :xyz, _acoustic_horizontal_momentum!,
             model.momentum.ρu, model.momentum.ρv, grid, Δtˢ,
-            model.dynamics.density, acoustic.ψ)
+            model.dynamics.density, substepper.ψ)
 
     return nothing
 end
@@ -304,13 +304,13 @@ Update vertical momentum with fast pressure gradient and buoyancy.
 For now, use explicit vertical pressure gradient.
 The full implicit solve will be added in a future iteration.
 """
-function acoustic_vertical_momentum_step!(model, acoustic, Δtˢ, g)
+function acoustic_vertical_momentum_step!(model, substepper, Δtˢ, g)
     grid = model.grid
     arch = architecture(grid)
 
     launch!(arch, grid, :xyz, _acoustic_vertical_momentum!,
             model.momentum.ρw, grid, Δtˢ, g,
-            model.dynamics.density, acoustic.ψ)
+            model.dynamics.density, substepper.ψ)
 
     return nothing
 end
@@ -343,7 +343,7 @@ Update density from compression and accumulate time-averaged velocities.
 The compression term is the fast (acoustic) part of continuity:
 ∂ₜρ = -ρ ∇·u
 """
-function acoustic_density_step!(model, acoustic, Δtˢ, n, Nsₛₜₐgₑ)
+function acoustic_density_step!(model, substepper, Δtˢ, n, Nsₛₜₐgₑ)
     grid = model.grid
     arch = architecture(grid)
 
@@ -352,8 +352,8 @@ function acoustic_density_step!(model, acoustic, Δtˢ, n, Nsₛₜₐgₑ)
     launch!(arch, grid, :xyz, _acoustic_density_and_averaging!,
             model.dynamics.density, grid, Δtˢ, χᵗ,
             model.velocities.u, model.velocities.v, model.velocities.w,
-            acoustic.ρᵣ, acoustic.κᵈ,
-            acoustic.ū, acoustic.v̄, acoustic.w̄)
+            substepper.ρᵣ, substepper.κᵈ,
+            substepper.ū, substepper.v̄, substepper.w̄)
 
     return nothing
 end
@@ -435,10 +435,10 @@ Arguments
 - `stage`: RK stage number (1, 2, or 3)
 - `Δt`: Time step for this RK stage (α × full Δt)
 """
-function acoustic_substep_loop!(model, acoustic, stage, Δt)
+function acoustic_substep_loop!(model, substepper, stage, Δt)
     grid = model.grid
     arch = architecture(grid)
-    Ns = acoustic.Ns
+    Ns = substepper.Ns
     g = model.thermodynamic_constants.gravitational_acceleration
 
     # Number of substeps for this RK stage
@@ -448,30 +448,30 @@ function acoustic_substep_loop!(model, acoustic, stage, Δt)
     # === PRECOMPUTE PHASE (once per RK stage) ===
 
     # Apply slow tendencies to momentum ONCE for the full RK stage
-    apply_slow_momentum_tendencies!(model, acoustic, Δt)
+    apply_slow_momentum_tendencies!(model, substepper, Δt)
 
     # Compute thermodynamic coefficients: ψ = Rᵐ T, c² = γᵐ ψ
-    compute_acoustic_coefficients!(acoustic, model)
+    compute_acoustic_coefficients!(substepper, model)
 
     # Store density reference for divergence damping
-    parent(acoustic.ρᵣ) .= parent(model.dynamics.density)
+    parent(substepper.ρᵣ) .= parent(model.dynamics.density)
 
     # Initialize time-averaged velocities
-    fill!(acoustic.ū, 0)
-    fill!(acoustic.v̄, 0)
-    fill!(acoustic.w̄, 0)
+    fill!(substepper.ū, 0)
+    fill!(substepper.v̄, 0)
+    fill!(substepper.w̄, 0)
 
     # === ACOUSTIC SUBSTEP LOOP ===
     for n = 1:Nsₛₜₐgₑ
         # Update momentum from fast terms (pressure gradient + buoyancy)
-        acoustic_horizontal_momentum_step!(model, acoustic, Δtˢ)
-        acoustic_vertical_momentum_step!(model, acoustic, Δtˢ, g)
+        acoustic_horizontal_momentum_step!(model, substepper, Δtˢ)
+        acoustic_vertical_momentum_step!(model, substepper, Δtˢ, g)
 
         # Update velocities from momentum
         update_velocities_from_momentum!(model)
 
         # Update density from compression + accumulate averaged velocities
-        acoustic_density_step!(model, acoustic, Δtˢ, n, Nsₛₜₐgₑ)
+        acoustic_density_step!(model, substepper, Δtˢ, n, Nsₛₜₐgₑ)
     end
 
     return nothing
@@ -483,13 +483,13 @@ Apply slow momentum tendencies once per RK stage.
 The slow tendencies (advection, Coriolis, diffusion - everything except
 pressure gradient and buoyancy) are integrated over the full stage Δt.
 """
-function apply_slow_momentum_tendencies!(model, acoustic, Δt)
+function apply_slow_momentum_tendencies!(model, substepper, Δt)
     grid = model.grid
     arch = architecture(grid)
 
     launch!(arch, grid, :xyz, _apply_slow_momentum_tendencies!,
             model.momentum.ρu, model.momentum.ρv, model.momentum.ρw,
-            acoustic.Gˢρu, acoustic.Gˢρv, acoustic.Gˢρw,
+            substepper.Gˢρu, substepper.Gˢρv, substepper.Gˢρw,
             Δt)
 
     return nothing
