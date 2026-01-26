@@ -398,3 +398,7 @@ function OceananigansDiagnostics.default_nan_checker(model::AtmosphereModel)
     nan_checker = NaNChecker(field_to_check_nans)
     return nan_checker
 end
+
+# For compatibility with Oceananigans JLD2Writer
+Oceananigans.OutputWriters.default_included_properties(::AtmosphereModel) = [:grid]
+
