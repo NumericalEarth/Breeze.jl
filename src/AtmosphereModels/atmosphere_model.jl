@@ -401,4 +401,3 @@ end
 
 # For compatibility with Oceananigans JLD2Writer
 Oceananigans.OutputWriters.default_included_properties(::AtmosphereModel) = [:grid]
-
