@@ -224,6 +224,8 @@ end
 #####
 
 """
+$(TYPEDSIGNATURES)
+
 Update scalar fields using standard SSP RK3 with time-averaged velocities.
 
 For scalars (θ, moisture, tracers), we use the time-averaged velocities
