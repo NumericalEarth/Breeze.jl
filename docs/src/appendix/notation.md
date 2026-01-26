@@ -122,8 +122,8 @@ The following table also uses a few conventions that suffuse the source code and
 | ``c^2``                             | `c²`   |                                     | Sound speed squared, ``c² = γᵐ ψ = γᵐ Rᵐ T``                                   |
 | ``G^n``                             | `Gⁿ`   |                                     | Tendency fields at time step ``n``                                             |
 | ``G^s``                             | `Gˢ`   |                                     | Slow tendencies (excludes fast pressure gradient and buoyancy)                 |
-| ``N^s``                             | `Nˢ`   | `AcousticSubstepper.Nˢ`             | Number of acoustic substeps per full time step                                 |
-| ``\Delta t^s``                      | `Δtˢ`  |                                     | Acoustic substep time step, ``Δtˢ = Δt / Nˢ``                                  |
+| ``N_s``                             | `Ns`   | `AcousticSubstepper.Ns`             | Number of acoustic substeps per full time step                                 |
+| ``\Delta t_s``                      | `Δtˢ`  |                                     | Acoustic substep time step, ``Δtˢ = Δt / Ns``                                  |
 | ``\kappa^d``                        | `κᵈ`   | `AcousticSubstepper.κᵈ`             | Divergence damping coefficient for acoustic substepping                        |
 | ``\chi^t``                          | `χᵗ`   |                                     | Time-averaging weight for velocity fields in acoustic substepping              |
 | ``\bar{u}, \bar{v}, \bar{w}``       | `ū, v̄, w̄` |                                 | Time-averaged velocities for scalar advection                                  |

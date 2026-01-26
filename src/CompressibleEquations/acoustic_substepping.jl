@@ -33,7 +33,7 @@ Follows performance patterns from Oceananigans.SplitExplicitFreeSurface:
 Fields
 ======
 
-- `Nˢ`: Number of acoustic substeps per full time step
+- `Ns`: Number of acoustic substeps per full time step
 - `α`: Implicit weight for vertical solve (0.5 for Crank-Nicolson)
 - `κᵈ`: Divergence damping coefficient (typically 0.05-0.1)
 - `ψ`: Pressure coefficient ψ = Rᵐ T, so p = ψ ρ (CenterField)
@@ -46,7 +46,7 @@ Fields
 """
 struct AcousticSubstepper{N, FT, CF, UF, VF, WF, TS, RHS}
     # Number of acoustic substeps per full time step
-    Nˢ :: N
+    Ns :: N
 
     # Implicitness parameter (Crank-Nicolson: α = 0.5)
     α :: FT
@@ -79,7 +79,7 @@ struct AcousticSubstepper{N, FT, CF, UF, VF, WF, TS, RHS}
 end
 
 Adapt.adapt_structure(to, a::AcousticSubstepper) =
-    AcousticSubstepper(a.Nˢ,
+    AcousticSubstepper(a.Ns,
                        a.α,
                        a.κᵈ,
                        adapt(to, a.ψ),
@@ -95,18 +95,18 @@ Adapt.adapt_structure(to, a::AcousticSubstepper) =
                        adapt(to, a.rhs))
 
 """
-    AcousticSubstepper(grid; Nˢ=6, α=0.5, κᵈ=0.05)
+    AcousticSubstepper(grid; Ns=6, α=0.5, κᵈ=0.05)
 
 Construct an `AcousticSubstepper` for acoustic substepping on `grid`.
 
 Keyword Arguments
 =================
 
-- `Nˢ`: Number of acoustic substeps per full time step. Default: 6
+- `Ns`: Number of acoustic substeps per full time step. Default: 6
 - `α`: Implicitness parameter for vertical solve. Default: 0.5 (Crank-Nicolson)
 - `κᵈ`: Divergence damping coefficient. Default: 0.05
 """
-function AcousticSubstepper(grid; Nˢ::N=6, α=0.5, κᵈ=0.05) where N
+function AcousticSubstepper(grid; Ns::N=6, α=0.5, κᵈ=0.05) where N
     FT = eltype(grid)
     arch = architecture(grid)
 
@@ -136,7 +136,7 @@ function AcousticSubstepper(grid; Nˢ::N=6, α=0.5, κᵈ=0.05) where N
     # RHS storage for tridiagonal solve
     rhs = ZFaceField(grid)
 
-    return AcousticSubstepper(Nˢ, α, κᵈ,
+    return AcousticSubstepper(Ns, α, κᵈ,
                               ψ, c²,
                               ū, v̄, w̄,
                               Gˢρu, Gˢρv, Gˢρw,
@@ -172,28 +172,28 @@ end
 #####
 
 """
-    acoustic_substeps_per_stage(stage, Nˢ)
+    acoustic_substeps_per_stage(stage, Ns)
 
-Number of acoustic substeps for RK `stage` given total `Nˢ` substeps per time step.
+Number of acoustic substeps for RK `stage` given total `Ns` substeps per time step.
 
 Following CM1's convention for the Wicker-Skamarock SSP RK3 scheme:
-- Stage 1: Nˢ/3 substeps
-- Stage 2: Nˢ/2 substeps
-- Stage 3: Nˢ substeps
+- Stage 1: Ns/3 substeps
+- Stage 2: Ns/2 substeps
+- Stage 3: Ns substeps
 
 Arguments
 =========
 
 - `stage`: RK stage number (1, 2, or 3)
-- `Nˢ`: Total number of acoustic substeps per full time step
+- `Ns`: Total number of acoustic substeps per full time step
 """
-@inline function acoustic_substeps_per_stage(stage, Nˢ)
+@inline function acoustic_substeps_per_stage(stage, Ns)
     if stage == 1
-        return max(1, div(Nˢ, 3))
+        return max(1, div(Ns, 3))
     elseif stage == 2
-        return max(1, div(Nˢ, 2))
+        return max(1, div(Ns, 2))
     else  # stage == 3
-        return Nˢ
+        return Ns
     end
 end
 
@@ -343,11 +343,11 @@ Update density from compression and accumulate time-averaged velocities.
 The compression term is the fast (acoustic) part of continuity:
 ∂ₜρ = -ρ ∇·u
 """
-function acoustic_density_step!(model, acoustic, Δtˢ, n, Nˢₛₜₐgₑ)
+function acoustic_density_step!(model, acoustic, Δtˢ, n, Nsₛₜₐgₑ)
     grid = model.grid
     arch = architecture(grid)
 
-    χᵗ = 1 / Nˢₛₜₐgₑ  # Uniform time-averaging weight
+    χᵗ = 1 / Nsₛₜₐgₑ  # Uniform time-averaging weight
 
     launch!(arch, grid, :xyz, _acoustic_density_and_averaging!,
             model.dynamics.density, grid, Δtˢ, χᵗ,
@@ -438,12 +438,12 @@ Arguments
 function acoustic_substep_loop!(model, acoustic, stage, Δt)
     grid = model.grid
     arch = architecture(grid)
-    Nˢ = acoustic.Nˢ
+    Ns = acoustic.Ns
     g = model.thermodynamic_constants.gravitational_acceleration
 
     # Number of substeps for this RK stage
-    Nˢₛₜₐgₑ = acoustic_substeps_per_stage(stage, Nˢ)
-    Δtˢ = Δt / Nˢₛₜₐgₑ  # Acoustic substep time step
+    Nsₛₜₐgₑ = acoustic_substeps_per_stage(stage, Ns)
+    Δtˢ = Δt / Nsₛₜₐgₑ  # Acoustic substep time step
 
     # === PRECOMPUTE PHASE (once per RK stage) ===
 
@@ -462,7 +462,7 @@ function acoustic_substep_loop!(model, acoustic, stage, Δt)
     fill!(acoustic.w̄, 0)
 
     # === ACOUSTIC SUBSTEP LOOP ===
-    for n = 1:Nˢₛₜₐgₑ
+    for n = 1:Nsₛₜₐgₑ
         # Update momentum from fast terms (pressure gradient + buoyancy)
         acoustic_horizontal_momentum_step!(model, acoustic, Δtˢ)
         acoustic_vertical_momentum_step!(model, acoustic, Δtˢ, g)
@@ -471,7 +471,7 @@ function acoustic_substep_loop!(model, acoustic, stage, Δt)
         update_velocities_from_momentum!(model)
 
         # Update density from compression + accumulate averaged velocities
-        acoustic_density_step!(model, acoustic, Δtˢ, n, Nˢₛₜₐgₑ)
+        acoustic_density_step!(model, acoustic, Δtˢ, n, Nsₛₜₐgₑ)
     end
 
     return nothing

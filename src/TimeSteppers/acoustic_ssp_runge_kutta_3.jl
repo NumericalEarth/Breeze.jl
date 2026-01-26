@@ -55,7 +55,7 @@ end
     AcousticSSPRungeKutta3(grid, prognostic_fields;
                           implicit_solver = nothing,
                           Gⁿ = map(similar, prognostic_fields),
-                          Nˢ = 6,
+                          Ns = 6,
                           α = 0.5,
                           κᵈ = 0.05)
 
@@ -69,7 +69,7 @@ Keyword Arguments
 
 - `implicit_solver`: Optional implicit solver for diffusion. Default: `nothing`
 - `Gⁿ`: Tendency fields at current stage. Default: similar to `prognostic_fields`
-- `Nˢ`: Number of acoustic substeps per full time step. Default: 6
+- `Ns`: Number of acoustic substeps per full time step. Default: 6
 - `α`: Implicitness parameter for vertical acoustic solve. Default: 0.5
 - `κᵈ`: Divergence damping coefficient. Default: 0.05
 
@@ -85,7 +85,7 @@ Wicker, L.J. and Skamarock, W.C. (2002). Time-Splitting Methods for Elastic Mode
 function AcousticSSPRungeKutta3(grid, prognostic_fields;
                                 implicit_solver::TI = nothing,
                                 Gⁿ::TG = map(similar, prognostic_fields),
-                                Nˢ = 6,
+                                Ns = 6,
                                 α = 0.5,
                                 κᵈ = 0.05) where {TI, TG}
 
@@ -101,7 +101,7 @@ function AcousticSSPRungeKutta3(grid, prognostic_fields;
     U0 = typeof(U⁰)
 
     # Create acoustic substepping infrastructure
-    acoustic = AcousticSubstepper(grid; Nˢ, α, κᵈ)
+    acoustic = AcousticSubstepper(grid; Ns, α, κᵈ)
     AS = typeof(acoustic)
 
     return AcousticSSPRungeKutta3{FT, U0, TG, TI, AS}(α¹, α², α³, U⁰, Gⁿ, implicit_solver, acoustic)
