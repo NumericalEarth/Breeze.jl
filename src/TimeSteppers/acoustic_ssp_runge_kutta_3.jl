@@ -224,6 +224,8 @@ end
 #####
 
 """
+$(TYPEDSIGNATURES)
+
 Update scalar fields using standard SSP RK3 with time-averaged velocities.
 
 For scalars (θ, moisture, tracers), we use the time-averaged velocities
@@ -234,7 +236,6 @@ function scalar_ssp_rk3_substep!(model, Δt, α)
     arch = grid.architecture
     U⁰ = model.timestepper.U⁰
     Gⁿ = model.timestepper.Gⁿ
-    substepper = model.timestepper.substepper
 
     prognostic = prognostic_fields(model)
     n_momentum = 3  # ρu, ρv, ρw
