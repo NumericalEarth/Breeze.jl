@@ -141,6 +141,14 @@ Pressure is computed directly from the equation of state.
 """
 AtmosphereModels.dynamics_pressure_solver(dynamics::CompressibleDynamics, grid) = nothing
 
+"""
+$(TYPEDSIGNATURES)
+
+Return the default timestepper for `CompressibleDynamics`.
+Uses acoustic substepping to allow larger advective time steps while substepping the fast acoustic modes.
+"""
+AtmosphereModels.default_timestepper(::CompressibleDynamics) = :AcousticSSPRungeKutta3
+
 #####
 ##### Show methods
 #####
@@ -179,3 +187,30 @@ function AtmosphereModels.materialize_momentum_and_velocities(::CompressibleDyna
 
     return momentum, velocities
 end
+
+#####
+##### Potential temperature diagnostics interface
+#####
+
+"""
+$(TYPEDSIGNATURES)
+
+Return the pressure field for potential temperature diagnostics.
+For compressible dynamics, uses the actual pressure field.
+"""
+AtmosphereModels.Diagnostics.dynamics_pressure_for_potential_temperature(dynamics::CompressibleDynamics) = dynamics.pressure
+
+"""
+$(TYPEDSIGNATURES)
+
+Return the density field for potential temperature diagnostics.
+For compressible dynamics, uses the actual density field.
+"""
+AtmosphereModels.Diagnostics.dynamics_density_for_potential_temperature(dynamics::CompressibleDynamics) = dynamics.density
+
+"""
+$(TYPEDSIGNATURES)
+
+Return the standard pressure for potential temperature diagnostics.
+"""
+AtmosphereModels.Diagnostics.dynamics_standard_pressure(dynamics::CompressibleDynamics) = dynamics.standard_pressure

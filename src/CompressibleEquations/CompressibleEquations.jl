@@ -27,7 +27,8 @@ module CompressibleEquations
 
 export
     CompressibleDynamics,
-    CompressibleModel
+    CompressibleModel,
+    AcousticSubstepper
 
 using DocStringExtensions: TYPEDSIGNATURES
 using Adapt: Adapt, adapt
@@ -35,7 +36,6 @@ using KernelAbstractions: @kernel, @index
 
 using Oceananigans: Oceananigans, CenterField, XFaceField, YFaceField, ZFaceField, prognostic_fields
 using Oceananigans.BoundaryConditions: FieldBoundaryConditions, regularize_field_boundary_conditions, fill_halo_regions!
-using Oceananigans.Models.NonhydrostaticModels: NonhydrostaticModels
 using Oceananigans.Operators: divᶜᶜᶜ
 using Oceananigans.TimeSteppers: TimeSteppers
 using Oceananigans.Utils: prettysummary, launch!
@@ -53,5 +53,6 @@ const CompressibleModel = AtmosphereModel{<:CompressibleDynamics}
 
 include("compressible_density_tendency.jl")
 include("compressible_time_stepping.jl")
+include("acoustic_substepping.jl")
 
 end # module

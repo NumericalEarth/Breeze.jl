@@ -1,14 +1,15 @@
 using KernelAbstractions: @kernel, @index
 
 using Oceananigans: AbstractModel, prognostic_fields, fields
-using Oceananigans.Models.NonhydrostaticModels: compute_pressure_correction!, make_pressure_correction!
 using Oceananigans.TimeSteppers:
     AbstractTimeStepper,
     tick!,
     update_state!,
     compute_flux_bc_tendencies!,
     step_lagrangian_particles!,
-    implicit_step!
+    implicit_step!,
+    compute_pressure_correction!,
+    make_pressure_correction!
 using Oceananigans.Utils: launch!, time_difference_seconds
 
 """

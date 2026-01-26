@@ -118,3 +118,13 @@ The following table also uses a few conventions that suffuse the source code and
 | ``N_A``                             | `ℕᴬ`   |                                     | Avogadro's number, molecules per mole                                          |
 | ``\mathcal{U}``                     | `𝒰`    |                                     | Thermodynamic state struct (e.g., `StaticEnergyState`)                         |
 | ``\mathcal{M}``                     | `ℳ`    |                                     | Microphysical state struct (e.g., `WarmPhaseOneMomentState`)                   |
+| ``\psi``                            | `ψ`    |                                     | Pressure coefficient for acoustic substepping, ``ψ = Rᵐ T``                    |
+| ``c^2``                             | `c²`   |                                     | Sound speed squared, ``c² = γᵐ ψ = γᵐ Rᵐ T``                                   |
+| ``G^n``                             | `Gⁿ`   |                                     | Tendency fields at time step ``n``                                             |
+| ``G^s``                             | `Gˢ`   |                                     | Slow tendencies (excludes fast pressure gradient and buoyancy)                 |
+| ``N_s``                             | `Ns`   | `AcousticSubstepper.Ns`             | Number of acoustic substeps per full time step                                 |
+| ``\Delta \tau``                     | `Δτ`   |                                     | Acoustic substep time step, ``Δτ = Δt / Ns``                                   |
+| ``\kappa^d``                        | `κᵈ`   | `AcousticSubstepper.κᵈ`             | Divergence damping coefficient for acoustic substepping                        |
+| ``\rho_r``                          | `ρᵣ`   | `AcousticSubstepper.ρᵣ`             | Reference density for divergence damping (start of acoustic loop)              |
+| ``\chi^t``                          | `χᵗ`   |                                     | Time-averaging weight for velocity fields in acoustic substepping              |
+| ``\bar{u}, \bar{v}, \bar{w}``       | `ū, v̄, w̄` |                                 | Time-averaged velocities for scalar advection                                  |

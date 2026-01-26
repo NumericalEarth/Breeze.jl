@@ -84,6 +84,8 @@ export
 
     # TimeSteppers
     SSPRungeKutta3,
+    AcousticSSPRungeKutta3,
+    AcousticSubstepper,
 
     # ParcelDynamics
     ParcelDynamics,
@@ -169,7 +171,7 @@ include("AnelasticEquations/AnelasticEquations.jl")
 using .AnelasticEquations: AnelasticDynamics, AnelasticModel
 
 include("CompressibleEquations/CompressibleEquations.jl")
-using .CompressibleEquations: CompressibleDynamics, CompressibleModel
+using .CompressibleEquations: CompressibleDynamics, CompressibleModel, AcousticSubstepper
 
 include("KinematicDriver/KinematicDriver.jl")
 using .KinematicDriver: PrescribedDensity, PrescribedDynamics, KinematicModel
