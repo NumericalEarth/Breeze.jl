@@ -234,7 +234,6 @@ function scalar_ssp_rk3_substep!(model, Δt, α)
     arch = grid.architecture
     U⁰ = model.timestepper.U⁰
     Gⁿ = model.timestepper.Gⁿ
-    acoustic = model.timestepper.acoustic
 
     prognostic = prognostic_fields(model)
     n_momentum = 3  # ρu, ρv, ρw
