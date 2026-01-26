@@ -112,6 +112,8 @@ end
 #####
 
 """
+$(TYPEDSIGNATURES)
+
 Compute slow tendencies for momentum (advection, Coriolis, turbulence, forcing).
 
 The pressure gradient and buoyancy are NOT included here - they are "fast" terms
