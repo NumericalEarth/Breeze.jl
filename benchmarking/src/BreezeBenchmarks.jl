@@ -60,7 +60,7 @@ function BenchmarkMetadata(arch)
         end
     end
 
-    # Get CPU model (platform-specific)
+    # Get CPU model
     cpu_model = "$(Sys.cpu_info()[1].model) ($(Sys.CPU_NAME))"
 
     return BenchmarkMetadata(
