@@ -139,16 +139,24 @@ model_compressible = AtmosphereModel(grid;
 
 set!(model_compressible; θ=θᵢ, u=U, qᵗ=0, ρ=ρᵢ)
 
-# ## Case 4: Compressible dynamics with acoustic substepping (default)
+# ## Case 4: Compressible dynamics with acoustic substepping (work in progress)
 #
-# Fully compressible dynamics with acoustic substepping following the Wicker-Skamarock scheme.
-# This is the default for `CompressibleDynamics` and allows larger advective time steps
-# by substepping the fast acoustic modes.
+# NOTE: Acoustic substepping is currently under development. The perturbation-based
+# formulation requires a time-invariant hydrostatic reference density profile to
+# maintain stability, which is not yet implemented. For now, we use the explicit
+# compressible model for all compressible cases.
+#
+# TODO: Implement stable acoustic substepping following CM1's approach:
+# - Use pressure perturbation as prognostic variable instead of density
+# - Store time-invariant reference profiles for hydrostatic balance
+# - Implement vertically-implicit solve for w-p coupling
 
+# For now, we reuse the explicit compressible model for the "acoustic" case
 dynamics_acoustic = CompressibleDynamics(surface_pressure=p₀, standard_pressure=pˢᵗ)
 model_acoustic = AtmosphereModel(grid;
                                  dynamics = dynamics_acoustic,
-                                 advection)  # Uses default AcousticSSPRungeKutta3
+                                 advection,
+                                 timestepper = :SSPRungeKutta3)  # Use explicit RK3, same as model_compressible
 
 set!(model_acoustic; θ=θᵢ, u=U, qᵗ=0, ρ=ρᵢ)
 
@@ -171,9 +179,9 @@ cfl = 0.5
 Δt_anelastic = cfl * min(Δx, Δz) / U  # Based on advective velocity
 Δt_compressible = cfl * min(Δx, Δz) / (cₛ + U)  # Based on sound speed + advection
 
-# For acoustic substepping, we use the advective time step
-# The number of acoustic substeps is determined by nsound parameter (default 6)
-Δt_acoustic = Δt_anelastic
+# The "acoustic" case uses explicit time stepping (same as compressible case)
+# until acoustic substepping is fully implemented
+Δt_acoustic = Δt_compressible
 
 @info "Time steps:" Δt_anelastic Δt_compressible Δt_acoustic
 
@@ -244,7 +252,7 @@ run!(simulation_boussinesq)
 @info "Running fully explicit compressible simulation..."
 run!(simulation_compressible)
 
-@info "Running compressible with acoustic substepping..."
+@info "Running compressible (second instance, for comparison)..."
 run!(simulation_acoustic)
 
 # ## Results: Comparison of dynamical formulations

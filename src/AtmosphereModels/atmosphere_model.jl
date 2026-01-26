@@ -119,6 +119,7 @@ function AtmosphereModel(grid;
                          closure = nothing,
                          microphysics = nothing,
                          timestepper = nothing,
+                         timestepper_kwargs = NamedTuple(),
                          radiation = nothing)
 
     # Use default dynamics if not specified
@@ -200,7 +201,7 @@ function AtmosphereModel(grid;
                                                         tracers)
 
     implicit_solver = implicit_diffusion_solver(time_discretization(closure), grid)
-    timestepper = TimeStepper(timestepper, grid, prognostic_model_fields; implicit_solver)
+    timestepper = TimeStepper(timestepper, grid, prognostic_model_fields; implicit_solver, timestepper_kwargs...)
     pressure_solver = dynamics_pressure_solver(dynamics, grid)
 
     model_fields = merge(prognostic_model_fields, velocities, (; T=temperature, qᵗ=specific_moisture))

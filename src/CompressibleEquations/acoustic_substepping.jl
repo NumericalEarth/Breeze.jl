@@ -267,30 +267,30 @@ function acoustic_horizontal_momentum_step!(model, substepper, Δτ)
 
     launch!(arch, grid, :xyz, _acoustic_horizontal_momentum!,
             model.momentum.ρu, model.momentum.ρv, grid, Δτ,
-            model.dynamics.density, substepper.ψ)
+            model.dynamics.density, substepper.ρᵣ, substepper.ψ)
 
     return nothing
 end
 
-@kernel function _acoustic_horizontal_momentum!(ρu, ρv, grid, Δτ, ρ, ψ)
+@kernel function _acoustic_horizontal_momentum!(ρu, ρv, grid, Δτ, ρ, ρᵣ, ψ)
     i, j, k = @index(Global, NTuple)
 
-    # Fast pressure gradient: ∂ₓp = ψ ∂ₓρ where ψ = Rᵐ T
-    # Note: ψ is at cell centers, must interpolate to faces
+    # Fast pressure gradient: ∂ₓp' = ψ ∂ₓρ' where ψ = Rᵐ T and ρ' = ρ - ρᵣ
+    # We use the perturbation pressure gradient to avoid amplifying hydrostatic imbalance
     @inbounds begin
         # u-component: pressure gradient at (Face, Center, Center)
         ψᶠᶜᶜ = ℑxᶠᵃᵃ(i, j, k, grid, ψ)
-        ∂ₓρ = ∂xᶠᶜᶜ(i, j, k, grid, ρ)
-        ∂ₓp = ψᶠᶜᶜ * ∂ₓρ
+        ∂ₓρ′ = ∂xᶠᶜᶜ(i, j, k, grid, ρ) - ∂xᶠᶜᶜ(i, j, k, grid, ρᵣ)
+        ∂ₓp′ = ψᶠᶜᶜ * ∂ₓρ′
 
-        ρu[i, j, k] -= Δτ * ∂ₓp
+        ρu[i, j, k] -= Δτ * ∂ₓp′
 
         # v-component: pressure gradient at (Center, Face, Center)
         ψᶜᶠᶜ = ℑyᵃᶠᵃ(i, j, k, grid, ψ)
-        ∂ᵧρ = ∂yᶜᶠᶜ(i, j, k, grid, ρ)
-        ∂ᵧp = ψᶜᶠᶜ * ∂ᵧρ
+        ∂ᵧρ′ = ∂yᶜᶠᶜ(i, j, k, grid, ρ) - ∂yᶜᶠᶜ(i, j, k, grid, ρᵣ)
+        ∂ᵧp′ = ψᶜᶠᶜ * ∂ᵧρ′
 
-        ρv[i, j, k] -= Δτ * ∂ᵧp
+        ρv[i, j, k] -= Δτ * ∂ᵧp′
     end
 end
 
@@ -299,8 +299,9 @@ end
 #####
 
 """
-Update vertical momentum with fast pressure gradient and buoyancy.
+Update vertical momentum with fast perturbation pressure gradient and buoyancy.
 
+Uses perturbation quantities (ρ' = ρ - ρᵣ) to avoid amplifying hydrostatic imbalance.
 For now, use explicit vertical pressure gradient.
 The full implicit solve will be added in a future iteration.
 """
@@ -310,26 +311,29 @@ function acoustic_vertical_momentum_step!(model, substepper, Δτ, g)
 
     launch!(arch, grid, :xyz, _acoustic_vertical_momentum!,
             model.momentum.ρw, grid, Δτ, g,
-            model.dynamics.density, substepper.ψ)
+            model.dynamics.density, substepper.ρᵣ, substepper.ψ)
 
     return nothing
 end
 
-@kernel function _acoustic_vertical_momentum!(ρw, grid, Δτ, g, ρ, ψ)
+@kernel function _acoustic_vertical_momentum!(ρw, grid, Δτ, g, ρ, ρᵣ, ψ)
     i, j, k = @index(Global, NTuple)
 
     @inbounds begin
-        # Pressure gradient at (Center, Center, Face)
+        # Perturbation pressure gradient at (Center, Center, Face): ∂p'/∂z = ψ ∂ρ'/∂z
         ψᶜᶜᶠ = ℑzᵃᵃᶠ(i, j, k, grid, ψ)
-        ∂zρ = ∂zᶜᶜᶠ(i, j, k, grid, ρ)
-        ∂zp = ψᶜᶜᶠ * ∂zρ
+        ∂zρ′ = ∂zᶜᶜᶠ(i, j, k, grid, ρ) - ∂zᶜᶜᶠ(i, j, k, grid, ρᵣ)
+        ∂zp′ = ψᶜᶜᶠ * ∂zρ′
 
-        # Buoyancy: b = -g at cell faces
+        # Perturbation buoyancy: b' = -g ρ' = -g (ρ - ρᵣ)
         ρᶜᶜᶠ = ℑzᵃᵃᶠ(i, j, k, grid, ρ)
-        ρb = -g * ρᶜᶜᶠ
+        ρᵣᶜᶜᶠ = ℑzᵃᵃᶠ(i, j, k, grid, ρᵣ)
+        ρ′ = ρᶜᶜᶠ - ρᵣᶜᶜᶠ
+        b′ = -g * ρ′
 
-        # Fast terms: pressure gradient + buoyancy
-        ρw[i, j, k] += Δτ * (-∂zp + ρb)
+        # Fast terms: perturbation pressure gradient + perturbation buoyancy
+        # ∂(ρw)/∂t = ... - ∂p'/∂z + b' = ... - ∂p'/∂z - g*ρ'
+        ρw[i, j, k] += Δτ * (-∂zp′ + b′)
     end
 end
 
