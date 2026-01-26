@@ -261,18 +261,18 @@ Update horizontal momentum with fast pressure gradient (explicit).
 
 Uses on-the-fly pressure gradient: ∂p/∂x = ψ ∂ρ/∂x where ψ = Rᵐ T.
 """
-function acoustic_horizontal_momentum_step!(model, substepper, Δtˢ)
+function acoustic_horizontal_momentum_step!(model, substepper, Δτ)
     grid = model.grid
     arch = architecture(grid)
 
     launch!(arch, grid, :xyz, _acoustic_horizontal_momentum!,
-            model.momentum.ρu, model.momentum.ρv, grid, Δtˢ,
+            model.momentum.ρu, model.momentum.ρv, grid, Δτ,
             model.dynamics.density, substepper.ψ)
 
     return nothing
 end
 
-@kernel function _acoustic_horizontal_momentum!(ρu, ρv, grid, Δtˢ, ρ, ψ)
+@kernel function _acoustic_horizontal_momentum!(ρu, ρv, grid, Δτ, ρ, ψ)
     i, j, k = @index(Global, NTuple)
 
     # Fast pressure gradient: ∂ₓp = ψ ∂ₓρ where ψ = Rᵐ T
@@ -283,14 +283,14 @@ end
         ∂ₓρ = ∂xᶠᶜᶜ(i, j, k, grid, ρ)
         ∂ₓp = ψᶠᶜᶜ * ∂ₓρ
 
-        ρu[i, j, k] -= Δtˢ * ∂ₓp
+        ρu[i, j, k] -= Δτ * ∂ₓp
 
         # v-component: pressure gradient at (Center, Face, Center)
         ψᶜᶠᶜ = ℑyᵃᶠᵃ(i, j, k, grid, ψ)
         ∂ᵧρ = ∂yᶜᶠᶜ(i, j, k, grid, ρ)
         ∂ᵧp = ψᶜᶠᶜ * ∂ᵧρ
 
-        ρv[i, j, k] -= Δtˢ * ∂ᵧp
+        ρv[i, j, k] -= Δτ * ∂ᵧp
     end
 end
 
@@ -304,18 +304,18 @@ Update vertical momentum with fast pressure gradient and buoyancy.
 For now, use explicit vertical pressure gradient.
 The full implicit solve will be added in a future iteration.
 """
-function acoustic_vertical_momentum_step!(model, substepper, Δtˢ, g)
+function acoustic_vertical_momentum_step!(model, substepper, Δτ, g)
     grid = model.grid
     arch = architecture(grid)
 
     launch!(arch, grid, :xyz, _acoustic_vertical_momentum!,
-            model.momentum.ρw, grid, Δtˢ, g,
+            model.momentum.ρw, grid, Δτ, g,
             model.dynamics.density, substepper.ψ)
 
     return nothing
 end
 
-@kernel function _acoustic_vertical_momentum!(ρw, grid, Δtˢ, g, ρ, ψ)
+@kernel function _acoustic_vertical_momentum!(ρw, grid, Δτ, g, ρ, ψ)
     i, j, k = @index(Global, NTuple)
 
     @inbounds begin
@@ -329,7 +329,7 @@ end
         ρb = -g * ρᶜᶜᶠ
 
         # Fast terms: pressure gradient + buoyancy
-        ρw[i, j, k] += Δtˢ * (-∂zp + ρb)
+        ρw[i, j, k] += Δτ * (-∂zp + ρb)
     end
 end
 
@@ -343,14 +343,14 @@ Update density from compression and accumulate time-averaged velocities.
 The compression term is the fast (acoustic) part of continuity:
 ∂ₜρ = -ρ ∇·u
 """
-function acoustic_density_step!(model, substepper, Δtˢ, n, Nsₛₜₐgₑ)
+function acoustic_density_step!(model, substepper, Δτ, n, Nsₛₜₐgₑ)
     grid = model.grid
     arch = architecture(grid)
 
     χᵗ = 1 / Nsₛₜₐgₑ  # Uniform time-averaging weight
 
     launch!(arch, grid, :xyz, _acoustic_density_and_averaging!,
-            model.dynamics.density, grid, Δtˢ, χᵗ,
+            model.dynamics.density, grid, Δτ, χᵗ,
             model.velocities.u, model.velocities.v, model.velocities.w,
             substepper.ρᵣ, substepper.κᵈ,
             substepper.ū, substepper.v̄, substepper.w̄)
@@ -358,7 +358,7 @@ function acoustic_density_step!(model, substepper, Δtˢ, n, Nsₛₜₐgₑ)
     return nothing
 end
 
-@kernel function _acoustic_density_and_averaging!(ρ, grid, Δtˢ, χᵗ, u, v, w, ρᵣ, κᵈ, ū, v̄, w̄)
+@kernel function _acoustic_density_and_averaging!(ρ, grid, Δτ, χᵗ, u, v, w, ρᵣ, κᵈ, ū, v̄, w̄)
     i, j, k = @index(Global, NTuple)
 
     @inbounds begin
@@ -366,7 +366,7 @@ end
         ∇u = divᶜᶜᶜ(i, j, k, grid, u, v, w)
 
         # Density update from compression: ∂ₜρ = -ρ ∇·u
-        ρ[i, j, k] -= Δtˢ * ρ[i, j, k] * ∇u
+        ρ[i, j, k] -= Δτ * ρ[i, j, k] * ∇u
 
         # Divergence damping: nudge density toward reference
         ρ[i, j, k] -= κᵈ * (ρ[i, j, k] - ρᵣ[i, j, k])
@@ -443,7 +443,7 @@ function acoustic_substep_loop!(model, substepper, stage, Δt)
 
     # Number of substeps for this RK stage
     Nsₛₜₐgₑ = acoustic_substeps_per_stage(stage, Ns)
-    Δtˢ = Δt / Nsₛₜₐgₑ  # Acoustic substep time step
+    Δτ = Δt / Nsₛₜₐgₑ  # Acoustic substep time step
 
     # === PRECOMPUTE PHASE (once per RK stage) ===
 
@@ -464,14 +464,14 @@ function acoustic_substep_loop!(model, substepper, stage, Δt)
     # === ACOUSTIC SUBSTEP LOOP ===
     for n = 1:Nsₛₜₐgₑ
         # Update momentum from fast terms (pressure gradient + buoyancy)
-        acoustic_horizontal_momentum_step!(model, substepper, Δtˢ)
-        acoustic_vertical_momentum_step!(model, substepper, Δtˢ, g)
+        acoustic_horizontal_momentum_step!(model, substepper, Δτ)
+        acoustic_vertical_momentum_step!(model, substepper, Δτ, g)
 
         # Update velocities from momentum
         update_velocities_from_momentum!(model)
 
         # Update density from compression + accumulate averaged velocities
-        acoustic_density_step!(model, substepper, Δtˢ, n, Nsₛₜₐgₑ)
+        acoustic_density_step!(model, substepper, Δτ, n, Nsₛₜₐgₑ)
     end
 
     return nothing

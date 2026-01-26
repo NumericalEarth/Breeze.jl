@@ -11,6 +11,8 @@ using Oceananigans.TimeSteppers:
     step_lagrangian_particles!,
     implicit_step!
 
+using Breeze.AtmosphereModels: AtmosphereModel
+
 using Breeze.CompressibleEquations:
     AcousticSubstepper,
     acoustic_substep_loop!
