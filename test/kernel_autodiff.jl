@@ -5,6 +5,7 @@
 using KernelAbstractions # version 0.9.0
 using Reactant # version 0.2.203   
 using Enzyme # version 0.13.118
+using CUDA
 
 Reactant.set_default_backend("cpu")
 
@@ -36,5 +37,5 @@ doutput = Reactant.to_rarray(zeros(16, 16))
 input = Reactant.to_rarray(rand(16, 16))
 dinput = Reactant.to_rarray(zeros(16, 16))
 
-compiled = Reactant.@compile grad_kernel_loss(
+compiled = Reactant.@compile raise=true raise_first=true grad_kernel_loss(
     output, doutput, input, dinput)

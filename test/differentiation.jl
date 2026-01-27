@@ -67,7 +67,7 @@ Reactant.set_default_backend("cpu")
 # end
 
 @testset "Reactant/Enzyme differentiation - Periodic topology (2D)" begin
-    grid = RectilinearGrid(ReactantState(); size=(11, 11), extent=(1000, 1000),
+    grid = RectilinearGrid(ReactantState(); size=(30, 30), extent=(1000, 1000),
                            halo=(3, 3), topology=(Periodic, Periodic, Flat))
     model = AtmosphereModel(grid; dynamics=CompressibleDynamics())
     dmodel = Enzyme.make_zero(model)
