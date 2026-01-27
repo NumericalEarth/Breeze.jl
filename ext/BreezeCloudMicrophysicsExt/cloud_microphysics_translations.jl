@@ -435,8 +435,7 @@ Total number of activated droplets per unit volume [1/m³]
 
     # Sum activated droplets from each mode
     N_act = zero(FT)
-    @inbounds for i in 1:n_modes(ad)
-        mode_i = ad.modes[i]
+    for mode_i in ad.modes
 
         # Critical supersaturation for this mode
         κ_mean = mean_hygroscopicity(ap, mode_i)
