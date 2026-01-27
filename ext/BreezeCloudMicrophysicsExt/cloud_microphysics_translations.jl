@@ -222,7 +222,7 @@ Named tuple `(; evap_rate_0, evap_rate_1)` where:
 end
 
 #####
-##### Aerosol activation (TRANSLATION: uses Breeze thermodynamics)
+##### Aerosol activation (TRANSLATION: uses AerosolActivation.jl in CloudMicrophysics with Breeze thermodynamics)
 #####
 #
 # Aerosol activation computes the number of cloud droplets formed when aerosol
