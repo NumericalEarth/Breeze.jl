@@ -601,7 +601,7 @@ const τⁿᵘᵐ_2m = 10.0  # seconds
     # Aerosol activation: source of cloud liquid mass from newly activated droplets
     # Newly formed droplets have finite initial size given by the activation radius
     Sᵃᶜᵗ = aerosol_activation_mass_tendency(categories.aerosol_activation, categories.air_properties,
-                                             ρ, Nᵃ, w, Δt, 𝒰, constants)
+                                             ρ, Nᵃ, Nᶜˡ, w, Δt, 𝒰, constants)
 
     # Total tendency
     ΣρS = ρ * (Sᶜᵒⁿᵈ + Sᵃᶜⁿᵛ + Sᵃᶜᶜ + Sᵃᶜᵗ)
@@ -648,7 +648,7 @@ end
 
     # Aerosol activation: source of cloud droplet number (limited by available aerosol)
     dNᶜˡ_act = aerosol_activation_tendency(categories.aerosol_activation, categories.air_properties,
-                                            ρ, Nᵃ, w, Δt, 𝒰, constants)
+                                            ρ, Nᵃ, Nᶜˡ, w, Δt, 𝒰, constants)
 
     # Total tendency [1/m³/s]
     Σ_dNᶜˡ = dNᶜˡ_au + dNᶜˡ_sc + dNᶜˡ_ac + dNᶜˡ_adj_up + dNᶜˡ_adj_dn + dNᶜˡ_act
@@ -668,17 +668,18 @@ end
 const r_act_min = 0.5e-6  # 0.5 μm
 
 # No activation when aerosol_activation is nothing
-@inline aerosol_activation_tendency(::Nothing, aps, ρ, Nᵃ, w, Δt, 𝒰, constants) = zero(ρ)
-@inline aerosol_activation_mass_tendency(::Nothing, aps, ρ, Nᵃ, w, Δt, 𝒰, constants) = zero(ρ)
+@inline aerosol_activation_tendency(::Nothing, aps, ρ, Nᵃ, Nᶜˡ, w, Δt, 𝒰, constants) = zero(ρ)
+@inline aerosol_activation_mass_tendency(::Nothing, aps, ρ, Nᵃ, Nᶜˡ, w, Δt, 𝒰, constants) = zero(ρ)
 
 # Compute activation tendency using Abdul-Razzak and Ghan (2000)
-# With prognostic aerosol, activation is limited by available aerosol number Nᵃ.
-# As aerosol activates, Nᵃ decreases, naturally limiting further activation.
+# The ARG2000 parameterization gives the fraction of the TOTAL aerosol population that should be activated. 
+# We compare this target to the current cloud droplet number and activate the deficit.
 @inline function aerosol_activation_tendency(
     aerosol_activation::AerosolActivation,
     aps::AirProperties{FT},
     ρ::FT,
     Nᵃ::FT,
+    Nᶜˡ::FT,
     w::FT,
     Δt::FT,
     𝒰,
@@ -688,6 +689,7 @@ const r_act_min = 0.5e-6  # 0.5 μm
     # Only activate if there's updraft (positive w) and aerosol available
     w⁺ = max(0, w)
     Nᵃ⁺ = max(0, Nᵃ)
+    Nᶜˡ⁺ = max(0, Nᶜˡ)
 
     # Get thermodynamic properties
     T = temperature(𝒰, constants)
@@ -699,22 +701,33 @@ const r_act_min = 0.5e-6  # 0.5 μm
     # Supersaturation - activation only occurs when air is supersaturated (S > 0)
     S = supersaturation(T, ρ, q, constants, PlanarLiquidSurface())
 
-    # Compute the activated fraction of aerosol based on current supersaturation
-    # This gives the fraction that would activate given current conditions
+    # Reconstruct local total aerosol population (interstitial + activated)
+    # ARG2000 gives the fraction of this total that should be activated
+    N_tot = Nᵃ⁺ + Nᶜˡ⁺
+
+    # Compute the activated fraction of the TOTAL aerosol population
     activated_fraction = aerosol_activated_fraction(aerosol_activation, aps, T, p, w⁺, qᵗ, qˡ, ρ, constants)
 
-    # The activation rate [1/m³/s] is the activated number divided by the model timestep
-    # This matches the parcel model approach where dN/dt = N_activated / dt
-    # Zero activation if: no updraft (w ≤ 0), no aerosol (Nᵃ ≤ 0), or subsaturated (S ≤ 0)
-    is_active = (w⁺ > 0) & (Nᵃ⁺ > 0) & (S > 0)
-    N_activated = activated_fraction * Nᵃ⁺
-    dNᶜˡ_act = ifelse(is_active, N_activated / Δt, zero(ρ))
+    # Target number of activated droplets
+    N_target = activated_fraction * N_tot
+
+    # Activation is driven by disequilibrium: difference between target and current
+    # We only model activation (source), not deactivation (evaporation handles that)
+    ΔN_act = max(zero(FT), N_target - Nᶜˡ⁺)
+
+    # Limit by available interstitial aerosol
+    ΔN_act = min(ΔN_act, Nᵃ⁺)
+
+    # Convert to rate [1/m³/s]
+    # Zero activation if: no updraft (w ≤ 0) or subsaturated (S ≤ 0)
+    is_active = (w⁺ > 0) & (S > 0)
+    dNᶜˡ_act = ifelse(is_active, ΔN_act / Δt, zero(ρ))
 
     return dNᶜˡ_act
 end
 
 """
-    aerosol_activation_mass_tendency(aerosol_activation, aps, ρ, Nᵃ, w, Δt, 𝒰, constants)
+    aerosol_activation_mass_tendency(aerosol_activation, aps, ρ, Nᵃ, Nᶜˡ, w, Δt, 𝒰, constants)
 
 Compute the cloud liquid mass tendency from aerosol activation.
 
@@ -735,6 +748,7 @@ The mass tendency is then:
 ```
 
 # Arguments
+- `Nᶜˡ`: Current cloud droplet number concentration [1/m³]
 - `Δt`: Model timestep [s] - used for activation rate conversion
 
 # Returns
@@ -745,6 +759,7 @@ Mass tendency for cloud liquid [kg/kg/s]
     aps::AirProperties{FT},
     ρ::FT,
     Nᵃ::FT,
+    Nᶜˡ::FT,
     w::FT,
     Δt::FT,
     𝒰,
@@ -753,57 +768,53 @@ Mass tendency for cloud liquid [kg/kg/s]
 
     ap = aerosol_activation.activation_parameters
 
-    # Only activate if there's updraft (positive w) and aerosol available
-    w⁺ = max(0, w)
-    Nᵃ⁺ = max(0, Nᵃ)
+    # Compute number tendency using the disequilibrium approach
+    dNᶜˡ_act = aerosol_activation_tendency(aerosol_activation, aps, ρ, Nᵃ, Nᶜˡ, w, Δt, 𝒰, constants)
 
-    # Get thermodynamic properties
-    T = temperature(𝒰, constants)
-    p = 𝒰.reference_pressure
-    q = 𝒰.moisture_mass_fractions
-    qᵗ = q.vapor + q.liquid
-    qˡ = q.liquid
+    # Only compute mass if there's actual activation
+    if dNᶜˡ_act > zero(FT)
+        # Get thermodynamic properties for activation radius calculation
+        T = temperature(𝒰, constants)
+        p = 𝒰.reference_pressure
+        q = 𝒰.moisture_mass_fractions
+        qᵗ = q.vapor + q.liquid
+        qˡ = q.liquid
 
-    # Supersaturation - activation only occurs when air is supersaturated (S > 0)
-    S = supersaturation(T, ρ, q, constants, PlanarLiquidSurface())
+        # Compute activation radius from Köhler theory
+        # A = 2σ / (ρw * Rv * T) is the curvature parameter
+        # r_act = A / (3 * S) for the critical radius at supersaturation S
+        Rᵛ = vapor_gas_constant(constants)
+        ρʷ = ap.ρ_w  # water density [kg/m³]
+        σ = ap.σ     # surface tension [N/m]
 
-    # Compute activated fraction and number tendency rate [1/m³/s]
-    activated_fraction = aerosol_activated_fraction(aerosol_activation, aps, T, p, w⁺, qᵗ, qˡ, ρ, constants)
-    is_active = (w⁺ > 0) & (Nᵃ⁺ > 0) & (S > 0)
-    N_activated = activated_fraction * Nᵃ⁺
-    dNᶜˡ_act = ifelse(is_active, N_activated / Δt, zero(ρ))
+        A = 2 * σ / (ρʷ * Rᵛ * T)
 
-    # Compute activation radius from Köhler theory
-    # A = 2σ / (ρw * Rv * T) is the curvature parameter
-    # r_act = A / (3 * S) for the critical radius at supersaturation S
-    Rᵛ = vapor_gas_constant(constants)
-    ρʷ = ap.ρ_w  # water density [kg/m³]
-    σ = ap.σ     # surface tension [N/m]
+        # Use maximum supersaturation to compute activation radius
+        # For the w argument, use a minimum value of 0.1 m/s to avoid numerical issues
+        # when w is very small (this is only used for computing r_act, not for activation itself)
+        w⁺ = max(zero(FT), w)
+        w_for_smax = max(w⁺, FT(0.1))
+        S_max = max_supersaturation_breeze(aerosol_activation, aps, T, p, w_for_smax, qᵗ, qˡ, zero(FT), zero(FT), zero(FT), ρ, constants)
 
-    A = 2 * σ / (ρʷ * Rᵛ * T)
+        # Protect against division by zero or NaN: if S_max is too small or NaN, use default radius
+        # S_max below ~1e-6 (0.0001%) is physically unrealistic for cloud formation
+        S_max_valid = isfinite(S_max) & (S_max > FT(1e-8))
+        S_max_safe = ifelse(S_max_valid, max(S_max, FT(1e-6)), FT(0.01))  # default 1% if invalid
+        r_act_raw = A / (3 * S_max_safe)
 
-    # Use maximum supersaturation to compute activation radius
-    # For the w argument, use a minimum value of 0.1 m/s to avoid numerical issues
-    # when w is very small (this is only used for computing r_act, not for activation itself)
-    w_for_smax = max(w⁺, FT(0.1))
-    S_max = max_supersaturation_breeze(aerosol_activation, aps, T, p, w_for_smax, qᵗ, qˡ, zero(FT), zero(FT), zero(FT), ρ, constants)
+        # Clamp activation radius: minimum r_act_min, maximum 1 μm (typical cloud droplet size)
+        r_act = clamp(r_act_raw, FT(r_act_min), FT(1e-6))
 
-    # Protect against division by zero or NaN: if S_max is too small or NaN, use default radius
-    # S_max below ~1e-6 (0.0001%) is physically unrealistic for cloud formation
-    S_max_valid = isfinite(S_max) & (S_max > FT(1e-8))
-    S_max_safe = ifelse(S_max_valid, max(S_max, FT(1e-6)), FT(0.01))  # default 1% if invalid
-    r_act_raw = A / (3 * S_max_safe)
+        # Mass of a single activated droplet [kg]
+        # m = (4π/3) * r³ * ρw
+        m_droplet = FT(4π / 3) * r_act^3 * ρʷ
 
-    # Clamp activation radius: minimum r_act_min, maximum 1 μm (typical cloud droplet size)
-    r_act = clamp(r_act_raw, FT(r_act_min), FT(1e-6))
-
-    # Mass of a single activated droplet [kg]
-    # m = (4π/3) * r³ * ρw
-    m_droplet = FT(4π / 3) * r_act^3 * ρʷ
-
-    # Mass tendency [kg/kg/s]
-    # dq/dt = (dN/dt * m_droplet) / ρ
-    dqᶜˡ_act = dNᶜˡ_act * m_droplet / ρ
+        # Mass tendency [kg/kg/s]
+        # dq/dt = (dN/dt * m_droplet) / ρ
+        dqᶜˡ_act = dNᶜˡ_act * m_droplet / ρ
+    else
+        dqᶜˡ_act = zero(FT)
+    end
 
     return dqᶜˡ_act
 end
@@ -962,16 +973,18 @@ end
 @inline function AtmosphereModels.microphysical_tendency(bμp::WPNE2M, ::Val{:ρnᵃ}, ρ, ℳ::WarmPhaseTwoMomentState, 𝒰, constants)
     categories = bμp.categories
 
+    nᶜˡ = ℳ.nᶜˡ
     nᵃ = ℳ.nᵃ
     w = ℳ.w
     Δt = ℳ.Δt
 
-    # Number density [1/m³]
+    # Number densities [1/m³]
+    Nᶜˡ = ρ * max(0, nᶜˡ)
     Nᵃ = ρ * max(0, nᵃ)
 
     # Aerosol activation: sink of aerosol number (same as source for cloud droplet number)
     dNᵃ_act = -aerosol_activation_tendency(categories.aerosol_activation, categories.air_properties,
-                                            ρ, Nᵃ, w, Δt, 𝒰, constants)
+                                            ρ, Nᵃ, Nᶜˡ, w, Δt, 𝒰, constants)
 
     # Numerical relaxation for negative values
     Sⁿᵘᵐ = -Nᵃ / τⁿᵘᵐ_2m
