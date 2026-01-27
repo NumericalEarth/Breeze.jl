@@ -25,7 +25,7 @@ using Oceananigans.TimeSteppers: time_step!
 
 using Breeze
 
-using CUDA: CUDA
+using CUDA: CUDA, CUDABackend
 
 include("convective_boundary_layer.jl")
 
