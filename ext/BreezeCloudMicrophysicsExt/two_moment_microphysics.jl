@@ -627,8 +627,6 @@ end
     w = ℳ.w
     Δt = ℳ.Δt
 
-    FT = typeof(ρ)
-
     # Number densities [1/m³]
     Nᶜˡ = ρ * max(0, nᶜˡ)
     Nᵃ = ρ * max(0, nᵃ)
