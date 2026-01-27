@@ -290,7 +290,7 @@ distribution. For schemes without aerosol, returns 0.
 
 This value should be used to initialize the density-weighted aerosol number `ρnᵃ`.
 """
-initial_aerosol_number(::Nothing) = 0.0
+initial_aerosol_number(::Nothing) = 0
 
 """
 $(TYPEDSIGNATURES)
