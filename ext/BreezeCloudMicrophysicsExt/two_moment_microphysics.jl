@@ -166,8 +166,8 @@ Returns the sum of `N` (number concentration in 1/m³) across all aerosol modes.
 function initial_aerosol_number_from_activation(aerosol_activation::AerosolActivation)
     ad = aerosol_activation.aerosol_distribution
     Nᵃ = zero(eltype(ad.modes[1].N))
-    for i in 1:n_modes(ad)
-        Nᵃ += ad.modes[i].N
+    for mode in ad.modes
+        Nᵃ += mode.N
     end
     return Nᵃ
 end
