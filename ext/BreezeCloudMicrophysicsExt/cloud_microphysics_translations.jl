@@ -371,8 +371,7 @@ end
 
     # Compute critical supersaturation and contribution from each mode
     tmp = zero(FT)
-    @inbounds for i in 1:n_modes(ad)
-        mode_i = ad.modes[i]
+    for mode_i in ad.modes
 
         # Mean hygroscopicity for mode (volume-weighted κ)
         κ_mean = mean_hygroscopicity(ap, mode_i)
