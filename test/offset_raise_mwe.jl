@@ -1,82 +1,46 @@
-# MWE: Negative offset indices fail to raise in Reactant autodiff
+# MWE: Non-zero offset in kernel index causes Reactant raising to fail
 
 using KernelAbstractions
-using KernelAbstractions: Kernel, ndrange, workgroupsize, CompilerMetadata
-using KernelAbstractions.NDIteration: NDIteration, NDRange, workitems, _Size
-using Reactant
-using Enzyme
-using CUDA
-using Base: @pure
-
-import KernelAbstractions: get, expand, StaticSize, partition
-import KernelAbstractions: __ndrange, __groupsize
+using Reactant, Enzyme, CUDA
 
 Reactant.set_default_backend("cpu")
 
-struct OffsetStaticSize{S} <: _Size
-    function OffsetStaticSize{S}() where S
-        new{S::Tuple{Vararg}}()
-    end
-end
+offset = 0  # fails; change to 0 and all tests pass
+len = 11
+size = (len, len)
 
-@pure OffsetStaticSize(s::Tuple{Vararg{UnitRange{Int}}}) = OffsetStaticSize{s}()
-@pure OffsetStaticSize(s::Tuple{Vararg{Int}}) = OffsetStaticSize{s}()
-@pure get(::Type{OffsetStaticSize{S}}) where {S} = S
-@pure Base.length(::OffsetStaticSize{S}) where {S} = prod(length, S)
-
-@inline offsets_from_ranges(ranges::NTuple{2, UnitRange}) = (ranges[1].start - 1, ranges[2].start - 1)
-@inline getrange(::Type{OffsetStaticSize{S}}) where {S} = map(length, S), offsets_from_ranges(S)
-
-const OffsetNDRange{N, S} = NDRange{N, <:StaticSize, <:StaticSize, <:Any, <:OffsetStaticSize{S}} where {N, S}
-
-@inline function expand(ndrange::OffsetNDRange{N, S}, groupidx::CartesianIndex{N}, idx::CartesianIndex{N}) where {N, S}
-    nI = ntuple(Val(N)) do I
-        stride = size(workitems(ndrange), I)
-        (groupidx.I[I] - 1) * stride + idx.I[I] + S[I]
-    end
-    return CartesianIndex(nI)
-end
-
-@inline __ndrange(::CompilerMetadata{NDRange}) where {NDRange<:OffsetStaticSize} = CartesianIndices(get(NDRange))
-@inline __groupsize(cm::CompilerMetadata{NDRange}) where {NDRange<:OffsetStaticSize} = size(__ndrange(cm))
-
-const OffsetKernel = Kernel{<:Any, <:StaticSize, <:OffsetStaticSize}
-
-function partition(kernel::OffsetKernel, ::Nothing, ::Nothing)
-    range, offs = getrange(ndrange(kernel))
-    groupsize = get(workgroupsize(kernel))
-    blocks, groupsize, dynamic = NDIteration.partition(range, groupsize)
-    iterspace = NDRange{length(range), StaticSize{blocks}, StaticSize{groupsize}}(blocks, OffsetStaticSize(offs))
-    return iterspace, dynamic
-end
-
-@kernel function _kernel!(B, A)
+@kernel function _k!(B, A, off)
     i, j = @index(Global, NTuple)
-    @inbounds B[i, j] = A[i, j] * 2
+    @inbounds B[i + off, j + off] = A[i + off, j + off] * 2
 end
-
-offset = -2:14
 
 function loss(B, A)
-    backend = get_backend(A)
-    kernel = _kernel!(backend, StaticSize((16, 16)), OffsetStaticSize((offset, offset)))
-    kernel(B, A)
-    return sum(B)
+    kernel = _k!(get_backend(A))
+    kernel(B, A, offset; ndrange=size)
+    sum(B)
 end
 
 function grad_loss(B, dB, A, dA)
-    dB .= 0
-    dA .= 0
-    Enzyme.autodiff(Enzyme.ReverseWithPrimal, loss, Enzyme.Active,
+    _, l = Enzyme.autodiff(Enzyme.ReverseWithPrimal, loss, Enzyme.Active,
                     Enzyme.Duplicated(B, dB), Enzyme.Duplicated(A, dA))
+    return dA, l
 end
 
-A = Reactant.to_rarray(rand(17, 17))
-B = Reactant.to_rarray(zeros(17, 17))
-dA = Reactant.to_rarray(zeros(17, 17))
-dB = Reactant.to_rarray(zeros(17, 17))
+# Test 1: Direct Julia execution
+println("Test 1: loss(B, A)")
+B1, A1 = zeros(size...), ones(size...)
+println("  result: ", loss(B1, A1))
 
-# FAILS: negative offset (-2:14)
-# WORKS: positive offset (1:17)
-# compiled = Reactant.@compile raise=true raise_first=true grad_loss(B, dB, A, dA)
-Reactant.@compile loss(B, A)
+# Test 2: Reactant forward compilation
+println("Test 2: Reactant.@compile loss")
+A2 = Reactant.to_rarray(ones(size...))
+B2 = Reactant.to_rarray(zeros(size...))
+compiled_loss = Reactant.@compile loss(B2, A2)
+println("  result: ", compiled_loss(B2, A2))
+
+# Test 3: Reactant autodiff compilation
+println("Test 3: Reactant.@compile grad_loss")
+A3 = Reactant.to_rarray(ones(size...))
+B3 = Reactant.to_rarray(zeros(size...))
+compiled_grad = Reactant.@compile raise=true raise_first=true grad_loss(B3, similar(B3), A3, similar(A3))
+println("  result: ", compiled_grad(B3, similar(B3), A3, similar(A3)))
