@@ -39,6 +39,8 @@ Manifest.toml
 *.DS_Store
 *.vscode
 *.code-workspace
+
+
 *mlir*
-*.tar
 *.tar.gz
+*.tar
