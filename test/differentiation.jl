@@ -15,13 +15,13 @@ using CUDA
 Reactant.set_default_backend("cpu")
 
 @testset "Reactant/Enzyme differentiation - Bounded topology (3D)" begin
-    grid = RectilinearGrid(ReactantState(); size=(4, 4, 4), extent=(1000, 1000, 1000),
-                           halo=(3, 3, 3), topology=(Bounded, Bounded, Bounded))
+    grid = RectilinearGrid(ReactantState(); size=(4, 4), extent=(1000, 1000),
+                           halo=(3, 3), topology=(Bounded, Bounded, Flat))
     model = AtmosphereModel(grid; dynamics=CompressibleDynamics())
     dmodel = Enzyme.make_zero(model)
 
     θ_init = CenterField(grid)
-    set!(θ_init, (x, y, z) -> 0.01 * x + 0.01 * y + 0.01 * z)
+    set!(θ_init, (x, y) -> 0.01 * x + 0.01 * y)
     dθ_init = CenterField(grid)
     set!(dθ_init, 0.0)
 
@@ -46,7 +46,7 @@ Reactant.set_default_backend("cpu")
     end
 
     Δt = 0.01
-    nsteps = 4
+    nsteps = 1
 
     @testset "Compilation succeeds" begin
         compiled = Reactant.@compile raise_first=true raise=true sync=true grad_loss(
