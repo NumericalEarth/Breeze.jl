@@ -233,7 +233,7 @@ end
 #            activation: 2. Multiple aerosol types. J. Geophys. Res., 105(D5), 6837-6844.
 #####
 
-using CloudMicrophysics.AerosolModel: Mode_B, Mode_κ, n_modes
+using CloudMicrophysics.AerosolModel: Mode_B, Mode_κ
 
 """
     max_supersaturation_breeze(aerosol_activation, air_properties, T, p, w, qᵗ, qˡ, qⁱ, Nˡ, Nⁱ, ρ, constants)
