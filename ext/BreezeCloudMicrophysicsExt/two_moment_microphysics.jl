@@ -771,50 +771,45 @@ Mass tendency for cloud liquid [kg/kg/s]
     # Compute number tendency using the disequilibrium approach
     dNᶜˡ_act = aerosol_activation_tendency(aerosol_activation, aps, ρ, Nᵃ, Nᶜˡ, w, Δt, 𝒰, constants)
 
-    # Only compute mass if there's actual activation
-    if dNᶜˡ_act > zero(FT)
-        # Get thermodynamic properties for activation radius calculation
-        T = temperature(𝒰, constants)
-        p = 𝒰.reference_pressure
-        q = 𝒰.moisture_mass_fractions
-        qᵗ = q.vapor + q.liquid
-        qˡ = q.liquid
+    # Get thermodynamic properties for activation radius calculation
+    T = temperature(𝒰, constants)
+    q = 𝒰.moisture_mass_fractions
+    qᵗ = q.vapor + q.liquid
+    qˡ = q.liquid
 
-        # Compute activation radius from Köhler theory
-        # A = 2σ / (ρw * Rv * T) is the curvature parameter
-        # r_act = A / (3 * S) for the critical radius at supersaturation S
-        Rᵛ = vapor_gas_constant(constants)
-        ρʷ = ap.ρ_w  # water density [kg/m³]
-        σ = ap.σ     # surface tension [N/m]
+    # Compute activation radius from Köhler theory
+    # A = 2σ / (ρw * Rv * T) is the curvature parameter
+    # r_act = A / (3 * S) for the critical radius at supersaturation S
+    Rᵛ = vapor_gas_constant(constants)
+    ρʷ = ap.ρ_w  # water density [kg/m³]
+    σ = ap.σ     # surface tension [N/m]
 
-        A = 2 * σ / (ρʷ * Rᵛ * T)
+    A = 2 * σ / (ρʷ * Rᵛ * T)
 
-        # Use maximum supersaturation to compute activation radius
-        # For the w argument, use a minimum value of 0.1 m/s to avoid numerical issues
-        # when w is very small (this is only used for computing r_act, not for activation itself)
-        w⁺ = max(zero(FT), w)
-        w_for_smax = max(w⁺, FT(0.1))
-        S_max = max_supersaturation_breeze(aerosol_activation, aps, T, p, w_for_smax, qᵗ, qˡ, zero(FT), zero(FT), zero(FT), ρ, constants)
+    # Use maximum supersaturation to compute activation radius
+    # For the w argument, use a minimum value of 0.1 m/s to avoid numerical issues
+    # when w is very small (this is only used for computing r_act, not for activation itself)
+    w⁺ = max(0, w)
+    w_for_smax = max(w⁺, 0.1)
+    p = 𝒰.reference_pressure
+    S_max = max_supersaturation_breeze(aerosol_activation, aps, T, p, w_for_smax, qᵗ, qˡ, 0, 0, 0, ρ, constants)
 
-        # Protect against division by zero or NaN: if S_max is too small or NaN, use default radius
-        # S_max below ~1e-6 (0.0001%) is physically unrealistic for cloud formation
-        S_max_valid = isfinite(S_max) & (S_max > FT(1e-8))
-        S_max_safe = ifelse(S_max_valid, max(S_max, FT(1e-6)), FT(0.01))  # default 1% if invalid
-        r_act_raw = A / (3 * S_max_safe)
+    # Protect against division by zero or NaN: if S_max is too small or NaN, use default radius
+    # S_max below ~1e-6 (0.0001%) is physically unrealistic for cloud formation
+    S_max_valid = isfinite(S_max) & (S_max > 1e-8)
+    S_max_safe = ifelse(S_max_valid, max(S_max, 1e-6), 0.01)  # default 1% if invalid
+    r_act_raw = A / (3 * S_max_safe)
 
-        # Clamp activation radius: minimum r_act_min, maximum 1 μm (typical cloud droplet size)
-        r_act = clamp(r_act_raw, FT(r_act_min), FT(1e-6))
+    # Clamp activation radius: minimum r_act_min, maximum 1 μm (typical cloud droplet size)
+    r_act = clamp(r_act_raw, r_act_min, 1e-6)
 
-        # Mass of a single activated droplet [kg]
-        # m = (4π/3) * r³ * ρw
-        m_droplet = FT(4π / 3) * r_act^3 * ρʷ
+    # Mass of a single activated droplet [kg]
+    # m = (4π/3) * r³ * ρw
+    m_droplet = FT(4π / 3) * r_act^3 * ρʷ
 
-        # Mass tendency [kg/kg/s]
-        # dq/dt = (dN/dt * m_droplet) / ρ
-        dqᶜˡ_act = dNᶜˡ_act * m_droplet / ρ
-    else
-        dqᶜˡ_act = zero(FT)
-    end
+    # Mass tendency [kg/kg/s] - zero if no activation
+    # dq/dt = (dN/dt * m_droplet) / ρ
+    dqᶜˡ_act = ifelse(dNᶜˡ_act > 0, dNᶜˡ_act * m_droplet / ρ, 0)
 
     return dqᶜˡ_act
 end
