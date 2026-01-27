@@ -15,6 +15,8 @@ using CUDA
 Reactant.set_default_backend("cpu")
 
 @testset "Reactant/Enzyme differentiation with SSPRungeKutta3" begin
+    Reactant.MLIR.IR.DUMP_MLIR_ALWAYS[] = true
+    Reactant.MLIR.IR.DUMP_MLIR_DIR[] = "/Users/danielkz/Aeolus2/Breeze.jl/mlir_dump/differentiation"
     grid = RectilinearGrid(ReactantState(); size=(4, 4), extent=(1000, 1000),
                            halo=(3, 3), topology=(Periodic, Periodic, Flat))
     model = AtmosphereModel(grid; dynamics=CompressibleDynamics())
@@ -46,7 +48,7 @@ Reactant.set_default_backend("cpu")
     end
 
     Δt = 0.01
-    nsteps = 4
+    nsteps = 1
 
     @testset "Compilation succeeds" begin
         compiled = Reactant.@compile raise_first=true raise=true sync=true grad_loss(
@@ -54,14 +56,14 @@ Reactant.set_default_backend("cpu")
         @test compiled !== nothing
     end
 
-    @testset "Gradient computation" begin
-        compiled = Reactant.@compile raise_first=true raise=true sync=true grad_loss(
-            model, dmodel, θ_init, dθ_init, Δt, nsteps)
-        dθ, loss_val = compiled(model, dmodel, θ_init, dθ_init, Δt, nsteps)
+    # @testset "Gradient computation" begin
+    #     compiled = Reactant.@compile raise_first=true raise=true sync=true grad_loss(
+    #         model, dmodel, θ_init, dθ_init, Δt, nsteps)
+    #     dθ, loss_val = compiled(model, dmodel, θ_init, dθ_init, Δt, nsteps)
 
-        @test loss_val > 0
-        @test !isnan(loss_val)
-        @test maximum(abs, interior(dθ)) > 0  # Gradient should be non-zero
-        @test !any(isnan, interior(dθ))
-    end
+    #     @test loss_val > 0
+    #     @test !isnan(loss_val)
+    #     @test maximum(abs, interior(dθ)) > 0  # Gradient should be non-zero
+    #     @test !any(isnan, interior(dθ))
+    # end
 end

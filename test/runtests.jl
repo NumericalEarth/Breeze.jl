@@ -15,6 +15,12 @@ if filter_tests!(testsuite, args)
     end
 end
 
+# At the top of runtests.jl, add:
+if "differentiation" in ARGS
+    include("differentiation.jl")
+    exit(0)
+end
+
 const init_code = quote
     import CUDA
     using Oceananigans.Architectures: CPU, GPU
