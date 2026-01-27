@@ -311,7 +311,7 @@ Maximum supersaturation (dimensionless, e.g., 0.01 = 1% supersaturation)
     A = 2 * ap.σ / (ρʷ * Rᵛ * T)
 
     # Only compute if there's updraft
-    S_max_ARG = _compute_smax_arg(ap, ad, A, α, γ, G, w, ρʷ)
+    S_max_ARG = compute_smax_arg(ap, ad, A, α, γ, G, w, ρʷ)
 
     # Correction for existing liquid and ice (phase relaxation)
     # See Eq. A13 in Korolev and Mazin (2003) or CloudMicrophysics implementation
@@ -366,7 +366,7 @@ end
 end
 
 # Helper function to compute S_max using ARG parameterization
-@inline function _compute_smax_arg(ap, ad, A::FT, α::FT, γ::FT, G::FT, w::FT, ρʷ::FT) where FT
+@inline function compute_smax_arg(ap, ad, A::FT, α::FT, γ::FT, G::FT, w::FT, ρʷ::FT) where FT
     ζ = 2 * A / 3 * sqrt(α * w / G)
 
     # Compute critical supersaturation and contribution from each mode
