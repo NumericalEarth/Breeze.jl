@@ -841,8 +841,7 @@ Uses the maximum supersaturation to determine which aerosol modes activate.
     # Sum activated fraction from each mode
     total_N = zero(FT)
     activated_N = zero(FT)
-    @inbounds for i in 1:n_modes(ad)
-        mode_i = ad.modes[i]
+    for mode_i in ad.modes
         N_mode = mode_i.N
         total_N += N_mode
 
