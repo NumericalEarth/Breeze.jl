@@ -496,7 +496,8 @@ function (d::MoistPotentialTemperatureKernelFunction)(i, j, k, grid)
         if d.flavor isa AbstractLiquidIceFlavor
             θˡⁱ
         elseif d.flavor isa AbstractVirtualFlavor
-            θˡⁱ * (1 + Rᵛ / Rᵈ * qᵛ)
+            δ = Rᵛ / Rᵈ - 1
+            θ * (1 + δ * qᵛ - qˡ - qⁱ)
         end
     elseif d.flavor isa AbstractEquivalentFlavor
         # Saturation specific humidity over a liquid surface
