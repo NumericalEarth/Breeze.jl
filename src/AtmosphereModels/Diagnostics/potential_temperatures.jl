@@ -202,7 +202,7 @@ Field(θᵛ)
 ├── operand: KernelFunctionOperation at (Center, Center, Center)
 ├── status: time=0.0
 └── data: 3×3×14 OffsetArray(::Array{Float64, 3}, 0:2, 0:2, -2:11) with eltype Float64 with indices 0:2×0:2×-2:11
-    └── max=304.824, min=304.824, mean=304.824
+    └── max=301.824, min=301.824, mean=301.824
 ```
 
 # References
