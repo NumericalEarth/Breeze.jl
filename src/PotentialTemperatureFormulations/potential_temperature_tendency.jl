@@ -91,11 +91,12 @@ end
     Π = exner_function(𝒰, constants)
     cᵖᵐ = mixture_heat_capacity(q, constants)
     closure_buoyancy = AtmosphereModelBuoyancy(dynamics, formulation, constants)
+    Δt = clock.last_Δt
 
     return ( - div_ρUc(i, j, k, grid, advection, ρ_field, velocities, potential_temperature)
              + c_div_ρU(i, j, k, grid, dynamics, velocities, potential_temperature)
              - ∇_dot_Jᶜ(i, j, k, grid, ρ_field, closure, closure_fields, id, potential_temperature, clock, model_fields, closure_buoyancy)
-             + grid_microphysical_tendency(i, j, k, grid, microphysics, Val(:ρθ), ρ, microphysical_fields, 𝒰, constants)
+             + grid_microphysical_tendency(i, j, k, grid, microphysics, Val(:ρθ), ρ, microphysical_fields, 𝒰, constants, velocities, Δt)
              + ρθ_forcing(i, j, k, grid, clock, model_fields)
              + ρe_forcing(i, j, k, grid, clock, model_fields) / (cᵖᵐ * Π)
     )

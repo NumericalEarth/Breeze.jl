@@ -139,9 +139,11 @@ end
     q = grid_moisture_fractions(i, j, k, grid, microphysics, ρ, qᵗ, microphysical_fields)
     𝒰 = diagnose_thermodynamic_state(i, j, k, grid, formulation, dynamics, q)
 
+    Δt = clock.last_Δt
+
     return ( - div_ρUc(i, j, k, grid, advection, ρ_field, Uᵗ, c)
              + c_div_ρU(i, j, k, grid, dynamics, velocities, c) # for PrescribedDynamics
              - ∇_dot_Jᶜ(i, j, k, grid, ρ_field, closure, closure_fields, id, c, clock, model_fields, closure_buoyancy)
-             + grid_microphysical_tendency(i, j, k, grid, microphysics, name, ρ, microphysical_fields, 𝒰, constants)
+             + grid_microphysical_tendency(i, j, k, grid, microphysics, name, ρ, microphysical_fields, 𝒰, constants, velocities, Δt)
              + c_forcing(i, j, k, grid, clock, model_fields))
 end

@@ -56,6 +56,15 @@ See Eq. (13.28) by [Pruppacher & Klett (2010)](@cite pruppacher2010microphysics)
     return 1 / (ℒˡ / K_therm / T * (ℒˡ / Rᵛ / T - 1) + Rᵛ * T / D_vapor / pᵛ⁺)
 end
 
+@inline function diffusional_growth_factor_ice(aps::AirProperties{FT}, T, constants) where {FT}
+    (; K_therm, D_vapor) = aps
+    Rᵛ = vapor_gas_constant(constants)
+    ℒⁱ = ice_latent_heat(T, constants)
+    pᵛ⁺ = saturation_vapor_pressure(T, constants, PlanarIceSurface())
+
+    return 1 / (ℒⁱ / K_therm / T * (ℒⁱ / Rᵛ / T - 1) + Rᵛ * T / D_vapor / pᵛ⁺)
+end
+
 #####
 ##### Rain evaporation (TRANSLATION: uses the above thermodynamics-dependent functions)
 #####
@@ -178,14 +187,14 @@ Named tuple `(; evap_rate_0, evap_rate_1)` where:
         (; ν_air, D_vapor) = aps
         (; av, bv, α, β, ρ0) = evap
         x_star = pdf_r.xr_min
-        ρw = pdf_r.ρw
+        ρʷ = pdf_r.ρw
 
         # Diffusional growth factor (G function)
         G = diffusional_growth_factor(aps, T, constants)
 
         # Mean rain drop mass and diameter
         (; xr_mean) = pdf_rain_parameters(pdf_r, qʳ, ρ, Nʳ)
-        Dr = cbrt(6 * xr_mean / (π * ρw))
+        Dʳ = cbrt(6 * xr_mean / (π * ρʷ))
 
         # Ventilation factors for number and mass tendencies
         t_star = cbrt(6 * x_star / xr_mean)
@@ -196,13 +205,13 @@ Named tuple `(; evap_rate_0, evap_rate_1)` where:
         b_vent_1 = bv * Γ(5 // 2 + 3 // 2 * β) / 6^(β / 2 + 1 // 2)
 
         # Reynolds number
-        N_Re = α * xr_mean^β * sqrt(ρ0 / ρ) * Dr / ν_air
-        Fv0 = a_vent_0 + b_vent_0 * cbrt(ν_air / D_vapor) * sqrt(N_Re)
-        Fv1 = a_vent_1 + b_vent_1 * cbrt(ν_air / D_vapor) * sqrt(N_Re)
+        Re = α * xr_mean^β * sqrt(ρ0 / ρ) * Dʳ / ν_air
+        Fv0 = a_vent_0 + b_vent_0 * cbrt(ν_air / D_vapor) * sqrt(Re)
+        Fv1 = a_vent_1 + b_vent_1 * cbrt(ν_air / D_vapor) * sqrt(Re)
 
         # Evaporation rates (negative for evaporation)
-        evap_rate_0 = min(zero(FT), FT(2) * FT(π) * G * 𝒮 * Nʳ * Dr * Fv0 / xr_mean)
-        evap_rate_1 = min(zero(FT), FT(2) * FT(π) * G * 𝒮 * Nʳ * Dr * Fv1 / ρ)
+        evap_rate_0 = min(zero(FT), FT(2) * FT(π) * G * 𝒮 * Nʳ * Dʳ * Fv0 / xr_mean)
+        evap_rate_1 = min(zero(FT), FT(2) * FT(π) * G * 𝒮 * Nʳ * Dʳ * Fv1 / ρ)
 
         # Handle edge cases where xr_mean approaches zero
         evap_rate_0 = ifelse(xr_mean / x_star < eps(FT), zero(FT), evap_rate_0)
@@ -210,4 +219,234 @@ Named tuple `(; evap_rate_0, evap_rate_1)` where:
     end
 
     return (; evap_rate_0, evap_rate_1)
+end
+
+#####
+##### Aerosol activation (TRANSLATION: uses AerosolActivation.jl in CloudMicrophysics with Breeze thermodynamics)
+#####
+#
+# Aerosol activation computes the number of cloud droplets formed when aerosol
+# particles are exposed to supersaturated conditions. This is the source term
+# for cloud droplet number in two-moment microphysics.
+#
+# Reference: Abdul-Razzak, H. and Ghan, S.J. (2000). A parameterization of aerosol
+#            activation: 2. Multiple aerosol types. J. Geophys. Res., 105(D5), 6837-6844.
+#####
+
+using CloudMicrophysics.AerosolModel: Mode_B, Mode_κ
+
+"""
+    max_supersaturation_breeze(aerosol_activation, air_properties, T, p, w, qᵗ, qˡ, qⁱ, Nˡ, Nⁱ, ρ, constants)
+
+Compute the maximum supersaturation using the Abdul-Razzak and Ghan (2000) parameterization.
+
+This is a translation of `CloudMicrophysics.AerosolActivation.max_supersaturation` that uses
+Breeze's thermodynamics instead of Thermodynamics.jl.
+
+# Arguments
+- `aerosol_activation`: AerosolActivation containing activation parameters and aerosol distribution
+- `air_properties`: AirProperties (thermal conductivity, vapor diffusivity)
+- `T`: Temperature [K]
+- `p`: Pressure [Pa]
+- `w`: Updraft velocity [m/s]
+- `qᵗ`: Total specific humidity [kg/kg]
+- `qˡ`: Liquid water specific humidity [kg/kg]
+- `qⁱ`: Ice water specific humidity [kg/kg]
+- `Nˡ`: Liquid water number concentration [1/m³]
+- `Nⁱ`: Ice water number concentration [1/m³]
+- `ρ`: Air density [kg/m³]
+- `constants`: Breeze ThermodynamicConstants
+
+# Returns
+Maximum supersaturation (dimensionless, e.g., 0.01 = 1% supersaturation)
+"""
+@inline function max_supersaturation_breeze(
+    aerosol_activation,
+    aps::AirProperties{FT},
+    T::FT,
+    p::FT,
+    w::FT,
+    qᵗ::FT,
+    qˡ::FT,
+    qⁱ::FT,
+    Nˡ::FT,
+    Nⁱ::FT,
+    ρ::FT,
+    constants,
+) where {FT}
+
+    ap = aerosol_activation.activation_parameters
+    ad = aerosol_activation.aerosol_distribution
+
+    # Thermodynamic properties from Breeze
+    Rᵛ = vapor_gas_constant(constants)
+    ℒˡ = liquid_latent_heat(T, constants)
+    ℒⁱ = ice_latent_heat(T, constants)
+    pᵛ⁺ = saturation_vapor_pressure(T, constants, PlanarLiquidSurface())
+    pᵛ⁺ⁱ = saturation_vapor_pressure(T, constants, PlanarIceSurface())
+    g = constants.gravitational_acceleration
+    ρʷ = ap.ρ_w  # water density
+    ρⁱ = ap.ρ_i  # ice density
+
+    # Moisture mass fractions and mixture properties
+    qᵛ = qᵗ - qˡ - qⁱ
+    q = MoistureMassFractions(qᵛ, qˡ, qⁱ)
+    Rᵐ = mixture_gas_constant(q, constants)
+    cᵖᵐ = mixture_heat_capacity(q, constants)
+
+    # Vapor pressure
+    pᵛ = qᵛ * ρ * Rᵛ * T
+
+    # Diffusional growth factor G (Eq. 13.28 in Pruppacher & Klett)
+    G = diffusional_growth_factor(aps, T, constants) / ρʷ
+
+    # ARG parameters (Eq. 11, 12 in Abdul-Razzak et al. 1998)
+    # α = rate of change of saturation ratio due to adiabatic cooling
+    α = pᵛ / pᵛ⁺ * (ℒˡ * g / Rᵛ / cᵖᵐ / T^2 - g / Rᵐ / T)
+    # γ = thermodynamic factor for condensation
+    γ = Rᵛ * T / pᵛ⁺ + pᵛ / pᵛ⁺ * Rᵐ * ℒˡ^2 / Rᵛ / cᵖᵐ / T / p
+
+    # Curvature coefficient (Kelvin effect)
+    # Formula: A = 2σ / (ρʷ * R_v * T)
+    A = 2 * ap.σ / (ρʷ * Rᵛ * T)
+
+    # Only compute if there's updraft
+    S_max_ARG = compute_smax_arg(ap, ad, A, α, γ, G, w, ρʷ)
+
+    # Correction for existing liquid and ice (phase relaxation)
+    # See Eq. A13 in Korolev and Mazin (2003) or CloudMicrophysics implementation
+
+    # Liquid relaxation
+    rˡ = ifelse(Nˡ > eps(FT), cbrt(ρ * qˡ / Nˡ / ρʷ / (FT(4) / 3 * FT(π))), zero(FT))
+    Kˡ = 4 * FT(π) * ρʷ * Nˡ * rˡ * G * γ
+
+    # Ice relaxation
+    γⁱ = Rᵛ * T / pᵛ⁺ + pᵛ / pᵛ⁺ * Rᵐ * ℒˡ * ℒⁱ / Rᵛ / cᵖᵐ / T / p
+    rⁱ = ifelse(Nⁱ > eps(FT), cbrt(ρ * qⁱ / Nⁱ / ρⁱ / (FT(4) / 3 * FT(π))), zero(FT))
+    Gⁱ = diffusional_growth_factor_ice(aps, T, constants)
+    Kⁱ = 4 * FT(π) * Nⁱ * rⁱ * Gⁱ * γⁱ
+
+    ξ = pᵛ⁺ / pᵛ⁺ⁱ
+
+    S_max = S_max_ARG * (α * w - Kⁱ * (ξ - 1)) / (α * w + (Kˡ + Kⁱ * ξ) * S_max_ARG)
+
+    return max(zero(FT), S_max)
+end
+
+# Helper function to compute mean hygroscopicity
+@inline function mean_hygroscopicity(ap, mode::Mode_κ{T, FT}) where {T <: Tuple, FT}
+    κ_mean = zero(FT)
+    @inbounds for j in 1:fieldcount(T)
+        κ_mean += mode.vol_mix_ratio[j] * mode.kappa[j]
+    end
+    return κ_mean
+end
+
+@inline mean_hygroscopicity(ap, mode::Mode_κ{T, FT}) where {T <: Real, FT} = mode.vol_mix_ratio * mode.kappa
+
+@inline function mean_hygroscopicity(ap, mode::Mode_B{T, FT}) where {T <: Tuple, FT}
+    numerator = zero(FT)
+    @inbounds for j in 1:fieldcount(T)
+        numerator += mode.mass_mix_ratio[j] * mode.dissoc[j] * mode.osmotic_coeff[j] *
+                     mode.soluble_mass_frac[j] / mode.molar_mass[j]
+    end
+
+    denominator = zero(FT)
+    @inbounds for j in 1:fieldcount(T)
+        denominator += mode.mass_mix_ratio[j] / mode.aerosol_density[j]
+    end
+
+    return numerator / denominator * ap.M_w / ap.ρ_w
+end
+
+@inline function mean_hygroscopicity(ap, mode::Mode_B{T, FT}) where {T <: Real, FT}
+    numerator = mode.mass_mix_ratio * mode.dissoc * mode.osmotic_coeff * mode.soluble_mass_frac / mode.molar_mass
+    denominator = mode.mass_mix_ratio / mode.aerosol_density
+    return numerator / denominator * ap.M_w / ap.ρ_w
+end
+
+# Helper function to compute S_max using ARG parameterization
+@inline function compute_smax_arg(ap, ad, A::FT, α::FT, γ::FT, G::FT, w::FT, ρʷ::FT) where FT
+    ζ = 2 * A / 3 * sqrt(α * w / G)
+
+    # Compute critical supersaturation and contribution from each mode
+    tmp = zero(FT)
+    for mode_i in ad.modes
+
+        # Mean hygroscopicity for mode (volume-weighted κ)
+        κ_mean = mean_hygroscopicity(ap, mode_i)
+
+        # Critical supersaturation (Eq. 9 in ARG 2000)
+        Sm_i = 2 / sqrt(κ_mean) * (A / 3 / mode_i.r_dry)^(FT(3) / 2)
+
+        # Fitting parameters
+        f = ap.f1 * exp(ap.f2 * log(mode_i.stdev)^2)
+        g_param = ap.g1 + ap.g2 * log(mode_i.stdev)
+
+        # η parameter
+        η = (α * w / G)^(FT(3) / 2) / (FT(2π) * ρʷ * γ * mode_i.N)
+
+        # Contribution to 1/S_max² (Eq. 6 in ARG 2000)
+        tmp += 1 / Sm_i^2 * (f * (ζ / η)^ap.p1 + g_param * (Sm_i^2 / (η + 3 * ζ))^ap.p2)
+    end
+
+    return 1 / sqrt(tmp)
+end
+
+"""
+    activated_droplet_number(aerosol_activation, air_properties, T, p, w, qᵗ, qˡ, qⁱ, Nˡ, Nⁱ, ρ, constants)
+
+Compute the number of cloud droplets that would form from aerosol activation.
+
+Uses the Abdul-Razzak and Ghan (2000) parameterization. The activation depends on:
+- Updraft velocity (drives supersaturation development)
+- Temperature and pressure
+- Aerosol properties (number, size, hygroscopicity)
+
+# Returns
+Total number of activated droplets per unit volume [1/m³]
+"""
+@inline function activated_droplet_number(
+    aerosol_activation,
+    aps::AirProperties{FT},
+    T::FT,
+    p::FT,
+    w::FT,
+    qᵗ::FT,
+    qˡ::FT,
+    qⁱ::FT,
+    Nˡ::FT,
+    Nⁱ::FT,
+    ρ::FT,
+    constants,
+) where {FT}
+
+    ap = aerosol_activation.activation_parameters
+    ad = aerosol_activation.aerosol_distribution
+
+    # Compute maximum supersaturation
+    S_max = max_supersaturation_breeze(aerosol_activation, aps, T, p, w, qᵗ, qˡ, qⁱ, Nˡ, Nⁱ, ρ, constants)
+
+    # Curvature coefficient
+    Rᵛ = vapor_gas_constant(constants)
+    # Formula: A = 2σ / (ρʷ * Rᵛ * T)
+    A = 2 * ap.σ / (ap.ρ_w * Rᵛ * T)
+
+    # Sum activated droplets from each mode
+    N_act = zero(FT)
+    for mode_i in ad.modes
+
+        # Critical supersaturation for this mode
+        κ_mean = mean_hygroscopicity(ap, mode_i)
+        Sm_i = 2 / sqrt(κ_mean) * (A / 3 / mode_i.r_dry)^(FT(3) / 2)
+
+        # Fraction activated (Eq. 7 in ARG 2000)
+        u_i = 2 * log(Sm_i / S_max) / 3 / sqrt(FT(2)) / log(mode_i.stdev)
+
+        activated_fraction = FT(0.5) * (1 - SF.erf(u_i))
+
+        N_act += mode_i.N * activated_fraction
+    end
+
+    return N_act
 end

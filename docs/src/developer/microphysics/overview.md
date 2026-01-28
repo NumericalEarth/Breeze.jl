@@ -17,8 +17,8 @@ without modification.
 
 | Function | Arguments | Description |
 |----------|-----------|-------------|
-| `microphysical_state` | `(microphysics, ρ, μ, 𝒰)` | **Primary interface**. Build scheme-specific state from scalars. |
-| `grid_microphysical_state` | `(i, j, k, grid, microphysics, μ_fields, ρ, 𝒰)` | **Generic wrapper**. Extracts prognostics then calls gridless version. |
+| `microphysical_state` | `(microphysics, ρ, μ, 𝒰, w=0, Δt=1)` | **Primary interface**. Build scheme-specific state from scalars. |
+| `grid_microphysical_state` | `(i, j, k, grid, microphysics, μ_fields, ρ, 𝒰, w=0, Δt=1)` | **Generic wrapper**. Extracts prognostics then calls gridless version. |
 
 **Design principle**: Schemes implement the gridless `microphysical_state`; the grid-indexed version is generic.
 
@@ -27,15 +27,18 @@ Arguments:
 - `ρ`: Air density
 - `μ`: NamedTuple of density-weighted prognostic scalars (e.g., `(ρqᶜˡ=..., ρqʳ=...)`)
 - `𝒰`: Thermodynamic state
+- `w`: Vertical velocity [m/s] (default: 0). Used by schemes with aerosol activation.
+- `Δt`: Model timestep [s] (default: 1). Used for aerosol activation rate conversion.
 
 ### Tendency Computation
 
 | Function | Arguments | Description |
 |----------|-----------|-------------|
 | `microphysical_tendency` | `(microphysics, name, ρ, ℳ, 𝒰, constants)` | **State-based**. Compute tendency for variable `name`. |
-| `grid_microphysical_tendency` | `(i, j, k, grid, microphysics, name, ρ, fields, 𝒰, constants)` | **Generic wrapper**. Builds `ℳ` and dispatches to state-based version. |
+| `grid_microphysical_tendency` | `(i, j, k, grid, microphysics, name, ρ, fields, 𝒰, constants, velocities, Δt=1)` | **Generic wrapper**. Builds `ℳ` and dispatches to state-based version. |
 
 **Design principle**: Schemes implement the state-based version; grid-indexed is generic.
+The vertical velocity `w` is interpolated from cell faces to cell centers and passed to the microphysical state for aerosol activation.
 
 The `name` argument is a `Val` type (e.g., `Val(:ρqᶜˡ)`) that dispatches to the appropriate tendency.
 
@@ -108,7 +111,7 @@ These functions are sufficient to use a microphysics scheme with [`ParcelModel`]
 
 | Function | Purpose |
 |----------|---------|
-| `microphysical_state(microphysics, ρ, μ, 𝒰)` | Build state from prognostics |
+| `microphysical_state(microphysics, ρ, μ, 𝒰, w, Δt)` | Build state from prognostics |
 | `microphysical_tendency(microphysics, name, ρ, ℳ, 𝒰, constants)` | Compute tendencies |
 | `moisture_fractions(microphysics, ℳ, qᵗ)` | Partition moisture (if generic doesn't work) |
 | `prognostic_field_names(microphysics)` | List prognostic variables |
