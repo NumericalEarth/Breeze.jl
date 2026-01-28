@@ -15,7 +15,7 @@ Pkg.activate(@__DIR__)
 
 using ArgParse
 using BreezeBenchmarks
-using JSON3
+using JSON
 using Oceananigans
 using Oceananigans.TurbulenceClosures: SmagorinskyLilly, DynamicSmagorinsky
 
@@ -355,7 +355,7 @@ function main()
         else
             # Read existing file and append
             existing_data = open(output_file, "r") do io
-                JSON3.read(io)
+                JSON.read(io)
             end
             all_entries = vcat(existing_data, new_entries)
             println("\nAppending to existing results file: $output_file")
@@ -363,7 +363,7 @@ function main()
 
         # Write all results to JSON
         open(output_file, "w") do io
-            JSON3.pretty(io, all_entries)
+            JSON.pretty(io, all_entries)
         end
 
         println("Results saved to: $output_file ($(length(new_entries)) new, $(length(all_entries)) total)")
