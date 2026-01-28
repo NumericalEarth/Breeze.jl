@@ -663,9 +663,9 @@ end
 ##### Aerosol activation tendency
 #####
 
-# Minimum activation radius [m] - used when supersaturation is very small
-# This is a typical activation radius for small aerosol (~50 nm dry radius at low S)
-const r_act_min = 0.5e-6  # 0.5 μm
+# Nucleation radius [m] - fallback when supersaturation is negligible
+# Matches CloudMicrophysics parcel model default: r_nuc = 0.5 * 1e-4 * 1e-6
+const r_nuc = 5e-11  # 0.05 nm
 
 # No activation when aerosol_activation is nothing
 @inline aerosol_activation_tendency(::Nothing, aps, ρ, Nᵃ, Nᶜˡ, w, Δt, 𝒰, constants) = zero(ρ)
@@ -785,15 +785,14 @@ Mass tendency for cloud liquid [kg/kg/s]
     A = 2 * σ / (ρʷ * Rᵛ * T)
 
     # Use instantaneous supersaturation to compute activation radius
+    # Following CloudMicrophysics parcel model: use r_nuc as fallback when no activation or no supersaturation
     S = supersaturation(T, ρ, q, constants, PlanarLiquidSurface())
 
-    # Protect against division by zero: if S is too small or negative, use a default radius
-    # S below ~1e-6 (0.0001%) gives very large radii that will be clamped anyway
-    S_safe = max(S, 1e-6)
-    r_act_raw = A / (3 * S_safe)
-
-    # Clamp activation radius: minimum r_act_min, maximum 1 μm (typical cloud droplet size)
-    r_act = clamp(r_act_raw, r_act_min, 1e-6)
+    # Compute radius: r_act = A / (3 * S), capped at 1 μm
+    # Use r_nuc as fallback when S is negligible (no supersaturation) or no activation
+    activation_active = (dNᶜˡ_act > eps(FT)) & (S > eps(FT))
+    r_act_computed = min(1e-6, A / (3 * max(S, eps(FT))))
+    r_act = ifelse(activation_active, r_act_computed, r_nuc)
 
     # Mass of a single activated droplet [kg]
     # m = (4π/3) * r³ * ρw
