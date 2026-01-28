@@ -6,12 +6,18 @@ on:
   push:
     branches:
       - 'main'
+    paths: &paths
+      - '.github/workflows/Whitespace.yml'
+      - '**.jl'
+      - '**.md'
+      - '**.sh'
   pull_request:
+    paths: *paths
 
 jobs:
   whitespace:
     name: Check whitespace
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-slim
     timeout-minutes: 2
     steps:
       - name: Checkout the NumericalEarth/Breeze.jl repository

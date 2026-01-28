@@ -344,7 +344,7 @@ using Oceananigans: interpolate
 
     # Get parcel and environmental temperatures at final height
     T_parcel = temperature(model.dynamics.state.𝒰, constants)
-    T_environment = interpolate((z_final,), model.temperature)
+    T_environment = interpolate(z_final, model.temperature)
 
     # In an isentropic atmosphere, parcel temperature should match environment
     # Allow 1 K tolerance for numerical errors
