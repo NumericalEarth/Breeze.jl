@@ -735,12 +735,12 @@ When aerosol particles activate to form cloud droplets, the newly formed droplet
 have a finite initial size given by the activation radius. This function computes
 the corresponding mass source term for cloud liquid water.
 
-The activation radius is derived from Köhler theory [Abdul-Razzak and Ghan (2000)](@cite AbdulRazzakGhan2000):
+The activation radius is derived from Köhler theory:
 ```math
-r_{act} = \\frac{A}{3 S_{max}}
+r_{act} = \\frac{A}{3 S}
 ```
-where ``A = 2σ/(ρ_w R_v T)`` is the curvature parameter and ``S_{max}`` is the
-maximum supersaturation.
+where ``A = 2σ/(ρ_w R_v T)`` is the curvature parameter and ``S`` is the
+instantaneous supersaturation.
 
 The mass tendency is then:
 ```math
@@ -774,8 +774,6 @@ Mass tendency for cloud liquid [kg/kg/s]
     # Get thermodynamic properties for activation radius calculation
     T = temperature(𝒰, constants)
     q = 𝒰.moisture_mass_fractions
-    qᵗ = q.vapor + q.liquid
-    qˡ = q.liquid
 
     # Compute activation radius from Köhler theory
     # A = 2σ / (ρw * Rv * T) is the curvature parameter
@@ -786,19 +784,13 @@ Mass tendency for cloud liquid [kg/kg/s]
 
     A = 2 * σ / (ρʷ * Rᵛ * T)
 
-    # Use maximum supersaturation to compute activation radius
-    # For the w argument, use a minimum value of 0.1 m/s to avoid numerical issues
-    # when w is very small (this is only used for computing r_act, not for activation itself)
-    w⁺ = max(0, w)
-    w_for_smax = max(w⁺, 0.1)
-    p = 𝒰.reference_pressure
-    S_max = max_supersaturation_breeze(aerosol_activation, aps, T, p, w_for_smax, qᵗ, qˡ, 0, 0, 0, ρ, constants)
+    # Use instantaneous supersaturation to compute activation radius
+    S = supersaturation(T, ρ, q, constants, PlanarLiquidSurface())
 
-    # Protect against division by zero or NaN: if S_max is too small or NaN, use default radius
-    # S_max below ~1e-6 (0.0001%) is physically unrealistic for cloud formation
-    S_max_valid = isfinite(S_max) & (S_max > 1e-8)
-    S_max_safe = ifelse(S_max_valid, max(S_max, 1e-6), 0.01)  # default 1% if invalid
-    r_act_raw = A / (3 * S_max_safe)
+    # Protect against division by zero: if S is too small or negative, use a default radius
+    # S below ~1e-6 (0.0001%) gives very large radii that will be clamped anyway
+    S_safe = max(S, 1e-6)
+    r_act_raw = A / (3 * S_safe)
 
     # Clamp activation radius: minimum r_act_min, maximum 1 μm (typical cloud droplet size)
     r_act = clamp(r_act_raw, r_act_min, 1e-6)
