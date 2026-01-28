@@ -672,7 +672,7 @@ const r_act_min = 0.5e-6  # 0.5 μm
 @inline aerosol_activation_mass_tendency(::Nothing, aps, ρ, Nᵃ, Nᶜˡ, w, Δt, 𝒰, constants) = zero(ρ)
 
 # Compute activation tendency using Abdul-Razzak and Ghan (2000)
-# The ARG2000 parameterization gives the fraction of the TOTAL aerosol population that should be activated. 
+# The ARG2000 parameterization gives the fraction of the TOTAL aerosol population that should be activated.
 # We compare this target to the current cloud droplet number and activate the deficit.
 @inline function aerosol_activation_tendency(
     aerosol_activation::AerosolActivation,
