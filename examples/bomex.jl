@@ -279,30 +279,29 @@ add_callback!(simulation, progress, IterationInterval(1000))
 u, v, w, = model.velocities
 U = Average(u, dims=(1, 2)) |> Field # horizontal mean
 V = Average(v, dims=(1, 2)) |> Field
-W = Average(w, dims=(1, 2)) |> Field
 #θbar = Average(θ, dims=(1,2)) |> Field
-θˡⁱbar = Average(θˡⁱ, dims=(1,2)) |> Field
-qˡbar = Average(qˡ, dims=(1,2)) |> Field
+θˡⁱavg = Average(θˡⁱ, dims=(1,2)) |> Field
+qˡavg = Average(qˡ, dims=(1,2)) |> Field
 qᵗ = qˡ + qᵛ
-qᵗbar = Average(qᵗ, dims=(1,2)) |> Field
-θᵛbar = Average(θᵛ, dims=(1,2)) |> Field
-θᵛapprox = θ * (1 + 0.61 * qᵛ - qˡ)
-θᵛabar = Average(θᵛapprox, dims=(1,2)) |> Field
+qᵗavg = Average(qᵗ, dims=(1,2)) |> Field
+θᵛavg = Average(θᵛ, dims=(1,2)) |> Field
+θᵛ_S03 = θ * (1 + 0.608 * qᵛ - qˡ)
+θᵛ_S03avg = Average(θᵛ_S03, dims=(1,2)) |> Field
 
 
 u′² = (u - U) * (u - U)
 v′² = (v - V) * (v - V)
-w′² = (w - W) * (w - W)
-tke = @at (Center, Center, Center) (u′² + v′² + w′²) / 2 
-w′qˡ′ = @at (Center, Center, Center) (w - W) * (qˡ - qˡbar)
-w′qᵗ′ = @at (Center, Center, Center) (w - W) * (qᵗ - qᵗbar)
-w′u′ = @at (Center, Center, Center) (w - W) * (u - U)
-w′θˡⁱ′ = @at (Center, Center, Center) (w - W) * (θˡⁱ - θˡⁱbar)
-w′θᵛ′ = @at (Center, Center, Center) (w - W) * (θᵛ - θᵛbar)
-w′θᵛ′approx = @at (Center, Center, Center) (w - W) * (θᵛapprox - θᵛabar)
+w′² = w * w
+k = @at (Center, Center, Center) (u′² + v′² + w′²) / 2 
+w′qˡ′ = @at (Center, Center, Center) w * (qˡ - qˡavg)
+w′qᵗ′ = @at (Center, Center, Center) w * (qᵗ - qᵗavg)
+w′u′ = @at (Center, Center, Center) w * (u - U)
+w′θˡⁱ′ = @at (Center, Center, Center) w * (θˡⁱ - θˡⁱavg)
+w′θᵛ′ = @at (Center, Center, Center) w * (θᵛ - θᵛavg)
+w′θᵛ′_S03= @at (Center, Center, Center) w * (θᵛ_S03 - θᵛ_S03avg)
 
 
-outputs = merge(model.velocities, model.tracers, (; θ, θˡⁱ, θᵛ, qˡ, qᵛ, w′², w′qˡ′, w′qᵗ′, w′u′, tke, w′θˡⁱ′, w′θᵛ′, w′θᵛ′approx))
+outputs = merge(model.velocities, model.tracers, (; θ, θˡⁱ, θᵛ, qˡ, qᵛ, w′², w′qˡ′, w′qᵗ′, w′u′, k, w′θˡⁱ′, w′θᵛ′, w′θᵛ′_S03))
 avg_outputs = NamedTuple(name => Average(outputs[name], dims=(1, 2)) for name in keys(outputs))
 
 filename = "bomex.jld2"
@@ -311,7 +310,7 @@ simulation.output_writers[:averages] = JLD2Writer(model, avg_outputs; filename,
                                                   overwrite_existing = true)
 
 # # Timeseries integrated TKE, cloud fraction and LWP
-# tke_integrated = Integral(Average(tke, dims=(1,2)))
+# tke_integrated = Integral(Average(k, dims=(1,2)))
 
 # # cloud fraction
 # qˡ_thresh = 1e-6  # kg/kg
@@ -414,23 +413,23 @@ fig
 
 # 1 x 2 panel plot showing vertical velocity variance and tke
 w′²t = FieldTimeSeries(filename, "w′²")
-tke = FieldTimeSeries(filename, "tke")
+kt = FieldTimeSeries(filename, "k")
 
 fig = Figure(size=(900, 400), fontsize=14)
 
 axw = Axis(fig[1, 2], xlabel="w′² (m²/s²)", ylabel="z (m)")
-axtke = Axis(fig[1, 1], xlabel="tke (m²/s²)", ylabel="z (m)")
+axk = Axis(fig[1, 1], xlabel="tke (m²/s²)", ylabel="z (m)")
 
 colors = [default_colours[mod1(i, length(default_colours))] for i in 1:Nt]
 
 for n in 1:Nt
     label = n == 1 ? "initial condition" : "mean over $(Int(times[n-1]/hour))-$(Int(times[n]/hour)) hr"
     lines!(axw, w′²t[n], color=colors[n], label=label)
-    lines!(axtke, tke[n], color=colors[n])
+    lines!(axk, kt[n], color=colors[n])
 end
 
 # Set axis limits to focus on the boundary layer
-for ax in (axw, axtke)
+for ax in (axw, axk)
     ylims!(ax, 0, 2500)
 end
 axislegend(axw, position=:rt)
@@ -446,7 +445,7 @@ w′θˡⁱ′t = FieldTimeSeries(filename, "w′θˡⁱ′")
 w′u′t = FieldTimeSeries(filename, "w′u′")
 w′qᵗ′t = FieldTimeSeries(filename, "w′qᵗ′")
 w′θᵛ′t = FieldTimeSeries(filename, "w′θᵛ′")
-w′θᵛ′approx_t = FieldTimeSeries(filename, "w′θᵛ′approx")
+w′θᵛ′_S03_t = FieldTimeSeries(filename, "w′θᵛ′_S03")
 fig = Figure(size=(900, 1200), fontsize=14)
 
 # todo: convert to W/m^2
@@ -464,7 +463,7 @@ for n in 1:Nt
     lines!(axwθ, w′θˡⁱ′t[n], color=colors[n])
     lines!(axwql, w′qˡ′t[n], color=colors[n])
     lines!(axwθv, w′θᵛ′t[n], color=colors[n])
-    lines!(axwθv, w′θᵛ′approx_t[n], color=colors[n], linestyle=:dash)
+    lines!(axwθv, w′θᵛ′_S03_t[n], color=colors[n], linestyle=:dash)
     lines!(axwu, w′u′t[n], color=colors[n])
 end
 
