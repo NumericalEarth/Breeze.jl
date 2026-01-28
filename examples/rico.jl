@@ -280,7 +280,6 @@ averaged_outputs = NamedTuple(name => Average(outputs[name], dims=(1, 2)) for na
 
 filename = "rico.jld2"
 simulation.output_writers[:averages] = JLD2Writer(model, averaged_outputs; filename,
-                                                  including = [:grid],
                                                   schedule = AveragedTimeInterval(2hour),
                                                   overwrite_existing = true)
 
@@ -306,7 +305,6 @@ slice_outputs = (
 filename = "rico_slices.jld2"
 output_interval = 20seconds
 simulation.output_writers[:slices] = JLD2Writer(model, slice_outputs; filename,
-                                                including = [:grid],
                                                 schedule = TimeInterval(output_interval),
                                                 overwrite_existing = true)
 
