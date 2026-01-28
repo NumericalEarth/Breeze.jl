@@ -494,8 +494,8 @@ for [`AtmosphereModel`](@ref) and consolidates all state-dependent computations:
 # Keyword Arguments
 - `compute_tendencies`: If `true` (default), compute tendencies for prognostic variables.
 """
-function TimeSteppers.update_state!(model::ParcelModel, callbacks=[]; compute_tendencies=true)
-    compute_tendencies && compute_parcel_tendencies!(model)
+function TimeSteppers.update_state!(model::ParcelModel, callbacks=[]; compute_tendencies=true, Δt=1.0)
+    compute_tendencies && compute_parcel_tendencies!(model, Δt)
     return nothing
 end
 
@@ -511,8 +511,12 @@ The parcel model evolves **specific quantities** (e, qᵗ) directly, not
 density-weighted quantities. For adiabatic ascent with no microphysics,
 specific static energy and moisture are exactly conserved (de/dt = dqᵗ/dt = 0).
 This is simpler and more accurate than stepping density-weighted quantities.
+
+# Arguments
+- `model`: The parcel model
+- `Δt`: Model timestep [s]. Required for aerosol activation rate conversion.
 """
-function compute_parcel_tendencies!(model::ParcelModel)
+function compute_parcel_tendencies!(model::ParcelModel, Δt)
     dynamics = model.dynamics
     state = dynamics.state
     tendencies = dynamics.timestepper.G
@@ -530,9 +534,9 @@ function compute_parcel_tendencies!(model::ParcelModel)
     tendencies.Gz = interpolate(z, model.velocities.w)
 
     # Build diagnostic microphysical state from prognostic variables
-    # Pass updraft velocity explicitly for aerosol activation
+    # Pass updraft velocity and timestep for aerosol activation
     w = tendencies.Gz
-    ℳ = microphysical_state(microphysics, ρ, μ, 𝒰, w)
+    ℳ = microphysical_state(microphysics, ρ, μ, 𝒰, w, Δt)
 
     # Thermodynamic and moisture tendencies from microphysics (specific, not density-weighted)
     # For adiabatic (no microphysics): both are zero, giving exact conservation
@@ -689,7 +693,7 @@ quantities remain exactly constant throughout the simulation.
 """
 function ssp_rk3_parcel_substep!(model::ParcelModel, U⁰::ParcelInitialState, Δt, α)
     # Compute tendencies at current state
-    compute_parcel_tendencies!(model)
+    compute_parcel_tendencies!(model, Δt)
 
     dynamics = model.dynamics
     state = dynamics.state
@@ -723,8 +727,9 @@ function ssp_rk3_parcel_substep!(model::ParcelModel, U⁰::ParcelInitialState, �
     state.μ = ssp_rk3_microphysics_substep(U⁰.μ, state.μ, tendencies.Gμ, Δt, α)
 
     # Update moisture fractions in thermodynamic state
+    # w and Δt not used for moisture fraction computation
     microphysics = model.microphysics
-    ℳ = microphysical_state(microphysics, state.ρ, state.μ, state.𝒰)
+    ℳ = microphysical_state(microphysics, state.ρ, state.μ, state.𝒰, zero(state.ρ), one(state.ρ))
     q⁺ = moisture_fractions(microphysics, ℳ, state.qᵗ)
     state.𝒰 = with_moisture(state.𝒰, q⁺)
 
@@ -777,7 +782,7 @@ updated from the profiles.
 """
 function step_parcel_state!(model::ParcelModel, Δt)
     # Compute tendencies at current state
-    compute_parcel_tendencies!(model)
+    compute_parcel_tendencies!(model, Δt)
 
     dynamics = model.dynamics
     state = dynamics.state
@@ -811,8 +816,9 @@ function step_parcel_state!(model::ParcelModel, Δt)
     state.μ = apply_microphysical_tendencies(state.μ, tendencies.Gμ, Δt)
 
     # Update moisture fractions in thermodynamic state
+    # w and Δt not used for moisture fraction computation
     microphysics = model.microphysics
-    ℳ = microphysical_state(microphysics, state.ρ, state.μ, state.𝒰)
+    ℳ = microphysical_state(microphysics, state.ρ, state.μ, state.𝒰, zero(state.ρ), one(state.ρ))
     q⁺ = moisture_fractions(microphysics, ℳ, state.qᵗ)
     state.𝒰 = with_moisture(state.𝒰, q⁺)
 

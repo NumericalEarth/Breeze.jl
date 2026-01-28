@@ -111,7 +111,7 @@ These functions are sufficient to use a microphysics scheme with [`ParcelModel`]
 
 | Function | Purpose |
 |----------|---------|
-| `microphysical_state(microphysics, ρ, μ, 𝒰)` | Build state from prognostics |
+| `microphysical_state(microphysics, ρ, μ, 𝒰, w, Δt)` | Build state from prognostics |
 | `microphysical_tendency(microphysics, name, ρ, ℳ, 𝒰, constants)` | Compute tendencies |
 | `moisture_fractions(microphysics, ℳ, qᵗ)` | Partition moisture (if generic doesn't work) |
 | `prognostic_field_names(microphysics)` | List prognostic variables |

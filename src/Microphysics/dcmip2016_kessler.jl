@@ -192,20 +192,20 @@ AtmosphereModels.prognostic_field_names(::DCMIP2016KM) = (:ρqᶜˡ, :ρqʳ)
 
 # Gridless microphysical state: convert density-weighted prognostics to specific quantities.
 # The grid-indexed version is a generic wrapper that extracts μ from fields and calls this.
-# The w and Δt arguments are accepted for interface compatibility but not used by one-moment schemes.
-@inline function AtmosphereModels.microphysical_state(::DCMIP2016KM, ρ, μ, 𝒰, w=zero(ρ), Δt=one(ρ))
+# The w and Δt arguments are required for interface compatibility but not used by the Kessler schemes.
+@inline function AtmosphereModels.microphysical_state(::DCMIP2016KM, ρ, μ, 𝒰, w, Δt)
     qᶜˡ = μ.ρqᶜˡ / ρ
     qʳ = μ.ρqʳ / ρ
     return AtmosphereModels.WarmRainState(qᶜˡ, qʳ)
 end
 
 # Disambiguation for μ::Nothing (no prognostics yet)
-@inline function AtmosphereModels.microphysical_state(::DCMIP2016KM, ρ, ::Nothing, 𝒰, w=zero(ρ), Δt=one(ρ))
+@inline function AtmosphereModels.microphysical_state(::DCMIP2016KM, ρ, ::Nothing, 𝒰, w, Δt)
     return AtmosphereModels.NothingMicrophysicalState(typeof(ρ))
 end
 
 # Disambiguation for empty NamedTuple
-@inline function AtmosphereModels.microphysical_state(::DCMIP2016KM, ρ, ::NamedTuple{(), Tuple{}}, 𝒰, w=zero(ρ), Δt=one(ρ))
+@inline function AtmosphereModels.microphysical_state(::DCMIP2016KM, ρ, ::NamedTuple{(), Tuple{}}, 𝒰, w, Δt)
     return AtmosphereModels.NothingMicrophysicalState(typeof(ρ))
 end
 

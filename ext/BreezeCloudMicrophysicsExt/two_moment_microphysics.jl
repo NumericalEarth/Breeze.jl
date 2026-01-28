@@ -252,8 +252,7 @@ end
 #####
 
 # Gridless version: takes density, prognostic NamedTuple, thermodynamic state, updraft velocity, and timestep
-# Default Δt = 1.0 s matches CloudMicrophysics.jl parcel model default (const_dt = 1)
-@inline function AtmosphereModels.microphysical_state(bμp::WPNE2M, ρ, μ, 𝒰, w=zero(ρ), Δt=one(ρ))
+@inline function AtmosphereModels.microphysical_state(bμp::WPNE2M, ρ, μ, 𝒰, w, Δt)
     qᶜˡ = μ.ρqᶜˡ / ρ
     nᶜˡ = μ.ρnᶜˡ / ρ
     qʳ = μ.ρqʳ / ρ
@@ -263,9 +262,9 @@ end
 end
 
 # Grid-indexed version: extracts from Fields
-# Vertical velocity w is now passed from grid_microphysical_tendency (interpolated to cell center)
-# Δt comes from clock.last_Δt, with default 1.0 s for backwards compatibility
-@inline function AtmosphereModels.grid_microphysical_state(i, j, k, grid, bμp::WPNE2M, μ, ρ, 𝒰, w=zero(ρ), Δt=one(ρ))
+# Vertical velocity w is passed from grid_microphysical_tendency (interpolated to cell center)
+# Δt comes from clock.last_Δt
+@inline function AtmosphereModels.grid_microphysical_state(i, j, k, grid, bμp::WPNE2M, μ, ρ, 𝒰, w, Δt)
     FT = typeof(ρ)
     @inbounds qᶜˡ = μ.qᶜˡ[i, j, k]
     @inbounds nᶜˡ = μ.nᶜˡ[i, j, k]
