@@ -1,0 +1,42 @@
+using Oceananigans
+using CUDA
+using Reactant, KernelAbstractions, Breeze, Enzyme
+using Oceananigans.Utils: launch!, KernelParameters
+using KernelAbstractions
+using Oceananigans.Grids: topology, halo_size, Periodic, Flat
+using Oceananigans.Architectures: ReactantState
+using Test
+
+diagnostic_indices(::Bounded, N, H) = 1:N+1
+diagnostic_indices(::Periodic, N, H) = -H+1:N+H
+diagnostic_indices(::Flat, N, H) = 1:N
+
+@kernel function _stencil_kernel!(output, input)
+    i, j = @index(Global, NTuple)
+    # Stencil access - average with neighbors
+    @inbounds output[i, j] = 0.25 * (input[i, j] + input[i-1, j] + input[i, j-1] + input[i-1, j-1])
+end
+
+function compute_stencil!(output, input, grid, workspec)
+    launch!(grid.architecture, grid, workspec, _stencil_kernel!, output, input)
+    return output
+end
+
+@testset "Stencil with OffsetStaticSize kernel" begin
+    grid = RectilinearGrid(ReactantState(); size=(11, 11), extent=(1000, 1000),
+                           halo=(3, 3), topology=(Periodic, Periodic, Flat))
+    f = CenterField(grid)
+    g = CenterField(grid)
+    set!(f, (x, y) -> 0.01 * x + 0.01 * y)
+
+    TX, TY, TZ = topology(grid)
+    Nx, Ny, Nz = size(grid)
+    Hx, Hy, Hz = halo_size(grid)
+
+    ii = diagnostic_indices(TX(), Nx, Hx)
+    jj = diagnostic_indices(TY(), Ny, Hy)
+    kp = KernelParameters(ii, jj)
+
+    compiled = Reactant.@compile raise_first=true raise=true sync=true compute_stencil!(g, f, grid, kp)
+    @test compiled !== nothing
+end
