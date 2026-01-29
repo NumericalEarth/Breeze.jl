@@ -317,20 +317,20 @@ Maximum supersaturation (dimensionless, e.g., 0.01 = 1% supersaturation)
     # See Eq. A13 in Korolev and Mazin (2003) or CloudMicrophysics implementation
 
     # Liquid relaxation
-    rˡ = ifelse(Nˡ > eps(FT), cbrt(ρ * qˡ / Nˡ / ρʷ / (FT(4) / 3 * FT(π))), zero(FT))
-    Kˡ = 4 * FT(π) * ρʷ * Nˡ * rˡ * G * γ
+    rˡ = ifelse(Nˡ > eps(FT), cbrt(ρ * qˡ / Nˡ / ρʷ / (4 / 3 * π)), 0)
+    Kˡ = 4 * π * ρʷ * Nˡ * rˡ * G * γ
 
     # Ice relaxation
     γⁱ = Rᵛ * T / pᵛ⁺ + pᵛ / pᵛ⁺ * Rᵐ * ℒˡ * ℒⁱ / Rᵛ / cᵖᵐ / T / p
-    rⁱ = ifelse(Nⁱ > eps(FT), cbrt(ρ * qⁱ / Nⁱ / ρⁱ / (FT(4) / 3 * FT(π))), zero(FT))
+    rⁱ = ifelse(Nⁱ > eps(FT), cbrt(ρ * qⁱ / Nⁱ / ρⁱ / (4 / 3 * π)), 0)
     Gⁱ = diffusional_growth_factor_ice(aps, T, constants)
-    Kⁱ = 4 * FT(π) * Nⁱ * rⁱ * Gⁱ * γⁱ
+    Kⁱ = 4 * π * Nⁱ * rⁱ * Gⁱ * γⁱ
 
     ξ = pᵛ⁺ / pᵛ⁺ⁱ
 
     S_max = S_max_ARG * (α * w - Kⁱ * (ξ - 1)) / (α * w + (Kˡ + Kⁱ * ξ) * S_max_ARG)
 
-    return max(zero(FT), S_max)
+    return max(0, S_max)
 end
 
 # Helper function to compute mean hygroscopicity
@@ -377,14 +377,14 @@ end
         κ_mean = mean_hygroscopicity(ap, mode_i)
 
         # Critical supersaturation (Eq. 9 in ARG 2000)
-        Sm_i = 2 / sqrt(κ_mean) * (A / 3 / mode_i.r_dry)^(FT(3) / 2)
+        Sm_i = 2 / sqrt(κ_mean) * (A / 3 / mode_i.r_dry)^(3 / 2)
 
         # Fitting parameters
         f = ap.f1 * exp(ap.f2 * log(mode_i.stdev)^2)
         g_param = ap.g1 + ap.g2 * log(mode_i.stdev)
 
         # η parameter
-        η = (α * w / G)^(FT(3) / 2) / (FT(2π) * ρʷ * γ * mode_i.N)
+        η = (α * w / G)^(3 / 2) / (2π * ρʷ * γ * mode_i.N)
 
         # Contribution to 1/S_max² (Eq. 6 in ARG 2000)
         tmp += 1 / Sm_i^2 * (f * (ζ / η)^ap.p1 + g_param * (Sm_i^2 / (η + 3 * ζ))^ap.p2)
@@ -438,12 +438,12 @@ Total number of activated droplets per unit volume [1/m³]
 
         # Critical supersaturation for this mode
         κ_mean = mean_hygroscopicity(ap, mode_i)
-        Sm_i = 2 / sqrt(κ_mean) * (A / 3 / mode_i.r_dry)^(FT(3) / 2)
+        Sm_i = 2 / sqrt(κ_mean) * (A / 3 / mode_i.r_dry)^(3 / 2)
 
         # Fraction activated (Eq. 7 in ARG 2000)
-        u_i = 2 * log(Sm_i / S_max) / 3 / sqrt(FT(2)) / log(mode_i.stdev)
+        u_i = 2 * log(Sm_i / S_max) / 3 / sqrt(2) / log(mode_i.stdev)
 
-        activated_fraction = FT(0.5) * (1 - SF.erf(u_i))
+        activated_fraction = 0.5 * (1 - SF.erf(u_i))
 
         N_act += mode_i.N * activated_fraction
     end
