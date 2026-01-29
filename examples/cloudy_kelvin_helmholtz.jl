@@ -187,7 +187,6 @@ outputs = merge(model.velocities, model.microphysical_fields, (; ξ, θ))
 filename = "wave_clouds.jld2"
 
 output_writer = JLD2Writer(model, outputs; filename,
-                           including = [:grid],
                            schedule = TimeInterval(4),
                            overwrite_existing = true)
 
