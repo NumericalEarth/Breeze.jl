@@ -815,6 +815,77 @@ function log_intercept_parameter(N_ice, μ, logλ)
 end
 
 """
+    DiameterBounds
+
+Physical bounds on ice particle diameters for the lambda solver.
+See [`DiameterBounds()`](@ref) constructor.
+"""
+struct DiameterBounds{FT}
+    D_min :: FT
+    D_max :: FT
+end
+
+"""
+$(TYPEDSIGNATURES)
+
+Construct diameter bounds for the lambda solver.
+
+The P3 scheme constrains the size distribution such that the mean diameter
+remains within physical limits. This prevents unphysical distributions with
+extremely small or large particles.
+
+For a gamma distribution N'(D) = N₀ D^μ exp(-λD), the mean diameter is:
+  D_mean = (μ + 1) / λ
+
+To enforce D_min ≤ D_mean ≤ D_max:
+  (μ + 1) / D_max ≤ λ ≤ (μ + 1) / D_min
+
+# Keyword Arguments
+
+- `D_min`: Minimum mean diameter [m], default 2 μm
+- `D_max`: Maximum mean diameter [m], default 40 mm
+
+# Example
+
+```julia
+bounds = DiameterBounds(; D_min=5e-6, D_max=20e-3)  # 5 μm to 20 mm
+```
+"""
+function DiameterBounds(FT = Float64; D_min = FT(2e-6), D_max = FT(40e-3))
+    return DiameterBounds(FT(D_min), FT(D_max))
+end
+
+"""
+    lambda_bounds_from_diameter(μ, bounds::DiameterBounds)
+
+Compute λ bounds from diameter bounds for a given shape parameter μ.
+
+For D_mean = (μ + 1) / λ:
+- λ_min = (μ + 1) / D_max
+- λ_max = (μ + 1) / D_min
+
+Returns (λ_min, λ_max).
+"""
+@inline function lambda_bounds_from_diameter(μ, bounds::DiameterBounds)
+    FT = typeof(μ)
+    λ_min = (μ + 1) / bounds.D_max
+    λ_max = (μ + 1) / bounds.D_min
+    return (λ_min, λ_max)
+end
+
+"""
+    enforce_diameter_bounds(λ, μ, bounds::DiameterBounds)
+
+Clamp λ to ensure the mean diameter stays within physical bounds.
+
+Returns the clamped λ value.
+"""
+@inline function enforce_diameter_bounds(λ, μ, bounds::DiameterBounds)
+    (λ_min, λ_max) = lambda_bounds_from_diameter(μ, bounds)
+    return clamp(λ, λ_min, λ_max)
+end
+
+"""
     IceDistributionParameters
 
 Result of [`distribution_parameters`](@ref). Fields: `N₀`, `λ`, `μ`.
@@ -881,15 +952,24 @@ See [Morrison and Milbrandt (2015a)](@cite Morrison2015parameterization) Section
 function distribution_parameters(L_ice, N_ice, rime_fraction, rime_density;
                                   mass = IceMassPowerLaw(),
                                   closure = TwoMomentClosure(),
+                                  diameter_bounds = nothing,
                                   shape_relation = nothing,  # deprecated
                                   kwargs...)
+    FT = typeof(L_ice)
+
     # Handle deprecated keyword
     actual_closure = isnothing(shape_relation) ? closure : shape_relation
 
     logλ = solve_lambda(L_ice, N_ice, rime_fraction, rime_density; mass, closure=actual_closure, kwargs...)
     λ = exp(logλ)
     μ = shape_parameter(actual_closure, logλ)
-    N₀ = intercept_parameter(N_ice, μ, logλ)
+
+    # Enforce diameter bounds if provided
+    if !isnothing(diameter_bounds)
+        λ = enforce_diameter_bounds(λ, μ, diameter_bounds)
+    end
+
+    N₀ = intercept_parameter(N_ice, μ, log(λ))
 
     return IceDistributionParameters(N₀, λ, μ)
 end
@@ -958,6 +1038,7 @@ params = distribution_parameters(L_ice, N_ice, Z_ice, 0.0, 400.0)
 function distribution_parameters(L_ice, N_ice, Z_ice, rime_fraction, rime_density;
                                   mass = IceMassPowerLaw(),
                                   closure = ThreeMomentClosure(),
+                                  diameter_bounds = nothing,
                                   kwargs...)
 
     FT = typeof(L_ice)
@@ -972,7 +1053,13 @@ function distribution_parameters(L_ice, N_ice, Z_ice, rime_fraction, rime_densit
         μ = closure.μmin
         logλ = solve_lambda(L_ice, N_ice, Z_ice, rime_fraction, rime_density, μ; mass, kwargs...)
         λ = exp(logλ)
-        N₀ = intercept_parameter(N_ice, μ, logλ)
+
+        # Enforce diameter bounds if provided
+        if !isnothing(diameter_bounds)
+            λ = enforce_diameter_bounds(λ, μ, diameter_bounds)
+        end
+
+        N₀ = intercept_parameter(N_ice, μ, log(λ))
         return IceDistributionParameters(N₀, λ, μ)
     end
 
@@ -983,8 +1070,13 @@ function distribution_parameters(L_ice, N_ice, Z_ice, rime_fraction, rime_densit
     logλ = solve_lambda(L_ice, N_ice, Z_ice, rime_fraction, rime_density, μ; mass, kwargs...)
     λ = exp(logλ)
 
+    # Enforce diameter bounds if provided
+    if !isnothing(diameter_bounds)
+        λ = enforce_diameter_bounds(λ, μ, diameter_bounds)
+    end
+
     # Compute N₀ from normalization
-    N₀ = intercept_parameter(N_ice, μ, logλ)
+    N₀ = intercept_parameter(N_ice, μ, log(λ))
 
     return IceDistributionParameters(N₀, λ, μ)
 end

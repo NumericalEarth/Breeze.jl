@@ -152,19 +152,102 @@ integrand(::AbstractP3Integral, D, state) = zero(D)
 #####
 
 """
-Terminal velocity V(D) for ice particles.
+    terminal_velocity(D, state)
 
-Follows power law: V(D) = a_V * D^b_V
+Terminal velocity V(D) for ice particles following Morrison & Milbrandt (2015a).
 
-with adjustments for particle regime (small ice, unrimed, rimed, graupel).
+The fall speed depends on particle regime:
+- Small spherical ice (D < D_th): Stokes drag, V ∝ D²
+- Large particles (D ≥ D_th): Power law V = a_V × (ρ₀/ρ)^0.5 × D^b_V
+
+Regime-dependent coefficients from Table 2 of Morrison & Milbrandt (2015a):
+- Unrimed aggregates: a_V = 11.72, b_V = 0.41
+- Graupel/rimed: a_V = 19.3, b_V = 0.37
+
+Air density correction follows Mitchell (1996).
 """
-@inline function terminal_velocity(D, state;
-                                    a_V = 11.72,
-                                    b_V = 0.41)
-    # Simplified power law for now
-    # Full P3 uses regime-dependent coefficients
+@inline function terminal_velocity(D, state::IceSizeDistributionState)
     FT = typeof(D)
-    return FT(a_V) * D^FT(b_V)
+    Fᶠ = state.rime_fraction
+    ρ₀ = state.reference_air_density
+    ρ = state.air_density
+
+    # Air density correction factor
+    ρ_correction = sqrt(ρ₀ / max(ρ, FT(0.1)))
+
+    # Get regime thresholds
+    thresholds = regime_thresholds_from_state(D, state)
+    D_th = thresholds.spherical
+
+    # Stokes regime for small particles (D < 100 μm typically)
+    # V_stokes = C_s × D² with C_s ≈ 7e5 s⁻¹ m⁻¹
+    C_stokes = FT(7e5)
+    V_stokes = C_stokes * D^2 * ρ_correction
+
+    # Power law regime for large particles
+    # Coefficients depend on riming
+    a_V_unrimed = FT(11.72)
+    b_V_unrimed = FT(0.41)
+    a_V_rimed = FT(19.3)
+    b_V_rimed = FT(0.37)
+
+    # Interpolate based on rime fraction
+    a_V = (1 - Fᶠ) * a_V_unrimed + Fᶠ * a_V_rimed
+    b_V = (1 - Fᶠ) * b_V_unrimed + Fᶠ * b_V_rimed
+
+    V_power = a_V * D^b_V * ρ_correction
+
+    # Select regime based on diameter
+    D_threshold = FT(100e-6)
+    is_small = D < D_threshold
+
+    return ifelse(is_small, min(V_stokes, V_power), V_power)
+end
+
+"""
+    regime_thresholds_from_state(D, state)
+
+Compute ice regime thresholds from the state's mass-diameter parameters.
+Returns an IceRegimeThresholds struct with spherical, graupel, partial_rime thresholds.
+"""
+@inline function regime_thresholds_from_state(D, state::IceSizeDistributionState)
+    FT = typeof(D)
+    α = state.mass_coefficient
+    β = state.mass_exponent
+    ρᵢ = state.ice_density
+    Fᶠ = state.rime_fraction
+    ρᶠ = state.rime_density
+
+    # Regime 1 threshold: D where power law equals sphere
+    # (π/6) ρᵢ D³ = α D^β  →  D = (6α / (π ρᵢ))^(1/(3-β))
+    D_spherical = (6 * α / (FT(π) * ρᵢ))^(1 / (3 - β))
+
+    # For unrimed ice, graupel and partial rime thresholds are infinite
+    is_unrimed = Fᶠ < FT(1e-10)
+
+    # Safe rime fraction for rimed calculations
+    Fᶠ_safe = max(Fᶠ, FT(1e-10))
+
+    # Deposited ice density (Eq. 16 from MM15a)
+    k = (1 - Fᶠ_safe)^(-1 / (3 - β))
+    num = ρᶠ * Fᶠ_safe
+    den = (β - 2) * (k - 1) / ((1 - Fᶠ_safe) * k - 1) - (1 - Fᶠ_safe)
+    ρ_dep = num / max(den, FT(1e-10))
+
+    # Graupel density
+    ρ_g = Fᶠ_safe * ρᶠ + (1 - Fᶠ_safe) * ρ_dep
+
+    # Graupel threshold
+    D_graupel_calc = (6 * α / (FT(π) * ρ_g))^(1 / (3 - β))
+
+    # Partial rime threshold
+    D_partial_calc = (6 * α / (FT(π) * ρ_g * (1 - Fᶠ_safe)))^(1 / (3 - β))
+
+    D_graupel = ifelse(is_unrimed, FT(Inf), D_graupel_calc)
+    D_partial = ifelse(is_unrimed, FT(Inf), D_partial_calc)
+    ρ_graupel = ifelse(is_unrimed, ρᵢ, ρ_g)
+
+    return (spherical = D_spherical, graupel = D_graupel, partial_rime = D_partial, ρ_graupel = ρ_graupel)
 end
 
 # Number-weighted fall speed: ∫ V(D) N'(D) dD
@@ -194,26 +277,67 @@ end
 #####
 
 """
-Particle mass m(D) as a function of diameter.
+    particle_mass(D, state)
+
+Particle mass m(D) as a function of diameter following the 4-regime
+piecewise mass-diameter relationship from Morrison & Milbrandt (2015a) Eqs. 1-5.
 
 The mass-dimension relationship depends on the particle regime:
-- Small spherical ice: m = (π/6) ρⁱ D³
-- Unrimed aggregates: m = α D^β
-- Partially rimed: interpolation
-- Fully rimed (graupel): m = (π/6) ρᶠ D³
+1. Small spherical ice (D < D_th): m = (π/6) ρᵢ D³
+2. Vapor-grown aggregates (D_th ≤ D < D_gr): m = α D^β
+3. Graupel (D_gr ≤ D < D_cr): m = (π/6) ρ_g D³
+4. Partially rimed (D ≥ D_cr): m = α/(1-Fᶠ) D^β
+
+The thresholds D_th, D_gr, D_cr depend on rime fraction and rime density.
 """
 @inline function particle_mass(D, state::IceSizeDistributionState)
-    # Simplified form using effective density
-    # Full P3 uses regime-dependent formulation
     FT = typeof(D)
-    ρⁱ = FT(917)  # kg/m³, pure ice density
-    ρᶠ = state.rime_density
+    α = state.mass_coefficient
+    β = state.mass_exponent
+    ρᵢ = state.ice_density
     Fᶠ = state.rime_fraction
+    ρᶠ = state.rime_density
 
-    # Effective density: interpolate between ice and rime
-    ρ_eff = (1 - Fᶠ) * ρⁱ * FT(0.1) + Fᶠ * ρᶠ  # 0.1 factor for aggregate density
+    # Get regime thresholds
+    thresholds = regime_thresholds_from_state(D, state)
 
-    return FT(π) / 6 * ρ_eff * D^3
+    # Regime 1: small spheres
+    a₁ = ρᵢ * FT(π) / 6
+    b₁ = FT(3)
+
+    # Regime 2: vapor-grown aggregates
+    a₂ = FT(α)
+    b₂ = FT(β)
+
+    # Regime 3: graupel
+    a₃ = thresholds.ρ_graupel * FT(π) / 6
+    b₃ = FT(3)
+
+    # Regime 4: partially rimed
+    Fᶠ_safe = min(Fᶠ, FT(1) - eps(FT))
+    a₄ = FT(α) / (1 - Fᶠ_safe)
+    b₄ = FT(β)
+
+    # Determine which regime applies
+    is_regime_4 = D ≥ thresholds.partial_rime
+    is_regime_3 = D ≥ thresholds.graupel
+    is_regime_2 = D ≥ thresholds.spherical
+
+    # Select coefficients using branchless logic
+    # Start with regime 1 (smallest), override as D exceeds thresholds
+    a = a₁
+    b = b₁
+
+    a = ifelse(is_regime_2, a₂, a)
+    b = ifelse(is_regime_2, b₂, b)
+
+    a = ifelse(is_regime_3, a₃, a)
+    b = ifelse(is_regime_3, b₃, b)
+
+    a = ifelse(is_regime_4, a₄, a)
+    b = ifelse(is_regime_4, b₄, b)
+
+    return a * D^b
 end
 
 #####
@@ -221,24 +345,49 @@ end
 #####
 
 """
-Ventilation factor ``fᵛᵉ`` for vapor diffusion enhancement.
+    ventilation_factor(D, state, constant_term)
 
-Following Hall and Pruppacher (1976):
-- For D ≤ 100 μm: fᵛᵉ = 1.0
-- For D > 100 μm: fᵛᵉ = 0.65 + 0.44 * (V*D)^0.5
+Ventilation factor f_v for vapor diffusion enhancement following Hall & Pruppacher (1976).
+
+The ventilation factor accounts for enhanced mass transfer due to air flow
+around falling particles. For a particle of diameter D falling at velocity V:
+
+f_v = a_v + b_v × Re^(1/2) × Sc^(1/3)
+
+where Re = V×D/ν is the Reynolds number and Sc = ν/D_v is the Schmidt number.
+For typical atmospheric conditions with Sc^(1/3) ≈ 0.9:
+
+- Small particles (D ≤ 100 μm): f_v ≈ 1.0 (diffusion-limited)
+- Large particles (D > 100 μm): f_v = 0.65 + 0.44 × √(V × D / ν)
+
+This function returns either the constant term (0.65) or the Reynolds-dependent
+term (0.44 × √(V×D)) depending on the `constant_term` argument, allowing
+separation for integral evaluation.
 """
-@inline function ventilation_factor(D, state; constant_term=true)
+@inline function ventilation_factor(D, state::IceSizeDistributionState, constant_term)
+    FT = typeof(D)
     V = terminal_velocity(D, state)
-    D_threshold = typeof(D)(100e-6)
+
+    # Kinematic viscosity of air (approximately 1.5e-5 m²/s at typical conditions)
+    ν = FT(1.5e-5)
+
+    D_threshold = FT(100e-6)
     is_small = D ≤ D_threshold
 
-    # Small particles: constant_term → 1, otherwise → 0
-    small_value = ifelse(constant_term, one(D), zero(D))
-    # Large particles: constant_term → 0.65, otherwise → 0.44 * sqrt(V * D)
-    large_value = ifelse(constant_term, typeof(D)(0.65), typeof(D)(0.44) * sqrt(V * D))
+    # Small particles: no ventilation enhancement (f_v = 1)
+    # constant_term=true → 1, constant_term=false → 0
+    small_value = ifelse(constant_term, one(FT), zero(FT))
+
+    # Large particles: f_v = 0.65 + 0.44 × √(V × D / ν)
+    # constant_term=true → 0.65, constant_term=false → 0.44 × √(V × D / ν)
+    Re_term = sqrt(V * D / ν)
+    large_value = ifelse(constant_term, FT(0.65), FT(0.44) * Re_term)
 
     return ifelse(is_small, small_value, large_value)
 end
+
+# Backwards compatibility wrapper
+@inline ventilation_factor(D, state; constant_term=true) = ventilation_factor(D, state, constant_term)
 
 # Basic ventilation: ∫ fᵛᵉ(D) C(D) N'(D) dD
 @inline function integrand(::Ventilation, D, state::IceSizeDistributionState)
@@ -293,16 +442,49 @@ end
 end
 
 """
-Capacitance C(D) for vapor diffusion.
+    capacitance(D, state)
 
-For spheres: C = D/2
-For non-spherical particles: C ≈ 0.48 * D (plates/dendrites)
+Capacitance C(D) for vapor diffusion following regime-dependent formulation.
+
+The capacitance determines the rate of vapor exchange with ice particles:
+- Small spherical ice (D < D_th): C = D/2 (sphere)
+- Large ice crystals/aggregates: C ≈ 0.48 × D (non-spherical)
+- Heavily rimed (graupel): C = D/2 (approximately spherical)
+
+For non-spherical particles, the capacitance is approximated as that of
+an oblate spheroid with aspect ratio typical of vapor-grown crystals.
+See Pruppacher & Klett (1997) Chapter 13.
 """
 @inline function capacitance(D, state::IceSizeDistributionState)
-    D_crit = critical_diameter_small_ice(state.rime_fraction)
-    sphere_capacitance = D / 2
-    nonspherical_capacitance = typeof(D)(0.48) * D
-    return ifelse(D ≤ D_crit, sphere_capacitance, nonspherical_capacitance)
+    FT = typeof(D)
+    Fᶠ = state.rime_fraction
+
+    # Get regime thresholds
+    thresholds = regime_thresholds_from_state(D, state)
+
+    # Sphere capacitance
+    C_sphere = D / 2
+
+    # Non-spherical capacitance (oblate spheroid approximation)
+    # Typical aspect ratio of 0.6 gives C ≈ 0.48 D
+    C_nonspherical = FT(0.48) * D
+
+    # Small spherical ice
+    is_small = D < thresholds.spherical
+
+    # Heavily rimed particles become more spherical
+    # Graupel and heavily rimed particles: use spherical capacitance
+    is_graupel = D ≥ thresholds.graupel
+
+    # Interpolate based on rime fraction for intermediate regime
+    # More rime → more spherical
+    C_intermediate = (1 - Fᶠ) * C_nonspherical + Fᶠ * C_sphere
+
+    # Select based on regime
+    C = ifelse(is_small, C_sphere, C_intermediate)
+    C = ifelse(is_graupel, C_sphere, C)
+
+    return C
 end
 
 #####
@@ -352,45 +534,229 @@ end
 end
 
 """
-Particle density ρ(D) as a function of diameter.
+    particle_density(D, state)
+
+Particle effective density ρ(D) as a function of diameter.
+
+The density is computed from the mass and volume:
+ρ_eff(D) = m(D) / V(D) = m(D) / [(π/6) D³]
+
+This gives regime-dependent effective densities:
+- Small spherical ice: ρ_eff = ρᵢ = 917 kg/m³
+- Aggregates: ρ_eff = 6α D^(β-3) / π (decreases with size for β < 3)
+- Graupel: ρ_eff = ρ_g
+- Partially rimed: ρ_eff = 6α D^(β-3) / [π(1-Fᶠ)]
 """
 @inline function particle_density(D, state::IceSizeDistributionState)
     FT = typeof(D)
-    ρⁱ = FT(917)  # kg/m³, pure ice density
-    Fᶠ = state.rime_fraction
-    ρᶠ = state.rime_density
 
-    # Effective density: interpolate
-    return (1 - Fᶠ) * ρⁱ * FT(0.1) + Fᶠ * ρᶠ
+    # Get particle mass from regime-dependent formulation
+    m = particle_mass(D, state)
+
+    # Particle volume (sphere)
+    V = FT(π) / 6 * D^3
+
+    # Effective density = mass / volume
+    # Clamp to avoid unrealistic values
+    ρ_eff = m / max(V, eps(FT))
+
+    # Clamp to physical range [50, 917] kg/m³
+    return clamp(ρ_eff, FT(50), FT(917))
 end
 
 #####
 ##### Collection integrals
 #####
 
-# Aggregation number: ∫∫ K(D₁,D₂) N'(D₁) N'(D₂) dD₁ dD₂
-# Simplified single integral form
-@inline function integrand(::AggregationNumber, D, state::IceSizeDistributionState)
-    V = terminal_velocity(D, state)
-    A = particle_area(D, state)
-    Np = size_distribution(D, state)
-    return V * A * Np^2  # Simplified self-collection
-end
+"""
+    collision_kernel(D₁, D₂, state, E_coll)
 
-# Rain collection by ice
-@inline function integrand(::RainCollectionNumber, D, state::IceSizeDistributionState)
-    V = terminal_velocity(D, state)
-    A = particle_area(D, state)
-    Np = size_distribution(D, state)
-    return V * A * Np
+Collision kernel K(D₁,D₂) for ice-ice aggregation following Morrison & Milbrandt (2015a).
+
+K(D₁,D₂) = E_coll × (π/4)(D₁+D₂)² × |V(D₁) - V(D₂)|
+
+where:
+- E_coll is the collection efficiency (typically 0.1-1.0 for aggregation)
+- (π/4)(D₁+D₂)² is the geometric sweep-out cross-section
+- |V(D₁) - V(D₂)| is the differential fall speed
+"""
+@inline function collision_kernel(D₁, D₂, state::IceSizeDistributionState, E_coll)
+    FT = typeof(D₁)
+
+    # Terminal velocities at each diameter
+    V₁ = terminal_velocity(D₁, state)
+    V₂ = terminal_velocity(D₂, state)
+
+    # Differential fall speed
+    ΔV = abs(V₁ - V₂)
+
+    # Geometric sweep-out area: π/4 × (D₁ + D₂)²
+    A_sweep = FT(π) / 4 * (D₁ + D₂)^2
+
+    return E_coll * A_sweep * ΔV
 end
 
 """
-Particle cross-sectional area A(D).
+    evaluate_double_integral(state, kernel_func; n_quadrature=32)
+
+Evaluate a double integral ∫∫ kernel_func(D₁, D₂, state) N'(D₁) N'(D₂) dD₁ dD₂
+using 2D Chebyshev-Gauss quadrature.
+
+This is used for collection integrals (aggregation, self-collection) that require
+integration over pairs of particle sizes.
+"""
+function evaluate_double_integral(state::IceSizeDistributionState, kernel_func;
+                                   n_quadrature::Int = 32)
+    FT = typeof(state.slope)
+    nodes, weights = chebyshev_gauss_nodes_weights(FT, n_quadrature)
+
+    λ = state.slope
+    result = zero(FT)
+
+    for i in 1:n_quadrature
+        x₁ = nodes[i]
+        w₁ = weights[i]
+        D₁ = transform_to_diameter(x₁, λ)
+        J₁ = jacobian_diameter_transform(x₁, λ)
+        N₁ = size_distribution(D₁, state)
+
+        for j in 1:n_quadrature
+            x₂ = nodes[j]
+            w₂ = weights[j]
+            D₂ = transform_to_diameter(x₂, λ)
+            J₂ = jacobian_diameter_transform(x₂, λ)
+            N₂ = size_distribution(D₂, state)
+
+            # Kernel value
+            K = kernel_func(D₁, D₂, state)
+
+            result += w₁ * w₂ * K * N₁ * N₂ * J₁ * J₂
+        end
+    end
+
+    return result
+end
+
+"""
+    aggregation_kernel(D₁, D₂, state)
+
+Aggregation kernel for ice-ice self-collection.
+"""
+@inline function aggregation_kernel(D₁, D₂, state::IceSizeDistributionState)
+    FT = typeof(D₁)
+    E_agg = FT(0.1)  # Default aggregation efficiency (temperature-dependent in full model)
+    return collision_kernel(D₁, D₂, state, E_agg)
+end
+
+# Aggregation number: ∫∫ K(D₁,D₂) N'(D₁) N'(D₂) dD₁ dD₂
+# Using approximation from Wisner et al. (1972) for computational efficiency:
+# I_agg ≈ ∫ V(D) A(D) N(D)² dD × scale_factor
+# This is the self-collection form used in most bulk schemes
+@inline function integrand(::AggregationNumber, D, state::IceSizeDistributionState)
+    FT = typeof(D)
+    V = terminal_velocity(D, state)
+    A = particle_area(D, state)
+    Np = size_distribution(D, state)
+
+    # Aggregation efficiency (simplified)
+    E_agg = FT(0.1)
+
+    # Self-collection approximation: ∫ E_agg × V × A × N² dD
+    return E_agg * V * A * Np^2
+end
+
+"""
+    evaluate_aggregation_integral(state; n_quadrature=32)
+
+Evaluate the full 2D aggregation integral using proper collision kernel.
+This is more accurate than the 1D approximation but slower.
+
+∫∫ (1/2) K_agg(D₁,D₂) N'(D₁) N'(D₂) dD₁ dD₂
+
+The factor of 1/2 avoids double-counting symmetric collisions.
+"""
+function evaluate_aggregation_integral(state::IceSizeDistributionState;
+                                        n_quadrature::Int = 32)
+    return evaluate_double_integral(state, aggregation_kernel; n_quadrature) / 2
+end
+
+# Rain collection by ice (riming kernel)
+# ∫ E_rim × V(D) × A(D) × N'(D) dD
+@inline function integrand(::RainCollectionNumber, D, state::IceSizeDistributionState)
+    FT = typeof(D)
+    V = terminal_velocity(D, state)
+    A = particle_area(D, state)
+    Np = size_distribution(D, state)
+
+    # Collection efficiency for rain-ice (typically higher than ice-ice)
+    E_rim = FT(1.0)
+
+    return E_rim * V * A * Np
+end
+
+"""
+    riming_kernel(D_ice, D_drop, V_ice, V_drop, E_rim)
+
+Riming kernel for ice-droplet collection.
+
+K = E_rim × (π/4)(D_ice + D_drop)² × |V_ice - V_drop|
+
+For riming, the collection efficiency E_rim ≈ 1 for large ice collecting
+small cloud droplets, but decreases for small ice or large rain drops.
+"""
+@inline function riming_kernel(D_ice, D_drop, V_ice, V_drop, E_rim)
+    FT = typeof(D_ice)
+    A_sweep = FT(π) / 4 * (D_ice + D_drop)^2
+    ΔV = abs(V_ice - V_drop)
+    return E_rim * A_sweep * ΔV
+end
+
+"""
+    particle_area(D, state)
+
+Projected cross-sectional area A(D) for ice particles.
+
+The projected area depends on particle regime following Morrison & Milbrandt (2015a):
+- Small spherical ice (D < D_th): A = (π/4) D² (sphere)
+- Vapor-grown aggregates: A = γ D^σ with γ = 0.2285, σ = 1.88 (fractal)
+- Graupel: A = (π/4) D² (sphere)
+
+For aggregates, the area-diameter relationship captures the fractal nature
+of ice crystal aggregates which have larger projected areas relative to
+their volume compared to spheres.
+
+Coefficients from Mitchell (1996) and Morrison & Milbrandt (2015a) Table 2.
 """
 @inline function particle_area(D, state::IceSizeDistributionState)
     FT = typeof(D)
-    return FT(π) / 4 * D^2  # Simplified: sphere
+    Fᶠ = state.rime_fraction
+
+    # Get regime thresholds
+    thresholds = regime_thresholds_from_state(D, state)
+
+    # Spherical area
+    A_sphere = FT(π) / 4 * D^2
+
+    # Aggregate area: A = γ D^σ
+    # Coefficients for vapor-grown aggregates
+    γ = FT(0.2285)
+    σ = FT(1.88)
+    A_aggregate = γ * D^σ
+
+    # Small spherical ice
+    is_small = D < thresholds.spherical
+
+    # Graupel is approximately spherical
+    is_graupel = D ≥ thresholds.graupel
+
+    # Interpolate based on rime fraction for intermediate regime
+    A_intermediate = (1 - Fᶠ) * A_aggregate + Fᶠ * A_sphere
+
+    # Select based on regime
+    A = ifelse(is_small, A_sphere, A_intermediate)
+    A = ifelse(is_graupel, A_sphere, A)
+
+    return A
 end
 
 #####

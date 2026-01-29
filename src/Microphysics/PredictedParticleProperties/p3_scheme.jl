@@ -80,6 +80,17 @@ The scheme tracks 9 prognostic densities:
 - `precipitation_boundary_condition`: Boundary condition for surface precipitation
   (default `nothing` = open boundary, precipitation exits domain)
 
+# Tabulation
+
+For faster process rate calculations, use [`tabulate`](@ref) to pre-compute
+lookup tables:
+
+```julia
+using Oceananigans
+p3 = PredictedParticlePropertiesMicrophysics()
+p3_fast = tabulate(p3, CPU())  # Pre-compute lookup tables
+```
+
 # Example
 
 ```julia

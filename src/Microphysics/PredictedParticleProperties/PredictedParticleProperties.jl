@@ -159,6 +159,7 @@ export
     ShapeParameterRelation,  # alias for TwoMomentClosure
     IceRegimeThresholds,
     IceDistributionParameters,
+    DiameterBounds,
     solve_lambda,
     solve_shape_parameter,
     distribution_parameters,
@@ -166,12 +167,15 @@ export
     ice_regime_thresholds,
     ice_mass,
     ice_mass_coefficients,
-    intercept_parameter
+    intercept_parameter,
+    lambda_bounds_from_diameter,
+    enforce_diameter_bounds
 
 using DocStringExtensions: TYPEDSIGNATURES, TYPEDFIELDS
 using SpecialFunctions: loggamma, gamma_inc
 
 using Oceananigans: Oceananigans
+using Oceananigans.Architectures: CPU
 using Breeze.AtmosphereModels: prognostic_field_names
 
 #####

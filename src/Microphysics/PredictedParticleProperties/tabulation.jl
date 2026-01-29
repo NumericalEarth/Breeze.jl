@@ -123,8 +123,14 @@ the size distribution parameters (N₀, μ, λ).
                                                 rime_fraction,
                                                 liquid_fraction;
                                                 rime_density = typeof(mean_particle_mass)(400),
-                                                shape_parameter = zero(typeof(mean_particle_mass)))
+                                                shape_parameter = zero(typeof(mean_particle_mass)),
+                                                air_density = typeof(mean_particle_mass)(1.225))
     FT = typeof(mean_particle_mass)
+
+    # Default P3 mass-diameter parameters
+    mass_coefficient = FT(0.0121)
+    mass_exponent = FT(1.9)
+    reference_air_density = FT(1.225)
 
     # Effective density: interpolate between aggregate and rime
     effective_density = (1 - rime_fraction) * e.pure_ice_density * e.unrimed_density_factor +
@@ -145,7 +151,12 @@ the size distribution parameters (N₀, μ, λ).
         slope_parameter,
         rime_fraction,
         liquid_fraction,
-        rime_density
+        rime_density,
+        mass_coefficient,
+        mass_exponent,
+        e.pure_ice_density,
+        reference_air_density,
+        air_density
     )
 end
 
@@ -620,4 +631,67 @@ function tabulate(p3::PredictedParticlePropertiesMicrophysics{FT},
         throw(ArgumentError("Unknown property to tabulate: $property. " *
                            "Supported: :ice_fall_speed, :ice_deposition"))
     end
+end
+
+"""
+$(TYPEDSIGNATURES)
+
+Tabulate all ice integral properties for fast lookup during simulation.
+
+This is a convenience function that tabulates fall speed, deposition,
+and other integral properties in one call.
+
+# Arguments
+- `p3`: P3 microphysics scheme
+- `arch`: Architecture (`CPU()` or `GPU()`)
+
+# Keyword Arguments
+Passed to [`TabulationParameters`](@ref).
+
+# Returns
+A new `PredictedParticlePropertiesMicrophysics` with all ice integrals tabulated.
+
+# Example
+
+```julia
+using Oceananigans
+using Breeze.Microphysics.PredictedParticleProperties
+
+p3 = PredictedParticlePropertiesMicrophysics()
+p3_tabulated = tabulate(p3, CPU())
+```
+"""
+function tabulate(p3::PredictedParticlePropertiesMicrophysics{FT}, arch=CPU();
+                  kwargs...) where FT
+
+    params = TabulationParameters(FT; kwargs...)
+
+    # Tabulate fall speed and deposition integrals
+    tabulated_fall_speed = tabulate(p3.ice.fall_speed, arch, params)
+    tabulated_deposition = tabulate(p3.ice.deposition, arch, params)
+
+    new_ice = IceProperties(
+        p3.ice.minimum_rime_density,
+        p3.ice.maximum_rime_density,
+        p3.ice.maximum_shape_parameter,
+        p3.ice.minimum_reflectivity,
+        tabulated_fall_speed,
+        tabulated_deposition,
+        p3.ice.bulk_properties,
+        p3.ice.collection,
+        p3.ice.sixth_moment,
+        p3.ice.lambda_limiter,
+        p3.ice.ice_rain
+    )
+
+    return PredictedParticlePropertiesMicrophysics(
+        p3.water_density,
+        p3.minimum_mass_mixing_ratio,
+        p3.minimum_number_mixing_ratio,
+        new_ice,
+        p3.rain,
+        p3.cloud,
+        p3.process_rates,
+        p3.precipitation_boundary_condition
+    )
 end
