@@ -28,19 +28,16 @@ Terminal velocity determines sedimentation rates. P3 computes three weighted fal
 corresponding to `uns`, `ums`, `uzs` in the Fortran lookup tables
 ([Morrison & Milbrandt (2015a)](@cite Morrison2015parameterization) Table 3).
 
-### Terminal Velocity Power Law
+### Terminal Velocity Formulation
 
-Individual particle fall speed follows ([Morrison & Milbrandt (2015a)](@cite Morrison2015parameterization) Eq. 9):
+Individual particle fall speed follows the [Mitchell and Heymsfield (2005)](@cite MitchellHeymsfield2005)
+Best number formulation, which relates fall speed to particle mass, projected area, and air properties.
+The formulation accounts for the transition from Stokes to turbulent flow regimes and includes
+surface roughness effects. A density correction factor ``(ρ₀/ρ)^{0.54}`` is applied following
+[Heymsfield et al. (2006)](@cite HeymsfieldEtAl2006).
 
-```math
-V(D) = a_V \left(\frac{ρ₀}{ρ}\right)^{1/2} D^{b_V}
-```
-
-where:
-- ``a_V = 11.72`` m^{1-b}/s is the fall speed coefficient
-- ``b_V = 0.41`` is the fall speed exponent
-- ``ρ₀ = 1.225`` kg/m³ is reference air density
-- ``ρ`` is local air density
+The fall speed depends on the mass-diameter and area-diameter relationships, which vary
+across the four particle regimes (see [Particle Properties](@ref p3_particle_properties)).
 
 ### Number-Weighted Fall Speed
 

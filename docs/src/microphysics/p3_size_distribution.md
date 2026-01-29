@@ -77,7 +77,7 @@ with empirical coefficients from [Morrison & Milbrandt (2015a)](@cite Morrison20
 - ``μ_{max} = 6``
 
 This relationship is based on aircraft observations of ice particle size distributions
-compiled by [Field et al. (2007)](@cite FieldEtAl2007).
+from [Heymsfield (2003)](@cite Heymsfield2003).
 
 !!! note "Three-Moment Mode"
     When using three-moment ice ([Milbrandt et al. (2021)](@cite MilbrandtEtAl2021),
@@ -299,7 +299,7 @@ This provides the complete size distribution needed for computing microphysical 
 
 - [Morrison2015parameterization](@cite): PSD formulation and μ-λ relationship (Sec. 2b)
 - [MilbrandtYau2005](@cite): Multimoment bulk microphysics and shape parameter analysis
-- [FieldEtAl2007](@cite): Snow size distribution observations used for μ-λ fit
+- [Heymsfield2003](@cite): Ice size distribution observations used for μ-λ fit
 - [MilbrandtEtAl2021](@cite): Three-moment ice with Z as prognostic
 - [MilbrandtEtAl2024](@cite): Updated three-moment formulation
 - [Morrison2025complete3moment](@cite): Complete three-moment implementation

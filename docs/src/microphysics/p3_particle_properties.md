@@ -294,18 +294,21 @@ fig
 
 ## Rime Density Parameterization
 
-The rime density ``ρᶠ`` depends on the collection conditions during riming. From
-[HeymsfieldPflaum1985graupelgrowth](@cite) as implemented in
-[Morrison2015parameterization](@citet):
+The rime density ``ρᶠ`` depends on the collection conditions during riming. The
+parameterization follows [Cober and List (1993)](@cite CoberList1993) as implemented in
+[Morrison2015parameterization](@citet). The rime density is computed as a function of
+the impact parameter ``R_i``, which depends on droplet size, impact velocity, and temperature:
 
 ```math
-ρᶠ = \min\left(ρᵢ, \max\left(ρ_{min}, a_ρ + b_ρ T_c\right)\right)
+ρᶠ = \begin{cases}
+(0.051 + 0.114 R_i - 0.0055 R_i^2) \times 1000 & R_i \le 8 \\
+611 + 72.25 (R_i - 8) & R_i > 8
+\end{cases}
 ```
 
-where:
-- ``T_c`` is temperature in Celsius
+The rime density is bounded:
 - ``ρ_{min} = 50`` kg/m³ is minimum rime density
-- ``ρᵢ = 917`` kg/m³ is pure ice density (maximum)
+- ``ρ_{max} = 900`` kg/m³ is maximum rime density
 
 The rime density affects the graupel density ``ρ_g`` and thus the regime thresholds.
 As particles rime more heavily, they become denser and more spherical.

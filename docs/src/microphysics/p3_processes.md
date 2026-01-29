@@ -216,14 +216,14 @@ where ``ρ^f`` is the rime density, which depends on impact velocity and tempera
 
 #### Rime Density Parameterization
 
-From [HeymsfieldPflaum1985graupelgrowth](@citet) as used in
+From [Cober and List (1993)](@cite CoberList1993) as used in
 [Morrison2015parameterization](@citet):
 
 ```math
-ρ^f = \min\left(917, \max\left(50, a_ρ + b_ρ \ln\left(\frac{V}{D}\right) + c_ρ T_c\right)\right)
+ρ^f = \min\left(900, \max\left(50, f(R_i)\right)\right)
 ```
 
-where ``T_c`` is temperature in Celsius.
+where ``R_i`` is an impact parameter depending on droplet size, impact velocity, and temperature.
 
 ### Ice-Rain Collection
 
