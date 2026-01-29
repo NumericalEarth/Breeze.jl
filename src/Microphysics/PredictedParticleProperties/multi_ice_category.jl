@@ -12,7 +12,7 @@ export MultiIceCategory
 
 Container for multiple ice categories in P3-MC (multi-category P3).
 
-Following [Milbrandt and Morrison (2016)](@citet MilbrandtMorrison2016), each
+Following [Milbrandt and Morrison (2016)](@cite MilbrandtMorrison2016), each
 ice category evolves independently with its own rime fraction, rime density,
 liquid fraction, and 3-moment ice state. Categories interact through
 ice-ice collection (aggregation between categories).
@@ -112,7 +112,7 @@ multi_category_ice_field_names(::MultiIceCategory{N}) where N = multi_category_i
 
 Compute ice-ice collection rate between two ice categories.
 
-Following [Milbrandt and Morrison (2016)](@citet MilbrandtMorrison2016),
+Following [Milbrandt and Morrison (2016)](@cite MilbrandtMorrison2016),
 particles from different categories can collide and aggregate when
 they have similar properties. The collection efficiency depends on
 temperature (following aggregation efficiency) and the relative

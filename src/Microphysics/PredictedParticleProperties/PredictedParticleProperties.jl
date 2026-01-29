@@ -20,25 +20,25 @@ rather than multiple discrete ice categories.
 This implementation is based on the following P3 papers:
 
 1. **Morrison & Milbrandt (2015a)** - Original P3: m(D), A(D), V(D), process rates
-   [Morrison2015parameterization](@citet)
+   [Morrison and Milbrandt (2015a)](@cite Morrison2015parameterization)
 
 2. **Morrison et al. (2015b)** - Part II: Case study validation
-   [Morrison2015part2](@citet)
+   [Morrison et al. (2015b)](@cite Morrison2015part2)
 
 3. **Milbrandt & Morrison (2016)** - Part III: Multiple ice categories (NOT implemented)
-   [MilbrandtMorrison2016](@citet)
+   [Milbrandt and Morrison (2016)](@cite MilbrandtMorrison2016)
 
 4. **Milbrandt et al. (2021)** - Three-moment ice: Z as prognostic, size sorting
-   [MilbrandtEtAl2021](@citet)
+   [Milbrandt et al. (2021)](@cite MilbrandtEtAl2021)
 
 5. **Milbrandt et al. (2024)** - Updated triple-moment formulation
-   [MilbrandtEtAl2024](@citet)
+   [Milbrandt et al. (2024)](@cite MilbrandtEtAl2024)
 
 6. **Milbrandt et al. (2025)** - Predicted liquid fraction: shedding, refreezing
-   [MilbrandtEtAl2025liquidfraction](@citet)
+   [Milbrandt et al. (2025)](@cite MilbrandtEtAl2025liquidfraction)
 
 7. **Morrison et al. (2025)** - Complete three-moment implementation
-   [Morrison2025complete3moment](@citet)
+   [Morrison et al. (2025)](@cite Morrison2025complete3moment)
 
 # Source Code
 

@@ -62,28 +62,47 @@ Z ∝ M_6 = N₀ \frac{Γ(μ + 7)}{λ^{μ+7}}
 
 ## Shape-Slope (μ-λ) Relationship
 
-To close the system with only two prognostic moments (mass and number), P3 relates
-the shape parameter ``μ`` to the slope parameter ``λ``
-([Morrison & Milbrandt (2015a)](@cite Morrison2015parameterization) Eq. 27):
+In the officail P3 code, ``μ`` is diagnosed rather than set by a
+single global power law. Define the mean-volume diameter estimate (in mm)
 
 ```math
-μ = \text{clamp}\left( a λ^b - c,\, 0,\, μ_{max} \right)
+D_{mvd} = 10^3 \left(\frac{L}{c_{gp}}\right)^{1/3},
 ```
 
-with empirical coefficients from [Morrison & Milbrandt (2015a)](@cite Morrison2015parameterization):
-- ``a = 0.00191``
-- ``b = 0.8``
-- ``c = 2``
-- ``μ_{max} = 6``
+where ``c_{gp}`` is the coefficient in the fully rimed mass law ``m(D) = c_{gp} D^3``.
+Then:
 
-This relationship is based on aircraft observations of ice particle size distributions
-from [Heymsfield (2003)](@cite Heymsfield2003).
+```math
+μ =
+\begin{cases}
+\text{clamp}\left(0.076 (0.01 λ)^{0.8} - 2,\ 0,\ 6\right), & D_{mvd} \le 0.2\,\text{mm} \\
+\text{clamp}\left(0.25 (D_{mvd} - 0.2)\, f_ρ\, Fᶠ,\ 0,\ μ_{max}\right), & D_{mvd} > 0.2\,\text{mm}
+\end{cases}
+```
+
+with
+
+```math
+f_ρ = \max\left(1,\ 1 + 0.00842(\bar{ρ}-400)\right),
+\quad \bar{ρ} = \frac{6 c_{gp}}{π},
+\quad μ_{max} = 20.
+```
+
+The first branch corresponds to the Heymsfield (2003) μ–λ fit (Eq. 27 in
+[Morrison2015parameterization](@cite)), written with λ in m⁻¹ (the factor 0.01
+converts to cm⁻¹). The second branch increases ``μ`` with particle size and riming
+in the Fortran lookup-table generator.
+
+!!! note "Breeze helper closure"
+    The `TwoMomentClosure` / `ShapeParameterRelation` used in the examples implements
+    only the Heymsfield power-law clamp (``μ_{max} = 6``). This matches the small-particle
+    branch but omits the large-particle diagnostic used in the officail P3 code.
 
 !!! note "Three-Moment Mode"
-    When using three-moment ice ([Milbrandt et al. (2021)](@cite MilbrandtEtAl2021),
-    [Milbrandt et al. (2024)](@cite MilbrandtEtAl2024)), the sixth moment ``Z``
-    provides an additional constraint, allowing ``μ`` to be diagnosed independently
-    of the μ-λ relationship. This is discussed in [Three-Moment Extension](#three-moment-extension).
+    In the officail P3 code, ``μ`` (and the bulk ice density used in rates) are obtained
+    from lookup table 3 (`p3_lookupTable_3.dat-v1.4`) by interpolation in the Z/Q space,
+    rime fraction, liquid fraction, and rime density. The analytic moment relations
+    provide the conceptual basis for the table but are not solved directly at runtime.
 
 ```@example p3_psd
 using Breeze.Microphysics.PredictedParticleProperties
@@ -113,6 +132,9 @@ Given prognostic moments ``L`` (mass concentration) and ``N`` (number concentrat
 plus predicted rime properties ``Fᶠ`` and ``ρᶠ``, we solve for the distribution
 parameters ``(N₀, λ, μ)``.
 
+In the official P3 lookup tables, rime and liquid fractions are tabulated on
+discrete bins (0, 1/3, 2/3, 1) and interpolated during lookup.
+
 ### The Mass-Number Ratio
 
 The ratio of ice mass to number concentration depends on the distribution parameters:
@@ -139,10 +161,12 @@ Finding ``λ`` requires solving:
 \log\left(\frac{L}{N}\right) = \log\left(\frac{\int_0^∞ m(D) N'(D)\, dD}{\int_0^∞ N'(D)\, dD}\right)
 ```
 
-This is a nonlinear equation in ``λ`` (since ``μ = μ(λ)``), solved numerically
-using the secant method. The implementation follows the approach in
-[Morrison & Milbrandt (2015a)](@cite Morrison2015parameterization) Section 2b,
-adapted for the piecewise m(D) relationship.
+This is a nonlinear equation in ``λ`` (since ``μ = μ(λ)``). In the official P3
+code, ``λ`` is determined during lookup-table generation by scanning over a
+fixed range (roughly 10–10⁷ m⁻¹) and selecting the value that best matches L/N
+for the current ``μ`` and piecewise ``m(D)``. The runtime then interpolates ``λ``
+from the tables. The `distribution_parameters` helper in Breeze instead uses a
+secant solver for direct evaluation.
 
 ```@example p3_psd
 # Solve for distribution parameters
@@ -272,6 +296,9 @@ This allows independent determination of ``μ`` rather than using the μ-λ rela
 ```
 
 Combined with the L/N ratio, this gives two equations for two unknowns (``μ`` and ``λ``).
+In the official P3 code, these constraints are used to build a lookup table that
+returns ``μ`` (and bulk density) by interpolation; ``λ`` is then obtained from
+the main table using the diagnosed ``μ``.
 
 The benefit of three-moment ice is improved representation of:
 - **Size sorting**: Large particles fall faster and separate from small ones
@@ -289,8 +316,8 @@ The P3 size distribution closure proceeds as:
 
 1. **Prognostic moments**: ``L``, ``N`` (and optionally ``Z``) are carried by the model
 2. **Rime properties**: ``Fᶠ`` and ``ρᶠ`` determine the mass-diameter relationship
-3. **Lambda solver**: Secant method finds ``λ`` satisfying the L/N constraint
-4. **μ-λ relation**: Shape parameter from empirical power law (or from Z/N for 3-moment)
+3. **Lambda solver**: ``λ`` is tabulated by scanning L/N in the reference Fortran (Breeze uses a secant solver in the helper)
+4. **μ diagnosis**: Piecewise diagnostic for 2-moment, or lookup-table inversion for 3-moment
 5. **Normalization**: Intercept ``N₀`` from number conservation
 
 This provides the complete size distribution needed for computing microphysical rates.

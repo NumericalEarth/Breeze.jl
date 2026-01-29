@@ -26,7 +26,8 @@ Small ice particles are assumed spherical with pure ice density
 m(D) = \frac{π}{6} ρᵢ D³
 ```
 
-where ``ρᵢ = 917`` kg/m³ is pure ice density.
+where ``ρᵢ = 900`` kg/m³ is the value used in the reference lookup tables
+(pure ice is approximately 917 kg/m³).
 
 **Regime 2: Vapor-Grown Aggregates** (``D_{th} ≤ D < D_{gr}`` or unrimed)
 
@@ -196,33 +197,32 @@ A(D) = \frac{π}{4} D²
 
 **Partially Rimed**:
 
-Weighted average of spherical and nonspherical:
+Per official P3 code, the projected area is interpolated by particle mass between
+the unrimed and graupel relationships, rather than a simple Fᶠ weighting:
 
 ```math
-A(D) = Fᶠ \frac{π}{4} D² + (1 - Fᶠ) γ D^σ
+A(D) = A_{ur} + \frac{m_{pr} - m_{ur}}{m_{gr} - m_{ur}} \left(A_{gr} - A_{ur}\right)
 ```
+
+with ``A_{ur} = γ D^σ``, ``A_{gr} = \frac{π}{4} D^2``,
+``m_{ur} = α D^β``, ``m_{gr} = \frac{π}{6} ρ_g D^3``,
+and ``m_{pr} = c_{sr} D^{d_{sr}}`` from the partially rimed mass law.
 
 ## Terminal Velocity
 
-The terminal velocity ``V(D)`` for ice particles follows a power law with density correction
-([Morrison2015parameterization](@citet) Eq. 9):
-
-```math
-V(D) = a_v D^{b_v} \left(\frac{ρ₀}{ρ}\right)^{0.5}
-```
-
-where:
-- ``a_v, b_v`` are regime-dependent coefficients (Table 2 of [Morrison2015parameterization](@citet))
-- ``ρ₀ = 1.225`` kg/m³ is reference air density
-- ``ρ`` is local air density
-
-The velocity coefficients also depend on the m(D) regime and are documented in the supplementary
-material of [Morrison2015parameterization](@citet).
+The official P3 code computes terminal velocity using the
+[MitchellHeymsfield2005](@cite) Best-number drag formulation with the
+regime-dependent ``m(D)`` and ``A(D)`` relationships. The resulting fall speeds
+are stored in lookup tables and include the air-density correction
+``(ρ₀/ρ)^{0.54}`` following [HeymsfieldEtAl2006](@cite). Regime-specific coefficients
+from the P3 papers therefore do not appear as a single global power law in the
+lookup tables.
 
 !!! note "Velocity Coefficients"
-    The velocity-diameter coefficients (a_v, b_v) vary by regime and can be updated
-    with new observational data. See [Morrison2015parameterization](@citet)
-    supplementary material for derivation details.
+    The regime-specific power-law coefficients in the literature are a compact summary
+    of fall-speed behavior, but the official P3 derives fall speeds from the
+    Best-number drag law and tabulates the results. See
+    [Morrison2015parameterization](@citet) supplementary material for coefficient definitions.
 
 ## Particle Density
 
@@ -312,6 +312,13 @@ The rime density is bounded:
 
 The rime density affects the graupel density ``ρ_g`` and thus the regime thresholds.
 As particles rime more heavily, they become denser and more spherical.
+
+!!! note "Official P3 implementation details"
+    The Fortran scheme clamps ``R_i`` to [1, 12] before applying the Cober–List fit;
+    the linear branch for ``R_i > 8`` is extended to ``R_i = 12`` so that
+    ``ρᶠ = 900`` kg/m³. When riming is inactive, ``ρᶠ`` defaults to 400 kg/m³.
+    The lookup tables discretize ``ρᶠ`` on an uneven grid (50, 250, 450, 650, 900 kg/m³)
+    and interpolate between bins.
 
 ## Summary
 

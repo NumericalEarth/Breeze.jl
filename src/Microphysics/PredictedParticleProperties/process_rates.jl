@@ -49,7 +49,7 @@ end
 """
     rain_autoconversion_rate(p3, qᶜˡ, Nᶜ)
 
-Compute rain autoconversion rate following [Khairoutdinov and Kogan (2000)](@citet KhairoutdinovKogan2000).
+Compute rain autoconversion rate following [Khairoutdinov and Kogan (2000)](@cite KhairoutdinovKogan2000).
 
 Cloud droplets larger than a threshold undergo collision-coalescence to form rain.
 
@@ -83,7 +83,7 @@ end
 """
     rain_accretion_rate(p3, qᶜˡ, qʳ)
 
-Compute rain accretion rate following [Khairoutdinov and Kogan (2000)](@citet KhairoutdinovKogan2000).
+Compute rain accretion rate following [Khairoutdinov and Kogan (2000)](@cite KhairoutdinovKogan2000).
 
 Falling rain drops collect cloud droplets via gravitational sweep-out.
 
@@ -114,7 +114,7 @@ end
 Compute rain self-collection rate (number tendency only).
 
 Large rain drops collect smaller ones, reducing number but conserving mass.
-Follows [Seifert and Beheng (2001)](@citet SeifertBeheng2001).
+Follows [Seifert and Beheng (2001)](@cite SeifertBeheng2001).
 
 # Arguments
 - `p3`: P3 microphysics scheme (provides parameters)
@@ -622,7 +622,7 @@ end
 Compute ice nucleation rate from deposition/condensation freezing.
 
 New ice crystals nucleate when temperature is below a threshold and the air
-is supersaturated with respect to ice. Uses [Cooper (1986)](@citet Cooper1986).
+is supersaturated with respect to ice. Uses [Cooper (1986)](@cite Cooper1986).
 
 # Arguments
 - `p3`: P3 microphysics scheme (provides parameters)
@@ -678,7 +678,7 @@ end
 Compute immersion freezing rate of cloud droplets.
 
 Cloud droplets freeze when temperature is below a threshold. Uses
-[Bigg (1953)](@citet Bigg1953) stochastic freezing parameterization.
+[Bigg (1953)](@cite Bigg1953) stochastic freezing parameterization.
 
 # Arguments
 - `p3`: P3 microphysics scheme (provides parameters)
@@ -723,7 +723,7 @@ end
 Compute immersion freezing rate of rain drops.
 
 Rain drops freeze when temperature is below a threshold. Uses
-[Bigg (1953)](@citet Bigg1953) stochastic freezing parameterization.
+[Bigg (1953)](@cite Bigg1953) stochastic freezing parameterization.
 
 # Arguments
 - `p3`: P3 microphysics scheme (provides parameters)
@@ -777,7 +777,7 @@ The rate is proportional to:
 - Cloud droplet surface area (∝ D² × N_cloud)
 - Collection efficiency (Brownian + phoretic)
 
-Following [Cotton et al. (1986)](@cite CottonEtAl1986) and [Meyers et al. (1992)](@cite MeyersEtAl1992):
+Following [Meyers et al. (1992)](@cite MeyerEtAl1992icenucleation):
 
 ```math
 \\frac{dN^i}{dt} = 4π D_c^2 N_c N_{IN} D_{IN} (1 + 0.4 Re^{0.5} Sc^{0.33})
@@ -864,7 +864,7 @@ Compute secondary ice production from rime splintering (Hallett-Mossop effect).
 
 When rimed ice particles accrete supercooled drops, ice splinters are
 ejected. This occurs only in a narrow temperature range around -5°C.
-See [Hallett and Mossop (1974)](@citet HallettMossop1974).
+See [Hallett and Mossop (1974)](@cite HallettMossop1974).
 
 # Arguments
 - `p3`: P3 microphysics scheme (provides parameters)
@@ -1245,7 +1245,7 @@ Compute liquid shedding rate from ice particles.
 
 When ice particles carry too much liquid coating (from partial melting
 or warm riming), excess liquid is shed as rain drops.
-See [Milbrandt et al. (2025)](@citet MilbrandtEtAl2025liquidfraction).
+See [Milbrandt et al. (2025)](@cite MilbrandtEtAl2025liquidfraction).
 
 # Arguments
 - `p3`: P3 microphysics scheme (provides parameters)
@@ -1309,7 +1309,7 @@ Compute refreezing rate of liquid on ice particles.
 
 Below freezing, liquid coating on ice particles refreezes,
 transferring mass from liquid-on-ice to ice+rime.
-See [Milbrandt et al. (2025)](@citet MilbrandtEtAl2025liquidfraction).
+See [Milbrandt et al. (2025)](@cite MilbrandtEtAl2025liquidfraction).
 
 # Arguments
 - `p3`: P3 microphysics scheme (provides parameters)
@@ -1872,7 +1872,7 @@ end
 Compute mass-weighted terminal velocity for rain.
 
 Uses the power-law relationship v(D) = a × D^b × √(ρ₀/ρ).
-See [Seifert and Beheng (2006)](@citet SeifertBeheng2006).
+See [Seifert and Beheng (2006)](@cite SeifertBeheng2006).
 
 # Arguments
 - `p3`: P3 microphysics scheme (provides parameters)
@@ -1949,8 +1949,8 @@ Compute mass-weighted terminal velocity for ice.
 
 When tabulated integrals are available (via `tabulate(p3, arch)`), uses
 pre-computed lookup tables for accurate size-distribution integration.
-Otherwise, uses regime-dependent fall speeds following [Mitchell (1996)](@citet Mitchell1996)
-and [Morrison and Milbrandt (2015)](@citet Morrison2015parameterization).
+Otherwise, uses regime-dependent fall speeds following [Mitchell (1996)](@cite Mitchell1996powerlaws)
+and [Morrison and Milbrandt (2015a)](@cite Morrison2015parameterization).
 
 # Arguments
 - `p3`: P3 microphysics scheme (provides parameters)

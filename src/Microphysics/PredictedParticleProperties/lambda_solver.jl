@@ -224,7 +224,7 @@ end
     deposited_ice_density(mass, rime_fraction, rime_density)
 
 Density of the vapor-deposited (unrimed) portion of ice particles.
-Equation 16 in [Morrison2015parameterization](@citet).
+Equation 16 in [Morrison and Milbrandt (2015a)](@cite Morrison2015parameterization).
 """
 function deposited_ice_density(mass::IceMassPowerLaw, rime_fraction, rime_density)
     β = mass.exponent

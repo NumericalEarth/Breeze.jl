@@ -300,9 +300,13 @@ axislegend(ax, position=:rt)
 fig
 ```
 
-## Quadrature Implementation
+## Numerical Integration and Tabulation
 
-Integrals are evaluated numerically using Chebyshev-Gauss quadrature with
+The official P3 lookup tables are generated using fixed-bin numerical integration
+(40,000 diameter bins for single-particle integrals and 1,500 for collection integrals),
+with constant bin widths in diameter space.
+
+Breeze evaluates integrals directly using Chebyshev-Gauss quadrature with
 a change of variables to map ``[0, ∞)`` to a bounded interval:
 
 ```@example p3_integrals
@@ -325,13 +329,17 @@ lookup tables:
 using Oceananigans: CPU
 
 # Create tabulated fall speed integrals
-params = TabulationParameters(Float64; n_Qnorm=10, n_Fr=3, n_Fl=2, n_quadrature=64)
+params = TabulationParameters(Float64;
+    number_of_mass_points = 10,
+    number_of_rime_fraction_points = 3,
+    number_of_liquid_fraction_points = 2,
+    number_of_quadrature_points = 64)
 fs = IceFallSpeed()
 fs_tab = tabulate(fs, CPU(), params)
 
 println("Tabulated fall speed integrals:")
-println("  Table size: $(size(fs_tab.number_weighted))")
-println("  Sample value: $(fs_tab.number_weighted[5, 2, 1])")
+println("  Table summary: $(summary(fs_tab.number_weighted))")
+println("  Sample value: $(fs_tab.number_weighted.table[5, 2, 1])")
 ```
 
 ## Summary
