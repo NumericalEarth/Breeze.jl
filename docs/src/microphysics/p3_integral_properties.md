@@ -36,6 +36,13 @@ The formulation accounts for the transition from Stokes to turbulent flow regime
 surface roughness effects. A density correction factor ``(ρ₀/ρ)^{0.54}`` is applied following
 [Heymsfield et al. (2006)](@cite HeymsfieldEtAl2006).
 
+For mixed-phase particles (with liquid fraction ``F^l``), the fall speed is linearly interpolated
+between the ice fall speed and the rain fall speed:
+
+```math
+V(D) = F^l V_{rain}(D) + (1 - F^l) V_{ice}(D)
+```
+
 The fall speed depends on the mass-diameter and area-diameter relationships, which vary
 across the four particle regimes (see [Particle Properties](@ref p3_particle_properties)).
 

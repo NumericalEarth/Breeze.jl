@@ -159,6 +159,7 @@ export
 
     # Lambda solver
     IceMassPowerLaw,
+    P3Closure,
     TwoMomentClosure,
     ThreeMomentClosure,
     ShapeParameterRelation,  # alias for TwoMomentClosure

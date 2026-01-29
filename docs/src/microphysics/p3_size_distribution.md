@@ -94,9 +94,10 @@ converts to cm⁻¹). The second branch increases ``μ`` with particle size and 
 in the Fortran lookup-table generator.
 
 !!! note "Breeze helper closure"
-    The `TwoMomentClosure` / `ShapeParameterRelation` used in the examples implements
-    only the Heymsfield power-law clamp (``μ_{max} = 6``). This matches the small-particle
-    branch but omits the large-particle diagnostic used in the officail P3 code.
+    Breeze implements the `P3Closure` which matches the official P3 Fortran logic.
+    For small particles (``D_{mvd} \le 0.2`` mm), it uses the Heymsfield (2003) power-law relation.
+    For large particles (``D_{mvd} > 0.2`` mm), it uses the diagnostic based on mean volume diameter
+    and rime density to account for riming effects. This ensures consistency with the lookup tables.
 
 !!! note "Three-Moment Mode"
     In the officail P3 code, ``μ`` (and the bulk ice density used in rates) are obtained

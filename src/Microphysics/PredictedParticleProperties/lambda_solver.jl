@@ -132,14 +132,111 @@ end
 const ShapeParameterRelation = TwoMomentClosure
 
 """
-    shape_parameter(closure::TwoMomentClosure, logλ)
+    P3Closure
 
-Compute μ from log(λ) using the power law relationship.
+Updated μ-λ closure for P3, including the large-particle diagnostic.
+See [`P3Closure()`](@ref) constructor.
 """
-function shape_parameter(closure::TwoMomentClosure, logλ)
+struct P3Closure{FT}
+    # Constants for small particle regime (Field et al. 2007)
+    a :: FT
+    b :: FT
+    c :: FT
+    μmax_small :: FT
+    # Constants for large particle regime
+    μmax_large :: FT
+    D_threshold :: FT # Threshold diameter [m] (0.2 mm)
+end
+
+"""
+$(TYPEDSIGNATURES)
+
+Construct the P3 μ-λ closure which includes a diagnostic for large rimed particles.
+
+This closure matches the logic in the official P3 Fortran code (lookup table generation).
+It uses the Field et al. (2007) relation for small particles, but switches to
+a diagnostic based on mean volume diameter (D_mvd) for large particles to account
+for riming effects.
+
+# Logic
+
+1. Compute mean volume diameter ``D_{mvd} = (L / (\\frac{\\pi}{6} \\rho_g))^{1/3}``
+2. If ``D_{mvd} \\le 0.2`` mm:
+   Use Field et al. (2007) relation: ``\\mu = 0.076 \\lambda^{0.8} - 2`` (clamped [0, 6])
+3. If ``D_{mvd} > 0.2`` mm:
+   ``\\mu = 0.25 (D_{mvd} - 0.2) f_\\rho F^f`` (clamped [0, 20])
+   where ``f_\\rho = \\max(1, 1 + 0.00842(\\rho_g - 400))``
+
+# Keyword Arguments
+
+- `a`, `b`, `c`: Constants for small regime (same as TwoMomentClosure)
+- `μmax_small`: Max μ for small regime (default 6)
+- `μmax_large`: Max μ for large regime (default 20)
+- `D_threshold`: Threshold D_mvd [m] (default 2e-4)
+"""
+function P3Closure(FT = Oceananigans.defaults.FloatType;
+                   a = 0.00191,
+                   b = 0.8,
+                   c = 2,
+                   μmax_small = 6,
+                   μmax_large = 20,
+                   D_threshold = 2e-4)
+    return P3Closure(FT(a), FT(b), FT(c), FT(μmax_small), FT(μmax_large), FT(D_threshold))
+end
+
+"""
+    shape_parameter(closure, logλ, L_ice, rime_fraction, rime_density, mass_params)
+
+Compute shape parameter μ.
+"""
+function shape_parameter(closure::TwoMomentClosure, logλ, args...)
     λ = exp(logλ)
     μ = closure.a * λ^closure.b - closure.c
     return clamp(μ, zero(μ), closure.μmax)
+end
+
+function shape_parameter(closure::P3Closure, logλ, L_ice, rime_fraction, rime_density, mass::IceMassPowerLaw)
+    FT = typeof(closure.a)
+    λ = exp(logλ)
+    
+    # 1. Compute graupel density (rho_g)
+    if iszero(rime_fraction)
+        ρ_g = mass.ice_density
+    else
+        ρ_dep = deposited_ice_density(mass, rime_fraction, rime_density)
+        ρ_g = graupel_density(rime_fraction, rime_density, ρ_dep)
+    end
+    
+    # 2. Compute D_mvd (Mean Volume Diameter)
+    # D_mvd = (L / ((pi/6) * rho_g))^(1/3)
+    val = L_ice / (FT(π)/6 * ρ_g)
+    # Handle L=0 case
+    if val <= 0
+        D_mvd = zero(FT)
+    else
+        D_mvd = val^(1/3) # in meters
+    end
+    
+    # 3. Branch based on D_mvd
+    if D_mvd <= closure.D_threshold
+        # Small regime: Heymsfield 2003
+        μ = closure.a * λ^closure.b - closure.c
+        μ = clamp(μ, zero(FT), closure.μmax_small)
+    else
+        # Large regime
+        D_mvd_mm = D_mvd * 1000
+        D_thres_mm = closure.D_threshold * 1000
+        
+        # Density adjustment factor
+        f_ρ = max(one(FT), one(FT) + FT(0.00842) * (ρ_g - 400))
+        
+        # μ = 0.25 * (D_mvd_mm - 0.2) * f_rho * F^f
+        μ = FT(0.25) * (D_mvd_mm - D_thres_mm) * f_ρ * rime_fraction
+        
+        μ = clamp(μ, zero(FT), closure.μmax_large)
+    end
+    
+    return μ
 end
 
 #####
@@ -230,6 +327,12 @@ function deposited_ice_density(mass::IceMassPowerLaw, rime_fraction, rime_densit
     β = mass.exponent
     Fᶠ = rime_fraction
     ρᶠ = rime_density
+    FT = typeof(β)
+
+    # Handle unrimed case to avoid division by zero
+    if Fᶠ <= eps(FT)
+        return mass.ice_density
+    end
 
     k = (1 - Fᶠ)^(-1 / (3 - β))
     num = ρᶠ * Fᶠ
@@ -482,14 +585,15 @@ end
 #####
 
 """
-    log_mass_number_ratio(mass, closure, rime_fraction, rime_density, logλ)
+    log_mass_number_ratio(mass, closure, rime_fraction, rime_density, logλ, L_ice)
 
 Compute log(L_ice / N_ice) as a function of logλ for two-moment closure.
+Includes L_ice argument to support the P3Closure diagnostic.
 """
 function log_mass_number_ratio(mass::IceMassPowerLaw,
-                               closure::TwoMomentClosure,
-                               rime_fraction, rime_density, logλ)
-    μ = shape_parameter(closure, logλ)
+                               closure,
+                               rime_fraction, rime_density, logλ, L_ice)
+    μ = shape_parameter(closure, logλ, L_ice, rime_fraction, rime_density, mass)
     log_L_over_N₀ = log_mass_moment(mass, rime_fraction, rime_density, μ, logλ)
     log_N_over_N₀ = log_gamma_moment(μ, logλ)
     return log_L_over_N₀ - log_N_over_N₀
@@ -662,7 +766,7 @@ end
 """
     solve_lambda(L_ice, N_ice, rime_fraction, rime_density;
                  mass = IceMassPowerLaw(),
-                 closure = TwoMomentClosure(),
+                 closure = P3Closure(),
                  logλ_bounds = (log(10), log(1e7)),
                  max_iterations = 50,
                  tolerance = 1e-10)
@@ -681,18 +785,19 @@ matches the observed ratio. This is the two-moment solver using the
 
 # Keyword Arguments
 - `mass`: Power law parameters (default: `IceMassPowerLaw()`)
-- `closure`: Two-moment closure (default: `TwoMomentClosure()`)
+- `closure`: Two-moment closure (default: `P3Closure()`)
 
 # Returns
 - `logλ`: Log of slope parameter
 """
 function solve_lambda(L_ice, N_ice, rime_fraction, rime_density;
                       mass = IceMassPowerLaw(),
-                      closure = TwoMomentClosure(),
+                      closure = P3Closure(),
                       shape_relation = nothing,  # deprecated, for backwards compatibility
                       logλ_bounds = (log(10), log(1e7)),
                       max_iterations = 50,
-                      tolerance = 1e-10)
+                      tolerance = 1e-10,
+                      kwargs...)
 
     # Handle deprecated keyword
     actual_closure = isnothing(shape_relation) ? closure : shape_relation
@@ -704,7 +809,8 @@ function solve_lambda(L_ice, N_ice, rime_fraction, rime_density;
     end
 
     target = log(L_ice) - log(N_ice)
-    f(logλ) = log_mass_number_ratio(mass, actual_closure, rime_fraction, rime_density, logλ) - target
+    # Pass L_ice to log_mass_number_ratio for P3 closure diagnostic
+    f(logλ) = log_mass_number_ratio(mass, actual_closure, rime_fraction, rime_density, logλ, L_ice) - target
 
     # Secant method
     x₀, x₁ = FT.(logλ_bounds)
@@ -750,7 +856,8 @@ function solve_lambda(L_ice, N_ice, Z_ice, rime_fraction, rime_density, μ;
                       mass = IceMassPowerLaw(),
                       logλ_bounds = (log(10), log(1e7)),
                       max_iterations = 50,
-                      tolerance = 1e-10)
+                      tolerance = 1e-10,
+                      kwargs...)
 
     FT = typeof(L_ice)
     if L_ice <= 0 || N_ice <= 0
@@ -926,7 +1033,7 @@ The solution proceeds in three steps:
 # Keyword Arguments
 
 - `mass`: Power law parameters (default: `IceMassPowerLaw()`)
-- `closure`: Two-moment closure (default: `TwoMomentClosure()`)
+- `closure`: Two-moment closure (default: `P3Closure()`)
 
 # Returns
 
@@ -951,7 +1058,7 @@ See [Morrison and Milbrandt (2015a)](@cite Morrison2015parameterization) Section
 """
 function distribution_parameters(L_ice, N_ice, rime_fraction, rime_density;
                                   mass = IceMassPowerLaw(),
-                                  closure = TwoMomentClosure(),
+                                  closure = P3Closure(),
                                   diameter_bounds = nothing,
                                   shape_relation = nothing,  # deprecated
                                   kwargs...)
@@ -962,7 +1069,7 @@ function distribution_parameters(L_ice, N_ice, rime_fraction, rime_density;
 
     logλ = solve_lambda(L_ice, N_ice, rime_fraction, rime_density; mass, closure=actual_closure, kwargs...)
     λ = exp(logλ)
-    μ = shape_parameter(actual_closure, logλ)
+    μ = shape_parameter(actual_closure, logλ, L_ice, rime_fraction, rime_density, mass)
 
     # Enforce diameter bounds if provided
     if !isnothing(diameter_bounds)

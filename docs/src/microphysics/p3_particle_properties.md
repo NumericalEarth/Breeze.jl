@@ -211,18 +211,14 @@ and ``m_{pr} = c_{sr} D^{d_{sr}}`` from the partially rimed mass law.
 ## Terminal Velocity
 
 The official P3 code computes terminal velocity using the
-[MitchellHeymsfield2005](@cite) Best-number drag formulation with the
+[Mitchell and Heymsfield (2005)](@cite MitchellHeymsfield2005) Best-number drag formulation with the
 regime-dependent ``m(D)`` and ``A(D)`` relationships. The resulting fall speeds
 are stored in lookup tables and include the air-density correction
-``(ρ₀/ρ)^{0.54}`` following [HeymsfieldEtAl2006](@cite). Regime-specific coefficients
-from the P3 papers therefore do not appear as a single global power law in the
-lookup tables.
+``(ρ₀/ρ)^{0.54}`` following [Heymsfield et al. (2006)](@cite HeymsfieldEtAl2006).
 
-!!! note "Velocity Coefficients"
-    The regime-specific power-law coefficients in the literature are a compact summary
-    of fall-speed behavior, but the official P3 derives fall speeds from the
-    Best-number drag law and tabulates the results. See
-    [Morrison2015parameterization](@citet) supplementary material for coefficient definitions.
+Breeze implements this full Best-number formulation directly in the quadrature routines,
+ensuring consistency with the lookup tables. For mixed-phase particles, the velocity
+interpolates between the ice and rain fall speeds based on liquid fraction.
 
 ## Particle Density
 
