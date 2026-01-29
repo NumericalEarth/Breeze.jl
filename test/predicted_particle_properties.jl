@@ -674,7 +674,7 @@ using Oceananigans: CPU
     end
 
     @testset "Rime fraction dependence" begin
-        # Rimed particles have higher density
+        # Test that both rimed and unrimed states produce valid results
         state_unrimed = IceSizeDistributionState(Float64;
             intercept = 1e6, shape = 0.0, slope = 1000.0,
             rime_fraction = 0.0, rime_density = 400.0)
@@ -683,7 +683,7 @@ using Oceananigans: CPU
             intercept = 1e6, shape = 0.0, slope = 1000.0,
             rime_fraction = 0.5, rime_density = 600.0)
 
-        # Both should produce valid results
+        # Both should produce valid results for number-weighted fall speed
         V_unrimed = evaluate(NumberWeightedFallSpeed(), state_unrimed)
         V_rimed = evaluate(NumberWeightedFallSpeed(), state_rimed)
 
@@ -691,6 +691,15 @@ using Oceananigans: CPU
         @test isfinite(V_rimed)
         @test V_unrimed > 0
         @test V_rimed > 0
+
+        # Mass-weighted fall speed should be larger for rimed particles
+        # because particle_mass depends on rime_fraction (higher effective density)
+        F_m_unrimed = evaluate(MassWeightedFallSpeed(), state_unrimed)
+        F_m_rimed = evaluate(MassWeightedFallSpeed(), state_rimed)
+
+        @test isfinite(F_m_unrimed)
+        @test isfinite(F_m_rimed)
+        @test F_m_rimed > F_m_unrimed  # Higher mass → larger flux integral
     end
 
     @testset "Liquid fraction dependence" begin
