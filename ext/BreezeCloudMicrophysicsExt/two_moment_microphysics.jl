@@ -692,10 +692,7 @@ const r_nuc = 5e-11  # 0.05 nm
 
     # Get thermodynamic properties
     T = temperature(𝒰, constants)
-    p = 𝒰.reference_pressure
     q = 𝒰.moisture_mass_fractions
-    qᵗ = q.vapor + q.liquid
-    qˡ = q.liquid
 
     # Supersaturation - activation only occurs when air is supersaturated (S > 0)
     S = supersaturation(T, ρ, q, constants, PlanarLiquidSurface())
@@ -705,7 +702,7 @@ const r_nuc = 5e-11  # 0.05 nm
     N_tot = Nᵃ⁺ + Nᶜˡ⁺
 
     # Compute the activated fraction of the TOTAL aerosol population
-    activated_fraction = aerosol_activated_fraction(aerosol_activation, aps, T, p, w⁺, qᵗ, qˡ, ρ, constants)
+    activated_fraction = aerosol_activated_fraction(aerosol_activation, T, S, constants)
 
     # Target number of activated droplets
     N_target = activated_fraction * N_tot
@@ -805,28 +802,33 @@ Mass tendency for cloud liquid [kg/kg/s]
 end
 
 """
-    aerosol_activated_fraction(aerosol_activation, aps, T, p, w, qᵗ, qˡ, ρ, constants)
+    aerosol_activated_fraction(aerosol_activation, T, S, constants)
 
-Compute the fraction of aerosol that activates given current thermodynamic conditions.
-Uses the maximum supersaturation to determine which aerosol modes activate.
+Compute the fraction of aerosol that activates given instantaneous supersaturation.
+Uses the instantaneous supersaturation to determine which aerosol modes activate,
+following the CloudMicrophysics parcel model approach.
+
+# Arguments
+- `aerosol_activation`: AerosolActivation containing activation parameters and aerosol distribution
+- `T`: Temperature [K]
+- `S`: Instantaneous supersaturation (dimensionless, e.g., 0.01 = 1%)
+- `constants`: Breeze ThermodynamicConstants
+
+# Returns
+Fraction of aerosol that activates (0 to 1)
 """
 @inline function aerosol_activated_fraction(
     aerosol_activation::AerosolActivation,
-    aps::AirProperties{FT},
     T::FT,
-    p::FT,
-    w::FT,
-    qᵗ::FT,
-    qˡ::FT,
-    ρ::FT,
+    S::FT,
     constants,
 ) where {FT}
 
     ap = aerosol_activation.activation_parameters
     ad = aerosol_activation.aerosol_distribution
 
-    # Compute maximum supersaturation
-    S_max = max_supersaturation_breeze(aerosol_activation, aps, T, p, w, qᵗ, qˡ, zero(FT), zero(FT), zero(FT), ρ, constants)
+    # No activation if subsaturated
+    S⁺ = max(zero(FT), S)
 
     # Curvature coefficient
     Rᵛ = vapor_gas_constant(constants)
@@ -846,14 +848,14 @@ Uses the maximum supersaturation to determine which aerosol modes activate.
         Sm_i = 2 / sqrt(κ_mean) * (A / 3 / mode_i.r_dry)^(3/2)
 
         # Activated fraction for this mode (Eq. 7 in ARG 2000)
-        u = 2 * log(Sm_i / S_max) / 3 / sqrt(2) / log(mode_i.stdev)
+        u = 2 * log(Sm_i / max(S⁺, eps(FT))) / 3 / sqrt(2) / log(mode_i.stdev)
         f_activated = (1 - erf(u)) / 2
 
         activated_N += f_activated * N_mode
     end
 
     # Return total activated fraction
-    return ifelse(total_N > 0, activated_N / total_N, zero(T))
+    return ifelse(total_N > 0, activated_N / total_N, zero(FT))
 end
 
 #####
