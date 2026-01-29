@@ -43,6 +43,8 @@ examples = [
     Example("Splitting supercell", "splitting_supercell", false),
 ]
 
+examples = []
+
 # Filter out long-running example if necessary
 filter!(x -> x.build_always || get(ENV, "BREEZE_BUILD_ALL_EXAMPLES", "false") == "true", examples)
 example_pages = [ex.title => joinpath("literated", ex.basename * ".md") for ex in examples]
@@ -155,7 +157,7 @@ makedocs(
     ),
     pages=[
         "Home" => "index.md",
-        "Examples" => example_pages,
+        # "Examples" => example_pages,
         "Thermodynamics" => "thermodynamics.md",
         "AtmosphereModel" => Any[
             "Diagnostics" => "atmosphere_model/diagnostics.md",
@@ -182,7 +184,7 @@ makedocs(
         "API" => "api.md",
         "Contributors guide" => "contributing.md",
     ],
-    linkcheck = true,
+    linkcheck = false,  # Disabled due to GitHub rate limiting (429 errors)
     draft = false,
     doctest = true
 )

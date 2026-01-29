@@ -61,6 +61,7 @@ export
     PlanarIceSurface,
 
     # Microphysics
+    prognostic_field_names,
     SaturationAdjustment,
     MixedPhaseEquilibrium,
     WarmPhaseEquilibrium,
@@ -72,6 +73,8 @@ export
     BulkMicrophysics,
     compute_hydrostatic_pressure!,
     NonEquilibriumCloudFormation,
+    P3Microphysics,
+    PredictedParticlePropertiesMicrophysics,
 
     # BoundaryConditions
     BulkDrag,
