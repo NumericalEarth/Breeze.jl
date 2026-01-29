@@ -8,7 +8,8 @@ using Breeze.Microphysics.PredictedParticleProperties:
     chebyshev_gauss_nodes_weights,
     size_distribution,
     tabulate,
-    TabulationParameters
+    TabulationParameters,
+    TabulatedFunction3D
 
 using Oceananigans: CPU
 
@@ -444,42 +445,53 @@ using Oceananigans: CPU
 
     @testset "Tabulation parameters" begin
         params = TabulationParameters()
-        @test params.n_Qnorm == 50
-        @test params.n_Fr == 4
-        @test params.n_Fl == 4
-        @test params.Qnorm_min ≈ 1e-18
-        @test params.Qnorm_max ≈ 1e-5
-        @test params.n_quadrature == 64
+        @test params.number_of_mass_points == 50
+        @test params.number_of_rime_fraction_points == 4
+        @test params.number_of_liquid_fraction_points == 4
+        @test params.minimum_log_mean_particle_mass ≈ -18
+        @test params.maximum_log_mean_particle_mass ≈ -5
+        @test params.number_of_quadrature_points == 64
 
         # Custom parameters
         params_custom = TabulationParameters(Float32;
-            n_Qnorm=20, n_Fr=3, n_Fl=2, n_quadrature=32)
-        @test params_custom.n_Qnorm == 20
-        @test params_custom.n_Fr == 3
-        @test params_custom.n_Fl == 2
-        @test params_custom.Qnorm_min isa Float32
+            number_of_mass_points=20,
+            number_of_rime_fraction_points=3,
+            number_of_liquid_fraction_points=2,
+            number_of_quadrature_points=32)
+        @test params_custom.number_of_mass_points == 20
+        @test params_custom.number_of_rime_fraction_points == 3
+        @test params_custom.number_of_liquid_fraction_points == 2
+        @test params_custom.minimum_log_mean_particle_mass isa Float32
     end
 
     @testset "Tabulate single integral" begin
-        params = TabulationParameters(Float64; n_Qnorm=5, n_Fr=2, n_Fl=2, n_quadrature=16)
+        params = TabulationParameters(Float64;
+            number_of_mass_points=5,
+            number_of_rime_fraction_points=2,
+            number_of_liquid_fraction_points=2,
+            number_of_quadrature_points=16)
 
         # Tabulate number-weighted fall speed
         tab_Vn = tabulate(NumberWeightedFallSpeed(), CPU(), params)
 
-        @test tab_Vn isa TabulatedIntegral
-        @test size(tab_Vn) == (5, 2, 2)
+        @test tab_Vn isa TabulatedFunction3D
+        @test size(tab_Vn.table) == (5, 2, 2)
 
         # Values should be positive and finite
-        @test all(isfinite, tab_Vn.data)
-        @test all(x -> x > 0, tab_Vn.data)
+        @test all(isfinite, tab_Vn.table)
+        @test all(x -> x > 0, tab_Vn.table)
 
-        # Test indexing
-        @test tab_Vn[1, 1, 1] > 0
-        @test tab_Vn[5, 2, 2] > 0
+        # Test indexing via table
+        @test tab_Vn.table[1, 1, 1] > 0
+        @test tab_Vn.table[5, 2, 2] > 0
     end
 
     @testset "Tabulate IceFallSpeed container" begin
-        params = TabulationParameters(Float64; n_Qnorm=5, n_Fr=2, n_Fl=2, n_quadrature=16)
+        params = TabulationParameters(Float64;
+            number_of_mass_points=5,
+            number_of_rime_fraction_points=2,
+            number_of_liquid_fraction_points=2,
+            number_of_quadrature_points=16)
 
         fs = IceFallSpeed()
         fs_tab = tabulate(fs, CPU(), params)
@@ -490,18 +502,22 @@ using Oceananigans: CPU
         @test fs_tab.fall_speed_exponent == fs.fall_speed_exponent
 
         # Integrals should be tabulated
-        @test fs_tab.number_weighted isa TabulatedIntegral
-        @test fs_tab.mass_weighted isa TabulatedIntegral
-        @test fs_tab.reflectivity_weighted isa TabulatedIntegral
+        @test fs_tab.number_weighted isa TabulatedFunction3D
+        @test fs_tab.mass_weighted isa TabulatedFunction3D
+        @test fs_tab.reflectivity_weighted isa TabulatedFunction3D
 
         # Check sizes
-        @test size(fs_tab.number_weighted) == (5, 2, 2)
-        @test size(fs_tab.mass_weighted) == (5, 2, 2)
-        @test size(fs_tab.reflectivity_weighted) == (5, 2, 2)
+        @test size(fs_tab.number_weighted.table) == (5, 2, 2)
+        @test size(fs_tab.mass_weighted.table) == (5, 2, 2)
+        @test size(fs_tab.reflectivity_weighted.table) == (5, 2, 2)
     end
 
     @testset "Tabulate IceDeposition container" begin
-        params = TabulationParameters(Float64; n_Qnorm=5, n_Fr=2, n_Fl=2, n_quadrature=16)
+        params = TabulationParameters(Float64;
+            number_of_mass_points=5,
+            number_of_rime_fraction_points=2,
+            number_of_liquid_fraction_points=2,
+            number_of_quadrature_points=16)
 
         dep = IceDeposition()
         dep_tab = tabulate(dep, CPU(), params)
@@ -511,12 +527,12 @@ using Oceananigans: CPU
         @test dep_tab.vapor_diffusivity == dep.vapor_diffusivity
 
         # All 6 integrals should be tabulated
-        @test dep_tab.ventilation isa TabulatedIntegral
-        @test dep_tab.ventilation_enhanced isa TabulatedIntegral
-        @test dep_tab.small_ice_ventilation_constant isa TabulatedIntegral
-        @test dep_tab.small_ice_ventilation_reynolds isa TabulatedIntegral
-        @test dep_tab.large_ice_ventilation_constant isa TabulatedIntegral
-        @test dep_tab.large_ice_ventilation_reynolds isa TabulatedIntegral
+        @test dep_tab.ventilation isa TabulatedFunction3D
+        @test dep_tab.ventilation_enhanced isa TabulatedFunction3D
+        @test dep_tab.small_ice_ventilation_constant isa TabulatedFunction3D
+        @test dep_tab.small_ice_ventilation_reynolds isa TabulatedFunction3D
+        @test dep_tab.large_ice_ventilation_constant isa TabulatedFunction3D
+        @test dep_tab.large_ice_ventilation_reynolds isa TabulatedFunction3D
     end
 
     @testset "Tabulate P3 scheme by property" begin
@@ -524,11 +540,14 @@ using Oceananigans: CPU
 
         # Tabulate fall speed
         p3_fs = tabulate(p3, :ice_fall_speed, CPU();
-            n_Qnorm=5, n_Fr=2, n_Fl=2, n_quadrature=16)
+            number_of_mass_points=5,
+            number_of_rime_fraction_points=2,
+            number_of_liquid_fraction_points=2,
+            number_of_quadrature_points=16)
 
         @test p3_fs isa PredictedParticlePropertiesMicrophysics
-        @test p3_fs.ice.fall_speed.number_weighted isa TabulatedIntegral
-        @test p3_fs.ice.fall_speed.mass_weighted isa TabulatedIntegral
+        @test p3_fs.ice.fall_speed.number_weighted isa TabulatedFunction3D
+        @test p3_fs.ice.fall_speed.mass_weighted isa TabulatedFunction3D
 
         # Other properties should be unchanged
         @test p3_fs.ice.deposition.ventilation isa Ventilation
@@ -537,9 +556,12 @@ using Oceananigans: CPU
 
         # Tabulate deposition
         p3_dep = tabulate(p3, :ice_deposition, CPU();
-            n_Qnorm=5, n_Fr=2, n_Fl=2, n_quadrature=16)
+            number_of_mass_points=5,
+            number_of_rime_fraction_points=2,
+            number_of_liquid_fraction_points=2,
+            number_of_quadrature_points=16)
 
-        @test p3_dep.ice.deposition.ventilation isa TabulatedIntegral
+        @test p3_dep.ice.deposition.ventilation isa TabulatedFunction3D
         @test p3_dep.ice.fall_speed.number_weighted isa NumberWeightedFallSpeed
     end
 
@@ -556,8 +578,8 @@ using Oceananigans: CPU
 
     @testset "Fall speed physical consistency" begin
         # For a given PSD, larger particles fall faster
-        # Mass-weighted velocity should generally be larger than number-weighted
-        # because larger particles contribute more to mass
+        # Note: evaluate() returns density-weighted integrals (fluxes), not mean velocities.
+        # So we cannot compare V_n and V_m directly without normalization.
 
         state = IceSizeDistributionState(Float64;
             intercept = 1e6,
@@ -878,17 +900,29 @@ using Oceananigans: CPU
 
     @testset "Mass-weighted velocity ordering" begin
         # For particles with power-law fall speed V(D) = a D^b (b > 0):
-        # Reflectivity-weighted (Z-weighted) velocity should be largest
+        # Reflectivity-weighted (Z-weighted) mean velocity should be largest
         # because it weights by D^6, emphasizing large particles
         # Mass-weighted should be intermediate
         # Number-weighted should be smallest
+        # Note: We must compare normalized mean velocities, not raw flux integrals.
 
         state = IceSizeDistributionState(Float64;
             intercept = 1e6, shape = 0.0, slope = 500.0)  # Large particles
 
-        V_n = evaluate(NumberWeightedFallSpeed(), state; n_quadrature=128)
-        V_m = evaluate(MassWeightedFallSpeed(), state; n_quadrature=128)
-        V_z = evaluate(ReflectivityWeightedFallSpeed(), state; n_quadrature=128)
+        # Flux integrals
+        F_n = evaluate(NumberWeightedFallSpeed(), state; n_quadrature=128)
+        F_m = evaluate(MassWeightedFallSpeed(), state; n_quadrature=128)
+        F_z = evaluate(ReflectivityWeightedFallSpeed(), state; n_quadrature=128)
+
+        # Normalization moments
+        M_n = evaluate(NumberMomentLambdaLimit(), state; n_quadrature=128)
+        M_m = evaluate(MassMomentLambdaLimit(), state; n_quadrature=128)
+        M_z = evaluate(Reflectivity(), state; n_quadrature=128)
+
+        # Mean velocities
+        V_n = F_n / M_n
+        V_m = F_m / M_m
+        V_z = F_z / M_z
 
         # All should be positive
         @test V_n > 0
@@ -896,11 +930,8 @@ using Oceananigans: CPU
         @test V_z > 0
 
         # Check ordering: V_z ≥ V_m ≥ V_n for most PSDs
-        # (this depends on the fall speed power-law exponent)
-        # Just verify they're all in reasonable range
-        @test isfinite(V_n)
-        @test isfinite(V_m)
-        @test isfinite(V_z)
+        @test V_z >= V_m
+        @test V_m >= V_n
     end
 
     @testset "Ventilation integral properties" begin
@@ -1055,13 +1086,13 @@ using Oceananigans: CPU
     end
 
     @testset "Lambda solver - edge cases" begin
-        # Zero mass should return log(0)
+        # Zero mass or number should return the upper bound (smallest particles),
+        # not the unphysical λ = 0.
         logλ_zero_L = solve_lambda(0.0, 1e5, 0.0, 400.0)
-        @test logλ_zero_L == log(0.0)
+        @test logλ_zero_L == log(1e7)
 
-        # Zero number should return log(0)
         logλ_zero_N = solve_lambda(1e-4, 0.0, 0.0, 400.0)
-        @test logλ_zero_N == log(0.0)
+        @test logλ_zero_N == log(1e7)
     end
 
     @testset "Lambda solver - L/N dependence" begin

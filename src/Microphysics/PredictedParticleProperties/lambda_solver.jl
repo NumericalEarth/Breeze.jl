@@ -698,7 +698,10 @@ function solve_lambda(L_ice, N_ice, rime_fraction, rime_density;
     actual_closure = isnothing(shape_relation) ? closure : shape_relation
 
     FT = typeof(L_ice)
-    (iszero(N_ice) || iszero(L_ice)) && return log(zero(FT))
+    if L_ice <= 0 || N_ice <= 0
+        # No ice mass or number: return upper bound to avoid unphysical λ = 0.
+        return FT(logλ_bounds[2])
+    end
 
     target = log(L_ice) - log(N_ice)
     f(logλ) = log_mass_number_ratio(mass, actual_closure, rime_fraction, rime_density, logλ) - target
@@ -750,7 +753,10 @@ function solve_lambda(L_ice, N_ice, Z_ice, rime_fraction, rime_density, μ;
                       tolerance = 1e-10)
 
     FT = typeof(L_ice)
-    (iszero(N_ice) || iszero(L_ice)) && return log(zero(FT))
+    if L_ice <= 0 || N_ice <= 0
+        # No ice mass or number: return upper bound to avoid unphysical λ = 0.
+        return FT(logλ_bounds[2])
+    end
 
     target = log(L_ice) - log(N_ice)
 

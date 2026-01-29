@@ -342,7 +342,7 @@ end
 ##### GPU/architecture support for TabulatedFunction3D
 #####
 
-on_architecture(arch, f::TabulatedFunction3D) =
+Oceananigans.Architectures.on_architecture(arch, f::TabulatedFunction3D) =
     TabulatedFunction3D(f.func,
                         on_architecture(arch, f.table),
                         f.x_min, f.x_max, f.inverse_Δx,
