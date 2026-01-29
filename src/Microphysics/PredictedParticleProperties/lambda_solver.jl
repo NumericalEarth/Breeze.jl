@@ -198,7 +198,7 @@ end
 function shape_parameter(closure::P3Closure, logλ, L_ice, rime_fraction, rime_density, mass::IceMassPowerLaw)
     FT = typeof(closure.a)
     λ = exp(logλ)
-    
+
     # 1. Compute graupel density (rho_g)
     if iszero(rime_fraction)
         ρ_g = mass.ice_density
@@ -206,7 +206,7 @@ function shape_parameter(closure::P3Closure, logλ, L_ice, rime_fraction, rime_d
         ρ_dep = deposited_ice_density(mass, rime_fraction, rime_density)
         ρ_g = graupel_density(rime_fraction, rime_density, ρ_dep)
     end
-    
+
     # 2. Compute D_mvd (Mean Volume Diameter)
     # D_mvd = (L / ((pi/6) * rho_g))^(1/3)
     val = L_ice / (FT(π)/6 * ρ_g)
@@ -216,7 +216,7 @@ function shape_parameter(closure::P3Closure, logλ, L_ice, rime_fraction, rime_d
     else
         D_mvd = val^(1/3) # in meters
     end
-    
+
     # 3. Branch based on D_mvd
     if D_mvd <= closure.D_threshold
         # Small regime: Heymsfield 2003
@@ -226,16 +226,16 @@ function shape_parameter(closure::P3Closure, logλ, L_ice, rime_fraction, rime_d
         # Large regime
         D_mvd_mm = D_mvd * 1000
         D_thres_mm = closure.D_threshold * 1000
-        
+
         # Density adjustment factor
         f_ρ = max(one(FT), one(FT) + FT(0.00842) * (ρ_g - 400))
-        
+
         # μ = 0.25 * (D_mvd_mm - 0.2) * f_rho * F^f
         μ = FT(0.25) * (D_mvd_mm - D_thres_mm) * f_ρ * rime_fraction
-        
+
         μ = clamp(μ, zero(FT), closure.μmax_large)
     end
-    
+
     return μ
 end
 

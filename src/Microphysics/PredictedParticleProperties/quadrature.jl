@@ -192,19 +192,19 @@ interpolation between the ice fall speed and rain fall speed:
 @inline function terminal_velocity(D, state::IceSizeDistributionState)
     FT = typeof(D)
     Fˡ = state.liquid_fraction
-    
+
     # Calculate ice fall speed (Mitchell & Heymsfield 2005)
     # Uses mass/area of the ice portion only
     m_ice = particle_mass_ice_only(D, state)
     A_ice = particle_area_ice_only(D, state)
     V_ice = ice_fall_speed_mh2005(D, state, m_ice, A_ice)
-    
+
     # Apply density correction to ice fall speed
     ρ = state.air_density
     ρ₀ = state.reference_air_density
     ρ_correction = (ρ₀ / max(ρ, FT(0.1)))^FT(0.54)
     V_ice_corr = V_ice * ρ_correction
-    
+
     # Calculate rain fall speed (if needed)
     if Fˡ > eps(FT)
         # Rain fall speed includes density correction internally
@@ -224,35 +224,35 @@ Calculates velocity at reference conditions (P3_REF_T, P3_REF_P).
 @inline function ice_fall_speed_mh2005(D, state::IceSizeDistributionState, m, A)
     FT = typeof(D)
     g = FT(9.81)
-    
+
     # Reference properties
     ρ_ref = FT(P3_REF_RHO)
     η_ref = FT(P3_REF_ETA) # dynamic
     ν_ref = FT(P3_REF_NU)  # kinematic
-    
+
     # Avoid division by zero
     A_safe = max(A, eps(FT))
-    
+
     # Best number X at reference conditions
     # X = 2 m g ρ D^2 / (A η^2)
     X = 2 * m * g * ρ_ref * D^2 / (A_safe * η_ref^2)
-    
+
     # Limit X for numerical stability (and to match Fortran checks?)
     X = max(X, FT(1e-20))
-    
+
     # MH2005 drag terms (a0=0, b0=0 branch for aggregates)
     X_sqrt = sqrt(X)
     C1_X_sqrt = MH_C₁ * X_sqrt
     term = sqrt(1 + C1_X_sqrt)
-    
+
     # b₁ = (C₁ √X) / (2 (√(1+C₁√X)-1) √(1+C₁√X))
     denom_b = 2 * (term - 1) * term
     b₁ = C1_X_sqrt / max(denom_b, eps(FT))
-    
+
     # a₁ = C₂ (√(1+C₁√X)-1)² / X^b₁
     # Note: X^b1 can be small.
     # Fortran computes `xx**b1` then `a1 = ... / xx**b1`
-    
+
     # If X is very small (Stokes regime), b1 -> 1, a1 -> ?
     # Let's handle small X explicitly to avoid singularities
     if X < 1e-5
@@ -260,16 +260,16 @@ Calculates velocity at reference conditions (P3_REF_T, P3_REF_P).
         # We can just return Stokes velocity
         return m * g / (3 * FT(π) * η_ref * D)
     end
-    
+
     a₁ = MH_C₂ * (term - 1)^2 / X^b₁
-    
+
     # Velocity formula derived from MH2005 power law fit Re = a X^b
     # V = a₁ * ν^(1-2b₁) * (2 m g / (ρ A))^b₁ * D^(2b₁ - 1)
-    
+
     term_bracket = 2 * m * g / (ρ_ref * A_safe)
-    
+
     V_ref = a₁ * ν_ref^(1 - 2*b₁) * term_bracket^b₁ * D^(2*b₁ - 1)
-    
+
     return V_ref
 end
 
@@ -280,12 +280,12 @@ Compute rain fall speed using piecewise power laws from P3 Fortran.
 """
 @inline function rain_fall_speed(D, ρ_correction)
     FT = typeof(D)
-    
+
     # Mass of water sphere in GRAMS for the formula
     # ρ_w = 997 kg/m³
     m_kg = (FT(π)/6) * FT(997) * D^3
     m_g = m_kg * 1000
-    
+
     # Formulas give V in cm/s
     if D <= 134.43e-6
         V_cm = 4.5795e5 * m_g^(2/3)
@@ -296,7 +296,7 @@ Compute rain fall speed using piecewise power laws from P3 Fortran.
     else
         V_cm = FT(917.0)
     end
-    
+
     return V_cm * FT(0.01) * ρ_correction
 end
 
@@ -311,43 +311,43 @@ Used for fall speed calculation of the ice component.
     α = state.mass_coefficient
     β = state.mass_exponent
     ρᵢ = state.ice_density
-    
+
     thresholds = regime_thresholds_from_state(D, state)
-    
+
     # Regime 1: small spheres
     a₁ = ρᵢ * FT(π) / 6
     b₁ = FT(3)
-    
+
     # Regime 2: aggregates
     a₂ = FT(α)
     b₂ = FT(β)
-    
+
     # Regime 3: graupel
     a₃ = thresholds.ρ_graupel * FT(π) / 6
     b₃ = FT(3)
-    
+
     # Regime 4: partially rimed
     # Use safe rime fraction for coefficient calculation
     Fᶠ_safe = min(state.rime_fraction, FT(1) - eps(FT))
     a₄ = FT(α) / (1 - Fᶠ_safe)
     b₄ = FT(β)
-    
+
     is_regime_4 = D ≥ thresholds.partial_rime
     is_regime_3 = D ≥ thresholds.graupel
     is_regime_2 = D ≥ thresholds.spherical
-    
+
     a = a₁
     b = b₁
-    
+
     a = ifelse(is_regime_2, a₂, a)
     b = ifelse(is_regime_2, b₂, b)
-    
+
     a = ifelse(is_regime_3, a₃, a)
     b = ifelse(is_regime_3, b₃, b)
-    
+
     a = ifelse(is_regime_4, a₄, a)
     b = ifelse(is_regime_4, b₄, b)
-    
+
     return a * D^b
 end
 
@@ -359,25 +359,25 @@ Projected area of the ice portion of the particle.
 @inline function particle_area_ice_only(D, state::IceSizeDistributionState)
     FT = typeof(D)
     Fᶠ = state.rime_fraction
-    
+
     thresholds = regime_thresholds_from_state(D, state)
-    
+
     # Spherical area
     A_sphere = FT(π) / 4 * D^2
-    
+
     # Aggregate area
     γ = FT(0.2285)
     σ = FT(1.88)
     A_aggregate = γ * D^σ
-    
+
     is_small = D < thresholds.spherical
     is_graupel = D ≥ thresholds.graupel
-    
+
     A_intermediate = (1 - Fᶠ) * A_aggregate + Fᶠ * A_sphere
-    
+
     A = ifelse(is_small, A_sphere, A_intermediate)
     A = ifelse(is_graupel, A_sphere, A)
-    
+
     return A
 end
 
@@ -468,14 +468,14 @@ where m_liquid is the mass of a water sphere.
 @inline function particle_mass(D, state::IceSizeDistributionState)
     FT = typeof(D)
     Fˡ = state.liquid_fraction
-    
+
     # Calculate ice mass (unmodified by liquid fraction)
     m_ice = particle_mass_ice_only(D, state)
-    
+
     # Liquid mass (sphere)
     # ρ_w = 1000 kg/m³ (from P3 Fortran)
     m_liquid = FT(π)/6 * 1000 * D^3
-    
+
     return (1 - Fˡ) * m_ice + Fˡ * m_liquid
 end
 
@@ -865,13 +865,13 @@ Includes liquid fraction weighting for mixed-phase particles.
 @inline function particle_area(D, state::IceSizeDistributionState)
     FT = typeof(D)
     Fˡ = state.liquid_fraction
-    
+
     # Calculate ice area (unmodified by liquid fraction)
     A_ice = particle_area_ice_only(D, state)
-    
+
     # Liquid area (sphere)
     A_liquid = FT(π)/4 * D^2
-    
+
     return (1 - Fˡ) * A_ice + Fˡ * A_liquid
 end
 
