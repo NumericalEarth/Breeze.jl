@@ -10,7 +10,11 @@
 
 using Oceananigans: Oceananigans
 
-using Breeze.Thermodynamics: temperature
+using Breeze.Thermodynamics: temperature,
+                             saturation_specific_humidity,
+                             saturation_vapor_pressure,
+                             PlanarLiquidSurface,
+                             PlanarIceSurface
 
 #####
 ##### Utility functions
@@ -176,10 +180,10 @@ where D is the drop diameter and f_v is the ventilation factor.
     K_a = FT(2.5e-2)          # Thermal conductivity of air [W/m/K]
     D_v = FT(2.5e-5)          # Diffusivity of water vapor [m²/s]
 
-    # Saturation vapor pressure
-    T₀ = prp.freezing_temperature
-    e_s0 = FT(611)  # Pa at 273.15 K
-    e_s = e_s0 * exp(L_v / R_v * (1 / T₀ - 1 / T))
+    # Saturation vapor pressure derived from qᵛ⁺ˡ
+    # From ideal gas law: ρ_v⁺ = e_s / (R_v × T)
+    # And ρ_v⁺ ≈ ρ × qᵛ⁺ˡ for small qᵛ⁺ˡ
+    e_s = ρ * qᵛ⁺ˡ * R_v * T
 
     # Mean drop properties
     m_mean = safe_divide(qʳ_eff, nʳ_eff, FT(1e-12))
@@ -320,14 +324,16 @@ The bulk rate integrates over the size distribution:
 
     # Thermodynamic constants
     R_v = FT(461.5)           # Gas constant for water vapor [J/kg/K]
+    R_d = FT(287.0)           # Gas constant for dry air [J/kg/K]
     L_s = FT(2.835e6)         # Latent heat of sublimation [J/kg]
     K_a = FT(2.5e-2)          # Thermal conductivity of air [W/m/K]
     D_v = FT(2.5e-5)          # Diffusivity of water vapor [m²/s]
 
-    # Saturation vapor pressure over ice (simplified Clausius-Clapeyron)
-    T₀ = prp.freezing_temperature
-    e_si0 = FT(611)  # Pa at 273.15 K
-    e_si = e_si0 * exp(L_s / R_v * (1 / T₀ - 1 / T))
+    # Saturation vapor pressure over ice
+    # Derived from qᵛ⁺ⁱ: qᵛ⁺ⁱ = ε × e_si / (P - (1-ε) × e_si)
+    # Rearranging: e_si = P × qᵛ⁺ⁱ / (ε + qᵛ⁺ⁱ × (1 - ε))
+    ε = R_d / R_v
+    e_si = P * qᵛ⁺ⁱ / (ε + qᵛ⁺ⁱ * (1 - ε))
 
     # Supersaturation ratio with respect to ice
     S_i = qᵛ / max(qᵛ⁺ⁱ, FT(1e-10))
@@ -519,6 +525,64 @@ end
     rate_factor = ΔT_pos
 
     return qⁱ_eff * rate_factor / τ_melt
+end
+
+"""
+    ice_melting_rates(p3, qⁱ, nⁱ, qʷⁱ, T, qᵛ, qᵛ⁺, Fᶠ, ρᶠ)
+
+Compute partitioned ice melting rates following Milbrandt et al. (2025).
+
+Above freezing, ice particles melt. The meltwater is partitioned:
+- **Partial melting** (large particles): Meltwater stays on ice as liquid coating (qʷⁱ)
+- **Complete melting** (small particles): Meltwater sheds directly to rain
+
+The partitioning is based on a maximum liquid fraction capacity. Once the
+particle reaches this capacity, additional meltwater sheds to rain.
+
+# Arguments
+- `p3`: P3 microphysics scheme (provides parameters)
+- `qⁱ`: Ice mass fraction [kg/kg]
+- `nⁱ`: Ice number concentration [1/kg]
+- `qʷⁱ`: Liquid water on ice [kg/kg]
+- `T`: Temperature [K]
+- `qᵛ`: Vapor mass fraction [kg/kg]
+- `qᵛ⁺`: Saturation vapor mass fraction over liquid [kg/kg]
+- `Fᶠ`: Rime fraction [-]
+- `ρᶠ`: Rime density [kg/m³]
+
+# Returns
+- NamedTuple with `partial_melting` and `complete_melting` rates [kg/kg/s]
+"""
+@inline function ice_melting_rates(p3, qⁱ, nⁱ, qʷⁱ, T, qᵛ, qᵛ⁺, Fᶠ, ρᶠ)
+    FT = typeof(qⁱ)
+    prp = p3.process_rates
+
+    # Get total melting rate
+    total_melt = ice_melting_rate(p3, qⁱ, nⁱ, T, qᵛ, qᵛ⁺, Fᶠ, ρᶠ)
+
+    # Maximum liquid fraction capacity (from Milbrandt et al. 2025)
+    # Spongy ice can hold about 14% liquid by mass
+    max_liquid_fraction = prp.maximum_liquid_fraction
+
+    # Total ice mass (ice + liquid coating)
+    qⁱ_total = qⁱ + qʷⁱ
+    qⁱ_total_safe = max(qⁱ_total, FT(1e-20))
+
+    # Current liquid fraction
+    current_liquid_fraction = qʷⁱ / qⁱ_total_safe
+
+    # Partition melting based on liquid fraction capacity
+    # If below capacity: melting goes to liquid coating
+    # If at/above capacity: melting sheds to rain
+    fraction_to_coating = clamp_positive(max_liquid_fraction - current_liquid_fraction) / max_liquid_fraction
+
+    # Limit to [0, 1]
+    fraction_to_coating = clamp(fraction_to_coating, FT(0), FT(1))
+
+    partial = total_melt * fraction_to_coating
+    complete = total_melt * (1 - fraction_to_coating)
+
+    return (partial_melting = partial, complete_melting = complete)
 end
 
 """
@@ -1287,6 +1351,10 @@ end
 
 Container for computed P3 process rates.
 Includes Phase 1 (rain, deposition, melting), Phase 2 (aggregation, riming, shedding, nucleation).
+
+Following Milbrandt et al. (2025), melting is partitioned:
+- `partial_melting`: Meltwater stays on ice as liquid coating (large particles)
+- `complete_melting`: Meltwater sheds to rain (small particles)
 """
 struct P3ProcessRates{FT}
     # Phase 1: Rain tendencies
@@ -1297,7 +1365,8 @@ struct P3ProcessRates{FT}
 
     # Phase 1: Ice tendencies
     deposition :: FT               # Vapor → ice mass [kg/kg/s]
-    melting :: FT                  # Ice → rain mass [kg/kg/s]
+    partial_melting :: FT          # Ice → liquid coating (stays on ice) [kg/kg/s]
+    complete_melting :: FT         # Ice → rain mass (sheds) [kg/kg/s]
     melting_number :: FT           # Ice number reduction from melting [1/kg/s]
 
     # Phase 2: Ice aggregation
@@ -1329,36 +1398,37 @@ struct P3ProcessRates{FT}
 end
 
 """
-    compute_p3_process_rates(i, j, k, grid, p3, μ, ρ, 𝒰, constants)
+    compute_p3_process_rates(p3, ρ, ℳ, 𝒰, constants)
 
-Compute all P3 process rates (Phase 1 and Phase 2).
+Compute all P3 process rates (Phase 1 and Phase 2) from a microphysical state.
+
+This is the gridless version that accepts a `P3MicrophysicalState` directly,
+suitable for use in GPU kernels where grid indexing is handled externally.
 
 # Arguments
-- `i, j, k`: Grid indices
-- `grid`: Computational grid
 - `p3`: P3 microphysics scheme
-- `μ`: Microphysical fields (prognostic and diagnostic)
 - `ρ`: Air density [kg/m³]
+- `ℳ`: P3MicrophysicalState containing all mixing ratios
 - `𝒰`: Thermodynamic state
 - `constants`: Thermodynamic constants
 
 # Returns
 - `P3ProcessRates` containing all computed rates
 """
-@inline function compute_p3_process_rates(i, j, k, grid, p3, μ, ρ, 𝒰, constants)
-    FT = eltype(grid)
+@inline function compute_p3_process_rates(p3, ρ, ℳ, 𝒰, constants)
+    FT = typeof(ρ)
     prp = p3.process_rates
     T₀ = prp.freezing_temperature
 
-    # Extract fields (density-weighted → specific)
-    qᶜˡ = @inbounds μ.ρqᶜˡ[i, j, k] / ρ
-    qʳ = @inbounds μ.ρqʳ[i, j, k] / ρ
-    nʳ = @inbounds μ.ρnʳ[i, j, k] / ρ
-    qⁱ = @inbounds μ.ρqⁱ[i, j, k] / ρ
-    nⁱ = @inbounds μ.ρnⁱ[i, j, k] / ρ
-    qᶠ = @inbounds μ.ρqᶠ[i, j, k] / ρ
-    bᶠ = @inbounds μ.ρbᶠ[i, j, k] / ρ
-    qʷⁱ = @inbounds μ.ρqʷⁱ[i, j, k] / ρ
+    # Extract from microphysical state (already specific, not density-weighted)
+    qᶜˡ = ℳ.qᶜˡ
+    qʳ = ℳ.qʳ
+    nʳ = ℳ.nʳ
+    qⁱ = ℳ.qⁱ
+    nⁱ = ℳ.nⁱ
+    qᶠ = ℳ.qᶠ
+    bᶠ = ℳ.bᶠ
+    qʷⁱ = ℳ.qʷⁱ
 
     # Rime properties
     Fᶠ = safe_divide(qᶠ, qⁱ, zero(FT))
@@ -1368,17 +1438,9 @@ Compute all P3 process rates (Phase 1 and Phase 2).
     T = temperature(𝒰, constants)
     qᵛ = 𝒰.moisture_mass_fractions.vapor
 
-    # Saturation vapor mixing ratios (simplified Clausius-Clapeyron)
-    # TODO: Replace with proper thermodynamic interface
-    eₛ_liquid = FT(611.2) * exp(FT(17.67) * (T - T₀) / (T - FT(29.65)))
-    eₛ_ice = FT(611.2) * exp(FT(21.87) * (T - T₀) / (T - FT(7.66)))
-
-    Rᵈ = FT(287.0)
-    Rᵛ = FT(461.5)
-    ε = Rᵈ / Rᵛ
-    p = ρ * Rᵈ * T
-    qᵛ⁺ˡ = ε * eₛ_liquid / (p - (1 - ε) * eₛ_liquid)
-    qᵛ⁺ⁱ = ε * eₛ_ice / (p - (1 - ε) * eₛ_ice)
+    # Saturation vapor mixing ratios using Breeze thermodynamics
+    qᵛ⁺ˡ = saturation_specific_humidity(T, ρ, constants, PlanarLiquidSurface())
+    qᵛ⁺ⁱ = saturation_specific_humidity(T, ρ, constants, PlanarIceSurface())
 
     # Cloud droplet number concentration
     Nᶜ = p3.cloud.number_concentration
@@ -1395,8 +1457,13 @@ Compute all P3 process rates (Phase 1 and Phase 2).
     # Phase 1: Ice deposition/sublimation and melting
     # =========================================================================
     dep = ice_deposition_rate(p3, qⁱ, qᵛ, qᵛ⁺ⁱ)
-    melt = ice_melting_rate(p3, qⁱ, T)
-    melt_n = ice_melting_number_rate(qⁱ, nⁱ, melt)
+
+    # Partitioned melting: partial stays on ice, complete goes to rain
+    melt_rates = ice_melting_rates(p3, qⁱ, nⁱ, qʷⁱ, T, qᵛ, qᵛ⁺ˡ, Fᶠ, ρᶠ)
+    partial_melt = melt_rates.partial_melting
+    complete_melt = melt_rates.complete_melting
+    total_melt = partial_melt + complete_melt
+    melt_n = ice_melting_number_rate(qⁱ, nⁱ, total_melt)
 
     # =========================================================================
     # Phase 2: Ice aggregation
@@ -1439,7 +1506,7 @@ Compute all P3 process rates (Phase 1 and Phase 2).
         # Phase 1: Rain
         autoconv, accr, rain_evap, rain_self,
         # Phase 1: Ice
-        dep, melt, melt_n,
+        dep, partial_melt, complete_melt, melt_n,
         # Phase 2: Aggregation
         agg,
         # Phase 2: Riming
@@ -1487,8 +1554,8 @@ Compute rain mass tendency from P3 process rates.
 Rain gains from:
 - Autoconversion (Phase 1)
 - Accretion (Phase 1)
-- Melting (Phase 1)
-- Shedding (Phase 2)
+- Complete melting (Phase 1) - meltwater that sheds from ice
+- Shedding (Phase 2) - liquid coating shed from ice
 
 Rain loses from:
 - Evaporation (Phase 1)
@@ -1496,9 +1563,10 @@ Rain loses from:
 - Immersion freezing (Phase 2)
 """
 @inline function tendency_ρqʳ(rates::P3ProcessRates, ρ)
-    # Phase 1: gains from autoconv, accr, melt; loses from evap
+    # Phase 1: gains from autoconv, accr, complete_melt; loses from evap
     # Phase 2: gains from shedding; loses from riming and freezing
-    gain = rates.autoconversion + rates.accretion + rates.melting + rates.shedding
+    # Note: partial_melting stays on ice as liquid coating, only complete_melting goes to rain
+    gain = rates.autoconversion + rates.accretion + rates.complete_melting + rates.shedding
     loss = -rates.rain_evaporation + rates.rain_riming + rates.rain_freezing_mass  # evap is negative
     return ρ * (gain - loss)
 end
@@ -1510,7 +1578,7 @@ Compute rain number tendency from P3 process rates.
 
 Rain number gains from:
 - Autoconversion (Phase 1)
-- Melting (Phase 1)
+- Complete melting (Phase 1) - new rain drops from melted ice
 - Shedding (Phase 2)
 
 Rain number loses from:
@@ -1525,8 +1593,9 @@ Rain number loses from:
     # Phase 1: New drops from autoconversion
     n_from_autoconv = rates.autoconversion / m_rain_init
 
-    # Phase 1: New drops from melting (conserve number)
-    n_from_melt = safe_divide(nⁱ * rates.melting, qⁱ, zero(FT))
+    # Phase 1: New drops from complete melting (conserve number)
+    # Only complete_melting produces new rain drops; partial_melting stays on ice
+    n_from_melt = safe_divide(nⁱ * rates.complete_melting, qⁱ, zero(FT))
 
     # Phase 1: Self-collection reduces number (already negative)
     # Phase 2: Shedding creates new drops
@@ -1553,15 +1622,17 @@ Ice gains from:
 - Rime splintering (Phase 2)
 
 Ice loses from:
-- Melting (Phase 1)
+- Partial melting (Phase 1) - becomes liquid coating
+- Complete melting (Phase 1) - sheds to rain
 """
 @inline function tendency_ρqⁱ(rates::P3ProcessRates, ρ)
-    # Phase 1: deposition, melting
+    # Phase 1: deposition, melting (both partial and complete reduce ice mass)
     # Phase 2: riming (cloud + rain), refreezing, nucleation, freezing, splintering
     gain = rates.deposition + rates.cloud_riming + rates.rain_riming + rates.refreezing +
            rates.nucleation_mass + rates.cloud_freezing_mass + rates.rain_freezing_mass +
            rates.splintering_mass
-    loss = rates.melting
+    # Total melting reduces ice mass (partial stays as liquid coating, complete sheds)
+    loss = rates.partial_melting + rates.complete_melting
     return ρ * (gain - loss)
 end
 
@@ -1637,7 +1708,7 @@ Rime volume changes with rime mass: ∂bᶠ/∂t = ∂qᶠ/∂t / ρ_rime
 end
 
 """
-    tendency_ρzⁱ(rates, μ, λ)
+    tendency_ρzⁱ(rates, ρ, qⁱ, nⁱ, zⁱ)
 
 Compute ice sixth moment tendency from P3 process rates.
 
@@ -1648,8 +1719,9 @@ The sixth moment (reflectivity) changes with:
 - Nucleation (growth) (Phase 2)
 - Aggregation (redistribution) (Phase 2)
 
-For P3 3-moment, Z tendencies are computed more accurately using
-size distribution integrals. This simplified version uses proportional scaling.
+This simplified version uses proportional scaling (Z/q ratio).
+For more accurate 3-moment treatment, use the version that accepts
+the p3 scheme to access tabulated sixth moment integrals.
 """
 @inline function tendency_ρzⁱ(rates::P3ProcessRates, ρ, qⁱ, nⁱ, zⁱ)
     FT = typeof(ρ)
@@ -1659,9 +1731,93 @@ size distribution integrals. This simplified version uses proportional scaling.
     ratio = safe_divide(zⁱ, qⁱ, zero(FT))
 
     # Net mass change for ice
-    mass_change = rates.deposition - rates.melting +
+    # Total melting (partial + complete) reduces ice mass
+    total_melting = rates.partial_melting + rates.complete_melting
+    mass_change = rates.deposition - total_melting +
                   rates.cloud_riming + rates.rain_riming + rates.refreezing
 
+    return ρ * ratio * mass_change
+end
+
+"""
+    tendency_ρzⁱ(rates, ρ, qⁱ, nⁱ, zⁱ, Fᶠ, Fˡ, p3)
+
+Compute ice sixth moment tendency using tabulated integrals when available.
+
+Following Milbrandt et al. (2021, 2024), the sixth moment tendency is
+computed by integrating the contribution of each process over the
+size distribution, properly accounting for how different processes
+affect particles of different sizes.
+
+When tabulated integrals are available via `tabulate(p3, arch)`, uses
+pre-computed lookup tables. Otherwise, falls back to proportional scaling.
+
+# Arguments
+- `rates`: P3ProcessRates containing mass tendencies
+- `ρ`: Air density [kg/m³]
+- `qⁱ`: Ice mass mixing ratio [kg/kg]
+- `nⁱ`: Ice number concentration [1/kg]
+- `zⁱ`: Ice sixth moment [m⁶/kg]
+- `Fᶠ`: Rime fraction [-]
+- `Fˡ`: Liquid fraction [-]
+- `p3`: P3 microphysics scheme (for accessing tabulated integrals)
+
+# Returns
+- Tendency of density-weighted sixth moment [kg/m³ × m⁶/kg / s]
+"""
+@inline function tendency_ρzⁱ(rates::P3ProcessRates, ρ, qⁱ, nⁱ, zⁱ, Fᶠ, Fˡ, p3)
+    FT = typeof(ρ)
+
+    # Mean ice particle mass for table lookup
+    m̄ = safe_divide(qⁱ, nⁱ, FT(1e-20))
+    log_mean_mass = log10(max(m̄, FT(1e-20)))
+
+    # Try to use tabulated sixth moment integrals
+    z_tendency = _tabulated_z_tendency(
+        p3.ice.sixth_moment, log_mean_mass, Fᶠ, Fˡ, rates, ρ, qⁱ, nⁱ, zⁱ
+    )
+
+    return z_tendency
+end
+
+# Tabulated version: use TabulatedFunction3D lookups for each process
+@inline function _tabulated_z_tendency(sixth::IceSixthMoment{<:TabulatedFunction3D}, log_m, Fᶠ, Fˡ, rates, ρ, qⁱ, nⁱ, zⁱ)
+    FT = typeof(ρ)
+
+    # Look up normalized Z contribution for each process
+    z_dep = sixth.deposition(log_m, Fᶠ, Fˡ)
+    z_melt = sixth.melt1(log_m, Fᶠ, Fˡ) + sixth.melt2(log_m, Fᶠ, Fˡ)
+    z_rime = sixth.rime(log_m, Fᶠ, Fˡ)
+    z_agg = sixth.aggregation(log_m, Fᶠ, Fˡ)
+    z_shed = sixth.shedding(log_m, Fᶠ, Fˡ)
+    z_sub = sixth.sublimation(log_m, Fᶠ, Fˡ) + sixth.sublimation1(log_m, Fᶠ, Fˡ)
+
+    # Total melting
+    total_melting = rates.partial_melting + rates.complete_melting
+
+    # Compute Z tendency from tabulated integrals
+    # Each integral gives the normalized Z rate per unit mass rate
+    z_rate = z_dep * rates.deposition +
+             z_rime * (rates.cloud_riming + rates.rain_riming) +
+             z_agg * rates.aggregation * safe_divide(qⁱ, nⁱ, FT(1e-12)) +  # agg is number rate
+             z_shed * rates.shedding -
+             z_melt * total_melting
+
+    # Sublimation (when deposition is negative)
+    is_sublimating = rates.deposition < 0
+    z_rate = z_rate + ifelse(is_sublimating, z_sub * abs(rates.deposition), zero(FT))
+
+    return ρ * z_rate
+end
+
+# Fallback: use proportional scaling when integrals are not tabulated
+@inline function _tabulated_z_tendency(::Any, log_m, Fᶠ, Fˡ, rates, ρ, qⁱ, nⁱ, zⁱ)
+    # Fall back to the simple proportional scaling
+    FT = typeof(ρ)
+    ratio = safe_divide(zⁱ, qⁱ, zero(FT))
+    total_melting = rates.partial_melting + rates.complete_melting
+    mass_change = rates.deposition - total_melting +
+                  rates.cloud_riming + rates.rain_riming + rates.refreezing
     return ρ * ratio * mass_change
 end
 
@@ -1671,16 +1827,37 @@ end
 Compute liquid on ice tendency from P3 process rates.
 
 Liquid on ice:
-- Gains from partial melting above freezing (currently in melting rate)
-- Loses from shedding (Phase 2)
-- Loses from refreezing (Phase 2)
+- Gains from partial melting above freezing (meltwater stays on ice)
+- Loses from shedding (Phase 2) - liquid sheds to rain
+- Loses from refreezing (Phase 2) - liquid refreezes to ice
+
+Following Milbrandt et al. (2025), partial melting adds to the liquid coating
+while complete melting sheds directly to rain.
 """
 @inline function tendency_ρqʷⁱ(rates::P3ProcessRates, ρ)
-    # Phase 2: loses from shedding and refreezing
-    # Gains: In full P3, partial melting above freezing adds to qʷⁱ
-    # For now, melting goes directly to rain; this is a placeholder
-    return -ρ * (rates.shedding + rates.refreezing)
+    # Gains from partial melting (meltwater stays on ice as liquid coating)
+    # Loses from shedding (liquid sheds to rain) and refreezing (liquid refreezes)
+    gain = rates.partial_melting
+    loss = rates.shedding + rates.refreezing
+    return ρ * (gain - loss)
 end
+
+#####
+##### Fallback methods for Nothing rates
+#####
+##### These are safety fallbacks that return zero tendency when rates
+##### have not been computed (e.g., during incremental development).
+#####
+
+@inline tendency_ρqᶜˡ(::Nothing, ρ) = zero(ρ)
+@inline tendency_ρqʳ(::Nothing, ρ) = zero(ρ)
+@inline tendency_ρnʳ(::Nothing, ρ, nⁱ, qⁱ; kwargs...) = zero(ρ)
+@inline tendency_ρqⁱ(::Nothing, ρ) = zero(ρ)
+@inline tendency_ρnⁱ(::Nothing, ρ) = zero(ρ)
+@inline tendency_ρqᶠ(::Nothing, ρ, Fᶠ) = zero(ρ)
+@inline tendency_ρbᶠ(::Nothing, ρ, Fᶠ, ρᶠ) = zero(ρ)
+@inline tendency_ρzⁱ(::Nothing, ρ, qⁱ, nⁱ, zⁱ) = zero(ρ)
+@inline tendency_ρqʷⁱ(::Nothing, ρ) = zero(ρ)
 
 #####
 ##### Phase 3: Terminal velocities
@@ -1766,11 +1943,13 @@ Compute number-weighted terminal velocity for rain.
 end
 
 """
-    ice_terminal_velocity_mass_weighted(p3, qⁱ, nⁱ, Fᶠ, ρᶠ, ρ)
+    ice_terminal_velocity_mass_weighted(p3, qⁱ, nⁱ, Fᶠ, ρᶠ, ρ; Fˡ=zero(typeof(qⁱ)))
 
 Compute mass-weighted terminal velocity for ice.
 
-Uses regime-dependent fall speeds following [Mitchell (1996)](@citet Mitchell1996)
+When tabulated integrals are available (via `tabulate(p3, arch)`), uses
+pre-computed lookup tables for accurate size-distribution integration.
+Otherwise, uses regime-dependent fall speeds following [Mitchell (1996)](@citet Mitchell1996)
 and [Morrison and Milbrandt (2015)](@citet Morrison2015parameterization).
 
 # Arguments
@@ -1780,21 +1959,53 @@ and [Morrison and Milbrandt (2015)](@citet Morrison2015parameterization).
 - `Fᶠ`: Rime mass fraction (qᶠ/qⁱ)
 - `ρᶠ`: Rime density [kg/m³]
 - `ρ`: Air density [kg/m³]
+- `Fˡ`: Liquid fraction (optional, for tabulated lookup)
 
 # Returns
 - Mass-weighted fall speed [m/s] (positive downward)
 """
-@inline function ice_terminal_velocity_mass_weighted(p3, qⁱ, nⁱ, Fᶠ, ρᶠ, ρ)
+@inline function ice_terminal_velocity_mass_weighted(p3, qⁱ, nⁱ, Fᶠ, ρᶠ, ρ; Fˡ=zero(typeof(qⁱ)))
     FT = typeof(qⁱ)
     prp = p3.process_rates
+    fs = p3.ice.fall_speed
 
-    ρ₀ = prp.reference_air_density
+    ρ₀ = fs.reference_air_density
+    v_min = prp.ice_velocity_min
+    v_max = prp.ice_velocity_max
+
+    qⁱ_eff = clamp_positive(qⁱ)
+    nⁱ_eff = max(nⁱ, FT(1))
+
+    # Mean ice particle mass
+    m̄ = qⁱ_eff / nⁱ_eff
+
+    # Density correction factor (applied to all fall speeds)
+    ρ_correction = sqrt(ρ₀ / ρ)
+
+    # Try to use tabulated fall speed if available
+    vₜ = _tabulated_mass_weighted_fall_speed(fs.mass_weighted, m̄, Fᶠ, Fˡ, ρ_correction, p3, prp)
+
+    return clamp(vₜ, v_min, v_max)
+end
+
+# Tabulated version: use TabulatedFunction3D lookup
+@inline function _tabulated_mass_weighted_fall_speed(table::TabulatedFunction3D, m̄, Fᶠ, Fˡ, ρ_correction, p3, prp)
+    FT = typeof(m̄)
+    # Compute log mean mass (guarding against log(0))
+    log_mean_mass = log10(max(m̄, FT(1e-20)))
+    # Look up normalized velocity from table
+    vₜ_norm = table(log_mean_mass, Fᶠ, Fˡ)
+    return vₜ_norm * ρ_correction
+end
+
+# Fallback: use analytical approximation when not tabulated
+@inline function _tabulated_mass_weighted_fall_speed(::Any, m̄, Fᶠ, Fˡ, ρ_correction, p3, prp)
+    FT = typeof(m̄)
+
     ρ_eff_unrimed = prp.ice_effective_density_unrimed
     D_threshold = prp.ice_diameter_threshold
     D_min = prp.ice_diameter_min
     D_max = prp.ice_diameter_max
-    v_min = prp.ice_velocity_min
-    v_max = prp.ice_velocity_max
     ρᶠ_min = prp.minimum_rime_density
     ρᶠ_max = prp.maximum_rime_density
 
@@ -1804,15 +2015,9 @@ and [Morrison and Milbrandt (2015)](@citet Morrison2015parameterization).
     b_rimed = prp.ice_fall_speed_exponent_rimed
     c_small = prp.ice_small_particle_coefficient
 
-    qⁱ_eff = clamp_positive(qⁱ)
-    nⁱ_eff = max(nⁱ, FT(1))
-
-    # Mean ice particle mass
-    m̄ = qⁱ_eff / nⁱ_eff
-
     # Effective density depends on riming
     Fᶠ_clamped = clamp(Fᶠ, FT(0), FT(1))
-    ρᶠ_clamped = clamp(ρᶠ, ρᶠ_min, ρᶠ_max)
+    ρᶠ_clamped = clamp(prp.ice_effective_density_unrimed, ρᶠ_min, ρᶠ_max)  # Use parameter value
     ρ_eff = ρ_eff_unrimed + Fᶠ_clamped * (ρᶠ_clamped - ρ_eff_unrimed)
 
     # Effective diameter
@@ -1823,9 +2028,6 @@ and [Morrison and Milbrandt (2015)](@citet Morrison2015parameterization).
     a = a_unrimed + Fᶠ_clamped * (a_rimed - a_unrimed)
     b = b_unrimed + Fᶠ_clamped * (b_rimed - b_unrimed)
 
-    # Density correction
-    ρ_correction = sqrt(ρ₀ / ρ)
-
     # Terminal velocity (large particle regime)
     vₜ_large = a * D_clamped^b * ρ_correction
 
@@ -1833,9 +2035,7 @@ and [Morrison and Milbrandt (2015)](@citet Morrison2015parameterization).
     vₜ_small = c_small * D_clamped^2 * ρ_correction
 
     # Blend between regimes
-    vₜ = ifelse(D_clamped < D_threshold, vₜ_small, vₜ_large)
-
-    return clamp(vₜ, v_min, v_max)
+    return ifelse(D_clamped < D_threshold, vₜ_small, vₜ_large)
 end
 
 """
@@ -1854,20 +2054,48 @@ Compute number-weighted terminal velocity for ice.
 # Returns
 - Number-weighted fall speed [m/s] (positive downward)
 """
-@inline function ice_terminal_velocity_number_weighted(p3, qⁱ, nⁱ, Fᶠ, ρᶠ, ρ)
+@inline function ice_terminal_velocity_number_weighted(p3, qⁱ, nⁱ, Fᶠ, ρᶠ, ρ; Fˡ=zero(typeof(qⁱ)))
+    FT = typeof(qⁱ)
     prp = p3.process_rates
-    ratio = prp.velocity_ratio_number_to_mass
-    vₘ = ice_terminal_velocity_mass_weighted(p3, qⁱ, nⁱ, Fᶠ, ρᶠ, ρ)
+    fs = p3.ice.fall_speed
 
+    ρ₀ = fs.reference_air_density
+    v_min = prp.ice_velocity_min
+    v_max = prp.ice_velocity_max
+
+    qⁱ_eff = clamp_positive(qⁱ)
+    nⁱ_eff = max(nⁱ, FT(1))
+    m̄ = qⁱ_eff / nⁱ_eff
+    ρ_correction = sqrt(ρ₀ / ρ)
+
+    # Try to use tabulated fall speed if available
+    vₜ = _tabulated_number_weighted_fall_speed(fs.number_weighted, m̄, Fᶠ, Fˡ, ρ_correction, p3, prp)
+
+    return clamp(vₜ, v_min, v_max)
+end
+
+# Tabulated version: use TabulatedFunction3D lookup
+@inline function _tabulated_number_weighted_fall_speed(table::TabulatedFunction3D, m̄, Fᶠ, Fˡ, ρ_correction, p3, prp)
+    FT = typeof(m̄)
+    log_mean_mass = log10(max(m̄, FT(1e-20)))
+    vₜ_norm = table(log_mean_mass, Fᶠ, Fˡ)
+    return vₜ_norm * ρ_correction
+end
+
+# Fallback: use ratio to mass-weighted velocity
+@inline function _tabulated_number_weighted_fall_speed(::Any, m̄, Fᶠ, Fˡ, ρ_correction, p3, prp)
+    ratio = prp.velocity_ratio_number_to_mass
+    vₘ = _tabulated_mass_weighted_fall_speed(nothing, m̄, Fᶠ, Fˡ, ρ_correction, p3, prp)
     return ratio * vₘ
 end
 
 """
-    ice_terminal_velocity_reflectivity_weighted(p3, qⁱ, nⁱ, Fᶠ, ρᶠ, ρ)
+    ice_terminal_velocity_reflectivity_weighted(p3, qⁱ, nⁱ, Fᶠ, ρᶠ, ρ; Fˡ=0)
 
 Compute reflectivity-weighted (Z-weighted) terminal velocity for ice.
 
 Needed for the sixth moment (reflectivity) sedimentation in 3-moment P3.
+When tabulated integrals are available, uses pre-computed lookup tables.
 
 # Arguments
 - `p3`: P3 microphysics scheme (provides parameters)
@@ -1876,14 +2104,42 @@ Needed for the sixth moment (reflectivity) sedimentation in 3-moment P3.
 - `Fᶠ`: Rime mass fraction (qᶠ/qⁱ)
 - `ρᶠ`: Rime density [kg/m³]
 - `ρ`: Air density [kg/m³]
+- `Fˡ`: Liquid fraction (optional, for tabulated lookup)
 
 # Returns
 - Reflectivity-weighted fall speed [m/s] (positive downward)
 """
-@inline function ice_terminal_velocity_reflectivity_weighted(p3, qⁱ, nⁱ, Fᶠ, ρᶠ, ρ)
+@inline function ice_terminal_velocity_reflectivity_weighted(p3, qⁱ, nⁱ, Fᶠ, ρᶠ, ρ; Fˡ=zero(typeof(qⁱ)))
+    FT = typeof(qⁱ)
     prp = p3.process_rates
-    ratio = prp.velocity_ratio_reflectivity_to_mass
-    vₘ = ice_terminal_velocity_mass_weighted(p3, qⁱ, nⁱ, Fᶠ, ρᶠ, ρ)
+    fs = p3.ice.fall_speed
 
+    ρ₀ = fs.reference_air_density
+    v_min = prp.ice_velocity_min
+    v_max = prp.ice_velocity_max
+
+    qⁱ_eff = clamp_positive(qⁱ)
+    nⁱ_eff = max(nⁱ, FT(1))
+    m̄ = qⁱ_eff / nⁱ_eff
+    ρ_correction = sqrt(ρ₀ / ρ)
+
+    # Try to use tabulated fall speed if available
+    vₜ = _tabulated_reflectivity_weighted_fall_speed(fs.reflectivity_weighted, m̄, Fᶠ, Fˡ, ρ_correction, p3, prp)
+
+    return clamp(vₜ, v_min, v_max)
+end
+
+# Tabulated version: use TabulatedFunction3D lookup
+@inline function _tabulated_reflectivity_weighted_fall_speed(table::TabulatedFunction3D, m̄, Fᶠ, Fˡ, ρ_correction, p3, prp)
+    FT = typeof(m̄)
+    log_mean_mass = log10(max(m̄, FT(1e-20)))
+    vₜ_norm = table(log_mean_mass, Fᶠ, Fˡ)
+    return vₜ_norm * ρ_correction
+end
+
+# Fallback: use ratio to mass-weighted velocity
+@inline function _tabulated_reflectivity_weighted_fall_speed(::Any, m̄, Fᶠ, Fˡ, ρ_correction, p3, prp)
+    ratio = prp.velocity_ratio_reflectivity_to_mass
+    vₘ = _tabulated_mass_weighted_fall_speed(nothing, m̄, Fᶠ, Fˡ, ρ_correction, p3, prp)
     return ratio * vₘ
 end

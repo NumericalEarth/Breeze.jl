@@ -417,10 +417,8 @@ end
 @inline function p3_rates_and_properties(p3, ρ, ℳ::P3MicrophysicalState, 𝒰, constants)
     FT = typeof(ρ)
 
-    # TODO: Compute all process rates from ℳ and 𝒰
-    # For now, return placeholder rates structure
-    # rates = compute_p3_process_rates(p3, ρ, ℳ, 𝒰, constants)
-    rates = nothing  # Placeholder until process rates are fully implemented
+    # Compute all process rates from microphysical state ℳ and thermodynamic state 𝒰
+    rates = compute_p3_process_rates(p3, ρ, ℳ, 𝒰, constants)
 
     Fᶠ = safe_divide(ℳ.qᶠ, ℳ.qⁱ, zero(FT))
     ρᶠ = safe_divide(ℳ.qᶠ, ℳ.bᶠ, FT(400))

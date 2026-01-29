@@ -58,6 +58,11 @@ export
     P3MicrophysicalState,
     ProcessRateParameters,
 
+    # Multi-category ice
+    MultiIceCategory,
+    multi_category_ice_field_names,
+    inter_category_collection,
+
     # Ice properties
     IceProperties,
     IceFallSpeed,
@@ -235,6 +240,12 @@ include("lambda_solver.jl")
 #####
 
 include("process_rates.jl")
+
+#####
+##### Multi-ice category support
+#####
+
+include("multi_ice_category.jl")
 
 #####
 ##### AtmosphereModel interface (must be last - depends on all types)
