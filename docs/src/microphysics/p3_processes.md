@@ -75,6 +75,14 @@ concentration.
 The threshold diameter for autoconversion (default 25 μm) sets the boundary between
 cloud and rain.
 
+!!! note "Alternative Autoconversion Schemes"
+    P3 supports multiple warm-rain autoconversion/accretion parameterizations:
+    - **Khairoutdinov & Kogan (2000)**: Default scheme (shown above)
+    - **Seifert & Beheng (2001)**: Alternative with droplet spectral shape dependence
+    - **Kogan (2013)**: Updated formulation with different exponents
+
+    The scheme is selected via the `autoAccr_param` parameter in the Fortran code.
+
 ### Accretion
 
 Rain collects cloud droplets ([Morrison2015parameterization](@citet) Eq. 46):
@@ -204,7 +212,7 @@ Ice particles collect cloud droplets
 \frac{dq^f}{dt} = E_{ic} q^{cl} \int_0^∞ A(D) V(D) N'(D)\, dD
 ```
 
-where ``E_{ic}`` is the ice-cloud collection efficiency (default 0.1).
+where ``E_{ic}`` is the ice-cloud collection efficiency (default 0.5).
 
 Simultaneously, the rime volume increases:
 
@@ -251,8 +259,12 @@ Ice particles aggregate when they collide
 
 The factor of 1/2 avoids double-counting. Mass is conserved; only number decreases.
 
-The aggregation efficiency ``E_{agg}`` depends on temperature, with maximum efficiency
-near 0°C where ice surfaces are "sticky".
+The aggregation efficiency ``E_{agg}`` depends on temperature:
+- ``E_{agg} = 0.001`` for ``T < 253.15`` K (−20°C)
+- Linear ramp from 0.001 to 0.3 between 253.15 K and 268.15 K
+- ``E_{agg} = 0.3`` for ``T > 268.15`` K (−5°C)
+
+The maximum efficiency occurs near −5°C where ice surfaces become "sticky".
 
 ## Phase Change Processes
 
@@ -339,7 +351,7 @@ tracking ``V_z`` allows proper size sorting of precipitation particles.
 | Process | Affects | Key Parameter | Reference |
 |---------|---------|---------------|-----------|
 | Condensation | ``q^{cl}`` | Saturation timescale | [Rogers & Yau (1989)](@cite rogers1989short) |
-| Autoconversion | ``q^{cl} \to q^r`` | K-K coefficients | [KhairoutdinovKogan2000](@cite) |
+| Autoconversion | ``q^{cl} \to q^r`` | Scheme-dependent | [KhairoutdinovKogan2000](@cite), [SeifertBeheng2006](@cite) |
 | Accretion | ``q^{cl} \to q^r`` | Collection efficiency | [Morrison2015parameterization](@cite) |
 | Rain evaporation | ``q^r \to q_v`` | Ventilation | [Morrison2015parameterization](@cite) |
 | Heterogeneous nucleation | ``N^i`` | INP concentration | [Morrison2015parameterization](@cite) |
@@ -361,8 +373,8 @@ Many processes have strong temperature dependence:
 ```
 T < 235 K:  Homogeneous freezing (cloud → ice)
 235-268 K:  Heterogeneous nucleation, deposition growth
-265-273 K:  Hallett-Mossop ice multiplication
-268-273 K:  Maximum aggregation efficiency
+265-270 K:  Hallett-Mossop ice multiplication (-8 to -3°C)
+T > 268 K:  Maximum aggregation efficiency (E_agg = 0.3)
 T > 273 K:  Melting, shedding
 ```
 
