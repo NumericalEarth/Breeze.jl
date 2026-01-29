@@ -9,7 +9,6 @@
 export tabulate, TabulationParameters, P3IntegralEvaluator
 
 using Adapt: Adapt
-using KernelAbstractions: @kernel, @index
 using Oceananigans.Architectures: CPU, device, on_architecture
 
 #####
