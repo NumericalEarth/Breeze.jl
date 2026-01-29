@@ -718,8 +718,8 @@ const r_nuc = 5e-11  # 0.05 nm
     ΔN_act = min(ΔN_act, Nᵃ⁺)
 
     # Convert to rate [1/m³/s]
-    # Zero activation if: no updraft (w ≤ 0) or subsaturated (S ≤ 0)
-    is_active = (w⁺ > 0) & (S > 0)
+    # Zero activation if subsaturated (S ≤ 0)
+    is_active = S > 0
     dNᶜˡ_act = ifelse(is_active, ΔN_act / Δt, zero(ρ))
 
     return dNᶜˡ_act
