@@ -353,7 +353,7 @@ end
 # ## Simulation Setup
 
 Δt = 10.0  # Initial timestep (seconds)
-stop_time = 12hours  # 12-hour simulation at paper resolution
+stop_time = 48hours  # 2-day overnight run at paper resolution
 
 if get(ENV, "CI", "false") == "true"
     stop_time = 30minutes
@@ -382,7 +382,7 @@ function progress(sim)
     return nothing
 end
 
-add_callback!(simulation, progress, IterationInterval(100))
+add_callback!(simulation, progress, IterationInterval(500))
 
 # ### Output writers
 
@@ -390,7 +390,7 @@ add_callback!(simulation, progress, IterationInterval(100))
 outputs_3d = (; u, v, w, θ)
 simulation.output_writers[:fields] = JLD2Writer(model, outputs_3d;
                                                 filename = "tropical_cyclone_world_fields.jld2",
-                                                schedule = TimeInterval(1hour),
+                                                schedule = TimeInterval(6hours),
                                                 overwrite_existing = true)
 
 # Surface fields at higher frequency for TC tracking
@@ -401,7 +401,7 @@ surface_outputs = (u_surface = view(u, :, :, surface_k),
 
 simulation.output_writers[:surface] = JLD2Writer(model, surface_outputs;
                                                  filename = "tropical_cyclone_world_surface.jld2",
-                                                 schedule = TimeInterval(10minutes),
+                                                 schedule = TimeInterval(30minutes),
                                                  overwrite_existing = true)
 
 # Horizontally-averaged profiles for comparing with paper Figure 3
@@ -411,12 +411,12 @@ avg_outputs = (θ_avg = Average(θ, dims=(1, 2)),
 
 simulation.output_writers[:profiles] = JLD2Writer(model, avg_outputs;
                                                   filename = "tropical_cyclone_world_averages.jld2",
-                                                  schedule = TimeInterval(15minutes),
+                                                  schedule = TimeInterval(1hour),
                                                   overwrite_existing = true)
 
 # Checkpointer for restart capability
 simulation.output_writers[:checkpointer] = Checkpointer(model;
-                                                        schedule = TimeInterval(30minutes),
+                                                        schedule = TimeInterval(6hours),
                                                         prefix = "tropical_cyclone_checkpoint",
                                                         overwrite_existing = true)
 

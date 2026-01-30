@@ -39,3 +39,6 @@ Manifest.toml
 *.DS_Store
 *.vscode
 *.code-workspace
+
+# Paper reference (kept locally only)
+examples/tropical_cyclone_world.md
