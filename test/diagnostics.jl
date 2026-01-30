@@ -7,7 +7,7 @@ using GPUArraysCore: @allowscalar
 
 @testset "Potential temperature diagnostics [$(FT)]" for FT in test_float_types()
     Oceananigans.defaults.FloatType = FT
-    grid = RectilinearGrid(default_arch; size=(2, 2, 8), extent=(100, 100, 1000))
+    grid = RectilinearGrid(default_arch; size=(2, 2, 8), x=(0, 100), y=(0, 100), z=(0, 1000))
     model = AtmosphereModel(grid)
     set!(model, θ=300, qᵗ=0.01)
 
@@ -80,7 +80,7 @@ end
 
 @testset "Static energy diagnostics [$(FT)]" for FT in test_float_types()
     Oceananigans.defaults.FloatType = FT
-    grid = RectilinearGrid(default_arch; size=(2, 2, 8), extent=(100, 100, 1000))
+    grid = RectilinearGrid(default_arch; size=(2, 2, 8), x=(0, 100), y=(0, 100), z=(0, 1000))
     model = AtmosphereModel(grid)
     set!(model, θ=300, qᵗ=0.01)
 
@@ -100,7 +100,7 @@ end
 
 @testset "Relative humidity diagnostics [$(FT)]" for FT in test_float_types()
     Oceananigans.defaults.FloatType = FT
-    grid = RectilinearGrid(default_arch; size=(2, 2, 8), extent=(100, 100, 1000))
+    grid = RectilinearGrid(default_arch; size=(2, 2, 8), x=(0, 100), y=(0, 100), z=(0, 1000))
     microphysics = SaturationAdjustment()
     model = AtmosphereModel(grid; microphysics)
 

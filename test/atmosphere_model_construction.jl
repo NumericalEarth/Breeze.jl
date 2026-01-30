@@ -7,7 +7,7 @@ using Oceananigans.Operators: ℑzᵃᵃᶠ
 using Test
 
 function run_nan_checker_test(arch; erroring)
-    grid = RectilinearGrid(arch, size=(4, 2, 1), extent=(1, 1, 1))
+    grid = RectilinearGrid(arch; size=(4, 2, 1), x=(0, 1), y=(0, 1), z=(0, 1))
     model = AtmosphereModel(grid)
     simulation = Simulation(model, Δt=1, stop_iteration=2)
     @allowscalar model.momentum.ρu[1, 1, 1] = NaN
@@ -48,12 +48,12 @@ end
         @testset let p₀ = p₀, θ₀ = θ₀, formulation = formulation
             reference_state = ReferenceState(grid, constants, surface_pressure=p₀, potential_temperature=θ₀)
 
-            # Check that interpolating to the first face (k=1) recovers surface values
-            # Note: surface_density correctly converts potential temperature to temperature using the Exner function
+            # Check that interpolating to the first face (k=1) approximately recovers surface values.
+            # Uses rtol=1e-4 because GradientBoundaryCondition introduces small interpolation errors.
             ρ₀ = surface_density(reference_state)
             for i = 1:Nx, j = 1:Ny
-                @test p₀ ≈ @allowscalar ℑzᵃᵃᶠ(i, j, 1, grid, reference_state.pressure)
-                @test ρ₀ ≈ @allowscalar ℑzᵃᵃᶠ(i, j, 1, grid, reference_state.density)
+                @test isapprox(p₀, @allowscalar(ℑzᵃᵃᶠ(i, j, 1, grid, reference_state.pressure)), rtol=FT(1e-4))
+                @test isapprox(ρ₀, @allowscalar(ℑzᵃᵃᶠ(i, j, 1, grid, reference_state.density)), rtol=FT(1e-4))
             end
 
             dynamics = AnelasticDynamics(reference_state)
