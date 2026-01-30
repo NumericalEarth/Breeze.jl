@@ -319,12 +319,10 @@ add_callback!(simulation, progress, IterationInterval(100))
 
 # ### Output writers
 
-filename = "tropical_cyclone_world_v2_beta$(β)_Nx$(Nx)"
-
 # Full 3D fields at lower frequency for detailed analysis
 outputs_3d = (; u, v, w, θ)
 simulation.output_writers[:fields] = JLD2Writer(model, outputs_3d;
-                                                filename = filename * "_fields.jld2",
+                                                filename = "tropical_cyclone_world_fields.jld2",
                                                 schedule = TimeInterval(1hour),
                                                 overwrite_existing = true)
 
@@ -335,7 +333,7 @@ surface_outputs = (u_surface = view(u, :, :, surface_k),
                    θ_surface = view(θ, :, :, surface_k))
 
 simulation.output_writers[:surface] = JLD2Writer(model, surface_outputs;
-                                                 filename = filename * "_surface.jld2",
+                                                 filename = "tropical_cyclone_world_surface.jld2",
                                                  schedule = TimeInterval(10minutes),
                                                  overwrite_existing = true)
 
@@ -345,7 +343,7 @@ avg_outputs = (θ_avg = Average(θ, dims=(1, 2)),
                v_avg = Average(v, dims=(1, 2)))
 
 simulation.output_writers[:profiles] = JLD2Writer(model, avg_outputs;
-                                                  filename = filename * "_profiles.jld2",
+                                                  filename = "tropical_cyclone_world_averages.jld2",
                                                   schedule = TimeInterval(30minutes),
                                                   overwrite_existing = true)
 
@@ -370,8 +368,8 @@ run!(simulation)
 if get(ENV, "CI", "false") != "true"
     @info "Creating visualizations..."
 
-    surface_file = filename * "_surface.jld2"
-    profile_file = filename * "_profiles.jld2"
+    surface_file = "tropical_cyclone_world_surface.jld2"
+    profile_file = "tropical_cyclone_world_averages.jld2"
 
     title_case = β == 0 ? "Dry" : (β == 1 ? "Moist" : "Semidry")
 
@@ -420,9 +418,8 @@ if get(ENV, "CI", "false") != "true"
         Label(fig[0, :], "$title_case Tropical Cyclone World (β = $β) — Surface Wind Speed",
               fontsize = 16, tellwidth = false)
 
-        png_file = filename * "_surface_winds.png"
-        save(png_file, fig)
-        @info "Saved surface wind snapshots to $png_file"
+        save("tropical_cyclone_world_surface_winds.png", fig) #src
+        fig
 
         # ### Figure 2: Time series of maximum wind speed
         #
@@ -440,9 +437,8 @@ if get(ENV, "CI", "false") != "true"
         lines!(ax_ts, times_hours, max_wind; linewidth = 2, color = :dodgerblue)
         scatter!(ax_ts, times_hours, max_wind; markersize = 8, color = :dodgerblue)
 
-        png_file2 = filename * "_max_wind_timeseries.png"
-        save(png_file2, fig2)
-        @info "Saved max wind time series to $png_file2"
+        save("tropical_cyclone_world_intensity.png", fig2) #src
+        fig2
 
         # ### Figure 3: Animation of surface wind speed
         #
@@ -462,11 +458,12 @@ if get(ENV, "CI", "false") != "true"
         Colorbar(fig3[1, 2], hm_anim; label = "Wind speed (m/s)")
         Label(fig3[0, :], title3, fontsize = 16, tellwidth = false)
 
-        mp4_file = filename * "_surface_winds.mp4"
-        CairoMakie.record(fig3, mp4_file, 1:Nt, framerate = 8) do nn
+        CairoMakie.record(fig3, "tropical_cyclone_world.mp4", 1:Nt, framerate = 8) do nn
             n_obs[] = nn
         end
-        @info "Saved animation to $mp4_file"
+        nothing #hide
+
+        # ![](tropical_cyclone_world.mp4)
     end
 
     # ### Figure 4: Mean profile evolution
@@ -513,9 +510,8 @@ if get(ENV, "CI", "false") != "true"
         Label(fig4[0, :], "$title_case TC (β = $β) — Mean Profile Evolution",
               fontsize = 16, tellwidth = false)
 
-        png_file4 = filename * "_profiles.png"
-        save(png_file4, fig4)
-        @info "Saved mean profiles to $png_file4"
+        save("tropical_cyclone_world_profiles.png", fig4) #src
+        fig4
     end
 end
 
