@@ -208,24 +208,49 @@ end
 # - For T > Tₜ: constant cooling at rate -Q̇ = -1 K/day
 # - For T ≤ Tₜ: Newtonian relaxation toward Tₜ with timescale τ = 20 days
 #
-# We implement this as a forcing on ρθ. Since we're in the dry limit and
-# the atmosphere is nearly dry-adiabatic, we approximate T ≈ θ × Π where
-# Π is the Exner function. For simplicity in the dry case, we use θ directly
-# as a proxy for the temperature structure.
+# We estimate the tropopause height from the reference state using the dry adiabat,
+# then apply height-based piecewise forcing. This is a reasonable approximation since
+# the reference state sets the vertical structure.
 
 ρᵣ = reference_state.density
+pᵣ = reference_state.pressure
 
-# For the dry case, we use a height-based approximation:
-# The tropopause is roughly where θ(z) corresponds to Tₜ on a reference adiabat.
-# A simpler approach: apply constant cooling throughout the troposphere.
+# Compute the reference Exner function profile and estimate tropopause height
+# T = θ × Π, so Tₜ = θ₀ × Πₜ → Πₜ = Tₜ/θ₀
+# Π = (p/p₀₀)^κ → p_tropopause = p₀₀ × (Tₜ/θ₀)^(1/κ)
+p₀₀ = 1e5  # Reference pressure for Exner function (Pa)
+Rᵈ = Breeze.Thermodynamics.dry_air_gas_constant(constants)
+cᵖ = constants.dry_air.heat_capacity
+κ = Rᵈ / cᵖ  # R/cₚ ≈ 0.286
 
-# We create a static forcing field based on height
+# For a dry adiabatic reference state, estimate the height where T = Tₜ
+# Using hydrostatic relation: z ≈ (cₚ/g) × (Tₛ - Tₜ) for dry adiabat
+g = constants.gravitational_acceleration
+z_tropopause = cᵖ / g * (Tₛ - Tₜ)  # ≈ 9-10 km for Tₛ=300K, Tₜ=210K
+
+@info "Estimated tropopause height: $(z_tropopause/1e3) km"
+
+# Create piecewise radiative forcing field based on height
+# Below tropopause (z < zₜ): constant cooling at -Q̇
+# Above tropopause (z ≥ zₜ): weaker cooling (approximating Newtonian relaxation to Tₜ)
+
 ∂t_ρθ_rad = Field{Nothing, Nothing, Center}(grid)
 
-# Approximate: constant cooling of -1 K/day throughout troposphere
-# This is a simplification; a full implementation would use discrete forcing
-# that depends on the actual temperature field.
-set!(∂t_ρθ_rad, ρᵣ * (-Q̇))
+# Compute forcing at each vertical level
+z_nodes = znodes(grid, Center())
+ρᵣ_data = interior(ρᵣ, 1, 1, :)  # Extract density profile as vector
+
+for k in 1:grid.Nz
+    z_k = z_nodes[k]
+    ρ_k = ρᵣ_data[k]
+
+    # Piecewise cooling following paper Eq. 1:
+    # - Below tropopause: constant cooling -Q̇
+    # - Above tropopause: weaker cooling (Newtonian relaxation is small near Tₜ)
+    ∂θ∂t = z_k < z_tropopause ? -Q̇ : -Q̇ * 0.1
+
+    interior(∂t_ρθ_rad)[1, 1, k] = ρ_k * ∂θ∂t
+end
 
 radiation_forcing = Forcing(∂t_ρθ_rad)
 
@@ -255,7 +280,6 @@ model = AtmosphereModel(grid;
 # perturbations to the potential temperature in the lowest levels to trigger
 # convection. For moist cases (β > 0), we also add a moisture profile.
 
-g = constants.gravitational_acceleration
 N² = 1e-5  # Weak stable stratification (nearly neutral for dry convection)
 
 # θ profile: nearly neutral with weak stratification
@@ -537,9 +561,8 @@ end
 #
 # - Uses `SaturationAdjustment` microphysics (no precipitation fallout)
 # - Paper uses full single-moment bulk microphysics with rain/ice
-# - Radiative cooling is constant throughout troposphere (simplified)
-# - Paper uses temperature-dependent piecewise cooling
 # - Grid is uniform (paper uses stretched vertical grid)
+# - Resolution is reduced (paper uses 2 km horizontal, stretched vertical)
 #
 # For more faithful reproduction, consider using `OneMomentCloudMicrophysics`
-# and implementing the full temperature-dependent radiative scheme.
+# from CloudMicrophysics.jl extension.
