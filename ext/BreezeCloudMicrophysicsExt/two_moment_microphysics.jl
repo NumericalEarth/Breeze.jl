@@ -700,27 +700,14 @@ const r_nuc = 5e-11  # 0.05 nm
     # Supersaturation - activation only occurs when air is supersaturated (S > 0)
     S = supersaturation(T, ρ, q, constants, PlanarLiquidSurface())
 
-    # Reconstruct local total aerosol population (interstitial + activated)
-    # ARG2000 gives the fraction of this total that should be activated
-    N_tot = Nᵃ⁺ + Nᶜˡ⁺
+    # Target: fraction of available aerosol that should activate
+    N_target = aerosol_activated_fraction(aerosol_activation, aps, T, p, w⁺, qᵗ, qˡ, ρ, constants) * Nᵃ⁺
 
-    # Compute the activated fraction of the TOTAL aerosol population
-    activated_fraction = aerosol_activated_fraction(aerosol_activation, aps, T, p, w⁺, qᵗ, qˡ, ρ, constants)
+    # Disequilibrium: activate deficit, limited by available aerosol
+    ΔN_act = clamp(N_target - Nᶜˡ⁺, zero(FT), Nᵃ⁺)
 
-    # Target number of activated droplets
-    N_target = activated_fraction * N_tot
-
-    # Activation is driven by disequilibrium: difference between target and current
-    # We only model activation (source), not deactivation (evaporation handles that)
-    ΔN_act = max(zero(FT), N_target - Nᶜˡ⁺)
-
-    # Limit by available interstitial aerosol
-    ΔN_act = min(ΔN_act, Nᵃ⁺)
-
-    # Convert to rate [1/m³/s]
-    # Zero activation if subsaturated (S ≤ 0)
-    is_active = S > 0
-    dNᶜˡ_act = ifelse(is_active, ΔN_act / Δt, zero(ρ))
+    # Convert to rate [1/m³/s], zero if subsaturated
+    dNᶜˡ_act = ifelse(S > 0, ΔN_act / Δt, zero(ρ))
 
     return dNᶜˡ_act
 end
