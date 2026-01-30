@@ -172,7 +172,7 @@ function initial_aerosol_number_from_activation(aerosol_activation::AerosolActiv
     return Nᵃ
 end
 
-initial_aerosol_number_from_activation(::Nothing) = 0.0
+initial_aerosol_number_from_activation(::Nothing) = 0
 
 """
     TwoMomentCategories{W, AP, LV, RV, AA}
@@ -371,7 +371,7 @@ function TwoMomentCloudMicrophysics(FT::DataType = Oceananigans.defaults.FloatTy
 end
 
 # Default relaxation timescale for 2M cloud liquid (seconds)
-const τ_relax_2m_default = 10.0
+const τ_relax_2m_default = 10
 
 # Materialize condensate formation for 2M scheme
 materialize_2m_condensate_formation(cf::AbstractCondensateFormation, categories) = cf
@@ -555,7 +555,7 @@ end
 #####
 
 # Numerical timescale for limiting negative-value relaxation
-const τⁿᵘᵐ_2m = 10.0  # seconds
+const τⁿᵘᵐ_2m = 10  # seconds
 
 #####
 ##### Cloud liquid mass tendency (ρqᶜˡ) - state-based
@@ -774,10 +774,10 @@ Mass tendency for cloud liquid [kg/kg/s]
     # Following CloudMicrophysics parcel model: use r_nuc as fallback when no activation or no supersaturation
     S = supersaturation(T, ρ, q, constants, PlanarLiquidSurface())
 
-    # Compute radius: rᵃᶜᵗ = 2A / (3S), capped at 1 μm
+    # Compute radius: rᵃᶜᵗ = 2A / (3S), capped at 1 μm (1e-6 m)
     # Use rⁿᵘᶜ as fallback when S is negligible (no supersaturation) or no activation
     is_activating = (dNᶜˡ_act > eps(FT)) & (S > eps(FT))
-    rᵃᶜᵗ = ifelse(is_activating, min(1e-6, 2 * A / (3 * max(S, eps(FT)))), rⁿᵘᶜ)
+    rᵃᶜᵗ = ifelse(is_activating, min(FT(1e-6), 2 * A / (3 * max(S, eps(FT)))), rⁿᵘᶜ)
 
     # Mass of a single activated droplet [kg]
     # m = (4π/3) * r³ * ρʷ
