@@ -48,6 +48,7 @@
 # ## Packages
 
 using Breeze
+using CUDA
 using Oceananigans
 using Oceananigans.Grids: xnode, ynode, znode, xnodes, ynodes, znodes
 using Oceananigans.Units
@@ -83,15 +84,15 @@ f₀ = 3e-4        # Coriolis parameter (s⁻¹)
 # The paper uses a 1152 km × 1152 km doubly-periodic domain with 2 km horizontal
 # resolution and a 28 km model top. We use reduced resolution for faster runs.
 
-arch = CPU()
+arch = GPU()
 
 # Domain size (paper values)
 Lx = Ly = 1152e3  # 1152 km
 H  = 28e3         # 28 km model top
 
 # Resolution (reduced for CI/documentation — increase for science runs)
-Nx = Ny = 64      # Paper uses 576 (2 km spacing)
-Nz = 32           # Paper uses ~80 with vertical stretching
+Nx = Ny = 576     # Paper resolution: 2 km spacing
+Nz = 80           # Paper uses ~80 with vertical stretching
 
 if get(ENV, "CI", "false") == "true"
     Nx = Ny = 32
@@ -352,7 +353,7 @@ end
 # ## Simulation Setup
 
 Δt = 10.0  # Initial timestep (seconds)
-stop_time = 6hours
+stop_time = 12hours  # 12-hour simulation at paper resolution
 
 if get(ENV, "CI", "false") == "true"
     stop_time = 30minutes
@@ -410,8 +411,14 @@ avg_outputs = (θ_avg = Average(θ, dims=(1, 2)),
 
 simulation.output_writers[:profiles] = JLD2Writer(model, avg_outputs;
                                                   filename = "tropical_cyclone_world_averages.jld2",
-                                                  schedule = TimeInterval(30minutes),
+                                                  schedule = TimeInterval(15minutes),
                                                   overwrite_existing = true)
+
+# Checkpointer for restart capability
+simulation.output_writers[:checkpointer] = Checkpointer(model;
+                                                        schedule = TimeInterval(30minutes),
+                                                        prefix = "tropical_cyclone_checkpoint",
+                                                        overwrite_existing = true)
 
 # ## Run the simulation
 
@@ -420,7 +427,7 @@ case_name = β == 0 ? "dry" : (β == 1 ? "moist" : "semidry (β=$β)")
 @info "Surface wetness β = $β, surface temperature Tₛ = $Tₛ K, tropopause Tₜ = $Tₜ K"
 @info "Stop time: $(prettytime(stop_time))"
 
-run!(simulation)
+run!(simulation)  # Note: pickup=true not yet supported for AtmosphereModel
 
 @info "Simulation complete!"
 
