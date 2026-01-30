@@ -17,34 +17,22 @@ using Breeze
 
 """
     convective_boundary_layer(arch = CPU();
-                              resolution = :medium,
                               float_type = Float64,
-                              Nx = nothing,
-                              Ny = nothing,
-                              Nz = nothing,
+                              Nx = 64, Ny = 64, Nz = 64,
                               advection = WENO(order=5),
                               closure = SmagorinskyLilly())
 
 Create an `AtmosphereModel` for the dry convective boundary layer benchmark case
-from Sauer & Munoz-Esparza (2020), Section 4.2.
+from [Sauer and Munoz-Esparza (2020)](@cite Sauer2020fasteddy), Section 4.2.
 
 # Arguments
 - `arch`: Architecture to run on (`CPU()` or `GPU()`)
 
 # Keyword Arguments
-- `resolution`: Preset resolution (`:small`, `:medium`, `:large`, or `:production`)
-- `float_type`: Floating point precision (`Float32` or `Float64`, default: `Float64`)
-- `Nx, Ny, Nz`: Override grid resolution (if provided, ignores `resolution`)
+- `float_type`: Floating point precision (`Float32` or `Float64`)
+- `Nx, Ny, Nz`: Grid resolution
 - `advection`: Advection scheme (default: `WENO(order=5)`)
 - `closure`: Turbulence closure (default: `SmagorinskyLilly()`)
-
-# Resolution presets
-| Resolution   | Grid size       | Purpose                    |
-|--------------|-----------------|----------------------------|
-| `:small`     | 32 × 32 × 32    | Quick tests                |
-| `:medium`    | 64 × 64 × 64    | Development benchmarks     |
-| `:large`     | 128 × 128 × 64  | Performance benchmarks     |
-| `:production`| 600 × 594 × 122 | Full case from paper       |
 
 # Physical parameters (from Sauer & Munoz-Esparza 2020, Section 4.2)
 - Domain: 12 km × 12 km × 3 km
@@ -56,31 +44,13 @@ from Sauer & Munoz-Esparza (2020), Section 4.2.
 - Initial perturbations: ±0.25 K in lowest 400 m
 """
 function convective_boundary_layer(arch = CPU();
-                                   resolution = :medium,
                                    float_type = Float64,
-                                   Nx = nothing,
-                                   Ny = nothing,
-                                   Nz = nothing,
+                                   Nx = 64, Ny = 64, Nz = 64,
                                    advection = WENO(order=5),
                                    closure = SmagorinskyLilly())
 
     # Set floating point precision
     Oceananigans.defaults.FloatType = float_type
-
-    # Resolution presets
-    if isnothing(Nx) || isnothing(Ny) || isnothing(Nz)
-        if resolution == :small
-            Nx, Ny, Nz = 32, 32, 32
-        elseif resolution == :medium
-            Nx, Ny, Nz = 64, 64, 64
-        elseif resolution == :large
-            Nx, Ny, Nz = 128, 128, 64
-        elseif resolution == :production
-            Nx, Ny, Nz = 600, 594, 122
-        else
-            throw(ArgumentError("Unknown resolution: $resolution. Use :small, :medium, :large, or :production"))
-        end
-    end
 
     # Domain size (from paper: 12.0 × 11.9 × 3.0 km, simplified to 12 × 12 × 3 km)
     Lx = 12kilometers
@@ -100,13 +70,14 @@ function convective_boundary_layer(arch = CPU();
     # Surface pressure: standard atmosphere
     # Surface potential temperature: 309 K (from paper)
     p₀ = 101325  # Pa
-    θ₀ = 309.0   # K
+    θ₀ = 309     # K
 
     constants = ThermodynamicConstants()
     reference_state = ReferenceState(grid, constants;
         surface_pressure = p₀,
         potential_temperature = θ₀
     )
+
     dynamics = AnelasticDynamics(reference_state)
 
     # Coriolis parameter for latitude 33.5° N

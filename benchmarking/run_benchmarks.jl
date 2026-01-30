@@ -3,11 +3,20 @@
 #####
 ##### This script runs the convective boundary layer benchmark case
 ##### with configurable parameters via command-line arguments.
+##### Default device is GPU.
 #####
-##### Usage:
-#####   julia --project run_benchmarks.jl --size=16x16x16
-#####   julia --project run_benchmarks.jl --size=128x128x128 --device=GPU --float_type=Float32
-#####   julia --project run_benchmarks.jl --size="64x64x64, 128x128x64" --advection="WENO5, WENO9"
+##### Modes:
+#####   - benchmark: Quick performance benchmarks (default)
+#####   - simulate: Full runs with output for validation
+#####
+##### Usage (benchmark mode):
+#####   julia --project run_benchmarks.jl                          # Default: 64³, GPU, Float32, WENO5
+#####   julia --project run_benchmarks.jl --size=128^3             # 128³ grid on GPU
+#####   julia --project run_benchmarks.jl --size="64^3, 128^3"     # Multiple sizes
+#####
+##### Usage (simulate mode):
+#####   julia --project run_benchmarks.jl --mode=simulate --size=128^3 --stop_time=2.0
+#####   julia --project run_benchmarks.jl --mode=simulate --size=256^3 --stop_time=1.0 --output_interval=5
 #####
 
 using Pkg
@@ -20,6 +29,12 @@ using Oceananigans
 using Oceananigans.TurbulenceClosures: SmagorinskyLilly, DynamicSmagorinsky
 
 using Breeze
+using Breeze.Microphysics: NonEquilibriumCloudFormation
+
+# Load CloudMicrophysics extension for OneMomentCloudMicrophysics
+using CloudMicrophysics
+const CMExt = Base.get_extension(Breeze, :BreezeCloudMicrophysicsExt)
+using .CMExt: OneMomentCloudMicrophysics
 
 using Printf
 using Dates
@@ -36,6 +51,11 @@ function parse_commandline()
     )
 
     @add_arg_table! s begin
+        "--mode"
+            help = "Mode: 'benchmark' for quick performance tests, 'simulate' for full runs with output"
+            arg_type = String
+            default = "benchmark"
+
         "--size"
             help = "Grid size as NxxNyxNz (e.g., 128x128x128) or N^3 for cubic (e.g., 64^3). " *
                    "Multiple sizes can be specified as comma-separated list."
@@ -45,7 +65,7 @@ function parse_commandline()
         "--device"
             help = "Device to run on: CPU or GPU"
             arg_type = String
-            default = "CPU"
+            default = "GPU"
 
         "--configuration"
             help = "Benchmark configuration: convective_boundary_layer"
@@ -66,7 +86,9 @@ function parse_commandline()
 
         "--microphysics"
             help = "Microphysics scheme: nothing, SaturationAdjustment, " *
-                   "MixedPhaseEquilibrium, WarmPhaseEquilibrium, BulkMicrophysics. " *
+                   "MixedPhaseEquilibrium, WarmPhaseEquilibrium, " *
+                   "1M_WarmEquilibrium, 1M_MixedEquilibrium, " *
+                   "1M_WarmNonEquilibrium, 1M_MixedNonEquilibrium. " *
                    "Multiple schemes can be specified as comma-separated list."
             arg_type = String
             default = "nothing"
@@ -78,24 +100,39 @@ function parse_commandline()
             default = "nothing"
 
         "--time_steps"
-            help = "Number of time steps to benchmark"
+            help = "Number of time steps (benchmark mode only)"
             arg_type = Int
             default = 100
 
         "--warmup_steps"
-            help = "Number of warmup time steps"
+            help = "Number of warmup time steps (benchmark mode only)"
             arg_type = Int
             default = 10
 
         "--dt"
             help = "Time step size in seconds"
             arg_type = Float64
-            default = 0.05
+            default = 0.5
+
+        "--stop_time"
+            help = "Simulation stop time in hours (simulate mode only)"
+            arg_type = Float64
+            default = 2.0
+
+        "--output_interval"
+            help = "Output interval in minutes (simulate mode only)"
+            arg_type = Float64
+            default = 10.0
 
         "--output"
             help = "Output JSON filename for benchmark results"
             arg_type = String
             default = "benchmark_results.json"
+
+        "--output_dir"
+            help = "Directory for simulation output files (simulate mode only)"
+            arg_type = String
+            default = "."
 
         "--clear"
             help = "Clear existing results file before writing"
@@ -122,96 +159,76 @@ end
     parse_size(size_str)
 
 Parse a size string into a tuple (Nx, Ny, Nz).
-
-Supported formats:
-- "128x128x128" - explicit dimensions
-- "64^3" - shorthand for cubic grid (64x64x64)
+Formats: "128x128x128" or "64^3" (cubic shorthand).
 """
-function parse_size(size_str::AbstractString)
-    # Check for cubic shorthand: N^3
+function parse_size(size_str)
     if occursin("^3", size_str)
-        n_str = replace(size_str, "^3" => "")
-        N = parse(Int, n_str)
+        N = parse(Int, replace(size_str, "^3" => ""))
         return (N, N, N)
     end
-
-    # Standard format: NxxNyxNz
     parts = split(size_str, "x")
-    if length(parts) != 3
-        error("Invalid size format: $size_str. Expected NxxNyxNz (e.g., 128x128x128) or N^3 (e.g., 64^3)")
-    end
-    return (parse(Int, parts[1]), parse(Int, parts[2]), parse(Int, parts[3]))
+    length(parts) == 3 || error("Invalid size: $size_str. Use NxNyxNz or N^3.")
+    return Tuple(parse(Int, p) for p in parts)
 end
 
 #####
 ##### Factory functions to create schemes from names
 #####
+##### Uses @eval with Symbol to convert strings like "CPU" -> CPU()
+#####
 
-function make_architecture(name::AbstractString)
-    if name == "CPU"
-        return CPU()
-    elseif name == "GPU"
-        return GPU()
-    else
-        error("Unknown device: $name. Use CPU or GPU.")
-    end
+# Simple constructors: "CPU" -> CPU(), "Float32" -> Float32
+make_architecture(name) = (@eval $(Symbol(name)))()
+make_float_type(name) = @eval $(Symbol(name))
+
+# Advection: parse "WENO5" -> WENO(FT; order=5), "Centered2" -> Centered(FT; order=2)
+function make_advection(name, FT)
+    name == "nothing" && return nothing
+    name == "bounded_WENO5" && return WENO(FT; order=5, bounds=(0, Inf))
+
+    # Parse scheme name and order from strings like "WENO5", "Centered2"
+    m = match(r"^([A-Za-z]+)(\d+)$", name)
+    isnothing(m) && error("Unknown advection: $name. Use WENO5, WENO9, Centered2, or bounded_WENO5.")
+    scheme = @eval $(Symbol(m[1]))
+    order = parse(Int, m[2])
+    return scheme(FT; order)
 end
 
-function make_float_type(name::AbstractString)
-    if name == "Float32"
-        return Float32
-    elseif name == "Float64"
-        return Float64
-    else
-        error("Unknown float type: $name. Use Float32 or Float64.")
-    end
-end
+# Closures: "SmagorinskyLilly" -> SmagorinskyLilly(FT)
+make_closure(name, FT) = name == "nothing" ? nothing : (@eval $(Symbol(name)))(FT)
 
-function make_advection(name::AbstractString, FT)
-    if name == "nothing"
-        return nothing
-    elseif name == "Centered2"
-        return Centered(FT; order=2)
-    elseif name == "WENO5"
-        return WENO(FT; order=5)
-    elseif name == "WENO9"
-        return WENO(FT; order=9)
-    elseif name == "bounded_WENO5"
-        return WENO(FT; order=5, bounds=(0, Inf))
-    else
-        error("Unknown advection scheme: $name. " *
-              "Use nothing, Centered2, WENO5, WENO9, or bounded_WENO5.")
-    end
-end
+# Microphysics: supports 0M saturation adjustment and 1M bulk schemes
+function make_microphysics(name, FT=Float32)
+    name == "nothing" && return nothing
 
-function make_closure(name::AbstractString, FT)
-    if name == "nothing"
-        return nothing
-    elseif name == "SmagorinskyLilly"
-        return SmagorinskyLilly(FT)
-    elseif name == "DynamicSmagorinsky"
-        return DynamicSmagorinsky(FT)
-    else
-        error("Unknown closure: $name. " *
-              "Use nothing, SmagorinskyLilly, or DynamicSmagorinsky.")
-    end
-end
-
-function make_microphysics(name::AbstractString)
-    if name == "nothing"
-        return nothing
-    elseif name == "SaturationAdjustment"
+    # 0M Saturation adjustment schemes
+    if name == "SaturationAdjustment"
         return SaturationAdjustment()
     elseif name == "MixedPhaseEquilibrium"
         return SaturationAdjustment(; phase_equilibrium=MixedPhaseEquilibrium())
     elseif name == "WarmPhaseEquilibrium"
         return SaturationAdjustment(; phase_equilibrium=WarmPhaseEquilibrium())
-    elseif name == "BulkMicrophysics"
-        return BulkMicrophysics()
+
+    # 1M schemes with saturation adjustment (equilibrium cloud formation)
+    elseif name == "1M_WarmEquilibrium"
+        cloud_formation = SaturationAdjustment(FT; equilibrium=WarmPhaseEquilibrium(FT))
+        return OneMomentCloudMicrophysics(FT; cloud_formation)
+    elseif name == "1M_MixedEquilibrium"
+        cloud_formation = SaturationAdjustment(FT; equilibrium=MixedPhaseEquilibrium(FT))
+        return OneMomentCloudMicrophysics(FT; cloud_formation)
+
+    # 1M schemes with non-equilibrium cloud formation (prognostic cloud condensate)
+    elseif name == "1M_WarmNonEquilibrium"
+        cloud_formation = NonEquilibriumCloudFormation(nothing, nothing)  # warm-phase only
+        return OneMomentCloudMicrophysics(FT; cloud_formation)
+    elseif name == "1M_MixedNonEquilibrium"
+        cloud_formation = NonEquilibriumCloudFormation(nothing, nothing)  # will get ice from categories
+        # For mixed-phase, we need to specify ice formation
+        categories = CMExt.one_moment_cloud_microphysics_categories(FT)
+        cloud_formation = NonEquilibriumCloudFormation(nothing, categories.cloud_ice)
+        return OneMomentCloudMicrophysics(FT; cloud_formation, categories)
     else
-        error("Unknown microphysics: $name. " *
-              "Use nothing, SaturationAdjustment, MixedPhaseEquilibrium, " *
-              "WarmPhaseEquilibrium, or BulkMicrophysics.")
+        error("Unknown microphysics: $name")
     end
 end
 
@@ -220,8 +237,9 @@ end
 #####
 
 function run_benchmarks(args)
-    # Parse device (single value)
+    mode = args["mode"]
     arch = make_architecture(args["device"])
+    configuration = args["configuration"]
 
     # Parse lists from arguments
     sizes = [parse_size(s) for s in parse_list(args["size"])]
@@ -230,12 +248,13 @@ function run_benchmarks(args)
     closures = parse_list(args["closure"])
     microphysics_schemes = parse_list(args["microphysics"])
 
-    # Benchmark parameters
+    # Mode-specific parameters
+    Δt = args["dt"]
     time_steps = args["time_steps"]
     warmup_steps = args["warmup_steps"]
-    Δt = args["dt"]
-
-    configuration = args["configuration"]
+    stop_time = args["stop_time"] * 3600  # Convert hours to seconds
+    output_interval = args["output_interval"] * 60  # Convert minutes to seconds
+    output_dir = args["output_dir"]
 
     results = []
 
@@ -243,58 +262,64 @@ function run_benchmarks(args)
     println("Breeze.jl Benchmark Suite")
     println("=" ^ 95)
     println("Date: ", now())
+    println("Mode: ", mode)
     println("Architecture: ", arch)
     println("Sizes: ", sizes)
     println("Float types: ", float_types)
     println("Advection schemes: ", advections)
     println("Closures: ", closures)
     println("Microphysics: ", microphysics_schemes)
-    println("Time steps: ", time_steps)
+    if mode == "benchmark"
+        println("Time steps: ", time_steps, " (warmup: ", warmup_steps, ")")
+    else
+        println("Stop time: ", args["stop_time"], " hours")
+        println("Output interval: ", args["output_interval"], " minutes")
+    end
     println("Δt: ", Δt, " s")
     println("=" ^ 95)
     println()
 
-    # Loop over all combinations
-    for (Nx, Ny, Nz) in sizes
-        for FT in float_types
-            for adv_name in advections
-                for cls_name in closures
-                    for micro_name in microphysics_schemes
-                        # Build benchmark name
-                        size_str = "$(Nx)x$(Ny)x$(Nz)"
-                        ft_str = FT == Float32 ? "F32" : "F64"
-                        name = "CBL_$(size_str)_$(ft_str)_$(adv_name)_$(cls_name)_$(micro_name)"
+    # Loop over all combinations using Iterators.product
+    for ((Nx, Ny, Nz), FT, adv_name, cls_name, micro_name) in
+            Iterators.product(sizes, float_types, advections, closures, microphysics_schemes)
 
-                        println("\n", "-" ^ 70)
-                        println("Running: $name")
-                        println("-" ^ 70)
+        # Build benchmark name
+        size_str = "$(Nx)x$(Ny)x$(Nz)"
+        ft_str = FT == Float32 ? "F32" : "F64"
+        name = "CBL_$(size_str)_$(ft_str)_$(adv_name)_$(cls_name)_$(micro_name)"
 
-                        # Create schemes
-                        advection = make_advection(adv_name, FT)
-                        closure = make_closure(cls_name, FT)
-                        microphysics = make_microphysics(micro_name)
+        println("\n", "-" ^ 70)
+        println("Running: $name")
+        println("-" ^ 70)
 
-                        # Create model based on configuration
-                        if configuration == "convective_boundary_layer"
-                            model = convective_boundary_layer(arch;
-                                Nx, Ny, Nz,
-                                float_type = FT,
-                                advection = isnothing(advection) ? WENO(FT; order=5) : advection,
-                                closure = closure
-                            )
-                        else
-                            error("Unknown configuration: $configuration")
-                        end
+        # Create schemes
+        advection = make_advection(adv_name, FT)
+        closure = make_closure(cls_name, FT)
+        microphysics = make_microphysics(micro_name, FT)
 
-                        # Run benchmark
-                        result = benchmark_time_stepping(model;
-                            time_steps, Δt, warmup_steps, name, verbose = true
-                        )
-                        push!(results, result)
-                    end
-                end
-            end
+        # Create model based on configuration
+        if configuration == "convective_boundary_layer"
+            model = convective_boundary_layer(arch;
+                Nx, Ny, Nz,
+                float_type = FT,
+                advection = isnothing(advection) ? WENO(FT; order=5) : advection,
+                closure = closure
+            )
+        else
+            error("Unknown configuration: $configuration")
         end
+
+        # Run based on mode
+        if mode == "benchmark"
+            result = benchmark_time_stepping(model; time_steps, Δt, warmup_steps, name, verbose=true)
+        elseif mode == "simulate"
+            result = run_benchmark_simulation(model;
+                stop_time, Δt, output_interval, output_dir, name, verbose=true
+            )
+        else
+            error("Unknown mode: $mode. Use 'benchmark' or 'simulate'.")
+        end
+        push!(results, result)
     end
 
     return results
@@ -431,34 +456,16 @@ function generate_markdown_report(filename, entries)
     end
 end
 
-"""
-Convert a BenchmarkResult to a JSON-serializable dictionary.
-"""
-function result_to_dict(r)
-    return Dict(
-        "name" => r.name,
-        "float_type" => r.float_type,
-        "grid_size" => collect(r.grid_size),
-        "time_steps" => r.time_steps,
-        "dt" => r.Δt,
-        "total_time_seconds" => r.total_time_seconds,
-        "time_per_step_seconds" => r.time_per_step_seconds,
-        "steps_per_second" => 1.0 / r.time_per_step_seconds,
-        "grid_points_per_second" => r.grid_points_per_second,
-        "metadata" => Dict(
-            "julia_version" => r.metadata.julia_version,
-            "oceananigans_version" => r.metadata.oceananigans_version,
-            "breeze_version" => r.metadata.breeze_version,
-            "architecture" => r.metadata.architecture,
-            "gpu_name" => r.metadata.gpu_name,
-            "cuda_version" => r.metadata.cuda_version,
-            "cpu_model" => r.metadata.cpu_model,
-            "num_threads" => r.metadata.num_threads,
-            "hostname" => r.metadata.hostname,
-            "timestamp" => string(r.metadata.timestamp)
-        )
-    )
+# Convert struct to Dict, handling nested structs and special types
+struct_to_dict(x) = x
+struct_to_dict(x::Tuple) = collect(x)
+struct_to_dict(x::DateTime) = string(x)
+function struct_to_dict(x::T) where T
+    isstructtype(T) || return x
+    Dict(string(f) => struct_to_dict(getfield(x, f)) for f in fieldnames(T))
 end
+
+result_to_dict(r) = merge(struct_to_dict(r), Dict("steps_per_second" => 1.0 / r.time_per_step_seconds))
 
 # Run when invoked as script
 if abspath(PROGRAM_FILE) == @__FILE__
