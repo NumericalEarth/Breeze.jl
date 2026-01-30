@@ -12,6 +12,38 @@
 #
 # This script defaults to the **dry case (β = 0)** to demonstrate the paper's novel finding.
 # Change β to explore moist and semidry regimes.
+#
+# ## Differences from Cronin & Chavas (2019)
+#
+# This implementation makes several simplifications compared to the original paper:
+#
+# ### Resolution and Domain
+# - **Horizontal resolution**: We use ~18 km spacing (64×64) vs. paper's 2 km (576×576)
+# - **Vertical grid**: Uniform spacing vs. paper's stretched grid (64 levels in lowest 1 km)
+# - **Domain size**: Fixed 1152 km for all β; paper uses 1728 km for β ≥ 0.9
+#
+# ### Simulation Duration and Initialization
+# - **Runtime**: 6 hours default vs. paper's 70 days — insufficient for spontaneous TC genesis
+# - **Initialization**: Dry adiabat + random perturbations vs. pre-equilibrated state from
+#   100-day nonrotating RCE simulation
+#
+# ### Microphysics
+# - **Scheme**: `SaturationAdjustment` (equilibrium condensation, no precipitation fallout)
+#   vs. SAM's full single-moment bulk microphysics with rain, snow, graupel, ice sedimentation
+# - **Ice phase**: Warm-phase only (`WarmPhaseEquilibrium`) vs. full ice microphysics
+#
+# ### Radiative Cooling
+# - **Implementation**: Temperature-dependent forcing via `field_dependencies=:T` (faithful
+#   to paper's Eq. 1 piecewise scheme)
+# - Paper: `(∂T/∂t)_rad = -Q̇` for `T > Tₜ`, `(∂T/∂t)_rad = (Tₜ - T)/τ` for `T ≤ Tₜ`
+#
+# ### Other
+# - **Turbulence closure**: No explicit subgrid scheme (relies on WENO numerical diffusion)
+# - **Storm tracking**: None — paper uses pressure perturbation threshold + tracking algorithm
+# - **Top boundary**: Simple bounded (no explicit sponge layer)
+#
+# For scientific reproduction, increase resolution, extend runtime to ~70 days, and consider
+# using `OneMomentCloudMicrophysics` from the CloudMicrophysics.jl extension.
 
 # ## Packages
 
@@ -81,6 +113,7 @@ grid = RectilinearGrid(arch;
 # since there's no moisture to track.
 
 constants = ThermodynamicConstants()
+g = constants.gravitational_acceleration
 
 reference_state = ReferenceState(grid, constants;
                                  surface_pressure = 101325,
@@ -204,57 +237,49 @@ end
 
 # ## Radiative Forcing
 #
-# The paper (Eq. 1) prescribes a piecewise radiative tendency:
-# - For T > Tₜ: constant cooling at rate -Q̇ = -1 K/day
-# - For T ≤ Tₜ: Newtonian relaxation toward Tₜ with timescale τ = 20 days
+# The paper (Eq. 1) prescribes a piecewise radiative tendency based on temperature:
 #
-# We estimate the tropopause height from the reference state using the dry adiabat,
-# then apply height-based piecewise forcing. This is a reasonable approximation since
-# the reference state sets the vertical structure.
+# ```math
+# \left(\frac{∂T}{∂t}\right)_{\rm rad} = \begin{cases}
+#   -\dot{Q}, & T > T_t \\
+#   (T_t - T)/τ, & T ≤ T_t
+# \end{cases}
+# ```
+#
+# where Q̇ = 1 K/day is the constant cooling rate in the troposphere, Tₜ = 210 K is
+# the tropopause temperature, and τ = 20 days is the Newtonian relaxation timescale.
+#
+# We implement this as an energy forcing `ρe` using `discrete_form=true` to access
+# both the temperature field T and reference density ρᵣ. The energy forcing is:
+#
+# F_{ρe} = ρ × cₚ × (∂T/∂t)_rad
+#
+# which is automatically converted to potential temperature tendency by Breeze.
 
 ρᵣ = reference_state.density
-pᵣ = reference_state.pressure
+cᵖᵈ = constants.dry_air.heat_capacity
 
-# Compute the reference Exner function profile and estimate tropopause height
-# T = θ × Π, so Tₜ = θ₀ × Πₜ → Πₜ = Tₜ/θ₀
-# Π = (p/p₀₀)^κ → p_tropopause = p₀₀ × (Tₜ/θ₀)^(1/κ)
-p₀₀ = 1e5  # Reference pressure for Exner function (Pa)
-Rᵈ = Breeze.Thermodynamics.dry_air_gas_constant(constants)
-cᵖ = constants.dry_air.heat_capacity
-κ = Rᵈ / cᵖ  # R/cₚ ≈ 0.286
+radiation_params = (; Tₜ = FT(Tₜ), Q̇ = FT(Q̇), τ = FT(τᵣ), cᵖ = FT(cᵖᵈ), ρᵣ)
 
-# For a dry adiabatic reference state, estimate the height where T = Tₜ
-# Using hydrostatic relation: z ≈ (cₚ/g) × (Tₛ - Tₜ) for dry adiabat
-g = constants.gravitational_acceleration
-z_tropopause = cᵖ / g * (Tₛ - Tₜ)  # ≈ 9-10 km for Tₛ=300K, Tₜ=210K
-
-@info "Estimated tropopause height: $(z_tropopause/1e3) km"
-
-# Create piecewise radiative forcing field based on height
-# Below tropopause (z < zₜ): constant cooling at -Q̇
-# Above tropopause (z ≥ zₜ): weaker cooling (approximating Newtonian relaxation to Tₜ)
-
-∂t_ρθ_rad = Field{Nothing, Nothing, Center}(grid)
-
-# Compute forcing at each vertical level
-z_nodes = znodes(grid, Center())
-ρᵣ_data = interior(ρᵣ, 1, 1, :)  # Extract density profile as vector
-
-for k in 1:grid.Nz
-    z_k = z_nodes[k]
-    ρ_k = ρᵣ_data[k]
+# Discrete form forcing that accesses T from model_fields and ρ from parameters
+@inline function radiative_cooling(i, j, k, grid, clock, model_fields, p)
+    @inbounds T = model_fields.T[i, j, k]
+    @inbounds ρ = p.ρᵣ[i, j, k]
 
     # Piecewise cooling following paper Eq. 1:
-    # - Below tropopause: constant cooling -Q̇
-    # - Above tropopause: weaker cooling (Newtonian relaxation is small near Tₜ)
-    ∂θ∂t = z_k < z_tropopause ? -Q̇ : -Q̇ * 0.1
+    # - T > Tₜ: constant cooling at -Q̇
+    # - T ≤ Tₜ: Newtonian relaxation toward Tₜ
+    ∂T∂t = ifelse(T > p.Tₜ, -p.Q̇, (p.Tₜ - T) / p.τ)
 
-    interior(∂t_ρθ_rad)[1, 1, k] = ρ_k * ∂θ∂t
+    # Return energy density tendency: ρ × cₚ × ∂T/∂t
+    return ρ * p.cᵖ * ∂T∂t
 end
 
-radiation_forcing = Forcing(∂t_ρθ_rad)
+ρe_radiation_forcing = Forcing(radiative_cooling;
+                               discrete_form = true,
+                               parameters = radiation_params)
 
-forcing = (; ρθ = radiation_forcing)
+forcing = (; ρe = ρe_radiation_forcing)
 
 # ## Model Construction
 #
@@ -557,12 +582,22 @@ end
 # 3. Dry TCs have smaller outer radii but similar-sized convective cores
 # 4. TC intensity decreases as the surface is dried (lower β)
 #
-# ## Simplifications in this Implementation
+# ## What This Implementation Gets Right
 #
-# - Uses `SaturationAdjustment` microphysics (no precipitation fallout)
-# - Paper uses full single-moment bulk microphysics with rain/ice
-# - Grid is uniform (paper uses stretched vertical grid)
-# - Resolution is reduced (paper uses 2 km horizontal, stretched vertical)
+# - **Radiative cooling**: Temperature-dependent piecewise scheme (Eq. 1) using
+#   `field_dependencies=:T` for true Newtonian relaxation above tropopause
+# - **Surface fluxes**: Bulk aerodynamic formulas (Eqs. 2-4) with gustiness
+# - **Domain geometry**: Correct domain size (1152 km) and model top (28 km)
+# - **Coriolis**: f-plane with f = 3×10⁻⁴ s⁻¹
+# - **Surface wetness**: Full β parameterization for moist-dry transition
 #
-# For more faithful reproduction, consider using `OneMomentCloudMicrophysics`
-# from CloudMicrophysics.jl extension.
+# ## What Requires Higher Resolution / Longer Runs
+#
+# To reproduce the paper's results quantitatively:
+#
+# 1. **Increase resolution**: `Nx = Ny = 576` (2 km spacing)
+# 2. **Use stretched vertical grid**: 64 levels in lowest 1 km
+# 3. **Run for 70 days**: Spontaneous cyclogenesis requires O(10 days)
+# 4. **Initialize from RCE**: Pre-equilibrate with 100-day nonrotating simulation
+# 5. **Use full microphysics**: `OneMomentCloudMicrophysics` with ice phase
+# 6. **Use larger domain for moist cases**: 1728 km for β ≥ 0.9
