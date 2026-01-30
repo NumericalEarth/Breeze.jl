@@ -40,7 +40,7 @@
 # ### Other
 # - **Turbulence closure**: No explicit subgrid scheme (relies on WENO numerical diffusion)
 # - **Storm tracking**: None — paper uses pressure perturbation threshold + tracking algorithm
-# - **Top boundary**: Simple bounded (no explicit sponge layer)
+# - **Top boundary**: Rayleigh damping sponge in upper 3 km (paper doesn't specify, SAM has built-in)
 #
 # For scientific reproduction, increase resolution, extend runtime to ~70 days, and consider
 # using `OneMomentCloudMicrophysics` from the CloudMicrophysics.jl extension.
@@ -279,7 +279,24 @@ end
                                discrete_form = true,
                                parameters = radiation_params)
 
-forcing = (; ρe = ρe_radiation_forcing)
+# ## Sponge Layer
+#
+# To prevent spurious wave reflections from the upper boundary, we add a Rayleigh
+# damping sponge layer in the upper 3 km of the domain (top ~10%). The sponge damps
+# vertical velocity toward zero using Oceananigans' `Relaxation` forcing with a
+# `GaussianMask`. This is standard practice for LES with a rigid lid, though the
+# paper doesn't explicitly describe this (SAM likely has a built-in sponge).
+
+using Oceananigans.Forcings: Relaxation, GaussianMask
+
+sponge_width = 3000.0   # m - width of sponge layer
+sponge_center = H - sponge_width / 2  # Center the Gaussian in upper portion
+sponge_rate = 1 / 60.0  # s⁻¹ - 1 minute relaxation timescale
+
+sponge_mask = GaussianMask{:z}(center = sponge_center, width = sponge_width)
+ρw_sponge = Relaxation(rate = sponge_rate, mask = sponge_mask)
+
+forcing = (; ρe = ρe_radiation_forcing, ρw = ρw_sponge)
 
 # ## Model Construction
 #
@@ -585,11 +602,12 @@ end
 # ## What This Implementation Gets Right
 #
 # - **Radiative cooling**: Temperature-dependent piecewise scheme (Eq. 1) using
-#   `field_dependencies=:T` for true Newtonian relaxation above tropopause
+#   `discrete_form=true` for true Newtonian relaxation above tropopause
 # - **Surface fluxes**: Bulk aerodynamic formulas (Eqs. 2-4) with gustiness
 # - **Domain geometry**: Correct domain size (1152 km) and model top (28 km)
 # - **Coriolis**: f-plane with f = 3×10⁻⁴ s⁻¹
 # - **Surface wetness**: Full β parameterization for moist-dry transition
+# - **Sponge layer**: Rayleigh damping in upper 3 km to prevent wave reflections
 #
 # ## What Requires Higher Resolution / Longer Runs
 #
