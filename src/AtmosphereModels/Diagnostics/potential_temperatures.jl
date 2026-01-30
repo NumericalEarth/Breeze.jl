@@ -158,17 +158,31 @@ end
 Return a `KernelFunctionOperation` representing virtual potential temperature ``θᵛ``.
 
 Virtual potential temperature is the temperature that dry air would need to have
-in order to have the same density as moist air at the same pressure. It accounts
-for the effect of water vapor on air density:
+in order to have the same density as moist air at the same pressure. To define virtual
+potential temperature, we first note the definition of virtual _temperature_:
 
 ```math
-θᵛ = θˡⁱ \\left( qᵈ + ε qᵛ \\right)
+Tᵛ = T \\left( 1 + δᵛ qᵛ - qˡ - qⁱ \\right)
 ```
 
-where ``θˡⁱ`` is liquid-ice potential temperature, ``qᵈ`` and ``qᵛ`` are the
-specific humidities of dry air and vapor respectively, and
-``ε = Rᵛ / Rᵈ`` is the ratio between the vapor and dry air gas constants.
-``ε ≈ 1.608`` for water vapor and a dry air mixture typical to Earth's atmosphere.
+where ``δᵛ ≡ Rᵛ / Rᵈ - 1``. This follows from the ideal gas law for a mixture,
+``p = ρ Rᵐ T``, the mixture gas constant
+``Rᵐ = qᵈ Rᵈ + qᵛ Rᵛ = Rᵈ \\left( 1 + δᵛ qᵛ - qˡ - qⁱ \\right)``,
+and the definition of virtual temperature, ``p = ρ Rᵈ Tᵛ``, which leads to
+
+```math
+Tᵛ = T \frac{Rᵐ}{Rᵈ} = T \\left( 1 + δᵛ qᵛ - qˡ - qⁱ \\right)
+```
+
+The virtual potential temperature is defined analogously,
+
+```math
+θᵛ = θ \\left( 1 + δᵛ qᵛ - qˡ - qⁱ \\right)
+```
+
+where ``θ`` is potential temperature. Note that
+``Rᵛ / Rᵈ ≈ 1.608`` for water vapor and a dry air mixture typical to Earth's atmosphere,
+and that ``δᵛ ≈ 0.608``.
 
 ```jldoctest
 using Breeze
@@ -188,7 +202,7 @@ Field(θᵛ)
 ├── operand: KernelFunctionOperation at (Center, Center, Center)
 ├── status: time=0.0
 └── data: 3×3×14 OffsetArray(::Array{Float64, 3}, 0:2, 0:2, -2:11) with eltype Float64 with indices 0:2×0:2×-2:11
-    └── max=304.824, min=304.824, mean=304.824
+    └── max=301.824, min=301.824, mean=301.824
 ```
 
 # References
@@ -489,15 +503,15 @@ function (d::MoistPotentialTemperatureKernelFunction)(i, j, k, grid)
 
     θ★ = if d.flavor isa AbstractPlainFlavor
         θ
-    elseif d.flavor isa AbstractLiquidIceFlavor || d.flavor isa AbstractVirtualFlavor
-        # Liquid-ice potential temperature
-        θˡⁱ = θ * (1 - (ℒˡᵣ * qˡ + ℒⁱᵣ * qⁱ) / (cᵖᵐ * T))
 
-        if d.flavor isa AbstractLiquidIceFlavor
-            θˡⁱ
-        elseif d.flavor isa AbstractVirtualFlavor
-            θˡⁱ * (1 + Rᵛ / Rᵈ * qᵛ)
-        end
+    elseif d.flavor isa AbstractLiquidIceFlavor
+        # Liquid-ice potential temperature
+        θ * (1 - (ℒˡᵣ * qˡ + ℒⁱᵣ * qⁱ) / (cᵖᵐ * T))
+
+    elseif d.flavor isa AbstractVirtualFlavor
+        δ = Rᵛ / Rᵈ - 1
+        θ * (1 + δ * qᵛ - qˡ - qⁱ)
+
     elseif d.flavor isa AbstractEquivalentFlavor
         # Saturation specific humidity over a liquid surface
         surface = PlanarLiquidSurface()
