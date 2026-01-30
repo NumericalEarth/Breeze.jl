@@ -663,8 +663,8 @@ end
 #####
 
 # Nucleation radius [m] - fallback when supersaturation is negligible
-# Matches CloudMicrophysics parcel model default: r_nuc = 0.5 * 1e-4 * 1e-6
-const r_nuc = 5e-11  # 0.05 nm
+# Matches CloudMicrophysics parcel model default: rⁿᵘᶜ = 0.5 * 1e-4 * 1e-6
+const rⁿᵘᶜ = 5e-11  # 0.05 nm
 
 # No activation when aerosol_activation is nothing
 @inline aerosol_activation_tendency(::Nothing, aps, ρ, Nᵃ, Nᶜˡ, w, Δt, 𝒰, constants) = zero(ρ)
@@ -701,13 +701,13 @@ const r_nuc = 5e-11  # 0.05 nm
     S = supersaturation(T, ρ, q, constants, PlanarLiquidSurface())
 
     # Target: fraction of available aerosol that should activate
-    N_target = aerosol_activated_fraction(aerosol_activation, aps, T, p, w⁺, qᵗ, qˡ, ρ, constants) * Nᵃ⁺
+    Nᵗᵃʳᵍᵉᵗ = aerosol_activated_fraction(aerosol_activation, aps, T, p, w⁺, qᵗ, qˡ, ρ, constants) * Nᵃ⁺
 
     # Disequilibrium: activate deficit, limited by available aerosol
-    ΔN_act = clamp(N_target - Nᶜˡ⁺, zero(FT), Nᵃ⁺)
+    ΔNᵃᶜᵗ = clamp(Nᵗᵃʳᵍᵉᵗ - Nᶜˡ⁺, zero(FT), Nᵃ⁺)
 
     # Convert to rate [1/m³/s], zero if subsaturated
-    dNᶜˡ_act = ifelse(S > 0, ΔN_act / Δt, zero(ρ))
+    dNᶜˡ_act = ifelse(S > 0, ΔNᵃᶜᵗ / Δt, zero(ρ))
 
     return dNᶜˡ_act
 end
@@ -774,19 +774,18 @@ Mass tendency for cloud liquid [kg/kg/s]
     # Following CloudMicrophysics parcel model: use r_nuc as fallback when no activation or no supersaturation
     S = supersaturation(T, ρ, q, constants, PlanarLiquidSurface())
 
-    # Compute radius: r_act = 2A / (3S), capped at 1 μm
-    # Use r_nuc as fallback when S is negligible (no supersaturation) or no activation
-    activation_active = (dNᶜˡ_act > eps(FT)) & (S > eps(FT))
-    r_act_computed = min(1e-6, 2 * A / (3 * max(S, eps(FT))))
-    r_act = ifelse(activation_active, r_act_computed, r_nuc)
+    # Compute radius: rᵃᶜᵗ = 2A / (3S), capped at 1 μm
+    # Use rⁿᵘᶜ as fallback when S is negligible (no supersaturation) or no activation
+    is_activating = (dNᶜˡ_act > eps(FT)) & (S > eps(FT))
+    rᵃᶜᵗ = ifelse(is_activating, min(1e-6, 2 * A / (3 * max(S, eps(FT)))), rⁿᵘᶜ)
 
     # Mass of a single activated droplet [kg]
-    # m = (4π/3) * r³ * ρw
-    m_droplet = FT(4π / 3) * r_act^3 * ρʷ
+    # m = (4π/3) * r³ * ρʷ
+    mᵈʳᵒᵖ = FT(4π / 3) * rᵃᶜᵗ^3 * ρʷ
 
     # Mass tendency [kg/kg/s] - zero if no activation
-    # dq/dt = (dN/dt * m_droplet) / ρ
-    dqᶜˡ_act = ifelse(dNᶜˡ_act > 0, dNᶜˡ_act * m_droplet / ρ, 0)
+    # dq/dt = (dN/dt * mᵈʳᵒᵖ) / ρ
+    dqᶜˡ_act = ifelse(dNᶜˡ_act > 0, dNᶜˡ_act * mᵈʳᵒᵖ / ρ, 0)
 
     return dqᶜˡ_act
 end
@@ -813,34 +812,34 @@ Uses the maximum supersaturation to determine which aerosol modes activate.
     ad = aerosol_activation.aerosol_distribution
 
     # Compute maximum supersaturation
-    S_max = max_supersaturation_breeze(aerosol_activation, aps, T, p, w, qᵗ, qˡ, zero(FT), zero(FT), zero(FT), ρ, constants)
+    Sᵐᵃˣ = max_supersaturation_breeze(aerosol_activation, aps, T, p, w, qᵗ, qˡ, zero(FT), zero(FT), zero(FT), ρ, constants)
 
     # Curvature coefficient
     Rᵛ = vapor_gas_constant(constants)
     A = 2 * ap.σ / (ap.ρ_w * Rᵛ * T)
 
     # Sum activated fraction from each mode
-    total_N = zero(FT)
-    activated_N = zero(FT)
-    for mode_i in ad.modes
-        N_mode = mode_i.N
-        total_N += N_mode
+    Nᵗᵒᵗ = zero(FT)
+    Nᵃᶜᵗ = zero(FT)
+    for mode in ad.modes
+        Nᵐᵒᵈᵉ = mode.N
+        Nᵗᵒᵗ += Nᵐᵒᵈᵉ
 
         # Mean hygroscopicity for this mode
-        κ_mean = mean_hygroscopicity(ap, mode_i)
+        κ̄ = mean_hygroscopicity(ap, mode)
 
-        # Critical supersaturation for mode i (Eq. 9 in ARG 2000)
-        Sm_i = 2 / sqrt(κ_mean) * (A / 3 / mode_i.r_dry)^(3/2)
+        # Critical supersaturation for mode (Eq. 9 in ARG 2000)
+        Sᶜʳⁱᵗ = 2 / sqrt(κ̄) * (A / 3 / mode.r_dry)^(3/2)
 
         # Activated fraction for this mode (Eq. 7 in ARG 2000)
-        u = 2 * log(Sm_i / S_max) / 3 / sqrt(2) / log(mode_i.stdev)
-        f_activated = (1 - erf(u)) / 2
+        u = 2 * log(Sᶜʳⁱᵗ / Sᵐᵃˣ) / 3 / sqrt(2) / log(mode.stdev)
+        fᵃᶜᵗ = (1 - erf(u)) / 2
 
-        activated_N += f_activated * N_mode
+        Nᵃᶜᵗ += fᵃᶜᵗ * Nᵐᵒᵈᵉ
     end
 
     # Return total activated fraction
-    return ifelse(total_N > 0, activated_N / total_N, zero(T))
+    return ifelse(Nᵗᵒᵗ > 0, Nᵃᶜᵗ / Nᵗᵒᵗ, zero(T))
 end
 
 #####

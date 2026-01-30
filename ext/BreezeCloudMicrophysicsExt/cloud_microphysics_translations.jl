@@ -311,7 +311,7 @@ Maximum supersaturation (dimensionless, e.g., 0.01 = 1% supersaturation)
     A = 2 * ap.σ / (ρʷ * Rᵛ * T)
 
     # Only compute if there's updraft
-    S_max_ARG = compute_smax_arg(ap, ad, A, α, γ, G, w, ρʷ)
+    Sᵐᵃˣ_ARG = compute_smax_arg(ap, ad, A, α, γ, G, w, ρʷ)
 
     # Correction for existing liquid and ice (phase relaxation)
     # See Eq. A13 in Korolev and Mazin (2003) or CloudMicrophysics implementation
@@ -328,18 +328,18 @@ Maximum supersaturation (dimensionless, e.g., 0.01 = 1% supersaturation)
 
     ξ = pᵛ⁺ / pᵛ⁺ⁱ
 
-    S_max = S_max_ARG * (α * w - Kⁱ * (ξ - 1)) / (α * w + (Kˡ + Kⁱ * ξ) * S_max_ARG)
+    Sᵐᵃˣ = Sᵐᵃˣ_ARG * (α * w - Kⁱ * (ξ - 1)) / (α * w + (Kˡ + Kⁱ * ξ) * Sᵐᵃˣ_ARG)
 
-    return max(0, S_max)
+    return max(0, Sᵐᵃˣ)
 end
 
 # Helper function to compute mean hygroscopicity
 @inline function mean_hygroscopicity(ap, mode::Mode_κ{T, FT}) where {T <: Tuple, FT}
-    κ_mean = zero(FT)
+    κ̄ = zero(FT)
     @inbounds for j in 1:fieldcount(T)
-        κ_mean += mode.vol_mix_ratio[j] * mode.kappa[j]
+        κ̄ += mode.vol_mix_ratio[j] * mode.kappa[j]
     end
-    return κ_mean
+    return κ̄
 end
 
 @inline mean_hygroscopicity(ap, mode::Mode_κ{T, FT}) where {T <: Real, FT} = mode.vol_mix_ratio * mode.kappa
@@ -365,30 +365,30 @@ end
     return numerator / denominator * ap.M_w / ap.ρ_w
 end
 
-# Helper function to compute S_max using ARG parameterization
+# Helper function to compute Sᵐᵃˣ using ARG parameterization
 @inline function compute_smax_arg(ap, ad, A::FT, α::FT, γ::FT, G::FT, w::FT, ρʷ::FT) where FT
     ζ = 2 * A / 3 * sqrt(α * w / G)
 
     # Compute critical supersaturation and contribution from each mode
-    tmp = zero(FT)
-    for mode_i in ad.modes
+    Σ_inv_Sᵐᵃˣ² = zero(FT)
+    for mode in ad.modes
 
         # Mean hygroscopicity for mode (volume-weighted κ)
-        κ_mean = mean_hygroscopicity(ap, mode_i)
+        κ̄ = mean_hygroscopicity(ap, mode)
 
         # Critical supersaturation (Eq. 9 in ARG 2000)
-        Sm_i = 2 / sqrt(κ_mean) * (A / 3 / mode_i.r_dry)^(3 / 2)
+        Sᶜʳⁱᵗ = 2 / sqrt(κ̄) * (A / 3 / mode.r_dry)^(3 / 2)
 
-        # Fitting parameters
-        f = ap.f1 * exp(ap.f2 * log(mode_i.stdev)^2)
-        g_param = ap.g1 + ap.g2 * log(mode_i.stdev)
+        # Fitting parameters (fᵥ and gᵥ are ventilation-related)
+        fᵥ = ap.f1 * exp(ap.f2 * log(mode.stdev)^2)
+        gᵥ = ap.g1 + ap.g2 * log(mode.stdev)
 
         # η parameter
-        η = (α * w / G)^(3 / 2) / (2π * ρʷ * γ * mode_i.N)
+        η = (α * w / G)^(3 / 2) / (2π * ρʷ * γ * mode.N)
 
-        # Contribution to 1/S_max² (Eq. 6 in ARG 2000)
-        tmp += 1 / Sm_i^2 * (f * (ζ / η)^ap.p1 + g_param * (Sm_i^2 / (η + 3 * ζ))^ap.p2)
+        # Contribution to 1/Sᵐᵃˣ² (Eq. 6 in ARG 2000)
+        Σ_inv_Sᵐᵃˣ² += 1 / Sᶜʳⁱᵗ^2 * (fᵥ * (ζ / η)^ap.p1 + gᵥ * (Sᶜʳⁱᵗ^2 / (η + 3 * ζ))^ap.p2)
     end
 
-    return 1 / sqrt(tmp)
+    return 1 / sqrt(Σ_inv_Sᵐᵃˣ²)
 end
