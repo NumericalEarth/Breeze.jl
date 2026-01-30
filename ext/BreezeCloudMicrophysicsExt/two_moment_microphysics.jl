@@ -723,10 +723,10 @@ the corresponding mass source term for cloud liquid water.
 
 The activation radius is derived from Köhler theory:
 ```math
-r_{act} = \\frac{A}{3 S}
+r_{act} = \\frac{2A}{3 S}
 ```
 where ``A = 2σ/(ρ_w R_v T)`` is the curvature parameter and ``S`` is the
-instantaneous supersaturation.
+instantaneous supersaturation. See eq. 19 in [Abdul-Razzak et al. (1998)](@cite ARG1998).
 
 The mass tendency is then:
 ```math
@@ -763,7 +763,7 @@ Mass tendency for cloud liquid [kg/kg/s]
 
     # Compute activation radius from Köhler theory
     # A = 2σ / (ρw * Rv * T) is the curvature parameter
-    # r_act = A / (3 * S) for the critical radius at supersaturation S
+    # r_act = 2A / (3S) for the critical radius at supersaturation S
     Rᵛ = vapor_gas_constant(constants)
     ρʷ = ap.ρ_w  # water density [kg/m³]
     σ = ap.σ     # surface tension [N/m]
@@ -774,10 +774,10 @@ Mass tendency for cloud liquid [kg/kg/s]
     # Following CloudMicrophysics parcel model: use r_nuc as fallback when no activation or no supersaturation
     S = supersaturation(T, ρ, q, constants, PlanarLiquidSurface())
 
-    # Compute radius: r_act = A / (3 * S), capped at 1 μm
+    # Compute radius: r_act = 2A / (3S), capped at 1 μm
     # Use r_nuc as fallback when S is negligible (no supersaturation) or no activation
     activation_active = (dNᶜˡ_act > eps(FT)) & (S > eps(FT))
-    r_act_computed = min(1e-6, A / (3 * max(S, eps(FT))))
+    r_act_computed = min(1e-6, 2 * A / (3 * max(S, eps(FT))))
     r_act = ifelse(activation_active, r_act_computed, r_nuc)
 
     # Mass of a single activated droplet [kg]
