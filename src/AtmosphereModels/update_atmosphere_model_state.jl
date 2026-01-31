@@ -60,8 +60,13 @@ function tracer_specific_to_density!(tracers, density)
     return nothing
 end
 
+# Kernel launch indices for computing diagnostic fields (e.g., velocities from momentum).
+# For periodic dimensions, we shrink by 1 on each side because the velocity computation
+# uses interpolation operators that access neighboring points (e.g., ℑxᶠᵃᵃ accesses i-1).
+# The outermost halo points are then filled by fill_halo_regions! via periodic wrapping.
+# This requires halo >= 2 for periodic dimensions to ensure the computed region is non-empty.
 diagnostic_indices(::Bounded, N, H) = 1:N+1
-diagnostic_indices(::Periodic, N, H) = -H+1:N+H
+diagnostic_indices(::Periodic, N, H) = -H+2:N+H-1
 diagnostic_indices(::Flat, N, H) = 1:N
 
 #####
