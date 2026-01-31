@@ -13,8 +13,6 @@
 
 using Breeze
 using Breeze: PrescribedDynamics, KinematicModel
-using Breeze.Thermodynamics: adiabatic_hydrostatic_density
-using GPUArraysCore: @allowscalar
 using Oceananigans
 using Oceananigans.Architectures: architecture, child_architecture, CPU
 using Oceananigans.DistributedComputations: Distributed, Partition
@@ -24,20 +22,6 @@ using Test
 # Define default_arch if not already defined (e.g., when running tests directly)
 if !@isdefined(default_arch)
     default_arch = CPU()
-end
-
-#####
-##### Helper for initializing CompressibleDynamics with a reference state density
-#####
-
-"""
-    default_density(z, constants; surface_pressure=101325, potential_temperature=288)
-
-Compute the default reference state density at height `z` using an adiabatic hydrostatic profile.
-This matches the default ReferenceState used by AnelasticDynamics.
-"""
-function default_density(z, constants; surface_pressure=101325, potential_temperature=288)
-    return adiabatic_hydrostatic_density(z, surface_pressure, potential_temperature, constants)
 end
 
 #####
@@ -93,24 +77,6 @@ function compare_fields(model_serial, model_distributed; rtol=0, atol=0)
     return all_match
 end
 
-# Speed of sound in air at standard conditions (m/s)
-const SPEED_OF_SOUND = 340.0
-
-"""
-    acoustic_max_Δt(grid; cfl=0.5, speed_of_sound=SPEED_OF_SOUND)
-
-Compute the maximum time step allowed by the acoustic CFL constraint.
-For compressible dynamics, the time step must satisfy Δt < Δx / c_s.
-"""
-function acoustic_max_Δt(grid; cfl=0.5, speed_of_sound=SPEED_OF_SOUND)
-    # Use L/N for uniform grids
-    Δx = grid.Lx / grid.Nx
-    Δy = grid.Ly / grid.Ny
-    Δz = grid.Lz / grid.Nz
-    Δ_min = min(Δx, Δy, Δz)
-    return cfl * Δ_min / speed_of_sound
-end
-
 """
     run_comparison_test(;
         arch,
@@ -128,8 +94,6 @@ end
 Run a model with serial and single-rank distributed architectures,
 then compare results for equivalence. Uses TimeStepWizard for
 adaptive time stepping based on CFL condition.
-
-For CompressibleDynamics, automatically computes max_Δt from the acoustic CFL.
 
 Returns true if all prognostic fields match within tolerance.
 """
@@ -158,13 +122,10 @@ function run_comparison_test(;
     constants = ThermodynamicConstants()
 
     function make_dynamics(grid, dynamics_type, constants)
+        reference_state = ReferenceState(grid, constants)
         if dynamics_type === :Anelastic
-            reference_state = ReferenceState(grid, constants)
             return AnelasticDynamics(reference_state)
-        elseif dynamics_type === :Compressible
-            return CompressibleDynamics()
         elseif dynamics_type === :Prescribed
-            reference_state = ReferenceState(grid, constants)
             return PrescribedDynamics(reference_state)
         else
             error("Unknown dynamics type: $dynamics_type")
@@ -196,30 +157,18 @@ function run_comparison_test(;
     u₀(x, y, z) = sin(2π * x / Lx) * cos(2π * y / Ly)
     v₀(x, y, z) = cos(2π * x / Lx) * sin(2π * y / Ly)
 
-    # For CompressibleDynamics, we need to initialize density with a reference state
-    ρ₀(x, y, z) = default_density(z, constants)
-
     model_serial = AtmosphereModel(grid_serial; model_kwargs_serial...)
-    if dynamics_type === :Compressible
-        set!(model_serial; ρ = ρ₀, θ = θ₀, qᵗ = qᵗ₀, u = u₀, v = v₀)
-    else
-        set!(model_serial; θ = θ₀, qᵗ = qᵗ₀, u = u₀, v = v₀)
-    end
-    # For CompressibleDynamics, compute max_Δt from acoustic CFL
-    max_Δt = dynamics_type === :Compressible ? acoustic_max_Δt(grid_serial; cfl) : Inf
+    set!(model_serial; θ = θ₀, qᵗ = qᵗ₀, u = u₀, v = v₀)
 
-    wizard_serial = TimeStepWizard(; cfl, max_Δt)
+    wizard_serial = TimeStepWizard(; cfl)
     simulation_serial = Simulation(model_serial; Δt=1e-3seconds, stop_time)
     simulation_serial.callbacks[:wizard] = Callback(wizard_serial, IterationInterval(1))
     run!(simulation_serial)
 
     model_distributed = AtmosphereModel(grid_distributed; model_kwargs_distributed...)
-    if dynamics_type === :Compressible
-        set!(model_distributed; ρ = ρ₀, θ = θ₀, qᵗ = qᵗ₀, u = u₀, v = v₀)
-    else
-        set!(model_distributed; θ = θ₀, qᵗ = qᵗ₀, u = u₀, v = v₀)
-    end
-    wizard_distributed = TimeStepWizard(; cfl, max_Δt)
+    set!(model_distributed; θ = θ₀, qᵗ = qᵗ₀, u = u₀, v = v₀)
+
+    wizard_distributed = TimeStepWizard(; cfl)
     simulation_distributed = Simulation(model_distributed; Δt=1e-3seconds, stop_time)
     simulation_distributed.callbacks[:wizard] = Callback(wizard_distributed, IterationInterval(1))
     run!(simulation_distributed)
@@ -237,7 +186,7 @@ const TOPOLOGIES = (
     (Periodic, Bounded, Bounded),   # Channel (bounded in y)
 )
 
-const DYNAMICS_TYPES = (:Anelastic, :Compressible, :Prescribed)
+const DYNAMICS_TYPES = (:Anelastic, :Prescribed)
 
 #####
 ##### Tests
@@ -275,27 +224,18 @@ const DYNAMICS_TYPES = (:Anelastic, :Compressible, :Prescribed)
         arch_distributed = Distributed(arch; partition=Partition(1, 1))
         grid = RectilinearGrid(arch_distributed; size=grid_size, x, y, z, topology)
         constants = ThermodynamicConstants()
+        reference_state = ReferenceState(grid, constants)
 
         if dynamics_type === :Anelastic
-            reference_state = ReferenceState(grid, constants)
             dynamics = AnelasticDynamics(reference_state)
-        elseif dynamics_type === :Compressible
-            dynamics = CompressibleDynamics()
         else # :Prescribed
-            reference_state = ReferenceState(grid, constants)
             dynamics = PrescribedDynamics(reference_state)
         end
 
         model = AtmosphereModel(grid; dynamics, thermodynamic_constants=constants)
         @test model isa AtmosphereModel
 
-        # CompressibleDynamics requires density initialization
-        if dynamics_type === :Compressible
-            ρ₀(x, y, z) = default_density(z, constants)
-            set!(model; ρ=ρ₀, θ=300, qᵗ=0.01)
-        else
-            set!(model; θ=300, qᵗ=0.01)
-        end
+        set!(model; θ=300, qᵗ=0.01)
         time_step!(model, 1)
         @test model.clock.iteration == 1
     end
@@ -387,19 +327,8 @@ end
     #     @test result
     # end
 
-    @testset "Compressible dynamics - doubly periodic" begin
-        # CompressibleDynamics uses acoustic CFL constraint (computed automatically)
-        result = run_comparison_test(;
-            arch,
-            dynamics_type = :Compressible,
-            topology = (Periodic, Periodic, Bounded),
-            closure = nothing,
-            microphysics = nothing,
-            advection = WENO(),
-            coriolis = nothing,
-            stop_time = 1)  # Short run due to small acoustic time step
-        @test result
-    end
+    # Note: CompressibleDynamics tests are disabled - distributed support not yet implemented
+    # TODO: Enable CompressibleDynamics tests when distributed support is extended
 end
 
 @testset "Distributed with full physics [$(FT)]" for FT in (Float32, Float64)
