@@ -2,7 +2,7 @@
 #
 # This example sets up, runs, and visualizes simulations of "thermal bubbles"
 # (just circular regions of warm air) rising through a neutral background.
-# We run both a dry simulation and a "cloudy" simulation. In the cloudy case,
+# We run a dry simulation and two "cloudy" simulations, both with and without precipitation. In the cloudy cases,
 # we simulate a pocket of warm air rising in a saturated, condensate-laden environment.
 
 using Breeze
@@ -149,9 +149,9 @@ nothing #hide
 # following the methodology described by Bryan and Fritsch (2002). This simulation
 # includes moisture processes, where excess water vapor condenses to liquid water,
 # releasing latent heat that enhances the buoyancy of the rising bubble.
-# 
+#
 # For pedagogical purposes, we build a new model with warm-phase saturation adjustment microphysics.
-# (We coudl have also used this model for the dry simulation):
+# (We could have also used this model for the dry simulation):
 
 microphysics = SaturationAdjustment(equilibrium=WarmPhaseEquilibrium())
 moist_model = AtmosphereModel(grid; dynamics, thermodynamic_constants, advection, microphysics)
@@ -256,3 +256,116 @@ end
 nothing #hide
 
 # ![](cloudy_thermal_bubble.mp4)
+
+# ## Moist thermal bubble with precipitating one-moment microphysics
+#
+# Next, we extend the moist thermal bubble example to a precipitating case using `OneMomentCloudMicrophysics`, which
+# adds prognostic rain via autoconversion (cloud droplets coalescing to form rain) and accretion (rain collecting cloud
+# droplets). This follows the CM1 benchmark configuration (`iinit=4`, `isnd=4`).
+#
+# Note: The one-moment microphysics requires the CloudMicrophysics.jl package to be loaded,
+# which activates the `BreezeCloudMicrophysicsExt` extension.
+
+using CloudMicrophysics
+BreezeCloudMicrophysicsExt = Base.get_extension(Breeze, :BreezeCloudMicrophysicsExt)
+using .BreezeCloudMicrophysicsExt: OneMomentCloudMicrophysics
+
+# Build a new model with one-moment microphysics. We use saturation adjustment for
+# cloud formation, but now rain is a prognostic variable that evolves via microphysical
+# processes. We also use the same initial conditions as the moist case, but with slightly lower total
+# water (qᵗ = 0.020) following the CM1 benchmark.
+
+precip_cloud_formation = SaturationAdjustment(equilibrium=WarmPhaseEquilibrium())
+precip_microphysics = OneMomentCloudMicrophysics(; cloud_formation=precip_cloud_formation)
+precip_model = AtmosphereModel(grid; dynamics, thermodynamic_constants, advection,
+                               microphysics=precip_microphysics)
+
+qᵗ_precip = 0.020  # CM1 qt_mb value for saturated neutrally-stable sounding
+set!(precip_model, θ=θᵢ, qᵗ=qᵗ_precip)
+
+# ## Simulation
+#
+# We run the simulation for 60 minutes to allow precipitation to develop. The one-moment scheme
+# requires time for cloud liquid to accumulate and autoconversion to produce rain.
+
+precip_simulation = Simulation(precip_model; Δt=2, stop_time=60minutes)
+conjure_time_step_wizard!(precip_simulation, cfl=0.7)
+
+θ_precip = liquid_ice_potential_temperature(precip_model)
+u_p, v_p, w_precip = precip_model.velocities
+qˡ_precip = precip_model.microphysical_fields.qˡ    # Total liquid (cloud + rain)
+qᶜˡ_precip = precip_model.microphysical_fields.qᶜˡ  # Cloud liquid only
+qʳ_precip = precip_model.microphysical_fields.qʳ    # Rain mixing ratio
+
+function progress_precip(sim)
+    qᶜˡmax = maximum(qᶜˡ_precip)
+    qʳmax = maximum(qʳ_precip)
+    wmax = maximum(abs, w_precip)
+
+    msg = @sprintf("Iter: %4d, t: %14s, Δt: %14s, max|w|: %.2f m/s",
+                   iteration(sim), prettytime(sim), prettytime(sim.Δt), wmax)
+    msg *= @sprintf(", max(qᶜˡ): %.2e, max(qʳ): %.2e", qᶜˡmax, qʳmax)
+
+    @info msg
+    return nothing
+end
+
+add_callback!(precip_simulation, progress_precip, TimeInterval(5minutes))
+
+precip_outputs = (; θ=θ_precip, w=w_precip, qᶜˡ=qᶜˡ_precip, qʳ=qʳ_precip)
+
+precip_filename = "precipitating_thermal_bubble.jld2"
+precip_writer = JLD2Writer(precip_model, precip_outputs; filename=precip_filename,
+                           schedule = TimeInterval(30seconds),
+                           overwrite_existing = true)
+
+precip_simulation.output_writers[:jld2] = precip_writer
+
+run!(precip_simulation)
+
+# ## Visualization of a precipitating thermal bubble
+
+θts = FieldTimeSeries(precip_filename, "θ")
+wts = FieldTimeSeries(precip_filename, "w")
+qᶜˡts = FieldTimeSeries(precip_filename, "qᶜˡ")
+qʳts = FieldTimeSeries(precip_filename, "qʳ")
+
+times_precip = θts.times
+Nt = length(times_precip)
+
+θ_range_p = (minimum(θts), maximum(θts))
+w_range_p = maximum(abs, wts)
+qᶜˡ_range = (0, max(1e-6, maximum(qᶜˡts)))
+qʳ_range = (0, max(1e-6, maximum(qʳts)))
+
+fig = Figure(size=(1400, 700), fontsize=11)
+axθ = Axis(fig[1, 2], aspect=2, xlabel="x (m)", ylabel="z (m)", title="θ (K)")
+axw = Axis(fig[1, 3], aspect=2, xlabel="x (m)", ylabel="z (m)", title="w (m/s)")
+axqᶜˡ = Axis(fig[2, 2], aspect=2, xlabel="x (m)", ylabel="z (m)", title="Cloud liquid qᶜˡ (kg/kg)")
+axqʳ = Axis(fig[2, 3], aspect=2, xlabel="x (m)", ylabel="z (m)", title="Rain qʳ (kg/kg)")
+
+n = Observable(1)
+θn = @lift θts[$n]
+wn = @lift wts[$n]
+qᶜˡn = @lift qᶜˡts[$n]
+qʳn = @lift qʳts[$n]
+
+hmθ = heatmap!(axθ, θn, colorrange=θ_range_p, colormap=:thermal)
+hmw = heatmap!(axw, wn, colorrange=(-w_range_p, w_range_p), colormap=:balance)
+hmqᶜˡ = heatmap!(axqᶜˡ, qᶜˡn, colorrange=qᶜˡ_range, colormap=:dense)
+hmqʳ = heatmap!(axqʳ, qʳn, colorrange=qʳ_range, colormap=:amp)
+
+Colorbar(fig[1, 1], hmθ, label="θ (K)", vertical=true, width=15)
+Colorbar(fig[1, 4], hmw, label="w (m/s)", vertical=true, width=15)
+Colorbar(fig[2, 1], hmqᶜˡ, label="qᶜˡ (kg/kg)", vertical=true, width=15)
+Colorbar(fig[2, 4], hmqʳ, label="qʳ (kg/kg)", vertical=true, width=15)
+
+colgap!(fig.layout, 10)
+rowgap!(fig.layout, 10)
+
+CairoMakie.record(fig, "precipitating_thermal_bubble.mp4", 1:Nt, framerate=12) do nn
+    n[] = nn
+end
+nothing #hide
+
+# ![](precipitating_thermal_bubble.mp4)

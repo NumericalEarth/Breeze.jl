@@ -90,7 +90,7 @@ See [`ExplicitImports.jl` documentation](https://juliatesting.github.io/Explicit
 ## Building the documentation locally
 
 `Breeze.jl` [documentation](https://numericalearth.github.io/BreezeDocumentation/) is generated using [`Documenter.jl`](https://github.com/JuliaDocs/Documenter.jl).
-You can preview how the documentation will look like with your changes by building the documentation locally. 
+You can preview how the documentation will look like with your changes by building the documentation locally.
 From the top-level directory of your local repository run
 
 ```sh

@@ -2,7 +2,7 @@ using Breeze
 using Oceananigans
 using Test
 
-@testset "Vertically implicit diffusion correctness [$(FT)]" for FT in (Float32, Float64)
+@testset "Vertically implicit diffusion correctness [$(FT)]" for FT in test_float_types()
     Oceananigans.defaults.FloatType = FT
     Nz = 32
     Lz = FT(100)
@@ -135,4 +135,3 @@ using Test
         @test isapprox(numerical_decay_c, expected_decay_c, rtol=0.05)
     end
 end
-

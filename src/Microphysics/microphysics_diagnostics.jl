@@ -36,7 +36,7 @@ struct RelativeHumidityKernelFunction{μ, M, MF, T, R, TH}
     thermodynamic_constants :: TH
 end
 
-Utils.prettysummary(kf::RelativeHumidityKernelFunction) = "RelativeHumidityKernelFunction"
+Utils.prettysummary(::RelativeHumidityKernelFunction) = "RelativeHumidityKernelFunction"
 
 Adapt.adapt_structure(to, k::RelativeHumidityKernelFunction) =
     RelativeHumidityKernelFunction(adapt(to, k.microphysics),
@@ -146,7 +146,7 @@ function (d::AdjustmentRH)(i, j, k, grid)
     equil = microphysics_phase_equilibrium(d.microphysics)
 
     # Compute moisture fractions (vapor, liquid, ice)
-    q = compute_moisture_fractions(i, j, k, grid, d.microphysics, ρᵣ, qᵗ, d.microphysical_fields)
+    q = grid_moisture_fractions(i, j, k, grid, d.microphysics, ρᵣ, qᵗ, d.microphysical_fields)
 
     # Vapor specific humidity
     qᵛ = q.vapor

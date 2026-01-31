@@ -24,16 +24,16 @@ using Oceananigans.BoundaryConditions: FieldBoundaryConditions, regularize_field
 using Oceananigans.Fields: set!
 using Oceananigans.Grids: ZDirection, inactive_cell
 using Oceananigans.ImmersedBoundaries: mask_immersed_field!
+using Oceananigans.Models.NonhydrostaticModels: NonhydrostaticModels
 using Oceananigans.Operators: Δzᵃᵃᶜ, Δzᵃᵃᶠ, divᶜᶜᶜ, Δzᶜᶜᶜ, ℑzᵃᵃᶠ, ∂xᶠᶜᶜ, ∂yᶜᶠᶜ, ∂zᶜᶜᶠ
 using Oceananigans.Solvers: Solvers, solve!, FourierTridiagonalPoissonSolver, AbstractHomogeneousNeumannFormulation
-using Oceananigans.TimeSteppers: TimeSteppers
 using Oceananigans.Utils: prettysummary, launch!
 
 using Breeze.Thermodynamics: ReferenceState, mixture_gas_constant
 using Breeze.AtmosphereModels: AtmosphereModels, AtmosphereModel, mean_pressure, pressure_anomaly
 
 # Import microphysics interface for buoyancy computation
-using Breeze.AtmosphereModels: compute_moisture_fractions
+using Breeze.AtmosphereModels: grid_moisture_fractions
 
 include("anelastic_dynamics.jl")
 include("anelastic_pressure_solver.jl")
@@ -45,4 +45,3 @@ const AnelasticModel = AtmosphereModel{<:AnelasticDynamics}
 include("anelastic_time_stepping.jl")
 
 end # module
-

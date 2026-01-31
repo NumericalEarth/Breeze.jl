@@ -34,7 +34,7 @@ export
     mixture_heat_capacity,
     dynamics_density,
     dynamics_pressure,
-    
+
     # Diagnostics
     compute_hydrostatic_pressure!,
     PotentialTemperature,
@@ -52,6 +52,13 @@ export
     surface_precipitation_flux,
     total_pressure,
     specific_humidity,
+
+    # Thermodynamics
+    temperature,
+    supersaturation,
+    saturation_specific_humidity,
+    PlanarLiquidSurface,
+    PlanarIceSurface,
 
     # Microphysics
     SaturationAdjustment,
@@ -76,7 +83,12 @@ export
     SubsidenceForcing,
 
     # TimeSteppers
-    SSPRungeKutta3
+    SSPRungeKutta3,
+
+    # ParcelDynamics
+    ParcelDynamics,
+    ParcelModel,
+    ParcelState
 
 using Oceananigans: Oceananigans, @at, AnisotropicMinimumDissipation, Average,
                     AveragedTimeInterval, BackgroundField, BetaPlane, Bounded,
@@ -141,6 +153,10 @@ using .MoistAirBuoyancies
 include("AtmosphereModels/AtmosphereModels.jl")
 using .AtmosphereModels
 
+# BoundaryConditions is loaded early so formulation modules can use BC conversion utilities
+include("BoundaryConditions/BoundaryConditions.jl")
+using .BoundaryConditions
+
 # Thermodynamic formulation modules (included after AtmosphereModels so they can dispatch on AtmosphereModel)
 include("StaticEnergyFormulations/StaticEnergyFormulations.jl")
 using .StaticEnergyFormulations: StaticEnergyFormulation
@@ -170,13 +186,13 @@ using .Advection
 include("CelestialMechanics/CelestialMechanics.jl")
 using .CelestialMechanics
 
-include("BoundaryConditions/BoundaryConditions.jl")
-using .BoundaryConditions
-
 include("Forcings/Forcings.jl")
 using .Forcings
 
 include("TimeSteppers/TimeSteppers.jl")
 using .TimeSteppers
+
+include("ParcelModels/ParcelModels.jl")
+using .ParcelModels
 
 end # module Breeze

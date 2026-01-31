@@ -145,7 +145,7 @@ AtmosphereModels.dynamics_pressure_solver(dynamics::CompressibleDynamics, grid) 
 ##### Show methods
 #####
 
-function Base.summary(dynamics::CompressibleDynamics)
+function Base.summary(::CompressibleDynamics)
     return "CompressibleDynamics"
 end
 
@@ -164,7 +164,7 @@ end
 ##### Momentum and velocity materialization
 #####
 
-function AtmosphereModels.materialize_momentum_and_velocities(dynamics::CompressibleDynamics, grid, boundary_conditions)
+function AtmosphereModels.materialize_momentum_and_velocities(::CompressibleDynamics, grid, boundary_conditions)
     ρu = XFaceField(grid, boundary_conditions=boundary_conditions.ρu)
     ρv = YFaceField(grid, boundary_conditions=boundary_conditions.ρv)
     ρw = ZFaceField(grid, boundary_conditions=boundary_conditions.ρw)
@@ -179,4 +179,3 @@ function AtmosphereModels.materialize_momentum_and_velocities(dynamics::Compress
 
     return momentum, velocities
 end
-
