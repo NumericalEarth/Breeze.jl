@@ -457,6 +457,53 @@ Before running a long simulation:
 3. **Forgetting Explicit Imports**: Tests will fail - add to using statements
 4. **Using plain `julia` blocks in docstrings**: NEVER do this. ALWAYS use `jldoctest` blocks so examples are tested and verified to work. Plain `julia` blocks are not tested and will become stale.
 
+## Debugging Physics Simulations
+
+### Thermodynamic Variable Discipline
+
+Breeze.jl uses multiple thermodynamic variables that are related but NOT interchangeable:
+
+| Variable | Meaning | Relationship |
+|----------|---------|--------------|
+| `T` | Temperature (K) | Absolute temperature |
+| `θ` | Potential temperature (K) | `θ = T / Π` where `Π = (p/p₀)^κ` |
+| `ρe` | Density × total energy (J/m³) | Includes kinetic + internal energy |
+| `ρθ` | Density × potential temperature (kg·K/m³) | Prognostic in `LiquidIcePotentialTemperatureFormulation` |
+
+**Before applying forcing or boundary conditions:**
+
+1. **Check the paper**: Does it specify forcing in terms of T, θ, or energy?
+2. **Check working examples**: Which field do BOMEX/RICO apply similar forcing to?
+3. **Check the Breeze source**: Which variable is prognostic for your formulation?
+4. **Verify units**: K/s vs K/day, W/m² vs K·m/s — get conversions right
+
+**Common mistakes:**
+- Applying a temperature tendency directly to potential temperature
+- Confusing `ρe` (energy) with `ρθ` (potential temperature)
+- Not accounting for the Exner function when converting T ↔ θ
+
+### When a Stable Simulation Becomes Unstable
+
+If the model was running stably and then becomes unstable after your changes:
+
+1. **STOP** — Do not keep adding "fixes"
+2. **Identify the last working state** — Use `git log` and `git diff`
+3. **Revert to working state** — `git checkout` the stable version
+4. **Make ONE change at a time** — Test after each change
+5. **Find the breaking change** — The instability was introduced by something you changed
+
+The instability is NOT a pre-existing bug if the code was stable before your changes.
+
+### Mandatory Checks Before Modifying Physics Code
+
+- [ ] Have I read the relevant working examples (BOMEX, RICO, prescribed_SST)?
+- [ ] Have I identified which field the example applies similar physics to?
+- [ ] Have I verified my implementation matches the paper's specification?
+- [ ] Am I making ONE change only?
+- [ ] Have I committed or stashed the current working state?
+
+If any answer is "no", complete that step before proceeding.
+
 ## Git Workflow
 - Follow ColPrac (Collaborative Practices for Community Packages)
 - Create feature branches for new work
@@ -527,11 +574,12 @@ done
 - MCPRepl.jl: https://github.com/kahliburke/MCPRepl.jl
 
 ## When Unsure
-1. Check existing examples in `examples/` directory
-2. Look at similar implementations in Oceananigans.jl
-3. Review tests for usage patterns
-4. Ask in GitHub discussions
-5. Check documentation in `docs/src/`
+1. **Study working examples first** — BOMEX, RICO, and other examples in `examples/` are stable and correct. Compare your code to them before making changes.
+2. Check existing examples in `examples/` directory
+3. Look at similar implementations in Oceananigans.jl
+4. Review tests for usage patterns
+5. Ask in GitHub discussions
+6. Check documentation in `docs/src/`
 
 ## AI Assistant Behavior
 - Prioritize type stability and GPU compatibility
