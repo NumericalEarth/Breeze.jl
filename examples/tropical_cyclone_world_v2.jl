@@ -26,9 +26,10 @@
 # To run at paper resolution, set: Nx=Ny=576, scale_factor=1, closure=ScalarDiffusivity(ν=10,κ=10)
 #
 # ### Simulation Duration and Initialization
-# - **Runtime**: 30 min test (use 48 hours for development) vs. paper's 70 days
-# - **Initialization**: Dry adiabat + random perturbations vs. pre-equilibrated state from
-#   100-day nonrotating RCE simulation
+# - **Runtime**: 25 days (test) vs. paper's 70 days
+# - **Initialization**: Equilibrated profile (dry adiabat in troposphere, isothermal at Tₜ in
+#   stratosphere) vs. paper's 100-day nonrotating RCE spinup. This ensures the piecewise
+#   radiative forcing starts near equilibrium, preventing numerical instability.
 #
 # ### Microphysics
 # - **Scheme**: `SaturationAdjustment` (equilibrium condensation, no precipitation fallout)
@@ -36,10 +37,10 @@
 # - **Ice phase**: Warm-phase only (`WarmPhaseEquilibrium`) vs. full ice microphysics
 #
 # ### Radiative Cooling
-# - **Implementation**: Following RICO pattern — Field-based forcing on ρθ (not discrete_form on ρe)
-# - Paper formula: `(∂T/∂t)_rad = -Q̇` for `T > Tₜ` (constant -1 K/day in troposphere)
-# - Since T > Tₜ = 210 K everywhere in troposphere, we use constant: `F_ρθ = ρᵣ × (-Q̇)`
-# - This matches RICO's approach (constant -2.5 K/day) and ensures consistent thermodynamics
+# - **Implementation**: Following BOMEX pattern — discrete forcing on ρe (energy density)
+# - Paper formula (Eq. 1): `(∂T/∂t)_rad = -Q̇` for `T > Tₜ`, relaxation for `T ≤ Tₜ`
+# - We apply `F_ρe = ρ × cₚ × ∂T/∂t`; Breeze converts via `G_ρθ += F_ρe / (cᵖᵐ × Π)`
+# - Requires equilibrated initial condition (isothermal stratosphere at T = Tₜ)
 #
 # ### Other
 # - **Storm tracking**: None — paper uses pressure perturbation threshold + tracking algorithm
@@ -252,7 +253,7 @@ else
     boundary_conditions = (; ρu = ρu_bcs, ρv = ρv_bcs, ρe = ρe_bcs)
 end
 
-# ## Radiative Forcing (RICO Pattern)
+# ## Radiative Forcing (Paper-Equivalent)
 #
 # The paper (Eq. 1) prescribes a piecewise radiative tendency based on temperature:
 #
@@ -266,27 +267,62 @@ end
 # where Q̇ = 1 K/day is the constant cooling rate in the troposphere, Tₜ = 210 K is
 # the tropopause temperature, and τ = 20 days is the Newtonian relaxation timescale.
 #
-# **RICO Pattern**: Following the RICO example, we implement radiative forcing as a
-# Field-based tendency on ρθ (NOT ρe with discrete_form). This is simpler, more stable,
-# and consistent with other Breeze examples:
+# **Thermodynamic Conversion**: Since Breeze uses potential temperature (θ), we need
+# to convert the paper's T-based forcing to θ-based forcing. Using T = θ × Π:
 #
-#   F_{ρθ} = ρᵣ × ∂θ/∂t
+#   ∂T/∂t = Π × ∂θ/∂t  →  ∂θ/∂t = (∂T/∂t) / Π
 #
-# For the troposphere (T > Tₜ = 210 K everywhere), we have constant cooling:
-#   ∂T/∂t = -Q̇ = -1 K/day
+# where Π = (p/pˢᵗ)^(R/cₚ) is the Exner function. This means:
+# - At surface (Π ≈ 1): ∂θ/∂t ≈ ∂T/∂t
+# - At altitude (Π < 1): ∂θ/∂t > ∂T/∂t (stronger θ cooling to achieve same T cooling)
 #
-# Since θ ≈ T at surface and the ratio θ/T = 1/Π is O(1), we approximate:
-#   ∂θ/∂t ≈ -Q̇ (constant cooling of potential temperature)
-#
-# This is exactly the RICO approach (constant -2.5 K/day), just with different rate.
+# The forcing on ρθ is then: F_ρθ = ρ × ∂θ/∂t = ρ × (∂T/∂t) / Π
 
+# Extract reference state fields for discrete forcing
 ρᵣ = reference_state.density
+pᵣ = reference_state.pressure
+pˢᵗ = reference_state.standard_pressure
 
-# Create Field-based radiative forcing (like RICO)
-∂t_ρθ_radiation = Field{Nothing, Nothing, Center}(grid)
-∂θ∂t = -Q̇  # Constant cooling rate (K/s), negative for cooling
-set!(∂t_ρθ_radiation, ρᵣ * ∂θ∂t)  # F_ρθ = ρᵣ × ∂θ/∂t
-ρθ_radiation_forcing = Forcing(∂t_ρθ_radiation)
+# Thermodynamic constants for Exner function
+Rᵈ = Breeze.Thermodynamics.dry_air_gas_constant(constants)
+cᵖᵈ = constants.dry_air.heat_capacity
+κ = Rᵈ / cᵖᵈ  # R/cₚ ≈ 0.286 for dry air
+
+# Relaxation timescale for stratosphere (paper uses 20 days)
+τᵣ = 20days
+
+# ## Piecewise Radiative Forcing (Paper's Eq. 1)
+#
+# Following BOMEX pattern: apply T-based forcing to ρe, letting Breeze handle
+# the conversion to ρθ tendency via division by (cᵖᵐ × Π).
+#
+# F_ρe = ρ × cₚ × ∂T/∂t
+#
+# Breeze computes: G_ρθ += F_ρe / (cᵖᵐ × Π) = ρ × ∂T/∂t / Π = ρ × ∂θ/∂t
+#
+# With equilibrated initial conditions (T ≈ Tₜ in stratosphere), this is stable.
+
+forcing_params = (; Tₜ = FT(Tₜ), Q̇ = FT(Q̇), τ = FT(τᵣ), ρᵣ, cₚ = FT(cᵖᵈ))
+
+# Discrete form forcing applied to ρe (energy density)
+@inline function piecewise_T_forcing(i, j, k, grid, clock, model_fields, p)
+    # Get temperature from model diagnostics
+    @inbounds T = model_fields.T[i, j, k]
+    @inbounds ρ = p.ρᵣ[i, j, k]
+    
+    # Paper's piecewise T tendency (Eq. 1):
+    # - T > Tₜ: constant cooling at -Q̇
+    # - T ≤ Tₜ: Newtonian relaxation toward Tₜ
+    ∂T∂t = ifelse(T > p.Tₜ, -p.Q̇, (p.Tₜ - T) / p.τ)
+    
+    # Return energy forcing: F_ρe = ρ × cₚ × ∂T/∂t
+    # Breeze will divide by (cᵖᵐ × Π) to get ρθ tendency
+    return ρ * p.cₚ * ∂T∂t
+end
+
+ρe_radiation_forcing = Forcing(piecewise_T_forcing;
+                               discrete_form = true,
+                               parameters = forcing_params)
 
 # ## Sponge Layer
 #
@@ -305,8 +341,8 @@ sponge_rate = 1 / 60.0  # s⁻¹ - 1 minute relaxation timescale
 sponge_mask = GaussianMask{:z}(center = sponge_center, width = sponge_width)
 ρw_sponge = Relaxation(rate = sponge_rate, mask = sponge_mask)
 
-# Assemble all forcings: radiative cooling on ρθ (RICO pattern), sponge on ρw
-forcing = (; ρθ = ρθ_radiation_forcing, ρw = ρw_sponge)
+# Assemble all forcings: piecewise radiative forcing on ρe (BOMEX pattern), sponge on ρw
+forcing = (; ρe = ρe_radiation_forcing, ρw = ρw_sponge)
 
 # ## Turbulence Closure
 #
@@ -340,43 +376,96 @@ model = AtmosphereModel(grid;
 
 # ## Initial Conditions
 #
-# We initialize with a dry adiabatic temperature profile and add small random
-# perturbations to the potential temperature in the lowest levels to trigger
-# convection. For moist cases (β > 0), we also add a moisture profile.
+# We initialize with an equilibrated temperature profile following the paper's RCE:
+# - Troposphere: dry adiabatic (θ ≈ θ₀), T decreases with height
+# - Stratosphere: isothermal at T = Tₜ = 210 K (θ = Tₜ/Π increases with height)
+#
+# This ensures the piecewise radiative forcing starts near equilibrium:
+# - Troposphere (T > Tₜ): moderate cooling at 1 K/day
+# - Stratosphere (T ≈ Tₜ): minimal forcing (already at target temperature)
+#
+# The paper initialized from 100-day nonrotating RCE spinup; we approximate that
+# equilibrium profile directly.
 
 θ₀ = reference_state.potential_temperature
-g = constants.gravitational_acceleration
-N² = 1e-5  # Weak stable stratification (nearly neutral for dry convection)
+pᵣ_field = reference_state.pressure
+pˢᵗ_val = reference_state.standard_pressure
 
-# θ profile: nearly neutral with weak stratification
-θ_profile(z) = θ₀ * exp(N² * z / g)
+# Convert pressure field to array for initialization function
+pᵣ_array = Array(interior(pᵣ_field))
+
+# Equilibrated θ profile: dry adiabat in troposphere, isothermal stratosphere
+function equilibrated_θ_profile(x, y, z, k, pᵣ_arr, θ_surface, T_tropopause, p_standard, kappa)
+    # Get pressure at this level (use k index)
+    p_local = pᵣ_arr[1, 1, k]
+    
+    # Exner function
+    Π = (p_local / p_standard)^kappa
+    
+    # Temperature on dry adiabat
+    T_adiabat = θ_surface * Π
+    
+    if T_adiabat > T_tropopause
+        # Troposphere: follow dry adiabat
+        return θ_surface
+    else
+        # Stratosphere: isothermal at Tₜ, so θ = Tₜ/Π
+        return T_tropopause / Π
+    end
+end
 
 # Random perturbation parameters
 δθ = 0.5   # K (perturbation amplitude)
 zδ = 1000  # m (depth of perturbation layer)
 
-θᵢ(x, y, z) = θ_profile(z) + δθ * (2 * rand() - 1) * (z < zδ)
+# Build 3D θ initial condition array
+# Convert GPU arrays to CPU for initialization loop
+z_nodes = Array(Oceananigans.Grids.znodes(grid, Center()))
+θᵢ_array = zeros(FT, Nx, Ny, Nz)
+
+for k in 1:Nz
+    z = z_nodes[k]
+    θ_eq = equilibrated_θ_profile(0, 0, z, k, pᵣ_array, θ₀, Tₜ, pˢᵗ_val, κ)
+    for j in 1:Ny
+        for i in 1:Nx
+            # Add random perturbation in lowest 1 km
+            perturbation = z < zδ ? δθ * (2 * rand() - 1) : 0.0
+            θᵢ_array[i, j, k] = θ_eq + perturbation
+        end
+    end
+end
 
 if β > 0
     # Moisture profile for moist cases
-    # Surface specific humidity scaled by β
     q_surface = 0.015  # ~15 g/kg near tropical surface
     q_scale_height = 3000.0  # m
-
-    qᵗ_profile(z) = β * q_surface * exp(-z / q_scale_height)
-
     δq = 1e-4  # kg/kg (perturbation amplitude)
-    qᵢ(x, y, z) = max(0, qᵗ_profile(z) + δq * (2 * rand() - 1) * (z < zδ))
 
-    set!(model, θ = θᵢ, qᵗ = qᵢ)
+    qᵢ_array = zeros(FT, Nx, Ny, Nz)
+    for k in 1:Nz
+        z = z_nodes[k]
+        q_mean = β * q_surface * exp(-z / q_scale_height)
+        for j in 1:Ny
+            for i in 1:Nx
+                perturbation = z < zδ ? δq * (2 * rand() - 1) : 0.0
+                qᵢ_array[i, j, k] = max(0, q_mean + perturbation)
+            end
+        end
+    end
+
+    set!(model, θ = θᵢ_array, qᵗ = qᵢ_array)
 else
-    set!(model, θ = θᵢ)
+    set!(model, θ = θᵢ_array)
 end
+
+# Log initial θ profile info
+θ_min, θ_max = extrema(θᵢ_array)
+@info "Initial θ profile: θ ∈ [$θ_min, $θ_max] K (equilibrated for piecewise forcing)"
 
 # ## Simulation Setup
 
 Δt = 10.0  # Initial timestep (seconds)
-stop_time = 48hours  # 48-hour run for TC development
+stop_time = 25days  # Full simulation with piecewise radiative forcing and equilibrated initialization
 
 if get(ENV, "CI", "false") == "true"
     stop_time = 30minutes
@@ -531,13 +620,13 @@ if get(ENV, "CI", "false") != "true"
 
         # Compute wind speed for all times
         function wind_speed(n)
-            u_data = interior(u_ts[n], :, :, 1)
-            v_data = interior(v_ts[n], :, :, 1)
+            u_data = Array(interior(u_ts[n], :, :, 1))
+            v_data = Array(interior(v_ts[n], :, :, 1))
             return sqrt.(u_data.^2 .+ v_data.^2)
         end
 
-        # Determine color range from all data
-        U_max = maximum(maximum(wind_speed(n)) for n in 1:Nt)
+        # Determine color range from all data (ensure U_max ≥ 1 to avoid colormap issues)
+        U_max = max(1.0, maximum(maximum(wind_speed(n)) for n in 1:Nt))
 
         fig = Figure(size = (1200, 400), fontsize = 12)
 
