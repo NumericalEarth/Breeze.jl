@@ -309,13 +309,13 @@ plane_averaged_tke = Field(Average(k, dims=(1,2)))  # (1, 1, Nz)
 tke_integrated = Integral(plane_averaged_tke)
 
 # # Cloud fraction
-# qˡ_thresh = 1e-6
-# cloud_mask = qˡ .> qˡ_thresh
-# cloud_fraction = Average(Maximum(cloud_mask; dims=3); dims=(1, 2))
+qˡ_thresh = 1e-6
+cloud_mask = qˡ .> qˡ_thresh
+cloud_fraction = Average(Maximum(cloud_mask; dims=3); dims=(1, 2))
 
 # LWP
 
-simulation.output_writers[:scalar_timeseries] = JLD2Writer(model, (; tke_integrated); 
+simulation.output_writers[:scalar_timeseries] = JLD2Writer(model, (; tke_integrated);
                                                   filename = "bomex_scalar_timeseries.jld2",
                                                   schedule = TimeInterval(5minutes),
                                                   overwrite_existing = true)
@@ -428,8 +428,8 @@ end
 
 axislegend(axw, position=:rt)
 
-xims!(axk, 0, 0.5)
-xims!(axw, 0, 0.3)
+xlims!(axk, 0, 0.5)
+xlims!(axw, 0, 0.3)
 
 fig[0, :] = Label(fig, "BOMEX: turbulent profile evolution (Siebesma et al., 2003)", fontsize=18, tellwidth=false)
 
@@ -437,10 +437,10 @@ save("bomex_var_profiles.png", fig) #src
 fig
 
 # 3 x 2 panel plot showing turbulent flux profiles
-w′qˡ′t = FieldTimeSeries(filename, "w′qˡ′") 
+w′qˡ′t = FieldTimeSeries(filename, "w′qˡ′")
 w′θˡⁱ′t = FieldTimeSeries(filename, "w′θˡⁱ′")
 w′u′t = FieldTimeSeries(filename, "w′u′")
-w′qᵗ′t = FieldTimeSeries(filename, "w′qᵗ′") 
+w′qᵗ′t = FieldTimeSeries(filename, "w′qᵗ′")
 w′θᵛ′t = FieldTimeSeries(filename, "w′θᵛ′")
 
 fig = Figure(size=(900, 1200), fontsize=14)
