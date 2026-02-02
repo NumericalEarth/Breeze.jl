@@ -19,12 +19,12 @@
 #####   julia --project run_benchmarks.jl --mode=simulate --size=256^3 --stop_time=1.0 --output_interval=5
 #####
 
-using Pkg
+using Pkg: Pkg
 Pkg.activate(@__DIR__)
 
-using ArgParse
-using BreezeBenchmarks
-using JSON
+using ArgParse: @add_arg_table!, ArgParseSettings, parse_args
+using BreezeBenchmarks: convective_boundary_layer, benchmark_time_stepping, run_benchmark_simulation
+using JSON: JSON
 using Oceananigans
 using Oceananigans.TurbulenceClosures: SmagorinskyLilly, DynamicSmagorinsky
 
@@ -32,12 +32,12 @@ using Breeze
 using Breeze.Microphysics: NonEquilibriumCloudFormation
 
 # Load CloudMicrophysics extension for OneMomentCloudMicrophysics
-using CloudMicrophysics
+using CloudMicrophysics: CloudMicrophysics
 const CMExt = Base.get_extension(Breeze, :BreezeCloudMicrophysicsExt)
 using .CMExt: OneMomentCloudMicrophysics
 
-using Printf
-using Dates
+using Printf: @printf
+using Dates: DateTime, now, UTC
 
 #####
 ##### Argument parsing
