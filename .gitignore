@@ -39,3 +39,7 @@ Manifest.toml
 *.DS_Store
 *.vscode
 *.code-workspace
+
+# Benchmarking output
+benchmark_results.json
+benchmark_results.md
