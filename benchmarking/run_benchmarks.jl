@@ -372,18 +372,16 @@ function main()
         new_entries = [result_to_dict(r) for r in results]
 
         # Load existing results or start fresh
-        if clear_file || !isfile(output_file)
-            all_entries = new_entries
+        all_entries = if clear_file || !isfile(output_file)
             if clear_file && isfile(output_file)
                 println("\nCleared existing results file: $output_file")
             end
+            new_entries
         else
             # Read existing file and append
-            existing_data = open(output_file, "r") do io
-                JSON.read(io)
-            end
-            all_entries = vcat(existing_data, new_entries)
+            existing_data = JSON.parse(read(output_file); dicttype=Dict{String,Any})
             println("\nAppending to existing results file: $output_file")
+            vcat(existing_data, new_entries)
         end
 
         # Write all results to JSON
