@@ -388,7 +388,7 @@ function main()
 
         # Write all results to JSON
         open(output_file, "w") do io
-            JSON.pretty(io, all_entries)
+            JSON.json(io, all_entries; pretty=true)
         end
 
         println("Results saved to: $output_file ($(length(new_entries)) new, $(length(all_entries)) total)")
