@@ -80,15 +80,23 @@ experiment_name = "tc_test"  # Change for different experiment types
 # ### Primary control parameters (user-configurable)
 
 β  = 0.0    # Surface wetness: 0 = dry, 1 = moist (paper's novel finding: β=0 works!)
-Tₛ = 300.0  # Surface temperature (K)
-Tₜ = 210.0  # Tropopause temperature (K) — for Set 2, use Tₜ = 0.7 * Tₛ
+Tₛ = 300.0  # Surface temperature (K) — paper value
+Tₜ = 210.0  # Tropopause temperature (K) — paper value
+θ_init = Tₛ  # Initial atmospheric θ (K) — equilibrated with surface
+
+# Warm-core vortex seed parameters (to help TC genesis at coarse resolution)
+seed_vortex = true        # Enable vortex seeding
+seed_θ_anomaly = 5.0      # K — warm core anomaly magnitude
+seed_radius = 100e3       # m — horizontal radius of warm core
+seed_height = 10e3        # m — vertical extent of warm core
+# Note: seed_x and seed_y are set after Lx/Ly are defined (see below)
 
 # ### Physical parameters from the paper
 
 Cᴰ = 1.5e-3      # Drag coefficient
 Cᵀ = 1.5e-3      # Sensible heat transfer coefficient (= Cᴰ in paper)
 v★ = 1.0         # Gustiness / minimum wind speed (m/s)
-Q̇  = 1.0 / day   # Radiative cooling rate (K/s) for T > Tₜ
+Q̇  = 1.0 / day   # Radiative cooling rate (K/s) for T > Tₜ — paper value
 τᵣ = 20days      # Newtonian relaxation timescale for T ≤ Tₜ
 f₀ = 3e-4        # Coriolis parameter (s⁻¹)
 
@@ -103,9 +111,13 @@ f₀ = 3e-4        # Coriolis parameter (s⁻¹)
 
 arch = GPU()
 
-# Domain size (paper values)
-Lx = Ly = 1152e3  # 1152 km
+# Domain size (half of paper values for smaller domain test)
+Lx = Ly = 576e3   # 576 km (half of paper's 1152 km)
 H  = 28e3         # 28 km model top
+
+# Seed position (center of domain)
+seed_x = 0.5 * Lx  # m — x-position
+seed_y = 0.5 * Ly  # m — y-position
 
 # ## Test Configuration (4x reduced resolution)
 #
@@ -119,8 +131,8 @@ H  = 28e3         # 28 km model top
 #   scale_factor = 1 in paper_vertical_grid()
 #   closure = ScalarDiffusivity(ν=10, κ=10)
 
-# Resolution: reduced 4x for testing (paper uses 576×576 = 2 km)
-Nx = Ny = 144     # Test resolution: 8 km spacing
+# Resolution: 4 km spacing in half-sized domain
+Nx = Ny = 144     # 4 km spacing in 576 km domain
 
 # Stretched vertical grid following paper Section 2a, with configurable scale factor:
 # - 64/scale_factor levels in lowest 1 km
@@ -161,7 +173,7 @@ function paper_vertical_grid(H; scale_factor=4)
     return z_faces
 end
 
-z_faces = paper_vertical_grid(H; scale_factor=4)  # 4x coarser for testing
+z_faces = paper_vertical_grid(H; scale_factor=2)  # 2x coarser for 4 km horizontal resolution
 Nz = length(z_faces) - 1
 
 # Count levels in lowest 1 km
@@ -387,7 +399,9 @@ model = AtmosphereModel(grid;
 # The paper initialized from 100-day nonrotating RCE spinup; we approximate that
 # equilibrium profile directly.
 
-θ₀ = reference_state.potential_temperature
+# Use θ_init for initial condition (NOT reference_state.potential_temperature = Tₛ)
+# This creates surface-air disequilibrium: Tₛ - θ_init = 40 K at startup
+θ₀ = θ_init  # Use the separate initial θ parameter
 pᵣ_field = reference_state.pressure
 pˢᵗ_val = reference_state.standard_pressure
 
@@ -420,6 +434,8 @@ zδ = 1000  # m (depth of perturbation layer)
 
 # Build 3D θ initial condition array
 # Convert GPU arrays to CPU for initialization loop
+x_nodes = Array(Oceananigans.Grids.xnodes(grid, Center()))
+y_nodes = Array(Oceananigans.Grids.ynodes(grid, Center()))
 z_nodes = Array(Oceananigans.Grids.znodes(grid, Center()))
 θᵢ_array = zeros(FT, Nx, Ny, Nz)
 
@@ -430,9 +446,24 @@ for k in 1:Nz
         for i in 1:Nx
             # Add random perturbation in lowest 1 km
             perturbation = z < zδ ? δθ * (2 * rand() - 1) : 0.0
+            
+            # Add warm-core vortex seed if enabled
+            if seed_vortex && z < seed_height
+                x = x_nodes[i]
+                y = y_nodes[j]
+                r = sqrt((x - seed_x)^2 + (y - seed_y)^2)
+                # Gaussian warm core: max at center, decays with radius and height
+                warm_core = seed_θ_anomaly * exp(-r^2 / (2 * seed_radius^2)) * (1 - z / seed_height)
+                perturbation += warm_core
+            end
+            
             θᵢ_array[i, j, k] = θ_eq + perturbation
         end
     end
+end
+
+if seed_vortex
+    @info "Added warm-core vortex seed: Δθ = $seed_θ_anomaly K, radius = $(seed_radius/1e3) km, height = $(seed_height/1e3) km"
 end
 
 if β > 0
@@ -460,12 +491,13 @@ end
 
 # Log initial θ profile info
 θ_min, θ_max = extrema(θᵢ_array)
-@info "Initial θ profile: θ ∈ [$θ_min, $θ_max] K (equilibrated for piecewise forcing)"
+@info "Initial θ profile: θ ∈ [$θ_min, $θ_max] K"
+@info "Surface-air disequilibrium: Tₛ - θ_init = $(Tₛ - θ_init) K (drives strong sensible heat flux)"
 
 # ## Simulation Setup
 
-Δt = 10.0  # Initial timestep (seconds)
-stop_time = 25days  # Full simulation with piecewise radiative forcing and equilibrated initialization
+Δt = 5.0   # Initial timestep (seconds) — halved for 4 km resolution
+stop_time = 200days  # Long run with half-sized domain (576 km × 576 km)
 
 if get(ENV, "CI", "false") == "true"
     stop_time = 30minutes
@@ -576,6 +608,113 @@ simulation.output_writers[:checkpointer] = Checkpointer(model;
                                                         dir = joinpath(experiment_dir, "checkpoints"),
                                                         prefix = "checkpoint",
                                                         overwrite_existing = true)
+
+# Create figures directory early for periodic monitoring
+figures_dir = joinpath(experiment_dir, "figures")
+mkpath(figures_dir)
+
+# ### Periodic figure updates for monitoring
+#
+# Generate all plots periodically so we can monitor TC development during the run.
+
+function update_figures(sim)
+    # Only update if we have enough data
+    t_days = sim.model.clock.time / 86400
+    if t_days < 0.5
+        return nothing  # Skip early timesteps
+    end
+    
+    try
+        surface_file = joinpath(experiment_dir, "surface.jld2")
+        profile_file = joinpath(experiment_dir, "profiles.jld2")
+        
+        if !isfile(surface_file)
+            return nothing
+        end
+        
+        u_ts = FieldTimeSeries(surface_file, "u_surface")
+        v_ts = FieldTimeSeries(surface_file, "v_surface")
+        times = u_ts.times
+        Nt = length(times)
+        
+        if Nt < 2
+            return nothing
+        end
+        
+        # Compute wind speed for all timesteps
+        wind_speed(n) = sqrt.(Array(interior(u_ts[n])).^2 .+ Array(interior(v_ts[n])).^2)
+        max_wind = [maximum(wind_speed(n)) for n in 1:Nt]
+        times_hours = times ./ 3600
+        
+        # --- Figure 1: Intensity plot ---
+        fig1 = Figure(size = (600, 400), fontsize = 14)
+        ax1 = Axis(fig1[1, 1];
+                   xlabel = "Time (hours)",
+                   ylabel = "Maximum surface wind speed (m/s)",
+                   title = "Dry TC (β = $β) — Intensity Evolution")
+        lines!(ax1, times_hours, max_wind; linewidth = 2, color = :dodgerblue)
+        scatter!(ax1, times_hours, max_wind; markersize = 4, color = :dodgerblue)
+        save(joinpath(figures_dir, "intensity.png"), fig1)
+        
+        # --- Figure 2: Surface wind snapshots ---
+        x_km = Array(xnodes(grid, Center())) ./ 1e3
+        y_km = Array(ynodes(grid, Center())) ./ 1e3
+        U_max = max(1.0, maximum(max_wind))
+        
+        fig2 = Figure(size = (1200, 400), fontsize = 12)
+        indices = [1, max(1, Nt ÷ 2), Nt]
+        for (i, n) in enumerate(indices)
+            ax = Axis(fig2[1, i];
+                      xlabel = "x (km)", ylabel = i == 1 ? "y (km)" : "",
+                      title = "t = $(prettytime(times[n]))",
+                      aspect = 1)
+            hm = heatmap!(ax, x_km, y_km, wind_speed(n);
+                          colormap = :viridis, colorrange = (0, U_max))
+            if i == length(indices)
+                Colorbar(fig2[1, i+1], hm; label = "Surface wind speed (m/s)")
+            end
+        end
+        Label(fig2[0, :], "Dry Tropical Cyclone World (β = $β) — Surface Wind Speed",
+              fontsize = 16, tellwidth = false)
+        save(joinpath(figures_dir, "surface_winds.png"), fig2)
+        
+        # --- Figure 3: Profile evolution (if available) ---
+        if isfile(profile_file)
+            θ_avg_ts = FieldTimeSeries(profile_file, "θ_avg")
+            u_avg_ts = FieldTimeSeries(profile_file, "u_avg")
+            v_avg_ts = FieldTimeSeries(profile_file, "v_avg")
+            prof_times = θ_avg_ts.times
+            Nt_prof = length(prof_times)
+            z_km = Array(znodes(grid, Center())) ./ 1e3
+            
+            fig3 = Figure(size = (900, 400), fontsize = 14)
+            axθ = Axis(fig3[1, 1]; xlabel = "θ (K)", ylabel = "z (km)", title = "Potential temperature")
+            axu = Axis(fig3[1, 2]; xlabel = "u (m/s)", title = "Zonal wind")
+            axv = Axis(fig3[1, 3]; xlabel = "v (m/s)", title = "Meridional wind")
+            
+            prof_indices = [1, max(1, Nt_prof ÷ 2), Nt_prof]
+            colors = [:blue, :green, :red]
+            for (i, n) in enumerate(prof_indices)
+                label = "t = $(prettytime(prof_times[n]))"
+                lines!(axθ, Array(vec(interior(θ_avg_ts[n]))), z_km; color = colors[i], label = label)
+                lines!(axu, Array(vec(interior(u_avg_ts[n]))), z_km; color = colors[i])
+                lines!(axv, Array(vec(interior(v_avg_ts[n]))), z_km; color = colors[i])
+            end
+            axislegend(axθ; position = :rt)
+            Label(fig3[0, :], "Dry TC (β = $β) — Mean Profile Evolution", fontsize = 16, tellwidth = false)
+            save(joinpath(figures_dir, "profiles.png"), fig3)
+        end
+        
+        @info "Updated all figures at t = $(prettytime(sim.model.clock.time))"
+    catch e
+        @warn "Figure update failed: $e"
+        @warn "Stacktrace: $(catch_backtrace())"
+    end
+    
+    return nothing
+end
+
+add_callback!(simulation, update_figures, TimeInterval(12hours))
 
 # ## Run the simulation
 
