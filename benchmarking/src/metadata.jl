@@ -42,7 +42,7 @@ function BenchmarkMetadata(arch)
         cpu_model,
         Threads.nthreads(),
         gethostname(),
-        now()
+        now(UTC)
     )
 end
 

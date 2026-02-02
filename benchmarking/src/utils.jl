@@ -135,7 +135,7 @@ function run_benchmark_simulation(model;
     total_points = Nx * Ny * Nz
 
     # Build output filename
-    timestamp = Dates.format(now(), "yyyy-mm-dd_HHMMSS")
+    timestamp = Dates.format(now(UTC), "yyyy-mm-dd_HHMMSS")
     output_filename = joinpath(output_dir, "$(name)_$(timestamp).jld2")
 
     # Final snapshot filename

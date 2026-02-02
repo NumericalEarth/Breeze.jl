@@ -397,7 +397,7 @@ function main()
         println("Markdown report saved to: $md_file")
     end
 
-    println("Benchmarks completed at ", now())
+    println("Benchmarks completed at ", now(UTC), "Z")
 end
 
 """
