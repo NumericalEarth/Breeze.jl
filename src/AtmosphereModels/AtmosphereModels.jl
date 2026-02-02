@@ -49,6 +49,9 @@ export
     # Cloud effective radius
     ConstantRadiusParticles,
 
+    # Microphysics interface
+    prognostic_field_names,
+
     # Diagnostics (re-exported from Diagnostics submodule)
     PotentialTemperature,
     VirtualPotentialTemperature,

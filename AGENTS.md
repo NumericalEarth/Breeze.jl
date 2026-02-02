@@ -39,6 +39,8 @@ Breeze interfaces with ClimaOcean for coupled atmosphere-ocean simulations.
 3. **Kernel Functions**: For GPU compatibility:
    - Use KernelAbstractions.jl syntax for kernels, eg `@kernel`, `@index`
    - Keep kernels type-stable and allocation-free
+   - **Functions called from GPU kernels CANNOT have keyword arguments.** All parameters must be positional.
+     This includes microphysics rate functions, thermodynamic functions, and any `@inline` helper called from a kernel.
    - Short-circuiting if-statements should be avoided if possible. This includes
      `if`... `else`, as well as the ternary operator `?` ... `:`. The function `ifelse` should be used for logic instead.
    - Do not put error messages inside kernels.
@@ -48,16 +50,19 @@ Breeze interfaces with ClimaOcean for coupled atmosphere-ocean simulations.
      with kernels launched via `launch!`. This ensures code works on both CPU and GPU.
    - **Use literal zeros**: Write `max(0, a)` instead of `max(zero(FT), a)`. Julia handles type
      promotion automatically, and `0` is more readable. The same applies to `min`, `clamp`, etc.
+   - **Use `sqrt` and `cbrt`**: Never use `^(1/2)` or `^(1/3)` for square roots or cube roots.
+     Always use `sqrt(x)` and `cbrt(x)` instead. These are faster, more precise, and more readable.
 
 4. **Documentation**:
    - Use DocStringExtensions.jl for consistent docstrings
    - Use `$(TYPEDSIGNATURES)` for automatic typed signature documentation (preferred over `$(SIGNATURES)`)
    - Never write explicit function signatures in docstrings; always use `$(TYPEDSIGNATURES)`
    - Add examples in docstrings when helpful
-   - **Citations in docstrings**: Use inline citations with `[Author1 and Author2 (year)](@cite Key)` or `[Author1 et al. (Year)](@cite Key)` syntax.
+   - **Citations in docstrings**: Use inline citations with `[Author1 and Author2 (year)](@cite Key)` or `[Author1 et al. (Year)](@cite Key)` syntax (`@citet Key` is invalid).
      Avoid separate "References" sections with bare `[Key](@cite)` - these just show citation keys in the REPL
      without context, which is not helpful. Instead, weave citations naturally into the prose, e.g.:
      "Tetens' formula [Tetens1930](@citet) is an empirical formula..."
+   - **Citations in the rest of documentation** (i.e. not docstrings in the source code): Use the `[Key](@cite)` or `[Key](@citet)` style, as appropriate, not the `[Author1 and Author2 (year)](@cite Key)` or `[Author1 et al. (Year)](@cite Key)` syntax, that's only necessary for docstrings.
 
 5. **Memory leanness**
    - Favor doing computations inline versus allocating temporary memory
@@ -91,7 +96,7 @@ Breeze interfaces with ClimaOcean for coupled atmosphere-ocean simulations.
     long_function(a = 1,
                   b = 2)
     ```
-    * Variables should be declared `const` _only when necessary_, and not otherwise. This helps interpret the meaning and usage of variables. Do not overuse `const`.
+    * **NEVER use `const` in examples or scripts.** Variables should be declared `const` _only when necessary_ in source code (e.g., for performance-critical global variables in modules), and not otherwise. In examples and validation scripts, just use regular variable assignment. This helps interpret the meaning and usage of variables and avoids unnecessary complexity.
   - `TitleCase` style is reserved for types, type aliases, and constructors.
   - `snake_case` style should be used for functions and variables (instances of types)
   - "Number variables" (`Nx`, `Ny`) should start with capital `N`. For number of time steps use `Nt`.
