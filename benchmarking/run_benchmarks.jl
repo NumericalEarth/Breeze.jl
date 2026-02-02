@@ -310,11 +310,11 @@ function run_benchmarks(args)
         end
 
         # Run based on mode
-        if mode == "benchmark"
-            result = benchmark_time_stepping(model; time_steps, Δt, warmup_steps, name, verbose=true)
+        result = if mode == "benchmark"
+            benchmark_time_stepping(model; time_steps, Δt, warmup_steps, name, verbose=true)
         elseif mode == "simulate"
-            result = run_benchmark_simulation(model;
-                stop_time, Δt, output_interval, output_dir, name, verbose=true
+            run_benchmark_simulation(model;
+                                     stop_time, Δt, output_interval, output_dir, name, verbose=true
             )
         else
             error("Unknown mode: $mode. Use 'benchmark' or 'simulate'.")
@@ -457,6 +457,7 @@ end
 # Convert struct to Dict, handling nested structs and special types
 struct_to_dict(x::Tuple) = collect(x)
 struct_to_dict(x::DateTime) = string(x)
+struct_to_dict(x::String) = x
 function struct_to_dict(x::T) where T
     isstructtype(T) || return x
     Dict(string(f) => struct_to_dict(getfield(x, f)) for f in fieldnames(T))
