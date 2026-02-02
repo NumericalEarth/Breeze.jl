@@ -455,7 +455,6 @@ function generate_markdown_report(filename, entries)
 end
 
 # Convert struct to Dict, handling nested structs and special types
-struct_to_dict(x) = x
 struct_to_dict(x::Tuple) = collect(x)
 struct_to_dict(x::DateTime) = string(x)
 function struct_to_dict(x::T) where T
