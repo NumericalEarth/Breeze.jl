@@ -279,29 +279,23 @@ add_callback!(simulation, progress, IterationInterval(1000))
 u, v, w, = model.velocities
 U = Average(u, dims=(1, 2)) |> Field # horizontal mean
 V = Average(v, dims=(1, 2)) |> Field
-#θbar = Average(θ, dims=(1,2)) |> Field
 θˡⁱavg = Average(θˡⁱ, dims=(1,2)) |> Field
 qˡavg = Average(qˡ, dims=(1,2)) |> Field
 qᵗ = qˡ + qᵛ
 qᵗavg = Average(qᵗ, dims=(1,2)) |> Field
 θᵛavg = Average(θᵛ, dims=(1,2)) |> Field
-θᵛ_S03 = θ * (1 + 0.608 * qᵛ - qˡ)
-θᵛ_S03avg = Average(θᵛ_S03, dims=(1,2)) |> Field
-
 
 u′² = (u - U) * (u - U)
 v′² = (v - V) * (v - V)
 w′² = w * w
-k = @at (Center, Center, Center) (u′² + v′² + w′²) / 2 
-w′qˡ′ = @at (Center, Center, Center) w * (qˡ - qˡavg)
-w′qᵗ′ = @at (Center, Center, Center) w * (qᵗ - qᵗavg)
-w′u′ = @at (Center, Center, Center) w * (u - U)
-w′θˡⁱ′ = @at (Center, Center, Center) w * (θˡⁱ - θˡⁱavg)
-w′θᵛ′ = @at (Center, Center, Center) w * (θᵛ - θᵛavg)
-w′θᵛ′_S03= @at (Center, Center, Center) w * (θᵛ_S03 - θᵛ_S03avg)
+k = (w′² + v′² + u′²) / 2
+w′qˡ′ = w * (qˡ - qˡavg)
+w′qᵗ′ = w * (qᵗ - qᵗavg)
+w′u′ =  w * (u - U)
+w′θˡⁱ′ = w * (θˡⁱ - θˡⁱavg)
+w′θᵛ′ = w * (θᵛ - θᵛavg)
 
-
-outputs = merge(model.velocities, model.tracers, (; θ, θˡⁱ, θᵛ, qˡ, qᵛ, w′², w′qˡ′, w′qᵗ′, w′u′, k, w′θˡⁱ′, w′θᵛ′, w′θᵛ′_S03))
+outputs = merge(model.velocities, model.tracers, (; θ, θˡⁱ, θᵛ, qˡ, qᵛ, w′², w′qˡ′, w′qᵗ′, w′u′, k, w′θˡⁱ′, w′θᵛ′))
 avg_outputs = NamedTuple(name => Average(outputs[name], dims=(1, 2)) for name in keys(outputs))
 
 filename = "bomex.jld2"
@@ -309,23 +303,22 @@ simulation.output_writers[:averages] = JLD2Writer(model, avg_outputs; filename,
                                                   schedule = AveragedTimeInterval(1hour),
                                                   overwrite_existing = true)
 
-# # Timeseries integrated TKE, cloud fraction and LWP
-# tke_integrated = Integral(Average(k, dims=(1,2)))
+# Timeseries integrated TKE, cloud fraction and LWP for output
+# Turbulent kinetic energy
+plane_averaged_tke = Field(Average(k, dims=(1,2)))  # (1, 1, Nz)
+tke_integrated = Integral(plane_averaged_tke)
 
-# # cloud fraction
-# qˡ_thresh = 1e-6  # kg/kg
+# # Cloud fraction
+# qˡ_thresh = 1e-6
 # cloud_mask = qˡ .> qˡ_thresh
-# mask_array = interior(cloud_mask)  # (Nx, Ny, Nz)
-# column_cloud = any(mask_array; dims=3)  # (Nx, Ny, 1)
-# total_cloud_cover = Average(column_cloud)
+# cloud_fraction = Average(Maximum(cloud_mask; dims=3); dims=(1, 2))
 
-# # LWP
+# LWP
 
-# filename = "bomex_scalar_timeseries.jld2"
-# simulation.output_writers[:scalar_timeseries] = JLD2Writer(model, (; tke_integrated, total_cloud_cover); filename,
-#                                                   including = [:grid],
-#                                                   schedule = TimeInterval(5minutes),
-#                                                   overwrite_existing = true)
+simulation.output_writers[:scalar_timeseries] = JLD2Writer(model, (; tke_integrated); 
+                                                  filename = "bomex_scalar_timeseries.jld2",
+                                                  schedule = TimeInterval(5minutes),
+                                                  overwrite_existing = true)
 
 
 
@@ -379,8 +372,8 @@ axqˡ = Axis(fig[2, 2], xlabel="qˡ (kg/kg)", ylabel="z (m)")
 times = θt.times
 Nt = length(times)
 
-default_colours = Makie.wong_colors()
-colors = [default_colours[mod1(i, length(default_colours))] for i in 1:Nt]
+default_colours = Makie.wong_colors();
+colors = [default_colours[mod1(i, length(default_colours))] for i in 1:Nt];
 
 for n in 1:Nt
     label = n == 1 ? "initial condition" : "mean over $(Int(times[n-1]/hour))-$(Int(times[n]/hour)) hr"
@@ -432,7 +425,11 @@ end
 for ax in (axw, axk)
     ylims!(ax, 0, 2500)
 end
+
 axislegend(axw, position=:rt)
+
+xims!(axk, 0, 0.5)
+xims!(axw, 0, 0.3)
 
 fig[0, :] = Label(fig, "BOMEX: turbulent profile evolution (Siebesma et al., 2003)", fontsize=18, tellwidth=false)
 
@@ -440,30 +437,28 @@ save("bomex_var_profiles.png", fig) #src
 fig
 
 # 3 x 2 panel plot showing turbulent flux profiles
-w′qˡ′t = FieldTimeSeries(filename, "w′qˡ′")
+w′qˡ′t = FieldTimeSeries(filename, "w′qˡ′") 
 w′θˡⁱ′t = FieldTimeSeries(filename, "w′θˡⁱ′")
 w′u′t = FieldTimeSeries(filename, "w′u′")
-w′qᵗ′t = FieldTimeSeries(filename, "w′qᵗ′")
+w′qᵗ′t = FieldTimeSeries(filename, "w′qᵗ′") 
 w′θᵛ′t = FieldTimeSeries(filename, "w′θᵛ′")
-w′θᵛ′_S03_t = FieldTimeSeries(filename, "w′θᵛ′_S03")
+
 fig = Figure(size=(900, 1200), fontsize=14)
 
-# todo: convert to W/m^2
-axwqt = Axis(fig[1, 1], xlabel="w′qᵗ′ (m/s)", ylabel="z (m)")
-axwθ = Axis(fig[1, 2], xlabel="w′θ′ (K m/s)", ylabel="z (m)")
-axwql = Axis(fig[2, 1], xlabel="w′qˡ′ (m/s)", ylabel="z (m)")
-axwθv = Axis(fig[2, 2], xlabel="w′θᵛ′ (K m/s)", ylabel="z (m)")
+axwqt = Axis(fig[1, 1], xlabel="ρ₀ℒˡᵣw′qᵗ′ (W/m²)", ylabel="z (m)")
+axwθ = Axis(fig[1, 2], xlabel="ρ₀cᵖᵈw′θ′ (W/m²)", ylabel="z (m)")
+axwql = Axis(fig[2, 1], xlabel="ρ₀ℒˡᵣw′qˡ′ (W/m²)", ylabel="z (m)")
+axwθv = Axis(fig[2, 2], xlabel="ρ₀cᵖᵈw′θᵛ′ (W/m²)", ylabel="z (m)")
 axwu = Axis(fig[3, 1], xlabel="w′u′ (m²/s²)", ylabel="z (m)")
 
 colors = [default_colours[mod1(i, length(default_colours))] for i in 1:Nt]
 
 for n in 1:Nt
     label = n == 1 ? "initial condition" : "mean over $(Int(times[n-1]/hour))-$(Int(times[n]/hour)) hr"
-    lines!(axwqt, w′qᵗ′t[n], color=colors[n], label=label)
-    lines!(axwθ, w′θˡⁱ′t[n], color=colors[n])
-    lines!(axwql, w′qˡ′t[n], color=colors[n])
-    lines!(axwθv, w′θᵛ′t[n], color=colors[n])
-    lines!(axwθv, w′θᵛ′_S03_t[n], color=colors[n], linestyle=:dash)
+    lines!(axwqt, w′qᵗ′t[n] * surface_density(reference_state) * constants.liquid.reference_latent_heat, color=colors[n], label=label)
+    lines!(axwθ, w′θˡⁱ′t[n] * surface_density(reference_state) * constants.dry_air.heat_capacity , color=colors[n])
+    lines!(axwql, w′qˡ′t[n] * surface_density(reference_state) * constants.liquid.reference_latent_heat, color=colors[n], label=label)
+    lines!(axwθv, w′θᵛ′t[n] * surface_density(reference_state) * constants.dry_air.heat_capacity, color=colors[n])
     lines!(axwu, w′u′t[n], color=colors[n])
 end
 
