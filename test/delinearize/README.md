@@ -4,27 +4,44 @@
 **Related:** `cursor-toolchain/rules/domains/differentiability/investigations/delinearizing-segfault.md`  
 **Synchronized with:** `Manteia.jl/test/delinearize/` (downstream)
 
-## 🔴 ROOT CAUSE IDENTIFIED
+## 🟡 PARTIAL FIX IN REACTANT v0.2.211
 
-**The issue is `halo >= 2` + `--check-bounds=yes`**
+**The issue is `halo >= 2` in KernelAbstractions kernels with loop-dependent indices.**
+
+### Version-Dependent Behavior
+
+| Reactant Version | `halo≥2` Behavior | Notes |
+|------------------|-------------------|-------|
+| < v0.2.211       | ❌ **Segfault** | Process crashes |
+| **v0.2.211+**    | ❌ "failed to raise func" | Clean error, no crash |
+
+**Recommendation:** Use **Reactant v0.2.211+** to get clean error messages instead of segfaults.
+
+### Tested Versions (2026-02-03)
+- Reactant: v0.2.211
+- Enzyme: v0.13.129
+- KernelAbstractions: v0.9.39
+
+### Behavior with Reactant v0.2.211+
 
 | Halo Size | `--check-bounds=no` | `--check-bounds=yes` |
 |-----------|---------------------|----------------------|
 | `halo=1`  | ✅ Works | ✅ Works |
-| `halo≥2`  | ⚠️ May hit B.6.2 (grid size) | ❌ **Segfault (this bug)** |
+| `halo≥2`  | ❌ StableHLO shape error | ❌ "failed to raise func" |
+
+**Two different error paths:**
+- `--check-bounds=yes`: "failed to raise func" (MLIR affine expressions)
+- `--check-bounds=no`: StableHLO `dynamic_update_slice` shape mismatch (workgroup vs array size)
 
 **Root cause:** Periodic halo kernels have loops with index arithmetic (`for i = 1:H`). When `H > 1`:
 - The loop variable `i` appears in index expressions: `i`, `N+i`, `H+i`, `N+H+i`
-- With `--check-bounds=yes`, Julia inserts bounds checking for each access
-- The combination creates complex MLIR that crashes `DelinearizeIndexingPass`
-
-**Note:** "failed to raise func" with `--check-bounds=no` is typically B.6.2 (grid size issue), not this bug.
+- Complex MLIR affine expressions are generated that the compiler cannot raise
 
 **Key MWE:** `test_reactant.jl` (pure KernelAbstractions, no Oceananigans)
 
-## Status: Awaiting Upstream Reactant Fix
+## Status: Awaiting Full Upstream Reactant Fix
 
-Requires Reactant fix to handle bounds checking code with loop-dependent index expressions.
+Reactant v0.2.211 fixes the segfault (now a clean error). The underlying "failed to raise func" issue still requires an upstream fix to handle loop-dependent index expressions in KernelAbstractions kernels.
 
 ## Role in Package Hierarchy
 
@@ -140,8 +157,19 @@ Once B.6.3 is fixed upstream in Reactant, B.6.4 may also be resolved.
 
 ## Package Version Requirements
 
+**Minimum Reactant version: v0.2.211** (converts segfault to clean error)
+
 Record versions when reporting results:
 
 ```julia
-@info "Package versions" Breeze=pkgversion(Breeze) Oceananigans=pkgversion(Oceananigans) Reactant=pkgversion(Reactant) Enzyme=pkgversion(Enzyme)
+@info "Versions" Reactant=pkgversion(Reactant) Enzyme=pkgversion(Enzyme) KernelAbstractions=pkgversion(KernelAbstractions)
 ```
+
+### MLIR Debug Output (v0.2.211+)
+
+When compilation fails, Reactant now dumps the MLIR module to a temp file:
+```
+┌ Error: Compilation failed, MLIR module written to /var/folders/.../module_000_..._post_all_pm.mlir
+```
+
+This file contains the complex affine expressions that failed to raise.
