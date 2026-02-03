@@ -1,33 +1,30 @@
-# DelinearizingIndexPassing Segfault Investigation Tests (Midstream)
+# DelinearizeIndexingPass Segfault Investigation (B.6.3)
 
-**Investigation:** DelinearizingIndexPassing Segmentation Fault (B.6.3)  
+**Investigation:** Segfault with `halo >= 2` + `--check-bounds=yes`  
 **Related:** `cursor-toolchain/rules/domains/differentiability/investigations/delinearizing-segfault.md`  
 **Synchronized with:** `Manteia.jl/test/delinearize/` (downstream)
 
-## ⚠️ PR Dependency Notice
+## 🔴 ROOT CAUSE IDENTIFIED
 
-**This folder contains the primary investigation tests.** The Manteia.jl downstream tests depend on functionality provided by `BreezeReactantExt`, so compilation and gradient computation must be validated here in Breeze.jl first before downstream packages can use it.
+**The issue is `halo >= 2` + `--check-bounds=yes`**
 
-When the relevant Breeze PR is merged, downstream packages (Manteia) can then run their own tests.
+| Halo Size | `--check-bounds=no` | `--check-bounds=yes` |
+|-----------|---------------------|----------------------|
+| `halo=1`  | ✅ Works | ✅ Works |
+| `halo≥2`  | ⚠️ May hit B.6.2 (grid size) | ❌ **Segfault (this bug)** |
 
-## Problem Summary
+**Root cause:** Periodic halo kernels have loops with index arithmetic (`for i = 1:H`). When `H > 1`:
+- The loop variable `i` appears in index expressions: `i`, `N+i`, `H+i`, `N+H+i`
+- With `--check-bounds=yes`, Julia inserts bounds checking for each access
+- The combination creates complex MLIR that crashes `DelinearizeIndexingPass`
 
-Segmentation faults occur during Reactant/Enzyme autodiff compilation or execution when using periodic topology grids with certain Julia runtime options (ParallelTestRunner, bounds checking). The error messages reference "DelinearizingIndexPassing" which is an MLIR pass related to array index computation.
+**Note:** "failed to raise func" with `--check-bounds=no` is typically B.6.2 (grid size issue), not this bug.
 
-The issue appears closely linked to:
-- Using `ParallelTestRunner`
-- Having `--check-bounds=yes` enabled
-- `(Periodic, Periodic, Flat)` topology
-- `fill_halos!` operations during traced loops
+**Key MWE:** `test_reactant.jl` (pure KernelAbstractions, no Oceananigans)
 
-## Current Status
+## Status: Awaiting Upstream Reactant Fix
 
-| Component | Status |
-|-----------|--------|
-| Periodic topology (no ParallelTestRunner) | ⚠️ May work |
-| Periodic topology + ParallelTestRunner | ❌ Segfault |
-| Periodic topology + check-bounds=yes | ❌ Segfault |
-| Root cause identified | ❌ Not yet |
+Requires Reactant fix to handle bounds checking code with loop-dependent index expressions.
 
 ## Role in Package Hierarchy
 
@@ -47,44 +44,34 @@ This is the **midstream** test location. BreezeReactantExt provides critical ext
 
 | File | Purpose | Status |
 |------|---------|--------|
+| **`test_reactant.jl`** | **UPSTREAM MWE**: Pure KernelAbstractions, no Oceananigans | Use for filing Reactant issue |
+| `test_delinearize_halo_size_mwe.jl` | Tests halo=1,2,3 with Oceananigans | halo=1 ✅, halo≥2 + check-bounds ❌ |
 | `test_delinearize_breeze_medwe.jl` | Full MedWE with Breeze AtmosphereModel | ❌ Fails with --check-bounds=yes |
-| `test_delinearize_oceananigans_medwe.jl` | Full MedWE with Oceananigans HydrostaticFreeSurfaceModel | ❌ Fails with --check-bounds=yes |
-| `test_delinearize_fill_halos_medwe.jl` | Minimal MedWE focusing on fill_halo_regions! only | ✅ **PASSES** |
-| `test_delinearize_timestep_components_medwe.jl` | Progressive test: set! → update_state! → time_step! | Test 1 FAILS |
-| `test_delinearize_halo_size_mwe.jl` | **KEY MWE**: Tests halo=1,2,3 - isolates root cause | halo=1 ✅, halo>=2 ❌ |
-| `test_delinearize_set_mwe.jl` | set!(model, T=...) - fails because it calls fill_halos internally | ❌ FAILS (halo=3) |
-| `test_delinearize_field_ops_mwe.jl` | Progressive: parent()→set!()→update_state!() | Test 3+ fail |
-| `test_delinearize_array_ops_mwe.jl` | Pure Reactant array ops: broadcast, view, struct | ✅ All pass |
-| `test_delinearize_periodic_indexing_mwe.jl` | Near-MWE with NO Oceananigans - pure Reactant periodic indexing | ⚠️ Scalar indexing issue (not relevant) |
+| `test_delinearize_oceananigans_medwe.jl` | Full MedWE with Oceananigans | ❌ Fails with --check-bounds=yes |
+| `test_delinearize_fill_halos_medwe.jl` | fill_halo_regions! only (with halo=1) | ✅ PASSES |
+| `test_delinearize_array_ops_mwe.jl` | Pure Reactant array ops | ✅ All pass |
 
 ### Key Finding (2026-02-03) - ROOT CAUSE IDENTIFIED
 
-**The issue is `fill_halo_regions!` with `halo >= 2`**
+**The segfault requires both: `halo >= 2` AND `--check-bounds=yes`**
 
-| Halo Size | --check-bounds=no | --check-bounds=yes |
-|-----------|-------------------|-------------------|
-| `halo=1`  | ✅ PASSES | ✅ PASSES |
-| `halo=2`  | ❌ "failed to raise func" | ❌ Segfault |
-| `halo=3`  | ❌ "failed to raise func" | ❌ Segfault |
-
-**Why `set!(model, T=field)` fails:** It internally calls `initialization_update_state!` 
-which calls `fill_halo_regions!` on tracer fields (with halo=3 typically).
-
-**Root cause:** The periodic halo kernels have loops `for i = 1:H` where H is halo size.
-When H>=2, Reactant's MLIR pass manager can't handle the complex affine index expressions
-created by loop unrolling. See `fill_halo_regions_periodic.jl`:
+**Why H > 1 + check-bounds causes segfault:**
 
 ```julia
-@inbounds for i = 1:H  # ← THIS LOOP IS THE PROBLEM WHEN H >= 2
-    parent(c)[i, j, k]     = parent(c)[N+i, j, k]
-    parent(c)[N+H+i, j, k] = parent(c)[H+i, j, k]
+@inbounds for i = 1:H
+    parent(c)[i, j, k]     = parent(c)[N+i, j, k]     # indices: i, N+i
+    parent(c)[N+H+i, j, k] = parent(c)[H+i, j, k]     # indices: N+H+i, H+i
 end
 ```
 
-**Earlier tests that passed used `halo=1`**, which is why we incorrectly thought fill_halos worked.
-- Oceananigans' KernelAbstractions-based halo filling works correctly with Reactant
-- The DelinearizingIndexPassing segfault is triggered by something ELSE in the model time-stepping
-- The issue is NOT in the periodic boundary halo exchange itself
+1. **Loop variable in indices**: `i` appears in 4 index expressions per iteration
+2. **Bounds checking code**: Julia inserts `if !(1 <= idx <= size) throw(BoundsError)` for EACH access
+3. **Complex conditional MLIR**: Loop-dependent indices inside conditional bounds checks
+4. **DelinearizeIndexingPass crash**: Cannot handle the complex affine expressions
+
+**Why `--check-bounds=no` avoids segfault:**
+- No bounds checking → simpler MLIR → no crash
+- But may still hit B.6.2 ("failed to raise func") if grid is large
 
 ### Test Hierarchy (from most to least complex)
 
@@ -94,14 +81,12 @@ test_delinearize_oceananigans_medwe.jl    ← Full Oceananigans model (FAILS wit
 test_delinearize_fill_halos_medwe.jl      ← Just fill_halo_regions! (PASSES ✅)
 ```
 
-### Next Investigation: What's Different in time_step!?
+### Resolution Path
 
-Since fill_halos works in isolation, the culprit must be in the model's `time_step!`:
-1. **Tendency computations** - stencil operations in compute_tendencies!
-2. **Pressure corrections** - even ExplicitFreeSurface has some operations
-3. **Time stepper internals** - SSP RK3 substeps, state storage/restoration
-4. **Field operations** - set!, interior access patterns
-5. **Kernel parameter dispatch** - workgroup size calculations
+1. ✅ Root cause identified: `halo >= 2` in periodic halo kernels
+2. **File upstream Reactant issue** with `test_delinearize_halo_size_mwe.jl` as MWE
+3. Potential workaround: Manually unroll halo loops in Oceananigans (not ideal)
+4. Wait for Reactant fix to handle KA kernels with runtime-dependent loops
 
 ## How to Run
 
@@ -140,17 +125,18 @@ The segfault suggests that the index conversion is producing invalid memory addr
 
 ### Relationship to B.6.4 (Bounded Topology Segfault)
 
-Both B.6.3 (this issue) and B.6.4 involve `fill_halos!` but manifest differently:
-- **B.6.3**: Periodic topology + ParallelTestRunner + bounds checking → DelinearizingIndexPassing
-- **B.6.4**: Bounded topology + nsteps > 1 → SinkDUS
+B.6.3 and B.6.4 likely share the same root cause:
+- **B.6.3**: Periodic halo kernels with `halo >= 2` → fail to raise / segfault
+- **B.6.4**: Bounded halo kernels may have similar loop structures
+
+Once B.6.3 is fixed upstream in Reactant, B.6.4 may also be resolved.
 
 ## Next Steps
 
-1. **Characterize the failure**: Run MedWE with various Julia options
-2. **Isolate triggers**: Determine exact combination of flags that cause segfault
-3. **Simplify to MWE**: Remove Breeze-specific code while preserving the bug
-4. **File upstream issue**: Once we have a pure Reactant+Enzyme MWE
-5. **Merge PR**: Once fixed, merge and notify downstream (Manteia)
+1. ✅ **Root cause identified**: `fill_halo_regions!` with `halo >= 2`
+2. **File upstream Reactant issue** using `test_delinearize_halo_size_mwe.jl` as MWE
+3. Wait for Reactant fix or implement workaround in Oceananigans
+4. **Merge PR**: Once fixed, merge and notify downstream (Manteia)
 
 ## Package Version Requirements
 

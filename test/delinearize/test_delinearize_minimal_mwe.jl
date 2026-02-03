@@ -18,9 +18,9 @@ using CUDA
 Reactant.set_default_backend("cpu")
 
 # Exact same setup as the failing test
-halo = (1, 1, 1)
+halo = (2, 2, 2)
 grid = RectilinearGrid(ReactantState();
-    size=(4,4,4), extent=(1,1,0.1), halo=halo, topology=(Periodic,Periodic,Bounded))
+    size=(3,3,2), extent=(1,1,0.1), halo=halo, topology=(Periodic,Periodic,Bounded))
 
 field = CenterField(grid)
 set!(field, 0.0)  # Uses Oceananigans set! which fills interior only
