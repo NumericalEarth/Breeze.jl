@@ -59,20 +59,29 @@ This is the **midstream** test location. BreezeReactantExt provides critical ext
 
 ## Test Files
 
-| File | Purpose | Status |
-|------|---------|--------|
+| File | Purpose | Status (v0.2.211+) |
+|------|---------|---------------------|
 | **`test_reactant.jl`** | **UPSTREAM MWE**: Pure KernelAbstractions, no Oceananigans | Use for filing Reactant issue |
-| `test_delinearize_halo_size_mwe.jl` | Tests halo=1,2,3 with Oceananigans | halo=1 ✅, halo≥2 + check-bounds ❌ |
-| `test_delinearize_breeze_medwe.jl` | Full MedWE with Breeze AtmosphereModel | ❌ Fails with --check-bounds=yes |
-| `test_delinearize_oceananigans_medwe.jl` | Full MedWE with Oceananigans | ❌ Fails with --check-bounds=yes |
+| `test_delinearize_halo_size_mwe.jl` | Tests halo=1,2,3 with Oceananigans | halo=1 ✅, halo≥2 ❌ (clean error) |
+| `test_delinearize_breeze_medwe.jl` | Full MedWE with Breeze AtmosphereModel | ❌ Clean error |
+| `test_delinearize_oceananigans_medwe.jl` | Full MedWE with Oceananigans | ❌ Clean error |
 | `test_delinearize_fill_halos_medwe.jl` | fill_halo_regions! only (with halo=1) | ✅ PASSES |
 | `test_delinearize_array_ops_mwe.jl` | Pure Reactant array ops | ✅ All pass |
 
+### Error Types by Configuration (Reactant v0.2.211+)
+
+| Configuration | `--check-bounds=yes` | `--check-bounds=no` |
+|---------------|----------------------|---------------------|
+| halo=1, Periodic | ✅ Works | ✅ Works |
+| halo=1, Bounded | ⚠️ Untested (B.6.4 may apply) | ⚠️ Untested |
+| halo≥2, Periodic | "failed to raise func" | StableHLO shape error |
+| halo≥2, Bounded | ❌ Likely fails (B.6.3/B.6.4) | ❌ Likely fails |
+
 ### Key Finding (2026-02-03) - ROOT CAUSE IDENTIFIED
 
-**The segfault requires both: `halo >= 2` AND `--check-bounds=yes`**
+**The issue is `halo >= 2` with KernelAbstractions kernels containing loop-dependent indices.**
 
-**Why H > 1 + check-bounds causes segfault:**
+**Why H > 1 causes compilation failure:**
 
 ```julia
 @inbounds for i = 1:H
@@ -82,13 +91,15 @@ end
 ```
 
 1. **Loop variable in indices**: `i` appears in 4 index expressions per iteration
-2. **Bounds checking code**: Julia inserts `if !(1 <= idx <= size) throw(BoundsError)` for EACH access
-3. **Complex conditional MLIR**: Loop-dependent indices inside conditional bounds checks
-4. **DelinearizeIndexingPass crash**: Cannot handle the complex affine expressions
+2. **Complex MLIR**: Loop-dependent indices generate complex affine/StableHLO expressions
+3. **Reactant can't compile**: Two different failure modes depending on `--check-bounds`
 
-**Why `--check-bounds=no` avoids segfault:**
-- No bounds checking → simpler MLIR → no crash
-- But may still hit B.6.2 ("failed to raise func") if grid is large
+**Error paths with Reactant v0.2.211+:**
+
+| `--check-bounds` | Error | Root Cause |
+|------------------|-------|------------|
+| `yes` | "failed to raise func" | MLIR affine expressions too complex |
+| `no` | StableHLO shape error | `dynamic_update_slice` mismatch (workgroup vs array size) |
 
 ### Test Hierarchy (from most to least complex)
 

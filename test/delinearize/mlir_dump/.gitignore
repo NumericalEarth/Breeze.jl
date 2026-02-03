@@ -1,0 +1,6 @@
+# Ignore all MLIR dump files (they can be large and are regenerated)
+*.mlir
+*.txt
+
+# But keep this .gitignore
+!.gitignore

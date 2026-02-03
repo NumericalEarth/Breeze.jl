@@ -20,6 +20,13 @@ using KernelAbstractions: StaticSize
 Reactant.set_default_backend("cpu")
 Reactant.allowscalar(true)
 
+# Enable MLIR dumping for debugging
+mlir_dump_dir = joinpath(@__DIR__, "mlir_dump")
+mkpath(mlir_dump_dir)
+Reactant.MLIR.IR.DUMP_MLIR_ALWAYS[] = true
+Reactant.MLIR.IR.DUMP_MLIR_DIR[] = mlir_dump_dir
+@info "MLIR dumps will be written to" mlir_dump_dir
+
 H, N = 2, 4
 total = N + 2*H
 
@@ -35,7 +42,7 @@ const ReactantBackend = Base.get_extension(Reactant, :ReactantKernelAbstractions
 dev = ReactantBackend()  # ← FAILS with "failed to raise func" (v0.2.211+)
 # dev = KernelAbstractions.CPU()  # ← WORKS
 
-kernel! = halo_kernel!(dev, StaticSize((8,8)), StaticSize((total,total)))
+kernel! = halo_kernel!(dev, StaticSize((8)), StaticSize((total)))
 
 loss(c) = (kernel!(c, H, N); mean(c.^2))
 grad(c, dc) = (dc .= 0; Enzyme.autodiff(Enzyme.ReverseWithPrimal, loss, Active, Duplicated(c, dc)))
