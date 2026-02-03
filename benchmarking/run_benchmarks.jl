@@ -435,17 +435,15 @@ function generate_markdown_report(filename, entries)
             grid = entry["grid_size"]
             grid_str = "$(grid[1])×$(grid[2])×$(grid[3])"
             timestamp = entry["metadata"]["timestamp"]
-            # Extract just the date portion for brevity
-            date_str = split(timestamp, "T")[1]
 
             @printf(io, "| `%s` | %s | %s | %.2f | %.2f | %.2e | %s |\n",
-                entry["name"],
-                entry["float_type"],
-                grid_str,
-                entry["time_per_step_seconds"] * 1000,
-                entry["steps_per_second"],
-                entry["grid_points_per_second"],
-                date_str)
+                    entry["name"],
+                    entry["float_type"],
+                    grid_str,
+                    entry["time_per_step_seconds"] * 1000,
+                    entry["steps_per_second"],
+                    entry["grid_points_per_second"],
+                    timestamp)
         end
     end
 end
