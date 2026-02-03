@@ -10,8 +10,8 @@ This test removes Oceananigans entirely and tests whether the issue is in:
 If this fails with --check-bounds=yes, the issue is purely in Reactant.
 If this passes, the issue is in how Oceananigans constructs its halo operations.
 
-Run with: julia --project=. test/delinearize/test_delinearize_periodic_indexing_mwe.jl
-Run with bounds checking: julia --project=. --check-bounds=yes test/delinearize/test_delinearize_periodic_indexing_mwe.jl
+Run with: julia --project=test test/delinearize/test_delinearize_periodic_indexing_mwe.jl
+Run with bounds checking: julia --project=test --check-bounds=yes test/delinearize/test_delinearize_periodic_indexing_mwe.jl
 =#
 
 using Reactant

@@ -12,8 +12,8 @@ This test removes model complexity entirely and focuses on:
 If this fails with --check-bounds=yes, we've isolated the issue to fill_halo_regions!
 If this passes, the issue is elsewhere in the model time-stepping.
 
-Run with: julia --project=. test/delinearize/test_delinearize_fill_halos_medwe.jl
-Run with bounds checking: julia --project=. --check-bounds=yes test/delinearize/test_delinearize_fill_halos_medwe.jl
+Run with: julia --project=test test/delinearize/test_delinearize_fill_halos_medwe.jl
+Run with bounds checking: julia --project=test --check-bounds=yes test/delinearize/test_delinearize_fill_halos_medwe.jl
 =#
 
 using Oceananigans

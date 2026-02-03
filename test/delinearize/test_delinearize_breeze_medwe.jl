@@ -18,8 +18,8 @@ The segfault is associated with:
 - --check-bounds=yes
 - fill_halos! operations on periodic boundaries
 
-Run with: julia --project=. test/delinearize/test_delinearize_breeze_medwe.jl
-Run with bounds checking: julia --project=. --check-bounds=yes test/delinearize/test_delinearize_breeze_medwe.jl
+Run with: julia --project=test test/delinearize/test_delinearize_breeze_medwe.jl
+Run with bounds checking: julia --project=test --check-bounds=yes test/delinearize/test_delinearize_breeze_medwe.jl
 =#
 
 using Oceananigans

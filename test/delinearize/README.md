@@ -49,32 +49,65 @@ This is the **midstream** test location. BreezeReactantExt provides critical ext
 |------|---------|--------|
 | `test_delinearize_breeze_medwe.jl` | Full MedWE with Breeze AtmosphereModel | ❌ Fails with --check-bounds=yes |
 | `test_delinearize_oceananigans_medwe.jl` | Full MedWE with Oceananigans HydrostaticFreeSurfaceModel | ❌ Fails with --check-bounds=yes |
-| `test_delinearize_fill_halos_medwe.jl` | Minimal MedWE focusing on fill_halo_regions! only | Active investigation |
-| `test_delinearize_periodic_indexing_mwe.jl` | Near-MWE with NO Oceananigans - pure Reactant periodic indexing | Active investigation |
+| `test_delinearize_fill_halos_medwe.jl` | Minimal MedWE focusing on fill_halo_regions! only | ✅ **PASSES** |
+| `test_delinearize_timestep_components_medwe.jl` | Progressive test: set! → update_state! → time_step! | Test 1 FAILS |
+| `test_delinearize_set_mwe.jl` | **TRUE MWE**: Just set!(model, T=...) | ❌ **FAILS with --check-bounds=yes** |
+| `test_delinearize_periodic_indexing_mwe.jl` | Near-MWE with NO Oceananigans - pure Reactant periodic indexing | ⚠️ Scalar indexing issue (not relevant) |
+
+### Key Finding (2026-02-03)
+
+**`set!(model, T=...)` is the culprit!** The issue is NOT in:
+- ❌ fill_halo_regions! (passes)
+- ❌ time_step! internals
+- ❌ update_state!
+- ❌ @trace loops
+
+**The issue IS in:**
+- ✅ `set!(model, T=field)` - basic field assignment to model triggers the segfault
+
+**`fill_halo_regions!` is NOT the problem!** The fill_halos test passes completely, which means:
+- Oceananigans' KernelAbstractions-based halo filling works correctly with Reactant
+- The DelinearizingIndexPassing segfault is triggered by something ELSE in the model time-stepping
+- The issue is NOT in the periodic boundary halo exchange itself
 
 ### Test Hierarchy (from most to least complex)
 
 ```
-test_delinearize_breeze_medwe.jl          ← Full Breeze model (FAILS)
-test_delinearize_oceananigans_medwe.jl    ← Full Oceananigans model (FAILS)
-test_delinearize_fill_halos_medwe.jl      ← Just fill_halo_regions! (test this)
-test_delinearize_periodic_indexing_mwe.jl ← Pure Reactant arrays (test this)
+test_delinearize_breeze_medwe.jl          ← Full Breeze model (FAILS with --check-bounds=yes)
+test_delinearize_oceananigans_medwe.jl    ← Full Oceananigans model (FAILS with --check-bounds=yes)
+test_delinearize_fill_halos_medwe.jl      ← Just fill_halo_regions! (PASSES ✅)
 ```
 
-If the pure Reactant test fails, the issue is in Reactant's handling of array operations with bounds checking.
-If only the fill_halos test fails, the issue is in how Oceananigans implements halo filling.
+### Next Investigation: What's Different in time_step!?
+
+Since fill_halos works in isolation, the culprit must be in the model's `time_step!`:
+1. **Tendency computations** - stencil operations in compute_tendencies!
+2. **Pressure corrections** - even ExplicitFreeSurface has some operations
+3. **Time stepper internals** - SSP RK3 substeps, state storage/restoration
+4. **Field operations** - set!, interior access patterns
+5. **Kernel parameter dispatch** - workgroup size calculations
 
 ## How to Run
 
-Run tests individually to isolate the issue:
+Run tests individually using the **test environment** (`--project=test`):
 
 ```bash
-# Run with default settings (may work)
-julia --project=. test/delinearize/test_delinearize_breeze_medwe.jl
+cd Breeze.jl
 
-# Run with bounds checking enabled (likely to trigger segfault)
-julia --project=. --check-bounds=yes test/delinearize/test_delinearize_breeze_medwe.jl
+# Run with default settings (may work)
+julia --project=test test/delinearize/test_delinearize_breeze_medwe.jl
+
+# Run with bounds checking enabled (triggers segfault)
+julia --project=test --check-bounds=yes test/delinearize/test_delinearize_breeze_medwe.jl
+
+# Run the component breakdown test to isolate the issue
+julia --project=test --check-bounds=yes test/delinearize/test_delinearize_timestep_components_medwe.jl
+
+# Run fill_halos test (should PASS)
+julia --project=test --check-bounds=yes test/delinearize/test_delinearize_fill_halos_medwe.jl
 ```
+
+**Note:** Use `--project=test` (not `--project=.`) to use the test environment defined in `test/Project.toml`.
 
 **Warning:** These tests may segfault. Run them in isolation, not as part of a larger test suite.
 
