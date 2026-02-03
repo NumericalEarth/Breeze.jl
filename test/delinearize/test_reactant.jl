@@ -1,53 +1,35 @@
-using Reactant
-using Enzyme
-using KernelAbstractions
+# MWE: DelinearizeIndexingPass segfault with ReactantBackend + check-bounds
+# Run: julia --project=test --check-bounds=yes test/delinearize/test_reactant.jl
+
+using Reactant, Enzyme, KernelAbstractions, CUDA
 using Statistics: mean
+using KernelAbstractions: StaticSize
 
 Reactant.set_default_backend("cpu")
+Reactant.allowscalar(true)
 
-mutable struct MinimalGrid{T}
-    Nx::T
-    Ny::T
-    Nz::T
-    Hx::T
-end
+H, N = 2, 4
+total = N + 2*H
 
-@kernel function fill_periodic_halo!(c, grid)
+@kernel function halo_kernel!(c, H, N)
     j, k = @index(Global, NTuple)
-    H = grid.Hx
-    N = grid.Nx
     @inbounds for i = 1:H
-        c[i, j, k]     = c[N+i, j, k]
+        c[i, j, k] = c[N+i, j, k]
         c[N+H+i, j, k] = c[H+i, j, k]
     end
 end
 
-function fill_halos!(c, grid)
-    Ny_total = grid.Ny + 2 * grid.Hx
-    Nz_total = grid.Nz + 2 * grid.Hx
-    kernel! = fill_periodic_halo!(KernelAbstractions.CPU(), (4, 4))
-    kernel!(c, grid; ndrange=(Ny_total, Nz_total))
-    KernelAbstractions.synchronize(KernelAbstractions.CPU())
-    return nothing
-end
+# Toggle between these two lines to see the difference:
+const ReactantBackend = Base.get_extension(Reactant, :ReactantKernelAbstractionsExt).ReactantBackend
+dev = ReactantBackend()  # ← FAILS with segfault
+# dev = KernelAbstractions.CPU()  # ← WORKS
 
-function loss(c, grid)
-    fill_halos!(c, grid)
-    return mean(c.^2)
-end
+kernel! = halo_kernel!(dev, StaticSize((8,8)), StaticSize((total,total)))
 
-function grad(c, dc, grid)
-    dc .= 0
-    _, lv = Enzyme.autodiff(Enzyme.ReverseWithPrimal, loss, Enzyme.Active,
-        Enzyme.Duplicated(c, dc), Enzyme.Const(grid))
-    return lv
-end
+loss(c) = (kernel!(c, H, N); mean(c.^2))
+grad(c, dc) = (dc .= 0; Enzyme.autodiff(Enzyme.ReverseWithPrimal, loss, Active, Duplicated(c, dc)))
 
-halo = 2
-Nx, Ny, Nz = 4, 4, 4
-grid = MinimalGrid(Nx, Ny, Nz, halo)
-c = Reactant.to_rarray(zeros(Nx + 2*halo, Ny + 2*halo, Nz + 2*halo))
-dc = Reactant.to_rarray(zeros(Nx + 2*halo, Ny + 2*halo, Nz + 2*halo))
+c  = Reactant.to_rarray(zeros(total, total, total))
+dc = Reactant.to_rarray(zeros(total, total, total))
 
-@info "Compiling with halo=$halo..."
-compiled = Reactant.@compile raise_first=true raise=true sync=true grad(c, dc, grid)
+Reactant.@compile raise=true raise_first=true sync=true grad(c, dc)
