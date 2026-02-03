@@ -12,10 +12,9 @@ H, N = 2, 4
 total = N + 2*H
 
 @kernel function halo_kernel!(c, H, N)
-    j, k = @index(Global, NTuple)
+    j = @index(Global, Linear)
     @inbounds for i = 1:H
-        c[i, j, k] = c[N+i, j, k]
-        c[N+H+i, j, k] = c[H+i, j, k]
+        c[i, j] = c[N+i, j]
     end
 end
 
@@ -29,7 +28,7 @@ kernel! = halo_kernel!(dev, StaticSize((8,8)), StaticSize((total,total)))
 loss(c) = (kernel!(c, H, N); mean(c.^2))
 grad(c, dc) = (dc .= 0; Enzyme.autodiff(Enzyme.ReverseWithPrimal, loss, Active, Duplicated(c, dc)))
 
-c  = Reactant.to_rarray(zeros(total, total, total))
-dc = Reactant.to_rarray(zeros(total, total, total))
+c  = Reactant.to_rarray(zeros(total, total))
+dc = Reactant.to_rarray(zeros(total, total))
 
 Reactant.@compile raise=true raise_first=true sync=true grad(c, dc)
