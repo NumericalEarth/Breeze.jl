@@ -19,38 +19,9 @@
 # Two-moment schemes use state structs (ℳ) to encapsulate local microphysical
 # variables. This enables the same tendency functions to work for both grid-based
 # LES and Lagrangian parcel models.
+#
+# Note: WarmPhaseTwoMomentState is defined in cloud_microphysics_translations.jl
 #####
-
-using Breeze.AtmosphereModels: AbstractMicrophysicalState
-
-#####
-##### MicrophysicalState struct for two-moment warm-phase microphysics
-#####
-
-"""
-    WarmPhaseTwoMomentState{FT} <: AbstractMicrophysicalState{FT}
-
-Microphysical state for warm-phase two-moment bulk microphysics.
-
-Contains the local mixing ratios and number concentrations needed to compute
-tendencies for cloud liquid and rain following the Seifert-Beheng 2006 scheme.
-
-# Fields
-- `qᶜˡ`: Cloud liquid mixing ratio (kg/kg)
-- `nᶜˡ`: Cloud liquid number per unit mass (1/kg)
-- `qʳ`: Rain mixing ratio (kg/kg)
-- `nʳ`: Rain number per unit mass (1/kg)
-- `nᵃ`: Aerosol number per unit mass (1/kg)
-- `w`: Updraft velocity (m/s) - used for aerosol activation (0 if unknown)
-"""
-struct WarmPhaseTwoMomentState{FT} <: AbstractMicrophysicalState{FT}
-    qᶜˡ :: FT  # cloud liquid mixing ratio
-    nᶜˡ :: FT  # cloud liquid number per unit mass
-    qʳ  :: FT  # rain mixing ratio
-    nʳ  :: FT  # rain number per unit mass
-    nᵃ  :: FT  # aerosol number per unit mass
-    w   :: FT  # updraft velocity
-end
 
 using CloudMicrophysics.Parameters:
     SB2006,

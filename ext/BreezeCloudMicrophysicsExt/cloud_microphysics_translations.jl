@@ -222,6 +222,38 @@ Named tuple `(; evap_rate_0, evap_rate_1)` where:
 end
 
 #####
+##### Two-moment microphysical state (defined here for use in translations below)
+#####
+
+using Breeze.AtmosphereModels: AbstractMicrophysicalState
+using CloudMicrophysics.AerosolModel: Mode_B, Mode_κ
+
+"""
+    WarmPhaseTwoMomentState{FT} <: AbstractMicrophysicalState{FT}
+
+Microphysical state for warm-phase two-moment bulk microphysics.
+
+Contains the local mixing ratios and number concentrations needed to compute
+tendencies for cloud liquid and rain following the Seifert-Beheng 2006 scheme.
+
+# Fields
+- `qᶜˡ`: Cloud liquid mixing ratio (kg/kg)
+- `nᶜˡ`: Cloud liquid number per unit mass (1/kg)
+- `qʳ`: Rain mixing ratio (kg/kg)
+- `nʳ`: Rain number per unit mass (1/kg)
+- `nᵃ`: Aerosol number per unit mass (1/kg)
+- `w`: Updraft velocity (m/s) - used for aerosol activation (0 if unknown)
+"""
+struct WarmPhaseTwoMomentState{FT} <: AbstractMicrophysicalState{FT}
+    qᶜˡ :: FT  # cloud liquid mixing ratio
+    nᶜˡ :: FT  # cloud liquid number per unit mass
+    qʳ  :: FT  # rain mixing ratio
+    nʳ  :: FT  # rain number per unit mass
+    nᵃ  :: FT  # aerosol number per unit mass
+    w   :: FT  # updraft velocity
+end
+
+#####
 ##### Aerosol activation (TRANSLATION: uses AerosolActivation.jl in CloudMicrophysics with Breeze thermodynamics)
 #####
 #
@@ -232,8 +264,6 @@ end
 # Reference: Abdul-Razzak, H. and Ghan, S.J. (2000). A parameterization of aerosol
 #            activation: 2. Multiple aerosol types. J. Geophys. Res., 105(D5), 6837-6844.
 #####
-
-using CloudMicrophysics.AerosolModel: Mode_B, Mode_κ
 
 """
     max_supersaturation_breeze(aerosol_activation, aps, ρ, ℳ, 𝒰, constants)
