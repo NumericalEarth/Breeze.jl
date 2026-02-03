@@ -336,8 +336,8 @@ end
 # Helper function to compute mean hygroscopicity
 @inline function mean_hygroscopicity(ap, mode::Mode_κ{T, FT}) where {T <: Tuple, FT}
     κ̄ = zero(FT)
-    @inbounds for j in 1:fieldcount(T)
-        κ̄ += mode.vol_mix_ratio[j] * mode.kappa[j]
+    @inbounds for α in 1:fieldcount(T)
+        κ̄ += mode.vol_mix_ratio[α] * mode.kappa[α]
     end
     return κ̄
 end
@@ -346,14 +346,14 @@ end
 
 @inline function mean_hygroscopicity(ap, mode::Mode_B{T, FT}) where {T <: Tuple, FT}
     numerator = zero(FT)
-    @inbounds for j in 1:fieldcount(T)
-        numerator += mode.mass_mix_ratio[j] * mode.dissoc[j] * mode.osmotic_coeff[j] *
-                     mode.soluble_mass_frac[j] / mode.molar_mass[j]
+    @inbounds for α in 1:fieldcount(T)
+        numerator += mode.mass_mix_ratio[α] * mode.dissoc[α] * mode.osmotic_coeff[α] *
+                     mode.soluble_mass_frac[α] / mode.molar_mass[α]
     end
 
     denominator = zero(FT)
-    @inbounds for j in 1:fieldcount(T)
-        denominator += mode.mass_mix_ratio[j] / mode.aerosol_density[j]
+    @inbounds for α in 1:fieldcount(T)
+        denominator += mode.mass_mix_ratio[α] / mode.aerosol_density[α]
     end
 
     return numerator / denominator * ap.M_w / ap.ρ_w
