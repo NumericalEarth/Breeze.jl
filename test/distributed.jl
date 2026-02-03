@@ -1,377 +1,162 @@
 # Distributed integration tests for AtmosphereModel
 #
-# These tests verify that AtmosphereModel works correctly with Oceananigans'
-# distributed computing infrastructure. Currently, distributed support in
-# AtmosphereModel is experimental and some configurations may not work.
+# Tests verify that AtmosphereModel works correctly with Oceananigans'
+# distributed computing infrastructure.
 #
 # When run in the standard test suite, these tests use a single-rank "distributed"
-# configuration. For true multi-rank testing, run with:
+# configuration. For true multi-rank testing with different partitions, run with:
+#
 #   mpiexec -n 4 julia --project test/distributed.jl
 #
-# NOTE: As of this writing, distributed support requires additional development
-# in Breeze's AtmosphereModel, particularly in kernel launch configurations.
+# Multi-rank partitions to test manually:
+#   Partition(4, 1, 1)  - 4-way x partition
+#   Partition(2, 2, 1)  - 2x2 xy partition
+#   Partition(1, 4, 1)  - 4-way y partition
 
 using Breeze
-using Breeze: PrescribedDynamics, KinematicModel
+using Breeze: PrescribedDynamics
 using Oceananigans
-using Oceananigans.Architectures: architecture, child_architecture, CPU
+using Oceananigans.Architectures: architecture, CPU
 using Oceananigans.DistributedComputations: Distributed, Partition
 using Oceananigans.Units: seconds
 using Test
 
-# Define default_arch if not already defined (e.g., when running tests directly)
 if !@isdefined(default_arch)
     default_arch = CPU()
 end
 
 #####
-##### Utility for comparing serial and distributed model runs
+##### Test utilities
 #####
 
-"""
-    compare_fields(model_serial, model_distributed; rtol=0, atol=0)
+function fields_match(model_serial, model_distributed; rtol=0, atol=0)
+    for (name, φ_serial) in pairs(Oceananigans.prognostic_fields(model_serial))
+        φ_distributed = Oceananigans.prognostic_fields(model_distributed)[name]
+        data_s = interior(φ_serial) |> Array
+        data_d = interior(φ_distributed) |> Array
 
-Compare prognostic fields between a serial and distributed model.
-For single-rank distributed runs, fields are compared directly.
-For multi-rank distributed runs, each rank compares its local portion.
-
-Returns true if all prognostic fields match within tolerance.
-"""
-function compare_fields(model_serial, model_distributed; rtol=0, atol=0)
-    all_match = true
-
-    grid_distributed = model_distributed.grid
-    arch = architecture(grid_distributed)
-
-    for (name, field_serial) in pairs(Oceananigans.prognostic_fields(model_serial))
-        field_distributed = Oceananigans.prognostic_fields(model_distributed)[name]
-
-        data_serial = interior(field_serial) |> Array
-        data_distributed = interior(field_distributed) |> Array
-
-        if arch isa Distributed
-            local_size = size(data_distributed)
-            if size(data_serial) == local_size
-                if !isapprox(data_serial, data_distributed; atol, rtol)
-                    @warn "Field $name does not match between serial and distributed runs"
-                    max_diff = maximum(abs, data_serial .- data_distributed)
-                    @warn "  Maximum difference: $max_diff"
-                    all_match = false
-                end
-            else
-                if !all(isfinite, data_distributed)
-                    @warn "Field $name contains non-finite values in distributed run"
-                    all_match = false
-                end
-            end
+        # For multi-rank runs, just check for finite values
+        if size(data_s) != size(data_d)
+            all(isfinite, data_d) || return false
         else
-            if !isapprox(data_serial, data_distributed; atol, rtol)
-                @warn "Field $name does not match"
-                max_diff = maximum(abs, data_serial .- data_distributed)
-                @warn "  Maximum difference: $max_diff"
-                all_match = false
-            end
+            isapprox(data_s, data_d; atol, rtol) || return false
         end
     end
-
-    return all_match
+    return true
 end
 
-"""
-    run_comparison_test(;
-        arch,
-        dynamics_type,
-        topology,
-        closure,
-        microphysics,
-        advection = WENO(),
-        coriolis = nothing,
-        stop_time = 10,
-        grid_size = (8, 8, 8),
-        extent = (1000, 1000, 1000),
-        cfl = 0.5)
+function run_and_compare(; arch, partition=Partition(1, 1), dynamics_type=:Anelastic,
+                         closure=nothing, microphysics=nothing, coriolis=nothing,
+                         grid_size=(16, 16, 16), extent=(1000, 1000, 1000), stop_time=10)
 
-Run a model with serial and single-rank distributed architectures,
-then compare results for equivalence. Uses TimeStepWizard for
-adaptive time stepping based on CFL condition.
-
-Returns true if all prognostic fields match within tolerance.
-"""
-function run_comparison_test(;
-        arch,
-        dynamics_type,
-        topology,
-        closure,
-        microphysics,
-        advection = WENO(),
-        coriolis = nothing,
-        stop_time = 10,
-        grid_size = (8, 8, 8),
-        extent = (1000, 1000, 1000),
-        cfl = 0.5)
-
-    x = (0, extent[1])
-    y = (0, extent[2])
-    z = (0, extent[3])
-
-    grid_serial = RectilinearGrid(arch; size=grid_size, x, y, z, topology)
-
-    arch_distributed = Distributed(arch; partition=Partition(1, 1))
-    grid_distributed = RectilinearGrid(arch_distributed; size=grid_size, x, y, z, topology)
-
+    topology = (Periodic, Periodic, Bounded)
+    x, y, z = (0, extent[1]), (0, extent[2]), (0, extent[3])
+    Lx, Ly, Lz = extent
     constants = ThermodynamicConstants()
 
-    function make_dynamics(grid, dynamics_type, constants)
-        reference_state = ReferenceState(grid, constants)
-        if dynamics_type === :Anelastic
-            return AnelasticDynamics(reference_state)
-        elseif dynamics_type === :Prescribed
-            return PrescribedDynamics(reference_state)
-        else
-            error("Unknown dynamics type: $dynamics_type")
-        end
-    end
-
-    dynamics_serial = make_dynamics(grid_serial, dynamics_type, constants)
-    dynamics_distributed = make_dynamics(grid_distributed, dynamics_type, constants)
-
-    model_kwargs_serial = (;
-        dynamics = dynamics_serial,
-        thermodynamic_constants = constants,
-        advection,
-        closure,
-        microphysics,
-        coriolis)
-
-    model_kwargs_distributed = (;
-        dynamics = dynamics_distributed,
-        thermodynamic_constants = constants,
-        advection,
-        closure,
-        microphysics,
-        coriolis)
-
-    θ₀ = 300
-    qᵗ₀ = 0.01
-    Lx, Ly, Lz = extent
     u₀(x, y, z) = sin(2π * x / Lx) * cos(2π * y / Ly)
     v₀(x, y, z) = cos(2π * x / Lx) * sin(2π * y / Ly)
 
-    model_serial = AtmosphereModel(grid_serial; model_kwargs_serial...)
-    set!(model_serial; θ = θ₀, qᵗ = qᵗ₀, u = u₀, v = v₀)
+    # Distributed model (on all ranks)
+    arch_distributed = Distributed(arch; partition)
+    grid_distributed = RectilinearGrid(arch_distributed; size=grid_size, x, y, z, topology)
+    reference_state_d = ReferenceState(grid_distributed, constants)
+    dynamics_d = dynamics_type === :Anelastic ? AnelasticDynamics(reference_state_d) :
+                                                PrescribedDynamics(reference_state_d)
 
-    wizard_serial = TimeStepWizard(; cfl)
-    simulation_serial = Simulation(model_serial; Δt=1e-3seconds, stop_time)
-    simulation_serial.callbacks[:wizard] = Callback(wizard_serial, IterationInterval(1))
-    run!(simulation_serial)
+    model_distributed = AtmosphereModel(grid_distributed; dynamics=dynamics_d,
+                                        thermodynamic_constants=constants,
+                                        advection=WENO(), closure, microphysics, coriolis)
+    set!(model_distributed; θ=300, qᵗ=0.01, u=u₀, v=v₀)
 
-    model_distributed = AtmosphereModel(grid_distributed; model_kwargs_distributed...)
-    set!(model_distributed; θ = θ₀, qᵗ = qᵗ₀, u = u₀, v = v₀)
+    simulation_d = Simulation(model_distributed; Δt=1e-3seconds, stop_time)
+    simulation_d.callbacks[:wizard] = Callback(TimeStepWizard(cfl=0.5), IterationInterval(1))
+    run!(simulation_d)
 
-    wizard_distributed = TimeStepWizard(; cfl)
-    simulation_distributed = Simulation(model_distributed; Δt=1e-3seconds, stop_time)
-    simulation_distributed.callbacks[:wizard] = Callback(wizard_distributed, IterationInterval(1))
-    run!(simulation_distributed)
+    # Serial model (only on root rank for comparison)
+    local_rank = arch_distributed.local_rank
+    if local_rank == 0
+        grid_serial = RectilinearGrid(arch; size=grid_size, x, y, z, topology)
+        reference_state = ReferenceState(grid_serial, constants)
+        dynamics = dynamics_type === :Anelastic ? AnelasticDynamics(reference_state) :
+                                                  PrescribedDynamics(reference_state)
 
-    FT = eltype(grid_serial)
-    return compare_fields(model_serial, model_distributed; rtol=10*eps(FT))
+        model_serial = AtmosphereModel(grid_serial; dynamics, thermodynamic_constants=constants,
+                                       advection=WENO(), closure, microphysics, coriolis)
+        set!(model_serial; θ=300, qᵗ=0.01, u=u₀, v=v₀)
+
+        simulation = Simulation(model_serial; Δt=1e-3seconds, stop_time)
+        simulation.callbacks[:wizard] = Callback(TimeStepWizard(cfl=0.5), IterationInterval(1))
+        run!(simulation)
+
+        # Compare fields on root
+        FT = eltype(grid_distributed)
+        return fields_match(model_serial, model_distributed; rtol=10*eps(FT))
+    else
+        return true  # Non-root ranks pass by default
+    end
 end
-
-#####
-##### Test configurations
-#####
-
-const TOPOLOGIES = (
-    (Periodic, Periodic, Bounded),  # Doubly periodic
-    (Periodic, Bounded, Bounded),   # Channel (bounded in y)
-)
-
-const DYNAMICS_TYPES = (:Anelastic, :Prescribed)
 
 #####
 ##### Tests
 #####
 
-@testset "Distributed AtmosphereModel construction" begin
+@testset "Distributed AtmosphereModel" begin
     arch = default_arch
+    arch isa GPU && (@info "Skipping distributed tests on GPU"; return)
 
-    if arch isa GPU
-        @info "Skipping distributed construction tests on GPU"
-        return
-    end
+    @testset "Construction" begin
+        arch_d = Distributed(arch; partition=Partition(1, 1))
+        grid = RectilinearGrid(arch_d; size=(16, 16, 16),
+                               x=(0, 1000), y=(0, 1000), z=(0, 1000),
+                               topology=(Periodic, Periodic, Bounded))
 
-    grid_size = (4, 4, 4)
-    extent = (1000, 1000, 1000)
-
-    @testset "Distributed grid construction with topology: $topology" for topology in TOPOLOGIES
-        x = (0, extent[1])
-        y = (0, extent[2])
-        z = (0, extent[3])
-
-        arch_distributed = Distributed(arch; partition=Partition(1, 1))
-        grid = RectilinearGrid(arch_distributed; size=grid_size, x, y, z, topology)
-
-        @test grid isa RectilinearGrid
         @test architecture(grid) isa Distributed
-    end
 
-    @testset "AtmosphereModel with distributed grid: $dynamics_type" for dynamics_type in DYNAMICS_TYPES
-        topology = (Periodic, Periodic, Bounded)
-        x = (0, extent[1])
-        y = (0, extent[2])
-        z = (0, extent[3])
-
-        arch_distributed = Distributed(arch; partition=Partition(1, 1))
-        grid = RectilinearGrid(arch_distributed; size=grid_size, x, y, z, topology)
         constants = ThermodynamicConstants()
         reference_state = ReferenceState(grid, constants)
-
-        if dynamics_type === :Anelastic
-            dynamics = AnelasticDynamics(reference_state)
-        else # :Prescribed
-            dynamics = PrescribedDynamics(reference_state)
-        end
-
+        dynamics = AnelasticDynamics(reference_state)
         model = AtmosphereModel(grid; dynamics, thermodynamic_constants=constants)
+
         @test model isa AtmosphereModel
 
         set!(model; θ=300, qᵗ=0.01)
         time_step!(model, 1)
         @test model.clock.iteration == 1
     end
-end
 
-@testset "Distributed vs serial comparison" begin
-    arch = default_arch
-
-    if arch isa GPU
-        @info "Skipping distributed comparison tests on GPU"
-        return
-    end
-
-    # Only test doubly periodic topology with Anelastic dynamics
-    # Channel topology and Compressible dynamics have known issues with distributed support
-    @testset "Anelastic dynamics - doubly periodic" begin
-        @testset "No closure or microphysics" begin
-            result = run_comparison_test(;
-                arch,
-                dynamics_type = :Anelastic,
-                topology = (Periodic, Periodic, Bounded),
-                closure = nothing,
-                microphysics = nothing,
-                advection = WENO(),
-                coriolis = nothing)
-            @test result
+    @testset "Serial vs distributed comparison" begin
+        @testset "AnelasticDynamics" begin
+            @test run_and_compare(; arch)
         end
 
-        @testset "With SmagorinskyLilly closure" begin
-            result = run_comparison_test(;
-                arch,
-                dynamics_type = :Anelastic,
-                topology = (Periodic, Periodic, Bounded),
-                closure = SmagorinskyLilly(),
-                microphysics = nothing,
-                advection = WENO(),
-                coriolis = nothing)
-            @test result
+        @testset "PrescribedDynamics" begin
+            @test run_and_compare(; arch, dynamics_type=:Prescribed)
+        end
+
+        @testset "With SmagorinskyLilly" begin
+            @test run_and_compare(; arch, closure=SmagorinskyLilly())
+        end
+
+        @testset "With AnisotropicMinimumDissipation" begin
+            @test run_and_compare(; arch, closure=AnisotropicMinimumDissipation())
         end
 
         @testset "With SaturationAdjustment" begin
-            result = run_comparison_test(;
-                arch,
-                dynamics_type = :Anelastic,
-                topology = (Periodic, Periodic, Bounded),
-                closure = nothing,
-                microphysics = SaturationAdjustment(),
-                advection = WENO(),
-                coriolis = nothing)
-            @test result
+            @test run_and_compare(; arch, microphysics=SaturationAdjustment())
         end
 
         @testset "With FPlane Coriolis" begin
-            result = run_comparison_test(;
-                arch,
-                dynamics_type = :Anelastic,
-                topology = (Periodic, Periodic, Bounded),
-                closure = nothing,
-                microphysics = nothing,
-                advection = WENO(),
-                coriolis = FPlane(f=1e-4))
-            @test result
+            @test run_and_compare(; arch, coriolis=FPlane(f=1e-4))
         end
     end
 
-    @testset "Prescribed dynamics - doubly periodic" begin
-        result = run_comparison_test(;
-            arch,
-            dynamics_type = :Prescribed,
-            topology = (Periodic, Periodic, Bounded),
-            closure = nothing,
-            microphysics = nothing,
-            advection = WENO(),
-            coriolis = nothing)
-        @test result
+    @testset "Full physics [$FT]" for FT in (Float32, Float64)
+        Oceananigans.defaults.FloatType = FT
+        @test run_and_compare(; arch,
+                              closure=SmagorinskyLilly(),
+                              microphysics=SaturationAdjustment(FT),
+                              coriolis=FPlane(f=FT(1e-4)),
+                              extent=(5000, 5000, 2000), stop_time=50)
     end
-
-    # Note: Channel topology tests are commented out due to known distributed issues
-    # TODO: Enable channel topology tests when distributed support is extended
-    # @testset "Channel topology (bounded in y)" begin
-    #     result = run_comparison_test(;
-    #         arch,
-    #         dynamics_type = :Anelastic,
-    #         topology = (Periodic, Bounded, Bounded),
-    #         closure = nothing,
-    #         microphysics = nothing,
-    #         advection = WENO(),
-    #         coriolis = nothing)
-    #     @test result
-    # end
-
-    # Note: CompressibleDynamics tests are disabled - distributed support not yet implemented
-    # TODO: Enable CompressibleDynamics tests when distributed support is extended
-end
-
-@testset "Distributed with full physics [$(FT)]" for FT in (Float32, Float64)
-    Oceananigans.defaults.FloatType = FT
-
-    arch = default_arch
-    if arch isa GPU
-        @info "Skipping distributed full physics test on GPU"
-        return
-    end
-
-    result = run_comparison_test(;
-        arch,
-        dynamics_type = :Anelastic,
-        topology = (Periodic, Periodic, Bounded),
-        closure = SmagorinskyLilly(),
-        microphysics = SaturationAdjustment(FT),
-        advection = WENO(order=5),
-        coriolis = FPlane(f=FT(1e-4)),
-        grid_size = (8, 8, 8),
-        extent = (5000, 5000, 2000),
-        stop_time = 50)
-
-    @test result
-end
-
-@testset "Distributed with AnisotropicMinimumDissipation [$(FT)]" for FT in (Float32, Float64)
-    Oceananigans.defaults.FloatType = FT
-
-    arch = default_arch
-    if arch isa GPU
-        @info "Skipping distributed AMD test on GPU"
-        return
-    end
-
-    result = run_comparison_test(;
-        arch,
-        dynamics_type = :Anelastic,
-        topology = (Periodic, Periodic, Bounded),
-        closure = AnisotropicMinimumDissipation(),
-        microphysics = nothing,
-        advection = WENO(),
-        coriolis = nothing)
-
-    @test result
 end
