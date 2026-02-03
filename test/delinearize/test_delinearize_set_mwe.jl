@@ -17,7 +17,7 @@ using CUDA
 Reactant.set_default_backend("cpu")
 
 # Grid
-grid = RectilinearGrid(ReactantState(); size=(4,4,2), extent=(1,1,0.1), halo=(3,3,3), topology=(Periodic,Periodic,Bounded))
+grid = RectilinearGrid(ReactantState(); size=(4,4,2), extent=(1,1,0.1), halo=(1,1,1), topology=(Periodic,Periodic,Bounded))
 
 # Model
 model = HydrostaticFreeSurfaceModel(grid; free_surface=ExplicitFreeSurface(), buoyancy=nothing, tracers=:T, closure=nothing)

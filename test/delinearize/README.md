@@ -51,21 +51,37 @@ This is the **midstream** test location. BreezeReactantExt provides critical ext
 | `test_delinearize_oceananigans_medwe.jl` | Full MedWE with Oceananigans HydrostaticFreeSurfaceModel | ❌ Fails with --check-bounds=yes |
 | `test_delinearize_fill_halos_medwe.jl` | Minimal MedWE focusing on fill_halo_regions! only | ✅ **PASSES** |
 | `test_delinearize_timestep_components_medwe.jl` | Progressive test: set! → update_state! → time_step! | Test 1 FAILS |
-| `test_delinearize_set_mwe.jl` | **TRUE MWE**: Just set!(model, T=...) | ❌ **FAILS with --check-bounds=yes** |
+| `test_delinearize_halo_size_mwe.jl` | **KEY MWE**: Tests halo=1,2,3 - isolates root cause | halo=1 ✅, halo>=2 ❌ |
+| `test_delinearize_set_mwe.jl` | set!(model, T=...) - fails because it calls fill_halos internally | ❌ FAILS (halo=3) |
+| `test_delinearize_field_ops_mwe.jl` | Progressive: parent()→set!()→update_state!() | Test 3+ fail |
+| `test_delinearize_array_ops_mwe.jl` | Pure Reactant array ops: broadcast, view, struct | ✅ All pass |
 | `test_delinearize_periodic_indexing_mwe.jl` | Near-MWE with NO Oceananigans - pure Reactant periodic indexing | ⚠️ Scalar indexing issue (not relevant) |
 
-### Key Finding (2026-02-03)
+### Key Finding (2026-02-03) - ROOT CAUSE IDENTIFIED
 
-**`set!(model, T=...)` is the culprit!** The issue is NOT in:
-- ❌ fill_halo_regions! (passes)
-- ❌ time_step! internals
-- ❌ update_state!
-- ❌ @trace loops
+**The issue is `fill_halo_regions!` with `halo >= 2`**
 
-**The issue IS in:**
-- ✅ `set!(model, T=field)` - basic field assignment to model triggers the segfault
+| Halo Size | --check-bounds=no | --check-bounds=yes |
+|-----------|-------------------|-------------------|
+| `halo=1`  | ✅ PASSES | ✅ PASSES |
+| `halo=2`  | ❌ "failed to raise func" | ❌ Segfault |
+| `halo=3`  | ❌ "failed to raise func" | ❌ Segfault |
 
-**`fill_halo_regions!` is NOT the problem!** The fill_halos test passes completely, which means:
+**Why `set!(model, T=field)` fails:** It internally calls `initialization_update_state!` 
+which calls `fill_halo_regions!` on tracer fields (with halo=3 typically).
+
+**Root cause:** The periodic halo kernels have loops `for i = 1:H` where H is halo size.
+When H>=2, Reactant's MLIR pass manager can't handle the complex affine index expressions
+created by loop unrolling. See `fill_halo_regions_periodic.jl`:
+
+```julia
+@inbounds for i = 1:H  # ← THIS LOOP IS THE PROBLEM WHEN H >= 2
+    parent(c)[i, j, k]     = parent(c)[N+i, j, k]
+    parent(c)[N+H+i, j, k] = parent(c)[H+i, j, k]
+end
+```
+
+**Earlier tests that passed used `halo=1`**, which is why we incorrectly thought fill_halos worked.
 - Oceananigans' KernelAbstractions-based halo filling works correctly with Reactant
 - The DelinearizingIndexPassing segfault is triggered by something ELSE in the model time-stepping
 - The issue is NOT in the periodic boundary halo exchange itself
