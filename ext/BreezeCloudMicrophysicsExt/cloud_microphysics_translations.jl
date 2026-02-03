@@ -236,7 +236,7 @@ end
 using CloudMicrophysics.AerosolModel: Mode_B, Mode_κ
 
 """
-    max_supersaturation_breeze(aerosol_activation, air_properties, T, p, w, qᵗ, qˡ, qⁱ, Nˡ, Nⁱ, ρ, constants)
+    max_supersaturation_breeze(aerosol_activation, aps, ρ, ℳ, 𝒰, constants)
 
 Compute the maximum supersaturation using the Abdul-Razzak and Ghan (2000) parameterization.
 
@@ -245,16 +245,10 @@ Breeze's thermodynamics instead of Thermodynamics.jl.
 
 # Arguments
 - `aerosol_activation`: AerosolActivation containing activation parameters and aerosol distribution
-- `air_properties`: AirProperties (thermal conductivity, vapor diffusivity)
-- `T`: Temperature [K]
-- `p`: Pressure [Pa]
-- `w`: Updraft velocity [m/s]
-- `qᵗ`: Total specific humidity [kg/kg]
-- `qˡ`: Liquid water specific humidity [kg/kg]
-- `qⁱ`: Ice water specific humidity [kg/kg]
-- `Nˡ`: Liquid water number concentration [1/m³]
-- `Nⁱ`: Ice water number concentration [1/m³]
+- `aps`: AirProperties (thermal conductivity, vapor diffusivity)
 - `ρ`: Air density [kg/m³]
+- `ℳ`: Microphysical state containing updraft velocity and number concentrations
+- `𝒰`: Thermodynamic state
 - `constants`: Breeze ThermodynamicConstants
 
 # Returns
@@ -263,17 +257,22 @@ Maximum supersaturation (dimensionless, e.g., 0.01 = 1% supersaturation)
 @inline function max_supersaturation_breeze(
     aerosol_activation,
     aps::AirProperties{FT},
-    T::FT,
-    p::FT,
-    w::FT,
-    qᵗ::FT,
-    qˡ::FT,
-    qⁱ::FT,
-    Nˡ::FT,
-    Nⁱ::FT,
     ρ::FT,
+    ℳ::WarmPhaseTwoMomentState{FT},
+    𝒰,
     constants,
 ) where {FT}
+
+    # Extract from thermodynamic state
+    T = temperature(𝒰, constants)
+    p = 𝒰.reference_pressure
+    q = 𝒰.moisture_mass_fractions
+    (; qᵛ, qˡ, qⁱ) = q
+
+    # Extract from microphysical state
+    w = ℳ.w
+    Nˡ = ℳ.nᶜˡ * ρ  # convert from per-mass to per-volume
+    Nⁱ = zero(FT)   # warm phase: no ice
 
     ap = aerosol_activation.activation_parameters
     ad = aerosol_activation.aerosol_distribution
@@ -288,9 +287,7 @@ Maximum supersaturation (dimensionless, e.g., 0.01 = 1% supersaturation)
     ρʷ = ap.ρ_w  # water density
     ρⁱ = ap.ρ_i  # ice density
 
-    # Moisture mass fractions and mixture properties
-    qᵛ = qᵗ - qˡ - qⁱ
-    q = MoistureMassFractions(qᵛ, qˡ, qⁱ)
+    # Mixture properties
     Rᵐ = mixture_gas_constant(q, constants)
     cᵖᵐ = mixture_heat_capacity(q, constants)
 
