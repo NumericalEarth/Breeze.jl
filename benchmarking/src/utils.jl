@@ -59,6 +59,7 @@ function benchmark_time_stepping(model;
 
     total_time_seconds = (end_time - start_time) / 1e9
     time_per_step_seconds = total_time_seconds / time_steps
+    steps_per_second = time_steps / total_time_seconds
     grid_points_per_second = total_points / time_per_step_seconds
 
     metadata = BenchmarkMetadata(arch)
@@ -71,6 +72,7 @@ function benchmark_time_stepping(model;
         Δt,
         total_time_seconds,
         time_per_step_seconds,
+        steps_per_second,
         grid_points_per_second,
         metadata
     )
@@ -221,6 +223,7 @@ function run_benchmark_simulation(model;
     wall_time_seconds = (end_time - start_time) / 1e9
     time_steps = iteration(simulation)
     time_per_step_seconds = wall_time_seconds / time_steps
+    steps_per_second = time_steps / wall_time_seconds
     grid_points_per_second = total_points / time_per_step_seconds
 
     metadata = BenchmarkMetadata(arch)
@@ -234,6 +237,7 @@ function run_benchmark_simulation(model;
         Float64(Δt),
         wall_time_seconds,
         time_per_step_seconds,
+        steps_per_second,
         grid_points_per_second,
         output_filename,
         metadata

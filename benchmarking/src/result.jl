@@ -10,6 +10,7 @@ struct BenchmarkResult
     Δt::Float64
     total_time_seconds::Float64
     time_per_step_seconds::Float64
+    steps_per_second::Float64
     grid_points_per_second::Float64
     metadata::BenchmarkMetadata
 end
@@ -27,6 +28,7 @@ function Base.show(io::IO, ::MIME"text/plain", r::BenchmarkResult)
     println(io, "├── Δt: ", r.Δt)
     println(io, "├── total_time: ", @sprintf("%.3f s", r.total_time_seconds))
     println(io, "├── time_per_step: ", @sprintf("%.6f s", r.time_per_step_seconds))
+    println(io, "├── steps_per_second: ", @sprintf("%.6f/s", r.steps_per_second))
     println(io, "├── grid_points_per_second: ", @sprintf("%.2e", r.grid_points_per_second))
     print(io,   "└── metadata: ", r.metadata.architecture, " @ ", r.metadata.timestamp)
 end
@@ -44,6 +46,7 @@ struct SimulationResult
     Δt::Float64
     wall_time_seconds::Float64
     time_per_step_seconds::Float64
+    steps_per_second::Float64
     grid_points_per_second::Float64
     output_file::String
     metadata::BenchmarkMetadata
@@ -63,6 +66,7 @@ function Base.show(io::IO, ::MIME"text/plain", r::SimulationResult)
     println(io, "├── Δt: ", r.Δt)
     println(io, "├── wall_time: ", @sprintf("%.1f s (%.2f hours)", r.wall_time_seconds, r.wall_time_seconds / 3600))
     println(io, "├── time_per_step: ", @sprintf("%.6f s", r.time_per_step_seconds))
+    println(io, "├── steps_per_second: ", @sprintf("%.6f/s", r.steps_per_second))
     println(io, "├── grid_points_per_second: ", @sprintf("%.2e", r.grid_points_per_second))
     println(io, "├── output_file: ", r.output_file)
     print(io,   "└── metadata: ", r.metadata.architecture, " @ ", r.metadata.timestamp)

@@ -347,13 +347,12 @@ function main()
 
     for r in results
         grid_str = "$(r.grid_size[1])×$(r.grid_size[2])×$(r.grid_size[3])"
-        steps_per_second = 1.0 / r.time_per_step_seconds
         @printf("%-50s %8s %12s %10.4f ms %10.2f %15.2e\n",
             r.name,
             r.float_type,
             grid_str,
             r.time_per_step_seconds * 1000,
-            steps_per_second,
+            r.steps_per_second,
             r.grid_points_per_second
         )
     end
@@ -368,20 +367,17 @@ function main()
         output_file = args["output"]
         clear_file = args["clear"]
 
-        # Convert results to JSON-serializable format
-        new_entries = [result_to_dict(r) for r in results]
-
         # Load existing results or start fresh
         all_entries = if clear_file || !isfile(output_file)
             if clear_file && isfile(output_file)
                 println("\nCleared existing results file: $output_file")
             end
-            new_entries
+            results
         else
             # Read existing file and append
-            existing_data = JSON.parse(read(output_file); dicttype=Dict{String,Any})
+            existing_data = JSON.parse(read(output_file))
             println("\nAppending to existing results file: $output_file")
-            vcat(existing_data, new_entries)
+            vcat(existing_data, results)
         end
 
         # Write all results to JSON
@@ -389,11 +385,11 @@ function main()
             JSON.json(io, all_entries; pretty=true)
         end
 
-        println("Results saved to: $output_file ($(length(new_entries)) new, $(length(all_entries)) total)")
+        println("Results saved to: $output_file ($(length(results)) new, $(length(all_entries)) total)")
 
         # Generate markdown report from the full JSON data
         md_file = replace(output_file, ".json" => ".md")
-        generate_markdown_report(md_file, all_entries)
+        generate_markdown_report(md_file, JSON.parse(read(output_file)))
         println("Markdown report saved to: $md_file")
     end
 
@@ -453,17 +449,6 @@ function generate_markdown_report(filename, entries)
         end
     end
 end
-
-# Convert struct to Dict, handling nested structs and special types
-struct_to_dict(x::Tuple) = collect(x)
-struct_to_dict(x::DateTime) = string(x)
-struct_to_dict(x::String) = x
-function struct_to_dict(x::T) where T
-    isstructtype(T) || return x
-    Dict(string(f) => struct_to_dict(getfield(x, f)) for f in fieldnames(T))
-end
-
-result_to_dict(r) = merge(struct_to_dict(r), Dict("steps_per_second" => 1.0 / r.time_per_step_seconds))
 
 # Run when invoked as script
 if abspath(PROGRAM_FILE) == @__FILE__
