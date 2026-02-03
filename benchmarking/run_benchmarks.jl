@@ -438,7 +438,7 @@ function generate_markdown_report(filename, entries)
             # Extract just the date portion for brevity
             date_str = split(timestamp, "T")[1]
 
-            @printf(io, "| %s | %s | %s | %.2f | %.2f | %.2e | %s |\n",
+            @printf(io, "| `%s` | %s | %s | %.2f | %.2f | %.2e | %s |\n",
                 entry["name"],
                 entry["float_type"],
                 grid_str,
