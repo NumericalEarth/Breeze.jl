@@ -42,7 +42,6 @@ tendencies for cloud liquid and rain following the Seifert-Beheng 2006 scheme.
 - `nʳ`: Rain number per unit mass (1/kg)
 - `nᵃ`: Aerosol number per unit mass (1/kg)
 - `w`: Updraft velocity (m/s) - used for aerosol activation (0 if unknown)
-- `Δt`: Model timestep (s) - used for aerosol activation rate conversion
 """
 struct WarmPhaseTwoMomentState{FT} <: AbstractMicrophysicalState{FT}
     qᶜˡ :: FT  # cloud liquid mixing ratio
@@ -51,7 +50,6 @@ struct WarmPhaseTwoMomentState{FT} <: AbstractMicrophysicalState{FT}
     nʳ  :: FT  # rain number per unit mass
     nᵃ  :: FT  # aerosol number per unit mass
     w   :: FT  # updraft velocity
-    Δt  :: FT  # model timestep
 end
 
 using CloudMicrophysics.Parameters:
@@ -82,7 +80,7 @@ using CloudMicrophysics.Parameters:
 #####
 
 """
-    AerosolActivation{AP, AD}
+    AerosolActivation{AP, AD, FT}
 
 Aerosol activation parameters for two-moment microphysics.
 
@@ -93,20 +91,22 @@ to compute the activation source term for cloud droplet number concentration.
 # Fields
 - `activation_parameters`: [`AerosolActivationParameters`] from CloudMicrophysics.jl
 - `aerosol_distribution`: Aerosol size distribution (modes with number, size, hygroscopicity)
+- `τⁿᵘᶜ`: Nucleation timescale [s] for converting activation deficit to rate (default: 1s)
 
 # References
 * Abdul-Razzak, H. and Ghan, S.J. (2000). A parameterization of aerosol activation:
   2. Multiple aerosol types. J. Geophys. Res., 105(D5), 6837-6844.
 """
-struct AerosolActivation{AP, AD}
+struct AerosolActivation{AP, AD, FT}
     activation_parameters :: AP
     aerosol_distribution :: AD
+    τⁿᵘᶜ :: FT  # nucleation timescale
 end
 
 Base.summary(::AerosolActivation) = "AerosolActivation"
 
 """
-    default_aerosol_activation(FT = Float64)
+    default_aerosol_activation(FT = Float64; τⁿᵘᶜ = 1)
 
 Create a default `AerosolActivation` representing a typical continental aerosol population.
 
@@ -115,6 +115,10 @@ The default distribution is a single mode with:
 - Geometric standard deviation: 2.0
 - Number concentration: 100 cm⁻³ (100 × 10⁶ m⁻³)
 - Hygroscopicity κ: 0.5 (typical for ammonium sulfate)
+
+# Keyword arguments
+- `τⁿᵘᶜ`: Nucleation timescale [s] for converting activation deficit to rate (default: 1s).
+  Controls how quickly the cloud droplet number relaxes toward the target activated number.
 
 This provides sensible out-of-the-box behavior for two-moment microphysics.
 Users can customize the aerosol population by constructing their own `AerosolActivation`.
@@ -129,7 +133,8 @@ microphysics = TwoMomentCloudMicrophysics()
 marine_mode = CMAM.Mode_κ(0.08e-6, 1.8, 50e6, (1.0,), (1.0,), (0.058,), (1.0,))
 marine_aerosol = AerosolActivation(
     AerosolActivationParameters(Float64),
-    CMAM.AerosolDistribution((marine_mode,))
+    CMAM.AerosolDistribution((marine_mode,)),
+    1  # τⁿᵘᶜ = 1s
 )
 microphysics = TwoMomentCloudMicrophysics(aerosol_activation = marine_aerosol)
 
@@ -137,7 +142,7 @@ microphysics = TwoMomentCloudMicrophysics(aerosol_activation = marine_aerosol)
 microphysics = TwoMomentCloudMicrophysics(aerosol_activation = nothing)
 ```
 """
-function default_aerosol_activation(FT::DataType = Float64)
+function default_aerosol_activation(FT::DataType = Float64; τⁿᵘᶜ = 1)
     # Default continental aerosol mode using κ-Köhler theory
     # Mode_κ(r_dry, stdev, N, vol_mix_ratio, mass_mix_ratio, molar_mass, kappa)
     r_dry = 0.05e-6           # 50 nm dry radius
@@ -153,7 +158,7 @@ function default_aerosol_activation(FT::DataType = Float64)
 
     activation_parameters = AerosolActivationParameters(FT)
 
-    return AerosolActivation(activation_parameters, aerosol_distribution)
+    return AerosolActivation(activation_parameters, aerosol_distribution, FT(τⁿᵘᶜ))
 end
 
 """
@@ -251,27 +256,25 @@ end
 ##### MicrophysicalState construction from fields
 #####
 
-# Gridless version: takes density, prognostic NamedTuple, thermodynamic state, updraft velocity, and timestep
-@inline function AtmosphereModels.microphysical_state(bμp::WPNE2M, ρ, μ, 𝒰, w, Δt)
+# Gridless version: takes density, prognostic NamedTuple, thermodynamic state, and updraft velocity
+@inline function AtmosphereModels.microphysical_state(bμp::WPNE2M, ρ, μ, 𝒰, w)
     qᶜˡ = μ.ρqᶜˡ / ρ
     nᶜˡ = μ.ρnᶜˡ / ρ
     qʳ = μ.ρqʳ / ρ
     nʳ = μ.ρnʳ / ρ
     nᵃ = μ.ρnᵃ / ρ
-    return WarmPhaseTwoMomentState(qᶜˡ, nᶜˡ, qʳ, nʳ, nᵃ, w, Δt)
+    return WarmPhaseTwoMomentState(qᶜˡ, nᶜˡ, qʳ, nʳ, nᵃ, w)
 end
 
 # Grid-indexed version: extracts from Fields
 # Vertical velocity w is passed from grid_microphysical_tendency (interpolated to cell center)
-# Δt comes from clock.last_Δt
-@inline function AtmosphereModels.grid_microphysical_state(i, j, k, grid, bμp::WPNE2M, μ, ρ, 𝒰, w, Δt)
-    FT = typeof(ρ)
+@inline function AtmosphereModels.grid_microphysical_state(i, j, k, grid, bμp::WPNE2M, μ, ρ, 𝒰, w)
     @inbounds qᶜˡ = μ.qᶜˡ[i, j, k]
     @inbounds nᶜˡ = μ.nᶜˡ[i, j, k]
     @inbounds qʳ = μ.qʳ[i, j, k]
     @inbounds nʳ = μ.nʳ[i, j, k]
     @inbounds nᵃ = μ.nᵃ[i, j, k]
-    return WarmPhaseTwoMomentState(qᶜˡ, nᶜˡ, qʳ, nʳ, nᵃ, w, FT(Δt))
+    return WarmPhaseTwoMomentState(qᶜˡ, nᶜˡ, qʳ, nʳ, nᵃ, w)
 end
 
 """
@@ -571,7 +574,6 @@ const τⁿᵘᵐ_2m = 10  # seconds
     nᶜˡ = ℳ.nᶜˡ
     nᵃ = ℳ.nᵃ
     w = ℳ.w
-    Δt = ℳ.Δt
 
     # Number densities [1/m³]
     Nᶜˡ = ρ * max(0, nᶜˡ)
@@ -600,7 +602,7 @@ const τⁿᵘᵐ_2m = 10  # seconds
     # Aerosol activation: source of cloud liquid mass from newly activated droplets
     # Newly formed droplets have finite initial size given by the activation radius
     Sᵃᶜᵗ = aerosol_activation_mass_tendency(categories.aerosol_activation, categories.air_properties,
-                                             ρ, Nᵃ, Nᶜˡ, w, Δt, 𝒰, constants)
+                                             ρ, Nᵃ, Nᶜˡ, w, 𝒰, constants)
 
     # Total tendency
     ΣρS = ρ * (Sᶜᵒⁿᵈ + Sᵃᶜⁿᵛ + Sᵃᶜᶜ + Sᵃᶜᵗ)
@@ -624,7 +626,6 @@ end
     nᶜˡ = ℳ.nᶜˡ
     nᵃ = ℳ.nᵃ
     w = ℳ.w
-    Δt = ℳ.Δt
 
     # Number densities [1/m³]
     Nᶜˡ = ρ * max(0, nᶜˡ)
@@ -647,7 +648,7 @@ end
 
     # Aerosol activation: source of cloud droplet number (limited by available aerosol)
     dNᶜˡ_act = aerosol_activation_tendency(categories.aerosol_activation, categories.air_properties,
-                                            ρ, Nᵃ, Nᶜˡ, w, Δt, 𝒰, constants)
+                                            ρ, Nᵃ, Nᶜˡ, w, 𝒰, constants)
 
     # Total tendency [1/m³/s]
     Σ_dNᶜˡ = dNᶜˡ_au + dNᶜˡ_sc + dNᶜˡ_ac + dNᶜˡ_adj_up + dNᶜˡ_adj_dn + dNᶜˡ_act
@@ -667,12 +668,13 @@ end
 const rⁿᵘᶜ = 5e-11  # 0.05 nm
 
 # No activation when aerosol_activation is nothing
-@inline aerosol_activation_tendency(::Nothing, aps, ρ, Nᵃ, Nᶜˡ, w, Δt, 𝒰, constants) = zero(ρ)
-@inline aerosol_activation_mass_tendency(::Nothing, aps, ρ, Nᵃ, Nᶜˡ, w, Δt, 𝒰, constants) = zero(ρ)
+@inline aerosol_activation_tendency(::Nothing, aps, ρ, Nᵃ, Nᶜˡ, w, 𝒰, constants) = zero(ρ)
+@inline aerosol_activation_mass_tendency(::Nothing, aps, ρ, Nᵃ, Nᶜˡ, w, 𝒰, constants) = zero(ρ)
 
 # Compute activation tendency using Abdul-Razzak and Ghan (2000)
 # The ARG2000 parameterization gives the fraction of the TOTAL aerosol population that should be activated.
 # We compare this target to the current cloud droplet number and activate the deficit.
+# The activation deficit is converted to a rate using the nucleation timescale τⁿᵘᶜ.
 @inline function aerosol_activation_tendency(
     aerosol_activation::AerosolActivation,
     aps::AirProperties{FT},
@@ -680,7 +682,6 @@ const rⁿᵘᶜ = 5e-11  # 0.05 nm
     Nᵃ::FT,
     Nᶜˡ::FT,
     w::FT,
-    Δt::FT,
     𝒰,
     constants,
 ) where {FT}
@@ -706,14 +707,17 @@ const rⁿᵘᶜ = 5e-11  # 0.05 nm
     # Disequilibrium: activate deficit, limited by available aerosol
     ΔNᵃᶜᵗ = clamp(Nᵗᵃʳᵍᵉᵗ - Nᶜˡ⁺, zero(FT), Nᵃ⁺)
 
+    # Nucleation timescale from aerosol activation parameters
+    τⁿᵘᶜ = aerosol_activation.τⁿᵘᶜ
+
     # Convert to rate [1/m³/s], zero if subsaturated
-    dNᶜˡ_act = ifelse(S > 0, ΔNᵃᶜᵗ / Δt, zero(ρ))
+    dNᶜˡ_act = ifelse(S > 0, ΔNᵃᶜᵗ / τⁿᵘᶜ, zero(ρ))
 
     return dNᶜˡ_act
 end
 
 """
-    aerosol_activation_mass_tendency(aerosol_activation, aps, ρ, Nᵃ, Nᶜˡ, w, Δt, 𝒰, constants)
+    aerosol_activation_mass_tendency(aerosol_activation, aps, ρ, Nᵃ, Nᶜˡ, w, 𝒰, constants)
 
 Compute the cloud liquid mass tendency from aerosol activation.
 
@@ -733,9 +737,11 @@ The mass tendency is then:
 \\frac{dq^{cl}}{dt}_{act} = \\frac{dN^{cl}}{dt}_{act} \\cdot \\frac{4π}{3} r_{act}^3 \\frac{ρ_w}{ρ}
 ```
 
+The activation rate is controlled by the nucleation timescale `τⁿᵘᶜ` stored in
+the [`AerosolActivation`](@ref) parameters (default: 1s).
+
 # Arguments
 - `Nᶜˡ`: Current cloud droplet number concentration [1/m³]
-- `Δt`: Model timestep [s] - used for activation rate conversion
 
 # Returns
 Mass tendency for cloud liquid [kg/kg/s]
@@ -747,7 +753,6 @@ Mass tendency for cloud liquid [kg/kg/s]
     Nᵃ::FT,
     Nᶜˡ::FT,
     w::FT,
-    Δt::FT,
     𝒰,
     constants,
 ) where {FT}
@@ -755,7 +760,7 @@ Mass tendency for cloud liquid [kg/kg/s]
     ap = aerosol_activation.activation_parameters
 
     # Compute number tendency using the disequilibrium approach
-    dNᶜˡ_act = aerosol_activation_tendency(aerosol_activation, aps, ρ, Nᵃ, Nᶜˡ, w, Δt, 𝒰, constants)
+    dNᶜˡ_act = aerosol_activation_tendency(aerosol_activation, aps, ρ, Nᵃ, Nᶜˡ, w, 𝒰, constants)
 
     # Get thermodynamic properties for activation radius calculation
     T = temperature(𝒰, constants)
@@ -947,7 +952,6 @@ end
     nᶜˡ = ℳ.nᶜˡ
     nᵃ = ℳ.nᵃ
     w = ℳ.w
-    Δt = ℳ.Δt
 
     # Number densities [1/m³]
     Nᶜˡ = ρ * max(0, nᶜˡ)
@@ -955,7 +959,7 @@ end
 
     # Aerosol activation: sink of aerosol number (same as source for cloud droplet number)
     dNᵃ_act = -aerosol_activation_tendency(categories.aerosol_activation, categories.air_properties,
-                                            ρ, Nᵃ, Nᶜˡ, w, Δt, 𝒰, constants)
+                                            ρ, Nᵃ, Nᶜˡ, w, 𝒰, constants)
 
     # Numerical relaxation for negative values
     Sⁿᵘᵐ = -Nᵃ / τⁿᵘᵐ_2m

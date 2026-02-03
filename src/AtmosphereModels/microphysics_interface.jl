@@ -119,7 +119,7 @@ end
 #####
 
 """
-    microphysical_state(microphysics, ρ, μ, 𝒰, w, Δt)
+    microphysical_state(microphysics, ρ, μ, 𝒰, w)
 
 Build an [`AbstractMicrophysicalState`](@ref) (ℳ) from density-weighted prognostic
 microphysical variables `μ`, density `ρ`, and thermodynamic state `𝒰`.
@@ -138,28 +138,27 @@ while precipitation (rain, snow) still comes from `μ`.
 - `μ`: NamedTuple of density-weighted prognostic variables (e.g., `(ρqᶜˡ=..., ρqʳ=...)`)
 - `𝒰`: Thermodynamic state
 - `w`: Updraft velocity [m/s]
-- `Δt`: Model timestep [s]
 
 # Returns
 An `AbstractMicrophysicalState` subtype containing the local specific microphysical variables.
 
 See also [`microphysical_tendency`](@ref), [`AbstractMicrophysicalState`](@ref).
 """
-@inline microphysical_state(::Nothing, ρ, μ, 𝒰, w, Δt) = NothingMicrophysicalState(typeof(ρ))
-@inline microphysical_state(::Nothing, ρ, ::Nothing, 𝒰, w, Δt) = NothingMicrophysicalState(typeof(ρ))
-@inline microphysical_state(microphysics, ρ, ::Nothing, 𝒰, w, Δt) = NothingMicrophysicalState(typeof(ρ))
-@inline microphysical_state(microphysics, ρ, ::NamedTuple{(), Tuple{}}, 𝒰, w, Δt) = NothingMicrophysicalState(typeof(ρ))
+@inline microphysical_state(::Nothing, ρ, μ, 𝒰, w) = NothingMicrophysicalState(typeof(ρ))
+@inline microphysical_state(::Nothing, ρ, ::Nothing, 𝒰, w) = NothingMicrophysicalState(typeof(ρ))
+@inline microphysical_state(microphysics, ρ, ::Nothing, 𝒰, w) = NothingMicrophysicalState(typeof(ρ))
+@inline microphysical_state(microphysics, ρ, ::NamedTuple{(), Tuple{}}, 𝒰, w) = NothingMicrophysicalState(typeof(ρ))
 # Disambiguation for Nothing microphysics + empty NamedTuple
-@inline microphysical_state(::Nothing, ρ, ::NamedTuple{(), Tuple{}}, 𝒰, w, Δt) = NothingMicrophysicalState(typeof(ρ))
+@inline microphysical_state(::Nothing, ρ, ::NamedTuple{(), Tuple{}}, 𝒰, w) = NothingMicrophysicalState(typeof(ρ))
 
 """
-    grid_microphysical_state(i, j, k, grid, microphysics, μ_fields, ρ, 𝒰, w, Δt)
+    grid_microphysical_state(i, j, k, grid, microphysics, μ_fields, ρ, 𝒰, w)
 
 Build an [`AbstractMicrophysicalState`](@ref) (ℳ) at grid point `(i, j, k)`.
 
 This is the **grid-indexed wrapper** that:
 1. Extracts prognostic values from `μ_fields` via [`extract_microphysical_prognostics`](@ref)
-2. Calls the gridless [`microphysical_state(microphysics, ρ, μ, 𝒰, w, Δt)`](@ref)
+2. Calls the gridless [`microphysical_state(microphysics, ρ, μ, 𝒰, w)`](@ref)
 
 Microphysics schemes should implement the gridless version, not this one.
 
@@ -171,20 +170,19 @@ Microphysics schemes should implement the gridless version, not this one.
 - `ρ`: Local density (scalar)
 - `𝒰`: Thermodynamic state
 - `w`: Vertical velocity [m/s]. Used by schemes with aerosol activation.
-- `Δt`: Model timestep [s]. Used for aerosol activation rate conversion.
 
 # Returns
 An `AbstractMicrophysicalState` subtype containing the local microphysical variables.
 
 See also [`microphysical_tendency`](@ref), [`AbstractMicrophysicalState`](@ref).
 """
-@inline function grid_microphysical_state(i, j, k, grid, microphysics, μ_fields, ρ, 𝒰, w, Δt)
+@inline function grid_microphysical_state(i, j, k, grid, microphysics, μ_fields, ρ, 𝒰, w)
     μ = extract_microphysical_prognostics(i, j, k, microphysics, μ_fields)
-    return microphysical_state(microphysics, ρ, μ, 𝒰, w, Δt)
+    return microphysical_state(microphysics, ρ, μ, 𝒰, w)
 end
 
 # Explicit Nothing fallback
-@inline grid_microphysical_state(i, j, k, grid, microphysics::Nothing, μ_fields, ρ, 𝒰, w, Δt) =
+@inline grid_microphysical_state(i, j, k, grid, microphysics::Nothing, μ_fields, ρ, 𝒰, w) =
     NothingMicrophysicalState(eltype(grid))
 
 """
@@ -216,7 +214,7 @@ See also [`microphysical_state`](@ref), [`AbstractMicrophysicalState`](@ref).
 #####
 
 """
-    grid_microphysical_tendency(i, j, k, grid, microphysics, name, ρ, fields, 𝒰, constants, velocities, Δt=1)
+    grid_microphysical_tendency(i, j, k, grid, microphysics, name, ρ, fields, 𝒰, constants, velocities)
 
 Compute the tendency for microphysical variable `name` at grid point `(i, j, k)`.
 
@@ -230,18 +228,16 @@ this method directly without using `microphysical_state`.
 # Arguments
 - `velocities`: Velocity fields (u, v, w). The vertical velocity `w` is interpolated
                 from cell faces to cell centers for aerosol activation.
-- `Δt`: Model timestep [s] (default: 1). Passed to `grid_microphysical_state` for
-        aerosol activation rate conversion.
 """
-@inline function grid_microphysical_tendency(i, j, k, grid, microphysics, name, ρ, fields, 𝒰, constants, velocities, Δt=one(ρ))
+@inline function grid_microphysical_tendency(i, j, k, grid, microphysics, name, ρ, fields, 𝒰, constants, velocities)
     # Interpolate w from face to center for aerosol activation
     w = ℑzᵃᵃᶜ(i, j, k, grid, velocities.w)
-    ℳ = grid_microphysical_state(i, j, k, grid, microphysics, fields, ρ, 𝒰, w, Δt)
+    ℳ = grid_microphysical_state(i, j, k, grid, microphysics, fields, ρ, 𝒰, w)
     return microphysical_tendency(microphysics, name, ρ, ℳ, 𝒰, constants)
 end
 
 # Explicit Nothing fallback (for backward compatibility)
-@inline grid_microphysical_tendency(i, j, k, grid, microphysics::Nothing, name, ρ, μ, 𝒰, constants, velocities, Δt=1) = zero(grid)
+@inline grid_microphysical_tendency(i, j, k, grid, microphysics::Nothing, name, ρ, μ, 𝒰, constants, velocities) = zero(grid)
 
 #####
 ##### Definition of the microphysics interface, with methods for "Nothing" microphysics
@@ -387,8 +383,8 @@ Schemes should implement [`update_microphysical_auxiliaries!`](@ref), not this f
 end
 
 @inline function update_microphysical_fields!(μ, i, j, k, grid, microphysics, ρ, 𝒰, constants)
-    # w and Δt are not used for auxiliary field updates, pass zeros
-    ℳ = grid_microphysical_state(i, j, k, grid, microphysics, μ, ρ, 𝒰, zero(ρ), one(ρ))
+    # w is not used for auxiliary field updates, pass zero
+    ℳ = grid_microphysical_state(i, j, k, grid, microphysics, μ, ρ, 𝒰, zero(ρ))
     update_microphysical_auxiliaries!(μ, i, j, k, grid, microphysics, ℳ, ρ, 𝒰, constants)
     return nothing
 end
@@ -448,8 +444,8 @@ Non-equilibrium schemes don't need `𝒰` to build their state (they use prognos
 """
 @inline function grid_moisture_fractions(i, j, k, grid, microphysics, ρ, qᵗ, μ_fields)
     μ = extract_microphysical_prognostics(i, j, k, microphysics, μ_fields)
-    # w and Δt are not used for moisture fraction computation, pass zeros
-    ℳ = microphysical_state(microphysics, ρ, μ, nothing, zero(ρ), one(ρ))
+    # w is not used for moisture fraction computation, pass zero
+    ℳ = microphysical_state(microphysics, ρ, μ, nothing, zero(ρ))
     return moisture_fractions(microphysics, ℳ, qᵗ)
 end
 

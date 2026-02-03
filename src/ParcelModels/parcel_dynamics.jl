@@ -534,9 +534,9 @@ function compute_parcel_tendencies!(model::ParcelModel, Δt)
     tendencies.Gz = interpolate(z, model.velocities.w)
 
     # Build diagnostic microphysical state from prognostic variables
-    # Pass updraft velocity and timestep for aerosol activation
+    # Pass updraft velocity for aerosol activation
     w = tendencies.Gz
-    ℳ = microphysical_state(microphysics, ρ, μ, 𝒰, w, Δt)
+    ℳ = microphysical_state(microphysics, ρ, μ, 𝒰, w)
 
     # Thermodynamic and moisture tendencies from microphysics (specific, not density-weighted)
     # For adiabatic (no microphysics): both are zero, giving exact conservation
@@ -727,9 +727,8 @@ function ssp_rk3_parcel_substep!(model::ParcelModel, U⁰::ParcelInitialState, �
     state.μ = ssp_rk3_microphysics_substep(U⁰.μ, state.μ, tendencies.Gμ, Δt, α)
 
     # Update moisture fractions in thermodynamic state
-    # w and Δt not used for moisture fraction computation
     microphysics = model.microphysics
-    ℳ = microphysical_state(microphysics, state.ρ, state.μ, state.𝒰, zero(state.ρ), one(state.ρ))
+    ℳ = microphysical_state(microphysics, state.ρ, state.μ, state.𝒰, zero(state.ρ))
     q⁺ = moisture_fractions(microphysics, ℳ, state.qᵗ)
     state.𝒰 = with_moisture(state.𝒰, q⁺)
 
@@ -816,9 +815,8 @@ function step_parcel_state!(model::ParcelModel, Δt)
     state.μ = apply_microphysical_tendencies(state.μ, tendencies.Gμ, Δt)
 
     # Update moisture fractions in thermodynamic state
-    # w and Δt not used for moisture fraction computation
     microphysics = model.microphysics
-    ℳ = microphysical_state(microphysics, state.ρ, state.μ, state.𝒰, zero(state.ρ), one(state.ρ))
+    ℳ = microphysical_state(microphysics, state.ρ, state.μ, state.𝒰, zero(state.ρ))
     q⁺ = moisture_fractions(microphysics, ℳ, state.qᵗ)
     state.𝒰 = with_moisture(state.𝒰, q⁺)
 

@@ -67,13 +67,11 @@ end
                           microphysics, microphysical_fields, constants)
 
     closure_buoyancy = AtmosphereModelBuoyancy(dynamics, formulation, constants)
-    Δt = clock.last_Δt
-
     return ( - div_ρUc(i, j, k, grid, advection, ρ_field, velocities, specific_energy)
              + c_div_ρU(i, j, k, grid, dynamics, velocities, specific_energy)
              + buoyancy_flux
              - ∇_dot_Jᶜ(i, j, k, grid, ρ_field, closure, closure_fields, id, specific_energy, clock, model_fields, closure_buoyancy)
-             + grid_microphysical_tendency(i, j, k, grid, microphysics, Val(:ρe), ρ, microphysical_fields, 𝒰, constants, velocities, Δt)
+             + grid_microphysical_tendency(i, j, k, grid, microphysics, Val(:ρe), ρ, microphysical_fields, 𝒰, constants, velocities)
              + ρe_forcing(i, j, k, grid, clock, model_fields))
 end
 
