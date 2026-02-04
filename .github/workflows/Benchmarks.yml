@@ -107,7 +107,7 @@ jobs:
           gh-repository: "github.com/NumericalEarth/BreezeBenchmarks"
           github-token: ${{ steps.generate_token.outputs.token }}
           # github-token: ${{ github.event.pull_request.head.repo.fork && github.token || steps.generate_token.outputs.token }}
-          comment-always: true
+          comment-always: false
           summary-always: true
           alert-threshold: "110%"
           fail-on-alert: false
