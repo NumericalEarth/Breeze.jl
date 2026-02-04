@@ -85,7 +85,7 @@ jobs:
           benchmark-data-dir-path: "."
           gh-repository: "github.com/NumericalEarth/BreezeBenchmarks"
           github-token: ${{ steps.generate_token.outputs.token }}
-          comment-always: true
+          comment-always: false
           summary-always: true
           alert-threshold: "150%"
           fail-on-alert: false
