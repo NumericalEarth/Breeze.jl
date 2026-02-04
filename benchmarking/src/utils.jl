@@ -62,6 +62,7 @@ function benchmark_time_stepping(model;
     steps_per_second = time_steps / total_time_seconds
     grid_points_per_second = total_points / time_per_step_seconds
 
+    gpu_memory_used = arch isa GPU ? CUDA.MemoryInfo().pool_used_bytes : 0
     metadata = BenchmarkMetadata(arch)
 
     result = BenchmarkResult(
@@ -74,7 +75,8 @@ function benchmark_time_stepping(model;
         time_per_step_seconds,
         steps_per_second,
         grid_points_per_second,
-        metadata
+        gpu_memory_used,
+        metadata,
     )
 
     if verbose
@@ -82,6 +84,9 @@ function benchmark_time_stepping(model;
         @info "    Total time: $(@sprintf("%.3f", total_time_seconds)) s"
         @info "    Time per step: $(@sprintf("%.6f", time_per_step_seconds)) s"
         @info "    Grid points/s: $(@sprintf("%.2e", grid_points_per_second))"
+        if arch isa GPU
+            @info "    GPU memory usage: $(Base.format_bytes(gpu_memory_used))"
+        end
     end
 
     return result
@@ -226,6 +231,7 @@ function run_benchmark_simulation(model;
     steps_per_second = time_steps / wall_time_seconds
     grid_points_per_second = total_points / time_per_step_seconds
 
+    gpu_memory_used = arch isa GPU ? CUDA.MemoryInfo().pool_used_bytes : 0
     metadata = BenchmarkMetadata(arch)
 
     result = SimulationResult(
@@ -240,7 +246,8 @@ function run_benchmark_simulation(model;
         steps_per_second,
         grid_points_per_second,
         output_filename,
-        metadata
+        gpu_memory_used,
+        metadata,
     )
 
     if verbose
@@ -251,6 +258,9 @@ function run_benchmark_simulation(model;
         @info "    Grid points/s: $(@sprintf("%.2e", grid_points_per_second))"
         @info "    Surface timeseries: $output_filename"
         @info "    Final 3D snapshot: $final_filename"
+        if arch isa GPU
+            @info "    GPU memory usage: $(Base.format_bytes(gpu_memory_used))"
+        end
     end
 
     return result

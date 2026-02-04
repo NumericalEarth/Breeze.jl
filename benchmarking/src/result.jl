@@ -12,6 +12,7 @@ struct BenchmarkResult
     time_per_step_seconds::Float64
     steps_per_second::Float64
     grid_points_per_second::Float64
+    gpu_memory_used::Int64
     metadata::BenchmarkMetadata
 end
 
@@ -30,6 +31,7 @@ function Base.show(io::IO, ::MIME"text/plain", r::BenchmarkResult)
     println(io, "├── time_per_step: ", @sprintf("%.6f s", r.time_per_step_seconds))
     println(io, "├── steps_per_second: ", @sprintf("%.6f/s", r.steps_per_second))
     println(io, "├── grid_points_per_second: ", @sprintf("%.2e", r.grid_points_per_second))
+    println(io, "├── gpu_memory_used: ", Base.format_bytes(r.gpu_memory_used))
     print(io,   "└── metadata: ", r.metadata.architecture, " @ ", r.metadata.timestamp)
 end
 
@@ -49,6 +51,7 @@ struct SimulationResult
     steps_per_second::Float64
     grid_points_per_second::Float64
     output_file::String
+    gpu_memory_used::Int64
     metadata::BenchmarkMetadata
 end
 
@@ -69,5 +72,6 @@ function Base.show(io::IO, ::MIME"text/plain", r::SimulationResult)
     println(io, "├── steps_per_second: ", @sprintf("%.6f/s", r.steps_per_second))
     println(io, "├── grid_points_per_second: ", @sprintf("%.2e", r.grid_points_per_second))
     println(io, "├── output_file: ", r.output_file)
+    println(io, "├── gpu_memory_used: ", Base.format_bytes(r.gpu_memory_used))
     print(io,   "└── metadata: ", r.metadata.architecture, " @ ", r.metadata.timestamp)
 end

@@ -18,6 +18,7 @@ using Printf
 using Statistics
 
 using Oceananigans
+using Oceananigans.Architectures: GPU
 using Oceananigans.Units
 using Oceananigans.TimeSteppers: time_step!
 using Oceananigans.OutputWriters: JLD2OutputWriter, IterationInterval, TimeInterval, write_output!
