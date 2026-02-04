@@ -56,3 +56,42 @@ jobs:
         timeout-minutes: 1
         run:
           cat "benchmark_results.md" >> "${GITHUB_STEP_SUMMARY}"
+      - name: Create JSON for github-action-benchmark
+        shell: julia --color=yes --project {0}
+        run: |
+          # This step creates a new JSON file to be digested by the
+          # `benchmark-action/github-action-benchmark` workflow.
+          using JSON
+          data = first(JSON.parse(read("benchmark_results.json")))
+          dict = Dict(
+              "name" => data["name"],
+              "unit" => "steps/s",
+              "value" => data["steps_per_second"],
+          )
+          open("github-action-benchmark.json", "w") do io
+              JSON.json(io, dict)
+          end
+      - uses: actions/create-github-app-token@v2
+        id: generate_token
+        with:
+          app-id: "${{ secrets.NUMTERRA_BOT_ID }}"
+          private-key: "${{ secrets.NUMTERRA_BOT_PRIVATE_KEY }}"
+          owner: NumericalEarth
+          repositories: |
+            Breeze.jl
+            BreezeBenchmarks
+      - name: Publish benchmark results
+        uses: benchmark-action/github-action-benchmark@v1
+        with:
+          name: Breeze.jl Benchmarks
+          tool: "customSmallerIsBetter"
+          output-file-path: "github-action-benchmark.json"
+          benchmark-data-dir-path: "benchmarks"
+          gh-repository: "github.com/NumericalEarth/BreezeBenchmarks"
+          github-token: ${{ steps.generate_token.outputs.token }}
+          comment-always: true
+          summary-always: true
+          alert-threshold: "150%"
+          fail-on-alert: false
+          auto-push: true
+          max-items-in-chart: 50
