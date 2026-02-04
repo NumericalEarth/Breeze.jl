@@ -64,7 +64,7 @@ jobs:
     permissions:
       actions: write
       contents: write
-      pull-requests: read
+      pull-requests: write
       statuses: write
     runs-on: ubuntu-latest
     timeout-minutes: 10
@@ -107,10 +107,12 @@ jobs:
           gh-repository: "github.com/NumericalEarth/BreezeBenchmarks"
           github-token: ${{ steps.generate_token.outputs.token }}
           # github-token: ${{ github.event_name == 'pull_request' && github.token || steps.generate_token.outputs.token }}
-          comment-always: false
+          comment-always: true
           summary-always: true
-          alert-threshold: "150%"
+          alert-threshold: "110%"
           fail-on-alert: false
           auto-push: true
           # auto-push: ${{ github.event_name != 'pull_request' }}
           max-items-in-chart: 50
+          # Enable alert commit comment
+          comment-on-alert: true
