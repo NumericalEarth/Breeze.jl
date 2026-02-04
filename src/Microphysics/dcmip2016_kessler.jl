@@ -5,17 +5,23 @@ using ..Thermodynamics:
     mixture_gas_constant,
     mixture_heat_capacity,
     saturation_specific_humidity,
+    temperature,
     total_mixing_ratio,
-    total_specific_moisture
+    total_specific_moisture,
+    with_moisture,
+    with_temperature
 
 using ..AtmosphereModels:
     dynamics_density,
     dynamics_pressure,
     surface_pressure
 
+using ..ParcelModels: ParcelModel
+
 using Oceananigans: Oceananigans, CenterField, Field
 using Oceananigans.AbstractOperations: KernelFunctionOperation
 using Oceananigans.Architectures: architecture
+using Oceananigans.Fields: interpolate
 using Oceananigans.Grids: Center, znode
 using Oceananigans.Utils: launch!
 
@@ -787,6 +793,143 @@ end
 
     # Note: DCMIP2016 does NOT have a qˡ (total liquid) field
     # Rain sedimentation is handled internally, not via microphysical_velocities
+
+    return nothing
+end
+
+#####
+##### Parcel model implementation
+#####
+# For parcel models, apply Kessler microphysics to the parcel's scalar state.
+# This includes autoconversion, accretion, saturation adjustment, and rain evaporation.
+# Rain sedimentation is not applicable to a Lagrangian parcel (rain falls with the parcel).
+
+"""
+$(TYPEDSIGNATURES)
+
+Apply DCMIP2016 Kessler microphysics to a parcel model.
+
+For a Lagrangian parcel, the microphysics processes are:
+1. **Autoconversion**: Cloud water → rain when cloud exceeds threshold
+2. **Accretion**: Rain + cloud → rain (collection)
+3. **Saturation adjustment**: Vapor ↔ cloud to maintain equilibrium
+4. **Rain evaporation**: Rain → vapor in subsaturated air
+
+Note: Rain sedimentation is not applicable to a Lagrangian parcel since
+the parcel is a closed system (rain does not fall out of the parcel).
+"""
+function AtmosphereModels.microphysics_model_update!(microphysics::DCMIP2016KM, model::ParcelModel)
+    Δt = model.clock.last_Δt
+
+    # Skip microphysics update if timestep is zero, infinite, or invalid
+    (isnan(Δt) || isinf(Δt) || Δt ≤ 0) && return nothing
+
+    state = model.dynamics.state
+    constants = model.thermodynamic_constants
+
+    # Extract parcel state
+    ρ = state.ρ
+    z = state.z
+    qᵗ = state.qᵗ
+    𝒰 = state.𝒰
+    μ = state.μ
+    p = model.dynamics.pressure
+
+    # Get pressure at parcel height (interpolate from environmental profile)
+    p_parcel = interpolate(z, p)
+
+    # Get current condensate mixing ratios
+    qᶜˡ = max(0, μ.ρqᶜˡ / ρ)
+    qʳ  = max(0, μ.ρqʳ / ρ)
+    qˡ_sum = qᶜˡ + qʳ
+    qᵗ_bounded = max(qᵗ, qˡ_sum)
+    qᵛ = qᵗ_bounded - qˡ_sum
+
+    # Convert to mixing ratios for Kessler physics
+    q = MoistureMassFractions(qᵛ, qˡ_sum)
+    r = MoistureMixingRatio(q)
+    rᵛ = r.vapor
+    rᵗ = total_mixing_ratio(r)
+    rᶜˡ = qᶜˡ * (1 + rᵗ)
+    rʳ  = qʳ * (1 + rᵗ)
+
+    # Thermodynamic constants
+    ℒˡᵣ = constants.liquid.reference_latent_heat
+    cᵖᵈ = constants.dry_air.heat_capacity
+    T_DCMIP2016 = microphysics.dcmip_temperature_scale
+    f₅ = saturation_adjustment_coefficient(T_DCMIP2016, constants)
+    δT = constants.saturation_vapor_pressure.liquid_temperature_offset
+
+    # Evaporation parameters
+    Cᵨ     = microphysics.density_scale
+    Cᵉᵛ₁   = microphysics.evaporation_ventilation_coefficient_1
+    Cᵉᵛ₂   = microphysics.evaporation_ventilation_coefficient_2
+    βᵉᵛ₁   = microphysics.evaporation_ventilation_exponent_1
+    βᵉᵛ₂   = microphysics.evaporation_ventilation_exponent_2
+    Cᵈⁱᶠᶠ  = microphysics.diffusivity_coefficient
+    Cᵗʰᵉʳᵐ = microphysics.thermal_conductivity_coefficient
+
+    # Compute temperature from thermodynamic state
+    T = temperature(𝒰, constants)
+
+    # Autoconversion + Accretion: cloud → rain
+    Δrᴾ = cloud_to_rain_production(rᶜˡ, rʳ, Δt, microphysics)
+    rᶜˡ_new = max(0, rᶜˡ - Δrᴾ)
+    rʳ_new = max(0, rʳ + Δrᴾ)
+
+    # Saturation adjustment
+    surface = PlanarLiquidSurface()
+    qᵛ⁺ = saturation_specific_humidity(T, ρ, constants, surface)
+    rᵛ⁺ = qᵛ⁺ / (1 - qᵛ⁺)
+    Δrˢᵃᵗ = (rᵛ - rᵛ⁺) / (1 + rᵛ⁺ * f₅ / (T - δT)^2)
+
+    # Rain evaporation (Klemp & Wilhelmson 1978 eq. 2.14)
+    ρᵏ = Cᵨ * ρ
+    ρrʳ = ρᵏ * rʳ_new
+    Vᵉᵛ = (Cᵉᵛ₁ + Cᵉᵛ₂ * ρrʳ^βᵉᵛ₁) * ρrʳ^βᵉᵛ₂
+    Dᵗʰ = Cᵈⁱᶠᶠ / (p_parcel * rᵛ⁺) + Cᵗʰᵉʳᵐ
+    Δrᵛ⁺ = max(0, rᵛ⁺ - rᵛ)
+    FT = typeof(ρ)
+    Ėʳ = Vᵉᵛ / Dᵗʰ * Δrᵛ⁺ / (ρᵏ * rᵛ⁺ + FT(1e-20))
+    Δrᴱmax = max(0, -Δrˢᵃᵗ - rᶜˡ_new)
+    Δrᴱ = min(min(Δt * Ėʳ, Δrᴱmax), rʳ_new)
+
+    # Apply condensation (limited by available cloud water)
+    Δrᶜ = max(Δrˢᵃᵗ, -rᶜˡ_new)
+    rᵛ_final = max(0, rᵛ - Δrᶜ + Δrᴱ)
+    rᶜˡ_final = rᶜˡ_new + Δrᶜ
+    rʳ_final = rʳ_new - Δrᴱ
+
+    # Convert back to mass fractions
+    rˡ_final = rᶜˡ_final + rʳ_final
+    r_final = MoistureMixingRatio(rᵛ_final, rˡ_final)
+    q_final = MoistureMassFractions(r_final)
+    rᵗ_final = total_mixing_ratio(r_final)
+    qᶜˡ_final = rᶜˡ_final / (1 + rᵗ_final)
+    qʳ_final  = rʳ_final / (1 + rᵗ_final)
+    qᵗ_final = total_specific_moisture(q_final)
+
+    # Update temperature from latent heating
+    net_phase_change = Δrᶜ - Δrᴱ
+    ΔT = ℒˡᵣ / cᵖᵈ * net_phase_change
+    T_new = T + ΔT
+
+    # Update parcel state
+    state.μ = (; ρqᶜˡ = ρ * qᶜˡ_final, ρqʳ = ρ * qʳ_final)
+    state.qᵗ = qᵗ_final
+    state.ρqᵗ = ρ * qᵗ_final
+
+    # Update thermodynamic state with new moisture and temperature.
+    # with_temperature computes the correct static energy including latent heat terms.
+    𝒰_new = with_moisture(𝒰, q_final)
+    𝒰_new = with_temperature(𝒰_new, T_new, constants)
+    state.𝒰 = 𝒰_new
+
+    # Update static energy from the thermodynamic state.
+    # The StaticEnergyState stores the moist static energy which accounts for
+    # both sensible heat and latent heat of condensate.
+    state.ℰ = 𝒰_new.static_energy
+    state.ρℰ = ρ * state.ℰ
 
     return nothing
 end

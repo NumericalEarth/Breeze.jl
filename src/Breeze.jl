@@ -174,6 +174,9 @@ using .CompressibleEquations: CompressibleDynamics, CompressibleModel
 include("KinematicDriver/KinematicDriver.jl")
 using .KinematicDriver: PrescribedDensity, PrescribedDynamics, KinematicModel
 
+include("ParcelModels/ParcelModels.jl")
+using .ParcelModels
+
 include("Microphysics/Microphysics.jl")
 using .Microphysics
 
@@ -191,8 +194,5 @@ using .Forcings
 
 include("TimeSteppers/TimeSteppers.jl")
 using .TimeSteppers
-
-include("ParcelModels/ParcelModels.jl")
-using .ParcelModels
 
 end # module Breeze
