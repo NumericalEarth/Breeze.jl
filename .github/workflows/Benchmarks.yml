@@ -89,7 +89,7 @@ jobs:
           with open("github-action-benchmark.json", "w") as f:
               json.dump(data, f)
       - uses: actions/create-github-app-token@v2
-        # if: ${{ github.event_name != 'pull_request' }}
+        # if: ${{ ! github.event.pull_request.head.repo.fork }}
         id: generate_token
         with:
           app-id: "${{ secrets.NUMTERRA_BOT_ID }}"
@@ -106,7 +106,7 @@ jobs:
           benchmark-data-dir-path: "."
           gh-repository: "github.com/NumericalEarth/BreezeBenchmarks"
           github-token: ${{ steps.generate_token.outputs.token }}
-          # github-token: ${{ github.event_name == 'pull_request' && github.token || steps.generate_token.outputs.token }}
+          # github-token: ${{ github.event.pull_request.head.repo.fork && github.token || steps.generate_token.outputs.token }}
           comment-always: true
           summary-always: true
           alert-threshold: "110%"
