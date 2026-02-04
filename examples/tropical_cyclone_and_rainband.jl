@@ -2,7 +2,7 @@ using Breeze
 using Oceananigans: Oceananigans
 using Oceananigans.Units
 using Oceananigans.Fields: FieldTimeSeries
-
+using Breeze: DCMIP2016KesslerMicrophysics, WENO
 using AtmosphericProfilesLibrary
 using CairoMakie
 using CloudMicrophysics
@@ -20,11 +20,11 @@ Random.TaskLocalRNG()
 ## Domain and grid
 Oceananigans.defaults.FloatType = Float32
 
-Nx = Ny = 200
-Nz = 100
+Nx = Ny = 300
+Nz = 256
 
 x = y = (0, Nx*1000)
-z = (0, 16000)
+z = (0, 20500)
 
 grid = RectilinearGrid(GPU(); x, y, z,
                        size = (Nx, Ny, Nz), halo = (5, 5, 5),
@@ -122,20 +122,11 @@ println("\n=== Creating AtmosphereModel ===")
 BreezeCloudMicrophysicsExt = Base.get_extension(Breeze, :BreezeCloudMicrophysicsExt)
 using .BreezeCloudMicrophysicsExt: OneMomentCloudMicrophysics
 
-cloud_formation = SaturationAdjustment(equilibrium=WarmPhaseEquilibrium())
-microphysics = OneMomentCloudMicrophysics(; cloud_formation)
-
-weno = WENO(order=5)
-bounds_preserving_weno = WENO(order=5, bounds=(0, 1))
-
-momentum_advection = weno
-scalar_advection = (ρθ = weno,
-                    ρqᵗ = bounds_preserving_weno,
-                    ρqᶜˡ = bounds_preserving_weno,
-                    ρqʳ = bounds_preserving_weno)
+microphysics = DCMIP2016KesslerMicrophysics()
+advection = WENO(order=9, minimum_buffer_upwind_order=3)
 
 model = AtmosphereModel(grid; dynamics, coriolis, microphysics,
-                        momentum_advection, scalar_advection, forcing, boundary_conditions)
+                        advection, forcing, boundary_conditions)
 
 
 ###########################
@@ -145,8 +136,6 @@ model = AtmosphereModel(grid; dynamics, coriolis, microphysics,
 RMW = 31000
 V_RMW = 43 # m/s
 a = 0.5
-Deltap = 4500 # Pa
-pressure_top = 50000 # Pa (500 mb)
 Δz = znodes(grid, Center())[2] - znodes(grid, Center())[1]
 
 # Center of domain for perturbation
@@ -207,12 +196,14 @@ radius_of_eyewall_adjustment = radius_of_angular_momentum_surface_func
 
 
 function tangential_wind(x, y, z)
-    v_adjustment_factor = (RMW) ./ (RMW + radius_of_eyewall_adjustment(z))
+    
     r = sqrt((x-x_center)^2 + (y-y_center)^2)
-    if r <= RMW + radius_of_eyewall_adjustment(z)
-        return V_RMW * v_adjustment_factor * r/(RMW + radius_of_eyewall_adjustment(z))
+    if r <= RMW + radius_of_eyewall_adjustment(z) && z < 16000
+        return V_RMW  * r/(RMW + radius_of_eyewall_adjustment(z))
+    elseif z < 16000
+        return V_RMW * ((RMW + radius_of_eyewall_adjustment(z))/r)^a
     else
-        return V_RMW * v_adjustment_factor * ((RMW + radius_of_eyewall_adjustment(z))/r)^a
+        return 0
     end
 end
 
@@ -248,55 +239,57 @@ for k in 1:Nz_p
     # When integrating inward (decreasing r), pressure decreases
     for r_idx in (Nr-1):-1:1
         r = rrange[r_idx]
-        # Density at this radius (approximate using background)
-        ρ = p_background / (R * T_k)
+      
         
         # Compute pressure gradient from gradient wind balance
         # Use radius from center, not absolute position
         v_tang = tangential_wind(x_center + r, y_center, z_k)
         # Gradient wind: dp/dr = ρ * (f*v + v²/r)
+        if r_idx == Nr
+            ρ = p_background / (R * T_k)
+        else
+            ρ = p[k, r_idx+1] / (R * T_k)
+        end
+        ρ = p_background / (R * T_k)
+        
         dp_dr = ρ * (v_tang * coriolis.f + v_tang^2 / max(r, 100))  # Avoid division by zero
         
         # When moving inward (r decreases by ∂r), pressure change is dp_dr * (-∂r)
         # Since we're going from larger r to smaller r, the change is negative
-        dp = -dp_dr * ∂r
+        dp = dp_dr * ∂r
         
         # Pressure decreases as we move inward
         p[k, r_idx] = p[k, r_idx + 1] + dp
     end
 end
-p = p[:,1:Nx]
-# Compute pressure deficit relative to outer edge
-p_outer = p[:, end]
-δp = p .- reshape(repeat(p_outer, Nx), Nz_p, Nx)
+# Pressure deficit relative to far-field (max_radius); keep full radial grid so
+# result does not depend on domain size Nx
+p_outer = p[:, 1]
+p=reverse(p, dims=2)
 
-# Create interpolation function for pressure deficit
-function δp_func(x, y, z)
+
+
+function p_func(x, y, z)
     radius = sqrt((x - x_center)^2 + (y - y_center)^2)
-    
-    # Clamp to valid ranges
-    radius_clamped = clamp(radius, 0, max_radius)
     z_clamped = clamp(z, minimum(znodes(grid, Center())), maximum(znodes(grid, Center())))
-    
-    # Find indices
     z_idx = searchsortedfirst(znodes(grid, Center()), z_clamped)
     z_idx = clamp(z_idx, 1, Nz_p)
-    
-    r_idx = searchsortedfirst(rrange_asc, radius_clamped)
+    r_idx = searchsortedfirst(rrange_asc, radius)
     r_idx = clamp(r_idx, 1, Nr)
-    
-    # Return pressure deficit in Pa (not hPa)
-    return δp[z_idx, r_idx]
+    return p[z_idx, r_idx]
 end
 
-# plot the pressure profile
+# plot the pressure 
 fig = Figure()
+data = p'/100 .- p_outer'/100
+levels = minimum(data):5:maximum(data)
 ax = Axis(fig[1, 1])
-contourf!(ax, 1:1:Nx, znodes(grid, Center())/1000, δp', levels=-50:1:0, colormap=Reverse(:tol_YlOrBr))
-Colorbar(fig[1, 2], limits=(-50, 0), label="pressure deficit (hPa)", colormap=Reverse(:tol_YlOrBr))
+contourf!(ax, rrange_asc./1000, znodes(grid, Center()) ./1000, data,
+          levels = levels, colormap = :viridis)
+Colorbar(fig[1, 2], limits = (minimum(levels), maximum(levels)), label = "pressure (hPa)", colormap = :viridis)
 ax.ylabel = "Height (km)"
 ax.xlabel = "Radius (km)"
-Makie.save("pressure_profile.png", fig)
+Makie.save("pressure_deficit_profile.png", fig)
 
 
 
@@ -316,25 +309,14 @@ function θ_init(x, y, z)
     # Clamp z to sounding range for interpolation
     z_clamped = clamp(z, minimum(z_asc), maximum(z_asc))
     θ_background = θ_sounding_interp(z_clamped)
-    
-    # Get reference pressure at height z using hydrostatic relation
-    # Use the sounding temperature profile to compute pressure
-    p_surface = reference_state.surface_pressure
-    g = constants.gravitational_acceleration
-    R = constants.molar_gas_constant/constants.dry_air.molar_mass
+    z_idx = searchsortedfirst(znodes(grid, Center()), z_clamped)
     
     # Use temperature from sounding to compute reference pressure
-    T_background = T_sounding_interp(z_clamped)
-    p_ref = p_surface * exp(-g * z / (R * T_background))
+    p_ref = p_outer[z_idx]
     
-    # Get pressure deficit from vortex (in Pa, negative value at center)
-    δp = δp_func(x, y, z)
-    
-    # Potential temperature perturbation (negative sign gives warm core for pressure deficit)
-    δθ = -θ_background * (δp * 100 / p_ref)
-    
+
     # Return background potential temperature from sounding plus vortex perturbation
-    return θ_background + δθ
+    return θ_background * ( p_ref/(p_func(x, y, z)))
 end
 
 function qᵗ_init(x, y, z)
@@ -357,43 +339,59 @@ set!(model,
     v=v_init)
 
 
-
+############## PLOT INITIAL CONDITIONS ##############
+    
 tangential_wind_data = (Array(interior(model.velocities.u, :, :, 1)).^2 + Array(interior(model.velocities.v, :, :, 1)).^2).^0.5
 tangential_wind_slice = (Array(interior(model.velocities.u, :, Nx÷2, :)).^2 + Array(interior(model.velocities.v, :, Nx÷2, :)).^2).^0.5
-temperature_profile = Array(interior(liquid_ice_potential_temperature(model), 1, 1, :))
-############## PLOT INITIAL CONDITIONS ##############
+
 
 # Extract coordinate arrays
 x_coords = xnodes(grid, Center())
 y_coords = ynodes(grid, Center())
 z_coords = znodes(grid, Center())
 
+for i in 1:Nx
+θ = θ_init(x_coords[i], y_coords[Nx÷2], 1000)
+println(θ)
+
+end
+## plan view of potential temperature
+data = Array(interior(liquid_ice_potential_temperature(model), :, :, 2)) .- θ_sounding_interp(z_coords[2])
+limits = minimum(data):0.5:maximum(data)+0.5
 fig = Figure()
 ax = Axis(fig[1, 1])
-contourf!(ax, x_coords, y_coords, 
-    Array(interior(liquid_ice_potential_temperature(model), :, :, 2)), levels=295:1:330)
-
-Colorbar(fig[1, 2], limits=(295, 330), label="Potential Temperature (K)")
+contourf!(ax, x_coords, y_coords, data, levels=limits)
+Colorbar(fig[1, 2], limits=(minimum(limits), maximum(limits)), label="Potential Temperature (K)")
 Makie.save("theta_init.png", fig)
 
 ## cross section at center of domain
+θ_background = zeros(Nz)
+for k in range(1, Nz)
+    θ_background[k] = θ_sounding_interp(z_coords[k])
+end
+data = Array(interior(liquid_ice_potential_temperature(model), Nx÷2, :, :)) .- θ_background'
+limits = minimum(data):0.5:maximum(data)+0.5
 fig = Figure()
 ax = Axis(fig[1, 1])
-contourf!(ax, y_coords, z_coords, Array(interior(liquid_ice_potential_temperature(model), Nx÷2, :, :)) .- temperature_profile', levels=0:1:20)
-Colorbar(fig[1, 2], limits=(0, 20), label="Potential Temperature (K)")
+contourf!(ax, y_coords, z_coords, data, levels=limits)
+Colorbar(fig[1, 2], limits=(minimum(limits), maximum(limits)), label="Potential Temperature (K)")
 Makie.save("theta_init_cross_section.png", fig)
 
 ## tangential wind profile
+data = (Array(interior(model.velocities.u, :, :, 1)).^2 + Array(interior(model.velocities.v, :, :, 1)).^2).^0.5
+limits = minimum(data):0.5:maximum(data)+0.5
 fig = Figure()
 ax = Axis(fig[1, 1])
-contourf!(ax, x_coords, y_coords, tangential_wind_data, levels=0:1:43)
-Colorbar(fig[1, 2], limits=(0, 43), label="Tangential Wind (m/s)")
+contourf!(ax, x_coords, y_coords, data, levels=limits)
+Colorbar(fig[1, 2], limits=(minimum(limits), maximum(limits)), label="Tangential Wind (m/s)")
 Makie.save("tangential_wind_profile.png", fig)
 
 ## tangential wind profile at cross section
+data = (Array(interior(model.velocities.u, Nx÷2, :, :)).^2 + Array(interior(model.velocities.v, Nx÷2, :, :)).^2).^0.5
+limits = minimum(data):0.5:maximum(data)+0.5
 fig = Figure()
 ax = Axis(fig[1, 1])
-contourf!(ax, y_coords/1000, z_coords/1000, tangential_wind_slice, levels=100)
+contourf!(ax, y_coords/1000, z_coords/1000, data, levels=limits)
 Colorbar(fig[1, 2], limits=(0, 33), label="Tangential Wind (m/s)")
 Makie.save("tangential_wind_profile_cross_section.png", fig)
 
