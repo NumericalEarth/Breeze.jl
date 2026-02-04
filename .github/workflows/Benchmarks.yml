@@ -47,7 +47,7 @@ jobs:
         timeout-minutes: 45
         run:
           earlyoom -m 3 -s 100 -r 300 --prefer 'julia' &
-          julia --color=yes --project run_benchmarks.jl --device GPU --size "128^3, 256^3, 546x546x384, 688x688x340"
+          julia --color=yes --project run_benchmarks.jl --device GPU --size "128^3, 256^3, 384x384x256, 768x768x256"
       - uses: actions/upload-artifact@v6
         with:
           name: benchmarks-results
