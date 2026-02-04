@@ -853,9 +853,7 @@ function AtmosphereModels.microphysics_model_update!(microphysics::DCMIP2016KM, 
     rᶜˡ = qᶜˡ * (1 + rᵗ)
     rʳ  = qʳ * (1 + rᵗ)
 
-    # Thermodynamic constants
-    ℒˡᵣ = constants.liquid.reference_latent_heat
-    cᵖᵈ = constants.dry_air.heat_capacity
+    # Saturation adjustment parameters (computed from thermodynamic constants)
     T_DCMIP2016 = microphysics.dcmip_temperature_scale
     f₅ = saturation_adjustment_coefficient(T_DCMIP2016, constants)
     δT = constants.saturation_vapor_pressure.liquid_temperature_offset
@@ -909,26 +907,17 @@ function AtmosphereModels.microphysics_model_update!(microphysics::DCMIP2016KM, 
     qʳ_final  = rʳ_final / (1 + rᵗ_final)
     qᵗ_final = total_specific_moisture(q_final)
 
-    # Update temperature from latent heating
-    net_phase_change = Δrᶜ - Δrᴱ
-    ΔT = ℒˡᵣ / cᵖᵈ * net_phase_change
-    T_new = T + ΔT
-
     # Update parcel state
     state.μ = (; ρqᶜˡ = ρ * qᶜˡ_final, ρqʳ = ρ * qʳ_final)
     state.qᵗ = qᵗ_final
     state.ρqᵗ = ρ * qᵗ_final
 
-    # Update thermodynamic state with new moisture and temperature.
-    # with_temperature computes the correct static energy including latent heat terms.
-    𝒰_new = with_moisture(𝒰, q_final)
-    𝒰_new = with_temperature(𝒰_new, T_new, constants)
-    state.𝒰 = 𝒰_new
+    # Update thermodynamic state with new moisture fractions.
+    # Parcel models conserve specific static energy; latent heating is implicit.
+    state.𝒰 = with_moisture(𝒰, q_final)
 
-    # Update static energy from the thermodynamic state.
-    # The StaticEnergyState stores the moist static energy which accounts for
-    # both sensible heat and latent heat of condensate.
-    state.ℰ = 𝒰_new.static_energy
+    # Keep static energy consistent with the thermodynamic state.
+    state.ℰ = state.𝒰.static_energy
     state.ρℰ = ρ * state.ℰ
 
     return nothing
