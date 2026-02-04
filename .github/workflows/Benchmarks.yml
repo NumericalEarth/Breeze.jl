@@ -1,0 +1,52 @@
+name: Benchmarks
+
+on:
+  push:
+    branches:
+      - main
+    tags: "*"
+    paths: &paths
+      - ".github/workflows/Documentation.yml"
+      - "src/**"
+      - "Project.toml"
+  pull_request:
+    paths: *paths
+
+concurrency:
+  # Skip intermediate builds: always.
+  # Cancel intermediate builds: always.
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  run-benchmarks:
+    permissions:
+      actions: write
+      contents: write
+      pull-requests: read
+      statuses: write
+    runs-on: aws-linux-nvidia-gpu-l4
+    container:
+      # TODO: use image for benchmark environment after this is merged on `main`
+      image: 'ghcr.io/numericalearth/breeze-docker-images:docs-julia_1.12.4'
+      options: --gpus=all
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@v6
+      - name: Instantiate docs environment
+        shell: julia --color=yes --project=benchmarking {0}
+        run: |
+          using Pkg
+          Pkg.instantiate()
+      - name: Run benchmark
+        shell: bash
+        working-directory: benchmarking
+        timeout-minutes: 45
+        run:
+          earlyoom -m 3 -s 100 -r 300 --prefer 'julia' &
+          julia --color=yes --project run_benchmarks.jl --device GPU --size "546x546x384"
+      - uses: actions/upload-artifact@v6
+        with:
+          name: benchmarks-results
+          path: benchmarking/benchmark_results.json
+          retention-days: 90
