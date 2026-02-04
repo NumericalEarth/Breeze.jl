@@ -322,22 +322,6 @@ result.metadata
 3. **Report relative speedup** rather than absolute times when comparing hardware
 4. **Consider statistical significance** for small differences (<10%)
 
-## File Structure
-
-```
-benchmarking/
-├── Project.toml                      # Package dependencies
-├── README.md                         # This file
-├── run_benchmarks.jl                 # Command-line benchmark script
-├── run_gpu_benchmarks.jl             # Comprehensive GPU benchmark suite
-├── plot_benchmarks.jl                # Visualization utilities
-├── benchmark_results.json            # Accumulated results (JSON)
-├── benchmark_results.md              # Auto-generated report
-└── src/
-    ├── BreezeBenchmarks.jl           # Module exports and utilities
-    └── convective_boundary_layer.jl  # CBL benchmark case
-```
-
 ## Adding New Benchmark Cases
 
 To add a new benchmark case:
