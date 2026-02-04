@@ -79,11 +79,16 @@ jobs:
           import json
 
           with open('benchmark_results.json', 'r') as file:
-              data = json.load(file)
-          dicts = [{'name': d['name'], 'unit': 'points/s', 'value': d['grid_points_per_second']} for d in data]
+              orig_data = json.load(file)
+
+          data = []
+          for d in orig_data:
+              orig_name = d['name'].split('_')
+              name = orig_name[0] + '_' + orig_name[2] + '/' + orig_name[3] + '/' + d['metadata']['gpu_name'] + '/' + orig_name[1]
+              data.append({'name': name, 'unit': 'points/s', 'value': d['grid_points_per_second']})
 
           with open("github-action-benchmark.json", "w") as f:
-              json.dump(dicts, f)
+              json.dump(data, f)
       - uses: actions/create-github-app-token@v2
         id: generate_token
         with:
