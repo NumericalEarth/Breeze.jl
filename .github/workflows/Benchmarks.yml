@@ -50,3 +50,9 @@ jobs:
           name: benchmarks-results
           path: benchmarking/benchmark_results.*
           retention-days: 90
+      - name: Create job summary
+        shell: bash
+        working-directory: benchmarking
+        timeout-minutes: 1
+        run:
+          cat "benchmark_results.md" >> "${GITHUB_STEP_SUMMARY}"
