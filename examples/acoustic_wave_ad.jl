@@ -63,7 +63,7 @@ U₀ = 20.0
 Δx, Δy = Lx / Nx, Ly / Ny
 𝕌ˢ = 𝕌ˢⁱ + U₀ * 1.5
 Δt = 0.5 * min(Δx, Δy) / 𝕌ˢ
-nsteps = 24*24
+nsteps = 36*36
 
 # Coordinate arrays
 xc = Array(xnodes(grid, Center()))

@@ -84,7 +84,7 @@ set!(model,
 Δx, Δy = Lx / Nx, Ly / Ny
 𝕌ˢ = 𝕌ˢⁱ + U₀ * 1.5  # max wind speed
 Δt = 0.5 * min(Δx, Δy) / 𝕌ˢ
-nsteps = 24*24  # number of time steps
+nsteps = 36*36 # number of time steps
 
 simulation = Simulation(model; Δt, stop_iteration = nsteps)
 
