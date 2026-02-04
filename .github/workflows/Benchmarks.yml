@@ -48,5 +48,5 @@ jobs:
       - uses: actions/upload-artifact@v6
         with:
           name: benchmarks-results
-          path: benchmarking/benchmark_results.json
+          path: benchmarking/benchmark_results.*
           retention-days: 90
