@@ -62,14 +62,10 @@ jobs:
           # This step creates a new JSON file to be digested by the
           # `benchmark-action/github-action-benchmark` workflow.
           using JSON
-          data = first(JSON.parse(read("benchmark_results.json")))
-          dict = Dict(
-              "name" => data["name"],
-              "unit" => "steps/s",
-              "value" => data["steps_per_second"],
-          )
+          data = JSON.parse(read("benchmark_results.json"))
+          dicts = [Dict("name" => d["name"], "unit" => "steps/s", "value" => d["steps_per_second"]) for d in data]
           open("github-action-benchmark.json", "w") do io
-              JSON.json(io, [dict])
+              JSON.json(io, dicts)
           end
       - uses: actions/create-github-app-token@v2
         id: generate_token
