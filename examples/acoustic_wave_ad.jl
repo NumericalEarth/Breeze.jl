@@ -4,10 +4,10 @@
 # simulation using Reactant and Enzyme in two pedagogical steps:
 #
 # **Part 1**: Compute ∂L/∂ρ_init - the gradient of the loss w.r.t. the initial density field
-#             This shows how the final energy depends on each point in the initial condition.
+#             This shows how the final density depends on each point in the initial condition.
 #
 # **Part 2**: Compute ∂L/∂params - the gradient w.r.t. the Gaussian parameters (δρ, σ, x₀, y₀)
-#             This shows how the final energy depends on the shape/position of the perturbation.
+#             This shows how the final density depends on the shape/position of the perturbation.
 
 using Oceananigans
 using Oceananigans.Architectures: ReactantState
@@ -31,7 +31,7 @@ Reactant.allowscalar(true)
 # Grid and model setup (small grid for AD demonstration)
 # ============================================================================
 
-Nx, Ny = 32, 16
+Nx, Ny = 256, 128
 Lx, Ly = 1000.0, 200.0  # meters
 
 @time "Constructing grid" grid = RectilinearGrid(ReactantState();
@@ -63,7 +63,7 @@ U₀ = 20.0
 Δx, Δy = Lx / Nx, Ly / Ny
 𝕌ˢ = 𝕌ˢⁱ + U₀ * 1.5
 Δt = 0.5 * min(Δx, Δy) / 𝕌ˢ
-nsteps = 4
+nsteps = 24*24
 
 # Coordinate arrays
 xc = Array(xnodes(grid, Center()))
@@ -78,19 +78,19 @@ i_obs = 3Nx ÷ 4     # 3/4 of the way in x (middle of right half)
 j_obs = 3Ny ÷ 4     # 3/4 of the way in y (middle of top half)
 
 # Initial Gaussian parameters - center at middle of domain
-δρ_val = 0.01       # amplitude (kg/m³)
+δρ_val = 0.001      # density perturbation amplitude (kg/m³) - small for linear acoustics
 σ_val = 50.0        # width (m)
 x₀_val = Lx / 2     # x-position at domain center (m)
 y₀_val = Ly / 2     # y-position at domain center (m)
 
 println("=" ^ 70)
-println("Acoustic Wave AD Demonstration")
+println("Acoustic Wave AD Demonstration (Density Perturbation)")
 println("=" ^ 70)
 println()
 println("Grid: $Nx × $Ny, Domain: $Lx m × $Ly m")
 println("Time step: $(round(Δt, sigdigits=3)) s, Steps: $nsteps")
 println("Observation point: ($i_obs, $j_obs) at x=$(xc[i_obs])m, y=$(yc[j_obs])m")
-println("Parameters: δρ=$δρ_val, σ=$σ_val, x₀=$x₀_val, y₀=$y₀_val")
+println("Density perturbation: δρ=$δρ_val kg/m³, σ=$σ_val m, x₀=$x₀_val m, y₀=$y₀_val m")
 println()
 
 # ============================================================================
@@ -120,9 +120,11 @@ function loss_field(model, ρ_init, θ₀, U₀, Δt, nsteps, i_obs, j_obs)
     ρθ = model.formulation.potential_temperature_density
     u = model.velocities.u
     
-    # Copy initial conditions
+    # Copy initial density
     interior(ρ) .= interior(ρ_init)
     interior(ρθ) .= interior(ρ_init) .* θ₀
+    
+    # No velocity perturbation - just background
     parent(u) .= U₀
     
     # Time-stepping
@@ -167,6 +169,7 @@ end
 # Extract results
 dρ_array = Array(interior(dρ_result))[:, :, 1]
 ρ_init_array = Array(interior(ρ_init))[:, :, 1]
+ρ_perturbation = ρ_init_array .- ρ_ref  # Perturbation from background
 
 println()
 println("Loss value: $loss_val_1")
@@ -181,59 +184,48 @@ println()
 # (Figure will be completed and saved after Part 2 with parameter gradients)
 # ============================================================================
 
-# High-quality figure setup
-fig = Figure(size = (1200, 600), fontsize = 14, figure_padding = 20)
+# Vertical stack layout like acoustic_wave.jl (density on top, sensitivity below)
+aspect_ratio = Lx / Ly
+fig = Figure(size = (800, 500), fontsize = 12)
 
-# Supertitle
-Label(fig[0, 1:2], "Acoustic Wave AD: Initial Condition and Sensitivity", 
-      fontsize = 18, font = :bold)
+# Supertitle (include number of timesteps)
+fig[0, :] = Label(fig, "Acoustic Wave AD: Density Perturbation and Sensitivity (nsteps=$nsteps)", 
+                  fontsize = 16, tellwidth = false)
 
-# Left panel: Initial density field
+# Top panel: Initial density perturbation (ρ - ρ_ref)
 ax1 = Axis(fig[1, 1]; 
+    aspect = aspect_ratio,
+    ylabel = "y (m)",
+    title = "Initial Density Perturbation  ρ′(x,y)")
+
+hidexdecorations!(ax1)
+
+# Use symmetric colorrange centered at zero
+ρ_lim = δρ_val / 2
+hm1 = heatmap!(ax1, xc, yc, ρ_perturbation; 
+    colormap = :balance,
+    colorrange = (-ρ_lim, ρ_lim))
+Colorbar(fig[1, 2], hm1; label = "ρ′ (kg/m³)", height = Relative(0.8))
+
+# Mark observation point on top panel
+scatter!(ax1, [xc[i_obs]], [yc[j_obs]]; color = :red, markersize = 10, marker = :star5)
+
+# Bottom panel: Gradient of loss w.r.t. initial density
+ax2 = Axis(fig[2, 1]; 
+    aspect = aspect_ratio,
     xlabel = "x (m)", 
     ylabel = "y (m)",
-    title = "Initial Density Field  ρ₀(x,y)",
-    titlesize = 16,
-    xlabelsize = 14,
-    ylabelsize = 14,
-    aspect = Lx / Ly)
+    title = "Sensitivity  ∂L/∂ρ₀")
 
-hm1 = heatmap!(ax1, xc, yc, ρ_init_array'; 
-    colormap = :balance)
-Colorbar(fig[1, 1][1, 2], hm1; 
-    label = "ρ (kg/m³)", 
-    labelsize = 12,
-    ticklabelsize = 11)
-
-# Mark observation point on left panel
-scatter!(ax1, [xc[i_obs]], [yc[j_obs]]; color = :red, markersize = 12, marker = :star5)
-
-# Right panel: Gradient of loss w.r.t. initial density
-ax2 = Axis(fig[1, 2]; 
-    xlabel = "x (m)", 
-    ylabel = "y (m)",
-    title = "Sensitivity  ∂L/∂ρ₀",
-    titlesize = 16,
-    xlabelsize = 14,
-    ylabelsize = 14,
-    aspect = Lx / Ly)
-
-# Colorrange defined by actual min and max of gradient
-grad_min, grad_max = extrema(dρ_array)
-hm2 = heatmap!(ax2, xc, yc, dρ_array'; 
+# Colorrange defined by actual min and max of gradient (symmetric around zero)
+grad_max_abs = max(abs(minimum(dρ_array)), abs(maximum(dρ_array)))
+hm2 = heatmap!(ax2, xc, yc, dρ_array; 
     colormap = :balance, 
-    colorrange = (grad_min, grad_max))
-Colorbar(fig[1, 2][1, 2], hm2; 
-    label = "∂L/∂ρ", 
-    labelsize = 12,
-    ticklabelsize = 11)
+    colorrange = (-grad_max_abs, grad_max_abs))
+Colorbar(fig[2, 2], hm2; label = "∂L/∂ρ", height = Relative(0.8))
 
-# Mark observation point on right panel
-scatter!(ax2, [xc[i_obs]], [yc[j_obs]]; color = :red, markersize = 12, marker = :star5)
-
-# Adjust layout (will add more content after Part 2)
-rowgap!(fig.layout, 1, 10)
-colgap!(fig.layout, 1, 30)
+# Mark observation point on bottom panel
+scatter!(ax2, [xc[i_obs]], [yc[j_obs]]; color = :red, markersize = 10, marker = :star5)
 
 # ============================================================================
 # PART 2: Gradient w.r.t. Gaussian Parameters
@@ -261,7 +253,7 @@ function loss_params(model, params, xc, yc, ρ_ref, θ₀, U₀, Δt, nsteps, i_
     ρθ = model.formulation.potential_temperature_density
     u = model.velocities.u
     
-    # Construct Gaussian initial condition using broadcasting
+    # Construct Gaussian density perturbation using broadcasting
     X = reshape(xc, :, 1)
     Y = reshape(yc, 1, :)
     r² = (X .- x₀).^2 .+ (Y .- y₀).^2
@@ -271,6 +263,8 @@ function loss_params(model, params, xc, yc, ρ_ref, θ₀, U₀, Δt, nsteps, i_
     
     interior(ρ) .= reshape(ρ_vals, size(interior(ρ)))
     interior(ρθ) .= reshape(ρθ_vals, size(interior(ρθ)))
+    
+    # No velocity perturbation - just background
     parent(u) .= U₀
     
     # Time-stepping
@@ -337,24 +331,15 @@ println()
 println("Position gradient: ∇_{(x₀,y₀)} L = ($∂L_∂x₀, $∂L_∂y₀)")
 println()
 
-# Add parameter gradients to the figure
-grad_text = """Parameter Gradients:
-∂L/∂δρ = $(round(∂L_∂δρ, sigdigits=4))
-∂L/∂σ  = $(round(∂L_∂σ, sigdigits=4))
-∂L/∂x₀ = $(round(∂L_∂x₀, sigdigits=4))
-∂L/∂y₀ = $(round(∂L_∂y₀, sigdigits=4))"""
+# Add parameter gradients to the figure (row 3, below the two heatmaps)
+grad_text = "Parameter Gradients:  ∂L/∂δρ = $(round(∂L_∂δρ, sigdigits=4)),  ∂L/∂σ = $(round(∂L_∂σ, sigdigits=4)),  ∂L/∂x₀ = $(round(∂L_∂x₀, sigdigits=4)),  ∂L/∂y₀ = $(round(∂L_∂y₀, sigdigits=4))"
 
-# Add text box below the plots
-Label(fig[2, 1:2], grad_text; 
-      fontsize = 12, 
-      font = :regular,
-      halign = :center,
-      valign = :top,
-      padding = (10, 10, 10, 10))
+Label(fig[3, 1:2], grad_text; fontsize = 11, tellwidth = false)
 
-# Save the completed figure
-save("acoustic_wave_gradient_field.png", fig; px_per_unit = 2)
-println("Figure saved to: acoustic_wave_gradient_field.png")
+# Save the completed figure (include nsteps in filename)
+output_filename = "acoustic_wave_gradient_field_nsteps$(nsteps).png"
+save(output_filename, fig; px_per_unit = 2)
+println("Figure saved to: $output_filename")
 println()
 
 # ============================================================================
@@ -414,7 +399,7 @@ println("This demonstration showed:")
 println()
 println("1. PART 1: Computing ∂L/∂ρ_init - the sensitivity of the loss")
 println("   to each grid point in the initial density field.")
-println("   → Visualized in: acoustic_wave_gradient_field.png")
+println("   → Visualized in: $output_filename")
 println()
 println("2. PART 2: Computing ∂L/∂params - the sensitivity to the")
 println("   Gaussian parameters (amplitude, width, position).")

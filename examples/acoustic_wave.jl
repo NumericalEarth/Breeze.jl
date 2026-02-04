@@ -22,7 +22,7 @@ using CairoMakie
 
 # ## Grid and model setup
 
-Nx, Ny = 32, 16
+Nx, Ny = 256, 128
 Lx, Ly = 1000.0, 200.0  # meters
 
 grid = RectilinearGrid(size = (Nx, Ny), extent = (Lx, Ly),
@@ -62,16 +62,14 @@ Uᵢ(y) = U₀ * (0.5 + y / Ly)
 # ## Initial conditions
 #
 # We initialize a localized Gaussian density pulse representing an acoustic disturbance.
-# For a rightward-propagating acoustic wave, the velocity perturbation is in phase with
-# the density perturbation: ``u' = (𝕌ˢ / ρ₀) ρ'``.
+# No velocity perturbation - only the background wind shear.
 
-δρ = 0.01         # Density perturbation amplitude (kg/m³)
+δρ = 0.001        # Density perturbation amplitude (kg/m³) - small for linear acoustics
 σ = 50.0          # Pulse width (m)
 x₀ = Lx / 2       # Gaussian center x-position (domain center)
 y₀ = Ly / 2       # Gaussian center y-position (domain center)
 
-# In a horizontal slice, density is uniform (no hydrostatic variation)
-# Using inline Gaussian to avoid function redefinition issues
+# Gaussian density perturbation, no velocity perturbation
 set!(model, 
      ρ = (x, y) -> ρ₀ + δρ * exp(-((x - x₀)^2 + (y - y₀)^2) / (2σ^2)),
      θ = θ₀, 
@@ -86,7 +84,7 @@ set!(model,
 Δx, Δy = Lx / Nx, Ly / Ny
 𝕌ˢ = 𝕌ˢⁱ + U₀ * 1.5  # max wind speed
 Δt = 0.5 * min(Δx, Δy) / 𝕌ˢ
-nsteps = 100  # number of time steps
+nsteps = 24*24  # number of time steps
 
 simulation = Simulation(model; Δt, stop_iteration = nsteps)
 
@@ -163,8 +161,8 @@ Un = @lift Uts[$n]
 Rn = @lift Rts[$n]
 V²n = @lift V²ts[$n]
 
-ρlim = δρ / 4
-ulim = 1
+ρlim = δρ / 2  # Colorrange based on density perturbation amplitude
+ulim = 0.1     # Small colorrange for velocity (no initial perturbation)
 
 hmρ = heatmap!(axρ, ρ′n; colormap = :balance, colorrange = (-ρlim, ρlim))
 hmv = heatmap!(axv, vn; colormap = :balance, colorrange = (-ulim, ulim))
@@ -178,10 +176,11 @@ Colorbar(fig[1, 3], hmρ; label = "ρ′ (kg/m³)")
 Colorbar(fig[2, 3], hmv; label = "v (m/s)")
 Colorbar(fig[3, 3], hmu; label = "u′ (m/s)")
 
-title = @lift "Acoustic wave in horizontal shear — t = $(prettytime(times[$n]))"
+title = @lift "Acoustic wave in horizontal shear — t = $(prettytime(times[$n])), nsteps=$nsteps"
 fig[0, :] = Label(fig, title, fontsize = 16, tellwidth = false)
 
-CairoMakie.record(fig, "acoustic_wave.mp4", 1:Nt, framerate = 18) do nn
+output_filename = "acoustic_wave_nsteps$(nsteps).mp4"
+CairoMakie.record(fig, output_filename, 1:Nt, framerate = 18) do nn
     n[] = nn
 end
 nothing #hide
