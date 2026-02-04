@@ -89,6 +89,11 @@ function benchmark_time_stepping(model;
         end
     end
 
+    if arch isa GPU
+        # Reclaim memory, so that next benchmarks will start from a clean state.
+        CUDA.reclaim()
+    end
+
     return result
 end
 
@@ -261,6 +266,11 @@ function run_benchmark_simulation(model;
         if arch isa GPU
             @info "    GPU memory usage: $(Base.format_bytes(gpu_memory_used))"
         end
+    end
+
+    if arch isa GPU
+        # Reclaim memory, so that next simulations will start from a clean state.
+        CUDA.reclaim()
     end
 
     return result
