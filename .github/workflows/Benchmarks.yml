@@ -69,7 +69,7 @@ jobs:
               "value" => data["steps_per_second"],
           )
           open("github-action-benchmark.json", "w") do io
-              JSON.json(io, dict)
+              JSON.json(io, [dict])
           end
       - uses: actions/create-github-app-token@v2
         id: generate_token
