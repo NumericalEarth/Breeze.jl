@@ -82,7 +82,7 @@ jobs:
           name: Breeze.jl Benchmarks
           tool: "customSmallerIsBetter"
           output-file-path: "benchmarking/github-action-benchmark.json"
-          benchmark-data-dir-path: "benchmarks"
+          benchmark-data-dir-path: "."
           gh-repository: "github.com/NumericalEarth/BreezeBenchmarks"
           github-token: ${{ steps.generate_token.outputs.token }}
           comment-always: true
