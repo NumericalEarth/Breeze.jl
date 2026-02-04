@@ -201,25 +201,25 @@ end
 ##### MicrophysicalState construction from fields
 #####
 
-# Gridless version: takes density, prognostic NamedTuple, thermodynamic state, and updraft velocity
-@inline function AtmosphereModels.microphysical_state(bμp::WPNE2M, ρ, μ, 𝒰, w)
+# Gridless version: takes density, prognostic NamedTuple, thermodynamic state, and velocities
+@inline function AtmosphereModels.microphysical_state(bμp::WPNE2M, ρ, μ, 𝒰, velocities)
     qᶜˡ = μ.ρqᶜˡ / ρ
     nᶜˡ = μ.ρnᶜˡ / ρ
     qʳ = μ.ρqʳ / ρ
     nʳ = μ.ρnʳ / ρ
     nᵃ = μ.ρnᵃ / ρ
-    return WarmPhaseTwoMomentState(qᶜˡ, nᶜˡ, qʳ, nʳ, nᵃ, w)
+    return WarmPhaseTwoMomentState(qᶜˡ, nᶜˡ, qʳ, nʳ, nᵃ, velocities)
 end
 
 # Grid-indexed version: extracts from Fields
-# Vertical velocity w is passed from grid_microphysical_tendency (interpolated to cell center)
-@inline function AtmosphereModels.grid_microphysical_state(i, j, k, grid, bμp::WPNE2M, μ, ρ, 𝒰, w)
+# Velocities are passed from grid_microphysical_tendency (interpolated to cell center)
+@inline function AtmosphereModels.grid_microphysical_state(i, j, k, grid, bμp::WPNE2M, μ, ρ, 𝒰, velocities)
     @inbounds qᶜˡ = μ.qᶜˡ[i, j, k]
     @inbounds nᶜˡ = μ.nᶜˡ[i, j, k]
     @inbounds qʳ = μ.qʳ[i, j, k]
     @inbounds nʳ = μ.nʳ[i, j, k]
     @inbounds nᵃ = μ.nᵃ[i, j, k]
-    return WarmPhaseTwoMomentState(qᶜˡ, nᶜˡ, qʳ, nʳ, nᵃ, w)
+    return WarmPhaseTwoMomentState(qᶜˡ, nᶜˡ, qʳ, nʳ, nᵃ, velocities)
 end
 
 """
@@ -518,7 +518,6 @@ const τⁿᵘᵐ_2m = 10  # seconds
     qʳ = ℳ.qʳ
     nᶜˡ = ℳ.nᶜˡ
     nᵃ = ℳ.nᵃ
-    w = ℳ.w
 
     # Number densities [1/m³]
     Nᶜˡ = ρ * max(0, nᶜˡ)
@@ -570,7 +569,6 @@ end
     qʳ = ℳ.qʳ
     nᶜˡ = ℳ.nᶜˡ
     nᵃ = ℳ.nᵃ
-    w = ℳ.w
 
     # Number densities [1/m³]
     Nᶜˡ = ρ * max(0, nᶜˡ)
@@ -630,12 +628,14 @@ const rⁿᵘᶜ = 5e-11  # 0.05 nm
 ) where {FT}
 
     # Extract and clamp values from microphysical state
-    w⁺ = max(0, ℳ.w)
+    w = ℳ.velocities.w  # extract vertical velocity for aerosol activation
+    w⁺ = max(0, w)
     Nᵃ⁺ = max(0, ℳ.nᵃ * ρ)
     Nᶜˡ⁺ = max(0, ℳ.nᶜˡ * ρ)
 
     # Construct clamped microphysical state for activation calculation
-    ℳ⁺ = WarmPhaseTwoMomentState(ℳ.qᶜˡ, ℳ.nᶜˡ, ℳ.qʳ, ℳ.nʳ, ℳ.nᵃ, w⁺)
+    velocities⁺ = (; u = ℳ.velocities.u, v = ℳ.velocities.v, w = w⁺)
+    ℳ⁺ = WarmPhaseTwoMomentState(ℳ.qᶜˡ, ℳ.nᶜˡ, ℳ.qʳ, ℳ.nʳ, ℳ.nᵃ, velocities⁺)
 
     # Supersaturation - activation only occurs when air is supersaturated (S > 0)
     T = temperature(𝒰, constants)

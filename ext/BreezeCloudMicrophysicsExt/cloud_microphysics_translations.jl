@@ -229,7 +229,7 @@ using Breeze.AtmosphereModels: AbstractMicrophysicalState
 using CloudMicrophysics.AerosolModel: Mode_B, Mode_κ
 
 """
-    WarmPhaseTwoMomentState{FT} <: AbstractMicrophysicalState{FT}
+    WarmPhaseTwoMomentState{FT, V} <: AbstractMicrophysicalState{FT}
 
 Microphysical state for warm-phase two-moment bulk microphysics.
 
@@ -242,15 +242,16 @@ tendencies for cloud liquid and rain following the Seifert-Beheng 2006 scheme.
 - `qʳ`: Rain mixing ratio (kg/kg)
 - `nʳ`: Rain number per unit mass (1/kg)
 - `nᵃ`: Aerosol number per unit mass (1/kg)
-- `w`: Updraft velocity (m/s) - used for aerosol activation (0 if unknown)
+- `velocities`: NamedTuple of velocity components `(; u, v, w)` [m/s].
+  The vertical velocity `w` is used for aerosol activation.
 """
-struct WarmPhaseTwoMomentState{FT} <: AbstractMicrophysicalState{FT}
-    qᶜˡ :: FT  # cloud liquid mixing ratio
-    nᶜˡ :: FT  # cloud liquid number per unit mass
-    qʳ  :: FT  # rain mixing ratio
-    nʳ  :: FT  # rain number per unit mass
-    nᵃ  :: FT  # aerosol number per unit mass
-    w   :: FT  # updraft velocity
+struct WarmPhaseTwoMomentState{FT, V} <: AbstractMicrophysicalState{FT}
+    qᶜˡ :: FT         # cloud liquid mixing ratio
+    nᶜˡ :: FT         # cloud liquid number per unit mass
+    qʳ  :: FT         # rain mixing ratio
+    nʳ  :: FT         # rain number per unit mass
+    nᵃ  :: FT         # aerosol number per unit mass
+    velocities :: V   # velocity components (; u, v, w)
 end
 
 """
@@ -328,7 +329,7 @@ Maximum supersaturation (dimensionless, e.g., 0.01 = 1% supersaturation)
     qⁱ = q.ice
 
     # Extract from microphysical state
-    w = ℳ.w
+    w = ℳ.velocities.w  # vertical velocity for aerosol activation
     Nˡ = ℳ.nᶜˡ * ρ  # convert from per-mass to per-volume
     Nⁱ = zero(FT)   # warm phase: no ice
 
