@@ -1,10 +1,10 @@
-# # Acoustic wave refraction by wind shear
+# # Acoustic wave refraction by wind shear (2D horizontal)
 #
-# This example simulates an acoustic pulse propagating through a wind shear layer
+# This example simulates an acoustic pulse propagating through a horizontal wind shear layer
 # using the fully compressible [Euler equations](https://en.wikipedia.org/wiki/Euler_equations_(fluid_dynamics)).
-# When wind speed increases with height, sound waves are refracted: waves traveling **with**
-# the wind bend **downward** (trapped near the surface), while waves traveling **against**
-# the wind bend **upward**.
+# When wind speed varies across the domain, sound waves are refracted: waves traveling **with**
+# the wind bend toward regions of lower wind speed, while waves traveling **against**
+# the wind bend toward regions of higher wind speed.
 #
 # The sound speed for a wave traveling in direction ``\hat{\boldsymbol{n}}`` is
 # ```math
@@ -13,59 +13,51 @@
 # where ``𝕌ˢⁱ`` is the intrinsic sound speed and ``\boldsymbol{u}`` is the wind velocity.
 # This causes wavefronts to tilt toward regions of lower effective sound speed.
 #
-# This phenomenon explains why distant sounds are often heard more clearly downwind
-# of a source, as sound energy is "ducted" along the surface. For more on this topic, see
-#
-# ```@bibliography
-# ostashev2015acoustics
-# pierce2019acoustics
-# ```
-#
-# We use stable stratification to suppress [Kelvin-Helmholtz instability](https://en.wikipedia.org/wiki/Kelvin%E2%80%93Helmholtz_instability)
-# and a logarithmic wind profile consistent with the atmospheric surface layer.
+# This is a 2D horizontal slice simulation with doubly-periodic boundary conditions.
 
 using Breeze
-using Breeze.Thermodynamics: adiabatic_hydrostatic_density
 using Oceananigans.Units
 using Printf
 using CairoMakie
 
 # ## Grid and model setup
 
-Nx, Nz = 128, 64
-Lx, Lz = 1000, 200  # meters
+Nx, Ny = 32, 16
+Lx, Ly = 1000.0, 200.0  # meters
 
-grid = RectilinearGrid(size = (Nx, Nz), x = (-Lx/2, Lx/2), z = (0, Lz),
-                       topology = (Periodic, Flat, Bounded))
+grid = RectilinearGrid(size = (Nx, Ny), extent = (Lx, Ly),
+                       topology = (Periodic, Periodic, Flat))
 
 model = AtmosphereModel(grid; dynamics = CompressibleDynamics())
 
 # ## Background state
 #
-# We build a hydrostatically balanced reference state using [`ReferenceState`](@ref).
-# This provides the background density and pressure profiles.
+# For a 2D horizontal slice, we use uniform thermodynamic properties.
+# The reference density is computed from the ideal gas law at the given pressure and temperature.
 
 constants = model.thermodynamic_constants
 
-θ₀ = 300      # Reference potential temperature (K)
-p₀ = 101325   # Surface pressure (Pa)
-pˢᵗ = 1e5     # Standard pressure (Pa)
+θ₀ = 300.0      # Reference potential temperature (K)
+p₀ = 101325.0   # Surface pressure (Pa)
 
-reference = ReferenceState(grid, constants; surface_pressure=p₀, potential_temperature=θ₀, standard_pressure=pˢᵗ)
-
-# The sound speed at the surface determines the acoustic wave propagation speed.
-
+# Compute thermodynamic constants
 Rᵈ = constants.molar_gas_constant / constants.dry_air.molar_mass
 cᵖᵈ = constants.dry_air.heat_capacity
 γ = cᵖᵈ / (cᵖᵈ - Rᵈ)
+
+# Reference density from ideal gas law: ρ = p / (R * T)
+# At surface, T ≈ θ₀ (potential temperature equals temperature when p = p_ref)
+ρ₀ = p₀ / (Rᵈ * θ₀)
+
+# The sound speed determines the acoustic wave propagation speed
 𝕌ˢⁱ = sqrt(γ * Rᵈ * θ₀)
 
-# The wind profile follows the classic log-law of the atmospheric surface layer.
+# The wind profile varies linearly across the y-direction to create horizontal shear.
 
-U₀ = 20 # Surface velocity (m/s, u★ / κ)
-ℓ = 1  # Roughness length [m] -- like, shrubs and stuff
+U₀ = 20.0 # Maximum velocity (m/s)
 
-Uᵢ(z) = U₀ * log((z + ℓ) / ℓ)
+# Wind increases from U₀/2 at y=0 to 3U₀/2 at y=Ly
+Uᵢ(y) = U₀ * (0.5 + y / Ly)
 
 # ## Initial conditions
 #
@@ -74,15 +66,16 @@ Uᵢ(z) = U₀ * log((z + ℓ) / ℓ)
 # the density perturbation: ``u' = (𝕌ˢ / ρ₀) ρ'``.
 
 δρ = 0.01         # Density perturbation amplitude (kg/m³)
-σ = 20            # Pulse width (m)
+σ = 50.0          # Pulse width (m)
+x₀ = Lx / 2       # Gaussian center x-position (domain center)
+y₀ = Ly / 2       # Gaussian center y-position (domain center)
 
-gaussian(x, z) = exp(-(x^2 + z^2) / 2σ^2)
-ρ₀ = interior(reference.density, 1, 1, 1)[]
-
-ρᵢ(x, z) = adiabatic_hydrostatic_density(z, p₀, θ₀, pˢᵗ, constants) + δρ * gaussian(x, z)
-uᵢ(x, z) = Uᵢ(z) #+ (𝕌ˢⁱ / ρ₀) * δρ * gaussian(x, z)
-
-set!(model, ρ=ρᵢ, θ=θ₀, u=uᵢ)
+# In a horizontal slice, density is uniform (no hydrostatic variation)
+# Using inline Gaussian to avoid function redefinition issues
+set!(model, 
+     ρ = (x, y) -> ρ₀ + δρ * exp(-((x - x₀)^2 + (y - y₀)^2) / (2σ^2)),
+     θ = θ₀, 
+     u = (x, y) -> Uᵢ(y))
 
 
 # ## Simulation setup
@@ -90,22 +83,19 @@ set!(model, ρ=ρᵢ, θ=θ₀, u=uᵢ)
 # Acoustic waves travel fast (``𝕌ˢⁱ ≈ 347`` m/s), so we need a small time step.
 # The [Courant–Friedrichs–Lewy (CFL) condition](https://en.wikipedia.org/wiki/Courant%E2%80%93Friedrichs%E2%80%93Lewy_condition) is based on the effective sound speed ``𝕌ˢ = 𝕌ˢⁱ + \mathrm{max}(U)``.
 
-Δx, Δz = Lx / Nx, Lz / Nz
-𝕌ˢ = 𝕌ˢⁱ + Uᵢ(Lz)
-Δt = 0.5 * min(Δx, Δz) / 𝕌ˢ
-stop_time = 1  # seconds
+Δx, Δy = Lx / Nx, Ly / Ny
+𝕌ˢ = 𝕌ˢⁱ + U₀ * 1.5  # max wind speed
+Δt = 0.5 * min(Δx, Δy) / 𝕌ˢ
+nsteps = 100  # number of time steps
 
-simulation = Simulation(model; Δt, stop_time)
+simulation = Simulation(model; Δt, stop_iteration = nsteps)
 
-function progress(sim)
-    u, v, w = sim.model.velocities
-    msg = @sprintf("Iter: %d, t: %s, max|u|: %.2f m/s, max|w|: %.2f m/s",
-                   iteration(sim), prettytime(sim),
-                   maximum(abs, u), maximum(abs, w))
-    @info msg
-end
+progress(sim) = @info @sprintf("Iter: %d, t: %s, max|u|: %.2f m/s, max|v|: %.2f m/s",
+                               iteration(sim), prettytime(sim),
+                               maximum(abs, sim.model.velocities.u), 
+                               maximum(abs, sim.model.velocities.v))
 
-add_callback!(simulation, progress, IterationInterval(100))
+add_callback!(simulation, progress, IterationInterval(10))
 
 # ## Output
 #
@@ -117,22 +107,22 @@ u, v, w = model.velocities
 ρᵇᵍ = CenterField(grid)
 uᵇᵍ = XFaceField(grid)
 
-set!(ρᵇᵍ, (x, z) -> adiabatic_hydrostatic_density(z, p₀, θ₀, pˢᵗ, constants))
-set!(uᵇᵍ, (x, z) -> Uᵢ(z))
+set!(ρᵇᵍ, (x, y) -> ρ₀)
+set!(uᵇᵍ, (x, y) -> Uᵢ(y))
 
 ρ′ = Field(ρ - ρᵇᵍ)
 u′ = Field(u - uᵇᵍ)
 
 U = Average(u, dims = 1)
 R = Average(ρ, dims = 1)
-W² = Average(w^2, dims = 1)
+V² = Average(v^2, dims = 1)
 
 filename = "acoustic_wave.jld2"
-outputs = (; ρ′, u′, w, U, R, W²)
+outputs = (; ρ′, u′, v, U, R, V²)
 
 simulation.output_writers[:jld2] = JLD2Writer(model, outputs; filename,
                                               including = [:grid],
-                                              schedule = TimeInterval(0.01),
+                                              schedule = IterationInterval(1),
                                               overwrite_existing = true)
 
 run!(simulation)
@@ -143,51 +133,52 @@ run!(simulation)
 
 ρ′ts = FieldTimeSeries(filename, "ρ′")
 u′ts = FieldTimeSeries(filename, "u′")
-wts = FieldTimeSeries(filename, "w")
+vts = FieldTimeSeries(filename, "v")
 Uts = FieldTimeSeries(filename, "U")
 Rts = FieldTimeSeries(filename, "R")
-W²ts = FieldTimeSeries(filename, "W²")
+V²ts = FieldTimeSeries(filename, "V²")
 
 times = ρ′ts.times
 Nt = length(times)
 
 fig = Figure(size = (900, 600), fontsize = 12)
 
-axρ = Axis(fig[1, 2]; aspect = 5, ylabel = "z (m)")
-axw = Axis(fig[2, 2]; aspect = 5, ylabel = "z (m)")
-axu = Axis(fig[3, 2]; aspect = 5, xlabel = "x (m)", ylabel = "z (m)")
+aspect_ratio = Lx / Ly
+axρ = Axis(fig[1, 2]; aspect = aspect_ratio, ylabel = "y (m)")
+axv = Axis(fig[2, 2]; aspect = aspect_ratio, ylabel = "y (m)")
+axu = Axis(fig[3, 2]; aspect = aspect_ratio, xlabel = "x (m)", ylabel = "y (m)")
 axR = Axis(fig[1, 1]; xlabel = "⟨ρ⟩ (kg/m³)")
-axW = Axis(fig[2, 1]; xlabel = "⟨w²⟩ (m²/s²)", limits = (extrema(W²ts), nothing))
+axV = Axis(fig[2, 1]; xlabel = "⟨v²⟩ (m²/s²)", limits = (extrema(V²ts), nothing))
 axU = Axis(fig[3, 1]; xlabel = "⟨u⟩ (m/s)")
 
 hidexdecorations!(axρ)
-hidexdecorations!(axw)
+hidexdecorations!(axv)
 colsize!(fig.layout, 1, Relative(0.2))
 
 n = Observable(Nt)
 ρ′n = @lift ρ′ts[$n]
 u′n = @lift u′ts[$n]
-wn = @lift wts[$n]
+vn = @lift vts[$n]
 Un = @lift Uts[$n]
 Rn = @lift Rts[$n]
-W²n = @lift W²ts[$n]
+V²n = @lift V²ts[$n]
 
 ρlim = δρ / 4
 ulim = 1
 
 hmρ = heatmap!(axρ, ρ′n; colormap = :balance, colorrange = (-ρlim, ρlim))
-hmw = heatmap!(axw, wn; colormap = :balance, colorrange = (-ulim, ulim))
+hmv = heatmap!(axv, vn; colormap = :balance, colorrange = (-ulim, ulim))
 hmu = heatmap!(axu, u′n; colormap = :balance, colorrange = (-ulim, ulim))
 
 lines!(axR, Rn)
-lines!(axW, W²n)
+lines!(axV, V²n)
 lines!(axU, Un)
 
 Colorbar(fig[1, 3], hmρ; label = "ρ′ (kg/m³)")
-Colorbar(fig[2, 3], hmw; label = "w (m/s)")
+Colorbar(fig[2, 3], hmv; label = "v (m/s)")
 Colorbar(fig[3, 3], hmu; label = "u′ (m/s)")
 
-title = @lift "Acoustic wave in log-layer shear — t = $(prettytime(times[$n]))"
+title = @lift "Acoustic wave in horizontal shear — t = $(prettytime(times[$n]))"
 fig[0, :] = Label(fig, title, fontsize = 16, tellwidth = false)
 
 CairoMakie.record(fig, "acoustic_wave.mp4", 1:Nt, framerate = 18) do nn
