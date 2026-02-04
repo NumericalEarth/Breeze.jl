@@ -365,27 +365,34 @@ Maximum supersaturation (dimensionless, e.g., 0.01 = 1% supersaturation)
     # Formula: A = 2σ / (ρʷ * R_v * T)
     A = 2 * ap.σ / (ρʷ * Rᵛ * T)
 
-    # Only compute if there's updraft
+    # Maximum supersaturation from ARG 2000 (only valid for w > 0)
     Sᵐᵃˣ₀ = compute_smax(aerosol_activation, A, α, γ, G, w, ρʷ)
 
     # Correction for existing liquid and ice (phase relaxation)
     # See Eq. A13 in Korolev and Mazin (2003) or CloudMicrophysics implementation
 
     # Liquid relaxation
-    rˡ = ifelse(Nˡ > eps(FT), cbrt(ρ * qˡ / Nˡ / ρʷ / (4 / 3 * π)), 0)
+    rˡ = ifelse(Nˡ > eps(FT), cbrt(ρ * qˡ / Nˡ / ρʷ / (4 / 3 * π)), zero(FT))
     Kˡ = 4 * π * ρʷ * Nˡ * rˡ * G * γ
 
     # Ice relaxation
     γⁱ = Rᵛ * T / pᵛ⁺ + pᵛ / pᵛ⁺ * Rᵐ * ℒˡ * ℒⁱ / Rᵛ / cᵖᵐ / T / p
-    rⁱ = ifelse(Nⁱ > eps(FT), cbrt(ρ * qⁱ / Nⁱ / ρⁱ / (4 / 3 * π)), 0)
+    rⁱ = ifelse(Nⁱ > eps(FT), cbrt(ρ * qⁱ / Nⁱ / ρⁱ / (4 / 3 * π)), zero(FT))
     Gⁱ = diffusional_growth_factor_ice(aps, T, constants)
     Kⁱ = 4 * π * Nⁱ * rⁱ * Gⁱ * γⁱ
 
     ξ = pᵛ⁺ / pᵛ⁺ⁱ
 
-    Sᵐᵃˣ = Sᵐᵃˣ₀ * (α * w - Kⁱ * (ξ - 1)) / (α * w + (Kˡ + Kⁱ * ξ) * Sᵐᵃˣ₀)
+    # Phase-relaxation corrected Sᵐᵃˣ (Eq. A13 in Korolev and Mazin 2003)
+    # Use safe denominator conditioned on w > 0 to avoid NaN
+    denominator = α * w + (Kˡ + Kⁱ * ξ) * Sᵐᵃˣ₀
+    safe_denominator = ifelse(w > zero(FT), denominator, one(FT))
+    Sᵐᵃˣ_computed = Sᵐᵃˣ₀ * (α * w - Kⁱ * (ξ - 1)) / safe_denominator
 
-    return max(0, Sᵐᵃˣ)
+    # Activation only occurs with positive updraft velocity
+    Sᵐᵃˣ = ifelse(w > zero(FT), Sᵐᵃˣ_computed, zero(FT))
+
+    return max(zero(FT), Sᵐᵃˣ)
 end
 
 # Helper function to compute mean hygroscopicity
@@ -426,7 +433,11 @@ end
     ap = aerosol_activation.activation_parameters
     ad = aerosol_activation.aerosol_distribution
 
-    ζ = 2 * A / 3 * sqrt(α * w / G)
+    # Use safe positive w to avoid NaN in computation; result is 0 when w <= 0
+    # ARG 2000 parameterization is only valid for positive updraft velocities
+    w⁺ = max(eps(FT), w)
+
+    ζ = 2 * A / 3 * sqrt(α * w⁺ / G)
 
     # Compute critical supersaturation and contribution from each mode
     Σ_inv_Sᵐᵃˣ² = zero(FT)
@@ -443,11 +454,14 @@ end
         gᵥ = ap.g1 + ap.g2 * log(mode.stdev)
 
         # η parameter
-        η = sqrt(α * w / G)^3 / (2π * ρʷ * γ * mode.N)
+        η = sqrt(α * w⁺ / G)^3 / (2π * ρʷ * γ * mode.N)
 
         # Contribution to 1/Sᵐᵃˣ² (Eq. 6 in ARG 2000)
         Σ_inv_Sᵐᵃˣ² += 1 / Sᶜʳⁱᵗ^2 * (fᵥ * (ζ / η)^ap.p1 + gᵥ * (Sᶜʳⁱᵗ^2 / (η + 3 * ζ))^ap.p2)
     end
 
-    return 1 / sqrt(Σ_inv_Sᵐᵃˣ²)
+    Sᵐᵃˣ_computed = 1 / sqrt(Σ_inv_Sᵐᵃˣ²)
+
+    # Return 0 for no updraft (w <= 0), otherwise return computed value
+    return ifelse(w > zero(FT), Sᵐᵃˣ_computed, zero(FT))
 end
