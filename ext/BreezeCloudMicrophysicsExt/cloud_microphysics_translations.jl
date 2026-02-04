@@ -338,7 +338,7 @@ Maximum supersaturation (dimensionless, e.g., 0.01 = 1% supersaturation)
     A = 2 * ap.σ / (ρʷ * Rᵛ * T)
 
     # Only compute if there's updraft
-    Sᵐᵃˣ_ARG = compute_smax_arg(ap, ad, A, α, γ, G, w, ρʷ)
+    Sᵐᵃˣ₀ = compute_smax(aerosol_activation, A, α, γ, G, w, ρʷ)
 
     # Correction for existing liquid and ice (phase relaxation)
     # See Eq. A13 in Korolev and Mazin (2003) or CloudMicrophysics implementation
@@ -355,7 +355,7 @@ Maximum supersaturation (dimensionless, e.g., 0.01 = 1% supersaturation)
 
     ξ = pᵛ⁺ / pᵛ⁺ⁱ
 
-    Sᵐᵃˣ = Sᵐᵃˣ_ARG * (α * w - Kⁱ * (ξ - 1)) / (α * w + (Kˡ + Kⁱ * ξ) * Sᵐᵃˣ_ARG)
+    Sᵐᵃˣ = Sᵐᵃˣ₀ * (α * w - Kⁱ * (ξ - 1)) / (α * w + (Kˡ + Kⁱ * ξ) * Sᵐᵃˣ₀)
 
     return max(0, Sᵐᵃˣ)
 end
@@ -392,8 +392,12 @@ end
     return numerator / denominator * ap.M_w / ap.ρ_w
 end
 
-# Helper function to compute Sᵐᵃˣ using ARG parameterization
-@inline function compute_smax_arg(ap, ad, A::FT, α::FT, γ::FT, G::FT, w::FT, ρʷ::FT) where FT
+# Helper function to compute Sᵐᵃˣ
+# Dispatches on aerosol_activation type to enable different activation schemes
+@inline function compute_smax(aerosol_activation, A::FT, α::FT, γ::FT, G::FT, w::FT, ρʷ::FT) where FT
+    ap = aerosol_activation.activation_parameters
+    ad = aerosol_activation.aerosol_distribution
+
     ζ = 2 * A / 3 * sqrt(α * w / G)
 
     # Compute critical supersaturation and contribution from each mode
