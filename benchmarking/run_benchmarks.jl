@@ -19,9 +19,6 @@
 #####   julia --project run_benchmarks.jl --mode=simulate --size=256^3 --stop_time=1.0 --output_interval=5
 #####
 
-using Pkg: Pkg
-Pkg.activate(@__DIR__)
-
 using ArgParse: @add_arg_table!, ArgParseSettings, parse_args
 using BreezeBenchmarks: convective_boundary_layer, benchmark_time_stepping, run_benchmark_simulation
 using JSON: JSON
