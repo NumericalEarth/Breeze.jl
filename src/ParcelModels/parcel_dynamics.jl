@@ -494,8 +494,8 @@ for [`AtmosphereModel`](@ref) and consolidates all state-dependent computations:
 # Keyword Arguments
 - `compute_tendencies`: If `true` (default), compute tendencies for prognostic variables.
 """
-function TimeSteppers.update_state!(model::ParcelModel, callbacks=[]; compute_tendencies=true, Δt=1.0)
-    compute_tendencies && compute_parcel_tendencies!(model, Δt)
+function TimeSteppers.update_state!(model::ParcelModel, callbacks=[]; compute_tendencies=true)
+    compute_tendencies && compute_parcel_tendencies!(model)
     return nothing
 end
 
@@ -511,12 +511,8 @@ The parcel model evolves **specific quantities** (e, qᵗ) directly, not
 density-weighted quantities. For adiabatic ascent with no microphysics,
 specific static energy and moisture are exactly conserved (de/dt = dqᵗ/dt = 0).
 This is simpler and more accurate than stepping density-weighted quantities.
-
-# Arguments
-- `model`: The parcel model
-- `Δt`: Model timestep [s]. Required for aerosol activation rate conversion.
 """
-function compute_parcel_tendencies!(model::ParcelModel, Δt)
+function compute_parcel_tendencies!(model::ParcelModel)
     dynamics = model.dynamics
     state = dynamics.state
     tendencies = dynamics.timestepper.G
@@ -693,7 +689,7 @@ quantities remain exactly constant throughout the simulation.
 """
 function ssp_rk3_parcel_substep!(model::ParcelModel, U⁰::ParcelInitialState, Δt, α)
     # Compute tendencies at current state
-    compute_parcel_tendencies!(model, Δt)
+    compute_parcel_tendencies!(model)
 
     dynamics = model.dynamics
     state = dynamics.state
@@ -781,7 +777,7 @@ updated from the profiles.
 """
 function step_parcel_state!(model::ParcelModel, Δt)
     # Compute tendencies at current state
-    compute_parcel_tendencies!(model, Δt)
+    compute_parcel_tendencies!(model)
 
     dynamics = model.dynamics
     state = dynamics.state

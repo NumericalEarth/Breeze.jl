@@ -204,7 +204,7 @@ end
     set!(model, T=T, p=p, ρ=ρ, z=0.0, w=1.0)
 
     # Compute tendencies (this calls microphysical_tendency)
-    compute_parcel_tendencies!(model, 1.0)
+    compute_parcel_tendencies!(model)
 
     # Check tendencies are computed
     tendencies = model.dynamics.timestepper.G
@@ -245,7 +245,7 @@ end
     @test tendency_qt == 0.0
 
     # Compute tendencies (this calls microphysical_tendency internally)
-    compute_parcel_tendencies!(model, 1.0)
+    compute_parcel_tendencies!(model)
 
     tendencies = model.dynamics.timestepper.G
     @test tendencies.Gz ≈ 1.0  # w = 1 m/s
@@ -284,7 +284,7 @@ end
     @test tendency_qt == 0.0
 
     # Compute tendencies (this calls microphysical_tendency internally)
-    compute_parcel_tendencies!(model, 1.0)
+    compute_parcel_tendencies!(model)
 
     tendencies = model.dynamics.timestepper.G
     @test tendencies.Gz ≈ 1.0  # w = 1 m/s
