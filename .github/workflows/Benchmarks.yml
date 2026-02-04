@@ -80,7 +80,7 @@ jobs:
         uses: benchmark-action/github-action-benchmark@v1
         with:
           name: Breeze.jl Benchmarks
-          tool: "customSmallerIsBetter"
+          tool: "customBiggerIsBetter"
           output-file-path: "benchmarking/github-action-benchmark.json"
           benchmark-data-dir-path: "."
           gh-repository: "github.com/NumericalEarth/BreezeBenchmarks"
