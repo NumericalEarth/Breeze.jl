@@ -323,7 +323,9 @@ Maximum supersaturation (dimensionless, e.g., 0.01 = 1% supersaturation)
     T = temperature(𝒰, constants)
     p = 𝒰.reference_pressure
     q = 𝒰.moisture_mass_fractions
-    (; qᵛ, qˡ, qⁱ) = q
+    qᵛ = q.vapor
+    qˡ = q.liquid
+    qⁱ = q.ice
 
     # Extract from microphysical state
     w = ℳ.w
