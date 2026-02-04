@@ -33,7 +33,7 @@ jobs:
     timeout-minutes: 60
     steps:
       - uses: actions/checkout@v6
-      - name: Instantiate docs environment
+      - name: Instantiate benchmarking environment
         shell: julia --color=yes --project=benchmarking {0}
         run: |
           using Pkg
