@@ -80,7 +80,7 @@ jobs:
 
           with open('benchmark_results.json', 'r') as file:
               data = json.load(file)
-          dicts = [{'name': d['name'], 'unit': '"steps/s', 'value': d['steps_per_second']} for d in data]
+          dicts = [{'name': d['name'], 'unit': 'points/s', 'value': d['grid_points_per_second']} for d in data]
 
           with open("github-action-benchmark.json", "w") as f:
               json.dump(dicts, f)
