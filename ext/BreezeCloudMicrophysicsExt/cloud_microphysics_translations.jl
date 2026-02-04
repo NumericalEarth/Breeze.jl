@@ -253,6 +253,32 @@ struct WarmPhaseTwoMomentState{FT} <: AbstractMicrophysicalState{FT}
     w   :: FT  # updraft velocity
 end
 
+"""
+    AerosolActivation{AP, AD, FT}
+
+Aerosol activation parameters for two-moment microphysics.
+
+Aerosol activation is the physical process that creates cloud droplets from aerosol
+particles when air becomes supersaturated. This struct bundles the parameters needed
+to compute the activation source term for cloud droplet number concentration.
+
+# Fields
+- `activation_parameters`: [`AerosolActivationParameters`] from CloudMicrophysics.jl
+- `aerosol_distribution`: Aerosol size distribution (modes with number, size, hygroscopicity)
+- `τⁿᵘᶜ`: Nucleation timescale [s] for converting activation deficit to rate (default: 1s)
+
+# References
+* Abdul-Razzak, H. and Ghan, S.J. (2000). A parameterization of aerosol activation:
+  2. Multiple aerosol types. J. Geophys. Res., 105(D5), 6837-6844.
+"""
+struct AerosolActivation{AP, AD, FT}
+    activation_parameters :: AP
+    aerosol_distribution :: AD
+    τⁿᵘᶜ :: FT  # nucleation timescale
+end
+
+Base.summary(::AerosolActivation) = "AerosolActivation"
+
 #####
 ##### Aerosol activation (TRANSLATION: uses AerosolActivation.jl in CloudMicrophysics with Breeze thermodynamics)
 #####
@@ -285,7 +311,7 @@ Breeze's thermodynamics instead of Thermodynamics.jl.
 Maximum supersaturation (dimensionless, e.g., 0.01 = 1% supersaturation)
 """
 @inline function max_supersaturation_breeze(
-    aerosol_activation,
+    aerosol_activation::AerosolActivation,
     aps::AirProperties{FT},
     ρ::FT,
     ℳ::WarmPhaseTwoMomentState{FT},
