@@ -10,11 +10,7 @@ export
     run_benchmark_simulation,
     BenchmarkResult,
     SimulationResult,
-    BenchmarkMetadata,
-
-    # I/O
-    save_benchmark,
-    load_benchmark
+    BenchmarkMetadata
 
 using Dates
 using JLD2
@@ -34,7 +30,6 @@ using CUDA: CUDA, CUDABackend
 # Base functionalities
 include("metadata.jl")
 include("result.jl")
-include("io.jl")
 include("timestepping.jl")
 include("utils.jl")
 # Specific models to benchmark
