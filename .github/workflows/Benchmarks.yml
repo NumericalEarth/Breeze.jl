@@ -61,7 +61,7 @@ jobs:
   publish-benchmarks:
     name: "Publish benchmarks"
     needs: run-benchmarks
-    if: ${{ github.event_name != 'pull_request' }}
+    # if: ${{ github.event_name != 'pull_request' }}
     permissions:
       actions: write
       contents: write
