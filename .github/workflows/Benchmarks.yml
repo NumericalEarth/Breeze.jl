@@ -20,6 +20,7 @@ concurrency:
 
 jobs:
   run-benchmarks:
+    name: "Run benchmarks"
     permissions:
       actions: write
       contents: write
@@ -56,17 +57,33 @@ jobs:
         timeout-minutes: 1
         run:
           cat "benchmark_results.md" >> "${GITHUB_STEP_SUMMARY}"
+
+  publish-benchmarks:
+    name: "Publish benchmarks"
+    needs: run-benchmarks
+    if: ${{ github.event_name != 'pull_request' }}
+    permissions:
+      actions: write
+      contents: write
+      pull-requests: read
+      statuses: write
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/download-artifact@v7
       - name: Create JSON for github-action-benchmark
-        shell: julia --color=yes --project {0}
+        shell: python
         run: |
           # This step creates a new JSON file to be digested by the
           # `benchmark-action/github-action-benchmark` workflow.
-          using JSON
-          data = JSON.parse(read("benchmark_results.json"))
-          dicts = [Dict("name" => d["name"], "unit" => "steps/s", "value" => d["steps_per_second"]) for d in data]
-          open("github-action-benchmark.json", "w") do io
-              JSON.json(io, dicts)
-          end
+          import json
+
+          with open('benchmark_results.json', 'r') as file:
+              data = json.load(file)
+          dicts = [{'name': d['name'], 'unit': '"steps/s', 'value': d['steps_per_second']} for d in data]
+
+          with open("github-action-benchmark.json", "w") as f:
+              json.dump(dicts, f)
       - uses: actions/create-github-app-token@v2
         id: generate_token
         with:
@@ -76,12 +93,11 @@ jobs:
           repositories: |
             Breeze.jl
             BreezeBenchmarks
-      - name: Publish benchmark results
-        uses: benchmark-action/github-action-benchmark@v1
+      - uses: benchmark-action/github-action-benchmark@v1
         with:
           name: Breeze.jl Benchmarks
           tool: "customBiggerIsBetter"
-          output-file-path: "benchmarking/github-action-benchmark.json"
+          output-file-path: "github-action-benchmark.json"
           benchmark-data-dir-path: "."
           gh-repository: "github.com/NumericalEarth/BreezeBenchmarks"
           github-token: ${{ steps.generate_token.outputs.token }}
