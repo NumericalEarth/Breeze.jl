@@ -61,7 +61,6 @@ jobs:
   publish-benchmarks:
     name: "Publish benchmarks"
     needs: run-benchmarks
-    # if: ${{ github.event_name != 'pull_request' }}
     permissions:
       actions: write
       contents: write
@@ -90,6 +89,7 @@ jobs:
           with open("github-action-benchmark.json", "w") as f:
               json.dump(data, f)
       - uses: actions/create-github-app-token@v2
+        # if: ${{ github.event_name != 'pull_request' }}
         id: generate_token
         with:
           app-id: "${{ secrets.NUMTERRA_BOT_ID }}"
@@ -106,9 +106,11 @@ jobs:
           benchmark-data-dir-path: "."
           gh-repository: "github.com/NumericalEarth/BreezeBenchmarks"
           github-token: ${{ steps.generate_token.outputs.token }}
+          # github-token: ${{ github.event_name == 'pull_request' && github.token || steps.generate_token.outputs.token }}
           comment-always: false
           summary-always: true
           alert-threshold: "150%"
           fail-on-alert: false
           auto-push: true
+          # auto-push: ${{ github.event_name != 'pull_request' }}
           max-items-in-chart: 50
