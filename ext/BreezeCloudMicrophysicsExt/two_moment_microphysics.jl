@@ -671,7 +671,7 @@ The activation radius is derived from Köhler theory:
 r_{act} = \\frac{2A}{3 S}
 ```
 where ``A = 2σ/(ρ_w R_v T)`` is the curvature parameter and ``S`` is the
-instantaneous supersaturation. See eq. 19 in [Abdul-Razzak et al. (1998)](@cite ARG1998).
+instantaneous supersaturation. See eq. 19 in [Abdul-Razzak et al. (1998)](@cite AbdulRazzakGhan1998).
 
 The mass tendency is then:
 ```math
