@@ -26,6 +26,10 @@ jobs:
       pull-requests: read
       statuses: write
     runs-on: aws-linux-nvidia-gpu-l4
+    defaults:
+      run:
+        shell: bash
+        working-directory: ./benchmarking
     container:
       # TODO: use image for benchmark environment after this is merged on `main`
       image: 'ghcr.io/numericalearth/breeze-docker-images:docs-julia_1.12.4'
@@ -34,13 +38,11 @@ jobs:
     steps:
       - uses: actions/checkout@v6
       - name: Instantiate benchmarking environment
-        shell: julia --color=yes --project=benchmarking {0}
+        shell: julia --color=yes --project {0}
         run: |
           using Pkg
           Pkg.instantiate()
       - name: Run benchmark
-        shell: bash
-        working-directory: benchmarking
         timeout-minutes: 45
         run:
           earlyoom -m 3 -s 100 -r 300 --prefer 'julia' &
@@ -51,8 +53,6 @@ jobs:
           path: benchmarking/benchmark_results.*
           retention-days: 90
       - name: Create job summary
-        shell: bash
-        working-directory: benchmarking
         timeout-minutes: 1
         run:
           cat "benchmark_results.md" >> "${GITHUB_STEP_SUMMARY}"
