@@ -9,6 +9,8 @@ export
     StaticEnergy,
     SaturationSpecificHumidity,
     SaturationSpecificHumidityField,
+    DewpointTemperature,
+    DewpointTemperatureField,
     equilibrium_saturation_specific_humidity,
     # Interface functions extended by Microphysics
     microphysics_phase_equilibrium
@@ -26,6 +28,8 @@ using Breeze.Thermodynamics:
     saturation_specific_humidity,
     saturation_vapor_pressure,
     equilibrium_saturation_specific_humidity,
+    dewpoint_temperature,
+    vapor_pressure,
     density,
     PlanarLiquidSurface,
     # Phase equilibrium types
@@ -50,5 +54,6 @@ const c = Center()
 include("potential_temperatures.jl")
 include("static_energy.jl")
 include("saturation_specific_humidity.jl")
+include("dewpoint_temperature.jl")
 
 end # module

@@ -35,6 +35,7 @@ The following table also uses a few conventions that suffuse the source code and
 | ``\boldsymbol{ρu} = (ρu, ρv, ρw)``  | `ρu, ρv, ρw` | `AM.momentum`                 | Momentum components                                                            |
 | ``ρ e``                             | `ρe`   | `AM.energy_density`                 | Energy density                                                                 |
 | ``T``                               | `T`    | `AM.temperature`                    | Temperature                                                                    |
+| ``Tᵈ``                              | `Tᵈ`   | `DewpointTemperature(model)`        | Dewpoint temperature                                                           |
 | ``p``                               | `p`    | `AM.pressure`                       | Pressure                                                                       |
 | ``b``                               | `b`    |                                     | Buoyancy                                                                       |
 | ``ρ qᵗ``                            | `ρqᵗ`  | `AM.moisture_density`               | Total moisture density                                                         |
