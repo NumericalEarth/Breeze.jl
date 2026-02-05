@@ -1,0 +1,75 @@
+name: Validation
+
+on:
+  push:
+    branches:
+      - "main"
+    paths:
+      - ".github/workflows/Validation.yml"
+      - "examples/Project.jl"
+      - "examples/boussinesq_bomex.jl"
+      - "ext/**"
+      - "src/**"
+      - "test/**"
+      - "Project.toml"
+  pull_request:
+    paths:
+      - ".github/workflows/Validation.yml"
+      - "examples/Project.jl"
+      - "examples/boussinesq_bomex.jl"
+      - "ext/**"
+      - "src/**"
+      - "test/**"
+      - "Project.toml"
+  release:
+  workflow_dispatch:
+
+concurrency:
+  # Skip intermediate builds: always.
+  # Cancel intermediate builds: always.
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+# needed to allow julia-actions/cache to delete old caches that it has created
+permissions:
+  actions: write
+  contents: read
+
+jobs:
+  validate:
+    name: Validation - Julia ${{ matrix.version }} - ${{ matrix.os }}
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 30
+    strategy:
+      fail-fast: false
+      matrix:
+        version:
+          - "1.12.4"
+        os:
+          - ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+      - uses: julia-actions/setup-julia@v2
+        with:
+          version: ${{ matrix.version }}
+      - uses: julia-actions/cache@v2
+        id: julia-cache
+      - name: Instantiate examples environment
+        shell: julia --color=yes --project=examples {0}
+        run: |
+          using Pkg
+          Pkg.instantiate()
+      - name: Run BOMEX example
+        env:
+          VALIDATION: "true"
+          CI: "true"
+        run: |
+          julia --color=yes --project=examples examples/boussinesq_bomex.jl
+      - name: Save Julia depot cache on cancel or failure
+        id: julia-cache-save
+        if: cancelled() || failure()
+        uses: actions/cache/save@v5
+        with:
+          path: |
+            ${{ steps.julia-cache.outputs.cache-paths }}
+          key: ${{ steps.julia-cache.outputs.cache-key }}
