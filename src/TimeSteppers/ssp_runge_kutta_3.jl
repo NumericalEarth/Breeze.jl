@@ -75,6 +75,7 @@ Shu, C.-W., & Osher, S. (1988). Efficient implementation of essentially non-osci
     shock-capturing schemes. Journal of Computational Physics, 77(2), 439-471.
 """
 function SSPRungeKutta3(grid, prognostic_fields;
+                        dynamics = nothing,
                         implicit_solver::TI = nothing,
                         Gⁿ::TG = map(similar, prognostic_fields)) where {TI, TG}
 

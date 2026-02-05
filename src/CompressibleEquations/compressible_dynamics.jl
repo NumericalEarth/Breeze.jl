@@ -188,15 +188,6 @@ AtmosphereModels.default_timestepper(dynamics::CompressibleDynamics) =
 default_timestepper(::SplitExplicitTimeDiscretization) = :AcousticSSPRungeKutta3
 default_timestepper(::ExplicitTimeStepping) = :SSPRungeKutta3
 
-function AtmosphereModels.augment_timestepper_kwargs(dynamics::CompressibleDynamics, timestepper_kwargs)
-    td = dynamics.time_discretization
-    if td isa SplitExplicitTimeDiscretization
-        return merge((; split_explicit = td), timestepper_kwargs)
-    else
-        return timestepper_kwargs
-    end
-end
-
 #####
 ##### Show methods
 #####

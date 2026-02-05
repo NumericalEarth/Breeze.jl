@@ -56,25 +56,24 @@ end
 
 """
     AcousticSSPRungeKutta3(grid, prognostic_fields;
-                          implicit_solver = nothing,
-                          Gⁿ = map(similar, prognostic_fields),
-                          split_explicit = SplitExplicitTimeDiscretization())
+                           dynamics,
+                           implicit_solver = nothing,
+                           Gⁿ = map(similar, prognostic_fields))
 
 Construct an `AcousticSSPRungeKutta3` time stepper for fully compressible dynamics.
 
 This combines the SSP RK3 scheme from [Shu and Osher (1988)](@cite Shu1988Efficient)
 with acoustic substepping from [Wicker and Skamarock (2002)](@cite WickerSkamarock2002).
 
-The acoustic substepping parameters (`Ns`, `time_discretization`, `κᵈ`) are
-configured via the [`SplitExplicitTimeDiscretization`](@ref Breeze.CompressibleEquations.SplitExplicitTimeDiscretization) object,
-which is typically set on [`CompressibleDynamics`](@ref) and passed through automatically.
+The acoustic substepping parameters are configured via the `time_discretization` field
+of the [`CompressibleDynamics`](@ref) object passed as `dynamics`.
 
 Keyword Arguments
 =================
 
+- `dynamics`: The [`CompressibleDynamics`](@ref) object containing the `time_discretization`.
 - `implicit_solver`: Optional implicit solver for diffusion. Default: `nothing`
 - `Gⁿ`: Tendency fields at current stage. Default: similar to `prognostic_fields`
-- `split_explicit`: [`SplitExplicitTimeDiscretization`](@ref) configuration with `substeps`, `time_discretization`, and `κᵈ`.
 
 References
 ==========
@@ -86,11 +85,12 @@ Wicker, L.J. and Skamarock, W.C. (2002). Time-Splitting Methods for Elastic Mode
     Using Forward Time Schemes. Monthly Weather Review, 130, 2088-2097.
 """
 function AcousticSSPRungeKutta3(grid, prognostic_fields;
+                                dynamics,
                                 implicit_solver::TI = nothing,
-                                Gⁿ::TG = map(similar, prognostic_fields),
-                                split_explicit = SplitExplicitTimeDiscretization()) where {TI, TG}
+                                Gⁿ::TG = map(similar, prognostic_fields)) where {TI, TG}
 
     FT = eltype(grid)
+    time_discretization = dynamics.time_discretization
 
     # SSP RK3 stage coefficients
     α¹ = FT(1)
@@ -102,7 +102,7 @@ function AcousticSSPRungeKutta3(grid, prognostic_fields;
     U0 = typeof(U⁰)
 
     # Create acoustic substepping infrastructure from SplitExplicitTimeDiscretization configuration
-    substepper = AcousticSubstepper(grid, split_explicit)
+    substepper = AcousticSubstepper(grid, time_discretization)
     AS = typeof(substepper)
 
     return AcousticSSPRungeKutta3{FT, U0, TG, TI, AS}(α¹, α², α³, U⁰, Gⁿ, implicit_solver, substepper)
