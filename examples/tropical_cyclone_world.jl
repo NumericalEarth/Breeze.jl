@@ -150,10 +150,10 @@ Nx = Ny = 144     # 8 km spacing in 1152 km domain
 # - 500*scale_factor m spacing above 3.5 km
 # - Linear transition from 1 km to 3.5 km
 function paper_vertical_grid(H; scale_factor=4)
-    # scale_factor=1 for paper resolution, =4 for testing
+    ## scale_factor=1 for paper resolution, =4 for testing
     z_faces = Float64[0.0]
 
-    # Region 1: levels in lowest 1 km
+    ## Region 1: levels in lowest 1 km
     n_levels_lower = 64 ÷ scale_factor  # 64 → 16 for scale_factor=4
     Δz₁ = 1000.0 / n_levels_lower  # 15.625 m → 62.5 m
     for i in 1:n_levels_lower
@@ -161,20 +161,20 @@ function paper_vertical_grid(H; scale_factor=4)
     end
     z = 1000.0
 
-    # Region 2: Linear transition from 1 km to 3.5 km
+    ## Region 2: Linear transition from 1 km to 3.5 km
     z_start, z_end = 1000.0, 3500.0
     Δz_start = Δz₁
     Δz_end = 500.0 * scale_factor  # 500 m → 2000 m
 
     while z < z_end - 1e-6  # Small tolerance for floating point
-        # Linear interpolation of Δz based on current position
+        ## Linear interpolation of Δz based on current position
         frac = (z - z_start) / (z_end - z_start)
         Δz = Δz_start + frac * (Δz_end - Δz_start)
         z = min(z + Δz, z_end)
         push!(z_faces, z)
     end
 
-    # Region 3: Constant spacing above 3.5 km to model top
+    ## Region 3: Constant spacing above 3.5 km to model top
     Δz₃ = 500.0 * scale_factor  # 500 m → 2000 m
     while z < H - 1e-6
         z = min(z + Δz₃, H)
@@ -266,7 +266,7 @@ FT = eltype(grid)
 # at the surface. For β = 0 (dry), there is no moisture flux.
 
 if β > 0
-    # Scaled surface saturation humidity for semidry cases
+    ## Scaled surface saturation humidity for semidry cases
     ρqᵗ_moisture_bc = Breeze.BulkVaporFlux(coefficient = Cᵀ * β,
                                            gustiness = v★,
                                            surface_temperature = Tₛ)
@@ -329,17 +329,17 @@ forcing_params = (; Tₜ = FT(Tₜ), Q̇ = FT(Q̇), τ = FT(τᵣ), ρᵣ, cₚ 
 
 # Discrete form forcing applied to ρe (energy density)
 @inline function piecewise_T_forcing(i, j, k, grid, clock, model_fields, p)
-    # Get temperature from model diagnostics
+    ## Get temperature from model diagnostics
     @inbounds T = model_fields.T[i, j, k]
     @inbounds ρ = p.ρᵣ[i, j, k]
 
-    # Paper's piecewise T tendency (Eq. 1):
-    # - T > Tₜ: constant cooling at -Q̇
-    # - T ≤ Tₜ: Newtonian relaxation toward Tₜ
+    ## Paper's piecewise T tendency (Eq. 1):
+    ## - T > Tₜ: constant cooling at -Q̇
+    ## - T ≤ Tₜ: Newtonian relaxation toward Tₜ
     ∂T∂t = ifelse(T > p.Tₜ, -p.Q̇, (p.Tₜ - T) / p.τ)
 
-    # Return energy forcing: F_ρe = ρ × cₚ × ∂T/∂t
-    # Breeze will divide by (cᵖᵐ × Π) to get ρθ tendency
+    ## Return energy forcing: F_ρe = ρ × cₚ × ∂T/∂t
+    ## Breeze will divide by (cᵖᵐ × Π) to get ρθ tendency
     return ρ * p.cₚ * ∂T∂t
 end
 
@@ -421,20 +421,20 @@ pᵣ_array = Array(interior(pᵣ_field))
 
 # Equilibrated θ profile: dry adiabat in troposphere, isothermal stratosphere
 function equilibrated_θ_profile(x, y, z, k, pᵣ_arr, θ_surface, T_tropopause, p_standard, kappa)
-    # Get pressure at this level (use k index)
+    ## Get pressure at this level (use k index)
     p_local = pᵣ_arr[1, 1, k]
 
-    # Exner function
+    ## Exner function
     Π = (p_local / p_standard)^kappa
 
-    # Temperature on dry adiabat
+    ## Temperature on dry adiabat
     T_adiabat = θ_surface * Π
 
     if T_adiabat > T_tropopause
-        # Troposphere: follow dry adiabat
+        ## Troposphere: follow dry adiabat
         return θ_surface
     else
-        # Stratosphere: isothermal at Tₜ, so θ = Tₜ/Π
+        ## Stratosphere: isothermal at Tₜ, so θ = Tₜ/Π
         return T_tropopause / Π
     end
 end
@@ -455,15 +455,15 @@ for k in 1:Nz
     θ_eq = equilibrated_θ_profile(0, 0, z, k, pᵣ_array, θ₀, Tₜ, pˢᵗ_val, κ)
     for j in 1:Ny
         for i in 1:Nx
-            # Add random perturbation in lowest 1 km
+            ## Add random perturbation in lowest 1 km
             perturbation = z < zδ ? δθ * (2 * rand() - 1) : 0.0
 
-            # Add warm-core vortex seed if enabled
+            ## Add warm-core vortex seed if enabled
             if seed_vortex && z < seed_height
                 x = x_nodes[i]
                 y = y_nodes[j]
                 r = sqrt((x - seed_x)^2 + (y - seed_y)^2)
-                # Gaussian warm core: max at center, decays with radius and height
+                ## Gaussian warm core: max at center, decays with radius and height
                 warm_core = seed_θ_anomaly * exp(-r^2 / (2 * seed_radius^2)) * (1 - z / seed_height)
                 perturbation += warm_core
             end
@@ -478,7 +478,7 @@ if seed_vortex
 end
 
 if β > 0
-    # Moisture profile for moist cases
+    ## Moisture profile for moist cases
     q_surface = 0.015  # ~15 g/kg near tropical surface
     q_scale_height = 3000.0  # m
     δq = 1e-4  # kg/kg (perturbation amplitude)
@@ -629,7 +629,7 @@ mkpath(figures_dir)
 # Generate all plots periodically so we can monitor TC development during the run.
 
 function update_figures(sim)
-    # Only update if we have enough data
+    ## Only update if we have enough data
     t_days = sim.model.clock.time / 86400
     if t_days < 0.5
         return nothing  # Skip early timesteps
@@ -652,12 +652,12 @@ function update_figures(sim)
             return nothing
         end
 
-        # Compute wind speed for all timesteps
+        ## Compute wind speed for all timesteps
         wind_speed(n) = sqrt.(Array(interior(u_ts[n])).^2 .+ Array(interior(v_ts[n])).^2)
         max_wind = [maximum(wind_speed(n)) for n in 1:Nt]
         times_hours = times ./ 3600
 
-        # --- Figure 1: Intensity plot ---
+        ## --- Figure 1: Intensity plot ---
         title_case = β == 0 ? "Dry" : (β == 1 ? "Moist" : "Semidry")
         fig1 = Figure(size = (600, 400), fontsize = 14)
         ax1 = Axis(fig1[1, 1];
@@ -668,7 +668,7 @@ function update_figures(sim)
         scatter!(ax1, times_hours, max_wind; markersize = 4, color = :dodgerblue)
         save(joinpath(figures_dir, "intensity.png"), fig1)
 
-        # --- Figure 2: Surface wind snapshots ---
+        ## --- Figure 2: Surface wind snapshots ---
         x_km = Array(xnodes(grid, Center())) ./ 1e3
         y_km = Array(ynodes(grid, Center())) ./ 1e3
         U_max = max(1.0, maximum(max_wind))
@@ -690,7 +690,7 @@ function update_figures(sim)
               fontsize = 16, tellwidth = false)
         save(joinpath(figures_dir, "surface_winds.png"), fig2)
 
-        # --- Figure 3: Profile evolution (if available) ---
+        ## --- Figure 3: Profile evolution (if available) ---
         if isfile(profile_file)
             θ_avg_ts = FieldTimeSeries(profile_file, "θ_avg")
             u_avg_ts = FieldTimeSeries(profile_file, "u_avg")
@@ -755,10 +755,10 @@ if get(ENV, "CI", "false") != "true"
 
     title_case = β == 0 ? "Dry" : (β == 1 ? "Moist" : "Semidry")
 
-    # ### Figure 1: Surface wind speed snapshots
-    #
-    # Shows the horizontal structure of the developing convection/TC at several times.
-    # Compare to Cronin & Chavas (2019), Figure 1.
+    ## ### Figure 1: Surface wind speed snapshots
+    ##
+    ## Shows the horizontal structure of the developing convection/TC at several times.
+    ## Compare to Cronin & Chavas (2019), Figure 1.
 
     if isfile(surface_file)
         u_ts = FieldTimeSeries(surface_file, "u_surface")
@@ -769,19 +769,19 @@ if get(ENV, "CI", "false") != "true"
         x = xnodes(grid, Center()) ./ 1e3  # km
         y = ynodes(grid, Center()) ./ 1e3  # km
 
-        # Compute wind speed for all times
+        ## Compute wind speed for all times
         function wind_speed(n)
             u_data = Array(interior(u_ts[n], :, :, 1))
             v_data = Array(interior(v_ts[n], :, :, 1))
             return sqrt.(u_data.^2 .+ v_data.^2)
         end
 
-        # Determine color range from all data (ensure U_max ≥ 1 to avoid colormap issues)
+        ## Determine color range from all data (ensure U_max ≥ 1 to avoid colormap issues)
         U_max = max(1.0, maximum(maximum(wind_speed(n)) for n in 1:Nt))
 
         fig = Figure(size = (1200, 400), fontsize = 12)
 
-        # Plot first, middle, and last snapshots
+        ## Plot first, middle, and last snapshots
         indices = [1, max(1, Nt ÷ 2), Nt]
 
         local hm_last  # for colorbar reference
@@ -803,9 +803,9 @@ if get(ENV, "CI", "false") != "true"
         save(joinpath(figures_dir, "surface_winds.png"), fig) #src
         fig
 
-        # ### Figure 2: Time series of maximum wind speed
-        #
-        # Shows TC intensification over time. Compare to Cronin & Chavas (2019), Figure 5.
+        ## ### Figure 2: Time series of maximum wind speed
+        ##
+        ## Shows TC intensification over time. Compare to Cronin & Chavas (2019), Figure 5.
 
         max_wind = [maximum(wind_speed(n)) for n in 1:Nt]
         times_hours = times ./ 3600
@@ -822,9 +822,9 @@ if get(ENV, "CI", "false") != "true"
         save(joinpath(figures_dir, "intensity.png"), fig2) #src
         fig2
 
-        # ### Figure 3: Animation of surface wind speed
-        #
-        # Animated evolution to see convective organization and TC formation.
+        ## ### Figure 3: Animation of surface wind speed
+        ##
+        ## Animated evolution to see convective organization and TC formation.
 
         fig3 = Figure(size = (600, 550), fontsize = 14)
         ax_anim = Axis(fig3[1, 1];
@@ -845,13 +845,13 @@ if get(ENV, "CI", "false") != "true"
         end
         nothing #hide
 
-        # ![](tropical_cyclone_world.mp4)
+        ## ![](tropical_cyclone_world.mp4)
     end
 
-    # ### Figure 4: Mean profile evolution
-    #
-    # Shows how the horizontally-averaged thermodynamic structure evolves.
-    # Compare to Cronin & Chavas (2019), Figure 3.
+    ## ### Figure 4: Mean profile evolution
+    ##
+    ## Shows how the horizontally-averaged thermodynamic structure evolves.
+    ## Compare to Cronin & Chavas (2019), Figure 3.
 
     if isfile(profile_file)
         θ_avg_ts = FieldTimeSeries(profile_file, "θ_avg")
