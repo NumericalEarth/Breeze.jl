@@ -154,12 +154,12 @@ reference_state = ReferenceState(grid, model.thermodynamic_constants,
                                  potential_temperature = 300)
 
 # Use the Kessler-specific reference state for initial conditions
-set!(kessler_model, qᵗ = qᵗ, z = 0, w = 1,
+set!(model, qᵗ = qᵗ, z = 0, w = 1,
      θ = reference_state.potential_temperature,
      p = reference_state.pressure,
      ρ = reference_state.density)
 
-kessler_simulation = Simulation(kessler_model; Δt=1, stop_time=120minutes)
+kessler_simulation = Simulation(model; Δt=1, stop_time=120minutes)
 
 # Store Kessler parcel snapshots
 kessler_snapshots = []
@@ -174,10 +174,10 @@ end
 add_callback!(kessler_simulation, record_kessler_state!, IterationInterval(10))
 run!(kessler_simulation)
 
-@info "Kessler parcel reached" kessler_model.dynamics.state.z
+@info "Kessler parcel reached" model.dynamics.state.z
 
 # Extract time series from Kessler snapshots
-kessler_constants = kessler_model.thermodynamic_constants
+kessler_constants = model.thermodynamic_constants
 kessler_t = [s.t for s in kessler_snapshots]
 kessler_z = [s.z for s in kessler_snapshots]
 kessler_T = [temperature(s.𝒰, kessler_constants) for s in kessler_snapshots]
@@ -190,7 +190,7 @@ kessler_S = [supersaturation(temperature(s.𝒰, kessler_constants), s.ρ,
 nothing #hide
 
 # Environmental temperature at each parcel height
-kessler_Tₑ = [interpolate(s.z, kessler_model.temperature) for s in kessler_snapshots]
+kessler_Tₑ = [interpolate(s.z, model.temperature) for s in kessler_snapshots]
 nothing #hide
 
 # ## Visualization
