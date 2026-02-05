@@ -8,6 +8,8 @@ using Oceananigans.TimeSteppers:
     compute_flux_bc_tendencies!,
     step_lagrangian_particles!,
     implicit_step!
+
+using Breeze.AtmosphereModels: compute_pressure_correction!, make_pressure_correction!
 using Oceananigans.Utils: launch!, time_difference_seconds
 
 """

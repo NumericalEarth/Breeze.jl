@@ -1,7 +1,6 @@
 using Oceananigans.Fields: Fields, set!
 using Oceananigans.BoundaryConditions: fill_halo_regions!
 using Oceananigans.TimeSteppers: update_state!
-using Breeze.TimeSteppers: compute_pressure_correction!, make_pressure_correction!
 
 using .Diagnostics: SaturationSpecificHumidity
 

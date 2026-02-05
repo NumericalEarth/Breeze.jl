@@ -40,7 +40,6 @@ using KernelAbstractions: @kernel, @index
 using Oceananigans: Oceananigans, CenterField, XFaceField, YFaceField, ZFaceField, prognostic_fields
 using Oceananigans.BoundaryConditions: FieldBoundaryConditions, regularize_field_boundary_conditions, fill_halo_regions!
 using Oceananigans.Operators: divᶜᶜᶜ
-using Oceananigans.TimeSteppers: TimeSteppers
 using Oceananigans.Utils: prettysummary, launch!
 
 using Breeze.Thermodynamics: mixture_gas_constant, mixture_heat_capacity

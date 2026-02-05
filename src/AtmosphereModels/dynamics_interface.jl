@@ -82,6 +82,26 @@ Default: returns `timestepper_kwargs` unchanged.
 augment_timestepper_kwargs(dynamics, timestepper_kwargs) = timestepper_kwargs
 
 #####
+##### Pressure correction interface
+#####
+
+"""
+    compute_pressure_correction!(model, Δt)
+
+Compute the pressure correction for the given model. Default: no-op.
+For anelastic dynamics, solves the pressure Poisson equation.
+"""
+compute_pressure_correction!(model, Δt) = nothing
+
+"""
+    make_pressure_correction!(model, Δt)
+
+Apply the pressure correction to the momentum fields. Default: no-op.
+For anelastic dynamics, projects momentum to enforce the divergence constraint.
+"""
+make_pressure_correction!(model, Δt) = nothing
+
+#####
 ##### Pressure interface
 #####
 
