@@ -863,7 +863,7 @@ function TimeSteppers.time_step!(model::ParcelModel, Δt; callbacks=nothing)
     corrected_Δt = tⁿ⁺¹ - model.clock.time
     tick!(model.clock, corrected_Δt)
 
-    # Set last_Δt to the actual timestep for microphysics update
+    # Set last_Δt 
     model.clock.last_Δt = Δt
 
     # Apply microphysics model update AFTER all RK3 stages and clock update
