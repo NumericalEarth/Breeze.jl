@@ -69,7 +69,7 @@ T₀ = 300     # Sea surface temperature (K)
 ρu_bcs = FieldBoundaryConditions(bottom=BulkDrag(coefficient=Cᴰ))
 ρv_bcs = FieldBoundaryConditions(bottom=BulkDrag(coefficient=Cᴰ))
 
-## damping 
+## damping
 sponge_rate = 1/8  # s⁻¹ - relaxation rate (8 s timescale)
 sponge_mask = GaussianMask{:z}(center=3500, width=500)
 sponge = Relaxation(rate=sponge_rate, mask=sponge_mask)
@@ -232,15 +232,15 @@ p = zeros(Nz_p, Nr)
 for k in 1:Nz_p
     z_k = znodes(grid, Center())[k]
     z_clamped = clamp(z_k, minimum(z_asc), maximum(z_asc))
-    
+
     # Background pressure at this height (using sounding)
     T_k = T_sounding_interp(z_clamped)
     R = constants.molar_gas_constant/constants.dry_air.molar_mass
     p_background = reference_state.surface_pressure * exp(-constants.gravitational_acceleration * z_k / (R * T_k))
-    
+
     # Start from outer edge (no perturbation)
     p[k, end] = p_background
-    
+
     # Integrate inward using gradient wind balance
     # Gradient wind balance: (1/ρ) * dp/dr = f*v + v²/r
     # So: dp/dr = ρ * (f*v + v²/r)
@@ -250,17 +250,17 @@ for k in 1:Nz_p
         r = rrange[r_idx]
         # Density at this radius (approximate using background)
         ρ = p_background / (R * T_k)
-        
+
         # Compute pressure gradient from gradient wind balance
         # Use radius from center, not absolute position
         v_tang = tangential_wind(x_center + r, y_center, z_k)
         # Gradient wind: dp/dr = ρ * (f*v + v²/r)
         dp_dr = ρ * (v_tang * coriolis.f + v_tang^2 / max(r, 100))  # Avoid division by zero
-        
+
         # When moving inward (r decreases by ∂r), pressure change is dp_dr * (-∂r)
         # Since we're going from larger r to smaller r, the change is negative
         dp = -dp_dr * ∂r
-        
+
         # Pressure decreases as we move inward
         p[k, r_idx] = p[k, r_idx + 1] + dp
     end
@@ -273,18 +273,18 @@ p_outer = p[:, end]
 # Create interpolation function for pressure deficit
 function δp_func(x, y, z)
     radius = sqrt((x - x_center)^2 + (y - y_center)^2)
-    
+
     # Clamp to valid ranges
     radius_clamped = clamp(radius, 0, max_radius)
     z_clamped = clamp(z, minimum(znodes(grid, Center())), maximum(znodes(grid, Center())))
-    
+
     # Find indices
     z_idx = searchsortedfirst(znodes(grid, Center()), z_clamped)
     z_idx = clamp(z_idx, 1, Nz_p)
-    
+
     r_idx = searchsortedfirst(rrange_asc, radius_clamped)
     r_idx = clamp(r_idx, 1, Nr)
-    
+
     # Return pressure deficit in Pa (not hPa)
     return δp[z_idx, r_idx]
 end
@@ -316,23 +316,23 @@ function θ_init(x, y, z)
     # Clamp z to sounding range for interpolation
     z_clamped = clamp(z, minimum(z_asc), maximum(z_asc))
     θ_background = θ_sounding_interp(z_clamped)
-    
+
     # Get reference pressure at height z using hydrostatic relation
     # Use the sounding temperature profile to compute pressure
     p_surface = reference_state.surface_pressure
     g = constants.gravitational_acceleration
     R = constants.molar_gas_constant/constants.dry_air.molar_mass
-    
+
     # Use temperature from sounding to compute reference pressure
     T_background = T_sounding_interp(z_clamped)
     p_ref = p_surface * exp(-g * z / (R * T_background))
-    
+
     # Get pressure deficit from vortex (in Pa, negative value at center)
     δp = δp_func(x, y, z)
-    
+
     # Potential temperature perturbation (negative sign gives warm core for pressure deficit)
     δθ = -θ_background * (δp * 100 / p_ref)
-    
+
     # Return background potential temperature from sounding plus vortex perturbation
     return θ_background + δθ
 end
@@ -342,7 +342,7 @@ function qᵗ_init(x, y, z)
     # Clamp z to sounding range for interpolation
     z_clamped = clamp(z, minimum(z_asc), maximum(z_asc))
     qᵗ_background = qᵗ_sounding_interp(z_clamped)
-    
+
     # For now, use the sounding profile without radial variation
     # (The vortex perturbation primarily affects temperature/pressure, not moisture)
     # In future, could add moisture enhancement in the eyewall region
@@ -370,7 +370,7 @@ z_coords = znodes(grid, Center())
 
 fig = Figure()
 ax = Axis(fig[1, 1])
-contourf!(ax, x_coords, y_coords, 
+contourf!(ax, x_coords, y_coords,
     Array(interior(liquid_ice_potential_temperature(model), :, :, 2)), levels=295:1:330)
 
 Colorbar(fig[1, 2], limits=(295, 330), label="Potential Temperature (K)")
