@@ -344,7 +344,7 @@ Maximum supersaturation (dimensionless, e.g., 0.01 = 1% supersaturation)
     pᵛ⁺ⁱ = saturation_vapor_pressure(T, constants, PlanarIceSurface())
     g = constants.gravitational_acceleration
     ρʷ = ap.ρ_w  # water density
-    ρⁱ = ap.ρ_i  # ice density
+    ρˢ = ap.ρ_i  # ice density
 
     # Mixture properties
     Rᵐ = mixture_gas_constant(q, constants)
@@ -378,7 +378,7 @@ Maximum supersaturation (dimensionless, e.g., 0.01 = 1% supersaturation)
 
     # Ice relaxation
     γⁱ = Rᵛ * T / pᵛ⁺ + pᵛ / pᵛ⁺ * Rᵐ * ℒˡ * ℒⁱ / Rᵛ / cᵖᵐ / T / p
-    rⁱ = ifelse(Nⁱ > eps(FT), cbrt(ρ * qⁱ / Nⁱ / ρⁱ / (4 / 3 * π)), zero(FT))
+    rⁱ = ifelse(Nⁱ > eps(FT), cbrt(ρ * qⁱ / Nⁱ / ρˢ / (4 / 3 * π)), zero(FT))
     Gⁱ = diffusional_growth_factor_ice(aps, T, constants)
     Kⁱ = 4 * π * Nⁱ * rⁱ * Gⁱ * γⁱ
 
