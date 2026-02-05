@@ -8,8 +8,7 @@ using ..Thermodynamics:
     temperature,
     total_mixing_ratio,
     total_specific_moisture,
-    with_moisture,
-    with_temperature
+    with_moisture
 
 using ..AtmosphereModels:
     dynamics_density,
