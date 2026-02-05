@@ -5,7 +5,7 @@ on:
     branches:
       - main
     paths: &paths
-      - ".github/workflows/Documentation.yml"
+      - ".github/workflows/Benchmarks.yml"
       - "src/**"
       - "Project.toml"
   pull_request:
