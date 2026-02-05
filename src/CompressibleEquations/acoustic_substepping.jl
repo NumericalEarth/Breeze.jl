@@ -562,7 +562,7 @@ Called once per RK stage (coefficients depend only on frozen quantities).
 """
 function compute_implicit_vertical_coefficients!(substepper, Δτ)
     solver = substepper.vertical_solver
-    α = substepper.time_discretization.α
+    α = substepper.time_discretization.implicit_weight
     α² = α * α
     grid = substepper.ψ.grid
     arch = architecture(grid)
@@ -624,7 +624,7 @@ After solving for (ρw)^{n+1}, updates density with the vertical mass flux diver
 function acoustic_implicit_vertical_step!(model, substepper, Δτ, g)
     grid = model.grid
     arch = architecture(grid)
-    α = substepper.time_discretization.α
+    α = substepper.time_discretization.implicit_weight
     β = 1 - α
     rhs = substepper.rhs
 

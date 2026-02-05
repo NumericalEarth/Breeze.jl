@@ -70,14 +70,14 @@ following [Klemp, Skamarock, and Dudhia (2007)](@cite KlempSkamarockDudhia2007)
 and CM1's `sound.F`.
 
 The off-centering parameter ``α`` controls the time discretization:
-- ``α = 0.5``: Crank-Nicolson (second-order, no acoustic damping)
-- ``α > 0.5``: Forward-weighted (damps vertically propagating acoustic modes)
+- 0.5: Crank-Nicolson (second-order, no acoustic damping)
+- Greater than 0.5: Forward-weighted (damps vertically propagating acoustic modes)
 
 Fields
 ======
 
-- `α`: Off-centering parameter (0.5 for Crank-Nicolson, typically 0.5-0.55)
+- `implicit_weight`: Off-centering parameter (0.5 for Crank-Nicolson, typically 0.5-0.55)
 """
 struct VerticallyImplicit{FT}
-    α :: FT
+    implicit_weight :: FT
 end
