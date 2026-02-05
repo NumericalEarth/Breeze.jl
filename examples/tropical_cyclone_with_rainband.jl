@@ -20,13 +20,14 @@ Random.TaskLocalRNG()
 ## Domain and grid
 Oceananigans.defaults.FloatType = Float32
 
-Nx = Ny = 512
-Nz = 256
+arch = GPU()
+Nx = Ny = 100
+Nz = 128
 
-x = y = (0, Nx*1000)
+x = y = (0, 2000Nx)
 z = (0, 20500)
 
-grid = RectilinearGrid(GPU(); x, y, z,
+grid = RectilinearGrid(arch; x, y, z,
                        size = (Nx, Ny, Nz), halo = (5, 5, 5),
                        topology = (Periodic, Periodic, Bounded))
 
@@ -37,108 +38,99 @@ constants = ThermodynamicConstants()
 # Load moist tropical sounding from Dunion 2011
 println("\n=== Loading Dunion 2011 moist tropical sounding ===")
 sounding = CSV.read("dunion2011_moist_tropical_MT.csv", DataFrame)
-T_C = sounding[:, :Temperature_C]
-T_dew = sounding[:, :Dewpoint_C]
-p_hPa = Float64.(sounding[:, :Pressure_hPa])
-z_sounding = Float64.(sounding[:, :GPH_m])
-θ_sounding = Float64.(sounding[:, :Theta_K])
-mixing_ratio_g_kg = Float64.(sounding[:, :Mixing_ratio_g_kg])
+Tˢ_data = 273.15 .+ Float64.(sounding[:, :Temperature_C])
+pˢ_data = 100 .* Float64.(sounding[:, :Pressure_hPa])
+zˢ_data = Float64.(sounding[:, :GPH_m])
+θˢ_data = Float64.(sounding[:, :Theta_K])
+qᵗˢ_data = 1000 .* Float64.(sounding[:, :Mixing_ratio_g_kg])
 
-#todo mixing ration in kg/kg
-#todo: reverse order of sounding/human readable/in the units of the model
+pˢ_data = reverse(pˢ_data)
+zˢ_data = reverse(zˢ_data)
+θˢ_data = reverse(θˢ_data)
+qᵗˢ_data = reverse(qᵗˢ_data)
+
+# --- <--
+#  o  zˢ[5] 
+# ---
+#  o  zˢ[4] 
+# ---
+#  o  zˢ[3] 
+# ---
+#  o  zˢ[2]  
+# --- zˢ[1]
+
+zˢᶠ = (zˢ_data[1:end-1] .+ zˢ_data[2:end]) ./ 2
+Δz = zˢ_data[end] - zˢ_data[end-1]
+zˢ_data[1] = 0
+push!(zˢᶠ, zˢᶠ[end] + Δz)
+Nzˢ = length(zˢ_data) - 1
+sounding_grid = RectilinearGrid(size=Nzˢ, z=zˢᶠ, topology=(Flat, Flat, Bounded))
+
+# Pass grid (and location) so BCs are only set for Bounded direction; Flat directions get no east/west/north/south BCs
+sounding_loc = (Center(), Center(), Center())
+Tˢ_bcs = FieldBoundaryConditions(sounding_grid, sounding_loc, bottom=ValueBoundaryCondition(Tˢ_data[1]))
+θˢ_bcs = FieldBoundaryConditions(sounding_grid, sounding_loc, bottom=ValueBoundaryCondition(θˢ_data[1]))
+Tˢ = CenterField(sounding_grid, boundary_conditions=Tˢ_bcs)
+θˢ = CenterField(sounding_grid, boundary_conditions=θˢ_bcs)
+qᵗˢ = CenterField(sounding_grid)
+set!(Tˢ, Tˢ_data[2:end])
+set!(θˢ, θˢ_data[2:end])
+set!(qᵗˢ, qᵗˢ_data[2:end])
+
+## make a plot
+fig = Figure()
+axθˢ = Axis(fig[1, 1], xlabel="Potential Temperature (K)", ylabel="Height (m)", title="Dunion 2011 Sounding: Potential Temperature")
+axqᵗˢ = Axis(fig[1, 2], xlabel="Total Moisture (kg/kg)", ylabel="Height (m)", title="Dunion 2011 Sounding: Total Moisture")
+lines!(axθˢ, θˢ)
+lines!(axqᵗˢ, qᵗˢ)
+Makie.save("dunion2011_sounding.png", fig)
 
 ## set reference state
 reference_state = ReferenceState(grid, constants,
-                                 surface_pressure = p_hPa[end]*100,
-                                 potential_temperature = θ_sounding[end])
-
+                                 surface_pressure = pˢ_data[1],
+                                 potential_temperature = θˢ_data[1])
 dynamics = AnelasticDynamics(reference_state)
-
-
-
 ## surface fluxes
 Cᴰ = 1.229e-3 # Drag coefficient for momentum
 Cᵀ = 1.094e-3 # Sensible heat transfer coefficient
 Cᵛ = 1.133e-3 # Moisture flux transfer coefficient
 T₀ = 300     # Sea surface temperature (K)
-
 ρe_flux = BulkSensibleHeatFlux(coefficient=Cᵀ, surface_temperature=T₀)
 ρqᵗ_flux = BulkVaporFlux(coefficient=Cᵛ, surface_temperature=T₀)
-
 ρe_bcs = FieldBoundaryConditions(bottom=ρe_flux)
 ρqᵗ_bcs = FieldBoundaryConditions(bottom=ρqᵗ_flux)
-
 ρu_bcs = FieldBoundaryConditions(bottom=BulkDrag(coefficient=Cᴰ))
 ρv_bcs = FieldBoundaryConditions(bottom=BulkDrag(coefficient=Cᴰ))
 
-## damping 
+## damping
 sponge_rate = 1/8  # s⁻¹ - relaxation rate (8 s timescale)
 sponge_mask = GaussianMask{:z}(center=3500, width=500)
 sponge = Relaxation(rate=sponge_rate, mask=sponge_mask)
-
-## subsidence
-FT = eltype(grid)
-wˢ_profile = AtmosphericProfilesLibrary.Rico_subsidence(FT)
-wˢ = Field{Nothing, Nothing, Face}(grid)
-set!(wˢ, z -> wˢ_profile(z))
-subsidence = SubsidenceForcing(wˢ)
-
-
-## geostrophic forcings
-println("\n=== Setting up geostrophic forcings ===")
-coriolis = FPlane(f=4.5e-5)
-println("  Coriolis parameter: f = $(coriolis.f) s⁻¹")
-uᵍ = AtmosphericProfilesLibrary.Rico_geostrophic_ug(FT)
-vᵍ = AtmosphericProfilesLibrary.Rico_geostrophic_vg(FT)
-geostrophic = geostrophic_forcings(z -> uᵍ(z), z -> vᵍ(z))
-println("  Geostrophic wind profiles loaded from RICO")
-
-
-## moisture tendency
-ρᵣ = reference_state.density
-∂t_ρqᵗ_large_scale = Field{Nothing, Nothing, Center}(grid)
-dqdt_profile = AtmosphericProfilesLibrary.Rico_dqtdt(FT)
-set!(∂t_ρqᵗ_large_scale, z -> dqdt_profile(z))
-set!(∂t_ρqᵗ_large_scale, ρᵣ * ∂t_ρqᵗ_large_scale)
-∂t_ρqᵗ_large_scale_forcing = Forcing(∂t_ρqᵗ_large_scale)
-
-## radiative forcing
-∂t_ρθ_large_scale = Field{Nothing, Nothing, Center}(grid)
-∂t_θ_large_scale = - 2.5 / day # K / day
-set!(∂t_ρθ_large_scale, ρᵣ * ∂t_θ_large_scale)
-ρθ_large_scale_forcing = Forcing(∂t_ρθ_large_scale)
-
-
-## forcing and boundary conditions
-Fρu = (subsidence, geostrophic.ρu)
-Fρv = (subsidence, geostrophic.ρv)
-Fρw = sponge
-Fρqᵗ = (subsidence, ∂t_ρqᵗ_large_scale_forcing)
-Fρθ = (subsidence, ρθ_large_scale_forcing)
-
-forcing = (ρu=Fρu, ρv=Fρv, ρw=Fρw, ρqᵗ=Fρqᵗ, ρθ=Fρθ)
+forcing = (; ρw=sponge)
 boundary_conditions = (ρe=ρe_bcs, ρqᵗ=ρqᵗ_bcs, ρu=ρu_bcs, ρv=ρv_bcs)
 
 ## model
 println("\n=== Creating AtmosphereModel ===")
 BreezeCloudMicrophysicsExt = Base.get_extension(Breeze, :BreezeCloudMicrophysicsExt)
 using .BreezeCloudMicrophysicsExt: OneMomentCloudMicrophysics
-
-# RICO-style microphysics: one-moment warm-rain with saturation adjustment
 cloud_formation = SaturationAdjustment(equilibrium=WarmPhaseEquilibrium())
 microphysics = OneMomentCloudMicrophysics(; cloud_formation)
-
-# RICO-style advection: 5th-order WENO for momentum and ρθ; bounds-preserving WENO for moisture and microphysics
-weno = WENO(order=5)
-bounds_preserving_weno = WENO(order=5, bounds=(0, 1))
+weno = WENO(order=9)
+bounds_preserving_weno = WENO(order=9, bounds=(0, 1))
 momentum_advection = weno
 scalar_advection = (ρθ = weno,
                     ρqᵗ = bounds_preserving_weno,
                     ρqᶜˡ = bounds_preserving_weno,
                     ρqʳ = bounds_preserving_weno)
+coriolis = FPlane(f=5e-5)
 
 model = AtmosphereModel(grid; dynamics, coriolis, microphysics,
                         momentum_advection, scalar_advection, forcing, boundary_conditions)
+
+
+model = AtmosphereModel(grid; dynamics, coriolis, microphysics,
+                        momentum_advection, scalar_advection, boundary_conditions)
+
 
 
 ###########################
@@ -155,31 +147,14 @@ x_center = (x[1] + x[2]) / 2
 y_center = (y[1] + y[2]) / 2
 println("  Perturbation center: ($(x_center/1000), $(y_center/1000)) km")
 
-
-# =============================================================================
-# VORTEX PROFILES (Moon and Nolan 2010 / Emanuel 1986 / Stern and Nolan 2009 / Yu and Didlake 2019)
-# =============================================================================
-
-
 # Convert mixing ratio from g/kg to kg/kg, then to specific humidity qᵗ
 # Specific humidity q = w / (1 + w) where w is mixing ratio in kg/kg
-mixing_ratio_kg_kg = mixing_ratio_g_kg ./ 1000
-qᵗ_sounding = mixing_ratio_kg_kg ./ (1 .+ mixing_ratio_kg_kg)
+qᵗ_sounding = qᵗˢ_data ./ (1 .+ qᵗˢ_data)
 
 # Create interpolations for the sounding profiles
-# Reverse to get ascending order (z increasing)
-z_asc = reverse(z_sounding)
-θ_asc = reverse(θ_sounding)
-qᵗ_asc = reverse(qᵗ_sounding)
-T_K_asc = reverse(T_C .+ 273.15)
-
-θ_sounding_interp = linear_interpolation(z_asc, θ_asc)
-qᵗ_sounding_interp = linear_interpolation(z_asc, qᵗ_asc)
-T_sounding_interp = linear_interpolation(z_asc, T_K_asc)
-
-println("  Sounding loaded: $(length(z_sounding)) levels from $(minimum(z_sounding)) to $(maximum(z_sounding)) m")
-println("  Surface θ: $(θ_sounding[end]) K, qᵗ: $(qᵗ_sounding[end]) kg/kg")
-println("  Tropopause θ: $(θ_sounding[1]) K, qᵗ: $(qᵗ_sounding[1]) kg/kg")
+θ_sounding_interp = linear_interpolation((zˢ_data), (θˢ_data))
+qᵗ_sounding_interp = linear_interpolation((zˢ_data), (qᵗˢ_data))
+T_sounding_interp = linear_interpolation((zˢ_data), (Tˢ_data))
 
 # The radius of the angular momentum surface changes with height,
 # following Eq. 4.4 in Stern and Nolan 2009
@@ -247,16 +222,9 @@ for k in 1:Nz_p
     p[k, end] = p_background
     
     # Integrate inward using gradient wind balance
-    # Gradient wind balance: (1/ρ) * dp/dr = f*v + v²/r
-    # So: dp/dr = ρ * (f*v + v²/r)
-    # For a cyclonic vortex, this is positive (pressure increases with radius)
-    # When integrating inward (decreasing r), pressure decreases
     for r_idx in (Nr-1):-1:1
         r = rrange[r_idx]
-      
-        
         # Compute pressure gradient from gradient wind balance
-        # Use radius from center, not absolute position
         v_tang = tangential_wind(x_center + r, y_center, z_k)
         # Gradient wind: dp/dr = ρ * (f*v + v²/r)
         if r_idx == Nr
@@ -266,18 +234,11 @@ for k in 1:Nz_p
         end
         ρ = p_background / (R * T_k)
         
-        dp_dr = ρ * (v_tang * coriolis.f + v_tang^2 / max(r, 100))  # Avoid division by zero
-        
-        # When moving inward (r decreases by ∂r), pressure change is dp_dr * (-∂r)
-        # Since we're going from larger r to smaller r, the change is negative
+        dp_dr = ρ * (v_tang * coriolis.f + v_tang^2 / max(r, 100))
         dp = dp_dr * ∂r
-        
-        # Pressure decreases as we move inward
         p[k, r_idx] = p[k, r_idx + 1] + dp
     end
 end
-# Pressure deficit relative to far-field (max_radius); keep full radial grid so
-# result does not depend on domain size Nx
 p_outer = p[:, 1]
 p=reverse(p, dims=2)
 
@@ -359,7 +320,7 @@ fig[0, :] = Label(fig, "Pressure deficit (hPa)", fontsize=14, tellwidth=false)
 data = (p'/100 .- p_outer'/100)'  # transpose for (height, radius)
 levels = minimum(data):5:maximum(data)
 ax = Axis(fig[1, 1], xlabel="Radius (km)", ylabel="Height (km)")
-contourf!(ax, rrange_asc/1000, z_km, data, levels=levels, colormap=:viridis)
+contourf!(ax, rrange_asc/1000, z_km, data', levels=levels, colormap=:viridis)
 Colorbar(fig[1, 2], limits=(minimum(levels), maximum(levels)), label="Pressure (hPa)", colormap=:viridis)
 Makie.save("pressure_deficit_profile.png", fig)
 
@@ -539,7 +500,7 @@ Makie.save("tropical_cyclone_slices_final.png", fig)
 println("  Saved final snapshot: tropical_cyclone_slices_final.png")
 
 # Also save a few key time snapshots
-key_times = 1:10:Nt
+key_times = 1:1:Nt
 for (idx, t_idx) in enumerate(key_times)
     n[] = t_idx
     filename = "tropical_cyclone_slices_t$(idx).png"
