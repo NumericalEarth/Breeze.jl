@@ -283,6 +283,36 @@ For compressible dynamics, returns `-∂p/∂z`.
 @inline z_pressure_gradient(i, j, k, grid, dynamics) = zero(grid)
 
 #####
+##### Slow tendency mode for split-explicit time-stepping
+#####
+
+"""
+$(TYPEDEF)
+
+Wrapper type indicating that only "slow" tendencies should be computed.
+
+When computing momentum tendencies with a `SlowTendencyMode`-wrapped dynamics,
+the "fast" terms (pressure gradient and buoyancy) return zero. This is used
+for split-explicit time-stepping where fast terms are handled separately
+in an acoustic substep loop.
+
+See also [`SplitExplicit`](@ref Breeze.CompressibleEquations.SplitExplicit).
+"""
+struct SlowTendencyMode{D}
+    dynamics :: D
+end
+
+# Forward dynamics_density to the wrapped dynamics
+@inline dynamics_density(s::SlowTendencyMode) = dynamics_density(s.dynamics)
+
+# Fast terms return zero in slow tendency mode
+@inline x_pressure_gradient(i, j, k, grid, ::SlowTendencyMode) = zero(grid)
+@inline y_pressure_gradient(i, j, k, grid, ::SlowTendencyMode) = zero(grid)
+@inline z_pressure_gradient(i, j, k, grid, ::SlowTendencyMode) = zero(grid)
+
+@inline buoyancy_forceᶜᶜᶜ(i, j, k, grid, ::SlowTendencyMode, args...) = zero(grid)
+
+#####
 ##### Tendency computation interface
 #####
 

@@ -15,7 +15,8 @@ using Breeze.AtmosphereModels: AtmosphereModel
 
 using Breeze.CompressibleEquations:
     AcousticSubstepper,
-    acoustic_substep_loop!
+    acoustic_substep_loop!,
+    prepare_acoustic_cache!
 
 """
 $(TYPEDEF)
@@ -110,8 +111,20 @@ function AcousticSSPRungeKutta3(grid, prognostic_fields;
 end
 
 #####
-##### Slow tendency computation (excludes pressure gradient, computed during acoustic loop)
+##### Slow tendency computation (excludes pressure gradient and buoyancy)
 #####
+
+using Oceananigans.Operators: divᶜᶜᶜ
+
+using Breeze.AtmosphereModels:
+    AtmosphereModels,
+    SlowTendencyMode,
+    dynamics_density,
+    thermodynamic_density,
+    compute_x_momentum_tendency!,
+    compute_y_momentum_tendency!,
+    compute_z_momentum_tendency!,
+    compute_dynamics_tendency!
 
 """
 $(TYPEDSIGNATURES)
@@ -122,50 +135,162 @@ The pressure gradient and buoyancy are NOT included here - they are "fast" terms
 that are computed during the acoustic substep loop. In hydrostatic equilibrium,
 pressure gradient and buoyancy nearly cancel, so treating them together in the
 fast loop maintains stability.
+
+This function uses [`SlowTendencyMode`](@ref Breeze.AtmosphereModels.SlowTendencyMode)
+to wrap the dynamics, causing pressure gradient and buoyancy functions to return zero.
 """
 function compute_slow_momentum_tendencies!(model)
     substepper = model.timestepper.substepper
     grid = model.grid
     arch = architecture(grid)
 
-    Gⁿ = model.timestepper.Gⁿ
-    dynamics = model.dynamics
+    # Wrap dynamics in SlowTendencyMode so that pressure gradient and buoyancy return zero
+    slow_dynamics = SlowTendencyMode(model.dynamics)
 
-    # The full tendencies include pressure gradient and buoyancy.
-    # For acoustic substepping, we subtract both to get slow tendencies.
-    launch!(arch, grid, :xyz, _compute_slow_momentum_tendencies!,
-            substepper.Gˢρu, substepper.Gˢρv, substepper.Gˢρw,
-            Gⁿ.ρu, Gⁿ.ρv, Gⁿ.ρw,
-            dynamics, grid, model.thermodynamic_constants)
+    model_fields = fields(model)
+
+    # Build momentum tendency arguments with slow dynamics
+    momentum_args = (
+        dynamics_density(model.dynamics),
+        model.advection.momentum,
+        model.velocities,
+        model.closure,
+        model.closure_fields,
+        model.momentum,
+        model.coriolis,
+        model.clock,
+        model_fields)
+
+    u_args = tuple(momentum_args..., model.forcing.ρu, slow_dynamics)
+    v_args = tuple(momentum_args..., model.forcing.ρv, slow_dynamics)
+
+    # Extra arguments for vertical velocity are required to compute buoyancy
+    # (which will return zero due to SlowTendencyMode)
+    w_args = tuple(momentum_args..., model.forcing.ρw,
+                   slow_dynamics,
+                   model.formulation,
+                   model.temperature,
+                   model.specific_moisture,
+                   model.microphysics,
+                   model.microphysical_fields,
+                   model.thermodynamic_constants)
+
+    # Compute slow tendencies directly into substepper storage
+    Gˢρu = substepper.Gˢρu
+    Gˢρv = substepper.Gˢρv
+    Gˢρw = substepper.Gˢρw
+
+    launch!(arch, grid, :xyz, compute_x_momentum_tendency!, Gˢρu, grid, u_args)
+    launch!(arch, grid, :xyz, compute_y_momentum_tendency!, Gˢρv, grid, v_args)
+    launch!(arch, grid, :xyz, compute_z_momentum_tendency!, Gˢρw, grid, w_args)
 
     return nothing
 end
 
-using Oceananigans.Operators: ℑzᵃᵃᶠ
-using Breeze.AtmosphereModels: x_pressure_gradient, y_pressure_gradient, z_pressure_gradient, dynamics_density
+#####
+##### Slow density and thermodynamic tendencies
+#####
 
-@kernel function _compute_slow_momentum_tendencies!(Gˢρu, Gˢρv, Gˢρw,
-                                                     Gρu, Gρv, Gρw,
-                                                     dynamics, grid, constants)
+using Breeze.AtmosphereModels: compute_dynamics_tendency!, thermodynamic_density
+
+"""
+$(TYPEDSIGNATURES)
+
+Compute slow tendencies for density and thermodynamic variable.
+
+For split-explicit time-stepping, the density equation is entirely handled
+by the acoustic substep loop (backward step using mass flux divergence),
+so the slow density tendency is zero (or contains only mass source terms).
+
+The slow thermodynamic tendency is the full tendency corrected to remove
+the fast acoustic flux divergence term that will be computed in the
+acoustic substep loop. Following [Klemp, Skamarock, and Dudhia (2007)](@cite KlempSkamarockDudhia2007),
+the slow tendency is effectively the advective-form transport plus physics:
+
+``G^s_χ = G^{\\mathrm{full}}_χ + \\bar{s} \\, \\boldsymbol{∇·m}``
+
+where ``\\bar{s} = \\bar{χ}/\\bar{ρ}`` is the stage-frozen specific thermodynamic
+variable and ``\\boldsymbol{∇·m}`` is the mass flux divergence at the stage start.
+"""
+function compute_slow_scalar_tendencies!(model)
+    substepper = model.timestepper.substepper
+    grid = model.grid
+    arch = architecture(grid)
+
+    # Slow density tendency is zero for dry dynamics (the full continuity
+    # equation is handled by the acoustic backward step)
+    fill!(substepper.Gˢρ, 0)
+
+    # Compute full thermodynamic tendency into Gˢχ using existing tendency machinery.
+    # The full tendency includes advection (flux form), diffusion, microphysics, forcing.
+    compute_full_thermodynamic_tendency_into!(substepper.Gˢχ, model)
+
+    # Correct the slow thermodynamic tendency by adding back the fast flux divergence
+    # term that the acoustic loop will handle: Gˢχ += s̄ ∇·m
+    # This converts from flux-form to advective-form transport.
+    launch!(arch, grid, :xyz, _correct_slow_thermodynamic_tendency!,
+            substepper.Gˢχ, grid,
+            substepper.χᵣ, substepper.ρᵣ,
+            model.momentum.ρu, model.momentum.ρv, model.momentum.ρw)
+
+    return nothing
+end
+
+@kernel function _correct_slow_thermodynamic_tendency!(Gˢχ, grid, χᵣ, ρᵣ, ρu, ρv, ρw)
     i, j, k = @index(Global, NTuple)
 
-    # Full tendencies minus (pressure gradient + buoyancy) = slow tendencies
-    ∂ₓp = x_pressure_gradient(i, j, k, grid, dynamics)
-    ∂ᵧp = y_pressure_gradient(i, j, k, grid, dynamics)
-    ∂zp = z_pressure_gradient(i, j, k, grid, dynamics)
-
-    # Buoyancy term: ρb = -gρ at cell faces
-    ρ = dynamics_density(dynamics)
-    g = constants.gravitational_acceleration
-    ρᶜᶜᶠ = ℑzᵃᵃᶠ(i, j, k, grid, ρ)
-    ρb = -g * ρᶜᶜᶠ
-
     @inbounds begin
-        Gˢρu[i, j, k] = Gρu[i, j, k] + ∂ₓp
-        Gˢρv[i, j, k] = Gρv[i, j, k] + ∂ᵧp
-        # Remove both pressure gradient AND buoyancy from vertical momentum
-        Gˢρw[i, j, k] = Gρw[i, j, k] + ∂zp - ρb
+        # Stage-frozen specific thermodynamic variable: s̄ = χ̄ / ρ̄
+        s̄ = χᵣ[i, j, k] / ρᵣ[i, j, k]
+
+        # Mass flux divergence at stage start
+        div_m = divᶜᶜᶜ(i, j, k, grid, ρu, ρv, ρw)
+
+        # Correct: Gˢχ += s̄ ∇·m
+        # This removes the acoustic flux divergence from the full flux-form tendency,
+        # leaving only the advective-form transport plus physics terms.
+        Gˢχ[i, j, k] += s̄ * div_m
     end
+end
+
+"""
+$(TYPEDSIGNATURES)
+
+Compute the full thermodynamic tendency into a target field.
+
+This calls the formulation-specific tendency computation and stores the
+result in `target`, which is typically the substepper's `Gˢχ` field.
+"""
+function compute_full_thermodynamic_tendency_into!(target, model)
+    grid = model.grid
+    arch = grid.architecture
+    Gⁿ = model.timestepper.Gⁿ
+
+    # Use the existing tendency computation infrastructure
+    common_args = (
+        model.dynamics,
+        model.formulation,
+        model.thermodynamic_constants,
+        model.specific_moisture,
+        model.velocities,
+        model.microphysics,
+        model.microphysical_fields,
+        model.closure,
+        model.closure_fields,
+        model.clock,
+        fields(model))
+
+    # Compute the thermodynamic tendency using the formulation's method
+    # This writes into the standard Gⁿ storage
+    AtmosphereModels.compute_thermodynamic_tendency!(model, common_args)
+
+    # Copy the result from the standard storage to our target field.
+    # The thermodynamic tendency field name depends on the formulation.
+    χ_name = AtmosphereModels.thermodynamic_density_name(model.formulation)
+    Gχ_full = getproperty(Gⁿ, χ_name)
+    parent(target) .= parent(Gχ_full)
+
+    return nothing
 end
 
 #####
@@ -173,52 +298,37 @@ end
 #####
 
 """
+$(TYPEDSIGNATURES)
+
 Apply an SSP RK3 substep with acoustic substepping.
 
-For momentum: acoustic substep loop handles the update
-For scalars: standard SSP RK3 update using time-averaged velocities
+The acoustic substep loop handles momentum, density, and the thermodynamic
+variable (ρθ or ρe). Remaining scalars (tracers) are updated using standard
+SSP RK3 with time-averaged velocities from the acoustic loop.
 """
 function acoustic_ssp_rk3_substep!(model, Δt, α, stage)
     grid = model.grid
     arch = grid.architecture
-    U⁰ = model.timestepper.U⁰
-    Gⁿ = model.timestepper.Gⁿ
     substepper = model.timestepper.substepper
+
+    # Prepare stage-frozen reference state FIRST (needed by slow tendency correction)
+    prepare_acoustic_cache!(substepper, model)
 
     # Compute slow momentum tendencies (everything except fast pressure gradient)
     compute_slow_momentum_tendencies!(model)
 
+    # Compute slow density and thermodynamic tendencies
+    # (requires χᵣ and ρᵣ from prepare_acoustic_cache!)
+    compute_slow_scalar_tendencies!(model)
+
     # Effective time step for this RK stage
     Δtˢᵗᵃᵍᵉ = α * Δt
 
-    # Execute acoustic substep loop for momentum and density
+    # Execute acoustic substep loop for momentum, density, and thermodynamic variable
     acoustic_substep_loop!(model, substepper, stage, Δtˢᵗᵃᵍᵉ)
 
-    # For non-momentum fields (scalars), use standard SSP RK3 update
-    for (i, (u, u⁰, G)) in enumerate(zip(prognostic_fields(model), U⁰, Gⁿ))
-        if i <= 3  # Skip momentum (handled by acoustic loop)
-            continue
-        end
-
-        # Handle density specially - it's updated in acoustic loop
-        if i == 4 + length(model.tracers) + 1  # Rough heuristic; TODO: improve
-            continue
-        end
-
-        launch!(arch, grid, :xyz, _ssp_rk3_substep!, u, u⁰, G, Δt, α)
-
-        # Field index for implicit solver
-        field_index = Val(i - 3)
-
-        implicit_step!(u,
-                       model.timestepper.implicit_solver,
-                       model.closure,
-                       model.closure_fields,
-                       field_index,
-                       model.clock,
-                       fields(model),
-                       α * Δt)
-    end
+    # Update remaining scalars (tracers) using standard SSP RK3
+    scalar_ssp_rk3_substep!(model, Δt, α)
 
     return nothing
 end

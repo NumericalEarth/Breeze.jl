@@ -28,9 +28,11 @@ module CompressibleEquations
 export
     CompressibleDynamics,
     CompressibleModel,
-    AcousticSubstepper
+    AcousticSubstepper,
+    SplitExplicit,
+    ExplicitTimeStepping
 
-using DocStringExtensions: TYPEDSIGNATURES
+using DocStringExtensions: TYPEDEF, TYPEDSIGNATURES
 using Adapt: Adapt, adapt
 using KernelAbstractions: @kernel, @index
 
@@ -42,9 +44,10 @@ using Oceananigans.Utils: prettysummary, launch!
 
 using Breeze.Thermodynamics: mixture_gas_constant, mixture_heat_capacity
 
-using Breeze.AtmosphereModels: AtmosphereModels, AtmosphereModel, grid_moisture_fractions, dynamics_density, standard_pressure
+using Breeze.AtmosphereModels: AtmosphereModels, AtmosphereModel, grid_moisture_fractions, dynamics_density, standard_pressure, thermodynamic_density
 using Breeze.PotentialTemperatureFormulations: LiquidIcePotentialTemperatureFormulation
 
+include("time_discretizations.jl")
 include("compressible_dynamics.jl")
 include("compressible_buoyancy.jl")
 

@@ -173,7 +173,11 @@ makedocs(
             ],
         ],
         "Radiative Transfer" => "radiative_transfer.md",
-        "Dycore equations and algorithms" => "dycore_equations_algorithms.md",
+        "Dynamics" => Any[
+            "Governing equations" => "dycore_equations_algorithms.md",
+            "Anelastic dynamics" => "anelastic_dynamics.md",
+            "Compressible dynamics" => "compressible_dynamics.md",
+        ],
         "Appendix" => Any[
             "Notation" => "appendix/notation.md",
             "Reproducibility of Breeze.jl models" => "reproducibility.md",

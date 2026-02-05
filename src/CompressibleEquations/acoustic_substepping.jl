@@ -25,10 +25,18 @@ Storage and parameters for acoustic substepping within each RK stage.
 
 Follows performance patterns from Oceananigans.SplitExplicitFreeSurface:
 - Precomputed thermodynamic coefficients (ψ = Rᵐ T, c²) for on-the-fly pressure
+- Stage-frozen reference state (ρᵣ, χᵣ) for perturbation pressure gradient
 - Time-averaged velocity fields for scalar advection
-- Slow tendency storage
-- Reference density for divergence damping
+- Slow tendency storage for momentum, density, and thermodynamic variable
 - Vertical tridiagonal solver
+
+The acoustic substepping implements the forward-backward scheme from
+[Wicker and Skamarock (2002)](@cite WickerSkamarock2002) and
+[Klemp, Skamarock, and Dudhia (2007)](@cite KlempSkamarockDudhia2007):
+
+1. **Forward step**: Update momentum using perturbation pressure gradient
+2. **Backward step**: Update density and thermodynamic variable using new velocities
+3. Accumulate time-averaged velocities for scalar transport
 
 Fields
 ======
@@ -39,8 +47,11 @@ Fields
 - `ψ`: Pressure coefficient ψ = Rᵐ T, so p = ψ ρ (CenterField)
 - `c²`: Moist sound speed squared c² = γᵐ ψ (CenterField)
 - `ū, v̄, w̄`: Time-averaged velocities for scalar advection
-- `Gˢρu, Gˢρv, Gˢρw`: Slow tendencies (fixed during acoustic loop)
-- `ρᵣ`: Reference density at start of acoustic loop (for damping)
+- `Gˢρu, Gˢρv, Gˢρw`: Slow momentum tendencies (fixed during acoustic loop)
+- `Gˢρ`: Slow density tendency (fixed during acoustic loop)
+- `Gˢχ`: Slow thermodynamic tendency (fixed during acoustic loop)
+- `ρᵣ`: Stage-frozen reference density
+- `χᵣ`: Stage-frozen reference thermodynamic variable (ρθ or ρe)
 - `vertical_solver`: BatchedTridiagonalSolver for w-ρ implicit coupling
 - `rhs`: Right-hand side storage for tridiagonal solve
 """
@@ -63,13 +74,22 @@ struct AcousticSubstepper{N, FT, CF, UF, VF, WF, TS, RHS}
     v̄ :: VF  # YFaceField
     w̄ :: WF  # ZFaceField
 
-    # Slow tendencies (computed once per RK stage, held fixed during acoustic loop)
+    # Slow momentum tendencies (computed once per RK stage, held fixed during acoustic loop)
     Gˢρu :: UF
     Gˢρv :: VF
     Gˢρw :: WF
 
-    # Reference density at start of acoustic loop (for divergence damping)
+    # Slow density tendency (fixed during acoustic loop)
+    Gˢρ :: CF
+
+    # Slow thermodynamic tendency (fixed during acoustic loop)
+    Gˢχ :: CF
+
+    # Stage-frozen reference density (for perturbation pressure gradient and damping)
     ρᵣ :: CF
+
+    # Stage-frozen reference thermodynamic variable (ρθ or ρe)
+    χᵣ :: CF
 
     # Vertical tridiagonal solver for implicit w-ρ coupling
     vertical_solver :: TS
@@ -90,7 +110,10 @@ Adapt.adapt_structure(to, a::AcousticSubstepper) =
                        adapt(to, a.Gˢρu),
                        adapt(to, a.Gˢρv),
                        adapt(to, a.Gˢρw),
+                       adapt(to, a.Gˢρ),
+                       adapt(to, a.Gˢχ),
                        adapt(to, a.ρᵣ),
+                       adapt(to, a.χᵣ),
                        adapt(to, a.vertical_solver),
                        adapt(to, a.rhs))
 
@@ -122,13 +145,22 @@ function AcousticSubstepper(grid; Ns::N=6, α=0.5, κᵈ=0.05) where N
     v̄ = YFaceField(grid)
     w̄ = ZFaceField(grid)
 
-    # Slow tendencies
+    # Slow momentum tendencies
     Gˢρu = XFaceField(grid)
     Gˢρv = YFaceField(grid)
     Gˢρw = ZFaceField(grid)
 
-    # Reference density
+    # Slow density tendency
+    Gˢρ = CenterField(grid)
+
+    # Slow thermodynamic tendency
+    Gˢχ = CenterField(grid)
+
+    # Stage-frozen reference density
     ρᵣ = CenterField(grid)
+
+    # Stage-frozen reference thermodynamic variable
+    χᵣ = CenterField(grid)
 
     # Vertical tridiagonal solver
     vertical_solver = build_acoustic_vertical_solver(grid)
@@ -140,7 +172,8 @@ function AcousticSubstepper(grid; Ns::N=6, α=0.5, κᵈ=0.05) where N
                               ψ, c²,
                               ū, v̄, w̄,
                               Gˢρu, Gˢρv, Gˢρw,
-                              ρᵣ,
+                              Gˢρ, Gˢχ,
+                              ρᵣ, χᵣ,
                               vertical_solver,
                               rhs)
 end
@@ -198,19 +231,39 @@ Arguments
 end
 
 #####
-##### Compute thermodynamic coefficients (once per RK stage)
+##### Prepare acoustic cache (once per RK stage)
 #####
 
-"""
-Compute ψ = Rᵐ T and c² = γᵐ ψ for the acoustic substep loop.
+using Breeze.AtmosphereModels: thermodynamic_density
 
-These coefficients are held fixed during acoustic substepping since
-temperature evolves via slow tendencies only.
 """
-function compute_acoustic_coefficients!(substepper, model)
+$(TYPEDSIGNATURES)
+
+Prepare the acoustic cache for an RK stage by storing the stage-frozen
+reference state and computing linearized EOS coefficients.
+
+This function:
+1. Stores the stage-frozen reference density ρᵣ and thermodynamic variable χᵣ
+2. Computes the linearized acoustic pressure coefficient ψ = Rᵐ T and sound
+   speed squared c² = γᵐ ψ, held fixed during acoustic substepping
+
+The perturbation pressure gradient during acoustic substeps uses:
+``p' ≈ ψ ρ' = Rᵐ T (ρ - ρᵣ)``
+
+For the potential temperature formulation, this is equivalent to the
+linearized EOS ``p' = c̄² ρ'`` since ``θ`` is materially conserved
+to leading order in acoustic perturbations.
+"""
+function prepare_acoustic_cache!(substepper, model)
     grid = model.grid
     arch = architecture(grid)
 
+    # Store stage-frozen reference state
+    χ = thermodynamic_density(model.formulation)
+    parent(substepper.ρᵣ) .= parent(model.dynamics.density)
+    parent(substepper.χᵣ) .= parent(χ)
+
+    # Compute thermodynamic coefficients: ψ = Rᵐ T, c² = γᵐ ψ
     launch!(arch, grid, :xyz, _compute_acoustic_coefficients!,
             substepper.ψ, substepper.c²,
             model.dynamics.density,
@@ -295,6 +348,69 @@ end
 end
 
 #####
+##### Thermodynamic variable update (backward step)
+#####
+
+"""
+$(TYPEDSIGNATURES)
+
+Update the thermodynamic variable χ (ρθ or ρe) during an acoustic substep.
+
+Following [Klemp, Skamarock, and Dudhia (2007)](@cite KlempSkamarockDudhia2007) Eq. 15,
+the thermodynamic variable is updated using a linearized flux divergence:
+
+```math
+χ^{τ+Δτ} = χ^τ - Δτ \\, \\boldsymbol{∇·}(\\bar{s} \\, \\boldsymbol{m}^{τ+Δτ})
+    + Δτ \\, Π^{\\mathrm{ac}}(\\bar{U}) \\, \\boldsymbol{∇·u}^{τ+Δτ}
+    + Δτ \\, G_{χ,\\mathrm{slow}}
+```
+
+where ``\\bar{s} = \\bar{χ} / \\bar{ρ}`` is the stage-frozen specific thermodynamic
+variable (θ or e) and ``\\boldsymbol{m} = (ρu, ρv, ρw)`` is momentum.
+
+The linearization advects the reference-level specific variable by the current
+momentum, rather than computing the full nonlinear flux. This is critical for
+stability of the acoustic substepping scheme.
+
+For `LiquidIcePotentialTemperatureFormulation`, ``Π^{\\mathrm{ac}} = 0`` because
+``θ`` is materially conserved.
+"""
+function acoustic_thermodynamic_step!(model, substepper, Δτ)
+    grid = model.grid
+    arch = architecture(grid)
+    χ = thermodynamic_density(model.formulation)
+
+    launch!(arch, grid, :xyz, _acoustic_thermodynamic_step!,
+            χ, grid, Δτ,
+            model.momentum.ρu, model.momentum.ρv, model.momentum.ρw,
+            substepper.χᵣ, substepper.ρᵣ,
+            substepper.Gˢχ)
+
+    return nothing
+end
+
+@kernel function _acoustic_thermodynamic_step!(χ, grid, Δτ, ρu, ρv, ρw, χᵣ, ρᵣ, Gˢχ)
+    i, j, k = @index(Global, NTuple)
+
+    @inbounds begin
+        # Stage-frozen specific thermodynamic variable: s̄ = χ̄ / ρ̄
+        s̄ = χᵣ[i, j, k] / ρᵣ[i, j, k]
+
+        # Linearized flux divergence: ∇·(s̄ m) where m = (ρu, ρv, ρw) is the
+        # newly updated momentum (backward step). The specific variable s̄ is
+        # interpolated to cell centers via s̄ · ∇·m ≈ s̄ · div(ρu, ρv, ρw)
+        # since s̄ varies slowly compared to the acoustic perturbations.
+        div_m = divᶜᶜᶜ(i, j, k, grid, ρu, ρv, ρw)
+
+        # Thermodynamic update: χ = χ - Δτ s̄ ∇·m + Δτ Gˢχ
+        # Note: For ρθ formulation, Π^ac = 0, so no compression source term.
+        # The compression source for static energy formulation will be added
+        # via dispatch when that formulation supports split-explicit stepping.
+        χ[i, j, k] += Δτ * (-s̄ * div_m + Gˢχ[i, j, k])
+    end
+end
+
+#####
 ##### Vertical momentum update (semi-implicit)
 #####
 
@@ -338,44 +454,81 @@ end
 end
 
 #####
-##### Density update from compression + velocity averaging
+##### Density update (backward step, conservative form)
 #####
 
 """
-Update density from compression and accumulate time-averaged velocities.
+$(TYPEDSIGNATURES)
 
-The compression term is the fast (acoustic) part of continuity:
-∂ₜρ = -ρ ∇·u
+Update density using the conservative mass flux divergence (backward step).
+
+The density is updated using the newly computed momentum (backward step):
+
+```math
+ρ^{τ+Δτ} = ρ^τ - Δτ \\, \\boldsymbol{∇·m}^{τ+Δτ} + Δτ \\, G_{ρ,\\mathrm{slow}}
+```
+
+where ``\\boldsymbol{m} = (ρu, ρv, ρw)`` is the momentum updated in the forward step.
+Divergence damping is applied to suppress spurious acoustic oscillations.
 """
-function acoustic_density_step!(model, substepper, Δτ, n, Nsₛₜₐgₑ)
+function acoustic_density_step!(model, substepper, Δτ)
+    grid = model.grid
+    arch = architecture(grid)
+
+    launch!(arch, grid, :xyz, _acoustic_density_step!,
+            model.dynamics.density, grid, Δτ,
+            model.momentum.ρu, model.momentum.ρv, model.momentum.ρw,
+            substepper.ρᵣ, substepper.κᵈ, substepper.Gˢρ)
+
+    return nothing
+end
+
+@kernel function _acoustic_density_step!(ρ, grid, Δτ, ρu, ρv, ρw, ρᵣ, κᵈ, Gˢρ)
+    i, j, k = @index(Global, NTuple)
+
+    @inbounds begin
+        # Mass flux divergence: ∇·m = ∇·(ρu, ρv, ρw) using new momentum
+        div_m = divᶜᶜᶜ(i, j, k, grid, ρu, ρv, ρw)
+
+        # Density update: ∂ₜρ = -∇·m + Gˢρ
+        ρ[i, j, k] += Δτ * (-div_m + Gˢρ[i, j, k])
+
+        # Divergence damping: nudge density toward stage-frozen reference
+        ρ[i, j, k] -= κᵈ * (ρ[i, j, k] - ρᵣ[i, j, k])
+    end
+end
+
+#####
+##### Accumulate time-averaged velocities
+#####
+
+"""
+$(TYPEDSIGNATURES)
+
+Accumulate time-averaged velocities for scalar transport.
+
+Time-averaged velocities from the acoustic loop are used for advection
+of scalars (θ, moisture, tracers) in the outer RK loop, ensuring
+mass-consistent transport following [Klemp, Skamarock, and Dudhia (2007)](@cite KlempSkamarockDudhia2007).
+"""
+function accumulate_time_averaged_velocities!(substepper, model, Nsₛₜₐgₑ)
     grid = model.grid
     arch = architecture(grid)
 
     χᵗ = 1 / Nsₛₜₐgₑ  # Uniform time-averaging weight
 
-    launch!(arch, grid, :xyz, _acoustic_density_and_averaging!,
-            model.dynamics.density, grid, Δτ, χᵗ,
+    launch!(arch, grid, :xyz, _accumulate_time_averaged_velocities!,
+            substepper.ū, substepper.v̄, substepper.w̄,
             model.velocities.u, model.velocities.v, model.velocities.w,
-            substepper.ρᵣ, substepper.κᵈ,
-            substepper.ū, substepper.v̄, substepper.w̄)
+            χᵗ)
 
     return nothing
 end
 
-@kernel function _acoustic_density_and_averaging!(ρ, grid, Δτ, χᵗ, u, v, w, ρᵣ, κᵈ, ū, v̄, w̄)
+@kernel function _accumulate_time_averaged_velocities!(ū, v̄, w̄, u, v, w, χᵗ)
     i, j, k = @index(Global, NTuple)
 
     @inbounds begin
-        # Velocity divergence
-        ∇u = divᶜᶜᶜ(i, j, k, grid, u, v, w)
-
-        # Density update from compression: ∂ₜρ = -ρ ∇·u
-        ρ[i, j, k] -= Δτ * ρ[i, j, k] * ∇u
-
-        # Divergence damping: nudge density toward reference
-        ρ[i, j, k] -= κᵈ * (ρ[i, j, k] - ρᵣ[i, j, k])
-
-        # Accumulate time-averaged velocities
         ū[i, j, k] += χᵗ * u[i, j, k]
         v̄[i, j, k] += χᵗ * v[i, j, k]
         w̄[i, j, k] += χᵗ * w[i, j, k]
@@ -420,28 +573,32 @@ end
 #####
 
 """
-    acoustic_substep_loop!(model, acoustic, stage, Δt)
+    acoustic_substep_loop!(model, substepper, stage, Δt)
 
 Execute the acoustic substep loop for RK `stage`.
 
-This function:
-1. Applies slow tendencies to momentum once (for the full RK stage)
-2. Precomputes thermodynamic coefficients (ψ, c²)
-3. Initializes time-averaged velocities
-4. Loops over acoustic substeps, updating momentum and density with fast terms
-5. Uses time-averaged velocities for scalar advection (handled in outer RK loop)
+Implements the forward-backward scheme from
+[Wicker and Skamarock (2002)](@cite WickerSkamarock2002) and
+[Klemp, Skamarock, and Dudhia (2007)](@cite KlempSkamarockDudhia2007):
+
+1. Prepare acoustic cache (stage-frozen reference state and linearized EOS)
+2. Apply slow momentum tendencies once for the full stage
+3. Loop over acoustic substeps:
+   a. **Forward step**: Update momentum from perturbation pressure gradient + buoyancy
+   b. Update velocities from momentum
+   c. **Backward step**: Update density from mass flux divergence (new momentum)
+   d. **Backward step**: Update thermodynamic variable from linearized flux divergence
+   e. Accumulate time-averaged velocities
 
 Arguments
 =========
 
 - `model`: The `AtmosphereModel`
-- `acoustic`: The `AcousticSubstepper` containing storage and parameters
+- `substepper`: The `AcousticSubstepper` containing storage and parameters
 - `stage`: RK stage number (1, 2, or 3)
 - `Δt`: Time step for this RK stage (α × full Δt)
 """
 function acoustic_substep_loop!(model, substepper, stage, Δt)
-    grid = model.grid
-    arch = architecture(grid)
     Ns = substepper.Ns
     g = model.thermodynamic_constants.gravitational_acceleration
 
@@ -450,15 +607,12 @@ function acoustic_substep_loop!(model, substepper, stage, Δt)
     Δτ = Δt / Nsₛₜₐgₑ  # Acoustic substep time step
 
     # === PRECOMPUTE PHASE (once per RK stage) ===
+    # Note: prepare_acoustic_cache! is called before this function
+    # (in acoustic_ssp_rk3_substep!) because the slow tendency correction
+    # needs the stage-frozen reference state.
 
-    # Apply slow tendencies to momentum ONCE for the full RK stage
+    # Apply slow momentum tendencies to momentum ONCE for the full RK stage
     apply_slow_momentum_tendencies!(model, substepper, Δt)
-
-    # Compute thermodynamic coefficients: ψ = Rᵐ T, c² = γᵐ ψ
-    compute_acoustic_coefficients!(substepper, model)
-
-    # Store density reference for divergence damping
-    parent(substepper.ρᵣ) .= parent(model.dynamics.density)
 
     # Initialize time-averaged velocities
     fill!(substepper.ū, 0)
@@ -467,15 +621,21 @@ function acoustic_substep_loop!(model, substepper, stage, Δt)
 
     # === ACOUSTIC SUBSTEP LOOP ===
     for n = 1:Nsₛₜₐgₑ
-        # Update momentum from fast terms (pressure gradient + buoyancy)
+        # (A) Forward step: update momentum from fast pressure gradient + buoyancy
         acoustic_horizontal_momentum_step!(model, substepper, Δτ)
         acoustic_vertical_momentum_step!(model, substepper, Δτ, g)
 
-        # Update velocities from momentum
+        # (B) Update velocities from momentum
         update_velocities_from_momentum!(model)
 
-        # Update density from compression + accumulate averaged velocities
-        acoustic_density_step!(model, substepper, Δτ, n, Nsₛₜₐgₑ)
+        # (C) Backward step: update density using new momentum (mass flux divergence)
+        acoustic_density_step!(model, substepper, Δτ)
+
+        # (D) Backward step: update thermodynamic variable using new momentum
+        acoustic_thermodynamic_step!(model, substepper, Δτ)
+
+        # (E) Accumulate time-averaged velocities for scalar transport
+        accumulate_time_averaged_velocities!(substepper, model, Nsₛₜₐgₑ)
     end
 
     return nothing
