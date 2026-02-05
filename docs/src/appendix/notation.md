@@ -79,7 +79,7 @@ The following table also uses a few conventions that suffuse the source code and
 | ``cˡ``                              | `cˡ`   | `TC.liquid.heat_capacity`           | Heat capacity of the liquid phase (incompressible)                             |
 | ``cⁱ``                              | `cⁱ`   | `TC.ice.heat_capacity`              | Heat capacity of the ice phase (incompressible)                                |
 | ``\rho^w``                          | `ρʷ`   | `TC.liquid.density`                 | Density of liquid water                                                        |
-| ``\rho^i``                          | `ρⁱ`   | `TC.ice.density`                    | Density of ice                                                                 |
+| ``\rho^s``                          | `ρˢ`   | `TC.ice.density`                    | Density of ice                                                                 |
 | ``cᵖᵐ``                             | `cᵖᵐ`  | `mixture_heat_capacity(q, constants)` | Mixture heat capacity at constant pressure                                   |
 | ``Tᵣ``                              | `Tᵣ`   | `TC.energy_reference_temperature`   | Reference temperature for internal energy relations and latent heat            |
 | ``\mathcal{L}^l_r``                 | `ℒˡᵣ`  | `TC.liquid.reference_latent_heat`   | Latent heat of condensation at the energy reference temperature                |
