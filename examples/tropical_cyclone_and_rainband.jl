@@ -69,7 +69,7 @@ T₀ = 300     # Sea surface temperature (K)
 ρu_bcs = FieldBoundaryConditions(bottom=BulkDrag(coefficient=Cᴰ))
 ρv_bcs = FieldBoundaryConditions(bottom=BulkDrag(coefficient=Cᴰ))
 
-## damping 
+## damping
 sponge_rate = 1/8  # s⁻¹ - relaxation rate (8 s timescale)
 sponge_mask = GaussianMask{:z}(center=3500, width=500)
 sponge = Relaxation(rate=sponge_rate, mask=sponge_mask)
@@ -223,15 +223,15 @@ p = zeros(Nz_p, Nr)
 for k in 1:Nz_p
     z_k = znodes(grid, Center())[k]
     z_clamped = clamp(z_k, minimum(z_asc), maximum(z_asc))
-    
+
     # Background pressure at this height (using sounding)
     T_k = T_sounding_interp(z_clamped)
     R = constants.molar_gas_constant/constants.dry_air.molar_mass
     p_background = reference_state.surface_pressure * exp(-constants.gravitational_acceleration * z_k / (R * T_k))
-    
+
     # Start from outer edge (no perturbation)
     p[k, end] = p_background
-    
+
     # Integrate inward using gradient wind balance
     # Gradient wind balance: (1/ρ) * dp/dr = f*v + v²/r
     # So: dp/dr = ρ * (f*v + v²/r)
@@ -239,8 +239,6 @@ for k in 1:Nz_p
     # When integrating inward (decreasing r), pressure decreases
     for r_idx in (Nr-1):-1:1
         r = rrange[r_idx]
-      
-        
         # Compute pressure gradient from gradient wind balance
         # Use radius from center, not absolute position
         v_tang = tangential_wind(x_center + r, y_center, z_k)
@@ -250,14 +248,10 @@ for k in 1:Nz_p
         else
             ρ = p[k, r_idx+1] / (R * T_k)
         end
-        ρ = p_background / (R * T_k)
-        
         dp_dr = ρ * (v_tang * coriolis.f + v_tang^2 / max(r, 100))  # Avoid division by zero
-        
+
         # When moving inward (r decreases by ∂r), pressure change is dp_dr * (-∂r)
-        # Since we're going from larger r to smaller r, the change is negative
-        dp = dp_dr * ∂r
-        
+        dp = -dp_dr * ∂r
         # Pressure decreases as we move inward
         p[k, r_idx] = p[k, r_idx + 1] + dp
     end
@@ -271,10 +265,11 @@ p=reverse(p, dims=2)
 
 function p_func(x, y, z)
     radius = sqrt((x - x_center)^2 + (y - y_center)^2)
+    radius_clamped = clamp(radius, 0, max_radius)
     z_clamped = clamp(z, minimum(znodes(grid, Center())), maximum(znodes(grid, Center())))
     z_idx = searchsortedfirst(znodes(grid, Center()), z_clamped)
     z_idx = clamp(z_idx, 1, Nz_p)
-    r_idx = searchsortedfirst(rrange_asc, radius)
+    r_idx = searchsortedfirst(rrange_asc, radius_clamped)
     r_idx = clamp(r_idx, 1, Nr)
     return p[z_idx, r_idx]
 end
@@ -310,13 +305,11 @@ function θ_init(x, y, z)
     z_clamped = clamp(z, minimum(z_asc), maximum(z_asc))
     θ_background = θ_sounding_interp(z_clamped)
     z_idx = searchsortedfirst(znodes(grid, Center()), z_clamped)
-    
-    # Use temperature from sounding to compute reference pressure
+    z_idx = clamp(z_idx, 1, Nz_p)
+    # Reference pressure at this height (from outer-edge profile)
     p_ref = p_outer[z_idx]
-    
-
     # Return background potential temperature from sounding plus vortex perturbation
-    return θ_background * ( p_ref/(p_func(x, y, z)))
+    return θ_background * (p_ref / p_func(x, y, z))
 end
 
 function qᵗ_init(x, y, z)
@@ -324,7 +317,7 @@ function qᵗ_init(x, y, z)
     # Clamp z to sounding range for interpolation
     z_clamped = clamp(z, minimum(z_asc), maximum(z_asc))
     qᵗ_background = qᵗ_sounding_interp(z_clamped)
-    
+
     # For now, use the sounding profile without radial variation
     # (The vortex perturbation primarily affects temperature/pressure, not moisture)
     # In future, could add moisture enhancement in the eyewall region
