@@ -34,7 +34,7 @@ jobs:
       # TODO: use image for benchmark environment after this is merged on `main`
       image: 'ghcr.io/numericalearth/breeze-docker-images:docs-julia_1.12.4'
       options: --gpus=all
-    timeout-minutes: 60
+    timeout-minutes: 30
     steps:
       - uses: actions/checkout@v6
       - name: Instantiate benchmarking environment
@@ -88,7 +88,7 @@ jobs:
           with open("github-action-benchmark.json", "w") as f:
               json.dump(data, f)
       - uses: actions/create-github-app-token@v2
-        # if: ${{ ! github.event.pull_request.head.repo.fork }}
+        if: ${{ ! github.event.pull_request.head.repo.fork }}
         id: generate_token
         with:
           app-id: "${{ secrets.NUMTERRA_BOT_ID }}"
@@ -104,19 +104,16 @@ jobs:
           output-file-path: "github-action-benchmark.json"
           benchmark-data-dir-path: "."
           gh-repository: "github.com/NumericalEarth/BreezeBenchmarks"
-          github-token: ${{ steps.generate_token.outputs.token }}
-          # github-token: ${{ github.event.pull_request.head.repo.fork && github.token || steps.generate_token.outputs.token }}
+          github-token: ${{ github.event.pull_request.head.repo.fork && github.token || steps.generate_token.outputs.token }}
           comment-always: false
           summary-always: true
           alert-threshold: "110%"
           fail-on-alert: false
-          auto-push: true
-          # auto-push: ${{ github.event_name != 'pull_request' }}
+          auto-push: ${{ github.event_name == 'push' }}
           max-items-in-chart: 50
-          # Enable alert commit comment
           comment-on-alert: true
       - name: Push results to BreezeBenchmarks repo
-        # if: ${{ github.event_name == 'push' }}
+        if: ${{ github.event_name == 'push' }}
         run: |
           git clone https://numterra-bot:${{ steps.generate_token.outputs.token }}@github.com/NumericalEarth/BreezeBenchmarks.git
           cd BreezeBenchmarks
