@@ -24,13 +24,13 @@ const DewpointTemperature = KernelFunctionOperation{C, C, C, <:Any, <:Any, <:Dew
 """
 $(TYPEDSIGNATURES)
 
-Return a `KernelFunctionOperation` representing the dewpoint temperature ``Tᵈ``.
+Return a `KernelFunctionOperation` representing the dewpoint temperature ``T⁺``.
 
 The dewpoint temperature is the temperature at which the air would become saturated
 at its current vapor pressure. It is computed by solving the implicit equation:
 
 ```math
-pᵛ⁺(Tᵈ) = pᵛ
+pᵛ⁺(T⁺) = pᵛ
 ```
 
 using secant iteration, where ``pᵛ`` is the actual vapor pressure and ``pᵛ⁺``
@@ -44,8 +44,8 @@ For saturated air, the dewpoint temperature equals the actual temperature.
 model = AtmosphereModel(grid; microphysics=SaturationAdjustment())
 set!(model, θ=300, qᵗ=0.01)
 
-Tᵈ = DewpointTemperature(model)
-Tᵈ_field = Field(Tᵈ)
+T⁺ = DewpointTemperature(model)
+T⁺_field = Field(T⁺)
 ```
 """
 function DewpointTemperature(model)

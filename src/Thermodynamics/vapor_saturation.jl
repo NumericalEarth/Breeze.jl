@@ -273,14 +273,14 @@ end
 """
 $(TYPEDSIGNATURES)
 
-Compute the dewpoint temperature ``Tᵈ`` given the vapor pressure `pᵛ`,
+Compute the dewpoint temperature ``T⁺`` given the vapor pressure `pᵛ`,
 actual temperature `T`, thermodynamic `constants`, and condensation `surface`.
 
 The dewpoint temperature is defined as the temperature at which the saturation
 vapor pressure equals the actual vapor pressure:
 
 ```math
-pᵛ⁺(Tᵈ) = pᵛ
+pᵛ⁺(T⁺) = pᵛ
 ```
 
 This implicit equation is solved using secant iteration, which works with any
@@ -303,8 +303,8 @@ equals the actual temperature and `T` is returned.
                                        tolerance = 1e-4,
                                        maxiter = 10)
     # First guess: current temperature
-    Tᵈ₁ = T
-    pᵛ⁺₁ = saturation_vapor_pressure(Tᵈ₁, constants, surface)
+    T⁺₁ = T
+    pᵛ⁺₁ = saturation_vapor_pressure(T⁺₁, constants, surface)
     r₁ = pᵛ⁺₁ - pᵛ
 
     # If saturated or supersaturated, dewpoint equals temperature
@@ -312,22 +312,22 @@ equals the actual temperature and `T` is returned.
 
     # Second guess: lower temperature based on relative humidity
     ℋ = pᵛ / pᵛ⁺₁  # relative humidity
-    Tᵈ₂ = T - (1 - ℋ) * 20  # heuristic initial step
-    pᵛ⁺₂ = saturation_vapor_pressure(Tᵈ₂, constants, surface)
+    T⁺₂ = T - (1 - ℋ) * 20  # heuristic initial step
+    pᵛ⁺₂ = saturation_vapor_pressure(T⁺₂, constants, surface)
     r₂ = pᵛ⁺₂ - pᵛ
 
     # Secant iteration
     iter = 0
     while abs(r₂) > tolerance * pᵛ && iter < maxiter
-        ΔTΔr = (Tᵈ₂ - Tᵈ₁) / (r₂ - r₁)
-        r₁, Tᵈ₁ = r₂, Tᵈ₂
-        Tᵈ₂ -= r₂ * ΔTΔr
-        pᵛ⁺₂ = saturation_vapor_pressure(Tᵈ₂, constants, surface)
+        ΔTΔr = (T⁺₂ - T⁺₁) / (r₂ - r₁)
+        r₁, T⁺₁ = r₂, T⁺₂
+        T⁺₂ -= r₂ * ΔTΔr
+        pᵛ⁺₂ = saturation_vapor_pressure(T⁺₂, constants, surface)
         r₂ = pᵛ⁺₂ - pᵛ
         iter += 1
     end
 
-    return Tᵈ₂
+    return T⁺₂
 end
 
 """
