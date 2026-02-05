@@ -141,9 +141,12 @@ set!(model_compressible; θ=θᵢ, u=U, qᵗ=0, ρ=ρᵢ)
 # ## Case 4: Split-explicit with explicit vertical substepping
 #
 # Split-explicit acoustic substepping with fully explicit vertical stepping.
-# The time step is limited by the vertical acoustic CFL: Δτ < Δz / cₛ.
+# The acoustic substep Δτ must satisfy both the horizontal and vertical
+# acoustic CFL: Δτ < min(Δx, Δz) / cₛ.
 
-explicit_split = SplitExplicitTimeDiscretization(substeps=12)
+Ns = 12
+
+explicit_split = SplitExplicitTimeDiscretization(substeps=Ns)
 explicit_split_dynamics = CompressibleDynamics(surface_pressure=p₀, standard_pressure=pˢᵗ,
                                               time_discretization=explicit_split)
 model_explicit_split = AtmosphereModel(grid; dynamics=explicit_split_dynamics, advection)
@@ -153,10 +156,12 @@ set!(model_explicit_split; θ=θᵢ, u=U, qᵗ=0, ρ=ρᵢ)
 # ## Case 5: Split-explicit with vertically implicit substepping
 #
 # Split-explicit acoustic substepping with vertically implicit solve.
-# The vertical CFL restriction is removed, allowing time steps comparable
-# to the anelastic model.
+# The vertical CFL restriction on the acoustic substep is removed;
+# only the horizontal CFL remains: Δτ < Δx / cₛ.
+# On this grid Δx = Δz, so both cases need the same number of substeps.
+# The implicit solve's advantage appears with finer vertical grids (Δz ≪ Δx).
 
-implicit_split = SplitExplicitTimeDiscretization(VerticallyImplicit(0.5), substeps=6)
+implicit_split = SplitExplicitTimeDiscretization(VerticallyImplicit(0.5), substeps=Ns)
 implicit_split_dynamics = CompressibleDynamics(surface_pressure=p₀, standard_pressure=pˢᵗ,
                                               time_discretization=implicit_split)
 model_implicit_split = AtmosphereModel(grid; dynamics=implicit_split_dynamics, advection)
@@ -174,25 +179,21 @@ set!(model_implicit_split; θ=θᵢ, u=U, qᵗ=0, ρ=ρᵢ)
 # Sound speed (approximately)
 Rᵈ = constants.molar_gas_constant / constants.dry_air.molar_mass
 cᵖᵈ = constants.dry_air.heat_capacity
-γ = cᵖᵈ / (cᵖᵈ - Rᵈ)
-cₛ = sqrt(γ * Rᵈ * θ₀)  # ~347 m/s
+γᵈ = cᵖᵈ / (cᵖᵈ - Rᵈ)
+cₛ = sqrt(γᵈ * Rᵈ * θ₀)  # ~347 m/s
 
 # CFL-based time steps
 cfl = 0.5
 Δt_anelastic = cfl * min(Δx, Δz) / U  # Based on advective velocity
 Δt_compressible = cfl * min(Δx, Δz) / (cₛ + U)  # Based on sound speed + advection
 
-# The split-explicit cases can use larger time steps than the fully explicit compressible case.
-# With explicit vertical substepping, the acoustic substep Δτ must satisfy Δτ < Δz / cₛ.
-# With 12 substeps: Δτ = Δt / 12, so Δt < 12 * Δz / cₛ ≈ 12 * 1000 / 347 ≈ 35s.
+# The split-explicit cases can use much larger time steps than the fully explicit
+# compressible case. The acoustic substep Δτ = Δt / Ns must satisfy the horizontal
+# acoustic CFL: Δτ < Δx / cₛ, so Δt < Ns × Δx / cₛ ≈ 12 × 1000 / 347 ≈ 35s.
 # We use a conservative Δt limited by advection.
-Δt_explicit_split = cfl * Δz / U  # Limited by vertical advective CFL
+Δt_split = cfl * min(Δx, Δz) / U
 
-# With vertically implicit substepping, the vertical CFL is removed entirely.
-# The acoustic substep only needs Δτ < Δx / cₛ (horizontal CFL).
-Δt_implicit_split = cfl * Δx / U  # Based on horizontal advective CFL
-
-@info "Time steps:" Δt_anelastic Δt_compressible Δt_explicit_split Δt_implicit_split
+@info "Time steps:" Δt_anelastic Δt_compressible Δt_split
 
 # ## Simulations
 #
@@ -203,8 +204,8 @@ stop_time = 3000  # seconds
 simulation_anelastic = Simulation(model_anelastic; Δt=Δt_anelastic, stop_time)
 simulation_boussinesq = Simulation(model_boussinesq; Δt=Δt_anelastic, stop_time)
 simulation_compressible = Simulation(model_compressible; Δt=Δt_compressible, stop_time)
-simulation_explicit_split = Simulation(model_explicit_split; Δt=Δt_explicit_split, stop_time)
-simulation_implicit_split = Simulation(model_implicit_split; Δt=Δt_implicit_split, stop_time)
+simulation_explicit_split = Simulation(model_explicit_split; Δt=Δt_split, stop_time)
+simulation_implicit_split = Simulation(model_implicit_split; Δt=Δt_split, stop_time)
 
 # Progress callbacks:
 
@@ -240,10 +241,10 @@ function setup_output(simulation, model, filename)
     set!(θᵇᵍf, (x, z) -> θᵇᵍ(z))
     θ′ = θ - θᵇᵍf
 
-outputs = merge(model.velocities, (; θ′))
-simulation.output_writers[:jld2] = JLD2Writer(model, outputs; filename,
-                                              schedule = TimeInterval(100),
-                                              overwrite_existing = true)
+    outputs = merge(model.velocities, (; θ′))
+    simulation.output_writers[:jld2] = JLD2Writer(model, outputs; filename,
+                                                  schedule = TimeInterval(100),
+                                                  overwrite_existing = true)
     return nothing
 end
 
