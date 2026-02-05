@@ -97,6 +97,19 @@ jobs:
           repositories: |
             Breeze.jl
             BreezeBenchmarks
+      - name: Push results to BreezeBenchmarks repo
+        if: ${{ github.event_name == 'push' }}
+        run: |
+          git clone https://numterra-bot:${{ steps.generate_token.outputs.token }}@github.com/NumericalEarth/BreezeBenchmarks.git
+          cd BreezeBenchmarks
+          DIRNAME="benchmarks/by_branch/${{ github.head_ref || github.ref_name }}/${{ github.sha }}"
+          mkdir -p "${DIRNAME}"
+          cp -v ../benchmark_results.json "${DIRNAME}/."
+          git config --global user.name "numterra-bot[bot]"
+          git config --global user.email "242463128+numterra-bot[bot]@users.noreply.github.com"
+          git add .
+          git commit -m'Save benchmark results for commit ${{ github.ref }}'
+          git push -u origin main
       - uses: benchmark-action/github-action-benchmark@v1
         with:
           name: Breeze.jl Benchmarks
@@ -112,16 +125,3 @@ jobs:
           auto-push: ${{ github.event_name == 'push' }}
           max-items-in-chart: 50
           comment-on-alert: true
-      - name: Push results to BreezeBenchmarks repo
-        if: ${{ github.event_name == 'push' }}
-        run: |
-          git clone https://numterra-bot:${{ steps.generate_token.outputs.token }}@github.com/NumericalEarth/BreezeBenchmarks.git
-          cd BreezeBenchmarks
-          DIRNAME="benchmarks/by_branch/${{ github.head_ref || github.ref_name }}/${{ github.sha }}"
-          mkdir -p "${DIRNAME}"
-          cp -v ../benchmark_results.json "${DIRNAME}/."
-          git config --global user.name "numterra-bot[bot]"
-          git config --global user.email "242463128+numterra-bot[bot]@users.noreply.github.com"
-          git add .
-          git commit -m'Save benchmark results for commit ${{ github.ref }}'
-          git push -u origin main
