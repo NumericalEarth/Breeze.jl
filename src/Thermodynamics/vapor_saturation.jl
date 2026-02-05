@@ -300,8 +300,8 @@ equals the actual temperature and `T` is returned.
 - `maxiter`: Maximum number of iterations (default: 10)
 """
 @inline function dewpoint_temperature(pᵛ, T, constants, surface;
-                                       tolerance = 1e-4,
-                                       maxiter = 10)
+                                      tolerance = 1e-4,
+                                      maxiter = 10)
     # First guess: current temperature
     Tᵈ₁ = T
     pᵛ⁺₁ = saturation_vapor_pressure(Tᵈ₁, constants, surface)
