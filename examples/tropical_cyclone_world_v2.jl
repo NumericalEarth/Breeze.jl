@@ -152,7 +152,7 @@ Nx = Ny = 144     # 8 km spacing in 1152 km domain
 function paper_vertical_grid(H; scale_factor=4)
     # scale_factor=1 for paper resolution, =4 for testing
     z_faces = Float64[0.0]
-    
+
     # Region 1: levels in lowest 1 km
     n_levels_lower = 64 ÷ scale_factor  # 64 → 16 for scale_factor=4
     Δz₁ = 1000.0 / n_levels_lower  # 15.625 m → 62.5 m
@@ -160,12 +160,12 @@ function paper_vertical_grid(H; scale_factor=4)
         push!(z_faces, i * Δz₁)
     end
     z = 1000.0
-    
+
     # Region 2: Linear transition from 1 km to 3.5 km
     z_start, z_end = 1000.0, 3500.0
     Δz_start = Δz₁
     Δz_end = 500.0 * scale_factor  # 500 m → 2000 m
-    
+
     while z < z_end - 1e-6  # Small tolerance for floating point
         # Linear interpolation of Δz based on current position
         frac = (z - z_start) / (z_end - z_start)
@@ -173,14 +173,14 @@ function paper_vertical_grid(H; scale_factor=4)
         z = min(z + Δz, z_end)
         push!(z_faces, z)
     end
-    
+
     # Region 3: Constant spacing above 3.5 km to model top
     Δz₃ = 500.0 * scale_factor  # 500 m → 2000 m
     while z < H - 1e-6
         z = min(z + Δz₃, H)
         push!(z_faces, z)
     end
-    
+
     return z_faces
 end
 
@@ -332,12 +332,12 @@ forcing_params = (; Tₜ = FT(Tₜ), Q̇ = FT(Q̇), τ = FT(τᵣ), ρᵣ, cₚ 
     # Get temperature from model diagnostics
     @inbounds T = model_fields.T[i, j, k]
     @inbounds ρ = p.ρᵣ[i, j, k]
-    
+
     # Paper's piecewise T tendency (Eq. 1):
     # - T > Tₜ: constant cooling at -Q̇
     # - T ≤ Tₜ: Newtonian relaxation toward Tₜ
     ∂T∂t = ifelse(T > p.Tₜ, -p.Q̇, (p.Tₜ - T) / p.τ)
-    
+
     # Return energy forcing: F_ρe = ρ × cₚ × ∂T/∂t
     # Breeze will divide by (cᵖᵐ × Π) to get ρθ tendency
     return ρ * p.cₚ * ∂T∂t
@@ -423,13 +423,13 @@ pᵣ_array = Array(interior(pᵣ_field))
 function equilibrated_θ_profile(x, y, z, k, pᵣ_arr, θ_surface, T_tropopause, p_standard, kappa)
     # Get pressure at this level (use k index)
     p_local = pᵣ_arr[1, 1, k]
-    
+
     # Exner function
     Π = (p_local / p_standard)^kappa
-    
+
     # Temperature on dry adiabat
     T_adiabat = θ_surface * Π
-    
+
     if T_adiabat > T_tropopause
         # Troposphere: follow dry adiabat
         return θ_surface
@@ -457,7 +457,7 @@ for k in 1:Nz
         for i in 1:Nx
             # Add random perturbation in lowest 1 km
             perturbation = z < zδ ? δθ * (2 * rand() - 1) : 0.0
-            
+
             # Add warm-core vortex seed if enabled
             if seed_vortex && z < seed_height
                 x = x_nodes[i]
@@ -467,7 +467,7 @@ for k in 1:Nz
                 warm_core = seed_θ_anomaly * exp(-r^2 / (2 * seed_radius^2)) * (1 - z / seed_height)
                 perturbation += warm_core
             end
-            
+
             θᵢ_array[i, j, k] = θ_eq + perturbation
         end
     end
@@ -634,29 +634,29 @@ function update_figures(sim)
     if t_days < 0.5
         return nothing  # Skip early timesteps
     end
-    
+
     try
         surface_file = joinpath(experiment_dir, "surface.jld2")
         profile_file = joinpath(experiment_dir, "profiles.jld2")
-        
+
         if !isfile(surface_file)
             return nothing
         end
-        
+
         u_ts = FieldTimeSeries(surface_file, "u_surface")
         v_ts = FieldTimeSeries(surface_file, "v_surface")
         times = u_ts.times
         Nt = length(times)
-        
+
         if Nt < 2
             return nothing
         end
-        
+
         # Compute wind speed for all timesteps
         wind_speed(n) = sqrt.(Array(interior(u_ts[n])).^2 .+ Array(interior(v_ts[n])).^2)
         max_wind = [maximum(wind_speed(n)) for n in 1:Nt]
         times_hours = times ./ 3600
-        
+
         # --- Figure 1: Intensity plot ---
         title_case = β == 0 ? "Dry" : (β == 1 ? "Moist" : "Semidry")
         fig1 = Figure(size = (600, 400), fontsize = 14)
@@ -667,12 +667,12 @@ function update_figures(sim)
         lines!(ax1, times_hours, max_wind; linewidth = 2, color = :dodgerblue)
         scatter!(ax1, times_hours, max_wind; markersize = 4, color = :dodgerblue)
         save(joinpath(figures_dir, "intensity.png"), fig1)
-        
+
         # --- Figure 2: Surface wind snapshots ---
         x_km = Array(xnodes(grid, Center())) ./ 1e3
         y_km = Array(ynodes(grid, Center())) ./ 1e3
         U_max = max(1.0, maximum(max_wind))
-        
+
         fig2 = Figure(size = (1200, 400), fontsize = 12)
         indices = [1, max(1, Nt ÷ 2), Nt]
         for (i, n) in enumerate(indices)
@@ -689,7 +689,7 @@ function update_figures(sim)
         Label(fig2[0, :], "$title_case Tropical Cyclone World (β = $β) — Surface Wind Speed",
               fontsize = 16, tellwidth = false)
         save(joinpath(figures_dir, "surface_winds.png"), fig2)
-        
+
         # --- Figure 3: Profile evolution (if available) ---
         if isfile(profile_file)
             θ_avg_ts = FieldTimeSeries(profile_file, "θ_avg")
@@ -698,12 +698,12 @@ function update_figures(sim)
             prof_times = θ_avg_ts.times
             Nt_prof = length(prof_times)
             z_km = Array(znodes(grid, Center())) ./ 1e3
-            
+
             fig3 = Figure(size = (900, 400), fontsize = 14)
             axθ = Axis(fig3[1, 1]; xlabel = "θ (K)", ylabel = "z (km)", title = "Potential temperature")
             axu = Axis(fig3[1, 2]; xlabel = "u (m/s)", title = "Zonal wind")
             axv = Axis(fig3[1, 3]; xlabel = "v (m/s)", title = "Meridional wind")
-            
+
             prof_indices = [1, max(1, Nt_prof ÷ 2), Nt_prof]
             colors = [:blue, :green, :red]
             for (i, n) in enumerate(prof_indices)
@@ -716,13 +716,13 @@ function update_figures(sim)
             Label(fig3[0, :], "$title_case TC (β = $β) — Mean Profile Evolution", fontsize = 16, tellwidth = false)
             save(joinpath(figures_dir, "profiles.png"), fig3)
         end
-        
+
         @info "Updated all figures at t = $(prettytime(sim.model.clock.time))"
     catch e
         @warn "Figure update failed: $e"
         @warn "Stacktrace: $(catch_backtrace())"
     end
-    
+
     return nothing
 end
 
