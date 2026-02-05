@@ -70,6 +70,17 @@ For compressible dynamics, returns `:AcousticSSPRungeKutta3` (acoustic substeppi
 """
 default_timestepper(dynamics) = :SSPRungeKutta3
 
+"""
+    augment_timestepper_kwargs(dynamics, timestepper_kwargs)
+
+Augment time-stepper keyword arguments with dynamics-specific parameters.
+
+For `CompressibleDynamics` with `SplitExplicit`, passes the `SplitExplicit`
+configuration to the `AcousticSSPRungeKutta3` constructor.
+Default: returns `timestepper_kwargs` unchanged.
+"""
+augment_timestepper_kwargs(dynamics, timestepper_kwargs) = timestepper_kwargs
+
 #####
 ##### Pressure interface
 #####

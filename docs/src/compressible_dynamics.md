@@ -26,7 +26,7 @@ p = ρ R^m T .
 
 `CompressibleDynamics` supports two time discretization strategies controlled by the `time_discretization` keyword:
 
-- [`SplitExplicit`](@ref Breeze.CompressibleEquations.SplitExplicit): Acoustic substepping with separate slow/fast tendency splitting. This allows advective CFL time steps (~10-20 m/s) instead of acoustic CFL time steps (~340 m/s).
+- [`SplitExplicitTimeDiscretization`](@ref Breeze.CompressibleEquations.SplitExplicitTimeDiscretization): Acoustic substepping with separate slow/fast tendency splitting. This allows advective CFL time steps (~10-20 m/s) instead of acoustic CFL time steps (~340 m/s).
 
 - [`ExplicitTimeStepping`](@ref Breeze.CompressibleEquations.ExplicitTimeStepping): All tendencies computed together. The time step is limited by the acoustic CFL condition: ``Δt < Δx / c_s``.
 
@@ -143,9 +143,23 @@ For the potential temperature formulation (``χ = ρθ``), the compression sourc
 
 These time-averaged velocities are used for scalar (tracer) transport in the outer RK loop, ensuring mass-consistent advection.
 
-### Implicit vertical solve (planned)
+### Vertically implicit solve (optional)
 
-Both CM1 (`sound.F`) and WRF (`advance_w` in `module_small_step_em.F`) treat vertical acoustic propagation implicitly using a tridiagonal solver. This removes the vertical CFL restriction on the acoustic substep size, which can be severe when ``Δz \ll Δx``. Breeze currently uses an explicit vertical step; the implicit solve is planned for a future iteration.
+When ``Δz \ll Δx``, the explicit vertical acoustic step restricts the substep size ``Δτ < Δz / c_s``, which can be severe. Both CM1 (`sound.F`) and WRF (`advance_w` in `module_small_step_em.F`) treat vertical acoustic propagation implicitly.
+
+Breeze supports this via the optional [`VerticallyImplicit`](@ref Breeze.CompressibleEquations.VerticallyImplicit) type:
+
+```julia
+# Explicit vertical step (default):
+dynamics = CompressibleDynamics(time_discretization=SplitExplicitTimeDiscretization())
+model = AtmosphereModel(grid; dynamics)
+
+# Implicit vertical step with off-centering α = 0.5 (Crank-Nicolson):
+dynamics = CompressibleDynamics(time_discretization=SplitExplicitTimeDiscretization(VerticallyImplicit(0.5)))
+model = AtmosphereModel(grid; dynamics)
+```
+
+The implicit system couples the vertical momentum equation (which depends on ``∂ρ'/∂z``) with the continuity equation (which depends on ``∂(ρw)/∂z``). Eliminating ``ρ`` yields a tridiagonal system for ``ρw`` that is solved each substep via `BatchedTridiagonalSolver`. The off-centering parameter ``α`` controls acoustic damping: ``α = 0.5`` is Crank-Nicolson (second-order, undamped); ``α > 0.5`` damps vertically-propagating acoustic modes, following [Durran and Klemp (1983)](@cite DurranKlemp1983).
 
 ## Comparison with anelastic dynamics
 

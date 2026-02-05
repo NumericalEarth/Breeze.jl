@@ -2,7 +2,7 @@
 ##### Acoustic Substepping for CompressibleDynamics
 #####
 ##### Implements split-explicit time integration following CM1/Wicker-Skamarock,
-##### with optimizations from Oceananigans.SplitExplicitFreeSurface:
+##### with optimizations from Oceananigans.SplitExplicitTimeDiscretizationFreeSurface:
 ##### - On-the-fly pressure gradient computation
 ##### - Pre-converted kernel arguments
 ##### - Topology-aware operators (no halo filling between substeps)
@@ -23,12 +23,11 @@ using Adapt: Adapt, adapt
 
 Storage and parameters for acoustic substepping within each RK stage.
 
-Follows performance patterns from Oceananigans.SplitExplicitFreeSurface:
+Follows performance patterns from Oceananigans.SplitExplicitTimeDiscretizationFreeSurface:
 - Precomputed thermodynamic coefficients (ψ = Rᵐ T, c²) for on-the-fly pressure
 - Stage-frozen reference state (ρᵣ, χᵣ) for perturbation pressure gradient
 - Time-averaged velocity fields for scalar advection
 - Slow tendency storage for momentum, density, and thermodynamic variable
-- Vertical tridiagonal solver
 
 The acoustic substepping implements the forward-backward scheme from
 [Wicker and Skamarock (2002)](@cite WickerSkamarock2002) and
@@ -38,11 +37,14 @@ The acoustic substepping implements the forward-backward scheme from
 2. **Backward step**: Update density and thermodynamic variable using new velocities
 3. Accumulate time-averaged velocities for scalar transport
 
+The vertical acoustic step is either fully explicit (`vertical_time_discretization = nothing`)
+or vertically implicit (`vertical_time_discretization = VerticallyImplicit(α)`).
+
 Fields
 ======
 
-- `Ns`: Number of acoustic substeps per full time step
-- `α`: Implicit weight for vertical solve (0.5 for Crank-Nicolson)
+- `substeps`: Number of acoustic substeps per full time step
+- `vertical_time_discretization`: Vertical vertical_time_discretization strategy (`nothing` or [`VerticallyImplicit`](@ref))
 - `κᵈ`: Divergence damping coefficient (typically 0.05-0.1)
 - `ψ`: Pressure coefficient ψ = Rᵐ T, so p = ψ ρ (CenterField)
 - `c²`: Moist sound speed squared c² = γᵐ ψ (CenterField)
@@ -52,15 +54,15 @@ Fields
 - `Gˢχ`: Slow thermodynamic tendency (fixed during acoustic loop)
 - `ρᵣ`: Stage-frozen reference density
 - `χᵣ`: Stage-frozen reference thermodynamic variable (ρθ or ρe)
-- `vertical_solver`: BatchedTridiagonalSolver for w-ρ implicit coupling
-- `rhs`: Right-hand side storage for tridiagonal solve
+- `vertical_solver`: BatchedTridiagonalSolver for w-ρ implicit coupling (`nothing` when explicit)
+- `rhs`: Right-hand side storage for tridiagonal solve (`nothing` when explicit)
 """
-struct AcousticSubstepper{N, FT, CF, UF, VF, WF, TS, RHS}
+struct AcousticSubstepper{N, SS, FT, CF, UF, VF, WF, TS, RHS}
     # Number of acoustic substeps per full time step
-    Ns :: N
+    substeps :: N
 
-    # Implicitness parameter (Crank-Nicolson: α = 0.5)
-    α :: FT
+    # Vertical vertical_time_discretization: nothing (explicit) or VerticallyImplicit(α)
+    vertical_time_discretization :: SS
 
     # Divergence damping coefficient
     κᵈ :: FT
@@ -91,16 +93,16 @@ struct AcousticSubstepper{N, FT, CF, UF, VF, WF, TS, RHS}
     # Stage-frozen reference thermodynamic variable (ρθ or ρe)
     χᵣ :: CF
 
-    # Vertical tridiagonal solver for implicit w-ρ coupling
+    # Vertical tridiagonal solver for implicit w-ρ coupling (nothing when explicit)
     vertical_solver :: TS
 
-    # Right-hand side storage for tridiagonal solve
+    # Right-hand side storage for tridiagonal solve (nothing when explicit)
     rhs :: RHS
 end
 
 Adapt.adapt_structure(to, a::AcousticSubstepper) =
-    AcousticSubstepper(a.Ns,
-                       a.α,
+    AcousticSubstepper(a.substeps,
+                       a.vertical_time_discretization,
                        a.κᵈ,
                        adapt(to, a.ψ),
                        adapt(to, a.c²),
@@ -118,23 +120,16 @@ Adapt.adapt_structure(to, a::AcousticSubstepper) =
                        adapt(to, a.rhs))
 
 """
-    AcousticSubstepper(grid; Ns=6, α=0.5, κᵈ=0.05)
+    AcousticSubstepper(grid, split_explicit::SplitExplicitTimeDiscretization)
 
-Construct an `AcousticSubstepper` for acoustic substepping on `grid`.
-
-Keyword Arguments
-=================
-
-- `Ns`: Number of acoustic substeps per full time step. Default: 6
-- `α`: Implicitness parameter for vertical solve. Default: 0.5 (Crank-Nicolson)
-- `κᵈ`: Divergence damping coefficient. Default: 0.05
+Construct an `AcousticSubstepper` for acoustic substepping on `grid`,
+using parameters from `split_explicit`.
 """
-function AcousticSubstepper(grid; Ns::N=6, α=0.5, κᵈ=0.05) where N
+function AcousticSubstepper(grid, split_explicit::SplitExplicitTimeDiscretization)
+    Ns = split_explicit.substeps
+    vertical_time_discretization = split_explicit.vertical_time_discretization
     FT = eltype(grid)
-    arch = architecture(grid)
-
-    α = convert(FT, α)
-    κᵈ = convert(FT, κᵈ)
+    κᵈ = convert(FT, split_explicit.κᵈ)
 
     # Thermodynamic coefficients
     ψ = CenterField(grid)
@@ -162,13 +157,11 @@ function AcousticSubstepper(grid; Ns::N=6, α=0.5, κᵈ=0.05) where N
     # Stage-frozen reference thermodynamic variable
     χᵣ = CenterField(grid)
 
-    # Vertical tridiagonal solver
-    vertical_solver = build_acoustic_vertical_solver(grid)
+    # Vertical tridiagonal solver (only allocated for implicit vertical stepping)
+    vertical_solver = build_acoustic_vertical_solver(grid, vertical_time_discretization)
+    rhs = build_acoustic_vertical_rhs(grid, vertical_time_discretization)
 
-    # RHS storage for tridiagonal solve
-    rhs = ZFaceField(grid)
-
-    return AcousticSubstepper(Ns, α, κᵈ,
+    return AcousticSubstepper(Ns, vertical_time_discretization, κᵈ,
                               ψ, c²,
                               ū, v̄, w̄,
                               Gˢρu, Gˢρv, Gˢρw,
@@ -178,10 +171,14 @@ function AcousticSubstepper(grid; Ns::N=6, α=0.5, κᵈ=0.05) where N
                               rhs)
 end
 
+# No vertical solver or RHS for explicit vertical stepping
+build_acoustic_vertical_solver(grid, ::Nothing) = nothing
+build_acoustic_vertical_rhs(grid, ::Nothing) = nothing
+
 """
 Build the vertical tridiagonal solver for the implicit w-ρ coupling.
 """
-function build_acoustic_vertical_solver(grid)
+function build_acoustic_vertical_solver(grid, ::VerticallyImplicit)
     arch = architecture(grid)
     FT = eltype(grid)
     Nx, Ny, Nz = size(grid)
@@ -199,6 +196,8 @@ function build_acoustic_vertical_solver(grid)
                                     scratch,
                                     tridiagonal_direction = ZDirection())
 end
+
+build_acoustic_vertical_rhs(grid, ::VerticallyImplicit) = ZFaceField(grid)
 
 #####
 ##### Acoustic substep count per RK stage (following CM1)
@@ -499,6 +498,201 @@ end
 end
 
 #####
+##### Horizontal-only density update (for implicit vertical vertical_time_discretization)
+#####
+
+using Oceananigans.Operators: δxᶜᵃᵃ, δyᵃᶜᵃ, Ax_qᶠᶜᶜ, Ay_qᶜᶠᶜ, Vᶜᶜᶜ
+
+"""
+$(TYPEDSIGNATURES)
+
+Update density using only horizontal mass flux divergence.
+
+Used when the vertical density update is handled inside the implicit w-ρ solve.
+"""
+function acoustic_density_horizontal_step!(model, substepper, Δτ)
+    grid = model.grid
+    arch = architecture(grid)
+
+    launch!(arch, grid, :xyz, _acoustic_density_horizontal_step!,
+            model.dynamics.density, grid, Δτ,
+            model.momentum.ρu, model.momentum.ρv,
+            substepper.ρᵣ, substepper.κᵈ, substepper.Gˢρ)
+
+    return nothing
+end
+
+@kernel function _acoustic_density_horizontal_step!(ρ, grid, Δτ, ρu, ρv, ρᵣ, κᵈ, Gˢρ)
+    i, j, k = @index(Global, NTuple)
+
+    @inbounds begin
+        # Horizontal mass flux divergence only: ∂(ρu)/∂x + ∂(ρv)/∂y
+        Vⁱ = Vᶜᶜᶜ(i, j, k, grid)
+        div_m_h = (δxᶜᵃᵃ(i, j, k, grid, Ax_qᶠᶜᶜ, ρu) +
+                   δyᵃᶜᵃ(i, j, k, grid, Ay_qᶜᶠᶜ, ρv)) / Vⁱ
+
+        # Density update: ∂ₜρ = -∇ₕ·m + Gˢρ
+        ρ[i, j, k] += Δτ * (-div_m_h + Gˢρ[i, j, k])
+
+        # Divergence damping
+        ρ[i, j, k] -= κᵈ * (ρ[i, j, k] - ρᵣ[i, j, k])
+    end
+end
+
+#####
+##### Vertically implicit w-ρ solve
+#####
+
+using Oceananigans.Operators: Δzᶜᶜᶜ, Δzᶜᶜᶠ, δzᵃᵃᶠ, δzᵃᵃᶜ, Az_qᶜᶜᶠ
+using Oceananigans.Solvers: solve!
+
+"""
+$(TYPEDSIGNATURES)
+
+Compute tridiagonal coefficients for the vertically implicit w-ρ solve.
+
+The tridiagonal system arises from coupling the vertical momentum equation
+(which depends on ∂ρ'/∂z) with the continuity equation (which depends on ∂(ρw)/∂z).
+Eliminating ρ yields a tridiagonal system for ρw.
+
+Following CM1 (`sound.F`, lines 661-718), the coefficients have an α² Δτ² factor
+from the product of implicit weights in the w and ρ equations.
+
+Called once per RK stage (coefficients depend only on frozen quantities).
+"""
+function compute_implicit_vertical_coefficients!(substepper, Δτ)
+    solver = substepper.vertical_solver
+    α = substepper.vertical_time_discretization.α
+    α² = α * α
+    grid = substepper.ψ.grid
+    arch = architecture(grid)
+
+    launch!(arch, grid, :xyz, _compute_implicit_vertical_coefficients!,
+            solver.a, solver.b, solver.c,
+            grid, α², Δτ, substepper.ψ)
+
+    return nothing
+end
+
+@kernel function _compute_implicit_vertical_coefficients!(lower, diag, upper,
+                                                          grid, α², Δτ, ψ)
+    i, j, k = @index(Global, NTuple)
+    Nz = size(grid, 3)
+
+    @inbounds begin
+        # Grid spacings
+        Δzᶠ = Δzᶜᶜᶠ(i, j, k, grid)  # Face spacing (between centers k-1 and k)
+
+        # Coupling coefficient: α² Δτ² ψ_face / Δz_face
+        ψᶠ = ℑzᵃᵃᶠ(i, j, k, grid, ψ)
+        Q = α² * Δτ * Δτ * ψᶠ / Δzᶠ
+
+        if k == 1 || k == Nz + 1
+            # Boundary: w = 0 at top and bottom
+            lower[i, j, k] = 0
+            diag[i, j, k] = 1
+            upper[i, j, k] = 0
+        else
+            # Interior: coupling to ρw at k-1, k, k+1
+            Δzᶜk   = Δzᶜᶜᶜ(i, j, k, grid)     # Center spacing at k (between faces k and k+1)
+            Δzᶜkm1 = Δzᶜᶜᶜ(i, j, k - 1, grid)  # Center spacing at k-1
+
+            # Lower diagonal: coupling to (ρw)_{k-1} via ρ at center k-1
+            lower[i, j, k] = -Q / Δzᶜkm1
+
+            # Upper diagonal: coupling to (ρw)_{k+1} via ρ at center k
+            upper[i, j, k] = -Q / Δzᶜk
+
+            # Diagonal: self-coupling
+            diag[i, j, k] = 1 + Q * (1 / Δzᶜk + 1 / Δzᶜkm1)
+        end
+    end
+end
+
+"""
+$(TYPEDSIGNATURES)
+
+Compute RHS of the tridiagonal system for vertical momentum and solve.
+
+The RHS includes:
+1. Current ρw
+2. Off-centered explicit vertical pressure gradient and buoyancy
+3. Implicit vertical pressure gradient using partially-updated density (after horizontal step)
+
+After solving for (ρw)^{n+1}, updates density with the vertical mass flux divergence.
+"""
+function acoustic_implicit_vertical_step!(model, substepper, Δτ, g)
+    grid = model.grid
+    arch = architecture(grid)
+    α = substepper.vertical_time_discretization.α
+    β = 1 - α
+    rhs = substepper.rhs
+
+    # Build the RHS of the tridiagonal system
+    launch!(arch, grid, :xyz, _compute_implicit_vertical_rhs!,
+            rhs, grid, Δτ, α, β, g,
+            model.momentum.ρw,
+            model.dynamics.density, substepper.ρᵣ, substepper.ψ)
+
+    # Solve the tridiagonal system: A (ρw)^{n+1} = rhs
+    # Note: the solver handles k=1:Nz; the top face k=Nz+1 must be set to 0
+    solve!(model.momentum.ρw, substepper.vertical_solver, rhs)
+
+    # Enforce w=0 at top boundary (k=Nz+1 is outside the solver's range)
+    Nz = size(grid, 3)
+    ρw = model.momentum.ρw
+    view(parent(ρw), :, :, Nz + 1 + ρw.data.offsets[3]) .= 0
+
+    # Update density with the vertical mass flux divergence using new ρw
+    launch!(arch, grid, :xyz, _acoustic_density_vertical_step!,
+            model.dynamics.density, grid, Δτ,
+            model.momentum.ρw)
+
+    return nothing
+end
+
+@kernel function _compute_implicit_vertical_rhs!(rhs, grid, Δτ, α, β, g,
+                                                  ρw, ρ, ρᵣ, ψ)
+    i, j, k = @index(Global, NTuple)
+    Nz = size(grid, 3)
+
+    @inbounds begin
+        if k == 1 || k == Nz + 1
+            # Boundary: w = 0
+            rhs[i, j, k] = 0
+        else
+            # Perturbation pressure gradient at face k: ψ ∂ρ'/∂z
+            ψᶠ = ℑzᵃᵃᶠ(i, j, k, grid, ψ)
+            ∂zρ′ = ∂zᶜᶜᶠ(i, j, k, grid, ρ) - ∂zᶜᶜᶠ(i, j, k, grid, ρᵣ)
+            ∂zp′ = ψᶠ * ∂zρ′
+
+            # Perturbation buoyancy at face k: -g ρ'
+            ρ′ᶠ = ℑzᵃᵃᶠ(i, j, k, grid, ρ) - ℑzᵃᵃᶠ(i, j, k, grid, ρᵣ)
+
+            # Vertical force: -∂p'/∂z - g ρ'
+            F_vert = -∂zp′ - g * ρ′ᶠ
+
+            # RHS = current ρw + full Δτ vertical force
+            # (The tridiagonal matrix handles the implicit correction)
+            rhs[i, j, k] = ρw[i, j, k] + Δτ * F_vert
+        end
+    end
+end
+
+@kernel function _acoustic_density_vertical_step!(ρ, grid, Δτ, ρw)
+    i, j, k = @index(Global, NTuple)
+
+    @inbounds begin
+        # Vertical mass flux divergence: ∂(ρw)/∂z at cell center
+        Vⁱ = Vᶜᶜᶜ(i, j, k, grid)
+        div_ρw_z = δzᵃᵃᶜ(i, j, k, grid, Az_qᶜᶜᶠ, ρw) / Vⁱ
+
+        # Update density with vertical divergence
+        ρ[i, j, k] -= Δτ * div_ρw_z
+    end
+end
+
+#####
 ##### Accumulate time-averaged velocities
 #####
 
@@ -511,11 +705,11 @@ Time-averaged velocities from the acoustic loop are used for advection
 of scalars (θ, moisture, tracers) in the outer RK loop, ensuring
 mass-consistent transport following [Klemp, Skamarock, and Dudhia (2007)](@cite KlempSkamarockDudhia2007).
 """
-function accumulate_time_averaged_velocities!(substepper, model, Nsₛₜₐgₑ)
+function accumulate_time_averaged_velocities!(substepper, model, Nτ)
     grid = model.grid
     arch = architecture(grid)
 
-    χᵗ = 1 / Nsₛₜₐgₑ  # Uniform time-averaging weight
+    χᵗ = 1 / Nτ  # Uniform time-averaging weight
 
     launch!(arch, grid, :xyz, _accumulate_time_averaged_velocities!,
             substepper.ū, substepper.v̄, substepper.w̄,
@@ -599,12 +793,12 @@ Arguments
 - `Δt`: Time step for this RK stage (α × full Δt)
 """
 function acoustic_substep_loop!(model, substepper, stage, Δt)
-    Ns = substepper.Ns
+    Ns = substepper.substeps
     g = model.thermodynamic_constants.gravitational_acceleration
 
     # Number of substeps for this RK stage
-    Nsₛₜₐgₑ = acoustic_substeps_per_stage(stage, Ns)
-    Δτ = Δt / Nsₛₜₐgₑ  # Acoustic substep time step
+    Nτ = acoustic_substeps_per_stage(stage, Ns)
+    Δτ = Δt / Nτ  # Acoustic substep time step
 
     # === PRECOMPUTE PHASE (once per RK stage) ===
     # Note: prepare_acoustic_cache! is called before this function
@@ -614,29 +808,91 @@ function acoustic_substep_loop!(model, substepper, stage, Δt)
     # Apply slow momentum tendencies to momentum ONCE for the full RK stage
     apply_slow_momentum_tendencies!(model, substepper, Δt)
 
+    # Compute implicit vertical coefficients (once per stage, if implicit)
+    compute_implicit_vertical_coefficients!(substepper, Δτ, substepper.vertical_time_discretization)
+
     # Initialize time-averaged velocities
     fill!(substepper.ū, 0)
     fill!(substepper.v̄, 0)
     fill!(substepper.w̄, 0)
 
     # === ACOUSTIC SUBSTEP LOOP ===
-    for n = 1:Nsₛₜₐgₑ
-        # (A) Forward step: update momentum from fast pressure gradient + buoyancy
-        acoustic_horizontal_momentum_step!(model, substepper, Δτ)
-        acoustic_vertical_momentum_step!(model, substepper, Δτ, g)
-
-        # (B) Update velocities from momentum
-        update_velocities_from_momentum!(model)
-
-        # (C) Backward step: update density using new momentum (mass flux divergence)
-        acoustic_density_step!(model, substepper, Δτ)
-
-        # (D) Backward step: update thermodynamic variable using new momentum
-        acoustic_thermodynamic_step!(model, substepper, Δτ)
-
-        # (E) Accumulate time-averaged velocities for scalar transport
-        accumulate_time_averaged_velocities!(substepper, model, Nsₛₜₐgₑ)
+    for n = 1:Nτ
+        acoustic_substep!(model, substepper, Δτ, g, Nτ, substepper.vertical_time_discretization)
     end
+
+    return nothing
+end
+
+# No-op for explicit vertical vertical_time_discretization
+compute_implicit_vertical_coefficients!(substepper, Δτ, ::Nothing) = nothing
+
+# Compute coefficients for implicit vertical vertical_time_discretization
+function compute_implicit_vertical_coefficients!(substepper, Δτ, vis::VerticallyImplicit)
+    compute_implicit_vertical_coefficients!(substepper, Δτ)
+    return nothing
+end
+
+#####
+##### Explicit acoustic substep (vertical_time_discretization = nothing)
+#####
+
+"""
+Perform one acoustic substep with explicit vertical stepping.
+"""
+function acoustic_substep!(model, substepper, Δτ, g, Nτ, ::Nothing)
+    # (A) Forward step: update momentum from fast pressure gradient + buoyancy
+    acoustic_horizontal_momentum_step!(model, substepper, Δτ)
+    acoustic_vertical_momentum_step!(model, substepper, Δτ, g)
+
+    # (B) Update velocities from momentum
+    update_velocities_from_momentum!(model)
+
+    # (C) Backward step: update density using new momentum (full 3D mass flux divergence)
+    acoustic_density_step!(model, substepper, Δτ)
+
+    # (D) Backward step: update thermodynamic variable using new momentum
+    acoustic_thermodynamic_step!(model, substepper, Δτ)
+
+    # (E) Accumulate time-averaged velocities for scalar transport
+    accumulate_time_averaged_velocities!(substepper, model, Nτ)
+
+    return nothing
+end
+
+#####
+##### Implicit acoustic substep (vertical_time_discretization = VerticallyImplicit)
+#####
+
+"""
+Perform one acoustic substep with vertically implicit w-ρ solve.
+
+The step ordering differs from the explicit case:
+1. Horizontal momentum update (explicit)
+2. Horizontal density update (explicit, using new ρu, ρv)
+3. Implicit vertical w-ρ solve (tridiagonal) + vertical density update
+4. Update velocities from momentum
+5. Thermodynamic variable update (backward step)
+6. Accumulate time-averaged velocities
+"""
+function acoustic_substep!(model, substepper, Δτ, g, Nτ, ::VerticallyImplicit)
+    # (A) Forward step: update horizontal momentum from fast pressure gradient
+    acoustic_horizontal_momentum_step!(model, substepper, Δτ)
+
+    # (B) Update density with horizontal divergence only (before implicit vertical solve)
+    acoustic_density_horizontal_step!(model, substepper, Δτ)
+
+    # (C) Implicit vertical w-ρ solve: builds RHS, solves tridiagonal, updates density vertically
+    acoustic_implicit_vertical_step!(model, substepper, Δτ, g)
+
+    # (D) Update velocities from momentum
+    update_velocities_from_momentum!(model)
+
+    # (E) Backward step: update thermodynamic variable using new momentum
+    acoustic_thermodynamic_step!(model, substepper, Δτ)
+
+    # (F) Accumulate time-averaged velocities for scalar transport
+    accumulate_time_averaged_velocities!(substepper, model, Nτ)
 
     return nothing
 end

@@ -14,11 +14,11 @@ Fields
 - `pressure`: Diagnostic pressure field p = ρ Rᵐ T
 - `standard_pressure`: Reference pressure pˢᵗ for potential temperature (default 10⁵ Pa)
 - `surface_pressure`: Mean pressure at the bottom of the atmosphere p₀
-- `time_discretization`: Time discretization scheme ([`SplitExplicit`](@ref) or [`ExplicitTimeStepping`](@ref))
+- `time_discretization`: Time discretization scheme ([`SplitExplicitTimeDiscretization`](@ref) or [`ExplicitTimeStepping`](@ref))
 
 The `time_discretization` determines how tendencies are computed and which
 time-stepper is used:
-- [`SplitExplicit`](@ref): Acoustic substepping with separate slow/fast tendencies
+- [`SplitExplicitTimeDiscretization`](@ref): Acoustic substepping with separate slow/fast tendencies
 - [`ExplicitTimeStepping`](@ref): All tendencies computed together (small Δt required)
 """
 struct CompressibleDynamics{D, P, FT, TD}
@@ -26,7 +26,7 @@ struct CompressibleDynamics{D, P, FT, TD}
     pressure :: P             # p = ρ R^m T (diagnostic)
     standard_pressure :: FT   # pˢᵗ (reference pressure for potential temperature)
     surface_pressure :: FT    # p₀ (mean pressure at the bottom of the atmosphere)
-    time_discretization :: TD # SplitExplicit or ExplicitTimeStepping
+    time_discretization :: TD # SplitExplicitTimeDiscretization or ExplicitTimeStepping
 end
 
 """
@@ -40,12 +40,12 @@ Keyword Arguments
 
 - `standard_pressure`: Reference pressure for potential temperature (default: 10⁵ Pa)
 - `surface_pressure`: Mean surface pressure (default: 101325.0 Pa)
-- `time_discretization`: Time discretization scheme. Default: [`SplitExplicit`](@ref)
+- `time_discretization`: Time discretization scheme. Default: [`SplitExplicitTimeDiscretization`](@ref)
   for acoustic substepping. Use [`ExplicitTimeStepping`](@ref) for standard explicit.
 """
 function CompressibleDynamics(; standard_pressure = 1e5,
                                 surface_pressure = 101325.0,
-                                time_discretization::TD = SplitExplicit()) where TD
+                                time_discretization::TD = SplitExplicitTimeDiscretization()) where TD
     FT = promote_type(typeof(standard_pressure), typeof(surface_pressure))
     pˢᵗ = convert(FT, standard_pressure)
     p₀ = convert(FT, surface_pressure)
@@ -179,20 +179,29 @@ $(TYPEDSIGNATURES)
 
 Return the default timestepper for `CompressibleDynamics` based on its `time_discretization`.
 
-- [`SplitExplicit`](@ref): Returns `:AcousticSSPRungeKutta3` for acoustic substepping
+- [`SplitExplicitTimeDiscretization`](@ref): Returns `:AcousticSSPRungeKutta3` for acoustic substepping
 - [`ExplicitTimeStepping`](@ref): Returns `:SSPRungeKutta3` for standard explicit time-stepping
 """
 AtmosphereModels.default_timestepper(dynamics::CompressibleDynamics) =
     default_timestepper(dynamics.time_discretization)
 
-default_timestepper(::SplitExplicit) = :AcousticSSPRungeKutta3
+default_timestepper(::SplitExplicitTimeDiscretization) = :AcousticSSPRungeKutta3
 default_timestepper(::ExplicitTimeStepping) = :SSPRungeKutta3
+
+function AtmosphereModels.augment_timestepper_kwargs(dynamics::CompressibleDynamics, timestepper_kwargs)
+    td = dynamics.time_discretization
+    if td isa SplitExplicitTimeDiscretization
+        return merge((; split_explicit = td), timestepper_kwargs)
+    else
+        return timestepper_kwargs
+    end
+end
 
 #####
 ##### Show methods
 #####
 
-Base.summary(::SplitExplicit) = "SplitExplicit"
+Base.summary(::SplitExplicitTimeDiscretization) = "SplitExplicitTimeDiscretization"
 Base.summary(::ExplicitTimeStepping) = "ExplicitTimeStepping"
 
 function Base.summary(dynamics::CompressibleDynamics)

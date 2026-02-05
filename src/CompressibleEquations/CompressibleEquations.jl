@@ -29,8 +29,9 @@ export
     CompressibleDynamics,
     CompressibleModel,
     AcousticSubstepper,
-    SplitExplicit,
-    ExplicitTimeStepping
+    SplitExplicitTimeDiscretization,
+    ExplicitTimeStepping,
+    VerticallyImplicit
 
 using DocStringExtensions: TYPEDEF, TYPEDSIGNATURES
 using Adapt: Adapt, adapt

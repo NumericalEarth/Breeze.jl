@@ -103,9 +103,9 @@ pˢᵗ = 1e5  # Standard pressure for potential temperature (Pa)
 # We use the anelastic formulation with liquid-ice potential temperature thermodynamics:
 
 reference_state = ReferenceState(grid, constants; surface_pressure=p₀, potential_temperature=θ₀, standard_pressure=pˢᵗ)
-dynamics_anelastic = AnelasticDynamics(reference_state)
+anelastic_dynamics = AnelasticDynamics(reference_state)
 advection = WENO(minimum_buffer_upwind_order=3)
-model_anelastic = AtmosphereModel(grid; dynamics=dynamics_anelastic, advection)
+model_anelastic = AtmosphereModel(grid; dynamics=anelastic_dynamics, advection)
 
 set!(model_anelastic, θ=θᵢ, u=U)
 
@@ -120,43 +120,35 @@ reference_state_const = ReferenceState(grid, constants; surface_pressure=p₀, p
 ρ_surface = adiabatic_hydrostatic_density(0, p₀, θ₀, pˢᵗ, constants)
 set!(reference_state_const.density, ρ_surface)
 
-dynamics_boussinesq = AnelasticDynamics(reference_state_const)
-model_boussinesq = AtmosphereModel(grid; dynamics=dynamics_boussinesq, advection)
+boussinesq_dynamics = AnelasticDynamics(reference_state_const)
+model_boussinesq = AtmosphereModel(grid; dynamics=boussinesq_dynamics, advection)
 
 set!(model_boussinesq, θ=θᵢ, u=U)
 
 # ## Case 3: Compressible dynamics (fully explicit)
 #
 # Fully compressible dynamics without acoustic substepping.
-# This requires smaller time steps due to the acoustic CFL constraint.
-# We explicitly request `SSPRungeKutta3` to override the default acoustic substepping.
+# Using `ExplicitTimeStepping()` tells the model to use standard `SSPRungeKutta3`
+# with a time step limited by the acoustic CFL.
 
-dynamics_compressible = CompressibleDynamics(surface_pressure=p₀, standard_pressure=pˢᵗ)
-model_compressible = AtmosphereModel(grid;
-                                     dynamics = dynamics_compressible,
-                                     advection,
-                                     timestepper = :SSPRungeKutta3)  # Override default
+compressible_dynamics = CompressibleDynamics(surface_pressure=p₀, standard_pressure=pˢᵗ,
+                                             time_discretization=ExplicitTimeStepping())
+model_compressible = AtmosphereModel(grid; dynamics=compressible_dynamics, advection)
 
 set!(model_compressible; θ=θᵢ, u=U, qᵗ=0, ρ=ρᵢ)
 
-# ## Case 4: Compressible dynamics with acoustic substepping (work in progress)
+# ## Case 4: Compressible dynamics with acoustic substepping
 #
-# NOTE: Acoustic substepping is currently under development. The perturbation-based
-# formulation requires a time-invariant hydrostatic reference density profile to
-# maintain stability, which is not yet implemented. For now, we use the explicit
-# compressible model for all compressible cases.
-#
-# TODO: Implement stable acoustic substepping following CM1's approach:
-# - Use pressure perturbation as prognostic variable instead of density
-# - Store time-invariant reference profiles for hydrostatic balance
-# - Implement vertically-implicit solve for w-p coupling
+# The split-explicit formulation: acoustic substepping handles fast pressure
+# waves while the outer RK3 loop handles slow advective modes. The vertically implicit
+# solve removes the vertical CFL restriction, allowing time steps comparable to the
+# anelastic model.
 
-# For now, we reuse the explicit compressible model for the "acoustic" case
-dynamics_acoustic = CompressibleDynamics(surface_pressure=p₀, standard_pressure=pˢᵗ)
-model_acoustic = AtmosphereModel(grid;
-                                 dynamics = dynamics_acoustic,
-                                 advection,
-                                 timestepper = :SSPRungeKutta3)  # Use explicit RK3, same as model_compressible
+vertically_implicit_split_discretization = SplitExplicitTimeDiscretization(VerticallyImplicit(0.5), substeps=6)
+explicit_split_discretization = SplitExplicitTimeDiscretization(substeps=6)
+acoustic_substepping_compressible_dynamics = CompressibleDynamics(surface_pressure=p₀, standard_pressure=pˢᵗ,
+                                                                 time_discretization=vertically_implicit_split_discretization)
+model_acoustic = AtmosphereModel(grid; dynamics=acoustic_substepping_compressible_dynamics, advection)
 
 set!(model_acoustic; θ=θᵢ, u=U, qᵗ=0, ρ=ρᵢ)
 
@@ -179,9 +171,11 @@ cfl = 0.5
 Δt_anelastic = cfl * min(Δx, Δz) / U  # Based on advective velocity
 Δt_compressible = cfl * min(Δx, Δz) / (cₛ + U)  # Based on sound speed + advection
 
-# The "acoustic" case uses explicit time stepping (same as compressible case)
-# until acoustic substepping is fully implemented
-Δt_acoustic = Δt_compressible
+# The split-explicit case can use much larger time steps than the explicit compressible case.
+# With the vertically implicit solve, the acoustic CFL is only horizontal:
+# Δτ = Δt / Ns, need Δτ < Δx / cₛ, so Δt < Ns * Δx / cₛ ≈ 6 * 1000 / 347 ≈ 17s
+# We use a conservative Δt limited by advection, same as the anelastic models.
+Δt_acoustic = cfl * Δx / U  # Based on advective CFL, NOT sound speed
 
 @info "Time steps:" Δt_anelastic Δt_compressible Δt_acoustic
 
@@ -252,7 +246,7 @@ run!(simulation_boussinesq)
 @info "Running fully explicit compressible simulation..."
 run!(simulation_compressible)
 
-@info "Running compressible (second instance, for comparison)..."
+@info "Running compressible with acoustic substepping..."
 run!(simulation_acoustic)
 
 # ## Results: Comparison of dynamical formulations
