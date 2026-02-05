@@ -195,7 +195,7 @@ function run_benchmark_simulation(model;
     end
 
     # Periodic output: only save the lowest level (2D slices) to reduce I/O cost
-    simulation.output_writers[:surface] = JLD2OutputWriter(model, outputs;
+    simulation.output_writers[:surface] = JLD2Writer(model, outputs;
         filename = output_filename,
         indices = (:, :, 1),
         schedule = TimeInterval(output_interval),
@@ -203,7 +203,7 @@ function run_benchmark_simulation(model;
     )
 
     # Final snapshot: save full 3D fields at the end of the simulation
-    simulation.output_writers[:final_3d] = JLD2OutputWriter(model, outputs;
+    simulation.output_writers[:final_3d] = JLD2Writer(model, outputs;
         filename = final_filename,
         schedule = IterationInterval(typemax(Int)),  # Never triggers during run
         overwrite_existing = true

@@ -21,7 +21,7 @@ using Oceananigans
 using Oceananigans.Architectures: GPU
 using Oceananigans.Units
 using Oceananigans.TimeSteppers: time_step!
-using Oceananigans.OutputWriters: JLD2OutputWriter, IterationInterval, TimeInterval, write_output!
+using Oceananigans.OutputWriters: JLD2Writer, IterationInterval, TimeInterval, write_output!
 using Oceananigans.Simulations: SpecifiedTimes
 
 using Breeze
