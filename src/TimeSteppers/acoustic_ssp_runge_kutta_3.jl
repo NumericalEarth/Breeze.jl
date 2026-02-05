@@ -196,75 +196,26 @@ $(TYPEDSIGNATURES)
 
 Compute slow tendencies for density and thermodynamic variable.
 
-For split-explicit time-stepping, the density equation is entirely handled
-by the acoustic substep loop (backward step using mass flux divergence),
-so the slow density tendency is zero (or contains only mass source terms).
+In the perturbation-variable approach, the slow tendencies are simply the full
+RHS ``R^t`` evaluated at the stage-level state. No correction is needed because
+the acoustic loop advances perturbation variables, not full fields.
 
-The slow thermodynamic tendency is the full tendency corrected to remove
-the fast acoustic flux divergence term that will be computed in the
-acoustic substep loop. Following [Klemp, Skamarock, and Dudhia (2007)](@cite KlempSkamarockDudhia2007),
-the slow tendency is effectively the advective-form transport plus physics:
-
-``G^s_χ = G^{\\mathrm{full}}_χ + \\bar{s} \\, \\boldsymbol{∇·m}``
-
-where ``\\bar{s} = \\bar{χ}/\\bar{ρ}`` is the stage-frozen specific thermodynamic
-variable and ``\\boldsymbol{∇·m}`` is the mass flux divergence at the stage start.
+- ``G^s_ρ = -\\boldsymbol{∇·m}^t``: full density tendency (continuity equation)
+- ``G^s_χ``: full thermodynamic tendency (advection + physics)
 """
 function compute_slow_scalar_tendencies!(model)
     substepper = model.timestepper.substepper
     grid = model.grid
     arch = architecture(grid)
 
-    # Slow density tendency is zero for dry dynamics (the full continuity
-    # equation is handled by the acoustic backward step)
-    fill!(substepper.Gˢρ, 0)
+    # Compute Gˢρ = -∇·m^t (full density tendency at stage start)
+    compute_dynamics_tendency!(model)
+    χ_ρ_name = :ρ
+    Gρ_full = getproperty(model.timestepper.Gⁿ, χ_ρ_name)
+    parent(substepper.Gˢρ) .= parent(Gρ_full)
 
-    # Compute full thermodynamic tendency into Gˢχ using existing tendency machinery.
-    # The full tendency includes advection (flux form), diffusion, microphysics, forcing.
-    compute_full_thermodynamic_tendency_into!(substepper.Gˢχ, model)
-
-    # Correct the slow thermodynamic tendency by adding back the fast flux divergence
-    # term that the acoustic loop will handle: Gˢχ += s̄ ∇·m
-    # This converts from flux-form to advective-form transport.
-    launch!(arch, grid, :xyz, _correct_slow_thermodynamic_tendency!,
-            substepper.Gˢχ, grid,
-            substepper.χᵣ, substepper.ρᵣ,
-            model.momentum.ρu, model.momentum.ρv, model.momentum.ρw)
-
-    return nothing
-end
-
-@kernel function _correct_slow_thermodynamic_tendency!(Gˢχ, grid, χᵣ, ρᵣ, ρu, ρv, ρw)
-    i, j, k = @index(Global, NTuple)
-
-    @inbounds begin
-        # Stage-frozen specific thermodynamic variable: s̄ = χ̄ / ρ̄
-        s̄ = χᵣ[i, j, k] / ρᵣ[i, j, k]
-
-        # Mass flux divergence at stage start
-        div_m = divᶜᶜᶜ(i, j, k, grid, ρu, ρv, ρw)
-
-        # Correct: Gˢχ += s̄ ∇·m
-        # This removes the acoustic flux divergence from the full flux-form tendency,
-        # leaving only the advective-form transport plus physics terms.
-        Gˢχ[i, j, k] += s̄ * div_m
-    end
-end
-
-"""
-$(TYPEDSIGNATURES)
-
-Compute the full thermodynamic tendency into a target field.
-
-This calls the formulation-specific tendency computation and stores the
-result in `target`, which is typically the substepper's `Gˢχ` field.
-"""
-function compute_full_thermodynamic_tendency_into!(target, model)
-    grid = model.grid
-    arch = grid.architecture
+    # Compute Gˢχ = full thermodynamic tendency (no correction needed)
     Gⁿ = model.timestepper.Gⁿ
-
-    # Use the existing tendency computation infrastructure
     common_args = (
         model.dynamics,
         model.formulation,
@@ -278,15 +229,11 @@ function compute_full_thermodynamic_tendency_into!(target, model)
         model.clock,
         fields(model))
 
-    # Compute the thermodynamic tendency using the formulation's method
-    # This writes into the standard Gⁿ storage
     AtmosphereModels.compute_thermodynamic_tendency!(model, common_args)
 
-    # Copy the result from the standard storage to our target field.
-    # The thermodynamic tendency field name depends on the formulation.
     χ_name = AtmosphereModels.thermodynamic_density_name(model.formulation)
     Gχ_full = getproperty(Gⁿ, χ_name)
-    parent(target) .= parent(Gχ_full)
+    parent(substepper.Gˢχ) .= parent(Gχ_full)
 
     return nothing
 end

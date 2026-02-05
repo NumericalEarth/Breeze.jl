@@ -7,9 +7,7 @@ using Oceananigans.TimeSteppers:
     update_state!,
     compute_flux_bc_tendencies!,
     step_lagrangian_particles!,
-    implicit_step!,
-    compute_pressure_correction!,
-    make_pressure_correction!
+    implicit_step!
 using Oceananigans.Utils: launch!, time_difference_seconds
 
 """

@@ -33,23 +33,18 @@
 #
 # ## Comparison of dynamical formulations
 #
-# Following the CM1 test case comparisons, we compare four different formulations:
+# We compare five dynamical formulations:
 #
 # 1. **Anelastic**: Filters acoustic waves via the anelastic approximation
 # 2. **Boussinesq**: Anelastic with constant reference density
 # 3. **Compressible (explicit)**: Fully compressible with explicit time stepping
-# 4. **Compressible (acoustic substepping)**: Fully compressible with acoustic substepping
-#
-# The key differences are:
-# - Anelastic formulations filter acoustic waves and use a pressure solver
-# - Compressible formulations retain acoustic waves and require smaller time steps
-# - Acoustic substepping allows larger advective time steps by substepping the fast acoustic modes
+# 4. **Split-explicit (explicit vertical)**: Acoustic substepping with explicit vertical
+# 5. **Split-explicit (implicit vertical)**: Acoustic substepping with implicit vertical solve
 
 using Breeze
 using Breeze.CompressibleEquations: ExplicitTimeStepping
-using Breeze.Thermodynamics: adiabatic_hydrostatic_density, adiabatic_hydrostatic_pressure
+using Breeze.Thermodynamics: adiabatic_hydrostatic_density
 using Oceananigans.Units
-using Statistics
 using Printf
 using CairoMakie
 
@@ -60,8 +55,7 @@ using CairoMakie
 p₀ = 100000  # Pa - surface pressure
 θ₀ = 300     # K - reference potential temperature
 U  = 20      # m s⁻¹ - mean wind
-N  = 0.01    # s⁻¹ - Brunt-Väisälä frequency
-N² = N^2
+N² = 0.01^2  # s⁻² - Brunt-Väisälä frequency squared
 
 # ## Grid configuration
 #
@@ -71,296 +65,216 @@ N² = N^2
 Nx, Nz = 300, 10
 Lx, Lz = 300kilometers, 10kilometers
 
-grid = RectilinearGrid(CPU(), size = (Nx, Nz), halo = (5, 5),
-                       x = (0, Lx), z = (0, Lz),
-                       topology = (Periodic, Flat, Bounded))
+grid = RectilinearGrid(CPU(), size=(Nx, Nz), halo=(5, 5),
+                       x=(0, Lx), z=(0, Lz),
+                       topology=(Periodic, Flat, Bounded))
 
-# ## Initial condition functions
+# ## Initial conditions
 #
 # The perturbation parameters from the paper by [SkamarockKlemp1994](@citet):
 
-Δθ = 0.01               # K - perturbation amplitude
-a  = 5000               # m - perturbation half-width parameter
-x₀ = Lx / 3             # m - perturbation center in x
+Δθ = 0.01    # K - perturbation amplitude
+a  = 5000    # m - perturbation half-width parameter
+x₀ = Lx / 3 # m - perturbation center in x
 
 constants = ThermodynamicConstants()
 g = constants.gravitational_acceleration
-pˢᵗ = 1e5  # Standard pressure for potential temperature (Pa)
-
-# The background potential temperature profile with a constant Brunt-Väisälä frequency:
+pˢᵗ = 1e5
 
 θᵇᵍ(z) = θ₀ * exp(N² * z / g)
-
-# The initial condition combines the background profile with the localized perturbation:
-
 θᵢ(x, z) = θᵇᵍ(z) + Δθ * sin(π * z / Lz) / (1 + (x - x₀)^2 / a^2)
-
-# For compressible dynamics, we also need the background density:
-
 ρᵢ(x, z) = adiabatic_hydrostatic_density(z, p₀, θ₀, pˢᵗ, constants)
 
-# ## Case 1: Anelastic dynamics
-#
-# We use the anelastic formulation with liquid-ice potential temperature thermodynamics:
+# ## Build all five models
 
-reference_state = ReferenceState(grid, constants; surface_pressure=p₀, potential_temperature=θ₀, standard_pressure=pˢᵗ)
+advection = WENO()
+Ns = 6 # acoustic substeps
+surface_pressure = p₀
+potential_temperature = θ₀
+
+# Case 1: Anelastic
+
+reference_state = ReferenceState(grid, constants; surface_pressure, potential_temperature)
 anelastic_dynamics = AnelasticDynamics(reference_state)
-advection = WENO(minimum_buffer_upwind_order=3)
-model_anelastic = AtmosphereModel(grid; dynamics=anelastic_dynamics, advection)
 
-set!(model_anelastic, θ=θᵢ, u=U)
+# Case 2: Boussinesq (constant reference density)
+constant_density_reference_state = ReferenceState(grid, constants; surface_pressure, potential_temperature)
 
-# ## Case 2: Boussinesq (constant reference density)
-#
-# For the Boussinesq case, we set the reference density to a constant value.
-# This tests how density variation in the reference state affects wave propagation.
-
-constant_density_reference_state = ReferenceState(grid, constants; surface_pressure=p₀, potential_temperature=θ₀, standard_pressure=pˢᵗ)
-
-# Get the surface density and set the entire reference density field to this constant value:
-ρ_surface = adiabatic_hydrostatic_density(0, p₀, θ₀, pˢᵗ, constants)
-set!(constant_density_reference_state.density, ρ_surface)
-
+ρ₀ = adiabatic_hydrostatic_density(0, p₀, θ₀, pˢᵗ, constants)
+set!(constant_density_reference_state.density, ρ₀)
 boussinesq_dynamics = AnelasticDynamics(constant_density_reference_state)
-model_boussinesq = AtmosphereModel(grid; dynamics=boussinesq_dynamics, advection)
 
-set!(model_boussinesq, θ=θᵢ, u=U)
+# Case 3: Compressible (fully explicit, no substepping)
+compressible_dynamics = CompressibleDynamics(; surface_pressure, time_discretization=ExplicitTimeStepping())
 
-# ## Case 3: Compressible dynamics (fully explicit)
-#
-# Fully compressible dynamics without acoustic substepping.
-# Using `ExplicitTimeStepping()` tells the model to use standard `SSPRungeKutta3`
-# with a time step limited by the acoustic CFL.
+# Case 4: Split-explicit with explicit vertical substepping
+time_discretization = SplitExplicitTimeDiscretization(substeps=Ns)
+explicit_split_dynamics = CompressibleDynamics(; surface_pressure, time_discretization)
 
-compressible_dynamics = CompressibleDynamics(surface_pressure=p₀, standard_pressure=pˢᵗ,
-                                             time_discretization=ExplicitTimeStepping())
-model_compressible = AtmosphereModel(grid; dynamics=compressible_dynamics, advection)
+# Case 5: Split-explicit with vertically implicit substepping
+time_discretization = SplitExplicitTimeDiscretization(VerticallyImplicit(0.5), substeps=Ns)
+implicit_split_dynamics = CompressibleDynamics(; surface_pressure, time_discretization)
 
-set!(model_compressible; θ=θᵢ, u=U, qᵗ=0, ρ=ρᵢ)
+# Build all models:
+models = Dict(
+    :anelastic      => AtmosphereModel(grid; advection, dynamics=anelastic_dynamics),
+    :boussinesq     => AtmosphereModel(grid; advection, dynamics=boussinesq_dynamics),
+    :compressible   => AtmosphereModel(grid; advection, dynamics=compressible_dynamics),
+    :explicit_split => AtmosphereModel(grid; advection, dynamics=explicit_split_dynamics),
+    :implicit_split => AtmosphereModel(grid; advection, dynamics=implicit_split_dynamics),
+)
 
-# ## Case 4: Split-explicit with explicit vertical substepping
-#
-# Split-explicit acoustic substepping with fully explicit vertical stepping.
-# The acoustic substep Δτ must satisfy both the horizontal and vertical
-# acoustic CFL: Δτ < min(Δx, Δz) / cₛ.
+# Set initial conditions:
 
-Ns = 12
+for name in (:anelastic, :boussinesq)
+    set!(models[name]; θ=θᵢ, u=U)
+end
 
-explicit_split = SplitExplicitTimeDiscretization(substeps=Ns)
-explicit_split_dynamics = CompressibleDynamics(surface_pressure=p₀, standard_pressure=pˢᵗ,
-                                              time_discretization=explicit_split)
-model_explicit_split = AtmosphereModel(grid; dynamics=explicit_split_dynamics, advection)
-
-set!(model_explicit_split; θ=θᵢ, u=U, qᵗ=0, ρ=ρᵢ)
-
-# ## Case 5: Split-explicit with vertically implicit substepping
-#
-# Split-explicit acoustic substepping with vertically implicit solve.
-# The vertical CFL restriction on the acoustic substep is removed;
-# only the horizontal CFL remains: Δτ < Δx / cₛ.
-# On this grid Δx = Δz, so both cases need the same number of substeps.
-# The implicit solve's advantage appears with finer vertical grids (Δz ≪ Δx).
-
-implicit_split = SplitExplicitTimeDiscretization(VerticallyImplicit(0.5), substeps=Ns)
-implicit_split_dynamics = CompressibleDynamics(surface_pressure=p₀, standard_pressure=pˢᵗ,
-                                              time_discretization=implicit_split)
-model_implicit_split = AtmosphereModel(grid; dynamics=implicit_split_dynamics, advection)
-
-set!(model_implicit_split; θ=θᵢ, u=U, qᵗ=0, ρ=ρᵢ)
-
+for name in (:compressible, :explicit_split, :implicit_split)
+    set!(models[name]; θ=θᵢ, u=U, qᵗ=0, ρ=ρᵢ)
+end
+    
 # ## Time stepping constraints
 #
-# The anelastic models can use larger time steps since acoustic waves are filtered.
-# The fully explicit compressible model requires time steps limited by the sound speed.
+# The anelastic and split-explicit models use the advective CFL,
+# while the fully explicit compressible model is limited by the sound speed.
 
-Δx = Lx / Nx
-Δz = Lz / Nz
-
-# Sound speed (approximately)
-Rᵈ = constants.molar_gas_constant / constants.dry_air.molar_mass
+Δx, Δz = Lx / Nx, Lz / Nz
+Rᵈ = Breeze.Thermodynamics.dry_air_gas_constant(constants)
 cᵖᵈ = constants.dry_air.heat_capacity
-γᵈ = cᵖᵈ / (cᵖᵈ - Rᵈ)
-cₛ = sqrt(γᵈ * Rᵈ * θ₀)  # ~347 m/s
+cₛ = sqrt(cᵖᵈ / (cᵖᵈ - Rᵈ) * Rᵈ * θ₀)
 
-# CFL-based time steps
 cfl = 0.5
-Δt_anelastic = cfl * min(Δx, Δz) / U  # Based on advective velocity
-Δt_compressible = cfl * min(Δx, Δz) / (cₛ + U)  # Based on sound speed + advection
+Δt_advective    = cfl * min(Δx, Δz) / U
+Δt_compressible = cfl * min(Δx, Δz) / (cₛ + U)
+Δt_split        = 2.0
 
-# The split-explicit cases can use much larger time steps than the fully explicit
-# compressible case. The acoustic substep Δτ = Δt / Ns must satisfy the horizontal
-# acoustic CFL: Δτ < Δx / cₛ, so Δt < Ns × Δx / cₛ ≈ 12 × 1000 / 347 ≈ 35s.
-# We use a conservative Δt limited by advection.
-Δt_split = cfl * min(Δx, Δz) / U
+time_steps = Dict(
+    :anelastic      => Δt_advective,
+    :boussinesq     => Δt_advective,
+    :compressible   => Δt_compressible,
+    :explicit_split => Δt_split,
+    :implicit_split => Δt_split,
+)
 
-@info "Time steps:" Δt_anelastic Δt_compressible Δt_split
+@info "Time steps" Δt_advective Δt_compressible Δt_split
 
-# ## Simulations
-#
-# We run for 3000 seconds, matching the simulation time in [SkamarockKlemp1994](@cite):
+# ## Run all simulations
 
-stop_time = 3000  # seconds
+stop_time = 3000 # seconds
 
-simulation_anelastic = Simulation(model_anelastic; Δt=Δt_anelastic, stop_time)
-simulation_boussinesq = Simulation(model_boussinesq; Δt=Δt_anelastic, stop_time)
-simulation_compressible = Simulation(model_compressible; Δt=Δt_compressible, stop_time)
-simulation_explicit_split = Simulation(model_explicit_split; Δt=Δt_split, stop_time)
-simulation_implicit_split = Simulation(model_implicit_split; Δt=Δt_split, stop_time)
+case_names = Dict(
+    :anelastic      => "Anelastic",
+    :boussinesq     => "Boussinesq",
+    :compressible   => "Compressible",
+    :explicit_split => "Split (explicit vert)",
+    :implicit_split => "Split (implicit vert)",
+)
 
-# Progress callbacks:
+# Background θ field for computing perturbation
+θᵇᵍ_field = CenterField(grid)
+set!(θᵇᵍ_field, (x, z) -> θᵇᵍ(z))
 
-function make_progress(name, model)
-θ = PotentialTemperature(model)
-θᵇᵍf = CenterField(grid)
-set!(θᵇᵍf, (x, z) -> θᵇᵍ(z))
-θ′ = θ - θᵇᵍf
+simulations = Dict{Symbol, Simulation}()
 
-function progress(sim)
-    u, v, w = sim.model.velocities
-        msg = @sprintf("%s - Iter: % 4d, t: % 14s, max(θ′): %.4e, max|w|: %.4f",
+for (key, model) in models
+    Δt = time_steps[key]
+    sim = Simulation(model; Δt, stop_time)
+
+    # Progress callback
+    θ′ = PotentialTemperature(model) - θᵇᵍ_field
+    name = case_names[key]
+
+    function progress(sim)
+        w = sim.model.velocities.w
+        @info @sprintf("%s - Iter: %4d, t: %s, max(θ′): %.4e, max|w|: %.4f",
                        name, iteration(sim), prettytime(sim), maximum(θ′), maximum(abs, w))
-    @info msg
-    return nothing
+        return nothing
     end
-    return progress
-end
 
-add_callback!(simulation_anelastic, make_progress("Anelastic", model_anelastic), IterationInterval(50))
-add_callback!(simulation_boussinesq, make_progress("Boussinesq", model_boussinesq), IterationInterval(50))
-add_callback!(simulation_compressible, make_progress("Compressible", model_compressible), IterationInterval(500))
-add_callback!(simulation_explicit_split, make_progress("Split (explicit vert)", model_explicit_split), IterationInterval(50))
-add_callback!(simulation_implicit_split, make_progress("Split (implicit vert)", model_implicit_split), IterationInterval(50))
+    callback_interval = key == :compressible ? IterationInterval(500) : IterationInterval(50)
+    add_callback!(sim, progress, IterationInterval(50))
 
-# ## Output
-#
-# We save the potential temperature perturbation for each case:
-
-function setup_output(simulation, model, filename)
-    θ = PotentialTemperature(model)
-    θᵇᵍf = CenterField(grid)
-    set!(θᵇᵍf, (x, z) -> θᵇᵍ(z))
-    θ′ = θ - θᵇᵍf
-
+    # Output
     outputs = merge(model.velocities, (; θ′))
-    simulation.output_writers[:jld2] = JLD2Writer(model, outputs; filename,
-                                                  schedule = TimeInterval(100),
-                                                  overwrite_existing = true)
-    return nothing
+    sim.output_writers[:jld2] = JLD2Writer(model, outputs;
+                                           filename = "igw_$(key).jld2",
+                                           schedule = TimeInterval(100),
+                                           overwrite_existing = true)
+    simulations[key] = sim
 end
 
-setup_output(simulation_anelastic, model_anelastic, "igw_anelastic.jld2")
-setup_output(simulation_boussinesq, model_boussinesq, "igw_boussinesq.jld2")
-setup_output(simulation_compressible, model_compressible, "igw_compressible.jld2")
-setup_output(simulation_explicit_split, model_explicit_split, "igw_explicit_split.jld2")
-setup_output(simulation_implicit_split, model_implicit_split, "igw_implicit_split.jld2")
+for (key, sim) in simulations
+    @info "Running $(case_names[key])..."
+    run!(sim)
+end
 
-# Run all simulations:
-
-@info "Running anelastic simulation..."
-run!(simulation_anelastic)
-
-@info "Running Boussinesq simulation..."
-run!(simulation_boussinesq)
-
-@info "Running fully explicit compressible simulation..."
-run!(simulation_compressible)
-
-@info "Running split-explicit with explicit vertical..."
-run!(simulation_explicit_split)
-
-@info "Running split-explicit with implicit vertical..."
-run!(simulation_implicit_split)
-
-# ## Results: Comparison of dynamical formulations
+# ## Results
 #
-# Following the CM1 test case, we compare the potential temperature perturbation
-# at the final time for all four formulations. This comparison reveals:
-# - How well each formulation captures inertia-gravity wave propagation
-# - The effect of the anelastic approximation vs full compressibility
-# - The effect of constant vs variable reference density
+# We compare the potential temperature perturbation at the final time for all five
+# formulations. This comparison reveals how well each formulation captures
+# inertia-gravity wave propagation.
 
-θ′_anelastic = FieldTimeSeries("igw_anelastic.jld2", "θ′")
-θ′_boussinesq = FieldTimeSeries("igw_boussinesq.jld2", "θ′")
-θ′_compressible = FieldTimeSeries("igw_compressible.jld2", "θ′")
-θ′_explicit_split = FieldTimeSeries("igw_explicit_split.jld2", "θ′")
-θ′_implicit_split = FieldTimeSeries("igw_implicit_split.jld2", "θ′")
+cases = [:anelastic, :boussinesq, :compressible, :explicit_split, :implicit_split]
+titles = [case_names[k] for k in cases]
 
-times = θ′_anelastic.times
+θ′ts = Dict(k => FieldTimeSeries("igw_$(k).jld2", "θ′") for k in cases)
+times = θ′ts[:anelastic].times
 Nt = length(times)
 
-# Convert x to km for plotting
-x_km = range(0, Lx/1000, length=Nx)
-z_km = range(0, Lz/1000, length=Nz)
+x_km = range(0, Lx / 1000, length=Nx)
+z_km = range(0, Lz / 1000, length=Nz)
+levels = range(-Δθ / 2, stop=Δθ / 2, length=21)
+θ′_final = Dict(k => interior(θ′ts[k][Nt], :, 1, :) for k in cases)
 
-levels = range(-Δθ/2, stop=Δθ/2, length=21)
-
-# Final snapshots
-θ′_an = interior(θ′_anelastic[Nt], :, 1, :)
-θ′_bo = interior(θ′_boussinesq[Nt], :, 1, :)
-θ′_co = interior(θ′_compressible[Nt], :, 1, :)
-θ′_es = interior(θ′_explicit_split[Nt], :, 1, :)
-θ′_is = interior(θ′_implicit_split[Nt], :, 1, :)
-
-# Create a comparison plot with all five cases:
+# ## Contour comparison
 
 fig = Figure(size=(1400, 900))
 
-ax1 = Axis(fig[1, 1], ylabel="z (km)", title="Anelastic")
-ax2 = Axis(fig[1, 2], title="Boussinesq")
-ax3 = Axis(fig[2, 1], ylabel="z (km)", title="Compressible (explicit)")
-ax4 = Axis(fig[2, 2], title="Split-explicit (explicit vert)")
-ax5 = Axis(fig[2, 3], title="Split-explicit (implicit vert)")
+axes_layout = [(1, 1), (1, 2), (2, 1), (2, 2), (2, 3)]
+axes = [Axis(fig[r, c]; title=titles[i],
+             ylabel = c == 1 ? "z (km)" : "",
+             xlabel = r == 2 ? "x (km)" : "")
+        for (i, (r, c)) in enumerate(axes_layout)]
 
-for ax in (ax1, ax2); hidexdecorations!(ax, grid=false); end
-for ax in (ax2, ax4, ax5); hideydecorations!(ax, grid=false); end
+for ax in axes; if ax.xlabel[] == ""; hidexdecorations!(ax, grid=false); end; end
+for ax in axes; if ax.ylabel[] == ""; hideydecorations!(ax, grid=false); end; end
 
-hm1 = contourf!(ax1, x_km, z_km, θ′_an; colormap=:balance, levels)
-hm2 = contourf!(ax2, x_km, z_km, θ′_bo; colormap=:balance, levels)
-hm3 = contourf!(ax3, x_km, z_km, θ′_co; colormap=:balance, levels)
-hm4 = contourf!(ax4, x_km, z_km, θ′_es; colormap=:balance, levels)
-hm5 = contourf!(ax5, x_km, z_km, θ′_is; colormap=:balance, levels)
+hm = nothing
+for (i, k) in enumerate(cases)
+    hm = contourf!(axes[i], x_km, z_km, θ′_final[k]; colormap=:balance, levels)
+end
 
-Colorbar(fig[1:2, 4], hm1; label="θ′ (K)")
-
+Colorbar(fig[1:2, 4], hm; label="θ′ (K)")
 fig[0, :] = Label(fig, "Inertia-gravity waves: θ′ at t = $(prettytime(times[Nt]))", fontsize=20)
 
 save("inertia_gravity_wave_comparison.png", fig)
 
 fig
 
-# ## Animation of wave propagation
-#
-# We create an animation showing the evolution of all five cases side by side:
+# ## Animation
 
 n = Observable(1)
 
-θ′_an_n = @lift interior(θ′_anelastic[$n], :, 1, :)
-θ′_bo_n = @lift interior(θ′_boussinesq[$n], :, 1, :)
-θ′_co_n = @lift interior(θ′_compressible[$n], :, 1, :)
-θ′_es_n = @lift interior(θ′_explicit_split[$n], :, 1, :)
-θ′_is_n = @lift interior(θ′_implicit_split[$n], :, 1, :)
-
 fig_anim = Figure(size=(1400, 900))
+anim_axes = [Axis(fig_anim[r, c]; title=titles[i],
+                   ylabel = c == 1 ? "z (km)" : "",
+                   xlabel = r == 2 ? "x (km)" : "")
+             for (i, (r, c)) in enumerate(axes_layout)]
 
-ax1 = Axis(fig_anim[1, 1], ylabel="z (km)", title="Anelastic")
-ax2 = Axis(fig_anim[1, 2], title="Boussinesq")
-ax3 = Axis(fig_anim[2, 1], ylabel="z (km)", title="Compressible (explicit)")
-ax4 = Axis(fig_anim[2, 2], title="Split-explicit (explicit vert)")
-ax5 = Axis(fig_anim[2, 3], title="Split-explicit (implicit vert)")
+for ax in anim_axes; if ax.xlabel[] == ""; hidexdecorations!(ax, grid=false); end; end
+for ax in anim_axes; if ax.ylabel[] == ""; hideydecorations!(ax, grid=false); end; end
 
-for ax in (ax1, ax2); hidexdecorations!(ax, grid=false); end
-for ax in (ax2, ax4, ax5); hideydecorations!(ax, grid=false); end
+hm_anim = nothing
+for (i, k) in enumerate(cases)
+    data = @lift interior(θ′ts[k][$n], :, 1, :)
+    hm_anim = contourf!(anim_axes[i], x_km, z_km, data;
+                         colormap=:balance, levels, extendhigh=:auto, extendlow=:auto)
+end
 
-hm1 = contourf!(ax1, x_km, z_km, θ′_an_n; colormap=:balance, levels, extendhigh=:auto, extendlow=:auto)
-hm2 = contourf!(ax2, x_km, z_km, θ′_bo_n; colormap=:balance, levels, extendhigh=:auto, extendlow=:auto)
-hm3 = contourf!(ax3, x_km, z_km, θ′_co_n; colormap=:balance, levels, extendhigh=:auto, extendlow=:auto)
-hm4 = contourf!(ax4, x_km, z_km, θ′_es_n; colormap=:balance, levels, extendhigh=:auto, extendlow=:auto)
-hm5 = contourf!(ax5, x_km, z_km, θ′_is_n; colormap=:balance, levels, extendhigh=:auto, extendlow=:auto)
-
-Colorbar(fig_anim[1:2, 4], hm1; label="θ′ (K)")
-
-title = @lift "Inertia-gravity waves: θ′ at t = $(prettytime(times[$n]))"
-fig_anim[0, :] = Label(fig_anim, title, fontsize=20, tellwidth=false)
+Colorbar(fig_anim[1:2, 4], hm_anim; label="θ′ (K)")
+anim_title = @lift "Inertia-gravity waves: θ′ at t = $(prettytime(times[$n]))"
+fig_anim[0, :] = Label(fig_anim, anim_title, fontsize=20, tellwidth=false)
 
 record(fig_anim, "inertia_gravity_wave.mp4", 1:Nt, framerate=8) do nn
     n[] = nn
@@ -374,19 +288,18 @@ nothing #hide
 # A vertical cross-section at mid-height shows the wave phase and amplitude differences:
 
 z_mid = Nz ÷ 2
+linestyles = [:solid, :dash, :dot, :dashdot, :dashdotdot]
 
 fig_cross = Figure(size=(900, 400))
 ax = Axis(fig_cross[1, 1], xlabel="x (km)", ylabel="θ′ (K)",
-          title="Potential temperature perturbation at z = $(round(z_km[z_mid], digits=1)) km, t = $(prettytime(times[Nt]))")
+          title="θ′ at z = $(round(z_km[z_mid], digits=1)) km, t = $(prettytime(times[Nt]))")
 
-lines!(ax, x_km, θ′_an[:, z_mid], label="Anelastic", linewidth=2)
-lines!(ax, x_km, θ′_bo[:, z_mid], label="Boussinesq", linewidth=2, linestyle=:dash)
-lines!(ax, x_km, θ′_co[:, z_mid], label="Compressible (explicit)", linewidth=2, linestyle=:dot)
-lines!(ax, x_km, θ′_es[:, z_mid], label="Split-explicit (explicit vert)", linewidth=2, linestyle=:dashdot)
-lines!(ax, x_km, θ′_is[:, z_mid], label="Split-explicit (implicit vert)", linewidth=2, linestyle=:dashdotdot)
+for (i, k) in enumerate(cases)
+    lines!(ax, x_km, θ′_final[k][:, z_mid];
+           label=titles[i], linewidth=2, linestyle=linestyles[i])
+end
 
 axislegend(ax, position=:rt)
-
 save("inertia_gravity_wave_cross_section.png", fig_cross)
 
 fig_cross

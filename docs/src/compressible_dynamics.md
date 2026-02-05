@@ -73,75 +73,79 @@ U^{n+1} &= \tfrac{1}{3} U^n + \tfrac{2}{3} \Phi(U^{(2)}; \, Δt)
 
 where ``\Phi`` denotes the forward Euler + acoustic subcycling stage operator.
 
-### Stage-frozen reference state and perturbations
+### Stage-frozen reference state and perturbation variables
 
-At the start of each RK stage, the reference state ``\bar{U}`` is frozen:
-
-```math
-\bar{ρ} = ρ^{\mathrm{stage}}, \qquad \bar{χ} = χ^{\mathrm{stage}}, \qquad \bar{s} = \bar{χ}/\bar{ρ} .
-```
-
-During acoustic substeps, the perturbation pressure ``p'`` is computed from a linearized equation of state:
+Following [Klemp, Skamarock, and Dudhia (2007)](@cite KlempSkamarockDudhia2007), the acoustic loop advances **perturbation variables** relative to the stage-level state, not the full fields directly. At the start of each RK stage, the reference state is frozen:
 
 ```math
-p' = ψ \, (ρ - \bar{ρ}), \qquad \text{where} \quad ψ = R^m T
+\bar{ρ} = ρ^t, \qquad \bar{χ} = χ^t, \qquad \bar{s} = \bar{χ}/\bar{ρ}, \qquad \bar{\boldsymbol{m}} = (\rho \boldsymbol{u})^t .
 ```
 
-is held fixed during the substep loop. Using perturbation quantities for the pressure gradient avoids amplifying hydrostatic imbalance.
+Perturbation variables are defined as deviations from this reference:
+
+```math
+ρ'' = ρ - \bar{ρ}, \qquad \boldsymbol{m}'' = \boldsymbol{m} - \bar{\boldsymbol{m}}, \qquad χ'' = χ - \bar{χ} .
+```
+
+These start at zero and remain small (acoustic-amplitude) during the substep loop. The perturbation pressure is:
+
+```math
+p'' = ψ \, ρ'', \qquad \text{where} \quad ψ = R^m T
+```
+
+is held fixed during the substep loop.
+
+The slow tendencies ``R^t`` (the full right-hand side evaluated at the stage-level state) are also computed once and held fixed. For momentum, ``R^t_{\boldsymbol{m}}`` excludes the pressure gradient and buoyancy (which are handled as fast terms). For density and thermodynamic variable, ``R^t`` is the full tendency including advection.
 
 ### Forward-backward acoustic substep loop
 
-Within each RK stage, the acoustic substep loop iterates ``N_s`` times with time step ``Δτ = Δt_{\mathrm{stage}} / N_s``. Following CM1's convention:
+Within each RK stage, the acoustic substep loop iterates ``N_τ`` times with time step ``Δτ = Δt_{\mathrm{stage}} / N_τ``. Following CM1's convention:
 
-| RK Stage | Stage ``Δt`` | Substeps |
+| RK Stage | Stage ``Δt`` | Substeps ``N_τ`` |
 |----------|-------------|----------|
-| 1 | ``Δt/3`` | ``N_s/3`` |
-| 2 | ``Δt/2`` | ``N_s/2`` |
-| 3 | ``Δt`` | ``N_s`` |
+| 1 | ``Δt`` | ``N_s/3`` |
+| 2 | ``Δt/4`` | ``N_s/2`` |
+| 3 | ``2Δt/3`` | ``N_s`` |
 
-Each substep applies a forward-backward scheme:
+Each substep advances the perturbation variables:
 
-**(A) Forward step --- momentum update:**
-
-```math
-(\rho \boldsymbol{u})^{τ+Δτ} = (\rho \boldsymbol{u})^{τ} - Δτ \, \boldsymbol{\nabla} p'^{\,τ} + Δτ \, b'^{\,τ} \hat{\boldsymbol{z}} + Δτ \, G^s_{\rho \boldsymbol{u}} ,
-```
-
-where the slow momentum tendencies ``G^s_{\rho \boldsymbol{u}}`` are applied once at the start of the stage.
-
-**(B) Update velocities:**
+**(A) Forward step --- perturbation momentum:**
 
 ```math
-\boldsymbol{u}^{τ+Δτ} = (\rho \boldsymbol{u})^{τ+Δτ} / ρ^τ .
+\boldsymbol{m}''^{\,τ+Δτ} = \boldsymbol{m}''^{\,τ} + Δτ \left( R^t_{\boldsymbol{m}} - \boldsymbol{\nabla} p''^{\,τ} - g ρ''^{\,τ} \hat{\boldsymbol{z}} \right)
 ```
 
-**(C) Backward step --- density update:**
+The slow tendency ``R^t_{\boldsymbol{m}}`` includes advection and Coriolis at the stage level. The fast terms (perturbation pressure gradient and buoyancy) use the current perturbation density ``ρ''``.
+
+**(B) Backward step --- perturbation density:**
 
 ```math
-ρ^{τ+Δτ} = ρ^{τ} - Δτ \, \boldsymbol{\nabla \cdot}\, \boldsymbol{m}^{τ+Δτ} ,
+ρ''^{\,τ+Δτ} = ρ''^{\,τ} + Δτ \left( R^t_ρ - \boldsymbol{\nabla \cdot}\, \boldsymbol{m}''^{\,τ+Δτ} \right)
 ```
 
-using the **newly computed** momentum (backward coupling). Divergence damping nudges density toward the stage-frozen reference: ``ρ \leftarrow ρ - κ^d (ρ - \bar{ρ})``.
+Only the **perturbation momentum** divergence appears --- not the full momentum. This eliminates double-counting of the advective velocity contribution already in ``R^t_ρ``.
 
-**(D) Backward step --- thermodynamic variable update:**
-
-Following [Klemp, Skamarock, and Dudhia (2007)](@cite KlempSkamarockDudhia2007) Eq. 15, the thermodynamic variable is updated using a linearized flux divergence:
+**(C) Backward step --- perturbation thermodynamic variable:**
 
 ```math
-χ^{τ+Δτ} = χ^{τ} - Δτ \, \bar{s} \, \boldsymbol{\nabla \cdot}\, \boldsymbol{m}^{τ+Δτ} + Δτ \, G^s_χ ,
+χ''^{\,τ+Δτ} = χ''^{\,τ} + Δτ \left( R^t_χ - \bar{s} \, \boldsymbol{\nabla \cdot}\, \boldsymbol{m}''^{\,τ+Δτ} \right)
 ```
 
-where ``\bar{s}`` is the stage-frozen specific thermodynamic variable and ``G^s_χ`` is the slow thermodynamic tendency. The linearization advects the reference-level specific variable by the current momentum, following WRF's approach.
+where ``\bar{s} = \bar{χ}/\bar{ρ}`` is the stage-frozen specific thermodynamic variable. For the potential temperature formulation (``χ = ρθ``), the compression source ``Π^{\mathrm{ac}} = 0``.
 
-For the potential temperature formulation (``χ = ρθ``), the compression source ``Π^{\mathrm{ac}} = 0``.
-
-**(E) Accumulate time-averaged velocities:**
+**(D) Recover full fields** at the end of the substep loop:
 
 ```math
-\bar{\boldsymbol{u}} = \frac{1}{N_s} \sum_{n=1}^{N_s} \boldsymbol{u}^{(n)} .
+ρ = \bar{ρ} + ρ'', \qquad \boldsymbol{m} = \bar{\boldsymbol{m}} + \boldsymbol{m}'', \qquad χ = \bar{χ} + χ'' .
 ```
 
-These time-averaged velocities are used for scalar (tracer) transport in the outer RK loop, ensuring mass-consistent advection.
+**(E) Accumulate time-averaged velocities** each substep for scalar transport:
+
+```math
+\bar{\boldsymbol{u}} = \frac{1}{N_τ} \sum_{n=1}^{N_τ} \frac{\bar{\boldsymbol{m}} + \boldsymbol{m}''^{(n)}}{\bar{ρ} + ρ''^{(n)}} .
+```
+
+These time-averaged velocities are used for tracer advection in the outer RK loop.
 
 ### Vertically implicit solve (optional)
 
