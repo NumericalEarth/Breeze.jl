@@ -25,20 +25,20 @@ The first positional argument controls the vertical stepping strategy:
 Fields
 ======
 
-- `vertical_time_discretization`: `nothing` or [`VerticallyImplicit`](@ref)
+- `time_discretization`: `nothing` or [`VerticallyImplicit`](@ref)
 - `substeps`: Number of acoustic substeps per full time step. Default: 6
-- `κᵈ`: Divergence damping coefficient. Default: 0.05
+- `divergence_damping_coefficient`: Divergence damping coefficient. Default: 0.05
 
 See also [`ExplicitTimeStepping`](@ref).
 """
 struct SplitExplicitTimeDiscretization{VTD, N, FT}
-    vertical_time_discretization :: VTD
+    time_discretization :: VTD
     substeps :: N
-    κᵈ :: FT
+    divergence_damping_coefficient :: FT
 end
 
-function SplitExplicitTimeDiscretization(vertical_time_discretization=nothing; substeps=6, κᵈ=0.05)
-    return SplitExplicitTimeDiscretization(vertical_time_discretization, substeps, κᵈ)
+function SplitExplicitTimeDiscretization(time_discretization=nothing; substeps=6, divergence_damping_coefficient=0.05)
+    return SplitExplicitTimeDiscretization(time_discretization, substeps, divergence_damping_coefficient)
 end
 
 """

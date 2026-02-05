@@ -37,15 +37,15 @@ The acoustic substepping implements the forward-backward scheme from
 2. **Backward step**: Update density and thermodynamic variable using new velocities
 3. Accumulate time-averaged velocities for scalar transport
 
-The vertical acoustic step is either fully explicit (`vertical_time_discretization = nothing`)
-or vertically implicit (`vertical_time_discretization = VerticallyImplicit(α)`).
+The vertical acoustic step is either fully explicit (`time_discretization = nothing`)
+or vertically implicit (`time_discretization = VerticallyImplicit(α)`).
 
 Fields
 ======
 
 - `substeps`: Number of acoustic substeps per full time step
-- `vertical_time_discretization`: Vertical vertical_time_discretization strategy (`nothing` or [`VerticallyImplicit`](@ref))
-- `κᵈ`: Divergence damping coefficient (typically 0.05-0.1)
+- `time_discretization`: Vertical time_discretization strategy (`nothing` or [`VerticallyImplicit`](@ref))
+- `divergence_damping_coefficient`: Divergence damping coefficient (typically 0.05-0.1)
 - `ψ`: Pressure coefficient ψ = Rᵐ T, so p = ψ ρ (CenterField)
 - `c²`: Moist sound speed squared c² = γᵐ ψ (CenterField)
 - `ū, v̄, w̄`: Time-averaged velocities for scalar advection
@@ -61,11 +61,11 @@ struct AcousticSubstepper{N, SS, FT, CF, UF, VF, WF, TS, RHS}
     # Number of acoustic substeps per full time step
     substeps :: N
 
-    # Vertical vertical_time_discretization: nothing (explicit) or VerticallyImplicit(α)
-    vertical_time_discretization :: SS
+    # Vertical time_discretization: nothing (explicit) or VerticallyImplicit(α)
+    time_discretization :: SS
 
     # Divergence damping coefficient
-    κᵈ :: FT
+    divergence_damping_coefficient :: FT
 
     # Precomputed thermodynamic coefficients (computed once per RK stage)
     ψ  :: CF  # Pressure coefficient: p = ψ ρ = Rᵐ T ρ
@@ -102,8 +102,8 @@ end
 
 Adapt.adapt_structure(to, a::AcousticSubstepper) =
     AcousticSubstepper(a.substeps,
-                       a.vertical_time_discretization,
-                       a.κᵈ,
+                       a.time_discretization,
+                       a.divergence_damping_coefficient,
                        adapt(to, a.ψ),
                        adapt(to, a.c²),
                        adapt(to, a.ū),
@@ -127,9 +127,9 @@ using parameters from `split_explicit`.
 """
 function AcousticSubstepper(grid, split_explicit::SplitExplicitTimeDiscretization)
     Ns = split_explicit.substeps
-    vertical_time_discretization = split_explicit.vertical_time_discretization
+    time_discretization = split_explicit.time_discretization
     FT = eltype(grid)
-    κᵈ = convert(FT, split_explicit.κᵈ)
+    divergence_damping_coefficient = convert(FT, split_explicit.divergence_damping_coefficient)
 
     # Thermodynamic coefficients
     ψ = CenterField(grid)
@@ -158,10 +158,10 @@ function AcousticSubstepper(grid, split_explicit::SplitExplicitTimeDiscretizatio
     χᵣ = CenterField(grid)
 
     # Vertical tridiagonal solver (only allocated for implicit vertical stepping)
-    vertical_solver = build_acoustic_vertical_solver(grid, vertical_time_discretization)
-    rhs = build_acoustic_vertical_rhs(grid, vertical_time_discretization)
+    vertical_solver = build_acoustic_vertical_solver(grid, time_discretization)
+    rhs = build_acoustic_vertical_rhs(grid, time_discretization)
 
-    return AcousticSubstepper(Ns, vertical_time_discretization, κᵈ,
+    return AcousticSubstepper(Ns, time_discretization, divergence_damping_coefficient,
                               ψ, c²,
                               ū, v̄, w̄,
                               Gˢρu, Gˢρv, Gˢρw,
@@ -477,12 +477,12 @@ function acoustic_density_step!(model, substepper, Δτ)
     launch!(arch, grid, :xyz, _acoustic_density_step!,
             model.dynamics.density, grid, Δτ,
             model.momentum.ρu, model.momentum.ρv, model.momentum.ρw,
-            substepper.ρᵣ, substepper.κᵈ, substepper.Gˢρ)
+            substepper.ρᵣ, substepper.divergence_damping_coefficient, substepper.Gˢρ)
 
     return nothing
 end
 
-@kernel function _acoustic_density_step!(ρ, grid, Δτ, ρu, ρv, ρw, ρᵣ, κᵈ, Gˢρ)
+@kernel function _acoustic_density_step!(ρ, grid, Δτ, ρu, ρv, ρw, ρᵣ, divergence_damping_coefficient, Gˢρ)
     i, j, k = @index(Global, NTuple)
 
     @inbounds begin
@@ -493,12 +493,12 @@ end
         ρ[i, j, k] += Δτ * (-div_m + Gˢρ[i, j, k])
 
         # Divergence damping: nudge density toward stage-frozen reference
-        ρ[i, j, k] -= κᵈ * (ρ[i, j, k] - ρᵣ[i, j, k])
+        ρ[i, j, k] -= divergence_damping_coefficient * (ρ[i, j, k] - ρᵣ[i, j, k])
     end
 end
 
 #####
-##### Horizontal-only density update (for implicit vertical vertical_time_discretization)
+##### Horizontal-only density update (for implicit vertical time_discretization)
 #####
 
 using Oceananigans.Operators: δxᶜᵃᵃ, δyᵃᶜᵃ, Ax_qᶠᶜᶜ, Ay_qᶜᶠᶜ, Vᶜᶜᶜ
@@ -517,12 +517,12 @@ function acoustic_density_horizontal_step!(model, substepper, Δτ)
     launch!(arch, grid, :xyz, _acoustic_density_horizontal_step!,
             model.dynamics.density, grid, Δτ,
             model.momentum.ρu, model.momentum.ρv,
-            substepper.ρᵣ, substepper.κᵈ, substepper.Gˢρ)
+            substepper.ρᵣ, substepper.divergence_damping_coefficient, substepper.Gˢρ)
 
     return nothing
 end
 
-@kernel function _acoustic_density_horizontal_step!(ρ, grid, Δτ, ρu, ρv, ρᵣ, κᵈ, Gˢρ)
+@kernel function _acoustic_density_horizontal_step!(ρ, grid, Δτ, ρu, ρv, ρᵣ, divergence_damping_coefficient, Gˢρ)
     i, j, k = @index(Global, NTuple)
 
     @inbounds begin
@@ -535,7 +535,7 @@ end
         ρ[i, j, k] += Δτ * (-div_m_h + Gˢρ[i, j, k])
 
         # Divergence damping
-        ρ[i, j, k] -= κᵈ * (ρ[i, j, k] - ρᵣ[i, j, k])
+        ρ[i, j, k] -= divergence_damping_coefficient * (ρ[i, j, k] - ρᵣ[i, j, k])
     end
 end
 
@@ -562,7 +562,7 @@ Called once per RK stage (coefficients depend only on frozen quantities).
 """
 function compute_implicit_vertical_coefficients!(substepper, Δτ)
     solver = substepper.vertical_solver
-    α = substepper.vertical_time_discretization.α
+    α = substepper.time_discretization.α
     α² = α * α
     grid = substepper.ψ.grid
     arch = architecture(grid)
@@ -624,7 +624,7 @@ After solving for (ρw)^{n+1}, updates density with the vertical mass flux diver
 function acoustic_implicit_vertical_step!(model, substepper, Δτ, g)
     grid = model.grid
     arch = architecture(grid)
-    α = substepper.vertical_time_discretization.α
+    α = substepper.time_discretization.α
     β = 1 - α
     rhs = substepper.rhs
 
@@ -809,7 +809,7 @@ function acoustic_substep_loop!(model, substepper, stage, Δt)
     apply_slow_momentum_tendencies!(model, substepper, Δt)
 
     # Compute implicit vertical coefficients (once per stage, if implicit)
-    compute_implicit_vertical_coefficients!(substepper, Δτ, substepper.vertical_time_discretization)
+    compute_implicit_vertical_coefficients!(substepper, Δτ, substepper.time_discretization)
 
     # Initialize time-averaged velocities
     fill!(substepper.ū, 0)
@@ -818,23 +818,23 @@ function acoustic_substep_loop!(model, substepper, stage, Δt)
 
     # === ACOUSTIC SUBSTEP LOOP ===
     for n = 1:Nτ
-        acoustic_substep!(model, substepper, Δτ, g, Nτ, substepper.vertical_time_discretization)
+        acoustic_substep!(model, substepper, Δτ, g, Nτ, substepper.time_discretization)
     end
 
     return nothing
 end
 
-# No-op for explicit vertical vertical_time_discretization
+# No-op for explicit vertical time_discretization
 compute_implicit_vertical_coefficients!(substepper, Δτ, ::Nothing) = nothing
 
-# Compute coefficients for implicit vertical vertical_time_discretization
+# Compute coefficients for implicit vertical time_discretization
 function compute_implicit_vertical_coefficients!(substepper, Δτ, vis::VerticallyImplicit)
     compute_implicit_vertical_coefficients!(substepper, Δτ)
     return nothing
 end
 
 #####
-##### Explicit acoustic substep (vertical_time_discretization = nothing)
+##### Explicit acoustic substep (time_discretization = nothing)
 #####
 
 """
@@ -861,7 +861,7 @@ function acoustic_substep!(model, substepper, Δτ, g, Nτ, ::Nothing)
 end
 
 #####
-##### Implicit acoustic substep (vertical_time_discretization = VerticallyImplicit)
+##### Implicit acoustic substep (time_discretization = VerticallyImplicit)
 #####
 
 """

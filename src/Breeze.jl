@@ -16,7 +16,6 @@ export
     CompressibleDynamics,
     CompressibleModel,
     SplitExplicitTimeDiscretization,
-    ExplicitTimeStepping,
     VerticallyImplicit,
     PrescribedDensity,
     PrescribedDynamics,
@@ -175,7 +174,8 @@ using .AnelasticEquations: AnelasticDynamics, AnelasticModel
 
 include("CompressibleEquations/CompressibleEquations.jl")
 using .CompressibleEquations: CompressibleDynamics, CompressibleModel, AcousticSubstepper,
-                              SplitExplicitTimeDiscretization, ExplicitTimeStepping, VerticallyImplicit
+                              SplitExplicitTimeDiscretization, ExplicitTimeStepping,
+                              VerticallyImplicit
 
 include("KinematicDriver/KinematicDriver.jl")
 using .KinematicDriver: PrescribedDensity, PrescribedDynamics, KinematicModel

@@ -65,7 +65,7 @@ Construct an `AcousticSSPRungeKutta3` time stepper for fully compressible dynami
 This combines the SSP RK3 scheme from [Shu and Osher (1988)](@cite Shu1988Efficient)
 with acoustic substepping from [Wicker and Skamarock (2002)](@cite WickerSkamarock2002).
 
-The acoustic substepping parameters (`Ns`, `vertical_time_discretization`, `κᵈ`) are
+The acoustic substepping parameters (`Ns`, `time_discretization`, `κᵈ`) are
 configured via the [`SplitExplicitTimeDiscretization`](@ref Breeze.CompressibleEquations.SplitExplicitTimeDiscretization) object,
 which is typically set on [`CompressibleDynamics`](@ref) and passed through automatically.
 
@@ -74,7 +74,7 @@ Keyword Arguments
 
 - `implicit_solver`: Optional implicit solver for diffusion. Default: `nothing`
 - `Gⁿ`: Tendency fields at current stage. Default: similar to `prognostic_fields`
-- `split_explicit`: [`SplitExplicitTimeDiscretization`](@ref) configuration with `substeps`, `vertical_time_discretization`, and `κᵈ`.
+- `split_explicit`: [`SplitExplicitTimeDiscretization`](@ref) configuration with `substeps`, `time_discretization`, and `κᵈ`.
 
 References
 ==========
