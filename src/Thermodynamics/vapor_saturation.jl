@@ -300,8 +300,8 @@ equals the actual temperature and `T` is returned.
 - `maxiter`: Maximum number of iterations (default: 10)
 """
 @inline function dewpoint_temperature(pᵛ, T, constants, surface;
-                                       tolerance = 1e-4,
-                                       maxiter = 10)
+                                      tolerance = 1e-4,
+                                      maxiter = 10)
     # First guess: current temperature
     T⁺₁ = T
     pᵛ⁺₁ = saturation_vapor_pressure(T⁺₁, constants, surface)
@@ -337,8 +337,8 @@ Compute the dewpoint temperature using a phase `equilibrium` model to determine
 the condensation surface based on temperature `T`.
 """
 @inline function dewpoint_temperature(pᵛ, T, constants, equilibrium::AbstractPhaseEquilibrium;
-                                       tolerance = 1e-4,
-                                       maxiter = 10)
+                                      tolerance = 1e-4,
+                                      maxiter = 10)
     surface = equilibrated_surface(equilibrium, T)
     return dewpoint_temperature(pᵛ, T, constants, surface; tolerance, maxiter)
 end
