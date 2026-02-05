@@ -443,6 +443,110 @@ function saturation_adjustment_coefficient(T_DCMIP2016, constants)
 end
 
 #####
+##### Shared core Kessler microphysics
+#####
+# These @inline functions encapsulate the core Kessler physics shared between
+# the Eulerian grid kernel and the Lagrangian parcel model.
+
+"""
+    kessler_microphysics_pointwise(rᵛ, rᶜˡ, rʳ, Δr𝕎, T, ρ, p, Δt, microphysics, constants, f₅, δT, FT)
+
+Apply one Kessler microphysics step: autoconversion, accretion, saturation adjustment,
+rain evaporation, and condensation.
+
+`Δr𝕎` is the sedimentation flux divergence (zero for parcel models).
+
+Returns `(rᵛ_new, rᶜˡ_final, rʳ_final, net_phase_change)`.
+"""
+@inline function kessler_microphysics_pointwise(rᵛ, rᶜˡ, rʳ, Δr𝕎, T, ρ, p, Δt,
+                                           microphysics, constants, f₅, δT, FT)
+    surface = PlanarLiquidSurface()
+    Cᵨ     = microphysics.density_scale
+    Cᵉᵛ₁   = microphysics.evaporation_ventilation_coefficient_1
+    Cᵉᵛ₂   = microphysics.evaporation_ventilation_coefficient_2
+    βᵉᵛ₁   = microphysics.evaporation_ventilation_exponent_1
+    βᵉᵛ₂   = microphysics.evaporation_ventilation_exponent_2
+    Cᵈⁱᶠᶠ  = microphysics.diffusivity_coefficient
+    Cᵗʰᵉʳᵐ = microphysics.thermal_conductivity_coefficient
+
+    # Autoconversion + Accretion: cloud → rain (KW eq. 2.13)
+    Δrᴾ = cloud_to_rain_production(rᶜˡ, rʳ, Δt, microphysics)
+    rᶜˡ_new = max(0, rᶜˡ - Δrᴾ)
+    rʳ_new = max(0, rʳ + Δrᴾ + Δr𝕎)
+
+    # Saturation specific humidity
+    qᵛ⁺ = saturation_specific_humidity(T, ρ, constants, surface)
+    rᵛ⁺ = qᵛ⁺ / (1 - qᵛ⁺)
+
+    # Saturation adjustment
+    Δrˢᵃᵗ = (rᵛ - rᵛ⁺) / (1 + rᵛ⁺ * f₅ / (T - δT)^2)
+
+    # Rain evaporation (KW eq. 2.14)
+    ρᵏ = Cᵨ * ρ
+    ρrʳ = ρᵏ * rʳ_new
+    Vᵉᵛ = (Cᵉᵛ₁ + Cᵉᵛ₂ * ρrʳ^βᵉᵛ₁) * ρrʳ^βᵉᵛ₂
+    Dᵗʰ = Cᵈⁱᶠᶠ / (p * rᵛ⁺) + Cᵗʰᵉʳᵐ
+    Δrᵛ⁺ = max(0, rᵛ⁺ - rᵛ)
+    Ėʳ = Vᵉᵛ / Dᵗʰ * Δrᵛ⁺ / (ρᵏ * rᵛ⁺ + FT(1e-20))
+    Δrᴱmax = max(0, -Δrˢᵃᵗ - rᶜˡ_new)
+    Δrᴱ = min(min(Δt * Ėʳ, Δrᴱmax), rʳ_new)
+
+    # Condensation (limited by available cloud water)
+    Δrᶜ = max(Δrˢᵃᵗ, -rᶜˡ_new)
+    rᵛ_new = max(0, rᵛ - Δrᶜ + Δrᴱ)
+    rᶜˡ_final = rᶜˡ_new + Δrᶜ
+    rʳ_final = rʳ_new - Δrᴱ
+
+    net_phase_change = Δrᶜ - Δrᴱ
+
+    return rᵛ_new, rᶜˡ_final, rʳ_final, net_phase_change
+end
+
+"""
+    mixing_ratios_to_mass_fractions(rᵛ, rᶜˡ, rʳ)
+
+Convert from mixing ratios back to mass fractions.
+
+Returns `(qᵛ, qᶜˡ, qʳ, qᵗ)`.
+"""
+@inline function mixing_ratios_to_mass_fractions(rᵛ, rᶜˡ, rʳ)
+    rˡ = rᶜˡ + rʳ
+    r = MoistureMixingRatio(rᵛ, rˡ)
+    q = MoistureMassFractions(r)
+    qᵛ = q.vapor
+    qᵗ = total_specific_moisture(q)
+    rᵗ = total_mixing_ratio(r)
+    qᶜˡ = rᶜˡ / (1 + rᵗ)
+    qʳ  = rʳ / (1 + rᵗ)
+
+    return qᵛ, qᶜˡ, qʳ, qᵗ
+end
+
+"""
+    mass_fractions_to_mixing_ratios(qᵗ, ρqᶜˡ, ρqʳ, ρ)
+
+Convert from mass fractions to mixing ratios.
+
+Returns `(rᵛ, rᶜˡ, rʳ)` mixing ratios for use in Kessler physics.
+"""
+@inline function mass_fractions_to_mixing_ratios(qᵗ, ρqᶜˡ, ρqʳ, ρ)
+    qᶜˡ = max(0, ρqᶜˡ / ρ)
+    qʳ  = max(0, ρqʳ / ρ)
+    qˡ_sum = qᶜˡ + qʳ
+    qᵗ = max(qᵗ, qˡ_sum)
+    qᵛ = qᵗ - qˡ_sum
+
+    q = MoistureMassFractions(qᵛ, qˡ_sum)
+    r = MoistureMixingRatio(q)
+    rᵛ = r.vapor
+    rᵗ = total_mixing_ratio(r)
+    rᶜˡ = qᶜˡ * (1 + rᵗ)
+    rʳ  = qʳ * (1 + rᵗ)
+
+    return rᵛ, rᶜˡ, rʳ
+end
+
+#####
 ##### GPU kernel for Kessler microphysics
 #####
 
@@ -459,7 +563,6 @@ end
                                         θˡⁱ, ρθˡⁱ, ρqᵗ, μ)
     i, j = @index(Global, NTuple)
     FT = eltype(grid)
-    surface = PlanarLiquidSurface()
     precipitation_rate_field = μ.precipitation_rate
 
     # Thermodynamic constants
@@ -473,14 +576,8 @@ end
     δT = constants.saturation_vapor_pressure.liquid_temperature_offset
 
     # Microphysics parameters
-    cfl    = microphysics.substep_cfl
-    Cᵨ     = microphysics.density_scale
-    Cᵉᵛ₁   = microphysics.evaporation_ventilation_coefficient_1
-    Cᵉᵛ₂   = microphysics.evaporation_ventilation_coefficient_2
-    βᵉᵛ₁   = microphysics.evaporation_ventilation_exponent_1
-    βᵉᵛ₂   = microphysics.evaporation_ventilation_exponent_2
-    Cᵈⁱᶠᶠ  = microphysics.diffusivity_coefficient
-    Cᵗʰᵉʳᵐ = microphysics.thermal_conductivity_coefficient
+    cfl = microphysics.substep_cfl
+    Cᵨ  = microphysics.density_scale
 
     # Reference density at surface for terminal velocity (KW eq. 2.15)
     @inbounds ρ₁ = density[i, j, 1]
@@ -496,19 +593,7 @@ end
         @inbounds begin
             ρ = density[i, j, k]
             qᵗ = ρqᵗ[i, j, k] / ρ
-            qᶜˡ = max(0, μ.ρqᶜˡ[i, j, k] / ρ)
-            qʳ  = max(0, μ.ρqʳ[i, j, k] / ρ)
-            qˡ_sum = qᶜˡ + qʳ
-            qᵗ = max(qᵗ, qˡ_sum)
-            qᵛ = qᵗ - qˡ_sum
-
-            # Convert to mixing ratios for Kessler physics
-            q = MoistureMassFractions(qᵛ, qˡ_sum)
-            r = MoistureMixingRatio(q)
-            rᵛ = r.vapor
-            rᵗ = total_mixing_ratio(r)
-            rᶜˡ = qᶜˡ * (1 + rᵗ)
-            rʳ  = qʳ * (1 + rᵗ)
+            rᵛ, rᶜˡ, rʳ = mass_fractions_to_mixing_ratios(qᵗ, μ.ρqᶜˡ[i, j, k], μ.ρqʳ[i, j, k], ρ)
 
             𝕎ʳᵏ = kessler_terminal_velocity(rʳ, ρ, ρ₁, microphysics)
             μ.𝕎ʳ[i, j, k] = 𝕎ʳᵏ
@@ -530,18 +615,7 @@ end
     @inbounds begin
         ρ = density[i, j, Nz]
         qᵗ = ρqᵗ[i, j, Nz] / ρ
-        qᶜˡ = max(0, μ.ρqᶜˡ[i, j, Nz] / ρ)
-        qʳ  = max(0, μ.ρqʳ[i, j, Nz] / ρ)
-        qˡ_sum = qᶜˡ + qʳ
-        qᵗ = max(qᵗ, qˡ_sum)
-        qᵛ = qᵗ - qˡ_sum
-
-        q = MoistureMassFractions(qᵛ, qˡ_sum)
-        r = MoistureMixingRatio(q)
-        rᵛ = r.vapor
-        rᵗ = total_mixing_ratio(r)
-        rᶜˡ = qᶜˡ * (1 + rᵗ)
-        rʳ  = qʳ * (1 + rᵗ)
+        rᵛ, rᶜˡ, rʳ = mass_fractions_to_mixing_ratios(qᵗ, μ.ρqᶜˡ[i, j, Nz], μ.ρqʳ[i, j, Nz], ρ)
 
         μ.𝕎ʳ[i, j, Nz] = kessler_terminal_velocity(rʳ, ρ, ρ₁, microphysics)
         μ.qᵛ[i, j, Nz]  = rᵛ
@@ -593,7 +667,7 @@ end
                 Π = (p / p₀)^(Rᵐ / cᵖᵐ)
                 Tᵏ = Π * θˡⁱᵏ + ℒˡᵣ * qˡ_current / cᵖᵐ
 
-                # Rain sedimentation
+                # Rain sedimentation flux (upstream differencing)
                 ρᵏ = Cᵨ * ρ
                 𝕎ʳᵏ = μ.𝕎ʳ[i, j, k]
                 zᵏ⁺¹ = znode(i, j, k+1, grid, Center(), Center(), Center())
@@ -601,45 +675,19 @@ end
                 ρᵏ⁺¹ = Cᵨ * density[i, j, k+1]
                 rʳᵏ⁺¹ = μ.qʳ[i, j, k+1]
                 𝕎ʳᵏ⁺¹ = μ.𝕎ʳ[i, j, k+1]
-
-                # Δr𝕎: change in rain mixing ratio due to sedimentation (upstream differencing)
                 Δr𝕎 = Δtₛ * (ρᵏ⁺¹ * rʳᵏ⁺¹ * 𝕎ʳᵏ⁺¹ - ρᵏ * rʳ * 𝕎ʳᵏ) / (ρᵏ * Δz)
                 zᵏ = zᵏ⁺¹
 
-                # Δrᴾ: cloud-to-rain production from autoconversion + accretion (KW eq. 2.13)
-                Δrᴾ = cloud_to_rain_production(rᶜˡ, rʳ, Δtₛ, microphysics)
-                rᶜˡ_new = max(0, rᶜˡ - Δrᴾ)
-                rʳ_new = max(0, rʳ + Δrᴾ + Δr𝕎)
-
-                # Saturation specific humidity using Breeze thermodynamics
-                qᵛ⁺ = saturation_specific_humidity(Tᵏ, ρ, constants, surface)
-                # Convert to saturation mixing ratio: rᵛ⁺ = qᵛ⁺ / (1 - qᵛ⁺)
-                rᵛ⁺ = qᵛ⁺ / (1 - qᵛ⁺)
-
-                # Δrˢᵃᵗ: mixing ratio adjustment to restore saturation equilibrium
-                Δrˢᵃᵗ = (rᵛ - rᵛ⁺) / (1 + rᵛ⁺ * f₅ / (Tᵏ - δT)^2)
-
-                # Δrᴱ: rain evaporation into subsaturated air (KW eq. 2.14)
-                ρrʳ = ρᵏ * rʳ_new
-                Vᵉᵛ = (Cᵉᵛ₁ + Cᵉᵛ₂ * ρrʳ^βᵉᵛ₁) * ρrʳ^βᵉᵛ₂
-                Dᵗʰ = Cᵈⁱᶠᶠ / (p * rᵛ⁺) + Cᵗʰᵉʳᵐ
-                Δrᵛ⁺ = max(0, rᵛ⁺ - rᵛ)
-                Ėʳ = Vᵉᵛ / Dᵗʰ * Δrᵛ⁺ / (ρᵏ * rᵛ⁺ + FT(1e-20))
-                Δrᴱmax = max(0, -Δrˢᵃᵗ - rᶜˡ_new)
-                Δrᴱ = min(min(Δtₛ * Ėʳ, Δrᴱmax), rʳ_new)
-
-                # Δrᶜ: condensation of vapor to cloud liquid (limited by available cloud water)
-                Δrᶜ = max(Δrˢᵃᵗ, -rᶜˡ_new)
-                rᵛ_new = max(0, rᵛ - Δrᶜ + Δrᴱ)
-                rᶜˡ_final = rᶜˡ_new + Δrᶜ
-                rʳ_final = rʳ_new - Δrᴱ
+                # Core microphysics step
+                rᵛ_new, rᶜˡ_final, rʳ_final, net_phase_change =
+                    kessler_microphysics_pointwise(rᵛ, rᶜˡ, rʳ, Δr𝕎, Tᵏ, ρ, p, Δtₛ,
+                                              microphysics, constants, f₅, δT, FT)
 
                 μ.qᵛ[i, j, k]  = rᵛ_new
                 μ.qᶜˡ[i, j, k] = rᶜˡ_final
                 μ.qʳ[i, j, k]  = rʳ_final
 
                 # Update θˡⁱ from latent heating
-                net_phase_change = Δrᶜ - Δrᴱ
                 ΔT_phase = ℒˡᵣ / cᵖᵈ * net_phase_change
                 T_new = Tᵏ + ΔT_phase
 
@@ -677,45 +725,23 @@ end
             Π = (p / p₀)^(Rᵐ / cᵖᵐ)
             Tᵏ = Π * θˡⁱᵏ + ℒˡᵣ * qˡ_current / cᵖᵐ
 
-            # Rain sedimentation at top boundary
-            ρᵏ = Cᵨ * ρ
+            # Rain sedimentation flux at top boundary
             𝕎ʳᵏ = μ.𝕎ʳ[i, j, k]
             zᵏ = znode(i, j, k, grid, Center(), Center(), Center())
             zᵏ⁻¹ = znode(i, j, k-1, grid, Center(), Center(), Center())
             Δz_half = (zᵏ - zᵏ⁻¹) / 2
             Δr𝕎 = -Δtₛ * rʳ * 𝕎ʳᵏ / Δz_half
 
-            # Δrᴾ: cloud-to-rain production (KW eq. 2.13)
-            Δrᴾ = cloud_to_rain_production(rᶜˡ, rʳ, Δtₛ, microphysics)
-            rᶜˡ_new = max(0, rᶜˡ - Δrᴾ)
-            rʳ_new = max(0, rʳ + Δrᴾ + Δr𝕎)
-
-            # Δrˢᵃᵗ: saturation adjustment
-            qᵛ⁺ = saturation_specific_humidity(Tᵏ, ρ, constants, surface)
-            rᵛ⁺ = qᵛ⁺ / (1 - qᵛ⁺)
-            Δrˢᵃᵗ = (rᵛ - rᵛ⁺) / (1 + rᵛ⁺ * f₅ / (Tᵏ - δT)^2)
-
-            # Δrᴱ: rain evaporation (KW eq. 2.14)
-            ρrʳ = ρᵏ * rʳ_new
-            Vᵉᵛ = (Cᵉᵛ₁ + Cᵉᵛ₂ * ρrʳ^βᵉᵛ₁) * ρrʳ^βᵉᵛ₂
-            Dᵗʰ = Cᵈⁱᶠᶠ / (p * rᵛ⁺) + Cᵗʰᵉʳᵐ
-            Δrᵛ⁺ = max(0, rᵛ⁺ - rᵛ)
-            Ėʳ = Vᵉᵛ / Dᵗʰ * Δrᵛ⁺ / (ρᵏ * rᵛ⁺ + FT(1e-20))
-            Δrᴱmax = max(0, -Δrˢᵃᵗ - rᶜˡ_new)
-            Δrᴱ = min(min(Δtₛ * Ėʳ, Δrᴱmax), rʳ_new)
-
-            # Δrᶜ: condensation
-            Δrᶜ = max(Δrˢᵃᵗ, -rᶜˡ_new)
-            rᵛ_new = max(0, rᵛ - Δrᶜ + Δrᴱ)
-            rᶜˡ_final = rᶜˡ_new + Δrᶜ
-            rʳ_final = rʳ_new - Δrᴱ
+            # Core microphysics step (shared with ParcelModel)
+            rᵛ_new, rᶜˡ_final, rʳ_final, net_phase_change =
+                kessler_microphysics_pointwise(rᵛ, rᶜˡ, rʳ, Δr𝕎, Tᵏ, ρ, p, Δtₛ,
+                                          microphysics, constants, f₅, δT, FT)
 
             μ.qᵛ[i, j, k]  = rᵛ_new
             μ.qᶜˡ[i, j, k] = rᶜˡ_final
             μ.qʳ[i, j, k]  = rʳ_final
 
             # Update θˡⁱ from latent heating
-            net_phase_change = Δrᶜ - Δrᴱ
             ΔT_phase = ℒˡᵣ / cᵖᵈ * net_phase_change
             T_new = Tᵏ + ΔT_phase
 
@@ -757,14 +783,7 @@ end
             rᶜˡ = μ.qᶜˡ[i, j, k]
             rʳ = μ.qʳ[i, j, k]
 
-            rˡ = rᶜˡ + rʳ
-            r = MoistureMixingRatio(rᵛ, rˡ)
-            q = MoistureMassFractions(r)
-            qᵛ = q.vapor
-            qᵗ = total_specific_moisture(q)
-            rᵗ = total_mixing_ratio(r)
-            qᶜˡ = rᶜˡ / (1 + rᵗ)
-            qʳ  = rʳ / (1 + rᵗ)
+            qᵛ, qᶜˡ, qʳ, qᵗ = mixing_ratios_to_mass_fractions(rᵛ, rᶜˡ, rʳ)
 
             ρqᵗ[i, j, k]    = ρ * qᵗ
             μ.ρqᶜˡ[i, j, k] = ρ * qᶜˡ
@@ -800,8 +819,8 @@ end
 #####
 ##### Parcel model implementation
 #####
-# For parcel models, apply Kessler microphysics to the parcel's scalar state.
-# This includes autoconversion, accretion, saturation adjustment, and rain evaporation.
+# For parcel models, apply Kessler microphysics to the parcel's scalar state
+# using the same shared core functions as the Eulerian kernel.
 # Rain sedimentation is not applicable to a Lagrangian parcel (rain falls with the parcel).
 
 """
@@ -829,83 +848,30 @@ function AtmosphereModels.microphysics_model_update!(microphysics::DCMIP2016KM, 
 
     # Extract parcel state
     ρ = state.ρ
-    z = state.z
-    qᵗ = state.qᵗ
     𝒰 = state.𝒰
     μ = state.μ
-    p = model.dynamics.pressure
 
     # Get pressure at parcel height (interpolate from environmental profile)
-    p_parcel = interpolate(z, p)
+    p_parcel = interpolate(state.z, model.dynamics.pressure)
 
-    # Get current condensate mixing ratios
-    qᶜˡ = max(0, μ.ρqᶜˡ / ρ)
-    qʳ  = max(0, μ.ρqʳ / ρ)
-    qˡ_sum = qᶜˡ + qʳ
-    qᵗ_bounded = max(qᵗ, qˡ_sum)
-    qᵛ = qᵗ_bounded - qˡ_sum
+    # Convert mass fractions → mixing ratios (shared helper)
+    rᵛ, rᶜˡ, rʳ = mass_fractions_to_mixing_ratios(state.qᵗ, μ.ρqᶜˡ, μ.ρqʳ, ρ)
 
-    # Convert to mixing ratios for Kessler physics
-    q = MoistureMassFractions(qᵛ, qˡ_sum)
-    r = MoistureMixingRatio(q)
-    rᵛ = r.vapor
-    rᵗ = total_mixing_ratio(r)
-    rᶜˡ = qᶜˡ * (1 + rᵗ)
-    rʳ  = qʳ * (1 + rᵗ)
-
-    # Saturation adjustment parameters (computed from thermodynamic constants)
-    T_DCMIP2016 = microphysics.dcmip_temperature_scale
-    f₅ = saturation_adjustment_coefficient(T_DCMIP2016, constants)
-    δT = constants.saturation_vapor_pressure.liquid_temperature_offset
-
-    # Evaporation parameters
-    Cᵨ     = microphysics.density_scale
-    Cᵉᵛ₁   = microphysics.evaporation_ventilation_coefficient_1
-    Cᵉᵛ₂   = microphysics.evaporation_ventilation_coefficient_2
-    βᵉᵛ₁   = microphysics.evaporation_ventilation_exponent_1
-    βᵉᵛ₂   = microphysics.evaporation_ventilation_exponent_2
-    Cᵈⁱᶠᶠ  = microphysics.diffusivity_coefficient
-    Cᵗʰᵉʳᵐ = microphysics.thermal_conductivity_coefficient
-
-    # Compute temperature from thermodynamic state
+    # Temperature from thermodynamic state
     T = temperature(𝒰, constants)
 
-    # Autoconversion + Accretion: cloud → rain
-    Δrᴾ = cloud_to_rain_production(rᶜˡ, rʳ, Δt, microphysics)
-    rᶜˡ_new = max(0, rᶜˡ - Δrᴾ)
-    rʳ_new = max(0, rʳ + Δrᴾ)
-
-    # Saturation adjustment
-    surface = PlanarLiquidSurface()
-    qᵛ⁺ = saturation_specific_humidity(T, ρ, constants, surface)
-    rᵛ⁺ = qᵛ⁺ / (1 - qᵛ⁺)
-    Δrˢᵃᵗ = (rᵛ - rᵛ⁺) / (1 + rᵛ⁺ * f₅ / (T - δT)^2)
-
-    # Rain evaporation (Klemp & Wilhelmson 1978 eq. 2.14)
-    ρᵏ = Cᵨ * ρ
-    ρrʳ = ρᵏ * rʳ_new
-    Vᵉᵛ = (Cᵉᵛ₁ + Cᵉᵛ₂ * ρrʳ^βᵉᵛ₁) * ρrʳ^βᵉᵛ₂
-    Dᵗʰ = Cᵈⁱᶠᶠ / (p_parcel * rᵛ⁺) + Cᵗʰᵉʳᵐ
-    Δrᵛ⁺ = max(0, rᵛ⁺ - rᵛ)
+    # Saturation adjustment parameters
+    f₅ = saturation_adjustment_coefficient(microphysics.dcmip_temperature_scale, constants)
+    δT = constants.saturation_vapor_pressure.liquid_temperature_offset
     FT = typeof(ρ)
-    Ėʳ = Vᵉᵛ / Dᵗʰ * Δrᵛ⁺ / (ρᵏ * rᵛ⁺ + FT(1e-20))
-    Δrᴱmax = max(0, -Δrˢᵃᵗ - rᶜˡ_new)
-    Δrᴱ = min(min(Δt * Ėʳ, Δrᴱmax), rʳ_new)
 
-    # Apply condensation (limited by available cloud water)
-    Δrᶜ = max(Δrˢᵃᵗ, -rᶜˡ_new)
-    rᵛ_final = max(0, rᵛ - Δrᶜ + Δrᴱ)
-    rᶜˡ_final = rᶜˡ_new + Δrᶜ
-    rʳ_final = rʳ_new - Δrᴱ
+    # Core microphysics step (no sedimentation for parcel: Δr𝕎 = 0)
+    rᵛ_new, rᶜˡ_final, rʳ_final, _ = kessler_microphysics_pointwise(
+        rᵛ, rᶜˡ, rʳ, zero(FT), T, ρ, p_parcel, Δt,
+        microphysics, constants, f₅, δT, FT)
 
-    # Convert back to mass fractions
-    rˡ_final = rᶜˡ_final + rʳ_final
-    r_final = MoistureMixingRatio(rᵛ_final, rˡ_final)
-    q_final = MoistureMassFractions(r_final)
-    rᵗ_final = total_mixing_ratio(r_final)
-    qᶜˡ_final = rᶜˡ_final / (1 + rᵗ_final)
-    qʳ_final  = rʳ_final / (1 + rᵗ_final)
-    qᵗ_final = total_specific_moisture(q_final)
+    # Convert mixing ratios → mass fractions (shared helper)
+    _, qᶜˡ_final, qʳ_final, qᵗ_final = mixing_ratios_to_mass_fractions(rᵛ_new, rᶜˡ_final, rʳ_final)
 
     # Update parcel state
     state.μ = (; ρqᶜˡ = ρ * qᶜˡ_final, ρqʳ = ρ * qʳ_final)
@@ -914,6 +880,9 @@ function AtmosphereModels.microphysics_model_update!(microphysics::DCMIP2016KM, 
 
     # Update thermodynamic state with new moisture fractions.
     # Parcel models conserve specific static energy; latent heating is implicit.
+    rˡ_final = rᶜˡ_final + rʳ_final
+    r_final = MoistureMixingRatio(rᵛ_new, rˡ_final)
+    q_final = MoistureMassFractions(r_final)
     state.𝒰 = with_moisture(𝒰, q_final)
 
     # Keep static energy consistent with the thermodynamic state.
