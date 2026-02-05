@@ -31,8 +31,7 @@ jobs:
         shell: bash
         working-directory: ./benchmarking
     container:
-      # TODO: use image for benchmark environment after this is merged on `main`
-      image: 'ghcr.io/numericalearth/breeze-docker-images:docs-julia_1.12.4'
+      image: 'ghcr.io/numericalearth/breeze-docker-images:benchmarking-julia_1.12.4'
       options: --gpus=all
     timeout-minutes: 30
     steps:
