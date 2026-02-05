@@ -1,0 +1,32 @@
+name = "BreezeBenchmarks"
+uuid = "bf6d035f-d60d-49bd-b9cb-a5154202673a"
+version = "0.1.0"
+authors = ["NumericalEarth organization (github.com/NumericalEarth) and contributors"]
+
+[deps]
+ArgParse = "c7e460c6-2fb9-53a9-8c5b-16f535851c63"
+Breeze = "660aa2fb-d4c8-4359-a52c-9c057bc511da"
+CUDA = "052768ef-5323-5732-b1bb-66c8b64840ba"
+CloudMicrophysics = "6a9e3e04-43cd-43ba-94b9-e8782df3c71b"
+Dates = "ade2ca70-3891-5945-98fb-dc099432e06a"
+JLD2 = "033835bb-8acc-5ee8-8aae-3f567f8a3819"
+JSON = "682c06a0-de6a-54ab-a142-c8b1cf79cde6"
+Oceananigans = "9e8cae18-63c1-5223-a75c-80ca9d6e9a09"
+Printf = "de0858da-6303-5e67-8744-51eddeeeb8d7"
+Statistics = "10745b16-79ce-11e8-11f9-7d13ad32a3b2"
+
+[sources]
+Breeze = {path = ".."}
+
+[compat]
+ArgParse = "1"
+Breeze = "0.3"
+CUDA = "5"
+CloudMicrophysics = "0.29.1"
+Dates = "<0.0.1, 1"
+JLD2 = "0.5, 0.6"
+JSON = "1.4.0"
+Oceananigans = "0.104"
+Printf = "1"
+Statistics = "<0.0.1, 1"
+julia = "1.10"
