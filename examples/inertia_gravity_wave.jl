@@ -133,7 +133,7 @@ end
 for name in (:compressible, :explicit_split, :implicit_split)
     set!(models[name]; θ=θᵢ, u=U, qᵗ=0, ρ=ρᵢ)
 end
-    
+
 # ## Time stepping constraints
 #
 # The anelastic and split-explicit models use the advective CFL,
