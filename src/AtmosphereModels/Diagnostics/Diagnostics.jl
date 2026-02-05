@@ -28,8 +28,6 @@ using Breeze.Thermodynamics:
     saturation_specific_humidity,
     saturation_vapor_pressure,
     equilibrium_saturation_specific_humidity,
-    dewpoint_temperature,
-    vapor_pressure,
     density,
     PlanarLiquidSurface,
     # Phase equilibrium types
