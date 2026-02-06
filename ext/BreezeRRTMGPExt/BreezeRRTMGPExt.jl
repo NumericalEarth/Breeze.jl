@@ -69,6 +69,10 @@ end
 
 compute_datetime(dt::AbstractDateTime, epoch) = dt
 compute_datetime(t::Number, epoch::AbstractDateTime) = epoch + Millisecond(round(Int, 1000t))
+# When epoch is nothing and time is numeric, we can't compute datetime (used for fixed zenith angle)
+compute_datetime(t::Number, epoch::Nothing) = nothing
+
+using Oceananigans.Utils: IterationInterval
 
 include("gray_radiative_transfer_model.jl")
 include("rrtmgp_shared_utilities.jl")
