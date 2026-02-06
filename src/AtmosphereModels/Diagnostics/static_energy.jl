@@ -98,7 +98,7 @@ function (d::StaticEnergyKernelFunction)(i, j, k, grid)
         T = d.temperature[i, j, k]
     end
 
-    q = compute_moisture_fractions(i, j, k, grid, d.microphysics, ρᵣ, qᵗ, d.microphysical_fields)
+    q = grid_moisture_fractions(i, j, k, grid, d.microphysics, ρᵣ, qᵗ, d.microphysical_fields)
     cᵖᵐ = Thermodynamics.mixture_heat_capacity(q, d.thermodynamic_constants)
 
     g = d.thermodynamic_constants.gravitational_acceleration
@@ -118,4 +118,3 @@ function (d::StaticEnergyKernelFunction)(i, j, k, grid)
         return ρᵣ * e
     end
 end
-

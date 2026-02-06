@@ -71,7 +71,7 @@ To build a model with `MoistAirBuoyancy`, we include potential temperature and t
 tracers `θ` and `qᵗ` to the model.
 
 ```jldoctest mab
-model = NonhydrostaticModel(; grid, buoyancy, tracers = (:θ, :qᵗ))
+model = NonhydrostaticModel(grid; buoyancy, tracers = (:θ, :qᵗ))
 
 # output
 NonhydrostaticModel{CPU, RectilinearGrid}(time = 0 seconds, iteration = 0)
@@ -98,7 +98,7 @@ function MoistAirBuoyancy(grid;
     return MoistAirBuoyancy(reference_state, thermodynamic_constants)
 end
 
-Base.summary(b::MoistAirBuoyancy) = "MoistAirBuoyancy"
+Base.summary(::MoistAirBuoyancy) = "MoistAirBuoyancy"
 
 function Base.show(io::IO, b::MoistAirBuoyancy)
     print(io, summary(b), ":\n",
@@ -118,7 +118,6 @@ const c = Center()
         qᵗ = tracers.qᵗ[i, j, k]
     end
 
-    z = Oceananigans.Grids.znode(i, j, k, grid, c, c, c)
     pˢᵗ = mb.reference_state.standard_pressure
     q = MoistureMassFractions(qᵗ)
     𝒰 = LiquidIcePotentialTemperatureState(θ, q, pˢᵗ, pᵣ)
@@ -269,9 +268,7 @@ const c = Center()
         θᵢ = θ[i, j, k]
         qᵗᵢ = qᵗ[i, j, k]
         pᵣ = mb.reference_state.pressure[i, j, k]
-        ρᵣ = mb.reference_state.density[i, j, k]
     end
-    z = Oceananigans.Grids.znode(i, j, k, grid, c, c, c)
     pˢᵗ = mb.reference_state.standard_pressure
     q = MoistureMassFractions(qᵗᵢ)
     𝒰 = LiquidIcePotentialTemperatureState(θᵢ, q, pˢᵗ, pᵣ)
@@ -344,11 +341,9 @@ Adapt.adapt_structure(to, ck::CondensateKernel) = CondensateKernel(adapt(to, ck.
         θᵢ = θ[i, j, k]
         qᵗᵢ = qᵗ[i, j, k]
         pᵣ = mb.reference_state.pressure[i, j, k]
-        ρᵣ = mb.reference_state.density[i, j, k]
     end
 
     # First assume non-saturation.
-    z = Oceananigans.Grids.znode(i, j, k, grid, c, c, c)
     pˢᵗ = mb.reference_state.standard_pressure
     q = MoistureMassFractions(qᵗᵢ)
     𝒰 = LiquidIcePotentialTemperatureState(Tᵢ, q, pˢᵗ, pᵣ)

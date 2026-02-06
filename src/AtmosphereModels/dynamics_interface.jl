@@ -18,11 +18,17 @@ Return the default dynamics for the given grid and thermodynamic constants.
 function default_dynamics end
 
 """
-    materialize_dynamics(dynamics_stub, grid, boundary_conditions)
+    materialize_dynamics(dynamics_stub, grid, boundary_conditions, thermodynamic_constants, microphysics=nothing)
 
 Materialize a dynamics stub into a complete dynamics object with all required fields.
+
+The `microphysics` argument is optional and used by dynamics types that need to know
+the microphysics scheme to create appropriate prognostic state (e.g., `ParcelDynamics`).
 """
 function materialize_dynamics end
+
+# Default: ignore microphysics argument (for backward compatibility)
+materialize_dynamics(d, grid, bcs, constants, microphysics) = materialize_dynamics(d, grid, bcs, constants)
 
 """
     materialize_momentum_and_velocities(dynamics, grid, boundary_conditions)
@@ -30,6 +36,21 @@ function materialize_dynamics end
 Create momentum and velocity fields for the given dynamics.
 """
 function materialize_momentum_and_velocities end
+
+"""
+    materialize_velocities(velocities, grid)
+
+Create velocity fields from a velocity specification (e.g., `PrescribedVelocityFields`).
+"""
+function materialize_velocities end
+
+"""
+    update_dynamics_with_velocities(dynamics, velocities)
+
+Update dynamics with velocity specification. Default is a no-op.
+For `PrescribedDynamics`, stores the `PrescribedVelocityFields` for dispatch.
+"""
+update_dynamics_with_velocities(dynamics, velocities) = dynamics
 
 """
     dynamics_pressure_solver(dynamics, grid)
@@ -111,6 +132,33 @@ function buoyancy_forceᶜᶜᶜ end
 #####
 
 """
+    validate_velocity_boundary_conditions(dynamics, user_boundary_conditions)
+
+Validate that velocity boundary conditions are only provided for dynamics that support them.
+
+By default, throws an error if the user provides boundary conditions for `:u`, `:v`, or `:w`,
+since velocity is a diagnostic field for most dynamics (e.g., anelastic, compressible).
+
+For `PrescribedDynamics`, velocity boundary conditions are allowed since velocities are
+regular fields that can be set directly.
+"""
+function validate_velocity_boundary_conditions(dynamics, user_boundary_conditions)
+    velocity_names = (:u, :v, :w)
+    user_bc_names = keys(user_boundary_conditions)
+    provided_velocity_bcs = filter(name -> name ∈ user_bc_names, velocity_names)
+
+    if !isempty(provided_velocity_bcs)
+        throw(ArgumentError(
+            "Boundary conditions for velocity components $(provided_velocity_bcs) are not supported " *
+            "for $(summary(dynamics)). Velocity boundary conditions are only valid for PrescribedDynamics " *
+            "(kinematic models) where velocities are regular fields. For prognostic dynamics, " *
+            "set boundary conditions on momentum fields (:ρu, :ρv, :ρw) instead."
+        ))
+    end
+    return nothing
+end
+
+"""
     surface_pressure(dynamics)
 
 Return the surface pressure used for boundary condition regularization.
@@ -141,6 +189,16 @@ initialize_model_thermodynamics!(model) = nothing  # default: do nothing
 #####
 
 """
+    prognostic_momentum_field_names(dynamics)
+
+Return a tuple of prognostic momentum field names.
+
+For prognostic dynamics (anelastic, compressible), returns `(:ρu, :ρv, :ρw)`.
+For kinematic dynamics (prescribed velocities), returns an empty tuple.
+"""
+prognostic_momentum_field_names(::Any) = (:ρu, :ρv, :ρw)
+
+"""
     prognostic_dynamics_field_names(dynamics)
 
 Return a tuple of prognostic field names specific to the dynamics formulation.
@@ -156,6 +214,19 @@ prognostic_dynamics_field_names(::Any) = ()
 Return a tuple of additional (diagnostic) field names for the dynamics.
 """
 additional_dynamics_field_names(::Any) = ()
+
+"""
+    velocity_boundary_condition_names(dynamics)
+
+Return a tuple of velocity field names that need default boundary conditions.
+
+For most dynamics (anelastic, compressible), velocities are diagnostic and their boundary
+conditions are created internally. Returns an empty tuple.
+
+For `PrescribedDynamics`, velocities are regular fields that can have user-provided
+boundary conditions, so this returns `(:u, :v, :w)`.
+"""
+velocity_boundary_condition_names(::Any) = ()
 
 """
     dynamics_prognostic_fields(dynamics)

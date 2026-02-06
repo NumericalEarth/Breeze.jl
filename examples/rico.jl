@@ -70,17 +70,17 @@ dynamics = AnelasticDynamics(reference_state)
 # with constant transfer coefficients (see [vanZanten2011](@citet); text surrounding equations 1-4):
 
 Cᴰ = 1.229e-3 # Drag coefficient for momentum
-Cᵀ = 1.094e-3 # "Temperature" aka sensible heat transfer coefficient
+Cᵀ = 1.094e-3 # Sensible heat transfer coefficient
 Cᵛ = 1.133e-3 # Moisture flux transfer coefficient
 T₀ = 299.8    # Sea surface temperature (K)
 
 # We implement the specified bulk formula with Breeze utilities whose scope
 # currently extends only to constant coefficients (but could expand in the future),
 
-ρθ_flux = BulkSensibleHeatFlux(coefficient=Cᵀ, surface_temperature=T₀)
+ρe_flux = BulkSensibleHeatFlux(coefficient=Cᵀ, surface_temperature=T₀)
 ρqᵗ_flux = BulkVaporFlux(coefficient=Cᵛ, surface_temperature=T₀)
 
-ρθ_bcs = FieldBoundaryConditions(bottom=ρθ_flux)
+ρe_bcs = FieldBoundaryConditions(bottom=ρe_flux)
 ρqᵗ_bcs = FieldBoundaryConditions(bottom=ρqᵗ_flux)
 
 ρu_bcs = FieldBoundaryConditions(bottom=BulkDrag(coefficient=Cᴰ))
@@ -148,7 +148,7 @@ set!(∂t_ρqᵗ_large_scale, ρᵣ * ∂t_ρqᵗ_large_scale)
 # This is the key simplification that allows us to avoid interactive radiation.
 
 ∂t_ρθ_large_scale = Field{Nothing, Nothing, Center}(grid)
-∂t_θ_large_scale = - 2.5 / day # K / day
+∂t_θ_large_scale = - 2.5 / day # K / day
 set!(∂t_ρθ_large_scale, ρᵣ * ∂t_θ_large_scale)
 ρθ_large_scale_forcing = Forcing(∂t_ρθ_large_scale)
 
@@ -161,7 +161,7 @@ Fρqᵗ = (subsidence, ∂t_ρqᵗ_large_scale_forcing)
 Fρθ = (subsidence, ρθ_large_scale_forcing)
 
 forcing = (ρu=Fρu, ρv=Fρv, ρw=Fρw, ρqᵗ=Fρqᵗ, ρθ=Fρθ)
-boundary_conditions = (ρθ=ρθ_bcs, ρqᵗ=ρqᵗ_bcs, ρu=ρu_bcs, ρv=ρv_bcs)
+boundary_conditions = (ρe=ρe_bcs, ρqᵗ=ρqᵗ_bcs, ρu=ρu_bcs, ρv=ρv_bcs)
 nothing #hide
 
 # ## Model setup

@@ -90,7 +90,7 @@ See [`ExplicitImports.jl` documentation](https://juliatesting.github.io/Explicit
 ## Building the documentation locally
 
 `Breeze.jl` [documentation](https://numericalearth.github.io/BreezeDocumentation/) is generated using [`Documenter.jl`](https://github.com/JuliaDocs/Documenter.jl).
-You can preview how the documentation will look like with your changes by building the documentation locally. 
+You can preview how the documentation will look like with your changes by building the documentation locally.
 From the top-level directory of your local repository run
 
 ```sh
@@ -117,3 +117,30 @@ Pkg.add("LiveServer") # this is necessary only the first time, to install LiveSe
 using LiveSever: serve
 serve(; dir="docs/build")
 ```
+
+## Pre-commit hook
+
+This project uses [pre-commit](https://pre-commit.com/) for ensuring some minimal formatting consistency in the codebase, in particular related to whitespace.
+
+### Installing a pre-commit manager
+
+You can install a "pre-commit manager" locally so that you can automatically ensure to adapt to the project style.
+There are multiple pre-commit managers you can install, some alternatives are:
+
+* the original [pre-commit](https://pre-commit.com/): follow the [instructions to install it](https://pre-commit.com/#install), and then move in the terminal inside the Breeze repository and run the command
+  ```
+  pre-commit install
+  ```
+  to install the hooks
+* a new (and faster) manager called [prek](https://prek.j178.dev/): follow the [instructions to install it](https://prek.j178.dev/installation/), and then move in the terminal inside the Breeze repository and run the command
+  ```
+  prek install
+  ```
+  to install the hooks.
+
+That's it!
+After you install the pre-commit manager and the hooks for this repository, you don't have to do anything else manually: whenever you run `git commit` in this repository, the manager will automatically run the hooks and fix the possible issues.
+
+!!! Note
+    If a pre-commit hooks detects an issue and automatically fixes it, the git commit actually fails.
+    In that case you will have to `git add` the new changes and `git commit` again to make the commit successful.

@@ -1,4 +1,5 @@
 [deps]
+Adapt = "79e6a3ab-5dfb-504d-930d-738a2a938a0e"
 Aqua = "4c88cf16-eb10-579e-8560-4a9242c79595"
 Breeze = "660aa2fb-d4c8-4359-a52c-9c057bc511da"
 CUDA = "052768ef-5323-5732-b1bb-66c8b64840ba"
@@ -19,6 +20,7 @@ Test = "8dfed614-e22c-5e08-85e1-65c5234f0b40"
 Breeze = {path = ".."}
 
 [compat]
+Adapt = "4.3.0"
 Aqua = "0.8"
 CUDA = "5"
 ClimaComms = "0.6"
@@ -28,7 +30,7 @@ Documenter = "1.15"
 ExplicitImports = "1.13"
 GPUArraysCore = "0.2"
 NCDatasets = "0.14"
-Oceananigans = "0.102, 0.103"
+Oceananigans = "0.104"
 ParallelTestRunner = "2.0.1"
 RRTMGP = "0.21"
 Statistics = "<0.0.1, 1"

@@ -23,7 +23,7 @@ function run_nan_checker_test(arch; erroring)
     return nothing
 end
 
-@testset "AtmosphereModel [$(FT)]" for FT in (Float32, Float64)
+@testset "AtmosphereModel [$(FT)]" for FT in test_float_types()
     Oceananigans.defaults.FloatType = FT
     Nx = Ny = 3
     grid = RectilinearGrid(default_arch; size=(Nx, Ny, 8), x=(0, 1_000), y=(0, 1_000), z=(0, 1_000))
@@ -49,8 +49,8 @@ end
             reference_state = ReferenceState(grid, constants, surface_pressure=p₀, potential_temperature=θ₀)
 
             # Check that interpolating to the first face (k=1) recovers surface values
-            q₀ = Breeze.Thermodynamics.MoistureMassFractions{FT} |> zero
-            ρ₀ = Breeze.Thermodynamics.density(θ₀, p₀, q₀, constants)
+            # Note: surface_density correctly converts potential temperature to temperature using the Exner function
+            ρ₀ = surface_density(reference_state)
             for i = 1:Nx, j = 1:Ny
                 @test p₀ ≈ @allowscalar ℑzᵃᵃᶠ(i, j, 1, grid, reference_state.pressure)
                 @test ρ₀ ≈ @allowscalar ℑzᵃᵃᶠ(i, j, 1, grid, reference_state.density)
@@ -61,17 +61,22 @@ end
 
             # Test round-trip consistency: set θ, get ρe; then set ρe, get back θ
             set!(model; θ = θ₀)
+
             ρe₁ = Field(static_energy_density(model))
+            e₁ = Field(static_energy(model))
+            ρθ₁ = Field(liquid_ice_potential_temperature_density(model))
             θ₁ = Field(liquid_ice_potential_temperature(model))
 
             set!(model; ρe = ρe₁)
-            @test static_energy_density(model) ≈ ρe₁
+            @test static_energy(model) ≈ e₁
             @test liquid_ice_potential_temperature(model) ≈ θ₁
+            @test static_energy_density(model) ≈ ρe₁
+            @test liquid_ice_potential_temperature_density(model) ≈ ρθ₁
         end
     end
 end
 
-@testset "Saturation and LiquidIcePotentialTemperatureField (WarmPhase) [$(FT)]" for FT in (Float32, Float64), formulation in (:LiquidIcePotentialTemperature, :StaticEnergy)
+@testset "Saturation and LiquidIcePotentialTemperatureField (WarmPhase) [$(FT)]" for FT in test_float_types(), formulation in (:LiquidIcePotentialTemperature, :StaticEnergy)
     Oceananigans.defaults.FloatType = FT
     grid = RectilinearGrid(default_arch; size=(8, 8, 8), x=(0, 1_000), y=(0, 1_000), z=(0, 1_000))
     constants = ThermodynamicConstants()
@@ -104,7 +109,7 @@ end
     @test qᵛ⁺k ≈ qᵛ⁺_expected rtol=FT(1e-5)
 end
 
-@testset "AtmosphereModel with TetensFormula [$(FT)]" for FT in (Float32, Float64)
+@testset "AtmosphereModel with TetensFormula [$(FT)]" for FT in test_float_types()
     Oceananigans.defaults.FloatType = FT
     grid = RectilinearGrid(default_arch; size=(4, 4, 4), x=(0, 1_000), y=(0, 1_000), z=(0, 1_000))
     tetens = TetensFormula()
@@ -122,4 +127,3 @@ end
         @test model.clock.iteration == 1
     end
 end
-
