@@ -457,7 +457,7 @@ rain evaporation, and condensation.
 
 Returns `(rᵛ_new, rᶜˡ_final, rʳ_final, net_phase_change)`.
 """
-@inline function kessler_microphysics_pointwise(rᵛ, rᶜˡ, rʳ, Δr𝕎, T, ρ, p, Δt,
+@inline function step_kessler_microphysics(rᵛ, rᶜˡ, rʳ, Δr𝕎, T, ρ, p, Δt,
                                            microphysics, constants, f₅, δT, FT)
     surface = PlanarLiquidSurface()
     Cᵨ     = microphysics.density_scale
@@ -679,8 +679,8 @@ end
 
                 # Core microphysics step
                 rᵛ_new, rᶜˡ_final, rʳ_final, net_phase_change =
-                    kessler_microphysics_pointwise(rᵛ, rᶜˡ, rʳ, Δr𝕎, Tᵏ, ρ, p, Δtₛ,
-                                                   microphysics, constants, f₅, δT, FT)
+                    step_kessler_microphysics(rᵛ, rᶜˡ, rʳ, Δr𝕎, Tᵏ, ρ, p, Δtₛ,
+                                              microphysics, constants, f₅, δT, FT)
 
                 μ.qᵛ[i, j, k]  = rᵛ_new
                 μ.qᶜˡ[i, j, k] = rᶜˡ_final
@@ -733,8 +733,8 @@ end
 
             # Core microphysics step (shared with ParcelModel)
             rᵛ_new, rᶜˡ_final, rʳ_final, net_phase_change =
-                kessler_microphysics_pointwise(rᵛ, rᶜˡ, rʳ, Δr𝕎, Tᵏ, ρ, p, Δtₛ,
-                                               microphysics, constants, f₅, δT, FT)
+                step_kessler_microphysics(rᵛ, rᶜˡ, rʳ, Δr𝕎, Tᵏ, ρ, p, Δtₛ,
+                                          microphysics, constants, f₅, δT, FT)
 
             μ.qᵛ[i, j, k]  = rᵛ_new
             μ.qᶜˡ[i, j, k] = rᶜˡ_final
@@ -865,9 +865,9 @@ function AtmosphereModels.microphysics_model_update!(microphysics::DCMIP2016KM, 
     FT = typeof(ρ)
 
     # Core microphysics step (no sedimentation for parcel: Δr𝕎 = 0)
-    rᵛ_new, rᶜˡ_final, rʳ_final, _ = kessler_microphysics_pointwise(
-        rᵛ, rᶜˡ, rʳ, zero(FT), T, ρ, p_parcel, Δt,
-        microphysics, constants, f₅, δT, FT)
+    rᵛ_new, rᶜˡ_final, rʳ_final, _ = 
+        step_kessler_microphysics!(rᵛ, rᶜˡ, rʳ, zero(FT), T, ρ, p_parcel, Δt,
+                                   microphysics, constants, f₅, δT, FT)
 
     # Convert mixing ratios → mass fractions (shared helper)
     _, qᶜˡ_final, qʳ_final, qᵗ_final = mixing_ratios_to_mass_fractions(rᵛ_new, rᶜˡ_final, rʳ_final)
