@@ -50,55 +50,47 @@ end
 get_temperature(model) = Array(interior(model.temperature))
 
 #####
-##### Part (a): Model construction tests
+##### Tests grouped by topology
 #####
 
-@testset "Reactant model construction" begin
-    @info "Testing Reactant model construction..."
+@testset "Reactant CompressibleDynamics" begin
+    @info "Testing Reactant CompressibleDynamics compilation..."
+
     for config in test_topologies
         @testset "$(config.name)" begin
             @info "  Testing $(config.name)..."
+
+            # Build grid and model once per topology
             grid = make_grid(ReactantState(), config)
             model = AtmosphereModel(grid; dynamics = CompressibleDynamics())
 
-            @test model.grid === grid
-            @test model.dynamics isa CompressibleDynamics
+            @testset "Construction" begin
+                @test model.grid === grid
+                @test model.dynamics isa CompressibleDynamics
 
-            # Initialize with simple constant values
-            set!(model; θ = 300.0, ρ = 1.0)
+                # Initialize with simple constant values
+                set!(model; θ = 300.0, ρ = 1.0)
 
-            T = get_temperature(model)
-            @test all(isfinite, T)
-            @test all(T .> 0)
-        end
-    end
-end
+                T = get_temperature(model)
+                @test all(isfinite, T)
+                @test all(T .> 0)
+            end
 
-#####
-##### Part (b): Time step compilation tests
-#####
+            @testset "Compiled time_step!" begin
+                @info "    Compiling time_step!..."
+                Δt = 0.01
+                nsteps = 2
 
-@testset "Reactant time_step! compilation" begin
-    @info "Testing Reactant time_step! compilation..."
-    for config in test_topologies
-        @testset "$(config.name)" begin
-            @info "  Compiling time_step! for $(config.name)..."
-            grid = make_grid(ReactantState(), config)
-            model = AtmosphereModel(grid; dynamics = CompressibleDynamics())
-            set!(model; θ = 300.0, ρ = 1.0)
+                compiled_run = Reactant.@compile sync=true run_time_steps!(model, Δt, nsteps)
+                @test compiled_run !== nothing
 
-            Δt = 0.01
-            nsteps = 2
+                @info "    Running compiled time_step!..."
+                compiled_run(model, Δt, nsteps)
 
-            compiled_run = Reactant.@compile sync=true run_time_steps!(model, Δt, nsteps)
-            @test compiled_run !== nothing
-
-            @info "  Running compiled time_step! for $(config.name)..."
-            compiled_run(model, Δt, nsteps)
-
-            T = get_temperature(model)
-            @test all(isfinite, T)
-            @test all(T .> 0)
+                T = get_temperature(model)
+                @test all(isfinite, T)
+                @test all(T .> 0)
+            end
         end
     end
 end
