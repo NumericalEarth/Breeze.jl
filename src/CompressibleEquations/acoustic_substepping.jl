@@ -27,15 +27,20 @@ using Oceananigans.Grids: Periodic, Bounded,
 using Adapt: Adapt, adapt
 
 #####
-##### Topology-aware interpolation operators (to be moved to Oceananigans)
+##### Topology-aware interpolation and difference operators
 #####
 ##### These avoid halo access for frozen fields during acoustic substeps.
 ##### Convention: ℑxTᶠᵃᵃ is the topology-aware version of ℑxᶠᵃᵃ.
+##### Convention: δxTᶠᵃᵃ is the topology-aware version of δxTᶠᵃᵃ.
 #####
 
 # Fallback: use standard interpolation
 @inline ℑxTᶠᵃᵃ(i, j, k, grid, f::AbstractArray) = ℑxᶠᵃᵃ(i, j, k, grid, f)
 @inline ℑyTᵃᶠᵃ(i, j, k, grid, f::AbstractArray) = ℑyᵃᶠᵃ(i, j, k, grid, f)
+@inline ℑzTᵃᵃᶠ(i, j, k, grid, f::AbstractArray) = ℑzᵃᵃᶠ(i, j, k, grid, f)
+
+# Fallback: use standard difference
+@inline δzTᵃᵃᶠ(i, j, k, grid, f::AbstractArray) = δzᵃᵃᶠ(i, j, k, grid, f)
 
 # Periodic: wrap at i=1 / j=1
 const PX = AbstractUnderlyingGrid{FT, Periodic} where FT
@@ -53,6 +58,34 @@ end
                      ℑyᵃᶠᵃ(i, j, k, grid, f))
 end
 
+# Bounded vertical: handle boundary faces k=1 and k=Nz+1
+# For a bounded vertical grid, the vertical interpolation to face k
+# averages values at cell centers k-1 and k.
+# At k=1 (bottom face), there is no k-1 center in the interior, so use k=1 center value.
+# At k=Nz+1 (top face), there is no k+1 center in the interior, so use k=Nz center value.
+const BZ = AbstractUnderlyingGrid{FT, <:Any, <:Any, Bounded} where FT
+
+@inline function ℑzTᵃᵃᶠ(i, j, k, grid::BZ, f::AbstractArray)
+    Nz = size(grid, 3)
+    @inbounds ifelse(k == 1,
+                     f[i, j, 1],
+                     ifelse(k == Nz + 1,
+                            f[i, j, Nz],
+                            ℑzᵃᵃᶠ(i, j, k, grid, f)))
+end
+
+# Vertical difference for bounded grids: δz f at face k = f[k] - f[k-1]
+# At k=1 (bottom face), there is no k-1 center, so return 0.
+# At k=Nz+1 (top face), there is no k center, so return 0.
+@inline function δzTᵃᵃᶠ(i, j, k, grid::BZ, f::AbstractArray)
+    Nz = size(grid, 3)
+    @inbounds ifelse(k == 1,
+                     zero(eltype(f)),
+                     ifelse(k == Nz + 1,
+                            zero(eltype(f)),
+                            δzᵃᵃᶠ(i, j, k, grid, f)))
+end
+
 """
     AcousticSubstepper
 
@@ -60,7 +93,7 @@ Storage and parameters for acoustic substepping within each RK stage.
 
 Follows performance patterns from Oceananigans.SplitExplicitTimeDiscretizationFreeSurface:
 - Precomputed thermodynamic coefficients (ψ = Rᵐ T, c²) for on-the-fly pressure
-- Stage-frozen reference state (ρᵣ, χᵣ) for perturbation pressure gradient
+- Stage-frozen reference state (ρᵣ, ρχᵣ) for perturbation pressure gradient
 - Time-averaged velocity fields for scalar advection
 - Slow tendency storage for momentum, density, and thermodynamic variable
 
@@ -81,18 +114,21 @@ Fields
 - `substeps`: Number of acoustic substeps per full time step
 - `time_discretization`: Vertical time_discretization strategy (`nothing` or [`VerticallyImplicit`](@ref))
 - `divergence_damping_coefficient`: Divergence damping coefficient (typically 0.05-0.1)
-- `ψ`: Pressure coefficient ψ = Rᵐ T, so p = ψ ρ (CenterField)
-- `c²`: Moist sound speed squared c² = γᵐ ψ (CenterField)
-- `ū, v̄, w̄`: Time-averaged velocities for scalar advection
-- `Gˢρu, Gˢρv, Gˢρw`: Slow momentum tendencies (fixed during acoustic loop)
+- `pressure_coefficient`: Pressure coefficient ψ = Rᵐ T, so p = ψ ρ (CenterField)
+- `sound_speed_squared`: Moist acoustic sound speed squared cᵃᶜ² = γᵐ ψ (CenterField)
+- `averaged_velocities`: NamedTuple with (u, v, w) time-averaged velocities for scalar advection
+- `slow_momentum_tendencies`: NamedTuple with (ρu, ρv, ρw) slow momentum tendencies (fixed during acoustic loop)
 - `Gˢρ`: Slow density tendency (fixed during acoustic loop)
-- `Gˢχ`: Slow thermodynamic tendency (fixed during acoustic loop)
+- `Gˢρχ`: Slow thermodynamic tendency (fixed during acoustic loop)
 - `ρᵣ`: Stage-frozen reference density
-- `χᵣ`: Stage-frozen reference thermodynamic variable (ρθ or ρe)
+- `ρχᵣ`: Stage-frozen reference thermodynamic variable (ρθ or ρe)
+- `perturbation_momentum`: NamedTuple with (ρu, ρv, ρw) perturbation momentum
+- `ρ″`: Perturbation density
+- `ρχ″`: Perturbation thermodynamic variable
 - `vertical_solver`: BatchedTridiagonalSolver for w-ρ implicit coupling (`nothing` when explicit)
 - `rhs`: Right-hand side storage for tridiagonal solve (`nothing` when explicit)
 """
-struct AcousticSubstepper{N, SS, FT, CF, UF, VF, WF, TS, RHS}
+struct AcousticSubstepper{N, SS, FT, CF, AV, SM, PM, TS, RHS}
     # Number of acoustic substeps per full time step
     substeps :: N
 
@@ -103,31 +139,25 @@ struct AcousticSubstepper{N, SS, FT, CF, UF, VF, WF, TS, RHS}
     divergence_damping_coefficient :: FT
 
     # Precomputed thermodynamic coefficients (computed once per RK stage)
-    ψ  :: CF  # Pressure coefficient: p = ψ ρ = Rᵐ T ρ
-    c² :: CF  # Sound speed squared: c² = γᵐ ψ
+    pressure_coefficient :: CF  # ψ = Rᵐ T, so p = ψ ρ
+    sound_speed_squared  :: CF  # cᵃᶜ² = γᵐ ψ = γᵐ Rᵐ T (acoustic sound speed squared)
 
-    # Time-averaged velocities for scalar advection
-    ū :: UF  # XFaceField
-    v̄ :: VF  # YFaceField
-    w̄ :: WF  # ZFaceField
+    # Time-averaged velocities for scalar advection (NamedTuple with u, v, w)
+    averaged_velocities :: AV
 
     # Slow tendencies (full RHS R^t, computed once per RK stage)
-    Gˢρu :: UF  # Slow x-momentum tendency
-    Gˢρv :: VF  # Slow y-momentum tendency
-    Gˢρw :: WF  # Slow z-momentum tendency
+    slow_momentum_tendencies :: SM  # NamedTuple with ρu, ρv, ρw
     Gˢρ  :: CF  # Slow density tendency = -∇·m^t
-    Gˢχ  :: CF  # Slow thermodynamic tendency
+    Gˢρχ :: CF  # Slow thermodynamic tendency
 
     # Stage-frozen reference state
-    ρᵣ :: CF  # Stage-frozen density
-    χᵣ :: CF  # Stage-frozen thermodynamic variable (ρθ or ρe)
+    ρᵣ  :: CF  # Stage-frozen density
+    ρχᵣ :: CF  # Stage-frozen thermodynamic variable (ρθ or ρe)
 
     # Perturbation fields (advanced during acoustic loop, start at zero each stage)
-    ρu″ :: UF  # Perturbation x-momentum
-    ρv″ :: VF  # Perturbation y-momentum
-    ρw″ :: WF  # Perturbation z-momentum
+    perturbation_momentum :: PM  # NamedTuple with ρu, ρv, ρw
     ρ″  :: CF  # Perturbation density
-    χ″  :: CF  # Perturbation thermodynamic variable
+    ρχ″ :: CF  # Perturbation thermodynamic variable
 
     # Vertical tridiagonal solver for implicit w-ρ coupling (nothing when explicit)
     vertical_solver :: TS
@@ -140,23 +170,17 @@ Adapt.adapt_structure(to, a::AcousticSubstepper) =
     AcousticSubstepper(a.substeps,
                        a.time_discretization,
                        a.divergence_damping_coefficient,
-                       adapt(to, a.ψ),
-                       adapt(to, a.c²),
-                       adapt(to, a.ū),
-                       adapt(to, a.v̄),
-                       adapt(to, a.w̄),
-                       adapt(to, a.Gˢρu),
-                       adapt(to, a.Gˢρv),
-                       adapt(to, a.Gˢρw),
+                       adapt(to, a.pressure_coefficient),
+                       adapt(to, a.sound_speed_squared),
+                       map(f -> adapt(to, f), a.averaged_velocities),
+                       map(f -> adapt(to, f), a.slow_momentum_tendencies),
                        adapt(to, a.Gˢρ),
-                       adapt(to, a.Gˢχ),
+                       adapt(to, a.Gˢρχ),
                        adapt(to, a.ρᵣ),
-                       adapt(to, a.χᵣ),
-                       adapt(to, a.ρu″),
-                       adapt(to, a.ρv″),
-                       adapt(to, a.ρw″),
+                       adapt(to, a.ρχᵣ),
+                       map(f -> adapt(to, f), a.perturbation_momentum),
                        adapt(to, a.ρ″),
-                       adapt(to, a.χ″),
+                       adapt(to, a.ρχ″),
                        adapt(to, a.vertical_solver),
                        adapt(to, a.rhs))
 
@@ -173,47 +197,47 @@ function AcousticSubstepper(grid, split_explicit::SplitExplicitTimeDiscretizatio
     divergence_damping_coefficient = convert(FT, split_explicit.divergence_damping_coefficient)
 
     # Thermodynamic coefficients
-    ψ = CenterField(grid)
-    c² = CenterField(grid)
+    pressure_coefficient = CenterField(grid)
+    sound_speed_squared = CenterField(grid)
 
-    # Time-averaged velocities
-    ū = XFaceField(grid)
-    v̄ = YFaceField(grid)
-    w̄ = ZFaceField(grid)
+    # Time-averaged velocities (for scalar advection)
+    averaged_velocities = (u = XFaceField(grid),
+                           v = YFaceField(grid),
+                           w = ZFaceField(grid))
 
     # Slow momentum tendencies
-    Gˢρu = XFaceField(grid)
-    Gˢρv = YFaceField(grid)
-    Gˢρw = ZFaceField(grid)
+    slow_momentum_tendencies = (ρu = XFaceField(grid),
+                                ρv = YFaceField(grid),
+                                ρw = ZFaceField(grid))
 
     # Slow density tendency
     Gˢρ = CenterField(grid)
 
     # Slow thermodynamic tendency
-    Gˢχ = CenterField(grid)
+    Gˢρχ = CenterField(grid)
 
     # Stage-frozen reference state
     ρᵣ = CenterField(grid)
-    χᵣ = CenterField(grid)
+    ρχᵣ = CenterField(grid)
 
     # Perturbation fields (zeroed at start of each RK stage)
-    ρu″ = XFaceField(grid)
-    ρv″ = YFaceField(grid)
-    ρw″ = ZFaceField(grid)
+    perturbation_momentum = (ρu = XFaceField(grid),
+                             ρv = YFaceField(grid),
+                             ρw = ZFaceField(grid))
     ρ″ = CenterField(grid)
-    χ″ = CenterField(grid)
+    ρχ″ = CenterField(grid)
 
     # Vertical tridiagonal solver (only allocated for implicit vertical stepping)
     vertical_solver = build_acoustic_vertical_solver(grid, time_discretization)
     rhs = build_acoustic_vertical_rhs(grid, time_discretization)
 
     return AcousticSubstepper(Ns, time_discretization, divergence_damping_coefficient,
-                              ψ, c²,
-                              ū, v̄, w̄,
-                              Gˢρu, Gˢρv, Gˢρw,
-                              Gˢρ, Gˢχ,
-                              ρᵣ, χᵣ,
-                              ρu″, ρv″, ρw″, ρ″, χ″,
+                              pressure_coefficient, sound_speed_squared,
+                              averaged_velocities,
+                              slow_momentum_tendencies,
+                              Gˢρ, Gˢρχ,
+                              ρᵣ, ρχᵣ,
+                              perturbation_momentum, ρ″, ρχ″,
                               vertical_solver,
                               rhs)
 end
@@ -259,7 +283,7 @@ Prepare the acoustic cache for an RK stage by storing the stage-frozen
 reference state and computing linearized EOS coefficients.
 
 This function:
-1. Stores the stage-frozen reference density ρᵣ and thermodynamic variable χᵣ
+1. Stores the stage-frozen reference density ρᵣ and thermodynamic variable ρχᵣ
 2. Computes the linearized acoustic pressure coefficient ψ = Rᵐ T and sound
    speed squared c² = γᵐ ψ, held fixed during acoustic substepping
 
@@ -277,11 +301,11 @@ function prepare_acoustic_cache!(substepper, model)
     # Store stage-frozen reference state
     χ = thermodynamic_density(model.formulation)
     parent(substepper.ρᵣ) .= parent(model.dynamics.density)
-    parent(substepper.χᵣ) .= parent(χ)
+    parent(substepper.ρχᵣ) .= parent(χ)
 
     # Compute thermodynamic coefficients: ψ = Rᵐ T, c² = γᵐ ψ
     launch!(arch, grid, :xyz, _compute_acoustic_coefficients!,
-            substepper.ψ, substepper.c²,
+            substepper.pressure_coefficient, substepper.sound_speed_squared,
             model.dynamics.density,
             model.specific_moisture,
             model.temperature,
@@ -293,18 +317,19 @@ function prepare_acoustic_cache!(substepper, model)
     return nothing
 end
 
-@kernel function _compute_acoustic_coefficients!(ψ, c², ρ_field, qᵗ_field, T_field,
+@kernel function _compute_acoustic_coefficients!(pressure_coefficient, sound_speed_squared,
+                                                  ρ, qᵗ, T,
                                                   grid, microphysics, microphysical_fields, constants)
     i, j, k = @index(Global, NTuple)
 
     @inbounds begin
-        ρ = ρ_field[i, j, k]
-        qᵗ = qᵗ_field[i, j, k]
-        T = T_field[i, j, k]
+        ρⁱ = ρ[i, j, k]
+        qᵗⁱ = qᵗ[i, j, k]
+        Tⁱ = T[i, j, k]
     end
 
     # Compute moisture fractions
-    q = grid_moisture_fractions(i, j, k, grid, microphysics, ρ, qᵗ, microphysical_fields)
+    q = grid_moisture_fractions(i, j, k, grid, microphysics, ρⁱ, qᵗⁱ, microphysical_fields)
 
     # Mixture thermodynamic properties
     Rᵐ = mixture_gas_constant(q, constants)
@@ -312,12 +337,13 @@ end
     cᵛᵐ = cᵖᵐ - Rᵐ
     γᵐ = cᵖᵐ / cᵛᵐ
 
-    @inbounds begin
-        # Pressure coefficient: p = ψ ρ
-        ψ[i, j, k] = Rᵐ * T
+    # Pressure coefficient ψ = Rᵐ T (so p = ψ ρ)
+    ψⁱ = Rᵐ * Tⁱ
 
-        # Moist sound speed squared: c² = γᵐ ψ = γᵐ Rᵐ T
-        c²[i, j, k] = γᵐ * ψ[i, j, k]
+    @inbounds begin
+        pressure_coefficient[i, j, k] = ψⁱ
+        # Acoustic sound speed squared: cᵃᶜ² = γᵐ ψ = γᵐ Rᵐ T
+        sound_speed_squared[i, j, k] = γᵐ * ψⁱ
     end
 end
 
@@ -330,35 +356,37 @@ end
 #####
 
 function acoustic_forward_step!(substepper, Δτ, g)
-    grid = substepper.ψ.grid
+    grid = substepper.pressure_coefficient.grid
     arch = architecture(grid)
+    m″ = substepper.perturbation_momentum
+    Gˢm = substepper.slow_momentum_tendencies
 
     launch!(arch, grid, :xyz, _acoustic_forward_step!,
-            substepper.ρu″, substepper.ρv″, substepper.ρw″,
+            m″.ρu, m″.ρv, m″.ρw,
             grid, Δτ, g,
-            substepper.ρ″, substepper.ψ,
-            substepper.Gˢρu, substepper.Gˢρv, substepper.Gˢρw)
+            substepper.ρ″, substepper.pressure_coefficient,
+            Gˢm.ρu, Gˢm.ρv, Gˢm.ρw)
 
     return nothing
 end
 
 @kernel function _acoustic_forward_step!(ρu″, ρv″, ρw″, grid, Δτ, g,
-                                         ρ″, ψ, Gˢρu, Gˢρv, Gˢρw)
+                                         ρ″, pressure_coefficient, Gˢρu, Gˢρv, Gˢρw)
     i, j, k = @index(Global, NTuple)
 
     @inbounds begin
         # x-momentum: topology-aware pressure gradient and interpolation
-        ψᶠᶜᶜ = ℑxTᶠᵃᵃ(i, j, k, grid, ψ)
+        ψᶠᶜᶜ = ℑxTᶠᵃᵃ(i, j, k, grid, pressure_coefficient)
         ∂x_p″ = ψᶠᶜᶜ * δxTᶠᵃᵃ(i, j, k, grid, ρ″) / Δxᶠᶜᶜ(i, j, k, grid)
         ρu″[i, j, k] += Δτ * (Gˢρu[i, j, k] - ∂x_p″)
 
         # y-momentum: topology-aware pressure gradient and interpolation
-        ψᶜᶠᶜ = ℑyTᵃᶠᵃ(i, j, k, grid, ψ)
+        ψᶜᶠᶜ = ℑyTᵃᶠᵃ(i, j, k, grid, pressure_coefficient)
         ∂y_p″ = ψᶜᶠᶜ * δyTᵃᶠᵃ(i, j, k, grid, ρ″) / Δyᶜᶠᶜ(i, j, k, grid)
         ρv″[i, j, k] += Δτ * (Gˢρv[i, j, k] - ∂y_p″)
 
         # z-momentum: top-level pressure gradient and interpolation
-        ψᶜᶜᶠ = ℑzᵃᵃᶠ(i, j, k, grid, ψ)
+        ψᶜᶜᶠ = ℑzᵃᵃᶠ(i, j, k, grid, pressure_coefficient)
         ∂z_p″ = ψᶜᶜᶠ * ∂zᶜᶜᶠ(i, j, k, grid, ρ″)
         ρ″ᶠ = ℑzᵃᵃᶠ(i, j, k, grid, ρ″)
         Δρw″ = Δτ * (Gˢρw[i, j, k] - ∂z_p″ - g * ρ″ᶠ)
@@ -416,29 +444,31 @@ where ``\\boldsymbol{m} = (ρu, ρv, ρw)`` is the momentum updated in the forwa
 Divergence damping is applied to suppress spurious acoustic oscillations.
 """
 function acoustic_backward_step!(substepper, model, Δτ, Nτ)
-    grid = substepper.ψ.grid
+    grid = substepper.pressure_coefficient.grid
     arch = architecture(grid)
-    χᵗ = 1 / Nτ
+    averaging_weight = 1 / Nτ
+    ū = substepper.averaged_velocities
+    m″ = substepper.perturbation_momentum
 
     launch!(arch, grid, :xyz, _acoustic_backward_step!,
-            substepper.ρ″, substepper.χ″,
-            substepper.ū, substepper.v̄, substepper.w̄,
-            grid, Δτ, χᵗ, substepper.divergence_damping_coefficient,
-            substepper.ρu″, substepper.ρv″, substepper.ρw″,
-            substepper.χᵣ, substepper.ρᵣ,
+            substepper.ρ″, substepper.ρχ″,
+            ū.u, ū.v, ū.w,
+            grid, Δτ, averaging_weight, substepper.divergence_damping_coefficient,
+            m″.ρu, m″.ρv, m″.ρw,
+            substepper.ρχᵣ, substepper.ρᵣ,
             model.momentum.ρu, model.momentum.ρv, model.momentum.ρw,
             model.dynamics.density,
-            substepper.Gˢρ, substepper.Gˢχ)
+            substepper.Gˢρ, substepper.Gˢρχ)
 
     return nothing
 end
 
-@kernel function _acoustic_backward_step!(ρ″, χ″, ū, v̄, w̄,
-                                           grid, Δτ, χᵗ, κᵈ,
-                                           ρu″, ρv″, ρw″,
-                                           χᵣ, ρᵣ,
-                                           ρu, ρv, ρw, ρ,
-                                           Gˢρ, Gˢχ)
+@kernel function _acoustic_backward_step!(ρ″, ρχ″, ū, v̄, w̄,
+                                          grid, Δτ, averaging_weight, κᵈ,
+                                          ρu″, ρv″, ρw″,
+                                          ρχᵣ, ρᵣ,
+                                          ρu, ρv, ρw, ρ,
+                                          Gˢρ, Gˢρχ)
     i, j, k = @index(Global, NTuple)
 
     @inbounds begin
@@ -453,8 +483,8 @@ end
         ρ″[i, j, k] *= (1 - κᵈ)
 
         # --- Thermodynamic perturbation update ---
-        s̄ = χᵣ[i, j, k] / ρᵣ[i, j, k]
-        χ″[i, j, k] += Δτ * (Gˢχ[i, j, k] - s̄ * div_m″)
+        s̄ = ρχᵣ[i, j, k] / ρᵣ[i, j, k]
+        ρχ″[i, j, k] += Δτ * (Gˢρχ[i, j, k] - s̄ * div_m″)
 
         # --- Accumulate time-averaged velocities ---
         # Topology-aware interpolation for perturbation density (no halos filled)
@@ -463,9 +493,9 @@ end
         ρᶜᶠᶜ = ℑyᵃᶠᵃ(i, j, k, grid, ρ) + ℑyTᵃᶠᵃ(i, j, k, grid, ρ″)
         ρᶜᶜᶠ = ℑzᵃᵃᶠ(i, j, k, grid, ρ) + ℑzᵃᵃᶠ(i, j, k, grid, ρ″)
 
-        ū[i, j, k] += χᵗ * (ρu[i, j, k] + ρu″[i, j, k]) / ρᶠᶜᶜ
-        v̄[i, j, k] += χᵗ * (ρv[i, j, k] + ρv″[i, j, k]) / ρᶜᶠᶜ
-        w̄[i, j, k] += χᵗ * (ρw[i, j, k] + ρw″[i, j, k]) / ρᶜᶜᶠ
+        ū[i, j, k] += averaging_weight * (ρu[i, j, k] + ρu″[i, j, k]) / ρᶠᶜᶜ
+        v̄[i, j, k] += averaging_weight * (ρv[i, j, k] + ρv″[i, j, k]) / ρᶜᶠᶜ
+        w̄[i, j, k] += averaging_weight * (ρw[i, j, k] + ρw″[i, j, k]) / ρᶜᶜᶠ
     end
 end
 
@@ -476,12 +506,13 @@ end
 ##### (Operators Ax_qᶠᶜᶜ, Ay_qᶜᶠᶜ, Vᶜᶜᶜ etc. imported above)
 
 function acoustic_density_horizontal_step!(substepper, Δτ)
-    grid = substepper.ψ.grid
+    grid = substepper.pressure_coefficient.grid
     arch = architecture(grid)
+    m″ = substepper.perturbation_momentum
 
     launch!(arch, grid, :xyz, _acoustic_density_horizontal_step!,
             substepper.ρ″, grid, Δτ,
-            substepper.ρu″, substepper.ρv″,
+            m″.ρu, m″.ρv,
             substepper.divergence_damping_coefficient, substepper.Gˢρ)
 
     return nothing
@@ -492,6 +523,7 @@ end
 
     @inbounds begin
         Vⁱ = Vᶜᶜᶜ(i, j, k, grid)
+        # Horizontal momentum divergence perturbation: ∂(ρu″)/∂x + ∂(ρv″)/∂y
         div_m_h″ = (δxTᶜᵃᵃ(i, j, k, grid, Ax_qᶠᶜᶜ, ρu″) +
                     δyTᵃᶜᵃ(i, j, k, grid, Ay_qᶜᶠᶜ, ρv″)) / Vⁱ
 
@@ -525,18 +557,18 @@ function compute_implicit_vertical_coefficients!(substepper, Δτ)
     solver = substepper.vertical_solver
     α = substepper.time_discretization.implicit_weight
     α² = α * α
-    grid = substepper.ψ.grid
+    grid = substepper.pressure_coefficient.grid
     arch = architecture(grid)
 
     launch!(arch, grid, :xyz, _compute_implicit_vertical_coefficients!,
             solver.a, solver.b, solver.c,
-            grid, α², Δτ, substepper.ψ)
+            grid, α², Δτ, substepper.pressure_coefficient)
 
     return nothing
 end
 
 @kernel function _compute_implicit_vertical_coefficients!(lower, diag, upper,
-                                                          grid, α², Δτ, ψ)
+                                                          grid, α², Δτ, pressure_coefficient)
     i, j, k = @index(Global, NTuple)
     Nz = size(grid, 3)
 
@@ -545,7 +577,7 @@ end
         Δzᶠ = Δzᶜᶜᶠ(i, j, k, grid)  # Face spacing (between centers k-1 and k)
 
         # Coupling coefficient: α² Δτ² ψ_face / Δz_face
-        ψᶠ = ℑzᵃᵃᶠ(i, j, k, grid, ψ)
+        ψᶠ = ℑzᵃᵃᶠ(i, j, k, grid, pressure_coefficient)
         Q = α² * Δτ * Δτ * ψᶠ / Δzᶠ
 
         if k == 1 || k == Nz + 1
@@ -583,32 +615,34 @@ The RHS includes:
 After solving for (ρw)^{n+1}, updates density with the vertical mass flux divergence.
 """
 function acoustic_implicit_vertical_step!(substepper, Δτ, g)
-    grid = substepper.ψ.grid
+    grid = substepper.pressure_coefficient.grid
     arch = architecture(grid)
     rhs = substepper.rhs
+    m″ = substepper.perturbation_momentum
+    Gˢm = substepper.slow_momentum_tendencies
 
     # Build the RHS of the tridiagonal system using perturbation fields
     launch!(arch, grid, :xyz, _compute_implicit_vertical_rhs!,
             rhs, grid, Δτ, g,
-            substepper.ρw″, substepper.ρ″, substepper.ψ, substepper.Gˢρw)
+            m″.ρw, substepper.ρ″, substepper.pressure_coefficient, Gˢm.ρw)
 
     # Solve the tridiagonal system: A ρw″^{n+1} = rhs
-    solve!(substepper.ρw″, substepper.vertical_solver, rhs)
+    solve!(m″.ρw, substepper.vertical_solver, rhs)
 
     # Enforce w=0 at top boundary (k=Nz+1 is outside the solver's range)
     Nz = size(grid, 3)
-    ρw″ = substepper.ρw″
+    ρw″ = m″.ρw
     view(parent(ρw″), :, :, Nz + 1 + ρw″.data.offsets[3]) .= 0
 
     # Update perturbation density with vertical perturbation momentum divergence
     launch!(arch, grid, :xyz, _acoustic_density_vertical_step!,
-            substepper.ρ″, grid, Δτ, substepper.ρw″)
+            substepper.ρ″, grid, Δτ, m″.ρw)
 
     return nothing
 end
 
 @kernel function _compute_implicit_vertical_rhs!(rhs, grid, Δτ, g,
-                                                  ρw″, ρ″, ψ, Gˢρw)
+                                                  ρw″, ρ″, pressure_coefficient, Gˢρw)
     i, j, k = @index(Global, NTuple)
     Nz = size(grid, 3)
 
@@ -617,7 +651,7 @@ end
             rhs[i, j, k] = 0
         else
             # Perturbation pressure gradient: ψ ∂ρ″/∂z
-            ψᶠ = ℑzᵃᵃᶠ(i, j, k, grid, ψ)
+            ψᶠ = ℑzᵃᵃᶠ(i, j, k, grid, pressure_coefficient)
             ∂zp″ = ψᶠ * ∂zᶜᶜᶠ(i, j, k, grid, ρ″)
 
             # Perturbation buoyancy: -g ρ″
@@ -703,26 +737,98 @@ function acoustic_substep_loop!(model, substepper, Δt, α, U⁰)
     compute_implicit_vertical_coefficients!(substepper, Δτ, substepper.time_discretization)
 
     # Initialize perturbation fields to zero
-    fill!(substepper.ρu″, 0)
-    fill!(substepper.ρv″, 0)
-    fill!(substepper.ρw″, 0)
+    m″ = substepper.perturbation_momentum
+    fill!(m″.ρu, 0)
+    fill!(m″.ρv, 0)
+    fill!(m″.ρw, 0)
     fill!(substepper.ρ″, 0)
-    fill!(substepper.χ″, 0)
+    fill!(substepper.ρχ″, 0)
 
     # Initialize time-averaged velocities to zero
-    fill!(substepper.ū, 0)
-    fill!(substepper.v̄, 0)
-    fill!(substepper.w̄, 0)
+    ū = substepper.averaged_velocities
+    fill!(ū.u, 0)
+    fill!(ū.v, 0)
+    fill!(ū.w, 0)
 
     # === ACOUSTIC SUBSTEP LOOP (advances perturbation variables) ===
-    for n = 1:Nτ
-        acoustic_substep!(model, substepper, Δτ, g, Nτ, substepper.time_discretization)
-    end
+    # Dispatch to optimized explicit or implicit loop
+    _acoustic_substep_loop!(model, substepper, Δτ, g, Nτ, substepper.time_discretization)
 
     # === RECOVERY: apply SSP RK3 convex combination ===
     # U_new = α * (U + U'') + (1 - α) * U⁰
     recover_full_fields_ssp!(model, substepper, α, U⁰)
 
+    return nothing
+end
+
+#####
+##### Optimized explicit acoustic substep loop
+#####
+
+"""
+Optimized acoustic substep loop for explicit vertical stepping.
+
+Pre-configures kernels and pre-converts arguments to minimize overhead
+during the substep loop, following the pattern from Oceananigans'
+split-explicit free surface solver.
+"""
+function _acoustic_substep_loop!(model, substepper, Δτ, g, Nτ, ::Nothing)
+    grid = substepper.pressure_coefficient.grid
+    arch = architecture(grid)
+    averaging_weight = 1 / Nτ  # velocity averaging weight
+    κᵈ = substepper.divergence_damping_coefficient
+    m″ = substepper.perturbation_momentum
+    Gˢm = substepper.slow_momentum_tendencies
+    ū = substepper.averaged_velocities
+
+    # Pre-configure kernels (once per RK stage)
+    forward_kernel!, _ = configure_kernel(arch, grid, :xyz, _acoustic_forward_step!)
+    backward_kernel!, _ = configure_kernel(arch, grid, :xyz, _acoustic_backward_step!)
+
+    # Pack kernel arguments (order must match kernel signatures)
+    forward_args = (m″.ρu, m″.ρv, m″.ρw,
+                    grid, Δτ, g,
+                    substepper.ρ″, substepper.pressure_coefficient,
+                    Gˢm.ρu, Gˢm.ρv, Gˢm.ρw)
+
+    backward_args = (substepper.ρ″, substepper.ρχ″,
+                     ū.u, ū.v, ū.w,
+                     grid, Δτ, averaging_weight, κᵈ,
+                     m″.ρu, m″.ρv, m″.ρw,
+                     substepper.ρχᵣ, substepper.ρᵣ,
+                     model.momentum.ρu, model.momentum.ρv, model.momentum.ρw,
+                     model.dynamics.density,
+                     substepper.Gˢρ, substepper.Gˢρχ)
+
+    # Pre-convert arguments to device-compatible format (important for GPU)
+    # GC.@preserve prevents garbage collection during the substep loop
+    GC.@preserve forward_args backward_args begin
+        converted_forward_args = convert_to_device(arch, forward_args)
+        converted_backward_args = convert_to_device(arch, backward_args)
+
+        # Execute substep loop with pre-converted arguments
+        for n = 1:Nτ
+            forward_kernel!(converted_forward_args...)
+            backward_kernel!(converted_backward_args...)
+        end
+    end
+
+    return nothing
+end
+
+#####
+##### Implicit acoustic substep loop (not yet optimized)
+#####
+
+"""
+Acoustic substep loop for vertically implicit stepping.
+Falls back to the original implementation for now.
+"""
+function _acoustic_substep_loop!(model, substepper, Δτ, g, Nτ, ::VerticallyImplicit)
+    # TODO: Optimize the implicit path similarly
+    for n = 1:Nτ
+        acoustic_substep!(model, substepper, Δτ, g, Nτ, substepper.time_discretization)
+    end
     return nothing
 end
 
@@ -738,26 +844,27 @@ the updated state with the initial state.
 function recover_full_fields_ssp!(model, substepper, α, U⁰)
     grid = model.grid
     arch = architecture(grid)
-    χ = thermodynamic_density(model.formulation)
+    ρχ = thermodynamic_density(model.formulation)
+    m″ = substepper.perturbation_momentum
 
     # Get initial state fields for momentum and density
     # prognostic_fields returns: (ρ, ρu, ρv, ρw, ρθ, ρqᵗ, ...)
-    # For CompressibleDynamics: ρ=U⁰[1], ρu=U⁰[2], ρv=U⁰[3], ρw=U⁰[4], χ(ρθ)=U⁰[5]
-    ρ⁰, ρu⁰, ρv⁰, ρw⁰, χ⁰ = U⁰[1], U⁰[2], U⁰[3], U⁰[4], U⁰[5]
+    # For CompressibleDynamics: ρ=U⁰[1], ρu=U⁰[2], ρv=U⁰[3], ρw=U⁰[4], ρχ(ρθ)=U⁰[5]
+    ρ⁰, ρu⁰, ρv⁰, ρw⁰, ρχ⁰ = U⁰[1], U⁰[2], U⁰[3], U⁰[4], U⁰[5]
 
     launch!(arch, grid, :xyz, _recover_full_fields_ssp!,
             model.momentum.ρu, model.momentum.ρv, model.momentum.ρw,
-            model.dynamics.density, χ,
-            substepper.ρu″, substepper.ρv″, substepper.ρw″,
-            substepper.ρ″, substepper.χ″,
-            ρu⁰, ρv⁰, ρw⁰, ρ⁰, χ⁰, α)
+            model.dynamics.density, ρχ,
+            m″.ρu, m″.ρv, m″.ρw,
+            substepper.ρ″, substepper.ρχ″,
+            ρu⁰, ρv⁰, ρw⁰, ρ⁰, ρχ⁰, α)
 
     return nothing
 end
 
-@kernel function _recover_full_fields_ssp!(ρu, ρv, ρw, ρ, χ,
-                                            ρu″, ρv″, ρw″, ρ″, χ″,
-                                            ρu⁰, ρv⁰, ρw⁰, ρ⁰, χ⁰, α)
+@kernel function _recover_full_fields_ssp!(ρu, ρv, ρw, ρ, ρχ,
+                                            ρu″, ρv″, ρw″, ρ″, ρχ″,
+                                            ρu⁰, ρv⁰, ρw⁰, ρ⁰, ρχ⁰, α)
     i, j, k = @index(Global, NTuple)
 
     # SSP RK3 convex combination: U_new = α * (U + U'') + (1 - α) * U⁰
@@ -766,7 +873,7 @@ end
         ρv[i, j, k] = α * (ρv[i, j, k] + ρv″[i, j, k]) + (1 - α) * ρv⁰[i, j, k]
         ρw[i, j, k] = α * (ρw[i, j, k] + ρw″[i, j, k]) + (1 - α) * ρw⁰[i, j, k]
         ρ[i, j, k] = α * (ρ[i, j, k] + ρ″[i, j, k]) + (1 - α) * ρ⁰[i, j, k]
-        χ[i, j, k] = α * (χ[i, j, k] + χ″[i, j, k]) + (1 - α) * χ⁰[i, j, k]
+        ρχ[i, j, k] = α * (ρχ[i, j, k] + ρχ″[i, j, k]) + (1 - α) * ρχ⁰[i, j, k]
     end
 end
 
@@ -791,7 +898,7 @@ function acoustic_substep!(model, substepper, Δτ, g, Nτ, ::Nothing)
     # Forward: update all perturbation momentum (ρu″, ρv″, ρw″)
     acoustic_forward_step!(substepper, Δτ, g)
 
-    # Backward: update ρ″, χ″, and accumulate ū, v̄, w̄
+    # Backward: update ρ″, ρχ″, and accumulate ū, v̄, w̄
     acoustic_backward_step!(substepper, model, Δτ, Nτ)
 
     return nothing

@@ -174,13 +174,11 @@ function compute_slow_momentum_tendencies!(model)
                    model.thermodynamic_constants)
 
     # Compute slow tendencies directly into substepper storage
-    Gˢρu = substepper.Gˢρu
-    Gˢρv = substepper.Gˢρv
-    Gˢρw = substepper.Gˢρw
+    Gˢm = substepper.slow_momentum_tendencies
 
-    launch!(arch, grid, :xyz, compute_x_momentum_tendency!, Gˢρu, grid, u_args)
-    launch!(arch, grid, :xyz, compute_y_momentum_tendency!, Gˢρv, grid, v_args)
-    launch!(arch, grid, :xyz, compute_z_momentum_tendency!, Gˢρw, grid, w_args)
+    launch!(arch, grid, :xyz, compute_x_momentum_tendency!, Gˢm.ρu, grid, u_args)
+    launch!(arch, grid, :xyz, compute_y_momentum_tendency!, Gˢm.ρv, grid, v_args)
+    launch!(arch, grid, :xyz, compute_z_momentum_tendency!, Gˢm.ρw, grid, w_args)
 
     return nothing
 end
@@ -233,7 +231,7 @@ function compute_slow_scalar_tendencies!(model)
 
     χ_name = AtmosphereModels.thermodynamic_density_name(model.formulation)
     Gχ_full = getproperty(Gⁿ, χ_name)
-    parent(substepper.Gˢχ) .= parent(Gχ_full)
+    parent(substepper.Gˢρχ) .= parent(Gχ_full)
 
     return nothing
 end
