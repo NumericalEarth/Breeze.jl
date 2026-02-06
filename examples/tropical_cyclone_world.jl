@@ -25,6 +25,7 @@ using Printf
 using Random
 
 Random.seed!(2019)
+Oceananigans.defaults.FloatType = Float32
 
 # ## Domain and grid
 #
@@ -49,12 +50,8 @@ z = PiecewiseStretchedDiscretization(
 
 Nz = length(z) - 1
 
-grid = RectilinearGrid(arch;
-                       size = (Nx, Ny, Nz),
-                       x = (0, Lx),
-                       y = (0, Ly),
-                       z,
-                       halo = (5, 5, 5),
+grid = RectilinearGrid(arch; size = (Nx, Ny, Nz), halo = (5, 5, 5),
+                       x = (0, Lx), y = (0, Ly), z,
                        topology = (Periodic, Periodic, Bounded))
 
 # ## Reference state and dynamics
@@ -81,18 +78,18 @@ coriolis = FPlane(f = 3e-4)
 β = 1
 Cᴰ = 1.5e-3
 Cᵀ = Cᴰ
-v★ = 1
+Uᵍ = 1
 
-ρu_bcs = FieldBoundaryConditions(bottom = BulkDrag(coefficient=Cᴰ, gustiness=v★))
-ρv_bcs = FieldBoundaryConditions(bottom = BulkDrag(coefficient=Cᴰ, gustiness=v★))
+ρu_bcs = FieldBoundaryConditions(bottom = BulkDrag(coefficient = Cᴰ, gustiness = Uᵍ))
+ρv_bcs = FieldBoundaryConditions(bottom = BulkDrag(coefficient = Cᴰ, gustiness = Uᵍ))
 
-ρe_bcs = FieldBoundaryConditions(bottom = BulkSensibleHeatFlux(coefficient=Cᵀ,
-                                                                gustiness=v★,
-                                                                surface_temperature=T₀))
+ρe_bcs = FieldBoundaryConditions(bottom = BulkSensibleHeatFlux(coefficient = Cᵀ,
+                                                               gustiness = Uᵍ,
+                                                               surface_temperature = T₀))
 
-ρqᵗ_bcs = FieldBoundaryConditions(bottom = BulkVaporFlux(coefficient=Cᵀ * β,
-                                                          gustiness=v★,
-                                                          surface_temperature=T₀))
+ρqᵗ_bcs = FieldBoundaryConditions(bottom = BulkVaporFlux(coefficient = β*Cᵀ,
+                                                         gustiness = Uᵍ,
+                                                         surface_temperature = T₀))
 
 boundary_conditions = (; ρu=ρu_bcs, ρv=ρv_bcs, ρe=ρe_bcs, ρqᵗ=ρqᵗ_bcs)
 nothing #hide
@@ -112,13 +109,13 @@ FT = eltype(grid)
 ρᵣ = reference_state.density
 cᵖᵈ = constants.dry_air.heat_capacity
 
-forcing_params = (; Tᵗˢ=FT(Tᵗˢ), Ṫ=FT(Ṫ), τ=FT(τᵣ), ρᵣ, cₚ=FT(cᵖᵈ))
+forcing_params = (; Tᵗˢ, Ṫ, τᵣ, ρᵣ, cᵖᵈ)
 
 @inline function piecewise_T_forcing(i, j, k, grid, clock, model_fields, p)
     @inbounds T = model_fields.T[i, j, k]
     @inbounds ρ = p.ρᵣ[i, j, k]
-    ∂T∂t = ifelse(T > p.Tᵗˢ, -p.Ṫ, (p.Tᵗˢ - T) / p.τ)
-    return ρ * p.cₚ * ∂T∂t
+    ∂T∂t = ifelse(T > p.Tᵗˢ, -p.Ṫ, (p.Tᵗˢ - T) / p.τᵣ)
+    return ρ * p.cᵖᵈ * ∂T∂t
 end
 
 ρe_forcing = Forcing(piecewise_T_forcing;
@@ -162,15 +159,15 @@ pˢᵗ = reference_state.standard_pressure
 # Analytical Exner function for a hydrostatic constant-θ atmosphere
 Π(z) = Π₀ - g * z / (cᵖᵈ * θ₀)
 
-function θ_equilibrium(z)
-    T_adiabat = θ₀ * Π(z)
-    return ifelse(T_adiabat > Tᵗˢ, θ₀, Tᵗˢ / Π(z))
+function θᵉᵐ(z)
+    Tᵃᵈ = θ₀ * Π(z)
+    return ifelse(Tᵃᵈ > Tᵗˢ, θ₀, Tᵗˢ / Π(z))
 end
 
 δθ = 1//2  # K
 zδ = 1000  # m
 
-θᵢ(x, y, z) = θ_equilibrium(z) + δθ * (2rand() - 1) * (z < zδ)
+θᵢ(x, y, z) = θᵉᵐ(z) + δθ * (2rand() - 1) * (z < zδ)
 
 q₀ = 15e-3 # surface specific humidity (kg/kg)
 Hq = 3000   # moisture scale height (m)
@@ -181,9 +178,9 @@ set!(model, θ=θᵢ, qᵗ=qᵢ)
 
 # ## Simulation
 #
-# We run for 10 days, which is sufficient for moist TC genesis and intensification.
+# We run for 6 days, which is sufficient for moist TC genesis and intensification.
 
-simulation = Simulation(model; Δt=10, stop_time=10days)
+simulation = Simulation(model; Δt=10, stop_time=6days)
 conjure_time_step_wizard!(simulation, cfl=0.7)
 
 # ## Output and progress
