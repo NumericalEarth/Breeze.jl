@@ -455,7 +455,7 @@ rain evaporation, and condensation.
 
 `Δr𝕎` is the sedimentation flux divergence (zero for parcel models).
 
-Returns `(rᵛ, rᶜˡ, rʳ, net_phase_change)`.
+Returns `(rᵛ, rᶜˡ, rʳ, Δrˡ)`.
 """
 @inline function step_kessler_microphysics(rᵛ, rᶜˡ, rʳ, Δr𝕎, T, ρ, p, Δt,
                                            microphysics, constants, f₅, δT, FT)
@@ -496,9 +496,9 @@ Returns `(rᵛ, rᶜˡ, rʳ, net_phase_change)`.
     rᶜˡ = rᶜˡ + Δrᶜ
     rʳ = rʳ - Δrᴱ
 
-    net_phase_change = Δrᶜ - Δrᴱ
+    Δrˡ = Δrᶜ - Δrᴱ
 
-    return rᵛ, rᶜˡ, rʳ, net_phase_change
+    return rᵛ, rᶜˡ, rʳ, Δrˡ
 end
 
 """
@@ -678,15 +678,15 @@ end
                 zᵏ = zᵏ⁺¹
 
                 # Core microphysics step
-                rᵛ, rᶜˡ, rʳ, net_phase_change = step_kessler_microphysics(rᵛ, rᶜˡ, rʳ, Δr𝕎, Tᵏ, ρ, p, Δtₛ,
-                                                                          microphysics, constants, f₅, δT, FT)
+                rᵛ, rᶜˡ, rʳ, Δrˡ = step_kessler_microphysics(rᵛ, rᶜˡ, rʳ, Δr𝕎, Tᵏ, ρ, p, Δtₛ,
+                                                             microphysics, constants, f₅, δT, FT)
 
                 μ.qᵛ[i, j, k]  = rᵛ
                 μ.qᶜˡ[i, j, k] = rᶜˡ
                 μ.qʳ[i, j, k]  = rʳ
 
                 # Update θˡⁱ from latent heating
-                ΔT_phase = ℒˡᵣ / cᵖᵈ * net_phase_change
+                ΔT_phase = ℒˡᵣ / cᵖᵈ * Δrˡ
                 T = Tᵏ + ΔT_phase
 
                 rˡ = rᶜˡ + rʳ
@@ -731,15 +731,15 @@ end
             Δr𝕎 = -Δtₛ * rʳ * 𝕎ʳᵏ / Δz_half
 
             # Core microphysics step (shared with ParcelModel)
-            rᵛ, rᶜˡ, rʳ, net_phase_change = step_kessler_microphysics(rᵛ, rᶜˡ, rʳ, Δr𝕎, Tᵏ, ρ, p, Δtₛ,
-                                                                      microphysics, constants, f₅, δT, FT)
+            rᵛ, rᶜˡ, rʳ, Δrˡ = step_kessler_microphysics(rᵛ, rᶜˡ, rʳ, Δr𝕎, Tᵏ, ρ, p, Δtₛ,
+                                                         microphysics, constants, f₅, δT, FT)
 
             μ.qᵛ[i, j, k]  = rᵛ
             μ.qᶜˡ[i, j, k] = rᶜˡ
             μ.qʳ[i, j, k]  = rʳ
 
             # Update θˡⁱ from latent heating
-            ΔT_phase = ℒˡᵣ / cᵖᵈ * net_phase_change
+            ΔT_phase = ℒˡᵣ / cᵖᵈ * Δrˡ
             T = Tᵏ + ΔT_phase
 
             rˡ = rᶜˡ + rʳ
