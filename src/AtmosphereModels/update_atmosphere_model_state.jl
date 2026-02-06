@@ -93,7 +93,7 @@ function compute_velocities!(model::AtmosphereModel)
     fill_halo_regions!(density)
     fill_halo_regions!(model.momentum)
 
-    launch!(arch, grid, kp,
+    launch!(arch, grid, :xyz,
             _compute_velocities!,
             model.velocities,
             grid,
