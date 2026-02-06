@@ -18,7 +18,8 @@ using Oceananigans.Operators: ∂xᶠᶜᶜ, ∂yᶜᶠᶜ, ∂zᶜᶜᶠ, ℑx�
                               Ax_qᶠᶜᶜ, Ay_qᶜᶠᶜ, Az_qᶜᶜᶠ, Vᶜᶜᶜ,
                               Δxᶠᶜᶜ, Δyᶜᶠᶜ,
                               δzᵃᵃᶜ
-using Oceananigans.Utils: launch!
+using Oceananigans.Utils: launch!, configure_kernel
+using Oceananigans.Architectures: convert_to_device
 
 using Oceananigans.Grids: Periodic, Bounded,
                           AbstractUnderlyingGrid
@@ -348,20 +349,22 @@ end
     @inbounds begin
         # x-momentum: topology-aware pressure gradient and interpolation
         ψᶠᶜᶜ = ℑxTᶠᵃᵃ(i, j, k, grid, ψ)
-        ∂ₓp″ = ψᶠᶜᶜ * δxTᶠᵃᵃ(i, j, k, grid, ρ″) / Δxᶠᶜᶜ(i, j, k, grid)
-        ρu″[i, j, k] += Δτ * (Gˢρu[i, j, k] - ∂ₓp″)
+        ∂x_p″ = ψᶠᶜᶜ * δxTᶠᵃᵃ(i, j, k, grid, ρ″) / Δxᶠᶜᶜ(i, j, k, grid)
+        ρu″[i, j, k] += Δτ * (Gˢρu[i, j, k] - ∂x_p″)
 
         # y-momentum: topology-aware pressure gradient and interpolation
         ψᶜᶠᶜ = ℑyTᵃᶠᵃ(i, j, k, grid, ψ)
-        ∂ᵧp″ = ψᶜᶠᶜ * δyTᵃᶠᵃ(i, j, k, grid, ρ″) / Δyᶜᶠᶜ(i, j, k, grid)
-        ρv″[i, j, k] += Δτ * (Gˢρv[i, j, k] - ∂ᵧp″)
+        ∂y_p″ = ψᶜᶠᶜ * δyTᵃᶠᵃ(i, j, k, grid, ρ″) / Δyᶜᶠᶜ(i, j, k, grid)
+        ρv″[i, j, k] += Δτ * (Gˢρv[i, j, k] - ∂y_p″)
 
-        # z-momentum: skip bottom boundary face k=1 (w=0 there;
-        # top face k=Nz+1 is outside the kernel range since launch is :xyz over centers)
+        # z-momentum: top-level pressure gradient and interpolation
         ψᶜᶜᶠ = ℑzᵃᵃᶠ(i, j, k, grid, ψ)
-        ∂zp″ = ψᶜᶜᶠ * ∂zᶜᶜᶠ(i, j, k, grid, ρ″)
+        ∂z_p″ = ψᶜᶜᶠ * ∂zᶜᶜᶠ(i, j, k, grid, ρ″)
         ρ″ᶠ = ℑzᵃᵃᶠ(i, j, k, grid, ρ″)
-        Δρw″ = Δτ * (Gˢρw[i, j, k] - ∂zp″ - g * ρ″ᶠ)
+        Δρw″ = Δτ * (Gˢρw[i, j, k] - ∂z_p″ - g * ρ″ᶠ)
+
+        # skip bottom boundary face k=1 (w=0 there;
+        # top face k=Nz+1 is outside the kernel range since launch is :xyz over centers)
         ρw″[i, j, k] += Δρw″ * (k > 1)
     end
 end
@@ -373,7 +376,7 @@ end
 """
 $(TYPEDSIGNATURES)
 
-Update the thermodynamic variable χ (ρθ or ρe) during an acoustic substep.
+Update the thermodynamic variable χ during an acoustic substep.
 
 Following [Klemp, Skamarock, and Dudhia (2007)](@cite KlempSkamarockDudhia2007) Eq. 15,
 the thermodynamic variable is updated using a linearized flux divergence:
