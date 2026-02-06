@@ -18,7 +18,7 @@ Reactant.set_default_backend("cpu")
 #####
 
 test_topologies = [
-    # 1D cases 
+    # 1D cases
     (topology = (Periodic, Flat, Flat), size = (8,),       extent = (1000.0,),             halo = (3,),    name = "(Periodic, Flat, Flat)"),
     (topology = (Flat, Flat, Bounded), size = (8,),       extent = (1000.0,),             halo = (3,),    name = "(Flat, Flat, Bounded)"),
 
