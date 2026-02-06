@@ -48,6 +48,7 @@ the secant iteration convergence.
 # Example
 
 ```julia
+grid = RectilinearGrid(size=(1, 1, 8), extent=(1, 1, 1e3))
 model = AtmosphereModel(grid; microphysics=SaturationAdjustment())
 set!(model, θ=300, qᵗ=0.01)
 
