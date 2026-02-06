@@ -14,6 +14,8 @@ export
     FourCategories,
     SaturationSpecificHumidity,
     SaturationSpecificHumidityField,
+    DewpointTemperature,
+    DewpointTemperatureField,
     DCMIP2016KesslerMicrophysics,
     kessler_terminal_velocity,
     saturation_adjustment_coefficient,
