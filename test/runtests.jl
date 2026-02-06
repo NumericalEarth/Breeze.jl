@@ -4,6 +4,9 @@ using ParallelTestRunner: find_tests, parse_args, filter_tests!, runtests
 # Start with autodiscovered tests
 testsuite = find_tests(@__DIR__)
 
+# Parse arguments
+args = parse_args(ARGS)
+
 if filter_tests!(testsuite, args)
     # Skip Enzyme/Reactant tests in Julia v1.12+ until upstream
     # support is improved.
@@ -11,8 +14,6 @@ if filter_tests!(testsuite, args)
         delete!(testsuite, "reactant_compilation")
     end
 end
-# Parse arguments
-args = parse_args(ARGS)
 
 const init_code = quote
     import CUDA
