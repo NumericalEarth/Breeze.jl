@@ -1,10 +1,7 @@
 name = "Breeze"
 uuid = "660aa2fb-d4c8-4359-a52c-9c057bc511da"
-version = "0.3.1"
 authors = ["NumericalEarth organization (github.com/NumericalEarth) and lovely contributors"]
-
-[workspace]
-projects = ["docs", "test"]
+version = "0.3.1"
 
 [deps]
 Adapt = "79e6a3ab-5dfb-504d-930d-738a2a938a0e"
@@ -25,8 +22,8 @@ Reactant = "3c362404-f566-11ee-1572-e11a4b42c853"
 
 [extensions]
 BreezeCloudMicrophysicsExt = "CloudMicrophysics"
-BreezeReactantExt = "Reactant"
 BreezeRRTMGPExt = ["ClimaComms", "RRTMGP"]
+BreezeReactantExt = "Reactant"
 
 [compat]
 Adapt = "4.3.0"
@@ -43,3 +40,6 @@ Printf = "1"
 RRTMGP = "0.21"
 Reactant = "0.2.203"
 julia = "1.10.10"
+
+[workspace]
+projects = ["docs", "test"]
