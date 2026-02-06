@@ -455,7 +455,7 @@ rain evaporation, and condensation.
 
 `Δr𝕎` is the sedimentation flux divergence (zero for parcel models).
 
-Returns `(rᵛ_new, rᶜˡ_final, rʳ_final, net_phase_change)`.
+Returns `(rᵛ, rᶜˡ, rʳ, net_phase_change)`.
 """
 @inline function step_kessler_microphysics(rᵛ, rᶜˡ, rʳ, Δr𝕎, T, ρ, p, Δt,
                                            microphysics, constants, f₅, δT, FT)
@@ -470,8 +470,8 @@ Returns `(rᵛ_new, rᶜˡ_final, rʳ_final, net_phase_change)`.
 
     # Autoconversion + Accretion: cloud → rain (KW eq. 2.13)
     Δrᴾ = cloud_to_rain_production(rᶜˡ, rʳ, Δt, microphysics)
-    rᶜˡ_new = max(0, rᶜˡ - Δrᴾ)
-    rʳ_new = max(0, rʳ + Δrᴾ + Δr𝕎)
+    rᶜˡ = max(0, rᶜˡ - Δrᴾ)
+    rʳ = max(0, rʳ + Δrᴾ + Δr𝕎)
 
     # Saturation specific humidity
     qᵛ⁺ = saturation_specific_humidity(T, ρ, constants, surface)
@@ -482,23 +482,23 @@ Returns `(rᵛ_new, rᶜˡ_final, rʳ_final, net_phase_change)`.
 
     # Rain evaporation (KW eq. 2.14)
     ρᵏ = Cᵨ * ρ
-    ρrʳ = ρᵏ * rʳ_new
+    ρrʳ = ρᵏ * rʳ
     Vᵉᵛ = (Cᵉᵛ₁ + Cᵉᵛ₂ * ρrʳ^βᵉᵛ₁) * ρrʳ^βᵉᵛ₂
     Dᵗʰ = Cᵈⁱᶠᶠ / (p * rᵛ⁺) + Cᵗʰᵉʳᵐ
     Δrᵛ⁺ = max(0, rᵛ⁺ - rᵛ)
     Ėʳ = Vᵉᵛ / Dᵗʰ * Δrᵛ⁺ / (ρᵏ * rᵛ⁺ + FT(1e-20))
-    Δrᴱmax = max(0, -Δrˢᵃᵗ - rᶜˡ_new)
-    Δrᴱ = min(min(Δt * Ėʳ, Δrᴱmax), rʳ_new)
+    Δrᴱmax = max(0, -Δrˢᵃᵗ - rᶜˡ)
+    Δrᴱ = min(min(Δt * Ėʳ, Δrᴱmax), rʳ)
 
     # Condensation (limited by available cloud water)
-    Δrᶜ = max(Δrˢᵃᵗ, -rᶜˡ_new)
-    rᵛ_new = max(0, rᵛ - Δrᶜ + Δrᴱ)
-    rᶜˡ_final = rᶜˡ_new + Δrᶜ
-    rʳ_final = rʳ_new - Δrᴱ
+    Δrᶜ = max(Δrˢᵃᵗ, -rᶜˡ)
+    rᵛ = max(0, rᵛ - Δrᶜ + Δrᴱ)
+    rᶜˡ = rᶜˡ + Δrᶜ
+    rʳ = rʳ - Δrᴱ
 
     net_phase_change = Δrᶜ - Δrᴱ
 
-    return rᵛ_new, rᶜˡ_final, rʳ_final, net_phase_change
+    return rᵛ, rᶜˡ, rʳ, net_phase_change
 end
 
 """
@@ -662,9 +662,9 @@ end
                 cᵖᵐ = mixture_heat_capacity(r, constants)
                 Rᵐ  = mixture_gas_constant(r, constants)
                 q = MoistureMassFractions(r)
-                qˡ_current = q.liquid
+                qˡ = q.liquid
                 Π = (p / p₀)^(Rᵐ / cᵖᵐ)
-                Tᵏ = Π * θˡⁱᵏ + ℒˡᵣ * qˡ_current / cᵖᵐ
+                Tᵏ = Π * θˡⁱᵏ + ℒˡᵣ * qˡ / cᵖᵐ
 
                 # Rain sedimentation flux (upstream differencing)
                 ρᵏ = Cᵨ * ρ
@@ -678,26 +678,25 @@ end
                 zᵏ = zᵏ⁺¹
 
                 # Core microphysics step
-                rᵛ_new, rᶜˡ_final, rʳ_final, net_phase_change =
-                    step_kessler_microphysics(rᵛ, rᶜˡ, rʳ, Δr𝕎, Tᵏ, ρ, p, Δtₛ,
-                                              microphysics, constants, f₅, δT, FT)
+                rᵛ, rᶜˡ, rʳ, net_phase_change = step_kessler_microphysics(rᵛ, rᶜˡ, rʳ, Δr𝕎, Tᵏ, ρ, p, Δtₛ,
+                                                                          microphysics, constants, f₅, δT, FT)
 
-                μ.qᵛ[i, j, k]  = rᵛ_new
-                μ.qᶜˡ[i, j, k] = rᶜˡ_final
-                μ.qʳ[i, j, k]  = rʳ_final
+                μ.qᵛ[i, j, k]  = rᵛ
+                μ.qᶜˡ[i, j, k] = rᶜˡ
+                μ.qʳ[i, j, k]  = rʳ
 
                 # Update θˡⁱ from latent heating
                 ΔT_phase = ℒˡᵣ / cᵖᵈ * net_phase_change
-                T_new = Tᵏ + ΔT_phase
+                T = Tᵏ + ΔT_phase
 
-                rˡ_new = rᶜˡ_final + rʳ_final
-                r_new = MoistureMixingRatio(rᵛ_new, rˡ_new)
-                cᵖᵐ_new = mixture_heat_capacity(r_new, constants)
-                Rᵐ_new  = mixture_gas_constant(r_new, constants)
-                q_new = MoistureMassFractions(r_new)
-                qˡ_new = q_new.liquid
-                Π_new = (p / p₀)^(Rᵐ_new / cᵖᵐ_new)
-                θˡⁱ_new = (T_new - ℒˡᵣ * qˡ_new / cᵖᵐ_new) / Π_new
+                rˡ = rᶜˡ + rʳ
+                r = MoistureMixingRatio(rᵛ, rˡ)
+                cᵖᵐ = mixture_heat_capacity(r, constants)
+                Rᵐ  = mixture_gas_constant(r, constants)
+                q = MoistureMassFractions(r)
+                qˡ = q.liquid
+                Π = (p / p₀)^(Rᵐ / cᵖᵐ)
+                θˡⁱ_new = (T - ℒˡᵣ * qˡ / cᵖᵐ) / Π
 
                 θˡⁱ[i, j, k]  = θˡⁱ_new
                 ρθˡⁱ[i, j, k] = ρ * θˡⁱ_new
@@ -720,9 +719,9 @@ end
             cᵖᵐ = mixture_heat_capacity(r, constants)
             Rᵐ  = mixture_gas_constant(r, constants)
             q = MoistureMassFractions(r)
-            qˡ_current = q.liquid
+            qˡ = q.liquid
             Π = (p / p₀)^(Rᵐ / cᵖᵐ)
-            Tᵏ = Π * θˡⁱᵏ + ℒˡᵣ * qˡ_current / cᵖᵐ
+            Tᵏ = Π * θˡⁱᵏ + ℒˡᵣ * qˡ / cᵖᵐ
 
             # Rain sedimentation flux at top boundary
             𝕎ʳᵏ = μ.𝕎ʳ[i, j, k]
@@ -732,26 +731,25 @@ end
             Δr𝕎 = -Δtₛ * rʳ * 𝕎ʳᵏ / Δz_half
 
             # Core microphysics step (shared with ParcelModel)
-            rᵛ_new, rᶜˡ_final, rʳ_final, net_phase_change =
-                step_kessler_microphysics(rᵛ, rᶜˡ, rʳ, Δr𝕎, Tᵏ, ρ, p, Δtₛ,
-                                          microphysics, constants, f₅, δT, FT)
+            rᵛ, rᶜˡ, rʳ, net_phase_change = step_kessler_microphysics(rᵛ, rᶜˡ, rʳ, Δr𝕎, Tᵏ, ρ, p, Δtₛ,
+                                                                      microphysics, constants, f₅, δT, FT)
 
-            μ.qᵛ[i, j, k]  = rᵛ_new
-            μ.qᶜˡ[i, j, k] = rᶜˡ_final
-            μ.qʳ[i, j, k]  = rʳ_final
+            μ.qᵛ[i, j, k]  = rᵛ
+            μ.qᶜˡ[i, j, k] = rᶜˡ
+            μ.qʳ[i, j, k]  = rʳ
 
             # Update θˡⁱ from latent heating
             ΔT_phase = ℒˡᵣ / cᵖᵈ * net_phase_change
-            T_new = Tᵏ + ΔT_phase
+            T = Tᵏ + ΔT_phase
 
-            rˡ_new = rᶜˡ_final + rʳ_final
-            r_new = MoistureMixingRatio(rᵛ_new, rˡ_new)
-            cᵖᵐ_new = mixture_heat_capacity(r_new, constants)
-            Rᵐ_new  = mixture_gas_constant(r_new, constants)
-            q_new = MoistureMassFractions(r_new)
-            qˡ_new = q_new.liquid
-            Π_new = (p / p₀)^(Rᵐ_new / cᵖᵐ_new)
-            θˡⁱ_new = (T_new - ℒˡᵣ * qˡ_new / cᵖᵐ_new) / Π_new
+            rˡ = rᶜˡ + rʳ
+            r = MoistureMixingRatio(rᵛ, rˡ)
+            cᵖᵐ = mixture_heat_capacity(r, constants)
+            Rᵐ  = mixture_gas_constant(r, constants)
+            q = MoistureMassFractions(r)
+            qˡ = q.liquid
+            Π = (p / p₀)^(Rᵐ / cᵖᵐ)
+            θˡⁱ_new = (T - ℒˡᵣ * qˡ / cᵖᵐ) / Π
 
             θˡⁱ[i, j, k]  = θˡⁱ_new
             ρθˡⁱ[i, j, k] = ρ * θˡⁱ_new
@@ -865,24 +863,23 @@ function AtmosphereModels.microphysics_model_update!(microphysics::DCMIP2016KM, 
     FT = typeof(ρ)
 
     # Core microphysics step (no sedimentation for parcel: Δr𝕎 = 0)
-    rᵛ_new, rᶜˡ_final, rʳ_final, _ = 
-        step_kessler_microphysics!(rᵛ, rᶜˡ, rʳ, zero(FT), T, ρ, p_parcel, Δt,
-                                   microphysics, constants, f₅, δT, FT)
+    rᵛ, rᶜˡ, rʳ, _ = step_kessler_microphysics!(rᵛ, rᶜˡ, rʳ, zero(FT), T, ρ, p_parcel, Δt,
+                                                microphysics, constants, f₅, δT, FT)
 
     # Convert mixing ratios → mass fractions (shared helper)
-    _, qᶜˡ_final, qʳ_final, qᵗ_final = mixing_ratios_to_mass_fractions(rᵛ_new, rᶜˡ_final, rʳ_final)
+    _, qᶜˡ, qʳ, qᵗ = mixing_ratios_to_mass_fractions(rᵛ, rᶜˡ, rʳ)
 
     # Update parcel state
-    state.μ = (; ρqᶜˡ = ρ * qᶜˡ_final, ρqʳ = ρ * qʳ_final)
-    state.qᵗ = qᵗ_final
-    state.ρqᵗ = ρ * qᵗ_final
+    state.μ = (; ρqᶜˡ = ρ * qᶜˡ, ρqʳ = ρ * qʳ)
+    state.qᵗ = qᵗ
+    state.ρqᵗ = ρ * qᵗ
 
     # Update thermodynamic state with new moisture fractions.
     # Parcel models conserve specific static energy; latent heating is implicit.
-    rˡ_final = rᶜˡ_final + rʳ_final
-    r_final = MoistureMixingRatio(rᵛ_new, rˡ_final)
-    q_final = MoistureMassFractions(r_final)
-    state.𝒰 = with_moisture(𝒰, q_final)
+    rˡ = rᶜˡ + rʳ
+    r = MoistureMixingRatio(rᵛ, rˡ)
+    q = MoistureMassFractions(r)
+    state.𝒰 = with_moisture(𝒰, q)
 
     # Keep static energy consistent with the thermodynamic state.
     state.ℰ = state.𝒰.static_energy
