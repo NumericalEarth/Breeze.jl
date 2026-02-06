@@ -502,7 +502,7 @@ Returns `(rᵛ_new, rᶜˡ_final, rʳ_final, net_phase_change)`.
 end
 
 """
-    mixing_ratios_to_mass_fractions(rᵛ, rᶜˡ, rʳ)
+$(TYPEDSIGNATURES)
 
 Convert from mixing ratios back to mass fractions.
 
