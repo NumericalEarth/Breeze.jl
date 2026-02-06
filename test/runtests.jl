@@ -1,36 +1,11 @@
 import Breeze
-using ParallelTestRunner: find_tests, parse_args, filter_tests!, runtests, PTRWorker
+using ParallelTestRunner: find_tests, parse_args, filter_tests!, runtests
 
 # Start with autodiscovered tests
 testsuite = find_tests(@__DIR__)
 
-# Create custom worker without --check-bounds=yes (causes Reactant crash)
-function create_worker_without_checkbounds()
-    exeflags = String[]
-    for flag in Base.julia_cmd().exec[2:end]
-        startswith(flag, "--check-bounds") && continue
-        push!(exeflags, flag)
-    end
-    push!(exeflags, "--startup-file=no")
-    push!(exeflags, "--depwarn=yes")
-    push!(exeflags, "--project=$(Base.active_project())")
-    push!(exeflags, "--color=yes")
-    env = ["JULIA_NUM_THREADS" => "1", "OPENBLAS_NUM_THREADS" => "1"]
-    return PTRWorker(; exeflags, env)
-end
-
-const custom_worker = create_worker_without_checkbounds()
-
 # Parse arguments
 args = parse_args(ARGS)
-
-if filter_tests!(testsuite, args)
-    # Skip Enzyme/Reactant tests in Julia v1.12+ until upstream
-    # support is improved.
-    if VERSION >= v"1.12"
-        delete!(testsuite, "differentiation")
-    end
-end
 
 const init_code = quote
     import CUDA
@@ -56,4 +31,4 @@ const init_code = quote
     all_float_types() = (Float32, Float64)
 end
 
-runtests(Breeze, args; testsuite, init_code, test_worker = _ -> custom_worker)
+runtests(Breeze, args; testsuite, init_code)
