@@ -522,7 +522,7 @@ Returns `(qᵛ, qᶜˡ, qʳ, qᵗ)`.
 end
 
 """
-    mass_fractions_to_mixing_ratios(qᵗ, ρqᶜˡ, ρqʳ, ρ)
+$(TYPEDSIGNATURES)
 
 Convert from mass fractions to mixing ratios.
 
