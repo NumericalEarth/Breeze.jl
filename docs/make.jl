@@ -28,19 +28,19 @@ struct Example
 end
 
 examples = [
-    Example("Stratified dry thermal bubble", "dry_thermal_bubble", true),
-    Example("Cloudy thermal bubble", "cloudy_thermal_bubble", true),
-    Example("Cloudy Kelvin-Helmholtz instability", "cloudy_kelvin_helmholtz", true),
-    Example("Shallow cumulus convection (BOMEX)", "bomex", true),
-    Example("Precipitating shallow cumulus (RICO)", "rico", false),
-    Example("Convection over prescribed sea surface temperature (SST)", "prescribed_sea_surface_temperature", true),
-    Example("Inertia gravity wave", "inertia_gravity_wave", true),
-    Example("Single column radiation", "single_column_radiation", true),
-    Example("Stationary parcel model", "stationary_parcel_model", true),
-    Example("Rising parcel: adiabatic ascent", "rising_parcels", true),
-    Example("Acoustic wave in shear layer", "acoustic_wave", true),
-    Example("Cloud formation in prescribed updraft", "kinematic_driver", true),
-    Example("Splitting supercell", "splitting_supercell", false),
+    # Example("Stratified dry thermal bubble", "dry_thermal_bubble", true),
+    # Example("Cloudy thermal bubble", "cloudy_thermal_bubble", true),
+    # Example("Cloudy Kelvin-Helmholtz instability", "cloudy_kelvin_helmholtz", true),
+    # Example("Shallow cumulus convection (BOMEX)", "bomex", true),
+    # Example("Precipitating shallow cumulus (RICO)", "rico", false),
+    # Example("Convection over prescribed sea surface temperature (SST)", "prescribed_sea_surface_temperature", true),
+    # Example("Inertia gravity wave", "inertia_gravity_wave", true),
+    # Example("Single column radiation", "single_column_radiation", true),
+    # Example("Stationary parcel model", "stationary_parcel_model", true),
+    # Example("Rising parcel: adiabatic ascent", "rising_parcels", true),
+    # Example("Acoustic wave in shear layer", "acoustic_wave", true),
+    # Example("Cloud formation in prescribed updraft", "kinematic_driver", true),
+    # Example("Splitting supercell", "splitting_supercell", false),
     Example("Tropical cyclone world", "tropical_cyclone_world", false),
 ]
 
