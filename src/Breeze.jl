@@ -66,6 +66,8 @@ export
     WarmPhaseEquilibrium,
     SaturationSpecificHumidity,
     SaturationSpecificHumidityField,
+    DewpointTemperature,
+    DewpointTemperatureField,
     equilibrium_saturation_specific_humidity,
     RelativeHumidity,
     RelativeHumidityField,
