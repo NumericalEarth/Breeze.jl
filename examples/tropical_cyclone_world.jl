@@ -304,19 +304,21 @@ Umax = maximum(maximum(compute_speed!(n)) for n in 1:Nt)
 fig = Figure(size=(1200, 400), fontsize=12)
 
 indices = [1, max(1, Nt ÷ 2), Nt]
-local hm
+hms = []
 for (i, idx) in enumerate(indices)
     ax = Axis(fig[1, i];
               xlabel = "x (m)",
               ylabel = i == 1 ? "y (m)" : "",
               title = "t = $(prettytime(times[idx]))",
               aspect = 1)
+
     hm = heatmap!(ax, compute_speed!(idx); colormap=:speed, colorrange=(0, Umax))
+    push!(hms, hm)
 end
-Colorbar(fig[1, length(indices) + 1], hm; label="Surface wind speed (m/s)")
+Colorbar(fig[1, length(indices) + 1], hms[end]; label="Surface wind speed (m/s)")
 
 fig[0, :] = Label(fig, "TC World (β = $β): surface wind speed",
-                   fontsize=16, tellwidth=false)
+                  fontsize=16, tellwidth=false)
 
 save("tc_world_surface_winds.png", fig) #src
 fig
