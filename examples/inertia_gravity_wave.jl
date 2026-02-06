@@ -240,12 +240,10 @@ axes = [Axis(fig[r, c]; title=titles[i],
 for ax in axes; if ax.xlabel[] == ""; hidexdecorations!(ax, grid=false); end; end
 for ax in axes; if ax.ylabel[] == ""; hideydecorations!(ax, grid=false); end; end
 
-hm = nothing
-for (i, k) in enumerate(cases)
-    hm = contourf!(axes[i], x_km, z_km, θ′_final[k]; colormap=:balance, levels)
-end
+cfs = [contourf!(axes[i], x_km, z_km, θ′_final[k]; colormap=:balance, levels)
+       for (i, k) in enumerate(cases)]
 
-Colorbar(fig[1:2, 4], hm; label="θ′ (K)")
+Colorbar(fig[1:2, 4], first(cfs); label="θ′ (K)")
 fig[0, :] = Label(fig, "Inertia-gravity waves: θ′ at t = $(prettytime(times[Nt]))", fontsize=20)
 
 save("inertia_gravity_wave_comparison.png", fig)
