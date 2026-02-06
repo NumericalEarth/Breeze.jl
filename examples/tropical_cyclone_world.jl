@@ -90,14 +90,11 @@ v★ = 1
                                                                 gustiness=v★,
                                                                 surface_temperature=T₀))
 
-if β > 0
-    ρqᵗ_bcs = FieldBoundaryConditions(bottom = BulkVaporFlux(coefficient=Cᵀ * β,
-                                                              gustiness=v★,
-                                                              surface_temperature=T₀))
-    boundary_conditions = (; ρu=ρu_bcs, ρv=ρv_bcs, ρe=ρe_bcs, ρqᵗ=ρqᵗ_bcs)
-else
-    boundary_conditions = (; ρu=ρu_bcs, ρv=ρv_bcs, ρe=ρe_bcs)
-end
+ρqᵗ_bcs = FieldBoundaryConditions(bottom = BulkVaporFlux(coefficient=Cᵀ * β,
+                                                          gustiness=v★,
+                                                          surface_temperature=T₀))
+
+boundary_conditions = (; ρu=ρu_bcs, ρv=ρv_bcs, ρe=ρe_bcs, ρqᵗ=ρqᵗ_bcs)
 nothing #hide
 
 # ## Radiative forcing
@@ -135,7 +132,6 @@ end
 
 sponge_mask = GaussianMask{:z}(center = H - 1500, width = 3000)
 ρw_sponge = Relaxation(rate = 1/60, mask = sponge_mask)
-
 forcing = (; ρe=ρe_forcing, ρw=ρw_sponge)
 nothing #hide
 
@@ -176,15 +172,12 @@ zδ = 1000  # m
 
 θᵢ(x, y, z) = θ_equilibrium(z) + δθ * (2rand() - 1) * (z < zδ)
 
-if β > 0
-    qₛ = 15e-3 # surface specific humidity (kg/kg)
-    zq = 3000   # moisture scale height (m)
-    δq = 1e-4   # perturbation amplitude (kg/kg)
-    qᵢ(x, y, z) = max(0, β * qₛ * exp(-z / zq) + δq * (2rand() - 1) * (z < zδ))
-    set!(model, θ=θᵢ, qᵗ=qᵢ)
-else
-    set!(model, θ=θᵢ)
-end
+q₀ = 15e-3 # surface specific humidity (kg/kg)
+Hq = 3000   # moisture scale height (m)
+δq = 1e-4   # perturbation amplitude (kg/kg)
+qᵢ(x, y, z) = max(0, β * q₀ * exp(-z / Hq) + δq * (2rand() - 1) * (z < zδ))
+
+set!(model, θ=θᵢ, qᵗ=qᵢ)
 
 # ## Simulation
 #
@@ -296,31 +289,32 @@ v_ts = FieldTimeSeries("tc_world_surface.jld2", "v")
 times = u_ts.times
 Nt = length(times)
 
-x_km = Array(Oceananigans.Grids.xnodes(grid, Center())) ./ 1e3
-y_km = Array(Oceananigans.Grids.ynodes(grid, Center())) ./ 1e3
+speed(u, v) = @at (Center, Center, Center) sqrt(u^2 + v^2)
 
-function wind_speed(n)
-    u_data = Array(interior(u_ts[n], :, :, 1))
-    v_data = Array(interior(v_ts[n], :, :, 1))
-    return @. sqrt(u_data^2 + v_data^2)
+un = XFaceField(u_ts.grid)
+vn = YFaceField(u_ts.grid)
+U = Field(speed(un, vn))
+
+function compute_speed!(n)
+    parent(un) .= parent(u_ts[n])
+    parent(vn) .= parent(v_ts[n])
+    compute!(U)
+    return Array(interior(U, :, :, 1))
 end
 
-speed(u, v) = @at (Center, Center, Center) sqrt(u^2 + v^2)
-U_max = maximum(maximum(speed(u_ts[n], v_ts[n])) for n in 1:Nt)
-
+Umax = maximum(maximum(compute_speed!(n)) for n in 1:Nt)
 
 fig = Figure(size=(1200, 400), fontsize=12)
 
 indices = [1, max(1, Nt ÷ 2), Nt]
 local hm
-for (i, n) in enumerate(indices)
+for (i, idx) in enumerate(indices)
     ax = Axis(fig[1, i];
-              xlabel = "x (km)",
-              ylabel = i == 1 ? "y (km)" : "",
-              title = "t = $(prettytime(times[n]))",
+              xlabel = "x (m)",
+              ylabel = i == 1 ? "y (m)" : "",
+              title = "t = $(prettytime(times[idx]))",
               aspect = 1)
-    hm = heatmap!(ax, x_km, y_km, wind_speed(n);
-                  colormap=:speed, colorrange=(0, U_max))
+    hm = heatmap!(ax, compute_speed!(idx); colormap=:speed, colorrange=(0, Umax))
 end
 Colorbar(fig[1, length(indices) + 1], hm; label="Surface wind speed (m/s)")
 
@@ -333,28 +327,17 @@ fig
 # ## Animation of surface wind speed
 
 fig = Figure(size=(600, 550), fontsize=14)
-ax = Axis(fig[1, 1]; xlabel="x (km)", ylabel="y (km)", aspect=1)
+ax = Axis(fig[1, 1]; xlabel="x (m)", ylabel="y (m)", aspect=1)
 
 n = Observable(1)
-
-un = XFaceField(u_ts.grid)
-vn = YFaceField(u_ts.grid)
-U = Field(speed(un, vn))
-
-Un = @lift begin
-    parent(un) .= parent(u_ts[$n])
-    parent(vn) .= parent(v_ts[$n])
-    compute!(U)
-    Array(interior(U, :, :, 1))
-end
-
 title = @lift "TC World (β = $β) — t = $(prettytime(times[$n]))"
+Un = @lift compute_speed!($n)
 
-hm = heatmap!(ax, x_km, y_km, Un; colormap=:speed, colorrange=(0, U_max))
+hm = heatmap!(ax, Un; colormap=:speed, colorrange=(0, Umax))
 Colorbar(fig[1, 2], hm; label="Wind speed (m/s)")
 fig[0, :] = Label(fig, title, fontsize=16, tellwidth=false)
 
-CairoMakie.record(fig, "tc_world.mp4", 1:Nt, framerate=8) do nn
+CairoMakie.record(fig, "tc_world.mp4", 1:Nt, framerate=16) do nn
     n[] = nn
 end
 nothing #hide
