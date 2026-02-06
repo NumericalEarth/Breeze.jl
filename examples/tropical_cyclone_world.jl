@@ -306,12 +306,10 @@ fig = Figure(size=(1200, 400), fontsize=12)
 indices = [1, max(1, Nt ÷ 2), Nt]
 hms = []
 for (i, idx) in enumerate(indices)
-    ax = Axis(fig[1, i];
-              xlabel = "x (m)",
-              ylabel = i == 1 ? "y (m)" : "",
-              title = "t = $(prettytime(times[idx]))",
-              aspect = 1)
-
+    xlabel = i == 1 ? "x (m)" : ""
+    ylabel = i == 1 ? "y (m)" : ""
+    title = "t = $(prettytime(times[idx]))"
+    ax = Axis(fig[1, i]; aspect = 1, xlabel, ylabel, title)
     hm = heatmap!(ax, compute_speed!(idx); colormap=:speed, colorrange=(0, Umax))
     push!(hms, hm)
 end
