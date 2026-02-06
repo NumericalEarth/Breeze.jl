@@ -82,6 +82,9 @@ export
     geostrophic_forcings,
     SubsidenceForcing,
 
+    # Grid utilities
+    PiecewiseStretchedDiscretization,
+
     # TimeSteppers
     SSPRungeKutta3,
 
@@ -119,7 +122,7 @@ using Oceananigans.BoundaryConditions: ImpenetrableBoundaryCondition
 export
     CPU, GPU,
     Center, Face, Periodic, Bounded, Flat,
-    RectilinearGrid, ExponentialDiscretization, Clock,
+    RectilinearGrid, ExponentialDiscretization, PiecewiseStretchedDiscretization, Clock,
     nodes, xnodes, ynodes, znodes,
     znode,
     xspacings, yspacings, zspacings,
@@ -188,6 +191,9 @@ using .CelestialMechanics
 
 include("Forcings/Forcings.jl")
 using .Forcings
+
+include("VerticalGrids.jl")
+using .VerticalGrids
 
 include("TimeSteppers/TimeSteppers.jl")
 using .TimeSteppers
