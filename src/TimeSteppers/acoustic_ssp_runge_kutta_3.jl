@@ -255,6 +255,7 @@ function acoustic_ssp_rk3_substep!(model, Δt, α, stage)
     grid = model.grid
     arch = grid.architecture
     substepper = model.timestepper.substepper
+    U⁰ = model.timestepper.U⁰
 
     # Prepare stage-frozen reference state FIRST (needed by slow tendency correction)
     prepare_acoustic_cache!(substepper, model)
@@ -266,11 +267,9 @@ function acoustic_ssp_rk3_substep!(model, Δt, α, stage)
     # (requires χᵣ and ρᵣ from prepare_acoustic_cache!)
     compute_slow_scalar_tendencies!(model)
 
-    # Effective time step for this RK stage
-    Δtˢᵗᵃᵍᵉ = α * Δt
-
     # Execute acoustic substep loop for momentum, density, and thermodynamic variable
-    acoustic_substep_loop!(model, substepper, stage, Δtˢᵗᵃᵍᵉ)
+    # Pass full Δt, α, and U⁰ for SSP RK3 convex combination
+    acoustic_substep_loop!(model, substepper, Δt, α, U⁰)
 
     # Update remaining scalars (tracers) using standard SSP RK3
     scalar_ssp_rk3_substep!(model, Δt, α)

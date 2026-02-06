@@ -246,36 +246,6 @@ end
 build_acoustic_vertical_rhs(grid, ::VerticallyImplicit) = ZFaceField(grid)
 
 #####
-##### Acoustic substep count per RK stage (following CM1)
-#####
-
-"""
-    acoustic_substeps_per_stage(stage, Ns)
-
-Number of acoustic substeps for RK `stage` given total `Ns` substeps per time step.
-
-Following CM1's convention for the Wicker-Skamarock SSP RK3 scheme:
-- Stage 1: Ns/3 substeps
-- Stage 2: Ns/2 substeps
-- Stage 3: Ns substeps
-
-Arguments
-=========
-
-- `stage`: RK stage number (1, 2, or 3)
-- `Ns`: Total number of acoustic substeps per full time step
-"""
-@inline function acoustic_substeps_per_stage(stage, Ns)
-    if stage == 1
-        return max(1, div(Ns, 3))
-    elseif stage == 2
-        return max(1, div(Ns, 2))
-    else  # stage == 3
-        return Ns
-    end
-end
-
-#####
 ##### Prepare acoustic cache (once per RK stage)
 #####
 
@@ -675,9 +645,9 @@ end
 #####
 
 """
-    acoustic_substep_loop!(model, substepper, stage, Δt)
+    acoustic_substep_loop!(model, substepper, Δt, α, U⁰)
 
-Execute the acoustic substep loop for RK `stage`.
+Execute the acoustic substep loop for an SSP RK3 stage with weight `α`.
 
 Implements the forward-backward scheme from
 [Wicker and Skamarock (2002)](@cite WickerSkamarock2002) and
@@ -692,21 +662,34 @@ Implements the forward-backward scheme from
    d. **Backward step**: Update thermodynamic variable from linearized flux divergence
    e. Accumulate time-averaged velocities
 
+The acoustic substep size `Δτ = Δt / Ns` is constant across all RK stages to maintain
+stability. The number of substeps varies with the SSP RK3 stage weight `α`:
+- Stage 1 (α=1): Ns substeps
+- Stage 2 (α=1/4): Ns/4 substeps
+- Stage 3 (α=2/3): 2Ns/3 substeps
+
+After the acoustic loop, the SSP RK3 convex combination is applied:
+``U_{new} = α (U + U'') + (1 - α) U⁰``
+
 Arguments
 =========
 
 - `model`: The `AtmosphereModel`
 - `substepper`: The `AcousticSubstepper` containing storage and parameters
-- `stage`: RK stage number (1, 2, or 3)
-- `Δt`: Time step for this RK stage (α × full Δt)
+- `Δt`: Full time step (not scaled by α)
+- `α`: SSP RK3 stage weight (1, 1/4, or 2/3)
+- `U⁰`: Initial state at beginning of time step (for SSP RK3 convex combination)
 """
-function acoustic_substep_loop!(model, substepper, stage, Δt)
+function acoustic_substep_loop!(model, substepper, Δt, α, U⁰)
     Ns = substepper.substeps
     g = model.thermodynamic_constants.gravitational_acceleration
 
-    # Number of substeps for this RK stage
-    Nτ = acoustic_substeps_per_stage(stage, Ns)
-    Δτ = Δt / Nτ  # Acoustic substep time step
+    # Constant acoustic substep size (same for all RK stages)
+    Δτ = Δt / Ns
+
+    # All stages use Ns substeps to compute the full Δt tendency.
+    # The SSP RK3 formula applies the α weight to (U + Δt*L), not to the tendency.
+    Nτ = Ns
 
     # === PRECOMPUTE PHASE (once per RK stage) ===
     # Note: prepare_acoustic_cache! is called before this function
@@ -733,41 +716,54 @@ function acoustic_substep_loop!(model, substepper, stage, Δt)
         acoustic_substep!(model, substepper, Δτ, g, Nτ, substepper.time_discretization)
     end
 
-    # === RECOVERY: add perturbations to model fields ===
-    recover_full_fields!(model, substepper)
+    # === RECOVERY: apply SSP RK3 convex combination ===
+    # U_new = α * (U + U'') + (1 - α) * U⁰
+    recover_full_fields_ssp!(model, substepper, α, U⁰)
 
     return nothing
 end
 
 """
-Recover full fields from perturbation variables at the end of the substep loop.
+Recover full fields from perturbation variables with SSP RK3 convex combination.
 
-Adds the perturbation to the stage-level model fields:
-``U = U^t + U''``
+Applies the SSP RK3 update formula:
+``U_{new} = α (U + U'') + (1 - α) U⁰``
+
+This correctly implements the SSP RK3 scheme where each stage blends
+the updated state with the initial state.
 """
-function recover_full_fields!(model, substepper)
+function recover_full_fields_ssp!(model, substepper, α, U⁰)
     grid = model.grid
     arch = architecture(grid)
     χ = thermodynamic_density(model.formulation)
 
-    launch!(arch, grid, :xyz, _recover_full_fields!,
+    # Get initial state fields for momentum and density
+    # prognostic_fields returns: (ρ, ρu, ρv, ρw, ρθ, ρqᵗ, ...)
+    # For CompressibleDynamics: ρ=U⁰[1], ρu=U⁰[2], ρv=U⁰[3], ρw=U⁰[4], χ(ρθ)=U⁰[5]
+    ρ⁰, ρu⁰, ρv⁰, ρw⁰, χ⁰ = U⁰[1], U⁰[2], U⁰[3], U⁰[4], U⁰[5]
+
+    launch!(arch, grid, :xyz, _recover_full_fields_ssp!,
             model.momentum.ρu, model.momentum.ρv, model.momentum.ρw,
             model.dynamics.density, χ,
             substepper.ρu″, substepper.ρv″, substepper.ρw″,
-            substepper.ρ″, substepper.χ″)
+            substepper.ρ″, substepper.χ″,
+            ρu⁰, ρv⁰, ρw⁰, ρ⁰, χ⁰, α)
 
     return nothing
 end
 
-@kernel function _recover_full_fields!(ρu, ρv, ρw, ρ, χ, ρu″, ρv″, ρw″, ρ″, χ″)
+@kernel function _recover_full_fields_ssp!(ρu, ρv, ρw, ρ, χ,
+                                            ρu″, ρv″, ρw″, ρ″, χ″,
+                                            ρu⁰, ρv⁰, ρw⁰, ρ⁰, χ⁰, α)
     i, j, k = @index(Global, NTuple)
 
+    # SSP RK3 convex combination: U_new = α * (U + U'') + (1 - α) * U⁰
     @inbounds begin
-        ρu[i, j, k] += ρu″[i, j, k]
-        ρv[i, j, k] += ρv″[i, j, k]
-        ρw[i, j, k] += ρw″[i, j, k]
-        ρ[i, j, k] += ρ″[i, j, k]
-        χ[i, j, k] += χ″[i, j, k]
+        ρu[i, j, k] = α * (ρu[i, j, k] + ρu″[i, j, k]) + (1 - α) * ρu⁰[i, j, k]
+        ρv[i, j, k] = α * (ρv[i, j, k] + ρv″[i, j, k]) + (1 - α) * ρv⁰[i, j, k]
+        ρw[i, j, k] = α * (ρw[i, j, k] + ρw″[i, j, k]) + (1 - α) * ρw⁰[i, j, k]
+        ρ[i, j, k] = α * (ρ[i, j, k] + ρ″[i, j, k]) + (1 - α) * ρ⁰[i, j, k]
+        χ[i, j, k] = α * (χ[i, j, k] + χ″[i, j, k]) + (1 - α) * χ⁰[i, j, k]
     end
 end
 
