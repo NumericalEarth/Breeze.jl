@@ -448,7 +448,7 @@ end
 # the Eulerian grid kernel and the Lagrangian parcel model.
 
 """
-    kessler_microphysics_pointwise(rᵛ, rᶜˡ, rʳ, Δr𝕎, T, ρ, p, Δt, microphysics, constants, f₅, δT, FT)
+$(TYPEDSIGNATURES)
 
 Apply one Kessler microphysics step: autoconversion, accretion, saturation adjustment,
 rain evaporation, and condensation.
