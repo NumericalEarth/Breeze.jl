@@ -74,6 +74,7 @@ export
     BulkMicrophysics,
     compute_hydrostatic_pressure!,
     NonEquilibriumCloudFormation,
+    initial_aerosol_number,
 
     # BoundaryConditions
     BulkDrag,
