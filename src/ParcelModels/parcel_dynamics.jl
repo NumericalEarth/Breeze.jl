@@ -4,12 +4,14 @@ using Oceananigans: Oceananigans, CenterField
 using Oceananigans.Architectures: on_architecture
 using Oceananigans.BoundaryConditions: fill_halo_regions!
 using Oceananigans.Fields: ZeroField, set!, interpolate
-using Oceananigans.Grids: Center
+using Oceananigans.Grids: Center, znode
 using Oceananigans.TimeSteppers: TimeSteppers, tick!
 
 using Breeze.Thermodynamics: MoistureMassFractions,
     LiquidIcePotentialTemperatureState, StaticEnergyState,
-    with_moisture, mixture_heat_capacity
+    PlanarLiquidSurface,
+    with_moisture, mixture_heat_capacity,
+    temperature_from_potential_temperature, saturation_specific_humidity
 
 using Breeze.AtmosphereModels: AtmosphereModels, AtmosphereModel
 
@@ -864,6 +866,13 @@ function TimeSteppers.time_step!(model::ParcelModel, Δt; callbacks=nothing)
     tⁿ⁺¹ = model.clock.time + Δt * (1 - ts.α¹)  # Already advanced by α¹*Δt in stage 1
     corrected_Δt = tⁿ⁺¹ - model.clock.time
     tick!(model.clock, corrected_Δt)
+
+    # Set last_Δt
+    model.clock.last_Δt = Δt
+
+    # Apply microphysics model update AFTER all RK3 stages and clock update
+    # (for schemes like DCMIP2016Kessler that operate via direct state modification)
+    microphysics_model_update!(model.microphysics, model)
 
     return nothing
 end
