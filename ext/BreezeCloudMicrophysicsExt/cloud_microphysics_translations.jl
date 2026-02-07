@@ -441,7 +441,7 @@ end
     # ARG 2000 parameterization is only valid for positive updraft velocities
     w⁺ = max(eps(FT), w)
 
-    ζ = 2 * A / 3 * sqrt(α * w⁺ / G)
+    ζ = 2A / 3 * sqrt(α * w⁺ / G)
 
     # Compute critical supersaturation and contribution from each mode
     Σ_inv_Sᵐᵃˣ² = zero(FT)
