@@ -62,7 +62,10 @@ end
     ℒⁱ = ice_latent_heat(T, constants)
     pᵛ⁺ = saturation_vapor_pressure(T, constants, PlanarIceSurface())
 
-    return 1 / (ℒⁱ / K_therm / T * (ℒⁱ / Rᵛ / T - 1) + Rᵛ * T / D_vapor / pᵛ⁺)
+    Dᵛ = D_vapor
+    
+    # TODO: notation for the thermal diffusivity K_therm?
+    return 1 / (ℒⁱ / (K_therm * T) * (ℒⁱ / (Rᵛ * T) - 1) + Rᵛ * T / (Dᵛ * pᵛ⁺))
 end
 
 #####
@@ -378,9 +381,9 @@ Maximum supersaturation (dimensionless, e.g., 0.01 = 1% supersaturation)
 
     # Ice relaxation
     γⁱ = Rᵛ * T / pᵛ⁺ + pᵛ / pᵛ⁺ * Rᵐ * ℒˡ * ℒⁱ / Rᵛ / cᵖᵐ / T / p
-    rⁱ = ifelse(Nⁱ > eps(FT), cbrt(ρ * qⁱ / Nⁱ / ρˢ / (4 / 3 * π)), zero(FT))
+    rⁱ = ifelse(Nⁱ > eps(FT), cbrt(ρ * qⁱ / Nⁱ / ρˢ / (4π / 3)), zero(FT))
     Gⁱ = diffusional_growth_factor_ice(aps, T, constants)
-    Kⁱ = 4 * π * Nⁱ * rⁱ * Gⁱ * γⁱ
+    Kⁱ = 4π * Nⁱ * rⁱ * Gⁱ * γⁱ
 
     ξ = pᵛ⁺ / pᵛ⁺ⁱ
 
@@ -438,7 +441,7 @@ end
     # ARG 2000 parameterization is only valid for positive updraft velocities
     w⁺ = max(eps(FT), w)
 
-    ζ = 2 * A / 3 * sqrt(α * w⁺ / G)
+    ζ = 2A / 3 * sqrt(α * w⁺ / G)
 
     # Compute critical supersaturation and contribution from each mode
     Σ_inv_Sᵐᵃˣ² = zero(FT)
@@ -448,7 +451,7 @@ end
         κ̄ = mean_hygroscopicity(ap, mode)
 
         # Critical supersaturation (Eq. 9 in ARG 2000)
-        Sᶜʳⁱᵗ = 2 / sqrt(κ̄) * (A / 3 / mode.r_dry)^(3/2)
+        Sᶜʳⁱᵗ = 2 / sqrt(κ̄) * sqrt(A / (3 * mode.r_dry))^3
 
         # Fitting parameters (fᵥ and gᵥ are ventilation-related)
         fᵥ = ap.f1 * exp(ap.f2 * log(mode.stdev)^2)
