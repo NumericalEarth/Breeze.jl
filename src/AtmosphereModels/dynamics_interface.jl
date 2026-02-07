@@ -60,6 +60,36 @@ Returns `nothing` for dynamics that do not require a pressure solver (e.g., comp
 """
 function dynamics_pressure_solver end
 
+"""
+    default_timestepper(dynamics)
+
+Return the default timestepper symbol for the given dynamics.
+
+For anelastic dynamics, returns `:SSPRungeKutta3`.
+For compressible dynamics, returns `:AcousticSSPRungeKutta3` (acoustic substepping).
+"""
+default_timestepper(dynamics) = :SSPRungeKutta3
+
+#####
+##### Pressure correction interface
+#####
+
+"""
+    compute_pressure_correction!(model, Δt)
+
+Compute the pressure correction for the given model. Default: no-op.
+For anelastic dynamics, solves the pressure Poisson equation.
+"""
+compute_pressure_correction!(model, Δt) = nothing
+
+"""
+    make_pressure_correction!(model, Δt)
+
+Apply the pressure correction to the momentum fields. Default: no-op.
+For anelastic dynamics, projects momentum to enforce the divergence constraint.
+"""
+make_pressure_correction!(model, Δt) = nothing
+
 #####
 ##### Pressure interface
 #####
@@ -271,6 +301,36 @@ For anelastic dynamics, returns zero (pressure is handled via projection).
 For compressible dynamics, returns `-∂p/∂z`.
 """
 @inline z_pressure_gradient(i, j, k, grid, dynamics) = zero(grid)
+
+#####
+##### Slow tendency mode for split-explicit time-stepping
+#####
+
+"""
+$(TYPEDEF)
+
+Wrapper type indicating that only "slow" tendencies should be computed.
+
+When computing momentum tendencies with a `SlowTendencyMode`-wrapped dynamics,
+the "fast" terms (pressure gradient and buoyancy) return zero. This is used
+for split-explicit time-stepping where fast terms are handled separately
+in an acoustic substep loop.
+
+See also [`SplitExplicit`](@ref Breeze.CompressibleEquations.SplitExplicit).
+"""
+struct SlowTendencyMode{D}
+    dynamics :: D
+end
+
+# Forward dynamics_density to the wrapped dynamics
+@inline dynamics_density(s::SlowTendencyMode) = dynamics_density(s.dynamics)
+
+# Fast terms return zero in slow tendency mode
+@inline x_pressure_gradient(i, j, k, grid, ::SlowTendencyMode) = zero(grid)
+@inline y_pressure_gradient(i, j, k, grid, ::SlowTendencyMode) = zero(grid)
+@inline z_pressure_gradient(i, j, k, grid, ::SlowTendencyMode) = zero(grid)
+
+@inline buoyancy_forceᶜᶜᶜ(i, j, k, grid, ::SlowTendencyMode, args...) = zero(grid)
 
 #####
 ##### Tendency computation interface

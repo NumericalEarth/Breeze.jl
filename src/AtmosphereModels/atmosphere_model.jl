@@ -118,11 +118,15 @@ function AtmosphereModel(grid;
                          scalar_advection = DefaultValue(),
                          closure = nothing,
                          microphysics = nothing,
-                         timestepper = :SSPRungeKutta3,
+                         timestepper = nothing,
+                         timestepper_kwargs = NamedTuple(),
                          radiation = nothing)
 
     # Use default dynamics if not specified
     isnothing(dynamics) && (dynamics = default_dynamics(grid, thermodynamic_constants))
+
+    # Use default timestepper for the dynamics if not specified
+    isnothing(timestepper) && (timestepper = default_timestepper(dynamics))
 
     # Validate that velocity boundary conditions are only provided for dynamics that support them
     validate_velocity_boundary_conditions(dynamics, boundary_conditions)
@@ -197,7 +201,7 @@ function AtmosphereModel(grid;
                                                         tracers)
 
     implicit_solver = implicit_diffusion_solver(time_discretization(closure), grid)
-    timestepper = TimeStepper(timestepper, grid, prognostic_model_fields; implicit_solver)
+    timestepper = TimeStepper(timestepper, grid, prognostic_model_fields; dynamics, implicit_solver, timestepper_kwargs...)
     pressure_solver = dynamics_pressure_solver(dynamics, grid)
 
     model_fields = merge(prognostic_model_fields, velocities, (; T=temperature, qᵗ=specific_moisture))

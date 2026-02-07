@@ -15,6 +15,8 @@ export
     AnelasticModel,
     CompressibleDynamics,
     CompressibleModel,
+    SplitExplicitTimeDiscretization,
+    VerticallyImplicit,
     PrescribedDensity,
     PrescribedDynamics,
     KinematicModel,
@@ -86,6 +88,9 @@ export
 
     # TimeSteppers
     SSPRungeKutta3,
+    AcousticSSPRungeKutta3,
+    AcousticRungeKutta3,
+    AcousticSubstepper,
 
     # ParcelDynamics
     ParcelDynamics,
@@ -171,7 +176,9 @@ include("AnelasticEquations/AnelasticEquations.jl")
 using .AnelasticEquations: AnelasticDynamics, AnelasticModel
 
 include("CompressibleEquations/CompressibleEquations.jl")
-using .CompressibleEquations: CompressibleDynamics, CompressibleModel
+using .CompressibleEquations: CompressibleDynamics, CompressibleModel, AcousticSubstepper,
+                              SplitExplicitTimeDiscretization, ExplicitTimeStepping,
+                              VerticallyImplicit
 
 include("KinematicDriver/KinematicDriver.jl")
 using .KinematicDriver: PrescribedDensity, PrescribedDynamics, KinematicModel

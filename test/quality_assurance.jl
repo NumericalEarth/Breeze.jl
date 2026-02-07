@@ -10,7 +10,8 @@ using Dates: Dates
 using RRTMGP: RRTMGP
 
 @testset "Aqua" begin
-    Aqua.test_all(Breeze)
+    # Skip persistent_tasks test because CUDA/GPU packages can leave background tasks
+    Aqua.test_all(Breeze; persistent_tasks=false)
 end
 
 @testset "ExplicitImports" begin
