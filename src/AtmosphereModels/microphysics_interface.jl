@@ -169,7 +169,8 @@ Microphysics schemes should implement the gridless version, not this one.
 - `μ_fields`: NamedTuple of microphysical fields
 - `ρ`: Local density (scalar)
 - `𝒰`: Thermodynamic state
-- `velocities`: NamedTuple of velocity components `(; u, v, w)` [m/s].
+- `velocities`: Velocity fields (u, v, w). Velocities are interpolated to cell centers
+                for use by microphysics schemes (e.g., aerosol activation uses vertical velocity).
 
 # Returns
 An `AbstractMicrophysicalState` subtype containing the local microphysical variables.
@@ -230,14 +231,9 @@ Schemes that need full grid access (e.g., for non-local operations) can override
 this method directly without using `microphysical_state`.
 
 # Arguments
-- `velocities`: Velocity fields (u, v, w). Velocities are interpolated to cell centers
-                for use by microphysics schemes (e.g., aerosol activation uses vertical velocity).
+- `velocities`: NamedTuple of velocity components `(; u, v, w)` [m/s].
 """
 @inline function grid_microphysical_tendency(i, j, k, grid, microphysics, name, ρ, fields, 𝒰, constants, velocities)
-    # Interpolate velocities from faces to cell center
-    u = ℑxᶜᵃᵃ(i, j, k, grid, velocities.u)
-    v = ℑyᵃᶜᵃ(i, j, k, grid, velocities.v)
-    w = ℑzᵃᵃᶜ(i, j, k, grid, velocities.w)
     ℳ = grid_microphysical_state(i, j, k, grid, microphysics, fields, ρ, 𝒰, velocities)
     return microphysical_tendency(microphysics, name, ρ, ℳ, 𝒰, constants)
 end
