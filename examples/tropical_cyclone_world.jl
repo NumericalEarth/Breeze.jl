@@ -25,7 +25,6 @@ using Printf
 using Random
 
 Random.seed!(2019)
-Oceananigans.defaults.FloatType = Float32
 
 # ## Domain and grid
 #
