@@ -383,7 +383,7 @@ Maximum supersaturation (dimensionless, e.g., 0.01 = 1% supersaturation)
     γⁱ = Rᵛ * T / pᵛ⁺ + pᵛ / pᵛ⁺ * Rᵐ * ℒˡ * ℒⁱ / Rᵛ / cᵖᵐ / T / p
     rⁱ = ifelse(Nⁱ > eps(FT), cbrt(ρ * qⁱ / Nⁱ / ρˢ / (4π / 3)), zero(FT))
     Gⁱ = diffusional_growth_factor_ice(aps, T, constants)
-    Kⁱ = 4 * π * Nⁱ * rⁱ * Gⁱ * γⁱ
+    Kⁱ = 4π * Nⁱ * rⁱ * Gⁱ * γⁱ
 
     ξ = pᵛ⁺ / pᵛ⁺ⁱ
 
