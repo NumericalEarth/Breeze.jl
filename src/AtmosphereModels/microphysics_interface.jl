@@ -238,7 +238,7 @@ this method directly without using `microphysical_state`.
     u = ℑxᶜᵃᵃ(i, j, k, grid, velocities.u)
     v = ℑyᵃᶜᵃ(i, j, k, grid, velocities.v)
     w = ℑzᵃᵃᶜ(i, j, k, grid, velocities.w)
-    ℳ = grid_microphysical_state(i, j, k, grid, microphysics, fields, ρ, 𝒰, (; u, v, w))
+    ℳ = grid_microphysical_state(i, j, k, grid, microphysics, fields, ρ, 𝒰, velocities)
     return microphysical_tendency(microphysics, name, ρ, ℳ, 𝒰, constants)
 end
 
