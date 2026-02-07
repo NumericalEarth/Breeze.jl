@@ -17,11 +17,19 @@ using Breeze.Thermodynamics:
     StaticEnergyState,
     LiquidIcePotentialTemperatureState,
     MoistureMassFractions,
+    TetensFormula,
     temperature,
     mixture_heat_capacity
 
 using Breeze.AtmosphereModels: NothingMicrophysicalState, microphysical_tendency
 using Breeze.Microphysics: SaturationAdjustment, DCMIP2016KesslerMicrophysics
+
+# Helper function to create thermodynamic constants compatible with DCMIP2016 Kessler
+# The Kessler scheme uses TetensFormula for saturation vapor pressure
+function kessler_thermodynamic_constants()
+    tetens = TetensFormula(liquid_temperature_offset=36)
+    return ThermodynamicConstants(; saturation_vapor_pressure=tetens)
+end
 
 using Test
 
@@ -261,7 +269,8 @@ end
 @testset "ParcelModel with DCMIP2016KesslerMicrophysics" begin
     grid = RectilinearGrid(size=10, z=(0, 1000), topology=(Flat, Flat, Bounded))
     microphysics = DCMIP2016KesslerMicrophysics()
-    model = AtmosphereModel(grid; dynamics=ParcelDynamics(), microphysics)
+    constants = kessler_thermodynamic_constants()
+    model = AtmosphereModel(grid; dynamics=ParcelDynamics(), microphysics, thermodynamic_constants=constants)
 
     T(z) = 288.0 - 0.0065 * z
     p(z) = 101325.0 * exp(-z / 8500)

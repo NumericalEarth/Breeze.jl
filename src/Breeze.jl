@@ -66,6 +66,8 @@ export
     WarmPhaseEquilibrium,
     SaturationSpecificHumidity,
     SaturationSpecificHumidityField,
+    DewpointTemperature,
+    DewpointTemperatureField,
     equilibrium_saturation_specific_humidity,
     RelativeHumidity,
     RelativeHumidityField,
@@ -177,6 +179,9 @@ using .CompressibleEquations: CompressibleDynamics, CompressibleModel
 include("KinematicDriver/KinematicDriver.jl")
 using .KinematicDriver: PrescribedDensity, PrescribedDynamics, KinematicModel
 
+include("ParcelModels/ParcelModels.jl")
+using .ParcelModels
+
 include("Microphysics/Microphysics.jl")
 using .Microphysics
 
@@ -197,8 +202,5 @@ using .VerticalGrids
 
 include("TimeSteppers/TimeSteppers.jl")
 using .TimeSteppers
-
-include("ParcelModels/ParcelModels.jl")
-using .ParcelModels
 
 end # module Breeze
