@@ -381,7 +381,7 @@ Maximum supersaturation (dimensionless, e.g., 0.01 = 1% supersaturation)
 
     # Ice relaxation
     γⁱ = Rᵛ * T / pᵛ⁺ + pᵛ / pᵛ⁺ * Rᵐ * ℒˡ * ℒⁱ / Rᵛ / cᵖᵐ / T / p
-    rⁱ = ifelse(Nⁱ > eps(FT), cbrt(ρ * qⁱ / Nⁱ / ρˢ / (4 / 3 * π)), zero(FT))
+    rⁱ = ifelse(Nⁱ > eps(FT), cbrt(ρ * qⁱ / Nⁱ / ρˢ / (4π / 3)), zero(FT))
     Gⁱ = diffusional_growth_factor_ice(aps, T, constants)
     Kⁱ = 4 * π * Nⁱ * rⁱ * Gⁱ * γⁱ
 
