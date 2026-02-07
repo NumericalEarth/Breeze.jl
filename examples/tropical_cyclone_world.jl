@@ -356,6 +356,6 @@ nothing #hide
 # and a Rayleigh damping sponge layer in the upper 3 km prevent spurious reflections.
 #
 # For full reproduction of the paper's results, use 2 km horizontal resolution
-# (`Nx = Ny = 576`, `scale_factor = 1` in `stretched_vertical_faces`) and run
-# for at least 70 days. The dry case (β = 0) requires finer resolution and longer
-# integration times for spontaneous genesis.
+# (`Nx = Ny = 576`), the paper's vertical spacing (`Δz_fine = 1000/64`,
+# `Δz_coarse = 500`), and run for at least 70 days. The dry case (β = 0) requires
+# finer resolution and longer integration times for spontaneous genesis.
