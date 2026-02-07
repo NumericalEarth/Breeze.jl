@@ -451,7 +451,7 @@ end
         κ̄ = mean_hygroscopicity(ap, mode)
 
         # Critical supersaturation (Eq. 9 in ARG 2000)
-        Sᶜʳⁱᵗ = 2 / sqrt(κ̄) * (A / 3 / mode.r_dry)^(3/2)
+        Sᶜʳⁱᵗ = 2 / sqrt(κ̄) * sqrt(A / (3 * mode.r_dry))^3
 
         # Fitting parameters (fᵥ and gᵥ are ventilation-related)
         fᵥ = ap.f1 * exp(ap.f2 * log(mode.stdev)^2)
