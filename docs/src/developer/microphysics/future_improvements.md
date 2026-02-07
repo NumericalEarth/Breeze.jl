@@ -56,8 +56,6 @@ end
 - Some schemes have unusual fields (e.g., DCMIP2016Kessler's 2D `precipitation_rate`)
 - May need an escape hatch for schemes with non-standard requirements
 
-**Status**: Ready to implement (velocity field overhaul is complete, see item 5).
-
 ## 3. Reduce Number of Interface Functions
 
 **Issue**: The interface has ~12 functions, some of which may be redundant or could be combined.
@@ -77,53 +75,12 @@ end
 2. Which functions SA schemes must override
 3. How moisture fraction computation differs
 
-## 5. Overhaul `microphysical_velocities` — **Completed**
-
-**Resolution**: The `sedimentation_speed` interface now provides a clean separation of concerns.
-
-### What changed
-
-- **`sedimentation_speed(microphysics, microphysical_fields, name)`** is the primary developer
-  interface. Schemes return a positive sedimentation speed field (or `nothing`) for each tracer.
-  This replaces the old `microphysical_velocities` as the function schemes must implement.
-- **`microphysical_velocities`** is now a generic wrapper that calls `sedimentation_speed` and
-  constructs a `(u=ZeroField(), v=ZeroField(), w=NegatedField(fs))` tuple for the advection
-  operator. Scheme developers no longer override this function.
-- **`total_water_sedimentation_speed_components(microphysics, microphysical_fields)`** returns
-  `(speed_field, humidity_field)` pairs used to compute the aggregate total water sedimentation
-  speed.
-- **`model.bulk_sedimentation_velocities`** stores precomputed aggregate sedimentation velocities
-  (currently just `ρqᵗ`), updated during `update_state!` via
-  `update_bulk_sedimentation_velocities!`.
-
-### Answers to previously-open questions
-
-1. **Separation of concerns**: Yes — velocity *computation* happens in
-   `update_microphysical_auxiliaries!` (which writes sedimentation speed values to `ZFaceField`s),
-   while velocity *retrieval* happens via `sedimentation_speed` (which returns those fields).
-
-2. **Naming conventions**: `microphysical_velocities` is retained as a generic wrapper, not
-   eliminated. Schemes implement `sedimentation_speed` which returns the appropriate field by name.
-
-3. **Multi-moment schemes**: Each tracer gets its own `sedimentation_speed` dispatch. For example,
-   in the 2M scheme: `sedimentation_speed(bμp, μ, Val(:ρqʳ))` returns the mass-weighted rain
-   sedimentation speed `μ.wʳ`, while `sedimentation_speed(bμp, μ, Val(:ρnʳ))` returns the
-   number-weighted sedimentation speed `μ.wʳₙ`.
-
-4. **Advection coupling**: For individual tracers, `microphysical_velocities` (wrapping
-   `sedimentation_speed`) provides the velocity tuple added to bulk flow. For total moisture
-   (`ρqᵗ`), the precomputed `model.bulk_sedimentation_velocities.ρqᵗ` is used directly.
-
-5. **Parcel precipitation loss**: This remains an open question for future work. The insight that
-   sedimentation is Eulerian-only is preserved — `sedimentation_speed` is Eulerian-only.
-
 ## Summary
 
 | Priority | Item | Status |
 |----------|------|--------|
 | High | Consolidate state types | Ready to implement |
 | Medium | Document SA exception | Ready to implement |
-| ~~Medium~~ | ~~Overhaul velocities~~ | **Completed** (`sedimentation_speed` interface) |
 | Low | Automate field materialization | Ready to implement |
 | Low | Further function consolidation | Ongoing |
 
