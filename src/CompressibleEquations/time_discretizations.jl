@@ -27,7 +27,7 @@ Fields
 
 - `time_discretization`: `nothing` or [`VerticallyImplicit`](@ref)
 - `substeps`: Number of acoustic substeps per full time step. Default: 6
-- `divergence_damping_coefficient`: Divergence damping coefficient. Default: 0.05
+- `divergence_damping_coefficient`: Divergence damping coefficient. Default: 0.05. When using base-state pressure correction (`reference_potential_temperature` in `CompressibleDynamics`), the stability constraint `(1-κᵈ)^Ns < 0.1` must be satisfied (e.g., κᵈ=0.2 for Ns=12, κᵈ=0.1 for Ns=24)
 
 See also [`ExplicitTimeStepping`](@ref).
 """

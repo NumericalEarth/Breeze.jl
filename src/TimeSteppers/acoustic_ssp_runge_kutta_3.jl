@@ -109,7 +109,7 @@ function AcousticSSPRungeKutta3(grid, prognostic_fields;
 end
 
 #####
-##### Slow tendency computation (excludes pressure gradient and buoyancy)
+##### Stage-frozen tendency computation
 #####
 
 using Oceananigans.Operators: divᶜᶜᶜ
@@ -127,27 +127,32 @@ using Breeze.AtmosphereModels:
 """
 $(TYPEDSIGNATURES)
 
-Compute slow tendencies for momentum (advection, Coriolis, turbulence, forcing).
+Compute slow momentum tendencies (advection, Coriolis, turbulence, forcing).
 
-The pressure gradient and buoyancy are NOT included here - they are "fast" terms
-that are computed during the acoustic substep loop. In hydrostatic equilibrium,
-pressure gradient and buoyancy nearly cancel, so treating them together in the
-fast loop maintains stability.
+The pressure gradient and buoyancy are excluded using [`SlowTendencyMode`](@ref).
+These "fast" terms are handled by the acoustic substep loop through perturbation
+variables: ``-ψ ∂ρ''/∂x`` (horizontal pressure) and ``-ψ ∂ρ''/∂z - g ρ''``
+(vertical pressure + buoyancy).
 
-This function uses [`SlowTendencyMode`](@ref Breeze.AtmosphereModels.SlowTendencyMode)
-to wrap the dynamics, causing pressure gradient and buoyancy functions to return zero.
+!!! note "Limitation with SSP RK3"
+    The perturbation pressure ``ψ ∂ρ''/∂x`` only captures density-driven pressure
+    changes. Pressure perturbations from temperature/θ variations (the ``ρ ∂ψ/∂x``
+    term) are not resolved. Including the full pressure gradient in the slow tendency
+    is unstable with SSP RK3 due to acoustic mode interference from the convex
+    combination. The Wicker-Skamarock RK3 (stage fractions Δt/3, Δt/2, Δt) is
+    needed to properly handle the full pressure gradient.
 """
 function compute_slow_momentum_tendencies!(model)
     substepper = model.timestepper.substepper
     grid = model.grid
     arch = architecture(grid)
 
-    # Wrap dynamics in SlowTendencyMode so that pressure gradient and buoyancy return zero
+    # Wrap dynamics in SlowTendencyMode so pressure gradient and buoyancy return zero.
+    # The acoustic substep provides perturbation pressure/buoyancy instead.
     slow_dynamics = SlowTendencyMode(model.dynamics)
 
     model_fields = fields(model)
 
-    # Build momentum tendency arguments with slow dynamics
     momentum_args = (
         dynamics_density(model.dynamics),
         model.advection.momentum,
@@ -162,8 +167,6 @@ function compute_slow_momentum_tendencies!(model)
     u_args = tuple(momentum_args..., model.forcing.ρu, slow_dynamics)
     v_args = tuple(momentum_args..., model.forcing.ρv, slow_dynamics)
 
-    # Extra arguments for vertical velocity are required to compute buoyancy
-    # (which will return zero due to SlowTendencyMode)
     w_args = tuple(momentum_args..., model.forcing.ρw,
                    slow_dynamics,
                    model.formulation,
@@ -173,7 +176,6 @@ function compute_slow_momentum_tendencies!(model)
                    model.microphysical_fields,
                    model.thermodynamic_constants)
 
-    # Compute slow tendencies directly into substepper storage
     Gˢm = substepper.slow_momentum_tendencies
 
     launch!(arch, grid, :xyz, compute_x_momentum_tendency!, Gˢm.ρu, grid, u_args)
@@ -294,17 +296,17 @@ function scalar_ssp_rk3_substep!(model, Δt, α)
     Gⁿ = model.timestepper.Gⁿ
 
     prognostic = prognostic_fields(model)
-    n_momentum = 3  # ρu, ρv, ρw
+    n_acoustic = 5  # ρ, ρu, ρv, ρw, ρθ (handled by acoustic loop)
 
     for (i, (u, u⁰, G)) in enumerate(zip(prognostic, U⁰, Gⁿ))
-        if i <= n_momentum  # Skip momentum (handled by acoustic loop)
+        if i <= n_acoustic  # Skip fields handled by acoustic loop
             continue
         end
 
         launch!(arch, grid, :xyz, _ssp_rk3_substep!, u, u⁰, G, Δt, α)
 
         # Implicit diffusion step
-        field_index = Val(i - n_momentum)
+        field_index = Val(i - n_acoustic)
         implicit_step!(u,
                        model.timestepper.implicit_solver,
                        model.closure,

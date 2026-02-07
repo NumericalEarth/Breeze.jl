@@ -87,6 +87,7 @@ export
     # TimeSteppers
     SSPRungeKutta3,
     AcousticSSPRungeKutta3,
+    AcousticRungeKutta3,
     AcousticSubstepper,
 
     # ParcelDynamics

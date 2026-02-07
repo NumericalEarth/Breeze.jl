@@ -88,7 +88,7 @@ pˢᵗ = 1e5
 # ## Build all five models
 
 advection = WENO()
-Ns = 6 # acoustic substeps
+Ns = 12 # acoustic substeps
 surface_pressure = p₀
 potential_temperature = θ₀
 
@@ -108,12 +108,15 @@ boussinesq_dynamics = AnelasticDynamics(constant_density_reference_state)
 compressible_dynamics = CompressibleDynamics(; surface_pressure, time_discretization=ExplicitTimeStepping())
 
 # Case 4: Split-explicit with explicit vertical substepping
-time_discretization = SplitExplicitTimeDiscretization(substeps=Ns)
+# No base-state correction (reference_potential_temperature) — the correction requires
+# VerticallyImplicit for stability. Without it, only density-driven pressure is resolved.
+time_discretization = SplitExplicitTimeDiscretization(substeps=Ns, divergence_damping_coefficient=0.2)
 explicit_split_dynamics = CompressibleDynamics(; surface_pressure, time_discretization)
 
 # Case 5: Split-explicit with vertically implicit substepping
-time_discretization = SplitExplicitTimeDiscretization(VerticallyImplicit(0.5), substeps=Ns)
-implicit_split_dynamics = CompressibleDynamics(; surface_pressure, time_discretization)
+time_discretization = SplitExplicitTimeDiscretization(VerticallyImplicit(0.5), substeps=Ns, divergence_damping_coefficient=0.2)
+implicit_split_dynamics = CompressibleDynamics(; surface_pressure, time_discretization,
+                                                 reference_potential_temperature=θ₀)
 
 # Build all models:
 models = Dict(
@@ -147,7 +150,7 @@ cₛ = sqrt(cᵖᵈ / (cᵖᵈ - Rᵈ) * Rᵈ * θ₀)
 cfl = 0.5
 Δt_advective    = cfl * min(Δx, Δz) / U
 Δt_compressible = cfl * min(Δx, Δz) / (cₛ + U)
-Δt_split        = 2.0
+Δt_split        = 2.0 # Δt_compressible * Ns
 
 time_steps = Dict(
     :anelastic      => Δt_advective,
@@ -192,8 +195,8 @@ for (key, model) in models
         return nothing
     end
 
-    callback_interval = key == :compressible ? IterationInterval(500) : IterationInterval(50)
-    add_callback!(sim, progress, IterationInterval(50))
+    callback_interval = key == :compressible ? IterationInterval(500) : IterationInterval(100)
+    add_callback!(sim, progress, callback_interval)
 
     # Output
     outputs = merge(model.velocities, (; θ′))
@@ -256,21 +259,18 @@ n = Observable(1)
 
 fig_anim = Figure(size=(1400, 900))
 anim_axes = [Axis(fig_anim[r, c]; title=titles[i],
-                   ylabel = c == 1 ? "z (km)" : "",
-                   xlabel = r == 2 ? "x (km)" : "")
+                   ylabel = c == 1 ? "z (m)" : "",
+                   xlabel = r == 2 ? "x (m)" : "")
              for (i, (r, c)) in enumerate(axes_layout)]
 
 for ax in anim_axes; if ax.xlabel[] == ""; hidexdecorations!(ax, grid=false); end; end
 for ax in anim_axes; if ax.ylabel[] == ""; hideydecorations!(ax, grid=false); end; end
 
-hm_anim = nothing
-for (i, k) in enumerate(cases)
-    data = @lift interior(θ′ts[k][$n], :, 1, :)
-    hm_anim = contourf!(anim_axes[i], x_km, z_km, data;
-                         colormap=:balance, levels, extendhigh=:auto, extendlow=:auto)
-end
+hm_anims = [contourf!(anim_axes[i], @lift(θ′ts[k][$n]);
+                      colormap=:balance, levels, extendhigh=:auto, extendlow=:auto)
+            for (i, k) in enumerate(cases)]
 
-Colorbar(fig_anim[1:2, 4], hm_anim; label="θ′ (K)")
+Colorbar(fig_anim[1:2, 4], last(hm_anims); label="θ′ (K)")
 anim_title = @lift "Inertia-gravity waves: θ′ at t = $(prettytime(times[$n]))"
 fig_anim[0, :] = Label(fig_anim, anim_title, fontsize=20, tellwidth=false)
 

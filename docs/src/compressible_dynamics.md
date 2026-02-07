@@ -34,8 +34,13 @@ p = ρ R^m T .
 
 The split-explicit scheme follows [Wicker and Skamarock (2002)](@cite WickerSkamarock2002)
 and [Klemp, Skamarock, and Dudhia (2007)](@cite KlempSkamarockDudhia2007).
-It uses a three-stage SSP Runge-Kutta (SSPRK3) outer loop for slow tendencies
+It uses a three-stage Runge-Kutta outer loop for slow tendencies
 with an inner forward-backward acoustic substep loop for fast tendencies.
+
+Two RK3 outer loop variants are available:
+
+- **Wicker-Skamarock RK3** ([`AcousticRungeKutta3`](@ref), default): Uses stage fractions ``Δt/3, Δt/2, Δt`` with simple recovery ``U = U^0 + U''``. Supports the base-state pressure correction for temperature-driven dynamics.
+- **SSP RK3** ([`AcousticSSPRungeKutta3`](@ref)): Uses convex combinations with weights ``α = 1, 1/4, 2/3``. Does **not** support the base-state pressure correction.
 
 ### Slow-fast splitting
 
@@ -59,9 +64,23 @@ The **slow operator** contains everything else:
 - Turbulent diffusion
 - Microphysics and forcing
 
-### SSPRK3 outer loop
+### Wicker-Skamarock RK3 outer loop
 
-The three-stage SSP RK3 scheme in Shu-Osher form advances the state over a full time step ``Δt``:
+The default [`AcousticRungeKutta3`](@ref) time stepper uses stage fractions ``β = 1/3, 1/2, 1``:
+
+```math
+\begin{aligned}
+U^{(1)} &= U^n + \tfrac{Δt}{3} \, R(U^n) \\
+U^{(2)} &= U^n + \tfrac{Δt}{2} \, R(U^{(1)}) \\
+U^{n+1} &= U^n + Δt \, R(U^{(2)})
+\end{aligned}
+```
+
+Each stage resets to the initial state ``U^n`` and advances by ``β \, Δt``. The acoustic substep size varies per stage: ``Δτ = β \, Δt / N_s``, where ``N_s`` is the number of substeps. Recovery at the end of each stage is simply ``U = U^0 + U''`` (no convex combination), which is compatible with the base-state pressure correction.
+
+### SSP RK3 outer loop (alternative)
+
+The [`AcousticSSPRungeKutta3`](@ref) time stepper uses the SSP RK3 scheme in Shu-Osher form:
 
 ```math
 \begin{aligned}
@@ -71,7 +90,7 @@ U^{n+1} &= \tfrac{1}{3} U^n + \tfrac{2}{3} \Phi(U^{(2)}; \, Δt)
 \end{aligned}
 ```
 
-where ``\Phi`` denotes the forward Euler + acoustic subcycling stage operator.
+where ``\Phi`` denotes the forward Euler + acoustic subcycling stage operator. The convex combination introduces acoustic mode interference that prevents use of the base-state pressure correction (see below).
 
 ### Stage-frozen reference state and perturbation variables
 
@@ -99,13 +118,7 @@ The slow tendencies ``R^t`` (the full right-hand side evaluated at the stage-lev
 
 ### Forward-backward acoustic substep loop
 
-Within each RK stage, the acoustic substep loop iterates ``N_τ`` times with time step ``Δτ = Δt_{\mathrm{stage}} / N_τ``. Following CM1's convention:
-
-| RK Stage | Stage ``Δt`` | Substeps ``N_τ`` |
-|----------|-------------|----------|
-| 1 | ``Δt`` | ``N_s/3`` |
-| 2 | ``Δt/4`` | ``N_s/2`` |
-| 3 | ``2Δt/3`` | ``N_s`` |
+Within each RK stage, the acoustic substep loop iterates ``N_s`` times with time step ``Δτ = β \, Δt / N_s`` (for Wicker-Skamarock RK3) or ``Δτ = Δt / N_s`` (for SSP RK3).
 
 Each substep advances the perturbation variables:
 
@@ -146,6 +159,76 @@ where ``\bar{s} = \bar{χ}/\bar{ρ}`` is the stage-frozen specific thermodynamic
 ```
 
 These time-averaged velocities are used for tracer advection in the outer RK loop.
+
+### Base-state pressure correction
+
+The perturbation pressure ``p'' = ψ \, ρ''`` only captures pressure changes from density variations *during* the acoustic loop (since ``ρ'' = 0`` at the start of each stage and ``ψ`` is frozen). This misses the temperature-driven pressure gradient.
+
+To see why, decompose the full horizontal pressure gradient:
+
+```math
+\frac{\partial p}{\partial x} = \frac{\partial (ψ ρ)}{\partial x}
+= \underbrace{ψ \frac{\partial ρ}{\partial x}}_{\text{density-driven}} + \underbrace{ρ \frac{\partial ψ}{\partial x}}_{\text{temperature-driven}}
+```
+
+The acoustic loop resolves the density-driven term through ``ψ \, \partial ρ'' / \partial x``. But the temperature-driven term ``ρ \, \partial ψ / \partial x`` --- which arises from horizontal variations in ``ψ = R^m T`` (e.g., from potential temperature perturbations) --- is not captured because ``ψ`` is frozen and ``ρ''`` starts at zero.
+
+For problems driven by temperature perturbations (such as inertia-gravity waves triggered by a ``θ'`` anomaly), this missing term means the split-explicit scheme cannot generate the correct pressure gradients, and vertical velocity remains zero.
+
+The fix is to add the temperature-driven pressure gradient ``ρ \, \partial ψ / \partial x`` to the slow momentum tendencies:
+
+```math
+R^t_{\boldsymbol{m}} \mathrel{-}= ρ \, \boldsymbol{\nabla}_h ψ
+```
+
+where ``\boldsymbol{\nabla}_h`` denotes the horizontal gradient only. The vertical pressure gradient and buoyancy are handled entirely by the acoustic forward step through ``ψ \, \partial ρ'' / \partial z`` and ``g \, ρ''``.
+
+This correction is activated by providing `reference_potential_temperature` when constructing `CompressibleDynamics`:
+
+```julia
+dynamics = CompressibleDynamics(;
+    surface_pressure = p₀,
+    time_discretization = SplitExplicitTimeDiscretization(
+        VerticallyImplicit(0.5),
+        substeps = 12,
+        divergence_damping_coefficient = 0.2),
+    reference_potential_temperature = θ₀)
+```
+
+!!! note "Requirements for the base-state pressure correction"
+    The correction requires two conditions for stability:
+
+    1. **Vertically implicit substepping**: Use `VerticallyImplicit(α)` as the first argument to `SplitExplicitTimeDiscretization`. The horizontal correction drives vertical motion that explicit vertical stepping cannot stabilize.
+
+    2. **Sufficient divergence damping**: The damping coefficient ``κ_d`` and number of substeps ``N_s`` must satisfy
+
+       ```math
+       (1 - κ_d)^{N_s} \lesssim 0.1
+       ```
+
+       Practical combinations include:
+
+       | ``N_s`` | ``κ_d`` | ``(1-κ_d)^{N_s}`` |
+       |---------|---------|-----------------|
+       | 12      | 0.2     | 0.069           |
+       | 24      | 0.1     | 0.080           |
+       | 48      | 0.05    | 0.085           |
+
+!!! note "Only available with Wicker-Skamarock RK3"
+    The base-state pressure correction is only supported by the [`AcousticRungeKutta3`](@ref) time stepper (the default). The SSP RK3 convex combination creates acoustic mode interference that makes the correction unstable.
+
+### Divergence damping
+
+Divergence damping suppresses spurious acoustic oscillations by multiplicatively
+damping the perturbation density each substep:
+
+```math
+ρ''^{\,τ+Δτ} \mathrel{*}= (1 - κ_d)
+```
+
+Over ``N_s`` substeps this accumulates to a total damping factor of ``(1 - κ_d)^{N_s}``.
+The default value is ``κ_d = 0.05``. When using the base-state pressure correction,
+a larger value (e.g., ``κ_d = 0.2``) may be needed to satisfy the stability constraint.
 
 ### Vertically implicit solve (optional)
 
