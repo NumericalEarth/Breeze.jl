@@ -649,7 +649,7 @@ const rⁿᵘᶜ = 5e-11  # 0.05 nm
     ΔNᵃᶜᵗ = clamp(Nᵗᵃʳᵍᵉᵗ - Nᶜˡ⁺, zero(FT), Nᵃ⁺)
 
     # Nucleation timescale from aerosol activation parameters
-    τⁿᵘᶜ = aerosol_activation.τⁿᵘᶜ
+    τⁿᵘᶜ = aerosol_activation.nucleation_timescale
 
     # Convert to rate [1/m³/s], zero if subsaturated
     dNᶜˡ_act = ifelse(S > 0, ΔNᵃᶜᵗ / τⁿᵘᶜ, zero(ρ))

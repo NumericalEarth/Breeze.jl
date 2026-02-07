@@ -266,7 +266,7 @@ to compute the activation source term for cloud droplet number concentration.
 # Fields
 - `activation_parameters`: [`AerosolActivationParameters`] from CloudMicrophysics.jl
 - `aerosol_distribution`: Aerosol size distribution (modes with number, size, hygroscopicity)
-- `τⁿᵘᶜ`: Nucleation timescale [s] for converting activation deficit to rate (default: 1s)
+- `nucleation_timescale`: Nucleation timescale [s] for converting activation deficit to rate (default: 1s)
 
 # References
 * Abdul-Razzak, H. and Ghan, S.J. (2000). A parameterization of aerosol activation:
@@ -275,7 +275,7 @@ to compute the activation source term for cloud droplet number concentration.
 struct AerosolActivation{AP, AD, FT}
     activation_parameters :: AP
     aerosol_distribution :: AD
-    τⁿᵘᶜ :: FT  # nucleation timescale
+    nucleation_timescale :: FT
 end
 
 Base.summary(::AerosolActivation) = "AerosolActivation"
