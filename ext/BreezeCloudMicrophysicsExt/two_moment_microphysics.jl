@@ -771,8 +771,8 @@ Uses the maximum supersaturation to determine which aerosol modes activate.
         Sᶜʳⁱᵗ = 2 / sqrt(κ̄) * (A / 3 / mode.r_dry)^(3/2)
 
         # Activated fraction for this mode (Eq. 7 in ARG 2000)
-        u = 2 * log(Sᶜʳⁱᵗ / Sᵐᵃˣ) / 3 / sqrt(2) / log(mode.stdev)
-        fᵃᶜᵗ = (1 - erf(u)) / 2
+        ϕ = 2 * log(Sᶜʳⁱᵗ / Sᵐᵃˣ) / 3 / sqrt(2) / log(mode.stdev)
+        fᵃᶜᵗ = (1 - erf(ϕ)) / 2
 
         Nᵃᶜᵗ += fᵃᶜᵗ * Nᵐᵒᵈᵉ
     end
