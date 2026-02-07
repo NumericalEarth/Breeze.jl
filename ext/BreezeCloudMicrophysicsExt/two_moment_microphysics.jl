@@ -643,10 +643,10 @@ const rⁿᵘᶜ = 5e-11  # 0.05 nm
     S = supersaturation(T, ρ, q, constants, PlanarLiquidSurface())
 
     # Target: fraction of available aerosol that should activate
-    Nᵗᵃʳᵍᵉᵗ = aerosol_activated_fraction(aerosol_activation, aps, ρ, ℳ⁺, 𝒰, constants) * Nᵃ⁺
+    N★ = aerosol_activated_fraction(aerosol_activation, aps, ρ, ℳ⁺, 𝒰, constants) * Nᵃ⁺
 
     # Disequilibrium: activate deficit, limited by available aerosol
-    ΔNᵃᶜᵗ = clamp(Nᵗᵃʳᵍᵉᵗ - Nᶜˡ⁺, zero(FT), Nᵃ⁺)
+    ΔNᵃᶜᵗ = clamp(N★ - Nᶜˡ⁺, zero(FT), Nᵃ⁺)
 
     # Nucleation timescale from aerosol activation parameters
     τⁿᵘᶜ = aerosol_activation.nucleation_timescale
