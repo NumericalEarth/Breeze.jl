@@ -396,19 +396,165 @@ end
 # Fallback for Nothing microphysics (no fields to index)
 @inline grid_moisture_fractions(i, j, k, grid, microphysics::Nothing, ρ, qᵗ, μ) = MoistureMassFractions(qᵗ)
 
+#####
+##### Sedimentation speed interface
+#####
+
 """
-$(TYPEDSIGNATURES)
+    sedimentation_speed(microphysics, microphysical_fields, name)
 
-Return the microphysical velocities associated with `microphysics`, `microphysical_fields`, and tracer `name`.
+Return the sedimentation speed associated with `microphysics`, `microphysical_fields`, and tracer `name`.
 
-Must be either `nothing`, or a NamedTuple with three components `u, v, w`.
-The velocities are added to the bulk flow velocities for advecting the tracer.
-For example, the terminal velocity of falling rain.
+Sedimentation speed is defined as positive (a magnitude) representing the speed of downward motion
+due to sedimentation. Must return either `nothing` (no sedimentation for this tracer) or
+an indexable field-like object whose values are positive sedimentation speeds in m/s.
+
+This is the **primary interface** that microphysics scheme developers should implement.
+The generic [`microphysical_velocities`](@ref) function wraps `sedimentation_speed`, converting
+the positive sedimentation speed to a negative vertical velocity for use in the advection operator.
+
+For individual hydrometeors (rain, cloud liquid, etc.), `sedimentation_speed` typically returns
+a precomputed `ZFaceField` from `microphysical_fields`. For example:
+
+```julia
+@inline sedimentation_speed(m::MyScheme, μ, ::Val{:ρqʳ}) = μ.wʳ
+```
+"""
+@inline sedimentation_speed(microphysics::Nothing, microphysical_fields, name) = nothing
+
+#####
+##### NegatedField
+#####
+
+"""
+    NegatedField{F}
+
+A lazy wrapper that negates the values of an underlying field when indexed.
+Used to convert positive fall speeds to negative vertical velocities.
+"""
+struct NegatedField{F}
+    field :: F
+end
+
+@inline Base.getindex(nf::NegatedField, i, j, k) = -@inbounds nf.field[i, j, k]
+
+Adapt.adapt_structure(to, nf::NegatedField) = NegatedField(adapt(to, nf.field))
+
+#####
+##### Microphysical velocities (generic wrapper around sedimentation_speed)
+#####
+
+"""
+    microphysical_velocities(microphysics, microphysical_fields, name)
+
+Return the microphysical velocities associated with `microphysics`, `microphysical_fields`,
+and tracer `name`.
+
+Returns either `nothing` (no sedimentation) or a NamedTuple `(u, v, w)` where `w` is
+a `NegatedField` wrapping the positive sedimentation speed field. The velocities are added to
+the bulk flow velocities for advecting the tracer.
+
+This is a generic wrapper that calls [`sedimentation_speed`](@ref) and constructs the velocity tuple.
+Microphysics scheme developers should implement `sedimentation_speed`, not this function.
 """
 @inline microphysical_velocities(microphysics::Nothing, microphysical_fields, name) = nothing
 
-# NOTE: The grid-indexed fallback for Nothing microphysics is defined above (line 159)
-# via the generic fallback mechanism which calls the state-based method.
+@inline function microphysical_velocities(microphysics, microphysical_fields, name)
+    fs = sedimentation_speed(microphysics, microphysical_fields, name)
+    return _velocities_from_sedimentation_speed(fs)
+end
+
+@inline _velocities_from_sedimentation_speed(::Nothing) = nothing
+@inline _velocities_from_sedimentation_speed(fs) = (u=ZeroField(), v=ZeroField(), w=NegatedField(fs))
+
+#####
+##### Bulk sedimentation velocities (precomputed aggregate sedimentation velocities on the model)
+#####
+
+"""
+    materialize_bulk_sedimentation_velocities(microphysics, microphysical_fields, grid)
+
+Create the `bulk_sedimentation_velocities` NamedTuple stored on `AtmosphereModel`.
+
+For microphysics schemes with sedimentation, this allocates a `ZFaceField` for the
+total water sedimentation velocity `wᵗ` and returns `(ρqᵗ = (u=ZeroField(), v=ZeroField(), w=wᵗ),)`.
+
+Returns `nothing` when `microphysics === nothing`.
+"""
+materialize_bulk_sedimentation_velocities(::Nothing, microphysical_fields, grid) = nothing
+
+function materialize_bulk_sedimentation_velocities(microphysics, microphysical_fields, grid)
+    wᵗ_bcs = FieldBoundaryConditions(grid, (Center(), Center(), Face()); bottom=nothing)
+    wᵗ = ZFaceField(grid; boundary_conditions=wᵗ_bcs)
+    return (; ρqᵗ = (u=ZeroField(), v=ZeroField(), w=wᵗ))
+end
+
+"""
+    update_bulk_sedimentation_velocities!(bulk_sedimentation_velocities, microphysics, microphysical_fields, qᵗ)
+
+Compute aggregate sedimentation velocities from component hydrometeor sedimentation speeds.
+
+Currently computes the total water sedimentation velocity:
+```math
+wᵗ = \\frac{\\sum_i w_i q_i}{q_t}
+```
+where `wᵢ` are the individual hydrometeor sedimentation speeds (positive, from `sedimentation_speed`)
+and `qᵢ` are the corresponding specific humidities.
+
+The result is stored as a **negative** vertical velocity in `bulk_sedimentation_velocities.ρqᵗ.w`,
+consistent with the downward convention used in the advection operator.
+"""
+update_bulk_sedimentation_velocities!(::Nothing, microphysics, microphysical_fields, qᵗ) = nothing
+
+function update_bulk_sedimentation_velocities!(bulk_sedimentation_velocities, microphysics, microphysical_fields, qᵗ)
+    wᵗ = bulk_sedimentation_velocities.ρqᵗ.w
+    grid = wᵗ.grid
+    arch = grid.architecture
+    speed_fields = total_water_sedimentation_speed_components(microphysics, microphysical_fields)
+    launch!(arch, grid, :xyz, _compute_bulk_sedimentation_velocity!, wᵗ, grid, speed_fields, qᵗ)
+    return nothing
+end
+
+"""
+    total_water_sedimentation_speed_components(microphysics, microphysical_fields)
+
+Return a tuple of `(sedimentation_speed_field, specific_humidity_field)` pairs that contribute
+to the total water sedimentation speed. Each pair contains:
+- A sedimentation speed field (positive, on faces) from `microphysical_fields`
+- The corresponding specific humidity field (on centers) from `microphysical_fields`
+
+Microphysics schemes must implement this function. For example, a warm-phase 1M scheme
+where only rain sediments would return:
+```julia
+((μ.wʳ, μ.qʳ),)
+```
+
+A scheme with both cloud liquid and rain sedimentation would return:
+```julia
+((μ.wᶜˡ, μ.qᶜˡ), (μ.wʳ, μ.qʳ))
+```
+"""
+# Default: no sedimentation components. Schemes with sedimentation override this.
+total_water_sedimentation_speed_components(microphysics, microphysical_fields) = ()
+total_water_sedimentation_speed_components(::Nothing, microphysical_fields) = ()
+
+@kernel function _compute_bulk_sedimentation_velocity!(wᵗ, grid, components, qᵗ)
+    i, j, k = @index(Global, NTuple)
+    @inbounds begin
+        qt = qᵗ[i, j, k]
+        numerator = _weighted_sedimentation_speed_sum(i, j, k, components)
+        wᵗ[i, j, k] = ifelse(qt > 0, -numerator / qt, zero(qt))
+    end
+end
+
+# Recursive computation of Σ(wᵢ * qᵢ) over component tuples
+@inline _weighted_sedimentation_speed_sum(i, j, k, ::Tuple{}) = zero(eltype(Float64))
+
+@inline function _weighted_sedimentation_speed_sum(i, j, k, components::Tuple)
+    w, q = first(components)
+    @inbounds val = w[i, j, k] * max(zero(eltype(q)), q[i, j, k])
+    return val + _weighted_sedimentation_speed_sum(i, j, k, Base.tail(components))
+end
 
 """
 $(TYPEDSIGNATURES)

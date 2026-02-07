@@ -70,7 +70,7 @@ the rate at which rain mass leaves the domain through the bottom boundary.
 Units: kg/m²/s (positive = downward, out of domain)
 
 Note: The returned value is positive when rain is falling out of the domain
-(the terminal velocity `wʳ` is negative, and we flip the sign).
+(the fall speed `wʳ` is stored as a positive magnitude).
 """
 function AtmosphereModels.surface_precipitation_flux(model, microphysics::TwoMomentCloudMicrophysics)
     grid = model.grid
@@ -92,12 +92,12 @@ Adapt.adapt_structure(to, k::TwoMomentSurfacePrecipitationFluxKernel) =
 
 @inline function (kernel::TwoMomentSurfacePrecipitationFluxKernel)(i, j, k_idx, grid)
     # Flux at bottom face (k=1), ignore k_idx since this is a 2D field
-    # wʳ < 0 (downward), so -wʳ * ρqʳ > 0 represents flux out of domain
+    # wʳ > 0 (fall speed magnitude), so wʳ * ρqʳ > 0 represents flux out of domain
     @inbounds wʳ = kernel.terminal_velocity[i, j, 1]
     @inbounds ρqʳ = kernel.rain_density[i, j, 1]
 
     # Return positive flux for rain leaving domain (downward)
-    return -wʳ * ρqʳ
+    return wʳ * ρqʳ
 end
 
 #####

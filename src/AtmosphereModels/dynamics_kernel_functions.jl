@@ -9,6 +9,11 @@ using Oceananigans.Utils: sum_of_velocities
 @inline div_ρUc(i, j, k, grid, args...) = zero(grid)
 @inline c_div_ρU(i, j, k, grid, args...) = zero(grid)
 
+# Use precomputed bulk sedimentation velocity when provided, otherwise call microphysical_velocities
+@inline _sedimentation_velocity(::Nothing, microphysics, microphysical_fields, name) =
+    microphysical_velocities(microphysics, microphysical_fields, name)
+@inline _sedimentation_velocity(Uˢ, microphysics, microphysical_fields, name) = Uˢ
+
 """
     ∇_dot_Jᶜ(i, j, k, grid, ρ, closure::AbstractTurbulenceClosure, closure_fields,
              id, c, clock, model_fields, buoyancy)
@@ -112,6 +117,7 @@ end
 
 @inline function scalar_tendency(i, j, k, grid,
                                  c,
+                                 Uˢ,
                                  id,
                                  name,
                                  c_forcing,
@@ -128,7 +134,7 @@ end
                                  clock,
                                  model_fields)
 
-    Uᵖ = microphysical_velocities(microphysics, microphysical_fields, name)
+    Uᵖ = _sedimentation_velocity(Uˢ, microphysics, microphysical_fields, name)
     Uᵗ = sum_of_velocities(velocities, Uᵖ)
     ρ_field = dynamics_density(dynamics)
     @inbounds ρ = ρ_field[i, j, k]

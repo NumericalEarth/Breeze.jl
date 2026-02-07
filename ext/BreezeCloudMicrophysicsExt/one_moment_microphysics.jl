@@ -172,20 +172,22 @@ const OMCM = OneMomentCloudMicrophysics
 # Default fallback for OneMomentCloudMicrophysics tendencies (state-based)
 @inline AM.microphysical_tendency(bμp::OMCM, name, ρ, ℳ, 𝒰, constants) = zero(ρ)
 
-# Default fallback for OneMomentCloudMicrophysics velocities
-@inline AM.microphysical_velocities(bμp::OMCM, μ, name) = nothing
+# Default fallback for OneMomentCloudMicrophysics sedimentation speed
+@inline AM.sedimentation_speed(bμp::OMCM, μ, name) = nothing
 
-# Rain sedimentation: rain falls with terminal velocity (stored in microphysical fields)
-const zf = ZeroField()
-@inline AM.microphysical_velocities(bμp::OMCM, μ, ::Val{:ρqʳ}) = (u=zf, v=zf, w=μ.wʳ)
+# Rain sedimentation speed: stored as positive magnitude in microphysical fields
+@inline AM.sedimentation_speed(bμp::OMCM, μ, ::Val{:ρqʳ}) = μ.wʳ
+
+# Total water sedimentation speed components for computing aggregate sedimentation velocity
+AM.total_water_sedimentation_speed_components(bμp::OMCM, μ) = ((μ.wʳ, μ.qʳ),)
 
 # ImpenetrableBoundaryCondition alias
 const IBC = BoundaryCondition{<:Open, Nothing}
 
-# Helper for bottom terminal velocity based on precipitation_boundary_condition
+# Helper for bottom fall speed based on precipitation_boundary_condition
 # Used in update_microphysical_fields! to set wʳ[bottom] = 0 for ImpenetrableBoundaryCondition
-@inline bottom_terminal_velocity(::Nothing, wʳ) = wʳ  # no boundary condition / open: keep computed value
-@inline bottom_terminal_velocity(::IBC, wʳ) = zero(wʳ)  # impenetrable boundary condition
+@inline bottom_sedimentation_speed(::Nothing, wʳ) = wʳ  # no boundary condition / open: keep computed value
+@inline bottom_sedimentation_speed(::IBC, wʳ) = zero(wʳ)  # impenetrable boundary condition
 
 #####
 ##### Type aliases
@@ -303,7 +305,7 @@ function AM.materialize_microphysical_fields(bμp::OneMomentLiquidRain, grid, bc
 
     center_fields = center_field_tuple(grid, center_names...)
 
-    # Rain terminal velocity (negative = downward)
+    # Rain fall speed (positive magnitude)
     # bottom = nothing ensures the kernel-set value is preserved during fill_halo_regions!
     wʳ_bcs = FieldBoundaryConditions(grid, (Center(), Center(), Face()); bottom=nothing)
     wʳ = ZFaceField(grid; boundary_conditions=wʳ_bcs)
@@ -332,12 +334,11 @@ end
     # Derived: total liquid
     @inbounds μ.qˡ[i, j, k] = ℳ.qᶜˡ + ℳ.qʳ
 
-    # Terminal velocity with bottom boundary condition
+    # Fall speed (positive magnitude) with bottom boundary condition
     categories = bμp.categories
     𝕎 = terminal_velocity(categories.rain, categories.hydrometeor_velocities.rain, ρ, ℳ.qʳ)
-    wʳ = -𝕎 # negative = downward
-    wʳ₀ = bottom_terminal_velocity(bμp.precipitation_boundary_condition, wʳ)
-    @inbounds μ.wʳ[i, j, k] = ifelse(k == 1, wʳ₀, wʳ)
+    wʳ₀ = bottom_sedimentation_speed(bμp.precipitation_boundary_condition, 𝕎)
+    @inbounds μ.wʳ[i, j, k] = ifelse(k == 1, wʳ₀, 𝕎)
 
     return nothing
 end
@@ -357,12 +358,11 @@ end
     @inbounds μ.qˡ[i, j, k] = ℳ.qᶜˡ + ℳ.qʳ
     @inbounds μ.qⁱ[i, j, k] = ℳ.qᶜⁱ + ℳ.qˢ
 
-    # Terminal velocity with bottom boundary condition
+    # Fall speed (positive magnitude) with bottom boundary condition
     categories = bμp.categories
     𝕎 = terminal_velocity(categories.rain, categories.hydrometeor_velocities.rain, ρ, ℳ.qʳ)
-    wʳ = -𝕎 # negative = downward
-    wʳ₀ = bottom_terminal_velocity(bμp.precipitation_boundary_condition, wʳ)
-    @inbounds μ.wʳ[i, j, k] = ifelse(k == 1, wʳ₀, wʳ)
+    wʳ₀ = bottom_sedimentation_speed(bμp.precipitation_boundary_condition, 𝕎)
+    @inbounds μ.wʳ[i, j, k] = ifelse(k == 1, wʳ₀, 𝕎)
 
     return nothing
 end
