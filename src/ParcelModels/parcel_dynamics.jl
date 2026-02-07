@@ -4,7 +4,6 @@ using Oceananigans: Oceananigans, CenterField
 using Oceananigans.Architectures: on_architecture
 using Oceananigans.BoundaryConditions: fill_halo_regions!
 using Oceananigans.Fields: ZeroField, set!, interpolate
-using Oceananigans.Grids: Center, znode
 using Oceananigans.TimeSteppers: TimeSteppers, tick!
 using Oceananigans.Utils: launch!
 
