@@ -35,7 +35,7 @@ jobs:
     container:
       image: 'ghcr.io/numericalearth/breeze-docker-images:docs-julia_1.12.4'
       options: --gpus=all
-    timeout-minutes: 120
+    timeout-minutes: 60
     steps:
       - uses: actions/checkout@v6
       - name: Set BREEZE_BUILD_ALL_EXAMPLES
@@ -60,7 +60,7 @@ jobs:
           git config --global --add safe.directory ${PWD}
       - name: Build documentation
         shell: bash
-        timeout-minutes: 120
+        timeout-minutes: 45
         run:
           earlyoom -m 3 -s 100 -r 300 --prefer 'julia' &
           julia --color=yes --project=docs --threads 1,$(nproc) docs/make.jl
