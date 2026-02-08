@@ -1,19 +1,19 @@
 # # Tropical Cyclone World (Cronin & Chavas, 2019)
 #
 # This example implements the rotating radiative-convective equilibrium (RCE) experiment
-# from [Cronin and Chavas (2019)](@cite Cronin2019). The experiment demonstrates that
-# tropical cyclones can form and persist even in completely dry atmospheres, challenging
-# the conventional wisdom that moisture is essential for TC dynamics.
+# from [Cronin2019](@citet). The experiment demonstrates that tropical cyclones can form
+# and persist even in completely dry atmospheres, challenging the conventional wisdom
+# that moisture is essential for TC dynamics.
 #
 # The key innovation is the surface wetness parameter β, which controls the transition
 # from completely dry (β = 0, no evaporation) to fully moist (β = 1) conditions.
-# [Cronin and Chavas (2019)](@citet Cronin2019) found that TCs form in both limits,
-# with a "no-storms-land" at intermediate β where spontaneous genesis does not occur.
-# This script defaults to β = 1 (moist), which produces robust spontaneous TC genesis
-# at moderate resolution. The simulation approximates the paper's 100-day nonrotating
-# RCE spinup with an equilibrated initial temperature profile (dry adiabat in the
-# troposphere, isothermal stratosphere) and uses warm-phase saturation adjustment
-# microphysics for the moist case.
+# [Cronin2019](@citet) found that TCs form in both limits, with a "no-storms-land" at
+# intermediate β where spontaneous genesis does not occur.  This script defaults to β =
+# 1 (moist), which produces robust spontaneous TC genesis at moderate resolution. The
+# simulation approximates the paper's 100-day nonrotating RCE spinup with an
+# equilibrated initial temperature profile (dry adiabat in the troposphere, isothermal
+# stratosphere) and uses warm-phase saturation adjustment microphysics for the moist
+# case.
 
 using Breeze
 using Oceananigans: Oceananigans
@@ -265,7 +265,7 @@ run!(simulation)
 # ## Results: mean profile evolution
 #
 # We visualize the evolution of horizontally-averaged profiles,
-# for comparison with Figure 3 in [Cronin and Chavas (2019)](@cite Cronin2019).
+# for comparison with Figure 3 in [Cronin2019](@citet).
 
 θt = FieldTimeSeries("tc_world_profiles.jld2", "θ")
 ut = FieldTimeSeries("tc_world_profiles.jld2", "u")
@@ -365,11 +365,10 @@ nothing #hide
 
 # ## Discussion
 #
-# [Cronin and Chavas (2019)](@citet Cronin2019) found that tropical cyclones form
-# in both dry (β = 0) and moist (β = 1) limits, with a "no-storms-land" at
-# intermediate surface wetness (β ≈ 0.01-0.3) where spontaneous TC genesis does
-# not occur. Dry TCs have smaller outer radii but similar-sized convective cores,
-# and TC intensity decreases as the surface is dried.
+# [Cronin2019](@citet) found that tropical cyclones form in both dry (β = 0) and moist
+# (β = 1) limits, with a "no-storms-land" at intermediate surface wetness (β ≈ 0.01-0.3)
+# where spontaneous TC genesis does not occur. Dry TCs have smaller outer radii but
+# similar-sized convective cores, and TC intensity decreases as the surface is dried.
 #
 # The radiative forcing is implemented as a piecewise temperature tendency (Eq. 1):
 # constant cooling at 1 K/day in the troposphere (T > Tᵗˢ) and Newtonian relaxation
