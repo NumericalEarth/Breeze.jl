@@ -173,5 +173,6 @@ To implement a new microphysics scheme, we need to:
 8. **Implement `moisture_fractions`** to partition moisture
 9. **Implement `maybe_adjust_thermodynamic_state`** (trivial for non-equilibrium schemes)
 
-For schemes with sedimentation, you would also implement velocity fields and the
-`microphysical_velocities` function.
+For schemes with sedimentation, you would also implement `sedimentation_speed` (returning positive
+sedimentation speed fields per tracer). The aggregate total water sedimentation velocity is
+computed generically from the per-tracer `sedimentation_speed` implementations.

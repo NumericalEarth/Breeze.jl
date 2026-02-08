@@ -1,5 +1,5 @@
 using Breeze
-using Breeze.AtmosphereModels: microphysical_velocities
+using Breeze.AtmosphereModels: microphysical_velocities, sedimentation_speed
 using CloudMicrophysics
 using GPUArraysCore: @allowscalar
 using Oceananigans
@@ -143,13 +143,13 @@ end
 
     wʳ = @allowscalar model.microphysical_fields.wʳ[1, 1, 1]
     ρqʳ = @allowscalar model.microphysical_fields.ρqʳ[1, 1, 1]
-    expected_flux = -wʳ * ρqʳ
+    expected_flux = wʳ * ρqʳ  # wʳ is positive (fall speed magnitude)
 
     @test @allowscalar spf[1, 1] ≈ expected_flux
     @test @allowscalar spf[1, 1] >= 0
 end
 
-@testset "TwoMomentCloudMicrophysics velocities and terminal velocities [$FT]" for FT in test_float_types()
+@testset "TwoMomentCloudMicrophysics sedimentation_speed and velocities [$FT]" for FT in test_float_types()
     Oceananigans.defaults.FloatType = FT
     grid = RectilinearGrid(default_arch; size=(2, 2, 2), x=(0, 100), y=(0, 100), z=(0, 100))
 
@@ -163,7 +163,20 @@ end
 
     μ = model.microphysical_fields
 
-    # microphysical_velocities
+    # sedimentation_speed returns the positive magnitude sedimentation speed fields
+    fs_rain_mass = sedimentation_speed(microphysics, μ, Val(:ρqʳ))
+    @test fs_rain_mass === μ.wʳ
+
+    fs_rain_num = sedimentation_speed(microphysics, μ, Val(:ρnʳ))
+    @test fs_rain_num === μ.wʳₙ
+
+    fs_cloud_mass = sedimentation_speed(microphysics, μ, Val(:ρqᶜˡ))
+    @test fs_cloud_mass === μ.wᶜˡ
+
+    fs_cloud_num = sedimentation_speed(microphysics, μ, Val(:ρnᶜˡ))
+    @test fs_cloud_num === μ.wᶜˡₙ
+
+    # microphysical_velocities wraps sedimentation_speed with NegatedField
     vel_rain_mass = microphysical_velocities(microphysics, μ, Val(:ρqʳ))
     @test vel_rain_mass !== nothing
     @test haskey(vel_rain_mass, :w)
@@ -180,13 +193,13 @@ end
     @test vel_cloud_num !== nothing
     @test haskey(vel_cloud_num, :w)
 
-    # Terminal velocities
+    # Fall speeds should be positive (positive magnitude)
     wᶜˡ = @allowscalar μ.wᶜˡ[1, 1, 2]
     wʳ = @allowscalar μ.wʳ[1, 1, 2]
 
-    @test wᶜˡ <= 0
-    @test wʳ < 0
-    @test abs(wʳ) > abs(wᶜˡ)
+    @test wᶜˡ >= 0
+    @test wʳ > 0
+    @test wʳ > wᶜˡ
 end
 
 @testset "TwoMomentCloudMicrophysics ImpenetrableBoundaryCondition [$FT]" for FT in test_float_types()

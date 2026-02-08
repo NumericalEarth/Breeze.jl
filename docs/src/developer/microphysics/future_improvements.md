@@ -56,8 +56,6 @@ end
 - Some schemes have unusual fields (e.g., DCMIP2016Kessler's 2D `precipitation_rate`)
 - May need an escape hatch for schemes with non-standard requirements
 
-**Status**: On hold pending velocity field overhaul (see item 5).
-
 ## 3. Reduce Number of Interface Functions
 
 **Issue**: The interface has ~12 functions, some of which may be redundant or could be combined.
@@ -77,67 +75,17 @@ end
 2. Which functions SA schemes must override
 3. How moisture fraction computation differs
 
-## 5. Overhaul `microphysical_velocities`
-
-**Issue**: The relationship between `microphysical_velocities` and the velocity fields updated
-in `update_microphysical_auxiliaries!` is unclear.
-
-**Current state**:
-- `update_microphysical_auxiliaries!` writes velocity values to fields (e.g., `μ.wʳ[i,j,k] = ...`)
-- `microphysical_velocities(scheme, μ, name)` returns the velocity field for a given tracer
-
-### Key Insight: Sedimentation is Eulerian-Only
-
-Analysis of parcel models (`pyrcel`, `PySDM`) reveals that:
-
-| Model | Type | Sedimentation handling |
-|-------|------|----------------------|
-| `pyrcel` | 0D parcel | **None** — droplets stay within parcel |
-| `PySDM` (0D) | 0D parcel | Could be mass sink, but typically not used |
-| `PySDM` (1D/2D) | Kinematic grid | Particle displacement through spatial mesh |
-| Breeze `ParcelModel` | 0D parcel | **None** (currently) |
-| Breeze `AtmosphereModel` | Eulerian LES | Tracer advection with terminal velocity |
-
-**Implications**:
-- `microphysical_velocities` is fundamentally an **Eulerian concept** — it provides velocities
-  for advecting tracer fields through a spatial grid
-- In parcel models, sedimentation should be modeled as a **mass sink term** in
-  `microphysical_tendency`, not as spatial transport
-- This means `microphysical_velocities` should remain Eulerian-only and not be part of the
-  minimal parcel interface
-
-### Questions to resolve
-
-1. **Separation of concerns**: Should velocity computation be separated from field writing?
-   Currently, both happen in `update_microphysical_auxiliaries!`.
-
-2. **Naming conventions**: Can `microphysical_velocities` be eliminated if velocity fields
-   are stored with predictable names based on tracer names?
-
-3. **Multi-moment schemes**: How should schemes handle different velocities for mass vs.
-   number concentration (e.g., `wʳ` for rain mass, `wʳₙ` for rain number concentration)?
-
-4. **Advection coupling**: How does the velocity field connect to the advection machinery
-   in `AtmosphereModel`?
-
-5. **Parcel precipitation loss**: Should we add a standard pattern for precipitation removal
-   in parcel models? This would be a sink term based on threshold size or collection efficiency,
-   implemented in `microphysical_tendency`.
-
-**Status**: Needs comprehensive review. This blocks automation of `materialize_microphysical_fields`.
-
 ## Summary
 
 | Priority | Item | Status |
 |----------|------|--------|
 | High | Consolidate state types | Ready to implement |
 | Medium | Document SA exception | Ready to implement |
-| Medium | Overhaul velocities | Needs design work |
-| Low | Automate field materialization | Blocked on velocity overhaul |
+| Low | Automate field materialization | Ready to implement |
 | Low | Further function consolidation | Ongoing |
 
 The interface is already well-structured around the gridless state abstraction. The main
 remaining complexity is in:
-1. Velocity field handling (needs overhaul)
-2. Saturation adjustment special cases (needs documentation)
-3. Redundant state types (straightforward to fix)
+1. Saturation adjustment special cases (needs documentation)
+2. Redundant state types (straightforward to fix)
+3. Automating field materialization (no longer blocked)
