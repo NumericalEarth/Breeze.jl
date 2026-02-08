@@ -510,33 +510,34 @@ function update_bulk_sedimentation_velocities!(bulk_sedimentation_velocities, mi
     wᵗ = bulk_sedimentation_velocities.ρqᵗ.w
     grid = wᵗ.grid
     arch = grid.architecture
-    speed_fields = total_water_sedimentation_speed_components(microphysics, microphysical_fields)
-    launch!(arch, grid, :xyz, _compute_bulk_sedimentation_velocity!, wᵗ, grid, speed_fields, qᵗ)
+    names = prognostic_field_names(microphysics)
+    components = sedimentation_components(microphysics, microphysical_fields, names)
+    launch!(arch, grid, :xyz, _compute_bulk_sedimentation_velocity!, wᵗ, grid, components, qᵗ)
     return nothing
 end
 
-"""
-    total_water_sedimentation_speed_components(microphysics, microphysical_fields)
+# Build (speed_field, humidity_field) pairs for mass tracers with sedimentation.
+# Filters prognostic names to mass tracers (names starting with :ρq) that have
+# non-nothing sedimentation_speed, and pairs each speed field with the corresponding
+# specific humidity field (obtained by stripping the leading ρ: :ρqʳ → :qʳ).
+# Number tracers (e.g. :ρnᶜˡ) are excluded because they don't contribute to the
+# mass-weighted total water sedimentation velocity.
+sedimentation_components(microphysics, μ, names::Tuple{}) = ()
 
-Return a tuple of `(sedimentation_speed_field, specific_humidity_field)` pairs that contribute
-to the total water sedimentation speed. Each pair contains:
-- A sedimentation speed field (positive, on faces) from `microphysical_fields`
-- The corresponding specific humidity field (on centers) from `microphysical_fields`
-
-Microphysics schemes must implement this function. For example, a warm-phase 1M scheme
-where only rain sediments would return:
-```julia
-((μ.wʳ, μ.qʳ),)
-```
-
-A scheme with both cloud liquid and rain sedimentation would return:
-```julia
-((μ.wᶜˡ, μ.qᶜˡ), (μ.wʳ, μ.qʳ))
-```
-"""
-# Default: no sedimentation components. Schemes with sedimentation override this.
-total_water_sedimentation_speed_components(microphysics, microphysical_fields) = ()
-total_water_sedimentation_speed_components(::Nothing, microphysical_fields) = ()
+function sedimentation_components(microphysics, μ, names::Tuple)
+    name = first(names)
+    rest = sedimentation_components(microphysics, μ, Base.tail(names))
+    name_str = string(name)
+    # Only include mass tracers (names starting with ρq)
+    startswith(name_str, "ρq") || return rest
+    speed = sedimentation_speed(microphysics, μ, Val(name))
+    if speed === nothing
+        return rest
+    else
+        humidity_name = Symbol(name_str[nextind(name_str, 1):end])  # :ρqʳ → :qʳ
+        return ((speed, getproperty(μ, humidity_name)), rest...)
+    end
+end
 
 @kernel function _compute_bulk_sedimentation_velocity!(wᵗ, grid, components, qᵗ)
     i, j, k = @index(Global, NTuple)

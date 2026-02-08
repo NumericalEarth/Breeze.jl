@@ -379,10 +379,6 @@ end
 # Rain number: use number-weighted sedimentation speed
 @inline AtmosphereModels.sedimentation_speed(bμp::WPNE2M, μ, ::Val{:ρnʳ}) = μ.wʳₙ
 
-# Total water sedimentation speed components for computing aggregate sedimentation velocity
-# In 2M, both cloud liquid and rain contribute to total water sedimentation
-AtmosphereModels.total_water_sedimentation_speed_components(bμp::WPNE2M, μ) = ((μ.wᶜˡ, μ.qᶜˡ), (μ.wʳ, μ.qʳ))
-
 #####
 ##### Microphysical tendencies
 #####

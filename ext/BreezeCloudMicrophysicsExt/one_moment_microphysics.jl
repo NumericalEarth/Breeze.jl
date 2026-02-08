@@ -178,9 +178,6 @@ const OMCM = OneMomentCloudMicrophysics
 # Rain sedimentation speed: stored as positive magnitude in microphysical fields
 @inline AM.sedimentation_speed(bμp::OMCM, μ, ::Val{:ρqʳ}) = μ.wʳ
 
-# Total water sedimentation speed components for computing aggregate sedimentation velocity
-AM.total_water_sedimentation_speed_components(bμp::OMCM, μ) = ((μ.wʳ, μ.qʳ),)
-
 # ImpenetrableBoundaryCondition alias
 const IBC = BoundaryCondition{<:Open, Nothing}
 

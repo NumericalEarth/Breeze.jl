@@ -109,7 +109,6 @@ sedimentation speeds, representing the aggregate sedimentation rate of total wat
 | Function | Arguments | Description |
 |----------|-----------|-------------|
 | `sedimentation_speed` | `(microphysics, microphysical_fields, name)` | **Primary interface**: return positive sedimentation speed field for tracer `name`, or `nothing` |
-| `total_water_sedimentation_speed_components` | `(microphysics, microphysical_fields)` | Return `(speed_field, humidity_field)` tuples for aggregate computation |
 | `microphysical_velocities` | `(microphysics, microphysical_fields, name)` | **Generic wrapper** (don't override): converts sedimentation speed to negative velocity tuple via `NegatedField` |
 
 **Design principle**: Schemes implement `sedimentation_speed`; the generic `microphysical_velocities`
@@ -119,7 +118,7 @@ tuple for the advection operator.
 #### From individual sedimentation speeds to aggregate velocity
 
 The effective total water sedimentation speed is a mass-weighted average of the liquid and ice
-sedimentation speeds (cf. CliMA documentation, Section 3.4):
+sedimentation speeds [Yatunin2025](@cite) (Section 3.4):
 
 ```math
 \mathbb{W}^t = \frac{q^l \, \mathbb{W}^l + q^i \, \mathbb{W}^i}{q^t}
@@ -139,8 +138,13 @@ In general, the kernel computes:
 \mathbb{W}^t = \frac{\sum_i \mathbb{W}_i \, q_i}{q^t}
 ```
 
-where the sum runs over the `(speed_field, humidity_field)` pairs returned by
-`total_water_sedimentation_speed_components`.
+The `(speed_field, humidity_field)` pairs are built generically from `sedimentation_speed`:
+for each mass tracer in `prognostic_field_names` (names starting with `:ρq`),
+`sedimentation_speed` is called. If non-nothing, the corresponding specific humidity field
+is obtained by stripping the `ρ` prefix (`:ρqʳ` → `:qʳ`) and looking it up in the
+microphysical fields. Number tracers (e.g. `:ρnᶜˡ`) are excluded since they don't contribute
+to the mass-weighted total water velocity. This means implementing `sedimentation_speed` for
+individual tracers is sufficient — no additional function is needed for the aggregate.
 
 #### Concrete example: 2M warm-phase scheme
 
@@ -149,9 +153,9 @@ sedimentation:
 
 - `sedimentation_speed(scheme, μ, Val(:ρqᶜˡ))` returns `μ.wᶜˡ` (cloud liquid mass-weighted terminal velocity)
 - `sedimentation_speed(scheme, μ, Val(:ρqʳ))` returns `μ.wʳ` (rain mass-weighted terminal velocity)
-- `total_water_sedimentation_speed_components(scheme, μ)` returns `((μ.wᶜˡ, μ.qᶜˡ), (μ.wʳ, μ.qʳ))`
 
-The kernel then computes:
+The generic mechanism automatically builds the pairs `((μ.wᶜˡ, μ.qᶜˡ), (μ.wʳ, μ.qʳ))`
+from the mass tracers in `prognostic_field_names` and `sedimentation_speed`. The kernel then computes:
 
 ```math
 \mathbb{W}^t = \frac{\mathbb{W}^{cl} \, q^{cl} + \mathbb{W}^r \, q^r}{q^t}
@@ -209,7 +213,6 @@ These additional functions are required for full [`AtmosphereModel`](@ref) suppo
 | `materialize_microphysical_fields(microphysics, grid, bcs)` | Create prognostic + auxiliary fields |
 | `update_microphysical_auxiliaries!(μ, i, j, k, grid, microphysics, ℳ, ρ, 𝒰, constants)` | Update auxiliary fields at grid points |
 | `sedimentation_speed(microphysics, μ_fields, name)` | Positive sedimentation speed for tracer advection |
-| `total_water_sedimentation_speed_components(microphysics, μ_fields)` | Component `(speed, humidity)` pairs for aggregate velocity |
 
 **Why these are Eulerian-only**:
 - **Field materialization**: Parcel models don't have fields; they store scalars directly in `ParcelState`.
@@ -228,7 +231,6 @@ These additional functions are required for full [`AtmosphereModel`](@ref) suppo
 | `materialize_microphysical_fields` | — | ✓ | Fields for grid storage |
 | `update_microphysical_auxiliaries!` | — | ✓ | Write to diagnostic fields |
 | `sedimentation_speed` | — | ✓ | Positive sedimentation speed per tracer |
-| `total_water_sedimentation_speed_components` | — | ✓ | Component pairs for aggregate velocity |
 | `grid_microphysical_state` | — | — | Generic wrapper (don't override) |
 | `grid_microphysical_tendency` | — | — | Generic wrapper (don't override) |
 | `microphysical_velocities` | — | — | Generic wrapper (don't override) |
@@ -281,7 +283,6 @@ Schemes may define their own state types inheriting from `AbstractMicrophysicalS
 
 5. **Explicit returns**: All mutating functions `return nothing`.
 
-6. **Sedimentation is Eulerian**: Sedimentation speeds (`sedimentation_speed`,
-   `total_water_sedimentation_speed_components`) are only meaningful for grid-based simulations
-   where tracers advect through space. In parcel models, precipitation loss should be modeled
-   as a sink term in `microphysical_tendency`.
+6. **Sedimentation is Eulerian**: Sedimentation speeds (`sedimentation_speed`) are only
+   meaningful for grid-based simulations where tracers advect through space. In parcel models,
+   precipitation loss should be modeled as a sink term in `microphysical_tendency`.

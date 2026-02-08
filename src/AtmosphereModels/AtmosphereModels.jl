@@ -38,7 +38,6 @@ export
     NegatedField,
     materialize_bulk_sedimentation_velocities,
     update_bulk_sedimentation_velocities!,
-    total_water_sedimentation_speed_components,
 
     # Interface functions (extended by BoundaryConditions and Forcings)
     regularize_atmosphere_model_boundary_conditions,
