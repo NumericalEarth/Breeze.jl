@@ -18,6 +18,7 @@
 using Breeze
 using Oceananigans: Oceananigans
 using Oceananigans.Units
+using Oceananigans.Grids: znode, Center
 
 using CairoMakie
 using CUDA
@@ -25,6 +26,7 @@ using Printf
 using Random
 
 Random.seed!(2019)
+Oceananigans.defaults.FloatType = Float32
 
 # ## Domain and grid
 #
@@ -126,9 +128,30 @@ end
 # Rayleigh damping in the upper 3 km prevents spurious wave reflections
 # from the rigid lid.
 
-sponge_mask = GaussianMask{:z}(center = H - 1500, width = 3000)
-ρw_sponge = Relaxation(rate = 1/60, mask = sponge_mask)
-forcing = (; ρe=ρe_forcing, ρw=ρw_sponge)
+sponge_mask = GaussianMask{:z}(center = 24000, width = 5000)
+ρw_sponge = Relaxation(rate = 1/10, mask = sponge_mask)
+
+# θ sponge: strongly relax temperature toward stratospheric equilibrium
+# in the sponge region to keep stratospheric θ bounded for Float32.
+# The wide sponge (centered at 24 km, width 5 km) kills dynamics above ~20 km,
+# similar to GATE's approach (sponge from 19-27 km).
+
+θ_sponge_params = (; Tᵗˢ, ρᵣ, cᵖᵈ, rate = 1/10, center = 24000, width = 5000)
+
+@inline function θ_sponge(i, j, k, grid, clock, model_fields, p)
+    @inbounds T = model_fields.T[i, j, k]
+    @inbounds ρ = p.ρᵣ[i, j, k]
+    z = znode(i, j, k, grid, Center(), Center(), Center())
+    d = (z - p.center) / p.width
+    mask = exp(-d^2 / 2)
+    return -p.rate * mask * ρ * p.cᵖᵈ * (T - p.Tᵗˢ)
+end
+
+ρe_sponge = Forcing(θ_sponge;
+                     discrete_form = true,
+                     parameters = θ_sponge_params)
+
+forcing = (; ρe=(ρe_forcing, ρe_sponge), ρw=ρw_sponge)
 nothing #hide
 
 # ## Model
@@ -180,7 +203,7 @@ set!(model, θ=θᵢ, qᵗ=qᵢ)
 # We run for 6 days, which is sufficient for moist TC genesis and intensification.
 
 simulation = Simulation(model; Δt=10, stop_time=6days)
-conjure_time_step_wizard!(simulation, cfl=0.7)
+conjure_time_step_wizard!(simulation, cfl=0.5)
 
 # ## Output and progress
 
