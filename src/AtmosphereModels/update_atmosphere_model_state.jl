@@ -77,15 +77,18 @@ function compute_velocities!(model::AtmosphereModel)
     grid = model.grid
     arch = grid.architecture
 
-    TX, TY, TZ = topology(grid)
-    Nx, Ny, Nz = size(grid)
-    Hx, Hy, Hz = halo_size(grid)
+    # TODO: Better support OffsetStaticSize in KernalAbstractions
+    # For now, just use :xyz instead of KernelParameters
+    
+    # TX, TY, TZ = topology(grid)
+    # Nx, Ny, Nz = size(grid)
+    # Hx, Hy, Hz = halo_size(grid)
 
-    ii = diagnostic_indices(TX(), Nx, Hx)
-    jj = diagnostic_indices(TY(), Ny, Hy)
-    kk = diagnostic_indices(TZ(), Nz, Hz)
+    # ii = diagnostic_indices(TX(), Nx, Hx)
+    # jj = diagnostic_indices(TY(), Ny, Hy)
+    # kk = diagnostic_indices(TZ(), Nz, Hz)
 
-    kp = KernelParameters(ii, jj, kk)
+    # kp = KernelParameters(ii, jj, kk)
 
     # Ensure halos are filled before velocity computation
     # (prognostic field halo fill in update_state! is async)
@@ -93,7 +96,7 @@ function compute_velocities!(model::AtmosphereModel)
     fill_halo_regions!(density)
     fill_halo_regions!(model.momentum)
 
-    launch!(arch, grid, kp,
+    launch!(arch, grid, :xyz,
             _compute_velocities!,
             model.velocities,
             grid,
