@@ -79,6 +79,7 @@ function compute_velocities!(model::AtmosphereModel)
 
     #TODO: Better support OffsetStaticSize in KernalAbstractions
     # For now, just use :xyz instead of KernelParameters
+    # See: https://github.com/NumericalEarth/Breeze.jl/issues/433
 
     # TX, TY, TZ = topology(grid)
     # Nx, Ny, Nz = size(grid)
