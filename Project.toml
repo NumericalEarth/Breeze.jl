@@ -21,9 +21,11 @@ Printf = "de0858da-6303-5e67-8744-51eddeeeb8d7"
 ClimaComms = "3a4d1b5c-c61d-41fd-a00a-5873ba7a1b0d"
 CloudMicrophysics = "6a9e3e04-43cd-43ba-94b9-e8782df3c71b"
 RRTMGP = "a01a1ee8-cea4-48fc-987c-fc7878d79da1"
+Reactant = "3c362404-f566-11ee-1572-e11a4b42c853"
 
 [extensions]
 BreezeCloudMicrophysicsExt = "CloudMicrophysics"
+BreezeReactantExt = "Reactant"
 BreezeRRTMGPExt = ["ClimaComms", "RRTMGP"]
 
 [compat]
@@ -39,4 +41,5 @@ KernelAbstractions = "0.9"
 Oceananigans = "0.104.2"
 Printf = "1"
 RRTMGP = "0.21"
+Reactant = "0.2.203"
 julia = "1.10.10"
