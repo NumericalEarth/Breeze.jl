@@ -31,7 +31,7 @@ BreezeRRTMGPExt = ["ClimaComms", "RRTMGP"]
 [compat]
 Adapt = "4.3.0"
 ClimaComms = "0.6"
-CloudMicrophysics = "0.29.0, 0.30"
+CloudMicrophysics = "0.29.0, 0.30, 0.31"
 Dates = "<0.0.1, 1"
 DocStringExtensions = "0.9.5"
 GPUArraysCore = "0.2"
