@@ -1,11 +1,11 @@
 using ..Thermodynamics: Thermodynamics, mixture_heat_capacity, mixture_gas_constant
 
 using Oceananigans.BoundaryConditions: fill_halo_regions!, compute_x_bcs!, compute_y_bcs!, compute_z_bcs!
-using Oceananigans.Grids: Bounded, Periodic, Flat, topology, halo_size
+using Oceananigans.Grids: Bounded, Periodic, Flat # , topology, halo_size
 using Oceananigans.ImmersedBoundaries: mask_immersed_field!
 using Oceananigans.TimeSteppers: TimeSteppers
 using Oceananigans.TurbulenceClosures: compute_diffusivities!
-using Oceananigans.Utils: launch!, KernelParameters
+using Oceananigans.Utils: launch! # , KernelParameters
 using Oceananigans.Operators: ℑxᶠᵃᵃ, ℑyᵃᶠᵃ, ℑzᵃᵃᶠ
 
 function TimeSteppers.update_state!(model::AtmosphereModel, callbacks=[]; compute_tendencies=true)
