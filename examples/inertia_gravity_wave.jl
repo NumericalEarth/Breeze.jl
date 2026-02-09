@@ -122,7 +122,6 @@ outputs = merge(model.velocities, (; θ′))
 
 filename = "inertia_gravity_wave.jld2"
 simulation.output_writers[:jld2] = JLD2Writer(model, outputs; filename,
-                                              including = [:grid],
                                               schedule = TimeInterval(100),
                                               overwrite_existing = true)
 
