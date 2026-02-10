@@ -1,5 +1,5 @@
 using Breeze
-using Breeze.AtmosphereModels: microphysical_velocities
+using Breeze.AtmosphereModels: microphysical_velocities, sedimentation_speed
 using CloudMicrophysics
 using CloudMicrophysics.Parameters: CloudLiquid, CloudIce
 using GPUArraysCore: @allowscalar
@@ -215,7 +215,7 @@ end
 
     wʳ = @allowscalar model.microphysical_fields.wʳ[1, 1, 1]
     ρqʳ = @allowscalar model.microphysical_fields.ρqʳ[1, 1, 1]
-    expected_flux = -wʳ * ρqʳ
+    expected_flux = wʳ * ρqʳ  # wʳ is positive (fall speed magnitude)
 
     @test @allowscalar spf[1, 1] ≈ expected_flux
     @test @allowscalar spf[1, 1] > 0
@@ -310,7 +310,7 @@ end
     @test contains(str_ne, "cloud_formation")
 end
 
-@testset "microphysical_velocities [$(FT)]" for FT in test_float_types()
+@testset "sedimentation_speed and microphysical_velocities [$(FT)]" for FT in test_float_types()
     Oceananigans.defaults.FloatType = FT
     grid = RectilinearGrid(default_arch; size=(2, 2, 2), x=(0, 100), y=(0, 100), z=(0, 100))
 
@@ -323,10 +323,24 @@ end
     set!(model; θ=300, qᵗ=0.015, qʳ=0.001)
 
     μ = model.microphysical_fields
+
+    # sedimentation_speed returns positive magnitude for rain, nothing for cloud
+    fs_rain = sedimentation_speed(microphysics, μ, Val(:ρqʳ))
+    @test fs_rain !== nothing
+    @test fs_rain === μ.wʳ
+
+    fs_cloud = sedimentation_speed(microphysics, μ, Val(:ρqᶜˡ))
+    @test fs_cloud === nothing
+
+    # microphysical_velocities wraps sedimentation_speed with NegatedField
     vel_rain = microphysical_velocities(microphysics, μ, Val(:ρqʳ))
     @test vel_rain !== nothing
     @test haskey(vel_rain, :w)
 
     vel_cloud = microphysical_velocities(microphysics, μ, Val(:ρqᶜˡ))
     @test vel_cloud === nothing
+
+    # Fall speed values should be positive (positive magnitude)
+    wʳ = @allowscalar μ.wʳ[1, 1, 2]
+    @test wʳ >= 0
 end

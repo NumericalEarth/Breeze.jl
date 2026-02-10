@@ -33,6 +33,11 @@ export
     grid_microphysical_tendency,
     update_microphysical_fields!,
     update_microphysical_auxiliaries!,
+    sedimentation_speed,
+    microphysical_velocities,
+    NegatedField,
+    materialize_bulk_sedimentation_velocities,
+    update_bulk_sedimentation_velocities!,
 
     # Interface functions (extended by BoundaryConditions and Forcings)
     regularize_atmosphere_model_boundary_conditions,
@@ -62,7 +67,8 @@ using DocStringExtensions: TYPEDSIGNATURES, TYPEDEF, TYPEDFIELDS
 using Adapt: Adapt, adapt
 using KernelAbstractions: @kernel, @index
 
-using Oceananigans: Oceananigans, CenterField, fields
+using Oceananigans: Oceananigans, Center, Face, CenterField, fields
+using Oceananigans.Fields: ZeroField, ZFaceField
 using Oceananigans.BoundaryConditions: FieldBoundaryConditions, regularize_field_boundary_conditions, fill_halo_regions!
 using Oceananigans.ImmersedBoundaries: mask_immersed_field!
 using Oceananigans.Operators: Δzᶜᶜᶜ, ℑzᵃᵃᶠ

@@ -13,6 +13,8 @@ function TimeSteppers.update_state!(model::AtmosphereModel, callbacks=[]; comput
 
     fill_halo_regions!(prognostic_fields(model), model.clock, fields(model), async=true)
     compute_auxiliary_variables!(model)
+    update_bulk_sedimentation_velocities!(model.bulk_sedimentation_velocities, model.microphysics,
+                                         model.microphysical_fields, model.specific_moisture)
     update_radiation!(model.radiation, model)
     compute_forcings!(model)
     microphysics_model_update!(model.microphysics, model)
@@ -259,6 +261,9 @@ end
     @inbounds temperature[i, j, k] = T
 end
 
+bulk_sedimentation_velocity(::Nothing, name) = nothing
+bulk_sedimentation_velocity(velocities, name) = get(velocities, name, nothing)
+
 function compute_tendencies!(model::AtmosphereModel)
     grid = model.grid
     arch = grid.architecture
@@ -295,8 +300,11 @@ function compute_tendencies!(model::AtmosphereModel)
     ##### Moisture density tendency
     #####
 
+    Uᵗ = bulk_sedimentation_velocity(model.bulk_sedimentation_velocities, :ρqᵗ)
+
     ρq_args = (
         model.specific_moisture,
+        Uᵗ,
         Val(2),
         Val(:ρqᵗ),
         model.forcing.ρqᵗ,
@@ -319,6 +327,7 @@ function compute_tendencies!(model::AtmosphereModel)
 
         scalar_args = (
             ρc,
+            nothing, # Uˢ (hydrometeor velocities are handled by microphysical_velocities)
             Val(i + 2),
             Val(name),
             model.forcing[name],

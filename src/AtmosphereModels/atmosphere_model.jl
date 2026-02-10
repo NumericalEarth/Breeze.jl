@@ -27,7 +27,7 @@ function validate_tracers(tracers::Tuple)
 end
 
 mutable struct AtmosphereModel{Dyn, Frm, Arc, Tst, Grd, Clk, Thm, Mom, Moi, Mfr, Buy,
-                               Tmp, Sol, Vel, Trc, Adv, Cor, Frc, Mic, Cnd, Cls, Cfs, Rad} <: AbstractModel{Tst, Arc}
+                               Tmp, Sol, Vel, Trc, Adv, Cor, Frc, Mic, Cnd, Fvl, Cls, Cfs, Rad} <: AbstractModel{Tst, Arc}
     architecture :: Arc
     grid :: Grd
     clock :: Clk
@@ -47,6 +47,7 @@ mutable struct AtmosphereModel{Dyn, Frm, Arc, Tst, Grd, Clk, Thm, Mom, Moi, Mfr,
     forcing :: Frc
     microphysics :: Mic
     microphysical_fields :: Cnd
+    bulk_sedimentation_velocities :: Fvl
     timestepper :: Tst
     closure :: Cls
     closure_fields :: Cfs
@@ -177,6 +178,7 @@ function AtmosphereModel(grid;
         velocities = materialize_velocities(velocities, grid)
     end
     microphysical_fields = materialize_microphysical_fields(microphysics, grid, regularized_boundary_conditions)
+    bulk_sedimentation_velocities = materialize_bulk_sedimentation_velocities(microphysics, microphysical_fields, grid)
 
     tracers = NamedTuple(name => CenterField(grid, boundary_conditions=regularized_boundary_conditions[name]) for name in tracer_names)
 
@@ -241,6 +243,7 @@ function AtmosphereModel(grid;
                             forcing,
                             microphysics,
                             microphysical_fields,
+                            bulk_sedimentation_velocities,
                             timestepper,
                             closure,
                             closure_fields,
