@@ -7,7 +7,7 @@ using Breeze
 include("Timesteppers.jl")
 using .TimeSteppers
 
-include("MassConservation.jl")
-using .MassConservation
+include("AtmosphereModels.jl")
+using .AtmosphereModels
 
 end # module
