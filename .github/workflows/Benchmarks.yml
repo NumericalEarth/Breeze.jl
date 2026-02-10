@@ -17,6 +17,10 @@ concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
   cancel-in-progress: true
 
+env:
+  # Disable GPU support for Reactant until we actually use it.
+  REACTANT_GPU: 'none'
+
 jobs:
   run-benchmarks:
     name: "Run benchmarks"

@@ -25,6 +25,10 @@ permissions:
   actions: write
   contents: read
 
+env:
+  # Disable GPU support for Reactant until we actually use it.
+  REACTANT_GPU: 'none'
+
 jobs:
   test:
     name: Julia ${{ matrix.version }} - ${{ matrix.os }} - ${{ matrix.arch }} - ${{ github.event_name }}
