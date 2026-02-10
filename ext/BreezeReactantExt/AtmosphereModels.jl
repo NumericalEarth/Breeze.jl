@@ -1,15 +1,12 @@
 module AtmosphereModels
 
 using Reactant
-using Oceananigans
-using Breeze
-
 using Oceananigans: ReactantState
 using Oceananigans.Models.NonhydrostaticModels: compute_pressure_correction!, make_pressure_correction!
 using Oceananigans.TimeSteppers: update_state!
-using Breeze: AtmosphereModels, AtmosphereModel
+using Breeze: AtmosphereModel
 
-function AtmosphereModels.enforce_mass_conservation!(model::AtmosphereModel{<:Any, <:Any, <:ReactantState})
+function Breeze.AtmosphereModels.enforce_mass_conservation!(model::AtmosphereModel{<:Any, <:Any, <:ReactantState})
     FT = eltype(model.grid)
     Δt = one(FT)
     Reactant.@jit compute_pressure_correction!(model, Δt)
