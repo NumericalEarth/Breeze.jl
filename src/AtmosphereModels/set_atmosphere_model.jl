@@ -249,7 +249,7 @@ function Fields.set!(model::AtmosphereModel; time=nothing, enforce_mass_conserva
 end
 
 """
-    enforce_mass_conservation!(model)
+$(TYPEDSIGNATURES)
 
 Apply a pressure correction to enforce the anelastic continuity equation.
 Overridden in BreezeReactantExt to compile the pressure solve via `@jit`.
