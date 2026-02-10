@@ -4,7 +4,7 @@ using Reactant
 using Oceananigans: ReactantState
 using Oceananigans.Models.NonhydrostaticModels: compute_pressure_correction!, make_pressure_correction!
 using Oceananigans.TimeSteppers: update_state!
-using Breeze: AtmosphereModel
+using Breeze: Breeze, AtmosphereModel
 
 function Breeze.AtmosphereModels.enforce_mass_conservation!(model::AtmosphereModel{<:Any, <:Any, <:ReactantState})
     FT = eltype(model.grid)
