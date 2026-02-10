@@ -47,6 +47,5 @@ examples/tropical_cyclone_world.md
 examples/atsc-jas-d-18-0357*
 
 # Benchmarking output
-*benchmarks*.json
-benchmark_results.json
+*.json
 benchmark_results.md
