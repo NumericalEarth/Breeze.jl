@@ -8,5 +8,6 @@ include("Timesteppers.jl")
 using .TimeSteppers
 
 include("MassConservation.jl")
+using .MassConservation
 
 end # module
