@@ -1,19 +1,19 @@
 # # Tropical Cyclone World (Cronin & Chavas, 2019)
 #
 # This example implements the rotating radiative-convective equilibrium (RCE) experiment
-# from [Cronin and Chavas (2019)](@cite Cronin2019). The experiment demonstrates that
-# tropical cyclones can form and persist even in completely dry atmospheres, challenging
-# the conventional wisdom that moisture is essential for TC dynamics.
+# from [Cronin2019](@citet). The experiment demonstrates that tropical cyclones can form
+# and persist even in completely dry atmospheres, challenging the conventional wisdom
+# that moisture is essential for TC dynamics.
 #
 # The key innovation is the surface wetness parameter β, which controls the transition
 # from completely dry (β = 0, no evaporation) to fully moist (β = 1) conditions.
-# [Cronin and Chavas (2019)](@citet Cronin2019) found that TCs form in both limits,
-# with a "no-storms-land" at intermediate β where spontaneous genesis does not occur.
-# This script defaults to β = 1 (moist), which produces robust spontaneous TC genesis
-# at moderate resolution. The simulation approximates the paper's 100-day nonrotating
-# RCE spinup with an equilibrated initial temperature profile (dry adiabat in the
-# troposphere, isothermal stratosphere) and uses warm-phase saturation adjustment
-# microphysics for the moist case.
+# [Cronin2019](@citet) found that TCs form in both limits, with a "no-storms-land" at
+# intermediate β where spontaneous genesis does not occur.  This script defaults to β =
+# 1 (moist), which produces robust spontaneous TC genesis at moderate resolution. The
+# simulation approximates the paper's 100-day nonrotating RCE spinup with an
+# equilibrated initial temperature profile (dry adiabat in the troposphere, isothermal
+# stratosphere) and uses warm-phase saturation adjustment microphysics for the moist
+# case.
 
 using Breeze
 using Breeze.Thermodynamics: compute_reference_state!
@@ -366,7 +366,7 @@ nothing #hide
 # ## Discussion
 #
 # This example demonstrates spontaneous tropical cyclone genesis in a rotating
-# radiative-convective equilibrium setup, following [Cronin and Chavas (2019)](@cite Cronin2019).
+# radiative-convective equilibrium setup, following [Cronin2019](@citet).
 # The surface wetness parameter β controls moisture availability: β = 1 (default)
 # produces robust moist TC genesis, while β = 0 yields dry TCs.
 #
