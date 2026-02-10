@@ -16,6 +16,7 @@
 # microphysics for the moist case.
 
 using Breeze
+using Breeze.Thermodynamics: compute_reference_state!
 using Oceananigans: Oceananigans
 using Oceananigans.Units
 using Oceananigans.Grids: znode, Center
@@ -38,9 +39,11 @@ Oceananigans.defaults.FloatType = Float32
 # resolution (16 levels in the lowest km, 2000 m spacing above).
 
 arch = GPU()
-Lx = Ly = 1152e3
+paper_Lx = paper_Ly = 1152e3
+paper_Nx = paper_Ny = 576
+Lx = Ly = paper_Lx / 2
+Lx = Ly = paper_Lx / 8 |> Int 
 H = 28e3
-Nx = Ny = 144
 
 Δz_fine = 1000 / 16   # 62.5 m (paper: 1000/64 ≈ 15.6 m)
 Δz_coarse = 2000      # m (paper: 500 m)
@@ -57,15 +60,43 @@ grid = RectilinearGrid(arch; size = (Nx, Ny, Nz), halo = (5, 5, 5),
 
 # ## Reference state and dynamics
 #
-# We use the anelastic formulation with a reference state derived from the
-# surface potential temperature T₀ = 300 K and standard surface pressure.
+# We use the anelastic formulation with a reference state initialized from
+# the surface potential temperature T₀ = 300 K and standard surface pressure.
+# The reference state is then adjusted to match the initial temperature and
+# moisture profiles. This adjustment is critical for tall domains: without it,
+# the constant-θ adiabat reference state diverges from the actual atmosphere
+# in the stratosphere (T_ref ≈ 26 K vs T_actual = 210 K at 28 km), producing
+# catastrophic buoyancy forces.
 
 T₀ = 300
 constants = ThermodynamicConstants()
 
 reference_state = ReferenceState(grid, constants;
                                  surface_pressure = 101325,
-                                 potential_temperature = T₀)
+                                 potential_temperature = T₀,
+                                 vapor_mass_fraction = 0)
+
+# Define equilibrium temperature and moisture profiles for adjustment and initialization
+Tᵗˢ = 210
+cᵖᵈ = constants.dry_air.heat_capacity
+g = constants.gravitational_acceleration
+Rᵈ = Breeze.Thermodynamics.dry_air_gas_constant(constants)
+κ = Rᵈ / cᵖᵈ
+pˢᵗ = reference_state.standard_pressure
+Π₀ = (101325 / pˢᵗ)^κ
+
+# Analytical Exner function for a hydrostatic constant-θ atmosphere
+Π(z) = Π₀ - g * z / (cᵖᵈ * T₀)
+
+β = 1
+q₀ = 15e-3 # surface specific humidity (kg/kg)
+Hq = 3000   # moisture scale height (m)
+
+Tᵇᵍ(z) = max(Tᵗˢ, T₀ * Π(z))
+qᵇᵍ(z) = max(0, β * q₀ * exp(-z / Hq))
+
+# Adjust reference state to match actual profiles
+compute_reference_state!(reference_state, Tᵇᵍ, qᵇᵍ, constants)
 
 dynamics = AnelasticDynamics(reference_state)
 coriolis = FPlane(f = 3e-4)
@@ -76,9 +107,7 @@ coriolis = FPlane(f = 3e-4)
 # Cᴰ = 1.5 × 10⁻³ and gustiness v★ = 1 m/s. The surface wetness parameter β
 # scales the moisture flux coefficient.
 
-β = 1
-Cᴰ = 1.5e-3
-Cᵀ = Cᴰ
+Cᴰ = Cᵀ = 1.5e-3
 Uᵍ = 1
 
 ρu_bcs = FieldBoundaryConditions(bottom = BulkDrag(coefficient = Cᴰ, gustiness = Uᵍ))
@@ -102,13 +131,11 @@ nothing #hide
 # with timescale τᵣ = 20 days for T ≤ Tᵗˢ (stratosphere). We apply this as an
 # energy forcing on ρe, so that Breeze handles the conversion to ρθ tendency.
 
-Tᵗˢ = 210
 Ṫ  = 1 / day
 τᵣ = 20days
 
 FT = eltype(grid)
 ρᵣ = reference_state.density
-cᵖᵈ = constants.dry_air.heat_capacity
 
 forcing_params = (; Tᵗˢ, Ṫ, τᵣ, ρᵣ, cᵖᵈ)
 
@@ -128,15 +155,18 @@ end
 # Rayleigh damping in the upper 3 km prevents spurious wave reflections
 # from the rigid lid.
 
-sponge_mask = GaussianMask{:z}(center = 24000, width = 5000)
-ρw_sponge = Relaxation(rate = 1/10, mask = sponge_mask)
+center = 26000
+width = 2000
+rate = 1/100
+sponge_mask = GaussianMask{:z}(; center, width)
+ρw_sponge = Relaxation(; rate, mask = sponge_mask)
 
 # θ sponge: strongly relax temperature toward stratospheric equilibrium
 # in the sponge region to keep stratospheric θ bounded for Float32.
 # The wide sponge (centered at 24 km, width 5 km) kills dynamics above ~20 km,
 # similar to GATE's approach (sponge from 19-27 km).
 
-θ_sponge_params = (; Tᵗˢ, ρᵣ, cᵖᵈ, rate = 1/10, center = 24000, width = 5000)
+θ_sponge_params = (; Tᵗˢ, ρᵣ, cᵖᵈ, rate, center, width)
 
 @inline function θ_sponge(i, j, k, grid, clock, model_fields, p)
     @inbounds T = model_fields.T[i, j, k]
@@ -148,8 +178,8 @@ sponge_mask = GaussianMask{:z}(center = 24000, width = 5000)
 end
 
 ρe_sponge = Forcing(θ_sponge;
-                     discrete_form = true,
-                     parameters = θ_sponge_params)
+                    discrete_form = true,
+                    parameters = θ_sponge_params)
 
 forcing = (; ρe=(ρe_forcing, ρe_sponge), ρw=ρw_sponge)
 nothing #hide
@@ -167,36 +197,23 @@ model = AtmosphereModel(grid; dynamics, coriolis, advection,
 # ## Initial conditions
 #
 # We initialize with an equilibrated temperature profile: a dry adiabat in the
-# troposphere (θ = θ₀) transitioning to an isothermal stratosphere at Tᵗˢ = 210 K.
+# troposphere transitioning to an isothermal stratosphere at Tᵗˢ = 210 K.
 # This approximates the paper's 100-day nonrotating RCE spinup. Small random
 # perturbations in the lowest kilometer trigger convection.
+#
+# **Important:** After `compute_reference_state!`, we must use `set!(model, T=...)` rather than
+# `set!(model, θ=...)`. The `compute_reference_state!` call recomputes the reference pressure,
+# which changes the Exner function used to convert θ → T. Setting θ directly
+# would produce incorrect temperatures in the stratosphere.
 
-θ₀ = T₀
-g = constants.gravitational_acceleration
-Rᵈ = Breeze.Thermodynamics.dry_air_gas_constant(constants)
-κ = Rᵈ / cᵖᵈ
-pˢᵗ = reference_state.standard_pressure
-Π₀ = (101325 / pˢᵗ)^κ
+δT = 1//2  # K perturbation amplitude
+zδ = 1000  # m perturbation depth
+δq = 1e-4  # moisture perturbation amplitude (kg/kg)
 
-# Analytical Exner function for a hydrostatic constant-θ atmosphere
-Π(z) = Π₀ - g * z / (cᵖᵈ * θ₀)
+Tᵢ(x, y, z) = Tᵇᵍ(z) + δT * (2rand() - 1) * (z < zδ),
+qᵗᵢ(x, y, z) = max(0, qᵇᵍ(z) + δq * (2rand() - 1) * (z < zδ))
 
-function θᵉᵐ(z)
-    Tᵃᵈ = θ₀ * Π(z)
-    return ifelse(Tᵃᵈ > Tᵗˢ, θ₀, Tᵗˢ / Π(z))
-end
-
-δθ = 1//2  # K
-zδ = 1000  # m
-
-θᵢ(x, y, z) = θᵉᵐ(z) + δθ * (2rand() - 1) * (z < zδ)
-
-q₀ = 15e-3 # surface specific humidity (kg/kg)
-Hq = 3000   # moisture scale height (m)
-δq = 1e-4   # perturbation amplitude (kg/kg)
-qᵢ(x, y, z) = max(0, β * q₀ * exp(-z / Hq) + δq * (2rand() - 1) * (z < zδ))
-
-set!(model, θ=θᵢ, qᵗ=qᵢ)
+set!(model, T = Tᵢ, qᵗ = qᵗᵢ)
 
 # ## Simulation
 #
@@ -209,15 +226,18 @@ conjure_time_step_wizard!(simulation, cfl=0.5)
 
 u, v, w = model.velocities
 θ = liquid_ice_potential_temperature(model)
+s₀ = Field(sqrt(u^2 + v^2), indices = (:, :, 1))
 
 function progress(sim)
+    compute!(s₀)
     wmax = maximum(abs, w)
     umax = maximum(abs, u)
     vmax = maximum(abs, v)
+    s₀max = maximum(s₀)
     θmin, θmax = extrema(θ)
-    msg = @sprintf("Iter %d, t = %s, Δt = %s, max|u,v,w| = (%.1f, %.1f, %.1f) m/s, θ ∈ [%.1f, %.1f] K",
+    msg = @sprintf("Iter %d, t = %s, Δt = %s, s₀ = %.1f m/s, max|u,v,w| = (%.1f, %.1f, %.1f) m/s, θ ∈ [%.1f, %.1f] K",
                    iteration(sim), prettytime(sim), prettytime(sim.Δt),
-                   umax, vmax, wmax, θmin, θmax)
+                   s₀max, umax, vmax, wmax, θmin, θmax)
     @info msg
     return nothing
 end
