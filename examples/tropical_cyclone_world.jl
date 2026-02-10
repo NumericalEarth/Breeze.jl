@@ -31,18 +31,16 @@ Oceananigans.defaults.FloatType = Float32
 
 # ## Domain and grid
 #
-# The paper uses a 1152 km × 1152 km doubly-periodic domain with 2 km horizontal
-# resolution and a 28 km model top. We use 8 km horizontal resolution for testing.
-# The vertical grid follows the paper's Section 2a specification:
-# 64 levels in the lowest kilometer, 500 m spacing above 3.5 km,
-# and a linear transition in between. For testing we use coarser vertical
-# resolution (16 levels in the lowest km, 2000 m spacing above).
+# A 288 km × 288 km doubly-periodic domain with 3 km horizontal resolution
+# and a 28 km model top. The vertical grid uses 62.5 m spacing in the lowest
+# kilometer, 2000 m spacing above 3.5 km, and a smooth transition in between.
 
 arch = GPU()
 paper_Lx = paper_Ly = 1152e3
 paper_Nx = paper_Ny = 576
-Lx = Ly = paper_Lx / 2
-Lx = Ly = paper_Lx / 8 |> Int 
+Lx = Ly = paper_Lx / 4
+Nx = Ny = 96
+# Lx = Ly = paper_Lx / 8 |> Int 
 H = 28e3
 
 Δz_fine = 1000 / 16   # 62.5 m (paper: 1000/64 ≈ 15.6 m)
@@ -57,6 +55,8 @@ Nz = length(z) - 1
 grid = RectilinearGrid(arch; size = (Nx, Ny, Nz), halo = (5, 5, 5),
                        x = (0, Lx), y = (0, Ly), z,
                        topology = (Periodic, Periodic, Bounded))
+
+@show grid
 
 # ## Reference state and dynamics
 #
@@ -152,36 +152,13 @@ end
 
 # ## Sponge layer
 #
-# Rayleigh damping in the upper 3 km prevents spurious wave reflections
-# from the rigid lid.
+# Rayleigh damping with a Gaussian profile centered at 26 km (width 2 km)
+# prevents spurious wave reflections from the rigid lid.
 
-center = 26000
-width = 2000
-rate = 1/100
-sponge_mask = GaussianMask{:z}(; center, width)
-ρw_sponge = Relaxation(; rate, mask = sponge_mask)
+sponge_mask = GaussianMask{:z}(center=26000, width=2000)
+ρw_sponge = Relaxation(rate=1/100, mask=sponge_mask)
 
-# θ sponge: strongly relax temperature toward stratospheric equilibrium
-# in the sponge region to keep stratospheric θ bounded for Float32.
-# The wide sponge (centered at 24 km, width 5 km) kills dynamics above ~20 km,
-# similar to GATE's approach (sponge from 19-27 km).
-
-θ_sponge_params = (; Tᵗˢ, ρᵣ, cᵖᵈ, rate, center, width)
-
-@inline function θ_sponge(i, j, k, grid, clock, model_fields, p)
-    @inbounds T = model_fields.T[i, j, k]
-    @inbounds ρ = p.ρᵣ[i, j, k]
-    z = znode(i, j, k, grid, Center(), Center(), Center())
-    d = (z - p.center) / p.width
-    mask = exp(-d^2 / 2)
-    return -p.rate * mask * ρ * p.cᵖᵈ * (T - p.Tᵗˢ)
-end
-
-ρe_sponge = Forcing(θ_sponge;
-                    discrete_form = true,
-                    parameters = θ_sponge_params)
-
-forcing = (; ρe=(ρe_forcing, ρe_sponge), ρw=ρw_sponge)
+forcing = (; ρe=ρe_forcing, ρw=ρw_sponge)
 nothing #hide
 
 # ## Model
@@ -210,17 +187,17 @@ model = AtmosphereModel(grid; dynamics, coriolis, advection,
 zδ = 1000  # m perturbation depth
 δq = 1e-4  # moisture perturbation amplitude (kg/kg)
 
-Tᵢ(x, y, z) = Tᵇᵍ(z) + δT * (2rand() - 1) * (z < zδ),
+Tᵢ(x, y, z) = Tᵇᵍ(z) + δT * (2rand() - 1) * (z < zδ)
 qᵗᵢ(x, y, z) = max(0, qᵇᵍ(z) + δq * (2rand() - 1) * (z < zδ))
 
 set!(model, T = Tᵢ, qᵗ = qᵗᵢ)
 
 # ## Simulation
 #
-# We run for 6 days, which is sufficient for moist TC genesis and intensification.
+# We run for 8 days, which is sufficient for moist TC genesis and intensification.
 
-simulation = Simulation(model; Δt=10, stop_time=6days)
-conjure_time_step_wizard!(simulation, cfl=0.5)
+simulation = Simulation(model; Δt=1, stop_time=8days)
+conjure_time_step_wizard!(simulation, cfl=0.7)
 
 # ## Output and progress
 
@@ -230,21 +207,22 @@ s₀ = Field(sqrt(u^2 + v^2), indices = (:, :, 1))
 
 function progress(sim)
     compute!(s₀)
-    wmax = maximum(abs, w)
     umax = maximum(abs, u)
     vmax = maximum(abs, v)
+    wmax = maximum(abs, w)
     s₀max = maximum(s₀)
     θmin, θmax = extrema(θ)
-    msg = @sprintf("Iter %d, t = %s, Δt = %s, s₀ = %.1f m/s, max|u,v,w| = (%.1f, %.1f, %.1f) m/s, θ ∈ [%.1f, %.1f] K",
-                   iteration(sim), prettytime(sim), prettytime(sim.Δt),
-                   s₀max, umax, vmax, wmax, θmin, θmax)
+    msg = @sprintf("(%d) t = %s, Δt = %s",
+                   iteration(sim), prettytime(sim, false), prettytime(sim.Δt, false))
+    msg *= @sprintf(", s₀ = %.1f m/s, max|U| ≈ (%d, %d, %d) m/s, θ ∈ [%d, %d] K",
+                    s₀max, umax, vmax, wmax, floor(θmin), ceil(θmax))
     @info msg
     return nothing
 end
 
-add_callback!(simulation, progress, IterationInterval(500))
+add_callback!(simulation, progress, IterationInterval(1000))
 
-# Horizontally-averaged profiles for comparison with the paper's Figure 3.
+# Horizontally-averaged profiles.
 
 avg_outputs = (θ = Average(θ, dims=(1, 2)),
                u = Average(u, dims=(1, 2)),
@@ -263,7 +241,7 @@ end
 
 simulation.output_writers[:profiles] = JLD2Writer(model, avg_outputs;
                                                   filename = "tc_world_profiles.jld2",
-                                                  schedule = TimeInterval(1hour),
+                                                  schedule = TimeInterval(12hour),
                                                   init = save_parameters,
                                                   overwrite_existing = true)
 
@@ -284,8 +262,7 @@ run!(simulation)
 
 # ## Results: mean profile evolution
 #
-# We visualize the evolution of horizontally-averaged profiles,
-# for comparison with Figure 3 in [Cronin and Chavas (2019)](@cite Cronin2019).
+# Evolution of horizontally-averaged potential temperature and velocity profiles.
 
 θt = FieldTimeSeries("tc_world_profiles.jld2", "θ")
 ut = FieldTimeSeries("tc_world_profiles.jld2", "u")
@@ -310,7 +287,7 @@ for n in 1:Nt
     lines!(axv, vt[n], color=colors[n])
 end
 
-axislegend(axθ, position=:rb, labelsize=10)
+Legend(fig[1, 4], axθ, labelsize=10)
 
 fig[0, :] = Label(fig, "TC World (β = $β): mean profile evolution",
                   fontsize=16, tellwidth=false)
@@ -342,19 +319,22 @@ function compute_speed!(n)
 end
 
 Umax = maximum(maximum(compute_speed!(n)) for n in 1:Nt)
+Ulim = Umax / 2 
 
 fig = Figure(size=(1200, 400), fontsize=12)
 
-indices = [1, max(1, Nt ÷ 2), Nt]
 hms = []
+indices = round.(Int, [Nt / 3, 2Nt / 3, Nt])
+
 for (i, idx) in enumerate(indices)
     xlabel = i == 1 ? "x (m)" : ""
     ylabel = i == 1 ? "y (m)" : ""
     title = "t = $(prettytime(times[idx]))"
     ax = Axis(fig[1, i]; aspect = 1, xlabel, ylabel, title)
-    hm = heatmap!(ax, compute_speed!(idx); colormap=:speed, colorrange=(0, Umax))
+    hm = heatmap!(ax, compute_speed!(idx); colormap=:speed, colorrange=(0, Umax / 2))
     push!(hms, hm)
 end
+
 Colorbar(fig[1, length(indices) + 1], hms[end]; label="Surface wind speed (m/s)")
 
 fig[0, :] = Label(fig, "TC World (β = $β): surface wind speed",
@@ -372,7 +352,7 @@ n = Observable(1)
 title = @lift "TC World (β = $β) — t = $(prettytime(times[$n]))"
 Un = @lift compute_speed!($n)
 
-hm = heatmap!(ax, Un; colormap=:speed, colorrange=(0, Umax))
+hm = heatmap!(ax, Un; colormap=:speed, colorrange=(0, Umax / 2))
 Colorbar(fig[1, 2], hm; label="Wind speed (m/s)")
 fig[0, :] = Label(fig, title, fontsize=16, tellwidth=false)
 
@@ -385,19 +365,13 @@ nothing #hide
 
 # ## Discussion
 #
-# [Cronin and Chavas (2019)](@citet Cronin2019) found that tropical cyclones form
-# in both dry (β = 0) and moist (β = 1) limits, with a "no-storms-land" at
-# intermediate surface wetness (β ≈ 0.01-0.3) where spontaneous TC genesis does
-# not occur. Dry TCs have smaller outer radii but similar-sized convective cores,
-# and TC intensity decreases as the surface is dried.
+# This example demonstrates spontaneous tropical cyclone genesis in a rotating
+# radiative-convective equilibrium setup, following [Cronin and Chavas (2019)](@cite Cronin2019).
+# The surface wetness parameter β controls moisture availability: β = 1 (default)
+# produces robust moist TC genesis, while β = 0 yields dry TCs.
 #
-# The radiative forcing is implemented as a piecewise temperature tendency (Eq. 1):
-# constant cooling at 1 K/day in the troposphere (T > Tᵗˢ) and Newtonian relaxation
-# in the stratosphere (T ≤ Tᵗˢ). Surface fluxes follow bulk formulas with constant
-# drag and heat exchange coefficients. The f-plane Coriolis parameter f₀ = 3 × 10⁻⁴ s⁻¹
-# and a Rayleigh damping sponge layer in the upper 3 km prevent spurious reflections.
-#
-# For full reproduction of the paper's results, use 2 km horizontal resolution
-# (`Nx = Ny = 576`), the paper's vertical spacing (`Δz_fine = 1000/64`,
-# `Δz_coarse = 500`), and run for at least 70 days. The dry case (β = 0) requires
-# finer resolution and longer integration times for spontaneous genesis.
+# The radiative forcing is a piecewise temperature tendency: constant cooling
+# at 1 K/day in the troposphere (T > Tᵗˢ) and Newtonian relaxation toward Tᵗˢ
+# with timescale τᵣ = 20 days in the stratosphere. Surface fluxes use bulk
+# formulas with drag coefficient Cᴰ = 1.5 × 10⁻³ and gustiness 1 m/s.
+# The f-plane Coriolis parameter is f₀ = 3 × 10⁻⁴ s⁻¹.
