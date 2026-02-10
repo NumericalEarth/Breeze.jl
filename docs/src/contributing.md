@@ -132,7 +132,7 @@ There are multiple pre-commit managers you can install, some alternatives are:
   pre-commit install
   ```
   to install the hooks
-* a new (and faster) manager called [prek](https://github.com/j178/prek): follow the [instructions to install it](https://github.com/j178/prek#installation), and then move in the terminal inside the Breeze repository and run the command
+* a new (and faster) manager called [prek](https://prek.j178.dev/): follow the [instructions to install it](https://prek.j178.dev/installation/), and then move in the terminal inside the Breeze repository and run the command
   ```
   prek install
   ```
