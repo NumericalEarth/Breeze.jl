@@ -40,7 +40,7 @@ paper_Lx = paper_Ly = 1152e3
 paper_Nx = paper_Ny = 576
 Lx = Ly = paper_Lx / 4
 Nx = Ny = 96
-# Lx = Ly = paper_Lx / 8 |> Int 
+# Lx = Ly = paper_Lx / 8 |> Int
 H = 28e3
 
 Δz_fine = 1000 / 16   # 62.5 m (paper: 1000/64 ≈ 15.6 m)
@@ -196,7 +196,7 @@ set!(model, T = Tᵢ, qᵗ = qᵗᵢ)
 #
 # We run for 8 days, which is sufficient for moist TC genesis and intensification.
 
-simulation = Simulation(model; Δt=1, stop_time=8days)
+simulation = Simulation(model; Δt=1, stop_time=6days)
 conjure_time_step_wizard!(simulation, cfl=0.7)
 
 # ## Output and progress
@@ -319,7 +319,7 @@ function compute_speed!(n)
 end
 
 Umax = maximum(maximum(compute_speed!(n)) for n in 1:Nt)
-Ulim = Umax / 2 
+Ulim = Umax / 2
 
 fig = Figure(size=(1200, 400), fontsize=12)
 
