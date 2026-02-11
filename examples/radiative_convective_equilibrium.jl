@@ -9,8 +9,7 @@
 #
 # The RCEMIP (Radiative-Convective Equilibrium Model Intercomparison Project) protocol
 # establishes standardized boundary conditions for comparing RCE simulations across
-# different atmospheric models. The key features specified in Section 3 of Wing et al.
-# (2018) are:
+# different atmospheric models. The key features specified in Section 3 of [Wing2018](@citet) are:
 #
 # - Uniform, fixed sea surface temperature (SST) — Section 3.1
 # - Perpetual, uniform insolation with fixed solar zenith angle — Section 3.2
