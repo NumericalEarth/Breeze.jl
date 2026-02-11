@@ -158,7 +158,7 @@ dynamics = AnelasticDynamics(reference_state)
 
 # ## Trace Gas Concentrations (Section 3.5, Table 1)
 #
-# From Wing et al. (2018), Table 1:
+# From [Wing2018](@citet), Table 1:
 # - CO₂: 348 ppmv
 # - CH₄: 1650 ppbv
 # - N₂O: 306 ppbv
