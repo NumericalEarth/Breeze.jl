@@ -169,7 +169,7 @@ end
 end
 
 """
-    compute_hydrostatic_reference!(ref::ReferenceState, constants)
+$(TYPEDSIGNATURES)
 
 Compute the hydrostatic reference pressure and density profiles from the
 temperature and moisture mass fraction profiles stored in `ref`.
