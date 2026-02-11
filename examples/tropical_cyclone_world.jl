@@ -1,13 +1,13 @@
 # # Tropical Cyclone World (Cronin & Chavas, 2019)
 #
 # This example implements the rotating radiative-convective equilibrium (RCE) experiment
-# from [Cronin2019](@citet). The experiment demonstrates that tropical cyclones can form
+# from [Cronin and Chavas (2019)](@cite Cronin2019). The experiment demonstrates that tropical cyclones can form
 # and persist even in completely dry atmospheres, challenging the conventional wisdom
 # that moisture is essential for TC dynamics.
 #
 # The key innovation is the surface wetness parameter β, which controls the transition
 # from completely dry (β = 0, no evaporation) to fully moist (β = 1) conditions.
-# [Cronin2019](@citet) found that TCs form in both limits, with a "no-storms-land" at
+# [Cronin and Chavas (2019)](@cite Cronin2019) found that TCs form in both limits, with a "no-storms-land" at
 # intermediate β where spontaneous genesis does not occur.  This script defaults to β =
 # 1 (moist), which produces robust spontaneous TC genesis at moderate resolution. The
 # simulation approximates the paper's 100-day nonrotating RCE spinup with an
@@ -30,7 +30,7 @@ Oceananigans.defaults.FloatType = Float32
 
 # ## Domain and grid
 #
-# [Cronin and Chavas (2019)](@cite) used a 1152 km × 1152 km domain with 2 km horizontal
+# [Cronin and Chavas (2019)](@cite Cronin2019) used a 1152 km × 1152 km domain with 2 km horizontal
 # resolution. To reduce computational costs for the purpose of this example, we use a
 # 288 km × 288 km domain -- 4x smaller in both horizontal directions -- with a
 # 2x coarser 4 km horizontal resolution. We keep the 28 km model top,
@@ -160,7 +160,8 @@ nothing #hide
 # We use 9th-order WENO advection and warm-phase saturation adjustment microphysics.
 
 momentum_advection = WENO(order=9)
-scalar_advection = (ρθ = WENO(order=9), ρqᵗ = WENO(order=9, bounds=(0, 1)))
+scalar_advection = (ρθ = WENO(order=5),
+                    ρqᵗ = WENO(order=5, bounds=(0, 1)))
 
 microphysics = SaturationAdjustment(equilibrium=WarmPhaseEquilibrium())
 
@@ -202,6 +203,7 @@ u, v, w = model.velocities
 s = @at (Center, Center, Center) sqrt(u^2 + v^2)
 s₀ = Field(s, indices = (:, :, 1))
 
+qᵗ = model.specific_moisture
 ρqᵗ = model.moisture_density
 ρe = static_energy_density(model)
 ℒˡ = Breeze.Thermodynamics.liquid_latent_heat(T₀, constants)
@@ -230,7 +232,6 @@ add_callback!(simulation, progress, IterationInterval(1000))
 
 # Horizontally-averaged profiles.
 
-qᵗ = model.specific_moisture
 ℋ = RelativeHumidity(model)
 
 avg_outputs = (θ = Average(θ, dims=(1, 2)),
@@ -308,11 +309,14 @@ for n in 1:Nt
     lines!(axwqᵗ, wqᵗt[n], color=colors[n]; linewidth)
 end
 
-hideydecorations!(axqᵗ)
-hideydecorations!(axℋ)
-hideydecorations!(axw²)
-hideydecorations!(axwθ)
-xlims!(axℋ, -0.02, 1.1)
+for ax in (axqᵗ, axℋ, axw², axwθ)
+    hideydecorations!(ax, grid=false)
+    hidespines!(ax, :t, :r, :l)
+end
+
+hidespines!(axθ, :t, :r)
+hidespines!(axwqᵗ, :t, :l)
+xlims!(axℋ, -0.1, 1.1)
 
 Legend(fig[2, :], axθ, labelsize=10, orientation=:horizontal)
 
