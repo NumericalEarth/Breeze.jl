@@ -286,7 +286,7 @@ wqᵗt = FieldTimeSeries("tc_world_profiles.jld2", "wqᵗ")
 times = θt.times
 Nt = length(times)
 
-fig = Figure(size=(900, 400), fontsize=14)
+fig = Figure(size=(900, 400), fontsize=10)
 
 axθ = Axis(fig[1, 1], xlabel="θ (K)", ylabel="z (m)")
 axqᵗ = Axis(fig[1, 2], xlabel="qᵗ (kg/kg)")
@@ -298,15 +298,16 @@ axwqᵗ = Axis(fig[1, 6], xlabel="wqᵗ (m²/s² kg/kg)", ylabel="z (m)", yaxisp
 default_colours = Makie.wong_colors()
 colors = [default_colours[mod1(n, length(default_colours))] for n in 1:Nt]
 linewidth = 3
+alpha = 0.6
 
 for n in 1:Nt
     label = n == 1 ? "initial" : "t = $(prettytime(times[n]))"
-    lines!(axθ, θt[n], color=colors[n]; label, linewidth)
-    lines!(axqᵗ, qᵗt[n], color=colors[n]; linewidth)
-    lines!(axℋ, ℋt[n], color=colors[n]; linewidth)
-    lines!(axw², w²t[n], color=colors[n]; linewidth)
-    lines!(axwθ, wθt[n], color=colors[n]; linewidth)
-    lines!(axwqᵗ, wqᵗt[n], color=colors[n]; linewidth)
+    lines!(axθ, θt[n], color=colors[n]; label, linewidth, alpha)
+    lines!(axqᵗ, qᵗt[n], color=colors[n]; linewidth, alpha)
+    lines!(axℋ, ℋt[n], color=colors[n]; linewidth, alpha)
+    lines!(axw², w²t[n], color=colors[n]; linewidth, alpha)
+    lines!(axwθ, wθt[n], color=colors[n]; linewidth, alpha)
+    lines!(axwqᵗ, wqᵗt[n], color=colors[n]; linewidth, alpha)
 end
 
 for ax in (axqᵗ, axℋ, axw², axwθ)
@@ -318,7 +319,7 @@ hidespines!(axθ, :t, :r)
 hidespines!(axwqᵗ, :t, :l)
 xlims!(axℋ, -0.1, 1.1)
 
-Legend(fig[2, :], axθ, labelsize=10, orientation=:horizontal)
+Legend(fig[2, :], axθ, labelsize=12, orientation=:horizontal)
 
 fig[0, :] = Label(fig, "TC World (β = $β): mean profile evolution",
                   fontsize=16, tellwidth=false)
