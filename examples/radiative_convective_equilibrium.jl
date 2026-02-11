@@ -40,7 +40,7 @@ Random.seed!(2024)
 
 # ## RCEMIP Protocol Parameters
 #
-# The following parameters are specified in Section 3 and Table 1 of Wing et al. (2018):
+# The following parameters are specified in Section 3 and Table 1 of [Wing2018](@citet):
 #
 # ### Sea Surface Temperature (Section 3.1, Table 1)
 #
