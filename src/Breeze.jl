@@ -96,7 +96,7 @@ export
     ParcelState
 
 using Oceananigans: Oceananigans, @at, AnisotropicMinimumDissipation, Average,
-                    AveragedTimeInterval, BackgroundField, BetaPlane, Bounded,
+                    AveragedTimeInterval, BackgroundField, BetaPlane, Bounded, BoundaryConditionOperation,
                     CPU, Callback, Center, CenterField, Centered, Checkpointer, Clock,
                     ConstantCartesianCoriolis, Distributed, DynamicSmagorinsky,
                     ExponentialDiscretization, FPlane, Face, Field, FieldBoundaryConditions,
@@ -134,6 +134,7 @@ export
     Centered, UpwindBiased, WENO, FluxFormAdvection,
     FluxBoundaryCondition, ValueBoundaryCondition, GradientBoundaryCondition, ImpenetrableBoundaryCondition,
     OpenBoundaryCondition, PerturbationAdvection, FieldBoundaryConditions,
+    BoundaryConditionOperation,
     Field, CenterField, XFaceField, YFaceField, ZFaceField,
     Average, Integral,
     BackgroundField, interior, set!, compute!, regrid!,
