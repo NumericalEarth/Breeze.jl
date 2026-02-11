@@ -1,3 +1,4 @@
+#=
 # # Tropical Cyclone World (Cronin & Chavas, 2019)
 #
 # This example implements the rotating radiative-convective equilibrium (RCE) experiment
@@ -159,10 +160,12 @@ nothing #hide
 #
 # We use 9th-order WENO advection and warm-phase saturation adjustment microphysics.
 
-advection = WENO(order=9)
+momentum_advection = WENO(order=9)
+scalar_advection = (ρθ = WENO(order=9), ρqᵗ = WENO(order=9, bounds=(0, 1)))
+
 microphysics = SaturationAdjustment(equilibrium=WarmPhaseEquilibrium())
 
-model = AtmosphereModel(grid; dynamics, coriolis, advection,
+model = AtmosphereModel(grid; dynamics, coriolis, momentum_advection, scalar_advection,
                         microphysics, forcing, boundary_conditions)
 
 # ## Initial conditions
@@ -267,6 +270,7 @@ simulation.output_writers[:surface] = JLD2Writer(model, surface_outputs;
 # ## Run
 
 run!(simulation)
+=#
 
 # ## Results: mean profile evolution
 #
@@ -310,6 +314,7 @@ hideydecorations!(axqᵗ)
 hideydecorations!(axℋ)
 hideydecorations!(axw²)
 hideydecorations!(axwθ)
+xlims!(axℋ, -0.02, 1.1)
 
 Legend(fig[2, :], axθ, labelsize=10, orientation=:horizontal)
 
@@ -332,7 +337,7 @@ Nt = length(times)
 
 smax = maximum(s_ts)
 slim = smax / 2
-𝒬lim = maximum(𝒬_ts) / 4
+𝒬lim = maximum(𝒬_ts) / 8
 
 fig = Figure(size=(1200, 800), fontsize=12)
 
