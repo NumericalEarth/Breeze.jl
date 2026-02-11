@@ -19,7 +19,7 @@
 # - Prescribed trace gas concentrations — Section 3.5
 #
 # This example implements a scaled-down version of the RCEMIP "RCE_small" configuration
-# (Table 2 of Wing et al. 2018), suitable for GPU computation as a documentation example.
+# (Table 2 of [Wing2018](@citet)), suitable for GPU computation as a documentation example.
 # Note: This is a demonstration of the RCE setup; strict RCEMIP compliance would require
 # additional verification of initial conditions and trace gas profiles.
 
