@@ -304,7 +304,7 @@ set_reference_field!(::ZeroField, value) = nothing
 #####
 
 """
-    compute_reference_state!(reference_state, T̄, q̄ᵛ, q̄ˡ, q̄ⁱ, constants)
+$(TYPEDSIGNATURES)
 
 Recompute the reference pressure and density profiles by setting the
 reference temperature to `T̄` and moisture mass fractions to `q̄ᵛ`, `q̄ˡ`, `q̄ⁱ`,
