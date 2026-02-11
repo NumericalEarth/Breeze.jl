@@ -11,11 +11,13 @@ using Breeze.Thermodynamics:
     saturation_vapor_pressure,
     equilibrated_surface
 
-# Import SaturationSpecificHumidity from AtmosphereModels.Diagnostics
+# Import diagnostics from AtmosphereModels.Diagnostics
 using ..AtmosphereModels.Diagnostics:
     Diagnostics,
     SaturationSpecificHumidity,
     SaturationSpecificHumidityField,
+    DewpointTemperature,
+    DewpointTemperatureField,
     microphysics_phase_equilibrium
 
 # Extend microphysics_phase_equilibrium for SaturationAdjustment
