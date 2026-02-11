@@ -119,6 +119,7 @@ end
 #####
 
 const θFormulation = Union{Val{:LiquidIcePotentialTemperature}, Val{:θ}}
+const eFormulation = Union{Val{:StaticEnergy}, Val{:e}, Val{:ρe}}
 
 # Check if FieldBoundaryConditions has any non-default values
 has_nondefault_bcs(::Nothing) = false
@@ -158,9 +159,21 @@ function convert_energy_to_theta_bcs(bcs, formulation::θFormulation, constants)
     :ρe ∈ keys(bcs) || return bcs
     has_nondefault_bcs(bcs.ρe) || return bcs
 
-    ρθ_bcs = energy_to_theta_bcs(bcs.ρe)
+    ρe_bcs = set_sensible_heat_formulation_bcs(bcs.ρe, PotentialTemperatureFlux())
+    ρθ_bcs = energy_to_theta_bcs(ρe_bcs)
     remaining = NamedTuple(k => v for (k, v) in pairs(bcs) if k !== :ρe)
     return merge(remaining, (; ρθ=ρθ_bcs))
+end
+
+# Set formulation on BulkSensibleHeatFlux for static energy formulations
+function convert_energy_to_theta_bcs(bcs, formulation::eFormulation, constants)
+    validate_thermodynamic_bcs(bcs)
+    :ρe ∈ keys(bcs) || return bcs
+    has_nondefault_bcs(bcs.ρe) || return bcs
+
+    ρe_bcs = set_sensible_heat_formulation_bcs(bcs.ρe, StaticEnergyFlux())
+    remaining = NamedTuple(k => v for (k, v) in pairs(bcs) if k !== :ρe)
+    return merge(remaining, (; ρe=ρe_bcs))
 end
 
 convert_energy_to_theta_bcs(bcs, f::Symbol, c) = convert_energy_to_theta_bcs(bcs, Val(f), c)
@@ -206,12 +219,12 @@ regularize_atmosphere_boundary_condition(bc::BoundaryCondition{<:Flux, <:XDirect
 regularize_atmosphere_boundary_condition(bc::BoundaryCondition{<:Flux, <:YDirectionBulkDragFunction},
                                          side, loc, grid, dynamics, microphysics, surface_pressure, constants) = bc
 
-# Regularize BulkSensibleHeatFlux: populate surface_pressure and thermodynamic_constants
+# Regularize BulkSensibleHeatFlux: populate surface_pressure, thermodynamic_constants, preserve formulation
 function regularize_atmosphere_boundary_condition(bc::BulkSensibleHeatFluxBoundaryCondition,
                                                   side, loc, grid, dynamics, microphysics, surface_pressure, constants)
     bf = bc.condition
     T₀ = materialize_surface_field(bf.surface_temperature, grid)
-    new_bf = BulkSensibleHeatFluxFunction(bf.coefficient, bf.gustiness, T₀, surface_pressure, constants)
+    new_bf = BulkSensibleHeatFluxFunction(bf.coefficient, bf.gustiness, T₀, surface_pressure, constants, bf.formulation)
     return BoundaryCondition(Flux(), new_bf)
 end
 

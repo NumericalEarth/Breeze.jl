@@ -56,7 +56,8 @@ export
     StabilityEquivalentPotentialTemperature,
     LiquidIcePotentialTemperature,
     StaticEnergy,
-    compute_hydrostatic_pressure!
+    compute_hydrostatic_pressure!,
+    set_to_mean!
 
 using DocStringExtensions: TYPEDSIGNATURES, TYPEDEF, TYPEDFIELDS
 using Adapt: Adapt, adapt
@@ -104,5 +105,6 @@ using .Diagnostics
 
 # set_atmosphere_model requires Diagnostics for SaturationSpecificHumidity
 include("set_atmosphere_model.jl")
+include("set_to_mean.jl")
 
 end
