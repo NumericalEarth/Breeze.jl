@@ -45,7 +45,7 @@ An extension to [RRTMGP.jl](https://github.com/CliMA/RRTMGP.jl) provides solvers
 Breeze's examples include single column radiation, idealized thermal bubbles and inertia-gravity waves and Kelvin-Helmholtz, [BOMEX](https://doi.org/10.1175/1520-0469(2003)60<1201:ALESIS>2.0.CO;2) shallow convection, [RICO](https://doi.org/10.1029/2011MS000056) trade-wind cumulus, [supercells](https://doi.org/10.1002/2015MS000435), mountain waves, and more.
 
 Learn more by reading on or checking out [the documentation](https://numericalearth.github.io/BreezeDocumentation/dev/) and [examples](https://github.com/NumericalEarth/Breeze.jl/tree/main/examples).
-And don't hesitate to get in touch on the [NumericalEarth slack](https://join.slack.com/t/numericalearth/shared_invite/zt-3kjcowmpg-B0s3nalWkvZg8IBc~BIJEA) or by opening a new [discussion](https://github.com/NumericalEarth/Breeze.jl/discussions)!
+And don't hesitate to get in touch on the [NumericalEarth slack](https://join.slack.com/t/numericalearth/shared_invite/zt-3pwpvky4k-XX7RkgQgHLIUt~wtwGXN~Q) or by opening a new [discussion](https://github.com/NumericalEarth/Breeze.jl/discussions)!
 
 ## Roadmap and a call to action
 
