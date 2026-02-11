@@ -328,7 +328,7 @@ function compute_reference_state!(ref::ReferenceState, T̄, q̄ᵛ, q̄ˡ, q̄�
 end
 
 """
-    compute_reference_state!(reference_state, T̄, q̄ᵗ, constants)
+$(TYPEDSIGNATURES)
 
 Convenience method that assumes all moisture is vapor (no condensate in the
 reference state). Equivalent to `compute_reference_state!(reference_state, T̄, q̄ᵗ, 0, 0, constants)`.
