@@ -1,7 +1,7 @@
 # # Radiative-Convective Equilibrium (RCEMIP)
 #
 # This example simulates radiative-convective equilibrium (RCE) following the RCEMIP-I
-# protocol described in [Wing et al. (2018)](@cite Wing2018). RCE is an idealization
+# protocol described in [Wing2018](@citet). RCE is an idealization
 # of the climate system in which radiative cooling of the atmosphere is balanced by
 # convective heat transport from a warm surface.
 #
