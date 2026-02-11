@@ -1,4 +1,3 @@
-#=
 # # Tropical Cyclone World (Cronin & Chavas, 2019)
 #
 # This example implements the rotating radiative-convective equilibrium (RCE) experiment
@@ -270,7 +269,6 @@ simulation.output_writers[:surface] = JLD2Writer(model, surface_outputs;
 # ## Run
 
 run!(simulation)
-=#
 
 # ## Results: mean profile evolution
 #
