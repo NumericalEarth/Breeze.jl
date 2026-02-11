@@ -1,7 +1,7 @@
 # # Radiative-Convective Equilibrium (RCEMIP)
 #
 # This example simulates radiative-convective equilibrium (RCE) following the RCEMIP-I
-# protocol described in [Wing et al. (2018)](@cite Wing2018). RCE is an idealization
+# protocol described in [Wing2018](@citet). RCE is an idealization
 # of the climate system in which radiative cooling of the atmosphere is balanced by
 # convective heat transport from a warm surface.
 #
@@ -9,8 +9,7 @@
 #
 # The RCEMIP (Radiative-Convective Equilibrium Model Intercomparison Project) protocol
 # establishes standardized boundary conditions for comparing RCE simulations across
-# different atmospheric models. The key features specified in Section 3 of Wing et al.
-# (2018) are:
+# different atmospheric models. The key features specified in Section 3 of [Wing2018](@citet) are:
 #
 # - Uniform, fixed sea surface temperature (SST) — Section 3.1
 # - Perpetual, uniform insolation with fixed solar zenith angle — Section 3.2
@@ -19,7 +18,7 @@
 # - Prescribed trace gas concentrations — Section 3.5
 #
 # This example implements a scaled-down version of the RCEMIP "RCE_small" configuration
-# (Table 2 of Wing et al. 2018), suitable for GPU computation as a documentation example.
+# (Table 2 of [Wing2018](@citet)), suitable for GPU computation as a documentation example.
 # Note: This is a demonstration of the RCE setup; strict RCEMIP compliance would require
 # additional verification of initial conditions and trace gas profiles.
 
@@ -40,7 +39,7 @@ Random.seed!(2024)
 
 # ## RCEMIP Protocol Parameters
 #
-# The following parameters are specified in Section 3 and Table 1 of Wing et al. (2018):
+# The following parameters are specified in Section 3 and Table 1 of [Wing2018](@citet):
 #
 # ### Sea Surface Temperature (Section 3.1, Table 1)
 #
@@ -57,7 +56,7 @@ SST = 300  # Sea surface temperature [K] — Wing et al. (2018), Table 1
 # > "The solar constant is reduced such that the diurnally averaged insolation
 # > at the equator on the equinox is achieved at all times."
 #
-# From the corrigendum to Wing et al. (2018):
+# From the corrigendum to [Wing2018](@citet):
 # - Solar constant: S₀ = 551.58 W/m² (reduced from 1361 W/m² to achieve perpetual insolation)
 # - Solar zenith angle: θ = 42.05° (cos θ ≈ 0.7434)
 #
@@ -164,7 +163,7 @@ dynamics = AnelasticDynamics(reference_state)
 
 # ## Trace Gas Concentrations (Section 3.5, Table 1)
 #
-# From Wing et al. (2018), Table 1:
+# From [Wing2018](@citet), Table 1:
 # - CO₂: 348 ppmv
 # - CH₄: 1650 ppbv
 # - N₂O: 306 ppbv
@@ -313,7 +312,7 @@ momentum_advection, scalar_advection, radiation,
 # - Moisture: Exponentially decreasing with 2.5 km scale height
 
 function Tᵢ(z)
-    # Moist adiabatic-like profile in troposphere, isothermal stratosphere
+    ## Moist adiabatic-like profile in troposphere, isothermal stratosphere
     T_surface = SST - 1  # Slight air-sea temperature difference
     Γ = 6.5e-3           # Lapse rate [K/m]
     z_trop = 15000       # Approximate tropopause height [m]
@@ -327,7 +326,7 @@ function Tᵢ(z)
 end
 
 function qᵗᵢ(z)
-    # Exponentially decreasing moisture — Wing et al. (2018), Appendix A
+    ## Exponentially decreasing moisture — Wing et al. (2018), Appendix A
     q₀ = 0.018           # Surface specific humidity (~80% RH at 300 K)
     Hq = 2500            # Moisture scale height [m] — RCEMIP uses ~2.5 km
     q_min = 1e-6         # Minimum humidity in stratosphere
@@ -392,7 +391,7 @@ function progress(sim)
     Tmin, Tmax = extrema(T)
     qˡmax = maximum(qˡ)
 
-    # Compute TOA radiative flux (energy balance diagnostic)
+    ## Compute TOA radiative flux (energy balance diagnostic)
     ℐ_lw_up = radiation.upwelling_longwave_flux
     ℐ_sw_dn = radiation.downwelling_shortwave_flux
     OLR = mean(view(ℐ_lw_up, :, :, Nz+1))
@@ -480,7 +479,7 @@ colors = [default_colours[mod1(i, length(default_colours))] for i in 1:Nt]
 for n in 1:Nt
     t_min = Int(times[n] / 60)
     label = n == 1 ? "initial" : "t = $(t_min) min"
-    
+
     lines!(axθ, θts[n], color=colors[n], label=label)
     lines!(axq, qᵛts[n], color=colors[n])
     lines!(axw, wts[n], color=colors[n])

@@ -4,12 +4,16 @@ using Oceananigans: Oceananigans, CenterField
 using Oceananigans.Architectures: on_architecture
 using Oceananigans.BoundaryConditions: fill_halo_regions!
 using Oceananigans.Fields: ZeroField, set!, interpolate
-using Oceananigans.Grids: Center
 using Oceananigans.TimeSteppers: TimeSteppers, tick!
+using Oceananigans.Utils: launch!
+
+using KernelAbstractions: @kernel, @index
 
 using Breeze.Thermodynamics: MoistureMassFractions,
     LiquidIcePotentialTemperatureState, StaticEnergyState,
-    with_moisture, mixture_heat_capacity
+    PlanarLiquidSurface,
+    with_moisture, mixture_heat_capacity,
+    temperature_from_potential_temperature, saturation_specific_humidity
 
 using Breeze.AtmosphereModels: AtmosphereModels, AtmosphereModel
 
@@ -363,6 +367,15 @@ end
 ##### Helper functions for set!
 #####
 
+@kernel function _set_temperature_from_potential_temperature!(T_field, θ_field, p_field, pˢᵗ, constants)
+    i, j, k = @index(Global, NTuple)
+    @inbounds begin
+        θₖ = θ_field[i, j, k]
+        pₖ = p_field[i, j, k]
+    end
+    @inbounds T_field[i, j, k] = @inline temperature_from_potential_temperature(θₖ, pₖ, constants; pˢᵗ)
+end
+
 """
 $(TYPEDSIGNATURES)
 
@@ -370,30 +383,23 @@ Set temperature field from potential temperature, using proper thermodynamic rel
 """
 function set_temperature_from_potential_temperature!(T_field, θ, p_field, pˢᵗ, constants)
     grid = T_field.grid
-    if θ isa Number
-        # θ is constant - loop over grid and compute T at each point
-        for k in 1:size(grid, 3)
-            for j in 1:size(grid, 2)
-                for i in 1:size(grid, 1)
-                    pₖ = p_field[i, j, k]
-                    T_field[i, j, k] = temperature_from_potential_temperature(θ, pₖ, constants; pˢᵗ)
-                end
-            end
-        end
-    else
-        # θ is a function of z
-        for k in 1:size(grid, 3)
-            zₖ = znode(1, 1, k, grid, Center(), Center(), Center())
-            θₖ = θ(zₖ)
-            for j in 1:size(grid, 2)
-                for i in 1:size(grid, 1)
-                    pₖ = p_field[i, j, k]
-                    T_field[i, j, k] = temperature_from_potential_temperature(θₖ, pₖ, constants; pˢᵗ)
-                end
-            end
-        end
-    end
+    arch = grid.architecture
+    θ_field = CenterField(grid)
+    set!(θ_field, θ)
+    launch!(arch, grid, :xyz, _set_temperature_from_potential_temperature!,
+            T_field, θ_field, p_field, pˢᵗ, constants)
     return nothing
+end
+
+@kernel function _set_moisture_from_relative_humidity!(qᵗ_field, ℋ_field, T_field, ρ_field, constants)
+    i, j, k = @index(Global, NTuple)
+    @inbounds begin
+        ℋₖ = ℋ_field[i, j, k]
+        Tₖ = T_field[i, j, k]
+        ρₖ = ρ_field[i, j, k]
+    end
+    qᵛ⁺ = @inline saturation_specific_humidity(Tₖ, ρₖ, constants, PlanarLiquidSurface())
+    @inbounds qᵗ_field[i, j, k] = ℋₖ * qᵛ⁺
 end
 
 """
@@ -403,32 +409,11 @@ Set specific humidity field from relative humidity, computing qᵗ = ℋ * qᵛ�
 """
 function set_moisture_from_relative_humidity!(qᵗ_field, ℋ, T_field, ρ_field, constants)
     grid = qᵗ_field.grid
-    if ℋ isa Number
-        for k in 1:size(grid, 3)
-            for j in 1:size(grid, 2)
-                for i in 1:size(grid, 1)
-                    Tₖ = T_field[i, j, k]
-                    ρₖ = ρ_field[i, j, k]
-                    qᵛ⁺ = saturation_specific_humidity(Tₖ, ρₖ, constants, PlanarLiquidSurface())
-                    qᵗ_field[i, j, k] = ℋ * qᵛ⁺
-                end
-            end
-        end
-    else
-        # ℋ is a function of z
-        for k in 1:size(grid, 3)
-            zₖ = znode(1, 1, k, grid, Center(), Center(), Center())
-            ℋₖ = ℋ(zₖ)
-            for j in 1:size(grid, 2)
-                for i in 1:size(grid, 1)
-                    Tₖ = T_field[i, j, k]
-                    ρₖ = ρ_field[i, j, k]
-                    qᵛ⁺ = saturation_specific_humidity(Tₖ, ρₖ, constants, PlanarLiquidSurface())
-                    qᵗ_field[i, j, k] = ℋₖ * qᵛ⁺
-                end
-            end
-        end
-    end
+    arch = grid.architecture
+    ℋ_field = CenterField(grid)
+    set!(ℋ_field, ℋ)
+    launch!(arch, grid, :xyz, _set_moisture_from_relative_humidity!,
+            qᵗ_field, ℋ_field, T_field, ρ_field, constants)
     return nothing
 end
 
@@ -860,6 +845,13 @@ function TimeSteppers.time_step!(model::ParcelModel, Δt; callbacks=nothing)
     tⁿ⁺¹ = model.clock.time + Δt * (1 - ts.α¹)  # Already advanced by α¹*Δt in stage 1
     corrected_Δt = tⁿ⁺¹ - model.clock.time
     tick!(model.clock, corrected_Δt)
+
+    # Set last_Δt
+    model.clock.last_Δt = Δt
+
+    # Apply microphysics model update AFTER all RK3 stages and clock update
+    # (for schemes like DCMIP2016Kessler that operate via direct state modification)
+    microphysics_model_update!(model.microphysics, model)
 
     return nothing
 end

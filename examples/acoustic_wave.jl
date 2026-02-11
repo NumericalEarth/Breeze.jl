@@ -131,7 +131,6 @@ filename = "acoustic_wave.jld2"
 outputs = (; ρ′, u′, w, U, R, W²)
 
 simulation.output_writers[:jld2] = JLD2Writer(model, outputs; filename,
-                                              including = [:grid],
                                               schedule = TimeInterval(0.01),
                                               overwrite_existing = true)
 
