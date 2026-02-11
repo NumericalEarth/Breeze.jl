@@ -263,6 +263,10 @@ The Kessler scheme performs its own saturation adjustment internally via the ker
 """
 @inline AtmosphereModels.maybe_adjust_thermodynamic_state(𝒰, ::DCMIP2016KM, qᵗ, constants) = 𝒰
 
+AtmosphereModels.vapor_mass_fraction(::DCMIP2016KM, model) = model.microphysical_fields.qᵛ
+AtmosphereModels.liquid_mass_fraction(::DCMIP2016KM, model) = model.microphysical_fields.qᶜˡ + model.microphysical_fields.qʳ
+AtmosphereModels.ice_mass_fraction(::DCMIP2016KM, model) = nothing
+
 """
 $(TYPEDSIGNATURES)
 
