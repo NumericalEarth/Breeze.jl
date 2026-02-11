@@ -376,6 +376,7 @@ serve(dir="docs/build")
 - `examples/boussinesq_bomex.jl` - BOMEX intercomparison case (Boussinesq)
 - `examples/mountain_wave.jl` - Mountain wave simulation
 - `examples/cloudy_kelvin_helmholtz.jl` - Cloudy Kelvin-Helmholtz instability
+- `examples/tropical_cyclone_world_v2.jl` - TC genesis (Cronin & Chavas 2019)
 - Many more examples available in the `examples/` directory
 
 ## Physics Domain Knowledge
@@ -457,6 +458,109 @@ Before running a long simulation:
 3. **Forgetting Explicit Imports**: Tests will fail - add to using statements
 4. **Using plain `julia` blocks in docstrings**: NEVER do this. ALWAYS use `jldoctest` blocks so examples are tested and verified to work. Plain `julia` blocks are not tested and will become stale.
 
+## Debugging Physics Simulations
+
+### Thermodynamic Variable Discipline
+
+Breeze.jl uses multiple thermodynamic variables that are related but NOT interchangeable:
+
+| Variable | Meaning | Relationship |
+|----------|---------|--------------|
+| `T` | Temperature (K) | Absolute temperature |
+| `θ` | Potential temperature (K) | `θ = T / Π` where `Π = (p/p₀)^κ` |
+| `ρe` | Density × total energy (J/m³) | Includes kinetic + internal energy |
+| `ρθ` | Density × potential temperature (kg·K/m³) | Prognostic in `LiquidIcePotentialTemperatureFormulation` |
+
+**Before applying forcing or boundary conditions:**
+
+1. **Check the paper**: Does it specify forcing in terms of T, θ, or energy?
+2. **Check working examples**: Which field do BOMEX/RICO apply similar forcing to?
+3. **Check the Breeze source**: Which variable is prognostic for your formulation?
+4. **Verify units**: K/s vs K/day, W/m² vs K·m/s — get conversions right
+
+**Common mistakes:**
+- Applying a temperature tendency directly to potential temperature
+- Confusing `ρe` (energy) with `ρθ` (potential temperature)
+- Not accounting for the Exner function when converting T ↔ θ
+
+### When a Stable Simulation Becomes Unstable
+
+If the model was running stably and then becomes unstable after your changes:
+
+1. **STOP** — Do not keep adding "fixes"
+2. **Identify the last working state** — Use `git log` and `git diff`
+3. **Revert to working state** — `git checkout` the stable version
+4. **Make ONE change at a time** — Test after each change
+5. **Find the breaking change** — The instability was introduced by something you changed
+
+The instability is NOT a pre-existing bug if the code was stable before your changes.
+
+### Diagnose-Before-Fix Protocol
+
+When something fails (simulation crashes, values blow up, results look wrong):
+
+1. **STOP** — Do not immediately try a fix
+2. **Characterize the failure precisely:**
+   - Where? (which field, which altitude, which time)
+   - What are the values? (NaN, 1e13, negative density)
+   - When did it start? (timestep 1? after 16 hours?)
+
+3. **Work backwards from the symptom:**
+   - If values are extreme at high altitude → check what's special about high altitude
+   - If values become NaN → check for division by small numbers
+   - If blow-up is gradual → check forcing/tendency magnitudes
+
+4. **Compute the physics analytically:**
+   - What is the expected tendency at the failure location?
+   - Is that tendency physically reasonable?
+   - What would cause an unreasonable tendency?
+
+5. **Only after diagnosis** — propose a targeted fix
+
+**Anti-pattern:** "The simulation blows up at high altitude → cap the values at high altitude"
+This treats the symptom, not the cause.
+
+**Correct approach:** "The simulation blows up at high altitude → Why? What's special about high altitude?
+Low Π → large 1/Π factor → the forcing is amplified → Why is forcing so large in the first place?
+Initial T is 30K vs target 210K → enormous relaxation forcing → FIX: equilibrate initial condition"
+
+### Model Architecture Awareness
+
+When implementing physics from a paper that uses a different model (e.g., SAM, WRF, MPAS):
+
+1. **Identify the paper's prognostic variables:**
+   - Does it use T, θ, static energy, moist static energy?
+   - How is forcing applied to that variable?
+
+2. **Identify Breeze's prognostic variables:**
+   - `LiquidIcePotentialTemperatureFormulation` uses ρθ
+   - `StaticEnergyFormulation` uses ρe
+
+3. **Derive the transformation:**
+   - If paper applies ∂T/∂t and Breeze uses θ: ∂θ/∂t = ∂T/∂t × (1/Π)
+   - This 1/Π factor can amplify by 10× at high altitudes!
+
+4. **Check if the paper's model handles this differently:**
+   - SAM uses static energy (∝ T) → T-forcing is applied directly, no 1/Π
+   - Papers using SAM may not mention this because it's implicit in their model
+
+5. **Adjust your implementation accordingly:**
+   - Either convert forcing correctly, OR
+   - Adjust initial conditions so forcing is small where amplification is large
+
+### Mandatory Checks Before Modifying Physics Code
+
+- [ ] Have I read the relevant working examples (BOMEX, RICO, prescribed_SST)?
+- [ ] Have I identified which field the example applies similar physics to?
+- [ ] Have I verified the example's context matches my case (domain, resolution, regimes)?
+- [ ] Have I verified my implementation matches the paper's specification?
+- [ ] Have I computed forcing/tendency magnitudes analytically at key locations?
+- [ ] Have I verified initial conditions are compatible with my forcing?
+- [ ] Am I making ONE change only?
+- [ ] Have I committed or stashed the current working state?
+
+If any answer is "no", complete that step before proceeding.
+
 ## Git Workflow
 - Follow ColPrac (Collaborative Practices for Community Packages)
 - Create feature branches for new work
@@ -527,11 +631,12 @@ done
 - MCPRepl.jl: https://github.com/kahliburke/MCPRepl.jl
 
 ## When Unsure
-1. Check existing examples in `examples/` directory
-2. Look at similar implementations in Oceananigans.jl
-3. Review tests for usage patterns
-4. Ask in GitHub discussions
-5. Check documentation in `docs/src/`
+1. **Study working examples first** — BOMEX, RICO, and other examples in `examples/` are stable and correct. Compare your code to them before making changes.
+2. Check existing examples in `examples/` directory
+3. Look at similar implementations in Oceananigans.jl
+4. Review tests for usage patterns
+5. Ask in GitHub discussions
+6. Check documentation in `docs/src/`
 
 ## AI Assistant Behavior
 - Prioritize type stability and GPU compatibility
@@ -638,6 +743,64 @@ A typical development workflow:
 5. Iterate rapidly until the feature/fix is complete
 
 This eliminates the slow compile-restart cycle and enables interactive debugging.
+
+## Tropical Cyclone Genesis Simulations
+
+Lessons learned from implementing Cronin & Chavas (2019) TC world simulations.
+
+### Moist vs Dry TC Physics
+
+| Case | TC Genesis | Requirements |
+|------|------------|--------------|
+| Moist (β=1) | Spontaneous, robust | Works at 8km resolution, forms in ~5 days |
+| Dry (β=0) | Requires assistance | Paper resolution (2km), seeding, or extreme forcing |
+
+**Key insight**: Latent heat release enables the WISHE (Wind-Induced Surface Heat Exchange)
+feedback that drives spontaneous self-aggregation and intensification. Dry TCs exist but
+require much stronger forcing or explicit seeding to overcome the lack of this feedback.
+
+### Critical Parameters for TC Formation
+
+1. **Domain size**: Must be large enough for vortex merger cascade
+   - Vortex scale ≈ Rossby deformation radius ≈ N·H/f ≈ 200-400 km
+   - Domain should fit multiple vortices (≥3×) for upscale organization
+   - 1152 km works well; 576 km produces "lattice" equilibrium
+
+2. **Resolution**: Affects convective organization
+   - 2 km: Paper resolution, spontaneous dry TC genesis
+   - 4-8 km: Works for moist TCs; dry TCs need seeding or strong forcing
+   - Vertical resolution in lowest 1 km is critical for surface flux accuracy
+
+3. **Surface-air disequilibrium**: Drives heat fluxes
+   - Tₛ - θ_surface ≈ 10-15 K is typical for RCE equilibrium
+   - Larger disequilibrium → stronger sensible heat flux → faster spinup
+
+### Common Failure Modes
+
+| Symptom | Likely Cause | Solution |
+|---------|--------------|----------|
+| No TC formation | Domain too small | Increase Lx, Ly to ≥ 1152 km |
+| TCs decay after forming | Domain too small for vortex merger | Larger domain or accept lattice |
+| Simulation blows up | Initial T far from equilibrium | Use equilibrated θ profile |
+| Flat intensity curve | Weak forcing (dry case) | Use moist physics, add seed, or increase forcing |
+
+### Monitoring TC Simulations
+
+Essential diagnostics to track:
+- **Max surface wind speed**: Primary TC intensity metric
+- **Max vorticity (ζ/f)**: Detects organized rotation before winds peak
+- **Mean θ profile**: Verifies RCE equilibration
+- **Surface wind/vorticity spatial plots**: Shows TC structure and count
+
+Use periodic figure updates (every 6-12 hours simulation time) during long runs
+to catch issues early. See `tropical_cyclone_world_v2.jl` for implementation.
+
+### Experiment Organization
+
+- Use timestamped experiment directories for reproducibility
+- Save `config.toml` with all parameters
+- Separate output types (fields, surface, profiles, checkpoints)
+- Monitor with periodic figure callbacks during simulation
 
 ## Roadmap
 

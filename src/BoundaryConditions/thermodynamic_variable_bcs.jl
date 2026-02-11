@@ -255,7 +255,7 @@ end
 
 # Convert ρe BCs → ρθ BCs (for LiquidIcePotentialTemperatureFormulation)
 energy_to_theta_bc(bc) = bc
-energy_to_theta_bc(bc::BulkSensibleHeatFluxBoundaryCondition) = bc  # Already a θ flux
+energy_to_theta_bc(bc::BulkSensibleHeatFluxBoundaryCondition) = bc
 energy_to_theta_bc(bc::BoundaryCondition{<:Flux}) = EnergyFluxBoundaryCondition(bc.condition)
 
 function energy_to_theta_bcs(fbcs::FieldBoundaryConditions)
@@ -309,4 +309,28 @@ function regularize_atmosphere_boundary_condition(bc::UnregularizedThetaFluxBC,
     density = dynamics_density(dynamics)
     new_tf = ThetaFluxBoundaryConditionFunction(tf.condition, side, microphysics, constants, density)
     return BoundaryCondition(Flux(), new_tf)
+end
+
+#####
+##### Set formulation on BulkSensibleHeatFlux for StaticEnergyFormulation
+#####
+
+set_sensible_heat_formulation(bc, formulation) = bc
+
+function set_sensible_heat_formulation(bc::BulkSensibleHeatFluxBoundaryCondition, formulation)
+    bf = bc.condition
+    new_bf = BulkSensibleHeatFluxFunction(bf.coefficient, bf.gustiness, bf.surface_temperature,
+                                           bf.surface_pressure, bf.thermodynamic_constants,
+                                           formulation)
+    return BoundaryCondition(Flux(), new_bf)
+end
+
+function set_sensible_heat_formulation_bcs(fbcs::FieldBoundaryConditions, formulation)
+    return FieldBoundaryConditions(; west     = set_sensible_heat_formulation(fbcs.west, formulation),
+                                     east     = set_sensible_heat_formulation(fbcs.east, formulation),
+                                     south    = set_sensible_heat_formulation(fbcs.south, formulation),
+                                     north    = set_sensible_heat_formulation(fbcs.north, formulation),
+                                     bottom   = set_sensible_heat_formulation(fbcs.bottom, formulation),
+                                     top      = set_sensible_heat_formulation(fbcs.top, formulation),
+                                     immersed = set_sensible_heat_formulation(fbcs.immersed, formulation))
 end
