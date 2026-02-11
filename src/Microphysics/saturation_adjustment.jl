@@ -95,6 +95,11 @@ AtmosphereModels.prognostic_field_names(::MPSA) = tuple()
 # in the microphysical fields (μ.qᵛ), computed during update_state!
 AtmosphereModels.specific_humidity(::SA, model) = model.microphysical_fields.qᵛ
 
+AtmosphereModels.vapor_mass_fraction(::SA, model) = model.microphysical_fields.qᵛ
+AtmosphereModels.liquid_mass_fraction(::SA, model) = model.microphysical_fields.qˡ
+AtmosphereModels.ice_mass_fraction(::WPSA, model) = nothing
+AtmosphereModels.ice_mass_fraction(::MPSA, model) = model.microphysical_fields.qⁱ
+
 center_field_tuple(grid, names...) = NamedTuple{names}(CenterField(grid) for name in names)
 AtmosphereModels.materialize_microphysical_fields(::WPSA, grid, bcs) = center_field_tuple(grid, :qᵛ, :qˡ)
 AtmosphereModels.materialize_microphysical_fields(::MPSA, grid, bcs) = center_field_tuple(grid, :qᵛ, :qˡ, :qⁱ)

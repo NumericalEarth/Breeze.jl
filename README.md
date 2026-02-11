@@ -45,7 +45,7 @@ An extension to [RRTMGP.jl](https://github.com/CliMA/RRTMGP.jl) provides solvers
 Breeze's examples include single column radiation, idealized thermal bubbles and inertia-gravity waves and Kelvin-Helmholtz, [BOMEX](https://doi.org/10.1175/1520-0469(2003)60<1201:ALESIS>2.0.CO;2) shallow convection, [RICO](https://doi.org/10.1029/2011MS000056) trade-wind cumulus, [supercells](https://doi.org/10.1002/2015MS000435), mountain waves, and more.
 
 Learn more by reading on or checking out [the documentation](https://numericalearth.github.io/BreezeDocumentation/dev/) and [examples](https://github.com/NumericalEarth/Breeze.jl/tree/main/examples).
-And don't hesitate to get in touch on the [NumericalEarth slack](https://join.slack.com/t/numericalearth/shared_invite/zt-3kjcowmpg-B0s3nalWkvZg8IBc~BIJEA) or by opening a new [discussion](https://github.com/NumericalEarth/Breeze.jl/discussions)!
+And don't hesitate to get in touch on the [NumericalEarth slack](https://join.slack.com/t/numericalearth/shared_invite/zt-3pwpvky4k-XX7RkgQgHLIUt~wtwGXN~Q) or by opening a new [discussion](https://github.com/NumericalEarth/Breeze.jl/discussions)!
 
 ## Roadmap and a call to action
 
@@ -60,7 +60,7 @@ The goals of the current group of model developers include developing
 - ⛈️ **Advanced microphysics**: Predicted Particle Property (P3) bulk microphysics, spectral bin schemes, and Lagrangian superdroplet methods for high-fidelity cloud and precipitation modeling.
 - ️🏔 **Acoustic substepping and terrain-following coordinates**: A compressible dynamical core with horizontally explicit, vertically-implicit acoustic substepping that efficiently resolves sound waves in flow over complex topography with smooth [sigma coordinates](https://en.wikipedia.org/wiki/Sigma_coordinate_system)
 - 🔬 **Open boundaries and nesting**: Open boundary conditions are useful for both idealized simulations and realistic one- and two-way nested simulations for high-resolution downscaling.
-- 🌀 **Coupled atmosphere-ocean simulations**: Support for high-resolution coupled atmosphere-ocean simulations via [ClimaOcean.jl](https://github.com/CliMA/ClimaOcean.jl)
+- 🌀 **Coupled atmosphere-ocean simulations**: Support for high-resolution coupled atmosphere-ocean simulations via (NumericalEarth.jl)[https://github.com/NumericalEarth/NumericalEarth.jl].
 
 If you have ideas, dreams, or criticisms that can make Breeze and its future better, don't hesitate to speak up by [opening issues](https://github.com/NumericalEarth/Breeze.jl/issues/new/choose) and contributing pull requests.
 

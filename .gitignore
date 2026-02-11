@@ -26,6 +26,7 @@ build/
 # committed for packages, but should be committed for applications that require a static
 # environment.
 Manifest.toml
+Manifest-v*.toml
 
 # output files
 *.jld2
@@ -39,3 +40,12 @@ Manifest.toml
 *.DS_Store
 *.vscode
 *.code-workspace
+.claude/
+
+# Paper references (kept locally only)
+examples/tropical_cyclone_world.md
+examples/atsc-jas-d-18-0357*
+
+# Benchmarking output
+*.json
+benchmark_results.md
