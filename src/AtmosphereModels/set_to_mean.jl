@@ -1,6 +1,7 @@
 using ..Thermodynamics: ReferenceState, compute_hydrostatic_reference!
 using Oceananigans.BoundaryConditions: fill_halo_regions!
 using Oceananigans.Fields: interior, ZeroField
+using Statistics: mean!
 
 """
     set_to_mean!(reference_state, model)

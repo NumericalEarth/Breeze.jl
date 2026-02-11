@@ -11,6 +11,12 @@ using Breeze.Thermodynamics:
     saturation_specific_humidity,
     PlanarLiquidSurface
 
+using Breeze.AtmosphereModels:
+    set_to_mean!,
+    vapor_mass_fraction,
+    liquid_mass_fraction,
+    ice_mass_fraction
+
 using Oceananigans
 using Oceananigans.Fields: ZeroField
 using GPUArraysCore: @allowscalar
@@ -228,5 +234,112 @@ using Test
         ρ_cold = @allowscalar ref.density[1, 1, 1]
 
         @test ρ_cold > ρ_warm
+    end
+end
+
+#####
+##### Mass fraction accessors and set_to_mean!
+#####
+
+@testset "Mass fraction accessors and set_to_mean! [$(FT)]" for FT in test_float_types()
+    Oceananigans.defaults.FloatType = FT
+    grid = RectilinearGrid(default_arch; size=(8, 8, 8), x=(0, 100), y=(0, 100), z=(0, 1000),
+                           topology=(Periodic, Periodic, Bounded), halo=(5, 5, 5))
+    constants = ThermodynamicConstants(FT)
+
+    #####
+    ##### vapor/liquid/ice_mass_fraction for Nothing microphysics
+    #####
+
+    @testset "Mass fraction accessors (no microphysics)" begin
+        model = AtmosphereModel(grid)
+        set!(model, θ=FT(300), qᵗ=FT(0.01))
+
+        qᵛ = vapor_mass_fraction(model)
+        qˡ = liquid_mass_fraction(model)
+        qⁱ = ice_mass_fraction(model)
+
+        # With no microphysics: vapor = total moisture, liquid = ice = nothing
+        @test qᵛ === model.specific_moisture
+        @test qˡ === nothing
+        @test qⁱ === nothing
+
+        # Check the field has the expected value
+        qᵛ₁ = @allowscalar qᵛ[1, 1, 1]
+        @test isapprox(qᵛ₁, FT(0.01); rtol=FT(1e-5))
+    end
+
+    #####
+    ##### vapor/liquid/ice_mass_fraction for SaturationAdjustment
+    #####
+
+    @testset "Mass fraction accessors (SaturationAdjustment)" begin
+        microphysics = SaturationAdjustment(equilibrium=WarmPhaseEquilibrium())
+        model = AtmosphereModel(grid; microphysics)
+        set!(model, θ=FT(300), qᵗ=FT(0.01))
+        time_step!(model, 1)  # triggers state update which populates microphysical fields
+
+        qᵛ = vapor_mass_fraction(model)
+        qˡ = liquid_mass_fraction(model)
+        qⁱ = ice_mass_fraction(model)
+
+        # SaturationAdjustment has prognostic qᵛ and qˡ fields
+        @test qᵛ isa Field
+        @test qˡ isa Field
+        @test qⁱ === nothing  # WarmPhaseEquilibrium has no ice
+    end
+
+    #####
+    ##### set_to_mean! with ZeroField moisture (default dry reference state)
+    #####
+
+    @testset "set_to_mean! with dry reference state" begin
+        model = AtmosphereModel(grid)
+        ref = model.dynamics.reference_state
+
+        # Set a non-uniform temperature field
+        set!(model, θ=FT(300))
+        time_step!(model, 1)
+
+        ρ_before = @allowscalar ref.density[1, 1, 1]
+
+        set_to_mean!(ref, model)
+
+        ρ_after = @allowscalar ref.density[1, 1, 1]
+
+        # Reference state should be updated (density recomputed)
+        @test ρ_after > 0
+        @test ref.temperature isa Field
+    end
+
+    #####
+    ##### set_to_mean! with allocated moisture fields
+    #####
+
+    @testset "set_to_mean! with moist reference state" begin
+        reference_state = ReferenceState(grid, constants; vapor_mass_fraction=0)
+        dynamics = AnelasticDynamics(reference_state)
+        model = AtmosphereModel(grid; dynamics)
+
+        set!(model, θ=FT(300), qᵗ=FT(0.01))
+        time_step!(model, 1)
+
+        set_to_mean!(reference_state, model)
+
+        # Temperature should be set to the horizontal mean of model temperature
+        T_ref = @allowscalar reference_state.temperature[1, 1, 1]
+        @test T_ref > 0
+        @test isfinite(T_ref)
+
+        # Vapor mass fraction should be set to horizontal mean of model moisture
+        qᵛ_ref = @allowscalar reference_state.vapor_mass_fraction[1, 1, 1]
+        @test qᵛ_ref > 0
+        @test isapprox(qᵛ_ref, FT(0.01); rtol=FT(0.1))
+
+        # Pressure and density should be physically reasonable
+        p_ref = @allowscalar reference_state.pressure[1, 1, 1]
+        ρ_ref = @allowscalar reference_state.density[1, 1, 1]
+        @test p_ref > 0
+        @test ρ_ref > 0
     end
 end
