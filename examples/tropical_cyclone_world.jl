@@ -19,7 +19,6 @@ using Breeze
 using Breeze.Thermodynamics: compute_reference_state!
 using Oceananigans: Oceananigans
 using Oceananigans.Units
-using Oceananigans.Grids: znode, Center
 
 using CairoMakie
 using CUDA
@@ -31,20 +30,22 @@ Oceananigans.defaults.FloatType = Float32
 
 # ## Domain and grid
 #
-# A 288 km × 288 km doubly-periodic domain with 3 km horizontal resolution
-# and a 28 km model top. The vertical grid uses 62.5 m spacing in the lowest
-# kilometer, 2000 m spacing above 3.5 km, and a smooth transition in between.
+# [Cronin and Chavas (2019)](@cite) used a 1152 km × 1152 km domain with 2 km horizontal
+# resolution. To reduce computational costs for the purpose of this example, we use a
+# 288 km × 288 km domain -- 4x smaller in both horizontal directions -- with a
+# 2x coarser 4 km horizontal resolution. We keep the 28 km model top,
+# but with 40 m spacing in the lowest kilometers rather than ~16 m, and
+# 1000 m spacing above 3.5 km rather than 500 m (and a smooth transition in between).
 
 arch = GPU()
-paper_Lx = paper_Ly = 1152e3
-paper_Nx = paper_Ny = 576
+paper_Lx = 1152e3
+paper_Nx = 576
 Lx = Ly = paper_Lx / 4
-Nx = Ny = 96
-# Lx = Ly = paper_Lx / 8 |> Int
+Nx = Ny = paper_Nx / 8 |> Int
 H = 28e3
 
-Δz_fine = 1000 / 16   # 62.5 m (paper: 1000/64 ≈ 15.6 m)
-Δz_coarse = 2000      # m (paper: 500 m)
+Δz_fine = 40 # m
+Δz_coarse = 1000 # m
 
 z = PiecewiseStretchedDiscretization(
     z  = [0, 1000, 3500, H],
@@ -55,8 +56,6 @@ Nz = length(z) - 1
 grid = RectilinearGrid(arch; size = (Nx, Ny, Nz), halo = (5, 5, 5),
                        x = (0, Lx), y = (0, Ly), z,
                        topology = (Periodic, Periodic, Bounded))
-
-@show grid
 
 # ## Reference state and dynamics
 #
@@ -133,22 +132,17 @@ nothing #hide
 
 Ṫ  = 1 / day
 τᵣ = 20days
-
-FT = eltype(grid)
 ρᵣ = reference_state.density
+parameters = (; Tᵗˢ, Ṫ, τᵣ, ρᵣ, cᵖᵈ)
 
-forcing_params = (; Tᵗˢ, Ṫ, τᵣ, ρᵣ, cᵖᵈ)
-
-@inline function piecewise_T_forcing(i, j, k, grid, clock, model_fields, p)
+@inline function ρe_forcing_func(i, j, k, grid, clock, model_fields, p)
     @inbounds T = model_fields.T[i, j, k]
     @inbounds ρ = p.ρᵣ[i, j, k]
     ∂T∂t = ifelse(T > p.Tᵗˢ, -p.Ṫ, (p.Tᵗˢ - T) / p.τᵣ)
     return ρ * p.cᵖᵈ * ∂T∂t
 end
 
-ρe_forcing = Forcing(piecewise_T_forcing;
-                     discrete_form = true,
-                     parameters = forcing_params)
+ρe_forcing = Forcing(ρe_forcing_func; discrete_form=true, parameters)
 
 # ## Sponge layer
 #
@@ -156,7 +150,7 @@ end
 # prevents spurious wave reflections from the rigid lid.
 
 sponge_mask = GaussianMask{:z}(center=26000, width=2000)
-ρw_sponge = Relaxation(rate=1/100, mask=sponge_mask)
+ρw_sponge = Relaxation(rate=1/30, mask=sponge_mask)
 
 forcing = (; ρe=ρe_forcing, ρw=ρw_sponge)
 nothing #hide
@@ -194,7 +188,7 @@ set!(model, T = Tᵢ, qᵗ = qᵗᵢ)
 
 # ## Simulation
 #
-# We run for 8 days, which is sufficient for moist TC genesis and intensification.
+# We run for 6 days, which is sufficient for moist TC genesis and intensification.
 
 simulation = Simulation(model; Δt=1, stop_time=6days)
 conjure_time_step_wizard!(simulation, cfl=0.7)
@@ -203,19 +197,29 @@ conjure_time_step_wizard!(simulation, cfl=0.7)
 
 u, v, w = model.velocities
 θ = liquid_ice_potential_temperature(model)
-s₀ = Field(sqrt(u^2 + v^2), indices = (:, :, 1))
+s = @at (Center, Center, Center) sqrt(u^2 + v^2)
+s₀ = Field(s, indices = (:, :, 1))
+
+ρqᵗ = model.moisture_density
+ρe = static_energy_density(model)
+ℒˡ = Breeze.Thermodynamics.liquid_latent_heat(T₀, constants)
+𝒬ᵀ = BoundaryConditionOperation(ρe, :bottom, model)
+Jᵛ = BoundaryConditionOperation(ρqᵗ, :bottom, model)
+𝒬 = Field(𝒬ᵀ + ℒˡ * Jᵛ)
 
 function progress(sim)
     compute!(s₀)
+    compute!(𝒬)
     umax = maximum(abs, u)
     vmax = maximum(abs, v)
     wmax = maximum(abs, w)
     s₀max = maximum(s₀)
+    𝒬max = maximum(𝒬)
     θmin, θmax = extrema(θ)
     msg = @sprintf("(%d) t = %s, Δt = %s",
                    iteration(sim), prettytime(sim, false), prettytime(sim.Δt, false))
-    msg *= @sprintf(", s₀ = %.1f m/s, max|U| ≈ (%d, %d, %d) m/s, θ ∈ [%d, %d] K",
-                    s₀max, umax, vmax, wmax, floor(θmin), ceil(θmax))
+    msg *= @sprintf(", s₀ = %.1f m/s, max(𝒬) = %.1f W/m², max|U| ≈ (%d, %d, %d) m/s, θ ∈ [%d, %d] K",
+                    s₀max, 𝒬max, umax, vmax, wmax, floor(θmin), ceil(θmax))
     @info msg
     return nothing
 end
@@ -224,9 +228,15 @@ add_callback!(simulation, progress, IterationInterval(1000))
 
 # Horizontally-averaged profiles.
 
+qᵗ = model.specific_moisture
+ℋ = RelativeHumidity(model)
+
 avg_outputs = (θ = Average(θ, dims=(1, 2)),
-               u = Average(u, dims=(1, 2)),
-               v = Average(v, dims=(1, 2)))
+               qᵗ = Average(qᵗ, dims=(1, 2)),
+               ℋ = Average(ℋ, dims=(1, 2)),
+               w² = Average(w^2, dims=(1, 2)),
+               wθ = Average(w * θ, dims=(1, 2)),
+               wqᵗ = Average(w * qᵗ, dims=(1, 2)))
 
 function save_parameters(file, model)
     file["parameters/β"] = β
@@ -241,18 +251,16 @@ end
 
 simulation.output_writers[:profiles] = JLD2Writer(model, avg_outputs;
                                                   filename = "tc_world_profiles.jld2",
-                                                  schedule = TimeInterval(12hour),
+                                                  schedule = TimeInterval(1day),
                                                   init = save_parameters,
                                                   overwrite_existing = true)
 
 # Surface fields for tracking TC development.
 
-surface_outputs = (u = view(u, :, :, 1),
-                   v = view(v, :, :, 1),
-                   θ = view(θ, :, :, 1))
-
+surface_outputs = (; s, 𝒬)
 simulation.output_writers[:surface] = JLD2Writer(model, surface_outputs;
                                                  filename = "tc_world_surface.jld2",
+                                                 indices = (:, :, 1),
                                                  schedule = TimeInterval(30minutes),
                                                  overwrite_existing = true)
 
@@ -262,11 +270,15 @@ run!(simulation)
 
 # ## Results: mean profile evolution
 #
-# Evolution of horizontally-averaged potential temperature and velocity profiles.
+# Evolution of horizontally-averaged potential temperature, vertical velocity variance,
+# and the vertical potential temperature flux.
 
 θt = FieldTimeSeries("tc_world_profiles.jld2", "θ")
-ut = FieldTimeSeries("tc_world_profiles.jld2", "u")
-vt = FieldTimeSeries("tc_world_profiles.jld2", "v")
+qᵗt = FieldTimeSeries("tc_world_profiles.jld2", "qᵗ")
+ℋt = FieldTimeSeries("tc_world_profiles.jld2", "ℋ")
+w²t = FieldTimeSeries("tc_world_profiles.jld2", "w²")
+wθt = FieldTimeSeries("tc_world_profiles.jld2", "wθ")
+wqᵗt = FieldTimeSeries("tc_world_profiles.jld2", "wqᵗ")
 
 times = θt.times
 Nt = length(times)
@@ -274,20 +286,32 @@ Nt = length(times)
 fig = Figure(size=(900, 400), fontsize=14)
 
 axθ = Axis(fig[1, 1], xlabel="θ (K)", ylabel="z (m)")
-axu = Axis(fig[1, 2], xlabel="u (m/s)", ylabel="z (m)")
-axv = Axis(fig[1, 3], xlabel="v (m/s)", ylabel="z (m)")
+axqᵗ = Axis(fig[1, 2], xlabel="qᵗ (kg/kg)")
+axℋ = Axis(fig[1, 3], xlabel="ℋ")
+axw² = Axis(fig[1, 4], xlabel="w² (m²/s²)")
+axwθ = Axis(fig[1, 5], xlabel="wθ (m²/s² K)")
+axwqᵗ = Axis(fig[1, 6], xlabel="wqᵗ (m²/s² kg/kg)", ylabel="z (m)", yaxisposition=:right)
 
 default_colours = Makie.wong_colors()
 colors = [default_colours[mod1(n, length(default_colours))] for n in 1:Nt]
+linewidth = 3
 
 for n in 1:Nt
     label = n == 1 ? "initial" : "t = $(prettytime(times[n]))"
-    lines!(axθ, θt[n], color=colors[n], label=label)
-    lines!(axu, ut[n], color=colors[n])
-    lines!(axv, vt[n], color=colors[n])
+    lines!(axθ, θt[n], color=colors[n]; label, linewidth)
+    lines!(axqᵗ, qᵗt[n], color=colors[n]; linewidth)
+    lines!(axℋ, ℋt[n], color=colors[n]; linewidth)
+    lines!(axw², w²t[n], color=colors[n]; linewidth)
+    lines!(axwθ, wθt[n], color=colors[n]; linewidth)
+    lines!(axwqᵗ, wqᵗt[n], color=colors[n]; linewidth)
 end
 
-Legend(fig[1, 4], axθ, labelsize=10)
+hideydecorations!(axqᵗ)
+hideydecorations!(axℋ)
+hideydecorations!(axw²)
+hideydecorations!(axwθ)
+
+Legend(fig[2, :], axθ, labelsize=10, orientation=:horizontal)
 
 fig[0, :] = Label(fig, "TC World (β = $β): mean profile evolution",
                   fontsize=16, tellwidth=false)
@@ -300,47 +324,41 @@ fig
 # Snapshots of the surface wind speed field at early, middle, and late times
 # show the evolution of convective organization and TC formation.
 
-u_ts = FieldTimeSeries("tc_world_surface.jld2", "u")
-v_ts = FieldTimeSeries("tc_world_surface.jld2", "v")
-times = u_ts.times
+s_ts = FieldTimeSeries("tc_world_surface.jld2", "s")
+𝒬_ts = FieldTimeSeries("tc_world_surface.jld2", "𝒬")
+
+times = s_ts.times
 Nt = length(times)
 
-speed(u, v) = @at (Center, Center, Center) sqrt(u^2 + v^2)
+smax = maximum(s_ts)
+slim = smax / 2
+𝒬lim = maximum(𝒬_ts) / 4
 
-un = XFaceField(u_ts.grid)
-vn = YFaceField(u_ts.grid)
-U = Field(speed(un, vn))
+fig = Figure(size=(1200, 800), fontsize=12)
 
-function compute_speed!(n)
-    parent(un) .= parent(u_ts[n])
-    parent(vn) .= parent(v_ts[n])
-    compute!(U)
-    return Array(interior(U, :, :, 1))
-end
-
-Umax = maximum(maximum(compute_speed!(n)) for n in 1:Nt)
-Ulim = Umax / 2
-
-fig = Figure(size=(1200, 400), fontsize=12)
-
-hms = []
-indices = round.(Int, [Nt / 3, 2Nt / 3, Nt])
+s_heatmaps = []
+𝒬_heatmaps = []
+indices = ceil.(Int, [Nt / 3, 2Nt / 3, Nt])
 
 for (i, idx) in enumerate(indices)
     xlabel = i == 1 ? "x (m)" : ""
     ylabel = i == 1 ? "y (m)" : ""
     title = "t = $(prettytime(times[idx]))"
-    ax = Axis(fig[1, i]; aspect = 1, xlabel, ylabel, title)
-    hm = heatmap!(ax, compute_speed!(idx); colormap=:speed, colorrange=(0, Umax / 2))
-    push!(hms, hm)
+    axs = Axis(fig[1, i]; aspect = 1, xlabel, ylabel, title)
+    ax𝒬 = Axis(fig[2, i]; aspect = 1, xlabel, ylabel, title)
+    s_hm = heatmap!(axs, s_ts[idx]; colormap=:speed, colorrange=(0, slim))
+    push!(s_heatmaps, s_hm)
+    𝒬_hm = heatmap!(ax𝒬, 𝒬_ts[idx]; colormap=:magma, colorrange=(0, 𝒬lim))
+    push!(𝒬_heatmaps, 𝒬_hm)
 end
 
-Colorbar(fig[1, length(indices) + 1], hms[end]; label="Surface wind speed (m/s)")
+Colorbar(fig[1, length(indices) + 1], s_heatmaps[end]; label="Surface wind speed (m/s)")
+Colorbar(fig[2, length(indices) + 1], 𝒬_heatmaps[end]; label="Surface moisture flux (W/m²)")
 
-fig[0, :] = Label(fig, "TC World (β = $β): surface wind speed",
+fig[0, :] = Label(fig, "TC World (β = $β): surface wind and heat flux",
                   fontsize=16, tellwidth=false)
 
-save("tc_world_surface_winds.png", fig) #src
+save("tc_world_surface.png", fig) #src
 fig
 
 # ## Animation of surface wind speed
@@ -350,10 +368,10 @@ ax = Axis(fig[1, 1]; xlabel="x (m)", ylabel="y (m)", aspect=1)
 
 n = Observable(1)
 title = @lift "TC World (β = $β) — t = $(prettytime(times[$n]))"
-Un = @lift compute_speed!($n)
+sn = @lift s_ts[$n]
 
-hm = heatmap!(ax, Un; colormap=:speed, colorrange=(0, Umax / 2))
-Colorbar(fig[1, 2], hm; label="Wind speed (m/s)")
+hm = heatmap!(ax, sn; colormap=:speed, colorrange=(0, slim))
+Colorbar(fig[1, 2], hm; label="Surface wind speed (m/s)")
 fig[0, :] = Label(fig, title, fontsize=16, tellwidth=false)
 
 CairoMakie.record(fig, "tc_world.mp4", 1:Nt, framerate=16) do nn
