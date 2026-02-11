@@ -128,7 +128,7 @@ z_faces = range(0, zᵗ, length=Nz+1)
 
 # Select architecture and set precision
 arch = GPU()
-Oceananigans.defaults.FloatType = Float32
+Oceananigans.defaults.FloatType = Float64
 
 grid = RectilinearGrid(arch;
                        size = (Nx, Ny, Nz),
@@ -287,9 +287,12 @@ using .BreezeCloudMicrophysicsExt: OneMomentCloudMicrophysics
 
 cloud_formation = SaturationAdjustment(equilibrium=MixedPhaseEquilibrium())
 microphysics = OneMomentCloudMicrophysics(; cloud_formation)
-advection = WENO(order=5)
+momentum_advection = WENO(order=9)
+scalar_advection = (ρθ = WENO(order=5),
+ρqᵗ = WENO(order=5, bounds=(0, 1)))
 
-model = AtmosphereModel(grid; dynamics, coriolis, microphysics, advection, radiation,
+model = AtmosphereModel(grid; dynamics, coriolis, microphysics,
+momentum_advection, scalar_advection, radiation,
                         boundary_conditions, forcing = (; ρw=sponge))
 
 # ## Initial Conditions
