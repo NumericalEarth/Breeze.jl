@@ -191,9 +191,9 @@ set!(model, T = Tᵢ, qᵗ = qᵗᵢ)
 
 # ## Simulation
 #
-# We run for 6 days, which is sufficient for moist TC genesis and intensification.
+# We run for 4 days, which is sufficient for moist TC genesis and intensification.
 
-simulation = Simulation(model; Δt=1, stop_time=6days)
+simulation = Simulation(model; Δt=1, stop_time=4days)
 conjure_time_step_wizard!(simulation, cfl=0.7)
 
 # ## Output and progress
@@ -203,7 +203,6 @@ u, v, w = model.velocities
 s = @at (Center, Center, Center) sqrt(u^2 + v^2)
 s₀ = Field(s, indices = (:, :, 1))
 
-qᵗ = model.specific_moisture
 ρqᵗ = model.moisture_density
 ρe = static_energy_density(model)
 ℒˡ = Breeze.Thermodynamics.liquid_latent_heat(T₀, constants)
@@ -232,6 +231,7 @@ add_callback!(simulation, progress, IterationInterval(1000))
 
 # Horizontally-averaged profiles.
 
+qᵗ = model.specific_moisture
 ℋ = RelativeHumidity(model)
 
 avg_outputs = (θ = Average(θ, dims=(1, 2)),
