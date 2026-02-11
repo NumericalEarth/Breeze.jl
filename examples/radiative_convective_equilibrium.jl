@@ -57,7 +57,7 @@ SST = 300  # Sea surface temperature [K] — Wing et al. (2018), Table 1
 # > "The solar constant is reduced such that the diurnally averaged insolation
 # > at the equator on the equinox is achieved at all times."
 #
-# From the corrigendum to Wing et al. (2018):
+# From the corrigendum to [Wing2018](@citet):
 # - Solar constant: S₀ = 551.58 W/m² (reduced from 1361 W/m² to achieve perpetual insolation)
 # - Solar zenith angle: θ = 42.05° (cos θ ≈ 0.7434)
 #
