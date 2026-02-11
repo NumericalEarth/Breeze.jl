@@ -48,7 +48,7 @@ weno_advection_schemes = [
 weno_test_grids = [
     # 1D case
     (topology = (Flat, Flat, Bounded), size = (8,),       extent = (1000.0,),             halo = (5,),    name = "(Periodic, Flat, Flat)"),
-    
+
     # 2D case
     (topology = (Periodic, Periodic, Flat), size = (8, 8),       extent = (1000.0, 1000.0),             halo = (5, 5),    name = "(Periodic, Periodic, Flat)"),
 ]
