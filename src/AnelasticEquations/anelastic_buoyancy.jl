@@ -9,20 +9,29 @@ $(TYPEDSIGNATURES)
 
 Compute the buoyancy force density for anelastic dynamics at cell center `(i, j, k)`.
 
-For the anelastic formulation, the buoyancy force is:
+The anelastic buoyancy force is the gravitational force on the density anomaly:
 
 ```math
-ρ b = -g (ρ - ρᵣ)
+-g \\rho' = -g (\\rho - \\rho_r)
 ```
 
-where `ρ` is the in-situ density computed from the ideal gas law using the
-current temperature and pressure, and `ρᵣ` is the reference density.
+where ``\\rho = p_r / (R^m T)`` is the in-situ density from the ideal gas law,
+and ``\\rho_r = p_r / (R^m_r T_r)`` is the reference density. Substituting:
 
-The density is computed as:
 ```math
-ρ = \\frac{pᵣ}{Rᵐ T}
+\\rho' = \\frac{p_r}{R^m T} - \\frac{p_r}{R^m_r T_r}
+       = \\frac{p_r}{R^m_r T_r} \\left( \\frac{R^m_r T_r}{R^m T} - 1 \\right)
+       = \\rho_r \\left( \\frac{R^m_r T_r}{R^m T} - 1 \\right)
 ```
-where `pᵣ` is the reference pressure, `Rᵐ` is the mixture gas constant, and `T` is temperature.
+
+This "perturbation form" avoids subtracting two large, nearly-equal numbers
+(``p_r / (R^m T) - \\rho_r``), which causes catastrophic cancellation when ``T \\approx T_r``.
+Instead, the ratio ``R^m_r T_r / (R^m T)`` is close
+to 1, and the subtraction of 1 preserves relative precision.
+
+Here ``R^m = q^d R^d + q^v R^v`` is the mixture gas constant for the current
+moisture state and ``R^m_r`` is the mixture gas constant for the reference
+moisture state.
 """
 @inline function AtmosphereModels.buoyancy_forceᶜᶜᶜ(i, j, k, grid,
                                                     dynamics::AnelasticDynamics,
@@ -32,18 +41,32 @@ where `pᵣ` is the reference pressure, `Rᵐ` is the mixture gas constant, and 
                                                     microphysical_fields,
                                                     constants)
 
+    ref = dynamics.reference_state
+
     @inbounds begin
         qᵗ = specific_moisture[i, j, k]
-        pᵣ = dynamics.reference_state.pressure[i, j, k]
-        ρᵣ = dynamics.reference_state.density[i, j, k]
+        ρᵣ = ref.density[i, j, k]
+        Tᵣ = ref.temperature[i, j, k]
         T = temperature[i, j, k]
     end
 
+    # Reference moisture fractions for Rᵐᵣ
+    @inbounds begin
+        qᵛᵣ = ref.vapor_mass_fraction[i, j, k]
+        qˡᵣ = ref.liquid_mass_fraction[i, j, k]
+        qⁱᵣ = ref.ice_mass_fraction[i, j, k]
+    end
+
+    qᵣ = MoistureMassFractions(qᵛᵣ, qˡᵣ, qⁱᵣ)
+    Rᵐᵣ = mixture_gas_constant(qᵣ, constants)
+
+    # Current moisture fractions for Rᵐ
     q = grid_moisture_fractions(i, j, k, grid, microphysics, ρᵣ, qᵗ, microphysical_fields)
     Rᵐ = mixture_gas_constant(q, constants)
-    ρ = pᵣ / (Rᵐ * T)
+
+    # Perturbation buoyancy: ρ' = ρ - ρᵣ = ρᵣ (Rᵐᵣ Tᵣ / (Rᵐ T) - 1)
     g = constants.gravitational_acceleration
-    ρ′ = ρ - ρᵣ
+    ρ′ = ρᵣ * (Rᵐᵣ * Tᵣ / (Rᵐ * T) - 1)
 
     return - g * ρ′
 end

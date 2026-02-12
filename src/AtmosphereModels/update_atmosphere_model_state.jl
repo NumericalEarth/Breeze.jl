@@ -1,11 +1,11 @@
 using ..Thermodynamics: Thermodynamics, mixture_heat_capacity, mixture_gas_constant
 
 using Oceananigans.BoundaryConditions: fill_halo_regions!, compute_x_bcs!, compute_y_bcs!, compute_z_bcs!
-using Oceananigans.Grids: Bounded, Periodic, Flat, topology, halo_size
+using Oceananigans.Grids: Bounded, Periodic, Flat # , topology, halo_size
 using Oceananigans.ImmersedBoundaries: mask_immersed_field!
 using Oceananigans.TimeSteppers: TimeSteppers
 using Oceananigans.TurbulenceClosures: compute_diffusivities!
-using Oceananigans.Utils: launch!, KernelParameters
+using Oceananigans.Utils: launch! # , KernelParameters
 using Oceananigans.Operators: ℑxᶠᵃᵃ, ℑyᵃᶠᵃ, ℑzᵃᵃᶠ
 
 function TimeSteppers.update_state!(model::AtmosphereModel, callbacks=[]; compute_tendencies=true)
@@ -82,15 +82,19 @@ function compute_velocities!(model::AtmosphereModel)
     grid = model.grid
     arch = grid.architecture
 
-    TX, TY, TZ = topology(grid)
-    Nx, Ny, Nz = size(grid)
-    Hx, Hy, Hz = halo_size(grid)
+    #TODO: Better support OffsetStaticSize in KernalAbstractions
+    # For now, just use :xyz instead of KernelParameters
+    # See: https://github.com/NumericalEarth/Breeze.jl/issues/433
 
-    ii = diagnostic_indices(TX(), Nx, Hx)
-    jj = diagnostic_indices(TY(), Ny, Hy)
-    kk = diagnostic_indices(TZ(), Nz, Hz)
+    # TX, TY, TZ = topology(grid)
+    # Nx, Ny, Nz = size(grid)
+    # Hx, Hy, Hz = halo_size(grid)
 
-    kp = KernelParameters(ii, jj, kk)
+    # ii = diagnostic_indices(TX(), Nx, Hx)
+    # jj = diagnostic_indices(TY(), Ny, Hy)
+    # kk = diagnostic_indices(TZ(), Nz, Hz)
+
+    # kp = KernelParameters(ii, jj, kk)
 
     # Ensure halos are filled before velocity computation
     # (prognostic field halo fill in update_state! is async)
@@ -98,7 +102,7 @@ function compute_velocities!(model::AtmosphereModel)
     fill_halo_regions!(density)
     fill_halo_regions!(model.momentum)
 
-    launch!(arch, grid, kp,
+    launch!(arch, grid, :xyz,
             _compute_velocities!,
             model.velocities,
             grid,
