@@ -92,13 +92,13 @@ function default_aerosol_activation(FT::DataType = Float64; τⁿᵘᶜ = 1)
     # Mode_κ(r_dry, stdev, N, vol_mix_ratio, mass_mix_ratio, molar_mass, kappa)
     r_dry = 0.05e-6           # 50 nm dry radius
     stdev = 2.0               # geometric standard deviation
-    N = 100e6                 # 100 cm⁻³
+    Nᵃ₀ = 100e6               # 100 cm⁻³
     vol_mix_ratio = (1.0,)    # single component
     mass_mix_ratio = (1.0,)
     molar_mass = (0.132,)     # ammonium sulfate ~132 g/mol
     kappa = (0.5,)            # hygroscopicity
 
-    mode = CMAM.Mode_κ(r_dry, stdev, N, vol_mix_ratio, mass_mix_ratio, molar_mass, kappa)
+    mode = CMAM.Mode_κ(r_dry, stdev, Nᵃ₀, vol_mix_ratio, mass_mix_ratio, molar_mass, kappa)
     aerosol_distribution = CMAM.AerosolDistribution((mode,))
 
     activation_parameters = AerosolActivationParameters(FT)
