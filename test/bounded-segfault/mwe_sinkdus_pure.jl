@@ -32,6 +32,8 @@ using Oceananigans.Fields: interior, set!
 using Breeze
 using Breeze: CompressibleDynamics
 using Breeze.AtmosphereModels: compute_velocities!
+using Breeze.TimeSteppers: store_initial_state!, ssp_rk3_substep!
+using Oceananigans.TimeSteppers: update_state!, compute_flux_bc_tendencies!, tick!
 using Reactant
 using Enzyme
 using Statistics: mean
@@ -174,6 +176,130 @@ function grad_loss_update_state(model, dmodel, θ_init, dθ_init, nsteps)
 end
 
 # ═══════════════════════════════════════════════════════════════════════════════
+# TEST 8a — Breeze model: 2x update_state! per iteration
+# ═══════════════════════════════════════════════════════════════════════════════
+# Test 8 (1x) passed. Does 2x trigger it?
+
+function loss_2x_update_state(model, θ_init, nsteps)
+    set!(model, θ=θ_init, ρ=1.0)
+    @trace track_numbers=false for i in 1:nsteps
+        update_state!(model)
+        parent(model.momentum.ρu) .= parent(model.momentum.ρu) .* 0.99
+        update_state!(model)
+        parent(model.momentum.ρu) .= parent(model.momentum.ρu) .* 0.99
+    end
+    return mean(interior(model.temperature) .^ 2)
+end
+
+function grad_loss_2x_update_state(model, dmodel, θ_init, dθ_init, nsteps)
+    _, val = Enzyme.autodiff(
+        Enzyme.set_strong_zero(Enzyme.ReverseWithPrimal),
+        loss_2x_update_state, Enzyme.Active,
+        Enzyme.Duplicated(model, dmodel),
+        Enzyme.Duplicated(θ_init, dθ_init),
+        Enzyme.Const(nsteps))
+    return val
+end
+
+# ═══════════════════════════════════════════════════════════════════════════════
+# TEST 8a2 — Breeze model: 3x update_state! per iteration (like 3 RK3 stages)
+# ═══════════════════════════════════════════════════════════════════════════════
+# Known to CRASH from previous run.
+
+function loss_3x_update_state(model, θ_init, nsteps)
+    set!(model, θ=θ_init, ρ=1.0)
+    @trace track_numbers=false for i in 1:nsteps
+        update_state!(model)
+        parent(model.momentum.ρu) .= parent(model.momentum.ρu) .* 0.99
+        update_state!(model)
+        parent(model.momentum.ρu) .= parent(model.momentum.ρu) .* 0.99
+        update_state!(model)
+        parent(model.momentum.ρu) .= parent(model.momentum.ρu) .* 0.99
+    end
+    return mean(interior(model.temperature) .^ 2)
+end
+
+function grad_loss_3x_update_state(model, dmodel, θ_init, dθ_init, nsteps)
+    _, val = Enzyme.autodiff(
+        Enzyme.set_strong_zero(Enzyme.ReverseWithPrimal),
+        loss_3x_update_state, Enzyme.Active,
+        Enzyme.Duplicated(model, dmodel),
+        Enzyme.Duplicated(θ_init, dθ_init),
+        Enzyme.Const(nsteps))
+    return val
+end
+
+# ═══════════════════════════════════════════════════════════════════════════════
+# TEST 8b — Breeze model: store_initial + substep + update_state (1 RK3 stage)
+# ═══════════════════════════════════════════════════════════════════════════════
+# Adds the RK3 substep kernel: u = (1-α)*u⁰ + α*(u + Δt*G)
+# This involves reading from U⁰ and Gⁿ fields, plus the substep kernel.
+
+function loss_one_rk3_stage(model, θ_init, Δt, nsteps)
+    set!(model, θ=θ_init, ρ=1.0)
+    @trace track_numbers=false for i in 1:nsteps
+        store_initial_state!(model)
+        update_state!(model)
+        compute_flux_bc_tendencies!(model)
+        ssp_rk3_substep!(model, Δt, 1.0)
+        update_state!(model)
+    end
+    return mean(interior(model.temperature) .^ 2)
+end
+
+function grad_loss_one_rk3_stage(model, dmodel, θ_init, dθ_init, Δt, nsteps)
+    _, val = Enzyme.autodiff(
+        Enzyme.set_strong_zero(Enzyme.ReverseWithPrimal),
+        loss_one_rk3_stage, Enzyme.Active,
+        Enzyme.Duplicated(model, dmodel),
+        Enzyme.Duplicated(θ_init, dθ_init),
+        Enzyme.Const(Δt),
+        Enzyme.Const(nsteps))
+    return val
+end
+
+# ═══════════════════════════════════════════════════════════════════════════════
+# TEST 8c — Breeze model: all 3 RK3 stages (= time_step! without tick/clock)
+# ═══════════════════════════════════════════════════════════════════════════════
+# This is essentially time_step! minus tick! and step_lagrangian_particles!.
+# If this crashes, we've confirmed it's purely the 3-stage RK3 pattern.
+
+function loss_three_rk3_stages(model, θ_init, Δt, nsteps)
+    set!(model, θ=θ_init, ρ=1.0)
+    @trace track_numbers=false for i in 1:nsteps
+        store_initial_state!(model)
+
+        # Stage 1: α = 1
+        update_state!(model)
+        compute_flux_bc_tendencies!(model)
+        ssp_rk3_substep!(model, Δt, 1.0)
+        update_state!(model)
+
+        # Stage 2: α = 1/4
+        compute_flux_bc_tendencies!(model)
+        ssp_rk3_substep!(model, Δt, 0.25)
+        update_state!(model)
+
+        # Stage 3: α = 2/3
+        compute_flux_bc_tendencies!(model)
+        ssp_rk3_substep!(model, Δt, 2/3)
+        update_state!(model)
+    end
+    return mean(interior(model.temperature) .^ 2)
+end
+
+function grad_loss_three_rk3_stages(model, dmodel, θ_init, dθ_init, Δt, nsteps)
+    _, val = Enzyme.autodiff(
+        Enzyme.set_strong_zero(Enzyme.ReverseWithPrimal),
+        loss_three_rk3_stages, Enzyme.Active,
+        Enzyme.Duplicated(model, dmodel),
+        Enzyme.Duplicated(θ_init, dθ_init),
+        Enzyme.Const(Δt),
+        Enzyme.Const(nsteps))
+    return val
+end
+
+# ═══════════════════════════════════════════════════════════════════════════════
 # TEST 9 — Breeze model: full time_step! in loop (known crash case)
 # ═══════════════════════════════════════════════════════════════════════════════
 
@@ -208,20 +334,8 @@ println("MLIR dumps → $mlir_dump_dir")
 println("nsteps = $nsteps, Δt = $Δt")
 println("=" ^ 72)
 
-# ── Test 6: Halo-heavy gradient ──────────────────────────────────────────────
-println("\nTest 6 — Gradient: 3 fields + many fill_halo_regions!:")
-let a = CenterField(grid)
-    b = CenterField(grid)
-    c = CenterField(grid)
-    da = Enzyme.make_zero(a)
-    db = Enzyme.make_zero(b)
-    dc = Enzyme.make_zero(c)
-    run_test("Compile+Run", () -> begin
-        compiled = Reactant.@compile raise_first=true raise=true sync=true grad_loss_halo_heavy(
-            a, da, b, db, c, dc, nsteps)
-        compiled(a, da, b, db, c, dc, nsteps)
-    end)
-end
+# ── Test 6: Halo-heavy gradient (SKIP — known PASS) ──────────────────────────
+println("\nTest 6 — SKIPPED (known PASS from previous run)")
 
 # ── Create Breeze model (shared for Tests 7-9) ──────────────────────────────
 println("\nCreating Breeze AtmosphereModel...")
@@ -234,34 +348,39 @@ set!(dθ_init, 0.0)
 println("  Model created: $(typeof(model))")
 println("  Prognostic fields: $(keys(Oceananigans.prognostic_fields(model)))")
 
-# ── Test 7: Diagnostic velocities ONLY ───────────────────────────────────────
-println("\nTest 7 — Gradient: compute_velocities! ONLY in loop (THE diagnostic velocity test):")
+# ── Test 7: Diagnostic velocities ONLY (SKIP — known PASS) ───────────────────
+println("\nTest 7 — SKIPPED (known PASS from previous run)")
+
+# ── Test 8: Full update_state! (SKIP — known PASS) ──────────────────────────
+println("\nTest 8 — SKIPPED (known PASS from previous run)")
+
+# ── Test 8a: 2x update_state! ─────────────────────────────────────────────────
+println("\nTest 8a — Gradient: 2x update_state! per iteration:")
 run_test("Compile+Run", () -> begin
-    compiled = Reactant.@compile raise_first=true raise=true sync=true grad_loss_diag_vel(
+    compiled = Reactant.@compile raise_first=true raise=true sync=true grad_loss_2x_update_state(
         model, dmodel, θ_init, dθ_init, nsteps)
     compiled(model, dmodel, θ_init, dθ_init, nsteps)
 end)
 
-# ── Test 8: Full update_state! ───────────────────────────────────────────────
-println("\nTest 8 — Gradient: full update_state! in loop:")
+# ── Test 8a2: 3x update_state! (known crash) ────────────────────────────────
+println("\nTest 8a2 — Gradient: 3x update_state! per iteration (KNOWN CRASH):")
 run_test("Compile+Run", () -> begin
-    compiled = Reactant.@compile raise_first=true raise=true sync=true grad_loss_update_state(
+    compiled = Reactant.@compile raise_first=true raise=true sync=true grad_loss_3x_update_state(
         model, dmodel, θ_init, dθ_init, nsteps)
     compiled(model, dmodel, θ_init, dθ_init, nsteps)
 end)
 
-# ── Test 9: Full time_step! (known crash) ─────────────────────────────────────
-println("\nTest 9 — Gradient: full time_step! in loop (KNOWN CRASH CASE):")
-run_test("Compile+Run", () -> begin
-    compiled = Reactant.@compile raise_first=true raise=true sync=true grad_loss_full_timestep(
-        model, dmodel, θ_init, dθ_init, Δt, nsteps)
-    compiled(model, dmodel, θ_init, dθ_init, Δt, nsteps)
-end)
+# ── Tests 8b, 8c, 9: SKIPPED (focus on 2x vs 3x boundary) ────────────────────
+println("\nTests 8b, 8c, 9 — SKIPPED (focus on 2x vs 3x threshold)")
 
 println("\n" * "=" ^ 72)
+println("RESULTS SUMMARY:")
+println("  Test 8  (1x update_state!): KNOWN PASS")
+println("  Test 8a (2x update_state!): ???")
+println("  Test 8a2(3x update_state!): KNOWN CRASH")
+println()
 println("INTERPRETATION:")
-println("  Test 6 PASS + Test 7 CRASH  → diagnostic velocities alone trigger it")
-println("  Test 7 PASS + Test 8 CRASH  → thermodynamic/pressure/diffusion ops needed")
-println("  Test 8 PASS + Test 9 CRASH  → tendency computation or RK3 substep needed")
-println("  All PASS                    → crash needs full model complexity")
+println("  8a PASS  + 8a2 CRASH → crash threshold is between 2x and 3x update_state!")
+println("  8a CRASH             → crash threshold is between 1x and 2x update_state!")
+println("  The SinkDUS bug is a SCALE issue: too many ops in the while body")
 println("=" ^ 72)
