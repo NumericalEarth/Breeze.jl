@@ -11,8 +11,6 @@ using Reactant
 using Test
 using CUDA
 
-Reactant.set_default_backend("cpu")
-
 #####
 ##### Test configurations
 #####
@@ -73,6 +71,17 @@ function run_time_steps!(model, Δt, nsteps)
 end
 
 get_temperature(model) = Array(interior(model.temperature))
+
+#####
+##### Set Reactant backend based on default_arch
+#####
+
+# Set Reactant backend based on default_arch (follows pattern from other tests)
+if default_arch isa GPU
+    Reactant.set_default_backend("gpu")
+else
+    Reactant.set_default_backend("cpu")
+end
 
 #####
 ##### Tests grouped by topology
