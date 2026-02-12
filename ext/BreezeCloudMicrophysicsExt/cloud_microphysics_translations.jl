@@ -63,7 +63,7 @@ end
     pᵛ⁺ = saturation_vapor_pressure(T, constants, PlanarIceSurface())
 
     Dᵛ = D_vapor
-    
+
     # TODO: notation for the thermal diffusivity K_therm?
     return 1 / (ℒⁱ / (K_therm * T) * (ℒⁱ / (Rᵛ * T) - 1) + Rᵛ * T / (Dᵛ * pᵛ⁺))
 end
