@@ -106,23 +106,6 @@ function default_aerosol_activation(FT::DataType = Float64; τⁿᵘᶜ = 1)
     return AerosolActivation(activation_parameters, aerosol_distribution, FT(τⁿᵘᶜ))
 end
 
-"""
-    initial_aerosol_number_from_activation(aerosol_activation::AerosolActivation)
-
-Compute the total initial aerosol number concentration from the aerosol distribution.
-
-Returns the sum of `N` (number concentration in 1/m³) across all aerosol modes.
-"""
-function initial_aerosol_number_from_activation(aerosol_activation::AerosolActivation)
-    ad = aerosol_activation.aerosol_distribution
-    Nᵃ = zero(eltype(ad.modes[1].N))
-    for mode in ad.modes
-        Nᵃ += mode.N
-    end
-    return Nᵃ
-end
-
-initial_aerosol_number_from_activation(::Nothing) = 0
 
 """
     TwoMomentCategories{W, AP, LV, RV, AA}
@@ -192,9 +175,15 @@ const TwoMomentCloudMicrophysics = BulkMicrophysics{<:Any, <:CM2MCategories, <:A
 const WarmPhaseNonEquilibrium2M = BulkMicrophysics{<:WarmPhaseNE, <:CM2MCategories, <:Any}
 const WPNE2M = WarmPhaseNonEquilibrium2M
 
-# Extend AtmosphereModels.initial_aerosol_number for two-moment microphysics
-function AtmosphereModels.initial_aerosol_number(microphysics::WPNE2M)
-    return initial_aerosol_number_from_activation(microphysics.categories.aerosol_activation)
+
+#####
+##### Initial aerosol number from aerosol distribution
+#####
+
+function AtmosphereModels.initial_aerosol_number(microphysics::TwoMomentCloudMicrophysics)
+    aa = microphysics.categories.aerosol_activation
+    aa isa Nothing && return 0
+    return sum(mode.N for mode in aa.aerosol_distribution.modes)
 end
 
 #####

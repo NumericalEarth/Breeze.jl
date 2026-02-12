@@ -72,9 +72,9 @@ export
     RelativeHumidity,
     RelativeHumidityField,
     BulkMicrophysics,
+    initial_aerosol_number,
     compute_hydrostatic_pressure!,
     NonEquilibriumCloudFormation,
-    initial_aerosol_number,
 
     # BoundaryConditions
     BulkDrag,

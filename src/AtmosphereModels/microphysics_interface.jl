@@ -14,6 +14,7 @@
 # to the state-based tendency. Schemes needing full grid access can override directly.
 #####
 
+using Oceananigans.Fields: set!
 using Oceananigans.Operators: ℑxᶜᵃᵃ, ℑyᵃᶜᵃ, ℑzᵃᵃᶜ
 
 using ..Thermodynamics: MoistureMassFractions
@@ -277,18 +278,6 @@ Return `tuple()` - zero-moment scheme has no prognostic variables.
 """
 prognostic_field_names(::Nothing) = tuple()
 
-"""
-    initial_aerosol_number(microphysics)
-
-Return the total initial aerosol number concentration [1/m³] from the microphysics scheme.
-
-For microphysics schemes with prognostic aerosol (e.g., two-moment with aerosol tracking),
-this returns the sum of aerosol number concentrations across all modes in the aerosol
-distribution. For schemes without aerosol, returns 0.
-
-This value should be used to initialize the density-weighted aerosol number `ρnᵃ`.
-"""
-initial_aerosol_number(::Nothing) = 0
 
 """
 $(TYPEDSIGNATURES)
@@ -297,6 +286,38 @@ Build microphysical fields associated with `microphysics` on `grid` and with
 user defined `boundary_conditions`.
 """
 materialize_microphysical_fields(microphysics::Nothing, grid, boundary_conditions) = NamedTuple()
+
+"""
+$(TYPEDSIGNATURES)
+
+Return the total initial aerosol number concentration [m⁻³] for a microphysics scheme.
+
+This is used by [`initialize_model_microphysical_fields!`](@ref) and parcel model
+construction to set a physically meaningful default for the prognostic aerosol number
+density `ρnᵃ`. The value is derived from the aerosol size distribution stored in the
+microphysics scheme, so it stays consistent with the activation parameters.
+
+Returns `0` by default; extensions override this for schemes with prognostic aerosol.
+"""
+initial_aerosol_number(microphysics) = 0
+
+"""
+$(TYPEDSIGNATURES)
+
+Initialize default values for microphysical fields after materialization.
+
+Sets `ρnᵃ` (aerosol number density) to [`initial_aerosol_number(microphysics)`](@ref)
+if the field exists. All other microphysical fields remain at zero.
+Users can override with `set!`.
+"""
+initialize_model_microphysical_fields!(fields, ::Nothing) = nothing
+
+function initialize_model_microphysical_fields!(fields, microphysics)
+    if :ρnᵃ ∈ keys(fields)
+        set!(fields.ρnᵃ, initial_aerosol_number(microphysics))
+    end
+    return nothing
+end
 
 """
 $(TYPEDSIGNATURES)

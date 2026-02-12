@@ -297,9 +297,9 @@ end
          qᵗ = qᵗ,
          z = 0, w = 1)
 
-    # Set initial aerosol number from activation parameters
-    nᵃ₀ = Breeze.initial_aerosol_number(microphysics)
-    model.dynamics.state.μ = (; ρqᶜˡ=FT(0), ρnᶜˡ=FT(0), ρqʳ=FT(0), ρnʳ=FT(0), ρnᵃ=FT(nᵃ₀))
+    # Set initial aerosol number
+    Nᵃ₀ = FT(initial_aerosol_number(microphysics))
+    model.dynamics.state.μ = (; ρqᶜˡ=FT(0), ρnᶜˡ=FT(0), ρqʳ=FT(0), ρnʳ=FT(0), ρnᵃ=Nᵃ₀)
 
     # Initially, cloud droplet number should be zero (no droplets before activation)
     @test model.dynamics.state.μ.ρnᶜˡ == 0

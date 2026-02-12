@@ -236,7 +236,8 @@ The prognostic variables use the same ρ-weighted names as the grid-based model
 function materialize_parcel_microphysics_prognostics(FT, microphysics)
     names = AtmosphereModels.prognostic_field_names(microphysics)
     length(names) == 0 && return nothing
-    return NamedTuple{names}(ntuple(_ -> zero(FT), length(names)))
+    Nᵃ₀ = FT(AtmosphereModels.initial_aerosol_number(microphysics))
+    return NamedTuple{names}(ntuple(i -> names[i] == :ρnᵃ ? Nᵃ₀ : zero(FT), length(names)))
 end
 
 function AtmosphereModels.materialize_momentum_and_velocities(::ParcelDynamics, grid, bcs)
