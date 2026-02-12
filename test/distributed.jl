@@ -8,6 +8,7 @@
 
 using Breeze
 using Breeze: PrescribedDynamics
+using Breeze.Thermodynamics: adiabatic_hydrostatic_density
 using MPI: mpiexec
 using Oceananigans
 using Oceananigans.Architectures: architecture, CPU
@@ -39,6 +40,41 @@ function fields_match(model_serial, model_distributed; rtol=0, atol=0)
     return true
 end
 
+function make_dynamics(dynamics_type, grid, constants)
+    if dynamics_type === :Compressible
+        return CompressibleDynamics()
+    else
+        reference_state = ReferenceState(grid, constants)
+        return dynamics_type === :Anelastic ? AnelasticDynamics(reference_state) :
+                                              PrescribedDynamics(reference_state)
+    end
+end
+
+function set_initial_conditions!(model, dynamics_type; u=0, v=0)
+    if dynamics_type === :Compressible
+        # CompressibleDynamics needs hydrostatically balanced density
+        # to avoid acoustic instability.
+        d = model.dynamics
+        constants = model.thermodynamic_constants
+        ρ₀(x, y, z) = adiabatic_hydrostatic_density(z, d.surface_pressure, 300.0,
+                                                      d.standard_pressure, constants)
+        set!(model; θ=300, qᵗ=0.01, ρ=ρ₀, u, v)
+    else
+        set!(model; θ=300, qᵗ=0.01, u, v)
+    end
+end
+
+function make_simulation(model, dynamics_type; stop_time=10)
+    if dynamics_type === :Compressible
+        # CompressibleDynamics resolves acoustic waves, requiring a small fixed Δt.
+        simulation = Simulation(model; Δt=0.05seconds, stop_time=min(stop_time, 1))
+    else
+        simulation = Simulation(model; Δt=1e-3seconds, stop_time)
+        simulation.callbacks[:wizard] = Callback(TimeStepWizard(cfl=0.5), IterationInterval(1))
+    end
+    return simulation
+end
+
 function run_and_compare(; arch, partition=Partition(1, 1), dynamics_type=:Anelastic,
                          closure=nothing, microphysics=nothing, coriolis=nothing,
                          grid_size=(16, 16, 16), extent=(1000, 1000, 1000), stop_time=10)
@@ -54,33 +90,27 @@ function run_and_compare(; arch, partition=Partition(1, 1), dynamics_type=:Anela
     # Distributed model (on all ranks)
     arch_distributed = Distributed(arch; partition)
     grid_distributed = RectilinearGrid(arch_distributed; size=grid_size, x, y, z, topology)
-    reference_state_d = ReferenceState(grid_distributed, constants)
-    dynamics_d = dynamics_type === :Anelastic ? AnelasticDynamics(reference_state_d) :
-                                                PrescribedDynamics(reference_state_d)
+    dynamics_d = make_dynamics(dynamics_type, grid_distributed, constants)
 
     model_distributed = AtmosphereModel(grid_distributed; dynamics=dynamics_d,
                                         thermodynamic_constants=constants,
                                         advection=WENO(), closure, microphysics, coriolis)
-    set!(model_distributed; θ=300, qᵗ=0.01, u=u₀, v=v₀)
+    set_initial_conditions!(model_distributed, dynamics_type; u=u₀, v=v₀)
 
-    simulation_d = Simulation(model_distributed; Δt=1e-3seconds, stop_time)
-    simulation_d.callbacks[:wizard] = Callback(TimeStepWizard(cfl=0.5), IterationInterval(1))
+    simulation_d = make_simulation(model_distributed, dynamics_type; stop_time)
     run!(simulation_d)
 
     # Serial model (only on root rank for comparison)
     local_rank = arch_distributed.local_rank
     if local_rank == 0
         grid_serial = RectilinearGrid(arch; size=grid_size, x, y, z, topology)
-        reference_state = ReferenceState(grid_serial, constants)
-        dynamics = dynamics_type === :Anelastic ? AnelasticDynamics(reference_state) :
-                                                  PrescribedDynamics(reference_state)
+        dynamics = make_dynamics(dynamics_type, grid_serial, constants)
 
         model_serial = AtmosphereModel(grid_serial; dynamics, thermodynamic_constants=constants,
                                        advection=WENO(), closure, microphysics, coriolis)
-        set!(model_serial; θ=300, qᵗ=0.01, u=u₀, v=v₀)
+        set_initial_conditions!(model_serial, dynamics_type; u=u₀, v=v₀)
 
-        simulation = Simulation(model_serial; Δt=1e-3seconds, stop_time)
-        simulation.callbacks[:wizard] = Callback(TimeStepWizard(cfl=0.5), IterationInterval(1))
+        simulation = make_simulation(model_serial, dynamics_type; stop_time)
         run!(simulation)
 
         # Compare fields on root
@@ -107,16 +137,13 @@ function run_serial_simulation(; dynamics_type=:Anelastic, microphysics=nothing,
     v₀(x, y, z) = cos(2π * x / Lx) * sin(2π * y / Ly)
 
     grid = RectilinearGrid(CPU(); size=grid_size, x, y, z, topology)
-    reference_state = ReferenceState(grid, constants)
-    dynamics = dynamics_type === :Anelastic ? AnelasticDynamics(reference_state) :
-                                              PrescribedDynamics(reference_state)
+    dynamics = make_dynamics(dynamics_type, grid, constants)
 
     model = AtmosphereModel(grid; dynamics, thermodynamic_constants=constants,
                             advection=WENO(), microphysics)
-    set!(model; θ=300, qᵗ=0.01, u=u₀, v=v₀)
+    set_initial_conditions!(model, dynamics_type; u=u₀, v=v₀)
 
-    simulation = Simulation(model; Δt=1e-3seconds, stop_time)
-    simulation.callbacks[:wizard] = Callback(TimeStepWizard(cfl=0.5), IterationInterval(1))
+    simulation = make_simulation(model, dynamics_type; stop_time)
 
     if !isnothing(output_filename)
         outputs = isnothing(output_fields) ? Oceananigans.prognostic_fields(model) : output_fields
@@ -169,6 +196,10 @@ end
             @test run_and_compare(; arch, dynamics_type=:Prescribed)
         end
 
+        @testset "CompressibleDynamics" begin
+            @test run_and_compare(; arch, dynamics_type=:Compressible)
+        end
+
         @testset "With SmagorinskyLilly" begin
             @test run_and_compare(; arch, closure=SmagorinskyLilly())
         end
@@ -212,8 +243,9 @@ end
         ]
 
         configurations = [
-            ("AnelasticDynamics",    ":Anelastic", "nothing"),
-            ("SaturationAdjustment", ":Anelastic", "SaturationAdjustment()"),
+            ("AnelasticDynamics",    ":Anelastic",    "nothing"),
+            ("CompressibleDynamics", ":Compressible",  "nothing"),
+            ("SaturationAdjustment", ":Anelastic",    "SaturationAdjustment()"),
         ]
 
         for (config_name, dynamics_type, microphysics) in configurations
@@ -221,6 +253,35 @@ end
                 dist_prefix = joinpath(output_dir, "breeze_dist_$(config_name)_$(part_name)")
                 serial_file = joinpath(output_dir, "breeze_serial_$(config_name)_$(part_name)")
                 script_file = joinpath(output_dir, "breeze_mpi_$(config_name)_$(part_name).jl")
+
+                # Build dynamics-specific setup and time stepping for MPI script
+                if dynamics_type == ":Compressible"
+                    dynamics_block = """
+                    dynamics = CompressibleDynamics()
+                    """
+                    ic_line = """
+                    using Breeze.Thermodynamics: adiabatic_hydrostatic_density
+                    ρ₀(x, y, z) = adiabatic_hydrostatic_density(z, dynamics.surface_pressure, 300.0,
+                                                                 dynamics.standard_pressure, constants)
+                    set!(model; θ=300, qᵗ=0.01, ρ=ρ₀, u=u₀, v=v₀)
+                    """
+                    simulation_block = """
+                    simulation = Simulation(model; Δt=0.05seconds, stop_time=1)
+                    """
+                else
+                    dynamics_block = """
+                    reference_state = ReferenceState(grid, constants)
+                    dynamics = $dynamics_type === :Anelastic ? AnelasticDynamics(reference_state) :
+                                                               PrescribedDynamics(reference_state)
+                    """
+                    ic_line = """
+                    set!(model; θ=300, qᵗ=0.01, u=u₀, v=v₀)
+                    """
+                    simulation_block = """
+                    simulation = Simulation(model; Δt=1e-3seconds, stop_time=10)
+                    simulation.callbacks[:wizard] = Callback(TimeStepWizard(cfl=0.5), IterationInterval(1))
+                    """
+                end
 
                 mpi_script = """
                 using MPI
@@ -245,19 +306,13 @@ end
                 v₀(x, y, z) = cos(2π * x / Lx) * sin(2π * y / Ly)
 
                 grid = RectilinearGrid(arch; size=grid_size, x, y, z, topology)
-                reference_state = ReferenceState(grid, constants)
-                dynamics = $dynamics_type === :Anelastic ? AnelasticDynamics(reference_state) :
-                                                           PrescribedDynamics(reference_state)
-
+                $dynamics_block
                 model = AtmosphereModel(grid; dynamics,
                                         thermodynamic_constants=constants,
                                         advection=WENO(),
                                         microphysics=$microphysics)
-                set!(model; θ=300, qᵗ=0.01, u=u₀, v=v₀)
-
-                simulation = Simulation(model; Δt=1e-3seconds, stop_time=10)
-                simulation.callbacks[:wizard] = Callback(TimeStepWizard(cfl=0.5), IterationInterval(1))
-
+                $ic_line
+                $simulation_block
                 simulation.output_writers[:jld2] = JLD2Writer(model,
                                                               Oceananigans.prognostic_fields(model);
                                                               filename = "$dist_prefix",
@@ -280,7 +335,8 @@ end
                     end
 
                     # Run the serial reference with JLD2Writer output
-                    dynamics_sym = dynamics_type == ":Anelastic" ? :Anelastic : :Prescribed
+                    dynamics_sym = dynamics_type == ":Anelastic"    ? :Anelastic :
+                                   dynamics_type == ":Compressible" ? :Compressible : :Prescribed
                     microphysics_obj = microphysics == "nothing" ? nothing : SaturationAdjustment()
                     serial_model = run_serial_simulation(; dynamics_type=dynamics_sym,
                                                           microphysics=microphysics_obj,
