@@ -93,7 +93,7 @@ AtmosphereModel{CPU, RectilinearGrid}(time = 0 seconds, iteration = 0)
 │   ├── momentum: Centered(order=2)
 │   ├── ρθ: Centered(order=2)
 │   └── ρqᵗ: Centered(order=2)
-├── forcing: none
+├── forcing: @NamedTuple{ρu::Returns{Float64}, ρv::Returns{Float64}, ρw::Returns{Float64}, ρqᵗ::Returns{Float64}, ρθ::Returns{Float64}, ρe::Returns{Float64}}
 ├── tracers: ()
 ├── coriolis: Nothing
 └── microphysics: Nothing
@@ -268,7 +268,7 @@ function atmosphere_model_forcing_summary(model::AtmosphereModel)
     forcing = model.forcing
     names = Tuple(name for name in keys(forcing) if !is_default_atmosphere_model_forcing(forcing[name]))
 
-    isempty(names) && return "none"
+    isempty(names) && return summary(model.forcing)
 
     summary_tuple = Tuple(string(name, "=>", nameof(typeof(forcing[name]))) for name in names)
     return join(summary_tuple, ", ")

@@ -33,7 +33,9 @@ end
     @testset "show includes forcing and thermodynamic constants" begin
         shown_model = sprint(show, model)
         @test occursin("thermodynamic_constants: ThermodynamicConstants{$FT}", shown_model)
-        @test occursin("forcing: none", shown_model)
+        @test occursin("forcing: @NamedTuple{", shown_model)
+        @test occursin("ρu::Returns{$FT}", shown_model)
+        @test occursin("ρe::Returns{$FT}", shown_model)
 
         uᵍ(z) = -10
         vᵍ(z) = 0
