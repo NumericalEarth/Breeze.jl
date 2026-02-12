@@ -695,10 +695,10 @@ Mass tendency for cloud liquid [kg/kg/s]
     # A = 2σ / (ρw * Rv * T) is the curvature parameter
     # r_act = 2A / (3S) for the critical radius at supersaturation S
     Rᵛ = vapor_gas_constant(constants)
-    ρʷ = ap.ρ_w  # water density [kg/m³]
+    ρᴸ = ap.ρ_w  # intrinsic density of liquid water [kg/m³]
     σ = ap.σ     # surface tension [N/m]
 
-    A = 2 * σ / (ρʷ * Rᵛ * T)
+    A = 2 * σ / (ρᴸ * Rᵛ * T)
 
     # Use instantaneous supersaturation to compute activation radius
     # Following CloudMicrophysics parcel model: use r_nuc as fallback when no activation or no supersaturation
@@ -710,8 +710,8 @@ Mass tendency for cloud liquid [kg/kg/s]
     rᵃᶜᵗ = ifelse(is_activating, min(FT(1e-6), 2 * A / (3 * max(S, eps(FT)))), rⁿᵘᶜ)
 
     # Mass of a single activated droplet [kg]
-    # m = (4π/3) * r³ * ρʷ
-    mᵈʳᵒᵖ = FT(4π / 3) * rᵃᶜᵗ^3 * ρʷ
+    # m = (4π/3) * r³ * ρᴸ
+    mᵈʳᵒᵖ = FT(4π / 3) * rᵃᶜᵗ^3 * ρᴸ
 
     # Mass tendency [kg/kg/s] - zero if no activation
     # dq/dt = (dN/dt * mᵈʳᵒᵖ) / ρ

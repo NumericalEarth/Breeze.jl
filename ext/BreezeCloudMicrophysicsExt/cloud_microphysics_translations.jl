@@ -190,14 +190,14 @@ Named tuple `(; evap_rate_0, evap_rate_1)` where:
         (; ν_air, D_vapor) = aps
         (; av, bv, α, β, ρ0) = evap
         x_star = pdf_r.xr_min
-        ρʷ = pdf_r.ρw
+        ρᴸ = pdf_r.ρw
 
         # Diffusional growth factor (G function)
         G = diffusional_growth_factor(aps, T, constants)
 
         # Mean rain drop mass and diameter
         (; xr_mean) = pdf_rain_parameters(pdf_r, qʳ, ρ, Nʳ)
-        Dʳ = cbrt(6 * xr_mean / (π * ρʷ))
+        Dʳ = cbrt(6 * xr_mean / (π * ρᴸ))
 
         # Ventilation factors for number and mass tendencies
         t_star = cbrt(6 * x_star / xr_mean)
@@ -346,8 +346,8 @@ Maximum supersaturation (dimensionless, e.g., 0.01 = 1% supersaturation)
     pᵛ⁺ = saturation_vapor_pressure(T, constants, PlanarLiquidSurface())
     pᵛ⁺ⁱ = saturation_vapor_pressure(T, constants, PlanarIceSurface())
     g = constants.gravitational_acceleration
-    ρʷ = ap.ρ_w  # water density
-    ρˢ = ap.ρ_i  # ice density
+    ρᴸ = ap.ρ_w  # intrinsic density of liquid water
+    ρᴵ = ap.ρ_i  # intrinsic density of ice
 
     # Mixture properties
     Rᵐ = mixture_gas_constant(q, constants)
@@ -357,7 +357,7 @@ Maximum supersaturation (dimensionless, e.g., 0.01 = 1% supersaturation)
     pᵛ = qᵛ * ρ * Rᵛ * T
 
     # Diffusional growth factor G (Eq. 13.28 in Pruppacher & Klett)
-    G = diffusional_growth_factor(aps, T, constants) / ρʷ
+    G = diffusional_growth_factor(aps, T, constants) / ρᴸ
 
     # ARG parameters (Eq. 11, 12 in Abdul-Razzak et al. 1998)
     # α = rate of change of saturation ratio due to adiabatic cooling
@@ -366,22 +366,22 @@ Maximum supersaturation (dimensionless, e.g., 0.01 = 1% supersaturation)
     γ = Rᵛ * T / pᵛ⁺ + pᵛ / pᵛ⁺ * Rᵐ * ℒˡ^2 / (Rᵛ * cᵖᵐ * T * p)
 
     # Curvature coefficient (Kelvin effect)
-    # Formula: A = 2σ / (ρʷ * R_v * T)
-    A = 2 * ap.σ / (ρʷ * Rᵛ * T)
+    # Formula: A = 2σ / (ρᴸ * R_v * T)
+    A = 2 * ap.σ / (ρᴸ * Rᵛ * T)
 
     # Maximum supersaturation from ARG 2000 (only valid for w > 0)
-    Sᵐᵃˣ₀ = compute_smax(aerosol_activation, A, α, γ, G, w, ρʷ)
+    Sᵐᵃˣ₀ = compute_smax(aerosol_activation, A, α, γ, G, w, ρᴸ)
 
     # Correction for existing liquid and ice (phase relaxation)
     # See Eq. A13 in Korolev and Mazin (2003) or CloudMicrophysics implementation
 
     # Liquid relaxation
-    rˡ = ifelse(Nˡ > eps(FT), cbrt(ρ * qˡ / (Nˡ * ρʷ * (4π / 3))), zero(FT))
-    Kˡ = 4π * ρʷ * Nˡ * rˡ * G * γ
+    rˡ = ifelse(Nˡ > eps(FT), cbrt(ρ * qˡ / (Nˡ * ρᴸ * (4π / 3))), zero(FT))
+    Kˡ = 4π * ρᴸ * Nˡ * rˡ * G * γ
 
     # Ice relaxation
     γⁱ = Rᵛ * T / pᵛ⁺ + pᵛ / pᵛ⁺ * Rᵐ * ℒˡ * ℒⁱ / (Rᵛ * cᵖᵐ * T * p)
-    rⁱ = ifelse(Nⁱ > eps(FT), cbrt(ρ * qⁱ / (Nⁱ * ρˢ * (4π / 3))), zero(FT))
+    rⁱ = ifelse(Nⁱ > eps(FT), cbrt(ρ * qⁱ / (Nⁱ * ρᴵ * (4π / 3))), zero(FT))
     Gⁱ = diffusional_growth_factor_ice(aps, T, constants)
     Kⁱ = 4π * Nⁱ * rⁱ * Gⁱ * γⁱ
 
@@ -433,7 +433,7 @@ end
 
 # Helper function to compute Sᵐᵃˣ
 # Dispatches on aerosol_activation type to enable different activation schemes
-@inline function compute_smax(aerosol_activation, A::FT, α::FT, γ::FT, G::FT, w::FT, ρʷ::FT) where FT
+@inline function compute_smax(aerosol_activation, A::FT, α::FT, γ::FT, G::FT, w::FT, ρᴸ::FT) where FT
     ap = aerosol_activation.activation_parameters
     ad = aerosol_activation.aerosol_distribution
 
@@ -458,7 +458,7 @@ end
         gᵥ = ap.g1 + ap.g2 * log(mode.stdev)
 
         # η parameter
-        η = sqrt(α * w⁺ / G)^3 / (2π * ρʷ * γ * mode.N)
+        η = sqrt(α * w⁺ / G)^3 / (2π * ρᴸ * γ * mode.N)
 
         # Contribution to 1/Sᵐᵃˣ² (Eq. 6 in ARG 2000)
         Σ_inv_Sᵐᵃˣ² += 1 / Sᶜʳⁱᵗ^2 * (fᵥ * (ζ / η)^ap.p1 + gᵥ * (Sᶜʳⁱᵗ^2 / (η + 3 * ζ))^ap.p2)
