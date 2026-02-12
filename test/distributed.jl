@@ -1,20 +1,14 @@
 # Distributed integration tests for AtmosphereModel
 #
-# Tests verify that AtmosphereModel works correctly with Oceananigans'
-# distributed computing infrastructure.
+# Section A: Single-rank "distributed" tests (run inline)
+# Section B: Multi-rank MPI tests (launched via mpiexec -n 4)
 #
 # When run in the standard test suite, these tests use a single-rank "distributed"
-# configuration. For true multi-rank testing with different partitions, run with:
-#
-#   mpiexec -n 4 julia --project test/distributed.jl
-#
-# Multi-rank partitions to test manually:
-#   Partition(4, 1, 1)  - 4-way x partition
-#   Partition(2, 2, 1)  - 2x2 xy partition
-#   Partition(1, 4, 1)  - 4-way y partition
+# configuration. The multi-rank tests self-launch via mpiexec inside the test.
 
 using Breeze
 using Breeze: PrescribedDynamics
+using MPI: mpiexec
 using Oceananigans
 using Oceananigans.Architectures: architecture, CPU
 using Oceananigans.DistributedComputations: Distributed, Partition
@@ -98,7 +92,48 @@ function run_and_compare(; arch, partition=Partition(1, 1), dynamics_type=:Anela
 end
 
 #####
-##### Tests
+##### Serial reference simulation for multi-rank comparison
+#####
+
+function run_serial_simulation(; dynamics_type=:Anelastic, microphysics=nothing,
+                                grid_size=(16, 16, 16), extent=(1000, 1000, 1000),
+                                stop_time=10, output_filename=nothing, output_fields=nothing)
+    topology = (Periodic, Periodic, Bounded)
+    x, y, z = (0, extent[1]), (0, extent[2]), (0, extent[3])
+    Lx, Ly, Lz = extent
+    constants = ThermodynamicConstants()
+
+    u₀(x, y, z) = sin(2π * x / Lx) * cos(2π * y / Ly)
+    v₀(x, y, z) = cos(2π * x / Lx) * sin(2π * y / Ly)
+
+    grid = RectilinearGrid(CPU(); size=grid_size, x, y, z, topology)
+    reference_state = ReferenceState(grid, constants)
+    dynamics = dynamics_type === :Anelastic ? AnelasticDynamics(reference_state) :
+                                              PrescribedDynamics(reference_state)
+
+    model = AtmosphereModel(grid; dynamics, thermodynamic_constants=constants,
+                            advection=WENO(), microphysics)
+    set!(model; θ=300, qᵗ=0.01, u=u₀, v=v₀)
+
+    simulation = Simulation(model; Δt=1e-3seconds, stop_time)
+    simulation.callbacks[:wizard] = Callback(TimeStepWizard(cfl=0.5), IterationInterval(1))
+
+    if !isnothing(output_filename)
+        outputs = isnothing(output_fields) ? Oceananigans.prognostic_fields(model) : output_fields
+        simulation.output_writers[:jld2] = JLD2Writer(model, outputs;
+                                                      filename = output_filename,
+                                                      schedule = IterationInterval(1),
+                                                      overwrite_existing = true,
+                                                      with_halos = true)
+    end
+
+    run!(simulation)
+
+    return model
+end
+
+#####
+##### Section A — Single-rank tests (run inline)
 #####
 
 @testset "Distributed AtmosphereModel" begin
@@ -158,5 +193,125 @@ end
                               microphysics=SaturationAdjustment(FT),
                               coriolis=FPlane(f=FT(1e-4)),
                               extent=(5000, 5000, 2000), stop_time=50)
+    end
+
+    #####
+    ##### Section B — Multi-rank MPI tests (launched via mpiexec -n 4)
+    ##### Uses JLD2Writer for distributed output and FieldTimeSeries to combine/compare.
+    #####
+
+    @testset "Multi-rank MPI tests" begin
+        nranks = 4
+        test_project = Base.active_project()
+        output_dir = mktempdir()
+
+        partitions = [
+            ("x4",    "Partition(4, 1, 1)"),
+            ("x2y2",  "Partition(2, 2, 1)"),
+            ("y4",    "Partition(1, 4, 1)"),
+        ]
+
+        configurations = [
+            ("AnelasticDynamics",    ":Anelastic", "nothing"),
+            ("SaturationAdjustment", ":Anelastic", "SaturationAdjustment()"),
+        ]
+
+        for (config_name, dynamics_type, microphysics) in configurations
+            for (part_name, partition_str) in partitions
+                dist_prefix = joinpath(output_dir, "breeze_dist_$(config_name)_$(part_name)")
+                serial_file = joinpath(output_dir, "breeze_serial_$(config_name)_$(part_name)")
+                script_file = joinpath(output_dir, "breeze_mpi_$(config_name)_$(part_name).jl")
+
+                mpi_script = """
+                using MPI
+                MPI.Init()
+
+                using Breeze
+                using Oceananigans
+                using Oceananigans.Architectures: CPU
+                using Oceananigans.DistributedComputations: Distributed, Partition
+                using Oceananigans.Units: seconds
+
+                arch = Distributed(CPU(); partition = $partition_str)
+
+                grid_size = (16, 16, 16)
+                extent = (1000, 1000, 1000)
+                topology = (Periodic, Periodic, Bounded)
+                x, y, z = (0, extent[1]), (0, extent[2]), (0, extent[3])
+                Lx, Ly, Lz = extent
+                constants = ThermodynamicConstants()
+
+                u₀(x, y, z) = sin(2π * x / Lx) * cos(2π * y / Ly)
+                v₀(x, y, z) = cos(2π * x / Lx) * sin(2π * y / Ly)
+
+                grid = RectilinearGrid(arch; size=grid_size, x, y, z, topology)
+                reference_state = ReferenceState(grid, constants)
+                dynamics = $dynamics_type === :Anelastic ? AnelasticDynamics(reference_state) :
+                                                           PrescribedDynamics(reference_state)
+
+                model = AtmosphereModel(grid; dynamics,
+                                        thermodynamic_constants=constants,
+                                        advection=WENO(),
+                                        microphysics=$microphysics)
+                set!(model; θ=300, qᵗ=0.01, u=u₀, v=v₀)
+
+                simulation = Simulation(model; Δt=1e-3seconds, stop_time=10)
+                simulation.callbacks[:wizard] = Callback(TimeStepWizard(cfl=0.5), IterationInterval(1))
+
+                simulation.output_writers[:jld2] = JLD2Writer(model,
+                                                              Oceananigans.prognostic_fields(model);
+                                                              filename = "$dist_prefix",
+                                                              schedule = IterationInterval(1),
+                                                              overwrite_existing = true,
+                                                              with_halos = true)
+                run!(simulation)
+
+                MPI.Barrier(MPI.COMM_WORLD)
+                MPI.Finalize()
+                """
+
+                @testset "$config_name — $partition_str" begin
+                    # Write and run the MPI script
+                    write(script_file, mpi_script)
+                    try
+                        run(`$(mpiexec()) -n $nranks $(Base.julia_cmd()) --project=$test_project -O0 $script_file`)
+                    finally
+                        rm(script_file; force=true)
+                    end
+
+                    # Run the serial reference with JLD2Writer output
+                    dynamics_sym = dynamics_type == ":Anelastic" ? :Anelastic : :Prescribed
+                    microphysics_obj = microphysics == "nothing" ? nothing : SaturationAdjustment()
+                    serial_model = run_serial_simulation(; dynamics_type=dynamics_sym,
+                                                          microphysics=microphysics_obj,
+                                                          output_filename=serial_file)
+
+                    # Compare using FieldTimeSeries (automatically combines distributed rank files)
+                    FT = eltype(serial_model.grid)
+                    rtol = 10 * eps(FT)
+                    atol = 100 * eps(FT) # absolute tolerance for near-zero fields
+                    for name in keys(Oceananigans.prognostic_fields(serial_model))
+                        varname = string(name)
+                        fts_serial = FieldTimeSeries(serial_file * ".jld2", varname)
+                        fts_distributed = FieldTimeSeries(dist_prefix * ".jld2", varname)
+
+                        @test size(fts_distributed.grid) == size(fts_serial.grid)
+                        @test length(fts_distributed.times) == length(fts_serial.times)
+
+                        for n in 1:length(fts_serial.times)
+                            @test isapprox(interior(fts_serial[n]), interior(fts_distributed[n]); rtol, atol)
+                        end
+                    end
+
+                    # Cleanup
+                    rm(serial_file * ".jld2"; force=true)
+                    for r in 0:(nranks - 1)
+                        rm(dist_prefix * "_rank$r.jld2"; force=true)
+                    end
+                end
+            end
+        end
+
+        rm(output_dir; force=true, recursive=true)
     end
 end
