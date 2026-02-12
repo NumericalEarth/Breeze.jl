@@ -27,8 +27,8 @@ function loss(model, θ, n)
         update_state!(model)
         parent(model.momentum.ρu) .= parent(model.momentum.ρu) .* 0.99
         # ↓ uncomment for segfault ↓
-        # update_state!(model)
-        # parent(model.momentum.ρu) .= parent(model.momentum.ρu) .* 0.99
+        update_state!(model)
+        parent(model.momentum.ρu) .= parent(model.momentum.ρu) .* 0.99
     end
     return mean(interior(model.temperature) .^ 2)
 end
