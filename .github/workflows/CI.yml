@@ -25,11 +25,15 @@ permissions:
   actions: write
   contents: read
 
+env:
+  # Disable GPU support for Reactant until we actually use it.
+  REACTANT_GPU: 'none'
+
 jobs:
   test:
     name: Julia ${{ matrix.version }} - ${{ matrix.os }} - ${{ matrix.arch }} - ${{ github.event_name }}
     runs-on: ${{ matrix.os }}
-    timeout-minutes: 90
+    timeout-minutes: 60
     container:
       image: ${{ (startsWith(matrix.os, 'aws-linux-nvidia-gpu-') && format('ghcr.io/numericalearth/breeze-docker-images:test-julia_{0}', matrix.version) ) || '' }}
       options: --gpus=all
@@ -118,7 +122,10 @@ jobs:
               # We use earlyoom only on the GPU machines
               earlyoom -m 3 -s 100 -r 300 --prefer 'julia' &
           fi
-          julia --project --color=yes --check-bounds=yes -e 'using Pkg; Pkg.test(; coverage=true, julia_args=["--check-bounds=yes", "--compiled-modules=yes", "--depwarn=yes"], test_args=`${{ env.runtest_test_args }}`, force_latest_compatible_version=false, allow_reresolve=true)'
+          julia --project --color=yes --check-bounds=yes -e 'using Pkg; Pkg.test(; coverage=true, julia_args=["--check-bounds=yes", "--compiled-modules=yes", "--depwarn=yes", "-O0"], test_args=`${{ env.runtest_test_args }}`, force_latest_compatible_version=false, allow_reresolve=true)'
+        env:
+          # Don't make Reactant occupy all the GPU memory
+          XLA_REACTANT_GPU_PREALLOCATE: false
       - uses: julia-actions/julia-processcoverage@v1
       - uses: codecov/codecov-action@v5
         with:

@@ -259,6 +259,14 @@ specific_humidity(model) = specific_humidity(model.microphysics, model)
 
 specific_humidity(::Nothing, model) = model.specific_moisture
 
+vapor_mass_fraction(model) = vapor_mass_fraction(model.microphysics, model)
+liquid_mass_fraction(model) = liquid_mass_fraction(model.microphysics, model)
+ice_mass_fraction(model) = ice_mass_fraction(model.microphysics, model)
+
+vapor_mass_fraction(::Nothing, model) = model.specific_moisture
+liquid_mass_fraction(::Nothing, model) = nothing
+ice_mass_fraction(::Nothing, model) = nothing
+
 """
 $(TYPEDSIGNATURES)
 
