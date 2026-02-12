@@ -361,9 +361,9 @@ Maximum supersaturation (dimensionless, e.g., 0.01 = 1% supersaturation)
 
     # ARG parameters (Eq. 11, 12 in Abdul-Razzak et al. 1998)
     # α = rate of change of saturation ratio due to adiabatic cooling
-    α = pᵛ / pᵛ⁺ * (ℒˡ * g / Rᵛ / cᵖᵐ / T^2 - g / Rᵐ / T)
+    α = pᵛ / pᵛ⁺ * (ℒˡ * g / (Rᵛ * cᵖᵐ * T^2) - g / (Rᵐ * T))
     # γ = thermodynamic factor for condensation
-    γ = Rᵛ * T / pᵛ⁺ + pᵛ / pᵛ⁺ * Rᵐ * ℒˡ^2 / Rᵛ / cᵖᵐ / T / p
+    γ = Rᵛ * T / pᵛ⁺ + pᵛ / pᵛ⁺ * Rᵐ * ℒˡ^2 / (Rᵛ * cᵖᵐ * T * p)
 
     # Curvature coefficient (Kelvin effect)
     # Formula: A = 2σ / (ρʷ * R_v * T)
@@ -377,7 +377,7 @@ Maximum supersaturation (dimensionless, e.g., 0.01 = 1% supersaturation)
 
     # Liquid relaxation
     rˡ = ifelse(Nˡ > eps(FT), cbrt(ρ * qˡ / Nˡ / ρʷ / (4 / 3 * π)), zero(FT))
-    Kˡ = 4 * π * ρʷ * Nˡ * rˡ * G * γ
+    Kˡ = 4π * ρʷ * Nˡ * rˡ * G * γ
 
     # Ice relaxation
     γⁱ = Rᵛ * T / pᵛ⁺ + pᵛ / pᵛ⁺ * Rᵐ * ℒˡ * ℒⁱ / Rᵛ / cᵖᵐ / T / p
