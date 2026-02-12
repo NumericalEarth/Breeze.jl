@@ -93,7 +93,7 @@ AtmosphereModel{CPU, RectilinearGrid}(time = 0 seconds, iteration = 0)
 │   ├── momentum: Centered(order=2)
 │   ├── ρθ: Centered(order=2)
 │   └── ρqᵗ: Centered(order=2)
-├── forcing: @NamedTuple{ρu::Returns{Float64}, ρv::Returns{Float64}, ρw::Returns{Float64}, ρqᵗ::Returns{Float64}, ρθ::Returns{Float64}, ρe::Returns{Float64}}
+├── forcing: @NamedTuple{ρu::Returns{Float64}, ρv::Returns{Float64}, ρw::Returns{Float64}, ρθ::Returns{Float64}, ρqᵗ::Returns{Float64}, ρe::Returns{Float64}}
 ├── tracers: ()
 ├── coriolis: Nothing
 └── microphysics: Nothing
