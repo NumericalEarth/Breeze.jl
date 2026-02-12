@@ -376,12 +376,12 @@ Maximum supersaturation (dimensionless, e.g., 0.01 = 1% supersaturation)
     # See Eq. A13 in Korolev and Mazin (2003) or CloudMicrophysics implementation
 
     # Liquid relaxation
-    rˡ = ifelse(Nˡ > eps(FT), cbrt(ρ * qˡ / Nˡ / ρʷ / (4 / 3 * π)), zero(FT))
+    rˡ = ifelse(Nˡ > eps(FT), cbrt(ρ * qˡ / (Nˡ * ρʷ * (4π / 3))), zero(FT))
     Kˡ = 4π * ρʷ * Nˡ * rˡ * G * γ
 
     # Ice relaxation
-    γⁱ = Rᵛ * T / pᵛ⁺ + pᵛ / pᵛ⁺ * Rᵐ * ℒˡ * ℒⁱ / Rᵛ / cᵖᵐ / T / p
-    rⁱ = ifelse(Nⁱ > eps(FT), cbrt(ρ * qⁱ / Nⁱ / ρˢ / (4π / 3)), zero(FT))
+    γⁱ = Rᵛ * T / pᵛ⁺ + pᵛ / pᵛ⁺ * Rᵐ * ℒˡ * ℒⁱ / (Rᵛ * cᵖᵐ * T * p)
+    rⁱ = ifelse(Nⁱ > eps(FT), cbrt(ρ * qⁱ / (Nⁱ * ρˢ * (4π / 3))), zero(FT))
     Gⁱ = diffusional_growth_factor_ice(aps, T, constants)
     Kⁱ = 4π * Nⁱ * rⁱ * Gⁱ * γⁱ
 
