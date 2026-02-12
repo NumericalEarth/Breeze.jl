@@ -30,6 +30,20 @@ end
     model = AtmosphereModel(grid)
     @test model.grid === grid
 
+    @testset "show includes forcing and thermodynamic constants" begin
+        shown_model = sprint(show, model)
+        @test occursin("thermodynamic_constants: ThermodynamicConstants{$FT}", shown_model)
+        @test occursin("forcing: none", shown_model)
+
+        uᵍ(z) = -10
+        vᵍ(z) = 0
+        coriolis = FPlane(f=FT(1e-4))
+        forced_model = AtmosphereModel(grid; coriolis, forcing=geostrophic_forcings(uᵍ, vᵍ))
+        shown_forced_model = sprint(show, forced_model)
+
+        @test occursin("forcing: ρu=>GeostrophicForcing, ρv=>GeostrophicForcing", shown_forced_model)
+    end
+
     @testset "Basic tests for set!" begin
         set!(model, time=1)
         @test model.clock.time == 1
