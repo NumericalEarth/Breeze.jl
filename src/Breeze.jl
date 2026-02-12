@@ -85,6 +85,9 @@ export
     geostrophic_forcings,
     SubsidenceForcing,
 
+    # Grid utilities
+    PiecewiseStretchedDiscretization,
+
     # TimeSteppers
     SSPRungeKutta3,
 
@@ -94,7 +97,7 @@ export
     ParcelState
 
 using Oceananigans: Oceananigans, @at, AnisotropicMinimumDissipation, Average,
-                    AveragedTimeInterval, BackgroundField, BetaPlane, Bounded,
+                    AveragedTimeInterval, BackgroundField, BetaPlane, Bounded, BoundaryConditionOperation,
                     CPU, Callback, Center, CenterField, Centered, Checkpointer, Clock,
                     ConstantCartesianCoriolis, Distributed, DynamicSmagorinsky,
                     ExponentialDiscretization, FPlane, Face, Field, FieldBoundaryConditions,
@@ -122,7 +125,7 @@ using Oceananigans.BoundaryConditions: ImpenetrableBoundaryCondition
 export
     CPU, GPU,
     Center, Face, Periodic, Bounded, Flat,
-    RectilinearGrid, ExponentialDiscretization, Clock,
+    RectilinearGrid, ExponentialDiscretization, PiecewiseStretchedDiscretization, Clock,
     nodes, xnodes, ynodes, znodes,
     znode,
     xspacings, yspacings, zspacings,
@@ -132,6 +135,7 @@ export
     Centered, UpwindBiased, WENO, FluxFormAdvection,
     FluxBoundaryCondition, ValueBoundaryCondition, GradientBoundaryCondition, ImpenetrableBoundaryCondition,
     OpenBoundaryCondition, PerturbationAdvection, FieldBoundaryConditions,
+    BoundaryConditionOperation,
     Field, CenterField, XFaceField, YFaceField, ZFaceField,
     Average, Integral,
     BackgroundField, interior, set!, compute!, regrid!,
@@ -194,6 +198,9 @@ using .CelestialMechanics
 
 include("Forcings/Forcings.jl")
 using .Forcings
+
+include("VerticalGrids.jl")
+using .VerticalGrids
 
 include("TimeSteppers/TimeSteppers.jl")
 using .TimeSteppers
