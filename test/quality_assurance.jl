@@ -8,6 +8,7 @@ using CloudMicrophysics: CloudMicrophysics
 using ClimaComms: ClimaComms
 using Dates: Dates
 using RRTMGP: RRTMGP
+using SpecialFunctions: SpecialFunctions
 
 @testset "Aqua" begin
     Aqua.test_all(Breeze)
