@@ -142,7 +142,7 @@ scalar_advection = WENO(order=5)
 # We create polynomial coefficients for each flux type. The default coefficients
 # come from Large & Yeager (2009) observational fits:
 
-Uᵍ = 1e-2  # Minimum wind speed (m/s)
+Uᵍ = 1e-2  # Gustiness (m/s)
 
 # Create a polynomial bulk coefficient that will be automatically configured
 # for each flux type
