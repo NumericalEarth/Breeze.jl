@@ -193,6 +193,40 @@ end
         time_step!(model, 1e-6)
         @test true
     end
+
+    @testset "PolynomialCoefficient full model build + time step [$FT]" begin
+        coef = PolynomialCoefficient()
+
+        ρu_bcs  = FieldBoundaryConditions(bottom=BulkDrag(coefficient=coef, gustiness=gustiness, surface_temperature=T₀))
+        ρv_bcs  = FieldBoundaryConditions(bottom=BulkDrag(coefficient=coef, gustiness=gustiness, surface_temperature=T₀))
+        ρθ_bcs  = FieldBoundaryConditions(bottom=BulkSensibleHeatFlux(coefficient=coef, gustiness=gustiness, surface_temperature=T₀))
+        ρqᵗ_bcs = FieldBoundaryConditions(bottom=BulkVaporFlux(coefficient=coef, gustiness=gustiness, surface_temperature=T₀))
+
+        boundary_conditions = (; ρu=ρu_bcs, ρv=ρv_bcs, ρθ=ρθ_bcs, ρqᵗ=ρqᵗ_bcs)
+        model = AtmosphereModel(grid; boundary_conditions)
+
+        θ₀_ref = model.dynamics.reference_state.potential_temperature
+        set!(model; θ=θ₀_ref, u=FT(5), qᵗ=FT(0.01))
+        time_step!(model, 1e-6)
+        @test true
+    end
+
+    @testset "PolynomialCoefficient with no stability correction [$FT]" begin
+        coef = PolynomialCoefficient(stability_function=nothing)
+
+        ρu_bcs  = FieldBoundaryConditions(bottom=BulkDrag(coefficient=coef, gustiness=gustiness, surface_temperature=T₀))
+        ρv_bcs  = FieldBoundaryConditions(bottom=BulkDrag(coefficient=coef, gustiness=gustiness, surface_temperature=T₀))
+        ρθ_bcs  = FieldBoundaryConditions(bottom=BulkSensibleHeatFlux(coefficient=coef, gustiness=gustiness, surface_temperature=T₀))
+        ρqᵗ_bcs = FieldBoundaryConditions(bottom=BulkVaporFlux(coefficient=coef, gustiness=gustiness, surface_temperature=T₀))
+
+        boundary_conditions = (; ρu=ρu_bcs, ρv=ρv_bcs, ρθ=ρθ_bcs, ρqᵗ=ρqᵗ_bcs)
+        model = AtmosphereModel(grid; boundary_conditions)
+
+        θ₀_ref = model.dynamics.reference_state.potential_temperature
+        set!(model; θ=θ₀_ref, u=FT(5), qᵗ=FT(0.01))
+        time_step!(model, 1e-6)
+        @test true
+    end
 end
 
 #####
