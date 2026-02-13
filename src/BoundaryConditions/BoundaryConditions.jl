@@ -229,7 +229,7 @@ function materialize_coefficient(coef::PolynomialCoefficient, grid, dynamics, mi
 end
 
 #####
-##### Materialize BulkDrag: populate surface_pressure, constants, and VPT
+##### Materialize BulkDrag: convert surface field and materialize coefficient
 #####
 
 function materialize_bulk_drag(df, grid, dynamics, microphysics, surface_pressure, constants,

@@ -112,16 +112,16 @@ end
 
 # Constructor with sensible defaults
 function PolynomialCoefficient(FT = Float64;
-                                   neutral_coefficients = nothing,
-                                   roughness_length = 1.5e-4,
-                                   minimum_wind_speed = 0.1,
-                                   stability_function = default_stability_function)
+                               neutral_coefficients = nothing,
+                               roughness_length = 1.5e-4,
+                               minimum_wind_speed = 0.1,
+                               stability_function = default_stability_function)
 
     return PolynomialCoefficient(neutral_coefficients,
-                                     FT(roughness_length),
-                                     FT(minimum_wind_speed),
-                                     stability_function,
-                                     nothing, nothing, nothing)
+                                 FT(roughness_length),
+                                 FT(minimum_wind_speed),
+                                 stability_function,
+                                 nothing, nothing, nothing)
 end
 
 Adapt.adapt_structure(to, coef::PolynomialCoefficient) =
@@ -178,18 +178,10 @@ C(z) = C₁₀ × [ln(10/z₀) / ln(z/z₀)]²
 - `C₁₀`: Transfer coefficient at 10m
 - `z`: Measurement height (m)
 - `z₀`: Roughness length (m)
-- `κ`: von Kármán constant (default: 0.4)
 """
-@inline function adjust_coefficient_for_height(C₁₀, z, z₀, κ = 0.4)
-    FT = typeof(z)
-    # Reference height is 10m
-    z_ref = 10
-
-    # Logarithmic profile ratio
-    log_ref = log(z_ref / z₀)
+@inline function adjust_coefficient_for_height(C₁₀, z, z₀)
+    log_ref = log(10 / z₀)
     log_z = log(z / z₀)
-
-    # Scale coefficient
     return C₁₀ * (log_ref / log_z)^2
 end
 
@@ -219,7 +211,6 @@ Wind speed is clamped to `U_min` to avoid singularity.
     θᵥ_mean = (θᵥ + θᵥ₀) / 2
     return (g / θᵥ_mean) * z * (θᵥ - θᵥ₀) / U_safe^2
 end
-
 
 #####
 ##### Helper functions for surface thermodynamic quantities
@@ -278,12 +269,13 @@ Returns the transfer coefficient (dimensionless).
     Cz = adjust_coefficient_for_height(C₁₀, z, coef.roughness_length)
 
     # Apply stability correction
-    return apply_stability_correction(coef, Cz, i, j, z, U, T₀)
+    return apply_stability_correction(coef, Cz, i, j, grid, U, T₀)
 end
 
 # Stability correction with a function — uses stored VPT and surface pressure
-@inline function apply_stability_correction(coef::PolynomialCoefficient, Cz, i, j, z, U, T₀)
-    θᵥ = coef.virtual_potential_temperature[i, j, 1]
+@inline function apply_stability_correction(coef::PolynomialCoefficient, Cz, i, j, grid, U, T₀)
+    z = znode(i, j, 1, grid, Center(), Center(), Center())
+    θᵥ = @inbounds coef.virtual_potential_temperature[i, j, 1]
     surface = PlanarLiquidSurface()
     θᵥ₀ = surface_virtual_potential_temperature(T₀, coef.surface_pressure, coef.thermodynamic_constants, surface)
     Riᵦ = bulk_richardson_number(z, θᵥ, θᵥ₀, U, coef.minimum_wind_speed)
@@ -291,7 +283,7 @@ end
 end
 
 # No stability correction (stability_function = nothing)
-@inline apply_stability_correction(::PolynomialCoefficient{<:Any, <:Any, Nothing}, Cz, i, j, z, U, T₀) = Cz
+@inline apply_stability_correction(::PolynomialCoefficient{<:Any, <:Any, Nothing}, Cz, args...) = Cz
 
 #####
 ##### Special constructors for boundary conditions
