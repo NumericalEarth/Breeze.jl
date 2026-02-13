@@ -12,16 +12,16 @@ const default_neutral_latent_heat_polynomial     = (0.120, 0.070, 2.55)
 """
     DefaultStabilityFunction()
 
-Stability correction factor based on the bulk Richardson number ``Ri_b``.
+Stability correction factor based on the bulk Richardson number ``Ri``.
 
-For unstable conditions (``Ri_b < 0``):
+For unstable conditions (``Ri < 0``):
 ```math
-ψ = √(1 - 16 \\, Ri_b)
+ψ = √(1 - 16 \\, Ri)
 ```
 
-For stable conditions (``Ri_b ≥ 0``):
+For stable conditions (``Ri ≥ 0``):
 ```math
-ψ = 1 / (1 + 10 \\, Ri_b)
+ψ = 1 / (1 + 10 \\, Ri)
 ```
 
 Multiplies the neutral transfer coefficient so that unstable conditions
@@ -39,8 +39,8 @@ Base.summary(::DefaultStabilityFunction) = "ψ(Ri) = √(1-16Ri) unstable, 1/(1+
 
 function Base.show(io::IO, ::DefaultStabilityFunction)
     println(io, "DefaultStabilityFunction")
-    println(io, "├── Riᵦ < 0 (unstable): ψ = √(1 - 16 Riᵦ)")
-    print(io,   "└── Riᵦ ≥ 0 (stable):   ψ = 1 / (1 + 10 Riᵦ)")
+    println(io, "├── Ri < 0 (unstable): ψ = √(1 - 16 Ri)")
+    print(io,   "└── Ri ≥ 0 (stable):   ψ = 1 / (1 + 10 Ri)")
 end
 
 const default_stability_function = DefaultStabilityFunction()
@@ -56,16 +56,16 @@ const default_stability_function = DefaultStabilityFunction()
 A bulk transfer coefficient that depends on wind speed and atmospheric stability,
 following [Large and Yeager (2009)](@cite LargeYeager2009).
 
-The neutral drag coefficient follows the Large & Yeager (2009) form:
+The neutral transfer coefficient at 10 m follows the Large & Yeager (2009) form:
 ```math
-C_N(U_{10}) = (a_0 + a_1 U_{10} + a_2 / U_{10}) × 10^{-3}
+C^N_{10}(U_h) = (a_0 + a_1 U_h + a_2 / U_h) × 10^{-3}
 ```
+where ``U_h`` is the wind speed at measurement height ``h``.
 
-For other measurement heights, the coefficient is adjusted using logarithmic profile theory.
-
-When a `stability_function` is provided, the coefficient is modified using bulk Richardson number:
+The coefficient is adjusted for measurement height using logarithmic profile theory,
+and when a `stability_function` is provided, further modified by the bulk Richardson number:
 ```math
-Ri_b = \\frac{g}{θ_v} \\frac{h (θ_v - θ_{v0})}{U^2}
+Ri = \\frac{g}{\\overline{θ_v}} \\frac{h \\, (θ_v - θ_{v0})}{U_h^2}
 ```
 
 When `polynomial` is `nothing`, the appropriate Large & Yeager (2009) polynomial
@@ -79,7 +79,7 @@ will be automatically selected based on the boundary condition type:
   is automatically selected by the boundary condition constructor.
 - `roughness_length`: Surface roughness ℓ in meters (default: 1.5e-4, typical for ocean)
 - `minimum_wind_speed`: Minimum wind speed to avoid singularity in a₂/U term (default: 0.1 m/s)
-- `stability_function`: Callable `ψ(Riᵦ)` that computes stability correction factor from bulk Richardson number.
+- `stability_function`: Callable `ψ(Ri)` that computes stability correction factor from bulk Richardson number.
   Set to `nothing` to disable stability correction. Default is `DefaultStabilityFunction()`.
 - `surface`: Surface type for computing saturation specific humidity in the stability correction.
   Default is `PlanarLiquidSurface()`. Use `PlanarIceSurface()` for ice surfaces.
@@ -195,10 +195,10 @@ Base.summary(::Nothing) = "Nothing"
 """
 $(TYPEDSIGNATURES)
 
-Compute neutral transfer coefficient at 10m height using Large & Yeager (2009) form:
-C_N(U₁₀) = (a₀ + a₁*U₁₀ + a₂/U₁₀) × 10⁻³
+Compute neutral transfer coefficient at 10 m using the Large & Yeager (2009) form:
+C¹⁰_N(U) = (a₀ + a₁ U + a₂ / U) × 10⁻³
 
-Wind speed is clamped to `U_min` to avoid singularity in the a₂/U₁₀ term.
+Wind speed is clamped to `U_min` to avoid singularity in the a₂/U term.
 """
 @inline function neutral_coefficient_10m(polynomial, U₁₀, U_min)
     a₀, a₁, a₂ = polynomial
@@ -216,7 +216,7 @@ end
 $(TYPEDSIGNATURES)
 
 Compute bulk Richardson number:
-Ri_b = (g/θᵥ) × h × (θᵥ - θᵥ₀) / U²
+Ri = (g/θ̄ᵥ) × h × (θᵥ - θᵥ₀) / U²
 
 Wind speed is clamped to `U_min` to avoid singularity.
 

@@ -111,28 +111,28 @@ scalar_advection = WENO(order=5)
 # In neutral conditions, the exchange coefficients vary with wind speed according to:
 #
 # ```math
-# C_N(U₁₀) = (a₀ + a₁ U₁₀ + a₂ / U₁₀) × 10⁻³
+# C^N_{10}(U_h) = (a₀ + a₁ U_h + a₂ / U_h) × 10⁻³
 # ```
 #
 # and are further modified by atmospheric stability using the bulk Richardson number,
 #
 # ```math
-# Ri_b = \frac{g}{\overline{θ_v}} \frac{h \, (θ_v - θ_{v0})}{U^2}
+# Ri = \frac{g}{\overline{θ_v}} \frac{h \, (θ_v - θ_{v0})}{U_h^2}
 # ```
 #
 # where ``h`` is the measurement height (first cell center), ``θ_v`` and ``θ_{v0}``
 # are virtual potential temperatures at the measurement height and surface, and
-# ``U`` is the wind speed.
+# ``U_h`` is the wind speed at height ``h``.
 # The stability-corrected transfer coefficient is then
 #
 # ```math
-# C(U, Ri_b) = C_N(U_{10}) \left[\frac{\ln(10/\ell)}{\ln(h/\ell)}\right]^2 ψ(Ri_b)
+# C^{Ri}_h(U_h, Ri) = C^N_{10}(U_h) \left[\frac{\ln(10/\ell)}{\ln(h/\ell)}\right]^2 ψ(Ri)
 # ```
 #
 # where ``\ell`` is the roughness length and ``ψ`` is a stability function.
 # The default stability function enhances transfer in unstable conditions
-# (``Ri_b < 0``, ``ψ = \sqrt{1 - 16 \, Ri_b}``) and reduces it in stable
-# conditions (``Ri_b ≥ 0``, ``ψ = 1 / (1 + 10 \, Ri_b)``).
+# (``Ri < 0``, ``ψ = \sqrt{1 - 16 \, Ri}``) and reduces it in stable
+# conditions (``Ri ≥ 0``, ``ψ = 1 / (1 + 10 \, Ri)``).
 #
 # In unstable conditions (over warm and wet surfaces), exchange is enhanced.
 # In stable conditions (cold and dry surfaces), exchange is reduced.
@@ -234,6 +234,7 @@ lines!(ax_ratio, U_range, Cᴰ_stable   ./ Cᴰ_neutral, color=:dodgerblue, line
 save("polynomial_coefficient_wind_stability.png", fig_coef)
 nothing #hide
 
+#=
 # ![](polynomial_coefficient_wind_stability.png)
 
 # We finally assemble all of the boundary conditions,
@@ -486,3 +487,5 @@ end
 nothing #hide
 
 # ![](prescribed_sea_surface_temperature.mp4)
+
+=#
