@@ -14,14 +14,16 @@ export BulkDragFunction,
        EnergyFluxBoundaryConditionFunction,
        EnergyFluxBoundaryCondition,
        ThetaFluxBoundaryConditionFunction,
-       ThetaFluxBoundaryCondition
+       ThetaFluxBoundaryCondition,
+       PolynomialBulkCoefficient,
+       default_stability_function
 
 using ..AtmosphereModels: AtmosphereModels, grid_moisture_fractions, dynamics_density
 using ..Thermodynamics: saturation_specific_humidity, surface_density, PlanarLiquidSurface,
                         mixture_heat_capacity
 
 using Oceananigans.Architectures: Architectures
-using Oceananigans.Grids: Center, Face, XDirection, YDirection, AbstractGrid
+using Oceananigans.Grids: Center, Face, XDirection, YDirection, AbstractGrid, znode
 using Oceananigans.Fields: Field, set!
 using Oceananigans.BoundaryConditions: BoundaryConditions as OceananigansBC,
                                        BoundaryCondition,
@@ -74,6 +76,7 @@ end
 ##### Boundary condition implementations
 #####
 
+include("polynomial_bulk_coefficient.jl")
 include("bulk_drag.jl")
 include("bulk_scalar_fluxes.jl")
 include("thermodynamic_variable_bcs.jl")
@@ -99,7 +102,7 @@ bulk flux boundary conditions and other atmosphere-specific boundary condition t
 If `formulation` is `:LiquidIcePotentialTemperature` and `ρe` boundary conditions are provided,
 they are automatically converted to `ρθ` boundary conditions using `EnergyFluxBoundaryCondition`.
 """
-function AtmosphereModels.regularize_atmosphere_model_boundary_conditions(boundary_conditions, grid, formulation,
+function AtmosphereModels.materialize_atmosphere_model_boundary_conditions(boundary_conditions, grid, formulation,
                                                                           dynamics, microphysics, surface_pressure,
                                                                           thermodynamic_constants)
     # Convert ρe boundary conditions to ρθ for potential temperature formulations
@@ -224,7 +227,7 @@ function regularize_atmosphere_boundary_condition(bc::BulkSensibleHeatFluxBounda
                                                   side, loc, grid, dynamics, microphysics, surface_pressure, constants)
     bf = bc.condition
     T₀ = materialize_surface_field(bf.surface_temperature, grid)
-    new_bf = BulkSensibleHeatFluxFunction(bf.coefficient, bf.gustiness, T₀, surface_pressure, constants, bf.formulation)
+    new_bf = BulkSensibleHeatFluxFunction(bf.coefficient, bf.gustiness, T₀, surface_pressure, constants, bf.formulation, nothing)
     return BoundaryCondition(Flux(), new_bf)
 end
 
@@ -234,7 +237,7 @@ function regularize_atmosphere_boundary_condition(bc::BulkVaporFluxBoundaryCondi
     bf = bc.condition
     T₀ = materialize_surface_field(bf.surface_temperature, grid)
     surface = PlanarLiquidSurface()
-    new_bf = BulkVaporFluxFunction(bf.coefficient, bf.gustiness, T₀, surface_pressure, constants, surface)
+    new_bf = BulkVaporFluxFunction(bf.coefficient, bf.gustiness, T₀, surface_pressure, constants, surface, nothing)
     return BoundaryCondition(Flux(), new_bf)
 end
 

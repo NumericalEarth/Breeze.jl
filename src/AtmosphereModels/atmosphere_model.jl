@@ -155,11 +155,18 @@ function AtmosphereModel(grid;
     default_boundary_conditions = NamedTuple{default_bc_names}(FieldBoundaryConditions() for _ in default_bc_names)
     boundary_conditions = merge(default_boundary_conditions, boundary_conditions)
 
+    # Pre-create diagnostic fields and microphysical fields (needed for VirtualPotentialTemperature
+    # diagnostic used in stability-dependent boundary conditions like PolynomialBulkCoefficient)
+    specific_moisture = CenterField(grid)
+    temperature = CenterField(grid)
+    microphysical_fields = materialize_microphysical_fields(microphysics, grid, boundary_conditions)
+
     # Pre-regularize AtmosphereModel boundary conditions (fill in reference_density, compute saturation humidity, etc.)
     # Also converts ρe boundary conditions to ρθ for potential temperature formulations
     p₀ = surface_pressure(dynamics)
-    boundary_conditions = regularize_atmosphere_model_boundary_conditions(boundary_conditions, grid, formulation,
-                                                                          dynamics, microphysics, p₀, thermodynamic_constants)
+    boundary_conditions = materialize_atmosphere_model_boundary_conditions(boundary_conditions, grid, formulation,
+                                                                          dynamics, microphysics, p₀, thermodynamic_constants,
+                                                                          microphysical_fields, specific_moisture, temperature)
 
     all_names = field_names(dynamics, formulation, microphysics, tracers)
     regularized_boundary_conditions = regularize_field_boundary_conditions(boundary_conditions, grid, all_names)
@@ -178,17 +185,12 @@ function AtmosphereModel(grid;
         momentum, _ = materialize_momentum_and_velocities(dynamics, grid, regularized_boundary_conditions)
         velocities = materialize_velocities(velocities, grid)
     end
-    microphysical_fields = materialize_microphysical_fields(microphysics, grid, regularized_boundary_conditions)
 
     tracers = NamedTuple(name => CenterField(grid, boundary_conditions=regularized_boundary_conditions[name]) for name in tracer_names)
 
     if moisture_density isa DefaultValue
         moisture_density = CenterField(grid, boundary_conditions=regularized_boundary_conditions.ρqᵗ)
     end
-
-    # Diagnostic fields
-    specific_moisture = CenterField(grid)
-    temperature = CenterField(grid)
 
     prognostic_microphysical_fields = NamedTuple(name => microphysical_fields[name] for name in prognostic_field_names(microphysics))
     prognostic_model_fields = collect_prognostic_fields(formulation,

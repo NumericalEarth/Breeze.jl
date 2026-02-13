@@ -46,6 +46,38 @@ Base.summary(df::BulkDragFunction) = string("BulkDragFunction(direction=", summa
                                             ", gustiness=", df.gustiness, ")")
 
 #####
+##### Coefficient evaluation (constant vs callable)
+#####
+
+# Fallback for constant coefficients
+@inline evaluate_drag_coefficient(C::Number, args...) = C
+
+# For callable coefficients (e.g., PolynomialBulkCoefficient)
+# Note: For drag, we don't have access to thermodynamic constants or surface temperature
+# in the BulkDragFunction, so stability correction is limited
+@inline function evaluate_drag_coefficient(C, i, j, grid, fields)
+    U² = wind_speed²ᶜᶜᶜ(i, j, grid, fields)
+    U = sqrt(U²)
+
+    # If coefficient doesn't have stability function, just pass wind speed
+    if isnothing(C.stability_function)
+        return C(U)
+    end
+
+    # For drag, we compute stability using atmospheric θ at lowest level
+    # compared to a typical surface value. This is approximate since we
+    # don't have access to actual surface temperature in BulkDragFunction.
+    θᵥ = virtual_potential_temperature(i, j, 1, fields)
+
+    # Use atmospheric θᵥ as proxy for surface (neutral assumption)
+    # This effectively disables stability correction for drag
+    # To enable it, surface temperature would need to be added to BulkDragFunction
+    θᵥ₀ = θᵥ
+
+    return C(U, θᵥ, θᵥ₀, nothing)
+end
+
+#####
 ##### getbc for BulkDragFunction
 #####
 
@@ -55,7 +87,10 @@ Base.summary(df::BulkDragFunction) = string("BulkDragFunction(direction=", summa
     U² = wind_speed²ᶠᶜᶜ(i, j, grid, fields)
     U = sqrt(U²)
     Ũ² = U² + df.gustiness^2
-    Cᴰ = df.coefficient
+
+    # Evaluate coefficient (handles both constant and callable)
+    Cᴰ = evaluate_drag_coefficient(df.coefficient, i, j, grid, fields)
+
     return - Cᴰ * Ũ² * ρu / U * (U > 0)
 end
 
@@ -65,7 +100,10 @@ end
     U² = wind_speed²ᶜᶠᶜ(i, j, grid, fields)
     U = sqrt(U²)
     Ũ² = U² + df.gustiness^2
-    Cᴰ = df.coefficient
+
+    # Evaluate coefficient (handles both constant and callable)
+    Cᴰ = evaluate_drag_coefficient(df.coefficient, i, j, grid, fields)
+
     return - Cᴰ * Ũ² * ρv / U * (U > 0)
 end
 

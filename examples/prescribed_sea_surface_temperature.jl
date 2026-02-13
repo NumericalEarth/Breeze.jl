@@ -18,6 +18,7 @@
 # simple yet effective representation of cloud processes in moist convection.
 
 using Breeze
+using Breeze.BoundaryConditions: PolynomialBulkCoefficient
 using Oceananigans
 using Oceananigans.Units
 using Printf
@@ -100,12 +101,33 @@ scalar_advection = WENO(order=5)
 #
 # where ``cᵖᵐ`` is the mixture heat capacity.
 #
-# We start by defining the drag coefficient and gustiness parameter,
+# ## Wind and stability-dependent transfer coefficients
+#
+# Rather than using constant transfer coefficients, we use `PolynomialBulkCoefficient`
+# which implements the wind speed and stability-dependent formulation from Large & Yeager (2009).
+# This provides a more realistic representation of air-sea exchange processes.
+#
+# The transfer coefficients vary with wind speed according to:
+#
+# ```math
+# C_N(U₁₀) = (a₀ + a₁ U₁₀ + a₂ / U₁₀) × 10⁻³
+# ```
+#
+# and are further modified by atmospheric stability using the bulk Richardson number.
+# In unstable conditions (warm surface), transfer is enhanced. In stable conditions
+# (cold surface), transfer is reduced. This captures the physical reality that
+# turbulent mixing is stronger when the surface is warmer than the air above it.
+#
+# We create polynomial coefficients for each flux type. The default coefficients
+# come from Large & Yeager (2009) observational fits:
 
-Cᴰ = 1e-3  # Drag coefficient
 Uᵍ = 1e-2  # Minimum wind speed (m/s)
 
-ρu_surface_flux = ρv_surface_flux = Breeze.BulkDrag(coefficient=Cᴰ, gustiness=Uᵍ)
+# Create a polynomial bulk coefficient that will be automatically configured
+# for each flux type
+coef = PolynomialBulkCoefficient(roughness_length = 1.5e-4)
+
+ρu_surface_flux = ρv_surface_flux = Breeze.BulkDrag(coef, gustiness=Uᵍ)
 
 # ## Sensible heat flux and vapor fluxes
 #
@@ -119,16 +141,11 @@ Uᵍ = 1e-2  # Minimum wind speed (m/s)
 ΔT = 4 # K
 T₀(x) = θ₀ + ΔT / 2 * sign(cos(2π * x / grid.Lx))
 
-# We complete our specification with the sensible heat transfer coefficient
-# and vapor transfer coefficient,
+# We complete our specification by using the same polynomial coefficient for
+# sensible and latent heat fluxes. The flux type will be automatically inferred:
 
-Cᵀ = 1e-3  # Sensible heat transfer coefficient
-Cᵛ = 1e-3  # Vapor transfer coefficient
-
-# and build the flux parameterizations
-
-ρe_surface_flux = BulkSensibleHeatFlux(coefficient=Cᵀ, gustiness=Uᵍ, surface_temperature=T₀)
-ρqᵗ_surface_flux = BulkVaporFlux(coefficient=Cᵛ, gustiness=Uᵍ, surface_temperature=T₀)
+ρe_surface_flux = BulkSensibleHeatFlux(coef, gustiness=Uᵍ, surface_temperature=T₀)
+ρqᵗ_surface_flux = BulkVaporFlux(coef, gustiness=Uᵍ, surface_temperature=T₀)
 
 # We finally assemble all of the boundary conditions,
 
