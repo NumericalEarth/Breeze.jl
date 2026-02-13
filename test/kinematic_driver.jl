@@ -102,7 +102,7 @@ end
     set!(model, θ=300, qᵗ=0, w=w₀, c=(x, y, z) -> c_exact(x, y, z, 0))
 
     stop_time = 50
-    simulation = Simulation(model; Δt=1, stop_time)
+    simulation = Simulation(model; Δt=1, stop_time, verbose=false)
     run!(simulation)
 
     c_truth = CenterField(grid)
