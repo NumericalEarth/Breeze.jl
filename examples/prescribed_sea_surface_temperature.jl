@@ -192,13 +192,18 @@ h = grid.Lz / grid.Nz / 2  # first cell center height
 U_min = 0.1
 ψ = DefaultStabilityFunction()
 
-T_warm = θ₀ + ΔT / 2  # warm SST (unstable)
-T_cold = θ₀ - ΔT / 2  # cold SST (stable)
+ΔT_line = 10  # K, temperature difference for stability lines
+T_warm = θ₀ + ΔT / 2      # warm SST in this simulation
+T_cold = θ₀ - ΔT / 2      # cold SST in this simulation
+T_unstable = θ₀ + ΔT_line  # strongly unstable
+T_stable   = θ₀ - ΔT_line  # strongly stable
 
 U_range = range(0.5, 25, length=200)
 Cᴰ_neutral  = [neutral_coefficient_10m(default_neutral_drag_polynomial, U, U_min) for U in U_range]
-Cᴰ_unstable = [Cᴰ * ψ(bulk_richardson_number(h, θ₀, T_warm, U, U_min)) for (Cᴰ, U) in zip(Cᴰ_neutral, U_range)]
-Cᴰ_stable   = [Cᴰ * ψ(bulk_richardson_number(h, θ₀, T_cold, U, U_min)) for (Cᴰ, U) in zip(Cᴰ_neutral, U_range)]
+Cᴰ_unstable = [Cᴰ * ψ(bulk_richardson_number(h, θ₀, T_unstable, U, U_min)) for (Cᴰ, U) in zip(Cᴰ_neutral, U_range)]
+Cᴰ_stable   = [Cᴰ * ψ(bulk_richardson_number(h, θ₀, T_stable,   U, U_min)) for (Cᴰ, U) in zip(Cᴰ_neutral, U_range)]
+Cᴰ_sim_warm = [Cᴰ * ψ(bulk_richardson_number(h, θ₀, T_warm, U, U_min)) for (Cᴰ, U) in zip(Cᴰ_neutral, U_range)]
+Cᴰ_sim_cold = [Cᴰ * ψ(bulk_richardson_number(h, θ₀, T_cold, U, U_min)) for (Cᴰ, U) in zip(Cᴰ_neutral, U_range)]
 
 fig_coef = Figure(size=(600, 400))
 ax_coef = Axis(fig_coef[1, 1],
@@ -206,11 +211,11 @@ ax_coef = Axis(fig_coef[1, 1],
                ylabel = "Cᴰ × 10³",
                title = "Drag coefficient at 10 m (Large & Yeager 2009)")
 
-band!(ax_coef, collect(U_range), Cᴰ_stable .* 1e3, Cᴰ_unstable .* 1e3,
+band!(ax_coef, collect(U_range), Cᴰ_sim_cold .* 1e3, Cᴰ_sim_warm .* 1e3,
       color=(:grey, 0.3), label="Simulation range (ΔT = $ΔT K)")
-lines!(ax_coef, U_range, Cᴰ_unstable .* 1e3, color=:firebrick,  linewidth=2, label="Unstable (T₀ = $T_warm K)")
+lines!(ax_coef, U_range, Cᴰ_unstable .* 1e3, color=:firebrick,  linewidth=2, label="Unstable (ΔT = $ΔT_line K)")
 lines!(ax_coef, U_range, Cᴰ_neutral  .* 1e3, color=:black,      linewidth=2, label="Neutral")
-lines!(ax_coef, U_range, Cᴰ_stable   .* 1e3, color=:dodgerblue, linewidth=2, label="Stable (T₀ = $T_cold K)")
+lines!(ax_coef, U_range, Cᴰ_stable   .* 1e3, color=:dodgerblue, linewidth=2, label="Stable (ΔT = -$ΔT_line K)")
 
 axislegend(ax_coef, position=:rt)
 
