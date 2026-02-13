@@ -204,11 +204,13 @@ fig_coef = Figure(size=(600, 400))
 ax_coef = Axis(fig_coef[1, 1],
                xlabel = "Wind speed (m/s)",
                ylabel = "Cᴰ × 10³",
-               title = "Neutral drag coefficient at 10 m (Large & Yeager 2009)")
+               title = "Drag coefficient at 10 m (Large & Yeager 2009)")
 
 band!(ax_coef, collect(U_range), Cᴰ_stable .* 1e3, Cᴰ_unstable .* 1e3,
-      color=(:grey, 0.3), label="Stability range (ΔT = $ΔT K)")
-lines!(ax_coef, U_range, Cᴰ_neutral .* 1e3, color=:black, linewidth=2, label="Neutral")
+      color=(:grey, 0.3), label="Simulation range (ΔT = $ΔT K)")
+lines!(ax_coef, U_range, Cᴰ_unstable .* 1e3, color=:firebrick,  linewidth=2, label="Unstable (T₀ = $T_warm K)")
+lines!(ax_coef, U_range, Cᴰ_neutral  .* 1e3, color=:black,      linewidth=2, label="Neutral")
+lines!(ax_coef, U_range, Cᴰ_stable   .* 1e3, color=:dodgerblue, linewidth=2, label="Stable (T₀ = $T_cold K)")
 
 axislegend(ax_coef, position=:rt)
 
