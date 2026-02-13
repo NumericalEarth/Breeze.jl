@@ -9,7 +9,7 @@ using Test
 function run_nan_checker_test(arch; erroring)
     grid = RectilinearGrid(arch, size=(4, 2, 1), extent=(1, 1, 1))
     model = AtmosphereModel(grid)
-    simulation = Simulation(model, Δt=1, stop_iteration=2)
+    simulation = Simulation(model, Δt=1, stop_iteration=2, verbose=false)
     @allowscalar model.momentum.ρu[1, 1, 1] = NaN
     erroring && erroring_NaNChecker!(simulation)
 
