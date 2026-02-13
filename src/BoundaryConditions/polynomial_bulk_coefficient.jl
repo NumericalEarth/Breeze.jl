@@ -321,26 +321,32 @@ end
 ##### Special constructors for boundary conditions
 #####
 
-# These constructors automatically set the appropriate Large & Yeager (2009) coefficients
-# based on the flux type when polynomial is nothing
+# Helper: fill in a default polynomial for a PolynomialCoefficient that has `nothing`
+fill_polynomial(coef::PolynomialCoefficient, polynomial) =
+    PolynomialCoefficient(polynomial,
+                          coef.roughness_length,
+                          coef.minimum_wind_speed,
+                          coef.stability_function,
+                          nothing, nothing, nothing)
+
+# Type alias for PolynomialCoefficient with no polynomial set
+const NothingPolynomialCoefficient = PolynomialCoefficient{<:Any, Nothing}
 
 """
 $(TYPEDSIGNATURES)
 
 Create a `BulkDrag` boundary condition with a `PolynomialCoefficient`.
-If `coef.polynomial` is `nothing`, automatically uses `default_neutral_drag_polynomial`
-from Large & Yeager (2009).
+Uses `default_neutral_drag_polynomial` from Large & Yeager (2009).
+"""
+BulkDrag(coef::NothingPolynomialCoefficient; kw...) =
+    BulkDrag(fill_polynomial(coef, default_neutral_drag_polynomial); kw...)
+
+"""
+$(TYPEDSIGNATURES)
+
+Create a `BulkDrag` boundary condition with a `PolynomialCoefficient`.
 """
 function BulkDrag(coef::PolynomialCoefficient; direction=nothing, gustiness=0, surface_temperature)
-    # If polynomial is nothing, create a new coefficient with momentum coefficients
-    if isnothing(coef.polynomial)
-        coef = PolynomialCoefficient(
-            polynomial = default_neutral_drag_polynomial,
-            roughness_length = coef.roughness_length,
-            minimum_wind_speed = coef.minimum_wind_speed,
-            stability_function = coef.stability_function
-        )
-    end
     df = BulkDragFunction(direction, coef, gustiness, surface_temperature)
     return BoundaryCondition(Flux(), df)
 end
@@ -349,19 +355,17 @@ end
 $(TYPEDSIGNATURES)
 
 Create a `BulkSensibleHeatFlux` boundary condition with a `PolynomialCoefficient`.
-If `coef.polynomial` is `nothing`, automatically uses `default_neutral_sensible_heat_polynomial`
-from Large & Yeager (2009).
+Uses `default_neutral_sensible_heat_polynomial` from Large & Yeager (2009).
+"""
+BulkSensibleHeatFlux(coef::NothingPolynomialCoefficient; kw...) =
+    BulkSensibleHeatFlux(fill_polynomial(coef, default_neutral_sensible_heat_polynomial); kw...)
+
+"""
+$(TYPEDSIGNATURES)
+
+Create a `BulkSensibleHeatFlux` boundary condition with a `PolynomialCoefficient`.
 """
 function BulkSensibleHeatFlux(coef::PolynomialCoefficient; gustiness=0, surface_temperature)
-    # If polynomial is nothing, create a new coefficient with sensible heat coefficients
-    if isnothing(coef.polynomial)
-        coef = PolynomialCoefficient(
-            polynomial = default_neutral_sensible_heat_polynomial,
-            roughness_length = coef.roughness_length,
-            minimum_wind_speed = coef.minimum_wind_speed,
-            stability_function = coef.stability_function
-        )
-    end
     bf = BulkSensibleHeatFluxFunction(coef, gustiness, surface_temperature, nothing, nothing, nothing)
     return BoundaryCondition(Flux(), bf)
 end
@@ -370,19 +374,17 @@ end
 $(TYPEDSIGNATURES)
 
 Create a `BulkVaporFlux` boundary condition with a `PolynomialCoefficient`.
-If `coef.polynomial` is `nothing`, automatically uses `default_neutral_latent_heat_polynomial`
-from Large & Yeager (2009).
+Uses `default_neutral_latent_heat_polynomial` from Large & Yeager (2009).
+"""
+BulkVaporFlux(coef::NothingPolynomialCoefficient; kw...) =
+    BulkVaporFlux(fill_polynomial(coef, default_neutral_latent_heat_polynomial); kw...)
+
+"""
+$(TYPEDSIGNATURES)
+
+Create a `BulkVaporFlux` boundary condition with a `PolynomialCoefficient`.
 """
 function BulkVaporFlux(coef::PolynomialCoefficient; gustiness=0, surface_temperature)
-    # If polynomial is nothing, create a new coefficient with latent heat coefficients
-    if isnothing(coef.polynomial)
-        coef = PolynomialCoefficient(
-            polynomial = default_neutral_latent_heat_polynomial,
-            roughness_length = coef.roughness_length,
-            minimum_wind_speed = coef.minimum_wind_speed,
-            stability_function = coef.stability_function
-        )
-    end
     bf = BulkVaporFluxFunction(coef, gustiness, surface_temperature, nothing, nothing, nothing)
     return BoundaryCondition(Flux(), bf)
 end
