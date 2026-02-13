@@ -134,7 +134,7 @@ end
 
 @testset "Subsidence forcing gradient [$FT]" for FT in test_float_types()
     Oceananigans.defaults.FloatType = FT
-    grid = RectilinearGrid(default_arch; size=(1, 1, 4), x=(0, 10), y=(0, 10), z=(0, 16))
+    grid = RectilinearGrid(default_arch; size=(2, 2, 4), x=(0, 10), y=(0, 10), z=(0, 16))
     reference_state = ReferenceState(grid)
     dynamics = AnelasticDynamics(reference_state)
 

@@ -191,7 +191,7 @@ end
 
 @testset "TwoMomentCloudMicrophysics ImpenetrableBoundaryCondition [$FT]" for FT in test_float_types()
     Oceananigans.defaults.FloatType = FT
-    grid = RectilinearGrid(default_arch; size=(1, 1, 1), x=(0, 1), y=(0, 1), z=(0, 1),
+    grid = RectilinearGrid(default_arch; size=(2, 2, 1), x=(0, 1), y=(0, 1), z=(0, 1),
                            topology=(Periodic, Periodic, Bounded))
 
     constants = ThermodynamicConstants()
@@ -227,7 +227,7 @@ end
 @testset "TwoMomentCloudMicrophysics cloud condensation [$FT]" for FT in test_float_types()
     Oceananigans.defaults.FloatType = FT
     Nz = 4
-    grid = RectilinearGrid(default_arch; size=(1, 1, Nz), x=(0, 1), y=(0, 1), z=(0, 1000),
+    grid = RectilinearGrid(default_arch; size=(2, 2, Nz), x=(0, 1), y=(0, 1), z=(0, 1000),
                            topology=(Periodic, Periodic, Bounded))
 
     constants = ThermodynamicConstants()
