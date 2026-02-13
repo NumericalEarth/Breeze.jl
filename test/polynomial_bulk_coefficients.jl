@@ -124,6 +124,7 @@ using Oceananigans.BoundaryConditions: BoundaryCondition
             coef.roughness_length,
             coef.minimum_wind_speed,
             DefaultStabilityFunction(),
+            Breeze.PlanarLiquidSurface(),  # surface
             θᵥ_field,                # virtual_potential_temperature
             1e5,                     # surface_pressure
             Breeze.Thermodynamics.ThermodynamicConstants()
