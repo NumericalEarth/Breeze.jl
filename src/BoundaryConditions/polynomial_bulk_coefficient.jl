@@ -42,7 +42,7 @@ For other measurement heights, the coefficient is adjusted using logarithmic pro
 
 When a `stability_function` is provided, the coefficient is modified using bulk Richardson number:
 ```math
-Ri_b = \\frac{g}{θ_v} \\frac{z (θ_v - θ_{v0})}{U^2}
+Ri_b = \\frac{g}{θ_v} \\frac{h (θ_v - θ_{v0})}{U^2}
 ```
 
 When `neutral_coefficients` is `nothing`, the appropriate Large & Yeager (2009) coefficients
@@ -169,20 +169,20 @@ end
 """
 $(TYPEDSIGNATURES)
 
-Adjust transfer coefficient from 10m reference height to measurement height `z`
+Adjust transfer coefficient from 10m reference height to measurement height `h`
 using logarithmic profile theory:
 
-C(z) = C₁₀ × [ln(10/z₀) / ln(z/z₀)]²
+C(h) = C₁₀ × [ln(10/ℓ) / ln(h/ℓ)]²
 
 # Arguments
 - `C₁₀`: Transfer coefficient at 10m
-- `z`: Measurement height (m)
-- `z₀`: Roughness length (m)
+- `h`: Measurement height (m)
+- `ℓ`: Roughness length (m)
 """
-@inline function adjust_coefficient_for_height(C₁₀, z, z₀)
-    log_ref = log(10 / z₀)
-    log_z = log(z / z₀)
-    return C₁₀ * (log_ref / log_z)^2
+@inline function adjust_coefficient_for_height(C₁₀, h, ℓ)
+    log_ref = log(10 / ℓ)
+    log_h = log(h / ℓ)
+    return C₁₀ * (log_ref / log_h)^2
 end
 
 #####
@@ -193,23 +193,23 @@ end
 $(TYPEDSIGNATURES)
 
 Compute bulk Richardson number:
-Ri_b = (g/θᵥ) × z × (θᵥ - θᵥ₀) / U²
+Ri_b = (g/θᵥ) × h × (θᵥ - θᵥ₀) / U²
 
 Wind speed is clamped to `U_min` to avoid singularity.
 
 # Arguments
-- `z`: Measurement height (m)
+- `h`: Measurement height (m)
 - `θᵥ`: Virtual potential temperature at measurement height (K)
 - `θᵥ₀`: Virtual potential temperature at surface (K)
 - `U`: Wind speed (m/s)
 - `U_min`: Minimum wind speed (m/s)
 - `g`: Gravitational acceleration (m/s², default: 9.81)
 """
-@inline function bulk_richardson_number(z, θᵥ, θᵥ₀, U, U_min, g = 9.81)
+@inline function bulk_richardson_number(h, θᵥ, θᵥ₀, U, U_min, g = 9.81)
     # Avoid division by zero
     U_safe = max(U, U_min)
     θᵥ_mean = (θᵥ + θᵥ₀) / 2
-    return (g / θᵥ_mean) * z * (θᵥ - θᵥ₀) / U_safe^2
+    return (g / θᵥ_mean) * h * (θᵥ - θᵥ₀) / U_safe^2
 end
 
 #####
@@ -265,25 +265,25 @@ Returns the transfer coefficient (dimensionless).
     C₁₀ = neutral_coefficient_10m(coef.neutral_coefficients, U, coef.minimum_wind_speed)
 
     # Adjust for measurement height
-    z = znode(i, j, 1, grid, Center(), Center(), Center())
-    Cz = adjust_coefficient_for_height(C₁₀, z, coef.roughness_length)
+    h = znode(i, j, 1, grid, Center(), Center(), Center())
+    Cz = adjust_coefficient_for_height(C₁₀, h, coef.roughness_length)
 
     # Apply stability correction
-    return apply_stability_correction(coef, Cz, i, j, grid, U, T₀)
-end
-
-# Stability correction with a function — uses stored VPT and surface pressure
-@inline function apply_stability_correction(coef::PolynomialCoefficient, Cz, i, j, grid, U, T₀)
-    z = znode(i, j, 1, grid, Center(), Center(), Center())
-    θᵥ = @inbounds coef.virtual_potential_temperature[i, j, 1]
-    surface = PlanarLiquidSurface()
-    θᵥ₀ = surface_virtual_potential_temperature(T₀, coef.surface_pressure, coef.thermodynamic_constants, surface)
-    Riᵦ = bulk_richardson_number(z, θᵥ, θᵥ₀, U, coef.minimum_wind_speed)
-    return Cz * coef.stability_function(Riᵦ)
+    return stability_corrected_coefficient(i, j, grid, coef, Cz, U, T₀)
 end
 
 # No stability correction (stability_function = nothing)
-@inline apply_stability_correction(::PolynomialCoefficient{<:Any, <:Any, Nothing}, Cz, args...) = Cz
+@inline stability_corrected_coefficient(i, j, grid, ::PolynomialCoefficient{<:Any, <:Any, Nothing}, Cz, U, T₀) = Cz
+
+# Stability correction with a function — uses stored VPT and surface pressure
+@inline function stability_corrected_coefficient(i, j, grid, coef::PolynomialCoefficient, Cz, U, T₀)
+    h = znode(i, j, 1, grid, Center(), Center(), Center())
+    θᵥ = @inbounds coef.virtual_potential_temperature[i, j, 1]
+    surface = PlanarLiquidSurface()
+    θᵥ₀ = surface_virtual_potential_temperature(T₀, coef.surface_pressure, coef.thermodynamic_constants, surface)
+    Riᵦ = bulk_richardson_number(h, θᵥ, θᵥ₀, U, coef.minimum_wind_speed)
+    return Cz * coef.stability_function(Riᵦ)
+end
 
 #####
 ##### Special constructors for boundary conditions
