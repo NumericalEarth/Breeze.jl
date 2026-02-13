@@ -16,7 +16,10 @@ export BulkDragFunction,
        ThetaFluxBoundaryConditionFunction,
        ThetaFluxBoundaryCondition,
        PolynomialCoefficient,
-       default_stability_function
+       default_stability_function,
+       default_neutral_drag_polynomial,
+       default_neutral_sensible_heat_polynomial,
+       default_neutral_latent_heat_polynomial
 
 using ..AtmosphereModels: AtmosphereModels, grid_moisture_fractions, dynamics_density
 using ..AtmosphereModels.Diagnostics: VirtualPotentialTemperature, saturation_total_specific_moisture

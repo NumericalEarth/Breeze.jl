@@ -13,27 +13,27 @@ using Oceananigans.BoundaryConditions: BoundaryCondition
     @testset "Constructor and defaults" begin
         # Test default constructor
         coef = PolynomialCoefficient()
-        @test coef.neutral_coefficients === nothing
+        @test coef.polynomial === nothing
         @test coef.roughness_length == 1.5e-4
         @test coef.stability_function === default_stability_function
 
         # Test explicit coefficients
-        drag_coef = PolynomialCoefficient(neutral_coefficients = (0.142, 0.076, 2.7))
-        @test drag_coef.neutral_coefficients == (0.142, 0.076, 2.7)
+        drag_coef = PolynomialCoefficient(polynomial = (0.142, 0.076, 2.7))
+        @test drag_coef.polynomial == (0.142, 0.076, 2.7)
 
-        heat_coef = PolynomialCoefficient(neutral_coefficients = (0.128, 0.068, 2.43))
-        @test heat_coef.neutral_coefficients == (0.128, 0.068, 2.43)
+        heat_coef = PolynomialCoefficient(polynomial = (0.128, 0.068, 2.43))
+        @test heat_coef.polynomial == (0.128, 0.068, 2.43)
 
-        moisture_coef = PolynomialCoefficient(neutral_coefficients = (0.120, 0.070, 2.55))
-        @test moisture_coef.neutral_coefficients == (0.120, 0.070, 2.55)
+        moisture_coef = PolynomialCoefficient(polynomial = (0.120, 0.070, 2.55))
+        @test moisture_coef.polynomial == (0.120, 0.070, 2.55)
 
         # Test custom coefficients
         custom_coef = PolynomialCoefficient(
-            neutral_coefficients = (1.0, 0.5, 0.1),
+            polynomial = (1.0, 0.5, 0.1),
             roughness_length = 1e-3,
             stability_function = nothing
         )
-        @test custom_coef.neutral_coefficients == (1.0, 0.5, 0.1)
+        @test custom_coef.polynomial == (1.0, 0.5, 0.1)
         @test isnothing(custom_coef.stability_function)
     end
 
@@ -124,7 +124,7 @@ using Oceananigans.BoundaryConditions: BoundaryCondition
 
         # Test evaluation with no stability correction
         coef = PolynomialCoefficient(
-            neutral_coefficients = (0.142, 0.076, 2.7),
+            polynomial = (0.142, 0.076, 2.7),
             stability_function = nothing
         )
         U = 10.0
@@ -138,7 +138,7 @@ using Oceananigans.BoundaryConditions: BoundaryCondition
         set!(θᵥ_field, 288.0)  # cooler than surface → unstable
 
         coef_stable = PolynomialCoefficient(
-            (0.142, 0.076, 2.7),     # neutral_coefficients
+            (0.142, 0.076, 2.7),     # polynomial
             coef.roughness_length,
             coef.minimum_wind_speed,
             default_stability_function,
@@ -160,7 +160,7 @@ using Oceananigans.BoundaryConditions: BoundaryCondition
         bc = Breeze.BulkDrag(coef, gustiness = 0.5, surface_temperature = SST)
         @test bc isa BoundaryCondition
         # Coefficient should have been materialized with momentum coefficients
-        @test bc.condition.coefficient.neutral_coefficients == (0.142, 0.076, 2.7)
+        @test bc.condition.coefficient.polynomial == (0.142, 0.076, 2.7)
         @test bc.condition.gustiness == 0.5
         @test bc.condition.surface_temperature === SST
     end
@@ -172,7 +172,7 @@ using Oceananigans.BoundaryConditions: BoundaryCondition
         bc = Breeze.BulkSensibleHeatFlux(coef, surface_temperature = SST)
         @test bc isa BoundaryCondition
         # Coefficient should have been materialized with sensible heat coefficients
-        @test bc.condition.coefficient.neutral_coefficients == (0.128, 0.068, 2.43)
+        @test bc.condition.coefficient.polynomial == (0.128, 0.068, 2.43)
     end
 
     @testset "Integration with BulkVaporFlux" begin
@@ -182,6 +182,6 @@ using Oceananigans.BoundaryConditions: BoundaryCondition
         bc = Breeze.BulkVaporFlux(coef, surface_temperature = SST)
         @test bc isa BoundaryCondition
         # Coefficient should have been materialized with latent heat coefficients
-        @test bc.condition.coefficient.neutral_coefficients == (0.120, 0.070, 2.55)
+        @test bc.condition.coefficient.polynomial == (0.120, 0.070, 2.55)
     end
 end

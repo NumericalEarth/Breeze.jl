@@ -2,6 +2,13 @@
 ##### PolynomialCoefficient: Wind and stability-dependent transfer coefficients
 #####
 
+# Default neutral polynomials (a₀, a₁, a₂) from Large & Yeager (2009),
+# "The global climatology of an interannually varying air–sea flux data set",
+# Climate Dynamics 33(2), 341–364.
+const default_neutral_drag_polynomial            = (0.142, 0.076, 2.7)
+const default_neutral_sensible_heat_polynomial   = (0.128, 0.068, 2.43)
+const default_neutral_latent_heat_polynomial     = (0.120, 0.070, 2.55)
+
 """
 $(TYPEDSIGNATURES)
 
@@ -25,7 +32,7 @@ end
 
 """
     PolynomialCoefficient(;
-        neutral_coefficients = nothing,
+        polynomial = nothing,
         roughness_length = 1.5e-4,
         stability_function = default_stability_function
     )
@@ -45,15 +52,15 @@ When a `stability_function` is provided, the coefficient is modified using bulk 
 Ri_b = \\frac{g}{θ_v} \\frac{h (θ_v - θ_{v0})}{U^2}
 ```
 
-When `neutral_coefficients` is `nothing`, the appropriate Large & Yeager (2009) coefficients
+When `polynomial` is `nothing`, the appropriate Large & Yeager (2009) polynomial
 will be automatically selected based on the boundary condition type:
-- `BulkDrag`: `(0.142, 0.076, 2.7)` for momentum
-- `BulkSensibleHeatFlux`: `(0.128, 0.068, 2.43)` for sensible heat
-- `BulkVaporFlux`: `(0.120, 0.070, 2.55)` for latent heat
+- `BulkDrag`: `default_neutral_drag_polynomial` = `(0.142, 0.076, 2.7)` for momentum
+- `BulkSensibleHeatFlux`: `default_neutral_sensible_heat_polynomial` = `(0.128, 0.068, 2.43)` for sensible heat
+- `BulkVaporFlux`: `default_neutral_latent_heat_polynomial` = `(0.120, 0.070, 2.55)` for latent heat
 
 # Keyword Arguments
-- `neutral_coefficients`: Tuple `(a₀, a₁, a₂)` for the polynomial. If `nothing`, coefficients
-  are automatically selected by the boundary condition constructor.
+- `polynomial`: Tuple `(a₀, a₁, a₂)` for the polynomial. If `nothing`, the polynomial
+  is automatically selected by the boundary condition constructor.
 - `roughness_length`: Surface roughness ℓ in meters (default: 1.5e-4, typical for ocean)
 - `minimum_wind_speed`: Minimum wind speed to avoid singularity in a₂/U term (default: 0.1 m/s)
 - `stability_function`: Function `ψ(Riᵦ)` that computes stability correction factor from bulk Richardson number.
@@ -72,7 +79,7 @@ coef = PolynomialCoefficient()
 
 # output
 PolynomialCoefficient{Float64}
-├── neutral_coefficients: nothing
+├── polynomial: nothing
 └── roughness_length: 0.00015 m
 ```
 
@@ -80,11 +87,11 @@ PolynomialCoefficient{Float64}
 using Breeze.BoundaryConditions: PolynomialCoefficient
 
 # With explicit coefficients
-coef = PolynomialCoefficient(neutral_coefficients = (0.142, 0.076, 2.7))
+coef = PolynomialCoefficient(polynomial = (0.142, 0.076, 2.7))
 
 # output
 PolynomialCoefficient{Float64}
-├── neutral_coefficients: (0.142, 0.076, 2.7)
+├── polynomial: (0.142, 0.076, 2.7)
 └── roughness_length: 0.00015 m
 ```
 
@@ -96,12 +103,12 @@ coef = PolynomialCoefficient(stability_function = nothing)
 
 # output
 PolynomialCoefficient{Float64}
-├── neutral_coefficients: nothing
+├── polynomial: nothing
 └── roughness_length: 0.00015 m
 ```
 """
 struct PolynomialCoefficient{FT, C, SF, θᵛ, P, TC}
-    neutral_coefficients :: C
+    polynomial :: C
     roughness_length :: FT
     minimum_wind_speed :: FT
     stability_function :: SF
@@ -112,12 +119,12 @@ end
 
 # Constructor with sensible defaults
 function PolynomialCoefficient(FT = Float64;
-                               neutral_coefficients = nothing,
+                               polynomial = nothing,
                                roughness_length = 1.5e-4,
                                minimum_wind_speed = 0.1,
                                stability_function = default_stability_function)
 
-    return PolynomialCoefficient(neutral_coefficients,
+    return PolynomialCoefficient(polynomial,
                                  FT(roughness_length),
                                  FT(minimum_wind_speed),
                                  stability_function,
@@ -125,7 +132,7 @@ function PolynomialCoefficient(FT = Float64;
 end
 
 Adapt.adapt_structure(to, coef::PolynomialCoefficient) =
-    PolynomialCoefficient(Adapt.adapt(to, coef.neutral_coefficients),
+    PolynomialCoefficient(Adapt.adapt(to, coef.polynomial),
                           Adapt.adapt(to, coef.roughness_length),
                           Adapt.adapt(to, coef.minimum_wind_speed),
                           coef.stability_function,
@@ -135,12 +142,12 @@ Adapt.adapt_structure(to, coef::PolynomialCoefficient) =
 
 function Base.show(io::IO, coef::PolynomialCoefficient{FT}) where FT
     println(io, "PolynomialCoefficient{$FT}")
-    println(io, "├── neutral_coefficients: ", coef.neutral_coefficients)
+    println(io, "├── polynomial: ", coef.polynomial)
     print(io,   "└── roughness_length: ", coef.roughness_length, " m")
 end
 
 Base.summary(coef::PolynomialCoefficient) =
-    string("PolynomialCoefficient(", coef.neutral_coefficients, ")")
+    string("PolynomialCoefficient(", coef.polynomial, ")")
 
 #####
 ##### Neutral coefficient computation (Large & Yeager 2009 form)
@@ -154,8 +161,8 @@ C_N(U₁₀) = (a₀ + a₁*U₁₀ + a₂/U₁₀) × 10⁻³
 
 Wind speed is clamped to `U_min` to avoid singularity in the a₂/U₁₀ term.
 """
-@inline function neutral_coefficient_10m(coefficients, U₁₀, U_min)
-    a₀, a₁, a₂ = coefficients
+@inline function neutral_coefficient_10m(polynomial, U₁₀, U_min)
+    a₀, a₁, a₂ = polynomial
     FT = typeof(U₁₀)
     # Avoid division by zero
     U_safe = max(U₁₀, U_min)
@@ -262,7 +269,7 @@ Returns the transfer coefficient (dimensionless).
 """
 @inline function (coef::PolynomialCoefficient)(i, j, grid, U, T₀)
     # Compute neutral coefficient at 10m
-    C₁₀ = neutral_coefficient_10m(coef.neutral_coefficients, U, coef.minimum_wind_speed)
+    C₁₀ = neutral_coefficient_10m(coef.polynomial, U, coef.minimum_wind_speed)
 
     # Adjust for measurement height
     h = znode(i, j, 1, grid, Center(), Center(), Center())
@@ -290,20 +297,20 @@ end
 #####
 
 # These constructors automatically set the appropriate Large & Yeager (2009) coefficients
-# based on the flux type when neutral_coefficients is nothing
+# based on the flux type when polynomial is nothing
 
 """
 $(TYPEDSIGNATURES)
 
 Create a `BulkDrag` boundary condition with a `PolynomialCoefficient`.
-If `coef.neutral_coefficients` is `nothing`, automatically uses Large & Yeager (2009)
-momentum coefficients `(0.142, 0.076, 2.7)`.
+If `coef.polynomial` is `nothing`, automatically uses `default_neutral_drag_polynomial`
+from Large & Yeager (2009).
 """
 function BulkDrag(coef::PolynomialCoefficient; direction=nothing, gustiness=0, surface_temperature)
-    # If neutral_coefficients is nothing, create a new coefficient with momentum coefficients
-    if isnothing(coef.neutral_coefficients)
+    # If polynomial is nothing, create a new coefficient with momentum coefficients
+    if isnothing(coef.polynomial)
         coef = PolynomialCoefficient(
-            neutral_coefficients = (0.142, 0.076, 2.7),  # Large & Yeager (2009) momentum
+            polynomial = default_neutral_drag_polynomial,
             roughness_length = coef.roughness_length,
             minimum_wind_speed = coef.minimum_wind_speed,
             stability_function = coef.stability_function
@@ -317,14 +324,14 @@ end
 $(TYPEDSIGNATURES)
 
 Create a `BulkSensibleHeatFlux` boundary condition with a `PolynomialCoefficient`.
-If `coef.neutral_coefficients` is `nothing`, automatically uses Large & Yeager (2009)
-sensible heat coefficients `(0.128, 0.068, 2.43)`.
+If `coef.polynomial` is `nothing`, automatically uses `default_neutral_sensible_heat_polynomial`
+from Large & Yeager (2009).
 """
 function BulkSensibleHeatFlux(coef::PolynomialCoefficient; gustiness=0, surface_temperature)
-    # If neutral_coefficients is nothing, create a new coefficient with sensible heat coefficients
-    if isnothing(coef.neutral_coefficients)
+    # If polynomial is nothing, create a new coefficient with sensible heat coefficients
+    if isnothing(coef.polynomial)
         coef = PolynomialCoefficient(
-            neutral_coefficients = (0.128, 0.068, 2.43),  # Large & Yeager (2009) sensible heat
+            polynomial = default_neutral_sensible_heat_polynomial,
             roughness_length = coef.roughness_length,
             minimum_wind_speed = coef.minimum_wind_speed,
             stability_function = coef.stability_function
@@ -338,14 +345,14 @@ end
 $(TYPEDSIGNATURES)
 
 Create a `BulkVaporFlux` boundary condition with a `PolynomialCoefficient`.
-If `coef.neutral_coefficients` is `nothing`, automatically uses Large & Yeager (2009)
-latent heat coefficients `(0.120, 0.070, 2.55)`.
+If `coef.polynomial` is `nothing`, automatically uses `default_neutral_latent_heat_polynomial`
+from Large & Yeager (2009).
 """
 function BulkVaporFlux(coef::PolynomialCoefficient; gustiness=0, surface_temperature)
-    # If neutral_coefficients is nothing, create a new coefficient with latent heat coefficients
-    if isnothing(coef.neutral_coefficients)
+    # If polynomial is nothing, create a new coefficient with latent heat coefficients
+    if isnothing(coef.polynomial)
         coef = PolynomialCoefficient(
-            neutral_coefficients = (0.120, 0.070, 2.55),  # Large & Yeager (2009) latent heat
+            polynomial = default_neutral_latent_heat_polynomial,
             roughness_length = coef.roughness_length,
             minimum_wind_speed = coef.minimum_wind_speed,
             stability_function = coef.stability_function
