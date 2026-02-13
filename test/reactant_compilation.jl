@@ -88,14 +88,10 @@ end
 #####
 
 @testset "Reactant CompressibleDynamics - Centered Advection" begin
-    @info "Testing Reactant CompressibleDynamics compilation with Centered advection..."
-
     for grid_config in test_grids
         @testset "$(grid_config.name)" begin
-            @info "  Testing $(grid_config.name)..."
             for scheme_config in test_advection_schemes
                 @testset "$(scheme_config.name)" begin
-                    @info "    Testing $(scheme_config.name)..."
                     # Build grid and model once per grid configuration
                     grid = make_grid(ReactantState(), grid_config)
                     model = AtmosphereModel(grid; dynamics = CompressibleDynamics(), advection = scheme_config.scheme)
@@ -113,14 +109,12 @@ end
                     end
 
                     @testset "Compiled time_step!" begin
-                        @info "    Compiling time_step!..."
                         Δt = 0.01
                         nsteps = 2
 
                         compiled_run = Reactant.@compile sync=true run_time_steps!(model, Δt, nsteps)
                         @test compiled_run !== nothing
 
-                        @info "    Running compiled time_step!..."
                         compiled_run(model, Δt, nsteps)
 
                         T = get_temperature(model)
@@ -134,14 +128,11 @@ end
 end
 
 @testset "Reactant CompressibleDynamics - WENO Advection" begin
-    @info "Testing Reactant CompressibleDynamics compilation with WENO advection (1D and 2D only)..."
 
     for grid_config in weno_test_grids
         @testset "$(grid_config.name)" begin
-            @info "  Testing $(grid_config.name)..."
             for scheme_config in weno_advection_schemes
                 @testset "$(scheme_config.name)" begin
-                    @info "    Testing $(scheme_config.name)..."
                     # Build grid and model once per grid configuration
                     grid = make_grid(ReactantState(), grid_config)
                     model = AtmosphereModel(grid; dynamics = CompressibleDynamics(), advection = scheme_config.scheme)
@@ -159,14 +150,12 @@ end
                     end
 
                     @testset "Compiled time_step!" begin
-                        @info "    Compiling time_step!..."
                         Δt = 0.01
                         nsteps = 2
 
                         compiled_run = Reactant.@compile sync=true run_time_steps!(model, Δt, nsteps)
                         @test compiled_run !== nothing
 
-                        @info "    Running compiled time_step!..."
                         compiled_run(model, Δt, nsteps)
 
                         T = get_temperature(model)
