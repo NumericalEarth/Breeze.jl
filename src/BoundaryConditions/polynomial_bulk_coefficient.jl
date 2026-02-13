@@ -127,6 +127,10 @@ PolynomialCoefficient{Float64}
 ├── minimum_wind_speed: 0.1 m/s
 └── stability_function: Nothing
 ```
+
+# References
+
+* Large, W., & Yeager, S. G. (2009). The global climatology of an interannually varying air–sea flux data set. Climate dynamics, 33(2), 341-364.
 """
 struct PolynomialCoefficient{FT, C, SF, θᵛ, P, TC}
     polynomial :: C
