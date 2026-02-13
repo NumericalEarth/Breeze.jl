@@ -9,6 +9,9 @@ using ClimaComms: ClimaComms
 using Dates: Dates
 using RRTMGP: RRTMGP
 using SpecialFunctions: SpecialFunctions
+if VERSION < v"1.12"
+    using Reactant: Reactant
+end
 
 @testset "Aqua" begin
     Aqua.test_all(Breeze)
