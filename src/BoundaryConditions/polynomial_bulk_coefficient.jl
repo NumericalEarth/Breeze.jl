@@ -49,7 +49,8 @@ const default_stability_function = DefaultStabilityFunction()
     PolynomialCoefficient(;
         polynomial = nothing,
         roughness_length = 1.5e-4,
-        stability_function = DefaultStabilityFunction()
+        stability_function = DefaultStabilityFunction(),
+        surface = PlanarLiquidSurface()
     )
 
 A bulk transfer coefficient that depends on wind speed and atmospheric stability,
@@ -80,6 +81,8 @@ will be automatically selected based on the boundary condition type:
 - `minimum_wind_speed`: Minimum wind speed to avoid singularity in a₂/U term (default: 0.1 m/s)
 - `stability_function`: Callable `ψ(Riᵦ)` that computes stability correction factor from bulk Richardson number.
   Set to `nothing` to disable stability correction. Default is `DefaultStabilityFunction()`.
+- `surface`: Surface type for computing saturation specific humidity in the stability correction.
+  Default is `PlanarLiquidSurface()`. Use `PlanarIceSurface()` for ice surfaces.
 
 The measurement height is automatically determined from the grid as the height of the first
 cell center above the surface.
@@ -97,6 +100,7 @@ PolynomialCoefficient{Float64}
 ├── polynomial: nothing
 ├── roughness_length: 0.00015 m
 ├── minimum_wind_speed: 0.1 m/s
+├── surface: PlanarLiquidSurface
 └── stability_function: ψ(Ri) = √(1-16Ri) unstable, 1/(1+10Ri) stable
 ```
 
@@ -111,6 +115,7 @@ PolynomialCoefficient{Float64}
 ├── polynomial: (0.142, 0.076, 2.7)
 ├── roughness_length: 0.00015 m
 ├── minimum_wind_speed: 0.1 m/s
+├── surface: PlanarLiquidSurface
 └── stability_function: ψ(Ri) = √(1-16Ri) unstable, 1/(1+10Ri) stable
 ```
 
@@ -125,6 +130,7 @@ PolynomialCoefficient{Float64}
 ├── polynomial: nothing
 ├── roughness_length: 0.00015 m
 ├── minimum_wind_speed: 0.1 m/s
+├── surface: PlanarLiquidSurface
 └── stability_function: Nothing
 ```
 
@@ -132,11 +138,12 @@ PolynomialCoefficient{Float64}
 
 * Large, W., & Yeager, S. G. (2009). The global climatology of an interannually varying air–sea flux data set. Climate dynamics, 33(2), 341-364.
 """
-struct PolynomialCoefficient{FT, C, SF, θᵛ, P, TC}
+struct PolynomialCoefficient{FT, C, SF, S, θᵛ, P, TC}
     polynomial :: C
     roughness_length :: FT
     minimum_wind_speed :: FT
     stability_function :: SF
+    surface :: S
     virtual_potential_temperature :: θᵛ
     surface_pressure :: P
     thermodynamic_constants :: TC
@@ -147,12 +154,14 @@ function PolynomialCoefficient(FT = Float64;
                                polynomial = nothing,
                                roughness_length = 1.5e-4,
                                minimum_wind_speed = 0.1,
-                               stability_function = DefaultStabilityFunction())
+                               stability_function = DefaultStabilityFunction(),
+                               surface = PlanarLiquidSurface())
 
     return PolynomialCoefficient(polynomial,
                                  FT(roughness_length),
                                  FT(minimum_wind_speed),
                                  stability_function,
+                                 surface,
                                  nothing, nothing, nothing)
 end
 
@@ -161,6 +170,7 @@ Adapt.adapt_structure(to, coef::PolynomialCoefficient) =
                           Adapt.adapt(to, coef.roughness_length),
                           Adapt.adapt(to, coef.minimum_wind_speed),
                           coef.stability_function,
+                          coef.surface,
                           Adapt.adapt(to, coef.virtual_potential_temperature),
                           Adapt.adapt(to, coef.surface_pressure),
                           Adapt.adapt(to, coef.thermodynamic_constants))
@@ -170,6 +180,7 @@ function Base.show(io::IO, coef::PolynomialCoefficient{FT}) where FT
     println(io, "├── polynomial: ", coef.polynomial)
     println(io, "├── roughness_length: ", coef.roughness_length, " m")
     println(io, "├── minimum_wind_speed: ", coef.minimum_wind_speed, " m/s")
+    println(io, "├── surface: ", summary(coef.surface))
     print(io,   "└── stability_function: ", summary(coef.stability_function))
 end
 
@@ -294,8 +305,7 @@ end
 @inline function stability_corrected_coefficient(i, j, grid, coef::PolynomialCoefficient, Cʰ, U, T₀)
     h = znode(i, j, 1, grid, Center(), Center(), Center())
     θᵥ = @inbounds coef.virtual_potential_temperature[i, j, 1]
-    surface = PlanarLiquidSurface()
-    θᵥ₀ = surface_virtual_potential_temperature(T₀, coef.surface_pressure, coef.thermodynamic_constants, surface)
+    θᵥ₀ = surface_virtual_potential_temperature(T₀, coef.surface_pressure, coef.thermodynamic_constants, coef.surface)
     Riᵦ = bulk_richardson_number(h, θᵥ, θᵥ₀, U, coef.minimum_wind_speed)
     return Cʰ * coef.stability_function(Riᵦ)
 end
@@ -326,6 +336,7 @@ fill_polynomial(coef::PolynomialCoefficient, polynomial) =
                           coef.roughness_length,
                           coef.minimum_wind_speed,
                           coef.stability_function,
+                          coef.surface,
                           nothing, nothing, nothing)
 
 # Type alias for PolynomialCoefficient with no polynomial set

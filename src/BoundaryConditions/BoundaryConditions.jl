@@ -229,6 +229,7 @@ function materialize_coefficient(coef::PolynomialCoefficient, grid, dynamics, mi
                                  coef.roughness_length,
                                  coef.minimum_wind_speed,
                                  coef.stability_function,
+                                 coef.surface,
                                  θᵥ, surface_pressure, constants)
 end
 
