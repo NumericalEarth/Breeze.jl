@@ -139,7 +139,7 @@ using Oceananigans.BoundaryConditions: BoundaryCondition
         # Test that PolynomialCoefficient works with BulkDrag constructor
         coef = PolynomialCoefficient()
         SST(x, y) = 300.0
-        bc = Breeze.BulkDrag(coef, gustiness = 0.5, surface_temperature = SST)
+        bc = Breeze.BulkDrag(coefficient = coef, gustiness = 0.5, surface_temperature = SST)
         @test bc isa BoundaryCondition
         # Coefficient should have been materialized with momentum coefficients
         @test bc.condition.coefficient.polynomial == (0.142, 0.076, 2.7)
@@ -151,7 +151,7 @@ using Oceananigans.BoundaryConditions: BoundaryCondition
         # Test that PolynomialCoefficient works with BulkSensibleHeatFlux
         coef = PolynomialCoefficient()
         SST(x, y) = 300.0
-        bc = Breeze.BulkSensibleHeatFlux(coef, surface_temperature = SST)
+        bc = Breeze.BulkSensibleHeatFlux(coefficient = coef, surface_temperature = SST)
         @test bc isa BoundaryCondition
         # Coefficient should have been materialized with sensible heat coefficients
         @test bc.condition.coefficient.polynomial == (0.128, 0.068, 2.43)
@@ -161,7 +161,7 @@ using Oceananigans.BoundaryConditions: BoundaryCondition
         # Test that PolynomialCoefficient works with BulkVaporFlux
         coef = PolynomialCoefficient()
         SST(x, y) = 300.0
-        bc = Breeze.BulkVaporFlux(coef, surface_temperature = SST)
+        bc = Breeze.BulkVaporFlux(coefficient = coef, surface_temperature = SST)
         @test bc isa BoundaryCondition
         # Coefficient should have been materialized with latent heat coefficients
         @test bc.condition.coefficient.polynomial == (0.120, 0.070, 2.55)

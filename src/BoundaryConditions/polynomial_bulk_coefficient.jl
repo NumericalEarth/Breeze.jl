@@ -297,7 +297,28 @@ end
 end
 
 #####
-##### Special constructors for boundary conditions
+##### Bulk coefficient evaluation
+#####
+##### Unified interface for evaluating bulk transfer coefficients. Dispatches
+##### on the coefficient type: constant Number returns directly, callable
+##### PolynomialCoefficient computes wind speed and evaluates with stability correction.
+#####
+
+@inline bulk_coefficient(i, j, grid, C::Number, fields, T₀) = C
+
+@inline function bulk_coefficient(i, j, grid, C::PolynomialCoefficient, fields, T₀)
+    U² = wind_speed²ᶜᶜᶜ(i, j, grid, fields)
+    U = sqrt(U²)
+    return C(i, j, grid, U, T₀)
+end
+
+#####
+##### Default polynomial filling for Function constructors
+#####
+##### When a PolynomialCoefficient with `polynomial = nothing` is passed as the
+##### coefficient, fill in the appropriate Large & Yeager (2009) default polynomial
+##### before constructing the Function struct. This way the user interface is the
+##### same regardless of coefficient type: BulkDrag(coefficient=..., gustiness=...).
 #####
 
 # Helper: fill in a default polynomial for a PolynomialCoefficient that has `nothing`
@@ -311,59 +332,12 @@ fill_polynomial(coef::PolynomialCoefficient, polynomial) =
 # Type alias for PolynomialCoefficient with no polynomial set
 const NothingPolynomialCoefficient = PolynomialCoefficient{<:Any, Nothing}
 
-"""
-$(TYPEDSIGNATURES)
+# Outer constructors that intercept nothing-polynomial and fill in defaults
+BulkDragFunction(d, coef::NothingPolynomialCoefficient, g, t) =
+    BulkDragFunction(d, fill_polynomial(coef, default_neutral_drag_polynomial), g, t)
 
-Create a `BulkDrag` boundary condition with a `PolynomialCoefficient`.
-Uses `default_neutral_drag_polynomial` from Large & Yeager (2009).
-"""
-BulkDrag(coef::NothingPolynomialCoefficient; kw...) =
-    BulkDrag(fill_polynomial(coef, default_neutral_drag_polynomial); kw...)
+BulkSensibleHeatFluxFunction(coef::NothingPolynomialCoefficient, g, t, p, c, f) =
+    BulkSensibleHeatFluxFunction(fill_polynomial(coef, default_neutral_sensible_heat_polynomial), g, t, p, c, f)
 
-"""
-$(TYPEDSIGNATURES)
-
-Create a `BulkDrag` boundary condition with a `PolynomialCoefficient`.
-"""
-function BulkDrag(coef::PolynomialCoefficient; direction=nothing, gustiness=0, surface_temperature)
-    df = BulkDragFunction(direction, coef, gustiness, surface_temperature)
-    return BoundaryCondition(Flux(), df)
-end
-
-"""
-$(TYPEDSIGNATURES)
-
-Create a `BulkSensibleHeatFlux` boundary condition with a `PolynomialCoefficient`.
-Uses `default_neutral_sensible_heat_polynomial` from Large & Yeager (2009).
-"""
-BulkSensibleHeatFlux(coef::NothingPolynomialCoefficient; kw...) =
-    BulkSensibleHeatFlux(fill_polynomial(coef, default_neutral_sensible_heat_polynomial); kw...)
-
-"""
-$(TYPEDSIGNATURES)
-
-Create a `BulkSensibleHeatFlux` boundary condition with a `PolynomialCoefficient`.
-"""
-function BulkSensibleHeatFlux(coef::PolynomialCoefficient; gustiness=0, surface_temperature)
-    bf = BulkSensibleHeatFluxFunction(coef, gustiness, surface_temperature, nothing, nothing, nothing)
-    return BoundaryCondition(Flux(), bf)
-end
-
-"""
-$(TYPEDSIGNATURES)
-
-Create a `BulkVaporFlux` boundary condition with a `PolynomialCoefficient`.
-Uses `default_neutral_latent_heat_polynomial` from Large & Yeager (2009).
-"""
-BulkVaporFlux(coef::NothingPolynomialCoefficient; kw...) =
-    BulkVaporFlux(fill_polynomial(coef, default_neutral_latent_heat_polynomial); kw...)
-
-"""
-$(TYPEDSIGNATURES)
-
-Create a `BulkVaporFlux` boundary condition with a `PolynomialCoefficient`.
-"""
-function BulkVaporFlux(coef::PolynomialCoefficient; gustiness=0, surface_temperature)
-    bf = BulkVaporFluxFunction(coef, gustiness, surface_temperature, nothing, nothing, nothing)
-    return BoundaryCondition(Flux(), bf)
-end
+BulkVaporFluxFunction(coef::NothingPolynomialCoefficient, g, t, p, c, s) =
+    BulkVaporFluxFunction(fill_polynomial(coef, default_neutral_latent_heat_polynomial), g, t, p, c, s)

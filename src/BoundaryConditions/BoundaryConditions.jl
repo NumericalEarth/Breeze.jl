@@ -48,6 +48,7 @@ using DocStringExtensions: TYPEDSIGNATURES
 # Get surface value from a Field or a Number
 @inline surface_value(i, j, field::AbstractArray) = @inbounds field[i, j, 1]
 @inline surface_value(i, j, x::Number) = x
+@inline surface_value(i, j, ::Nothing) = nothing
 
 #####
 ##### Wind speed calculations at staggered locations
@@ -224,7 +225,7 @@ function materialize_coefficient(coef::PolynomialCoefficient, grid, dynamics, mi
         reference_state, microphysics, microphysical_fields,
         specific_moisture, temperature, thermodynamic_constants=constants)
 
-    return PolynomialCoefficient(coef.neutral_coefficients,
+    return PolynomialCoefficient(coef.polynomial,
                                  coef.roughness_length,
                                  coef.minimum_wind_speed,
                                  coef.stability_function,

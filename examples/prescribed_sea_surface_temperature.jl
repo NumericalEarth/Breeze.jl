@@ -145,7 +145,7 @@ T₀(x) = θ₀ + ΔT / 2 * sign(cos(2π * x / grid.Lx))
 # `PolynomialCoefficient`, since the stability correction depends on the
 # surface virtual potential temperature.
 
-ρu_surface_flux = ρv_surface_flux = Breeze.BulkDrag(coef, gustiness=Uᵍ, surface_temperature=T₀)
+ρu_surface_flux = ρv_surface_flux = Breeze.BulkDrag(coefficient=coef, gustiness=Uᵍ, surface_temperature=T₀)
 
 # ## Sensible heat flux and vapor fluxes
 #
@@ -155,8 +155,8 @@ T₀(x) = θ₀ + ΔT / 2 * sign(cos(2π * x / grid.Lx))
 # We complete our specification by using the same polynomial coefficient for
 # sensible and latent heat fluxes. The flux type will be automatically inferred:
 
-ρe_surface_flux = BulkSensibleHeatFlux(coef, gustiness=Uᵍ, surface_temperature=T₀)
-ρqᵗ_surface_flux = BulkVaporFlux(coef, gustiness=Uᵍ, surface_temperature=T₀)
+ρe_surface_flux = BulkSensibleHeatFlux(coefficient=coef, gustiness=Uᵍ, surface_temperature=T₀)
+ρqᵗ_surface_flux = BulkVaporFlux(coefficient=coef, gustiness=Uᵍ, surface_temperature=T₀)
 
 # We finally assemble all of the boundary conditions,
 

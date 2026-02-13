@@ -10,7 +10,7 @@ struct BulkDragFunction{D, C, G, T}
 end
 
 """
-    BulkDragFunction(; direction=nothing, coefficient=1e-3, gustiness=0)
+    BulkDragFunction(; direction=nothing, coefficient=1e-3, gustiness=0, surface_temperature=nothing)
 
 Create a bulk drag function for computing surface momentum fluxes using bulk aerodynamic
 formulas. The drag function computes a quadratic drag:
@@ -27,11 +27,14 @@ where `Cᴰ` is the drag coefficient, `|U| = √(u² + v² + gustiness²)` is th
 - `direction`: The direction of the momentum component (`XDirection()` or `YDirection()`).
                If `nothing`, the direction is inferred from the field location during
                boundary condition regularization.
-- `coefficient`: The drag coefficient (default: `1e-3`).
+- `coefficient`: The drag coefficient (default: `1e-3`). Can be a constant or a
+  [`PolynomialCoefficient`](@ref) for wind and stability-dependent transfer coefficients.
 - `gustiness`: Minimum wind speed to prevent singularities when winds are calm (default: `0`)
+- `surface_temperature`: Surface temperature, required when using `PolynomialCoefficient`
+  with stability correction. Can be a `Field`, `Function`, or `Number`. (default: `nothing`)
 """
-function BulkDragFunction(; direction=nothing, coefficient=1e-3, gustiness=0)
-    return BulkDragFunction(direction, coefficient, gustiness, nothing)
+function BulkDragFunction(; direction=nothing, coefficient=1e-3, gustiness=0, surface_temperature=nothing)
+    return BulkDragFunction(direction, coefficient, gustiness, surface_temperature)
 end
 
 const XDirectionBulkDragFunction = BulkDragFunction{<:XDirection}
@@ -48,41 +51,28 @@ Base.summary(df::BulkDragFunction) = string("BulkDragFunction(direction=", summa
                                             ", gustiness=", df.gustiness, ")")
 
 #####
-##### Coefficient evaluation (constant vs callable)
-#####
-
-# For constant coefficients — no stability correction needed, no field access
-@inline evaluate_drag_coefficient(df::BulkDragFunction{<:Any, <:Number}, i, j, grid, fields) = df.coefficient
-
-# For callable coefficients (e.g., PolynomialCoefficient) — coefficient handles stability internally
-@inline function evaluate_drag_coefficient(df::BulkDragFunction, i, j, grid, fields)
-    T₀ = surface_value(i, j, df.surface_temperature)
-    U² = wind_speed²ᶜᶜᶜ(i, j, grid, fields)
-    U = sqrt(U²)
-    return df.coefficient(i, j, grid, U, T₀)
-end
-
-#####
 ##### getbc for BulkDragFunction
 #####
 
 @inline function OceananigansBC.getbc(df::XDirectionBulkDragFunction, i::Integer, j::Integer,
                                       grid::AbstractGrid, clock, fields)
     ρu = @inbounds fields.ρu[i, j, 1]
+    T₀ = surface_value(i, j, df.surface_temperature)
     U² = wind_speed²ᶠᶜᶜ(i, j, grid, fields)
     U = sqrt(U²)
     Ũ² = U² + df.gustiness^2
-    Cᴰ = evaluate_drag_coefficient(df, i, j, grid, fields)
+    Cᴰ = bulk_coefficient(i, j, grid, df.coefficient, fields, T₀)
     return - Cᴰ * Ũ² * ρu / U * (U > 0)
 end
 
 @inline function OceananigansBC.getbc(df::YDirectionBulkDragFunction, i::Integer, j::Integer,
                                       grid::AbstractGrid, clock, fields)
     ρv = @inbounds fields.ρv[i, j, 1]
+    T₀ = surface_value(i, j, df.surface_temperature)
     U² = wind_speed²ᶜᶠᶜ(i, j, grid, fields)
     U = sqrt(U²)
     Ũ² = U² + df.gustiness^2
-    Cᴰ = evaluate_drag_coefficient(df, i, j, grid, fields)
+    Cᴰ = bulk_coefficient(i, j, grid, df.coefficient, fields, T₀)
     return - Cᴰ * Ũ² * ρv / U * (U > 0)
 end
 
@@ -93,7 +83,7 @@ const BulkDragBoundaryCondition = BoundaryCondition{<:Flux, <:BulkDragFunction}
 #####
 
 """
-    BulkDrag(; direction=nothing, coefficient=1e-3, gustiness=0)
+    BulkDrag(; direction=nothing, coefficient=1e-3, gustiness=0, surface_temperature=nothing)
 
 Create a `FluxBoundaryCondition` for surface momentum drag.
 

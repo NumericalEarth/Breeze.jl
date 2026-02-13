@@ -57,15 +57,15 @@ Base.summary(bf::BulkSensibleHeatFluxFunction) =
 
 # Compute the thermodynamic variable difference at the surface.
 # Default to potential temperature flux when formulation is not set (ρθ BCs passed directly).
-@inline bulk_sensible_heat_difference(::Nothing, i, j, T₀, constants, fields) =
-    bulk_sensible_heat_difference(PotentialTemperatureFlux(), i, j, T₀, constants, fields)
+@inline bulk_sensible_heat_difference(i, j, grid, ::Nothing, T₀, constants, fields) =
+    bulk_sensible_heat_difference(i, j, grid, PotentialTemperatureFlux(), T₀, constants, fields)
 
-@inline function bulk_sensible_heat_difference(::PotentialTemperatureFlux, i, j, T₀, constants, fields)
+@inline function bulk_sensible_heat_difference(i, j, grid, ::PotentialTemperatureFlux, T₀, constants, fields)
     θ = @inbounds fields.θ[i, j, 1]
     return θ - T₀
 end
 
-@inline function bulk_sensible_heat_difference(::StaticEnergyFlux, i, j, T₀, constants, fields)
+@inline function bulk_sensible_heat_difference(i, j, grid, ::StaticEnergyFlux, T₀, constants, fields)
     cᵖᵈ = constants.dry_air.heat_capacity
     cᵖᵛ = constants.vapor.heat_capacity
     qᵗ = @inbounds fields.qᵗ[i, j, 1]
@@ -73,20 +73,6 @@ end
     e₀ = cᵖᵐ * T₀
     e = @inbounds fields.e[i, j, 1]
     return e - e₀
-end
-
-#####
-##### Coefficient evaluation for scalar fluxes
-#####
-
-# Fallback for constant coefficients
-@inline evaluate_scalar_coefficient(C::Number, args...) = C
-
-# For callable coefficients (e.g., PolynomialCoefficient) — coefficient handles stability internally
-@inline function evaluate_scalar_coefficient(C, i, j, grid, fields, T₀)
-    U² = wind_speed²ᶜᶜᶜ(i, j, grid, fields)
-    U = sqrt(U²)
-    return C(i, j, grid, U, T₀)
 end
 
 @inline function OceananigansBC.getbc(bf::BulkSensibleHeatFluxFunction, i::Integer, j::Integer,
@@ -100,9 +86,9 @@ end
     p₀ = bf.surface_pressure
     ρ₀ = surface_density(p₀, T₀, constants)
 
-    Cᵀ = evaluate_scalar_coefficient(bf.coefficient, i, j, grid, fields, T₀)
+    Cᵀ = bulk_coefficient(i, j, grid, bf.coefficient, fields, T₀)
 
-    Δϕ = bulk_sensible_heat_difference(bf.formulation, i, j, T₀, constants, fields)
+    Δϕ = bulk_sensible_heat_difference(i, j, grid, bf.formulation, T₀, constants, fields)
     return - ρ₀ * Cᵀ * Ũ * Δϕ
 end
 
@@ -172,7 +158,7 @@ Base.summary(bf::BulkVaporFluxFunction) =
     U² = wind_speed²ᶜᶜᶜ(i, j, grid, fields)
     Ũ = sqrt(U² + bf.gustiness^2)
 
-    Cᵛ = evaluate_scalar_coefficient(bf.coefficient, i, j, grid, fields, T₀)
+    Cᵛ = bulk_coefficient(i, j, grid, bf.coefficient, fields, T₀)
 
     return - ρ₀ * Cᵛ * Ũ * Δq
 end
