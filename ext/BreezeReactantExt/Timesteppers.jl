@@ -1,5 +1,7 @@
 module TimeSteppers
 
+using Reactant: Reactant
+
 using Oceananigans: AbstractModel, ReactantState
 using Oceananigans.TimeSteppers: update_state!, tick!, step_lagrangian_particles!, compute_flux_bc_tendencies!
 using Oceananigans.Models.NonhydrostaticModels: compute_pressure_correction!, make_pressure_correction!
