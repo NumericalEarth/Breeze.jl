@@ -156,7 +156,7 @@ function AtmosphereModel(grid;
     boundary_conditions = merge(default_boundary_conditions, boundary_conditions)
 
     # Pre-create diagnostic fields and microphysical fields (needed for VirtualPotentialTemperature
-    # diagnostic used in stability-dependent boundary conditions like PolynomialBulkCoefficient)
+    # diagnostic used in stability-dependent boundary conditions like PolynomialCoefficient)
     specific_moisture = CenterField(grid)
     temperature = CenterField(grid)
     microphysical_fields = materialize_microphysical_fields(microphysics, grid, boundary_conditions)

@@ -84,13 +84,13 @@ end
 # Fallback for constant coefficients
 @inline evaluate_scalar_coefficient(C::Number, args...) = C
 
-# For callable coefficients (e.g., PolynomialBulkCoefficient)
-@inline function evaluate_scalar_coefficient(C, i, j, grid, fields, T₀, p₀, constants, surface)
+# For callable coefficients (e.g., PolynomialCoefficient)
+@inline function evaluate_scalar_coefficient(C, i, j, grid, fields, θᵥ_op, T₀, p₀, constants, surface)
     U² = wind_speed²ᶜᶜᶜ(i, j, grid, fields)
     U = sqrt(U²)
 
     # Virtual potential temperature at first grid level from diagnostic KernelFunctionOperation
-    θᵥ = @inbounds fields.θᵥ[i, j, 1]
+    θᵥ = θᵥ_op[i, j, 1]
     θᵥ₀ = surface_virtual_potential_temperature(T₀, p₀, constants, surface)
 
     # Get measurement height from grid
@@ -112,7 +112,8 @@ end
     surface = PlanarLiquidSurface()
 
     # Evaluate coefficient (handles both constant and callable)
-    Cᵀ = evaluate_scalar_coefficient(bf.coefficient, i, j, grid, fields, T₀, p₀, constants, surface)
+    θᵥ = bf.virtual_potential_temperature
+    Cᵀ = evaluate_scalar_coefficient(bf.coefficient, i, j, grid, fields, θᵥ, T₀, p₀, constants, surface)
 
     Δϕ = bulk_sensible_heat_difference(bf.formulation, i, j, T₀, constants, fields)
     return - ρ₀ * Cᵀ * Ũ * Δϕ
@@ -187,7 +188,8 @@ Base.summary(bf::BulkVaporFluxFunction) =
     Ũ = sqrt(U² + bf.gustiness^2)
 
     # Evaluate coefficient (handles both constant and callable)
-    Cᵛ = evaluate_scalar_coefficient(bf.coefficient, i, j, grid, fields, T₀, p₀, constants, surface)
+    θᵥ = bf.virtual_potential_temperature
+    Cᵛ = evaluate_scalar_coefficient(bf.coefficient, i, j, grid, fields, θᵥ, T₀, p₀, constants, surface)
 
     return - ρ₀ * Cᵛ * Ũ * Δq
 end

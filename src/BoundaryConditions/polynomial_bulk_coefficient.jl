@@ -1,5 +1,5 @@
 #####
-##### PolynomialBulkCoefficient: Wind and stability-dependent transfer coefficients
+##### PolynomialCoefficient: Wind and stability-dependent transfer coefficients
 #####
 
 """
@@ -24,7 +24,7 @@ Unstable conditions enhance transfer (ψ > 1), stable conditions reduce it (ψ <
 end
 
 """
-    PolynomialBulkCoefficient(;
+    PolynomialCoefficient(;
         neutral_coefficients = nothing,
         roughness_length = 1.5e-4,
         stability_function = default_stability_function
@@ -65,42 +65,42 @@ cell center above the surface.
 # Examples
 
 ```jldoctest
-using Breeze.BoundaryConditions: PolynomialBulkCoefficient
+using Breeze.BoundaryConditions: PolynomialCoefficient
 
 # Polynomial coefficient with default settings
-coef = PolynomialBulkCoefficient()
+coef = PolynomialCoefficient()
 
 # output
-PolynomialBulkCoefficient{Float64, Nothing, typeof(default_stability_function)}
+PolynomialCoefficient{Float64, Nothing, typeof(default_stability_function)}
 ├── neutral_coefficients: nothing
 └── roughness_length: 0.00015 m
 ```
 
 ```jldoctest
-using Breeze.BoundaryConditions: PolynomialBulkCoefficient
+using Breeze.BoundaryConditions: PolynomialCoefficient
 
 # With explicit coefficients
-coef = PolynomialBulkCoefficient(neutral_coefficients = (0.142, 0.076, 2.7))
+coef = PolynomialCoefficient(neutral_coefficients = (0.142, 0.076, 2.7))
 
 # output
-PolynomialBulkCoefficient{Float64, Tuple{Float64, Float64, Float64}, typeof(default_stability_function)}
+PolynomialCoefficient{Float64, Tuple{Float64, Float64, Float64}, typeof(default_stability_function)}
 ├── neutral_coefficients: (0.142, 0.076, 2.7)
 └── roughness_length: 0.00015 m
 ```
 
 ```jldoctest
-using Breeze.BoundaryConditions: PolynomialBulkCoefficient
+using Breeze.BoundaryConditions: PolynomialCoefficient
 
 # No stability correction
-coef = PolynomialBulkCoefficient(stability_function = nothing)
+coef = PolynomialCoefficient(stability_function = nothing)
 
 # output
-PolynomialBulkCoefficient{Float64, Nothing, Nothing}
+PolynomialCoefficient{Float64, Nothing, Nothing}
 ├── neutral_coefficients: nothing
 └── roughness_length: 0.00015 m
 ```
 """
-struct PolynomialBulkCoefficient{FT, C, SF}
+struct PolynomialCoefficient{FT, C, SF}
     neutral_coefficients :: C
     roughness_length :: FT
     minimum_wind_speed :: FT
@@ -108,32 +108,32 @@ struct PolynomialBulkCoefficient{FT, C, SF}
 end
 
 # Constructor with sensible defaults
-function PolynomialBulkCoefficient(FT = Float64;
+function PolynomialCoefficient(FT = Float64;
                                    neutral_coefficients = nothing,
                                    roughness_length = 1.5e-4,
                                    minimum_wind_speed = 0.1,
                                    stability_function = default_stability_function)
 
-    return PolynomialBulkCoefficient(neutral_coefficients,
+    return PolynomialCoefficient(neutral_coefficients,
                                      FT(roughness_length),
                                      FT(minimum_wind_speed),
                                      stability_function)
 end
 
-Adapt.adapt_structure(to, coef::PolynomialBulkCoefficient) =
-    PolynomialBulkCoefficient(Adapt.adapt(to, coef.neutral_coefficients),
+Adapt.adapt_structure(to, coef::PolynomialCoefficient) =
+    PolynomialCoefficient(Adapt.adapt(to, coef.neutral_coefficients),
                               Adapt.adapt(to, coef.roughness_length),
                               Adapt.adapt(to, coef.minimum_wind_speed),
                               coef.stability_function)
 
-function Base.show(io::IO, coef::PolynomialBulkCoefficient{FT}) where FT
-    println(io, "PolynomialBulkCoefficient{$FT}")
+function Base.show(io::IO, coef::PolynomialCoefficient{FT}) where FT
+    println(io, "PolynomialCoefficient{$FT}")
     println(io, "├── neutral_coefficients: ", coef.neutral_coefficients)
     print(io,   "└── roughness_length: ", coef.roughness_length, " m")
 end
 
-Base.summary(coef::PolynomialBulkCoefficient) =
-    string("PolynomialBulkCoefficient(", coef.neutral_coefficients, ")")
+Base.summary(coef::PolynomialCoefficient) =
+    string("PolynomialCoefficient(", coef.neutral_coefficients, ")")
 
 #####
 ##### Neutral coefficient computation (Large & Yeager 2009 form)
@@ -234,8 +234,8 @@ and ``δᵛᵈ = Rᵛ/Rᵈ - 1 ≈ 0.608``.
 @inline function surface_virtual_potential_temperature(T₀, p₀, constants, surface)
     qᵛ⁺ = saturation_total_specific_moisture(T₀, p₀, constants, surface)
 
-    Rᵈ = constants.dry_air.gas_constant
-    Rᵛ = constants.vapor.gas_constant
+    Rᵈ = dry_air_gas_constant(constants)
+    Rᵛ = vapor_gas_constant(constants)
     δᵛᵈ = Rᵛ / Rᵈ - 1
 
     return T₀ * (1 + δᵛᵈ * qᵛ⁺)
@@ -259,7 +259,7 @@ Evaluate the bulk transfer coefficient for given conditions with stability corre
 
 Returns the transfer coefficient (dimensionless).
 """
-@inline function (coef::PolynomialBulkCoefficient)(U, θᵥ, θᵥ₀, z, constants)
+@inline function (coef::PolynomialCoefficient)(U, θᵥ, θᵥ₀, z, constants)
     # Compute neutral coefficient at 10m
     C₁₀ = neutral_coefficient_10m(coef.neutral_coefficients, U, coef.minimum_wind_speed)
 
@@ -291,35 +291,35 @@ end
 """
 $(TYPEDSIGNATURES)
 
-Create a `BulkDrag` boundary condition with a `PolynomialBulkCoefficient`.
+Create a `BulkDrag` boundary condition with a `PolynomialCoefficient`.
 If `coef.neutral_coefficients` is `nothing`, automatically uses Large & Yeager (2009)
 momentum coefficients `(0.142, 0.076, 2.7)`.
 """
-function BulkDrag(coef::PolynomialBulkCoefficient; direction=nothing, gustiness=0)
+function BulkDrag(coef::PolynomialCoefficient; direction=nothing, gustiness=0, surface_temperature)
     # If neutral_coefficients is nothing, create a new coefficient with momentum coefficients
     if isnothing(coef.neutral_coefficients)
-        coef = PolynomialBulkCoefficient(
+        coef = PolynomialCoefficient(
             neutral_coefficients = (0.142, 0.076, 2.7),  # Large & Yeager (2009) momentum
             roughness_length = coef.roughness_length,
             minimum_wind_speed = coef.minimum_wind_speed,
             stability_function = coef.stability_function
         )
     end
-    df = BulkDragFunction(direction, coef, gustiness)
+    df = BulkDragFunction(direction, coef, gustiness, surface_temperature, nothing, nothing, nothing)
     return BoundaryCondition(Flux(), df)
 end
 
 """
 $(TYPEDSIGNATURES)
 
-Create a `BulkSensibleHeatFlux` boundary condition with a `PolynomialBulkCoefficient`.
+Create a `BulkSensibleHeatFlux` boundary condition with a `PolynomialCoefficient`.
 If `coef.neutral_coefficients` is `nothing`, automatically uses Large & Yeager (2009)
 sensible heat coefficients `(0.128, 0.068, 2.43)`.
 """
-function BulkSensibleHeatFlux(coef::PolynomialBulkCoefficient; gustiness=0, surface_temperature)
+function BulkSensibleHeatFlux(coef::PolynomialCoefficient; gustiness=0, surface_temperature)
     # If neutral_coefficients is nothing, create a new coefficient with sensible heat coefficients
     if isnothing(coef.neutral_coefficients)
-        coef = PolynomialBulkCoefficient(
+        coef = PolynomialCoefficient(
             neutral_coefficients = (0.128, 0.068, 2.43),  # Large & Yeager (2009) sensible heat
             roughness_length = coef.roughness_length,
             minimum_wind_speed = coef.minimum_wind_speed,
@@ -333,14 +333,14 @@ end
 """
 $(TYPEDSIGNATURES)
 
-Create a `BulkVaporFlux` boundary condition with a `PolynomialBulkCoefficient`.
+Create a `BulkVaporFlux` boundary condition with a `PolynomialCoefficient`.
 If `coef.neutral_coefficients` is `nothing`, automatically uses Large & Yeager (2009)
 latent heat coefficients `(0.120, 0.070, 2.55)`.
 """
-function BulkVaporFlux(coef::PolynomialBulkCoefficient; gustiness=0, surface_temperature)
+function BulkVaporFlux(coef::PolynomialCoefficient; gustiness=0, surface_temperature)
     # If neutral_coefficients is nothing, create a new coefficient with latent heat coefficients
     if isnothing(coef.neutral_coefficients)
-        coef = PolynomialBulkCoefficient(
+        coef = PolynomialCoefficient(
             neutral_coefficients = (0.120, 0.070, 2.55),  # Large & Yeager (2009) latent heat
             roughness_length = coef.roughness_length,
             minimum_wind_speed = coef.minimum_wind_speed,

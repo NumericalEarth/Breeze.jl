@@ -1,33 +1,33 @@
 using Test
 using Breeze
 using Breeze.BoundaryConditions
-using Breeze.BoundaryConditions: PolynomialBulkCoefficient,
+using Breeze.BoundaryConditions: PolynomialCoefficient,
                                  default_stability_function,
                                  neutral_coefficient_10m,
                                  adjust_coefficient_for_height,
                                  bulk_richardson_number
 using Oceananigans.BoundaryConditions: BoundaryCondition
 
-@testset "PolynomialBulkCoefficient" begin
+@testset "PolynomialCoefficient" begin
     @testset "Constructor and defaults" begin
         # Test default constructor
-        coef = PolynomialBulkCoefficient()
+        coef = PolynomialCoefficient()
         @test coef.neutral_coefficients === nothing
         @test coef.roughness_length == 1.5e-4
         @test coef.stability_function === default_stability_function
 
         # Test explicit coefficients
-        drag_coef = PolynomialBulkCoefficient(neutral_coefficients = (0.142, 0.076, 2.7))
+        drag_coef = PolynomialCoefficient(neutral_coefficients = (0.142, 0.076, 2.7))
         @test drag_coef.neutral_coefficients == (0.142, 0.076, 2.7)
 
-        heat_coef = PolynomialBulkCoefficient(neutral_coefficients = (0.128, 0.068, 2.43))
+        heat_coef = PolynomialCoefficient(neutral_coefficients = (0.128, 0.068, 2.43))
         @test heat_coef.neutral_coefficients == (0.128, 0.068, 2.43)
 
-        moisture_coef = PolynomialBulkCoefficient(neutral_coefficients = (0.120, 0.070, 2.55))
+        moisture_coef = PolynomialCoefficient(neutral_coefficients = (0.120, 0.070, 2.55))
         @test moisture_coef.neutral_coefficients == (0.120, 0.070, 2.55)
 
         # Test custom coefficients
-        custom_coef = PolynomialBulkCoefficient(
+        custom_coef = PolynomialCoefficient(
             neutral_coefficients = (1.0, 0.5, 0.1),
             roughness_length = 1e-3,
             stability_function = nothing
@@ -119,7 +119,7 @@ using Oceananigans.BoundaryConditions: BoundaryCondition
 
     @testset "Callable interface" begin
         # Test evaluation with no stability
-        coef = PolynomialBulkCoefficient(
+        coef = PolynomialCoefficient(
             neutral_coefficients = (0.142, 0.076, 2.7),
             stability_function = nothing
         )
@@ -133,7 +133,7 @@ using Oceananigans.BoundaryConditions: BoundaryCondition
         @test C > 0
 
         # Test with stability correction
-        coef_stable = PolynomialBulkCoefficient(
+        coef_stable = PolynomialCoefficient(
             neutral_coefficients = (0.142, 0.076, 2.7),
             stability_function = default_stability_function
         )
@@ -145,18 +145,20 @@ using Oceananigans.BoundaryConditions: BoundaryCondition
     end
 
     @testset "Integration with BulkDrag" begin
-        # Test that PolynomialBulkCoefficient works with BulkDrag constructor
-        coef = PolynomialBulkCoefficient()
-        bc = BulkDrag(coef, gustiness = 0.5)
+        # Test that PolynomialCoefficient works with BulkDrag constructor
+        coef = PolynomialCoefficient()
+        SST(x, y) = 300.0
+        bc = BulkDrag(coef, gustiness = 0.5, surface_temperature = SST)
         @test bc isa BoundaryCondition
         # Coefficient should have been materialized with momentum coefficients
         @test bc.condition.coefficient.neutral_coefficients == (0.142, 0.076, 2.7)
         @test bc.condition.gustiness == 0.5
+        @test bc.condition.surface_temperature === SST
     end
 
     @testset "Integration with BulkSensibleHeatFlux" begin
-        # Test that PolynomialBulkCoefficient works with BulkSensibleHeatFlux
-        coef = PolynomialBulkCoefficient()
+        # Test that PolynomialCoefficient works with BulkSensibleHeatFlux
+        coef = PolynomialCoefficient()
         SST(x, y) = 300.0
         bc = BulkSensibleHeatFlux(coef, surface_temperature = SST)
         @test bc isa BoundaryCondition
@@ -165,8 +167,8 @@ using Oceananigans.BoundaryConditions: BoundaryCondition
     end
 
     @testset "Integration with BulkVaporFlux" begin
-        # Test that PolynomialBulkCoefficient works with BulkVaporFlux
-        coef = PolynomialBulkCoefficient()
+        # Test that PolynomialCoefficient works with BulkVaporFlux
+        coef = PolynomialCoefficient()
         SST(x, y) = 300.0
         bc = BulkVaporFlux(coef, surface_temperature = SST)
         @test bc isa BoundaryCondition

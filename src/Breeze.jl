@@ -79,6 +79,7 @@ export
     BulkDrag,
     BulkSensibleHeatFlux,
     BulkVaporFlux,
+    PolynomialCoefficient,
 
     # Forcing utilities
     geostrophic_forcings,

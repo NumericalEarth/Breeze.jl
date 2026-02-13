@@ -18,7 +18,6 @@
 # simple yet effective representation of cloud processes in moist convection.
 
 using Breeze
-using Breeze.BoundaryConditions: PolynomialBulkCoefficient
 using Oceananigans
 using Oceananigans.Units
 using Printf
@@ -103,7 +102,7 @@ scalar_advection = WENO(order=5)
 #
 # ## Wind and stability-dependent transfer coefficients
 #
-# Rather than using constant transfer coefficients, we use `PolynomialBulkCoefficient`
+# Rather than using constant transfer coefficients, we use `PolynomialCoefficient`
 # which implements the wind speed and stability-dependent formulation from Large & Yeager (2009).
 # This provides a more realistic representation of air-sea exchange processes.
 #
@@ -125,14 +124,13 @@ Uᵍ = 1e-2  # Minimum wind speed (m/s)
 
 # Create a polynomial bulk coefficient that will be automatically configured
 # for each flux type
-coef = PolynomialBulkCoefficient(roughness_length = 1.5e-4)
+coef = PolynomialCoefficient(roughness_length = 1.5e-4)
 
-ρu_surface_flux = ρv_surface_flux = Breeze.BulkDrag(coef, gustiness=Uᵍ)
-
-# ## Sensible heat flux and vapor fluxes
+# ## Surface temperature
 #
-# For `BulkVaporFlux`, the saturation specific humidity is computed from the surface
-# temperature. Surface temperature can be provided as a `Field`, a `Function`, or a `Number`.
+# The sea surface temperature enters the bulk formulas for sensible heat,
+# moisture fluxes, and (when using `PolynomialCoefficient`) the stability
+# correction for the transfer coefficients.
 #
 # In this example, we specify the sea surface temperature as a top hat function
 # i.e. representing a pair of ocean fronts in a periodic domain, with a
@@ -141,6 +139,19 @@ coef = PolynomialBulkCoefficient(roughness_length = 1.5e-4)
 ΔT = 4 # K
 T₀(x) = θ₀ + ΔT / 2 * sign(cos(2π * x / grid.Lx))
 
+# ## Momentum drag
+#
+# The `BulkDrag` boundary condition requires `surface_temperature` when using
+# `PolynomialCoefficient`, since the stability correction depends on the
+# surface virtual potential temperature.
+
+ρu_surface_flux = ρv_surface_flux = Breeze.BulkDrag(coef, gustiness=Uᵍ, surface_temperature=T₀)
+
+# ## Sensible heat flux and vapor fluxes
+#
+# For `BulkVaporFlux`, the saturation specific humidity is computed from the surface
+# temperature. Surface temperature can be provided as a `Field`, a `Function`, or a `Number`.
+#
 # We complete our specification by using the same polynomial coefficient for
 # sensible and latent heat fluxes. The flux type will be automatically inferred:
 

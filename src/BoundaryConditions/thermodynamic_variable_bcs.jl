@@ -292,19 +292,21 @@ end
 # Regularize EnergyFluxBoundaryCondition: populate side, microphysics, and thermodynamic_constants
 const UnregularizedEnergyFluxBC = BoundaryCondition{<:Flux, <:EnergyFluxBoundaryConditionFunction{<:Any, Nothing}}
 
-function regularize_atmosphere_boundary_condition(bc::UnregularizedEnergyFluxBC,
-                                                  side, loc, grid, dynamics, microphysics, surface_pressure, constants)
+function materialize_atmosphere_boundary_condition(bc::UnregularizedEnergyFluxBC,
+                                                  side, loc, grid, dynamics, microphysics, surface_pressure, constants,
+                                                  microphysical_fields, specific_moisture, temperature)
     ef = bc.condition
     density = dynamics_density(dynamics)
     new_ef = EnergyFluxBoundaryConditionFunction(ef.condition, side, microphysics, constants, density)
     return BoundaryCondition(Flux(), new_ef)
 end
 
-# Regularize ThetaFluxBoundaryCondition: populate side, microphysics, and thermodynamic_constants
+# Materialize ThetaFluxBoundaryCondition: populate side, microphysics, and thermodynamic_constants
 const UnregularizedThetaFluxBC = BoundaryCondition{<:Flux, <:ThetaFluxBoundaryConditionFunction{<:Any, Nothing}}
 
-function regularize_atmosphere_boundary_condition(bc::UnregularizedThetaFluxBC,
-                                                  side, loc, grid, dynamics, microphysics, surface_pressure, constants)
+function materialize_atmosphere_boundary_condition(bc::UnregularizedThetaFluxBC,
+                                                  side, loc, grid, dynamics, microphysics, surface_pressure, constants,
+                                                  microphysical_fields, specific_moisture, temperature)
     tf = bc.condition
     density = dynamics_density(dynamics)
     new_tf = ThetaFluxBoundaryConditionFunction(tf.condition, side, microphysics, constants, density)
@@ -321,7 +323,7 @@ function set_sensible_heat_formulation(bc::BulkSensibleHeatFluxBoundaryCondition
     bf = bc.condition
     new_bf = BulkSensibleHeatFluxFunction(bf.coefficient, bf.gustiness, bf.surface_temperature,
                                            bf.surface_pressure, bf.thermodynamic_constants,
-                                           formulation)
+                                           formulation, bf.virtual_potential_temperature)
     return BoundaryCondition(Flux(), new_bf)
 end
 
