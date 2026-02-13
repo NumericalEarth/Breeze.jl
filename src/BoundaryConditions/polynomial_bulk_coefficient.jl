@@ -10,31 +10,46 @@ const default_neutral_sensible_heat_polynomial   = (0.128, 0.068, 2.43)
 const default_neutral_latent_heat_polynomial     = (0.120, 0.070, 2.55)
 
 """
-$(TYPEDSIGNATURES)
+    DefaultStabilityFunction()
 
-Default stability function based on bulk Richardson number.
+Stability correction factor based on the bulk Richardson number ``Ri_b``.
 
-For unstable conditions (Riᵦ < 0):
-    ψ = √(1 - 16 Riᵦ)
+For unstable conditions (``Ri_b < 0``):
+```math
+ψ = √(1 - 16 \\, Ri_b)
+```
 
-For stable conditions (Riᵦ ≥ 0):
-    ψ = 1 / (1 + 10 Riᵦ)
+For stable conditions (``Ri_b ≥ 0``):
+```math
+ψ = 1 / (1 + 10 \\, Ri_b)
+```
 
-Returns the factor by which to multiply the neutral coefficient.
-Unstable conditions enhance transfer (ψ > 1), stable conditions reduce it (ψ < 1).
+Multiplies the neutral transfer coefficient so that unstable conditions
+enhance transfer (``ψ > 1``) and stable conditions reduce it (``ψ < 1``).
 """
-@inline function default_stability_function(Riᵦ)
-    # Unstable: sqrt(1 - 16*Ri_b), Stable: 1/(1 + 10*Ri_b)
-    Ψ⁻ = sqrt(max(1 - 16 * Riᵦ, 0))  # unstable branch. max to avoid negative sqrt
-    Ψ⁺ = 1 / (1 + 10 * max(Riᵦ, 0))  # stable branch. max to handle Ri_b < 0
+struct DefaultStabilityFunction end
+
+@inline function (::DefaultStabilityFunction)(Riᵦ)
+    Ψ⁻ = sqrt(max(1 - 16 * Riᵦ, 0))  # unstable branch
+    Ψ⁺ = 1 / (1 + 10 * max(Riᵦ, 0))  # stable branch
     return ifelse(Riᵦ < 0, Ψ⁻, Ψ⁺)
 end
+
+Base.summary(::DefaultStabilityFunction) = "ψ(Ri) = √(1-16Ri) unstable, 1/(1+10Ri) stable"
+
+function Base.show(io::IO, ::DefaultStabilityFunction)
+    println(io, "DefaultStabilityFunction")
+    println(io, "├── Riᵦ < 0 (unstable): ψ = √(1 - 16 Riᵦ)")
+    print(io,   "└── Riᵦ ≥ 0 (stable):   ψ = 1 / (1 + 10 Riᵦ)")
+end
+
+const default_stability_function = DefaultStabilityFunction()
 
 """
     PolynomialCoefficient(;
         polynomial = nothing,
         roughness_length = 1.5e-4,
-        stability_function = default_stability_function
+        stability_function = DefaultStabilityFunction()
     )
 
 A bulk transfer coefficient that depends on wind speed and atmospheric stability,
@@ -63,8 +78,8 @@ will be automatically selected based on the boundary condition type:
   is automatically selected by the boundary condition constructor.
 - `roughness_length`: Surface roughness ℓ in meters (default: 1.5e-4, typical for ocean)
 - `minimum_wind_speed`: Minimum wind speed to avoid singularity in a₂/U term (default: 0.1 m/s)
-- `stability_function`: Function `ψ(Riᵦ)` that computes stability correction factor from bulk Richardson number.
-  Set to `nothing` to disable stability correction. Default is `default_stability_function`.
+- `stability_function`: Callable `ψ(Riᵦ)` that computes stability correction factor from bulk Richardson number.
+  Set to `nothing` to disable stability correction. Default is `DefaultStabilityFunction()`.
 
 The measurement height is automatically determined from the grid as the height of the first
 cell center above the surface.
@@ -80,19 +95,23 @@ coef = PolynomialCoefficient()
 # output
 PolynomialCoefficient{Float64}
 ├── polynomial: nothing
-└── roughness_length: 0.00015 m
+├── roughness_length: 0.00015 m
+├── minimum_wind_speed: 0.1 m/s
+└── stability_function: ψ(Ri) = √(1-16Ri) unstable, 1/(1+10Ri) stable
 ```
 
 ```jldoctest
 using Breeze.BoundaryConditions: PolynomialCoefficient
 
-# With explicit coefficients
+# With explicit polynomial
 coef = PolynomialCoefficient(polynomial = (0.142, 0.076, 2.7))
 
 # output
 PolynomialCoefficient{Float64}
 ├── polynomial: (0.142, 0.076, 2.7)
-└── roughness_length: 0.00015 m
+├── roughness_length: 0.00015 m
+├── minimum_wind_speed: 0.1 m/s
+└── stability_function: ψ(Ri) = √(1-16Ri) unstable, 1/(1+10Ri) stable
 ```
 
 ```jldoctest
@@ -104,7 +123,9 @@ coef = PolynomialCoefficient(stability_function = nothing)
 # output
 PolynomialCoefficient{Float64}
 ├── polynomial: nothing
-└── roughness_length: 0.00015 m
+├── roughness_length: 0.00015 m
+├── minimum_wind_speed: 0.1 m/s
+└── stability_function: Nothing
 ```
 """
 struct PolynomialCoefficient{FT, C, SF, θᵛ, P, TC}
@@ -122,7 +143,7 @@ function PolynomialCoefficient(FT = Float64;
                                polynomial = nothing,
                                roughness_length = 1.5e-4,
                                minimum_wind_speed = 0.1,
-                               stability_function = default_stability_function)
+                               stability_function = DefaultStabilityFunction())
 
     return PolynomialCoefficient(polynomial,
                                  FT(roughness_length),
@@ -143,11 +164,14 @@ Adapt.adapt_structure(to, coef::PolynomialCoefficient) =
 function Base.show(io::IO, coef::PolynomialCoefficient{FT}) where FT
     println(io, "PolynomialCoefficient{$FT}")
     println(io, "├── polynomial: ", coef.polynomial)
-    print(io,   "└── roughness_length: ", coef.roughness_length, " m")
+    println(io, "├── roughness_length: ", coef.roughness_length, " m")
+    println(io, "├── minimum_wind_speed: ", coef.minimum_wind_speed, " m/s")
+    print(io,   "└── stability_function: ", summary(coef.stability_function))
 end
 
 Base.summary(coef::PolynomialCoefficient) =
     string("PolynomialCoefficient(", coef.polynomial, ")")
+Base.summary(::Nothing) = "Nothing"
 
 #####
 ##### Neutral coefficient computation (Large & Yeager 2009 form)
@@ -226,15 +250,16 @@ end
 """
 $(TYPEDSIGNATURES)
 
-compute virtual potential temperature over a planar `surface`
+Compute virtual potential temperature over a planar `surface`
 with surface temperature `T₀` and surface pressure `p₀`,
 
 ```math
 θᵥ₀ = T₀ (1 + δᵛᵈ qᵛ⁺)
 ```
 
-where qᵛ⁺ is the saturation total specific moisture,
-and ``δᵛᵈ = Rᵛ/Rᵈ - 1 ≈ 0.608``.
+where ``qᵛ⁺`` is the saturation specific humidity at the surface
+and ``δᵛᵈ = Rᵛ/Rᵈ - 1`` (≈ 0.608 for water vapor in Earth's atmosphere;
+the actual value depends on the gas constants in `constants`).
 """
 @inline function surface_virtual_potential_temperature(T₀, p₀, constants, surface)
     qᵛ⁺ = saturation_total_specific_moisture(T₀, p₀, constants, surface)
@@ -269,27 +294,27 @@ Returns the transfer coefficient (dimensionless).
 """
 @inline function (coef::PolynomialCoefficient)(i, j, grid, U, T₀)
     # Compute neutral coefficient at 10m
-    C₁₀ = neutral_coefficient_10m(coef.polynomial, U, coef.minimum_wind_speed)
+    C¹⁰ = neutral_coefficient_10m(coef.polynomial, U, coef.minimum_wind_speed)
 
     # Adjust for measurement height
     h = znode(i, j, 1, grid, Center(), Center(), Center())
-    Cz = adjust_coefficient_for_height(C₁₀, h, coef.roughness_length)
+    Cʰ = adjust_coefficient_for_height(C¹⁰, h, coef.roughness_length)
 
     # Apply stability correction
-    return stability_corrected_coefficient(i, j, grid, coef, Cz, U, T₀)
+    return stability_corrected_coefficient(i, j, grid, coef, Cʰ, U, T₀)
 end
 
 # No stability correction (stability_function = nothing)
-@inline stability_corrected_coefficient(i, j, grid, ::PolynomialCoefficient{<:Any, <:Any, Nothing}, Cz, U, T₀) = Cz
+@inline stability_corrected_coefficient(i, j, grid, ::PolynomialCoefficient{<:Any, <:Any, Nothing}, Cʰ, U, T₀) = Cʰ
 
 # Stability correction with a function — uses stored VPT and surface pressure
-@inline function stability_corrected_coefficient(i, j, grid, coef::PolynomialCoefficient, Cz, U, T₀)
+@inline function stability_corrected_coefficient(i, j, grid, coef::PolynomialCoefficient, Cʰ, U, T₀)
     h = znode(i, j, 1, grid, Center(), Center(), Center())
     θᵥ = @inbounds coef.virtual_potential_temperature[i, j, 1]
     surface = PlanarLiquidSurface()
     θᵥ₀ = surface_virtual_potential_temperature(T₀, coef.surface_pressure, coef.thermodynamic_constants, surface)
     Riᵦ = bulk_richardson_number(h, θᵥ, θᵥ₀, U, coef.minimum_wind_speed)
-    return Cz * coef.stability_function(Riᵦ)
+    return Cʰ * coef.stability_function(Riᵦ)
 end
 
 #####

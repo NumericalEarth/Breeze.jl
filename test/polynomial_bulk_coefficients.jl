@@ -2,7 +2,7 @@ using Test
 using Breeze
 using Breeze.BoundaryConditions
 using Breeze.BoundaryConditions: PolynomialCoefficient,
-                                 default_stability_function,
+                                 DefaultStabilityFunction,
                                  neutral_coefficient_10m,
                                  adjust_coefficient_for_height,
                                  bulk_richardson_number
@@ -15,7 +15,7 @@ using Oceananigans.BoundaryConditions: BoundaryCondition
         coef = PolynomialCoefficient()
         @test coef.polynomial === nothing
         @test coef.roughness_length == 1.5e-4
-        @test coef.stability_function === default_stability_function
+        @test coef.stability_function isa DefaultStabilityFunction
 
         # Test explicit coefficients
         drag_coef = PolynomialCoefficient(polynomial = (0.142, 0.076, 2.7))
@@ -104,17 +104,17 @@ using Oceananigans.BoundaryConditions: BoundaryCondition
     @testset "Stability functions" begin
         # Unstable conditions (Ri < 0) enhance transfer
         Ri_unstable = -0.1
-        ψ_unstable = default_stability_function(Ri_unstable)
+        ψ_unstable = DefaultStabilityFunction()(Ri_unstable)
         @test ψ_unstable > 1.0
 
         # Neutral conditions (Ri = 0) don't modify coefficient
         Ri_neutral = 0.0
-        ψ_neutral = default_stability_function(Ri_neutral)
+        ψ_neutral = DefaultStabilityFunction()(Ri_neutral)
         @test ψ_neutral ≈ 1.0
 
         # Stable conditions (Ri > 0) reduce transfer
         Ri_stable = 0.1
-        ψ_stable = default_stability_function(Ri_stable)
+        ψ_stable = DefaultStabilityFunction()(Ri_stable)
         @test ψ_stable < 1.0
     end
 
@@ -141,7 +141,7 @@ using Oceananigans.BoundaryConditions: BoundaryCondition
             (0.142, 0.076, 2.7),     # polynomial
             coef.roughness_length,
             coef.minimum_wind_speed,
-            default_stability_function,
+            DefaultStabilityFunction(),
             θᵥ_field,                # virtual_potential_temperature
             1e5,                     # surface_pressure
             Breeze.Thermodynamics.ThermodynamicConstants()
