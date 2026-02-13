@@ -205,11 +205,12 @@ Cᴰ_stable   = [Cᴰ * ψ(bulk_richardson_number(h, θ₀, T_stable,   U, U_min
 Cᴰ_sim_warm = [Cᴰ * ψ(bulk_richardson_number(h, θ₀, T_warm, U, U_min)) for (Cᴰ, U) in zip(Cᴰ_neutral, U_range)]
 Cᴰ_sim_cold = [Cᴰ * ψ(bulk_richardson_number(h, θ₀, T_cold, U, U_min)) for (Cᴰ, U) in zip(Cᴰ_neutral, U_range)]
 
-fig_coef = Figure(size=(600, 400))
+fig_coef = Figure(size=(1100, 400))
+
 ax_coef = Axis(fig_coef[1, 1],
                xlabel = "Wind speed (m/s)",
                ylabel = "Cᴰ × 10³",
-               title = "Drag coefficient at 10 m (Large & Yeager 2009)")
+               title = "Drag coefficient at 10 m")
 
 band!(ax_coef, collect(U_range), Cᴰ_sim_cold .* 1e3, Cᴰ_sim_warm .* 1e3,
       color=(:grey, 0.3), label="Simulation range (ΔT = $ΔT K)")
@@ -218,6 +219,17 @@ lines!(ax_coef, U_range, Cᴰ_neutral  .* 1e3, color=:black,      linewidth=2, l
 lines!(ax_coef, U_range, Cᴰ_stable   .* 1e3, color=:dodgerblue, linewidth=2, label="Stable (ΔT = -$ΔT_line K)")
 
 axislegend(ax_coef, position=:rt)
+
+ax_ratio = Axis(fig_coef[1, 2],
+                xlabel = "Wind speed (m/s)",
+                ylabel = "Cᴰ / Cᴰ_neutral",
+                title = "Stability correction factor")
+
+band!(ax_ratio, collect(U_range), Cᴰ_sim_cold ./ Cᴰ_neutral, Cᴰ_sim_warm ./ Cᴰ_neutral,
+      color=(:grey, 0.3))
+lines!(ax_ratio, U_range, Cᴰ_unstable ./ Cᴰ_neutral, color=:firebrick,  linewidth=2)
+lines!(ax_ratio, U_range, ones(length(U_range)),       color=:black,      linewidth=2)
+lines!(ax_ratio, U_range, Cᴰ_stable   ./ Cᴰ_neutral, color=:dodgerblue, linewidth=2)
 
 save("polynomial_coefficient_wind_stability.png", fig_coef)
 nothing #hide
