@@ -180,42 +180,35 @@ T₀(x) = θ₀ + ΔT / 2 * sign(cos(2π * x / grid.Lx))
 ρe_surface_flux = BulkSensibleHeatFlux(coefficient=coef, gustiness=Uᵍ, surface_temperature=T₀)
 ρqᵗ_surface_flux = BulkVaporFlux(coefficient=coef, gustiness=Uᵍ, surface_temperature=T₀)
 
-# We can visualize how the transfer coefficient varies with wind speed for different
-# stability conditions. The measurement height is the first cell center,
+# We can visualize how the neutral drag coefficient varies with wind speed,
+# and the range of stability-corrected values expected in this simulation.
+# The SST ranges from ``θ₀ - ΔT/2`` (cold, stable) to ``θ₀ + ΔT/2`` (warm, unstable),
+# so the stability correction spans these two limits.
 
 using Breeze.BoundaryConditions: neutral_coefficient_10m, bulk_richardson_number,
                                  default_neutral_drag_polynomial
 
 h = grid.Lz / grid.Nz / 2  # first cell center height
-ℓ = 1.5e-4                  # roughness length
 U_min = 0.1
-
-U_range = range(0.5, 25, length=200)
 ψ = DefaultStabilityFunction()
 
-## Compute drag coefficient for three stability cases
-Cᴰ_neutral  = zeros(length(U_range))
-Cᴰ_unstable = zeros(length(U_range))
-Cᴰ_stable   = zeros(length(U_range))
+T_warm = θ₀ + ΔT / 2  # warm SST (unstable)
+T_cold = θ₀ - ΔT / 2  # cold SST (stable)
 
-for (i, U) in enumerate(U_range)
-    C₁₀ = neutral_coefficient_10m(default_neutral_drag_polynomial, U, U_min)
-    Cz = C₁₀ * (log(10 / ℓ) / log(h / ℓ))^2
-
-    Cᴰ_neutral[i]  = Cz * ψ(0.0)
-    Cᴰ_unstable[i] = Cz * ψ(bulk_richardson_number(h, 288.0, 290.0, U, U_min))
-    Cᴰ_stable[i]   = Cz * ψ(bulk_richardson_number(h, 292.0, 290.0, U, U_min))
-end
+U_range = range(0.5, 25, length=200)
+Cᴰ_neutral  = [neutral_coefficient_10m(default_neutral_drag_polynomial, U, U_min) for U in U_range]
+Cᴰ_unstable = [Cᴰ * ψ(bulk_richardson_number(h, θ₀, T_warm, U, U_min)) for (Cᴰ, U) in zip(Cᴰ_neutral, U_range)]
+Cᴰ_stable   = [Cᴰ * ψ(bulk_richardson_number(h, θ₀, T_cold, U, U_min)) for (Cᴰ, U) in zip(Cᴰ_neutral, U_range)]
 
 fig_coef = Figure(size=(600, 400))
 ax_coef = Axis(fig_coef[1, 1],
                xlabel = "Wind speed (m/s)",
-               ylabel = "Cᴰ",
-               title = "Drag coefficient at h = $(round(h, digits=1)) m")
+               ylabel = "Cᴰ × 10³",
+               title = "Neutral drag coefficient at 10 m (Large & Yeager 2009)")
 
-lines!(ax_coef, U_range, Cᴰ_unstable, color=:firebrick,  linewidth=2, label="Unstable (θᵥ = 288 K, θᵥ₀ = 290 K)")
-lines!(ax_coef, U_range, Cᴰ_neutral,  color=:black,      linewidth=2, label="Neutral")
-lines!(ax_coef, U_range, Cᴰ_stable,   color=:dodgerblue,  linewidth=2, label="Stable (θᵥ = 292 K, θᵥ₀ = 290 K)")
+band!(ax_coef, collect(U_range), Cᴰ_stable .* 1e3, Cᴰ_unstable .* 1e3,
+      color=(:grey, 0.3), label="Stability range (ΔT = $ΔT K)")
+lines!(ax_coef, U_range, Cᴰ_neutral .* 1e3, color=:black, linewidth=2, label="Neutral")
 
 axislegend(ax_coef, position=:rt)
 
