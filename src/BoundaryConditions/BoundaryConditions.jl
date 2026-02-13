@@ -205,20 +205,27 @@ materialize_atmosphere_boundary_condition(bc, side, loc, grid, dynamics, microph
                                           microphysical_fields, specific_moisture, temperature) = bc
 
 #####
-##### Lazy VirtualPotentialTemperature creation
+##### Materialize coefficient: fill in VPT/pressure/constants for PolynomialCoefficient
 #####
 
-# Default: no VPT needed for non-callable coefficients
-maybe_create_virtual_potential_temperature(coefficient, grid, dynamics, microphysics,
-                                           microphysical_fields, specific_moisture, temperature, constants) = nothing
+# Default: pass through unchanged (constant coefficients, etc.)
+materialize_coefficient(C, grid, dynamics, microphysics, surface_pressure, constants,
+                        microphysical_fields, specific_moisture, temperature) = C
 
-# Create VPT for PolynomialCoefficient
-function maybe_create_virtual_potential_temperature(::PolynomialCoefficient, grid, dynamics, microphysics,
-                                                    microphysical_fields, specific_moisture, temperature, constants)
+# For PolynomialCoefficient: create VPT and return a fully-populated coefficient
+function materialize_coefficient(coef::PolynomialCoefficient, grid, dynamics, microphysics,
+                                 surface_pressure, constants,
+                                 microphysical_fields, specific_moisture, temperature)
     reference_state = dynamics.reference_state
-    return VirtualPotentialTemperature(grid;
+    θᵥ = VirtualPotentialTemperature(grid;
         reference_state, microphysics, microphysical_fields,
         specific_moisture, temperature, thermodynamic_constants=constants)
+
+    return PolynomialCoefficient(coef.neutral_coefficients,
+                                 coef.roughness_length,
+                                 coef.minimum_wind_speed,
+                                 coef.stability_function,
+                                 θᵥ, surface_pressure, constants)
 end
 
 #####
@@ -228,10 +235,10 @@ end
 function materialize_bulk_drag(df, grid, dynamics, microphysics, surface_pressure, constants,
                                microphysical_fields, specific_moisture, temperature)
     T₀ = materialize_surface_field(df.surface_temperature, grid)
-    θᵥ = maybe_create_virtual_potential_temperature(df.coefficient, grid, dynamics, microphysics,
-                                                     microphysical_fields, specific_moisture, temperature, constants)
-    new_df = BulkDragFunction(df.direction, df.coefficient, df.gustiness,
-                              T₀, surface_pressure, constants, θᵥ)
+    coef = materialize_coefficient(df.coefficient, grid, dynamics, microphysics,
+                                   surface_pressure, constants,
+                                   microphysical_fields, specific_moisture, temperature)
+    new_df = BulkDragFunction(df.direction, coef, df.gustiness, T₀)
     return BoundaryCondition(Flux(), new_df)
 end
 
@@ -251,8 +258,7 @@ function materialize_atmosphere_boundary_condition(bc::BoundaryCondition{<:Flux,
         throw(ArgumentError("Can only specify BulkDrag on x-momentum or y-momentum fields!"))
     end
 
-    directed_df = BulkDragFunction(direction, df.coefficient, df.gustiness,
-                                   df.surface_temperature, nothing, nothing, nothing)
+    directed_df = BulkDragFunction(direction, df.coefficient, df.gustiness, df.surface_temperature)
     return materialize_bulk_drag(directed_df, grid, dynamics, microphysics, surface_pressure, constants,
                                  microphysical_fields, specific_moisture, temperature)
 end
@@ -272,28 +278,30 @@ function materialize_atmosphere_boundary_condition(bc::BoundaryCondition{<:Flux,
                                  microphysical_fields, specific_moisture, temperature)
 end
 
-# Materialize BulkSensibleHeatFlux: populate surface_pressure, thermodynamic_constants, VPT, preserve formulation
+# Materialize BulkSensibleHeatFlux: populate surface_pressure, thermodynamic_constants, preserve formulation
 function materialize_atmosphere_boundary_condition(bc::BulkSensibleHeatFluxBoundaryCondition,
                                                   side, loc, grid, dynamics, microphysics, surface_pressure, constants,
                                                   microphysical_fields, specific_moisture, temperature)
     bf = bc.condition
     T₀ = materialize_surface_field(bf.surface_temperature, grid)
-    θᵥ = maybe_create_virtual_potential_temperature(bf.coefficient, grid, dynamics, microphysics,
-                                                     microphysical_fields, specific_moisture, temperature, constants)
-    new_bf = BulkSensibleHeatFluxFunction(bf.coefficient, bf.gustiness, T₀, surface_pressure, constants, bf.formulation, θᵥ)
+    coef = materialize_coefficient(bf.coefficient, grid, dynamics, microphysics,
+                                   surface_pressure, constants,
+                                   microphysical_fields, specific_moisture, temperature)
+    new_bf = BulkSensibleHeatFluxFunction(coef, bf.gustiness, T₀, surface_pressure, constants, bf.formulation)
     return BoundaryCondition(Flux(), new_bf)
 end
 
-# Materialize BulkVaporFlux: populate surface_pressure, thermodynamic_constants, surface, and VPT
+# Materialize BulkVaporFlux: populate surface_pressure, thermodynamic_constants, and surface
 function materialize_atmosphere_boundary_condition(bc::BulkVaporFluxBoundaryCondition,
                                                   side, loc, grid, dynamics, microphysics, surface_pressure, constants,
                                                   microphysical_fields, specific_moisture, temperature)
     bf = bc.condition
     T₀ = materialize_surface_field(bf.surface_temperature, grid)
     surface = PlanarLiquidSurface()
-    θᵥ = maybe_create_virtual_potential_temperature(bf.coefficient, grid, dynamics, microphysics,
-                                                     microphysical_fields, specific_moisture, temperature, constants)
-    new_bf = BulkVaporFluxFunction(bf.coefficient, bf.gustiness, T₀, surface_pressure, constants, surface, θᵥ)
+    coef = materialize_coefficient(bf.coefficient, grid, dynamics, microphysics,
+                                   surface_pressure, constants,
+                                   microphysical_fields, specific_moisture, temperature)
+    new_bf = BulkVaporFluxFunction(coef, bf.gustiness, T₀, surface_pressure, constants, surface)
     return BoundaryCondition(Flux(), new_bf)
 end
 

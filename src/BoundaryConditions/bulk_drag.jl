@@ -2,14 +2,11 @@
 ##### BulkDragFunction for momentum fluxes
 #####
 
-struct BulkDragFunction{D, C, G, T, P, TC, θᵛ}
+struct BulkDragFunction{D, C, G, T}
     direction :: D
     coefficient :: C
     gustiness :: G
     surface_temperature :: T
-    surface_pressure :: P
-    thermodynamic_constants :: TC
-    virtual_potential_temperature :: θᵛ
 end
 
 """
@@ -34,7 +31,7 @@ where `Cᴰ` is the drag coefficient, `|U| = √(u² + v² + gustiness²)` is th
 - `gustiness`: Minimum wind speed to prevent singularities when winds are calm (default: `0`)
 """
 function BulkDragFunction(; direction=nothing, coefficient=1e-3, gustiness=0)
-    return BulkDragFunction(direction, coefficient, gustiness, nothing, nothing, nothing, nothing)
+    return BulkDragFunction(direction, coefficient, gustiness, nothing)
 end
 
 const XDirectionBulkDragFunction = BulkDragFunction{<:XDirection}
@@ -44,10 +41,7 @@ Adapt.adapt_structure(to, df::BulkDragFunction) =
     BulkDragFunction(Adapt.adapt(to, df.direction),
                      Adapt.adapt(to, df.coefficient),
                      Adapt.adapt(to, df.gustiness),
-                     Adapt.adapt(to, df.surface_temperature),
-                     Adapt.adapt(to, df.surface_pressure),
-                     Adapt.adapt(to, df.thermodynamic_constants),
-                     Adapt.adapt(to, df.virtual_potential_temperature))
+                     Adapt.adapt(to, df.surface_temperature))
 
 Base.summary(df::BulkDragFunction) = string("BulkDragFunction(direction=", summary(df.direction),
                                             ", coefficient=", df.coefficient,
@@ -60,21 +54,12 @@ Base.summary(df::BulkDragFunction) = string("BulkDragFunction(direction=", summa
 # For constant coefficients — no stability correction needed, no field access
 @inline evaluate_drag_coefficient(df::BulkDragFunction{<:Any, <:Number}, i, j, grid, fields) = df.coefficient
 
-# For callable coefficients (e.g., PolynomialCoefficient) with stability correction
+# For callable coefficients (e.g., PolynomialCoefficient) — coefficient handles stability internally
 @inline function evaluate_drag_coefficient(df::BulkDragFunction, i, j, grid, fields)
-    C = df.coefficient
     T₀ = surface_value(i, j, df.surface_temperature)
-    θᵥ_op = df.virtual_potential_temperature
-    p₀ = df.surface_pressure
-    constants = df.thermodynamic_constants
-    surface = PlanarLiquidSurface()
-
     U² = wind_speed²ᶜᶜᶜ(i, j, grid, fields)
     U = sqrt(U²)
-    θᵥ = θᵥ_op[i, j, 1]
-    θᵥ₀ = surface_virtual_potential_temperature(T₀, p₀, constants, surface)
-    z = znode(i, j, 1, grid, Center(), Center(), Center())
-    return C(U, θᵥ, θᵥ₀, z, constants)
+    return df.coefficient(i, j, grid, U, T₀)
 end
 
 #####

@@ -5,14 +5,13 @@
 struct PotentialTemperatureFlux end
 struct StaticEnergyFlux end
 
-struct BulkSensibleHeatFluxFunction{C, G, T, P, TC, F, θᵛ}
+struct BulkSensibleHeatFluxFunction{C, G, T, P, TC, F}
     coefficient :: C
     gustiness :: G
     surface_temperature :: T
     surface_pressure :: P
     thermodynamic_constants :: TC
     formulation :: F
-    virtual_potential_temperature :: θᵛ
 end
 
 """
@@ -42,7 +41,7 @@ thermodynamic formulation.
                          Functions are converted to Fields during model construction.
 """
 BulkSensibleHeatFluxFunction(; coefficient, gustiness=0, surface_temperature) =
-    BulkSensibleHeatFluxFunction(coefficient, gustiness, surface_temperature, nothing, nothing, nothing, nothing)
+    BulkSensibleHeatFluxFunction(coefficient, gustiness, surface_temperature, nothing, nothing, nothing)
 
 Adapt.adapt_structure(to, bf::BulkSensibleHeatFluxFunction) =
     BulkSensibleHeatFluxFunction(Adapt.adapt(to, bf.coefficient),
@@ -50,8 +49,7 @@ Adapt.adapt_structure(to, bf::BulkSensibleHeatFluxFunction) =
                                  Adapt.adapt(to, bf.surface_temperature),
                                  Adapt.adapt(to, bf.surface_pressure),
                                  Adapt.adapt(to, bf.thermodynamic_constants),
-                                 bf.formulation,
-                                 Adapt.adapt(to, bf.virtual_potential_temperature))
+                                 bf.formulation)
 
 Base.summary(bf::BulkSensibleHeatFluxFunction) =
     string("BulkSensibleHeatFluxFunction(coefficient=", bf.coefficient,
@@ -84,19 +82,11 @@ end
 # Fallback for constant coefficients
 @inline evaluate_scalar_coefficient(C::Number, args...) = C
 
-# For callable coefficients (e.g., PolynomialCoefficient)
-@inline function evaluate_scalar_coefficient(C, i, j, grid, fields, θᵥ_op, T₀, p₀, constants, surface)
+# For callable coefficients (e.g., PolynomialCoefficient) — coefficient handles stability internally
+@inline function evaluate_scalar_coefficient(C, i, j, grid, fields, T₀)
     U² = wind_speed²ᶜᶜᶜ(i, j, grid, fields)
     U = sqrt(U²)
-
-    # Virtual potential temperature at first grid level from diagnostic KernelFunctionOperation
-    θᵥ = θᵥ_op[i, j, 1]
-    θᵥ₀ = surface_virtual_potential_temperature(T₀, p₀, constants, surface)
-
-    # Get measurement height from grid
-    z = znode(i, j, 1, grid, Center(), Center(), Center())
-
-    return C(U, θᵥ, θᵥ₀, z, constants)
+    return C(i, j, grid, U, T₀)
 end
 
 @inline function OceananigansBC.getbc(bf::BulkSensibleHeatFluxFunction, i::Integer, j::Integer,
@@ -109,11 +99,8 @@ end
     constants = bf.thermodynamic_constants
     p₀ = bf.surface_pressure
     ρ₀ = surface_density(p₀, T₀, constants)
-    surface = PlanarLiquidSurface()
 
-    # Evaluate coefficient (handles both constant and callable)
-    θᵥ = bf.virtual_potential_temperature
-    Cᵀ = evaluate_scalar_coefficient(bf.coefficient, i, j, grid, fields, θᵥ, T₀, p₀, constants, surface)
+    Cᵀ = evaluate_scalar_coefficient(bf.coefficient, i, j, grid, fields, T₀)
 
     Δϕ = bulk_sensible_heat_difference(bf.formulation, i, j, T₀, constants, fields)
     return - ρ₀ * Cᵀ * Ũ * Δϕ
@@ -125,14 +112,13 @@ const BulkSensibleHeatFluxBoundaryCondition = BoundaryCondition{<:Flux, <:BulkSe
 ##### BulkVaporFluxFunction for moisture fluxes
 #####
 
-struct BulkVaporFluxFunction{C, G, T, F, TC, S, θᵛ}
+struct BulkVaporFluxFunction{C, G, T, F, TC, S}
     coefficient :: C
     gustiness :: G
     surface_temperature :: T
     surface_pressure :: F
     thermodynamic_constants :: TC
     surface :: S
-    virtual_potential_temperature :: θᵛ
 end
 
 """
@@ -156,7 +142,7 @@ specific humidity, and `qᵛ₀` is the saturation specific humidity at the surf
                          Used to compute saturation specific humidity at the surface.
 """
 BulkVaporFluxFunction(; coefficient, gustiness=0, surface_temperature) =
-    BulkVaporFluxFunction(coefficient, gustiness, surface_temperature, nothing, nothing, nothing, nothing)
+    BulkVaporFluxFunction(coefficient, gustiness, surface_temperature, nothing, nothing, nothing)
 
 Adapt.adapt_structure(to, bf::BulkVaporFluxFunction) =
     BulkVaporFluxFunction(Adapt.adapt(to, bf.coefficient),
@@ -164,8 +150,7 @@ Adapt.adapt_structure(to, bf::BulkVaporFluxFunction) =
                           Adapt.adapt(to, bf.surface_temperature),
                           Adapt.adapt(to, bf.surface_pressure),
                           Adapt.adapt(to, bf.thermodynamic_constants),
-                          Adapt.adapt(to, bf.surface),
-                          Adapt.adapt(to, bf.virtual_potential_temperature))
+                          Adapt.adapt(to, bf.surface))
 
 Base.summary(bf::BulkVaporFluxFunction) =
     string("BulkVaporFluxFunction(coefficient=", bf.coefficient,
@@ -187,9 +172,7 @@ Base.summary(bf::BulkVaporFluxFunction) =
     U² = wind_speed²ᶜᶜᶜ(i, j, grid, fields)
     Ũ = sqrt(U² + bf.gustiness^2)
 
-    # Evaluate coefficient (handles both constant and callable)
-    θᵥ = bf.virtual_potential_temperature
-    Cᵛ = evaluate_scalar_coefficient(bf.coefficient, i, j, grid, fields, θᵥ, T₀, p₀, constants, surface)
+    Cᵛ = evaluate_scalar_coefficient(bf.coefficient, i, j, grid, fields, T₀)
 
     return - ρ₀ * Cᵛ * Ũ * Δq
 end

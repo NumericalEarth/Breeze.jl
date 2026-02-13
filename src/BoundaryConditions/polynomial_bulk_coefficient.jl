@@ -71,7 +71,7 @@ using Breeze.BoundaryConditions: PolynomialCoefficient
 coef = PolynomialCoefficient()
 
 # output
-PolynomialCoefficient{Float64, Nothing, typeof(default_stability_function)}
+PolynomialCoefficient{Float64}
 ├── neutral_coefficients: nothing
 └── roughness_length: 0.00015 m
 ```
@@ -83,7 +83,7 @@ using Breeze.BoundaryConditions: PolynomialCoefficient
 coef = PolynomialCoefficient(neutral_coefficients = (0.142, 0.076, 2.7))
 
 # output
-PolynomialCoefficient{Float64, Tuple{Float64, Float64, Float64}, typeof(default_stability_function)}
+PolynomialCoefficient{Float64}
 ├── neutral_coefficients: (0.142, 0.076, 2.7)
 └── roughness_length: 0.00015 m
 ```
@@ -95,16 +95,19 @@ using Breeze.BoundaryConditions: PolynomialCoefficient
 coef = PolynomialCoefficient(stability_function = nothing)
 
 # output
-PolynomialCoefficient{Float64, Nothing, Nothing}
+PolynomialCoefficient{Float64}
 ├── neutral_coefficients: nothing
 └── roughness_length: 0.00015 m
 ```
 """
-struct PolynomialCoefficient{FT, C, SF}
+struct PolynomialCoefficient{FT, C, SF, θᵛ, P, TC}
     neutral_coefficients :: C
     roughness_length :: FT
     minimum_wind_speed :: FT
     stability_function :: SF
+    virtual_potential_temperature :: θᵛ
+    surface_pressure :: P
+    thermodynamic_constants :: TC
 end
 
 # Constructor with sensible defaults
@@ -117,14 +120,18 @@ function PolynomialCoefficient(FT = Float64;
     return PolynomialCoefficient(neutral_coefficients,
                                      FT(roughness_length),
                                      FT(minimum_wind_speed),
-                                     stability_function)
+                                     stability_function,
+                                     nothing, nothing, nothing)
 end
 
 Adapt.adapt_structure(to, coef::PolynomialCoefficient) =
     PolynomialCoefficient(Adapt.adapt(to, coef.neutral_coefficients),
-                              Adapt.adapt(to, coef.roughness_length),
-                              Adapt.adapt(to, coef.minimum_wind_speed),
-                              coef.stability_function)
+                          Adapt.adapt(to, coef.roughness_length),
+                          Adapt.adapt(to, coef.minimum_wind_speed),
+                          coef.stability_function,
+                          Adapt.adapt(to, coef.virtual_potential_temperature),
+                          Adapt.adapt(to, coef.surface_pressure),
+                          Adapt.adapt(to, coef.thermodynamic_constants))
 
 function Base.show(io::IO, coef::PolynomialCoefficient{FT}) where FT
     println(io, "PolynomialCoefficient{$FT}")
@@ -248,38 +255,43 @@ end
 """
 $(TYPEDSIGNATURES)
 
-Evaluate the bulk transfer coefficient for given conditions with stability correction.
+Evaluate the bulk transfer coefficient for given conditions.
+
+For a materialized `PolynomialCoefficient` (with `virtual_potential_temperature`,
+`surface_pressure`, and `thermodynamic_constants` filled in during model construction),
+the stability correction is computed internally from the stored fields.
 
 # Arguments
+- `i`, `j`: Grid indices
+- `grid`: The grid
 - `U`: Wind speed (m/s)
-- `θᵥ`: Virtual potential temperature at measurement height (K)
-- `θᵥ₀`: Virtual potential temperature at surface (K)
-- `z`: Measurement height (m), uses coef.measurement_height if not provided
-- `constants`: Thermodynamic constants
+- `T₀`: Surface temperature (K) at location `(i, j)`
 
 Returns the transfer coefficient (dimensionless).
 """
-@inline function (coef::PolynomialCoefficient)(U, θᵥ, θᵥ₀, z, constants)
+@inline function (coef::PolynomialCoefficient)(i, j, grid, U, T₀)
     # Compute neutral coefficient at 10m
     C₁₀ = neutral_coefficient_10m(coef.neutral_coefficients, U, coef.minimum_wind_speed)
 
     # Adjust for measurement height
+    z = znode(i, j, 1, grid, Center(), Center(), Center())
     Cz = adjust_coefficient_for_height(C₁₀, z, coef.roughness_length)
 
-    # Apply stability correction using dispatch
-    return apply_stability_correction(coef.stability_function, Cz, z, θᵥ, θᵥ₀, U, coef.minimum_wind_speed)
+    # Apply stability correction
+    return apply_stability_correction(coef, Cz, i, j, z, U, T₀)
 end
 
-# Stability correction with a function
-@inline function apply_stability_correction(ψ::Function, Cz, z, θᵥ, θᵥ₀, U, U_min)
-    Riᵦ = bulk_richardson_number(z, θᵥ, θᵥ₀, U, U_min)
-    return Cz * ψ(Riᵦ)
+# Stability correction with a function — uses stored VPT and surface pressure
+@inline function apply_stability_correction(coef::PolynomialCoefficient, Cz, i, j, z, U, T₀)
+    θᵥ = coef.virtual_potential_temperature[i, j, 1]
+    surface = PlanarLiquidSurface()
+    θᵥ₀ = surface_virtual_potential_temperature(T₀, coef.surface_pressure, coef.thermodynamic_constants, surface)
+    Riᵦ = bulk_richardson_number(z, θᵥ, θᵥ₀, U, coef.minimum_wind_speed)
+    return Cz * coef.stability_function(Riᵦ)
 end
 
 # No stability correction (stability_function = nothing)
-@inline function apply_stability_correction(::Nothing, Cz, z, θᵥ, θᵥ₀, U, U_min)
-    return Cz
-end
+@inline apply_stability_correction(::PolynomialCoefficient{<:Any, <:Any, Nothing}, Cz, i, j, z, U, T₀) = Cz
 
 #####
 ##### Special constructors for boundary conditions
@@ -305,7 +317,7 @@ function BulkDrag(coef::PolynomialCoefficient; direction=nothing, gustiness=0, s
             stability_function = coef.stability_function
         )
     end
-    df = BulkDragFunction(direction, coef, gustiness, surface_temperature, nothing, nothing, nothing)
+    df = BulkDragFunction(direction, coef, gustiness, surface_temperature)
     return BoundaryCondition(Flux(), df)
 end
 
@@ -326,7 +338,7 @@ function BulkSensibleHeatFlux(coef::PolynomialCoefficient; gustiness=0, surface_
             stability_function = coef.stability_function
         )
     end
-    bf = BulkSensibleHeatFluxFunction(coef, gustiness, surface_temperature, nothing, nothing, nothing, nothing)
+    bf = BulkSensibleHeatFluxFunction(coef, gustiness, surface_temperature, nothing, nothing, nothing)
     return BoundaryCondition(Flux(), bf)
 end
 
@@ -347,6 +359,6 @@ function BulkVaporFlux(coef::PolynomialCoefficient; gustiness=0, surface_tempera
             stability_function = coef.stability_function
         )
     end
-    bf = BulkVaporFluxFunction(coef, gustiness, surface_temperature, nothing, nothing, nothing, nothing)
+    bf = BulkVaporFluxFunction(coef, gustiness, surface_temperature, nothing, nothing, nothing)
     return BoundaryCondition(Flux(), bf)
 end

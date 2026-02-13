@@ -6,6 +6,7 @@ using Breeze.BoundaryConditions: PolynomialCoefficient,
                                  neutral_coefficient_10m,
                                  adjust_coefficient_for_height,
                                  bulk_richardson_number
+using Oceananigans
 using Oceananigans.BoundaryConditions: BoundaryCondition
 
 @testset "PolynomialCoefficient" begin
@@ -118,29 +119,37 @@ using Oceananigans.BoundaryConditions: BoundaryCondition
     end
 
     @testset "Callable interface" begin
-        # Test evaluation with no stability
+        # Create a simple grid with first cell center at 10m
+        grid = RectilinearGrid(size=(1, 1, 1), x=(0, 100), y=(0, 100), z=(0, 20))
+
+        # Test evaluation with no stability correction
         coef = PolynomialCoefficient(
             neutral_coefficients = (0.142, 0.076, 2.7),
             stability_function = nothing
         )
         U = 10.0
-        z = 10.0
-        θᵥ = 288.0
-        θᵥ₀ = 290.0
-        constants = nothing
-        C = coef(U, θᵥ, θᵥ₀, z, constants)
+        T₀ = 290.0
+        C = coef(1, 1, grid, U, T₀)
         @test C isa Number
         @test C > 0
 
-        # Test with stability correction
+        # Test with stability correction — need a VPT field
+        θᵥ_field = CenterField(grid)
+        set!(θᵥ_field, 288.0)  # cooler than surface → unstable
+
         coef_stable = PolynomialCoefficient(
-            neutral_coefficients = (0.142, 0.076, 2.7),
-            stability_function = default_stability_function
+            (0.142, 0.076, 2.7),     # neutral_coefficients
+            coef.roughness_length,
+            coef.minimum_wind_speed,
+            default_stability_function,
+            θᵥ_field,                # virtual_potential_temperature
+            1e5,                     # surface_pressure
+            Breeze.Thermodynamics.ThermodynamicConstants()
         )
-        C_stable = coef_stable(U, θᵥ, θᵥ₀, z, constants)
+        C_stable = coef_stable(1, 1, grid, U, T₀)
         @test C_stable isa Number
         @test C_stable > 0
-        # Unstable conditions should enhance transfer
+        # Unstable conditions (θᵥ < θᵥ₀) should enhance transfer
         @test C_stable > C
     end
 
@@ -148,7 +157,7 @@ using Oceananigans.BoundaryConditions: BoundaryCondition
         # Test that PolynomialCoefficient works with BulkDrag constructor
         coef = PolynomialCoefficient()
         SST(x, y) = 300.0
-        bc = BulkDrag(coef, gustiness = 0.5, surface_temperature = SST)
+        bc = Breeze.BulkDrag(coef, gustiness = 0.5, surface_temperature = SST)
         @test bc isa BoundaryCondition
         # Coefficient should have been materialized with momentum coefficients
         @test bc.condition.coefficient.neutral_coefficients == (0.142, 0.076, 2.7)
@@ -160,7 +169,7 @@ using Oceananigans.BoundaryConditions: BoundaryCondition
         # Test that PolynomialCoefficient works with BulkSensibleHeatFlux
         coef = PolynomialCoefficient()
         SST(x, y) = 300.0
-        bc = BulkSensibleHeatFlux(coef, surface_temperature = SST)
+        bc = Breeze.BulkSensibleHeatFlux(coef, surface_temperature = SST)
         @test bc isa BoundaryCondition
         # Coefficient should have been materialized with sensible heat coefficients
         @test bc.condition.coefficient.neutral_coefficients == (0.128, 0.068, 2.43)
@@ -170,7 +179,7 @@ using Oceananigans.BoundaryConditions: BoundaryCondition
         # Test that PolynomialCoefficient works with BulkVaporFlux
         coef = PolynomialCoefficient()
         SST(x, y) = 300.0
-        bc = BulkVaporFlux(coef, surface_temperature = SST)
+        bc = Breeze.BulkVaporFlux(coef, surface_temperature = SST)
         @test bc isa BoundaryCondition
         # Coefficient should have been materialized with latent heat coefficients
         @test bc.condition.coefficient.neutral_coefficients == (0.120, 0.070, 2.55)
