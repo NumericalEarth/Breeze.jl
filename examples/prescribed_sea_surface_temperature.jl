@@ -103,8 +103,8 @@ scalar_advection = WENO(order=5)
 #
 # ## Wind and stability-dependent exchange coefficients
 #
-# Rather than using constant exchange coefficients, we use `PolynomialCoefficient`
-# which implements the wind speed and stability-dependent formulation from Large & Yeager (2009).
+# Rather than using constant exchange coefficients, we use [`PolynomialCoefficient`](@ref)
+# which implements the wind speed and stability-dependent formulation from [LargeYeager2009](@citet).
 # This provides a more realistic representation of air-sea exchange processes,
 # compared to constant exchange coefficients.
 #
@@ -140,7 +140,7 @@ scalar_advection = WENO(order=5)
 # turbulent mixing is stronger when the surface is warmer than the air above it.
 #
 # We create polynomial coefficients for each flux type. The default coefficients
-# come from Large & Yeager (2009) observational fits:
+# come from [LargeYeager2009](@citet) observational fits:
 
 Uᵍ = 1e-2  # Gustiness (m/s)
 
