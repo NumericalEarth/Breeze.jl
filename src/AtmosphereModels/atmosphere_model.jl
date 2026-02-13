@@ -164,15 +164,15 @@ function AtmosphereModel(grid;
     all_names = field_names(dynamics, formulation, microphysics, tracers)
     field_boundary_conditions = regularize_field_boundary_conditions(boundary_conditions, grid, all_names)
 
-    # Create microphysical fields with topology-validated boundary conditions
-    microphysical_fields = materialize_microphysical_fields(microphysics, grid, field_boundary_conditions)
+    # Create temporary microphysical fields for BC materialization (using pre-regularized BCs)
+    preliminary_microphysical_fields = materialize_microphysical_fields(microphysics, grid, field_boundary_conditions)
 
     # Materialize atmosphere-specific boundary conditions (fill in VPT diagnostic,
     # surface pressure, thermodynamic constants, convert ρe → ρθ for potential temperature formulations)
     p₀ = surface_pressure(dynamics)
     boundary_conditions = materialize_atmosphere_model_boundary_conditions(boundary_conditions, grid, formulation,
                                                                           dynamics, microphysics, p₀, thermodynamic_constants,
-                                                                          microphysical_fields, specific_moisture, temperature)
+                                                                          preliminary_microphysical_fields, specific_moisture, temperature)
 
     # Re-regularize after materialization (materialization may modify boundary conditions)
     regularized_boundary_conditions = regularize_field_boundary_conditions(boundary_conditions, grid, all_names)
