@@ -200,17 +200,6 @@ end
     return WarmPhaseTwoMomentState(qᶜˡ, nᶜˡ, qʳ, nʳ, nᵃ, velocities)
 end
 
-# Grid-indexed version: extracts from Fields
-# Velocities are passed from grid_microphysical_tendency (interpolated to cell center)
-@inline function AtmosphereModels.grid_microphysical_state(i, j, k, grid, bμp::WPNE2M, μ, ρ, 𝒰, velocities)
-    @inbounds qᶜˡ = μ.qᶜˡ[i, j, k]
-    @inbounds nᶜˡ = μ.nᶜˡ[i, j, k]
-    @inbounds qʳ = μ.qʳ[i, j, k]
-    @inbounds nʳ = μ.nʳ[i, j, k]
-    @inbounds nᵃ = μ.nᵃ[i, j, k]
-    return WarmPhaseTwoMomentState(qᶜˡ, nᶜˡ, qʳ, nʳ, nᵃ, velocities)
-end
-
 """
     TwoMomentCloudMicrophysics(FT = Oceananigans.defaults.FloatType;
                                cloud_formation = NonEquilibriumCloudFormation(nothing, nothing),
