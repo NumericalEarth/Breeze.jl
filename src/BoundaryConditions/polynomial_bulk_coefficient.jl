@@ -313,12 +313,7 @@ end
 end
 
 #####
-##### Default polynomial filling for Function constructors
-#####
-##### When a PolynomialCoefficient with `polynomial = nothing` is passed as the
-##### coefficient, fill in the appropriate Large & Yeager (2009) default polynomial
-##### before constructing the Function struct. This way the user interface is the
-##### same regardless of coefficient type: BulkDrag(coefficient=..., gustiness=...).
+##### Default polynomial filling
 #####
 
 # Helper: fill in a default polynomial for a PolynomialCoefficient that has `nothing`
@@ -331,13 +326,3 @@ fill_polynomial(coef::PolynomialCoefficient, polynomial) =
 
 # Type alias for PolynomialCoefficient with no polynomial set
 const NothingPolynomialCoefficient = PolynomialCoefficient{<:Any, Nothing}
-
-# Outer constructors that intercept nothing-polynomial and fill in defaults
-BulkDragFunction(d, coef::NothingPolynomialCoefficient, g, t) =
-    BulkDragFunction(d, fill_polynomial(coef, default_neutral_drag_polynomial), g, t)
-
-BulkSensibleHeatFluxFunction(coef::NothingPolynomialCoefficient, g, t, p, c, f) =
-    BulkSensibleHeatFluxFunction(fill_polynomial(coef, default_neutral_sensible_heat_polynomial), g, t, p, c, f)
-
-BulkVaporFluxFunction(coef::NothingPolynomialCoefficient, g, t, p, c, s) =
-    BulkVaporFluxFunction(fill_polynomial(coef, default_neutral_latent_heat_polynomial), g, t, p, c, s)
