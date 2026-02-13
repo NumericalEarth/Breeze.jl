@@ -179,6 +179,7 @@ function AtmosphereModel(grid;
         velocities = materialize_velocities(velocities, grid)
     end
     microphysical_fields = materialize_microphysical_fields(microphysics, grid, regularized_boundary_conditions)
+    initialize_model_microphysical_fields!(microphysical_fields, microphysics)
 
     tracers = NamedTuple(name => CenterField(grid, boundary_conditions=regularized_boundary_conditions[name]) for name in tracer_names)
 
