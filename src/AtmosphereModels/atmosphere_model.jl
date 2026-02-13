@@ -155,20 +155,26 @@ function AtmosphereModel(grid;
     default_boundary_conditions = NamedTuple{default_bc_names}(FieldBoundaryConditions() for _ in default_bc_names)
     boundary_conditions = merge(default_boundary_conditions, boundary_conditions)
 
-    # Pre-create diagnostic fields and microphysical fields (needed for VirtualPotentialTemperature
-    # diagnostic used in stability-dependent boundary conditions like PolynomialCoefficient)
+    # Pre-create diagnostic fields needed for VirtualPotentialTemperature
+    # (used in stability-dependent boundary conditions like PolynomialCoefficient)
     specific_moisture = CenterField(grid)
     temperature = CenterField(grid)
-    microphysical_fields = materialize_microphysical_fields(microphysics, grid, boundary_conditions)
 
-    # Pre-regularize AtmosphereModel boundary conditions (fill in reference_density, compute saturation humidity, etc.)
-    # Also converts ρe boundary conditions to ρθ for potential temperature formulations
+    # Regularize boundary conditions for grid topology before creating microphysical fields
+    all_names = field_names(dynamics, formulation, microphysics, tracers)
+    field_boundary_conditions = regularize_field_boundary_conditions(boundary_conditions, grid, all_names)
+
+    # Create microphysical fields with topology-validated boundary conditions
+    microphysical_fields = materialize_microphysical_fields(microphysics, grid, field_boundary_conditions)
+
+    # Materialize atmosphere-specific boundary conditions (fill in VPT diagnostic,
+    # surface pressure, thermodynamic constants, convert ρe → ρθ for potential temperature formulations)
     p₀ = surface_pressure(dynamics)
     boundary_conditions = materialize_atmosphere_model_boundary_conditions(boundary_conditions, grid, formulation,
                                                                           dynamics, microphysics, p₀, thermodynamic_constants,
                                                                           microphysical_fields, specific_moisture, temperature)
 
-    all_names = field_names(dynamics, formulation, microphysics, tracers)
+    # Re-regularize after materialization (materialization may modify boundary conditions)
     regularized_boundary_conditions = regularize_field_boundary_conditions(boundary_conditions, grid, all_names)
 
     # Materialize dynamics and formulation
