@@ -194,29 +194,6 @@ Wind speed is clamped to `U_min` to avoid singularity in the a₂/U₁₀ term.
 end
 
 #####
-##### Height adjustment using logarithmic profile
-#####
-
-"""
-$(TYPEDSIGNATURES)
-
-Adjust transfer coefficient from 10m reference height to measurement height `h`
-using logarithmic profile theory:
-
-C(h) = C₁₀ × [ln(10/ℓ) / ln(h/ℓ)]²
-
-# Arguments
-- `C₁₀`: Transfer coefficient at 10m
-- `h`: Measurement height (m)
-- `ℓ`: Roughness length (m)
-"""
-@inline function adjust_coefficient_for_height(C₁₀, h, ℓ)
-    log_ref = log(10 / ℓ)
-    log_h = log(h / ℓ)
-    return C₁₀ * (log_ref / log_h)^2
-end
-
-#####
 ##### Bulk Richardson number and stability correction
 #####
 
@@ -296,9 +273,11 @@ Returns the transfer coefficient (dimensionless).
     # Compute neutral coefficient at 10m
     C¹⁰ = neutral_coefficient_10m(coef.polynomial, U, coef.minimum_wind_speed)
 
-    # Adjust for measurement height
+    # Adjust for measurement height using logarithmic profile:
+    # C(h) = C₁₀ × [ln(10/ℓ) / ln(h/ℓ)]²
     h = znode(i, j, 1, grid, Center(), Center(), Center())
-    Cʰ = adjust_coefficient_for_height(C¹⁰, h, coef.roughness_length)
+    ℓ = coef.roughness_length
+    Cʰ = C¹⁰ * (log(10 / ℓ) / log(h / ℓ))^2
 
     # Apply stability correction
     return stability_corrected_coefficient(i, j, grid, coef, Cʰ, U, T₀)

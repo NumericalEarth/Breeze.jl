@@ -4,7 +4,6 @@ using Breeze.BoundaryConditions
 using Breeze.BoundaryConditions: PolynomialCoefficient,
                                  DefaultStabilityFunction,
                                  neutral_coefficient_10m,
-                                 adjust_coefficient_for_height,
                                  bulk_richardson_number
 using Oceananigans
 using Oceananigans.BoundaryConditions: BoundaryCondition
@@ -61,23 +60,6 @@ using Oceananigans.BoundaryConditions: BoundaryCondition
         # C_D = (0.142 + 0.076*20 + 2.7/20) × 10⁻³
         #     = (0.142 + 1.52 + 0.135) × 10⁻³ = 1.797 × 10⁻³
         @test C_high ≈ 1.797e-3 atol=1e-6
-    end
-
-    @testset "Height adjustment" begin
-        C₁₀ = 1.0e-3
-        z₀ = 1.5e-4
-
-        # At 10m, should return same value
-        C_10m = adjust_coefficient_for_height(C₁₀, 10.0, z₀)
-        @test C_10m ≈ C₁₀
-
-        # At higher elevation, coefficient should be smaller (log profile)
-        C_50m = adjust_coefficient_for_height(C₁₀, 50.0, z₀)
-        @test C_50m < C₁₀
-
-        # At lower elevation, coefficient should be larger
-        C_5m = adjust_coefficient_for_height(C₁₀, 5.0, z₀)
-        @test C_5m > C₁₀
     end
 
     @testset "Bulk Richardson number" begin
