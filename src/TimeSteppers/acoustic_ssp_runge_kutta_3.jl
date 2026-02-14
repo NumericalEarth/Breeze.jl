@@ -1,6 +1,6 @@
 using KernelAbstractions: @kernel, @index
 
-using Oceananigans: AbstractModel, prognostic_fields, fields, architecture
+using Oceananigans: prognostic_fields, fields, architecture
 using Oceananigans.Utils: launch!, time_difference_seconds
 
 using Oceananigans.TimeSteppers:
@@ -330,7 +330,7 @@ end
 ##### Store initial state
 #####
 
-function store_initial_state!(model::AbstractModel{<:AcousticSSPRungeKutta3})
+function store_initial_state!(model::AtmosphereModel{<:Any, <:Any, <:Any, <:AcousticSSPRungeKutta3})
     U⁰ = model.timestepper.U⁰
     for (u⁰, u) in zip(U⁰, prognostic_fields(model))
         parent(u⁰) .= parent(u)

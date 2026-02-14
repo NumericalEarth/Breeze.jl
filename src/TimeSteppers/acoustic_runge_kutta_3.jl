@@ -1,6 +1,6 @@
 using KernelAbstractions: @kernel, @index
 
-using Oceananigans: AbstractModel, prognostic_fields, fields, architecture
+using Oceananigans: prognostic_fields, fields, architecture
 using Oceananigans.Utils: launch!, time_difference_seconds
 
 using Oceananigans.TimeSteppers:
@@ -137,7 +137,7 @@ The acoustic substep loop handles the full PGF (reference + perturbation) and bu
 The outer RK3 time step is limited only by the advective CFL, not the acoustic CFL.
 The acoustic CFL is resolved by the substep loop with constant ``Δτ = Δt/N``.
 """
-function compute_slow_momentum_tendencies!(model::AbstractModel{<:AcousticRungeKutta3})
+function compute_slow_momentum_tendencies!(model::AtmosphereModel{<:Any, <:Any, <:Any, <:AcousticRungeKutta3})
     substepper = model.timestepper.substepper
     grid = model.grid
     arch = architecture(grid)
@@ -272,7 +272,7 @@ end
 ##### Store initial state
 #####
 
-function store_initial_state!(model::AbstractModel{<:AcousticRungeKutta3})
+function store_initial_state!(model::AtmosphereModel{<:Any, <:Any, <:Any, <:AcousticRungeKutta3})
     U⁰ = model.timestepper.U⁰
     for (u⁰, u) in zip(U⁰, prognostic_fields(model))
         parent(u⁰) .= parent(u)

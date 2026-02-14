@@ -128,7 +128,7 @@ For anelastic dynamics, this is the reference density.
 dynamics_density_for_potential_temperature(dynamics) = dynamics.reference_state.density
 
 """
-    dynamics_standard_pressure(dynamics)
+$(TYPEDSIGNATURES)
 
 Return the standard pressure for potential temperature calculations.
 """

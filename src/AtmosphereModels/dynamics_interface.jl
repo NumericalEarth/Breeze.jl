@@ -61,7 +61,7 @@ Returns `nothing` for dynamics that do not require a pressure solver (e.g., comp
 function dynamics_pressure_solver end
 
 """
-    default_timestepper(dynamics)
+$(TYPEDSIGNATURES)
 
 Return the default timestepper symbol for the given dynamics.
 
@@ -75,7 +75,7 @@ default_timestepper(dynamics) = :SSPRungeKutta3
 #####
 
 """
-    compute_pressure_correction!(model, Δt)
+$(TYPEDSIGNATURES)
 
 Compute the pressure correction for the given model. Default: no-op.
 For anelastic dynamics, solves the pressure Poisson equation.
@@ -83,7 +83,7 @@ For anelastic dynamics, solves the pressure Poisson equation.
 compute_pressure_correction!(model, Δt) = nothing
 
 """
-    make_pressure_correction!(model, Δt)
+$(TYPEDSIGNATURES)
 
 Apply the pressure correction to the momentum fields. Default: no-op.
 For anelastic dynamics, projects momentum to enforce the divergence constraint.

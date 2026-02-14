@@ -1,4 +1,4 @@
- #####
+#####
 ##### Time stepping for PrescribedDynamics (kinematic dynamics)
 #####
 

@@ -225,7 +225,7 @@ Adapt.adapt_structure(to, a::AcousticSubstepper) =
                        adapt(to, a.rhs))
 
 """
-    AcousticSubstepper(grid, split_explicit::SplitExplicitTimeDiscretization)
+$(TYPEDSIGNATURES)
 
 Construct an `AcousticSubstepper` using the Exner pressure formulation.
 """
@@ -534,17 +534,7 @@ end
     @inbounds return ref.exner[i, j, k]
 end
 
-"""
-Build π_ref by discrete hydrostatic integration using the FIXED reference
-potential temperature θ₀, so that `cᵖ θ₀_face (π₀[k] - π₀[k-1]) / Δz = -g` exactly.
-
-This is analogous to CM1's fixed reference state (pi0, th0) which is built
-once at initialization. The discrete balance ensures that the vertical PGF
-`cᵖ θᵥ ∂π'/∂z` (where π' = π - π₀) has zero hydrostatic residual when
-the actual state matches the reference.
-"""
-# Old build_discrete_hydrostatic_exner! removed — replaced by ExnerReferenceState
-# and _build_stage_hydrostatic_exner! for the stage-θᵥ approach.
+# Old build_discrete_hydrostatic_exner! removed — replaced by ExnerReferenceState.
 
 #####
 ##### Section 4: Convert slow tendencies to velocity/pressure form
@@ -937,7 +927,7 @@ end
 #####
 
 """
-    acoustic_rk3_substep_loop!(model, substepper, Δt, β, U⁰)
+$(TYPEDSIGNATURES)
 
 Execute the acoustic substep loop for a Wicker-Skamarock RK3 stage
 using the Exner pressure formulation.
@@ -1135,6 +1125,8 @@ end
 #####
 
 """
+$(TYPEDSIGNATURES)
+
 Recover full fields from Exner pressure acoustic variables.
 
 After the acoustic loop, convert the updated velocity and Exner pressure
@@ -1246,7 +1238,7 @@ end
 #####
 
 """
-    acoustic_substep_loop!(model, substepper, Δt, α, U⁰)
+$(TYPEDSIGNATURES)
 
 Execute the acoustic substep loop for an SSP RK3 stage.
 Delegates to the same Exner pressure acoustic loop used by WS-RK3.
@@ -1317,6 +1309,8 @@ function acoustic_substep_loop!(model, substepper, Δt, α_ssp, U⁰)
 end
 
 """
+$(TYPEDSIGNATURES)
+
 SSP-RK3 recovery: ``U_{new} = (1 - α) U⁰ + α U_{acoustic}``
 
 Uses nonlinear recovery from π' to ρθ via the equation of state:
