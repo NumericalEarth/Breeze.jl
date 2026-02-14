@@ -67,9 +67,9 @@ end
 function make_simulation(model, dynamics_type; stop_time=10)
     if dynamics_type === :Compressible
         # CompressibleDynamics resolves acoustic waves, requiring a small fixed Δt.
-        simulation = Simulation(model; Δt=0.05seconds, stop_time=min(stop_time, 1))
+        simulation = Simulation(model; Δt=0.05seconds, stop_time=min(stop_time, 1), verbose=false)
     else
-        simulation = Simulation(model; Δt=1e-3seconds, stop_time)
+        simulation = Simulation(model; Δt=1e-3seconds, stop_time, verbose=false)
         simulation.callbacks[:wizard] = Callback(TimeStepWizard(cfl=0.5), IterationInterval(1))
     end
     return simulation
@@ -266,7 +266,7 @@ end
                     set!(model; θ=300, qᵗ=0.01, ρ=ρ₀, u=u₀, v=v₀)
                     """
                     simulation_block = """
-                    simulation = Simulation(model; Δt=0.05seconds, stop_time=1)
+                    simulation = Simulation(model; Δt=0.05seconds, stop_time=1, verbose=false)
                     """
                 else
                     dynamics_block = """
@@ -278,7 +278,7 @@ end
                     set!(model; θ=300, qᵗ=0.01, u=u₀, v=v₀)
                     """
                     simulation_block = """
-                    simulation = Simulation(model; Δt=1e-3seconds, stop_time=10)
+                    simulation = Simulation(model; Δt=1e-3seconds, stop_time=10, verbose=false)
                     simulation.callbacks[:wizard] = Callback(TimeStepWizard(cfl=0.5), IterationInterval(1))
                     """
                 end
