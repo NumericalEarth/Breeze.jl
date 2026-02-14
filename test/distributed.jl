@@ -233,7 +233,6 @@ end
 
     @testset "Multi-rank MPI tests" begin
         nranks = 4
-        test_project = Base.active_project()
         output_dir = mktempdir()
 
         partitions = [
@@ -329,7 +328,7 @@ end
                     # Write and run the MPI script
                     write(script_file, mpi_script)
                     try
-                        run(`$(mpiexec()) -n $nranks $(Base.julia_cmd()) --project=$test_project -O0 $script_file`)
+                        run(`$(mpiexec()) -n $nranks $(Base.julia_cmd()) -O0 $script_file`)
                     finally
                         rm(script_file; force=true)
                     end
