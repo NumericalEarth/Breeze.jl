@@ -315,7 +315,7 @@ end
                 $simulation_block
                 simulation.output_writers[:jld2] = JLD2Writer(model,
                                                               Oceananigans.prognostic_fields(model);
-                                                              filename = "$dist_prefix",
+                                                              filename = "$(escape_string(dist_prefix))",
                                                               schedule = IterationInterval(1),
                                                               overwrite_existing = true,
                                                               with_halos = true)
