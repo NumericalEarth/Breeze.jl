@@ -20,7 +20,7 @@ Breeze = {path = ".."}
 [compat]
 CUDA = "5"
 CairoMakie = "0.15"
-CloudMicrophysics = "0.29.0, 0.30, 0.31"
+CloudMicrophysics = "0.31.4"
 Documenter = "1"
 DocumenterCitations = "1.4"
 InteractiveUtils = "<0.0.1, 1"
