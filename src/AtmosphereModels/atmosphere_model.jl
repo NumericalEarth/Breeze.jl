@@ -155,13 +155,26 @@ function AtmosphereModel(grid;
     default_boundary_conditions = NamedTuple{default_bc_names}(FieldBoundaryConditions() for _ in default_bc_names)
     boundary_conditions = merge(default_boundary_conditions, boundary_conditions)
 
-    # Pre-regularize AtmosphereModel boundary conditions (fill in reference_density, compute saturation humidity, etc.)
-    # Also converts ρe boundary conditions to ρθ for potential temperature formulations
-    p₀ = surface_pressure(dynamics)
-    boundary_conditions = regularize_atmosphere_model_boundary_conditions(boundary_conditions, grid, formulation,
-                                                                          dynamics, microphysics, p₀, thermodynamic_constants)
+    # Pre-create diagnostic fields needed for VirtualPotentialTemperature
+    # (used in stability-dependent boundary conditions like PolynomialCoefficient)
+    specific_moisture = CenterField(grid)
+    temperature = CenterField(grid)
 
+    # Regularize boundary conditions for grid topology before creating microphysical fields
     all_names = field_names(dynamics, formulation, microphysics, tracers)
+    field_boundary_conditions = regularize_field_boundary_conditions(boundary_conditions, grid, all_names)
+
+    # Create temporary microphysical fields for BC materialization (using pre-regularized BCs)
+    preliminary_microphysical_fields = materialize_microphysical_fields(microphysics, grid, field_boundary_conditions)
+
+    # Materialize atmosphere-specific boundary conditions (fill in VPT diagnostic,
+    # surface pressure, thermodynamic constants, convert ρe → ρθ for potential temperature formulations)
+    p₀ = surface_pressure(dynamics)
+    boundary_conditions = materialize_atmosphere_model_boundary_conditions(boundary_conditions, grid, formulation,
+                                                                          dynamics, microphysics, p₀, thermodynamic_constants,
+                                                                          preliminary_microphysical_fields, specific_moisture, temperature)
+
+    # Re-regularize after materialization (materialization may modify boundary conditions)
     regularized_boundary_conditions = regularize_field_boundary_conditions(boundary_conditions, grid, all_names)
 
     # Materialize dynamics and formulation
@@ -178,6 +191,7 @@ function AtmosphereModel(grid;
         momentum, _ = materialize_momentum_and_velocities(dynamics, grid, regularized_boundary_conditions)
         velocities = materialize_velocities(velocities, grid)
     end
+
     microphysical_fields = materialize_microphysical_fields(microphysics, grid, regularized_boundary_conditions)
     initialize_model_microphysical_fields!(microphysical_fields, microphysics)
 
@@ -186,10 +200,6 @@ function AtmosphereModel(grid;
     if moisture_density isa DefaultValue
         moisture_density = CenterField(grid, boundary_conditions=regularized_boundary_conditions.ρqᵗ)
     end
-
-    # Diagnostic fields
-    specific_moisture = CenterField(grid)
-    temperature = CenterField(grid)
 
     prognostic_microphysical_fields = NamedTuple(name => microphysical_fields[name] for name in prognostic_field_names(microphysics))
     prognostic_model_fields = collect_prognostic_fields(formulation,
