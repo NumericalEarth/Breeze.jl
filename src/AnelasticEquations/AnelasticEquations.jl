@@ -27,7 +27,7 @@ using Oceananigans.ImmersedBoundaries: mask_immersed_field!
 using Oceananigans.Models.NonhydrostaticModels: NonhydrostaticModels
 using Oceananigans.Operators: Δzᵃᵃᶜ, Δzᵃᵃᶠ, divᶜᶜᶜ, Δzᶜᶜᶜ, ℑzᵃᵃᶠ, ∂xᶠᶜᶜ, ∂yᶜᶠᶜ, ∂zᶜᶜᶠ
 using Oceananigans.Solvers: Solvers, solve!, FourierTridiagonalPoissonSolver, AbstractHomogeneousNeumannFormulation
-using Oceananigans.DistributedComputations: Distributed, DistributedFourierTridiagonalPoissonSolver, reconstruct_global_grid
+using Oceananigans.DistributedComputations: DistributedFourierTridiagonalPoissonSolver, reconstruct_global_grid
 using Oceananigans.Utils: prettysummary, launch!
 
 using Breeze.Thermodynamics: ReferenceState, MoistureMassFractions, mixture_gas_constant
