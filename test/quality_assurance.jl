@@ -9,6 +9,16 @@ using ClimaComms: ClimaComms
 using Dates: Dates
 using RRTMGP: RRTMGP
 using SpecialFunctions: SpecialFunctions
+if VERSION < v"1.12"
+    using Reactant: Reactant
+
+    # For some reason `BreezeReactantExt` is non-analyzable,
+    # but only in Julia v1.11-.
+    BreezeReactantExt = isdefined(Base, :get_extension) ? Base.get_extension(Breeze, :BreezeReactantExt) : Breeze.BreezeReactantExt
+    allow_unanalyzable = (BreezeReactantExt.TimeSteppers,)
+else
+    allow_unanalyzable = ()
+end
 
 @testset "Aqua" begin
     Aqua.test_all(Breeze)
@@ -16,7 +26,7 @@ end
 
 @testset "ExplicitImports" begin
     @testset "Explicit Imports" begin
-        @test ExplicitImports.check_no_implicit_imports(Breeze) === nothing
+        @test ExplicitImports.check_no_implicit_imports(Breeze; allow_unanalyzable) === nothing
     end
 
     @testset "Import via Owner" begin
@@ -24,7 +34,7 @@ end
     end
 
     @testset "Stale Explicit Imports" begin
-        @test ExplicitImports.check_no_stale_explicit_imports(Breeze) === nothing
+        @test ExplicitImports.check_no_stale_explicit_imports(Breeze; allow_unanalyzable) === nothing
     end
 
     @testset "Qualified Accesses" begin
