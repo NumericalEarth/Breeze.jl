@@ -231,11 +231,7 @@ lines!(ax_ratio, U_range, Cᴰ_unstable ./ Cᴰ_neutral, color=:firebrick,  line
 lines!(ax_ratio, U_range, ones(length(U_range)),       color=:black,      linewidth=2)
 lines!(ax_ratio, U_range, Cᴰ_stable   ./ Cᴰ_neutral, color=:dodgerblue, linewidth=2)
 
-save("polynomial_coefficient_wind_stability.png", fig_coef)
-nothing #hide
-
-#=
-# ![](polynomial_coefficient_wind_stability.png)
+fig_coef
 
 # We finally assemble all of the boundary conditions,
 
@@ -487,5 +483,3 @@ end
 nothing #hide
 
 # ![](prescribed_sea_surface_temperature.mp4)
-
-=#
