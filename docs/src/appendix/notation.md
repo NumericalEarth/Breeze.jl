@@ -121,6 +121,7 @@ The following table also uses a few conventions that suffuse the source code and
 | ``Cᴰ``                              | `Cᴰ`   |                                     | Surface drag coefficient                                                       |
 | ``Cᵀ``                              | `Cᵀ`   |                                     | Surface sensible heat transfer coefficient (Stanton number)                    |
 | ``Cᵛ``                              | `Cᵛ`   |                                     | Surface vapor transfer coefficient (Dalton number)                             |
+| ``\ell``                            | `ℓ`    |                                     | Surface roughness length, m                                                    |
 | ``T_0``                             | `T₀`   |                                     | Sea surface temperature                                                        |
 | ``qᵛ₀``                             | `qᵛ₀`  |                                     | Saturation specific humidity at sea surface                                    |
 | ``\mathscr{I}``                     | `ℐ`    |                                     | Radiative flux (intensity), W/m²                                               |

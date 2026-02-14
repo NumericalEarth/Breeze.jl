@@ -14,14 +14,20 @@ export BulkDragFunction,
        EnergyFluxBoundaryConditionFunction,
        EnergyFluxBoundaryCondition,
        ThetaFluxBoundaryConditionFunction,
-       ThetaFluxBoundaryCondition
+       ThetaFluxBoundaryCondition,
+       PolynomialCoefficient,
+       DefaultStabilityFunction,
+       default_neutral_drag_polynomial,
+       default_neutral_sensible_heat_polynomial,
+       default_neutral_latent_heat_polynomial
 
 using ..AtmosphereModels: AtmosphereModels, grid_moisture_fractions, dynamics_density
+using ..AtmosphereModels.Diagnostics: VirtualPotentialTemperature, saturation_total_specific_moisture
 using ..Thermodynamics: saturation_specific_humidity, surface_density, PlanarLiquidSurface,
-                        mixture_heat_capacity
+                        mixture_heat_capacity, dry_air_gas_constant, vapor_gas_constant
 
 using Oceananigans.Architectures: Architectures
-using Oceananigans.Grids: Center, Face, XDirection, YDirection, AbstractGrid
+using Oceananigans.Grids: Center, Face, XDirection, YDirection, AbstractGrid, znode
 using Oceananigans.Fields: Field, set!
 using Oceananigans.BoundaryConditions: BoundaryConditions as OceananigansBC,
                                        BoundaryCondition,
@@ -42,6 +48,7 @@ using DocStringExtensions: TYPEDSIGNATURES
 # Get surface value from a Field or a Number
 @inline surface_value(i, j, field::AbstractArray) = @inbounds field[i, j, 1]
 @inline surface_value(i, j, x::Number) = x
+@inline surface_value(i, j, ::Nothing) = nothing
 
 #####
 ##### Wind speed calculations at staggered locations
@@ -74,6 +81,7 @@ end
 ##### Boundary condition implementations
 #####
 
+include("polynomial_bulk_coefficient.jl")
 include("bulk_drag.jl")
 include("bulk_scalar_fluxes.jl")
 include("thermodynamic_variable_bcs.jl")
@@ -93,25 +101,28 @@ $(TYPEDSIGNATURES)
 
 Regularize boundary conditions for [`AtmosphereModel`](@ref AtmosphereModels.AtmosphereModel).
 This function walks through all boundary conditions and calls
-`regularize_atmosphere_boundary_condition` on each one, allowing specialized handling for
+`materialize_atmosphere_boundary_condition` on each one, allowing specialized handling for
 bulk flux boundary conditions and other atmosphere-specific boundary condition types.
 
 If `formulation` is `:LiquidIcePotentialTemperature` and `ρe` boundary conditions are provided,
 they are automatically converted to `ρθ` boundary conditions using `EnergyFluxBoundaryCondition`.
 """
-function AtmosphereModels.regularize_atmosphere_model_boundary_conditions(boundary_conditions, grid, formulation,
+function AtmosphereModels.materialize_atmosphere_model_boundary_conditions(boundary_conditions, grid, formulation,
                                                                           dynamics, microphysics, surface_pressure,
-                                                                          thermodynamic_constants)
+                                                                          thermodynamic_constants,
+                                                                          microphysical_fields, specific_moisture, temperature)
+
     # Convert ρe boundary conditions to ρθ for potential temperature formulations
     boundary_conditions = convert_energy_to_theta_bcs(boundary_conditions, formulation, thermodynamic_constants)
 
-    regularized = Dict{Symbol, Any}()
+    materialized = Dict{Symbol, Any}()
     for (name, fbcs) in pairs(boundary_conditions)
         loc = field_location(Val(name))
-        regularized[name] = regularize_atmosphere_field_bcs(fbcs, loc, grid, dynamics, microphysics,
-                                                            surface_pressure, thermodynamic_constants)
+        materialized[name] = materialize_atmosphere_field_bcs(fbcs, loc, grid, dynamics, microphysics,
+                                                              surface_pressure, thermodynamic_constants,
+                                                              microphysical_fields, specific_moisture, temperature)
     end
-    return NamedTuple(regularized)
+    return NamedTuple(materialized)
 end
 
 #####
@@ -178,25 +189,68 @@ end
 
 convert_energy_to_theta_bcs(bcs, f::Symbol, c) = convert_energy_to_theta_bcs(bcs, Val(f), c)
 
-# Regularize FieldBoundaryConditions by walking through each boundary
-function regularize_atmosphere_field_bcs(fbcs::FieldBoundaryConditions, loc, grid, dynam, micro, p₀, consts)
-    west     = regularize_atmosphere_boundary_condition(fbcs.west,     West(),   loc, grid, dynam, micro, p₀, consts)
-    east     = regularize_atmosphere_boundary_condition(fbcs.east,     East(),   loc, grid, dynam, micro, p₀, consts)
-    south    = regularize_atmosphere_boundary_condition(fbcs.south,    South(),  loc, grid, dynam, micro, p₀, consts)
-    north    = regularize_atmosphere_boundary_condition(fbcs.north,    North(),  loc, grid, dynam, micro, p₀, consts)
-    bottom   = regularize_atmosphere_boundary_condition(fbcs.bottom,   Bottom(), loc, grid, dynam, micro, p₀, consts)
-    top      = regularize_atmosphere_boundary_condition(fbcs.top,      Top(),    loc, grid, dynam, micro, p₀, consts)
-    immersed = regularize_atmosphere_boundary_condition(fbcs.immersed, nothing,  loc, grid, dynam, micro, p₀, consts)
+# Materialize FieldBoundaryConditions by walking through each boundary
+function materialize_atmosphere_field_bcs(fbcs::FieldBoundaryConditions, loc, grid, dynam, micro, p₀, consts,
+                                          microphysical_fields, specific_moisture, temperature)
+    args = (loc, grid, dynam, micro, p₀, consts, microphysical_fields, specific_moisture, temperature)
+    west     = materialize_atmosphere_boundary_condition(fbcs.west,     West(),   args...)
+    east     = materialize_atmosphere_boundary_condition(fbcs.east,     East(),   args...)
+    south    = materialize_atmosphere_boundary_condition(fbcs.south,    South(),  args...)
+    north    = materialize_atmosphere_boundary_condition(fbcs.north,    North(),  args...)
+    bottom   = materialize_atmosphere_boundary_condition(fbcs.bottom,   Bottom(), args...)
+    top      = materialize_atmosphere_boundary_condition(fbcs.top,      Top(),    args...)
+    immersed = materialize_atmosphere_boundary_condition(fbcs.immersed, nothing,  args...)
 
     return FieldBoundaryConditions(; west, east, south, north, bottom, top, immersed)
 end
 
 # Default: pass through unchanged
-regularize_atmosphere_boundary_condition(bc, side, loc, grid, dynamics, microphysics, surface_pressure, constants) = bc
+materialize_atmosphere_boundary_condition(bc, side, loc, grid, dynamics, microphysics, surface_pressure, constants,
+                                          microphysical_fields, specific_moisture, temperature) = bc
 
-# Regularize BulkDrag: infer direction from field location if needed
-function regularize_atmosphere_boundary_condition(bc::BoundaryCondition{<:Flux, <:BulkDragFunction{Nothing}},
-                                                  side, loc, grid, dynamics, microphysics, surface_pressure, constants)
+#####
+##### Materialize coefficient: fill in VPT/pressure/constants for PolynomialCoefficient
+#####
+
+# Default: pass through unchanged (constant coefficients, etc.)
+materialize_coefficient(C, grid, dynamics, microphysics, surface_pressure, constants,
+                        microphysical_fields, specific_moisture, temperature) = C
+
+# For PolynomialCoefficient: create VPT and return a fully-populated coefficient
+function materialize_coefficient(coef::PolynomialCoefficient, grid, dynamics, microphysics,
+                                 surface_pressure, constants,
+                                 microphysical_fields, specific_moisture, temperature)
+    reference_state = dynamics.reference_state
+    θᵥ = VirtualPotentialTemperature(grid;
+        reference_state, microphysics, microphysical_fields,
+        specific_moisture, temperature, thermodynamic_constants=constants)
+
+    return PolynomialCoefficient(coef.polynomial,
+                                 coef.roughness_length,
+                                 coef.minimum_wind_speed,
+                                 coef.stability_function,
+                                 coef.surface,
+                                 θᵥ, surface_pressure, constants)
+end
+
+#####
+##### Materialize BulkDrag: convert surface field and materialize coefficient
+#####
+
+function materialize_bulk_drag(df, grid, dynamics, microphysics, surface_pressure, constants,
+                               microphysical_fields, specific_moisture, temperature)
+    T₀ = materialize_surface_field(df.surface_temperature, grid)
+    coef = materialize_coefficient(df.coefficient, grid, dynamics, microphysics,
+                                   surface_pressure, constants,
+                                   microphysical_fields, specific_moisture, temperature)
+    new_df = BulkDragFunction(df.direction, coef, df.gustiness, T₀)
+    return BoundaryCondition(Flux(), new_df)
+end
+
+# BulkDrag with no direction: infer direction from field location, then materialize
+function materialize_atmosphere_boundary_condition(bc::BoundaryCondition{<:Flux, <:BulkDragFunction{Nothing}},
+                                                  side, loc, grid, dynamics, microphysics, surface_pressure, constants,
+                                                  microphysical_fields, specific_moisture, temperature)
     df = bc.condition
     LX, LY, _ = loc
 
@@ -209,32 +263,50 @@ function regularize_atmosphere_boundary_condition(bc::BoundaryCondition{<:Flux, 
         throw(ArgumentError("Can only specify BulkDrag on x-momentum or y-momentum fields!"))
     end
 
-    regularized_df = BulkDragFunction(direction, df.coefficient, df.gustiness)
-    return BoundaryCondition(Flux(), regularized_df)
+    directed_df = BulkDragFunction(direction, df.coefficient, df.gustiness, df.surface_temperature)
+    return materialize_bulk_drag(directed_df, grid, dynamics, microphysics, surface_pressure, constants,
+                                 microphysical_fields, specific_moisture, temperature)
 end
 
-# BulkDrag with direction already set: pass through
-regularize_atmosphere_boundary_condition(bc::BoundaryCondition{<:Flux, <:XDirectionBulkDragFunction},
-                                         side, loc, grid, dynamics, microphysics, surface_pressure, constants) = bc
-regularize_atmosphere_boundary_condition(bc::BoundaryCondition{<:Flux, <:YDirectionBulkDragFunction},
-                                         side, loc, grid, dynamics, microphysics, surface_pressure, constants) = bc
+# BulkDrag with direction already set: materialize
+function materialize_atmosphere_boundary_condition(bc::BoundaryCondition{<:Flux, <:XDirectionBulkDragFunction},
+                                                  side, loc, grid, dynamics, microphysics, surface_pressure, constants,
+                                                  microphysical_fields, specific_moisture, temperature)
+    return materialize_bulk_drag(bc.condition, grid, dynamics, microphysics, surface_pressure, constants,
+                                 microphysical_fields, specific_moisture, temperature)
+end
 
-# Regularize BulkSensibleHeatFlux: populate surface_pressure, thermodynamic_constants, preserve formulation
-function regularize_atmosphere_boundary_condition(bc::BulkSensibleHeatFluxBoundaryCondition,
-                                                  side, loc, grid, dynamics, microphysics, surface_pressure, constants)
+function materialize_atmosphere_boundary_condition(bc::BoundaryCondition{<:Flux, <:YDirectionBulkDragFunction},
+                                                  side, loc, grid, dynamics, microphysics, surface_pressure, constants,
+                                                  microphysical_fields, specific_moisture, temperature)
+    return materialize_bulk_drag(bc.condition, grid, dynamics, microphysics, surface_pressure, constants,
+                                 microphysical_fields, specific_moisture, temperature)
+end
+
+# Materialize BulkSensibleHeatFlux: populate surface_pressure, thermodynamic_constants, preserve formulation
+function materialize_atmosphere_boundary_condition(bc::BulkSensibleHeatFluxBoundaryCondition,
+                                                  side, loc, grid, dynamics, microphysics, surface_pressure, constants,
+                                                  microphysical_fields, specific_moisture, temperature)
     bf = bc.condition
     T₀ = materialize_surface_field(bf.surface_temperature, grid)
-    new_bf = BulkSensibleHeatFluxFunction(bf.coefficient, bf.gustiness, T₀, surface_pressure, constants, bf.formulation)
+    coef = materialize_coefficient(bf.coefficient, grid, dynamics, microphysics,
+                                   surface_pressure, constants,
+                                   microphysical_fields, specific_moisture, temperature)
+    new_bf = BulkSensibleHeatFluxFunction(coef, bf.gustiness, T₀, surface_pressure, constants, bf.formulation)
     return BoundaryCondition(Flux(), new_bf)
 end
 
-# Regularize BulkVaporFlux: populate surface_pressure, thermodynamic_constants, and surface
-function regularize_atmosphere_boundary_condition(bc::BulkVaporFluxBoundaryCondition,
-                                                  side, loc, grid, dynamics, microphysics, surface_pressure, constants)
+# Materialize BulkVaporFlux: populate surface_pressure, thermodynamic_constants, and surface
+function materialize_atmosphere_boundary_condition(bc::BulkVaporFluxBoundaryCondition,
+                                                  side, loc, grid, dynamics, microphysics, surface_pressure, constants,
+                                                  microphysical_fields, specific_moisture, temperature)
     bf = bc.condition
     T₀ = materialize_surface_field(bf.surface_temperature, grid)
     surface = PlanarLiquidSurface()
-    new_bf = BulkVaporFluxFunction(bf.coefficient, bf.gustiness, T₀, surface_pressure, constants, surface)
+    coef = materialize_coefficient(bf.coefficient, grid, dynamics, microphysics,
+                                   surface_pressure, constants,
+                                   microphysical_fields, specific_moisture, temperature)
+    new_bf = BulkVaporFluxFunction(coef, bf.gustiness, T₀, surface_pressure, constants, surface)
     return BoundaryCondition(Flux(), new_bf)
 end
 
@@ -243,6 +315,7 @@ end
 #####
 
 # Helper to convert functions to Fields
+materialize_surface_field(::Nothing, grid) = nothing
 materialize_surface_field(f::Field, grid) = f
 materialize_surface_field(f::Number, grid) = f
 
@@ -251,5 +324,26 @@ function materialize_surface_field(f::Function, grid)
     set!(field, f)
     return field
 end
+
+#####
+##### Default polynomial filling for Function constructors
+#####
+##### When a PolynomialCoefficient with `polynomial = nothing` is passed as the
+##### coefficient, fill in the appropriate Large & Yeager (2009) default polynomial
+##### before constructing the Function struct. This way the user interface is the
+##### same regardless of coefficient type: BulkDrag(coefficient=..., gustiness=...).
+#####
+##### These must be defined after the struct definitions (BulkDragFunction, etc.)
+##### so that they add methods to the existing constructors.
+#####
+
+BulkDragFunction(d, coef::NothingPolynomialCoefficient, g, t) =
+    BulkDragFunction(d, fill_polynomial(coef, default_neutral_drag_polynomial), g, t)
+
+BulkSensibleHeatFluxFunction(coef::NothingPolynomialCoefficient, g, t, p, c, f) =
+    BulkSensibleHeatFluxFunction(fill_polynomial(coef, default_neutral_sensible_heat_polynomial), g, t, p, c, f)
+
+BulkVaporFluxFunction(coef::NothingPolynomialCoefficient, g, t, p, c, s) =
+    BulkVaporFluxFunction(fill_polynomial(coef, default_neutral_latent_heat_polynomial), g, t, p, c, s)
 
 end # module BoundaryConditions
