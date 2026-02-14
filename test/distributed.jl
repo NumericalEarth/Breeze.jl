@@ -227,12 +227,12 @@ end
     end
 
     #####
-    ##### Section B — Multi-rank MPI tests (launched via mpiexec -n 4)
+    ##### Section B — Multi-rank MPI tests
     ##### Uses JLD2Writer for distributed output and FieldTimeSeries to combine/compare.
     #####
 
     @testset "Multi-rank MPI tests" begin
-        nranks = 4
+        nranks = clamp(Sys.CPU_THREADS, 2, 4)
         output_dir = mktempdir()
 
         partitions = [
