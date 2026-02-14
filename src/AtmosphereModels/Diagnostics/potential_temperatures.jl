@@ -285,6 +285,25 @@ function VirtualPotentialTemperature(model::AtmosphereModel, flavor_symbol=:spec
     return KernelFunctionOperation{Center, Center, Center}(func, model.grid)
 end
 
+function VirtualPotentialTemperature(grid;
+                                     reference_state,
+                                     microphysics,
+                                     microphysical_fields,
+                                     specific_moisture,
+                                     temperature,
+                                     thermodynamic_constants)
+
+    func = MoistPotentialTemperatureKernelFunction(SpecificVirtual(),
+                                                   reference_state,
+                                                   microphysics,
+                                                   microphysical_fields,
+                                                   specific_moisture,
+                                                   temperature,
+                                                   thermodynamic_constants)
+
+    return KernelFunctionOperation{Center, Center, Center}(func, grid)
+end
+
 """
     LiquidIcePotentialTemperature(model, flavor=:specific)
 

@@ -28,7 +28,7 @@ using Oceananigans.Operators: Δzᵃᵃᶜ, Δzᵃᵃᶠ, divᶜᶜᶜ, Δzᶜ�
 using Oceananigans.Solvers: Solvers, solve!, FourierTridiagonalPoissonSolver, AbstractHomogeneousNeumannFormulation
 using Oceananigans.Utils: prettysummary, launch!
 
-using Breeze.Thermodynamics: ReferenceState, mixture_gas_constant
+using Breeze.Thermodynamics: ReferenceState, MoistureMassFractions, mixture_gas_constant
 using Breeze.AtmosphereModels: AtmosphereModels, AtmosphereModel, mean_pressure, pressure_anomaly
 
 # Import microphysics interface for buoyancy computation

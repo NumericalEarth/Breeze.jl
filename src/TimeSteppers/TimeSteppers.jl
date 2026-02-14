@@ -8,7 +8,9 @@ Provides time stepping schemes for AtmosphereModel, including:
 """
 module TimeSteppers
 
-export SSPRungeKutta3, AcousticSSPRungeKutta3, AcousticRungeKutta3
+export SSPRungeKutta3, AcousticSSPRungeKutta3, AcousticRungeKutta3,
+       store_initial_state!,
+       ssp_rk3_substep!
 
 using DocStringExtensions: TYPEDSIGNATURES, TYPEDEF
 using Oceananigans.TimeSteppers: TimeSteppers as OceananigansTimeSteppers
