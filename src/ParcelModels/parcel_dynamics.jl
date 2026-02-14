@@ -1,5 +1,8 @@
 using Adapt: Adapt, adapt
 
+# Disambiguation: AcousticSSPRungeKutta3 is not compatible with ParcelDynamics
+using Breeze.TimeSteppers: AcousticSSPRungeKutta3
+
 using Oceananigans: Oceananigans, CenterField
 using Oceananigans.Architectures: on_architecture
 using Oceananigans.BoundaryConditions: fill_halo_regions!
@@ -860,9 +863,6 @@ function TimeSteppers.time_step!(model::ParcelModel, Δt; callbacks=nothing)
 
     return nothing
 end
-
-# Disambiguation: AcousticSSPRungeKutta3 is not compatible with ParcelDynamics
-using Breeze.TimeSteppers: AcousticSSPRungeKutta3
 
 function TimeSteppers.time_step!(model::AtmosphereModel{<:ParcelDynamics, <:Any, <:Any, <:AcousticSSPRungeKutta3}, Δt; callbacks=nothing)
     throw(ArgumentError("AcousticSSPRungeKutta3 time stepper is not compatible with ParcelDynamics. " *
