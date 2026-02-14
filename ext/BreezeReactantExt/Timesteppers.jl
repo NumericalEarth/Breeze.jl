@@ -1,22 +1,20 @@
 module TimeSteppers
 
-using Reactant
-using Oceananigans
-using Breeze
+using Reactant: Reactant
 
 using Oceananigans: AbstractModel, ReactantState
 using Oceananigans.TimeSteppers: update_state!, tick!, step_lagrangian_particles!, compute_flux_bc_tendencies!
 using Oceananigans.Models.NonhydrostaticModels: compute_pressure_correction!, make_pressure_correction!
 using Breeze.TimeSteppers: SSPRungeKutta3, store_initial_state!, ssp_rk3_substep!
 
-import Oceananigans: initialize!
-import Oceananigans.TimeSteppers: time_step!, first_time_step!
+using Oceananigans: initialize!
+using Oceananigans.TimeSteppers: TimeSteppers as OceananigansTimeSteppers, time_step!
 
 #####
 ##### SSPRungeKutta3 time stepping for Reactant
 #####
 
-function time_step!(model::AbstractModel{<:SSPRungeKutta3{FT}, <:ReactantState}, Δt; callbacks=[]) where FT
+function OceananigansTimeSteppers.time_step!(model::AbstractModel{<:SSPRungeKutta3{FT}, <:ReactantState}, Δt; callbacks=[]) where FT
     ts = model.timestepper
     α¹, α², α³ = ts.α¹, ts.α², ts.α³
 
@@ -58,7 +56,7 @@ function time_step!(model::AbstractModel{<:SSPRungeKutta3{FT}, <:ReactantState},
     return nothing
 end
 
-function first_time_step!(model::AbstractModel{<:SSPRungeKutta3, <:ReactantState}, Δt)
+function OceananigansTimeSteppers.first_time_step!(model::AbstractModel{<:SSPRungeKutta3, <:ReactantState}, Δt)
     initialize!(model)
     update_state!(model)
     time_step!(model, Δt)
