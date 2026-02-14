@@ -44,9 +44,10 @@ Keyword Arguments
 - `surface_pressure`: Mean surface pressure (default: 101325.0 Pa)
 - `time_discretization`: Time discretization scheme. Default: [`SplitExplicitTimeDiscretization`](@ref)
   for acoustic substepping. Use [`ExplicitTimeStepping`](@ref) for standard explicit.
-- `reference_potential_temperature`: Constant potential temperature θ₀ for building a fixed
-  hydrostatically-balanced reference state used in base-state pressure correction. Default: `nothing`
-  (no base-state correction). When provided, a `ReferenceState` is built during materialization.
+- `reference_potential_temperature`: Potential temperature for building a fixed
+  hydrostatically-balanced reference state used in base-state subtraction. Can be a constant `θ₀`
+  or a function `θ(z)`. Default: `nothing` (no base-state correction).
+  When provided, a `ReferenceState` is built during materialization.
 """
 function CompressibleDynamics(; standard_pressure = 1e5,
                                 surface_pressure = 101325.0,
@@ -90,10 +91,19 @@ function AtmosphereModels.materialize_dynamics(dynamics::CompressibleDynamics, g
     standard_pressure = convert(FT, dynamics.standard_pressure)
     surface_pressure = convert(FT, dynamics.surface_pressure)
 
-    # Build ReferenceState if reference_potential_temperature was provided
+    # Build reference state if reference_potential_temperature was provided.
+    # For SplitExplicitTimeDiscretization, use ExnerReferenceState which has
+    # exact discrete Exner hydrostatic balance (required for the Exner pressure
+    # acoustic substepping formulation). For other time discretizations, use
+    # the standard ReferenceState.
     θ₀ = dynamics.reference_state  # temporarily stored θ₀ (or nothing)
     if θ₀ === nothing
         reference_state = nothing
+    elseif dynamics.time_discretization isa SplitExplicitTimeDiscretization
+        reference_state = ExnerReferenceState(grid, thermodynamic_constants;
+                                              surface_pressure,
+                                              potential_temperature = θ₀,
+                                              standard_pressure)
     else
         reference_state = ReferenceState(grid, thermodynamic_constants;
                                          surface_pressure,

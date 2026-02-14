@@ -90,7 +90,6 @@ function AcousticSSPRungeKutta3(grid, prognostic_fields;
                                 Gⁿ::TG = map(similar, prognostic_fields)) where {TI, TG}
 
     FT = eltype(grid)
-    time_discretization = dynamics.time_discretization
 
     # SSP RK3 stage coefficients
     α¹ = FT(1)
@@ -101,8 +100,8 @@ function AcousticSSPRungeKutta3(grid, prognostic_fields;
     U⁰ = map(similar, prognostic_fields)
     U0 = typeof(U⁰)
 
-    # Create acoustic substepping infrastructure from SplitExplicitTimeDiscretization configuration
-    substepper = AcousticSubstepper(grid, time_discretization)
+    # Create acoustic substepping infrastructure
+    substepper = AcousticSubstepper(grid, dynamics.time_discretization)
     AS = typeof(substepper)
 
     return AcousticSSPRungeKutta3{FT, U0, TG, TI, AS}(α¹, α², α³, U⁰, Gⁿ, implicit_solver, substepper)

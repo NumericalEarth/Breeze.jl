@@ -332,6 +332,37 @@ end
 
 @inline buoyancy_forceᶜᶜᶜ(i, j, k, grid, ::SlowTendencyMode, args...) = zero(grid)
 
+"""
+$(TYPEDEF)
+
+Wrapper type indicating that vertical "fast" terms should be excluded from tendencies.
+
+When computing momentum tendencies with a `HorizontalSlowMode`-wrapped dynamics,
+the horizontal pressure gradient is computed normally, but the vertical pressure
+gradient and buoyancy return zero. These vertical fast terms are handled by the
+acoustic substep loop through perturbation variables ``-ψ ∂ρ''/∂z - g ρ''``.
+
+Including the full vertical PG and buoyancy in the slow tendency introduces a
+hydrostatic truncation error ``O(Δz^2)`` that drives spurious acoustic modes.
+The horizontal PG does not suffer from this issue and can safely be included.
+"""
+struct HorizontalSlowMode{D}
+    dynamics :: D
+end
+
+# Forward dynamics_density to the wrapped dynamics
+@inline dynamics_density(s::HorizontalSlowMode) = dynamics_density(s.dynamics)
+
+# Horizontal PG: forward to the wrapped dynamics
+@inline x_pressure_gradient(i, j, k, grid, s::HorizontalSlowMode) =
+    x_pressure_gradient(i, j, k, grid, s.dynamics)
+@inline y_pressure_gradient(i, j, k, grid, s::HorizontalSlowMode) =
+    y_pressure_gradient(i, j, k, grid, s.dynamics)
+
+# Vertical PG and buoyancy return zero (handled by acoustic loop)
+@inline z_pressure_gradient(i, j, k, grid, ::HorizontalSlowMode) = zero(grid)
+@inline buoyancy_forceᶜᶜᶜ(i, j, k, grid, ::HorizontalSlowMode, args...) = zero(grid)
+
 #####
 ##### Tendency computation interface
 #####

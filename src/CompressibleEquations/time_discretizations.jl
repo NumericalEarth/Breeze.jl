@@ -9,36 +9,56 @@
 """
 $(TYPEDEF)
 
-Split-explicit time discretization for compressible dynamics.
+Split-explicit time discretization for compressible dynamics using the
+Exner pressure formulation following CM1 (Bryan 2002).
 
 Uses acoustic substepping following [Wicker and Skamarock (2002)](@cite WickerSkamarock2002):
-- Outer loop: SSP RK3 for slow tendencies (advection, Coriolis, diffusion)
-- Inner loop: Acoustic substeps for fast tendencies (pressure gradient, buoyancy)
+- Outer loop: WS-RK3 for slow tendencies (advection, Coriolis, diffusion)
+- Inner loop: Forward-backward acoustic substeps for fast tendencies (pressure gradient)
+
+The acoustic loop uses velocity (u, v, w) and Exner pressure perturbation (π') as
+prognostic variables, with a vertically implicit w-π' coupling and CM1-style
+divergence damping.
 
 This allows using advective CFL time steps (~10-20 m/s) instead of acoustic CFL
 time steps (~340 m/s), typically enabling ~6x larger time steps.
 
-The first positional argument controls the vertical stepping strategy:
-- `nothing` (default): explicit vertical step (subject to vertical acoustic CFL)
-- [`VerticallyImplicit`](@ref)`(α)`: implicit vertical solve with off-centering `α`
-
 Fields
 ======
 
-- `time_discretization`: `nothing` or [`VerticallyImplicit`](@ref)
-- `substeps`: Number of acoustic substeps per full time step. Default: 6
-- `divergence_damping_coefficient`: Divergence damping coefficient. Default: 0.05. When using base-state pressure correction (`reference_potential_temperature` in `CompressibleDynamics`), the stability constraint `(1-κᵈ)^Ns < 0.1` must be satisfied (e.g., κᵈ=0.2 for Ns=12, κᵈ=0.1 for Ns=24)
+- `substeps`: Number of acoustic substeps for the **full** time step (stage 3 of WS-RK3). For WS-RK3, earlier stages take fewer substeps (``Nτ = \\mathrm{round}(β N)``), keeping ``Δτ = Δt/N`` constant. Default: 8
+- `forward_weight`: Off-centering parameter α for the vertically implicit solver. α > 0.5 damps vertical acoustic modes. Default: 0.6 (CM1 default)
+- `divergence_damping_coefficient`: CM1-style ``κ_{div}`` applied to the Exner pressure perturbation for suppressing the computational mode. Default: 0.10 (CM1 default)
+- `acoustic_damping_coefficient`: Klemp (2018) divergence damping ``β_d``. Post-implicit-solve velocity correction: ``u -= β_d c_p θ_v ∂Δπ'/∂x``. Provides constant damping per outer Δt regardless of substep count. Needed by WS-RK3 at large Δt. Default: 0.0
 
 See also [`ExplicitTimeStepping`](@ref).
 """
-struct SplitExplicitTimeDiscretization{VTD, N, FT}
-    time_discretization :: VTD
+struct SplitExplicitTimeDiscretization{N, FT}
     substeps :: N
+    forward_weight :: FT
     divergence_damping_coefficient :: FT
+    acoustic_damping_coefficient :: FT
 end
 
-function SplitExplicitTimeDiscretization(time_discretization=nothing; substeps=6, divergence_damping_coefficient=0.05)
-    return SplitExplicitTimeDiscretization(time_discretization, substeps, divergence_damping_coefficient)
+function SplitExplicitTimeDiscretization(; substeps=8,
+                                           forward_weight=0.6,
+                                           divergence_damping_coefficient=0.10,
+                                           acoustic_damping_coefficient=0.0)
+    return SplitExplicitTimeDiscretization(substeps,
+                                           forward_weight,
+                                           divergence_damping_coefficient,
+                                           acoustic_damping_coefficient)
+end
+
+# Legacy constructor: ignore positional argument (was time_discretization)
+function SplitExplicitTimeDiscretization(::Any; substeps=8,
+                                                forward_weight=0.6,
+                                                divergence_damping_coefficient=0.10,
+                                                acoustic_damping_coefficient=0.0)
+    return SplitExplicitTimeDiscretization(substeps,
+                                           forward_weight,
+                                           divergence_damping_coefficient,
+                                           acoustic_damping_coefficient)
 end
 
 """
@@ -55,7 +75,7 @@ Use [`SplitExplicitTimeDiscretization`](@ref) for more efficient time-stepping w
 struct ExplicitTimeStepping end
 
 #####
-##### Vertical time discretization for acoustic substeps
+##### Vertical time discretization (legacy, kept for compatibility)
 #####
 
 """
@@ -63,20 +83,14 @@ $(TYPEDEF)
 
 Vertically implicit time discretization for acoustic substeps.
 
-Treats the vertical coupling between ``w`` and ``ρ`` (via the vertical
-pressure gradient and buoyancy) implicitly using a tridiagonal solver.
-This removes the vertical CFL restriction on the acoustic substep size,
-following [Klemp, Skamarock, and Dudhia (2007)](@cite KlempSkamarockDudhia2007)
-and CM1's `sound.F`.
-
-The off-centering parameter ``α`` controls the time discretization:
-- 0.5: Crank-Nicolson (second-order, no acoustic damping)
-- Greater than 0.5: Forward-weighted (damps vertically propagating acoustic modes)
+Note: With the Exner pressure formulation, the vertically implicit solver
+is always enabled. This type is kept for API compatibility but is no longer
+required as a parameter to [`SplitExplicitTimeDiscretization`](@ref).
 
 Fields
 ======
 
-- `implicit_weight`: Off-centering parameter (0.5 for Crank-Nicolson, typically 0.5-0.55)
+- `implicit_weight`: Off-centering parameter (0.5 for Crank-Nicolson, typically 0.5-0.6)
 """
 struct VerticallyImplicit{FT}
     implicit_weight :: FT

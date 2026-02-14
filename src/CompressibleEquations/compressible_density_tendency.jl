@@ -15,10 +15,28 @@ using Oceananigans.Operators: ∂xᶠᶜᶜ, ∂yᶜᶠᶜ, ∂zᶜᶜᶠ
 #####
 ##### Pressure gradient for compressible dynamics
 #####
+##### When a reference state exists, the vertical pressure gradient subtracts the
+##### reference pressure gradient ∂z(p_ref). Combined with the reference-subtracted
+##### buoyancy -g(ρ - ρ_ref), this eliminates the O(Δz²) hydrostatic truncation error.
+##### The reference pressure is in discrete hydrostatic balance with the reference
+##### density, so ∂z(p_ref) + g*ℑz(ρ_ref) = 0 exactly at the discrete level.
+#####
+##### Horizontal pressure gradients are unaffected because the reference state
+##### is a column (varies only in z).
+#####
 
 @inline AtmosphereModels.x_pressure_gradient(i, j, k, grid, d::CompressibleDynamics) = ∂xᶠᶜᶜ(i, j, k, grid, d.pressure)
 @inline AtmosphereModels.y_pressure_gradient(i, j, k, grid, d::CompressibleDynamics) = ∂yᶜᶠᶜ(i, j, k, grid, d.pressure)
-@inline AtmosphereModels.z_pressure_gradient(i, j, k, grid, d::CompressibleDynamics) = ∂zᶜᶜᶠ(i, j, k, grid, d.pressure)
+
+@inline function AtmosphereModels.z_pressure_gradient(i, j, k, grid, d::CompressibleDynamics)
+    ∂z_p = ∂zᶜᶜᶠ(i, j, k, grid, d.pressure)
+    ∂z_p_ref = ∂z_reference_pressureᶜᶜᶠ(i, j, k, grid, d.reference_state)
+    return ∂z_p - ∂z_p_ref
+end
+
+@inline ∂z_reference_pressureᶜᶜᶠ(i, j, k, grid, ::Nothing) = 0
+@inline ∂z_reference_pressureᶜᶜᶠ(i, j, k, grid, ref::ReferenceState) = ∂zᶜᶜᶠ(i, j, k, grid, ref.pressure)
+@inline ∂z_reference_pressureᶜᶜᶠ(i, j, k, grid, ref::ExnerReferenceState) = ∂zᶜᶜᶠ(i, j, k, grid, ref.pressure)
 
 #####
 ##### Density tendency from continuity equation

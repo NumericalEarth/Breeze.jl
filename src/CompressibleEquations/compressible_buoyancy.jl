@@ -9,16 +9,17 @@ $(TYPEDSIGNATURES)
 
 Compute the buoyancy force density for compressible dynamics at cell center `(i, j, k)`.
 
-For the fully compressible formulation, the buoyancy/gravity force is simply:
+When a reference state is provided, the buoyancy force is computed as a perturbation:
 
 ```math
-ρ b = -g ρ
+ρ b = -g (ρ - ρ_r)
 ```
 
-where `ρ` is the prognostic density field.
+where ``ρ_r`` is the reference density in discrete hydrostatic balance. This eliminates
+the ``O(Δz^2)`` truncation error from the near-cancellation of ``∂p/∂z`` and ``gρ``,
+which is essential for stability with acoustic substepping at large time steps.
 
-Note: In the compressible formulation, the full gravitational force appears directly
-in the momentum equation without subtraction of a reference state.
+Without a reference state, the full gravitational force ``-gρ`` is used.
 """
 @inline function AtmosphereModels.buoyancy_forceᶜᶜᶜ(i, j, k, grid,
                                                     dynamics::CompressibleDynamics,
@@ -31,6 +32,11 @@ in the momentum equation without subtraction of a reference state.
     ρ_field = dynamics_density(dynamics)
     @inbounds ρ = ρ_field[i, j, k]
     g = constants.gravitational_acceleration
+    ρ_ref = reference_densityᶜᶜᶜ(i, j, k, dynamics.reference_state)
 
-    return -g * ρ
+    return -g * (ρ - ρ_ref)
 end
+
+@inline reference_densityᶜᶜᶜ(i, j, k, ::Nothing) = 0
+@inline reference_densityᶜᶜᶜ(i, j, k, ref::ReferenceState) = @inbounds ref.density[i, j, k]
+@inline reference_densityᶜᶜᶜ(i, j, k, ref::ExnerReferenceState) = @inbounds ref.density[i, j, k]

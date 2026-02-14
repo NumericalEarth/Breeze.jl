@@ -10,6 +10,7 @@ export
     MoistAirBuoyancy,
     ThermodynamicConstants,
     ReferenceState,
+    ExnerReferenceState,
     surface_density,
     AnelasticDynamics,
     AnelasticModel,

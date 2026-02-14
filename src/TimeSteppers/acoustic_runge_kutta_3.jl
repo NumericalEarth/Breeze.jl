@@ -17,7 +17,7 @@ using Breeze.CompressibleEquations:
     AcousticSubstepper,
     acoustic_rk3_substep_loop!,
     prepare_acoustic_cache!,
-    add_base_state_pressure_correction!
+    convert_slow_tendencies!
 
 """
 $(TYPEDEF)
@@ -89,7 +89,6 @@ function AcousticRungeKutta3(grid, prognostic_fields;
                               Gⁿ::TG = map(similar, prognostic_fields)) where {TI, TG}
 
     FT = eltype(grid)
-    time_discretization = dynamics.time_discretization
 
     # Wicker-Skamarock RK3 stage fractions
     β₁ = FT(1//3)
@@ -99,14 +98,14 @@ function AcousticRungeKutta3(grid, prognostic_fields;
     U⁰ = map(similar, prognostic_fields)
     U0 = typeof(U⁰)
 
-    substepper = AcousticSubstepper(grid, time_discretization)
+    substepper = AcousticSubstepper(grid, dynamics.time_discretization)
     AS = typeof(substepper)
 
     return AcousticRungeKutta3{FT, U0, TG, TI, AS}(β₁, β₂, β₃, U⁰, Gⁿ, implicit_solver, substepper)
 end
 
 #####
-##### Slow tendency computation (full RHS including pressure gradient)
+##### Slow tendency computation (excludes PGF and buoyancy for split-explicit)
 #####
 
 using Oceananigans.Operators: divᶜᶜᶜ
@@ -127,14 +126,16 @@ $(TYPEDSIGNATURES)
 Compute slow momentum tendencies (advection, Coriolis, turbulence, forcing).
 
 The pressure gradient and buoyancy are excluded using [`SlowTendencyMode`](@ref).
-These "fast" terms are handled by the acoustic substep loop through perturbation
-variables: ``-ψ ∂ρ''/∂x`` (pressure) and ``-ψ ∂ρ''/∂z - g ρ''`` (pressure + buoyancy).
+The acoustic substep loop handles the full PGF (reference + perturbation) and buoyancy:
 
-!!! note "Base-state pressure correction"
-    The perturbation pressure ``ψ ∂ρ''/∂x`` only captures density changes during
-    the acoustic loop. When a `reference_state` is provided in `CompressibleDynamics`,
-    [`add_base_state_pressure_correction!`](@ref) adds the pressure gradient from
-    ``(ρ - ρ̄)`` to these slow tendencies, capturing the full pressure signal.
+- Reference PGF: ``∂(p_{stage} - p_{ref})/∂x``
+- Perturbation PGF: ``ψ_θ ∂(ρθ'')/∂x`` where ``ψ_θ = c²/θ``
+- Perturbation buoyancy: ``-g ρ''``
+- Reference buoyancy: ``-g(ρ_{stage} - ρ_{ref})``
+- Thermal buoyancy: ``B_θ (ρθ)''``
+
+The outer RK3 time step is limited only by the advective CFL, not the acoustic CFL.
+The acoustic CFL is resolved by the substep loop with constant ``Δτ = Δt/N``.
 """
 function compute_slow_momentum_tendencies!(model::AbstractModel{<:AcousticRungeKutta3})
     substepper = model.timestepper.substepper
@@ -142,7 +143,7 @@ function compute_slow_momentum_tendencies!(model::AbstractModel{<:AcousticRungeK
     arch = architecture(grid)
 
     # Wrap dynamics in SlowTendencyMode so pressure gradient and buoyancy return zero.
-    # The acoustic substep provides perturbation pressure/buoyancy instead.
+    # The acoustic substep loop handles full PGF through the Exner pressure π'.
     slow_dynamics = SlowTendencyMode(model.dynamics)
 
     model_fields = fields(model)
@@ -189,7 +190,8 @@ $(TYPEDSIGNATURES)
 Apply a Wicker-Skamarock RK3 substep with acoustic substepping.
 
 The acoustic substep loop handles momentum, density, and the thermodynamic
-variable (ρθ or ρe) with effective stage timestep `β * Δt`.
+variable (ρθ or ρe). The substep size is constant ``Δτ = Δt/N`` across all
+stages, with the substep count varying as ``Nτ = \\mathrm{round}(β N)``.
 Remaining scalars (tracers) are updated with standard RK3.
 """
 function acoustic_rk3_substep!(model, Δt, β)
@@ -199,20 +201,15 @@ function acoustic_rk3_substep!(model, Δt, β)
     # Prepare stage-frozen reference state (needed by slow tendency computation)
     prepare_acoustic_cache!(substepper, model)
 
-    # Compute slow momentum tendencies (full RHS including pressure gradient)
+    # Compute slow momentum tendencies (advection, Coriolis, diffusion — PGF/buoyancy handled by acoustic loop)
     compute_slow_momentum_tendencies!(model)
-
-    # Add base-state pressure correction to slow momentum tendencies.
-    # This captures the pressure gradient from (ρ - ρ̄) that the acoustic
-    # perturbation ρ″ (which starts at zero) would otherwise miss.
-    add_base_state_pressure_correction!(substepper, model)
 
     # Compute slow density and thermodynamic tendencies
     # (reuses function defined in acoustic_ssp_runge_kutta_3.jl)
     compute_slow_scalar_tendencies!(model)
 
-    # Execute acoustic substep loop with effective stage timestep β * Δt
-    acoustic_rk3_substep_loop!(model, substepper, β * Δt, U⁰)
+    # Execute acoustic substep loop: constant Δτ = Δt/N, varying Nτ = round(β*N)
+    acoustic_rk3_substep_loop!(model, substepper, Δt, β, U⁰)
 
     # Update remaining scalars (tracers) using WS-RK3
     scalar_rk3_substep!(model, β * Δt)
@@ -297,8 +294,8 @@ The algorithm follows [Wicker and Skamarock (2002)](@cite WickerSkamarock2002):
 - Inner loop: Acoustic substeps for fast (pressure) tendencies
 
 Each RK stage:
-1. Compute slow tendencies (advection, Coriolis, diffusion, pressure gradient, buoyancy)
-2. Execute acoustic substep loop for momentum and density
+1. Compute slow tendencies (advection, Coriolis, diffusion only — PGF/buoyancy in acoustic loop)
+2. Execute acoustic substep loop for momentum and density (full PGF + buoyancy)
 3. Update scalars using standard RK update with time-averaged velocities
 """
 function OceananigansTimeSteppers.time_step!(model::AtmosphereModel{<:Any, <:Any, <:Any, <:AcousticRungeKutta3}, Δt; callbacks=[])
