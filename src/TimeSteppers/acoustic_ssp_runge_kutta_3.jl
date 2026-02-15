@@ -14,6 +14,7 @@ using Oceananigans.TimeSteppers:
 using Breeze.AtmosphereModels: AtmosphereModel
 
 using Breeze.CompressibleEquations:
+    CompressibleDynamics,
     AcousticSubstepper,
     acoustic_substep_loop!,
     prepare_acoustic_cache!
@@ -356,7 +357,7 @@ Each RK stage:
 2. Execute acoustic substep loop for momentum and density
 3. Update scalars using standard RK update with time-averaged velocities
 """
-function OceananigansTimeSteppers.time_step!(model::AtmosphereModel{<:Any, <:Any, <:Any, <:AcousticSSPRungeKutta3}, Δt; callbacks=[])
+function OceananigansTimeSteppers.time_step!(model::AtmosphereModel{<:CompressibleDynamics, <:Any, <:Any, <:AcousticSSPRungeKutta3}, Δt; callbacks=[])
     Δt == 0 && @warn "Δt == 0 may cause model blowup!"
 
     # Be paranoid and update state at iteration 0
