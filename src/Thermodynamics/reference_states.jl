@@ -473,15 +473,14 @@ function ExnerReferenceState(grid, constants=ThermodynamicConstants(eltype(grid)
 
     # Build θ₀ field
     θ₀_field = Field{Nothing, Nothing, Center}(grid)
-    θ₀_value = if potential_temperature isa Function
+    if potential_temperature isa Function
         set!(θ₀_field, potential_temperature)
-        convert(FT, potential_temperature(0))
     else
-        θ₀_value = convert(FT, potential_temperature)
-        set!(θ₀_field, Returns(θ₀_value))
-        θ₀_value
+        set!(θ₀_field, Returns(convert(FT, potential_temperature)))
     end
     fill_halo_regions!(θ₀_field)
+
+    θ₀_value = convert(FT, potential_temperature isa Function ? potential_temperature(0) : potential_temperature)
 
     # Build π₀ by discrete upward integration
     π₀_field = Field{Nothing, Nothing, Center}(grid)

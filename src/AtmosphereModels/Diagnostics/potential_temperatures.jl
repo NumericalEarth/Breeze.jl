@@ -294,7 +294,9 @@ function VirtualPotentialTemperature(grid;
                                      thermodynamic_constants)
 
     func = MoistPotentialTemperatureKernelFunction(SpecificVirtual(),
-                                                   reference_state,
+                                                   reference_state.pressure,
+                                                   reference_state.density,
+                                                   reference_state.standard_pressure,
                                                    microphysics,
                                                    microphysical_fields,
                                                    specific_moisture,

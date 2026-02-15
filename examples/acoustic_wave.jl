@@ -25,7 +25,6 @@
 # and a logarithmic wind profile consistent with the atmospheric surface layer.
 
 using Breeze
-using Breeze.Thermodynamics: adiabatic_hydrostatic_density
 using Oceananigans.Units
 using Printf
 using CairoMakie
@@ -38,7 +37,7 @@ Lx, Lz = 1000, 200  # meters
 grid = RectilinearGrid(size = (Nx, Nz), x = (-Lx/2, Lx/2), z = (0, Lz),
                        topology = (Periodic, Flat, Bounded))
 
-model = AtmosphereModel(grid; dynamics = CompressibleDynamics())
+model = AtmosphereModel(grid; dynamics = CompressibleDynamics(time_discretization=ExplicitTimeStepping()))
 
 # ## Background state
 #
