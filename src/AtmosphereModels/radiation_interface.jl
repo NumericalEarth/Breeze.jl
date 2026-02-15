@@ -184,7 +184,7 @@ struct BackgroundAtmosphere{N2, O2, CO2, CH4, N2O, CO, NO2, O3, CFC11, CFC12, CF
 end
 
 """
-    BackgroundAtmosphere(; kwargs...)
+$(TYPEDSIGNATURES)
 
 Construct a `BackgroundAtmosphere` with volume mixing ratios for radiatively active gases.
 All values are dimensionless molar fractions.
