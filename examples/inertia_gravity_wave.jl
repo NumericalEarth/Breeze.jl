@@ -192,7 +192,7 @@ for (key, model) in models
     Δt = time_steps[key]
     sim = Simulation(model; Δt, stop_time)
 
-    # Progress callback
+    ## Progress callback
     θ′ = PotentialTemperature(model) - θᵇᵍ_field
     name = case_names[key]
 
@@ -206,7 +206,7 @@ for (key, model) in models
     callback_interval = key == :compressible ? IterationInterval(500) : IterationInterval(100)
     add_callback!(sim, progress, callback_interval)
 
-    # Output
+    ## Output
     outputs = merge(model.velocities, (; θ′))
     sim.output_writers[:jld2] = JLD2Writer(model, outputs;
                                            filename = "igw_$(key).jld2",
