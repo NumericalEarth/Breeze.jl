@@ -123,7 +123,7 @@ end
     ref = model.dynamics.reference_state
     set!(model; θ=300, u=0, qᵗ=0, ρ=ref.density)
 
-    simulation = Simulation(model; Δt=6, stop_iteration=5)
+    simulation = Simulation(model; Δt=6, stop_iteration=5, verbose=false)
     run!(simulation)
 
     @test model.clock.iteration == 5
@@ -146,7 +146,7 @@ end
     ref = model.dynamics.reference_state
     set!(model; θ=300, u=0, qᵗ=0, ρ=ref.density)
 
-    simulation = Simulation(model; Δt=6, stop_iteration=5)
+    simulation = Simulation(model; Δt=6, stop_iteration=5, verbose=false)
     run!(simulation)
 
     @test model.clock.iteration == 5
@@ -202,7 +202,7 @@ end
 
     model = build_igw_model(timestepper=:AcousticSSPRungeKutta3, Ns=8, kdiv=0.05)
 
-    simulation = Simulation(model; Δt=12, stop_iteration=20)
+    simulation = Simulation(model; Δt=12, stop_iteration=20, verbose=false)
     run!(simulation)
 
     @test model.clock.iteration == 20
@@ -223,7 +223,7 @@ end
 
     model = build_igw_model(timestepper=:AcousticRungeKutta3, Ns=8, kdiv=0.10)
 
-    simulation = Simulation(model; Δt=12, stop_iteration=20)
+    simulation = Simulation(model; Δt=12, stop_iteration=20, verbose=false)
     run!(simulation)
 
     @test model.clock.iteration == 20
@@ -260,7 +260,7 @@ end
     ref = model.dynamics.reference_state
     set!(model; θ=300, u=0, qᵗ=0, ρ=ref.density)
 
-    simulation = Simulation(model; Δt=12, stop_iteration=10)
+    simulation = Simulation(model; Δt=12, stop_iteration=10, verbose=false)
     run!(simulation)
 
     @test model.clock.iteration == 10
