@@ -17,8 +17,7 @@ using Breeze.CompressibleEquations:
     CompressibleDynamics,
     AcousticSubstepper,
     acoustic_rk3_substep_loop!,
-    prepare_acoustic_cache!,
-    convert_slow_tendencies!
+    prepare_acoustic_cache!
 
 """
 $(TYPEDEF)
@@ -109,13 +108,10 @@ end
 ##### Slow tendency computation (excludes PGF and buoyancy for split-explicit)
 #####
 
-using Oceananigans.Operators: divᶜᶜᶜ
-
 using Breeze.AtmosphereModels:
     AtmosphereModels,
     SlowTendencyMode,
     dynamics_density,
-    thermodynamic_density,
     compute_x_momentum_tendency!,
     compute_y_momentum_tendency!,
     compute_z_momentum_tendency!,

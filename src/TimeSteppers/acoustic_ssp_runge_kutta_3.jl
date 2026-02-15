@@ -11,7 +11,17 @@ using Oceananigans.TimeSteppers:
     step_lagrangian_particles!,
     implicit_step!
 
-using Breeze.AtmosphereModels: AtmosphereModel
+using Breeze.AtmosphereModels:
+    AtmosphereModels,
+    AtmosphereModel,
+    SlowTendencyMode,
+    dynamics_density,
+    thermodynamic_density_name,
+    compute_x_momentum_tendency!,
+    compute_y_momentum_tendency!,
+    compute_z_momentum_tendency!,
+    compute_dynamics_tendency!
+
 
 using Breeze.CompressibleEquations:
     CompressibleDynamics,
@@ -112,18 +122,6 @@ end
 ##### Stage-frozen tendency computation
 #####
 
-using Oceananigans.Operators: divᶜᶜᶜ
-
-using Breeze.AtmosphereModels:
-    AtmosphereModels,
-    SlowTendencyMode,
-    dynamics_density,
-    thermodynamic_density,
-    compute_x_momentum_tendency!,
-    compute_y_momentum_tendency!,
-    compute_z_momentum_tendency!,
-    compute_dynamics_tendency!
-
 """
 $(TYPEDSIGNATURES)
 
@@ -189,8 +187,6 @@ end
 ##### Slow density and thermodynamic tendencies
 #####
 
-using Breeze.AtmosphereModels: compute_dynamics_tendency!, thermodynamic_density
-
 """
 $(TYPEDSIGNATURES)
 
@@ -231,7 +227,7 @@ function compute_slow_scalar_tendencies!(model)
 
     AtmosphereModels.compute_thermodynamic_tendency!(model, common_args)
 
-    χ_name = AtmosphereModels.thermodynamic_density_name(model.formulation)
+    χ_name = thermodynamic_density_name(model.formulation)
     Gχ_full = getproperty(Gⁿ, χ_name)
     parent(substepper.Gˢρχ) .= parent(Gχ_full)
 

@@ -1,8 +1,5 @@
 using Adapt: Adapt, adapt
 
-# Disambiguation: AcousticSSPRungeKutta3 is not compatible with ParcelDynamics
-using Breeze.TimeSteppers: AcousticSSPRungeKutta3
-
 using Oceananigans: Oceananigans, CenterField
 using Oceananigans.Architectures: on_architecture
 using Oceananigans.BoundaryConditions: fill_halo_regions!
