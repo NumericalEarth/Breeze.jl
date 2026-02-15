@@ -861,13 +861,6 @@ function TimeSteppers.time_step!(model::ParcelModel, Δt; callbacks=nothing)
     return nothing
 end
 
-# Disambiguation: AcousticSSPRungeKutta3 is not compatible with ParcelDynamics
-using Breeze.TimeSteppers: AcousticSSPRungeKutta3
-
-function TimeSteppers.time_step!(model::AtmosphereModel{<:ParcelDynamics, <:Any, <:Any, <:AcousticSSPRungeKutta3}, Δt; callbacks=nothing)
-    throw(ArgumentError("AcousticSSPRungeKutta3 time stepper is not compatible with ParcelDynamics. " *
-                        "ParcelDynamics uses its own internal time stepping scheme."))
-end
 
 
 #####

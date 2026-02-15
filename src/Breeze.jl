@@ -218,4 +218,16 @@ using .VerticalGrids
 include("TimeSteppers/TimeSteppers.jl")
 using .TimeSteppers
 
+# Disambiguation: acoustic time steppers are not compatible with ParcelDynamics.
+# These must be defined after both ParcelModels and TimeSteppers are loaded.
+using Oceananigans.TimeSteppers: TimeSteppers as OceananigansTimeSteppers
+
+function OceananigansTimeSteppers.time_step!(::AtmosphereModel{<:ParcelDynamics, <:Any, <:Any, <:AcousticSSPRungeKutta3}, Δt; callbacks=nothing)
+    throw(ArgumentError("AcousticSSPRungeKutta3 is not compatible with ParcelDynamics."))
+end
+
+function OceananigansTimeSteppers.time_step!(::AtmosphereModel{<:ParcelDynamics, <:Any, <:Any, <:AcousticRungeKutta3}, Δt; callbacks=nothing)
+    throw(ArgumentError("AcousticRungeKutta3 is not compatible with ParcelDynamics."))
+end
+
 end # module Breeze

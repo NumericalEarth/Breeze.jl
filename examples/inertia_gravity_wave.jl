@@ -38,8 +38,8 @@
 # 1. **Anelastic**: Filters acoustic waves via the anelastic approximation
 # 2. **Boussinesq**: Anelastic with constant reference density
 # 3. **Compressible (explicit)**: Fully compressible with explicit time stepping
-# 4. **Split-explicit (explicit vertical)**: Acoustic substepping with explicit vertical
-# 5. **Split-explicit (implicit vertical)**: Acoustic substepping with implicit vertical solve
+# 4. **Split-explicit SSP-RK3**: Acoustic substepping with SSP-RK3 outer loop
+# 5. **Split-explicit WS-RK3**: Acoustic substepping with Wicker-Skamarock RK3 outer loop
 
 using Breeze
 using Breeze.CompressibleEquations: ExplicitTimeStepping
@@ -88,7 +88,7 @@ pˢᵗ = 1e5
 # ## Build all five models
 
 advection = WENO()
-Ns = 12 # acoustic substeps
+Ns = 8 # acoustic substeps
 surface_pressure = p₀
 potential_temperature = θ₀
 
@@ -107,24 +107,32 @@ boussinesq_dynamics = AnelasticDynamics(constant_density_reference_state)
 # Case 3: Compressible (fully explicit, no substepping)
 compressible_dynamics = CompressibleDynamics(; surface_pressure, time_discretization=ExplicitTimeStepping())
 
-# Case 4: Split-explicit with explicit vertical substepping
-# No base-state correction (reference_potential_temperature) — the correction requires
-# VerticallyImplicit for stability. Without it, only density-driven pressure is resolved.
-time_discretization = SplitExplicitTimeDiscretization(substeps=Ns, divergence_damping_coefficient=0.2)
-explicit_split_dynamics = CompressibleDynamics(; surface_pressure, time_discretization)
+# Case 4: Split-explicit with SSP-RK3 outer loop
+# Uses acoustic substepping with Exner pressure variables (velocity + π') and
+# vertically implicit w-π' coupling. The reference potential temperature enables
+# base-state subtraction for accurate perturbation pressure.
+ssp_time_discretization = SplitExplicitTimeDiscretization(substeps=Ns, divergence_damping_coefficient=0.05)
+ssp_dynamics = CompressibleDynamics(; surface_pressure,
+                                      time_discretization=ssp_time_discretization,
+                                      reference_potential_temperature=θᵇᵍ)
 
-# Case 5: Split-explicit with vertically implicit substepping
-time_discretization = SplitExplicitTimeDiscretization(VerticallyImplicit(0.5), substeps=Ns, divergence_damping_coefficient=0.2)
-implicit_split_dynamics = CompressibleDynamics(; surface_pressure, time_discretization,
-                                                 reference_potential_temperature=θ₀)
+# Case 5: Split-explicit with Wicker-Skamarock RK3 outer loop
+# Same acoustic substepping as SSP-RK3, but with WS-RK3 stage fractions (Δt/3, Δt/2, Δt)
+# instead of SSP convex combinations. This is the default for CompressibleDynamics with
+# SplitExplicitTimeDiscretization.
+ws_time_discretization = SplitExplicitTimeDiscretization(substeps=Ns, divergence_damping_coefficient=0.10)
+ws_dynamics = CompressibleDynamics(; surface_pressure,
+                                     time_discretization=ws_time_discretization,
+                                     reference_potential_temperature=θᵇᵍ)
 
 # Build all models:
 models = Dict(
     :anelastic      => AtmosphereModel(grid; advection, dynamics=anelastic_dynamics),
     :boussinesq     => AtmosphereModel(grid; advection, dynamics=boussinesq_dynamics),
     :compressible   => AtmosphereModel(grid; advection, dynamics=compressible_dynamics),
-    :explicit_split => AtmosphereModel(grid; advection, dynamics=explicit_split_dynamics),
-    :implicit_split => AtmosphereModel(grid; advection, dynamics=implicit_split_dynamics),
+    :ssp_rk3        => AtmosphereModel(grid; advection, dynamics=ssp_dynamics,
+                                       timestepper=:AcousticSSPRungeKutta3),
+    :ws_rk3         => AtmosphereModel(grid; advection, dynamics=ws_dynamics),
 )
 
 # Set initial conditions:
@@ -133,8 +141,10 @@ for name in (:anelastic, :boussinesq)
     set!(models[name]; θ=θᵢ, u=U)
 end
 
-for name in (:compressible, :explicit_split, :implicit_split)
-    set!(models[name]; θ=θᵢ, u=U, qᵗ=0, ρ=ρᵢ)
+for name in (:compressible, :ssp_rk3, :ws_rk3)
+    ref = models[name].dynamics.reference_state
+    ρ_init = isnothing(ref) ? ρᵢ : ref.density
+    set!(models[name]; θ=θᵢ, u=U, qᵗ=0, ρ=ρ_init)
 end
 
 # ## Time stepping constraints
@@ -150,14 +160,14 @@ cₛ = sqrt(cᵖᵈ / (cᵖᵈ - Rᵈ) * Rᵈ * θ₀)
 cfl = 0.5
 Δt_advective    = cfl * min(Δx, Δz) / U
 Δt_compressible = cfl * min(Δx, Δz) / (cₛ + U)
-Δt_split        = 2.0 # Δt_compressible * Ns
+Δt_split        = 12.0
 
 time_steps = Dict(
     :anelastic      => Δt_advective,
     :boussinesq     => Δt_advective,
     :compressible   => Δt_compressible,
-    :explicit_split => Δt_split,
-    :implicit_split => Δt_split,
+    :ssp_rk3        => Δt_split,
+    :ws_rk3         => Δt_split,
 )
 
 @info "Time steps" Δt_advective Δt_compressible Δt_split
@@ -170,8 +180,8 @@ case_names = Dict(
     :anelastic      => "Anelastic",
     :boussinesq     => "Boussinesq",
     :compressible   => "Compressible",
-    :explicit_split => "Split (explicit vert)",
-    :implicit_split => "Split (implicit vert)",
+    :ssp_rk3        => "SSP-RK3",
+    :ws_rk3         => "WS-RK3",
 )
 
 # Background θ field for computing perturbation
@@ -218,7 +228,7 @@ end
 # formulations. This comparison reveals how well each formulation captures
 # inertia-gravity wave propagation.
 
-cases = [:anelastic, :boussinesq, :compressible, :explicit_split, :implicit_split]
+cases = [:anelastic, :boussinesq, :compressible, :ssp_rk3, :ws_rk3]
 titles = [case_names[k] for k in cases]
 
 θ′ts = Dict(k => FieldTimeSeries("igw_$(k).jld2", "θ′") for k in cases)
