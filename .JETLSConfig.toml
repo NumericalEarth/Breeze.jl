@@ -1,0 +1,37 @@
+# Ignore unused arguments, we love unused arguments
+[[diagnostic.patterns]]
+pattern = "lowering/unused-argument"
+match_by = "code"
+match_type = "literal"
+severity = "off"
+
+# Disable notes about unsorted import names
+[[diagnostic.patterns]]
+pattern = "lowering/unsorted-import-names"
+match_by = "code"
+match_type = "literal"
+severity = "off"
+
+# Disable all warnings in pkgextensions (this seems broken):
+# https://github.com/aviatesk/JETLS.jl/issues/521
+[[diagnostic.patterns]]
+pattern = ".*"
+match_by = "code"
+match_type = "regex"
+severity = "off"
+path = "ext/**/*.jl"
+
+# Disable warnings in tests about missing variables which are automagically
+# defined by ParallelTestRunner
+[[diagnostic.patterns]]
+pattern = "`default_arch` is not defined"
+match_by = "message"
+match_type = "literal"
+severity = "off"
+path = "test/**/*.jl"
+[[diagnostic.patterns]]
+pattern = "`test_float_types` is not defined"
+match_by = "message"
+match_type = "literal"
+severity = "off"
+path = "test/**/*.jl"
