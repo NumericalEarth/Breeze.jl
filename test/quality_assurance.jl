@@ -21,8 +21,7 @@ else
 end
 
 @testset "Aqua" begin
-    # Skip persistent_tasks test because CUDA/GPU packages can leave background tasks
-    Aqua.test_all(Breeze; persistent_tasks=false)
+    Aqua.test_all(Breeze)
 end
 
 @testset "ExplicitImports" begin
