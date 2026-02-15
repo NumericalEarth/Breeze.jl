@@ -42,8 +42,6 @@
 # 5. **Split-explicit WS-RK3**: Acoustic substepping with Wicker-Skamarock RK3 outer loop
 
 using Breeze
-using Breeze.CompressibleEquations: ExplicitTimeStepping
-using Breeze.Thermodynamics: adiabatic_hydrostatic_density
 using Oceananigans.Units
 using Printf
 using CairoMakie
@@ -153,7 +151,7 @@ end
 # while the fully explicit compressible model is limited by the sound speed.
 
 Δx, Δz = Lx / Nx, Lz / Nz
-Rᵈ = Breeze.Thermodynamics.dry_air_gas_constant(constants)
+Rᵈ = dry_air_gas_constant(constants)
 cᵖᵈ = constants.dry_air.heat_capacity
 cₛ = sqrt(cᵖᵈ / (cᵖᵈ - Rᵈ) * Rᵈ * θ₀)
 

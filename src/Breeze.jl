@@ -17,6 +17,7 @@ export
     CompressibleDynamics,
     CompressibleModel,
     SplitExplicitTimeDiscretization,
+    ExplicitTimeStepping,
     VerticallyImplicit,
     PrescribedDensity,
     PrescribedDynamics,
@@ -60,6 +61,8 @@ export
     temperature,
     supersaturation,
     saturation_specific_humidity,
+    adiabatic_hydrostatic_density,
+    dry_air_gas_constant,
     PlanarLiquidSurface,
     PlanarIceSurface,
 
@@ -217,9 +220,6 @@ using .Forcings
 
 include("VerticalGrids.jl")
 using .VerticalGrids
-
-include("TimeSteppers/TimeSteppers.jl")
-using .TimeSteppers
 
 # Disambiguation: acoustic time steppers are not compatible with ParcelDynamics.
 # These must be defined after both ParcelModels and TimeSteppers are loaded.
