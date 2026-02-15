@@ -358,15 +358,8 @@ end
                         end
                     end
 
-                    # Cleanup
-                    rm(serial_file * ".jld2"; force=true)
-                    for r in 0:(nranks - 1)
-                        rm(dist_prefix * "_rank$r.jld2"; force=true)
-                    end
                 end
             end
         end
-
-        rm(output_dir; force=true, recursive=true)
     end
 end
