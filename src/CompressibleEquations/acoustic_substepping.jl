@@ -828,7 +828,6 @@ end
                                           pᵣ, Bᵣ, ρᵣ,
                                           wten)
     i, j, k = @index(Global, NTuple)
-    Nz = size(grid, 3)
 
     @inbounds begin
         Δzᶠ = Δzᶜᶜᶠ(i, j, k, grid)
