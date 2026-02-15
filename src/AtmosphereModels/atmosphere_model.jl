@@ -88,11 +88,13 @@ AtmosphereModel{CPU, RectilinearGrid}(time = 0 seconds, iteration = 0)
 ├── grid: 8×8×8 RectilinearGrid{Float64, Periodic, Periodic, Bounded} on CPU with 3×3×3 halo
 ├── dynamics: AnelasticDynamics(p₀=101325.0, θ₀=288.0)
 ├── formulation: LiquidIcePotentialTemperatureFormulation
+├── thermodynamic_constants: ThermodynamicConstants{Float64}
 ├── timestepper: SSPRungeKutta3
 ├── advection scheme:
 │   ├── momentum: Centered(order=2)
 │   ├── ρθ: Centered(order=2)
 │   └── ρqᵗ: Centered(order=2)
+├── forcing: @NamedTuple{ρu::Returns{Float64}, ρv::Returns{Float64}, ρw::Returns{Float64}, ρθ::Returns{Float64}, ρqᵗ::Returns{Float64}, ρe::Returns{Float64}}
 ├── tracers: ()
 ├── coriolis: Nothing
 └── microphysics: Nothing
@@ -154,13 +156,26 @@ function AtmosphereModel(grid;
     default_boundary_conditions = NamedTuple{default_bc_names}(FieldBoundaryConditions() for _ in default_bc_names)
     boundary_conditions = merge(default_boundary_conditions, boundary_conditions)
 
-    # Pre-regularize AtmosphereModel boundary conditions (fill in reference_density, compute saturation humidity, etc.)
-    # Also converts ρe boundary conditions to ρθ for potential temperature formulations
-    p₀ = surface_pressure(dynamics)
-    boundary_conditions = regularize_atmosphere_model_boundary_conditions(boundary_conditions, grid, formulation,
-                                                                          dynamics, microphysics, p₀, thermodynamic_constants)
+    # Pre-create diagnostic fields needed for VirtualPotentialTemperature
+    # (used in stability-dependent boundary conditions like PolynomialCoefficient)
+    specific_moisture = CenterField(grid)
+    temperature = CenterField(grid)
 
+    # Regularize boundary conditions for grid topology before creating microphysical fields
     all_names = field_names(dynamics, formulation, microphysics, tracers)
+    field_boundary_conditions = regularize_field_boundary_conditions(boundary_conditions, grid, all_names)
+
+    # Create temporary microphysical fields for BC materialization (using pre-regularized BCs)
+    preliminary_microphysical_fields = materialize_microphysical_fields(microphysics, grid, field_boundary_conditions)
+
+    # Materialize atmosphere-specific boundary conditions (fill in VPT diagnostic,
+    # surface pressure, thermodynamic constants, convert ρe → ρθ for potential temperature formulations)
+    p₀ = surface_pressure(dynamics)
+    boundary_conditions = materialize_atmosphere_model_boundary_conditions(boundary_conditions, grid, formulation,
+                                                                          dynamics, microphysics, p₀, thermodynamic_constants,
+                                                                          preliminary_microphysical_fields, specific_moisture, temperature)
+
+    # Re-regularize after materialization (materialization may modify boundary conditions)
     regularized_boundary_conditions = regularize_field_boundary_conditions(boundary_conditions, grid, all_names)
 
     # Materialize dynamics and formulation
@@ -177,17 +192,15 @@ function AtmosphereModel(grid;
         momentum, _ = materialize_momentum_and_velocities(dynamics, grid, regularized_boundary_conditions)
         velocities = materialize_velocities(velocities, grid)
     end
+
     microphysical_fields = materialize_microphysical_fields(microphysics, grid, regularized_boundary_conditions)
+    initialize_model_microphysical_fields!(microphysical_fields, microphysics)
 
     tracers = NamedTuple(name => CenterField(grid, boundary_conditions=regularized_boundary_conditions[name]) for name in tracer_names)
 
     if moisture_density isa DefaultValue
         moisture_density = CenterField(grid, boundary_conditions=regularized_boundary_conditions.ρqᵗ)
     end
-
-    # Diagnostic fields
-    specific_moisture = CenterField(grid)
-    temperature = CenterField(grid)
 
     prognostic_microphysical_fields = NamedTuple(name => microphysical_fields[name] for name in prognostic_field_names(microphysics))
     prognostic_model_fields = collect_prognostic_fields(formulation,
@@ -262,15 +275,30 @@ function Base.summary(model::AtmosphereModel)
                   "(time = ", prettytime(model.clock.time), ", iteration = ", model.clock.iteration, ")")
 end
 
+is_default_atmosphere_model_forcing(::Returns) = true
+is_default_atmosphere_model_forcing(_) = false
+
+function atmosphere_model_forcing_summary(model::AtmosphereModel)
+    forcing = model.forcing
+    names = Tuple(name for name in keys(forcing) if !is_default_atmosphere_model_forcing(forcing[name]))
+
+    isempty(names) && return summary(model.forcing)
+
+    summary_tuple = Tuple(string(name, "=>", nameof(typeof(forcing[name]))) for name in names)
+    return join(summary_tuple, ", ")
+end
+
 function Base.show(io::IO, model::AtmosphereModel)
     TS = nameof(typeof(model.timestepper))
     Mic = nameof(typeof(model.microphysics))
     tracernames = prettykeys(model.tracers)
+    forcing_summary = atmosphere_model_forcing_summary(model)
 
     print(io, summary(model), "\n",
               "├── grid: ", summary(model.grid), "\n",
               "├── dynamics: ", summary(model.dynamics), "\n",
               "├── formulation: ", summary(model.formulation), "\n",
+              "├── thermodynamic_constants: ", summary(model.thermodynamic_constants), "\n",
               "├── timestepper: ", TS, "\n")
 
     if model.advection !== nothing
@@ -283,7 +311,8 @@ function Base.show(io::IO, model::AtmosphereModel)
         print(io, "│   └── " * string(name) * ": " * summary(model.advection[name]), "\n")
     end
 
-    print(io, "├── tracers: ", tracernames, "\n",
+    print(io, "├── forcing: ", forcing_summary, "\n",
+              "├── tracers: ", tracernames, "\n",
               "├── coriolis: ", summary(model.coriolis), "\n",
               "└── microphysics: ", Mic)
 end

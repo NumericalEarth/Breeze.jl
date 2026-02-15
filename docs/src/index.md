@@ -16,7 +16,7 @@ Don't hesitate to get in touch on the [NumericalEarth slack](https://join.slack.
 Our goal is to build a very fast, easy to learn, productive tool for atmospheric research, teaching, and forecasting, as well as a platform for the development of algorithms, numerical methods, parameterizations, microphysical schemes, and atmosphere model components.
 This won't be the effort of a single group, project, or even a single community.
 Such a lofty aim can only be realized by a wide-ranging and sustained collaboration of passionate people.
-Maybe that includes you --- consider it!
+Maybe that includes you -- consider it!
 Model development is hard but rewarding, and builds useful skills for a myriad of pursuits.
 
 The goals of the current group of model developers include developing
