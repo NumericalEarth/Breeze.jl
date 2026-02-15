@@ -91,7 +91,7 @@ end
 @testset "Setting relative humidity [$(FT)]" for FT in test_float_types()
     Oceananigans.defaults.FloatType = FT
 
-    grid = RectilinearGrid(default_arch; size=(2, 2, 8), x=(0, 1e3), y=(0, 1e3), z=(0, 1e3))
+    grid = RectilinearGrid(default_arch; size=(1, 1, 8), x=(0, 1e3), y=(0, 1e3), z=(0, 1e3))
     constants = ThermodynamicConstants(FT)
     reference_state = ReferenceState(grid, constants; surface_pressure=101325, potential_temperature=300)
     microphysics = SaturationAdjustment(FT; equilibrium=WarmPhaseEquilibrium())

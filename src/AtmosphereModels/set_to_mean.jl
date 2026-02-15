@@ -16,7 +16,7 @@ function set_to_mean!(ref::ReferenceState, model)
     constants = model.thermodynamic_constants
 
     mean!(ref.temperature, model.temperature)
-    fill_halo_regions!(ref.temperature; only_local_halos=true)
+    fill_halo_regions!(ref.temperature)
 
     mean_mass_fraction!(ref.vapor_mass_fraction, vapor_mass_fraction(model))
     mean_mass_fraction!(ref.liquid_mass_fraction, liquid_mass_fraction(model))
@@ -29,13 +29,13 @@ end
 
 function mean_mass_fraction!(ref_field, field)
     mean!(ref_field, field)
-    fill_halo_regions!(ref_field; only_local_halos=true)
+    fill_halo_regions!(ref_field)
     return nothing
 end
 
 function mean_mass_fraction!(ref_field, ::Nothing)
     interior(ref_field) .= 0
-    fill_halo_regions!(ref_field; only_local_halos=true)
+    fill_halo_regions!(ref_field)
     return nothing
 end
 

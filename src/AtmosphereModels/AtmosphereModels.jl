@@ -65,7 +65,6 @@ using KernelAbstractions: @kernel, @index
 
 using Oceananigans: Oceananigans, CenterField, fields
 using Oceananigans.BoundaryConditions: FieldBoundaryConditions, regularize_field_boundary_conditions, fill_halo_regions!
-using Oceananigans.Fields: Field
 using Oceananigans.ImmersedBoundaries: mask_immersed_field!
 using Oceananigans.Operators: Δzᶜᶜᶜ, ℑzᵃᵃᶠ
 using Oceananigans.Solvers: Solvers
@@ -94,12 +93,6 @@ include("atmosphere_model.jl")
 include("atmosphere_model_buoyancy.jl")
 include("radiation_interface.jl")
 include("dynamics_kernel_functions.jl")
-
-# Column fields (Field{Nothing, Nothing, <:Any}) have singleton x/y dimensions
-# and cannot participate in MPI halo communication on distributed grids.
-_is_column_field(::Field{Nothing, Nothing}) = true
-_is_column_field(::Any) = false
-
 include("update_atmosphere_model_state.jl")
 include("compute_hydrostatic_pressure.jl")
 

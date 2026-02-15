@@ -194,8 +194,8 @@ function compute_hydrostatic_reference!(ref::ReferenceState, constants)
             ref.liquid_mass_fraction, ref.ice_mass_fraction,
             grid, Nz, p₀, Rᵈ, Rᵛ, g)
 
-    fill_halo_regions!(ref.pressure; only_local_halos=true)
-    fill_halo_regions!(ref.density; only_local_halos=true)
+    fill_halo_regions!(ref.pressure)
+    fill_halo_regions!(ref.density)
 
     return nothing
 end
@@ -267,15 +267,15 @@ function ReferenceState(grid, constants=ThermodynamicConstants(eltype(grid));
     # ensuring zero buoyancy for the default initial condition θ = θ₀.
     set!(pᵣ, z -> adiabatic_hydrostatic_pressure(z, p₀, θ₀, constants))
     set!(ρᵣ, z -> adiabatic_hydrostatic_density(z, p₀, θ₀, pˢᵗ, constants))
-    fill_halo_regions!(pᵣ; only_local_halos=true)
-    fill_halo_regions!(ρᵣ; only_local_halos=true)
+    fill_halo_regions!(pᵣ)
+    fill_halo_regions!(ρᵣ)
 
     # Temperature from the Exner function (consistent with pᵣ and ρᵣ)
     Rᵈ = dry_air_gas_constant(constants)
     cᵖᵈ = constants.dry_air.heat_capacity
     κ = Rᵈ / cᵖᵈ
     set!(Tᵣ, z -> θ₀ * (adiabatic_hydrostatic_pressure(z, p₀, θ₀, constants) / pˢᵗ)^κ)
-    fill_halo_regions!(Tᵣ; only_local_halos=true)
+    fill_halo_regions!(Tᵣ)
 
     ref = ReferenceState(p₀, θ₀, pˢᵗ, pᵣ, ρᵣ, Tᵣ, qᵛᵣ, qˡᵣ, qⁱᵣ)
 
@@ -291,12 +291,12 @@ reference_moisture_field(::Nothing, grid) = ZeroField(eltype(grid))
 function reference_moisture_field(value, grid)
     field = Field{Nothing, Nothing, Center}(grid)
     set!(field, value)
-    fill_halo_regions!(field; only_local_halos=true)
+    fill_halo_regions!(field)
     return field
 end
 
 # set! and fill_halo_regions! are no-ops for ZeroField
-set_reference_field!(field, value) = (set!(field, value); fill_halo_regions!(field; only_local_halos=true); nothing)
+set_reference_field!(field, value) = (set!(field, value); fill_halo_regions!(field); nothing)
 set_reference_field!(::ZeroField, value) = nothing
 
 #####
@@ -319,7 +319,7 @@ This function is useful for:
 """
 function compute_reference_state!(ref::ReferenceState, T̄, q̄ᵛ, q̄ˡ, q̄ⁱ, constants)
     set!(ref.temperature, T̄)
-    fill_halo_regions!(ref.temperature; only_local_halos=true)
+    fill_halo_regions!(ref.temperature)
     set_reference_field!(ref.vapor_mass_fraction, q̄ᵛ)
     set_reference_field!(ref.liquid_mass_fraction, q̄ˡ)
     set_reference_field!(ref.ice_mass_fraction, q̄ⁱ)

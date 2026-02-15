@@ -241,7 +241,7 @@ end
     end
 
     @testset "Energy to θ flux conversion is correct [$FT]" begin
-        grid_1 = RectilinearGrid(default_arch; size=(2, 2, 4), x=(0, 100), y=(0, 100), z=(0, 100))
+        grid_1 = RectilinearGrid(default_arch; size=(1, 1, 4), x=(0, 100), y=(0, 100), z=(0, 100))
         𝒬 = FT(1000)
 
         ρe_bcs = FieldBoundaryConditions(bottom=FluxBoundaryCondition(𝒬))
@@ -262,7 +262,7 @@ end
     end
 
     @testset "Error when specifying both ρθ and ρe boundary conditions [$FT]" begin
-        grid_1 = RectilinearGrid(default_arch; size=(2, 2, 4), x=(0, 100), y=(0, 100), z=(0, 100))
+        grid_1 = RectilinearGrid(default_arch; size=(1, 1, 4), x=(0, 100), y=(0, 100), z=(0, 100))
 
         ρθ_bcs = FieldBoundaryConditions(bottom=FluxBoundaryCondition(FT(100)))
         ρe_bcs = FieldBoundaryConditions(bottom=FluxBoundaryCondition(FT(200)))

@@ -27,7 +27,8 @@ using CairoMakie
 # the parcel moves with the hydrometeors. We use an `ImpenetrableBoundaryCondition()`
 # to ensure moisture is conserved within the parcel.
 
-grid = RectilinearGrid(CPU(); size=1, z=(0, 1), topology=(Flat, Flat, Bounded))
+grid = RectilinearGrid(CPU(); size=(1, 1, 1), x=(0, 1), y=(0, 1), z=(0, 1),
+                       topology=(Periodic, Periodic, Bounded))
 
 constants = ThermodynamicConstants()
 reference_state = ReferenceState(grid, constants; surface_pressure=101325, potential_temperature=300)

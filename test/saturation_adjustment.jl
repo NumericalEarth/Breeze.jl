@@ -28,7 +28,7 @@ test_thermodynamics = (:StaticEnergy, :LiquidIcePotentialTemperature)
 
 @testset "Warm-phase saturation adjustment [$(FT)]" for FT in test_float_types()
     Oceananigans.defaults.FloatType = FT
-    grid = RectilinearGrid(default_arch; size=(2, 2, 1), x=(0, 1), y=(0, 1), z=(0, 1))
+    grid = RectilinearGrid(default_arch; size=(1, 1, 1), x=(0, 1), y=(0, 1), z=(0, 1))
     constants = ThermodynamicConstants(FT)
     reference_state = ReferenceState(grid, constants; surface_pressure=101325, potential_temperature=288)
 
@@ -103,7 +103,7 @@ end
 
 @testset "Mixed-phase saturation adjustment (AtmosphereModel) [$(FT)]" for FT in test_float_types()
     Oceananigans.defaults.FloatType = FT
-    grid = RectilinearGrid(default_arch; size=(2, 2, 1), x=(0, 1), y=(0, 1), z=(0, 1))
+    grid = RectilinearGrid(default_arch; size=(1, 1, 1), x=(0, 1), y=(0, 1), z=(0, 1))
 
     constants = ThermodynamicConstants(FT)
     ℒˡᵣ = constants.liquid.reference_latent_heat
@@ -239,7 +239,7 @@ end
 
 @testset "Saturation adjustment (MoistAirBuoyancies)" for FT in test_float_types()
     Oceananigans.defaults.FloatType = FT
-    grid = RectilinearGrid(default_arch; size=(2, 2, 1), x=(0, 1), y=(0, 1), z=(0, 1))
+    grid = RectilinearGrid(default_arch; size=(1, 1, 1), x=(0, 1), y=(0, 1), z=(0, 1))
     constants = ThermodynamicConstants(FT)
     reference_state = ReferenceState(grid, constants; surface_pressure=101325, potential_temperature=288)
     atol = test_tol(FT)

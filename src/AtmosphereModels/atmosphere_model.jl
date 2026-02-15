@@ -27,35 +27,6 @@ function validate_tracers(tracers::Tuple)
     return tracers
 end
 
-using Oceananigans.Grids: topology, halo_size, Periodic
-
-# Minimum halo size required for velocity interpolation stencil.
-# The velocity computation uses 2-point interpolation (e.g., ℑxᶠᵃᵃ accesses i-1),
-# and the kernel range is shrunk by 1 on each side, so we need halo >= 2.
-const MINIMUM_VELOCITY_INTERPOLATION_HALO = 2
-
-"""
-Validate that the grid's halo is large enough for the velocity interpolation stencil.
-For periodic dimensions, we need at least 2 halo points because the velocity computation
-uses a 2-point interpolation stencil (accesses i-1) and the kernel range is shrunk by 1.
-"""
-function validate_velocity_interpolation_halo(grid)
-    Hx, Hy, Hz = halo_size(grid)
-    TX, TY, TZ = topology(grid)
-
-    if TX == Periodic && Hx < MINIMUM_VELOCITY_INTERPOLATION_HALO
-        throw(ArgumentError("For periodic x-topology, AtmosphereModel requires halo ≥ $MINIMUM_VELOCITY_INTERPOLATION_HALO in x (got Hx=$Hx)"))
-    end
-
-    if TY == Periodic && Hy < MINIMUM_VELOCITY_INTERPOLATION_HALO
-        throw(ArgumentError("For periodic y-topology, AtmosphereModel requires halo ≥ $MINIMUM_VELOCITY_INTERPOLATION_HALO in y (got Hy=$Hy)"))
-    end
-
-    # Note: z is typically Bounded, so no check needed for Hz
-
-    return nothing
-end
-
 mutable struct AtmosphereModel{Dyn, Frm, Arc, Tst, Grd, Clk, Thm, Mom, Moi, Mfr, Buy,
                                Tmp, Sol, Vel, Trc, Adv, Cor, Frc, Mic, Cnd, Cls, Cfs, Rad} <: AbstractModel{Tst, Arc}
     architecture :: Arc
@@ -167,7 +138,6 @@ function AtmosphereModel(grid;
 
     # Check halos and throw an error if the grid's halo is too small
     validate_model_halo(grid, momentum_advection, scalar_advection, closure)
-    validate_velocity_interpolation_halo(grid)
 
     # Reduce the advection order in directions that do not have enough grid points
     momentum_advection = validate_momentum_advection(momentum_advection, grid)
