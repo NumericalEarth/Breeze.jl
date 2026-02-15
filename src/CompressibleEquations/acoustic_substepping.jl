@@ -496,7 +496,7 @@ function _build_stage_hydrostatic_exner!(π_ref, θᵥ, model)
             π_ref, model.dynamics.pressure, pˢᵗ, κ)
 
     # Integrate upward using STAGE θᵥ (same as used by acoustic loop)
-    Nx, Ny, Nz = size(grid)
+    Nz = size(grid)[3]
     launch!(arch, grid, :xy, _integrate_stage_hydrostatic_exner!,
             π_ref, θᵥ, grid, g, cᵖ, Nz)
 
@@ -551,7 +551,6 @@ These are frozen during the acoustic substep loop.
 function convert_slow_tendencies!(substepper, model)
     grid = model.grid
     arch = architecture(grid)
-    pˢᵗ = model.dynamics.standard_pressure
     cᵖ = model.thermodynamic_constants.dry_air.heat_capacity
     g = model.thermodynamic_constants.gravitational_acceleration
     Rᵈ = dry_air_gas_constant(model.thermodynamic_constants)
@@ -991,7 +990,7 @@ function acoustic_rk3_substep_loop!(model, substepper, Δt, β_stage, U⁰)
 
     fpk = CenterField(grid)  # TODO: pre-allocate this
 
-    for n in 1:Nτ
+    for _ in 1:Nτ
         # Step 1: Horizontal forward — update u, v
         launch!(arch, grid, :xyz, _acoustic_horizontal_forward!,
                 u, v, grid, Δτ, cᵖ,
@@ -1272,7 +1271,7 @@ function acoustic_substep_loop!(model, substepper, Δt, α_ssp, U⁰)
     β_d = substepper.acoustic_damping_coefficient
     fpk = CenterField(grid)  # TODO: pre-allocate
 
-    for n in 1:Nτ
+    for _ in 1:Nτ
         launch!(arch, grid, :xyz, _acoustic_horizontal_forward!,
                 u, v, grid, Δτ, cᵖ,
                 substepper.π′_damped, substepper.θᵥ,

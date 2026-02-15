@@ -201,8 +201,6 @@ the acoustic loop advances perturbation variables, not full fields.
 """
 function compute_slow_scalar_tendencies!(model)
     substepper = model.timestepper.substepper
-    grid = model.grid
-    arch = architecture(grid)
 
     # Compute Gˢρ = -∇·m^t (full density tendency at stage start)
     compute_dynamics_tendency!(model)
@@ -248,8 +246,6 @@ variable (ρθ or ρe). Remaining scalars (tracers) are updated using standard
 SSP RK3 with time-averaged velocities from the acoustic loop.
 """
 function acoustic_ssp_rk3_substep!(model, Δt, α, stage)
-    grid = model.grid
-    arch = grid.architecture
     substepper = model.timestepper.substepper
     U⁰ = model.timestepper.U⁰
 
