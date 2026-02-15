@@ -21,6 +21,14 @@ match_type = "regex"
 severity = "off"
 path = "ext/**/*.jl"
 
+# Ignore unused imports, it's a flaky check:
+# https://github.com/aviatesk/JETLS.jl/issues/547
+[[diagnostic.patterns]]
+pattern = "lowering/unused-import"
+match_by = "code"
+match_type = "literal"
+severity = "off"
+
 # Disable warnings in tests about missing variables which are automagically
 # defined by ParallelTestRunner
 [[diagnostic.patterns]]
