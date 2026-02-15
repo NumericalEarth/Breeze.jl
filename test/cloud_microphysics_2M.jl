@@ -305,7 +305,7 @@ end
     @test model.dynamics.state.μ.ρnᶜˡ == 0
 
     # Run parcel simulation until it becomes supersaturated
-    simulation = Simulation(model; Δt=1.0, stop_iteration=500)
+    simulation = Simulation(model; Δt=1.0, stop_iteration=500, verbose=false)
     run!(simulation)
 
     # After rising, parcel should have some cloud droplets from activation
