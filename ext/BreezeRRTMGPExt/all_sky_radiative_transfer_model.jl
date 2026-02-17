@@ -66,8 +66,8 @@ RRTMGP loads lookup tables from netCDF via an extension.
 - `direct_surface_albedo`: Direct surface albedo, 0-1. Can be scalar or 2D field.
 - `diffuse_surface_albedo`: Diffuse surface albedo, 0-1. Can be scalar or 2D field.
 - `solar_constant`: Top-of-atmosphere solar flux in W/m² (default: 1361)
-- `liquid_effective_radius`: Model for cloud liquid effective radius in μm (default: `ConstantRadiusParticles(10.0)`)
-- `ice_effective_radius`: Model for cloud ice effective radius in μm (default: `ConstantRadiusParticles(30.0)`)
+- `liquid_effective_radius`: Model for cloud liquid effective radius in meters (default: `ConstantRadiusParticles(10e-6)`)
+- `ice_effective_radius`: Model for cloud ice effective radius in meters (default: `ConstantRadiusParticles(30e-6)`)
 - `ice_roughness`: Ice crystal roughness for cloud optics (1=smooth, 2=medium, 3=rough; default: 2)
 """
 function AtmosphereModels.RadiativeTransferModel(grid::AbstractGrid,
@@ -83,8 +83,8 @@ function AtmosphereModels.RadiativeTransferModel(grid::AbstractGrid,
                                                  surface_albedo = nothing,
                                                  solar_constant = 1361,
                                                  schedule = IterationInterval(1),
-                                                 liquid_effective_radius = ConstantRadiusParticles(10.0),
-                                                 ice_effective_radius = ConstantRadiusParticles(30.0),
+                                                 liquid_effective_radius = ConstantRadiusParticles(10e-6),
+                                                 ice_effective_radius = ConstantRadiusParticles(30e-6),
                                                  ice_roughness = 2)
 
     FT = eltype(grid)
@@ -227,6 +227,7 @@ function AtmosphereModels.RadiativeTransferModel(grid::AbstractGrid,
     upwelling_longwave_flux = ZFaceField(grid)
     downwelling_longwave_flux = ZFaceField(grid)
     downwelling_shortwave_flux = ZFaceField(grid)
+    heating_tendency = CenterField(grid)
 
     surface_properties = SurfaceRadiativeProperties(surface_temperature,
                                                     surface_emissivity,
@@ -253,6 +254,7 @@ function AtmosphereModels.RadiativeTransferModel(grid::AbstractGrid,
                                   upwelling_longwave_flux,
                                   downwelling_longwave_flux,
                                   downwelling_shortwave_flux,
+                                  heating_tendency,
                                   liquid_eff_radius,
                                   ice_eff_radius,
                                   schedule)
@@ -294,6 +296,9 @@ function AtmosphereModels._update_radiation!(rtm::AllSkyRadiativeTransferModel, 
     update_sw_fluxes!(solver)
 
     copy_rrtmgp_fluxes_to_fields!(rtm, solver, grid)
+
+    # Compute heating tendency from flux divergence
+    compute_radiation_heating!(rtm, grid)
 
     return nothing
 end
@@ -350,10 +355,11 @@ end
         has_cloud = (qˡ + qⁱ) > zero(FT)
         cloud_state.cld_frac[k, c] = ifelse(has_cloud, one(FT), zero(FT))
 
-        # Effective radii in microns
+        # Effective radii (convert from meters to μm for RRTMGP)
+        m_to_μm = convert(FT, 1e6)
         rˡ = cloud_liquid_effective_radius(i, j, k, grid, liquid_effective_radius)
         rⁱ = cloud_ice_effective_radius(i, j, k, grid, ice_effective_radius)
-        cloud_state.cld_r_eff_liq[k, c] = rˡ
-        cloud_state.cld_r_eff_ice[k, c] = rⁱ
+        cloud_state.cld_r_eff_liq[k, c] = m_to_μm * rˡ
+        cloud_state.cld_r_eff_ice[k, c] = m_to_μm * rⁱ
     end
 end

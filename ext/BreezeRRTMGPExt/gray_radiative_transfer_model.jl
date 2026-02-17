@@ -17,7 +17,7 @@ using KernelAbstractions: @kernel, @index
 using Dates: AbstractDateTime, Millisecond
 
 # Dispatch on background_atmosphere = Nothing for gray radiation
-const GrayRadiativeTransferModel = RadiativeTransferModel{<:Any, <:Any, <:Any, <:Any, Nothing, <:Any, <:Any, <:Any, <:Any, <:Any, <:Any, <:Any}
+const GrayRadiativeTransferModel = RadiativeTransferModel{<:Any, <:Any, <:Any, <:Any, Nothing, <:Any, <:Any, <:Any, <:Any, <:Any, <:Any, <:Any, <:Any}
 
 materialize_surface_property(x::Number, grid) = convert(eltype(grid), x)
 materialize_surface_property(x::Field, grid) = x
@@ -179,6 +179,7 @@ function AtmosphereModels.RadiativeTransferModel(grid::AbstractGrid,
     upwelling_longwave_flux = ZFaceField(grid)
     downwelling_longwave_flux = ZFaceField(grid)
     downwelling_shortwave_flux = ZFaceField(grid)  # Direct beam only
+    heating_tendency = CenterField(grid)
 
     surface_properties = SurfaceRadiativeProperties(surface_temperature,
                                                     surface_emissivity,
@@ -196,6 +197,7 @@ function AtmosphereModels.RadiativeTransferModel(grid::AbstractGrid,
                                   upwelling_longwave_flux,
                                   downwelling_longwave_flux,
                                   downwelling_shortwave_flux,
+                                  heating_tendency,
                                   nothing,  # liquid_effective_radius = nothing for gray
                                   nothing,  # ice_effective_radius = nothing for gray
                                   schedule)
@@ -283,6 +285,9 @@ function AtmosphereModels._update_radiation!(rtm::GrayRadiativeTransferModel, mo
 
     # Copy RRTMGP flux arrays to Oceananigans fields with sign convention
     copy_fluxes_to_fields!(rtm, grid)
+
+    # Compute heating tendency from flux divergence
+    compute_radiation_heating!(rtm, grid)
 
     return nothing
 end

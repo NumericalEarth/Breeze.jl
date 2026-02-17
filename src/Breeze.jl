@@ -10,6 +10,8 @@ export
     MoistAirBuoyancy,
     ThermodynamicConstants,
     ReferenceState,
+    compute_reference_state!,
+    set_to_mean!,
     surface_density,
     AnelasticDynamics,
     AnelasticModel,

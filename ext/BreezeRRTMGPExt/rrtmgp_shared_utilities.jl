@@ -2,7 +2,7 @@
 ##### Shared utilities for clear-sky and all-sky RRTMGP radiation
 #####
 
-using Oceananigans.Operators: ℑzᵃᵃᶠ
+using Oceananigans.Operators: ℑzᵃᵃᶠ, Δzᶜᶜᶜ
 using Oceananigans.Architectures: architecture
 using Oceananigans.Utils: launch!
 
@@ -135,4 +135,30 @@ end
         ℐ_lw_dn[i, j, k] = -lw_flux_dn[k, c]
         ℐ_sw_dn[i, j, k] = -sw_flux_dn[k, c]
     end
+end
+
+#####
+##### Compute radiation heating tendency from flux divergence
+#####
+
+function compute_radiation_heating!(rtm, grid)
+    arch = architecture(grid)
+    ℐ_lw_up = rtm.upwelling_longwave_flux
+    ℐ_lw_dn = rtm.downwelling_longwave_flux
+    ℐ_sw_dn = rtm.downwelling_shortwave_flux
+    heating = rtm.heating_tendency
+    launch!(arch, grid, :xyz, _compute_radiation_heating!, heating, ℐ_lw_up, ℐ_lw_dn, ℐ_sw_dn, grid)
+    return nothing
+end
+
+@kernel function _compute_radiation_heating!(heating, ℐ_lw_up, ℐ_lw_dn, ℐ_sw_dn, grid)
+    i, j, k = @index(Global, NTuple)
+    # Net flux at faces k and k+1 (positive upward)
+    @inbounds begin
+        F_k  = ℐ_lw_up[i, j, k]   + ℐ_lw_dn[i, j, k]   + ℐ_sw_dn[i, j, k]
+        F_k1 = ℐ_lw_up[i, j, k+1] + ℐ_lw_dn[i, j, k+1] + ℐ_sw_dn[i, j, k+1]
+    end
+    Δz = Δzᶜᶜᶜ(i, j, k, grid)
+    # Heating = -dF/dz (positive when flux convergence warms)
+    @inbounds heating[i, j, k] = -(F_k1 - F_k) / Δz
 end

@@ -27,6 +27,7 @@ function AtmosphereModels.compute_thermodynamic_tendency!(model::StaticEnergyMod
         Val(1),
         model.forcing.ρe,
         model.advection.ρe,
+        radiation_heating_tendency(model.radiation),
         common_args...,
         model.temperature)
 
@@ -39,6 +40,7 @@ end
                                         id,
                                         ρe_forcing,
                                         advection,
+                                        radiation_heating_field,
                                         dynamics,
                                         formulation,
                                         constants,
@@ -72,7 +74,8 @@ end
              + buoyancy_flux
              - ∇_dot_Jᶜ(i, j, k, grid, ρ_field, closure, closure_fields, id, specific_energy, clock, model_fields, closure_buoyancy)
              + grid_microphysical_tendency(i, j, k, grid, microphysics, Val(:ρe), ρ, microphysical_fields, 𝒰, constants, velocities)
-             + ρe_forcing(i, j, k, grid, clock, model_fields))
+             + ρe_forcing(i, j, k, grid, clock, model_fields)
+             + radiation_heating(i, j, k, grid, radiation_heating_field))
 end
 
 #####

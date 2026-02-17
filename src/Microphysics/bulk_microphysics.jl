@@ -239,9 +239,6 @@ end
 end
 
 # Forward mass fraction diagnostics to cloud_formation scheme
-AtmosphereModels.vapor_mass_fraction(bμp::NPBM, model) =
-    AtmosphereModels.vapor_mass_fraction(bμp.cloud_formation, model)
-AtmosphereModels.liquid_mass_fraction(bμp::NPBM, model) =
-    AtmosphereModels.liquid_mass_fraction(bμp.cloud_formation, model)
-AtmosphereModels.ice_mass_fraction(bμp::NPBM, model) =
-    AtmosphereModels.ice_mass_fraction(bμp.cloud_formation, model)
+AtmosphereModels.vapor_mass_fraction(bμp::BulkMicrophysics, model) = AtmosphereModels.vapor_mass_fraction(bμp.cloud_formation, model)
+AtmosphereModels.liquid_mass_fraction(bμp::BulkMicrophysics, model) = AtmosphereModels.liquid_mass_fraction(bμp.cloud_formation, model)
+AtmosphereModels.ice_mass_fraction(bμp::BulkMicrophysics, model) = AtmosphereModels.ice_mass_fraction(bμp.cloud_formation, model)

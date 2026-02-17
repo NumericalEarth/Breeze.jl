@@ -11,7 +11,7 @@ using DocStringExtensions: TYPEDSIGNATURES
 
 # Oceananigans imports
 using Oceananigans.Architectures: architecture, CPU, GPU
-using Oceananigans.Fields: ZFaceField
+using Oceananigans.Fields: ZFaceField, CenterField
 
 # RRTMGP imports (external types - cannot modify)
 #   GrayAtmosphericState: atmospheric state arrays (t_lay, p_lay, t_lev, p_lev, z_lev, t_sfc)

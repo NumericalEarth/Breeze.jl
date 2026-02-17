@@ -65,8 +65,8 @@ radiation = RadiativeTransferModel(grid, AllSkyOptics(), constants;
     background_atmosphere = background,
     coordinate = cos_zenith,
     schedule = TimeInterval(15minutes),
-    liquid_effective_radius = ConstantRadiusParticles(10.0),
-    ice_effective_radius = ConstantRadiusParticles(30.0))
+    liquid_effective_radius = ConstantRadiusParticles(10e-6),
+    ice_effective_radius = ConstantRadiusParticles(30e-6))
 
 # Surface fluxes (bulk formulae)
 Cᴰ, Cᵀ, Cᵛ = 1e-3, 1e-3, 1.2e-3

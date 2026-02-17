@@ -35,7 +35,15 @@ update_radiation!(::Nothing, model) = nothing
 # Internal function that actually computes radiation (implemented by extensions)
 _update_radiation!(::Nothing, model) = nothing
 
-struct RadiativeTransferModel{FT<:Number, C, E, SP, BA, AS, LW, SW, F, LER, IER, S}
+# Extract the heating tendency field from radiation (nothing-safe)
+radiation_heating_tendency(::Nothing) = nothing
+radiation_heating_tendency(radiation) = radiation.heating_tendency
+
+# Inline accessor for use inside tendency kernels
+@inline radiation_heating(i, j, k, grid, ::Nothing) = zero(eltype(grid))
+@inline radiation_heating(i, j, k, grid, heating_tendency) = @inbounds heating_tendency[i, j, k]
+
+struct RadiativeTransferModel{FT<:Number, C, E, SP, BA, AS, LW, SW, F, H, LER, IER, S}
     solar_constant :: FT # Scalar
     coordinate :: C # coordinates (for RectilinearGrid) for computing the solar zenith angle
     epoch :: E # optional epoch for computing time with floating-point clocks
@@ -47,6 +55,7 @@ struct RadiativeTransferModel{FT<:Number, C, E, SP, BA, AS, LW, SW, F, LER, IER,
     upwelling_longwave_flux :: F
     downwelling_longwave_flux :: F
     downwelling_shortwave_flux :: F
+    heating_tendency :: H # Center field: -dF_net/dz in W/m³
     liquid_effective_radius :: LER # Model for cloud liquid effective radius (Nothing for gray/clear-sky)
     ice_effective_radius :: IER    # Model for cloud ice effective radius (Nothing for gray/clear-sky)
     schedule :: S  # Update schedule (default: IterationInterval(1) = every step)

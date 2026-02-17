@@ -70,8 +70,8 @@ all_sky_radiation = RadiativeTransferModel(grid, AllSkyOptics(), constants;
                                            surface_emissivity = 0.98,
                                            surface_albedo = 0.1,
                                            solar_constant = 1361,
-                                           liquid_effective_radius = ConstantRadiusParticles(10.0),  # μm
-                                           ice_effective_radius = ConstantRadiusParticles(30.0))     # μm
+                                           liquid_effective_radius = ConstantRadiusParticles(10e-6),
+                                           ice_effective_radius = ConstantRadiusParticles(30e-6))
 
 # ## Atmosphere models
 #
@@ -206,3 +206,34 @@ scheme_labels = ["Gray", "Clear-sky (420 ppm)", "2×CO₂ (840 ppm)", "All-sky (
 Legend(fig[0, :], scheme_handles, scheme_labels; orientation=:horizontal, framevisible=false, tellwidth=false)
 
 fig
+
+# ## Heating rates
+#
+# The `RadiativeTransferModel` automatically computes the heating tendency
+# `Q = -dF_net/dz` (W/m³) from the radiative flux divergence. We convert to K/day
+# using `dT/dt = Q / (ρ cₚ)`.
+
+Q_gray   = gray_radiation.heating_tendency
+Q_clear  = clear_sky_radiation.heating_tendency
+Q_2xco2  = high_co2_radiation.heating_tendency
+Q_allsky = all_sky_radiation.heating_tendency
+
+# Convert W/m³ → K/day: Q / (ρᵣ cᵖᵈ) × 86400
+ρᵣ = reference_state.density
+cᵖᵈ = constants.dry_air.heat_capacity / constants.dry_air.molar_mass  # J/(kg·K)
+to_K_per_day = 86400 / cᵖᵈ
+
+fig2 = Figure(size=(800, 500), fontsize=14)
+
+ax_Q = Axis(fig2[1, 1]; xlabel="Heating rate (K/day)", ylabel="Altitude (km)",
+            yticks=z_ticks_m, title="Radiative heating rates")
+
+lines!(ax_Q, to_K_per_day * Q_gray   / ρᵣ; color=c_gray,   label="Gray")
+lines!(ax_Q, to_K_per_day * Q_clear  / ρᵣ; color=c_clear,  label="Clear-sky (420 ppm)")
+lines!(ax_Q, to_K_per_day * Q_2xco2  / ρᵣ; color=c_2xco2,  label="2×CO₂ (840 ppm)")
+lines!(ax_Q, to_K_per_day * Q_allsky / ρᵣ; color=c_allsky, label="All-sky (cloudy)")
+
+vlines!(ax_Q, 0; color=:gray50, linestyle=:dash, linewidth=1)
+axislegend(ax_Q, position=:lt)
+
+fig2

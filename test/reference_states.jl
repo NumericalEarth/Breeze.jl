@@ -342,4 +342,57 @@ end
         @test p_ref > 0
         @test ρ_ref > 0
     end
+
+    #####
+    ##### set_to_mean! preserves physical fields (T, qᵗ, u, w)
+    #####
+    #
+    # The prognostic variables are density-weighted (ρe = ρᵣ·e, ρqᵗ = ρᵣ·qᵗ,
+    # ρu = ρᵣ·u). When ρᵣ changes, these must be rescaled so the physical
+    # quantities are preserved. Without rescaling, T = (ρe/ρᵣ_new - gz)/cₚ
+    # would differ from the original T = (ρe/ρᵣ_old - gz)/cₚ.
+
+    @testset "set_to_mean! preserves physical fields" begin
+        reference_state = ReferenceState(grid, constants; vapor_mass_fraction=0)
+        dynamics = AnelasticDynamics(reference_state)
+        model = AtmosphereModel(grid; dynamics, formulation=:StaticEnergy)
+
+        # Set initial conditions with non-trivial profiles
+        T_prof(z) = max(FT(210), FT(300) - FT(6.5e-3) * z)
+        q_prof(z) = FT(0.015) * exp(-z / FT(2500))
+
+        # compute_reference_state! takes f(z); set!(model, ...) takes f(x, y, z)
+        compute_reference_state!(reference_state, T_prof, q_prof, constants)
+        set!(model, T=(x, y, z) -> T_prof(z), qᵗ=(x, y, z) -> q_prof(z), u=FT(5), w=FT(0))
+        time_step!(model, 1)  # populates diagnostic fields
+
+        # Record physical fields before set_to_mean!
+        T_before  = Array(interior(model.temperature))
+        qᵗ_before = Array(interior(model.specific_moisture))
+        u_before  = Array(interior(model.velocities.u))
+        w_before  = Array(interior(model.velocities.w))
+
+        # Call set_to_mean! — this changes ρᵣ and must rescale prognostics
+        set_to_mean!(reference_state, model)
+
+        # Reference temperature should match model mean temperature
+        Tᵣ_after = Array(interior(reference_state.temperature))
+        T_mean = dropdims(sum(T_before, dims=(1, 2)) / (size(T_before, 1) * size(T_before, 2)), dims=(1, 2))
+        for k in 1:grid.Nz
+            @test isapprox(Tᵣ_after[1, 1, k], T_mean[k]; rtol=FT(1e-5))
+        end
+
+        # Diagnostic fields are recomputed inside set_to_mean! (via update_state!)
+        # so they should already reflect the rescaled prognostics + new ρᵣ.
+        T_after  = Array(interior(model.temperature))
+        qᵗ_after = Array(interior(model.specific_moisture))
+        u_after  = Array(interior(model.velocities.u))
+        w_after  = Array(interior(model.velocities.w))
+
+        # Physical fields should be preserved
+        @test isapprox(T_after, T_before; rtol=FT(1e-4))
+        @test isapprox(qᵗ_after, qᵗ_before; rtol=FT(1e-4))
+        @test isapprox(u_after, u_before; rtol=FT(1e-4))
+        @test isapprox(w_after, w_before; atol=FT(1e-4))
+    end
 end

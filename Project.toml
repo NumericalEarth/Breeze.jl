@@ -8,27 +8,28 @@ projects = ["benchmarking", "docs", "test"]
 
 [deps]
 Adapt = "79e6a3ab-5dfb-504d-930d-738a2a938a0e"
+CloudMicrophysics = "6a9e3e04-43cd-43ba-94b9-e8782df3c71b"
 Dates = "ade2ca70-3891-5945-98fb-dc099432e06a"
 DocStringExtensions = "ffbed154-4ef7-542d-bbb7-c09d3a79fcae"
 GPUArraysCore = "46192b85-c4d5-4398-a991-12ede77f4527"
 InteractiveUtils = "b77e0a4c-d291-57a0-90e8-8db25a27a240"
 JLD2 = "033835bb-8acc-5ee8-8aae-3f567f8a3819"
 KernelAbstractions = "63c18a36-062a-441e-b654-da1e3ab1ce7c"
+NCDatasets = "85f8d34a-cbdd-5861-8df4-14fed0d494ab"
 Oceananigans = "9e8cae18-63c1-5223-a75c-80ca9d6e9a09"
 Printf = "de0858da-6303-5e67-8744-51eddeeeb8d7"
+RRTMGP = "a01a1ee8-cea4-48fc-987c-fc7878d79da1"
 Statistics = "10745b16-79ce-11e8-11f9-7d13ad32a3b2"
 
 [weakdeps]
 ClimaComms = "3a4d1b5c-c61d-41fd-a00a-5873ba7a1b0d"
-CloudMicrophysics = "6a9e3e04-43cd-43ba-94b9-e8782df3c71b"
-RRTMGP = "a01a1ee8-cea4-48fc-987c-fc7878d79da1"
 Reactant = "3c362404-f566-11ee-1572-e11a4b42c853"
 SpecialFunctions = "276daf66-3868-5448-9aa4-cd146d93841b"
 
 [extensions]
 BreezeCloudMicrophysicsExt = ["CloudMicrophysics", "SpecialFunctions"]
-BreezeReactantExt = "Reactant"
 BreezeRRTMGPExt = ["ClimaComms", "RRTMGP"]
+BreezeReactantExt = "Reactant"
 
 [compat]
 Adapt = "4.3.0"
@@ -40,10 +41,11 @@ GPUArraysCore = "0.2"
 InteractiveUtils = "<0.0.1, 1"
 JLD2 = "0.5.13, 0.6"
 KernelAbstractions = "0.9"
+NCDatasets = "0.14.11"
 Oceananigans = "0.104.2"
 Printf = "1"
-Statistics = "<0.0.1, 1"
 RRTMGP = "0.21"
 SpecialFunctions = "2"
 Reactant = "0.2.203"
+Statistics = "<0.0.1, 1"
 julia = "1.11.9"
