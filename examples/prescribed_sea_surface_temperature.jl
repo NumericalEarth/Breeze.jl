@@ -7,7 +7,7 @@
 # heating drives organized atmospheric circulations.
 #
 # The simulation uses bulk aerodynamic formulas to compute surface fluxes of momentum,
-# sensible heat, and latent heat based on bulk transfer coefficients. This approach
+# sensible heat, and latent heat based on bulk exchange coefficients. This approach
 # parameterizes the complex turbulent exchange processes in the surface layer using
 # simple drag law formulations that relate fluxes to the difference between surface
 # and near-surface atmospheric properties.
@@ -18,6 +18,7 @@
 # simple yet effective representation of cloud processes in moist convection.
 
 using Breeze
+using Breeze: BulkDrag, BulkSensibleHeatFlux, BulkVaporFlux
 using Oceananigans
 using Oceananigans.Units
 using Printf
@@ -85,7 +86,7 @@ scalar_advection = WENO(order=5)
 # ```
 #
 # where ``|U|`` is "total" the differential wind speed (including gustiness),
-# ``Cᴰ, Cᵀ, Cᵛ`` are transfer coefficients, and ``θ₀, qᵛ₀`` are the surface temperature
+# ``Cᴰ, Cᵀ, Cᵛ`` are exchange coefficients, and ``θ₀, qᵛ₀`` are the surface temperature
 # and surface specific humidity. For wet surfaces, ``qᵛ₀`` is the saturation specific
 # humidity over a planar liquid surface computed at the surface temperature.
 # ``τˣ`` is the surface momentum flux, ``Jᶿ`` is the potential temperature density flux,
@@ -100,17 +101,58 @@ scalar_advection = WENO(order=5)
 #
 # where ``cᵖᵐ`` is the mixture heat capacity.
 #
-# We start by defining the drag coefficient and gustiness parameter,
-
-Cᴰ = 1e-3  # Drag coefficient
-Uᵍ = 1e-2  # Minimum wind speed (m/s)
-
-ρu_surface_flux = ρv_surface_flux = Breeze.BulkDrag(coefficient=Cᴰ, gustiness=Uᵍ)
-
-# ## Sensible heat flux and vapor fluxes
+# ## Wind and stability-dependent exchange coefficients
 #
-# For `BulkVaporFlux`, the saturation specific humidity is computed from the surface
-# temperature. Surface temperature can be provided as a `Field`, a `Function`, or a `Number`.
+# Rather than using constant exchange coefficients, we use [`PolynomialCoefficient`](@ref)
+# which implements the wind speed and stability-dependent formulation from [LargeYeager2009](@citet).
+# This provides a more realistic representation of air-sea exchange processes,
+# compared to constant exchange coefficients.
+#
+# In neutral conditions, the exchange coefficients vary with wind speed according to:
+#
+# ```math
+# C^N_{10}(U_h) = (a₀ + a₁ U_h + a₂ / U_h) × 10⁻³
+# ```
+#
+# and are further modified by atmospheric stability using the bulk Richardson number,
+#
+# ```math
+# Ri = \frac{g}{\overline{θ_v}} \frac{h \, (θ_v - θ_{v0})}{U_h^2}
+# ```
+#
+# where ``h`` is the measurement height (first cell center), ``θ_v`` and ``θ_{v0}``
+# are virtual potential temperatures at the measurement height and surface, and
+# ``U_h`` is the wind speed at height ``h``.
+# The stability-corrected transfer coefficient is then
+#
+# ```math
+# C^{Ri}_h(U_h, Ri) = C^N_{10}(U_h) \left[\frac{\ln(10/\ell)}{\ln(h/\ell)}\right]^2 ψ(Ri)
+# ```
+#
+# where ``\ell`` is the roughness length and ``ψ`` is a stability function.
+# The default stability function enhances transfer in unstable conditions
+# (``Ri < 0``, ``ψ = \sqrt{1 - 16 \, Ri}``) and reduces it in stable
+# conditions (``Ri ≥ 0``, ``ψ = 1 / (1 + 10 \, Ri)``).
+#
+# In unstable conditions (over warm and wet surfaces), exchange is enhanced.
+# In stable conditions (cold and dry surfaces), exchange is reduced.
+# This captures the physical reality that
+# turbulent mixing is stronger when the surface is warmer than the air above it.
+#
+# We create polynomial coefficients for each flux type. The default coefficients
+# come from [LargeYeager2009](@citet) observational fits:
+
+Uᵍ = 1e-2  # Gustiness (m/s)
+
+# Create a polynomial bulk coefficient that will be automatically configured
+# for each flux type
+coef = PolynomialCoefficient(roughness_length = 1.5e-4)
+
+# ## Surface temperature
+#
+# The sea surface temperature enters the bulk formulas for sensible heat,
+# moisture fluxes, and (when using `PolynomialCoefficient`) the stability
+# correction for the exchange coefficients.
 #
 # In this example, we specify the sea surface temperature as a top hat function
 # i.e. representing a pair of ocean fronts in a periodic domain, with a
@@ -119,16 +161,77 @@ Uᵍ = 1e-2  # Minimum wind speed (m/s)
 ΔT = 4 # K
 T₀(x) = θ₀ + ΔT / 2 * sign(cos(2π * x / grid.Lx))
 
-# We complete our specification with the sensible heat transfer coefficient
-# and vapor transfer coefficient,
+# ## Momentum drag
+#
+# The `BulkDrag` boundary condition requires `surface_temperature` when using
+# `PolynomialCoefficient`, since the stability correction depends on the
+# surface virtual potential temperature.
 
-Cᵀ = 1e-3  # Sensible heat transfer coefficient
-Cᵛ = 1e-3  # Vapor transfer coefficient
+ρu_surface_flux = ρv_surface_flux = BulkDrag(coefficient=coef, gustiness=Uᵍ, surface_temperature=T₀)
 
-# and build the flux parameterizations
+# ## Sensible heat flux and vapor fluxes
+#
+# For `BulkVaporFlux`, the saturation specific humidity is computed from the surface
+# temperature. Surface temperature can be provided as a `Field`, a `Function`, or a `Number`.
+#
+# We complete our specification by using the same polynomial coefficient for
+# sensible and latent heat fluxes. The flux type will be automatically inferred:
 
-ρe_surface_flux = BulkSensibleHeatFlux(coefficient=Cᵀ, gustiness=Uᵍ, surface_temperature=T₀)
-ρqᵗ_surface_flux = BulkVaporFlux(coefficient=Cᵛ, gustiness=Uᵍ, surface_temperature=T₀)
+ρe_surface_flux = BulkSensibleHeatFlux(coefficient=coef, gustiness=Uᵍ, surface_temperature=T₀)
+ρqᵗ_surface_flux = BulkVaporFlux(coefficient=coef, gustiness=Uᵍ, surface_temperature=T₀)
+
+# We can visualize how the neutral drag coefficient varies with wind speed,
+# and the range of stability-corrected values expected in this simulation.
+# The SST ranges from ``θ₀ - ΔT/2`` (cold, stable) to ``θ₀ + ΔT/2`` (warm, unstable),
+# so the stability correction spans these two limits.
+
+using Breeze.BoundaryConditions: neutral_coefficient_10m, bulk_richardson_number,
+                                 default_neutral_drag_polynomial
+
+h = grid.Lz / grid.Nz / 2  # first cell center height
+U_min = 0.1
+ψ = DefaultStabilityFunction()
+
+ΔT_line = 10  # K, temperature difference for stability lines
+T_warm = θ₀ + ΔT / 2      # warm SST in this simulation
+T_cold = θ₀ - ΔT / 2      # cold SST in this simulation
+T_unstable = θ₀ + ΔT_line  # strongly unstable
+T_stable   = θ₀ - ΔT_line  # strongly stable
+
+U_range = range(0.5, 25, length=200)
+Cᴰ_neutral  = [neutral_coefficient_10m(default_neutral_drag_polynomial, U, U_min) for U in U_range]
+Cᴰ_unstable = [Cᴰ * ψ(bulk_richardson_number(h, θ₀, T_unstable, U, U_min)) for (Cᴰ, U) in zip(Cᴰ_neutral, U_range)]
+Cᴰ_stable   = [Cᴰ * ψ(bulk_richardson_number(h, θ₀, T_stable,   U, U_min)) for (Cᴰ, U) in zip(Cᴰ_neutral, U_range)]
+Cᴰ_sim_warm = [Cᴰ * ψ(bulk_richardson_number(h, θ₀, T_warm, U, U_min)) for (Cᴰ, U) in zip(Cᴰ_neutral, U_range)]
+Cᴰ_sim_cold = [Cᴰ * ψ(bulk_richardson_number(h, θ₀, T_cold, U, U_min)) for (Cᴰ, U) in zip(Cᴰ_neutral, U_range)]
+
+fig = Figure(size=(1100, 400))
+
+ax_coef = Axis(fig[1, 1],
+               xlabel = "Wind speed (m/s)",
+               ylabel = "Cᴰ × 10³",
+               title = "Drag coefficient at 10 m")
+
+band!(ax_coef, collect(U_range), Cᴰ_sim_cold .* 1e3, Cᴰ_sim_warm .* 1e3,
+      color=(:grey, 0.3), label="Simulation range (ΔT = $ΔT K)")
+lines!(ax_coef, U_range, Cᴰ_unstable .* 1e3, color=:firebrick,  linewidth=2, label="Unstable (ΔT = $ΔT_line K)")
+lines!(ax_coef, U_range, Cᴰ_neutral  .* 1e3, color=:black,      linewidth=2, label="Neutral")
+lines!(ax_coef, U_range, Cᴰ_stable   .* 1e3, color=:dodgerblue, linewidth=2, label="Stable (ΔT = -$ΔT_line K)")
+
+axislegend(ax_coef, position=:rt)
+
+ax_ratio = Axis(fig[1, 2],
+                xlabel = "Wind speed (m/s)",
+                ylabel = "Cᴰ / Cᴰ_neutral",
+                title = "Stability correction factor")
+
+band!(ax_ratio, collect(U_range), Cᴰ_sim_cold ./ Cᴰ_neutral, Cᴰ_sim_warm ./ Cᴰ_neutral,
+      color=(:grey, 0.3))
+lines!(ax_ratio, U_range, Cᴰ_unstable ./ Cᴰ_neutral, color=:firebrick,  linewidth=2)
+lines!(ax_ratio, U_range, ones(length(U_range)),     color=:black,      linewidth=2)
+lines!(ax_ratio, U_range, Cᴰ_stable   ./ Cᴰ_neutral, color=:dodgerblue, linewidth=2)
+
+fig
 
 # We finally assemble all of the boundary conditions,
 
@@ -184,9 +287,10 @@ qᵗ = model.specific_moisture
 
 # ## Surface flux diagnostics
 #
-# We use Oceananigans' `BoundaryConditionOperation` to extract the surface flux
-# values from the boundary conditions. These 1D fields (varying only in x)
-# represent the actual flux values applied at the ocean-atmosphere interface.
+# We use Oceananigans' [`BoundaryConditionOperation`](https://clima.github.io/OceananigansDocumentation/stable/appendix/library/#Oceananigans.Models.BoundaryConditionOperation-Tuple{Field,%20Symbol,%20Oceananigans.AbstractModel})
+# to extract the surface flux values from the boundary conditions. These 1D fields
+# (varying only in x) represent the actual flux values applied at the
+# ocean-atmosphere interface.
 #
 # The surface fluxes are:
 #

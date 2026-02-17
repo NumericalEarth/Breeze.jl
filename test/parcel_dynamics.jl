@@ -344,7 +344,7 @@ using Oceananigans: interpolate
     e_initial = model.dynamics.state.ℰ
 
     # Run simulation for 20 minutes (parcel rises 1200 m at 1 m/s)
-    simulation = Simulation(model; Δt=1.0, stop_time=20minutes)
+    simulation = Simulation(model; Δt=1.0, stop_time=20minutes, verbose=false)
     run!(simulation)
 
     z_final = model.dynamics.state.z
@@ -392,7 +392,7 @@ end
     e_initial = model.dynamics.state.ℰ
 
     # Run simulation for 15 minutes
-    simulation = Simulation(model; Δt=1.0, stop_time=15minutes)
+    simulation = Simulation(model; Δt=1.0, stop_time=15minutes, verbose=false)
     run!(simulation)
 
     qᵗ_final = model.dynamics.state.qᵗ
@@ -446,7 +446,7 @@ OneMomentCloudMicrophysics = BreezeCloudMicrophysicsExt.OneMomentCloudMicrophysi
     @test haskey(μ, :ρqʳ)
 
     # Time step should work
-    simulation = Simulation(model; Δt=1.0, stop_time=5minutes)
+    simulation = Simulation(model; Δt=1.0, stop_time=5minutes, verbose=false)
     run!(simulation)
 
     @test model.dynamics.state.z ≈ 300.0 atol=1.0  # 5 min at 1 m/s = 300m
@@ -478,7 +478,7 @@ end
     @test model.dynamics.state.μ.ρqʳ ≈ 0.0
 
     # Run long enough for condensation to occur (above LCL)
-    simulation = Simulation(model; Δt=1.0, stop_time=60minutes)
+    simulation = Simulation(model; Δt=1.0, stop_time=60minutes, verbose=false)
     run!(simulation)
 
     # After rising through LCL, cloud liquid should form
@@ -509,7 +509,7 @@ end
          z = 0, w = 1)
 
     # Run long enough for cloud formation and autoconversion
-    simulation = Simulation(model; Δt=1.0, stop_time=120minutes)
+    simulation = Simulation(model; Δt=1.0, stop_time=120minutes, verbose=false)
     run!(simulation)
 
     # Extract final microphysical state
@@ -568,7 +568,7 @@ TwoMomentCloudMicrophysics = BreezeCloudMicrophysicsExt.TwoMomentCloudMicrophysi
     @test haskey(μ, :ρnʳ)
 
     # Time step should work
-    simulation = Simulation(model; Δt=1.0, stop_time=5minutes)
+    simulation = Simulation(model; Δt=1.0, stop_time=5minutes, verbose=false)
     run!(simulation)
 
     @test model.dynamics.state.z ≈ 300.0 atol=1.0  # 5 min at 1 m/s = 300m
@@ -597,10 +597,11 @@ end
 
     # Initialize with some droplet number (CCN activation)
     nᶜˡ₀ = 100e6  # 100 million droplets per kg
-    model.dynamics.state.μ = (; ρqᶜˡ=0.0, ρnᶜˡ=1.2 * nᶜˡ₀, ρqʳ=0.0, ρnʳ=0.0)
+    Nᵃ₀ = initial_aerosol_number(microphysics)
+    model.dynamics.state.μ = (; ρqᶜˡ=0.0, ρnᶜˡ=1.2 * nᶜˡ₀, ρqʳ=0.0, ρnʳ=0.0, ρnᵃ= Nᵃ₀)
 
     # Run long enough for condensation to occur (above LCL)
-    simulation = Simulation(model; Δt=1.0, stop_time=60minutes)
+    simulation = Simulation(model; Δt=1.0, stop_time=60minutes, verbose=false)
     run!(simulation)
 
     # After rising through LCL, cloud liquid should form
@@ -634,10 +635,11 @@ end
 
     # Initialize with droplet number for 2M scheme
     nᶜˡ₀ = 100e6
-    model.dynamics.state.μ = (; ρqᶜˡ=0.0, ρnᶜˡ=1.2 * nᶜˡ₀, ρqʳ=0.0, ρnʳ=0.0)
+    Nᵃ₀ = initial_aerosol_number(microphysics)
+    model.dynamics.state.μ = (; ρqᶜˡ=0.0, ρnᶜˡ=1.2 * nᶜˡ₀, ρqʳ=0.0, ρnʳ=0.0, ρnᵃ= Nᵃ₀)
 
     # Run long enough for cloud formation and autoconversion
-    simulation = Simulation(model; Δt=1.0, stop_time=120minutes)
+    simulation = Simulation(model; Δt=1.0, stop_time=120minutes, verbose=false)
     run!(simulation)
 
     # Extract final microphysical state

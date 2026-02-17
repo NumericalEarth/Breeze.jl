@@ -33,9 +33,10 @@ export
     grid_microphysical_tendency,
     update_microphysical_fields!,
     update_microphysical_auxiliaries!,
+    initial_aerosol_number,
 
     # Interface functions (extended by BoundaryConditions and Forcings)
-    regularize_atmosphere_model_boundary_conditions,
+    materialize_atmosphere_model_boundary_conditions,
     materialize_atmosphere_model_forcing,
     compute_forcing!,
 
@@ -67,7 +68,7 @@ using KernelAbstractions: @kernel, @index
 using Oceananigans: Oceananigans, CenterField, fields
 using Oceananigans.BoundaryConditions: FieldBoundaryConditions, regularize_field_boundary_conditions, fill_halo_regions!
 using Oceananigans.ImmersedBoundaries: mask_immersed_field!
-using Oceananigans.Operators: Δzᶜᶜᶜ, ℑzᵃᵃᶠ
+using Oceananigans.Operators: Δzᶜᶜᶜ, ℑzᵃᵃᶜ, ℑzᵃᵃᶠ
 using Oceananigans.Solvers: Solvers
 using Oceananigans.TimeSteppers: TimeSteppers
 using Oceananigans.Utils: prettysummary, launch!

@@ -9,14 +9,14 @@ Breeze's [`AtmosphereModel`](@ref Breeze.AtmosphereModels.AtmosphereModel) provi
 An extension to [RRTMGP.jl](https://github.com/CliMA/RRTMGP.jl) provides solvers for gray, clear-sky, and all-sky radiative transfer.
 Breeze's examples include single column radiation, idealized thermal bubbles and inertia-gravity waves and Kelvin-Helmholtz, [BOMEX](@cite Siebesma2003) shallow convection, [RICO](@cite vanZanten2011) trade-wind cumulus, mountain waves, and more.
 
-Don't hesitate to get in touch on the [NumericalEarth slack](https://join.slack.com/t/numericalearth/shared_invite/zt-3kjcowmpg-B0s3nalWkvZg8IBc~BIJEA) or by opening a new [discussion](https://github.com/NumericalEarth/Breeze.jl/discussions)!
+Don't hesitate to get in touch on the [NumericalEarth slack](https://join.slack.com/t/numericalearth/shared_invite/zt-3pwpvky4k-XX7RkgQgHLIUt~wtwGXN~Q) or by opening a new [discussion](https://github.com/NumericalEarth/Breeze.jl/discussions)!
 
 ## Roadmap and a call to action
 
 Our goal is to build a very fast, easy to learn, productive tool for atmospheric research, teaching, and forecasting, as well as a platform for the development of algorithms, numerical methods, parameterizations, microphysical schemes, and atmosphere model components.
 This won't be the effort of a single group, project, or even a single community.
 Such a lofty aim can only be realized by a wide-ranging and sustained collaboration of passionate people.
-Maybe that includes you --- consider it!
+Maybe that includes you -- consider it!
 Model development is hard but rewarding, and builds useful skills for a myriad of pursuits.
 
 The goals of the current group of model developers include developing
