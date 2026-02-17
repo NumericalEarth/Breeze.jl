@@ -104,15 +104,6 @@ References
 Pauluis, O. (2008). Thermodynamic consistency of the anelastic approximation for a moist atmosphere.
   Journal of the Atmospheric Sciences 65, 2719–2729.
 """
-
-# Breeze's acoustic and SSP time steppers accept a `dynamics` keyword;
-# Oceananigans' built-in steppers (RungeKutta3, QuasiAdamsBashforth2) do not.
-_timestepper_uses_dynamics(::Val) = false
-_timestepper_uses_dynamics(::Val{:SSPRungeKutta3}) = true
-_timestepper_uses_dynamics(::Val{:AcousticSSPRungeKutta3}) = true
-_timestepper_uses_dynamics(::Val{:AcousticRungeKutta3}) = true
-_timestepper_uses_dynamics(s::Symbol) = _timestepper_uses_dynamics(Val(s))
-
 function AtmosphereModel(grid;
                          clock = Clock(grid),
                          thermodynamic_constants = ThermodynamicConstants(eltype(grid)),
@@ -284,6 +275,14 @@ function AtmosphereModel(grid;
 
     return model
 end
+
+# Breeze's acoustic and SSP time steppers accept a `dynamics` keyword;
+# Oceananigans' built-in steppers (RungeKutta3, QuasiAdamsBashforth2) do not.
+_timestepper_uses_dynamics(::Val) = false
+_timestepper_uses_dynamics(::Val{:SSPRungeKutta3}) = true
+_timestepper_uses_dynamics(::Val{:AcousticSSPRungeKutta3}) = true
+_timestepper_uses_dynamics(::Val{:AcousticRungeKutta3}) = true
+_timestepper_uses_dynamics(s::Symbol) = _timestepper_uses_dynamics(Val(s))
 
 function Base.summary(model::AtmosphereModel)
     A = nameof(typeof(model.grid.architecture))

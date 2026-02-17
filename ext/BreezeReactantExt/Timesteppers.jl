@@ -2,7 +2,7 @@ using Reactant: Reactant
 
 using Oceananigans: AbstractModel, ReactantState
 using Oceananigans.TimeSteppers: update_state!, tick!, step_lagrangian_particles!, compute_flux_bc_tendencies!
-using Oceananigans.Models.NonhydrostaticModels: compute_pressure_correction!, make_pressure_correction!
+using Breeze.AtmosphereModels: compute_pressure_correction!, make_pressure_correction!
 using Breeze.TimeSteppers: SSPRungeKutta3, store_initial_state!, ssp_rk3_substep!,
                            maybe_initialize_state!
 
