@@ -72,6 +72,7 @@ export
     RelativeHumidity,
     RelativeHumidityField,
     BulkMicrophysics,
+    initial_aerosol_number,
     compute_hydrostatic_pressure!,
     NonEquilibriumCloudFormation,
 
@@ -79,6 +80,11 @@ export
     BulkDrag,
     BulkSensibleHeatFlux,
     BulkVaporFlux,
+    PolynomialCoefficient,
+    DefaultStabilityFunction,
+    default_neutral_drag_polynomial,
+    default_neutral_sensible_heat_polynomial,
+    default_neutral_latent_heat_polynomial,
 
     # Forcing utilities
     geostrophic_forcings,

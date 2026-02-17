@@ -74,8 +74,9 @@ struct ExplicitMicrophysicsState{FT} <: AbstractMicrophysicalState{FT}
     qⁱ :: FT
 end
 
-function microphysical_state(::ExplicitMicrophysics, ρ, μ::NamedTuple, 𝒰)
+function microphysical_state(::ExplicitMicrophysics, ρ, μ::NamedTuple, 𝒰, velocities)
     # Convert density-weighted prognostics to specific quantities
+    # velocities is required for interface compatibility (used by some schemes for aerosol activation)
     qᵛ = μ.ρqᵛ / ρ
     qˡ = μ.ρqˡ / ρ
     qⁱ = μ.ρqⁱ / ρ
