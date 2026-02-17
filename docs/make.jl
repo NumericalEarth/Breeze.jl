@@ -43,6 +43,7 @@ examples = [
     Example("Cloud formation in prescribed updraft", "kinematic_driver", true),
     Example("Splitting supercell", "splitting_supercell", false),
     Example("Tropical cyclone world", "tropical_cyclone_world", false),
+    Example("Radiative shallow convection (2D)", "radiative_shallow_convection", false),
 ]
 
 # Filter out long-running example if necessary
