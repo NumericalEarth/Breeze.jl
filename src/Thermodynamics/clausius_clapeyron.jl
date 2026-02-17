@@ -57,10 +57,6 @@ pᵛ⁺(T) = pᵗʳ (T / Tᵗʳ)^{Δcᵝ / Rᵛ} \\exp \\left [ (1/Tᵗʳ - 1/T)
     can then be used for both condensation (vapor → liquid) and deposition (vapor → ice).
 """
 @inline function saturation_vapor_pressure(T, constants::ClausiusClapeyronThermodynamicConstants, surface)
-    # Saturation vapor pressure is undefined for T ≤ 0; return zero as a safeguard
-    # against unphysical temperatures that can arise from numerical instability.
-    T ≤ zero(T) && return zero(T)
-
     ℒ₀ = absolute_zero_latent_heat(constants, surface)
     Δcᵝ = specific_heat_difference(constants, surface)
 
