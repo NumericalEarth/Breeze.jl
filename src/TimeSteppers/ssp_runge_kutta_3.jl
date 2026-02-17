@@ -146,9 +146,9 @@ end
 """
 $(TYPEDSIGNATURES)
 
-Copy prognostic fields to `U⁰` storage for use in later SSP RK3 stages.
+Copy prognostic fields to `U⁰` storage for use in later RK3 stages.
 """
-function store_initial_state!(model::AbstractModel{<:SSPRungeKutta3})
+function store_initial_state!(model)
     U⁰ = model.timestepper.U⁰
     for (u⁰, u) in zip(U⁰, prognostic_fields(model))
         parent(u⁰) .= parent(u)

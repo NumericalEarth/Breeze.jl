@@ -125,17 +125,8 @@ $(TYPEDSIGNATURES)
 Compute slow momentum tendencies (advection, Coriolis, turbulence, forcing).
 
 The pressure gradient and buoyancy are excluded using [`SlowTendencyMode`](@ref).
-These "fast" terms are handled by the acoustic substep loop through perturbation
-variables: ``-ψ ∂ρ''/∂x`` (horizontal pressure) and ``-ψ ∂ρ''/∂z - g ρ''``
-(vertical pressure + buoyancy).
-
-!!! note "Limitation with SSP RK3"
-    The perturbation pressure ``ψ ∂ρ''/∂x`` only captures density-driven pressure
-    changes. Pressure perturbations from temperature/θ variations (the ``ρ ∂ψ/∂x``
-    term) are not resolved. Including the full pressure gradient in the slow tendency
-    is unstable with SSP RK3 due to acoustic mode interference from the convex
-    combination. The Wicker-Skamarock RK3 (stage fractions Δt/3, Δt/2, Δt) is
-    needed to properly handle the full pressure gradient.
+These "fast" terms are handled by the acoustic substep loop, which resolves
+the acoustic CFL through substepping with constant ``Δτ = Δt/N``.
 """
 function compute_slow_momentum_tendencies!(model)
     substepper = model.timestepper.substepper
@@ -265,28 +256,26 @@ end
 """
 $(TYPEDSIGNATURES)
 
-Update scalar fields using standard SSP RK3 with time-averaged velocities.
+Update non-acoustic scalar fields (moisture, tracers) using the given kernel.
 
-For scalars (θ, moisture, tracers), we use the time-averaged velocities
-from the acoustic loop for advection, ensuring stability.
+Iterates over prognostic fields, skipping the first 5 (ρ, ρu, ρv, ρw, ρθ)
+which are handled by the acoustic substep loop. For each remaining field,
+launches `kernel!` with the provided `kernel_args` and applies the implicit
+diffusion step.
 """
-function scalar_ssp_rk3_substep!(model, Δt, α)
+function acoustic_scalar_substep!(model, kernel!, Δt_implicit, kernel_args...)
     grid = model.grid
     arch = grid.architecture
     U⁰ = model.timestepper.U⁰
     Gⁿ = model.timestepper.Gⁿ
-
     prognostic = prognostic_fields(model)
     n_acoustic = 5  # ρ, ρu, ρv, ρw, ρθ (handled by acoustic loop)
 
     for (i, (u, u⁰, G)) in enumerate(zip(prognostic, U⁰, Gⁿ))
-        if i <= n_acoustic  # Skip fields handled by acoustic loop
-            continue
-        end
+        i <= n_acoustic && continue
 
-        launch!(arch, grid, :xyz, _ssp_rk3_substep!, u, u⁰, G, Δt, α)
+        launch!(arch, grid, :xyz, kernel!, u, u⁰, G, kernel_args...)
 
-        # Implicit diffusion step
         field_index = Val(i - n_acoustic)
         implicit_step!(u,
                        model.timestepper.implicit_solver,
@@ -295,30 +284,14 @@ function scalar_ssp_rk3_substep!(model, Δt, α)
                        field_index,
                        model.clock,
                        fields(model),
-                       α * Δt)
+                       Δt_implicit)
     end
 
     return nothing
 end
 
-#####
-##### Import SSP RK3 kernel from ssp_runge_kutta_3.jl (avoid duplicate definition)
-#####
-
-# The _ssp_rk3_substep! kernel is already defined in ssp_runge_kutta_3.jl
-# We reuse it here instead of defining it again
-
-#####
-##### Store initial state
-#####
-
-function store_initial_state!(model::AtmosphereModel{<:Any, <:Any, <:Any, <:AcousticSSPRungeKutta3})
-    U⁰ = model.timestepper.U⁰
-    for (u⁰, u) in zip(U⁰, prognostic_fields(model))
-        parent(u⁰) .= parent(u)
-    end
-    return nothing
-end
+scalar_ssp_rk3_substep!(model, Δt, α) =
+    acoustic_scalar_substep!(model, _ssp_rk3_substep!, α * Δt, Δt, α)
 
 #####
 ##### Time stepping (main entry point)

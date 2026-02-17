@@ -1,15 +1,13 @@
 using KernelAbstractions: @kernel, @index
 
-using Oceananigans: prognostic_fields, fields, architecture
-using Oceananigans.Utils: launch!, time_difference_seconds
+using Oceananigans.Utils: time_difference_seconds
 
 using Oceananigans.TimeSteppers:
     AbstractTimeStepper,
     tick!,
     update_state!,
     compute_flux_bc_tendencies!,
-    step_lagrangian_particles!,
-    implicit_step!
+    step_lagrangian_particles!
 
 using Breeze.AtmosphereModels: AtmosphereModel
 
@@ -105,79 +103,6 @@ function AcousticRungeKutta3(grid, prognostic_fields;
 end
 
 #####
-##### Slow tendency computation (excludes PGF and buoyancy for split-explicit)
-#####
-
-using Breeze.AtmosphereModels:
-    AtmosphereModels,
-    SlowTendencyMode,
-    dynamics_density,
-    compute_x_momentum_tendency!,
-    compute_y_momentum_tendency!,
-    compute_z_momentum_tendency!,
-    compute_dynamics_tendency!
-
-"""
-$(TYPEDSIGNATURES)
-
-Compute slow momentum tendencies (advection, Coriolis, turbulence, forcing).
-
-The pressure gradient and buoyancy are excluded using [`SlowTendencyMode`](@ref).
-The acoustic substep loop handles the full PGF (reference + perturbation) and buoyancy:
-
-- Reference PGF: ``∂(p_{stage} - p_{ref})/∂x``
-- Perturbation PGF: ``ψ_θ ∂(ρθ'')/∂x`` where ``ψ_θ = c²/θ``
-- Perturbation buoyancy: ``-g ρ''``
-- Reference buoyancy: ``-g(ρ_{stage} - ρ_{ref})``
-- Thermal buoyancy: ``B_θ (ρθ)''``
-
-The outer RK3 time step is limited only by the advective CFL, not the acoustic CFL.
-The acoustic CFL is resolved by the substep loop with constant ``Δτ = Δt/N``.
-"""
-function compute_slow_momentum_tendencies!(model::AtmosphereModel{<:Any, <:Any, <:Any, <:AcousticRungeKutta3})
-    substepper = model.timestepper.substepper
-    grid = model.grid
-    arch = architecture(grid)
-
-    # Wrap dynamics in SlowTendencyMode so pressure gradient and buoyancy return zero.
-    # The acoustic substep loop handles full PGF through the Exner pressure π'.
-    slow_dynamics = SlowTendencyMode(model.dynamics)
-
-    model_fields = fields(model)
-
-    momentum_args = (
-        dynamics_density(model.dynamics),
-        model.advection.momentum,
-        model.velocities,
-        model.closure,
-        model.closure_fields,
-        model.momentum,
-        model.coriolis,
-        model.clock,
-        model_fields)
-
-    u_args = tuple(momentum_args..., model.forcing.ρu, slow_dynamics)
-    v_args = tuple(momentum_args..., model.forcing.ρv, slow_dynamics)
-
-    w_args = tuple(momentum_args..., model.forcing.ρw,
-                   slow_dynamics,
-                   model.formulation,
-                   model.temperature,
-                   model.specific_moisture,
-                   model.microphysics,
-                   model.microphysical_fields,
-                   model.thermodynamic_constants)
-
-    Gⁿ = model.timestepper.Gⁿ
-
-    launch!(arch, grid, :xyz, compute_x_momentum_tendency!, Gⁿ.ρu, grid, u_args)
-    launch!(arch, grid, :xyz, compute_y_momentum_tendency!, Gⁿ.ρv, grid, v_args)
-    launch!(arch, grid, :xyz, compute_z_momentum_tendency!, Gⁿ.ρw, grid, w_args)
-
-    return nothing
-end
-
-#####
 ##### WS-RK3 substep with acoustic substepping
 #####
 
@@ -218,44 +143,8 @@ end
 ##### Scalar update with time-averaged velocities
 #####
 
-"""
-$(TYPEDSIGNATURES)
-
-Update scalar fields using Wicker-Skamarock RK3 with time-averaged velocities.
-
-For scalars beyond the acoustic fields (moisture, tracers), we apply the
-simple RK update: ``u = u⁰ + Δt_{stage} G``.
-"""
-function scalar_rk3_substep!(model, Δt_stage)
-    grid = model.grid
-    arch = grid.architecture
-    U⁰ = model.timestepper.U⁰
-    Gⁿ = model.timestepper.Gⁿ
-
-    prognostic = prognostic_fields(model)
-    n_acoustic = 5  # ρ, ρu, ρv, ρw, ρθ (handled by acoustic loop)
-
-    for (i, (u, u⁰, G)) in enumerate(zip(prognostic, U⁰, Gⁿ))
-        if i <= n_acoustic  # Skip fields handled by acoustic loop
-            continue
-        end
-
-        launch!(arch, grid, :xyz, _rk3_substep!, u, u⁰, G, Δt_stage)
-
-        # Implicit diffusion step
-        field_index = Val(i - n_acoustic)
-        implicit_step!(u,
-                       model.timestepper.implicit_solver,
-                       model.closure,
-                       model.closure_fields,
-                       field_index,
-                       model.clock,
-                       fields(model),
-                       Δt_stage)
-    end
-
-    return nothing
-end
+scalar_rk3_substep!(model, Δt_stage) =
+    acoustic_scalar_substep!(model, _rk3_substep!, Δt_stage, Δt_stage)
 
 @kernel function _rk3_substep!(u, u⁰, G, Δt_stage)
     i, j, k = @index(Global, NTuple)
@@ -263,18 +152,6 @@ end
         # Wicker-Skamarock RK3: u = u⁰ + β * Δt * G
         u[i, j, k] = u⁰[i, j, k] + Δt_stage * G[i, j, k]
     end
-end
-
-#####
-##### Store initial state
-#####
-
-function store_initial_state!(model::AtmosphereModel{<:Any, <:Any, <:Any, <:AcousticRungeKutta3})
-    U⁰ = model.timestepper.U⁰
-    for (u⁰, u) in zip(U⁰, prognostic_fields(model))
-        parent(u⁰) .= parent(u)
-    end
-    return nothing
 end
 
 #####
