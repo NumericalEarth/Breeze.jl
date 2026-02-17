@@ -34,10 +34,10 @@ For stable conditions (``ζ ≥ 0``), uses [Beljaars & Holtslag (1991)](@cite be
 
 # References
 
-* Hogström, U. (1996). Review of some basic characteristics of the atmospheric
-  surface layer. Boundary-Layer Meteorology, 78, 215-246.
-* Beljaars, A. C. M., & Holtslag, A. A. M. (1991). Flux parameterization over
-  land surfaces for atmospheric models. Journal of Applied Meteorology, 30, 327-341.
+* Hogström, U. L. F. (1996). Review of some basic characteristics of the atmospheric surface layer.
+  Boundary-Layer Meteorology, 78, 215-246.
+* Beljaars, A. C. M., & Holtslag, A. A. M. (1991). Flux parameterization over land surfaces
+  for atmospheric models. Journal of Applied Meteorology, 30, 327-341.
 """
 struct StabilityFunctionParameters{FT}
     γᴰ :: FT
@@ -433,6 +433,10 @@ PolynomialCoefficient{Float64}
 
 # References
 
+* Beljaars, A. C. M., & Holtslag, A. A. M. (1991). Flux parameterization over land surfaces
+  for atmospheric models. Journal of Applied Meteorology, 30, 327-341.
+* Hogström, U. L. F. (1996). Review of some basic characteristics of the atmospheric surface layer.
+  Boundary-Layer Meteorology, 78, 215-246.
 * Large, W., & Yeager, S. G. (2009). The global climatology of an interannually varying air–sea flux data set. Climate dynamics, 33(2), 341-364.
 * Li, Y., Gao, Z., Lenschow, D. H., & Chen, F. (2010). An improved approach for parameterizing surface-layer turbulent transfer coefficients in numerical models. Boundary-Layer Meteorology, 137, 153-165.
 """
