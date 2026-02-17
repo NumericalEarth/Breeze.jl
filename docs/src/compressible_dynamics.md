@@ -328,7 +328,7 @@ where ``\kappa^d`` is the divergence damping coefficient (typically 0.05--0.10).
 extrapolation that damps the ``2\Delta\tau`` computational mode inherent in the forward-backward
 scheme, following [Klemp, Skamarock, and Dudhia (2007)](@cite KlempSkamarockDudhia2007).
 
-### [Why the Exner linearization is necessary](@id outer-rk3-stability)
+### [Why the Exner linearization is necessary](@id exner-linearization)
 
 In a ``ρ``-based formulation where the perturbation pressure gradient takes the form
 ``c_s^2 \, \boldsymbol{\nabla} ρ''``, the sound speed coefficient ``c_s^2 = γ R^d T`` must

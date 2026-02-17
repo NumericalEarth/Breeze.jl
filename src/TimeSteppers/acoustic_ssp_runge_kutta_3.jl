@@ -1,5 +1,3 @@
-using KernelAbstractions: @kernel, @index
-
 using Oceananigans: prognostic_fields, fields, architecture
 using Oceananigans.Utils: launch!, time_difference_seconds
 

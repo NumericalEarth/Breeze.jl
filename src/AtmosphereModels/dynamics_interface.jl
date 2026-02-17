@@ -316,7 +316,7 @@ the "fast" terms (pressure gradient and buoyancy) return zero. This is used
 for split-explicit time-stepping where fast terms are handled separately
 in an acoustic substep loop.
 
-See also [`SplitExplicit`](@ref Breeze.CompressibleEquations.SplitExplicit).
+See also [`SplitExplicitTimeDiscretization`](@ref Breeze.CompressibleEquations.SplitExplicitTimeDiscretization).
 """
 struct SlowTendencyMode{D}
     dynamics :: D
