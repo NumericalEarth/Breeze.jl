@@ -286,7 +286,8 @@ Uses a conservative sound speed estimate `cₛ = √(γ Rᵈ Tᵣ)` with `Tᵣ =
 CFL is not needed because the w-π' coupling is vertically implicit.
 
 Following CM1, the substep count satisfies `Δτ · cₛ / Δx_min ≤ 1` where
-`Δτ = Δt / N` is the acoustic substep size.
+`Δτ = Δt / N` is the acoustic substep size. A safety factor of 1.2 is applied
+to ensure stability with the forward-backward splitting.
 """
 function compute_acoustic_substeps(grid, Δt, thermodynamic_constants)
     cᵖ = thermodynamic_constants.dry_air.heat_capacity
@@ -302,7 +303,8 @@ function compute_acoustic_substeps(grid, Δt, thermodynamic_constants)
     Δy_min = TY === Flat ? Inf : minimum_yspacing(grid)
     Δh_min = min(Δx_min, Δy_min)
 
-    return ceil(Int, Δt * cₛ / Δh_min)
+    safety_factor = 1.2
+    return ceil(Int, safety_factor * Δt * cₛ / Δh_min)
 end
 
 # When substeps is specified, use it directly

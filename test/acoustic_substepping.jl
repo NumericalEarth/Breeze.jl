@@ -67,11 +67,12 @@ end
     @testset "1 km grid, Δt=12" begin
         grid = RectilinearGrid(acoustic_test_arch; size=(100, 6, 10), halo=(5, 5, 5),
                                x=(0, 100kilometers), y=(0, 6kilometers), z=(0, 10kilometers))
-        # Δx = 1000 m, cₛ ≈ 347 m/s → N = ceil(12 * 347 / 1000) = ceil(4.16) = 5
+        # Δx = 1000 m, cₛ ≈ 347 m/s, safety factor 1.2
+        # N = ceil(1.2 * 12 * 347 / 1000) = ceil(4.99) = 5
         N = compute_acoustic_substeps(grid, 12, constants)
         @test N isa Int
         @test N >= 1
-        @test N == ceil(Int, 12 * sqrt(1.4 * 287.0 * 300) / 1000)
+        @test N == ceil(Int, 1.2 * 12 * sqrt(1.4 * 287.0 * 300) / 1000)
     end
 
     @testset "Flat y-topology" begin
@@ -80,7 +81,7 @@ end
                                topology=(Periodic, Flat, Bounded))
         # Should use only Δx, not Δy
         N = compute_acoustic_substeps(grid, 12, constants)
-        N_expected = ceil(Int, 12 * sqrt(1.4 * 287.0 * 300) / 1000)
+        N_expected = ceil(Int, 1.2 * 12 * sqrt(1.4 * 287.0 * 300) / 1000)
         @test N == N_expected
     end
 end
