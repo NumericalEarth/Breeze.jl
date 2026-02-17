@@ -21,7 +21,7 @@ else
 end
 
 @testset "Aqua" begin
-    Aqua.test_all(Breeze; stale_deps=(ignore=[:CloudMicrophysics, :RRTMGP, :NCDatasets],))
+    Aqua.test_all(Breeze)
 end
 
 @testset "ExplicitImports" begin
