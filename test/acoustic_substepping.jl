@@ -10,7 +10,10 @@ using Breeze
 using Breeze: AcousticSubstepper
 using Breeze.CompressibleEquations: ExplicitTimeStepping, SplitExplicitTimeDiscretization,
                                     compute_acoustic_substeps
-using Breeze.Thermodynamics: adiabatic_hydrostatic_density
+using Breeze.AtmosphereModels: SlowTendencyMode, HorizontalSlowMode,
+                               x_pressure_gradient, y_pressure_gradient, z_pressure_gradient,
+                               buoyancy_forceᶜᶜᶜ, dynamics_density
+using Breeze.Thermodynamics: adiabatic_hydrostatic_density, ExnerReferenceState, surface_density
 using GPUArraysCore: @allowscalar
 using Oceananigans
 using Oceananigans.Architectures: architecture
@@ -299,4 +302,169 @@ end
     # With no perturbation and balanced reference state, w should be near zero
     w_max = @allowscalar maximum(abs, interior(model.velocities.w))
     @test w_max < 1e-6  # Should be at machine precision level
+end
+
+#####
+##### Test acoustic divergence damping (Klemp 2018)
+#####
+
+@testset "Acoustic divergence damping [$(FT)]" for FT in test_float_types()
+    Oceananigans.defaults.FloatType = FT
+    grid = RectilinearGrid(acoustic_test_arch; size=(8, 8, 8), halo=(5, 5, 5),
+                           x=(0, 8kilometers), y=(0, 8kilometers), z=(0, 8kilometers))
+
+    # Use nonzero acoustic_damping_coefficient to exercise _acoustic_divergence_damping! kernel
+    td = SplitExplicitTimeDiscretization(substeps=8, acoustic_damping_coefficient=FT(0.5))
+    dynamics = CompressibleDynamics(td; reference_potential_temperature=300)
+    model = AtmosphereModel(grid; advection=WENO(), dynamics,
+                            timestepper=:AcousticRungeKutta3)
+
+    ref = model.dynamics.reference_state
+    set!(model; θ=300, u=0, qᵗ=0, ρ=ref.density)
+
+    simulation = Simulation(model; Δt=6, stop_iteration=3, verbose=false)
+    run!(simulation)
+
+    @test model.clock.iteration == 3
+    @test !any(isnan, parent(model.dynamics.density))
+end
+
+#####
+##### Test explicit time stepping default
+#####
+
+@testset "Default time stepper for ExplicitTimeStepping [$(FT)]" for FT in test_float_types()
+    Oceananigans.defaults.FloatType = FT
+    grid = RectilinearGrid(acoustic_test_arch; size=(4, 4, 8), x=(0, 100), y=(0, 100), z=(0, 1000))
+
+    dynamics = CompressibleDynamics(ExplicitTimeStepping())
+    model = AtmosphereModel(grid; dynamics)
+
+    @test model.timestepper isa SSPRungeKutta3
+end
+
+#####
+##### CompressibleDynamics show methods
+#####
+
+@testset "CompressibleDynamics show methods" begin
+    # Pre-materialization
+    dynamics = CompressibleDynamics()
+    s = sprint(show, dynamics)
+    @test occursin("CompressibleDynamics", s)
+    @test occursin("ExplicitTimeStepping", s)
+    @test occursin("not materialized", s)
+
+    # With split-explicit
+    td = SplitExplicitTimeDiscretization(substeps=8)
+    dynamics2 = CompressibleDynamics(td; reference_potential_temperature=300)
+    s2 = sprint(show, dynamics2)
+    @test occursin("SplitExplicitTimeDiscretization", s2)
+end
+
+#####
+##### ExnerReferenceState construction and show
+#####
+
+@testset "ExnerReferenceState [$(FT)]" for FT in test_float_types()
+    Oceananigans.defaults.FloatType = FT
+    grid = RectilinearGrid(acoustic_test_arch; size=(4, 4, 8), x=(0, 100), y=(0, 100), z=(0, 10000),
+                           topology=(Periodic, Periodic, Bounded))
+    constants = ThermodynamicConstants(FT)
+
+    @testset "Construction and basic properties" begin
+        ref = ExnerReferenceState(grid, constants; surface_pressure=101325, potential_temperature=300)
+        @test ref isa ExnerReferenceState
+        @test eltype(ref) == FT
+        @test ref.surface_pressure == FT(101325)
+        @test ref.surface_potential_temperature == FT(300)
+
+        # Pressure should decrease monotonically
+        for k in 2:grid.Nz
+            pᵏ = @allowscalar ref.pressure[1, 1, k]
+            pᵏ⁻¹ = @allowscalar ref.pressure[1, 1, k-1]
+            @test pᵏ < pᵏ⁻¹
+        end
+    end
+
+    @testset "show/summary" begin
+        ref = ExnerReferenceState(grid, constants; surface_pressure=101325, potential_temperature=300)
+        s = sprint(show, ref)
+        @test occursin("ExnerReferenceState", s)
+        @test occursin("p₀", s)
+    end
+
+    @testset "surface_density" begin
+        ref = ExnerReferenceState(grid, constants; surface_pressure=101325, potential_temperature=300)
+        ρ₀ = surface_density(ref)
+        @test ρ₀ > 0
+        @test ρ₀ isa FT
+    end
+
+    @testset "Function-valued θ₀" begin
+        g = constants.gravitational_acceleration
+        θ_func(z) = FT(300) * exp(FT(1e-4) * z / g)
+        ref = ExnerReferenceState(grid, constants; surface_pressure=100000, potential_temperature=θ_func)
+        @test ref isa ExnerReferenceState
+
+        # Pressure should still decrease monotonically
+        for k in 2:grid.Nz
+            pᵏ = @allowscalar ref.pressure[1, 1, k]
+            pᵏ⁻¹ = @allowscalar ref.pressure[1, 1, k-1]
+            @test pᵏ < pᵏ⁻¹
+        end
+    end
+end
+
+#####
+##### SlowTendencyMode and HorizontalSlowMode
+#####
+
+@testset "SlowTendencyMode and HorizontalSlowMode [$(FT)]" for FT in test_float_types()
+    Oceananigans.defaults.FloatType = FT
+    grid = RectilinearGrid(acoustic_test_arch; size=(8, 8, 8), halo=(5, 5, 5),
+                           x=(0, 100), y=(0, 100), z=(0, 1000))
+
+    dynamics = CompressibleDynamics(SplitExplicitTimeDiscretization();
+                                   reference_potential_temperature=300)
+    model = AtmosphereModel(grid; advection=WENO(), dynamics)
+    ref = model.dynamics.reference_state
+    set!(model; θ=300, u=0, qᵗ=0, ρ=ref.density)
+
+    @testset "SlowTendencyMode" begin
+        slow = SlowTendencyMode(model.dynamics)
+        @test x_pressure_gradient(1, 1, 1, grid, slow) == 0
+        @test y_pressure_gradient(1, 1, 1, grid, slow) == 0
+        @test z_pressure_gradient(1, 1, 1, grid, slow) == 0
+        @test buoyancy_forceᶜᶜᶜ(1, 1, 1, grid, slow) == 0
+        @test dynamics_density(slow) === model.dynamics.density
+    end
+
+    @testset "HorizontalSlowMode" begin
+        hslow = HorizontalSlowMode(model.dynamics)
+        @test z_pressure_gradient(1, 1, 1, grid, hslow) == 0
+        @test buoyancy_forceᶜᶜᶜ(1, 1, 1, grid, hslow) == 0
+        @test dynamics_density(hslow) === model.dynamics.density
+    end
+end
+
+#####
+##### CompressibleDynamics without reference state (ExplicitTimeStepping)
+#####
+
+@testset "CompressibleDynamics without reference state [$(FT)]" for FT in test_float_types()
+    Oceananigans.defaults.FloatType = FT
+    grid = RectilinearGrid(acoustic_test_arch; size=(8, 8, 8), halo=(5, 5, 5),
+                           x=(0, 4000), y=(0, 4000), z=(0, 4000))
+
+    dynamics = CompressibleDynamics()
+    model = AtmosphereModel(grid; advection=WENO(), dynamics)
+
+    set!(model; θ=300, u=0, qᵗ=0, ρ=1.2)
+    simulation = Simulation(model; Δt=0.1, stop_iteration=3, verbose=false)
+    run!(simulation)
+
+    @test model.clock.iteration == 3
+    @test !any(isnan, parent(model.dynamics.density))
+    @test model.dynamics.reference_state === nothing
 end
