@@ -36,7 +36,6 @@ examples = [
     Example("Convection over prescribed sea surface temperature (SST)", "prescribed_sea_surface_temperature", true),
     Example("Inertia gravity wave", "inertia_gravity_wave", true),
     Example("Single column radiation", "single_column_radiation", true),
-    Example("Radiative-convective equilibrium (RCEMIP)", "radiative_convective_equilibrium", false),
     Example("Stationary parcel model", "stationary_parcel_model", true),
     Example("Rising parcel: adiabatic ascent", "rising_parcels", true),
     Example("Acoustic wave in shear layer", "acoustic_wave", true),
