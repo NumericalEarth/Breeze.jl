@@ -502,7 +502,7 @@ const τⁿᵘᵐ_2m = 10  # seconds
     Nᵃ = ρ * max(0, nᵃ)
 
     # Thermodynamic state
-    T = max(temperature(𝒰, constants), one(eltype(ρ)))
+    T = temperature(𝒰, constants)
     q = 𝒰.moisture_mass_fractions
     qᵛ = q.vapor
 
@@ -616,7 +616,7 @@ const rⁿᵘᶜ = 5e-11  # 0.05 nm
     ℳ⁺ = WarmPhaseTwoMomentState(ℳ.qᶜˡ, ℳ.nᶜˡ, ℳ.qʳ, ℳ.nʳ, ℳ.nᵃ, velocities⁺)
 
     # Supersaturation - activation only occurs when air is supersaturated (S > 0)
-    T = max(temperature(𝒰, constants), one(eltype(ρ)))
+    T = temperature(𝒰, constants)
     q = 𝒰.moisture_mass_fractions
     S = supersaturation(T, ρ, q, constants, PlanarLiquidSurface())
 
@@ -677,7 +677,7 @@ Mass tendency for cloud liquid [kg/kg/s]
     dNᶜˡ_act = aerosol_activation_tendency(aerosol_activation, aps, ρ, ℳ, 𝒰, constants)
 
     # Get thermodynamic properties for activation radius calculation
-    T = max(temperature(𝒰, constants), one(eltype(ρ)))
+    T = temperature(𝒰, constants)
     q = 𝒰.moisture_mass_fractions
 
     # Compute activation radius from Köhler theory
@@ -731,7 +731,7 @@ Uses the maximum supersaturation to determine which aerosol modes activate.
     Sᵐᵃˣ = max_supersaturation_breeze(aerosol_activation, aps, ρ, ℳ, 𝒰, constants)
 
     # Curvature coefficient
-    T = max(temperature(𝒰, constants), one(eltype(ρ)))
+    T = temperature(𝒰, constants)
     Rᵛ = vapor_gas_constant(constants)
     A = 2 * ap.σ / (ap.ρ_w * Rᵛ * T)
 
@@ -785,7 +785,7 @@ end
     Sᵃᶜᶜ = ac.dq_rai_dt  # positive (source for rain)
 
     # Rain evaporation (in subsaturated air)
-    T = max(temperature(𝒰, constants), one(eltype(ρ)))
+    T = temperature(𝒰, constants)
     q = 𝒰.moisture_mass_fractions
 
     evap = rain_evaporation_2m(sb, categories.air_properties, q, max(0, qʳ), ρ, Nʳ, T, constants)
@@ -832,7 +832,7 @@ end
     dNʳ_br = CM2.rain_breakup(sb.pdf_r, sb.brek, max(0, qʳ), ρ, Nʳ, dNʳ_sc)  # positive
 
     # Rain evaporation (number change)
-    T = max(temperature(𝒰, constants), one(eltype(ρ)))
+    T = temperature(𝒰, constants)
     q = 𝒰.moisture_mass_fractions
 
     evap = rain_evaporation_2m(sb, categories.air_properties, q, max(0, qʳ), ρ, Nʳ, T, constants)
