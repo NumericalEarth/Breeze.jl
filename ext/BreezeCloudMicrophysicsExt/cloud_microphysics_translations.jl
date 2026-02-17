@@ -437,14 +437,10 @@ end
     ap = aerosol_activation.activation_parameters
     ad = aerosol_activation.aerosol_distribution
 
-    # ARG 2000 parameterization is only valid for positive updraft velocities
-    # and positive supersaturation production (α > 0, G > 0, γ > 0, A > 0).
-    # Return zero when conditions are not met.
-    (w <= zero(FT) || A <= zero(FT) || γ <= zero(FT)) && return zero(FT)
-    αw_over_G = α * w / G
-    αw_over_G <= zero(FT) && return zero(FT)
+    # ARG 2000 only valid for positive updraft velocity
+    w <= zero(FT) && return zero(FT)
 
-    ζ = 2A / 3 * sqrt(αw_over_G)
+    ζ = 2A / 3 * sqrt(α * w / G)
 
     # Compute critical supersaturation and contribution from each mode
     Σ_inv_Sᵐᵃˣ² = zero(FT)
@@ -455,25 +451,19 @@ end
         κ̄ <= zero(FT) && continue
 
         # Critical supersaturation (Eq. 9 in ARG 2000)
-        Sᶜʳⁱᵗ = 2 / sqrt(κ̄) * sqrt(max(zero(FT), A / (3 * mode.r_dry)))^3
+        Sᶜʳⁱᵗ = 2 / sqrt(κ̄) * (A / (3 * mode.r_dry))^(FT(3) / 2)
 
-        # Fitting parameters (fᵥ and gᵥ are ventilation-related)
         fᵥ = ap.f1 * exp(ap.f2 * log(mode.stdev)^2)
         gᵥ = ap.g1 + ap.g2 * log(mode.stdev)
 
-        # η parameter
-        η = sqrt(αw_over_G)^3 / (2π * ρᴸ * γ * mode.N)
-
-        # Guard fractional exponents against small negative bases
-        # from floating-point arithmetic
-        ζ_over_η = max(zero(FT), ζ / η)
-        inner = max(zero(FT), Sᶜʳⁱᵗ^2 / (η + 3 * ζ))
+        η = (α * w / G)^(FT(3) / 2) / (2π * ρᴸ * γ * mode.N)
 
         # Contribution to 1/Sᵐᵃˣ² (Eq. 6 in ARG 2000)
-        Σ_inv_Sᵐᵃˣ² += 1 / Sᶜʳⁱᵗ^2 * (fᵥ * ζ_over_η^ap.p1 + gᵥ * inner^ap.p2)
+        Σ_inv_Sᵐᵃˣ² += 1 / Sᶜʳⁱᵗ^2 * (fᵥ * (ζ / η)^ap.p1 + gᵥ * (Sᶜʳⁱᵗ^2 / (η + 3 * ζ))^ap.p2)
     end
 
-    Sᵐᵃˣ_computed = 1 / sqrt(max(eps(FT), Σ_inv_Sᵐᵃˣ²))
+    # No activatable aerosol modes → no activation
+    Σ_inv_Sᵐᵃˣ² <= zero(FT) && return zero(FT)
 
-    return Sᵐᵃˣ_computed
+    return 1 / sqrt(Σ_inv_Sᵐᵃˣ²)
 end
