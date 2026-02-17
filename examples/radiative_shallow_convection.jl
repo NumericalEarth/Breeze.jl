@@ -13,7 +13,6 @@ using Oceananigans
 using Oceananigans.Units
 using Printf, Random, Statistics
 
-using NCDatasets
 using RRTMGP
 using CloudMicrophysics
 
@@ -205,13 +204,13 @@ model = AtmosphereModel(grid; dynamics, microphysics, radiation,
 # weak inversion near 1.5 km and drier free troposphere above.
 
 function Tᵢ(z)
-    T₀ = 299.2
+    Tˢᶠᶜ = 299.2  # Surface air temperature [K]
     if z ≤ 740
-        return T₀ - 0.004 * z                            # Well-mixed boundary layer
+        return Tˢᶠᶜ - 0.004 * z                              # Well-mixed boundary layer
     elseif z ≤ 2000
-        return T₀ - 0.004 * 740 - 0.003 * (z - 740)     # Cloud layer
+        return Tˢᶠᶜ - 0.004 * 740 - 0.003 * (z - 740)       # Cloud layer
     else
-        return T₀ - 0.004 * 740 - 0.003 * 1260 - 0.002 * (z - 2000)  # Free troposphere
+        return Tˢᶠᶜ - 0.004 * 740 - 0.003 * 1260 - 0.002 * (z - 2000)  # Free troposphere
     end
 end
 
@@ -239,7 +238,7 @@ set!(model; T=Tᵢ_pert, qᵗ=qᵢ_pert, u=uᵢ)
 
 T = model.temperature
 qᵗ = model.specific_moisture
-u, v, w = model.velocities
+u, w = model.velocities.u, model.velocities.w
 qˡ = model.microphysical_fields.qˡ
 
 @info "Radiative Shallow Convection (2D)"

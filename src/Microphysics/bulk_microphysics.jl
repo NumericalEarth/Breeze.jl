@@ -83,6 +83,7 @@ AtmosphereModels.vapor_mass_fraction(::NonEquilibriumCloudFormation, model) = mo
 AtmosphereModels.liquid_mass_fraction(::NonEquilibriumCloudFormation, model) = model.microphysical_fields.qˡ
 AtmosphereModels.ice_mass_fraction(::NonEquilibriumCloudFormation{<:Any, Nothing}, model) = nothing
 AtmosphereModels.ice_mass_fraction(::NonEquilibriumCloudFormation, model) = model.microphysical_fields.qⁱ
+
 #####
 ##### Condensate formation models (for non-equilibrium schemes)
 #####

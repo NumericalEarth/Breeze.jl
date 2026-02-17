@@ -464,7 +464,7 @@ end
         # η parameter
         η = sqrt(αw_over_G)^3 / (2π * ρᴸ * γ * mode.N)
 
-        # Use abs to guard fractional exponents against small negative bases
+        # Guard fractional exponents against small negative bases
         # from floating-point arithmetic
         ζ_over_η = max(zero(FT), ζ / η)
         inner = max(zero(FT), Sᶜʳⁱᵗ^2 / (η + 3 * ζ))

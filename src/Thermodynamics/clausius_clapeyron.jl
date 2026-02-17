@@ -64,8 +64,5 @@ pᵛ⁺(T) = pᵗʳ (T / Tᵗʳ)^{Δcᵝ / Rᵛ} \\exp \\left [ (1/Tᵗʳ - 1/T)
     pᵗʳ = constants.triple_point_pressure
     Rᵛ = vapor_gas_constant(constants)
 
-    # Guard against unphysical negative temperatures that cause complex exponentiation
-    T = max(T, one(T))
-
     return pᵗʳ * (T / Tᵗʳ)^(Δcᵝ / Rᵛ) * exp((1/Tᵗʳ - 1/T) * ℒ₀ / Rᵛ)
 end
