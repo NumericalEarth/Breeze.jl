@@ -319,6 +319,13 @@ Maximum supersaturation (dimensionless, e.g., 0.01 = 1% supersaturation)
     constants,
 ) where {FT}
 
+    # Extract from microphysical state
+    w = ℳ.velocities.w  # vertical velocity for aerosol activation
+
+    # No activation possible without updraft
+    FT = typeof(w)
+    w ≤ eps(FT) && return zero(FT)
+
     # Extract from thermodynamic state
     T = temperature(𝒰, constants)
     p = 𝒰.reference_pressure
@@ -326,9 +333,6 @@ Maximum supersaturation (dimensionless, e.g., 0.01 = 1% supersaturation)
     qᵛ = q.vapor
     qˡ = q.liquid
     qⁱ = q.ice
-
-    # Extract from microphysical state
-    w = ℳ.velocities.w  # vertical velocity for aerosol activation
     Nˡ = ℳ.nᶜˡ * ρ  # convert from per-mass to per-volume
     Nⁱ = zero(FT)   # warm phase: no ice
 
