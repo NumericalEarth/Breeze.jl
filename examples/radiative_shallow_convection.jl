@@ -239,7 +239,9 @@ run!(simulation)
 # ## Mean profile evolution
 #
 # Plot horizontally-averaged profiles of temperature, moisture, and radiative
-# heating rate at several times to show the evolution of the boundary layer.
+# flux divergence at several times to show the evolution of the boundary layer.
+# The atmosphere is largely transparent to shortwave radiation, so the net
+# radiative effect is longwave cooling (negative flux divergence).
 
 Tts  = FieldTimeSeries(averages_filename, "T")
 qᵛts = FieldTimeSeries(averages_filename, "qᵛ")
@@ -263,7 +265,7 @@ fig = Figure(size=(1200, 400), fontsize=14)
 
 axT = Axis(fig[1, 1]; xlabel="T (K)", ylabel="z (km)")
 axq = Axis(fig[1, 2]; xlabel="qᵛ (g/kg)")
-axQ = Axis(fig[1, 3]; xlabel="Heating rate (K/day)")
+axQ = Axis(fig[1, 3]; xlabel="Flux divergence (K/day)")
 
 for n in 1:Nt
     label = @sprintf("t = %s", prettytime(times[n]))
