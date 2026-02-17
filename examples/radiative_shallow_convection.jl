@@ -176,7 +176,7 @@ sponge_params = (; λ, zˢ, zᵗ)
 BreezeCloudMicrophysicsExt = Base.get_extension(Breeze, :BreezeCloudMicrophysicsExt)
 TwoMomentCloudMicrophysics = BreezeCloudMicrophysicsExt.TwoMomentCloudMicrophysics
 
-microphysics = TwoMomentCloudMicrophysics()
+microphysics = TwoMomentCloudMicrophysics(FT)
 
 # ## Model assembly
 
