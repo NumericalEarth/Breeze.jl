@@ -131,11 +131,7 @@ Rate of change of rain specific humidity (negative = evaporation)
 
     evap_rate = base_rate * ventilation
 
-    # Only evaporate if subsaturated (𝒮 < 0) and rain exists
-    evaporating = (qʳ > ϵ_numerics(FT)) & (𝒮 < 0)
-
-    # Only evaporation (negative tendency) is considered for rain
-    return ifelse(evaporating, min(zero(FT), evap_rate), zero(FT))
+    return min(zero(FT), evap_rate)
 end
 
 #####
@@ -179,47 +175,32 @@ Named tuple `(; evap_rate_0, evap_rate_1)` where:
     constants,
 ) where {FT}
 
-    evap_rate_0 = zero(FT)
-    evap_rate_1 = zero(FT)
-
-    # Compute supersaturation over liquid (negative means subsaturated)
     𝒮 = supersaturation(T, ρ, q, constants, PlanarLiquidSurface())
 
-    # Only evaporate if there's rain and air is subsaturated
-    if (Nʳ > ϵ_numerics(FT)) && (𝒮 < zero(FT))
-        (; ν_air, D_vapor) = aps
-        (; av, bv, α, β, ρ0) = evap
-        x_star = pdf_r.xr_min
-        ρᴸ = pdf_r.ρw
+    (; ν_air, D_vapor) = aps
+    (; av, bv, α, β, ρ0) = evap
+    x_star = pdf_r.xr_min
+    ρᴸ = pdf_r.ρw
 
-        # Diffusional growth factor (G function)
-        G = diffusional_growth_factor(aps, T, constants)
+    G = diffusional_growth_factor(aps, T, constants)
 
-        # Mean rain drop mass and diameter
-        (; xr_mean) = pdf_rain_parameters(pdf_r, qʳ, ρ, Nʳ)
-        Dʳ = cbrt(6 * xr_mean / (π * ρᴸ))
+    (; xr_mean) = pdf_rain_parameters(pdf_r, qʳ, ρ, Nʳ)
+    Dʳ = cbrt(6 * xr_mean / (π * ρᴸ))
 
-        # Ventilation factors for number and mass tendencies
-        t_star = cbrt(6 * x_star / xr_mean)
-        a_vent_0 = av * Γ_incl(FT(-1), t_star) / FT(6)^(-2 // 3)
-        b_vent_0 = bv * Γ_incl(-1 // 2 + 3 // 2 * β, t_star) / FT(6)^(β / 2 - 1 // 2)
+    # Ventilation factors for number and mass tendencies
+    t_star = cbrt(6 * x_star / xr_mean)
+    a_vent_0 = av * Γ_incl(FT(-1), t_star) / FT(6)^(-2 // 3)
+    b_vent_0 = bv * Γ_incl(-1 // 2 + 3 // 2 * β, t_star) / FT(6)^(β / 2 - 1 // 2)
 
-        a_vent_1 = av * Γ(FT(2)) / cbrt(FT(6))
-        b_vent_1 = bv * Γ(5 // 2 + 3 // 2 * β) / 6^(β / 2 + 1 // 2)
+    a_vent_1 = av * Γ(FT(2)) / cbrt(FT(6))
+    b_vent_1 = bv * Γ(5 // 2 + 3 // 2 * β) / 6^(β / 2 + 1 // 2)
 
-        # Reynolds number
-        Re = α * xr_mean^β * sqrt(ρ0 / ρ) * Dʳ / ν_air
-        Fv0 = a_vent_0 + b_vent_0 * cbrt(ν_air / D_vapor) * sqrt(Re)
-        Fv1 = a_vent_1 + b_vent_1 * cbrt(ν_air / D_vapor) * sqrt(Re)
+    Re = α * xr_mean^β * sqrt(ρ0 / ρ) * Dʳ / ν_air
+    Fv0 = a_vent_0 + b_vent_0 * cbrt(ν_air / D_vapor) * sqrt(Re)
+    Fv1 = a_vent_1 + b_vent_1 * cbrt(ν_air / D_vapor) * sqrt(Re)
 
-        # Evaporation rates (negative for evaporation)
-        evap_rate_0 = min(zero(FT), FT(2) * FT(π) * G * 𝒮 * Nʳ * Dʳ * Fv0 / xr_mean)
-        evap_rate_1 = min(zero(FT), FT(2) * FT(π) * G * 𝒮 * Nʳ * Dʳ * Fv1 / ρ)
-
-        # Handle edge cases where xr_mean approaches zero
-        evap_rate_0 = ifelse(xr_mean / x_star < eps(FT), zero(FT), evap_rate_0)
-        evap_rate_1 = ifelse(qʳ < eps(FT), zero(FT), evap_rate_1)
-    end
+    evap_rate_0 = min(zero(FT), FT(2) * FT(π) * G * 𝒮 * Nʳ * Dʳ * Fv0 / xr_mean)
+    evap_rate_1 = min(zero(FT), FT(2) * FT(π) * G * 𝒮 * Nʳ * Dʳ * Fv1 / ρ)
 
     return (; evap_rate_0, evap_rate_1)
 end
@@ -376,25 +357,19 @@ Maximum supersaturation (dimensionless, e.g., 0.01 = 1% supersaturation)
     # See Eq. A13 in Korolev and Mazin (2003) or CloudMicrophysics implementation
 
     # Liquid relaxation
-    rˡ = ifelse(Nˡ > eps(FT), cbrt(ρ * qˡ / (Nˡ * ρᴸ * (4π / 3))), zero(FT))
+    rˡ = Nˡ > eps(FT) ? cbrt(ρ * qˡ / (Nˡ * ρᴸ * (4π / 3))) : zero(FT)
     Kˡ = 4π * ρᴸ * Nˡ * rˡ * G * γ
 
     # Ice relaxation
     γⁱ = Rᵛ * T / pᵛ⁺ + pᵛ / pᵛ⁺ * Rᵐ * ℒˡ * ℒⁱ / (Rᵛ * cᵖᵐ * T * p)
-    rⁱ = ifelse(Nⁱ > eps(FT), cbrt(ρ * qⁱ / (Nⁱ * ρᴵ * (4π / 3))), zero(FT))
+    rⁱ = Nⁱ > eps(FT) ? cbrt(ρ * qⁱ / (Nⁱ * ρᴵ * (4π / 3))) : zero(FT)
     Gⁱ = diffusional_growth_factor_ice(aps, T, constants)
     Kⁱ = 4π * Nⁱ * rⁱ * Gⁱ * γⁱ
 
     ξ = pᵛ⁺ / pᵛ⁺ⁱ
 
     # Phase-relaxation corrected Sᵐᵃˣ (Eq. A13 in Korolev and Mazin 2003)
-    # Use safe denominator conditioned on w > 0 to avoid NaN
-    denominator = α * w + (Kˡ + Kⁱ * ξ) * Sᵐᵃˣ₀
-    safe_denominator = ifelse(w > zero(FT), denominator, one(FT))
-    Sᵐᵃˣ_computed = Sᵐᵃˣ₀ * (α * w - Kⁱ * (ξ - 1)) / safe_denominator
-
-    # Activation only occurs with positive updraft velocity
-    Sᵐᵃˣ = ifelse(w > zero(FT), Sᵐᵃˣ_computed, zero(FT))
+    Sᵐᵃˣ = Sᵐᵃˣ₀ * (α * w - Kⁱ * (ξ - 1)) / (α * w + (Kˡ + Kⁱ * ξ) * Sᵐᵃˣ₀)
 
     return max(zero(FT), Sᵐᵃˣ)
 end
@@ -437,19 +412,12 @@ end
     ap = aerosol_activation.activation_parameters
     ad = aerosol_activation.aerosol_distribution
 
-    # ARG 2000 only valid for positive updraft velocity and positive α
-    # (α is the adiabatic supersaturation production rate; non-positive means no activation)
-    (w <= zero(FT) || α <= zero(FT)) && return zero(FT)
-
     ζ = 2A / 3 * sqrt(α * w / G)
 
     # Compute critical supersaturation and contribution from each mode
     Σ_inv_Sᵐᵃˣ² = zero(FT)
     for mode in ad.modes
-
-        # Mean hygroscopicity for mode (volume-weighted κ)
         κ̄ = mean_hygroscopicity(ap, mode)
-        κ̄ <= zero(FT) && continue
 
         # Critical supersaturation (Eq. 9 in ARG 2000)
         Sᶜʳⁱᵗ = 2 / sqrt(κ̄) * (A / (3 * mode.r_dry))^(FT(3) / 2)
@@ -462,9 +430,6 @@ end
         # Contribution to 1/Sᵐᵃˣ² (Eq. 6 in ARG 2000)
         Σ_inv_Sᵐᵃˣ² += 1 / Sᶜʳⁱᵗ^2 * (fᵥ * (ζ / η)^ap.p1 + gᵥ * (Sᶜʳⁱᵗ^2 / (η + 3 * ζ))^ap.p2)
     end
-
-    # No activatable aerosol modes → no activation
-    Σ_inv_Sᵐᵃˣ² <= zero(FT) && return zero(FT)
 
     return 1 / sqrt(Σ_inv_Sᵐᵃˣ²)
 end

@@ -1,8 +1,8 @@
 # # Radiative Shallow Convection (2D)
 #
 # A 2D (x-z) shallow convection case with all-sky RRTMGP radiation and
-# two-moment cloud microphysics. This example validates the coupling between
-# radiation, dynamics, and precipitation in a computationally cheap configuration.
+# saturation adjustment cloud microphysics. This example validates the coupling
+# between radiation and dynamics in a computationally cheap configuration.
 #
 # The setup resembles a trade-cumulus regime: a warm, moist boundary layer beneath
 # a capping inversion at ~2 km, with shallow clouds forming and precipitating.
@@ -16,7 +16,6 @@ using Printf, Random, Statistics
 using NCDatasets  # Required for RRTMGP lookup tables
 using RRTMGP
 using CUDA
-using CloudMicrophysics
 
 Random.seed!(2025)
 
@@ -173,30 +172,18 @@ sponge_params = (; λ, zˢ, zᵗ)
 ρθ_sponge = Forcing(θ_sponge, discrete_form=true, parameters=θ_sponge_params)
 
 # ## Microphysics
-#
-# Two-moment warm-rain microphysics: prognostic cloud liquid mass and number,
-# rain mass and number, and aerosol number.
 
-BreezeCloudMicrophysicsExt = Base.get_extension(Breeze, :BreezeCloudMicrophysicsExt)
-TwoMomentCloudMicrophysics = BreezeCloudMicrophysicsExt.TwoMomentCloudMicrophysics
-
-microphysics = TwoMomentCloudMicrophysics()
+microphysics = SaturationAdjustment(equilibrium=WarmPhaseEquilibrium())
 
 # ## Model assembly
 
 boundary_conditions = (ρθ=ρθ_bcs, ρqᵗ=ρqᵗ_bcs, ρu=ρu_bcs)
 
-weno = WENO(order=5)
-bounded_weno = WENO(order=5, bounds=(0, 1))
-momentum_advection = weno
+weno_order = 5
+momentum_advection = WENO(order=weno_order)
 
-scalar_advection = (ρθ   = weno,
-                    ρqᵗ  = bounded_weno,
-                    ρqᶜˡ = bounded_weno,
-                    ρnᶜˡ = weno,
-                    ρqʳ  = bounded_weno,
-                    ρnʳ  = weno,
-                    ρnᵃ  = weno)
+scalar_advection = (ρθ  = WENO(order=weno_order),
+                    ρqᵗ = WENO(order=weno_order, bounds=(0, 1)))
 
 forcing = (ρw=ρw_sponge, ρu=ρu_sponge, ρθ=ρθ_sponge)
 
@@ -237,7 +224,7 @@ zδ = 500
 
 ϵ() = rand() - 0.5
 Tᵢ(x, z) = Tᵇᵍ(z) + δT * ϵ() * (z < zδ)
-qᵢ(x, z) = qᵗᵢ(x, z) + δq * ϵ() * (z < zδ)
+qᵢ(x, z) = qᵗᵇᵍ(z) + δq * ϵ() * (z < zδ)
 
 compute_reference_state!(reference_state, Tᵇᵍ, qᵗᵇᵍ, constants)
 set!(model; T=Tᵢ, qᵗ=qᵢ, u=uᵢ)
