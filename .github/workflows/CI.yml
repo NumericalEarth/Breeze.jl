@@ -41,7 +41,7 @@ jobs:
       fail-fast: false
       matrix:
         version:
-          - "1.11"
+          - "min"
           - "1.12.5"
         os:
           - ubuntu-latest
@@ -50,7 +50,7 @@ jobs:
         arch:
           - "default"
         exclude:
-          - version: "1.11"
+          - version: "min"
             os: windows-latest
         include:
           - version: "1.12.4"
