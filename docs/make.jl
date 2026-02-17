@@ -34,7 +34,7 @@ examples = [
     Example("Shallow cumulus convection (BOMEX)", "bomex", true),
     Example("Precipitating shallow cumulus (RICO)", "rico", false),
     Example("Convection over prescribed sea surface temperature (SST)", "prescribed_sea_surface_temperature", true),
-    Example("Inertia gravity wave", "inertia_gravity_wave", true),
+    Example("Inertia gravity wave: many time steppers", "inertia_gravity_wave", true),
     Example("Single column radiation", "single_column_radiation", true),
     Example("Stationary parcel model", "stationary_parcel_model", true),
     Example("Rising parcel: adiabatic ascent", "rising_parcels", true),

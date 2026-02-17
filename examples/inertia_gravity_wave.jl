@@ -122,8 +122,8 @@ adaptive_dynamics = CompressibleDynamics(SplitExplicitTimeDiscretization();
 # base-state subtraction for accurate perturbation pressure.
 ssp_time_discretization = SplitExplicitTimeDiscretization(substeps=Ns, divergence_damping_coefficient=0.05)
 ssp_dynamics = CompressibleDynamics(ssp_time_discretization;
-                                      surface_pressure,
-                                      reference_potential_temperature=θᵇᵍ)
+                                    surface_pressure,
+                                    reference_potential_temperature = θᵇᵍ)
 
 # Case 6: Split-explicit with Wicker-Skamarock RK3 outer loop
 # Same acoustic substepping as SSP-RK3, but with WS-RK3 stage fractions (Δt/3, Δt/2, Δt)
@@ -145,6 +145,7 @@ models = Dict(
                                        timestepper=:AcousticSSPRungeKutta3),
     :ws_rk3         => AtmosphereModel(grid; advection, dynamics=ws_dynamics),
 )
+nothing #hide
 
 # Set initial conditions:
 
@@ -170,7 +171,7 @@ cₛ = sqrt(cᵖᵈ / (cᵖᵈ - Rᵈ) * Rᵈ * θ₀)
 cfl = 0.5
 Δt_advective    = cfl * min(Δx, Δz) / U
 Δt_compressible = cfl * min(Δx, Δz) / (cₛ + U)
-Δt_split        = 12.0
+Δt_split        = 12
 
 time_steps = Dict(
     :anelastic      => Δt_advective,
@@ -188,12 +189,12 @@ time_steps = Dict(
 stop_time = 3000 # seconds
 
 case_names = Dict(
+    :boussinesq     => "Boussinesq",
     :anelastic      => "Anelastic",
     :compressible   => "Compressible (explicit)",
-    :boussinesq     => "Boussinesq",
-    :adaptive       => "Split-explicit (adaptive SSP-RK3)",
-    :ssp_rk3        => "Split-explicit (SSP-RK3)",
     :ws_rk3         => "Split-explicit (WS-RK3)",
+    :ssp_rk3        => "Split-explicit (SSP-RK3)",
+    :adaptive       => "Split-explicit (adaptive SSP-RK3)",
 )
 
 # Background θ field for computing perturbation
@@ -204,7 +205,7 @@ simulations = Dict{Symbol, Simulation}()
 
 for (key, model) in models
     Δt = time_steps[key]
-    sim = Simulation(model; Δt, stop_time)
+    sim = Simulation(model; Δt, stop_time, verbose=false)
 
     ## Progress callback
     θ′ = PotentialTemperature(model) - θᵇᵍ_field
@@ -256,8 +257,7 @@ levels = range(-Δθ / 2, stop=Δθ / 2, length=21)
 
 fig = Figure(size=(1400, 900))
 
-# 2×3 layout: top row [anelastic, compressible], middle row [boussinesq, adaptive],
-#             bottom row [ssp_rk3, ws_rk3]
+## 3×2 layout: [boussinesq, anelastic, compressible, ssprk3, wsrk3, adaptive ssprk3],
 axes_layout = [(1, 1), (1, 2), (1, 3), (2, 1), (2, 2), (2, 3)]
 axes = [Axis(fig[r, c]; title=titles[i],
              ylabel = c == 1 ? "z (km)" : "",
