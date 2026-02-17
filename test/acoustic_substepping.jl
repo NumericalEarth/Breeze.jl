@@ -8,7 +8,8 @@
 
 using Breeze
 using Breeze: AcousticSubstepper
-using Breeze.CompressibleEquations: ExplicitTimeStepping, SplitExplicitTimeDiscretization
+using Breeze.CompressibleEquations: ExplicitTimeStepping, SplitExplicitTimeDiscretization,
+                                    compute_acoustic_substeps
 using Breeze.Thermodynamics: adiabatic_hydrostatic_density
 using GPUArraysCore: @allowscalar
 using Oceananigans
@@ -33,10 +34,10 @@ const acoustic_test_arch = Oceananigans.Architectures.CPU()
     Oceananigans.defaults.FloatType = FT
     grid = RectilinearGrid(acoustic_test_arch; size=(4, 4, 8), x=(0, 100), y=(0, 100), z=(0, 1000))
 
-    @testset "Default construction" begin
+    @testset "Default construction (adaptive substeps)" begin
         td = SplitExplicitTimeDiscretization()
         acoustic = AcousticSubstepper(grid, td)
-        @test acoustic.substeps == 8
+        @test acoustic.substeps === nothing  # adaptive by default
         @test acoustic.forward_weight ≈ FT(0.6)
         @test acoustic.divergence_damping_coefficient ≈ FT(0.10)
         @test acoustic.exner_perturbation isa Oceananigans.Fields.Field
@@ -52,6 +53,35 @@ const acoustic_test_arch = Oceananigans.Architectures.CPU()
         @test acoustic.substeps == 10
         @test acoustic.forward_weight ≈ FT(0.55)
         @test acoustic.divergence_damping_coefficient ≈ FT(0.2)
+    end
+end
+
+#####
+##### Test adaptive substep computation
+#####
+
+@testset "compute_acoustic_substeps [$(FT)]" for FT in test_float_types()
+    Oceananigans.defaults.FloatType = FT
+    constants = ThermodynamicConstants()
+
+    @testset "1 km grid, Δt=12" begin
+        grid = RectilinearGrid(acoustic_test_arch; size=(100, 6, 10), halo=(5, 5, 5),
+                               x=(0, 100kilometers), y=(0, 6kilometers), z=(0, 10kilometers))
+        # Δx = 1000 m, cₛ ≈ 347 m/s → N = ceil(12 * 347 / 1000) = ceil(4.16) = 5
+        N = compute_acoustic_substeps(grid, 12, constants)
+        @test N isa Int
+        @test N >= 1
+        @test N == ceil(Int, 12 * sqrt(1.4 * 287.0 * 300) / 1000)
+    end
+
+    @testset "Flat y-topology" begin
+        grid = RectilinearGrid(acoustic_test_arch; size=(100, 10), halo=(5, 5),
+                               x=(0, 100kilometers), z=(0, 10kilometers),
+                               topology=(Periodic, Flat, Bounded))
+        # Should use only Δx, not Δy
+        N = compute_acoustic_substeps(grid, 12, constants)
+        N_expected = ceil(Int, 12 * sqrt(1.4 * 287.0 * 300) / 1000)
+        @test N == N_expected
     end
 end
 

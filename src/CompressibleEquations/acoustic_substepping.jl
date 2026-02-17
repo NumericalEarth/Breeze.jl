@@ -25,8 +25,10 @@ using Oceananigans.Operators:
 using Oceananigans.Utils: launch!
 using Oceananigans.BoundaryConditions: fill_halo_regions!
 
-using Oceananigans.Grids: Periodic, Bounded,
-                          AbstractUnderlyingGrid
+using Oceananigans.Grids: Periodic, Bounded, Flat,
+                          AbstractUnderlyingGrid,
+                          topology,
+                          minimum_xspacing, minimum_yspacing
 
 using Adapt: Adapt, adapt
 
@@ -268,11 +270,49 @@ function AcousticSubstepper(grid, split_explicit::SplitExplicitTimeDiscretizatio
 end
 
 #####
-##### Section 3: Cache preparation (once per RK stage)
+##### Section 2b: Adaptive substep computation
 #####
 
 using Breeze.AtmosphereModels: thermodynamic_density
 using Breeze.Thermodynamics: dry_air_gas_constant
+
+"""
+$(TYPEDSIGNATURES)
+
+Compute the number of acoustic substeps from the horizontal acoustic CFL condition.
+
+Uses a conservative sound speed estimate `cₛ = √(γ Rᵈ Tᵣ)` with `Tᵣ = 300 K`
+(giving `cₛ ≈ 347 m/s`) and the minimum horizontal grid spacing. The vertical
+CFL is not needed because the w-π' coupling is vertically implicit.
+
+Following CM1, the substep count satisfies `Δτ · cₛ / Δx_min ≤ 1` where
+`Δτ = Δt / N` is the acoustic substep size.
+"""
+function compute_acoustic_substeps(grid, Δt, thermodynamic_constants)
+    cᵖ = thermodynamic_constants.dry_air.heat_capacity
+    Rᵈ = dry_air_gas_constant(thermodynamic_constants)
+    cᵥ = cᵖ - Rᵈ
+    γ = cᵖ / cᵥ
+    Tᵣ = 300 # Conservative reference temperature (surface conditions)
+    cₛ = sqrt(γ * Rᵈ * Tᵣ) # ≈ 347 m/s
+
+    # Minimum horizontal grid spacing (skip Flat dimensions)
+    TX, TY, _ = topology(grid)
+    Δx_min = TX === Flat ? Inf : minimum_xspacing(grid)
+    Δy_min = TY === Flat ? Inf : minimum_yspacing(grid)
+    Δh_min = min(Δx_min, Δy_min)
+
+    return ceil(Int, Δt * cₛ / Δh_min)
+end
+
+# When substeps is specified, use it directly
+@inline acoustic_substeps(N::Int, grid, Δt, constants) = N
+# When substeps is nothing, compute from acoustic CFL
+@inline acoustic_substeps(::Nothing, grid, Δt, constants) = compute_acoustic_substeps(grid, Δt, constants)
+
+#####
+##### Section 3: Cache preparation (once per RK stage)
+#####
 
 """
 $(TYPEDSIGNATURES)
@@ -886,17 +926,18 @@ The acoustic substep size is constant: ``Δτ = Δt / N``.
 Each stage takes ``Nτ = \\max(\\mathrm{round}(β N), 1)`` substeps.
 """
 function acoustic_rk3_substep_loop!(model, substepper, Δt, β_stage, U⁰)
-    N = substepper.substeps
+    grid = model.grid
+    arch = architecture(grid)
     cᵖ = model.thermodynamic_constants.dry_air.heat_capacity
+
+    # Compute substep count (adaptive when substeps === nothing)
+    N = acoustic_substeps(substepper.substeps, grid, Δt, model.thermodynamic_constants)
 
     # Constant acoustic substep size across all stages
     Δτ = Δt / N
 
     # Substep count varies per stage: Nτ ≈ β * N
     Nτ = max(round(Int, β_stage * N), 1)
-
-    grid = model.grid
-    arch = architecture(grid)
 
     # Convert slow tendencies to velocity/pressure form
     convert_slow_tendencies!(substepper, model)
@@ -1192,15 +1233,14 @@ Execute the acoustic substep loop for an SSP RK3 stage.
 Delegates to the same Exner pressure acoustic loop used by WS-RK3.
 """
 function acoustic_substep_loop!(model, substepper, Δt, α_ssp, U⁰)
-    # For SSP-RK3, all stages use Ns substeps
-    Ns = substepper.substeps
-    cᵖ = model.thermodynamic_constants.dry_air.heat_capacity
-
-    Δτ = Δt / Ns
-    Nτ = Ns
-
     grid = model.grid
     arch = architecture(grid)
+    cᵖ = model.thermodynamic_constants.dry_air.heat_capacity
+
+    # For SSP-RK3, all stages use Ns substeps (adaptive when substeps === nothing)
+    Ns = acoustic_substeps(substepper.substeps, grid, Δt, model.thermodynamic_constants)
+    Δτ = Δt / Ns
+    Nτ = Ns
 
     # Convert slow tendencies
     convert_slow_tendencies!(substepper, model)
