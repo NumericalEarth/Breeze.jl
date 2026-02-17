@@ -29,8 +29,8 @@ For unstable conditions (``ζ < 0``), uses [Hogström (1996)](@cite hogstrom1996
 - ``φ^T = 0.95(1 - γ^T ζ)^{-1/2}``
 
 For stable conditions (``ζ ≥ 0``), uses [Beljaars & Holtslag (1991)](@cite beljaars1991flux):
-- ``Ψ^D = -(a ζ + b (ζ - c/d) e^{-dζ} + bc/d)``
-- ``Ψ^T = -((1 + 2aζ/3)^{3/2} + b (ζ - c/d) e^{-dζ} + bc/d - 1)``
+- ``Ψ^D = -[a ζ + b (ζ - c/d) e^{-dζ} + bc/d]``
+- ``Ψ^T = -[(1 + 2aζ/3)^{3/2} + b (ζ - c/d) e^{-dζ} + bc/d - 1]``
 
 # References
 
