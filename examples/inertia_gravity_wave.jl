@@ -271,12 +271,6 @@ cfs = [contourf!(axes[i], x_km, z_km, θ′_final[k]; colormap=:balance, levels)
 Colorbar(fig[1:2, 4], first(cfs); label="θ′ (K)")
 fig[0, :] = Label(fig, "Inertia-gravity waves: θ′ at t = $(prettytime(times[Nt]))", fontsize=20)
 
-save("inertia_gravity_wave_comparison.png", fig)
-
-fig
-
-# ## Animation
-
 n = Observable(1)
 
 fig_anim = Figure(size=(1400, 900))
@@ -321,6 +315,5 @@ for (i, k) in enumerate(cases)
 end
 
 axislegend(ax, position=:rt)
-save("inertia_gravity_wave_cross_section.png", fig_cross)
 
 fig_cross
