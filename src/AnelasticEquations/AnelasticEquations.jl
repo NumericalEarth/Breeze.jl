@@ -22,11 +22,12 @@ using Oceananigans: Oceananigans, CenterField, XFaceField, YFaceField, ZFaceFiel
 using Oceananigans.Architectures: architecture
 using Oceananigans.BoundaryConditions: FieldBoundaryConditions, regularize_field_boundary_conditions, fill_halo_regions!
 using Oceananigans.Fields: set!
-using Oceananigans.Grids: ZDirection, inactive_cell
+using Oceananigans.Grids: topology, ZDirection, inactive_cell, FullyConnected
 using Oceananigans.ImmersedBoundaries: mask_immersed_field!
 using Oceananigans.Models.NonhydrostaticModels: NonhydrostaticModels
 using Oceananigans.Operators: Δzᵃᵃᶜ, Δzᵃᵃᶠ, divᶜᶜᶜ, Δzᶜᶜᶜ, ℑzᵃᵃᶠ, ∂xᶠᶜᶜ, ∂yᶜᶠᶜ, ∂zᶜᶜᶠ
 using Oceananigans.Solvers: Solvers, solve!, FourierTridiagonalPoissonSolver, AbstractHomogeneousNeumannFormulation
+using Oceananigans.DistributedComputations: DistributedFourierTridiagonalPoissonSolver, reconstruct_global_grid
 using Oceananigans.Utils: prettysummary, launch!
 
 using Breeze.Thermodynamics: ReferenceState, MoistureMassFractions, mixture_gas_constant

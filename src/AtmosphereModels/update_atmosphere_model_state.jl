@@ -60,8 +60,13 @@ function tracer_specific_to_density!(tracers, density)
     return nothing
 end
 
+# Kernel launch indices for computing diagnostic fields (e.g., velocities from momentum).
+# For periodic dimensions, we shrink by 1 on each side because the velocity computation
+# uses interpolation operators that access neighboring points (e.g., ℑxᶠᵃᵃ accesses i-1).
+# The outermost halo points are then filled by fill_halo_regions! via periodic wrapping.
+# This requires halo >= 2 for periodic dimensions to ensure the computed region is non-empty.
 diagnostic_indices(::Bounded, N, H) = 1:N+1
-diagnostic_indices(::Periodic, N, H) = -H+1:N+H
+diagnostic_indices(::Periodic, N, H) = -H+2:N+H-1
 diagnostic_indices(::Flat, N, H) = 1:N
 
 #####
@@ -94,7 +99,10 @@ function compute_velocities!(model::AtmosphereModel)
     # Ensure halos are filled before velocity computation
     # (prognostic field halo fill in update_state! is async)
     density = dynamics_density(model.dynamics)
-    fill_halo_regions!(density)
+    # Note: only_local_halos=true is needed because the density may be a column field
+    # (Flat in x and y, e.g. for AnelasticDynamics reference state), and Oceananigans'
+    # distributed halo communication does not handle Flat-located dimensions correctly.
+    fill_halo_regions!(density; only_local_halos=true)
     fill_halo_regions!(model.momentum)
 
     launch!(arch, grid, :xyz,
