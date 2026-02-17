@@ -22,8 +22,8 @@ env:
   REACTANT_GPU: 'none'
 
 jobs:
-  run-benchmarks:
-    name: "Run benchmarks"
+  run-scaling-benchmarks:
+    name: "Scaling benchmarks"
     permissions:
       actions: write
       contents: write
@@ -52,7 +52,91 @@ jobs:
           julia --color=yes --project run_benchmarks.jl --device GPU --size "128^3, 384x384x256, 768x768x256"
       - uses: actions/upload-artifact@v6
         with:
-          name: benchmarks-results
+          name: benchmarks-scaling
+          path: benchmarking/benchmark_results.*
+          retention-days: 90
+      - name: Create job summary
+        timeout-minutes: 1
+        run:
+          cat "benchmark_results.md" >> "${GITHUB_STEP_SUMMARY}"
+
+  run-dynamics-benchmarks:
+    name: "Dynamics benchmarks (${{ matrix.dynamics }})"
+    permissions:
+      actions: write
+      contents: write
+      pull-requests: read
+      statuses: write
+    runs-on: aws-linux-nvidia-gpu-l4
+    strategy:
+      fail-fast: false
+      matrix:
+        dynamics: [anelastic, compressible_splitexplicit]
+    defaults:
+      run:
+        shell: bash
+        working-directory: ./benchmarking
+    container:
+      image: 'ghcr.io/numericalearth/breeze-docker-images:benchmarking-julia_1.12.4'
+      options: --gpus=all
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v6
+      - name: Instantiate benchmarking environment
+        shell: julia --color=yes --project {0}
+        run: |
+          using Pkg
+          Pkg.instantiate()
+      - name: Run benchmarks
+        timeout-minutes: 45
+        run:
+          earlyoom -m 3 -s 100 -r 300 --prefer 'julia' &
+          julia --color=yes --project run_benchmarks.jl --device GPU --dynamics ${{ matrix.dynamics }} --size "512x512x256"
+      - uses: actions/upload-artifact@v6
+        with:
+          name: benchmarks-dynamics-${{ matrix.dynamics }}
+          path: benchmarking/benchmark_results.*
+          retention-days: 90
+      - name: Create job summary
+        timeout-minutes: 1
+        run:
+          cat "benchmark_results.md" >> "${GITHUB_STEP_SUMMARY}"
+
+  run-microphysics-benchmarks:
+    name: "Microphysics benchmarks (${{ matrix.microphysics }})"
+    permissions:
+      actions: write
+      contents: write
+      pull-requests: read
+      statuses: write
+    runs-on: aws-linux-nvidia-gpu-l4
+    strategy:
+      fail-fast: false
+      matrix:
+        microphysics: [MixedPhaseEquilibrium, 1M_MixedEquilibrium, 1M_MixedNonEquilibrium]
+    defaults:
+      run:
+        shell: bash
+        working-directory: ./benchmarking
+    container:
+      image: 'ghcr.io/numericalearth/breeze-docker-images:benchmarking-julia_1.12.4'
+      options: --gpus=all
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v6
+      - name: Instantiate benchmarking environment
+        shell: julia --color=yes --project {0}
+        run: |
+          using Pkg
+          Pkg.instantiate()
+      - name: Run benchmarks
+        timeout-minutes: 45
+        run:
+          earlyoom -m 3 -s 100 -r 300 --prefer 'julia' &
+          julia --color=yes --project run_benchmarks.jl --device GPU --microphysics ${{ matrix.microphysics }} --size "512x512x256"
+      - uses: actions/upload-artifact@v6
+        with:
+          name: benchmarks-microphysics-${{ matrix.microphysics }}
           path: benchmarking/benchmark_results.*
           retention-days: 90
       - name: Create job summary
@@ -62,7 +146,7 @@ jobs:
 
   publish-benchmarks:
     name: "Publish benchmarks"
-    needs: run-benchmarks
+    needs: [run-scaling-benchmarks, run-dynamics-benchmarks, run-microphysics-benchmarks]
     permissions:
       actions: write
       contents: write
@@ -72,23 +156,35 @@ jobs:
     timeout-minutes: 10
     steps:
       - uses: actions/download-artifact@v7
-      - name: Create JSON for github-action-benchmark
+        with:
+          pattern: benchmarks-*
+      - name: Merge results and create JSON for github-action-benchmark
         shell: python
         run: |
-          # This step creates a new JSON file to be digested by the
-          # `benchmark-action/github-action-benchmark` workflow.
-          import json
+          # Merge benchmark_results.json from all artifact directories,
+          # then create the JSON file for github-action-benchmark.
+          import json, glob
 
-          with open('benchmark_results.json', 'r') as file:
-              orig_data = json.load(file)
+          all_data = []
+          for path in sorted(glob.glob('benchmarks-*/benchmark_results.json')):
+              with open(path) as f:
+                  all_data.extend(json.load(f))
 
+          # Write merged results for archival
+          with open('benchmark_results.json', 'w') as f:
+              json.dump(all_data, f, indent=2)
+
+          # Build github-action-benchmark entries
+          # Name format: <name>/<gpu>/<grid_size>
           data = []
-          for d in orig_data:
-              orig_name = d['name'].split('_')
-              name = orig_name[0] + '_' + orig_name[2] + '/' + orig_name[3] + '/' + d['metadata']['gpu_name'] + '/' + orig_name[1]
+          for d in all_data:
+              grid = d['grid_size']
+              grid_str = f"{grid[0]}x{grid[1]}x{grid[2]}"
+              gpu = d['metadata']['gpu_name']
+              name = f"{d['name']}/{gpu}/{grid_str}"
               data.append({'name': name, 'unit': 'points/s', 'value': d['grid_points_per_second']})
 
-          with open("github-action-benchmark.json", "w") as f:
+          with open('github-action-benchmark.json', 'w') as f:
               json.dump(data, f)
       - uses: actions/create-github-app-token@v2
         if: ${{ ! github.event.pull_request.head.repo.fork }}
