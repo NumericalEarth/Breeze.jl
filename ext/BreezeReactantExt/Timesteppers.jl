@@ -1,5 +1,3 @@
-module TimeSteppers
-
 using Reactant: Reactant
 
 using Oceananigans: AbstractModel, ReactantState
@@ -69,5 +67,3 @@ function OceananigansTimeSteppers.first_time_step!(model::AbstractModel{<:SSPRun
     time_step!(model, Δt)
     return nothing
 end
-
-end # module
