@@ -15,11 +15,15 @@ using Printf, Random, Statistics
 
 using NCDatasets  # Required for RRTMGP lookup tables
 using RRTMGP
+using CUDA
 using CloudMicrophysics
 
 Random.seed!(2025)
 
 # ## Parameters
+#
+# Radiation parameters follow the RCEMIP protocol
+# (Wing et al., Geosci. Model Dev., 11, 793–813, 2018).
 
 SST = 300                    # Sea surface temperature [K]
 solar_constant = 551.58      # RCEMIP reduced solar constant [W/m²]
@@ -36,22 +40,22 @@ Nz = 80
 Lx = 12800   # 12.8 km (100 m horizontal spacing)
 zᵗ = 4000    # 4 km domain top
 
-arch = CPU()
-FT = Float32
+arch = GPU()
+Oceananigans.defaults.FloatType = Float32
 
-grid = RectilinearGrid(arch, FT;
-                        size = (Nx, Nz),
-                        x = (0, Lx),
-                        z = (0, zᵗ),
-                        halo = (5, 5),
-                        topology = (Periodic, Flat, Bounded))
+grid = RectilinearGrid(arch;
+                       size = (Nx, Nz),
+                       x = (0, Lx),
+                       z = (0, zᵗ),
+                       halo = (5, 5),
+                       topology = (Periodic, Flat, Bounded))
 
 # ## Reference state
 
 p₀ = 101325  # Surface pressure [Pa]
 θ₀ = 300     # Reference potential temperature [K]
 
-constants = ThermodynamicConstants(FT)
+constants = ThermodynamicConstants()
 
 reference_state = ReferenceState(grid, constants;
                                  surface_pressure = p₀,
@@ -176,24 +180,25 @@ sponge_params = (; λ, zˢ, zᵗ)
 BreezeCloudMicrophysicsExt = Base.get_extension(Breeze, :BreezeCloudMicrophysicsExt)
 TwoMomentCloudMicrophysics = BreezeCloudMicrophysicsExt.TwoMomentCloudMicrophysics
 
-microphysics = TwoMomentCloudMicrophysics(FT)
+microphysics = TwoMomentCloudMicrophysics()
 
 # ## Model assembly
 
-boundary_conditions = (; ρθ=ρθ_bcs, ρqᵗ=ρqᵗ_bcs, ρu=ρu_bcs)
+boundary_conditions = (ρθ=ρθ_bcs, ρqᵗ=ρqᵗ_bcs, ρu=ρu_bcs)
 
-weno_order = 5
-momentum_advection = WENO(order=weno_order)
+weno = WENO(order=5)
+bounded_weno = WENO(order=5, bounds=(0, 1))
+momentum_advection = weno
 
-scalar_advection = (ρθ   = WENO(order=weno_order),
-                    ρqᵗ  = WENO(order=weno_order, bounds=(0, 1)),
-                    ρqᶜˡ = WENO(order=weno_order, bounds=(0, 1)),
-                    ρnᶜˡ = WENO(order=weno_order),
-                    ρqʳ  = WENO(order=weno_order, bounds=(0, 1)),
-                    ρnʳ  = WENO(order=weno_order),
-                    ρnᵃ  = WENO(order=weno_order))
+scalar_advection = (ρθ   = weno,
+                    ρqᵗ  = bounded_weno,
+                    ρqᶜˡ = bounded_weno,
+                    ρnᶜˡ = weno,
+                    ρqʳ  = bounded_weno,
+                    ρnʳ  = weno,
+                    ρnᵃ  = weno)
 
-forcing = (; ρw=ρw_sponge, ρu=ρu_sponge, ρθ=ρθ_sponge)
+forcing = (ρw=ρw_sponge, ρu=ρu_sponge, ρθ=ρθ_sponge)
 
 model = AtmosphereModel(grid; dynamics, microphysics, radiation,
                         momentum_advection, scalar_advection,
@@ -204,18 +209,18 @@ model = AtmosphereModel(grid; dynamics, microphysics, radiation,
 # RICO-like tropical trade-cumulus sounding: moist boundary layer with a
 # weak inversion near 1.5 km and drier free troposphere above.
 
-function Tᵢ(z)
-    Tˢᶠᶜ = 299.2  # Surface air temperature [K]
+function Tᵇᵍ(z)
+    T₀ = 299.2  # Surface air temperature [K]
     if z ≤ 740
-        return Tˢᶠᶜ - 0.004 * z                              # Well-mixed boundary layer
+        return T₀ - 0.004 * z                              # Well-mixed boundary layer
     elseif z ≤ 2000
-        return Tˢᶠᶜ - 0.004 * 740 - 0.003 * (z - 740)       # Cloud layer
+        return T₀ - 0.004 * 740 - 0.003 * (z - 740)       # Cloud layer
     else
-        return Tˢᶠᶜ - 0.004 * 740 - 0.003 * 1260 - 0.002 * (z - 2000)  # Free troposphere
+        return T₀ - 0.004 * 740 - 0.003 * 1260 - 0.002 * (z - 2000)  # Free troposphere
     end
 end
 
-function qᵗᵢ(z)
+function qᵗᵇᵍ(z)
     q₀ = 0.020    # Surface specific humidity [kg/kg] (~90% RH at SST)
     Hq = 3000     # Moisture scale height [m]
     q_min = 1e-6  # Minimum humidity
@@ -223,7 +228,7 @@ function qᵗᵢ(z)
 end
 
 # Trade wind profile: ~5 m/s at surface, decreasing with height
-uᵢ(x, z) = -5.0 * max(1 - z / 3000, 0)
+uᵢ(x, z) = -5 * max(1 - z / 3000, 0)
 
 # Random perturbations in the lowest 500 m to trigger convection
 δT = 0.5
@@ -231,11 +236,11 @@ uᵢ(x, z) = -5.0 * max(1 - z / 3000, 0)
 zδ = 500
 
 ϵ() = rand() - 0.5
-Tᵢ_pert(x, z) = Tᵢ(z) + δT * ϵ() * (z < zδ)
-qᵢ_pert(x, z) = qᵗᵢ(z) + δq * ϵ() * (z < zδ)
+Tᵢ(x, z) = Tᵇᵍ(z) + δT * ϵ() * (z < zδ)
+qᵢ(x, z) = qᵗᵢ(x, z) + δq * ϵ() * (z < zδ)
 
-compute_reference_state!(reference_state, Tᵢ, qᵗᵢ, constants)
-set!(model; T=Tᵢ_pert, qᵗ=qᵢ_pert, u=uᵢ)
+compute_reference_state!(reference_state, Tᵇᵍ, qᵗᵇᵍ, constants)
+set!(model; T=Tᵢ, qᵗ=qᵢ, u=uᵢ)
 
 T = model.temperature
 qᵗ = model.specific_moisture
