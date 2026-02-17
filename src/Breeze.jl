@@ -83,7 +83,7 @@ export
     BulkSensibleHeatFlux,
     BulkVaporFlux,
     PolynomialCoefficient,
-    DefaultStabilityFunction,
+    FittedStabilityFunction,
     default_neutral_drag_polynomial,
     default_neutral_sensible_heat_polynomial,
     default_neutral_latent_heat_polynomial,
