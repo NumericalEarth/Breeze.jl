@@ -236,7 +236,7 @@ function Tᵢ(z)
     Γ = 6.5e-3           # Lapse rate [K/m]
     T_trop = 200         # Stratosphere temperature [K]
     T_adiabat = T_surface - Γ * z
-    # Smooth transition to isothermal stratosphere (softplus avoids kink in dT/dz)
+    ## Smooth transition to isothermal stratosphere (softplus avoids kink in dT/dz)
     δ = 3  # Smoothing scale [K] (~500 m transition zone)
     return T_trop + δ * log(1 + exp((T_adiabat - T_trop) / δ))
 end

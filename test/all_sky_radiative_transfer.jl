@@ -141,8 +141,8 @@ using RRTMGP
                                            ice_effective_radius = large_ice)
 
         # Verify the effective radius models are stored correctly
-        @test radiation.liquid_effective_radius.radius == FT(5.0)
-        @test radiation.ice_effective_radius.radius == FT(50.0)
+        @test radiation.liquid_effective_radius.radius == FT(5e-6)
+        @test radiation.ice_effective_radius.radius == FT(50e-6)
 
         clock = Clock(time=DateTime(2024, 6, 21, 12, 0, 0))
         microphysics = SaturationAdjustment()
