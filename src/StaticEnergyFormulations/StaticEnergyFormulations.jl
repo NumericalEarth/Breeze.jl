@@ -25,7 +25,7 @@ using Breeze.AtmosphereModels: AtmosphereModels, diagnose_thermodynamic_state,
     grid_moisture_fractions, maybe_adjust_thermodynamic_state, div_ρUc,
     c_div_ρU, ∇_dot_Jᶜ, w_buoyancy_forceᶜᶜᶠ,
     AtmosphereModelBuoyancy, grid_microphysical_tendency,
-    radiation_heating_tendency, radiation_heating
+    radiation_flux_divergence
 
 using Breeze.Thermodynamics: StaticEnergyState, LiquidIcePotentialTemperatureState, with_temperature
 

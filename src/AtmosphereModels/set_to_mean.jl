@@ -9,10 +9,8 @@ using Statistics: mean!
 Recompute the reference pressure and density profiles from horizontally-averaged
 temperature and moisture mass fractions of the current model state.
 
-Because prognostic variables are density-weighted (ρe = ρᵣ·e, ρqᵗ = ρᵣ·qᵗ,
-ρu = ρᵣ·u, etc.), the momentum is reconstructed from the diagnostic velocity
-fields (which are unaffected by the reference state change) using the new ρᵣ,
-and scalar fields are rescaled by ρᵣ_new / ρᵣ_old.
+Density-weighted prognostic fields (ρe, ρqᵗ, ρu, etc.) are left unchanged;
+diagnostic fields are recomputed from the new reference state via `update_state!`.
 """
 function set_to_mean!(ref::ReferenceState, model)
     constants = model.thermodynamic_constants

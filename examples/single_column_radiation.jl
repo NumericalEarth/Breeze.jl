@@ -213,10 +213,10 @@ fig
 # `Q = -dF_net/dz` (W/m³) from the radiative flux divergence. We convert to K/day
 # using `dT/dt = Q / (ρ cₚ)`.
 
-Q_gray   = gray_radiation.heating_tendency
-Q_clear  = clear_sky_radiation.heating_tendency
-Q_2xco2  = high_co2_radiation.heating_tendency
-Q_allsky = all_sky_radiation.heating_tendency
+Q_gray   = gray_radiation.flux_divergence
+Q_clear  = clear_sky_radiation.flux_divergence
+Q_2xco2  = high_co2_radiation.flux_divergence
+Q_allsky = all_sky_radiation.flux_divergence
 
 # Convert W/m³ → K/day: Q / (ρᵣ cᵖᵈ) × 86400
 ρᵣ = reference_state.density

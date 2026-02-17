@@ -35,13 +35,13 @@ update_radiation!(::Nothing, model) = nothing
 # Internal function that actually computes radiation (implemented by extensions)
 _update_radiation!(::Nothing, model) = nothing
 
-# Extract the heating tendency field from radiation (nothing-safe)
-radiation_heating_tendency(::Nothing) = nothing
-radiation_heating_tendency(radiation) = radiation.heating_tendency
+# Extract the radiation flux divergence field from radiation (nothing-safe)
+radiation_flux_divergence(::Nothing) = nothing
+radiation_flux_divergence(radiation) = radiation.flux_divergence
 
 # Inline accessor for use inside tendency kernels
-@inline radiation_heating(i, j, k, grid, ::Nothing) = zero(eltype(grid))
-@inline radiation_heating(i, j, k, grid, heating_tendency) = @inbounds heating_tendency[i, j, k]
+@inline radiation_flux_divergence(i, j, k, grid, ::Nothing) = zero(eltype(grid))
+@inline radiation_flux_divergence(i, j, k, grid, flux_divergence) = @inbounds flux_divergence[i, j, k]
 
 struct RadiativeTransferModel{FT<:Number, C, E, SP, BA, AS, LW, SW, F, H, LER, IER, S}
     solar_constant :: FT # Scalar
@@ -55,7 +55,7 @@ struct RadiativeTransferModel{FT<:Number, C, E, SP, BA, AS, LW, SW, F, H, LER, I
     upwelling_longwave_flux :: F
     downwelling_longwave_flux :: F
     downwelling_shortwave_flux :: F
-    heating_tendency :: H # Center field: -dF_net/dz in W/m³
+    flux_divergence :: H # Center field: -dF_net/dz in W/m³
     liquid_effective_radius :: LER # Model for cloud liquid effective radius (Nothing for gray/clear-sky)
     ice_effective_radius :: IER    # Model for cloud ice effective radius (Nothing for gray/clear-sky)
     schedule :: S  # Update schedule (default: IterationInterval(1) = every step)

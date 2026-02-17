@@ -227,7 +227,7 @@ function AtmosphereModels.RadiativeTransferModel(grid::AbstractGrid,
     upwelling_longwave_flux = ZFaceField(grid)
     downwelling_longwave_flux = ZFaceField(grid)
     downwelling_shortwave_flux = ZFaceField(grid)
-    heating_tendency = CenterField(grid)
+    flux_divergence = CenterField(grid)
 
     surface_properties = SurfaceRadiativeProperties(surface_temperature,
                                                     surface_emissivity,
@@ -254,7 +254,7 @@ function AtmosphereModels.RadiativeTransferModel(grid::AbstractGrid,
                                   upwelling_longwave_flux,
                                   downwelling_longwave_flux,
                                   downwelling_shortwave_flux,
-                                  heating_tendency,
+                                  flux_divergence,
                                   liquid_eff_radius,
                                   ice_eff_radius,
                                   schedule)
@@ -297,8 +297,8 @@ function AtmosphereModels._update_radiation!(rtm::AllSkyRadiativeTransferModel, 
 
     copy_rrtmgp_fluxes_to_fields!(rtm, solver, grid)
 
-    # Compute heating tendency from flux divergence
-    compute_radiation_heating!(rtm, grid)
+    # Compute radiation flux divergence
+    compute_radiation_flux_divergence!(rtm, grid)
 
     return nothing
 end

@@ -138,20 +138,20 @@ end
 end
 
 #####
-##### Compute radiation heating tendency from flux divergence
+##### Compute radiation flux divergence from radiative fluxes
 #####
 
-function compute_radiation_heating!(rtm, grid)
+function compute_radiation_flux_divergence!(rtm, grid)
     arch = architecture(grid)
     ℐ_lw_up = rtm.upwelling_longwave_flux
     ℐ_lw_dn = rtm.downwelling_longwave_flux
     ℐ_sw_dn = rtm.downwelling_shortwave_flux
-    heating = rtm.heating_tendency
-    launch!(arch, grid, :xyz, _compute_radiation_heating!, heating, ℐ_lw_up, ℐ_lw_dn, ℐ_sw_dn, grid)
+    flux_div = rtm.flux_divergence
+    launch!(arch, grid, :xyz, _compute_radiation_flux_divergence!, flux_div, ℐ_lw_up, ℐ_lw_dn, ℐ_sw_dn, grid)
     return nothing
 end
 
-@kernel function _compute_radiation_heating!(heating, ℐ_lw_up, ℐ_lw_dn, ℐ_sw_dn, grid)
+@kernel function _compute_radiation_flux_divergence!(flux_div, ℐ_lw_up, ℐ_lw_dn, ℐ_sw_dn, grid)
     i, j, k = @index(Global, NTuple)
     # Net flux at faces k and k+1 (positive upward)
     @inbounds begin
@@ -159,6 +159,6 @@ end
         F_k1 = ℐ_lw_up[i, j, k+1] + ℐ_lw_dn[i, j, k+1] + ℐ_sw_dn[i, j, k+1]
     end
     Δz = Δzᶜᶜᶜ(i, j, k, grid)
-    # Heating = -dF/dz (positive when flux convergence warms)
-    @inbounds heating[i, j, k] = -(F_k1 - F_k) / Δz
+    # Flux divergence: -dF/dz (positive when flux convergence warms)
+    @inbounds flux_div[i, j, k] = -(F_k1 - F_k) / Δz
 end
