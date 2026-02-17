@@ -235,6 +235,65 @@ using Test
 
         @test ρ_cold > ρ_warm
     end
+
+    #####
+    ##### ReferenceState with function-valued θ₀
+    #####
+
+    @testset "ReferenceState with function θ₀" begin
+        p₀ = FT(100000)
+        N² = FT(1e-4)
+        θ_func(z) = FT(300) * exp(N² * z / g)
+
+        ref = ReferenceState(grid, constants; surface_pressure=p₀, potential_temperature=θ_func)
+
+        # Pressure should decrease monotonically
+        for k in 2:grid.Nz
+            pᵏ = @allowscalar ref.pressure[1, 1, k]
+            pᵏ⁻¹ = @allowscalar ref.pressure[1, 1, k-1]
+            @test pᵏ < pᵏ⁻¹
+        end
+
+        # Density should decrease monotonically
+        for k in 2:grid.Nz
+            ρᵏ = @allowscalar ref.density[1, 1, k]
+            ρᵏ⁻¹ = @allowscalar ref.density[1, 1, k-1]
+            @test ρᵏ < ρᵏ⁻¹
+        end
+
+        # Surface density should be physical
+        ρ₀ = surface_density(ref)
+        @test ρ₀ > 0
+        @test ρ₀ isa FT
+    end
+
+    #####
+    ##### ReferenceState with discrete_hydrostatic_balance
+    #####
+
+    @testset "ReferenceState with discrete_hydrostatic_balance" begin
+        ref = ReferenceState(grid, constants; discrete_hydrostatic_balance=true)
+
+        # Pressure should decrease monotonically
+        for k in 2:grid.Nz
+            pᵏ = @allowscalar ref.pressure[1, 1, k]
+            pᵏ⁻¹ = @allowscalar ref.pressure[1, 1, k-1]
+            @test pᵏ < pᵏ⁻¹
+        end
+
+        # Discrete hydrostatic balance: Δp + g * ℑρ * Δz ≈ 0
+        for k in 2:grid.Nz
+            pᵏ = @allowscalar ref.pressure[1, 1, k]
+            pᵏ⁻¹ = @allowscalar ref.pressure[1, 1, k-1]
+            ρᵏ = @allowscalar ref.density[1, 1, k]
+            ρᵏ⁻¹ = @allowscalar ref.density[1, 1, k-1]
+            zᶠ = @allowscalar Oceananigans.Grids.znode(1, 1, k, grid, Center(), Center(), Face())
+            zᶠ⁻¹ = @allowscalar Oceananigans.Grids.znode(1, 1, k-1, grid, Center(), Center(), Face())
+            Δz = zᶠ - zᶠ⁻¹
+            residual = (pᵏ - pᵏ⁻¹) + g * (ρᵏ + ρᵏ⁻¹) / 2 * Δz
+            @test abs(residual) < FT(1e-6)
+        end
+    end
 end
 
 #####
