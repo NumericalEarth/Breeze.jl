@@ -21,7 +21,9 @@ else
 end
 
 @testset "Aqua" begin
-    Aqua.test_all(Breeze; stale_deps=(ignore=[:CloudMicrophysics, :RRTMGP],))
+    Aqua.test_all(Breeze;
+                   stale_deps=(ignore=[:CloudMicrophysics, :RRTMGP],),
+                   persistent_tasks=!Sys.iswindows())
 end
 
 @testset "ExplicitImports" begin
