@@ -168,11 +168,11 @@ function compute_slow_momentum_tendencies!(model::AtmosphereModel{<:Any, <:Any, 
                    model.microphysical_fields,
                    model.thermodynamic_constants)
 
-    Gˢm = substepper.slow_tendencies.momentum
+    Gⁿ = model.timestepper.Gⁿ
 
-    launch!(arch, grid, :xyz, compute_x_momentum_tendency!, Gˢm.ρu, grid, u_args)
-    launch!(arch, grid, :xyz, compute_y_momentum_tendency!, Gˢm.ρv, grid, v_args)
-    launch!(arch, grid, :xyz, compute_z_momentum_tendency!, Gˢm.ρw, grid, w_args)
+    launch!(arch, grid, :xyz, compute_x_momentum_tendency!, Gⁿ.ρu, grid, u_args)
+    launch!(arch, grid, :xyz, compute_y_momentum_tendency!, Gⁿ.ρv, grid, v_args)
+    launch!(arch, grid, :xyz, compute_z_momentum_tendency!, Gⁿ.ρw, grid, w_args)
 
     return nothing
 end

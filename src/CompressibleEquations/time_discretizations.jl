@@ -27,9 +27,9 @@ Fields
 ======
 
 - `substeps`: Number of acoustic substeps for the **full** time step (stage 3 of WS-RK3). For WS-RK3, earlier stages take fewer substeps (``Nτ = \\mathrm{round}(β N)``), keeping ``Δτ = Δt/N`` constant. Default: `nothing` (automatically computed from the acoustic CFL condition each time step)
-- `forward_weight`: Off-centering parameter α for the vertically implicit solver. α > 0.5 damps vertical acoustic modes. Default: 0.6 (CM1 default)
-- `divergence_damping_coefficient`: CM1-style ``κ_{div}`` applied to the Exner pressure perturbation for suppressing the computational mode. Default: 0.10 (CM1 default)
-- `acoustic_damping_coefficient`: Klemp (2018) divergence damping ``β_d``. Post-implicit-solve velocity correction: ``u -= β_d c_p θ_v ∂Δπ'/∂x``. Provides constant damping per outer Δt regardless of substep count. Needed by WS-RK3 at large Δt. Default: 0.0
+- `forward_weight`: Off-centering parameter ω for the vertically implicit solver. ω > 0.5 damps vertical acoustic modes. Default: 0.6 (CM1 default)
+- `divergence_damping_coefficient`: Forward-extrapolation filter coefficient ``ϰ^{di}`` applied to the Exner pressure perturbation: ``π̃' = π' + ϰ^{di} (π' - π'_{old})``. Default: 0.10 (CM1 default)
+- `acoustic_damping_coefficient`: Klemp (2018) divergence damping ``ϰ^{ac}``. Post-implicit-solve velocity correction: ``u -= ϰ^{ac} c_p θ_v ∂Δπ'/∂x``. Provides constant damping per outer Δt regardless of substep count. Needed by WS-RK3 at large Δt. Default: 0.0
 
 See also [`ExplicitTimeStepping`](@ref).
 """

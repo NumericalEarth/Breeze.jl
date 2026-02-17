@@ -195,7 +195,7 @@ end
 ##### at advection-limited Δt=12 to verify the acoustic substepping is stable.
 #####
 
-function build_igw_model(; timestepper=:AcousticSSPRungeKutta3, Ns=8, kdiv=0.05)
+function build_igw_model(; timestepper=:AcousticSSPRungeKutta3, Ns=8, κᵈ=0.05)
     Nx, Ny, Nz = 100, 6, 10
     Lx, Ly, Lz = 100kilometers, 6kilometers, 10kilometers
 
@@ -217,7 +217,7 @@ function build_igw_model(; timestepper=:AcousticSSPRungeKutta3, Ns=8, kdiv=0.05)
     x₀ = Lx / 3
     θᵢ(x, y, z) = θᵇᵍ(z) + Δθ * sin(π * z / Lz) / (1 + (x - x₀)^2 / a^2)
 
-    td = SplitExplicitTimeDiscretization(substeps=Ns, divergence_damping_coefficient=kdiv)
+    td = SplitExplicitTimeDiscretization(substeps=Ns, divergence_damping_coefficient=κᵈ)
     dynamics = CompressibleDynamics(td; surface_pressure=p₀,
                                       reference_potential_temperature=θᵇᵍ)
 
@@ -232,7 +232,7 @@ end
 @testset "IGW stability: SSP-RK3 (Δt=12, Ns=8) [$(FT)]" for FT in test_float_types()
     Oceananigans.defaults.FloatType = FT
 
-    model = build_igw_model(timestepper=:AcousticSSPRungeKutta3, Ns=8, kdiv=0.05)
+    model = build_igw_model(timestepper=:AcousticSSPRungeKutta3, Ns=8, κᵈ=0.05)
 
     simulation = Simulation(model; Δt=12, stop_iteration=20, verbose=false)
     run!(simulation)
@@ -253,7 +253,7 @@ end
 @testset "IGW stability: WS-RK3 (Δt=12, Ns=8) [$(FT)]" for FT in test_float_types()
     Oceananigans.defaults.FloatType = FT
 
-    model = build_igw_model(timestepper=:AcousticRungeKutta3, Ns=8, kdiv=0.10)
+    model = build_igw_model(timestepper=:AcousticRungeKutta3, Ns=8, κᵈ=0.10)
 
     simulation = Simulation(model; Δt=12, stop_iteration=20, verbose=false)
     run!(simulation)

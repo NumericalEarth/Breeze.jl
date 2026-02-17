@@ -5,7 +5,7 @@
 ##### Wicker-Skamarock (2002), and Klemp et al. (2007):
 ##### - Forward-backward acoustic substeps with (velocity, Exner pressure) variables
 ##### - Vertically implicit w-π coupling with off-centering (always on)
-##### - CM1-style divergence damping (kdiv) on the pressure variable
+##### - Forward-extrapolation filter (ϰᵈⁱ) on the pressure variable
 ##### - Constant acoustic substep size Δτ = Δt/N across all RK stages
 ##### - Topology-aware operators (no halo filling between substeps)
 #####
@@ -125,38 +125,40 @@ The forward-backward scheme updates:
 1. **Forward**: Velocity from Exner pressure gradient: ``u += Δτ (u_{ten} - cᵖ θᵥ ∂π'_d/∂x)``
 2. **Backward**: Exner pressure from velocity divergence: ``π' += Δτ (π_{ten} - S ∇·u) + w_{terms}``
 3. **Implicit**: Vertically implicit w-π' coupling (tridiagonal solve)
-4. **Damping**: ``π'_d = π' + κ_{div} (π' - π'_{old})``
+4. **Filtering**: ``π̃' = π' + ϰᵈⁱ (π' - π'_{old})``
 
 Fields
 ======
 
 - `substeps`: Number of acoustic substeps for the full time step
-- `forward_weight`: Off-centering parameter α (0.6 = CM1 default); β = 1 - α
-- `divergence_damping_coefficient`: CM1-style `kdiv` for π' damping (default 0.10)
-- `acoustic_damping_coefficient`: Klemp 2018 β_d for velocity damping
+- `forward_weight`: Off-centering parameter ω (0.6 = CM1 default)
+- `divergence_damping_coefficient`: Forward-extrapolation filter ϰᵈⁱ for π' (default 0.10)
+- `acoustic_damping_coefficient`: Klemp 2018 ϰᵃᶜ for velocity damping
 - `virtual_potential_temperature`: Stage-frozen θᵥ (CenterField)
 - `acoustic_compression`: Coefficient `(γ-1)π₀` converting `∇·u` to `∂π'/∂t` (CenterField)
 - `reference_exner_function`: Reference π₀ = (p_ref/pˢᵗ)^(R/cᵖ) (CenterField)
 - `exner_perturbation`: Current Exner pressure perturbation π' = π - π₀ (CenterField)
 - `previous_exner_perturbation`: Previous-substep π' for divergence damping (CenterField)
-- `damped_exner_perturbation`: Damped π' used in PGF (CenterField)
+- `filtered_exner_perturbation`: Filtered π̃' used in PGF (CenterField)
 - `stage_thermodynamic_density`: Stage-frozen ρθ (CenterField)
 - `averaged_velocities`: Time-averaged velocities for scalar advection
-- `slow_tendencies`: Frozen slow tendencies (momentum, density, thermodynamic_density, velocity, exner_pressure)
+- `slow_tendencies`: Frozen slow tendencies (velocity, exner_pressure). Momentum tendencies
+  are stored in the outer timestepper's `Gⁿ` fields; density and thermodynamic density
+  tendencies are also read directly from `Gⁿ`.
 - `vertical_solver`: BatchedTridiagonalSolver for implicit w-π' coupling
 - `rhs`: Right-hand side storage for tridiagonal solve
 """
 struct AcousticSubstepper{N, FT, CF, AV, ST, TS}
     substeps :: N                              # Number of acoustic substeps per full Δt
-    forward_weight :: FT                       # Off-centering α (CM1 default 0.6), β = 1 - α
-    divergence_damping_coefficient :: FT       # CM1-style kdiv for π' damping
-    acoustic_damping_coefficient :: FT         # Klemp 2018 β_d
+    forward_weight :: FT                       # Off-centering ω (CM1 default 0.6)
+    divergence_damping_coefficient :: FT       # Forward-extrapolation filter ϰᵈⁱ
+    acoustic_damping_coefficient :: FT         # Klemp 2018 ϰᵃᶜ
     virtual_potential_temperature :: CF        # Stage-frozen θᵥ
     acoustic_compression :: CF                 # (γ-1)π₀ — converts ∇·u to ∂π'/∂t
     reference_exner_function :: CF             # π₀ from reference state
     exner_perturbation :: CF                   # Current π' = π - π₀
     previous_exner_perturbation :: CF          # Previous-substep π' (for damping)
-    damped_exner_perturbation :: CF            # Damped π' used in PGF
+    filtered_exner_perturbation :: CF            # Filtered π̃' used in PGF
     stage_thermodynamic_density :: CF          # Stage-frozen ρθ
     averaged_velocities :: AV                  # Time-averaged velocities for scalar advection
     slow_tendencies :: ST                      # Frozen slow tendencies (NamedTuple)
@@ -165,10 +167,7 @@ struct AcousticSubstepper{N, FT, CF, AV, ST, TS}
 end
 
 function _adapt_slow_tendencies(to, st)
-    return (momentum = map(f -> adapt(to, f), st.momentum),
-            density = adapt(to, st.density),
-            thermodynamic_density = adapt(to, st.thermodynamic_density),
-            velocity = map(f -> adapt(to, f), st.velocity),
+    return (velocity = map(f -> adapt(to, f), st.velocity),
             exner_pressure = adapt(to, st.exner_pressure))
 end
 
@@ -182,7 +181,7 @@ Adapt.adapt_structure(to, a::AcousticSubstepper) =
                        adapt(to, a.reference_exner_function),
                        adapt(to, a.exner_perturbation),
                        adapt(to, a.previous_exner_perturbation),
-                       adapt(to, a.damped_exner_perturbation),
+                       adapt(to, a.filtered_exner_perturbation),
                        adapt(to, a.stage_thermodynamic_density),
                        map(f -> adapt(to, f), a.averaged_velocities),
                        _adapt_slow_tendencies(to, a.slow_tendencies),
@@ -197,28 +196,23 @@ Construct an `AcousticSubstepper` using the Exner pressure formulation.
 function AcousticSubstepper(grid, split_explicit::SplitExplicitTimeDiscretization)
     Ns = split_explicit.substeps
     FT = eltype(grid)
-    α = convert(FT, split_explicit.forward_weight)
-    kdiv = convert(FT, split_explicit.divergence_damping_coefficient)
-    β_d = convert(FT, split_explicit.acoustic_damping_coefficient)
+    ω = convert(FT, split_explicit.forward_weight)
+    ϰᵈⁱ = convert(FT, split_explicit.divergence_damping_coefficient)
+    ϰᵃᶜ = convert(FT, split_explicit.acoustic_damping_coefficient)
 
     virtual_potential_temperature = CenterField(grid)
     acoustic_compression = CenterField(grid)
     reference_exner_function = CenterField(grid)
     exner_perturbation = CenterField(grid)
     previous_exner_perturbation = CenterField(grid)
-    damped_exner_perturbation = CenterField(grid)
+    filtered_exner_perturbation = CenterField(grid)
     stage_thermodynamic_density = CenterField(grid)
 
     averaged_velocities = (u = XFaceField(grid),
                            v = YFaceField(grid),
                            w = ZFaceField(grid))
 
-    slow_tendencies = (momentum = (ρu = XFaceField(grid),
-                                   ρv = YFaceField(grid),
-                                   ρw = ZFaceField(grid)),
-                       density = CenterField(grid),
-                       thermodynamic_density = CenterField(grid),
-                       velocity = (u = XFaceField(grid),
+    slow_tendencies = (velocity = (u = XFaceField(grid),
                                    v = YFaceField(grid),
                                    w = ZFaceField(grid)),
                        exner_pressure = CenterField(grid))
@@ -240,13 +234,13 @@ function AcousticSubstepper(grid, split_explicit::SplitExplicitTimeDiscretizatio
 
     rhs = CenterField(grid)
 
-    return AcousticSubstepper(Ns, α, kdiv, β_d,
+    return AcousticSubstepper(Ns, ω, ϰᵈⁱ, ϰᵃᶜ,
                               virtual_potential_temperature,
                               acoustic_compression,
                               reference_exner_function,
                               exner_perturbation,
                               previous_exner_perturbation,
-                              damped_exner_perturbation,
+                              filtered_exner_perturbation,
                               stage_thermodynamic_density,
                               averaged_velocities,
                               slow_tendencies,
@@ -258,7 +252,7 @@ end
 ##### Section 2b: Adaptive substep computation
 #####
 
-using Breeze.AtmosphereModels: thermodynamic_density
+using Breeze.AtmosphereModels: thermodynamic_density, thermodynamic_density_name
 using Breeze.Thermodynamics: dry_air_gas_constant
 
 """
@@ -334,7 +328,7 @@ function prepare_acoustic_cache!(substepper, model)
             substepper.virtual_potential_temperature,
             substepper.acoustic_compression,
             substepper.exner_perturbation,
-            substepper.damped_exner_perturbation,
+            substepper.filtered_exner_perturbation,
             substepper.reference_exner_function,
             model.dynamics.density,
             model.dynamics.pressure,
@@ -353,17 +347,17 @@ function prepare_acoustic_cache!(substepper, model)
     return nothing
 end
 
-@kernel function _recompute_pi_prime!(π′, π′_damped, p, π_ref, pˢᵗ, κ)
+@kernel function _recompute_pi_prime!(π′, π̃′, p, πᵣ, pˢᵗ, κ)
     i, j, k = @index(Global, NTuple)
     @inbounds begin
         πⁱ = (p[i, j, k] / pˢᵗ)^κ
-        π′[i, j, k] = πⁱ - π_ref[i, j, k]
-        π′_damped[i, j, k] = π′[i, j, k]
+        π′[i, j, k] = πⁱ - πᵣ[i, j, k]
+        π̃′[i, j, k] = π′[i, j, k]
     end
 end
 
-@kernel function _prepare_exner_cache!(θᵥ_field, acoustic_compression_field, π′_field, π′_damped_field,
-                                       π_ref_field,
+@kernel function _prepare_exner_cache!(θᵥ_field, acoustic_compression_field, π′_field, π̃′_field,
+                                       πᵣ_field,
                                        ρ, p, T, qᵗ, grid,
                                        microphysics, microphysical_fields,
                                        constants, reference_state, pˢᵗ, cᵖ, κ)
@@ -394,15 +388,15 @@ end
     # c_eff² = cᵖ θᵥ S = cᵖ θᵥ (γ-1) π₀ = γ Rᵐ T = c²
     Sⁱ = (γᵐ - 1) * πⁱ
 
-    # Exner pressure perturbation: π' = π - π_ref
-    π_refⁱ = _get_reference_exner(i, j, k, reference_state, pˢᵗ, κ)
+    # Exner pressure perturbation: π' = π - πᵣ
+    πᵣⁱ = reference_exner(i, j, k, reference_state, pˢᵗ, κ)
 
     @inbounds begin
         θᵥ_field[i, j, k] = θᵥⁱ
         acoustic_compression_field[i, j, k] = Sⁱ
-        π′_field[i, j, k] = πⁱ - π_refⁱ
-        π′_damped_field[i, j, k] = πⁱ - π_refⁱ
-        π_ref_field[i, j, k] = π_refⁱ
+        π′_field[i, j, k] = πⁱ - πᵣⁱ
+        π̃′_field[i, j, k] = πⁱ - πᵣⁱ
+        πᵣ_field[i, j, k] = πᵣⁱ
     end
 end
 
@@ -416,7 +410,7 @@ function _set_exner_reference!(substepper, model, ref::ExnerReferenceState, pˢ�
     parent(substepper.reference_exner_function) .= parent(ref.exner_function)
     # Compute π' = π_actual - π₀
     launch!(arch, grid, :xyz, _recompute_pi_prime!,
-            substepper.exner_perturbation, substepper.damped_exner_perturbation,
+            substepper.exner_perturbation, substepper.filtered_exner_perturbation,
             model.dynamics.pressure, substepper.reference_exner_function, pˢᵗ, κ)
     return nothing
 end
@@ -424,11 +418,11 @@ end
 function _set_exner_reference!(substepper, model, ref::ReferenceState, pˢᵗ, κ)
     grid = model.grid
     arch = architecture(grid)
-    # Build π_ref from reference pressure (not exact Exner balance)
+    # Build πᵣ from reference pressure (not exact Exner balance)
     launch!(arch, grid, :xyz, _set_bottom_exner!,
             substepper.reference_exner_function, ref.pressure, pˢᵗ, κ)
     launch!(arch, grid, :xyz, _recompute_pi_prime!,
-            substepper.exner_perturbation, substepper.damped_exner_perturbation,
+            substepper.exner_perturbation, substepper.filtered_exner_perturbation,
             model.dynamics.pressure, substepper.reference_exner_function, pˢᵗ, κ)
     return nothing
 end
@@ -438,7 +432,7 @@ function _set_exner_reference!(substepper, model, ::Nothing, pˢᵗ, κ)
     arch = architecture(grid)
     fill!(parent(substepper.reference_exner_function), 0)
     launch!(arch, grid, :xyz, _recompute_pi_prime!,
-            substepper.exner_perturbation, substepper.damped_exner_perturbation,
+            substepper.exner_perturbation, substepper.filtered_exner_perturbation,
             model.dynamics.pressure, substepper.reference_exner_function, pˢᵗ, κ)
     return nothing
 end
@@ -448,14 +442,14 @@ end
     @inbounds πᵣ[i, j, k] = (p[i, j, k] / pˢᵗ)^κ
 end
 
-@inline _get_reference_exner(i, j, k, ::Nothing, pˢᵗ, κ) = zero(pˢᵗ)
+@inline reference_exner(i, j, k, ::Nothing, pˢᵗ, κ) = zero(pˢᵗ)
 
-@inline function _get_reference_exner(i, j, k, ref::ReferenceState, pˢᵗ, κ)
+@inline function reference_exner(i, j, k, ref::ReferenceState, pˢᵗ, κ)
     @inbounds pᵣ = ref.pressure[i, j, k]
     return (pᵣ / pˢᵗ)^κ
 end
 
-@inline function _get_reference_exner(i, j, k, ref::ExnerReferenceState, pˢᵗ, κ)
+@inline function reference_exner(i, j, k, ref::ExnerReferenceState, pˢᵗ, κ)
     @inbounds return ref.exner_function[i, j, k]
 end
 
@@ -481,22 +475,18 @@ function convert_slow_tendencies!(substepper, model)
     g = model.thermodynamic_constants.gravitational_acceleration
     Rᵈ = dry_air_gas_constant(model.thermodynamic_constants)
     κ = Rᵈ / cᵖᵈ
+    Gⁿ = model.timestepper.Gⁿ
 
     launch!(arch, grid, :xyz, _convert_slow_tendencies!,
             substepper.slow_tendencies.velocity.u,
             substepper.slow_tendencies.velocity.v,
             substepper.slow_tendencies.velocity.w,
             substepper.slow_tendencies.exner_pressure,
-            substepper.slow_tendencies.momentum.ρu,
-            substepper.slow_tendencies.momentum.ρv,
-            substepper.slow_tendencies.momentum.ρw,
-            substepper.slow_tendencies.thermodynamic_density,
-            substepper.slow_tendencies.density,
+            Gⁿ.ρu, Gⁿ.ρv, Gⁿ.ρw,
             model.dynamics.density,
             model.velocities.u,
             model.velocities.v,
             model.velocities.w,
-            substepper.stage_thermodynamic_density,
             substepper.exner_perturbation,
             substepper.reference_exner_function,
             substepper.virtual_potential_temperature,
@@ -506,9 +496,9 @@ function convert_slow_tendencies!(substepper, model)
 end
 
 @kernel function _convert_slow_tendencies!(Gˢu, Gˢv, Gˢw, Gˢπ,
-                                           Gˢρu, Gˢρv, Gˢρw, Gˢρχ, Gˢρ,
+                                           Gˢρu, Gˢρv, Gˢρw,
                                            ρ, u, v, w,
-                                           ρχᵣ, π′, πᵣ, θᵥ,
+                                           π′, πᵣ, θᵥ,
                                            grid, κ, cᵖᵈ, g)
     i, j, k = @index(Global, NTuple)
     Nz = size(grid, 3)
@@ -595,18 +585,18 @@ end
 #####
 
 @kernel function _acoustic_horizontal_forward!(u, v, grid, Δτ, cᵖ,
-                                               π′_damped, θᵥ, Gˢu, Gˢv)
+                                               π̃′, θᵥ, Gˢu, Gˢv)
     i, j, k = @index(Global, NTuple)
 
     @inbounds begin
         # u += Δτ (Gˢu - cᵖ θᵥ ∂π'/∂x)
         θᵥᶠᶜᶜ = ℑxTᶠᵃᵃ(i, j, k, grid, θᵥ)
-        ∂x_π = δxTᶠᵃᵃ(i, j, k, grid, π′_damped) / Δxᶠᶜᶜ(i, j, k, grid)
+        ∂x_π = δxTᶠᵃᵃ(i, j, k, grid, π̃′) / Δxᶠᶜᶜ(i, j, k, grid)
         u[i, j, k] += Δτ * (Gˢu[i, j, k] - cᵖ * θᵥᶠᶜᶜ * ∂x_π) * !on_x_boundary(i, j, k, grid)
 
         # v += Δτ (Gˢv - cᵖ θᵥ ∂π'/∂y)
         θᵥᶜᶠᶜ = ℑyTᵃᶠᵃ(i, j, k, grid, θᵥ)
-        ∂y_π = δyTᵃᶠᵃ(i, j, k, grid, π′_damped) / Δyᶜᶠᶜ(i, j, k, grid)
+        ∂y_π = δyTᵃᶠᵃ(i, j, k, grid, π̃′) / Δyᶜᶠᶜ(i, j, k, grid)
         v[i, j, k] += Δτ * (Gˢv[i, j, k] - cᵖ * θᵥᶜᶠᶜ * ∂y_π) * !on_y_boundary(i, j, k, grid)
     end
 end
@@ -619,7 +609,7 @@ end
 ##### from the old (pre-solve) w.
 #####
 
-@kernel function _compute_π′_forcing!(π′_forcing, grid, Δτ, β,
+@kernel function _compute_π′_forcing!(π′_forcing, grid, Δτ, ω̄,
                                       u, v, w, S, Gˢπ)
     i, j, k = @index(Global, NTuple)
     Nz = size(grid, 3)
@@ -629,14 +619,14 @@ end
         ∇ₕ_u = (u[i+1, j, k] - u[i, j, k]) / Δxᶠᶜᶜ(i, j, k, grid) +
                 (v[i, j+1, k] - v[i, j, k]) / Δyᶜᶠᶜ(i, j, k, grid)
 
-        # β-weighted vertical divergence from old w (before implicit solve)
+        # (1-ω)-weighted vertical divergence from old w (before implicit solve)
         w⁻_bot = ifelse(k == 1, zero(eltype(w)), w[i, j, k])
         w⁻_top = ifelse(k == Nz, zero(eltype(w)), w[i, j, k + 1])
         Δzᶜ = Δzᶜᶜᶜ(i, j, k, grid)
 
-        # π′_forcing = Δτ (Gˢπ - S ∇ₕ·u⁺) - β Δτ S ∂w⁻/∂z
+        # π′_forcing = Δτ (Gˢπ - S ∇ₕ·u⁺) - (1-ω) Δτ S ∂w⁻/∂z
         π′_forcing[i, j, k] = Δτ * (Gˢπ[i, j, k] - S[i, j, k] * ∇ₕ_u) -
-                               β * Δτ * S[i, j, k] * (w⁻_top - w⁻_bot) / Δzᶜ
+                               ω̄ * Δτ * S[i, j, k] * (w⁻_top - w⁻_bot) / Δzᶜ
     end
 end
 
@@ -666,14 +656,14 @@ The approach:
 function implicit_w_solve!(w, substepper, model, Δτ, π′_forcing)
     grid = model.grid
     arch = architecture(grid)
-    α = substepper.forward_weight
+    ω = substepper.forward_weight
     cᵖᵈ = model.thermodynamic_constants.dry_air.heat_capacity
     solver = substepper.vertical_solver
 
     # Build tridiagonal system for π' and solve
     launch!(arch, grid, :xyz, _build_π′_tridiagonal!,
             solver.a, solver.b, solver.c, substepper.rhs,
-            grid, α, Δτ, cᵖᵈ,
+            grid, ω, Δτ, cᵖᵈ,
             w, substepper.exner_perturbation, π′_forcing,
             substepper.virtual_potential_temperature, substepper.acoustic_compression,
             substepper.slow_tendencies.velocity.w)
@@ -683,7 +673,7 @@ function implicit_w_solve!(w, substepper, model, Δτ, π′_forcing)
 
     # Back-solve: w⁺ from the off-centered pressure gradient
     launch!(arch, grid, :xyz, _update_w_from_pressure!,
-            w, grid, α, Δτ, cᵖᵈ,
+            w, grid, ω, Δτ, cᵖᵈ,
             substepper.exner_perturbation, substepper.previous_exner_perturbation,
             substepper.virtual_potential_temperature,
             substepper.slow_tendencies.velocity.w)
@@ -692,7 +682,7 @@ function implicit_w_solve!(w, substepper, model, Δτ, π′_forcing)
 end
 
 @kernel function _build_π′_tridiagonal!(lower, diag, upper, rhs_field,
-                                        grid, α, Δτ, cᵖᵈ,
+                                        grid, ω, Δτ, cᵖᵈ,
                                         w, π′, π′_forcing,
                                         θᵥ, S,
                                         Gˢw)
@@ -710,10 +700,10 @@ end
         Mᵖ_bot = cᵖᵈ * θᵥᶠ_bot / Δzᶠ_bot
         Mᵖ_top = cᵖᵈ * θᵥᶠ_top / Δzᶠ_top
 
-        # Tridiagonal coupling coefficients: Q = α² Δτ² S Mᵖ / Δz
+        # Tridiagonal coupling coefficients: Q = ω² Δτ² S Mᵖ / Δz
         Sⁱ = S[i, j, k]
-        Q_bot = α * α * Δτ * Δτ * Sⁱ * Mᵖ_bot / Δzᶜ
-        Q_top = α * α * Δτ * Δτ * Sⁱ * Mᵖ_top / Δzᶜ
+        Q_bot = ω * ω * Δτ * Δτ * Sⁱ * Mᵖ_bot / Δzᶜ
+        Q_top = ω * ω * Δτ * Δτ * Sⁱ * Mᵖ_top / Δzᶜ
 
         Q_bot = ifelse(k == 1, zero(Q_bot), Q_bot)
         Q_top = ifelse(k == Nz, zero(Q_top), Q_top)
@@ -722,25 +712,25 @@ end
         upper[i, j, k] = -Q_top
         diag[i, j, k] = 1 + Q_bot + Q_top
 
-        # Explicit w at faces: wᵉ = w + Δτ Gˢw - β Δτ Mᵖ δz(π')
-        # π_ref has zero hydrostatic residual (built with same θᵥ averaging).
+        # Explicit w at faces: wᵉ = w + Δτ Gˢw - (1-ω) Δτ Mᵖ δz(π')
+        # πᵣ has zero hydrostatic residual (built with same θᵥ averaging).
         δz_π_bot = ifelse(k == 1, zero(eltype(π′)), π′[i, j, k] - π′[i, j, k - 1])
         δz_π_top = ifelse(k == Nz, zero(eltype(π′)), π′[i, j, k + 1] - π′[i, j, k])
 
-        β = 1 - α
+        ω̄ = 1 - ω
         wᵉ_bot = ifelse(k == 1, zero(eltype(w)),
-                         w[i, j, k] + Δτ * Gˢw[i, j, k] - β * Δτ * Mᵖ_bot * δz_π_bot)
+                         w[i, j, k] + Δτ * Gˢw[i, j, k] - ω̄ * Δτ * Mᵖ_bot * δz_π_bot)
         wᵉ_top = ifelse(k == Nz, zero(eltype(w)),
-                         w[i, j, k + 1] + Δτ * Gˢw[i, j, k + 1] - β * Δτ * Mᵖ_top * δz_π_top)
+                         w[i, j, k + 1] + Δτ * Gˢw[i, j, k + 1] - ω̄ * Δτ * Mᵖ_top * δz_π_top)
 
         ∂z_wᵉ = (wᵉ_top - wᵉ_bot) / Δzᶜ
 
-        # RHS = π' + π′_forcing - α Δτ S ∂wᵉ/∂z
-        rhs_field[i, j, k] = π′[i, j, k] + π′_forcing[i, j, k] - α * Δτ * Sⁱ * ∂z_wᵉ
+        # RHS = π' + π′_forcing - ω Δτ S ∂wᵉ/∂z
+        rhs_field[i, j, k] = π′[i, j, k] + π′_forcing[i, j, k] - ω * Δτ * Sⁱ * ∂z_wᵉ
     end
 end
 
-@kernel function _update_w_from_pressure!(w, grid, α, Δτ, cᵖᵈ,
+@kernel function _update_w_from_pressure!(w, grid, ω, Δτ, cᵖᵈ,
                                           π′⁺, π′⁻, θᵥ,
                                           Gˢw)
     i, j, k = @index(Global, NTuple)
@@ -750,13 +740,13 @@ end
         θᵥᶠ = ℑzTᵃᵃᶠ(i, j, k, grid, θᵥ)
         Mᵖ = cᵖᵈ * θᵥᶠ / Δzᶠ  # vertical PGF coefficient
 
-        # Off-centered vertical PGF: β δz(π'⁻) + α δz(π'⁺)
-        β = 1 - α
+        # Off-centered vertical PGF: (1-ω) δz(π'⁻) + ω δz(π'⁺)
+        ω̄ = 1 - ω
         δz_π⁻ = δzTᵃᵃᶠ(i, j, k, grid, π′⁻)
         δz_π⁺ = δzTᵃᵃᶠ(i, j, k, grid, π′⁺)
 
-        # w⁺ = w + Δτ Gˢw - Δτ Mᵖ (β δz(π'⁻) + α δz(π'⁺))
-        w⁺ = w[i, j, k] + Δτ * Gˢw[i, j, k] - Δτ * Mᵖ * (β * δz_π⁻ + α * δz_π⁺)
+        # w⁺ = w + Δτ Gˢw - Δτ Mᵖ ((1-ω) δz(π'⁻) + ω δz(π'⁺))
+        w⁺ = w[i, j, k] + Δτ * Gˢw[i, j, k] - Δτ * Mᵖ * (ω̄ * δz_π⁻ + ω * δz_π⁺)
         w[i, j, k] = w⁺ * (k > 1)
     end
 end
@@ -765,18 +755,18 @@ end
 ##### Section 8: Update π' with new w, apply damping, accumulate averages
 #####
 ##### After the implicit w solve, update π' using the NEW w (α-weighted)
-##### and apply the CM1-style divergence damping.
+##### and apply the forward-extrapolation filter.
 #####
 
-@kernel function _update_pressure_and_average!(π′, π′_damped, π′⁻,
+@kernel function _update_pressure_and_average!(π′, π̃′, π′⁻,
                                                u, v, w, ū,
-                                               grid, kdiv, avg_weight)
+                                               grid, ϰᵈⁱ, avg_weight)
     i, j, k = @index(Global, NTuple)
 
     @inbounds begin
-        # Apply divergence damping: π'_damped = π'⁺ + kdiv (π'⁺ - π'⁻)
+        # Forward-extrapolation filter: π̃′ = π'⁺ + ϰᵈⁱ (π'⁺ - π'⁻)
         π′⁺ = π′[i, j, k]
-        π′_damped[i, j, k] = π′⁺ + kdiv * (π′⁺ - π′⁻[i, j, k])
+        π̃′[i, j, k] = π′⁺ + ϰᵈⁱ * (π′⁺ - π′⁻[i, j, k])
 
         # Save current π' as previous for next substep
         π′⁻[i, j, k] = π′⁺
@@ -788,7 +778,7 @@ end
     end
 end
 
-@kernel function _acoustic_divergence_damping!(u, v, π′, π′⁻, θᵥ, grid, β_d, cᵖ)
+@kernel function _acoustic_divergence_damping!(u, v, π′, π′⁻, θᵥ, grid, ϰᵃᶜ, cᵖ)
     i, j, k = @index(Global, NTuple)
 
     @inbounds begin
@@ -796,21 +786,21 @@ end
         # PGF-scaled change in π' per substep. This provides constant damping
         # per outer Δt regardless of substep count N, stabilizing WS-RK3.
         #
-        # u -= β_d cᵖ θᵥ ∂(Δπ')/∂x,  v -= β_d cᵖ θᵥ ∂(Δπ')/∂y
+        # u -= ϰᵃᶜ cᵖ θᵥ ∂(Δπ')/∂x,  v -= ϰᵃᶜ cᵖ θᵥ ∂(Δπ')/∂y
         #
-        # The cᵖ θᵥ factor matches the PGF scaling so that β_d is a
-        # dimensionless O(1) coefficient (β_d ∈ [2, 10] typical).
+        # The cᵖ θᵥ factor matches the PGF scaling so that ϰᵃᶜ is a
+        # dimensionless O(1) coefficient (ϰᵃᶜ ∈ [2, 10] typical).
         Δπ_i   = π′[i, j, k]     - π′⁻[i, j, k]
         Δπ_im1 = π′[i - 1, j, k] - π′⁻[i - 1, j, k]
         Δx = Δxᶠᶜᶜ(i, j, k, grid)
         θᵥᶠᶜᶜ = ℑxTᶠᵃᵃ(i, j, k, grid, θᵥ)
-        u[i, j, k] -= β_d * cᵖ * θᵥᶠᶜᶜ * (Δπ_i - Δπ_im1) / Δx * !on_x_boundary(i, j, k, grid)
+        u[i, j, k] -= ϰᵃᶜ * cᵖ * θᵥᶠᶜᶜ * (Δπ_i - Δπ_im1) / Δx * !on_x_boundary(i, j, k, grid)
 
         Δπ_j   = π′[i, j, k]     - π′⁻[i, j, k]
         Δπ_jm1 = π′[i, j - 1, k] - π′⁻[i, j - 1, k]
         Δy = Δyᶜᶠᶜ(i, j, k, grid)
         θᵥᶜᶠᶜ = ℑyTᵃᶠᵃ(i, j, k, grid, θᵥ)
-        v[i, j, k] -= β_d * cᵖ * θᵥᶜᶠᶜ * (Δπ_j - Δπ_jm1) / Δy * !on_y_boundary(i, j, k, grid)
+        v[i, j, k] -= ϰᵃᶜ * cᵖ * θᵥᶜᶠᶜ * (Δπ_j - Δπ_jm1) / Δy * !on_y_boundary(i, j, k, grid)
     end
 end
 
@@ -852,20 +842,20 @@ function acoustic_rk3_substep_loop!(model, substepper, Δt, β_stage, U⁰)
     # The acoustic loop must start from a CONSISTENT Uⁿ state (both velocity
     # AND pressure from Uⁿ). Starting π' from U_eval while velocities are from
     # Uⁿ creates an imbalance that destabilizes the acoustic loop at large Δt.
-    # θᵥ, S, π_ref remain from U_eval (frozen thermodynamic quantities).
+    # θᵥ, S, πᵣ remain from U_eval (frozen thermodynamic quantities).
     pˢᵗ = model.dynamics.standard_pressure
     Rᵈ = dry_air_gas_constant(model.thermodynamic_constants)
     κ = Rᵈ / cᵖ
     launch!(arch, grid, :xyz, _reset_pi_prime_to_U0!,
             substepper.exner_perturbation, substepper.reference_exner_function, U⁰[5], pˢᵗ, Rᵈ, κ)
 
-    parent(substepper.damped_exner_perturbation) .= parent(substepper.exner_perturbation)
+    parent(substepper.filtered_exner_perturbation) .= parent(substepper.exner_perturbation)
     parent(substepper.previous_exner_perturbation) .= parent(substepper.exner_perturbation)
 
     # Save π'_initial in ρχᵣ for the perturbation recovery.
     # With π' reset to π'(Uⁿ), the recovery computes:
-    #   π_new = π(Uⁿ) + Δπ' = π_ref + π'_final  (they cancel)
-    # so ρθ_new = EOS(π_ref + π'_final).
+    #   π_new = π(Uⁿ) + Δπ' = πᵣ + π'_final  (they cancel)
+    # so ρθ_new = EOS(πᵣ + π'_final).
     parent(substepper.stage_thermodynamic_density) .= parent(substepper.exner_perturbation)
 
     u = model.velocities.u
@@ -880,10 +870,10 @@ function acoustic_rk3_substep_loop!(model, substepper, Δt, β_stage, U⁰)
     launch!(arch, grid, :xyz, _reset_velocities_to_U0!,
             u, v, w, U⁰[2], U⁰[3], U⁰[4], U⁰[1], grid)
 
-    α = substepper.forward_weight
-    β = 1 - α
-    kdiv = substepper.divergence_damping_coefficient
-    β_d = substepper.acoustic_damping_coefficient
+    ω = substepper.forward_weight
+    ω̄ = 1 - ω
+    ϰᵈⁱ = substepper.divergence_damping_coefficient
+    ϰᵃᶜ = substepper.acoustic_damping_coefficient
 
     π′_forcing = CenterField(grid)  # TODO: pre-allocate this
 
@@ -891,13 +881,13 @@ function acoustic_rk3_substep_loop!(model, substepper, Δt, β_stage, U⁰)
         # Step 1: Forward — update u, v from PGF and slow tendency
         launch!(arch, grid, :xyz, _acoustic_horizontal_forward!,
                 u, v, grid, Δτ, cᵖ,
-                substepper.damped_exner_perturbation, substepper.virtual_potential_temperature,
+                substepper.filtered_exner_perturbation, substepper.virtual_potential_temperature,
                 substepper.slow_tendencies.velocity.u,
                 substepper.slow_tendencies.velocity.v)
 
-        # Step 2: Explicit π' forcing (Gˢπ + horizontal divergence + β·∂w⁻/∂z)
+        # Step 2: Explicit π' forcing (Gˢπ + horizontal divergence + (1-ω)·∂w⁻/∂z)
         launch!(arch, grid, :xyz, _compute_π′_forcing!,
-                π′_forcing, grid, Δτ, β,
+                π′_forcing, grid, Δτ, ω̄,
                 u, v, w, substepper.acoustic_compression, substepper.slow_tendencies.exner_pressure)
 
         # Save π' before implicit solve (for damping)
@@ -906,20 +896,20 @@ function acoustic_rk3_substep_loop!(model, substepper, Δt, β_stage, U⁰)
         # Step 3: Implicit solve — tridiagonal for π'⁺, back-solve for w⁺
         implicit_w_solve!(w, substepper, model, Δτ, π′_forcing)
 
-        # Step 3b: Klemp (2018) divergence damping (if β_d > 0)
+        # Step 3b: Klemp (2018) divergence damping (if ϰᵃᶜ > 0)
         # Damp u, v proportional to ∂(π'⁺ - π'⁻)/∂x.
         # Total damping per outer Δt is constant regardless of N.
-        if β_d > 0
+        if ϰᵃᶜ > 0
             launch!(arch, grid, :xyz, _acoustic_divergence_damping!,
                     u, v, substepper.exner_perturbation, substepper.previous_exner_perturbation,
-                    substepper.virtual_potential_temperature, grid, β_d, cᵖ)
+                    substepper.virtual_potential_temperature, grid, ϰᵃᶜ, cᵖ)
         end
 
-        # Step 4: Apply kdiv forward-extrapolation + accumulate velocity averages
+        # Step 4: Apply ϰᵈⁱ forward-extrapolation + accumulate velocity averages
         launch!(arch, grid, :xyz, _update_pressure_and_average!,
-                substepper.exner_perturbation, substepper.damped_exner_perturbation, substepper.previous_exner_perturbation,
+                substepper.exner_perturbation, substepper.filtered_exner_perturbation, substepper.previous_exner_perturbation,
                 u, v, w, ū,
-                grid, kdiv, 1 / Nτ)
+                grid, ϰᵈⁱ, 1 / Nτ)
     end
 
     # Recovery: convert acoustic variables back to Breeze prognostic fields.
@@ -930,13 +920,13 @@ function acoustic_rk3_substep_loop!(model, substepper, Δt, β_stage, U⁰)
     return nothing
 end
 
-@kernel function _reset_pi_prime_to_U0!(π′, π_ref, ρχ⁰, pˢᵗ, Rᵈ, κ)
+@kernel function _reset_pi_prime_to_U0!(π′, πᵣ, ρχ⁰, pˢᵗ, Rᵈ, κ)
     i, j, k = @index(Global, NTuple)
     @inbounds begin
         # Compute π(Uⁿ) from ρθⁿ via the equation of state: π = (Rd·ρθ/p₀)^(R/cv)
         R_over_cv = κ / (1 - κ)
         πⁿ = (Rᵈ * ρχ⁰[i, j, k] / pˢᵗ)^R_over_cv
-        π′[i, j, k] = πⁿ - π_ref[i, j, k]
+        π′[i, j, k] = πⁿ - πᵣ[i, j, k]
     end
 end
 
@@ -989,6 +979,11 @@ function recover_full_fields!(model, substepper, U⁰, Δt_stage)
     Rᵈ = dry_air_gas_constant(model.thermodynamic_constants)
     κ = Rᵈ / cᵖ
 
+    # Read slow tendencies directly from Gⁿ (no substepper copy needed)
+    Gⁿ = model.timestepper.Gⁿ
+    χ_name = thermodynamic_density_name(model.formulation)
+    Gˢρχ = getproperty(Gⁿ, χ_name)
+
     # Nonlinear recovery for WS-RK3:
     # ρθ: π'-perturbation approach — apply WS-RK3 perturbation in π'-space,
     #   then convert once via the equation of state. Avoids nonlinear splitting.
@@ -996,12 +991,12 @@ function recover_full_fields!(model, substepper, U⁰, Δt_stage)
     #   θⁿ = ρθⁿ/ρⁿ from U⁰ (initial state), NOT θᵥ from the evaluation state.
     #   Using θᵥ would double-count the θ change from earlier stages.
     #   Gˢθ = (Gˢρθ - θᵥ·Gˢρ)/ρ is the slow θ tendency at the evaluation state.
-    # π'_initial is saved in ρχᵣ; Gˢρχ/Gˢρ hold slow tendencies.
+    # π'_initial is saved in stage_thermodynamic_density.
     launch!(arch, grid, :xyz, _nonlinear_recovery_wsrk3!,
             model.dynamics.density, ρχ,
             substepper.exner_perturbation, substepper.stage_thermodynamic_density,
             substepper.reference_exner_function,
-            substepper.virtual_potential_temperature, substepper.slow_tendencies.thermodynamic_density, substepper.slow_tendencies.density,
+            substepper.virtual_potential_temperature, Gˢρχ, Gⁿ.ρ,
             U⁰[1], U⁰[5], pˢᵗ, Rᵈ, κ, Δt_stage)
 
     # Reconstruct momentum from updated density and velocity
@@ -1011,7 +1006,7 @@ function recover_full_fields!(model, substepper, U⁰, Δt_stage)
     return nothing
 end
 
-@kernel function _nonlinear_recovery_wsrk3!(ρ, ρχ, π′_final, π′_initial, π_ref,
+@kernel function _nonlinear_recovery_wsrk3!(ρ, ρχ, π′_final, π′_initial, πᵣ,
                                              θᵥ, Gˢρχ, Gˢρ,
                                              ρ⁰, ρχ⁰, pˢᵗ, Rᵈ, κ, Δt_stage)
     i, j, k = @index(Global, NTuple)
@@ -1083,7 +1078,7 @@ function acoustic_substep_loop!(model, substepper, Δt, α_ssp, U⁰)
     ū = substepper.averaged_velocities
     launch!(arch, grid, :xyz, _zero_avg_velocities!, ū)
 
-    parent(substepper.damped_exner_perturbation) .= parent(substepper.exner_perturbation)
+    parent(substepper.filtered_exner_perturbation) .= parent(substepper.exner_perturbation)
     parent(substepper.previous_exner_perturbation) .= parent(substepper.exner_perturbation)
 
     u = model.velocities.u
@@ -1091,36 +1086,36 @@ function acoustic_substep_loop!(model, substepper, Δt, α_ssp, U⁰)
     w = model.velocities.w
 
     # Off-centering parameter for implicit solver (NOT the SSP coefficient)
-    α_implicit = substepper.forward_weight
-    β_implicit = 1 - α_implicit
-    kdiv = substepper.divergence_damping_coefficient
-    β_d = substepper.acoustic_damping_coefficient
+    ω = substepper.forward_weight
+    ω̄ = 1 - ω
+    ϰᵈⁱ = substepper.divergence_damping_coefficient
+    ϰᵃᶜ = substepper.acoustic_damping_coefficient
     π′_forcing = CenterField(grid)  # TODO: pre-allocate
 
     for _ in 1:Nτ
         launch!(arch, grid, :xyz, _acoustic_horizontal_forward!,
                 u, v, grid, Δτ, cᵖ,
-                substepper.damped_exner_perturbation, substepper.virtual_potential_temperature,
+                substepper.filtered_exner_perturbation, substepper.virtual_potential_temperature,
                 substepper.slow_tendencies.velocity.u,
                 substepper.slow_tendencies.velocity.v)
 
         launch!(arch, grid, :xyz, _compute_π′_forcing!,
-                π′_forcing, grid, Δτ, β_implicit,
+                π′_forcing, grid, Δτ, ω̄,
                 u, v, w, substepper.acoustic_compression, substepper.slow_tendencies.exner_pressure)
 
         parent(substepper.previous_exner_perturbation) .= parent(substepper.exner_perturbation)
         implicit_w_solve!(w, substepper, model, Δτ, π′_forcing)
 
-        if β_d > 0
+        if ϰᵃᶜ > 0
             launch!(arch, grid, :xyz, _acoustic_divergence_damping!,
                     u, v, substepper.exner_perturbation, substepper.previous_exner_perturbation,
-                    substepper.virtual_potential_temperature, grid, β_d, cᵖ)
+                    substepper.virtual_potential_temperature, grid, ϰᵃᶜ, cᵖ)
         end
 
         launch!(arch, grid, :xyz, _update_pressure_and_average!,
-                substepper.exner_perturbation, substepper.damped_exner_perturbation, substepper.previous_exner_perturbation,
+                substepper.exner_perturbation, substepper.filtered_exner_perturbation, substepper.previous_exner_perturbation,
                 u, v, w, ū,
-                grid, kdiv, 1 / Nτ)
+                grid, ϰᵈⁱ, 1 / Nτ)
     end
 
     # Recovery uses π'_final: convert back to prognostic fields
@@ -1152,14 +1147,19 @@ function recover_full_fields_ssp!(model, substepper, α, U⁰, Δt)
 
     m⁰ = (ρu = U⁰[2], ρv = U⁰[3], ρw = U⁰[4])
 
+    # Read slow tendencies directly from Gⁿ (no substepper copy needed)
+    Gⁿ = model.timestepper.Gⁿ
+    χ_name = thermodynamic_density_name(model.formulation)
+    Gˢρχ = getproperty(Gⁿ, χ_name)
+
     # Nonlinear recovery from π' to ρθ using the equation of state:
-    # ρθ = (pˢᵗ/Rᵈ) * π^(cv/R) where π = π_ref + π'
+    # ρθ = (pˢᵗ/Rᵈ) * π^(cv/R) where π = πᵣ + π'
     # Density is diagnosed from ρ = ρθ/θ_new where θ_new includes the
     # slow advective θ tendency accumulated over Δt.
     launch!(arch, grid, :xyz, _nonlinear_recovery!,
             model.dynamics.density, ρχ,
             substepper.exner_perturbation, substepper.reference_exner_function, substepper.virtual_potential_temperature,
-            substepper.slow_tendencies.thermodynamic_density, substepper.slow_tendencies.density,
+            Gˢρχ, Gⁿ.ρ,
             pˢᵗ, Rᵈ, κ, Δt)
 
     # Reconstruct momentum from acoustic velocity and recovered density
@@ -1175,13 +1175,13 @@ function recover_full_fields_ssp!(model, substepper, α, U⁰, Δt)
     return nothing
 end
 
-@kernel function _nonlinear_recovery!(ρ, ρχ, π′, π_ref, θᵥ, Gˢρχ, Gˢρ, pˢᵗ, Rᵈ, κ, Δt)
+@kernel function _nonlinear_recovery!(ρ, ρχ, π′, πᵣ, θᵥ, Gˢρχ, Gˢρ, pˢᵗ, Rᵈ, κ, Δt)
     i, j, k = @index(Global, NTuple)
 
     @inbounds begin
         # Nonlinear EOS: ρθ = (pˢᵗ/Rᵈ) π^(cᵥ/R), where π = πᵣ + π'
         cᵥ_over_R = (1 - κ) / κ
-        π_total = π_ref[i, j, k] + π′[i, j, k]
+        π_total = πᵣ[i, j, k] + π′[i, j, k]
         ρχ⁺ = (pˢᵗ / Rᵈ) * π_total^cᵥ_over_R
         ρχ[i, j, k] = ρχ⁺
 

@@ -172,11 +172,11 @@ function compute_slow_momentum_tendencies!(model)
                    model.microphysical_fields,
                    model.thermodynamic_constants)
 
-    Gˢm = substepper.slow_tendencies.momentum
+    Gⁿ = model.timestepper.Gⁿ
 
-    launch!(arch, grid, :xyz, compute_x_momentum_tendency!, Gˢm.ρu, grid, u_args)
-    launch!(arch, grid, :xyz, compute_y_momentum_tendency!, Gˢm.ρv, grid, v_args)
-    launch!(arch, grid, :xyz, compute_z_momentum_tendency!, Gˢm.ρw, grid, w_args)
+    launch!(arch, grid, :xyz, compute_x_momentum_tendency!, Gⁿ.ρu, grid, u_args)
+    launch!(arch, grid, :xyz, compute_y_momentum_tendency!, Gⁿ.ρv, grid, v_args)
+    launch!(arch, grid, :xyz, compute_z_momentum_tendency!, Gⁿ.ρw, grid, w_args)
 
     return nothing
 end
@@ -198,16 +198,12 @@ the acoustic loop advances perturbation variables, not full fields.
 - ``G^s_χ``: full thermodynamic tendency (advection + physics)
 """
 function compute_slow_scalar_tendencies!(model)
-    substepper = model.timestepper.substepper
-
     # Compute Gˢρ = -∇·m^t (full density tendency at stage start)
+    # Writes directly to model.timestepper.Gⁿ.ρ
     compute_dynamics_tendency!(model)
-    χ_ρ_name = :ρ
-    Gρ_full = getproperty(model.timestepper.Gⁿ, χ_ρ_name)
-    parent(substepper.slow_tendencies.density) .= parent(Gρ_full)
 
     # Compute Gˢχ = full thermodynamic tendency (no correction needed)
-    Gⁿ = model.timestepper.Gⁿ
+    # Writes directly to model.timestepper.Gⁿ.ρθ (or other thermodynamic field)
     common_args = (
         model.dynamics,
         model.formulation,
@@ -222,10 +218,6 @@ function compute_slow_scalar_tendencies!(model)
         fields(model))
 
     AtmosphereModels.compute_thermodynamic_tendency!(model, common_args)
-
-    χ_name = thermodynamic_density_name(model.formulation)
-    Gχ_full = getproperty(Gⁿ, χ_name)
-    parent(substepper.slow_tendencies.thermodynamic_density) .= parent(Gχ_full)
 
     return nothing
 end
