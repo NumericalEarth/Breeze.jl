@@ -424,6 +424,9 @@ end
 # Helper function to compute Sᵐᵃˣ
 # Dispatches on aerosol_activation type to enable different activation schemes
 @inline function compute_smax(aerosol_activation, A::FT, α::FT, γ::FT, G::FT, w::FT, ρᴸ::FT) where FT
+    # No activation possible without updraft (w ≤ 0 gives ζ=η=0 → NaN from 0/0)
+    w ≤ eps(FT) && return zero(FT)
+
     ap = aerosol_activation.activation_parameters
     ad = aerosol_activation.aerosol_distribution
 
