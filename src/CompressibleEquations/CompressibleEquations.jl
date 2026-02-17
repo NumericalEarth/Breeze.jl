@@ -32,7 +32,6 @@ export
     SplitExplicitTimeDiscretization,
     ExplicitTimeStepping,
     VerticallyImplicit,
-    add_base_state_pressure_correction!,
     prepare_acoustic_cache!,
     acoustic_rk3_substep_loop!,
     acoustic_substep_loop!
@@ -46,7 +45,7 @@ using Oceananigans.BoundaryConditions: FieldBoundaryConditions, regularize_field
 using Oceananigans.Operators: divᶜᶜᶜ
 using Oceananigans.Utils: prettysummary, launch!
 
-using Breeze.Thermodynamics: mixture_gas_constant, mixture_heat_capacity, dry_air_gas_constant, ReferenceState, ExnerReferenceState
+using Breeze.Thermodynamics: mixture_gas_constant, mixture_heat_capacity, dry_air_gas_constant, ExnerReferenceState
 
 using Breeze.AtmosphereModels: AtmosphereModels, AtmosphereModel, grid_moisture_fractions, dynamics_density, standard_pressure, thermodynamic_density
 using Breeze.PotentialTemperatureFormulations: LiquidIcePotentialTemperatureFormulation

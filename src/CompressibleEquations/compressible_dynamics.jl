@@ -15,7 +15,7 @@ Fields
 - `standard_pressure`: Reference pressure pˢᵗ for potential temperature (default 10⁵ Pa)
 - `surface_pressure`: Mean pressure at the bottom of the atmosphere p₀
 - `time_discretization`: Time discretization scheme ([`SplitExplicitTimeDiscretization`](@ref) or [`ExplicitTimeStepping`](@ref))
-- `reference_state`: Fixed hydrostatically-balanced reference state for base-state pressure correction (`nothing` or `ReferenceState`)
+- `reference_state`: Fixed hydrostatically-balanced reference state for base-state pressure correction (`nothing` or [`ExnerReferenceState`](@ref))
 
 The `time_discretization` determines how tendencies are computed and which
 time-stepper is used:
@@ -28,7 +28,7 @@ struct CompressibleDynamics{TD, D, P, FT, RS}
     pressure :: P             # p = ρ R^m T (diagnostic)
     standard_pressure :: FT   # pˢᵗ (reference pressure for potential temperature)
     surface_pressure :: FT    # p₀ (mean pressure at the bottom of the atmosphere)
-    reference_state :: RS     # ReferenceState for base-state pressure correction (Nothing or ReferenceState)
+    reference_state :: RS     # ExnerReferenceState for base-state pressure correction (or Nothing)
 end
 
 """
@@ -51,7 +51,7 @@ Keyword Arguments
 - `reference_potential_temperature`: Potential temperature for building a fixed
   hydrostatically-balanced reference state used in base-state subtraction. Can be a constant `θ₀`
   or a function `θ(z)`. Default: `nothing` (no base-state correction).
-  When provided, a `ReferenceState` is built during materialization.
+  When provided, an [`ExnerReferenceState`](@ref) is built during materialization.
 """
 function CompressibleDynamics(time_discretization::TD = ExplicitTimeStepping();
                               standard_pressure = 1e5,
@@ -61,7 +61,7 @@ function CompressibleDynamics(time_discretization::TD = ExplicitTimeStepping();
     FT = promote_type(typeof(standard_pressure), typeof(surface_pressure))
     pˢᵗ = convert(FT, standard_pressure)
     p₀ = convert(FT, surface_pressure)
-    # Store reference_potential_temperature temporarily; ReferenceState is built in materialize_dynamics
+    # Store reference_potential_temperature temporarily; ExnerReferenceState is built in materialize_dynamics
     return CompressibleDynamics(time_discretization, nothing, nothing, pˢᵗ, p₀, reference_potential_temperature)
 end
 
@@ -97,23 +97,17 @@ function AtmosphereModels.materialize_dynamics(dynamics::CompressibleDynamics, g
     surface_pressure = convert(FT, dynamics.surface_pressure)
 
     # Build reference state if reference_potential_temperature was provided.
-    # For SplitExplicitTimeDiscretization, use ExnerReferenceState which has
-    # exact discrete Exner hydrostatic balance (required for the Exner pressure
-    # acoustic substepping formulation). For other time discretizations, use
-    # the standard ReferenceState.
+    # ExnerReferenceState builds the Exner function π₀ by discrete integration,
+    # ensuring exact discrete Exner hydrostatic balance. This is used for both
+    # split-explicit (acoustic substepping) and explicit time stepping.
     θ₀ = dynamics.reference_state  # temporarily stored θ₀ (or nothing)
     if θ₀ === nothing
         reference_state = nothing
-    elseif dynamics.time_discretization isa SplitExplicitTimeDiscretization
+    else
         reference_state = ExnerReferenceState(grid, thermodynamic_constants;
                                               surface_pressure,
                                               potential_temperature = θ₀,
                                               standard_pressure)
-    else
-        reference_state = ReferenceState(grid, thermodynamic_constants;
-                                         surface_pressure,
-                                         potential_temperature = θ₀,
-                                         standard_pressure)
     end
 
     return CompressibleDynamics(dynamics.time_discretization, density, pressure,

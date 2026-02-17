@@ -140,10 +140,7 @@ Fields
 - `exner_perturbation`: Current Exner pressure perturbation π' = π - π₀ (CenterField)
 - `previous_exner_perturbation`: Previous-substep π' for divergence damping (CenterField)
 - `damped_exner_perturbation`: Damped π' used in PGF (CenterField)
-- `stage_density`: Stage-frozen density ρ (CenterField)
 - `stage_thermodynamic_density`: Stage-frozen ρθ (CenterField)
-- `stage_pressure`: Reference-subtracted pressure p_stage - p_ref (CenterField)
-- `stage_buoyancy`: Reference buoyancy -g(ρ_stage - ρ_ref) / ρ_stage (CenterField)
 - `averaged_velocities`: Time-averaged velocities for scalar advection
 - `slow_tendencies`: Frozen slow tendencies (momentum, density, thermodynamic_density, velocity, exner_pressure)
 - `vertical_solver`: BatchedTridiagonalSolver for implicit w-π' coupling
@@ -160,10 +157,7 @@ struct AcousticSubstepper{N, FT, CF, AV, ST, TS}
     exner_perturbation :: CF                   # Current π' = π - π₀
     previous_exner_perturbation :: CF          # Previous-substep π' (for damping)
     damped_exner_perturbation :: CF            # Damped π' used in PGF
-    stage_density :: CF                        # Stage-frozen density ρ
     stage_thermodynamic_density :: CF          # Stage-frozen ρθ
-    stage_pressure :: CF                       # p_stage - p_ref (exact discrete balance)
-    stage_buoyancy :: CF                       # -g(ρ_stage - ρ_ref) / ρ_stage
     averaged_velocities :: AV                  # Time-averaged velocities for scalar advection
     slow_tendencies :: ST                      # Frozen slow tendencies (NamedTuple)
     vertical_solver :: TS                      # BatchedTridiagonalSolver for implicit w-π' coupling
@@ -189,10 +183,7 @@ Adapt.adapt_structure(to, a::AcousticSubstepper) =
                        adapt(to, a.exner_perturbation),
                        adapt(to, a.previous_exner_perturbation),
                        adapt(to, a.damped_exner_perturbation),
-                       adapt(to, a.stage_density),
                        adapt(to, a.stage_thermodynamic_density),
-                       adapt(to, a.stage_pressure),
-                       adapt(to, a.stage_buoyancy),
                        map(f -> adapt(to, f), a.averaged_velocities),
                        _adapt_slow_tendencies(to, a.slow_tendencies),
                        adapt(to, a.vertical_solver),
@@ -216,10 +207,7 @@ function AcousticSubstepper(grid, split_explicit::SplitExplicitTimeDiscretizatio
     exner_perturbation = CenterField(grid)
     previous_exner_perturbation = CenterField(grid)
     damped_exner_perturbation = CenterField(grid)
-    stage_density = CenterField(grid)
     stage_thermodynamic_density = CenterField(grid)
-    stage_pressure = CenterField(grid)
-    stage_buoyancy = CenterField(grid)
 
     averaged_velocities = (u = XFaceField(grid),
                            v = YFaceField(grid),
@@ -259,10 +247,7 @@ function AcousticSubstepper(grid, split_explicit::SplitExplicitTimeDiscretizatio
                               exner_perturbation,
                               previous_exner_perturbation,
                               damped_exner_perturbation,
-                              stage_density,
                               stage_thermodynamic_density,
-                              stage_pressure,
-                              stage_buoyancy,
                               averaged_velocities,
                               slow_tendencies,
                               vertical_solver,
@@ -335,9 +320,8 @@ function prepare_acoustic_cache!(substepper, model)
     grid = model.grid
     arch = architecture(grid)
 
-    # Store stage-frozen reference state (for recovery)
+    # Store stage-frozen thermodynamic density (for recovery)
     χ = thermodynamic_density(model.formulation)
-    parent(substepper.stage_density) .= parent(model.dynamics.density)
     parent(substepper.stage_thermodynamic_density) .= parent(χ)
 
     # Compute stage-frozen coefficients
@@ -363,8 +347,7 @@ function prepare_acoustic_cache!(substepper, model)
             model.dynamics.reference_state,
             pˢᵗ, cᵖ, κ)
 
-    # Use the ExnerReferenceState's π₀ directly (exact discrete Exner hydrostatic balance),
-    # or build from stage θᵥ for standard ReferenceState.
+    # Use the ExnerReferenceState's π₀ directly (exact discrete Exner hydrostatic balance).
     _set_exner_reference!(substepper, model, model.dynamics.reference_state, pˢᵗ, κ)
 
     return nothing
@@ -438,18 +421,6 @@ function _set_exner_reference!(substepper, model, ref::ExnerReferenceState, pˢ�
     return nothing
 end
 
-function _set_exner_reference!(substepper, model, ref::ReferenceState, pˢᵗ, κ)
-    grid = model.grid
-    arch = architecture(grid)
-    # Build π_ref from reference pressure (not exact Exner balance)
-    launch!(arch, grid, :xyz, _set_bottom_exner!,
-            substepper.reference_exner_function, ref.pressure, pˢᵗ, κ)
-    launch!(arch, grid, :xyz, _recompute_pi_prime!,
-            substepper.exner_perturbation, substepper.damped_exner_perturbation,
-            model.dynamics.pressure, substepper.reference_exner_function, pˢᵗ, κ)
-    return nothing
-end
-
 function _set_exner_reference!(substepper, model, ::Nothing, pˢᵗ, κ)
     grid = model.grid
     arch = architecture(grid)
@@ -472,7 +443,7 @@ end
 
 _compute_vertical_reference!(substepper, model, ::Nothing) = nothing
 
-function _compute_vertical_reference!(substepper, model, ref::Union{ReferenceState, ExnerReferenceState})
+function _compute_vertical_reference!(substepper, model, ref::ExnerReferenceState)
     grid = model.grid
     arch = architecture(grid)
     g = model.thermodynamic_constants.gravitational_acceleration
@@ -532,16 +503,9 @@ end
 
 @inline _get_reference_exner(i, j, k, ::Nothing, pˢᵗ, κ) = zero(pˢᵗ)
 
-@inline function _get_reference_exner(i, j, k, ref::ReferenceState, pˢᵗ, κ)
-    @inbounds pᵣ = ref.pressure[i, j, k]
-    return (pᵣ / pˢᵗ)^κ
-end
-
 @inline function _get_reference_exner(i, j, k, ref::ExnerReferenceState, pˢᵗ, κ)
     @inbounds return ref.exner_function[i, j, k]
 end
-
-# Old build_discrete_hydrostatic_exner! removed — replaced by ExnerReferenceState.
 
 #####
 ##### Section 4: Convert slow tendencies to velocity/pressure form
