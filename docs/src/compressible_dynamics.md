@@ -84,7 +84,7 @@ Two outer Runge-Kutta loop variants are available, both three-stage.
 
 #### Wicker-Skamarock RK3
 
-The default [`AcousticRungeKutta3`](@ref) time stepper
+The [`AcousticRungeKutta3`](@ref) time stepper
 ([Wicker and Skamarock 2002](@cite WickerSkamarock2002)) uses stage fractions
 ``β = 1/3, 1/2, 1``:
 
@@ -101,9 +101,9 @@ substep size is **constant** across all stages: ``Δτ = Δt / N_s``, while the 
 varies: ``N_τ = \max(\mathrm{round}(β N_s), 1)``. This ensures the acoustic CFL number is
 the same regardless of stage fraction.
 
-#### SSP RK3 (alternative)
+#### SSP RK3 (default)
 
-The [`AcousticSSPRungeKutta3`](@ref) time stepper uses the strong-stability-preserving (SSP) RK3
+The default [`AcousticSSPRungeKutta3`](@ref) time stepper uses the strong-stability-preserving (SSP) RK3
 scheme in Shu-Osher form ([Shu and Osher 1988](@cite Shu1988Efficient)):
 
 ```math

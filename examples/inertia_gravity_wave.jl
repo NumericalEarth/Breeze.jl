@@ -127,8 +127,7 @@ ssp_dynamics = CompressibleDynamics(ssp_time_discretization;
 
 # Case 6: Split-explicit with Wicker-Skamarock RK3 outer loop
 # Same acoustic substepping as SSP-RK3, but with WS-RK3 stage fractions (Δt/3, Δt/2, Δt)
-# instead of SSP convex combinations. This is the default for CompressibleDynamics with
-# SplitExplicitTimeDiscretization.
+# instead of SSP convex combinations.
 ws_time_discretization = SplitExplicitTimeDiscretization(substeps=Ns, divergence_damping_coefficient=0.10)
 ws_dynamics = CompressibleDynamics(ws_time_discretization;
                                      surface_pressure,
@@ -139,11 +138,10 @@ models = Dict(
     :anelastic      => AtmosphereModel(grid; advection, dynamics=anelastic_dynamics),
     :compressible   => AtmosphereModel(grid; advection, dynamics=compressible_dynamics),
     :boussinesq     => AtmosphereModel(grid; advection, dynamics=boussinesq_dynamics),
-    :adaptive       => AtmosphereModel(grid; advection, dynamics=adaptive_dynamics,
-                                       timestepper=:AcousticSSPRungeKutta3),
-    :ssp_rk3        => AtmosphereModel(grid; advection, dynamics=ssp_dynamics,
-                                       timestepper=:AcousticSSPRungeKutta3),
-    :ws_rk3         => AtmosphereModel(grid; advection, dynamics=ws_dynamics),
+    :adaptive       => AtmosphereModel(grid; advection, dynamics=adaptive_dynamics),
+    :ssp_rk3        => AtmosphereModel(grid; advection, dynamics=ssp_dynamics),
+    :ws_rk3         => AtmosphereModel(grid; advection, dynamics=ws_dynamics,
+                                       timestepper=:AcousticRungeKutta3),
 )
 nothing #hide
 

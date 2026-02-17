@@ -214,7 +214,7 @@ Return the default timestepper for `CompressibleDynamics` based on its `time_dis
 AtmosphereModels.default_timestepper(dynamics::CompressibleDynamics) =
     default_timestepper(dynamics.time_discretization)
 
-default_timestepper(::SplitExplicitTimeDiscretization) = :AcousticRungeKutta3
+default_timestepper(::SplitExplicitTimeDiscretization) = :AcousticSSPRungeKutta3
 default_timestepper(::ExplicitTimeStepping) = :SSPRungeKutta3
 
 #####

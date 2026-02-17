@@ -123,7 +123,7 @@ end
 end
 
 #####
-##### Test that default time stepper for split-explicit is WS-RK3
+##### Test that default time stepper for split-explicit is SSP-RK3
 #####
 
 @testset "Default time stepper for SplitExplicitTimeDiscretization [$(FT)]" for FT in test_float_types()
@@ -133,7 +133,7 @@ end
     dynamics = CompressibleDynamics(SplitExplicitTimeDiscretization())
     model = AtmosphereModel(grid; dynamics)
 
-    @test model.timestepper isa AcousticRungeKutta3
+    @test model.timestepper isa AcousticSSPRungeKutta3
 end
 
 #####
