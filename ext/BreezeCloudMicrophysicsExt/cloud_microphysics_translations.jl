@@ -323,7 +323,6 @@ Maximum supersaturation (dimensionless, e.g., 0.01 = 1% supersaturation)
     w = ℳ.velocities.w  # vertical velocity for aerosol activation
 
     # No activation possible without updraft
-    FT = typeof(w)
     w ≤ eps(FT) && return zero(FT)
 
     # Extract from thermodynamic state

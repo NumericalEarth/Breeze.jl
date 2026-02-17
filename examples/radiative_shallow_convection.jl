@@ -113,35 +113,6 @@ Cᵛ = 1.2e-3
 ρqᵗ_bcs = FieldBoundaryConditions(bottom=ρqᵗ_flux)
 ρu_bcs = FieldBoundaryConditions(bottom=Breeze.BulkDrag(coefficient=Cᴰ))
 
-# ## Sponge layer
-#
-# Rayleigh damping in the top 1 km to absorb gravity waves.
-
-zˢ = 3000  # Sponge starts at 3 km
-λ = 1/20   # Maximum damping rate [1/s] (20 s e-folding timescale)
-
-@inline function sponge_mask(i, j, k, grid, p)
-    z = Oceananigans.Grids.znode(i, j, k, grid, Center(), Center(), Center())
-    return clamp((z - p.zˢ) / (p.zᵗ - p.zˢ), 0, 1)
-end
-
-@inline function w_sponge(i, j, k, grid, clock, fields, p)
-    z = Oceananigans.Grids.znode(i, j, k, grid, Center(), Center(), Face())
-    mask = clamp((z - p.zˢ) / (p.zᵗ - p.zˢ), 0, 1)
-    @inbounds ρw = fields.ρw[i, j, k]
-    return -p.λ * mask * ρw
-end
-
-@inline function u_sponge(i, j, k, grid, clock, fields, p)
-    mask = sponge_mask(i, j, k, grid, p)
-    @inbounds ρu = fields.ρu[i, j, k]
-    return -p.λ * mask * ρu
-end
-
-sponge_params = (; λ, zˢ, zᵗ)
-ρw_sponge = Forcing(w_sponge, discrete_form=true, parameters=sponge_params)
-ρu_sponge = Forcing(u_sponge, discrete_form=true, parameters=sponge_params)
-
 # ## Microphysics
 
 microphysics = SaturationAdjustment(equilibrium=WarmPhaseEquilibrium())
@@ -156,11 +127,9 @@ momentum_advection = WENO(order=weno_order)
 scalar_advection = (ρθ  = WENO(order=weno_order),
                     ρqᵗ = WENO(order=weno_order, bounds=(0, 1)))
 
-forcing = (ρw=ρw_sponge, ρu=ρu_sponge)
-
 model = AtmosphereModel(grid; dynamics, microphysics, radiation,
                         momentum_advection, scalar_advection,
-                        boundary_conditions, forcing)
+                        boundary_conditions)
 
 # ## Initial conditions
 #
