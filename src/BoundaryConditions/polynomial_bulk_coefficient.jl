@@ -67,15 +67,15 @@ end
 
 Regression coefficients for the non-iterative mapping from bulk Richardson number
 ``Riᴮ`` to the Monin-Obukhov stability parameter ``ζ = z/L``, following
-Li et al. (2010).
+[Li et al. (2010)](@cite li2010improved).
 
 The superscripts u, w, s denote unstable, weakly stable, and strongly stable
 regimes respectively. Subscript indices follow the original paper.
 
 Three regimes:
-- **Unstable** (``Riᴮ <`` `stable_unstable_transition`): Eq. 12
-- **Weakly stable** (`stable_unstable_transition` ``≤ Riᴮ ≤`` `strongly_stable_transition`): Eq. 14
-- **Strongly stable** (``Riᴮ >`` `strongly_stable_transition`): Eq. 16
+- **Unstable** (``Riᴮ <`` `stable_unstable_transition`): Eq. (12)
+- **Weakly stable** (`stable_unstable_transition` ``≤ Riᴮ ≤`` `strongly_stable_transition`): Eq. (14)
+- **Strongly stable** (``Riᴮ >`` `strongly_stable_transition`): Eq. (16)
 
 # References
 
