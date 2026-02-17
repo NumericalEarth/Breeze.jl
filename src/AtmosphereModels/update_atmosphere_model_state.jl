@@ -99,7 +99,10 @@ function compute_velocities!(model::AtmosphereModel)
     # Ensure halos are filled before velocity computation
     # (prognostic field halo fill in update_state! is async)
     density = dynamics_density(model.dynamics)
-    fill_halo_regions!(density)
+    # Note: only_local_halos=true is needed because the density may be a column field
+    # (Flat in x and y, e.g. for AnelasticDynamics reference state), and Oceananigans'
+    # distributed halo communication does not handle Flat-located dimensions correctly.
+    fill_halo_regions!(density; only_local_halos=true)
     fill_halo_regions!(model.momentum)
 
     launch!(arch, grid, :xyz,
