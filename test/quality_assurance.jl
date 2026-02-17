@@ -21,6 +21,7 @@ else
 end
 
 @testset "Aqua" begin
+    Aqua.test_all(Breeze)
 end
 
 @testset "ExplicitImports" begin
