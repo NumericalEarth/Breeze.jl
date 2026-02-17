@@ -421,6 +421,18 @@ function _set_exner_reference!(substepper, model, ref::ExnerReferenceState, pˢ�
     return nothing
 end
 
+function _set_exner_reference!(substepper, model, ref::ReferenceState, pˢᵗ, κ)
+    grid = model.grid
+    arch = architecture(grid)
+    # Build π_ref from reference pressure (not exact Exner balance)
+    launch!(arch, grid, :xyz, _set_bottom_exner!,
+            substepper.reference_exner_function, ref.pressure, pˢᵗ, κ)
+    launch!(arch, grid, :xyz, _recompute_pi_prime!,
+            substepper.exner_perturbation, substepper.damped_exner_perturbation,
+            model.dynamics.pressure, substepper.reference_exner_function, pˢᵗ, κ)
+    return nothing
+end
+
 function _set_exner_reference!(substepper, model, ::Nothing, pˢᵗ, κ)
     grid = model.grid
     arch = architecture(grid)
@@ -431,77 +443,17 @@ function _set_exner_reference!(substepper, model, ::Nothing, pˢᵗ, κ)
     return nothing
 end
 
-##### Compute reference-subtracted pressure and buoyancy for the vertical PGF.
-##### These satisfy exact discrete hydrostatic balance: ∂pᵣ/∂z + g avg(ρ-ρ_ref) = 0
-##### to machine precision, avoiding the hydrostatic imbalance that plagues the
-##### pure Exner formulation.
-
-function _compute_vertical_reference!(substepper, model)
-    ref = model.dynamics.reference_state
-    _compute_vertical_reference!(substepper, model, ref)
-end
-
-_compute_vertical_reference!(substepper, model, ::Nothing) = nothing
-
-function _compute_vertical_reference!(substepper, model, ref::ExnerReferenceState)
-    grid = model.grid
-    arch = architecture(grid)
-    g = model.thermodynamic_constants.gravitational_acceleration
-
-    # pᵣ = p_stage - p_ref
-    parent(substepper.stage_pressure) .= parent(model.dynamics.pressure)
-    parent(substepper.stage_pressure) .-= parent(ref.pressure)
-
-    # bᵣ = -g(ρ_stage - ρ_ref) / ρ_stage (buoyancy in velocity form)
-    launch!(arch, grid, :xyz, _compute_reference_buoyancy_velocity!,
-            substepper.stage_buoyancy, model.dynamics.density, ref.density, g)
-    return nothing
-end
-
-@kernel function _compute_reference_buoyancy_velocity!(bᵣ, ρ, ρ_ref, g)
-    i, j, k = @index(Global, NTuple)
-    @inbounds bᵣ[i, j, k] = -g * (ρ[i, j, k] - ρ_ref[i, j, k]) / ρ[i, j, k]
-end
-
-function _build_stage_hydrostatic_exner!(πᵣ, θᵥ, model)
-    grid = model.grid
-    arch = architecture(grid)
-    g = model.thermodynamic_constants.gravitational_acceleration
-    cᵖᵈ = model.thermodynamic_constants.dry_air.heat_capacity
-    pˢᵗ = model.dynamics.standard_pressure
-    Rᵈ = dry_air_gas_constant(model.thermodynamic_constants)
-    κ = Rᵈ / cᵖᵈ
-
-    # Set bottom value from actual stage pressure
-    launch!(arch, grid, :xyz, _set_bottom_exner!,
-            πᵣ, model.dynamics.pressure, pˢᵗ, κ)
-
-    # Integrate upward using STAGE θᵥ (same as used by acoustic loop)
-    Nz = size(grid, 3)
-    launch!(arch, grid, :xy, _integrate_stage_hydrostatic_exner!,
-            πᵣ, θᵥ, grid, g, cᵖᵈ, Nz)
-
-    return nothing
-end
-
 @kernel function _set_bottom_exner!(πᵣ, p, pˢᵗ, κ)
     i, j, k = @index(Global, NTuple)
     @inbounds πᵣ[i, j, k] = (p[i, j, k] / pˢᵗ)^κ
 end
 
-@kernel function _integrate_stage_hydrostatic_exner!(πᵣ, θᵥ, grid, g, cᵖᵈ, Nz)
-    i, j = @index(Global, NTuple)
-    for k in 2:Nz
-        @inbounds begin
-            Δzᶠ = Δzᶜᶜᶠ(i, j, k, grid)
-            # Use the SAME face average as the w-update kernel: avg(θᵥ[k-1], θᵥ[k])
-            θᵥᶠ = (θᵥ[i, j, k] + θᵥ[i, j, k-1]) / 2
-            πᵣ[i, j, k] = πᵣ[i, j, k-1] - g * Δzᶠ / (cᵖᵈ * θᵥᶠ)
-        end
-    end
-end
-
 @inline _get_reference_exner(i, j, k, ::Nothing, pˢᵗ, κ) = zero(pˢᵗ)
+
+@inline function _get_reference_exner(i, j, k, ref::ReferenceState, pˢᵗ, κ)
+    @inbounds pᵣ = ref.pressure[i, j, k]
+    return (pᵣ / pˢᵗ)^κ
+end
 
 @inline function _get_reference_exner(i, j, k, ref::ExnerReferenceState, pˢᵗ, κ)
     @inbounds return ref.exner_function[i, j, k]
@@ -863,22 +815,6 @@ end
 end
 
 #####
-##### Section 8: Zero fields
-#####
-
-@kernel function _zero_acoustic_fields!(ū, π′, π′_old, π′_damped)
-    i, j, k = @index(Global, NTuple)
-    @inbounds begin
-        ū.u[i, j, k] = 0
-        ū.v[i, j, k] = 0
-        ū.w[i, j, k] = 0
-        π′[i, j, k] = 0
-        π′_old[i, j, k] = 0
-        π′_damped[i, j, k] = 0
-    end
-end
-
-#####
 ##### Section 9: WS-RK3 substep loop
 #####
 
@@ -1013,36 +949,6 @@ end
     end
 end
 
-@kernel function _accumulate_density_change!(Δρ, grid, Δτ, ρ₀, u, v, w)
-    i, j, k = @index(Global, NTuple)
-    Nz = size(grid, 3)
-
-    @inbounds begin
-        # Velocity divergence: ∂u/∂x + ∂v/∂y + ∂w/∂z
-        # Must use the SAME discrete divergence operator as the pressure equation
-        # (in _compute_fpk!) so that ρ and ρθ evolve consistently.
-        # Using ∇·(ρ₀u) instead would introduce an extra u·∇ρ₀ term not present
-        # in the pressure equation, causing ρ-ρθ inconsistency and drift.
-        div_u = (u[i + 1, j, k] - u[i, j, k]) / Δxᶠᶜᶜ(i, j, k, grid) +
-                (v[i, j + 1, k] - v[i, j, k]) / Δyᶜᶠᶜ(i, j, k, grid)
-
-        w_top = ifelse(k == Nz, zero(eltype(w)), w[i, j, k + 1])
-        w_bot = ifelse(k == 1, zero(eltype(w)), w[i, j, k])
-        div_u += (w_top - w_bot) / Δzᶜᶜᶜ(i, j, k, grid)
-
-        # Linearized continuity equation: ∂ρ/∂t = -ρ₀ ∇·u
-        Δρ[i, j, k] -= Δτ * ρ₀[i, j, k] * div_u
-    end
-end
-
-@kernel function _compute_slow_theta_tendency!(Gˢθ, Gˢρχ, Gˢρ, θᵥ, ρ)
-    i, j, k = @index(Global, NTuple)
-    @inbounds begin
-        # Material derivative of θ: Gˢθ = (Gˢρθ - θ Gˢρ) / ρ
-        Gˢθ[i, j, k] = (Gˢρχ[i, j, k] - θᵥ[i, j, k] * Gˢρ[i, j, k]) / ρ[i, j, k]
-    end
-end
-
 @kernel function _reset_velocities_to_U0!(u, v, w, ρu⁰, ρv⁰, ρw⁰, ρ⁰, grid)
     i, j, k = @index(Global, NTuple)
     @inbounds begin
@@ -1054,25 +960,6 @@ end
 
         ρᶜᶜᶠ = ℑzᵃᵃᶠ(i, j, k, grid, ρ⁰)
         w[i, j, k] = ρw⁰[i, j, k] / ρᶜᶜᶠ * (k > 1)
-    end
-end
-
-@kernel function _reset_pi_prime_to_U0!(π′, π′_damped, ρ⁰, ρθ⁰, π_ref,
-                                        constants, pˢᵗ, κ, cᵖ)
-    i, j, k = @index(Global, NTuple)
-    @inbounds begin
-        ρⁱ = ρ⁰[i, j, k]
-        ρθⁱ = ρθ⁰[i, j, k]
-        θⁱ = ρθⁱ / ρⁱ
-        Rᵈ = cᵖ * κ
-        # T = θ^γ (ρ R / pˢᵗ)^(γ-1) — standard formula
-        γ = cᵖ / (cᵖ - Rᵈ)
-        Tⁱ = θⁱ^γ * (ρⁱ * Rᵈ / pˢᵗ)^(γ - 1)
-        pⁱ = ρⁱ * Rᵈ * Tⁱ
-        πⁱ = (pⁱ / pˢᵗ)^κ
-        π′_val = πⁱ - π_ref[i, j, k]
-        π′[i, j, k] = π′_val
-        π′_damped[i, j, k] = π′_val
     end
 end
 
@@ -1122,25 +1009,6 @@ function recover_full_fields!(model, substepper, U⁰, Δt_stage)
             model.momentum, model.dynamics.density, model.velocities, grid)
 
     return nothing
-end
-
-@kernel function _linearized_recovery!(ρ, ρχ, π′, π′_initial, ρᵣ, ρχᵣ, π_ref, θᵥ, ρ⁰, ρχ⁰, κ)
-    i, j, k = @index(Global, NTuple)
-
-    @inbounds begin
-        # Linearized conversion from Δπ' to ρθ perturbation:
-        # π ∝ (ρθ)^(R/cv), so δπ = (R/cv)(π/ρθ) δ(ρθ)
-        # Invert: δ(ρθ) = (cv/R)(ρθ/π) δπ = ((1-κ)/κ)(ρθ/π) Δπ'
-        # Use the CHANGE in π' (not total) to avoid double-counting.
-        cᵥ_over_R = (1 - κ) / κ
-        πᵣ = π_ref[i, j, k]
-        Δπ = π′[i, j, k] - π′_initial[i, j, k]
-        ρχ_perturbation = cᵥ_over_R * ρχᵣ[i, j, k] / πᵣ * Δπ
-
-        # WS-RK3: U_new = U⁰ + perturbation
-        ρχ[i, j, k] = ρχ⁰[i, j, k] + ρχ_perturbation
-        ρ[i, j, k] = ρχ[i, j, k] / θᵥ[i, j, k]
-    end
 end
 
 @kernel function _nonlinear_recovery_wsrk3!(ρ, ρχ, π′_final, π′_initial, π_ref,
@@ -1338,11 +1206,3 @@ end
         ρχ[i, j, k]   = α * ρχ[i, j, k]   + (1 - α) * ρχ⁰[i, j, k]
     end
 end
-
-#####
-##### Section 12: Unused legacy functions (kept for API compatibility)
-#####
-
-add_base_state_pressure_correction!(substepper, model) = nothing
-add_base_state_pressure_correction!(substepper, model, ::Nothing) = nothing
-add_base_state_pressure_correction!(substepper, model, ref) = nothing
