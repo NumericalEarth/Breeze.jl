@@ -75,6 +75,14 @@ Base.summary(::NonEquilibriumCloudFormation) = "NonEquilibriumCloudFormation"
 # NonEquilibriumCloudFormation uses the standard tendency interface,
 # so the model-wide microphysics update is a no-op.
 AtmosphereModels.microphysics_model_update!(::NonEquilibriumCloudFormation, model) = nothing
+
+# NonEquilibriumCloudFormation stores vapor in microphysical_fields.qᵛ,
+# just like SaturationAdjustment.
+AtmosphereModels.specific_humidity(::NonEquilibriumCloudFormation, model) = model.microphysical_fields.qᵛ
+AtmosphereModels.vapor_mass_fraction(::NonEquilibriumCloudFormation, model) = model.microphysical_fields.qᵛ
+AtmosphereModels.liquid_mass_fraction(::NonEquilibriumCloudFormation, model) = model.microphysical_fields.qˡ
+AtmosphereModels.ice_mass_fraction(::NonEquilibriumCloudFormation{<:Any, Nothing}, model) = nothing
+AtmosphereModels.ice_mass_fraction(::NonEquilibriumCloudFormation, model) = model.microphysical_fields.qⁱ
 #####
 ##### Condensate formation models (for non-equilibrium schemes)
 #####
