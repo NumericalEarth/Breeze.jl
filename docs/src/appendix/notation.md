@@ -75,7 +75,7 @@ The following table also uses a few conventions that suffuse the source code and
 | ``\mathscr{H}``                     | `ℋ`    | `RelativeHumidity(model)`           | Relative humidity, ``ℋ = pᵛ / pᵛ⁺``                                            |
 | ``\mathscr{S}``                     | `𝒮`    | `supersaturation(T, ρ, q, c, surf)` | Supersaturation, ``𝒮 = pᵛ / pᵛ⁺ - 1``                                          |
 | ``g``                               | `g`    | `TC.gravitational_acceleration`     | Gravitational acceleration                                                     |
-| ``\mathbb{U}^s``                    | `𝕌ˢ`   |                                     | Sound speed, ``𝕌ˢ = \sqrt{γ Rᵈ T}``                                            |
+| ``\mathbb{C}^{ac}``                 | `ℂᵃᶜ`  |                                     | Acoustic sound speed, ``ℂᵃᶜ = \sqrt{γ Rᵈ T}``                                  |
 | ``\mathcal{R}``                     | `ℛ`    | `TC.molar_gas_constant`             | Universal (molar) gas constant                                                 |
 | ``Tᵗʳ``                             | `Tᵗʳ`  | `TC.triple_point_temperature`       | Temperature at the vapor-liquid-ice triple point                               |
 | ``pᵗʳ``                             | `pᵗʳ`  | `TC.triple_point_pressure`          | Pressure at the vapor-liquid-ice triple point                                  |
@@ -132,7 +132,7 @@ The following table also uses a few conventions that suffuse the source code and
 | ``\mathcal{U}``                     | `𝒰`    |                                     | Thermodynamic state struct (e.g., `StaticEnergyState`)                         |
 | ``\mathcal{M}``                     | `ℳ`    |                                     | Microphysical state struct (e.g., `WarmPhaseOneMomentState`)                   |
 | ``\psi``                            | `ψ`    | `AcousticSubstepper.pressure_coefficient` | Pressure coefficient for acoustic substepping, ``ψ = Rᵐ T``             |
-| ``c^{ac}^2``                        | `cᵃᶜ²` | `AcousticSubstepper.sound_speed_squared`  | Acoustic sound speed squared, ``cᵃᶜ² = γᵐ ψ = γᵐ Rᵐ T``                 |
+| ``{\mathbb{C}^{ac}}^2``             | `ℂᵃᶜ²` |                                           | Acoustic sound speed squared, ``ℂᵃᶜ² = γᵐ ψ = γᵐ Rᵐ T``                 |
 | ``G^n``                             | `Gⁿ`   |                                     | Tendency fields at time step ``n``                                             |
 | ``G^s``                             | `Gˢ`   |                                     | Slow tendencies (excludes fast pressure gradient and buoyancy)                 |
 | ``N_s``                             | `Ns`   | `AcousticSubstepper.Ns`             | Number of acoustic substeps per full time step                                 |

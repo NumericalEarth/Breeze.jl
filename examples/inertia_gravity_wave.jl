@@ -110,7 +110,7 @@ boussinesq_dynamics = AnelasticDynamics(constant_density_reference_state)
 
 # Case 4: Split-explicit with adaptive substeps at the advective time step.
 # The number of acoustic substeps is computed automatically from the CFL condition
-# each time step: `N = ceil(safety_factor · Δt · cₛ / Δx_min)`.
+# each time step: `N = ceil(safety_factor · Δt · ℂᵃᶜ / Δx_min)`.
 # We use SSP-RK3 because it is stable at larger advective CFL than WS-RK3.
 adaptive_dynamics = CompressibleDynamics(SplitExplicitTimeDiscretization();
                                           surface_pressure,
@@ -166,11 +166,11 @@ end
 Δx, Δz = Lx / Nx, Lz / Nz
 Rᵈ = dry_air_gas_constant(constants)
 cᵖᵈ = constants.dry_air.heat_capacity
-cₛ = sqrt(cᵖᵈ / (cᵖᵈ - Rᵈ) * Rᵈ * θ₀)
+ℂᵃᶜ = sqrt(cᵖᵈ / (cᵖᵈ - Rᵈ) * Rᵈ * θ₀)
 
 cfl = 0.5
 Δt_advective    = cfl * min(Δx, Δz) / U
-Δt_compressible = cfl * min(Δx, Δz) / (cₛ + U)
+Δt_compressible = cfl * min(Δx, Δz) / (ℂᵃᶜ + U)
 Δt_split        = 12
 
 time_steps = Dict(

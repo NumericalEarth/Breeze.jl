@@ -67,7 +67,7 @@ end
     @testset "1 km grid, Δt=12" begin
         grid = RectilinearGrid(acoustic_test_arch; size=(100, 6, 10), halo=(5, 5, 5),
                                x=(0, 100kilometers), y=(0, 6kilometers), z=(0, 10kilometers))
-        # Δx = 1000 m, cₛ ≈ 347 m/s, safety factor 1.2
+        # Δx = 1000 m, ℂᵃᶜ ≈ 347 m/s, safety factor 1.2
         # N = ceil(1.2 * 12 * 347 / 1000) = ceil(4.99) = 5
         N = compute_acoustic_substeps(grid, 12, constants)
         @test N isa Int

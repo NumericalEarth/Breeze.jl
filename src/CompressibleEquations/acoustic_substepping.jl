@@ -260,11 +260,11 @@ $(TYPEDSIGNATURES)
 
 Compute the number of acoustic substeps from the horizontal acoustic CFL condition.
 
-Uses a conservative sound speed estimate `cₛ = √(γ Rᵈ Tᵣ)` with `Tᵣ = 300 K`
-(giving `cₛ ≈ 347 m/s`) and the minimum horizontal grid spacing. The vertical
+Uses a conservative sound speed estimate `ℂᵃᶜ = √(γ Rᵈ Tᵣ)` with `Tᵣ = 300 K`
+(giving `ℂᵃᶜ ≈ 347 m/s`) and the minimum horizontal grid spacing. The vertical
 CFL is not needed because the w-π' coupling is vertically implicit.
 
-Following CM1, the substep count satisfies `Δτ · cₛ / Δx_min ≤ 1` where
+Following CM1, the substep count satisfies `Δτ · ℂᵃᶜ / Δx_min ≤ 1` where
 `Δτ = Δt / N` is the acoustic substep size. A safety factor of 1.2 is applied
 to ensure stability with the forward-backward splitting.
 """
@@ -274,7 +274,7 @@ function compute_acoustic_substeps(grid, Δt, thermodynamic_constants)
     cᵥ = cᵖ - Rᵈ
     γ = cᵖ / cᵥ
     Tᵣ = 300 # Conservative reference temperature (surface conditions)
-    cₛ = sqrt(γ * Rᵈ * Tᵣ) # ≈ 347 m/s
+    ℂᵃᶜ = sqrt(γ * Rᵈ * Tᵣ) # ≈ 347 m/s
 
     # Minimum horizontal grid spacing (skip Flat dimensions)
     TX, TY, _ = topology(grid)
@@ -283,7 +283,7 @@ function compute_acoustic_substeps(grid, Δt, thermodynamic_constants)
     Δh_min = min(Δx_min, Δy_min)
 
     safety_factor = 1.2
-    return ceil(Int, safety_factor * Δt * cₛ / Δh_min)
+    return ceil(Int, safety_factor * Δt * ℂᵃᶜ / Δh_min)
 end
 
 # When substeps is specified, use it directly

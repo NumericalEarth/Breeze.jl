@@ -86,7 +86,7 @@ Thermodynamic relations (mixture gas constant ``R^m``, heat capacity ``c^{pm}``,
 
 ### Thermodynamic closures
 - ``Π = (p / p_0)^{R^m / c^{pm}}``: Exner function
-- ``c_s = \sqrt{γ^m R^m T}``: Adiabatic sound speed, where ``γ^m = c^{pm} / c^{vm}``
+- ``\mathbb{C}^{ac} = \sqrt{γ^m R^m T}``: Acoustic sound speed, where ``γ^m = c^{pm} / c^{vm}``
 - ``b``: Buoyancy
 
 See [Thermodynamics](@ref Thermodynamics-section) for full definitions of ``R^m(q)``, ``c^{pm}(q)``, and ``Π``.

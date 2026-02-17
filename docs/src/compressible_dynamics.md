@@ -331,7 +331,7 @@ scheme, following [Klemp, Skamarock, and Dudhia (2007)](@cite KlempSkamarockDudh
 ### [Why the Exner linearization is necessary](@id exner-linearization)
 
 In a ``ρ``-based formulation where the perturbation pressure gradient takes the form
-``c_s^2 \, \boldsymbol{\nabla} ρ''``, the sound speed coefficient ``c_s^2 = γ R^d T`` must
+``{\mathbb{C}^{ac}}^2 \, \boldsymbol{\nabla} ρ''``, the sound speed coefficient ``{\mathbb{C}^{ac}}^2 = γ R^d T`` must
 be recomputed from the equation of state at each Runge-Kutta stage. This recomputation couples
 acoustic-amplitude density perturbations ``ρ''`` back into the pressure field used by the
 next stage's slow tendency evaluation, effectively imposing an **acoustic CFL constraint on
