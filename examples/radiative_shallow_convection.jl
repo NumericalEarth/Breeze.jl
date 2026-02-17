@@ -249,7 +249,7 @@ qˡ = model.microphysical_fields.qˡ
 # ## Simulation
 
 simulation = Simulation(model; Δt=1, stop_time=4hours)
-conjure_time_step_wizard!(simulation, cfl=0.5, max_Δt=5)
+conjure_time_step_wizard!(simulation, cfl=0.7)
 
 wall_clock = Ref(time_ns())
 
