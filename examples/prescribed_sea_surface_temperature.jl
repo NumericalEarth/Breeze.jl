@@ -127,8 +127,9 @@ scalar_advection = WENO(order=5)
 # The default stability correction uses [`FittedStabilityFunction`](@ref), which maps
 # ``Riᴮ`` to the Monin-Obukhov stability parameter ``ζ = z/L`` via the non-iterative
 # regression of [Li2010](@citet), then evaluates integrated MOST stability functions
-# ``Ψᴰ(ζ)`` and ``Ψᵀ(ζ)`` (Hogström 1996 for unstable, Beljaars & Holtslag 1991 for
-# stable conditions). The stability-corrected transfer coefficients are
+# ``Ψᴰ(ζ)`` and ``Ψᵀ(ζ)`` ([hogstrom1996review](@citet) for unstable,
+# [beljaars1991flux](@citet) for stable conditions). The stability-corrected transfer
+# coefficients are:
 #
 # ```math
 # Cᴰ = Cᴰ_N \left[\frac{α}{α - Ψᴰ}\right]^2, \quad
