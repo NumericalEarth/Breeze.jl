@@ -103,7 +103,9 @@ set!(constant_density_reference_state.density, ρ₀)
 boussinesq_dynamics = AnelasticDynamics(constant_density_reference_state)
 
 # Case 3: Compressible (fully explicit, no substepping)
-compressible_dynamics = CompressibleDynamics(ExplicitTimeStepping(); surface_pressure)
+compressible_dynamics = CompressibleDynamics(ExplicitTimeStepping();
+                                              surface_pressure,
+                                              reference_potential_temperature=θᵇᵍ)
 
 # Case 4: Split-explicit with SSP-RK3 outer loop
 # Uses acoustic substepping with Exner pressure variables (velocity + π') and
