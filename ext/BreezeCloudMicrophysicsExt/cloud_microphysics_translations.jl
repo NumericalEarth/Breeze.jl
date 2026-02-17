@@ -437,8 +437,9 @@ end
     ap = aerosol_activation.activation_parameters
     ad = aerosol_activation.aerosol_distribution
 
-    # ARG 2000 only valid for positive updraft velocity
-    w <= zero(FT) && return zero(FT)
+    # ARG 2000 only valid for positive updraft velocity and positive α
+    # (α is the adiabatic supersaturation production rate; non-positive means no activation)
+    (w <= zero(FT) || α <= zero(FT)) && return zero(FT)
 
     ζ = 2A / 3 * sqrt(α * w / G)
 

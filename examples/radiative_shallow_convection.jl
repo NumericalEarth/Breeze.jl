@@ -249,8 +249,8 @@ qˡ = model.microphysical_fields.qˡ
 
 # ## Simulation
 
-simulation = Simulation(model; Δt=1, stop_time=4hours)
-conjure_time_step_wizard!(simulation, cfl=0.7)
+simulation = Simulation(model; Δt=1, stop_time=30minutes)
+conjure_time_step_wizard!(simulation, cfl=0.5, max_Δt=5)
 
 wall_clock = Ref(time_ns())
 
@@ -287,13 +287,13 @@ avg_outputs = NamedTuple(name => Average(outputs[name], dims=1) for name in keys
 filename = "radiative_shallow_convection"
 simulation.output_writers[:averages] = JLD2Writer(model, avg_outputs;
                                                   filename = filename * "_averages.jld2",
-                                                  schedule = AveragedTimeInterval(30minutes),
+                                                  schedule = AveragedTimeInterval(10minutes),
                                                   overwrite_existing = true)
 
 slice_outputs = (; w, qˡ, T)
 simulation.output_writers[:slices] = JLD2Writer(model, slice_outputs;
                                                 filename = filename * "_slices.jld2",
-                                                schedule = TimeInterval(15minutes),
+                                                schedule = TimeInterval(5minutes),
                                                 overwrite_existing = true)
 
 @info "Starting simulation..."
