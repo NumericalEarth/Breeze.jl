@@ -61,7 +61,9 @@ function tracer_specific_to_density!(tracers, density)
 end
 
 diagnostic_indices(::Bounded, N, H) = 1:N+1
-diagnostic_indices(::Periodic, N, H) = -H+1:N+H
+# For Periodic, start at -H+2 because face-interpolation (ℑxᶠᵃᵃ) accesses i-1.
+# Starting at -H+1 would require accessing index -H which is out of bounds.
+diagnostic_indices(::Periodic, N, H) = -H+2:N+H
 diagnostic_indices(::Flat, N, H) = 1:N
 
 #####

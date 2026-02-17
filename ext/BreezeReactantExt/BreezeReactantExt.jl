@@ -1,6 +1,7 @@
 module BreezeReactantExt
 
+using Breeze
+
 include("Timesteppers.jl")
-using .TimeSteppers
 
 end # module

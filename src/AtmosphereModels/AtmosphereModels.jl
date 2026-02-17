@@ -11,6 +11,10 @@ export
     pressure_anomaly,
     total_pressure,
     buoyancy_forceᶜᶜᶜ,
+    SlowTendencyMode,
+    HorizontalSlowMode,
+    compute_pressure_correction!,
+    make_pressure_correction!,
     # Thermodynamic formulation interface (formulation types exported by their respective modules)
     thermodynamic_density_name,
     thermodynamic_density,
@@ -59,7 +63,12 @@ export
     LiquidIcePotentialTemperature,
     StaticEnergy,
     compute_hydrostatic_pressure!,
-    set_to_mean!
+    set_to_mean!,
+
+    # Momentum tendency kernels (used by TimeSteppers for acoustic substepping)
+    compute_x_momentum_tendency!,
+    compute_y_momentum_tendency!,
+    compute_z_momentum_tendency!
 
 using DocStringExtensions: TYPEDSIGNATURES, TYPEDEF, TYPEDFIELDS
 using Adapt: Adapt, adapt
