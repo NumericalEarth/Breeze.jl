@@ -14,7 +14,6 @@ using Breeze.AtmosphereModels:
     AtmosphereModel,
     SlowTendencyMode,
     dynamics_density,
-    thermodynamic_density_name,
     compute_x_momentum_tendency!,
     compute_y_momentum_tendency!,
     compute_z_momentum_tendency!,
