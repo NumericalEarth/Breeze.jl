@@ -415,18 +415,6 @@ function _set_exner_reference!(substepper, model, ref::ExnerReferenceState, pˢ�
     return nothing
 end
 
-function _set_exner_reference!(substepper, model, ref::ReferenceState, pˢᵗ, κ)
-    grid = model.grid
-    arch = architecture(grid)
-    # Build πᵣ from reference pressure (not exact Exner balance)
-    launch!(arch, grid, :xyz, _set_bottom_exner!,
-            substepper.reference_exner_function, ref.pressure, pˢᵗ, κ)
-    launch!(arch, grid, :xyz, _recompute_pi_prime!,
-            substepper.exner_perturbation, substepper.filtered_exner_perturbation,
-            model.dynamics.pressure, substepper.reference_exner_function, pˢᵗ, κ)
-    return nothing
-end
-
 function _set_exner_reference!(substepper, model, ::Nothing, pˢᵗ, κ)
     grid = model.grid
     arch = architecture(grid)
@@ -437,17 +425,7 @@ function _set_exner_reference!(substepper, model, ::Nothing, pˢᵗ, κ)
     return nothing
 end
 
-@kernel function _set_bottom_exner!(πᵣ, p, pˢᵗ, κ)
-    i, j, k = @index(Global, NTuple)
-    @inbounds πᵣ[i, j, k] = (p[i, j, k] / pˢᵗ)^κ
-end
-
 @inline reference_exner(i, j, k, ::Nothing, pˢᵗ, κ) = zero(pˢᵗ)
-
-@inline function reference_exner(i, j, k, ref::ReferenceState, pˢᵗ, κ)
-    @inbounds pᵣ = ref.pressure[i, j, k]
-    return (pᵣ / pˢᵗ)^κ
-end
 
 @inline function reference_exner(i, j, k, ref::ExnerReferenceState, pˢᵗ, κ)
     @inbounds return ref.exner_function[i, j, k]

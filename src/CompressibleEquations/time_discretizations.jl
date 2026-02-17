@@ -62,25 +62,3 @@ by the acoustic CFL condition (sound speed ~340 m/s).
 Use [`SplitExplicitTimeDiscretization`](@ref) for more efficient time-stepping with larger Δt.
 """
 struct ExplicitTimeStepping end
-
-#####
-##### Vertical time discretization (legacy, kept for compatibility)
-#####
-
-"""
-$(TYPEDEF)
-
-Vertically implicit time discretization for acoustic substeps.
-
-Note: With the Exner pressure formulation, the vertically implicit solver
-is always enabled. This type is kept for API compatibility but is no longer
-required as a parameter to [`SplitExplicitTimeDiscretization`](@ref).
-
-Fields
-======
-
-- `implicit_weight`: Off-centering parameter (0.5 for Crank-Nicolson, typically 0.5-0.6)
-"""
-struct VerticallyImplicit{FT}
-    implicit_weight :: FT
-end
