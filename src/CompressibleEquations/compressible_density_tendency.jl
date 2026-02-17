@@ -30,8 +30,8 @@ using Oceananigans.Operators: ∂xᶠᶜᶜ, ∂yᶜᶠᶜ, ∂zᶜᶜᶠ
 
 @inline function AtmosphereModels.z_pressure_gradient(i, j, k, grid, d::CompressibleDynamics)
     ∂z_p = ∂zᶜᶜᶠ(i, j, k, grid, d.pressure)
-    ∂z_p_ref = ∂z_reference_pressureᶜᶜᶠ(i, j, k, grid, d.reference_state)
-    return ∂z_p - ∂z_p_ref
+    ∂z_pᵣ = ∂z_reference_pressureᶜᶜᶠ(i, j, k, grid, d.reference_state)
+    return ∂z_p - ∂z_pᵣ
 end
 
 @inline ∂z_reference_pressureᶜᶜᶠ(i, j, k, grid, ::Nothing) = 0

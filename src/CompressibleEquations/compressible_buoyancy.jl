@@ -32,10 +32,10 @@ Without a reference state, the full gravitational force ``-gρ`` is used.
     ρ_field = dynamics_density(dynamics)
     @inbounds ρ = ρ_field[i, j, k]
     g = constants.gravitational_acceleration
-    ρ_ref = reference_densityᶜᶜᶜ(i, j, k, dynamics.reference_state)
+    ρᵣ = reference_densityᶜᶜᶜ(i, j, k, grid, dynamics.reference_state)
 
-    return -g * (ρ - ρ_ref)
+    return -g * (ρ - ρᵣ)
 end
 
-@inline reference_densityᶜᶜᶜ(i, j, k, ::Nothing) = 0
-@inline reference_densityᶜᶜᶜ(i, j, k, ref::ExnerReferenceState) = @inbounds ref.density[i, j, k]
+@inline reference_densityᶜᶜᶜ(i, j, k, grid, ::Nothing) = 0
+@inline reference_densityᶜᶜᶜ(i, j, k, grid, ref::ExnerReferenceState) = @inbounds ref.density[i, j, k]
