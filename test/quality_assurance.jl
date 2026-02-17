@@ -15,7 +15,7 @@ if VERSION < v"1.12"
     # For some reason `BreezeReactantExt` is non-analyzable,
     # but only in Julia v1.11-.
     BreezeReactantExt = isdefined(Base, :get_extension) ? Base.get_extension(Breeze, :BreezeReactantExt) : Breeze.BreezeReactantExt
-    allow_unanalyzable = (BreezeReactantExt.TimeSteppers,)
+    allow_unanalyzable = (BreezeReactantExt,)
 else
     allow_unanalyzable = ()
 end

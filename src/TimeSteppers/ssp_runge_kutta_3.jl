@@ -1,7 +1,6 @@
 using KernelAbstractions: @kernel, @index
 
 using Oceananigans: AbstractModel, prognostic_fields, fields
-using Oceananigans.Models.NonhydrostaticModels: compute_pressure_correction!, make_pressure_correction!
 using Oceananigans.TimeSteppers:
     AbstractTimeStepper,
     tick!,
@@ -9,6 +8,8 @@ using Oceananigans.TimeSteppers:
     compute_flux_bc_tendencies!,
     step_lagrangian_particles!,
     implicit_step!
+
+using Breeze.AtmosphereModels: compute_pressure_correction!, make_pressure_correction!
 using Oceananigans.Utils: launch!, time_difference_seconds
 
 """
@@ -74,6 +75,7 @@ Shu, C.-W., & Osher, S. (1988). Efficient implementation of essentially non-osci
     shock-capturing schemes. Journal of Computational Physics, 77(2), 439-471.
 """
 function SSPRungeKutta3(grid, prognostic_fields;
+                        dynamics = nothing,
                         implicit_solver::TI = nothing,
                         Gⁿ::TG = map(similar, prognostic_fields)) where {TI, TG}
 
@@ -144,9 +146,9 @@ end
 """
 $(TYPEDSIGNATURES)
 
-Copy prognostic fields to `U⁰` storage for use in later SSP RK3 stages.
+Copy prognostic fields to `U⁰` storage for use in later RK3 stages.
 """
-function store_initial_state!(model::AbstractModel{<:SSPRungeKutta3})
+function store_initial_state!(model)
     U⁰ = model.timestepper.U⁰
     for (u⁰, u) in zip(U⁰, prognostic_fields(model))
         parent(u⁰) .= parent(u)
@@ -176,7 +178,7 @@ function OceananigansTimeSteppers.time_step!(model::AbstractModel{<:SSPRungeKutt
     Δt == 0 && @warn "Δt == 0 may cause model blowup!"
 
     # Be paranoid and update state at iteration 0, in case run! is not used:
-    model.clock.iteration == 0 && update_state!(model, callbacks; compute_tendencies = true)
+    maybe_initialize_state!(model, callbacks)
 
     ts = model.timestepper
     α¹ = ts.α¹

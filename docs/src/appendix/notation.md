@@ -75,7 +75,7 @@ The following table also uses a few conventions that suffuse the source code and
 | ``\mathscr{H}``                     | `ℋ`    | `RelativeHumidity(model)`           | Relative humidity, ``ℋ = pᵛ / pᵛ⁺``                                            |
 | ``\mathscr{S}``                     | `𝒮`    | `supersaturation(T, ρ, q, c, surf)` | Supersaturation, ``𝒮 = pᵛ / pᵛ⁺ - 1``                                          |
 | ``g``                               | `g`    | `TC.gravitational_acceleration`     | Gravitational acceleration                                                     |
-| ``\mathbb{U}^s``                    | `𝕌ˢ`   |                                     | Sound speed, ``𝕌ˢ = \sqrt{γ Rᵈ T}``                                            |
+| ``\mathbb{C}^{ac}``                 | `ℂᵃᶜ`  |                                     | Acoustic sound speed, ``ℂᵃᶜ = \sqrt{γ Rᵈ T}``                                  |
 | ``\mathcal{R}``                     | `ℛ`    | `TC.molar_gas_constant`             | Universal (molar) gas constant                                                 |
 | ``Tᵗʳ``                             | `Tᵗʳ`  | `TC.triple_point_temperature`       | Temperature at the vapor-liquid-ice triple point                               |
 | ``pᵗʳ``                             | `pᵗʳ`  | `TC.triple_point_pressure`          | Pressure at the vapor-liquid-ice triple point                                  |
@@ -131,3 +131,13 @@ The following table also uses a few conventions that suffuse the source code and
 | ``N_A``                             | `ℕᴬ`   |                                     | Avogadro's number, molecules per mole                                          |
 | ``\mathcal{U}``                     | `𝒰`    |                                     | Thermodynamic state struct (e.g., `StaticEnergyState`)                         |
 | ``\mathcal{M}``                     | `ℳ`    |                                     | Microphysical state struct (e.g., `WarmPhaseOneMomentState`)                   |
+| ``\psi``                            | `ψ`    | `AcousticSubstepper.pressure_coefficient` | Pressure coefficient for acoustic substepping, ``ψ = Rᵐ T``             |
+| ``{\mathbb{C}^{ac}}^2``             | `ℂᵃᶜ²` |                                           | Acoustic sound speed squared, ``ℂᵃᶜ² = γᵐ ψ = γᵐ Rᵐ T``                 |
+| ``G^n``                             | `Gⁿ`   |                                     | Tendency fields at time step ``n``                                             |
+| ``G^s``                             | `Gˢ`   |                                     | Slow tendencies (excludes fast pressure gradient and buoyancy)                 |
+| ``N_s``                             | `Ns`   | `AcousticSubstepper.Ns`             | Number of acoustic substeps per full time step                                 |
+| ``\Delta \tau``                     | `Δτ`   |                                     | Acoustic substep time step, ``Δτ = Δt / Ns``                                   |
+| ``\kappa^d``                        | `κᵈ`   | `AcousticSubstepper.κᵈ`             | Divergence damping coefficient for acoustic substepping                        |
+| ``\rho_r``                          | `ρᵣ`   | `AcousticSubstepper.ρᵣ`             | Reference density for divergence damping (start of acoustic loop)              |
+| ``w^{avg}``                         | `averaging_weight` |                              | Time-averaging weight for velocity fields in acoustic substepping              |
+| ``\bar{u}, \bar{v}, \bar{w}``       | `ū, v̄, w̄` |                                 | Time-averaged velocities for scalar advection                                  |
