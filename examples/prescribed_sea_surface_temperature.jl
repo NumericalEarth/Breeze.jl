@@ -117,27 +117,30 @@ scalar_advection = WENO(order=5)
 # and are further modified by atmospheric stability using the bulk Richardson number,
 #
 # ```math
-# Ri = \frac{g}{\overline{θ_v}} \frac{h \, (θ_v - θ_{v0})}{U_h^2}
+# Riᴮ = \frac{g}{\overline{θ_v}} \frac{h \, (θ_v - θ_{v0})}{U_h^2}
 # ```
 #
 # where ``h`` is the measurement height (first cell center), ``θ_v`` and ``θ_{v0}``
 # are virtual potential temperatures at the measurement height and surface, and
 # ``U_h`` is the wind speed at height ``h``.
-# The stability-corrected transfer coefficient is then
+#
+# The default stability correction uses [`FittedStabilityFunction`](@ref), which maps
+# ``Riᴮ`` to the Monin-Obukhov stability parameter ``ζ = z/L`` via the non-iterative
+# regression of [Li2010](@citet), then evaluates integrated MOST stability functions
+# ``Ψᴰ(ζ)`` and ``Ψᵀ(ζ)`` (Hogström 1996 for unstable, Beljaars & Holtslag 1991 for
+# stable conditions). The stability-corrected transfer coefficients are
 #
 # ```math
-# C^{Ri}_h(U_h, Ri) = C^N_{10}(U_h) \left[\frac{\ln(10/\ell)}{\ln(h/\ell)}\right]^2 ψ(Ri)
+# Cᴰ = Cᴰ_N \left[\frac{α}{α - Ψᴰ}\right]^2, \quad
+# Cᵀ = Cᵀ_N \frac{α}{α - Ψᴰ} \frac{β_h}{β_h - Ψᵀ}
 # ```
 #
-# where ``\ell`` is the roughness length and ``ψ`` is a stability function.
-# The default stability function enhances transfer in unstable conditions
-# (``Ri < 0``, ``ψ = \sqrt{1 - 16 \, Ri}``) and reduces it in stable
-# conditions (``Ri ≥ 0``, ``ψ = 1 / (1 + 10 \, Ri)``).
+# where ``α = \ln(h/ℓ)`` and ``β_h = \ln(h/ℓ_h)`` with roughness lengths ``ℓ``
+# (momentum) and ``ℓ_h`` (scalar). This provides structurally correct and different
+# corrections for momentum and scalar transfer.
 #
 # In unstable conditions (over warm and wet surfaces), exchange is enhanced.
 # In stable conditions (cold and dry surfaces), exchange is reduced.
-# This captures the physical reality that
-# turbulent mixing is stronger when the surface is warmer than the air above it.
 #
 # We create polynomial coefficients for each flux type. The default coefficients
 # come from [LargeYeager2009](@citet) observational fits:
@@ -190,7 +193,10 @@ using Breeze.BoundaryConditions: neutral_coefficient_10m, bulk_richardson_number
 
 h = grid.Lz / grid.Nz / 2  # first cell center height
 U_min = 0.1
-ψ = DefaultStabilityFunction()
+ℓ = coef.roughness_length
+sf = coef.stability_function
+α = log(h / ℓ)
+β = log(ℓ / sf.scalar_roughness_length)
 
 ΔT_line = 10  # K, temperature difference for stability lines
 T_warm = θ₀ + ΔT / 2      # warm SST in this simulation
@@ -198,12 +204,12 @@ T_cold = θ₀ - ΔT / 2      # cold SST in this simulation
 T_unstable = θ₀ + ΔT_line  # strongly unstable
 T_stable   = θ₀ - ΔT_line  # strongly stable
 
-U_range = range(0.5, 25, length=200)
+U_range = range(3, 25, length=200)
 Cᴰ_neutral  = [neutral_coefficient_10m(default_neutral_drag_polynomial, U, U_min) for U in U_range]
-Cᴰ_unstable = [Cᴰ * ψ(bulk_richardson_number(h, θ₀, T_unstable, U, U_min)) for (Cᴰ, U) in zip(Cᴰ_neutral, U_range)]
-Cᴰ_stable   = [Cᴰ * ψ(bulk_richardson_number(h, θ₀, T_stable,   U, U_min)) for (Cᴰ, U) in zip(Cᴰ_neutral, U_range)]
-Cᴰ_sim_warm = [Cᴰ * ψ(bulk_richardson_number(h, θ₀, T_warm, U, U_min)) for (Cᴰ, U) in zip(Cᴰ_neutral, U_range)]
-Cᴰ_sim_cold = [Cᴰ * ψ(bulk_richardson_number(h, θ₀, T_cold, U, U_min)) for (Cᴰ, U) in zip(Cᴰ_neutral, U_range)]
+Cᴰ_unstable = [Cᴰ * sf(bulk_richardson_number(h, θ₀, T_unstable, U, U_min), α, β) for (Cᴰ, U) in zip(Cᴰ_neutral, U_range)]
+Cᴰ_stable   = [Cᴰ * sf(bulk_richardson_number(h, θ₀, T_stable,   U, U_min), α, β) for (Cᴰ, U) in zip(Cᴰ_neutral, U_range)]
+Cᴰ_sim_warm = [Cᴰ * sf(bulk_richardson_number(h, θ₀, T_warm, U, U_min), α, β) for (Cᴰ, U) in zip(Cᴰ_neutral, U_range)]
+Cᴰ_sim_cold = [Cᴰ * sf(bulk_richardson_number(h, θ₀, T_cold, U, U_min), α, β) for (Cᴰ, U) in zip(Cᴰ_neutral, U_range)]
 
 fig = Figure(size=(1100, 400))
 
