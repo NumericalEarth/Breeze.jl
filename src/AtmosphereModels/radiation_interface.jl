@@ -193,7 +193,7 @@ struct BackgroundAtmosphere{N2, O2, CO2, CH4, N2O, CO, NO2, O3, CFC11, CFC12, CF
 end
 
 """
-    BackgroundAtmosphere(; kwargs...)
+$(TYPEDSIGNATURES)
 
 Construct a `BackgroundAtmosphere` with volume mixing ratios for radiatively active gases.
 All values are dimensionless molar fractions.
@@ -250,7 +250,7 @@ end
 using Oceananigans.Fields: field
 
 """
-    materialize_background_atmosphere(atm::BackgroundAtmosphere, grid)
+$(TYPEDSIGNATURES)
 
 Materialize a `BackgroundAtmosphere` by converting O₃ functions to fields and
 converting constant gases to the grid's float type.
