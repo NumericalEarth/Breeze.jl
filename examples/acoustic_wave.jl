@@ -6,12 +6,12 @@
 # the wind bend **downward** (trapped near the surface), while waves traveling **against**
 # the wind bend **upward**.
 #
-# The sound speed for a wave traveling in direction ``\hat{\boldsymbol{n}}`` is
+# The effective propagation speed for a wave traveling in direction ``\hat{\boldsymbol{n}}`` is
 # ```math
-# 𝕌ˢ = 𝕌ˢⁱ + \boldsymbol{u} \cdot \hat{\boldsymbol{n}}
+# \mathbb{C}^{ac} + \boldsymbol{u} \cdot \hat{\boldsymbol{n}}
 # ```
-# where ``𝕌ˢⁱ`` is the intrinsic sound speed and ``\boldsymbol{u}`` is the wind velocity.
-# This causes wavefronts to tilt toward regions of lower effective sound speed.
+# where ``ℂᵃᶜ`` is the acoustic sound speed and ``\boldsymbol{u}`` is the wind velocity.
+# This causes wavefronts to tilt toward regions of lower effective propagation speed.
 #
 # This phenomenon explains why distant sounds are often heard more clearly downwind
 # of a source, as sound energy is "ducted" along the surface. For more on this topic, see
@@ -25,7 +25,6 @@
 # and a logarithmic wind profile consistent with the atmospheric surface layer.
 
 using Breeze
-using Breeze.Thermodynamics: adiabatic_hydrostatic_density
 using Oceananigans.Units
 using Printf
 using CairoMakie
@@ -38,7 +37,7 @@ Lx, Lz = 1000, 200  # meters
 grid = RectilinearGrid(size = (Nx, Nz), x = (-Lx/2, Lx/2), z = (0, Lz),
                        topology = (Periodic, Flat, Bounded))
 
-model = AtmosphereModel(grid; dynamics = CompressibleDynamics())
+model = AtmosphereModel(grid; dynamics = CompressibleDynamics(ExplicitTimeStepping()))
 
 # ## Background state
 #
@@ -58,7 +57,7 @@ reference = ReferenceState(grid, constants; surface_pressure=p₀, potential_tem
 Rᵈ = constants.molar_gas_constant / constants.dry_air.molar_mass
 cᵖᵈ = constants.dry_air.heat_capacity
 γ = cᵖᵈ / (cᵖᵈ - Rᵈ)
-𝕌ˢⁱ = sqrt(γ * Rᵈ * θ₀)
+ℂᵃᶜ = sqrt(γ * Rᵈ * θ₀)
 
 # The wind profile follows the classic log-law of the atmospheric surface layer.
 
@@ -71,7 +70,7 @@ Uᵢ(z) = U₀ * log((z + ℓ) / ℓ)
 #
 # We initialize a localized Gaussian density pulse representing an acoustic disturbance.
 # For a rightward-propagating acoustic wave, the velocity perturbation is in phase with
-# the density perturbation: ``u' = (𝕌ˢ / ρ₀) ρ'``.
+# the density perturbation: ``u' = (ℂᵃᶜ / ρ₀) ρ'``.
 
 δρ = 0.01         # Density perturbation amplitude (kg/m³)
 σ = 20            # Pulse width (m)
@@ -80,19 +79,18 @@ gaussian(x, z) = exp(-(x^2 + z^2) / 2σ^2)
 ρ₀ = interior(reference.density, 1, 1, 1)[]
 
 ρᵢ(x, z) = adiabatic_hydrostatic_density(z, p₀, θ₀, pˢᵗ, constants) + δρ * gaussian(x, z)
-uᵢ(x, z) = Uᵢ(z) #+ (𝕌ˢⁱ / ρ₀) * δρ * gaussian(x, z)
+uᵢ(x, z) = Uᵢ(z) #+ (ℂᵃᶜ / ρ₀) * δρ * gaussian(x, z)
 
 set!(model, ρ=ρᵢ, θ=θ₀, u=uᵢ)
 
 
 # ## Simulation setup
 #
-# Acoustic waves travel fast (``𝕌ˢⁱ ≈ 347`` m/s), so we need a small time step.
-# The [Courant–Friedrichs–Lewy (CFL) condition](https://en.wikipedia.org/wiki/Courant%E2%80%93Friedrichs%E2%80%93Lewy_condition) is based on the effective sound speed ``𝕌ˢ = 𝕌ˢⁱ + \mathrm{max}(U)``.
+# Acoustic waves travel fast (``ℂᵃᶜ ≈ 347`` m/s), so we need a small time step.
+# The [Courant–Friedrichs–Lewy (CFL) condition](https://en.wikipedia.org/wiki/Courant%E2%80%93Friedrichs%E2%80%93Lewy_condition) is based on the effective propagation speed ``ℂᵃᶜ + \mathrm{max}(U)``.
 
 Δx, Δz = Lx / Nx, Lz / Nz
-𝕌ˢ = 𝕌ˢⁱ + Uᵢ(Lz)
-Δt = 0.5 * min(Δx, Δz) / 𝕌ˢ
+Δt = 0.5 * min(Δx, Δz) / (ℂᵃᶜ + Uᵢ(Lz))
 stop_time = 1  # seconds
 
 simulation = Simulation(model; Δt, stop_time)

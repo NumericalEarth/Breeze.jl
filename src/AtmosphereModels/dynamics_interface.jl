@@ -60,6 +60,36 @@ Returns `nothing` for dynamics that do not require a pressure solver (e.g., comp
 """
 function dynamics_pressure_solver end
 
+"""
+$(TYPEDSIGNATURES)
+
+Return the default timestepper symbol for the given dynamics.
+
+For anelastic dynamics, returns `:SSPRungeKutta3`.
+For compressible dynamics, returns `:AcousticSSPRungeKutta3` (acoustic substepping).
+"""
+default_timestepper(dynamics) = :SSPRungeKutta3
+
+#####
+##### Pressure correction interface
+#####
+
+"""
+$(TYPEDSIGNATURES)
+
+Compute the pressure correction for the given model. Default: no-op.
+For anelastic dynamics, solves the pressure Poisson equation.
+"""
+compute_pressure_correction!(model, Δt) = nothing
+
+"""
+$(TYPEDSIGNATURES)
+
+Apply the pressure correction to the momentum fields. Default: no-op.
+For anelastic dynamics, projects momentum to enforce the divergence constraint.
+"""
+make_pressure_correction!(model, Δt) = nothing
+
 #####
 ##### Pressure interface
 #####
@@ -271,6 +301,67 @@ For anelastic dynamics, returns zero (pressure is handled via projection).
 For compressible dynamics, returns `-∂p/∂z`.
 """
 @inline z_pressure_gradient(i, j, k, grid, dynamics) = zero(grid)
+
+#####
+##### Slow tendency mode for split-explicit time-stepping
+#####
+
+"""
+$(TYPEDEF)
+
+Wrapper type indicating that only "slow" tendencies should be computed.
+
+When computing momentum tendencies with a `SlowTendencyMode`-wrapped dynamics,
+the "fast" terms (pressure gradient and buoyancy) return zero. This is used
+for split-explicit time-stepping where fast terms are handled separately
+in an acoustic substep loop.
+
+See also [`SplitExplicitTimeDiscretization`](@ref Breeze.CompressibleEquations.SplitExplicitTimeDiscretization).
+"""
+struct SlowTendencyMode{D}
+    dynamics :: D
+end
+
+# Forward dynamics_density to the wrapped dynamics
+@inline dynamics_density(s::SlowTendencyMode) = dynamics_density(s.dynamics)
+
+# Fast terms return zero in slow tendency mode
+@inline x_pressure_gradient(i, j, k, grid, ::SlowTendencyMode) = zero(grid)
+@inline y_pressure_gradient(i, j, k, grid, ::SlowTendencyMode) = zero(grid)
+@inline z_pressure_gradient(i, j, k, grid, ::SlowTendencyMode) = zero(grid)
+
+@inline buoyancy_forceᶜᶜᶜ(i, j, k, grid, ::SlowTendencyMode, args...) = zero(grid)
+
+"""
+$(TYPEDEF)
+
+Wrapper type indicating that vertical "fast" terms should be excluded from tendencies.
+
+When computing momentum tendencies with a `HorizontalSlowMode`-wrapped dynamics,
+the horizontal pressure gradient is computed normally, but the vertical pressure
+gradient and buoyancy return zero. These vertical fast terms are handled by the
+acoustic substep loop through perturbation variables ``-ψ ∂ρ''/∂z - g ρ''``.
+
+Including the full vertical PG and buoyancy in the slow tendency introduces a
+hydrostatic truncation error ``O(Δz^2)`` that drives spurious acoustic modes.
+The horizontal PG does not suffer from this issue and can safely be included.
+"""
+struct HorizontalSlowMode{D}
+    dynamics :: D
+end
+
+# Forward dynamics_density to the wrapped dynamics
+@inline dynamics_density(s::HorizontalSlowMode) = dynamics_density(s.dynamics)
+
+# Horizontal PG: forward to the wrapped dynamics
+@inline x_pressure_gradient(i, j, k, grid, s::HorizontalSlowMode) =
+    x_pressure_gradient(i, j, k, grid, s.dynamics)
+@inline y_pressure_gradient(i, j, k, grid, s::HorizontalSlowMode) =
+    y_pressure_gradient(i, j, k, grid, s.dynamics)
+
+# Vertical PG and buoyancy return zero (handled by acoustic loop)
+@inline z_pressure_gradient(i, j, k, grid, ::HorizontalSlowMode) = zero(grid)
+@inline buoyancy_forceᶜᶜᶜ(i, j, k, grid, ::HorizontalSlowMode, args...) = zero(grid)
 
 #####
 ##### Tendency computation interface

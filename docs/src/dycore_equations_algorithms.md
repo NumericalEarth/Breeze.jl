@@ -1,21 +1,20 @@
-# [Dycore equations and algorithms](@id Dycore-section)
+# [Governing equations](@id Dycore-section)
 
 This section summarizes the governing equations behind Breeze's atmospheric dynamics used by [`AtmosphereModel`](@ref). Breeze supports two dynamical formulations:
 
-- **[`AnelasticDynamics`](@ref Breeze.AnelasticEquations.AnelasticDynamics)**: Filters acoustic waves by linearizing about a hydrostatic reference state, following the thermodynamically consistent framework of [Pauluis2008](@citet). Suitable for most large-eddy simulations and mesoscale applications.
+- **[`AnelasticDynamics`](@ref Breeze.AnelasticEquations.AnelasticDynamics)**: Filters acoustic waves by linearizing about a hydrostatic reference state, following the thermodynamically consistent framework of [Pauluis2008](@citet). Suitable for most large-eddy simulations and mesoscale applications. See the [Anelastic dynamics](@ref Anelastic-section) page for details.
 
-- **[`CompressibleDynamics`](@ref)**: Solves the fully compressible Euler equations with prognostic density. Retains acoustic waves and is useful for validation, acoustic studies, and problems where full compressibility is important.
+- **[`CompressibleDynamics`](@ref)**: Solves the fully compressible Euler equations with prognostic density. Retains acoustic waves and supports split-explicit time integration for efficiency. See the [Compressible dynamics](@ref Compressible-section) page for details.
 
-We begin with the compressible Navier-Stokes momentum equations and reduce them to an anelastic, conservative form.
-We then describe the fully compressible formulation, and finally outline the time-discretized pressure correction used to enforce the anelastic constraint.
+Both formulations share the same compressible Navier-Stokes equations as a starting point, with the anelastic formulation obtained as a special case through linearization.
 
-## Compressible momentum equations
+## Compressible Navier-Stokes equations
 
-Let ``ρ`` denote density, ``\boldsymbol{u}`` velocity, ``p`` pressure, ``\boldsymbol{f}`` non-pressure body forces (e.g., Coriolis), and ``\boldsymbol{\tau}`` the kinematic (per-mass) subgrid/viscous stresses. We denote the corresponding dynamic (per-volume) stresses by ``\boldsymbol{\mathcal{T}} = ρ \, \boldsymbol{\tau}``. With gravity ``- g \hat{\boldsymbol{z}}``, the inviscid compressible equations in flux form are
+Let ``ρ`` denote density, ``\boldsymbol{u}`` velocity, ``p`` pressure, ``\boldsymbol{f}`` non-pressure body forces (e.g., Coriolis), and ``\boldsymbol{\tau}`` the kinematic (per-mass) subgrid/viscous stresses. We denote the corresponding dynamic (per-volume) stresses by ``\boldsymbol{\mathcal{T}} = ρ \, \boldsymbol{\tau}``. With gravity ``- g \hat{\boldsymbol{z}}``, the compressible equations in flux form are
 
 ```math
 \begin{aligned}
-&\text{Mass:} && \partial_t ρ + \boldsymbol{\nabla \cdot}\, (ρ \boldsymbol{u}) = 0 ,\\
+&\text{Mass:} && \partial_t ρ + \boldsymbol{\nabla \cdot}\, (ρ \boldsymbol{u}) = S_ρ ,\\
 &\text{Momentum:} && \partial_t(ρ \boldsymbol{u}) + \boldsymbol{\nabla \cdot}\, (ρ \boldsymbol{u} \boldsymbol{u}) + \boldsymbol{\nabla} p = - ρ g \hat{\boldsymbol{z}} + ρ \boldsymbol{f} + \boldsymbol{\nabla \cdot}\, \boldsymbol{\mathcal{T}} .
 \end{aligned}
 ```
@@ -23,7 +22,27 @@ Let ``ρ`` denote density, ``\boldsymbol{u}`` velocity, ``p`` pressure, ``\bolds
 Notation ``\boldsymbol{\nabla \cdot}\, (ρ \boldsymbol{u} \boldsymbol{u})`` above denotes a vector whose components are
 ``[\boldsymbol{\nabla \cdot}\, (ρ \boldsymbol{u} \boldsymbol{u})]_i = \boldsymbol{\nabla \cdot}\, (ρ u_i \boldsymbol{u})``.
 
-For moist flows we also track total water (vapor + condensates) via
+## Thermodynamic equation
+
+In addition to mass and momentum, Breeze advances a thermodynamic prognostic variable ``χ`` in conservative (flux) form:
+
+```math
+\partial_t χ + \boldsymbol{\nabla \cdot}\, (χ \boldsymbol{u}) = Π(ρ, χ, \ldots) \, \boldsymbol{\nabla \cdot \, u} + S_χ ,
+```
+
+where ``Π`` is a formulation-specific compression source and ``S_χ`` represents diabatic and diffusive sources.
+
+Breeze supports two concrete choices for ``χ``:
+
+- **Liquid-ice potential temperature density** (``χ = ρ θ^{li}``): The potential temperature is materially conserved under adiabatic motion, so ``Π = 0``. This is the simplest thermodynamic formulation.
+
+- **Static energy density** (``χ = ρ e``): The moist static energy ``e = c^{pm} T + g z - \mathscr{L}^l_r q^l - \mathscr{L}^i_r q^i`` includes gravitational potential energy and latent heat. In this case ``Π \neq 0`` and encodes the pressure work term.
+
+The thermodynamic equation couples to the momentum equation through the equation of state (below) and buoyancy.
+
+## Moisture transport
+
+For moist flows we track total water (vapor + condensates) via
 
 ```math
 \partial_t(ρ q^t) + \boldsymbol{\nabla \cdot}\, (ρ q^t \boldsymbol{u}) = S_q ,
@@ -31,166 +50,43 @@ For moist flows we also track total water (vapor + condensates) via
 
 where ``q^t`` is total specific humidity and ``S_q`` accounts for sources/sinks from microphysics and boundary fluxes.
 
-Thermodynamic relations (mixture gas constant ``R^m``, heat capacity ``c^{pm}``, Exner function, etc.)
-are summarized in the [Thermodynamics](@ref Thermodynamics-section) section.
+## Equation of state
 
-## Anelastic approximation
-
-To filter acoustic waves while retaining compressibility effects in buoyancy and thermodynamics, we linearize about a hydrostatic, horizontally uniform reference state ``(pᵣ(z), ρᵣ(z))`` with constant reference potential temperature ``θᵣ``. The key assumptions are
-
-- Small Mach number and small relative density perturbations except in buoyancy.
-- Hydrostatic reference balance: ``\partial_z pᵣ = -ρᵣ g``.
-- Mass flux divergence constraint: ``\boldsymbol{\nabla \cdot}\, (ρᵣ\,\boldsymbol{u}) = 0``.
-
-Define the specific volume of moist air and its reference value as
+Pressure is related to density and temperature through the ideal gas law for moist air:
 
 ```math
-α = \frac{R^m T}{pᵣ} , \qquad αᵣ = \frac{R^d θᵣ}{pᵣ} ,
+p = ρ R^m T ,
 ```
 
-where ``R^m`` is the mixture gas constant and ``R^{d}`` is the dry-air gas constant. The buoyancy appearing in the vertical momentum is
+where ``R^m = (1 - q^t) R^d + q^v R^v`` is the mixture gas constant.
 
-```math
-b ≡ g \frac{α - αᵣ}{αᵣ} .
-```
+Thermodynamic relations (mixture gas constant ``R^m``, heat capacity ``c^{pm}``, Exner function, etc.) are summarized in the [Thermodynamics](@ref Thermodynamics-section) section.
 
-## Conservative anelastic system
+## Symbols and notation
 
-With ``ρᵣ(z)`` fixed by the reference state, the prognostic equations advanced in Breeze are written in conservative form for the ``ρᵣ``-weighted fields:
+### Core variables
+- ``ρ``: Density (prognostic for compressible; reference ``ρᵣ(z)`` for anelastic)
+- ``\boldsymbol{u} = (u, v, w)``: Velocity
+- ``\boldsymbol{m} = ρ \boldsymbol{u}``: Momentum
+- ``p``: Pressure
+- ``T``: Temperature
+- ``θ``: Potential temperature
+- ``χ``: Thermodynamic prognostic variable (``ρθ`` or ``ρe``)
 
-- Continuity (constraint):
+### Moisture
+- ``q^t``: Total specific humidity (vapor + condensates)
+- ``q^v, q^l, q^i``: Vapor, liquid, and ice mass fractions
+- ``R^m``: Mixture gas constant
+- ``c^{pm}``: Mixture heat capacity at constant pressure
 
-```math
-\boldsymbol{\nabla \cdot}\, (ρᵣ \boldsymbol{u}) = 0 .
-```
-
-- Momentum:
-
-```math
-\partial_t(ρᵣ \boldsymbol{u}) + \boldsymbol{\nabla \cdot}\, (ρᵣ \boldsymbol{u} \boldsymbol{u}) = - ρᵣ \boldsymbol{\nabla} \phi + ρᵣ \, b \hat{\boldsymbol{z}} + ρᵣ \boldsymbol{f} + \boldsymbol{\nabla \cdot}\, \boldsymbol{\mathcal{T}} ,
-```
-
-where ``\phi`` is a nonhydrostatic pressure correction potential defined by the projection step (see below). Pressure is decomposed as ``p = pᵣ(z) + p_h'(x, y, z, t) + p_n``, where ``p_h'`` is a hydrostatic anomaly (obeying ``\partial_z p_h' = -ρᵣ b``) and ``p_n`` is the nonhydrostatic component responsible for enforcing the anelastic constraint. In the discrete formulation used here, ``\phi`` coincides with the pressure correction variable.
-
-- Total water:
-
-```math
-\partial_t(ρᵣ q^t) + \boldsymbol{\nabla \cdot}\, (ρᵣ q^t \boldsymbol{u}) = S_q .
-```
-
-### Moist static energy
-
-Breeze advances a conservative moist static energy density
-
-```math
-ρᵣ e ≡ ρᵣ \left ( c^{pm} T + g z - \mathscr{L}^l_r q^l - \mathscr{L}^i_r q^i \right ),
-```
-
-where ``c^{p m}`` is the mixture heat capacity, ``T`` is temperature, ``g`` is gravitational acceleration,
-``z`` is height,
-``\mathscr{L}^l_r`` is the latent heat of condensation (vapor to liquid) at the energy reference temperature,
-and
-``\mathscr{L}^i_r`` is the latent heat of deposition (vapor to ice) at the energy reference temperature,
-
-According to [Pauluis2008](@citet), the moist static energy obeys
-
-```math
-\partial_t(ρᵣ e) + \boldsymbol{\nabla \cdot}\, (ρᵣ e \boldsymbol{u}) = ρᵣ w b + S_e ,
-```
-
-with vertical velocity ``w``, buoyancy ``b`` as above, and ``S_e`` including microphysical and external energy sources/sinks.
-The ``ρᵣ w b`` term is the buoyancy flux that links the energy and momentum budgets in the anelastic limit.
-
-Thermodynamic closures needed for ``R^m``, ``c^{pm}`` and the Exner function ``Π = (pᵣ / p_0)^{R^m / c^{pm}}`` are given in [Thermodynamics](@ref Thermodynamics-section) section.
-
-## Compressible dynamics
-
-Breeze also supports fully compressible dynamics via [`CompressibleDynamics`](@ref), which directly time-steps the density without an anelastic constraint. This formulation retains acoustic waves and is suitable for problems where compressibility effects are important, such as:
-- Acoustic wave propagation
-- Shock-resolving simulations
-- Validation against fully compressible reference solutions
-
-### Prognostic equations
-
-The compressible formulation advances density ``ρ`` as a prognostic variable alongside momentum:
-
-```math
-\begin{aligned}
-&\text{Mass:} && \partial_t ρ + \boldsymbol{\nabla \cdot}\, (ρ \boldsymbol{u}) = 0 ,\\
-&\text{Momentum:} && \partial_t(ρ \boldsymbol{u}) + \boldsymbol{\nabla \cdot}\, (ρ \boldsymbol{u} \boldsymbol{u}) + \boldsymbol{\nabla} p = - ρ g \hat{\boldsymbol{z}} + ρ \boldsymbol{f} + \boldsymbol{\nabla \cdot}\, \boldsymbol{\mathcal{T}} .
-\end{aligned}
-```
-
-### Equation of state
-
-Pressure is computed from the ideal gas law using prognostic density and potential temperature:
-
-```math
-p = ρ R^m T
-```
-
-where ``ρ`` is density, ``R^m`` is the mixture gas constant, and ``T`` is temperature.
-
-For dry air, this simplifies to the classic Poisson equation relating pressure, density, and potential temperature.
-
-### Time stepping
-
-`CompressibleDynamics` uses fully explicit time integration without a pressure correction step. This permits acoustic waves to propagate and requires a CFL condition based on the sound speed:
-
-```math
-Δt < \frac{Δx}{c_s}, \quad \text{where} \quad c_s = \sqrt{\frac{c^{pm}}{c^{vm}} R^m T}
-```
-
-is the adiabatic sound speed (approximately 340 m/s at standard conditions).
-
-### Comparison with anelastic dynamics
-
-| Property | AnelasticDynamics | CompressibleDynamics |
-|----------|-------------------|----------------------|
-| Acoustic waves | Filtered | Resolved |
-| Density | Reference ``ρᵣ(z)`` only | Prognostic ``ρ(x,y,z,t)`` |
-| Pressure | Solved from Poisson equation | Computed from equation of state |
-| Time step | Limited by advective CFL | Limited by acoustic CFL |
-| Typical applications | LES, mesoscale simulations | _Under development_ |
-
-## Time discretization and pressure correction (Anelastic)
-
-The anelastic formulation uses a multi-stage time integrator for advection, Coriolis, buoyancy, forcing, and tracer terms, coupled with a projection step to enforce the anelastic constraint at each substep. Denote the predicted momentum by ``\widetilde{(ρᵣ \boldsymbol{u})}``. The projection is
-
-1. Solve the variable-coefficient Poisson problem for the pressure correction potential ``\phi``:
-
-   ```math
-   \boldsymbol{\nabla \cdot}\, \big( ρᵣ \, \boldsymbol{\nabla} \phi \big) = \frac{1}{Δt} \, \boldsymbol{\nabla \cdot}\, \widetilde{(ρᵣ \boldsymbol{u})} ,
-   ```
-
-   with periodic lateral boundaries and homogeneous Neumann boundary conditions in ``z``.
-
-2. Update momentum to enforce ``\boldsymbol{\nabla \cdot}\, (ρᵣ \boldsymbol{u}^{n+1}) = 0``:
-
-   ```math
-   ρᵣ \boldsymbol{u}^{n+1} = \widetilde{(ρᵣ \boldsymbol{u})} - Δt \, ρᵣ \boldsymbol{\nabla} \phi .
-   ```
-
-In Breeze this projection is implemented as a Fourier–tridiagonal solve in the vertical with variable ``ρᵣ(z)``, aligning with the hydrostatic reference state. The hydrostatic pressure anomaly ``p_h'`` can be obtained diagnostically by vertical integration of buoyancy and used when desired to separate hydrostatic and nonhydrostatic pressure effects.
-
-## Symbols and closures used here
-
-### Anelastic dynamics
-- ``ρᵣ(z)``, ``pᵣ(z)``: Reference density and pressure satisfying hydrostatic balance for a constant ``θᵣ``.
-- ``α = R^m T / pᵣ``, ``αᵣ = R^d θᵣ / pᵣ``: Specific volume and its reference value.
-- ``b = g (α - αᵣ) / αᵣ``: Buoyancy.
-- ``e = c^{pd} \, θ``: Energy variable used for moist static energy in the conservative equation.
-- ``q^t``: Total specific humidity (vapor + condensates).
-- ``\phi``: Nonhydrostatic pressure correction potential used by the projection.
-
-### Compressible dynamics
-- ``ρ``: Prognostic density field.
-- ``p``: Pressure computed from equation of state.
-- ``θ``: Potential temperature.
-- ``c_s``: Sound speed.
-
-### Diffusion and turbulence closure notation
+### Stresses and forces
 - ``\boldsymbol{\tau}``: Kinematic (per-mass) subgrid/viscous stress tensor returned by Oceananigans closures.
 - ``\boldsymbol{\mathcal{T}} = ρ \, \boldsymbol{\tau}``: Dynamic (per-volume) stress used in the momentum equation; Breeze computes flux divergences as ``\boldsymbol{\nabla\cdot}\, \boldsymbol{\mathcal{T}}``.
+- ``\boldsymbol{f}``: Non-pressure body forces (Coriolis)
 
-See [Thermodynamics](@ref Thermodynamics-section) section for definitions of ``R^m(q)``, ``c^{pm}(q)``, and ``Π``.
+### Thermodynamic closures
+- ``Π = (p / p_0)^{R^m / c^{pm}}``: Exner function
+- ``\mathbb{C}^{ac} = \sqrt{γ^m R^m T}``: Acoustic sound speed, where ``γ^m = c^{pm} / c^{vm}``
+- ``b``: Buoyancy
+
+See [Thermodynamics](@ref Thermodynamics-section) for full definitions of ``R^m(q)``, ``c^{pm}(q)``, and ``Π``.

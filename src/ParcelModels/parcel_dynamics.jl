@@ -315,11 +315,9 @@ function Oceananigans.set!(model::ParcelModel; T = nothing, θ = nothing,
                            u = 0, v = 0, w = 0,
                            x = 0, y = 0, z = nothing)
 
-    grid = model.grid
     dynamics = model.dynamics
     constants = model.thermodynamic_constants
     pˢᵗ = dynamics.standard_pressure
-    g = constants.gravitational_acceleration
 
     # Set pressure and density first (needed for T from θ and qᵗ from ℋ)
     !isnothing(ρ) && set!(dynamics.density, ρ)
@@ -860,6 +858,7 @@ function TimeSteppers.time_step!(model::ParcelModel, Δt; callbacks=nothing)
 
     return nothing
 end
+
 
 
 #####
