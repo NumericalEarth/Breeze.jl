@@ -104,6 +104,15 @@ References
 Pauluis, O. (2008). Thermodynamic consistency of the anelastic approximation for a moist atmosphere.
   Journal of the Atmospheric Sciences 65, 2719–2729.
 """
+
+# Breeze's acoustic and SSP time steppers accept a `dynamics` keyword;
+# Oceananigans' built-in steppers (RungeKutta3, QuasiAdamsBashforth2) do not.
+_timestepper_uses_dynamics(::Val) = false
+_timestepper_uses_dynamics(::Val{:SSPRungeKutta3}) = true
+_timestepper_uses_dynamics(::Val{:AcousticSSPRungeKutta3}) = true
+_timestepper_uses_dynamics(::Val{:AcousticRungeKutta3}) = true
+_timestepper_uses_dynamics(s::Symbol) = _timestepper_uses_dynamics(Val(s))
+
 function AtmosphereModel(grid;
                          clock = Clock(grid),
                          thermodynamic_constants = ThermodynamicConstants(eltype(grid)),
@@ -214,7 +223,14 @@ function AtmosphereModel(grid;
                                                         tracers)
 
     implicit_solver = implicit_diffusion_solver(time_discretization(closure), grid)
-    timestepper = TimeStepper(timestepper, grid, prognostic_model_fields; dynamics, implicit_solver, timestepper_kwargs...)
+
+    # Only pass `dynamics` to time steppers that accept it (Breeze's acoustic and SSP steppers).
+    # Oceananigans' built-in time steppers (RungeKutta3, QuasiAdamsBashforth2) do not.
+    if _timestepper_uses_dynamics(timestepper)
+        timestepper = TimeStepper(timestepper, grid, prognostic_model_fields; dynamics, implicit_solver, timestepper_kwargs...)
+    else
+        timestepper = TimeStepper(timestepper, grid, prognostic_model_fields; implicit_solver, timestepper_kwargs...)
+    end
     pressure_solver = dynamics_pressure_solver(dynamics, grid)
 
     model_fields = merge(prognostic_model_fields, velocities, (; T=temperature, qᵗ=specific_moisture))

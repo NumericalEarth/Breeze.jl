@@ -63,7 +63,7 @@ end
     Oceananigans.defaults.FloatType = FT
     grid = RectilinearGrid(acoustic_test_arch; size=(4, 4, 8), x=(0, 100), y=(0, 100), z=(0, 1000))
 
-    dynamics = CompressibleDynamics()
+    dynamics = CompressibleDynamics(SplitExplicitTimeDiscretization())
     model = AtmosphereModel(grid;
                             dynamics,
                             timestepper=:AcousticSSPRungeKutta3)
@@ -79,7 +79,7 @@ end
     Oceananigans.defaults.FloatType = FT
     grid = RectilinearGrid(acoustic_test_arch; size=(4, 4, 8), x=(0, 100), y=(0, 100), z=(0, 1000))
 
-    dynamics = CompressibleDynamics()
+    dynamics = CompressibleDynamics(SplitExplicitTimeDiscretization())
     model = AtmosphereModel(grid;
                             dynamics,
                             timestepper=:AcousticRungeKutta3)
@@ -99,7 +99,7 @@ end
     Oceananigans.defaults.FloatType = FT
     grid = RectilinearGrid(acoustic_test_arch; size=(4, 4, 8), x=(0, 100), y=(0, 100), z=(0, 1000))
 
-    dynamics = CompressibleDynamics()
+    dynamics = CompressibleDynamics(SplitExplicitTimeDiscretization())
     model = AtmosphereModel(grid; dynamics)
 
     @test model.timestepper isa AcousticRungeKutta3
@@ -114,7 +114,8 @@ end
     grid = RectilinearGrid(acoustic_test_arch; size=(8, 8, 8), halo=(5, 5, 5),
                            x=(0, 8kilometers), y=(0, 8kilometers), z=(0, 8kilometers))
 
-    dynamics = CompressibleDynamics(; reference_potential_temperature=300)
+    dynamics = CompressibleDynamics(SplitExplicitTimeDiscretization();
+                                   reference_potential_temperature=300)
     model = AtmosphereModel(grid;
                             advection=WENO(),
                             dynamics,
@@ -137,7 +138,8 @@ end
     grid = RectilinearGrid(acoustic_test_arch; size=(8, 8, 8), halo=(5, 5, 5),
                            x=(0, 8kilometers), y=(0, 8kilometers), z=(0, 8kilometers))
 
-    dynamics = CompressibleDynamics(; reference_potential_temperature=300)
+    dynamics = CompressibleDynamics(SplitExplicitTimeDiscretization();
+                                   reference_potential_temperature=300)
     model = AtmosphereModel(grid;
                             advection=WENO(),
                             dynamics,
@@ -185,9 +187,8 @@ function build_igw_model(; timestepper=:AcousticSSPRungeKutta3, Ns=8, kdiv=0.05)
     θᵢ(x, y, z) = θᵇᵍ(z) + Δθ * sin(π * z / Lz) / (1 + (x - x₀)^2 / a^2)
 
     td = SplitExplicitTimeDiscretization(substeps=Ns, divergence_damping_coefficient=kdiv)
-    dynamics = CompressibleDynamics(; surface_pressure=p₀,
-                                      reference_potential_temperature=θᵇᵍ,
-                                      time_discretization=td)
+    dynamics = CompressibleDynamics(td; surface_pressure=p₀,
+                                      reference_potential_temperature=θᵇᵍ)
 
     model = AtmosphereModel(grid; advection=WENO(), dynamics, timestepper)
 
@@ -251,9 +252,8 @@ end
                            x=(0, 16kilometers), y=(0, 8kilometers), z=(0, 10kilometers))
 
     td = SplitExplicitTimeDiscretization(substeps=8)
-    dynamics = CompressibleDynamics(; surface_pressure=100000,
-                                      reference_potential_temperature=300,
-                                      time_discretization=td)
+    dynamics = CompressibleDynamics(td; surface_pressure=100000,
+                                      reference_potential_temperature=300)
 
     model = AtmosphereModel(grid; advection=WENO(), dynamics)
 

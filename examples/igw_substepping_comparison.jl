@@ -52,23 +52,21 @@ cᵖᵈ = constants.dry_air.heat_capacity
 surface_pressure = p₀
 
 # 1. Breeze fully explicit compressible (reference)
-explicit_dynamics = CompressibleDynamics(; surface_pressure,
-                                          time_discretization=ExplicitTimeStepping(),
+explicit_dynamics = CompressibleDynamics(ExplicitTimeStepping();
+                                          surface_pressure,
                                           reference_potential_temperature=θᵇᵍ)
 
 # 2. Breeze SSP-RK3 with advection-limited Δt=12 (Ns=8 acoustic substeps)
-ssprk3_dynamics = CompressibleDynamics(; surface_pressure,
-                                         reference_potential_temperature=θᵇᵍ,
-                                         time_discretization=SplitExplicitTimeDiscretization(nothing;
-                                             substeps=8,
-                                             divergence_damping_coefficient=0.05))
+ssprk3_dynamics = CompressibleDynamics(SplitExplicitTimeDiscretization(substeps=8,
+                                          divergence_damping_coefficient=0.05);
+                                         surface_pressure,
+                                         reference_potential_temperature=θᵇᵍ)
 
 # 3. Breeze WS-RK3 with advection-limited Δt=12 (Ns=8 acoustic substeps)
-wsrk3_dynamics = CompressibleDynamics(; surface_pressure,
-                                        reference_potential_temperature=θᵇᵍ,
-                                        time_discretization=SplitExplicitTimeDiscretization(nothing;
-                                            substeps=8,
-                                            divergence_damping_coefficient=0.10))
+wsrk3_dynamics = CompressibleDynamics(SplitExplicitTimeDiscretization(substeps=8,
+                                         divergence_damping_coefficient=0.10);
+                                        surface_pressure,
+                                        reference_potential_temperature=θᵇᵍ)
 
 model_explicit = AtmosphereModel(grid; advection=WENO(), dynamics=explicit_dynamics)
 model_ssprk3   = AtmosphereModel(grid; advection=WENO(), dynamics=ssprk3_dynamics,

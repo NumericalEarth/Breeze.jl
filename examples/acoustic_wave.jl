@@ -37,7 +37,7 @@ Lx, Lz = 1000, 200  # meters
 grid = RectilinearGrid(size = (Nx, Nz), x = (-Lx/2, Lx/2), z = (0, Lz),
                        topology = (Periodic, Flat, Bounded))
 
-model = AtmosphereModel(grid; dynamics = CompressibleDynamics(time_discretization=ExplicitTimeStepping()))
+model = AtmosphereModel(grid; dynamics = CompressibleDynamics(ExplicitTimeStepping()))
 
 # ## Background state
 #

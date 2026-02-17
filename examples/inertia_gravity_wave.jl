@@ -103,15 +103,15 @@ set!(constant_density_reference_state.density, ρ₀)
 boussinesq_dynamics = AnelasticDynamics(constant_density_reference_state)
 
 # Case 3: Compressible (fully explicit, no substepping)
-compressible_dynamics = CompressibleDynamics(; surface_pressure, time_discretization=ExplicitTimeStepping())
+compressible_dynamics = CompressibleDynamics(ExplicitTimeStepping(); surface_pressure)
 
 # Case 4: Split-explicit with SSP-RK3 outer loop
 # Uses acoustic substepping with Exner pressure variables (velocity + π') and
 # vertically implicit w-π' coupling. The reference potential temperature enables
 # base-state subtraction for accurate perturbation pressure.
 ssp_time_discretization = SplitExplicitTimeDiscretization(substeps=Ns, divergence_damping_coefficient=0.05)
-ssp_dynamics = CompressibleDynamics(; surface_pressure,
-                                      time_discretization=ssp_time_discretization,
+ssp_dynamics = CompressibleDynamics(ssp_time_discretization;
+                                      surface_pressure,
                                       reference_potential_temperature=θᵇᵍ)
 
 # Case 5: Split-explicit with Wicker-Skamarock RK3 outer loop
@@ -119,8 +119,8 @@ ssp_dynamics = CompressibleDynamics(; surface_pressure,
 # instead of SSP convex combinations. This is the default for CompressibleDynamics with
 # SplitExplicitTimeDiscretization.
 ws_time_discretization = SplitExplicitTimeDiscretization(substeps=Ns, divergence_damping_coefficient=0.10)
-ws_dynamics = CompressibleDynamics(; surface_pressure,
-                                     time_discretization=ws_time_discretization,
+ws_dynamics = CompressibleDynamics(ws_time_discretization;
+                                     surface_pressure,
                                      reference_potential_temperature=θᵇᵍ)
 
 # Build all models:

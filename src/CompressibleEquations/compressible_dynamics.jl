@@ -22,50 +22,55 @@ time-stepper is used:
 - [`SplitExplicitTimeDiscretization`](@ref): Acoustic substepping with separate slow/fast tendencies
 - [`ExplicitTimeStepping`](@ref): All tendencies computed together (small Δt required)
 """
-struct CompressibleDynamics{D, P, FT, TD, RS}
+struct CompressibleDynamics{TD, D, P, FT, RS}
+    time_discretization :: TD # SplitExplicitTimeDiscretization or ExplicitTimeStepping
     density :: D              # ρ (prognostic)
     pressure :: P             # p = ρ R^m T (diagnostic)
     standard_pressure :: FT   # pˢᵗ (reference pressure for potential temperature)
     surface_pressure :: FT    # p₀ (mean pressure at the bottom of the atmosphere)
-    time_discretization :: TD # SplitExplicitTimeDiscretization or ExplicitTimeStepping
     reference_state :: RS     # ReferenceState for base-state pressure correction (Nothing or ReferenceState)
 end
 
 """
 $(TYPEDSIGNATURES)
 
-Construct `CompressibleDynamics` with optional `standard_pressure` (default 10⁵ Pa).
-The density and pressure fields are materialized later in the model constructor.
+Construct `CompressibleDynamics`. The density and pressure fields are materialized
+later in the model constructor.
+
+Positional Arguments
+====================
+
+- `time_discretization`: Time discretization scheme. Default: [`ExplicitTimeStepping`](@ref).
+  Use [`SplitExplicitTimeDiscretization`](@ref) for acoustic substepping.
 
 Keyword Arguments
 =================
 
 - `standard_pressure`: Reference pressure for potential temperature (default: 10⁵ Pa)
 - `surface_pressure`: Mean surface pressure (default: 101325.0 Pa)
-- `time_discretization`: Time discretization scheme. Default: [`SplitExplicitTimeDiscretization`](@ref)
-  for acoustic substepping. Use [`ExplicitTimeStepping`](@ref) for standard explicit.
 - `reference_potential_temperature`: Potential temperature for building a fixed
   hydrostatically-balanced reference state used in base-state subtraction. Can be a constant `θ₀`
   or a function `θ(z)`. Default: `nothing` (no base-state correction).
   When provided, a `ReferenceState` is built during materialization.
 """
-function CompressibleDynamics(; standard_pressure = 1e5,
-                                surface_pressure = 101325.0,
-                                time_discretization::TD = SplitExplicitTimeDiscretization(),
-                                reference_potential_temperature = nothing) where TD
+function CompressibleDynamics(time_discretization::TD = ExplicitTimeStepping();
+                              standard_pressure = 1e5,
+                              surface_pressure = 101325.0,
+                              reference_potential_temperature = nothing) where TD
+
     FT = promote_type(typeof(standard_pressure), typeof(surface_pressure))
     pˢᵗ = convert(FT, standard_pressure)
     p₀ = convert(FT, surface_pressure)
     # Store reference_potential_temperature temporarily; ReferenceState is built in materialize_dynamics
-    return CompressibleDynamics(nothing, nothing, pˢᵗ, p₀, time_discretization, reference_potential_temperature)
+    return CompressibleDynamics(time_discretization, nothing, nothing, pˢᵗ, p₀, reference_potential_temperature)
 end
 
 Adapt.adapt_structure(to, dynamics::CompressibleDynamics) =
-    CompressibleDynamics(adapt(to, dynamics.density),
+    CompressibleDynamics(dynamics.time_discretization,
+                         adapt(to, dynamics.density),
                          adapt(to, dynamics.pressure),
                          dynamics.standard_pressure,
                          dynamics.surface_pressure,
-                         dynamics.time_discretization,
                          adapt(to, dynamics.reference_state))
 
 #####
@@ -111,8 +116,8 @@ function AtmosphereModels.materialize_dynamics(dynamics::CompressibleDynamics, g
                                          standard_pressure)
     end
 
-    return CompressibleDynamics(density, pressure, standard_pressure, surface_pressure,
-                                dynamics.time_discretization, reference_state)
+    return CompressibleDynamics(dynamics.time_discretization, density, pressure,
+                                standard_pressure, surface_pressure, reference_state)
 end
 
 #####
@@ -227,7 +232,7 @@ Base.summary(::ExplicitTimeStepping) = "ExplicitTimeStepping"
 
 function Base.summary(dynamics::CompressibleDynamics)
     td = summary(dynamics.time_discretization)
-    return "CompressibleDynamics($td)"
+    return "CompressibleDynamics{$td}"
 end
 
 function Base.show(io::IO, dynamics::CompressibleDynamics)

@@ -50,17 +50,6 @@ function SplitExplicitTimeDiscretization(; substeps=8,
                                            acoustic_damping_coefficient)
 end
 
-# Legacy constructor: ignore positional argument (was time_discretization)
-function SplitExplicitTimeDiscretization(::Any; substeps=8,
-                                                forward_weight=0.6,
-                                                divergence_damping_coefficient=0.10,
-                                                acoustic_damping_coefficient=0.0)
-    return SplitExplicitTimeDiscretization(substeps,
-                                           forward_weight,
-                                           divergence_damping_coefficient,
-                                           acoustic_damping_coefficient)
-end
-
 """
 $(TYPEDEF)
 
