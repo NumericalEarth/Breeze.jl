@@ -39,9 +39,9 @@ const acoustic_test_arch = Oceananigans.Architectures.CPU()
         @test acoustic.substeps == 8
         @test acoustic.forward_weight ≈ FT(0.6)
         @test acoustic.divergence_damping_coefficient ≈ FT(0.10)
-        @test acoustic.π′ isa Oceananigans.Fields.Field
-        @test acoustic.θᵥ isa Oceananigans.Fields.Field
-        @test acoustic.ppterm isa Oceananigans.Fields.Field
+        @test acoustic.exner_perturbation isa Oceananigans.Fields.Field
+        @test acoustic.virtual_potential_temperature isa Oceananigans.Fields.Field
+        @test acoustic.acoustic_compression isa Oceananigans.Fields.Field
     end
 
     @testset "Custom parameters" begin

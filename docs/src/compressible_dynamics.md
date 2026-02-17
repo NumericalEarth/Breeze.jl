@@ -142,7 +142,7 @@ computed from the current (evaluation) state and held fixed during the acoustic 
 
 - ``\theta_v``: virtual potential temperature
 - ``\pi_0``: reference Exner pressure (from the ExnerReferenceState)
-- ``\text{ppterm} = (\gamma - 1) \pi``: Exner pressure tendency coefficient, where
+- ``S = (\gamma - 1) \pi``: Exner pressure tendency coefficient, where
   ``\gamma = c_p^m / c_v^m`` is the mixture heat capacity ratio
 
 The acoustic loop also requires **slow tendencies** converted to velocity and pressure form
@@ -187,14 +187,14 @@ Using off-centering parameter ``\alpha`` (default 0.6), the update is split into
 w^{\tau + \Delta\tau} &= w^\tau + \Delta\tau \, \dot{w}^s
     - \Delta\tau \, c_p^d \bar{\theta}_v \left[ \beta \frac{\partial \pi'^{\,\tau}}{\partial z} + \alpha \frac{\partial \pi'^{\,\tau+\Delta\tau}}{\partial z} \right] \\
 \pi'^{\,\tau+\Delta\tau} &= \pi'^{\,\tau} + \Delta\tau \, \dot{\pi}^s
-    + \Delta\tau \, \text{ppterm} \left[ \nabla_h \cdot \boldsymbol{u}^{\tau+\Delta\tau}
+    + \Delta\tau \, S \left[ \nabla_h \cdot \boldsymbol{u}^{\tau+\Delta\tau}
     + \beta \frac{\partial w^\tau}{\partial z} + \alpha \frac{\partial w^{\tau+\Delta\tau}}{\partial z} \right]
 \end{aligned}
 ```
 
 Substituting the ``w`` equation into the ``\pi'`` equation and rearranging yields a
 tridiagonal system for ``\pi'^{\,\tau+\Delta\tau}`` with coupling coefficient
-``\alpha^2 \Delta\tau^2 \, c_p^d \, \bar{\theta}_v \, \text{ppterm} / \Delta z^2 = \alpha^2 \Delta\tau^2 c_s^2 / \Delta z^2``.
+``\alpha^2 \Delta\tau^2 \, c_p^d \, \bar{\theta}_v \, S / \Delta z^2 = \alpha^2 \Delta\tau^2 c_s^2 / \Delta z^2``.
 After solving for ``\pi'``, the vertical velocity is recovered via the ``w`` equation.
 
 **(C) Filter and accumulate:**
@@ -390,7 +390,7 @@ The complete algorithm for one Wicker-Skamarock RK3 time step is:
 2. **For each RK stage** ``k = 1, 2, 3`` with fractions ``β_k = 1/3, 1/2, 1``:
    1. Compute slow tendencies ``G^s`` from the current evaluation state
    2. Convert slow tendencies to velocity/pressure form: ``\dot{u}^s``, ``\dot{w}^s``, ``\dot{\pi}^s``
-   3. Freeze stage quantities: ``\bar{\theta}_v``, ``\text{ppterm}``, ``\pi_0``
+   3. Freeze stage quantities: ``\bar{\theta}_v``, ``S``, ``\pi_0``
    4. Initialize ``\pi' = \pi(U^n) - \pi_0`` (consistent with velocity reset to ``U^n``)
    5. Reset velocities ``(u, v, w)`` to ``U^n``
    6. **Acoustic substep loop** (``N_\tau`` iterations with ``\Delta\tau = \Delta t / N_s``):

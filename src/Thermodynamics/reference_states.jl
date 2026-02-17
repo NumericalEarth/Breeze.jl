@@ -246,6 +246,40 @@ function general_hydrostatic_density(z, p₀, θ_func, pˢᵗ, constants)
     return p / (Rᵈ * T)
 end
 
+#####
+##### Dispatch: select closed-form (constant θ₀) or numerical (θ₀(z)) hydrostatic profiles
+#####
+
+# Closed-form for constant potential temperature
+hydrostatic_pressure(z, p₀, θ₀::Number, pˢᵗ, constants) =
+    adiabatic_hydrostatic_pressure(z, p₀, θ₀, constants)
+
+hydrostatic_density(z, p₀, θ₀::Number, pˢᵗ, constants) =
+    adiabatic_hydrostatic_density(z, p₀, θ₀, pˢᵗ, constants)
+
+function hydrostatic_temperature(z, p₀, θ₀::Number, pˢᵗ, constants)
+    κ = dry_air_gas_constant(constants) / constants.dry_air.heat_capacity
+    p = adiabatic_hydrostatic_pressure(z, p₀, θ₀, constants)
+    return θ₀ * (p / pˢᵗ)^κ
+end
+
+# Numerical integration for θ₀(z) profiles
+hydrostatic_pressure(z, p₀, θ₀::Function, pˢᵗ, constants) =
+    general_hydrostatic_pressure(z, p₀, θ₀, pˢᵗ, constants)
+
+hydrostatic_density(z, p₀, θ₀::Function, pˢᵗ, constants) =
+    general_hydrostatic_density(z, p₀, θ₀, pˢᵗ, constants)
+
+function hydrostatic_temperature(z, p₀, θ₀::Function, pˢᵗ, constants)
+    κ = dry_air_gas_constant(constants) / constants.dry_air.heat_capacity
+    p = general_hydrostatic_pressure(z, p₀, θ₀, pˢᵗ, constants)
+    return θ₀(z) * (p / pˢᵗ)^κ
+end
+
+# Surface value extraction
+_surface_value(x::Number) = x
+_surface_value(f::Function) = f(0)
+
 """
 $(TYPEDSIGNATURES)
 
@@ -306,62 +340,30 @@ function ReferenceState(grid, constants=ThermodynamicConstants(eltype(grid));
     qˡᵣ = reference_moisture_field(liquid_mass_fraction, grid)
     qⁱᵣ = reference_moisture_field(ice_mass_fraction, grid)
 
-    # Constants for temperature computation
-    Rᵈ = dry_air_gas_constant(constants)
-    cᵖᵈ = constants.dry_air.heat_capacity
-    κ = Rᵈ / cᵖᵈ
+    θ₀ = potential_temperature
+    θ₀_surface = convert(FT, _surface_value(θ₀))
+    ρ_surface = surface_density(p₀, θ₀_surface, pˢᵗ, constants)
 
-    if potential_temperature isa Function
-        θ_func = potential_temperature
-        θ₀_value = convert(FT, θ_func(0))
+    ρ_bcs = FieldBoundaryConditions(grid, loc, bottom=ValueBoundaryCondition(ρ_surface))
+    ρᵣ = Field{Nothing, Nothing, Center}(grid, boundary_conditions=ρ_bcs)
+    set!(ρᵣ, z -> hydrostatic_density(z, p₀, θ₀, pˢᵗ, constants))
+    fill_halo_regions!(ρᵣ)
 
-        ρ_surface = surface_density(p₀, θ₀_value, pˢᵗ, constants)
-        ρ_bcs = FieldBoundaryConditions(grid, loc, bottom=ValueBoundaryCondition(ρ_surface))
-        ρᵣ = Field{Nothing, Nothing, Center}(grid, boundary_conditions=ρ_bcs)
-        set!(ρᵣ, z -> general_hydrostatic_density(z, p₀, θ_func, pˢᵗ, constants))
-        fill_halo_regions!(ρᵣ)
+    p_bcs = FieldBoundaryConditions(grid, loc, bottom=ValueBoundaryCondition(p₀))
+    pᵣ = Field{Nothing, Nothing, Center}(grid, boundary_conditions=p_bcs)
+    set!(pᵣ, z -> hydrostatic_pressure(z, p₀, θ₀, pˢᵗ, constants))
+    fill_halo_regions!(pᵣ)
 
-        p_bcs = FieldBoundaryConditions(grid, loc, bottom=ValueBoundaryCondition(p₀))
-        pᵣ = Field{Nothing, Nothing, Center}(grid, boundary_conditions=p_bcs)
-        set!(pᵣ, z -> general_hydrostatic_pressure(z, p₀, θ_func, pˢᵗ, constants))
-        fill_halo_regions!(pᵣ)
-
-        if discrete_hydrostatic_balance
-            g = constants.gravitational_acceleration
-            enforce_discrete_hydrostatic_balance!(pᵣ, ρᵣ, g)
-        end
-
-        # Temperature from potential temperature and Exner function
-        Tᵣ = Field{Nothing, Nothing, Center}(grid)
-        set!(Tᵣ, z -> θ_func(z) * (general_hydrostatic_pressure(z, p₀, θ_func, pˢᵗ, constants) / pˢᵗ)^κ)
-        fill_halo_regions!(Tᵣ)
-    else
-        θ₀ = convert(FT, potential_temperature)
-        θ₀_value = θ₀
-
-        ρ₀ = surface_density(p₀, θ₀, pˢᵗ, constants)
-        ρ_bcs = FieldBoundaryConditions(grid, loc, bottom=ValueBoundaryCondition(ρ₀))
-        ρᵣ = Field{Nothing, Nothing, Center}(grid, boundary_conditions=ρ_bcs)
-        set!(ρᵣ, z -> adiabatic_hydrostatic_density(z, p₀, θ₀, pˢᵗ, constants))
-        fill_halo_regions!(ρᵣ)
-
-        p_bcs = FieldBoundaryConditions(grid, loc, bottom=ValueBoundaryCondition(p₀))
-        pᵣ = Field{Nothing, Nothing, Center}(grid, boundary_conditions=p_bcs)
-        set!(pᵣ, z -> adiabatic_hydrostatic_pressure(z, p₀, θ₀, constants))
-        fill_halo_regions!(pᵣ)
-
-        if discrete_hydrostatic_balance
-            g = constants.gravitational_acceleration
-            enforce_discrete_hydrostatic_balance!(pᵣ, ρᵣ, g)
-        end
-
-        # Temperature from the Exner function
-        Tᵣ = Field{Nothing, Nothing, Center}(grid)
-        set!(Tᵣ, z -> θ₀ * (adiabatic_hydrostatic_pressure(z, p₀, θ₀, constants) / pˢᵗ)^κ)
-        fill_halo_regions!(Tᵣ)
+    if discrete_hydrostatic_balance
+        g = constants.gravitational_acceleration
+        enforce_discrete_hydrostatic_balance!(pᵣ, ρᵣ, g)
     end
 
-    return ReferenceState(p₀, θ₀_value, pˢᵗ, pᵣ, ρᵣ, Tᵣ, qᵛᵣ, qˡᵣ, qⁱᵣ)
+    Tᵣ = Field{Nothing, Nothing, Center}(grid)
+    set!(Tᵣ, z -> hydrostatic_temperature(z, p₀, θ₀, pˢᵗ, constants))
+    fill_halo_regions!(Tᵣ)
+
+    return ReferenceState(p₀, θ₀_surface, pˢᵗ, pᵣ, ρᵣ, Tᵣ, qᵛᵣ, qˡᵣ, qⁱᵣ)
 end
 
 #####
@@ -391,42 +393,64 @@ Fields
 ======
 
 - `surface_pressure`: Reference pressure at z=0 (Pa)
-- `potential_temperature`: Reference potential temperature (constant or surface value)
+- `surface_potential_temperature`: Reference potential temperature at z=0 (K)
 - `standard_pressure`: pˢᵗ for potential temperature definition (Pa)
 - `pressure`: Reference pressure field p₀ = pˢᵗ π₀^(cᵖ/R) (derived from π₀)
 - `density`: Reference density field ρ₀ = p₀/(R T₀) (derived from π₀ and θ₀)
-- `exner`: Reference Exner function π₀ (built by discrete integration)
-- `potential_temperature_field`: Reference potential temperature θ₀(z) (z-only field)
+- `exner_function`: Reference Exner function π₀ (built by discrete integration)
 """
-struct ExnerReferenceState{FT, FP, FD, FE, FT2}
+struct ExnerReferenceState{FT, FP, FD, FE}
     surface_pressure :: FT
-    potential_temperature :: FT
+    surface_potential_temperature :: FT
     standard_pressure :: FT
     pressure :: FP
     density :: FD
-    exner :: FE
-    potential_temperature_field :: FT2
+    exner_function :: FE
 end
 
 Adapt.adapt_structure(to, ref::ExnerReferenceState) =
     ExnerReferenceState(adapt(to, ref.surface_pressure),
-                        adapt(to, ref.potential_temperature),
+                        adapt(to, ref.surface_potential_temperature),
                         adapt(to, ref.standard_pressure),
                         adapt(to, ref.pressure),
                         adapt(to, ref.density),
-                        adapt(to, ref.exner),
-                        adapt(to, ref.potential_temperature_field))
+                        adapt(to, ref.exner_function))
 
 Base.eltype(::ExnerReferenceState{FT}) where FT = FT
 
 function Base.summary(ref::ExnerReferenceState)
     FT = eltype(ref)
     return string("ExnerReferenceState{$FT}(p₀=", prettysummary(ref.surface_pressure),
-                  ", θ₀=", prettysummary(ref.potential_temperature),
+                  ", θ₀=", prettysummary(ref.surface_potential_temperature),
                   ", pˢᵗ=", prettysummary(ref.standard_pressure), ")")
 end
 
 Base.show(io::IO, ref::ExnerReferenceState) = print(io, summary(ref))
+
+@kernel function _compute_exner_reference!(π₀, pᵣ, ρᵣ, θ₀, grid, Nz, π₀_surface, pˢᵗ, cᵖᵈ, κ, Rᵈ, g)
+    _ = @index(Global)
+
+    # Initialize π₀ at the bottom from the surface pressure
+    @inbounds π₀[1, 1, 1] = π₀_surface
+
+    # Integrate upward: π₀[k] = π₀[k-1] - g Δz / (cᵖ avg(θ₀))
+    for k in 2:Nz
+        Δz_face = Δzᶜᶜᶠ(1, 1, k, grid)
+        @inbounds θ₀_face = (θ₀[1, 1, k] + θ₀[1, 1, k-1]) / 2
+        @inbounds π₀[1, 1, k] = π₀[1, 1, k-1] - g * Δz_face / (cᵖᵈ * θ₀_face)
+    end
+
+    # Derive pressure and density from π₀
+    for k in 1:Nz
+        @inbounds begin
+            πᵏ = π₀[1, 1, k]
+            pᵏ = pˢᵗ * πᵏ^(1/κ)
+            Tᵏ = θ₀[1, 1, k] * πᵏ
+            pᵣ[1, 1, k] = pᵏ
+            ρᵣ[1, 1, k] = pᵏ / (Rᵈ * Tᵏ)
+        end
+    end
+end
 
 """
 $(TYPEDSIGNATURES)
@@ -462,61 +486,42 @@ function ExnerReferenceState(grid, constants=ThermodynamicConstants(eltype(grid)
                              standard_pressure = 1e5)
 
     FT = eltype(grid)
+    arch = architecture(grid)
     p₀ = convert(FT, surface_pressure)
     pˢᵗ = convert(FT, standard_pressure)
     Rᵈ = dry_air_gas_constant(constants)
     cᵖᵈ = constants.dry_air.heat_capacity
     κ = Rᵈ / cᵖᵈ
     g = constants.gravitational_acceleration
-
+    Nz = size(grid, 3)
     loc = (nothing, nothing, Center())
 
-    # Build θ₀ field
-    θ₀_field = Field{Nothing, Nothing, Center}(grid)
-    if potential_temperature isa Function
-        set!(θ₀_field, potential_temperature)
-    else
-        set!(θ₀_field, Returns(convert(FT, potential_temperature)))
-    end
-    fill_halo_regions!(θ₀_field)
+    # Build θ₀ field (temporary, used only during construction)
+    θ₀ = Field{Nothing, Nothing, Center}(grid)
+    set!(θ₀, potential_temperature)
+    fill_halo_regions!(θ₀)
 
-    θ₀_value = convert(FT, potential_temperature isa Function ? potential_temperature(0) : potential_temperature)
-
-    # Build π₀ by discrete upward integration
-    π₀_field = Field{Nothing, Nothing, Center}(grid)
-    Nz = size(grid, 3)
-
-    # Bottom value from surface pressure
+    # Surface values for boundary conditions and display
     π₀_surface = (p₀ / pˢᵗ)^κ
-    @allowscalar π₀_field[1, 1, 1] = π₀_surface
+    θ₀_surface = @allowscalar θ₀[1, 1, 1]
+    ρ_surface = p₀ / (Rᵈ * θ₀_surface * π₀_surface)
 
-    # Integrate upward: π₀[k] = π₀[k-1] - g Δz / (cᵖ avg(θ₀))
-    @allowscalar for k in 2:Nz
-        Δz_face = Δzᶜᶜᶠ(1, 1, k, grid)
-        θ₀_face = (θ₀_field[1, 1, k] + θ₀_field[1, 1, k-1]) / 2
-        π₀_field[1, 1, k] = π₀_field[1, 1, k-1] - g * Δz_face / (cᵖᵈ * θ₀_face)
-    end
-    fill_halo_regions!(π₀_field)
-
-    # Derive pressure: p₀ = pˢᵗ π₀^(cᵖ/R)
+    # Allocate output fields
+    π₀ = Field{Nothing, Nothing, Center}(grid)
     p_bcs = FieldBoundaryConditions(grid, loc, bottom=ValueBoundaryCondition(p₀))
     pᵣ = Field{Nothing, Nothing, Center}(grid, boundary_conditions=p_bcs)
-    @allowscalar for k in 1:Nz
-        pᵣ[1, 1, k] = pˢᵗ * π₀_field[1, 1, k]^(1/κ)
-    end
-    fill_halo_regions!(pᵣ)
-
-    # Derive density: ρ₀ = p₀ / (Rᵈ T₀) where T₀ = θ₀ π₀
-    ρ_surface = p₀ / (Rᵈ * θ₀_value * π₀_surface)
     ρ_bcs = FieldBoundaryConditions(grid, loc, bottom=ValueBoundaryCondition(ρ_surface))
     ρᵣ = Field{Nothing, Nothing, Center}(grid, boundary_conditions=ρ_bcs)
-    @allowscalar for k in 1:Nz
-        T₀ = θ₀_field[1, 1, k] * π₀_field[1, 1, k]
-        ρᵣ[1, 1, k] = pᵣ[1, 1, k] / (Rᵈ * T₀)
-    end
+
+    # Build π₀ by discrete upward integration, then derive p₀ and ρ₀
+    launch!(arch, grid, tuple(1), _compute_exner_reference!,
+            π₀, pᵣ, ρᵣ, θ₀, grid, Nz, π₀_surface, pˢᵗ, cᵖᵈ, κ, Rᵈ, g)
+
+    fill_halo_regions!(π₀)
+    fill_halo_regions!(pᵣ)
     fill_halo_regions!(ρᵣ)
 
-    return ExnerReferenceState(p₀, θ₀_value, pˢᵗ, pᵣ, ρᵣ, π₀_field, θ₀_field)
+    return ExnerReferenceState(p₀, θ₀_surface, pˢᵗ, pᵣ, ρᵣ, π₀)
 end
 
 # ExnerReferenceState has the same surface_density interface as ReferenceState
