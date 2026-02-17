@@ -172,7 +172,7 @@ function compute_slow_momentum_tendencies!(model)
                    model.microphysical_fields,
                    model.thermodynamic_constants)
 
-    Gˢm = substepper.slow_momentum_tendencies
+    Gˢm = substepper.slow_tendencies.momentum
 
     launch!(arch, grid, :xyz, compute_x_momentum_tendency!, Gˢm.ρu, grid, u_args)
     launch!(arch, grid, :xyz, compute_y_momentum_tendency!, Gˢm.ρv, grid, v_args)
@@ -204,7 +204,7 @@ function compute_slow_scalar_tendencies!(model)
     compute_dynamics_tendency!(model)
     χ_ρ_name = :ρ
     Gρ_full = getproperty(model.timestepper.Gⁿ, χ_ρ_name)
-    parent(substepper.Gˢρ) .= parent(Gρ_full)
+    parent(substepper.slow_tendencies.density) .= parent(Gρ_full)
 
     # Compute Gˢχ = full thermodynamic tendency (no correction needed)
     Gⁿ = model.timestepper.Gⁿ
@@ -225,7 +225,7 @@ function compute_slow_scalar_tendencies!(model)
 
     χ_name = thermodynamic_density_name(model.formulation)
     Gχ_full = getproperty(Gⁿ, χ_name)
-    parent(substepper.Gˢρχ) .= parent(Gχ_full)
+    parent(substepper.slow_tendencies.thermodynamic_density) .= parent(Gχ_full)
 
     return nothing
 end
@@ -351,7 +351,7 @@ function OceananigansTimeSteppers.time_step!(model::AtmosphereModel{<:Compressib
     Δt == 0 && @warn "Δt == 0 may cause model blowup!"
 
     # Be paranoid and update state at iteration 0
-    model.clock.iteration == 0 && update_state!(model, callbacks; compute_tendencies = true)
+    maybe_initialize_state!(model, callbacks)
 
     ts = model.timestepper
     α¹ = ts.α¹

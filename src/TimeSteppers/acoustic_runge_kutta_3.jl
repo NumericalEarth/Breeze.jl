@@ -168,7 +168,7 @@ function compute_slow_momentum_tendencies!(model::AtmosphereModel{<:Any, <:Any, 
                    model.microphysical_fields,
                    model.thermodynamic_constants)
 
-    Gˢm = substepper.slow_momentum_tendencies
+    Gˢm = substepper.slow_tendencies.momentum
 
     launch!(arch, grid, :xyz, compute_x_momentum_tendency!, Gˢm.ρu, grid, u_args)
     launch!(arch, grid, :xyz, compute_y_momentum_tendency!, Gˢm.ρv, grid, v_args)
@@ -299,7 +299,7 @@ function OceananigansTimeSteppers.time_step!(model::AtmosphereModel{<:Compressib
     Δt == 0 && @warn "Δt == 0 may cause model blowup!"
 
     # Be paranoid and update state at iteration 0
-    model.clock.iteration == 0 && update_state!(model, callbacks; compute_tendencies = true)
+    maybe_initialize_state!(model, callbacks)
 
     ts = model.timestepper
     β₁ = ts.β₁
