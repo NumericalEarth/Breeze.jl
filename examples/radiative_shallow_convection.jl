@@ -12,6 +12,7 @@ using Breeze
 using Oceananigans
 using Oceananigans.Units
 using Printf, Random, Statistics
+using CairoMakie
 
 using NCDatasets  # Required for RRTMGP lookup tables
 using RRTMGP
@@ -114,9 +115,7 @@ Cᵛ = 1.2e-3
 
 # ## Sponge layer
 #
-# Rayleigh damping in the top 1 km to absorb gravity waves and damp
-# spurious thermal perturbations from radiation at the domain top.
-# The sponge relaxes momentum toward zero and ρθ toward the reference state.
+# Rayleigh damping in the top 1 km to absorb gravity waves.
 
 zˢ = 3000  # Sponge starts at 3 km
 λ = 1/20   # Maximum damping rate [1/s] (20 s e-folding timescale)
@@ -139,37 +138,9 @@ end
     return -p.λ * mask * ρu
 end
 
-# Theta sponge: relax ρθ toward the reference state to counteract
-# the unrealistic radiative cooling at the domain top (where RRTMGP
-# sees no atmosphere above the model domain).
-@inline function θ_sponge(i, j, k, grid, clock, fields, p)
-    mask = sponge_mask(i, j, k, grid, p)
-    @inbounds begin
-        ρθ = fields.ρθ[i, j, k]
-        Tᵣ = p.Tᵣ[i, j, k]
-        pᵣ = p.pᵣ[i, j, k]
-        ρᵣ = p.ρᵣ[i, j, k]
-    end
-    Π = (pᵣ / p.pˢᵗ) ^ p.κ
-    θᵣ = Tᵣ / Π
-    ρθᵣ = ρᵣ * θᵣ
-    return -p.λ * mask * (ρθ - ρθᵣ)
-end
-
-cᵖᵈ = constants.dry_air.heat_capacity
-Rᵈ = constants.molar_gas_constant / constants.dry_air.molar_mass
-κ = Rᵈ / cᵖᵈ
-pˢᵗ = reference_state.standard_pressure
-
 sponge_params = (; λ, zˢ, zᵗ)
 ρw_sponge = Forcing(w_sponge, discrete_form=true, parameters=sponge_params)
 ρu_sponge = Forcing(u_sponge, discrete_form=true, parameters=sponge_params)
-
-θ_sponge_params = (; λ, zˢ, zᵗ, κ, pˢᵗ,
-                     Tᵣ=reference_state.temperature,
-                     pᵣ=reference_state.pressure,
-                     ρᵣ=reference_state.density)
-ρθ_sponge = Forcing(θ_sponge, discrete_form=true, parameters=θ_sponge_params)
 
 # ## Microphysics
 
@@ -185,7 +156,7 @@ momentum_advection = WENO(order=weno_order)
 scalar_advection = (ρθ  = WENO(order=weno_order),
                     ρqᵗ = WENO(order=weno_order, bounds=(0, 1)))
 
-forcing = (ρw=ρw_sponge, ρu=ρu_sponge, ρθ=ρθ_sponge)
+forcing = (ρw=ρw_sponge, ρu=ρu_sponge)
 
 model = AtmosphereModel(grid; dynamics, microphysics, radiation,
                         momentum_advection, scalar_advection,
@@ -254,13 +225,13 @@ function progress(sim)
     qˡmax = maximum(qˡ)
 
     OLR = mean(view(radiation.upwelling_longwave_flux, :, 1, Nz+1))
-    SW_in = -mean(view(radiation.downwelling_shortwave_flux, :, 1, Nz+1))
+    SW_dn = mean(view(radiation.downwelling_shortwave_flux, :, 1, Nz+1))
 
     msg = @sprintf("Iter: %5d, t: %8s, Δt: %5.1fs, wall: %8s",
                    iteration(sim), prettytime(sim), sim.Δt, prettytime(elapsed))
     msg *= @sprintf(", max|w|: %5.2f m/s, T: [%5.1f, %5.1f] K, max(qˡ): %.2e",
                    wmax, Tmin, Tmax, qˡmax)
-    msg *= @sprintf(", OLR: %.1f W/m², SW_in: %.1f W/m²", OLR, SW_in)
+    msg *= @sprintf(", OLR: %.1f W/m², SW_dn: %.1f W/m²", OLR, SW_dn)
     @info msg
 
     wall_clock[] = time_ns()
@@ -272,22 +243,119 @@ add_callback!(simulation, progress, IterationInterval(100))
 # ## Output
 
 qᵛ = model.microphysical_fields.qᵛ
+Q = radiation.flux_divergence
 
-outputs = (; u, w, T, qˡ, qᵛ)
+outputs = (; u, w, T, qˡ, qᵛ, Q)
 avg_outputs = NamedTuple(name => Average(outputs[name], dims=1) for name in keys(outputs))
 
 filename = "radiative_shallow_convection"
+averages_filename = filename * "_averages.jld2"
+slices_filename = filename * "_slices.jld2"
+
 simulation.output_writers[:averages] = JLD2Writer(model, avg_outputs;
-                                                  filename = filename * "_averages.jld2",
+                                                  filename = averages_filename,
                                                   schedule = AveragedTimeInterval(10minutes),
                                                   overwrite_existing = true)
 
 slice_outputs = (; w, qˡ, T)
 simulation.output_writers[:slices] = JLD2Writer(model, slice_outputs;
-                                                filename = filename * "_slices.jld2",
+                                                filename = slices_filename,
                                                 schedule = TimeInterval(5minutes),
                                                 overwrite_existing = true)
 
 @info "Starting simulation..."
 run!(simulation)
 @info "Simulation completed!"
+
+# ## Mean profile evolution
+#
+# Plot horizontally-averaged profiles of temperature, moisture, and radiative
+# heating rate at several times to show the evolution of the boundary layer.
+
+Tts  = FieldTimeSeries(averages_filename, "T")
+qᵛts = FieldTimeSeries(averages_filename, "qᵛ")
+qˡts = FieldTimeSeries(averages_filename, "qˡ")
+Qts  = FieldTimeSeries(averages_filename, "Q")
+
+times = Tts.times
+Nt = length(times)
+
+# Convert radiative flux divergence from W/m³ to K/day
+ρᵣ_data = Array(interior(reference_state.density, 1, 1, :))
+cᵖᵈ = constants.dry_air.heat_capacity / constants.dry_air.molar_mass  # J/(kg·K)
+to_K_per_day = 86400 / cᵖᵈ
+
+Δz = zᵗ / Nz
+zc_km = [(k - 0.5) * Δz / 1000 for k in 1:Nz]
+
+colormap = cgrad(:viridis, Nt, categorical=true)
+
+fig = Figure(size=(1200, 400), fontsize=14)
+
+axT = Axis(fig[1, 1]; xlabel="T (K)", ylabel="z (km)")
+axq = Axis(fig[1, 2]; xlabel="qᵛ (g/kg)")
+axQ = Axis(fig[1, 3]; xlabel="Heating rate (K/day)")
+
+for n in 1:Nt
+    label = @sprintf("t = %s", prettytime(times[n]))
+
+    T_data  = interior(Tts[n],  1, 1, :)
+    qᵛ_data = interior(qᵛts[n], 1, 1, :) .* 1000  # kg/kg → g/kg
+    Q_data  = to_K_per_day .* interior(Qts[n], 1, 1, :) ./ ρᵣ_data
+
+    lines!(axT, T_data,  zc_km; color=colormap[n], label)
+    lines!(axq, qᵛ_data, zc_km; color=colormap[n])
+    lines!(axQ, Q_data,  zc_km; color=colormap[n])
+end
+
+vlines!(axQ, 0; color=:gray50, linestyle=:dash, linewidth=1)
+hideydecorations!(axq; grid=false)
+hideydecorations!(axQ; grid=false)
+
+fig[0, 1:3] = Label(fig, "Radiative Shallow Convection — Mean Profiles", fontsize=16, tellwidth=false)
+Legend(fig[2, :], axT; orientation=:horizontal, framevisible=false, tellwidth=false)
+
+save("radiative_shallow_convection_profiles.png", fig)
+
+fig
+
+# ## Animation of cloud structure
+#
+# Animate xz slices of vertical velocity and cloud liquid water content.
+
+wts  = FieldTimeSeries(slices_filename, "w")
+qˡts_slice = FieldTimeSeries(slices_filename, "qˡ")
+
+slice_times = wts.times
+Nt_slices = length(slice_times)
+
+wlim  = max(maximum(abs, wts) / 2, 1f-6)
+qˡlim = max(maximum(qˡts_slice) / 2, 1f-6)
+
+fig = Figure(size=(1000, 600), fontsize=14)
+
+n = Observable(Nt_slices)
+title = @lift "Radiative Shallow Convection at t = " * prettytime(slice_times[$n])
+fig[0, :] = Label(fig, title, fontsize=16, tellwidth=false)
+
+axw  = Axis(fig[1, 1]; xlabel="x (km)", ylabel="z (km)", title="w (m/s)")
+axqˡ = Axis(fig[1, 2]; xlabel="x (km)", ylabel="z (km)", title="qˡ (g/kg)")
+
+w_n  = @lift wts[$n]
+qˡ_n = @lift qˡts_slice[$n]
+
+hmw  = heatmap!(axw,  w_n;  colormap=:balance, colorrange=(-wlim, wlim))
+hmqˡ = heatmap!(axqˡ, qˡ_n; colormap=:dense,   colorrange=(0, qˡlim))
+
+Colorbar(fig[2, 1], hmw;  vertical=false, label="w (m/s)")
+Colorbar(fig[2, 2], hmqˡ; vertical=false, label="qˡ (g/kg)")
+
+hideydecorations!(axqˡ; grid=false)
+
+save("radiative_shallow_convection.png", fig)
+
+CairoMakie.record(fig, "radiative_shallow_convection.mp4", 1:Nt_slices; framerate=4) do nn
+    n[] = nn
+end
+
+fig

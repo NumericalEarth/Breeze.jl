@@ -247,6 +247,39 @@ function BackgroundAtmosphere(; N₂  = 0.78084,      # Nitrogen (~78%)
                                 HFC₁₂₅, HFC₁₃₄ₐ, HFC₁₄₃ₐ, HFC₂₃, HFC₃₂)
 end
 
+function _vmr_string(value::Number)
+    value == 0 && return nothing
+    if value ≥ 0.001
+        return string(round(value, sigdigits=5))
+    elseif value ≥ 1e-6
+        return string(round(value * 1e6, sigdigits=4), " ppm")
+    elseif value ≥ 1e-9
+        return string(round(value * 1e9, sigdigits=4), " ppb")
+    else
+        return string(value)
+    end
+end
+
+_vmr_string(value) = summary(value)
+
+function Base.show(io::IO, atm::BackgroundAtmosphere)
+    gases = [:N₂, :O₂, :CO₂, :CH₄, :N₂O, :CO, :NO₂, :O₃,
+             :CFC₁₁, :CFC₁₂, :CFC₂₂, :CCl₄, :CF₄,
+             :HFC₁₂₅, :HFC₁₃₄ₐ, :HFC₁₄₃ₐ, :HFC₂₃, :HFC₃₂]
+
+    nonzero = Tuple{Symbol, String}[]
+    for name in gases
+        val = getfield(atm, name)
+        s = _vmr_string(val)
+        s !== nothing && push!(nonzero, (name, s))
+    end
+
+    print(io, "BackgroundAtmosphere with $(length(nonzero)) active gases:")
+    for (name, s) in nonzero
+        print(io, "\n  ", name, " = ", s)
+    end
+end
+
 using Oceananigans.Fields: field
 
 """
