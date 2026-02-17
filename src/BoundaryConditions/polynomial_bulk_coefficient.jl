@@ -24,11 +24,11 @@ Note: we use superscript D (drag/momentum) and T (temperature/scalar) to match t
 transfer coefficient notation ``Cᴰ``, ``Cᵀ`` established in `notation.md`.
 In the literature these are commonly written ``Ψ_m`` and ``Ψ_h``.
 
-For unstable conditions (``ζ < 0``), uses Hogström (1996):
+For unstable conditions (``ζ < 0``), uses [Hogström (1996)](@cite hogstrom1996review):
 - ``φ^D = (1 - γ^D ζ)^{-1/4}``
 - ``φ^T = 0.95(1 - γ^T ζ)^{-1/2}``
 
-For stable conditions (``ζ ≥ 0``), uses Beljaars & Holtslag (1991):
+For stable conditions (``ζ ≥ 0``), uses [Beljaars & Holtslag (1991)](@cite beljaars1991flux):
 - ``Ψ^D = -(a ζ + b (ζ - c/d) e^{-dζ} + bc/d)``
 - ``Ψ^T = -((1 + 2aζ/3)^{3/2} + b (ζ - c/d) e^{-dζ} + bc/d - 1)``
 
@@ -148,8 +148,9 @@ Stability correction based on Monin-Obukhov similarity theory using the
 Li et al. (2010) analytical mapping from bulk Richardson number to the
 stability parameter ``ζ = z/L``.
 
-Uses Hogström (1996) integrated stability functions for unstable conditions and
-Beljaars & Holtslag (1991) for stable conditions.
+Uses [Hogström (1996)](@cite hogstrom1996review) integrated stability functions
+for unstable conditions and [Beljaars & Holtslag (1991)](@cite beljaars1991flux)
+for stable conditions.
 
 Applies structurally correct (and different) corrections for momentum vs scalar transfer:
 - Momentum: ``Cᴰ = Cᴰ_N [α / (α - Ψᴰ)]²``
@@ -165,15 +166,15 @@ scalar correction factor.
 - `scalar_roughness_length`: Roughness length for heat/moisture ``ℓ_h`` (m).
 
 # Keyword Arguments
-- `richardson_number_mapping`: [`RichardsonNumberMapping`](@ref) coefficients (default: Li et al. 2010).
-- `stability_function_parameters`: [`StabilityFunctionParameters`](@ref) (default: Hogström 1996 / Beljaars & Holtslag 1991).
+- `richardson_number_mapping`: [`RichardsonNumberMapping`](@ref) coefficients (default: [Li et al. (2010)](@cite li2010improved)).
+- `stability_function_parameters`: [`StabilityFunctionParameters`](@ref) (default: [Hogström (1996)](@cite hogstrom1996review) / [Beljaars & Holtslag (1991)](@cite beljaars1991flux)).
 
 # References
 
 * Li, Y., Gao, Z., Lenschow, D. H., & Chen, F. (2010). An improved approach for
   parameterizing surface-layer turbulent transfer coefficients in numerical models.
   Boundary-Layer Meteorology, 137, 153-165.
-* Hogström, U. (1996). Review of some basic characteristics of the atmospheric surface layer.
+* Hogström, U. L. F. (1996). Review of some basic characteristics of the atmospheric surface layer.
   Boundary-Layer Meteorology, 78, 215-246.
 * Beljaars, A. C. M., & Holtslag, A. A. M. (1991). Flux parameterization over land surfaces
   for atmospheric models. Journal of Applied Meteorology, 30, 327-341.
