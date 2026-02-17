@@ -82,11 +82,11 @@ scalar_advection = WENO(order=5)
 # motion of the air and surface,
 #
 # ```math
-# τˣ = - Cᴰ |U| ρu, \quad Jᶿ = - ρ₀ Cᵀ |U| (θ - θ₀), \quad Jᵛ = - ρ₀ Cᵛ |U| (qᵗ - qᵛ₀),
+# τˣ = - ρ₀ Cᴰ |ΔU| (u - u₀), \quad Jᶿ = - ρ₀ Cᵀ |U| (θ - θ₀), \quad Jᵛ = - ρ₀ Cᵛ |U| (qᵗ - qᵛ₀),
 # ```
 #
-# where ``|U|`` is "total" the differential wind speed (including gustiness),
-# ``Cᴰ, Cᵀ, Cᵛ`` are exchange coefficients, and ``θ₀, qᵛ₀`` are the surface temperature
+# where ``Cᴰ, Cᵀ, Cᵛ`` are exchange coefficients, ``|ΔU| = [(u - u₀)^2 + (v - v₀)^2 + U_g^2]^{1/2}``
+# is "total" differential wind speed (including gustiness ``U_g``), and ``θ₀, qᵛ₀`` are the surface temperature
 # and surface specific humidity. For wet surfaces, ``qᵛ₀`` is the saturation specific
 # humidity over a planar liquid surface computed at the surface temperature.
 # ``τˣ`` is the surface momentum flux, ``Jᶿ`` is the potential temperature density flux,
