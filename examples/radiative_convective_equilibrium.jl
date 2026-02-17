@@ -429,8 +429,8 @@ qˡxy_ts = FieldTimeSeries(slices_filename, "qˡxy")
 slice_times = wxz_ts.times
 Nt_slices = length(slice_times)
 
-wlim = maximum(abs, wxz_ts) / 2
-qˡlim = maximum(qˡxz_ts) / 2
+wlim = max(maximum(abs, wxz_ts) / 2, 1f-6)
+qˡlim = max(maximum(qˡxz_ts) / 2, 1f-6)
 
 fig = Figure(size=(1000, 1200), fontsize=14)
 

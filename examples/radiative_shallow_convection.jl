@@ -13,6 +13,7 @@ using Oceananigans
 using Oceananigans.Units
 using Printf, Random, Statistics
 
+using NCDatasets  # Required for RRTMGP lookup tables
 using RRTMGP
 using CloudMicrophysics
 
