@@ -257,9 +257,11 @@ conjure_time_step_wizard!(simulation, cfl=0.7)
 # We add a progress callback and output the hourly time-averages of the horizontally-averaged
 # profiles for post-processing.
 
-θ = liquid_ice_potential_temperature(model)
+θˡⁱ = liquid_ice_potential_temperature(model)
+θ = PotentialTemperature(model)
 qˡ = model.microphysical_fields.qˡ
 qᵛ = model.microphysical_fields.qᵛ
+θᵛ = VirtualPotentialTemperature(model)
 
 function progress(sim)
     qˡmax = maximum(qˡ)
@@ -273,13 +275,52 @@ end
 
 add_callback!(simulation, progress, IterationInterval(1000))
 
-outputs = merge(model.velocities, model.tracers, (; θ, qˡ, qᵛ))
+# Compute turbulent quantites for output
+u, v, w, = model.velocities
+U = Average(u, dims=(1, 2)) |> Field # horizontal mean
+V = Average(v, dims=(1, 2)) |> Field
+θˡⁱavg = Average(θˡⁱ, dims=(1,2)) |> Field
+qˡavg = Average(qˡ, dims=(1,2)) |> Field
+qᵗ = qˡ + qᵛ
+qᵗavg = Average(qᵗ, dims=(1,2)) |> Field
+θᵛavg = Average(θᵛ, dims=(1,2)) |> Field
+
+u′² = (u - U) * (u - U)
+v′² = (v - V) * (v - V)
+w′² = w * w
+k = (w′² + v′² + u′²) / 2
+w′qˡ′ = w * (qˡ - qˡavg)
+w′qᵗ′ = w * (qᵗ - qᵗavg)
+w′u′ =  w * (u - U)
+w′θˡⁱ′ = w * (θˡⁱ - θˡⁱavg)
+w′θᵛ′ = w * (θᵛ - θᵛavg)
+
+outputs = merge(model.velocities, model.tracers, (; θ, θˡⁱ, θᵛ, qˡ, qᵛ, w′², w′qˡ′, w′qᵗ′, w′u′, k, w′θˡⁱ′, w′θᵛ′))
 avg_outputs = NamedTuple(name => Average(outputs[name], dims=(1, 2)) for name in keys(outputs))
 
 filename = "bomex.jld2"
 simulation.output_writers[:averages] = JLD2Writer(model, avg_outputs; filename,
                                                   schedule = AveragedTimeInterval(1hour),
                                                   overwrite_existing = true)
+
+# Timeseries integrated TKE, cloud fraction and LWP for output
+# Turbulent kinetic energy
+plane_averaged_tke = Field(Average(k, dims=(1,2)))  # (1, 1, Nz)
+tke_integrated = Integral(plane_averaged_tke)
+
+# # Cloud fraction
+qˡ_thresh = 1e-6
+cloud_mask = qˡ .> qˡ_thresh
+cloud_fraction = Average(Maximum(cloud_mask; dims=3); dims=(1, 2))
+
+# LWP
+
+simulation.output_writers[:scalar_timeseries] = JLD2Writer(model, (; tke_integrated);
+                                                  filename = "bomex_scalar_timeseries.jld2",
+                                                  schedule = TimeInterval(5minutes),
+                                                  overwrite_existing = true)
+
+
 
 # Output horizontal slices at z = 600 m for animation
 # Find the k-index closest to z = 600 m
@@ -331,8 +372,8 @@ axqˡ = Axis(fig[2, 2], xlabel="qˡ (kg/kg)", ylabel="z (m)")
 times = θt.times
 Nt = length(times)
 
-default_colours = Makie.wong_colors()
-colors = [default_colours[mod1(i, length(default_colours))] for i in 1:Nt]
+default_colours = Makie.wong_colors();
+colors = [default_colours[mod1(i, length(default_colours))] for i in 1:Nt];
 
 for n in 1:Nt
     label = n == 1 ? "initial condition" : "mean over $(Int(times[n-1]/hour))-$(Int(times[n]/hour)) hr"
@@ -360,6 +401,76 @@ text!(axuv, -8.5, 2200, text="solid: u\ndashed: v", fontsize=12)
 fig[0, :] = Label(fig, "BOMEX: Mean profile evolution (Siebesma et al., 2003)", fontsize=18, tellwidth=false)
 
 save("bomex_profiles.png", fig) #src
+fig
+
+
+# 1 x 2 panel plot showing vertical velocity variance and tke
+w′²t = FieldTimeSeries(filename, "w′²")
+kt = FieldTimeSeries(filename, "k")
+
+fig = Figure(size=(900, 400), fontsize=14)
+
+axw = Axis(fig[1, 2], xlabel="w′² (m²/s²)", ylabel="z (m)")
+axk = Axis(fig[1, 1], xlabel="tke (m²/s²)", ylabel="z (m)")
+
+colors = [default_colours[mod1(i, length(default_colours))] for i in 1:Nt]
+
+for n in 1:Nt
+    label = n == 1 ? "initial condition" : "mean over $(Int(times[n-1]/hour))-$(Int(times[n]/hour)) hr"
+    lines!(axw, w′²t[n], color=colors[n], label=label)
+    lines!(axk, kt[n], color=colors[n])
+end
+
+# Set axis limits to focus on the boundary layer
+for ax in (axw, axk)
+    ylims!(ax, 0, 2500)
+end
+
+axislegend(axw, position=:rt)
+
+xlims!(axk, 0, 0.5)
+xlims!(axw, 0, 0.3)
+
+fig[0, :] = Label(fig, "BOMEX: turbulent profile evolution (Siebesma et al., 2003)", fontsize=18, tellwidth=false)
+
+save("bomex_var_profiles.png", fig) #src
+fig
+
+# 3 x 2 panel plot showing turbulent flux profiles
+w′qˡ′t = FieldTimeSeries(filename, "w′qˡ′")
+w′θˡⁱ′t = FieldTimeSeries(filename, "w′θˡⁱ′")
+w′u′t = FieldTimeSeries(filename, "w′u′")
+w′qᵗ′t = FieldTimeSeries(filename, "w′qᵗ′")
+w′θᵛ′t = FieldTimeSeries(filename, "w′θᵛ′")
+
+fig = Figure(size=(900, 1200), fontsize=14)
+
+axwqt = Axis(fig[1, 1], xlabel="ρ₀ℒˡᵣw′qᵗ′ (W/m²)", ylabel="z (m)")
+axwθ = Axis(fig[1, 2], xlabel="ρ₀cᵖᵈw′θ′ (W/m²)", ylabel="z (m)")
+axwql = Axis(fig[2, 1], xlabel="ρ₀ℒˡᵣw′qˡ′ (W/m²)", ylabel="z (m)")
+axwθv = Axis(fig[2, 2], xlabel="ρ₀cᵖᵈw′θᵛ′ (W/m²)", ylabel="z (m)")
+axwu = Axis(fig[3, 1], xlabel="w′u′ (m²/s²)", ylabel="z (m)")
+
+colors = [default_colours[mod1(i, length(default_colours))] for i in 1:Nt]
+
+for n in 1:Nt
+    label = n == 1 ? "initial condition" : "mean over $(Int(times[n-1]/hour))-$(Int(times[n]/hour)) hr"
+    lines!(axwqt, w′qᵗ′t[n] * surface_density(reference_state) * constants.liquid.reference_latent_heat, color=colors[n], label=label)
+    lines!(axwθ, w′θˡⁱ′t[n] * surface_density(reference_state) * constants.dry_air.heat_capacity , color=colors[n])
+    lines!(axwql, w′qˡ′t[n] * surface_density(reference_state) * constants.liquid.reference_latent_heat, color=colors[n], label=label)
+    lines!(axwθv, w′θᵛ′t[n] * surface_density(reference_state) * constants.dry_air.heat_capacity, color=colors[n])
+    lines!(axwu, w′u′t[n], color=colors[n])
+end
+
+# Set axis limits to focus on the boundary layer
+for ax in (axwqt, axwθ, axwql, axwu, axwθv)
+    ylims!(ax, 0, 2500)
+end
+axislegend(axwqt, position=:rt)
+
+fig[0, :] = Label(fig, "BOMEX: Turbulent flux profile evolution (Siebesma et al., 2003)", fontsize=18, tellwidth=false)
+
+save("bomex_turb_profiles.png", fig) #src
 fig
 
 # The simulation shows the development of a cloudy boundary layer with:
