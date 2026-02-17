@@ -36,7 +36,7 @@ Lx = 12800   # 12.8 km (100 m horizontal spacing)
 zᵗ = 4000    # 4 km domain top
 
 arch = CPU()
-FT = Float64
+FT = Float32
 
 grid = RectilinearGrid(arch, FT;
                         size = (Nx, Nz),
