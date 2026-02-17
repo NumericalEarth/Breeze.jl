@@ -151,8 +151,8 @@ makedocs(
     plugins = [bib],
     format = Documenter.HTML(
         ;
-        size_threshold_warn = 2 ^ 20, # 1 MiB
-        size_threshold = 2 ^ 21, # 2 MiB
+        size_threshold_warn = 2 ^ 19, # 512 KiB
+        size_threshold = 2 ^ 20, # 1 MiB
     ),
     pages=[
         "Home" => "index.md",
