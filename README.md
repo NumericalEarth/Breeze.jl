@@ -90,7 +90,7 @@ Swap `CPU()` for `GPU()` to run on an NVIDIA GPU.
 - **LES turbulence closures** for subgrid-scale mixing — [prescribed SST convection](https://numericalearth.github.io/BreezeDocumentation/dev/literated/prescribed_sea_surface_temperature/)
 - **Surface physics**: Coriolis forces, bulk drag, heat and moisture fluxes — [tropical cyclones](https://numericalearth.github.io/BreezeDocumentation/dev/literated/tropical_cyclone_world/)
 - **Kinematic driver and parcel model** for rapid physics prototyping — [kinematic driver](https://numericalearth.github.io/BreezeDocumentation/dev/literated/kinematic_driver/), [rising parcels](https://numericalearth.github.io/BreezeDocumentation/dev/literated/rising_parcels/)
-- **GPU-ready**: swap `CPU()` for `GPU()` to run on NVIDIA GPUs
+- **GPU-first**: use `GPU()` to run _very fast_ on NVIDIA GPUs
 
 ## Selected examples
 
