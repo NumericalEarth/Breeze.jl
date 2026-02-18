@@ -213,7 +213,7 @@ fig
 #    profile within the cloud layer.
 #
 # 4. **Divergence correction**: Without `divergence_correction=true`, the constant
-#    velocity field would create spurious tracer sources because ``∇·(ρW) ≠ 0``.
+#    velocity field would create spurious tracer sources because ``𝛁·(ρ𝐔) ≠ 0``.
 #    The correction adds a compensating term to the tracer equations.
 #
 # This setup is analogous to classic parcel theory experiments in cloud physics,
