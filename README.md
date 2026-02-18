@@ -75,7 +75,7 @@ run!(simulation)
 heatmap(liquid_ice_potential_temperature(model), colormap=:thermal, axis=(; aspect=2))
 ```
 
-<!-- TODO: paste quick start figure here -->
+<img width="1192" height="631" alt="image" src="https://github.com/user-attachments/assets/c5681645-045d-483a-9ff1-140a3126acbc" />
 
 Swap `CPU()` for `GPU()` to run on an NVIDIA GPU.
 
