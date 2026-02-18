@@ -74,6 +74,7 @@ run!(simulation)
 
 heatmap(liquid_ice_potential_temperature(model), colormap=:thermal, axis=(; aspect=2))
 ```
+<img width="1200" height="900" alt="image" src="https://github.com/user-attachments/assets/42ac9a6b-bf98-4989-97b6-4a37688f0dc5" />
 
 <img width="1196" height="630" alt="image" src="https://github.com/user-attachments/assets/235c8226-9cdc-41a1-bfb2-cd3afc19fce0" />
 
