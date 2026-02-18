@@ -82,7 +82,7 @@ scalar_advection = WENO(order=5)
 # motion of the air and surface,
 #
 # ```math
-# τˣ = - ρ₀ Cᴰ |ΔU| (u - u₀), \quad Jᶿ = - ρ₀ Cᵀ |U| (θ - θ₀), \quad Jᵛ = - ρ₀ Cᵛ |U| (qᵗ - qᵛ₀),
+# τˣ = - ρ₀ Cᴰ |ΔU| (u - u₀), \quad Jᶿ = - ρ₀ Cᵀ |ΔU| (θ - θ₀), \quad Jᵛ = - ρ₀ Cᵛ |ΔU| (qᵗ - qᵛ₀),
 # ```
 #
 # where ``Cᴰ, Cᵀ, Cᵛ`` are exchange coefficients, ``|ΔU| = [(u - u₀)^2 + (v - v₀)^2 + {U^g}^2]^{1/2}``
