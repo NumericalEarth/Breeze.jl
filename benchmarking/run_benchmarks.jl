@@ -222,9 +222,9 @@ function make_microphysics(name, FT=Float32)
     if name == "SaturationAdjustment"
         return SaturationAdjustment()
     elseif name == "MixedPhaseEquilibrium"
-        return SaturationAdjustment(; phase_equilibrium=MixedPhaseEquilibrium())
+        return SaturationAdjustment(; equilibrium=MixedPhaseEquilibrium())
     elseif name == "WarmPhaseEquilibrium"
-        return SaturationAdjustment(; phase_equilibrium=WarmPhaseEquilibrium())
+        return SaturationAdjustment(; equilibrium=WarmPhaseEquilibrium())
 
     # 1M schemes with saturation adjustment (equilibrium cloud formation)
     elseif name == "1M_WarmEquilibrium"
