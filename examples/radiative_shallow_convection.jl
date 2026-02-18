@@ -142,6 +142,35 @@ Cᵛ = 1.2e-3
 
 microphysics = SaturationAdjustment(equilibrium=WarmPhaseEquilibrium())
 
+# ## Stratospheric sponge
+#
+# The domain extends to 25 km, but the initial stratosphere isn't in radiative
+# equilibrium: ozone absorbs shortwave radiation and the coarse upper cells
+# respond strongly. A Newtonian relaxation of temperature toward the initial
+# profile above 8 km keeps the stratosphere anchored without affecting the
+# tropospheric dynamics. We apply this as an energy forcing on `ρe`, which
+# Breeze automatically converts to a `ρθ` tendency.
+
+Tᵣ = reference_state.temperature
+ρᵣ = reference_state.density
+cᵖᵈ = constants.dry_air.heat_capacity / constants.dry_air.molar_mass  # J/(kg·K)
+τ_sponge = 6hours
+
+@inline function stratospheric_relaxation(i, j, k, grid, clock, model_fields, p)
+    @inbounds T = model_fields.T[i, j, k]
+    @inbounds Tᵣ = p.Tᵣ[i, j, k]
+    @inbounds ρ = p.ρᵣ[i, j, k]
+    z = znode(i, j, k, grid, Center(), Center(), Center())
+    α = clamp((z - 8000) / 4000, 0, 1)
+    ∂T∂t = -α * (T - Tᵣ) / p.τ
+    return ρ * p.cᵖᵈ * ∂T∂t
+end
+
+sponge = Forcing(stratospheric_relaxation; discrete_form=true,
+                 parameters=(; Tᵣ, ρᵣ, cᵖᵈ, τ=τ_sponge))
+
+forcing = (; ρe=sponge)
+
 # ## Model assembly
 
 boundary_conditions = (ρθ=ρθ_bcs, ρqᵗ=ρqᵗ_bcs, ρu=ρu_bcs)
@@ -152,7 +181,7 @@ momentum_advection = WENO(order=weno_order)
 scalar_advection = (ρθ  = WENO(order=weno_order),
                     ρqᵗ = WENO(order=weno_order, bounds=(0, 1)))
 
-model = AtmosphereModel(grid; dynamics, microphysics, radiation,
+model = AtmosphereModel(grid; dynamics, microphysics, radiation, forcing,
                         momentum_advection, scalar_advection,
                         boundary_conditions)
 
