@@ -199,7 +199,7 @@ function PotentialTemperature(model::AtmosphereModel, flavor_symbol=:specific)
                                                    p, ρ, pˢᵗ,
                                                    model.microphysics,
                                                    model.microphysical_fields,
-                                                   specific_prognostic_moisture(model),
+                                                   model.microphysical_fields[moisture_specific_name(model.microphysics)],
                                                    model.temperature,
                                                    model.thermodynamic_constants)
 
@@ -278,7 +278,7 @@ function VirtualPotentialTemperature(model::AtmosphereModel, flavor_symbol=:spec
                                                    p, ρ, pˢᵗ,
                                                    model.microphysics,
                                                    model.microphysical_fields,
-                                                   specific_prognostic_moisture(model),
+                                                   model.microphysical_fields[moisture_specific_name(model.microphysics)],
                                                    model.temperature,
                                                    model.thermodynamic_constants)
 
@@ -368,7 +368,7 @@ function LiquidIcePotentialTemperature(model::AtmosphereModel, flavor_symbol=:sp
                                                    p, ρ, pˢᵗ,
                                                    model.microphysics,
                                                    model.microphysical_fields,
-                                                   specific_prognostic_moisture(model),
+                                                   model.microphysical_fields[moisture_specific_name(model.microphysics)],
                                                    model.temperature,
                                                    model.thermodynamic_constants)
 
@@ -442,7 +442,7 @@ function EquivalentPotentialTemperature(model::AtmosphereModel, flavor_symbol=:s
                                                    p, ρ, pˢᵗ,
                                                    model.microphysics,
                                                    model.microphysical_fields,
-                                                   specific_prognostic_moisture(model),
+                                                   model.microphysical_fields[moisture_specific_name(model.microphysics)],
                                                    model.temperature,
                                                    model.thermodynamic_constants)
 
@@ -525,7 +525,7 @@ function StabilityEquivalentPotentialTemperature(model::AtmosphereModel, flavor_
                                                    p, ρ, pˢᵗ,
                                                    model.microphysics,
                                                    model.microphysical_fields,
-                                                   specific_prognostic_moisture(model),
+                                                   model.microphysical_fields[moisture_specific_name(model.microphysics)],
                                                    model.temperature,
                                                    model.thermodynamic_constants)
 
@@ -540,13 +540,13 @@ function (d::MoistPotentialTemperatureKernelFunction)(i, j, k, grid)
     @inbounds begin
         p = d.pressure[i, j, k]
         ρ = d.density[i, j, k]
-        qₘ = d.specific_moisture[i, j, k]
+        qᵛ = d.specific_moisture[i, j, k]
         pˢᵗ = d.standard_pressure
         T = d.temperature[i, j, k]
     end
 
     constants = d.thermodynamic_constants
-    q = grid_moisture_fractions(i, j, k, grid, d.microphysics, ρ, qₘ, d.microphysical_fields)
+    q = grid_moisture_fractions(i, j, k, grid, d.microphysics, ρ, qᵛ, d.microphysical_fields)
     qᵛ = q.vapor
     qˡ = q.liquid
     qⁱ = q.ice

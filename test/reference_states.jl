@@ -14,7 +14,6 @@ using Breeze.Thermodynamics:
 using Breeze.AtmosphereModels:
     set_to_mean!,
     specific_humidity,
-    specific_prognostic_moisture,
     liquid_mass_fraction,
     ice_mass_fraction
 
@@ -320,7 +319,7 @@ end
         qⁱ = ice_mass_fraction(model)
 
         # With no microphysics: vapor = total moisture, liquid = ice = nothing
-        @test qᵛ === specific_prognostic_moisture(model)
+        @test qᵛ === specific_humidity(model)
         @test qˡ === nothing
         @test qⁱ === nothing
 

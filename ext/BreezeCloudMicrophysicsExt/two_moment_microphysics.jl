@@ -428,18 +428,18 @@ end
 ##### Moisture fraction computation
 #####
 
-@inline function AtmosphereModels.grid_moisture_fractions(i, j, k, grid, bμp::WPNE2M, ρ, qₘ, μ)
+@inline function AtmosphereModels.grid_moisture_fractions(i, j, k, grid, bμp::WPNE2M, ρ, qᵛ, μ)
     qᶜˡ = @inbounds μ.ρqᶜˡ[i, j, k] / ρ
     qʳ = @inbounds μ.ρqʳ[i, j, k] / ρ
     qˡ = qᶜˡ + qʳ
-    return MoistureMassFractions(qₘ, qˡ)
+    return MoistureMassFractions(qᵛ, qˡ)
 end
 
 # Gridless version for parcel models.
-# Input qₘ is total moisture; subtract condensate to get vapor.
-@inline function AtmosphereModels.moisture_fractions(bμp::WPNE2M, ℳ::WarmPhaseTwoMomentState, qₘ)
+# Input qᵛ is vapor; subtract condensate to get vapor.
+@inline function AtmosphereModels.moisture_fractions(bμp::WPNE2M, ℳ::WarmPhaseTwoMomentState, qᵛ)
     qˡ = ℳ.qᶜˡ + ℳ.qʳ
-    qᵛ = qₘ - qˡ
+    qᵛ = qᵛ - qˡ
     return MoistureMassFractions(qᵛ, qˡ)
 end
 
@@ -448,7 +448,7 @@ end
 #####
 
 # Non-equilibrium: no adjustment (cloud liquid is prognostic)
-@inline AtmosphereModels.maybe_adjust_thermodynamic_state(𝒰₀, bμp::WPNE2M, qₘ, constants) = 𝒰₀
+@inline AtmosphereModels.maybe_adjust_thermodynamic_state(𝒰₀, bμp::WPNE2M, qᵛ, constants) = 𝒰₀
 
 #####
 ##### Microphysical velocities for advection

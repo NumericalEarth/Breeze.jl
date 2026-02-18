@@ -262,7 +262,7 @@ Return the thermodynamic state without adjustment.
 
 The Kessler scheme performs its own saturation adjustment internally via the kernel.
 """
-@inline AtmosphereModels.maybe_adjust_thermodynamic_state(𝒰, ::DCMIP2016KM, qₘ, constants) = 𝒰
+@inline AtmosphereModels.maybe_adjust_thermodynamic_state(𝒰, ::DCMIP2016KM, qᵛ, constants) = 𝒰
 
 AtmosphereModels.moisture_prognostic_name(::DCMIP2016KM) = :ρqᵛ
 AtmosphereModels.liquid_mass_fraction(::DCMIP2016KM, model) = model.microphysical_fields.qᶜˡ + model.microphysical_fields.qʳ

@@ -24,7 +24,7 @@ Without a reference state, the full gravitational force ``-gρ`` is used.
 @inline function AtmosphereModels.buoyancy_forceᶜᶜᶜ(i, j, k, grid,
                                                     dynamics::CompressibleDynamics,
                                                     temperature,
-                                                    specific_prognostic_moisture,
+                                                    specific_moisture,
                                                     microphysics,
                                                     microphysical_fields,
                                                     constants)

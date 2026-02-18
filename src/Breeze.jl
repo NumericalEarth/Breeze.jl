@@ -57,7 +57,6 @@ export
     specific_humidity,
     moisture_prognostic_name,
     moisture_specific_name,
-    specific_prognostic_moisture,
 
     # Thermodynamics
     temperature,

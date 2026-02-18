@@ -24,7 +24,7 @@ export
 
 using ..AtmosphereModels: AtmosphereModels, moisture_fractions, grid_moisture_fractions,
     materialize_microphysical_fields, update_microphysical_fields!,
-    NothingMicrophysicalState, WarmRainState, specific_prognostic_moisture
+    NothingMicrophysicalState, WarmRainState, moisture_specific_name
 
 include("saturation_adjustment.jl")
 include("bulk_microphysics.jl")

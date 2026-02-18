@@ -126,7 +126,7 @@ function RelativeHumidity(model)
 
     func = RelativeHumidityKernelFunction(microphysics,
                                           model.microphysical_fields,
-                                          specific_prognostic_moisture(model),
+                                          model.microphysical_fields[moisture_specific_name(model.microphysics)],
                                           model.temperature,
                                           model.dynamics.reference_state,
                                           model.thermodynamic_constants)

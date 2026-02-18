@@ -208,7 +208,7 @@ AtmosphereModels.moisture_prognostic_name(::NonEquilibriumCloudFormation) = :ρq
 const NCBM = BulkMicrophysics{<:Any, Nothing, <:Any}
 const NPBM = NCBM  # Alias: Non-Precipitating Bulk Microphysics
 
-maybe_adjust_thermodynamic_state(𝒰₀, bμp::NCBM, qₘ, constants) =
+maybe_adjust_thermodynamic_state(𝒰₀, bμp::NCBM, qᵛ, constants) =
     AtmosphereModels.adjust_thermodynamic_state(𝒰₀, bμp.cloud_formation, constants)
 
 AtmosphereModels.prognostic_field_names(::NPBM) = tuple()
@@ -219,26 +219,26 @@ AtmosphereModels.materialize_microphysical_fields(bμp::NPBM, grid, bcs) = mater
 end
 
 # Forward grid_moisture_fractions to cloud_formation scheme
-@inline function AtmosphereModels.grid_moisture_fractions(i, j, k, grid, bμp::NPBM, ρ, qₘ, μ)
-    return grid_moisture_fractions(i, j, k, grid, bμp.cloud_formation, ρ, qₘ, μ)
+@inline function AtmosphereModels.grid_moisture_fractions(i, j, k, grid, bμp::NPBM, ρ, qᵛ, μ)
+    return grid_moisture_fractions(i, j, k, grid, bμp.cloud_formation, ρ, qᵛ, μ)
 end
 
 # Forward state-based moisture_fractions to cloud_formation scheme
-@inline function AtmosphereModels.moisture_fractions(bμp::NPBM, ℳ, qₘ)
-    return moisture_fractions(bμp.cloud_formation, ℳ, qₘ)
+@inline function AtmosphereModels.moisture_fractions(bμp::NPBM, ℳ, qᵛ)
+    return moisture_fractions(bμp.cloud_formation, ℳ, qᵛ)
 end
 
 # Disambiguation for specific state types
-@inline function AtmosphereModels.moisture_fractions(bμp::NPBM, ℳ::WarmRainState, qₘ)
-    return moisture_fractions(bμp.cloud_formation, ℳ, qₘ)
+@inline function AtmosphereModels.moisture_fractions(bμp::NPBM, ℳ::WarmRainState, qᵛ)
+    return moisture_fractions(bμp.cloud_formation, ℳ, qᵛ)
 end
 
-@inline function AtmosphereModels.moisture_fractions(bμp::NPBM, ℳ::NothingMicrophysicalState, qₘ)
-    return moisture_fractions(bμp.cloud_formation, ℳ, qₘ)
+@inline function AtmosphereModels.moisture_fractions(bμp::NPBM, ℳ::NothingMicrophysicalState, qᵛ)
+    return moisture_fractions(bμp.cloud_formation, ℳ, qᵛ)
 end
 
-@inline function AtmosphereModels.moisture_fractions(bμp::NPBM, ℳ::NamedTuple, qₘ)
-    return moisture_fractions(bμp.cloud_formation, ℳ, qₘ)
+@inline function AtmosphereModels.moisture_fractions(bμp::NPBM, ℳ::NamedTuple, qᵛ)
+    return moisture_fractions(bμp.cloud_formation, ℳ, qᵛ)
 end
 
 # Forward mass fraction diagnostics to cloud_formation scheme

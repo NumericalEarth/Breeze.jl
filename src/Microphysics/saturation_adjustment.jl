@@ -118,13 +118,13 @@ end
 
 # Grid-indexed moisture fractions for saturation adjustment schemes.
 # These read from diagnostic fields that are filled during update_microphysical_fields!.
-@inline function AtmosphereModels.grid_moisture_fractions(i, j, k, grid, ::WPSA, ρ, qₘ, μ)
+@inline function AtmosphereModels.grid_moisture_fractions(i, j, k, grid, ::WPSA, ρ, qᵉᵐ, μ)
     qᵛ = @inbounds μ.qᵛ[i, j, k]
     qˡ = @inbounds μ.qˡ[i, j, k]
     return MoistureMassFractions(qᵛ, qˡ)
 end
 
-@inline function AtmosphereModels.grid_moisture_fractions(i, j, k, grid, ::MPSA, ρ, qₘ, μ)
+@inline function AtmosphereModels.grid_moisture_fractions(i, j, k, grid, ::MPSA, ρ, qᵉᵐ, μ)
     qᵛ = @inbounds μ.qᵛ[i, j, k]
     qˡ = @inbounds μ.qˡ[i, j, k]
     qⁱ = @inbounds μ.qⁱ[i, j, k]
@@ -135,7 +135,7 @@ end
 # The moisture fractions come from the thermodynamic state after adjustment.
 # Since NothingMicrophysicalState has no prognostic variables, we return all vapor.
 # The parcel model's saturation adjustment updates the thermodynamic state directly.
-@inline AtmosphereModels.moisture_fractions(::SA, ::NothingMicrophysicalState, qₘ) = MoistureMassFractions(qₘ)
+@inline AtmosphereModels.moisture_fractions(::SA, ::NothingMicrophysicalState, qᵉᵐ) = MoistureMassFractions(qᵉᵐ)
 
 # State-based tendency (used by parcel models)
 # SaturationAdjustment operates through thermodynamic state adjustment, so explicit tendencies are zero
@@ -162,8 +162,8 @@ end
 const ATS = AbstractThermodynamicState
 
 # This function allows saturation adjustment to be used as a microphysics scheme directly
-@inline function AtmosphereModels.maybe_adjust_thermodynamic_state(𝒰₀, saturation_adjustment::SA, qₘ, constants)
-    qᵃ = MoistureMassFractions(qₘ) # compute moisture state to be adjusted
+@inline function AtmosphereModels.maybe_adjust_thermodynamic_state(𝒰₀, saturation_adjustment::SA, qᵉᵐ, constants)
+    qᵃ = MoistureMassFractions(qᵉᵐ) # compute moisture state to be adjusted
     𝒰ᵃ = with_moisture(𝒰₀, qᵃ)
     return adjust_thermodynamic_state(𝒰ᵃ, saturation_adjustment, constants)
 end

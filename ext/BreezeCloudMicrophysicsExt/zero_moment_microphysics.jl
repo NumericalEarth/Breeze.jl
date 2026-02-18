@@ -17,13 +17,13 @@ const ZMCM = ZeroMomentCloudMicrophysics
 AtmosphereModels.prognostic_field_names(::ZMCM) = tuple()
 AtmosphereModels.materialize_microphysical_fields(bμp::ZMCM, grid, bcs) = materialize_microphysical_fields(bμp.cloud_formation, grid, bcs)
 @inline AtmosphereModels.update_microphysical_fields!(μ, i, j, k, grid, bμp::ZMCM, ρ, 𝒰, constants) = update_microphysical_fields!(μ, i, j, k, grid, bμp.cloud_formation, ρ, 𝒰, constants)
-@inline AtmosphereModels.grid_moisture_fractions(i, j, k, grid, bμp::ZMCM, ρ, qₘ, μ) = grid_moisture_fractions(i, j, k, grid, bμp.cloud_formation, ρ, qₘ, μ)
+@inline AtmosphereModels.grid_moisture_fractions(i, j, k, grid, bμp::ZMCM, ρ, qᵉᵐ, μ) = grid_moisture_fractions(i, j, k, grid, bμp.cloud_formation, ρ, qᵉᵐ, μ)
 @inline AtmosphereModels.grid_microphysical_tendency(i, j, k, grid, bμp::ZMCM, name, ρ, μ, 𝒰, constants, velocities) = zero(grid)
 @inline AtmosphereModels.microphysical_velocities(bμp::ZMCM, μ, name) = nothing
 
-@inline function AtmosphereModels.maybe_adjust_thermodynamic_state(𝒰₀, bμp::ZMCM, qₘ, constants)
-    # Initialize moisture state from equilibrium moisture qₘ (not from stale microphysical fields)
-    q₀ = MoistureMassFractions(qₘ)
+@inline function AtmosphereModels.maybe_adjust_thermodynamic_state(𝒰₀, bμp::ZMCM, qᵉᵐ, constants)
+    # Initialize moisture state from equilibrium moisture qᵉᵐ (not from stale microphysical fields)
+    q₀ = MoistureMassFractions(qᵉᵐ)
     𝒰₁ = with_moisture(𝒰₀, q₀)
     return adjust_thermodynamic_state(𝒰₁, bμp.cloud_formation, constants)
 end

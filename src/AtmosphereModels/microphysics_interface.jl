@@ -271,13 +271,6 @@ end
 """
 $(TYPEDSIGNATURES)
 
-Return the specific prognostic moisture field from the model's microphysical fields.
-"""
-specific_prognostic_moisture(model) = model.microphysical_fields[moisture_specific_name(model.microphysics)]
-
-"""
-$(TYPEDSIGNATURES)
-
 Return the specific humidity (vapor mass fraction) field for the given `model`.
 
 This always returns the actual vapor field `qᵛ` from the microphysical fields,
@@ -301,7 +294,7 @@ This function takes the thermodynamic state, microphysics scheme, total moisture
 constants. Schemes that use saturation adjustment override this to adjust the moisture partition.
 Non-equilibrium schemes simply return the state unchanged.
 """
-@inline maybe_adjust_thermodynamic_state(state, ::Nothing, qₘ, constants) = state
+@inline maybe_adjust_thermodynamic_state(state, ::Nothing, qᵛ, constants) = state
 
 """
 $(TYPEDSIGNATURES)
@@ -457,30 +450,30 @@ their prognostic variables.
 
 The default implementation for `Nothing` microphysics assumes all moisture is vapor.
 """
-@inline moisture_fractions(::Nothing, ℳ, qₘ) = MoistureMassFractions(qₘ)
-@inline moisture_fractions(microphysics, ::NothingMicrophysicalState, qₘ) = MoistureMassFractions(qₘ)
-@inline moisture_fractions(::Nothing, ::NothingMicrophysicalState, qₘ) = MoistureMassFractions(qₘ)
+@inline moisture_fractions(::Nothing, ℳ, qᵛ) = MoistureMassFractions(qᵛ)
+@inline moisture_fractions(microphysics, ::NothingMicrophysicalState, qᵛ) = MoistureMassFractions(qᵛ)
+@inline moisture_fractions(::Nothing, ::NothingMicrophysicalState, qᵛ) = MoistureMassFractions(qᵛ)
 
 # Disambiguation for Nothing microphysics + specific state types
-@inline moisture_fractions(::Nothing, ℳ::WarmRainState, qₘ) = MoistureMassFractions(qₘ)
-@inline moisture_fractions(::Nothing, ℳ::NamedTuple, qₘ) = MoistureMassFractions(qₘ)
+@inline moisture_fractions(::Nothing, ℳ::WarmRainState, qᵛ) = MoistureMassFractions(qᵛ)
+@inline moisture_fractions(::Nothing, ℳ::NamedTuple, qᵛ) = MoistureMassFractions(qᵛ)
 
 # WarmRainState: cloud liquid + rain
-# Input qₘ is total moisture; subtract condensate to get vapor.
-@inline function moisture_fractions(microphysics, ℳ::WarmRainState, qₘ)
+# Input qᵛ is vapor; used with condensate to build moisture fractions.
+@inline function moisture_fractions(microphysics, ℳ::WarmRainState, qᵛ)
     qˡ = ℳ.qᶜˡ + ℳ.qʳ
-    qᵛ = max(zero(qₘ), qₘ - qˡ)
+    qᵛ = max(zero(qᵛ), qᵛ - qˡ)
     return MoistureMassFractions(qᵛ, qˡ)
 end
 
 # Fallback for NamedTuple microphysical state (used by parcel models with prognostic microphysics).
 # NamedTuple contains specific moisture fractions computed from ρ-weighted prognostics.
 # Parcel models store total moisture in qᵗ, so we subtract condensate to get vapor.
-@inline function moisture_fractions(microphysics, ℳ::NamedTuple, qₘ)
-    qˡ = zero(qₘ)
-    qˡ += haskey(ℳ, :qᶜˡ) ? ℳ.qᶜˡ : zero(qₘ)
-    qˡ += haskey(ℳ, :qʳ) ? ℳ.qʳ : zero(qₘ)
-    return MoistureMassFractions(max(zero(qₘ), qₘ - qˡ), qˡ)
+@inline function moisture_fractions(microphysics, ℳ::NamedTuple, qᵛ)
+    qˡ = zero(qᵛ)
+    qˡ += haskey(ℳ, :qᶜˡ) ? ℳ.qᶜˡ : zero(qᵛ)
+    qˡ += haskey(ℳ, :qʳ) ? ℳ.qʳ : zero(qᵛ)
+    return MoistureMassFractions(max(zero(qᵛ), qᵛ - qˡ), qˡ)
 end
 
 """
@@ -498,16 +491,16 @@ Non-equilibrium schemes don't need `𝒰` to build their state (they use prognos
 
 **Saturation adjustment schemes** should override this to read from diagnostic fields.
 """
-@inline function grid_moisture_fractions(i, j, k, grid, microphysics, ρ, qₘ, μ_fields)
+@inline function grid_moisture_fractions(i, j, k, grid, microphysics, ρ, qᵛ, μ_fields)
     μ = extract_microphysical_prognostics(i, j, k, microphysics, μ_fields)
     # velocities are not used for moisture fraction computation, pass zeros
     zero_velocities = (; u = zero(ρ), v = zero(ρ), w = zero(ρ))
     ℳ = microphysical_state(microphysics, ρ, μ, nothing, zero_velocities)
-    return moisture_fractions(microphysics, ℳ, qₘ)
+    return moisture_fractions(microphysics, ℳ, qᵛ)
 end
 
 # Fallback for Nothing microphysics (no fields to index)
-@inline grid_moisture_fractions(i, j, k, grid, microphysics::Nothing, ρ, qₘ, μ) = MoistureMassFractions(qₘ)
+@inline grid_moisture_fractions(i, j, k, grid, microphysics::Nothing, ρ, qᵛ, μ) = MoistureMassFractions(qᵛ)
 
 """
 $(TYPEDSIGNATURES)

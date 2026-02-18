@@ -228,14 +228,14 @@ function AtmosphereModel(grid;
     pressure_solver = dynamics_pressure_solver(dynamics, grid)
 
     moisture_specific = moisture_specific_name(microphysics)
-    specific_prognostic_moisture_field = microphysical_fields[moisture_specific]
+    specific_moisture = microphysical_fields[moisture_specific]
     model_fields = merge(prognostic_model_fields, velocities, microphysical_fields,
                          (; T=temperature))
     density = dynamics_density(dynamics)
     forcing = atmosphere_model_forcing(forcing, prognostic_model_fields, model_fields,
                                        grid, coriolis, density,
                                        velocities, dynamics, formulation, microphysics,
-                                       specific_prognostic_moisture_field)
+                                       specific_moisture)
 
     # Include thermodynamic density (ρe or ρθ), moisture, microphysical prognostic fields, plus user tracers
     closure_thermo_name = thermodynamic_density_name(formulation)
@@ -361,7 +361,7 @@ end
 function atmosphere_model_forcing(user_forcings, prognostic_fields, model_fields,
                                   grid, coriolis, density,
                                   velocities, dynamics, formulation, microphysics,
-                                  specific_prognostic_moisture_field)
+                                  specific_moisture)
     forcings_type = typeof(user_forcings)
     msg = string("AtmosphereModel forcing must be a NamedTuple, got $forcings_type")
     throw(ArgumentError(msg))
@@ -371,7 +371,7 @@ end
 function atmosphere_model_forcing(::Nothing, prognostic_fields, model_fields,
                                   grid, coriolis, density,
                                   velocities, dynamics, formulation, microphysics,
-                                  specific_prognostic_moisture_field)
+                                  specific_moisture)
     names = keys(prognostic_fields)
     return NamedTuple{names}(Returns(zero(eltype(prognostic_fields[name]))) for name in names)
 end
@@ -379,7 +379,7 @@ end
 function atmosphere_model_forcing(user_forcings::NamedTuple, prognostic_fields, model_fields,
                                   grid, coriolis, density,
                                   velocities, dynamics, formulation, microphysics,
-                                  specific_prognostic_moisture_field)
+                                  specific_moisture)
 
     user_forcing_names = keys(user_forcings)
 
@@ -404,7 +404,7 @@ function atmosphere_model_forcing(user_forcings::NamedTuple, prognostic_fields, 
     # Build specific fields for subsidence forcing (maps specific field names like :u, :θ to fields)
     formulation_fields = fields(formulation)
     moist_specific = moisture_specific_name(microphysics)
-    specific_fields = merge(velocities, formulation_fields, NamedTuple{(moist_specific,)}((specific_prognostic_moisture_field,)))
+    specific_fields = merge(velocities, formulation_fields, NamedTuple{(moist_specific,)}((specific_moisture,)))
 
     # Build context for special forcing types (used by extended materialize_forcing in Forcings module)
     forcing_context = (; coriolis, density, specific_fields)
