@@ -61,13 +61,11 @@ A warm bubble rising through a stratified atmosphere in 15 lines:
 ```julia
 using Breeze, Oceananigans.Units, CairoMakie
 
-grid = RectilinearGrid(CPU(); size=(256, 256), halo=(5, 5),
-                       x=(-10e3, 10e3), z=(0, 10e3),
+grid = RectilinearGrid(CPU(); size=(256, 256), x=(-10e3, 10e3), z=(0, 10e3),
                        topology=(Periodic, Flat, Bounded))
 
 reference = ReferenceState(grid; potential_temperature=300)
-model = AtmosphereModel(grid; dynamics=AnelasticDynamics(reference), advection=WENO(order=9))
-
+model = AtmosphereModel(grid; dynamics=AnelasticDynamics(reference), advection=WENO(order=5))
 set!(model, θ = (x, z) -> 300 + 2cos(π/2 * min(1, √(x^2 + (z - 2000)^2) / 2000))^2)
 
 simulation = Simulation(model; Δt=2, stop_time=25minutes)
