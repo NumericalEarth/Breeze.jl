@@ -56,7 +56,7 @@ For more information, see the [Pkg.jl documentation](https://pkgdocs.julialang.o
 
 ## Quick start
 
-A warm bubble rising through a stratified atmosphere in 15 lines:
+A warm bubble rising through a neutral atmosphere in 15 lines:
 
 ```julia
 using Breeze, Oceananigans.Units, CairoMakie
