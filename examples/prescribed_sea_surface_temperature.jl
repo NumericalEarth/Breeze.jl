@@ -132,7 +132,7 @@ scalar_advection = WENO(order=5)
 # coefficients are:
 #
 # ```math
-# Cᴰ = Cᴰ_N \left[\frac{α}{α - Ψᴰ}\right]^2, \quad
+# Cᴰ = Cᴰ_N \left(\frac{α}{α - Ψᴰ}\right)^2, \quad
 # Cᵀ = Cᵀ_N \frac{α}{α - Ψᴰ} \frac{β_h}{β_h - Ψᵀ}
 # ```
 #
