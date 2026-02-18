@@ -15,12 +15,6 @@
   <a href="https://numericalearth.github.io/BreezeDocumentation/dev/">
     <img alt="Documentation" src="https://img.shields.io/badge/documentation-in%20development-orange?style=flat-square">
   </a>
-  <a href="https://doi.org/10.5281/zenodo.18050353">
-    <img src="https://zenodo.org/badge/DOI/10.5281/zenodo.18050353.svg" alt="DOI">
-  </a>
-  <a href="https://codecov.io/gh/NumericalEarth/Breeze.jl" >
-    <img src="https://codecov.io/gh/NumericalEarth/Breeze.jl/graph/badge.svg?token=09TZGWKUPV"/>
-  </a>
   <a href="https://github.com/NumericalEarth/BreezeBenchmarks">
     <img alt="Benchmarks" src="https://img.shields.io/badge/benchmarks-BreezeBenchmarks-informational?style=flat-square">
   </a>
@@ -33,6 +27,12 @@
   </a>
   <a href="https://github.com/JuliaTesting/Aqua.jl" >
     <img src="https://raw.githubusercontent.com/JuliaTesting/Aqua.jl/master/badge.svg"/>
+  </a>
+  <a href="https://doi.org/10.5281/zenodo.18050353">
+    <img src="https://zenodo.org/badge/DOI/10.5281/zenodo.18050353.svg" alt="DOI">
+  </a>
+  <a href="https://codecov.io/gh/NumericalEarth/Breeze.jl" >
+    <img src="https://codecov.io/gh/NumericalEarth/Breeze.jl/graph/badge.svg?token=09TZGWKUPV"/>
   </a>
 </p>
 
