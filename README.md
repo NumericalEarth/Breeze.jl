@@ -81,15 +81,15 @@ Swap `CPU()` for `GPU()` to run on an NVIDIA GPU.
 
 ## Features
 
-- **Anelastic dynamics** with a pressure Poisson solver that filters sound waves — [BOMEX shallow convection](https://numericalearth.github.io/BreezeDocumentation/dev/literated/bomex/), [RICO trade-wind cumulus](https://numericalearth.github.io/BreezeDocumentation/dev/literated/rico/)
-- **Compressible dynamics** with split-explicit acoustic substepping (horizontally explicit, vertically implicit) using SSP-RK3 or Wicker-Skamarock RK3 — [inertia-gravity waves](https://numericalearth.github.io/BreezeDocumentation/dev/literated/inertia_gravity_wave/), [acoustic waves](https://numericalearth.github.io/BreezeDocumentation/dev/literated/acoustic_wave/)
-- **Moist thermodynamics** with liquid-ice potential temperature and static energy formulations — [cloudy thermal bubble](https://numericalearth.github.io/BreezeDocumentation/dev/literated/cloudy_thermal_bubble/)
-- **Cloud microphysics**: saturation adjustment, Kessler, one- and two-moment bulk schemes via [CloudMicrophysics.jl](https://github.com/CliMA/CloudMicrophysics.jl) — [splitting supercell](https://numericalearth.github.io/BreezeDocumentation/dev/literated/splitting_supercell/)
-- **Radiative transfer**: gray, clear-sky, and all-sky solvers via [RRTMGP.jl](https://github.com/CliMA/RRTMGP.jl) — [single column radiation](https://numericalearth.github.io/BreezeDocumentation/dev/literated/single_column_radiation/)
+- **Anelastic dynamics** with a pressure Poisson solver that filters sound waves
+- **Compressible dynamics** with split-explicit acoustic substepping (horizontally explicit, vertically implicit) using SSP-RK3 or Wicker-Skamarock RK3
+- **Moist thermodynamics** with liquid-ice potential temperature and static energy formulations
+- **Cloud microphysics**: saturation adjustment, Kessler, one- and two-moment bulk schemes via [CloudMicrophysics.jl](https://github.com/CliMA/CloudMicrophysics.jl)
+- **Radiative transfer**: gray, clear-sky, and all-sky solvers via [RRTMGP.jl](https://github.com/CliMA/RRTMGP.jl)
 - **High-order advection** including bounds-preserving WENO schemes
-- **LES turbulence closures** for subgrid-scale mixing — [prescribed SST convection](https://numericalearth.github.io/BreezeDocumentation/dev/literated/prescribed_sea_surface_temperature/)
-- **Surface physics**: Coriolis forces, bulk drag, heat and moisture fluxes — [tropical cyclones](https://numericalearth.github.io/BreezeDocumentation/dev/literated/tropical_cyclone_world/)
-- **Kinematic driver and parcel model** for rapid physics prototyping — [kinematic driver](https://numericalearth.github.io/BreezeDocumentation/dev/literated/kinematic_driver/), [rising parcels](https://numericalearth.github.io/BreezeDocumentation/dev/literated/rising_parcels/)
+- **LES turbulence closures** for subgrid-scale mixing
+- **Surface physics**: Coriolis forces, bulk drag, heat and moisture fluxes
+- **Kinematic driver and parcel model** for rapid prototyping of microphysics and radiation schemes
 - **GPU-first**: use `GPU()` to run _very fast_ on NVIDIA GPUs
 
 ## Selected examples
