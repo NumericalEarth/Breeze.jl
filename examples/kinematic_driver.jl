@@ -17,7 +17,7 @@
 # - Moist boundary layer air entering from below
 #
 # The **divergence correction** option compensates for the non-zero mass flux divergence
-# ``𝛁·(ρ𝐔)`` that arises when velocity doesn't vary with the reference density profile.
+# ``\boldsymbol{\nabla} \cdot (ρ \boldsymbol{u})`` that arises when velocity doesn't vary with the reference density profile.
 # This is essential for physically consistent tracer advection in kinematic models.
 
 using Breeze
@@ -47,11 +47,12 @@ reference_state = ReferenceState(grid, constants;
 # The key feature of kinematic models is [`PrescribedDynamics`](@ref), which fixes
 # the density and pressure fields from a reference state. We enable
 # `divergence_correction=true` because our constant vertical velocity doesn't
-# satisfy the anelastic continuity constraint ``𝛁·(ρ𝐔) = 0``.
+# satisfy the anelastic continuity constraint ``\boldsymbol{\nabla} \cdot (ρ \boldsymbol{u}) = 0``.
 #
 # Without this correction, the tracer equation would see spurious sources/sinks
-# from the non-zero velocity divergence. The correction adds a term ``c 𝛁·(ρ𝐔)``
-# that compensates for the prescribed velocity field's divergence.
+# from the non-zero velocity divergence. The correction adds a term
+# ``c \boldsymbol{\nabla} \cdot (ρ \boldsymbol{u})`` that compensates for the prescribed
+# velocity field's divergence.
 
 W₀ = 2 # Vertical velocity (m/s) — a gentle updraft
 dynamics = PrescribedDynamics(reference_state; divergence_correction=true)
@@ -213,7 +214,7 @@ fig
 #    profile within the cloud layer.
 #
 # 4. **Divergence correction**: Without `divergence_correction=true`, the constant
-#    velocity field would create spurious tracer sources because ``𝛁·(ρ𝐔) ≠ 0``.
+#    velocity field would create spurious tracer sources because ``\boldsymbol{\nabla} \cdot (ρ \boldsymbol{u}) ≠ 0``.
 #    The correction adds a compensating term to the tracer equations.
 #
 # This setup is analogous to classic parcel theory experiments in cloud physics,
