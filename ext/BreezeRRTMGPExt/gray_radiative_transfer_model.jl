@@ -400,11 +400,14 @@ end
     c = rrtmgp_column_index(i, j, grid.Nx)
 
     @inbounds begin
-        # Layer values (cell centers) - k runs from 1 to Nz
-        Tᶜ[k, c] = T[i, j, k]
-        pᶜ[k, c] = p[i, j, k]
+        # Face values at k and k+1
         pᶠ[k, c] = ℑzᵃᵃᶠ(i, j, k, grid, p)
         Tᶠ[k, c] = ℑzᵃᵃᶠ(i, j, k, grid, T)
+
+        # Layer values: use face-averaged temperature for consistency with level sources,
+        # preventing 2Δz oscillations in the radiative heating rate.
+        pᶜ[k, c] = p[i, j, k]
+        Tᶜ[k, c] = (ℑzᵃᵃᶠ(i, j, k, grid, T) + ℑzᵃᵃᶠ(i, j, k+1, grid, T)) / 2
 
         # Special case setting the topmost level + surface temperature
         # Because kernel spans (Nx, Ny, Nz)

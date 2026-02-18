@@ -50,13 +50,20 @@ end
     @inbounds begin
         # Layer (cell-centered) values
         pᶜ = pᵣ[i, j, k]
-        Tᶜ = T[i, j, k]
         qᵛₖ = max(qᵛ[i, j, k], zero(eltype(qᵛ)))
 
-        # Face values at k and k+1 (needed for column dry air mass)
+        # Face values at k and k+1 (needed for column dry air mass and level temperatures)
         pᶠₖ = ℑzᵃᵃᶠ(i, j, k, grid, pᵣ)
-        Tᶠₖ = ℑzᵃᵃᶠ(i, j, k, grid, T)
         pᶠₖ₊₁ = ℑzᵃᵃᶠ(i, j, k+1, grid, pᵣ)
+        Tᶠₖ = ℑzᵃᵃᶠ(i, j, k, grid, T)
+        Tᶠₖ₊₁ = ℑzᵃᵃᶠ(i, j, k+1, grid, T)
+
+        # Use face-averaged temperature for the RRTMGP layer temperature.
+        # This ensures consistency between RRTMGP's layer and level Planck sources,
+        # preventing 2Δz oscillations in the radiative heating rate that arise when
+        # RRTMGP's linear-in-tau source correction amplifies lay_source − lev_source
+        # mismatches at the grid Nyquist frequency.
+        Tᶜ = (Tᶠₖ + Tᶠₖ₊₁) / 2
 
         # RRTMGP Planck/source lookup tables are defined over a finite temperature range.
         # Clamp temperatures to avoid extrapolation that can yield tiny negative source values
