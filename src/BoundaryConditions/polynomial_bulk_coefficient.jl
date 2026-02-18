@@ -13,6 +13,15 @@ const default_neutral_latent_heat_polynomial     = (0.120, 0.070, 2.55)
 ##### StabilityFunctionParameters: Ψ function constants
 #####
 
+struct StabilityFunctionParameters{FT}
+    γᴰ :: FT
+    γᵀ :: FT
+    a :: FT
+    b :: FT
+    c :: FT
+    d :: FT
+end
+
 """
     StabilityFunctionParameters(FT = Oceananigans.defaults.FloatType;
         γᴰ = 19.3, γᵀ = 11.6, a = 1, b = 2/3, c = 5, d = 0.35)
@@ -39,15 +48,6 @@ For stable conditions (``ζ ≥ 0``), uses [Beljaars & Holtslag (1991)](@cite be
 * Beljaars, A. C. M., & Holtslag, A. A. M. (1991). Flux parameterization over land surfaces
   for atmospheric models. Journal of Applied Meteorology, 30, 327-341.
 """
-struct StabilityFunctionParameters{FT}
-    γᴰ :: FT
-    γᵀ :: FT
-    a :: FT
-    b :: FT
-    c :: FT
-    d :: FT
-end
-
 function StabilityFunctionParameters(FT = Oceananigans.defaults.FloatType;
                                      γᴰ = 19.3,
                                      γᵀ = 11.6,
@@ -67,7 +67,7 @@ end
 
 Regression coefficients for the non-iterative mapping from bulk Richardson number
 ``Riᴮ`` to the Monin-Obukhov stability parameter ``ζ = z/L``, following
-[Li et al. (2010)](@cite li2010improved).
+[Li et al. (2010)](@cite Li2010).
 
 The superscripts u, w, s denote unstable, weakly stable, and strongly stable
 regimes respectively. Subscript indices follow the original paper.
@@ -166,7 +166,7 @@ scalar correction factor.
 - `scalar_roughness_length`: Roughness length for heat/moisture ``ℓ_h`` (m).
 
 # Keyword Arguments
-- `richardson_number_mapping`: [`RichardsonNumberMapping`](@ref) coefficients (default: [Li et al. (2010)](@cite li2010improved)).
+- `richardson_number_mapping`: [`RichardsonNumberMapping`](@ref) coefficients (default: [Li et al. (2010)](@cite Li2010)).
 - `stability_function_parameters`: [`StabilityFunctionParameters`](@ref) (default: [Hogström (1996)](@cite hogstrom1996review) / [Beljaars & Holtslag (1991)](@cite beljaars1991flux)).
 
 # References
