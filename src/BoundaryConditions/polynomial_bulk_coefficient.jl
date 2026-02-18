@@ -13,6 +13,15 @@ const default_neutral_latent_heat_polynomial     = (0.120, 0.070, 2.55)
 ##### StabilityFunctionParameters: Ψ function constants
 #####
 
+struct StabilityFunctionParameters{FT}
+    γᴰ :: FT
+    γᵀ :: FT
+    a :: FT
+    b :: FT
+    c :: FT
+    d :: FT
+end
+
 """
     StabilityFunctionParameters(FT = Oceananigans.defaults.FloatType;
         γᴰ = 19.3, γᵀ = 11.6, a = 1, b = 2/3, c = 5, d = 0.35)
@@ -24,30 +33,21 @@ Note: we use superscript D (drag/momentum) and T (temperature/scalar) to match t
 transfer coefficient notation ``Cᴰ``, ``Cᵀ`` established in `notation.md`.
 In the literature these are commonly written ``Ψ_m`` and ``Ψ_h``.
 
-For unstable conditions (``ζ < 0``), uses Hogström (1996):
+For unstable conditions (``ζ < 0``), uses [Hogström (1996)](@cite hogstrom1996review):
 - ``φ^D = (1 - γ^D ζ)^{-1/4}``
 - ``φ^T = 0.95(1 - γ^T ζ)^{-1/2}``
 
-For stable conditions (``ζ ≥ 0``), uses Beljaars & Holtslag (1991):
-- ``Ψ^D = -(a ζ + b (ζ - c/d) e^{-dζ} + bc/d)``
-- ``Ψ^T = -((1 + 2aζ/3)^{3/2} + b (ζ - c/d) e^{-dζ} + bc/d - 1)``
+For stable conditions (``ζ ≥ 0``), uses [Beljaars & Holtslag (1991)](@cite beljaars1991flux):
+- ``Ψ^D = -[a ζ + b (ζ - c/d) e^{-dζ} + bc/d]``
+- ``Ψ^T = -[(1 + 2aζ/3)^{3/2} + b (ζ - c/d) e^{-dζ} + bc/d - 1]``
 
 # References
 
-* Hogström, U. (1996). Review of some basic characteristics of the atmospheric
-  surface layer. Boundary-Layer Meteorology, 78, 215-246.
-* Beljaars, A. C. M., & Holtslag, A. A. M. (1991). Flux parameterization over
-  land surfaces for atmospheric models. Journal of Applied Meteorology, 30, 327-341.
+* Beljaars, A. C. M., & Holtslag, A. A. M. (1991). Flux parameterization over land surfaces
+  for atmospheric models. Journal of Applied Meteorology, 30, 327-341.
+* Hogström, U. L. F. (1996). Review of some basic characteristics of the atmospheric surface layer.
+  Boundary-Layer Meteorology, 78, 215-246.
 """
-struct StabilityFunctionParameters{FT}
-    γᴰ :: FT
-    γᵀ :: FT
-    a :: FT
-    b :: FT
-    c :: FT
-    d :: FT
-end
-
 function StabilityFunctionParameters(FT = Oceananigans.defaults.FloatType;
                                      γᴰ = 19.3,
                                      γᵀ = 11.6,
@@ -67,15 +67,15 @@ end
 
 Regression coefficients for the non-iterative mapping from bulk Richardson number
 ``Riᴮ`` to the Monin-Obukhov stability parameter ``ζ = z/L``, following
-Li et al. (2010).
+[Li et al. (2010)](@cite Li2010).
 
 The superscripts u, w, s denote unstable, weakly stable, and strongly stable
 regimes respectively. Subscript indices follow the original paper.
 
 Three regimes:
-- **Unstable** (``Riᴮ <`` `stable_unstable_transition`): Eq. 12
-- **Weakly stable** (`stable_unstable_transition` ``≤ Riᴮ ≤`` `strongly_stable_transition`): Eq. 14
-- **Strongly stable** (``Riᴮ >`` `strongly_stable_transition`): Eq. 16
+- **Unstable** (``Riᴮ <`` `stable_unstable_transition`): Eq. (12)
+- **Weakly stable** (`stable_unstable_transition` ``≤ Riᴮ ≤`` `strongly_stable_transition`): Eq. (14)
+- **Strongly stable** (``Riᴮ >`` `strongly_stable_transition`): Eq. (16)
 
 # References
 
@@ -148,8 +148,9 @@ Stability correction based on Monin-Obukhov similarity theory using the
 Li et al. (2010) analytical mapping from bulk Richardson number to the
 stability parameter ``ζ = z/L``.
 
-Uses Hogström (1996) integrated stability functions for unstable conditions and
-Beljaars & Holtslag (1991) for stable conditions.
+Uses [Hogström (1996)](@cite hogstrom1996review) integrated stability functions
+for unstable conditions and [Beljaars & Holtslag (1991)](@cite beljaars1991flux)
+for stable conditions.
 
 Applies structurally correct (and different) corrections for momentum vs scalar transfer:
 - Momentum: ``Cᴰ = Cᴰ_N [α / (α - Ψᴰ)]²``
@@ -165,18 +166,18 @@ scalar correction factor.
 - `scalar_roughness_length`: Roughness length for heat/moisture ``ℓ_h`` (m).
 
 # Keyword Arguments
-- `richardson_number_mapping`: [`RichardsonNumberMapping`](@ref) coefficients (default: Li et al. 2010).
-- `stability_function_parameters`: [`StabilityFunctionParameters`](@ref) (default: Hogström 1996 / Beljaars & Holtslag 1991).
+- `richardson_number_mapping`: [`RichardsonNumberMapping`](@ref) coefficients (default: [Li et al. (2010)](@cite Li2010)).
+- `stability_function_parameters`: [`StabilityFunctionParameters`](@ref) (default: [Hogström (1996)](@cite hogstrom1996review) / [Beljaars & Holtslag (1991)](@cite beljaars1991flux)).
 
 # References
 
+* Beljaars, A. C. M., & Holtslag, A. A. M. (1991). Flux parameterization over land surfaces
+  for atmospheric models. Journal of Applied Meteorology, 30, 327-341.
+* Hogström, U. L. F. (1996). Review of some basic characteristics of the atmospheric surface layer.
+  Boundary-Layer Meteorology, 78, 215-246.
 * Li, Y., Gao, Z., Lenschow, D. H., & Chen, F. (2010). An improved approach for
   parameterizing surface-layer turbulent transfer coefficients in numerical models.
   Boundary-Layer Meteorology, 137, 153-165.
-* Hogström, U. (1996). Review of some basic characteristics of the atmospheric surface layer.
-  Boundary-Layer Meteorology, 78, 215-246.
-* Beljaars, A. C. M., & Holtslag, A. A. M. (1991). Flux parameterization over land surfaces
-  for atmospheric models. Journal of Applied Meteorology, 30, 327-341.
 """
 struct FittedStabilityFunction{FT, RM, SP}
     scalar_roughness_length :: FT
@@ -432,6 +433,10 @@ PolynomialCoefficient{Float64}
 
 # References
 
+* Beljaars, A. C. M., & Holtslag, A. A. M. (1991). Flux parameterization over land surfaces
+  for atmospheric models. Journal of Applied Meteorology, 30, 327-341.
+* Hogström, U. L. F. (1996). Review of some basic characteristics of the atmospheric surface layer.
+  Boundary-Layer Meteorology, 78, 215-246.
 * Large, W., & Yeager, S. G. (2009). The global climatology of an interannually varying air–sea flux data set. Climate dynamics, 33(2), 341-364.
 * Li, Y., Gao, Z., Lenschow, D. H., & Chen, F. (2010). An improved approach for parameterizing surface-layer turbulent transfer coefficients in numerical models. Boundary-Layer Meteorology, 137, 153-165.
 """
