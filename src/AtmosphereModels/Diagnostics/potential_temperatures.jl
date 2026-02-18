@@ -225,7 +225,7 @@ where ``δᵛ ≡ Rᵛ / Rᵈ - 1``. This follows from the ideal gas law for a m
 and the definition of virtual temperature, ``p = ρ Rᵈ Tᵛ``, which leads to
 
 ```math
-Tᵛ = T \frac{Rᵐ}{Rᵈ} = T \\left( 1 + δᵛ qᵛ - qˡ - qⁱ \\right)
+Tᵛ = T \\frac{Rᵐ}{Rᵈ} = T \\left( 1 + δᵛ qᵛ - qˡ - qⁱ \\right)
 ```
 
 The virtual potential temperature is defined analogously,

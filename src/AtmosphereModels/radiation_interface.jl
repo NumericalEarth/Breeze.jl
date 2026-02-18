@@ -43,7 +43,13 @@ abstract type AbstractOptics end
 """
 $(TYPEDEF)
 
-Type representing gray atmosphere radiation ([O'Gorman & Schneider 2008](@cite OGormanSchneider2008)), can be used as optics argument in [`RadiativeTransferModel`](@ref).
+Type representing gray atmosphere radiation ([O'Gorman & Schneider 2008](@cite OGormanSchneider2008)),
+can be used as optics argument in [`RadiativeTransferModel`](@ref).
+
+# References
+
+* O'Gorman, P. A. and Schneider, T. (2008). The hydrological cycle over a wide range of climates simulated
+    with an idealized GCM. Journal of Climate, 21, 3815–3832.
 """
 struct GrayOptics <: AbstractOptics end
 """
@@ -105,6 +111,11 @@ RadiativeTransferModel
 ├── direct_surface_albedo: ConstantField(0.1)
 └── diffuse_surface_albedo: ConstantField(0.1)
 ```
+
+# References
+
+* O'Gorman, P. A. and Schneider, T. (2008). The hydrological cycle over a wide range of climates simulated
+    with an idealized GCM. Journal of Climate, 21, 3815–3832.
 """
 function RadiativeTransferModel(grid::AbstractGrid, optics, args...; kw...)
     msg = "Unknown optics $(optics). Valid options are $(join(string.(subtypes(AbstractOptics)) .* "()", ", ")).\n" *
