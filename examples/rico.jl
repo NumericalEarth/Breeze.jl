@@ -412,9 +412,9 @@ qʳxy_ts = FieldTimeSeries("rico_slices.jld2", "qʳxy")
 times = wxy_ts.times
 Nt = length(times)
 
-qᶜˡlim = maximum(qᶜˡxz_ts) / 4
-qʳlim = maximum(qʳxz_ts) / 4
-wlim = maximum(abs, wxy_ts) / 2
+qᶜˡlim = max(maximum(qᶜˡxz_ts), FT(1e-8)) / 4
+qʳlim = max(maximum(qʳxz_ts), FT(1e-8)) / 4
+wlim = max(maximum(abs, wxy_ts), FT(1e-4)) / 2
 
 # Now let's plot the slices and animate them.
 
