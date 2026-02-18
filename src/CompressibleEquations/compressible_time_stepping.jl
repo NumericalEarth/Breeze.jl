@@ -84,7 +84,7 @@ function AtmosphereModels.compute_auxiliary_dynamics_variables!(model::Compressi
             dynamics.density,
             model.formulation,
             dynamics,
-            model.specific_moisture,
+            specific_prognostic_moisture(model),
             grid,
             model.microphysics,
             model.microphysical_fields,
@@ -98,17 +98,17 @@ end
 
 @kernel function _compute_temperature_and_pressure!(temperature_field, pressure_field,
                                                     density, formulation, dynamics,
-                                                    specific_moisture, grid, microphysics,
+                                                    specific_prognostic_moisture, grid, microphysics,
                                                     microphysical_fields, constants)
     i, j, k = @index(Global, NTuple)
 
     @inbounds begin
         ρ = density[i, j, k]
-        qᵗ = specific_moisture[i, j, k]
+        qₘ = specific_prognostic_moisture[i, j, k]
     end
 
     # Compute moisture fractions
-    q = grid_moisture_fractions(i, j, k, grid, microphysics, ρ, qᵗ, microphysical_fields)
+    q = grid_moisture_fractions(i, j, k, grid, microphysics, ρ, qₘ, microphysical_fields)
     Rᵐ = mixture_gas_constant(q, constants)
     cᵖᵐ = mixture_heat_capacity(q, constants)
     cᵛᵐ = cᵖᵐ - Rᵐ

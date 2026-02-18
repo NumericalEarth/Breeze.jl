@@ -108,7 +108,7 @@ set!(all_sky_model; θ=θ₀, qᵗ=qᵗᵢ)
 
 T = gray_model.temperature
 pᵣ = reference_state.pressure
-qᵗ = gray_model.specific_moisture
+qᵗ = specific_prognostic_moisture(gray_model)
 ℋ = RelativeHumidityField(gray_model)
 
 ℐ_lw_up_gray = gray_radiation.upwelling_longwave_flux

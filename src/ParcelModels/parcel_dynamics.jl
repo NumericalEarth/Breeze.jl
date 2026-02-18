@@ -15,7 +15,7 @@ using Breeze.Thermodynamics: MoistureMassFractions,
     with_moisture, mixture_heat_capacity,
     temperature_from_potential_temperature, saturation_specific_humidity
 
-using Breeze.AtmosphereModels: AtmosphereModels, AtmosphereModel
+using Breeze.AtmosphereModels: AtmosphereModels, AtmosphereModel, specific_prognostic_moisture
 
 #####
 ##### ParcelState: state of a rising parcel
@@ -344,15 +344,18 @@ function Oceananigans.set!(model::ParcelModel; T = nothing, θ = nothing,
 
     # Compute specific humidity from relative humidity if ℋ is provided
     if !isnothing(ℋ) && isnothing(qᵗ)
-        set_moisture_from_relative_humidity!(model.specific_moisture, ℋ,
+        spm = specific_prognostic_moisture(model)
+        set_moisture_from_relative_humidity!(spm, ℋ,
                                               model.temperature, dynamics.density, constants)
     elseif !isnothing(qᵗ)
-        set!(model.specific_moisture, qᵗ)
+        spm = specific_prognostic_moisture(model)
+        set!(spm, qᵗ)
     else
         # Default to zero moisture
-        set!(model.specific_moisture, 0)
+        spm = specific_prognostic_moisture(model)
+        set!(spm, 0)
     end
-    fill_halo_regions!(model.specific_moisture)
+    fill_halo_regions!(specific_prognostic_moisture(model))
 
     # Initialize parcel state if z is provided
     if !isnothing(z)
@@ -436,7 +439,7 @@ function initialize_parcel_state!(state, z₀, x₀, y₀, model)
     T₀ = interpolate(z₀, model.temperature)
     ρ₀ = interpolate(z₀, dynamics.density)
     p₀ = interpolate(z₀, dynamics.pressure)
-    qᵗ₀ = interpolate(z₀, model.specific_moisture)
+    qᵗ₀ = interpolate(z₀, specific_prognostic_moisture(model))
 
     # Set position
     state.x = x₀

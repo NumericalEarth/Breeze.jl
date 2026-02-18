@@ -96,7 +96,7 @@ end
                                      dynamics,
                                      formulation,
                                      temperature,
-                                     specific_moisture,
+                                     specific_prognostic_moisture,
                                      microphysics,
                                      microphysical_fields,
                                      constants)
@@ -104,7 +104,7 @@ end
     return ( - div_𝐯w(i, j, k, grid, advection, momentum, velocities.w)
              - z_pressure_gradient(i, j, k, grid, dynamics)
              + buoyancy_forceᶜᶜᶠ(i, j, k, grid, dynamics, temperature,
-                                 specific_moisture, microphysics, microphysical_fields, constants)
+                                 specific_prognostic_moisture, microphysics, microphysical_fields, constants)
              - z_f_cross_U(i, j, k, grid, coriolis, momentum)
              - ∂ⱼ_𝒯₃ⱼ(i, j, k, grid, density, closure, closure_fields, clock, model_fields, nothing)
              + ρw_forcing(i, j, k, grid, clock, model_fields))
@@ -119,7 +119,7 @@ end
                                  dynamics,
                                  formulation,
                                  constants,
-                                 specific_moisture,
+                                 specific_prognostic_moisture,
                                  velocities,
                                  microphysics,
                                  microphysical_fields,
@@ -132,11 +132,11 @@ end
     Uᵗ = sum_of_velocities(velocities, Uᵖ)
     ρ_field = dynamics_density(dynamics)
     @inbounds ρ = ρ_field[i, j, k]
-    @inbounds qᵗ = specific_moisture[i, j, k]
+    @inbounds qₘ = specific_prognostic_moisture[i, j, k]
     closure_buoyancy = AtmosphereModelBuoyancy(dynamics, formulation, constants)
 
     # Compute moisture fractions first
-    q = grid_moisture_fractions(i, j, k, grid, microphysics, ρ, qᵗ, microphysical_fields)
+    q = grid_moisture_fractions(i, j, k, grid, microphysics, ρ, qₘ, microphysical_fields)
     𝒰 = diagnose_thermodynamic_state(i, j, k, grid, formulation, dynamics, q)
 
     return ( - div_ρUc(i, j, k, grid, advection, ρ_field, Uᵗ, c)

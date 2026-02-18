@@ -13,7 +13,8 @@ using Breeze.Thermodynamics:
 
 using Breeze.AtmosphereModels:
     set_to_mean!,
-    vapor_mass_fraction,
+    specific_humidity,
+    specific_prognostic_moisture,
     liquid_mass_fraction,
     ice_mass_fraction
 
@@ -314,12 +315,12 @@ end
         model = AtmosphereModel(grid)
         set!(model, θ=FT(300), qᵗ=FT(0.01))
 
-        qᵛ = vapor_mass_fraction(model)
+        qᵛ = specific_humidity(model)
         qˡ = liquid_mass_fraction(model)
         qⁱ = ice_mass_fraction(model)
 
         # With no microphysics: vapor = total moisture, liquid = ice = nothing
-        @test qᵛ === model.specific_moisture
+        @test qᵛ === specific_prognostic_moisture(model)
         @test qˡ === nothing
         @test qⁱ === nothing
 
@@ -338,7 +339,7 @@ end
         set!(model, θ=FT(300), qᵗ=FT(0.01))
         time_step!(model, 1)  # triggers state update which populates microphysical fields
 
-        qᵛ = vapor_mass_fraction(model)
+        qᵛ = specific_humidity(model)
         qˡ = liquid_mass_fraction(model)
         qⁱ = ice_mass_fraction(model)
 

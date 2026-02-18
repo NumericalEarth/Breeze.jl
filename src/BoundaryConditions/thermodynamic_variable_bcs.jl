@@ -63,9 +63,9 @@ const NorthEnergyFluxBC  = EnergyFluxBoundaryConditionFunction{<:Any, <:North}
 
 # Convert energy flux to potential temperature flux: Jᶿ = 𝒬 / cᵖᵐ
 @inline function 𝒬_to_Jᶿ(i, j, k, grid, ef, 𝒬, fields)
-    qᵗ = @inbounds fields.qᵗ[i, j, k]
+    qᵛ = @inbounds fields.qᵛ[i, j, k]
     ρ = @inbounds ef.density[i, j, k]
-    q = grid_moisture_fractions(i, j, k, grid, ef.microphysics, ρ, qᵗ, fields)
+    q = grid_moisture_fractions(i, j, k, grid, ef.microphysics, ρ, qᵛ, fields)
     cᵖᵐ = mixture_heat_capacity(q, ef.thermodynamic_constants)
     return 𝒬 / cᵖᵐ
 end
@@ -184,9 +184,9 @@ const NorthThetaFluxBC  = ThetaFluxBoundaryConditionFunction{<:Any, <:North}
 
 # Convert potential temperature flux to energy flux: 𝒬 = Jᶿ × cᵖᵐ
 @inline function Jᶿ_to_𝒬(i, j, k, grid, tf, Jᶿ, fields)
-    qᵗ = @inbounds fields.qᵗ[i, j, k]
+    qᵛ = @inbounds fields.qᵛ[i, j, k]
     ρ = @inbounds tf.density[i, j, k]
-    q = grid_moisture_fractions(i, j, k, grid, tf.microphysics, ρ, qᵗ, fields)
+    q = grid_moisture_fractions(i, j, k, grid, tf.microphysics, ρ, qᵛ, fields)
     cᵖᵐ = mixture_heat_capacity(q, tf.thermodynamic_constants)
     return Jᶿ * cᵖᵐ
 end

@@ -333,7 +333,7 @@ function prepare_acoustic_cache!(substepper, model)
             model.dynamics.density,
             model.dynamics.pressure,
             model.temperature,
-            model.specific_moisture,
+            specific_prognostic_moisture(model),
             grid,
             model.microphysics,
             model.microphysical_fields,
@@ -358,7 +358,7 @@ end
 
 @kernel function _prepare_exner_cache!(θᵥ_field, acoustic_compression_field, π′_field, π̃′_field,
                                        πᵣ_field,
-                                       ρ, p, T, qᵗ, grid,
+                                       ρ, p, T, qₘ, grid,
                                        microphysics, microphysical_fields,
                                        constants, reference_state, pˢᵗ, cᵖ, κ)
     i, j, k = @index(Global, NTuple)
@@ -367,11 +367,11 @@ end
         ρⁱ = ρ[i, j, k]
         pⁱ = p[i, j, k]
         Tⁱ = T[i, j, k]
-        qᵗⁱ = qᵗ[i, j, k]
+        qₘⁱ = qₘ[i, j, k]
     end
 
     # Compute moisture fractions and mixture properties
-    q = grid_moisture_fractions(i, j, k, grid, microphysics, ρⁱ, qᵗⁱ, microphysical_fields)
+    q = grid_moisture_fractions(i, j, k, grid, microphysics, ρⁱ, qₘⁱ, microphysical_fields)
     Rᵐ = mixture_gas_constant(q, constants)
     cᵖᵐ = mixture_heat_capacity(q, constants)
     cᵛᵐ = cᵖᵐ - Rᵐ

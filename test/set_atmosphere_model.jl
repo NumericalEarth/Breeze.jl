@@ -1,4 +1,5 @@
 using Breeze
+using Breeze.AtmosphereModels: specific_prognostic_moisture
 using GPUArraysCore: @allowscalar
 using Oceananigans
 using Test
@@ -106,7 +107,7 @@ end
         # Verify the moisture was set correctly using the RelativeHumidity diagnostic
         ℋ_field = RelativeHumidityField(model)
         @test @allowscalar all(isapprox.(interior(ℋ_field), FT(0.5); rtol=5e-2))
-        @test @allowscalar all(x -> x > 0, interior(model.specific_moisture))
+        @test @allowscalar all(x -> x > 0, interior(specific_prognostic_moisture(model)))
     end
 
     # Function inputs don't work on GPU (non-bitstype argument error)

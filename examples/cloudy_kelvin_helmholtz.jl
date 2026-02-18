@@ -126,7 +126,7 @@ set!(model; u=uᵢ, θ=θᵢ, ℋ=ℋᵢ)
 U = Field(Average(model.velocities.u, dims=(1, 2)))
 Ri = N^2 / ∂z(U)^2
 
-Qᵗ = Field(Average(model.specific_moisture, dims=1))
+Qᵗ = Field(Average(specific_prognostic_moisture(model), dims=1))
 θ = Field(Average(liquid_ice_potential_temperature(model), dims=1))
 ℋ = Field(Average(RelativeHumidity(model), dims=1))
 

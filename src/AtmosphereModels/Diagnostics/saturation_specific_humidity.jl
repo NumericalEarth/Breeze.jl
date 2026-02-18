@@ -45,8 +45,8 @@ of *saturation specific humidity* ``qᵛ⁺``.
 * `:equilibrium`
 
   Return the *saturation specific humidity* in potentially-saturated conditions, using the
-  `model.specific_moisture`. This is equivalent to the `:total_moisture` flavor
-  under saturated conditions with no condensate; or in other words, if `model.specific_moisture` happens
+  `specific_prognostic_moisture(model)`. This is equivalent to the `:total_moisture` flavor
+  under saturated conditions with no condensate; or in other words, if `specific_prognostic_moisture(model)` happens
   to be equal to the saturation specific humidity.
 
 * `:total_moisture`
@@ -71,7 +71,7 @@ function SaturationSpecificHumidity(model, flavor_symbol=:prognostic)
     func = SaturationSpecificHumidityKernelFunction(flavor,
                                                     model.microphysics,
                                                     model.microphysical_fields,
-                                                    model.specific_moisture,
+                                                    specific_prognostic_moisture(model),
                                                     model.temperature,
                                                     model.dynamics.reference_state,
                                                     model.thermodynamic_constants)
@@ -114,14 +114,14 @@ function (d::SaturationSpecificHumidityKernelFunction)(i, j, k, grid)
     surface = equilibrated_surface(equilibrium, T)
 
     if d.flavor isa PrognosticFlavor
-        qᵗ = @inbounds d.specific_moisture[i, j, k]
-        q = grid_moisture_fractions(i, j, k, grid, d.microphysics, ρᵣ, qᵗ, d.microphysical_fields)
+        qₘ = @inbounds d.specific_moisture[i, j, k]
+        q = grid_moisture_fractions(i, j, k, grid, d.microphysics, ρᵣ, qₘ, d.microphysical_fields)
         ρ = density(T, pᵣ, q, constants)
         return saturation_specific_humidity(T, ρ, constants, surface)
 
     elseif d.flavor isa EquilibriumFlavor
-        qᵗ = @inbounds d.specific_moisture[i, j, k]
-        return equilibrium_saturation_specific_humidity(T, pᵣ, qᵗ, constants, surface)
+        qₘ = @inbounds d.specific_moisture[i, j, k]
+        return equilibrium_saturation_specific_humidity(T, pᵣ, qₘ, constants, surface)
 
     elseif d.flavor isa TotalMoistureFlavor
         return saturation_total_specific_moisture(T, pᵣ, constants, surface)
