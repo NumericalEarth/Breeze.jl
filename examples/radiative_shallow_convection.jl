@@ -137,18 +137,6 @@ Cᵛ = 1.2e-3
 ρqᵗ_bcs = FieldBoundaryConditions(bottom=ρqᵗ_flux)
 ρu_bcs = FieldBoundaryConditions(bottom=Breeze.BulkDrag(coefficient=Cᴰ))
 
-# ## Sponge layer
-#
-# A Rayleigh damping sponge layer in the upper portion of the domain prevents
-# spurious gravity wave reflections from the rigid upper boundary. We relax
-# the vertical momentum `ρw` toward zero with an 8-second timescale near
-# the domain top. Without this sponge, gravity waves excited by convection
-# reflect off the lid and produce oscillatory artifacts in the mean profiles.
-
-sponge_rate = 1/8  # s⁻¹ (8-second relaxation timescale)
-sponge_mask = GaussianMask{:z}(center=3500, width=500)
-sponge = Relaxation(rate=sponge_rate, mask=sponge_mask)
-
 # ## Microphysics
 #
 # Warm-phase saturation adjustment diagnoses cloud liquid water from temperature
@@ -159,8 +147,8 @@ microphysics = SaturationAdjustment(equilibrium=WarmPhaseEquilibrium())
 
 # ## Model assembly
 #
-# We assemble the model with 5th-order WENO advection, the surface boundary
-# conditions, and the sponge layer applied to ρw.
+# We assemble the model with 5th-order WENO advection and the surface boundary
+# conditions.
 
 boundary_conditions = (ρθ=ρθ_bcs, ρqᵗ=ρqᵗ_bcs, ρu=ρu_bcs)
 
@@ -170,9 +158,7 @@ momentum_advection = WENO(order=weno_order)
 scalar_advection = (ρθ  = WENO(order=weno_order),
                     ρqᵗ = WENO(order=weno_order, bounds=(0, 1)))
 
-forcing = (ρw = sponge,)
-
-model = AtmosphereModel(grid; dynamics, microphysics, radiation, forcing,
+model = AtmosphereModel(grid; dynamics, microphysics, radiation,
                         momentum_advection, scalar_advection,
                         boundary_conditions)
 
