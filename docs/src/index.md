@@ -5,7 +5,7 @@ Fast and friendly Julia software for atmospheric fluid dynamics on CPUs and GPUs
 Breeze is a library for simulating atmospheric flows and weather phenomena, such as clouds and hurricanes, on both CPUs and GPUs.
 Built on [Oceananigans](https://github.com/CliMA/Oceananigans.jl), Breeze extends its grids, solvers, and advection schemes with atmospheric dynamics, thermodynamics, microphysics, and radiation.
 
-Learn more in the [examples](@ref examples) or get in touch on the [NumericalEarth Slack](https://join.slack.com/t/numericalearth/shared_invite/zt-3pwpvky4k-XX7RkgQgHLIUt~wtwGXN~Q) or [GitHub discussions](https://github.com/NumericalEarth/Breeze.jl/discussions).
+Learn more in the [examples](literated/dry_thermal_bubble.md) or get in touch on the [NumericalEarth Slack](https://join.slack.com/t/numericalearth/shared_invite/zt-3pwpvky4k-XX7RkgQgHLIUt~wtwGXN~Q) or [GitHub discussions](https://github.com/NumericalEarth/Breeze.jl/discussions).
 
 ## Features
 
