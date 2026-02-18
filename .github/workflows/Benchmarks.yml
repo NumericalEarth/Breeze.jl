@@ -22,46 +22,8 @@ env:
   REACTANT_GPU: 'none'
 
 jobs:
-  run-scaling-benchmarks:
-    name: "Scaling benchmarks"
-    permissions:
-      actions: write
-      contents: write
-      pull-requests: read
-      statuses: write
-    runs-on: aws-linux-nvidia-gpu-l4
-    defaults:
-      run:
-        shell: bash
-        working-directory: ./benchmarking
-    container:
-      image: 'ghcr.io/numericalearth/breeze-docker-images:benchmarking-julia_1.12.4'
-      options: --gpus=all
-    timeout-minutes: 30
-    steps:
-      - uses: actions/checkout@v6
-      - name: Instantiate benchmarking environment
-        shell: julia --color=yes --project {0}
-        run: |
-          using Pkg
-          Pkg.instantiate()
-      - name: Run benchmarks
-        timeout-minutes: 45
-        run:
-          earlyoom -m 3 -s 100 -r 300 --prefer 'julia' &
-          julia --color=yes --project run_benchmarks.jl --device GPU --size "128^3, 384x384x256, 768x768x256"
-      - uses: actions/upload-artifact@v6
-        with:
-          name: benchmarks-scaling
-          path: benchmarking/benchmark_results.*
-          retention-days: 90
-      - name: Create job summary
-        timeout-minutes: 1
-        run:
-          cat "benchmark_results.md" >> "${GITHUB_STEP_SUMMARY}"
-
-  run-dynamics-benchmarks:
-    name: "Dynamics benchmarks (${{ matrix.dynamics }})"
+  run-benchmarks:
+    name: "Run benchmarks - dynamics ${{ matrix.dynamics }} - microphysics ${{ matrix.microphysics }} - grid ${{ matrix.grid }}"
     permissions:
       actions: write
       contents: write
@@ -71,7 +33,25 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        dynamics: [anelastic, compressible_splitexplicit]
+        include:
+          - dynamics: ''
+            microphysics: ''
+            grid: '128^3, 384x384x256, 768x768x256'
+          - dynamics: 'anelastic'
+            microphysics: ''
+            grid: '512x512x256'
+          - dynamics: 'compressible_splitexplicit'
+            microphysics: ''
+            grid: '512x512x256'
+          - dynamics: ''
+            microphysics: 'MixedPhaseEquilibrium'
+            grid: '512x512x256'
+          - dynamics: ''
+            microphysics: '1M_MixedEquilibrium'
+            grid: '512x512x256'
+          - dynamics: ''
+            microphysics: '1M_MixedNonEquilibrium'
+            grid: '512x512x256'
     defaults:
       run:
         shell: bash
@@ -89,54 +69,19 @@ jobs:
           Pkg.instantiate()
       - name: Run benchmarks
         timeout-minutes: 45
-        run:
-          earlyoom -m 3 -s 100 -r 300 --prefer 'julia' &
-          julia --color=yes --project run_benchmarks.jl --device GPU --dynamics ${{ matrix.dynamics }} --size "512x512x256"
-      - uses: actions/upload-artifact@v6
-        with:
-          name: benchmarks-dynamics-${{ matrix.dynamics }}
-          path: benchmarking/benchmark_results.*
-          retention-days: 90
-      - name: Create job summary
-        timeout-minutes: 1
-        run:
-          cat "benchmark_results.md" >> "${GITHUB_STEP_SUMMARY}"
-
-  run-microphysics-benchmarks:
-    name: "Microphysics benchmarks (${{ matrix.microphysics }})"
-    permissions:
-      actions: write
-      contents: write
-      pull-requests: read
-      statuses: write
-    runs-on: aws-linux-nvidia-gpu-l4
-    strategy:
-      fail-fast: false
-      matrix:
-        microphysics: [MixedPhaseEquilibrium, 1M_MixedEquilibrium, 1M_MixedNonEquilibrium]
-    defaults:
-      run:
-        shell: bash
-        working-directory: ./benchmarking
-    container:
-      image: 'ghcr.io/numericalearth/breeze-docker-images:benchmarking-julia_1.12.4'
-      options: --gpus=all
-    timeout-minutes: 30
-    steps:
-      - uses: actions/checkout@v6
-      - name: Instantiate benchmarking environment
-        shell: julia --color=yes --project {0}
         run: |
-          using Pkg
-          Pkg.instantiate()
-      - name: Run benchmarks
-        timeout-minutes: 45
-        run:
           earlyoom -m 3 -s 100 -r 300 --prefer 'julia' &
-          julia --color=yes --project run_benchmarks.jl --device GPU --microphysics ${{ matrix.microphysics }} --size "512x512x256"
+          ARGS=()
+          if [[ -n "${{ matrix.dynamics }}" ]]; then
+              ARGS+=(--dynamics "${{ matrix.dynamics }}")
+          fi
+          if [[ -n "${{ matrix.microphysics }}" ]]; then
+              ARGS+=(--microphysics "${{ matrix.microphysics }}")
+          fi
+          julia --color=yes --project run_benchmarks.jl --device GPU "${ARGS[@]}" --size "${{ matrix.grid }}"
       - uses: actions/upload-artifact@v6
         with:
-          name: benchmarks-microphysics-${{ matrix.microphysics }}
+          name: 'benchmarks-scaling-dynamics_${{ matrix.dynamics }}-microphysics_${{ matrix.microphysics }}'
           path: benchmarking/benchmark_results.*
           retention-days: 90
       - name: Create job summary
@@ -146,7 +91,7 @@ jobs:
 
   publish-benchmarks:
     name: "Publish benchmarks"
-    needs: [run-scaling-benchmarks, run-dynamics-benchmarks, run-microphysics-benchmarks]
+    needs: run-benchmarks
     permissions:
       actions: write
       contents: write
