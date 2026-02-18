@@ -1,22 +1,24 @@
 # # Diurnal cycle of radiative convection
 #
-# This example simulates shallow convection driven by interactive all-sky RRTMGP
-# radiation over a warm tropical ocean, featuring a full diurnal cycle of solar
-# forcing. Saturation-adjustment microphysics diagnoses cloud liquid water, which
-# feeds back on the radiation through cloud-top longwave cooling and shortwave
-# absorption.
+# This example simulates moist convection over a warm tropical ocean, driven by
+# surface fluxes and modulated by interactive all-sky RRTMGP radiation with a
+# full diurnal cycle of solar forcing. Saturation-adjustment microphysics diagnoses
+# cloud liquid water, which feeds back on the radiation through longwave emission
+# and shortwave absorption.
 #
-# The initial sounding has a well-mixed sub-cloud layer, a moist cloud layer
-# capped by a temperature inversion at ~2 km, and a stable free troposphere that
-# transitions to an isothermal stratosphere above ~14 km. A stretched vertical
-# grid keeps the cloud layer well-resolved (100 m spacing) while extending to
-# 25 km so that RRTMGP sees a realistic atmospheric column for both longwave
-# and shortwave radiative transfer.
+# The initial sounding has a dry-adiabatic sub-cloud layer (0–1 km) capped by a
+# conditionally unstable troposphere (6.5 K/km lapse rate). The dry-adiabatic
+# sub-cloud layer eliminates convective inhibition, allowing surface perturbations
+# to trigger moist convection that releases the available potential energy. A
+# stretched vertical grid resolves the cloud layer (100 m spacing below 3 km)
+# while extending to 25 km so that RRTMGP sees a realistic atmospheric column
+# for both longwave and shortwave radiative transfer.
 #
-# The diurnal cycle modulates the cloud-radiation interaction: during the day,
-# shortwave absorption partially offsets longwave cooling at cloud top, weakening
-# the cloud-driven turbulence and thinning the cloud layer. At night, unopposed
-# longwave cooling strengthens convection and deepens the clouds.
+# The warm sea surface (303 K) drives strong sensible and latent heat fluxes
+# that sustain the convection. Moist updrafts produce clouds from about 1 km
+# up to 3–5 km, and the radiative transfer responds to the evolving cloud field.
+# A stratospheric sponge layer above 8 km prevents spurious temperature drift
+# in the coarse upper cells.
 
 using Breeze
 using Oceananigans
@@ -104,7 +106,7 @@ background_atmosphere = BackgroundAtmosphere(
 # fluxes are realistic rather than reduced to a diurnal mean. The sun rises at
 # t ≈ 0, reaches noon at t ≈ 6 hours, and sets at t ≈ 12 hours.
 
-SST = 300  # Sea surface temperature [K]
+SST = 303  # Sea surface temperature [K]
 
 radiation = RadiativeTransferModel(grid, AllSkyOptics(), constants;
                                    surface_temperature = SST,
@@ -121,19 +123,20 @@ radiation = RadiativeTransferModel(grid, AllSkyOptics(), constants;
 # ## Surface fluxes
 #
 # Bulk aerodynamic formulae provide surface sensible heat, moisture, and momentum
-# fluxes. The SST of 300 K drives a modest air–sea temperature disequilibrium
-# that sustains the boundary layer against radiative cooling.
+# fluxes. The 3 K air–sea temperature disequilibrium drives strong surface fluxes
+# that warm and moisten the boundary layer, feeding the convection.
 
 Cᴰ = 1.0e-3
 Cᵀ = 1.0e-3
 Cᵛ = 1.2e-3
+Uᵍ = 1.0  # Gustiness [m/s] — ensures surface fluxes even in calm conditions
 
-ρθ_flux = BulkSensibleHeatFlux(coefficient=Cᵀ, surface_temperature=SST)
-ρqᵗ_flux = BulkVaporFlux(coefficient=Cᵛ, surface_temperature=SST)
+ρθ_flux = BulkSensibleHeatFlux(coefficient=Cᵀ, gustiness=Uᵍ, surface_temperature=SST)
+ρqᵗ_flux = BulkVaporFlux(coefficient=Cᵛ, gustiness=Uᵍ, surface_temperature=SST)
 
 ρθ_bcs = FieldBoundaryConditions(bottom=ρθ_flux)
 ρqᵗ_bcs = FieldBoundaryConditions(bottom=ρqᵗ_flux)
-ρu_bcs = FieldBoundaryConditions(bottom=Breeze.BulkDrag(coefficient=Cᴰ))
+ρu_bcs = FieldBoundaryConditions(bottom=Breeze.BulkDrag(coefficient=Cᴰ, gustiness=Uᵍ))
 
 # ## Microphysics
 #
@@ -187,42 +190,32 @@ model = AtmosphereModel(grid; dynamics, microphysics, radiation, forcing,
 
 # ## Initial conditions
 #
-# The sounding has a well-mixed sub-cloud layer (0–700 m) at the dry adiabatic
-# lapse rate, a moist cloud layer (700–2000 m) at 5 K/km, a 4 K temperature
-# inversion at 2 km, and a free troposphere with a 6.5 K/km lapse rate that
-# transitions to an isothermal stratosphere at 210 K above ~14 km. Moisture
-# is 18 g/kg at the surface, decaying exponentially, with a sharp drop at the
-# inversion.
+# The sounding has a dry-adiabatic sub-cloud layer (0–1 km, 9.8 K/km)
+# capped by a conditionally unstable troposphere (6.5 K/km lapse rate)
+# that transitions to an isothermal stratosphere at 210 K. Moisture is
+# 20 g/kg at the surface with a 2.5 km scale height, typical of the
+# tropical maritime boundary layer.
 
 function Tᵇᵍ(z)
-    T₀ = 299.2
+    T₀ = 300.0
     T_strat = 210.0
-    if z ≤ 700
+    if z ≤ 1000
         T = T₀ - 9.8e-3 * z
-    elseif z ≤ 2000
-        T = T₀ - 9.8e-3 * 700 - 5e-3 * (z - 700)
     else
-        T_ft = T₀ - 9.8e-3 * 700 - 5e-3 * 1300 + 4
-        T = T_ft - 6.5e-3 * (z - 2000)
+        T = T₀ - 9.8e-3 * 1000 - 6.5e-3 * (z - 1000)
     end
     return max(T, T_strat)
 end
 
-function qᵗᵇᵍ(z)
-    if z ≤ 2000
-        return 0.018 * exp(-z / 2500)
-    else
-        return 0.004 * exp(-(z - 2000) / 5000)
-    end
-end
+qᵗᵇᵍ(z) = 0.020 * exp(-z / 2500)
 
 uᵢ(x, z) = -5 * max(1 - z / 3000, 0)
 
-# Random perturbations in the lowest 500 m trigger convection.
+# Random perturbations in the lowest 1 km trigger convection.
 
-δT = 0.5
-δq = 5e-4
-zδ = 500
+δT = 2.0
+δq = 2e-3
+zδ = 1000
 
 ϵ() = rand() - 0.5
 Tᵢ(x, z) = Tᵇᵍ(z) + δT * ϵ() * (z < zδ)
@@ -287,7 +280,7 @@ Q = radiation.flux_divergence
 outputs = (; u, w, T, qˡ, qᵛ, Q)
 avg_outputs = NamedTuple(name => Average(outputs[name], dims=1) for name in keys(outputs))
 
-filename = "radiative_shallow_convection"
+filename = "radiative_convection"
 averages_filename = filename * "_averages.jld2"
 slices_filename = filename * "_slices.jld2"
 
@@ -328,8 +321,8 @@ to_K_per_day = 86400 / cᵖᵈ
 zc = znodes(grid, Center())
 zc_km = Array(zc) ./ 1000
 
-# We plot profiles at four times of day and zoom in on the lowest 4 km
-# where the clouds and boundary layer dynamics are.
+# We plot profiles at four times of day and zoom in on the lowest 6 km
+# where the clouds and convective dynamics are.
 
 snapshot_hours = [0, 6, 12, 18]
 snapshot_labels = ["Sunrise (t = 0)", "Noon (t = 6 h)", "Sunset (t = 12 h)", "Midnight (t = 18 h)"]
@@ -337,9 +330,9 @@ snapshot_colors = [:goldenrod, :orangered, :purple, :midnightblue]
 
 fig = Figure(size=(1400, 450), fontsize=14)
 
-axT  = Axis(fig[1, 1]; xlabel="T (K)", ylabel="z (km)", limits=(nothing, (0, 4)))
-axqˡ = Axis(fig[1, 2]; xlabel="qˡ (g/kg)", limits=(nothing, (0, 4)))
-axQ  = Axis(fig[1, 3]; xlabel="Flux divergence (K/day)", limits=(nothing, (0, 4)))
+axT  = Axis(fig[1, 1]; xlabel="T (K)", ylabel="z (km)", limits=(nothing, (0, 6)))
+axqˡ = Axis(fig[1, 2]; xlabel="qˡ (g/kg)", limits=(nothing, (0, 6)))
+axQ  = Axis(fig[1, 3]; xlabel="Flux divergence (K/day)", limits=(nothing, (0, 6)))
 
 for (ih, hour) in enumerate(snapshot_hours)
     n = findfirst(t -> t ≥ hour * 3600, times)
@@ -361,13 +354,13 @@ hideydecorations!(axQ; grid=false)
 fig[0, 1:3] = Label(fig, "Diurnal Cycle — Mean Profiles", fontsize=16, tellwidth=false)
 Legend(fig[2, :], axT; orientation=:horizontal, framevisible=false, tellwidth=false)
 
-save("radiative_shallow_convection_profiles.png", fig) #src
+save("radiative_convection_profiles.png", fig) #src
 fig
 
 # ## Animation of cloud structure
 #
 # We animate xz slices of vertical velocity and cloud liquid water, zoomed
-# to the lowest 3 km where the convective dynamics and clouds live.
+# to the lowest 5 km where the convective dynamics and clouds live.
 
 wts  = FieldTimeSeries(slices_filename, "w")
 qˡts_slice = FieldTimeSeries(slices_filename, "qˡ")
@@ -384,8 +377,8 @@ n = Observable(Nt_slices)
 title = @lift "Diurnal Radiative Convection at t = " * prettytime(slice_times[$n])
 fig[0, :] = Label(fig, title, fontsize=16, tellwidth=false)
 
-axw  = Axis(fig[1, 1]; xlabel="x (km)", ylabel="z (km)", title="w (m/s)", limits=(nothing, (0, 3)))
-axqˡ = Axis(fig[1, 2]; xlabel="x (km)", ylabel="z (km)", title="qˡ (g/kg)", limits=(nothing, (0, 3)))
+axw  = Axis(fig[1, 1]; xlabel="x (km)", ylabel="z (km)", title="w (m/s)", limits=(nothing, (0, 5)))
+axqˡ = Axis(fig[1, 2]; xlabel="x (km)", ylabel="z (km)", title="qˡ (g/kg)", limits=(nothing, (0, 5)))
 
 w_n  = @lift wts[$n]
 qˡ_n = @lift qˡts_slice[$n]
@@ -398,9 +391,9 @@ Colorbar(fig[2, 2], hmqˡ; vertical=false, label="qˡ (g/kg)")
 
 hideydecorations!(axqˡ; grid=false)
 
-CairoMakie.record(fig, "radiative_shallow_convection.mp4", 1:Nt_slices; framerate=12) do nn
+CairoMakie.record(fig, "radiative_convection.mp4", 1:Nt_slices; framerate=12) do nn
     n[] = nn
 end
 nothing #hide
 
-# ![](radiative_shallow_convection.mp4)
+# ![](radiative_convection.mp4)
