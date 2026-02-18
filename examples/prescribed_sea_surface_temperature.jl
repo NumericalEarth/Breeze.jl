@@ -82,13 +82,13 @@ scalar_advection = WENO(order=5)
 # motion of the air and surface,
 #
 # ```math
-# τˣ = - Cᴰ |U| ρu, \quad Jᶿ = - ρ₀ Cᵀ |U| (θ - θ₀), \quad Jᵛ = - ρ₀ Cᵛ |U| (qᵗ - qᵛ₀),
+# τˣ = - ρ₀ Cᴰ |ΔU| (u - u₀), \quad Jᶿ = - ρ₀ Cᵀ |ΔU| (θ - θ₀), \quad Jᵛ = - ρ₀ Cᵛ |ΔU| (qᵗ - qᵛ₀),
 # ```
 #
-# where ``|U|`` is "total" the differential wind speed (including gustiness),
-# ``Cᴰ, Cᵀ, Cᵛ`` are exchange coefficients, and ``θ₀, qᵛ₀`` are the surface temperature
-# and surface specific humidity. For wet surfaces, ``qᵛ₀`` is the saturation specific
-# humidity over a planar liquid surface computed at the surface temperature.
+# where ``Cᴰ, Cᵀ, Cᵛ`` are exchange coefficients, ``|ΔU| = [(u - u₀)^2 + (v - v₀)^2 + {U^g}^2]^{1/2}``
+# is the total differential wind speed (including gustiness ``Uᵍ``), and ``u₀, θ₀, qᵛ₀`` are the
+# surface velocity, surface temperature, and surface specific humidity respectively. For wet surfaces,
+# ``qᵛ₀`` is the saturation specific humidity over a planar liquid surface computed at the surface temperature.
 # ``τˣ`` is the surface momentum flux, ``Jᶿ`` is the potential temperature density flux,
 # and ``Jᵛ`` is the surface moisture density flux.
 # The surface density ``ρ₀`` is computed from the model's reference state.
@@ -127,11 +127,12 @@ scalar_advection = WENO(order=5)
 # The default stability correction uses [`FittedStabilityFunction`](@ref), which maps
 # ``Riᴮ`` to the Monin-Obukhov stability parameter ``ζ = z/L`` via the non-iterative
 # regression of [Li2010](@citet), then evaluates integrated MOST stability functions
-# ``Ψᴰ(ζ)`` and ``Ψᵀ(ζ)`` (Hogström 1996 for unstable, Beljaars & Holtslag 1991 for
-# stable conditions). The stability-corrected transfer coefficients are
+# ``Ψᴰ(ζ)`` and ``Ψᵀ(ζ)`` ([hogstrom1996review](@citet) for unstable,
+# [beljaars1991flux](@citet) for stable conditions). The stability-corrected transfer
+# coefficients are:
 #
 # ```math
-# Cᴰ = Cᴰ_N \left[\frac{α}{α - Ψᴰ}\right]^2, \quad
+# Cᴰ = Cᴰ_N \left(\frac{α}{α - Ψᴰ}\right)^2, \quad
 # Cᵀ = Cᵀ_N \frac{α}{α - Ψᴰ} \frac{β_h}{β_h - Ψᵀ}
 # ```
 #
