@@ -17,7 +17,7 @@
 # - Moist boundary layer air entering from below
 #
 # The **divergence correction** option compensates for the non-zero mass flux divergence
-# ``∇·(ρU)`` that arises when velocity doesn't vary with the reference density profile.
+# ``𝛁·(ρ𝐔)`` that arises when velocity doesn't vary with the reference density profile.
 # This is essential for physically consistent tracer advection in kinematic models.
 
 using Breeze
@@ -47,10 +47,10 @@ reference_state = ReferenceState(grid, constants;
 # The key feature of kinematic models is [`PrescribedDynamics`](@ref), which fixes
 # the density and pressure fields from a reference state. We enable
 # `divergence_correction=true` because our constant vertical velocity doesn't
-# satisfy the anelastic continuity constraint ``∇·(ρU) = 0``.
+# satisfy the anelastic continuity constraint ``𝛁·(ρ𝐔) = 0``.
 #
 # Without this correction, the tracer equation would see spurious sources/sinks
-# from the non-zero velocity divergence. The correction adds a term ``c ∇·(ρU)``
+# from the non-zero velocity divergence. The correction adds a term ``c 𝛁·(ρ𝐔)``
 # that compensates for the prescribed velocity field's divergence.
 
 W₀ = 2 # Vertical velocity (m/s) — a gentle updraft
