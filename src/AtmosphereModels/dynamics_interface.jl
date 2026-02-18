@@ -322,8 +322,6 @@ struct SlowTendencyMode{D}
     dynamics :: D
 end
 
-Adapt.adapt_structure(to, s::SlowTendencyMode) = SlowTendencyMode(adapt(to, s.dynamics))
-
 # Forward dynamics_density to the wrapped dynamics
 @inline dynamics_density(s::SlowTendencyMode) = dynamics_density(s.dynamics)
 
@@ -351,8 +349,6 @@ The horizontal PG does not suffer from this issue and can safely be included.
 struct HorizontalSlowMode{D}
     dynamics :: D
 end
-
-Adapt.adapt_structure(to, s::HorizontalSlowMode) = HorizontalSlowMode(adapt(to, s.dynamics))
 
 # Forward dynamics_density to the wrapped dynamics
 @inline dynamics_density(s::HorizontalSlowMode) = dynamics_density(s.dynamics)

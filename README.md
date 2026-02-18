@@ -21,6 +21,9 @@
   <a href="https://codecov.io/gh/NumericalEarth/Breeze.jl" >
     <img src="https://codecov.io/gh/NumericalEarth/Breeze.jl/graph/badge.svg?token=09TZGWKUPV"/>
   </a>
+  <a href="https://github.com/NumericalEarth/BreezeBenchmarks">
+    <img alt="Benchmarks" src="https://img.shields.io/badge/benchmarks-BreezeBenchmarks-informational?style=flat-square">
+  </a>
   </br>
   <a href="https://github.com/NumericalEarth/Breeze.jl/discussions">
     <img alt="Ask us anything" src="https://img.shields.io/badge/Ask%20us-anything-1abc9c.svg?style=flat-square">
