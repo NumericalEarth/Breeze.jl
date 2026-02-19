@@ -82,6 +82,7 @@ export
     NonEquilibriumCloudFormation,
 
     # BoundaryConditions
+    PerturbationMomentumAdvection,
     BulkDrag,
     BulkSensibleHeatFlux,
     BulkVaporFlux,

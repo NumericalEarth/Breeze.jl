@@ -28,6 +28,9 @@ function AtmosphereModels.compute_pressure_correction!(model::AnelasticModel, Δ
     foreach(mask_immersed_field!, model.momentum)
     fill_halo_regions!(model.momentum, model.clock, fields(model))
 
+    # Enforce mass conservation at open boundaries (solvability condition for pressure)
+    enforce_open_boundary_mass_conservation!(model, model.boundary_mass_fluxes)
+
     dynamics = model.dynamics
     ρŨ = model.momentum
     solver = model.pressure_solver

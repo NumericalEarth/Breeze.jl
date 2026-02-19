@@ -149,13 +149,33 @@ end
 ##### Momentum and velocity materialization
 #####
 
+"""
+$(TYPEDSIGNATURES)
+
+Inherit lateral boundary conditions from momentum fields to velocity fields.
+This ensures that open boundary conditions on momentum are also applied to velocities,
+while preserving the velocity field's immersed boundary conditions.
+"""
+function inherit_momentum_bcs(velocity_bcs::FieldBoundaryConditions, momentum_bcs::FieldBoundaryConditions)
+    return FieldBoundaryConditions(; west     = momentum_bcs.west,
+                                    east     = momentum_bcs.east,
+                                    south    = momentum_bcs.south,
+                                    north    = momentum_bcs.north,
+                                    bottom   = momentum_bcs.bottom,
+                                    top      = momentum_bcs.top,
+                                    immersed = velocity_bcs.immersed)
+end
+
 function AtmosphereModels.materialize_momentum_and_velocities(dynamics::AnelasticDynamics, grid, boundary_conditions)
     ρu = XFaceField(grid, boundary_conditions=boundary_conditions.ρu)
     ρv = YFaceField(grid, boundary_conditions=boundary_conditions.ρv)
     ρw = ZFaceField(grid, boundary_conditions=boundary_conditions.ρw)
     momentum = (; ρu, ρv, ρw)
 
-    velocity_bcs = NamedTuple(name => FieldBoundaryConditions() for name in (:u, :v, :w))
+    # Velocity fields inherit lateral BCs from momentum (for open boundary support)
+    velocity_bcs = (; u = inherit_momentum_bcs(FieldBoundaryConditions(), boundary_conditions.ρu),
+                      v = inherit_momentum_bcs(FieldBoundaryConditions(), boundary_conditions.ρv),
+                      w = inherit_momentum_bcs(FieldBoundaryConditions(), boundary_conditions.ρw))
     velocity_bcs = regularize_field_boundary_conditions(velocity_bcs, grid, (:u, :v, :w))
     u = XFaceField(grid, boundary_conditions=velocity_bcs.u)
     v = YFaceField(grid, boundary_conditions=velocity_bcs.v)
