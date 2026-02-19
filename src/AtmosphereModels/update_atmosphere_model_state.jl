@@ -119,13 +119,16 @@ function compute_momentum_tendencies!(model::AtmosphereModel, model_fields)
     Gρv = model.timestepper.Gⁿ.ρv
     Gρw = model.timestepper.Gⁿ.ρw
 
+    # Use transport momentum (contravariant for terrain-following grids)
+    advecting_momentum = transport_momentum(model)
+
     momentum_args = (
         dynamics_density(model.dynamics),
         model.advection.momentum,
         model.velocities,
         model.closure,
         model.closure_fields,
-        model.momentum,
+        advecting_momentum,
         model.coriolis,
         model.clock,
         model_fields)
@@ -273,13 +276,16 @@ function compute_tendencies!(model::AtmosphereModel)
 
     compute_momentum_tendencies!(model, model_fields)
 
+    # Use transport velocities (contravariant for terrain-following grids)
+    advecting_velocities = transport_velocities(model)
+
     # Arguments common to energy density, moisture density, and tracer density tendencies:
     common_args = (
         model.dynamics,
         model.formulation,
         model.thermodynamic_constants,
         model.specific_moisture,
-        model.velocities,
+        advecting_velocities,
         model.microphysics,
         model.microphysical_fields,
         model.closure,

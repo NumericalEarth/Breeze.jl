@@ -382,6 +382,33 @@ For compressible dynamics, this computes the density tendency from the continuit
 compute_dynamics_tendency!(model) = nothing  # default: no dynamics-specific tendencies
 
 #####
+##### Transport velocity/momentum interface (for terrain-following coordinates)
+#####
+
+"""
+    transport_velocities(model)
+
+Return the velocity tuple used for scalar advection transport.
+
+For standard (non-terrain) models, this is `model.velocities`.
+For terrain-following coordinates, the vertical component is replaced
+by the contravariant vertical velocity ``\\tilde{\\Omega}``.
+"""
+transport_velocities(model) = model.velocities
+
+"""
+    transport_momentum(model)
+
+Return the momentum tuple used for momentum advection transport
+and the continuity equation divergence.
+
+For standard (non-terrain) models, this is `model.momentum`.
+For terrain-following coordinates, the vertical component `ρw` is
+replaced by the contravariant vertical momentum ``\\rho \\tilde{\\Omega}``.
+"""
+transport_momentum(model) = model.momentum
+
+#####
 ##### Auxiliary dynamics variables interface
 #####
 

@@ -72,7 +72,7 @@ using Test
         end
     end
 
-    @testset "Terrain-following grid with CompressibleDynamics" begin
+    @testset "Terrain-following grid with CompressibleDynamics (no terrain physics)" begin
         Nx, Nz = 16, 8
         Lx, Lz = 10000.0, 5000.0
 
@@ -84,12 +84,11 @@ using Test
         h(x, y) = 200 * exp(-x^2 / 2000^2)
         metrics = follow_terrain!(grid, h)
 
-        # Check that we can construct a compressible model on this grid
+        # Without terrain_metrics in dynamics, uses standard physics
         model = AtmosphereModel(grid; dynamics=CompressibleDynamics(ExplicitTimeStepping()))
-
         @test model isa AtmosphereModel
+        @test model.dynamics.terrain_metrics === nothing
 
-        # Check that we can set initial conditions and take a time step
         θ₀ = 300.0
         p₀ = 101325.0
         pˢᵗ = 1e5
@@ -99,8 +98,40 @@ using Test
 
         Δt = 0.1
         time_step!(model, Δt)
-
-        # Model should not blow up
         @test isfinite(maximum(abs, model.velocities.w))
+    end
+
+    @testset "Terrain-following CompressibleDynamics with terrain physics" begin
+        Nx, Nz = 16, 8
+        Lx, Lz = 10000.0, 5000.0
+
+        z_faces = MutableVerticalDiscretization(collect(range(0, Lz, length=Nz+1)))
+        grid = RectilinearGrid(CPU(); size=(Nx, Nz),
+                               x=(-Lx/2, Lx/2), z=z_faces,
+                               topology=(Periodic, Flat, Bounded))
+
+        h(x, y) = 200 * exp(-x^2 / 2000^2)
+        metrics = follow_terrain!(grid, h)
+
+        # With terrain_metrics, physics includes terrain corrections
+        dynamics = CompressibleDynamics(ExplicitTimeStepping(); terrain_metrics=metrics)
+        model = AtmosphereModel(grid; dynamics)
+
+        @test model isa AtmosphereModel
+        @test model.dynamics.terrain_metrics isa TerrainMetrics
+        @test model.dynamics.Ω̃ !== nothing
+        @test model.dynamics.ρΩ̃ !== nothing
+
+        θ₀ = 300.0
+        p₀ = 101325.0
+        pˢᵗ = 1e5
+        constants = model.thermodynamic_constants
+        ρᵢ(x, z) = adiabatic_hydrostatic_density(z, p₀, θ₀, pˢᵗ, constants)
+        set!(model, ρ=ρᵢ, θ=θ₀)
+
+        Δt = 0.1
+        time_step!(model, Δt)
+        @test isfinite(maximum(abs, model.velocities.w))
+        @test isfinite(maximum(abs, model.dynamics.Ω̃))
     end
 end

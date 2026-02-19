@@ -187,6 +187,10 @@ using .StaticEnergyFormulations: StaticEnergyFormulation
 include("PotentialTemperatureFormulations/PotentialTemperatureFormulations.jl")
 using .PotentialTemperatureFormulations: LiquidIcePotentialTemperatureFormulation
 
+# TerrainFollowingDiscretization (needed by CompressibleEquations for terrain physics)
+include("TerrainFollowingDiscretization/TerrainFollowingDiscretization.jl")
+using .TerrainFollowingDiscretization
+
 # Dynamics modules (included after AtmosphereModels so they can dispatch on AtmosphereModel)
 include("AnelasticEquations/AnelasticEquations.jl")
 using .AnelasticEquations: AnelasticDynamics, AnelasticModel
@@ -221,8 +225,5 @@ using .Forcings
 
 include("VerticalGrids.jl")
 using .VerticalGrids
-
-include("TerrainFollowingDiscretization/TerrainFollowingDiscretization.jl")
-using .TerrainFollowingDiscretization
 
 end # module Breeze
