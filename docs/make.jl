@@ -28,6 +28,7 @@ struct Example
 end
 
 examples = [
+    Example("Open-boundary thermal bubble", "open_boundary_thermal_bubble", true),
     Example("Stratified dry thermal bubble", "dry_thermal_bubble", true),
     Example("Cloudy thermal bubble", "cloudy_thermal_bubble", true),
     Example("Cloudy Kelvin-Helmholtz instability", "cloudy_kelvin_helmholtz", true),
