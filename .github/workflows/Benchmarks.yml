@@ -36,21 +36,12 @@ jobs:
         include:
           - dynamics: 'anelastic'
             microphysics: 'nothing'
-            grid: '128^3, 384x384x256, 768x768x256'
-          - dynamics: 'anelastic'
-            microphysics: 'nothing'
-            grid: '512x512x256'
+            grid: '128^3, 512x512x256, 768x768x256'
           - dynamics: 'compressible_splitexplicit'
             microphysics: 'nothing'
             grid: '512x512x256'
           - dynamics: 'anelastic'
-            microphysics: 'MixedPhaseEquilibrium'
-            grid: '512x512x256'
-          - dynamics: 'anelastic'
-            microphysics: '1M_MixedEquilibrium'
-            grid: '512x512x256'
-          - dynamics: 'anelastic'
-            microphysics: '1M_MixedNonEquilibrium'
+            microphysics: 'MixedPhaseEquilibrium, 1M_MixedEquilibrium, 1M_MixedNonEquilibrium'
             grid: '512x512x256'
     defaults:
       run:
@@ -127,6 +118,8 @@ jobs:
               name_parts = d['name'].split(';')
               base_name = name_parts[0]
               advection = [p for p in name_parts if p.startswith('advection:')][0].split(':')[1]
+              # Closure is unused for the time being because it's always the
+              # same everywhere in the current setup.
               closure = [p for p in name_parts if p.startswith('closure:')][0].split(':')[1]
               dynamics = [p for p in name_parts if p.startswith('dynamics:')][0].split(':')[1]
               ft = [p for p in name_parts if p.startswith('float-type:')][0].split(':')[1]
