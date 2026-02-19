@@ -100,19 +100,19 @@ end
 @kernel function _set_btf_sigma!(grid, h_field, z_top)
     i, j = @index(Global, NTuple)
 
-    @inbounds h = h_field[i, j, 1]
+    # Terrain height interpolated to each stagger location
+    @inbounds hᶜᶜ = h_field[i, j, 1]
+    hᶠᶜ = ℑxᶠᵃᵃ(i, j, 1, grid, h_field)
+    hᶜᶠ = ℑyᵃᶠᵃ(i, j, 1, grid, h_field)
+    hᶠᶠ = ℑxyᶠᶠᵃ(i, j, 1, grid, h_field)
 
     # Basic terrain-following: σ = (z_top - h) / z_top
-    σᶜᶜ = (z_top - h) / z_top
-
-    # TODO: interpolate h to staggered horizontal locations for σᶠᶜ, σᶜᶠ, σᶠᶠ
-    # For now use the same σ at all stagger locations (first-order approximation).
     @inbounds begin
-        grid.z.σᶜᶜⁿ[i, j, 1] = σᶜᶜ
-        grid.z.σᶠᶜⁿ[i, j, 1] = σᶜᶜ
-        grid.z.σᶜᶠⁿ[i, j, 1] = σᶜᶜ
-        grid.z.σᶠᶠⁿ[i, j, 1] = σᶜᶜ
-        grid.z.ηⁿ[i, j, 1] = h
+        grid.z.σᶜᶜⁿ[i, j, 1] = (z_top - hᶜᶜ) / z_top
+        grid.z.σᶠᶜⁿ[i, j, 1] = (z_top - hᶠᶜ) / z_top
+        grid.z.σᶜᶠⁿ[i, j, 1] = (z_top - hᶜᶠ) / z_top
+        grid.z.σᶠᶠⁿ[i, j, 1] = (z_top - hᶠᶠ) / z_top
+        grid.z.ηⁿ[i, j, 1] = hᶜᶜ
     end
 end
 

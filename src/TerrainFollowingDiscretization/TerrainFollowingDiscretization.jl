@@ -22,12 +22,13 @@ module TerrainFollowingDiscretization
 
 export follow_terrain!, TerrainMetrics, BasicTerrainFollowing
 
+using Adapt: Adapt, adapt
 using KernelAbstractions: @kernel, @index
 using Oceananigans: Center, Face, CenterField, XFaceField, YFaceField, ZFaceField
 using Oceananigans.Grids: xnode, ynode, rnode, topology, halo_size
 using Oceananigans.ImmersedBoundaries: MutableGridOfSomeKind
 using Oceananigans.Utils: launch!
-using Oceananigans.Operators: ∂xᶠᶜᶜ, ∂yᶜᶠᶜ
+using Oceananigans.Operators: ∂xᶠᶜᶜ, ∂yᶜᶠᶜ, ℑxᶠᵃᵃ, ℑyᵃᶠᵃ, ℑxyᶠᶠᵃ
 
 include("terrain_smoothing.jl")
 include("terrain_metrics.jl")

@@ -30,6 +30,12 @@ struct TerrainMetrics{H, SX, SY, FT}
     z_top :: FT
 end
 
+Adapt.adapt_structure(to, m::TerrainMetrics) =
+    TerrainMetrics(adapt(to, m.topography),
+                   adapt(to, m.∂x_h),
+                   adapt(to, m.∂y_h),
+                   m.z_top)
+
 """
     terrain_slope_x(i, j, k, grid, metrics, ℓz)
 

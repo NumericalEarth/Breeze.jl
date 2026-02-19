@@ -1,6 +1,6 @@
 using Breeze
 using Oceananigans
-using Oceananigans.Grids: MutableVerticalDiscretization, rnode, xnode
+using Oceananigans.Grids: MutableVerticalDiscretization, rnode, xnode, znode
 using Test
 
 @testset "TerrainFollowingDiscretization" begin
@@ -42,6 +42,28 @@ using Test
 
         # Check z_top
         @test metrics.z_top ≈ Lz
+
+        # Check that σᶠᶜ differs from σᶜᶜ (staggered interpolation)
+        # σᶠᶜ at face i should be the average of σᶜᶜ at i-1 and i
+        for i in 2:Nx
+            σᶠᶜ_expected = (grid.z.σᶜᶜⁿ[i-1, 1, 1] + grid.z.σᶜᶜⁿ[i, 1, 1]) / 2
+            @test grid.z.σᶠᶜⁿ[i, 1, 1] ≈ σᶠᶜ_expected rtol=1e-10
+        end
+
+        # Check that physical z-nodes reflect terrain
+        # At the surface (k=1, Face), z should equal h(x)
+        for i in 1:Nx
+            x = xnode(i, grid, Center())
+            h_expected = h₀ * exp(-x^2 / a^2)
+            z_surface = znode(i, 1, 1, grid, Center(), Center(), Face())
+            @test z_surface ≈ h_expected rtol=1e-10
+        end
+
+        # At the top (k=Nz+1, Face), z should equal Lz
+        for i in 1:Nx
+            z_top_computed = znode(i, 1, Nz+1, grid, Center(), Center(), Face())
+            @test z_top_computed ≈ Lz rtol=1e-10
+        end
     end
 
     @testset "follow_terrain! terrain slopes" begin
@@ -133,5 +155,47 @@ using Test
         time_step!(model, Δt)
         @test isfinite(maximum(abs, model.velocities.w))
         @test isfinite(maximum(abs, model.dynamics.Ω̃))
+    end
+
+    @testset "Contravariant velocity for horizontal flow over terrain" begin
+        Nx, Nz = 16, 8
+        Lx, Lz = 10000.0, 5000.0
+
+        z_faces = MutableVerticalDiscretization(collect(range(0, Lz, length=Nz+1)))
+        grid = RectilinearGrid(CPU(); size=(Nx, Nz),
+                               x=(-Lx/2, Lx/2), z=z_faces,
+                               topology=(Periodic, Flat, Bounded))
+
+        h₀ = 200.0
+        a = 2000.0
+        h(x, y) = h₀ * exp(-x^2 / a^2)
+        metrics = follow_terrain!(grid, h)
+
+        dynamics = CompressibleDynamics(ExplicitTimeStepping(); terrain_metrics=metrics)
+        model = AtmosphereModel(grid; dynamics)
+
+        constants = model.thermodynamic_constants
+        θ₀ = 300.0
+        p₀ = 101325.0
+        pˢᵗ = 1e5
+        ρᵢ(x, z) = adiabatic_hydrostatic_density(z, p₀, θ₀, pˢᵗ, constants)
+
+        U₀ = 10.0
+        set!(model, ρ=ρᵢ, θ=θ₀, u=U₀)
+
+        # Take one step to trigger computation of Ω̃
+        time_step!(model, 0.1)
+
+        # Ω̃ should be nonzero near the mountain (terrain slopes are nonzero)
+        # and near zero far from the mountain (terrain slopes ≈ 0)
+        Ω̃ = model.dynamics.Ω̃
+        @test maximum(abs, Ω̃) > 0
+
+        # At the model top (k = Nz+1), terrain slopes decay to zero so Ω̃ ≈ w
+        # (the decay factor is 1 - ζ/z_top = 0 at the top)
+        w = model.velocities.w
+        for i in 1:Nx
+            @test Ω̃[i, 1, Nz+1] ≈ w[i, 1, Nz+1] atol=1e-10
+        end
     end
 end
