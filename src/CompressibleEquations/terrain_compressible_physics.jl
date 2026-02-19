@@ -65,34 +65,33 @@ end
 @kernel function _compute_contravariant_velocity!(Ω̃, ρΩ̃, grid, velocities, momentum, metrics)
     i, j, k = @index(Global, NTuple)
 
-    # Terrain slopes at (Center, Center, Face) for vertical transport location.
-    # ∂x_h is at (Face, Center) — average to (Center, Center)
-    # ∂y_h is at (Center, Face) — average to (Center, Center)
+    # Terrain slope decay factor
     ζ = rnode(k, grid, Face())
     z_top = metrics.z_top
     decay = 1 - ζ / z_top
 
-    @inbounds ∂x_h_cc = (metrics.∂x_h[i, j, 1] + metrics.∂x_h[i+1, j, 1]) / 2
-    @inbounds ∂y_h_cc = (metrics.∂y_h[i, j, 1] + metrics.∂y_h[i, j+1, 1]) / 2
+    # Terrain slopes interpolated to (Center, Center) using Oceananigans operators
+    # (handles Flat topologies correctly)
+    ∂x_h_cc = ℑxᶜᵃᵃ(i, j, 1, grid, metrics.∂x_h)
+    ∂y_h_cc = ℑyᵃᶜᵃ(i, j, 1, grid, metrics.∂y_h)
 
     slope_x = ∂x_h_cc * decay
     slope_y = ∂y_h_cc * decay
 
-    # Interpolate u to (Center, Center, Face) and v to (Center, Center, Face)
-    # ℑxᶠᵃᵃ interpolates to Face in x (but u is already at Face in x).
-    # We need Center in x: average u[i,j,k] and u[i+1,j,k].
-    @inbounds u_ccf = (velocities.u[i, j, k] + velocities.u[i+1, j, k]) / 2
-    @inbounds v_ccf = (velocities.v[i, j, k] + velocities.v[i, j+1, k]) / 2
+    # Velocities interpolated to (Center, Center, Face) using Oceananigans operators
+    u_ccf = ℑxᶜᵃᵃ(i, j, k, grid, velocities.u)
+    v_ccf = ℑyᵃᶜᵃ(i, j, k, grid, velocities.v)
     @inbounds w_ccf = velocities.w[i, j, k]
 
     # Contravariant vertical velocity
     Ω̃_ijk = w_ccf - slope_x * u_ccf - slope_y * v_ccf
 
-    # Contravariant vertical momentum (same interpolation pattern)
-    @inbounds ρu_ccf = (momentum.ρu[i, j, k] + momentum.ρu[i+1, j, k]) / 2
-    @inbounds ρv_ccf = (momentum.ρv[i, j, k] + momentum.ρv[i, j+1, k]) / 2
+    # Momentum interpolated to (Center, Center, Face)
+    ρu_ccf = ℑxᶜᵃᵃ(i, j, k, grid, momentum.ρu)
+    ρv_ccf = ℑyᵃᶜᵃ(i, j, k, grid, momentum.ρv)
     @inbounds ρw_ccf = momentum.ρw[i, j, k]
 
+    # Contravariant vertical momentum
     ρΩ̃_ijk = ρw_ccf - slope_x * ρu_ccf - slope_y * ρv_ccf
 
     @inbounds begin
