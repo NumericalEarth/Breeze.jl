@@ -137,8 +137,8 @@ jobs:
               grid = d['grid_size']
               grid_str = f"{grid[0]}x{grid[1]}x{grid[2]}"
 
-              level_1 = f'{base_name} [{ft}]'
-              level_2 = f'Advection: {advection}; Dynamics: {dynamics}; Microphysics: {microphysics}'
+              level_1 = f'{base_name}; Dynamics: {dynamics}; Microphysics: {microphysics} [{ft}]'
+              level_2 = f'Advection: {advection}'
               level_3 = f'{gpu}'
               level_4 = f'{grid_str}'
 
