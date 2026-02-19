@@ -34,22 +34,22 @@ jobs:
       fail-fast: false
       matrix:
         include:
-          - dynamics: ''
-            microphysics: ''
+          - dynamics: 'anelastic'
+            microphysics: 'nothing'
             grid: '128^3, 384x384x256, 768x768x256'
           - dynamics: 'anelastic'
-            microphysics: ''
+            microphysics: 'nothing'
             grid: '512x512x256'
           - dynamics: 'compressible_splitexplicit'
-            microphysics: ''
+            microphysics: 'nothing'
             grid: '512x512x256'
-          - dynamics: ''
+          - dynamics: 'anelastic'
             microphysics: 'MixedPhaseEquilibrium'
             grid: '512x512x256'
-          - dynamics: ''
+          - dynamics: 'anelastic'
             microphysics: '1M_MixedEquilibrium'
             grid: '512x512x256'
-          - dynamics: ''
+          - dynamics: 'anelastic'
             microphysics: '1M_MixedNonEquilibrium'
             grid: '512x512x256'
     defaults:
@@ -81,9 +81,10 @@ jobs:
           julia --color=yes --project run_benchmarks.jl --device GPU "${ARGS[@]}" --size "${{ matrix.grid }}"
       - uses: actions/upload-artifact@v6
         with:
-          name: 'benchmarks-scaling-dynamics_${{ matrix.dynamics }}-microphysics_${{ matrix.microphysics }}'
+          name: 'benchmarks-dynamics_${{ matrix.dynamics }}-microphysics_${{ matrix.microphysics }}-grid_${{ matrix.grid }}'
           path: benchmarking/benchmark_results.*
           retention-days: 90
+          overwrite: false
       - name: Create job summary
         timeout-minutes: 1
         run:
