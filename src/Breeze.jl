@@ -97,6 +97,9 @@ export
 
     # Grid utilities
     PiecewiseStretchedDiscretization,
+    follow_terrain!,
+    TerrainMetrics,
+    BasicTerrainFollowing,
 
     # TimeSteppers
     SSPRungeKutta3,
@@ -132,13 +135,13 @@ using Oceananigans: Oceananigans, @at, AnisotropicMinimumDissipation, Average,
                     time_step!, xnodes, xspacings, ynodes, yspacings, znodes,
                     zspacings, ∂x, ∂y, ∂z
 
-using Oceananigans.Grids: znode
+using Oceananigans.Grids: znode, MutableVerticalDiscretization
 using Oceananigans.BoundaryConditions: ImpenetrableBoundaryCondition
 
 export
     CPU, GPU,
     Center, Face, Periodic, Bounded, Flat,
-    RectilinearGrid, ExponentialDiscretization, PiecewiseStretchedDiscretization, Clock,
+    RectilinearGrid, ExponentialDiscretization, PiecewiseStretchedDiscretization, MutableVerticalDiscretization, Clock,
     nodes, xnodes, ynodes, znodes,
     znode,
     xspacings, yspacings, zspacings,
@@ -218,5 +221,8 @@ using .Forcings
 
 include("VerticalGrids.jl")
 using .VerticalGrids
+
+include("TerrainFollowingDiscretization/TerrainFollowingDiscretization.jl")
+using .TerrainFollowingDiscretization
 
 end # module Breeze
