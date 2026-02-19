@@ -241,12 +241,23 @@ function Fields.set!(model::AtmosphereModel; time=nothing, enforce_mass_conserva
     update_state!(model, compute_tendencies=false)
 
     if enforce_mass_conservation
-        FT = eltype(model.grid)
-        Δt = one(FT)
-        compute_pressure_correction!(model, Δt)
-        make_pressure_correction!(model, Δt)
-        update_state!(model, compute_tendencies=false)
+        enforce_mass_conservation!(model)
     end
 
+    return nothing
+end
+
+"""
+$(TYPEDSIGNATURES)
+
+Apply a pressure correction to enforce the anelastic continuity equation.
+Overridden in BreezeReactantExt to compile the pressure solve via `@jit`.
+"""
+function enforce_mass_conservation!(model)
+    FT = eltype(model.grid)
+    Δt = one(FT)
+    compute_pressure_correction!(model, Δt)
+    make_pressure_correction!(model, Δt)
+    update_state!(model, compute_tendencies=false)
     return nothing
 end
