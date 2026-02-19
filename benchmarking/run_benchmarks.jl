@@ -305,7 +305,7 @@ function run_benchmarks(args)
         # Build benchmark name
         size_str = "$(Nx)x$(Ny)x$(Nz)"
         ft_str = FT == Float32 ? "F32" : "F64"
-        name = "CBL_$(size_str)_$(ft_str)_$(dyn_name)_$(adv_name)_$(cls_name)_$(micro_name)"
+        name = "CBL;grid:$(size_str);float-type:$(ft_str);dynamics:$(dyn_name);advection:$(adv_name);closure:$(cls_name);microphysics:$(micro_name)"
 
         println("\n", "-" ^ 70)
         println("Running: $name")
