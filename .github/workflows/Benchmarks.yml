@@ -121,13 +121,28 @@ jobs:
               json.dump(all_data, f, indent=2)
 
           # Build github-action-benchmark entries
-          # Name format: <name>/<gpu>/<grid_size>
+          # Name format: <name>/<properties>/<gpu>/<grid_size>
           data = []
           for d in all_data:
+              name_parts = d['name'].split(';')
+              base_name = name_parts[0]
+              advection = [p for p in name_parts if p.startswith('advection:')][0].split(':')[1]
+              closure = [p for p in name_parts if p.startswith('closure:')][0].split(':')[1]
+              dynamics = [p for p in name_parts if p.startswith('dynamics:')][0].split(':')[1]
+              ft = [p for p in name_parts if p.startswith('float-type:')][0].split(':')[1]
+              microphysics = [p for p in name_parts if p.startswith('microphysics:')][0].split(':')[1]
+
+              gpu = d['metadata']['gpu_name']
+
               grid = d['grid_size']
               grid_str = f"{grid[0]}x{grid[1]}x{grid[2]}"
-              gpu = d['metadata']['gpu_name']
-              name = f"{d['name']}/{gpu}/{grid_str}"
+
+              level_1 = f'{base_name} [{ft}]'
+              level_2 = f'Advection: {advection}; Dynamics: {dynamics}; Microphysics: {microphysics}'
+              level_3 = f'{gpu}'
+              level_4 = f'{grid_str}'
+
+              name = f"{level_1}/{level_2}/{level_3}/{level_4}"
               data.append({'name': name, 'unit': 'points/s', 'value': d['grid_points_per_second']})
 
           with open('github-action-benchmark.json', 'w') as f:
