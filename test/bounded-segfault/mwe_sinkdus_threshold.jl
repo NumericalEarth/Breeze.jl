@@ -11,7 +11,7 @@ using CUDA
 Reactant.set_default_backend("cpu")
 
 grid = RectilinearGrid(ReactantState();
-    size=(4,4), extent=(1e3,1e3), halo=(3,3),
+    size=(5,5), extent=(1e3,1e3), halo=(3,3),
     topology=(Bounded, Bounded, Flat))
 
 model  = AtmosphereModel(grid; dynamics=CompressibleDynamics())
