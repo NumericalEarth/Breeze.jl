@@ -130,13 +130,29 @@ jobs:
               grid = d['grid_size']
               grid_str = f"{grid[0]}x{grid[1]}x{grid[2]}"
 
-              level_1 = f'{base_name}; Dynamics: {dynamics}; Microphysics: {microphysics} [{ft}]'
-              level_2 = f'Advection: {advection}'
-              level_3 = f'{gpu}'
-              level_4 = f'{grid_str}'
+              # We want to group benchmarks in two different ways: with the anelastic
+              # dynamics, group all the 512x512x256 grids together, so that you can
+              # compare the different microphysics.  Otherwise, if there's no microphysics
+              # group together same dynamics _and_ microphysics.  NOTE: yes, same
+              # benchmark may appear twice in both groups
+              if dynamics == 'anelastic' and grid_str == '512x512x256':
+                  level_1 = f'{base_name}; Dynamics: {dynamics}; Grid: {grid_str} [{ft}]'
+                  level_2 = f'Advection: {advection}'
+                  level_3 = f'{gpu}'
+                  level_4 = f'{microphysics}'
 
-              name = f"{level_1}/{level_2}/{level_3}/{level_4}"
-              data.append({'name': name, 'unit': 'points/s', 'value': d['grid_points_per_second']})
+                  name = f"{level_1}/{level_2}/{level_3}/{level_4}"
+                  data.append({'name': name, 'unit': 'points/s', 'value': d['grid_points_per_second']})
+                  pass
+
+              if microphysics == 'nothing':
+                  level_1 = f'{base_name}; Dynamics: {dynamics}; Microphysics: {microphysics} [{ft}]'
+                  level_2 = f'Advection: {advection}'
+                  level_3 = f'{gpu}'
+                  level_4 = f'{grid_str}'
+
+                  name = f"{level_1}/{level_2}/{level_3}/{level_4}"
+                  data.append({'name': name, 'unit': 'points/s', 'value': d['grid_points_per_second']})
 
           with open('github-action-benchmark.json', 'w') as f:
               json.dump(data, f)
