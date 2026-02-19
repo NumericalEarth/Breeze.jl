@@ -10,11 +10,14 @@ export
     MoistAirBuoyancy,
     ThermodynamicConstants,
     ReferenceState,
+    ExnerReferenceState,
     surface_density,
     AnelasticDynamics,
     AnelasticModel,
     CompressibleDynamics,
     CompressibleModel,
+    SplitExplicitTimeDiscretization,
+    ExplicitTimeStepping,
     PrescribedDensity,
     PrescribedDynamics,
     KinematicModel,
@@ -57,6 +60,8 @@ export
     temperature,
     supersaturation,
     saturation_specific_humidity,
+    adiabatic_hydrostatic_density,
+    dry_air_gas_constant,
     PlanarLiquidSurface,
     PlanarIceSurface,
 
@@ -81,7 +86,7 @@ export
     BulkSensibleHeatFlux,
     BulkVaporFlux,
     PolynomialCoefficient,
-    DefaultStabilityFunction,
+    FittedStabilityFunction,
     default_neutral_drag_polynomial,
     default_neutral_sensible_heat_polynomial,
     default_neutral_latent_heat_polynomial,
@@ -95,6 +100,9 @@ export
 
     # TimeSteppers
     SSPRungeKutta3,
+    AcousticSSPRungeKutta3,
+    AcousticRungeKutta3,
+    AcousticSubstepper,
 
     # ParcelDynamics
     ParcelDynamics,
@@ -181,10 +189,14 @@ include("AnelasticEquations/AnelasticEquations.jl")
 using .AnelasticEquations: AnelasticDynamics, AnelasticModel
 
 include("CompressibleEquations/CompressibleEquations.jl")
-using .CompressibleEquations: CompressibleDynamics, CompressibleModel
+using .CompressibleEquations: CompressibleDynamics, CompressibleModel, AcousticSubstepper,
+                              SplitExplicitTimeDiscretization, ExplicitTimeStepping
 
 include("KinematicDriver/KinematicDriver.jl")
 using .KinematicDriver: PrescribedDensity, PrescribedDynamics, KinematicModel
+
+include("TimeSteppers/TimeSteppers.jl")
+using .TimeSteppers
 
 include("ParcelModels/ParcelModels.jl")
 using .ParcelModels
@@ -206,8 +218,5 @@ using .Forcings
 
 include("VerticalGrids.jl")
 using .VerticalGrids
-
-include("TimeSteppers/TimeSteppers.jl")
-using .TimeSteppers
 
 end # module Breeze

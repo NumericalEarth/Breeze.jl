@@ -50,9 +50,23 @@ const PotentialTemperatureDensityType = Union{
     StabilityEquivalentDensity
 }
 
-struct MoistPotentialTemperatureKernelFunction{F, R, μ, M, MF, TMP, TH}
+#####
+##### Kernel function for potential temperature diagnostics
+#####
+##### The kernel function stores the three fields needed for computing potential temperature:
+##### - pressure: the pressure field used in the Exner function
+##### - density: the density field used for moisture fractions and density-weighted outputs
+##### - standard_pressure: the reference pressure for potential temperature (typically 10⁵ Pa)
+#####
+##### For anelastic dynamics, these come from the reference state (pᵣ, ρᵣ, pˢᵗ).
+##### For compressible dynamics, these are the actual pressure and density fields.
+#####
+
+struct MoistPotentialTemperatureKernelFunction{F, P, D, FT, μ, M, MF, TMP, TH}
     flavor :: F
-    reference_state :: R
+    pressure :: P
+    density :: D
+    standard_pressure :: FT
     microphysics :: μ
     microphysical_fields :: M
     specific_moisture :: MF
@@ -62,7 +76,9 @@ end
 
 Adapt.adapt_structure(to, k::MoistPotentialTemperatureKernelFunction) =
     MoistPotentialTemperatureKernelFunction(adapt(to, k.flavor),
-                                            adapt(to, k.reference_state),
+                                            adapt(to, k.pressure),
+                                            adapt(to, k.density),
+                                            k.standard_pressure,
                                             adapt(to, k.microphysics),
                                             adapt(to, k.microphysical_fields),
                                             adapt(to, k.specific_moisture),
@@ -86,6 +102,40 @@ const EquivalentPotentialTemperature = KernelFunctionOperation{C, C, C, <:Any, <
 
 const StabilityEquivalentPotentialTemperature = KernelFunctionOperation{C, C, C, <:Any, <:Any,
     <:MoistPotentialTemperatureKernelFunction{<:AbstractStabilityEquivalentFlavor}}
+
+#####
+##### Dynamics interface for potential temperature diagnostics
+#####
+##### Extract pressure, density, and standard_pressure from the dynamics.
+##### For anelastic dynamics, use the reference state.
+##### For compressible dynamics (defined in CompressibleEquations module), use actual fields.
+#####
+
+"""
+$(TYPEDSIGNATURES)
+
+Return the pressure field used for computing potential temperature.
+For anelastic dynamics, this is the reference pressure.
+"""
+dynamics_pressure_for_potential_temperature(dynamics) = dynamics.reference_state.pressure
+
+"""
+$(TYPEDSIGNATURES)
+
+Return the density field used for computing potential temperature.
+For anelastic dynamics, this is the reference density.
+"""
+dynamics_density_for_potential_temperature(dynamics) = dynamics.reference_state.density
+
+"""
+$(TYPEDSIGNATURES)
+
+Return the standard pressure for potential temperature calculations.
+"""
+dynamics_standard_pressure(dynamics) = dynamics.reference_state.standard_pressure
+
+# Note: CompressibleDynamics methods are defined in CompressibleEquations/compressible_dynamics.jl
+# since CompressibleEquations is loaded after AtmosphereModels
 
 """
     PotentialTemperature(model, flavor=:specific)
@@ -114,7 +164,7 @@ using Breeze
 
 grid = RectilinearGrid(size=(1, 1, 8), extent=(1, 1, 1e3))
 model = AtmosphereModel(grid)
-set!(model, θ=300)
+set!(model, θ=300, qᵗ=0.01)
 
 θ = PotentialTemperature(model)
 Field(θ)
@@ -141,8 +191,12 @@ function PotentialTemperature(model::AtmosphereModel, flavor_symbol=:specific)
         throw(ArgumentError(msg))
     end
 
+    p = dynamics_pressure_for_potential_temperature(model.dynamics)
+    ρ = dynamics_density_for_potential_temperature(model.dynamics)
+    pˢᵗ = dynamics_standard_pressure(model.dynamics)
+
     func = MoistPotentialTemperatureKernelFunction(flavor,
-                                                   model.dynamics.reference_state,
+                                                   p, ρ, pˢᵗ,
                                                    model.microphysics,
                                                    model.microphysical_fields,
                                                    model.specific_moisture,
@@ -171,7 +225,7 @@ where ``δᵛ ≡ Rᵛ / Rᵈ - 1``. This follows from the ideal gas law for a m
 and the definition of virtual temperature, ``p = ρ Rᵈ Tᵛ``, which leads to
 
 ```math
-Tᵛ = T \frac{Rᵐ}{Rᵈ} = T \\left( 1 + δᵛ qᵛ - qˡ - qⁱ \\right)
+Tᵛ = T \\frac{Rᵐ}{Rᵈ} = T \\left( 1 + δᵛ qᵛ - qˡ - qⁱ \\right)
 ```
 
 The virtual potential temperature is defined analogously,
@@ -204,10 +258,6 @@ Field(θᵛ)
 └── data: 3×3×14 OffsetArray(::Array{Float64, 3}, 0:2, 0:2, -2:11) with eltype Float64 with indices 0:2×0:2×-2:11
     └── max=301.824, min=301.824, mean=301.824
 ```
-
-# References
-
-* Emanuel, K. A. (1994). Atmospheric Convection (Oxford University Press).
 """
 function VirtualPotentialTemperature(model::AtmosphereModel, flavor_symbol=:specific)
 
@@ -220,8 +270,12 @@ function VirtualPotentialTemperature(model::AtmosphereModel, flavor_symbol=:spec
         throw(ArgumentError(msg))
     end
 
+    p = dynamics_pressure_for_potential_temperature(model.dynamics)
+    ρ = dynamics_density_for_potential_temperature(model.dynamics)
+    pˢᵗ = dynamics_standard_pressure(model.dynamics)
+
     func = MoistPotentialTemperatureKernelFunction(flavor,
-                                                   model.dynamics.reference_state,
+                                                   p, ρ, pˢᵗ,
                                                    model.microphysics,
                                                    model.microphysical_fields,
                                                    model.specific_moisture,
@@ -240,7 +294,9 @@ function VirtualPotentialTemperature(grid;
                                      thermodynamic_constants)
 
     func = MoistPotentialTemperatureKernelFunction(SpecificVirtual(),
-                                                   reference_state,
+                                                   reference_state.pressure,
+                                                   reference_state.density,
+                                                   reference_state.standard_pressure,
                                                    microphysics,
                                                    microphysical_fields,
                                                    specific_moisture,
@@ -259,21 +315,11 @@ Liquid-ice potential temperature is a conserved quantity under moist adiabatic p
 that accounts for the latent heat associated with liquid water and ice:
 
 ```math
-θˡⁱ = θ \\left (1 - \\frac{ℒˡᵣ qˡ + ℒⁱᵣ qⁱ}{cᵖᵐ T} \\right )
+θˡⁱ = θ \\left(1 - \\frac{ℒˡᵣ qˡ + ℒⁱᵣ qⁱ}{cᵖᵐ T}\\right)
 ```
 
-or
-
-```math
-θˡⁱ = \\frac{T}{Π} \\left (1 - \\frac{ℒˡᵣ qˡ + ℒⁱᵣ qⁱ}{cᵖᵐ T} \\right )
-```
-
-where ``θ`` is the potential temperature, ``Π = (p/p₀)^{Rᵐ/cᵖᵐ}`` is the Exner function using mixture properties,
-``ℒˡᵣ`` and ``ℒⁱᵣ`` are the reference latent heats of vaporization and sublimation,
-``qˡ`` and ``qⁱ`` are the liquid and ice specific humidities, and
-``cᵖᵐ`` is the moist air heat capacity.
-
-This is the prognostic thermodynamic variable used in `LiquidIcePotentialTemperatureThermodynamics`.
+where ``θ`` is the mixture potential temperature, ``ℒˡᵣ`` and ``ℒⁱᵣ`` are the reference
+latent heats for liquid and ice, and ``qˡ``, ``qⁱ`` are the liquid and ice mass fractions.
 
 # Arguments
 
@@ -287,7 +333,7 @@ using Breeze
 
 grid = RectilinearGrid(size=(1, 1, 8), extent=(1, 1, 1e3))
 model = AtmosphereModel(grid)
-set!(model, θ=300)
+set!(model, θ=300, qᵗ=0.01)
 
 θˡⁱ = LiquidIcePotentialTemperature(model)
 Field(θˡⁱ)
@@ -314,8 +360,12 @@ function LiquidIcePotentialTemperature(model::AtmosphereModel, flavor_symbol=:sp
         throw(ArgumentError(msg))
     end
 
+    p = dynamics_pressure_for_potential_temperature(model.dynamics)
+    ρ = dynamics_density_for_potential_temperature(model.dynamics)
+    pˢᵗ = dynamics_standard_pressure(model.dynamics)
+
     func = MoistPotentialTemperatureKernelFunction(flavor,
-                                                   model.dynamics.reference_state,
+                                                   p, ρ, pˢᵗ,
                                                    model.microphysics,
                                                    model.microphysical_fields,
                                                    model.specific_moisture,
@@ -332,23 +382,14 @@ Return a `KernelFunctionOperation` representing equivalent potential temperature
 
 Equivalent potential temperature is conserved during moist adiabatic processes
 (including condensation and evaporation) and is useful for identifying air masses
-and diagnosing moist instabilities. It is the temperature that a parcel would have
-if all its moisture were condensed out and the resulting latent heat used to warm
-the parcel, followed by adiabatic expansion to a reference pressure.
-
-We use a formulation derived by [Emanuel (1994)](@cite Emanuel1994),
+and tracking convective processes. Following [Emanuel1994](@cite Emanuel1994) equation 4.5.11:
 
 ```math
-θᵉ = T \\left( \\frac{p₀}{pᵈ} \\right)^{Rᵈ / cᵖᵐ}
-      \\exp \\left( \\frac{ℒˡ qᵛ}{cᵖᵐ T} \\right) ℋ^{- Rᵛ qᵛ / cᵖᵐ}
+θᵉ = T \\left(\\frac{p₀}{p}\\right)^{Rᵈ/cᵖᵐ} \\exp\\left(\\frac{ℒˡ qᵛ}{cᵖᵐ T}\\right) ℋ^γ
 ```
 
-where ``T`` is temperature, ``pᵈ`` is dry air pressure, ``p₀`` is the reference pressure,
-``ℒˡ`` is the latent heat of vaporization, ``qᵛ`` is the vapor specific humidity,
-``ℋ`` is the relative humidity, and ``cᵖᵐ`` is the heat capacity of the moist air mixture.
-
-The formulation follows equation (34) of the paper by [Bryan and Fritsch (2002)](@cite BryanFritsch2002),
-adapted from the derivation in the work by [Durran and Klemp (1982)](@cite DurranKlemp1982).
+where ``ℒˡ`` is the latent heat of vaporization, ``qᵛ`` is the vapor mass fraction,
+``ℋ`` is the relative humidity, and ``γ = -Rᵛ qᵛ / cᵖᵐ``.
 
 # Arguments
 
@@ -380,11 +421,7 @@ Field(θᵉ)
 
 # References
 
-* Bryan, G. H. and Fritsch, J. M. (2002). A benchmark simulation for moist nonhydrostatic numerical models.
-    Monthly Weather Review 130, 2917–2928.
-* Durran, D. R. and Klemp, J. B. (1982). On the effects of moisture on the Brunt-Väisälä frequency.
-    Journal of the Atmospheric Sciences 39, 2152–2158.
-* Emanuel, K. A. (1994). Atmospheric Convection (Oxford University Press).
+* Emanuel, K. A. (1994). Atmospheric Convection. Oxford University Press.
 """
 function EquivalentPotentialTemperature(model::AtmosphereModel, flavor_symbol=:specific)
 
@@ -397,8 +434,12 @@ function EquivalentPotentialTemperature(model::AtmosphereModel, flavor_symbol=:s
         throw(ArgumentError(msg))
     end
 
+    p = dynamics_pressure_for_potential_temperature(model.dynamics)
+    ρ = dynamics_density_for_potential_temperature(model.dynamics)
+    pˢᵗ = dynamics_standard_pressure(model.dynamics)
+
     func = MoistPotentialTemperatureKernelFunction(flavor,
-                                                   model.dynamics.reference_state,
+                                                   p, ρ, pˢᵗ,
                                                    model.microphysics,
                                                    model.microphysical_fields,
                                                    model.specific_moisture,
@@ -476,8 +517,12 @@ function StabilityEquivalentPotentialTemperature(model::AtmosphereModel, flavor_
         throw(ArgumentError(msg))
     end
 
+    p = dynamics_pressure_for_potential_temperature(model.dynamics)
+    ρ = dynamics_density_for_potential_temperature(model.dynamics)
+    pˢᵗ = dynamics_standard_pressure(model.dynamics)
+
     func = MoistPotentialTemperatureKernelFunction(flavor,
-                                                   model.dynamics.reference_state,
+                                                   p, ρ, pˢᵗ,
                                                    model.microphysics,
                                                    model.microphysical_fields,
                                                    model.specific_moisture,
@@ -493,15 +538,15 @@ end
 
 function (d::MoistPotentialTemperatureKernelFunction)(i, j, k, grid)
     @inbounds begin
-        pᵣ = d.reference_state.pressure[i, j, k]
-        ρᵣ = d.reference_state.density[i, j, k]
+        p = d.pressure[i, j, k]
+        ρ = d.density[i, j, k]
         qᵗ = d.specific_moisture[i, j, k]
-        pˢᵗ = d.reference_state.standard_pressure
+        pˢᵗ = d.standard_pressure
         T = d.temperature[i, j, k]
     end
 
     constants = d.thermodynamic_constants
-    q = grid_moisture_fractions(i, j, k, grid, d.microphysics, ρᵣ, qᵗ, d.microphysical_fields)
+    q = grid_moisture_fractions(i, j, k, grid, d.microphysics, ρ, qᵗ, d.microphysical_fields)
     qᵛ = q.vapor
     qˡ = q.liquid
     qⁱ = q.ice
@@ -515,7 +560,7 @@ function (d::MoistPotentialTemperatureKernelFunction)(i, j, k, grid)
     # Plain properties
     Rᵐ = mixture_gas_constant(q, constants)
     cᵖᵐ = mixture_heat_capacity(q, constants)
-    Πᵐ = (pᵣ / pˢᵗ)^(Rᵐ / cᵖᵐ)
+    Πᵐ = (p / pˢᵗ)^(Rᵐ / cᵖᵐ)
 
     # Plain potential temperature (used as a base for several others)
     θ = T / Πᵐ
@@ -534,7 +579,7 @@ function (d::MoistPotentialTemperatureKernelFunction)(i, j, k, grid)
     elseif d.flavor isa AbstractEquivalentFlavor
         # Saturation specific humidity over a liquid surface
         surface = PlanarLiquidSurface()
-        ℋ = relative_humidity(T, pᵣ, q, constants, surface)
+        ℋ = relative_humidity(T, p, q, constants, surface)
         γ = - Rᵛ * qᵛ / cᵖᵐ
 
         # Latent heat of vaporization at temperature T
@@ -548,7 +593,7 @@ function (d::MoistPotentialTemperatureKernelFunction)(i, j, k, grid)
         #   of mass fractions.
         # - When this is verified, the math should be written in the documentation.
         # - Could this also be written θᵉ = θ * exp(ℒˡ * qᵛ / (cᵖᵐ * T)) * ℋ^γ ?
-        θᵉ = T * (pˢᵗ / pᵣ)^(Rᵈ / cᵖᵐ) * exp(ℒˡ * qᵛ / (cᵖᵐ * T)) * ℋ^γ
+        θᵉ = T * (pˢᵗ / p)^(Rᵈ / cᵖᵐ) * exp(ℒˡ * qᵛ / (cᵖᵐ * T)) * ℋ^γ
 
         if d.flavor isa AbstractStabilityEquivalentFlavor
             # Equation 16, Durran & Klemp 1982
@@ -564,6 +609,6 @@ function (d::MoistPotentialTemperatureKernelFunction)(i, j, k, grid)
     if d.flavor isa SpecificPotentialTemperatureType
         return θ★
     elseif d.flavor isa PotentialTemperatureDensityType
-        return ρᵣ * θ★
+        return ρ * θ★
     end
 end

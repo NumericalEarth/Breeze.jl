@@ -120,11 +120,15 @@ function AtmosphereModel(grid;
                          scalar_advection = DefaultValue(),
                          closure = nothing,
                          microphysics = nothing,
-                         timestepper = :SSPRungeKutta3,
+                         timestepper = nothing,
+                         timestepper_kwargs = NamedTuple(),
                          radiation = nothing)
 
     # Use default dynamics if not specified
     isnothing(dynamics) && (dynamics = default_dynamics(grid, thermodynamic_constants))
+
+    # Use default timestepper for the dynamics if not specified
+    isnothing(timestepper) && (timestepper = default_timestepper(dynamics))
 
     # Validate that velocity boundary conditions are only provided for dynamics that support them
     validate_velocity_boundary_conditions(dynamics, boundary_conditions)
@@ -210,7 +214,14 @@ function AtmosphereModel(grid;
                                                         tracers)
 
     implicit_solver = implicit_diffusion_solver(time_discretization(closure), grid)
-    timestepper = TimeStepper(timestepper, grid, prognostic_model_fields; implicit_solver)
+
+    # Only pass `dynamics` to time steppers that accept it (Breeze's acoustic and SSP steppers).
+    # Oceananigans' built-in time steppers (RungeKutta3, QuasiAdamsBashforth2) do not.
+    if _timestepper_uses_dynamics(timestepper)
+        timestepper = TimeStepper(timestepper, grid, prognostic_model_fields; dynamics, implicit_solver, timestepper_kwargs...)
+    else
+        timestepper = TimeStepper(timestepper, grid, prognostic_model_fields; implicit_solver, timestepper_kwargs...)
+    end
     pressure_solver = dynamics_pressure_solver(dynamics, grid)
 
     model_fields = merge(prognostic_model_fields, velocities, (; T=temperature, qᵗ=specific_moisture))
@@ -264,6 +275,14 @@ function AtmosphereModel(grid;
 
     return model
 end
+
+# Breeze's acoustic and SSP time steppers accept a `dynamics` keyword;
+# Oceananigans' built-in steppers (RungeKutta3, QuasiAdamsBashforth2) do not.
+_timestepper_uses_dynamics(::Val) = false
+_timestepper_uses_dynamics(::Val{:SSPRungeKutta3}) = true
+_timestepper_uses_dynamics(::Val{:AcousticSSPRungeKutta3}) = true
+_timestepper_uses_dynamics(::Val{:AcousticRungeKutta3}) = true
+_timestepper_uses_dynamics(s::Symbol) = _timestepper_uses_dynamics(Val(s))
 
 function Base.summary(model::AtmosphereModel)
     A = nameof(typeof(model.grid.architecture))

@@ -1,7 +1,8 @@
 module BreezeReactantExt
 
+using Breeze
+
 include("Timesteppers.jl")
-using .TimeSteppers
 
 include("AtmosphereModels.jl")
 using .AtmosphereModels
