@@ -178,6 +178,7 @@ makedocs(
             "Governing equations" => "dycore_equations_algorithms.md",
             "Anelastic dynamics" => "anelastic_dynamics.md",
             "Compressible dynamics" => "compressible_dynamics.md",
+            "Terrain-following coordinates" => "terrain_following_coordinates.md",
         ],
         "Appendix" => Any[
             "Notation" => "appendix/notation.md",
