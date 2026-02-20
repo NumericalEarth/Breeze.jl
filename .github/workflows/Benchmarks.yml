@@ -6,6 +6,7 @@ on:
       - main
     paths: &paths
       - ".github/workflows/Benchmarks.yml"
+      - "benchmarking/**"
       - "src/**"
       - "Project.toml"
   pull_request:
@@ -109,21 +110,20 @@ jobs:
 
           # Write merged results for archival
           with open('benchmark_results.json', 'w') as f:
-              json.dump(all_data, f, indent=2)
+              json.dump(all_data, f, ensure_ascii=False, indent=2)
 
           # Build github-action-benchmark entries
           # Name format: <name>/<properties>/<gpu>/<grid_size>
           data = []
           for d in all_data:
-              name_parts = d['name'].split(';')
-              base_name = name_parts[0]
-              advection = [p for p in name_parts if p.startswith('advection:')][0].split(':')[1]
+              base_name = d['name'].split('_')[0]
+              advection = d['advection']
               # Closure is unused for the time being because it's always the
               # same everywhere in the current setup.
-              closure = [p for p in name_parts if p.startswith('closure:')][0].split(':')[1]
-              dynamics = [p for p in name_parts if p.startswith('dynamics:')][0].split(':')[1]
-              ft = [p for p in name_parts if p.startswith('float-type:')][0].split(':')[1]
-              microphysics = [p for p in name_parts if p.startswith('microphysics:')][0].split(':')[1]
+              closure = d['closure']
+              dynamics = d['dynamics']
+              ft = d['float_type']
+              microphysics = d['microphysics']
 
               gpu = d['metadata']['gpu_name']
 
@@ -169,11 +169,14 @@ jobs:
       - name: Push results to BreezeBenchmarks repo
         if: ${{ github.event_name == 'push' }}
         run: |
+          # Clone BreezeBenchmarks
           git clone https://numterra-bot:${{ steps.generate_token.outputs.token }}@github.com/NumericalEarth/BreezeBenchmarks.git
           cd BreezeBenchmarks
           DIRNAME="benchmarks/by_branch/${{ github.head_ref || github.ref_name }}/${{ github.sha }}"
           mkdir -vp "${DIRNAME}"
-          cp -rv ../benchmarks-* "${DIRNAME}/."
+          # Copy over file
+          cp -v ../benchmark_results.json "${DIRNAME}/."
+          # Push
           git config --global user.name "numterra-bot[bot]"
           git config --global user.email "242463128+numterra-bot[bot]@users.noreply.github.com"
           git add .
