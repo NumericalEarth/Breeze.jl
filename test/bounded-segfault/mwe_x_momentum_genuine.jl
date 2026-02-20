@@ -34,6 +34,7 @@ using Breeze: CompressibleDynamics
 using Breeze.AtmosphereModels: compute_momentum_tendencies!, tracer_density_to_specific!, tracer_specific_to_density!, compute_auxiliary_variables!, update_radiation!, compute_forcings!, microphysics_model_update!
 using Breeze.AtmosphereModels: prognostic_fields, fields
 using Breeze.AtmosphereModels: dynamics_density, compute_x_momentum_tendency!, compute_y_momentum_tendency!, compute_z_momentum_tendency!
+using Breeze.AtmosphereModels: compute_velocities!, compute_auxiliary_thermodynamic_variables!, compute_auxiliary_dynamics_variables!, compute_diffusivities!
 using Reactant
 using Statistics: mean
 using CUDA
@@ -72,7 +73,12 @@ function loss(model, θ, nsteps)
     @trace track_numbers = false for _ in 1:nsteps
         for _ in 1:3
             fill_halo_regions!(prognostic_fields(model), model.clock, fields(model), async=true)
-            compute_auxiliary_variables!(model)
+            
+            compute_velocities!(model)
+            # Dispatch on thermodynamic formulation type
+            compute_auxiliary_thermodynamic_variables!(model)
+            # Dispatch on dynamics type (computes pressure for compressible dynamics)
+            compute_auxiliary_dynamics_variables!(model)
             model_fields = Oceananigans.fields(model)
             grid = model.grid
             arch = grid.architecture
