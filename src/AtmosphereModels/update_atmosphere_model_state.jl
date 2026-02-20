@@ -4,7 +4,7 @@ using Oceananigans.BoundaryConditions: fill_halo_regions!, compute_x_bcs!, compu
 using Oceananigans.Grids: Bounded, Periodic, Flat # , topology, halo_size
 using Oceananigans.ImmersedBoundaries: mask_immersed_field!
 using Oceananigans.TimeSteppers: TimeSteppers
-using Oceananigans.TurbulenceClosures: compute_diffusivities!
+using Oceananigans.TurbulenceClosures: compute_closure_fields!
 using Oceananigans.Utils: launch! # , KernelParameters
 using Oceananigans.Operators: ℑxᶠᵃᵃ, ℑyᵃᶠᵃ, ℑzᵃᵃᶠ
 
@@ -173,7 +173,7 @@ function compute_auxiliary_variables!(model)
     compute_auxiliary_dynamics_variables!(model)
 
     # Compute diffusivities
-    compute_diffusivities!(model.closure_fields, model.closure, model)
+    compute_closure_fields!(model.closure_fields, model.closure, model)
 
     # TODO: should we mask the auxiliary variables? They can also be masked in the kernel
 
