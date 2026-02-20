@@ -7,6 +7,14 @@
 ##### inconsistency that arises when PerturbationAdvection is applied directly to
 ##### density-weighted prognostic variables (ρu, ρv, ρθ, ρq).
 #####
+##### TODO: Unify with Oceananigans' PerturbationAdvection by adding optional `density`
+##### and `gravity_wave_speed` fields upstream. This would eliminate ~270 lines of
+##### duplicated radiation logic. The upstream PerturbationAdvection would need:
+#####   1. Optional `density` field (default nothing) for ρψ → ψ conversion
+#####   2. Optional `gravity_wave_speed` (default 0) added to phase speed
+#####   3. `_fill_*_halo!` methods for Center-located fields (currently only Face)
+##### See https://github.com/CliMA/Oceananigans.jl for upstream PR.
+#####
 
 using Oceananigans: defaults
 using Oceananigans.Operators: Δxᶠᶜᶜ, Δyᶜᶠᶜ
