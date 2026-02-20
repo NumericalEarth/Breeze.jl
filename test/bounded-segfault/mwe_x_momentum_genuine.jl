@@ -73,41 +73,58 @@ function loss(model, θ, nsteps)
     set!(model, θ = θ, ρ = 1.0)
 
     @trace track_numbers = false for _ in 1:nsteps
-        for _ in 1:3
-            args = (model.clock, fields(model))
-            kwargs= Dict(:async => true)
-            _fields = prognostic_fields(model)
-            for i in eachindex(_fields)
-                @inbounds fill_halo_regions!(_fields[i], args...; kwargs...)
-            end
-            
-            
-            compute_velocities!(model)
-            # Dispatch on thermodynamic formulation type
-            compute_auxiliary_thermodynamic_variables!(model)
-            # Dispatch on dynamics type (computes pressure for compressible dynamics)
-            compute_auxiliary_dynamics_variables!(model)
-            model_fields = Oceananigans.fields(model)
-            grid = model.grid
-            arch = grid.architecture
-            Gρu = model.timestepper.Gⁿ.ρu
-            Gρv = model.timestepper.Gⁿ.ρv
-            Gρw = model.timestepper.Gⁿ.ρw
-        
-            momentum_args = (
-                dynamics_density(model.dynamics),
-                model.advection.momentum,
-                model.velocities,
-                model.closure,
-                model.closure_fields,
-                model.momentum,
-                model.coriolis,
-                model.clock,
-                model_fields)
-        
-            u_args = tuple(momentum_args..., model.forcing.ρu, model.dynamics)
-            launch!(arch, grid, :xyz, compute_x_momentum_tendency!, Gρu, grid, u_args)
-        end
+        fill_halo_regions!(prognostic_fields(model), model.clock, fields(model), async=true)
+        compute_velocities!(model)
+        compute_auxiliary_thermodynamic_variables!(model)
+        compute_auxiliary_dynamics_variables!(model)
+
+        model_fields = Oceananigans.fields(model)
+        grid = model.grid
+        arch = grid.architecture
+        Gρu = model.timestepper.Gⁿ.ρu
+    
+        momentum_args = (
+            dynamics_density(model.dynamics),
+            model.advection.momentum,
+            model.velocities,
+            model.closure,
+            model.closure_fields,
+            model.momentum,
+            model.coriolis,
+            model.clock,
+            model_fields)
+    
+        u_args = tuple(momentum_args..., model.forcing.ρu, model.dynamics)
+        launch!(arch, grid, :xyz, compute_x_momentum_tendency!, Gρu, grid, u_args)
+
+        fill_halo_regions!(prognostic_fields(model), model.clock, fields(model), async=true)
+        compute_velocities!(model)
+        compute_auxiliary_thermodynamic_variables!(model)
+        compute_auxiliary_dynamics_variables!(model)
+
+        model_fields = Oceananigans.fields(model)
+        grid = model.grid
+        arch = grid.architecture
+        Gρu = model.timestepper.Gⁿ.ρu
+    
+        momentum_args = (
+            dynamics_density(model.dynamics),
+            model.advection.momentum,
+            model.velocities,
+            model.closure,
+            model.closure_fields,
+            model.momentum,
+            model.coriolis,
+            model.clock,
+            model_fields)
+    
+        u_args = tuple(momentum_args..., model.forcing.ρu, model.dynamics)
+        launch!(arch, grid, :xyz, compute_x_momentum_tendency!, Gρu, grid, u_args)
+
+        fill_halo_regions!(prognostic_fields(model), model.clock, fields(model), async=true)
+        compute_velocities!(model)
+        compute_auxiliary_thermodynamic_variables!(model)
+        compute_auxiliary_dynamics_variables!(model)
     end
 
     return mean(interior(model.temperature) .^ 2)
