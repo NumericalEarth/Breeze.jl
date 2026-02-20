@@ -2,7 +2,7 @@ using ..Thermodynamics: Thermodynamics, ThermodynamicConstants
 
 using Oceananigans: Oceananigans, AbstractModel, Center, CenterField, Clock, Field,
                     Centered, fields, prognostic_fields
-using Oceananigans.Advection: Advection, adapt_advection_order, cell_advection_timescale, BoundsPreservingWENO
+using Oceananigans.Advection: Advection, adapt_advection_order, cell_advection_timescale
 using Oceananigans.AbstractOperations: @at
 using Oceananigans.BoundaryConditions: FieldBoundaryConditions, regularize_field_boundary_conditions
 using Oceananigans.Diagnostics: Diagnostics as OceananigansDiagnostics, NaNChecker
@@ -245,17 +245,6 @@ function AtmosphereModel(grid;
     momentum_advection_tuple = (; momentum = momentum_advection)
     advection = merge(momentum_advection_tuple, scalar_advection_tuple)
     advection = NamedTuple(name => adapt_advection_order(scheme, grid) for (name, scheme) in pairs(advection))
-
-    # Warn if microphysical tracers are not using bounds-preserving advection
-    if !isnothing(microphysics) && !isempty(microphysical_names)
-        unbounded = filter(name -> !(advection[name] isa BoundsPreservingWENO), microphysical_names)
-        if !isempty(unbounded)
-            @warn "Microphysical tracers $(unbounded) are not using bounds-preserving advection. " *
-                  "Non-negative quantities like mass and number concentrations may develop unphysical " *
-                  "negative values. Consider using WENO(order=5, bounds=(0, Inf)) or providing " *
-                  "per-tracer `scalar_advection`."
-        end
-    end
 
     model = AtmosphereModel(arch,
                             grid,
