@@ -20,7 +20,8 @@ using KernelAbstractions: @kernel, @index
 
 using Oceananigans: Oceananigans, CenterField, XFaceField, YFaceField, ZFaceField, fields
 using Oceananigans.Architectures: architecture
-using Oceananigans.BoundaryConditions: FieldBoundaryConditions, regularize_field_boundary_conditions, fill_halo_regions!
+using Oceananigans.BoundaryConditions: BoundaryCondition, FieldBoundaryConditions, regularize_field_boundary_conditions,
+                                      fill_halo_regions!, Open, OpenBoundaryCondition
 using Oceananigans.Fields: set!
 using Oceananigans.Grids: ZDirection, inactive_cell
 using Oceananigans.ImmersedBoundaries: mask_immersed_field!

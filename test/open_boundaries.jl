@@ -54,7 +54,7 @@ const OpenBC = BoundaryCondition{<:Open}
         @test model.boundary_mass_fluxes.north !== nothing
     end
 
-    @testset "Velocity fields inherit momentum boundary conditions" begin
+    @testset "Velocity fields get open BCs when momentum has open BCs" begin
         grid = RectilinearGrid(default_arch, size=(8, 8), x=(0, 1), z=(0, 1),
                                topology=(Bounded, Flat, Bounded))
 
@@ -64,14 +64,10 @@ const OpenBC = BoundaryCondition{<:Open}
 
         model = AtmosphereModel(grid; boundary_conditions)
 
-        # Check that velocity fields inherited the open boundary conditions
+        # Velocity fields should have Open BCs to prevent ImpenetrableBoundaryCondition
         u_bcs = model.velocities.u.boundary_conditions
-        ρu_bcs = model.momentum.ρu.boundary_conditions
-
         @test u_bcs.west isa OpenBC
         @test u_bcs.east isa OpenBC
-        @test typeof(ρu_bcs.west) == typeof(u_bcs.west)
-        @test typeof(ρu_bcs.east) == typeof(u_bcs.east)
     end
 
     @testset "PerturbationMomentumAdvection with open boundaries" begin
@@ -151,5 +147,47 @@ const OpenBC = BoundaryCondition{<:Open}
         run!(simulation)
 
         @test model.clock.iteration == 3
+    end
+
+    @testset "Uniform flow stability with open x-boundaries" begin
+        Nx, Nz = 32, 8
+        grid = RectilinearGrid(default_arch;
+                               size = (Nx, Nz),
+                               x = (0, 1000),
+                               z = (0, 1000),
+                               halo = (5, 5),
+                               topology = (Bounded, Flat, Bounded))
+
+        U = 10.0
+
+        # Build exterior value as ρᵣ * U (momentum density)
+        tmp_model = AtmosphereModel(grid; advection = WENO())
+        ρᵣ = tmp_model.dynamics.reference_state.density
+        ρu_mean = Field{Face, Nothing, Center}(grid)
+        set!(ρu_mean, ρᵣ * U)
+
+        scheme = PerturbationAdvection()
+        ρu_bcs = FieldBoundaryConditions(
+            west = OpenBoundaryCondition(ρu_mean; scheme),
+            east = OpenBoundaryCondition(ρu_mean; scheme))
+
+        model = AtmosphereModel(grid;
+                                advection = WENO(),
+                                boundary_conditions = (; ρu = ρu_bcs))
+
+        θ₀ = model.dynamics.reference_state.potential_temperature
+        set!(model; u = U, θ = θ₀)
+
+        Δt = 0.01
+        for _ in 1:100
+            time_step!(model, Δt)
+        end
+
+        # The uniform flow should remain approximately uniform
+        # (small perturbations from reference-state discretization are acceptable)
+        u_max = maximum(abs, interior(model.velocities.u))
+        u_min = minimum(abs, interior(model.velocities.u))
+        @test u_max < U + 0.1
+        @test u_min > U - 0.1
     end
 end

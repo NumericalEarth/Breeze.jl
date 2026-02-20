@@ -9,7 +9,8 @@
 
 using Oceananigans.AbstractOperations: Integral, grid_metric_operation, Ax, Ay
 using Oceananigans.BoundaryConditions: Open, BoundaryCondition
-using Oceananigans.Fields: Field, compute!, interior, view
+using Base: view
+using Oceananigans.Fields: Field, compute!, interior
 using Oceananigans.Grids: topology, Bounded, Face, Center
 using GPUArraysCore: @allowscalar
 
@@ -85,6 +86,9 @@ Initialize boundary mass fluxes container based on the momentum fields.
 Returns `NoBoundaryMassFluxes()` if no open boundaries are detected.
 """
 function initialize_boundary_mass_fluxes(momentum)
+    # ParcelModels and other models without momentum have empty NamedTuples
+    hasproperty(momentum, :ρu) || return NoBoundaryMassFluxes()
+
     ρu = momentum.ρu
     ρv = momentum.ρv
     grid = ρu.grid

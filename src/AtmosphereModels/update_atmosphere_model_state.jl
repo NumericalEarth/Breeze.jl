@@ -11,7 +11,7 @@ using Oceananigans.Operators: ℑxᶠᵃᵃ, ℑyᵃᶠᵃ, ℑzᵃᵃᶠ
 function TimeSteppers.update_state!(model::AtmosphereModel, callbacks=[]; compute_tendencies=true)
     tracer_density_to_specific!(model) # convert tracer density to specific tracer distribution
 
-    fill_halo_regions!(prognostic_fields(model), model.clock, fields(model), async=true)
+    fill_halo_regions!(prognostic_fields(model), model.clock, fields(model); fill_open_bcs=false, async=true)
     compute_auxiliary_variables!(model)
     update_radiation!(model.radiation, model)
     compute_forcings!(model)
@@ -97,7 +97,7 @@ function compute_velocities!(model::AtmosphereModel)
     # (prognostic field halo fill in update_state! is async)
     density = dynamics_density(model.dynamics)
     fill_halo_regions!(density)
-    fill_halo_regions!(model.momentum)
+    fill_halo_regions!(model.momentum; fill_open_bcs=false)
 
     launch!(arch, grid, :xyz,
             _compute_velocities!,
@@ -107,7 +107,10 @@ function compute_velocities!(model::AtmosphereModel)
             model.momentum)
 
     foreach(mask_immersed_field!, model.velocities)
-    fill_halo_regions!(model.velocities)
+    # Use fill_open_bcs=false to preserve boundary velocities computed from ρu / ρ.
+    # Velocity open BCs are propagated from momentum open BCs to prevent
+    # ImpenetrableBoundaryCondition from overwriting boundary velocity values.
+    fill_halo_regions!(model.velocities; fill_open_bcs=false)
 
     return nothing
 end
