@@ -57,8 +57,8 @@ using RRTMGP
                                                    surface_emissivity = 0.98,
                                                    surface_albedo = 0.1,
                                                    solar_constant = 1361,
-                                                   liquid_effective_radius = ConstantRadiusParticles(10.0),
-                                                   ice_effective_radius = ConstantRadiusParticles(30.0))
+                                                   liquid_effective_radius = ConstantRadiusParticles(10e-6),
+                                                   ice_effective_radius = ConstantRadiusParticles(30e-6))
 
         # Use noon on summer solstice at 45°N for good solar illumination
         clock = Clock(time=DateTime(2024, 6, 21, 12, 0, 0))
@@ -131,8 +131,8 @@ using RRTMGP
         dynamics = AnelasticDynamics(reference_state)
 
         # Test with custom effective radii
-        small_droplets = ConstantRadiusParticles(5.0)   # 5 μm
-        large_ice = ConstantRadiusParticles(50.0)       # 50 μm
+        small_droplets = ConstantRadiusParticles(5e-6)
+        large_ice = ConstantRadiusParticles(50e-6)
 
         radiation = RadiativeTransferModel(grid, AllSkyOptics(), constants;
                                            surface_temperature = 300,
@@ -141,8 +141,8 @@ using RRTMGP
                                            ice_effective_radius = large_ice)
 
         # Verify the effective radius models are stored correctly
-        @test radiation.liquid_effective_radius.radius == FT(5.0)
-        @test radiation.ice_effective_radius.radius == FT(50.0)
+        @test radiation.liquid_effective_radius.radius == FT(5e-6)
+        @test radiation.ice_effective_radius.radius == FT(50e-6)
 
         clock = Clock(time=DateTime(2024, 6, 21, 12, 0, 0))
         microphysics = SaturationAdjustment()

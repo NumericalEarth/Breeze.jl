@@ -76,6 +76,15 @@ Base.summary(::NonEquilibriumCloudFormation) = "NonEquilibriumCloudFormation"
 # NonEquilibriumCloudFormation uses the standard tendency interface,
 # so the model-wide microphysics update is a no-op.
 AtmosphereModels.microphysics_model_update!(::NonEquilibriumCloudFormation, model) = nothing
+
+# NonEquilibriumCloudFormation stores vapor in microphysical_fields.qᵛ,
+# just like SaturationAdjustment.
+AtmosphereModels.specific_humidity(::NonEquilibriumCloudFormation, model) = model.microphysical_fields.qᵛ
+AtmosphereModels.vapor_mass_fraction(::NonEquilibriumCloudFormation, model) = model.microphysical_fields.qᵛ
+AtmosphereModels.liquid_mass_fraction(::NonEquilibriumCloudFormation, model) = model.microphysical_fields.qˡ
+AtmosphereModels.ice_mass_fraction(::NonEquilibriumCloudFormation{<:Any, Nothing}, model) = nothing
+AtmosphereModels.ice_mass_fraction(::NonEquilibriumCloudFormation, model) = model.microphysical_fields.qⁱ
+
 #####
 ##### Condensate formation models (for non-equilibrium schemes)
 #####
@@ -208,6 +217,10 @@ maybe_adjust_thermodynamic_state(𝒰₀, bμp::NCBM, qᵗ, constants) =
 AtmosphereModels.prognostic_field_names(::NPBM) = tuple()
 AtmosphereModels.materialize_microphysical_fields(bμp::NPBM, grid, bcs) = materialize_microphysical_fields(bμp.cloud_formation, grid, bcs)
 
+# Forward specific_humidity to cloud_formation scheme
+AtmosphereModels.specific_humidity(bμp::BulkMicrophysics, model) =
+    AtmosphereModels.specific_humidity(bμp.cloud_formation, model)
+
 @inline function AtmosphereModels.update_microphysical_fields!(μ, i, j, k, grid, bμp::NPBM, ρ, 𝒰, constants)
     return update_microphysical_fields!(μ, i, j, k, grid, bμp.cloud_formation, ρ, 𝒰, constants)
 end
@@ -236,9 +249,6 @@ end
 end
 
 # Forward mass fraction diagnostics to cloud_formation scheme
-AtmosphereModels.vapor_mass_fraction(bμp::NPBM, model) =
-    AtmosphereModels.vapor_mass_fraction(bμp.cloud_formation, model)
-AtmosphereModels.liquid_mass_fraction(bμp::NPBM, model) =
-    AtmosphereModels.liquid_mass_fraction(bμp.cloud_formation, model)
-AtmosphereModels.ice_mass_fraction(bμp::NPBM, model) =
-    AtmosphereModels.ice_mass_fraction(bμp.cloud_formation, model)
+AtmosphereModels.vapor_mass_fraction(bμp::BulkMicrophysics, model) = AtmosphereModels.vapor_mass_fraction(bμp.cloud_formation, model)
+AtmosphereModels.liquid_mass_fraction(bμp::BulkMicrophysics, model) = AtmosphereModels.liquid_mass_fraction(bμp.cloud_formation, model)
+AtmosphereModels.ice_mass_fraction(bμp::BulkMicrophysics, model) = AtmosphereModels.ice_mass_fraction(bμp.cloud_formation, model)

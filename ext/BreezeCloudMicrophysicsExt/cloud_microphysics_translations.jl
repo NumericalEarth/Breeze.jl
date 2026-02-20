@@ -192,10 +192,8 @@ Named tuple `(; evap_rate_0, evap_rate_1)` where:
         x_star = pdf_r.xr_min
         ρᴸ = pdf_r.ρw
 
-        # Diffusional growth factor (G function)
         G = diffusional_growth_factor(aps, T, constants)
 
-        # Mean rain drop mass and diameter
         (; xr_mean) = pdf_rain_parameters(pdf_r, qʳ, ρ, Nʳ)
         Dʳ = cbrt(6 * xr_mean / (π * ρᴸ))
 
@@ -207,12 +205,10 @@ Named tuple `(; evap_rate_0, evap_rate_1)` where:
         a_vent_1 = av * Γ(FT(2)) / cbrt(FT(6))
         b_vent_1 = bv * Γ(5 // 2 + 3 // 2 * β) / 6^(β / 2 + 1 // 2)
 
-        # Reynolds number
         Re = α * xr_mean^β * sqrt(ρ0 / ρ) * Dʳ / ν_air
         Fv0 = a_vent_0 + b_vent_0 * cbrt(ν_air / D_vapor) * sqrt(Re)
         Fv1 = a_vent_1 + b_vent_1 * cbrt(ν_air / D_vapor) * sqrt(Re)
 
-        # Evaporation rates (negative for evaporation)
         evap_rate_0 = min(zero(FT), FT(2) * FT(π) * G * 𝒮 * Nʳ * Dʳ * Fv0 / xr_mean)
         evap_rate_1 = min(zero(FT), FT(2) * FT(π) * G * 𝒮 * Nʳ * Dʳ * Fv1 / ρ)
 
@@ -323,6 +319,12 @@ Maximum supersaturation (dimensionless, e.g., 0.01 = 1% supersaturation)
     constants,
 ) where {FT}
 
+    # Extract from microphysical state
+    w = ℳ.velocities.w  # vertical velocity for aerosol activation
+
+    # No activation possible without updraft
+    w ≤ eps(FT) && return zero(FT)
+
     # Extract from thermodynamic state
     T = temperature(𝒰, constants)
     p = 𝒰.reference_pressure
@@ -330,9 +332,6 @@ Maximum supersaturation (dimensionless, e.g., 0.01 = 1% supersaturation)
     qᵛ = q.vapor
     qˡ = q.liquid
     qⁱ = q.ice
-
-    # Extract from microphysical state
-    w = ℳ.velocities.w  # vertical velocity for aerosol activation
     Nˡ = ℳ.nᶜˡ * ρ  # convert from per-mass to per-volume
     Nⁱ = zero(FT)   # warm phase: no ice
 
@@ -376,25 +375,19 @@ Maximum supersaturation (dimensionless, e.g., 0.01 = 1% supersaturation)
     # See Eq. A13 in Korolev and Mazin (2003) or CloudMicrophysics implementation
 
     # Liquid relaxation
-    rˡ = ifelse(Nˡ > eps(FT), cbrt(ρ * qˡ / (Nˡ * ρᴸ * (4π / 3))), zero(FT))
+    rˡ = Nˡ > eps(FT) ? cbrt(ρ * qˡ / (Nˡ * ρᴸ * (4π / 3))) : zero(FT)
     Kˡ = 4π * ρᴸ * Nˡ * rˡ * G * γ
 
     # Ice relaxation
     γⁱ = Rᵛ * T / pᵛ⁺ + pᵛ / pᵛ⁺ * Rᵐ * ℒˡ * ℒⁱ / (Rᵛ * cᵖᵐ * T * p)
-    rⁱ = ifelse(Nⁱ > eps(FT), cbrt(ρ * qⁱ / (Nⁱ * ρᴵ * (4π / 3))), zero(FT))
+    rⁱ = Nⁱ > eps(FT) ? cbrt(ρ * qⁱ / (Nⁱ * ρᴵ * (4π / 3))) : zero(FT)
     Gⁱ = diffusional_growth_factor_ice(aps, T, constants)
     Kⁱ = 4π * Nⁱ * rⁱ * Gⁱ * γⁱ
 
     ξ = pᵛ⁺ / pᵛ⁺ⁱ
 
     # Phase-relaxation corrected Sᵐᵃˣ (Eq. A13 in Korolev and Mazin 2003)
-    # Use safe denominator conditioned on w > 0 to avoid NaN
-    denominator = α * w + (Kˡ + Kⁱ * ξ) * Sᵐᵃˣ₀
-    safe_denominator = ifelse(w > zero(FT), denominator, one(FT))
-    Sᵐᵃˣ_computed = Sᵐᵃˣ₀ * (α * w - Kⁱ * (ξ - 1)) / safe_denominator
-
-    # Activation only occurs with positive updraft velocity
-    Sᵐᵃˣ = ifelse(w > zero(FT), Sᵐᵃˣ_computed, zero(FT))
+    Sᵐᵃˣ = Sᵐᵃˣ₀ * (α * w - Kⁱ * (ξ - 1)) / (α * w + (Kˡ + Kⁱ * ξ) * Sᵐᵃˣ₀)
 
     return max(zero(FT), Sᵐᵃˣ)
 end
@@ -434,38 +427,30 @@ end
 # Helper function to compute Sᵐᵃˣ
 # Dispatches on aerosol_activation type to enable different activation schemes
 @inline function compute_smax(aerosol_activation, A::FT, α::FT, γ::FT, G::FT, w::FT, ρᴸ::FT) where FT
+    # No activation possible without updraft (w ≤ 0 gives ζ=η=0 → NaN from 0/0)
+    w ≤ eps(FT) && return zero(FT)
+
     ap = aerosol_activation.activation_parameters
     ad = aerosol_activation.aerosol_distribution
 
-    # Use safe positive w to avoid NaN in computation; result is 0 when w <= 0
-    # ARG 2000 parameterization is only valid for positive updraft velocities
-    w⁺ = max(eps(FT), w)
-
-    ζ = 2A / 3 * sqrt(α * w⁺ / G)
+    ζ = 2A / 3 * sqrt(α * w / G)
 
     # Compute critical supersaturation and contribution from each mode
     Σ_inv_Sᵐᵃˣ² = zero(FT)
     for mode in ad.modes
-
-        # Mean hygroscopicity for mode (volume-weighted κ)
         κ̄ = mean_hygroscopicity(ap, mode)
 
         # Critical supersaturation (Eq. 9 in ARG 2000)
-        Sᶜʳⁱᵗ = 2 / sqrt(κ̄) * sqrt(A / (3 * mode.r_dry))^3
+        Sᶜʳⁱᵗ = 2 / sqrt(κ̄) * (A / (3 * mode.r_dry))^(FT(3) / 2)
 
-        # Fitting parameters (fᵥ and gᵥ are ventilation-related)
         fᵥ = ap.f1 * exp(ap.f2 * log(mode.stdev)^2)
         gᵥ = ap.g1 + ap.g2 * log(mode.stdev)
 
-        # η parameter
-        η = sqrt(α * w⁺ / G)^3 / (2π * ρᴸ * γ * mode.N)
+        η = (α * w / G)^(FT(3) / 2) / (2π * ρᴸ * γ * mode.N)
 
         # Contribution to 1/Sᵐᵃˣ² (Eq. 6 in ARG 2000)
         Σ_inv_Sᵐᵃˣ² += 1 / Sᶜʳⁱᵗ^2 * (fᵥ * (ζ / η)^ap.p1 + gᵥ * (Sᶜʳⁱᵗ^2 / (η + 3 * ζ))^ap.p2)
     end
 
-    Sᵐᵃˣ_computed = 1 / sqrt(Σ_inv_Sᵐᵃˣ²)
-
-    # Return 0 for no updraft (w <= 0), otherwise return computed value
-    return ifelse(w > zero(FT), Sᵐᵃˣ_computed, zero(FT))
+    return 1 / sqrt(Σ_inv_Sᵐᵃˣ²)
 end

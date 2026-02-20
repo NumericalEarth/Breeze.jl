@@ -9,12 +9,13 @@ using Statistics: mean!
 Recompute the reference pressure and density profiles from horizontally-averaged
 temperature and moisture mass fractions of the current model state.
 
-This is useful as a simulation callback to keep the reference state close to the
-evolving mean state, minimizing buoyancy perturbations `ρ - ρᵣ`.
+Density-weighted prognostic fields (ρe, ρqᵗ, ρu, etc.) are left unchanged;
+diagnostic fields are recomputed from the new reference state via `update_state!`.
 """
 function set_to_mean!(ref::ReferenceState, model)
     constants = model.thermodynamic_constants
 
+    # Update reference temperature and moisture from horizontal means
     mean!(ref.temperature, model.temperature)
     fill_halo_regions!(ref.temperature)
 
@@ -22,7 +23,12 @@ function set_to_mean!(ref::ReferenceState, model)
     mean_mass_fraction!(ref.liquid_mass_fraction, liquid_mass_fraction(model))
     mean_mass_fraction!(ref.ice_mass_fraction, ice_mass_fraction(model))
 
+    # Recompute hydrostatic pressure and density
     compute_hydrostatic_reference!(ref, constants)
+
+    # Recompute all diagnostic variables (T, qᵗ, u, v, w, diffusivities, etc.)
+    # from the rescaled prognostics + new ρᵣ
+    TimeSteppers.update_state!(model; compute_tendencies=false)
 
     return nothing
 end

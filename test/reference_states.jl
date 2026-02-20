@@ -401,4 +401,54 @@ end
         @test p_ref > 0
         @test ρ_ref > 0
     end
+
+    #####
+    ##### set_to_mean! preserves density-weighted prognostic fields
+    #####
+    #
+    # Density-weighted prognostic fields (ρe, ρqᵗ, ρu) are left unchanged
+    # by set_to_mean!. Only the reference state (ρᵣ, pᵣ, Tᵣ) is updated.
+
+    @testset "set_to_mean! preserves density-weighted prognostics" begin
+        reference_state = ReferenceState(grid, constants; vapor_mass_fraction=0)
+        dynamics = AnelasticDynamics(reference_state)
+        model = AtmosphereModel(grid; dynamics, formulation=:StaticEnergy)
+
+        # Set initial conditions with non-trivial profiles
+        T_prof(z) = max(FT(210), FT(300) - FT(6.5e-3) * z)
+        q_prof(z) = FT(0.015) * exp(-z / FT(2500))
+
+        # compute_reference_state! takes f(z); set!(model, ...) takes f(x, y, z)
+        compute_reference_state!(reference_state, T_prof, q_prof, constants)
+        set!(model, T=(x, y, z) -> T_prof(z), qᵗ=(x, y, z) -> q_prof(z), u=FT(5), w=FT(0))
+        time_step!(model, 1)  # populates diagnostic fields
+
+        # Record density-weighted prognostic fields before set_to_mean!
+        ρe_before  = Array(interior(model.formulation.energy_density))
+        ρqᵗ_before = Array(interior(model.moisture_density))
+        ρu_before  = Array(interior(model.momentum.ρu))
+        ρw_before  = Array(interior(model.momentum.ρw))
+
+        # Call set_to_mean! — this changes ρᵣ but leaves prognostics unchanged
+        set_to_mean!(reference_state, model)
+
+        # Reference temperature should match model mean temperature
+        T_before = Array(interior(model.temperature))
+        Tᵣ_after = Array(interior(reference_state.temperature))
+        T_mean = dropdims(sum(T_before, dims=(1, 2)) / (size(T_before, 1) * size(T_before, 2)), dims=(1, 2))
+        for k in 1:grid.Nz
+            @test isapprox(Tᵣ_after[1, 1, k], T_mean[k]; rtol=FT(1e-5))
+        end
+
+        # Density-weighted prognostic fields should be unchanged
+        ρe_after  = Array(interior(model.formulation.energy_density))
+        ρqᵗ_after = Array(interior(model.moisture_density))
+        ρu_after  = Array(interior(model.momentum.ρu))
+        ρw_after  = Array(interior(model.momentum.ρw))
+
+        @test ρe_after  ≈ ρe_before
+        @test ρqᵗ_after ≈ ρqᵗ_before
+        @test ρu_after  ≈ ρu_before
+        @test ρw_after  ≈ ρw_before
+    end
 end

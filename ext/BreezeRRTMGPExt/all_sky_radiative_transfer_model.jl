@@ -13,6 +13,7 @@ using Breeze.AtmosphereModels:
     SurfaceRadiativeProperties,
     specific_humidity,
     BackgroundAtmosphere,
+    materialize_background_atmosphere,
     AllSkyOptics,
     ConstantRadiusParticles,
     cloud_liquid_effective_radius,
@@ -49,10 +50,15 @@ This constructor requires that `NCDatasets` is loadable in the user environment 
 RRTMGP loads lookup tables from netCDF via an extension.
 
 # Keyword Arguments
-- `background_atmosphere`: Background atmospheric gas composition (default: `BackgroundAtmosphere{FT}()`).
+- `background_atmosphere`: Background atmospheric gas composition (default: `BackgroundAtmosphere()`).
+  O₃ can be a Number or Function of `z`; other gases are global mean constants.
+  O₃ can be a Number, Function, or Field; other gases are global mean constants.
 - `surface_temperature`: Surface temperature in Kelvin (required).
-- `coordinate`: Tuple of (longitude, latitude) in degrees. If `nothing` (default),
-                extracted from grid coordinates.
+- `coordinate`: Solar geometry specification. Can be:
+  - `nothing` (default): extracts location from grid coordinates for time-varying zenith angle
+  - `(longitude, latitude)` tuple in degrees: uses DateTime clock for time-varying zenith angle
+  - A `Number` representing fixed `cos(zenith_angle)`: perpetual insolation for RCE experiments
+    (e.g., `cosd(42.04) ≈ 0.743` for RCEMIP protocol)
 - `epoch`: Optional epoch for computing time with floating-point clocks.
 - `surface_emissivity`: Surface emissivity, 0-1 (default: 0.98). Scalar.
 - `surface_albedo`: Surface albedo, 0-1. Can be scalar or 2D field.
@@ -60,14 +66,14 @@ RRTMGP loads lookup tables from netCDF via an extension.
 - `direct_surface_albedo`: Direct surface albedo, 0-1. Can be scalar or 2D field.
 - `diffuse_surface_albedo`: Diffuse surface albedo, 0-1. Can be scalar or 2D field.
 - `solar_constant`: Top-of-atmosphere solar flux in W/m² (default: 1361)
-- `liquid_effective_radius`: Model for cloud liquid effective radius in μm (default: `ConstantRadiusParticles(10.0)`)
-- `ice_effective_radius`: Model for cloud ice effective radius in μm (default: `ConstantRadiusParticles(30.0)`)
+- `liquid_effective_radius`: Model for cloud liquid effective radius in meters (default: `ConstantRadiusParticles(10e-6)`)
+- `ice_effective_radius`: Model for cloud ice effective radius in meters (default: `ConstantRadiusParticles(30e-6)`)
 - `ice_roughness`: Ice crystal roughness for cloud optics (1=smooth, 2=medium, 3=rough; default: 2)
 """
 function AtmosphereModels.RadiativeTransferModel(grid::AbstractGrid,
                                                  ::AllSkyOptics,
                                                  constants::ThermodynamicConstants;
-                                                 background_atmosphere = BackgroundAtmosphere{eltype(grid)}(),
+                                                 background_atmosphere = BackgroundAtmosphere(),
                                                  surface_temperature,
                                                  coordinate = nothing,
                                                  epoch = nothing,
@@ -76,8 +82,9 @@ function AtmosphereModels.RadiativeTransferModel(grid::AbstractGrid,
                                                  diffuse_surface_albedo = nothing,
                                                  surface_albedo = nothing,
                                                  solar_constant = 1361,
-                                                 liquid_effective_radius = ConstantRadiusParticles(10.0),
-                                                 ice_effective_radius = ConstantRadiusParticles(30.0),
+                                                 schedule = IterationInterval(1),
+                                                 liquid_effective_radius = ConstantRadiusParticles(10e-6),
+                                                 ice_effective_radius = ConstantRadiusParticles(30e-6),
                                                  ice_roughness = 2)
 
     FT = eltype(grid)
@@ -87,6 +94,9 @@ function AtmosphereModels.RadiativeTransferModel(grid::AbstractGrid,
                  direct_surface_albedo and diffuse_surface_albedo"
 
     coordinate = maybe_infer_coordinate(coordinate, grid)
+
+    # Materialize background atmosphere (converts O₃ functions to fields)
+    background_atmosphere = materialize_background_atmosphere(background_atmosphere, grid)
 
     if !isnothing(surface_albedo)
         if !isnothing(direct_surface_albedo) || !isnothing(diffuse_surface_albedo)
@@ -110,7 +120,7 @@ function AtmosphereModels.RadiativeTransferModel(grid::AbstractGrid,
 
     # RRTMGP grid + context
     context = rrtmgp_context(arch)
-    DA = ClimaComms.array_type(context.device)
+    ArrayType = ClimaComms.array_type(context.device)
     grid_params = RRTMGPGridParams(FT; context, nlay=Nz, ncol=Nc)
 
     # Lookup tables (requires NCDatasets extension for RRTMGP)
@@ -131,32 +141,32 @@ function AtmosphereModels.RadiativeTransferModel(grid::AbstractGrid,
         end
     end
 
-    nbnd_lw = luts.lu_kwargs.nbnd_lw
-    nbnd_sw = luts.lu_kwargs.nbnd_sw
-    ngas = luts.lu_kwargs.ngas_sw
+    Nband_lw = luts.lu_kwargs.nbnd_lw
+    Nband_sw = luts.lu_kwargs.nbnd_sw
+    Ngas = luts.lu_kwargs.ngas_sw
 
     # Atmospheric state arrays
-    rrtmgp_λ = DA{FT}(undef, Nc)
-    rrtmgp_φ = DA{FT}(undef, Nc)
-    rrtmgp_layerdata = DA{FT}(undef, 4, Nz, Nc)
-    rrtmgp_pᶠ = DA{FT}(undef, Nz+1, Nc)
-    rrtmgp_Tᶠ = DA{FT}(undef, Nz+1, Nc)
-    rrtmgp_T₀ = DA{FT}(undef, Nc)
+    rrtmgp_λ = ArrayType{FT}(undef, Nc)
+    rrtmgp_φ = ArrayType{FT}(undef, Nc)
+    rrtmgp_layerdata = ArrayType{FT}(undef, 4, Nz, Nc)
+    rrtmgp_pᶠ = ArrayType{FT}(undef, Nz+1, Nc)
+    rrtmgp_Tᶠ = ArrayType{FT}(undef, Nz+1, Nc)
+    rrtmgp_T₀ = ArrayType{FT}(undef, Nc)
 
     set_longitude!(rrtmgp_λ, coordinate, grid)
     set_latitude!(rrtmgp_φ, coordinate, grid)
 
-    vmr = init_vmr(ngas, Nz, Nc, FT, DA; gm=true)
+    vmr = init_vmr(Ngas, Nz, Nc, FT, ArrayType; gm=true)
     set_global_mean_gases!(vmr, luts.lookups.idx_gases_sw, background_atmosphere)
 
     # Cloud state arrays
-    cloud_liquid_radius = DA{FT}(undef, Nz, Nc)
-    cloud_ice_radius = DA{FT}(undef, Nz, Nc)
-    cloud_liquid_water_path = DA{FT}(undef, Nz, Nc)
-    cloud_ice_water_path = DA{FT}(undef, Nz, Nc)
-    cloud_fraction = DA{FT}(undef, Nz, Nc)
-    cloud_mask_longwave = DA{Bool}(undef, Nz, Nc)
-    cloud_mask_shortwave = DA{Bool}(undef, Nz, Nc)
+    cloud_liquid_radius = ArrayType{FT}(undef, Nz, Nc)
+    cloud_ice_radius = ArrayType{FT}(undef, Nz, Nc)
+    cloud_liquid_water_path = ArrayType{FT}(undef, Nz, Nc)
+    cloud_ice_water_path = ArrayType{FT}(undef, Nz, Nc)
+    cloud_fraction = ArrayType{FT}(undef, Nz, Nc)
+    cloud_mask_longwave = ArrayType{Bool}(undef, Nz, Nc)
+    cloud_mask_shortwave = ArrayType{Bool}(undef, Nz, Nc)
 
     # Initialize cloud arrays to zero
     fill!(cloud_liquid_radius, zero(FT))
@@ -180,13 +190,13 @@ function AtmosphereModels.RadiativeTransferModel(grid::AbstractGrid,
     atmospheric_state = AtmosphericState(rrtmgp_λ, rrtmgp_φ, rrtmgp_layerdata, rrtmgp_pᶠ, rrtmgp_Tᶠ, rrtmgp_T₀, vmr, cloud_state, nothing)
 
     # Boundary conditions (bandwise emissivity/albedo; incident fluxes are unused here)
-    cos_zenith = DA{FT}(undef, Nc)
-    rrtmgp_ℐ₀ = DA{FT}(undef, Nc)
+    cos_zenith = ArrayType{FT}(undef, Nc)
+    rrtmgp_ℐ₀ = ArrayType{FT}(undef, Nc)
     rrtmgp_ℐ₀ .= convert(FT, solar_constant)
 
-    rrtmgp_ε₀ = DA{FT}(undef, nbnd_lw, Nc)
-    rrtmgp_αb₀ = DA{FT}(undef, nbnd_sw, Nc)
-    rrtmgp_αw₀ = DA{FT}(undef, nbnd_sw, Nc)
+    rrtmgp_ε₀ = ArrayType{FT}(undef, Nband_lw, Nc)
+    rrtmgp_αb₀ = ArrayType{FT}(undef, Nband_sw, Nc)
+    rrtmgp_αw₀ = ArrayType{FT}(undef, Nband_sw, Nc)
 
     if surface_emissivity isa Number
         surface_emissivity = ConstantField(convert(FT, surface_emissivity))
@@ -217,6 +227,7 @@ function AtmosphereModels.RadiativeTransferModel(grid::AbstractGrid,
     upwelling_longwave_flux = ZFaceField(grid)
     downwelling_longwave_flux = ZFaceField(grid)
     downwelling_shortwave_flux = ZFaceField(grid)
+    flux_divergence = CenterField(grid)
 
     surface_properties = SurfaceRadiativeProperties(surface_temperature,
                                                     surface_emissivity,
@@ -243,8 +254,10 @@ function AtmosphereModels.RadiativeTransferModel(grid::AbstractGrid,
                                   upwelling_longwave_flux,
                                   downwelling_longwave_flux,
                                   downwelling_shortwave_flux,
+                                  flux_divergence,
                                   liquid_eff_radius,
-                                  ice_eff_radius)
+                                  ice_eff_radius,
+                                  schedule)
 end
 
 #####
@@ -256,7 +269,7 @@ $(TYPEDSIGNATURES)
 
 Update the all-sky (gas + cloud) full-spectrum radiative fluxes from the current model state.
 """
-function AtmosphereModels.update_radiation!(rtm::AllSkyRadiativeTransferModel, model)
+function AtmosphereModels._update_radiation!(rtm::AllSkyRadiativeTransferModel, model)
     grid = model.grid
     clock = model.clock
     solver = rtm.longwave_solver
@@ -283,6 +296,10 @@ function AtmosphereModels.update_radiation!(rtm::AllSkyRadiativeTransferModel, m
     update_sw_fluxes!(solver)
 
     copy_rrtmgp_fluxes_to_fields!(rtm, solver, grid)
+
+    # Compute radiation flux divergence
+    compute_radiation_flux_divergence!(rtm, grid)
+
     return nothing
 end
 
@@ -310,7 +327,7 @@ end
                                              liquid_effective_radius, ice_effective_radius)
     i, j, k = @index(Global, NTuple)
 
-    col = rrtmgp_column_index(i, j, grid.Nx)
+    c = rrtmgp_column_index(i, j, grid.Nx)
 
     FT = eltype(ρᵣ)
     kg_to_g = convert(FT, 1000)
@@ -331,17 +348,18 @@ end
         # Note: cld_path_liq/ice, cld_frac, cld_r_eff_liq/ice are RRTMGP's CloudState field names
         cloud_liquid_water_path = kg_to_g * ρ * qˡ * Δz
         cloud_ice_water_path = kg_to_g * ρ * qⁱ * Δz
-        cloud_state.cld_path_liq[k, col] = cloud_liquid_water_path
-        cloud_state.cld_path_ice[k, col] = cloud_ice_water_path
+        cloud_state.cld_path_liq[k, c] = cloud_liquid_water_path
+        cloud_state.cld_path_ice[k, c] = cloud_ice_water_path
 
         # Binary cloud fraction (1 if any condensate, 0 otherwise)
         has_cloud = (qˡ + qⁱ) > zero(FT)
-        cloud_state.cld_frac[k, col] = ifelse(has_cloud, one(FT), zero(FT))
+        cloud_state.cld_frac[k, c] = ifelse(has_cloud, one(FT), zero(FT))
 
-        # Effective radii in microns
+        # Effective radii (convert from meters to μm for RRTMGP)
+        m_to_μm = convert(FT, 1e6)
         rˡ = cloud_liquid_effective_radius(i, j, k, grid, liquid_effective_radius)
         rⁱ = cloud_ice_effective_radius(i, j, k, grid, ice_effective_radius)
-        cloud_state.cld_r_eff_liq[k, col] = rˡ
-        cloud_state.cld_r_eff_ice[k, col] = rⁱ
+        cloud_state.cld_r_eff_liq[k, c] = m_to_μm * rˡ
+        cloud_state.cld_r_eff_ice[k, c] = m_to_μm * rⁱ
     end
 end
