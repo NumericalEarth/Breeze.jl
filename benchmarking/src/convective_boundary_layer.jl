@@ -14,11 +14,13 @@ using Oceananigans.Units
 using Oceananigans.TurbulenceClosures: SmagorinskyLilly
 
 using Breeze
+using Breeze: CompressibleDynamics
 
 """
     convective_boundary_layer(arch = CPU();
                               float_type = Float64,
                               Nx = 64, Ny = 64, Nz = 64,
+                              dynamics = nothing,
                               advection = WENO(order=5),
                               closure = SmagorinskyLilly())
 
@@ -31,6 +33,8 @@ from [Sauer and Munoz-Esparza (2020)](@cite Sauer2020fasteddy), Section 4.2.
 # Keyword Arguments
 - `float_type`: Floating point precision (`Float32` or `Float64`)
 - `Nx, Ny, Nz`: Grid resolution
+- `dynamics`: Dynamics formulation. `nothing` defaults to `AnelasticDynamics`.
+  Pass a `CompressibleDynamics` instance for compressible formulations.
 - `advection`: Advection scheme (default: `WENO(order=5)`)
 - `closure`: Turbulence closure (default: `SmagorinskyLilly()`)
 
@@ -46,6 +50,7 @@ from [Sauer and Munoz-Esparza (2020)](@cite Sauer2020fasteddy), Section 4.2.
 function convective_boundary_layer(arch = CPU();
                                    float_type = Float64,
                                    Nx = 64, Ny = 64, Nz = 64,
+                                   dynamics = nothing,
                                    advection = WENO(order=5),
                                    closure = SmagorinskyLilly())
 
@@ -73,12 +78,23 @@ function convective_boundary_layer(arch = CPU();
     θ₀ = 309     # K
 
     constants = ThermodynamicConstants()
-    reference_state = ReferenceState(grid, constants;
-        surface_pressure = p₀,
-        potential_temperature = θ₀
-    )
 
-    dynamics = AnelasticDynamics(reference_state)
+    # Build dynamics formulation
+    if isnothing(dynamics)
+        # Default: anelastic dynamics with reference state
+        reference_state = ReferenceState(grid, constants;
+            surface_pressure = p₀,
+            potential_temperature = θ₀
+        )
+        dynamics = AnelasticDynamics(reference_state)
+    elseif dynamics isa CompressibleDynamics
+        # CompressibleDynamics is passed in pre-constructed;
+        # set reference_potential_temperature for acoustic substepping if not already set
+        dynamics = CompressibleDynamics(dynamics.time_discretization;
+            surface_pressure = p₀,
+            reference_potential_temperature = θ₀
+        )
+    end
 
     # Coriolis parameter for latitude 33.5° N
     # f = 2Ω sin(φ) where Ω = 7.2921 × 10⁻⁵ s⁻¹

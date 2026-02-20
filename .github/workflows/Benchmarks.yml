@@ -23,13 +23,26 @@ env:
 
 jobs:
   run-benchmarks:
-    name: "Run benchmarks"
+    name: "Run benchmarks - dynamics ${{ matrix.dynamics }} - microphysics ${{ matrix.microphysics }} - grid ${{ matrix.grid }}"
     permissions:
       actions: write
       contents: write
       pull-requests: read
       statuses: write
     runs-on: aws-linux-nvidia-gpu-l4
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - dynamics: 'anelastic'
+            microphysics: 'nothing'
+            grid: '128^3, 512x512x256, 768x768x256'
+          - dynamics: 'compressible_splitexplicit'
+            microphysics: 'nothing'
+            grid: '512x512x256'
+          - dynamics: 'anelastic'
+            microphysics: 'MixedPhaseEquilibrium, 1M_MixedEquilibrium, 1M_MixedNonEquilibrium'
+            grid: '512x512x256'
     defaults:
       run:
         shell: bash
@@ -47,14 +60,22 @@ jobs:
           Pkg.instantiate()
       - name: Run benchmarks
         timeout-minutes: 45
-        run:
+        run: |
           earlyoom -m 3 -s 100 -r 300 --prefer 'julia' &
-          julia --color=yes --project run_benchmarks.jl --device GPU --size "128^3, 384x384x256, 768x768x256"
+          ARGS=()
+          if [[ -n "${{ matrix.dynamics }}" ]]; then
+              ARGS+=(--dynamics "${{ matrix.dynamics }}")
+          fi
+          if [[ -n "${{ matrix.microphysics }}" ]]; then
+              ARGS+=(--microphysics "${{ matrix.microphysics }}")
+          fi
+          julia --color=yes --project run_benchmarks.jl --device GPU "${ARGS[@]}" --size "${{ matrix.grid }}"
       - uses: actions/upload-artifact@v6
         with:
-          name: benchmarks-results
+          name: 'benchmarks-dynamics_${{ matrix.dynamics }}-microphysics_${{ matrix.microphysics }}-grid_${{ matrix.grid }}'
           path: benchmarking/benchmark_results.*
           retention-days: 90
+          overwrite: false
       - name: Create job summary
         timeout-minutes: 1
         run:
@@ -72,23 +93,68 @@ jobs:
     timeout-minutes: 10
     steps:
       - uses: actions/download-artifact@v7
-      - name: Create JSON for github-action-benchmark
+        with:
+          pattern: benchmarks-*
+      - name: Merge results and create JSON for github-action-benchmark
         shell: python
         run: |
-          # This step creates a new JSON file to be digested by the
-          # `benchmark-action/github-action-benchmark` workflow.
-          import json
+          # Merge benchmark_results.json from all artifact directories,
+          # then create the JSON file for github-action-benchmark.
+          import json, glob
 
-          with open('benchmark_results.json', 'r') as file:
-              orig_data = json.load(file)
+          all_data = []
+          for path in sorted(glob.glob('benchmarks-*/benchmark_results.json')):
+              with open(path) as f:
+                  all_data.extend(json.load(f))
 
+          # Write merged results for archival
+          with open('benchmark_results.json', 'w') as f:
+              json.dump(all_data, f, indent=2)
+
+          # Build github-action-benchmark entries
+          # Name format: <name>/<properties>/<gpu>/<grid_size>
           data = []
-          for d in orig_data:
-              orig_name = d['name'].split('_')
-              name = orig_name[0] + '_' + orig_name[2] + '/' + orig_name[3] + '/' + d['metadata']['gpu_name'] + '/' + orig_name[1]
-              data.append({'name': name, 'unit': 'points/s', 'value': d['grid_points_per_second']})
+          for d in all_data:
+              name_parts = d['name'].split(';')
+              base_name = name_parts[0]
+              advection = [p for p in name_parts if p.startswith('advection:')][0].split(':')[1]
+              # Closure is unused for the time being because it's always the
+              # same everywhere in the current setup.
+              closure = [p for p in name_parts if p.startswith('closure:')][0].split(':')[1]
+              dynamics = [p for p in name_parts if p.startswith('dynamics:')][0].split(':')[1]
+              ft = [p for p in name_parts if p.startswith('float-type:')][0].split(':')[1]
+              microphysics = [p for p in name_parts if p.startswith('microphysics:')][0].split(':')[1]
 
-          with open("github-action-benchmark.json", "w") as f:
+              gpu = d['metadata']['gpu_name']
+
+              grid = d['grid_size']
+              grid_str = f"{grid[0]}x{grid[1]}x{grid[2]}"
+
+              # We want to group benchmarks in two different ways: with the anelastic
+              # dynamics, group all the 512x512x256 grids together, so that you can
+              # compare the different microphysics.  Otherwise, if there's no microphysics
+              # group together same dynamics _and_ microphysics.  NOTE: yes, same
+              # benchmark may appear twice in both groups
+              if dynamics == 'anelastic' and grid_str == '512x512x256':
+                  level_1 = f'{base_name}; Dynamics: {dynamics}; Grid: {grid_str} [{ft}]'
+                  level_2 = f'Advection: {advection}'
+                  level_3 = f'{gpu}'
+                  level_4 = f'{microphysics}'
+
+                  name = f"{level_1}/{level_2}/{level_3}/{level_4}"
+                  data.append({'name': name, 'unit': 'points/s', 'value': d['grid_points_per_second']})
+                  pass
+
+              if microphysics == 'nothing':
+                  level_1 = f'{base_name}; Dynamics: {dynamics}; Microphysics: {microphysics} [{ft}]'
+                  level_2 = f'Advection: {advection}'
+                  level_3 = f'{gpu}'
+                  level_4 = f'{grid_str}'
+
+                  name = f"{level_1}/{level_2}/{level_3}/{level_4}"
+                  data.append({'name': name, 'unit': 'points/s', 'value': d['grid_points_per_second']})
+
+          with open('github-action-benchmark.json', 'w') as f:
               json.dump(data, f)
       - uses: actions/create-github-app-token@v2
         if: ${{ ! github.event.pull_request.head.repo.fork }}
@@ -106,12 +172,12 @@ jobs:
           git clone https://numterra-bot:${{ steps.generate_token.outputs.token }}@github.com/NumericalEarth/BreezeBenchmarks.git
           cd BreezeBenchmarks
           DIRNAME="benchmarks/by_branch/${{ github.head_ref || github.ref_name }}/${{ github.sha }}"
-          mkdir -p "${DIRNAME}"
-          cp -v ../benchmark_results.json "${DIRNAME}/."
+          mkdir -vp "${DIRNAME}"
+          cp -rv ../benchmarks-* "${DIRNAME}/."
           git config --global user.name "numterra-bot[bot]"
           git config --global user.email "242463128+numterra-bot[bot]@users.noreply.github.com"
           git add .
-          git commit -m'Save benchmark results for commit ${{ github.ref }}'
+          git commit -m'Save benchmark results for commit ${{ github.sha }}'
           git push -u origin main
       - uses: benchmark-action/github-action-benchmark@v1
         with:
