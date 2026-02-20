@@ -18,8 +18,8 @@ using Oceananigans: AbstractModel
 using Oceananigans.TimeSteppers: TimeSteppers as OceananigansTimeSteppers,
                                  update_state!
 
-# TODO: move maybe_initialize_state! to Oceananigans
-# (see https://github.com/CliMA/Oceananigans.jl/issues/5300)
+# TODO: import maybe_initialize_state! from Oceananigans once
+# https://github.com/CliMA/Oceananigans.jl/pull/XXXX merges.
 
 """
     $(TYPEDSIGNATURES)

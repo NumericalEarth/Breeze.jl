@@ -4,13 +4,14 @@ using Oceananigans: AbstractModel, prognostic_fields, fields
 using Oceananigans.TimeSteppers:
     AbstractTimeStepper,
     tick!,
+    tick_stage!,
     update_state!,
     compute_flux_bc_tendencies!,
     step_lagrangian_particles!,
     implicit_step!
 
 using Breeze.AtmosphereModels: compute_pressure_correction!, make_pressure_correction!
-using Oceananigans.Utils: launch!, time_difference_seconds
+using Oceananigans.Utils: launch!
 
 """
 $(TYPEDEF)
@@ -201,7 +202,7 @@ function OceananigansTimeSteppers.time_step!(model::AbstractModel{<:SSPRungeKutt
     compute_pressure_correction!(model, Δt)
     make_pressure_correction!(model, Δt)
 
-    tick!(model.clock, Δt; stage=true)
+    tick_stage!(model.clock, Δt)
     update_state!(model, callbacks; compute_tendencies = true)
     step_lagrangian_particles!(model, Δt)
 
@@ -229,11 +230,10 @@ function OceananigansTimeSteppers.time_step!(model::AbstractModel{<:SSPRungeKutt
     compute_pressure_correction!(model, α³ * Δt)
     make_pressure_correction!(model, α³ * Δt)
 
-    # Adjust final time-step to reduce floating point error accumulation
-    corrected_Δt = time_difference_seconds(tⁿ⁺¹, model.clock.time)
-    tick!(model.clock, corrected_Δt)
-    model.clock.last_stage_Δt = corrected_Δt
-    model.clock.last_Δt = Δt
+    # Correct the clock time to the pre-computed tⁿ⁺¹ to reduce floating
+    # point error accumulation.
+    corrected_Δt = tⁿ⁺¹ - model.clock.time
+    tick_stage!(model.clock, corrected_Δt, Δt)
 
     update_state!(model, callbacks; compute_tendencies = true)
     step_lagrangian_particles!(model, α³ * Δt)
