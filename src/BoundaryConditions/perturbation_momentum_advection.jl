@@ -48,8 +48,7 @@ $(TYPEDSIGNATURES)
 
 Construct a `PerturbationMomentumAdvection` scheme for use with `OpenBoundaryCondition`.
 
-Keyword Arguments
-=================
+# Keyword Arguments
 
 - `density` (required): density field for converting density-weighted fields to intensive units.
   For anelastic dynamics, use `reference_state.density`.
@@ -58,8 +57,7 @@ Keyword Arguments
 - `inflow_timescale`: relaxation timescale when flow enters the domain [s]. Default: 0 (Dirichlet).
 - `outflow_timescale`: relaxation timescale when flow exits the domain [s]. Default: Inf (pure radiation).
 
-Example
-=======
+# Example
 
 ```julia
 reference_state = model.dynamics.reference_state
