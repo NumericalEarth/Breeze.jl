@@ -502,6 +502,7 @@ function compute_parcel_tendencies!(model::ParcelModel)
     tendencies = dynamics.timestepper.G
     microphysics = model.microphysics
     constants = model.thermodynamic_constants
+    clock = model.clock
 
     z = state.z
     ρ = state.ρ
@@ -520,11 +521,11 @@ function compute_parcel_tendencies!(model::ParcelModel)
 
     # Thermodynamic and moisture tendencies from microphysics (specific, not density-weighted)
     # For adiabatic (no microphysics): both are zero, giving exact conservation
-    tendencies.Ge = microphysical_tendency(microphysics, Val(:e), ρ, ℳ, 𝒰, constants)
-    tendencies.Gqᵗ = microphysical_tendency(microphysics, Val(:qᵗ), ρ, ℳ, 𝒰, constants)
+    tendencies.Ge = microphysical_tendency(microphysics, Val(:e), ρ, ℳ, 𝒰, constants, clock)
+    tendencies.Gqᵗ = microphysical_tendency(microphysics, Val(:qᵗ), ρ, ℳ, 𝒰, constants, clock)
 
     # Microphysics prognostic tendencies (scheme-dependent)
-    tendencies.Gμ = compute_microphysics_prognostic_tendencies(microphysics, ρ, μ, ℳ, 𝒰, constants)
+    tendencies.Gμ = compute_microphysics_prognostic_tendencies(microphysics, ρ, μ, ℳ, 𝒰, constants, clock)
 
     return nothing
 end
@@ -537,17 +538,17 @@ end
 
 # Compute tendencies for microphysics prognostic variables
 # Fallback: return nothing for schemes without prognostic microphysics
-compute_microphysics_prognostic_tendencies(microphysics, ρ, μ::Nothing, ℳ, 𝒰, constants) = nothing
-compute_microphysics_prognostic_tendencies(::Nothing, ρ, μ, ℳ, 𝒰, constants) = μ
-compute_microphysics_prognostic_tendencies(::Nothing, ρ, μ::Nothing, ℳ, 𝒰, constants) = nothing
+compute_microphysics_prognostic_tendencies(microphysics, ρ, μ::Nothing, ℳ, 𝒰, constants, clock) = nothing
+compute_microphysics_prognostic_tendencies(::Nothing, ρ, μ, ℳ, 𝒰, constants, clock) = μ
+compute_microphysics_prognostic_tendencies(::Nothing, ρ, μ::Nothing, ℳ, 𝒰, constants, clock) = nothing
 # Disambiguation for Nothing microphysics + NamedTuple
-compute_microphysics_prognostic_tendencies(::Nothing, ρ, μ::NamedTuple, ℳ, 𝒰, constants) = μ
+compute_microphysics_prognostic_tendencies(::Nothing, ρ, μ::NamedTuple, ℳ, 𝒰, constants, clock) = μ
 
 # For NamedTuple prognostics, compute tendencies for each field via microphysical_tendency
-function compute_microphysics_prognostic_tendencies(microphysics, ρ, μ::NamedTuple, ℳ, 𝒰, constants)
+function compute_microphysics_prognostic_tendencies(microphysics, ρ, μ::NamedTuple, ℳ, 𝒰, constants, clock)
     prog_names = AtmosphereModels.prognostic_field_names(microphysics)
     tendencies = map(prog_names) do name
-        microphysical_tendency(microphysics, Val(name), ρ, ℳ, 𝒰, constants)
+        microphysical_tendency(microphysics, Val(name), ρ, ℳ, 𝒰, constants, clock)
     end
     return NamedTuple{keys(μ)}(tendencies)
 end

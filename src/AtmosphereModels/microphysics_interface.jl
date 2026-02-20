@@ -8,7 +8,7 @@
 #
 # The workflow is:
 #   ℳ = grid_microphysical_state(i, j, k, grid, microphysics, fields, ρ, 𝒰)
-#   tendency = microphysical_tendency(microphysics, name, ρ, ℳ, 𝒰, constants)
+#   tendency = microphysical_tendency(microphysics, name, ρ, ℳ, 𝒰, constants, clock)
 #
 # The grid-indexed interface provides a default fallback that builds ℳ and dispatches
 # to the state-based tendency. Schemes needing full grid access can override directly.
@@ -192,7 +192,7 @@ end
     NothingMicrophysicalState(eltype(grid))
 
 """
-    microphysical_tendency(microphysics, name, ρ, ℳ, 𝒰, constants)
+    microphysical_tendency(microphysics, name, ρ, ℳ, 𝒰, constants, clock)
 
 Compute the tendency for microphysical variable `name` from the microphysical
 state `ℳ` and thermodynamic state `𝒰`.
@@ -207,20 +207,21 @@ without grid indexing. It works identically for grid-based LES and parcel models
 - `ℳ`: Microphysical state (e.g., `WarmPhaseOneMomentState`)
 - `𝒰`: Thermodynamic state
 - `constants`: Thermodynamic constants
+- `clock`: The simulation clock (provides `clock.last_Δt` for tendency limiting)
 
 # Returns
 The tendency value (scalar, units depend on variable).
 
 See also [`microphysical_state`](@ref), [`AbstractMicrophysicalState`](@ref).
 """
-@inline microphysical_tendency(microphysics::Nothing, name, ρ, ℳ, 𝒰, constants) = zero(ρ)
+@inline microphysical_tendency(microphysics::Nothing, name, ρ, ℳ, 𝒰, constants, clock) = zero(ρ)
 
 #####
 ##### Grid-indexed tendency interface (default fallback)
 #####
 
 """
-    grid_microphysical_tendency(i, j, k, grid, microphysics, name, ρ, fields, 𝒰, constants, velocities)
+    grid_microphysical_tendency(i, j, k, grid, microphysics, name, ρ, fields, 𝒰, constants, velocities, clock)
 
 Compute the tendency for microphysical variable `name` at grid point `(i, j, k)`.
 
@@ -233,14 +234,15 @@ this method directly without using `microphysical_state`.
 
 # Arguments
 - `velocities`: NamedTuple of velocity components `(; u, v, w)` [m/s].
+- `clock`: The simulation clock (provides `clock.last_Δt` for tendency limiting).
 """
-@inline function grid_microphysical_tendency(i, j, k, grid, microphysics, name, ρ, fields, 𝒰, constants, velocities)
+@inline function grid_microphysical_tendency(i, j, k, grid, microphysics, name, ρ, fields, 𝒰, constants, velocities, clock)
     ℳ = grid_microphysical_state(i, j, k, grid, microphysics, fields, ρ, 𝒰, velocities)
-    return microphysical_tendency(microphysics, name, ρ, ℳ, 𝒰, constants)
+    return microphysical_tendency(microphysics, name, ρ, ℳ, 𝒰, constants, clock)
 end
 
-# Explicit Nothing fallback (for backward compatibility)
-@inline grid_microphysical_tendency(i, j, k, grid, microphysics::Nothing, name, ρ, μ, 𝒰, constants, velocities) = zero(grid)
+# Explicit Nothing fallback
+@inline grid_microphysical_tendency(i, j, k, grid, microphysics::Nothing, name, ρ, μ, 𝒰, constants, velocities, clock) = zero(grid)
 
 #####
 ##### Definition of the microphysics interface, with methods for "Nothing" microphysics

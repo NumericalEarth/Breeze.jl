@@ -140,7 +140,7 @@ end
 
 # State-based tendency (used by parcel models)
 # SaturationAdjustment operates through thermodynamic state adjustment, so explicit tendencies are zero
-@inline AtmosphereModels.microphysical_tendency(::SA, name, ρ, ℳ, 𝒰, constants) = zero(ρ)
+@inline AtmosphereModels.microphysical_tendency(::SA, name, ρ, ℳ, 𝒰, constants, clock) = zero(ρ)
 
 #####
 ##### Saturation adjustment utilities
