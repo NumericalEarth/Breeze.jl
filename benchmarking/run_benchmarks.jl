@@ -318,14 +318,15 @@ function run_benchmarks(args)
         microphysics = make_microphysics(micro_name, FT)
 
         # Create model based on configuration
-        if configuration == "convective_boundary_layer"
-            model = convective_boundary_layer(arch;
-                Nx, Ny, Nz,
-                float_type = FT,
-                dynamics,
-                advection = isnothing(advection) ? WENO(FT; order=5) : advection,
-                closure = closure
-            )
+        model = if configuration == "convective_boundary_layer"
+            convective_boundary_layer(arch;
+                                      Nx, Ny, Nz,
+                                      float_type = FT,
+                                      dynamics,
+                                      advection,
+                                      closure,
+                                      microphysics,
+                                      )
         else
             error("Unknown configuration: $configuration")
         end
