@@ -6,6 +6,7 @@ on:
       - main
     paths: &paths
       - ".github/workflows/Benchmarks.yml"
+      - "benchmarking/**"
       - "src/**"
       - "Project.toml"
   pull_request:
