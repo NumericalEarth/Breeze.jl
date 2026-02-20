@@ -110,7 +110,7 @@ jobs:
 
           # Write merged results for archival
           with open('benchmark_results.json', 'w') as f:
-              json.dump(all_data, f, indent=2)
+              json.dump(all_data, f, ensure_ascii=False, indent=2)
 
           # Build github-action-benchmark entries
           # Name format: <name>/<properties>/<gpu>/<grid_size>
