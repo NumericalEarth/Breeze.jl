@@ -745,13 +745,15 @@ Uses the maximum supersaturation to determine which aerosol modes activate.
         Nᵗᵒᵗ += Nᵐᵒᵈᵉ
 
         # Mean hygroscopicity for this mode
-        κ̄ = mean_hygroscopicity(ap, mode)
+        κ̄ = max(eps(FT), mean_hygroscopicity(ap, mode))
 
         # Critical supersaturation for mode (Eq. 9 in ARG 2000)
-        Sᶜʳⁱᵗ = 2 / sqrt(κ̄) * (A / 3 / mode.r_dry)^(3/2)
+        # Guard against negative base for fractional power
+        Sᶜʳⁱᵗ = 2 / sqrt(κ̄) * max(zero(FT), A / 3 / mode.r_dry)^(3/2)
 
         # Activated fraction for this mode (Eq. 7 in ARG 2000)
-        ϕ = 2 * log(Sᶜʳⁱᵗ / Sᵐᵃˣ) / 3 / sqrt(2) / log(mode.stdev)
+        # Guard against log(0) or log(negative) when Sᵐᵃˣ ≈ 0
+        ϕ = 2 * log(max(eps(FT), Sᶜʳⁱᵗ) / max(eps(FT), Sᵐᵃˣ)) / 3 / sqrt(2) / log(mode.stdev)
         fᵃᶜᵗ = (1 - erf(ϕ)) / 2
 
         Nᵃᶜᵗ += fᵃᶜᵗ * Nᵐᵒᵈᵉ
