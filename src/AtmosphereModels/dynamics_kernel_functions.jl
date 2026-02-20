@@ -132,11 +132,11 @@ end
     Uᵗ = sum_of_velocities(velocities, Uᵖ)
     ρ_field = dynamics_density(dynamics)
     @inbounds ρ = ρ_field[i, j, k]
-    @inbounds qᵗ = specific_moisture[i, j, k]
+    @inbounds qᵛ = specific_moisture[i, j, k]
     closure_buoyancy = AtmosphereModelBuoyancy(dynamics, formulation, constants)
 
     # Compute moisture fractions first
-    q = grid_moisture_fractions(i, j, k, grid, microphysics, ρ, qᵗ, microphysical_fields)
+    q = grid_moisture_fractions(i, j, k, grid, microphysics, ρ, qᵛ, microphysical_fields)
     𝒰 = diagnose_thermodynamic_state(i, j, k, grid, formulation, dynamics, q)
 
     return ( - div_ρUc(i, j, k, grid, advection, ρ_field, Uᵗ, c)

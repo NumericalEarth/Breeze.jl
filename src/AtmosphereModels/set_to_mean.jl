@@ -18,7 +18,7 @@ function set_to_mean!(ref::ReferenceState, model)
     mean!(ref.temperature, model.temperature)
     fill_halo_regions!(ref.temperature)
 
-    mean_mass_fraction!(ref.vapor_mass_fraction, vapor_mass_fraction(model))
+    mean_mass_fraction!(ref.vapor_mass_fraction, specific_humidity(model))
     mean_mass_fraction!(ref.liquid_mass_fraction, liquid_mass_fraction(model))
     mean_mass_fraction!(ref.ice_mass_fraction, ice_mass_fraction(model))
 

@@ -207,7 +207,7 @@ add_callback!(moist_simulation, progress_moist, TimeInterval(3minutes))
 
 θ = liquid_ice_potential_temperature(moist_model)
 u, v, w = moist_model.velocities
-qᵗ = moist_model.specific_moisture
+qᵗ = specific_humidity(moist_model)
 qˡ = moist_model.microphysical_fields.qˡ
 qˡ′ = qˡ - Field(Average(qˡ, dims=1))
 moist_outputs = (; θ, w, qˡ′)

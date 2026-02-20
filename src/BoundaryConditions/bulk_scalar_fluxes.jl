@@ -68,8 +68,8 @@ end
 @inline function bulk_sensible_heat_difference(i, j, grid, ::StaticEnergyFlux, T₀, constants, fields)
     cᵖᵈ = constants.dry_air.heat_capacity
     cᵖᵛ = constants.vapor.heat_capacity
-    qᵗ = @inbounds fields.qᵗ[i, j, 1]
-    cᵖᵐ = (1 - qᵗ) * cᵖᵈ + qᵗ * cᵖᵛ  # no condensate at the surface
+    qᵛ = @inbounds fields.qᵛ[i, j, 1]
+    cᵖᵐ = (1 - qᵛ) * cᵖᵈ + qᵛ * cᵖᵛ  # no condensate at the surface
     e₀ = cᵖᵐ * T₀
     e = @inbounds fields.e[i, j, 1]
     return e - e₀
@@ -152,8 +152,8 @@ Base.summary(bf::BulkVaporFluxFunction) =
     ρ₀ = surface_density(p₀, T₀, constants)
     qᵛ₀ = saturation_specific_humidity(T₀, ρ₀, constants, surface)
 
-    qᵗ = @inbounds fields.qᵗ[i, j, 1]
-    Δq = qᵗ - qᵛ₀ # neglecting condensate
+    qᵛ = @inbounds fields.qᵛ[i, j, 1]
+    Δq = qᵛ - qᵛ₀
 
     U² = wind_speed²ᶜᶜᶜ(i, j, grid, fields)
     Ũ = sqrt(U² + bf.gustiness^2)

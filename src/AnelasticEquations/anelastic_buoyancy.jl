@@ -44,7 +44,7 @@ moisture state.
     ref = dynamics.reference_state
 
     @inbounds begin
-        qᵗ = specific_moisture[i, j, k]
+        qᵛ = specific_moisture[i, j, k]
         ρᵣ = ref.density[i, j, k]
         Tᵣ = ref.temperature[i, j, k]
         T = temperature[i, j, k]
@@ -61,7 +61,7 @@ moisture state.
     Rᵐᵣ = mixture_gas_constant(qᵣ, constants)
 
     # Current moisture fractions for Rᵐ
-    q = grid_moisture_fractions(i, j, k, grid, microphysics, ρᵣ, qᵗ, microphysical_fields)
+    q = grid_moisture_fractions(i, j, k, grid, microphysics, ρᵣ, qᵛ, microphysical_fields)
     Rᵐ = mixture_gas_constant(q, constants)
 
     # Perturbation buoyancy: ρ' = ρ - ρᵣ = ρᵣ (Rᵐᵣ Tᵣ / (Rᵐ T) - 1)

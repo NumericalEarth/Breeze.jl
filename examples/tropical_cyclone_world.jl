@@ -231,7 +231,7 @@ add_callback!(simulation, progress, IterationInterval(1000))
 
 # Horizontally-averaged profiles.
 
-qᵗ = model.specific_moisture
+qᵗ = specific_humidity(model)
 ℋ = RelativeHumidity(model)
 
 avg_outputs = (θ = Average(θ, dims=(1, 2)),

@@ -84,7 +84,7 @@ function AtmosphereModels.compute_auxiliary_dynamics_variables!(model::Compressi
             dynamics.density,
             model.formulation,
             dynamics,
-            model.specific_moisture,
+            model.microphysical_fields[moisture_specific_name(model.microphysics)],
             grid,
             model.microphysics,
             model.microphysical_fields,
@@ -104,11 +104,11 @@ end
 
     @inbounds begin
         ρ = density[i, j, k]
-        qᵗ = specific_moisture[i, j, k]
+        qᵛ = specific_moisture[i, j, k]
     end
 
     # Compute moisture fractions
-    q = grid_moisture_fractions(i, j, k, grid, microphysics, ρ, qᵗ, microphysical_fields)
+    q = grid_moisture_fractions(i, j, k, grid, microphysics, ρ, qᵛ, microphysical_fields)
     Rᵐ = mixture_gas_constant(q, constants)
     cᵖᵐ = mixture_heat_capacity(q, constants)
     cᵛᵐ = cᵖᵐ - Rᵐ

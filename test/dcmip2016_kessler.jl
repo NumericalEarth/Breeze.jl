@@ -345,7 +345,7 @@ end
 
     set!(model.dynamics.reference_state.density, reshape(ρ_prof, 1, 1, Nz))
     set!(model.dynamics.reference_state.pressure, reshape(p_prof, 1, 1, Nz))
-    set!(model.moisture_density, reshape(ρ_prof .* qᵗ_init, 1, 1, Nz))
+    set!(model.moisture_density, reshape(ρ_prof .* qᵛ_init, 1, 1, Nz))
     set!(model.microphysical_fields.ρqᶜˡ, reshape(ρ_prof .* qᶜˡ_init, 1, 1, Nz))
     set!(model.microphysical_fields.ρqʳ, reshape(ρ_prof .* qʳ_init, 1, 1, Nz))
 
@@ -367,7 +367,7 @@ end
     # Extract results
     ρqᶜˡ_result = Array(interior(model.microphysical_fields.ρqᶜˡ, 1, 1, :))
     ρqʳ_result = Array(interior(model.microphysical_fields.ρqʳ, 1, 1, :))
-    ρqᵗ_result = Array(interior(model.moisture_density, 1, 1, :))
+    ρqᵛ_result = Array(interior(model.moisture_density, 1, 1, :))
     ρθˡⁱ_result = Array(interior(model.formulation.potential_temperature_density, 1, 1, :))
 
     qᵛ_breeze = zeros(FT, Nz)
@@ -379,7 +379,7 @@ end
         ρ = ρ_prof[k]
         qᶜˡ_breeze[k] = ρqᶜˡ_result[k] / ρ
         qʳ_breeze[k] = ρqʳ_result[k] / ρ
-        qᵛ_breeze[k] = ρqᵗ_result[k] / ρ - qᶜˡ_breeze[k] - qʳ_breeze[k]
+        qᵛ_breeze[k] = ρqᵛ_result[k] / ρ
 
         θˡⁱ_val = ρθˡⁱ_result[k] / ρ
         q = MoistureMassFractions(qᵛ_breeze[k], qᶜˡ_breeze[k] + qʳ_breeze[k])

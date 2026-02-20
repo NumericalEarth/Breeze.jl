@@ -50,7 +50,7 @@ grid = RectilinearGrid(size=(64, 64, 75), x=(0, 6400), y=(0, 6400), z=(0, 3000))
 
 wˢ(z) = z < 1500 ? -0.0065 * z / 1500 : -0.0065 * (1 - (z - 1500) / 600)
 subsidence = SubsidenceForcing(wˢ)
-forcing = (; ρθ=subsidence, ρqᵗ=subsidence)
+forcing = (; ρθ=subsidence, ρqᵛ=subsidence)
 
 model = AtmosphereModel(grid; forcing)
 
@@ -128,7 +128,7 @@ function AtmosphereModels.materialize_atmosphere_model_forcing(forcing::Subsiden
         fill_halo_regions!(wˢ)
     end
 
-    if name ∈ (:ρu, :ρv, :ρw, :ρθ, :ρe, :ρqᵗ)
+    if name ∈ (:ρu, :ρv, :ρw, :ρθ, :ρe, :ρqᵗ, :ρqᵛ, :ρqᵉᵐ)
         specific_name = strip_density_prefix(name)
         specific_field = context.specific_fields[specific_name]
     else

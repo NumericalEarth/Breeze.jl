@@ -17,7 +17,8 @@ using Breeze.AtmosphereModels:
     compute_x_momentum_tendency!,
     compute_y_momentum_tendency!,
     compute_z_momentum_tendency!,
-    compute_dynamics_tendency!
+    compute_dynamics_tendency!,
+    moisture_specific_name
 
 
 using Breeze.CompressibleEquations:
@@ -157,7 +158,7 @@ function compute_slow_momentum_tendencies!(model)
                    slow_dynamics,
                    model.formulation,
                    model.temperature,
-                   model.specific_moisture,
+                   model.microphysical_fields[moisture_specific_name(model.microphysics)],
                    model.microphysics,
                    model.microphysical_fields,
                    model.thermodynamic_constants)
@@ -198,7 +199,7 @@ function compute_slow_scalar_tendencies!(model)
         model.dynamics,
         model.formulation,
         model.thermodynamic_constants,
-        model.specific_moisture,
+        model.microphysical_fields[moisture_specific_name(model.microphysics)],
         model.velocities,
         model.microphysics,
         model.microphysical_fields,

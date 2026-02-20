@@ -290,7 +290,7 @@ qᵛ⁺ = Breeze.Microphysics.SaturationSpecificHumidity(model)
 
 ρu, ρv, ρw = model.momentum
 u, v, w = model.velocities
-qᵗ = model.specific_moisture
+qᵗ = specific_humidity(model)
 
 # ## Surface flux diagnostics
 #
@@ -326,7 +326,7 @@ Jᵛ = BoundaryConditionOperation(ρqᵗ, :bottom, model)
 # helping monitor the simulation's progress and detect any numerical issues.
 
 function progress(sim)
-    qᵗ = sim.model.specific_moisture
+    qᵗ = specific_humidity(sim.model)
     u, v, w = sim.model.velocities
 
     umax = maximum(abs, u)
@@ -361,7 +361,7 @@ add_callback!(simulation, progress, IterationInterval(100))
 # The JLD2 format provides efficient storage with full Julia type preservation.
 
 output_filename = "prescribed_sea_surface_temperature_convection.jld2"
-qᵗ = model.specific_moisture
+qᵗ = specific_humidity(model)
 u, v, w, = model.velocities
 s = sqrt(u^2 + w^2) # speed
 ξ = ∂z(u) - ∂x(w)   # cross-stream vorticity

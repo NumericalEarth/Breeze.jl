@@ -84,7 +84,7 @@ function StaticEnergy(model, flavor_symbol=:specific)
                                       model.dynamics.reference_state,
                                       model.microphysics,
                                       model.microphysical_fields,
-                                      model.specific_moisture,
+                                      model.microphysical_fields[moisture_specific_name(model.microphysics)],
                                       model.temperature,
                                       model.thermodynamic_constants)
 
@@ -94,11 +94,11 @@ end
 function (d::StaticEnergyKernelFunction)(i, j, k, grid)
     @inbounds begin
         ρᵣ = d.reference_state.density[i, j, k]
-        qᵗ = d.specific_moisture[i, j, k]
+        qᵛ = d.specific_moisture[i, j, k]
         T = d.temperature[i, j, k]
     end
 
-    q = grid_moisture_fractions(i, j, k, grid, d.microphysics, ρᵣ, qᵗ, d.microphysical_fields)
+    q = grid_moisture_fractions(i, j, k, grid, d.microphysics, ρᵣ, qᵛ, d.microphysical_fields)
     cᵖᵐ = Thermodynamics.mixture_heat_capacity(q, d.thermodynamic_constants)
 
     g = d.thermodynamic_constants.gravitational_acceleration

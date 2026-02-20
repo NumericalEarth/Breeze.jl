@@ -27,6 +27,8 @@ export
     precipitation_rate,
     surface_precipitation_flux,
     specific_humidity,
+    moisture_prognostic_name,
+    moisture_specific_name,
 
     # Microphysics interface
     AbstractMicrophysicalState,

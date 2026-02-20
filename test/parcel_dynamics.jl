@@ -248,7 +248,7 @@ end
     # This tests that the state-based interface exists for SaturationAdjustment
     # Microphysical sources are zero (SaturationAdjustment operates via state adjustment)
     tendency_e = microphysical_tendency(microphysics, Val(:ρe), ρ_val, ℳ, 𝒰, constants)
-    tendency_qt = microphysical_tendency(microphysics, Val(:ρqᵗ), ρ_val, ℳ, 𝒰, constants)
+    tendency_qt = microphysical_tendency(microphysics, Val(:ρqᵛ), ρ_val, ℳ, 𝒰, constants)
     @test tendency_e == 0.0
     @test tendency_qt == 0.0
 
@@ -288,7 +288,7 @@ end
     # This tests that the state-based interface exists for DCMIP2016Kessler
     # Microphysical sources are zero (operates via microphysics_model_update!)
     tendency_e = microphysical_tendency(microphysics, Val(:ρe), ρ_val, ℳ, 𝒰, constants)
-    tendency_qt = microphysical_tendency(microphysics, Val(:ρqᵗ), ρ_val, ℳ, 𝒰, constants)
+    tendency_qt = microphysical_tendency(microphysics, Val(:ρqᵛ), ρ_val, ℳ, 𝒰, constants)
     @test tendency_e == 0.0
     @test tendency_qt == 0.0
 

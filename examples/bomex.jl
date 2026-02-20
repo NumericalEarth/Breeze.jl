@@ -263,7 +263,7 @@ qᵛ = model.microphysical_fields.qᵛ
 
 function progress(sim)
     qˡmax = maximum(qˡ)
-    qᵗmax = maximum(sim.model.specific_moisture)
+    qᵗmax = maximum(specific_humidity(sim.model))
     wmax = maximum(abs, sim.model.velocities.w)
     msg = @sprintf("Iter: %d, t: % 12s, Δt: %s, max|w|: %.2e m/s, max(qᵗ): %.2e, max(qˡ): %.2e",
                    iteration(sim), prettytime(sim), prettytime(sim.Δt), wmax, qᵗmax, qˡmax)

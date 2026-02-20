@@ -82,7 +82,7 @@ T⁺_field = Field(T⁺)
 function DewpointTemperature(model; tolerance=1e-4, maxiter=10)
     func = DewpointTemperatureKernelFunction(model.microphysics,
                                              model.microphysical_fields,
-                                             model.specific_moisture,
+                                             model.microphysical_fields[moisture_specific_name(model.microphysics)],
                                              model.temperature,
                                              model.dynamics.reference_state,
                                              model.thermodynamic_constants,
@@ -100,7 +100,7 @@ function (d::DewpointTemperatureKernelFunction)(i, j, k, grid)
     @inbounds begin
         pᵣ = d.reference_state.pressure[i, j, k]
         ρᵣ = d.reference_state.density[i, j, k]
-        qᵗ = d.specific_moisture[i, j, k]
+        qᵛ = d.specific_moisture[i, j, k]
         T = d.temperature[i, j, k]
     end
 
@@ -109,7 +109,7 @@ function (d::DewpointTemperatureKernelFunction)(i, j, k, grid)
     surface = equilibrated_surface(equilibrium, T)
 
     # Get vapor specific humidity from microphysics partition
-    q = grid_moisture_fractions(i, j, k, grid, d.microphysics, ρᵣ, qᵗ, d.microphysical_fields)
+    q = grid_moisture_fractions(i, j, k, grid, d.microphysics, ρᵣ, qᵛ, d.microphysical_fields)
     qᵛ = q.vapor
 
     # Compute density and vapor pressure

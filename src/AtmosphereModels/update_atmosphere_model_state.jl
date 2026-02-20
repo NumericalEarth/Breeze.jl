@@ -138,7 +138,7 @@ function compute_momentum_tendencies!(model::AtmosphereModel, model_fields)
                    model.dynamics,
                    model.formulation,
                    model.temperature,
-                   model.specific_moisture,
+                   model.microphysical_fields[moisture_specific_name(model.microphysics)],
                    model.microphysics,
                    model.microphysical_fields,
                    model.thermodynamic_constants)
@@ -187,7 +187,7 @@ function compute_auxiliary_thermodynamic_variables!(model::AtmosphereModel)
     launch!(arch, grid, :xyz,
             _compute_auxiliary_thermodynamic_variables!,
             model.temperature,
-            model.specific_moisture,
+            model.microphysical_fields[moisture_specific_name(model.microphysics)],
             model.formulation,
             model.dynamics,
             grid,
@@ -197,7 +197,6 @@ function compute_auxiliary_thermodynamic_variables!(model::AtmosphereModel)
             model.moisture_density)
 
     fill_halo_regions!(model.temperature)
-    fill_halo_regions!(model.specific_moisture)
     fill_halo_regions!(model.microphysical_fields)
     fill_halo_regions!(model.formulation)
 
@@ -240,19 +239,19 @@ end
     ρ_field = dynamics_density(dynamics)
     @inbounds begin
         ρ = ρ_field[i, j, k]
-        ρqᵗ = moisture_density[i, j, k]
-        qᵗ = ρqᵗ / ρ
-        specific_moisture[i, j, k] = qᵗ
+        ρqᵛ = moisture_density[i, j, k]
+        qᵛ = ρqᵛ / ρ
+        specific_moisture[i, j, k] = qᵛ
     end
 
     # Compute moisture fractions first (needed by diagnose_thermodynamic_state)
-    q = grid_moisture_fractions(i, j, k, grid, microphysics, ρ, qᵗ, microphysical_fields)
+    q = grid_moisture_fractions(i, j, k, grid, microphysics, ρ, qᵛ, microphysical_fields)
 
     𝒰₀ = diagnose_thermodynamic_state(i, j, k, grid, formulation, dynamics, q)
 
     # Adjust the thermodynamic state if using a microphysics scheme
     # that invokes saturation adjustment
-    𝒰₁ = maybe_adjust_thermodynamic_state(𝒰₀, microphysics, qᵗ, constants)
+    𝒰₁ = maybe_adjust_thermodynamic_state(𝒰₀, microphysics, qᵛ, constants)
 
     update_microphysical_fields!(microphysical_fields, i, j, k, grid,
                                  microphysics, ρ, 𝒰₁, constants)
@@ -278,7 +277,7 @@ function compute_tendencies!(model::AtmosphereModel)
         model.dynamics,
         model.formulation,
         model.thermodynamic_constants,
-        model.specific_moisture,
+        model.microphysical_fields[moisture_specific_name(model.microphysics)],
         model.velocities,
         model.microphysics,
         model.microphysical_fields,
@@ -297,16 +296,17 @@ function compute_tendencies!(model::AtmosphereModel)
     ##### Moisture density tendency
     #####
 
+    moist_name = moisture_prognostic_name(model.microphysics)
     ρq_args = (
-        model.specific_moisture,
+        model.microphysical_fields[moisture_specific_name(model.microphysics)],
         Val(2),
-        Val(:ρqᵗ),
-        model.forcing.ρqᵗ,
-        model.advection.ρqᵗ,
+        Val(moist_name),
+        model.forcing[moist_name],
+        model.advection[moist_name],
         common_args...)
 
-    Gρqᵗ = model.timestepper.Gⁿ.ρqᵗ
-    launch!(arch, grid, :xyz, compute_scalar_tendency!, Gρqᵗ, grid, ρq_args)
+    Gρqₘ = getproperty(model.timestepper.Gⁿ, moist_name)
+    launch!(arch, grid, :xyz, compute_scalar_tendency!, Gρqₘ, grid, ρq_args)
 
     #####
     ##### Tracer density tendencies
