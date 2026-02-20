@@ -15,7 +15,7 @@
   <a href="https://numericalearth.github.io/BreezeDocumentation/dev/">
     <img alt="Documentation" src="https://img.shields.io/badge/documentation-in%20development-orange?style=flat-square">
   </a>
-  <a href="https://github.com/NumericalEarth/BreezeBenchmarks">
+  <a href="https://numericalearth.github.io/BreezeBenchmarks/">
     <img alt="Benchmarks" src="https://img.shields.io/badge/benchmarks-BreezeBenchmarks-informational?style=flat-square">
   </a>
   </br>

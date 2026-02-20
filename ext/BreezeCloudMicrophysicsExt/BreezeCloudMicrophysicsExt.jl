@@ -22,7 +22,6 @@ using CloudMicrophysics.Microphysics1M:
 # Two-moment microphysics
 using CloudMicrophysics: Microphysics2M as CM2
 
-using Breeze
 using Breeze.AtmosphereModels: AtmosphereModels,
     materialize_microphysical_fields,
     update_microphysical_fields!,
