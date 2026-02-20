@@ -27,7 +27,7 @@ function validate_tracers(tracers::Tuple)
 end
 
 mutable struct AtmosphereModel{Dyn, Frm, Arc, Tst, Grd, Clk, Thm, Mom, Moi, Mfr, Buy,
-                               Tmp, Sol, Vel, Trc, Adv, Cor, Frc, Mic, Cnd, Cls, Cfs, Rad} <: AbstractModel{Tst, Arc}
+                               Tmp, Sol, Vel, Trc, Adv, Cor, Frc, Mic, Cnd, Cls, Cfs, Rad, Bmf} <: AbstractModel{Tst, Arc}
     architecture :: Arc
     grid :: Grd
     clock :: Clk
@@ -51,6 +51,7 @@ mutable struct AtmosphereModel{Dyn, Frm, Arc, Tst, Grd, Clk, Thm, Mom, Moi, Mfr,
     closure :: Cls
     closure_fields :: Cfs
     radiation :: Rad
+    boundary_mass_fluxes :: Bmf
 end
 
 """
@@ -246,6 +247,9 @@ function AtmosphereModel(grid;
     advection = merge(momentum_advection_tuple, scalar_advection_tuple)
     advection = NamedTuple(name => adapt_advection_order(scheme, grid) for (name, scheme) in pairs(advection))
 
+    # Initialize boundary mass fluxes for open boundary mass conservation
+    boundary_mass_fluxes = initialize_boundary_mass_fluxes(momentum)
+
     model = AtmosphereModel(arch,
                             grid,
                             clock,
@@ -268,7 +272,8 @@ function AtmosphereModel(grid;
                             timestepper,
                             closure,
                             closure_fields,
-                            radiation)
+                            radiation,
+                            boundary_mass_fluxes)
 
     # Initialize thermodynamics (dynamics-specific)
     initialize_model_thermodynamics!(model)

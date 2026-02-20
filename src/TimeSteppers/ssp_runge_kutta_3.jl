@@ -191,6 +191,11 @@ function OceananigansTimeSteppers.time_step!(model::AbstractModel{<:SSPRungeKutt
     # Store u^(0) for use in stages 2 and 3
     store_initial_state!(model)
 
+    # Set last_stage_Δt before the first pressure correction so that
+    # PerturbationAdvection open boundary conditions use the correct Δt
+    # (on the first time step, last_stage_Δt starts as Inf which makes PMA a no-op)
+    model.clock.last_stage_Δt = Δt
+
     #
     # First stage: u^(1) = u^(0) + Δt * L(u^(0))
     #

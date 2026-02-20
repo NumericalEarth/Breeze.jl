@@ -20,7 +20,8 @@ using KernelAbstractions: @kernel, @index
 
 using Oceananigans: Oceananigans, CenterField, XFaceField, YFaceField, ZFaceField, fields
 using Oceananigans.Architectures: architecture
-using Oceananigans.BoundaryConditions: FieldBoundaryConditions, regularize_field_boundary_conditions, fill_halo_regions!
+using Oceananigans.BoundaryConditions: BoundaryCondition, FieldBoundaryConditions, regularize_field_boundary_conditions,
+                                      fill_halo_regions!, Open, OpenBoundaryCondition
 using Oceananigans.Fields: set!
 using Oceananigans.Grids: ZDirection, inactive_cell
 using Oceananigans.ImmersedBoundaries: mask_immersed_field!
@@ -29,7 +30,8 @@ using Oceananigans.Solvers: Solvers, solve!, FourierTridiagonalPoissonSolver, Ab
 using Oceananigans.Utils: prettysummary, launch!
 
 using Breeze.Thermodynamics: ReferenceState, MoistureMassFractions, mixture_gas_constant
-using Breeze.AtmosphereModels: AtmosphereModels, AtmosphereModel, mean_pressure, pressure_anomaly
+using Breeze.AtmosphereModels: AtmosphereModels, AtmosphereModel, mean_pressure, pressure_anomaly,
+                               enforce_open_boundary_mass_conservation!
 
 # Import microphysics interface for buoyancy computation
 using Breeze.AtmosphereModels: grid_moisture_fractions
