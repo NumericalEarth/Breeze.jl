@@ -40,6 +40,7 @@ examples = [
     Example("Rising parcel: adiabatic ascent", "rising_parcels", true),
     Example("Acoustic wave in shear layer", "acoustic_wave", true),
     Example("Cloud formation in prescribed updraft", "kinematic_driver", true),
+    Example("Mountain wave with terrain-following coordinates", "terrain_following_mountain_wave", false),
     Example("Splitting supercell", "splitting_supercell", false),
     Example("Tropical cyclone world", "tropical_cyclone_world", false),
 ]
@@ -178,6 +179,7 @@ makedocs(
             "Governing equations" => "dycore_equations_algorithms.md",
             "Anelastic dynamics" => "anelastic_dynamics.md",
             "Compressible dynamics" => "compressible_dynamics.md",
+            "Terrain-following coordinates" => "terrain_following_coordinates.md",
         ],
         "Appendix" => Any[
             "Notation" => "appendix/notation.md",
