@@ -228,10 +228,10 @@ function make_microphysics(name, FT=Float32)
 
     # 1M schemes with saturation adjustment (equilibrium cloud formation)
     elseif name == "1M_WarmEquilibrium"
-        cloud_formation = SaturationAdjustment(FT; equilibrium=WarmPhaseEquilibrium(FT))
+        cloud_formation = SaturationAdjustment(; equilibrium=WarmPhaseEquilibrium())
         return OneMomentCloudMicrophysics(FT; cloud_formation)
     elseif name == "1M_MixedEquilibrium"
-        cloud_formation = SaturationAdjustment(FT; equilibrium=MixedPhaseEquilibrium(FT))
+        cloud_formation = SaturationAdjustment(; equilibrium=MixedPhaseEquilibrium())
         return OneMomentCloudMicrophysics(FT; cloud_formation)
 
     # 1M schemes with non-equilibrium cloud formation (prognostic cloud condensate)
@@ -301,6 +301,9 @@ function run_benchmarks(args)
     # Loop over all combinations using Iterators.product
     for ((Nx, Ny, Nz), FT, dyn_name, adv_name, cls_name, micro_name) in
             Iterators.product(sizes, float_types, dynamics_names, advections, closures, microphysics_schemes)
+
+        # Set floating point precision so constructors pick up the right default
+        Oceananigans.defaults.FloatType = FT
 
         # Build benchmark name
         size_str = "$(Nx)x$(Ny)x$(Nz)"
