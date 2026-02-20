@@ -167,7 +167,7 @@ jobs:
             Breeze.jl
             BreezeBenchmarks
       - name: Push results to BreezeBenchmarks repo
-        # if: ${{ github.event_name == 'push' }}
+        if: ${{ github.event_name == 'push' }}
         run: |
           # Clone BreezeBenchmarks
           git clone https://numterra-bot:${{ steps.generate_token.outputs.token }}@github.com/NumericalEarth/BreezeBenchmarks.git
