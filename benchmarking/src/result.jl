@@ -5,6 +5,10 @@
 struct BenchmarkResult
     name::String
     float_type::String
+    advection::String
+    closure::String
+    dynamics::String
+    microphysics::String
     grid_size::Tuple{Int, Int, Int}
     time_steps::Int
     Δt::Float64
@@ -24,6 +28,10 @@ function Base.show(io::IO, ::MIME"text/plain", r::BenchmarkResult)
     println(io, "BenchmarkResult")
     println(io, "├── name: ", r.name)
     println(io, "├── float_type: ", r.float_type)
+    println(io, "├── advection: ", r.advection)
+    println(io, "├── closure: ", r.closure)
+    println(io, "├── dynamics: ", r.dynamics)
+    println(io, "├── microphysics: ", r.microphysics)
     println(io, "├── grid_size: ", r.grid_size)
     println(io, "├── time_steps: ", r.time_steps)
     println(io, "├── Δt: ", r.Δt)
@@ -42,6 +50,10 @@ end
 struct SimulationResult
     name::String
     float_type::String
+    advection::String
+    closure::String
+    dynamics::String
+    microphysics::String
     grid_size::Tuple{Int, Int, Int}
     simulation_time_seconds::Float64
     time_steps::Int
@@ -63,6 +75,10 @@ function Base.show(io::IO, ::MIME"text/plain", r::SimulationResult)
     println(io, "SimulationResult")
     println(io, "├── name: ", r.name)
     println(io, "├── float_type: ", r.float_type)
+    println(io, "├── advection: ", r.advection)
+    println(io, "├── closure: ", r.closure)
+    println(io, "├── dynamics: ", r.dynamics)
+    println(io, "├── microphysics: ", r.microphysics)
     println(io, "├── grid_size: ", r.grid_size)
     println(io, "├── simulation_time: ", @sprintf("%.1f s (%.2f hours)", r.simulation_time_seconds, r.simulation_time_seconds / 3600))
     println(io, "├── time_steps: ", r.time_steps)

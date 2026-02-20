@@ -228,10 +228,10 @@ function make_microphysics(name, FT=Float32)
 
     # 1M schemes with saturation adjustment (equilibrium cloud formation)
     elseif name == "1M_WarmEquilibrium"
-        cloud_formation = SaturationAdjustment(FT; equilibrium=WarmPhaseEquilibrium(FT))
+        cloud_formation = SaturationAdjustment(; equilibrium=WarmPhaseEquilibrium())
         return OneMomentCloudMicrophysics(FT; cloud_formation)
     elseif name == "1M_MixedEquilibrium"
-        cloud_formation = SaturationAdjustment(FT; equilibrium=MixedPhaseEquilibrium(FT))
+        cloud_formation = SaturationAdjustment(; equilibrium=MixedPhaseEquilibrium())
         return OneMomentCloudMicrophysics(FT; cloud_formation)
 
     # 1M schemes with non-equilibrium cloud formation (prognostic cloud condensate)
@@ -302,10 +302,13 @@ function run_benchmarks(args)
     for ((Nx, Ny, Nz), FT, dyn_name, adv_name, cls_name, micro_name) in
             Iterators.product(sizes, float_types, dynamics_names, advections, closures, microphysics_schemes)
 
+        # Set floating point precision so constructors pick up the right default
+        Oceananigans.defaults.FloatType = FT
+
         # Build benchmark name
         size_str = "$(Nx)x$(Ny)x$(Nz)"
         ft_str = FT == Float32 ? "F32" : "F64"
-        name = "CBL;grid:$(size_str);float-type:$(ft_str);dynamics:$(dyn_name);advection:$(adv_name);closure:$(cls_name);microphysics:$(micro_name)"
+        name = "CBL_$(size_str)_$(ft_str)_$(dyn_name)_$(adv_name)_$(cls_name)_$(micro_name)"
 
         println("\n", "-" ^ 70)
         println("Running: $name")
@@ -318,25 +321,45 @@ function run_benchmarks(args)
         microphysics = make_microphysics(micro_name, FT)
 
         # Create model based on configuration
-        if configuration == "convective_boundary_layer"
-            model = convective_boundary_layer(arch;
-                Nx, Ny, Nz,
-                float_type = FT,
-                dynamics,
-                advection = isnothing(advection) ? WENO(FT; order=5) : advection,
-                closure = closure
-            )
+        model = if configuration == "convective_boundary_layer"
+            convective_boundary_layer(arch;
+                                      Nx, Ny, Nz,
+                                      float_type = FT,
+                                      dynamics,
+                                      advection,
+                                      closure,
+                                      microphysics,
+                                      )
         else
             error("Unknown configuration: $configuration")
         end
 
         # Run based on mode
         result = if mode == "benchmark"
-            benchmark_time_stepping(model; time_steps, Δt, warmup_steps, name, verbose=true)
+            benchmark_time_stepping(model;
+                                    time_steps,
+                                    Δt,
+                                    warmup_steps,
+                                    name,
+                                    verbose=true,
+                                    advection=adv_name,
+                                    closure=cls_name,
+                                    dynamics=dyn_name,
+                                    microphysics=micro_name,
+                                    )
         elseif mode == "simulate"
             run_benchmark_simulation(model;
-                                     stop_time, Δt, output_interval, output_dir, name, verbose=true
-            )
+                                     stop_time,
+                                     Δt,
+                                     output_interval,
+                                     output_dir,
+                                     name,
+                                     verbose=true,
+                                     advection=adv_name,
+                                     closure=cls_name,
+                                     dynamics=dyn_name,
+                                     microphysics=micro_name,
+                                     )
         else
             error("Unknown mode: $mode. Use 'benchmark' or 'simulate'.")
         end

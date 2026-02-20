@@ -11,7 +11,6 @@
 
 using Oceananigans
 using Oceananigans.Units
-using Oceananigans.TurbulenceClosures: SmagorinskyLilly
 
 using Breeze
 using Breeze: CompressibleDynamics
@@ -22,7 +21,9 @@ using Breeze: CompressibleDynamics
                               Nx = 64, Ny = 64, Nz = 64,
                               dynamics = nothing,
                               advection = WENO(order=5),
-                              closure = SmagorinskyLilly())
+                              closure = nothing,
+                              microphysics = nothing,
+                              )
 
 Create an `AtmosphereModel` for the dry convective boundary layer benchmark case
 from [Sauer and Munoz-Esparza (2020)](@cite Sauer2020fasteddy), Section 4.2.
@@ -36,7 +37,8 @@ from [Sauer and Munoz-Esparza (2020)](@cite Sauer2020fasteddy), Section 4.2.
 - `dynamics`: Dynamics formulation. `nothing` defaults to `AnelasticDynamics`.
   Pass a `CompressibleDynamics` instance for compressible formulations.
 - `advection`: Advection scheme (default: `WENO(order=5)`)
-- `closure`: Turbulence closure (default: `SmagorinskyLilly()`)
+- `closure`: Turbulence closure (default: `nothing`)
+- `microphysics`: Microphysics (default: `nothing`)
 
 # Physical parameters (from Sauer & Munoz-Esparza 2020, Section 4.2)
 - Domain: 12 km × 12 km × 3 km
@@ -52,7 +54,9 @@ function convective_boundary_layer(arch = CPU();
                                    Nx = 64, Ny = 64, Nz = 64,
                                    dynamics = nothing,
                                    advection = WENO(order=5),
-                                   closure = SmagorinskyLilly())
+                                   closure = nothing,
+                                   microphysics = nothing,
+                                   )
 
     # Set floating point precision
     Oceananigans.defaults.FloatType = float_type
@@ -141,6 +145,7 @@ function convective_boundary_layer(arch = CPU();
         closure,
         coriolis,
         forcing,
+        microphysics,
         boundary_conditions = (ρθ = ρθ_bcs, ρu = ρu_bcs, ρv = ρv_bcs)
     )
 
