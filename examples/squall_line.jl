@@ -78,7 +78,7 @@ using Printf
 # 1 km horizontal resolution and 500 m vertical resolution.
 # The 2D setup uses `(Periodic, Flat, Bounded)` topology.
 
-Oceananigans.defaults.FloatType = Float32
+Oceananigans.defaults.FloatType = Float64
 
 Nx, Nz = 600, 40
 Lx, Lz = 600kilometers, 20kilometers
