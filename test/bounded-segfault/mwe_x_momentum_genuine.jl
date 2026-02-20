@@ -67,12 +67,20 @@ nsteps = 2
 # ─── Loss function ────────────────────────────────────────────────────────────
 # Mirrors the pattern from Round 6 "M" test: all args built inside the trace.
 
+print("prognosic fields: ", prognostic_fields(model))
+
 function loss(model, θ, nsteps)
     set!(model, θ = θ, ρ = 1.0)
 
     @trace track_numbers = false for _ in 1:nsteps
         for _ in 1:3
-            fill_halo_regions!(prognostic_fields(model), model.clock, fields(model), async=true)
+            args = (model.clock, fields(model))
+            kwargs= Dict(:async => true)
+            _fields = prognostic_fields(model)
+            for i in eachindex(_fields)
+                @inbounds fill_halo_regions!(_fields[i], args...; kwargs...)
+            end
+            
             
             compute_velocities!(model)
             # Dispatch on thermodynamic formulation type
