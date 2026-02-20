@@ -10,12 +10,15 @@
 #
 # Instead of using an [`ImmersedBoundaryGrid`](@ref) with partial cells, we deform the
 # computational grid itself using [`follow_terrain!`](@ref), which applies a basic
-# terrain-following (Gal-Chen) coordinate transformation. The physics are then
-# corrected with [`TerrainMetrics`](@ref) to account for the tilted coordinate surfaces.
+# terrain-following ([Gal-Chen and Somerville (1975)](@cite GalChen1975)) coordinate
+# transformation. The physics are then corrected with [`TerrainMetrics`](@ref) to account
+# for the tilted coordinate surfaces.
 
 using Breeze
-using Oceananigans.Grids: MutableVerticalDiscretization
+using Oceananigans.Grids: MutableVerticalDiscretization, znode
+using Oceananigans.Operators: Δzᶜᶜᶠ
 using Oceananigans.Units
+using Breeze.Thermodynamics: ThermodynamicConstants, dry_air_gas_constant
 using Printf
 using CairoMakie
 
@@ -35,52 +38,104 @@ grid = RectilinearGrid(size = (Nx, Nz),
 
 # ## Terrain
 #
-# A bell-shaped mountain (Gaussian ridge) centered at the origin:
+# A Gaussian ridge centered at the origin. The mountain height ``h_0`` and half-width
+# ``a`` are chosen so that the non-dimensional mountain height ``N h_0 / U`` is in
+# the weakly nonlinear regime (``\approx 0.25``), following the test cases reviewed
+# by [Klemp (2011)](@cite Klemp2011).
 
-h₀ = 500meters
-a = 5kilometers
+h₀ = 250meters
+a = 10kilometers
 h(x, y) = h₀ * exp(-x^2 / a^2)
 
 # Apply the terrain to the grid and retrieve the metric terms.
 
 metrics = follow_terrain!(grid, h)
 
-# ## Model construction
+# ## Physical parameters
 #
-# Build a compressible model with explicit time-stepping and terrain corrections.
-# Passing `terrain_metrics` to [`CompressibleDynamics`](@ref) activates the
-# terrain-following physics: contravariant vertical velocity, corrected pressure
-# gradient, and terrain-aware divergence.
+# Define the atmospheric state before building the model, since the
+# `reference_potential_temperature` profile is needed at construction time.
 
-dynamics = CompressibleDynamics(ExplicitTimeStepping(); terrain_metrics=metrics)
-model = AtmosphereModel(grid; dynamics)
-
-# ## Initial conditions
-#
-# We start from hydrostatic balance with a stably stratified potential temperature
-# profile ``θ(z) = θ₀ \exp(N^2 z / g)`` and a uniform horizontal wind.
-
-constants = model.thermodynamic_constants
+constants = ThermodynamicConstants(Float64)
 g = constants.gravitational_acceleration
 
 θ₀ = 300      # Surface potential temperature (K)
 p₀ = 101325   # Surface pressure (Pa)
 pˢᵗ = 1e5     # Standard pressure (Pa)
-N² = 1e-4     # Brunt–Väisälä frequency squared (s⁻²)
+N² = 1e-4     # Brunt-Väisälä frequency squared (s⁻²)
 
-θᵢ(x, z) = θ₀ * exp(N² * z / g)
-ρᵢ(x, z) = adiabatic_hydrostatic_density(z, p₀, θ₀, pˢᵗ, constants)
+Rᵈ = dry_air_gas_constant(constants)
+cᵖᵈ = constants.dry_air.heat_capacity
+κ = Rᵈ / cᵖᵈ
+π_surface = (p₀ / pˢᵗ)^κ
+
+# Potential temperature increases exponentially with height for constant ``N^2``.
+θ_of_z(z) = θ₀ * exp(N² * z / g)
+
+# ## Sponge layer
+#
+# A Rayleigh damping layer near the domain top absorbs upward-propagating waves
+# and prevents spurious reflections from the rigid lid.
+
+sponge_width = Lz / 4
+sponge_mask(x, z) = exp(-(z - Lz)^2 / sponge_width^2)
+ρw_sponge = Relaxation(rate=1/10, mask=sponge_mask)
+
+# ## Model construction
+#
+# Build a compressible model with explicit time-stepping, WENO advection, and terrain
+# corrections. Passing `terrain_metrics` to [`CompressibleDynamics`](@ref) activates
+# the terrain-following physics: contravariant vertical velocity, corrected pressure
+# gradient, and terrain-aware divergence. The `reference_potential_temperature` enables
+# a perturbation pressure approach for the horizontal pressure gradient that reduces
+# the truncation error inherent in terrain-following coordinates.
+
+dynamics = CompressibleDynamics(ExplicitTimeStepping();
+                                terrain_metrics = metrics,
+                                reference_potential_temperature = θ_of_z)
+model = AtmosphereModel(grid; dynamics, advection=WENO(), forcing=(; ρw=ρw_sponge))
+
+# ## Initial conditions
+#
+# We initialize the atmosphere in discrete hydrostatic balance using Exner function
+# integration. This is essential for compressible models on terrain-following grids:
+# the equation of state alone does not produce a pressure field in discrete
+# hydrostatic balance, so column-by-column Exner integration is needed to avoid
+# spurious vertical accelerations.
+
+# Initialize density and potential temperature density column by column
+# via discrete Exner integration from the surface pressure.
+ρ_field = model.dynamics.density
+ρθ_field = model.formulation.potential_temperature_density
+
+for i in 1:Nx
+    πₖ = π_surface
+    for k in 1:Nz
+        z_phys = znode(i, 1, k, grid, Center(), Center(), Center())
+        θₖ = θ_of_z(z_phys)
+
+        if k > 1
+            z_below = znode(i, 1, k - 1, grid, Center(), Center(), Center())
+            θ_face = (θₖ + θ_of_z(z_below)) / 2
+            πₖ = πₖ - g * Δzᶜᶜᶠ(i, 1, k, grid) / (cᵖᵈ * θ_face)
+        end
+
+        pₖ = pˢᵗ * πₖ^(1 / κ)
+        ρₖ = pₖ / (Rᵈ * θₖ * πₖ)
+
+        ρ_field[i, 1, k] = ρₖ
+        ρθ_field[i, 1, k] = ρₖ * θₖ
+    end
+end
 
 U₀ = 10  # Background wind speed (m/s)
 
-set!(model, ρ=ρᵢ, θ=θᵢ, u=U₀)
+set!(model, u=U₀)
 
 # ## Time-stepping
 #
 # Acoustic waves require a CFL condition based on the sound speed.
 
-Rᵈ = constants.molar_gas_constant / constants.dry_air.molar_mass
-cᵖᵈ = constants.dry_air.heat_capacity
 γ = cᵖᵈ / (cᵖᵈ - Rᵈ)
 ℂᵃᶜ = sqrt(γ * Rᵈ * θ₀)
 
@@ -94,7 +149,7 @@ simulation = Simulation(model; Δt, stop_time)
 
 function progress(sim)
     u, v, w = sim.model.velocities
-    msg = @sprintf("Iter: %d, t: %s, max|u|: %.2f, max|w|: %.2f m/s",
+    msg = @sprintf("Iter: %d, t: %s, max|u|: %.2f, max|w|: %.4f m/s",
                    iteration(sim), prettytime(sim),
                    maximum(abs, u), maximum(abs, w))
     @info msg

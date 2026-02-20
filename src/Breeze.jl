@@ -100,6 +100,8 @@ export
     follow_terrain!,
     TerrainMetrics,
     BasicTerrainFollowing,
+    SlopeOutsideInterpolation,
+    SlopeInsideInterpolation,
 
     # TimeSteppers
     SSPRungeKutta3,

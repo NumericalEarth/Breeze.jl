@@ -20,7 +20,8 @@ ported to Oceananigans.
 """
 module TerrainFollowingDiscretization
 
-export follow_terrain!, TerrainMetrics, BasicTerrainFollowing
+export follow_terrain!, TerrainMetrics, BasicTerrainFollowing,
+       SlopeOutsideInterpolation, SlopeInsideInterpolation
 
 using Adapt: Adapt, adapt
 using KernelAbstractions: @kernel, @index

@@ -46,12 +46,13 @@ metrics = follow_terrain!(grid, h)
 ```
 """
 function follow_terrain!(grid::MutableGridOfSomeKind, topography;
-                          smoothing = BasicTerrainFollowing())
-    return _follow_terrain!(grid, topography, smoothing)
+                          smoothing = BasicTerrainFollowing(),
+                          pressure_gradient_stencil = SlopeOutsideInterpolation())
+    return _follow_terrain!(grid, topography, smoothing, pressure_gradient_stencil)
 end
 
 # Dispatch on smoothing type
-function _follow_terrain!(grid, topography, ::BasicTerrainFollowing)
+function _follow_terrain!(grid, topography, ::BasicTerrainFollowing, pressure_gradient_stencil)
     arch = grid.architecture
 
     # Get the model top from the reference coordinate
@@ -79,7 +80,7 @@ function _follow_terrain!(grid, topography, ::BasicTerrainFollowing)
 
     launch!(arch, grid, kp, _compute_terrain_slopes!, ∂x_h, ∂y_h, grid, h_field)
 
-    return TerrainMetrics(h_field, ∂x_h, ∂y_h, z_top)
+    return TerrainMetrics(h_field, ∂x_h, ∂y_h, z_top, pressure_gradient_stencil)
 end
 
 # Set topography from a function
