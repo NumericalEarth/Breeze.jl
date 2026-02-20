@@ -9,7 +9,12 @@
                             Δt = 0.05,
                             warmup_steps = 10,
                             name = "benchmark",
-                            verbose = true)
+                            verbose = true,
+                            advection::String = "",
+                            closure::String = "",
+                            dynamics::String = "",
+                            microphysics::String = "",
+                            )
 
 Run a benchmark by executing `time_steps` time steps of the given model.
 Uses `many_time_steps!` to avoid Simulation overhead.
@@ -21,7 +26,12 @@ function benchmark_time_stepping(model;
                                  Δt = 0.05,
                                  warmup_steps = 10,
                                  name = "benchmark",
-                                 verbose = true)
+                                 verbose = true,
+                                 advection::String = "",
+                                 closure::String = "",
+                                 dynamics::String = "",
+                                 microphysics::String = "",
+                                 )
 
     grid = model.grid
     arch = Oceananigans.Architectures.architecture(grid)
@@ -68,6 +78,10 @@ function benchmark_time_stepping(model;
     result = BenchmarkResult(
         name,
         string(FT),
+        advection,
+        closure,
+        dynamics,
+        microphysics,
         (Nx, Ny, Nz),
         time_steps,
         Δt,
@@ -109,7 +123,12 @@ end
                              output_dir = ".",
                              name = "benchmark_simulation",
                              output_fields = (:u, :v, :w, :θ),
-                             verbose = true)
+                             verbose = true,
+                             advection::String = "",
+                             closure::String = "",
+                             dynamics::String = "",
+                             microphysics::String = "",
+                             )
 
 Run a full simulation with output writers for validation and longer benchmarks.
 
@@ -127,6 +146,10 @@ approximately 2 hours to reach quasi-steady convective state.
 - `name`: Name for the simulation (used in output filename)
 - `output_fields`: Tuple of field names to save (default: u, v, w, θ)
 - `verbose`: Print progress information
+- `advection`: Name of the advection scheme
+- `closure`: Name of the closure
+- `dynamics`: Name of the dynamics
+- `microphysics`: Name of the microphysics
 
 # Returns
 A `SimulationResult` containing timing information and the output file path.
@@ -138,7 +161,12 @@ function run_benchmark_simulation(model;
                                   output_dir = ".",
                                   name = "benchmark_simulation",
                                   output_fields = (:u, :v, :w, :θ),
-                                  verbose = true)
+                                  verbose = true,
+                                  advection::String = "",
+                                  closure::String = "",
+                                  dynamics::String = "",
+                                  microphysics::String = "",
+                                  )
 
     grid = model.grid
     arch = Oceananigans.Architectures.architecture(grid)
@@ -242,6 +270,10 @@ function run_benchmark_simulation(model;
     result = SimulationResult(
         name,
         string(FT),
+        advection,
+        closure,
+        dynamics,
+        microphysics,
         (Nx, Ny, Nz),
         Float64(stop_time),
         time_steps,

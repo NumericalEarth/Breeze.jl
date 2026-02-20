@@ -336,11 +336,30 @@ function run_benchmarks(args)
 
         # Run based on mode
         result = if mode == "benchmark"
-            benchmark_time_stepping(model; time_steps, Δt, warmup_steps, name, verbose=true)
+            benchmark_time_stepping(model;
+                                    time_steps,
+                                    Δt,
+                                    warmup_steps,
+                                    name,
+                                    verbose=true,
+                                    advection=adv_name,
+                                    closure=cls_name,
+                                    dynamics=dyn_name,
+                                    microphysics=micro_name,
+                                    )
         elseif mode == "simulate"
             run_benchmark_simulation(model;
-                                     stop_time, Δt, output_interval, output_dir, name, verbose=true
-            )
+                                     stop_time,
+                                     Δt,
+                                     output_interval,
+                                     output_dir,
+                                     name,
+                                     verbose=true,
+                                     advection=adv_name,
+                                     closure=cls_name,
+                                     dynamics=dyn_name,
+                                     microphysics=micro_name,
+                                     )
         else
             error("Unknown mode: $mode. Use 'benchmark' or 'simulate'.")
         end
