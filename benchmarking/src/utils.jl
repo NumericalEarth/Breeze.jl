@@ -10,10 +10,10 @@
                             warmup_steps = 10,
                             name = "benchmark",
                             verbose = true,
-                            advection::String = "",
-                            closure::String = "",
-                            dynamics::String = "",
-                            microphysics::String = "",
+                            advection::AbstractString = "",
+                            closure::AbstractString = "",
+                            dynamics::AbstractString = "",
+                            microphysics::AbstractString = "",
                             )
 
 Run a benchmark by executing `time_steps` time steps of the given model.
@@ -27,10 +27,10 @@ function benchmark_time_stepping(model;
                                  warmup_steps = 10,
                                  name = "benchmark",
                                  verbose = true,
-                                 advection::String = "",
-                                 closure::String = "",
-                                 dynamics::String = "",
-                                 microphysics::String = "",
+                                 advection::AbstractString = "",
+                                 closure::AbstractString = "",
+                                 dynamics::AbstractString = "",
+                                 microphysics::AbstractString = "",
                                  )
 
     grid = model.grid
@@ -78,10 +78,10 @@ function benchmark_time_stepping(model;
     result = BenchmarkResult(
         name,
         string(FT),
-        advection,
-        closure,
-        dynamics,
-        microphysics,
+        String(advection),
+        String(closure),
+        String(dynamics),
+        String(microphysics),
         (Nx, Ny, Nz),
         time_steps,
         Δt,
@@ -124,10 +124,10 @@ end
                              name = "benchmark_simulation",
                              output_fields = (:u, :v, :w, :θ),
                              verbose = true,
-                             advection::String = "",
-                             closure::String = "",
-                             dynamics::String = "",
-                             microphysics::String = "",
+                             advection::AbstractString = "",
+                             closure::AbstractString = "",
+                             dynamics::AbstractString = "",
+                             microphysics::AbstractString = "",
                              )
 
 Run a full simulation with output writers for validation and longer benchmarks.
@@ -162,10 +162,10 @@ function run_benchmark_simulation(model;
                                   name = "benchmark_simulation",
                                   output_fields = (:u, :v, :w, :θ),
                                   verbose = true,
-                                  advection::String = "",
-                                  closure::String = "",
-                                  dynamics::String = "",
-                                  microphysics::String = "",
+                                  advection::AbstractString = "",
+                                  closure::AbstractString = "",
+                                  dynamics::AbstractString = "",
+                                  microphysics::AbstractString = "",
                                   )
 
     grid = model.grid
@@ -270,10 +270,10 @@ function run_benchmark_simulation(model;
     result = SimulationResult(
         name,
         string(FT),
-        advection,
-        closure,
-        dynamics,
-        microphysics,
+        String(advection),
+        String(closure),
+        String(dynamics),
+        String(microphysics),
         (Nx, Ny, Nz),
         Float64(stop_time),
         time_steps,
