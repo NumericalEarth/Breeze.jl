@@ -116,8 +116,7 @@ jobs:
           # Name format: <name>/<properties>/<gpu>/<grid_size>
           data = []
           for d in all_data:
-              name_parts = d['name'].split(';')
-              base_name = name_parts[0]
+              base_name = d['name'].split('_')[0]
               advection = d['advection']
               # Closure is unused for the time being because it's always the
               # same everywhere in the current setup.
