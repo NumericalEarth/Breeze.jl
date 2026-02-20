@@ -11,4 +11,6 @@ fill!(parent(u), 0)
 set!(u, (x, y) -> 1.0)
 fill_halo_regions!(u)
 
+print(u.boundary_conditions)
+
 display(parent(u)[:, :, 1])
