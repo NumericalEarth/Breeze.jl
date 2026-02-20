@@ -22,7 +22,7 @@ Breeze = {path = ".."}
 ArgParse = "1"
 Breeze = "0.3"
 CUDA = "5"
-CloudMicrophysics = "0.29.1"
+CloudMicrophysics = "0.31.4"
 Dates = "<0.0.1, 1"
 JLD2 = "0.5, 0.6"
 JSON = "1.4.0"

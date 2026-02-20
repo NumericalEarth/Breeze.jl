@@ -13,6 +13,6 @@ Breeze = {path = ".."}
 
 [compat]
 AtmosphericProfilesLibrary = "0.1.7"
-CloudMicrophysics = "0.22.13, 0.29"
+CloudMicrophysics = "0.31.4"
 NCDatasets = "0.14"
 Oceananigans = "0.104"
