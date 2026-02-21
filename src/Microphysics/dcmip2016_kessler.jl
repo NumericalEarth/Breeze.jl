@@ -285,7 +285,7 @@ Return zero tendency.
 All microphysical source/sink terms are applied directly to the prognostic fields via the
 `microphysics_model_update!` kernel, bypassing the standard tendency interface.
 """
-@inline AtmosphereModels.microphysical_tendency(::DCMIP2016KM, name, ρ, ℳ, 𝒰, constants) = zero(ρ)
+@inline AtmosphereModels.microphysical_tendency(::DCMIP2016KM, name, ρ, ℳ, 𝒰, constants, clock) = zero(ρ)
 
 #####
 ##### Precipitation rate and surface flux diagnostics

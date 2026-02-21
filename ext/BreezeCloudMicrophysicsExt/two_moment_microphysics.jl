@@ -311,7 +311,7 @@ materialize_2m_condensate_formation(::Any, categories) = ConstantRateCondensateF
 #####
 
 # Default fallback for tendencies (state-based)
-@inline AtmosphereModels.microphysical_tendency(bμp::TwoMomentCloudMicrophysics, name, ρ, ℳ, 𝒰, constants) = zero(ρ)
+@inline AtmosphereModels.microphysical_tendency(bμp::TwoMomentCloudMicrophysics, name, ρ, ℳ, 𝒰, constants, clock) = zero(ρ)
 
 # Default fallback for velocities
 @inline AtmosphereModels.microphysical_velocities(bμp::TwoMomentCloudMicrophysics, μ, name) = nothing
@@ -489,7 +489,7 @@ const τⁿᵘᵐ_2m = 10  # seconds
 ##### Cloud liquid mass tendency (ρqᶜˡ) - state-based
 #####
 
-@inline function AtmosphereModels.microphysical_tendency(bμp::WPNE2M, ::Val{:ρqᶜˡ}, ρ, ℳ::WarmPhaseTwoMomentState, 𝒰, constants)
+@inline function AtmosphereModels.microphysical_tendency(bμp::WPNE2M, ::Val{:ρqᶜˡ}, ρ, ℳ::WarmPhaseTwoMomentState, 𝒰, constants, clock)
     categories = bμp.categories
     sb = categories.warm_processes
     τᶜˡ = liquid_relaxation_timescale(bμp.cloud_formation, categories)
@@ -541,7 +541,7 @@ end
 ##### Cloud liquid number tendency (ρnᶜˡ) - state-based
 #####
 
-@inline function AtmosphereModels.microphysical_tendency(bμp::WPNE2M, ::Val{:ρnᶜˡ}, ρ, ℳ::WarmPhaseTwoMomentState, 𝒰, constants)
+@inline function AtmosphereModels.microphysical_tendency(bμp::WPNE2M, ::Val{:ρnᶜˡ}, ρ, ℳ::WarmPhaseTwoMomentState, 𝒰, constants, clock)
     categories = bμp.categories
     sb = categories.warm_processes
 
@@ -765,7 +765,7 @@ end
 ##### Rain mass tendency (ρqʳ) - state-based
 #####
 
-@inline function AtmosphereModels.microphysical_tendency(bμp::WPNE2M, ::Val{:ρqʳ}, ρ, ℳ::WarmPhaseTwoMomentState, 𝒰, constants)
+@inline function AtmosphereModels.microphysical_tendency(bμp::WPNE2M, ::Val{:ρqʳ}, ρ, ℳ::WarmPhaseTwoMomentState, 𝒰, constants, clock)
     categories = bμp.categories
     sb = categories.warm_processes
 
@@ -810,7 +810,7 @@ end
 ##### Rain number tendency (ρnʳ) - state-based
 #####
 
-@inline function AtmosphereModels.microphysical_tendency(bμp::WPNE2M, ::Val{:ρnʳ}, ρ, ℳ::WarmPhaseTwoMomentState, 𝒰, constants)
+@inline function AtmosphereModels.microphysical_tendency(bμp::WPNE2M, ::Val{:ρnʳ}, ρ, ℳ::WarmPhaseTwoMomentState, 𝒰, constants, clock)
     categories = bμp.categories
     sb = categories.warm_processes
 
@@ -860,7 +860,7 @@ end
 # Aerosol number decreases when droplets are activated.
 # This is the sink term that mirrors the activation source for cloud droplet number.
 
-@inline function AtmosphereModels.microphysical_tendency(bμp::WPNE2M, ::Val{:ρnᵃ}, ρ, ℳ::WarmPhaseTwoMomentState, 𝒰, constants)
+@inline function AtmosphereModels.microphysical_tendency(bμp::WPNE2M, ::Val{:ρnᵃ}, ρ, ℳ::WarmPhaseTwoMomentState, 𝒰, constants, clock)
     categories = bμp.categories
 
     nᵃ = ℳ.nᵃ

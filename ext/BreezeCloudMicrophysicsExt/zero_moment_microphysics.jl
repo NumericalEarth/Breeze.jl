@@ -18,7 +18,7 @@ AtmosphereModels.prognostic_field_names(::ZMCM) = tuple()
 AtmosphereModels.materialize_microphysical_fields(bμp::ZMCM, grid, bcs) = materialize_microphysical_fields(bμp.cloud_formation, grid, bcs)
 @inline AtmosphereModels.update_microphysical_fields!(μ, i, j, k, grid, bμp::ZMCM, ρ, 𝒰, constants) = update_microphysical_fields!(μ, i, j, k, grid, bμp.cloud_formation, ρ, 𝒰, constants)
 @inline AtmosphereModels.grid_moisture_fractions(i, j, k, grid, bμp::ZMCM, ρ, qᵗ, μ) = grid_moisture_fractions(i, j, k, grid, bμp.cloud_formation, ρ, qᵗ, μ)
-@inline AtmosphereModels.grid_microphysical_tendency(i, j, k, grid, bμp::ZMCM, name, ρ, μ, 𝒰, constants, velocities) = zero(grid)
+@inline AtmosphereModels.grid_microphysical_tendency(i, j, k, grid, bμp::ZMCM, name, ρ, μ, 𝒰, constants, velocities, clock) = zero(grid)
 @inline AtmosphereModels.microphysical_velocities(bμp::ZMCM, μ, name) = nothing
 
 @inline function AtmosphereModels.maybe_adjust_thermodynamic_state(𝒰₀, bμp::ZMCM, qᵗ, constants)
@@ -28,7 +28,7 @@ AtmosphereModels.materialize_microphysical_fields(bμp::ZMCM, grid, bcs) = mater
     return adjust_thermodynamic_state(𝒰₁, bμp.cloud_formation, constants)
 end
 
-@inline function AtmosphereModels.grid_microphysical_tendency(i, j, k, grid, bμp::ZMCM, ::Val{:ρqᵗ}, ρ, μ, 𝒰, constants, velocities)
+@inline function AtmosphereModels.grid_microphysical_tendency(i, j, k, grid, bμp::ZMCM, ::Val{:ρqᵗ}, ρ, μ, 𝒰, constants, velocities, clock)
     # Get cloud liquid water from microphysical fields
     q = 𝒰.moisture_mass_fractions
     qˡ = q.liquid

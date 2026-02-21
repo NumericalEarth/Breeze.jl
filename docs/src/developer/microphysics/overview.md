@@ -33,8 +33,8 @@ Arguments:
 
 | Function | Arguments | Description |
 |----------|-----------|-------------|
-| `microphysical_tendency` | `(microphysics, name, ρ, ℳ, 𝒰, constants)` | **State-based**. Compute tendency for variable `name`. |
-| `grid_microphysical_tendency` | `(i, j, k, grid, microphysics, name, ρ, fields, 𝒰, constants, velocities)` | **Generic wrapper**. Builds `ℳ` and dispatches to state-based version. |
+| `microphysical_tendency` | `(microphysics, name, ρ, ℳ, 𝒰, constants, clock)` | **State-based**. Compute tendency for variable `name`. |
+| `grid_microphysical_tendency` | `(i, j, k, grid, microphysics, name, ρ, fields, 𝒰, constants, velocities, clock)` | **Generic wrapper**. Builds `ℳ` and dispatches to state-based version. |
 
 **Design principle**: Schemes implement the state-based version; grid-indexed is generic.
 All velocity components are interpolated from cell faces to cell centers and passed as a NamedTuple `(; u, v, w)` to the microphysical state for aerosol activation and other velocity-dependent processes.
