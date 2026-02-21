@@ -26,6 +26,7 @@ using Oceananigans
 using Oceananigans.TurbulenceClosures: SmagorinskyLilly, DynamicSmagorinsky
 
 using Breeze
+using Breeze: CompressibleDynamics, SplitExplicitTimeDiscretization, ExplicitTimeStepping
 using Breeze.Microphysics: NonEquilibriumCloudFormation
 
 # Load CloudMicrophysics extension for OneMomentCloudMicrophysics
@@ -89,6 +90,12 @@ function parse_commandline()
                    "Multiple schemes can be specified as comma-separated list."
             arg_type = String
             default = "nothing"
+
+        "--dynamics"
+            help = "Dynamics formulation: anelastic, compressible_explicit, compressible_splitexplicit. " *
+                   "Multiple can be specified as comma-separated list."
+            arg_type = String
+            default = "anelastic"
 
         "--closure"
             help = "Turbulence closure: nothing, SmagorinskyLilly, DynamicSmagorinsky. " *
@@ -194,6 +201,19 @@ end
 # Closures: "SmagorinskyLilly" -> SmagorinskyLilly(FT)
 make_closure(name, FT) = name == "nothing" ? nothing : (@eval $(Symbol(name)))(FT)
 
+# Dynamics: "anelastic", "compressible_explicit", "compressible_splitexplicit"
+function make_dynamics(name)
+    if name == "anelastic"
+        return nothing  # sentinel; convective_boundary_layer handles anelastic by default
+    elseif name == "compressible_explicit"
+        return CompressibleDynamics(ExplicitTimeStepping())
+    elseif name == "compressible_splitexplicit"
+        return CompressibleDynamics(SplitExplicitTimeDiscretization(substeps=12))
+    else
+        error("Unknown dynamics: $name. Use anelastic, compressible_explicit, or compressible_splitexplicit.")
+    end
+end
+
 # Microphysics: supports 0M saturation adjustment and 1M bulk schemes
 function make_microphysics(name, FT=Float32)
     name == "nothing" && return nothing
@@ -202,16 +222,16 @@ function make_microphysics(name, FT=Float32)
     if name == "SaturationAdjustment"
         return SaturationAdjustment()
     elseif name == "MixedPhaseEquilibrium"
-        return SaturationAdjustment(; phase_equilibrium=MixedPhaseEquilibrium())
+        return SaturationAdjustment(; equilibrium=MixedPhaseEquilibrium())
     elseif name == "WarmPhaseEquilibrium"
-        return SaturationAdjustment(; phase_equilibrium=WarmPhaseEquilibrium())
+        return SaturationAdjustment(; equilibrium=WarmPhaseEquilibrium())
 
     # 1M schemes with saturation adjustment (equilibrium cloud formation)
     elseif name == "1M_WarmEquilibrium"
-        cloud_formation = SaturationAdjustment(FT; equilibrium=WarmPhaseEquilibrium(FT))
+        cloud_formation = SaturationAdjustment(; equilibrium=WarmPhaseEquilibrium())
         return OneMomentCloudMicrophysics(FT; cloud_formation)
     elseif name == "1M_MixedEquilibrium"
-        cloud_formation = SaturationAdjustment(FT; equilibrium=MixedPhaseEquilibrium(FT))
+        cloud_formation = SaturationAdjustment(; equilibrium=MixedPhaseEquilibrium())
         return OneMomentCloudMicrophysics(FT; cloud_formation)
 
     # 1M schemes with non-equilibrium cloud formation (prognostic cloud condensate)
@@ -241,6 +261,7 @@ function run_benchmarks(args)
     # Parse lists from arguments
     sizes = [parse_size(s) for s in parse_list(args["size"])]
     float_types = [make_float_type(s) for s in parse_list(args["float_type"])]
+    dynamics_names = parse_list(args["dynamics"])
     advections = parse_list(args["advection"])
     closures = parse_list(args["closure"])
     microphysics_schemes = parse_list(args["microphysics"])
@@ -263,6 +284,7 @@ function run_benchmarks(args)
     println("Architecture: ", arch)
     println("Sizes: ", sizes)
     println("Float types: ", float_types)
+    println("Dynamics: ", dynamics_names)
     println("Advection schemes: ", advections)
     println("Closures: ", closures)
     println("Microphysics: ", microphysics_schemes)
@@ -277,42 +299,67 @@ function run_benchmarks(args)
     println()
 
     # Loop over all combinations using Iterators.product
-    for ((Nx, Ny, Nz), FT, adv_name, cls_name, micro_name) in
-            Iterators.product(sizes, float_types, advections, closures, microphysics_schemes)
+    for ((Nx, Ny, Nz), FT, dyn_name, adv_name, cls_name, micro_name) in
+            Iterators.product(sizes, float_types, dynamics_names, advections, closures, microphysics_schemes)
+
+        # Set floating point precision so constructors pick up the right default
+        Oceananigans.defaults.FloatType = FT
 
         # Build benchmark name
         size_str = "$(Nx)x$(Ny)x$(Nz)"
         ft_str = FT == Float32 ? "F32" : "F64"
-        name = "CBL_$(size_str)_$(ft_str)_$(adv_name)_$(cls_name)_$(micro_name)"
+        name = "CBL_$(size_str)_$(ft_str)_$(dyn_name)_$(adv_name)_$(cls_name)_$(micro_name)"
 
         println("\n", "-" ^ 70)
         println("Running: $name")
         println("-" ^ 70)
 
         # Create schemes
+        dynamics = make_dynamics(dyn_name)
         advection = make_advection(adv_name, FT)
         closure = make_closure(cls_name, FT)
         microphysics = make_microphysics(micro_name, FT)
 
         # Create model based on configuration
-        if configuration == "convective_boundary_layer"
-            model = convective_boundary_layer(arch;
-                Nx, Ny, Nz,
-                float_type = FT,
-                advection = isnothing(advection) ? WENO(FT; order=5) : advection,
-                closure = closure
-            )
+        model = if configuration == "convective_boundary_layer"
+            convective_boundary_layer(arch;
+                                      Nx, Ny, Nz,
+                                      float_type = FT,
+                                      dynamics,
+                                      advection,
+                                      closure,
+                                      microphysics,
+                                      )
         else
             error("Unknown configuration: $configuration")
         end
 
         # Run based on mode
         result = if mode == "benchmark"
-            benchmark_time_stepping(model; time_steps, Δt, warmup_steps, name, verbose=true)
+            benchmark_time_stepping(model;
+                                    time_steps,
+                                    Δt,
+                                    warmup_steps,
+                                    name,
+                                    verbose=true,
+                                    advection=adv_name,
+                                    closure=cls_name,
+                                    dynamics=dyn_name,
+                                    microphysics=micro_name,
+                                    )
         elseif mode == "simulate"
             run_benchmark_simulation(model;
-                                     stop_time, Δt, output_interval, output_dir, name, verbose=true
-            )
+                                     stop_time,
+                                     Δt,
+                                     output_interval,
+                                     output_dir,
+                                     name,
+                                     verbose=true,
+                                     advection=adv_name,
+                                     closure=cls_name,
+                                     dynamics=dyn_name,
+                                     microphysics=micro_name,
+                                     )
         else
             error("Unknown mode: $mode. Use 'benchmark' or 'simulate'.")
         end
