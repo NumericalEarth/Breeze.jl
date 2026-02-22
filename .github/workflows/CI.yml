@@ -99,9 +99,10 @@ jobs:
               TEST_ARGS+=(--jobs=3)
               # ...but also set a more conservative limit to memory usage before
               # reciclying a worker, to avoid out-of-memory issues.
-              echo "JULIA_TEST_MAXRSS_MB=2500" | tee "${GITHUB_ENV}"
+              JULIA_TEST_MAXRSS_MB=2500
+              echo "JULIA_TEST_MAXRSS_MB=${JULIA_TEST_MAXRSS_MB}" | tee -a "${GITHUB_ENV}"
           fi
-          echo "runtest_test_args=${TEST_ARGS[@]}" | tee "${GITHUB_ENV}"
+          echo "runtest_test_args=${TEST_ARGS[@]}" | tee -a "${GITHUB_ENV}"
       - name: Prepare test environment
         if: ${{ startsWith(matrix.os, 'aws-linux-nvidia-gpu-') }}
         shell: bash
