@@ -1,8 +1,8 @@
 using Reactant: Reactant
 
-using Oceananigans: AbstractModel, ReactantState
+using Oceananigans: ReactantState
 using Oceananigans.TimeSteppers: update_state!, tick!, step_lagrangian_particles!, compute_flux_bc_tendencies!
-using Breeze.AtmosphereModels: compute_pressure_correction!, make_pressure_correction!
+using Breeze.AtmosphereModels: AtmosphereModel, compute_pressure_correction!, make_pressure_correction!
 using Breeze.TimeSteppers: SSPRungeKutta3, store_initial_state!, ssp_rk3_substep!
 
 using Oceananigans: initialize!
@@ -12,13 +12,13 @@ using Oceananigans.TimeSteppers: TimeSteppers as OceananigansTimeSteppers, time_
 # (see https://github.com/CliMA/Oceananigans.jl/issues/5300)
 
 # Reactant handles initialization via first_time_step!, so this is a no-op.
-Breeze.TimeSteppers.maybe_initialize_state!(::AbstractModel{<:Any, <:ReactantState}, callbacks) = nothing
+Breeze.TimeSteppers.maybe_initialize_state!(::AtmosphereModel{<:Any, <:Any, <:ReactantState}, callbacks) = nothing
 
 #####
 ##### SSPRungeKutta3 time stepping for Reactant
 #####
 
-function OceananigansTimeSteppers.time_step!(model::AbstractModel{<:SSPRungeKutta3{FT}, <:ReactantState}, Δt; callbacks=[]) where FT
+function OceananigansTimeSteppers.time_step!(model::AtmosphereModel{<:Any, <:Any, <:ReactantState, <:SSPRungeKutta3}, Δt; callbacks=[])
     ts = model.timestepper
     α¹, α², α³ = ts.α¹, ts.α², ts.α³
 
@@ -60,7 +60,7 @@ function OceananigansTimeSteppers.time_step!(model::AbstractModel{<:SSPRungeKutt
     return nothing
 end
 
-function OceananigansTimeSteppers.first_time_step!(model::AbstractModel{<:SSPRungeKutta3, <:ReactantState}, Δt)
+function OceananigansTimeSteppers.first_time_step!(model::AtmosphereModel{<:Any, <:Any, <:ReactantState, <:SSPRungeKutta3}, Δt)
     initialize!(model)
     update_state!(model)
     time_step!(model, Δt)

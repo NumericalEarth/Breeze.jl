@@ -1,6 +1,6 @@
 using KernelAbstractions: @kernel, @index
 
-using Oceananigans: AbstractModel, prognostic_fields, fields
+using Oceananigans: prognostic_fields, fields
 using Oceananigans.TimeSteppers:
     AbstractTimeStepper,
     tick!,
@@ -9,7 +9,7 @@ using Oceananigans.TimeSteppers:
     step_lagrangian_particles!,
     implicit_step!
 
-using Breeze.AtmosphereModels: compute_pressure_correction!, make_pressure_correction!
+using Breeze.AtmosphereModels: AtmosphereModel, compute_pressure_correction!, make_pressure_correction!
 using Oceananigans.Utils: launch!, time_difference_seconds
 
 """
@@ -174,7 +174,7 @@ u^(3) = 1/3 u^(0) + 2/3 u^(2) + 2/3 Δt L(u^(2))
 
 where `L` above is the right-hand-side, e.g., `∂u/∂t = L(u)`.
 """
-function OceananigansTimeSteppers.time_step!(model::AbstractModel{<:SSPRungeKutta3}, Δt; callbacks=[])
+function OceananigansTimeSteppers.time_step!(model::AtmosphereModel{<:Any, <:Any, <:Any, <:SSPRungeKutta3}, Δt; callbacks=[])
     Δt == 0 && @warn "Δt == 0 may cause model blowup!"
 
     # Be paranoid and update state at iteration 0, in case run! is not used:
