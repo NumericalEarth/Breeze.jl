@@ -244,7 +244,7 @@ function AtmosphereModel(grid;
     scalar_advection_tuple = with_tracers(scalar_names, scalar_advection, default_generator, with_velocities=false)
     momentum_advection_tuple = (; momentum = momentum_advection)
     advection = merge(momentum_advection_tuple, scalar_advection_tuple)
-    advection = NamedTuple(name => adapt_advection_order(scheme, grid) for (name, scheme) in pairs(advection))
+    advection_tuple = NamedTuple(name => adapt_advection_order(scheme, grid) for (name, scheme) in pairs(advection))
 
     model = AtmosphereModel(arch,
                             grid,
@@ -260,7 +260,7 @@ function AtmosphereModel(grid;
                             velocities,
                             tracers,
                             nothing, # buoyancy, temporary solution for compatibility with Oceananigans.TurbulenceClosures
-                            advection,
+                            advection_tuple,
                             coriolis,
                             forcing,
                             microphysics,
