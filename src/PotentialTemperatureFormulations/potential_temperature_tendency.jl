@@ -68,7 +68,7 @@ end
                                                 ρe_forcing,
                                                 advection,
                                                 dynamics,
-                                                formulation,
+                                                formulation::LiquidIcePotentialTemperatureFormulation,
                                                 constants,
                                                 specific_moisture,
                                                 velocities,
