@@ -12,6 +12,7 @@ if filter_tests!(testsuite, args)
     # support is improved.
     if VERSION >= v"1.12"
         delete!(testsuite, "reactant_compilation")
+        delete!(testsuite, "reactant_compressible_dynamics_models")
     end
 end
 
