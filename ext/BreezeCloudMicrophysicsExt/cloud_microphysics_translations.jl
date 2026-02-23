@@ -431,6 +431,11 @@ end
     return numerator / denominator * ap.M_w / ap.ρ_w
 end
 
+# Safe math helpers for the ARG 2000 parameterization.
+# Unphysical thermodynamic states (from advection errors) can produce
+# negative intermediate values that would crash sqrt or fractional ^.
+@inline safe_sqrt(x::FT) where FT = sqrt(max(zero(FT), x))
+
 # Helper function to compute Sᵐᵃˣ
 # Dispatches on aerosol_activation type to enable different activation schemes
 @inline function compute_smax(aerosol_activation, A::FT, α::FT, γ::FT, G::FT, w::FT, ρᴸ::FT) where FT
@@ -441,7 +446,12 @@ end
     # ARG 2000 parameterization is only valid for positive updraft velocities
     w⁺ = max(eps(FT), w)
 
-    ζ = 2A / 3 * sqrt(α * w⁺ / G)
+    # Clamp α: negative α arises from unphysical thermodynamic states
+    # (e.g., negative vapor fraction from advection errors).
+    # Activation should not occur in that case.
+    α⁺ = max(zero(FT), α)
+
+    ζ = 2A / 3 * safe_sqrt(α⁺ * w⁺ / G)
 
     # Compute critical supersaturation and contribution from each mode
     Σ_inv_Sᵐᵃˣ² = zero(FT)
@@ -451,21 +461,21 @@ end
         κ̄ = mean_hygroscopicity(ap, mode)
 
         # Critical supersaturation (Eq. 9 in ARG 2000)
-        Sᶜʳⁱᵗ = 2 / sqrt(κ̄) * sqrt(A / (3 * mode.r_dry))^3
+        Sᶜʳⁱᵗ = 2 / safe_sqrt(κ̄) * safe_sqrt(A / (3 * mode.r_dry))^3
 
         # Fitting parameters (fᵥ and gᵥ are ventilation-related)
         fᵥ = ap.f1 * exp(ap.f2 * log(mode.stdev)^2)
         gᵥ = ap.g1 + ap.g2 * log(mode.stdev)
 
         # η parameter
-        η = sqrt(α * w⁺ / G)^3 / (2π * ρᴸ * γ * mode.N)
+        η = safe_sqrt(α⁺ * w⁺ / G)^3 / (2π * ρᴸ * γ * mode.N)
 
         # Contribution to 1/Sᵐᵃˣ² (Eq. 6 in ARG 2000)
-        Σ_inv_Sᵐᵃˣ² += 1 / Sᶜʳⁱᵗ^2 * (fᵥ * (ζ / η)^ap.p1 + gᵥ * (Sᶜʳⁱᵗ^2 / (η + 3 * ζ))^ap.p2)
+        Σ_inv_Sᵐᵃˣ² += 1 / Sᶜʳⁱᵗ^2 * (fᵥ * safe_sqrt(ζ / η)^3 + gᵥ * safe_sqrt(Sᶜʳⁱᵗ^2 / (η + 3ζ)))
     end
 
-    Sᵐᵃˣ_computed = 1 / sqrt(Σ_inv_Sᵐᵃˣ²)
+    Sᵐᵃˣ_computed = 1 / safe_sqrt(Σ_inv_Sᵐᵃˣ²)
 
-    # Return 0 for no updraft (w <= 0), otherwise return computed value
-    return ifelse(w > zero(FT), Sᵐᵃˣ_computed, zero(FT))
+    # Return 0 for no updraft (w <= 0) or unphysical state (α <= 0)
+    return ifelse((w > zero(FT)) & (α > zero(FT)), Sᵐᵃˣ_computed, zero(FT))
 end

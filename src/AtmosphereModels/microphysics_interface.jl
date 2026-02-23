@@ -116,6 +116,92 @@ end
 end
 
 #####
+##### Tendency limiting factor
+#####
+#
+# A single global limiting factor α ∈ [0, 1] per grid point, applied to ALL
+# microphysical tendencies uniformly, so that no prognostic tracer vanishes
+# within a worst-case timestep Δt_worst = 2 * clock.last_Δt.
+#
+# Per-tracer limiting would break conservation: e.g. autoconversion converts
+# cloud→rain. Limiting the cloud sink but not the rain source would create mass.
+# A global factor scales both identically, preserving inter-tracer conservation.
+#
+# Uses type-stable tuple recursion via Val-wrapped names, matching the pattern
+# in _extract_prognostics above.
+
+# Base case: no more tracers to check
+@inline _tendency_factor(microphysics, ρ, ℳ, 𝒰, constants, clock, Δt, fields, i, j, k) = one(ρ)
+
+# Recursive case: compute factor for one tracer, recurse on rest
+@inline function _tendency_factor(microphysics, ρ, ℳ, 𝒰, constants, clock, Δt, fields, i, j, k,
+                                  vname::Val{name}, rest...) where name
+    G = microphysical_tendency(microphysics, vname, ρ, ℳ, 𝒰, constants, clock)
+    ρq = @inbounds getproperty(fields, name)[i, j, k]
+    ρq_safe = max(zero(ρ), ρq)
+    α_candidate = ρq_safe / (-G * Δt)
+    α = ifelse(G < zero(G), min(one(ρ), α_candidate), one(ρ))
+    α_rest = _tendency_factor(microphysics, ρ, ℳ, 𝒰, constants, clock, Δt, fields, i, j, k, rest...)
+    return min(α, α_rest)
+end
+
+"""
+$(TYPEDSIGNATURES)
+
+Compute a global tendency limiting factor `α ∈ [0, 1]` at grid point `(i, j, k)`.
+
+The factor ensures that no prognostic microphysical tracer is driven negative by
+source terms within a worst-case timestep `Δt_worst = 2 * clock.last_Δt`. All
+microphysical tendencies at this grid point are multiplied by the same `α`, which
+preserves inter-tracer conservation (e.g., cloud→rain conversions remain balanced).
+
+Returns `1` (no limiting) when:
+- No prognostic fields exist (saturation adjustment, `Nothing` microphysics)
+- All tendencies are non-negative (sources only)
+- The clock has not yet recorded a valid timestep (`clock.last_Δt` is `Inf` or `NaN`)
+
+See also [`grid_microphysical_tendency`](@ref), [`microphysical_tendency`](@ref).
+"""
+@inline function grid_microphysical_tendency_factor(i, j, k, grid, microphysics, ρ, fields, ℳ, 𝒰, constants, clock)
+    Δt_worst = 2 * clock.last_Δt
+    valid_Δt = isfinite(Δt_worst) & (Δt_worst > 0)
+    names = prognostic_field_names(microphysics)
+    val_names = map(Val, names)
+    α = _tendency_factor(microphysics, ρ, ℳ, 𝒰, constants, clock, Δt_worst, fields, i, j, k, val_names...)
+    return ifelse(valid_Δt, α, one(ρ))
+end
+
+#####
+##### Numerical restoration tendency
+#####
+
+"""
+$(TYPEDSIGNATURES)
+
+Compute a numerical restoration tendency that drives negative tracer values toward zero.
+
+When a density-weighted prognostic microphysical tracer `c` is negative at grid point
+`(i, j, k)`, returns a positive tendency `-ρq / Δt` that restores it to zero over
+approximately one timestep. Returns zero for non-negative values and for non-microphysical
+tracers.
+
+This corrects small negative values from numerical advection errors. The microphysical
+tendency limiter ([`grid_microphysical_tendency_factor`](@ref)) prevents source-term-driven
+negativity; this function handles residual negativity from transport.
+"""
+@inline function numerical_microphysical_tendency(i, j, k, microphysics, name::Val{N}, c, clock) where N
+    @inbounds ρq = c[i, j, k]
+    Δt = clock.last_Δt
+    valid_Δt = isfinite(Δt) & (Δt > 0)
+    is_prognostic = N ∈ prognostic_field_names(microphysics)
+    G = -ρq / 2Δt
+    return ifelse(is_prognostic & (ρq < 0) & valid_Δt, G, zero(ρq))
+end
+
+@inline numerical_microphysical_tendency(i, j, k, ::Nothing, name, c, clock) = zero(eltype(c))
+@inline numerical_microphysical_tendency(i, j, k, ::Nothing, name::Val, c, clock) = zero(eltype(c))
+
+#####
 ##### MicrophysicalState interface
 #####
 
@@ -229,6 +315,10 @@ This is the **grid-indexed** interface used by the tendency kernels. The default
 implementation builds the microphysical state `ℳ` via [`microphysical_state`](@ref)
 and dispatches to the state-based [`microphysical_tendency`](@ref).
 
+The tendency is multiplied by a global limiting factor `α` from
+[`grid_microphysical_tendency_factor`](@ref), which prevents prognostic tracers from
+being driven negative by microphysical source terms within a single timestep.
+
 Schemes that need full grid access (e.g., for non-local operations) can override
 this method directly without using `microphysical_state`.
 
@@ -238,7 +328,9 @@ this method directly without using `microphysical_state`.
 """
 @inline function grid_microphysical_tendency(i, j, k, grid, microphysics, name, ρ, fields, 𝒰, constants, velocities, clock)
     ℳ = grid_microphysical_state(i, j, k, grid, microphysics, fields, ρ, 𝒰, velocities)
-    return microphysical_tendency(microphysics, name, ρ, ℳ, 𝒰, constants, clock)
+    G = microphysical_tendency(microphysics, name, ρ, ℳ, 𝒰, constants, clock)
+    α = grid_microphysical_tendency_factor(i, j, k, grid, microphysics, ρ, fields, ℳ, 𝒰, constants, clock)
+    return α * G
 end
 
 # Explicit Nothing fallback
