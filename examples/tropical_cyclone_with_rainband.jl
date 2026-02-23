@@ -36,6 +36,13 @@ Random.seed!(42)
 Random.TaskLocalRNG()
 
 ###########################
+# Output directory
+###########################
+
+const figures_dir = "figures"
+mkpath(figures_dir)
+
+###########################
 # Configuration flags
 ###########################
 
@@ -52,11 +59,11 @@ const use_yu_didlake_2019 = false
 Oceananigans.defaults.FloatType = Float32
 
 arch = GPU()
-Nx = Ny = 100
+Nx = Ny = 500
 Nz = 128
 
-x = y = (0, 2000Nx)    # 200 km × 200 km domain; 2 km horizontal resolution
-z = (0, 20500)          # 0–20.5 km
+x = y = (0, 1000Nx)    # 1000 km × 1000 km domain; 2 km horizontal resolution
+z = (0, 22000)          # 0–22 km
 
 grid = RectilinearGrid(arch; x, y, z,
                        size = (Nx, Ny, Nz), halo = (5, 5, 5),
@@ -148,7 +155,7 @@ lines!(axθ, θˢ_data, zˢ_data)
 lines!(axT, Tˢ_data .- 273.15, zˢ_data)
 lines!(axq, qᵗˢ_gkg, zˢ_data)
 lines!(axp, pˢ_data ./ 100, zˢ_data)
-Makie.save("dunion2011_sounding.png", fig)
+Makie.save(joinpath(figures_dir, "dunion2011_sounding.png"), fig)
 println("  Saved dunion2011_sounding.png")
 
 ###########################
@@ -185,9 +192,19 @@ boundary_conditions = (ρe=ρe_bcs, ρqᵗ=ρqᵗ_bcs, ρu=ρu_bcs, ρv=ρv_bcs)
 ###########################
 
 # Gaussian mask centred at 19 km absorbs waves before they reach the rigid lid at 20.5 km.
-sponge_rate = 1 / 300.0                                         # s⁻¹  (300 s ≈ 5 min)
-sponge_mask = GaussianMask{:z}(center=19_000.0, width=1_500.0)
-sponge      = Relaxation(rate=sponge_rate, mask=sponge_mask)
+# Implemented as a discrete forcing (not Relaxation) for GPU compatibility: Oceananigans'
+# Relaxation wraps in ContinuousForcing which does dynamic NamedTuple field inspection at
+# kernel launch — this is incompatible with CUDA compilation.
+sponge_params = (center = 21_500f0,            # m — lowered so absorption starts ~18 km
+                 width  = 3_000f0,             # m — wider Gaussian for gradual absorption
+                 rate   = Float32(1 / 30.0))   # s⁻¹ — 30 s timescale (was 300 s)
+
+@inline function sponge_ρw(i, j, k, grid, clock, fields, p)
+    z    = znode(i, j, k, grid, Center(), Center(), Face())
+    mask = exp(-((z - p.center) / p.width)^2)
+    return -p.rate * mask * @inbounds fields.ρw[i, j, k]
+end
+sponge = Forcing(sponge_ρw, discrete_form=true, parameters=sponge_params)
 
 ###########################
 # Coriolis
@@ -478,57 +495,57 @@ r_km = rrange ./ 1000
 
 # ---- 2. RMW vs height ----
 fig = Figure(size=(480, 550))
-ax  = Axis(fig[1, 1], xlabel="RMW (km)", ylabel="Height (km)",
-           title="Radius of Maximum Winds\n(Stern & Nolan 2009 Eq. 4.4)")
+ax  = Axis(fig[1, 1], xlabel="Radius of Maximum Winds (km)", ylabel="Height (km)",
+           title="Radius of Maximum Winds vs. Height\n(Stern & Nolan 2009 Eq. 4.4)")
 lines!(ax, rmw_profile ./ 1000, z_km)
-vlines!(ax, [RMW/1000], color=:red, linestyle=:dash, label="Surface RMW")
+vlines!(ax, [RMW/1000], color=:red, linestyle=:dash, label="Surface RMW = $(RMW/1000) km")
 axislegend(ax)
-Makie.save("rmw_profile.png", fig)
+Makie.save(joinpath(figures_dir, "rmw_profile.png"), fig)
 println("  Saved rmw_profile.png")
 
 # ---- 3. Tangential wind profile at surface (1-D) ----
 vt_sfc = [tangential_wind(x_center + r, y_center, z_nodes_cpu[1]) for r in rrange]
 fig = Figure(size=(500, 380))
-ax  = Axis(fig[1, 1], xlabel="Radius (km)", ylabel="|V_tan| (m/s)",
-           title="Modified Rankine Wind Profile at Surface")
+ax  = Axis(fig[1, 1], xlabel="Radius from storm centre (km)", ylabel="Tangential wind speed (m s⁻¹)",
+           title="Initial Tangential Wind Profile at Surface\n(Modified Rankine Vortex)")
 lines!(ax, r_km, vt_sfc)
 vlines!(ax, [RMW/1000], color=:red, linestyle=:dash, label="RMW = $(RMW/1000) km")
 axislegend(ax)
 xlims!(ax, 0, 200)
-Makie.save("tangential_wind_profile_1d.png", fig)
+Makie.save(joinpath(figures_dir, "tangential_wind_profile_1d.png"), fig)
 println("  Saved tangential_wind_profile_1d.png")
 
 # ---- 4. Pressure deficit cross section (r–z) ----
-p_deficit = (p_outer' .- p_vortex) ./ 100   # hPa; shape (Nz, Nr)
+p_deficit = (p_outer .- p_vortex) ./ 100   # hPa; shape (Nz, Nr)
 fig = Figure(size=(700, 430))
-fig[0, :] = Label(fig, "Pressure deficit (hPa)", fontsize=14, tellwidth=false)
-ax  = Axis(fig[1, 1], xlabel="Radius (km)", ylabel="Height (km)")
-cf  = contourf!(ax, r_km, z_km, p_deficit; colormap=:viridis)
-Colorbar(fig[1, 2], cf, label="Δp (hPa)")
+fig[0, :] = Label(fig, "Initial Pressure Deficit vs. Background (hPa)", fontsize=14, tellwidth=false)
+ax  = Axis(fig[1, 1], xlabel="Radius from storm centre (km)", ylabel="Height (km)")
+cf  = contourf!(ax, r_km, z_km, p_deficit'; colormap=:viridis)
+Colorbar(fig[1, 2], cf, label="Pressure deficit Δp (hPa)")
 xlims!(ax, 0, 200)
-Makie.save("pressure_deficit_profile.png", fig)
+Makie.save(joinpath(figures_dir, "pressure_deficit_profile.png"), fig)
 println("  Saved pressure_deficit_profile.png")
 
 # ---- 5. Wind speed plan view at k = 1 (≈ surface) ----
 speed_xy = (Array(interior(model.velocities.u, :, :, 1)).^2 .+
             Array(interior(model.velocities.v, :, :, 1)).^2).^0.5
 fig = Figure(size=(580, 500))
-fig[0, :] = Label(fig, "Wind speed at surface (m/s)", fontsize=14, tellwidth=false)
-ax  = Axis(fig[1, 1], aspect=1, xlabel="x (km)", ylabel="y (km)")
+fig[0, :] = Label(fig, "Initial Horizontal Wind Speed at Surface (m s⁻¹)", fontsize=14, tellwidth=false)
+ax  = Axis(fig[1, 1], aspect=1, xlabel="Zonal distance (km)", ylabel="Meridional distance (km)")
 hm  = heatmap!(ax, x_km, y_km, speed_xy; colormap=:amp, colorrange=(0, V_RMW))
-Colorbar(fig[1, 2], hm, label="|V| (m/s)")
-Makie.save("tangential_wind_profile.png", fig)
+Colorbar(fig[1, 2], hm, label="Horizontal wind speed |V| (m s⁻¹)")
+Makie.save(joinpath(figures_dir, "tangential_wind_profile.png"), fig)
 println("  Saved tangential_wind_profile.png")
 
 # ---- 6. Wind speed cross section through domain centre (y–z) ----
 speed_yz = (Array(interior(model.velocities.u, Nx÷2, :, :)).^2 .+
             Array(interior(model.velocities.v, Nx÷2, :, :)).^2).^0.5
 fig = Figure(size=(680, 430))
-fig[0, :] = Label(fig, "Wind speed cross section y–z (m/s)", fontsize=14, tellwidth=false)
-ax  = Axis(fig[1, 1], xlabel="y (km)", ylabel="z (km)")
-hm  = heatmap!(ax, y_km, z_km, speed_yz'; colormap=:amp, colorrange=(0, V_RMW))
-Colorbar(fig[1, 2], hm, label="|V| (m/s)")
-Makie.save("tangential_wind_profile_cross_section.png", fig)
+fig[0, :] = Label(fig, "Initial Horizontal Wind Speed — North–South Vertical Cross Section (m s⁻¹)", fontsize=14, tellwidth=false)
+ax  = Axis(fig[1, 1], xlabel="Meridional distance (km)", ylabel="Height (km)")
+hm  = heatmap!(ax, y_km, z_km, speed_yz; colormap=:amp, colorrange=(0, V_RMW))
+Colorbar(fig[1, 2], hm, label="Horizontal wind speed |V| (m s⁻¹)")
+Makie.save(joinpath(figures_dir, "tangential_wind_profile_cross_section.png"), fig)
 println("  Saved tangential_wind_profile_cross_section.png")
 
 # ---- 7. Potential temperature perturbation plan view (z ≈ 160 m) ----
@@ -536,60 +553,94 @@ println("  Saved tangential_wind_profile_cross_section.png")
 θ_xy      = Array(interior(θ_lip, :, :, 2))
 θ_bg_k2   = θ_sounding_interp(z_km[2] * 1000)
 Δθ_xy     = θ_xy .- θ_bg_k2
-clim_θ    = maximum(abs.(Δθ_xy))
+clim_θ    = max(Float64(maximum(abs.(Δθ_xy))), 0.01)   # Float64 for Makie; guard zero-range
 fig = Figure(size=(580, 500))
-fig[0, :] = Label(fig, "Δθ at z ≈ $(round(z_km[2], digits=1)) km (K)", fontsize=14, tellwidth=false)
-ax  = Axis(fig[1, 1], aspect=1, xlabel="x (km)", ylabel="y (km)")
-hm  = heatmap!(ax, x_km, y_km, Δθ_xy; colormap=:RdBu_r, colorrange=(-clim_θ, clim_θ))
-Colorbar(fig[1, 2], hm, label="Δθ (K)")
-Makie.save("theta_init.png", fig)
+fig[0, :] = Label(fig, "Initial Potential Temperature Anomaly at z ≈ $(round(z_km[2], digits=1)) km (K)", fontsize=14, tellwidth=false)
+ax  = Axis(fig[1, 1], aspect=1, xlabel="Zonal distance (km)", ylabel="Meridional distance (km)")
+hm  = heatmap!(ax, x_km, y_km, Δθ_xy; colormap=:balance, colorrange=(-clim_θ, clim_θ))
+Colorbar(fig[1, 2], colormap=:balance, limits=(-clim_θ, clim_θ), label="Potential temperature anomaly Δθ (K)")
+Makie.save(joinpath(figures_dir, "theta_init.png"), fig)
 println("  Saved theta_init.png")
 
 # ---- 8. Potential temperature perturbation cross section (y–z) ----
 θ_bg_prof = [θ_sounding_interp(z_km[k] * 1000) for k in 1:Nz]
 Δθ_yz     = Array(interior(θ_lip, Nx÷2, :, :)) .- θ_bg_prof'
-clim_θyz  = maximum(abs.(Δθ_yz))
+clim_θyz  = max(Float64(maximum(abs.(Δθ_yz))), 0.01)
 fig = Figure(size=(680, 430))
-fig[0, :] = Label(fig, "Δθ cross section y–z (K)", fontsize=14, tellwidth=false)
-ax  = Axis(fig[1, 1], xlabel="y (km)", ylabel="z (km)")
-hm  = heatmap!(ax, y_km, z_km, Δθ_yz'; colormap=:RdBu_r, colorrange=(-clim_θyz, clim_θyz))
-Colorbar(fig[1, 2], hm, label="Δθ (K)")
-Makie.save("theta_init_cross_section.png", fig)
+fig[0, :] = Label(fig, "Initial Potential Temperature Anomaly — North–South Vertical Cross Section (K)", fontsize=14, tellwidth=false)
+ax  = Axis(fig[1, 1], xlabel="Meridional distance (km)", ylabel="Height (km)")
+hm  = heatmap!(ax, y_km, z_km, Δθ_yz; colormap=:balance, colorrange=(-clim_θyz, clim_θyz))
+Colorbar(fig[1, 2], colormap=:balance, limits=(-clim_θyz, clim_θyz), label="Potential temperature anomaly Δθ (K)")
+Makie.save(joinpath(figures_dir, "theta_init_cross_section.png"), fig)
 println("  Saved theta_init_cross_section.png")
 
 # ---- 9. Moisture cross section (y–z) ----
 # model.tracers.ρqᵗ is the density-weighted field; divide by ρ_ref to get specific humidity
 fig = Figure(size=(680, 430))
-fig[0, :] = Label(fig, "Initial qᵗ cross section y–z (g/kg)", fontsize=14, tellwidth=false)
-ax  = Axis(fig[1, 1], xlabel="y (km)", ylabel="z (km)")
-qᵗ_yz = Array(interior(model.specific_moisture, Nx÷2, :, :))   # kg/kg
-hm  = heatmap!(ax, y_km, z_km, (qᵗ_yz .* 1000)'; colormap=:dense)
-Colorbar(fig[1, 2], hm, label="qᵗ (g/kg)")
-Makie.save("moisture_init_cross_section.png", fig)
+fig[0, :] = Label(fig, "Initial Total Water Mixing Ratio — North–South Vertical Cross Section (g kg⁻¹)", fontsize=14, tellwidth=false)
+ax  = Axis(fig[1, 1], xlabel="Meridional distance (km)", ylabel="Height (km)")
+qᵗ_yz    = Array(interior(model.specific_moisture, Nx÷2, :, :))   # kg/kg
+qᵗ_gkg   = qᵗ_yz .* 1000f0
+qlim     = Float64(maximum(qᵗ_gkg))
+hm  = heatmap!(ax, y_km, z_km, qᵗ_gkg; colormap=:dense, colorrange=(0.0, qlim))
+Colorbar(fig[1, 2], colormap=:dense, limits=(0.0, qlim), label="Total water mixing ratio qᵗ (g kg⁻¹)")
+Makie.save(joinpath(figures_dir, "moisture_init_cross_section.png"), fig)
 println("  Saved moisture_init_cross_section.png")
 
-# ---- 10. Rainband heating profiles (r–z cross sections) ----
+# ---- 10. Rainband heating profiles (r–z cross sections + plan views) ----
 r_vis = range(0.0, 150_000.0, length=150)
 z_vis = range(0.0, 15_000.0,  length=150)
 Q_con_2d = [convective_rainband_heating(x_center + r, y_center, Float32(z), 0.0f0, con_params)
-            for z in z_vis, r in r_vis]
+            for r in r_vis, z in z_vis]   # (Nr_vis, Nz_vis) — matches contourf!(r_vis, z_vis, M)
 Q_str_2d = [stratiform_rainband_heating(x_center + r, y_center, Float32(z), 0.0f0, str_params)
-            for z in z_vis, r in r_vis]
+            for r in r_vis, z in z_vis]
 
-fig = Figure(size=(950, 420))
-fig[0, :] = Label(fig, "Rainband heating profiles (K/day equivalent)\n" *
-                       "($(use_yu_didlake_2019 ? "Yu & Didlake 2019" : "Moon & Nolan 2010"))",
-                  fontsize=14, tellwidth=false)
-ax1 = Axis(fig[1, 1], xlabel="Radius (km)", ylabel="Height (km)", title="Convective")
-ax2 = Axis(fig[1, 2], xlabel="Radius (km)", ylabel="Height (km)", title="Stratiform")
+# Plan views at the sin-peak height of each component
+xy_vis_km = range(-150.0, 150.0, length=200)   # km, relative to storm centre
+z_con_vis = Float32(z_bc + σ_zc / 2)           # convective peak ≈ 3.5 km
+z_str_vis = Float32(z_bs + σ_zs / 2)           # stratiform heating peak (σ_zs/2 above z_bs)
+Q_con_xy = [convective_rainband_heating(x_center + xr * 1000, y_center + yr * 1000,
+                                        z_con_vis, 0.0f0, con_params)
+            for xr in xy_vis_km, yr in xy_vis_km]   # (Nxy, Nxy)
+Q_str_xy = [stratiform_rainband_heating(x_center + xr * 1000, y_center + yr * 1000,
+                                        z_str_vis, 0.0f0, str_params)
+            for xr in xy_vis_km, yr in xy_vis_km]
+
 lim_c = maximum(abs.(Q_con_2d)) * 86400
 lim_s = max(maximum(abs.(Q_str_2d)) * 86400, 0.01)
+z_con_km = round(z_con_vis / 1000, digits=1)
+z_str_km = round(z_str_vis / 1000, digits=1)
+
+fig = Figure(size=(950, 840))
+fig[0, :] = Label(fig, "Spiral Rainband Diabatic Heating Rate (K day⁻¹)\n" *
+                       "($(use_yu_didlake_2019 ? "Yu & Didlake 2019" : "Moon & Nolan 2010"))",
+                  fontsize=14, tellwidth=false)
+
+# Row 1: r–z cross sections
+ax1 = Axis(fig[1, 1], xlabel="Radius from storm centre (km)", ylabel="Height (km)",
+           title="Convective component — r–z cross section")
+ax2 = Axis(fig[1, 2], xlabel="Radius from storm centre (km)", ylabel="Height (km)",
+           title="Stratiform component — r–z cross section")
 cf1 = contourf!(ax1, collect(r_vis)./1000, collect(z_vis)./1000, Q_con_2d.*86400;
-                colormap=:RdBu_r, levels=range(-lim_c, lim_c, length=21))
+                colormap=:balance, levels=range(-lim_c, lim_c, length=21))
 cf2 = contourf!(ax2, collect(r_vis)./1000, collect(z_vis)./1000, Q_str_2d.*86400;
-                colormap=:RdBu_r, levels=range(-lim_s, lim_s, length=21))
-Colorbar(fig[1, 3], cf2, label="K/day")
-Makie.save("rainband_heating_profiles.png", fig)
+                colormap=:balance, levels=range(-lim_s, lim_s, length=21))
+Colorbar(fig[1, 3], cf2, label="Heating rate (K day⁻¹)")
+
+# Row 2: plan views at the peak heating height of each component
+ax3 = Axis(fig[2, 1], aspect=1,
+           xlabel="Zonal distance from centre (km)", ylabel="Meridional distance from centre (km)",
+           title="Convective component — plan view at z ≈ $(z_con_km) km")
+ax4 = Axis(fig[2, 2], aspect=1,
+           xlabel="Zonal distance from centre (km)", ylabel="Meridional distance from centre (km)",
+           title="Stratiform component — plan view at z ≈ $(z_str_km) km")
+heatmap!(ax3, collect(xy_vis_km), collect(xy_vis_km), Q_con_xy .* 86400;
+         colormap=:balance, colorrange=(-lim_c, lim_c))
+heatmap!(ax4, collect(xy_vis_km), collect(xy_vis_km), Q_str_xy .* 86400;
+         colormap=:balance, colorrange=(-lim_s, lim_s))
+Colorbar(fig[2, 3], colormap=:balance, limits=(-lim_s, lim_s), label="Heating rate (K day⁻¹)")
+
+Makie.save(joinpath(figures_dir, "rainband_heating_profiles.png"), fig)
 println("  Saved rainband_heating_profiles.png")
 
 ###########################
@@ -609,12 +660,12 @@ wall_clock = Ref(time_ns())
 
 function progress(sim)
     elapsed = 1e-9 * (time_ns() - wall_clock[])
-    @info @sprintf("Iter: %d, t: %s, Δt: %s, wall time: %s\n" *
-                   "  max|V|: %.2f m/s, max w: %.2f m/s, min w: %.2f m/s\n" *
-                   "  max(qᵛ): %.2e  max(qᶜˡ): %.2e  max(qʳ): %.2e",
-                   iteration(sim), prettytime(sim), prettytime(sim.Δt), prettytime(elapsed),
-                   maximum(abs, u), maximum(w), minimum(w),
-                   maximum(qᵛ), maximum(qᶜˡ), maximum(qʳ))
+    msg = @sprintf(
+        "Iter: %d, t: %s, Δt: %s, wall: %s | max|V|=%.2f w=[%.2f,%.2f] m/s | qᵛ=%.2e qᶜˡ=%.2e qʳ=%.2e",
+        iteration(sim), prettytime(sim), prettytime(sim.Δt), prettytime(elapsed),
+        maximum(abs, u), minimum(w), maximum(w),
+        maximum(qᵛ), maximum(qᶜˡ), maximum(qʳ))
+    @info msg
     wall_clock[] = time_ns()
     return nothing
 end
@@ -641,14 +692,16 @@ println("  xy-slices at z ≈ $(z_out[k_5km]) m (k=$k_5km) and z ≈ $(z_out[k_1
 println("  xz-slice  at y ≈ $(ynodes(grid, Center())[j_mid]) m (j=$j_mid)")
 
 slice_outputs = (
-    wxy    = view(w,    :, :, k_5km),
-    qʳxy   = view(qʳ,   :, :, k_5km),
-    qᶜˡxy  = view(qᶜˡ,  :, :, k_5km),
-    uxy    = view(u,    :, :, k_1km),
-    vxy    = view(v,    :, :, k_1km),
-    wxz    = view(w,    :, j_mid, :),
-    qʳxz   = view(qʳ,   :, j_mid, :),
-    qᶜˡxz  = view(qᶜˡ,  :, j_mid, :),
+    wxy   = view(w,   :, :, k_5km),
+    qʳxy  = view(qʳ,  :, :, k_5km),
+    qᶜˡxy = view(qᶜˡ, :, :, k_5km),
+    uxy   = view(u,   :, :, k_5km),
+    vxy   = view(v,   :, :, k_5km),
+    wxz   = view(w,   :, j_mid, :),
+    qʳxz  = view(qʳ,  :, j_mid, :),
+    qᶜˡxz = view(qᶜˡ, :, j_mid, :),
+    uxz   = view(u,   :, j_mid, :),
+    vxz   = view(v,   :, j_mid, :),
 )
 
 slices_filename = "tropical_cyclone_and_rainband_slices.jld2"
@@ -658,66 +711,113 @@ simulation.output_writers[:slices] = JLD2Writer(model, slice_outputs;
                                                 schedule = TimeInterval(2minutes),
                                                 overwrite_existing = true)
 
+
+@info "Starting simulation run..."
+run_start = time_ns()
 run!(simulation)
+run_elapsed = (time_ns() - run_start) * 1e-9
+@info @sprintf("Simulation finished in %.2f seconds (%.2f min)", run_elapsed, run_elapsed / 60)
 
 ###########################
 # Post-run plots
 ###########################
 
 println("\n=== Plotting output slices ===")
-wxy_ts    = FieldTimeSeries(slices_filename, "wxy")
-qʳxy_ts   = FieldTimeSeries(slices_filename, "qʳxy")
-qᶜˡxy_ts  = FieldTimeSeries(slices_filename, "qᶜˡxy")
-wxz_ts    = FieldTimeSeries(slices_filename, "wxz")
-qʳxz_ts   = FieldTimeSeries(slices_filename, "qʳxz")
-qᶜˡxz_ts  = FieldTimeSeries(slices_filename, "qᶜˡxz")
+wxy_ts   = FieldTimeSeries(slices_filename, "wxy")
+qʳxy_ts  = FieldTimeSeries(slices_filename, "qʳxy")
+qᶜˡxy_ts = FieldTimeSeries(slices_filename, "qᶜˡxy")
+uxy_ts   = FieldTimeSeries(slices_filename, "uxy")
+vxy_ts   = FieldTimeSeries(slices_filename, "vxy")
+wxz_ts   = FieldTimeSeries(slices_filename, "wxz")
+qʳxz_ts  = FieldTimeSeries(slices_filename, "qʳxz")
+qᶜˡxz_ts = FieldTimeSeries(slices_filename, "qᶜˡxz")
+uxz_ts   = FieldTimeSeries(slices_filename, "uxz")
+vxz_ts   = FieldTimeSeries(slices_filename, "vxz")
 
 times = wxy_ts.times
 Nt    = length(times)
 println("  $Nt snapshots: t ∈ [$(prettytime(times[1])), $(prettytime(times[end]))]")
 
-wlim   = 5.0
-qʳlim  = max(maximum(qʳxy_ts),  maximum(qʳxz_ts))  / 4
-qᶜˡlim = max(maximum(qᶜˡxy_ts), maximum(qᶜˡxz_ts)) / 4
+wlim   = 10.0
+qʳlim  = max(Float64(maximum(qʳxy_ts)),  Float64(maximum(qʳxz_ts)))  / 4
+qᶜˡlim = max(Float64(maximum(qᶜˡxy_ts)), Float64(maximum(qᶜˡxz_ts))) / 4
+qʳlim  = max(qʳlim,  1e-6)
+qᶜˡlim = max(qᶜˡlim, 1e-6)
+Vrlim  = 20.0              # ±20 m/s  (inflow negative, outflow positive)
+Vtlim  = Float64(V_RMW) * 1.5   # max tangential wind scale
 
-fig = Figure(size=(1200, 800), fontsize=12)
+# 2-D coordinate arrays (km, relative to storm centre) for wind decomposition
+x_center_km = Float32(x_center / 1000)
+y_center_km = Float32(y_center / 1000)
+dx_km2d = Float32[x_km[i] - x_center_km for i in 1:Nx, j in 1:Ny]   # (Nx, Ny)
+dy_km2d = Float32[y_km[j] - y_center_km for i in 1:Nx, j in 1:Ny]   # (Nx, Ny)
+r_safe  = max.(sqrt.(dx_km2d.^2 .+ dy_km2d.^2), 1f-3)
+# For the xz slice at y = y_center: sin(ϕ)=0, cos(ϕ)=sign(x−xc)
+sign_x  = reshape(sign.(x_km .- x_center_km), :, 1)                   # (Nx, 1)
+
+fig = Figure(size=(2000, 800), fontsize=12)
 n   = Observable(1)
 fig[0, :] = Label(fig,
-    @lift("TC + rainband: w, qᶜˡ, qʳ — t = " * prettytime(times[$n])),
+    @lift("TC + rainband: w, qᶜˡ, qʳ, Vᵣ, Vₜ — t = " * prettytime(times[$n])),
     fontsize=14, tellwidth=false)
 
-axw_xy    = Axis(fig[1, 1], aspect=1, xlabel="x (km)", ylabel="y (km)", title="w at z≈5 km (m/s)")
-axqᶜˡ_xy  = Axis(fig[1, 2], aspect=1, xlabel="x (km)", ylabel="y (km)", title="qᶜˡ at z≈5 km (kg/kg)")
-axqʳ_xy   = Axis(fig[1, 3], aspect=1, xlabel="x (km)", ylabel="y (km)", title="qʳ at z≈5 km (kg/kg)")
-axw_xz    = Axis(fig[2, 1], xlabel="x (km)", ylabel="z (km)", title="w at y=centre (m/s)")
-axqᶜˡ_xz  = Axis(fig[2, 2], xlabel="x (km)", ylabel="z (km)", title="qᶜˡ at y=centre (kg/kg)")
-axqʳ_xz   = Axis(fig[2, 3], xlabel="x (km)", ylabel="z (km)", title="qʳ at y=centre (kg/kg)")
+# Row 1: xy plan views at z ≈ 5 km
+axw_xy   = Axis(fig[1, 1], aspect=1, xlabel="x (km)", ylabel="y (km)", title="w at z≈5 km (m/s)")
+axqᶜˡ_xy = Axis(fig[1, 2], aspect=1, xlabel="x (km)", ylabel="y (km)", title="qᶜˡ at z≈5 km (kg/kg)")
+axqʳ_xy  = Axis(fig[1, 3], aspect=1, xlabel="x (km)", ylabel="y (km)", title="qʳ at z≈5 km (kg/kg)")
+axVr_xy  = Axis(fig[1, 4], aspect=1, xlabel="x (km)", ylabel="y (km)", title="Radial wind at z≈5 km (m/s)")
+axVt_xy  = Axis(fig[1, 5], aspect=1, xlabel="x (km)", ylabel="y (km)", title="Tangential wind at z≈5 km (m/s)")
 
-wxy_n    = @lift Array(interior(wxy_ts[$n],    :, :, 1))
-qᶜˡxy_n  = @lift Array(interior(qᶜˡxy_ts[$n], :, :, 1))
-qʳxy_n   = @lift Array(interior(qʳxy_ts[$n],  :, :, 1))
-wxz_n    = @lift Array(interior(wxz_ts[$n],    :, 1, :))
-qᶜˡxz_n  = @lift Array(interior(qᶜˡxz_ts[$n], :, 1, :))
-qʳxz_n   = @lift Array(interior(qʳxz_ts[$n],  :, 1, :))
+# Row 2: x–z cross sections through domain centre
+axw_xz   = Axis(fig[2, 1], xlabel="x (km)", ylabel="z (km)", title="w at y=centre (m/s)")
+axqᶜˡ_xz = Axis(fig[2, 2], xlabel="x (km)", ylabel="z (km)", title="qᶜˡ at y=centre (kg/kg)")
+axqʳ_xz  = Axis(fig[2, 3], xlabel="x (km)", ylabel="z (km)", title="qʳ at y=centre (kg/kg)")
+axVr_xz  = Axis(fig[2, 4], xlabel="x (km)", ylabel="z (km)", title="Radial wind at y=centre (m/s)")
+axVt_xz  = Axis(fig[2, 5], xlabel="x (km)", ylabel="z (km)", title="Tangential wind at y=centre (m/s)")
 
-hmw_xy   = heatmap!(axw_xy,   x_km, y_km, wxy_n;    colormap=:balance, colorrange=(-wlim,   wlim))
-hmqᶜˡ_xy = heatmap!(axqᶜˡ_xy, x_km, y_km, qᶜˡxy_n;  colormap=:dense,   colorrange=(0, qᶜˡlim))
-hmqʳ_xy  = heatmap!(axqʳ_xy,  x_km, y_km, qʳxy_n;   colormap=:amp,     colorrange=(0, qʳlim))
-hmw_xz   = heatmap!(axw_xz,   x_km, z_km, wxz_n;    colormap=:balance, colorrange=(-wlim,   wlim))
-hmqᶜˡ_xz = heatmap!(axqᶜˡ_xz, x_km, z_km, qᶜˡxz_n;  colormap=:dense,   colorrange=(0, qᶜˡlim))
-hmqʳ_xz  = heatmap!(axqʳ_xz,  x_km, z_km, qʳxz_n;   colormap=:amp,     colorrange=(0, qʳlim))
+# Observables for saved fields
+wxy_n   = @lift Array(interior(wxy_ts[$n],   :, :, 1))
+qᶜˡxy_n = @lift Array(interior(qᶜˡxy_ts[$n], :, :, 1))
+qʳxy_n  = @lift Array(interior(qʳxy_ts[$n],  :, :, 1))
+uxy_n   = @lift Array(interior(uxy_ts[$n],   :, :, 1))
+vxy_n   = @lift Array(interior(vxy_ts[$n],   :, :, 1))
+wxz_n   = @lift Array(interior(wxz_ts[$n],   :, 1, :))
+qᶜˡxz_n = @lift Array(interior(qᶜˡxz_ts[$n], :, 1, :))
+qʳxz_n  = @lift Array(interior(qʳxz_ts[$n],  :, 1, :))
+uxz_n   = @lift Array(interior(uxz_ts[$n],   :, 1, :))
+vxz_n   = @lift Array(interior(vxz_ts[$n],   :, 1, :))
+
+# Derived: radial wind Vᵣ = (u·x̂ + v·ŷ)/r,  tangential Vₜ = (−u·ŷ + v·x̂)/r
+Vrxy_n  = @lift (($uxy_n) .* dx_km2d .+ ($vxy_n) .* dy_km2d) ./ r_safe
+Vtxy_n  = @lift (-($uxy_n) .* dy_km2d .+ ($vxy_n) .* dx_km2d) ./ r_safe
+# At y=y_centre: sin(ϕ)=0 so Vᵣ=u·sign(x−xc), Vₜ=v·sign(x−xc)
+Vrxz_n  = @lift ($uxz_n) .* sign_x
+Vtxz_n  = @lift ($vxz_n) .* sign_x
+
+hmw_xy   = heatmap!(axw_xy,   x_km, y_km, wxy_n;   colormap=:balance, colorrange=(-wlim,   wlim))
+hmqᶜˡ_xy = heatmap!(axqᶜˡ_xy, x_km, y_km, qᶜˡxy_n; colormap=:dense,   colorrange=(0, qᶜˡlim))
+hmqʳ_xy  = heatmap!(axqʳ_xy,  x_km, y_km, qʳxy_n;  colormap=:amp,     colorrange=(0, qʳlim))
+hmVr_xy  = heatmap!(axVr_xy,  x_km, y_km, Vrxy_n;  colormap=:balance, colorrange=(-Vrlim, Vrlim))
+hmVt_xy  = heatmap!(axVt_xy,  x_km, y_km, Vtxy_n;  colormap=:amp,     colorrange=(0, Vtlim))
+hmw_xz   = heatmap!(axw_xz,   x_km, z_km, wxz_n;   colormap=:balance, colorrange=(-wlim,   wlim))
+hmqᶜˡ_xz = heatmap!(axqᶜˡ_xz, x_km, z_km, qᶜˡxz_n; colormap=:dense,   colorrange=(0, qᶜˡlim))
+hmqʳ_xz  = heatmap!(axqʳ_xz,  x_km, z_km, qʳxz_n;  colormap=:amp,     colorrange=(0, qʳlim))
+hmVr_xz  = heatmap!(axVr_xz,  x_km, z_km, Vrxz_n;  colormap=:balance, colorrange=(-Vrlim, Vrlim))
+hmVt_xz  = heatmap!(axVt_xz,  x_km, z_km, Vtxz_n;  colormap=:amp,     colorrange=(0, Vtlim))
 
 Colorbar(fig[3, 1], hmw_xy,   vertical=false, label="w (m/s)")
 Colorbar(fig[3, 2], hmqᶜˡ_xy, vertical=false, label="qᶜˡ (kg/kg)")
 Colorbar(fig[3, 3], hmqʳ_xy,  vertical=false, label="qʳ (kg/kg)")
+Colorbar(fig[3, 4], hmVr_xy,  vertical=false, label="Vᵣ (m/s)")
+Colorbar(fig[3, 5], hmVt_xy,  vertical=false, label="Vₜ (m/s)")
 
 # Save all frames
 for t_idx in 1:Nt
     n[] = t_idx
-    Makie.save(@sprintf("tropical_cyclone_slices_t%04d.png", t_idx), fig)
+    Makie.save(joinpath(figures_dir, @sprintf("tropical_cyclone_slices_t%04d.png", t_idx)), fig)
 end
 n[] = Nt
-Makie.save("tropical_cyclone_slices_final.png", fig)
+Makie.save(joinpath(figures_dir, "tropical_cyclone_slices_final.png"), fig)
 println("  Saved $Nt frames + tropical_cyclone_slices_final.png")
 
 # ---- Max-w time series ----
@@ -725,5 +825,5 @@ fig_ts = Figure(size=(600, 340))
 ax_ts  = Axis(fig_ts[1, 1], xlabel="Time (h)", ylabel="max w (m/s)",
               title="Maximum vertical velocity")
 lines!(ax_ts, max_w_times ./ 3600, max_w_ts)
-Makie.save("max_w_timeseries.png", fig_ts)
+Makie.save(joinpath(figures_dir, "max_w_timeseries.png"), fig_ts)
 println("  Saved max_w_timeseries.png")
