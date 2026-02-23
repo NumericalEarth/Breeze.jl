@@ -39,7 +39,7 @@ Random.seed!(2025)
 # This gives RRTMGP a realistic atmospheric column (including the stratosphere)
 # while keeping the total cell count modest.
 
-Nx = 128
+Nx = 256
 Lx = 12800   # 12.8 km
 
 arch = GPU()
