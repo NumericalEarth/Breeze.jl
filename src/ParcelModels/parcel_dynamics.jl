@@ -12,10 +12,43 @@ using KernelAbstractions: @kernel, @index
 using Breeze.Thermodynamics: MoistureMassFractions,
     LiquidIcePotentialTemperatureState, StaticEnergyState,
     PlanarLiquidSurface,
-    with_moisture, mixture_heat_capacity,
+    with_moisture, mixture_heat_capacity, density,
     temperature_from_potential_temperature, saturation_specific_humidity
 
 using Breeze.AtmosphereModels: AtmosphereModels, AtmosphereModel
+
+#####
+##### Updraft types
+#####
+
+"""
+    SpecifiedUpdraft
+
+Singleton type for specified updraft dynamics. The parcel rises following
+the prescribed environmental vertical velocity field `w(z)`.
+
+This is the default updraft type: `dz/dt = w_env(z)`.
+"""
+struct SpecifiedUpdraft end
+
+"""
+    BuoyancyDrivenUpdraft
+
+Singleton type for buoyancy-driven updraft dynamics. The parcel has a
+prognostic vertical velocity driven by buoyancy:
+
+```math
+dw/dt = B
+dz/dt = w
+```
+
+where `B = -g (ρ_parcel - ρ_env) / ρ_env` is the net buoyancy from the density
+difference, including both the virtual temperature effect and condensate loading.
+"""
+struct BuoyancyDrivenUpdraft end
+
+Base.summary(::SpecifiedUpdraft) = "SpecifiedUpdraft"
+Base.summary(::BuoyancyDrivenUpdraft) = "BuoyancyDrivenUpdraft"
 
 #####
 ##### ParcelState: state of a rising parcel
@@ -34,6 +67,7 @@ mutable struct ParcelState{FT, TH, MP}
     x :: FT
     y :: FT
     z :: FT
+    w :: FT
     ρ :: FT
     qᵗ :: FT
     ρqᵗ :: FT
@@ -52,7 +86,8 @@ end
 Base.eltype(::ParcelState{FT}) where FT = FT
 
 function Base.show(io::IO, state::ParcelState{FT}) where FT
-    print(io, "ParcelState{$FT}(z=", state.z, ", ρ=", round(state.ρ, digits=4),
+    print(io, "ParcelState{$FT}(z=", state.z, ", w=", round(state.w, digits=4),
+          ", ρ=", round(state.ρ, digits=4),
           ", qᵗ=", round(state.qᵗ * 1000, digits=2), " g/kg)")
 end
 
@@ -75,13 +110,14 @@ mutable struct ParcelTendencies{FT, GM}
     Gx :: FT
     Gy :: FT
     Gz :: FT
+    Gw :: FT
     Ge :: FT
     Gqᵗ :: FT
     Gμ :: GM
 end
 
 ParcelTendencies(FT::DataType, Gμ::GM) where GM =
-    ParcelTendencies{FT, GM}(zero(FT), zero(FT), zero(FT), zero(FT), zero(FT), Gμ)
+    ParcelTendencies{FT, GM}(zero(FT), zero(FT), zero(FT), zero(FT), zero(FT), zero(FT), Gμ)
 
 #####
 ##### ParcelDynamics: Lagrangian parcel dynamics for AtmosphereModel
@@ -100,11 +136,12 @@ Lagrangian parcel dynamics for [`AtmosphereModel`](@ref).
 - `surface_pressure`: surface pressure [Pa]
 - `standard_pressure`: standard pressure for potential temperature [Pa]
 """
-struct ParcelDynamics{S, TS, D, P, FT}
+struct ParcelDynamics{S, TS, D, P, U, FT}
     state :: S
     timestepper :: TS
     density :: D
     pressure :: P
+    updraft :: U
     surface_pressure :: FT
     standard_pressure :: FT
 end
@@ -118,13 +155,16 @@ The environmental profiles and parcel state are set using `set!` after
 constructing the `AtmosphereModel`.
 """
 function ParcelDynamics(FT::DataType=Oceananigans.defaults.FloatType;
+                        updraft = SpecifiedUpdraft(),
                         surface_pressure = 101325,
                         standard_pressure = 1e5)
-    return ParcelDynamics{Nothing, Nothing, Nothing, Nothing, FT}(
+    U = typeof(updraft)
+    return ParcelDynamics{Nothing, Nothing, Nothing, Nothing, U, FT}(
         nothing,
         nothing,
         nothing,
         nothing,
+        updraft,
         convert(FT, surface_pressure),
         convert(FT, standard_pressure)
     )
@@ -137,6 +177,7 @@ function Base.show(io::IO, d::ParcelDynamics)
     state_str = d.state isa ParcelState ? d.state : "uninitialized"
     println(io, "├── state: ", state_str)
     println(io, "├── timestepper: ", isnothing(d.timestepper) ? "uninitialized" : "ParcelTimestepper (SSP RK3)")
+    println(io, "├── updraft: ", summary(d.updraft))
     println(io, "├── density: ", isnothing(d.density) ? "unset" : summary(d.density))
     println(io, "├── pressure: ", isnothing(d.pressure) ? "unset" : summary(d.pressure))
     println(io, "├── surface_pressure: ", d.surface_pressure)
@@ -209,18 +250,19 @@ function AtmosphereModels.materialize_dynamics(d::ParcelDynamics, grid, bcs, con
 
     # Initialize state with default values
     ρ_default = FT(1.2)
+    w_default = zero(FT)
     qᵗ_default = zero(FT)
     ρqᵗ_default = ρ_default * qᵗ_default
     ℰ_default = e_default  # static energy for default formulation
     ρℰ_default = ρ_default * ℰ_default
-    state = ParcelState(zero(FT), zero(FT), z_default, ρ_default, qᵗ_default, ρqᵗ_default,
-                        ℰ_default, ρℰ_default, 𝒰, μ)
+    state = ParcelState(zero(FT), zero(FT), z_default, w_default, ρ_default,
+                        qᵗ_default, ρqᵗ_default, ℰ_default, ρℰ_default, 𝒰, μ)
 
     # SSP RK3 timestepper with tendencies
     Gμ = zero_microphysics_prognostic_tendencies(μ)
     timestepper = ParcelTimestepper(state, Gμ)
 
-    return ParcelDynamics(state, timestepper, ρ, p, p₀, pˢᵗ)
+    return ParcelDynamics(state, timestepper, ρ, p, d.updraft, p₀, pˢᵗ)
 end
 
 """
@@ -261,6 +303,7 @@ Adapt.adapt_structure(to, d::ParcelDynamics) =
                    adapt(to, d.timestepper),
                    adapt(to, d.density),
                    adapt(to, d.pressure),
+                   d.updraft,
                    d.surface_pressure,
                    d.standard_pressure)
 
@@ -269,6 +312,7 @@ Oceananigans.Architectures.on_architecture(to, d::ParcelDynamics) =
                    on_architecture(to, d.timestepper),
                    on_architecture(to, d.density),
                    on_architecture(to, d.pressure),
+                   d.updraft,
                    d.surface_pressure,
                    d.standard_pressure)
 
@@ -304,15 +348,17 @@ conditions interpolated at that height.
 - `v`: Meridional velocity v(z) [m/s] - function, array, or constant (default: 0)
 - `w`: Vertical velocity w(z) [m/s] - function, array, or constant (default: 0)
 
-**Parcel position**:
+**Parcel state**:
 - `x`: Initial parcel x-position [m] (default: 0)
 - `y`: Initial parcel y-position [m] (default: 0)
 - `z`: Initial parcel height [m] (required to initialize parcel state)
+- `w_parcel`: Initial parcel vertical velocity [m/s] (for `BuoyancyDrivenUpdraft`)
 """
 function Oceananigans.set!(model::ParcelModel; T = nothing, θ = nothing,
                            ρ = nothing, p = nothing,
                            qᵗ = nothing, ℋ = nothing,
                            u = 0, v = 0, w = 0,
+                           w_parcel = nothing,
                            x = 0, y = 0, z = nothing)
 
     dynamics = model.dynamics
@@ -357,6 +403,11 @@ function Oceananigans.set!(model::ParcelModel; T = nothing, θ = nothing,
     # Initialize parcel state if z is provided
     if !isnothing(z)
         initialize_parcel_state!(dynamics.state, z, x, y, model)
+    end
+
+    # Set parcel vertical velocity (for BuoyancyDrivenUpdraft)
+    if !isnothing(w_parcel)
+        dynamics.state.w = convert(eltype(model.grid), w_parcel)
     end
 
     return nothing
@@ -438,10 +489,11 @@ function initialize_parcel_state!(state, z₀, x₀, y₀, model)
     p₀ = interpolate(z₀, dynamics.pressure)
     qᵗ₀ = interpolate(z₀, model.specific_moisture)
 
-    # Set position
+    # Set position and zero vertical velocity (can be overridden by set! w_parcel keyword)
     state.x = x₀
     state.y = y₀
     state.z = z₀
+    state.w = zero(FT)
 
     # Set density and moisture
     state.ρ = ρ₀
@@ -508,10 +560,12 @@ function compute_parcel_tendencies!(model::ParcelModel)
     𝒰 = state.𝒰
     μ = state.μ
 
-    # Position tendencies = environmental velocity at current height
+    # Horizontal position tendencies = environmental velocity at current height
     tendencies.Gx = interpolate(z, model.velocities.u)
     tendencies.Gy = interpolate(z, model.velocities.v)
-    tendencies.Gz = interpolate(z, model.velocities.w)
+
+    # Vertical position and velocity tendencies dispatched on updraft type
+    compute_updraft_tendencies!(tendencies, state, dynamics, model, dynamics.updraft)
 
     # Build diagnostic microphysical state from prognostic variables
     # Pass velocities for microphysics (e.g., aerosol activation uses vertical velocity)
@@ -526,6 +580,68 @@ function compute_parcel_tendencies!(model::ParcelModel)
     # Microphysics prognostic tendencies (scheme-dependent)
     tendencies.Gμ = compute_microphysics_prognostic_tendencies(microphysics, ρ, μ, ℳ, 𝒰, constants)
 
+    return nothing
+end
+
+#####
+##### Buoyancy computation and updraft tendency dispatch
+#####
+
+"""
+$(TYPEDSIGNATURES)
+
+Compute the net buoyancy acceleration for a parcel.
+
+The buoyancy is computed from the density difference between the parcel and
+environment: `B = -g (ρ_parcel - ρ_env) / ρ_env`.
+
+Here `ρ_parcel = p / (Rᵐ T)` is the total parcel density from the ideal gas law,
+where `Rᵐ = qᵈ Rᵈ + qᵛ Rᵛ` with `qᵈ = 1 - qᵛ - qˡ - qⁱ`. This formulation
+captures both the virtual temperature effect (from vapor content) and the
+condensate loading effect (condensate reduces `qᵈ`, reducing `Rᵐ`, increasing
+`ρ_parcel`) in a single term without double-counting.
+
+`ρ_env` is the environmental density interpolated at the parcel height.
+"""
+@inline function parcel_buoyancy(state, dynamics, constants)
+    g = constants.gravitational_acceleration
+    ρ_env = state.ρ
+    ρ_parcel = density(state.𝒰, constants)
+
+    # Full buoyancy from density difference.
+    # density(𝒰, constants) computes p / (R_m T) where R_m = q_d R_d + q_v R_v
+    # and q_d = 1 - q_v - q_l - q_i. The condensate loading effect is already
+    # captured through the reduced R_m (condensate reduces q_d, reducing R_m,
+    # increasing ρ_parcel). No separate water loading term is needed.
+    return -g * (ρ_parcel - ρ_env) / ρ_env
+end
+
+"""
+$(TYPEDSIGNATURES)
+
+Compute updraft tendencies for [`SpecifiedUpdraft`](@ref).
+
+The parcel follows the environmental vertical velocity: `dz/dt = w_env(z)`.
+The parcel velocity tendency `Gw` is zero (unused prognostic).
+"""
+@inline function compute_updraft_tendencies!(tendencies, state, dynamics, model, ::SpecifiedUpdraft)
+    tendencies.Gz = interpolate(state.z, model.velocities.w)
+    tendencies.Gw = zero(state.z)
+    return nothing
+end
+
+"""
+$(TYPEDSIGNATURES)
+
+Compute updraft tendencies for [`BuoyancyDrivenUpdraft`](@ref).
+
+The parcel has a prognostic vertical velocity driven by buoyancy:
+`dw/dt = B`, `dz/dt = w`.
+"""
+@inline function compute_updraft_tendencies!(tendencies, state, dynamics, model, ::BuoyancyDrivenUpdraft)
+    B = parcel_buoyancy(state, dynamics, model.thermodynamic_constants)
+    tendencies.Gz = state.w
+    tendencies.Gw = B
     return nothing
 end
 
@@ -622,6 +738,7 @@ mutable struct ParcelInitialState{FT, MP}
     x :: FT
     y :: FT
     z :: FT
+    w :: FT
     qᵗ :: FT
     ℰ :: FT
     μ :: MP
@@ -629,7 +746,7 @@ end
 
 function ParcelInitialState(state::ParcelState{FT, TH, MP}) where {FT, TH, MP}
     return ParcelInitialState{FT, MP}(
-        state.x, state.y, state.z, state.qᵗ, state.ℰ, state.μ
+        state.x, state.y, state.z, state.w, state.qᵗ, state.ℰ, state.μ
     )
 end
 
@@ -642,6 +759,7 @@ function store_initial_parcel_state!(U⁰::ParcelInitialState, state::ParcelStat
     U⁰.x = state.x
     U⁰.y = state.y
     U⁰.z = state.z
+    U⁰.w = state.w
     U⁰.qᵗ = state.qᵗ
     U⁰.ℰ = state.ℰ
     U⁰.μ = copy_microphysics_prognostics(state.μ)
@@ -679,10 +797,11 @@ function ssp_rk3_parcel_substep!(model::ParcelModel, U⁰::ParcelInitialState, �
     state = dynamics.state
     tendencies = dynamics.timestepper.G
 
-    # Step position
+    # Step position and vertical velocity
     state.x = (1 - α) * U⁰.x + α * (state.x + Δt * tendencies.Gx)
     state.y = (1 - α) * U⁰.y + α * (state.y + Δt * tendencies.Gy)
     state.z = (1 - α) * U⁰.z + α * (state.z + Δt * tendencies.Gz)
+    state.w = (1 - α) * U⁰.w + α * (state.w + Δt * tendencies.Gw)
 
     # Step specific quantities directly (exact conservation for adiabatic)
     state.qᵗ = (1 - α) * U⁰.qᵗ + α * (state.qᵗ + Δt * tendencies.Gqᵗ)
@@ -768,10 +887,11 @@ function step_parcel_state!(model::ParcelModel, Δt)
     state = dynamics.state
     tendencies = dynamics.timestepper.G
 
-    # Step position forward (Forward Euler)
+    # Step position and vertical velocity forward (Forward Euler)
     state.x += Δt * tendencies.Gx
     state.y += Δt * tendencies.Gy
     state.z += Δt * tendencies.Gz
+    state.w += Δt * tendencies.Gw
 
     # Step specific quantities forward (exact conservation for adiabatic)
     state.qᵗ += Δt * tendencies.Gqᵗ

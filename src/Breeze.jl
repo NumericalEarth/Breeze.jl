@@ -107,7 +107,9 @@ export
     # ParcelDynamics
     ParcelDynamics,
     ParcelModel,
-    ParcelState
+    ParcelState,
+    SpecifiedUpdraft,
+    BuoyancyDrivenUpdraft
 
 using Oceananigans: Oceananigans, @at, AnisotropicMinimumDissipation, Average,
                     AveragedTimeInterval, BackgroundField, BetaPlane, Bounded, BoundaryConditionOperation,

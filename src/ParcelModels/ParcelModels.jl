@@ -8,10 +8,14 @@ export
     ParcelTendencies,
     ParcelTimestepper,
     ParcelInitialState,
+    SpecifiedUpdraft,
+    BuoyancyDrivenUpdraft,
 
     # Functions
     adjust_adiabatically,
+    parcel_buoyancy,
     compute_parcel_tendencies!,
+    compute_updraft_tendencies!,
     step_parcel_state!,
     compute_microphysics_prognostic_tendencies,
     apply_microphysical_tendencies,
