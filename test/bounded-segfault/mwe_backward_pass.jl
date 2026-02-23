@@ -22,7 +22,7 @@ using Statistics: mean
 Reactant.set_default_backend("cpu")
 
 grid = RectilinearGrid(ReactantState();
-    size = (80, 80), extent = (1e3, 1e3), halo = (3, 3),
+    size = (5, 5), extent = (1e3, 1e3), halo = (3, 3),
     topology = (Bounded, Bounded, Flat))
 
 model = AtmosphereModel(grid; dynamics = CompressibleDynamics())
@@ -35,26 +35,20 @@ set!(θ, (x, y) -> begin
     spiral = 3sin(3ϕ + r / 80) * exp(-r^2 / (2 * 300^2))
     vortex = 5exp(-r^2 / (2 * 120^2))
     hotspot = -2exp(-((x - 750)^2 + (y - 300)^2) / 8e3)
-    dipole  = 2exp(-((x - 200)^2 + (y - 750)^2) / 6e3) -
-              2exp(-((x - 350)^2 + (y - 750)^2) / 6e3)
-    ripple  = 0.8sin(2π * x / 100) * sin(2π * y / 100) * exp(-r^2 / (2 * 400^2))
-    300 + vortex + spiral + hotspot + dipole + ripple
+    300 + vortex + spiral + hotspot
 end)
 dθ = CenterField(grid)
 set!(dθ, 0.0)
 
 θ_init = Array(interior(θ)[:, :, 1])
 
-ix1, iy1 = 20, 10
-ix2, iy2 = 30, 70
-
 function loss(model, θ, nsteps)
     set!(model, θ = θ, ρ = 1.0)
-    @trace track_numbers = false for _ in 1:nsteps
-        time_step!(model, 0.005)
+    @trace checkpointing = true track_numbers = false for _ in 1:nsteps
+        time_step!(model, 0.02)
     end
     T = interior(model.temperature)
-    return mean(T[ix1:ix2, iy1:iy2, 1:1] .^ 2)
+    return mean(sin.(T).^2)
 end
 
 function grad_loss(model, dmodel, θ, dθ, nsteps)
@@ -67,7 +61,8 @@ function grad_loss(model, dmodel, θ, dθ, nsteps)
 end
 
 println("Compiling backward pass (Bounded, Bounded, Flat) …")
-nsteps = 2000
+nsteps_raw = 2
+nsteps = nsteps_raw^2
 @time "compile" compiled = Reactant.@compile raise_first=true raise=true sync=true grad_loss(
     model, dmodel, θ, dθ, nsteps)
 
@@ -99,7 +94,7 @@ try
     hm2 = heatmap!(ax2, T_slice; colormap = :thermal)
     Colorbar(fig[1, 4], hm2)
 
-    ax3 = Axis(fig[1, 5]; title = "∂L/∂θ  (L = mean T[$ix1:$ix2,$iy1:$iy2]²)", xlabel = "x", ylabel = "y")
+    ax3 = Axis(fig[1, 5]; title = "∂L/∂θ  (L = mean sin(T)²)", xlabel = "x", ylabel = "y")
     hm3 = heatmap!(ax3, g_slice; colormap = :balance)
     Colorbar(fig[1, 6], hm3)
 
