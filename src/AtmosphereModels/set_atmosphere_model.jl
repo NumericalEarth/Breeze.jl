@@ -15,7 +15,7 @@ function prioritize_names(names)
     # Priority order (first items applied last, so reverse order of priority):
     # 1. ρ must be set first for compressible dynamics (density needed for momentum)
     # 2. Then velocities/momentum and moisture
-    for n in (:w, :ρw, :v, :ρv, :u, :ρu, :qᵗ, :ρqᵗ, :qᵛ, :ρqᵛ, :qᵉᵐ, :ρqᵉᵐ, :ρ)
+    for n in (:w, :ρw, :v, :ρv, :u, :ρu, :qᵗ, :ρqᵗ, :qᵛ, :ρqᵛ, :qᵉ, :ρqᵉ, :ρ)
         if n ∈ names
             names = move_to_front(names, n)
         end
@@ -109,7 +109,7 @@ Variables are set via keyword arguments. Supported variables include:
 
 **Prognostic variables** (density-weighted):
 - `ρu`, `ρv`, `ρw`: momentum components
-- `ρqᵗ`: total moisture density
+- `ρqᵉ`/`ρqᵛ`/`ρqᵗ`: moisture density (scheme-dependent)
 - Prognostic microphysical variables
 - Prognostic user-specified tracer fields
 
@@ -165,7 +165,7 @@ function Fields.set!(model::AtmosphereModel; time=nothing, enforce_mass_conserva
             c = getproperty(model.tracers, name)
             set!(c, value)
 
-        elseif name ∈ (:ρqᵗ, :ρqᵛ, :ρqᵉᵐ)
+        elseif name ∈ (:ρqᵗ, :ρqᵛ, :ρqᵉ)
             set!(model.moisture_density, value)
             ρ = dynamics_density(model.dynamics)
             spm = model.microphysical_fields[moisture_specific_name(model.microphysics)]
@@ -183,7 +183,7 @@ function Fields.set!(model::AtmosphereModel; time=nothing, enforce_mass_conserva
             ρ = dynamics_density(model.dynamics)
             set!(ρμ, ρ * ρμ)
 
-        elseif name ∈ (:qᵗ, :qᵛ, :qᵉᵐ)
+        elseif name ∈ (:qᵗ, :qᵛ, :qᵉ)
             spm = model.microphysical_fields[moisture_specific_name(model.microphysics)]
             set!(spm, value)
             ρ = dynamics_density(model.dynamics)
@@ -219,7 +219,7 @@ function Fields.set!(model::AtmosphereModel; time=nothing, enforce_mass_conserva
 
         else
             prognostic_names = keys(prognostic_fields(model))
-            settable_diagnostic_variables = (:qᵗ, :qᵛ, :qᵉᵐ, :ℋ, :u, :v, :w)
+            settable_diagnostic_variables = (:qᵗ, :qᵛ, :qᵉ, :ℋ, :u, :v, :w)
             specific_microphysical = settable_specific_microphysical_names(model.microphysics)
 
             msg = "Cannot set! $name in AtmosphereModel because $name is neither a

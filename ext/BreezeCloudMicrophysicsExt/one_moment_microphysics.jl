@@ -293,11 +293,11 @@ const ice_phase_field_names = (:ρqˢ, :qⁱ, :qᶜⁱ, :qˢ)
 
 function AM.materialize_microphysical_fields(bμp::OneMomentLiquidRain, grid, bcs)
     if bμp isa WP1M
-        center_names = (warm_phase_field_names..., :qᵉᵐ)
+        center_names = (warm_phase_field_names..., :qᵉ)
     elseif bμp isa WPNE1M
         center_names = (:ρqᶜˡ, warm_phase_field_names...)
     elseif bμp isa MP1M
-        center_names = (warm_phase_field_names..., ice_phase_field_names..., :qᵉᵐ)
+        center_names = (warm_phase_field_names..., ice_phase_field_names..., :qᵉ)
     elseif bμp isa MPNE1M
         center_names = (:ρqᶜˡ, :ρqᶜⁱ, warm_phase_field_names..., ice_phase_field_names...)
     end
@@ -374,20 +374,20 @@ end
 
 # State-based (gridless) moisture fraction computation for warm-phase 1M microphysics.
 # Works with WarmPhaseOneMomentState which contains specific quantities (qᶜˡ, qʳ).
-# Input qᵉᵐ is total/equilibrium moisture; subtract condensate to get vapor.
+# Input qᵉ is total/equilibrium moisture; subtract condensate to get vapor.
 # Used by parcel models. Grid models use grid_moisture_fractions instead.
-@inline function AM.moisture_fractions(bμp::WarmPhase1M, ℳ::WarmPhaseOneMomentState, qᵉᵐ)
+@inline function AM.moisture_fractions(bμp::WarmPhase1M, ℳ::WarmPhaseOneMomentState, qᵉ)
     qˡ = ℳ.qᶜˡ + ℳ.qʳ
-    qᵛ = qᵉᵐ - qˡ
+    qᵛ = qᵉ - qˡ
     return MoistureMassFractions(qᵛ, qˡ)
 end
 
 # State-based moisture fraction computation for mixed-phase 1M microphysics.
-# SA: qᵉᵐ is equilibrium moisture, subtract condensate to get vapor
-@inline function AM.moisture_fractions(bμp::MP1M, ℳ::MixedPhaseOneMomentState, qᵉᵐ)
+# SA: qᵉ is equilibrium moisture, subtract condensate to get vapor
+@inline function AM.moisture_fractions(bμp::MP1M, ℳ::MixedPhaseOneMomentState, qᵉ)
     qˡ = ℳ.qᶜˡ + ℳ.qʳ
     qⁱ = ℳ.qᶜⁱ + ℳ.qˢ
-    qᵛ = qᵉᵐ - qˡ - qⁱ
+    qᵛ = qᵉ - qˡ - qⁱ
     return MoistureMassFractions(qᵛ, qˡ, qⁱ)
 end
 
@@ -404,11 +404,11 @@ end
 #####
 # Saturation adjustment schemes read cloud condensate from diagnostic fields (set in previous timestep).
 # maybe_adjust_thermodynamic_state will then adjust to equilibrium for the current state.
-@inline function AM.grid_moisture_fractions(i, j, k, grid, bμp::WP1M, ρ, qᵉᵐ, μ)
+@inline function AM.grid_moisture_fractions(i, j, k, grid, bμp::WP1M, ρ, qᵉ, μ)
     qᶜˡ = @inbounds μ.qᶜˡ[i, j, k]
     qʳ = @inbounds μ.ρqʳ[i, j, k] / ρ
     qˡ = qᶜˡ + qʳ
-    qᵛ = qᵉᵐ - qˡ
+    qᵛ = qᵉ - qˡ
     return MoistureMassFractions(qᵛ, qˡ)
 end
 
@@ -421,14 +421,14 @@ end
 end
 
 # Mixed-phase saturation adjustment: read moisture partition from diagnostic fields.
-@inline function AM.grid_moisture_fractions(i, j, k, grid, bμp::MP1M, ρ, qᵉᵐ, μ)
+@inline function AM.grid_moisture_fractions(i, j, k, grid, bμp::MP1M, ρ, qᵉ, μ)
     qᶜˡ = @inbounds μ.qᶜˡ[i, j, k]
     qᶜⁱ = @inbounds μ.qᶜⁱ[i, j, k]
     qʳ = @inbounds μ.ρqʳ[i, j, k] / ρ
     qˢ = @inbounds μ.ρqˢ[i, j, k] / ρ
     qˡ = qᶜˡ + qʳ
     qⁱ = qᶜⁱ + qˢ
-    qᵛ = qᵉᵐ - qˡ - qⁱ
+    qᵛ = qᵉ - qˡ - qⁱ
     return MoistureMassFractions(qᵛ, qˡ, qⁱ)
 end
 
@@ -451,8 +451,8 @@ end
 @inline AM.maybe_adjust_thermodynamic_state(𝒰₀, bμp::NonEquilibrium1M, qᵛ, constants) = 𝒰₀
 
 # Saturation adjustment (warm-phase and mixed-phase)
-@inline function AM.maybe_adjust_thermodynamic_state(𝒰₀, bμp::Union{WP1M, MP1M}, qᵉᵐ, constants)
-    q₁ = MoistureMassFractions(qᵉᵐ)
+@inline function AM.maybe_adjust_thermodynamic_state(𝒰₀, bμp::Union{WP1M, MP1M}, qᵉ, constants)
+    q₁ = MoistureMassFractions(qᵉ)
     𝒰₁ = with_moisture(𝒰₀, q₁)
     𝒰′ = adjust_thermodynamic_state(𝒰₁, bμp.cloud_formation, constants)
     return 𝒰′

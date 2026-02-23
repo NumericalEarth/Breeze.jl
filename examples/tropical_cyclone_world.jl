@@ -116,11 +116,11 @@ Uᵍ = 1
                                                                gustiness = Uᵍ,
                                                                surface_temperature = T₀))
 
-ρqᵗ_bcs = FieldBoundaryConditions(bottom = BulkVaporFlux(coefficient = β*Cᵀ,
-                                                         gustiness = Uᵍ,
-                                                         surface_temperature = T₀))
+ρqᵉ_bcs = FieldBoundaryConditions(bottom = BulkVaporFlux(coefficient = β*Cᵀ,
+                                                        gustiness = Uᵍ,
+                                                        surface_temperature = T₀))
 
-boundary_conditions = (; ρu=ρu_bcs, ρv=ρv_bcs, ρe=ρe_bcs, ρqᵗ=ρqᵗ_bcs)
+boundary_conditions = (; ρu=ρu_bcs, ρv=ρv_bcs, ρe=ρe_bcs, ρqᵉ=ρqᵉ_bcs)
 nothing #hide
 
 # ## Radiative forcing
@@ -161,7 +161,7 @@ nothing #hide
 
 momentum_advection = WENO(order=9)
 scalar_advection = (ρθ = WENO(order=5),
-                    ρqᵗ = WENO(order=5, bounds=(0, 1)))
+                    ρqᵉ = WENO(order=5, bounds=(0, 1)))
 
 microphysics = SaturationAdjustment(equilibrium=WarmPhaseEquilibrium())
 
@@ -203,11 +203,11 @@ u, v, w = model.velocities
 s = @at (Center, Center, Center) sqrt(u^2 + v^2)
 s₀ = Field(s, indices = (:, :, 1))
 
-ρqᵗ = model.moisture_density
+ρqᵉ = model.moisture_density
 ρe = static_energy_density(model)
 ℒˡ = Breeze.Thermodynamics.liquid_latent_heat(T₀, constants)
 𝒬ᵀ = BoundaryConditionOperation(ρe, :bottom, model)
-Jᵛ = BoundaryConditionOperation(ρqᵗ, :bottom, model)
+Jᵛ = BoundaryConditionOperation(ρqᵉ, :bottom, model)
 𝒬 = Field(𝒬ᵀ + ℒˡ * Jᵛ)
 
 function progress(sim)

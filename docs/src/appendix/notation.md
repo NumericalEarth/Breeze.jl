@@ -17,7 +17,7 @@ A few notes about the following table:
   a "reference state", which is an adiabatic, hydrostatic solution to the equations of motion. But there is also an
   "energy reference temperature" and "reference latent heat", which are thermodynamic constants required to define
   the internal energy of moist atmospheric constituents.
-* Mapping to AM fields: `ρe` corresponds to `energy_density(model)`, `ρqᵗ` to `model.moisture_density`, and `qᵗ` to `model.specific_moisture`.
+* Mapping to AM fields: `ρe` corresponds to `energy_density(model)`, and the moisture density is accessed via `model.moisture_density`.
 
 The following table also uses a few conventions that suffuse the source code and which are internalized by wise developers:
 
@@ -25,7 +25,7 @@ The following table also uses a few conventions that suffuse the source code and
 * `q` refers to an instance of  [`MoistureMassFractions`](@ref Breeze.Thermodynamics.MoistureMassFractions)
 * "Reference" quantities use a subscript ``r`` (e.g., ``p_r``, ``\rho_r``).
 * Phase or mixture identifiers (``d``, ``v``, ``m``) appear as superscripts (e.g., ``Rᵈ``, ``cᵖᵐ``), matching usage in the codebase (e.g., `Rᵈ`, `cᵖᵐ`).
-* Conservative variables are stored in ρᵣ-weighted form in the code (e.g., `ρu`, `ρv`, `ρw`, `ρe`, `ρqᵗ`).
+* Conservative variables are stored in ρᵣ-weighted form in the code (e.g., `ρu`, `ρv`, `ρw`, `ρe`, `ρqᵉ` or `ρqᵛ`).
 
 | math symbol                         | code   | property name                       | description                                                                    |
 | ----------------------------------- | ------ | ----------------------------------- | ------------------------------------------------------------------------------ |
@@ -38,8 +38,8 @@ The following table also uses a few conventions that suffuse the source code and
 | ``T⁺``                              | `T⁺`   | `DewpointTemperature(model)`        | Dewpoint temperature                                                           |
 | ``p``                               | `p`    | `AM.pressure`                       | Pressure                                                                       |
 | ``b``                               | `b`    |                                     | Buoyancy                                                                       |
-| ``ρ qᵗ``                            | `ρqᵗ`  | `AM.moisture_density`               | Total moisture density                                                         |
-| ``qᵗ``                              | `qᵗ`   | `AM.specific_moisture`              | Total specific moisture (the sum of vapor, liquid, and ice mass fractions)     |
+| ``ρ qᵉ``                            | `ρqᵉ`  | `AM.moisture_density`               | Equilibrium moisture density (saturation adjustment schemes)                   |
+| ``ρ qᵛ``                            | `ρqᵛ`  | `AM.moisture_density`               | Vapor density (non-equilibrium schemes)                                        |
 | ``qᵛ``                              | `qᵛ`   | `AM.microphysical_fields.qᵛ`        | Vapor mass fraction, a.k.a "specific humidity"                                 |
 | ``qˡ``                              | `qˡ`   | `AM.microphysical_fields.qˡ`        | Liquid mass fraction                                                           |
 | ``qⁱ``                              | `qⁱ`   | `AM.microphysical_fields.qⁱ`        | Ice mass fraction                                                              |

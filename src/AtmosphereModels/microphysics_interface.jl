@@ -253,7 +253,7 @@ Return the prognostic moisture field name as a Symbol for the given microphysics
 
 The physical meaning of the prognostic moisture field depends on the scheme:
 - `Nothing` / non-equilibrium: `:ρqᵛ` (true vapor density)
-- `SaturationAdjustment`: `:ρqᵉᵐ` (equilibrium moisture density, diagnostically partitioned)
+- `SaturationAdjustment`: `:ρqᵉ` (equilibrium moisture density, diagnostically partitioned)
 """
 moisture_prognostic_name(::Nothing) = :ρqᵛ
 

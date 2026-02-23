@@ -128,7 +128,7 @@ function AtmosphereModels.materialize_atmosphere_model_forcing(forcing::Subsiden
         fill_halo_regions!(wˢ)
     end
 
-    if name ∈ (:ρu, :ρv, :ρw, :ρθ, :ρe, :ρqᵗ, :ρqᵛ, :ρqᵉᵐ)
+    if name ∈ (:ρu, :ρv, :ρw, :ρθ, :ρe, :ρqᵗ, :ρqᵛ, :ρqᵉ)
         specific_name = strip_density_prefix(name)
         specific_field = context.specific_fields[specific_name]
     else
