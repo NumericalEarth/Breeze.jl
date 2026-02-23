@@ -1,24 +1,22 @@
 # # Diurnal cycle of radiative convection
 #
-# This example simulates moist convection over a warm tropical ocean, driven by
-# surface fluxes and modulated by interactive all-sky RRTMGP radiation with a
-# full diurnal cycle of solar forcing. Saturation-adjustment microphysics diagnoses
-# cloud liquid water, which feeds back on the radiation through longwave emission
-# and shortwave absorption.
+# This example simulates a dramatic diurnal cycle of moist convection over a
+# tropical land surface. During the day, the sun heats the ground, driving
+# vigorous boundary-layer convection that lofts moisture into towering cumulus
+# clouds. At night, the surface cools rapidly by longwave emission, stabilizing
+# the boundary layer and shutting off convection.
 #
-# The initial sounding has a dry-adiabatic sub-cloud layer (0–1 km) capped by a
-# conditionally unstable troposphere (6.5 K/km lapse rate). The dry-adiabatic
-# sub-cloud layer eliminates convective inhibition, allowing surface perturbations
-# to trigger moist convection that releases the available potential energy. A
-# stretched vertical grid resolves the cloud layer (100 m spacing below 3 km)
-# while extending to 25 km so that RRTMGP sees a realistic atmospheric column
-# for both longwave and shortwave radiative transfer.
+# The key ingredient is a **time-varying surface temperature** that follows the
+# sun: peaking in the early afternoon and dipping well below the air temperature
+# at night. This creates a strong diurnal contrast — afternoon thunderstorms
+# that die at sunset and don't return until the next morning.
 #
-# The warm sea surface (303 K) drives strong sensible and latent heat fluxes
-# that sustain the convection. Moist updrafts produce clouds from about 1 km
-# up to 3–5 km, and the radiative transfer responds to the evolving cloud field.
-# A stratospheric sponge layer above 8 km prevents spurious temperature drift
-# in the coarse upper cells.
+# Interactive all-sky RRTMGP radiation computes spectrally-resolved shortwave
+# and longwave fluxes. Saturation-adjustment microphysics diagnoses cloud liquid
+# water that feeds back on the radiation. A stretched vertical grid resolves the
+# cloud layer (100 m spacing below 3 km) while extending to 25 km for a
+# realistic atmospheric column. A stratospheric sponge layer above 8 km prevents
+# spurious temperature drift in the coarse upper cells.
 
 using Breeze
 using Oceananigans
@@ -97,25 +95,39 @@ background_atmosphere = BackgroundAtmosphere(
     O₃ = tropical_ozone
 )
 
+# ## Diurnal surface temperature
+#
+# Over land, the surface temperature swings dramatically with the sun.
+# We model this as a sinusoidal cycle peaking 2 hours after solar noon:
+# Tₛ(t) = T̄ₛ + ΔTₛ cos(2π(t - t_peak) / 24h), with T̄ₛ = 300 K (mean)
+# and ΔTₛ = 10 K (amplitude). This gives 310 K in early afternoon and
+# 290 K at night — a 20 K diurnal range, typical of tropical semi-arid land.
+#
+# We start at midnight (t = 0), so the surface starts cold (290 K), warms
+# through the morning, peaks at t = 14 h (2 pm local), and cools at night.
+# A `Field` stores the surface temperature and a callback updates it each
+# time step, keeping both the bulk fluxes and RRTMGP in sync.
+
+T̄ₛ = 300   # Mean surface temperature [K]
+ΔTₛ = 10   # Diurnal amplitude [K]
+
+Tₛ = Field{Center, Center, Nothing}(grid)
+set!(Tₛ, T̄ₛ - ΔTₛ)  # Start at midnight minimum
+
 # ## Radiation with a diurnal cycle
 #
 # We place the domain at 15°N latitude on the prime meridian and start at
-# sunrise on the spring equinox (March 20). The `epoch` keyword converts the
-# model's floating-point clock to an absolute `DateTime` for computing the solar
-# zenith angle. With the full solar constant (1361 W/m²), daytime shortwave
-# fluxes are realistic rather than reduced to a diurnal mean. The sun rises at
-# t ≈ 0, reaches noon at t ≈ 6 hours, and sets at t ≈ 12 hours.
-
-SST = 303  # Sea surface temperature [K]
+# midnight on the spring equinox (March 20). The sun rises at t ≈ 6 h,
+# reaches noon at t ≈ 12 h, and sets at t ≈ 18 h.
 
 radiation = RadiativeTransferModel(grid, AllSkyOptics(), constants;
-                                   surface_temperature = SST,
-                                   surface_albedo = 0.07,
-                                   surface_emissivity = 0.98,
+                                   surface_temperature = Tₛ,
+                                   surface_albedo = 0.20,
+                                   surface_emissivity = 0.95,
                                    solar_constant = 1361,
                                    background_atmosphere,
                                    coordinate = (0.0, 15.0),
-                                   epoch = DateTime(2020, 3, 20, 6, 0, 0),
+                                   epoch = DateTime(2020, 3, 20, 0, 0, 0),
                                    schedule = TimeInterval(5minutes),
                                    liquid_effective_radius = ConstantRadiusParticles(10e-6),
                                    ice_effective_radius = ConstantRadiusParticles(30e-6))
@@ -123,16 +135,17 @@ radiation = RadiativeTransferModel(grid, AllSkyOptics(), constants;
 # ## Surface fluxes
 #
 # Bulk aerodynamic formulae provide surface sensible heat, moisture, and momentum
-# fluxes. The 3 K air–sea temperature disequilibrium drives strong surface fluxes
-# that warm and moisten the boundary layer, feeding the convection.
+# fluxes driven by the time-varying surface temperature. During the day Tₛ > Tair
+# drives strong upward fluxes; at night Tₛ < Tair can produce downward fluxes
+# that cool the boundary layer.
 
 Cᴰ = 1.0e-3
 Cᵀ = 1.0e-3
 Cᵛ = 1.2e-3
-Uᵍ = 1.0  # Gustiness [m/s] — ensures surface fluxes even in calm conditions
+Uᵍ = 1.0  # Gustiness [m/s]
 
-ρθ_flux = BulkSensibleHeatFlux(coefficient=Cᵀ, gustiness=Uᵍ, surface_temperature=SST)
-ρqᵗ_flux = BulkVaporFlux(coefficient=Cᵛ, gustiness=Uᵍ, surface_temperature=SST)
+ρθ_flux = BulkSensibleHeatFlux(coefficient=Cᵀ, gustiness=Uᵍ, surface_temperature=Tₛ)
+ρqᵗ_flux = BulkVaporFlux(coefficient=Cᵛ, gustiness=Uᵍ, surface_temperature=Tₛ)
 
 ρθ_bcs = FieldBoundaryConditions(bottom=ρθ_flux)
 ρqᵗ_bcs = FieldBoundaryConditions(bottom=ρqᵗ_flux)
@@ -190,11 +203,10 @@ model = AtmosphereModel(grid; dynamics, microphysics, radiation, forcing,
 
 # ## Initial conditions
 #
-# The sounding has a dry-adiabatic sub-cloud layer (0–1 km, 9.8 K/km)
-# capped by a conditionally unstable troposphere (6.5 K/km lapse rate)
-# that transitions to an isothermal stratosphere at 210 K. Moisture is
-# 20 g/kg at the surface with a 2.5 km scale height, typical of the
-# tropical maritime boundary layer.
+# The sounding has a dry-adiabatic sub-cloud layer (0–1 km) capped by a
+# conditionally unstable troposphere (6.5 K/km lapse rate) that transitions
+# to an isothermal stratosphere at 210 K. Moisture is 20 g/kg at the surface
+# with a 2.5 km scale height, typical of the tropical maritime boundary layer.
 
 function Tᵇᵍ(z)
     T₀ = 300.0
@@ -239,10 +251,28 @@ qˡ = model.microphysical_fields.qˡ
 
 # ## Simulation
 #
-# We run for a full 24-hour diurnal cycle, starting at sunrise.
+# We run for two full diurnal cycles (48 hours) starting at midnight,
+# so the on/off pattern of convection repeats convincingly.
 
-simulation = Simulation(model; Δt=1, stop_time=24hours)
+simulation = Simulation(model; Δt=1, stop_time=48hours)
 conjure_time_step_wizard!(simulation, cfl=0.5, max_Δt=10)
+
+# ## Surface temperature callback
+#
+# At each time step we update the surface temperature field following
+# a cosine curve that peaks 2 hours after solar noon (t = 14 h local).
+# The period is 24 hours and the simulation starts at midnight.
+
+function update_surface_temperature!(sim)
+    t = time(sim)
+    day = 24 * 60 * 60  # seconds in a day
+    t_peak = 14 * 60 * 60  # peak at 14:00 local (2 pm)
+    Tₛ_now = T̄ₛ + ΔTₛ * cos(2π * (t - t_peak) / day)
+    set!(Tₛ, Tₛ_now)
+    return nothing
+end
+
+add_callback!(simulation, update_surface_temperature!, TimeInterval(1minute))
 
 wall_clock = Ref(time_ns())
 
@@ -252,6 +282,7 @@ function progress(sim)
     wmax = maximum(abs, w)
     Tmin, Tmax = extrema(T)
     qˡmax = maximum(qˡ)
+    Tₛ_now = T̄ₛ + ΔTₛ * cos(2π * (time(sim) - 14hours) / 24hours)
 
     OLR = mean(view(radiation.upwelling_longwave_flux, :, 1, Nz+1))
 
@@ -259,7 +290,7 @@ function progress(sim)
                    iteration(sim), prettytime(sim), sim.Δt, prettytime(elapsed))
     msg *= @sprintf(", max|w|: %5.2f m/s, T: [%5.1f, %5.1f] K, max(qˡ): %.2e",
                    wmax, Tmin, Tmax, qˡmax)
-    msg *= @sprintf(", OLR: %.1f W/m²", OLR)
+    msg *= @sprintf(", Tₛ: %.1f K, OLR: %.1f W/m²", Tₛ_now, OLR)
     @info msg
 
     wall_clock[] = time_ns()
@@ -271,8 +302,7 @@ add_callback!(simulation, progress, IterationInterval(500))
 # ## Output
 #
 # Horizontally-averaged profiles are saved every hour (time-averaged) and 2D
-# slices every 10 minutes for animation. We restrict the slice output to the
-# lowest 3 km where the interesting dynamics live.
+# slices every 10 minutes for animation.
 
 qᵛ = model.microphysical_fields.qᵛ
 Q = radiation.flux_divergence
@@ -302,10 +332,8 @@ run!(simulation)
 # ## Mean profile evolution
 #
 # Hourly-averaged profiles reveal the diurnal modulation of the boundary layer.
-# We plot profiles at four representative times: sunrise, noon, sunset, and
-# midnight. The radiative flux divergence (converted to K/day) shows longwave
-# cooling that peaks at cloud top — weakened during the day when shortwave
-# absorption partially compensates, and strongest at night.
+# Noon profiles show a warm, moist, cloud-topped boundary layer, while midnight
+# profiles show a cooler, drier column with little cloud.
 
 Tts  = FieldTimeSeries(averages_filename, "T")
 qˡts = FieldTimeSeries(averages_filename, "qˡ")
@@ -314,37 +342,31 @@ Qts  = FieldTimeSeries(averages_filename, "Q")
 times = Tts.times
 Nt = length(times)
 
-ρᵣ_data = Array(interior(reference_state.density, 1, 1, :))
-cᵖᵈ = constants.dry_air.heat_capacity / constants.dry_air.molar_mass  # J/(kg·K)
-to_K_per_day = 86400 / cᵖᵈ
+# We plot profiles at six times across the two days and zoom in on the lowest
+# 6 km where the clouds and convective dynamics are.
 
-zc = znodes(grid, Center())
-zc_km = Array(zc) ./ 1000
-
-# We plot profiles at four times of day and zoom in on the lowest 6 km
-# where the clouds and convective dynamics are.
-
-snapshot_hours = [0, 6, 12, 18]
-snapshot_labels = ["Sunrise (t = 0)", "Noon (t = 6 h)", "Sunset (t = 12 h)", "Midnight (t = 18 h)"]
-snapshot_colors = [:goldenrod, :orangered, :purple, :midnightblue]
+snapshot_hours = [0, 6, 12, 18, 24, 36]
+snapshot_labels = ["Midnight (t = 0)", "Sunrise (t = 6 h)", "Noon (t = 12 h)",
+                   "Sunset (t = 18 h)", "Midnight day 2 (t = 24 h)", "Noon day 2 (t = 36 h)"]
+snapshot_colors = [:midnightblue, :goldenrod, :orangered, :purple, :steelblue, :red]
 
 fig = Figure(size=(1400, 450), fontsize=14)
 
 axT  = Axis(fig[1, 1]; xlabel="T (K)", ylabel="z (km)", limits=(nothing, (0, 6)))
-axqˡ = Axis(fig[1, 2]; xlabel="qˡ (g/kg)", limits=(nothing, (0, 6)))
-axQ  = Axis(fig[1, 3]; xlabel="Flux divergence (K/day)", limits=(nothing, (0, 6)))
+axqˡ = Axis(fig[1, 2]; xlabel="qˡ (kg/kg)", limits=(nothing, (0, 6)))
+axQ  = Axis(fig[1, 3]; xlabel="Q (W/m³)", limits=(nothing, (0, 6)))
 
 for (ih, hour) in enumerate(snapshot_hours)
     n = findfirst(t -> t ≥ hour * 3600, times)
     isnothing(n) && continue
 
-    T_data  = Array(interior(Tts[n],  1, 1, :))
-    qˡ_data = Array(interior(qˡts[n], 1, 1, :)) .* 1000
-    Q_data  = to_K_per_day .* Array(interior(Qts[n], 1, 1, :)) ./ ρᵣ_data
+    T_n  = view(Tts[n],  1, 1, :)
+    qˡ_n = view(qˡts[n], 1, 1, :)
+    Q_n  = view(Qts[n],  1, 1, :)
 
-    lines!(axT,  T_data,  zc_km; color=snapshot_colors[ih], label=snapshot_labels[ih])
-    lines!(axqˡ, qˡ_data, zc_km; color=snapshot_colors[ih])
-    lines!(axQ,  Q_data,  zc_km; color=snapshot_colors[ih])
+    lines!(axT,  T_n;  color=snapshot_colors[ih], label=snapshot_labels[ih])
+    lines!(axqˡ, qˡ_n; color=snapshot_colors[ih])
+    lines!(axQ,  Q_n;  color=snapshot_colors[ih])
 end
 
 vlines!(axQ, 0; color=:gray50, linestyle=:dash, linewidth=1)
@@ -374,11 +396,11 @@ qˡlim = max(maximum(qˡts_slice) / 2, 1f-6)
 fig = Figure(size=(1000, 600), fontsize=14)
 
 n = Observable(Nt_slices)
+axw  = Axis(fig[1, 1]; xlabel="x (km)", ylabel="z (km)", title="w (m/s)", limits=(nothing, (0, 5)))
+axqˡ = Axis(fig[1, 2]; xlabel="x (km)", ylabel="z (km)", title="qˡ (kg/kg)", limits=(nothing, (0, 5)))
+
 title = @lift "Diurnal Radiative Convection at t = " * prettytime(slice_times[$n])
 fig[0, :] = Label(fig, title, fontsize=16, tellwidth=false)
-
-axw  = Axis(fig[1, 1]; xlabel="x (km)", ylabel="z (km)", title="w (m/s)", limits=(nothing, (0, 5)))
-axqˡ = Axis(fig[1, 2]; xlabel="x (km)", ylabel="z (km)", title="qˡ (g/kg)", limits=(nothing, (0, 5)))
 
 w_n  = @lift wts[$n]
 qˡ_n = @lift qˡts_slice[$n]
