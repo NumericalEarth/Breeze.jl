@@ -14,7 +14,7 @@
 
 # Import CloudMicrophysics internals that we need
 # (these don't depend on Thermodynamics.jl)
-using CloudMicrophysics.Common: ϵ_numerics
+using CloudMicrophysics.Utilities: ϵ_numerics
 using CloudMicrophysics.Microphysics1M: lambda_inverse, get_n0, get_v0, SF
 
 # gamma function from SpecialFunctions (via CloudMicrophysics)
