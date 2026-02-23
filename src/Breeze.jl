@@ -65,6 +65,18 @@ export
     PlanarLiquidSurface,
     PlanarIceSurface,
 
+    # Microphysics interface
+    AbstractMicrophysicalState,
+    NothingMicrophysicalState,
+    WarmRainState,
+    microphysical_state,
+    microphysical_tendency,
+    grid_microphysical_tendency,
+    grid_microphysical_tendency_factor,
+    numerical_microphysical_tendency,
+    prognostic_field_names,
+    update_microphysical_fields!,
+
     # Microphysics
     SaturationAdjustment,
     MixedPhaseEquilibrium,
