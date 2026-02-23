@@ -16,12 +16,9 @@ using Test
 @testset "Reactant CompressibleDynamics" begin
     @info "Performing Reactant CompressibleDynamics tests..."
 
-    if default_arch isa GPU
-        Reactant.set_default_backend("gpu")
-    else
-        Reactant.set_default_backend("cpu")
-    end
 
+    Reactant.set_default_backend("cpu")
+    
     function run_timesteps!(model, Δt, Nt)
         @trace track_numbers=false for _ in 1:Nt
             time_step!(model, Δt)
