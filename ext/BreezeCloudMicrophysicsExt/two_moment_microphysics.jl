@@ -497,11 +497,9 @@ const τⁿᵘᵐ_2m = 10  # seconds
     qᶜˡ = ℳ.qᶜˡ
     qʳ = ℳ.qʳ
     nᶜˡ = ℳ.nᶜˡ
-    nᵃ = ℳ.nᵃ
 
     # Number densities [1/m³]
     Nᶜˡ = ρ * max(0, nᶜˡ)
-    Nᵃ = ρ * max(0, nᵃ)
 
     # Thermodynamic state
     T = temperature(𝒰, constants)
@@ -511,9 +509,21 @@ const τⁿᵘᵐ_2m = 10  # seconds
     # Saturation specific humidity
     qᵛ⁺ = saturation_specific_humidity(T, ρ, constants, PlanarLiquidSurface())
 
-    # Condensation/evaporation rate (relaxation to saturation)
+    # Sequential coupling of activation and condensation:
+    # Both processes consume vapor from the same supersaturation budget.
+    # Activation goes first (new droplets at critical Köhler radius),
+    # then condensation uses the remaining supersaturation to grow existing droplets.
+    # This prevents double-counting vapor consumption.
+
+    # Step 1: Activation mass tendency (uses full supersaturation)
+    Sᵃᶜᵗ = aerosol_activation_mass_tendency(categories.aerosol_activation, categories.air_properties,
+                                             ρ, ℳ, 𝒰, constants)
+
+    # Step 2: Condensation with reduced supersaturation (subtract activation mass)
     Sᶜᵒⁿᵈ = condensation_rate(qᵛ, qᵛ⁺, qᶜˡ, T, ρ, q, τᶜˡ, constants)
     Sᶜᵒⁿᵈ = ifelse(isnan(Sᶜᵒⁿᵈ), zero(Sᶜᵒⁿᵈ), Sᶜᵒⁿᵈ)
+    Sᶜᵒⁿᵈ_min = -max(0, qᶜˡ) / τᶜˡ
+    Sᶜᵒⁿᵈ = max(Sᶜᵒⁿᵈ - Sᵃᶜᵗ, Sᶜᵒⁿᵈ_min)
 
     # Autoconversion: cloud liquid → rain
     au = CM2.autoconversion(sb.acnv, sb.pdf_c, max(0, qᶜˡ), max(0, qʳ), ρ, Nᶜˡ)
@@ -522,11 +532,6 @@ const τⁿᵘᵐ_2m = 10  # seconds
     # Accretion: cloud liquid captured by falling rain
     ac = CM2.accretion(sb, max(0, qᶜˡ), max(0, qʳ), ρ, Nᶜˡ)
     Sᵃᶜᶜ = ac.dq_lcl_dt  # negative (sink for cloud)
-
-    # Aerosol activation: source of cloud liquid mass from newly activated droplets
-    # Newly formed droplets have finite initial size given by the activation radius
-    Sᵃᶜᵗ = aerosol_activation_mass_tendency(categories.aerosol_activation, categories.air_properties,
-                                             ρ, ℳ, 𝒰, constants)
 
     # Total tendency
     ΣρS = ρ * (Sᶜᵒⁿᵈ + Sᵃᶜⁿᵛ + Sᵃᶜᶜ + Sᵃᶜᵗ)
