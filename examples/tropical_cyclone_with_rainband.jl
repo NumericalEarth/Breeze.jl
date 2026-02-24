@@ -50,7 +50,7 @@ mkpath(figures_dir)
 #   - Higher heating centre (z_bs = 6 km vs 4 km in Moon and Nolan 2010)
 #   - Stronger maximum heating amplitude (Q_str_max = 4.24 K/h vs 1.5 K/h)
 #   - Broader radial half-width (σ_rs = 8 km vs 6 km)
-const use_yu_didlake_2019 = false
+const use_yu_didlake_2019 = true
 
 ###########################
 # Domain and grid
@@ -59,7 +59,7 @@ const use_yu_didlake_2019 = false
 Oceananigans.defaults.FloatType = Float32
 
 arch = GPU()
-Nx = Ny = 500
+Nx = Ny = 750
 Nz = 128
 
 x = y = (0, 1000Nx)    # 1000 km × 1000 km domain; 2 km horizontal resolution
@@ -195,8 +195,8 @@ boundary_conditions = (ρe=ρe_bcs, ρqᵗ=ρqᵗ_bcs, ρu=ρu_bcs, ρv=ρv_bcs)
 # Implemented as a discrete forcing (not Relaxation) for GPU compatibility: Oceananigans'
 # Relaxation wraps in ContinuousForcing which does dynamic NamedTuple field inspection at
 # kernel launch — this is incompatible with CUDA compilation.
-sponge_params = (center = 21_500f0,            # m — lowered so absorption starts ~18 km
-                 width  = 3_000f0,             # m — wider Gaussian for gradual absorption
+sponge_params = (center = 22_000f0,            # m — lowered so absorption starts ~18 km
+                 width  = 1_000f0,             # m — wider Gaussian for gradual absorption
                  rate   = Float32(1 / 30.0))   # s⁻¹ — 30 s timescale (was 300 s)
 
 @inline function sponge_ρw(i, j, k, grid, clock, fields, p)
@@ -205,6 +205,24 @@ sponge_params = (center = 21_500f0,            # m — lowered so absorption sta
     return -p.rate * mask * @inbounds fields.ρw[i, j, k]
 end
 sponge = Forcing(sponge_ρw, discrete_form=true, parameters=sponge_params)
+
+# Horizontal wind sponge: relax ρu, ρv toward zero.
+# Above 16 km the vortex tangential wind is already zero, so the target is trivially 0.
+
+@inline function sponge_ρu_fn(i, j, k, grid, clock, fields, p)
+    z    = znode(i, j, k, grid, Face(), Center(), Center())
+    mask = exp(-((z - p.center) / p.width)^2)
+    return -p.rate * mask * @inbounds fields.ρu[i, j, k]
+end
+
+@inline function sponge_ρv_fn(i, j, k, grid, clock, fields, p)
+    z    = znode(i, j, k, grid, Center(), Face(), Center())
+    mask = exp(-((z - p.center) / p.width)^2)
+    return -p.rate * mask * @inbounds fields.ρv[i, j, k]
+end
+
+sponge_ρu = Forcing(sponge_ρu_fn, discrete_form=true, parameters=sponge_params)
+sponge_ρv = Forcing(sponge_ρv_fn, discrete_form=true, parameters=sponge_params)
 
 ###########################
 # Coriolis
@@ -324,8 +342,33 @@ end
 convective_forcing = Forcing(convective_rainband_heating, parameters=con_params)
 stratiform_forcing = Forcing(stratiform_rainband_heating, parameters=str_params)
 
-forcing = (ρθ = (convective_forcing, stratiform_forcing),
-           ρw  = sponge)
+# ---- Sponge for ρθ: relax toward background (sounding) ρθ profile ----
+# WRF's Rayleigh damping (damp_opt=2) damps u, v, w, θ toward reference profiles;
+# Yu and Didlake (2019) report sponge-induced vortex weakening (43→40 m/s) consistent
+# with damping all prognostic fields.  Background ρθ = ρ_ref(z) × θ_sounding(z).
+ρθ_bg_col = Float32[Float32(ρ_sfc * exp(-z / H_ρ) *
+                    θ_sounding_interp(clamp(z, zˢ_data[1], zˢ_data[end])))
+                    for z in Array(znodes(grid, Center()))]
+ρθ_bg_device = arch isa GPU ? CuArray(ρθ_bg_col) : ρθ_bg_col
+
+sponge_ρθ_params = (center = sponge_params.center,
+                    width  = sponge_params.width,
+                    rate   = sponge_params.rate,
+                    ρθ_bg  = ρθ_bg_device)
+
+@inline function sponge_ρθ_fn(i, j, k, grid, clock, fields, p)
+    z      = znode(i, j, k, grid, Center(), Center(), Center())
+    mask   = exp(-((z - p.center) / p.width)^2)
+    ρθ_tgt = @inbounds p.ρθ_bg[k]
+    return -p.rate * mask * (@inbounds fields.ρθ[i, j, k] - ρθ_tgt)
+end
+
+sponge_ρθ = Forcing(sponge_ρθ_fn, discrete_form=true, parameters=sponge_ρθ_params)
+
+forcing = (ρθ = (convective_forcing, stratiform_forcing, sponge_ρθ),
+           ρw  = sponge,
+           ρu  = sponge_ρu,
+           ρv  = sponge_ρv)
 
 ###########################
 # Model
@@ -361,7 +404,8 @@ model = AtmosphereModel(grid; dynamics, coriolis, microphysics,
 
 RMW    = 31_000.0   # radius of maximum winds at surface (m)
 V_RMW  = 43.0       # maximum tangential wind at RMW (m/s)
-a      = 0.5        # outer-core wind decay exponent
+a      = 2        # outer-core wind decay exponent
+r_zero = Nx * 1000.0  # target radius where tangential wind is relaxed to zero (m)
 
 z_nodes_cpu = Array(znodes(grid, Center()))
 Δz_step     = z_nodes_cpu[2] - z_nodes_cpu[1]
@@ -395,8 +439,12 @@ function tangential_wind(x, y, z)
     z >= 16_000.0 && return zero(typeof(r))
     if r <= rmw_z
         return V_RMW * v_adj * r / rmw_z      # solid-body rotation inside eye wall
+    elseif r >= r_zero
+        return zero(typeof(r))                 # relaxed to zero by r = Nx*1000
     else
-        return V_RMW * v_adj * (rmw_z / r)^a  # power-law decay outside
+        v_outer = V_RMW * v_adj * (rmw_z / r)^a
+        taper   = (r_zero - r) / (r_zero - rmw_z)
+        return v_outer * taper                 # power-law decay with outer linear taper
     end
 end
 
@@ -511,7 +559,7 @@ ax  = Axis(fig[1, 1], xlabel="Radius from storm centre (km)", ylabel="Tangential
 lines!(ax, r_km, vt_sfc)
 vlines!(ax, [RMW/1000], color=:red, linestyle=:dash, label="RMW = $(RMW/1000) km")
 axislegend(ax)
-xlims!(ax, 0, 200)
+xlims!(ax, 0, Nx/2)
 Makie.save(joinpath(figures_dir, "tangential_wind_profile_1d.png"), fig)
 println("  Saved tangential_wind_profile_1d.png")
 
@@ -522,7 +570,7 @@ fig[0, :] = Label(fig, "Initial Pressure Deficit vs. Background (hPa)", fontsize
 ax  = Axis(fig[1, 1], xlabel="Radius from storm centre (km)", ylabel="Height (km)")
 cf  = contourf!(ax, r_km, z_km, p_deficit'; colormap=:viridis)
 Colorbar(fig[1, 2], cf, label="Pressure deficit Δp (hPa)")
-xlims!(ax, 0, 200)
+xlims!(ax, 0, Nx/2)
 Makie.save(joinpath(figures_dir, "pressure_deficit_profile.png"), fig)
 println("  Saved pressure_deficit_profile.png")
 
