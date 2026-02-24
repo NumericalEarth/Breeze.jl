@@ -24,7 +24,10 @@ using Breeze
 using Oceananigans: Oceananigans
 using Oceananigans.Units
 using Oceananigans.OutputReaders: FieldTimeSeries
-using Breeze: WENO, DCMIP2016KesslerMicrophysics, TetensFormula
+using Breeze: WENO, TetensFormula, SaturationAdjustment, WarmPhaseEquilibrium
+using CloudMicrophysics
+BreezeCloudMicrophysicsExt = Base.get_extension(Breeze, :BreezeCloudMicrophysicsExt)
+using .BreezeCloudMicrophysicsExt: OneMomentCloudMicrophysics
 using CairoMakie
 using Printf
 using Random
@@ -59,10 +62,10 @@ const use_yu_didlake_2019 = true
 Oceananigans.defaults.FloatType = Float32
 
 arch = GPU()
-Nx = Ny = 750
+Nx = Ny = 200
 Nz = 128
 
-x = y = (0, 1000Nx)    # 1000 km × 1000 km domain; 2 km horizontal resolution
+x = y = (0, 2000Nx)    # 1000 km × 1000 km domain; 2 km horizontal resolution
 z = (0, 22000)          # 0–22 km
 
 grid = RectilinearGrid(arch; x, y, z,
@@ -195,9 +198,9 @@ boundary_conditions = (ρe=ρe_bcs, ρqᵗ=ρqᵗ_bcs, ρu=ρu_bcs, ρv=ρv_bcs)
 # Implemented as a discrete forcing (not Relaxation) for GPU compatibility: Oceananigans'
 # Relaxation wraps in ContinuousForcing which does dynamic NamedTuple field inspection at
 # kernel launch — this is incompatible with CUDA compilation.
-sponge_params = (center = 22_000f0,            # m — lowered so absorption starts ~18 km
-                 width  = 1_000f0,             # m — wider Gaussian for gradual absorption
-                 rate   = Float32(1 / 30.0))   # s⁻¹ — 30 s timescale (was 300 s)
+sponge_params = (center = 22_000f0,            # m — at model top
+                 width  = 1_000f0,             # m — Gaussian half-width
+                 rate   = Float32(1 / 150.0))   # s⁻¹ — 150 s damping timescale
 
 @inline function sponge_ρw(i, j, k, grid, clock, fields, p)
     z    = znode(i, j, k, grid, Center(), Center(), Face())
@@ -258,6 +261,8 @@ y_center = Float64(y[1] + y[2]) / 2
 
 # Reference density for forcing kernels (exponential atmosphere)
 Rᵈ    = constants.molar_gas_constant / constants.dry_air.molar_mass  # J kg⁻¹ K⁻¹
+cₚ    = 1004.0                                                       # J kg⁻¹ K⁻¹ (dry air)
+κ_exp = Rᵈ / cₚ                                                      # Poisson exponent ≈ 0.286
 T_avg = sum(Tˢ_data) / length(Tˢ_data)                               # mean sounding temperature
 ρ_sfc = pˢ_data[1] / (Rᵈ * Tˢ_data[1])                             # surface density  (kg m⁻³)
 H_ρ   = Rᵈ * T_avg / constants.gravitational_acceleration            # density scale height (m)
@@ -365,18 +370,19 @@ end
 
 sponge_ρθ = Forcing(sponge_ρθ_fn, discrete_form=true, parameters=sponge_ρθ_params)
 
-forcing = (ρθ = (convective_forcing, stratiform_forcing, sponge_ρθ),
-           ρw  = sponge,
-           ρu  = sponge_ρu,
-           ρv  = sponge_ρv)
+forcing = (ρθ = (convective_forcing, stratiform_forcing),
+           ρw  = sponge)
 
+
+# forcing = (ρθ = (convective_forcing, stratiform_forcing), ρw  = sponge)
 ###########################
 # Model
 ###########################
 
 println("\n=== Creating AtmosphereModel ===")
 
-microphysics           = DCMIP2016KesslerMicrophysics()
+cloud_formation        = SaturationAdjustment(equilibrium=WarmPhaseEquilibrium())
+microphysics           = OneMomentCloudMicrophysics(; cloud_formation)
 weno                   = WENO(order=5)
 bounds_preserving_weno = WENO(order=5, bounds=(0, 1))
 momentum_advection     = weno
@@ -404,7 +410,7 @@ model = AtmosphereModel(grid; dynamics, coriolis, microphysics,
 
 RMW    = 31_000.0   # radius of maximum winds at surface (m)
 V_RMW  = 43.0       # maximum tangential wind at RMW (m/s)
-a      = 2        # outer-core wind decay exponent
+a      = 0.5        # outer-core wind decay exponent
 r_zero = Nx * 1000.0  # target radius where tangential wind is relaxed to zero (m)
 
 z_nodes_cpu = Array(znodes(grid, Center()))
@@ -469,7 +475,7 @@ for k in 1:Nz
     z_k  = z_nodes_cpu[k]
     z_c  = clamp(z_k, zˢ_data[1], zˢ_data[end])
     T_k  = T_sounding_interp(z_c)
-    p_bg = pˢ_data[1] * exp(-constants.gravitational_acceleration * z_k / (Rᵈ * T_k))
+    p_bg = p_sounding_interp(z_c)   # use observed sounding pressure (not isothermal formula)
     ρ_k  = p_bg / (Rᵈ * T_k)
 
     p_vortex[k, Nr] = p_bg    # outer boundary condition: undisturbed background pressure
@@ -483,14 +489,75 @@ for k in 1:Nz
     end
 end
 
-p_outer = p_vortex[:, Nr]   # background (outer-edge) pressure profile — used for θ_init
+p_outer = p_vortex[:, Nr]   # background (outer-edge) pressure profile
 
-# CPU-only lookup: r-z → pressure
-function p_at(x, y, z)
-    r     = sqrt((x - x_center)^2 + (y - y_center)^2)
-    k     = clamp(searchsortedfirst(z_nodes_cpu, z), 1, Nz)
-    r_idx = clamp(searchsortedfirst(rrange, r),      1, Nr)
-    return p_vortex[k, r_idx]
+# ---- Hydrostatically-balanced θ from the gradient-wind pressure field ----
+# Derive ρ from hydrostatic balance (∂p/∂z = -ρg), then T = p/(Rρ), θ = T(p₀/p)^κ.
+# This guarantees θ is consistent with BOTH gradient-wind and hydrostatic balance,
+# avoiding the constant-T assumption of the Poisson relation.
+
+g_val  = constants.gravitational_acceleration
+p_ref0 = 1e5   # reference pressure for potential temperature (Pa)
+
+θ_vortex = zeros(Float64, Nz, Nr)
+Δz_grid  = z_nodes_cpu[2] - z_nodes_cpu[1]   # uniform vertical spacing
+
+for ri in 1:Nr
+    for k in 1:Nz
+        if k == 1
+            # Forward difference at bottom
+            ρ_hydro = -(p_vortex[2, ri] - p_vortex[1, ri]) / (g_val * Δz_grid)
+        elseif k == Nz
+            # Backward difference at top
+            ρ_hydro = -(p_vortex[Nz, ri] - p_vortex[Nz-1, ri]) / (g_val * Δz_grid)
+        else
+            # Centered difference in interior
+            ρ_hydro = -(p_vortex[k+1, ri] - p_vortex[k-1, ri]) / (2 * g_val * Δz_grid)
+        end
+        # Guard against non-physical ρ (should not happen, but be safe)
+        ρ_hydro = max(ρ_hydro, 1e-3)
+        T_loc = p_vortex[k, ri] / (Rᵈ * ρ_hydro)
+        θ_vortex[k, ri] = T_loc * (p_ref0 / p_vortex[k, ri])^κ_exp
+    end
+end
+
+# Normalize θ_vortex: subtract the far-field θ_vortex and add the sounding θ.
+# This ensures the far field exactly matches the sounding while the warm-core anomaly
+# comes from the hydrostatically-consistent pressure structure.
+θ_anomaly = zeros(Float64, Nz, Nr)
+for k in 1:Nz
+    θ_far = θ_vortex[k, Nr]
+    for ri in 1:Nr
+        θ_anomaly[k, ri] = θ_vortex[k, ri] - θ_far
+    end
+end
+
+println("  θ warm-core anomaly at surface centre: " *
+        "$(round(θ_anomaly[1,1], digits=3)) K  " *
+        "(max anomaly: $(round(maximum(θ_anomaly), digits=3)) K)")
+
+# CPU-only lookup: r-z → θ  (sounding + hydrostatic anomaly, bilinear interpolation)
+function θ_at(x, y, z)
+    r  = sqrt((x - x_center)^2 + (y - y_center)^2)
+    z_c = clamp(z, zˢ_data[1], zˢ_data[end])
+    θ_bg = θ_sounding_interp(z_c)
+
+    # Vertical index + interpolation weight
+    ki = clamp(searchsortedfirst(z_nodes_cpu, z), 2, Nz)
+    tz = clamp((z - z_nodes_cpu[ki-1]) / (z_nodes_cpu[ki] - z_nodes_cpu[ki-1]), 0.0, 1.0)
+
+    # Radial index + interpolation weight
+    ri = clamp(searchsortedfirst(rrange, r), 2, Nr)
+    tr = clamp((r - rrange[ri-1]) / (rrange[ri] - rrange[ri-1]), 0.0, 1.0)
+
+    # Bilinear interpolation of anomaly
+    a00 = θ_anomaly[ki-1, ri-1]
+    a01 = θ_anomaly[ki-1, ri]
+    a10 = θ_anomaly[ki,   ri-1]
+    a11 = θ_anomaly[ki,   ri]
+    δθ  = (1-tz) * ((1-tr)*a00 + tr*a01) + tz * ((1-tr)*a10 + tr*a11)
+
+    return θ_bg + δθ
 end
 
 ###########################
@@ -508,14 +575,7 @@ function v_init(x, y, z)
 end
 
 function θ_init(x, y, z)
-    # Background potential temperature from Dunion 2011 sounding
-    z_c   = clamp(z, zˢ_data[1], zˢ_data[end])
-    θ_bg  = θ_sounding_interp(z_c)
-    k     = clamp(searchsortedfirst(z_nodes_cpu, z_c), 1, Nz)
-    p_ref = p_outer[k]      # background pressure at this height
-    p_loc = p_at(x, y, z)   # pressure at this (x, y, z) including vortex perturbation
-    # Warm-core balance: lower p inside vortex ↔ higher θ (Poisson / thermal-wind)
-    return θ_bg * (p_ref / p_loc)
+    return θ_at(x, y, z)
 end
 
 function qᵗ_init(x, y, z)
@@ -638,10 +698,8 @@ println("  Saved moisture_init_cross_section.png")
 # ---- 10. Rainband heating profiles (r–z cross sections + plan views) ----
 r_vis = range(0.0, 150_000.0, length=150)
 z_vis = range(0.0, 15_000.0,  length=150)
-Q_con_2d = [convective_rainband_heating(x_center + r, y_center, Float32(z), 0.0f0, con_params)
-            for r in r_vis, z in z_vis]   # (Nr_vis, Nz_vis) — matches contourf!(r_vis, z_vis, M)
-Q_str_2d = [stratiform_rainband_heating(x_center + r, y_center, Float32(z), 0.0f0, str_params)
-            for r in r_vis, z in z_vis]
+Q_con_2d = [convective_rainband_heating(x_center + r, y_center, Float32(z), 0.0f0, con_params) for r in r_vis, z in z_vis]   # (Nr_vis, Nz_vis) — matches contourf!(r_vis, z_vis, M)
+Q_str_2d = [stratiform_rainband_heating(x_center + r, y_center, Float32(z), 0.0f0, str_params) for r in r_vis, z in z_vis]
 
 # Plan views at the sin-peak height of each component
 xy_vis_km = range(-150.0, 150.0, length=200)   # km, relative to storm centre
@@ -676,7 +734,7 @@ cf2 = contourf!(ax2, collect(r_vis)./1000, collect(z_vis)./1000, Q_str_2d.*86400
 Colorbar(fig[1, 3], cf2, label="Heating rate (K day⁻¹)")
 
 # Row 2: plan views at the peak heating height of each component
-ax3 = Axis(fig[2, 1], aspect=1,
+ax= Axis(fig[2, 1], aspect=1,
            xlabel="Zonal distance from centre (km)", ylabel="Meridional distance from centre (km)",
            title="Convective component — plan view at z ≈ $(z_con_km) km")
 ax4 = Axis(fig[2, 2], aspect=1,
@@ -708,17 +766,24 @@ wall_clock = Ref(time_ns())
 
 function progress(sim)
     elapsed = 1e-9 * (time_ns() - wall_clock[])
+    wmax = maximum(w)
+    wmin = minimum(w)
+    umax = maximum(abs, u)
     msg = @sprintf(
         "Iter: %d, t: %s, Δt: %s, wall: %s | max|V|=%.2f w=[%.2f,%.2f] m/s | qᵛ=%.2e qᶜˡ=%.2e qʳ=%.2e",
         iteration(sim), prettytime(sim), prettytime(sim.Δt), prettytime(elapsed),
-        maximum(abs, u), minimum(w), maximum(w),
+        umax, wmin, wmax,
         maximum(qᵛ), maximum(qᶜˡ), maximum(qʳ))
     @info msg
+    if isnan(wmax) || isnan(umax) || wmax > 200.0
+        @warn "NaN or blowup detected — stopping simulation"
+        sim.stop_iteration = iteration(sim)
+    end
     wall_clock[] = time_ns()
     return nothing
 end
 
-add_callback!(simulation, progress, IterationInterval(100))
+add_callback!(simulation, progress, IterationInterval(25))
 
 # Collect time series of max vertical velocity (diagnostic)
 max_w_ts    = Float64[]
@@ -859,14 +924,14 @@ Colorbar(fig[3, 3], hmqʳ_xy,  vertical=false, label="qʳ (kg/kg)")
 Colorbar(fig[3, 4], hmVr_xy,  vertical=false, label="Vᵣ (m/s)")
 Colorbar(fig[3, 5], hmVt_xy,  vertical=false, label="Vₜ (m/s)")
 
-# Save all frames
-for t_idx in 1:Nt
+# Save animation video
+video_path = joinpath(figures_dir, "tropical_cyclone_slices.mp4")
+Makie.record(fig, video_path, 1:Nt; framerate=10) do t_idx
     n[] = t_idx
-    Makie.save(joinpath(figures_dir, @sprintf("tropical_cyclone_slices_t%04d.png", t_idx)), fig)
 end
 n[] = Nt
 Makie.save(joinpath(figures_dir, "tropical_cyclone_slices_final.png"), fig)
-println("  Saved $Nt frames + tropical_cyclone_slices_final.png")
+println("  Saved tropical_cyclone_slices.mp4 + tropical_cyclone_slices_final.png")
 
 # ---- Max-w time series ----
 fig_ts = Figure(size=(600, 340))
