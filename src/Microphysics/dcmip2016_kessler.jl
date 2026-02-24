@@ -435,14 +435,14 @@ function AtmosphereModels.microphysics_model_update!(microphysics::DCMIP2016KM, 
     θˡⁱ  = model.formulation.potential_temperature
     ρθˡⁱ = model.formulation.potential_temperature_density
 
-    # Total moisture density (prognostic variable of AtmosphereModel)
-    ρqᵗ = model.moisture_density
+    # Vapor density (prognostic variable of AtmosphereModel for DCMIP2016KM)
+    ρqᵛ = model.moisture_density
 
     # Microphysical fields
     μ = model.microphysical_fields
 
     launch!(arch, grid, :xy, _microphysical_update!,
-            microphysics, grid, Nz, Δt, ρ, p, p₀, constants, θˡⁱ, ρθˡⁱ, ρqᵗ, μ)
+            microphysics, grid, Nz, Δt, ρ, p, p₀, constants, θˡⁱ, ρθˡⁱ, ρqᵛ, μ)
 
     return nothing
 end
@@ -571,7 +571,7 @@ end
 
 @kernel function _microphysical_update!(microphysics, grid, Nz, Δt,
                                         density, pressure, p₀, constants,
-                                        θˡⁱ, ρθˡⁱ, ρqᵗ, μ)
+                                        θˡⁱ, ρθˡⁱ, ρqᵛ, μ)
     i, j = @index(Global, NTuple)
     FT = eltype(grid)
     precipitation_rate_field = μ.precipitation_rate
@@ -603,7 +603,7 @@ end
     for k = 1:(Nz-1)
         @inbounds begin
             ρ = density[i, j, k]
-            qᵛ = ρqᵗ[i, j, k] / ρ
+            qᵛ = ρqᵛ[i, j, k] / ρ
             rᵛ, rᶜˡ, rʳ = mass_fractions_to_mixing_ratios(qᵛ, μ.ρqᶜˡ[i, j, k], μ.ρqʳ[i, j, k], ρ)
 
             𝕎ʳᵏ = kessler_terminal_velocity(rʳ, ρ, ρ₁, microphysics)
@@ -625,7 +625,7 @@ end
     # k = Nz: no CFL update needed
     @inbounds begin
         ρ = density[i, j, Nz]
-        qᵛ = ρqᵗ[i, j, Nz] / ρ
+        qᵛ = ρqᵛ[i, j, Nz] / ρ
         rᵛ, rᶜˡ, rʳ = mass_fractions_to_mixing_ratios(qᵛ, μ.ρqᶜˡ[i, j, Nz], μ.ρqʳ[i, j, Nz], ρ)
 
         μ.𝕎ʳ[i, j, Nz] = kessler_terminal_velocity(rʳ, ρ, ρ₁, microphysics)
@@ -794,7 +794,7 @@ end
 
             qᵛ, qᶜˡ, qʳ, qᵗ = mixing_ratios_to_mass_fractions(rᵛ, rᶜˡ, rʳ)
 
-            ρqᵗ[i, j, k]    = ρ * qᵛ
+            ρqᵛ[i, j, k]    = ρ * qᵛ
             μ.ρqᶜˡ[i, j, k] = ρ * qᶜˡ
             μ.ρqʳ[i, j, k]  = ρ * qʳ
             μ.qᵛ[i, j, k]   = qᵛ
