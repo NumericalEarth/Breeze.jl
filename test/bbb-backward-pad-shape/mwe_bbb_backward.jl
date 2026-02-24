@@ -9,21 +9,21 @@ using Reactant
 using Reactant: @trace
 using Enzyme
 using Statistics: mean
+using CUDA
 
 Reactant.set_default_backend("cpu")
 
 grid = RectilinearGrid(ReactantState(); size=(4, 4, 4), extent=(1, 1, 1),
                        topology=(Bounded, Bounded, Bounded))
 
-model = AtmosphereModel(grid; dynamics=CompressibleDynamics())
+@time "Building model" model = AtmosphereModel(grid; dynamics=CompressibleDynamics())
 FT = eltype(grid)
-set!(model; θ=FT(300), ρ=one(FT))
 
 dmodel = Enzyme.make_zero(model)
 θ_init = CenterField(grid)
-set!(θ_init, (args...) -> FT(300))
+@time "Setting initial condition" set!(θ_init, (args...) -> FT(300))
 dθ_init = CenterField(grid)
-set!(dθ_init, FT(0))
+@time "Setting shadow initial condition" set!(dθ_init, FT(0))
 
 function loss(model, θ_init, Δt, nsteps)
     FT = eltype(model.grid)

@@ -9,6 +9,7 @@ using Reactant
 using Reactant: @trace
 using Enzyme
 using Statistics: mean
+using CUDA
 
 Reactant.set_default_backend("cpu")
 
