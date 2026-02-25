@@ -207,7 +207,7 @@ function OceananigansTimeSteppers.time_step!(model::AtmosphereModel{<:Compressib
     compute_flux_bc_tendencies!(model)
     acoustic_rk3_substep!(model, Δt, β₂)
 
-    tick_stage!(model.clock, (β₂ - β₁) * Δt)  
+    tick_stage!(model.clock, (β₂ - β₁) * Δt)
     update_state!(model, callbacks; compute_tendencies = true)
     step_lagrangian_particles!(model, β₂ * Δt)
 
