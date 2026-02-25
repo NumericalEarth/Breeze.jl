@@ -1,9 +1,11 @@
 #####
 ##### Reactant CompressibleDynamics tests
 #####
-# Tests construction and compiled time-stepping of AtmosphereModel
-# with CompressibleDynamics on selected topologies including Bounded.
-# Uses raise=true and raise_first=true to surface any MLIR compilation errors.
+# Topology matrix test for AtmosphereModel + CompressibleDynamics backward pass.
+# Tests both nsteps=1 (no checkpointing) and nsteps=9 (checkpointed, perfect square).
+#
+# 2D: PPF, BBF
+# 3D: PPP, PBB, PPB, BBB
 
 using Breeze
 using Oceananigans
@@ -18,15 +20,7 @@ using Test
 @testset "Reactant CompressibleDynamics" begin
     @info "Performing Reactant CompressibleDynamics tests..."
 
-
     Reactant.set_default_backend("cpu")
-    
-    function run_timesteps!(model, Δt, Nt)
-        @trace track_numbers=false for _ in 1:Nt
-            time_step!(model, Δt)
-        end
-        return nothing
-    end
 
     function make_init_fields(grid)
         FT = eltype(grid)
@@ -58,207 +52,72 @@ using Test
         return dθ_init, loss_value
     end
 
-    @testset "3D (Periodic, Periodic, Flat) — CompressibleDynamics" begin
-        @info "  Testing 3D (Periodic, Periodic, Flat)..."
-        grid = RectilinearGrid(ReactantState(); size=(4, 4), extent=(1, 1),
-                               topology=(Periodic, Periodic, Flat))
-        model = AtmosphereModel(grid; dynamics=CompressibleDynamics())
-        FT = eltype(grid)
-        set!(model; θ=FT(300), ρ=FT(1))
+    topologies_2d = [
+        ("PPF", (Periodic, Periodic, Flat)),
+        ("BBF", (Bounded,  Bounded,  Flat)),
+    ]
 
-        @testset "Construction" begin
+    topologies_3d = [
+        ("PPP", (Periodic, Periodic, Periodic)),
+        ("PBB", (Periodic, Bounded,  Bounded)),
+        ("PPB", (Periodic, Periodic, Bounded)),
+        ("BBB", (Bounded,  Bounded,  Bounded)),
+    ]
+
+    Δt_val  = 0.001
+    nsteps_list = (1, 9)
+
+    for (label, topo) in vcat(topologies_2d, topologies_3d)
+        is_2d = topo[3] === Flat
+        sz  = is_2d ? (6, 6)    : (6, 6, 6)
+        ext = is_2d ? (1, 1)    : (1, 1, 1)
+
+        @testset "$label" begin
+            @info "  Testing $label with size=$sz..."
+            grid = RectilinearGrid(ReactantState(); size=sz, extent=ext, topology=topo)
+            @time "Constructing model ($label)" model = AtmosphereModel(grid; dynamics=CompressibleDynamics())
+            FT = eltype(grid)
+            Δt = FT(Δt_val)
+
             @test model isa AtmosphereModel
             @test model.grid.architecture isa ReactantState
             @test model.dynamics isa CompressibleDynamics
-        end
 
-        @testset "Compiled time_step!" begin
-            @info "    Compiling and running time_step!..."
-            Δt = FT(0.001)
-            Nt = 4
-            compiled_run! = @compile raise=true raise_first=true sync=true run_timesteps!(model, Δt, Nt)
-            compiled_run!(model, Δt, Nt)
-            @test model.clock.iteration == Nt
-        end
-
-        @testset "Compiled backward pass (Enzyme)" begin
-            @info "    Compiling and running backward pass..."
-            Δt = FT(0.001)
-            nsteps = 4
-            dmodel = Enzyme.make_zero(model)
+            # Compile forward (loss) once
             θ_init, dθ_init = make_init_fields(grid)
-            compiled_grad = Reactant.@compile raise=true raise_first=true sync=true grad_loss(
-                model, dmodel, θ_init, dθ_init, Δt, nsteps)
-            @test compiled_grad !== nothing
+            ns_compile = 9
+            @info "    [$label] Compiling forward loss (nsteps=$ns_compile)..."
+            @time "Compiling forward loss ($label)" compiled_loss = Reactant.@compile raise=true raise_first=true sync=true loss(
+                model, θ_init, Δt, ns_compile)
 
-            dθ, loss_val = compiled_grad(model, dmodel, θ_init, dθ_init, Δt, nsteps)
-            @test loss_val > 0
-            @test isfinite(loss_val)
-            @test maximum(abs, interior(dθ)) > 0
-            @test !any(isnan, interior(dθ))
+            # Compile backward once (nsteps passed as argument)
+            dmodel = Enzyme.make_zero(model)
+            @info "    [$label] Compiling backward (nsteps=$ns_compile)..."
+            @time "Compiling backward ($label)" compiled_grad = Reactant.@compile raise=true raise_first=true sync=true grad_loss(
+                model, dmodel, θ_init, dθ_init, Δt, ns_compile)
+
+            # Run forward loss
+            for ns in nsteps_list
+                @testset "Forward loss (nsteps=$ns)" begin
+                    @info "    [$label] Running forward loss (nsteps=$ns)..."
+                    @time "Running forward loss ($label, n=$ns)" loss_val = compiled_loss(model, θ_init, Δt, ns)
+                    @test loss_val > 0
+                    @test isfinite(loss_val)
+                    @test !isnan(loss_val)
+                end
+            end
+
+            # Run backward with different nsteps values
+            for ns in nsteps_list
+                @testset "Backward (nsteps=$ns)" begin
+                    @info "    [$label] Running backward (nsteps=$ns)..."
+                    @time "Running backward ($label, n=$ns)" dθ, loss_val = compiled_grad(model, dmodel, θ_init, dθ_init, Δt, ns)
+                    @test loss_val > 0
+                    @test isfinite(loss_val)
+                    @test maximum(abs, interior(dθ)) > 0
+                    @test !any(isnan, interior(dθ))
+                end
+            end
         end
     end
-
-    @testset "3D (Bounded, Bounded, Flat) — CompressibleDynamics" begin
-        @info "  Testing 3D (Bounded, Bounded, Flat)..."
-        grid = RectilinearGrid(ReactantState(); size=(4, 4), extent=(1, 1),
-                               topology=(Bounded, Bounded, Flat))
-        model = AtmosphereModel(grid; dynamics=CompressibleDynamics())
-        FT = eltype(grid)
-        set!(model; θ=FT(300), ρ=FT(1))
-
-        @testset "Construction" begin
-            @test model isa AtmosphereModel
-            @test model.grid.architecture isa ReactantState
-            @test model.dynamics isa CompressibleDynamics
-        end
-
-        @testset "Compiled time_step!" begin
-            @info "    Compiling and running time_step!..."
-            Δt = FT(0.001)
-            Nt = 4
-            compiled_run! = @compile raise=true raise_first=true sync=true run_timesteps!(model, Δt, Nt)
-            compiled_run!(model, Δt, Nt)
-            @test model.clock.iteration == Nt
-        end
-
-        @testset "Compiled backward pass (Enzyme)" begin
-            @info "    Compiling and running backward pass..."
-            Δt = FT(0.001)
-            nsteps = 4
-            dmodel = Enzyme.make_zero(model)
-            θ_init, dθ_init = make_init_fields(grid)
-            compiled_grad = Reactant.@compile raise=true raise_first=true sync=true grad_loss(
-                model, dmodel, θ_init, dθ_init, Δt, nsteps)
-            @test compiled_grad !== nothing
-
-            dθ, loss_val = compiled_grad(model, dmodel, θ_init, dθ_init, Δt, nsteps)
-            @test loss_val > 0
-            @test isfinite(loss_val)
-            @test maximum(abs, interior(dθ)) > 0
-            @test !any(isnan, interior(dθ))
-        end
-    end
-
-    @testset "3D (Periodic, Periodic, Periodic) — CompressibleDynamics" begin
-        @info "  Testing 3D (Periodic, Periodic, Periodic)..."
-        grid = RectilinearGrid(ReactantState(); size=(4, 4, 4), extent=(1, 1, 1),
-                               topology=(Periodic, Periodic, Periodic))
-        model = AtmosphereModel(grid; dynamics=CompressibleDynamics())
-        FT = eltype(grid)
-        set!(model; θ=FT(300), ρ=FT(1))
-
-        @testset "Construction" begin
-            @test model isa AtmosphereModel
-            @test model.grid.architecture isa ReactantState
-            @test model.dynamics isa CompressibleDynamics
-        end
-
-        @testset "Compiled time_step!" begin
-            @info "    Compiling and running time_step!..."
-            Δt = FT(0.001)
-            Nt = 4
-            compiled_run! = @compile raise=true raise_first=true sync=true run_timesteps!(model, Δt, Nt)
-            compiled_run!(model, Δt, Nt)
-            @test model.clock.iteration == Nt
-        end
-
-        @testset "Compiled backward pass (Enzyme)" begin
-            @info "    Compiling and running backward pass..."
-            Δt = FT(0.001)
-            nsteps = 4
-            dmodel = Enzyme.make_zero(model)
-            θ_init, dθ_init = make_init_fields(grid)
-            compiled_grad = Reactant.@compile raise=true raise_first=true sync=true grad_loss(
-                model, dmodel, θ_init, dθ_init, Δt, nsteps)
-            @test compiled_grad !== nothing
-
-            dθ, loss_val = compiled_grad(model, dmodel, θ_init, dθ_init, Δt, nsteps)
-            @test loss_val > 0
-            @test isfinite(loss_val)
-            @test maximum(abs, interior(dθ)) > 0
-            @test !any(isnan, interior(dθ))
-        end
-    end
-
-    # @testset "3D (Bounded, Bounded, Bounded) — CompressibleDynamics" begin
-    #     @info "  Testing 3D (Bounded, Bounded, Bounded)..."
-    #     grid = RectilinearGrid(ReactantState(); size=(4, 4, 4), extent=(1, 1, 1),
-    #                            topology=(Bounded, Bounded, Bounded))
-    #     model = AtmosphereModel(grid; dynamics=CompressibleDynamics())
-    #     FT = eltype(grid)
-    #     set!(model; θ=FT(300), ρ=FT(1))
-
-    #     @testset "Construction" begin
-    #         @test model isa AtmosphereModel
-    #         @test model.grid.architecture isa ReactantState
-    #         @test model.dynamics isa CompressibleDynamics
-    #     end
-
-    #     @testset "Compiled time_step!" begin
-    #         @info "    Compiling and running time_step!..."
-    #         Δt = FT(0.001)
-    #         Nt = 4
-    #         compiled_run! = @compile raise=true raise_first=true sync=true run_timesteps!(model, Δt, Nt)
-    #         compiled_run!(model, Δt, Nt)
-    #         @test model.clock.iteration == Nt
-    #     end
-
-    #     @testset "Compiled backward pass (Enzyme)" begin
-    #         @info "    Compiling and running backward pass..."
-    #         Δt = FT(0.001)
-    #         nsteps = 4
-    #         dmodel = Enzyme.make_zero(model)
-    #         θ_init, dθ_init = make_init_fields(grid)
-    #         compiled_grad = Reactant.@compile raise=true raise_first=true sync=true grad_loss(
-    #             model, dmodel, θ_init, dθ_init, Δt, nsteps)
-    #         @test compiled_grad !== nothing
-
-    #         dθ, loss_val = compiled_grad(model, dmodel, θ_init, dθ_init, Δt, nsteps)
-    #         @test loss_val > 0
-    #         @test isfinite(loss_val)
-    #         @test maximum(abs, interior(dθ)) > 0
-    #         @test !any(isnan, interior(dθ))
-    #     end
-    # end
-
-    # @testset "3D (Periodic, Periodic, Bounded) — CompressibleDynamics" begin
-    #     @info "  Testing 3D (Periodic, Periodic, Bounded)..."
-    #     grid = RectilinearGrid(ReactantState(); size=(2, 2, 2), extent=(1, 1, 1),
-    #                            topology=(Periodic, Periodic, Bounded))
-    #     @time "Constructing model" model = AtmosphereModel(grid; dynamics=CompressibleDynamics())
-    #     FT = eltype(grid)
-
-    #     @testset "Construction" begin
-    #         @test model isa AtmosphereModel
-    #         @test model.grid.architecture isa ReactantState
-    #         @test model.dynamics isa CompressibleDynamics
-    #     end
-
-    #     @testset "Compiled time_step!" begin
-    #         @info "    Compiling and running time_step!..."
-    #         Δt = FT(0.001)
-    #         Nt = 1
-    #         @time "Compiling time_step!" compiled_run! = @compile raise=true raise_first=true sync=true run_timesteps!(model, Δt, Nt)
-    #         @time "Running time_step!" compiled_run!(model, Δt, Nt)
-    #         @test model.clock.iteration == Nt
-    #     end
-
-    #     @testset "Compiled backward pass (Enzyme)" begin
-    #         @info "    Compiling and running backward pass..."
-    #         Δt = FT(0.001)
-    #         nsteps = 1
-    #         dmodel = Enzyme.make_zero(model)
-    #         θ_init, dθ_init = make_init_fields(grid)
-    #         @time "Compiling grad_loss" compiled_grad = Reactant.@compile raise=true raise_first=true sync=true grad_loss(
-    #             model, dmodel, θ_init, dθ_init, Δt, nsteps)
-    #         @test compiled_grad !== nothing
-
-    #         @time "Running grad_loss" dθ, loss_val = compiled_grad(model, dmodel, θ_init, dθ_init, Δt, nsteps)
-    #         @test loss_val > 0
-    #         @test isfinite(loss_val)
-    #         @test maximum(abs, interior(dθ)) > 0
-    #         @test !any(isnan, interior(dθ))
-    #     end
-    # end
 end
