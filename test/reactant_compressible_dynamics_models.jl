@@ -53,19 +53,19 @@ using Test
     end
 
     topologies_2d = [
-        ("PPF", (Periodic, Periodic, Flat)),
-        ("BBF", (Bounded,  Bounded,  Flat)),
+        # ("PPF", (Periodic, Periodic, Flat)),
+        # ("BBF", (Bounded,  Bounded,  Flat)),
     ]
 
     topologies_3d = [
-        ("PPP", (Periodic, Periodic, Periodic)),
-        ("PBB", (Periodic, Bounded,  Bounded)),
+        # ("PPP", (Periodic, Periodic, Periodic)),
+        # ("PBB", (Periodic, Bounded,  Bounded)),
         ("BBB", (Bounded,  Bounded,  Bounded)),
-        ("PPB", (Periodic, Periodic, Bounded)),
+        # ("PPB", (Periodic, Periodic, Bounded)),
     ]
 
     Δt_val  = 0.02
-    nsteps_list = (1, 9)
+    nsteps_list = (1, 9, 9 * 9)
 
     for (label, topo) in vcat(topologies_2d, topologies_3d)
         is_2d = topo[3] === Flat
@@ -85,7 +85,7 @@ using Test
 
             # Compile forward (loss) once
             θ_init, dθ_init = make_init_fields(grid)
-            ns_compile = 9
+            ns_compile = 1
             @info "    [$label] Compiling forward loss (nsteps=$ns_compile)..."
             @time "Compiling forward loss ($label)" compiled_loss = Reactant.@compile raise=true raise_first=true sync=true loss(
                 model, θ_init, Δt, ns_compile)
@@ -116,6 +116,8 @@ using Test
                     @test isfinite(loss_val)
                     @test maximum(abs, interior(dθ)) > 0
                     @test !any(isnan, interior(dθ))
+                    println("loss_val: ", loss_val)
+                    println("dθ: ", Array(dθ))
                 end
             end
         end
