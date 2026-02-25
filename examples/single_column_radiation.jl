@@ -108,7 +108,7 @@ set!(all_sky_model; θ=θ₀, qᵗ=qᵗᵢ)
 
 T = gray_model.temperature
 pᵣ = reference_state.pressure
-qᵗ = specific_humidity(gray_model)
+qᵛ = specific_humidity(gray_model)
 ℋ = RelativeHumidityField(gray_model)
 
 ℐ_lw_up_gray = gray_radiation.upwelling_longwave_flux
@@ -161,7 +161,7 @@ ax_net = Axis(fig[2, 4]; xlabel="Net flux (W/m²)", yticks=z_ticks_m)
 
 # Atmospheric state
 lines!(ax_T, T; color=:gray30)
-lines!(ax_q, qᵗ; color=:gray30)
+lines!(ax_q, qᵛ; color=:gray30)
 lines!(ax_H, 100ℋ; color=:gray30)
 lines!(ax_ql, 1000qˡ; color=:lime)  # Convert to g/kg
 

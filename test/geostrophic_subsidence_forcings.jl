@@ -69,7 +69,7 @@ end
     @test haskey(model.forcing, :ρqᵛ)
     @test model.forcing.ρqᵛ isa SubsidenceForcing
 
-    ρqᵗ_initial = sum(model.moisture_density)
+    ρqᵛ_initial = sum(model.moisture_density)
 
     # Reduced iterations (from 10 to 3)
     Δt = FT(0.1)
@@ -77,10 +77,10 @@ end
         time_step!(model, Δt)
     end
 
-    ρqᵗ_final = sum(model.moisture_density)
+    ρqᵛ_final = sum(model.moisture_density)
 
-    @test !isnan(ρqᵗ_final)
-    @test ρqᵗ_final < ρqᵗ_initial
+    @test !isnan(ρqᵛ_final)
+    @test ρqᵛ_final < ρqᵛ_initial
 end
 
 @testset "θ → e conversion in StaticEnergy model [$(FT)]" for FT in test_float_types()

@@ -126,20 +126,20 @@ set!(model; u=uᵢ, θ=θᵢ, ℋ=ℋᵢ)
 U = Field(Average(model.velocities.u, dims=(1, 2)))
 Ri = N^2 / ∂z(U)^2
 
-Qᵗ = Field(Average(specific_humidity(model), dims=1))
+Qᵛ = Field(Average(specific_humidity(model), dims=1))
 θ = Field(Average(liquid_ice_potential_temperature(model), dims=1))
 ℋ = Field(Average(RelativeHumidity(model), dims=1))
 
 fig = Figure(size=(1000, 500))
 
 axu = Axis(fig[1, 1], xlabel = "uᵇ (m/s)", ylabel = "z (m)", title = "Zonal velocity")
-axq = Axis(fig[1, 2], xlabel = "qᵗ (kg/kg)", title="Total moisture")
+axq = Axis(fig[1, 2], xlabel = "qᵛ (kg/kg)", title="Specific humidity")
 axℋ = Axis(fig[1, 3], xlabel = "ℋ", title="Relative humidity")
 axθ = Axis(fig[1, 4], xlabel = "θ (K)", title="Potential temperature")
 axR = Axis(fig[1, 5], xlabel = "Ri", title="Richardson number")
 
 lines!(axu, U)
-lines!(axq, Qᵗ)
+lines!(axq, Qᵛ)
 lines!(axℋ, ℋ)
 lines!(axθ, θ)
 lines!(axR, Ri)

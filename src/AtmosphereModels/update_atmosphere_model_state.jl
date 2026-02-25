@@ -239,19 +239,19 @@ end
     ρ_field = dynamics_density(dynamics)
     @inbounds begin
         ρ = ρ_field[i, j, k]
-        ρqᵛ = moisture_density[i, j, k]
-        qᵛ = ρqᵛ / ρ
-        specific_moisture[i, j, k] = qᵛ
+        ρqₘ = moisture_density[i, j, k]
+        qₘ = ρqₘ / ρ
+        specific_moisture[i, j, k] = qₘ
     end
 
     # Compute moisture fractions first (needed by diagnose_thermodynamic_state)
-    q = grid_moisture_fractions(i, j, k, grid, microphysics, ρ, qᵛ, microphysical_fields)
+    q = grid_moisture_fractions(i, j, k, grid, microphysics, ρ, qₘ, microphysical_fields)
 
     𝒰₀ = diagnose_thermodynamic_state(i, j, k, grid, formulation, dynamics, q)
 
     # Adjust the thermodynamic state if using a microphysics scheme
     # that invokes saturation adjustment
-    𝒰₁ = maybe_adjust_thermodynamic_state(𝒰₀, microphysics, qᵛ, constants)
+    𝒰₁ = maybe_adjust_thermodynamic_state(𝒰₀, microphysics, qₘ, constants)
 
     update_microphysical_fields!(microphysical_fields, i, j, k, grid,
                                  microphysics, ρ, 𝒰₁, constants)
