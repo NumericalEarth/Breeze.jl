@@ -18,14 +18,16 @@ Random = "9a3f8284-a2c9-5f02-9a11-845980a1fd5c"
 Breeze = {path = ".."}
 
 [compat]
+AtmosphericProfilesLibrary = "0.1.7"
 CUDA = "5"
 CairoMakie = "0.15"
-CloudMicrophysics = "0.29.0"
+CloudMicrophysics = "0.31.4"
 Documenter = "1"
 DocumenterCitations = "1.4"
 InteractiveUtils = "<0.0.1, 1"
 Literate = "2"
 NCDatasets = "0.14"
-Oceananigans = "0.104"
+Oceananigans = "0.105"
 Pkg = "<0.0.1, 1"
+RRTMGP = "0.21.7"
 Random = "<0.0.1, 1"

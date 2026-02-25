@@ -14,7 +14,7 @@
 
 # Import CloudMicrophysics internals that we need
 # (these don't depend on Thermodynamics.jl)
-using CloudMicrophysics.Common: ϵ_numerics
+using CloudMicrophysics.Utilities: ϵ_numerics
 using CloudMicrophysics.Microphysics1M: lambda_inverse, get_n0, get_v0, SF
 
 # gamma function from SpecialFunctions (via CloudMicrophysics)
@@ -179,47 +179,53 @@ Named tuple `(; evap_rate_0, evap_rate_1)` where:
     constants,
 ) where {FT}
 
-    evap_rate_0 = zero(FT)
-    evap_rate_1 = zero(FT)
+    (; ν_air, D_vapor) = aps
+    (; av, bv, α, β, ρ0) = evap
+    x_star = pdf_r.xr_min
+    ρᴸ = pdf_r.ρw
 
     # Compute supersaturation over liquid (negative means subsaturated)
     𝒮 = supersaturation(T, ρ, q, constants, PlanarLiquidSurface())
 
-    # Only evaporate if there's rain and air is subsaturated
-    if (Nʳ > ϵ_numerics(FT)) && (𝒮 < zero(FT))
-        (; ν_air, D_vapor) = aps
-        (; av, bv, α, β, ρ0) = evap
-        x_star = pdf_r.xr_min
-        ρᴸ = pdf_r.ρw
+    # Condition: evaporate only when rain exists and air is subsaturated
+    evaporating = (Nʳ > ϵ_numerics(FT)) & (𝒮 < zero(FT))
 
-        # Diffusional growth factor (G function)
-        G = diffusional_growth_factor(aps, T, constants)
+    # Use safe positive values to avoid NaN/Inf in intermediate computations
+    Nʳ_safe = max(Nʳ, ϵ_numerics(FT))
+    qʳ_safe = max(qʳ, eps(FT))
 
-        # Mean rain drop mass and diameter
-        (; xr_mean) = pdf_rain_parameters(pdf_r, qʳ, ρ, Nʳ)
-        Dʳ = cbrt(6 * xr_mean / (π * ρᴸ))
+    # Diffusional growth factor (G function)
+    G = diffusional_growth_factor(aps, T, constants)
 
-        # Ventilation factors for number and mass tendencies
-        t_star = cbrt(6 * x_star / xr_mean)
-        a_vent_0 = av * Γ_incl(FT(-1), t_star) / FT(6)^(-2 // 3)
-        b_vent_0 = bv * Γ_incl(-1 // 2 + 3 // 2 * β, t_star) / FT(6)^(β / 2 - 1 // 2)
+    # Mean rain drop mass and diameter
+    (; xr_mean) = pdf_rain_parameters(pdf_r, qʳ_safe, ρ, Nʳ_safe)
+    xr_mean_safe = max(xr_mean, eps(FT))
+    Dʳ = cbrt(6 * xr_mean_safe / (π * ρᴸ))
 
-        a_vent_1 = av * Γ(FT(2)) / cbrt(FT(6))
-        b_vent_1 = bv * Γ(5 // 2 + 3 // 2 * β) / 6^(β / 2 + 1 // 2)
+    # Ventilation factors for number and mass tendencies
+    t_star = cbrt(6 * x_star / xr_mean_safe)
+    a_vent_0 = av * Γ_incl(FT(-1), t_star) / FT(6)^(-2 // 3)
+    b_vent_0 = bv * Γ_incl(-1 // 2 + 3 // 2 * β, t_star) / FT(6)^(β / 2 - 1 // 2)
 
-        # Reynolds number
-        Re = α * xr_mean^β * sqrt(ρ0 / ρ) * Dʳ / ν_air
-        Fv0 = a_vent_0 + b_vent_0 * cbrt(ν_air / D_vapor) * sqrt(Re)
-        Fv1 = a_vent_1 + b_vent_1 * cbrt(ν_air / D_vapor) * sqrt(Re)
+    a_vent_1 = av * Γ(FT(2)) / cbrt(FT(6))
+    b_vent_1 = bv * Γ(5 // 2 + 3 // 2 * β) / 6^(β / 2 + 1 // 2)
 
-        # Evaporation rates (negative for evaporation)
-        evap_rate_0 = min(zero(FT), FT(2) * FT(π) * G * 𝒮 * Nʳ * Dʳ * Fv0 / xr_mean)
-        evap_rate_1 = min(zero(FT), FT(2) * FT(π) * G * 𝒮 * Nʳ * Dʳ * Fv1 / ρ)
+    # Reynolds number
+    Re = α * xr_mean_safe^β * sqrt(ρ0 / ρ) * Dʳ / ν_air
+    Fv0 = a_vent_0 + b_vent_0 * cbrt(ν_air / D_vapor) * sqrt(Re)
+    Fv1 = a_vent_1 + b_vent_1 * cbrt(ν_air / D_vapor) * sqrt(Re)
 
-        # Handle edge cases where xr_mean approaches zero
-        evap_rate_0 = ifelse(xr_mean / x_star < eps(FT), zero(FT), evap_rate_0)
-        evap_rate_1 = ifelse(qʳ < eps(FT), zero(FT), evap_rate_1)
-    end
+    # Evaporation rates (negative for evaporation)
+    evap_rate_0 = min(zero(FT), 2π * G * 𝒮 * Nʳ_safe * Dʳ * Fv0 / xr_mean_safe)
+    evap_rate_1 = min(zero(FT), 2π * G * 𝒮 * Nʳ_safe * Dʳ * Fv1 / ρ)
+
+    # Handle edge cases where xr_mean approaches zero
+    evap_rate_0 = ifelse(xr_mean / x_star < eps(FT), zero(FT), evap_rate_0)
+    evap_rate_1 = ifelse(qʳ < eps(FT), zero(FT), evap_rate_1)
+
+    # Zero out when no evaporation should occur
+    evap_rate_0 = ifelse(evaporating, evap_rate_0, zero(FT))
+    evap_rate_1 = ifelse(evaporating, evap_rate_1, zero(FT))
 
     return (; evap_rate_0, evap_rate_1)
 end
