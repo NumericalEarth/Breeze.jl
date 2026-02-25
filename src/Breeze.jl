@@ -108,8 +108,8 @@ export
     ParcelDynamics,
     ParcelModel,
     ParcelState,
-    SpecifiedUpdraft,
-    BuoyancyDrivenUpdraft
+    PrescribedVerticalVelocity,
+    PrognosticVerticalVelocity
 
 using Oceananigans: Oceananigans, @at, AnisotropicMinimumDissipation, Average,
                     AveragedTimeInterval, BackgroundField, BetaPlane, Bounded, BoundaryConditionOperation,

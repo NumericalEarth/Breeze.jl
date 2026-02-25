@@ -10,8 +10,8 @@ using Breeze.ParcelModels:
     ParcelDynamics,
     ParcelModel,
     ParcelState,
-    SpecifiedUpdraft,
-    BuoyancyDrivenUpdraft,
+    PrescribedVerticalVelocity,
+    PrognosticVerticalVelocity,
     adjust_adiabatically,
     compute_parcel_tendencies!,
     parcel_buoyancy
@@ -85,13 +85,13 @@ end
     @test dynamics.state === nothing
     @test dynamics.density === nothing
     @test dynamics.pressure === nothing
-    @test dynamics.updraft isa SpecifiedUpdraft
+    @test dynamics.vertical_velocity_formulation isa PrescribedVerticalVelocity
     @test dynamics.surface_pressure == 101325.0
     @test dynamics.standard_pressure == 1e5
 
-    # BuoyancyDrivenUpdraft construction
-    dynamics_b = ParcelDynamics(updraft=BuoyancyDrivenUpdraft())
-    @test dynamics_b.updraft isa BuoyancyDrivenUpdraft
+    # PrognosticVerticalVelocity construction
+    dynamics_b = ParcelDynamics(vertical_velocity_formulation=PrognosticVerticalVelocity())
+    @test dynamics_b.vertical_velocity_formulation isa PrognosticVerticalVelocity
     @test dynamics_b.surface_pressure == 101325.0
 end
 
@@ -673,15 +673,15 @@ end
 end
 
 #####
-##### BuoyancyDrivenUpdraft tests
+##### PrognosticVerticalVelocity tests
 #####
 
-@testset "BuoyancyDrivenUpdraft construction and materialization" begin
+@testset "PrognosticVerticalVelocity construction and materialization" begin
     grid = RectilinearGrid(size=10, z=(0, 1000), topology=(Flat, Flat, Bounded))
-    dynamics = ParcelDynamics(updraft=BuoyancyDrivenUpdraft())
+    dynamics = ParcelDynamics(vertical_velocity_formulation=PrognosticVerticalVelocity())
     model = AtmosphereModel(grid; dynamics, microphysics=nothing)
 
-    @test model.dynamics.updraft isa BuoyancyDrivenUpdraft
+    @test model.dynamics.vertical_velocity_formulation isa PrognosticVerticalVelocity
     @test model.dynamics.state isa ParcelState
     @test model.dynamics.state.w == 0.0
 
@@ -698,7 +698,7 @@ end
     # environmental conditions should have near-zero buoyancy.
     # Use a high-resolution grid for accurate environmental interpolation.
     grid = RectilinearGrid(size=1000, z=(0, 10kilometers), topology=(Flat, Flat, Bounded))
-    dynamics = ParcelDynamics(updraft=BuoyancyDrivenUpdraft())
+    dynamics = ParcelDynamics(vertical_velocity_formulation=PrognosticVerticalVelocity())
     model = AtmosphereModel(grid; dynamics, microphysics=nothing)
 
     reference_state = ReferenceState(grid, model.thermodynamic_constants,
@@ -727,10 +727,10 @@ end
     @test model.dynamics.state.z > 0  # Has moved upward
 end
 
-@testset "Warm parcel accelerates upward with BuoyancyDrivenUpdraft" begin
+@testset "Warm parcel accelerates upward with PrognosticVerticalVelocity" begin
     # A parcel warmer than its environment should have positive buoyancy and accelerate.
     grid = RectilinearGrid(size=100, z=(0, 10kilometers), topology=(Flat, Flat, Bounded))
-    dynamics = ParcelDynamics(updraft=BuoyancyDrivenUpdraft())
+    dynamics = ParcelDynamics(vertical_velocity_formulation=PrognosticVerticalVelocity())
     model = AtmosphereModel(grid; dynamics, microphysics=nothing)
 
     reference_state = ReferenceState(grid, model.thermodynamic_constants,
@@ -767,13 +767,13 @@ end
     @test model.dynamics.state.z > 0  # Risen from initial position
 end
 
-@testset "BuoyancyDrivenUpdraft with OneMomentCloudMicrophysics" begin
+@testset "PrognosticVerticalVelocity with OneMomentCloudMicrophysics" begin
     grid = RectilinearGrid(size=100, z=(0, 10kilometers), topology=(Flat, Flat, Bounded))
-    dynamics = ParcelDynamics(updraft=BuoyancyDrivenUpdraft())
+    dynamics = ParcelDynamics(vertical_velocity_formulation=PrognosticVerticalVelocity())
     microphysics = OneMomentCloudMicrophysics()
     model = AtmosphereModel(grid; dynamics, microphysics)
 
-    @test model.dynamics.updraft isa BuoyancyDrivenUpdraft
+    @test model.dynamics.vertical_velocity_formulation isa PrognosticVerticalVelocity
 
     reference_state = ReferenceState(grid, model.thermodynamic_constants,
                                      surface_pressure = 101325,

@@ -12,29 +12,29 @@ using KernelAbstractions: @kernel, @index
 using Breeze.Thermodynamics: MoistureMassFractions,
     LiquidIcePotentialTemperatureState, StaticEnergyState,
     PlanarLiquidSurface,
-    with_moisture, mixture_heat_capacity, density,
+    with_moisture, mixture_heat_capacity, density, temperature,
     temperature_from_potential_temperature, saturation_specific_humidity
 
 using Breeze.AtmosphereModels: AtmosphereModels, AtmosphereModel
 
 #####
-##### Updraft types
+##### Vertical velocity formulations
 #####
 
 """
-    SpecifiedUpdraft
+    PrescribedVerticalVelocity
 
-Singleton type for specified updraft dynamics. The parcel rises following
-the prescribed environmental vertical velocity field `w(z)`.
+Singleton type for prescribed vertical velocity dynamics. The parcel moves
+following the prescribed environmental vertical velocity field `w(z)`.
 
-This is the default updraft type: `dz/dt = w_env(z)`.
+This is the default vertical velocity formulation: `dz/dt = w_env(z)`.
 """
-struct SpecifiedUpdraft end
+struct PrescribedVerticalVelocity end
 
 """
-    BuoyancyDrivenUpdraft
+    PrognosticVerticalVelocity
 
-Singleton type for buoyancy-driven updraft dynamics. The parcel has a
+Singleton type for prognostic vertical velocity dynamics. The parcel has a
 prognostic vertical velocity driven by buoyancy:
 
 ```math
@@ -45,10 +45,10 @@ dz/dt = w
 where `B = -g (ρ_parcel - ρ_env) / ρ_env` is the net buoyancy from the density
 difference, including both the virtual temperature effect and condensate loading.
 """
-struct BuoyancyDrivenUpdraft end
+struct PrognosticVerticalVelocity end
 
-Base.summary(::SpecifiedUpdraft) = "SpecifiedUpdraft"
-Base.summary(::BuoyancyDrivenUpdraft) = "BuoyancyDrivenUpdraft"
+Base.summary(::PrescribedVerticalVelocity) = "PrescribedVerticalVelocity"
+Base.summary(::PrognosticVerticalVelocity) = "PrognosticVerticalVelocity"
 
 #####
 ##### ParcelState: state of a rising parcel
@@ -141,7 +141,7 @@ struct ParcelDynamics{S, TS, D, P, U, FT}
     timestepper :: TS
     density :: D
     pressure :: P
-    updraft :: U
+    vertical_velocity_formulation :: U
     surface_pressure :: FT
     standard_pressure :: FT
 end
@@ -155,16 +155,16 @@ The environmental profiles and parcel state are set using `set!` after
 constructing the `AtmosphereModel`.
 """
 function ParcelDynamics(FT::DataType=Oceananigans.defaults.FloatType;
-                        updraft = SpecifiedUpdraft(),
+                        vertical_velocity_formulation = PrescribedVerticalVelocity(),
                         surface_pressure = 101325,
                         standard_pressure = 1e5)
-    U = typeof(updraft)
+    U = typeof(vertical_velocity_formulation)
     return ParcelDynamics{Nothing, Nothing, Nothing, Nothing, U, FT}(
         nothing,
         nothing,
         nothing,
         nothing,
-        updraft,
+        vertical_velocity_formulation,
         convert(FT, surface_pressure),
         convert(FT, standard_pressure)
     )
@@ -177,7 +177,7 @@ function Base.show(io::IO, d::ParcelDynamics)
     state_str = d.state isa ParcelState ? d.state : "uninitialized"
     println(io, "├── state: ", state_str)
     println(io, "├── timestepper: ", isnothing(d.timestepper) ? "uninitialized" : "ParcelTimestepper (SSP RK3)")
-    println(io, "├── updraft: ", summary(d.updraft))
+    println(io, "├── vertical_velocity_formulation: ", summary(d.vertical_velocity_formulation))
     println(io, "├── density: ", isnothing(d.density) ? "unset" : summary(d.density))
     println(io, "├── pressure: ", isnothing(d.pressure) ? "unset" : summary(d.pressure))
     println(io, "├── surface_pressure: ", d.surface_pressure)
@@ -262,7 +262,7 @@ function AtmosphereModels.materialize_dynamics(d::ParcelDynamics, grid, bcs, con
     Gμ = zero_microphysics_prognostic_tendencies(μ)
     timestepper = ParcelTimestepper(state, Gμ)
 
-    return ParcelDynamics(state, timestepper, ρ, p, d.updraft, p₀, pˢᵗ)
+    return ParcelDynamics(state, timestepper, ρ, p, d.vertical_velocity_formulation, p₀, pˢᵗ)
 end
 
 """
@@ -303,7 +303,7 @@ Adapt.adapt_structure(to, d::ParcelDynamics) =
                    adapt(to, d.timestepper),
                    adapt(to, d.density),
                    adapt(to, d.pressure),
-                   d.updraft,
+                   d.vertical_velocity_formulation,
                    d.surface_pressure,
                    d.standard_pressure)
 
@@ -312,7 +312,7 @@ Oceananigans.Architectures.on_architecture(to, d::ParcelDynamics) =
                    on_architecture(to, d.timestepper),
                    on_architecture(to, d.density),
                    on_architecture(to, d.pressure),
-                   d.updraft,
+                   d.vertical_velocity_formulation,
                    d.surface_pressure,
                    d.standard_pressure)
 
@@ -352,7 +352,7 @@ conditions interpolated at that height.
 - `x`: Initial parcel x-position [m] (default: 0)
 - `y`: Initial parcel y-position [m] (default: 0)
 - `z`: Initial parcel height [m] (required to initialize parcel state)
-- `w_parcel`: Initial parcel vertical velocity [m/s] (for `BuoyancyDrivenUpdraft`)
+- `w_parcel`: Initial parcel vertical velocity [m/s] (for `PrognosticVerticalVelocity`)
 """
 function Oceananigans.set!(model::ParcelModel; T = nothing, θ = nothing,
                            ρ = nothing, p = nothing,
@@ -405,7 +405,7 @@ function Oceananigans.set!(model::ParcelModel; T = nothing, θ = nothing,
         initialize_parcel_state!(dynamics.state, z, x, y, model)
     end
 
-    # Set parcel vertical velocity (for BuoyancyDrivenUpdraft)
+    # Set parcel vertical velocity (for PrognosticVerticalVelocity)
     if !isnothing(w_parcel)
         dynamics.state.w = convert(eltype(model.grid), w_parcel)
     end
@@ -564,27 +564,40 @@ function compute_parcel_tendencies!(model::ParcelModel)
     tendencies.Gx = interpolate(z, model.velocities.u)
     tendencies.Gy = interpolate(z, model.velocities.v)
 
-    # Vertical position and velocity tendencies dispatched on updraft type
-    compute_updraft_tendencies!(tendencies, state, dynamics, model, dynamics.updraft)
+    # Vertical position and velocity tendencies dispatched on vertical velocity formulation
+    compute_vertical_velocity_tendencies!(tendencies, state, dynamics, model, dynamics.vertical_velocity_formulation)
 
     # Build diagnostic microphysical state from prognostic variables
     # Pass velocities for microphysics (e.g., aerosol activation uses vertical velocity)
     velocities = (; u = tendencies.Gx, v = tendencies.Gy, w = tendencies.Gz)
-    ℳ = microphysical_state(microphysics, ρ, μ, 𝒰, velocities)
 
-    # Thermodynamic and moisture tendencies from microphysics (specific, not density-weighted)
-    # For adiabatic (no microphysics): both are zero, giving exact conservation
-    tendencies.Ge = microphysical_tendency(microphysics, Val(:e), ρ, ℳ, 𝒰, constants)
-    tendencies.Gqᵗ = microphysical_tendency(microphysics, Val(:qᵗ), ρ, ℳ, 𝒰, constants)
+    # Temperature guard: skip microphysics at extreme cold (T < 150 K) where
+    # saturation vapor pressure underflow produces NaN in condensation/evaporation.
+    # This occurs when a buoyancy-driven parcel reaches the domain boundary in an
+    # isentropic atmosphere with T → 0 near the top.
+    T = temperature(𝒰, constants)
 
-    # Microphysics prognostic tendencies (scheme-dependent)
-    tendencies.Gμ = compute_microphysics_prognostic_tendencies(microphysics, ρ, μ, ℳ, 𝒰, constants)
+    if !isnothing(microphysics) && T > 150
+        ℳ = microphysical_state(microphysics, ρ, μ, 𝒰, velocities)
+
+        # Thermodynamic and moisture tendencies from microphysics (specific, not density-weighted)
+        tendencies.Ge = microphysical_tendency(microphysics, Val(:e), ρ, ℳ, 𝒰, constants)
+        tendencies.Gqᵗ = microphysical_tendency(microphysics, Val(:qᵗ), ρ, ℳ, 𝒰, constants)
+
+        # Microphysics prognostic tendencies (scheme-dependent)
+        tendencies.Gμ = compute_microphysics_prognostic_tendencies(microphysics, ρ, μ, ℳ, 𝒰, constants)
+    else
+        # Adiabatic: zero tendencies give exact conservation of ℰ and qᵗ
+        tendencies.Ge = zero(ρ)
+        tendencies.Gqᵗ = zero(ρ)
+        tendencies.Gμ = zero_microphysics_prognostic_tendencies(μ)
+    end
 
     return nothing
 end
 
 #####
-##### Buoyancy computation and updraft tendency dispatch
+##### Buoyancy computation and vertical velocity tendency dispatch
 #####
 
 """
@@ -619,12 +632,12 @@ end
 """
 $(TYPEDSIGNATURES)
 
-Compute updraft tendencies for [`SpecifiedUpdraft`](@ref).
+Compute vertical velocity tendencies for [`PrescribedVerticalVelocity`](@ref).
 
 The parcel follows the environmental vertical velocity: `dz/dt = w_env(z)`.
 The parcel velocity tendency `Gw` is zero (unused prognostic).
 """
-@inline function compute_updraft_tendencies!(tendencies, state, dynamics, model, ::SpecifiedUpdraft)
+@inline function compute_vertical_velocity_tendencies!(tendencies, state, dynamics, model, ::PrescribedVerticalVelocity)
     tendencies.Gz = interpolate(state.z, model.velocities.w)
     tendencies.Gw = zero(state.z)
     return nothing
@@ -633,15 +646,28 @@ end
 """
 $(TYPEDSIGNATURES)
 
-Compute updraft tendencies for [`BuoyancyDrivenUpdraft`](@ref).
+Compute vertical velocity tendencies for [`PrognosticVerticalVelocity`](@ref).
 
 The parcel has a prognostic vertical velocity driven by buoyancy:
 `dw/dt = B`, `dz/dt = w`.
 """
-@inline function compute_updraft_tendencies!(tendencies, state, dynamics, model, ::BuoyancyDrivenUpdraft)
-    B = parcel_buoyancy(state, dynamics, model.thermodynamic_constants)
-    tendencies.Gz = state.w
-    tendencies.Gw = B
+@inline function compute_vertical_velocity_tendencies!(tendencies, state, dynamics, model, ::PrognosticVerticalVelocity)
+    z = state.z
+    z_max = model.grid.Lz
+
+    # Absorbing boundary: at the domain top, zero velocity and buoyancy
+    # tendencies. This prevents the parcel from accelerating into extreme
+    # atmospheric conditions (very cold, low pressure) at the boundary
+    # where microphysics computations may produce NaN.
+    if z >= z_max
+        tendencies.Gz = zero(z)
+        tendencies.Gw = zero(z)
+    else
+        B = parcel_buoyancy(state, dynamics, model.thermodynamic_constants)
+        tendencies.Gz = state.w
+        tendencies.Gw = B
+    end
+
     return nothing
 end
 
@@ -770,6 +796,31 @@ copy_microphysics_prognostics(::Nothing) = nothing
 copy_microphysics_prognostics(μ::NamedTuple) = deepcopy(μ)
 
 #####
+##### Domain boundary clamping
+#####
+
+"""
+$(TYPEDSIGNATURES)
+
+Clamp the parcel height to the vertical grid domain `[0, Lz]`.
+
+When the parcel reaches a boundary its vertical velocity is zeroed to
+prevent escape from the domain, which would produce unphysical
+environmental profiles (pressure, density) from extrapolation.
+"""
+@inline function clamp_to_domain!(state, grid)
+    z_max = grid.Lz
+    if state.z >= z_max
+        state.z = z_max
+        state.w = zero(state.w)
+    elseif state.z < 0
+        state.z = zero(state.z)
+        state.w = zero(state.w)
+    end
+    return nothing
+end
+
+#####
 ##### SSP RK3 substep
 #####
 
@@ -802,6 +853,9 @@ function ssp_rk3_parcel_substep!(model::ParcelModel, U⁰::ParcelInitialState, �
     state.y = (1 - α) * U⁰.y + α * (state.y + Δt * tendencies.Gy)
     state.z = (1 - α) * U⁰.z + α * (state.z + Δt * tendencies.Gz)
     state.w = (1 - α) * U⁰.w + α * (state.w + Δt * tendencies.Gw)
+
+    # Clamp parcel to the vertical domain; zero w when hitting a boundary
+    clamp_to_domain!(state, model.grid)
 
     # Step specific quantities directly (exact conservation for adiabatic)
     state.qᵗ = (1 - α) * U⁰.qᵗ + α * (state.qᵗ + Δt * tendencies.Gqᵗ)
@@ -892,6 +946,9 @@ function step_parcel_state!(model::ParcelModel, Δt)
     state.y += Δt * tendencies.Gy
     state.z += Δt * tendencies.Gz
     state.w += Δt * tendencies.Gw
+
+    # Clamp parcel to the vertical domain; zero w when hitting a boundary
+    clamp_to_domain!(state, model.grid)
 
     # Step specific quantities forward (exact conservation for adiabatic)
     state.qᵗ += Δt * tendencies.Gqᵗ
