@@ -60,17 +60,17 @@ using Test
     topologies_3d = [
         ("PPP", (Periodic, Periodic, Periodic)),
         ("PBB", (Periodic, Bounded,  Bounded)),
-        ("PPB", (Periodic, Periodic, Bounded)),
         ("BBB", (Bounded,  Bounded,  Bounded)),
+        ("PPB", (Periodic, Periodic, Bounded)),
     ]
 
-    Δt_val  = 0.001
+    Δt_val  = 0.02
     nsteps_list = (1, 9)
 
     for (label, topo) in vcat(topologies_2d, topologies_3d)
         is_2d = topo[3] === Flat
         sz  = is_2d ? (6, 6)    : (6, 6, 6)
-        ext = is_2d ? (1, 1)    : (1, 1, 1)
+        ext = is_2d ? (1e3, 1e3) : (1e3, 1e3, 1e3)
 
         @testset "$label" begin
             @info "  Testing $label with size=$sz..."
