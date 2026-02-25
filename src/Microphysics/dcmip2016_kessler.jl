@@ -411,7 +411,7 @@ function AtmosphereModels.microphysics_model_update!(microphysics::DCMIP2016KM, 
 
     # Skip microphysics update if timestep is zero, infinite, or invalid
     # (e.g., during model construction before any time step has been taken)
-    (isnan(Δt) || isinf(Δt) || Δt ≤ 0) && return nothing
+    # (isnan(Δt) || isinf(Δt) || Δt ≤ 0) && return nothing
 
     # Density and pressure fields (compatible with both Anelastic and Compressible dynamics)
     ρ = dynamics_density(model.dynamics)
@@ -843,7 +843,7 @@ function AtmosphereModels.microphysics_model_update!(microphysics::DCMIP2016KM, 
     Δt = model.clock.last_Δt
 
     # Skip microphysics update if timestep is zero, infinite, or invalid
-    (isnan(Δt) || isinf(Δt) || Δt ≤ 0) && return nothing
+    # (isnan(Δt) || isinf(Δt) || Δt ≤ 0) && return nothing
 
     state = model.dynamics.state
     constants = model.thermodynamic_constants
