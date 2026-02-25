@@ -1,7 +1,12 @@
-# B.6.10 minimal reproduction: checkpointing + fill_halo_regions! on asymmetric field
-# No Breeze dependency — pure Oceananigans + Reactant + Enzyme
+#####
+##### MWE: Isolating checkpointing + halo fill interaction on BBB
+#####
+# The single-step halo fill adjoint works fine (mwe_bbb_pad_bug.jl).
+# The full model with @trace checkpointing=true nsteps=4 fails (mwe_bbb_backward.jl).
+# This MWE strips the model away and tests @trace + checkpointing + fill_halo_regions!
+# on individual fields to pinpoint the trigger.
 #
-# Run: julia --check-bounds=no -O0 --project -e 'include("test/bbb-backward-pad-shape/mwe_checkpoint_halo.jl")'
+# Run: julia --project -e 'include("test/bbb-backward-pad-shape/mwe_checkpoint_halo.jl")'
 
 using Oceananigans
 using Oceananigans.Architectures: ReactantState
@@ -13,90 +18,128 @@ using Statistics: mean
 
 Reactant.set_default_backend("cpu")
 
-FT = Float64
-grid = RectilinearGrid(ReactantState(); size=(4, 4, 4), extent=(1, 1, 1),
-                       topology=(Bounded, Bounded, Bounded))
+N = 6
+nsteps = 4  # perfect square for checkpointing
 
-# ── Test 1: Face,Center,Center + checkpointed loop ──
-# This is the hypothesis: asymmetric field + checkpointing → stablehlo.pad failure
+grid_bbb = RectilinearGrid(ReactantState();
+    size = (N, N, N), extent = (1e3, 1e3, 1e3),
+    topology = (Bounded, Bounded, Bounded))
 
-function loss_fcc_ckpt(u)
-    @trace mincut=true checkpointing=true track_numbers=false for _ in 1:2
-        fill_halo_regions!(u)
-        parent(u) .= parent(u) .* FT(0.99)
+grid_pbb = RectilinearGrid(ReactantState();
+    size = (N, N, N), extent = (1e3, 1e3, 1e3),
+    topology = (Periodic, Bounded, Bounded))
+
+# ──────────────────────────────────────────────────────────────────
+# Helper: loss with checkpointed @trace loop
+# ──────────────────────────────────────────────────────────────────
+
+function loss_ckpt(field, nsteps)
+    @trace mincut=true checkpointing=true track_numbers=false for _ in 1:nsteps
+        parent(field) .*= 0.99
+        fill_halo_regions!(field)
     end
-    return mean(interior(u).^2)
+    return mean(interior(field).^2)
 end
 
-function grad_fcc_ckpt(u, du)
+function grad_ckpt(field, dfield, nsteps)
+    parent(dfield) .= 0
     _, lv = Enzyme.autodiff(
         Enzyme.set_strong_zero(Enzyme.ReverseWithPrimal),
-        loss_fcc_ckpt, Enzyme.Active,
-        Enzyme.Duplicated(u, du))
-    return lv
+        loss_ckpt, Enzyme.Active,
+        Enzyme.Duplicated(field, dfield),
+        Enzyme.Const(nsteps))
+    return dfield, lv
 end
 
-@info "Test 1: Face,Center,Center + checkpointed loop (expected FAIL)"
-let u = Field{Face, Center, Center}(grid)
-    set!(u, (x, y, z) -> sin(x))
-    du = Enzyme.make_zero(u)
-    @time compiled = Reactant.@compile raise=true raise_first=true sync=true grad_fcc_ckpt(u, du)
-    lv = compiled(u, du)
-    @info "Test 1 PASSED — loss=$lv"
-end
+# ──────────────────────────────────────────────────────────────────
+# Helper: loss WITHOUT checkpointing (control)
+# ──────────────────────────────────────────────────────────────────
 
-# ── Test 2: Face,Center,Center WITHOUT checkpointing (control) ──
-
-function loss_fcc_nockpt(u)
-    @trace track_numbers=false for _ in 1:2
-        fill_halo_regions!(u)
-        parent(u) .= parent(u) .* FT(0.99)
+function loss_no_ckpt(field, nsteps)
+    @trace mincut=true checkpointing=false track_numbers=false for _ in 1:nsteps
+        parent(field) .*= 0.99
+        fill_halo_regions!(field)
     end
-    return mean(interior(u).^2)
+    return mean(interior(field).^2)
 end
 
-function grad_fcc_nockpt(u, du)
+function grad_no_ckpt(field, dfield, nsteps)
+    parent(dfield) .= 0
     _, lv = Enzyme.autodiff(
         Enzyme.set_strong_zero(Enzyme.ReverseWithPrimal),
-        loss_fcc_nockpt, Enzyme.Active,
-        Enzyme.Duplicated(u, du))
-    return lv
+        loss_no_ckpt, Enzyme.Active,
+        Enzyme.Duplicated(field, dfield),
+        Enzyme.Const(nsteps))
+    return dfield, lv
 end
 
-@info "Test 2: Face,Center,Center WITHOUT checkpointing (expected PASS)"
-let u = Field{Face, Center, Center}(grid)
-    set!(u, (x, y, z) -> sin(x))
-    du = Enzyme.make_zero(u)
-    @time compiled = Reactant.@compile raise=true raise_first=true sync=true grad_fcc_nockpt(u, du)
-    lv = compiled(u, du)
-    @info "Test 2 PASSED — loss=$lv"
-end
+# ──────────────────────────────────────────────────────────────────
+# Test matrix
+# ──────────────────────────────────────────────────────────────────
 
-# ── Test 3: Center,Center,Center + checkpointed loop (symmetry control) ──
-
-function loss_ccc_ckpt(c)
-    @trace mincut=true checkpointing=true track_numbers=false for _ in 1:2
-        fill_halo_regions!(c)
-        parent(c) .= parent(c) .* FT(0.99)
+function run_test(label, field, dfield, ns, use_ckpt)
+    tag = use_ckpt ? "checkpointed" : "no-checkpoint"
+    @info "  [$label] Compiling backward ($tag, nsteps=$ns)..."
+    try
+        if use_ckpt
+            compiled = Reactant.@compile raise=true raise_first=true sync=true grad_ckpt(field, dfield, ns)
+        else
+            compiled = Reactant.@compile raise=true raise_first=true sync=true grad_no_ckpt(field, dfield, ns)
+        end
+        @info "  [$label] ✓ $tag compilation succeeded"
+        return true
+    catch e
+        @warn "  [$label] ✗ $tag compilation FAILED" exception=(e, catch_backtrace())
+        return false
     end
-    return mean(interior(c).^2)
 end
 
-function grad_ccc_ckpt(c, dc)
-    _, lv = Enzyme.autodiff(
-        Enzyme.set_strong_zero(Enzyme.ReverseWithPrimal),
-        loss_ccc_ckpt, Enzyme.Active,
-        Enzyme.Duplicated(c, dc))
-    return lv
-end
+results = Dict{String, Bool}()
 
-@info "Test 3: Center,Center,Center + checkpointed loop (expected PASS)"
-let c = CenterField(grid)
-    set!(c, (x, y, z) -> sin(x))
-    dc = Enzyme.make_zero(c)
-    @time compiled = Reactant.@compile raise=true raise_first=true sync=true grad_ccc_ckpt(c, dc)
-    lv = compiled(c, dc)
-    @info "Test 3 PASSED — loss=$lv"
-end
+# ── Test 1: CCF on BBB, WITH checkpointing (expected to FAIL) ──
+w_bbb = Field{Center, Center, Face}(grid_bbb); set!(w_bbb, 1.0)
+dw_bbb = Enzyme.make_zero(w_bbb)
+results["CCF-BBB-ckpt"] = run_test("CCF-BBB", w_bbb, dw_bbb, nsteps, true)
 
-@info "All tests done."
+# ── Test 2: CCC on BBB, WITH checkpointing ──
+c_bbb = CenterField(grid_bbb); set!(c_bbb, 1.0)
+dc_bbb = Enzyme.make_zero(c_bbb)
+results["CCC-BBB-ckpt"] = run_test("CCC-BBB", c_bbb, dc_bbb, nsteps, true)
+
+# ── Test 3: CFC on BBB, WITH checkpointing ──
+v_bbb = Field{Center, Face, Center}(grid_bbb); set!(v_bbb, 1.0)
+dv_bbb = Enzyme.make_zero(v_bbb)
+results["CFC-BBB-ckpt"] = run_test("CFC-BBB", v_bbb, dv_bbb, nsteps, true)
+
+# ── Test 4: FCC on BBB, WITH checkpointing ──
+u_bbb = Field{Face, Center, Center}(grid_bbb); set!(u_bbb, 1.0)
+du_bbb = Enzyme.make_zero(u_bbb)
+results["FCC-BBB-ckpt"] = run_test("FCC-BBB", u_bbb, du_bbb, nsteps, true)
+
+# ── Test 5: CCF on BBB, WITHOUT checkpointing (control) ──
+w_bbb2 = Field{Center, Center, Face}(grid_bbb); set!(w_bbb2, 1.0)
+dw_bbb2 = Enzyme.make_zero(w_bbb2)
+results["CCF-BBB-no-ckpt"] = run_test("CCF-BBB-ctrl", w_bbb2, dw_bbb2, nsteps, false)
+
+# ── Test 6: CCF on PBB, WITH checkpointing (control) ──
+w_pbb = Field{Center, Center, Face}(grid_pbb); set!(w_pbb, 1.0)
+dw_pbb = Enzyme.make_zero(w_pbb)
+results["CCF-PBB-ckpt"] = run_test("CCF-PBB-ctrl", w_pbb, dw_pbb, nsteps, true)
+
+# ── Test 7: CCC on BBB, WITHOUT checkpointing (control) ──
+c_bbb2 = CenterField(grid_bbb); set!(c_bbb2, 1.0)
+dc_bbb2 = Enzyme.make_zero(c_bbb2)
+results["CCC-BBB-no-ckpt"] = run_test("CCC-BBB-ctrl", c_bbb2, dc_bbb2, nsteps, false)
+
+# ──────────────────────────────────────────────────────────────────
+# Summary
+# ──────────────────────────────────────────────────────────────────
+
+println("\n", "="^60)
+println("RESULTS SUMMARY")
+println("="^60)
+for (k, v) in sort(collect(results))
+    status = v ? "✓ PASS" : "✗ FAIL"
+    println("  $status  $k")
+end
+println("="^60)

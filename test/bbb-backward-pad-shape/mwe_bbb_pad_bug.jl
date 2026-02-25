@@ -17,6 +17,9 @@
 
 using Oceananigans
 using Oceananigans.Architectures: ReactantState
+using Breeze
+using Oceananigans.Fields: CenterField, interior
+using Oceananigans.BoundaryConditions: fill_halo_regions!
 using Reactant
 using Enzyme
 
@@ -44,7 +47,7 @@ compiled_loss_ccc = Reactant.@compile raise=true loss_ccc(c)
 @info "Compiling backward (CCC)..."
 dc = Enzyme.make_zero(c)
 try
-    compiled_grad_ccc = Reactant.@compile raise=true Enzyme.autodiff(
+    compiled_grad_ccc = Reactant.@compile raise_first=true raise=true sync=true Enzyme.autodiff(
         Enzyme.set_strong_zero(Enzyme.ReverseWithPrimal),
         loss_ccc, Enzyme.Active,
         Enzyme.Duplicated(c, dc))
@@ -69,7 +72,7 @@ compiled_loss_ccf = Reactant.@compile raise=true loss_ccf(w)
 @info "Compiling backward (CCF)..."
 dw = Enzyme.make_zero(w)
 try
-    compiled_grad_ccf = Reactant.@compile raise=true Enzyme.autodiff(
+    compiled_grad_ccf = Reactant.@compile raise_first=true raise=true sync=true Enzyme.autodiff(
         Enzyme.set_strong_zero(Enzyme.ReverseWithPrimal),
         loss_ccf, Enzyme.Active,
         Enzyme.Duplicated(w, dw))
@@ -94,7 +97,7 @@ compiled_loss_cfc = Reactant.@compile raise=true loss_cfc(v)
 @info "Compiling backward (CFC)..."
 dv = Enzyme.make_zero(v)
 try
-    compiled_grad_cfc = Reactant.@compile raise=true Enzyme.autodiff(
+    compiled_grad_cfc = Reactant.@compile raise_first=true raise=true sync=true Enzyme.autodiff(
         Enzyme.set_strong_zero(Enzyme.ReverseWithPrimal),
         loss_cfc, Enzyme.Active,
         Enzyme.Duplicated(v, dv))
@@ -123,7 +126,7 @@ compiled_loss_pbb = Reactant.@compile raise=true loss_pbb(w_pbb)
 @info "Compiling backward (PBB-CCF, control)..."
 dw_pbb = Enzyme.make_zero(w_pbb)
 try
-    compiled_grad_pbb = Reactant.@compile raise=true Enzyme.autodiff(
+    compiled_grad_pbb = Reactant.@compile raise_first=true raise=true sync=true Enzyme.autodiff(
         Enzyme.set_strong_zero(Enzyme.ReverseWithPrimal),
         loss_pbb, Enzyme.Active,
         Enzyme.Duplicated(w_pbb, dw_pbb))

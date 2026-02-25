@@ -1,20 +1,19 @@
 #####
-##### Top-down MWE: Start from the full model and strip pieces until it passes.
+##### Top-down MWE: Build up from 1 RK3 stage toward the full time_step!
 #####
-# Bottom-up MWEs (single fields, multi-field, halo fills, checkpointing) all pass.
-# The full model + time_step! + checkpointing fails for BBB.
-# This script systematically removes parts of the time_step! pipeline
-# to find the exact trigger.
+# From mwe_topdown.jl we know:
+#   - Variant F (1 stage: store + substep + update_state!) → PASSES
+#   - Variant A (full time_step! with 3 stages) → FAILS
 #
-# Run: julia --project -e 'include("test/bbb-backward-pad-shape/mwe_topdown.jl")'
+# This script adds complexity incrementally to find the trigger.
+#
+# Run: julia --project -e 'include("test/bbb-backward-pad-shape/mwe_topdown_stages.jl")'
 
 using Breeze
 using Oceananigans
 using Oceananigans.Architectures: ReactantState
-using Oceananigans.TimeSteppers: update_state!
+using Oceananigans.TimeSteppers: update_state!, tick!, compute_flux_bc_tendencies!
 using Breeze.TimeSteppers: store_initial_state!, ssp_rk3_substep!
-using Breeze.AtmosphereModels: compute_pressure_correction!, make_pressure_correction!
-using Oceananigans.TimeSteppers: compute_flux_bc_tendencies!
 using Reactant
 using Reactant: @trace
 using Enzyme
@@ -38,10 +37,100 @@ dθ_init = CenterField(grid); set!(dθ_init, FT(0))
 nsteps = 4
 
 # ──────────────────────────────────────────────────────────────────
-# Variant A: Full time_step! (the known-failing case)
+# G: Two stages (store + substep + update_state!, repeated twice)
 # ──────────────────────────────────────────────────────────────────
 
-function loss_A(model, θ_init, Δt, nsteps)
+function loss_G(model, θ_init, Δt, nsteps)
+    FT = eltype(model.grid)
+    set!(model; θ = θ_init, ρ = one(FT))
+    α¹ = model.timestepper.α¹
+    α² = model.timestepper.α²
+    @trace mincut=true checkpointing=true track_numbers=false for _ in 1:nsteps
+        store_initial_state!(model)
+        ssp_rk3_substep!(model, Δt, α¹)
+        update_state!(model; compute_tendencies = true)
+        ssp_rk3_substep!(model, Δt, α²)
+        update_state!(model; compute_tendencies = true)
+    end
+    return mean(interior(model.temperature).^2)
+end
+
+# ──────────────────────────────────────────────────────────────────
+# H: Three stages (store + 3× substep + update_state!), no tick!, no flux BCs
+# ──────────────────────────────────────────────────────────────────
+
+function loss_H(model, θ_init, Δt, nsteps)
+    FT = eltype(model.grid)
+    set!(model; θ = θ_init, ρ = one(FT))
+    α¹ = model.timestepper.α¹
+    α² = model.timestepper.α²
+    α³ = model.timestepper.α³
+    @trace mincut=true checkpointing=true track_numbers=false for _ in 1:nsteps
+        store_initial_state!(model)
+        ssp_rk3_substep!(model, Δt, α¹)
+        update_state!(model; compute_tendencies = true)
+        ssp_rk3_substep!(model, Δt, α²)
+        update_state!(model; compute_tendencies = true)
+        ssp_rk3_substep!(model, Δt, α³)
+        update_state!(model; compute_tendencies = true)
+    end
+    return mean(interior(model.temperature).^2)
+end
+
+# ──────────────────────────────────────────────────────────────────
+# I: Three stages + tick! calls (like the real time_step!)
+# ──────────────────────────────────────────────────────────────────
+
+function loss_I(model, θ_init, Δt, nsteps)
+    FT = eltype(model.grid)
+    set!(model; θ = θ_init, ρ = one(FT))
+    α¹ = model.timestepper.α¹
+    α² = model.timestepper.α²
+    α³ = model.timestepper.α³
+    @trace mincut=true checkpointing=true track_numbers=false for _ in 1:nsteps
+        store_initial_state!(model)
+        ssp_rk3_substep!(model, Δt, α¹)
+        tick!(model.clock, Δt; stage = true)
+        update_state!(model; compute_tendencies = true)
+        ssp_rk3_substep!(model, Δt, α²)
+        update_state!(model; compute_tendencies = true)
+        ssp_rk3_substep!(model, Δt, α³)
+        tick!(model.clock, Δt)
+        update_state!(model; compute_tendencies = true)
+    end
+    return mean(interior(model.temperature).^2)
+end
+
+# ──────────────────────────────────────────────────────────────────
+# J: Three stages + compute_flux_bc_tendencies! (no tick!)
+# ──────────────────────────────────────────────────────────────────
+
+function loss_J(model, θ_init, Δt, nsteps)
+    FT = eltype(model.grid)
+    set!(model; θ = θ_init, ρ = one(FT))
+    α¹ = model.timestepper.α¹
+    α² = model.timestepper.α²
+    α³ = model.timestepper.α³
+    @trace mincut=true checkpointing=true track_numbers=false for _ in 1:nsteps
+        store_initial_state!(model)
+        compute_flux_bc_tendencies!(model)
+        ssp_rk3_substep!(model, Δt, α¹)
+        update_state!(model; compute_tendencies = true)
+        compute_flux_bc_tendencies!(model)
+        ssp_rk3_substep!(model, Δt, α²)
+        update_state!(model; compute_tendencies = true)
+        compute_flux_bc_tendencies!(model)
+        ssp_rk3_substep!(model, Δt, α³)
+        update_state!(model; compute_tendencies = true)
+    end
+    return mean(interior(model.temperature).^2)
+end
+
+# ──────────────────────────────────────────────────────────────────
+# K: Full time_step! (= variant A, for reference)
+# ──────────────────────────────────────────────────────────────────
+
+function loss_K(model, θ_init, Δt, nsteps)
     FT = eltype(model.grid)
     set!(model; θ = θ_init, ρ = one(FT))
     @trace mincut=true checkpointing=true track_numbers=false for _ in 1:nsteps
@@ -51,78 +140,7 @@ function loss_A(model, θ_init, Δt, nsteps)
 end
 
 # ──────────────────────────────────────────────────────────────────
-# Variant B: Just update_state! (no RK3 stages, no store/substep)
-# ──────────────────────────────────────────────────────────────────
-
-function loss_B(model, θ_init, Δt, nsteps)
-    FT = eltype(model.grid)
-    set!(model; θ = θ_init, ρ = one(FT))
-    @trace mincut=true checkpointing=true track_numbers=false for _ in 1:nsteps
-        update_state!(model; compute_tendencies = true)
-    end
-    return mean(interior(model.temperature).^2)
-end
-
-# ──────────────────────────────────────────────────────────────────
-# Variant C: update_state! WITHOUT compute_tendencies
-# (just halo fills + auxiliary variable computation)
-# ──────────────────────────────────────────────────────────────────
-
-function loss_C(model, θ_init, Δt, nsteps)
-    FT = eltype(model.grid)
-    set!(model; θ = θ_init, ρ = one(FT))
-    @trace mincut=true checkpointing=true track_numbers=false for _ in 1:nsteps
-        update_state!(model; compute_tendencies = false)
-    end
-    return mean(interior(model.temperature).^2)
-end
-
-# ──────────────────────────────────────────────────────────────────
-# Variant D: Just fill_halo_regions! on all prognostic fields
-# ──────────────────────────────────────────────────────────────────
-
-function loss_D(model, θ_init, Δt, nsteps)
-    FT = eltype(model.grid)
-    set!(model; θ = θ_init, ρ = one(FT))
-    @trace mincut=true checkpointing=true track_numbers=false for _ in 1:nsteps
-        fill_halo_regions!(prognostic_fields(model), model.clock, fields(model))
-    end
-    return mean(interior(model.temperature).^2)
-end
-
-# ──────────────────────────────────────────────────────────────────
-# Variant E: store_initial_state! + ssp_rk3_substep! (one stage, no update_state!)
-# ──────────────────────────────────────────────────────────────────
-
-function loss_E(model, θ_init, Δt, nsteps)
-    FT = eltype(model.grid)
-    set!(model; θ = θ_init, ρ = one(FT))
-    α¹ = model.timestepper.α¹
-    @trace mincut=true checkpointing=true track_numbers=false for _ in 1:nsteps
-        store_initial_state!(model)
-        ssp_rk3_substep!(model, Δt, α¹)
-    end
-    return mean(interior(model.temperature).^2)
-end
-
-# ──────────────────────────────────────────────────────────────────
-# Variant F: Single RK3 stage (store + substep + update_state!)
-# ──────────────────────────────────────────────────────────────────
-
-function loss_F(model, θ_init, Δt, nsteps)
-    FT = eltype(model.grid)
-    set!(model; θ = θ_init, ρ = one(FT))
-    α¹ = model.timestepper.α¹
-    @trace mincut=true checkpointing=true track_numbers=false for _ in 1:nsteps
-        store_initial_state!(model)
-        ssp_rk3_substep!(model, Δt, α¹)
-        update_state!(model; compute_tendencies = true)
-    end
-    return mean(interior(model.temperature).^2)
-end
-
-# ──────────────────────────────────────────────────────────────────
-# Run all variants
+# Runner
 # ──────────────────────────────────────────────────────────────────
 
 function make_grad(loss_fn)
@@ -141,12 +159,11 @@ function make_grad(loss_fn)
 end
 
 variants = [
-    ("A: Full time_step!",                           make_grad(loss_A)),
-    ("B: update_state! only (with tendencies)",      make_grad(loss_B)),
-    ("C: update_state! (no tendencies)",             make_grad(loss_C)),
-    ("D: fill_halo_regions! on prognostic_fields",   make_grad(loss_D)),
-    ("E: store + substep (no update_state!)",        make_grad(loss_E)),
-    ("F: store + substep + update_state!",           make_grad(loss_F)),
+    ("G: 2 stages (no tick, no flux BCs)",         make_grad(loss_G)),
+    ("H: 3 stages (no tick, no flux BCs)",         make_grad(loss_H)),
+    ("I: 3 stages + tick!",                        make_grad(loss_I)),
+    ("J: 3 stages + flux BCs (no tick)",           make_grad(loss_J)),
+    ("K: full time_step!",                         make_grad(loss_K)),
 ]
 
 results = Dict{String, Bool}()
