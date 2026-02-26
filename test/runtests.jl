@@ -11,7 +11,8 @@ if filter_tests!(testsuite, args)
     # Skip Enzyme/Reactant tests in Julia v1.12+ until upstream
     # support is improved.
     if VERSION >= v"1.12"
-        delete!(testsuite, "reactant_compilation")
+        delete!(testsuite, "reactant_centered_compilation")
+        delete!(testsuite, "reactant_weno_compilation")
     end
 end
 
