@@ -41,7 +41,7 @@ examples = [
     Example("Acoustic wave in shear layer", "acoustic_wave", true),
     Example("Cloud formation in prescribed updraft", "kinematic_driver", true),
     Example("Splitting supercell", "splitting_supercell", false),
-    Example("Baroclinic wave on the sphere", "baroclinic_wave", false),
+    Example("Baroclinic wave on the sphere", "baroclinic_wave", true),
     Example("Tropical cyclone world", "tropical_cyclone_world", false),
 ]
 
