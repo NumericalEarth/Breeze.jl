@@ -133,9 +133,9 @@ model = AtmosphereModel(grid; dynamics, coriolis, advection=WENO())
 # from the thermal wind relation for the meridional gradient.
 
 Ω      = coriolis.rotation_rate   # s⁻¹ — Earth rotation rate
-a      = 6.371229e6               # m — Earth radius
+a      = Oceananigans.defaults.planet_radius  # m — Earth radius
 Δθ_ep  = 60                       # K — equator-to-pole θ difference
-z_T    = 15000                    # m — tropopause height
+z_T    = 15_000                   # m — tropopause height
 U_bal  = g * Δθ_ep / (a * θ₀ * Ω) # m/s/m — thermal wind parameter
 
 # Perturbation parameters:
@@ -148,7 +148,7 @@ U_bal  = g * Δθ_ep / (a * θ₀ * Ω) # m/s/m — thermal wind parameter
 
 function uᵢ(λ, φ, z)
     φ_rad = φ * π / 180
-    vertical = ifelse(z ≤ z_T, z - z^2 / (2z_T), z_T / 2)
+    vertical = ifelse(z ≤ z_T, z - z^2 / 2z_T, z_T / 2)
     return U_bal * cos(φ_rad) * vertical
 end
 
@@ -158,7 +158,7 @@ function θᵢ(λ, φ, z)
     φ_rad  = φ * π / 180
     θ_bg   = θᵇᵍ(z)
     θ_merid = -Δθ_ep * sin(φ_rad)^2 * max(0, 1 - z / z_T)
-    r²     = (λ - λ_c)^2 + (φ - φ_c)^2
+    r² = (λ - λ_c)^2 + (φ - φ_c)^2
     θ_pert = Δθ * exp(-r² / (2σ^2)) * sin(π * z / H)
     return θ_bg + θ_merid + θ_pert
 end
@@ -233,9 +233,9 @@ set!(θᵇᵍ_field, (λ, φ, z) -> θᵇᵍ(z))
 outputs = merge(model.velocities, (; θ′))
 
 simulation.output_writers[:jld2] = JLD2Writer(model, outputs;
-                                               filename = "baroclinic_wave",
-                                               schedule = TimeInterval(6hours),
-                                               overwrite_existing = true)
+                                              filename = "baroclinic_wave",
+                                              schedule = TimeInterval(6hours),
+                                              overwrite_existing = true)
 
 # ## Run
 
