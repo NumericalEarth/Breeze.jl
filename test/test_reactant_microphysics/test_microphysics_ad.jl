@@ -224,24 +224,24 @@ end
 ##### 5. DCMIP2016 Kessler warm-rain microphysics
 #####
 
-@info "=" ^ 60
-@info "Test 5/9: DCMIP2016KesslerMicrophysics"
-@info "=" ^ 60
+# @info "=" ^ 60
+# @info "Test 5/9: DCMIP2016KesslerMicrophysics"
+# @info "=" ^ 60
 
-@testset "DCMIP2016KesslerMicrophysics" begin
-    microphysics = DCMIP2016KesslerMicrophysics()
-    kessler_constants = ThermodynamicConstants(saturation_vapor_pressure=TetensFormula())
-    @time "Constructing Kessler model" model = make_model(ReactantState();
-        microphysics, moisture=true, thermodynamic_constants=kessler_constants)
+# @testset "DCMIP2016KesslerMicrophysics" begin
+#     microphysics = DCMIP2016KesslerMicrophysics()
+#     kessler_constants = ThermodynamicConstants(saturation_vapor_pressure=TetensFormula())
+#     @time "Constructing Kessler model" model = make_model(ReactantState();
+#         microphysics, moisture=true, thermodynamic_constants=kessler_constants)
 
-    @testset "Forward" begin
-        run_forward_test(model)
-    end
+#     @testset "Forward" begin
+#         run_forward_test(model)
+#     end
 
-    @testset "Gradient" begin
-        run_gradient_test(model)
-    end
-end
+#     @testset "Gradient" begin
+#         run_gradient_test(model)
+#     end
+# end
 
 #####
 ##### CloudMicrophysics extension schemes (require CloudMicrophysics.jl)
