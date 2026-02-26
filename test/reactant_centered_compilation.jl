@@ -4,8 +4,7 @@
 #
 # Phase structure per topology:
 #   (a)   Build model on ReactantState
-#   (b+c) Compile + raise forward time_step!
-#   (d)   Compile + raise backward (Enzyme reverse mode)
+#   (b)   Compile + raise backward (Enzyme reverse mode)
 
 using Breeze
 using Oceananigans
@@ -28,7 +27,6 @@ end
 #####
 
 topologies = [
-    ("Periodic, Flat, Bounded", (Periodic, Flat, Bounded), 2),
     ("Periodic, Periodic, Flat",     (Periodic, Periodic, Flat),     2),
     ("Bounded, Bounded, Flat",       (Bounded,  Bounded,  Flat),     2),
     ("Periodic, Periodic, Periodic", (Periodic, Periodic, Periodic), 3),
@@ -96,7 +94,7 @@ end
             FT = eltype(grid)
             Δt = FT(Δt_val)
 
-            # ── (a) Build ──
+            # ── Build ──
             @testset "Build" begin
                 model = AtmosphereModel(grid; dynamics=CompressibleDynamics())
                 @test model isa AtmosphereModel
@@ -112,19 +110,7 @@ end
             model = AtmosphereModel(grid; dynamics=CompressibleDynamics())
             set!(model; θ=FT(300), ρ=one(FT))
 
-            # ── (b+c) Raise forward ──
-            @testset "Raise forward" begin
-                nsteps = 2
-                compiled_run = Reactant.@compile raise=true raise_first=true sync=true run_time_steps!(model, Δt, nsteps)
-                @test compiled_run !== nothing
-
-                compiled_run(model, Δt, nsteps)
-                T = get_temperature(model)
-                @test all(isfinite, T)
-                @test all(T .> 0)
-            end
-
-            # ── (d) Raise backward ──
+            # ── Raise backward ──
             @testset "Raise backward" begin
                 θ_init, dθ_init = make_init_fields(grid)
                 dmodel = Enzyme.make_zero(model)

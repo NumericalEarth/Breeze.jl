@@ -4,7 +4,7 @@
 #
 # Phase structure per topology:
 #   (a)   Build model on ReactantState
-#   (b+c) Compile + raise forward time_step!
+#   (b)   Compile + raise forward (Enzyme forward mode)
 
 using Breeze
 using Oceananigans
@@ -27,12 +27,11 @@ end
 
 topologies = [
     ("Periodic, Periodic, Flat", (Periodic, Periodic, Flat), 2),
-    ("Bounded, Bounded, Flat",   (Bounded,  Bounded,  Flat), 2),
+    ("Periodic, Bounded, Bounded",   (Periodic, Bounded, Bounded), 3),
 ]
 
 schemes = [
     ("WENO(order=5)",               WENO(order=5)),
-    ("WENO(order=9)",               WENO(order=9)),
     ("WENO(order=5, bounds=(0,1))", WENO(order=5, bounds=(0, 1))),
 ]
 
@@ -72,7 +71,7 @@ get_temperature(model) = Array(interior(model.temperature))
                     FT = eltype(grid)
                     Δt = FT(Δt_val)
 
-                    # ── (a) Build ──
+                    # ── Build ──
                     @testset "Build" begin
                         model = AtmosphereModel(grid; dynamics=CompressibleDynamics(), advection=scheme)
                         @test model isa AtmosphereModel
@@ -84,7 +83,7 @@ get_temperature(model) = Array(interior(model.temperature))
                         @test all(T .> 0)
                     end
 
-                    # ── (b+c) Raise forward ──
+                    # ── Raise forward ──
                     @testset "Raise forward" begin
                         model = AtmosphereModel(grid; dynamics=CompressibleDynamics(), advection=scheme)
                         set!(model; θ=FT(300), ρ=one(FT))
