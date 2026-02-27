@@ -194,6 +194,6 @@ jobs:
           summary-always: true
           alert-threshold: "110%"
           fail-on-alert: false
-          auto-push: true
+          auto-push: ${{ github.event_name == 'push' }}
           max-items-in-chart: 50
           comment-on-alert: true
