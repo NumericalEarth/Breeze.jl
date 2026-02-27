@@ -5,7 +5,7 @@ regular computational domain. This avoids the need for immersed boundaries or cu
 at the surface, simplifying the application of boundary conditions and ensuring smooth
 coordinate surfaces near the ground.
 
-The implementation is built on Oceananigans' [`MutableVerticalDiscretization`](@ref),
+The implementation is built on Oceananigans' `MutableVerticalDiscretization`,
 which provides the column-wise scaling factors ``\sigma(x, y)`` and surface displacement
 ``\eta(x, y)`` needed to deform the vertical coordinate. This page describes the
 coordinate transformation, the metric corrections required for the dynamical equations,
@@ -24,7 +24,7 @@ z = \zeta \, \sigma(x, y) + \eta(x, y) ,
 
 where ``\sigma`` is a column-wide vertical scaling factor and ``\eta`` is the
 surface displacement. Oceananigans stores ``\sigma`` and ``\eta`` in the
-[`MutableVerticalDiscretization`](@ref) and uses them to compute all vertical spacings and
+`MutableVerticalDiscretization` and uses them to compute all vertical spacings and
 node positions:
 
 ```math
@@ -152,7 +152,7 @@ The user-facing entry point is [`follow_terrain!`](@ref), which:
 
 1. Evaluates the topography function ``h(x, y)`` at each grid column.
 2. Sets ``\sigma_{i,j} = (z_{top} - h_{i,j}) / z_{top}`` and ``\eta_{i,j} = h_{i,j}``
-   on the grid's [`MutableVerticalDiscretization`](@ref).
+   on the grid's `MutableVerticalDiscretization`.
 3. Computes terrain slopes ``\partial h / \partial x`` and ``\partial h / \partial y``
    using finite differences.
 4. Returns a [`TerrainMetrics`](@ref) object storing the slopes and model-top height.
@@ -205,10 +205,6 @@ so all vertical transport automatically uses the contravariant velocity when ter
 
 ## API reference
 
-```@docs
-follow_terrain!
-TerrainMetrics
-BasicTerrainFollowing
-Breeze.TerrainFollowingDiscretization.terrain_slope_x
-Breeze.TerrainFollowingDiscretization.terrain_slope_y
-```
+See the full API documentation for [`follow_terrain!`](@ref), [`TerrainMetrics`](@ref),
+[`BasicTerrainFollowing`](@ref), [`SlopeOutsideInterpolation`](@ref), and
+[`SlopeInsideInterpolation`](@ref).

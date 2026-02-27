@@ -13,8 +13,14 @@
 ##### The terrain-corrected horizontal pressure gradient is:
 #####   (∂p/∂x)_z = (∂p/∂x)_ζ - (∂z/∂x)_ζ · (∂p/∂z)
 #####
+##### IMPORTANT: On MutableVerticalDiscretization grids, Oceananigans' generalized
+##### derivatives (∂xᶠᶜᶜ, ∂yᶜᶠᶜ) already include the chain-rule correction
+##### (∂z/∂x)_ζ · ∂ϕ/∂z, so they compute (∂ϕ/∂x)_z directly. The terrain PG
+##### formula needs (∂p/∂x)_ζ — the basic computational-coordinate derivative —
+##### so we must use δx/Δx instead of ∂x to avoid double-correcting.
+#####
 
-using Oceananigans.Operators: ∂xᶠᶜᶜ, ∂yᶜᶠᶜ, ∂zᶜᶜᶠ
+using Oceananigans.Operators: δxᶠᶜᶜ, δyᶜᶠᶜ, Δx⁻¹ᶠᶜᶜ, Δy⁻¹ᶜᶠᶜ, ∂zᶜᶜᶠ
 using Oceananigans.BoundaryConditions: fill_halo_regions!
 
 using Breeze.TerrainFollowingDiscretization: TerrainMetrics, terrain_slope_x, terrain_slope_y,
@@ -57,17 +63,18 @@ function compute_contravariant_velocity!(model::TerrainCompressibleModel)
             grid, model.velocities, model.momentum,
             dynamics.terrain_metrics)
 
-    fill_halo_regions!(dynamics.Ω̃)
-    fill_halo_regions!(dynamics.ρΩ̃)
-
     # Enforce kinematic BC: Ω̃ = 0 at the terrain surface (bottom face).
     # The ImpenetrableBoundaryCondition sets w = 0 at the bottom, but the
     # correct terrain BC is Ω̃ = 0 (no flow through the terrain surface).
     # Since Ω̃ = w - slope·u, having w = 0 gives Ω̃ = -slope·u ≠ 0 which is
     # a spurious mass flux through the terrain. Setting Ω̃ = 0 directly here
     # ensures no transport through the bottom boundary.
+    # Zero bottom face BEFORE filling halos so the BC propagates correctly.
     launch!(arch, grid, :xy, _zero_bottom_face!, dynamics.Ω̃)
     launch!(arch, grid, :xy, _zero_bottom_face!, dynamics.ρΩ̃)
+
+    fill_halo_regions!(dynamics.Ω̃)
+    fill_halo_regions!(dynamics.ρΩ̃)
 
     return nothing
 end
@@ -137,10 +144,13 @@ end
 ##### Terrain-corrected pressure gradient
 #####
 ##### The true horizontal pressure gradient at constant z is:
-#####   (∂p/∂x)_z = (∂p/∂x)_ζ - (∂z/∂x)_ζ · (∂p/∂ζ)
+#####   (∂p/∂x)_z = (∂p/∂x)_ζ - (∂z/∂x)_ζ · (∂p/∂z)
 #####
-##### Since Oceananigans' ∂xᶠᶜᶜ computes (∂p/∂x)_ζ on the computational grid,
-##### we need to subtract the terrain correction term.
+##### where (∂p/∂z) is the physical vertical derivative.  We use basic
+##### δx/Δx operators to compute (∂p/∂x)_ζ, then subtract the terrain
+##### correction.  Note: Oceananigans' generalized ∂xᶠᶜᶜ already includes
+##### the chain-rule correction on MutableVerticalDiscretization grids, so
+##### using it here would double-correct.
 #####
 ##### When a terrain reference pressure p_ref(z_physical) is available, the PG is
 ##### computed using perturbation pressure p' = p - p_ref. Since p_ref depends only
@@ -162,14 +172,15 @@ end
 
 @inline function _terrain_x_pressure_gradient(i, j, k, grid, d, ::SlopeOutsideInterpolation, ::Nothing)
     slope = terrain_slope_x(i, j, k, grid, d.terrain_metrics, Center())
-    ∂x_p = ∂xᶠᶜᶜ(i, j, k, grid, d.pressure)
+    # Use basic δx/Δx to get (∂p/∂x)_ζ, not the generalized ∂x which gives (∂p/∂x)_z
+    ∂x_p = δxᶠᶜᶜ(i, j, k, grid, d.pressure) * Δx⁻¹ᶠᶜᶜ(i, j, k, grid)
     ∂z_p = ℑzᵃᵃᶜ(i, j, k, grid, ℑxᶠᵃᵃ, ∂zᶜᶜᶠ, d.pressure)
     return ∂x_p - slope * ∂z_p
 end
 
 @inline function _terrain_x_pressure_gradient(i, j, k, grid, d, ::SlopeOutsideInterpolation, p_ref)
     slope = terrain_slope_x(i, j, k, grid, d.terrain_metrics, Center())
-    ∂x_p′ = ∂xᶠᶜᶜ(i, j, k, grid, _perturbation_pressure, d.pressure, p_ref)
+    ∂x_p′ = δxᶠᶜᶜ(i, j, k, grid, _perturbation_pressure, d.pressure, p_ref) * Δx⁻¹ᶠᶜᶜ(i, j, k, grid)
     ∂z_p′ = ℑzᵃᵃᶜ(i, j, k, grid, ℑxᶠᵃᵃ, ∂zᶜᶜᶠ, _perturbation_pressure, d.pressure, p_ref)
     return ∂x_p′ - slope * ∂z_p′
 end
@@ -194,13 +205,13 @@ end
 end
 
 @inline function _terrain_x_pressure_gradient(i, j, k, grid, d, ::SlopeInsideInterpolation, ::Nothing)
-    ∂x_p = ∂xᶠᶜᶜ(i, j, k, grid, d.pressure)
+    ∂x_p = δxᶠᶜᶜ(i, j, k, grid, d.pressure) * Δx⁻¹ᶠᶜᶜ(i, j, k, grid)
     correction = ℑzᵃᵃᶜ(i, j, k, grid, ℑxᶠᵃᵃ, _slope_x_times_∂z, d.terrain_metrics, d.pressure)
     return ∂x_p - correction
 end
 
 @inline function _terrain_x_pressure_gradient(i, j, k, grid, d, ::SlopeInsideInterpolation, p_ref)
-    ∂x_p′ = ∂xᶠᶜᶜ(i, j, k, grid, _perturbation_pressure, d.pressure, p_ref)
+    ∂x_p′ = δxᶠᶜᶜ(i, j, k, grid, _perturbation_pressure, d.pressure, p_ref) * Δx⁻¹ᶠᶜᶜ(i, j, k, grid)
     correction = ℑzᵃᵃᶜ(i, j, k, grid, ℑxᶠᵃᵃ, _slope_x_times_∂z_p′, d.terrain_metrics, d.pressure, p_ref)
     return ∂x_p′ - correction
 end
@@ -216,14 +227,14 @@ end
 
 @inline function _terrain_y_pressure_gradient(i, j, k, grid, d, ::SlopeOutsideInterpolation, ::Nothing)
     slope = terrain_slope_y(i, j, k, grid, d.terrain_metrics, Center())
-    ∂y_p = ∂yᶜᶠᶜ(i, j, k, grid, d.pressure)
+    ∂y_p = δyᶜᶠᶜ(i, j, k, grid, d.pressure) * Δy⁻¹ᶜᶠᶜ(i, j, k, grid)
     ∂z_p = ℑzᵃᵃᶜ(i, j, k, grid, ℑyᵃᶠᵃ, ∂zᶜᶜᶠ, d.pressure)
     return ∂y_p - slope * ∂z_p
 end
 
 @inline function _terrain_y_pressure_gradient(i, j, k, grid, d, ::SlopeOutsideInterpolation, p_ref)
     slope = terrain_slope_y(i, j, k, grid, d.terrain_metrics, Center())
-    ∂y_p′ = ∂yᶜᶠᶜ(i, j, k, grid, _perturbation_pressure, d.pressure, p_ref)
+    ∂y_p′ = δyᶜᶠᶜ(i, j, k, grid, _perturbation_pressure, d.pressure, p_ref) * Δy⁻¹ᶜᶠᶜ(i, j, k, grid)
     ∂z_p′ = ℑzᵃᵃᶜ(i, j, k, grid, ℑyᵃᶠᵃ, ∂zᶜᶜᶠ, _perturbation_pressure, d.pressure, p_ref)
     return ∂y_p′ - slope * ∂z_p′
 end
@@ -245,13 +256,13 @@ end
 end
 
 @inline function _terrain_y_pressure_gradient(i, j, k, grid, d, ::SlopeInsideInterpolation, ::Nothing)
-    ∂y_p = ∂yᶜᶠᶜ(i, j, k, grid, d.pressure)
+    ∂y_p = δyᶜᶠᶜ(i, j, k, grid, d.pressure) * Δy⁻¹ᶜᶠᶜ(i, j, k, grid)
     correction = ℑzᵃᵃᶜ(i, j, k, grid, ℑyᵃᶠᵃ, _slope_y_times_∂z, d.terrain_metrics, d.pressure)
     return ∂y_p - correction
 end
 
 @inline function _terrain_y_pressure_gradient(i, j, k, grid, d, ::SlopeInsideInterpolation, p_ref)
-    ∂y_p′ = ∂yᶜᶠᶜ(i, j, k, grid, _perturbation_pressure, d.pressure, p_ref)
+    ∂y_p′ = δyᶜᶠᶜ(i, j, k, grid, _perturbation_pressure, d.pressure, p_ref) * Δy⁻¹ᶜᶠᶜ(i, j, k, grid)
     correction = ℑzᵃᵃᶜ(i, j, k, grid, ℑyᵃᶠᵃ, _slope_y_times_∂z_p′, d.terrain_metrics, d.pressure, p_ref)
     return ∂y_p′ - correction
 end

@@ -47,7 +47,7 @@ using Oceananigans.Operators: divᶜᶜᶜ
 using Oceananigans.Utils: prettysummary, launch!
 
 using Breeze.Thermodynamics: mixture_gas_constant, mixture_heat_capacity, dry_air_gas_constant,
-                             ExnerReferenceState, hydrostatic_pressure
+                             ExnerReferenceState
 
 using Breeze.AtmosphereModels: AtmosphereModels, AtmosphereModel, grid_moisture_fractions, dynamics_density,
                                standard_pressure, thermodynamic_density

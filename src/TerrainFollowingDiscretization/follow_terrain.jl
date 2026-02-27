@@ -119,6 +119,10 @@ end
 
 @kernel function _compute_terrain_slopes!(∂x_h, ∂y_h, grid, h_field)
     i, j = @index(Global, NTuple)
-    @inbounds ∂x_h[i, j, 1] = ∂xᶠᶜᶜ(i, j, 1, grid, h_field)
-    @inbounds ∂y_h[i, j, 1] = ∂yᶜᶠᶜ(i, j, 1, grid, h_field)
+    # Use basic finite differences (δx · Δx⁻¹) instead of generalized derivatives (∂x).
+    # On MutableVerticalDiscretization grids, the generalized ∂x includes a chain-rule
+    # vertical correction (∂z/∂x · ∂ϕ/∂z) that accesses neighboring k-levels.
+    # Terrain slopes are purely horizontal, so we need the simple difference only.
+    @inbounds ∂x_h[i, j, 1] = δxᶠᶜᶜ(i, j, 1, grid, h_field) * Δx⁻¹ᶠᶜᶜ(i, j, 1, grid)
+    @inbounds ∂y_h[i, j, 1] = δyᶜᶠᶜ(i, j, 1, grid, h_field) * Δy⁻¹ᶜᶠᶜ(i, j, 1, grid)
 end
