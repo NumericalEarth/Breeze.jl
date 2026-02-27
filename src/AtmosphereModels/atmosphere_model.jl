@@ -1,7 +1,7 @@
 using ..Thermodynamics: Thermodynamics, ThermodynamicConstants
 
 using Oceananigans: Oceananigans, AbstractModel, Center, CenterField, Clock, Field,
-                    Centered, fields, prognostic_fields, prognostic_state
+                    Centered, fields, prognostic_fields, prognostic_state, restore_prognostic_state!
 using Oceananigans.Advection: Advection, adapt_advection_order, cell_advection_timescale
 using Oceananigans.AbstractOperations: @at
 using Oceananigans.BoundaryConditions: FieldBoundaryConditions, regularize_field_boundary_conditions
@@ -459,3 +459,14 @@ function Oceananigans.prognostic_state(model::AtmosphereModel)
              timestepper = prognostic_state(model.timestepper))
     return merge(state, prognostic_fields(model))
 end
+
+function Oceananigans.restore_prognostic_state!(restored::AtmosphereModel, from)
+    restore_prognostic_state!(restored.clock, from.clock)
+    restore_prognostic_state!(restored.timestepper, from.timestepper)
+    for (name, target) in pairs(prognostic_fields(restored))
+        restore_prognostic_state!(target, getfield(from, name))
+    end
+    return restored
+end
+
+Oceananigans.restore_prognostic_state!(::AtmosphereModel, ::Nothing) = nothing
