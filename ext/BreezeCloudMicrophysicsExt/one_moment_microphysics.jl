@@ -395,7 +395,6 @@ end
 @inline function AM.moisture_fractions(bμp::MPNE1M, ℳ::MixedPhaseOneMomentState, qᵛ)
     qˡ = ℳ.qᶜˡ + ℳ.qʳ
     qⁱ = ℳ.qᶜⁱ + ℳ.qˢ
-    qᵛ = qᵛ - qˡ - qⁱ
     return MoistureMassFractions(qᵛ, qˡ, qⁱ)
 end
 
