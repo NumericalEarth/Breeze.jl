@@ -73,6 +73,7 @@
 # with amplitude ``Δθ = 1\,{\rm K}`` and width ``σ = 10°``.
 
 using Breeze
+using Ocenanigans
 using Oceananigans.Units
 using Printf
 using CairoMakie
@@ -88,13 +89,12 @@ Nφ = 85
 Nz = 30
 H  = 30kilometers
 
-grid = LatitudeLongitudeGrid(GPU();
-                              size = (Nλ, Nφ, Nz),
-                              halo = (5, 5, 5),
-                              longitude = (0, 360),
-                              latitude = (-85, 85),
-                              z = (0, H),
-                              topology = (Periodic, Bounded, Bounded))
+grid = LatitudeLongitudeGrid(CPU();
+                             size = (Nλ, Nφ, Nz),
+                             halo = (5, 5, 5),
+                             longitude = (0, 360),
+                             latitude = (-85, 85),
+                             z = (0, H))
 
 # ## Physical parameters
 
@@ -121,8 +121,8 @@ N² = 1e-4   # s⁻² — Brunt-Väisälä frequency squared
 coriolis = HydrostaticSphericalCoriolis()
 
 dynamics = CompressibleDynamics(ExplicitTimeStepping();
-                                 surface_pressure = p₀,
-                                 reference_potential_temperature = θᵇᵍ)
+                                surface_pressure = p₀,
+                                reference_potential_temperature = θᵇᵍ)
 
 model = AtmosphereModel(grid; dynamics, coriolis, advection=WENO())
 
@@ -132,16 +132,16 @@ model = AtmosphereModel(grid; dynamics, coriolis, advection=WENO())
 # gradient, and a localized perturbation. The zonal wind is derived analytically
 # from the thermal wind relation for the meridional gradient.
 
-Ω      = coriolis.rotation_rate   # s⁻¹ — Earth rotation rate
+Ω      = coriolis.rotation_rate               # s⁻¹ — Earth rotation rate
 a      = Oceananigans.defaults.planet_radius  # m — Earth radius
-Δθ_ep  = 60                       # K — equator-to-pole θ difference
-z_T    = 15_000                   # m — tropopause height
-U_bal  = g * Δθ_ep / (a * θ₀ * Ω) # m/s/m — thermal wind parameter
+Δθ_ep  = 60                                   # K — equator-to-pole θ difference
+z_T    = 15_000                               # m — tropopause height
+U_bal  = g * Δθ_ep / (a * θ₀ * Ω)             # m/s/m — thermal wind parameter
 
 # Perturbation parameters:
-λ_c = 90  # ° — perturbation center longitude
-φ_c = 45  # ° — perturbation center latitude
-σ   = 10  # ° — Gaussian half-width
+λ_c = 90  # degrees — perturbation center longitude
+φ_c = 45  # degrees — perturbation center latitude
+σ   = 10  # degrees — Gaussian half-width
 Δθ  = 1   # K — perturbation amplitude
 
 # Balanced zonal wind from the thermal wind relation:
@@ -157,9 +157,9 @@ end
 function θᵢ(λ, φ, z)
     φ_rad  = φ * π / 180
     θ_bg   = θᵇᵍ(z)
-    θ_merid = -Δθ_ep * sin(φ_rad)^2 * max(0, 1 - z / z_T)
+    θ_merid = - Δθ_ep * sin(φ_rad)^2 * max(0, 1 - z / z_T)
     r² = (λ - λ_c)^2 + (φ - φ_c)^2
-    θ_pert = Δθ * exp(-r² / (2σ^2)) * sin(π * z / H)
+    θ_pert = Δθ * exp(-r² / 2σ^2) * sin(π * z / H)
     return θ_bg + θ_merid + θ_pert
 end
 
