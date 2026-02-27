@@ -31,8 +31,7 @@ prognostic_field_names(::ExplicitMicrophysics) = (:ρqᵛ, :ρqˡ, :ρqⁱ)
 !!! note "Field naming conventions"
     The names of prognostic fields defined by `prognostic_field_names` are crucial to the user
     interface, because users can interact with them and
-    [`set!`](https://clima.github.io/OceananigansDocumentation/stable/appendix/library/#Oceananigans.Fields.set!)
-    their initial conditions. Names should be concise, mathematical forms consistent with
+    `set!` their initial conditions. Names should be concise, mathematical forms consistent with
     Breeze conventions (see the notation appendix).
 
 ## Materializing Fields
