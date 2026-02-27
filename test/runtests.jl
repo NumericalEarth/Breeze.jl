@@ -9,8 +9,8 @@ args = parse_args(ARGS)
 
 if filter_tests!(testsuite, args)
     # Reactant compilation tests require --check-bounds=auto (Reactant/Enzyme
-    # limitation). Skip them unless explicitly opted in via environment variable.
-    if get(ENV, "BREEZE_RUN_REACTANT_TESTS", "false") != "true"
+    # limitation) and Julia < 1.12 until upstream support is improved.
+    if (VERSION >= v"1.12") || (Base.JLOptions().check_bounds == 1)
         delete!(testsuite, "reactant_centered_compilation")
         delete!(testsuite, "reactant_weno_compilation")
     end
