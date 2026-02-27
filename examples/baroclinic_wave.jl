@@ -137,7 +137,7 @@ model = AtmosphereModel(grid; dynamics, coriolis, advection=WENO())
 a      = Oceananigans.defaults.planet_radius  # m — Earth radius
 Δθ_ep  = 60                                   # K — equator-to-pole θ difference
 z_T    = 15_000                               # m — tropopause height
-U_bal  = g * Δθ_ep / (a * θ₀ * Ω)             # m/s/m — thermal wind parameter
+τ_bal  = g * Δθ_ep / (a * θ₀ * Ω)             # 1/s — thermal wind parameter
 
 # Perturbation parameters:
 λ_c = 90  # degrees — perturbation center longitude
@@ -150,7 +150,7 @@ U_bal  = g * Δθ_ep / (a * θ₀ * Ω)             # m/s/m — thermal wind par
 function uᵢ(λ, φ, z)
     φ_rad = φ * π / 180
     vertical = ifelse(z ≤ z_T, z - z^2 / 2z_T, z_T / 2)
-    return U_bal * cos(φ_rad) * vertical
+    return τ_bal * vertical * cos(φ_rad) # m/s
 end
 
 # Potential temperature: background + meridional gradient + perturbation:
