@@ -12,7 +12,7 @@ using KernelAbstractions: @kernel, @index
 using Breeze.Thermodynamics: MoistureMassFractions,
     LiquidIcePotentialTemperatureState, StaticEnergyState,
     PlanarLiquidSurface,
-    with_moisture, mixture_heat_capacity, density, temperature,
+    with_moisture, mixture_heat_capacity, density,
     temperature_from_potential_temperature, saturation_specific_humidity
 
 using Breeze.AtmosphereModels: AtmosphereModels, AtmosphereModel
