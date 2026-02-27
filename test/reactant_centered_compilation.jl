@@ -88,7 +88,6 @@ end
     Δt_val = 0.02
 
     for (label, topo, nd) in topologies
-        @info "Centered advection: $label"
         @testset "$label" begin
             grid = make_grid(topo, nd)
             FT = eltype(grid)

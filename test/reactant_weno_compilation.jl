@@ -65,7 +65,6 @@ get_temperature(model) = Array(interior(model.temperature))
     for (scheme_label, scheme) in schemes
         @testset "$scheme_label" begin
             for (label, topo, nd) in topologies
-                @info "WENO advection: $scheme_label / $label"
                 @testset "$label" begin
                     grid = make_grid(topo, nd)
                     FT = eltype(grid)
