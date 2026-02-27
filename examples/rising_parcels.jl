@@ -2,7 +2,8 @@
 #
 # This example demonstrates the `ParcelDynamics` mode for `AtmosphereModel`,
 # which enables Lagrangian simulations of air parcels moving through a
-# prescribed background atmosphere. The example simulates four parcels:
+# prescribed background atmosphere. The example simulates five parcels — four with
+# prescribed vertical velocity and one with buoyancy-driven ascent:
 #
 # 1. **Ascending dry adiabatic parcel**: A rising parcel cools at ~9.8 K/km, conserving
 #    potential temperature. Vapor increases toward saturation as temperature drops.
@@ -21,6 +22,10 @@
 #    tracks both mass and number concentration for cloud liquid and rain. Cloud droplets
 #    form via aerosol activation using the [Abdul-Razzak and Ghan (2000)](@cite
 #    AbdulRazzakGhan2000) scheme when the parcel becomes supersaturated.
+#
+# 5. **Buoyancy-driven cloudy ascent**: The same two-moment microphysics as case 4, but with
+#    `PrognosticVerticalVelocity` — the parcel's vertical velocity responds to the
+#    buoyancy force dw/dt = −g(ρ_parcel − ρ_env)/ρ_env, rather than being prescribed.
 #
 # The parcel model works with `AtmosphereModel`, using the standard `Simulation` interface.
 
@@ -256,16 +261,69 @@ nothing #hide
 twom_Tₑ = [interpolate(s.z, twom_model.temperature) for s in twom_snapshots]
 nothing #hide
 
+# ## Part 5: Buoyancy-driven cloudy ascent
+#
+# In all four cases above, the vertical velocity is prescribed: the parcel
+# rises at a constant 1 m/s regardless of its thermodynamic state.
+# Now we switch to **buoyancy-driven** ascent using `PrognosticVerticalVelocity`,
+# where the parcel carries a prognostic vertical velocity driven by buoyancy:
+# dw/dt = −g(ρ_parcel − ρ_env)/ρ_env. We reuse the two-moment microphysics
+# so the reader can directly compare rows 4 and 5.
+
+buoyant_dynamics = ParcelDynamics(vertical_velocity_formulation=PrognosticVerticalVelocity())
+buoyant_model = AtmosphereModel(grid; dynamics=buoyant_dynamics,
+                                microphysics=TwoMomentCloudMicrophysics())
+
+set!(buoyant_model, qᵗ = qᵗ, z = 0, w_parcel = 1.0,
+     θ = reference_state.potential_temperature,
+     p = reference_state.pressure,
+     ρ = reference_state.density)
+
+buoyant_simulation = Simulation(buoyant_model; Δt=0.1, stop_time=10minutes)
+
+buoyant_snapshots = []
+
+function record_buoyant_state!(sim)
+    state = sim.model.dynamics.state
+    t = sim.model.clock.time
+    push!(buoyant_snapshots, (; t, z=state.z, w=state.w, ρ=state.ρ, 𝒰=state.𝒰, μ=state.μ))
+    return nothing
+end
+
+add_callback!(buoyant_simulation, record_buoyant_state!, IterationInterval(10))
+run!(buoyant_simulation)
+
+@info "Buoyancy-driven parcel reached" buoyant_model.dynamics.state.z
+
+# Extract time series
+buoyant_constants = buoyant_model.thermodynamic_constants
+buoyant_t = [s.t for s in buoyant_snapshots]
+buoyant_z = [s.z for s in buoyant_snapshots]
+buoyant_w = [s.w for s in buoyant_snapshots]
+buoyant_T = [temperature(s.𝒰, buoyant_constants) for s in buoyant_snapshots]
+buoyant_qᵛ = [s.𝒰.moisture_mass_fractions.vapor for s in buoyant_snapshots]
+buoyant_qᶜˡ = [s.μ.ρqᶜˡ / s.ρ for s in buoyant_snapshots]
+buoyant_qʳ = [s.μ.ρqʳ / s.ρ for s in buoyant_snapshots]
+buoyant_nᶜˡ = [s.μ.ρnᶜˡ / s.ρ for s in buoyant_snapshots]
+buoyant_nʳ = [s.μ.ρnʳ / s.ρ for s in buoyant_snapshots]
+buoyant_nᵃ = [s.μ.ρnᵃ / s.ρ for s in buoyant_snapshots]
+nothing #hide
+
+# Environmental temperature at each parcel height
+buoyant_Tₑ = [interpolate(s.z, buoyant_model.temperature) for s in buoyant_snapshots]
+nothing #hide
+
 # ## Visualization
 #
-# We create a figure showing all four regimes:
+# We create a figure showing all five regimes:
 # - Dry ascent: adiabatic cooling and approach to saturation
 # - One-moment cloudy ascent: condensation onset, cloud development, and precipitation formation
 # - Kessler cloudy ascent: the same physics with the DCMIP2016 Kessler scheme
 # - Two-moment cloudy ascent: mass and number evolution with aerosol activation
+# - Buoyancy-driven ascent: two-moment microphysics with prognostic vertical velocity
 
 set_theme!(fontsize=14, linewidth=2.5)
-fig = Figure(size=(1200, 1200))
+fig = Figure(size=(1600, 1500))
 nothing #hide
 
 # Color palette
@@ -387,10 +445,58 @@ if any(nʳ_mask)
 end
 axislegend(ax4c; position=:rt, backgroundcolor=(:white, 0.8))
 
+## Row 5: Buoyancy-driven cloudy ascent
+Label(fig[9, 1:4], "Buoyancy-driven ascent with two-moment microphysics", fontsize=16)
+
+ax5a = Axis(fig[10, 1];
+    xlabel = "Temperature (K)",
+    ylabel = "Height (km)",
+    title = "Temperature evolution")
+lines!(ax5a, buoyant_T, buoyant_z / 1000; color=c_temp, label="Parcel")
+lines!(ax5a, buoyant_Tₑ, buoyant_z / 1000; color=:gray, linestyle=:dash, label="Environment")
+axislegend(ax5a; position=:lb, backgroundcolor=(:white, 0.8))
+
+ax5b = Axis(fig[10, 2];
+    xlabel = "Mixing ratio (kg/kg)",
+    ylabel = "Height (km)",
+    title = "Moisture evolution")
+lines!(ax5b, buoyant_qᵛ, buoyant_z / 1000; color=c_vapor, label="Vapor qᵛ")
+lines!(ax5b, buoyant_qᶜˡ, buoyant_z / 1000; color=c_cloud, label="Cloud qᶜˡ")
+lines!(ax5b, buoyant_qʳ, buoyant_z / 1000; color=c_rain, label="Rain qʳ")
+axislegend(ax5b; position=:rt, backgroundcolor=(:white, 0.8))
+
+ax5c = Axis(fig[10, 3];
+    xlabel = "Number concentration (1/kg)",
+    ylabel = "Height (km)",
+    xscale = log10,
+    title = "Number concentration")
+
+bnᶜˡ_mask = buoyant_nᶜˡ .> 1e-3
+bnʳ_mask = buoyant_nʳ .> 1e-3
+bnᵃ_mask = buoyant_nᵃ .> 1e-3
+
+if any(bnᵃ_mask)
+    lines!(ax5c, buoyant_nᵃ[bnᵃ_mask], buoyant_z[bnᵃ_mask] / 1000; color=:gray, label="Aerosol nᵃ")
+end
+if any(bnᶜˡ_mask)
+    lines!(ax5c, buoyant_nᶜˡ[bnᶜˡ_mask], buoyant_z[bnᶜˡ_mask] / 1000; color=c_cloud, label="Cloud nᶜˡ")
+end
+if any(bnʳ_mask)
+    lines!(ax5c, buoyant_nʳ[bnʳ_mask], buoyant_z[bnʳ_mask] / 1000; color=c_rain, label="Rain nʳ")
+end
+axislegend(ax5c; position=:rt, backgroundcolor=(:white, 0.8))
+
+ax5d = Axis(fig[10, 4];
+    xlabel = "Velocity (m/s)",
+    ylabel = "Height (km)",
+    title = "Vertical velocity")
+lines!(ax5d, buoyant_w, buoyant_z / 1000; color=:black)
+
 rowsize!(fig.layout, 1, Relative(0.03))
 rowsize!(fig.layout, 3, Relative(0.03))
 rowsize!(fig.layout, 5, Relative(0.03))
 rowsize!(fig.layout, 7, Relative(0.03))
+rowsize!(fig.layout, 9, Relative(0.03))
 
 fig
 
@@ -471,7 +577,7 @@ fig
 # the resulting cloud formation is not too bad.
 #
 #
-# ### Cloudy ascent with two-moment microphysics (bottom row)
+# ### Cloudy ascent with two-moment microphysics (fourth row)
 #
 # The [Seifert and Beheng (2006)](@cite SeifertBeheng2006) two-moment scheme
 # adds a crucial dimension: number concentration. This enables physically-based
@@ -494,7 +600,23 @@ fig
 #    cloud droplet self-collection, autoconversion of cloud to rain,
 #    accretion of cloud by rain, rain self-collection, and rain breakup.
 #
+# ### Buoyancy-driven cloudy ascent (bottom row)
+#
+# The bottom row repeats the two-moment microphysics from row 4 but switches
+# from prescribed to **prognostic vertical velocity**. The parcel starts at
+# 1 m/s and its velocity evolves according to the buoyancy force
+# B = −g(ρ_parcel − ρ_env)/ρ_env. Below the lifting condensation level,
+# the parcel decelerates just as in a dry adiabatic ascent. Once condensation
+# begins, latent heat release warms the parcel relative to its environment,
+# generating positive buoyancy that accelerates the ascent. The velocity panel
+# shows this transition directly — a key signature of buoyancy-driven dynamics
+# that is invisible when velocity is prescribed. Comparing the temperature and
+# moisture panels between rows 4 and 5 reveals how the ascent rate shapes
+# the cloud and precipitation evolution.
+#
 # This example demonstrates the basic thermodynamic and microphysical processes
 # governing cloud formation in a rising air parcel, and shows how different
 # microphysics schemes produce qualitatively similar but quantitatively different
-# results.
+# results. The buoyancy-driven case further demonstrates the coupling between
+# microphysics and dynamics: condensation → latent heating → buoyancy →
+# acceleration → more condensation.
