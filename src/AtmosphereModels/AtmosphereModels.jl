@@ -11,6 +11,10 @@ export
     pressure_anomaly,
     total_pressure,
     buoyancy_forceᶜᶜᶜ,
+    SlowTendencyMode,
+    HorizontalSlowMode,
+    compute_pressure_correction!,
+    make_pressure_correction!,
     # Thermodynamic formulation interface (formulation types exported by their respective modules)
     thermodynamic_density_name,
     thermodynamic_density,
@@ -33,9 +37,10 @@ export
     grid_microphysical_tendency,
     update_microphysical_fields!,
     update_microphysical_auxiliaries!,
+    initial_aerosol_number,
 
     # Interface functions (extended by BoundaryConditions and Forcings)
-    regularize_atmosphere_model_boundary_conditions,
+    materialize_atmosphere_model_boundary_conditions,
     materialize_atmosphere_model_forcing,
     compute_forcing!,
 
@@ -56,7 +61,13 @@ export
     StabilityEquivalentPotentialTemperature,
     LiquidIcePotentialTemperature,
     StaticEnergy,
-    compute_hydrostatic_pressure!
+    compute_hydrostatic_pressure!,
+    set_to_mean!,
+
+    # Momentum tendency kernels (used by TimeSteppers for acoustic substepping)
+    compute_x_momentum_tendency!,
+    compute_y_momentum_tendency!,
+    compute_z_momentum_tendency!
 
 using DocStringExtensions: TYPEDSIGNATURES, TYPEDEF, TYPEDFIELDS
 using Adapt: Adapt, adapt
@@ -65,7 +76,7 @@ using KernelAbstractions: @kernel, @index
 using Oceananigans: Oceananigans, CenterField, fields
 using Oceananigans.BoundaryConditions: FieldBoundaryConditions, regularize_field_boundary_conditions, fill_halo_regions!
 using Oceananigans.ImmersedBoundaries: mask_immersed_field!
-using Oceananigans.Operators: Δzᶜᶜᶜ, ℑzᵃᵃᶠ
+using Oceananigans.Operators: Δzᶜᶜᶜ, ℑzᵃᵃᶜ, ℑzᵃᵃᶠ
 using Oceananigans.Solvers: Solvers
 using Oceananigans.TimeSteppers: TimeSteppers
 using Oceananigans.Utils: prettysummary, launch!
@@ -104,5 +115,6 @@ using .Diagnostics
 
 # set_atmosphere_model requires Diagnostics for SaturationSpecificHumidity
 include("set_atmosphere_model.jl")
+include("set_to_mean.jl")
 
 end

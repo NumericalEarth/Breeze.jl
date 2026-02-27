@@ -1,4 +1,6 @@
 using Breeze
+using Breeze.AtmosphereModels: thermodynamic_density
+using Breeze.BoundaryConditions: EnergyFluxBoundaryCondition
 using GPUArraysCore: @allowscalar
 using Oceananigans: Oceananigans
 using Oceananigans.BoundaryConditions: BoundaryCondition
@@ -89,9 +91,34 @@ end
         bc = BulkSensibleHeatFlux(surface_temperature=T₀, coefficient=Cᴰ, gustiness=gustiness)
         @test bc isa BoundaryCondition
 
-        # Test with ρθ (covers both construction and model building)
+        # Test with ρθ (potential temperature formulation)
         ρθ_bcs = FieldBoundaryConditions(bottom=bc)
         model = AtmosphereModel(grid; boundary_conditions=(; ρθ=ρθ_bcs))
+        θ₀ = model.dynamics.reference_state.potential_temperature
+        set!(model; θ=θ₀)
+        time_step!(model, 1e-6)
+        @test true
+    end
+
+    @testset "BulkSensibleHeatFlux with StaticEnergyFormulation [$FT]" begin
+        bc = BulkSensibleHeatFlux(surface_temperature=T₀, coefficient=Cᴰ, gustiness=gustiness)
+
+        # Test with ρe on static energy formulation
+        ρe_bcs = FieldBoundaryConditions(bottom=bc)
+        model = AtmosphereModel(grid; formulation=:StaticEnergy,
+                                boundary_conditions=(; ρe=ρe_bcs))
+        θ₀ = model.dynamics.reference_state.potential_temperature
+        set!(model; θ=θ₀, qᵗ=FT(0.01))
+        time_step!(model, 1e-6)
+        @test true
+    end
+
+    @testset "BulkSensibleHeatFlux with ρe auto-converts for θ formulation [$FT]" begin
+        bc = BulkSensibleHeatFlux(surface_temperature=T₀, coefficient=Cᴰ, gustiness=gustiness)
+
+        # ρe BCs with θ formulation: should auto-convert to ρθ
+        ρe_bcs = FieldBoundaryConditions(bottom=bc)
+        model = AtmosphereModel(grid; boundary_conditions=(; ρe=ρe_bcs))
         θ₀ = model.dynamics.reference_state.potential_temperature
         set!(model; θ=θ₀)
         time_step!(model, 1e-6)
@@ -151,6 +178,57 @@ end
         time_step!(model, 1e-6)
         @test true
     end
+
+    @testset "Combined bulk boundary conditions with StaticEnergyFormulation [$FT]" begin
+        ρu_bcs = FieldBoundaryConditions(bottom=BulkDrag(coefficient=Cᴰ, gustiness=gustiness))
+        ρv_bcs = FieldBoundaryConditions(bottom=BulkDrag(coefficient=Cᴰ, gustiness=gustiness))
+        ρe_bcs = FieldBoundaryConditions(bottom=BulkSensibleHeatFlux(surface_temperature=T₀,
+                                                                     coefficient=Cᴰ, gustiness=gustiness))
+        ρqᵗ_bcs = FieldBoundaryConditions(bottom=BulkVaporFlux(surface_temperature=T₀,
+                                                               coefficient=Cᴰ, gustiness=gustiness))
+
+        boundary_conditions = (; ρu=ρu_bcs, ρv=ρv_bcs, ρe=ρe_bcs, ρqᵗ=ρqᵗ_bcs)
+        model = AtmosphereModel(grid; formulation=:StaticEnergy, boundary_conditions)
+
+        θ₀ = model.dynamics.reference_state.potential_temperature
+        set!(model; θ=θ₀, qᵗ=FT(0.01))
+        time_step!(model, 1e-6)
+        @test true
+    end
+
+    @testset "PolynomialCoefficient full model build + time step [$FT]" begin
+        coef = PolynomialCoefficient()
+
+        ρu_bcs  = FieldBoundaryConditions(bottom=BulkDrag(coefficient=coef, gustiness=gustiness, surface_temperature=T₀))
+        ρv_bcs  = FieldBoundaryConditions(bottom=BulkDrag(coefficient=coef, gustiness=gustiness, surface_temperature=T₀))
+        ρθ_bcs  = FieldBoundaryConditions(bottom=BulkSensibleHeatFlux(coefficient=coef, gustiness=gustiness, surface_temperature=T₀))
+        ρqᵗ_bcs = FieldBoundaryConditions(bottom=BulkVaporFlux(coefficient=coef, gustiness=gustiness, surface_temperature=T₀))
+
+        boundary_conditions = (; ρu=ρu_bcs, ρv=ρv_bcs, ρθ=ρθ_bcs, ρqᵗ=ρqᵗ_bcs)
+        model = AtmosphereModel(grid; boundary_conditions)
+
+        θ₀_ref = model.dynamics.reference_state.potential_temperature
+        set!(model; θ=θ₀_ref, u=FT(5), qᵗ=FT(0.01))
+        time_step!(model, 1e-6)
+        @test true
+    end
+
+    @testset "PolynomialCoefficient with no stability correction [$FT]" begin
+        coef = PolynomialCoefficient(stability_function=nothing)
+
+        ρu_bcs  = FieldBoundaryConditions(bottom=BulkDrag(coefficient=coef, gustiness=gustiness, surface_temperature=T₀))
+        ρv_bcs  = FieldBoundaryConditions(bottom=BulkDrag(coefficient=coef, gustiness=gustiness, surface_temperature=T₀))
+        ρθ_bcs  = FieldBoundaryConditions(bottom=BulkSensibleHeatFlux(coefficient=coef, gustiness=gustiness, surface_temperature=T₀))
+        ρqᵗ_bcs = FieldBoundaryConditions(bottom=BulkVaporFlux(coefficient=coef, gustiness=gustiness, surface_temperature=T₀))
+
+        boundary_conditions = (; ρu=ρu_bcs, ρv=ρv_bcs, ρθ=ρθ_bcs, ρqᵗ=ρqᵗ_bcs)
+        model = AtmosphereModel(grid; boundary_conditions)
+
+        θ₀_ref = model.dynamics.reference_state.potential_temperature
+        set!(model; θ=θ₀_ref, u=FT(5), qᵗ=FT(0.01))
+        time_step!(model, 1e-6)
+        @test true
+    end
 end
 
 #####
@@ -159,7 +237,6 @@ end
 
 @testset "Energy flux boundary conditions [$FT]" for FT in test_float_types()
     Oceananigans.defaults.FloatType = FT
-    using Breeze.BoundaryConditions: EnergyFluxBoundaryCondition
     using Breeze.Thermodynamics: mixture_heat_capacity, MoistureMassFractions
     using Oceananigans.Models: BoundaryConditionOperation
 
@@ -307,7 +384,7 @@ end
     using Breeze.BoundaryConditions: has_nondefault_bcs, convert_energy_to_theta_bcs,
                                      theta_to_energy_bcs, EnergyFluxBoundaryCondition,
                                      EnergyFluxBoundaryConditionFunction, ThetaFluxBoundaryConditionFunction,
-                                     ThetaFluxBCType, EnergyFluxBCType
+                                     ThetaFluxBCType
     using Oceananigans.Models: boundary_condition_location
 
     @testset "has_nondefault_bcs [$FT]" begin
@@ -318,10 +395,10 @@ end
     end
 
     @testset "boundary_condition_location [$FT]" begin
-        LX, LY, LZ = boundary_condition_location(:bottom, Center, Center, Center)
+        LZ = boundary_condition_location(:bottom, Center, Center, Center)[3]
         @test LZ === Nothing
 
-        LX, LY, LZ = boundary_condition_location(:west, Center, Center, Center)
+        LX = boundary_condition_location(:west, Center, Center, Center)[1]
         @test LX === Nothing
     end
 
@@ -375,7 +452,6 @@ end
 
 @testset "getbc coverage for all boundary faces [$FT]" for FT in test_float_types()
     Oceananigans.defaults.FloatType = FT
-    using Breeze.AtmosphereModels: thermodynamic_density
 
     grid = RectilinearGrid(default_arch; size=(1, 1, 1), x=(0, 100), y=(0, 100), z=(0, 100),
                            topology=(Bounded, Bounded, Bounded))
@@ -386,9 +462,9 @@ end
     Δt = FT(1e-6)
 
     # Test a representative subset of boundaries (bottom and west are sufficient for coverage)
-    for (side, ρe_bcs) in [
-        (:bottom, FieldBoundaryConditions(bottom=FluxBoundaryCondition(𝒬))),
-        (:west, FieldBoundaryConditions(west=FluxBoundaryCondition(𝒬))),
+    for ρe_bcs in [
+        FieldBoundaryConditions(bottom=FluxBoundaryCondition(𝒬)),
+        FieldBoundaryConditions(west=FluxBoundaryCondition(𝒬)),
     ]
         model = AtmosphereModel(grid; boundary_conditions=(ρe=ρe_bcs,))
         set!(model; θ=θ₀, qᵗ=qᵗ₀)

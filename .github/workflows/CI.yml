@@ -25,11 +25,15 @@ permissions:
   actions: write
   contents: read
 
+env:
+  # Disable GPU support for Reactant until we actually use it.
+  REACTANT_GPU: 'none'
+
 jobs:
   test:
-    name: Julia ${{ matrix.version }} - ${{ matrix.os }} - ${{ matrix.arch }} - ${{ github.event_name }}
+    name: Julia ${{ matrix.version }} - ${{ matrix.os }} - ${{ matrix.arch }} - check-bounds ${{ matrix.check-bounds }} - ${{ github.event_name }}
     runs-on: ${{ matrix.os }}
-    timeout-minutes: 90
+    timeout-minutes: 75
     container:
       image: ${{ (startsWith(matrix.os, 'aws-linux-nvidia-gpu-') && format('ghcr.io/numericalearth/breeze-docker-images:test-julia_{0}', matrix.version) ) || '' }}
       options: --gpus=all
@@ -38,13 +42,15 @@ jobs:
       matrix:
         version:
           - "min"
-          - "1.12.4"
+          - "1.12.5"
         os:
           - ubuntu-latest
           - macOS-latest
           - windows-latest
         arch:
           - "default"
+        check-bounds:
+          - "yes"
         exclude:
           - version: "min"
             os: windows-latest
@@ -52,6 +58,13 @@ jobs:
           - version: "1.12.4"
             os: aws-linux-nvidia-gpu-l4
             arch: "default"
+            check-bounds: "yes"
+          # Necessary for testing Reactant workloads until
+          # https://github.com/EnzymeAD/Reactant.jl/issues/2347 is fixed.
+          - version: "min"
+            os: ubuntu-latest
+            arch: "default"
+            check-bounds: "auto"
     steps:
       - uses: actions/checkout@v6
       - uses: julia-actions/setup-julia@v2
@@ -90,11 +103,15 @@ jobs:
           fi
 
           if [[ ${{ runner.os }} == "macOS" ]]; then
-              # Encourage ParallelTestRunner to use two jobs on macOS, rather
+              # Encourage ParallelTestRunner to use multiple jobs on macOS, rather
               # than the single one it'd use by default.
-              TEST_ARGS+=(--jobs=2)
+              TEST_ARGS+=(--jobs=3)
+              # ...but also set a more conservative limit to memory usage before
+              # reciclying a worker, to avoid out-of-memory issues.
+              JULIA_TEST_MAXRSS_MB=2500
+              echo "JULIA_TEST_MAXRSS_MB=${JULIA_TEST_MAXRSS_MB}" | tee -a "${GITHUB_ENV}"
           fi
-          echo "runtest_test_args=${TEST_ARGS[@]}" | tee "${GITHUB_ENV}"
+          echo "runtest_test_args=${TEST_ARGS[@]}" | tee -a "${GITHUB_ENV}"
       - name: Prepare test environment
         if: ${{ startsWith(matrix.os, 'aws-linux-nvidia-gpu-') }}
         shell: bash
@@ -110,7 +127,7 @@ jobs:
           # preference file to test directory (the global one will be ignored during the
           # tests), and add `CUDA_Runtime_jll` to the env to make the preference effective.
           cp /usr/local/share/julia/environments/breeze/LocalPreferences.toml test/.
-          julia --project=test --color=yes --check-bounds=yes -e 'using Pkg; Pkg.Registry.update(); Pkg.add("CUDA_Runtime_jll")'
+          julia --project=test --color=yes --check-bounds=${{ matrix.check-bounds }} -e 'using Pkg; Pkg.Registry.update(); Pkg.add("CUDA_Runtime_jll")'
       - name: Run tests
         shell: bash
         run: |
@@ -118,7 +135,10 @@ jobs:
               # We use earlyoom only on the GPU machines
               earlyoom -m 3 -s 100 -r 300 --prefer 'julia' &
           fi
-          julia --project --color=yes --check-bounds=yes -e 'using Pkg; Pkg.test(; coverage=true, julia_args=["--check-bounds=yes", "--compiled-modules=yes", "--depwarn=yes"], test_args=`${{ env.runtest_test_args }}`, force_latest_compatible_version=false, allow_reresolve=true)'
+          julia --project --color=yes --check-bounds=${{ matrix.check-bounds }} -e 'using Pkg; Pkg.test(; coverage=true, julia_args=["--check-bounds=${{ matrix.check-bounds }}", "--compiled-modules=yes", "--depwarn=yes", "-O0"], test_args=`${{ env.runtest_test_args }}`, force_latest_compatible_version=false, allow_reresolve=true)'
+        env:
+          # Don't make Reactant occupy all the GPU memory
+          XLA_REACTANT_GPU_PREALLOCATE: false
       - uses: julia-actions/julia-processcoverage@v1
       - uses: codecov/codecov-action@v5
         with:

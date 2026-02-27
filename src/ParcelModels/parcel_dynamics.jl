@@ -4,12 +4,16 @@ using Oceananigans: Oceananigans, CenterField
 using Oceananigans.Architectures: on_architecture
 using Oceananigans.BoundaryConditions: fill_halo_regions!
 using Oceananigans.Fields: ZeroField, set!, interpolate
-using Oceananigans.Grids: Center
-using Oceananigans.TimeSteppers: TimeSteppers, tick!
+using Oceananigans.TimeSteppers: TimeSteppers, tick_stage!
+using Oceananigans.Utils: launch!
+
+using KernelAbstractions: @kernel, @index
 
 using Breeze.Thermodynamics: MoistureMassFractions,
     LiquidIcePotentialTemperatureState, StaticEnergyState,
-    with_moisture, mixture_heat_capacity
+    PlanarLiquidSurface,
+    with_moisture, mixture_heat_capacity,
+    temperature_from_potential_temperature, saturation_specific_humidity
 
 using Breeze.AtmosphereModels: AtmosphereModels, AtmosphereModel
 
@@ -234,7 +238,8 @@ The prognostic variables use the same ρ-weighted names as the grid-based model
 function materialize_parcel_microphysics_prognostics(FT, microphysics)
     names = AtmosphereModels.prognostic_field_names(microphysics)
     length(names) == 0 && return nothing
-    return NamedTuple{names}(ntuple(_ -> zero(FT), length(names)))
+    Nᵃ₀ = FT(AtmosphereModels.initial_aerosol_number(microphysics))
+    return NamedTuple{names}(ntuple(i -> names[i] == :ρnᵃ ? Nᵃ₀ : zero(FT), length(names)))
 end
 
 function AtmosphereModels.materialize_momentum_and_velocities(::ParcelDynamics, grid, bcs)
@@ -310,11 +315,9 @@ function Oceananigans.set!(model::ParcelModel; T = nothing, θ = nothing,
                            u = 0, v = 0, w = 0,
                            x = 0, y = 0, z = nothing)
 
-    grid = model.grid
     dynamics = model.dynamics
     constants = model.thermodynamic_constants
     pˢᵗ = dynamics.standard_pressure
-    g = constants.gravitational_acceleration
 
     # Set pressure and density first (needed for T from θ and qᵗ from ℋ)
     !isnothing(ρ) && set!(dynamics.density, ρ)
@@ -363,6 +366,15 @@ end
 ##### Helper functions for set!
 #####
 
+@kernel function _set_temperature_from_potential_temperature!(T_field, θ_field, p_field, pˢᵗ, constants)
+    i, j, k = @index(Global, NTuple)
+    @inbounds begin
+        θₖ = θ_field[i, j, k]
+        pₖ = p_field[i, j, k]
+    end
+    @inbounds T_field[i, j, k] = @inline temperature_from_potential_temperature(θₖ, pₖ, constants; pˢᵗ)
+end
+
 """
 $(TYPEDSIGNATURES)
 
@@ -370,30 +382,23 @@ Set temperature field from potential temperature, using proper thermodynamic rel
 """
 function set_temperature_from_potential_temperature!(T_field, θ, p_field, pˢᵗ, constants)
     grid = T_field.grid
-    if θ isa Number
-        # θ is constant - loop over grid and compute T at each point
-        for k in 1:size(grid, 3)
-            for j in 1:size(grid, 2)
-                for i in 1:size(grid, 1)
-                    pₖ = p_field[i, j, k]
-                    T_field[i, j, k] = temperature_from_potential_temperature(θ, pₖ, constants; pˢᵗ)
-                end
-            end
-        end
-    else
-        # θ is a function of z
-        for k in 1:size(grid, 3)
-            zₖ = znode(1, 1, k, grid, Center(), Center(), Center())
-            θₖ = θ(zₖ)
-            for j in 1:size(grid, 2)
-                for i in 1:size(grid, 1)
-                    pₖ = p_field[i, j, k]
-                    T_field[i, j, k] = temperature_from_potential_temperature(θₖ, pₖ, constants; pˢᵗ)
-                end
-            end
-        end
-    end
+    arch = grid.architecture
+    θ_field = CenterField(grid)
+    set!(θ_field, θ)
+    launch!(arch, grid, :xyz, _set_temperature_from_potential_temperature!,
+            T_field, θ_field, p_field, pˢᵗ, constants)
     return nothing
+end
+
+@kernel function _set_moisture_from_relative_humidity!(qᵗ_field, ℋ_field, T_field, ρ_field, constants)
+    i, j, k = @index(Global, NTuple)
+    @inbounds begin
+        ℋₖ = ℋ_field[i, j, k]
+        Tₖ = T_field[i, j, k]
+        ρₖ = ρ_field[i, j, k]
+    end
+    qᵛ⁺ = @inline saturation_specific_humidity(Tₖ, ρₖ, constants, PlanarLiquidSurface())
+    @inbounds qᵗ_field[i, j, k] = ℋₖ * qᵛ⁺
 end
 
 """
@@ -403,32 +408,11 @@ Set specific humidity field from relative humidity, computing qᵗ = ℋ * qᵛ�
 """
 function set_moisture_from_relative_humidity!(qᵗ_field, ℋ, T_field, ρ_field, constants)
     grid = qᵗ_field.grid
-    if ℋ isa Number
-        for k in 1:size(grid, 3)
-            for j in 1:size(grid, 2)
-                for i in 1:size(grid, 1)
-                    Tₖ = T_field[i, j, k]
-                    ρₖ = ρ_field[i, j, k]
-                    qᵛ⁺ = saturation_specific_humidity(Tₖ, ρₖ, constants, PlanarLiquidSurface())
-                    qᵗ_field[i, j, k] = ℋ * qᵛ⁺
-                end
-            end
-        end
-    else
-        # ℋ is a function of z
-        for k in 1:size(grid, 3)
-            zₖ = znode(1, 1, k, grid, Center(), Center(), Center())
-            ℋₖ = ℋ(zₖ)
-            for j in 1:size(grid, 2)
-                for i in 1:size(grid, 1)
-                    Tₖ = T_field[i, j, k]
-                    ρₖ = ρ_field[i, j, k]
-                    qᵛ⁺ = saturation_specific_humidity(Tₖ, ρₖ, constants, PlanarLiquidSurface())
-                    qᵗ_field[i, j, k] = ℋₖ * qᵛ⁺
-                end
-            end
-        end
-    end
+    arch = grid.architecture
+    ℋ_field = CenterField(grid)
+    set!(ℋ_field, ℋ)
+    launch!(arch, grid, :xyz, _set_moisture_from_relative_humidity!,
+            qᵗ_field, ℋ_field, T_field, ρ_field, constants)
     return nothing
 end
 
@@ -524,13 +508,15 @@ function compute_parcel_tendencies!(model::ParcelModel)
     𝒰 = state.𝒰
     μ = state.μ
 
-    # Build diagnostic microphysical state from prognostic variables
-    ℳ = microphysical_state(microphysics, ρ, μ, 𝒰)
-
     # Position tendencies = environmental velocity at current height
     tendencies.Gx = interpolate(z, model.velocities.u)
     tendencies.Gy = interpolate(z, model.velocities.v)
     tendencies.Gz = interpolate(z, model.velocities.w)
+
+    # Build diagnostic microphysical state from prognostic variables
+    # Pass velocities for microphysics (e.g., aerosol activation uses vertical velocity)
+    velocities = (; u = tendencies.Gx, v = tendencies.Gy, w = tendencies.Gz)
+    ℳ = microphysical_state(microphysics, ρ, μ, 𝒰, velocities)
 
     # Thermodynamic and moisture tendencies from microphysics (specific, not density-weighted)
     # For adiabatic (no microphysics): both are zero, giving exact conservation
@@ -722,7 +708,8 @@ function ssp_rk3_parcel_substep!(model::ParcelModel, U⁰::ParcelInitialState, �
 
     # Update moisture fractions in thermodynamic state
     microphysics = model.microphysics
-    ℳ = microphysical_state(microphysics, state.ρ, state.μ, state.𝒰)
+    zero_velocities = (; u = zero(state.ρ), v = zero(state.ρ), w = zero(state.ρ))
+    ℳ = microphysical_state(microphysics, state.ρ, state.μ, state.𝒰, zero_velocities)
     q⁺ = moisture_fractions(microphysics, ℳ, state.qᵗ)
     state.𝒰 = with_moisture(state.𝒰, q⁺)
 
@@ -810,7 +797,8 @@ function step_parcel_state!(model::ParcelModel, Δt)
 
     # Update moisture fractions in thermodynamic state
     microphysics = model.microphysics
-    ℳ = microphysical_state(microphysics, state.ρ, state.μ, state.𝒰)
+    zero_velocities = (; u = zero(state.ρ), v = zero(state.ρ), w = zero(state.ρ))
+    ℳ = microphysical_state(microphysics, state.ρ, state.μ, state.𝒰, zero_velocities)
     q⁺ = moisture_fractions(microphysics, ℳ, state.qᵗ)
     state.𝒰 = with_moisture(state.𝒰, q⁺)
 
@@ -847,7 +835,7 @@ function TimeSteppers.time_step!(model::ParcelModel, Δt; callbacks=nothing)
 
     # Stage 1: u^(1) = u^(0) + Δt * L(u^(0))
     ssp_rk3_parcel_substep!(model, U⁰, Δt, ts.α¹)
-    tick!(model.clock, Δt; stage=true)
+    tick_stage!(model.clock, Δt)
 
     # Stage 2: u^(2) = 3/4 u^(0) + 1/4 (u^(1) + Δt * L(u^(1)))
     ssp_rk3_parcel_substep!(model, U⁰, Δt, ts.α²)
@@ -859,10 +847,15 @@ function TimeSteppers.time_step!(model::ParcelModel, Δt; callbacks=nothing)
     # Final clock update (adjust for floating point error)
     tⁿ⁺¹ = model.clock.time + Δt * (1 - ts.α¹)  # Already advanced by α¹*Δt in stage 1
     corrected_Δt = tⁿ⁺¹ - model.clock.time
-    tick!(model.clock, corrected_Δt)
+    tick_stage!(model.clock, corrected_Δt, Δt)
+
+    # Apply microphysics model update AFTER all RK3 stages and clock update
+    # (for schemes like DCMIP2016Kessler that operate via direct state modification)
+    microphysics_model_update!(model.microphysics, model)
 
     return nothing
 end
+
 
 
 #####

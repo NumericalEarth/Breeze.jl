@@ -6,7 +6,6 @@ using KernelAbstractions: @kernel, @index
 
 using Oceananigans.BoundaryConditions: fill_halo_regions!
 using Oceananigans.Fields: set!, FunctionField
-using Oceananigans.Models.NonhydrostaticModels: NonhydrostaticModels
 using Oceananigans.Operators: V⁻¹ᶜᶜᶜ, δxᶜᵃᵃ, δyᵃᶜᵃ, δzᵃᵃᶜ, ℑxᶠᵃᵃ, ℑyᵃᶠᵃ, ℑzᵃᵃᶠ
 using Oceananigans.Utils: launch!
 
@@ -46,8 +45,8 @@ AtmosphereModels.set_momentum!(::KinematicModel, name::Symbol, value) =
 ##### Pressure correction: no-op for kinematic dynamics
 #####
 
-NonhydrostaticModels.compute_pressure_correction!(::KinematicModel, Δt) = nothing
-NonhydrostaticModels.make_pressure_correction!(::KinematicModel, Δt) = nothing
+AtmosphereModels.compute_pressure_correction!(::KinematicModel, Δt) = nothing
+AtmosphereModels.make_pressure_correction!(::KinematicModel, Δt) = nothing
 
 #####
 ##### Density tendency (prognostic density only)

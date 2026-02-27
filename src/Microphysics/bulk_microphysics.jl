@@ -59,6 +59,7 @@ struct NonEquilibriumCloudFormation{L, I}
     - `ice`: Parameters for cloud ice (contains relaxation timescale `τ_relax`), or `nothing` for warm-phase only
 
     # References
+
     * Morrison, H. and Grabowski, W. W. (2008). A novel approach for representing ice
         microphysics in models: Description and tests using a kinematic framework.
         J. Atmos. Sci., 65, 1528–1548. https://doi.org/10.1175/2007JAS2491.1
@@ -233,3 +234,11 @@ end
 @inline function AtmosphereModels.moisture_fractions(bμp::NPBM, ℳ::NamedTuple, qᵗ)
     return moisture_fractions(bμp.cloud_formation, ℳ, qᵗ)
 end
+
+# Forward mass fraction diagnostics to cloud_formation scheme
+AtmosphereModels.vapor_mass_fraction(bμp::NPBM, model) =
+    AtmosphereModels.vapor_mass_fraction(bμp.cloud_formation, model)
+AtmosphereModels.liquid_mass_fraction(bμp::NPBM, model) =
+    AtmosphereModels.liquid_mass_fraction(bμp.cloud_formation, model)
+AtmosphereModels.ice_mass_fraction(bμp::NPBM, model) =
+    AtmosphereModels.ice_mass_fraction(bμp.cloud_formation, model)
