@@ -14,7 +14,7 @@
 #
 # ## Physical setup
 #
-# The background atmosphere is stably stratified with constant Brunt-Väisälä
+# The background atmosphere is stably stratified with a constant Brunt-Väisälä
 # frequency ``N``, giving a potential-temperature profile
 #
 # ```math
@@ -89,7 +89,7 @@ Nφ = 85
 Nz = 30
 H  = 30kilometers
 
-grid = LatitudeLongitudeGrid(CPU();
+grid = LatitudeLongitudeGrid(GPU();
                              size = (Nλ, Nφ, Nz),
                              halo = (5, 5, 5),
                              longitude = (0, 360),
