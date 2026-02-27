@@ -71,7 +71,7 @@ jobs:
               ARGS+=(--microphysics "${{ matrix.microphysics }}")
           fi
           julia --color=yes --project run_benchmarks.jl --device GPU "${ARGS[@]}" --size "${{ matrix.grid }}"
-      - uses: actions/upload-artifact@v6
+      - uses: actions/upload-artifact@v7
         with:
           name: 'benchmarks-dynamics_${{ matrix.dynamics }}-microphysics_${{ matrix.microphysics }}-grid_${{ matrix.grid }}'
           path: benchmarking/benchmark_results.*
