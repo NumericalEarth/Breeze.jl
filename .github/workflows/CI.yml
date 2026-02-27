@@ -112,6 +112,11 @@ jobs:
               echo "JULIA_TEST_MAXRSS_MB=${JULIA_TEST_MAXRSS_MB}" | tee -a "${GITHUB_ENV}"
           fi
           echo "runtest_test_args=${TEST_ARGS[@]}" | tee -a "${GITHUB_ENV}"
+      - name: Install earlyoom
+        if: ${{ matrix.os == 'ubuntu-latest' }}
+        shell: bash
+        run: |
+          sudo apt-get install -y earlyoom
       - name: Prepare test environment
         if: ${{ startsWith(matrix.os, 'aws-linux-nvidia-gpu-') }}
         shell: bash
@@ -131,8 +136,8 @@ jobs:
       - name: Run tests
         shell: bash
         run: |
-          if [[ ${{ matrix.os }} == aws-linux-nvidia-gpu* ]]; then
-              # We use earlyoom only on the GPU machines
+          if [[ ${{ runner.os }} == 'Linux' ]]; then
+              # We use earlyoom only on the Linux machines
               earlyoom -m 3 -s 100 -r 300 --prefer 'julia' &
           fi
           julia --project --color=yes --check-bounds=${{ matrix.check-bounds }} -e 'using Pkg; Pkg.test(; coverage=true, julia_args=["--check-bounds=${{ matrix.check-bounds }}", "--compiled-modules=yes", "--depwarn=yes", "-O0"], test_args=`${{ env.runtest_test_args }}`, force_latest_compatible_version=false, allow_reresolve=true)'
