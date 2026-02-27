@@ -73,7 +73,7 @@
 # with amplitude ``Δθ = 1\,{\rm K}`` and width ``σ = 10°``.
 
 using Breeze
-using Ocenanigans
+using Oceananigans
 using Oceananigans.Units
 using Printf
 using CairoMakie
