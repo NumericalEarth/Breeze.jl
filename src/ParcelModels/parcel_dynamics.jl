@@ -62,6 +62,12 @@ State of a Lagrangian air parcel with position, thermodynamic state, and microph
 
 The parcel model evolves **specific quantities** (qᵗ, ℰ) directly for exact conservation.
 Density-weighted forms (ρqᵗ, ρℰ) are also stored for consistency with the microphysics interface.
+
+- `w`: parcel vertical velocity [m/s] (prognostic for `PrognosticVerticalVelocity`,
+  zero for `PrescribedVerticalVelocity`)
+- `ρ`: **environmental** density at parcel height [kg/m³] (interpolated from background
+  profile, not the parcel's own density). The parcel density is computed from
+  `density(𝒰, constants)` using the ideal gas law applied to the parcel's thermodynamic state.
 """
 mutable struct ParcelState{FT, TH, MP}
     x :: FT
@@ -97,14 +103,9 @@ end
 
 """
 $(TYPEDEF)
+$(TYPEDFIELDS)
 
 Tendencies (time derivatives) for parcel prognostic variables.
-
-# Fields
-- `Gx`, `Gy`, `Gz`: position tendencies [m/s]
-- `Ge`: specific energy tendency [J/kg/s]
-- `Gqᵗ`: specific moisture tendency [kg/kg/s]
-- `Gμ`: microphysics prognostic tendencies (density-weighted)
 """
 mutable struct ParcelTendencies{FT, GM}
     Gx :: FT
@@ -571,21 +572,12 @@ function compute_parcel_tendencies!(model::ParcelModel)
     # Pass velocities for microphysics (e.g., aerosol activation uses vertical velocity)
     velocities = (; u = tendencies.Gx, v = tendencies.Gy, w = tendencies.Gz)
 
-    if !isnothing(microphysics)
-        ℳ = microphysical_state(microphysics, ρ, μ, 𝒰, velocities)
-
-        # Thermodynamic and moisture tendencies from microphysics (specific, not density-weighted)
-        tendencies.Ge = microphysical_tendency(microphysics, Val(:e), ρ, ℳ, 𝒰, constants)
-        tendencies.Gqᵗ = microphysical_tendency(microphysics, Val(:qᵗ), ρ, ℳ, 𝒰, constants)
-
-        # Microphysics prognostic tendencies (scheme-dependent)
-        tendencies.Gμ = compute_microphysics_prognostic_tendencies(microphysics, ρ, μ, ℳ, 𝒰, constants)
-    else
-        # Adiabatic: zero tendencies give exact conservation of ℰ and qᵗ
-        tendencies.Ge = zero(ρ)
-        tendencies.Gqᵗ = zero(ρ)
-        tendencies.Gμ = zero_microphysics_prognostic_tendencies(μ)
-    end
+    # Dispatch handles the Nothing case: microphysical_tendency(::Nothing, ...) returns zero,
+    # compute_microphysics_prognostic_tendencies(::Nothing, ...) returns nothing/zero NamedTuple
+    ℳ = microphysical_state(microphysics, ρ, μ, 𝒰, velocities)
+    tendencies.Ge = microphysical_tendency(microphysics, Val(:e), ρ, ℳ, 𝒰, constants)
+    tendencies.Gqᵗ = microphysical_tendency(microphysics, Val(:qᵗ), ρ, ℳ, 𝒰, constants)
+    tendencies.Gμ = compute_microphysics_prognostic_tendencies(microphysics, ρ, μ, ℳ, 𝒰, constants)
 
     return nothing
 end
@@ -731,15 +723,10 @@ end
 
 """
 $(TYPEDEF)
+$(TYPEDFIELDS)
 
 Storage for the initial parcel prognostic state at the beginning of a time step.
 Used by SSP RK3 to combine the initial state with intermediate states.
-
-# Fields
-- `x`, `y`, `z`: initial position [m]
-- `qᵗ`: initial specific total moisture [kg/kg]
-- `ℰ`: initial specific static energy [J/kg] or potential temperature [K]
-- `μ`: initial microphysics prognostics (density-weighted)
 """
 mutable struct ParcelInitialState{FT, MP}
     x :: FT
@@ -774,7 +761,7 @@ function store_initial_parcel_state!(U⁰::ParcelInitialState, state::ParcelStat
 end
 
 copy_microphysics_prognostics(::Nothing) = nothing
-copy_microphysics_prognostics(μ::NamedTuple) = deepcopy(μ)
+copy_microphysics_prognostics(μ::NamedTuple) = μ  # NamedTuples of scalars are immutable value types
 
 #####
 ##### Domain boundary clamping
@@ -788,7 +775,7 @@ Check that the parcel remains within the vertical grid domain `[0, Lz]`.
 Throws an error if the parcel escapes the domain, since extrapolation of
 environmental profiles (pressure, density) beyond the grid is unphysical.
 """
-@inline function check_domain_bounds!(state, grid)
+function check_domain_bounds!(state, grid)
     z_max = grid.Lz
     if state.z >= z_max
         error("Parcel reached the model top (z = $(state.z) m ≥ Lz = $(z_max) m). " *

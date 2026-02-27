@@ -717,7 +717,7 @@ end
     constants = model.thermodynamic_constants
     state = model.dynamics.state
     B = parcel_buoyancy(state, model.dynamics, constants)
-    @test abs(B) < 0.1  # Near-zero buoyancy
+    @test abs(B) < 0.01  # Near-zero buoyancy (with 1000 grid points, expect O(1e-3))
 
     # Run a few steps — parcel should still be rising (w > 0)
     simulation = Simulation(model; Δt=1.0, stop_time=10.0, verbose=false)
@@ -755,9 +755,13 @@ end
     state.ρℰ = state.ρ * state.ℰ
     state.𝒰 = StaticEnergyState(state.ℰ, q, state.z, state.𝒰.reference_pressure)
 
-    # Buoyancy should be positive (warm parcel is lighter)
+    # Buoyancy should be positive (warm parcel is lighter) and close to g * ΔT / T
     B = parcel_buoyancy(state, model.dynamics, constants)
+    T_parcel = temperature(state.𝒰, constants)
+    g = constants.gravitational_acceleration
+    B_expected = g * ΔT / T_parcel  # ≈ 9.81 * 2 / 288 ≈ 0.068 m/s²
     @test B > 0
+    @test B ≈ B_expected rtol=0.1  # Within 10% of analytical estimate
 
     # Run a few steps — parcel should accelerate upward
     simulation = Simulation(model; Δt=1.0, stop_time=10.0, verbose=false)
