@@ -42,7 +42,7 @@ using CairoMakie
 # causing adiabatic expansion and cooling. Without moisture condensation,
 # the parcel follows the dry adiabatic lapse rate Γd ≈ 9.8 K/km.
 
-grid = RectilinearGrid(size=100, z=(0, 10kilometers), topology=(Flat, Flat, Bounded))
+grid = RectilinearGrid(size=700, z=(0, 7kilometers), topology=(Flat, Flat, Bounded))
 model = AtmosphereModel(grid; dynamics=ParcelDynamics())
 
 reference_state = ReferenceState(grid, model.thermodynamic_constants,
@@ -110,7 +110,7 @@ set!(cloudy_model, qᵗ = qᵗ, z = 0, w = 1,
      p = reference_state.pressure,
      ρ = reference_state.density)
 
-cloudy_simulation = Simulation(cloudy_model; Δt=1, stop_time=120minutes)
+cloudy_simulation = Simulation(cloudy_model; Δt=1, stop_time=90minutes)
 
 # Store cloudy parcel snapshots
 cloudy_snapshots = []
@@ -172,7 +172,7 @@ set!(kessler_model, qᵗ = qᵗ, z = 0, w = 1,
      p = kessler_reference_state.pressure,
      ρ = kessler_reference_state.density)
 
-kessler_simulation = Simulation(kessler_model; Δt=1, stop_time=120minutes)
+kessler_simulation = Simulation(kessler_model; Δt=1, stop_time=90minutes)
 
 # Store Kessler parcel snapshots
 kessler_snapshots = []
@@ -224,7 +224,7 @@ set!(twom_model, qᵗ = qᵗ, z = 0, w = 1,
      p = reference_state.pressure,
      ρ = reference_state.density)
 
-twom_simulation = Simulation(twom_model; Δt=0.1, stop_time=120minutes)
+twom_simulation = Simulation(twom_model; Δt=1, stop_time=90minutes)
 
 # Store two-moment parcel snapshots
 twom_snapshots = []
@@ -279,7 +279,7 @@ set!(buoyant_model, qᵗ = qᵗ, z = 0, w_parcel = 1.0,
      p = reference_state.pressure,
      ρ = reference_state.density)
 
-buoyant_simulation = Simulation(buoyant_model; Δt=0.1, stop_time=10minutes)
+buoyant_simulation = Simulation(buoyant_model; Δt=1, stop_time=5minutes)
 
 buoyant_snapshots = []
 
@@ -491,6 +491,13 @@ ax5d = Axis(fig[10, 4];
     ylabel = "Height (km)",
     title = "Vertical velocity")
 lines!(ax5d, buoyant_w, buoyant_z / 1000; color=:black)
+
+for ax in [ax2a, ax2b, ax2c,
+           ax3a, ax3b, ax3c,
+           ax4a, ax4b, ax4c,
+           ax5a, ax5b, ax5c, ax5d]
+    ylims!(ax, 0, 5)
+end
 
 rowsize!(fig.layout, 1, Relative(0.03))
 rowsize!(fig.layout, 3, Relative(0.03))
