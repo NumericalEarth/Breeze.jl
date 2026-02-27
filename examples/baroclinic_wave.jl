@@ -211,8 +211,7 @@ simulation = Simulation(model; Δt, stop_time)
 # Progress callback:
 
 function progress(sim)
-    w = sim.model.velocities.w
-    u = sim.model.velocities.u
+    u, v, w = sim.model.velocities
     @info @sprintf("Iter %5d | t = %s | max|u| = %.1f m/s | max|w| = %.4f m/s",
                    iteration(sim), prettytime(sim), maximum(abs, u), maximum(abs, w))
     return nothing
