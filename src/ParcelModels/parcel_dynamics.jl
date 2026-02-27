@@ -571,13 +571,7 @@ function compute_parcel_tendencies!(model::ParcelModel)
     # Pass velocities for microphysics (e.g., aerosol activation uses vertical velocity)
     velocities = (; u = tendencies.Gx, v = tendencies.Gy, w = tendencies.Gz)
 
-    # Temperature guard: skip microphysics at extreme cold (T < 150 K) where
-    # saturation vapor pressure underflow produces NaN in condensation/evaporation.
-    # This occurs when a buoyancy-driven parcel reaches the domain boundary in an
-    # isentropic atmosphere with T → 0 near the top.
-    T = temperature(𝒰, constants)
-
-    if !isnothing(microphysics) && T > 150
+    if !isnothing(microphysics)
         ℳ = microphysical_state(microphysics, ρ, μ, 𝒰, velocities)
 
         # Thermodynamic and moisture tendencies from microphysics (specific, not density-weighted)
@@ -652,22 +646,9 @@ The parcel has a prognostic vertical velocity driven by buoyancy:
 `dw/dt = B`, `dz/dt = w`.
 """
 @inline function compute_vertical_velocity_tendencies!(tendencies, state, dynamics, model, ::PrognosticVerticalVelocity)
-    z = state.z
-    z_max = model.grid.Lz
-
-    # Absorbing boundary: at the domain top, zero velocity and buoyancy
-    # tendencies. This prevents the parcel from accelerating into extreme
-    # atmospheric conditions (very cold, low pressure) at the boundary
-    # where microphysics computations may produce NaN.
-    if z >= z_max
-        tendencies.Gz = zero(z)
-        tendencies.Gw = zero(z)
-    else
-        B = parcel_buoyancy(state, dynamics, model.thermodynamic_constants)
-        tendencies.Gz = state.w
-        tendencies.Gw = B
-    end
-
+    B = parcel_buoyancy(state, dynamics, model.thermodynamic_constants)
+    tendencies.Gz = state.w
+    tendencies.Gw = B
     return nothing
 end
 
@@ -802,20 +783,19 @@ copy_microphysics_prognostics(μ::NamedTuple) = deepcopy(μ)
 """
 $(TYPEDSIGNATURES)
 
-Clamp the parcel height to the vertical grid domain `[0, Lz]`.
+Check that the parcel remains within the vertical grid domain `[0, Lz]`.
 
-When the parcel reaches a boundary its vertical velocity is zeroed to
-prevent escape from the domain, which would produce unphysical
-environmental profiles (pressure, density) from extrapolation.
+Throws an error if the parcel escapes the domain, since extrapolation of
+environmental profiles (pressure, density) beyond the grid is unphysical.
 """
-@inline function clamp_to_domain!(state, grid)
+@inline function check_domain_bounds!(state, grid)
     z_max = grid.Lz
     if state.z >= z_max
-        state.z = z_max
-        state.w = zero(state.w)
+        error("Parcel reached the model top (z = $(state.z) m ≥ Lz = $(z_max) m). " *
+              "Increase the domain height or reduce the simulation stop_time.")
     elseif state.z < 0
-        state.z = zero(state.z)
-        state.w = zero(state.w)
+        error("Parcel fell below the model bottom (z = $(state.z) m < 0). " *
+              "Check initial conditions and forcing.")
     end
     return nothing
 end
@@ -854,8 +834,7 @@ function ssp_rk3_parcel_substep!(model::ParcelModel, U⁰::ParcelInitialState, �
     state.z = (1 - α) * U⁰.z + α * (state.z + Δt * tendencies.Gz)
     state.w = (1 - α) * U⁰.w + α * (state.w + Δt * tendencies.Gw)
 
-    # Clamp parcel to the vertical domain; zero w when hitting a boundary
-    clamp_to_domain!(state, model.grid)
+    check_domain_bounds!(state, model.grid)
 
     # Step specific quantities directly (exact conservation for adiabatic)
     state.qᵗ = (1 - α) * U⁰.qᵗ + α * (state.qᵗ + Δt * tendencies.Gqᵗ)
@@ -947,8 +926,7 @@ function step_parcel_state!(model::ParcelModel, Δt)
     state.z += Δt * tendencies.Gz
     state.w += Δt * tendencies.Gw
 
-    # Clamp parcel to the vertical domain; zero w when hitting a boundary
-    clamp_to_domain!(state, model.grid)
+    check_domain_bounds!(state, model.grid)
 
     # Step specific quantities forward (exact conservation for adiabatic)
     state.qᵗ += Δt * tendencies.Gqᵗ
