@@ -32,4 +32,22 @@ OceananigansTimeSteppers.TimeStepper(::Val{:AcousticSSPRungeKutta3}, args...; kw
 OceananigansTimeSteppers.TimeStepper(::Val{:AcousticRungeKutta3}, args...; kwargs...) =
     AcousticRungeKutta3(args...; kwargs...)
 
+#####
+##### Checkpointing
+#####
+
+function prognostic_state(timestepper::SSPRungeKutta3)
+    return (U⁰ = prognostic_state(timestepper.U⁰),
+            Gⁿ = prognostic_state(timestepper.Gⁿ))
+end
+
+function restore_prognostic_state!(restored::SSPRungeKutta3, from)
+    restore_prognostic_state!(restored.U⁰, from.U⁰)
+    restore_prognostic_state!(restored.Gⁿ, from.Gⁿ)
+    return restored
+end
+
+restore_prognostic_state!(::SSPRungeKutta3, ::Nothing) = nothing
+
+
 end # module
