@@ -323,7 +323,7 @@ nothing #hide
 # - Buoyancy-driven ascent: two-moment microphysics with prognostic vertical velocity
 
 set_theme!(fontsize=14, linewidth=2.5)
-fig = Figure(size=(1600, 1500))
+fig = Figure(size=(1200, 1100))
 nothing #hide
 
 # Color palette
