@@ -439,7 +439,6 @@ end
 # Input qᵛ is vapor; subtract condensate to get vapor.
 @inline function AtmosphereModels.moisture_fractions(bμp::WPNE2M, ℳ::WarmPhaseTwoMomentState, qᵛ)
     qˡ = ℳ.qᶜˡ + ℳ.qʳ
-    qᵛ = qᵛ - qˡ
     return MoistureMassFractions(qᵛ, qˡ)
 end
 
