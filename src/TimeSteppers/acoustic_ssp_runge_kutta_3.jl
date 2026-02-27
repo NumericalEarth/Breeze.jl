@@ -2,7 +2,6 @@ using Oceananigans: prognostic_fields, fields, architecture
 using Oceananigans.Utils: launch!, time_difference_seconds
 
 using Oceananigans.TimeSteppers:
-    AbstractTimeStepper,
     tick_stage!,
     update_state!,
     compute_flux_bc_tendencies!,
@@ -52,7 +51,7 @@ Fields
 - `implicit_solver`: Optional implicit solver for diffusion
 - `substepper`: AcousticSubstepper for acoustic substepping infrastructure
 """
-struct AcousticSSPRungeKutta3{FT, U0, TG, TI, AS} <: AbstractTimeStepper
+struct AcousticSSPRungeKutta3{FT, U0, TG, TI, AS} <: AbstractBreezeTimeStepper
     α¹ :: FT
     α² :: FT
     α³ :: FT

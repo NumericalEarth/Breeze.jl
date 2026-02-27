@@ -9,6 +9,7 @@ Provides time stepping schemes for AtmosphereModel, including:
 module TimeSteppers
 
 export SSPRungeKutta3, AcousticSSPRungeKutta3, AcousticRungeKutta3,
+       AbstractBreezeTimeStepper,
        store_initial_state!,
        ssp_rk3_substep!,
        maybe_initialize_state!
@@ -16,7 +17,12 @@ export SSPRungeKutta3, AcousticSSPRungeKutta3, AcousticRungeKutta3,
 using DocStringExtensions: TYPEDSIGNATURES, TYPEDEF
 using Oceananigans: AbstractModel
 using Oceananigans.TimeSteppers: TimeSteppers as OceananigansTimeSteppers,
+                                 AbstractTimeStepper,
                                  update_state!, maybe_initialize_state!
+
+import Oceananigans.TimeSteppers: prognostic_state, restore_prognostic_state!
+
+abstract type AbstractBreezeTimeStepper <: AbstractTimeStepper end
 
 include("ssp_runge_kutta_3.jl")
 include("acoustic_ssp_runge_kutta_3.jl")
@@ -36,18 +42,18 @@ OceananigansTimeSteppers.TimeStepper(::Val{:AcousticRungeKutta3}, args...; kwarg
 ##### Checkpointing
 #####
 
-function prognostic_state(timestepper::SSPRungeKutta3)
+function prognostic_state(timestepper::AbstractBreezeTimeStepper)
     return (U⁰ = prognostic_state(timestepper.U⁰),
             Gⁿ = prognostic_state(timestepper.Gⁿ))
 end
 
-function restore_prognostic_state!(restored::SSPRungeKutta3, from)
+function restore_prognostic_state!(restored::AbstractBreezeTimeStepper, from)
     restore_prognostic_state!(restored.U⁰, from.U⁰)
     restore_prognostic_state!(restored.Gⁿ, from.Gⁿ)
     return restored
 end
 
-restore_prognostic_state!(::SSPRungeKutta3, ::Nothing) = nothing
+restore_prognostic_state!(::AbstractBreezeTimeStepper, ::Nothing) = nothing
 
 
 end # module
