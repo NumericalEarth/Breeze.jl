@@ -847,10 +847,7 @@ function TimeSteppers.time_step!(model::ParcelModel, Δt; callbacks=nothing)
     # Final clock update (adjust for floating point error)
     tⁿ⁺¹ = model.clock.time + Δt * (1 - ts.α¹)  # Already advanced by α¹*Δt in stage 1
     corrected_Δt = tⁿ⁺¹ - model.clock.time
-    tick!(model.clock, corrected_Δt)
-
-    # Set last_Δt
-    model.clock.last_Δt = Δt
+    tick_stage!(model.clock, corrected_Δt, Δt)
 
     # Apply microphysics model update AFTER all RK3 stages and clock update
     # (for schemes like DCMIP2016Kessler that operate via direct state modification)
