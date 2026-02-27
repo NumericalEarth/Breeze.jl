@@ -206,7 +206,7 @@ set!(model; θ=θᵢ, u=uᵢ, qᵗ=0, ρ=ρᵢ)
 Δt = 2 # seconds
 stop_time = 10days
 
-simulation = Simulation(model; Δt, stop_time, verbose=false)
+simulation = Simulation(model; Δt, stop_time)
 
 # Progress callback:
 
