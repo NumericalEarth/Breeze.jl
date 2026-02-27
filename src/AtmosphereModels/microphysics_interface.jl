@@ -473,7 +473,7 @@ end
     qˡ = zero(qᵛ)
     qˡ += haskey(ℳ, :qᶜˡ) ? ℳ.qᶜˡ : zero(qᵛ)
     qˡ += haskey(ℳ, :qʳ) ? ℳ.qʳ : zero(qᵛ)
-    return MoistureMassFractions(max(zero(qᵛ), qᵛ - qˡ), qˡ)
+    return MoistureMassFractions(max(zero(qᵛ), qᵛ), qˡ)
 end
 
 """
