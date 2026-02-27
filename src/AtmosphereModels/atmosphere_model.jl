@@ -1,7 +1,9 @@
 using ..Thermodynamics: Thermodynamics, ThermodynamicConstants
 
 using Oceananigans: Oceananigans, AbstractModel, Center, CenterField, Clock, Field,
-                    Centered, fields, prognostic_fields, prognostic_state, restore_prognostic_state!
+                    Centered, fields, prognostic_fields, prognostic_state, restore_prognostic_state!,
+                    initialize!, Simulation
+using Oceananigans.OutputWriters: serializeproperty!
 using Oceananigans.Advection: Advection, adapt_advection_order, cell_advection_timescale
 using Oceananigans.AbstractOperations: @at
 using Oceananigans.BoundaryConditions: FieldBoundaryConditions, regularize_field_boundary_conditions
@@ -11,6 +13,8 @@ using Oceananigans.Models.HydrostaticFreeSurfaceModels: validate_momentum_advect
 using Oceananigans.TimeSteppers: TimeStepper
 using Oceananigans.TurbulenceClosures: implicit_diffusion_solver, time_discretization, build_closure_fields
 using Oceananigans.Utils: launch!, prettytime, prettykeys, with_tracers
+
+using JLD2
 
 struct DefaultValue end
 
@@ -470,3 +474,31 @@ function Oceananigans.restore_prognostic_state!(restored::AtmosphereModel, from)
 end
 
 Oceananigans.restore_prognostic_state!(::AtmosphereModel, ::Nothing) = nothing
+
+# Dict keyed by objectid(sim) to pass `write_pickup_state` from run! → initialize!
+const _write_pickup_state_filename = Dict{UInt, String}()
+
+# Allow us to dump out the picked up state for debugging
+function Oceananigans.run!(sim::Simulation{<:AtmosphereModel}; write_pickup_state=nothing, kwargs...)
+    if !isnothing(write_pickup_state)
+        _write_pickup_state_filename[objectid(sim)] = write_pickup_state
+    end
+    try
+        invoke(Oceananigans.run!, Tuple{Simulation}, sim; kwargs...)
+    finally
+        delete!(_write_pickup_state_filename, objectid(sim))
+    end
+end
+
+# Expect this to be called lazily on the first time_step!, after pickup restore and update_state!,
+# but before the first actual step
+function Oceananigans.initialize!(sim::Simulation{<:AtmosphereModel})
+    invoke(Oceananigans.initialize!, Tuple{Simulation}, sim)
+    filename = get(_write_pickup_state_filename, objectid(sim), nothing)
+    if !isnothing(filename)
+        # Following write_output!(::Checkpointer, ...)
+        JLD2.jldopen(filename, "w") do file
+            serializeproperty!(file, "simulation", prognostic_state(sim))
+        end
+    end
+end
