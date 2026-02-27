@@ -77,6 +77,7 @@ using Ocenanigans
 using Oceananigans.Units
 using Printf
 using CairoMakie
+using CUDA
 
 # ## Domain and grid
 #
