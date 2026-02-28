@@ -197,17 +197,18 @@ set!(model, θ=θᵢ, u=uᵢ, ρ=ρᵢ)
 
 # ## Time-stepping
 #
-# With split-explicit substepping, the outer time step is limited by the
-# advective CFL rather than the acoustic CFL. For the jet speed
+# With use split-explicit substepping: the outer time step is limited
+# by the advective CFL rather than the acoustic CFL. For the jet speed
 # ``U ≈ 30`` m/s and ``Δx ≈ 200`` km, the advective CFL allows
 # ``Δt ≈ 20`` s — 10× larger than the fully explicit acoustic
 # limit of ~3 s. Each outer step does extra work for the acoustic
 # substeps, yielding a net ~7× wall-clock speedup. The number of
 # acoustic substeps is computed adaptively each time step.
-# We run for 10 days to observe baroclinic wave growth.
+#
+# We run for 20 days to observe baroclinic wave growth.
 
 Δt = 20seconds
-stop_time = 10days
+stop_time = 20days
 
 simulation = Simulation(model; Δt, stop_time)
 
