@@ -8,7 +8,11 @@ using Oceananigans.TurbulenceClosures: compute_closure_fields!
 using Oceananigans.Utils: launch! # , KernelParameters
 using Oceananigans.Operators: ℑxᶠᵃᵃ, ℑyᵃᶠᵃ, ℑzᵃᵃᶠ
 
-function TimeSteppers.update_state!(model::AtmosphereModel, callbacks=[]; compute_tendencies=true)
+
+# By default, don't compute tendencies, cf. Oceananigans:
+# "After restoring from a checkpoint, skip tendency computation since the restored
+#  tendencies are already correct."
+function TimeSteppers.update_state!(model::AtmosphereModel, callbacks=[]; compute_tendencies=false)
     tracer_density_to_specific!(model) # convert tracer density to specific tracer distribution
 
     fill_halo_regions!(prognostic_fields(model), model.clock, fields(model), async=true)
