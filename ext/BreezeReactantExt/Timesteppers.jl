@@ -3,10 +3,6 @@ using Oceananigans.TimeSteppers: TimeSteppers as OceananigansTimeSteppers, time_
 using Breeze.CompressibleEquations: CompressibleDynamics
 using Breeze.TimeSteppers: SSPRungeKutta3
 
-# TODO: move maybe_initialize_state! to Oceananigans
-# (see https://github.com/CliMA/Oceananigans.jl/issues/5300)
-Breeze.TimeSteppers.maybe_initialize_state!(::AbstractModel{<:Any, <:ReactantState}, callbacks) = nothing
-
 function OceananigansTimeSteppers.first_time_step!(model::AtmosphereModel{<:CompressibleDynamics, <:Any, <:ReactantState, <:SSPRungeKutta3}, Δt)
     initialize!(model)
     update_state!(model)
