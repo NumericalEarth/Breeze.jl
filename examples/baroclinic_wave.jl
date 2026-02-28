@@ -18,19 +18,19 @@
 # frequency ``N``, giving a potential-temperature profile
 #
 # ```math
-# θ^{\rm bg}(z) = θ_0 \exp\!\left(\frac{N^2 z}{g}\right)
+# θ^{\rm b}(z) = θ_0 \exp\!\left(\frac{N^2 z}{g}\right)
 # ```
 #
 # with ``θ_0 = 300\,{\rm K}`` and ``N^2 = 10^{-4}\,{\rm s^{-2}}``.
 #
 # ### Meridional temperature gradient
 #
-# A pole-to-equator temperature difference ``Δθ_{\rm ep} = 60\,{\rm K}``
+# A pole-to-equator temperature difference ``Δθ = 60\,{\rm K}``
 # drives the baroclinic instability. The temperature gradient is confined
 # to the troposphere (below the tropopause height ``z_T = 15\,{\rm km}``):
 #
 # ```math
-# θ(φ, z) = θ^{\rm bg}(z) - Δθ_{\rm ep} \sin^2 φ \max(0,\, 1 - z/z_T)
+# θ(φ, z) = θ^{\rm b}(z) - Δθ \sin^2 φ \max(0,\, 1 - z/z_T)
 # ```
 #
 # This creates a cold pole / warm equator contrast at the surface that
@@ -48,7 +48,7 @@
 # yields a jet in geostrophic balance with the temperature field:
 #
 # ```math
-# u(φ, z) = \frac{g\, Δθ_{\rm ep}}{a\, θ_0\, Ω}\, \cos φ
+# u(φ, z) = \frac{g\, Δθ}{a\, θ_0\, Ω}\, \cos φ
 #            \times \begin{cases}
 #              z - \dfrac{z^2}{2 z_T} & z \le z_T \\[6pt]
 #              \dfrac{z_T}{2} & z > z_T
@@ -57,7 +57,7 @@
 #
 # The ``\cos φ`` factor gives a broad jet that peaks at the equator (~32 m/s)
 # and is roughly 22 m/s at 45° latitude.
-# Starting from a balanced state avoids spurious gravity-wave transients and
+# By initializing with a balanced state we avoid spurious gravity-wave transients and
 # allows baroclinic instability to develop cleanly from the perturbation.
 #
 # ### Perturbation
@@ -107,7 +107,7 @@ N² = 1e-4   # s⁻² — Brunt-Väisälä frequency squared
 
 # Background potential temperature with stable stratification:
 
-θᵇᵍ(z) = θ₀ * exp(N² * z / g)
+θᵇ(z) = θ₀ * exp(N² * z / g)
 
 # ## Model configuration
 #
@@ -123,7 +123,7 @@ coriolis = HydrostaticSphericalCoriolis()
 
 dynamics = CompressibleDynamics(ExplicitTimeStepping();
                                 surface_pressure = p₀,
-                                reference_potential_temperature = θᵇᵍ)
+                                reference_potential_temperature = θᵇ)
 
 model = AtmosphereModel(grid; dynamics, coriolis, advection=WENO())
 
@@ -133,11 +133,11 @@ model = AtmosphereModel(grid; dynamics, coriolis, advection=WENO())
 # gradient, and a localized perturbation. The zonal wind is derived analytically
 # from the thermal wind relation for the meridional gradient.
 
-Ω      = coriolis.rotation_rate               # s⁻¹ — Earth rotation rate
-a      = Oceananigans.defaults.planet_radius  # m — Earth radius
-Δθ_ep  = 60                                   # K — equator-to-pole θ difference
-z_T    = 15_000                               # m — tropopause height
-τ_bal  = g * Δθ_ep / (a * θ₀ * Ω)             # 1/s — thermal wind parameter
+Ω     = coriolis.rotation_rate               # s⁻¹ — Earth rotation rate
+a     = Oceananigans.defaults.planet_radius  # m — Earth radius
+Δθ    = 60                                   # K — equator-to-pole θ difference
+z_T   = 15_000                               # m — tropopause height
+τ_bal = g * Δθ / (a * θ₀ * Ω)                # s⁻¹ — thermal wind parameter
 
 # Perturbation parameters:
 λ_c = 90  # degrees — perturbation center longitude
@@ -156,12 +156,10 @@ end
 # Potential temperature: background + meridional gradient + perturbation:
 
 function θᵢ(λ, φ, z)
-    φ_rad  = φ * π / 180
-    θ_bg   = θᵇᵍ(z)
-    θ_merid = - Δθ_ep * sin(φ_rad)^2 * max(0, 1 - z / z_T)
+    θ_merid = - Δθ * sind(φ)^2 * max(0, 1 - z / z_T)
     r² = (λ - λ_c)^2 + (φ - φ_c)^2
     θ_pert = Δθ * exp(-r² / 2σ^2) * sin(π * z / H)
-    return θ_bg + θ_merid + θ_pert
+    return θᵇ(z) + θ_merid + θ_pert
 end
 
 # ### Hydrostatic density
@@ -186,7 +184,7 @@ function ρᵢ(λ, φ, z)
     dz = z / nsteps
     Π = 1.0 # Exner at surface (pˢᵗ = p₀)
     for n in 1:nsteps
-        zn = (n - 0.5) * dz
+        zn = (n - 1/2) * dz
         θn = θᵢ(λ, φ, zn)
         Π -= κ * g / (Rᵈ * θn) * dz
     end
@@ -194,16 +192,16 @@ function ρᵢ(λ, φ, z)
     return p₀ * Π^cᵥ_over_Rᵈ / (Rᵈ * θ)
 end
 
-set!(model; θ=θᵢ, u=uᵢ, qᵗ=0, ρ=ρᵢ)
+set!(model, θ=θᵢ, u=uᵢ, ρ=ρᵢ)
 
 # ## Time-stepping
 #
 # With explicit time stepping, the time step is limited by the acoustic CFL:
-# ``Δt ≲ Δz / c_s`` where ``c_s ≈ 340`` m/s is the speed of sound.
+# ``Δt ≲ Δz / c_s``, where ``c_s ≈ 340`` m/s is the speed of sound.
 # For ``Δz = 1`` km this gives ``Δt ≈ 3`` s. We run for 10 days to
 # observe baroclinic wave growth.
 
-Δt = 2 # seconds
+Δt = 2seconds
 stop_time = 10days
 
 simulation = Simulation(model; Δt, stop_time)
@@ -217,24 +215,24 @@ function progress(sim)
     return nothing
 end
 
-add_callback!(simulation, progress, IterationInterval(5000))
+add_callback!(simulation, progress, IterationInterval(1000))
 
 # ## Output
 #
 # We save potential-temperature perturbation (departure from background
 # stratification) and velocities for visualization.
 
-θ_field = PotentialTemperature(model)
+θ = PotentialTemperature(model)
 
-θᵇᵍ_field = CenterField(grid)
-set!(θᵇᵍ_field, (λ, φ, z) -> θᵇᵍ(z))
-θ′ = θ_field - θᵇᵍ_field
+θᵇᵍ = CenterField(grid)
+set!(θᵇᵍ, (λ, φ, z) -> θᵇ(z))
+θ′ = θ - θᵇᵍ
 
 outputs = merge(model.velocities, (; θ′))
 
 simulation.output_writers[:jld2] = JLD2Writer(model, outputs;
                                               filename = "baroclinic_wave",
-                                              schedule = TimeInterval(6hours),
+                                              schedule = TimeInterval(3hours),
                                               overwrite_existing = true)
 
 # ## Run
@@ -244,7 +242,7 @@ run!(simulation)
 # ## Visualization
 #
 # We plot the potential-temperature perturbation ``θ'`` (departure from the
-# horizontally uniform background ``θ^{\rm bg}(z)``) and the zonal wind
+# horizontally uniform background ``θ^{\rm b}(z)``) and the zonal wind
 # on the sphere. Oceananigans' Makie extension converts fields on a
 # `LatitudeLongitudeGrid` to spherical coordinates automatically when
 # plotted with `surface!` on an `Axis3`.
@@ -256,29 +254,28 @@ Nt = length(times)
 
 # Select the mid-level index for horizontal slices:
 k_mid = Nz ÷ 2
+z_mid = znode(k_mid, grid, Center())
 
 # ### Final snapshot on the sphere
 
 fig = Figure(size = (1200, 600))
 sphere_kw = (elevation = π/6, azimuth = -π/2, aspect = :data)
 
-ax1 = Axis3(fig[1, 1]; title = "θ′ at z ≈ $(Int(H/2/1000)) km, t = $(prettytime(times[Nt]))",
+ax1 = Axis3(fig[1, 1]; title = "θ′ at z = $(z_mid/1e3) km, t = $(prettytime(times[Nt]))",
             sphere_kw...)
 plt1 = surface!(ax1, view(θ′_ts[Nt], :, :, k_mid); colormap = :balance, shading = NoShading)
 hidedecorations!(ax1)
 hidespines!(ax1)
 Colorbar(fig[1, 2], plt1; label = "θ′ (K)")
 
-ax2 = Axis3(fig[1, 3]; title = "u at z ≈ $(Int(H/2/1000)) km, t = $(prettytime(times[Nt]))",
+ax2 = Axis3(fig[1, 3]; title = "u at z = $(z_mid/1e3) km, t = $(prettytime(times[Nt]))",
             sphere_kw...)
 plt2 = surface!(ax2, view(u_ts[Nt], :, :, k_mid); colormap = :balance, shading = NoShading)
 hidedecorations!(ax2)
 hidespines!(ax2)
 Colorbar(fig[1, 4], plt2; label = "u (m/s)")
 
-save("baroclinic_wave_final.png", fig)
-
-# ![](baroclinic_wave_final.png)
+current_figure()
 
 # ### Animation
 #
@@ -286,18 +283,20 @@ save("baroclinic_wave_final.png", fig)
 # the full simulation:
 
 n = Observable(1)
-anim_title = @lift "θ′ at z ≈ $(Int(H/2/1000)) km, t = $(prettytime(times[$n]))"
-
-fig_anim = Figure(size = (800, 600))
-ax = Axis3(fig_anim[1, 1]; title = anim_title, sphere_kw...)
-
 θ′_n = @lift view(θ′_ts[$n], :, :, k_mid)
+
+fig = Figure(size = (800, 600))
+
+title = @lift "θ′ at z = $(z_mid/1e3) km, t = $(prettytime(times[$n]))"
+
+ax = Axis3(fig[1, 1]; title, sphere_kw...)
 hm = surface!(ax, θ′_n; colormap = :balance, shading = NoShading)
+
 hidedecorations!(ax)
 hidespines!(ax)
-Colorbar(fig_anim[1, 2], hm; label = "θ′ (K)")
+Colorbar(fig[1, 2], hm; label = "θ′ (K)")
 
-record(fig_anim, "baroclinic_wave.mp4", 1:Nt; framerate = 8) do nn
+CairoMakie.record(fig, "baroclinic_wave.mp4", 1:Nt; framerate = 8) do nn
     n[] = nn
 end
 nothing #hide
