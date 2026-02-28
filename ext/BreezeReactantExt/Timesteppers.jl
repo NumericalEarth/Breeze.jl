@@ -1,4 +1,4 @@
-using Oceananigans: AbstractModel, ReactantState, initialize!
+using Oceananigans: ReactantState, initialize!
 using Oceananigans.TimeSteppers: TimeSteppers as OceananigansTimeSteppers, time_step!, update_state!
 using Breeze.TimeSteppers: SSPRungeKutta3
 
