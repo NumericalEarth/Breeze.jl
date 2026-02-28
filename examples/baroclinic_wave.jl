@@ -200,13 +200,13 @@ set!(model, θ=θᵢ, u=uᵢ, ρ=ρᵢ)
 # With split-explicit substepping, the outer time step is limited by the
 # advective CFL rather than the acoustic CFL. For the jet speed
 # ``U ≈ 30`` m/s and ``Δx ≈ 200`` km, the advective CFL allows
-# ``Δt ≈ 30`` s — 15× larger than the fully explicit acoustic
-# limit of ~2 s. Each outer step does extra work for the acoustic
+# ``Δt ≈ 20`` s — 10× larger than the fully explicit acoustic
+# limit of ~3 s. Each outer step does extra work for the acoustic
 # substeps, yielding a net ~7× wall-clock speedup. The number of
 # acoustic substeps is computed adaptively each time step.
 # We run for 10 days to observe baroclinic wave growth.
 
-Δt = 30 # seconds
+Δt = 20seconds
 stop_time = 10days
 
 simulation = Simulation(model; Δt, stop_time)
@@ -289,14 +289,14 @@ current_figure()
 # the full simulation:
 
 n = Observable(1)
-θ′_n = @lift view(θ′_ts[$n], :, :, k_mid)
+θ′n = @lift view(θ′_ts[$n], :, :, k_mid)
 
 fig = Figure(size = (800, 600))
 
 title = @lift "θ′ at z = $(z_mid/1e3) km, t = $(prettytime(times[$n]))"
 
 ax = Axis3(fig[1, 1]; title, sphere_kw...)
-hm = surface!(ax, θ′_n; colormap = :balance, shading = NoShading)
+hm = surface!(ax, θ′n; colormap = :balance, shading = NoShading)
 Colorbar(fig[1, 2], hm; label = "θ′ (K)")
 
 hidedecorations!(ax)
