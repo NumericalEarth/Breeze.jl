@@ -70,7 +70,7 @@ end
                                                 advection,
                                                 radiation_flux_divergence_field,
                                                 dynamics,
-                                                formulation,
+                                                formulation::LiquidIcePotentialTemperatureFormulation,
                                                 constants,
                                                 specific_moisture,
                                                 velocities,

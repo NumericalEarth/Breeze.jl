@@ -190,5 +190,5 @@ makedocs(
     ],
     linkcheck = true,
     draft = false,
-    doctest = true
+    doctest = true,
 )
