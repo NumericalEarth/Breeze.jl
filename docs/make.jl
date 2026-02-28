@@ -28,10 +28,10 @@ struct Example
 end
 
 examples = [
-    Example("Stratified dry thermal bubble", "dry_thermal_bubble", false),
-    Example("Cloudy thermal bubble", "cloudy_thermal_bubble", false),
-    Example("Cloudy Kelvin-Helmholtz instability", "cloudy_kelvin_helmholtz", false),
-    Example("Shallow cumulus convection (BOMEX)", "bomex", false),
+    Example("Stratified dry thermal bubble", "dry_thermal_bubble", true),
+    Example("Cloudy thermal bubble", "cloudy_thermal_bubble", true),
+    Example("Cloudy Kelvin-Helmholtz instability", "cloudy_kelvin_helmholtz", true),
+    Example("Shallow cumulus convection (BOMEX)", "bomex", true),
     Example("Precipitating shallow cumulus (RICO)", "rico", false),
     Example("Convection over prescribed sea surface temperature (SST)", "prescribed_sea_surface_temperature", false),
     Example("Inertia gravity wave: many time steppers", "inertia_gravity_wave", false),
