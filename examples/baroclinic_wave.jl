@@ -114,9 +114,9 @@ N² = 1e-4   # s⁻² — Brunt-Väisälä frequency squared
 # We use fully explicit compressible dynamics — all tendencies including
 # acoustic modes are advanced together, so the time step must resolve
 # sound waves (``Δt ≲ Δz / c_s ≈ 3`` s for 30 levels over 30 km).
-# The reference state uses the stratified ``θᵇᵍ(z)`` profile, so the buoyancy
-# force is computed as a perturbation ``ρ b = -g(ρ - ρ_r)`` for accuracy.
-# `HydrostaticSphericalCoriolis` retains the traditional ``f = 2Ω\sin φ``
+# The reference state uses the stratified ``θ^{\rm b}(z)`` profile, so the buoyancy
+# force is computed as a perturbation ``ρ b = -g (ρ - ρ_r)`` for accuracy.
+# `HydrostaticSphericalCoriolis` retains the traditional ``f = 2 Ω \sin φ``
 # Coriolis terms.
 
 coriolis = HydrostaticSphericalCoriolis()
@@ -148,9 +148,8 @@ z_T   = 15_000                               # m — tropopause height
 # Balanced zonal wind from the thermal wind relation:
 
 function uᵢ(λ, φ, z)
-    φ_rad = φ * π / 180
     vertical = ifelse(z ≤ z_T, z - z^2 / 2z_T, z_T / 2)
-    return τ_bal * vertical * cos(φ_rad) # m/s
+    return τ_bal * vertical * cosd(φ_rad) # m/s
 end
 
 # Potential temperature: background + meridional gradient + perturbation:
