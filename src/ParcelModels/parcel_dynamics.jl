@@ -4,7 +4,7 @@ using Oceananigans: Oceananigans, CenterField
 using Oceananigans.Architectures: on_architecture
 using Oceananigans.BoundaryConditions: fill_halo_regions!
 using Oceananigans.Fields: ZeroField, set!, interpolate
-using Oceananigans.TimeSteppers: TimeSteppers, tick!
+using Oceananigans.TimeSteppers: TimeSteppers, tick_stage!
 using Oceananigans.Utils: launch!
 
 using KernelAbstractions: @kernel, @index
@@ -835,7 +835,7 @@ function TimeSteppers.time_step!(model::ParcelModel, Δt; callbacks=nothing)
 
     # Stage 1: u^(1) = u^(0) + Δt * L(u^(0))
     ssp_rk3_parcel_substep!(model, U⁰, Δt, ts.α¹)
-    tick!(model.clock, Δt; stage=true)
+    tick_stage!(model.clock, Δt)
 
     # Stage 2: u^(2) = 3/4 u^(0) + 1/4 (u^(1) + Δt * L(u^(1)))
     ssp_rk3_parcel_substep!(model, U⁰, Δt, ts.α²)
@@ -847,10 +847,7 @@ function TimeSteppers.time_step!(model::ParcelModel, Δt; callbacks=nothing)
     # Final clock update (adjust for floating point error)
     tⁿ⁺¹ = model.clock.time + Δt * (1 - ts.α¹)  # Already advanced by α¹*Δt in stage 1
     corrected_Δt = tⁿ⁺¹ - model.clock.time
-    tick!(model.clock, corrected_Δt)
-
-    # Set last_Δt
-    model.clock.last_Δt = Δt
+    tick_stage!(model.clock, corrected_Δt, Δt)
 
     # Apply microphysics model update AFTER all RK3 stages and clock update
     # (for schemes like DCMIP2016Kessler that operate via direct state modification)

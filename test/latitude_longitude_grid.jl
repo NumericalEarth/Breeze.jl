@@ -22,14 +22,12 @@ if !@isdefined(test_float_types)
     test_float_types() = (Float64,)
 end
 
-const llg_test_arch = Oceananigans.Architectures.CPU()
-
 #####
 ##### Helper to build a LatitudeLongitudeGrid for tests
 #####
 
-function build_test_llg(; Nx=36, Ny=34, Nz=8, Lz=30kilometers)
-    return LatitudeLongitudeGrid(llg_test_arch;
+function build_test_llg(arch; Nx=36, Ny=34, Nz=8, Lz=30kilometers)
+    return LatitudeLongitudeGrid(arch;
                                  size = (Nx, Ny, Nz),
                                  halo = (5, 5, 5),
                                  longitude = (0, 360),
@@ -44,7 +42,8 @@ end
 
 @testset "Model construction on LatitudeLongitudeGrid [$(FT)]" for FT in test_float_types()
     Oceananigans.defaults.FloatType = FT
-    grid = build_test_llg()
+
+    grid = build_test_llg(default_arch)
 
     coriolis = HydrostaticSphericalCoriolis()
     dynamics = CompressibleDynamics(SplitExplicitTimeDiscretization();
@@ -63,7 +62,7 @@ end
 
 @testset "compute_acoustic_substeps on LatitudeLongitudeGrid [$(FT)]" for FT in test_float_types()
     Oceananigans.defaults.FloatType = FT
-    grid = build_test_llg()
+    grid = build_test_llg(default_arch)
     constants = ThermodynamicConstants()
 
     N = compute_acoustic_substeps(grid, 12, constants)
@@ -86,7 +85,7 @@ end
 
 @testset "Balanced state on LatitudeLongitudeGrid [$(FT)]" for FT in test_float_types()
     Oceananigans.defaults.FloatType = FT
-    grid = build_test_llg()
+    grid = build_test_llg(default_arch)
 
     coriolis = HydrostaticSphericalCoriolis()
     td = SplitExplicitTimeDiscretization(substeps = 8)
@@ -115,7 +114,7 @@ end
 
 @testset "SSP-RK3 with perturbation on LatitudeLongitudeGrid [$(FT)]" for FT in test_float_types()
     Oceananigans.defaults.FloatType = FT
-    grid = build_test_llg()
+    grid = build_test_llg(default_arch)
 
     coriolis = HydrostaticSphericalCoriolis()
     td = SplitExplicitTimeDiscretization(substeps = 8)
@@ -151,7 +150,7 @@ end
 
 @testset "WS-RK3 on LatitudeLongitudeGrid [$(FT)]" for FT in test_float_types()
     Oceananigans.defaults.FloatType = FT
-    grid = build_test_llg()
+    grid = build_test_llg(default_arch)
 
     coriolis = HydrostaticSphericalCoriolis()
     td = SplitExplicitTimeDiscretization(substeps = 8,
@@ -187,7 +186,7 @@ end
 
 @testset "Explicit CompressibleDynamics on LatitudeLongitudeGrid [$(FT)]" for FT in test_float_types()
     Oceananigans.defaults.FloatType = FT
-    grid = build_test_llg()
+    grid = build_test_llg(default_arch)
 
     coriolis = HydrostaticSphericalCoriolis()
     dynamics = CompressibleDynamics(ExplicitTimeStepping())
