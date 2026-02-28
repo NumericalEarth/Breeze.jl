@@ -33,7 +33,7 @@ examples = [
     Example("Cloudy Kelvin-Helmholtz instability", "cloudy_kelvin_helmholtz", false),
     Example("Shallow cumulus convection (BOMEX)", "bomex", false),
     Example("Precipitating shallow cumulus (RICO)", "rico", false),
-    Example("Convection over prescribed sea surface temperature (SST)", "prescribed_sea_surface_temperature", true),
+    Example("Convection over prescribed sea surface temperature (SST)", "prescribed_sea_surface_temperature", false),
     Example("Inertia gravity wave: many time steppers", "inertia_gravity_wave", false),
     Example("Single column radiation", "single_column_radiation", false),
     Example("Stationary parcel model", "stationary_parcel_model", false),
