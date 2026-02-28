@@ -297,7 +297,7 @@ fig = Figure(size = (800, 600))
 title = @lift "θ′ at z = $(z_mid/1e3) km, t = $(prettytime(times[$n]))"
 
 ax = Axis3(fig[1, 1]; title, sphere_kw...)
-hm = surface!(ax, θ′n; colormap = :balance, shading = NoShading)
+hm = surface!(ax, θ′n; colormap = :balance, colorrange = (-2, 2), shading = NoShading)
 Colorbar(fig[1, 2], hm; label = "θ′ (K)")
 
 hidedecorations!(ax)
