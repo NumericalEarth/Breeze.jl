@@ -149,7 +149,7 @@ z_T   = 15_000                               # m — tropopause height
 
 function uᵢ(λ, φ, z)
     vertical = ifelse(z ≤ z_T, z - z^2 / 2z_T, z_T / 2)
-    return τ_bal * vertical * cosd(φ_rad) # m/s
+    return τ_bal * vertical * cosd(φ) # m/s
 end
 
 # Potential temperature: background + meridional gradient + perturbation:
