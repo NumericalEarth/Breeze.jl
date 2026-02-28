@@ -189,7 +189,6 @@ makedocs(
         "Contributors guide" => "contributing.md",
     ],
     linkcheck = true,
-    linkcheck_ignore = [r"https://clima\.github\.io/OceananigansDocumentation/stable/.*"],
     draft = false,
     doctest = true,
 )
