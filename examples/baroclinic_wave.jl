@@ -157,6 +157,7 @@ end
 
 function θᵢ(λ, φ, z)
     θ_merid = - Δθ * sind(φ)^2 * max(0, 1 - z / z_T)
+
     r² = (λ - λ_c)^2 + (φ - φ_c)^2
     θ_pert = Δθ * exp(-r² / 2σ^2) * sin(π * z / H)
     return θᵇ(z) + θ_merid + θ_pert
@@ -169,10 +170,10 @@ end
 # from the surface for each column:
 #
 # ```math
-# \frac{dΠ}{dz} = -\frac{κ\, g}{R^d\, θ(φ, z)}
+# \frac{\mathrm{d}Π}{\mathrm{d}z} = -\frac{κ\, g}{R^d\, θ(φ, z)}
 # ```
 #
-# then recover ``ρ = p_0\, Π^{c_v/R^d} / (R^d\, θ)``.
+# and then recover ``ρ = p_0\, Π^{c_v/R^d} / (R^d\, θ)``.
 
 Rᵈ = dry_air_gas_constant(constants)
 cᵖ = constants.dry_air.heat_capacity
@@ -219,8 +220,8 @@ add_callback!(simulation, progress, IterationInterval(1000))
 
 # ## Output
 #
-# We save potential-temperature perturbation (departure from background
-# stratification) and velocities for visualization.
+# We save the velocities and the potential temperature perturbation (i.e., the
+# departure from background stratification) for visualization.
 
 θ = PotentialTemperature(model)
 
@@ -261,19 +262,20 @@ z_mid = znode(k_mid, grid, Center())
 fig = Figure(size = (1200, 600))
 sphere_kw = (elevation = π/6, azimuth = -π/2, aspect = :data)
 
-ax1 = Axis3(fig[1, 1]; title = "θ′ at z = $(z_mid/1e3) km, t = $(prettytime(times[Nt]))",
-            sphere_kw...)
+ax1 = Axis3(fig[1, 1];
+            title = "θ′ at z = $(z_mid/1e3) km, t = $(prettytime(times[Nt]))", sphere_kw...)
 plt1 = surface!(ax1, view(θ′_ts[Nt], :, :, k_mid); colormap = :balance, shading = NoShading)
-hidedecorations!(ax1)
-hidespines!(ax1)
 Colorbar(fig[1, 2], plt1; label = "θ′ (K)")
 
-ax2 = Axis3(fig[1, 3]; title = "u at z = $(z_mid/1e3) km, t = $(prettytime(times[Nt]))",
-            sphere_kw...)
+ax2 = Axis3(fig[1, 3];
+            title = "u at z = $(z_mid/1e3) km, t = $(prettytime(times[Nt]))", sphere_kw...)
 plt2 = surface!(ax2, view(u_ts[Nt], :, :, k_mid); colormap = :balance, shading = NoShading)
-hidedecorations!(ax2)
-hidespines!(ax2)
 Colorbar(fig[1, 4], plt2; label = "u (m/s)")
+
+for ax in (ax1, ax1)
+    hidedecorations!(ax)
+    hidespines!(ax)
+end
 
 current_figure()
 
