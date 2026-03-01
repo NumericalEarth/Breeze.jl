@@ -31,7 +31,7 @@ env:
 
 jobs:
   test:
-    name: Julia ${{ matrix.version }} - ${{ matrix.os }} - ${{ matrix.arch }} - ${{ github.event_name }}
+    name: Julia ${{ matrix.version }} - ${{ matrix.os }} - ${{ matrix.arch }} - check-bounds ${{ matrix.check-bounds }} - ${{ github.event_name }}
     runs-on: ${{ matrix.os }}
     timeout-minutes: 75
     container:
@@ -49,6 +49,8 @@ jobs:
           - windows-latest
         arch:
           - "default"
+        check-bounds:
+          - "yes"
         exclude:
           - version: "min"
             os: windows-latest
@@ -56,6 +58,13 @@ jobs:
           - version: "1.12.4"
             os: aws-linux-nvidia-gpu-l4
             arch: "default"
+            check-bounds: "yes"
+          # Necessary for testing Reactant workloads until
+          # https://github.com/EnzymeAD/Reactant.jl/issues/2347 is fixed.
+          - version: "min"
+            os: ubuntu-latest
+            arch: "default"
+            check-bounds: "auto"
     steps:
       - uses: actions/checkout@v6
       - uses: julia-actions/setup-julia@v2
@@ -103,6 +112,11 @@ jobs:
               echo "JULIA_TEST_MAXRSS_MB=${JULIA_TEST_MAXRSS_MB}" | tee -a "${GITHUB_ENV}"
           fi
           echo "runtest_test_args=${TEST_ARGS[@]}" | tee -a "${GITHUB_ENV}"
+      - name: Install earlyoom
+        if: ${{ matrix.os == 'ubuntu-latest' }}
+        shell: bash
+        run: |
+          sudo apt-get install -y earlyoom
       - name: Prepare test environment
         if: ${{ startsWith(matrix.os, 'aws-linux-nvidia-gpu-') }}
         shell: bash
@@ -118,15 +132,15 @@ jobs:
           # preference file to test directory (the global one will be ignored during the
           # tests), and add `CUDA_Runtime_jll` to the env to make the preference effective.
           cp /usr/local/share/julia/environments/breeze/LocalPreferences.toml test/.
-          julia --project=test --color=yes --check-bounds=yes -e 'using Pkg; Pkg.Registry.update(); Pkg.add("CUDA_Runtime_jll")'
+          julia --project=test --color=yes --check-bounds=${{ matrix.check-bounds }} -e 'using Pkg; Pkg.Registry.update(); Pkg.add("CUDA_Runtime_jll")'
       - name: Run tests
         shell: bash
         run: |
-          if [[ ${{ matrix.os }} == aws-linux-nvidia-gpu* ]]; then
-              # We use earlyoom only on the GPU machines
+          if [[ ${{ runner.os }} == 'Linux' ]]; then
+              # We use earlyoom only on the Linux machines
               earlyoom -m 3 -s 100 -r 300 --prefer 'julia' &
           fi
-          julia --project --color=yes --check-bounds=yes -e 'using Pkg; Pkg.test(; coverage=true, julia_args=["--check-bounds=yes", "--compiled-modules=yes", "--depwarn=yes", "-O0"], test_args=`${{ env.runtest_test_args }}`, force_latest_compatible_version=false, allow_reresolve=true)'
+          julia --project --color=yes --check-bounds=${{ matrix.check-bounds }} -e 'using Pkg; Pkg.test(; coverage=true, julia_args=["--check-bounds=${{ matrix.check-bounds }}", "--compiled-modules=yes", "--depwarn=yes", "-O0"], test_args=`${{ env.runtest_test_args }}`, force_latest_compatible_version=false, allow_reresolve=true)'
         env:
           # Don't make Reactant occupy all the GPU memory
           XLA_REACTANT_GPU_PREALLOCATE: false

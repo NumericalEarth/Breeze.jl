@@ -1,15 +1,15 @@
 using KernelAbstractions: @kernel, @index
 
-using Oceananigans: AbstractModel, prognostic_fields, fields
+using Oceananigans: prognostic_fields, fields
 using Oceananigans.TimeSteppers:
     AbstractTimeStepper,
-    tick!,
+    tick_stage!,
     update_state!,
     compute_flux_bc_tendencies!,
     step_lagrangian_particles!,
     implicit_step!
 
-using Breeze.AtmosphereModels: compute_pressure_correction!, make_pressure_correction!
+using Breeze.AtmosphereModels: AtmosphereModel, compute_pressure_correction!, make_pressure_correction!
 using Oceananigans.Utils: launch!, time_difference_seconds
 
 """
@@ -174,7 +174,7 @@ u^(3) = 1/3 u^(0) + 2/3 u^(2) + 2/3 Δt L(u^(2))
 
 where `L` above is the right-hand-side, e.g., `∂u/∂t = L(u)`.
 """
-function OceananigansTimeSteppers.time_step!(model::AbstractModel{<:SSPRungeKutta3}, Δt; callbacks=[])
+function OceananigansTimeSteppers.time_step!(model::AtmosphereModel{<:Any, <:Any, <:Any, <:SSPRungeKutta3}, Δt; callbacks=[])
     Δt == 0 && @warn "Δt == 0 may cause model blowup!"
 
     # Be paranoid and update state at iteration 0, in case run! is not used:
@@ -201,7 +201,7 @@ function OceananigansTimeSteppers.time_step!(model::AbstractModel{<:SSPRungeKutt
     compute_pressure_correction!(model, Δt)
     make_pressure_correction!(model, Δt)
 
-    tick!(model.clock, Δt; stage=true)
+    tick_stage!(model.clock, Δt)
     update_state!(model, callbacks; compute_tendencies = true)
     step_lagrangian_particles!(model, Δt)
 
@@ -231,9 +231,7 @@ function OceananigansTimeSteppers.time_step!(model::AbstractModel{<:SSPRungeKutt
 
     # Adjust final time-step to reduce floating point error accumulation
     corrected_Δt = time_difference_seconds(tⁿ⁺¹, model.clock.time)
-    tick!(model.clock, corrected_Δt)
-    model.clock.last_stage_Δt = corrected_Δt
-    model.clock.last_Δt = Δt
+    tick_stage!(model.clock, corrected_Δt, Δt)
 
     update_state!(model, callbacks; compute_tendencies = true)
     step_lagrangian_particles!(model, α³ * Δt)

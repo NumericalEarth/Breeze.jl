@@ -4,7 +4,7 @@ using Oceananigans.Utils: time_difference_seconds
 
 using Oceananigans.TimeSteppers:
     AbstractTimeStepper,
-    tick!,
+    tick_stage!,
     update_state!,
     compute_flux_bc_tendencies!,
     step_lagrangian_particles!
@@ -196,7 +196,7 @@ function OceananigansTimeSteppers.time_step!(model::AtmosphereModel{<:Compressib
     compute_flux_bc_tendencies!(model)
     acoustic_rk3_substep!(model, Δt, β₁)
 
-    tick!(model.clock, β₁ * Δt; stage=true)
+    tick_stage!(model.clock, β₁ * Δt)
     update_state!(model, callbacks; compute_tendencies = true)
     step_lagrangian_particles!(model, β₁ * Δt)
 
@@ -207,7 +207,7 @@ function OceananigansTimeSteppers.time_step!(model::AtmosphereModel{<:Compressib
     compute_flux_bc_tendencies!(model)
     acoustic_rk3_substep!(model, Δt, β₂)
 
-    tick!(model.clock, (β₂ - β₁) * Δt; stage=true)
+    tick_stage!(model.clock, (β₂ - β₁) * Δt)
     update_state!(model, callbacks; compute_tendencies = true)
     step_lagrangian_particles!(model, β₂ * Δt)
 
@@ -220,9 +220,7 @@ function OceananigansTimeSteppers.time_step!(model::AtmosphereModel{<:Compressib
 
     # Adjust final time-step
     corrected_Δt = time_difference_seconds(tⁿ⁺¹, model.clock.time)
-    tick!(model.clock, corrected_Δt)
-    model.clock.last_stage_Δt = corrected_Δt
-    model.clock.last_Δt = Δt
+    tick_stage!(model.clock, corrected_Δt, Δt)
 
     update_state!(model, callbacks; compute_tendencies = true)
     step_lagrangian_particles!(model, β₃ * Δt)
