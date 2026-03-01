@@ -18,7 +18,7 @@
 # frequency ``N``, giving a potential-temperature profile
 #
 # ```math
-# θ^{\rm b}(z) = θ_0 \exp\!\left(\frac{N^2 z}{g}\right)
+# θ^{\rm b}(z) = θ_0 \exp \left( \frac{N^2 z}{g} \right)
 # ```
 #
 # with ``θ_0 = 300\,{\rm K}`` and ``N^2 = 10^{-4}\,{\rm s^{-2}}``.
@@ -30,7 +30,7 @@
 # to the troposphere (below the tropopause height ``z_T = 15\,{\rm km}``):
 #
 # ```math
-# θ(φ, z) = θ^{\rm b}(z) - Δθ \sin^2 φ \max(0,\, 1 - z/z_T)
+# θ(φ, z) = θ^{\rm b}(z) - Δθ \sin φ \max(0,\, 1 - z/z_T)
 # ```
 #
 # This creates a cold pole / warm equator contrast at the surface that
@@ -66,8 +66,7 @@
 # ``(λ_c, φ_c) = (90°, 45°)`` seeds the instability:
 #
 # ```math
-# θ'(λ, φ, z) = Δθ \exp\!\left[-\frac{(λ - λ_c)^2 + (φ - φ_c)^2}{2σ^2}\right]
-#                \sin\!\left(\frac{π z}{H}\right)
+# θ'(λ, φ, z) = Δθ \exp \left[ -\frac{(λ - λ_c)^2 + (φ - φ_c)^2}{2σ^2} \right] \sin \left( \frac{π z}{H} \right)
 # ```
 #
 # with amplitude ``Δθ = 1\,{\rm K}`` and width ``σ = 10°``.
