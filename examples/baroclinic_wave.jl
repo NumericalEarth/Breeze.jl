@@ -30,7 +30,7 @@
 # to the troposphere (below the tropopause height ``z_T = 15\,{\rm km}``):
 #
 # ```math
-# θ(φ, z) = θ^{\rm b}(z) - Δθ \sin φ \max(0,\, 1 - z/z_T)
+# θ(φ, z) = θ^{\rm b}(z) - Δθ \sin φ \max(0, 1 - z/z_T)
 # ```
 #
 # This creates a cold pole / warm equator contrast at the surface that
@@ -42,7 +42,7 @@
 # via thermal wind balance. The thermal wind relation on the sphere,
 #
 # ```math
-# f \frac{∂u}{∂z} = -\frac{g}{a θ_0} \frac{∂θ}{∂φ}
+# f \frac{∂u}{∂z} = -\frac{g}{R θ_0} \frac{∂θ}{∂φ}
 # ```
 #
 # yields a jet in geostrophic balance with the temperature field:
@@ -55,7 +55,8 @@
 #            \end{cases}
 # ```
 #
-# where ``Δθ_{\rm ep}`` is the Equator-to-Pole potential temperature difference.
+# where ``Δθ_{\rm ep}`` is the Equator-to-Pole potential temperature difference and
+# ``R`` is the Earth's radius.
 # The ``\cos φ`` factor gives a broad jet that peaks at the equator (~32 m/s)
 # and is roughly 22 m/s at 45° latitude.
 # By initializing with a balanced state we avoid spurious gravity-wave transients and
@@ -135,10 +136,10 @@ model = AtmosphereModel(grid; dynamics, coriolis, advection=WENO())
 # from the thermal wind relation for the meridional gradient.
 
 Ω     = coriolis.rotation_rate               # s⁻¹ — Earth rotation rate
-a     = Oceananigans.defaults.planet_radius  # m — Earth radius
+R     = Oceananigans.defaults.planet_radius  # m — Earth radius
 Δθ_ep = 60                                   # K — equator-to-pole θ difference
 z_T   = 15_000                               # m — tropopause height
-τ_bal = a * θ₀ * Ω / (g * Δθ)                # s — thermal wind parameter timescale
+τ_bal = R * θ₀ * Ω / (g * Δθ)                # s — thermal wind parameter timescale
 
 # Perturbation parameters:
 λ_c = 90  # degrees — perturbation center longitude
@@ -304,7 +305,7 @@ hm1 = surface!(ax1, θ′n; colormap = :balance, colorrange = (-2, 2), shading =
 Colorbar(fig[1, 2], hm1; label = "θ′ (K)")
 
 ax2 = Axis3(fig[1, 3]; title = "w", sphere_kw...)
-hm2 = surface!(ax2, wn; colormap = :balance, colorrange = (-0.2, 0.2), shading = NoShading)
+hm2 = surface!(ax2, wn; colormap = :balance, colorrange = (-2, 2), shading = NoShading)
 Colorbar(fig[1, 4], hm2; label = "w (m/s)")
 
 fig[0, :] = Label(fig, title, fontsize=22, tellwidth=false)
