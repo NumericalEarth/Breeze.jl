@@ -48,13 +48,14 @@
 # yields a jet in geostrophic balance with the temperature field:
 #
 # ```math
-# u(φ, z) = \frac{g\, Δθ}{a\, θ_0\, Ω}\, \cos φ
+# u(φ, z) = \frac{g\, Δθ_{\rm ep}}{a\, θ_0\, Ω}\, \cos φ
 #            \times \begin{cases}
 #              \dfrac{z}{2} \left( 2 - \dfrac{z}{z_T} \right) & z \le z_T \\[6pt]
 #              \dfrac{z_T}{2} & z > z_T
 #            \end{cases}
 # ```
 #
+# where ``Δθ_{\rm ep}`` is the Equator-to-Pole potential temperature difference.
 # The ``\cos φ`` factor gives a broad jet that peaks at the equator (~32 m/s)
 # and is roughly 22 m/s at 45° latitude.
 # By initializing with a balanced state we avoid spurious gravity-wave transients and
