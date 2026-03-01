@@ -157,7 +157,7 @@ using RRTMGP
     @testset "Fixed cosine zenith angle [$(FT)]" for FT in test_float_types()
         Oceananigans.defaults.FloatType = FT
         Nz = 8
-        grid = RectilinearGrid(default_arch; size=Nz, x=(0, 100kilometers), y=(0, 100kilometers),
+        grid = RectilinearGrid(default_arch; size=(4, 4, Nz), x=(0, 100kilometers), y=(0, 100kilometers),
                                z=(0, 10kilometers), topology=(Periodic, Periodic, Bounded))
 
         constants = ThermodynamicConstants()
