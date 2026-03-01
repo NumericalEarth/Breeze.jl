@@ -135,7 +135,7 @@ model = AtmosphereModel(grid; dynamics, coriolis, advection=WENO())
 
 Ω     = coriolis.rotation_rate               # s⁻¹ — Earth rotation rate
 a     = Oceananigans.defaults.planet_radius  # m — Earth radius
-Δθ    = 60                                   # K — equator-to-pole θ difference
+Δθ_ep = 60                                   # K — equator-to-pole θ difference
 z_T   = 15_000                               # m — tropopause height
 τ_bal = a * θ₀ * Ω / (g * Δθ)                # s — thermal wind parameter timescale
 
@@ -155,7 +155,7 @@ end
 # Potential temperature: background + meridional gradient + perturbation:
 
 function θᵢ(λ, φ, z)
-    θ_merid = - Δθ * sind(φ) * max(0, 1 - z / z_T)
+    θ_merid = - Δθ_ep * sind(φ) * max(0, 1 - z / z_T)
 
     r² = (λ - λ_c)^2 + (φ - φ_c)^2
     θ_pert = Δθ * exp(-r² / 2σ^2) * sin(π * z / H)
@@ -237,7 +237,7 @@ outputs = merge(model.velocities, (; θ′))
 
 simulation.output_writers[:jld2] = JLD2Writer(model, outputs;
                                               filename = "baroclinic_wave",
-                                              schedule = TimeInterval(3hours),
+                                              schedule = TimeInterval(1hours),
                                               overwrite_existing = true)
 
 # ## Run
@@ -269,13 +269,13 @@ sphere_kw = (elevation = π/6, azimuth = -π/2, aspect = :data)
 
 ax1 = Axis3(fig[1, 1];
             title = "θ′ at z = $(z_mid/1e3) km, t = $(prettytime(times[Nt]))", sphere_kw...)
-plt1 = surface!(ax1, view(θ′_ts[Nt], :, :, k_mid); colormap = :balance, shading = NoShading)
-Colorbar(fig[1, 2], plt1; label = "θ′ (K)")
+hm1 = surface!(ax1, view(θ′_ts[Nt], :, :, k_mid); colormap = :balance, shading = NoShading)
+Colorbar(fig[1, 2], hm1; label = "θ′ (K)")
 
 ax2 = Axis3(fig[1, 3];
             title = "u at z = $(z_mid/1e3) km, t = $(prettytime(times[Nt]))", sphere_kw...)
-plt2 = surface!(ax2, view(u_ts[Nt], :, :, k_mid); colormap = :speed, shading = NoShading)
-Colorbar(fig[1, 4], plt2; label = "u (m/s)")
+hm2 = surface!(ax2, view(u_ts[Nt], :, :, k_mid); colormap = :speed, shading = NoShading)
+Colorbar(fig[1, 4], hm2; label = "u (m/s)")
 
 for ax in (ax1, ax2)
     hidedecorations!(ax)
@@ -303,7 +303,7 @@ hm1 = surface!(ax1, θ′n; colormap = :balance, colorrange = (-2, 2), shading =
 Colorbar(fig[1, 2], hm1; label = "θ′ (K)")
 
 ax2 = Axis3(fig[1, 3]; title = "w", sphere_kw...)
-hm2 = surface!(ax2, wn; colormap = :balance, colorrange = (-0.5, 0.5), shading = NoShading)
+hm2 = surface!(ax2, wn; colormap = :balance, colorrange = (-0.2, 0.2), shading = NoShading)
 Colorbar(fig[1, 4], hm2; label = "w (m/s)")
 
 fig[0, :] = Label(fig, title, fontsize=22, tellwidth=false)
@@ -313,7 +313,7 @@ for ax in (ax1, ax2)
     hidespines!(ax)
 end
 
-CairoMakie.record(fig, "baroclinic_wave.mp4", 1:Nt; framerate = 8) do nn
+CairoMakie.record(fig, "baroclinic_wave.mp4", 1:Nt; framerate = 12) do nn
     n[] = nn
 end
 nothing #hide
