@@ -39,6 +39,12 @@ export
     update_microphysical_auxiliaries!,
     initial_aerosol_number,
 
+    # Open boundary mass flux correction
+    BoundaryMassFluxes,
+    NoBoundaryMassFluxes,
+    initialize_boundary_mass_fluxes,
+    enforce_open_boundary_mass_conservation!,
+
     # Interface functions (extended by BoundaryConditions and Forcings)
     materialize_atmosphere_model_boundary_conditions,
     materialize_atmosphere_model_forcing,
@@ -100,6 +106,7 @@ include("atmosphere_model.jl")
 ##### Remaining AtmosphereModel components
 #####
 
+include("boundary_mass_fluxes.jl")
 include("atmosphere_model_buoyancy.jl")
 include("radiation_interface.jl")
 include("dynamics_kernel_functions.jl")
