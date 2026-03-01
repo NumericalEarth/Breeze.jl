@@ -50,7 +50,7 @@
 # ```math
 # u(φ, z) = \frac{g\, Δθ}{a\, θ_0\, Ω}\, \cos φ
 #            \times \begin{cases}
-#              z - \dfrac{z^2}{2 z_T} & z \le z_T \\[6pt]
+#              \dfrac{z}{2} \left( 2 - \dfrac{z}{z_T} \right) & z \le z_T \\[6pt]
 #              \dfrac{z_T}{2} & z > z_T
 #            \end{cases}
 # ```
@@ -66,7 +66,7 @@
 # ``(λ_c, φ_c) = (90°, 45°)`` seeds the instability:
 #
 # ```math
-# θ'(λ, φ, z) = Δθ \exp\!\left(-\frac{(λ - λ_c)^2 + (φ - φ_c)^2}{2σ^2}\right)
+# θ'(λ, φ, z) = Δθ \exp\!\left[-\frac{(λ - λ_c)^2 + (φ - φ_c)^2}{2σ^2}\right]
 #                \sin\!\left(\frac{π z}{H}\right)
 # ```
 #
@@ -166,14 +166,14 @@ end
 # ### Hydrostatic density
 #
 # The density must be in hydrostatic balance with the full ``θ(φ, z)`` field
-# (not just the 1D reference profile). We integrate the Exner function
-# from the surface for each column:
+# (not just the 1D reference profile). We integrate:
 #
 # ```math
-# \frac{\mathrm{d}Π}{\mathrm{d}z} = -\frac{κ\, g}{R^d\, θ(φ, z)}
+# \frac{\mathrm{d}Π}{\mathrm{d}z} = -\frac{κ\, g}{R^d\, θ}
 # ```
 #
-# and then recover ``ρ = p_0\, Π^{c_v/R^d} / (R^d\, θ)``.
+# from the surface up to height ``z`` for each column to get Exner function ``Π``
+# and then recover the density via ``ρ = p_0\, Π^{c_v/R^d} / (R^d\, θ)``.
 
 Rᵈ = dry_air_gas_constant(constants)
 cᵖ = constants.dry_air.heat_capacity
@@ -254,7 +254,7 @@ run!(simulation)
 # plotted with `surface!` on an `Axis3`.
 
 θ′_ts = FieldTimeSeries("baroclinic_wave.jld2", "θ′")
-u_ts  = FieldTimeSeries("baroclinic_wave.jld2", "u")
+u_ts = FieldTimeSeries("baroclinic_wave.jld2", "u")
 times = θ′_ts.times
 Nt = length(times)
 
@@ -277,7 +277,7 @@ ax2 = Axis3(fig[1, 3];
 plt2 = surface!(ax2, view(u_ts[Nt], :, :, k_mid); colormap = :balance, shading = NoShading)
 Colorbar(fig[1, 4], plt2; label = "u (m/s)")
 
-for ax in (ax1, ax1)
+for ax in (ax1, ax2)
     hidedecorations!(ax)
     hidespines!(ax)
 end
