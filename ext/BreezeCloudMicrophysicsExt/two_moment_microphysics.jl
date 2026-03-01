@@ -753,7 +753,7 @@ Uses the maximum supersaturation to determine which aerosol modes activate.
         κ̄ = mean_hygroscopicity(ap, mode)
 
         # Critical supersaturation for mode (Eq. 9 in ARG 2000)
-        Sᶜʳⁱᵗ = 2 / safe_sqrt(κ̄) * safe_sqrt(A / 3 / mode.r_dry)^3
+        Sᶜʳⁱᵗ = 2 / clipped_sqrt(κ̄) * clipped_sqrt(A / 3 / mode.r_dry)^3
 
         # Activated fraction for this mode (Eq. 7 in ARG 2000)
         ϕ = 2 * log(Sᶜʳⁱᵗ / Sᵐᵃˣ) / 3 / sqrt(2) / log(mode.stdev)

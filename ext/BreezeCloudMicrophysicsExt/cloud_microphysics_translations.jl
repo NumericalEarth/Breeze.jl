@@ -440,7 +440,7 @@ end
 # Safe math helpers for the ARG 2000 parameterization.
 # Unphysical thermodynamic states (from advection errors) can produce
 # negative intermediate values that would crash sqrt or fractional ^.
-@inline safe_sqrt(x::FT) where FT = sqrt(max(zero(FT), x))
+@inline clipped_sqrt(x::FT) where FT = sqrt(max(zero(FT), x))
 
 # Helper function to compute Sᵐᵃˣ
 # Dispatches on aerosol_activation type to enable different activation schemes
@@ -457,7 +457,7 @@ end
     # Activation should not occur in that case.
     α⁺ = max(zero(FT), α)
 
-    ζ = 2A / 3 * safe_sqrt(α⁺ * w⁺ / G)
+    ζ = 2A / 3 * clipped_sqrt(α⁺ * w⁺ / G)
 
     # Compute critical supersaturation and contribution from each mode
     Σ_inv_Sᵐᵃˣ² = zero(FT)
@@ -467,20 +467,20 @@ end
         κ̄ = mean_hygroscopicity(ap, mode)
 
         # Critical supersaturation (Eq. 9 in ARG 2000)
-        Sᶜʳⁱᵗ = 2 / safe_sqrt(κ̄) * safe_sqrt(A / (3 * mode.r_dry))^3
+        Sᶜʳⁱᵗ = 2 / clipped_sqrt(κ̄) * clipped_sqrt(A / (3 * mode.r_dry))^3
 
         # Fitting parameters (fᵥ and gᵥ are ventilation-related)
         fᵥ = ap.f1 * exp(ap.f2 * log(mode.stdev)^2)
         gᵥ = ap.g1 + ap.g2 * log(mode.stdev)
 
         # η parameter
-        η = safe_sqrt(α⁺ * w⁺ / G)^3 / (2π * ρᴸ * γ * mode.N)
+        η = clipped_sqrt(α⁺ * w⁺ / G)^3 / (2π * ρᴸ * γ * mode.N)
 
         # Contribution to 1/Sᵐᵃˣ² (Eq. 6 in ARG 2000)
-        Σ_inv_Sᵐᵃˣ² += 1 / Sᶜʳⁱᵗ^2 * (fᵥ * safe_sqrt(ζ / η)^3 + gᵥ * safe_sqrt(Sᶜʳⁱᵗ^2 / (η + 3ζ)))
+        Σ_inv_Sᵐᵃˣ² += 1 / Sᶜʳⁱᵗ^2 * (fᵥ * clipped_sqrt(ζ / η)^3 + gᵥ * clipped_sqrt(Sᶜʳⁱᵗ^2 / (η + 3ζ)))
     end
 
-    Sᵐᵃˣ_computed = 1 / safe_sqrt(Σ_inv_Sᵐᵃˣ²)
+    Sᵐᵃˣ_computed = 1 / clipped_sqrt(Σ_inv_Sᵐᵃˣ²)
 
     # Return 0 for no updraft (w <= 0) or unphysical state (α <= 0)
     return ifelse((w > zero(FT)) & (α > zero(FT)), Sᵐᵃˣ_computed, zero(FT))
