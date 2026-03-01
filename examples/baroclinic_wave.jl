@@ -207,7 +207,7 @@ set!(model, θ=θᵢ, u=uᵢ, ρ=ρᵢ)
 # We run for 20 days to observe baroclinic wave growth.
 
 Δt = 2seconds
-stop_time = 20days
+stop_time = 10days
 
 simulation = Simulation(model; Δt, stop_time)
 
@@ -254,6 +254,7 @@ run!(simulation)
 
 θ′_ts = FieldTimeSeries("baroclinic_wave.jld2", "θ′")
 u_ts = FieldTimeSeries("baroclinic_wave.jld2", "u")
+w_ts = FieldTimeSeries("baroclinic_wave.jld2", "w")
 times = θ′_ts.times
 Nt = length(times)
 
@@ -273,7 +274,7 @@ Colorbar(fig[1, 2], plt1; label = "θ′ (K)")
 
 ax2 = Axis3(fig[1, 3];
             title = "u at z = $(z_mid/1e3) km, t = $(prettytime(times[Nt]))", sphere_kw...)
-plt2 = surface!(ax2, view(u_ts[Nt], :, :, k_mid); colormap = :balance, shading = NoShading)
+plt2 = surface!(ax2, view(u_ts[Nt], :, :, k_mid); colormap = :speed, shading = NoShading)
 Colorbar(fig[1, 4], plt2; label = "u (m/s)")
 
 for ax in (ax1, ax2)
@@ -285,22 +286,32 @@ current_figure()
 
 # ### Animation
 #
-# Animate the potential-temperature perturbation on the sphere over
-# the full simulation:
+# Animate the potential-temperature perturbation and the vertical velocity
+# on the sphere over the full simulation:
 
 n = Observable(1)
 θ′n = @lift view(θ′_ts[$n], :, :, k_mid)
+wn = @lift view(w_ts[$n], :, :, k_mid)
 
-fig = Figure(size = (800, 600))
+fig = Figure(size = (1200, 600))
+sphere_kw = (elevation = π/6, azimuth = -π/2, aspect = :data)
 
-title = @lift "θ′ at z = $(z_mid/1e3) km, t = $(prettytime(times[$n]))"
+title = @lift "z = $(z_mid/1e3) km, t = $(prettytime(times[$n]))"
 
-ax = Axis3(fig[1, 1]; title, sphere_kw...)
-hm = surface!(ax, θ′n; colormap = :balance, colorrange = (-2, 2), shading = NoShading)
-Colorbar(fig[1, 2], hm; label = "θ′ (K)")
+ax1 = Axis3(fig[1, 1]; title = "θ′", sphere_kw...)
+hm1 = surface!(ax1, θ′n; colormap = :balance, colorrange = (-2, 2), shading = NoShading)
+Colorbar(fig[1, 2], hm1; label = "θ′ (K)")
 
-hidedecorations!(ax)
-hidespines!(ax)
+ax2 = Axis3(fig[1, 3]; title = "w", sphere_kw...)
+hm2 = surface!(ax2, wn; colormap = :balance, colorrange = (-0.5, 0.5), shading = NoShading)
+Colorbar(fig[1, 4], hm2; label = "w (m/s)")
+
+fig[0, :] = Label(fig, title, fontsize=22, tellwidth=false)
+
+for ax in (ax1, ax2)
+    hidedecorations!(ax)
+    hidespines!(ax)
+end
 
 CairoMakie.record(fig, "baroclinic_wave.mp4", 1:Nt; framerate = 8) do nn
     n[] = nn
