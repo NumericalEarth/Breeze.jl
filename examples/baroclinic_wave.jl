@@ -170,7 +170,7 @@ end
 # (not just the 1D reference profile). We integrate:
 #
 # ```math
-# \frac{\mathrm{d}Π}{\mathrm{d}z} = -\frac{κ\, g}{R^d\, θ}
+# \frac{∂Π}{∂z} = -\frac{κ\, g}{R^d\, θ}
 # ```
 #
 # from the surface up to height ``z`` for each column to get Exner function ``Π``
@@ -209,7 +209,7 @@ set!(model, θ=θᵢ, u=uᵢ, ρ=ρᵢ)
 # We run for 20 days to observe baroclinic wave growth.
 
 Δt = 2seconds
-stop_time = 10days
+stop_time = 20days
 
 simulation = Simulation(model; Δt, stop_time)
 
@@ -305,7 +305,7 @@ hm1 = surface!(ax1, θ′n; colormap = :balance, colorrange = (-2, 2), shading =
 Colorbar(fig[1, 2], hm1; label = "θ′ (K)")
 
 ax2 = Axis3(fig[1, 3]; title = "w", sphere_kw...)
-hm2 = surface!(ax2, wn; colormap = :balance, colorrange = (-2, 2), shading = NoShading)
+hm2 = surface!(ax2, wn; colormap = :balance, colorrange = (-1, 1), shading = NoShading)
 Colorbar(fig[1, 4], hm2; label = "w (m/s)")
 
 fig[0, :] = Label(fig, title, fontsize=22, tellwidth=false)
