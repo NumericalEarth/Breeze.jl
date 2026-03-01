@@ -8,7 +8,7 @@
 # instability, producing growing Rossby waves over roughly ten days.
 #
 # This is the first spherical-geometry example in Breeze, exercising
-# `CompressibleDynamics` with `SplitExplicitTimeDiscretization`
+# `CompressibleDynamics` with `ExplicitTimeStepping`
 # and `HydrostaticSphericalCoriolis` on a latitude-longitude grid spanning
 # 85° S to 85° N.
 #
@@ -122,7 +122,7 @@ N² = 1e-4   # s⁻² — Brunt-Väisälä frequency squared
 
 coriolis = HydrostaticSphericalCoriolis()
 
-dynamics = CompressibleDynamics(SplitExplicitTimeDiscretization();
+dynamics = CompressibleDynamics(ExplicitTimeStepping();
                                 surface_pressure = p₀,
                                 reference_potential_temperature = θᵇ)
 
@@ -138,7 +138,7 @@ model = AtmosphereModel(grid; dynamics, coriolis, advection=WENO())
 a     = Oceananigans.defaults.planet_radius  # m — Earth radius
 Δθ    = 60                                   # K — equator-to-pole θ difference
 z_T   = 15_000                               # m — tropopause height
-τ_bal = g * Δθ / (a * θ₀ * Ω)                # s⁻¹ — thermal wind parameter
+τ_bal = a * θ₀ * Ω / (g * Δθ)                # s — thermal wind parameter timescale
 
 # Perturbation parameters:
 λ_c = 90  # degrees — perturbation center longitude
@@ -149,14 +149,14 @@ z_T   = 15_000                               # m — tropopause height
 # Balanced zonal wind from the thermal wind relation:
 
 function uᵢ(λ, φ, z)
-    vertical = ifelse(z ≤ z_T, z - z^2 / 2z_T, z_T / 2)
-    return τ_bal * vertical * cosd(φ) # m/s
+    vertical_scale = ifelse(z ≤ z_T, z / 2 * (2 - z / z_T), z_T / 2)
+    return (vertical_scale / τ_bal) * cosd(φ) # m/s
 end
 
 # Potential temperature: background + meridional gradient + perturbation:
 
 function θᵢ(λ, φ, z)
-    θ_merid = - Δθ * sind(φ)^2 * max(0, 1 - z / z_T)
+    θ_merid = - Δθ * sind(φ) * max(0, 1 - z / z_T)
 
     r² = (λ - λ_c)^2 + (φ - φ_c)^2
     θ_pert = Δθ * exp(-r² / 2σ^2) * sin(π * z / H)
@@ -207,7 +207,7 @@ set!(model, θ=θᵢ, u=uᵢ, ρ=ρᵢ)
 #
 # We run for 20 days to observe baroclinic wave growth.
 
-Δt = 20seconds
+Δt = 2seconds
 stop_time = 20days
 
 simulation = Simulation(model; Δt, stop_time)
