@@ -32,9 +32,6 @@ end
 # Leave as-is: coordinate likely inferred from grid in kernels
 maybe_infer_coordinate(coordinate, grid) = coordinate
 
-# For fixed zenith angle (RCEMIP-style perpetual insolation), store the cos(zenith)
-maybe_infer_coordinate(cos_θ::Number, grid) = cos_θ
-
 # TODO: blacklist invalid coordinate/grid combinations
 
 """
@@ -48,8 +45,6 @@ Construct a gray atmosphere radiative transfer model for the given grid.
 - `coordinate`: Solar geometry specification. Can be:
   - `nothing` (default): extracts location from grid coordinates for time-varying zenith angle
   - `(longitude, latitude)` tuple in degrees: uses DateTime clock for time-varying zenith angle
-  - A `Number` representing fixed `cos(zenith_angle)`: perpetual insolation for RCE experiments
-    (e.g., `cosd(42.04) ≈ 0.743` for RCEMIP protocol)
 - `epoch`: Optional epoch for computing time with floating-point clocks.
 - `surface_emissivity`: Surface emissivity, 0-1 (default: 0.98). Scalar.
 - `surface_albedo`: Surface albedo, 0-1. Can be scalar or 2D field.
@@ -129,15 +124,13 @@ function AtmosphereModels.RadiativeTransferModel(grid::AbstractGrid,
                                              rrtmgp_T₀,
                                              optical_thickness)
 
-    # Surface emissivity for the longwave solver
-    rrtmgp_ε₀ = ArrayType{FT}(undef, Nc)
-
-    # Shortwave solver objects
-    cos_zenith = ArrayType{FT}(undef, Nc) # Cosine of the solar zenith angle
-    rrtmgp_αb₀ = ArrayType{FT}(undef, Nc)  # Direct surface albedo
-    rrtmgp_αw₀ = ArrayType{FT}(undef, Nc)  # Diffuse surface albedo
-    rrtmgp_ℐ₀ = ArrayType{FT}(undef, Nc)  # Top-of-atmosphere solar flux
-    rrtmgp_ε₀ = ArrayType{FT}(undef, Nc)  # Surface emissivity
+    # Boundary conditions: RRTMGP expects (nbnd, ncol) for surface properties.
+    # Gray optics has nbnd = 1.
+    cos_zenith = ArrayType{FT}(undef, Nc)
+    rrtmgp_ℐ₀ = ArrayType{FT}(undef, Nc)
+    rrtmgp_ε₀ = ArrayType{FT}(undef, 1, Nc)
+    rrtmgp_αb₀ = ArrayType{FT}(undef, 1, Nc)
+    rrtmgp_αw₀ = ArrayType{FT}(undef, 1, Nc)
 
     rrtmgp_ℐ₀ .= convert(FT, solar_constant)  # Top-of-atmosphere solar flux
 
@@ -205,8 +198,7 @@ end
 
 @inline rrtmgp_column_index(i, j, Nx) = i + (j - 1) * Nx
 
-function set_latitude!(rrtmgp_latitude, coordinate, grid)
-    # TODO: could launch kernel over xy to support ensembles of columns
+function set_latitude!(rrtmgp_latitude, coordinate::Tuple, grid)
     φ = coordinate[2]
     rrtmgp_latitude .= φ
     return nothing
@@ -436,20 +428,6 @@ Does not support anything but single-column grids for now.
 function update_solar_zenith_angle!(sw_solver, coordinate::Tuple, grid, datetime)
     cos_θz = cos_solar_zenith_angle(datetime, coordinate...)
     sw_solver.bcs.cos_zenith .= max.(cos_θz, 0)
-    return nothing
-end
-
-"""
-$(TYPEDSIGNATURES)
-
-Update the solar zenith angle for perpetual/fixed insolation (RCEMIP-style).
-
-When `cos_zenith_angle` is a `Number`, it represents a constant cosine of the
-solar zenith angle that does not vary with time. This is used for radiative-convective
-equilibrium experiments with perpetual insolation.
-"""
-function update_solar_zenith_angle!(sw_solver, cos_zenith_angle::Number, grid, datetime)
-    sw_solver.bcs.cos_zenith .= max(cos_zenith_angle, 0)
     return nothing
 end
 

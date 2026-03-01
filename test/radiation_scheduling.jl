@@ -154,7 +154,44 @@ using RRTMGP
         @allowscalar @test ℐ_lw_up[1, 1, 1] > 100  # Radiation fired
     end
 
-    # TODO: Add fixed cosine zenith angle test once the coordinate::Number
-    # code path is validated with multi-column grids (currently hits a
-    # BoundsError in RRTMGP state update for Nx*Ny > 1 grids).
+    @testset "Multi-column grid [$(FT)]" for FT in test_float_types()
+        Oceananigans.defaults.FloatType = FT
+        Nx, Ny, Nz = 4, 4, 8
+        grid = RectilinearGrid(default_arch; size=(Nx, Ny, Nz),
+                               x=(0, 100kilometers), y=(0, 100kilometers), z=(0, 10kilometers),
+                               topology=(Periodic, Periodic, Bounded))
+
+        constants = ThermodynamicConstants()
+        reference_state = ReferenceState(grid, constants;
+                                         surface_pressure = 101325,
+                                         potential_temperature = 300)
+        dynamics = AnelasticDynamics(reference_state)
+
+        radiation = RadiativeTransferModel(grid, GrayOptics(), constants;
+                                           surface_temperature = 300,
+                                           surface_emissivity = 0.98,
+                                           surface_albedo = 0.1,
+                                           coordinate = (FT(0), FT(45)))
+
+        clock = Clock(time=DateTime(2024, 6, 21, 16, 0, 0))
+        model = AtmosphereModel(grid; clock, dynamics,
+                                formulation = :LiquidIcePotentialTemperature, radiation)
+
+        θ(z) = 300 + FT(0.01) * z / 1000
+        qᵗ(z) = FT(0.015) * exp(-z / 2500)
+        set!(model; θ=θ, qᵗ=qᵗ)
+
+        ℐ_lw_up = radiation.upwelling_longwave_flux
+        ℐ_sw_dn = radiation.downwelling_shortwave_flux
+
+        # Longwave should be computed for all columns
+        @allowscalar @test ℐ_lw_up[1, 1, 1] > 100
+
+        # Shortwave should be non-zero (sun above horizon at 45°N summer solstice)
+        @allowscalar @test ℐ_sw_dn[1, 1, Nz + 1] < 0  # Downwelling is negative
+
+        # All columns should have the same fluxes (uniform ICs, same coordinate)
+        lw_array = Array(interior(ℐ_lw_up))
+        @test all(lw_array[:, :, 1] .== lw_array[1, 1, 1])
+    end
 end

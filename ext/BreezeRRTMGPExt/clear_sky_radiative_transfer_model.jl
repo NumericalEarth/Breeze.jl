@@ -40,8 +40,6 @@ RRTMGP loads lookup tables from netCDF via an extension.
 - `coordinate`: Solar geometry specification. Can be:
   - `nothing` (default): extracts location from grid coordinates for time-varying zenith angle
   - `(longitude, latitude)` tuple in degrees: uses DateTime clock for time-varying zenith angle
-  - A `Number` representing fixed `cos(zenith_angle)`: perpetual insolation for RCE experiments
-    (e.g., `cosd(42.04) ≈ 0.743` for RCEMIP protocol)
 - `epoch`: Optional epoch for computing time with floating-point clocks.
 - `surface_emissivity`: Surface emissivity, 0-1 (default: 0.98). Scalar.
 - `surface_albedo`: Surface albedo, 0-1. Can be scalar or 2D field.
