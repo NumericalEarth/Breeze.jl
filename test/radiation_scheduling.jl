@@ -177,8 +177,8 @@ using RRTMGP
         model = AtmosphereModel(grid; clock, dynamics,
                                 formulation = :LiquidIcePotentialTemperature, radiation)
 
-        θ(z) = 300 + FT(0.01) * z / 1000
-        qᵗ(z) = FT(0.015) * exp(-z / 2500)
+        θ(x, y, z) = 300 + FT(0.01) * z / 1000
+        qᵗ(x, y, z) = FT(0.015) * exp(-z / 2500)
         set!(model; θ=θ, qᵗ=qᵗ)
 
         ℐ_lw_up = radiation.upwelling_longwave_flux
