@@ -202,8 +202,9 @@ nothing #hide
 
 microphysics = SaturationAdjustment(equilibrium=WarmPhaseEquilibrium())
 advection = WENO(order=9)
+closure = DynamicSmagorinsky(schedule=IterationInterval(5))
 
-model = AtmosphereModel(grid; dynamics, coriolis, microphysics, advection, forcing,
+model = AtmosphereModel(grid; dynamics, coriolis, microphysics, advection, forcing, closure,
                         boundary_conditions = (ρθ=ρθ_bcs, ρqᵗ=ρqᵗ_bcs, ρu=ρu_bcs, ρv=ρv_bcs))
 
 # ## Initial conditions
