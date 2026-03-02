@@ -462,7 +462,6 @@ The default implementation for `Nothing` microphysics assumes all moisture is va
 # Input qᵛ is vapor; used with condensate to build moisture fractions.
 @inline function moisture_fractions(microphysics, ℳ::WarmRainState, qᵛ)
     qˡ = ℳ.qᶜˡ + ℳ.qʳ
-    qᵛ = max(zero(qᵛ), qᵛ - qˡ)
     return MoistureMassFractions(qᵛ, qˡ)
 end
 
