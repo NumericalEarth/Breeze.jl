@@ -24,7 +24,8 @@ using Breeze
 using Oceananigans: Oceananigans
 using Oceananigans.Units
 using Oceananigans.OutputReaders: FieldTimeSeries
-using Breeze: WENO, TetensFormula, SaturationAdjustment, WarmPhaseEquilibrium
+using Breeze: WENO, TetensFormula, SaturationAdjustment, WarmPhaseEquilibrium, SmagorinskyLilly
+using Oceananigans.TurbulenceClosures: VerticallyImplicitTimeDiscretization, VerticalScalarDiffusivity
 using CloudMicrophysics
 BreezeCloudMicrophysicsExt = Base.get_extension(Breeze, :BreezeCloudMicrophysicsExt)
 using .BreezeCloudMicrophysicsExt: OneMomentCloudMicrophysics
@@ -34,39 +35,51 @@ using Random
 using CUDA
 using CSV
 using DataFrames
+using DataInterpolations: CubicSpline
 
 Random.seed!(42)
 Random.TaskLocalRNG()
 
-###########################
-# Output directory
-###########################
+# ## Output directory
+
 
 const figures_dir = "figures"
 mkpath(figures_dir)
 
-###########################
-# Configuration flags
-###########################
 
+# ## Configuration flags
 # Set to true to use Yu and Didlake (2019) stratiform rainband modifications:
 #   - Higher heating centre (z_bs = 6 km vs 4 km in Moon and Nolan 2010)
 #   - Stronger maximum heating amplitude (Q_str_max = 4.24 K/h vs 1.5 K/h)
 #   - Broader radial half-width (σ_rs = 8 km vs 6 km)
 const use_yu_didlake_2019 = true
 
-###########################
-# Domain and grid
-###########################
+# Set to true to initialise a Bernoulli secondary circulation (boundary-layer inflow
+# at low levels, upper-troposphere outflow at high levels) consistent with the
+# gradient-wind pressure field.  Speeds up spin-up by seeding the transverse
+# circulation from t = 0.
+const use_secondary_circulation = true
+
+# Set to true to initialise a warm-core potential-temperature anomaly derived
+# hydrostatically from the gradient-wind pressure field.  When false, θ is
+# initialised from the environmental sounding alone (no warm core).
+const use_warm_core = true
+
+
+# ## Domain and grid
+
 
 Oceananigans.defaults.FloatType = Float32
 
 arch = GPU()
-Nx = Ny = 200
-Nz = 128
+Nx = Ny = 750
+Nz = 100
+resolution=1500
+debug = 1
+total_time = 6hours
 
-x = y = (0, 2000Nx)    # 1000 km × 1000 km domain; 2 km horizontal resolution
-z = (0, 22000)          # 0–22 km
+x = y = (0, resolution*Nx)
+z = (0, 20000)          
 
 grid = RectilinearGrid(arch; x, y, z,
                        size = (Nx, Ny, Nz), halo = (5, 5, 5),
@@ -106,24 +119,13 @@ println("  Surface: θ = $(round(θˢ_data[1], digits=1)) K, " *
         "T = $(round(Tˢ_data[1]-273.15, digits=1)) °C, " *
         "p = $(round(pˢ_data[1]/100, digits=1)) hPa")
 
-# ---- Piecewise-linear column interpolation (no external packages) ----
-# Returns a closure z → linearly interpolated value, clamped to [zs[1], zs[end]].
-function make_column_interp(zs::AbstractVector, vs::AbstractVector)
-    function interp(z)
-        z = clamp(z, zs[1], zs[end])
-        i = clamp(searchsortedfirst(zs, z), 2, length(zs))
-        t = (z - zs[i-1]) / (zs[i] - zs[i-1])
-        return vs[i-1] + t * (vs[i] - vs[i-1])
-    end
-    return interp
-end
+# ---- Cubic spline interpolants (used for IC and pressure integration) ----
+# CubicSpline gives C²-continuous profiles, avoiding the kinks that cause spurious gravity wave generation
 
-# ---- Continuous interpolants (used for IC and pressure integration) ----
-
-θ_sounding_interp  = make_column_interp(zˢ_data, θˢ_data)
-qᵗ_sounding_interp = make_column_interp(zˢ_data, qᵗˢ_data)
-T_sounding_interp  = make_column_interp(zˢ_data, Tˢ_data)
-p_sounding_interp  = make_column_interp(zˢ_data, pˢ_data)
+θ_sounding_interp  = CubicSpline(θˢ_data,  zˢ_data)
+qᵗ_sounding_interp = CubicSpline(qᵗˢ_data, zˢ_data)
+T_sounding_interp  = CubicSpline(Tˢ_data,  zˢ_data)
+p_sounding_interp  = CubicSpline(pˢ_data,  zˢ_data)
 
 # ---- Sounding Fields (for Oceananigans-style sounding plots) ----
 # Build a 1-D vertical grid whose cell centres sit on the sounding levels.
@@ -165,9 +167,19 @@ println("  Saved dunion2011_sounding.png")
 # Reference state
 ###########################
 
+# Full moist reference state from the Dunion 2011 sounding.
+# Step 1 — allocate with θ(z) and qᵛ(z) from the sounding (dry hydrostatic first pass).
 reference_state = ReferenceState(grid, constants,
-                                 surface_pressure     = pˢ_data[1],
-                                 potential_temperature = θˢ_data[1])
+                                 surface_pressure      = pˢ_data[1],
+                                 potential_temperature = z -> θ_sounding_interp(clamp(z, zˢ_data[1], zˢ_data[end])),
+                                 vapor_mass_fraction   = z -> qᵗ_sounding_interp(clamp(z, zˢ_data[1], zˢ_data[end])))
+# Step 2 — recompute ρ₀ and p₀ using the moist gas constant Rᵐ = qᵈRᵈ + qᵛRᵛ so
+# that the reference density is consistent with the actual moist Dunion atmosphere.
+compute_reference_state!(reference_state,
+                         z -> T_sounding_interp(clamp(z, zˢ_data[1], zˢ_data[end])),
+                         z -> qᵗ_sounding_interp(clamp(z, zˢ_data[1], zˢ_data[end])),
+                         constants)
+
 
 dynamics = AnelasticDynamics(reference_state)
 
@@ -194,33 +206,35 @@ boundary_conditions = (ρe=ρe_bcs, ρqᵗ=ρqᵗ_bcs, ρu=ρu_bcs, ρv=ρv_bcs)
 # Sponge layer  (upper atmosphere — damps spurious reflections near the model top)
 ###########################
 
-# Gaussian mask centred at 19 km absorbs waves before they reach the rigid lid at 20.5 km.
-# Implemented as a discrete forcing (not Relaxation) for GPU compatibility: Oceananigans'
-# Relaxation wraps in ContinuousForcing which does dynamic NamedTuple field inspection at
-# kernel launch — this is incompatible with CUDA compilation.
-sponge_params = (center = 22_000f0,            # m — at model top
-                 width  = 1_000f0,             # m — Gaussian half-width
-                 rate   = Float32(1 / 150.0))   # s⁻¹ — 150 s damping timescale
+# Quadratic ramp from z_start (TC top) to z_top (domain top): mask = ((z-z_start)/(z_top-z_start))².
+# Exactly zero at and below z_start so the TC circulation is untouched; increases smoothly
+# to full rate at the rigid lid.  Implemented as a discrete forcing for GPU compatibility.
+# DO NOT GO BELOW 18 KM ALTITUDE: THE OUTFLOW MUST BE CHARACTERIZED
+sponge_params = (z_start = 18_000f0,           # m — base of sponge (TC top)
+                 z_top   = 20_000f0,           # m — domain top
+                 rate    = Float32(1 / 30.0))  # s⁻¹ — 15 s damping timescale
 
-@inline function sponge_ρw(i, j, k, grid, clock, fields, p)
+@inline function sponge_ρw_fn(i, j, k, grid, clock, fields, p)
     z    = znode(i, j, k, grid, Center(), Center(), Face())
-    mask = exp(-((z - p.center) / p.width)^2)
+    frac = clamp((z - p.z_start) / (p.z_top - p.z_start), 0f0, 1f0)
+    mask = frac * frac
     return -p.rate * mask * @inbounds fields.ρw[i, j, k]
 end
-sponge = Forcing(sponge_ρw, discrete_form=true, parameters=sponge_params)
+sponge_ρw = Forcing(sponge_ρw_fn, discrete_form=true, parameters=sponge_params)
 
-# Horizontal wind sponge: relax ρu, ρv toward zero.
-# Above 16 km the vortex tangential wind is already zero, so the target is trivially 0.
+# Horizontal wind sponge: relax ρu, ρv toward zero above TC top.
 
 @inline function sponge_ρu_fn(i, j, k, grid, clock, fields, p)
     z    = znode(i, j, k, grid, Face(), Center(), Center())
-    mask = exp(-((z - p.center) / p.width)^2)
+    frac = clamp((z - p.z_start) / (p.z_top - p.z_start), 0f0, 1f0)
+    mask = frac * frac
     return -p.rate * mask * @inbounds fields.ρu[i, j, k]
 end
 
 @inline function sponge_ρv_fn(i, j, k, grid, clock, fields, p)
     z    = znode(i, j, k, grid, Center(), Face(), Center())
-    mask = exp(-((z - p.center) / p.width)^2)
+    frac = clamp((z - p.z_start) / (p.z_top - p.z_start), 0f0, 1f0)
+    mask = frac * frac
     return -p.rate * mask * @inbounds fields.ρv[i, j, k]
 end
 
@@ -260,7 +274,8 @@ x_center = Float64(x[1] + x[2]) / 2
 y_center = Float64(y[1] + y[2]) / 2
 
 # Reference density for forcing kernels (exponential atmosphere)
-Rᵈ    = constants.molar_gas_constant / constants.dry_air.molar_mass  # J kg⁻¹ K⁻¹
+Rᵈ    = dry_air_gas_constant(constants)                              # J kg⁻¹ K⁻¹ ≈ 287
+Rᵛ    = vapor_gas_constant(constants)                                # J kg⁻¹ K⁻¹ ≈ 461
 cₚ    = 1004.0                                                       # J kg⁻¹ K⁻¹ (dry air)
 κ_exp = Rᵈ / cₚ                                                      # Poisson exponent ≈ 0.286
 T_avg = sum(Tˢ_data) / length(Tˢ_data)                               # mean sounding temperature
@@ -272,7 +287,7 @@ r_rb = 70_000.0    # m
 
 # ---- Convective parameters ----
 Q_con_max = 3.0 / 3600.0   # K s⁻¹  (3.0 K h⁻¹)
-σ_rc      = 2_000.0        # radial half-width (m)
+σ_rc      = 4_000.0        # radial half-width (m)
 z_bc      = 0.0            # base height of convective heating (m)
 σ_zc      = 7_000.0        # vertical depth of convective heating (m)
 
@@ -347,34 +362,46 @@ end
 convective_forcing = Forcing(convective_rainband_heating, parameters=con_params)
 stratiform_forcing = Forcing(stratiform_rainband_heating, parameters=str_params)
 
-# ---- Sponge for ρθ: relax toward background (sounding) ρθ profile ----
+# ---- Sponge for ρθ: relax toward far-field ρθ at t=0 ----
 # WRF's Rayleigh damping (damp_opt=2) damps u, v, w, θ toward reference profiles;
 # Yu and Didlake (2019) report sponge-induced vortex weakening (43→40 m/s) consistent
-# with damping all prognostic fields.  Background ρθ = ρ_ref(z) × θ_sounding(z).
-ρθ_bg_col = Float32[Float32(ρ_sfc * exp(-z / H_ρ) *
-                    θ_sounding_interp(clamp(z, zˢ_data[1], zˢ_data[end])))
-                    for z in Array(znodes(grid, Center()))]
+# with damping all prognostic fields.
+#
+# The target ρθ profile is taken from the model's own far-field at t=0 (corner i=j=1,
+# ~530 km from the storm centre), which is unperturbed and consistent with both the
+# reference state and the initial moisture/temperature.  This avoids any mismatch that
+# would arise from re-deriving ρ from the sounding pressure (which is moist-atmosphere
+# pressure and differs slightly from the dry reference-state pressure).
+#
+# ρθ_bg_col is allocated here as a placeholder; filled from the model after set!() below.
+ρθ_bg_col    = zeros(Float32, Nz)
 ρθ_bg_device = arch isa GPU ? CuArray(ρθ_bg_col) : ρθ_bg_col
 
-sponge_ρθ_params = (center = sponge_params.center,
-                    width  = sponge_params.width,
-                    rate   = sponge_params.rate,
-                    ρθ_bg  = ρθ_bg_device)
+sponge_ρθ_params = (z_start = sponge_params.z_start,
+                    z_top   = sponge_params.z_top,
+                    rate    = sponge_params.rate,
+                    ρθ_bg   = ρθ_bg_device)
 
 @inline function sponge_ρθ_fn(i, j, k, grid, clock, fields, p)
     z      = znode(i, j, k, grid, Center(), Center(), Center())
-    mask   = exp(-((z - p.center) / p.width)^2)
+    frac   = clamp((z - p.z_start) / (p.z_top - p.z_start), 0f0, 1f0)
+    mask   = frac * frac
     ρθ_tgt = @inbounds p.ρθ_bg[k]
     return -p.rate * mask * (@inbounds fields.ρθ[i, j, k] - ρθ_tgt)
 end
 
 sponge_ρθ = Forcing(sponge_ρθ_fn, discrete_form=true, parameters=sponge_ρθ_params)
 
-forcing = (ρθ = (convective_forcing, stratiform_forcing),
-           ρw  = sponge)
-
-
-# forcing = (ρθ = (convective_forcing, stratiform_forcing), ρw  = sponge)
+forcing = ( 
+            ρw = sponge_ρw, 
+            ρu = sponge_ρu, 
+            ρv = sponge_ρv, 
+            ρθ = (
+                    sponge_ρθ,
+                    convective_forcing,
+                    stratiform_forcing
+                )
+            )
 ###########################
 # Model
 ###########################
@@ -391,9 +418,15 @@ scalar_advection       = (ρθ   = weno,
                           ρqᶜˡ = bounds_preserving_weno,
                           ρqʳ  = bounds_preserving_weno)
 
+vitd = VerticallyImplicitTimeDiscretization()
+closure = VerticalScalarDiffusivity(vitd; ν=25, κ=25)
+
+
 model = AtmosphereModel(grid; dynamics, coriolis, microphysics,
                         momentum_advection, scalar_advection,
-                        forcing, boundary_conditions,
+                        boundary_conditions,
+                        closure,
+                        forcing,
                         thermodynamic_constants=constants)
 
 ###########################
@@ -411,10 +444,18 @@ model = AtmosphereModel(grid; dynamics, coriolis, microphysics,
 RMW    = 31_000.0   # radius of maximum winds at surface (m)
 V_RMW  = 43.0       # maximum tangential wind at RMW (m/s)
 a      = 0.5        # outer-core wind decay exponent
-r_zero = Nx * 1000.0  # target radius where tangential wind is relaxed to zero (m)
+r_zero = Nx * resolution/2  # target radius where tangential wind is relaxed to zero (m)
 
 z_nodes_cpu = Array(znodes(grid, Center()))
 Δz_step     = z_nodes_cpu[2] - z_nodes_cpu[1]
+
+# Level-by-level moist gas constant from the sounding: Rᵐ(z) = qᵈ Rᵈ + qᵛ Rᵛ.
+# Used so the gradient-wind pressure integration and the hydrostatic θ recovery both
+# use the same gas constant as the moist reference state.
+Rᵐ_col = map(z_nodes_cpu) do z
+    qᵛ = qᵗ_sounding_interp(clamp(z, zˢ_data[1], zˢ_data[end]))
+    (1 - qᵛ) * Rᵈ + qᵛ * Rᵛ
+end
 
 T_out_K  = T_sounding_interp(16_000.0)      # outflow temperature
 
@@ -438,20 +479,28 @@ function rmw_at_height(z)
     return rmw_profile[k]
 end
 
+z_decay_bot = 13_000.0   # height where wind begins to taper (m)
+z_decay_top = 16_000.0   # height where wind reaches zero (m)
+
 function tangential_wind(x, y, z)
     r     = sqrt((x - x_center)^2 + (y - y_center)^2)
     rmw_z = rmw_at_height(z)
     v_adj = RMW / rmw_z                       # angular-momentum scaling (Stern & Nolan 2009)
-    z >= 16_000.0 && return zero(typeof(r))
+    z >= z_decay_top && return zero(typeof(r))
     if r <= rmw_z
-        return V_RMW * v_adj * r / rmw_z      # solid-body rotation inside eye wall
+        vt = V_RMW * v_adj * r / rmw_z        # solid-body rotation inside eye wall
     elseif r >= r_zero
         return zero(typeof(r))                 # relaxed to zero by r = Nx*1000
     else
         v_outer = V_RMW * v_adj * (rmw_z / r)^a
         taper   = (r_zero - r) / (r_zero - rmw_z)
-        return v_outer * taper                 # power-law decay with outer linear taper
+        vt = v_outer * taper                   # power-law decay with outer linear taper
     end
+    # Smooth cosine taper to zero between z_decay_bot and z_decay_top
+    if z > z_decay_bot
+        vt *= 0.5 * (1 + cos(π * (z - z_decay_bot) / (z_decay_top - z_decay_bot)))
+    end
+    return vt
 end
 
 ###########################
@@ -476,7 +525,7 @@ for k in 1:Nz
     z_c  = clamp(z_k, zˢ_data[1], zˢ_data[end])
     T_k  = T_sounding_interp(z_c)
     p_bg = p_sounding_interp(z_c)   # use observed sounding pressure (not isothermal formula)
-    ρ_k  = p_bg / (Rᵈ * T_k)
+    ρ_k  = p_bg / (Rᵐ_col[k] * T_k)   # moist density consistent with reference state
 
     p_vortex[k, Nr] = p_bg    # outer boundary condition: undisturbed background pressure
 
@@ -490,6 +539,17 @@ for k in 1:Nz
 end
 
 p_outer = p_vortex[:, Nr]   # background (outer-edge) pressure profile
+
+# ---- Pressure at the height-varying RMW (used for secondary-circulation IC) ----
+# Linearly interpolate p_vortex to the RMW radius at each model level.
+p_at_RMW = zeros(Float64, Nz)
+for k in 1:Nz
+    rmw_k = rmw_profile[k]
+    ri_hi = clamp(searchsortedfirst(rrange, rmw_k), 2, Nr)
+    ri_lo = ri_hi - 1
+    tr    = clamp((rmw_k - rrange[ri_lo]) / (rrange[ri_hi] - rrange[ri_lo]), 0.0, 1.0)
+    p_at_RMW[k] = (1 - tr) * p_vortex[k, ri_lo] + tr * p_vortex[k, ri_hi]
+end
 
 # ---- Hydrostatically-balanced θ from the gradient-wind pressure field ----
 # Derive ρ from hydrostatic balance (∂p/∂z = -ρg), then T = p/(Rρ), θ = T(p₀/p)^κ.
@@ -516,7 +576,7 @@ for ri in 1:Nr
         end
         # Guard against non-physical ρ (should not happen, but be safe)
         ρ_hydro = max(ρ_hydro, 1e-3)
-        T_loc = p_vortex[k, ri] / (Rᵈ * ρ_hydro)
+        T_loc = p_vortex[k, ri] / (Rᵐ_col[k] * ρ_hydro)   # moist T recovery
         θ_vortex[k, ri] = T_loc * (p_ref0 / p_vortex[k, ri])^κ_exp
     end
 end
@@ -531,6 +591,7 @@ for k in 1:Nz
         θ_anomaly[k, ri] = θ_vortex[k, ri] - θ_far
     end
 end
+
 
 println("  θ warm-core anomaly at surface centre: " *
         "$(round(θ_anomaly[1,1], digits=3)) K  " *
@@ -550,6 +611,8 @@ function θ_at(x, y, z)
     ri = clamp(searchsortedfirst(rrange, r), 2, Nr)
     tr = clamp((r - rrange[ri-1]) / (rrange[ri] - rrange[ri-1]), 0.0, 1.0)
 
+    use_warm_core || return θ_bg
+
     # Bilinear interpolation of anomaly
     a00 = θ_anomaly[ki-1, ri-1]
     a01 = θ_anomaly[ki-1, ri]
@@ -561,17 +624,79 @@ function θ_at(x, y, z)
 end
 
 ###########################
+# Secondary-circulation radial wind  (Bernoulli, use_secondary_circulation)
+###########################
+#
+# From Bernoulli along a frictionless streamline between RMW and radius r:
+#   |u_r|(r, z) = sqrt(2 · (p(r, z) − p(RMW, z)) / ρ(r, z))
+#
+# Sign (transverse/secondary circulation):
+#   z = 0          → sign = −1  (inward / boundary-layer inflow)
+#   z = z_decay_top/2 → sign =  0  (level of non-divergence)
+#   z = z_decay_top   → sign = +1  (outward / upper-troposphere outflow)
+# implemented as  sign(z) = −cos(π z / z_decay_top).
+#
+# Tapers:
+#   Radial : linearly from 1 at RMW to 0 at r_zero (matching tangential wind).
+#   Vertical: full strength below z_decay_bot, cosine ramp to 0 at z_decay_top.
+
+function radial_wind(x, y, z)
+    # Reduced scaler with warm core to avoid coupling instability between
+    # Bernoulli radial wind and warm-core buoyancy (see tests_warm_core_stability/).
+    scaler = use_warm_core ? 0.01 : 0.1
+    use_secondary_circulation || return 0.0
+    z >= z_decay_top && return 0.0         # no radial wind above 16 km
+
+    r     = sqrt((x - x_center)^2 + (y - y_center)^2)
+    k     = clamp(searchsortedfirst(z_nodes_cpu, z), 1, Nz)
+    rmw_z = rmw_profile[k]
+
+    r <= rmw_z && return 0.0           # calm inside the eye
+
+    # Interpolate p_vortex at radius r
+    ri = clamp(searchsortedfirst(rrange, r), 2, Nr)
+    tr = clamp((r - rrange[ri-1]) / (rrange[ri] - rrange[ri-1]), 0.0, 1.0)
+    p_r = (1 - tr) * p_vortex[k, ri-1] + tr * p_vortex[k, ri]
+
+    dp = p_r - p_at_RMW[k]            # > 0 for r > RMW (pressure increases outward)
+    dp <= 0.0 && return 0.0
+
+    # Moist density from isothermal T(z) — consistent with the θ initialisation
+    z_c = clamp(z, zˢ_data[1], zˢ_data[end])
+    ρ_k = p_r / (Rᵐ_col[k] * T_sounding_interp(z_c))
+
+    speed = sqrt(2.0 * dp / ρ_k)
+
+    # Radial taper: 1 at RMW → 0 at r_zero
+    taper_r = clamp((r_zero - r) / (r_zero - rmw_z), 0.0, 1.0)
+
+    # Vertical taper: 1 below z_decay_bot, cosine decay to 0 at z_decay_top
+    taper_z = if z >= z_decay_top
+        0.0
+    elseif z > z_decay_bot
+        0.5 * (1.0 + cos(π * (z - z_decay_bot) / (z_decay_top - z_decay_bot)))
+    else
+        1.0
+    end
+
+    # Sign: −1 (inflow) at z = 0  →  0 at z = z_decay_top/2  →  +1 (outflow) at z = z_decay_top
+    sign_z = -cos(π * clamp(z, 0.0, z_decay_top) / z_decay_top)
+
+    return sign_z * speed * taper_r * taper_z*scaler
+end
+
+###########################
 # Initial-condition functions  (evaluated on CPU by set!)
 ###########################
 
 function u_init(x, y, z)
     ϕ = atan(y - y_center, x - x_center)
-    return -sin(ϕ) * tangential_wind(x, y, z)
+    return -sin(ϕ) * tangential_wind(x, y, z) + cos(ϕ) * radial_wind(x, y, z)
 end
 
 function v_init(x, y, z)
     ϕ = atan(y - y_center, x - x_center)
-    return  cos(ϕ) * tangential_wind(x, y, z)
+    return  cos(ϕ) * tangential_wind(x, y, z) + sin(ϕ) * radial_wind(x, y, z)
 end
 
 function θ_init(x, y, z)
@@ -584,9 +709,43 @@ function qᵗ_init(x, y, z)
     return qᵗ_sounding_interp(z_c)   # kg/kg
 end
 
-println("  Setting initial conditions...")
-set!(model, θ=θ_init, qᵗ=qᵗ_init, u=u_init, v=v_init)
+println("  Setting initial conditions (threaded array fill)...")
+xn = Array(xnodes(grid, Center()))
+yn = Array(ynodes(grid, Center()))
+zn = Array(znodes(grid, Center()))
+
+u_arr  = zeros(Float32, Nx, Ny, Nz)
+v_arr  = zeros(Float32, Nx, Ny, Nz)
+θ_arr  = zeros(Float32, Nx, Ny, Nz)
+qᵗ_arr = zeros(Float32, Nx, Ny, Nz)
+
+Threads.@threads for i in 1:Nx
+    for j in 1:Ny, k in 1:Nz
+        u_arr[i,j,k]  = u_init(xn[i], yn[j], zn[k])
+        v_arr[i,j,k]  = v_init(xn[i], yn[j], zn[k])
+        θ_arr[i,j,k]  = θ_init(xn[i], yn[j], zn[k])
+        qᵗ_arr[i,j,k] = qᵗ_init(xn[i], yn[j], zn[k])
+    end
+end
+
+set!(model, θ=θ_arr, qᵗ=qᵗ_arr, u=u_arr, v=v_arr)
 println("  Done.")
+
+# Fill the sponge ρθ target from the model's far-field at t=0.
+# Corner (i=1, j=1) is ~530 km from the storm centre — fully unperturbed.
+copyto!(ρθ_bg_col, Array(interior(model.formulation.potential_temperature_density, 1, 1, :)))
+arch isa GPU && copyto!(ρθ_bg_device, ρθ_bg_col)
+
+let z_km_bg = Array(znodes(grid, Center())) ./ 1000
+    fig_bg = Figure(size=(400, 600))
+    ax_bg  = Axis(fig_bg[1, 1],
+        xlabel = "ρθ (kg m⁻³ K)",
+        ylabel = "Height (km)",
+        title  = "Sponge target: far-field ρθ at t=0")
+    lines!(ax_bg, Float64.(ρθ_bg_col), z_km_bg, color=:navy, linewidth=2)
+    Makie.save(joinpath(figures_dir, "rho_theta_background.png"), fig_bg)
+    println("  Saved rho_theta_background.png")
+end
 
 ###########################
 # Visualizations — initial conditions
@@ -659,7 +818,7 @@ println("  Saved tangential_wind_profile_cross_section.png")
 # ---- 7. Potential temperature perturbation plan view (z ≈ 160 m) ----
 θ_lip     = liquid_ice_potential_temperature(model)
 θ_xy      = Array(interior(θ_lip, :, :, 2))
-θ_bg_k2   = θ_sounding_interp(z_km[2] * 1000)
+θ_bg_k2   = θ_sounding_interp(clamp(z_km[2] * 1000, zˢ_data[1], zˢ_data[end]))
 Δθ_xy     = θ_xy .- θ_bg_k2
 clim_θ    = max(Float64(maximum(abs.(Δθ_xy))), 0.01)   # Float64 for Makie; guard zero-range
 fig = Figure(size=(580, 500))
@@ -671,7 +830,7 @@ Makie.save(joinpath(figures_dir, "theta_init.png"), fig)
 println("  Saved theta_init.png")
 
 # ---- 8. Potential temperature perturbation cross section (y–z) ----
-θ_bg_prof = [θ_sounding_interp(z_km[k] * 1000) for k in 1:Nz]
+θ_bg_prof = [θ_sounding_interp(clamp(z_km[k] * 1000, zˢ_data[1], zˢ_data[end])) for k in 1:Nz]
 Δθ_yz     = Array(interior(θ_lip, Nx÷2, :, :)) .- θ_bg_prof'
 clim_θyz  = max(Float64(maximum(abs.(Δθ_yz))), 0.01)
 fig = Figure(size=(680, 430))
@@ -695,7 +854,31 @@ Colorbar(fig[1, 2], colormap=:dense, limits=(0.0, qlim), label="Total water mixi
 Makie.save(joinpath(figures_dir, "moisture_init_cross_section.png"), fig)
 println("  Saved moisture_init_cross_section.png")
 
-# ---- 10. Rainband heating profiles (r–z cross sections + plan views) ----
+# ---- 10. Radial wind cross section (r–z) ----
+if use_secondary_circulation
+    r_ur_vis = range(0.0, (Nx ÷ 2) * resolution, length=300)   # 0 → domain half-width (m)
+    r_ur_km  = collect(r_ur_vis) ./ 1000.0
+
+    ur_2d = [radial_wind(x_center + r, y_center, z) for r in r_ur_vis, z in z_nodes_cpu]
+    urlim = max(maximum(abs.(ur_2d)), 0.01)
+
+    fig = Figure(size=(720, 430))
+    fig[0, :] = Label(fig, "Initial Secondary Circulation — Radial Wind (m s⁻¹)  [Bernoulli IC]",
+                      fontsize=14, tellwidth=false)
+    ax = Axis(fig[1, 1], xlabel="Radius from storm centre (km)", ylabel="Height (km)")
+    hm = heatmap!(ax, r_ur_km, z_km, ur_2d;
+                  colormap=:balance, colorrange=(-urlim, urlim))
+    Colorbar(fig[1, 2], colormap=:balance, limits=(-urlim, urlim),
+             label="Radial wind uᵣ (m s⁻¹)  [blue = inflow, red = outflow]")
+    # Mark the RMW profile
+    rmw_km = [rmw_profile[k] / 1000.0 for k in 1:Nz]
+    lines!(ax, rmw_km, z_km; color=:black, linestyle=:dash, linewidth=1.5, label="RMW")
+    axislegend(ax; position=:rt)
+    Makie.save(joinpath(figures_dir, "radial_wind_init_cross_section.png"), fig)
+    println("  Saved radial_wind_init_cross_section.png")
+end
+
+# ---- 11. Rainband heating profiles (r–z cross sections + plan views) ----
 r_vis = range(0.0, 150_000.0, length=150)
 z_vis = range(0.0, 15_000.0,  length=150)
 Q_con_2d = [convective_rainband_heating(x_center + r, y_center, Float32(z), 0.0f0, con_params) for r in r_vis, z in z_vis]   # (Nr_vis, Nz_vis) — matches contourf!(r_vis, z_vis, M)
@@ -740,7 +923,7 @@ ax= Axis(fig[2, 1], aspect=1,
 ax4 = Axis(fig[2, 2], aspect=1,
            xlabel="Zonal distance from centre (km)", ylabel="Meridional distance from centre (km)",
            title="Stratiform component — plan view at z ≈ $(z_str_km) km")
-heatmap!(ax3, collect(xy_vis_km), collect(xy_vis_km), Q_con_xy .* 86400;
+heatmap!(ax4, collect(xy_vis_km), collect(xy_vis_km), Q_con_xy .* 86400;
          colormap=:balance, colorrange=(-lim_c, lim_c))
 heatmap!(ax4, collect(xy_vis_km), collect(xy_vis_km), Q_str_xy .* 86400;
          colormap=:balance, colorrange=(-lim_s, lim_s))
@@ -753,7 +936,7 @@ println("  Saved rainband_heating_profiles.png")
 # Simulation
 ###########################
 
-simulation = Simulation(model; Δt=2, stop_time=12hours)
+simulation = Simulation(model; Δt=8, stop_time=total_time)
 conjure_time_step_wizard!(simulation, cfl=0.7)
 
 θˡⁱ = liquid_ice_potential_temperature(model)
@@ -775,7 +958,31 @@ function progress(sim)
         umax, wmin, wmax,
         maximum(qᵛ), maximum(qᶜˡ), maximum(qʳ))
     @info msg
-    if isnan(wmax) || isnan(umax) || wmax > 200.0
+
+    # Report locations where |w| > 20 m/s (only copy from GPU if threshold exceeded)
+    if max(abs(wmax), abs(wmin)) > 30.0 && debug == 1
+    w_cpu = Array(interior(w))
+    danger = findall(x -> abs(x) > 30.0, w_cpu)
+    if !isempty(danger)
+        x_nodes = Array(xnodes(grid, Center()))
+        y_nodes = Array(ynodes(grid, Center()))
+        z_nodes = Array(znodes(grid, Face()))
+        # Sort by descending |w| and show the worst 5
+        sort!(danger, by=idx -> -abs(w_cpu[idx]))
+        n_show = min(5, length(danger))
+        @warn "$(length(danger)) points with |w| > 30 m/s — top $n_show:"
+        for p in 1:n_show
+            ci = danger[p]
+            @warn @sprintf("  [%d] w=%.2f m/s at x=%.1f km, y=%.1f km, z=%.1f km",
+                           p, w_cpu[ci],
+                           x_nodes[ci[1]] / 1000,
+                           y_nodes[ci[2]] / 1000,
+                           z_nodes[ci[3]] / 1000)
+        end
+    end
+    end  # max(abs(wmax), abs(wmin)) > 20
+
+    if isnan(wmax) || isnan(umax) || wmax > 60.0
         @warn "NaN or blowup detected — stopping simulation"
         sim.stop_iteration = iteration(sim)
     end
@@ -795,6 +1002,32 @@ function collect_max_w(sim)
 end
 add_callback!(simulation, collect_max_w, TimeInterval(1minutes))
 
+# Collect vertical profile of θˡⁱ at the domain centre (x=Nx÷2, y=Ny÷2)
+center_θ_ts    = Vector{Vector{Float32}}()
+center_θ_times = Float64[]
+const center_θ_txt = joinpath(figures_dir, "center_theta_profiles.txt")
+open(center_θ_txt, "w") do io
+    # header: time (s) then one column per vertical level (θ in K)
+    println(io, "# Center-column θˡⁱ (K) — one row per snapshot")
+    println(io, "# Columns: time_s  θ[1]  θ[2]  ...  θ[$Nz]  (levels bottom→top)")
+end
+function collect_center_θ(sim)
+    compute!(θˡⁱ)
+    t  = time(sim)
+    θv = Array(interior(θˡⁱ, Nx÷2, Ny÷2, :))   # Vector{Float32}, length Nz
+    push!(center_θ_times, t)
+    push!(center_θ_ts, θv)
+    open(center_θ_txt, "a") do io
+        print(io, t)
+        for val in θv
+            print(io, "  ", val)
+        end
+        println(io)
+    end
+    return nothing
+end
+add_callback!(simulation, collect_center_θ, TimeInterval(2minutes))
+
 # ---- Output writers ----
 println("\n=== Setting up output ===")
 z_out = znodes(grid, Center())
@@ -805,16 +1038,18 @@ println("  xy-slices at z ≈ $(z_out[k_5km]) m (k=$k_5km) and z ≈ $(z_out[k_1
 println("  xz-slice  at y ≈ $(ynodes(grid, Center())[j_mid]) m (j=$j_mid)")
 
 slice_outputs = (
-    wxy   = view(w,   :, :, k_5km),
-    qʳxy  = view(qʳ,  :, :, k_5km),
-    qᶜˡxy = view(qᶜˡ, :, :, k_5km),
-    uxy   = view(u,   :, :, k_5km),
-    vxy   = view(v,   :, :, k_5km),
-    wxz   = view(w,   :, j_mid, :),
-    qʳxz  = view(qʳ,  :, j_mid, :),
-    qᶜˡxz = view(qᶜˡ, :, j_mid, :),
-    uxz   = view(u,   :, j_mid, :),
-    vxz   = view(v,   :, j_mid, :),
+    wxy   = view(w,    :, :, k_5km),
+    qʳxy  = view(qʳ,   :, :, k_5km),
+    qᶜˡxy = view(qᶜˡ,  :, :, k_5km),
+    uxy   = view(u,    :, :, k_5km),
+    vxy   = view(v,    :, :, k_5km),
+    θxy   = view(θˡⁱ,  :, :, k_5km),
+    wxz   = view(w,    :, j_mid, :),
+    qʳxz  = view(qʳ,   :, j_mid, :),
+    qᶜˡxz = view(qᶜˡ,  :, j_mid, :),
+    uxz   = view(u,    :, j_mid, :),
+    vxz   = view(v,    :, j_mid, :),
+    θxz   = view(θˡⁱ,  :, j_mid, :),
 )
 
 slices_filename = "tropical_cyclone_and_rainband_slices.jld2"
@@ -846,6 +1081,8 @@ qʳxz_ts  = FieldTimeSeries(slices_filename, "qʳxz")
 qᶜˡxz_ts = FieldTimeSeries(slices_filename, "qᶜˡxz")
 uxz_ts   = FieldTimeSeries(slices_filename, "uxz")
 vxz_ts   = FieldTimeSeries(slices_filename, "vxz")
+θxy_ts   = FieldTimeSeries(slices_filename, "θxy")
+θxz_ts   = FieldTimeSeries(slices_filename, "θxz")
 
 times = wxy_ts.times
 Nt    = length(times)
@@ -858,6 +1095,9 @@ qʳlim  = max(qʳlim,  1e-6)
 qᶜˡlim = max(qᶜˡlim, 1e-6)
 Vrlim  = 20.0              # ±20 m/s  (inflow negative, outflow positive)
 Vtlim  = Float64(V_RMW) * 1.5   # max tangential wind scale
+θ_bg_k5km = θ_sounding_interp(clamp(z_out[k_5km], zˢ_data[1], zˢ_data[end]))
+θ_bg_xz   = reshape(θ_bg_prof, 1, Nz)   # (1, Nz) for broadcasting against (Nx, Nz)
+θlim      = 5.0                           # ±5 K anomaly colorscale
 
 # 2-D coordinate arrays (km, relative to storm centre) for wind decomposition
 x_center_km = Float32(x_center / 1000)
@@ -868,10 +1108,10 @@ r_safe  = max.(sqrt.(dx_km2d.^2 .+ dy_km2d.^2), 1f-3)
 # For the xz slice at y = y_center: sin(ϕ)=0, cos(ϕ)=sign(x−xc)
 sign_x  = reshape(sign.(x_km .- x_center_km), :, 1)                   # (Nx, 1)
 
-fig = Figure(size=(2000, 800), fontsize=12)
+fig = Figure(size=(2400, 800), fontsize=12)
 n   = Observable(1)
 fig[0, :] = Label(fig,
-    @lift("TC + rainband: w, qᶜˡ, qʳ, Vᵣ, Vₜ — t = " * prettytime(times[$n])),
+    @lift("TC + rainband: w, qᶜˡ, qʳ, Vᵣ, Vₜ, Δθˡⁱ — t = " * prettytime(times[$n])),
     fontsize=14, tellwidth=false)
 
 # Row 1: xy plan views at z ≈ 5 km
@@ -880,6 +1120,7 @@ axqᶜˡ_xy = Axis(fig[1, 2], aspect=1, xlabel="x (km)", ylabel="y (km)", title=
 axqʳ_xy  = Axis(fig[1, 3], aspect=1, xlabel="x (km)", ylabel="y (km)", title="qʳ at z≈5 km (kg/kg)")
 axVr_xy  = Axis(fig[1, 4], aspect=1, xlabel="x (km)", ylabel="y (km)", title="Radial wind at z≈5 km (m/s)")
 axVt_xy  = Axis(fig[1, 5], aspect=1, xlabel="x (km)", ylabel="y (km)", title="Tangential wind at z≈5 km (m/s)")
+axθ_xy   = Axis(fig[1, 6], aspect=1, xlabel="x (km)", ylabel="y (km)", title="Δθˡⁱ at z≈5 km (K)")
 
 # Row 2: x–z cross sections through domain centre
 axw_xz   = Axis(fig[2, 1], xlabel="x (km)", ylabel="z (km)", title="w at y=centre (m/s)")
@@ -887,42 +1128,60 @@ axqᶜˡ_xz = Axis(fig[2, 2], xlabel="x (km)", ylabel="z (km)", title="qᶜˡ at
 axqʳ_xz  = Axis(fig[2, 3], xlabel="x (km)", ylabel="z (km)", title="qʳ at y=centre (kg/kg)")
 axVr_xz  = Axis(fig[2, 4], xlabel="x (km)", ylabel="z (km)", title="Radial wind at y=centre (m/s)")
 axVt_xz  = Axis(fig[2, 5], xlabel="x (km)", ylabel="z (km)", title="Tangential wind at y=centre (m/s)")
+axθ_xz   = Axis(fig[2, 6], xlabel="x (km)", ylabel="z (km)", title="Δθˡⁱ at y=centre (K)")
 
-# Observables for saved fields
-wxy_n   = @lift Array(interior(wxy_ts[$n],   :, :, 1))
-qᶜˡxy_n = @lift Array(interior(qᶜˡxy_ts[$n], :, :, 1))
-qʳxy_n  = @lift Array(interior(qʳxy_ts[$n],  :, :, 1))
-uxy_n   = @lift Array(interior(uxy_ts[$n],   :, :, 1))
-vxy_n   = @lift Array(interior(vxy_ts[$n],   :, :, 1))
-wxz_n   = @lift Array(interior(wxz_ts[$n],   :, 1, :))
-qᶜˡxz_n = @lift Array(interior(qᶜˡxz_ts[$n], :, 1, :))
-qʳxz_n  = @lift Array(interior(qʳxz_ts[$n],  :, 1, :))
-uxz_n   = @lift Array(interior(uxz_ts[$n],   :, 1, :))
-vxz_n   = @lift Array(interior(vxz_ts[$n],   :, 1, :))
+# Observables for saved fields (replace NaN/Inf with zero so Makie's colormap never sees non-finite values)
+_finite(A) = ifelse.(isfinite.(A), A, zero(eltype(A)))
+wxy_n   = @lift _finite(Array(interior(wxy_ts[$n],   :, :, 1)))
+qᶜˡxy_n = @lift _finite(Array(interior(qᶜˡxy_ts[$n], :, :, 1)))
+qʳxy_n  = @lift _finite(Array(interior(qʳxy_ts[$n],  :, :, 1)))
+uxy_n   = @lift _finite(Array(interior(uxy_ts[$n],   :, :, 1)))
+vxy_n   = @lift _finite(Array(interior(vxy_ts[$n],   :, :, 1)))
+θxy_n   = @lift _finite(Array(interior(θxy_ts[$n],   :, :, 1)))
+wxz_n   = @lift _finite(Array(interior(wxz_ts[$n],   :, 1, :)))
+qᶜˡxz_n = @lift _finite(Array(interior(qᶜˡxz_ts[$n], :, 1, :)))
+qʳxz_n  = @lift _finite(Array(interior(qʳxz_ts[$n],  :, 1, :)))
+uxz_n   = @lift _finite(Array(interior(uxz_ts[$n],   :, 1, :)))
+vxz_n   = @lift _finite(Array(interior(vxz_ts[$n],   :, 1, :)))
+θxz_n   = @lift _finite(Array(interior(θxz_ts[$n],   :, 1, :)))
 
 # Derived: radial wind Vᵣ = (u·x̂ + v·ŷ)/r,  tangential Vₜ = (−u·ŷ + v·x̂)/r
 Vrxy_n  = @lift (($uxy_n) .* dx_km2d .+ ($vxy_n) .* dy_km2d) ./ r_safe
 Vtxy_n  = @lift (-($uxy_n) .* dy_km2d .+ ($vxy_n) .* dx_km2d) ./ r_safe
+
 # At y=y_centre: sin(ϕ)=0 so Vᵣ=u·sign(x−xc), Vₜ=v·sign(x−xc)
 Vrxz_n  = @lift ($uxz_n) .* sign_x
 Vtxz_n  = @lift ($vxz_n) .* sign_x
+
+# θ perturbation: subtract sounding background
+Δθxy_n  = @lift Float64.($θxy_n) .- θ_bg_k5km
+Δθxz_n  = @lift Float64.($θxz_n) .- θ_bg_xz
 
 hmw_xy   = heatmap!(axw_xy,   x_km, y_km, wxy_n;   colormap=:balance, colorrange=(-wlim,   wlim))
 hmqᶜˡ_xy = heatmap!(axqᶜˡ_xy, x_km, y_km, qᶜˡxy_n; colormap=:dense,   colorrange=(0, qᶜˡlim))
 hmqʳ_xy  = heatmap!(axqʳ_xy,  x_km, y_km, qʳxy_n;  colormap=:amp,     colorrange=(0, qʳlim))
 hmVr_xy  = heatmap!(axVr_xy,  x_km, y_km, Vrxy_n;  colormap=:balance, colorrange=(-Vrlim, Vrlim))
 hmVt_xy  = heatmap!(axVt_xy,  x_km, y_km, Vtxy_n;  colormap=:amp,     colorrange=(0, Vtlim))
+hmθ_xy   = heatmap!(axθ_xy,   x_km, y_km, Δθxy_n;  colormap=:balance, colorrange=(-θlim, θlim))
+
+# |w| > 20 m/s contours on all plan-view panels
+absw_xy_n = @lift abs.($wxy_n)
+for ax_xy in (axw_xy, axqᶜˡ_xy, axqʳ_xy, axVr_xy, axVt_xy, axθ_xy)
+    contour!(ax_xy, x_km, y_km, absw_xy_n; levels=[20.0], color=:black, linewidth=1.5)
+end
 hmw_xz   = heatmap!(axw_xz,   x_km, z_km, wxz_n;   colormap=:balance, colorrange=(-wlim,   wlim))
 hmqᶜˡ_xz = heatmap!(axqᶜˡ_xz, x_km, z_km, qᶜˡxz_n; colormap=:dense,   colorrange=(0, qᶜˡlim))
 hmqʳ_xz  = heatmap!(axqʳ_xz,  x_km, z_km, qʳxz_n;  colormap=:amp,     colorrange=(0, qʳlim))
 hmVr_xz  = heatmap!(axVr_xz,  x_km, z_km, Vrxz_n;  colormap=:balance, colorrange=(-Vrlim, Vrlim))
 hmVt_xz  = heatmap!(axVt_xz,  x_km, z_km, Vtxz_n;  colormap=:amp,     colorrange=(0, Vtlim))
+hmθ_xz   = heatmap!(axθ_xz,   x_km, z_km, Δθxz_n;  colormap=:balance, colorrange=(-θlim, θlim))
 
 Colorbar(fig[3, 1], hmw_xy,   vertical=false, label="w (m/s)")
 Colorbar(fig[3, 2], hmqᶜˡ_xy, vertical=false, label="qᶜˡ (kg/kg)")
 Colorbar(fig[3, 3], hmqʳ_xy,  vertical=false, label="qʳ (kg/kg)")
 Colorbar(fig[3, 4], hmVr_xy,  vertical=false, label="Vᵣ (m/s)")
 Colorbar(fig[3, 5], hmVt_xy,  vertical=false, label="Vₜ (m/s)")
+Colorbar(fig[3, 6], hmθ_xy,   vertical=false, label="Δθˡⁱ (K)")
 
 # Save animation video
 video_path = joinpath(figures_dir, "tropical_cyclone_slices.mp4")
@@ -940,3 +1199,23 @@ ax_ts  = Axis(fig_ts[1, 1], xlabel="Time (h)", ylabel="max w (m/s)",
 lines!(ax_ts, max_w_times ./ 3600, max_w_ts)
 Makie.save(joinpath(figures_dir, "max_w_timeseries.png"), fig_ts)
 println("  Saved max_w_timeseries.png")
+
+# ---- Center-column θˡⁱ height–time Hovmöller ----
+if length(center_θ_ts) >= 2
+    θ_matrix  = reduce(hcat, center_θ_ts)          # (Nz, Nt)
+    θ_bg_vec  = [θ_sounding_interp(clamp(z * 1000, zˢ_data[1], zˢ_data[end]))
+                 for z in Array(z_km)]              # (Nz,) background
+    Δθ_matrix = Float64.(θ_matrix) .- θ_bg_vec     # (Nz, Nt) anomaly
+    t_h       = center_θ_times ./ 3600
+
+    fig_hov = Figure(size=(700, 500))
+    fig_hov[0, :] = Label(fig_hov, "θˡⁱ Anomaly at Domain Centre — Height–Time (K)",
+                          fontsize=13, tellwidth=false)
+    ax_hov  = Axis(fig_hov[1, 1], xlabel="Time (h)", ylabel="Height (km)")
+    lim_hov = max(maximum(abs, Δθ_matrix), 0.1)
+    hm_hov  = heatmap!(ax_hov, t_h, Array(z_km), Δθ_matrix';
+                        colormap=:balance, colorrange=(-lim_hov, lim_hov))
+    Colorbar(fig_hov[1, 2], hm_hov, label="Δθˡⁱ (K)")
+    Makie.save(joinpath(figures_dir, "center_theta_hovmoller.png"), fig_hov)
+    println("  Saved center_theta_hovmoller.png")
+end
