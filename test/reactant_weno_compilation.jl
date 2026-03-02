@@ -59,7 +59,7 @@ get_temperature(model) = Array(interior(model.temperature))
 ##### Tests
 #####
 
-@testset "Reactant CompressibleDynamics — WENO" begin
+@testset "reactant_weno_compilation" begin
     Δt_val = 0.02
 
     for (scheme_label, scheme) in schemes
