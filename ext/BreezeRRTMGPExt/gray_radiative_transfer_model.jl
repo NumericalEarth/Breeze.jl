@@ -17,7 +17,7 @@ using KernelAbstractions: @kernel, @index
 using Dates: AbstractDateTime, Millisecond
 
 # Dispatch on background_atmosphere = Nothing for gray radiation
-const GrayRadiativeTransferModel = RadiativeTransferModel{<:Any, <:Any, <:Any, <:Any, Nothing, <:Any, <:Any, <:Any, <:Any, <:Any, <:Any, <:Any, <:Any}
+const GrayRadiativeTransferModel = RadiativeTransferModel{<:Any, <:Any, <:Any, <:Any, Nothing}
 
 materialize_surface_property(x::Number, grid) = convert(eltype(grid), x)
 materialize_surface_property(x::Field, grid) = x
