@@ -25,12 +25,12 @@
 #
 # ### Meridional temperature gradient
 #
-# A pole-to-equator temperature difference ``Δθ = 60\,{\rm K}``
+# A pole-to-equator temperature difference ``Δθ_{\rm ep} = 60\,{\rm K}``
 # drives the baroclinic instability. The temperature gradient is confined
 # to the troposphere (below the tropopause height ``z_T = 15\,{\rm km}``):
 #
 # ```math
-# θ(φ, z) = θ^{\rm b}(z) - Δθ \sin φ \max(0, 1 - z/z_T)
+# θ(φ, z) = θ^{\rm b}(z) - Δθ_{\rm ep} \sin φ \max(0, 1 - z/z_T)
 # ```
 #
 # This creates a cold pole / warm equator contrast at the surface that
@@ -55,8 +55,7 @@
 #            \end{cases}
 # ```
 #
-# where ``Δθ_{\rm ep}`` is the Equator-to-Pole potential temperature difference and
-# ``R`` is the Earth's radius.
+# where ``R`` is the Earth's radius.
 # The ``\cos φ`` factor gives a broad jet that peaks at the equator (~32 m/s)
 # and is roughly 22 m/s at 45° latitude.
 # By initializing with a balanced state we avoid spurious gravity-wave transients and
@@ -139,7 +138,7 @@ model = AtmosphereModel(grid; dynamics, coriolis, advection=WENO())
 R     = Oceananigans.defaults.planet_radius  # m — Earth radius
 Δθ_ep = 60                                   # K — equator-to-pole θ difference
 z_T   = 15_000                               # m — tropopause height
-τ_bal = R * θ₀ * Ω / (g * Δθ)                # s — thermal wind parameter timescale
+τ_bal = R * θ₀ * Ω / (g * Δθ_ep)             # s — thermal wind parameter timescale
 
 # Perturbation parameters:
 λ_c = 90  # degrees — perturbation center longitude
