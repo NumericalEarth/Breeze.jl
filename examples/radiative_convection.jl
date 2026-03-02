@@ -39,14 +39,14 @@ Random.seed!(2025)
 # This gives RRTMGP a realistic atmospheric column (including the stratosphere)
 # while keeping the total cell count modest.
 
-Nx = 256
+Nx = 128
 Lx = 12800   # 12.8 km
 
 arch = GPU()
 Oceananigans.defaults.FloatType = Float32
 
 z = PiecewiseStretchedDiscretization(
-    z  = [0, 3000, 8000, 25000],
+    z  = [0, 3000, 8000, 15000],
     Δz = [100,  100, 1000,  1000])
 
 Nz = length(z) - 1
@@ -109,7 +109,7 @@ background_atmosphere = BackgroundAtmosphere(
 # time step, keeping both the bulk fluxes and RRTMGP in sync.
 
 T̄ₛ = 300   # Mean surface temperature [K]
-ΔTₛ = 10   # Diurnal amplitude [K]
+ΔTₛ = 20   # Diurnal amplitude [K]
 
 Tₛ = Field{Center, Center, Nothing}(grid)
 set!(Tₛ, T̄ₛ - ΔTₛ)  # Start at midnight minimum
@@ -120,13 +120,15 @@ set!(Tₛ, T̄ₛ - ΔTₛ)  # Start at midnight minimum
 # midnight on the spring equinox (March 20). The sun rises at t ≈ 6 h,
 # reaches noon at t ≈ 12 h, and sets at t ≈ 18 h.
 
+latitude = 15 # 15°N
+
 radiation = RadiativeTransferModel(grid, AllSkyOptics(), constants;
                                    surface_temperature = Tₛ,
                                    surface_albedo = 0.20,
                                    surface_emissivity = 0.95,
                                    solar_constant = 1361,
                                    background_atmosphere,
-                                   coordinate = (0.0, 15.0),
+                                   coordinate = (0, latitude),
                                    epoch = DateTime(2020, 3, 20, 0, 0, 0),
                                    schedule = TimeInterval(5minutes),
                                    liquid_effective_radius = ConstantRadiusParticles(10e-6),
@@ -139,10 +141,9 @@ radiation = RadiativeTransferModel(grid, AllSkyOptics(), constants;
 # drives strong upward fluxes; at night Tₛ < Tair can produce downward fluxes
 # that cool the boundary layer.
 
-Cᴰ = 1.0e-3
-Cᵀ = 1.0e-3
+Cᴰ = Cᵀ = 1e-3
 Cᵛ = 1.2e-3
-Uᵍ = 1.0  # Gustiness [m/s]
+Uᵍ = 1  # Gustiness [m/s]
 
 ρθ_flux = BulkSensibleHeatFlux(coefficient=Cᵀ, gustiness=Uᵍ, surface_temperature=Tₛ)
 ρqᵗ_flux = BulkVaporFlux(coefficient=Cᵛ, gustiness=Uᵍ, surface_temperature=Tₛ)
@@ -189,6 +190,7 @@ forcing = (; ρe=sponge)
 
 # ## Model assembly
 
+coriolis = FPlane(; latitude)
 boundary_conditions = (ρθ=ρθ_bcs, ρqᵗ=ρqᵗ_bcs, ρu=ρu_bcs)
 
 weno_order = 5
@@ -199,45 +201,45 @@ scalar_advection = (ρθ  = WENO(order=weno_order),
 
 model = AtmosphereModel(grid; dynamics, microphysics, radiation, forcing,
                         momentum_advection, scalar_advection,
-                        boundary_conditions)
+                        boundary_conditions, coriolis)
 
 # ## Initial conditions
 #
 # The sounding has a dry-adiabatic sub-cloud layer (0–1 km) capped by a
-# conditionally unstable troposphere (6.5 K/km lapse rate) that transitions
+# conditionally unstable troposphere (5 K/km lapse rate) that transitions
 # to an isothermal stratosphere at 210 K. Moisture is 20 g/kg at the surface
 # with a 2.5 km scale height, typical of the tropical maritime boundary layer.
 
 function Tᵇᵍ(z)
-    T₀ = 300.0
-    T_strat = 210.0
-    if z ≤ 1000
-        T = T₀ - 9.8e-3 * z
-    else
-        T = T₀ - 9.8e-3 * 1000 - 6.5e-3 * (z - 1000)
-    end
-    return max(T, T_strat)
+    T₀ = 300
+    Tˢᵗ = 210 # stratosphere temperature
+    T = T₀ - 1e-3 * max(z, 1000) - 5e-3 * max(0, z - 1000)
+    return max(T, Tˢᵗ)
 end
-
-qᵗᵇᵍ(z) = 0.020 * exp(-z / 2500)
 
 uᵢ(x, z) = -5 * max(1 - z / 3000, 0)
 
 # Random perturbations in the lowest 1 km trigger convection.
 
-δT = 2.0
-δq = 2e-3
+δT = 2
+δℋ = 1e-2
 zδ = 1000
 
 ϵ() = rand() - 0.5
 Tᵢ(x, z) = Tᵇᵍ(z) + δT * ϵ() * (z < zδ)
-qᵢ(x, z) = qᵗᵇᵍ(z) + δq * ϵ() * (z < zδ)
+ℋᵢ(x, z) = (0.5 + δℋ * ϵ()) * (z < zδ)
 
-# We recompute the reference state from the initial profiles for Float32 accuracy,
-# then set initial conditions using temperature (not potential temperature).
+# After setting initial conditions, we recompute the reference state from the
+# horizontally-averaged model state. This is important for Float32 accuracy in
+# tall domains: the default dry-adiabat reference state diverges from the actual
+# stratospheric profile, causing large density errors that overwhelm Float32
+# precision. `set_to_mean!` adjusts `ρᵣ` to match the current state while
+# rescaling density-weighted prognostic fields to preserve specific quantities.
 
-compute_reference_state!(reference_state, Tᵇᵍ, qᵗᵇᵍ, constants)
-set!(model; T=Tᵢ, qᵗ=qᵢ, u=uᵢ)
+set!(model; T=Tᵢ, ℋ=ℋᵢ, u=uᵢ)
+
+reference_state = model.dynamics.reference_state
+set_to_mean!(reference_state, model, rescale_densities=true)
 
 T = model.temperature
 qᵗ = model.specific_moisture
@@ -254,8 +256,8 @@ qˡ = model.microphysical_fields.qˡ
 # We run for two full diurnal cycles (48 hours) starting at midnight,
 # so the on/off pattern of convection repeats convincingly.
 
-simulation = Simulation(model; Δt=1, stop_time=48hours)
-conjure_time_step_wizard!(simulation, cfl=0.5, max_Δt=10)
+simulation = Simulation(model; Δt=1, stop_time=3days)
+conjure_time_step_wizard!(simulation, cfl=0.7)
 
 # ## Surface temperature callback
 #
@@ -265,8 +267,7 @@ conjure_time_step_wizard!(simulation, cfl=0.5, max_Δt=10)
 
 function update_surface_temperature!(sim)
     t = time(sim)
-    day = 24 * 60 * 60  # seconds in a day
-    t_peak = 14 * 60 * 60  # peak at 14:00 local (2 pm)
+    t_peak = 14hour  # peak at 14:00 local (2 pm)
     Tₛ_now = T̄ₛ + ΔTₛ * cos(2π * (t - t_peak) / day)
     set!(Tₛ, Tₛ_now)
     return nothing
@@ -297,17 +298,18 @@ function progress(sim)
     return nothing
 end
 
-add_callback!(simulation, progress, IterationInterval(500))
+add_callback!(simulation, progress, IterationInterval(1000))
 
 # ## Output
 #
 # Horizontally-averaged profiles are saved every hour (time-averaged) and 2D
 # slices every 10 minutes for animation.
 
-qᵛ = model.microphysical_fields.qᵛ
-Q = radiation.flux_divergence
 
-outputs = (; u, w, T, qˡ, qᵛ, Q)
+qᵛ = model.microphysical_fields.qᵛ
+Fᴿ = radiation.flux_divergence
+
+outputs = (; u, w, T, qˡ, qᵛ, Fᴿ)
 avg_outputs = NamedTuple(name => Average(outputs[name], dims=1) for name in keys(outputs))
 
 filename = "radiative_convection"
@@ -319,7 +321,7 @@ simulation.output_writers[:averages] = JLD2Writer(model, avg_outputs;
                                                   schedule = AveragedTimeInterval(1hour),
                                                   overwrite_existing = true)
 
-slice_outputs = (; w, qˡ, T)
+slice_outputs = (; w, qᵛ, T)
 simulation.output_writers[:slices] = JLD2Writer(model, slice_outputs;
                                                 filename = slices_filename,
                                                 schedule = TimeInterval(10minutes),
@@ -329,52 +331,50 @@ simulation.output_writers[:slices] = JLD2Writer(model, slice_outputs;
 run!(simulation)
 @info "Simulation completed!"
 
-# ## Mean profile evolution
+# ## Hovmöller diagrams of mean profile evolution
 #
-# Hourly-averaged profiles reveal the diurnal modulation of the boundary layer.
-# Noon profiles show a warm, moist, cloud-topped boundary layer, while midnight
-# profiles show a cooler, drier column with little cloud.
+# Time–height Hovmöller diagrams show how the horizontally-averaged temperature,
+# cloud liquid water, and radiative flux divergence evolve over two diurnal cycles.
+# The vertical axis is zoomed to the lowest 6 km where the convective dynamics live.
 
 Tts  = FieldTimeSeries(averages_filename, "T")
-qˡts = FieldTimeSeries(averages_filename, "qˡ")
-Qts  = FieldTimeSeries(averages_filename, "Q")
+qᵛts = FieldTimeSeries(averages_filename, "qᵛ")
+Fᴿts = FieldTimeSeries(averages_filename, "Fᴿ")
 
 times = Tts.times
 Nt = length(times)
 
-# We plot profiles at six times across the two days and zoom in on the lowest
-# 6 km where the clouds and convective dynamics are.
+z = Oceananigans.Grids.znodes(Tts.grid, Center())
+t_hours = times ./ 3600
 
-snapshot_hours = [0, 6, 12, 18, 24, 36]
-snapshot_labels = ["Midnight (t = 0)", "Sunrise (t = 6 h)", "Noon (t = 12 h)",
-                   "Sunset (t = 18 h)", "Midnight day 2 (t = 24 h)", "Noon day 2 (t = 36 h)"]
-snapshot_colors = [:midnightblue, :goldenrod, :orangered, :purple, :steelblue, :red]
+# Build time–height matrices from the averaged profiles.
 
-fig = Figure(size=(1400, 450), fontsize=14)
+T_zt  = permutedims(interior(Tts,  1, 1, :, :))
+T_zt .-= mean(T_zt, dims=1)
+qᵛ_zt = permutedims(interior(qᵛts, 1, 1, :, :))
+Fᴿ_zt = permutedims(interior(Fᴿts, 1, 1, :, :))
 
-axT  = Axis(fig[1, 1]; xlabel="T (K)", ylabel="z (km)", limits=(nothing, (0, 6)))
-axqˡ = Axis(fig[1, 2]; xlabel="qˡ (kg/kg)", limits=(nothing, (0, 6)))
-axQ  = Axis(fig[1, 3]; xlabel="Q (W/m³)", limits=(nothing, (0, 6)))
+fig = Figure(size=(900, 800), fontsize=14)
 
-for (ih, hour) in enumerate(snapshot_hours)
-    n = findfirst(t -> t ≥ hour * 3600, times)
-    isnothing(n) && continue
+zmax = 12000
 
-    T_n  = view(Tts[n],  1, 1, :)
-    qˡ_n = view(qˡts[n], 1, 1, :)
-    Q_n  = view(Qts[n],  1, 1, :)
+axT  = Axis(fig[1, 1]; ylabel="z (m)", title="Temperature anomaly (K)",
+            limits=((t_hours[1], t_hours[end]), (0, zmax)))
+axqᵛ = Axis(fig[2, 1]; ylabel="z (m)", title="Specific humidity (kg/kg)",
+            limits=((t_hours[1], t_hours[end]), (0, zmax)))
+axF  = Axis(fig[3, 1]; ylabel="z (m)", xlabel="time (hours)", title="Radiative flux divergence (W/m³)",
+            limits=((t_hours[1], t_hours[end]), (0, zmax)))
 
-    lines!(axT,  T_n;  color=snapshot_colors[ih], label=snapshot_labels[ih])
-    lines!(axqˡ, qˡ_n; color=snapshot_colors[ih])
-    lines!(axQ,  Q_n;  color=snapshot_colors[ih])
-end
+hidexdecorations!(axT;  grid=false)
+hidexdecorations!(axqᵛ; grid=false)
 
-vlines!(axQ, 0; color=:gray50, linestyle=:dash, linewidth=1)
-hideydecorations!(axqˡ; grid=false)
-hideydecorations!(axQ; grid=false)
+hmT  = heatmap!(axT,  t_hours, z, T_zt;  colormap=:balance, colorrange=(-2, 2))
+hmqᵛ = heatmap!(axqᵛ, t_hours, z, qᵛ_zt; colormap=:dense, colorrange=(0, 1e-2))
+hmF  = heatmap!(axF,  t_hours, z, Fᴿ_zt; colormap=:balance, colorrange=(-0.1, 0.1))
 
-fig[0, 1:3] = Label(fig, "Diurnal Cycle — Mean Profiles", fontsize=16, tellwidth=false)
-Legend(fig[2, :], axT; orientation=:horizontal, framevisible=false, tellwidth=false)
+Colorbar(fig[1, 2], hmT;  label="T′ (K)")
+Colorbar(fig[2, 2], hmqᵛ; label="qᵛ (kg/kg)")
+Colorbar(fig[3, 2], hmF;  label="Fᴿ (W/m³)")
 
 save("radiative_convection_profiles.png", fig) #src
 fig
@@ -385,35 +385,35 @@ fig
 # to the lowest 5 km where the convective dynamics and clouds live.
 
 wts  = FieldTimeSeries(slices_filename, "w")
-qˡts_slice = FieldTimeSeries(slices_filename, "qˡ")
+qᵛts = FieldTimeSeries(slices_filename, "qᵛ")
 
-slice_times = wts.times
-Nt_slices = length(slice_times)
+times = wts.times
+Nt = length(times)
 
-wlim  = max(maximum(abs, wts) / 2, 1f-6)
-qˡlim = max(maximum(qˡts_slice) / 2, 1f-6)
+wlim  = maximum(abs, wts) / 4
+qᵛlim = maximum(qᵛts) / 2
 
 fig = Figure(size=(1000, 600), fontsize=14)
 
-n = Observable(Nt_slices)
-axw  = Axis(fig[1, 1]; xlabel="x (km)", ylabel="z (km)", title="w (m/s)", limits=(nothing, (0, 5)))
-axqˡ = Axis(fig[1, 2]; xlabel="x (km)", ylabel="z (km)", title="qˡ (kg/kg)", limits=(nothing, (0, 5)))
+n = Observable(Nt)
+axw  = Axis(fig[1, 1]; xlabel="x (km)", ylabel="z (km)", title="w (m/s)", limits=(nothing, (0, 5e3)))
+axqᵛ = Axis(fig[1, 2]; xlabel="x (km)", ylabel="z (km)", title="qᵛ (kg/kg)", limits=(nothing, (0, 5e3)))
 
-title = @lift "Diurnal Radiative Convection at t = " * prettytime(slice_times[$n])
+title = @lift "Diurnal Radiative Convection at t = " * prettytime(times[$n])
 fig[0, :] = Label(fig, title, fontsize=16, tellwidth=false)
 
-w_n  = @lift wts[$n]
-qˡ_n = @lift qˡts_slice[$n]
+wn  = @lift wts[$n]
+qᵛn = @lift qᵛts[$n]
 
-hmw  = heatmap!(axw,  w_n;  colormap=:balance, colorrange=(-wlim, wlim))
-hmqˡ = heatmap!(axqˡ, qˡ_n; colormap=:dense,   colorrange=(0, qˡlim))
+hmw  = heatmap!(axw,  wn;  colormap=:balance, colorrange=(-wlim, wlim))
+hmqᵛ = heatmap!(axqᵛ, qᵛn; colormap=:dense,   colorrange=(0, qᵛlim))
 
 Colorbar(fig[2, 1], hmw;  vertical=false, label="w (m/s)")
-Colorbar(fig[2, 2], hmqˡ; vertical=false, label="qˡ (g/kg)")
+Colorbar(fig[2, 2], hmqᵛ; vertical=false, label="qᵛ (g/kg)")
 
-hideydecorations!(axqˡ; grid=false)
+hideydecorations!(axqᵛ; grid=false)
 
-CairoMakie.record(fig, "radiative_convection.mp4", 1:Nt_slices; framerate=12) do nn
+CairoMakie.record(fig, "radiative_convection.mp4", 1:Nt; framerate=12) do nn
     n[] = nn
 end
 nothing #hide
