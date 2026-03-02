@@ -201,7 +201,7 @@ nothing #hide
 # We use warm-phase saturation adjustment microphysics and 9th-order WENO advection.
 
 microphysics = SaturationAdjustment(equilibrium=WarmPhaseEquilibrium())
-momentum_advection = WENO(order=9, minimum_upwind_bias_order=1)
+momentum_advection = WENO(order=9, minimum_upwind_biased_order=1)
 scalar_advection = WENO(order=9)
 
 model = AtmosphereModel(grid; dynamics, coriolis, microphysics, momentum_advection, scalar_advection, forcing,
