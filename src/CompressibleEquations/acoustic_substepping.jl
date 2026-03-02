@@ -367,11 +367,11 @@ end
         ρⁱ = ρ[i, j, k]
         pⁱ = p[i, j, k]
         Tⁱ = T[i, j, k]
-        qᵛ = specific_moisture[i, j, k]
+        qᵛᵉ = specific_moisture[i, j, k]
     end
 
     # Compute moisture fractions and mixture properties
-    q = grid_moisture_fractions(i, j, k, grid, microphysics, ρⁱ, qᵛ, microphysical_fields)
+    q = grid_moisture_fractions(i, j, k, grid, microphysics, ρⁱ, qᵛᵉ, microphysical_fields)
     Rᵐ = mixture_gas_constant(q, constants)
     cᵖᵐ = mixture_heat_capacity(q, constants)
     cᵛᵐ = cᵖᵐ - Rᵐ

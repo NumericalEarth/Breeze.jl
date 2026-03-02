@@ -540,13 +540,13 @@ function (d::MoistPotentialTemperatureKernelFunction)(i, j, k, grid)
     @inbounds begin
         p = d.pressure[i, j, k]
         ρ = d.density[i, j, k]
-        qᵛ = d.specific_moisture[i, j, k]
+        qᵛᵉ = d.specific_moisture[i, j, k]
         pˢᵗ = d.standard_pressure
         T = d.temperature[i, j, k]
     end
 
     constants = d.thermodynamic_constants
-    q = grid_moisture_fractions(i, j, k, grid, d.microphysics, ρ, qᵛ, d.microphysical_fields)
+    q = grid_moisture_fractions(i, j, k, grid, d.microphysics, ρ, qᵛᵉ, d.microphysical_fields)
     qᵛ = q.vapor
     qˡ = q.liquid
     qⁱ = q.ice

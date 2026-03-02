@@ -104,11 +104,11 @@ end
 
     @inbounds begin
         ρ = density[i, j, k]
-        qᵛ = specific_moisture[i, j, k]
+        qᵛᵉ = specific_moisture[i, j, k]
     end
 
     # Compute moisture fractions
-    q = grid_moisture_fractions(i, j, k, grid, microphysics, ρ, qᵛ, microphysical_fields)
+    q = grid_moisture_fractions(i, j, k, grid, microphysics, ρ, qᵛᵉ, microphysical_fields)
     Rᵐ = mixture_gas_constant(q, constants)
     cᵖᵐ = mixture_heat_capacity(q, constants)
     cᵛᵐ = cᵖᵐ - Rᵐ

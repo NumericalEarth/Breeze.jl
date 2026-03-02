@@ -469,11 +469,12 @@ end
 # Fallback for NamedTuple microphysical state (used by parcel models with prognostic microphysics).
 # NamedTuple contains specific moisture fractions computed from ρ-weighted prognostics.
 # Parcel models store total moisture in qᵗ, so we subtract condensate to get vapor.
-@inline function moisture_fractions(microphysics, ℳ::NamedTuple, qᵛ)
-    qˡ = zero(qᵛ)
-    qˡ += haskey(ℳ, :qᶜˡ) ? ℳ.qᶜˡ : zero(qᵛ)
-    qˡ += haskey(ℳ, :qʳ) ? ℳ.qʳ : zero(qᵛ)
-    return MoistureMassFractions(max(zero(qᵛ), qᵛ), qˡ)
+@inline function moisture_fractions(microphysics, ℳ::NamedTuple, qᵗ)
+    qˡ = zero(qᵗ)
+    qˡ += haskey(ℳ, :qᶜˡ) ? ℳ.qᶜˡ : zero(qᵗ)
+    qˡ += haskey(ℳ, :qʳ) ? ℳ.qʳ : zero(qᵗ)
+    qᵛ = max(zero(qᵗ), qᵗ - qˡ)
+    return MoistureMassFractions(qᵛ, qˡ)
 end
 
 """

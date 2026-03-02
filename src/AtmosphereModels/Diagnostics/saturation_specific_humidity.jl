@@ -114,14 +114,14 @@ function (d::SaturationSpecificHumidityKernelFunction)(i, j, k, grid)
     surface = equilibrated_surface(equilibrium, T)
 
     if d.flavor isa PrognosticFlavor
-        qᵛ = @inbounds d.specific_moisture[i, j, k]
-        q = grid_moisture_fractions(i, j, k, grid, d.microphysics, ρᵣ, qᵛ, d.microphysical_fields)
+        qᵛᵉ = @inbounds d.specific_moisture[i, j, k]
+        q = grid_moisture_fractions(i, j, k, grid, d.microphysics, ρᵣ, qᵛᵉ, d.microphysical_fields)
         ρ = density(T, pᵣ, q, constants)
         return saturation_specific_humidity(T, ρ, constants, surface)
 
     elseif d.flavor isa EquilibriumFlavor
-        qᵛ = @inbounds d.specific_moisture[i, j, k]
-        return equilibrium_saturation_specific_humidity(T, pᵣ, qᵛ, constants, surface)
+        qᵛᵉ = @inbounds d.specific_moisture[i, j, k]
+        return equilibrium_saturation_specific_humidity(T, pᵣ, qᵛᵉ, constants, surface)
 
     elseif d.flavor isa TotalMoistureFlavor
         return saturation_total_specific_moisture(T, pᵣ, constants, surface)

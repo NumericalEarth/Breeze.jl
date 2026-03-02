@@ -217,9 +217,9 @@ using Breeze
 
 T₀(x, y) = 290 + 2 * sign(cos(2π * x / 20e3))
 
-ρqᵉ_bc = BulkVaporFlux(coefficient = 1e-3,
-                       gustiness = 0.1,
-                       surface_temperature = T₀)
+moisture_bc = BulkVaporFlux(coefficient = 1e-3,
+                            gustiness = 0.1,
+                            surface_temperature = T₀)
 
 # output
 FluxBoundaryCondition: BulkVaporFluxFunction(coefficient=0.001, gustiness=0.1)

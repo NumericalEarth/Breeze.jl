@@ -55,10 +55,10 @@ end
     specific_energy = formulation.specific_energy
     ρ_field = dynamics_density(dynamics)
     @inbounds ρ = ρ_field[i, j, k]
-    @inbounds qᵛ = specific_moisture[i, j, k]
+    @inbounds qᵛᵉ = specific_moisture[i, j, k]
 
     # Compute moisture fractions first
-    q = grid_moisture_fractions(i, j, k, grid, microphysics, ρ, qᵛ, microphysical_fields)
+    q = grid_moisture_fractions(i, j, k, grid, microphysics, ρ, qᵛᵉ, microphysical_fields)
     𝒰 = diagnose_thermodynamic_state(i, j, k, grid, formulation, dynamics, q)
 
     # Compute the buoyancy flux term, ρᵣ w b
@@ -129,14 +129,14 @@ end
     @inbounds begin
         pᵣ = dynamics_pressure(dynamics)[i, j, k]
         ρᵣ = dynamics_density(dynamics)[i, j, k]
-        qᵛ = specific_moisture[i, j, k]
+        qᵛᵉ = specific_moisture[i, j, k]
         θ = potential_temperature[i, j, k]
     end
 
     pˢᵗ = standard_pressure(dynamics)
-    q = grid_moisture_fractions(i, j, k, grid, microphysics, ρᵣ, qᵛ, microphysical_fields)
+    q = grid_moisture_fractions(i, j, k, grid, microphysics, ρᵣ, qᵛᵉ, microphysical_fields)
     𝒰θ₀ = LiquidIcePotentialTemperatureState(θ, q, pˢᵗ, pᵣ)
-    𝒰θ₁ = maybe_adjust_thermodynamic_state(𝒰θ₀, microphysics, qᵛ, constants)
+    𝒰θ₁ = maybe_adjust_thermodynamic_state(𝒰θ₀, microphysics, qᵛᵉ, constants)
     T = temperature(𝒰θ₁, constants)
 
     z = znode(i, j, k, grid, c, c, c)
@@ -201,12 +201,12 @@ end
     @inbounds begin
         pᵣ = dynamics_pressure(dynamics)[i, j, k]
         ρᵣ = dynamics_density(dynamics)[i, j, k]
-        qᵛ = specific_moisture[i, j, k]
+        qᵛᵉ = specific_moisture[i, j, k]
         T = temperature_field[i, j, k]
     end
 
     # Get moisture fractions (vapor only for unsaturated air)
-    q = grid_moisture_fractions(i, j, k, grid, microphysics, ρᵣ, qᵛ, microphysical_fields)
+    q = grid_moisture_fractions(i, j, k, grid, microphysics, ρᵣ, qᵛᵉ, microphysical_fields)
 
     # Convert temperature to static energy
     z = znode(i, j, k, grid, c, c, c)

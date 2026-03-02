@@ -239,19 +239,20 @@ end
     ρ_field = dynamics_density(dynamics)
     @inbounds begin
         ρ = ρ_field[i, j, k]
-        ρqₘ = moisture_density[i, j, k]
-        qₘ = ρqₘ / ρ
-        specific_moisture[i, j, k] = qₘ
+        ρqᵛᵉ = moisture_density[i, j, k]
+        # qᵛᵉ: vapor specific humidity (non-equilibrium) or equilibrium moisture (saturation adjustment)
+        qᵛᵉ = ρqᵛᵉ / ρ
+        specific_moisture[i, j, k] = qᵛᵉ
     end
 
     # Compute moisture fractions first (needed by diagnose_thermodynamic_state)
-    q = grid_moisture_fractions(i, j, k, grid, microphysics, ρ, qₘ, microphysical_fields)
+    q = grid_moisture_fractions(i, j, k, grid, microphysics, ρ, qᵛᵉ, microphysical_fields)
 
     𝒰₀ = diagnose_thermodynamic_state(i, j, k, grid, formulation, dynamics, q)
 
     # Adjust the thermodynamic state if using a microphysics scheme
     # that invokes saturation adjustment
-    𝒰₁ = maybe_adjust_thermodynamic_state(𝒰₀, microphysics, qₘ, constants)
+    𝒰₁ = maybe_adjust_thermodynamic_state(𝒰₀, microphysics, qᵛᵉ, constants)
 
     update_microphysical_fields!(microphysical_fields, i, j, k, grid,
                                  microphysics, ρ, 𝒰₁, constants)
@@ -305,8 +306,8 @@ function compute_tendencies!(model::AtmosphereModel)
         model.advection[moist_name],
         common_args...)
 
-    Gρqₘ = getproperty(model.timestepper.Gⁿ, moist_name)
-    launch!(arch, grid, :xyz, compute_scalar_tendency!, Gρqₘ, grid, ρq_args)
+    Gρqᵛᵉ = getproperty(model.timestepper.Gⁿ, moist_name)
+    launch!(arch, grid, :xyz, compute_scalar_tendency!, Gρqᵛᵉ, grid, ρq_args)
 
     #####
     ##### Tracer density tendencies

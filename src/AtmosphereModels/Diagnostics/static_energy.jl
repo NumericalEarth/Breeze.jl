@@ -94,11 +94,11 @@ end
 function (d::StaticEnergyKernelFunction)(i, j, k, grid)
     @inbounds begin
         ρᵣ = d.reference_state.density[i, j, k]
-        qᵛ = d.specific_moisture[i, j, k]
+        qᵛᵉ = d.specific_moisture[i, j, k]
         T = d.temperature[i, j, k]
     end
 
-    q = grid_moisture_fractions(i, j, k, grid, d.microphysics, ρᵣ, qᵛ, d.microphysical_fields)
+    q = grid_moisture_fractions(i, j, k, grid, d.microphysics, ρᵣ, qᵛᵉ, d.microphysical_fields)
     cᵖᵐ = Thermodynamics.mixture_heat_capacity(q, d.thermodynamic_constants)
 
     g = d.thermodynamic_constants.gravitational_acceleration

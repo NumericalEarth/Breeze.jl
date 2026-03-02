@@ -141,14 +141,15 @@ function (d::AdjustmentRH)(i, j, k, grid)
         pᵣ = d.reference_state.pressure[i, j, k]
         ρᵣ = d.reference_state.density[i, j, k]
         T = d.temperature[i, j, k]
-        qₘ = d.specific_moisture[i, j, k]
+        # qᵛᵉ: vapor (non-equilibrium) or equilibrium moisture (saturation adjustment)
+        qᵛᵉ = d.specific_moisture[i, j, k]
     end
 
     constants = d.thermodynamic_constants
     equil = microphysics_phase_equilibrium(d.microphysics)
 
     # Compute moisture fractions (vapor, liquid, ice)
-    q = grid_moisture_fractions(i, j, k, grid, d.microphysics, ρᵣ, qₘ, d.microphysical_fields)
+    q = grid_moisture_fractions(i, j, k, grid, d.microphysics, ρᵣ, qᵛᵉ, d.microphysical_fields)
 
     # Vapor specific humidity
     qᵛ = q.vapor

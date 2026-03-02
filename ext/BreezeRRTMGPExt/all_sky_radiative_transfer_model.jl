@@ -319,10 +319,10 @@ end
     @inbounds begin
         ρ = ρᵣ[i, j, k]
         Δz = Δzᶜᶜᶜ(i, j, k, grid)
-        qᵛ = specific_moisture[i, j, k]
+        qᵛᵉ = specific_moisture[i, j, k]
 
         # Get moisture fractions from microphysics
-        q = grid_moisture_fractions(i, j, k, grid, microphysics, ρ, qᵛ, microphysical_fields)
+        q = grid_moisture_fractions(i, j, k, grid, microphysics, ρ, qᵛᵉ, microphysical_fields)
 
         # Extract liquid and ice mass fractions
         qˡ = q.liquid
