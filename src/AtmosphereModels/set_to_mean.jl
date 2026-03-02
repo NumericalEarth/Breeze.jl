@@ -18,7 +18,7 @@ momentum fields) automatically.
 function rescale_density_weighted_fields!(model, ρᵣ_old)
     ρᵣ = dynamics_density(model.dynamics)
     for field in prognostic_fields(model)
-        field .= field * ρᵣ / ρᵣ_old
+        parent(field) ./= parent(ρᵣ) ./ parent(ρᵣ_old)
     end
     return nothing
 end
