@@ -73,9 +73,9 @@ The superscripts u, w, s denote unstable, weakly stable, and strongly stable
 regimes respectively. Subscript indices follow the original paper.
 
 Three regimes:
-- **Unstable** (``Riᴮ < Riᴮₜ``): Eq. (12), where ``Riᴮₜ`` is `stable_unstable_transition`
-- **Weakly stable** (``Riᴮₜ ≤ Riᴮ ≤ Riᴮₛ``): Eq. (14), where ``Riᴮₛ`` is `strongly_stable_transition`
-- **Strongly stable** (``Riᴮ > Riᴮₛ``): Eq. (16)
+- **Unstable** (``Riᴮ <`` `stable_unstable_transition`): Eq. (12)
+- **Weakly stable** (`stable_unstable_transition` ``≤ Riᴮ ≤`` `strongly_stable_transition`): Eq. (14)
+- **Strongly stable** (``Riᴮ >`` `strongly_stable_transition`): Eq. (16)
 
 # References
 
