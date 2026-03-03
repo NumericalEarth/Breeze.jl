@@ -378,7 +378,7 @@ end
 # Used by parcel models. Grid models use grid_moisture_fractions instead.
 @inline function AM.moisture_fractions(bμp::WarmPhase1M, ℳ::WarmPhaseOneMomentState, qᵉ)
     qˡ = ℳ.qᶜˡ + ℳ.qʳ
-    qᵛ = qᵉ - qˡ
+    qᵛ = qᵉ - ℳ.qᶜˡ
     return MoistureMassFractions(qᵛ, qˡ)
 end
 
@@ -387,7 +387,7 @@ end
 @inline function AM.moisture_fractions(bμp::MP1M, ℳ::MixedPhaseOneMomentState, qᵉ)
     qˡ = ℳ.qᶜˡ + ℳ.qʳ
     qⁱ = ℳ.qᶜⁱ + ℳ.qˢ
-    qᵛ = qᵉ - qˡ - qⁱ
+    qᵛ = qᵉ - ℳ.qᶜˡ - ℳ.qᶜⁱ
     return MoistureMassFractions(qᵛ, qˡ, qⁱ)
 end
 
@@ -405,16 +405,16 @@ end
 # maybe_adjust_thermodynamic_state will then adjust to equilibrium for the current state.
 @inline function AM.grid_moisture_fractions(i, j, k, grid, bμp::WP1M, ρ, qᵉ, μ)
     qᶜˡ = @inbounds μ.qᶜˡ[i, j, k]
-    qʳ = @inbounds μ.ρqʳ[i, j, k] / ρ
+    qʳ  = @inbounds μ.ρqʳ[i, j, k] / ρ
     qˡ = qᶜˡ + qʳ
-    qᵛ = qᵉ - qˡ
+    qᵛ = qᵉ - qᶜˡ
     return MoistureMassFractions(qᵛ, qˡ)
 end
 
 # Warm-phase non-equilibrium: prognostic stores true vapor; construct fractions directly.
 @inline function AM.grid_moisture_fractions(i, j, k, grid, bμp::WPNE1M, ρ, qᵛ, μ)
     qᶜˡ = @inbounds μ.ρqᶜˡ[i, j, k] / ρ
-    qʳ = @inbounds μ.ρqʳ[i, j, k] / ρ
+    qʳ  = @inbounds μ.ρqʳ[i, j, k] / ρ
     qˡ = qᶜˡ + qʳ
     return MoistureMassFractions(qᵛ, qˡ)
 end
@@ -423,20 +423,20 @@ end
 @inline function AM.grid_moisture_fractions(i, j, k, grid, bμp::MP1M, ρ, qᵉ, μ)
     qᶜˡ = @inbounds μ.qᶜˡ[i, j, k]
     qᶜⁱ = @inbounds μ.qᶜⁱ[i, j, k]
-    qʳ = @inbounds μ.ρqʳ[i, j, k] / ρ
-    qˢ = @inbounds μ.ρqˢ[i, j, k] / ρ
+    qʳ  = @inbounds μ.ρqʳ[i, j, k] / ρ
+    qˢ  = @inbounds μ.ρqˢ[i, j, k] / ρ
     qˡ = qᶜˡ + qʳ
     qⁱ = qᶜⁱ + qˢ
-    qᵛ = qᵉ - qˡ - qⁱ
+    qᵛ = qᵉ - qᶜˡ - qᶜⁱ
     return MoistureMassFractions(qᵛ, qˡ, qⁱ)
 end
 
 # Mixed-phase non-equilibrium: prognostic stores true vapor; construct fractions directly.
 @inline function AM.grid_moisture_fractions(i, j, k, grid, bμp::MPNE1M, ρ, qᵛ, μ)
     qᶜˡ = @inbounds μ.ρqᶜˡ[i, j, k] / ρ
-    qʳ = @inbounds μ.ρqʳ[i, j, k] / ρ
+    qʳ  = @inbounds μ.ρqʳ[i, j, k]  / ρ
     qᶜⁱ = @inbounds μ.ρqᶜⁱ[i, j, k] / ρ
-    qˢ = @inbounds μ.ρqˢ[i, j, k] / ρ
+    qˢ  = @inbounds μ.ρqˢ[i, j, k]  / ρ
     qˡ = qᶜˡ + qʳ
     qⁱ = qᶜⁱ + qˢ
     return MoistureMassFractions(qᵛ, qˡ, qⁱ)
