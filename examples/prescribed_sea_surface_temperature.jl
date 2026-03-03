@@ -294,7 +294,7 @@ qᵛ = specific_humidity(model)
 
 # ## Surface flux diagnostics
 #
-# We use Oceananigans' [`BoundaryConditionOperation`](https://clima.github.io/OceananigansDocumentation/stable/appendix/library/#Oceananigans.Models.BoundaryConditionOperation-Tuple{Field,%20Symbol,%20Oceananigans.AbstractModel})
+# We use Oceananigans' [`BoundaryConditionOperation`](https://clima.github.io/OceananigansDocumentation/stable/appendix/library#Oceananigans.Models.BoundaryConditionOperation-Tuple{Field,%20Symbol,%20Oceananigans.AbstractModel})
 # to extract the surface flux values from the boundary conditions. These 1D fields
 # (varying only in x) represent the actual flux values applied at the
 # ocean-atmosphere interface.
