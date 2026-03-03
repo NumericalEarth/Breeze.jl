@@ -436,9 +436,10 @@ end
 end
 
 # Gridless version for parcel models.
-# Input qᵛ is vapor; subtract condensate to get vapor.
-@inline function AtmosphereModels.moisture_fractions(bμp::WPNE2M, ℳ::WarmPhaseTwoMomentState, qᵛ)
+# Input qᵗ is total moisture; subtract condensate to get vapor.
+@inline function AtmosphereModels.moisture_fractions(bμp::WPNE2M, ℳ::WarmPhaseTwoMomentState, qᵗ)
     qˡ = ℳ.qᶜˡ + ℳ.qʳ
+    qᵛ = max(zero(qᵗ), qᵗ - qˡ)
     return MoistureMassFractions(qᵛ, qˡ)
 end
 
