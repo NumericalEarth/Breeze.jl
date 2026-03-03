@@ -16,6 +16,7 @@ using Breeze.Thermodynamics: MoistureMassFractions,
     temperature_from_potential_temperature, saturation_specific_humidity
 
 using Breeze.AtmosphereModels: AtmosphereModels, AtmosphereModel
+using Breeze.TimeSteppers: SSPRungeKutta3
 
 #####
 ##### Vertical velocity formulations
@@ -966,7 +967,7 @@ u^{(3)} = \\frac{1}{3} u^{(0)} + \\frac{2}{3} u^{(2)} + \\frac{2}{3} Δt L(u^{(2
 
 This scheme has CFL coefficient = 1 and is TVD (total variation diminishing).
 """
-function TimeSteppers.time_step!(model::ParcelModel, Δt; callbacks=nothing)
+function TimeSteppers.time_step!(model::AtmosphereModel{<:ParcelDynamics, <:Any, <:Any, <:SSPRungeKutta3}, Δt; callbacks=nothing)
     dynamics = model.dynamics
     ts = dynamics.timestepper
     state = dynamics.state
