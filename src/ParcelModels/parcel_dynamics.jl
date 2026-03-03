@@ -42,7 +42,7 @@ dw/dt = b
 dz/dt = w
 ```
 
-where `B = -g (ρ_parcel - ρ_env) / ρ_env` is the net buoyancy from the density
+where `b = -g (ρᵖ - ρᵉ) / ρᵉ` is the net buoyancy from the density
 difference, including both the virtual temperature effect and condensate loading.
 """
 struct PrognosticVerticalVelocity end
