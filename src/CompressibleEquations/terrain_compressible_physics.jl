@@ -100,17 +100,20 @@ end
     slope_x = ∂x_h_cc * decay
     slope_y = ∂y_h_cc * decay
 
-    # Velocities interpolated to (Center, Center, Face) using Oceananigans operators
-    u_ccf = ℑxᶜᵃᵃ(i, j, k, grid, velocities.u)
-    v_ccf = ℑyᵃᶜᵃ(i, j, k, grid, velocities.v)
+    # Velocities interpolated to (Center, Center, Face).
+    # u is at (Face, Center, Center) → ℑx brings to (Center, Center, Center)
+    #                                 → ℑz brings to (Center, Center, Face)
+    u_ccf = ℑzᵃᵃᶠ(i, j, k, grid, ℑxᶜᵃᵃ, velocities.u)
+    v_ccf = ℑzᵃᵃᶠ(i, j, k, grid, ℑyᵃᶜᵃ, velocities.v)
     @inbounds w_ccf = velocities.w[i, j, k]
 
     # Contravariant vertical velocity
     Ω̃_ijk = w_ccf - slope_x * u_ccf - slope_y * v_ccf
 
-    # Momentum interpolated to (Center, Center, Face)
-    ρu_ccf = ℑxᶜᵃᵃ(i, j, k, grid, momentum.ρu)
-    ρv_ccf = ℑyᵃᶜᵃ(i, j, k, grid, momentum.ρv)
+    # Momentum interpolated to (Center, Center, Face).
+    # ρu is at (Face, Center, Center) → ℑx then ℑz to (Center, Center, Face)
+    ρu_ccf = ℑzᵃᵃᶠ(i, j, k, grid, ℑxᶜᵃᵃ, momentum.ρu)
+    ρv_ccf = ℑzᵃᵃᶠ(i, j, k, grid, ℑyᵃᶜᵃ, momentum.ρv)
     @inbounds ρw_ccf = momentum.ρw[i, j, k]
 
     # Contravariant vertical momentum
