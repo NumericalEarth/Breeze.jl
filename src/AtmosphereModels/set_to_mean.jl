@@ -2,25 +2,64 @@ using ..Thermodynamics: ReferenceState, compute_hydrostatic_reference!
 using Oceananigans: Oceananigans, prognostic_fields
 using Oceananigans.BoundaryConditions: fill_halo_regions!
 using Oceananigans.Fields: interior, ZeroField
+using Oceananigans.Operators: ℑxᶠᵃᵃ, ℑyᵃᶠᵃ, ℑzᵃᵃᶠ
 using Statistics: mean!
 
 """
-    rescale_density_weighted_fields!(model, ρᵣ_old)
+    rescale_density_weighted_fields!(model, ρ⁻)
 
 Rescale all density-weighted prognostic fields so that specific quantities
 (velocity, potential temperature, moisture, etc.) are preserved after a change
 in the reference density `ρᵣ`. Each field is multiplied by `ρᵣ_new / ρᵣ_old`.
 
-`ρᵣ_old` is a `Field` containing the reference density before the update.
-Oceananigans handles interpolation to staggered locations (e.g. face-located
-momentum fields) automatically.
+Momentum fields (ρu, ρv, ρw) live at staggered face locations and require
+interpolation of the cell-centered density; a dedicated kernel handles this.
+All other prognostic fields are cell-centered and rescaled with broadcasting.
 """
-function rescale_density_weighted_fields!(model, ρᵣ_old)
-    ρᵣ = dynamics_density(model.dynamics)
-    for field in prognostic_fields(model)
-        parent(field) .*= parent(ρᵣ) ./ parent(ρᵣ_old)
+function rescale_density_weighted_fields!(model, ρ⁻)
+    grid = model.grid
+    arch = grid.architecture
+    ρ = dynamics_density(model.dynamics)
+
+    # Momentum: kernel with interpolation to face locations
+    launch!(arch, grid, :xyz, _rescale_momentum!, grid, model.momentum, ρ, ρ⁻)
+
+    # Cell-centered prognostic fields: broadcasting
+    formulation_fields = prognostic_fields(model.formulation)
+    for field in formulation_fields
+        parent(field) .*= parent(ρ) ./ parent(ρ⁻)
     end
+
+    parent(model.moisture_density) .*= parent(ρ) ./ parent(ρ⁻)
+
+    μ_names = prognostic_field_names(model.microphysics)
+    for name in μ_names
+        field = model.microphysical_fields[name]
+        parent(field) .*= parent(ρ) ./ parent(ρ⁻)
+    end
+
+    for field in model.tracers
+        parent(field) .*= parent(ρ) ./ parent(ρ⁻)
+    end
+
     return nothing
+end
+
+@kernel function _rescale_momentum!(grid, momentum, ρ, ρ⁻)
+    i, j, k = @index(Global, NTuple)
+    @inbounds begin
+        ρᶠᶜᶜ  = ℑxᶠᵃᵃ(i, j, k, grid, ρ)
+        ρ⁻ᶠᶜᶜ = ℑxᶠᵃᵃ(i, j, k, grid, ρ⁻)
+        momentum.ρu[i, j, k] *= ρᶠᶜᶜ / ρ⁻ᶠᶜᶜ
+
+        ρᶜᶠᶜ  = ℑyᵃᶠᵃ(i, j, k, grid, ρ)
+        ρ⁻ᶜᶠᶜ = ℑyᵃᶠᵃ(i, j, k, grid, ρ⁻)
+        momentum.ρv[i, j, k] *= ρᶜᶠᶜ / ρ⁻ᶜᶠᶜ
+
+        ρᶜᶜᶠ  = ℑzᵃᵃᶠ(i, j, k, grid, ρ)
+        ρ⁻ᶜᶜᶠ = ℑzᵃᵃᶠ(i, j, k, grid, ρ⁻)
+        momentum.ρw[i, j, k] *= ρᶜᶜᶠ / ρ⁻ᶜᶜᶠ
+    end
 end
 
 """
