@@ -111,7 +111,7 @@ The horizontal pressure gradient at constant ``z`` differs from the gradient at 
 ```math
 \left(\frac{\partial p}{\partial x}\right)_z
 = \left(\frac{\partial p}{\partial x}\right)_\zeta
-- \left(\frac{\partial z}{\partial x}\right)_\zeta \frac{\partial p}{\partial \zeta} ,
+- \left(\frac{\partial z}{\partial x}\right)_\zeta \frac{\partial p}{\partial z} ,
 ```
 
 and similarly for ``y``. Oceananigans' finite-difference operators compute

@@ -21,8 +21,8 @@ Arguments
 - `grid`: A grid with `MutableVerticalDiscretization` (created by passing
   `MutableVerticalDiscretization(z_faces)` as the `z` argument to `RectilinearGrid`).
 
-- `topography`: Either a function `h(x, y)` or a 2D array giving the terrain
-  height at each horizontal location.
+- `topography`: A function `h(x, y)` returning the terrain height at each
+  horizontal location.
 
 Keyword Arguments
 =================

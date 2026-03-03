@@ -20,7 +20,7 @@
 ##### so we must use δx/Δx instead of ∂x to avoid double-correcting.
 #####
 
-using Oceananigans.Operators: δxᶠᶜᶜ, δyᶜᶠᶜ, Δx⁻¹ᶠᶜᶜ, Δy⁻¹ᶜᶠᶜ, ∂zᶜᶜᶠ
+using Oceananigans.Operators: δxᶠᶜᶜ, δyᶜᶠᶜ, Δx⁻¹ᶠᶜᶜ, Δy⁻¹ᶜᶠᶜ, ∂zᶜᶜᶠ, Δzᶜᶜᶠ
 using Oceananigans.BoundaryConditions: fill_halo_regions!
 
 using Breeze.TerrainFollowingDiscretization: TerrainMetrics, terrain_slope_x, terrain_slope_y,
@@ -38,7 +38,7 @@ const TerrainCompressibleModel = AtmosphereModel{<:TerrainCompressibleDynamics}
 #####
 
 """
-    compute_contravariant_velocity!(model::TerrainCompressibleModel)
+$(TYPEDSIGNATURES)
 
 Compute the contravariant vertical velocity ``\\tilde{\\Omega}`` and
 contravariant vertical momentum ``\\rho \\tilde{\\Omega}`` from the
@@ -373,7 +373,7 @@ end
 using GPUArraysCore: @allowscalar
 
 """
-    compute_terrain_reference_state!(p_ref, ρ_ref, grid, p₀, θᵣ, pˢᵗ, constants)
+$(TYPEDSIGNATURES)
 
 Fill the 3D fields `p_ref` and `ρ_ref` with the hydrostatic reference pressure and
 density computed by per-column discrete Exner integration. On a terrain-following grid,
