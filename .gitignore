@@ -49,3 +49,6 @@ examples/atsc-jas-d-18-0357*
 # Benchmarking output
 *.json
 benchmark_results.md
+
+# MLIR output
+*.mlir
