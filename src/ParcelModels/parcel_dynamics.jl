@@ -38,7 +38,7 @@ Singleton type for prognostic vertical velocity dynamics. The parcel has a
 prognostic vertical velocity driven by buoyancy:
 
 ```math
-dw/dt = B
+dw/dt = b
 dz/dt = w
 ```
 
