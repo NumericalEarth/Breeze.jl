@@ -24,6 +24,34 @@ const Backend = RKAExt.ReactantBackend
 
 const N = 4
 
+using Oceananigans
+using Oceananigans.Architectures: ReactantState
+using KernelAbstractions
+using CUDA
+using Test
+
+@testset "LatitudeLongitudeGrid BinaryOperation broadcast — ReactantState" begin
+    grid = LatitudeLongitudeGrid(ReactantState();
+                                 size = (4, 4, 4),
+                                 halo = (3, 3, 3),
+                                 longitude = (0, 360),
+                                 latitude = (-80, 80),
+                                 z = (0, 1e3))
+
+    a = CenterField(grid)
+    b = CenterField(grid)
+    c = CenterField(grid)
+
+    set!(a, 1.0)
+    set!(b, 2.0)
+
+    # a * b  →  BinaryOperation{Center,Center,Center}
+    # set!(c, a * b) falls through to the generic  u .= v  path,
+    # which launches _broadcast_kernel! via KernelAbstractions on ReactantBackend.
+    @test_broken set!(c, a * b) isa Field
+end
+
+
 # ─────────────────────────────────────────────────────────────
 # Test 1: Direct ConcreteRArray arg
 # ─────────────────────────────────────────────────────────────
