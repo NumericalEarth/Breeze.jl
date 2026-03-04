@@ -29,7 +29,7 @@ numerical dissipation away from sharp gradients while maintaining stability.
 
 Fix the vertical resolution Δz and domain height. Vary the horizontal grid spacing
 Δx = Δy systematically to study how the grid aspect ratio Δx/Δz affects the log-law
-mismatch.
+mismatch. Start with Δz = 10 m to keep runs cheap; refine later if needed.
 
 ### Neutral ABL (primary)
 
@@ -37,8 +37,8 @@ Based on the Mirocha et al. (2018) SWiFT benchmark:
 
 | Parameter | Value |
 |-----------|-------|
-| Domain height | 2000 m |
-| Δz | 5 m (Nz = 400) |
+| Domain | 2400 × 2400 × 2000 m |
+| Δz | 10 m (Nz = 200) |
 | Geostrophic wind | Ug = 6.5 m/s, Vg = 0 |
 | Coriolis | latitude 33.5° (f ≈ 8.05e-5 s⁻¹) |
 | Surface roughness z₀ | 0.05 m |
@@ -50,27 +50,29 @@ Based on the Mirocha et al. (2018) SWiFT benchmark:
 
 Horizontal resolution sweep (Lx = Ly = 2400 m):
 
-| Run | Δx = Δy (m) | Nx = Ny | Δx/Δz |
-|-----|-------------|---------|-------|
-| N1  | 30          | 80      | 6     |
-| N2  | 15          | 160     | 3     |
-| N3  | 10          | 240     | 2     |
-| N4  | 7.5         | 320     | 1.5   |
-| N5  | 5           | 480     | 1     |
+| Run | Δx = Δy (m) | Nx = Ny | Δx/Δz | Total points |
+|-----|-------------|---------|-------|-------------|
+| N1  | 60          | 40      | 6     | 0.3M        |
+| N2  | 30          | 80      | 3     | 1.3M        |
+| N3  | 20          | 120     | 2     | 2.9M        |
+| N4  | 15          | 160     | 1.5   | 5.1M        |
+| N5  | 10          | 240     | 1     | 11.5M       |
+
+All runs are modest — the largest is 11.5M points.
 
 The neutral case cleanly isolates the log-law mismatch: MOST predicts φ_m = 1, so any
 deviation is unambiguously an LES artifact.
 
 ### GABLS1 stable ABL (secondary)
 
-Same Δz sweep approach applied to GABLS1 (Δz = 3.125 m, Lx = Ly = 400 m):
+Same approach applied to GABLS1 (Lz = 400 m, Δz = 3.125 m, Nz = 128, Lx = Ly = 400 m):
 
-| Run | Δx = Δy (m) | Nx = Ny | Δx/Δz |
-|-----|-------------|---------|-------|
-| G1  | 18.75       | ~21     | 6     |
-| G2  | 9.375       | ~43     | 3     |
-| G3  | 6.25        | 64      | 2     |
-| G4  | 3.125       | 128     | 1     |
+| Run | Δx = Δy (m) | Nx = Ny | Δx/Δz | Total points |
+|-----|-------------|---------|-------|-------------|
+| G1  | 18.75       | ~21     | 6     | 0.06M       |
+| G2  | 9.375       | ~43     | 3     | 0.2M        |
+| G3  | 6.25        | 64      | 2     | 0.5M        |
+| G4  | 3.125       | 128     | 1     | 2.1M        |
 
 GABLS1 is stably stratified, so the expected φ_m includes a stability correction
 (Beljaars & Holtslag 1991). Less clean for diagnosing the mismatch, but useful because
