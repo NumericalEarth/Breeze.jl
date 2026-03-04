@@ -142,51 +142,49 @@ end
     end
 end
 
-#####
-##### LatitudeLongitudeGrid (PBB topology via 360° longitude)
-#####
+####
+#### LatitudeLongitudeGrid (PBB topology via 360° longitude)
+####
 
-# NOTE: Test is currently broken because of getindex issue
+@testset "Reactant CompressibleDynamics — Centered, LatitudeLongitudeGrid" begin
+    Δt_val = 0.02
 
-# @testset "Reactant CompressibleDynamics — Centered, LatitudeLongitudeGrid" begin
-#     Δt_val = 0.02
+    Nλ = 8
+    Nφ = 8
+    Nz = 8
 
-#     Nλ = 8
-#     Nφ = 8
-#     Nz = 8
+    grid = make_latlon_grid(Nλ, Nφ, Nz)
 
-#     grid = make_latlon_grid(Nλ, Nφ, Nz)
+    FT = eltype(grid)
+    Δt = FT(Δt_val)
 
-#     FT = eltype(grid)
-#     Δt = FT(Δt_val)
+    @testset "Build" begin
+        model = AtmosphereModel(grid; dynamics=CompressibleDynamics())
+        @test model isa AtmosphereModel
+        @test model.dynamics isa CompressibleDynamics
 
-#     @testset "Build" begin
-#         model = AtmosphereModel(grid; dynamics=CompressibleDynamics())
-#         @test model isa AtmosphereModel
-#         @test model.dynamics isa CompressibleDynamics
+        θ_init, _ = make_init_fields(grid)
+        set!(model; θ=θ_init, ρ=initial_density(model))
+        T = get_temperature(model)
+        @test all(isfinite, T)
+        @test all(T .> 0)
+    end
 
-#         θ_init, _ = make_init_fields(grid)
-#         set!(model; θ=θ_init, ρ=initial_density(model))
-#         T = get_temperature(model)
-#         @test all(isfinite, T)
-#         @test all(T .> 0)
-#     end
+    model = AtmosphereModel(grid; dynamics=CompressibleDynamics())
+    θ_init, dθ_init = make_init_fields(grid)
+    set!(model; θ=θ_init, ρ=initial_density(model))
 
-#     model = AtmosphereModel(grid; dynamics=CompressibleDynamics())
-#     θ_init, dθ_init = make_init_fields(grid)
-#     set!(model; θ=θ_init, ρ=initial_density(model))
+    @testset "Raise backward" begin
+        dmodel = Enzyme.make_zero(model)
+        ns = 4
 
-#     @testset "Raise backward" begin
-#         dmodel = Enzyme.make_zero(model)
-#         ns = 4
+        compiled_grad = Reactant.@compile raise=true raise_first=true sync=true grad_loss(
+            model, dmodel, θ_init, dθ_init, Δt, ns)
 
-#         compiled_grad = Reactant.@compile raise=true raise_first=true sync=true grad_loss(
-#             model, dmodel, θ_init, dθ_init, Δt, ns)
-
-#         dθ, loss_val = compiled_grad(model, dmodel, θ_init, dθ_init, Δt, ns)
-#         @test loss_val > 0
-#         @test isfinite(loss_val)
-#         @test maximum(abs, interior(dθ)) > 0
-#         @test !any(isnan, interior(dθ))
-#     end
-# end
+        dθ, loss_val = compiled_grad(model, dmodel, θ_init, dθ_init, Δt, ns)
+        @test loss_val > 0
+        @test isfinite(loss_val)
+        @test maximum(abs, interior(dθ)) > 0
+        @test !any(isnan, interior(dθ))
+    end
+end
