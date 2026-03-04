@@ -107,6 +107,10 @@ Planned: fully compressible formulation, `EntropyThermodynamics` (prognostic `ρ
 7. **"Type is not callable"**: variable name shadows a function — rename or qualify
 8. **Quick fixes that break correctness**: if a test fails after a change, revisit the original edit
 9. **Scope creep in PRs**: keep changes focused on a single concern
+10. **Modifying Project.toml dependencies**: never add, remove, or change `[deps]` or `[weakdeps]`
+    in the root `Project.toml` unless the task absolutely requires it. Dependency changes have
+    wide-reaching consequences — they affect CI, load time, and downstream compatibility.
+    Only touch `[compat]` bounds when explicitly asked.
 
 ## Git Workflow & Whitespace
 
