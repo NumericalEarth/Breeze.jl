@@ -33,6 +33,31 @@ using Oceananigans.Grids: Periodic, Bounded, Flat,
 using Adapt: Adapt, adapt
 
 #####
+##### Section 0: Terrain-aware dispatch helpers
+#####
+##### These are @inline functions that dispatch on terrain_metrics type.
+##### The Nothing fallbacks (flat-grid case) return zero with no overhead.
+##### Terrain implementations are defined in terrain_compressible_physics.jl.
+#####
+
+# Extract terrain metrics from a model; overridden for TerrainCompressibleModel.
+@inline _acoustic_terrain_metrics(model) = nothing
+
+# Terrain PGF chain-rule correction: slope * ∂π'/∂z at (Face,Center,Center)
+# Corrects (∂π'/∂x)_ζ → (∂π'/∂x)_z = (∂π'/∂x)_ζ − slope · ∂π'/∂z
+@inline _acoustic_x_pgf_correction(i, j, k, grid, π̃′, ::Nothing) = 0
+@inline _acoustic_y_pgf_correction(i, j, k, grid, π̃′, ::Nothing) = 0
+
+# Kinematic bottom BC: w_bottom = u·(∂h/∂x) + v·(∂h/∂y)
+# Returns 0 for flat grids (impenetrable flat bottom → w=0).
+@inline _acoustic_w_bottom(i, j, grid, u, v, ::Nothing) = 0
+
+# Slope divergence at cell center k: ∂/∂ζ(u·sx + v·sy)
+# This is the terrain correction to the vertical divergence in the
+# acoustic pressure equation. Returns 0 for flat grids.
+@inline _acoustic_slope_div(i, j, k, grid, u, v, ::Nothing) = 0
+
+#####
 ##### Section 1: Topology-aware interpolation and difference operators
 #####
 ##### These avoid halo access for frozen fields during acoustic substeps.
@@ -464,6 +489,12 @@ The pressure tendency is: Gˢπ = -u · ∇π
 These are frozen during the acoustic substep loop.
 """
 function convert_slow_tendencies!(substepper, model)
+    _convert_slow_tendencies_impl!(substepper, model, model.velocities.w)
+end
+
+# `vertical_transport_velocity` is w for flat grids, Ω̃ for terrain-following grids.
+# For terrain grids this is overridden in terrain_compressible_physics.jl to pass Ω̃.
+function _convert_slow_tendencies_impl!(substepper, model, vertical_transport_velocity)
     grid = model.grid
     arch = architecture(grid)
     cᵖᵈ = model.thermodynamic_constants.dry_air.heat_capacity
@@ -481,7 +512,7 @@ function convert_slow_tendencies!(substepper, model)
             model.dynamics.density,
             model.velocities.u,
             model.velocities.v,
-            model.velocities.w,
+            vertical_transport_velocity,
             substepper.exner_perturbation,
             substepper.reference_exner_function,
             substepper.virtual_potential_temperature,
@@ -492,7 +523,7 @@ end
 
 @kernel function _convert_slow_tendencies!(Gˢu, Gˢv, Gˢw, Gˢπ,
                                            Gˢρu, Gˢρv, Gˢρw,
-                                           ρ, u, v, w,
+                                           ρ, u, v, w_transport,
                                            π′, πᵣ, θᵥ,
                                            grid, κ, cᵖᵈ, g)
     i, j, k = @index(Global, NTuple)
@@ -522,20 +553,18 @@ end
 
         Gˢw[i, j, k] = (Gˢρw[i, j, k] / ρᶜᶜᶠ + b) * (k > 1)
 
-        # Slow Exner pressure tendency: Gˢπ = -u · ∇π
+        # Slow Exner pressure tendency: Gˢπ = -v · ∇π in general coordinates.
         #
         # The full π equation splits into slow and fast parts:
         #   ∂π'/∂t = Gˢπ - S · ∇·u
         # where S·∇·u is the fast (acoustic) compression handled by the
         # acoustic backward step, and Gˢπ captures slow advection of π.
         #
-        # From π = (ρθ Rᵈ/p₀)^(Rᵈ/cᵥᵈ), the chain rule gives:
-        #   dπ/dt = (R/cᵥ)(π/ρθ) · d(ρθ)/dt
-        # The slow part is (R/cᵥ)(π/ρθ)·(-u·∇ρθ) = -u·∇π (no extra factor).
-        #
-        # Computing Gˢπ = -u·∇π directly (rather than from Gˢρθ) avoids a
-        # discretization mismatch: Gˢρθ uses WENO flux-divergence while the
-        # compression correction ρθ·∇·u uses centered differences.
+        # In terrain-following coordinates the material derivative of π is:
+        #   v·∇π = u·(∂π/∂x)_ζ + v·(∂π/∂y)_ζ + Ω̃·(∂π/∂z)
+        # where Ω̃ = w − u·sx − v·sy is the contravariant vertical velocity.
+        # For flat grids Ω̃ = w so w_transport = w; for terrain grids the
+        # caller passes Ω̃ as w_transport (see terrain_compressible_physics.jl).
         #
         # We use centered differences for ∇π. Since πᵣ varies only in z,
         # horizontal derivatives involve only π'.
@@ -543,30 +572,31 @@ end
         Δy = Δyᶜᶠᶜ(i, j, k, grid)
         Δzᶜ = Δzᶜᶜᶜ(i, j, k, grid)
 
-        # u · ∂π/∂x: centered average of u to cell center × centered π' gradient
+        # u · (∂π/∂x)_ζ: centered average of u to cell center × centered π' gradient
         uᶜ = (u[i, j, k] + u[i + 1, j, k]) / 2
         ∂π_∂x = (π′[i + 1, j, k] - π′[i - 1, j, k]) / (2 * Δx)
 
-        # v · ∂π/∂y: (zero for Flat y; centered for Periodic/Bounded)
+        # v · (∂π/∂y)_ζ: (zero for Flat y; centered for Periodic/Bounded)
         vᶜ = (v[i, j, k] + v[i, j + 1, k]) / 2
         ∂π_∂y = (π′[i, j + 1, k] - π′[i, j - 1, k]) / (2 * Δy)
 
-        # w · ∂π/∂z: full π = πᵣ + π', using centered differences
-        # At boundaries, π values from halos; w→0 at solid boundaries
+        # Ω̃ · ∂π/∂z: full π = πᵣ + π', using centered differences.
+        # w_transport = Ω̃ for terrain grids, w for flat grids.
+        # At boundaries, π values from halos; Ω̃→0 at solid boundaries.
         π_above = ifelse(k == Nz, πᵣ[i, j, k] + π′[i, j, k],
                          πᵣ[i, j, k + 1] + π′[i, j, k + 1])
         π_below = ifelse(k == 1, πᵣ[i, j, k] + π′[i, j, k],
                          πᵣ[i, j, k - 1] + π′[i, j, k - 1])
-        wᶜ = ifelse(k == 1, w[i, j, k + 1] / 2,
-              ifelse(k == Nz, w[i, j, k] / 2,
-                     (w[i, j, k] + w[i, j, k + 1]) / 2))
+        w_transport_c = ifelse(k == 1, w_transport[i, j, k + 1] / 2,
+                         ifelse(k == Nz, w_transport[i, j, k] / 2,
+                                (w_transport[i, j, k] + w_transport[i, j, k + 1]) / 2))
         ∂π_∂z = (π_above - π_below) / (2 * Δzᶜ)
 
-        u_dot_grad_π = uᶜ * ∂π_∂x + vᶜ * ∂π_∂y + wᶜ * ∂π_∂z
+        u_dot_grad_π = uᶜ * ∂π_∂x + vᶜ * ∂π_∂y + w_transport_c * ∂π_∂z
 
-        # Gˢπ = -u · ∇π (no extra R/cᵥ factor needed)
-        # The chain rule already accounts for it: u·∇π = (R/cᵥ)(π/ρθ)·u·∇(ρθ),
-        # so -u·∇π = (R/cᵥ)(π/ρθ)·(-u·∇ρθ) which is the correct slow π tendency.
+        # Gˢπ = -v · ∇π (no extra R/cᵥ factor needed)
+        # The chain rule already accounts for it: v·∇π = (R/cᵥ)(π/ρθ)·v·∇(ρθ),
+        # so -v·∇π = (R/cᵥ)(π/ρθ)·(-v·∇ρθ) which is the correct slow π tendency.
         Gˢπ[i, j, k] = -u_dot_grad_π
     end
 end
@@ -580,18 +610,22 @@ end
 #####
 
 @kernel function _acoustic_horizontal_forward!(u, v, grid, Δτ, cᵖ,
-                                               π̃′, θᵥ, Gˢu, Gˢv)
+                                               π̃′, θᵥ, Gˢu, Gˢv,
+                                               terrain_metrics)
     i, j, k = @index(Global, NTuple)
 
     @inbounds begin
         # u += Δτ (Gˢu - cᵖ θᵥ ∂π'/∂x)
+        # In terrain-following coords: (∂π'/∂x)_z = (∂π'/∂x)_ζ − slope · ∂π'/∂z
         θᵥᶠᶜᶜ = ℑxTᶠᵃᵃ(i, j, k, grid, θᵥ)
-        ∂x_π = δxTᶠᵃᵃ(i, j, k, grid, π̃′) / Δxᶠᶜᶜ(i, j, k, grid)
+        ∂x_π = δxTᶠᵃᵃ(i, j, k, grid, π̃′) / Δxᶠᶜᶜ(i, j, k, grid) -
+               _acoustic_x_pgf_correction(i, j, k, grid, π̃′, terrain_metrics)
         u[i, j, k] += Δτ * (Gˢu[i, j, k] - cᵖ * θᵥᶠᶜᶜ * ∂x_π) * !on_x_boundary(i, j, k, grid)
 
         # v += Δτ (Gˢv - cᵖ θᵥ ∂π'/∂y)
         θᵥᶜᶠᶜ = ℑyTᵃᶠᵃ(i, j, k, grid, θᵥ)
-        ∂y_π = δyTᵃᶠᵃ(i, j, k, grid, π̃′) / Δyᶜᶠᶜ(i, j, k, grid)
+        ∂y_π = δyTᵃᶠᵃ(i, j, k, grid, π̃′) / Δyᶜᶠᶜ(i, j, k, grid) -
+               _acoustic_y_pgf_correction(i, j, k, grid, π̃′, terrain_metrics)
         v[i, j, k] += Δτ * (Gˢv[i, j, k] - cᵖ * θᵥᶜᶠᶜ * ∂y_π) * !on_y_boundary(i, j, k, grid)
     end
 end
@@ -605,7 +639,8 @@ end
 #####
 
 @kernel function _compute_π′_forcing!(π′_forcing, grid, Δτ, ω̄,
-                                      u, v, w, S, Gˢπ)
+                                      u, v, w, S, Gˢπ,
+                                      terrain_metrics)
     i, j, k = @index(Global, NTuple)
     Nz = size(grid, 3)
 
@@ -614,14 +649,21 @@ end
         ∇ₕ_u = (u[i+1, j, k] - u[i, j, k]) / Δxᶠᶜᶜ(i, j, k, grid) +
                 (v[i, j+1, k] - v[i, j, k]) / Δyᶜᶠᶜ(i, j, k, grid)
 
-        # (1-ω)-weighted vertical divergence from old w (before implicit solve)
-        w⁻_bot = ifelse(k == 1, zero(eltype(w)), w[i, j, k])
+        # (1-ω)-weighted vertical divergence from old Ω̃⁻ (before implicit solve).
+        # Ω̃⁻ = w⁻ − u·sx − v·sy.  The w term stays; the slope correction is:
+        #   π′_forcing += (1-ω) Δτ S · ∂(u·sx + v·sy)/∂ζ
+        w_bottom = _acoustic_w_bottom(i, j, grid, u, v, terrain_metrics)
+        w⁻_bot = ifelse(k == 1, w_bottom, w[i, j, k])
         w⁻_top = ifelse(k == Nz, zero(eltype(w)), w[i, j, k + 1])
         Δzᶜ = Δzᶜᶜᶜ(i, j, k, grid)
 
-        # π′_forcing = Δτ (Gˢπ - S ∇ₕ·u⁺) - (1-ω) Δτ S ∂w⁻/∂z
+        slope_div = _acoustic_slope_div(i, j, k, grid, u, v, terrain_metrics)
+
+        # π′_forcing = Δτ (Gˢπ - S ∇ₕ·u⁺) - (1-ω) Δτ S ∂Ω̃⁻/∂z
+        #            = existing terms + (1-ω) Δτ S · slope_div  (terrain correction)
         π′_forcing[i, j, k] = Δτ * (Gˢπ[i, j, k] - S[i, j, k] * ∇ₕ_u) -
-                               ω̄ * Δτ * S[i, j, k] * (w⁻_top - w⁻_bot) / Δzᶜ
+                               ω̄ * Δτ * S[i, j, k] * (w⁻_top - w⁻_bot) / Δzᶜ +
+                               ω̄ * Δτ * S[i, j, k] * slope_div
     end
 end
 
@@ -648,7 +690,7 @@ The approach:
 2. This gives a tridiagonal system in π'⁺ at center locations
 3. After solving for π'⁺, back-solve for w⁺ from the new pressure gradient
 """
-function implicit_w_solve!(w, substepper, model, Δτ, π′_forcing)
+function implicit_w_solve!(u, v, w, substepper, model, Δτ, π′_forcing, terrain_metrics)
     grid = model.grid
     arch = architecture(grid)
     ω = substepper.forward_weight
@@ -659,9 +701,10 @@ function implicit_w_solve!(w, substepper, model, Δτ, π′_forcing)
     launch!(arch, grid, :xyz, _build_π′_tridiagonal!,
             solver.a, solver.b, solver.c, substepper.rhs,
             grid, ω, Δτ, cᵖᵈ,
-            w, substepper.exner_perturbation, π′_forcing,
+            u, v, w, substepper.exner_perturbation, π′_forcing,
             substepper.virtual_potential_temperature, substepper.acoustic_compression,
-            substepper.slow_tendencies.velocity.w)
+            substepper.slow_tendencies.velocity.w,
+            terrain_metrics)
 
     # Solve: A π'⁺ = rhs → result overwrites π'
     solve!(substepper.exner_perturbation, solver, substepper.rhs)
@@ -671,16 +714,18 @@ function implicit_w_solve!(w, substepper, model, Δτ, π′_forcing)
             w, grid, ω, Δτ, cᵖᵈ,
             substepper.exner_perturbation, substepper.previous_exner_perturbation,
             substepper.virtual_potential_temperature,
-            substepper.slow_tendencies.velocity.w)
+            substepper.slow_tendencies.velocity.w,
+            u, v, terrain_metrics)
 
     return nothing
 end
 
 @kernel function _build_π′_tridiagonal!(lower, diag, upper, rhs_field,
                                         grid, ω, Δτ, cᵖᵈ,
-                                        w, π′, π′_forcing,
+                                        u, v, w, π′, π′_forcing,
                                         θᵥ, S,
-                                        Gˢw)
+                                        Gˢw,
+                                        terrain_metrics)
     i, j, k = @index(Global, NTuple)
     Nz = size(grid, 3)
 
@@ -713,21 +758,34 @@ end
         δz_π_top = ifelse(k == Nz, zero(eltype(π′)), π′[i, j, k + 1] - π′[i, j, k])
 
         ω̄ = 1 - ω
-        wᵉ_bot = ifelse(k == 1, zero(eltype(w)),
+
+        # Bottom BC for w: w=0 for flat grids, w=u·∂h/∂x+v·∂h/∂y for terrain.
+        w_bottom = _acoustic_w_bottom(i, j, grid, u, v, terrain_metrics)
+
+        wᵉ_bot = ifelse(k == 1, w_bottom,
                          w[i, j, k] + Δτ * Gˢw[i, j, k] - ω̄ * Δτ * Mᵖ_bot * δz_π_bot)
         wᵉ_top = ifelse(k == Nz, zero(eltype(w)),
                          w[i, j, k + 1] + Δτ * Gˢw[i, j, k + 1] - ω̄ * Δτ * Mᵖ_top * δz_π_top)
 
+        # Slope divergence: ∂(u·sx + v·sy)/∂ζ at current (u⁺,v⁺).
+        # The RHS uses ∂Ω̃ᵉ/∂z = ∂wᵉ/∂z − slope_div, so the terrain
+        # correction to the RHS is + ω Δτ S · slope_div.
+        slope_div = _acoustic_slope_div(i, j, k, grid, u, v, terrain_metrics)
+
         ∂z_wᵉ = (wᵉ_top - wᵉ_bot) / Δzᶜ
 
-        # RHS = π' + π′_forcing - ω Δτ S ∂wᵉ/∂z
-        rhs_field[i, j, k] = π′[i, j, k] + π′_forcing[i, j, k] - ω * Δτ * Sⁱ * ∂z_wᵉ
+        # RHS = π' + π′_forcing - ω Δτ S ∂Ω̃ᵉ/∂z
+        #     = π' + π′_forcing - ω Δτ S (∂wᵉ/∂z - slope_div)
+        rhs_field[i, j, k] = π′[i, j, k] + π′_forcing[i, j, k] -
+                              ω * Δτ * Sⁱ * ∂z_wᵉ +
+                              ω * Δτ * Sⁱ * slope_div
     end
 end
 
 @kernel function _update_w_from_pressure!(w, grid, ω, Δτ, cᵖᵈ,
                                           π′⁺, π′⁻, θᵥ,
-                                          Gˢw)
+                                          Gˢw,
+                                          u, v, terrain_metrics)
     i, j, k = @index(Global, NTuple)
 
     @inbounds begin
@@ -742,7 +800,10 @@ end
 
         # w⁺ = w + Δτ Gˢw - Δτ Mᵖ ((1-ω) δz(π'⁻) + ω δz(π'⁺))
         w⁺ = w[i, j, k] + Δτ * Gˢw[i, j, k] - Δτ * Mᵖ * (ω̄ * δz_π⁻ + ω * δz_π⁺)
-        w[i, j, k] = w⁺ * (k > 1)
+
+        # Bottom BC: flat → w=0; terrain → w = u·∂h/∂x + v·∂h/∂y
+        w_bottom = _acoustic_w_bottom(i, j, grid, u, v, terrain_metrics)
+        w[i, j, k] = ifelse(k == 1, w_bottom, w⁺)
     end
 end
 
@@ -816,6 +877,7 @@ function acoustic_rk3_substep_loop!(model, substepper, Δt, β_stage, U⁰)
     grid = model.grid
     arch = architecture(grid)
     cᵖ = model.thermodynamic_constants.dry_air.heat_capacity
+    terrain_metrics = _acoustic_terrain_metrics(model)
 
     # Compute substep count (adaptive when substeps === nothing)
     N = acoustic_substeps(substepper.substeps, grid, Δt, model.thermodynamic_constants)
@@ -878,22 +940,25 @@ function acoustic_rk3_substep_loop!(model, substepper, Δt, β_stage, U⁰)
                 u, v, grid, Δτ, cᵖ,
                 substepper.filtered_exner_perturbation, substepper.virtual_potential_temperature,
                 substepper.slow_tendencies.velocity.u,
-                substepper.slow_tendencies.velocity.v)
+                substepper.slow_tendencies.velocity.v,
+                terrain_metrics)
 
-        # Step 2: Explicit π' forcing (Gˢπ + horizontal divergence + (1-ω)·∂w⁻/∂z)
+        # Step 2: Explicit π' forcing (Gˢπ + horizontal divergence + (1-ω)·∂Ω̃⁻/∂z)
         launch!(arch, grid, :xyz, _compute_π′_forcing!,
                 π′_forcing, grid, Δτ, ω̄,
-                u, v, w, substepper.acoustic_compression, substepper.slow_tendencies.exner_pressure)
+                u, v, w, substepper.acoustic_compression, substepper.slow_tendencies.exner_pressure,
+                terrain_metrics)
 
         # Save π' before implicit solve (for damping)
         parent(substepper.previous_exner_perturbation) .= parent(substepper.exner_perturbation)
 
         # Step 3: Implicit solve — tridiagonal for π'⁺, back-solve for w⁺
-        implicit_w_solve!(w, substepper, model, Δτ, π′_forcing)
+        implicit_w_solve!(u, v, w, substepper, model, Δτ, π′_forcing, terrain_metrics)
 
         # Step 3b: Klemp (2018) divergence damping (if ϰᵃᶜ > 0)
         # Damp u, v proportional to ∂(π'⁺ - π'⁻)/∂x.
         # Total damping per outer Δt is constant regardless of N.
+        # TODO: apply terrain metric correction to ∂(Δπ')/∂x here as well.
         if ϰᵃᶜ > 0
             launch!(arch, grid, :xyz, _acoustic_divergence_damping!,
                     u, v, substepper.exner_perturbation, substepper.previous_exner_perturbation,
@@ -1060,6 +1125,7 @@ function acoustic_substep_loop!(model, substepper, Δt, α_ssp, U⁰)
     grid = model.grid
     arch = architecture(grid)
     cᵖ = model.thermodynamic_constants.dry_air.heat_capacity
+    terrain_metrics = _acoustic_terrain_metrics(model)
 
     # For SSP-RK3, all stages use Ns substeps (adaptive when substeps === nothing)
     Ns = acoustic_substeps(substepper.substeps, grid, Δt, model.thermodynamic_constants)
@@ -1092,15 +1158,18 @@ function acoustic_substep_loop!(model, substepper, Δt, α_ssp, U⁰)
                 u, v, grid, Δτ, cᵖ,
                 substepper.filtered_exner_perturbation, substepper.virtual_potential_temperature,
                 substepper.slow_tendencies.velocity.u,
-                substepper.slow_tendencies.velocity.v)
+                substepper.slow_tendencies.velocity.v,
+                terrain_metrics)
 
         launch!(arch, grid, :xyz, _compute_π′_forcing!,
                 π′_forcing, grid, Δτ, ω̄,
-                u, v, w, substepper.acoustic_compression, substepper.slow_tendencies.exner_pressure)
+                u, v, w, substepper.acoustic_compression, substepper.slow_tendencies.exner_pressure,
+                terrain_metrics)
 
         parent(substepper.previous_exner_perturbation) .= parent(substepper.exner_perturbation)
-        implicit_w_solve!(w, substepper, model, Δτ, π′_forcing)
+        implicit_w_solve!(u, v, w, substepper, model, Δτ, π′_forcing, terrain_metrics)
 
+        # TODO: apply terrain metric correction to divergence damping ∂(Δπ')/∂x.
         if ϰᵃᶜ > 0
             launch!(arch, grid, :xyz, _acoustic_divergence_damping!,
                     u, v, substepper.exner_perturbation, substepper.previous_exner_perturbation,
