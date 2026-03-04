@@ -168,8 +168,8 @@ function Fields.set!(model::AtmosphereModel; time=nothing, enforce_mass_conserva
         elseif name ∈ (:ρqᵗ, :ρqᵛ, :ρqᵉ)
             set!(model.moisture_density, value)
             ρ = dynamics_density(model.dynamics)
-            spm = specific_prognostic_moisture(model)
-            set!(spm, model.moisture_density / ρ)
+            qᵛᵉ = specific_prognostic_moisture(model)
+            set!(qᵛᵉ, model.moisture_density / ρ)
 
         elseif name ∈ prognostic_field_names(model.microphysics)
             μ = getproperty(model.microphysical_fields, name)
@@ -184,10 +184,10 @@ function Fields.set!(model::AtmosphereModel; time=nothing, enforce_mass_conserva
             set!(ρμ, ρ * ρμ)
 
         elseif name ∈ (:qᵗ, :qᵛ, :qᵉ)
-            spm = specific_prognostic_moisture(model)
-            set!(spm, value)
+            qᵛᵉ = specific_prognostic_moisture(model)
+            set!(qᵛᵉ, value)
             ρ = dynamics_density(model.dynamics)
-            set!(model.moisture_density, ρ * spm)
+            set!(model.moisture_density, ρ * qᵛᵉ)
 
         elseif name ∈ (:u, :v, :w)
             set_velocity!(model, name, value)
@@ -212,16 +212,16 @@ function Fields.set!(model::AtmosphereModel; time=nothing, enforce_mass_conserva
             qᵛ⁺ = Field(SaturationSpecificHumidity(model, :equilibrium))
 
             # Set specific prognostic moisture = ℋ * qᵛ⁺
-            spm = specific_prognostic_moisture(model)
+            qᵛᵉ = specific_prognostic_moisture(model)
 
-            # Set spm = ℋ * qᵛ⁺
-            # First set ℋ onto spm (evaluates functions on CPU for GPU compatibility),
+            # Set qᵛᵉ = ℋ * qᵛ⁺
+            # First set ℋ onto qᵛᵉ (evaluates functions on CPU for GPU compatibility),
             # then multiply by the materialized saturation specific humidity.
-            set!(spm, value)
-            set!(spm, spm * qᵛ⁺)
+            set!(qᵛᵉ, value)
+            set!(qᵛᵉ, qᵛᵉ * qᵛ⁺)
 
             ρ = dynamics_density(model.dynamics)
-            set!(model.moisture_density, ρ * spm)
+            set!(model.moisture_density, ρ * qᵛᵉ)
 
         else
             prognostic_names = keys(prognostic_fields(model))

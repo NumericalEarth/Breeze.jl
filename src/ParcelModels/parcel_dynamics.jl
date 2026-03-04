@@ -393,16 +393,16 @@ function Oceananigans.set!(model::ParcelModel; T = nothing, θ = nothing,
 
     # Compute specific humidity from relative humidity if ℋ is provided
     if !isnothing(ℋ) && isnothing(qᵗ)
-        spm = specific_prognostic_moisture(model)
-        set_moisture_from_relative_humidity!(spm, ℋ,
+        qᵛᵉ = specific_prognostic_moisture(model)
+        set_moisture_from_relative_humidity!(qᵛᵉ, ℋ,
                                               model.temperature, dynamics.density, constants)
     elseif !isnothing(qᵗ)
-        spm = specific_prognostic_moisture(model)
-        set!(spm, qᵗ)
+        qᵛᵉ = specific_prognostic_moisture(model)
+        set!(qᵛᵉ, qᵗ)
     else
         # Default to zero moisture
-        spm = specific_prognostic_moisture(model)
-        set!(spm, 0)
+        qᵛᵉ = specific_prognostic_moisture(model)
+        set!(qᵛᵉ, 0)
     end
     fill_halo_regions!(specific_prognostic_moisture(model))
 
