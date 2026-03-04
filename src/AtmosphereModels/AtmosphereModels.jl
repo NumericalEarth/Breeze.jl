@@ -39,7 +39,7 @@ export
     grid_microphysical_tendency,
     moisture_fractions,
     grid_moisture_fractions,
-    specific_moisture_from_total,
+    prognostic_specific_moisture_from_total,
     update_microphysical_fields!,
     update_microphysical_auxiliaries!,
     initial_aerosol_number,

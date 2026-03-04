@@ -16,7 +16,7 @@ using Breeze.Thermodynamics: MoistureMassFractions,
     temperature_from_potential_temperature, saturation_specific_humidity
 
 using Breeze.AtmosphereModels: AtmosphereModels, AtmosphereModel,
-    moisture_specific_name, specific_moisture_from_total
+    moisture_specific_name, prognostic_specific_moisture_from_total
 using Breeze.TimeSteppers: SSPRungeKutta3
 
 #####
@@ -854,7 +854,7 @@ function ssp_rk3_parcel_substep!(model::ParcelModel, U⁰::ParcelInitialState, �
     microphysics = model.microphysics
     zero_velocities = (; u = zero(state.ρ), v = zero(state.ρ), w = zero(state.ρ))
     ℳ = microphysical_state(microphysics, state.ρ, state.μ, state.𝒰, zero_velocities)
-    qᵛᵉ = specific_moisture_from_total(microphysics, state.qᵗ, ℳ)
+    qᵛᵉ = prognostic_specific_moisture_from_total(microphysics, state.qᵗ, ℳ)
     q⁺ = moisture_fractions(microphysics, ℳ, qᵛᵉ)
     state.𝒰 = with_moisture(state.𝒰, q⁺)
 
@@ -947,7 +947,7 @@ function step_parcel_state!(model::ParcelModel, Δt)
     microphysics = model.microphysics
     zero_velocities = (; u = zero(state.ρ), v = zero(state.ρ), w = zero(state.ρ))
     ℳ = microphysical_state(microphysics, state.ρ, state.μ, state.𝒰, zero_velocities)
-    qᵛᵉ = specific_moisture_from_total(microphysics, state.qᵗ, ℳ)
+    qᵛᵉ = prognostic_specific_moisture_from_total(microphysics, state.qᵗ, ℳ)
     q⁺ = moisture_fractions(microphysics, ℳ, qᵛᵉ)
     state.𝒰 = with_moisture(state.𝒰, q⁺)
 

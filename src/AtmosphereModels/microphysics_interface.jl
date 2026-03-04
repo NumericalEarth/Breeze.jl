@@ -452,9 +452,9 @@ For `Nothing` microphysics, `qᵛᵉ = qᵗ` (all moisture is vapor).
 This is used by parcel models that store total moisture `qᵗ` as the prognostic
 variable, to produce the correct input for [`moisture_fractions`](@ref).
 """
-@inline specific_moisture_from_total(::Nothing, qᵗ, ℳ) = qᵗ
-@inline specific_moisture_from_total(::Nothing, qᵗ, ::NothingMicrophysicalState) = qᵗ
-@inline specific_moisture_from_total(::Nothing, qᵗ, ::NamedTuple) = qᵗ
+@inline prognostic_specific_moisture_from_total(::Nothing, qᵗ, ℳ) = qᵗ
+@inline prognostic_specific_moisture_from_total(::Nothing, qᵗ, ::NothingMicrophysicalState) = qᵗ
+@inline prognostic_specific_moisture_from_total(::Nothing, qᵗ, ::NamedTuple) = qᵗ
 
 """
 $(TYPEDSIGNATURES)

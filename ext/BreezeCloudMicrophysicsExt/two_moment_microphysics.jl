@@ -405,7 +405,7 @@ end
     # Rain terminal velocities: (number-weighted, mass-weighted)
     qʳ⁺ = max(0, qʳ)
     𝕎  = CM2.rain_terminal_velocity(sb, categories.rain_fall_velocity, qʳ⁺, ρ, Nʳ)
-                                         
+
     wʳₙ = -𝕎[1]  # number-weighted
     wʳ = -𝕎[2]   # mass-weighted
 
@@ -427,11 +427,11 @@ end
 end
 
 #####
-##### specific_moisture_from_total: convert qᵗ to qᵛᵉ
+##### prognostic_specific_moisture_from_total: convert qᵗ to qᵛᵉ
 #####
 
 # NE two-moment: qᵛ = qᵗ - qᶜˡ - qʳ (subtract all condensate)
-@inline AtmosphereModels.specific_moisture_from_total(bμp::WPNE2M, qᵗ, ℳ::WarmPhaseTwoMomentState) = max(zero(qᵗ), qᵗ - ℳ.qᶜˡ - ℳ.qʳ)
+@inline AtmosphereModels.prognostic_specific_moisture_from_total(bμp::WPNE2M, qᵗ, ℳ::WarmPhaseTwoMomentState) = max(zero(qᵗ), qᵗ - ℳ.qᶜˡ - ℳ.qʳ)
 
 #####
 ##### Moisture fraction computation
