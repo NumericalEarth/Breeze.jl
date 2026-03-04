@@ -1,75 +1,148 @@
 #####
-##### MWE: LatitudeLongitudeGrid broadcast fails on ReactantState
+##### Systematic probe: getindex on ConcreteRArray inside KA kernels
 #####
 #
-# set!(field, BinaryOperation) on a LatitudeLongitudeGrid with ReactantState
-# triggers gpu__broadcast_kernel! which fails with:
+# The LatitudeLongitudeGrid broadcast failure boils down to whether the
+# ReactantKA extension can handle getindex on ConcreteRArray / ConcretePJRTArray
+# inside kernels — both as direct arguments and nested inside structs.
 #
-#   InvalidIRError: unsupported dynamic function invocation (call to getindex)
+# This file probes the boundary progressively:
+#   Test 1: Direct ConcreteRArray as kernel arg, index it
+#   Test 2: ConcreteRArray wrapped in a struct, index through the struct
+#   Test 3: Two arrays in a struct, only one is used (other is dead weight in type tree)
+#   Test 4: Struct containing OffsetVector{Float64, ConcreteRArray} (matches LatLonGrid exactly)
 #
-# The grid's per-point metric arrays (λᶜᵃᵃ, φᵃᶜᵃ, Δxᶜᶜᵃ, Δxᶠᶜᵃ, …) are stored
-# as OffsetVector{Float64, ConcretePJRTArray{Float64,1,1}}.  Even though the
-# identity interpolation operator never indexes them, the GPU compiler rejects
-# the reachable getindex method on ConcretePJRTArray inside the PTX kernel.
-#
-# RectilinearGrid is unaffected because its metrics are uniform scalars.
+# Tests 3 & 4 mimic the real failure: the grid's metric arrays sit in the
+# kernel type closure but the identity interpolation operator never touches them.
 
-using Oceananigans
-using Oceananigans.Architectures: ReactantState
-using KernelAbstractions
-using CUDA
 using Reactant
-using Test
+using KernelAbstractions: @kernel, @index, StaticSize
+using OffsetArrays: OffsetVector
 
-@testset "LatitudeLongitudeGrid BinaryOperation broadcast — ReactantState" begin
-    grid = LatitudeLongitudeGrid(ReactantState();
-                                 size = (4, 4, 4),
-                                 halo = (3, 3, 3),
-                                 longitude = (0, 360),
-                                 latitude = (-80, 80),
-                                 z = (0, 1e3))
+const RKAExt  = Base.get_extension(Reactant, :ReactantKernelAbstractionsExt)
+const Backend = RKAExt.ReactantBackend
 
-    a = CenterField(grid)
-    b = CenterField(grid)
-    c = CenterField(grid)
+const N = 4
 
-    set!(a, 1.0)
-    set!(b, 2.0)
+# ─────────────────────────────────────────────────────────────
+# Test 1: Direct ConcreteRArray arg
+# ─────────────────────────────────────────────────────────────
 
-    # a * b  →  BinaryOperation{Center,Center,Center}
-    # set!(c, a * b) falls through to the generic  u .= v  path,
-    # which launches _broadcast_kernel! via KernelAbstractions on ReactantBackend.
-    @test_broken set!(c, a * b) isa Field
+@kernel function _direct_index_kernel!(out, v)
+    i = @index(Global, Linear)
+    @inbounds out[i] = v[i]
 end
 
-#####
-##### Distilled: getindex on ConcreteRArray inside a KA kernel
-#####
-#
-# The Oceananigans test above fails because the broadcast kernel's argument
-# types carry the full LatitudeLongitudeGrid, whose metric vectors are
-# OffsetVector{Float64, ConcretePJRTArray{Float64,1,1}}.  The GPU compiler
-# sees a reachable getindex path on ConcretePJRTArray and rejects it.
-#
-# Below we strip away Oceananigans entirely and check whether a bare
-# KernelAbstractions kernel on ReactantBackend can index a ConcreteRArray.
+function run_direct!(out, v)
+    _direct_index_kernel!(Backend(), StaticSize((N,)), StaticSize((N,)))(out, v)
+    return nothing
+end
 
-# using KernelAbstractions
+# ─────────────────────────────────────────────────────────────
+# Test 2: ConcreteRArray inside a struct, kernel indexes it
+# ─────────────────────────────────────────────────────────────
 
-# @kernel function _getindex_kernel!(out, v)
-#     i = @index(Global, Linear)
-#     @inbounds out[i] = v[i]
-# end
+struct Holder{A}
+    data::A
+end
 
-# @testset "ConcreteRArray getindex inside KA kernel — ReactantBackend" begin
-#     N = 4
-#     v   = Reactant.ConcreteRArray(collect(1.0:Float64(N)))
-#     out = Reactant.ConcreteRArray(zeros(N))
+@kernel function _struct_index_kernel!(out, h)
+    i = @index(Global, Linear)
+    @inbounds out[i] = h.data[i]
+end
 
-#     backend = KernelAbstractions.get_backend(out)
+function run_struct!(out, h)
+    _struct_index_kernel!(Backend(), StaticSize((N,)), StaticSize((N,)))(out, h)
+    return nothing
+end
 
-#     @test begin
-#         _getindex_kernel!(backend)(out, v; ndrange=N)
-#         Array(out) ≈ collect(1.0:Float64(N))
-#     end
-# end
+# ─────────────────────────────────────────────────────────────
+# Test 3: Struct with two arrays, kernel only uses one
+#          (dead array in the type tree, like LatLonGrid metrics)
+# ─────────────────────────────────────────────────────────────
+
+struct TwoArrays{A, B}
+    used::A
+    unused::B
+end
+
+@kernel function _dead_weight_kernel!(out, s)
+    i = @index(Global, Linear)
+    @inbounds out[i] = s.used[i]
+end
+
+function run_dead_weight!(out, s)
+    _dead_weight_kernel!(Backend(), StaticSize((N,)), StaticSize((N,)))(out, s)
+    return nothing
+end
+
+# ─────────────────────────────────────────────────────────────
+# Test 4: OffsetVector wrapping ConcreteRArray (exact LatLonGrid pattern)
+# ─────────────────────────────────────────────────────────────
+
+struct GridLike{A, M}
+    data::A
+    metric::M   # OffsetVector{Float64, ConcreteRArray} — never used by kernel
+end
+
+@kernel function _gridlike_kernel!(out, g)
+    i = @index(Global, Linear)
+    @inbounds out[i] = g.data[i]
+end
+
+function run_gridlike!(out, g)
+    _gridlike_kernel!(Backend(), StaticSize((N,)), StaticSize((N,)))(out, g)
+    return nothing
+end
+
+# ─────────────────────────────────────────────────────────────
+# Run
+# ─────────────────────────────────────────────────────────────
+
+out = Reactant.ConcreteRArray(zeros(N))
+v   = Reactant.ConcreteRArray(collect(1.0:Float64(N)))
+
+# Test 1
+@info "Test 1: Direct ConcreteRArray arg"
+try
+    f1! = @compile sync=true run_direct!(out, v)
+    f1!(out, v)
+    @info "  → PASS" result=Array(out)
+catch e
+    @info "  → FAIL" exception=e
+end
+
+# Test 2
+@info "Test 2: ConcreteRArray inside struct"
+h = Holder(v)
+try
+    f2! = @compile sync=true run_struct!(out, h)
+    f2!(out, h)
+    @info "  → PASS" result=Array(out)
+catch e
+    @info "  → FAIL" exception=e
+end
+
+# Test 3
+@info "Test 3: Struct with used + unused ConcreteRArray"
+unused = Reactant.ConcreteRArray(collect(100.0:100.0+Float64(N-1)))
+s = TwoArrays(v, unused)
+try
+    f3! = @compile sync=true run_dead_weight!(out, s)
+    f3!(out, s)
+    @info "  → PASS" result=Array(out)
+catch e
+    @info "  → FAIL" exception=e
+end
+
+# Test 4
+@info "Test 4: Struct with OffsetVector{ConcreteRArray} (LatLonGrid pattern)"
+metric = OffsetVector(Reactant.ConcreteRArray(collect(1.0:Float64(N+1))), 0:N)
+g = GridLike(v, metric)
+try
+    f4! = @compile sync=true run_gridlike!(out, g)
+    f4!(out, g)
+    @info "  → PASS" result=Array(out)
+catch e
+    @info "  → FAIL" exception=e
+end
