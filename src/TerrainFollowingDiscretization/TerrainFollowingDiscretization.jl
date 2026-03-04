@@ -24,8 +24,9 @@ export follow_terrain!, TerrainMetrics, BasicTerrainFollowing,
        SlopeOutsideInterpolation, SlopeInsideInterpolation
 
 using Adapt: Adapt, adapt
+using GPUArraysCore: @allowscalar
 using KernelAbstractions: @kernel, @index
-using Oceananigans: Center, Face, CenterField, XFaceField, YFaceField, architecture
+using Oceananigans: Center, Face, CenterField, XFaceField, YFaceField, architecture, interior
 using Oceananigans.Grids: xnode, ynode, rnode
 using Oceananigans.ImmersedBoundaries: MutableGridOfSomeKind
 using Oceananigans.Utils: launch!

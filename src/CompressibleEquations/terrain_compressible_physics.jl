@@ -20,6 +20,7 @@
 ##### so we must use δx/Δx instead of ∂x to avoid double-correcting.
 #####
 
+using GPUArraysCore: @allowscalar
 using Oceananigans: architecture
 using Oceananigans.Grids: znode
 using Oceananigans.Operators: δxᶠᶜᶜ, δyᶜᶠᶜ, Δx⁻¹ᶠᶜᶜ, Δy⁻¹ᶜᶠᶜ, ∂zᶜᶜᶠ, Δzᶜᶜᶠ, Δzᶜᶜᶜ
@@ -383,47 +384,41 @@ The reference pressure is also used for the perturbation horizontal pressure gra
 reducing the terrain-following PGF error.
 """
 function compute_terrain_reference_state!(p_ref, ρ_ref, grid, p₀, θᵣ, pˢᵗ, constants)
-    arch = architecture(grid)
+    Nx, Ny, Nz = size(grid)
     Rᵈ = dry_air_gas_constant(constants)
     cᵖᵈ = constants.dry_air.heat_capacity
     κ = Rᵈ / cᵖᵈ
     g = constants.gravitational_acceleration
     π_surface = (p₀ / pˢᵗ)^κ
+    c = Center()
 
-    # Column-parallel kernel: columns are independent but the vertical
-    # Exner integration within each column is sequential (recurrence).
-    launch!(arch, grid, :xy, _fill_terrain_reference_state!,
-            p_ref, ρ_ref, grid, π_surface, θᵣ, pˢᵗ, κ, g, cᵖᵈ, Rᵈ)
+    # The vertical Exner integration is a sequential recurrence in k, so it cannot
+    # be parallelized over k. Compute CPU-side (with @allowscalar for GPU arrays)
+    # since this is a one-time model setup operation.
+    @allowscalar for j in 1:Ny, i in 1:Nx
+        πₖ = π_surface
+        for k in 1:Nz
+            z_phys = znode(i, j, k, grid, c, c, c)
+            θₖ = _reference_theta(θᵣ, z_phys)
+
+            if k > 1
+                z_below = znode(i, j, k - 1, grid, c, c, c)
+                θ_below = _reference_theta(θᵣ, z_below)
+                θ_face = (θₖ + θ_below) / 2
+                Δz = Δzᶜᶜᶠ(i, j, k, grid)
+                πₖ = πₖ - g * Δz / (cᵖᵈ * θ_face)
+            end
+
+            pₖ = pˢᵗ * πₖ^(1 / κ)
+            ρₖ = pₖ / (Rᵈ * θₖ * πₖ)
+            p_ref[i, j, k] = pₖ
+            ρ_ref[i, j, k] = ρₖ
+        end
+    end
 
     fill_halo_regions!(p_ref)
     fill_halo_regions!(ρ_ref)
     return nothing
-end
-
-@kernel function _fill_terrain_reference_state!(p_ref, ρ_ref, grid, π_surface, θᵣ, pˢᵗ, κ, g, cᵖᵈ, Rᵈ)
-    i, j = @index(Global, NTuple)
-    c = Center()
-    Nz = size(grid, 3)
-    inv_κ = 1 / κ
-
-    πₖ = π_surface
-    for k in 1:Nz
-        z_phys = znode(i, j, k, grid, c, c, c)
-        θₖ = _reference_theta(θᵣ, z_phys)
-
-        if k > 1
-            z_below = znode(i, j, k - 1, grid, c, c, c)
-            θ_below = _reference_theta(θᵣ, z_below)
-            θ_face = (θₖ + θ_below) / 2
-            Δz = Δzᶜᶜᶠ(i, j, k, grid)
-            πₖ = πₖ - g * Δz / (cᵖᵈ * θ_face)
-        end
-
-        pₖ = pˢᵗ * πₖ^inv_κ
-        ρₖ = pₖ / (Rᵈ * θₖ * πₖ)
-        @inbounds p_ref[i, j, k] = pₖ
-        @inbounds ρ_ref[i, j, k] = ρₖ
-    end
 end
 
 # Evaluate the reference potential temperature at height z.
