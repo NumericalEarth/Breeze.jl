@@ -285,7 +285,7 @@ function compute_tendencies!(model::AtmosphereModel)
         model.formulation,
         model.thermodynamic_constants,
         specific_prognostic_moisture(model),
-        model.velocities,
+        advecting_velocities,
         model.microphysics,
         model.microphysical_fields,
         model.closure,
