@@ -324,18 +324,25 @@ end
 function materialize_atmosphere_boundary_condition(bc::BulkSensibleHeatFluxBoundaryCondition,
                                                   side, loc, grid, dynamics, microphysics, surface_pressure, constants,
                                                   microphysical_fields, specific_prognostic_moisture, temperature)
+
     bf = bc.condition
     T₀ = materialize_surface_field(bf.surface_temperature, grid)
     coef = materialize_coefficient(bf.coefficient, grid, dynamics, microphysics,
                                    surface_pressure, constants,
                                    microphysical_fields, specific_prognostic_moisture, temperature,
                                    Val(:scalar))
+
     # Auto-create FilteredSurfaceScalar if filtered_velocities is provided
-    fs = isnothing(bf.filtered_velocities) ? nothing :
-         FilteredSurfaceScalar(grid; height=bf.filtered_velocities.height,
-                                     filter_timescale=bf.filtered_velocities.filter_timescale)
+    fs = if isnothing(bf.filtered_velocities)
+        nothing
+    else
+        FilteredSurfaceScalar(grid; height=bf.filtered_velocities.height,
+                              filter_timescale=bf.filtered_velocities.filter_timescale)
+    end
+
     new_bf = BulkSensibleHeatFluxFunction(coef, bf.gustiness, T₀, surface_pressure, constants,
-                                           bf.formulation, bf.filtered_velocities, fs)
+                                          bf.formulation, bf.filtered_velocities, fs)
+
     return BoundaryCondition(Flux(), new_bf)
 end
 
@@ -343,6 +350,7 @@ end
 function materialize_atmosphere_boundary_condition(bc::BulkVaporFluxBoundaryCondition,
                                                   side, loc, grid, dynamics, microphysics, surface_pressure, constants,
                                                   microphysical_fields, specific_prognostic_moisture, temperature)
+
     bf = bc.condition
     T₀ = materialize_surface_field(bf.surface_temperature, grid)
     surface = PlanarLiquidSurface()
@@ -350,12 +358,18 @@ function materialize_atmosphere_boundary_condition(bc::BulkVaporFluxBoundaryCond
                                    surface_pressure, constants,
                                    microphysical_fields, specific_prognostic_moisture, temperature,
                                    Val(:scalar))
+
     # Auto-create FilteredSurfaceScalar if filtered_velocities is provided
-    fs = isnothing(bf.filtered_velocities) ? nothing :
+    fs = if isnothing(bf.filtered_velocities)
+        nothing
+    else
          FilteredSurfaceScalar(grid; height=bf.filtered_velocities.height,
-                                     filter_timescale=bf.filtered_velocities.filter_timescale)
+                               filter_timescale=bf.filtered_velocities.filter_timescale)
+    end
+
     new_bf = BulkVaporFluxFunction(coef, bf.gustiness, T₀, surface_pressure, constants, surface,
-                                    bf.filtered_velocities, fs)
+                                   bf.filtered_velocities, fs)
+
     return BoundaryCondition(Flux(), new_bf)
 end
 
