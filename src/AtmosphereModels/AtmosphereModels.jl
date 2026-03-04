@@ -27,6 +27,9 @@ export
     precipitation_rate,
     surface_precipitation_flux,
     specific_humidity,
+    moisture_prognostic_name,
+    moisture_specific_name,
+    specific_prognostic_moisture,
 
     # Microphysics interface
     AbstractMicrophysicalState,
@@ -38,6 +41,9 @@ export
     grid_microphysical_tendency_factor,
     numerical_microphysical_tendency,
     prognostic_field_names,
+    moisture_fractions,
+    grid_moisture_fractions,
+    specific_prognostic_moisture_from_total,
     update_microphysical_fields!,
     update_microphysical_auxiliaries!,
     initial_aerosol_number,
@@ -50,6 +56,7 @@ export
     # Radiation (implemented by extensions)
     RadiativeTransferModel,
     BackgroundAtmosphere,
+    materialize_background_atmosphere,
     GrayOptics,
     ClearSkyOptics,
     AllSkyOptics,
