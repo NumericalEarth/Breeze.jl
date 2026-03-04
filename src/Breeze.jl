@@ -11,6 +11,8 @@ export
     ThermodynamicConstants,
     ReferenceState,
     ExnerReferenceState,
+    compute_reference_state!,
+    set_to_mean!,
     surface_density,
     AnelasticDynamics,
     AnelasticModel,

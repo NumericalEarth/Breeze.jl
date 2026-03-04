@@ -457,7 +457,14 @@ end
 """
 $(TYPEDSIGNATURES)
 
-Set specific humidity field from relative humidity, computing qᵗ = ℋ * qᵛ⁺(T, ρ).
+Set specific humidity field from relative humidity, computing
+
+```math
+qᵗ = ℋ * qᵛ⁺(T, ρ).
+```
+
+where ``qᵗ`` is the total specific moisture, ``ℋ`` is the relative humidity,
+and ``qᵛ⁺`` is the saturation specific humidity at temperature ``T`` and density ``ρ``.
 """
 function set_moisture_from_relative_humidity!(qᵗ_field, ℋ, T_field, ρ_field, constants)
     grid = qᵗ_field.grid

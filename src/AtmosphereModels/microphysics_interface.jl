@@ -583,17 +583,17 @@ surface_precipitation_flux(model, ::Nothing) = Field{Center, Center, Nothing}(mo
 $(TYPEDEF)
 $(TYPEDFIELDS)
 
-Represents cloud particles with a constant effective radius in microns (μm).
+Represents cloud particles with a constant effective radius in meters.
 """
 struct ConstantRadiusParticles{FT}
-    "Effective radius [μm]"
+    "Effective radius [m]"
     radius :: FT
 end
 
 """
 $(TYPEDSIGNATURES)
 
-Return the effective radius of cloud liquid droplets in microns (μm).
+Return the effective radius of cloud liquid droplets in meters.
 
 This function dispatches on the `effective_radius_model` argument. The default
 implementation for `ConstantRadiusParticles` returns a constant value.
@@ -607,7 +607,7 @@ based on cloud properties.
 """
 $(TYPEDSIGNATURES)
 
-Return the effective radius of cloud ice particles in microns (μm).
+Return the effective radius of cloud ice particles in meters.
 
 This function dispatches on the `effective_radius_model` argument. The default
 implementation for [`ConstantRadiusParticles`](@ref) returns a constant value.
