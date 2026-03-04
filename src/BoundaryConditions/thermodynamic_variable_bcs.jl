@@ -294,7 +294,7 @@ const UnregularizedEnergyFluxBC = BoundaryCondition{<:Flux, <:EnergyFluxBoundary
 
 function materialize_atmosphere_boundary_condition(bc::UnregularizedEnergyFluxBC,
                                                   side, loc, grid, dynamics, microphysics, surface_pressure, constants,
-                                                  microphysical_fields, prognostic_specific_moisture, temperature)
+                                                  microphysical_fields, specific_prognostic_moisture, temperature)
     ef = bc.condition
     density = dynamics_density(dynamics)
     new_ef = EnergyFluxBoundaryConditionFunction(ef.condition, side, microphysics, constants, density)
@@ -306,7 +306,7 @@ const UnregularizedThetaFluxBC = BoundaryCondition{<:Flux, <:ThetaFluxBoundaryCo
 
 function materialize_atmosphere_boundary_condition(bc::UnregularizedThetaFluxBC,
                                                   side, loc, grid, dynamics, microphysics, surface_pressure, constants,
-                                                  microphysical_fields, prognostic_specific_moisture, temperature)
+                                                  microphysical_fields, specific_prognostic_moisture, temperature)
     tf = bc.condition
     density = dynamics_density(dynamics)
     new_tf = ThetaFluxBoundaryConditionFunction(tf.condition, side, microphysics, constants, density)

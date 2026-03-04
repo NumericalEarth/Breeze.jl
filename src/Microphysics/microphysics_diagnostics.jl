@@ -32,7 +32,7 @@ const C = Center
 struct RelativeHumidityKernelFunction{μ, M, MF, T, R, TH}
     microphysics :: μ
     microphysical_fields :: M
-    prognostic_specific_moisture :: MF
+    specific_prognostic_moisture :: MF
     temperature :: T
     reference_state :: R
     thermodynamic_constants :: TH
@@ -43,7 +43,7 @@ Utils.prettysummary(::RelativeHumidityKernelFunction) = "RelativeHumidityKernelF
 Adapt.adapt_structure(to, k::RelativeHumidityKernelFunction) =
     RelativeHumidityKernelFunction(adapt(to, k.microphysics),
                                    adapt(to, k.microphysical_fields),
-                                   adapt(to, k.prognostic_specific_moisture),
+                                   adapt(to, k.specific_prognostic_moisture),
                                    adapt(to, k.temperature),
                                    adapt(to, k.reference_state),
                                    adapt(to, k.thermodynamic_constants))
@@ -126,7 +126,7 @@ function RelativeHumidity(model)
 
     func = RelativeHumidityKernelFunction(microphysics,
                                           model.microphysical_fields,
-                                          model.microphysical_fields[moisture_specific_name(model.microphysics)],
+                                          specific_prognostic_moisture(model),
                                           model.temperature,
                                           model.dynamics.reference_state,
                                           model.thermodynamic_constants)
@@ -142,7 +142,7 @@ function (d::AdjustmentRH)(i, j, k, grid)
         ρᵣ = d.reference_state.density[i, j, k]
         T = d.temperature[i, j, k]
         # qᵛᵉ: vapor (non-equilibrium) or equilibrium moisture (saturation adjustment)
-        qᵛᵉ = d.prognostic_specific_moisture[i, j, k]
+        qᵛᵉ = d.specific_prognostic_moisture[i, j, k]
     end
 
     constants = d.thermodynamic_constants

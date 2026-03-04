@@ -271,6 +271,15 @@ end
 """
 $(TYPEDSIGNATURES)
 
+Return the prognostic specific moisture field for `model`.
+
+This is `qᵛ` for non-equilibrium schemes or `qᵉ` for saturation adjustment schemes.
+"""
+specific_prognostic_moisture(model) = model.microphysical_fields[moisture_specific_name(model.microphysics)]
+
+"""
+$(TYPEDSIGNATURES)
+
 Return the specific humidity (vapor mass fraction) field for the given `model`.
 
 This always returns the actual vapor field `qᵛ` from the microphysical fields,
@@ -452,12 +461,12 @@ For `Nothing` microphysics, `qᵛᵉ = qᵗ` (all moisture is vapor).
 This is used by parcel models that store total moisture `qᵗ` as the prognostic
 variable, to produce the correct input for [`moisture_fractions`](@ref).
 """
-@inline prognostic_specific_moisture_from_total(::Nothing, qᵗ, ℳ) = qᵗ
-@inline prognostic_specific_moisture_from_total(::Nothing, qᵗ, ::NothingMicrophysicalState) = qᵗ
-@inline prognostic_specific_moisture_from_total(::Nothing, qᵗ, ::NamedTuple) = qᵗ
+@inline specific_prognostic_moisture_from_total(::Nothing, qᵗ, ℳ) = qᵗ
+@inline specific_prognostic_moisture_from_total(::Nothing, qᵗ, ::NothingMicrophysicalState) = qᵗ
+@inline specific_prognostic_moisture_from_total(::Nothing, qᵗ, ::NamedTuple) = qᵗ
 
 # Generic fallback: no condensate prognostics → all moisture is vapor/equilibrium.
-@inline prognostic_specific_moisture_from_total(microphysics, qᵗ, ::NothingMicrophysicalState) = qᵗ
+@inline specific_prognostic_moisture_from_total(microphysics, qᵗ, ::NothingMicrophysicalState) = qᵗ
 
 """
 $(TYPEDSIGNATURES)

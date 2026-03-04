@@ -138,7 +138,7 @@ function compute_momentum_tendencies!(model::AtmosphereModel, model_fields)
                    model.dynamics,
                    model.formulation,
                    model.temperature,
-                   model.microphysical_fields[moisture_specific_name(model.microphysics)],
+                   specific_prognostic_moisture(model),
                    model.microphysics,
                    model.microphysical_fields,
                    model.thermodynamic_constants)
@@ -187,7 +187,7 @@ function compute_auxiliary_thermodynamic_variables!(model::AtmosphereModel)
     launch!(arch, grid, :xyz,
             _compute_auxiliary_thermodynamic_variables!,
             model.temperature,
-            model.microphysical_fields[moisture_specific_name(model.microphysics)],
+            specific_prognostic_moisture(model),
             model.formulation,
             model.dynamics,
             grid,
@@ -224,7 +224,7 @@ end
 end
 
 @kernel function _compute_auxiliary_thermodynamic_variables!(temperature,
-                                                             prognostic_specific_moisture,
+                                                             specific_prognostic_moisture,
                                                              formulation,
                                                              dynamics,
                                                              grid,
@@ -242,7 +242,7 @@ end
         ρqᵛᵉ = moisture_density[i, j, k]
         # qᵛᵉ: vapor specific humidity (non-equilibrium) or equilibrium moisture (saturation adjustment)
         qᵛᵉ = ρqᵛᵉ / ρ
-        prognostic_specific_moisture[i, j, k] = qᵛᵉ
+        specific_prognostic_moisture[i, j, k] = qᵛᵉ
     end
 
     # Compute moisture fractions first (needed by diagnose_thermodynamic_state)
@@ -278,7 +278,7 @@ function compute_tendencies!(model::AtmosphereModel)
         model.dynamics,
         model.formulation,
         model.thermodynamic_constants,
-        model.microphysical_fields[moisture_specific_name(model.microphysics)],
+        specific_prognostic_moisture(model),
         model.velocities,
         model.microphysics,
         model.microphysical_fields,
@@ -299,7 +299,7 @@ function compute_tendencies!(model::AtmosphereModel)
 
     moist_name = moisture_prognostic_name(model.microphysics)
     ρq_args = (
-        model.microphysical_fields[moisture_specific_name(model.microphysics)],
+        specific_prognostic_moisture(model),
         Val(2),
         Val(moist_name),
         model.forcing[moist_name],

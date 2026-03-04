@@ -267,7 +267,7 @@ The Kessler scheme performs its own saturation adjustment internally via the ker
 AtmosphereModels.moisture_prognostic_name(::DCMIP2016KM) = :ρqᵛ
 
 # DCMIP2016 Kessler stores vapor as prognostic; subtract all condensate from total.
-@inline function AtmosphereModels.prognostic_specific_moisture_from_total(::DCMIP2016KM, qᵗ, ℳ::AtmosphereModels.WarmRainState)
+@inline function AtmosphereModels.specific_prognostic_moisture_from_total(::DCMIP2016KM, qᵗ, ℳ::AtmosphereModels.WarmRainState)
     return max(0, qᵗ - ℳ.qᶜˡ - ℳ.qʳ)
 end
 AtmosphereModels.liquid_mass_fraction(::DCMIP2016KM, model) = model.microphysical_fields.qᶜˡ + model.microphysical_fields.qʳ

@@ -16,7 +16,7 @@ using Breeze.Thermodynamics: MoistureMassFractions,
     temperature_from_potential_temperature, saturation_specific_humidity
 
 using Breeze.AtmosphereModels: AtmosphereModels, AtmosphereModel,
-    moisture_specific_name, prognostic_specific_moisture_from_total
+    specific_prognostic_moisture, specific_prognostic_moisture_from_total
 using Breeze.TimeSteppers: SSPRungeKutta3
 
 #####
@@ -393,18 +393,18 @@ function Oceananigans.set!(model::ParcelModel; T = nothing, θ = nothing,
 
     # Compute specific humidity from relative humidity if ℋ is provided
     if !isnothing(ℋ) && isnothing(qᵗ)
-        spm = model.microphysical_fields[moisture_specific_name(model.microphysics)]
+        spm = specific_prognostic_moisture(model)
         set_moisture_from_relative_humidity!(spm, ℋ,
                                               model.temperature, dynamics.density, constants)
     elseif !isnothing(qᵗ)
-        spm = model.microphysical_fields[moisture_specific_name(model.microphysics)]
+        spm = specific_prognostic_moisture(model)
         set!(spm, qᵗ)
     else
         # Default to zero moisture
-        spm = model.microphysical_fields[moisture_specific_name(model.microphysics)]
+        spm = specific_prognostic_moisture(model)
         set!(spm, 0)
     end
-    fill_halo_regions!(model.microphysical_fields[moisture_specific_name(model.microphysics)])
+    fill_halo_regions!(specific_prognostic_moisture(model))
 
     # Initialize parcel state if z is provided
     if !isnothing(z)
@@ -500,7 +500,7 @@ function initialize_parcel_state!(state, z₀, x₀, y₀, model)
     T₀ = interpolate(z₀, model.temperature)
     ρ₀ = interpolate(z₀, dynamics.density)
     p₀ = interpolate(z₀, dynamics.pressure)
-    qᵗ₀ = interpolate(z₀, model.microphysical_fields[moisture_specific_name(model.microphysics)])
+    qᵗ₀ = interpolate(z₀, specific_prognostic_moisture(model))
 
     # Set position and zero vertical velocity (can be overridden by set! w_parcel keyword)
     state.x = x₀
@@ -861,7 +861,7 @@ function ssp_rk3_parcel_substep!(model::ParcelModel, U⁰::ParcelInitialState, �
     microphysics = model.microphysics
     zero_velocities = (; u = zero(state.ρ), v = zero(state.ρ), w = zero(state.ρ))
     ℳ = microphysical_state(microphysics, state.ρ, state.μ, state.𝒰, zero_velocities)
-    qᵛᵉ = prognostic_specific_moisture_from_total(microphysics, state.qᵗ, ℳ)
+    qᵛᵉ = specific_prognostic_moisture_from_total(microphysics, state.qᵗ, ℳ)
     q⁺ = moisture_fractions(microphysics, ℳ, qᵛᵉ)
     state.𝒰 = with_moisture(state.𝒰, q⁺)
 
@@ -954,7 +954,7 @@ function step_parcel_state!(model::ParcelModel, Δt)
     microphysics = model.microphysics
     zero_velocities = (; u = zero(state.ρ), v = zero(state.ρ), w = zero(state.ρ))
     ℳ = microphysical_state(microphysics, state.ρ, state.μ, state.𝒰, zero_velocities)
-    qᵛᵉ = prognostic_specific_moisture_from_total(microphysics, state.qᵗ, ℳ)
+    qᵛᵉ = specific_prognostic_moisture_from_total(microphysics, state.qᵗ, ℳ)
     q⁺ = moisture_fractions(microphysics, ℳ, qᵛᵉ)
     state.𝒰 = with_moisture(state.𝒰, q⁺)
 

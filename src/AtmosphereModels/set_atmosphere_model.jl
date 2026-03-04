@@ -168,7 +168,7 @@ function Fields.set!(model::AtmosphereModel; time=nothing, enforce_mass_conserva
         elseif name ∈ (:ρqᵗ, :ρqᵛ, :ρqᵉ)
             set!(model.moisture_density, value)
             ρ = dynamics_density(model.dynamics)
-            spm = model.microphysical_fields[moisture_specific_name(model.microphysics)]
+            spm = specific_prognostic_moisture(model)
             set!(spm, model.moisture_density / ρ)
 
         elseif name ∈ prognostic_field_names(model.microphysics)
@@ -184,7 +184,7 @@ function Fields.set!(model::AtmosphereModel; time=nothing, enforce_mass_conserva
             set!(ρμ, ρ * ρμ)
 
         elseif name ∈ (:qᵗ, :qᵛ, :qᵉ)
-            spm = model.microphysical_fields[moisture_specific_name(model.microphysics)]
+            spm = specific_prognostic_moisture(model)
             set!(spm, value)
             ρ = dynamics_density(model.dynamics)
             set!(model.moisture_density, ρ * spm)
@@ -212,16 +212,16 @@ function Fields.set!(model::AtmosphereModel; time=nothing, enforce_mass_conserva
             qᵛ⁺ = Field(SaturationSpecificHumidity(model, :equilibrium))
 
             # Set specific prognostic moisture = ℋ * qᵛ⁺
-            qᵛ = model.microphysical_fields[moisture_specific_name(model.microphysics)]
+            spm = specific_prognostic_moisture(model)
 
-            # Set qᵛ = ℋ * qᵛ⁺
-            # First set ℋ onto qᵛ (evaluates functions on CPU for GPU compatibility),
+            # Set spm = ℋ * qᵛ⁺
+            # First set ℋ onto spm (evaluates functions on CPU for GPU compatibility),
             # then multiply by the materialized saturation specific humidity.
-            set!(qᵛ, value)
-            set!(qᵛ, qᵛ * qᵛ⁺)
+            set!(spm, value)
+            set!(spm, spm * qᵛ⁺)
 
             ρ = dynamics_density(model.dynamics)
-            set!(model.moisture_density, ρ * qᵛ)
+            set!(model.moisture_density, ρ * spm)
 
         else
             prognostic_names = keys(prognostic_fields(model))

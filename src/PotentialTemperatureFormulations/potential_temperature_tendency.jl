@@ -1,5 +1,5 @@
 using Breeze.AtmosphereModels.Diagnostics: Diagnostics
-using Breeze.AtmosphereModels: AtmosphereModel, moisture_specific_name
+using Breeze.AtmosphereModels: AtmosphereModel, specific_prognostic_moisture
 
 using Oceananigans.Fields: Field, set!
 using Breeze.Thermodynamics: temperature
@@ -72,7 +72,7 @@ end
                                                 dynamics,
                                                 formulation::LiquidIcePotentialTemperatureFormulation,
                                                 constants,
-                                                prognostic_specific_moisture,
+                                                specific_prognostic_moisture,
                                                 velocities,
                                                 microphysics,
                                                 microphysical_fields,
@@ -84,7 +84,7 @@ end
     potential_temperature = formulation.potential_temperature
     ρ_field = dynamics_density(dynamics)
     @inbounds ρ = ρ_field[i, j, k]
-    @inbounds qᵛᵉ = prognostic_specific_moisture[i, j, k]
+    @inbounds qᵛᵉ = specific_prognostic_moisture[i, j, k]
 
     # Compute moisture fractions first
     q = grid_moisture_fractions(i, j, k, grid, microphysics, ρ, qᵛᵉ, microphysical_fields)
@@ -135,7 +135,7 @@ function AtmosphereModels.set_thermodynamic_variable!(model::PotentialTemperatur
             formulation.potential_temperature,
             grid,
             e,
-            model.microphysical_fields[moisture_specific_name(model.microphysics)],
+            specific_prognostic_moisture(model),
             model.dynamics,
             model.microphysics,
             model.microphysical_fields,
@@ -155,7 +155,7 @@ end
                                                      potential_temperature,
                                                      grid,
                                                      specific_energy,
-                                                     prognostic_specific_moisture,
+                                                     specific_prognostic_moisture,
                                                      dynamics,
                                                      microphysics,
                                                      microphysical_fields,
@@ -165,7 +165,7 @@ end
     @inbounds begin
         pᵣ = dynamics_pressure(dynamics)[i, j, k]
         ρᵣ = dynamics_density(dynamics)[i, j, k]
-        qᵛᵉ = prognostic_specific_moisture[i, j, k]
+        qᵛᵉ = specific_prognostic_moisture[i, j, k]
         e = specific_energy[i, j, k]
     end
 
@@ -213,7 +213,7 @@ function AtmosphereModels.set_thermodynamic_variable!(model::PotentialTemperatur
             formulation.potential_temperature,
             grid,
             T_field,
-            model.microphysical_fields[moisture_specific_name(model.microphysics)],
+            specific_prognostic_moisture(model),
             model.dynamics,
             model.microphysics,
             model.microphysical_fields,
@@ -226,7 +226,7 @@ end
                                                           potential_temperature,
                                                           grid,
                                                           temperature_field,
-                                                          prognostic_specific_moisture,
+                                                          specific_prognostic_moisture,
                                                           dynamics,
                                                           microphysics,
                                                           microphysical_fields,
@@ -236,7 +236,7 @@ end
     @inbounds begin
         pᵣ = dynamics_pressure(dynamics)[i, j, k]
         ρᵣ = dynamics_density(dynamics)[i, j, k]
-        qᵛᵉ = prognostic_specific_moisture[i, j, k]
+        qᵛᵉ = specific_prognostic_moisture[i, j, k]
         T = temperature_field[i, j, k]
     end
 

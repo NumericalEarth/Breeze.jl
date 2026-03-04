@@ -19,7 +19,7 @@ using Breeze.AtmosphereModels:
     cloud_liquid_effective_radius,
     cloud_ice_effective_radius,
     grid_moisture_fractions,
-    moisture_specific_name,
+    specific_prognostic_moisture,
     RadiativeTransferModel
 
 using Breeze.Thermodynamics: ThermodynamicConstants
@@ -313,7 +313,7 @@ function update_rrtmgp_cloud_state!(cloud_state, model, liquid_effective_radius,
     ρᵣ = model.dynamics.reference_state.density
     microphysics = model.microphysics
     microphysical_fields = model.microphysical_fields
-    qᵛ = model.microphysical_fields[moisture_specific_name(model.microphysics)]
+    qᵛ = specific_prognostic_moisture(model)
 
     launch!(arch, grid, :xyz, _update_rrtmgp_cloud_state!,
             cloud_state, grid, ρᵣ, microphysics, microphysical_fields, qᵛ,
@@ -322,7 +322,7 @@ function update_rrtmgp_cloud_state!(cloud_state, model, liquid_effective_radius,
     return nothing
 end
 
-@kernel function _update_rrtmgp_cloud_state!(cloud_state, grid, ρᵣ, microphysics, microphysical_fields, prognostic_specific_moisture,
+@kernel function _update_rrtmgp_cloud_state!(cloud_state, grid, ρᵣ, microphysics, microphysical_fields, specific_prognostic_moisture,
                                              liquid_effective_radius, ice_effective_radius)
     i, j, k = @index(Global, NTuple)
 
@@ -334,7 +334,7 @@ end
     @inbounds begin
         ρ = ρᵣ[i, j, k]
         Δz = Δzᶜᶜᶜ(i, j, k, grid)
-        qᵛᵉ = prognostic_specific_moisture[i, j, k]
+        qᵛᵉ = specific_prognostic_moisture[i, j, k]
 
         # Get moisture fractions from microphysics
         q = grid_moisture_fractions(i, j, k, grid, microphysics, ρ, qᵛᵉ, microphysical_fields)

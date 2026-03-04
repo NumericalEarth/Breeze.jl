@@ -34,7 +34,7 @@ using Breeze.Thermodynamics:
     WarmPhaseEquilibrium,
     equilibrated_surface
 
-using Breeze.AtmosphereModels: AtmosphereModel, grid_moisture_fractions, moisture_specific_name
+using Breeze.AtmosphereModels: AtmosphereModel, grid_moisture_fractions, specific_prognostic_moisture
 
 using Adapt: Adapt, adapt
 using Oceananigans: Oceananigans, Center
