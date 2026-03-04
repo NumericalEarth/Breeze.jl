@@ -64,8 +64,10 @@
 # normalized distance, ``Δθ = 2 \, {\rm K}``, ``R_x = 10 \, {\rm km}``,
 # ``R_z = 1.5 \, {\rm km}``, and the bubble is centered at ``z_c = 1.5 \, {\rm km}``.
 
+using CUDA
+using CloudMicrophysics
 using Breeze
-using Breeze: DCMIP2016KesslerMicrophysics, TetensFormula
+using Breeze: TetensFormula
 using Oceananigans: Oceananigans
 using Oceananigans.Units
 
@@ -83,7 +85,7 @@ Oceananigans.defaults.FloatType = Float64
 Nx, Nz = 600, 40
 Lx, Lz = 600kilometers, 20kilometers
 
-grid = RectilinearGrid(CPU(),
+grid = RectilinearGrid(GPU(),
                        size = (Nx, Nz),
                        x = (0, Lx),
                        z = (0, Lz),
@@ -201,13 +203,20 @@ fig
 # and a sponge layer on vertical momentum to prevent spurious reflections
 # from the rigid lid.
 
-microphysics = DCMIP2016KesslerMicrophysics()
+BreezeCloudMicrophysicsExt = Base.get_extension(Breeze, :BreezeCloudMicrophysicsExt)
+TwoMomentCloudMicrophysics = BreezeCloudMicrophysicsExt.TwoMomentCloudMicrophysics
+microphysics = TwoMomentCloudMicrophysics()
 advection = WENO(order=9, minimum_buffer_upwind_order=3)
 
-sponge_center = 18000
-sponge_width = 2000
-sponge_mask(x, z) = exp(-(z - sponge_center)^2 / (2 * sponge_width^2))
-ρw_sponge = Relaxation(rate=1/30, mask=sponge_mask)
+@inline function ρw_sponge_func(i, j, k, grid, clock, model_fields, p)
+    z = znode(i, j, k, grid, Center(), Center(), Face())
+    mask = exp(-(z - p.center)^2 / (2 * p.width^2))
+    @inbounds ρw = model_fields.ρw[i, j, k]
+    return -p.rate * mask * ρw
+end
+
+ρw_sponge = Forcing(ρw_sponge_func; discrete_form=true,
+                    parameters=(; rate=1/30, center=18000.0, width=2000.0))
 forcing = (; ρw=ρw_sponge)
 
 model = AtmosphereModel(grid; dynamics, microphysics, advection,
