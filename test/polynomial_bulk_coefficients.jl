@@ -478,4 +478,131 @@ using Oceananigans.BoundaryConditions: BoundaryCondition
         # Higher evaluation height → coefficient adjusted by log ratio
         @test C_20m > 0
     end
+
+    @testset "Height interpolation in filtered update" begin
+        # Grid with 4 vertical cells: centers at z=5, 15, 25, 35
+        grid = RectilinearGrid(default_arch; size=(4, 4, 4), x=(0, 100), y=(0, 100), z=(0, 40))
+
+        # Set up a velocity field with a known vertical profile
+        u = XFaceField(grid)
+        v = YFaceField(grid)
+        # u linear in z: u(z=5)=2, u(z=15)=4, u(z=25)=6, u(z=35)=8
+        interior(u) .= 0
+        for k in 1:4
+            interior(u, :, :, k) .= 2k
+        end
+        set!(v, 1.0)
+        velocities = (; u, v)
+
+        # Filter with height=10.0 (midpoint between k=1 center at 5m and k=2 center at 15m)
+        fv = FilteredSurfaceVelocities(grid; height=10.0, filter_timescale=1e10)
+        # Use large ε to make the result close to the instantaneous value
+        Δt = 1e10
+        Breeze.BoundaryConditions.update!(fv, velocities, grid, Δt)
+
+        # At height=10, linear interpolation: u = 2 + (10-5)/(15-5) * (4-2) = 3.0
+        # With ε = Δt/τ = 1, result = (0 + 1*3)/(1+1) = 1.5... but with ε=1e10/1e10=1
+        # Actually ε = Δt/τ = 1e10/1e10 = 1.0
+        ε = 1.0
+        expected_u = (0.0 + ε * 3.0) / (1 + ε)
+        @test fv.u[1, 1, 1] ≈ expected_u atol=1e-6
+    end
+
+    @testset "Wind speed dispatch with FilteredSurfaceVelocities" begin
+        using Breeze.BoundaryConditions: wind_speed²ᶠᶜᶜ, wind_speed²ᶜᶠᶜ, wind_speed²ᶜᶜᶜ
+
+        grid = RectilinearGrid(default_arch; size=(4, 4, 4), x=(0, 100), y=(0, 100), z=(0, 40))
+        fv = FilteredSurfaceVelocities(grid; filter_timescale=10.0)
+
+        # Set filtered velocities to known values
+        set!(fv.u, 3.0)
+        set!(fv.v, 4.0)
+
+        # Create dummy 3D fields with different values
+        u3d = XFaceField(grid)
+        v3d = YFaceField(grid)
+        set!(u3d, 10.0)
+        set!(v3d, 10.0)
+        fields = (; u=u3d, v=v3d)
+
+        # Nothing dispatch should use 3D fields (large values)
+        U²_none_cc = wind_speed²ᶜᶜᶜ(2, 2, grid, fields, nothing)
+        @test U²_none_cc > 100  # should be ~200
+
+        # FilteredSurfaceVelocities dispatch should use filtered 2D fields
+        U²_filt_cc = wind_speed²ᶜᶜᶜ(2, 2, grid, fields, fv)
+        @test U²_filt_cc < 100  # should be ~25 (3² + 4²)
+        @test U²_filt_cc > 0
+
+        # Test other staggered locations
+        U²_filt_fc = wind_speed²ᶠᶜᶜ(2, 2, grid, fields, fv)
+        @test U²_filt_fc > 0
+        @test U²_filt_fc < 100
+
+        U²_filt_cf = wind_speed²ᶜᶠᶜ(2, 2, grid, fields, fv)
+        @test U²_filt_cf > 0
+        @test U²_filt_cf < 100
+    end
+
+    @testset "update_filtered_surface_state! with Nothing" begin
+        using Breeze.BoundaryConditions: update_filtered_surface_state!
+        # Should be no-ops and not error
+        @test update_filtered_surface_state!(nothing, nothing) === nothing
+        @test update_filtered_surface_state!(nothing, nothing, nothing) === nothing
+    end
+
+    @testset "summary methods" begin
+        grid = RectilinearGrid(default_arch; size=(4, 4, 4), x=(0, 100), y=(0, 100), z=(0, 40))
+
+        fv = FilteredSurfaceVelocities(grid; height=10.0, filter_timescale=60.0)
+        s = summary(fv)
+        @test occursin("FilteredSurfaceVelocities", s)
+        @test occursin("10.0", s)
+        @test occursin("60.0", s)
+
+        fs = FilteredSurfaceScalar(grid; height=5.0, filter_timescale=30.0)
+        s2 = summary(fs)
+        @test occursin("FilteredSurfaceScalar", s2)
+        @test occursin("5.0", s2)
+        @test occursin("30.0", s2)
+
+        # BulkDragFunction summary with filtered_velocities
+        df = Breeze.BoundaryConditions.BulkDragFunction(direction=nothing, coefficient=1e-3,
+                                                         gustiness=0.5, surface_temperature=nothing,
+                                                         filtered_velocities=fv)
+        s3 = summary(df)
+        @test occursin("BulkDragFunction", s3)
+        @test occursin("FilteredSurfaceVelocities", s3)
+    end
+
+    @testset "FilteredSurfaceScalar update with height interpolation" begin
+        # Grid with 4 vertical cells: centers at z=5, 15, 25, 35
+        grid = RectilinearGrid(default_arch; size=(4, 4, 4), x=(0, 100), y=(0, 100), z=(0, 40))
+
+        # Set up a scalar field with known vertical profile
+        θ = CenterField(grid)
+        for k in 1:4
+            interior(θ, :, :, k) .= 290.0 + 2.0 * k  # θ(z=5)=292, θ(z=15)=294, etc.
+        end
+
+        # Filter at height = 10.0 (midpoint: expect interpolated value = 293.0)
+        fs = FilteredSurfaceScalar(grid; height=10.0, filter_timescale=1e10)
+        Breeze.BoundaryConditions.update!(fs, θ, grid, 1e10)
+
+        ε = 1.0
+        expected = (0.0 + ε * 293.0) / (1 + ε)
+        @test fs.field[1, 1, 1] ≈ expected atol=1e-6
+    end
+
+    @testset "evaluation_height helper" begin
+        using Breeze.BoundaryConditions: evaluation_height
+        grid = RectilinearGrid(default_arch; size=(1, 1, 1), x=(0, 100), y=(0, 100), z=(0, 20))
+
+        # Nothing → uses znode (first cell center at 10m for this grid)
+        h_default = evaluation_height(1, 1, grid, nothing)
+        @test h_default ≈ 10.0
+
+        # Explicit height passes through
+        @test evaluation_height(1, 1, grid, 25.0) == 25.0
+    end
 end
