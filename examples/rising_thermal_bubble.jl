@@ -60,18 +60,24 @@ z₀  = 2000.0   # bubble centre z [m]
 # Reactant-compiled execution and one on `CPU()` for the plain-Julia baseline.
 
 Lx, Ly, Lz = 10000.0, 10000.0, 10000.0
-Nx, Ny, Nz = 12, 12, 12
+Nx, Ny, Nz = 32, 32, 32
 
 topo = (Periodic, Bounded, Bounded)
 grid_kwargs = (size = (Nx, Ny, Nz), x = (0, Lx), y = (0, Ly), z = (0, Lz), topology = topo)
 
-grid     = RectilinearGrid(ReactantState(); grid_kwargs...)
-grid_cpu = RectilinearGrid(CPU();           grid_kwargs...)
+@info "Building grids…"
+@time begin
+    grid     = RectilinearGrid(ReactantState(); grid_kwargs...)
+    grid_cpu = RectilinearGrid(CPU();           grid_kwargs...)
+end
 
 FT = eltype(grid)
 
-model     = AtmosphereModel(grid;     dynamics = CompressibleDynamics())
-model_cpu = AtmosphereModel(grid_cpu; dynamics = CompressibleDynamics())
+@info "Building models…"
+@time begin
+    model     = AtmosphereModel(grid;     dynamics = CompressibleDynamics())
+    model_cpu = AtmosphereModel(grid_cpu; dynamics = CompressibleDynamics())
+end
 
 constants = model.thermodynamic_constants
 
@@ -85,12 +91,23 @@ constants = model.thermodynamic_constants
 θ_initial(x, y, z) = FT(θ₀) + θ_perturbation(x, y, z)
 ρ_initial(x, y, z) = adiabatic_hydrostatic_density(z, p₀, θ₀, pˢᵗ, constants)
 
-θ_init     = CenterField(grid);     set!(θ_init,     θ_initial)
-θ_init_cpu = CenterField(grid_cpu); set!(θ_init_cpu, θ_initial)
-dθ_init    = CenterField(grid);     set!(dθ_init,    FT(0))
+@info "Initializing fields…"
+@time begin
+    θ_init     = CenterField(grid);     set!(θ_init,     θ_initial)
+    θ_init_cpu = CenterField(grid_cpu); set!(θ_init_cpu, θ_initial)
+    dθ_init    = CenterField(grid);     set!(dθ_init,    FT(0))
+end
 
-set!(model;     θ = θ_init,     ρ = ρ_initial)
-set!(model_cpu; θ = θ_init_cpu, ρ = ρ_initial)
+@info "Setting initial model state…"
+@time begin
+    set!(model;     θ = θ_init,     ρ = ρ_initial)
+    set!(model_cpu; θ = θ_init_cpu, ρ = ρ_initial)
+end
+
+θ_init_arr = Array(interior(θ_init))
+θ_init_cpu_arr = Array(interior(θ_init_cpu))
+@info "Initial θ field diagnostics" minimum=minimum(θ_init_arr) maximum=maximum(θ_init_arr) max_perturbation=maximum(abs, θ_init_arr .- θ₀)
+@info "Reactant/CPU θ init consistency" max_abs_difference=maximum(abs, θ_init_arr .- θ_init_cpu_arr)
 
 # ## Time step
 #
@@ -112,7 +129,7 @@ cₛ  = sqrt(γ * Rᵈ * θ₀)
 # temperature field.
 
 z_threshold = 5000.0
-nsteps      = 400
+nsteps      = 2500
 
 function loss(model, θ_init, Δt, nsteps)
     FT = eltype(model.grid)
@@ -144,12 +161,12 @@ end
 # into XLA/StableHLO, producing fused, optimized kernels.
 
 @info "Compiling forward pass…"
-compiled_fwd = Reactant.@compile raise=true raise_first=true sync=true loss(
+@time compiled_fwd = Reactant.@compile raise=true raise_first=true sync=true loss(
     model, θ_init, Δt, nsteps)
 
 @info "Compiling backward pass (Enzyme reverse mode)…"
 dmodel = Enzyme.make_zero(model)
-compiled_bwd = Reactant.@compile raise=true raise_first=true sync=true grad_loss(
+@time compiled_bwd = Reactant.@compile raise=true raise_first=true sync=true grad_loss(
     model, dmodel, θ_init, dθ_init, Δt, nsteps)
 
 # ## Benchmarking
@@ -201,11 +218,11 @@ compiled_bwd = Reactant.@compile raise=true raise_first=true sync=true grad_loss
 # backward pass to obtain ``\partial J / \partial \theta_0``.
 
 @info "Running forward pass for evolved state…"
-compiled_fwd(model, θ_init, Δt, nsteps)
+@time compiled_fwd(model, θ_init, Δt, nsteps)
 temperature = Array(interior(model.temperature))
 
 @info "Computing sensitivity…"
-dθ, J = compiled_bwd(model, dmodel, θ_init, dθ_init, Δt, nsteps)
+@time dθ, J = compiled_bwd(model, dmodel, θ_init, dθ_init, Δt, nsteps)
 sensitivity = Array(interior(dθ))
 
 @info "Loss value" J
@@ -214,15 +231,15 @@ sensitivity = Array(interior(dθ))
 # ## Visualisation
 #
 # A combined figure with the evolved potential temperature (top row) and the adjoint
-# sensitivity ``\partial J / \partial \theta_0`` (bottom row).  Both rows show central
-# cross-sections through the bubble centre.
+# sensitivity ``\partial J / \partial \theta_0`` (bottom row). These 2D slices are
+# chosen nearest to the bubble center ``(x₀, y₀, z₀)``.
 
 x = range(0, Lx, length = Nx)
 y = range(0, Ly, length = Ny)
 z = range(Lz / 2Nz, Lz - Lz / 2Nz, length = Nz)
 
-jmid = Ny ÷ 2
-imid = Nx ÷ 2
+i0 = argmin(abs.(x .- x₀))
+j0 = argmin(abs.(y .- y₀))
 
 fig = Figure(size = (1200, 900), fontsize = 14)
 
@@ -236,16 +253,16 @@ Label(fig[0, :],
 θrange = (θ₀ - θlim, θ₀ + θlim)
 
 ax1 = Axis(fig[1, 1]; xlabel = "x (m)", ylabel = "z (m)",
-           title = "θ  — x–z slice at y = $(Int(Ly/2)) m",
+           title = "θ  — x–z slice at y ≈ $(Int(round(y[j0]))) m",
            aspect = DataAspect())
-hm1 = heatmap!(ax1, x, z, temperature[:, jmid, :];
+hm1 = heatmap!(ax1, x, z, temperature[:, j0, :];
                colormap = :thermal, colorrange = θrange)
 Colorbar(fig[1, 2], hm1; label = "θ (K)")
 
 ax2 = Axis(fig[1, 3]; xlabel = "y (m)", ylabel = "z (m)",
-           title = "θ  — y–z slice at x = $(Int(Lx/2)) m",
+           title = "θ  — y–z slice at x ≈ $(Int(round(x[i0]))) m",
            aspect = DataAspect())
-hm2 = heatmap!(ax2, y, z, temperature[imid, :, :];
+hm2 = heatmap!(ax2, y, z, temperature[i0, :, :];
                colormap = :thermal, colorrange = θrange)
 Colorbar(fig[1, 4], hm2; label = "θ (K)")
 
@@ -254,27 +271,28 @@ Colorbar(fig[1, 4], hm2; label = "θ (K)")
 slimit = maximum(abs, sensitivity)
 
 ax3 = Axis(fig[2, 1]; xlabel = "x (m)", ylabel = "z (m)",
-           title = "∂J/∂θ₀  — x–z slice at y = $(Int(Ly/2)) m",
+           title = "∂J/∂θ₀  — x–z slice at y ≈ $(Int(round(y[j0]))) m",
            aspect = DataAspect())
-hm3 = heatmap!(ax3, x, z, sensitivity[:, jmid, :];
+hm3 = heatmap!(ax3, x, z, sensitivity[:, j0, :];
                colormap = :balance, colorrange = (-slimit, slimit))
 Colorbar(fig[2, 2], hm3; label = "∂J/∂θ₀")
 
 ax4 = Axis(fig[2, 3]; xlabel = "y (m)", ylabel = "z (m)",
-           title = "∂J/∂θ₀  — y–z slice at x = $(Int(Lx/2)) m",
+           title = "∂J/∂θ₀  — y–z slice at x ≈ $(Int(round(x[i0]))) m",
            aspect = DataAspect())
-hm4 = heatmap!(ax4, y, z, sensitivity[imid, :, :];
+hm4 = heatmap!(ax4, y, z, sensitivity[i0, :, :];
                colormap = :balance, colorrange = (-slimit, slimit))
 Colorbar(fig[2, 4], hm4; label = "∂J/∂θ₀")
 
-save("rising_thermal_sensitivity.png", fig; px_per_unit = 2)
+@time save("rising_thermal_sensitivity.png", fig; px_per_unit = 2)
 @info "Saved rising_thermal_sensitivity.png"
 
 # ## 3D cube-face view
 #
 # To keep all planes perfectly aligned, we plot three *exterior* faces of the domain:
 # top (`z = z_max`), front (`y = y_min`), and left (`x = x_min`). This forms a
-# single visible cube corner.
+# single visible cube corner. For now, the face colors also come from these boundary
+# slices (rather than middle slices).
 
 xy_X = [x[i] for i in 1:Nx, j in 1:Ny]
 xy_Y = [y[j] for i in 1:Nx, j in 1:Ny]
@@ -318,31 +336,34 @@ sf_s = surface!(ax3d_s, yz_X, yz_Y, yz_Z; color = sensitivity[1, :, :],
                 colormap = :balance, colorrange = (-slimit, slimit), shading = NoShading)
 Colorbar(fig3[1, 4], sf_s; label = "∂J/∂θ₀")
 
-save("rising_thermal_3d.png", fig3; px_per_unit = 2)
+@time save("rising_thermal_3d.png", fig3; px_per_unit = 2)
 @info "Saved rising_thermal_3d.png"
 
 # ## Timing bar chart
 #
 # Three bars: the plain-Julia forward pass, the Reactant forward pass, and the Reactant
 # backward pass.  Annotations show the forward speedup and the backward/forward ratio.
-
-fig2 = Figure(size = (700, 420), fontsize = 14)
-ax = Axis(fig2[1, 1];
-          xticks = ([1, 2, 3],
-                    ["Forward\n(Julia)", "Forward\n(Reactant)", "Backward\n(Reactant)"]),
-          ylabel = "Wall time (s)",
-          title  = "Rising Thermal Bubble — Reactant + Enzyme Benchmark")
-
-barplot!(ax, [1, 2, 3], [t_fwd_julia, t_fwd_compiled, t_bwd_compiled];
-         color = [:steelblue, :seagreen, :coral],
-         bar_labels = :y, label_formatter = x -> @sprintf("%.4f s", x))
-
-Label(fig2[2, 1],
-      @sprintf("Forward speedup: %.1f×   |   Backward / Forward ratio: %.1f×",
-               fwd_speedup, bwd_fwd_ratio),
-      fontsize = 12, color = :gray30, tellwidth = false)
-
-save("rising_thermal_benchmark.png", fig2; px_per_unit = 2)
-@info "Saved rising_thermal_benchmark.png"
+#
+# NOTE: disabled while iterating on model setup and visualisation. Re-enable for
+# publication-style performance comparisons.
+#
+# fig2 = Figure(size = (700, 420), fontsize = 14)
+# ax = Axis(fig2[1, 1];
+#           xticks = ([1, 2, 3],
+#                     ["Forward\n(Julia)", "Forward\n(Reactant)", "Backward\n(Reactant)"]),
+#           ylabel = "Wall time (s)",
+#           title  = "Rising Thermal Bubble — Reactant + Enzyme Benchmark")
+#
+# barplot!(ax, [1, 2, 3], [t_fwd_julia, t_fwd_compiled, t_bwd_compiled];
+#          color = [:steelblue, :seagreen, :coral],
+#          bar_labels = :y, label_formatter = x -> @sprintf("%.4f s", x))
+#
+# Label(fig2[2, 1],
+#       @sprintf("Forward speedup: %.1f×   |   Backward / Forward ratio: %.1f×",
+#                fwd_speedup, bwd_fwd_ratio),
+#       fontsize = 12, color = :gray30, tellwidth = false)
+#
+# save("rising_thermal_benchmark.png", fig2; px_per_unit = 2)
+# @info "Saved rising_thermal_benchmark.png"
 
 nothing #hide
