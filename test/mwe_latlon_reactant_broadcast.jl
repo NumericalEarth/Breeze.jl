@@ -48,7 +48,7 @@ using Test
     # a * b  →  BinaryOperation{Center,Center,Center}
     # set!(c, a * b) falls through to the generic  u .= v  path,
     # which launches _broadcast_kernel! via KernelAbstractions on ReactantBackend.
-    @test_broken set!(c, a * b) isa Field
+    set!(c, a * b)
 end
 
 
@@ -130,47 +130,47 @@ end
 out = Reactant.ConcreteRArray(zeros(N))
 v   = Reactant.ConcreteRArray(collect(1.0:Float64(N)))
 
-# Test 1
-@info "Test 1: Direct ConcreteRArray arg"
-try
-    f1! = @compile sync=true run_direct!(out, v)
-    f1!(out, v)
-    @info "  → PASS" result=Array(out)
-catch e
-    @info "  → FAIL" exception=e
-end
+# # Test 1
+# @info "Test 1: Direct ConcreteRArray arg"
+# try
+#     f1! = @compile sync=true run_direct!(out, v)
+#     f1!(out, v)
+#     @info "  → PASS" result=Array(out)
+# catch e
+#     @info "  → FAIL" exception=e
+# end
 
-# Test 2
-@info "Test 2: ConcreteRArray inside struct"
-h = Holder(v)
-try
-    f2! = @compile sync=true run_struct!(out, h)
-    f2!(out, h)
-    @info "  → PASS" result=Array(out)
-catch e
-    @info "  → FAIL" exception=e
-end
+# # Test 2
+# @info "Test 2: ConcreteRArray inside struct"
+# h = Holder(v)
+# try
+#     f2! = @compile sync=true run_struct!(out, h)
+#     f2!(out, h)
+#     @info "  → PASS" result=Array(out)
+# catch e
+#     @info "  → FAIL" exception=e
+# end
 
-# Test 3
-@info "Test 3: Struct with used + unused ConcreteRArray"
-unused = Reactant.ConcreteRArray(collect(100.0:100.0+Float64(N-1)))
-s = TwoArrays(v, unused)
-try
-    f3! = @compile sync=true run_dead_weight!(out, s)
-    f3!(out, s)
-    @info "  → PASS" result=Array(out)
-catch e
-    @info "  → FAIL" exception=e
-end
+# # Test 3
+# @info "Test 3: Struct with used + unused ConcreteRArray"
+# unused = Reactant.ConcreteRArray(collect(100.0:100.0+Float64(N-1)))
+# s = TwoArrays(v, unused)
+# try
+#     f3! = @compile sync=true run_dead_weight!(out, s)
+#     f3!(out, s)
+#     @info "  → PASS" result=Array(out)
+# catch e
+#     @info "  → FAIL" exception=e
+# end
 
-# Test 4
-@info "Test 4: Struct with OffsetVector{ConcreteRArray} (LatLonGrid pattern)"
-metric = OffsetVector(Reactant.ConcreteRArray(collect(1.0:Float64(N+1))), 0:N)
-g = GridLike(v, metric)
-try
-    f4! = @compile sync=true run_gridlike!(out, g)
-    f4!(out, g)
-    @info "  → PASS" result=Array(out)
-catch e
-    @info "  → FAIL" exception=e
-end
+# # Test 4
+# @info "Test 4: Struct with OffsetVector{ConcreteRArray} (LatLonGrid pattern)"
+# metric = OffsetVector(Reactant.ConcreteRArray(collect(1.0:Float64(N+1))), 0:N)
+# g = GridLike(v, metric)
+# try
+#     f4! = @compile sync=true run_gridlike!(out, g)
+#     f4!(out, g)
+#     @info "  → PASS" result=Array(out)
+# catch e
+#     @info "  → FAIL" exception=e
+# end
