@@ -509,7 +509,7 @@ end
          z = 0, w = 1)
 
     # Run long enough for cloud formation and autoconversion
-    simulation = Simulation(model; Δt=1.0, stop_time=120minutes, verbose=false)
+    simulation = Simulation(model; Δt=1, stop_time=120minutes, verbose=false)
     run!(simulation)
 
     # Extract final microphysical state
@@ -523,8 +523,8 @@ end
 
     # Total water should be conserved (vapor + cloud + rain = initial qᵗ at parcel altitude)
     q = model.dynamics.state.𝒰.moisture_mass_fractions
-    qᵗ_total = q.vapor + qᶜˡ_final + qʳ_final
-    @test qᵗ_total ≈ model.dynamics.state.qᵗ rtol=1e-10
+    qᵗ = q.vapor + qᶜˡ_final + qʳ_final
+    @test qᵗ ≈ model.dynamics.state.qᵗ rtol=1e-10
 end
 
 #####
