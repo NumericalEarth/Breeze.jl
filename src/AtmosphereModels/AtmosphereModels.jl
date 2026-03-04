@@ -27,6 +27,9 @@ export
     precipitation_rate,
     surface_precipitation_flux,
     specific_humidity,
+    moisture_prognostic_name,
+    moisture_specific_name,
+    specific_prognostic_moisture,
 
     # Microphysics interface
     AbstractMicrophysicalState,
@@ -35,6 +38,9 @@ export
     microphysical_state,
     microphysical_tendency,
     grid_microphysical_tendency,
+    moisture_fractions,
+    grid_moisture_fractions,
+    specific_prognostic_moisture_from_total,
     update_microphysical_fields!,
     update_microphysical_auxiliaries!,
     initial_aerosol_number,

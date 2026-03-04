@@ -15,7 +15,7 @@ function prioritize_names(names)
     # Priority order (first items applied last, so reverse order of priority):
     # 1. ρ must be set first for compressible dynamics (density needed for momentum)
     # 2. Then velocities/momentum and moisture
-    for n in (:w, :ρw, :v, :ρv, :u, :ρu, :qᵗ, :ρqᵗ, :ρ)
+    for n in (:w, :ρw, :v, :ρv, :u, :ρu, :qᵗ, :ρqᵗ, :qᵛ, :ρqᵛ, :qᵉ, :ρqᵉ, :ρ)
         if n ∈ names
             names = move_to_front(names, n)
         end
@@ -109,7 +109,7 @@ Variables are set via keyword arguments. Supported variables include:
 
 **Prognostic variables** (density-weighted):
 - `ρu`, `ρv`, `ρw`: momentum components
-- `ρqᵗ`: total moisture density
+- `ρqᵉ`/`ρqᵛ`/`ρqᵗ`: moisture density (scheme-dependent)
 - Prognostic microphysical variables
 - Prognostic user-specified tracer fields
 
@@ -165,11 +165,11 @@ function Fields.set!(model::AtmosphereModel; time=nothing, enforce_mass_conserva
             c = getproperty(model.tracers, name)
             set!(c, value)
 
-        elseif name == :ρqᵗ
+        elseif name ∈ (:ρqᵗ, :ρqᵛ, :ρqᵉ)
             set!(model.moisture_density, value)
-            ρqᵗ = model.moisture_density
             ρ = dynamics_density(model.dynamics)
-            set!(model.specific_moisture, ρqᵗ / ρ)
+            qᵛᵉ = specific_prognostic_moisture(model)
+            set!(qᵛᵉ, model.moisture_density / ρ)
 
         elseif name ∈ prognostic_field_names(model.microphysics)
             μ = getproperty(model.microphysical_fields, name)
@@ -183,12 +183,11 @@ function Fields.set!(model::AtmosphereModel; time=nothing, enforce_mass_conserva
             ρ = dynamics_density(model.dynamics)
             set!(ρμ, ρ * ρμ)
 
-        elseif name == :qᵗ
-            qᵗ = model.specific_moisture
-            set!(qᵗ, value)
+        elseif name ∈ (:qᵗ, :qᵛ, :qᵉ)
+            qᵛᵉ = specific_prognostic_moisture(model)
+            set!(qᵛᵉ, value)
             ρ = dynamics_density(model.dynamics)
-            ρqᵗ = model.moisture_density
-            set!(ρqᵗ, ρ * qᵗ)
+            set!(model.moisture_density, ρ * qᵛᵉ)
 
         elseif name ∈ (:u, :v, :w)
             set_velocity!(model, name, value)
@@ -212,20 +211,21 @@ function Fields.set!(model::AtmosphereModel; time=nothing, enforce_mass_conserva
             # SaturationSpecificHumidity reads qᵗ by reference.
             qᵛ⁺ = Field(SaturationSpecificHumidity(model, :equilibrium))
 
-            # Set qᵗ = ℋ * qᵛ⁺
-            # First set ℋ onto qᵗ (evaluates functions on CPU for GPU compatibility),
+            # Set specific prognostic moisture = ℋ * qᵛ⁺
+            qᵛᵉ = specific_prognostic_moisture(model)
+
+            # Set qᵛᵉ = ℋ * qᵛ⁺
+            # First set ℋ onto qᵛᵉ (evaluates functions on CPU for GPU compatibility),
             # then multiply by the materialized saturation specific humidity.
-            qᵗ = model.specific_moisture
-            set!(qᵗ, value)
-            set!(qᵗ, qᵗ * qᵛ⁺)
+            set!(qᵛᵉ, value)
+            set!(qᵛᵉ, qᵛᵉ * qᵛ⁺)
 
             ρ = dynamics_density(model.dynamics)
-            ρqᵗ = model.moisture_density
-            set!(ρqᵗ, ρ * qᵗ)
+            set!(model.moisture_density, ρ * qᵛᵉ)
 
         else
             prognostic_names = keys(prognostic_fields(model))
-            settable_diagnostic_variables = (:qᵗ, :ℋ, :u, :v, :w)
+            settable_diagnostic_variables = (:qᵗ, :qᵛ, :qᵉ, :ℋ, :u, :v, :w)
             specific_microphysical = settable_specific_microphysical_names(model.microphysics)
 
             msg = "Cannot set! $name in AtmosphereModel because $name is neither a
