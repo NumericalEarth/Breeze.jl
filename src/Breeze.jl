@@ -107,7 +107,9 @@ export
     # ParcelDynamics
     ParcelDynamics,
     ParcelModel,
-    ParcelState
+    ParcelState,
+    PrescribedVerticalVelocity,
+    PrognosticVerticalVelocity
 
 using Oceananigans: Oceananigans, @at, AnisotropicMinimumDissipation, Average,
                     AveragedTimeInterval, BackgroundField, BetaPlane, Bounded, BoundaryConditionOperation,
