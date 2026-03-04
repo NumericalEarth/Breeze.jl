@@ -178,7 +178,7 @@ using .BreezeCloudMicrophysicsExt: OneMomentCloudMicrophysics
 cloud_formation = SaturationAdjustment(equilibrium=WarmPhaseEquilibrium())
 microphysics = OneMomentCloudMicrophysics(; cloud_formation)
 
-bounds_preserving_weno = WENO(order=5, bounds=(0, 1))
+bounds_preserving_weno = WENO(order=5, bounds=(0, 1), minimum_buffer_upwind_order=1)
 
 momentum_advection = WENO(order=5, minimum_buffer_upwind_order=1)
 scalar_advection = (ρθ = WENO(order=5),
