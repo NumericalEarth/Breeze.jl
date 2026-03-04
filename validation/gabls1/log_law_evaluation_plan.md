@@ -21,9 +21,9 @@ varying Δx at fixed Δz.
 
 ## Numerics
 
-All simulations use `WENO(order=9, minimum_upwind_bias_order=1)` for advection. No
-explicit SGS closure (ILES). The high-order WENO with minimum upwind bias provides low
-numerical dissipation away from sharp gradients while maintaining stability.
+All simulations use `WENO(order=9, minimum_buffer_upwind_order=1)` for advection. No
+explicit SGS closure (ILES). The high-order WENO with minimum buffer upwind order provides
+low numerical dissipation away from sharp gradients while maintaining stability.
 
 ## Horizontal resolution study
 
@@ -46,7 +46,7 @@ Based on the Mirocha et al. (2018) SWiFT benchmark:
 | Surface BC | no heat flux (neutral) |
 | Duration | ~15 hours (analyze 2-hour window around first wind maximum at 80 m) |
 | Perturbations | ±0.25 K below 500 m |
-| Advection | WENO(order=9, minimum_upwind_bias_order=1) |
+| Advection | WENO(order=9, minimum_buffer_upwind_order=1) |
 
 Horizontal resolution sweep (Lx = Ly = 2400 m):
 
@@ -98,6 +98,43 @@ From time-averaged profiles:
 2. **φ_m at first grid point vs Δx/Δz** — summary curve across all runs
 3. **Wind speed vs log(z)** — deviation from log-law slope at each resolution
 4. **GABLS1 profiles vs intercomparison envelope** — at Δx/Δz = 1 (standard case)
+5. **Turbulent stress and TKE profiles** — vertical profiles of u★(z) and TKE
+6. **Velocity spectra** — streamwise and vertical velocity spectra at 80 m
+
+## Relevant figures from Mirocha et al. (2018)
+
+The Mirocha et al. (2018) paper provides a comprehensive reference for what to expect from
+the neutral ABL benchmark. Key figures for comparison:
+
+- **Fig. 5**: Time-averaged wind speed profiles from three LES codes (WRF, SOWFA, HiGrad)
+  compared to SWiFT tower observations. Left panels show U(z) vs z; right panels show
+  U(z) vs log(z) to evaluate the log-law. All codes produce generally good agreement with
+  observations but show the characteristic near-surface overshoot.
+
+- **Fig. 6**: Solver intercomparison at isotropic 15 m grids. Wind speed profiles and
+  log-law comparison. Results are similar across solvers despite different numerics.
+
+- **Figs. 7-8**: Sensitivity to advection scheme order and SGS model choice. Higher-order
+  advection and NBA SGS both improve agreement. Variability from advection order is
+  comparable to variability from SGS model choice.
+
+- **Fig. 9**: Sensitivity to z₀ and geostrophic wind speed. Expected parameter dependence —
+  useful for validating our setup against theirs.
+
+- **Fig. 10**: High-resolution (7.5 m isotropic) results including wind direction and
+  temporal variability. Excellent inter-code agreement at fine resolution.
+
+- **Fig. 11**: Turbulent stress (friction velocity) and TKE profiles. Good stress agreement
+  across codes; simulated TKE significantly lower than observed (attributed to tower wake
+  effects in measurements).
+
+- **Figs. 12-13**: Velocity spectra and momentum flux cospectra at 80 m. Cospectra show
+  better agreement with observations than velocity spectra. High-wavenumber drop-off
+  reflects the numerical dissipation characteristics of each scheme.
+
+Our resolution sweep adds a new dimension to this analysis: we can show how these
+diagnostics evolve with Δx/Δz at fixed Δz, which Mirocha et al. did not systematically
+explore (they varied resolution but changed both Δx and Δz together).
 
 ## Expected outcome
 
