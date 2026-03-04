@@ -14,7 +14,9 @@ using Breeze.BoundaryConditions: PolynomialCoefficient,
 using Oceananigans
 using Oceananigans.BoundaryConditions: BoundaryCondition
 
-@testset "PolynomialCoefficient" begin
+@testset "PolynomialCoefficient [$FT]" for FT in test_float_types()
+    Oceananigans.defaults.FloatType = FT
+
     @testset "Constructor and defaults" begin
         # Test default constructor — uses FittedStabilityFunction
         coef = PolynomialCoefficient()
@@ -251,7 +253,7 @@ using Oceananigans.BoundaryConditions: BoundaryCondition
 
     @testset "Callable interface" begin
         # Create a simple grid with first cell center at 10m
-        grid = RectilinearGrid(size=(1, 1, 1), x=(0, 100), y=(0, 100), z=(0, 20))
+        grid = RectilinearGrid(default_arch; size=(1, 1, 1), x=(0, 100), y=(0, 100), z=(0, 20))
 
         # Test evaluation with no stability correction
         coef = PolynomialCoefficient(
@@ -322,7 +324,7 @@ using Oceananigans.BoundaryConditions: BoundaryCondition
     end
 
     @testset "FilteredSurfaceVelocities construction" begin
-        grid = RectilinearGrid(size=(4, 4, 4), x=(0, 100), y=(0, 100), z=(0, 40))
+        grid = RectilinearGrid(default_arch; size=(4, 4, 4), x=(0, 100), y=(0, 100), z=(0, 40))
 
         # Default: no height, infinite timescale
         fv = FilteredSurfaceVelocities(grid)
@@ -330,6 +332,7 @@ using Oceananigans.BoundaryConditions: BoundaryCondition
         @test fv.filter_timescale == Inf
         @test size(fv.u) == (4, 4, 1)
         @test size(fv.v) == (4, 4, 1)
+        @test fv.last_update[] == (0, 0)
 
         # With explicit height and timescale
         fv2 = FilteredSurfaceVelocities(grid; height=10.0, filter_timescale=60.0)
@@ -338,12 +341,13 @@ using Oceananigans.BoundaryConditions: BoundaryCondition
     end
 
     @testset "FilteredSurfaceScalar construction" begin
-        grid = RectilinearGrid(size=(4, 4, 4), x=(0, 100), y=(0, 100), z=(0, 40))
+        grid = RectilinearGrid(default_arch; size=(4, 4, 4), x=(0, 100), y=(0, 100), z=(0, 40))
 
         fs = FilteredSurfaceScalar(grid; height=10.0, filter_timescale=120.0)
         @test fs.height == 10.0
         @test fs.filter_timescale == 120.0
         @test size(fs.field) == (4, 4, 1)
+        @test fs.last_update[] == (0, 0)
 
         # Default
         fs0 = FilteredSurfaceScalar(grid)
@@ -352,7 +356,7 @@ using Oceananigans.BoundaryConditions: BoundaryCondition
     end
 
     @testset "FilteredSurfaceVelocities update!" begin
-        grid = RectilinearGrid(size=(4, 4, 4), x=(0, 100), y=(0, 100), z=(0, 40))
+        grid = RectilinearGrid(default_arch; size=(4, 4, 4), x=(0, 100), y=(0, 100), z=(0, 40))
         fv = FilteredSurfaceVelocities(grid; filter_timescale=10.0)
 
         # Create mock velocity fields
@@ -379,7 +383,7 @@ using Oceananigans.BoundaryConditions: BoundaryCondition
     end
 
     @testset "FilteredSurfaceScalar update!" begin
-        grid = RectilinearGrid(size=(4, 4, 4), x=(0, 100), y=(0, 100), z=(0, 40))
+        grid = RectilinearGrid(default_arch; size=(4, 4, 4), x=(0, 100), y=(0, 100), z=(0, 40))
         fs = FilteredSurfaceScalar(grid; filter_timescale=20.0)
 
         θ = CenterField(grid)
@@ -392,7 +396,7 @@ using Oceananigans.BoundaryConditions: BoundaryCondition
     end
 
     @testset "BulkDrag with filtered_velocities" begin
-        grid = RectilinearGrid(size=(4, 4, 4), x=(0, 100), y=(0, 100), z=(0, 40))
+        grid = RectilinearGrid(default_arch; size=(4, 4, 4), x=(0, 100), y=(0, 100), z=(0, 40))
         fv = FilteredSurfaceVelocities(grid; filter_timescale=60.0)
 
         # Test construction
@@ -410,7 +414,7 @@ using Oceananigans.BoundaryConditions: BoundaryCondition
     end
 
     @testset "BulkSensibleHeatFlux with filtered_velocities" begin
-        grid = RectilinearGrid(size=(4, 4, 4), x=(0, 100), y=(0, 100), z=(0, 40))
+        grid = RectilinearGrid(default_arch; size=(4, 4, 4), x=(0, 100), y=(0, 100), z=(0, 40))
         fv = FilteredSurfaceVelocities(grid; height=10.0, filter_timescale=60.0)
 
         coef = PolynomialCoefficient()
@@ -424,7 +428,7 @@ using Oceananigans.BoundaryConditions: BoundaryCondition
     end
 
     @testset "BulkVaporFlux with filtered_velocities" begin
-        grid = RectilinearGrid(size=(4, 4, 4), x=(0, 100), y=(0, 100), z=(0, 40))
+        grid = RectilinearGrid(default_arch; size=(4, 4, 4), x=(0, 100), y=(0, 100), z=(0, 40))
         fv = FilteredSurfaceVelocities(grid; filter_timescale=60.0)
 
         coef = PolynomialCoefficient()
@@ -452,7 +456,7 @@ using Oceananigans.BoundaryConditions: BoundaryCondition
     end
 
     @testset "Height-aware PolynomialCoefficient" begin
-        grid = RectilinearGrid(size=(1, 1, 1), x=(0, 100), y=(0, 100), z=(0, 20))
+        grid = RectilinearGrid(default_arch; size=(1, 1, 1), x=(0, 100), y=(0, 100), z=(0, 20))
 
         coef = PolynomialCoefficient(
             polynomial = (0.142, 0.076, 2.7),

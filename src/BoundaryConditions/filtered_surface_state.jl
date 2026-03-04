@@ -41,20 +41,22 @@ struct FilteredSurfaceVelocities{U, V, H, FT}
     v :: V   # Field{Center, Face, Nothing}
     height :: H
     filter_timescale :: FT
+    last_update :: Ref{Tuple{Int, Int}}  # (iteration, stage)
 end
 
 function FilteredSurfaceVelocities(grid; height=nothing, filter_timescale=Inf)
     u = Field{Face, Center, Nothing}(grid)
     v = Field{Center, Face, Nothing}(grid)
     FT = typeof(filter_timescale)
-    return FilteredSurfaceVelocities(u, v, height, FT(filter_timescale))
+    return FilteredSurfaceVelocities(u, v, height, FT(filter_timescale), Ref((0, 0)))
 end
 
 Adapt.adapt_structure(to, fv::FilteredSurfaceVelocities) =
     FilteredSurfaceVelocities(Adapt.adapt(to, fv.u),
                               Adapt.adapt(to, fv.v),
                               fv.height,
-                              fv.filter_timescale)
+                              fv.filter_timescale,
+                              fv.last_update)
 
 Base.summary(fv::FilteredSurfaceVelocities) =
     string("FilteredSurfaceVelocities(height=", fv.height,
@@ -82,18 +84,20 @@ struct FilteredSurfaceScalar{F, H, FT}
     field :: F   # Field{Center, Center, Nothing}
     height :: H
     filter_timescale :: FT
+    last_update :: Ref{Tuple{Int, Int}}  # (iteration, stage)
 end
 
 function FilteredSurfaceScalar(grid; height=nothing, filter_timescale=Inf)
     field = Field{Center, Center, Nothing}(grid)
     FT = typeof(filter_timescale)
-    return FilteredSurfaceScalar(field, height, FT(filter_timescale))
+    return FilteredSurfaceScalar(field, height, FT(filter_timescale), Ref((0, 0)))
 end
 
 Adapt.adapt_structure(to, fs::FilteredSurfaceScalar) =
     FilteredSurfaceScalar(Adapt.adapt(to, fs.field),
                           fs.height,
-                          fs.filter_timescale)
+                          fs.filter_timescale,
+                          fs.last_update)
 
 Base.summary(fs::FilteredSurfaceScalar) =
     string("FilteredSurfaceScalar(height=", fs.height,
@@ -135,18 +139,18 @@ end
 ##### Update kernels
 #####
 
-@kernel function _update_filtered_velocities!(u_f, v_f, u, v, grid, height, ε)
+@kernel function _update_filtered_velocities!(û, v̂, u, v, grid, height, ε)
     i, j = @index(Global, NTuple)
-    u_new = interpolate_or_surface(i, j, grid, u, Face(), Center(), height)
-    v_new = interpolate_or_surface(i, j, grid, v, Center(), Face(), height)
-    @inbounds u_f[i, j, 1] = (u_f[i, j, 1] + ε * u_new) / (1 + ε)
-    @inbounds v_f[i, j, 1] = (v_f[i, j, 1] + ε * v_new) / (1 + ε)
+    uⁿ = interpolate_or_surface(i, j, grid, u, Face(), Center(), height)
+    vⁿ = interpolate_or_surface(i, j, grid, v, Center(), Face(), height)
+    @inbounds û[i, j, 1] = (û[i, j, 1] + ε * uⁿ) / (1 + ε)
+    @inbounds v̂[i, j, 1] = (v̂[i, j, 1] + ε * vⁿ) / (1 + ε)
 end
 
-@kernel function _update_filtered_scalar!(f_filtered, field_3d, grid, height, ε)
+@kernel function _update_filtered_scalar!(f̂, field_3d, grid, height, ε)
     i, j = @index(Global, NTuple)
-    f_new = interpolate_or_surface(i, j, grid, field_3d, Center(), Center(), height)
-    @inbounds f_filtered[i, j, 1] = (f_filtered[i, j, 1] + ε * f_new) / (1 + ε)
+    fⁿ = interpolate_or_surface(i, j, grid, field_3d, Center(), Center(), height)
+    @inbounds f̂[i, j, 1] = (f̂[i, j, 1] + ε * fⁿ) / (1 + ε)
 end
 
 #####
@@ -184,3 +188,31 @@ function update!(fs::FilteredSurfaceScalar, field_3d, grid, Δt)
     fill_halo_regions!(fs.field)
     return nothing
 end
+
+#####
+##### Deduplication-aware update helpers
+#####
+
+update_filtered_surface_state!(::Nothing, model) = nothing
+update_filtered_surface_state!(::Nothing, source_field, model) = nothing
+
+function update_filtered_surface_state!(fv::FilteredSurfaceVelocities, model)
+    key = (model.clock.iteration, model.clock.stage)
+    fv.last_update[] == key && return nothing
+    Δt = model.clock.last_Δt
+    (isnan(Δt) || isinf(Δt) || Δt ≤ 0) && return nothing
+    update!(fv, model.velocities, model.grid, Δt)
+    fv.last_update[] = key
+    return nothing
+end
+
+function update_filtered_surface_state!(fs::FilteredSurfaceScalar, source_field, model)
+    key = (model.clock.iteration, model.clock.stage)
+    fs.last_update[] == key && return nothing
+    Δt = model.clock.last_Δt
+    (isnan(Δt) || isinf(Δt) || Δt ≤ 0) && return nothing
+    update!(fs, source_field, model.grid, Δt)
+    fs.last_update[] = key
+    return nothing
+end
+

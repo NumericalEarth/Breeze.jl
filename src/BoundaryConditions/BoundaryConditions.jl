@@ -91,6 +91,7 @@ include("polynomial_bulk_coefficient.jl")
 include("bulk_drag.jl")
 include("bulk_scalar_fluxes.jl")
 include("thermodynamic_variable_bcs.jl")
+include("update_boundary_conditions.jl")
 
 #####
 ##### Wind speed dispatch on FilteredSurfaceVelocities
