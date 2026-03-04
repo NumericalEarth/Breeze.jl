@@ -206,16 +206,22 @@ function Fields.set!(model::AtmosphereModel; time=nothing, enforce_mass_conserva
             # Call update_state! to ensure temperature is computed from thermodynamic variables
             update_state!(model, compute_tendencies=false)
 
-            # Compute saturation specific humidity using GPU-compatible kernel
-            # Use :equilibrium flavor which handles both saturated and unsaturated conditions
-            qᵛ⁺ = SaturationSpecificHumidity(model, :equilibrium)
+            # Compute saturation specific humidity into a concrete field.
+            # This must be materialized before overwriting qᵗ, because
+            # SaturationSpecificHumidity reads qᵗ by reference.
+            qᵛ⁺ = Field(SaturationSpecificHumidity(model, :equilibrium))
 
             # Set specific prognostic moisture = ℋ * qᵛ⁺
-            spm = model.microphysical_fields[moisture_specific_name(model.microphysics)]
-            set!(spm, value * qᵛ⁺)
+            qᵛ = model.microphysical_fields[moisture_specific_name(model.microphysics)]
+
+            # Set qᵛ = ℋ * qᵛ⁺
+            # First set ℋ onto qᵛ (evaluates functions on CPU for GPU compatibility),
+            # then multiply by the materialized saturation specific humidity.
+            set!(qᵛ, value)
+            set!(qᵛ, qᵛ * qᵛ⁺)
 
             ρ = dynamics_density(model.dynamics)
-            set!(model.moisture_density, ρ * spm)
+            set!(model.moisture_density, ρ * qᵛ)
 
         else
             prognostic_names = keys(prognostic_fields(model))

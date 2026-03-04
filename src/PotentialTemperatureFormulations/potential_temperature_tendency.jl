@@ -55,6 +55,7 @@ function AtmosphereModels.compute_thermodynamic_tendency!(model::PotentialTemper
         model.forcing.ρθ,
         model.forcing.ρe,
         model.advection.ρθ,
+        radiation_flux_divergence(model.radiation),
         common_args...)
 
     Gρθ = model.timestepper.Gⁿ.ρθ
@@ -67,6 +68,7 @@ end
                                                 ρθ_forcing,
                                                 ρe_forcing,
                                                 advection,
+                                                radiation_flux_divergence_field,
                                                 dynamics,
                                                 formulation::LiquidIcePotentialTemperatureFormulation,
                                                 constants,
@@ -92,12 +94,15 @@ end
     cᵖᵐ = mixture_heat_capacity(q, constants)
     closure_buoyancy = AtmosphereModelBuoyancy(dynamics, formulation, constants)
 
+    Fρe = ρe_forcing(i, j, k, grid, clock, model_fields)
+    div_ℐ = radiation_flux_divergence(i, j, k, grid, radiation_flux_divergence_field)
+
     return ( - div_ρUc(i, j, k, grid, advection, ρ_field, velocities, potential_temperature)
              + c_div_ρU(i, j, k, grid, dynamics, velocities, potential_temperature)
              - ∇_dot_Jᶜ(i, j, k, grid, ρ_field, closure, closure_fields, id, potential_temperature, clock, model_fields, closure_buoyancy)
              + grid_microphysical_tendency(i, j, k, grid, microphysics, Val(:ρθ), ρ, microphysical_fields, 𝒰, constants, velocities)
              + ρθ_forcing(i, j, k, grid, clock, model_fields)
-             + ρe_forcing(i, j, k, grid, clock, model_fields) / (cᵖᵐ * Π)
+             + (Fρe + div_ℐ) / (cᵖᵐ * Π)
     )
 end
 
