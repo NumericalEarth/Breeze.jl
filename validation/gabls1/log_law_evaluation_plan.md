@@ -2,8 +2,9 @@
 
 ## Goal
 
-Quantify the near-surface wind speed overshoot in LES and demonstrate that it is an
-inherent problem (not a Breeze bug) by comparing against reference data and MOST predictions.
+Quantify the near-surface wind speed overshoot in LES as a function of horizontal
+resolution (grid aspect ratio) and demonstrate that it is an inherent problem by
+comparing against reference data and MOST predictions.
 
 ## Background
 
@@ -13,97 +14,96 @@ momentum flux. This "log-law mismatch" is well-documented (Mason & Thomson 1992,
 et al. 1994, Brasseur & Wei 2010) and is worst in stable conditions where turbulent length
 scales are small relative to the grid.
 
-## Two test cases
+Brasseur & Wei (2010) showed that the overshoot depends critically on the grid aspect
+ratio Δx/Δz — the ratio of horizontal to vertical grid spacing controls how well the
+energy-containing eddies near the surface are resolved. This motivates a systematic study
+varying Δx at fixed Δz.
 
-### Neutral ABL (primary log-law diagnostic)
+## Numerics
 
-The neutral case cleanly isolates the log-law mismatch because MOST predicts φ_m = 1
-throughout the surface layer — any deviation is unambiguously an LES artifact. No stability
-function is needed in the comparison.
+All simulations use `WENO(order=9, minimum_upwind_bias_order=1)` for advection. No
+explicit SGS closure (ILES). The high-order WENO with minimum upwind bias provides low
+numerical dissipation away from sharp gradients while maintaining stability.
 
-Based on the Mirocha et al. (2018) SWiFT benchmark, also used in the ERF JAMES paper
-(Lattanzi et al. 2025):
+## Horizontal resolution study
+
+Fix the vertical resolution Δz and domain height. Vary the horizontal grid spacing
+Δx = Δy systematically to study how the grid aspect ratio Δx/Δz affects the log-law
+mismatch.
+
+### Neutral ABL (primary)
+
+Based on the Mirocha et al. (2018) SWiFT benchmark:
 
 | Parameter | Value |
 |-----------|-------|
-| Domain | 2400 × 2400 × 2000 m |
-| Grid | 160 × 160 × 400 (Δx = Δy = 15 m, Δz = 5 m) |
+| Domain height | 2000 m |
+| Δz | 5 m (Nz = 400) |
 | Geostrophic wind | Ug = 6.5 m/s, Vg = 0 |
 | Coriolis | latitude 33.5° (f ≈ 8.05e-5 s⁻¹) |
 | Surface roughness z₀ | 0.05 m |
 | Initial θ | 300 K uniform below 500 m, +0.01 K/m inversion above |
 | Surface BC | no heat flux (neutral) |
-| Duration | ~15 hours (analyze 2-hour window around first wind speed maximum at 80 m) |
+| Duration | ~15 hours (analyze 2-hour window around first wind maximum at 80 m) |
 | Perturbations | ±0.25 K below 500 m |
+| Advection | WENO(order=9, minimum_upwind_bias_order=1) |
 
-Reference data: WRF, SOWFA, HiGrad results from Mirocha et al. (2018).
+Horizontal resolution sweep (Lx = Ly = 2400 m):
+
+| Run | Δx = Δy (m) | Nx = Ny | Δx/Δz |
+|-----|-------------|---------|-------|
+| N1  | 30          | 80      | 6     |
+| N2  | 15          | 160     | 3     |
+| N3  | 10          | 240     | 2     |
+| N4  | 7.5         | 320     | 1.5   |
+| N5  | 5           | 480     | 1     |
+
+The neutral case cleanly isolates the log-law mismatch: MOST predicts φ_m = 1, so any
+deviation is unambiguously an LES artifact.
 
 ### GABLS1 stable ABL (secondary)
 
-GABLS1 is stably stratified, so the expected surface layer profile includes a stability
-correction: φ_m = 1 + β(z/L) with the Beljaars & Holtslag (1991) stable functions.
-This makes the overshoot diagnostic less clean — errors in the diagnosed Obukhov length L
-propagate into the "expected" profile. However, GABLS1 is useful because:
+Same Δz sweep approach applied to GABLS1 (Δz = 3.125 m, Lx = Ly = 400 m):
 
-- It has well-established intercomparison data from 8 LES groups
-- The stable case is where the problem is worst (small turbulent length scales)
-- It motivates the need for improved closures in realistic conditions
+| Run | Δx = Δy (m) | Nx = Ny | Δx/Δz |
+|-----|-------------|---------|-------|
+| G1  | 18.75       | ~21     | 6     |
+| G2  | 9.375       | ~43     | 3     |
+| G3  | 6.25        | 64      | 2     |
+| G4  | 3.125       | 128     | 1     |
 
-Parameters: see `gabls1.jl`.
+GABLS1 is stably stratified, so the expected φ_m includes a stability correction
+(Beljaars & Holtslag 1991). Less clean for diagnosing the mismatch, but useful because
+the stable case is where the problem is worst and there is intercomparison data from
+8 LES groups.
 
-## Evaluation steps
+## Diagnostics
 
-### 1. Run the neutral ABL case (ILES)
-
-Create `neutral_abl.jl` following the Mirocha et al. (2018) setup. No explicit SGS closure.
-
-### 2. Diagnose the log-law mismatch (neutral case)
-
-From the 2-hour averaged profiles around the wind speed maximum:
+From time-averaged profiles:
 
 - **Non-dimensional wind shear** φ_m(z) = (κz / u★) dU/dz.
-  MOST predicts φ_m = 1. The overshoot shows up as φ_m >> 1 at the first few grid points.
+  Neutral: expect φ_m = 1. Stable: expect φ_m = 1 + β(z/L).
 
-- **Wind speed ratio** U_LES(z₁) / U_log(z₁), where U_log = (u★/κ) ln(z/z₀).
-  Values > 1 indicate overshoot.
+- **Wind speed ratio** U_LES(z₁) / U_MOST(z₁) at the first grid point.
 
-- **Friction velocity** u★ = (⟨u'w'⟩² + ⟨v'w'⟩²)^(1/4) from surface momentum flux.
+- **Friction velocity** u★ = (⟨u'w'⟩² + ⟨v'w'⟩²)^(1/4) from surface flux.
 
-### 3. Run the GABLS1 stable case (ILES)
-
-Run `gabls1.jl` as-is. Compare against intercomparison data.
-
-### 4. Diagnose the mismatch (GABLS1)
-
-Same diagnostics but accounting for stability:
-
-- Compute Obukhov length L = -u★³ θ̄ / (κ g ⟨w'θ'⟩₀)
-- Expected φ_m = 1 + β(z/L) with Beljaars & Holtslag (1991) coefficients
-- Compare LES φ_m against stable MOST prediction
-
-### 5. Run both cases with SmagorinskyLilly (optional)
-
-Show that the explicit Smagorinsky SGS model makes the overshoot worse.
-
-### 6. Resolution sensitivity (optional)
-
-Run the neutral case at 2× and 0.5× resolution to confirm the mismatch persists.
-
-## Expected outcome
-
-- Both cases show φ_m overshoot near the surface.
-- The neutral case demonstrates the problem cleanly (φ_m >> 1 vs expected φ_m = 1).
-- Breeze GABLS1 profiles fall within the intercomparison spread.
-- This motivates implementing Sullivan et al. (1994) `SurfaceLayerDiffusivity`
-  and eventually the Kosovic (1997) NBA closure.
+- **Obukhov length** (GABLS1 only) L = -u★³ θ̄ / (κ g ⟨w'θ'⟩₀).
 
 ## Key plots
 
-1. **Neutral ABL**: Wind speed vs log(z) — deviation from straight log-law line
-2. **Neutral ABL**: φ_m(z) vs z — overshoot at first grid points vs φ_m = 1
-3. **GABLS1**: Wind speed and θ profiles vs intercomparison envelope
-4. **GABLS1**: φ_m(z) vs stable MOST prediction
-5. **Both cases**: φ_m comparison showing neutral is cleaner diagnostic
+1. **φ_m(z) vs z for each Δx/Δz** — does the overshoot decrease with finer Δx?
+2. **φ_m at first grid point vs Δx/Δz** — summary curve across all runs
+3. **Wind speed vs log(z)** — deviation from log-law slope at each resolution
+4. **GABLS1 profiles vs intercomparison envelope** — at Δx/Δz = 1 (standard case)
+
+## Expected outcome
+
+- Overshoot decreases as Δx/Δz → 1 (isotropic grid) but does not disappear.
+- Consistent with Brasseur & Wei (2010): a "high accuracy zone" exists but the
+  first grid point remains contaminated.
+- Motivates implementing Sullivan et al. (1994) `SurfaceLayerDiffusivity` and
+  eventually the Kosovic (1997) NBA closure.
 
 ## References
 
