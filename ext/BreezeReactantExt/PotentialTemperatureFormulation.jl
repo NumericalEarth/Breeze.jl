@@ -1,7 +1,7 @@
 using Oceananigans: ReactantState
 using Oceananigans.Grids: LatitudeLongitudeGrid
 using Oceananigans.Fields: set!
-using Breeze.AtmosphereModels: AtmosphereModels, set_thermodynamic_variable!, dynamics_density
+using Breeze.AtmosphereModels: AtmosphereModels, dynamics_density
 using Breeze.PotentialTemperatureFormulations: LiquidIcePotentialTemperatureFormulation
 
 # Workaround: on LatitudeLongitudeGrid + ReactantState, the BinaryOperation broadcast
