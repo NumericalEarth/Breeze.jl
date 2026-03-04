@@ -442,7 +442,28 @@ end
 """
 $(TYPEDSIGNATURES)
 
-Compute [`MoistureMassFractions`](@ref) from a microphysical state `ℳ` and total moisture `qᵗ`.
+Convert total specific moisture `qᵗ` to the scheme-dependent specific moisture `qᵛᵉ`
+by subtracting the appropriate condensate from the microphysical state `ℳ`.
+
+For non-equilibrium schemes, `qᵛᵉ = qᵛ = qᵗ - qˡ` (subtract all condensate).
+For saturation adjustment schemes, `qᵛᵉ = qᵉ = qᵗ - qʳ` (subtract only precipitation).
+For `Nothing` microphysics, `qᵛᵉ = qᵗ` (all moisture is vapor).
+
+This is used by parcel models that store total moisture `qᵗ` as the prognostic
+variable, to produce the correct input for [`moisture_fractions`](@ref).
+"""
+@inline specific_moisture_from_total(::Nothing, qᵗ, ℳ) = qᵗ
+@inline specific_moisture_from_total(::Nothing, qᵗ, ::NothingMicrophysicalState) = qᵗ
+@inline specific_moisture_from_total(::Nothing, qᵗ, ::NamedTuple) = qᵗ
+
+"""
+$(TYPEDSIGNATURES)
+
+Compute [`MoistureMassFractions`](@ref) from a microphysical state `ℳ` and
+scheme-dependent specific moisture `qᵛᵉ`.
+
+The input `qᵛᵉ` is the scheme-dependent specific moisture: vapor for non-equilibrium
+schemes, or equilibrium moisture (``qᵉ = qᵛ + qᶜˡ``) for saturation adjustment schemes.
 
 This is the state-based (gridless) interface for computing moisture fractions.
 Microphysics schemes should extend this method to partition moisture based on
@@ -467,13 +488,12 @@ end
 
 # Fallback for NamedTuple microphysical state (used by parcel models with prognostic microphysics).
 # NamedTuple contains specific moisture fractions computed from ρ-weighted prognostics.
-# Parcel models store total moisture in qᵗ, so we subtract condensate to get vapor.
-@inline function moisture_fractions(microphysics, ℳ::NamedTuple, qᵗ)
-    qˡ = zero(qᵗ)
-    qˡ += haskey(ℳ, :qᶜˡ) ? ℳ.qᶜˡ : zero(qᵗ)
-    qˡ += haskey(ℳ, :qʳ) ? ℳ.qʳ : zero(qᵗ)
-    qᵛ = max(zero(qᵗ), qᵗ - qˡ)
-    return MoistureMassFractions(qᵛ, qˡ)
+# Input qᵛᵉ is scheme-dependent specific moisture (vapor or equilibrium moisture).
+@inline function moisture_fractions(microphysics, ℳ::NamedTuple, qᵛᵉ)
+    qˡ = zero(qᵛᵉ)
+    qˡ += haskey(ℳ, :qᶜˡ) ? ℳ.qᶜˡ : zero(qᵛᵉ)
+    qˡ += haskey(ℳ, :qʳ) ? ℳ.qʳ : zero(qᵛᵉ)
+    return MoistureMassFractions(qᵛᵉ, qˡ)
 end
 
 """

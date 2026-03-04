@@ -427,6 +427,13 @@ end
 end
 
 #####
+##### specific_moisture_from_total: convert qᵗ to qᵛᵉ
+#####
+
+# NE two-moment: qᵛ = qᵗ - qᶜˡ - qʳ (subtract all condensate)
+@inline AtmosphereModels.specific_moisture_from_total(bμp::WPNE2M, qᵗ, ℳ::WarmPhaseTwoMomentState) = max(zero(qᵗ), qᵗ - ℳ.qᶜˡ - ℳ.qʳ)
+
+#####
 ##### Moisture fraction computation
 #####
 
@@ -438,11 +445,10 @@ end
 end
 
 # Gridless version for parcel models.
-# Input qᵗ is total moisture; subtract condensate to get vapor.
-@inline function AtmosphereModels.moisture_fractions(bμp::WPNE2M, ℳ::WarmPhaseTwoMomentState, qᵗ)
+# Input qᵛᵉ is scheme-dependent specific moisture (vapor for non-equilibrium).
+@inline function AtmosphereModels.moisture_fractions(bμp::WPNE2M, ℳ::WarmPhaseTwoMomentState, qᵛᵉ)
     qˡ = ℳ.qᶜˡ + ℳ.qʳ
-    qᵛ = max(0, qᵗ - qˡ)
-    return MoistureMassFractions(qᵛ, qˡ)
+    return MoistureMassFractions(qᵛᵉ, qˡ)
 end
 
 #####

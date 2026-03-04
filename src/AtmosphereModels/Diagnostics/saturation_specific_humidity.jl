@@ -4,7 +4,7 @@ struct SaturationSpecificHumidityKernelFunction{μ, FL, M, MF, T, R, TH}
     flavor :: FL
     microphysics :: μ
     microphysical_fields :: M
-    specific_moisture :: MF
+    prognostic_specific_moisture :: MF
     temperature :: T
     reference_state :: R
     thermodynamic_constants :: TH
@@ -16,7 +16,7 @@ Adapt.adapt_structure(to, k::SaturationSpecificHumidityKernelFunction) =
     SaturationSpecificHumidityKernelFunction(adapt(to, k.flavor),
                                              adapt(to, k.microphysics),
                                              adapt(to, k.microphysical_fields),
-                                             adapt(to, k.specific_moisture),
+                                             adapt(to, k.prognostic_specific_moisture),
                                              adapt(to, k.temperature),
                                              adapt(to, k.reference_state),
                                              adapt(to, k.thermodynamic_constants))
@@ -114,13 +114,13 @@ function (d::SaturationSpecificHumidityKernelFunction)(i, j, k, grid)
     surface = equilibrated_surface(equilibrium, T)
 
     if d.flavor isa PrognosticFlavor
-        qᵛᵉ = @inbounds d.specific_moisture[i, j, k]
+        qᵛᵉ = @inbounds d.prognostic_specific_moisture[i, j, k]
         q = grid_moisture_fractions(i, j, k, grid, d.microphysics, ρᵣ, qᵛᵉ, d.microphysical_fields)
         ρ = density(T, pᵣ, q, constants)
         return saturation_specific_humidity(T, ρ, constants, surface)
 
     elseif d.flavor isa EquilibriumFlavor
-        qᵛᵉ = @inbounds d.specific_moisture[i, j, k]
+        qᵛᵉ = @inbounds d.prognostic_specific_moisture[i, j, k]
         return equilibrium_saturation_specific_humidity(T, pᵣ, qᵛᵉ, constants, surface)
 
     elseif d.flavor isa TotalMoistureFlavor

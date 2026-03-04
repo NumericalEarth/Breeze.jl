@@ -70,7 +70,7 @@ end
                                                 dynamics,
                                                 formulation::LiquidIcePotentialTemperatureFormulation,
                                                 constants,
-                                                specific_moisture,
+                                                prognostic_specific_moisture,
                                                 velocities,
                                                 microphysics,
                                                 microphysical_fields,
@@ -82,7 +82,7 @@ end
     potential_temperature = formulation.potential_temperature
     ρ_field = dynamics_density(dynamics)
     @inbounds ρ = ρ_field[i, j, k]
-    @inbounds qᵛᵉ = specific_moisture[i, j, k]
+    @inbounds qᵛᵉ = prognostic_specific_moisture[i, j, k]
 
     # Compute moisture fractions first
     q = grid_moisture_fractions(i, j, k, grid, microphysics, ρ, qᵛᵉ, microphysical_fields)
@@ -150,7 +150,7 @@ end
                                                      potential_temperature,
                                                      grid,
                                                      specific_energy,
-                                                     specific_moisture,
+                                                     prognostic_specific_moisture,
                                                      dynamics,
                                                      microphysics,
                                                      microphysical_fields,
@@ -160,7 +160,7 @@ end
     @inbounds begin
         pᵣ = dynamics_pressure(dynamics)[i, j, k]
         ρᵣ = dynamics_density(dynamics)[i, j, k]
-        qᵛᵉ = specific_moisture[i, j, k]
+        qᵛᵉ = prognostic_specific_moisture[i, j, k]
         e = specific_energy[i, j, k]
     end
 
@@ -221,7 +221,7 @@ end
                                                           potential_temperature,
                                                           grid,
                                                           temperature_field,
-                                                          specific_moisture,
+                                                          prognostic_specific_moisture,
                                                           dynamics,
                                                           microphysics,
                                                           microphysical_fields,
@@ -231,7 +231,7 @@ end
     @inbounds begin
         pᵣ = dynamics_pressure(dynamics)[i, j, k]
         ρᵣ = dynamics_density(dynamics)[i, j, k]
-        qᵛᵉ = specific_moisture[i, j, k]
+        qᵛᵉ = prognostic_specific_moisture[i, j, k]
         T = temperature_field[i, j, k]
     end
 

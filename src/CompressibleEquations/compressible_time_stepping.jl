@@ -98,13 +98,13 @@ end
 
 @kernel function _compute_temperature_and_pressure!(temperature_field, pressure_field,
                                                     density, formulation, dynamics,
-                                                    specific_moisture, grid, microphysics,
+                                                    prognostic_specific_moisture, grid, microphysics,
                                                     microphysical_fields, constants)
     i, j, k = @index(Global, NTuple)
 
     @inbounds begin
         ρ = density[i, j, k]
-        qᵛᵉ = specific_moisture[i, j, k]
+        qᵛᵉ = prognostic_specific_moisture[i, j, k]
     end
 
     # Compute moisture fractions

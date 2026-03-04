@@ -224,7 +224,7 @@ end
 end
 
 @kernel function _compute_auxiliary_thermodynamic_variables!(temperature,
-                                                             specific_moisture,
+                                                             prognostic_specific_moisture,
                                                              formulation,
                                                              dynamics,
                                                              grid,
@@ -242,7 +242,7 @@ end
         ρqᵛᵉ = moisture_density[i, j, k]
         # qᵛᵉ: vapor specific humidity (non-equilibrium) or equilibrium moisture (saturation adjustment)
         qᵛᵉ = ρqᵛᵉ / ρ
-        specific_moisture[i, j, k] = qᵛᵉ
+        prognostic_specific_moisture[i, j, k] = qᵛᵉ
     end
 
     # Compute moisture fractions first (needed by diagnose_thermodynamic_state)

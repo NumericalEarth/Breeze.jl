@@ -69,7 +69,7 @@ struct MoistPotentialTemperatureKernelFunction{F, P, D, FT, μ, M, MF, TMP, TH}
     standard_pressure :: FT
     microphysics :: μ
     microphysical_fields :: M
-    specific_moisture :: MF
+    prognostic_specific_moisture :: MF
     temperature :: TMP
     thermodynamic_constants :: TH
 end
@@ -81,7 +81,7 @@ Adapt.adapt_structure(to, k::MoistPotentialTemperatureKernelFunction) =
                                             k.standard_pressure,
                                             adapt(to, k.microphysics),
                                             adapt(to, k.microphysical_fields),
-                                            adapt(to, k.specific_moisture),
+                                            adapt(to, k.prognostic_specific_moisture),
                                             adapt(to, k.temperature),
                                             adapt(to, k.thermodynamic_constants))
 
@@ -289,7 +289,7 @@ function VirtualPotentialTemperature(grid;
                                      reference_state,
                                      microphysics,
                                      microphysical_fields,
-                                     specific_moisture,
+                                     prognostic_specific_moisture,
                                      temperature,
                                      thermodynamic_constants)
 
@@ -299,7 +299,7 @@ function VirtualPotentialTemperature(grid;
                                                    reference_state.standard_pressure,
                                                    microphysics,
                                                    microphysical_fields,
-                                                   specific_moisture,
+                                                   prognostic_specific_moisture,
                                                    temperature,
                                                    thermodynamic_constants)
 
@@ -540,7 +540,7 @@ function (d::MoistPotentialTemperatureKernelFunction)(i, j, k, grid)
     @inbounds begin
         p = d.pressure[i, j, k]
         ρ = d.density[i, j, k]
-        qᵛᵉ = d.specific_moisture[i, j, k]
+        qᵛᵉ = d.prognostic_specific_moisture[i, j, k]
         pˢᵗ = d.standard_pressure
         T = d.temperature[i, j, k]
     end

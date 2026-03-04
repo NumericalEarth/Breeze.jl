@@ -3,7 +3,7 @@
 struct DewpointTemperatureKernelFunction{μ, M, MF, T, R, TH, FT}
     microphysics :: μ
     microphysical_fields :: M
-    specific_moisture :: MF
+    prognostic_specific_moisture :: MF
     temperature :: T
     reference_state :: R
     thermodynamic_constants :: TH
@@ -16,7 +16,7 @@ Oceananigans.Utils.prettysummary(kf::DewpointTemperatureKernelFunction) = "Dewpo
 Adapt.adapt_structure(to, k::DewpointTemperatureKernelFunction) =
     DewpointTemperatureKernelFunction(adapt(to, k.microphysics),
                                       adapt(to, k.microphysical_fields),
-                                      adapt(to, k.specific_moisture),
+                                      adapt(to, k.prognostic_specific_moisture),
                                       adapt(to, k.temperature),
                                       adapt(to, k.reference_state),
                                       adapt(to, k.thermodynamic_constants),
@@ -100,7 +100,7 @@ function (d::DewpointTemperatureKernelFunction)(i, j, k, grid)
     @inbounds begin
         pᵣ = d.reference_state.pressure[i, j, k]
         ρᵣ = d.reference_state.density[i, j, k]
-        qᵛᵉ = d.specific_moisture[i, j, k]
+        qᵛᵉ = d.prognostic_specific_moisture[i, j, k]
         T = d.temperature[i, j, k]
     end
 

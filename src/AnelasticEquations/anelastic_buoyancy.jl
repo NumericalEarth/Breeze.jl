@@ -36,7 +36,7 @@ moisture state.
 @inline function AtmosphereModels.buoyancy_forceᶜᶜᶜ(i, j, k, grid,
                                                     dynamics::AnelasticDynamics,
                                                     temperature,
-                                                    specific_moisture,
+                                                    prognostic_specific_moisture,
                                                     microphysics,
                                                     microphysical_fields,
                                                     constants)
@@ -44,7 +44,7 @@ moisture state.
     ref = dynamics.reference_state
 
     @inbounds begin
-        qᵛᵉ = specific_moisture[i, j, k]
+        qᵛᵉ = prognostic_specific_moisture[i, j, k]
         ρᵣ = ref.density[i, j, k]
         Tᵣ = ref.temperature[i, j, k]
         T = temperature[i, j, k]

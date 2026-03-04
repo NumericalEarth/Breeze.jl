@@ -307,7 +307,7 @@ function update_rrtmgp_cloud_state!(cloud_state, model, liquid_effective_radius,
     return nothing
 end
 
-@kernel function _update_rrtmgp_cloud_state!(cloud_state, grid, ρᵣ, microphysics, microphysical_fields, specific_moisture,
+@kernel function _update_rrtmgp_cloud_state!(cloud_state, grid, ρᵣ, microphysics, microphysical_fields, prognostic_specific_moisture,
                                              liquid_effective_radius, ice_effective_radius)
     i, j, k = @index(Global, NTuple)
 
@@ -319,7 +319,7 @@ end
     @inbounds begin
         ρ = ρᵣ[i, j, k]
         Δz = Δzᶜᶜᶜ(i, j, k, grid)
-        qᵛᵉ = specific_moisture[i, j, k]
+        qᵛᵉ = prognostic_specific_moisture[i, j, k]
 
         # Get moisture fractions from microphysics
         q = grid_moisture_fractions(i, j, k, grid, microphysics, ρ, qᵛᵉ, microphysical_fields)
