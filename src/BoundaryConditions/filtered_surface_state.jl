@@ -215,4 +215,3 @@ function update_filtered_surface_state!(fs::FilteredSurfaceScalar, source_field,
     fs.last_update[] = key
     return nothing
 end
-
