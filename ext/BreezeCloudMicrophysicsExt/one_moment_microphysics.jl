@@ -379,10 +379,10 @@ end
 @inline AM.prognostic_specific_moisture_from_total(bμp::MP1M, qᵗ, ℳ::MixedPhaseOneMomentState) = qᵗ - ℳ.qʳ - ℳ.qˢ
 
 # NE warm-phase: qᵛ = qᵗ - qᶜˡ - qʳ (subtract all condensate)
-@inline AM.prognostic_specific_moisture_from_total(bμp::WPNE1M, qᵗ, ℳ::WarmPhaseOneMomentState) = max(zero(qᵗ), qᵗ - ℳ.qᶜˡ - ℳ.qʳ)
+@inline AM.prognostic_specific_moisture_from_total(bμp::WPNE1M, qᵗ, ℳ::WarmPhaseOneMomentState) = max(0, qᵗ - ℳ.qᶜˡ - ℳ.qʳ)
 
 # NE mixed-phase: qᵛ = qᵗ - qᶜˡ - qᶜⁱ - qʳ - qˢ (subtract all condensate)
-@inline AM.prognostic_specific_moisture_from_total(bμp::MPNE1M, qᵗ, ℳ::MixedPhaseOneMomentState) = max(zero(qᵗ), qᵗ - ℳ.qᶜˡ - ℳ.qᶜⁱ - ℳ.qʳ - ℳ.qˢ)
+@inline AM.prognostic_specific_moisture_from_total(bμp::MPNE1M, qᵗ, ℳ::MixedPhaseOneMomentState) = max(0, qᵗ - ℳ.qᶜˡ - ℳ.qᶜⁱ - ℳ.qʳ - ℳ.qˢ)
 
 #####
 ##### Moisture fraction computation

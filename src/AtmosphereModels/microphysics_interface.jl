@@ -456,6 +456,9 @@ variable, to produce the correct input for [`moisture_fractions`](@ref).
 @inline prognostic_specific_moisture_from_total(::Nothing, qᵗ, ::NothingMicrophysicalState) = qᵗ
 @inline prognostic_specific_moisture_from_total(::Nothing, qᵗ, ::NamedTuple) = qᵗ
 
+# Generic fallback: no condensate prognostics → all moisture is vapor/equilibrium.
+@inline prognostic_specific_moisture_from_total(microphysics, qᵗ, ::NothingMicrophysicalState) = qᵗ
+
 """
 $(TYPEDSIGNATURES)
 
