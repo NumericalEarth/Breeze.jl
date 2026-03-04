@@ -53,7 +53,7 @@ end
 
 # Dispatch on smoothing type
 function _follow_terrain!(grid, topography, ::BasicTerrainFollowing, pressure_gradient_stencil)
-    arch = grid.architecture
+    arch = architecture(grid)
 
     # Get the model top from the reference coordinate
     Nz = size(grid, 3)
@@ -85,7 +85,7 @@ end
 
 # Set topography from a function
 function _set_topography!(h_field, grid, topography::Function)
-    arch = grid.architecture
+    arch = architecture(grid)
     kp = surface_kernel_parameters(grid)
     launch!(arch, grid, kp, _set_topography_from_function!, h_field, grid, topography)
     return nothing

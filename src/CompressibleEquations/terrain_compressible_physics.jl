@@ -20,6 +20,8 @@
 ##### so we must use δx/Δx instead of ∂x to avoid double-correcting.
 #####
 
+using Oceananigans: architecture
+using Oceananigans.Grids: znode
 using Oceananigans.Operators: δxᶠᶜᶜ, δyᶜᶠᶜ, Δx⁻¹ᶠᶜᶜ, Δy⁻¹ᶜᶠᶜ, ∂zᶜᶜᶠ, Δzᶜᶜᶠ, Δzᶜᶜᶜ
 using Oceananigans.BoundaryConditions: fill_halo_regions!
 
@@ -54,7 +56,7 @@ to the terrain-following coordinate surfaces:
 """
 function compute_contravariant_velocity!(model::TerrainCompressibleModel)
     grid = model.grid
-    arch = grid.architecture
+    arch = architecture(grid)
     dynamics = model.dynamics
 
     launch!(arch, grid, :xyz,
@@ -265,7 +267,7 @@ end
 
 function AtmosphereModels.compute_dynamics_tendency!(model::TerrainCompressibleModel)
     grid = model.grid
-    arch = grid.architecture
+    arch = architecture(grid)
     Gρ = model.timestepper.Gⁿ.ρ
     ρΩ̃ = model.dynamics.ρΩ̃
 
@@ -286,7 +288,7 @@ end
 
 function AtmosphereModels.compute_auxiliary_dynamics_variables!(model::TerrainCompressibleModel)
     grid = model.grid
-    arch = grid.architecture
+    arch = architecture(grid)
     dynamics = model.dynamics
 
     # Ensure halos are filled
@@ -348,18 +350,16 @@ end
     ρ_field = dynamics_density(dynamics)
     @inbounds ρ = ρ_field[i, j, k]
     g = constants.gravitational_acceleration
-    ρᵣ = _terrain_reference_density(i, j, k, dynamics.terrain_reference_density)
+    ρᵣ = _terrain_reference_density(i, j, k, grid, dynamics.terrain_reference_density)
     return -g * (ρ - ρᵣ)
 end
 
-@inline _terrain_reference_density(i, j, k, ::Nothing) = 0
-@inline _terrain_reference_density(i, j, k, ρ_ref) = @inbounds ρ_ref[i, j, k]
+@inline _terrain_reference_density(i, j, k, grid, ::Nothing) = zero(grid)
+@inline _terrain_reference_density(i, j, k, grid, ρ_ref) = @inbounds ρ_ref[i, j, k]
 
 #####
 ##### 3D terrain reference state via per-column discrete Exner integration
 #####
-
-using GPUArraysCore: @allowscalar
 
 """
 $(TYPEDSIGNATURES)
@@ -383,42 +383,53 @@ The reference pressure is also used for the perturbation horizontal pressure gra
 reducing the terrain-following PGF error.
 """
 function compute_terrain_reference_state!(p_ref, ρ_ref, grid, p₀, θᵣ, pˢᵗ, constants)
-    Nx, Ny, Nz = size(grid)
-    c = Center()
+    arch = architecture(grid)
     Rᵈ = dry_air_gas_constant(constants)
     cᵖᵈ = constants.dry_air.heat_capacity
     κ = Rᵈ / cᵖᵈ
     g = constants.gravitational_acceleration
     π_surface = (p₀ / pˢᵗ)^κ
 
-    @allowscalar for j in 1:Ny, i in 1:Nx
-        πₖ = π_surface
-        for k in 1:Nz
-            z_phys = znode(i, j, k, grid, c, c, c)
-            θₖ = _reference_theta(θᵣ, z_phys)
-
-            if k > 1
-                z_below = znode(i, j, k - 1, grid, c, c, c)
-                θ_below = _reference_theta(θᵣ, z_below)
-                θ_face = (θₖ + θ_below) / 2
-                Δz = Δzᶜᶜᶠ(i, j, k, grid)
-                πₖ = πₖ - g * Δz / (cᵖᵈ * θ_face)
-            end
-
-            pₖ = pˢᵗ * πₖ^(1 / κ)
-            ρₖ = pₖ / (Rᵈ * θₖ * πₖ)
-            @inbounds p_ref[i, j, k] = pₖ
-            @inbounds ρ_ref[i, j, k] = ρₖ
-        end
-    end
+    # Column-parallel kernel: columns are independent but the vertical
+    # Exner integration within each column is sequential (recurrence).
+    launch!(arch, grid, :xy, _fill_terrain_reference_state!,
+            p_ref, ρ_ref, grid, π_surface, θᵣ, pˢᵗ, κ, g, cᵖᵈ, Rᵈ)
 
     fill_halo_regions!(p_ref)
     fill_halo_regions!(ρ_ref)
     return nothing
 end
 
+@kernel function _fill_terrain_reference_state!(p_ref, ρ_ref, grid, π_surface, θᵣ, pˢᵗ, κ, g, cᵖᵈ, Rᵈ)
+    i, j = @index(Global, NTuple)
+    c = Center()
+    Nz = size(grid, 3)
+    inv_κ = 1 / κ
+
+    πₖ = π_surface
+    for k in 1:Nz
+        z_phys = znode(i, j, k, grid, c, c, c)
+        θₖ = _reference_theta(θᵣ, z_phys)
+
+        if k > 1
+            z_below = znode(i, j, k - 1, grid, c, c, c)
+            θ_below = _reference_theta(θᵣ, z_below)
+            θ_face = (θₖ + θ_below) / 2
+            Δz = Δzᶜᶜᶠ(i, j, k, grid)
+            πₖ = πₖ - g * Δz / (cᵖᵈ * θ_face)
+        end
+
+        pₖ = pˢᵗ * πₖ^inv_κ
+        ρₖ = pₖ / (Rᵈ * θₖ * πₖ)
+        @inbounds p_ref[i, j, k] = pₖ
+        @inbounds ρ_ref[i, j, k] = ρₖ
+    end
+end
+
 # Evaluate the reference potential temperature at height z.
 # Handles both constant θ₀ (Number) and θᵣ(z) (Function) profiles.
+# For GPU compatibility, prefer passing a callable struct rather than a
+# bare Function (see BasicTerrainFollowing documentation).
 @inline _reference_theta(θ₀::Number, z) = θ₀
 @inline _reference_theta(θᵣ::Function, z) = θᵣ(z)
 
@@ -457,9 +468,11 @@ end
     decay = 1 - ζ / metrics.z_top
     ∂x_h = ℑxᶜᵃᵃ(i, j, 1, grid, metrics.∂x_h)
     ∂y_h = ℑyᵃᶜᵃ(i, j, 1, grid, metrics.∂y_h)
-    u_cc = ℑxᶜᵃᵃ(i, j, 1, grid, u)
-    v_cc = ℑyᵃᶜᵃ(i, j, 1, grid, v)
-    return decay * (∂x_h * u_cc + ∂y_h * v_cc)
+    # Use the same ℑz(ℑx(u)) stencil as _compute_contravariant_velocity! at k=1
+    # so that Ω̃[k=1] = w_bottom − slope·u = 0 to machine precision.
+    u_ccf = ℑzᵃᵃᶠ(i, j, 1, grid, ℑxᶜᵃᵃ, u)
+    v_ccf = ℑzᵃᵃᶠ(i, j, 1, grid, ℑyᵃᶜᵃ, v)
+    return decay * (∂x_h * u_ccf + ∂y_h * v_ccf)
 end
 
 # Value of u·sx + v·sy at terrain-following face kf (Center,Center,Face).
@@ -476,10 +489,11 @@ end
 # Terrain slope divergence at cell center k: ∂/∂ζ(u·sx + v·sy).
 # This is the explicit terrain correction to the vertical divergence in the
 # acoustic pressure equation (Bug 2 in the plan).
-@inline function _acoustic_slope_div(i, j, k, grid, u, v, metrics::TerrainMetrics)
+# w_bottom is passed in to avoid recomputing it at every k (it's the same for
+# all k in a column and is already computed by the calling kernel).
+@inline function _acoustic_slope_div(i, j, k, grid, u, v, w_bottom, metrics::TerrainMetrics)
     Nz = size(grid, 3)
     Δzᶜ = Δzᶜᶜᶜ(i, j, k, grid)
-    w_bottom = _acoustic_w_bottom(i, j, grid, u, v, metrics)
     u_sx_top = ifelse(k == Nz, zero(Δzᶜ), _u_sx_at_face(i, j, k + 1, grid, u, v, metrics))
     u_sx_bot = ifelse(k == 1, w_bottom, _u_sx_at_face(i, j, k, grid, u, v, metrics))
     return (u_sx_top - u_sx_bot) / Δzᶜ
@@ -495,4 +509,35 @@ end
 
 function convert_slow_tendencies!(substepper, model::TerrainCompressibleModel)
     _convert_slow_tendencies_impl!(substepper, model, model.dynamics.Ω̃)
+end
+
+#####
+##### Terrain-aware Exner reference state for acoustic substepping
+#####
+##### On terrain grids the 1D ExnerReferenceState is not used (reference_state
+##### is Nothing), but we have a 3D terrain_reference_pressure from per-column
+##### discrete Exner integration.  We compute πᵣ = (p_ref / pˢᵗ)^κ from it,
+##### giving the acoustic loop a proper reference Exner that reduces truncation
+##### error in the split-explicit pressure equation.
+#####
+
+function _set_exner_reference!(substepper, model::TerrainCompressibleModel, ::Nothing, pˢᵗ, κ)
+    grid = model.grid
+    arch = architecture(grid)
+    p_ref = model.dynamics.terrain_reference_pressure
+
+    if p_ref === nothing
+        # No reference state at all — zero out πᵣ
+        fill!(parent(substepper.reference_exner_function), 0)
+    else
+        # Compute πᵣ from the 3D terrain reference pressure
+        launch!(arch, grid, :xyz, _compute_reference_exner_from_pressure!,
+                substepper.reference_exner_function, p_ref, pˢᵗ, κ)
+    end
+
+    # Recompute π' = π_actual - πᵣ
+    launch!(arch, grid, :xyz, _recompute_pi_prime!,
+            substepper.exner_perturbation, substepper.filtered_exner_perturbation,
+            model.dynamics.pressure, substepper.reference_exner_function, pˢᵗ, κ)
+    return nothing
 end
