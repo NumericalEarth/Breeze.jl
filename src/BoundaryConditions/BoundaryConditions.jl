@@ -15,6 +15,8 @@ export BulkDragFunction,
        EnergyFluxBoundaryCondition,
        ThetaFluxBoundaryConditionFunction,
        ThetaFluxBoundaryCondition,
+       FilteredSurfaceVelocities,
+       FilteredSurfaceScalar,
        PolynomialCoefficient,
        FittedStabilityFunction,
        StabilityFunctionParameters,
@@ -84,10 +86,39 @@ end
 ##### Boundary condition implementations
 #####
 
+include("filtered_surface_state.jl")
 include("polynomial_bulk_coefficient.jl")
 include("bulk_drag.jl")
 include("bulk_scalar_fluxes.jl")
 include("thermodynamic_variable_bcs.jl")
+
+#####
+##### Wind speed dispatch on FilteredSurfaceVelocities
+#####
+
+# Fallback: no filtering (passes through to existing methods)
+@inline wind_speed²ᶠᶜᶜ(i, j, grid, fields, ::Nothing) = wind_speed²ᶠᶜᶜ(i, j, grid, fields)
+@inline wind_speed²ᶜᶠᶜ(i, j, grid, fields, ::Nothing) = wind_speed²ᶜᶠᶜ(i, j, grid, fields)
+@inline wind_speed²ᶜᶜᶜ(i, j, grid, fields, ::Nothing) = wind_speed²ᶜᶜᶜ(i, j, grid, fields)
+
+# Filtered: read from 2D filtered fields
+@inline function wind_speed²ᶠᶜᶜ(i, j, grid, fields, fv::FilteredSurfaceVelocities)
+    u² = @inbounds fv.u[i, j, 1]^2
+    v² = ℑxyᶠᶜᵃ(i, j, 1, grid, ϕ², fv.v)
+    return u² + v²
+end
+
+@inline function wind_speed²ᶜᶠᶜ(i, j, grid, fields, fv::FilteredSurfaceVelocities)
+    u² = ℑxyᶜᶠᵃ(i, j, 1, grid, ϕ², fv.u)
+    v² = @inbounds fv.v[i, j, 1]^2
+    return u² + v²
+end
+
+@inline function wind_speed²ᶜᶜᶜ(i, j, grid, fields, fv::FilteredSurfaceVelocities)
+    u² = ℑxᶜᵃᵃ(i, j, 1, grid, ϕ², fv.u)
+    v² = ℑyᵃᶜᵃ(i, j, 1, grid, ϕ², fv.v)
+    return u² + v²
+end
 
 #####
 ##### AtmosphereModel boundary condition regularization
@@ -249,7 +280,7 @@ function materialize_bulk_drag(df, grid, dynamics, microphysics, surface_pressur
                                    surface_pressure, constants,
                                    microphysical_fields, specific_prognostic_moisture, temperature,
                                    Val(:momentum))
-    new_df = BulkDragFunction(df.direction, coef, df.gustiness, T₀)
+    new_df = BulkDragFunction(df.direction, coef, df.gustiness, T₀, df.filtered_velocities)
     return BoundaryCondition(Flux(), new_df)
 end
 
@@ -269,7 +300,7 @@ function materialize_atmosphere_boundary_condition(bc::BoundaryCondition{<:Flux,
         throw(ArgumentError("Can only specify BulkDrag on x-momentum or y-momentum fields!"))
     end
 
-    directed_df = BulkDragFunction(direction, df.coefficient, df.gustiness, df.surface_temperature)
+    directed_df = BulkDragFunction(direction, df.coefficient, df.gustiness, df.surface_temperature, df.filtered_velocities)
     return materialize_bulk_drag(directed_df, grid, dynamics, microphysics, surface_pressure, constants,
                                  microphysical_fields, specific_prognostic_moisture, temperature)
 end
@@ -299,7 +330,12 @@ function materialize_atmosphere_boundary_condition(bc::BulkSensibleHeatFluxBound
                                    surface_pressure, constants,
                                    microphysical_fields, specific_prognostic_moisture, temperature,
                                    Val(:scalar))
-    new_bf = BulkSensibleHeatFluxFunction(coef, bf.gustiness, T₀, surface_pressure, constants, bf.formulation)
+    # Auto-create FilteredSurfaceScalar if filtered_velocities is provided
+    fs = isnothing(bf.filtered_velocities) ? nothing :
+         FilteredSurfaceScalar(grid; height=bf.filtered_velocities.height,
+                                     filter_timescale=bf.filtered_velocities.filter_timescale)
+    new_bf = BulkSensibleHeatFluxFunction(coef, bf.gustiness, T₀, surface_pressure, constants,
+                                           bf.formulation, bf.filtered_velocities, fs)
     return BoundaryCondition(Flux(), new_bf)
 end
 
@@ -314,7 +350,12 @@ function materialize_atmosphere_boundary_condition(bc::BulkVaporFluxBoundaryCond
                                    surface_pressure, constants,
                                    microphysical_fields, specific_prognostic_moisture, temperature,
                                    Val(:scalar))
-    new_bf = BulkVaporFluxFunction(coef, bf.gustiness, T₀, surface_pressure, constants, surface)
+    # Auto-create FilteredSurfaceScalar if filtered_velocities is provided
+    fs = isnothing(bf.filtered_velocities) ? nothing :
+         FilteredSurfaceScalar(grid; height=bf.filtered_velocities.height,
+                                     filter_timescale=bf.filtered_velocities.filter_timescale)
+    new_bf = BulkVaporFluxFunction(coef, bf.gustiness, T₀, surface_pressure, constants, surface,
+                                    bf.filtered_velocities, fs)
     return BoundaryCondition(Flux(), new_bf)
 end
 
@@ -345,13 +386,13 @@ end
 ##### so that they add methods to the existing constructors.
 #####
 
-BulkDragFunction(d, coef::NothingPolynomialCoefficient, g, t) =
-    BulkDragFunction(d, fill_polynomial(coef, default_neutral_drag_polynomial, Val(:momentum)), g, t)
+BulkDragFunction(d, coef::NothingPolynomialCoefficient, g, t, fv) =
+    BulkDragFunction(d, fill_polynomial(coef, default_neutral_drag_polynomial, Val(:momentum)), g, t, fv)
 
-BulkSensibleHeatFluxFunction(coef::NothingPolynomialCoefficient, g, t, p, c, f) =
-    BulkSensibleHeatFluxFunction(fill_polynomial(coef, default_neutral_sensible_heat_polynomial, Val(:scalar)), g, t, p, c, f)
+BulkSensibleHeatFluxFunction(coef::NothingPolynomialCoefficient, g, t, p, c, f, fv, fs) =
+    BulkSensibleHeatFluxFunction(fill_polynomial(coef, default_neutral_sensible_heat_polynomial, Val(:scalar)), g, t, p, c, f, fv, fs)
 
-BulkVaporFluxFunction(coef::NothingPolynomialCoefficient, g, t, p, c, s) =
-    BulkVaporFluxFunction(fill_polynomial(coef, default_neutral_latent_heat_polynomial, Val(:scalar)), g, t, p, c, s)
+BulkVaporFluxFunction(coef::NothingPolynomialCoefficient, g, t, p, c, s, fv, fs) =
+    BulkVaporFluxFunction(fill_polynomial(coef, default_neutral_latent_heat_polynomial, Val(:scalar)), g, t, p, c, s, fv, fs)
 
 end # module BoundaryConditions

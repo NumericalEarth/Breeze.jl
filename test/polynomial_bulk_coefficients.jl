@@ -320,4 +320,158 @@ using Oceananigans.BoundaryConditions: BoundaryCondition
         @test bc.condition.coefficient.polynomial == (0.120, 0.070, 2.55)
         @test bc.condition.coefficient.transfer_type === Val(:scalar)
     end
+
+    @testset "FilteredSurfaceVelocities construction" begin
+        grid = RectilinearGrid(size=(4, 4, 4), x=(0, 100), y=(0, 100), z=(0, 40))
+
+        # Default: no height, infinite timescale
+        fv = FilteredSurfaceVelocities(grid)
+        @test fv.height === nothing
+        @test fv.filter_timescale == Inf
+        @test size(fv.u) == (4, 4, 1)
+        @test size(fv.v) == (4, 4, 1)
+
+        # With explicit height and timescale
+        fv2 = FilteredSurfaceVelocities(grid; height=10.0, filter_timescale=60.0)
+        @test fv2.height == 10.0
+        @test fv2.filter_timescale == 60.0
+    end
+
+    @testset "FilteredSurfaceScalar construction" begin
+        grid = RectilinearGrid(size=(4, 4, 4), x=(0, 100), y=(0, 100), z=(0, 40))
+
+        fs = FilteredSurfaceScalar(grid; height=10.0, filter_timescale=120.0)
+        @test fs.height == 10.0
+        @test fs.filter_timescale == 120.0
+        @test size(fs.field) == (4, 4, 1)
+
+        # Default
+        fs0 = FilteredSurfaceScalar(grid)
+        @test fs0.height === nothing
+        @test fs0.filter_timescale == Inf
+    end
+
+    @testset "FilteredSurfaceVelocities update!" begin
+        grid = RectilinearGrid(size=(4, 4, 4), x=(0, 100), y=(0, 100), z=(0, 40))
+        fv = FilteredSurfaceVelocities(grid; filter_timescale=10.0)
+
+        # Create mock velocity fields
+        u = XFaceField(grid)
+        v = YFaceField(grid)
+        set!(u, 5.0)
+        set!(v, 3.0)
+        velocities = (; u, v)
+
+        # Initial update from zero: ū = (0 + ε*5) / (1+ε) with ε = Δt/τ = 1/10
+        Breeze.BoundaryConditions.update!(fv, velocities, grid, 1.0)
+        ε = 1.0 / 10.0
+        expected_u = (0.0 + ε * 5.0) / (1 + ε)
+        expected_v = (0.0 + ε * 3.0) / (1 + ε)
+        @test fv.u[1, 1, 1] ≈ expected_u atol=1e-10
+        @test fv.v[1, 1, 1] ≈ expected_v atol=1e-10
+
+        # Second update: filter should integrate further toward the input
+        Breeze.BoundaryConditions.update!(fv, velocities, grid, 1.0)
+        expected_u2 = (expected_u + ε * 5.0) / (1 + ε)
+        expected_v2 = (expected_v + ε * 3.0) / (1 + ε)
+        @test fv.u[1, 1, 1] ≈ expected_u2 atol=1e-10
+        @test fv.v[1, 1, 1] ≈ expected_v2 atol=1e-10
+    end
+
+    @testset "FilteredSurfaceScalar update!" begin
+        grid = RectilinearGrid(size=(4, 4, 4), x=(0, 100), y=(0, 100), z=(0, 40))
+        fs = FilteredSurfaceScalar(grid; filter_timescale=20.0)
+
+        θ = CenterField(grid)
+        set!(θ, 300.0)
+
+        Breeze.BoundaryConditions.update!(fs, θ, grid, 2.0)
+        ε = 2.0 / 20.0
+        expected = (0.0 + ε * 300.0) / (1 + ε)
+        @test fs.field[1, 1, 1] ≈ expected atol=1e-10
+    end
+
+    @testset "BulkDrag with filtered_velocities" begin
+        grid = RectilinearGrid(size=(4, 4, 4), x=(0, 100), y=(0, 100), z=(0, 40))
+        fv = FilteredSurfaceVelocities(grid; filter_timescale=60.0)
+
+        # Test construction
+        bc = Breeze.BulkDrag(coefficient=1e-3, gustiness=0.5, filtered_velocities=fv)
+        @test bc isa BoundaryCondition
+        @test bc.condition.filtered_velocities === fv
+        @test bc.condition.gustiness == 0.5
+
+        # Test with PolynomialCoefficient
+        coef = PolynomialCoefficient()
+        SST(x, y) = 300.0
+        bc2 = Breeze.BulkDrag(coefficient=coef, surface_temperature=SST, filtered_velocities=fv)
+        @test bc2.condition.filtered_velocities === fv
+        @test bc2.condition.coefficient.polynomial == (0.142, 0.076, 2.7)
+    end
+
+    @testset "BulkSensibleHeatFlux with filtered_velocities" begin
+        grid = RectilinearGrid(size=(4, 4, 4), x=(0, 100), y=(0, 100), z=(0, 40))
+        fv = FilteredSurfaceVelocities(grid; height=10.0, filter_timescale=60.0)
+
+        coef = PolynomialCoefficient()
+        SST(x, y) = 300.0
+        bc = Breeze.BulkSensibleHeatFlux(coefficient=coef, surface_temperature=SST,
+                                          filtered_velocities=fv)
+        @test bc isa BoundaryCondition
+        @test bc.condition.filtered_velocities === fv
+        # filtered_scalar is not yet created (created during materialization)
+        @test bc.condition.filtered_scalar === nothing
+    end
+
+    @testset "BulkVaporFlux with filtered_velocities" begin
+        grid = RectilinearGrid(size=(4, 4, 4), x=(0, 100), y=(0, 100), z=(0, 40))
+        fv = FilteredSurfaceVelocities(grid; filter_timescale=60.0)
+
+        coef = PolynomialCoefficient()
+        SST(x, y) = 300.0
+        bc = Breeze.BulkVaporFlux(coefficient=coef, surface_temperature=SST,
+                                   filtered_velocities=fv)
+        @test bc isa BoundaryCondition
+        @test bc.condition.filtered_velocities === fv
+        @test bc.condition.filtered_scalar === nothing
+    end
+
+    @testset "Backward compatibility — filtered_velocities=nothing" begin
+        # Verify existing constructors still work with default nothing
+        bc_drag = Breeze.BulkDrag(coefficient=1e-3)
+        @test bc_drag.condition.filtered_velocities === nothing
+
+        SST(x, y) = 300.0
+        bc_heat = Breeze.BulkSensibleHeatFlux(coefficient=1e-3, surface_temperature=SST)
+        @test bc_heat.condition.filtered_velocities === nothing
+        @test bc_heat.condition.filtered_scalar === nothing
+
+        bc_vapor = Breeze.BulkVaporFlux(coefficient=1e-3, surface_temperature=SST)
+        @test bc_vapor.condition.filtered_velocities === nothing
+        @test bc_vapor.condition.filtered_scalar === nothing
+    end
+
+    @testset "Height-aware PolynomialCoefficient" begin
+        grid = RectilinearGrid(size=(1, 1, 1), x=(0, 100), y=(0, 100), z=(0, 20))
+
+        coef = PolynomialCoefficient(
+            polynomial = (0.142, 0.076, 2.7),
+            stability_function = nothing
+        )
+        U = 10.0
+        T₀ = 290.0
+
+        # Default call (first cell center height = 10m)
+        C_default = coef(1, 1, grid, U, T₀)
+
+        # Explicit height = 10m should give the same result
+        C_10m = coef(1, 1, grid, U, T₀, 10.0)
+        @test C_10m ≈ C_default atol=1e-12
+
+        # Different height should give a different coefficient
+        C_20m = coef(1, 1, grid, U, T₀, 20.0)
+        @test C_20m != C_default
+        # Higher evaluation height → coefficient adjusted by log ratio
+        @test C_20m > 0
+    end
 end

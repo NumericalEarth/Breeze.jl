@@ -590,13 +590,18 @@ the stability correction is computed internally from the stored fields.
 
 Returns the transfer coefficient (dimensionless).
 """
+# Default: evaluate at first cell center height
 @inline function (coef::PolynomialCoefficient)(i, j, grid, U, T₀)
-    # Compute neutral coefficient at 10m
+    h = znode(i, j, 1, grid, Center(), Center(), Center())
+    return coef(i, j, grid, U, T₀, h)
+end
+
+# Explicit height: used for filtered velocity with a fixed reference height
+@inline function (coef::PolynomialCoefficient)(i, j, grid, U, T₀, h)
     C¹⁰ = neutral_coefficient_10m(coef.polynomial, U, coef.minimum_wind_speed)
 
     # Adjust for measurement height using logarithmic profile:
     # C(h) = C₁₀ × [ln(10/ℓ) / ln(h/ℓ)]²
-    h = znode(i, j, 1, grid, Center(), Center(), Center())
     ℓ = coef.roughness_length
     α = log(h / ℓ)
     Cʰ = C¹⁰ * (log(10 / ℓ) / α)^2
@@ -634,12 +639,34 @@ end
 ##### PolynomialCoefficient computes wind speed and evaluates with stability correction.
 #####
 
-@inline bulk_coefficient(i, j, grid, C::Number, fields, T₀) = C
+#####
+##### Evaluation height helper
+#####
 
-@inline function bulk_coefficient(i, j, grid, C::PolynomialCoefficient, fields, T₀)
+@inline evaluation_height(i, j, grid, ::Nothing) = znode(i, j, 1, grid, Center(), Center(), Center())
+@inline evaluation_height(i, j, grid, h) = h
+
+#####
+##### Bulk coefficient evaluation — no filtering (backward compatible)
+#####
+
+@inline bulk_coefficient(i, j, grid, C::Number, fields, T₀, fv) = C
+
+@inline function bulk_coefficient(i, j, grid, C::PolynomialCoefficient, fields, T₀, ::Nothing)
     U² = wind_speed²ᶜᶜᶜ(i, j, grid, fields)
     U = sqrt(U²)
     return C(i, j, grid, U, T₀)
+end
+
+#####
+##### Bulk coefficient evaluation — with filtered velocities
+#####
+
+@inline function bulk_coefficient(i, j, grid, C::PolynomialCoefficient, fields, T₀, fv::FilteredSurfaceVelocities)
+    U² = wind_speed²ᶜᶜᶜ(i, j, grid, fields, fv)
+    U = sqrt(U²)
+    h = evaluation_height(i, j, grid, fv.height)
+    return C(i, j, grid, U, T₀, h)
 end
 
 #####
