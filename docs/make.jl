@@ -43,6 +43,7 @@ examples = [
     Example("Splitting supercell", "splitting_supercell", false),
     Example("Baroclinic wave on the sphere", "baroclinic_wave", true),
     Example("Tropical cyclone world", "tropical_cyclone_world", false),
+    Example("Diurnal cycle of radiative convection", "radiative_convection", false),
 ]
 
 # Filter out long-running example if necessary

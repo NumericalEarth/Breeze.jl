@@ -262,10 +262,23 @@ Return the thermodynamic state without adjustment.
 
 The Kessler scheme performs its own saturation adjustment internally via the kernel.
 """
-@inline AtmosphereModels.maybe_adjust_thermodynamic_state(𝒰, ::DCMIP2016KM, qᵗ, constants) = 𝒰
+@inline AtmosphereModels.maybe_adjust_thermodynamic_state(𝒰, ::DCMIP2016KM, qᵛ, constants) = 𝒰
 
-AtmosphereModels.vapor_mass_fraction(::DCMIP2016KM, model) = model.microphysical_fields.qᵛ
+AtmosphereModels.moisture_prognostic_name(::DCMIP2016KM) = :ρqᵛ
+
+# DCMIP2016 Kessler stores vapor as prognostic; subtract all condensate from total.
+@inline function AtmosphereModels.specific_prognostic_moisture_from_total(::DCMIP2016KM, qᵗ, ℳ::AtmosphereModels.WarmRainState)
+    return max(0, qᵗ - ℳ.qᶜˡ - ℳ.qʳ)
+end
 AtmosphereModels.liquid_mass_fraction(::DCMIP2016KM, model) = model.microphysical_fields.qᶜˡ + model.microphysical_fields.qʳ
+
+# Grid model: prognostic stores true vapor; construct fractions directly from fields.
+@inline function AtmosphereModels.grid_moisture_fractions(i, j, k, grid, ::DCMIP2016KM, ρ, qᵛ, μ)
+    qᶜˡ = @inbounds μ.qᶜˡ[i, j, k]
+    qʳ = @inbounds μ.qʳ[i, j, k]
+    qˡ = qᶜˡ + qʳ
+    return MoistureMassFractions(qᵛ, qˡ)
+end
 AtmosphereModels.ice_mass_fraction(::DCMIP2016KM, model) = nothing
 
 """
@@ -427,14 +440,14 @@ function AtmosphereModels.microphysics_model_update!(microphysics::DCMIP2016KM, 
     θˡⁱ  = model.formulation.potential_temperature
     ρθˡⁱ = model.formulation.potential_temperature_density
 
-    # Total moisture density (prognostic variable of AtmosphereModel)
-    ρqᵗ = model.moisture_density
+    # Vapor density (prognostic variable of AtmosphereModel for DCMIP2016KM)
+    ρqᵛ = model.moisture_density
 
     # Microphysical fields
     μ = model.microphysical_fields
 
     launch!(arch, grid, :xy, _microphysical_update!,
-            microphysics, grid, Nz, Δt, ρ, p, p₀, constants, θˡⁱ, ρθˡⁱ, ρqᵗ, μ)
+            microphysics, grid, Nz, Δt, ρ, p, p₀, constants, θˡⁱ, ρθˡⁱ, ρqᵛ, μ)
 
     return nothing
 end
@@ -533,12 +546,11 @@ Convert from mass fractions to mixing ratios.
 
 Returns `(rᵛ, rᶜˡ, rʳ)` mixing ratios for use in Kessler physics.
 """
-@inline function mass_fractions_to_mixing_ratios(qᵗ, ρqᶜˡ, ρqʳ, ρ)
+@inline function mass_fractions_to_mixing_ratios(qᵛ, ρqᶜˡ, ρqʳ, ρ)
     qᶜˡ = max(0, ρqᶜˡ / ρ)
     qʳ  = max(0, ρqʳ / ρ)
     qˡ_sum = qᶜˡ + qʳ
-    qᵗ = max(qᵗ, qˡ_sum)
-    qᵛ = qᵗ - qˡ_sum
+    qᵛ = max(0, qᵛ)
 
     q = MoistureMassFractions(qᵛ, qˡ_sum)
     r = MoistureMixingRatio(q)
@@ -564,7 +576,7 @@ end
 
 @kernel function _microphysical_update!(microphysics, grid, Nz, Δt,
                                         density, pressure, p₀, constants,
-                                        θˡⁱ, ρθˡⁱ, ρqᵗ, μ)
+                                        θˡⁱ, ρθˡⁱ, ρqᵛ, μ)
     i, j = @index(Global, NTuple)
     FT = eltype(grid)
     precipitation_rate_field = μ.precipitation_rate
@@ -596,8 +608,8 @@ end
     for k = 1:(Nz-1)
         @inbounds begin
             ρ = density[i, j, k]
-            qᵗ = ρqᵗ[i, j, k] / ρ
-            rᵛ, rᶜˡ, rʳ = mass_fractions_to_mixing_ratios(qᵗ, μ.ρqᶜˡ[i, j, k], μ.ρqʳ[i, j, k], ρ)
+            qᵛ = ρqᵛ[i, j, k] / ρ
+            rᵛ, rᶜˡ, rʳ = mass_fractions_to_mixing_ratios(qᵛ, μ.ρqᶜˡ[i, j, k], μ.ρqʳ[i, j, k], ρ)
 
             𝕎ʳᵏ = kessler_terminal_velocity(rʳ, ρ, ρ₁, microphysics)
             μ.𝕎ʳ[i, j, k] = 𝕎ʳᵏ
@@ -618,8 +630,8 @@ end
     # k = Nz: no CFL update needed
     @inbounds begin
         ρ = density[i, j, Nz]
-        qᵗ = ρqᵗ[i, j, Nz] / ρ
-        rᵛ, rᶜˡ, rʳ = mass_fractions_to_mixing_ratios(qᵗ, μ.ρqᶜˡ[i, j, Nz], μ.ρqʳ[i, j, Nz], ρ)
+        qᵛ = ρqᵛ[i, j, Nz] / ρ
+        rᵛ, rᶜˡ, rʳ = mass_fractions_to_mixing_ratios(qᵛ, μ.ρqᶜˡ[i, j, Nz], μ.ρqʳ[i, j, Nz], ρ)
 
         μ.𝕎ʳ[i, j, Nz] = kessler_terminal_velocity(rʳ, ρ, ρ₁, microphysics)
         μ.qᵛ[i, j, Nz]  = rᵛ
@@ -787,7 +799,7 @@ end
 
             qᵛ, qᶜˡ, qʳ, qᵗ = mixing_ratios_to_mass_fractions(rᵛ, rᶜˡ, rʳ)
 
-            ρqᵗ[i, j, k]    = ρ * qᵗ
+            ρqᵛ[i, j, k]    = ρ * qᵛ
             μ.ρqᶜˡ[i, j, k] = ρ * qᶜˡ
             μ.ρqʳ[i, j, k]  = ρ * qʳ
             μ.qᵛ[i, j, k]   = qᵛ
@@ -856,8 +868,12 @@ function AtmosphereModels.microphysics_model_update!(microphysics::DCMIP2016KM, 
     # Get pressure at parcel height (interpolate from environmental profile)
     p_parcel = interpolate(state.z, model.dynamics.pressure)
 
-    # Convert mass fractions → mixing ratios (shared helper)
-    rᵛ, rᶜˡ, rʳ = mass_fractions_to_mixing_ratios(state.qᵗ, μ.ρqᶜˡ, μ.ρqʳ, ρ)
+    # Convert mass fractions → mixing ratios (shared helper).
+    # Parcel model stores total moisture in qᵗ; compute vapor by subtracting condensate.
+    qᶜˡ_s = max(0, μ.ρqᶜˡ / ρ)
+    qʳ_s = max(0, μ.ρqʳ / ρ)
+    qᵛ_s = max(0, state.qᵗ - qᶜˡ_s - qʳ_s)
+    rᵛ, rᶜˡ, rʳ = mass_fractions_to_mixing_ratios(qᵛ_s, μ.ρqᶜˡ, μ.ρqʳ, ρ)
 
     # Temperature from thermodynamic state
     T = temperature(𝒰, constants)
@@ -874,7 +890,7 @@ function AtmosphereModels.microphysics_model_update!(microphysics::DCMIP2016KM, 
     # Convert mixing ratios → mass fractions (shared helper)
     _, qᶜˡ, qʳ, qᵗ = mixing_ratios_to_mass_fractions(rᵛ, rᶜˡ, rʳ)
 
-    # Update parcel state
+    # Update parcel state (parcel model stores total moisture in qᵗ)
     state.μ = (; ρqᶜˡ = ρ * qᶜˡ, ρqʳ = ρ * qʳ)
     state.qᵗ = qᵗ
     state.ρqᵗ = ρ * qᵗ
