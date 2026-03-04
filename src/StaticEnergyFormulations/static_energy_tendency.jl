@@ -1,5 +1,5 @@
 using Breeze.AtmosphereModels.Diagnostics: Diagnostics
-using Breeze.AtmosphereModels: AtmosphereModel
+using Breeze.AtmosphereModels: AtmosphereModel, specific_prognostic_moisture
 
 using Oceananigans.Fields: set!
 using Breeze.Thermodynamics: temperature
@@ -44,7 +44,7 @@ end
                                         dynamics,
                                         formulation,
                                         constants,
-                                        specific_moisture,
+                                        specific_prognostic_moisture,
                                         velocities,
                                         microphysics,
                                         microphysical_fields,
@@ -57,15 +57,15 @@ end
     specific_energy = formulation.specific_energy
     ρ_field = dynamics_density(dynamics)
     @inbounds ρ = ρ_field[i, j, k]
-    @inbounds qᵗ = specific_moisture[i, j, k]
+    @inbounds qᵛᵉ = specific_prognostic_moisture[i, j, k]
 
     # Compute moisture fractions first
-    q = grid_moisture_fractions(i, j, k, grid, microphysics, ρ, qᵗ, microphysical_fields)
+    q = grid_moisture_fractions(i, j, k, grid, microphysics, ρ, qᵛᵉ, microphysical_fields)
     𝒰 = diagnose_thermodynamic_state(i, j, k, grid, formulation, dynamics, q)
 
     # Compute the buoyancy flux term, ρᵣ w b
     buoyancy_flux = ℑzᵃᵃᶜ(i, j, k, grid, w_buoyancy_forceᶜᶜᶠ,
-                          velocities.w, dynamics, temperature_field, specific_moisture,
+                          velocities.w, dynamics, temperature_field, specific_prognostic_moisture,
                           microphysics, microphysical_fields, constants)
 
     closure_buoyancy = AtmosphereModelBuoyancy(dynamics, formulation, constants)
@@ -109,7 +109,7 @@ function AtmosphereModels.set_thermodynamic_variable!(model::StaticEnergyModel, 
             formulation.specific_energy,
             grid,
             θ,
-            model.specific_moisture,
+            specific_prognostic_moisture(model),
             model.dynamics,
             model.microphysics,
             model.microphysical_fields,
@@ -122,7 +122,7 @@ end
                                                              specific_energy,
                                                              grid,
                                                              potential_temperature,
-                                                             specific_moisture,
+                                                             specific_prognostic_moisture,
                                                              dynamics,
                                                              microphysics,
                                                              microphysical_fields,
@@ -132,14 +132,14 @@ end
     @inbounds begin
         pᵣ = dynamics_pressure(dynamics)[i, j, k]
         ρᵣ = dynamics_density(dynamics)[i, j, k]
-        qᵗ = specific_moisture[i, j, k]
+        qᵛᵉ = specific_prognostic_moisture[i, j, k]
         θ = potential_temperature[i, j, k]
     end
 
     pˢᵗ = standard_pressure(dynamics)
-    q = grid_moisture_fractions(i, j, k, grid, microphysics, ρᵣ, qᵗ, microphysical_fields)
+    q = grid_moisture_fractions(i, j, k, grid, microphysics, ρᵣ, qᵛᵉ, microphysical_fields)
     𝒰θ₀ = LiquidIcePotentialTemperatureState(θ, q, pˢᵗ, pᵣ)
-    𝒰θ₁ = maybe_adjust_thermodynamic_state(𝒰θ₀, microphysics, qᵗ, constants)
+    𝒰θ₁ = maybe_adjust_thermodynamic_state(𝒰θ₀, microphysics, qᵛᵉ, constants)
     T = temperature(𝒰θ₁, constants)
 
     z = znode(i, j, k, grid, c, c, c)
@@ -181,7 +181,7 @@ function AtmosphereModels.set_thermodynamic_variable!(model::StaticEnergyModel, 
             formulation.specific_energy,
             grid,
             T_field,
-            model.specific_moisture,
+            specific_prognostic_moisture(model),
             model.dynamics,
             model.microphysics,
             model.microphysical_fields,
@@ -194,7 +194,7 @@ end
                                                    specific_energy,
                                                    grid,
                                                    temperature_field,
-                                                   specific_moisture,
+                                                   specific_prognostic_moisture,
                                                    dynamics,
                                                    microphysics,
                                                    microphysical_fields,
@@ -204,12 +204,12 @@ end
     @inbounds begin
         pᵣ = dynamics_pressure(dynamics)[i, j, k]
         ρᵣ = dynamics_density(dynamics)[i, j, k]
-        qᵗ = specific_moisture[i, j, k]
+        qᵛᵉ = specific_prognostic_moisture[i, j, k]
         T = temperature_field[i, j, k]
     end
 
     # Get moisture fractions (vapor only for unsaturated air)
-    q = grid_moisture_fractions(i, j, k, grid, microphysics, ρᵣ, qᵗ, microphysical_fields)
+    q = grid_moisture_fractions(i, j, k, grid, microphysics, ρᵣ, qᵛᵉ, microphysical_fields)
 
     # Convert temperature to static energy
     z = znode(i, j, k, grid, c, c, c)

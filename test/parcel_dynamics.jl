@@ -259,7 +259,7 @@ end
     # This tests that the state-based interface exists for SaturationAdjustment
     # Microphysical sources are zero (SaturationAdjustment operates via state adjustment)
     tendency_e = microphysical_tendency(microphysics, Val(:ρe), ρ_val, ℳ, 𝒰, constants)
-    tendency_qt = microphysical_tendency(microphysics, Val(:ρqᵗ), ρ_val, ℳ, 𝒰, constants)
+    tendency_qt = microphysical_tendency(microphysics, Val(:ρqᵛ), ρ_val, ℳ, 𝒰, constants)
     @test tendency_e == 0.0
     @test tendency_qt == 0.0
 
@@ -299,7 +299,7 @@ end
     # This tests that the state-based interface exists for DCMIP2016Kessler
     # Microphysical sources are zero (operates via microphysics_model_update!)
     tendency_e = microphysical_tendency(microphysics, Val(:ρe), ρ_val, ℳ, 𝒰, constants)
-    tendency_qt = microphysical_tendency(microphysics, Val(:ρqᵗ), ρ_val, ℳ, 𝒰, constants)
+    tendency_qt = microphysical_tendency(microphysics, Val(:ρqᵛ), ρ_val, ℳ, 𝒰, constants)
     @test tendency_e == 0.0
     @test tendency_qt == 0.0
 
@@ -520,7 +520,7 @@ end
          z = 0, w = 1)
 
     # Run long enough for cloud formation and autoconversion
-    simulation = Simulation(model; Δt=1.0, stop_time=120minutes, verbose=false)
+    simulation = Simulation(model; Δt=1, stop_time=120minutes, verbose=false)
     run!(simulation)
 
     # Extract final microphysical state
@@ -534,8 +534,8 @@ end
 
     # Total water should be conserved (vapor + cloud + rain = initial qᵗ at parcel altitude)
     q = model.dynamics.state.𝒰.moisture_mass_fractions
-    qᵗ_total = q.vapor + qᶜˡ_final + qʳ_final
-    @test qᵗ_total ≈ model.dynamics.state.qᵗ rtol=1e-10
+    qᵗ = q.vapor + qᶜˡ_final + qʳ_final
+    @test qᵗ ≈ model.dynamics.state.qᵗ rtol=1e-10
 end
 
 #####
