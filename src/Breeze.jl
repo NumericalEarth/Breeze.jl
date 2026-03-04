@@ -11,6 +11,8 @@ export
     ThermodynamicConstants,
     ReferenceState,
     ExnerReferenceState,
+    compute_reference_state!,
+    set_to_mean!,
     surface_density,
     AnelasticDynamics,
     AnelasticModel,
@@ -55,6 +57,9 @@ export
     surface_precipitation_flux,
     total_pressure,
     specific_humidity,
+    moisture_prognostic_name,
+    moisture_specific_name,
+    specific_prognostic_moisture,
 
     # Thermodynamics
     temperature,
@@ -112,7 +117,9 @@ export
     # ParcelDynamics
     ParcelDynamics,
     ParcelModel,
-    ParcelState
+    ParcelState,
+    PrescribedVerticalVelocity,
+    PrognosticVerticalVelocity
 
 using Oceananigans: Oceananigans, @at, AnisotropicMinimumDissipation, Average,
                     AveragedTimeInterval, BackgroundField, BetaPlane, Bounded, BoundaryConditionOperation,
