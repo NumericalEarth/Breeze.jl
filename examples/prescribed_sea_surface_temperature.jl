@@ -161,7 +161,7 @@ coef = PolynomialCoefficient(roughness_length = 1.5e-4)
 # and [NishizawaKitamura2018](@citet). The exponential filter with a 10-minute
 # timescale smooths over the fastest eddies while tracking the evolving mean wind.
 
-filtered_velocities = FilteredSurfaceVelocities(grid; filter_timescale=10minutes)
+filtered_velocities = FilteredSurfaceVelocities(grid; filter_timescale=1hour)
 
 # ## Surface temperature
 #
