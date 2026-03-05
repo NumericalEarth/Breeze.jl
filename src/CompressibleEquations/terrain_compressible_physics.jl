@@ -20,7 +20,7 @@
 ##### so we must use δx/Δx instead of ∂x to avoid double-correcting.
 #####
 
-using Oceananigans.Operators: δxᶠᶜᶜ, δyᶜᶠᶜ, Δx⁻¹ᶠᶜᶜ, Δy⁻¹ᶜᶠᶜ, ∂zᶜᶜᶠ, Δzᶜᶜᶠ, Δzᶜᶜᶜ
+using Oceananigans.Operators: δxᶠᶜᶜ, δyᶜᶠᶜ, Δx⁻¹ᶠᶜᶜ, Δy⁻¹ᶜᶠᶜ, ∂zᶜᶜᶠ, Δzᶜᶜᶠ
 using Oceananigans.BoundaryConditions: fill_halo_regions!
 
 using Breeze.TerrainFollowingDiscretization: TerrainMetrics, terrain_slope_x, terrain_slope_y,
@@ -63,14 +63,25 @@ function compute_contravariant_velocity!(model::TerrainCompressibleModel)
             grid, model.velocities, model.momentum,
             dynamics.terrain_metrics)
 
-    # With the correct kinematic bottom BC (w_bottom = u·∂h/∂x + v·∂h/∂y set
-    # by the acoustic back-solve), Ω̃[k=1] = w − slope·u = 0 by construction.
-    # No post-hoc override is needed; the former _zero_bottom_face! hack is removed.
+    # Enforce kinematic BC: Ω̃ = 0 at the terrain surface (bottom face).
+    # The ImpenetrableBoundaryCondition sets w = 0 at the bottom, but the
+    # correct terrain BC is Ω̃ = 0 (no flow through the terrain surface).
+    # Since Ω̃ = w - slope·u, having w = 0 gives Ω̃ = -slope·u ≠ 0 which is
+    # a spurious mass flux through the terrain. Setting Ω̃ = 0 directly here
+    # ensures no transport through the bottom boundary.
+    # Zero bottom face BEFORE filling halos so the BC propagates correctly.
+    launch!(arch, grid, :xy, _zero_bottom_face!, dynamics.Ω̃)
+    launch!(arch, grid, :xy, _zero_bottom_face!, dynamics.ρΩ̃)
 
     fill_halo_regions!(dynamics.Ω̃)
     fill_halo_regions!(dynamics.ρΩ̃)
 
     return nothing
+end
+
+@kernel function _zero_bottom_face!(field)
+    i, j = @index(Global, NTuple)
+    @inbounds field[i, j, 1] = 0
 end
 
 @kernel function _compute_contravariant_velocity!(Ω̃, ρΩ̃, grid, velocities, momentum, metrics)
@@ -301,7 +312,7 @@ function AtmosphereModels.compute_auxiliary_dynamics_variables!(model::TerrainCo
             dynamics.density,
             model.formulation,
             dynamics,
-            specific_prognostic_moisture(model),
+            model.specific_moisture,
             grid,
             model.microphysics,
             model.microphysical_fields,
@@ -421,78 +432,3 @@ end
 # Handles both constant θ₀ (Number) and θᵣ(z) (Function) profiles.
 @inline _reference_theta(θ₀::Number, z) = θ₀
 @inline _reference_theta(θᵣ::Function, z) = θᵣ(z)
-
-#####
-##### Terrain-aware acoustic substepping helpers
-#####
-##### These implement the TerrainMetrics dispatch for the flat-grid fallbacks
-##### defined in acoustic_substepping.jl.  All functions are @inline so the
-##### compiler specialises them at compile time (no runtime branch).
-#####
-
-# Expose terrain metrics to the acoustic substep loop.
-@inline _acoustic_terrain_metrics(model::TerrainCompressibleModel) =
-    model.dynamics.terrain_metrics
-
-# Chain-rule correction for the horizontal acoustic PGF at (Face,Center,Center):
-#   (∂π'/∂x)_z = (∂π'/∂x)_ζ − slope · ∂π'/∂z
-# Uses SlopeOutside stencil (same as the slow-step PGF).
-@inline function _acoustic_x_pgf_correction(i, j, k, grid, π̃′, metrics::TerrainMetrics)
-    slope = terrain_slope_x(i, j, k, grid, metrics, Center())
-    ∂z_π = ℑzᵃᵃᶜ(i, j, k, grid, ℑxᶠᵃᵃ, ∂zᶜᶜᶠ, π̃′)
-    return slope * ∂z_π
-end
-
-@inline function _acoustic_y_pgf_correction(i, j, k, grid, π̃′, metrics::TerrainMetrics)
-    slope = terrain_slope_y(i, j, k, grid, metrics, Center())
-    ∂z_π = ℑzᵃᵃᶜ(i, j, k, grid, ℑyᵃᶠᵃ, ∂zᶜᶜᶠ, π̃′)
-    return slope * ∂z_π
-end
-
-# Kinematic bottom BC: w_bottom = u·(∂h/∂x)·decay + v·(∂h/∂y)·decay
-# Uses the same interpolations as _compute_contravariant_velocity! at k=1 so
-# that Ω̃[k=1] = w_bottom − slope·u = 0 to machine precision.
-@inline function _acoustic_w_bottom(i, j, grid, u, v, metrics::TerrainMetrics)
-    ζ = rnode(1, grid, Face())
-    decay = 1 - ζ / metrics.z_top
-    ∂x_h = ℑxᶜᵃᵃ(i, j, 1, grid, metrics.∂x_h)
-    ∂y_h = ℑyᵃᶜᵃ(i, j, 1, grid, metrics.∂y_h)
-    u_cc = ℑxᶜᵃᵃ(i, j, 1, grid, u)
-    v_cc = ℑyᵃᶜᵃ(i, j, 1, grid, v)
-    return decay * (∂x_h * u_cc + ∂y_h * v_cc)
-end
-
-# Value of u·sx + v·sy at terrain-following face kf (Center,Center,Face).
-@inline function _u_sx_at_face(i, j, kf, grid, u, v, metrics::TerrainMetrics)
-    ζ = rnode(kf, grid, Face())
-    decay = 1 - ζ / metrics.z_top
-    ∂x_h = ℑxᶜᵃᵃ(i, j, 1, grid, metrics.∂x_h)
-    ∂y_h = ℑyᵃᶜᵃ(i, j, 1, grid, metrics.∂y_h)
-    u_ccf = ℑzᵃᵃᶠ(i, j, kf, grid, ℑxᶜᵃᵃ, u)
-    v_ccf = ℑzᵃᵃᶠ(i, j, kf, grid, ℑyᵃᶜᵃ, v)
-    return decay * (∂x_h * u_ccf + ∂y_h * v_ccf)
-end
-
-# Terrain slope divergence at cell center k: ∂/∂ζ(u·sx + v·sy).
-# This is the explicit terrain correction to the vertical divergence in the
-# acoustic pressure equation (Bug 2 in the plan).
-@inline function _acoustic_slope_div(i, j, k, grid, u, v, metrics::TerrainMetrics)
-    Nz = size(grid, 3)
-    Δzᶜ = Δzᶜᶜᶜ(i, j, k, grid)
-    w_bottom = _acoustic_w_bottom(i, j, grid, u, v, metrics)
-    u_sx_top = ifelse(k == Nz, zero(Δzᶜ), _u_sx_at_face(i, j, k + 1, grid, u, v, metrics))
-    u_sx_bot = ifelse(k == 1, w_bottom, _u_sx_at_face(i, j, k, grid, u, v, metrics))
-    return (u_sx_top - u_sx_bot) / Δzᶜ
-end
-
-#####
-##### Override convert_slow_tendencies! to use Ω̃ for vertical π advection
-#####
-##### In terrain-following coords the material derivative of π involves Ω̃
-##### (not w) as the vertical transport velocity: v·∇π = u·(∂π/∂x)_ζ + ... + Ω̃·∂π/∂z.
-##### This is Bug 3 in the plan.
-#####
-
-function convert_slow_tendencies!(substepper, model::TerrainCompressibleModel)
-    _convert_slow_tendencies_impl!(substepper, model, model.dynamics.Ω̃)
-end
