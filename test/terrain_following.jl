@@ -1,6 +1,7 @@
 using Breeze
 using Oceananigans
 using Oceananigans.Grids: MutableVerticalDiscretization, rnode, xnode, znode
+using Breeze.Thermodynamics: hydrostatic_pressure
 using Test
 
 @testset "TerrainFollowingDiscretization" begin
@@ -197,5 +198,104 @@ using Test
         for i in 1:Nx
             @test Ω̃[i, 1, Nz+1] ≈ w[i, 1, Nz+1] atol=1e-10
         end
+    end
+
+    @testset "Terrain reference state matches continuous hydrostatic profile" begin
+        # The terrain reference state p_ref(i,j,k) must equal the continuous
+        # hydrostatic pressure evaluated at the local physical height z(i,j,k).
+        # A bug that initializes every column from sea-level pressure creates
+        # O(ρgh) errors over terrain.
+        Nx, Nz = 16, 8
+        Lx, Lz = 100000.0, 10000.0
+
+        z_faces = MutableVerticalDiscretization(collect(range(0, Lz, length=Nz+1)))
+        grid = RectilinearGrid(CPU(); size=(Nx, Nz),
+                               x=(-Lx/2, Lx/2), z=z_faces,
+                               topology=(Periodic, Flat, Bounded))
+
+        h₀ = 1000.0
+        a = 10000.0
+        h(x, y) = h₀ * exp(-x^2 / a^2)
+        metrics = follow_terrain!(grid, h)
+
+        θ₀ = 300.0
+        p₀ = 101325.0
+        pˢᵗ = 1e5
+
+        dynamics = CompressibleDynamics(ExplicitTimeStepping();
+                                        terrain_metrics=metrics,
+                                        reference_potential_temperature=θ₀)
+        model = AtmosphereModel(grid; dynamics)
+        constants = model.thermodynamic_constants
+
+        p_ref = model.dynamics.terrain_reference_pressure
+
+        # At each grid point, p_ref should match the continuous profile
+        # to within the discretization error of the Exner integration (O(Δz²))
+        for i in 1:Nx, k in 1:Nz
+            z_phys = znode(i, 1, k, grid, Center(), Center(), Center())
+            p_exact = hydrostatic_pressure(z_phys, p₀, θ₀, pˢᵗ, constants)
+            # Discrete Exner integration has O(Δz²) error; with Δz ≈ 1250 m
+            # the accumulated error at the top is ~0.5%, so use 1% tolerance
+            @test p_ref[i, 1, k] ≈ p_exact rtol=1e-2
+        end
+
+        # Critical check: at a given k-level, p_ref must NOT be constant across
+        # columns (it should vary because physical heights differ). But at the
+        # SAME physical height, values from different columns should agree closely.
+        # Compare the flat column (i at domain edge) vs the mountain-top column.
+        i_flat = 1    # far from mountain
+        i_peak = Nx÷2 # near mountain peak
+        z_flat_1 = znode(i_flat, 1, 1, grid, Center(), Center(), Center())
+        z_peak_1 = znode(i_peak, 1, 1, grid, Center(), Center(), Center())
+
+        # Physical heights differ, so p_ref at k=1 should differ
+        @test z_peak_1 > z_flat_1 + 100  # mountain is at least 100 m higher
+        @test p_ref[i_peak, 1, 1] < p_ref[i_flat, 1, 1]  # higher altitude → lower pressure
+    end
+
+    @testset "Terrain reference state with θ(z) profile (Function dispatch)" begin
+        # Same test but with a non-constant potential temperature profile,
+        # exercising the numerically_integrated_hydrostatic_pressure path.
+        Nx, Nz = 16, 16
+        Lx, Lz = 100000.0, 10000.0
+
+        z_faces = MutableVerticalDiscretization(collect(range(0, Lz, length=Nz+1)))
+        grid = RectilinearGrid(CPU(); size=(Nx, Nz),
+                               x=(-Lx/2, Lx/2), z=z_faces,
+                               topology=(Periodic, Flat, Bounded))
+
+        h₀ = 1000.0
+        a = 10000.0
+        h(x, y) = h₀ * exp(-x^2 / a^2)
+        metrics = follow_terrain!(grid, h)
+
+        g_val = 9.80665
+        N² = 1e-4
+        θ₀ = 300.0
+        p₀ = 101325.0
+        pˢᵗ = 1e5
+        θ_of_z(z) = θ₀ * exp(N² * z / g_val)
+
+        dynamics = CompressibleDynamics(ExplicitTimeStepping();
+                                        terrain_metrics=metrics,
+                                        reference_potential_temperature=θ_of_z)
+        model = AtmosphereModel(grid; dynamics)
+        constants = model.thermodynamic_constants
+
+        p_ref = model.dynamics.terrain_reference_pressure
+
+        # At each grid point, p_ref should match the continuous profile
+        for i in 1:Nx, k in 1:Nz
+            z_phys = znode(i, 1, k, grid, Center(), Center(), Center())
+            p_exact = hydrostatic_pressure(z_phys, p₀, θ_of_z, pˢᵗ, constants)
+            # Finer grid (Nz=16) so tighter tolerance than Nz=8 test
+            @test p_ref[i, 1, k] ≈ p_exact rtol=5e-3
+        end
+
+        # Mountain-top column should have lower p_ref at k=1 than flat column
+        i_flat = 1
+        i_peak = Nx÷2
+        @test p_ref[i_peak, 1, 1] < p_ref[i_flat, 1, 1]
     end
 end

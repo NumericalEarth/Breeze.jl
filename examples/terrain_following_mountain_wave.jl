@@ -18,7 +18,7 @@ using Breeze
 using Oceananigans.Grids: MutableVerticalDiscretization, znode
 using Oceananigans.Operators: Δzᶜᶜᶠ
 using Oceananigans.Units
-using Breeze.Thermodynamics: ThermodynamicConstants, dry_air_gas_constant
+using Breeze.Thermodynamics: ThermodynamicConstants, dry_air_gas_constant, hydrostatic_pressure
 using Printf
 using CairoMakie
 
@@ -67,7 +67,6 @@ N² = 1e-4     # Brunt-Väisälä frequency squared (s⁻²)
 Rᵈ = dry_air_gas_constant(constants)
 cᵖᵈ = constants.dry_air.heat_capacity
 κ = Rᵈ / cᵖᵈ
-π_surface = (p₀ / pˢᵗ)^κ
 
 # Potential temperature increases exponentially with height for constant ``N^2``.
 θ_of_z(z) = θ₀ * exp(N² * z / g)
@@ -109,12 +108,17 @@ model = AtmosphereModel(grid; dynamics, advection=WENO(), forcing=(; ρw=ρw_spo
 ρθ_field = model.formulation.potential_temperature_density
 
 for i in 1:Nx
-    πₖ = π_surface
+    πₖ = zero(κ)
     for k in 1:Nz
         z_phys = znode(i, 1, k, grid, Center(), Center(), Center())
         θₖ = θ_of_z(z_phys)
 
-        if k > 1
+        if k == 1
+            ## Evaluate the continuous hydrostatic pressure at the local physical
+            ## height (varies with terrain) rather than forcing sea-level pressure.
+            p_hydro = hydrostatic_pressure(z_phys, p₀, θ_of_z, pˢᵗ, constants)
+            πₖ = (p_hydro / pˢᵗ)^κ
+        else
             z_below = znode(i, 1, k - 1, grid, Center(), Center(), Center())
             θ_face = (θₖ + θ_of_z(z_below)) / 2
             πₖ = πₖ - g * Δzᶜᶜᶠ(i, 1, k, grid) / (cᵖᵈ * θ_face)

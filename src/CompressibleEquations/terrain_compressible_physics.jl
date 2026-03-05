@@ -365,7 +365,7 @@ end
 
 using GPUArraysCore: @allowscalar
 
-using Breeze.Thermodynamics: evaluate_profile
+using Breeze.Thermodynamics: evaluate_profile, hydrostatic_pressure
 
 """
 $(TYPEDSIGNATURES)
@@ -395,15 +395,19 @@ function compute_terrain_reference_state!(p_ref, ρ_ref, grid, p₀, θᵣ, pˢ�
     cᵖᵈ = constants.dry_air.heat_capacity
     κ = Rᵈ / cᵖᵈ
     g = constants.gravitational_acceleration
-    π_surface = (p₀ / pˢᵗ)^κ
-
     @allowscalar for j in 1:Ny, i in 1:Nx
-        πₖ = π_surface
+        πₖ = zero(κ) # initialized at k == 1 below
         for k in 1:Nz
             z_phys = znode(i, j, k, grid, c, c, c)
             θₖ = evaluate_profile(θᵣ, z_phys)
 
-            if k > 1
+            if k == 1
+                # Evaluate the continuous hydrostatic pressure at the local
+                # physical height (which varies with terrain) rather than
+                # forcing sea-level pressure at every column.
+                p_hydro = hydrostatic_pressure(z_phys, p₀, θᵣ, pˢᵗ, constants)
+                πₖ = (p_hydro / pˢᵗ)^κ
+            else
                 z_below = znode(i, j, k - 1, grid, c, c, c)
                 θ_below = evaluate_profile(θᵣ, z_below)
                 θ_face = (θₖ + θ_below) / 2
