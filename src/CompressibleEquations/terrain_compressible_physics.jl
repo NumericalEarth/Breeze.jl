@@ -426,4 +426,3 @@ function compute_terrain_reference_state!(p_ref, ρ_ref, grid, p₀, θᵣ, pˢ�
     fill_halo_regions!(ρ_ref)
     return nothing
 end
-
