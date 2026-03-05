@@ -45,78 +45,78 @@ Reactant.set_default_backend("gpu")
 #
 # A neutrally stratified dry atmosphere with a localised warm perturbation.
 
-θ₀  = 300.0    # background potential temperature [K]
-p₀  = 101325.0 # surface pressure [Pa]
-pˢᵗ = 1e5      # standard pressure [Pa]
+θ_background          = 300.0    # background potential temperature [K]
+surface_pressure      = 101325.0 # surface pressure [Pa]
+standard_pressure     = 1e5      # standard pressure [Pa]
 
-A   = 2.0      # perturbation amplitude [K]
-R   = 1000.0   # perturbation radius [m]
-x₀  = 5000.0   # bubble centre x [m]
-y₀  = 5000.0   # bubble centre y [m]
-z₀  = 2000.0   # bubble centre z [m]
+perturbation_amplitude = 2.0     # warm bubble amplitude [K]
+perturbation_radius    = 1000.0  # warm bubble e-folding radius [m]
+bubble_center_x        = 5000.0  # bubble centre x [m]
+bubble_center_y        = 5000.0  # bubble centre y [m]
+bubble_center_z        = 2000.0  # bubble centre z [m]
 
 # ## Domain, grid resolutions, and benchmark configuration
 #
-# The domain is a 10 km cube.  We sweep over three grid resolutions to study
+# The domain is a 10 km cube.  We sweep over several grid resolutions to study
 # how wall-clock time scales with problem size.  For each resolution we create
 # two grids: one on `ReactantState` for Reactant-compiled execution and one on
 # `GPU()` for the plain-Julia baseline.
 
-Lx, Ly, Lz = 10000.0, 10000.0, 10000.0
+domain_x, domain_y, domain_z = 10000.0, 10000.0, 10000.0
 
-topo = (Periodic, Bounded, Bounded)
+topology = (Periodic, Bounded, Bounded)
 
-grid_sizes  = [(64, 64, 64), (256, 256, 256), (512, 512, 512)]
-z_threshold = 5000.0
-nsteps      = 2500
-nwarmup     = 1
-ntrials     = 3
+grid_sizes       = [(32, 32, 32), (64, 64, 32), (128, 128, 32)]
+loss_z_threshold = 5000.0
+nsteps           = 2500
+nwarmup          = 1
+ntrials          = 3
 
 # ## Loss function and adjoint
 #
-# The loss is the mean squared potential temperature in the upper half of the domain
-# (above ``z_*``).  This is a simple proxy for "how much warm air has risen".
+# The loss is the mean squared potential temperature in the upper half of the
+# domain (above `loss_z_threshold`).  This is a simple proxy for "how much
+# warm air has risen".
 #
-# `grad_loss` wraps `Enzyme.autodiff` in reverse mode to compute
-# ``\partial J / \partial \theta_0`` — the sensitivity of the loss to the initial
-# temperature field.
+# `compute_gradient` wraps `Enzyme.autodiff` in reverse mode to compute
+# ∂J/∂θ₀ — the sensitivity of the loss to the initial temperature field.
 #
 # Both functions are defined once and reused for every grid resolution.
 
-function loss(model, θ_init, Δt, nsteps)
+function loss(model, θ_initial, Δt, nsteps)
     FT = eltype(model.grid)
-    set!(model; θ = θ_init, ρ = FT(1))
+    set!(model; θ = θ_initial, ρ = FT(1))
     @trace mincut=true checkpointing=true track_numbers=false for _ in 1:nsteps
         time_step!(model, Δt)
     end
-    T = interior(model.temperature)
-    k_start = ceil(Int, z_threshold / Lz * size(model.grid, 3)) + 1
-    upper = @view T[:, :, k_start:end]
-    return mean(upper .^ 2)
+    θ_evolved = interior(model.temperature)
+    k_start = ceil(Int, loss_z_threshold / domain_z * size(model.grid, 3)) + 1
+    upper_θ = @view θ_evolved[:, :, k_start:end]
+    return mean(upper_θ .^ 2)
 end
 
-function grad_loss(model, dmodel, θ_init, dθ_init, Δt, nsteps)
-    parent(dθ_init) .= 0
-    _, loss_val = Enzyme.autodiff(
+function compute_gradient(model, shadow_model, θ_initial, dθ_initial, Δt, nsteps)
+    parent(dθ_initial) .= 0
+    _, loss_value = Enzyme.autodiff(
         Enzyme.set_strong_zero(Enzyme.ReverseWithPrimal),
         loss, Enzyme.Active,
-        Enzyme.Duplicated(model, dmodel),
-        Enzyme.Duplicated(θ_init, dθ_init),
+        Enzyme.Duplicated(model, shadow_model),
+        Enzyme.Duplicated(θ_initial, dθ_initial),
         Enzyme.Const(Δt),
         Enzyme.Const(nsteps))
-    return dθ_init, loss_val
+    return dθ_initial, loss_value
 end
 
-# ## Multi-resolution benchmark loop
+# ## Multi-resolution loop
 #
 # For each grid resolution we:
 #
 # 1. Build `ReactantState` and `GPU()` grids and models.
 # 2. Set initial conditions (Gaussian warm bubble).
 # 3. Compile the forward and backward passes with Reactant.
-# 4. Benchmark: plain-Julia forward (GPU), Reactant forward, Reactant backward.
-# 5. Extract evolved temperature and adjoint sensitivity for visualisation.
-# 6. Save 2D-slice and 3D cube-face plots tagged by resolution.
+# 4. Run the forward model and compute adjoint sensitivities.
+# 5. Visualise evolved temperature and ∂J/∂θ₀ as 2-D slices and 3-D cut-aways.
+# 6. Benchmark: plain-Julia forward, Reactant forward, Reactant backward.
 #
 # Timing results are collected into `benchmark_results` for the summary plot.
 
@@ -124,73 +124,240 @@ benchmark_results = Dict{Tuple{Int,Int,Int}, NamedTuple}()
 
 for (Nx, Ny, Nz) in grid_sizes
 
+    GC.gc()
+
     @info "=" ^ 60
-    @info @sprintf("Grid resolution: %d × %d × %d  (%d cells)", Nx, Ny, Nz, Nx*Ny*Nz)
+    @info @sprintf("Grid resolution: %d × %d × %d  (%d cells)", Nx, Ny, Nz, Nx * Ny * Nz)
     @info "=" ^ 60
 
     # ── Grids and models ──────────────────────────────────────────────────
 
     grid_kwargs = (size = (Nx, Ny, Nz),
-                   x = (0, Lx), y = (0, Ly), z = (0, Lz),
-                   topology = topo)
+                   x = (0, domain_x), y = (0, domain_y), z = (0, domain_z),
+                   topology = topology)
 
-    @info "Building grids…"
+    @info "Building Reactant and GPU grids…"
     @time begin
-        grid     = RectilinearGrid(ReactantState(); grid_kwargs...)
-        grid_gpu = RectilinearGrid(GPU();           grid_kwargs...)
+        reactant_grid = RectilinearGrid(ReactantState(); grid_kwargs...)
+        gpu_grid      = RectilinearGrid(GPU();           grid_kwargs...)
     end
 
-    FT = eltype(grid)
+    FT = eltype(reactant_grid)
 
-    @info "Building models…"
+    @info "Building atmosphere models (explicit compressible stepping)…"
     @time begin
-        model     = AtmosphereModel(grid;     dynamics = CompressibleDynamics())
-        model_gpu = AtmosphereModel(grid_gpu; dynamics = CompressibleDynamics())
+        reactant_model = AtmosphereModel(reactant_grid; dynamics = CompressibleDynamics())
+        gpu_model      = AtmosphereModel(gpu_grid;      dynamics = CompressibleDynamics())
     end
 
-    constants = model.thermodynamic_constants
+    thermo = reactant_model.thermodynamic_constants
 
     # ── Initial conditions ────────────────────────────────────────────────
     #
-    # A Gaussian warm bubble centred at (x₀, y₀, z₀).  The loss function
-    # internally resets model state before each evaluation, so we only need
-    # the initial θ field (not full model state).
+    # A Gaussian warm bubble centred at (bubble_center_x, bubble_center_y,
+    # bubble_center_z).  The loss function internally resets model state
+    # before each evaluation, so we only need the initial θ field.
 
-    θ_perturbation(x, y, z) = FT(A) * exp(-((x - x₀)^2 + (y - y₀)^2 + (z - z₀)^2) / R^2)
-    θ_initial(x, y, z)      = FT(θ₀) + θ_perturbation(x, y, z)
+    θ_perturbation(x, y, z) = FT(perturbation_amplitude) * exp(
+        -((x - bubble_center_x)^2 + (y - bubble_center_y)^2 + (z - bubble_center_z)^2)
+        / perturbation_radius^2)
+
+    θ_init_func(x, y, z) = FT(θ_background) + θ_perturbation(x, y, z)
 
     @info "Initializing fields…"
     @time begin
-        θ_init     = CenterField(grid);     set!(θ_init,     θ_initial)
-        θ_init_gpu = CenterField(grid_gpu); set!(θ_init_gpu, θ_initial)
-        dθ_init    = CenterField(grid);     set!(dθ_init,    FT(0))
+        θ_initial_reactant = CenterField(reactant_grid); set!(θ_initial_reactant, θ_init_func)
+        θ_initial_gpu      = CenterField(gpu_grid);      set!(θ_initial_gpu,      θ_init_func)
+        dθ_initial         = CenterField(reactant_grid); set!(dθ_initial,         FT(0))
     end
 
-    θ_init_arr     = Array(interior(θ_init))
-    θ_init_gpu_arr = Array(interior(θ_init_gpu))
-    @info "Initial θ diagnostics" minimum=minimum(θ_init_arr) maximum=maximum(θ_init_arr) max_perturbation=maximum(abs, θ_init_arr .- θ₀)
-    @info "Reactant/GPU θ consistency" max_abs_diff=maximum(abs, θ_init_arr .- θ_init_gpu_arr)
+    θ_reactant_arr = Array(interior(θ_initial_reactant))
+    θ_gpu_arr      = Array(interior(θ_initial_gpu))
 
-    # ── Time step (CFL-limited by the acoustic sound speed) ───────────────
+    @info "Initial θ diagnostics" minimum(θ_reactant_arr) maximum(θ_reactant_arr) maximum(abs, θ_reactant_arr .- θ_background)
+    @info "Reactant vs GPU consistency" maximum(abs, θ_reactant_arr .- θ_gpu_arr)
 
-    Rᵈ  = constants.molar_gas_constant / constants.dry_air.molar_mass
-    cᵖᵈ = constants.dry_air.heat_capacity
-    γ   = cᵖᵈ / (cᵖᵈ - Rᵈ)
-    cₛ  = sqrt(γ * Rᵈ * θ₀)
-    Δt  = FT(0.4 * Lx / Nx / cₛ)
+    # ── Time step (CFL-limited by acoustic wave speed) ────────────────────
 
-    @info @sprintf("Δt = %.6f s  (CFL ≈ 0.4, cₛ ≈ %.1f m/s)", Δt, cₛ)
+    Rᵈ          = thermo.molar_gas_constant / thermo.dry_air.molar_mass
+    cᵖᵈ         = thermo.dry_air.heat_capacity
+    γ           = cᵖᵈ / (cᵖᵈ - Rᵈ)
+    sound_speed = sqrt(γ * Rᵈ * θ_background)
+    Δt          = FT(0.4 * domain_x / Nx / sound_speed)
+
+    @info @sprintf("Δt = %.6f s  (acoustic CFL ≈ 0.4, sound speed ≈ %.1f m/s)", Δt, sound_speed)
 
     # ── Reactant compilation ──────────────────────────────────────────────
 
-    @info "Compiling forward pass…"
-    @time compiled_fwd = Reactant.@compile raise=true raise_first=true sync=true loss(
-        model, θ_init, Δt, nsteps)
+    GC.gc()
 
-    @info "Compiling backward pass (Enzyme reverse mode)…"
-    dmodel = Enzyme.make_zero(model)
-    @time compiled_bwd = Reactant.@compile raise=true raise_first=true sync=true grad_loss(
-        model, dmodel, θ_init, dθ_init, Δt, nsteps)
+    @info "Compiling forward pass with Reactant…"
+    @time compiled_forward = Reactant.@compile raise=true raise_first=true sync=true loss(
+        reactant_model, θ_initial_reactant, Δt, nsteps)
+
+    GC.gc()
+
+    @info "Compiling backward pass (Enzyme reverse mode) with Reactant…"
+    shadow_model = Enzyme.make_zero(reactant_model)
+    @time compiled_backward = Reactant.@compile raise=true raise_first=true sync=true compute_gradient(
+        reactant_model, shadow_model, θ_initial_reactant, dθ_initial, Δt, nsteps)
+
+    # ── Compute forward state and adjoint sensitivity ─────────────────────
+
+    GC.gc()
+
+    @info "Running forward pass to obtain evolved temperature…"
+    @time compiled_forward(reactant_model, θ_initial_reactant, Δt, nsteps)
+    temperature = Array(interior(reactant_model.temperature))
+
+    GC.gc()
+
+    @info "Running backward pass to obtain adjoint sensitivity ∂J/∂θ₀…"
+    @time dθ_result, loss_value = compiled_backward(
+        reactant_model, shadow_model, θ_initial_reactant, dθ_initial, Δt, nsteps)
+    sensitivity = Array(interior(dθ_result))
+
+    @info @sprintf("Loss J = %.6e", loss_value)
+    @info @sprintf("Max |∂J/∂θ₀| = %.6e", maximum(abs, sensitivity))
+
+    # ── Coordinate arrays for plotting ────────────────────────────────────
+
+    xc = range(0, domain_x, length = Nx)
+    yc = range(0, domain_y, length = Ny)
+    zc = range(domain_z / 2Nz, domain_z - domain_z / 2Nz, length = Nz)
+
+    i_center = argmin(abs.(xc .- bubble_center_x))
+    j_center = argmin(abs.(yc .- bubble_center_y))
+
+    # ── Visualisation: 2-D slices ─────────────────────────────────────────
+    #
+    # Top row: evolved potential temperature θ.
+    # Bottom row: adjoint sensitivity ∂J/∂θ₀.
+    # Each row shows an x–z slice (through bubble centre y) and a y–z slice
+    # (through bubble centre x).
+
+    θ_deviation_max = maximum(abs, temperature .- θ_background)
+    θ_colorrange    = (θ_background - θ_deviation_max, θ_background + θ_deviation_max)
+
+    sensitivity_max  = maximum(abs, sensitivity)
+    sensitivity_range = (-sensitivity_max, sensitivity_max)
+
+    fig_slices = Figure(size = (1200, 900), fontsize = 14)
+
+    Label(fig_slices[0, :],
+        @sprintf("Rising thermal bubble — %d×%d×%d, %d steps, Δt = %.4f s, J = %.6e",
+                 Nx, Ny, Nz, nsteps, Δt, loss_value),
+        fontsize = 16, tellwidth = false)
+
+    ax_θ_xz = Axis(fig_slices[1, 1]; xlabel = "x (m)", ylabel = "z (m)",
+                    title = "θ  — x–z at y = $(Int(round(yc[j_center]))) m",
+                    aspect = DataAspect())
+    hm_θ_xz = heatmap!(ax_θ_xz, xc, zc, temperature[:, j_center, :];
+                        colormap = :thermal, colorrange = θ_colorrange)
+    Colorbar(fig_slices[1, 2], hm_θ_xz; label = "θ (K)")
+
+    ax_θ_yz = Axis(fig_slices[1, 3]; xlabel = "y (m)", ylabel = "z (m)",
+                    title = "θ  — y–z at x = $(Int(round(xc[i_center]))) m",
+                    aspect = DataAspect())
+    hm_θ_yz = heatmap!(ax_θ_yz, yc, zc, temperature[i_center, :, :];
+                        colormap = :thermal, colorrange = θ_colorrange)
+    Colorbar(fig_slices[1, 4], hm_θ_yz; label = "θ (K)")
+
+    ax_s_xz = Axis(fig_slices[2, 1]; xlabel = "x (m)", ylabel = "z (m)",
+                    title = "∂J/∂θ₀ — x–z at y = $(Int(round(yc[j_center]))) m",
+                    aspect = DataAspect())
+    hm_s_xz = heatmap!(ax_s_xz, xc, zc, sensitivity[:, j_center, :];
+                        colormap = :balance, colorrange = sensitivity_range)
+    Colorbar(fig_slices[2, 2], hm_s_xz; label = "∂J/∂θ₀")
+
+    ax_s_yz = Axis(fig_slices[2, 3]; xlabel = "y (m)", ylabel = "z (m)",
+                    title = "∂J/∂θ₀ — y–z at x = $(Int(round(xc[i_center]))) m",
+                    aspect = DataAspect())
+    hm_s_yz = heatmap!(ax_s_yz, yc, zc, sensitivity[i_center, :, :];
+                        colormap = :balance, colorrange = sensitivity_range)
+    Colorbar(fig_slices[2, 4], hm_s_yz; label = "∂J/∂θ₀")
+
+    fname_slices = @sprintf("rising_thermal_sensitivity_%dx%dx%d.png", Nx, Ny, Nz)
+    @time save(fname_slices, fig_slices; px_per_unit = 2)
+    @info "Saved $fname_slices"
+
+    # ── Visualisation: 3-D cube cut-away ──────────────────────────────────
+    #
+    # Three exterior faces of the domain (top x–y, front x–z, left y–z)
+    # form a single visible cube corner.  The color range is computed from
+    # only the three visible face slices so that features on the boundary
+    # are not washed out by interior extremes.
+
+    top_face_θ   = temperature[:, :, end]
+    front_face_θ = temperature[:, 1, :]
+    left_face_θ  = temperature[1, :, :]
+
+    visible_θ_max     = max(maximum(abs, top_face_θ   .- θ_background),
+                            maximum(abs, front_face_θ  .- θ_background),
+                            maximum(abs, left_face_θ   .- θ_background))
+    θ_colorrange_3d   = (θ_background - visible_θ_max, θ_background + visible_θ_max)
+
+    top_face_s   = sensitivity[:, :, end]
+    front_face_s = sensitivity[:, 1, :]
+    left_face_s  = sensitivity[1, :, :]
+
+    visible_s_max     = max(maximum(abs, top_face_s),
+                            maximum(abs, front_face_s),
+                            maximum(abs, left_face_s))
+    sensitivity_range_3d = (-visible_s_max, visible_s_max)
+
+    top_X  = [xc[i] for i in 1:Nx, j in 1:Ny]
+    top_Y  = [yc[j] for i in 1:Nx, j in 1:Ny]
+    top_Z  = fill(zc[end], Nx, Ny)
+
+    front_X = [xc[i] for i in 1:Nx, k in 1:Nz]
+    front_Y = fill(yc[1], Nx, Nz)
+    front_Z = [zc[k] for i in 1:Nx, k in 1:Nz]
+
+    left_X = fill(xc[1], Ny, Nz)
+    left_Y = [yc[j] for j in 1:Ny, k in 1:Nz]
+    left_Z = [zc[k] for j in 1:Ny, k in 1:Nz]
+
+    fig_3d = Figure(size = (1400, 600), fontsize = 14)
+
+    Label(fig_3d[0, :],
+        @sprintf("3-D cut-away — %d×%d×%d, %d steps, Δt = %.4f s",
+                 Nx, Ny, Nz, nsteps, Δt),
+        fontsize = 16, tellwidth = false)
+
+    ax_3d_θ = Axis3(fig_3d[1, 1]; xlabel = "x (m)", ylabel = "y (m)", zlabel = "z (m)",
+                    title = "Potential temperature θ", aspect = :data,
+                    azimuth = 1.20π, elevation = 0.30)
+
+    surface!(ax_3d_θ, top_X, top_Y, top_Z;
+             color = top_face_θ, colormap = :thermal,
+             colorrange = θ_colorrange_3d, shading = NoShading)
+    surface!(ax_3d_θ, front_X, front_Y, front_Z;
+             color = front_face_θ, colormap = :thermal,
+             colorrange = θ_colorrange_3d, shading = NoShading)
+    surf_θ = surface!(ax_3d_θ, left_X, left_Y, left_Z;
+                      color = left_face_θ, colormap = :thermal,
+                      colorrange = θ_colorrange_3d, shading = NoShading)
+    Colorbar(fig_3d[1, 2], surf_θ; label = "θ (K)")
+
+    ax_3d_s = Axis3(fig_3d[1, 3]; xlabel = "x (m)", ylabel = "y (m)", zlabel = "z (m)",
+                    title = "Sensitivity ∂J/∂θ₀", aspect = :data,
+                    azimuth = 1.20π, elevation = 0.30)
+
+    surface!(ax_3d_s, top_X, top_Y, top_Z;
+             color = top_face_s, colormap = :balance,
+             colorrange = sensitivity_range_3d, shading = NoShading)
+    surface!(ax_3d_s, front_X, front_Y, front_Z;
+             color = front_face_s, colormap = :balance,
+             colorrange = sensitivity_range_3d, shading = NoShading)
+    surf_s = surface!(ax_3d_s, left_X, left_Y, left_Z;
+                      color = left_face_s, colormap = :balance,
+                      colorrange = sensitivity_range_3d, shading = NoShading)
+    Colorbar(fig_3d[1, 4], surf_s; label = "∂J/∂θ₀")
+
+    fname_3d = @sprintf("rising_thermal_3d_%dx%dx%d.png", Nx, Ny, Nz)
+    @time save(fname_3d, fig_3d; px_per_unit = 2)
+    @info "Saved $fname_3d"
 
     # ── Benchmarking ──────────────────────────────────────────────────────
     #
@@ -198,157 +365,43 @@ for (Nx, Ny, Nz) in grid_sizes
     # synchronises with the device.  The plain-Julia GPU baseline uses
     # `Base.@elapsed` with CUDA.@sync for accurate wall-clock time.
 
-    @info "Benchmarking forward pass (plain Julia, GPU) — $ntrials trials…"
+    GC.gc()
+
+    @info "Benchmarking forward pass (plain Julia on GPU) — $ntrials trials…"
     for _ in 1:nwarmup
-        loss(model_gpu, θ_init_gpu, Δt, nsteps)
+        loss(gpu_model, θ_initial_gpu, Δt, nsteps)
     end
-    t_fwd_julia = @elapsed for _ in 1:ntrials
-        loss(model_gpu, θ_init_gpu, Δt, nsteps)
+    time_forward_julia = @elapsed for _ in 1:ntrials
+        loss(gpu_model, θ_initial_gpu, Δt, nsteps)
     end
-    t_fwd_julia /= ntrials
+    time_forward_julia /= ntrials
+
+    GC.gc()
 
     @info "Benchmarking forward pass (Reactant compiled) — $ntrials trials…"
-    prof_fwd = Reactant.Profiler.@timed nrepeat=ntrials compiled_fwd(
-        model, θ_init, Δt, nsteps)
-    t_fwd_compiled = prof_fwd.runtime_ns / 1e9
+    profile_forward = Reactant.Profiler.@timed nrepeat=ntrials compiled_forward(
+        reactant_model, θ_initial_reactant, Δt, nsteps)
+    time_forward_reactant = profile_forward.runtime_ns / 1e9
+
+    GC.gc()
 
     @info "Benchmarking backward pass (Reactant compiled) — $ntrials trials…"
-    prof_bwd = Reactant.Profiler.@timed nrepeat=ntrials compiled_bwd(
-        model, dmodel, θ_init, dθ_init, Δt, nsteps)
-    t_bwd_compiled = prof_bwd.runtime_ns / 1e9
+    profile_backward = Reactant.Profiler.@timed nrepeat=ntrials compiled_backward(
+        reactant_model, shadow_model, θ_initial_reactant, dθ_initial, Δt, nsteps)
+    time_backward_reactant = profile_backward.runtime_ns / 1e9
 
-    fwd_speedup   = t_fwd_julia / t_fwd_compiled
-    bwd_fwd_ratio = t_bwd_compiled / t_fwd_compiled
+    forward_speedup   = time_forward_julia / time_forward_reactant
+    backward_to_forward = time_backward_reactant / time_forward_reactant
 
     benchmark_results[(Nx, Ny, Nz)] = (;
-        t_fwd_julia, t_fwd_compiled, t_bwd_compiled,
-        fwd_speedup, bwd_fwd_ratio)
+        time_forward_julia, time_forward_reactant, time_backward_reactant,
+        forward_speedup, backward_to_forward)
 
-    @info @sprintf("  Forward  (Julia GPU) : %10.4f s", t_fwd_julia)
-    @info @sprintf("  Forward  (Reactant)  : %10.4f s", t_fwd_compiled)
-    @info @sprintf("  Backward (Reactant)  : %10.4f s", t_bwd_compiled)
-    @info @sprintf("  Forward speedup      : %10.1f×",  fwd_speedup)
-    @info @sprintf("  Backward / Forward   : %10.1f×",  bwd_fwd_ratio)
-
-    # ── Forward state and sensitivity field ───────────────────────────────
-
-    @info "Running compiled forward pass for evolved state…"
-    @time compiled_fwd(model, θ_init, Δt, nsteps)
-    temperature = Array(interior(model.temperature))
-
-    @info "Computing adjoint sensitivity…"
-    @time dθ, J = compiled_bwd(model, dmodel, θ_init, dθ_init, Δt, nsteps)
-    sensitivity = Array(interior(dθ))
-
-    @info "Loss value" J
-    @info "Max |∂J/∂θ₀|" maximum_sensitivity=maximum(abs, sensitivity)
-
-    # ── Visualisation: 2D slices ──────────────────────────────────────────
-    #
-    # Evolved potential temperature (top row) and adjoint sensitivity
-    # ∂J/∂θ₀ (bottom row), sliced nearest the bubble centre.
-
-    x = range(0, Lx, length = Nx)
-    y = range(0, Ly, length = Ny)
-    z = range(Lz / 2Nz, Lz - Lz / 2Nz, length = Nz)
-
-    i0 = argmin(abs.(x .- x₀))
-    j0 = argmin(abs.(y .- y₀))
-
-    fig = Figure(size = (1200, 900), fontsize = 14)
-
-    Label(fig[0, :],
-        @sprintf("Rising thermal bubble — %d×%d×%d, %d steps, Δt = %.4f s, J = %.6e",
-                 Nx, Ny, Nz, nsteps, Δt, J),
-        fontsize = 16, tellwidth = false)
-
-    θlim   = maximum(abs, temperature .- θ₀)
-    θrange = (θ₀ - θlim, θ₀ + θlim)
-
-    ax1 = Axis(fig[1, 1]; xlabel = "x (m)", ylabel = "z (m)",
-               title = "θ  — x–z slice at y ≈ $(Int(round(y[j0]))) m",
-               aspect = DataAspect())
-    hm1 = heatmap!(ax1, x, z, temperature[:, j0, :];
-                   colormap = :thermal, colorrange = θrange)
-    Colorbar(fig[1, 2], hm1; label = "θ (K)")
-
-    ax2 = Axis(fig[1, 3]; xlabel = "y (m)", ylabel = "z (m)",
-               title = "θ  — y–z slice at x ≈ $(Int(round(x[i0]))) m",
-               aspect = DataAspect())
-    hm2 = heatmap!(ax2, y, z, temperature[i0, :, :];
-                   colormap = :thermal, colorrange = θrange)
-    Colorbar(fig[1, 4], hm2; label = "θ (K)")
-
-    slimit = maximum(abs, sensitivity)
-
-    ax3 = Axis(fig[2, 1]; xlabel = "x (m)", ylabel = "z (m)",
-               title = "∂J/∂θ₀  — x–z slice at y ≈ $(Int(round(y[j0]))) m",
-               aspect = DataAspect())
-    hm3 = heatmap!(ax3, x, z, sensitivity[:, j0, :];
-                   colormap = :balance, colorrange = (-slimit, slimit))
-    Colorbar(fig[2, 2], hm3; label = "∂J/∂θ₀")
-
-    ax4 = Axis(fig[2, 3]; xlabel = "y (m)", ylabel = "z (m)",
-               title = "∂J/∂θ₀  — y–z slice at x ≈ $(Int(round(x[i0]))) m",
-               aspect = DataAspect())
-    hm4 = heatmap!(ax4, y, z, sensitivity[i0, :, :];
-                   colormap = :balance, colorrange = (-slimit, slimit))
-    Colorbar(fig[2, 4], hm4; label = "∂J/∂θ₀")
-
-    fname_2d = @sprintf("rising_thermal_sensitivity_%dx%dx%d.png", Nx, Ny, Nz)
-    @time save(fname_2d, fig; px_per_unit = 2)
-    @info "Saved $fname_2d"
-
-    # ── Visualisation: 3D cube-face view ──────────────────────────────────
-    #
-    # Three exterior faces of the domain (top, front, left) form a single
-    # visible cube corner.
-
-    xy_X = [x[i] for i in 1:Nx, j in 1:Ny]
-    xy_Y = [y[j] for i in 1:Nx, j in 1:Ny]
-    xy_Z = fill(z[end], Nx, Ny)
-
-    xz_X = [x[i] for i in 1:Nx, k in 1:Nz]
-    xz_Y = fill(y[1], Nx, Nz)
-    xz_Z = [z[k] for i in 1:Nx, k in 1:Nz]
-
-    yz_X = fill(x[1], Ny, Nz)
-    yz_Y = [y[j] for j in 1:Ny, k in 1:Nz]
-    yz_Z = [z[k] for j in 1:Ny, k in 1:Nz]
-
-    fig3 = Figure(size = (1400, 600), fontsize = 14)
-
-    Label(fig3[0, :],
-        @sprintf("3D cut-away — %d×%d×%d, %d steps, Δt = %.4f s", Nx, Ny, Nz, nsteps, Δt),
-        fontsize = 16, tellwidth = false)
-
-    ax3d_θ = Axis3(fig3[1, 1]; xlabel = "x (m)", ylabel = "y (m)", zlabel = "z (m)",
-                   title = "Potential temperature θ", aspect = :data,
-                   azimuth = 1.20π, elevation = 0.30)
-
-    surface!(ax3d_θ, xy_X, xy_Y, xy_Z; color = temperature[:, :, end],
-             colormap = :thermal, colorrange = θrange, shading = NoShading)
-    surface!(ax3d_θ, xz_X, xz_Y, xz_Z; color = temperature[:, 1, :],
-             colormap = :thermal, colorrange = θrange, shading = NoShading)
-    sf_θ = surface!(ax3d_θ, yz_X, yz_Y, yz_Z; color = temperature[1, :, :],
-                    colormap = :thermal, colorrange = θrange, shading = NoShading)
-    Colorbar(fig3[1, 2], sf_θ; label = "θ (K)")
-
-    ax3d_s = Axis3(fig3[1, 3]; xlabel = "x (m)", ylabel = "y (m)", zlabel = "z (m)",
-                   title = "Sensitivity ∂J/∂θ₀", aspect = :data,
-                   azimuth = 1.20π, elevation = 0.30)
-
-    surface!(ax3d_s, xy_X, xy_Y, xy_Z; color = sensitivity[:, :, end],
-             colormap = :balance, colorrange = (-slimit, slimit), shading = NoShading)
-    surface!(ax3d_s, xz_X, xz_Y, xz_Z; color = sensitivity[:, 1, :],
-             colormap = :balance, colorrange = (-slimit, slimit), shading = NoShading)
-    sf_s = surface!(ax3d_s, yz_X, yz_Y, yz_Z; color = sensitivity[1, :, :],
-                    colormap = :balance, colorrange = (-slimit, slimit), shading = NoShading)
-    Colorbar(fig3[1, 4], sf_s; label = "∂J/∂θ₀")
-
-    fname_3d = @sprintf("rising_thermal_3d_%dx%dx%d.png", Nx, Ny, Nz)
-    @time save(fname_3d, fig3; px_per_unit = 2)
-    @info "Saved $fname_3d"
+    @info @sprintf("  Forward  (Julia GPU) : %10.4f s", time_forward_julia)
+    @info @sprintf("  Forward  (Reactant)  : %10.4f s", time_forward_reactant)
+    @info @sprintf("  Backward (Reactant)  : %10.4f s", time_backward_reactant)
+    @info @sprintf("  Forward speedup      : %10.1f×",  forward_speedup)
+    @info @sprintf("  Backward / Forward   : %10.1f×",  backward_to_forward)
 
 end  # grid-size loop
 
@@ -367,8 +420,8 @@ for sz in grid_sizes
     r = benchmark_results[sz]
     label = @sprintf("%d×%d×%d", sz...)
     @info @sprintf("  %-16s  %10.4f s  %10.4f s  %10.4f s  %7.1f×  %7.1f×",
-                   label, r.t_fwd_julia, r.t_fwd_compiled, r.t_bwd_compiled,
-                   r.fwd_speedup, r.bwd_fwd_ratio)
+                   label, r.time_forward_julia, r.time_forward_reactant,
+                   r.time_backward_reactant, r.forward_speedup, r.backward_to_forward)
 end
 
 # ## Benchmark bar chart
@@ -377,46 +430,49 @@ end
 # forward pass, the Reactant-compiled forward pass, and the Reactant backward
 # pass.  Annotations show forward speedup and backward/forward ratio.
 
-n = length(grid_sizes)
-xlabels  = [@sprintf("%d³", sz[1]) for sz in grid_sizes]
-t_julia  = [benchmark_results[sz].t_fwd_julia    for sz in grid_sizes]
-t_react  = [benchmark_results[sz].t_fwd_compiled  for sz in grid_sizes]
-t_bwd    = [benchmark_results[sz].t_bwd_compiled   for sz in grid_sizes]
+num_resolutions = length(grid_sizes)
+resolution_labels = [@sprintf("%d×%d×%d", sz...) for sz in grid_sizes]
 
-xs     = repeat(1:n, inner = 3)
-dodge  = repeat(1:3, outer = n)
-heights = Float64[]
-for i in 1:n
-    push!(heights, t_julia[i], t_react[i], t_bwd[i])
+times_julia   = [benchmark_results[sz].time_forward_julia    for sz in grid_sizes]
+times_reactant = [benchmark_results[sz].time_forward_reactant for sz in grid_sizes]
+times_backward = [benchmark_results[sz].time_backward_reactant for sz in grid_sizes]
+
+bar_positions = repeat(1:num_resolutions, inner = 3)
+bar_dodge     = repeat(1:3, outer = num_resolutions)
+bar_heights   = Float64[]
+for i in 1:num_resolutions
+    push!(bar_heights, times_julia[i], times_reactant[i], times_backward[i])
 end
-colors = repeat([:steelblue, :seagreen, :coral], outer = n)
+bar_colors = repeat([:steelblue, :seagreen, :coral], outer = num_resolutions)
 
-fig_bench = Figure(size = (900, 500), fontsize = 14)
+fig_benchmark = Figure(size = (900, 500), fontsize = 14)
 
-ax_bench = Axis(fig_bench[1, 1];
-    xticks = (1:n, xlabels),
+ax_benchmark = Axis(fig_benchmark[1, 1];
+    xticks = (1:num_resolutions, resolution_labels),
     ylabel = "Wall time (s)",
     title  = "Rising Thermal Bubble — Reactant + Enzyme Benchmark",
     yscale = log10)
 
-barplot!(ax_bench, xs, heights;
-    dodge = dodge, color = colors,
+barplot!(ax_benchmark, bar_positions, bar_heights;
+    dodge = bar_dodge, color = bar_colors,
     bar_labels = :y,
     label_formatter = x -> @sprintf("%.3g s", x))
 
-labels = ["Forward (Julia GPU)", "Forward (Reactant)", "Backward (Reactant)"]
-elements = [PolyElement(color = c) for c in [:steelblue, :seagreen, :coral]]
-Legend(fig_bench[1, 2], elements, labels; framevisible = false)
+legend_labels   = ["Forward (Julia GPU)", "Forward (Reactant)", "Backward (Reactant)"]
+legend_elements = [PolyElement(color = c) for c in [:steelblue, :seagreen, :coral]]
+Legend(fig_benchmark[1, 2], legend_elements, legend_labels; framevisible = false)
 
-speedup_strs = [@sprintf("%.1f×", benchmark_results[sz].fwd_speedup) for sz in grid_sizes]
-ratio_strs   = [@sprintf("%.1f×", benchmark_results[sz].bwd_fwd_ratio) for sz in grid_sizes]
-summary_text = join([@sprintf("%s: speedup %s, bwd/fwd %s", xlabels[i], speedup_strs[i], ratio_strs[i])
-                     for i in 1:n], "   |   ")
+speedup_strings = [@sprintf("%.1f×", benchmark_results[sz].forward_speedup) for sz in grid_sizes]
+ratio_strings   = [@sprintf("%.1f×", benchmark_results[sz].backward_to_forward) for sz in grid_sizes]
+summary_text = join(
+    [@sprintf("%s: speedup %s, bwd/fwd %s", resolution_labels[i], speedup_strings[i], ratio_strings[i])
+     for i in 1:num_resolutions],
+    "   |   ")
 
-Label(fig_bench[2, :], summary_text;
+Label(fig_benchmark[2, :], summary_text;
       fontsize = 11, color = :gray30, tellwidth = false)
 
-save("rising_thermal_benchmark.png", fig_bench; px_per_unit = 2)
+save("rising_thermal_benchmark.png", fig_benchmark; px_per_unit = 2)
 @info "Saved rising_thermal_benchmark.png"
 
 nothing #hide
