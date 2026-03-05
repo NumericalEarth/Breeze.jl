@@ -365,6 +365,8 @@ end
 
 using GPUArraysCore: @allowscalar
 
+using Breeze.Thermodynamics: evaluate_profile
+
 """
 $(TYPEDSIGNATURES)
 
@@ -399,7 +401,7 @@ function compute_terrain_reference_state!(p_ref, ρ_ref, grid, p₀, θᵣ, pˢ�
         πₖ = π_surface
         for k in 1:Nz
             z_phys = znode(i, j, k, grid, c, c, c)
-            θₖ = _reference_theta(θᵣ, z_phys)
+            θₖ = evaluate_profile(θᵣ, z_phys)
 
             if k > 1
                 z_below = znode(i, j, k - 1, grid, c, c, c)
@@ -421,7 +423,3 @@ function compute_terrain_reference_state!(p_ref, ρ_ref, grid, p₀, θᵣ, pˢ�
     return nothing
 end
 
-# Evaluate the reference potential temperature at height z.
-# Handles both constant θ₀ (Number) and θᵣ(z) (Function) profiles.
-@inline _reference_theta(θ₀::Number, z) = θ₀
-@inline _reference_theta(θᵣ::Function, z) = θᵣ(z)

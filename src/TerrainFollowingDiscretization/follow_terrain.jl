@@ -93,6 +93,9 @@ end
 # Set topography from a function: always evaluate on CPU, then copy to device.
 # This supports arbitrary user-defined functions (including those that reference
 # non-const globals) without requiring GPU-compatible code.
+# Note: Oceananigans' set!(field, func) requires func(x, y, z) and evaluates on-device,
+# which would fail for non-GPU-compatible user functions. The manual copyto! pattern here
+# is intentionally more general.
 function _set_topography!(h_field, grid, topography::Function)
     Nx, Ny = size(grid, 1), size(grid, 2)
     cpu_h = [topography(xnode(i, grid, Center()), ynode(j, grid, Center()))
