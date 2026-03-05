@@ -1,278 +1,207 @@
-# # Differentiable Baroclinic Wave on the Sphere
+# # Baroclinic wave on the sphere
 #
-# The Jablonowski–Williamson (2006) baroclinic instability test case is the
-# canonical dynamical-core benchmark.  A zonally symmetric midlatitude jet in
-# thermal-wind balance is seeded with a small localised perturbation.  Over
-# 5–10 days the perturbation amplifies via baroclinic instability, eventually
-# producing realistic-looking extratropical cyclones with fronts and wave
-# breaking.
+# This example simulates the growth of a baroclinic wave on a near-global
+# `LatitudeLongitudeGrid`, inspired by the dynamical core benchmark described
+# by [JablonowskiWilliamson2006](@citet).
+# A midlatitude jet in thermal wind balance with a meridional temperature
+# gradient is seeded with a localized perturbation that triggers baroclinic
+# instability, producing growing Rossby waves over roughly ten days.
 #
-# This example sets up the test case on a `LatitudeLongitudeGrid` using Breeze's
-# compressible dynamics, then demonstrates how **Reactant + Enzyme** can
-# differentiate a scalar loss through the full simulation:
+# This version demonstrates **Reactant compilation** and **Enzyme
+# differentiation**: the forward simulation is compiled to XLA/StableHLO
+# via `Reactant.@compile`, and the adjoint sensitivity ``∂J/∂θ₀`` is
+# computed via Enzyme reverse-mode AD through the compiled time stepper.
+#
+# ## Physical setup
+#
+# The background atmosphere is stably stratified with a constant Brunt-Väisälä
+# frequency ``N``, giving a potential-temperature profile
 #
 # ```math
-# J = \langle v^2 \rangle \quad \text{over a midlatitude band}
+# θ^{\rm b}(z) = θ_0 \exp \left( \frac{N^2 z}{g} \right)
 # ```
 #
-# Since ``v = 0`` initially (the balanced state is zonally symmetric), any
-# meridional velocity that develops is purely from the growing instability.
-# The sensitivity ``\partial J / \partial \theta_0`` reveals which initial
-# temperature perturbations most efficiently amplify baroclinic growth.
+# with ``θ_0 = 300\,{\rm K}`` and ``N^2 = 10^{-4}\,{\rm s^{-2}}``.
 #
-# Three distinct regimes emerge as integration time ``T`` increases:
+# ### Meridional temperature gradient
 #
-# | Regime | ``T`` | Behaviour |
-# |--------|-------|-----------|
-# | Linear | ≲ 5 days | Exponential growth; adjoint is well-behaved |
-# | Nonlinear saturation | 7–10 days | Wave breaking; sensitivity develops frontal features |
-# | Chaotic | ≳ 12 days | Filamentation; adjoint blows up |
+# A pole-to-equator temperature difference ``Δθ_{\rm ep} = 60\,{\rm K}``
+# drives the baroclinic instability. The temperature gradient is confined
+# to the troposphere (below the tropopause height ``z_T = 15\,{\rm km}``):
 #
-# Plotting ``\|\nabla_A J\|`` versus ``T`` shows the transition from
-# "AD works perfectly" to "AD gives you garbage" — the central motivating
-# figure for understanding when tangent-linear methods break down.
+# ```math
+# θ(φ, z) = θ^{\rm b}(z) - Δθ_{\rm ep} \sin φ \max(0, 1 - z/z_T)
+# ```
+#
+# ### Balanced zonal jet
+#
+# The zonal wind is derived from the meridional temperature gradient
+# via thermal wind balance:
+#
+# ```math
+# u(φ, z) = \frac{g\, Δθ_{\rm ep}}{a\, θ_0\, Ω}\, \cos φ
+#            \times \begin{cases}
+#              \dfrac{z}{2} \left( 2 - \dfrac{z}{z_T} \right) & z \le z_T \\[6pt]
+#              \dfrac{z_T}{2} & z > z_T
+#            \end{cases}
+# ```
+#
+# ### Perturbation
+#
+# A localized potential-temperature Gaussian bump centered at
+# ``(λ_c, φ_c) = (90°, 45°)`` seeds the instability:
+#
+# ```math
+# θ'(λ, φ, z) = Δθ \exp \left[ -\frac{(λ - λ_c)^2 + (φ - φ_c)^2}{2σ^2} \right]
+#               \sin \left( \frac{π z}{H} \right)
+# ```
+#
+# ## Differentiability
+#
+# The loss function is the mean squared meridional velocity over the
+# full domain — a proxy for eddy kinetic energy. Since ``v = 0``
+# in the balanced initial state, all meridional motion comes from the
+# growing instability. The sensitivity ``∂J/∂θ₀`` reveals which
+# initial temperature perturbations most efficiently amplify baroclinic
+# growth.
 
 using Breeze
 using Oceananigans
 using Oceananigans.Units
 using Oceananigans.Architectures: ReactantState
-using Oceananigans.Coriolis: HydrostaticSphericalCoriolis
 using Reactant
 using Reactant: @trace
 using Enzyme
 using Statistics: mean
 using Printf
 using CairoMakie
-using CUDA
 
-# ## Jablonowski–Williamson parameters
+# ## Domain and grid
 #
-# All values follow the standard intercomparison protocol (JW06).  The
-# background atmosphere has a constant tropospheric lapse rate ``\Gamma`` with
-# an isothermal stratosphere above ``\eta_t = 0.2``.  The jet peaks at
-# ``\eta_0 = 0.252``, approximately 250 hPa (≈ 10.5 km).
+# Coarse resolution for fast Reactant compilation.
+# Increase `Nλ`, `Nφ`, `Nz` for physical runs.
 
-a_earth = 6.371229e6   # Earth radius [m]
-Ω_earth = 7.29212e-5   # rotation rate [s⁻¹]
-g       = 9.80616      # gravitational acceleration [m/s²]
+Nλ = 60
+Nφ = 30
+Nz = 10
+H  = 30kilometers
 
-T_sfc   = 288.0        # equatorial surface temperature [K]
-Γ_lapse = 0.005        # tropospheric lapse rate [K/m]
-p_sfc   = 1e5          # surface pressure [Pa]
-pˢᵗ     = 1e5          # standard (reference) pressure [Pa]
-
-u_jet   = 35.0         # maximum jet speed [m/s]
-η₀      = 0.252        # jet peak in η coordinates
-η_t     = 0.2          # tropopause η level
-
-# Perturbation parameters — a localised Gaussian bump in potential temperature
-# at a single longitude, seeding the most unstable baroclinic mode.
-A_pert  = 1.0          # perturbation amplitude [K]
-λ_c     = 20.0         # perturbation centre longitude [°]
-φ_c     = 40.0         # perturbation centre latitude [°]
-σ_pert  = 10.0         # perturbation angular width [°]
-
-# ## Grid and model
-#
-# A coarse grid for fast compilation; increase resolution for physical runs.
-
-Nλ = 32
-Nφ = 32
-Nz = 12
-z_top = 30000.0         # model top [m]
-
-lat_south = -80.0
-lat_north =  80.0
-
-grid_kwargs = (size = (Nλ, Nφ, Nz),
-               longitude = (0, 360),
-               latitude = (lat_south, lat_north),
-               z = (0, z_top),
-               topology = (Periodic, Bounded, Bounded))
-
-@info "Building grid…"
-@time grid = LatitudeLongitudeGrid(ReactantState(); grid_kwargs...)
+grid = LatitudeLongitudeGrid(ReactantState();
+                             size = (Nλ, Nφ, Nz),
+                             halo = (5, 5, 5),
+                             longitude = (0, 360),
+                             latitude = (-85, 85),
+                             z = (0, H))
 
 FT = eltype(grid)
 
-@info "Building model…"
-@time model = AtmosphereModel(grid;
-    dynamics = CompressibleDynamics(),
-    coriolis = HydrostaticSphericalCoriolis(FT))
+# ## Physical parameters
 
-constants = model.thermodynamic_constants
-Rᵈ  = constants.molar_gas_constant / constants.dry_air.molar_mass
-cᵖᵈ = constants.dry_air.heat_capacity
-κ   = Rᵈ / cᵖᵈ
+constants = ThermodynamicConstants()
+g  = constants.gravitational_acceleration
+p₀ = 100000  # Pa — surface pressure
+θ₀ = 300     # K — surface potential temperature
+N² = 1e-4    # s⁻² — Brunt-Väisälä frequency squared
 
-# ## Jablonowski–Williamson initial condition
+θᵇ(z) = θ₀ * exp(N² * z / g)
+
+# ## Model configuration
 #
-# The balanced state is specified analytically in the pressure coordinate
-# ``\eta = p / p_s``.  We map from geometric height ``z`` to ``\eta`` using the
-# barometric formula for a constant-lapse-rate troposphere with an isothermal
-# stratosphere above.  This mapping is approximate (ignores the latitude-
-# dependent pressure field) but sufficiently accurate for initialization.
+# Split-explicit compressible dynamics with acoustic substepping.
+# The reference state uses the stratified ``θ^{\rm b}(z)`` profile
+# so the buoyancy force is a perturbation ``ρ b = -g (ρ - ρ_r)``.
 
-z_trop  = T_sfc / Γ_lapse * (1 - η_t ^ (Rᵈ * Γ_lapse / g))   # tropopause height [m]
-T_strat = T_sfc * η_t ^ (Rᵈ * Γ_lapse / g)                     # stratospheric T [K]
+coriolis = HydrostaticSphericalCoriolis()
 
-@info "Derived parameters" z_trop T_strat
+dynamics = CompressibleDynamics(ExplicitTimeStepping();
+                                surface_pressure = p₀,
+                                reference_potential_temperature = θᵇ)
 
-function η_from_z(z)
-    if z ≤ z_trop
-        return (1 - Γ_lapse * z / T_sfc) ^ (g / (Rᵈ * Γ_lapse))
-    else
-        return η_t * exp(-g * (z - z_trop) / (Rᵈ * T_strat))
+model = AtmosphereModel(grid; dynamics, coriolis, advection = WENO())
+
+# ## Initial conditions
+
+Ω     = coriolis.rotation_rate
+R     = Oceananigans.defaults.planet_radius
+Δθ_ep = 60      # K — equator-to-pole θ difference
+z_T   = 15_000   # m — tropopause height
+τ_bal = R * θ₀ * Ω / (g * Δθ_ep)
+
+# Perturbation parameters:
+λ_c = 90   # degrees — perturbation centre longitude
+φ_c = 45   # degrees — perturbation centre latitude
+σ   = 10   # degrees — Gaussian half-width
+Δθ  = 1    # K — perturbation amplitude
+
+# ### Balanced zonal wind from thermal wind relation
+
+function uᵢ(λ, φ, z)
+    vertical_scale = ifelse(z ≤ z_T, z / 2 * (2 - z / z_T), z_T / 2)
+    return (vertical_scale / τ_bal) * cosd(φ)
+end
+
+# ### Potential temperature: background + meridional gradient + perturbation
+
+function θᵢ(λ, φ, z)
+    θ_merid = -Δθ_ep * sind(φ) * max(0, 1 - z / z_T)
+    r² = (λ - λ_c)^2 + (φ - φ_c)^2
+    θ_pert = Δθ * exp(-r² / (2σ^2)) * sin(π * z / H)
+    return θᵇ(z) + θ_merid + θ_pert
+end
+
+# ### Hydrostatic density
+#
+# Integrate the Exner function from the surface to height ``z``,
+# then recover ``ρ = p_0 Π^{c_v/R^d} / (R^d θ)``.
+
+Rᵈ = dry_air_gas_constant(constants)
+cᵖ = constants.dry_air.heat_capacity
+κ  = Rᵈ / cᵖ
+cᵥ_over_Rᵈ = (cᵖ - Rᵈ) / Rᵈ
+
+function ρᵢ(λ, φ, z)
+    nsteps = max(1, round(Int, z / 100))
+    dz = z / nsteps
+    Π = 1.0
+    for n in 1:nsteps
+        zn = (n - 1/2) * dz
+        θn = θᵢ(λ, φ, zn)
+        Π -= κ * g / (Rᵈ * θn) * dz
     end
+    θ = θᵢ(λ, φ, z)
+    return p₀ * Π^cᵥ_over_Rᵈ / (Rᵈ * θ)
 end
-
-# ### Zonal wind
-#
-# The jet lives in the troposphere (``\eta \ge \eta_0``) and is zero in the
-# stratosphere.  It peaks at ``\eta = \eta_0 \approx 252\,\text{hPa}`` and
-# decays toward the surface.
-
-function u_balanced(φ_deg, z)
-    η = η_from_z(z)
-    η < η₀ && return 0.0
-    φ = deg2rad(φ_deg)
-    ηᵥ = (η - η₀) * π / 2
-    return u_jet * cos(ηᵥ)^(3/2) * sin(2φ)^2
-end
-
-# ### Temperature
-#
-# Horizontal-mean profile ``\bar{T}(\eta)`` plus a thermal-wind correction
-# that ensures gradient-wind balance with the zonal jet.
-
-function T_balanced(φ_deg, z)
-    η = η_from_z(z)
-    φ = deg2rad(φ_deg)
-
-    T_mean = η > η_t ? T_sfc * η ^ (Rᵈ * Γ_lapse / g) : T_strat
-
-    ηᵥ = η ≥ η₀ ? (η - η₀) * π / 2 : 0.0
-    sinηᵥ = sin(ηᵥ)
-    cosηᵥ = cos(ηᵥ)
-
-    (η < 1e-12 || abs(sinηᵥ) < 1e-14) && return T_mean
-
-    sinφ = sin(φ)
-    cosφ = cos(φ)
-
-    A = (3 / (4η)) * (u_jet / Rᵈ) * sinηᵥ * sqrt(cosηᵥ)
-    B = (-2sinφ^6 * (cosφ^2 + 1/3) + 10/63) * 2u_jet * cosηᵥ^(3/2)
-    C = (8/5 * cosφ^3 * (sinφ^2 + 2/3) - π/4) * a_earth * Ω_earth
-
-    return T_mean + A * (B + C)
-end
-
-# ### Potential temperature, density, perturbation
-
-function θ_balanced(φ_deg, z)
-    T = T_balanced(φ_deg, z)
-    p = p_sfc * η_from_z(z)
-    return T * (pˢᵗ / p) ^ κ
-end
-
-function ρ_balanced(φ_deg, z)
-    T = T_balanced(φ_deg, z)
-    p = p_sfc * η_from_z(z)
-    return p / (Rᵈ * T)
-end
-
-function θ_perturbation(λ, φ, z)
-    d² = ((λ - λ_c) * cosd(φ_c))^2 + (φ - φ_c)^2
-    z_env = z < z_trop ? sin(π * z / z_trop) : FT(0)
-    return FT(A_pert) * exp(-d² / σ_pert^2) * z_env
-end
-
-# ### Full initial-condition functions
-#
-# `set!` on a `LatitudeLongitudeGrid` passes ``(\lambda, \varphi, z)`` with
-# longitude and latitude in **degrees**.
-
-u_initial(λ, φ, z) = FT(u_balanced(φ, z))
-θ_initial(λ, φ, z) = FT(θ_balanced(φ, z)) + θ_perturbation(λ, φ, z)
-ρ_initial(λ, φ, z) = FT(ρ_balanced(φ, z))
 
 # ### Set model state
 #
-# Density must be set before velocity so that momentum ``\rho u`` is
+# Density must be set before velocity so that momentum ``ρu`` is
 # computed correctly inside `set_velocity!`.
 
-@info "Setting initial model state…"
+@info "Setting initial conditions…"
 @time begin
-    set!(model; ρ = ρ_initial)
-    set!(model; u = u_initial, θ = θ_initial)
+    set!(model; ρ = ρᵢ)
+    set!(model; u = uᵢ, θ = θᵢ)
 end
 
-θ_init_arr = Array(interior(model.formulation.potential_temperature))
-u_init_arr = Array(interior(model.velocities.u))
-@info "Initial θ diagnostics" θ_min=minimum(θ_init_arr) θ_max=maximum(θ_init_arr)
-@info "Initial u diagnostics" u_min=minimum(u_init_arr) u_max=maximum(u_init_arr)
-
 # ## Time step
-#
-# CFL on the acoustic sound speed.  The vertical spacing is the binding
-# constraint on a coarse grid.
 
-γ  = cᵖᵈ / (cᵖᵈ - Rᵈ)
-cₛ = sqrt(γ * Rᵈ * T_sfc)
-Δz_cell = z_top / Nz
-Δt = FT(0.4 * Δz_cell / cₛ)
+γ  = cᵖ / (cᵖ - Rᵈ)
+cₛ = sqrt(γ * Rᵈ * θ₀)
+Δz = H / Nz
+Δt = FT(0.4 * Δz / cₛ)
 
 @info "Time step" Δt cₛ
 
-# ## Cell-centre coordinates
-#
-# Used for index-range computation and plotting.
-
-Δλ = 360.0 / Nλ
-Δφ = (lat_north - lat_south) / Nφ
-
-λ = range(Δλ / 2, 360 - Δλ / 2, length = Nλ)
-φ = range(lat_south + Δφ / 2, lat_north - Δφ / 2, length = Nφ)
-z = range(Δz_cell / 2, z_top - Δz_cell / 2, length = Nz)
-
 # ## Loss function and adjoint
 #
-# The loss is the mean squared meridional velocity inside a midlatitude target
-# band.  Because ``v = 0`` initially, ``\langle v^2 \rangle`` is exactly the
-# meridional component of eddy kinetic energy — a direct measure of baroclinic
-# growth rate.
-#
-# Index ranges are precomputed outside the loss so that Enzyme only sees
-# fixed-size array slicing (no integer arithmetic inside the AD tape).
+# The loss is the mean squared meridional velocity over the full domain.
+# Since ``v = 0`` initially, ``⟨v²⟩`` is exactly the meridional eddy
+# kinetic energy — a direct measure of baroclinic growth.
 
 nsteps = 4
 
-# Precompute initial-condition fields for the loss function.
-@info "Initializing θ fields for loss function…"
-@time begin
-    θ_init  = CenterField(grid); set!(θ_init,  θ_initial)
-    dθ_init = CenterField(grid); set!(dθ_init, FT(0))
-end
-
-# Target region in latitude (midlatitude storm track) and height (troposphere).
-φ_bounds = (25.0, 65.0)
-z_bounds = (0.0, 15000.0)
-
-@inline function bounded_index_range(bounds, coords)
-    lo, hi = bounds
-    vals = collect(coords)
-    i_lo = findfirst(v -> v ≥ lo, vals)
-    i_hi = findlast(v -> v ≤ hi, vals)
-    (isnothing(i_lo) || isnothing(i_hi) || i_hi < i_lo) &&
-        error("Invalid bounds $bounds for coordinates.")
-    return i_lo:i_hi
-end
-
-λR = 1:Nλ
-φR = bounded_index_range(φ_bounds, φ)
-zR = bounded_index_range(z_bounds, z)
-
-@info "Loss target region" λR φR zR
+θ_init  = CenterField(grid); set!(θ_init,  θᵢ)
+dθ_init = CenterField(grid); set!(dθ_init, FT(0))
 
 function loss(model, θ_init, Δt, nsteps)
     FT = eltype(model.grid)
@@ -281,9 +210,7 @@ function loss(model, θ_init, Δt, nsteps)
         time_step!(model, Δt)
     end
     v = model.velocities.v
-    v_int = interior(v)
-    target = @view v_int[λR, φR, zR]
-    return mean(target .^ 2)
+    return mean(interior(v) .^ 2)
 end
 
 function grad_loss(model, dmodel, θ_init, dθ_init, Δt, nsteps)
@@ -301,7 +228,7 @@ end
 # ## Reactant compilation
 #
 # `Reactant.@compile` traces both the forward model and the Enzyme-generated
-# adjoint into XLA/StableHLO, producing fused, optimized kernels.
+# adjoint into XLA/StableHLO, producing fused, optimised kernels.
 
 @info "Compiling forward pass…"
 @time compiled_fwd = Reactant.@compile raise=true raise_first=true sync=true loss(
@@ -312,7 +239,7 @@ dmodel = Enzyme.make_zero(model)
 @time compiled_bwd = Reactant.@compile raise=true raise_first=true sync=true grad_loss(
     model, dmodel, θ_init, dθ_init, Δt, nsteps)
 
-# ## Forward state and sensitivity
+# ## Run
 
 @info "Running compiled forward pass…"
 @time compiled_fwd(model, θ_init, Δt, nsteps)
@@ -325,57 +252,127 @@ v_evolved = Array(interior(model.velocities.v))
 sensitivity = Array(interior(dθ))
 
 @info "Loss value" J
-@info "Max |∂J/∂θ₀|" maximum_sensitivity = maximum(abs, sensitivity)
+@info "Max |∂J/∂θ₀|" maximum(abs, sensitivity)
 
 # ## Visualisation
 #
-# Top row: evolved meridional velocity (map view + latitude–height cross-section).
-# Bottom row: adjoint sensitivity ``\partial J / \partial \theta_0``.
+# We save two outputs:
+# 1) a sensitivity plot (map + latitude-height section),
+# 2) sphere-rendered snapshots + GIF from a short forward simulation.
 
-k_tropo = argmin(abs.(collect(z) .- 5000.0))
-i_pert  = argmin(abs.(collect(λ) .- λ_c))
+Δλ = 360.0 / Nλ
+Δφ = 170.0 / Nφ
+λ = range(Δλ / 2, 360 - Δλ / 2, length = Nλ)
+φ = range(-85 + Δφ / 2, 85 - Δφ / 2, length = Nφ)
+z = range(Δz / 2, H - Δz / 2, length = Nz)
 
-fig = Figure(size = (1400, 900), fontsize = 14)
+k_mid  = Nz ÷ 2
+z_mid  = z[k_mid]
+i_pert = argmin(abs.(collect(λ) .- λ_c))
 
-Label(fig[0, :],
-    @sprintf("Baroclinic wave (JW06) — %d steps, Δt = %.2f s, J = %.6e", nsteps, Δt, J),
-    fontsize = 16, tellwidth = false)
-
-# Top row: evolved v.
-
-vlim = max(maximum(abs, v_evolved), eps(FT))
-
-ax1 = Axis(fig[1, 1]; xlabel = "λ (°)", ylabel = "φ (°)",
-           title = "v  — z ≈ $(Int(round(z[k_tropo]))) m",
-           aspect = DataAspect())
-hm1 = heatmap!(ax1, collect(λ), collect(φ), v_evolved[:, :, k_tropo];
-               colormap = :balance, colorrange = (-vlim, vlim))
-Colorbar(fig[1, 2], hm1; label = "v (m/s)")
-
-ax2 = Axis(fig[1, 3]; xlabel = "φ (°)", ylabel = "z (m)",
-           title = "v  — λ ≈ $(Int(round(λ[i_pert])))°")
-hm2 = heatmap!(ax2, collect(φ), collect(z), v_evolved[i_pert, :, :];
-               colormap = :balance, colorrange = (-vlim, vlim))
-Colorbar(fig[1, 4], hm2; label = "v (m/s)")
-
-# Bottom row: sensitivity ∂J/∂θ₀.
-
+# Sensitivity figure.
 slimit = max(maximum(abs, sensitivity), eps(FT))
 
-ax3 = Axis(fig[2, 1]; xlabel = "λ (°)", ylabel = "φ (°)",
-           title = "∂J/∂θ₀  — z ≈ $(Int(round(z[k_tropo]))) m",
-           aspect = DataAspect())
-hm3 = heatmap!(ax3, collect(λ), collect(φ), sensitivity[:, :, k_tropo];
-               colormap = :balance, colorrange = (-slimit, slimit))
-Colorbar(fig[2, 2], hm3; label = "∂J/∂θ₀")
+fig_sens = Figure(size = (1200, 450), fontsize = 14)
+Label(fig_sens[0, :],
+      @sprintf("Adjoint sensitivity (∂J/∂θ₀), J = %.6e", J),
+      fontsize = 16, tellwidth = false)
 
-ax4 = Axis(fig[2, 3]; xlabel = "φ (°)", ylabel = "z (m)",
-           title = "∂J/∂θ₀  — λ ≈ $(Int(round(λ[i_pert])))°")
-hm4 = heatmap!(ax4, collect(φ), collect(z), sensitivity[i_pert, :, :];
-               colormap = :balance, colorrange = (-slimit, slimit))
-Colorbar(fig[2, 4], hm4; label = "∂J/∂θ₀")
+axs1 = Axis(fig_sens[1, 1]; xlabel = "λ (°)", ylabel = "φ (°)",
+            title = "∂J/∂θ₀ — z ≈ $(Int(round(z_mid))) m", aspect = DataAspect())
+hms1 = heatmap!(axs1, collect(λ), collect(φ), sensitivity[:, :, k_mid];
+                colormap = :balance, colorrange = (-slimit, slimit))
+Colorbar(fig_sens[1, 2], hms1; label = "∂J/∂θ₀")
 
-@time save("baroclinic_wave.png", fig; px_per_unit = 2)
-@info "Saved baroclinic_wave.png"
+axs2 = Axis(fig_sens[1, 3]; xlabel = "φ (°)", ylabel = "z (m)",
+            title = "∂J/∂θ₀ — λ ≈ $(Int(round(λ[i_pert])))°")
+hms2 = heatmap!(axs2, collect(φ), collect(z), sensitivity[i_pert, :, :];
+                colormap = :balance, colorrange = (-slimit, slimit))
+Colorbar(fig_sens[1, 4], hms2; label = "∂J/∂θ₀")
+
+save("baroclinic_wave_sensitivity.png", fig_sens; px_per_unit = 2)
+@info "Saved baroclinic_wave_sensitivity.png"
+
+# Short forward run for sphere movie output.
+@info "Running short forward simulation for sphere visualisation..."
+@time begin
+    set!(model; ρ = ρᵢ)
+    set!(model; u = uᵢ, θ = θᵢ)
+end
+
+θ = PotentialTemperature(model)
+θᵇᵍ = CenterField(grid)
+set!(θᵇᵍ, (λ, φ, z) -> θᵇ(z))
+θ′ = θ - θᵇᵍ
+
+outputs = merge(model.velocities, (; θ′))
+nsteps_vis = 120
+vis_filename = "baroclinic_wave_sphere"
+
+simulation = Simulation(model; Δt, stop_iteration = nsteps_vis)
+simulation.output_writers[:jld2] = JLD2Writer(model, outputs;
+                                              filename = vis_filename,
+                                              schedule = IterationInterval(5),
+                                              overwrite_existing = true)
+run!(simulation)
+
+θ′_ts = FieldTimeSeries("$(vis_filename).jld2", "θ′")
+u_ts = FieldTimeSeries("$(vis_filename).jld2", "u")
+times = θ′_ts.times
+Nt = length(times)
+
+# Final snapshot on the sphere.
+fig_sphere = Figure(size = (1200, 600))
+sphere_kw = (elevation = π / 6, azimuth = -π / 2, aspect = :data)
+
+ax1 = Axis3(fig_sphere[1, 1];
+            title = "θ′ at z = $(Int(round(z_mid / 1e3))) km, t = $(prettytime(times[Nt]))",
+            sphere_kw...)
+hm1 = surface!(ax1, view(θ′_ts[Nt], :, :, k_mid);
+               colormap = :balance, shading = NoShading)
+Colorbar(fig_sphere[1, 2], hm1; label = "θ′ (K)")
+
+ax2 = Axis3(fig_sphere[1, 3];
+            title = "u at z = $(Int(round(z_mid / 1e3))) km, t = $(prettytime(times[Nt]))",
+            sphere_kw...)
+hm2 = surface!(ax2, view(u_ts[Nt], :, :, k_mid);
+               colormap = :speed, shading = NoShading)
+Colorbar(fig_sphere[1, 4], hm2; label = "u (m/s)")
+
+for ax in (ax1, ax2)
+    hidedecorations!(ax)
+    hidespines!(ax)
+end
+
+save("baroclinic_wave_sphere.png", fig_sphere; px_per_unit = 2)
+@info "Saved baroclinic_wave_sphere.png"
+
+# GIF over the sphere.
+n = Observable(1)
+θ′n = @lift view(θ′_ts[$n], :, :, k_mid)
+un = @lift view(u_ts[$n], :, :, k_mid)
+title = @lift "z = $(Int(round(z_mid / 1e3))) km, t = $(prettytime(times[$n]))"
+
+fig_anim = Figure(size = (1200, 600))
+axg1 = Axis3(fig_anim[1, 1]; title = "θ′", sphere_kw...)
+hmg1 = surface!(axg1, θ′n; colormap = :balance, colorrange = (-2, 2), shading = NoShading)
+Colorbar(fig_anim[1, 2], hmg1; label = "θ′ (K)")
+
+axg2 = Axis3(fig_anim[1, 3]; title = "u", sphere_kw...)
+ulim = max(maximum(abs, Array(interior(u_ts[Nt]))), eps(FT))
+hmg2 = surface!(axg2, un; colormap = :balance, colorrange = (-ulim, ulim), shading = NoShading)
+Colorbar(fig_anim[1, 4], hmg2; label = "u (m/s)")
+
+fig_anim[0, :] = Label(fig_anim, title, fontsize = 22, tellwidth = false)
+
+for ax in (axg1, axg2)
+    hidedecorations!(ax)
+    hidespines!(ax)
+end
+
+CairoMakie.record(fig_anim, "baroclinic_wave_sphere.gif", 1:Nt; framerate = 12) do nn
+    n[] = nn
+end
+@info "Saved baroclinic_wave_sphere.gif"
 
 nothing #hide
