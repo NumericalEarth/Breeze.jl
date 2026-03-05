@@ -169,51 +169,51 @@ dmodel = Enzyme.make_zero(model)
 @time compiled_bwd = Reactant.@compile raise=true raise_first=true sync=true grad_loss(
     model, dmodel, θ_init, dθ_init, Δt, nsteps)
 
-# ## Benchmarking
-#
+## Benchmarking
+
 # Reactant-compiled code is timed with `Reactant.Profiler.@timed`, which synchronises
 # with the device and returns accurate wall-clock time.  The plain-Julia baseline uses
 # `Base.@elapsed` (CPU-synchronous by construction).
 
-# nwarmup = 1
-# ntrials = 5
+nwarmup = 1
+ntrials = 5
 
-# # ### Forward pass — plain Julia on CPU
+# ### Forward pass — plain Julia on CPU
 
-# @info "Benchmarking forward pass (plain Julia, CPU)…"
-# for _ in 1:nwarmup
-#     loss(model_cpu, θ_init_cpu, Δt, nsteps)
-# end
-# t_fwd_julia = @elapsed for _ in 1:ntrials
-#     loss(model_cpu, θ_init_cpu, Δt, nsteps)
-# end
-# t_fwd_julia /= ntrials
+@info "Benchmarking forward pass (plain Julia, CPU)…"
+for _ in 1:nwarmup
+    loss(model_cpu, θ_init_cpu, Δt, nsteps)
+end
+t_fwd_julia = @elapsed for _ in 1:ntrials
+    loss(model_cpu, θ_init_cpu, Δt, nsteps)
+end
+t_fwd_julia /= ntrials
 
-# # ### Forward pass — Reactant compiled
+# ### Forward pass — Reactant compiled
 
-# @info "Benchmarking forward pass (Reactant compiled)…"
-# prof_fwd = Reactant.Profiler.@timed nrepeat=ntrials compiled_fwd(model, θ_init, Δt, nsteps)
-# t_fwd_compiled = prof_fwd.runtime_ns / 1e9
+@info "Benchmarking forward pass (Reactant compiled)…"
+prof_fwd = Reactant.Profiler.@timed nrepeat=ntrials compiled_fwd(model, θ_init, Δt, nsteps)
+t_fwd_compiled = prof_fwd.runtime_ns / 1e9
 
-# # ### Backward pass — Reactant compiled (Enzyme reverse mode)
+# ### Backward pass — Reactant compiled (Enzyme reverse mode)
 
-# @info "Benchmarking backward pass (Reactant compiled)…"
-# prof_bwd = Reactant.Profiler.@timed nrepeat=ntrials compiled_bwd(model, dmodel, θ_init, dθ_init, Δt, nsteps)
-# t_bwd_compiled = prof_bwd.runtime_ns / 1e9
+@info "Benchmarking backward pass (Reactant compiled)…"
+prof_bwd = Reactant.Profiler.@timed nrepeat=ntrials compiled_bwd(model, dmodel, θ_init, dθ_init, Δt, nsteps)
+t_bwd_compiled = prof_bwd.runtime_ns / 1e9
 
-# # ### Results
+# ### Results
 
-# fwd_speedup = t_fwd_julia / t_fwd_compiled
-# bwd_fwd_ratio = t_bwd_compiled / t_fwd_compiled
+fwd_speedup = t_fwd_julia / t_fwd_compiled
+bwd_fwd_ratio = t_bwd_compiled / t_fwd_compiled
 
-# @info "Forward  (Julia)   " runtime = t_fwd_julia
-# @info "Forward  (Reactant)" runtime = t_fwd_compiled
-# @info "Backward (Reactant)" runtime = t_bwd_compiled
-# @info "Forward speedup (Julia / Reactant)" speedup = fwd_speedup
-# @info "Backward / Forward ratio (Reactant)" ratio = bwd_fwd_ratio
+@info "Forward  (Julia)   " runtime = t_fwd_julia
+@info "Forward  (Reactant)" runtime = t_fwd_compiled
+@info "Backward (Reactant)" runtime = t_bwd_compiled
+@info "Forward speedup (Julia / Reactant)" speedup = fwd_speedup
+@info "Backward / Forward ratio (Reactant)" ratio = bwd_fwd_ratio
 
-# ## Forward state and sensitivity field
-#
+## Forward state and sensitivity field
+
 # We run the compiled forward pass to obtain the evolved temperature, then the
 # backward pass to obtain ``\partial J / \partial \theta_0``.
 
