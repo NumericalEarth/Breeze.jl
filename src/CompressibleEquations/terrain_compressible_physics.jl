@@ -405,7 +405,7 @@ function compute_terrain_reference_state!(p_ref, ρ_ref, grid, p₀, θᵣ, pˢ�
 
             if k > 1
                 z_below = znode(i, j, k - 1, grid, c, c, c)
-                θ_below = _reference_theta(θᵣ, z_below)
+                θ_below = evaluate_profile(θᵣ, z_below)
                 θ_face = (θₖ + θ_below) / 2
                 Δz = Δzᶜᶜᶠ(i, j, k, grid)
                 πₖ = πₖ - g * Δz / (cᵖᵈ * θ_face)
