@@ -9,8 +9,9 @@
 
 using KernelAbstractions: @kernel, @index
 using Oceananigans: architecture
-using Oceananigans.Utils: launch!
-using Oceananigans.BoundaryConditions: fill_halo_regions!
+using Oceananigans.Fields: interpolate
+using Oceananigans.Grids: xnode, ynode, topology, Flat
+using Oceananigans.Utils: launch!, KernelParameters
 
 #####
 ##### FilteredSurfaceVelocities
@@ -25,7 +26,7 @@ for use in bulk flux boundary conditions.
 The filtered velocities `ū`, `v̄` are updated each time step via an
 exponential (first-order) filter:
 
-    ū ← (ū + ε u_new) / (1 + ε),     ε = Δt / τ
+    ū ← (ū + ϵ u_new) / (1 + ϵ),     ϵ = Δt / τ
 
 where `τ` is the `filter_timescale`.
 
@@ -104,58 +105,95 @@ Base.summary(fs::FilteredSurfaceScalar) =
            ", filter_timescale=", fs.filter_timescale, ")")
 
 #####
+##### Kernel parameters for filtered surface fields
+#####
+
+# Use 1:N+1 to cover the extra face point, avoiding fill_halo_regions!
+filtered_range(::Flat, N) = 1:N
+filtered_range(topo, N) = 1:N+1
+
+function filtered_kernel_parameters(grid)
+    TX, TY, _ = topology(grid)
+    Nx, Ny, _ = size(grid)
+    return KernelParameters(filtered_range(TX(), Nx), filtered_range(TY(), Ny))
+end
+
+#####
 ##### Height interpolation helper
 #####
 
 # No height specified: use first grid cell value
-@inline interpolate_or_surface(i, j, grid, field, LX, LY, ::Nothing) =
-    @inbounds field[i, j, 1]
+@inline interpolate_or_surface(i, j, grid, field, ℓx, ℓy, ::Nothing) = @inbounds field[i, j, 1]
 
-# Fixed reference height: linearly interpolate between bracketing z-levels
-@inline function interpolate_or_surface(i, j, grid, field, LX, LY, height)
-    Nz = size(grid, 3)
-
-    # Find the bracketing levels (evaluation height is typically in first few cells)
-    z_below = znode(i, j, 1, grid, LX, LY, Center())
-    k = 1
-    while k < Nz
-        z_above = znode(i, j, k + 1, grid, LX, LY, Center())
-        if z_above >= height
-            # Linear interpolation
-            f_below = @inbounds field[i, j, k]
-            f_above = @inbounds field[i, j, k + 1]
-            w = (height - z_below) / (z_above - z_below)
-            return f_below + w * (f_above - f_below)
-        end
-        z_below = z_above
-        k += 1
-    end
-
-    # If height exceeds top cell, return top cell value
-    return @inbounds field[i, j, Nz]
+# Fixed reference height: interpolate using Oceananigans.Fields.interpolate
+@inline function interpolate_or_surface(i, j, grid, field, ℓx, ℓy, z)
+    x = xnode(i, j, 1, grid, ℓx, ℓy, Center())
+    y = ynode(i, j, 1, grid, ℓx, ℓy, Center())
+    return interpolate((x, y, z), field, (ℓx, ℓy, Center()), grid)
 end
 
 #####
 ##### Update kernels
 #####
 
-@kernel function _update_filtered_velocities!(û, v̂, u, v, grid, height, ε)
+@kernel function _update_filtered_velocities!(û, v̂, u, v, grid, height, ϵ)
     i, j = @index(Global, NTuple)
     uⁿ = interpolate_or_surface(i, j, grid, u, Face(), Center(), height)
     vⁿ = interpolate_or_surface(i, j, grid, v, Center(), Face(), height)
-    @inbounds û[i, j, 1] = (û[i, j, 1] + ε * uⁿ) / (1 + ε)
-    @inbounds v̂[i, j, 1] = (v̂[i, j, 1] + ε * vⁿ) / (1 + ε)
+    @inbounds û[i, j, 1] = (û[i, j, 1] + ϵ * uⁿ) / (1 + ϵ)
+    @inbounds v̂[i, j, 1] = (v̂[i, j, 1] + ϵ * vⁿ) / (1 + ϵ)
 end
 
-@kernel function _update_filtered_scalar!(f̂, field_3d, grid, height, ε)
+@kernel function _update_filtered_scalar!(f̂, field_3d, grid, height, ϵ)
     i, j = @index(Global, NTuple)
     fⁿ = interpolate_or_surface(i, j, grid, field_3d, Center(), Center(), height)
-    @inbounds f̂[i, j, 1] = (f̂[i, j, 1] + ε * fⁿ) / (1 + ε)
+    @inbounds f̂[i, j, 1] = (f̂[i, j, 1] + ϵ * fⁿ) / (1 + ϵ)
 end
 
 #####
-##### Public update! methods
+##### Initialization kernels
 #####
+
+@kernel function _initialize_filtered_velocities!(û, v̂, u, v, grid, height)
+    i, j = @index(Global, NTuple)
+    @inbounds û[i, j, 1] = interpolate_or_surface(i, j, grid, u, Face(), Center(), height)
+    @inbounds v̂[i, j, 1] = interpolate_or_surface(i, j, grid, v, Center(), Face(), height)
+end
+
+@kernel function _initialize_filtered_scalar!(f̂, field_3d, grid, height)
+    i, j = @index(Global, NTuple)
+    @inbounds f̂[i, j, 1] = interpolate_or_surface(i, j, grid, field_3d, Center(), Center(), height)
+end
+
+#####
+##### Public initialize! and update! methods
+#####
+
+"""
+    initialize!(fv::FilteredSurfaceVelocities, velocities, grid)
+
+Set filtered surface velocities to the current near-surface values.
+"""
+function initialize!(fv::FilteredSurfaceVelocities, velocities, grid)
+    arch = architecture(grid)
+    kp = filtered_kernel_parameters(grid)
+    launch!(arch, grid, kp, _initialize_filtered_velocities!,
+            fv.u, fv.v, velocities.u, velocities.v, grid, fv.height)
+    return nothing
+end
+
+"""
+    initialize!(fs::FilteredSurfaceScalar, field_3d, grid)
+
+Set filtered surface scalar to the current near-surface value.
+"""
+function initialize!(fs::FilteredSurfaceScalar, field_3d, grid)
+    arch = architecture(grid)
+    kp = filtered_kernel_parameters(grid)
+    launch!(arch, grid, kp, _initialize_filtered_scalar!,
+            fs.field, field_3d, grid, fs.height)
+    return nothing
+end
 
 """
     update!(fv::FilteredSurfaceVelocities, velocities, grid, Δt)
@@ -166,11 +204,10 @@ fields `u` and `v`.
 """
 function update!(fv::FilteredSurfaceVelocities, velocities, grid, Δt)
     arch = architecture(grid)
-    ε = Δt / fv.filter_timescale
-    launch!(arch, grid, :xy, _update_filtered_velocities!,
-            fv.u, fv.v, velocities.u, velocities.v, grid, fv.height, ε)
-    fill_halo_regions!(fv.u)
-    fill_halo_regions!(fv.v)
+    kp = filtered_kernel_parameters(grid)
+    ϵ = Δt / fv.filter_timescale
+    launch!(arch, grid, kp, _update_filtered_velocities!,
+            fv.u, fv.v, velocities.u, velocities.v, grid, fv.height, ϵ)
     return nothing
 end
 
@@ -182,16 +219,29 @@ with time step `Δt`.
 """
 function update!(fs::FilteredSurfaceScalar, field_3d, grid, Δt)
     arch = architecture(grid)
-    ε = Δt / fs.filter_timescale
-    launch!(arch, grid, :xy, _update_filtered_scalar!,
-            fs.field, field_3d, grid, fs.height, ε)
-    fill_halo_regions!(fs.field)
+    kp = filtered_kernel_parameters(grid)
+    ϵ = Δt / fs.filter_timescale
+    launch!(arch, grid, kp, _update_filtered_scalar!,
+            fs.field, field_3d, grid, fs.height, ϵ)
     return nothing
 end
 
 #####
-##### Deduplication-aware update helpers
+##### Deduplication-aware initialize and update helpers
 #####
+
+initialize_filtered_surface_state!(::Nothing, model) = nothing
+initialize_filtered_surface_state!(::Nothing, source_field, model) = nothing
+
+function initialize_filtered_surface_state!(fv::FilteredSurfaceVelocities, model)
+    initialize!(fv, model.velocities, model.grid)
+    return nothing
+end
+
+function initialize_filtered_surface_state!(fs::FilteredSurfaceScalar, source_field, model)
+    initialize!(fs, source_field, model.grid)
+    return nothing
+end
 
 update_filtered_surface_state!(::Nothing, model) = nothing
 update_filtered_surface_state!(::Nothing, source_field, model) = nothing
@@ -200,7 +250,7 @@ function update_filtered_surface_state!(fv::FilteredSurfaceVelocities, model)
     key = (model.clock.iteration, model.clock.stage)
     fv.last_update[] == key && return nothing
     Δt = model.clock.last_Δt
-    (isnan(Δt) || isinf(Δt) || Δt ≤ 0) && return nothing
+    isinf(Δt) && return nothing # no valid Δt yet (before first time step)
     update!(fv, model.velocities, model.grid, Δt)
     fv.last_update[] = key
     return nothing
@@ -210,7 +260,7 @@ function update_filtered_surface_state!(fs::FilteredSurfaceScalar, source_field,
     key = (model.clock.iteration, model.clock.stage)
     fs.last_update[] == key && return nothing
     Δt = model.clock.last_Δt
-    (isnan(Δt) || isinf(Δt) || Δt ≤ 0) && return nothing
+    isinf(Δt) && return nothing # no valid Δt yet (before first time step)
     update!(fs, source_field, model.grid, Δt)
     fs.last_update[] = key
     return nothing
