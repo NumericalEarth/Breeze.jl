@@ -76,9 +76,9 @@ A_pert  = 1.0          # perturbation amplitude [K]
 #
 # A coarse grid for fast compilation; increase resolution for physical runs.
 
-Nλ = 16
-Nφ = 8
-Nz = 8
+Nλ = 32
+Nφ = 32
+Nz = 12
 z_top = 30000.0         # model top [m]
 
 lat_south = -80.0
