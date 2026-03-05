@@ -37,12 +37,12 @@ where `τ` is the `filter_timescale`.
   interpolated to that height.
 - `filter_timescale`: Filter time scale `τ` in seconds (default: `Inf`, no filtering).
 """
-struct FilteredSurfaceVelocities{U, V, H, FT}
+struct FilteredSurfaceVelocities{U, V, H, FT, R}
     u :: U   # Field{Face, Center, Nothing}
     v :: V   # Field{Center, Face, Nothing}
     height :: H
     filter_timescale :: FT
-    last_update :: Ref{Tuple{Int, Int}}  # (iteration, stage)
+    last_update :: R  # Ref{Tuple{Int, Int}} on CPU, Tuple{Int, Int} on GPU
 end
 
 function FilteredSurfaceVelocities(grid; height=nothing, filter_timescale=Inf)
@@ -57,7 +57,7 @@ Adapt.adapt_structure(to, fv::FilteredSurfaceVelocities) =
                               Adapt.adapt(to, fv.v),
                               fv.height,
                               fv.filter_timescale,
-                              fv.last_update)
+                              fv.last_update[])
 
 Base.summary(fv::FilteredSurfaceVelocities) =
     string("FilteredSurfaceVelocities(height=", fv.height,
@@ -81,11 +81,11 @@ The filter update is the same exponential form as `FilteredSurfaceVelocities`.
   first grid cell center value is used.
 - `filter_timescale`: Filter time scale `τ` in seconds (default: `Inf`).
 """
-struct FilteredSurfaceScalar{F, H, FT}
+struct FilteredSurfaceScalar{F, H, FT, R}
     field :: F   # Field{Center, Center, Nothing}
     height :: H
     filter_timescale :: FT
-    last_update :: Ref{Tuple{Int, Int}}  # (iteration, stage)
+    last_update :: R  # Ref{Tuple{Int, Int}} on CPU, Tuple{Int, Int} on GPU
 end
 
 function FilteredSurfaceScalar(grid; height=nothing, filter_timescale=Inf)
@@ -98,7 +98,7 @@ Adapt.adapt_structure(to, fs::FilteredSurfaceScalar) =
     FilteredSurfaceScalar(Adapt.adapt(to, fs.field),
                           fs.height,
                           fs.filter_timescale,
-                          fs.last_update)
+                          fs.last_update[])
 
 Base.summary(fs::FilteredSurfaceScalar) =
     string("FilteredSurfaceScalar(height=", fs.height,
