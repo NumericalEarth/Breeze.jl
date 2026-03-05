@@ -53,11 +53,12 @@ end
 
 # Dispatch on smoothing type
 function _follow_terrain!(grid, topography, ::BasicTerrainFollowing, pressure_gradient_stencil)
-    arch = grid.architecture
+    arch = architecture(grid)
 
-    # Get the model top from the reference coordinate
+    # Get the model top from the reference coordinate (scalar access is fine here —
+    # this is a one-time setup operation, not a hot path).
     Nz = size(grid, 3)
-    z_top = rnode(Nz + 1, grid, Face())
+    z_top = @allowscalar rnode(Nz + 1, grid, Face())
 
     # Create a 2D CenterField to store the topography
     h_field = CenterField(grid, indices=(:, :, 1))
@@ -83,19 +84,15 @@ function _follow_terrain!(grid, topography, ::BasicTerrainFollowing, pressure_gr
     return TerrainMetrics(h_field, ∂x_h, ∂y_h, z_top, pressure_gradient_stencil)
 end
 
-# Set topography from a function
+# Set topography from a function: always evaluate on CPU, then copy to device.
+# This supports arbitrary user-defined functions (including those that reference
+# non-const globals) without requiring GPU-compatible code.
 function _set_topography!(h_field, grid, topography::Function)
-    arch = grid.architecture
-    kp = surface_kernel_parameters(grid)
-    launch!(arch, grid, kp, _set_topography_from_function!, h_field, grid, topography)
+    Nx, Ny = size(grid, 1), size(grid, 2)
+    cpu_h = [topography(xnode(i, grid, Center()), ynode(j, grid, Center()))
+              for i in 1:Nx, j in 1:Ny]
+    copyto!(interior(h_field, :, :, 1), cpu_h)
     return nothing
-end
-
-@kernel function _set_topography_from_function!(h_field, grid, topography)
-    i, j = @index(Global, NTuple)
-    x = xnode(i, grid, Center())
-    y = ynode(j, grid, Center())
-    @inbounds h_field[i, j, 1] = topography(x, y)
 end
 
 @kernel function _set_btf_sigma!(grid, h_field, z_top)

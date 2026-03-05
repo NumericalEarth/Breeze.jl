@@ -25,8 +25,10 @@ export follow_terrain!, TerrainMetrics, BasicTerrainFollowing,
 
 using Adapt: Adapt, adapt
 using KernelAbstractions: @kernel, @index
-using Oceananigans: Center, Face, CenterField, XFaceField, YFaceField
+using Oceananigans: Center, Face, CenterField, XFaceField, YFaceField, interior
+using Oceananigans.Architectures: architecture
 using Oceananigans.Grids: xnode, ynode, rnode
+using GPUArraysCore: @allowscalar
 using Oceananigans.ImmersedBoundaries: MutableGridOfSomeKind
 using Oceananigans.Utils: launch!
 using Oceananigans.Operators: δxᶠᶜᶜ, δyᶜᶠᶜ, Δx⁻¹ᶠᶜᶜ, Δy⁻¹ᶜᶠᶜ, ℑxᶠᵃᵃ, ℑyᵃᶠᵃ, ℑxyᶠᶠᵃ
