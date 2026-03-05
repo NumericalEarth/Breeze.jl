@@ -21,6 +21,7 @@
 ##### inside the interpolation stencil.
 #####
 
+using Oceananigans: architecture
 using Oceananigans.Operators: ∂xᶠᶜᶜ, ∂yᶜᶠᶜ, δxᶠᶜᶜ, δyᶜᶠᶜ, Δx⁻¹ᶠᶜᶜ, Δy⁻¹ᶜᶠᶜ, ∂zᶜᶜᶠ, Δzᶜᶜᶠ
 using Oceananigans.BoundaryConditions: fill_halo_regions!
 
@@ -55,7 +56,7 @@ to the terrain-following coordinate surfaces:
 """
 function compute_contravariant_velocity!(model::TerrainCompressibleModel)
     grid = model.grid
-    arch = grid.architecture
+    arch = architecture(grid)
     dynamics = model.dynamics
 
     launch!(arch, grid, :xyz,
@@ -268,7 +269,7 @@ end
 
 function AtmosphereModels.compute_dynamics_tendency!(model::TerrainCompressibleModel)
     grid = model.grid
-    arch = grid.architecture
+    arch = architecture(grid)
     Gρ = model.timestepper.Gⁿ.ρ
     ρΩ̃ = model.dynamics.ρΩ̃
 
@@ -289,7 +290,7 @@ end
 
 function AtmosphereModels.compute_auxiliary_dynamics_variables!(model::TerrainCompressibleModel)
     grid = model.grid
-    arch = grid.architecture
+    arch = architecture(grid)
     dynamics = model.dynamics
 
     # Ensure halos are filled
@@ -355,7 +356,7 @@ end
     return -g * (ρ - ρᵣ)
 end
 
-@inline _terrain_reference_density(i, j, k, ::Nothing) = 0
+@inline _terrain_reference_density(i, j, k, ::Nothing) = false
 @inline _terrain_reference_density(i, j, k, ρ_ref) = @inbounds ρ_ref[i, j, k]
 
 #####

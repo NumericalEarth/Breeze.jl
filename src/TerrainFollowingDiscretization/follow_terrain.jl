@@ -33,9 +33,10 @@ Keyword Arguments
 Example
 =======
 
-```julia
+```jldoctest
 using Oceananigans
 using Oceananigans.Grids: MutableVerticalDiscretization
+using Breeze: follow_terrain!, TerrainMetrics
 
 z_faces = MutableVerticalDiscretization(collect(range(0, 10000, length=41)))
 grid = RectilinearGrid(size=(64, 40), x=(-50000, 50000), z=z_faces,
@@ -43,6 +44,11 @@ grid = RectilinearGrid(size=(64, 40), x=(-50000, 50000), z=z_faces,
 
 h(x, y) = 500 * exp(-x^2 / 5000^2)
 metrics = follow_terrain!(grid, h)
+metrics.z_top
+
+# output
+
+10000.0
 ```
 """
 function follow_terrain!(grid::MutableGridOfSomeKind, topography;
