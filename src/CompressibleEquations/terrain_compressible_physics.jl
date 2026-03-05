@@ -13,14 +13,15 @@
 ##### The terrain-corrected horizontal pressure gradient is:
 #####   (∂p/∂x)_z = (∂p/∂x)_ζ - (∂z/∂x)_ζ · (∂p/∂z)
 #####
-##### IMPORTANT: On MutableVerticalDiscretization grids, Oceananigans' generalized
-##### derivatives (∂xᶠᶜᶜ, ∂yᶜᶠᶜ) already include the chain-rule correction
-##### (∂z/∂x)_ζ · ∂ϕ/∂z, so they compute (∂ϕ/∂x)_z directly. The terrain PG
-##### formula needs (∂p/∂x)_ζ — the basic computational-coordinate derivative —
-##### so we must use δx/Δx instead of ∂x to avoid double-correcting.
+##### On MutableVerticalDiscretization grids, Oceananigans' generalized
+##### derivatives (∂xᶠᶜᶜ, ∂yᶜᶠᶜ) already include the chain-rule correction,
+##### so they compute (∂ϕ/∂x)_z directly. The SlopeOutsideInterpolation PG
+##### delegates to these operators. The SlopeInsideInterpolation PG uses
+##### δx/Δx (computational-coordinate derivative) with the slope multiplied
+##### inside the interpolation stencil.
 #####
 
-using Oceananigans.Operators: δxᶠᶜᶜ, δyᶜᶠᶜ, Δx⁻¹ᶠᶜᶜ, Δy⁻¹ᶜᶠᶜ, ∂zᶜᶜᶠ, Δzᶜᶜᶠ
+using Oceananigans.Operators: ∂xᶠᶜᶜ, ∂yᶜᶠᶜ, δxᶠᶜᶜ, δyᶜᶠᶜ, Δx⁻¹ᶠᶜᶜ, Δy⁻¹ᶜᶠᶜ, ∂zᶜᶜᶠ, Δzᶜᶜᶠ
 using Oceananigans.BoundaryConditions: fill_halo_regions!
 
 using Breeze.TerrainFollowingDiscretization: TerrainMetrics, terrain_slope_x, terrain_slope_y,
@@ -149,11 +150,10 @@ end
 ##### The true horizontal pressure gradient at constant z is:
 #####   (∂p/∂x)_z = (∂p/∂x)_ζ - (∂z/∂x)_ζ · (∂p/∂z)
 #####
-##### where (∂p/∂z) is the physical vertical derivative.  We use basic
-##### δx/Δx operators to compute (∂p/∂x)_ζ, then subtract the terrain
-##### correction.  Note: Oceananigans' generalized ∂xᶠᶜᶜ already includes
-##### the chain-rule correction on MutableVerticalDiscretization grids, so
-##### using it here would double-correct.
+##### For SlopeOutsideInterpolation (default), Oceananigans' generalized ∂xᶠᶜᶜ
+##### on MutableVerticalDiscretization grids computes this chain-rule correction
+##### automatically. For SlopeInsideInterpolation, we use basic δx/Δx operators
+##### to compute (∂p/∂x)_ζ, then multiply the slope inside the interpolation.
 #####
 ##### When a terrain reference pressure p_ref(z_physical) is available, the PG is
 ##### computed using perturbation pressure p' = p - p_ref. Since p_ref depends only
@@ -171,27 +171,25 @@ end
     return _terrain_x_pressure_gradient(i, j, k, grid, d, stencil, d.terrain_reference_pressure)
 end
 
-##### Slope-outside-interpolation (default): slope * ℑz(ℑx(∂z(p')))
+##### Slope-outside-interpolation (default): use Oceananigans' generalized ∂xᶠᶜᶜ
+##### which applies the chain-rule correction (∂p/∂x)_z = (∂p/∂x)_ζ - (∂z/∂x)_ζ · (∂p/∂z)
 
 @inline function _terrain_x_pressure_gradient(i, j, k, grid, d, ::SlopeOutsideInterpolation, ::Nothing)
-    slope = terrain_slope_x(i, j, k, grid, d.terrain_metrics, Center())
-    # Use basic δx/Δx to get (∂p/∂x)_ζ, not the generalized ∂x which gives (∂p/∂x)_z
-    ∂x_p = δxᶠᶜᶜ(i, j, k, grid, d.pressure) * Δx⁻¹ᶠᶜᶜ(i, j, k, grid)
-    ∂z_p = ℑzᵃᵃᶜ(i, j, k, grid, ℑxᶠᵃᵃ, ∂zᶜᶜᶠ, d.pressure)
-    return ∂x_p - slope * ∂z_p
+    return ∂xᶠᶜᶜ(i, j, k, grid, d.pressure)
 end
 
 @inline function _terrain_x_pressure_gradient(i, j, k, grid, d, ::SlopeOutsideInterpolation, p_ref)
-    slope = terrain_slope_x(i, j, k, grid, d.terrain_metrics, Center())
-    ∂x_p′ = δxᶠᶜᶜ(i, j, k, grid, _perturbation_pressure, d.pressure, p_ref) * Δx⁻¹ᶠᶜᶜ(i, j, k, grid)
-    ∂z_p′ = ℑzᵃᵃᶜ(i, j, k, grid, ℑxᶠᵃᵃ, ∂zᶜᶜᶠ, _perturbation_pressure, d.pressure, p_ref)
-    return ∂x_p′ - slope * ∂z_p′
+    return ∂xᶠᶜᶜ(i, j, k, grid, _perturbation_pressure, d.pressure, p_ref)
 end
 
 ##### Slope-inside-interpolation (CM1-like): ℑz(ℑx(slope * ∂z(p')))
 #####
 ##### The slope is evaluated at each (Center, Center, Face) stencil point
 ##### and multiplied by ∂z(p') before the 4-point average to (Face, Center, Center).
+#####
+##### Note: SlopeOutsideInterpolation derives the slope live from grid.z.σ/η
+##### via Oceananigans' ∂x_z operators, while SlopeInsideInterpolation reads
+##### pre-stored metrics.∂x_h. Both are equivalent for static terrain.
 
 @inline function _slope_x_times_∂z(i, j, k, grid, metrics, p)
     ∂x_h_cc = ℑxᶜᵃᵃ(i, j, 1, grid, metrics.∂x_h)
@@ -226,20 +224,14 @@ end
     return _terrain_y_pressure_gradient(i, j, k, grid, d, stencil, d.terrain_reference_pressure)
 end
 
-##### Slope-outside-interpolation (default): slope * ℑz(ℑy(∂z(p')))
+##### Slope-outside-interpolation (default): use Oceananigans' generalized ∂yᶜᶠᶜ
 
 @inline function _terrain_y_pressure_gradient(i, j, k, grid, d, ::SlopeOutsideInterpolation, ::Nothing)
-    slope = terrain_slope_y(i, j, k, grid, d.terrain_metrics, Center())
-    ∂y_p = δyᶜᶠᶜ(i, j, k, grid, d.pressure) * Δy⁻¹ᶜᶠᶜ(i, j, k, grid)
-    ∂z_p = ℑzᵃᵃᶜ(i, j, k, grid, ℑyᵃᶠᵃ, ∂zᶜᶜᶠ, d.pressure)
-    return ∂y_p - slope * ∂z_p
+    return ∂yᶜᶠᶜ(i, j, k, grid, d.pressure)
 end
 
 @inline function _terrain_y_pressure_gradient(i, j, k, grid, d, ::SlopeOutsideInterpolation, p_ref)
-    slope = terrain_slope_y(i, j, k, grid, d.terrain_metrics, Center())
-    ∂y_p′ = δyᶜᶠᶜ(i, j, k, grid, _perturbation_pressure, d.pressure, p_ref) * Δy⁻¹ᶜᶠᶜ(i, j, k, grid)
-    ∂z_p′ = ℑzᵃᵃᶜ(i, j, k, grid, ℑyᵃᶠᵃ, ∂zᶜᶜᶠ, _perturbation_pressure, d.pressure, p_ref)
-    return ∂y_p′ - slope * ∂z_p′
+    return ∂yᶜᶠᶜ(i, j, k, grid, _perturbation_pressure, d.pressure, p_ref)
 end
 
 ##### Slope-inside-interpolation (CM1-like): ℑz(ℑy(slope * ∂z(p')))
@@ -312,7 +304,7 @@ function AtmosphereModels.compute_auxiliary_dynamics_variables!(model::TerrainCo
             dynamics.density,
             model.formulation,
             dynamics,
-            model.specific_moisture,
+            specific_prognostic_moisture(model),
             grid,
             model.microphysics,
             model.microphysical_fields,
