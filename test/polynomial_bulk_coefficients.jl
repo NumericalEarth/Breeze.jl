@@ -605,4 +605,171 @@ using Oceananigans.BoundaryConditions: BoundaryCondition
         # Explicit height passes through
         @test evaluation_height(1, 1, grid, 25.0) == 25.0
     end
+
+    @testset "initialize! for FilteredSurfaceVelocities" begin
+        grid = RectilinearGrid(default_arch; size=(4, 4, 4), x=(0, 100), y=(0, 100), z=(0, 40))
+        fv = FilteredSurfaceVelocities(grid; filter_timescale=60.0)
+
+        u = XFaceField(grid)
+        v = YFaceField(grid)
+        set!(u, 7.0)
+        set!(v, 3.0)
+        velocities = (; u, v)
+
+        # Before initialize!, filtered fields are zero
+        @test fv.u[1, 1, 1] == 0
+        @test fv.v[1, 1, 1] == 0
+
+        Breeze.BoundaryConditions.initialize!(fv, velocities, grid)
+
+        # After initialize!, filtered fields match the surface values
+        @test fv.u[1, 1, 1] ≈ 7.0
+        @test fv.v[1, 1, 1] ≈ 3.0
+    end
+
+    @testset "initialize! for FilteredSurfaceScalar" begin
+        grid = RectilinearGrid(default_arch; size=(4, 4, 4), x=(0, 100), y=(0, 100), z=(0, 40))
+        fs = FilteredSurfaceScalar(grid; filter_timescale=60.0)
+
+        θ = CenterField(grid)
+        set!(θ, 300.0)
+
+        @test fs.field[1, 1, 1] == 0
+
+        Breeze.BoundaryConditions.initialize!(fs, θ, grid)
+
+        @test fs.field[1, 1, 1] ≈ 300.0
+    end
+
+    @testset "Adapt.adapt_structure" begin
+        using Adapt: Adapt
+        grid = RectilinearGrid(default_arch; size=(4, 4, 4), x=(0, 100), y=(0, 100), z=(0, 40))
+
+        fv = FilteredSurfaceVelocities(grid; height=10.0, filter_timescale=60.0)
+        # Adapt to CPU (identity transform) — verifies Ref is dereferenced
+        adapted = Adapt.adapt_structure(Array, fv)
+        @test adapted.last_update isa Tuple{Int, Int}
+        @test adapted.last_update == (0, 0)
+        @test adapted.height == 10.0
+        @test adapted.filter_timescale == 60.0
+
+        fs = FilteredSurfaceScalar(grid; height=5.0, filter_timescale=30.0)
+        adapted_fs = Adapt.adapt_structure(Array, fs)
+        @test adapted_fs.last_update isa Tuple{Int, Int}
+        @test adapted_fs.last_update == (0, 0)
+    end
+
+    @testset "filtered_kernel_parameters" begin
+        using Breeze.BoundaryConditions: filtered_kernel_parameters, filtered_range
+        using Oceananigans.Grids: Periodic, Bounded
+
+        # Periodic × Periodic: ranges are 1:N+1
+        grid_pp = RectilinearGrid(default_arch; size=(4, 6, 4),
+                                  x=(0, 100), y=(0, 100), z=(0, 40),
+                                  topology=(Periodic, Periodic, Bounded))
+        kp = filtered_kernel_parameters(grid_pp)
+        @test kp isa Oceananigans.Utils.KernelParameters
+        # Extract offsets from KernelParameters to check ranges
+        @test filtered_range(Periodic(), 4) == 1:5
+        @test filtered_range(Periodic(), 6) == 1:7
+        @test filtered_range(Flat(), 4) == 1:4
+        @test filtered_range(Bounded(), 4) == 1:5
+    end
+
+    @testset "update_filtered_surface_state! deduplication and isinf guard" begin
+        using Breeze.BoundaryConditions: update_filtered_surface_state!
+
+        grid = RectilinearGrid(default_arch; size=(4, 4, 4), x=(0, 100), y=(0, 100), z=(0, 40))
+        fv = FilteredSurfaceVelocities(grid; filter_timescale=10.0)
+
+        u = XFaceField(grid)
+        v = YFaceField(grid)
+        set!(u, 5.0)
+        set!(v, 3.0)
+
+        # Build a mock model-like object with the needed fields
+        clock = Oceananigans.TimeSteppers.Clock(time=zero(FT))
+        mock_model = (; clock, velocities=(; u, v), grid)
+
+        # Before first time step, clock.last_Δt is Inf — update should be a no-op
+        @test isinf(clock.last_Δt)
+        update_filtered_surface_state!(fv, mock_model)
+        @test fv.u[1, 1, 1] == 0  # unchanged
+
+        # Advance clock to simulate a time step having occurred
+        clock.last_Δt = 1.0
+        clock.iteration = 1
+        clock.stage = 1
+        update_filtered_surface_state!(fv, mock_model)
+        val_after_first = fv.u[1, 1, 1]
+        @test val_after_first != 0  # should have been updated
+
+        # Call again with same (iteration, stage) — deduplication should prevent update
+        set!(u, 100.0)  # change input drastically
+        update_filtered_surface_state!(fv, mock_model)
+        @test fv.u[1, 1, 1] ≈ val_after_first  # unchanged due to deduplication
+
+        # Advance to new iteration — should update again
+        clock.iteration = 2
+        update_filtered_surface_state!(fv, mock_model)
+        @test fv.u[1, 1, 1] != val_after_first  # now updated with u=100
+    end
+
+    @testset "initialize_boundary_condition! fallback" begin
+        using Breeze.BoundaryConditions: initialize_boundary_condition!
+        using Oceananigans.BoundaryConditions: Flux
+        # The generic fallback should return nothing for any non-bulk BC
+        @test initialize_boundary_condition!(nothing, Val(:bottom), nothing, nothing) === nothing
+        bc = BoundaryCondition(Flux(), nothing)
+        @test initialize_boundary_condition!(bc, Val(:bottom), nothing, nothing) === nothing
+    end
+
+    @testset "Integration: full model lifecycle with filtered bulk BCs" begin
+        grid = RectilinearGrid(default_arch; size=(4, 4, 4), x=(0, 100), y=(0, 100), z=(0, 100))
+        Cᴰ = 1e-3
+        gustiness = 0.1
+        T₀ = 290.0
+
+        # Create shared FilteredSurfaceVelocities
+        fv = FilteredSurfaceVelocities(grid; filter_timescale=60.0)
+
+        # Build BCs with filtering on all bulk types
+        ρu_bcs = FieldBoundaryConditions(bottom=Breeze.BulkDrag(coefficient=Cᴰ, gustiness=gustiness,
+                                                                 filtered_velocities=fv))
+        ρv_bcs = FieldBoundaryConditions(bottom=Breeze.BulkDrag(coefficient=Cᴰ, gustiness=gustiness,
+                                                                 filtered_velocities=fv))
+        ρθ_bcs = FieldBoundaryConditions(bottom=Breeze.BulkSensibleHeatFlux(surface_temperature=T₀,
+                                                                             coefficient=Cᴰ, gustiness=gustiness,
+                                                                             filtered_velocities=fv))
+        ρqᵛ_bcs = FieldBoundaryConditions(bottom=Breeze.BulkVaporFlux(surface_temperature=T₀,
+                                                                       coefficient=Cᴰ, gustiness=gustiness,
+                                                                       filtered_velocities=fv))
+
+        boundary_conditions = (; ρu=ρu_bcs, ρv=ρv_bcs, ρθ=ρθ_bcs, ρqᵛ=ρqᵛ_bcs)
+        model = AtmosphereModel(grid; boundary_conditions)
+
+        # Set initial conditions
+        θ₀ = model.dynamics.reference_state.potential_temperature
+        set!(model; θ=θ₀)
+
+        # initialize! should populate filtered velocities from current state
+        Oceananigans.initialize!(model)
+
+        # After initialize!, filtered velocities should be zero (model velocities are zero)
+        @test fv.u[1, 1, 1] == 0
+        @test fv.v[1, 1, 1] == 0
+
+        # Now set nonzero velocities and re-initialize
+        set!(model.velocities.u, 5.0)
+        set!(model.velocities.v, 3.0)
+        Oceananigans.initialize!(model)
+
+        # After re-initialization, filtered velocities should reflect the velocity fields
+        @test fv.u[1, 1, 1] ≈ 5.0
+        @test fv.v[1, 1, 1] ≈ 3.0
+
+        # Time stepping exercises update_boundary_condition! dispatches
+        time_step!(model, 1e-6)
+        @test model.clock.iteration == 1
+    end
 end
