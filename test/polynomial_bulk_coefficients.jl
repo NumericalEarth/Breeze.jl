@@ -770,17 +770,70 @@ using Oceananigans.BoundaryConditions: BoundaryCondition
         @test fs.field[2, 2, 1] > 299.0  # lagged behind the new value (290)
     end
 
-    @testset "Integration: filtered velocities lag during time stepping" begin
+    @testset "Drag flux uses filtered velocity, not instantaneous" begin
+        using Oceananigans.Models: BoundaryConditionOperation
+
+        grid = RectilinearGrid(default_arch; size=(4, 4, 4), x=(0, 100), y=(0, 100), z=(0, 100))
+        Cᴰ = 1e-3
+        gustiness = 0.5
+        τ_filter = 3600.0
+
+        fv = FilteredSurfaceVelocities(grid; filter_timescale=τ_filter)
+
+        # Build model with constant coefficient and filtered velocities
+        ρu_bcs = FieldBoundaryConditions(bottom=Breeze.BulkDrag(coefficient=Cᴰ, gustiness=gustiness,
+                                                                 filtered_velocities=fv))
+        ρv_bcs = FieldBoundaryConditions(bottom=Breeze.BulkDrag(coefficient=Cᴰ, gustiness=gustiness,
+                                                                 filtered_velocities=fv))
+        boundary_conditions = (; ρu=ρu_bcs, ρv=ρv_bcs)
+        model = AtmosphereModel(grid; boundary_conditions)
+
+        # Set known state: u = 5 m/s, v = 0
+        u₀ = FT(5)
+        θ₀ = model.dynamics.reference_state.potential_temperature
+        set!(model; θ=θ₀, u=u₀)
+
+        # Set filtered velocity to a very different value
+        U_f = FT(20)
+        set!(fv.u, U_f)
+        set!(fv.v, 0)
+
+        # Evaluate the drag flux via BoundaryConditionOperation
+        ρu = model.momentum.ρu
+        τˣ_op = BoundaryConditionOperation(ρu, :bottom, model)
+        τˣ_field = Field(τˣ_op)
+        compute!(τˣ_field)
+
+        # Expected flux using FILTERED velocity:
+        # τ = -Cᴰ * (U_f² + g²) * ρu / U_f
+        # where U_f = 20 (filtered), not u₀ = 5 (instantaneous)
+        ρu_sfc = ρu[2, 2, 1]
+        Ũ² = U_f^2 + FT(gustiness)^2
+        expected_filtered = -Cᴰ * Ũ² * ρu_sfc / U_f
+
+        # What the flux WOULD be with instantaneous velocity (u₀ = 5):
+        Ũ²_inst = u₀^2 + FT(gustiness)^2
+        expected_unfiltered = -Cᴰ * Ũ²_inst * ρu_sfc / u₀
+
+        # The actual flux should match the filtered prediction, not the instantaneous
+        @test τˣ_field[2, 2, 1] ≈ expected_filtered
+        @test τˣ_field[2, 2, 1] != expected_unfiltered
+
+        # Sanity check: the two predictions differ substantially
+        @test !isapprox(expected_filtered, expected_unfiltered, rtol=0.1)
+    end
+
+    @testset "Filtered velocity update is exact during time stepping" begin
+        using Breeze.BoundaryConditions: update_filtered_surface_state!
+
         grid = RectilinearGrid(default_arch; size=(4, 4, 4), x=(0, 100), y=(0, 100), z=(0, 100))
         Cᴰ = 1e-3
         gustiness = 0.1
-        T₀ = 290.0
-        τ = 3600.0  # 1 hour filter timescale
+        T₀ = FT(290)
+        τ_filter = FT(3600)  # 1 hour
 
-        # Create shared FilteredSurfaceVelocities
-        fv = FilteredSurfaceVelocities(grid; filter_timescale=τ)
+        fv = FilteredSurfaceVelocities(grid; filter_timescale=τ_filter)
 
-        # Build BCs with filtering on all bulk types
         ρu_bcs = FieldBoundaryConditions(bottom=Breeze.BulkDrag(coefficient=Cᴰ, gustiness=gustiness,
                                                                  filtered_velocities=fv))
         ρv_bcs = FieldBoundaryConditions(bottom=Breeze.BulkDrag(coefficient=Cᴰ, gustiness=gustiness,
@@ -795,26 +848,24 @@ using Oceananigans.BoundaryConditions: BoundaryCondition
         boundary_conditions = (; ρu=ρu_bcs, ρv=ρv_bcs, ρθ=ρθ_bcs, ρqᵛ=ρqᵛ_bcs)
         model = AtmosphereModel(grid; boundary_conditions)
 
-        # Set initial conditions with uniform wind
-        θ₀ = model.dynamics.reference_state.potential_temperature
-        set!(model; θ=θ₀, u=5)
+        θ₀_ref = model.dynamics.reference_state.potential_temperature
+        set!(model; θ=θ₀_ref, u=5)
         Oceananigans.initialize!(model)
-
-        # After initialize!, filtered velocity matches instantaneous
         @test fv.u[2, 2, 1] ≈ 5.0
 
-        # Manually perturb the filtered velocity to a very different value.
-        # This simulates the filter retaining memory of a past state.
+        # Perturb filtered velocity to simulate memory of a past state
         set!(fv.u, 50.0)
+        fv_before = fv.u[2, 2, 1]
 
-        # Take one time step (Δt = 1s, τ = 3600s, so ε ≈ 0.0003)
-        Δt = 1.0
+        # Take one time step — update_boundary_condition! updates filtered state
+        Δt = FT(1)
         time_step!(model, Δt)
 
-        # The filtered velocity should have been updated by update_boundary_condition!
-        # but with ε ≈ 0.0003 it should still be very close to 50, not 5.
-        @test fv.u[2, 2, 1] > 40.0    # lagged — still much closer to 50 than to 5
-        @test fv.u[2, 2, 1] != 50.0   # but not exactly 50 — the update happened
-        @test fv.u[2, 2, 1] < 50.0    # moved toward the actual velocity
+        # The filtered velocity should have been updated but remain lagged.
+        # With ε = Δt/τ ≈ 1/3600 and 3 RK3 stages (each with ε), the
+        # velocity barely moves from 50 toward the actual velocity.
+        ε = Δt / τ_filter
+        @test fv.u[2, 2, 1] < fv_before  # moved toward actual (< 50)
+        @test fv.u[2, 2, 1] > 45.0       # but barely (still close to 50)
     end
 end
