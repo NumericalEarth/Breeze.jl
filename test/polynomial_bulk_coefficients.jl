@@ -653,10 +653,20 @@ using Oceananigans.BoundaryConditions: BoundaryCondition
         @test adapted.height == 10.0
         @test adapted.filter_timescale == 60.0
 
+        # Double adaptation must be idempotent (GPU halo filling adapts twice)
+        adapted2 = Adapt.adapt_structure(Array, adapted)
+        @test adapted2.last_update isa Tuple{Int, Int}
+        @test adapted2.last_update == (0, 0)
+
         fs = FilteredSurfaceScalar(grid; height=5.0, filter_timescale=30.0)
         adapted_fs = Adapt.adapt_structure(Array, fs)
         @test adapted_fs.last_update isa Tuple{Int, Int}
         @test adapted_fs.last_update == (0, 0)
+
+        # Double adaptation for scalar too
+        adapted_fs2 = Adapt.adapt_structure(Array, adapted_fs)
+        @test adapted_fs2.last_update isa Tuple{Int, Int}
+        @test adapted_fs2.last_update == (0, 0)
     end
 
     @testset "filtered_kernel_parameters" begin

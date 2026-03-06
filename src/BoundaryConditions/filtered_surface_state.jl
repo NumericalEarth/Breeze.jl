@@ -52,12 +52,15 @@ function FilteredSurfaceVelocities(grid; height=nothing, filter_timescale=Inf)
     return FilteredSurfaceVelocities(u, v, height, FT(filter_timescale), Ref((0, 0)))
 end
 
+_deref(r::Ref) = r[]
+_deref(t::Tuple) = t
+
 Adapt.adapt_structure(to, fv::FilteredSurfaceVelocities) =
     FilteredSurfaceVelocities(Adapt.adapt(to, fv.u),
                               Adapt.adapt(to, fv.v),
                               fv.height,
                               fv.filter_timescale,
-                              fv.last_update[])
+                              _deref(fv.last_update))
 
 Base.summary(fv::FilteredSurfaceVelocities) =
     string("FilteredSurfaceVelocities(height=", fv.height,
@@ -98,7 +101,7 @@ Adapt.adapt_structure(to, fs::FilteredSurfaceScalar) =
     FilteredSurfaceScalar(Adapt.adapt(to, fs.field),
                           fs.height,
                           fs.filter_timescale,
-                          fs.last_update[])
+                          _deref(fs.last_update))
 
 Base.summary(fs::FilteredSurfaceScalar) =
     string("FilteredSurfaceScalar(height=", fs.height,
