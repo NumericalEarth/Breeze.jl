@@ -33,13 +33,47 @@ Arguments:
 
 | Function | Arguments | Description |
 |----------|-----------|-------------|
-| `microphysical_tendency` | `(microphysics, name, ρ, ℳ, 𝒰, constants)` | **State-based**. Compute tendency for variable `name`. |
-| `grid_microphysical_tendency` | `(i, j, k, grid, microphysics, name, ρ, fields, 𝒰, constants, velocities)` | **Generic wrapper**. Builds `ℳ` and dispatches to state-based version. |
+| `microphysical_tendency` | `(microphysics, name, ρ, ℳ, 𝒰, constants, clock)` | **State-based**. Compute tendency for variable `name`. |
+| `grid_microphysical_tendency` | `(i, j, k, grid, microphysics, name, ρ, fields, 𝒰, constants, velocities, clock)` | **Generic wrapper**. Builds `ℳ`, applies tendency limiter, and dispatches to state-based version. |
+| `grid_microphysical_tendency_factor` | `(i, j, k, grid, microphysics, ρ, fields, ℳ, 𝒰, constants, clock)` | Compute global limiting factor `α ∈ [0, 1]` to prevent tracer negativity. |
+| `numerical_microphysical_tendency` | `(i, j, k, microphysics, name, c, clock)` | Restore negative prognostic tracers toward zero over one timestep. |
 
 **Design principle**: Schemes implement the state-based version; grid-indexed is generic.
 All velocity components are interpolated from cell faces to cell centers and passed as a NamedTuple `(; u, v, w)` to the microphysical state for aerosol activation and other velocity-dependent processes.
 
 The `name` argument is a `Val` type (e.g., `Val(:ρqᶜˡ)`) that dispatches to the appropriate tendency.
+
+#### Tendency Limiting
+
+The `grid_microphysical_tendency` function applies a global limiting factor `α ∈ [0, 1]`
+to all microphysical tendencies at each grid point. This prevents prognostic tracers from
+being driven negative by microphysical source terms within a single timestep.
+
+The factor is computed by [`grid_microphysical_tendency_factor`](@ref) as:
+```
+α = min over all tracers of: ρq / (-G * Δt_worst)   when G < 0
+```
+where `G` is the tendency, `ρq` is the current tracer value, and `Δt_worst = 2 * clock.last_Δt`.
+
+A single global factor (rather than per-tracer limiting) preserves inter-tracer conservation.
+For example, autoconversion converts cloud→rain; limiting the cloud sink and rain source by
+the same factor keeps the conversion balanced.
+
+#### Numerical Restoration
+
+The tendency limiter prevents source-term-driven negativity, but small negative values
+(~1e-7) can still arise from numerical advection errors. The
+[`numerical_microphysical_tendency`](@ref) function adds a restoration tendency that drives
+negative prognostic microphysical tracers back to zero over approximately one timestep:
+
+```
+G_num = -ρq / Δt    when ρq < 0
+G_num = 0            when ρq ≥ 0
+```
+
+This tendency is applied only to prognostic microphysical tracers (identified via
+[`prognostic_field_names`](@ref)) and is inactive for user tracers. It is also inactive
+on the first timestep when `clock.last_Δt` is not yet valid.
 
 ### Moisture Fraction Computation
 
@@ -147,7 +181,8 @@ These additional functions are required for full [`AtmosphereModel`](@ref) suppo
 | `update_microphysical_auxiliaries!` | — | ✓ | Write to diagnostic fields |
 | `microphysical_velocities` | — | ✓ | Sedimentation advection |
 | `grid_microphysical_state` | — | — | Generic wrapper (don't override) |
-| `grid_microphysical_tendency` | — | — | Generic wrapper (don't override) |
+| `grid_microphysical_tendency` | — | — | Generic wrapper with tendency limiting (don't override) |
+| `grid_microphysical_tendency_factor` | — | — | Tendency limiter (don't override) |
 | `grid_moisture_fractions` | — | ✓* | Override for saturation adjustment |
 | `maybe_adjust_thermodynamic_state` | — | ✓* | Override for saturation adjustment |
 
