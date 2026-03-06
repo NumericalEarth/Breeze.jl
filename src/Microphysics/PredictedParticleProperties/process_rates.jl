@@ -12,7 +12,6 @@ using Oceananigans: Oceananigans
 
 using Breeze.Thermodynamics: temperature,
                              saturation_specific_humidity,
-                             saturation_vapor_pressure,
                              PlanarLiquidSurface,
                              PlanarIceSurface,
                              liquid_latent_heat,

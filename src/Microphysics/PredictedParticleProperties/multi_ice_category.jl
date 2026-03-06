@@ -46,6 +46,10 @@ Multiple ice categories.
 """
 struct MultiIceCategory{N, ICE}
     categories :: NTuple{N, ICE}
+
+    # Inner constructor only — suppresses the auto-generated outer constructor
+    # which has unbound type parameter ICE when N = 0.
+    MultiIceCategory{N, ICE}(categories) where {N, ICE} = new{N, ICE}(categories)
 end
 
 """
@@ -65,7 +69,9 @@ multi_ice = MultiIceCategory(3, Float64)  # 3 ice categories
 """
 function MultiIceCategory(n_categories::Int = 2, FT::Type{<:AbstractFloat} = Float64)
     categories = ntuple(_ -> IceProperties(FT), n_categories)
-    return MultiIceCategory(categories)
+    N = n_categories
+    ICE = eltype(categories)
+    return MultiIceCategory{N, ICE}(categories)
 end
 
 Base.length(::MultiIceCategory{N}) where N = N

@@ -9,7 +9,7 @@
 export tabulate, TabulationParameters, P3IntegralEvaluator
 
 using Adapt: Adapt
-using Oceananigans.Architectures: CPU, device, on_architecture
+using Oceananigans.Architectures: CPU, on_architecture
 
 #####
 ##### P3IntegralEvaluator - callable struct for integral computation

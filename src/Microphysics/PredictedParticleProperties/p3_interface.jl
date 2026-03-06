@@ -176,6 +176,10 @@ from the prognostic fields `μ`, not from the thermodynamic state `𝒰`.
     return P3MicrophysicalState(qᶜˡ, qʳ, nʳ, qⁱ, nⁱ, qᶠ, bᶠ, zⁱ, qʷⁱ)
 end
 
+# Disambiguation for P3 with Nothing or empty microphysical fields
+@inline AM.microphysical_state(::P3, ρ, ::Nothing, 𝒰, velocities) = AM.NothingMicrophysicalState(typeof(ρ))
+@inline AM.microphysical_state(::P3, ρ, ::NamedTuple{(), Tuple{}}, 𝒰, velocities) = AM.NothingMicrophysicalState(typeof(ρ))
+
 #####
 ##### Update microphysical auxiliary fields
 #####
