@@ -70,10 +70,11 @@ and hail. The implementation follows:
 
 | Component | Description | Status |
 |-----------|-------------|--------|
-| **Terminal velocity** | Simplified power law; needs regime-dependent coefficients | ⚠️ |
-| **Particle mass in quadrature** | Simplified effective density; needs full piecewise m(D) | ⚠️ |
+| **Terminal velocity (quadrature)** | Full Best-number Mitchell-Heymsfield formulation | ✅ |
+| **Terminal velocity (process rates)** | Simplified power law with regime switching | ⚠️ |
+| **Particle mass in quadrature** | Full piecewise m(D) with four regimes | ✅ |
 | **Capacitance** | Simple sphere/plate formula; needs full shape model | ⚠️ |
-| **Critical diameters** | Placeholder values; needs dynamic computation | ⚠️ |
+| **Critical diameters** | Dynamic computation in `size_distribution.jl` | ✅ |
 
 ### ✅ Phase 1 Process Rates (VERIFIED WORKING)
 
@@ -149,7 +150,7 @@ Ice nucleation and secondary ice production are now implemented:
 | **Rime splintering** | `rime_splintering_rate` | ✅ |
 
 - Deposition nucleation: Cooper (1986) parameterization, T < -15°C, Sᵢ > 5%
-- Immersion freezing: Bigg (1953) stochastic freezing, T < -4°C
+- Immersion freezing: Barklie-Gokhale (1959) stochastic freezing, T < -4°C, a_imm=0.65
 - Rime splintering: Hallett-Mossop (1974), -8°C < T < -3°C, peaks at -5°C
 
 #### Sixth Moment Tendencies
@@ -168,8 +169,9 @@ Ice nucleation and secondary ice production are now implemented:
 | Process | Description | Status |
 |---------|-------------|--------|
 | **Cloud droplet activation** | (aerosol module) | ❌ |
-| **Cloud condensation/evaporation** | (saturation adjustment) | ❌ |
-| **Lookup tables** | Read Fortran tables | ❌ |
+| **Cloud condensation/evaporation** | `cloud_condensation_rate` with psychrometric correction | ✅ |
+| **Contact freezing** | `contact_freezing_rate` following Meyers et al. (1992) | ✅ |
+| **Lookup tables (Fortran I/O)** | Read Fortran tables | ❌ |
 
 #### Sedimentation
 
@@ -203,7 +205,7 @@ Substepping would need to be implemented at a higher level (e.g., in the time st
 
 | Component | Description | Status |
 |-----------|-------------|--------|
-| **Multiple ice categories** | Milbrandt & Morrison (2016) Part III | ❌ (not planned) |
+| **Multiple ice categories** | `MultiIceCategory` framework exists, full Part III not complete | ⚠️ |
 | **Substepping** | Implicit/operator-split time stepping | ❌ |
 | **Diagnostics** | Reflectivity, precipitation rate | ❌ |
 | **Aerosol coupling** | CCN activation | ❌ |
@@ -243,7 +245,8 @@ Phase 2 process rates are implemented in `process_rates.jl` and verified:
 
 4. **Aggregation** ✅
    - `ice_aggregation_rate`: Temperature-dependent sticking efficiency
-   - Linear ramp from E=0.1 at 253K to E=1.0 at 268K
+   - Linear ramp from E=0.001 at 253K to E=0.3 at 273K (matching Fortran P3)
+   - Eii_fact rime-fraction limiter: shuts off aggregation for Fr > 0.9
 
 5. **Riming** ✅
    - `cloud_riming_rate`: Cloud droplet collection by ice
@@ -346,7 +349,10 @@ src/Microphysics/PredictedParticleProperties/
 ├── ice_lambda_limiter.jl           # λ constraint integral types
 ├── ice_rain_collection.jl          # Ice-rain collection integrals
 ├── rain_properties.jl              # Rain integral types
-└── cloud_droplet_properties.jl     # Cloud properties
+├── cloud_droplet_properties.jl     # Cloud properties
+├── cloud_properties.jl             # Cloud properties (unused duplicate)
+├── multi_ice_category.jl           # Multi-category ice framework
+└── process_rate_parameters.jl      # All tunable process rate parameters
 ```
 
 ## References

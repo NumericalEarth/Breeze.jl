@@ -66,8 +66,8 @@ For P3, these are determined from prognostic moments using the
 - `mass_coefficient`: α in m = α D^β [kg/m^β], default 0.0121
 - `mass_exponent`: β in m = α D^β [-], default 1.9
 - `ice_density`: Pure ice density [kg/m³], default 917
-- `reference_air_density`: ρ₀ for fall speed correction [kg/m³], default 1.225
-- `air_density`: Local air density [kg/m³], default 1.225
+- `reference_air_density`: ρ₀ for fall speed correction [kg/m³], default ≈0.825 (P3 reference)
+- `air_density`: Local air density [kg/m³], default ≈0.825 (P3 reference)
 
 # References
 
@@ -83,8 +83,8 @@ function IceSizeDistributionState(FT::Type{<:AbstractFloat} = Float64;
                                    mass_coefficient = FT(0.0121),
                                    mass_exponent = FT(1.9),
                                    ice_density = FT(917),
-                                   reference_air_density = FT(1.225),
-                                   air_density = FT(1.225))
+                                   reference_air_density = FT(60000 / (287.15 * 253.15)),
+                                   air_density = FT(60000 / (287.15 * 253.15)))
     return IceSizeDistributionState(
         FT(intercept),
         FT(shape),

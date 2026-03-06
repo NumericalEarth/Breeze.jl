@@ -65,7 +65,7 @@ using Oceananigans: CPU
 
     @testset "Ice fall speed" begin
         fs = IceFallSpeed()
-        @test fs.reference_air_density ≈ 1.225
+        @test fs.reference_air_density ≈ 60000 / (287.15 * 253.15)
         @test fs.fall_speed_coefficient ≈ 11.72
         @test fs.fall_speed_exponent ≈ 0.41
 

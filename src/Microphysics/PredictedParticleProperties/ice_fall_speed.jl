@@ -28,12 +28,14 @@ Construct `IceFallSpeed` with parameters and quadrature-based integrals.
 Ice particle terminal velocity follows a power law with air density correction:
 
 ```math
-V(D) = a_V \\left(\\frac{ρ_0}{ρ}\\right)^{0.5} D^{b_V}
+V(D) = a_V \\left(\\frac{ρ_0}{ρ}\\right)^{0.54} D^{b_V}
 ```
 
 where ``a_V`` is `fall_speed_coefficient`, ``b_V`` is `fall_speed_exponent`,
-and ``ρ_0`` is `reference_air_density`. The density correction accounts for
-reduced drag at higher altitudes where air is less dense.
+and ``ρ_0`` is `reference_air_density`. The density correction exponent 0.54
+follows [Heymsfield et al. (2006)](@cite Morrison2015parameterization), and
+``ρ_0`` matches the reference conditions (T=253.15 K, P=600 hPa) at which
+the P3 lookup tables are computed.
 
 Three weighted fall speeds are computed by integrating over the size distribution:
 
@@ -43,7 +45,7 @@ Three weighted fall speeds are computed by integrating over the size distributio
 
 # Keyword Arguments
 
-- `reference_air_density`: Reference ρ₀ [kg/m³], default 1.225 (sea level)
+- `reference_air_density`: Reference ρ₀ [kg/m³], default ≈0.825 (P3 mid-troposphere reference)
 - `fall_speed_coefficient`: Coefficient aᵥ [m^{1-b}/s], default 11.72
 - `fall_speed_exponent`: Exponent bᵥ [-], default 0.41
 
@@ -53,7 +55,7 @@ Three weighted fall speeds are computed by integrating over the size distributio
 [Milbrandt et al. (2021)](@cite MilbrandtEtAl2021) for reflectivity weighting.
 """
 function IceFallSpeed(FT::Type{<:AbstractFloat} = Float64;
-                      reference_air_density = 1.225,
+                      reference_air_density = 60000 / (287.15 * 253.15),
                       fall_speed_coefficient = 11.72,
                       fall_speed_exponent = 0.41)
     return IceFallSpeed(

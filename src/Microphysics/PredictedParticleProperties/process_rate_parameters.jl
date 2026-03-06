@@ -148,7 +148,7 @@ function ProcessRateParameters(FT::Type{<:AbstractFloat} = Float64;
         # Physical constants
         liquid_water_density = 1000,
         pure_ice_density = 917,
-        reference_air_density = 1.225,
+        reference_air_density = 100000 / (287.15 * 273.15),
         nucleated_ice_mass = 1e-12,
         freezing_temperature = 273.15,
 
@@ -178,11 +178,11 @@ function ProcessRateParameters(FT::Type{<:AbstractFloat} = Float64;
         aggregation_efficiency_max = 0.3,
         aggregation_timescale = 600.0,
         aggregation_efficiency_temperature_low = 253.15,
-        aggregation_efficiency_temperature_high = 268.15,
+        aggregation_efficiency_temperature_high = 273.15,
         aggregation_reference_concentration = 1e4,
 
         # Cloud riming
-        cloud_ice_collection_efficiency = 1.0,
+        cloud_ice_collection_efficiency = 0.5,
         cloud_riming_timescale = 300.0,
 
         # Rain riming
@@ -209,7 +209,7 @@ function ProcessRateParameters(FT::Type{<:AbstractFloat} = Float64;
 
         # Immersion freezing
         immersion_freezing_temperature_max = 269.15,
-        immersion_freezing_coefficient = 0.66,
+        immersion_freezing_coefficient = 0.65,
         immersion_freezing_timescale_cloud = 1000.0,
         immersion_freezing_timescale_rain = 300.0,
 

@@ -1008,10 +1008,17 @@ See [Morrison and Milbrandt (2015a)](@cite Morrison2015parameterization).
 
     # Temperature-dependent sticking efficiency (linear ramp)
     # Cold ice is less sticky, near-melting ice is very sticky
-    Eᵢᵢ_cold = FT(0.1)
+    Eᵢᵢ_cold = FT(0.001)
     Eᵢᵢ = ifelse(T < T_low, Eᵢᵢ_cold,
                   ifelse(T > T_high, Eᵢᵢ_max,
                          Eᵢᵢ_cold + (T - T_low) / (T_high - T_low) * (Eᵢᵢ_max - Eᵢᵢ_cold)))
+
+    # Rime-fraction limiter (Eii_fact): shut off aggregation for heavily rimed ice
+    # Fortran P3: Eii_fact = 1 for Fr<0.6, linear ramp to 0 for 0.6≤Fr<0.9, 0 for Fr≥0.9
+    Eᵢᵢ_fact = ifelse(Fᶠ < FT(0.6), FT(1),
+                       ifelse(Fᶠ > FT(0.9), FT(0),
+                              FT(1) - (Fᶠ - FT(0.6)) / FT(0.3)))
+    Eᵢᵢ = Eᵢᵢ * Eᵢᵢ_fact
 
     # Mean particle properties
     m_mean = safe_divide(qⁱ_eff, nⁱ_eff, FT(1e-12))
@@ -2003,8 +2010,8 @@ See [Seifert and Beheng (2006)](@cite SeifertBeheng2006).
     # Mass-weighted mean diameter: m = (π/6) ρʷ D³
     D̄ₘ = cbrt(6 * m̄ / (FT(π) * ρʷ))
 
-    # Density correction factor
-    ρ_correction = sqrt(ρ₀ / ρ)
+    # Density correction factor (Heymsfield et al. 2006)
+    ρ_correction = (ρ₀ / ρ)^FT(0.54)
 
     # Clamp diameter to physical range
     D̄ₘ_clamped = clamp(D̄ₘ, D_min, D_max)
@@ -2077,8 +2084,8 @@ and [Morrison and Milbrandt (2015a)](@cite Morrison2015parameterization).
     # Mean ice particle mass
     m̄ = qⁱ_eff / nⁱ_eff
 
-    # Density correction factor (applied to all fall speeds)
-    ρ_correction = sqrt(ρ₀ / ρ)
+    # Density correction factor (Heymsfield et al. 2006)
+    ρ_correction = (ρ₀ / ρ)^FT(0.54)
 
     # Try to use tabulated fall speed if available
     vₜ = _tabulated_mass_weighted_fall_speed(fs.mass_weighted, m̄, Fᶠ, Fˡ, ρᶠ, ρ_correction, p3, prp)
@@ -2164,7 +2171,7 @@ Compute number-weighted terminal velocity for ice.
     qⁱ_eff = clamp_positive(qⁱ)
     nⁱ_eff = max(nⁱ, FT(1))
     m̄ = qⁱ_eff / nⁱ_eff
-    ρ_correction = sqrt(ρ₀ / ρ)
+    ρ_correction = (ρ₀ / ρ)^FT(0.54)
 
     # Try to use tabulated fall speed if available
     vₜ = _tabulated_number_weighted_fall_speed(fs.number_weighted, m̄, Fᶠ, Fˡ, ρᶠ, ρ_correction, p3, prp)
@@ -2219,7 +2226,7 @@ When tabulated integrals are available, uses pre-computed lookup tables.
     qⁱ_eff = clamp_positive(qⁱ)
     nⁱ_eff = max(nⁱ, FT(1))
     m̄ = qⁱ_eff / nⁱ_eff
-    ρ_correction = sqrt(ρ₀ / ρ)
+    ρ_correction = (ρ₀ / ρ)^FT(0.54)
 
     # Try to use tabulated fall speed if available
     vₜ = _tabulated_reflectivity_weighted_fall_speed(fs.reflectivity_weighted, m̄, Fᶠ, Fˡ, ρᶠ, ρ_correction, p3, prp)

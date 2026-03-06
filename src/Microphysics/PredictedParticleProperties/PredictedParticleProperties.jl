@@ -46,8 +46,9 @@ Based on [P3-microphysics v5.5.0](https://github.com/P3-microphysics/P3-microphy
 
 # Not Implemented
 
-- Multiple free ice categories from Milbrandt & Morrison (2016)
-- Full process rate tendency functions (infrastructure is ready, rates are TODO)
+- Full multiple free ice categories from Milbrandt & Morrison (2016)
+  (initial framework exists via `MultiIceCategory`)
+- Fortran-format lookup table I/O (Breeze generates tables via `tabulate()`)
 """
 module PredictedParticleProperties
 

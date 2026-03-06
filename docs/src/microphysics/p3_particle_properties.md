@@ -26,8 +26,8 @@ Small ice particles are assumed spherical with pure ice density
 m(D) = \frac{π}{6} ρᵢ D³
 ```
 
-where ``ρᵢ = 900`` kg/m³ is the value used in the reference lookup tables
-(pure ice is approximately 917 kg/m³).
+where ``ρᵢ = 917`` kg/m³ (pure ice density). The Fortran P3 uses 900 kg/m³ for
+small spherical ice; Breeze uses the standard pure ice density 917 kg/m³.
 
 **Regime 2: Vapor-Grown Aggregates** (``D_{th} ≤ D < D_{gr}`` or unrimed)
 

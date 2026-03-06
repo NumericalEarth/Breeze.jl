@@ -102,22 +102,16 @@ From [Milbrandt et al. (2025)](@cite MilbrandtEtAl2025liquidfraction):
 - Shedding process
 - Refreezing process
 
-### What We Do NOT Implement (Future Work)
+### What We Do NOT Implement
 
-!!! note "Multiple Ice Categories"
+!!! note "Multiple Free Ice Categories"
     [Milbrandt & Morrison (2016)](@cite MilbrandtMorrison2016) introduced **multiple free ice categories**
-    that can coexist and interact. Our implementation uses a single ice category. Multiple categories
-    may be added in a future version to better represent environments with distinct ice populations
-    (e.g., anvil ice vs. convective ice).
+    that can coexist and interact. Our implementation defaults to a single ice category, though
+    infrastructure for multi-category ice exists via `MultiIceCategory` and `inter_category_collection`.
 
-!!! note "Full Process Rate Parameterizations"
-    The full process rate formulations from the P3 papers are documented in [Microphysical Processes](@ref p3_processes)
-    but are not yet all implemented as tendency functions. Current implementation provides the
-    integral infrastructure for computing bulk rates; the complete tendency equations are a TODO.
-
-!!! note "Saturation Adjustment-Free Approach"
-    The E3SM implementation includes modifications for saturation adjustment-free supersaturation
-    evolution. Our implementation currently uses saturation adjustment for cloud liquid.
+!!! note "Lookup Table I/O"
+    The Fortran P3 reads precomputed lookup tables from binary files. Breeze generates its own
+    tables via `tabulate()` using Chebyshev-Gauss quadrature instead.
 
 ## Prognostic Variables
 

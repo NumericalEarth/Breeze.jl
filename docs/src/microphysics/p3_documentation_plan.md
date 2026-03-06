@@ -298,17 +298,17 @@ V_m = evaluate(MassWeightedFallSpeed(), state)
 
 ---
 
-## Implementation Order
+## Implementation Status
 
-1. **p3_overview.md** - Start with motivation (half day)
-2. **p3_particle_properties.md** - Core physics (1 day)
-3. **p3_size_distribution.md** - PSD and solver (1 day)
-4. **p3_integral_properties.md** - All integrals documented (1 day)
-5. **p3_prognostics.md** - Variable definitions (half day)
-6. **p3_processes.md** - Detailed process physics (2 days)
-7. **p3_examples.md** - Simulations and visualization (1-2 days)
+All documentation sections are complete and wired into `docs/make.jl`:
 
-**Total estimate: 7-8 days of focused work**
+1. **p3_overview.md** ✅
+2. **p3_particle_properties.md** ✅
+3. **p3_size_distribution.md** ✅
+4. **p3_integral_properties.md** ✅
+5. **p3_prognostics.md** ✅
+6. **p3_processes.md** ✅
+7. **p3_examples.md** ✅ (CairoMakie visualizations, not in make.jl)
 
 ---
 

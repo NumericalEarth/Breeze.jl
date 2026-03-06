@@ -83,13 +83,14 @@ where:
 ### Cloud Liquid Tendency
 
 ```math
-\frac{\partial ρq^{cl}}{\partial t}\bigg|_{src} = \underbrace{COND}_{\text{condensation}}
-- \underbrace{EVAP}_{\text{evaporation}}
+\frac{\partial ρq^{cl}}{\partial t}\bigg|_{src} = \underbrace{COND}_{\text{condensation/evaporation}}
 - \underbrace{AUTO}_{\text{autoconversion}}
 - \underbrace{ACCR}_{\text{accretion by rain}}
 - \underbrace{RIM}_{\text{riming by ice}}
-- \underbrace{HOMF}_{\text{homogeneous freezing}}
+- \underbrace{IMMF}_{\text{immersion freezing}}
 ```
+
+Note: `COND` is a single signed rate (positive for condensation, negative for evaporation).
 
 ### Rain Mass Tendency
 
@@ -99,8 +100,8 @@ where:
 + \underbrace{SHED}_{\text{shedding from ice}}
 + \underbrace{MELT}_{\text{complete melting}}
 - \underbrace{EVAP}_{\text{rain evaporation}}
-- \underbrace{COLL}_{\text{collection by ice}}
-- \underbrace{FREZ}_{\text{freezing}}
+- \underbrace{RIM_{rain}}_{\text{rain riming by ice}}
+- \underbrace{FREZ}_{\text{rain freezing}}
 ```
 
 ### Rain Number Tendency
@@ -110,60 +111,71 @@ where:
 + \underbrace{SHED_n}_{\text{shedding}}
 + \underbrace{MELT_n}_{\text{melting}}
 - \underbrace{EVAP_n}_{\text{evaporation}}
-- \underbrace{COLL_n}_{\text{collection}}
+- \underbrace{RIM_n}_{\text{rain riming}}
 - \underbrace{SCBK}_{\text{self-collection/breakup}}
+- \underbrace{FREZ_n}_{\text{rain freezing}}
 ```
 
 ### Ice Mass Tendency
 
 ```math
 \frac{\partial ρq^i}{\partial t}\bigg|_{src} = \underbrace{NUC}_{\text{nucleation}}
-+ \underbrace{DEP}_{\text{deposition}}
-+ \underbrace{RIM}_{\text{riming}}
-+ \underbrace{COLL}_{\text{rain collection}}
-- \underbrace{SUB}_{\text{sublimation}}
-- \underbrace{MELT}_{\text{melting}}
++ \underbrace{DEP}_{\text{deposition/sublimation}}
++ \underbrace{RIM}_{\text{cloud riming}}
++ \underbrace{RIM_{rain}}_{\text{rain riming}}
++ \underbrace{IMMF_{cl}}_{\text{cloud freezing}}
++ \underbrace{IMMF_{rain}}_{\text{rain freezing}}
++ \underbrace{SEC}_{\text{splintering mass}}
+- \underbrace{MELT_{part}}_{\text{partial melting}}
+- \underbrace{MELT_{comp}}_{\text{complete melting}}
 ```
 
 ### Ice Number Tendency
 
 ```math
 \frac{\partial ρn^i}{\partial t}\bigg|_{src} = \underbrace{NUC_n}_{\text{nucleation}}
-+ \underbrace{SEC}_{\text{secondary production}}
-- \underbrace{AGG_n}_{\text{aggregation}}
-- \underbrace{MELT_n}_{\text{melting}}
++ \underbrace{IMMF_{cl,n}}_{\text{cloud freezing}}
++ \underbrace{IMMF_{rain,n}}_{\text{rain freezing}}
++ \underbrace{SEC_n}_{\text{splintering}}
++ \underbrace{MELT_n}_{\text{melting number}}
++ \underbrace{AGG_n}_{\text{aggregation}}
 ```
+
+Note: `AGG_n` and `MELT_n` are negative (signed loss terms).
 
 ### Rime Mass Tendency
 
 ```math
-\frac{\partial ρq^f}{\partial t}\bigg|_{src} = \underbrace{RIM}_{\text{riming}}
-+ \underbrace{COLL}_{\text{rain collection}}
+\frac{\partial ρq^f}{\partial t}\bigg|_{src} = \underbrace{RIM}_{\text{cloud riming}}
++ \underbrace{RIM_{rain}}_{\text{rain riming}}
 + \underbrace{REFR}_{\text{refreezing}}
-- \underbrace{SUB_f}_{\text{sublimation}}
-- \underbrace{MELT_f}_{\text{melting}}
++ \underbrace{IMMF_{cl}}_{\text{cloud freezing}}
++ \underbrace{IMMF_{rain}}_{\text{rain freezing}}
+- \underbrace{F^f \cdot MELT}_{\text{rime fraction × melting}}
+- \underbrace{SEC}_{\text{splintering mass}}
 ```
 
 ### Rime Volume Tendency
 
 ```math
-\frac{\partial ρb^f}{\partial t}\bigg|_{src} = \frac{1}{ρ^f}\left(\underbrace{RIM}_{\text{riming}}
-+ \underbrace{COLL}_{\text{rain collection}}
-+ \underbrace{REFR}_{\text{refreezing}}\right)
-- \underbrace{SUB_b}_{\text{sublimation}}
-- \underbrace{MELT_b}_{\text{melting}}
+\frac{\partial ρb^f}{\partial t}\bigg|_{src} = \frac{RIM + RIM_{rain}}{ρ^f_{new}}
++ \frac{REFR}{ρ^f}
++ \frac{IMMF}{ρ^w}
+- \frac{F^f \cdot MELT}{ρ^f}
 ```
+
+Note: different density denominators for different source terms.
 
 ### Reflectivity Tendency (3-moment)
 
+The simplified (non-tabulated) path uses proportional scaling:
+
 ```math
-\frac{\partial ρz^i}{\partial t}\bigg|_{src} = \underbrace{DEP_z}_{\text{deposition}}
-+ \underbrace{RIM_z}_{\text{riming}}
-- \underbrace{AGG_z}_{\text{aggregation}}
-- \underbrace{SUB_z}_{\text{sublimation}}
-- \underbrace{MELT_z}_{\text{melting}}
-- \underbrace{SHED_z}_{\text{shedding}}
+\frac{\partial ρz^i}{\partial t}\bigg|_{src} \approx \frac{z^i}{q^i} \sum_p \frac{dq^i}{dt}\bigg|_p
 ```
+
+The tabulated path uses per-process Z integrals from the lookup tables for
+deposition, riming, aggregation, sublimation, melting, and shedding.
 
 ### Liquid on Ice Tendency
 
@@ -171,7 +183,6 @@ where:
 \frac{\partial ρq^{wi}}{\partial t}\bigg|_{src} = \underbrace{MELT_{part}}_{\text{partial melting}}
 - \underbrace{SHED}_{\text{shedding}}
 - \underbrace{REFR}_{\text{refreezing}}
-- \underbrace{EVAP_{wi}}_{\text{evaporation}}
 ```
 
 ## Sedimentation

@@ -4,11 +4,6 @@ P3 includes a comprehensive set of microphysical processes governing the evoluti
 of cloud, rain, and ice hydrometeors. This section documents the physical formulations
 and rate equations from the P3 papers.
 
-!!! note "Implementation Status"
-    The process rate formulations documented here are from the P3 papers. Our implementation
-    provides the integral infrastructure for computing bulk rates (see [Integral Properties](@ref p3_integral_properties)).
-    Full tendency functions for all processes are a TODO for future work.
-
 ## Process Overview
 
 ```
@@ -44,20 +39,16 @@ The following subsections document processes from:
 ### Condensation and Evaporation
 
 Cloud liquid grows by condensation when supersaturated with respect to liquid water.
-The saturation adjustment approach instantaneously relaxes to saturation
+The implementation uses a relaxation approach with a psychrometric correction factor
 [rogers1989short](@cite):
 
 ```math
-\frac{dq^{cl}}{dt} = \frac{q_v - q_{vs}(T)}{\tau_c}
+\frac{dq^{cl}}{dt} = \frac{q_v - q_{vs}(T)}{\tau_c \, \Gamma_l}
 ```
 
-where ``\tau_c`` is the condensation timescale (default 1 s) and ``q_{vs}`` is
-saturation specific humidity.
-
-!!! note "Explicit Supersaturation"
-    The E3SM implementation of P3 includes modifications for explicit supersaturation
-    evolution rather than saturation adjustment. Our implementation currently uses
-    saturation adjustment for cloud liquid.
+where ``\tau_c`` is the condensation timescale (default 1 s), ``q_{vs}`` is
+saturation specific humidity, and ``\Gamma_l = 1 + (L_v / c_p) \, dq_{vs}/dT``
+is the psychrometric correction from the Clausius-Clapeyron relation.
 
 ### Autoconversion
 
@@ -120,21 +111,37 @@ where ``S = ρ_v/ρ_{vs}`` is the saturation ratio.
 
 ## Ice Nucleation
 
-### Heterogeneous Nucleation
+### Deposition/Condensation-Freezing Nucleation (Cooper 1986)
 
-Ice nucleating particles (INPs) activate at temperatures below about -5°C.
-From [Morrison2015parameterization](@citet) Section 2f:
+Ice nucleating particles activate at temperatures below -15°C (258.15 K) when supersaturated
+with respect to ice (``S_i > 1.05``). Following Cooper (1986):
 
 ```math
-\frac{dN^i}{dt}\bigg|_{het} = n_{INP}(T) \frac{d T}{dt}\bigg|_{neg}
+N_{INP} = 0.005 \exp\left(0.304 (273.15 - T)\right)
 ```
 
-where ``n_{INP}(T)`` follows parameterizations like [DeMottEtAl2010icenuclei](@citet)
-or [MeyerEtAl1992icenucleation](@citet).
+The nucleation rate is ``\max(0, (N_{INP} - N^i_{existing}) / \Delta t)``, capped at
+100 L⁻¹ (``100 \times 10^3`` m⁻³). Each new crystal has mass ``m_{i0} = (4\pi/3) \rho_i (1 \mu\text{m})^3``.
 
-!!! note "INP Parameterization"
-    The specific INP parameterization is configurable in P3. Our implementation
-    will support multiple options when nucleation rates are fully implemented.
+### Immersion Freezing (Barklie and Gokhale 1959)
+
+Cloud droplets and raindrops freeze by immersion at ``T \leq 269.15`` K (−4°C):
+
+```math
+\frac{dq^i}{dt}\bigg|_{imm} \propto \exp\left(a_{imm} (273.15 - T)\right)
+```
+
+where ``a_{imm} = 0.65`` (Barklie and Gokhale 1959, matching Fortran P3).
+
+### Contact Freezing (Meyers et al. 1992)
+
+Contact freezing follows [MeyerEtAl1992icenucleation](@citet) with INP concentration:
+
+```math
+N_{IN} = \exp(-2.80 + 0.262 \Delta T_s)
+```
+
+where ``\Delta T_s = 273.15 - T`` is the supercooling.
 
 ### Homogeneous Freezing
 
@@ -212,7 +219,7 @@ Ice particles collect cloud droplets
 \frac{dq^f}{dt} = E_{ic} q^{cl} \int_0^∞ A(D) V(D) N'(D)\, dD
 ```
 
-where ``E_{ic}`` is the ice-cloud collection efficiency (default 0.5).
+where ``E_{ic}`` is the ice-cloud collection efficiency (default 0.5, matching the Fortran P3 `eci` parameter).
 
 Simultaneously, the rime volume increases:
 
@@ -261,10 +268,11 @@ The factor of 1/2 avoids double-counting. Mass is conserved; only number decreas
 
 The aggregation efficiency ``E_{agg}`` depends on temperature:
 - ``E_{agg} = 0.001`` for ``T < 253.15`` K (−20°C)
-- Linear ramp from 0.001 to 0.3 between 253.15 K and 268.15 K
-- ``E_{agg} = 0.3`` for ``T > 268.15`` K (−5°C)
+- Linear ramp from 0.001 to 0.3 between 253.15 K and 273.15 K
+- ``E_{agg} = 0.3`` for ``T \geq 273.15`` K (0°C)
 
-The maximum efficiency occurs near −5°C where ice surfaces become "sticky".
+An additional rime-fraction limiter ``E_{ii,fact}`` shuts off aggregation for heavily
+rimed particles: ``E_{ii,fact} = 1`` for ``F^f < 0.6``, ramping linearly to 0 at ``F^f = 0.9``.
 
 ## Phase Change Processes
 
@@ -296,7 +304,7 @@ This allows tracking of wet ice particles before complete melting.
 
 ### Shedding
 
-When liquid fraction exceeds a threshold (typically 50%), excess liquid sheds as rain
+When liquid fraction exceeds a threshold (default 30%), excess liquid sheds as rain
 [MilbrandtEtAl2025liquidfraction](@cite):
 
 ```math
@@ -374,7 +382,7 @@ Many processes have strong temperature dependence:
 T < 235 K:  Homogeneous freezing (cloud → ice)
 235-268 K:  Heterogeneous nucleation, deposition growth
 265-270 K:  Hallett-Mossop ice multiplication (-8 to -3°C)
-T > 268 K:  Maximum aggregation efficiency (E_agg = 0.3)
+T > 273 K:  Maximum aggregation efficiency (E_agg = 0.3)
 T > 273 K:  Melting, shedding
 ```
 

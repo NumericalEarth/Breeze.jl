@@ -129,7 +129,7 @@ the size distribution parameters (N₀, μ, λ).
     # Default P3 mass-diameter parameters
     mass_coefficient = FT(0.0121)
     mass_exponent = FT(1.9)
-    reference_air_density = FT(1.225)
+    reference_air_density = FT(60000 / (287.15 * 253.15))
 
     # Effective density: interpolate between aggregate and rime
     effective_density = (1 - rime_fraction) * e.pure_ice_density * e.unrimed_density_factor +
