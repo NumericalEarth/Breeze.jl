@@ -265,3 +265,80 @@ model to determine the condensation surface based on temperature `T`.
     surface = equilibrated_surface(equilibrium, T)
     return adjustment_saturation_specific_humidity(T, pᵣ, qᵗ, constants, surface)
 end
+
+#####
+##### Dewpoint temperature
+#####
+
+"""
+$(TYPEDSIGNATURES)
+
+Compute the dewpoint temperature ``T⁺`` given the vapor pressure `pᵛ`,
+actual temperature `T`, thermodynamic `constants`, and condensation `surface`.
+
+The dewpoint temperature is defined as the temperature at which the saturation
+vapor pressure equals the actual vapor pressure:
+
+```math
+pᵛ⁺(T⁺) = pᵛ
+```
+
+This implicit equation is solved using secant iteration, which works with any
+saturation vapor pressure formulation.
+
+If the air is saturated or supersaturated (``pᵛ ≥ pᵛ⁺(T)``), the dewpoint
+equals the actual temperature and `T` is returned.
+
+# Arguments
+- `pᵛ`: Vapor pressure (Pa)
+- `T`: Actual temperature (K), used as upper bound and first guess
+- `constants`: `ThermodynamicConstants`
+- `surface`: Surface type for saturation vapor pressure calculation
+
+# Keyword arguments
+- `tolerance`: Relative tolerance for convergence (default: 1e-4)
+- `maxiter`: Maximum number of iterations (default: 10)
+"""
+@inline function dewpoint_temperature(pᵛ, T, constants, surface;
+                                      tolerance = 1e-4,
+                                      maxiter = 10)
+    # First guess: current temperature
+    T⁺₁ = T
+    pᵛ⁺₁ = saturation_vapor_pressure(T⁺₁, constants, surface)
+    r₁ = pᵛ⁺₁ - pᵛ
+
+    # If saturated or supersaturated, dewpoint equals temperature
+    r₁ <= 0 && return T
+
+    # Second guess: lower temperature based on relative humidity
+    ℋ = pᵛ / pᵛ⁺₁  # relative humidity
+    T⁺₂ = T - (1 - ℋ) * 20  # heuristic initial step
+    pᵛ⁺₂ = saturation_vapor_pressure(T⁺₂, constants, surface)
+    r₂ = pᵛ⁺₂ - pᵛ
+
+    # Secant iteration
+    iter = 0
+    while abs(r₂) > tolerance * pᵛ && iter < maxiter
+        ΔTΔr = (T⁺₂ - T⁺₁) / (r₂ - r₁)
+        r₁, T⁺₁ = r₂, T⁺₂
+        T⁺₂ -= r₂ * ΔTΔr
+        pᵛ⁺₂ = saturation_vapor_pressure(T⁺₂, constants, surface)
+        r₂ = pᵛ⁺₂ - pᵛ
+        iter += 1
+    end
+
+    return T⁺₂
+end
+
+"""
+$(TYPEDSIGNATURES)
+
+Compute the dewpoint temperature using a phase `equilibrium` model to determine
+the condensation surface based on temperature `T`.
+"""
+@inline function dewpoint_temperature(pᵛ, T, constants, equilibrium::AbstractPhaseEquilibrium;
+                                      tolerance = 1e-4,
+                                      maxiter = 10)
+    surface = equilibrated_surface(equilibrium, T)
+    return dewpoint_temperature(pᵛ, T, constants, surface; tolerance, maxiter)
+end

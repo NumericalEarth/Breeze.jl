@@ -31,8 +31,7 @@ prognostic_field_names(::ExplicitMicrophysics) = (:ρqᵛ, :ρqˡ, :ρqⁱ)
 !!! note "Field naming conventions"
     The names of prognostic fields defined by `prognostic_field_names` are crucial to the user
     interface, because users can interact with them and
-    [`set!`](https://clima.github.io/OceananigansDocumentation/stable/appendix/library/#Oceananigans.Fields.set!)
-    their initial conditions. Names should be concise, mathematical forms consistent with
+    `set!` their initial conditions. Names should be concise, mathematical forms consistent with
     Breeze conventions (see the notation appendix).
 
 ## Materializing Fields
@@ -74,8 +73,9 @@ struct ExplicitMicrophysicsState{FT} <: AbstractMicrophysicalState{FT}
     qⁱ :: FT
 end
 
-function microphysical_state(::ExplicitMicrophysics, ρ, μ::NamedTuple, 𝒰)
+function microphysical_state(::ExplicitMicrophysics, ρ, μ::NamedTuple, 𝒰, velocities)
     # Convert density-weighted prognostics to specific quantities
+    # velocities is required for interface compatibility (used by some schemes for aerosol activation)
     qᵛ = μ.ρqᵛ / ρ
     qˡ = μ.ρqˡ / ρ
     qⁱ = μ.ρqⁱ / ρ

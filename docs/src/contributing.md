@@ -65,7 +65,7 @@ Pkg.test("Breeze"; test_args=`doctests`)
 
 ### GPU tests
 
-When running the tests, if a CUDA GPU is detected, they automatically use the [`GPU` Oceananigans architecture](https://clima.github.io/OceananigansDocumentation/stable/appendix/library/#Oceananigans.Architectures.GPU), otherwise they run on [`CPU`](https://clima.github.io/OceananigansDocumentation/stable/appendix/library/#Oceananigans.Architectures.CPU).
+When running the tests, if a CUDA GPU is detected, they automatically use the [`GPU` Oceananigans architecture](https://clima.github.io/OceananigansDocumentation/stable/appendix/library#Oceananigans.Architectures.GPU), otherwise they run on [`CPU`](https://clima.github.io/OceananigansDocumentation/stable/appendix/library#Oceananigans.Architectures.CPU).
 To temporarily disable the automatic detection of the GPU and forcibly run the tests on CPU you can set the environment variable `CUDA_VISIBLE_DEVICES=-1`.
 For example, from within a Julia session you can do
 
@@ -141,6 +141,6 @@ There are multiple pre-commit managers you can install, some alternatives are:
 That's it!
 After you install the pre-commit manager and the hooks for this repository, you don't have to do anything else manually: whenever you run `git commit` in this repository, the manager will automatically run the hooks and fix the possible issues.
 
-!!! Note
+!!! note
     If a pre-commit hooks detects an issue and automatically fixes it, the git commit actually fails.
     In that case you will have to `git add` the new changes and `git commit` again to make the commit successful.

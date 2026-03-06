@@ -40,7 +40,14 @@ Manifest-v*.toml
 *.DS_Store
 *.vscode
 *.code-workspace
+# Claude Code — ignore user-specific settings, track shared rules/skills
+.claude/settings.local.json
+.claude/debug/
+
+# Paper references (kept locally only)
+examples/tropical_cyclone_world.md
+examples/atsc-jas-d-18-0357*
 
 # Benchmarking output
-benchmark_results.json
+*.json
 benchmark_results.md

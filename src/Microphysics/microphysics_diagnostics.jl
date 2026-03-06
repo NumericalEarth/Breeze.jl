@@ -11,11 +11,13 @@ using Breeze.Thermodynamics:
     saturation_vapor_pressure,
     equilibrated_surface
 
-# Import SaturationSpecificHumidity from AtmosphereModels.Diagnostics
+# Import diagnostics from AtmosphereModels.Diagnostics
 using ..AtmosphereModels.Diagnostics:
     Diagnostics,
     SaturationSpecificHumidity,
     SaturationSpecificHumidityField,
+    DewpointTemperature,
+    DewpointTemperatureField,
     microphysics_phase_equilibrium
 
 # Extend microphysics_phase_equilibrium for SaturationAdjustment
@@ -30,7 +32,7 @@ const C = Center
 struct RelativeHumidityKernelFunction{μ, M, MF, T, R, TH}
     microphysics :: μ
     microphysical_fields :: M
-    specific_moisture :: MF
+    specific_prognostic_moisture :: MF
     temperature :: T
     reference_state :: R
     thermodynamic_constants :: TH
@@ -41,7 +43,7 @@ Utils.prettysummary(::RelativeHumidityKernelFunction) = "RelativeHumidityKernelF
 Adapt.adapt_structure(to, k::RelativeHumidityKernelFunction) =
     RelativeHumidityKernelFunction(adapt(to, k.microphysics),
                                    adapt(to, k.microphysical_fields),
-                                   adapt(to, k.specific_moisture),
+                                   adapt(to, k.specific_prognostic_moisture),
                                    adapt(to, k.temperature),
                                    adapt(to, k.reference_state),
                                    adapt(to, k.thermodynamic_constants))
@@ -124,7 +126,7 @@ function RelativeHumidity(model)
 
     func = RelativeHumidityKernelFunction(microphysics,
                                           model.microphysical_fields,
-                                          model.specific_moisture,
+                                          specific_prognostic_moisture(model),
                                           model.temperature,
                                           model.dynamics.reference_state,
                                           model.thermodynamic_constants)
@@ -139,14 +141,15 @@ function (d::AdjustmentRH)(i, j, k, grid)
         pᵣ = d.reference_state.pressure[i, j, k]
         ρᵣ = d.reference_state.density[i, j, k]
         T = d.temperature[i, j, k]
-        qᵗ = d.specific_moisture[i, j, k]
+        # qᵛᵉ: vapor (non-equilibrium) or equilibrium moisture (saturation adjustment)
+        qᵛᵉ = d.specific_prognostic_moisture[i, j, k]
     end
 
     constants = d.thermodynamic_constants
     equil = microphysics_phase_equilibrium(d.microphysics)
 
     # Compute moisture fractions (vapor, liquid, ice)
-    q = grid_moisture_fractions(i, j, k, grid, d.microphysics, ρᵣ, qᵗ, d.microphysical_fields)
+    q = grid_moisture_fractions(i, j, k, grid, d.microphysics, ρᵣ, qᵛᵉ, d.microphysical_fields)
 
     # Vapor specific humidity
     qᵛ = q.vapor

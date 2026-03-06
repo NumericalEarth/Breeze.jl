@@ -1,6 +1,7 @@
 [deps]
 AtmosphericProfilesLibrary = "86bc3604-9858-485a-bdbe-831ec50de11d"
 Breeze = "660aa2fb-d4c8-4359-a52c-9c057bc511da"
+CUDA = "052768ef-5323-5732-b1bb-66c8b64840ba"
 CairoMakie = "13f3f980-e62b-5c42-98c6-ff1f3baf88f0"
 CloudMicrophysics = "6a9e3e04-43cd-43ba-94b9-e8782df3c71b"
 NCDatasets = "85f8d34a-cbdd-5861-8df4-14fed0d494ab"
@@ -13,6 +14,9 @@ Breeze = {path = ".."}
 
 [compat]
 AtmosphericProfilesLibrary = "0.1.7"
-CloudMicrophysics = "0.22.13, 0.29"
+CUDA = "5.9.7"
+CairoMakie = "0.15.8"
+CloudMicrophysics = "0.31.4"
 NCDatasets = "0.14"
-Oceananigans = "0.104"
+Oceananigans = "0.105.1"
+RRTMGP = "0.21.7"

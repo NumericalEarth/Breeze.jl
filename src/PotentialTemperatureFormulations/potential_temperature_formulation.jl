@@ -99,11 +99,12 @@ function AtmosphereModels.collect_prognostic_fields(formulation::LiquidIcePotent
                                                     dynamics,
                                                     momentum,
                                                     moisture_density,
+                                                    moisture_name,
                                                     microphysical_fields,
                                                     tracers)
 
     ρθ = formulation.potential_temperature_density
-    thermodynamic_variables = (ρθ=ρθ, ρqᵗ=moisture_density)
+    thermodynamic_variables = merge((ρθ=ρθ,), NamedTuple{(moisture_name,)}((moisture_density,)))
     dynamics_fields = dynamics_prognostic_fields(dynamics)
     return merge(dynamics_fields, momentum, thermodynamic_variables, microphysical_fields, tracers)
 end

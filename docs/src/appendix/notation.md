@@ -17,7 +17,7 @@ A few notes about the following table:
   a "reference state", which is an adiabatic, hydrostatic solution to the equations of motion. But there is also an
   "energy reference temperature" and "reference latent heat", which are thermodynamic constants required to define
   the internal energy of moist atmospheric constituents.
-* Mapping to AM fields: `ρe` corresponds to `energy_density(model)`, `ρqᵗ` to `model.moisture_density`, and `qᵗ` to `model.specific_moisture`.
+* Mapping to AM fields: `ρe` corresponds to `energy_density(model)`, and the moisture density is accessed via `model.moisture_density`.
 
 The following table also uses a few conventions that suffuse the source code and which are internalized by wise developers:
 
@@ -25,7 +25,7 @@ The following table also uses a few conventions that suffuse the source code and
 * `q` refers to an instance of  [`MoistureMassFractions`](@ref Breeze.Thermodynamics.MoistureMassFractions)
 * "Reference" quantities use a subscript ``r`` (e.g., ``p_r``, ``\rho_r``).
 * Phase or mixture identifiers (``d``, ``v``, ``m``) appear as superscripts (e.g., ``Rᵈ``, ``cᵖᵐ``), matching usage in the codebase (e.g., `Rᵈ`, `cᵖᵐ`).
-* Conservative variables are stored in ρᵣ-weighted form in the code (e.g., `ρu`, `ρv`, `ρw`, `ρe`, `ρqᵗ`).
+* Conservative variables are stored in ρᵣ-weighted form in the code (e.g., `ρu`, `ρv`, `ρw`, `ρe`, `ρqᵉ` or `ρqᵛ`).
 
 | math symbol                         | code   | property name                       | description                                                                    |
 | ----------------------------------- | ------ | ----------------------------------- | ------------------------------------------------------------------------------ |
@@ -35,10 +35,13 @@ The following table also uses a few conventions that suffuse the source code and
 | ``\boldsymbol{ρu} = (ρu, ρv, ρw)``  | `ρu, ρv, ρw` | `AM.momentum`                 | Momentum components                                                            |
 | ``ρ e``                             | `ρe`   | `AM.energy_density`                 | Energy density                                                                 |
 | ``T``                               | `T`    | `AM.temperature`                    | Temperature                                                                    |
+| ``T⁺``                              | `T⁺`   | `DewpointTemperature(model)`        | Dewpoint temperature                                                           |
 | ``p``                               | `p`    | `AM.pressure`                       | Pressure                                                                       |
 | ``b``                               | `b`    |                                     | Buoyancy                                                                       |
-| ``ρ qᵗ``                            | `ρqᵗ`  | `AM.moisture_density`               | Total moisture density                                                         |
-| ``qᵗ``                              | `qᵗ`   | `AM.specific_moisture`              | Total specific moisture (the sum of vapor, liquid, and ice mass fractions)     |
+| ``q^{ve}``                           | `qᵛᵉ`  |                                     | Scheme-dependent specific moisture: vapor (non-equilibrium) or equilibrium moisture (saturation adjustment) |
+| ``ρ q^{ve}``                         | `ρqᵛᵉ` | `AM.moisture_density`               | Scheme-dependent moisture density: ``ρqᵛ`` or ``ρqᵉ``                          |
+| ``ρ qᵉ``                            | `ρqᵉ`  | `AM.moisture_density`               | Equilibrium moisture density (saturation adjustment schemes)                   |
+| ``ρ qᵛ``                            | `ρqᵛ`  | `AM.moisture_density`               | Vapor density (non-equilibrium schemes)                                        |
 | ``qᵛ``                              | `qᵛ`   | `AM.microphysical_fields.qᵛ`        | Vapor mass fraction, a.k.a "specific humidity"                                 |
 | ``qˡ``                              | `qˡ`   | `AM.microphysical_fields.qˡ`        | Liquid mass fraction                                                           |
 | ``qⁱ``                              | `qⁱ`   | `AM.microphysical_fields.qⁱ`        | Ice mass fraction                                                              |
@@ -53,6 +56,15 @@ The following table also uses a few conventions that suffuse the source code and
 | ``ρqᶜⁱ``                            | `ρqᶜⁱ` |                                     | Cloud ice density                                                              |
 | ``ρqʳ``                             | `ρqʳ`  | `AM.microphysical_fields.ρqʳ`       | Rain density                                                                   |
 | ``ρqˢ``                             | `ρqˢ`  | `AM.microphysical_fields.ρqˢ`       | Snow density                                                                   |
+| ``n^{cl}``                          | `nᶜˡ`  | `AM.microphysical_fields.nᶜˡ`       | Cloud droplet number per unit mass (1/kg)                                      |
+| ``n^r``                             | `nʳ`   | `AM.microphysical_fields.nʳ`        | Rain drop number per unit mass (1/kg)                                          |
+| ``n^a``                             | `nᵃ`   | `AM.microphysical_fields.nᵃ`        | Aerosol number per unit mass (1/kg)                                            |
+| ``\rho n^{cl}``                     | `ρnᶜˡ` | `AM.microphysical_fields.ρnᶜˡ`      | Cloud droplet number density (1/m³), prognostic                                |
+| ``\rho n^r``                        | `ρnʳ`  | `AM.microphysical_fields.ρnʳ`       | Rain drop number density (1/m³), prognostic                                    |
+| ``\rho n^a``                        | `ρnᵃ`  | `AM.microphysical_fields.ρnᵃ`       | Aerosol number density (1/m³), prognostic                                      |
+| ``N^{cl}``                          | `Nᶜˡ`  |                                     | Volumetric cloud droplet number density, ``Nᶜˡ = ρ nᶜˡ`` (1/m³)               |
+| ``N^r``                             | `Nʳ`   |                                     | Volumetric rain drop number density, ``Nʳ = ρ nʳ`` (1/m³)                      |
+| ``N^a``                             | `Nᵃ`   |                                     | Volumetric aerosol number density, ``Nᵃ = ρ nᵃ`` (1/m³)                        |
 | ``\mathbb{W}^{cl}``                 | `𝕎ᶜˡ`  |                                     | Terminal velocity of cloud liquid (scalar, positive downward)                  |
 | ``\mathbb{W}^{ci}``                 | `𝕎ᶜⁱ`  |                                     | Terminal velocity of cloud ice (scalar, positive downward)                     |
 | ``\mathbb{W}^r``                    | `𝕎ʳ`   |                                     | Terminal velocity of rain (scalar, positive downward)                          |
@@ -65,7 +77,7 @@ The following table also uses a few conventions that suffuse the source code and
 | ``\mathscr{H}``                     | `ℋ`    | `RelativeHumidity(model)`           | Relative humidity, ``ℋ = pᵛ / pᵛ⁺``                                            |
 | ``\mathscr{S}``                     | `𝒮`    | `supersaturation(T, ρ, q, c, surf)` | Supersaturation, ``𝒮 = pᵛ / pᵛ⁺ - 1``                                          |
 | ``g``                               | `g`    | `TC.gravitational_acceleration`     | Gravitational acceleration                                                     |
-| ``\mathbb{U}^s``                    | `𝕌ˢ`   |                                     | Sound speed, ``𝕌ˢ = \sqrt{γ Rᵈ T}``                                            |
+| ``\mathbb{C}^{ac}``                 | `ℂᵃᶜ`  |                                     | Acoustic sound speed, ``ℂᵃᶜ = \sqrt{γ Rᵈ T}``                                  |
 | ``\mathcal{R}``                     | `ℛ`    | `TC.molar_gas_constant`             | Universal (molar) gas constant                                                 |
 | ``Tᵗʳ``                             | `Tᵗʳ`  | `TC.triple_point_temperature`       | Temperature at the vapor-liquid-ice triple point                               |
 | ``pᵗʳ``                             | `pᵗʳ`  | `TC.triple_point_pressure`          | Pressure at the vapor-liquid-ice triple point                                  |
@@ -78,6 +90,8 @@ The following table also uses a few conventions that suffuse the source code and
 | ``cᵖᵛ``                             | `cᵖᵛ`  | `TC.vapor.heat_capacity`            | Heat capacity of vapor at constant pressure                                    |
 | ``cˡ``                              | `cˡ`   | `TC.liquid.heat_capacity`           | Heat capacity of the liquid phase (incompressible)                             |
 | ``cⁱ``                              | `cⁱ`   | `TC.ice.heat_capacity`              | Heat capacity of the ice phase (incompressible)                                |
+| ``\rho^L``                          | `ρᴸ`   | `TC.liquid.density`                 | Intrinsic density of liquid water                                                        |
+| ``\rho^I``                          | `ρᴵ`   | `TC.ice.density`                    | Intrinsic density of ice                                                                 |
 | ``cᵖᵐ``                             | `cᵖᵐ`  | `mixture_heat_capacity(q, constants)` | Mixture heat capacity at constant pressure                                   |
 | ``Tᵣ``                              | `Tᵣ`   | `TC.energy_reference_temperature`   | Reference temperature for internal energy relations and latent heat            |
 | ``\mathcal{L}^l_r``                 | `ℒˡᵣ`  | `TC.liquid.reference_latent_heat`   | Latent heat of condensation at the energy reference temperature                |
@@ -95,7 +109,7 @@ The following table also uses a few conventions that suffuse the source code and
 | ``θᵉ``                              | `θᵉ`   |                                     | Equivalent potential temperature                                               |
 | ``θˡⁱ``                             | `θˡⁱ`  |                                     | Liquid-ice potential temperature                                               |
 | ``θᵇ``                              | `θᵇ`   |                                     | Stability-equivalent potential temperature (for moist Brunt-Väisälä)           |
-| ``θ``                               | `θ`    |                                     | Shorthand for liquid-ice potential temperature (used in [`set!`](https://clima.github.io/OceananigansDocumentation/stable/appendix/library/#Oceananigans.Fields.set!)) |
+| ``θ``                               | `θ`    |                                     | Shorthand for liquid-ice potential temperature (used in `set!`) |
 | ``\Delta t``                        | `Δt`   | `Simulation.Δt`                     | Time step.                                                                     |
 | ``\boldsymbol{\tau}``               | `τ`    |                                     | Kinematic subgrid/viscous stress tensor (per unit mass)                        |
 | ``\boldsymbol{\mathcal{T}}``        | `𝒯`    |                                     | Dynamic stress tensor used in anelastic momentum, ``\mathcal{T} = ρᵣ τ``       |
@@ -109,6 +123,7 @@ The following table also uses a few conventions that suffuse the source code and
 | ``Cᴰ``                              | `Cᴰ`   |                                     | Surface drag coefficient                                                       |
 | ``Cᵀ``                              | `Cᵀ`   |                                     | Surface sensible heat transfer coefficient (Stanton number)                    |
 | ``Cᵛ``                              | `Cᵛ`   |                                     | Surface vapor transfer coefficient (Dalton number)                             |
+| ``\ell``                            | `ℓ`    |                                     | Surface roughness length, m                                                    |
 | ``T_0``                             | `T₀`   |                                     | Sea surface temperature                                                        |
 | ``qᵛ₀``                             | `qᵛ₀`  |                                     | Saturation specific humidity at sea surface                                    |
 | ``\mathscr{I}``                     | `ℐ`    |                                     | Radiative flux (intensity), W/m²                                               |
@@ -118,3 +133,13 @@ The following table also uses a few conventions that suffuse the source code and
 | ``N_A``                             | `ℕᴬ`   |                                     | Avogadro's number, molecules per mole                                          |
 | ``\mathcal{U}``                     | `𝒰`    |                                     | Thermodynamic state struct (e.g., `StaticEnergyState`)                         |
 | ``\mathcal{M}``                     | `ℳ`    |                                     | Microphysical state struct (e.g., `WarmPhaseOneMomentState`)                   |
+| ``\psi``                            | `ψ`    | `AcousticSubstepper.pressure_coefficient` | Pressure coefficient for acoustic substepping, ``ψ = Rᵐ T``             |
+| ``{\mathbb{C}^{ac}}^2``             | `ℂᵃᶜ²` |                                           | Acoustic sound speed squared, ``ℂᵃᶜ² = γᵐ ψ = γᵐ Rᵐ T``                 |
+| ``G^n``                             | `Gⁿ`   |                                     | Tendency fields at time step ``n``                                             |
+| ``G^s``                             | `Gˢ`   |                                     | Slow tendencies (excludes fast pressure gradient and buoyancy)                 |
+| ``N_s``                             | `Ns`   | `AcousticSubstepper.Ns`             | Number of acoustic substeps per full time step                                 |
+| ``\Delta \tau``                     | `Δτ`   |                                     | Acoustic substep time step, ``Δτ = Δt / Ns``                                   |
+| ``\kappa^d``                        | `κᵈ`   | `AcousticSubstepper.κᵈ`             | Divergence damping coefficient for acoustic substepping                        |
+| ``\rho_r``                          | `ρᵣ`   | `AcousticSubstepper.ρᵣ`             | Reference density for divergence damping (start of acoustic loop)              |
+| ``w^{avg}``                         | `averaging_weight` |                              | Time-averaging weight for velocity fields in acoustic substepping              |
+| ``\bar{u}, \bar{v}, \bar{w}``       | `ū, v̄, w̄` |                                 | Time-averaged velocities for scalar advection                                  |

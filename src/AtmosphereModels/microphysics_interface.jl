@@ -14,6 +14,9 @@
 # to the state-based tendency. Schemes needing full grid access can override directly.
 #####
 
+using Oceananigans.Fields: set!
+using Oceananigans.Operators: ℑxᶜᵃᵃ, ℑyᵃᶜᵃ, ℑzᵃᵃᶜ
+
 using ..Thermodynamics: MoistureMassFractions
 
 #####
@@ -117,7 +120,7 @@ end
 #####
 
 """
-    microphysical_state(microphysics, ρ, μ, 𝒰)
+    microphysical_state(microphysics, ρ, μ, 𝒰, velocities)
 
 Build an [`AbstractMicrophysicalState`](@ref) (ℳ) from density-weighted prognostic
 microphysical variables `μ`, density `ρ`, and thermodynamic state `𝒰`.
@@ -135,27 +138,28 @@ while precipitation (rain, snow) still comes from `μ`.
 - `ρ`: Local density (scalar)
 - `μ`: NamedTuple of density-weighted prognostic variables (e.g., `(ρqᶜˡ=..., ρqʳ=...)`)
 - `𝒰`: Thermodynamic state
+- `velocities`: NamedTuple of velocity components `(; u, v, w)` [m/s].
 
 # Returns
 An `AbstractMicrophysicalState` subtype containing the local specific microphysical variables.
 
 See also [`microphysical_tendency`](@ref), [`AbstractMicrophysicalState`](@ref).
 """
-@inline microphysical_state(::Nothing, ρ, μ, 𝒰) = NothingMicrophysicalState(typeof(ρ))
-@inline microphysical_state(::Nothing, ρ, ::Nothing, 𝒰) = NothingMicrophysicalState(typeof(ρ))
-@inline microphysical_state(microphysics, ρ, ::Nothing, 𝒰) = NothingMicrophysicalState(typeof(ρ))
-@inline microphysical_state(microphysics, ρ, ::NamedTuple{(), Tuple{}}, 𝒰) = NothingMicrophysicalState(typeof(ρ))
+@inline microphysical_state(::Nothing, ρ, μ, 𝒰, velocities) = NothingMicrophysicalState(typeof(ρ))
+@inline microphysical_state(::Nothing, ρ, ::Nothing, 𝒰, velocities) = NothingMicrophysicalState(typeof(ρ))
+@inline microphysical_state(microphysics, ρ, ::Nothing, 𝒰, velocities) = NothingMicrophysicalState(typeof(ρ))
+@inline microphysical_state(microphysics, ρ, ::NamedTuple{(), Tuple{}}, 𝒰, velocities) = NothingMicrophysicalState(typeof(ρ))
 # Disambiguation for Nothing microphysics + empty NamedTuple
-@inline microphysical_state(::Nothing, ρ, ::NamedTuple{(), Tuple{}}, 𝒰) = NothingMicrophysicalState(typeof(ρ))
+@inline microphysical_state(::Nothing, ρ, ::NamedTuple{(), Tuple{}}, 𝒰, velocities) = NothingMicrophysicalState(typeof(ρ))
 
 """
-    grid_microphysical_state(i, j, k, grid, microphysics, μ_fields, ρ, 𝒰)
+    grid_microphysical_state(i, j, k, grid, microphysics, μ_fields, ρ, 𝒰, velocities)
 
 Build an [`AbstractMicrophysicalState`](@ref) (ℳ) at grid point `(i, j, k)`.
 
 This is the **grid-indexed wrapper** that:
 1. Extracts prognostic values from `μ_fields` via [`extract_microphysical_prognostics`](@ref)
-2. Calls the gridless [`microphysical_state(microphysics, ρ, μ, 𝒰)`](@ref)
+2. Calls the gridless [`microphysical_state(microphysics, ρ, μ, 𝒰, velocities)`](@ref)
 
 Microphysics schemes should implement the gridless version, not this one.
 
@@ -166,19 +170,25 @@ Microphysics schemes should implement the gridless version, not this one.
 - `μ_fields`: NamedTuple of microphysical fields
 - `ρ`: Local density (scalar)
 - `𝒰`: Thermodynamic state
+- `velocities`: Velocity fields (u, v, w). Velocities are interpolated to cell centers
+                for use by microphysics schemes (e.g., aerosol activation uses vertical velocity).
 
 # Returns
 An `AbstractMicrophysicalState` subtype containing the local microphysical variables.
 
 See also [`microphysical_tendency`](@ref), [`AbstractMicrophysicalState`](@ref).
 """
-@inline function grid_microphysical_state(i, j, k, grid, microphysics, μ_fields, ρ, 𝒰)
+@inline function grid_microphysical_state(i, j, k, grid, microphysics, μ_fields, ρ, 𝒰, velocities)
     μ = extract_microphysical_prognostics(i, j, k, microphysics, μ_fields)
-    return microphysical_state(microphysics, ρ, μ, 𝒰)
+    u = ℑxᶜᵃᵃ(i, j, k, grid, velocities.u)
+    v = ℑyᵃᶜᵃ(i, j, k, grid, velocities.v)
+    w = ℑzᵃᵃᶜ(i, j, k, grid, velocities.w)
+    U = (; u, v, w)
+    return microphysical_state(microphysics, ρ, μ, 𝒰, U)
 end
 
 # Explicit Nothing fallback
-@inline grid_microphysical_state(i, j, k, grid, microphysics::Nothing, μ_fields, ρ, 𝒰) =
+@inline grid_microphysical_state(i, j, k, grid, microphysics::Nothing, μ_fields, ρ, 𝒰, velocities) =
     NothingMicrophysicalState(eltype(grid))
 
 """
@@ -210,7 +220,7 @@ See also [`microphysical_state`](@ref), [`AbstractMicrophysicalState`](@ref).
 #####
 
 """
-    grid_microphysical_tendency(i, j, k, grid, microphysics, name, ρ, fields, 𝒰, constants)
+    grid_microphysical_tendency(i, j, k, grid, microphysics, name, ρ, fields, 𝒰, constants, velocities)
 
 Compute the tendency for microphysical variable `name` at grid point `(i, j, k)`.
 
@@ -220,14 +230,17 @@ and dispatches to the state-based [`microphysical_tendency`](@ref).
 
 Schemes that need full grid access (e.g., for non-local operations) can override
 this method directly without using `microphysical_state`.
+
+# Arguments
+- `velocities`: NamedTuple of velocity components `(; u, v, w)` [m/s].
 """
-@inline function grid_microphysical_tendency(i, j, k, grid, microphysics, name, ρ, fields, 𝒰, constants)
-    ℳ = grid_microphysical_state(i, j, k, grid, microphysics, fields, ρ, 𝒰)
+@inline function grid_microphysical_tendency(i, j, k, grid, microphysics, name, ρ, fields, 𝒰, constants, velocities)
+    ℳ = grid_microphysical_state(i, j, k, grid, microphysics, fields, ρ, 𝒰, velocities)
     return microphysical_tendency(microphysics, name, ρ, ℳ, 𝒰, constants)
 end
 
 # Explicit Nothing fallback (for backward compatibility)
-@inline grid_microphysical_tendency(i, j, k, grid, microphysics::Nothing, name, ρ, μ, 𝒰, constants) = zero(grid)
+@inline grid_microphysical_tendency(i, j, k, grid, microphysics::Nothing, name, ρ, μ, 𝒰, constants, velocities) = zero(grid)
 
 #####
 ##### Definition of the microphysics interface, with methods for "Nothing" microphysics
@@ -236,15 +249,49 @@ end
 """
 $(TYPEDSIGNATURES)
 
+Return the prognostic moisture field name as a Symbol for the given microphysics scheme.
+
+The physical meaning of the prognostic moisture field depends on the scheme:
+- `Nothing` / non-equilibrium: `:ρqᵛ` (true vapor density)
+- `SaturationAdjustment`: `:ρqᵉ` (equilibrium moisture density, diagnostically partitioned)
+"""
+moisture_prognostic_name(::Nothing) = :ρqᵛ
+
+"""
+$(TYPEDSIGNATURES)
+
+Return the specific (per-mass) moisture field name by stripping the `ρ` prefix
+from [`moisture_prognostic_name`](@ref).
+"""
+function moisture_specific_name(microphysics)
+    prog_name = string(moisture_prognostic_name(microphysics))
+    return Symbol(prog_name[nextind(prog_name, 1):end])
+end
+
+"""
+$(TYPEDSIGNATURES)
+
+Return the prognostic specific moisture field for `model`.
+
+This is `qᵛ` for non-equilibrium schemes or `qᵉ` for saturation adjustment schemes.
+"""
+specific_prognostic_moisture(model) = model.microphysical_fields[moisture_specific_name(model.microphysics)]
+
+"""
+$(TYPEDSIGNATURES)
+
 Return the specific humidity (vapor mass fraction) field for the given `model`.
 
-For `Nothing` microphysics (no condensate), the vapor mass fraction equals the total
-specific moisture. For microphysics schemes with prognostic vapor (e.g., where `qᵛ`
-is tracked explicitly), this function returns the appropriate vapor field.
+This always returns the actual vapor field `qᵛ` from the microphysical fields,
+regardless of microphysics scheme.
 """
-specific_humidity(model) = specific_humidity(model.microphysics, model)
+specific_humidity(model) = model.microphysical_fields.qᵛ
 
-specific_humidity(::Nothing, model) = model.specific_moisture
+liquid_mass_fraction(model) = liquid_mass_fraction(model.microphysics, model)
+ice_mass_fraction(model) = ice_mass_fraction(model.microphysics, model)
+
+liquid_mass_fraction(::Nothing, model) = nothing
+ice_mass_fraction(::Nothing, model) = nothing
 
 """
 $(TYPEDSIGNATURES)
@@ -256,7 +303,7 @@ This function takes the thermodynamic state, microphysics scheme, total moisture
 constants. Schemes that use saturation adjustment override this to adjust the moisture partition.
 Non-equilibrium schemes simply return the state unchanged.
 """
-@inline maybe_adjust_thermodynamic_state(state, ::Nothing, qᵗ, constants) = state
+@inline maybe_adjust_thermodynamic_state(state, ::Nothing, qᵛ, constants) = state
 
 """
 $(TYPEDSIGNATURES)
@@ -265,13 +312,46 @@ Return `tuple()` - zero-moment scheme has no prognostic variables.
 """
 prognostic_field_names(::Nothing) = tuple()
 
+
 """
 $(TYPEDSIGNATURES)
 
 Build microphysical fields associated with `microphysics` on `grid` and with
 user defined `boundary_conditions`.
 """
-materialize_microphysical_fields(microphysics::Nothing, grid, boundary_conditions) = NamedTuple()
+materialize_microphysical_fields(microphysics::Nothing, grid, boundary_conditions) = (; qᵛ=CenterField(grid))
+
+"""
+$(TYPEDSIGNATURES)
+
+Return the total initial aerosol number concentration [m⁻³] for a microphysics scheme.
+
+This is used by [`initialize_model_microphysical_fields!`](@ref) and parcel model
+construction to set a physically meaningful default for the prognostic aerosol number
+density `ρnᵃ`. The value is derived from the aerosol size distribution stored in the
+microphysics scheme, so it stays consistent with the activation parameters.
+
+Returns `0` by default; extensions override this for schemes with prognostic aerosol.
+"""
+initial_aerosol_number(microphysics) = 0
+
+"""
+$(TYPEDSIGNATURES)
+
+Initialize default values for microphysical fields after materialization.
+
+Sets `ρnᵃ` (aerosol number density) to [`initial_aerosol_number(microphysics)`](@ref)
+if the field exists. All other microphysical fields remain at zero.
+Users can override with `set!`.
+"""
+initialize_model_microphysical_fields!(fields, ::Nothing) = nothing
+
+function initialize_model_microphysical_fields!(fields, microphysics)
+    if :ρnᵃ ∈ keys(fields)
+        set!(fields.ρnᵃ, initial_aerosol_number(microphysics))
+    end
+    return nothing
+end
 
 """
 $(TYPEDSIGNATURES)
@@ -305,8 +385,39 @@ Schemes should write all auxiliary fields in one function. This includes:
 - Vapor mass fraction `qᵛ` from the thermodynamic state
 - Terminal velocities for sedimentation
 
+See [`WarmRainState`](@ref) implementation below for an example.
 """
 function update_microphysical_auxiliaries! end
+
+# Nothing microphysics: do nothing for any state
+@inline function update_microphysical_auxiliaries!(μ, i, j, k, grid, microphysics::Nothing, ℳ, ρ, 𝒰, constants)
+    return nothing
+end
+
+# Explicit disambiguation: Nothing microphysics + WarmRainState
+@inline function update_microphysical_auxiliaries!(μ, i, j, k, grid, microphysics::Nothing, ℳ::WarmRainState, ρ, 𝒰, constants)
+    return nothing
+end
+
+# Explicit disambiguation: Nothing microphysics + NothingMicrophysicalState
+@inline function update_microphysical_auxiliaries!(μ, i, j, k, grid, microphysics::Nothing, ℳ::NothingMicrophysicalState, ρ, 𝒰, constants)
+    return nothing
+end
+
+# Default for WarmRainState (used by DCMIP2016Kessler and non-precipitating warm-rain schemes)
+@inline function update_microphysical_auxiliaries!(μ, i, j, k, grid, microphysics, ℳ::WarmRainState, ρ, 𝒰, constants)
+    # Write state fields
+    @inbounds μ.qᶜˡ[i, j, k] = ℳ.qᶜˡ
+    @inbounds μ.qʳ[i, j, k] = ℳ.qʳ
+
+    # Vapor from thermodynamic state
+    @inbounds μ.qᵛ[i, j, k] = 𝒰.moisture_mass_fractions.vapor
+
+    # Derived: total liquid
+    @inbounds μ.qˡ[i, j, k] = ℳ.qᶜˡ + ℳ.qʳ
+
+    return nothing
+end
 
 # Fallback for NothingMicrophysicalState
 @inline function update_microphysical_auxiliaries!(μ, i, j, k, grid, microphysics, ℳ::NothingMicrophysicalState, ρ, 𝒰, constants)
@@ -325,11 +436,14 @@ This orchestrating function:
 Schemes should implement [`update_microphysical_auxiliaries!`](@ref), not this function.
 """
 @inline function update_microphysical_fields!(μ, i, j, k, grid, microphysics::Nothing, ρ, 𝒰, constants)
+    @inbounds μ.qᵛ[i, j, k] = 𝒰.moisture_mass_fractions.vapor
     return nothing
 end
 
 @inline function update_microphysical_fields!(μ, i, j, k, grid, microphysics, ρ, 𝒰, constants)
-    ℳ = grid_microphysical_state(i, j, k, grid, microphysics, μ, ρ, 𝒰)
+    # velocities are not used for auxiliary field updates, pass zeros
+    zero_velocities = (; u = zero(ρ), v = zero(ρ), w = zero(ρ))
+    ℳ = grid_microphysical_state(i, j, k, grid, microphysics, μ, ρ, 𝒰, zero_velocities)
     update_microphysical_auxiliaries!(μ, i, j, k, grid, microphysics, ℳ, ρ, 𝒰, constants)
     return nothing
 end
@@ -337,7 +451,31 @@ end
 """
 $(TYPEDSIGNATURES)
 
-Compute [`MoistureMassFractions`](@ref) from a microphysical state `ℳ` and total moisture `qᵗ`.
+Convert total specific moisture `qᵗ` to the scheme-dependent specific moisture `qᵛᵉ`
+by subtracting the appropriate condensate from the microphysical state `ℳ`.
+
+For non-equilibrium schemes, `qᵛᵉ = qᵛ = qᵗ - qˡ` (subtract all condensate).
+For saturation adjustment schemes, `qᵛᵉ = qᵉ = qᵗ - qʳ` (subtract only precipitation).
+For `Nothing` microphysics, `qᵛᵉ = qᵗ` (all moisture is vapor).
+
+This is used by parcel models that store total moisture `qᵗ` as the prognostic
+variable, to produce the correct input for [`moisture_fractions`](@ref).
+"""
+@inline specific_prognostic_moisture_from_total(::Nothing, qᵗ, ℳ) = qᵗ
+@inline specific_prognostic_moisture_from_total(::Nothing, qᵗ, ::NothingMicrophysicalState) = qᵗ
+@inline specific_prognostic_moisture_from_total(::Nothing, qᵗ, ::NamedTuple) = qᵗ
+
+# Generic fallback: no condensate prognostics → all moisture is vapor/equilibrium.
+@inline specific_prognostic_moisture_from_total(microphysics, qᵗ, ::NothingMicrophysicalState) = qᵗ
+
+"""
+$(TYPEDSIGNATURES)
+
+Compute [`MoistureMassFractions`](@ref) from a microphysical state `ℳ` and
+scheme-dependent specific moisture `qᵛᵉ`.
+
+The input `qᵛᵉ` is the scheme-dependent specific moisture: vapor for non-equilibrium
+schemes, or equilibrium moisture (``qᵉ = qᵛ + qᶜˡ``) for saturation adjustment schemes.
 
 This is the state-based (gridless) interface for computing moisture fractions.
 Microphysics schemes should extend this method to partition moisture based on
@@ -345,31 +483,29 @@ their prognostic variables.
 
 The default implementation for `Nothing` microphysics assumes all moisture is vapor.
 """
-@inline moisture_fractions(::Nothing, ℳ, qᵗ) = MoistureMassFractions(qᵗ)
-@inline moisture_fractions(microphysics, ::NothingMicrophysicalState, qᵗ) = MoistureMassFractions(qᵗ)
-@inline moisture_fractions(::Nothing, ::NothingMicrophysicalState, qᵗ) = MoistureMassFractions(qᵗ)
+@inline moisture_fractions(::Nothing, ℳ, qᵛ) = MoistureMassFractions(qᵛ)
+@inline moisture_fractions(microphysics, ::NothingMicrophysicalState, qᵛ) = MoistureMassFractions(qᵛ)
+@inline moisture_fractions(::Nothing, ::NothingMicrophysicalState, qᵛ) = MoistureMassFractions(qᵛ)
 
 # Disambiguation for Nothing microphysics + specific state types
-@inline moisture_fractions(::Nothing, ℳ::WarmRainState, qᵗ) = MoistureMassFractions(qᵗ)
-@inline moisture_fractions(::Nothing, ℳ::NamedTuple, qᵗ) = MoistureMassFractions(qᵗ)
+@inline moisture_fractions(::Nothing, ℳ::WarmRainState, qᵛ) = MoistureMassFractions(qᵛ)
+@inline moisture_fractions(::Nothing, ℳ::NamedTuple, qᵛ) = MoistureMassFractions(qᵛ)
 
 # WarmRainState: cloud liquid + rain
-@inline function moisture_fractions(microphysics, ℳ::WarmRainState, qᵗ)
+# Input qᵛ is vapor; used with condensate to build moisture fractions.
+@inline function moisture_fractions(microphysics, ℳ::WarmRainState, qᵛ)
     qˡ = ℳ.qᶜˡ + ℳ.qʳ
-    qᵛ = max(zero(qᵗ), qᵗ - qˡ)
     return MoistureMassFractions(qᵛ, qˡ)
 end
 
 # Fallback for NamedTuple microphysical state (used by parcel models with prognostic microphysics).
 # NamedTuple contains specific moisture fractions computed from ρ-weighted prognostics.
-# Assumes warm-phase: all condensate is liquid.
-@inline function moisture_fractions(microphysics, ℳ::NamedTuple, qᵗ)
-    # ℳ is assumed to contain specific quantities (already divided by ρ)
-    qˡ = zero(qᵗ)
-    qˡ += haskey(ℳ, :qᶜˡ) ? ℳ.qᶜˡ : zero(qᵗ)
-    qˡ += haskey(ℳ, :qʳ) ? ℳ.qʳ : zero(qᵗ)
-    qᵛ = max(zero(qᵗ), qᵗ - qˡ)
-    return MoistureMassFractions(qᵛ, qˡ)
+# Input qᵛᵉ is scheme-dependent specific moisture (vapor or equilibrium moisture).
+@inline function moisture_fractions(microphysics, ℳ::NamedTuple, qᵛᵉ)
+    qˡ = zero(qᵛᵉ)
+    qˡ += haskey(ℳ, :qᶜˡ) ? ℳ.qᶜˡ : zero(qᵛᵉ)
+    qˡ += haskey(ℳ, :qʳ) ? ℳ.qʳ : zero(qᵛᵉ)
+    return MoistureMassFractions(qᵛᵉ, qˡ)
 end
 
 """
@@ -387,14 +523,16 @@ Non-equilibrium schemes don't need `𝒰` to build their state (they use prognos
 
 **Saturation adjustment schemes** should override this to read from diagnostic fields.
 """
-@inline function grid_moisture_fractions(i, j, k, grid, microphysics, ρ, qᵗ, μ_fields)
+@inline function grid_moisture_fractions(i, j, k, grid, microphysics, ρ, qᵛ, μ_fields)
     μ = extract_microphysical_prognostics(i, j, k, microphysics, μ_fields)
-    ℳ = microphysical_state(microphysics, ρ, μ, nothing)
-    return moisture_fractions(microphysics, ℳ, qᵗ)
+    # velocities are not used for moisture fraction computation, pass zeros
+    zero_velocities = (; u = zero(ρ), v = zero(ρ), w = zero(ρ))
+    ℳ = microphysical_state(microphysics, ρ, μ, nothing, zero_velocities)
+    return moisture_fractions(microphysics, ℳ, qᵛ)
 end
 
 # Fallback for Nothing microphysics (no fields to index)
-@inline grid_moisture_fractions(i, j, k, grid, microphysics::Nothing, ρ, qᵗ, μ) = MoistureMassFractions(qᵗ)
+@inline grid_moisture_fractions(i, j, k, grid, microphysics::Nothing, ρ, qᵛ, μ) = MoistureMassFractions(qᵛ)
 
 """
 $(TYPEDSIGNATURES)
@@ -494,17 +632,17 @@ surface_precipitation_flux(model, ::Nothing) = Field{Center, Center, Nothing}(mo
 $(TYPEDEF)
 $(TYPEDFIELDS)
 
-Represents cloud particles with a constant effective radius in microns (μm).
+Represents cloud particles with a constant effective radius in meters.
 """
 struct ConstantRadiusParticles{FT}
-    "Effective radius [μm]"
+    "Effective radius [m]"
     radius :: FT
 end
 
 """
 $(TYPEDSIGNATURES)
 
-Return the effective radius of cloud liquid droplets in microns (μm).
+Return the effective radius of cloud liquid droplets in meters.
 
 This function dispatches on the `effective_radius_model` argument. The default
 implementation for `ConstantRadiusParticles` returns a constant value.
@@ -518,7 +656,7 @@ based on cloud properties.
 """
 $(TYPEDSIGNATURES)
 
-Return the effective radius of cloud ice particles in microns (μm).
+Return the effective radius of cloud ice particles in meters.
 
 This function dispatches on the `effective_radius_model` argument. The default
 implementation for [`ConstantRadiusParticles`](@ref) returns a constant value.

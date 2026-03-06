@@ -132,6 +132,40 @@ end
     end
 end
 
+@testset "Dewpoint temperature diagnostics [$(FT)]" for FT in test_float_types()
+    Oceananigans.defaults.FloatType = FT
+    grid = RectilinearGrid(default_arch; size=(2, 2, 8), extent=(100, 100, 1000))
+    microphysics = SaturationAdjustment()
+    model = AtmosphereModel(grid; microphysics)
+
+    # Test with subsaturated conditions (low moisture)
+    set!(model, θ=300, qᵗ=0.005)
+    T⁺ = DewpointTemperature(model)
+    @test T⁺ isa Oceananigans.AbstractOperations.KernelFunctionOperation
+    T⁺_field = Field(T⁺)
+    @test all(isfinite.(interior(T⁺_field)))
+    # Dewpoint should be less than or equal to temperature
+    @test all(interior(T⁺_field) .<= interior(model.temperature))
+    # Dewpoint should be in a reasonable range (above 200K)
+    @test all(interior(T⁺_field) .> 200)
+
+    # With low moisture, dewpoint should be less than temperature
+    @test all(interior(T⁺_field) .< interior(model.temperature))
+
+    # Test with saturated conditions (high moisture)
+    set!(model, θ=300, qᵗ=0.03)  # High moisture to ensure saturation
+    T⁺_sat = DewpointTemperatureField(model)
+    # For saturated conditions, dewpoint should equal temperature where there is condensate
+    qˡ = model.microphysical_fields.qˡ
+    @allowscalar begin
+        for k in 1:8
+            if qˡ[1, 1, k] > 0  # If there's condensate, should be saturated
+                @test T⁺_sat[1, 1, k] ≈ model.temperature[1, 1, k] rtol=FT(1e-3)
+            end
+        end
+    end
+end
+
 @testset "Hydrostatic pressure computation [$(FT)]" for FT in test_float_types()
     Oceananigans.defaults.FloatType = FT
     grid = RectilinearGrid(default_arch; size=(1, 1, 20), x=(0, 1000), y=(0, 1000), z=(0, 10000))
