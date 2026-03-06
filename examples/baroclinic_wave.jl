@@ -82,9 +82,9 @@ using CUDA
 # Coarse resolution for fast Reactant compilation.
 # Increase `Nλ`, `Nφ`, `Nz` for physical runs.
 
-Nλ = 60
-Nφ = 60
-Nz = 20
+Nλ = 10
+Nφ = 10
+Nz = 5
 H  = 30kilometers
 
 grid = LatitudeLongitudeGrid(ReactantState();
@@ -108,17 +108,18 @@ N² = 1e-4    # s⁻² — Brunt-Väisälä frequency squared
 
 # ## Model configuration
 #
-# Split-explicit compressible dynamics with acoustic substepping.
-# The reference state uses the stratified ``θ^{\rm b}(z)`` profile
-# so the buoyancy force is a perturbation ``ρ b = -g (ρ - ρ_r)``.
+# Two separate models on the same grid:
+# - `model_vis` runs forward-only for the GIF (cheap, many steps)
+# - `model_ad`  runs forward+backward for sensitivity (fewer steps to fit in memory)
 
 coriolis = HydrostaticSphericalCoriolis()
 
-dynamics = CompressibleDynamics(ExplicitTimeStepping();
-                                surface_pressure = p₀,
-                                reference_potential_temperature = θᵇ)
+make_dynamics() = CompressibleDynamics(ExplicitTimeStepping();
+                                       surface_pressure = p₀,
+                                       reference_potential_temperature = θᵇ)
 
-model = AtmosphereModel(grid; dynamics, coriolis)
+model_vis = AtmosphereModel(grid; dynamics = make_dynamics(), coriolis)
+model_ad  = AtmosphereModel(grid; dynamics = make_dynamics(), coriolis)
 
 # ## Initial conditions
 
@@ -176,12 +177,20 @@ end
 # ### Set model state
 #
 # Density must be set before velocity so that momentum ``ρu`` is
-# computed correctly inside `set_velocity!`.
+# computed correctly inside `set_velocity!`.  The expensive ``ρᵢ``
+# evaluation is done once on `model_vis`; the density array is then
+# copied to `model_ad` to avoid recomputing the numerical integration.
 
-@info "Setting initial conditions…"
+@info "Setting initial conditions (vis model)…"
 @time begin
-    set!(model; ρ = ρᵢ)
-    set!(model; u = uᵢ, θ = θᵢ)
+    set!(model_vis; ρ = ρᵢ)
+    set!(model_vis; u = uᵢ, θ = θᵢ)
+end
+
+@info "Copying initial conditions to AD model…"
+@time begin
+    parent(model_ad.dynamics.density) .= parent(model_vis.dynamics.density)
+    set!(model_ad; u = uᵢ, θ = θᵢ)
 end
 
 # ## Time step
@@ -193,16 +202,76 @@ cₛ = sqrt(γ * Rᵈ * θ₀)
 
 @info "Time step" Δt cₛ
 
-# ## Loss function and adjoint
+# ## Visualisation forward run
 #
-# The loss is the mean squared meridional velocity over the full domain.
-# Since ``v = 0`` initially, ``⟨v²⟩`` is exactly the meridional eddy
-# kinetic energy — a direct measure of baroclinic growth.
+# Step `model_vis` forward and capture mid-level snapshots for a sphere GIF.
 
-nsteps = 3600
+nsteps_vis = 4
+sample_interval = max(1, nsteps_vis ÷ 50)
+
+Δλ = 360.0 / Nλ
+Δφ = 170.0 / Nφ
+λ = range(Δλ / 2, 360 - Δλ / 2, length = Nλ)
+φ = range(-85 + Δφ / 2, 85 - Δφ / 2, length = Nφ)
+z = range(Δz / 2, H - Δz / 2, length = Nz)
+
+k_mid  = Nz ÷ 2
+z_mid  = z[k_mid]
+
+λrad = deg2rad.(collect(λ))
+φrad = deg2rad.(collect(φ))
+
+xs = [cos(ϕv) * cos(λv) for λv in λrad, ϕv in φrad]
+ys = [cos(ϕv) * sin(λv) for λv in λrad, ϕv in φrad]
+zs = [sin(ϕv) for λv in λrad, ϕv in φrad]
+
+θ_bg_mid = Float64(θᵇ(z_mid))
+
+θ_frames = Matrix{Float64}[]
+u_frames = Matrix{Float64}[]
+vis_times = Float64[]
+
+function capture_frame!(model, θ_bg_mid, k_mid)
+    θ_mid = Array(@view interior(model.formulation.potential_temperature)[:, :, k_mid])
+    u_mid = Array(@view interior(model.velocities.u)[:, :, k_mid])
+    push!(θ_frames, θ_mid .- θ_bg_mid)
+    push!(u_frames, u_mid)
+    push!(vis_times, Float64(model.clock.time))
+    return nothing
+end
+
+function advance_model!(model, Δt, nsteps)
+    @trace mincut=true checkpointing=true track_numbers=false for _ in 1:nsteps
+        time_step!(model, Δt)
+    end
+    return nothing
+end
+
+@info "Compiling visualisation stepping kernel…"
+@time compiled_vis = Reactant.@compile raise=true raise_first=true sync=true advance_model!(
+    model_vis, Δt, sample_interval)
+
+nframes = nsteps_vis ÷ sample_interval
+capture_frame!(model_vis, θ_bg_mid, k_mid)
+@info "Running visualisation forward pass ($nsteps_vis steps, $nframes frames)…"
+@time for _ in 1:nframes
+    compiled_vis(model_vis, Δt, sample_interval)
+    capture_frame!(model_vis, θ_bg_mid, k_mid)
+end
+
+Nt = length(vis_times)
+
+# ## AD forward + backward
+#
+# Use the separate `model_ad` for Enzyme differentiation.
+# `nsteps_ad` can be smaller than `nsteps_vis` to limit memory usage
+# in the backward pass.
+
+nsteps_ad = 4
 
 θ_init  = CenterField(grid); set!(θ_init,  θᵢ)
-ρ_init  = CenterField(grid); set!(ρ_init,  ρᵢ)
+ρ_init  = CenterField(grid)
+parent(ρ_init) .= parent(model_vis.dynamics.density)
 dθ_init = CenterField(grid); set!(dθ_init, FT(0))
 
 function loss(model, θ_init, ρ_init, Δt, nsteps)
@@ -228,74 +297,39 @@ function grad_loss(model, dmodel, θ_init, dθ_init, ρ_init, Δt, nsteps)
     return dθ_init, loss_val
 end
 
-# ## Reactant compilation
-#
-# `Reactant.@compile` traces both the forward model and the Enzyme-generated
-# adjoint into XLA/StableHLO, producing fused, optimised kernels.
-
-@info "Compiling forward pass…"
+@info "Compiling AD forward pass…"
 @time compiled_fwd = Reactant.@compile raise=true raise_first=true sync=true loss(
-    model, θ_init, ρ_init, Δt, nsteps)
+    model_ad, θ_init, ρ_init, Δt, nsteps_ad)
 
-@info "Compiling backward pass (Enzyme reverse mode)…"
-dmodel = Enzyme.make_zero(model)
+@info "Compiling AD backward pass (Enzyme reverse mode)…"
+dmodel = Enzyme.make_zero(model_ad)
 @time compiled_bwd = Reactant.@compile raise=true raise_first=true sync=true grad_loss(
-    model, dmodel, θ_init, dθ_init, ρ_init, Δt, nsteps)
+    model_ad, dmodel, θ_init, dθ_init, ρ_init, Δt, nsteps_ad)
 
-# ## Run
-#
-# Capture the evolved state from the forward pass **before** the backward
-# pass, which may invalidate internal XLA buffers via buffer donation.
-
-@info "Running compiled forward pass…"
-@time compiled_fwd(model, θ_init, ρ_init, Δt, nsteps)
-
-θ_evolved = Array(interior(model.formulation.potential_temperature))
-u_evolved = Array(interior(model.velocities.u))
-t_final   = Float64(model.clock.time)
+@info "Running AD forward pass…"
+@time compiled_fwd(model_ad, θ_init, ρ_init, Δt, nsteps_ad)
 
 @info "Computing sensitivity (Enzyme reverse mode)…"
-@time dθ, J = compiled_bwd(model, dmodel, θ_init, dθ_init, ρ_init, Δt, nsteps)
+@time dθ, J = compiled_bwd(model_ad, dmodel, θ_init, dθ_init, ρ_init, Δt, nsteps_ad)
 sensitivity = Array(interior(dθ))
 
 @info "Loss value" J
 @info "Max |∂J/∂θ₀|" maximum(abs, sensitivity)
 
-# ## Visualisation
+# ## Plots
 #
-# Two outputs: sensitivity heatmaps and a sphere snapshot of the evolved
-# state. The sphere data comes from the forward-pass arrays captured above,
-# avoiding the need to re-run the model after the backward pass (which
-# invalidates internal XLA buffers).
+# Three outputs: sensitivity heatmap, sphere snapshot, and sphere GIF.
 
-Δλ = 360.0 / Nλ
-Δφ = 170.0 / Nφ
-λ = range(Δλ / 2, 360 - Δλ / 2, length = Nλ)
-φ = range(-85 + Δφ / 2, 85 - Δφ / 2, length = Nφ)
-z = range(Δz / 2, H - Δz / 2, length = Nz)
-
-k_mid  = Nz ÷ 2
-z_mid  = z[k_mid]
 i_pert = argmin(abs.(collect(λ) .- λ_c))
-
-θ_bg_mid = Float64(θᵇ(z_mid))
-θ′_mid   = θ_evolved[:, :, k_mid] .- θ_bg_mid
-u_mid    = u_evolved[:, :, k_mid]
 sens_mid = sensitivity[:, :, k_mid]
+sphere_kw = (elevation = π / 6, azimuth = -π / 2, aspect = :data)
 
-λrad = deg2rad.(collect(λ))
-φrad = deg2rad.(collect(φ))
-
-xs = [cos(ϕv) * cos(λv) for λv in λrad, ϕv in φrad]
-ys = [cos(ϕv) * sin(λv) for λv in λrad, ϕv in φrad]
-zs = [sin(ϕv) for λv in λrad, ϕv in φrad]
-
-# Sensitivity figure.
+# Sensitivity heatmap.
 slimit = max(maximum(abs, sensitivity), eps(FT))
 
 fig_sens = Figure(size = (1200, 450), fontsize = 14)
 Label(fig_sens[0, :],
-      @sprintf("Adjoint sensitivity (∂J/∂θ₀), J = %.6e", J),
+      @sprintf("Adjoint sensitivity (∂J/∂θ₀), J = %.6e", Float64(J)),
       fontsize = 16, tellwidth = false)
 
 axs1 = Axis(fig_sens[1, 1]; xlabel = "λ (°)", ylabel = "φ (°)",
@@ -313,20 +347,19 @@ Colorbar(fig_sens[1, 4], hms2; label = "∂J/∂θ₀")
 save("baroclinic_wave_sensitivity.png", fig_sens; px_per_unit = 2)
 @info "Saved baroclinic_wave_sensitivity.png"
 
-# Sphere snapshot: evolved state + adjoint sensitivity.
+# Sphere snapshot (final frame + sensitivity).
 fig_sphere = Figure(size = (1800, 600))
-sphere_kw = (elevation = π / 6, azimuth = -π / 2, aspect = :data)
 
 ax1 = Axis3(fig_sphere[1, 1];
             title = "θ′ at z ≈ $(Int(round(z_mid / 1e3))) km",
             sphere_kw...)
-hm1 = surface!(ax1, xs, ys, zs; color = θ′_mid, colormap = :balance, shading = NoShading)
+hm1 = surface!(ax1, xs, ys, zs; color = θ_frames[Nt], colormap = :balance, shading = NoShading)
 Colorbar(fig_sphere[1, 2], hm1; label = "θ′ (K)")
 
 ax2 = Axis3(fig_sphere[1, 3];
             title = "u at z ≈ $(Int(round(z_mid / 1e3))) km",
             sphere_kw...)
-hm2 = surface!(ax2, xs, ys, zs; color = u_mid, colormap = :speed, shading = NoShading)
+hm2 = surface!(ax2, xs, ys, zs; color = u_frames[Nt], colormap = :speed, shading = NoShading)
 Colorbar(fig_sphere[1, 4], hm2; label = "u (m/s)")
 
 ax3 = Axis3(fig_sphere[1, 5];
@@ -342,10 +375,45 @@ for ax in (ax1, ax2, ax3)
 end
 
 Label(fig_sphere[0, :],
-      @sprintf("Baroclinic wave — t = %s,  J = ⟨v²⟩ = %.4e", prettytime(t_final), Float64(J)),
+      @sprintf("Baroclinic wave — t = %s,  J = ⟨v²⟩ = %.4e",
+               prettytime(vis_times[Nt]), Float64(J)),
       fontsize = 18, tellwidth = false)
 
 save("baroclinic_wave_sphere.png", fig_sphere; px_per_unit = 2)
 @info "Saved baroclinic_wave_sphere.png"
+
+# Sphere MP4 (evolving θ′ and u from the visualisation model).
+n = Observable(1)
+θ′n = @lift θ_frames[$n]
+un  = @lift u_frames[$n]
+ttl = @lift @sprintf("z ≈ %d km,  t = %s",
+                     round(z_mid / 1e3), prettytime(vis_times[$n]))
+
+θlim = max(maximum(x -> maximum(abs, x), θ_frames), eps(Float64))
+ulim = max(maximum(x -> maximum(abs, x), u_frames), eps(Float64))
+
+fig_anim = Figure(size = (1200, 600))
+axg1 = Axis3(fig_anim[1, 1]; title = "θ′", sphere_kw...)
+hmg1 = surface!(axg1, xs, ys, zs; color = θ′n, colormap = :balance,
+                colorrange = (-θlim, θlim), shading = NoShading)
+Colorbar(fig_anim[1, 2], hmg1; label = "θ′ (K)")
+
+axg2 = Axis3(fig_anim[1, 3]; title = "u", sphere_kw...)
+hmg2 = surface!(axg2, xs, ys, zs; color = un, colormap = :balance,
+                colorrange = (-ulim, ulim), shading = NoShading)
+Colorbar(fig_anim[1, 4], hmg2; label = "u (m/s)")
+
+fig_anim[0, :] = Label(fig_anim, ttl, fontsize = 20, tellwidth = false)
+
+for ax in (axg1, axg2)
+    hidedecorations!(ax)
+    hidespines!(ax)
+end
+
+@info "Recording MP4 ($Nt frames)…"
+CairoMakie.record(fig_anim, "baroclinic_wave_sphere.mp4", 1:Nt; framerate = 12) do nn
+    n[] = nn
+end
+@info "Saved baroclinic_wave_sphere.mp4"
 
 nothing #hide
