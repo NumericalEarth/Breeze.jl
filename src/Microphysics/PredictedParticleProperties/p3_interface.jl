@@ -495,6 +495,14 @@ Liquid on ice tendency: loses from shedding and refreezing.
     return tendency_ρqʷⁱ(rates, ρ)
 end
 
+"""
+Vapor tendency: loses from condensation, deposition, nucleation; gains from evaporation, sublimation.
+"""
+@inline function AM.microphysical_tendency(p3::P3, ::Val{:ρqᵛ}, ρ, ℳ::P3MicrophysicalState, 𝒰, constants)
+    rates, _, _, _, _, _ = p3_rates_and_properties(p3, ρ, ℳ, 𝒰, constants)
+    return tendency_ρqᵛ(rates, ρ)
+end
+
 # Fallback for any unhandled field names - return zero tendency
 @inline AM.microphysical_tendency(::P3, name, ρ, ℳ::P3MicrophysicalState, 𝒰, constants) = zero(ρ)
 

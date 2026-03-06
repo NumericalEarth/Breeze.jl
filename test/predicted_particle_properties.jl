@@ -20,7 +20,8 @@ using Breeze.Microphysics.PredictedParticleProperties:
     tendency_ρqᶠ,
     tendency_ρbᶠ,
     tendency_ρzⁱ,
-    tendency_ρqʷⁱ
+    tendency_ρqʷⁱ,
+    tendency_ρqᵛ
 
 using Oceananigans: CPU
 
@@ -1134,6 +1135,7 @@ using Oceananigans: CPU
             ntuple(_ -> zero(FT), fieldcount(P3ProcessRates))...
         )
         @test rates isa P3ProcessRates{FT}
+        @test rates.condensation == 0.0
         @test rates.autoconversion == 0.0
         @test rates.partial_melting == 0.0
         @test rates.complete_melting == 0.0
@@ -1150,6 +1152,8 @@ using Oceananigans: CPU
 
         # Create rates with typical warm-rain and ice process activity
         rates = P3ProcessRates(
+            # Phase 1: Cloud condensation/evaporation
+            FT(5e-7),   # condensation (positive = condensation)
             # Phase 1: Rain
             FT(1e-7),   # autoconversion
             FT(2e-7),   # accretion
@@ -1194,6 +1198,10 @@ using Oceananigans: CPU
         @test isfinite(tendency_ρbᶠ(rates, ρ, Fᶠ, ρᶠ))
         @test isfinite(tendency_ρzⁱ(rates, ρ, qⁱ, nⁱ, zⁱ))
         @test isfinite(tendency_ρqʷⁱ(rates, ρ))
+        @test isfinite(tendency_ρqᵛ(rates, ρ))
+
+        # Physics: condensation (vapor→cloud) should decrease vapor
+        @test tendency_ρqᵛ(rates, ρ) < 0
     end
 
     @testset "Tendency functions - zero rates produce zero tendencies" begin
@@ -1210,6 +1218,7 @@ using Oceananigans: CPU
         @test tendency_ρbᶠ(zero_rates, ρ, FT(0.3), FT(400.0)) == 0.0
         @test tendency_ρzⁱ(zero_rates, ρ, FT(1e-4), FT(1e5), FT(1e-8)) == 0.0
         @test tendency_ρqʷⁱ(zero_rates, ρ) == 0.0
+        @test tendency_ρqᵛ(zero_rates, ρ) == 0.0
     end
 
     @testset "Tendency functions - Float32 type stability" begin
@@ -1226,5 +1235,6 @@ using Oceananigans: CPU
         @test tendency_ρbᶠ(rates, ρ, FT(0.3), FT(400.0)) isa FT
         @test tendency_ρzⁱ(rates, ρ, FT(1e-4), FT(1e5), FT(1e-8)) isa FT
         @test tendency_ρqʷⁱ(rates, ρ) isa FT
+        @test tendency_ρqᵛ(rates, ρ) isa FT
     end
 end

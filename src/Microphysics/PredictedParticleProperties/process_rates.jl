@@ -14,7 +14,11 @@ using Breeze.Thermodynamics: temperature,
                              saturation_specific_humidity,
                              saturation_vapor_pressure,
                              PlanarLiquidSurface,
-                             PlanarIceSurface
+                             PlanarIceSurface,
+                             liquid_latent_heat,
+                             mixture_heat_capacity,
+                             vapor_gas_constant,
+                             MoistureMassFractions
 
 #####
 ##### Utility functions
@@ -41,6 +45,52 @@ end
 
 # Convenience overload for common case
 @inline safe_divide(a, b) = safe_divide(a, b, zero(a))
+
+#####
+##### Cloud condensation/evaporation
+#####
+
+"""
+    cloud_condensation_rate(p3, qᶜˡ, qᵛ, qᵛ⁺ˡ, T, q, constants)
+
+Compute cloud liquid condensation/evaporation rate using relaxation-to-saturation.
+
+When the air is supersaturated (qᵛ > qᵛ⁺ˡ), excess vapor condenses onto cloud
+droplets. When subsaturated, cloud liquid evaporates back to vapor. The rate
+follows a relaxation timescale with a thermodynamic (psychrometric) correction
+factor that accounts for latent heating during phase change.
+
+# Arguments
+- `p3`: P3 microphysics scheme (provides condensation timescale)
+- `qᶜˡ`: Cloud liquid mass fraction [kg/kg]
+- `qᵛ`: Vapor mass fraction [kg/kg]
+- `qᵛ⁺ˡ`: Saturation vapor mass fraction over liquid [kg/kg]
+- `T`: Temperature [K]
+- `q`: Moisture mass fractions (vapor, liquid, ice)
+- `constants`: Thermodynamic constants
+
+# Returns
+- Rate of vapor → cloud liquid conversion [kg/kg/s]
+  (positive = condensation, negative = evaporation)
+"""
+@inline function cloud_condensation_rate(p3, qᶜˡ, qᵛ, qᵛ⁺ˡ, T, q, constants)
+    FT = typeof(qᶜˡ)
+    τᶜˡ = p3.cloud.condensation_timescale
+
+    # Thermodynamic adjustment factor (psychrometric correction)
+    ℒˡ = liquid_latent_heat(T, constants)
+    cᵖᵐ = mixture_heat_capacity(q, constants)
+    Rᵛ = vapor_gas_constant(constants)
+    dqᵛ⁺_dT = qᵛ⁺ˡ * (ℒˡ / (Rᵛ * T^2) - 1 / T)
+    Γˡ = 1 + (ℒˡ / cᵖᵐ) * dqᵛ⁺_dT
+
+    # Relaxation toward saturation
+    Sᶜᵒⁿᵈ = (qᵛ - qᵛ⁺ˡ) / (Γˡ * τᶜˡ)
+
+    # Limit evaporation to available cloud liquid
+    Sᶜᵒⁿᵈ_min = -max(0, qᶜˡ) / τᶜˡ
+    return max(Sᶜᵒⁿᵈ, Sᶜᵒⁿᵈ_min)
+end
 
 #####
 ##### Rain processes
@@ -1357,6 +1407,9 @@ Following Milbrandt et al. (2025), melting is partitioned:
 - `complete_melting`: Meltwater sheds to rain (small particles)
 """
 struct P3ProcessRates{FT}
+    # Phase 1: Cloud condensation/evaporation
+    condensation :: FT             # Vapor → cloud liquid [kg/kg/s] (positive = condensation, negative = evaporation)
+
     # Phase 1: Rain tendencies
     autoconversion :: FT           # Cloud → rain mass [kg/kg/s]
     accretion :: FT                # Cloud → rain mass (via rain sweep-out) [kg/kg/s]
@@ -1442,8 +1495,16 @@ suitable for use in GPU kernels where grid indexing is handled externally.
     qᵛ⁺ˡ = saturation_specific_humidity(T, ρ, constants, PlanarLiquidSurface())
     qᵛ⁺ⁱ = saturation_specific_humidity(T, ρ, constants, PlanarIceSurface())
 
+    # Moisture mass fractions for thermodynamic calculations
+    q = 𝒰.moisture_mass_fractions
+
     # Cloud droplet number concentration
     Nᶜ = p3.cloud.number_concentration
+
+    # =========================================================================
+    # Phase 1: Cloud condensation/evaporation
+    # =========================================================================
+    cond = cloud_condensation_rate(p3, qᶜˡ, qᵛ, qᵛ⁺ˡ, T, q, constants)
 
     # =========================================================================
     # Phase 1: Rain processes
@@ -1503,6 +1564,8 @@ suitable for use in GPU kernels where grid indexing is handled externally.
     spl_q, spl_n = rime_splintering_rate(p3, cloud_rim, rain_rim, T)
 
     return P3ProcessRates(
+        # Phase 1: Condensation
+        cond,
         # Phase 1: Rain
         autoconv, accr, rain_evap, rain_self,
         # Phase 1: Ice
@@ -1533,6 +1596,9 @@ end
 
 Compute cloud liquid mass tendency from P3 process rates.
 
+Cloud liquid gains from:
+- Condensation (Phase 1)
+
 Cloud liquid is consumed by:
 - Autoconversion (Phase 1)
 - Accretion by rain (Phase 1)
@@ -1540,10 +1606,12 @@ Cloud liquid is consumed by:
 - Immersion freezing (Phase 2)
 """
 @inline function tendency_ρqᶜˡ(rates::P3ProcessRates, ρ)
+    # Phase 1: condensation (positive = cloud forms)
+    gain = rates.condensation
     # Phase 1: autoconversion and accretion
     # Phase 2: cloud riming by ice, immersion freezing
     loss = rates.autoconversion + rates.accretion + rates.cloud_riming + rates.cloud_freezing_mass
-    return -ρ * loss
+    return ρ * (gain - loss)
 end
 
 """
@@ -1843,6 +1911,29 @@ while complete melting sheds directly to rain.
     return ρ * (gain - loss)
 end
 
+"""
+    tendency_ρqᵛ(rates)
+
+Compute vapor mass tendency from P3 process rates.
+
+Vapor is consumed by:
+- Condensation (vapor → cloud liquid)
+- Deposition (vapor → ice)
+- Deposition nucleation (vapor → ice)
+
+Vapor is produced by:
+- Cloud evaporation (negative condensation)
+- Rain evaporation
+- Sublimation (negative deposition)
+"""
+@inline function tendency_ρqᵛ(rates::P3ProcessRates, ρ)
+    # Condensation: positive = vapor loss, negative = vapor gain (evap)
+    # Deposition: positive = vapor loss (dep), negative = vapor gain (sublimation)
+    # Rain evaporation: negative = rain loss = vapor gain
+    # Nucleation: always vapor loss
+    return ρ * (-rates.condensation - rates.deposition - rates.nucleation_mass - rates.rain_evaporation)
+end
+
 #####
 ##### Fallback methods for Nothing rates
 #####
@@ -1859,6 +1950,7 @@ end
 @inline tendency_ρbᶠ(::Nothing, ρ, Fᶠ, ρᶠ) = zero(ρ)
 @inline tendency_ρzⁱ(::Nothing, ρ, qⁱ, nⁱ, zⁱ) = zero(ρ)
 @inline tendency_ρqʷⁱ(::Nothing, ρ) = zero(ρ)
+@inline tendency_ρqᵛ(::Nothing, ρ) = zero(ρ)
 
 #####
 ##### Phase 3: Terminal velocities
