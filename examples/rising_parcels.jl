@@ -2,15 +2,30 @@
 #
 # This example demonstrates the `ParcelDynamics` mode for `AtmosphereModel`,
 # which enables Lagrangian simulations of air parcels moving through a
-# prescribed background atmosphere. The example simulates two parcels:
+# prescribed background atmosphere. The example simulates five parcels — four with
+# prescribed vertical velocity and one with buoyancy-driven ascent:
 #
 # 1. **Ascending dry adiabatic parcel**: A rising parcel cools at ~9.8 K/km, conserving
 #    potential temperature. Vapor increases toward saturation as temperature drops.
 #
-# 2. **Ascending cloudy precipitating parcel**: A moist parcel rises through the
+# 2. **Ascending cloudy parcel with CliMA one-moment microphysics)**: A moist parcel rises through the
 #    lifting condensation level, forming cloud via condensation, then rain via
 #    autoconversion. We use one-moment microphysics with non-equilibrium cloud
 #    formation [Morrison2008novel](@citet) to track cloud liquid and rain mass.
+#
+# 3. **Ascending cloudy parcel with Kessler microphysics**: The same moist parcel, but using
+#    the DCMIP2016 Kessler warm-rain scheme [Kessler1969](@citet). This scheme includes
+#    autoconversion, accretion, saturation adjustment, and rain evaporation.
+#
+# 4. **Ascending cloudy parcel with two-moment microphysics**: The moist parcel again, now
+#    using the [Seifert and Beheng (2006)](@cite SeifertBeheng2006) two-moment scheme, which
+#    tracks both mass and number concentration for cloud liquid and rain. Cloud droplets
+#    form via aerosol activation using the [Abdul-Razzak and Ghan (2000)](@cite
+#    AbdulRazzakGhan2000) scheme when the parcel becomes supersaturated.
+#
+# 5. **Buoyancy-driven cloudy ascent**: The same two-moment microphysics as case 4, but with
+#    `PrognosticVerticalVelocity` — the parcel's vertical velocity responds to the
+#    buoyancy force dw/dt = −g(ρ_parcel − ρ_env)/ρ_env, rather than being prescribed.
 #
 # The parcel model works with `AtmosphereModel`, using the standard `Simulation` interface.
 
@@ -27,7 +42,7 @@ using CairoMakie
 # causing adiabatic expansion and cooling. Without moisture condensation,
 # the parcel follows the dry adiabatic lapse rate Γd ≈ 9.8 K/km.
 
-grid = RectilinearGrid(size=100, z=(0, 10kilometers), topology=(Flat, Flat, Bounded))
+grid = RectilinearGrid(size=700, z=(0, 7kilometers), topology=(Flat, Flat, Bounded))
 model = AtmosphereModel(grid; dynamics=ParcelDynamics())
 
 reference_state = ReferenceState(grid, model.thermodynamic_constants,
@@ -83,6 +98,7 @@ nothing #hide
 
 BreezeCloudMicrophysicsExt = Base.get_extension(Breeze, :BreezeCloudMicrophysicsExt)
 OneMomentCloudMicrophysics = BreezeCloudMicrophysicsExt.OneMomentCloudMicrophysics
+TwoMomentCloudMicrophysics = BreezeCloudMicrophysicsExt.TwoMomentCloudMicrophysics
 
 microphysics = OneMomentCloudMicrophysics()
 cloudy_model = AtmosphereModel(grid; dynamics=ParcelDynamics(), microphysics)
@@ -94,7 +110,7 @@ set!(cloudy_model, qᵗ = qᵗ, z = 0, w = 1,
      p = reference_state.pressure,
      ρ = reference_state.density)
 
-cloudy_simulation = Simulation(cloudy_model; Δt=1, stop_time=120minutes)
+cloudy_simulation = Simulation(cloudy_model; Δt=1, stop_time=90minutes)
 
 # Store cloudy parcel snapshots
 cloudy_snapshots = []
@@ -128,14 +144,186 @@ nothing #hide
 cloudy_Tₑ = [interpolate(s.z, cloudy_model.temperature) for s in cloudy_snapshots]
 nothing #hide
 
+# ## Part 3: Cloudy parcel with Kessler microphysics
+#
+# Now we simulate the same moist parcel using the DCMIP2016 Kessler warm-rain scheme.
+# This scheme includes autoconversion, accretion, saturation adjustment, and rain
+# evaporation, following Klemp and Wilhelmson (1978). Unlike the one-moment scheme
+# which uses a relaxation approach, Kessler performs direct saturation adjustment.
+#
+# Note: The DCMIP2016 Kessler scheme uses `TetensFormula` for saturation vapor
+# pressure. We pass it explicitly via `thermodynamic_constants`.
+
+using Breeze: DCMIP2016KesslerMicrophysics, TetensFormula, ThermodynamicConstants
+
+microphysics = DCMIP2016KesslerMicrophysics()
+kessler_constants = ThermodynamicConstants(saturation_vapor_pressure=TetensFormula())
+kessler_model = AtmosphereModel(grid; dynamics=ParcelDynamics(), microphysics,
+                                thermodynamic_constants=kessler_constants)
+
+# Create reference state with the Tetens-based thermodynamic constants
+kessler_reference_state = ReferenceState(grid, kessler_model.thermodynamic_constants,
+                                         surface_pressure = 101325,
+                                         potential_temperature = 300)
+
+# Use the Kessler-specific reference state for initial conditions
+set!(kessler_model, qᵗ = qᵗ, z = 0, w = 1,
+     θ = kessler_reference_state.potential_temperature,
+     p = kessler_reference_state.pressure,
+     ρ = kessler_reference_state.density)
+
+kessler_simulation = Simulation(kessler_model; Δt=1, stop_time=90minutes)
+
+# Store Kessler parcel snapshots
+kessler_snapshots = []
+
+function record_kessler_state!(sim)
+    state = sim.model.dynamics.state
+    t = sim.model.clock.time
+    push!(kessler_snapshots, (; t, z=state.z, ρ=state.ρ, 𝒰=state.𝒰, μ=state.μ))
+    return nothing
+end
+
+add_callback!(kessler_simulation, record_kessler_state!, IterationInterval(10))
+run!(kessler_simulation)
+
+@info "Kessler parcel reached" kessler_model.dynamics.state.z
+
+# Extract time series from Kessler snapshots
+kessler_constants = kessler_model.thermodynamic_constants
+kessler_t = [s.t for s in kessler_snapshots]
+kessler_z = [s.z for s in kessler_snapshots]
+kessler_T = [temperature(s.𝒰, kessler_constants) for s in kessler_snapshots]
+kessler_qᵛ = [s.𝒰.moisture_mass_fractions.vapor for s in kessler_snapshots]
+kessler_qᶜˡ = [s.μ.ρqᶜˡ / s.ρ for s in kessler_snapshots]
+kessler_qʳ = [s.μ.ρqʳ / s.ρ for s in kessler_snapshots]
+kessler_S = [supersaturation(temperature(s.𝒰, kessler_constants), s.ρ,
+                             s.𝒰.moisture_mass_fractions, kessler_constants,
+                             PlanarLiquidSurface()) for s in kessler_snapshots]
+nothing #hide
+
+# Environmental temperature at each parcel height
+kessler_Tₑ = [interpolate(s.z, kessler_model.temperature) for s in kessler_snapshots]
+nothing #hide
+
+# ## Part 4: Cloudy parcel with two-moment microphysics
+#
+# Finally, we simulate the same moist parcel using the [Seifert and Beheng (2006)](@cite
+# SeifertBeheng2006) two-moment scheme. Unlike the one-moment schemes above, this tracks
+# both mass *and* number concentration for cloud liquid and rain. Cloud droplets form via
+# **aerosol activation** when the parcel becomes supersaturated — the default aerosol
+# population (~100 cm⁻³ continental aerosol) provides the CCN.
+
+twom_microphysics = TwoMomentCloudMicrophysics()
+twom_model = AtmosphereModel(grid; dynamics=ParcelDynamics(), microphysics=twom_microphysics)
+
+# Use the same reference state. Aerosol number is automatically initialized
+# from the default aerosol distribution.
+set!(twom_model, qᵗ = qᵗ, z = 0, w = 1,
+     θ = reference_state.potential_temperature,
+     p = reference_state.pressure,
+     ρ = reference_state.density)
+
+twom_simulation = Simulation(twom_model; Δt=1, stop_time=90minutes)
+
+# Store two-moment parcel snapshots
+twom_snapshots = []
+
+function record_twom_state!(sim)
+    state = sim.model.dynamics.state
+    t = sim.model.clock.time
+    push!(twom_snapshots, (; t, z=state.z, ρ=state.ρ, 𝒰=state.𝒰, μ=state.μ))
+    return nothing
+end
+
+add_callback!(twom_simulation, record_twom_state!, IterationInterval(100))
+run!(twom_simulation)
+
+@info "Two-moment parcel reached" twom_model.dynamics.state.z
+
+# Extract time series from two-moment snapshots
+twom_constants = twom_model.thermodynamic_constants
+twom_t = [s.t for s in twom_snapshots]
+twom_z = [s.z for s in twom_snapshots]
+twom_T = [temperature(s.𝒰, twom_constants) for s in twom_snapshots]
+twom_qᵛ = [s.𝒰.moisture_mass_fractions.vapor for s in twom_snapshots]
+twom_qᶜˡ = [s.μ.ρqᶜˡ / s.ρ for s in twom_snapshots]
+twom_qʳ = [s.μ.ρqʳ / s.ρ for s in twom_snapshots]
+twom_nᶜˡ = [s.μ.ρnᶜˡ / s.ρ for s in twom_snapshots]
+twom_nʳ = [s.μ.ρnʳ / s.ρ for s in twom_snapshots]
+twom_nᵃ = [s.μ.ρnᵃ / s.ρ for s in twom_snapshots]
+twom_S = [supersaturation(temperature(s.𝒰, twom_constants), s.ρ,
+                          s.𝒰.moisture_mass_fractions, twom_constants,
+                          PlanarLiquidSurface()) for s in twom_snapshots]
+nothing #hide
+
+# Environmental temperature at each parcel height
+twom_Tₑ = [interpolate(s.z, twom_model.temperature) for s in twom_snapshots]
+nothing #hide
+
+# ## Part 5: Buoyancy-driven cloudy ascent
+#
+# In all four cases above, the vertical velocity is prescribed: the parcel
+# rises at a constant 1 m/s regardless of its thermodynamic state.
+# Now we switch to **buoyancy-driven** ascent using `PrognosticVerticalVelocity`,
+# where the parcel carries a prognostic vertical velocity driven by buoyancy:
+# dw/dt = −g(ρ_parcel − ρ_env)/ρ_env. We reuse the two-moment microphysics
+# so the reader can directly compare rows 4 and 5.
+
+buoyant_dynamics = ParcelDynamics(vertical_velocity_formulation=PrognosticVerticalVelocity())
+buoyant_model = AtmosphereModel(grid; dynamics=buoyant_dynamics,
+                                microphysics=TwoMomentCloudMicrophysics())
+
+set!(buoyant_model, qᵗ = qᵗ, z = 0, w_parcel = 1.0,
+     θ = reference_state.potential_temperature,
+     p = reference_state.pressure,
+     ρ = reference_state.density)
+
+buoyant_simulation = Simulation(buoyant_model; Δt=1, stop_time=5minutes)
+
+buoyant_snapshots = []
+
+function record_buoyant_state!(sim)
+    state = sim.model.dynamics.state
+    t = sim.model.clock.time
+    push!(buoyant_snapshots, (; t, z=state.z, w=state.w, ρ=state.ρ, 𝒰=state.𝒰, μ=state.μ))
+    return nothing
+end
+
+add_callback!(buoyant_simulation, record_buoyant_state!, IterationInterval(10))
+run!(buoyant_simulation)
+
+@info "Buoyancy-driven parcel reached" buoyant_model.dynamics.state.z
+
+# Extract time series
+buoyant_constants = buoyant_model.thermodynamic_constants
+buoyant_t = [s.t for s in buoyant_snapshots]
+buoyant_z = [s.z for s in buoyant_snapshots]
+buoyant_w = [s.w for s in buoyant_snapshots]
+buoyant_T = [temperature(s.𝒰, buoyant_constants) for s in buoyant_snapshots]
+buoyant_qᵛ = [s.𝒰.moisture_mass_fractions.vapor for s in buoyant_snapshots]
+buoyant_qᶜˡ = [s.μ.ρqᶜˡ / s.ρ for s in buoyant_snapshots]
+buoyant_qʳ = [s.μ.ρqʳ / s.ρ for s in buoyant_snapshots]
+buoyant_nᶜˡ = [s.μ.ρnᶜˡ / s.ρ for s in buoyant_snapshots]
+buoyant_nʳ = [s.μ.ρnʳ / s.ρ for s in buoyant_snapshots]
+buoyant_nᵃ = [s.μ.ρnᵃ / s.ρ for s in buoyant_snapshots]
+nothing #hide
+
+# Environmental temperature at each parcel height
+buoyant_Tₑ = [interpolate(s.z, buoyant_model.temperature) for s in buoyant_snapshots]
+nothing #hide
+
 # ## Visualization
 #
-# We create a figure showing:
+# We create a figure showing all five regimes:
 # - Dry ascent: adiabatic cooling and approach to saturation
-# - Cloudy ascent: condensation onset, cloud development, and precipitation formation
+# - One-moment cloudy ascent: condensation onset, cloud development, and precipitation formation
+# - Kessler cloudy ascent: the same physics with the DCMIP2016 Kessler scheme
+# - Two-moment cloudy ascent: mass and number evolution with aerosol activation
+# - Buoyancy-driven ascent: two-moment microphysics with prognostic vertical velocity
 
 set_theme!(fontsize=14, linewidth=2.5)
-fig = Figure(size=(1200, 600))
+fig = Figure(size=(1200, 1100))
 nothing #hide
 
 # Color palette
@@ -162,7 +350,7 @@ ax1b = Axis(fig[2, 2];
 lines!(ax1b, dry_S, dry_z / 1000; color=c_vapor)
 vlines!(ax1b, [0]; color=:gray, linestyle=:dash)
 
-## Row 2: Cloudy parcel - condensation and cloud formation
+## Row 2: Cloudy parcel - one-moment microphysics
 Label(fig[3, 1:3], "Cloudy ascent with one-moment microphysics", fontsize=16)
 
 ax2a = Axis(fig[4, 1];
@@ -189,8 +377,133 @@ lines!(ax2c, cloudy_qᶜˡ, cloudy_z / 1000; color=c_cloud, label="Cloud qᶜˡ"
 lines!(ax2c, cloudy_qʳ, cloudy_z / 1000; color=c_rain, label="Rain qʳ")
 axislegend(ax2c; position=:rt, backgroundcolor=(:white, 0.8))
 
-rowsize!(fig.layout, 1, Relative(0.05))
-rowsize!(fig.layout, 3, Relative(0.05))
+## Row 3: Cloudy parcel - Kessler microphysics
+Label(fig[5, 1:3], "Cloudy ascent with Kessler microphysics", fontsize=16)
+
+ax3a = Axis(fig[6, 1];
+    xlabel = "Temperature (K)",
+    ylabel = "Height (km)",
+    title = "Temperature evolution")
+lines!(ax3a, kessler_T, kessler_z / 1000; color=c_temp, label="Parcel")
+lines!(ax3a, kessler_Tₑ, kessler_z / 1000; color=:gray, linestyle=:dash, label="Environment")
+axislegend(ax3a; position=:lb, backgroundcolor=(:white, 0.8))
+
+ax3b = Axis(fig[6, 2];
+    xlabel = "Supersaturation",
+    ylabel = "Height (km)",
+    title = "Supersaturation evolution")
+lines!(ax3b, kessler_S, kessler_z / 1000; color=c_vapor)
+vlines!(ax3b, [0]; color=:gray, linestyle=:dash)
+
+ax3c = Axis(fig[6, 3];
+    xlabel = "Mixing ratio (kg/kg)",
+    ylabel = "Height (km)",
+    title = "Moisture evolution")
+lines!(ax3c, kessler_qᵛ, kessler_z / 1000; color=c_vapor, label="Vapor qᵛ")
+lines!(ax3c, kessler_qᶜˡ, kessler_z / 1000; color=c_cloud, label="Cloud qᶜˡ")
+lines!(ax3c, kessler_qʳ, kessler_z / 1000; color=c_rain, label="Rain qʳ")
+axislegend(ax3c; position=:rt, backgroundcolor=(:white, 0.8))
+
+## Row 4: Cloudy parcel - two-moment microphysics
+Label(fig[7, 1:3], "Cloudy ascent with two-moment microphysics", fontsize=16)
+
+ax4a = Axis(fig[8, 1];
+    xlabel = "Temperature (K)",
+    ylabel = "Height (km)",
+    title = "Temperature evolution")
+lines!(ax4a, twom_T, twom_z / 1000; color=c_temp, label="Parcel")
+lines!(ax4a, twom_Tₑ, twom_z / 1000; color=:gray, linestyle=:dash, label="Environment")
+axislegend(ax4a; position=:lb, backgroundcolor=(:white, 0.8))
+
+ax4b = Axis(fig[8, 2];
+    xlabel = "Mixing ratio (kg/kg)",
+    ylabel = "Height (km)",
+    title = "Moisture evolution")
+lines!(ax4b, twom_qᵛ, twom_z / 1000; color=c_vapor, label="Vapor qᵛ")
+lines!(ax4b, twom_qᶜˡ, twom_z / 1000; color=c_cloud, label="Cloud qᶜˡ")
+lines!(ax4b, twom_qʳ, twom_z / 1000; color=c_rain, label="Rain qʳ")
+axislegend(ax4b; position=:rt, backgroundcolor=(:white, 0.8))
+
+ax4c = Axis(fig[8, 3];
+    xlabel = "Number concentration (1/kg)",
+    ylabel = "Height (km)",
+    xscale = log10,
+    title = "Number concentration")
+
+nᶜˡ_mask = twom_nᶜˡ .> 1e-3
+nʳ_mask = twom_nʳ .> 1e-3
+nᵃ_mask = twom_nᵃ .> 1e-3
+
+if any(nᵃ_mask)
+    lines!(ax4c, twom_nᵃ[nᵃ_mask], twom_z[nᵃ_mask] / 1000; color=:gray, label="Aerosol nᵃ")
+end
+if any(nᶜˡ_mask)
+    lines!(ax4c, twom_nᶜˡ[nᶜˡ_mask], twom_z[nᶜˡ_mask] / 1000; color=c_cloud, label="Cloud nᶜˡ")
+end
+if any(nʳ_mask)
+    lines!(ax4c, twom_nʳ[nʳ_mask], twom_z[nʳ_mask] / 1000; color=c_rain, label="Rain nʳ")
+end
+axislegend(ax4c; position=:rt, backgroundcolor=(:white, 0.8))
+
+## Row 5: Buoyancy-driven cloudy ascent
+Label(fig[9, 1:4], "Buoyancy-driven ascent with two-moment microphysics", fontsize=16)
+
+ax5a = Axis(fig[10, 1];
+    xlabel = "Temperature (K)",
+    ylabel = "Height (km)",
+    title = "Temperature evolution")
+lines!(ax5a, buoyant_T, buoyant_z / 1000; color=c_temp, label="Parcel")
+lines!(ax5a, buoyant_Tₑ, buoyant_z / 1000; color=:gray, linestyle=:dash, label="Environment")
+axislegend(ax5a; position=:lb, backgroundcolor=(:white, 0.8))
+
+ax5b = Axis(fig[10, 2];
+    xlabel = "Mixing ratio (kg/kg)",
+    ylabel = "Height (km)",
+    title = "Moisture evolution")
+lines!(ax5b, buoyant_qᵛ, buoyant_z / 1000; color=c_vapor, label="Vapor qᵛ")
+lines!(ax5b, buoyant_qᶜˡ, buoyant_z / 1000; color=c_cloud, label="Cloud qᶜˡ")
+lines!(ax5b, buoyant_qʳ, buoyant_z / 1000; color=c_rain, label="Rain qʳ")
+axislegend(ax5b; position=:rt, backgroundcolor=(:white, 0.8))
+
+ax5c = Axis(fig[10, 3];
+    xlabel = "Number concentration (1/kg)",
+    ylabel = "Height (km)",
+    xscale = log10,
+    title = "Number concentration")
+
+bnᶜˡ_mask = buoyant_nᶜˡ .> 1e-3
+bnʳ_mask = buoyant_nʳ .> 1e-3
+bnᵃ_mask = buoyant_nᵃ .> 1e-3
+
+if any(bnᵃ_mask)
+    lines!(ax5c, buoyant_nᵃ[bnᵃ_mask], buoyant_z[bnᵃ_mask] / 1000; color=:gray, label="Aerosol nᵃ")
+end
+if any(bnᶜˡ_mask)
+    lines!(ax5c, buoyant_nᶜˡ[bnᶜˡ_mask], buoyant_z[bnᶜˡ_mask] / 1000; color=c_cloud, label="Cloud nᶜˡ")
+end
+if any(bnʳ_mask)
+    lines!(ax5c, buoyant_nʳ[bnʳ_mask], buoyant_z[bnʳ_mask] / 1000; color=c_rain, label="Rain nʳ")
+end
+axislegend(ax5c; position=:rt, backgroundcolor=(:white, 0.8))
+
+ax5d = Axis(fig[10, 4];
+    xlabel = "Velocity (m/s)",
+    ylabel = "Height (km)",
+    title = "Vertical velocity")
+lines!(ax5d, buoyant_w, buoyant_z / 1000; color=:black)
+
+for ax in [ax2a, ax2b, ax2c,
+           ax3a, ax3b, ax3c,
+           ax4a, ax4b, ax4c,
+           ax5a, ax5b, ax5c, ax5d]
+    ylims!(ax, 0, 5)
+end
+
+rowsize!(fig.layout, 1, Relative(0.03))
+rowsize!(fig.layout, 3, Relative(0.03))
+rowsize!(fig.layout, 5, Relative(0.03))
+rowsize!(fig.layout, 7, Relative(0.03))
+rowsize!(fig.layout, 9, Relative(0.03))
 
 fig
 
@@ -204,7 +517,7 @@ fig
 # 2. Total moisture is conserved (in the absence of microphysics)
 #
 #
-# ### Cloudy ascent (bottom row)
+# ### Cloudy ascent with one-moment microphysics (second row)
 #
 # With one-moment non-equilibrium microphysics, the parcel exhibits key cloud physics:
 #
@@ -226,5 +539,91 @@ fig
 #    water content. Once rain forms, accretion (rain collecting cloud droplets)
 #    accelerates precipitation development.
 #
+#
+# ### Cloudy ascent with Kessler microphysics (third row)
+#
+# The DCMIP2016 Kessler scheme produces similar results to the one-moment scheme,
+# but with some notable differences:
+#
+# 1. **Single-step saturation adjustment**: The Kessler scheme performs a single-step
+#    saturation adjustment rather than the relaxation-based approach of the one-moment
+#    scheme. This aims to keep supersaturation at zero when cloud is present.
+#
+# 2. **Similar precipitation formation**: Both schemes use the same fundamental
+#    processes (autoconversion and accretion) to convert cloud water to rain,
+#    though with different parameterizations.
+#
+# 3. **Rain evaporation**: The Kessler scheme explicitly includes rain evaporation
+#    into subsaturated air, following Klemp and Wilhelmson (1978).
+#
+#
+# ### Why supersaturation remains slightly negative in the Kessler scheme
+#
+# You may notice that the Kessler scheme shows small negative supersaturation
+# even as cloud forms. This is expected behavior due to
+# the interaction between the single-step saturation adjustment and the parcel
+# model's energy-conserving thermodynamics.
+#
+# The explanation is as follows:
+#
+# 1. **Saturation adjustment at temperature T₀**: The Kessler scheme computes
+#    how much vapor to condense based on the current temperature T₀.
+#
+# 2. **Latent heat release**: When condensation occurs, latent heat is released.
+#    The parcel model conserves static energy, so the temperature automatically
+#    increases to T₁ > T₀.
+#
+# 3. **Higher saturation vapor pressure at T₁**: At the new temperature T₁, the saturation vapor
+#    pressure is higher than at T₀.
+#
+# 4. **Residual subsaturation**: The vapor was adjusted to match saturation at T₀,
+#    but at T₁ it is now slightly below saturation.
+#
+# For exact equilibrium, an iterative approach (like `SaturationAdjustment`)
+# would be needed, but the single-step method is computationally efficient and
+# the resulting cloud formation is not too bad.
+#
+#
+# ### Cloudy ascent with two-moment microphysics (fourth row)
+#
+# The [Seifert and Beheng (2006)](@cite SeifertBeheng2006) two-moment scheme
+# adds a crucial dimension: number concentration. This enables physically-based
+# precipitation formation rates that depend on droplet size:
+#
+# 1. **Aerosol activation**: As the parcel rises and becomes supersaturated,
+#    aerosol particles activate into cloud droplets following the
+#    [Abdul-Razzak and Ghan (2000)](@cite AbdulRazzakGhan2000) parameterization.
+#    Cloud droplet number increases from zero as activation occurs, while aerosol
+#    number decreases.
+#
+# 2. **Condensation with number tracking**: Like the one-moment scheme,
+#    supersaturation drives vapor-to-liquid conversion. But the two-moment scheme
+#    also knows how many droplets share the condensed water, enabling size-aware
+#    process rates.
+#
+# 3. **Number concentration panel**: The right panel reveals processes invisible
+#    to one-moment schemes: aerosol depletion by activation, and
+#    collision-coalescence processes that reshape the size distribution —
+#    cloud droplet self-collection, autoconversion of cloud to rain,
+#    accretion of cloud by rain, rain self-collection, and rain breakup.
+#
+# ### Buoyancy-driven cloudy ascent (bottom row)
+#
+# The bottom row repeats the two-moment microphysics from row 4 but switches
+# from prescribed to **prognostic vertical velocity**. The parcel starts at
+# 1 m/s and its velocity evolves according to the buoyancy force
+# B = −g(ρ_parcel − ρ_env)/ρ_env. Below the lifting condensation level,
+# the parcel decelerates just as in a dry adiabatic ascent. Once condensation
+# begins, latent heat release warms the parcel relative to its environment,
+# generating positive buoyancy that accelerates the ascent. The velocity panel
+# shows this transition directly — a key signature of buoyancy-driven dynamics
+# that is invisible when velocity is prescribed. Comparing the temperature and
+# moisture panels between rows 4 and 5 reveals how the ascent rate shapes
+# the cloud and precipitation evolution.
+#
 # This example demonstrates the basic thermodynamic and microphysical processes
-# governing cloud formation in a rising air parcel.
+# governing cloud formation in a rising air parcel, and shows how different
+# microphysics schemes produce qualitatively similar but quantitatively different
+# results. The buoyancy-driven case further demonstrates the coupling between
+# microphysics and dynamics: condensation → latent heating → buoyancy →
+# acceleration → more condensation.

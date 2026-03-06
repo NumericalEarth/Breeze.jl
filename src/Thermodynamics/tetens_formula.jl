@@ -59,9 +59,9 @@ for the ice formula are from [Murray (1967)](@cite Murray1967):
 
 # References
 
-* Tetens, O. (1930). Über einige meteorologische Begriffe. Zeitschrift für Geophysik 6, 297–309.
 * Monteith, J. L. and Unsworth, M. H. (2014). Principles of Environmental Physics. 4th Edition (Academic Press).
 * Murray, F. W. (1967). On the computation of saturation vapor pressure. Journal of Applied Meteorology 6, 203–204.
+* Tetens, O. (1930). Über einige meteorologische Begriffe. Zeitschrift für Geophysik 6, 297–309.
 * Wikipedia: Tetens equation; <https://en.wikipedia.org/wiki/Tetens_equation>
 
 # Example
@@ -127,8 +127,9 @@ pᵛ⁺(T) = pᵛ⁺ᵣ \\exp \\left( aⁱ \\frac{T - Tᵣ}{T - δTⁱ} \\right)
 ```
 
 # References
-* Tetens, O. (1930). Über einige meteorologische Begriffe. Zeitschrift für Geophysik 6, 297–309.
+
 * Murray, F. W. (1967). On the computation of saturation vapor pressure. Journal of Applied Meteorology 6, 203–204.
+* Tetens, O. (1930). Über einige meteorologische Begriffe. Zeitschrift für Geophysik 6, 297–309.
 """
 @inline function saturation_vapor_pressure(T, constants::TetensFormulaThermodynamicConstants, ::PlanarIceSurface)
     tf = constants.saturation_vapor_pressure

@@ -59,6 +59,7 @@ struct NonEquilibriumCloudFormation{L, I}
     - `ice`: Parameters for cloud ice (contains relaxation timescale `τ_relax`), or `nothing` for warm-phase only
 
     # References
+
     * Morrison, H. and Grabowski, W. W. (2008). A novel approach for representing ice
         microphysics in models: Description and tests using a kinematic framework.
         J. Atmos. Sci., 65, 1528–1548. https://doi.org/10.1175/2007JAS2491.1
@@ -197,11 +198,17 @@ function BulkMicrophysics(FT::DataType = Oceananigans.defaults.FloatType;
     return BulkMicrophysics(cloud_formation, categories, precipitation_boundary_condition)
 end
 
+# Forward moisture_prognostic_name to cloud_formation scheme
+AtmosphereModels.moisture_prognostic_name(bμp::BulkMicrophysics) =
+    AtmosphereModels.moisture_prognostic_name(bμp.cloud_formation)
+
+AtmosphereModels.moisture_prognostic_name(::NonEquilibriumCloudFormation) = :ρqᵛ
+
 # Non-categorical bulk microphysics
 const NCBM = BulkMicrophysics{<:Any, Nothing, <:Any}
 const NPBM = NCBM  # Alias: Non-Precipitating Bulk Microphysics
 
-maybe_adjust_thermodynamic_state(𝒰₀, bμp::NCBM, qᵗ, constants) =
+maybe_adjust_thermodynamic_state(𝒰₀, bμp::NCBM, qᵛ, constants) =
     AtmosphereModels.adjust_thermodynamic_state(𝒰₀, bμp.cloud_formation, constants)
 
 AtmosphereModels.prognostic_field_names(::NPBM) = tuple()
@@ -212,24 +219,30 @@ AtmosphereModels.materialize_microphysical_fields(bμp::NPBM, grid, bcs) = mater
 end
 
 # Forward grid_moisture_fractions to cloud_formation scheme
-@inline function AtmosphereModels.grid_moisture_fractions(i, j, k, grid, bμp::NPBM, ρ, qᵗ, μ)
-    return grid_moisture_fractions(i, j, k, grid, bμp.cloud_formation, ρ, qᵗ, μ)
+@inline function AtmosphereModels.grid_moisture_fractions(i, j, k, grid, bμp::NPBM, ρ, qᵛ, μ)
+    return grid_moisture_fractions(i, j, k, grid, bμp.cloud_formation, ρ, qᵛ, μ)
 end
 
 # Forward state-based moisture_fractions to cloud_formation scheme
-@inline function AtmosphereModels.moisture_fractions(bμp::NPBM, ℳ, qᵗ)
-    return moisture_fractions(bμp.cloud_formation, ℳ, qᵗ)
+@inline function AtmosphereModels.moisture_fractions(bμp::NPBM, ℳ, qᵛ)
+    return moisture_fractions(bμp.cloud_formation, ℳ, qᵛ)
 end
 
 # Disambiguation for specific state types
-@inline function AtmosphereModels.moisture_fractions(bμp::NPBM, ℳ::WarmRainState, qᵗ)
-    return moisture_fractions(bμp.cloud_formation, ℳ, qᵗ)
+@inline function AtmosphereModels.moisture_fractions(bμp::NPBM, ℳ::WarmRainState, qᵛ)
+    return moisture_fractions(bμp.cloud_formation, ℳ, qᵛ)
 end
 
-@inline function AtmosphereModels.moisture_fractions(bμp::NPBM, ℳ::NothingMicrophysicalState, qᵗ)
-    return moisture_fractions(bμp.cloud_formation, ℳ, qᵗ)
+@inline function AtmosphereModels.moisture_fractions(bμp::NPBM, ℳ::NothingMicrophysicalState, qᵛ)
+    return moisture_fractions(bμp.cloud_formation, ℳ, qᵛ)
 end
 
-@inline function AtmosphereModels.moisture_fractions(bμp::NPBM, ℳ::NamedTuple, qᵗ)
-    return moisture_fractions(bμp.cloud_formation, ℳ, qᵗ)
+@inline function AtmosphereModels.moisture_fractions(bμp::NPBM, ℳ::NamedTuple, qᵛ)
+    return moisture_fractions(bμp.cloud_formation, ℳ, qᵛ)
 end
+
+# Forward mass fraction diagnostics to cloud_formation scheme
+AtmosphereModels.liquid_mass_fraction(bμp::NPBM, model) =
+    AtmosphereModels.liquid_mass_fraction(bμp.cloud_formation, model)
+AtmosphereModels.ice_mass_fraction(bμp::NPBM, model) =
+    AtmosphereModels.ice_mass_fraction(bμp.cloud_formation, model)

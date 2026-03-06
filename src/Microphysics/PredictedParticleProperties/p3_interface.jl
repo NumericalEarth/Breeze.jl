@@ -80,20 +80,25 @@ function AM.prognostic_field_names(::P3)
 end
 
 #####
-##### Specific humidity
+##### Moisture prognostic name
 #####
 
 """
 $(TYPEDSIGNATURES)
 
-Return the vapor specific humidity field for P3 microphysics.
-
-For P3, vapor is diagnosed from total moisture minus all condensates:
-qᵛ = qᵗ - qᶜˡ - qʳ - qⁱ - qʷⁱ
+P3 is a non-equilibrium scheme: vapor (`qᵛ`) is the prognostic moisture variable.
 """
-function AM.specific_humidity(::P3, model)
-    # P3 stores vapor diagnostically
-    return model.microphysical_fields.qᵛ
+AM.moisture_prognostic_name(::P3) = :ρqᵛ
+
+"""
+$(TYPEDSIGNATURES)
+
+Convert total moisture to the prognostic moisture variable for P3.
+
+For P3, the prognostic moisture is vapor: `qᵛ = qᵗ - qᶜˡ - qʳ - qⁱ - qʷⁱ`.
+"""
+@inline function AM.specific_prognostic_moisture_from_total(::P3, qᵗ, ℳ::P3MicrophysicalState)
+    return max(0, qᵗ - ℳ.qᶜˡ - ℳ.qʳ - ℳ.qⁱ - ℳ.qʷⁱ)
 end
 
 #####
@@ -150,7 +155,7 @@ Build a [`P3MicrophysicalState`](@ref) from density-weighted prognostic variable
 P3 is a non-equilibrium scheme, so all cloud and precipitation variables come
 from the prognostic fields `μ`, not from the thermodynamic state `𝒰`.
 """
-@inline function AM.microphysical_state(::P3, ρ, μ, 𝒰)
+@inline function AM.microphysical_state(::P3, ρ, μ, 𝒰, velocities)
     qᶜˡ = μ.ρqᶜˡ / ρ
     qʳ  = μ.ρqʳ / ρ
     nʳ  = μ.ρnʳ / ρ
@@ -172,17 +177,11 @@ $(TYPEDSIGNATURES)
 
 Update diagnostic microphysical fields after state update.
 
-For P3, we compute vapor as the residual: qᵛ = qᵗ - qᶜˡ - qʳ - qⁱ - qʷⁱ
+After the moisture refactor, vapor is the prognostic moisture variable.
+The diagnostic `qᵛ` field is updated from the thermodynamic state.
 """
 @inline function AM.update_microphysical_auxiliaries!(μ, i, j, k, grid, ::P3, ℳ::P3MicrophysicalState, ρ, 𝒰, constants)
-    # Get total moisture from thermodynamic state
-    q = 𝒰.moisture_mass_fractions
-    qᵗ = q.vapor + q.liquid + q.ice
-
-    # Vapor is residual (total - all condensates)
-    qᵛ = max(0, qᵗ - ℳ.qᶜˡ - ℳ.qʳ - ℳ.qⁱ - ℳ.qʷⁱ)
-
-    @inbounds μ.qᵛ[i, j, k] = qᵛ
+    @inbounds μ.qᵛ[i, j, k] = 𝒰.moisture_mass_fractions.vapor
     return nothing
 end
 
@@ -195,18 +194,16 @@ $(TYPEDSIGNATURES)
 
 Compute moisture mass fractions from P3 microphysical state.
 
-Returns `MoistureMassFractions` with vapor, liquid (cloud + rain + liquid on ice),
-and ice components.
+After the moisture refactor, the first argument `qᵛ` is the prognostic
+vapor specific humidity (not total moisture). Returns `MoistureMassFractions`
+with vapor, liquid (cloud + rain + liquid on ice), and ice components.
 """
-@inline function AM.moisture_fractions(::P3, ℳ::P3MicrophysicalState, qᵗ)
+@inline function AM.moisture_fractions(::P3, ℳ::P3MicrophysicalState, qᵛ)
     # Total liquid = cloud + rain + liquid on ice
     qˡ = ℳ.qᶜˡ + ℳ.qʳ + ℳ.qʷⁱ
 
     # Ice (frozen fraction)
     qⁱ = ℳ.qⁱ
-
-    # Vapor is residual (ensuring non-negative)
-    qᵛ = max(0, qᵗ - qˡ - qⁱ)
 
     return MoistureMassFractions(qᵛ, qˡ, qⁱ)
 end
@@ -514,7 +511,7 @@ P3 is a non-equilibrium scheme - cloud formation and dissipation are handled
 by explicit process rates, not instantaneous saturation adjustment.
 Therefore, this function returns the state unchanged.
 """
-@inline AM.maybe_adjust_thermodynamic_state(𝒰, ::P3, qᵗ, constants) = 𝒰
+@inline AM.maybe_adjust_thermodynamic_state(𝒰, ::P3, qᵛ, constants) = 𝒰
 
 #####
 ##### Model update

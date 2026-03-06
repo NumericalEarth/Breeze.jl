@@ -34,13 +34,15 @@ examples = [
     Example("Shallow cumulus convection (BOMEX)", "bomex", true),
     Example("Precipitating shallow cumulus (RICO)", "rico", false),
     Example("Convection over prescribed sea surface temperature (SST)", "prescribed_sea_surface_temperature", true),
-    Example("Inertia gravity wave", "inertia_gravity_wave", true),
+    Example("Inertia gravity wave: many time steppers", "inertia_gravity_wave", true),
     Example("Single column radiation", "single_column_radiation", true),
     Example("Stationary parcel model", "stationary_parcel_model", true),
     Example("Rising parcel: adiabatic ascent", "rising_parcels", true),
     Example("Acoustic wave in shear layer", "acoustic_wave", true),
     Example("Cloud formation in prescribed updraft", "kinematic_driver", true),
     Example("Splitting supercell", "splitting_supercell", false),
+    Example("Tropical cyclone world", "tropical_cyclone_world", false),
+    Example("Diurnal cycle of radiative convection", "radiative_convection", false),
 ]
 
 examples = []
@@ -175,7 +177,11 @@ makedocs(
             ],
         ],
         "Radiative Transfer" => "radiative_transfer.md",
-        "Dycore equations and algorithms" => "dycore_equations_algorithms.md",
+        "Dynamics" => Any[
+            "Governing equations" => "dycore_equations_algorithms.md",
+            "Anelastic dynamics" => "anelastic_dynamics.md",
+            "Compressible dynamics" => "compressible_dynamics.md",
+        ],
         "Appendix" => Any[
             "Notation" => "appendix/notation.md",
             "Reproducibility of Breeze.jl models" => "reproducibility.md",
@@ -186,5 +192,5 @@ makedocs(
     ],
     linkcheck = false,  # Disabled due to GitHub rate limiting (429 errors)
     draft = false,
-    doctest = true
+    doctest = true,
 )

@@ -269,7 +269,6 @@ filename = string("bomex_", Nx, "_", Ny, "_", Nz, ".jld2")
 averages_filename = string("bomex_averages_", Nx, "_", Ny, "_", Nz, ".jld2")
 
 ow = JLD2Writer(model, outputs; filename,
-                including = [:grid],
                 schedule = TimeInterval(1minutes),
                 overwrite_existing = true)
 
@@ -277,7 +276,6 @@ simulation.output_writers[:jld2] = ow
 
 averages_ow = JLD2Writer(model, averaged_outputs;
                          filename = averages_filename,
-                         including = [:grid],
                          schedule = TimeInterval(1minutes),
                          overwrite_existing = true)
 

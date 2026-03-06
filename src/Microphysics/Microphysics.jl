@@ -14,6 +14,8 @@ export
     FourCategories,
     SaturationSpecificHumidity,
     SaturationSpecificHumidityField,
+    DewpointTemperature,
+    DewpointTemperatureField,
     DCMIP2016KesslerMicrophysics,
     kessler_terminal_velocity,
     saturation_adjustment_coefficient,
@@ -22,7 +24,7 @@ export
 
 using ..AtmosphereModels: AtmosphereModels, moisture_fractions, grid_moisture_fractions,
     materialize_microphysical_fields, update_microphysical_fields!,
-    NothingMicrophysicalState, WarmRainState
+    NothingMicrophysicalState, WarmRainState, specific_prognostic_moisture
 
 include("saturation_adjustment.jl")
 include("bulk_microphysics.jl")

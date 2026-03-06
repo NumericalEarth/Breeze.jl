@@ -1,30 +1,37 @@
 #####
-##### BulkSensibleHeatFluxFunction for temperature/potential temperature fluxes
+##### BulkSensibleHeatFluxFunction
 #####
 
-struct BulkSensibleHeatFluxFunction{C, G, T, P, TC}
+struct PotentialTemperatureFlux end
+struct StaticEnergyFlux end
+
+struct BulkSensibleHeatFluxFunction{C, G, T, P, TC, F}
     coefficient :: C
     gustiness :: G
     surface_temperature :: T
     surface_pressure :: P
     thermodynamic_constants :: TC
+    formulation :: F
 end
 
 """
     BulkSensibleHeatFluxFunction(; coefficient, gustiness=0, surface_temperature)
 
-Create a bulk sensible heat flux function for computing surface potential temperature fluxes.
-The flux is computed as:
+A bulk sensible heat flux function. The flux is computed as:
 
 ```math
-Jᶿ = - ρ₀ Cᵀ |U| (θ - θ₀)
+J = - ρ₀ Cᵀ |U| Δϕ
 ```
 
-where `Cᵀ` is the transfer coefficient, `|U|` is the wind speed, `θ` is the atmospheric
-potential temperature at the surface, and `θ₀` is the surface temperature.
+where `Cᵀ` is the transfer coefficient, `|U|` is the wind speed, and `Δϕ` is the
+difference between the near-surface atmospheric value and the surface value of the
+thermodynamic variable appropriate to the formulation:
 
-This boundary condition returns a potential temperature flux (proportional to sensible heat
-flux ``𝒬ᵀ = cᵖᵐ Jᶿ``) and should be applied directly to `ρθ` boundary conditions.
+- For `LiquidIcePotentialTemperatureFormulation`: `Δϕ = θ - θ₀` (potential temperature flux)
+- For `StaticEnergyFormulation`: `Δϕ = e - cᵖᵈ T₀` (static energy flux)
+
+The `formulation` is set automatically during model construction based on the
+thermodynamic formulation.
 
 # Keyword Arguments
 
@@ -34,25 +41,43 @@ flux ``𝒬ᵀ = cᵖᵐ Jᶿ``) and should be applied directly to `ρθ` bounda
                          Functions are converted to Fields during model construction.
 """
 BulkSensibleHeatFluxFunction(; coefficient, gustiness=0, surface_temperature) =
-    BulkSensibleHeatFluxFunction(coefficient, gustiness, surface_temperature, nothing, nothing)
+    BulkSensibleHeatFluxFunction(coefficient, gustiness, surface_temperature, nothing, nothing, nothing)
 
 Adapt.adapt_structure(to, bf::BulkSensibleHeatFluxFunction) =
     BulkSensibleHeatFluxFunction(Adapt.adapt(to, bf.coefficient),
                                  Adapt.adapt(to, bf.gustiness),
                                  Adapt.adapt(to, bf.surface_temperature),
                                  Adapt.adapt(to, bf.surface_pressure),
-                                 Adapt.adapt(to, bf.thermodynamic_constants))
+                                 Adapt.adapt(to, bf.thermodynamic_constants),
+                                 bf.formulation)
 
 Base.summary(bf::BulkSensibleHeatFluxFunction) =
     string("BulkSensibleHeatFluxFunction(coefficient=", bf.coefficient,
            ", gustiness=", bf.gustiness, ")")
 
-# getbc for BulkSensibleHeatFluxFunction: returns potential temperature flux Jᶿ
+# Compute the thermodynamic variable difference at the surface.
+# Default to potential temperature flux when formulation is not set (ρθ BCs passed directly).
+@inline bulk_sensible_heat_difference(i, j, grid, ::Nothing, T₀, constants, fields) =
+    bulk_sensible_heat_difference(i, j, grid, PotentialTemperatureFlux(), T₀, constants, fields)
+
+@inline function bulk_sensible_heat_difference(i, j, grid, ::PotentialTemperatureFlux, T₀, constants, fields)
+    θ = @inbounds fields.θ[i, j, 1]
+    return θ - T₀
+end
+
+@inline function bulk_sensible_heat_difference(i, j, grid, ::StaticEnergyFlux, T₀, constants, fields)
+    cᵖᵈ = constants.dry_air.heat_capacity
+    cᵖᵛ = constants.vapor.heat_capacity
+    qᵛ = @inbounds fields.qᵛ[i, j, 1]
+    cᵖᵐ = (1 - qᵛ) * cᵖᵈ + qᵛ * cᵖᵛ  # no condensate at the surface
+    e₀ = cᵖᵐ * T₀
+    e = @inbounds fields.e[i, j, 1]
+    return e - e₀
+end
+
 @inline function OceananigansBC.getbc(bf::BulkSensibleHeatFluxFunction, i::Integer, j::Integer,
                                       grid::AbstractGrid, clock, fields)
     T₀ = surface_value(i, j, bf.surface_temperature)
-    θ = @inbounds fields.θ[i, j, 1]
-    Δθ = θ - T₀
 
     U² = wind_speed²ᶜᶜᶜ(i, j, grid, fields)
     Ũ = sqrt(U² + bf.gustiness^2)
@@ -61,8 +86,10 @@ Base.summary(bf::BulkSensibleHeatFluxFunction) =
     p₀ = bf.surface_pressure
     ρ₀ = surface_density(p₀, T₀, constants)
 
-    Cᵀ = bf.coefficient
-    return - ρ₀ * Cᵀ * Ũ * Δθ
+    Cᵀ = bulk_coefficient(i, j, grid, bf.coefficient, fields, T₀)
+
+    Δϕ = bulk_sensible_heat_difference(i, j, grid, bf.formulation, T₀, constants, fields)
+    return - ρ₀ * Cᵀ * Ũ * Δϕ
 end
 
 const BulkSensibleHeatFluxBoundaryCondition = BoundaryCondition{<:Flux, <:BulkSensibleHeatFluxFunction}
@@ -125,13 +152,14 @@ Base.summary(bf::BulkVaporFluxFunction) =
     ρ₀ = surface_density(p₀, T₀, constants)
     qᵛ₀ = saturation_specific_humidity(T₀, ρ₀, constants, surface)
 
-    qᵗ = @inbounds fields.qᵗ[i, j, 1]
-    Δq = qᵗ - qᵛ₀ # neglecting condensate
+    qᵛ = @inbounds fields.qᵛ[i, j, 1]
+    Δq = qᵛ - qᵛ₀
 
     U² = wind_speed²ᶜᶜᶜ(i, j, grid, fields)
     Ũ = sqrt(U² + bf.gustiness^2)
 
-    Cᵛ = bf.coefficient
+    Cᵛ = bulk_coefficient(i, j, grid, bf.coefficient, fields, T₀)
+
     return - ρ₀ * Cᵛ * Ũ * Δq
 end
 
@@ -144,10 +172,11 @@ const BulkVaporFluxBoundaryCondition = BoundaryCondition{<:Flux, <:BulkVaporFlux
 """
     BulkSensibleHeatFlux(; coefficient, gustiness=0, surface_temperature)
 
-Create a `FluxBoundaryCondition` for surface potential temperature flux.
+Create a `FluxBoundaryCondition` for surface sensible heat flux.
 
-This boundary condition returns a potential temperature flux `Jᶿ` (proportional to
-sensible heat flux) and should be applied directly to `ρθ` boundary conditions.
+The bulk formula computes `J = -ρ₀ Cᵀ |U| Δϕ`, where `Δϕ` depends on the thermodynamic
+formulation: `Δθ` for potential temperature or `Δe` for static energy. The formulation
+is set automatically during model construction.
 
 See [`BulkSensibleHeatFluxFunction`](@ref) for details.
 
@@ -158,7 +187,7 @@ using Breeze
 
 T₀(x, y) = 290 + 2 * sign(cos(2π * x / 20e3))
 
-ρθ_bc = BulkSensibleHeatFlux(coefficient = 1e-3,
+ρe_bc = BulkSensibleHeatFlux(coefficient = 1e-3,
                              gustiness = 0.1,
                              surface_temperature = T₀)
 
@@ -188,9 +217,9 @@ using Breeze
 
 T₀(x, y) = 290 + 2 * sign(cos(2π * x / 20e3))
 
-ρqᵗ_bc = BulkVaporFlux(coefficient = 1e-3,
-                       gustiness = 0.1,
-                       surface_temperature = T₀)
+moisture_bc = BulkVaporFlux(coefficient = 1e-3,
+                            gustiness = 0.1,
+                            surface_temperature = T₀)
 
 # output
 FluxBoundaryCondition: BulkVaporFluxFunction(coefficient=0.001, gustiness=0.1)

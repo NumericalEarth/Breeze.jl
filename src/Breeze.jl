@@ -1,6 +1,6 @@
 """
-Julia package for finite volume GPU and CPU large eddy simulations (LES)
-of atmospheric flows. The abstractions, design, and finite volume engine
+Julia package for finite-volume GPU and CPU large eddy simulations (LES)
+of atmospheric flows. The abstractions, design, and finite-volume engine
 are based on Oceananigans.
 """
 module Breeze
@@ -10,11 +10,16 @@ export
     MoistAirBuoyancy,
     ThermodynamicConstants,
     ReferenceState,
+    ExnerReferenceState,
+    compute_reference_state!,
+    set_to_mean!,
     surface_density,
     AnelasticDynamics,
     AnelasticModel,
     CompressibleDynamics,
     CompressibleModel,
+    SplitExplicitTimeDiscretization,
+    ExplicitTimeStepping,
     PrescribedDensity,
     PrescribedDynamics,
     KinematicModel,
@@ -52,11 +57,16 @@ export
     surface_precipitation_flux,
     total_pressure,
     specific_humidity,
+    moisture_prognostic_name,
+    moisture_specific_name,
+    specific_prognostic_moisture,
 
     # Thermodynamics
     temperature,
     supersaturation,
     saturation_specific_humidity,
+    adiabatic_hydrostatic_density,
+    dry_air_gas_constant,
     PlanarLiquidSurface,
     PlanarIceSurface,
 
@@ -67,10 +77,13 @@ export
     WarmPhaseEquilibrium,
     SaturationSpecificHumidity,
     SaturationSpecificHumidityField,
+    DewpointTemperature,
+    DewpointTemperatureField,
     equilibrium_saturation_specific_humidity,
     RelativeHumidity,
     RelativeHumidityField,
     BulkMicrophysics,
+    initial_aerosol_number,
     compute_hydrostatic_pressure!,
     NonEquilibriumCloudFormation,
     P3Microphysics,
@@ -80,21 +93,34 @@ export
     BulkDrag,
     BulkSensibleHeatFlux,
     BulkVaporFlux,
+    PolynomialCoefficient,
+    FittedStabilityFunction,
+    default_neutral_drag_polynomial,
+    default_neutral_sensible_heat_polynomial,
+    default_neutral_latent_heat_polynomial,
 
     # Forcing utilities
     geostrophic_forcings,
     SubsidenceForcing,
 
+    # Grid utilities
+    PiecewiseStretchedDiscretization,
+
     # TimeSteppers
     SSPRungeKutta3,
+    AcousticSSPRungeKutta3,
+    AcousticRungeKutta3,
+    AcousticSubstepper,
 
     # ParcelDynamics
     ParcelDynamics,
     ParcelModel,
-    ParcelState
+    ParcelState,
+    PrescribedVerticalVelocity,
+    PrognosticVerticalVelocity
 
 using Oceananigans: Oceananigans, @at, AnisotropicMinimumDissipation, Average,
-                    AveragedTimeInterval, BackgroundField, BetaPlane, Bounded,
+                    AveragedTimeInterval, BackgroundField, BetaPlane, Bounded, BoundaryConditionOperation,
                     CPU, Callback, Center, CenterField, Centered, Checkpointer, Clock,
                     ConstantCartesianCoriolis, Distributed, DynamicSmagorinsky,
                     ExponentialDiscretization, FPlane, Face, Field, FieldBoundaryConditions,
@@ -122,7 +148,7 @@ using Oceananigans.BoundaryConditions: ImpenetrableBoundaryCondition
 export
     CPU, GPU,
     Center, Face, Periodic, Bounded, Flat,
-    RectilinearGrid, ExponentialDiscretization, Clock,
+    RectilinearGrid, ExponentialDiscretization, PiecewiseStretchedDiscretization, Clock,
     nodes, xnodes, ynodes, znodes,
     znode,
     xspacings, yspacings, zspacings,
@@ -132,6 +158,7 @@ export
     Centered, UpwindBiased, WENO, FluxFormAdvection,
     FluxBoundaryCondition, ValueBoundaryCondition, GradientBoundaryCondition, ImpenetrableBoundaryCondition,
     OpenBoundaryCondition, PerturbationAdvection, FieldBoundaryConditions,
+    BoundaryConditionOperation,
     Field, CenterField, XFaceField, YFaceField, ZFaceField,
     Average, Integral,
     BackgroundField, interior, set!, compute!, regrid!,
@@ -172,10 +199,17 @@ include("AnelasticEquations/AnelasticEquations.jl")
 using .AnelasticEquations: AnelasticDynamics, AnelasticModel
 
 include("CompressibleEquations/CompressibleEquations.jl")
-using .CompressibleEquations: CompressibleDynamics, CompressibleModel
+using .CompressibleEquations: CompressibleDynamics, CompressibleModel, AcousticSubstepper,
+                              SplitExplicitTimeDiscretization, ExplicitTimeStepping
 
 include("KinematicDriver/KinematicDriver.jl")
 using .KinematicDriver: PrescribedDensity, PrescribedDynamics, KinematicModel
+
+include("TimeSteppers/TimeSteppers.jl")
+using .TimeSteppers
+
+include("ParcelModels/ParcelModels.jl")
+using .ParcelModels
 
 include("Microphysics/Microphysics.jl")
 using .Microphysics
@@ -192,10 +226,7 @@ using .CelestialMechanics
 include("Forcings/Forcings.jl")
 using .Forcings
 
-include("TimeSteppers/TimeSteppers.jl")
-using .TimeSteppers
-
-include("ParcelModels/ParcelModels.jl")
-using .ParcelModels
+include("VerticalGrids.jl")
+using .VerticalGrids
 
 end # module Breeze

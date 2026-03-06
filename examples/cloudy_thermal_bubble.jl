@@ -82,7 +82,6 @@ outputs = (; θ, w)
 
 filename = "dry_thermal_bubble.jld2"
 writer = JLD2Writer(model, outputs; filename,
-                    including = [:grid],
                     schedule = TimeInterval(10seconds),
                     overwrite_existing = true)
 
@@ -191,14 +190,14 @@ E = total_energy(moist_model)
 θ = liquid_ice_potential_temperature(moist_model)
 
 function progress_moist(sim)
-    ρqᵗ = sim.model.moisture_density
+    ρqᵉ = sim.model.moisture_density
     u, v, w = sim.model.velocities
 
     msg = @sprintf("Iter: % 4d, t: % 14s, Δt: % 14s, ⟨E⟩: %.8e J, extrema(θ): (%.2f, %.2f) K \n",
                    iteration(sim), prettytime(sim), prettytime(sim.Δt), mean(E), extrema(θ)...)
 
-    msg *= @sprintf("   extrema(qᵗ): (%.2e, %.2e), max(qˡ): %.2e, max|w|: %.2f m/s, mean(qᵗ): %.2e",
-                    extrema(ρqᵗ)..., maximum(qˡ), maximum(abs, w), mean(ρqᵗ))
+    msg *= @sprintf("   extrema(ρqᵉ): (%.2e, %.2e), max(qˡ): %.2e, max|w|: %.2f m/s, mean(ρqᵉ): %.2e",
+                    extrema(ρqᵉ)..., maximum(qˡ), maximum(abs, w), mean(ρqᵉ))
 
     @info msg
     return nothing
@@ -208,14 +207,13 @@ add_callback!(moist_simulation, progress_moist, TimeInterval(3minutes))
 
 θ = liquid_ice_potential_temperature(moist_model)
 u, v, w = moist_model.velocities
-qᵗ = moist_model.specific_moisture
+qᵛ = specific_humidity(moist_model)
 qˡ = moist_model.microphysical_fields.qˡ
 qˡ′ = qˡ - Field(Average(qˡ, dims=1))
 moist_outputs = (; θ, w, qˡ′)
 
 moist_filename = "cloudy_thermal_bubble.jld2"
 moist_writer = JLD2Writer(moist_model, moist_outputs; filename=moist_filename,
-                          including = [:grid],
                           schedule = TimeInterval(10seconds),
                           overwrite_existing = true)
 
@@ -318,7 +316,6 @@ precip_outputs = (; θ=θ_precip, w=w_precip, qᶜˡ=qᶜˡ_precip, qʳ=qʳ_prec
 
 precip_filename = "precipitating_thermal_bubble.jld2"
 precip_writer = JLD2Writer(precip_model, precip_outputs; filename=precip_filename,
-                           including = [:grid],
                            schedule = TimeInterval(30seconds),
                            overwrite_existing = true)
 

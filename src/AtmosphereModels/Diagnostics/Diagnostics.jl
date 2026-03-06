@@ -9,6 +9,8 @@ export
     StaticEnergy,
     SaturationSpecificHumidity,
     SaturationSpecificHumidityField,
+    DewpointTemperature,
+    DewpointTemperatureField,
     equilibrium_saturation_specific_humidity,
     # Interface functions extended by Microphysics
     microphysics_phase_equilibrium
@@ -32,7 +34,7 @@ using Breeze.Thermodynamics:
     WarmPhaseEquilibrium,
     equilibrated_surface
 
-using Breeze.AtmosphereModels: AtmosphereModel, grid_moisture_fractions
+using Breeze.AtmosphereModels: AtmosphereModel, grid_moisture_fractions, specific_prognostic_moisture
 
 using Adapt: Adapt, adapt
 using Oceananigans: Oceananigans, Center
@@ -50,5 +52,6 @@ const c = Center()
 include("potential_temperatures.jl")
 include("static_energy.jl")
 include("saturation_specific_humidity.jl")
+include("dewpoint_temperature.jl")
 
 end # module

@@ -9,7 +9,7 @@ using Test
 function run_nan_checker_test(arch; erroring)
     grid = RectilinearGrid(arch, size=(4, 2, 1), extent=(1, 1, 1))
     model = AtmosphereModel(grid)
-    simulation = Simulation(model, Δt=1, stop_iteration=2)
+    simulation = Simulation(model, Δt=1, stop_iteration=2, verbose=false)
     @allowscalar model.momentum.ρu[1, 1, 1] = NaN
     erroring && erroring_NaNChecker!(simulation)
 
@@ -29,6 +29,22 @@ end
     grid = RectilinearGrid(default_arch; size=(Nx, Ny, 8), x=(0, 1_000), y=(0, 1_000), z=(0, 1_000))
     model = AtmosphereModel(grid)
     @test model.grid === grid
+
+    @testset "show includes forcing and thermodynamic constants" begin
+        shown_model = sprint(show, model)
+        @test occursin("thermodynamic_constants: ThermodynamicConstants{$FT}", shown_model)
+        @test occursin("forcing: @NamedTuple{", shown_model)
+        @test occursin("ρu::Returns{$FT}", shown_model)
+        @test occursin("ρe::Returns{$FT}", shown_model)
+
+        uᵍ(z) = -10
+        vᵍ(z) = 0
+        coriolis = FPlane(f=FT(1e-4))
+        forced_model = AtmosphereModel(grid; coriolis, forcing=geostrophic_forcings(uᵍ, vᵍ))
+        shown_forced_model = sprint(show, forced_model)
+
+        @test occursin("forcing: ρu=>GeostrophicForcing, ρv=>GeostrophicForcing", shown_forced_model)
+    end
 
     @testset "Basic tests for set!" begin
         set!(model, time=1)
