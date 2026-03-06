@@ -3,6 +3,7 @@ using KernelAbstractions: @kernel, @index
 using Oceananigans: prognostic_fields, fields
 using Oceananigans.TimeSteppers:
     AbstractTimeStepper,
+    tick!,
     tick_stage!,
     update_state!,
     compute_flux_bc_tendencies!,
@@ -231,7 +232,7 @@ function OceananigansTimeSteppers.time_step!(model::AtmosphereModel{<:Any, <:Any
 
     # Adjust final time-step to reduce floating point error accumulation
     corrected_Δt = time_difference_seconds(tⁿ⁺¹, model.clock.time)
-    tick_stage!(model.clock, corrected_Δt, Δt)
+    tick!(model.clock, corrected_Δt)
 
     update_state!(model, callbacks; compute_tendencies = true)
     step_lagrangian_particles!(model, α³ * Δt)
