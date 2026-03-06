@@ -724,14 +724,61 @@ using Oceananigans.BoundaryConditions: BoundaryCondition
         @test initialize_boundary_condition!(bc, Val(:bottom), nothing, nothing) === nothing
     end
 
-    @testset "Integration: full model lifecycle with filtered bulk BCs" begin
+    @testset "Temporal filtering produces lagged response" begin
+        grid = RectilinearGrid(default_arch; size=(4, 4, 4), x=(0, 100), y=(0, 100), z=(0, 40))
+        τ = 100.0
+        fv = FilteredSurfaceVelocities(grid; filter_timescale=τ)
+
+        u = XFaceField(grid)
+        v = YFaceField(grid)
+        set!(u, 10.0)
+        set!(v, 0.0)
+        velocities = (; u, v)
+
+        # Initialize: filtered matches instantaneous
+        Breeze.BoundaryConditions.initialize!(fv, velocities, grid)
+        @test fv.u[2, 2, 1] ≈ 10.0
+
+        # Velocity jumps to 0. Update with small Δt — filter should lag.
+        set!(u, 0.0)
+        Δt = 1.0
+        ϵ = Δt / τ
+        Breeze.BoundaryConditions.update!(fv, velocities, grid, Δt)
+
+        # After one update, filtered u ≈ 10 / (1 + ε) ≈ 9.9 — still close to old value
+        expected = 10.0 / (1 + ϵ)
+        @test fv.u[2, 2, 1] ≈ expected atol=1e-10
+        @test fv.u[2, 2, 1] > 9.0  # clearly lagged behind the new value (0)
+
+        # After many updates the filter converges toward the new value
+        for _ in 1:30
+            Breeze.BoundaryConditions.update!(fv, velocities, grid, τ) # ε = 1 per step
+        end
+        @test fv.u[2, 2, 1] ≈ 0.0 atol=1e-6  # converged to new value
+
+        # Same test for FilteredSurfaceScalar
+        fs = FilteredSurfaceScalar(grid; filter_timescale=τ)
+        θ = CenterField(grid)
+        set!(θ, 300.0)
+        Breeze.BoundaryConditions.initialize!(fs, θ, grid)
+        @test fs.field[2, 2, 1] ≈ 300.0
+
+        set!(θ, 290.0)
+        Breeze.BoundaryConditions.update!(fs, θ, grid, Δt)
+        expected_θ = (300.0 + ϵ * 290.0) / (1 + ϵ)
+        @test fs.field[2, 2, 1] ≈ expected_θ atol=1e-10
+        @test fs.field[2, 2, 1] > 299.0  # lagged behind the new value (290)
+    end
+
+    @testset "Integration: filtered velocities lag during time stepping" begin
         grid = RectilinearGrid(default_arch; size=(4, 4, 4), x=(0, 100), y=(0, 100), z=(0, 100))
         Cᴰ = 1e-3
         gustiness = 0.1
         T₀ = 290.0
+        τ = 3600.0  # 1 hour filter timescale
 
         # Create shared FilteredSurfaceVelocities
-        fv = FilteredSurfaceVelocities(grid; filter_timescale=60.0)
+        fv = FilteredSurfaceVelocities(grid; filter_timescale=τ)
 
         # Build BCs with filtering on all bulk types
         ρu_bcs = FieldBoundaryConditions(bottom=Breeze.BulkDrag(coefficient=Cᴰ, gustiness=gustiness,
@@ -748,28 +795,26 @@ using Oceananigans.BoundaryConditions: BoundaryCondition
         boundary_conditions = (; ρu=ρu_bcs, ρv=ρv_bcs, ρθ=ρθ_bcs, ρqᵛ=ρqᵛ_bcs)
         model = AtmosphereModel(grid; boundary_conditions)
 
-        # Set initial conditions
+        # Set initial conditions with uniform wind
         θ₀ = model.dynamics.reference_state.potential_temperature
-        set!(model; θ=θ₀)
-
-        # initialize! should populate filtered velocities from current state
+        set!(model; θ=θ₀, u=5)
         Oceananigans.initialize!(model)
 
-        # After initialize!, filtered velocities should be zero (model velocities are zero)
-        @test fv.u[1, 1, 1] == 0
-        @test fv.v[1, 1, 1] == 0
+        # After initialize!, filtered velocity matches instantaneous
+        @test fv.u[2, 2, 1] ≈ 5.0
 
-        # Now set nonzero velocities and re-initialize
-        set!(model.velocities.u, 5.0)
-        set!(model.velocities.v, 3.0)
-        Oceananigans.initialize!(model)
+        # Manually perturb the filtered velocity to a very different value.
+        # This simulates the filter retaining memory of a past state.
+        set!(fv.u, 50.0)
 
-        # After re-initialization, filtered velocities should reflect the velocity fields
-        @test fv.u[1, 1, 1] ≈ 5.0
-        @test fv.v[1, 1, 1] ≈ 3.0
+        # Take one time step (Δt = 1s, τ = 3600s, so ε ≈ 0.0003)
+        Δt = 1.0
+        time_step!(model, Δt)
 
-        # Time stepping exercises update_boundary_condition! dispatches
-        time_step!(model, 1e-6)
-        @test model.clock.iteration == 1
+        # The filtered velocity should have been updated by update_boundary_condition!
+        # but with ε ≈ 0.0003 it should still be very close to 50, not 5.
+        @test fv.u[2, 2, 1] > 40.0    # lagged — still much closer to 50 than to 5
+        @test fv.u[2, 2, 1] != 50.0   # but not exactly 50 — the update happened
+        @test fv.u[2, 2, 1] < 50.0    # moved toward the actual velocity
     end
 end
