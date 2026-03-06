@@ -278,8 +278,8 @@ using Oceananigans: CPU
         # Nodes should be in [-1, 1]
         @test all(-1 ≤ x ≤ 1 for x in nodes)
 
-        # Weights should sum to π (for Chebyshev-Gauss)
-        @test sum(weights) ≈ π
+        # Weights should sum to ≈2 (= ∫₋₁¹ dx, with √(1-x²) correction)
+        @test sum(weights) ≈ 2 rtol=1e-2
 
         # Test Float32
         nodes32, weights32 = chebyshev_gauss_nodes_weights(Float32, 16)

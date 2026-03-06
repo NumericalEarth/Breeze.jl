@@ -443,7 +443,7 @@ end
 #####
 
 """
-    ice_melting_rate(p3, qⁱ, nⁱ, T, qᵛ, qᵛ⁺, Fᶠ, ρᶠ)
+    ice_melting_rate(p3, qⁱ, nⁱ, T, qᵛ, qᵛ⁺, Fᶠ, ρᶠ, ρ)
 
 Compute ice melting rate using the heat balance equation from
 Morrison & Milbrandt (2015a) Eq. 44.
@@ -477,7 +477,7 @@ where:
 # Returns
 - Rate of ice → rain conversion [kg/kg/s]
 """
-@inline function ice_melting_rate(p3, qⁱ, nⁱ, T, qᵛ, qᵛ⁺, Fᶠ, ρᶠ)
+@inline function ice_melting_rate(p3, qⁱ, nⁱ, T, qᵛ, qᵛ⁺, Fᶠ, ρᶠ, ρ)
     FT = typeof(qⁱ)
     prp = p3.process_rates
 
@@ -500,12 +500,10 @@ where:
     # Vapor density terms
     # At T₀, ρ_vs corresponds to saturation at melting point
     e_s0 = FT(611)  # Saturation vapor pressure at 273.15 K [Pa]
-    P_atm = FT(1e5)  # Reference pressure [Pa]
     ρ_vs = e_s0 / (R_v * T₀)  # Saturation vapor density at T₀
 
-    # Ambient vapor density (from mixing ratio)
-    ρ_air = P_atm / (FT(287) * T)  # Approximate air density
-    ρ_v = qᵛ * ρ_air
+    # Ambient vapor density (from mixing ratio and actual air density)
+    ρ_v = qᵛ * ρ
 
     # Mean particle properties
     m_mean = safe_divide(qⁱ_eff, nⁱ_eff, FT(1e-12))
@@ -577,7 +575,7 @@ end
 end
 
 """
-    ice_melting_rates(p3, qⁱ, nⁱ, qʷⁱ, T, qᵛ, qᵛ⁺, Fᶠ, ρᶠ)
+    ice_melting_rates(p3, qⁱ, nⁱ, qʷⁱ, T, qᵛ, qᵛ⁺, Fᶠ, ρᶠ, ρ)
 
 Compute partitioned ice melting rates following Milbrandt et al. (2025).
 
@@ -602,12 +600,12 @@ particle reaches this capacity, additional meltwater sheds to rain.
 # Returns
 - NamedTuple with `partial_melting` and `complete_melting` rates [kg/kg/s]
 """
-@inline function ice_melting_rates(p3, qⁱ, nⁱ, qʷⁱ, T, qᵛ, qᵛ⁺, Fᶠ, ρᶠ)
+@inline function ice_melting_rates(p3, qⁱ, nⁱ, qʷⁱ, T, qᵛ, qᵛ⁺, Fᶠ, ρᶠ, ρ)
     FT = typeof(qⁱ)
     prp = p3.process_rates
 
     # Get total melting rate
-    total_melt = ice_melting_rate(p3, qⁱ, nⁱ, T, qᵛ, qᵛ⁺, Fᶠ, ρᶠ)
+    total_melt = ice_melting_rate(p3, qⁱ, nⁱ, T, qᵛ, qᵛ⁺, Fᶠ, ρᶠ, ρ)
 
     # Maximum liquid fraction capacity (from Milbrandt et al. 2025)
     # Spongy ice can hold about 14% liquid by mass
@@ -699,7 +697,7 @@ is supersaturated with respect to ice. Uses [Cooper (1986)](@cite Cooper1986).
     Sⁱ = (qᵛ - qᵛ⁺ⁱ) / max(qᵛ⁺ⁱ, FT(1e-10))
 
     # Conditions for nucleation
-    nucleation_active = (T < T_threshold) && (Sⁱ > Sⁱ_threshold)
+    nucleation_active = (T < T_threshold) & (Sⁱ > Sⁱ_threshold)
 
     # Cooper (1986): N_ice = 0.005 × exp(0.304 × (T₀ - T))
     ΔT = T₀ - T
@@ -715,8 +713,8 @@ is supersaturated with respect to ice. Uses [Cooper (1986)](@cite Cooper1986).
     Q_nuc = N_nuc * mᵢ₀
 
     # Zero out if conditions not met
-    N_nuc = ifelse(nucleation_active && N_nuc > FT(1e-20), N_nuc, zero(FT))
-    Q_nuc = ifelse(nucleation_active && Q_nuc > FT(1e-30), Q_nuc, zero(FT))
+    N_nuc = ifelse(nucleation_active & (N_nuc > FT(1e-20)), N_nuc, zero(FT))
+    Q_nuc = ifelse(nucleation_active & (Q_nuc > FT(1e-30)), Q_nuc, zero(FT))
 
     return Q_nuc, N_nuc
 end
@@ -750,7 +748,7 @@ Cloud droplets freeze when temperature is below a threshold. Uses
     qᶜˡ_eff = clamp_positive(qᶜˡ)
 
     # Conditions for freezing
-    freezing_active = (T < T_max) && (qᶜˡ_eff > FT(1e-8))
+    freezing_active = (T < T_max) & (qᶜˡ_eff > FT(1e-8))
 
     # Bigg (1953): J = exp(aimm × (T₀ - T))
     ΔT = T₀ - T
@@ -796,7 +794,7 @@ Rain drops freeze when temperature is below a threshold. Uses
     nʳ_eff = clamp_positive(nʳ)
 
     # Conditions for freezing
-    freezing_active = (T < T_max) && (qʳ_eff > FT(1e-8))
+    freezing_active = (T < T_max) & (qʳ_eff > FT(1e-8))
 
     # Bigg (1953)
     ΔT = T₀ - T
@@ -855,7 +853,7 @@ phoretic enhancement.
     qᶜˡ_eff = clamp_positive(qᶜˡ)
 
     # Conditions for contact freezing
-    freezing_active = (T < T₀) && (T < T_max) && (qᶜˡ_eff > FT(1e-8))
+    freezing_active = (T < T₀) & (T < T_max) & (qᶜˡ_eff > FT(1e-8))
 
     # Cloud droplet properties
     ρ_water = p3.water_density
@@ -936,7 +934,7 @@ See [Hallett and Mossop (1974)](@cite HallettMossop1974).
     mᵢ₀ = prp.nucleated_ice_mass
 
     # Hallett-Mossop temperature window
-    in_HM_window = (T > T_low) && (T < T_high)
+    in_HM_window = (T > T_low) & (T < T_high)
 
     # Efficiency peaks at T_peak, tapers to zero at boundaries
     efficiency = exp(-((T - T_peak) / T_width)^2)
@@ -1006,7 +1004,7 @@ See [Morrison and Milbrandt (2015a)](@cite Morrison2015parameterization).
     qⁱ_threshold = FT(1e-8)
     nⁱ_threshold = FT(1e2)
 
-    aggregation_active = (qⁱ_eff > qⁱ_threshold) && (nⁱ_eff > nⁱ_threshold)
+    aggregation_active = (qⁱ_eff > qⁱ_threshold) & (nⁱ_eff > nⁱ_threshold)
 
     # Temperature-dependent sticking efficiency (linear ramp)
     # Cold ice is less sticky, near-melting ice is very sticky
@@ -1098,7 +1096,7 @@ This increases ice mass and rime mass.
     below_freezing = T < T₀
 
     # ∂qᶜˡ/∂t = -Eᶜⁱ × qᶜˡ × qⁱ / τ_rim
-    rate = ifelse(below_freezing && qᶜˡ_eff > q_threshold && qⁱ_eff > q_threshold,
+    rate = ifelse(below_freezing & (qᶜˡ_eff > q_threshold) & (qⁱ_eff > q_threshold),
                    Eᶜⁱ * qᶜˡ_eff * qⁱ_eff / τ_rim,
                    zero(FT))
 
@@ -1160,7 +1158,7 @@ This increases ice mass and rime mass.
     # Only rime below freezing
     below_freezing = T < T₀
 
-    rate = ifelse(below_freezing && qʳ_eff > q_threshold && qⁱ_eff > q_threshold,
+    rate = ifelse(below_freezing & (qʳ_eff > q_threshold) & (qⁱ_eff > q_threshold),
                    Eʳⁱ * qʳ_eff * qⁱ_eff / τ_rim,
                    zero(FT))
 
@@ -1257,7 +1255,7 @@ the density of liquid water (soaking).
 
     # Wet growth regime: when T > -10°C and high LWC
     # Rime density approaches water density (spongy graupel)
-    is_wet_growth = (Tc > FT(-10)) && (lwc > FT(0.5e-3))
+    is_wet_growth = (Tc > FT(-10)) & (lwc > FT(0.5e-3))
     wet_fraction = clamp((Tc + FT(10)) / FT(10), zero(FT), one(FT))
     ρ_wet = ρ_dry * (1 - wet_fraction) + ρ_water * FT(0.8) * wet_fraction
 
@@ -1384,7 +1382,7 @@ See [Milbrandt et al. (2025)](@cite MilbrandtEtAl2025liquidfraction).
     ΔT = clamp_positive(T₀ - T)
     T_factor = FT(1) + FT(0.1) * ΔT
 
-    rate = ifelse(below_freezing && qʷⁱ_eff > FT(1e-10),
+    rate = ifelse(below_freezing & (qʷⁱ_eff > FT(1e-10)),
                    T_factor * qʷⁱ_eff / τ_frz,
                    zero(FT))
 
@@ -1519,11 +1517,11 @@ suitable for use in GPU kernels where grid indexing is handled externally.
     dep = ice_deposition_rate(p3, qⁱ, qᵛ, qᵛ⁺ⁱ)
 
     # Partitioned melting: partial stays on ice, complete goes to rain
-    melt_rates = ice_melting_rates(p3, qⁱ, nⁱ, qʷⁱ, T, qᵛ, qᵛ⁺ˡ, Fᶠ, ρᶠ)
+    melt_rates = ice_melting_rates(p3, qⁱ, nⁱ, qʷⁱ, T, qᵛ, qᵛ⁺ˡ, Fᶠ, ρᶠ, ρ)
     partial_melt = melt_rates.partial_melting
     complete_melt = melt_rates.complete_melting
-    total_melt = partial_melt + complete_melt
-    melt_n = ice_melting_number_rate(qⁱ, nⁱ, total_melt)
+    # Only complete melting removes ice particles; partial melting keeps particles as ice
+    melt_n = ice_melting_number_rate(qⁱ, nⁱ, complete_melt)
 
     # =========================================================================
     # Phase 2: Ice aggregation
@@ -1554,7 +1552,9 @@ suitable for use in GPU kernels where grid indexing is handled externally.
     # Ice nucleation (deposition nucleation and immersion freezing)
     # =========================================================================
     nuc_q, nuc_n = deposition_nucleation_rate(p3, T, qᵛ, qᵛ⁺ⁱ, nⁱ, ρ)
-    cloud_frz_q, cloud_frz_n = immersion_freezing_cloud_rate(p3, qᶜˡ, Nᶜ, T)
+    cloud_frz_q, cloud_frz_n_vol = immersion_freezing_cloud_rate(p3, qᶜˡ, Nᶜ, T)
+    # Convert cloud_frz_n from [1/m³/s] to [1/kg/s] (Nᶜ is in 1/m³)
+    cloud_frz_n = cloud_frz_n_vol / ρ
     rain_frz_q, rain_frz_n = immersion_freezing_rain_rate(p3, qʳ, nʳ, T)
 
     # =========================================================================
@@ -1696,9 +1696,10 @@ Ice loses from:
 @inline function tendency_ρqⁱ(rates::P3ProcessRates, ρ)
     # Phase 1: deposition, melting (both partial and complete reduce ice mass)
     # Phase 2: riming (cloud + rain), refreezing, nucleation, freezing, splintering
+    # Splintering mass is already part of the riming mass (splinters fragment existing rime),
+    # so it is NOT added here. Instead, it is subtracted from rime mass in tendency_ρqᶠ.
     gain = rates.deposition + rates.cloud_riming + rates.rain_riming + rates.refreezing +
-           rates.nucleation_mass + rates.cloud_freezing_mass + rates.rain_freezing_mass +
-           rates.splintering_mass
+           rates.nucleation_mass + rates.cloud_freezing_mass + rates.rain_freezing_mass
     # Total melting reduces ice mass (partial stays as liquid coating, complete sheds)
     loss = rates.partial_melting + rates.complete_melting
     return ρ * (gain - loss)
@@ -1747,7 +1748,8 @@ Rime mass loses from:
     gain = rates.cloud_riming + rates.rain_riming + rates.refreezing +
            rates.cloud_freezing_mass + rates.rain_freezing_mass
     # Phase 1: melts proportionally with ice mass
-    loss = Fᶠ * (rates.partial_melting + rates.complete_melting)
+    # Splintering mass is subtracted from rime (splinters fragment existing rime)
+    loss = Fᶠ * (rates.partial_melting + rates.complete_melting) + rates.splintering_mass
     return ρ * (gain - loss)
 end
 
@@ -1764,10 +1766,14 @@ Rime volume changes with rime mass: ∂bᶠ/∂t = ∂qᶠ/∂t / ρ_rime
     ρᶠ_safe = max(ρᶠ, FT(100))
     ρ_rim_new_safe = max(rates.rime_density_new, FT(100))
 
+    ρ_water = FT(1000)
+
     # Phase 2: Volume gain from new rime (cloud + rain riming + refreezing)
     # Use density of new rime for fresh rime, current density for refreezing
+    # Frozen cloud/rain drops are dense ice at approximately water density
     volume_gain = (rates.cloud_riming + rates.rain_riming) / ρ_rim_new_safe +
-                   rates.refreezing / ρᶠ_safe
+                   rates.refreezing / ρᶠ_safe +
+                   (rates.cloud_freezing_mass + rates.rain_freezing_mass) / ρ_water
 
     # Phase 1: Volume loss from melting (proportional to rime fraction)
     volume_loss = Fᶠ * (rates.partial_melting + rates.complete_melting) / ρᶠ_safe

@@ -56,10 +56,14 @@ These are then transformed to diameter space using [`transform_to_diameter`](@re
 """
 function chebyshev_gauss_nodes_weights(FT::Type{<:AbstractFloat}, n::Int)
     nodes = zeros(FT, n)
-    weights = fill(FT(π / n), n)
+    weights = zeros(FT, n)
 
     for i in 1:n
-        nodes[i] = cos(FT((2i - 1) * π / (2n)))
+        x = cos(FT((2i - 1) * π / (2n)))
+        nodes[i] = x
+        # Chebyshev-Gauss type 1 computes ∫ f(x)/√(1-x²) dx with weight π/n.
+        # For regular integrals ∫ f(x) dx, multiply by √(1-x²).
+        weights[i] = FT(π / n) * sqrt(1 - x^2)
     end
 
     return nodes, weights
@@ -200,8 +204,9 @@ interpolation between the ice fall speed and rain fall speed:
     V_ice = ice_fall_speed_mh2005(D, state, m_ice, A_ice)
 
     # Apply density correction to ice fall speed
+    # ρ₀ must match the reference conditions at which V_ice was computed (P3_REF_RHO ≈ 0.825)
     ρ = state.air_density
-    ρ₀ = state.reference_air_density
+    ρ₀ = FT(P3_REF_RHO)
     ρ_correction = (ρ₀ / max(ρ, FT(0.1)))^FT(0.54)
     V_ice_corr = V_ice * ρ_correction
 

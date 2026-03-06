@@ -167,7 +167,7 @@ function ProcessRateParameters(FT::Type{<:AbstractFloat} = Float64;
         accretion_exponent = 1.15,
 
         # Rain self-collection
-        self_collection_coefficient = 4.33,
+        self_collection_coefficient = 5.78,
 
         # Timescales
         rain_evaporation_timescale = 10.0,
@@ -175,7 +175,7 @@ function ProcessRateParameters(FT::Type{<:AbstractFloat} = Float64;
         ice_melting_timescale = 60.0,
 
         # Ice aggregation
-        aggregation_efficiency_max = 1.0,
+        aggregation_efficiency_max = 0.3,
         aggregation_timescale = 600.0,
         aggregation_efficiency_temperature_low = 253.15,
         aggregation_efficiency_temperature_high = 268.15,
