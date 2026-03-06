@@ -82,9 +82,9 @@ using CUDA
 # Coarse resolution for fast Reactant compilation.
 # Increase `Nλ`, `Nφ`, `Nz` for physical runs.
 
-Nλ = 10
-Nφ = 10
-Nz = 5
+Nλ = 90
+Nφ = 40
+Nz = 20
 H  = 30kilometers
 
 grid = LatitudeLongitudeGrid(ReactantState();
@@ -96,7 +96,7 @@ grid = LatitudeLongitudeGrid(ReactantState();
 
 FT = eltype(grid)
 
-# ## Physical parameters
+# ## Physical parameters``
 
 constants = ThermodynamicConstants()
 g  = constants.gravitational_acceleration
@@ -206,8 +206,8 @@ cₛ = sqrt(γ * Rᵈ * θ₀)
 #
 # Step `model_vis` forward and capture mid-level snapshots for a sphere GIF.
 
-nsteps_vis = 4
-sample_interval = max(1, nsteps_vis ÷ 50)
+nsteps_vis = 2500 * 16
+sample_interval = max(1, nsteps_vis ÷ 100)
 
 Δλ = 360.0 / Nλ
 Δφ = 170.0 / Nφ
@@ -261,13 +261,94 @@ end
 
 Nt = length(vis_times)
 
+# ## Visualisation outputs (before AD)
+#
+# Save visualization products first, then free visualization memory before AD.
+
+sphere_kw = (elevation = π / 6, azimuth = -π / 2, aspect = :data)
+
+# Sphere snapshot (final frame, forward-only fields).
+fig_sphere = Figure(size = (1200, 600))
+
+ax1 = Axis3(fig_sphere[1, 1];
+            title = "θ′ at z ≈ $(Int(round(z_mid / 1e3))) km",
+            sphere_kw...)
+hm1 = surface!(ax1, xs, ys, zs; color = θ_frames[Nt], colormap = :balance, shading = NoShading)
+Colorbar(fig_sphere[1, 2], hm1; label = "θ′ (K)")
+
+ax2 = Axis3(fig_sphere[1, 3];
+            title = "u at z ≈ $(Int(round(z_mid / 1e3))) km",
+            sphere_kw...)
+hm2 = surface!(ax2, xs, ys, zs; color = u_frames[Nt], colormap = :speed, shading = NoShading)
+Colorbar(fig_sphere[1, 4], hm2; label = "u (m/s)")
+
+for ax in (ax1, ax2)
+    hidedecorations!(ax)
+    hidespines!(ax)
+end
+
+Label(fig_sphere[0, :],
+      @sprintf("Baroclinic wave — forward-only snapshot, t = %s",
+               prettytime(vis_times[Nt])),
+      fontsize = 18, tellwidth = false)
+
+save("baroclinic_wave_sphere.png", fig_sphere; px_per_unit = 2)
+@info "Saved baroclinic_wave_sphere.png"
+
+# Sphere MP4 (evolving θ′ and u from the visualisation model).
+n = Observable(1)
+θ′n = @lift θ_frames[$n]
+un  = @lift u_frames[$n]
+ttl = @lift @sprintf("z ≈ %d km,  t = %s",
+                     round(z_mid / 1e3), prettytime(vis_times[$n]))
+
+θlim = max(maximum(x -> maximum(abs, x), θ_frames), eps(Float64))
+ulim = max(maximum(x -> maximum(abs, x), u_frames), eps(Float64))
+
+fig_anim = Figure(size = (1200, 600))
+axg1 = Axis3(fig_anim[1, 1]; title = "θ′", sphere_kw...)
+hmg1 = surface!(axg1, xs, ys, zs; color = θ′n, colormap = :balance,
+                colorrange = (-θlim, θlim), shading = NoShading)
+Colorbar(fig_anim[1, 2], hmg1; label = "θ′ (K)")
+
+axg2 = Axis3(fig_anim[1, 3]; title = "u", sphere_kw...)
+hmg2 = surface!(axg2, xs, ys, zs; color = un, colormap = :balance,
+                colorrange = (-ulim, ulim), shading = NoShading)
+Colorbar(fig_anim[1, 4], hmg2; label = "u (m/s)")
+
+fig_anim[0, :] = Label(fig_anim, ttl, fontsize = 20, tellwidth = false)
+
+for ax in (axg1, axg2)
+    hidedecorations!(ax)
+    hidespines!(ax)
+end
+
+@info "Recording MP4 ($Nt frames)…"
+CairoMakie.record(fig_anim, "baroclinic_wave_sphere.mp4", 1:Nt; framerate = 12) do nn
+    n[] = nn
+end
+@info "Saved baroclinic_wave_sphere.mp4"
+
+# Release visualization memory before AD.
+@info "Releasing visualization memory before AD…"
+θ_frames = nothing
+u_frames = nothing
+vis_times = nothing
+xs = nothing
+ys = nothing
+zs = nothing
+fig_sphere = nothing
+fig_anim = nothing
+GC.gc()
+CUDA.reclaim()
+
 # ## AD forward + backward
 #
 # Use the separate `model_ad` for Enzyme differentiation.
 # `nsteps_ad` can be smaller than `nsteps_vis` to limit memory usage
 # in the backward pass.
 
-nsteps_ad = 4
+nsteps_ad = 2500  * 16
 
 θ_init  = CenterField(grid); set!(θ_init,  θᵢ)
 ρ_init  = CenterField(grid)
@@ -316,15 +397,11 @@ sensitivity = Array(interior(dθ))
 @info "Loss value" J
 @info "Max |∂J/∂θ₀|" maximum(abs, sensitivity)
 
-# ## Plots
+# ## Sensitivity plot
 #
-# Three outputs: sensitivity heatmap, sphere snapshot, and sphere GIF.
+# Save sensitivity heatmap after AD.
 
 i_pert = argmin(abs.(collect(λ) .- λ_c))
-sens_mid = sensitivity[:, :, k_mid]
-sphere_kw = (elevation = π / 6, azimuth = -π / 2, aspect = :data)
-
-# Sensitivity heatmap.
 slimit = max(maximum(abs, sensitivity), eps(FT))
 
 fig_sens = Figure(size = (1200, 450), fontsize = 14)
@@ -346,74 +423,5 @@ Colorbar(fig_sens[1, 4], hms2; label = "∂J/∂θ₀")
 
 save("baroclinic_wave_sensitivity.png", fig_sens; px_per_unit = 2)
 @info "Saved baroclinic_wave_sensitivity.png"
-
-# Sphere snapshot (final frame + sensitivity).
-fig_sphere = Figure(size = (1800, 600))
-
-ax1 = Axis3(fig_sphere[1, 1];
-            title = "θ′ at z ≈ $(Int(round(z_mid / 1e3))) km",
-            sphere_kw...)
-hm1 = surface!(ax1, xs, ys, zs; color = θ_frames[Nt], colormap = :balance, shading = NoShading)
-Colorbar(fig_sphere[1, 2], hm1; label = "θ′ (K)")
-
-ax2 = Axis3(fig_sphere[1, 3];
-            title = "u at z ≈ $(Int(round(z_mid / 1e3))) km",
-            sphere_kw...)
-hm2 = surface!(ax2, xs, ys, zs; color = u_frames[Nt], colormap = :speed, shading = NoShading)
-Colorbar(fig_sphere[1, 4], hm2; label = "u (m/s)")
-
-ax3 = Axis3(fig_sphere[1, 5];
-            title = "∂J/∂θ₀ at z ≈ $(Int(round(z_mid / 1e3))) km",
-            sphere_kw...)
-hm3 = surface!(ax3, xs, ys, zs; color = sens_mid, colormap = :balance,
-               colorrange = (-slimit, slimit), shading = NoShading)
-Colorbar(fig_sphere[1, 6], hm3; label = "∂J/∂θ₀")
-
-for ax in (ax1, ax2, ax3)
-    hidedecorations!(ax)
-    hidespines!(ax)
-end
-
-Label(fig_sphere[0, :],
-      @sprintf("Baroclinic wave — t = %s,  J = ⟨v²⟩ = %.4e",
-               prettytime(vis_times[Nt]), Float64(J)),
-      fontsize = 18, tellwidth = false)
-
-save("baroclinic_wave_sphere.png", fig_sphere; px_per_unit = 2)
-@info "Saved baroclinic_wave_sphere.png"
-
-# Sphere MP4 (evolving θ′ and u from the visualisation model).
-n = Observable(1)
-θ′n = @lift θ_frames[$n]
-un  = @lift u_frames[$n]
-ttl = @lift @sprintf("z ≈ %d km,  t = %s",
-                     round(z_mid / 1e3), prettytime(vis_times[$n]))
-
-θlim = max(maximum(x -> maximum(abs, x), θ_frames), eps(Float64))
-ulim = max(maximum(x -> maximum(abs, x), u_frames), eps(Float64))
-
-fig_anim = Figure(size = (1200, 600))
-axg1 = Axis3(fig_anim[1, 1]; title = "θ′", sphere_kw...)
-hmg1 = surface!(axg1, xs, ys, zs; color = θ′n, colormap = :balance,
-                colorrange = (-θlim, θlim), shading = NoShading)
-Colorbar(fig_anim[1, 2], hmg1; label = "θ′ (K)")
-
-axg2 = Axis3(fig_anim[1, 3]; title = "u", sphere_kw...)
-hmg2 = surface!(axg2, xs, ys, zs; color = un, colormap = :balance,
-                colorrange = (-ulim, ulim), shading = NoShading)
-Colorbar(fig_anim[1, 4], hmg2; label = "u (m/s)")
-
-fig_anim[0, :] = Label(fig_anim, ttl, fontsize = 20, tellwidth = false)
-
-for ax in (axg1, axg2)
-    hidedecorations!(ax)
-    hidespines!(ax)
-end
-
-@info "Recording MP4 ($Nt frames)…"
-CairoMakie.record(fig_anim, "baroclinic_wave_sphere.mp4", 1:Nt; framerate = 12) do nn
-    n[] = nn
-end
-@info "Saved baroclinic_wave_sphere.mp4"
 
 nothing #hide
