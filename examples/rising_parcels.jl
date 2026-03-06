@@ -2,8 +2,8 @@
 #
 # This example demonstrates the `ParcelDynamics` mode for `AtmosphereModel`,
 # which enables Lagrangian simulations of air parcels moving through a
-# prescribed background atmosphere. The example simulates five parcels — four with
-# prescribed vertical velocity and one with buoyancy-driven ascent:
+# prescribed background atmosphere. The example simulates seven parcels — five with
+# prescribed vertical velocity and two with buoyancy-driven ascent:
 #
 # 1. **Ascending dry adiabatic parcel**: A rising parcel cools at ~9.8 K/km, conserving
 #    potential temperature. Vapor increases toward saturation as temperature drops.
@@ -26,6 +26,17 @@
 # 5. **Buoyancy-driven cloudy ascent**: The same two-moment microphysics as case 4, but with
 #    `PrognosticVerticalVelocity` — the parcel's vertical velocity responds to the
 #    buoyancy force dw/dt = −g(ρ_parcel − ρ_env)/ρ_env, rather than being prescribed.
+#
+# 6. **Ascending cloudy parcel with P3 microphysics**: The Predicted Particle Properties
+#    (P3) scheme — a three-moment ice scheme with continuously predicted particle
+#    properties (rime fraction, rime density, liquid fraction). Unlike traditional
+#    schemes that use discrete ice categories, P3 uses a single ice category with
+#    evolving characteristics. Cloud liquid condensation uses a relaxation-to-saturation
+#    approach.
+#
+# 7. **Buoyancy-driven P3 ascent**: The P3 scheme with `PrognosticVerticalVelocity`,
+#    directly comparable to case 5 to show how the ice microphysics coupling
+#    affects the buoyancy-driven dynamics.
 #
 # The parcel model works with `AtmosphereModel`, using the standard `Simulation` interface.
 
@@ -313,23 +324,120 @@ nothing #hide
 buoyant_Tₑ = [interpolate(s.z, buoyant_model.temperature) for s in buoyant_snapshots]
 nothing #hide
 
+# ## Part 6: P3 microphysics — prescribed velocity
+#
+# The Predicted Particle Properties (P3) scheme represents ice with a single
+# category whose properties (rime fraction, rime density) evolve continuously.
+# P3 tracks 9 microphysical prognostic variables: cloud liquid mass; rain mass
+# and number; ice mass, number, rime mass, rime volume, reflectivity, and
+# liquid-on-ice mass. Cloud condensation uses relaxation-to-saturation with a
+# psychrometric correction factor.
+
+p3_model = AtmosphereModel(grid; dynamics=ParcelDynamics(),
+                           microphysics=PredictedParticlePropertiesMicrophysics())
+
+set!(p3_model, qᵗ = qᵗ, z = 0, w = 1,
+     θ = reference_state.potential_temperature,
+     p = reference_state.pressure,
+     ρ = reference_state.density)
+
+p3_simulation = Simulation(p3_model; Δt=1, stop_time=90minutes)
+
+p3_snapshots = []
+
+function record_p3_state!(sim)
+    state = sim.model.dynamics.state
+    t = sim.model.clock.time
+    push!(p3_snapshots, (; t, z=state.z, ρ=state.ρ, 𝒰=state.𝒰, μ=state.μ))
+    return nothing
+end
+
+add_callback!(p3_simulation, record_p3_state!, IterationInterval(10))
+run!(p3_simulation)
+
+@info "P3 parcel reached" p3_model.dynamics.state.z
+
+p3_constants = p3_model.thermodynamic_constants
+p3_t = [s.t for s in p3_snapshots]
+p3_z = [s.z for s in p3_snapshots]
+p3_T = [temperature(s.𝒰, p3_constants) for s in p3_snapshots]
+p3_qᵛ = [s.𝒰.moisture_mass_fractions.vapor for s in p3_snapshots]
+p3_qᶜˡ = [s.μ.ρqᶜˡ / s.ρ for s in p3_snapshots]
+p3_qʳ = [s.μ.ρqʳ / s.ρ for s in p3_snapshots]
+p3_qⁱ = [s.μ.ρqⁱ / s.ρ for s in p3_snapshots]
+p3_S = [supersaturation(temperature(s.𝒰, p3_constants), s.ρ,
+                        s.𝒰.moisture_mass_fractions, p3_constants,
+                        PlanarLiquidSurface()) for s in p3_snapshots]
+nothing #hide
+
+p3_Tₑ = [interpolate(s.z, p3_model.temperature) for s in p3_snapshots]
+nothing #hide
+
+# ## Part 7: P3 microphysics — buoyancy-driven ascent
+#
+# The same P3 scheme, but now with prognostic vertical velocity driven by
+# buoyancy. This tests the full coupling: condensation → latent heating →
+# positive buoyancy → acceleration → more condensation.
+
+p3_buoyant_dynamics = ParcelDynamics(vertical_velocity_formulation=PrognosticVerticalVelocity())
+p3_buoyant_model = AtmosphereModel(grid; dynamics=p3_buoyant_dynamics,
+                                   microphysics=PredictedParticlePropertiesMicrophysics())
+
+set!(p3_buoyant_model, qᵗ = qᵗ, z = 0, w_parcel = 1.0,
+     θ = reference_state.potential_temperature,
+     p = reference_state.pressure,
+     ρ = reference_state.density)
+
+p3_buoyant_simulation = Simulation(p3_buoyant_model; Δt=1, stop_time=5minutes)
+
+p3_buoyant_snapshots = []
+
+function record_p3_buoyant_state!(sim)
+    state = sim.model.dynamics.state
+    t = sim.model.clock.time
+    push!(p3_buoyant_snapshots, (; t, z=state.z, w=state.w, ρ=state.ρ, 𝒰=state.𝒰, μ=state.μ))
+    return nothing
+end
+
+add_callback!(p3_buoyant_simulation, record_p3_buoyant_state!, IterationInterval(10))
+run!(p3_buoyant_simulation)
+
+@info "P3 buoyancy-driven parcel reached" p3_buoyant_model.dynamics.state.z
+
+p3b_constants = p3_buoyant_model.thermodynamic_constants
+p3b_t = [s.t for s in p3_buoyant_snapshots]
+p3b_z = [s.z for s in p3_buoyant_snapshots]
+p3b_w = [s.w for s in p3_buoyant_snapshots]
+p3b_T = [temperature(s.𝒰, p3b_constants) for s in p3_buoyant_snapshots]
+p3b_qᵛ = [s.𝒰.moisture_mass_fractions.vapor for s in p3_buoyant_snapshots]
+p3b_qᶜˡ = [s.μ.ρqᶜˡ / s.ρ for s in p3_buoyant_snapshots]
+p3b_qʳ = [s.μ.ρqʳ / s.ρ for s in p3_buoyant_snapshots]
+p3b_qⁱ = [s.μ.ρqⁱ / s.ρ for s in p3_buoyant_snapshots]
+nothing #hide
+
+p3b_Tₑ = [interpolate(s.z, p3_buoyant_model.temperature) for s in p3_buoyant_snapshots]
+nothing #hide
+
 # ## Visualization
 #
-# We create a figure showing all five regimes:
+# We create a figure showing all seven regimes:
 # - Dry ascent: adiabatic cooling and approach to saturation
 # - One-moment cloudy ascent: condensation onset, cloud development, and precipitation formation
 # - Kessler cloudy ascent: the same physics with the DCMIP2016 Kessler scheme
 # - Two-moment cloudy ascent: mass and number evolution with aerosol activation
 # - Buoyancy-driven ascent: two-moment microphysics with prognostic vertical velocity
+# - P3 cloudy ascent: three-moment ice with cloud condensation and warm rain
+# - Buoyancy-driven P3 ascent: P3 microphysics with prognostic vertical velocity
 
 set_theme!(fontsize=14, linewidth=2.5)
-fig = Figure(size=(1200, 1100))
+fig = Figure(size=(1200, 1550))
 nothing #hide
 
 # Color palette
 c_vapor = :dodgerblue
 c_cloud = :lime
 c_rain = :orangered
+c_ice = :cyan
 c_temp = :magenta
 
 ## Row 1: Dry adiabatic ascent
@@ -492,18 +600,77 @@ ax5d = Axis(fig[10, 4];
     title = "Vertical velocity")
 lines!(ax5d, buoyant_w, buoyant_z / 1000; color=:black)
 
+## Row 6: P3 microphysics - prescribed velocity
+Label(fig[11, 1:3], "Cloudy ascent with P3 microphysics", fontsize=16)
+
+ax6a = Axis(fig[12, 1];
+    xlabel = "Temperature (K)",
+    ylabel = "Height (km)",
+    title = "Temperature evolution")
+lines!(ax6a, p3_T, p3_z / 1000; color=c_temp, label="Parcel")
+lines!(ax6a, p3_Tₑ, p3_z / 1000; color=:gray, linestyle=:dash, label="Environment")
+axislegend(ax6a; position=:lb, backgroundcolor=(:white, 0.8))
+
+ax6b = Axis(fig[12, 2];
+    xlabel = "Supersaturation",
+    ylabel = "Height (km)",
+    title = "Supersaturation evolution")
+lines!(ax6b, p3_S, p3_z / 1000; color=c_vapor)
+vlines!(ax6b, [0]; color=:gray, linestyle=:dash)
+
+ax6c = Axis(fig[12, 3];
+    xlabel = "Mixing ratio (kg/kg)",
+    ylabel = "Height (km)",
+    title = "Moisture evolution")
+lines!(ax6c, p3_qᵛ, p3_z / 1000; color=c_vapor, label="Vapor qᵛ")
+lines!(ax6c, p3_qᶜˡ, p3_z / 1000; color=c_cloud, label="Cloud qᶜˡ")
+lines!(ax6c, p3_qʳ, p3_z / 1000; color=c_rain, label="Rain qʳ")
+lines!(ax6c, p3_qⁱ, p3_z / 1000; color=c_ice, label="Ice qⁱ")
+axislegend(ax6c; position=:rt, backgroundcolor=(:white, 0.8))
+
+## Row 7: P3 buoyancy-driven ascent
+Label(fig[13, 1:4], "Buoyancy-driven ascent with P3 microphysics", fontsize=16)
+
+ax7a = Axis(fig[14, 1];
+    xlabel = "Temperature (K)",
+    ylabel = "Height (km)",
+    title = "Temperature evolution")
+lines!(ax7a, p3b_T, p3b_z / 1000; color=c_temp, label="Parcel")
+lines!(ax7a, p3b_Tₑ, p3b_z / 1000; color=:gray, linestyle=:dash, label="Environment")
+axislegend(ax7a; position=:lb, backgroundcolor=(:white, 0.8))
+
+ax7b = Axis(fig[14, 2];
+    xlabel = "Mixing ratio (kg/kg)",
+    ylabel = "Height (km)",
+    title = "Moisture evolution")
+lines!(ax7b, p3b_qᵛ, p3b_z / 1000; color=c_vapor, label="Vapor qᵛ")
+lines!(ax7b, p3b_qᶜˡ, p3b_z / 1000; color=c_cloud, label="Cloud qᶜˡ")
+lines!(ax7b, p3b_qʳ, p3b_z / 1000; color=c_rain, label="Rain qʳ")
+lines!(ax7b, p3b_qⁱ, p3b_z / 1000; color=c_ice, label="Ice qⁱ")
+axislegend(ax7b; position=:rt, backgroundcolor=(:white, 0.8))
+
+ax7c = Axis(fig[14, 3];
+    xlabel = "Velocity (m/s)",
+    ylabel = "Height (km)",
+    title = "Vertical velocity")
+lines!(ax7c, p3b_w, p3b_z / 1000; color=:black)
+
 for ax in [ax2a, ax2b, ax2c,
            ax3a, ax3b, ax3c,
            ax4a, ax4b, ax4c,
-           ax5a, ax5b, ax5c, ax5d]
+           ax5a, ax5b, ax5c, ax5d,
+           ax6a, ax6b, ax6c,
+           ax7a, ax7b, ax7c]
     ylims!(ax, 0, 5)
 end
 
-rowsize!(fig.layout, 1, Relative(0.03))
-rowsize!(fig.layout, 3, Relative(0.03))
-rowsize!(fig.layout, 5, Relative(0.03))
-rowsize!(fig.layout, 7, Relative(0.03))
-rowsize!(fig.layout, 9, Relative(0.03))
+rowsize!(fig.layout, 1, Relative(0.02))
+rowsize!(fig.layout, 3, Relative(0.02))
+rowsize!(fig.layout, 5, Relative(0.02))
+rowsize!(fig.layout, 7, Relative(0.02))
+rowsize!(fig.layout, 9, Relative(0.02))
+rowsize!(fig.layout, 11, Relative(0.02))
+rowsize!(fig.layout, 13, Relative(0.02))
 
 fig
 
@@ -607,9 +774,9 @@ fig
 #    cloud droplet self-collection, autoconversion of cloud to rain,
 #    accretion of cloud by rain, rain self-collection, and rain breakup.
 #
-# ### Buoyancy-driven cloudy ascent (bottom row)
+# ### Buoyancy-driven cloudy ascent (fifth row)
 #
-# The bottom row repeats the two-moment microphysics from row 4 but switches
+# Row 5 repeats the two-moment microphysics from row 4 but switches
 # from prescribed to **prognostic vertical velocity**. The parcel starts at
 # 1 m/s and its velocity evolves according to the buoyancy force
 # B = −g(ρ_parcel − ρ_env)/ρ_env. Below the lifting condensation level,
@@ -621,9 +788,42 @@ fig
 # moisture panels between rows 4 and 5 reveals how the ascent rate shapes
 # the cloud and precipitation evolution.
 #
+# ### P3 microphysics (sixth row)
+#
+# The Predicted Particle Properties (P3) scheme uses a single ice category
+# with continuously predicted properties — a fundamentally different approach
+# from traditional bulk microphysics schemes. In this warm-rain parcel test,
+# the key behavior to verify is:
+#
+# 1. **Relaxation-to-saturation condensation**: P3 uses the same non-equilibrium
+#    condensation approach as the one-moment scheme, but with a psychrometric
+#    correction factor that accounts for latent heating during phase change.
+#    Supersaturation should remain small and positive above the LCL.
+#
+# 2. **Warm-rain processes**: Autoconversion and accretion convert cloud liquid
+#    to rain, similar to the other schemes. The P3 autoconversion uses a
+#    Kessler-like parameterization with a threshold cloud water content.
+#
+# 3. **Temperature evolution**: The transition from dry to moist adiabatic
+#    lapse rate should be visible, confirming that latent heat release from
+#    condensation is correctly captured by the static energy formulation.
+#
+# At these warm temperatures (T > 273 K), ice processes are inactive.
+# Ice nucleation, deposition, riming, and aggregation activate at colder
+# temperatures in deeper convection scenarios.
+#
+# ### Buoyancy-driven P3 ascent (seventh row)
+#
+# Comparing rows 6 and 7 demonstrates the same prescribed-vs-prognostic
+# velocity contrast as rows 4 and 5, but with P3 microphysics. The
+# buoyancy-velocity coupling is qualitatively the same: condensation →
+# latent heating → buoyancy → acceleration → more condensation. Differences
+# between the two-moment and P3 velocity evolution reflect the different
+# condensation parameterizations and warm-rain process rates.
+#
 # This example demonstrates the basic thermodynamic and microphysical processes
 # governing cloud formation in a rising air parcel, and shows how different
 # microphysics schemes produce qualitatively similar but quantitatively different
-# results. The buoyancy-driven case further demonstrates the coupling between
+# results. The buoyancy-driven cases further demonstrate the coupling between
 # microphysics and dynamics: condensation → latent heating → buoyancy →
 # acceleration → more condensation.
