@@ -75,6 +75,7 @@ using Enzyme
 using Statistics: mean
 using Printf
 using CairoMakie
+using CUDA
 
 # ## Domain and grid
 #
@@ -82,8 +83,8 @@ using CairoMakie
 # Increase `Nλ`, `Nφ`, `Nz` for physical runs.
 
 Nλ = 60
-Nφ = 30
-Nz = 10
+Nφ = 60
+Nz = 20
 H  = 30kilometers
 
 grid = LatitudeLongitudeGrid(ReactantState();
@@ -117,7 +118,7 @@ dynamics = CompressibleDynamics(ExplicitTimeStepping();
                                 surface_pressure = p₀,
                                 reference_potential_temperature = θᵇ)
 
-model = AtmosphereModel(grid; dynamics, coriolis, advection = WENO())
+model = AtmosphereModel(grid; dynamics, coriolis)
 
 # ## Initial conditions
 
@@ -198,14 +199,15 @@ cₛ = sqrt(γ * Rᵈ * θ₀)
 # Since ``v = 0`` initially, ``⟨v²⟩`` is exactly the meridional eddy
 # kinetic energy — a direct measure of baroclinic growth.
 
-nsteps = 4
+nsteps = 3600
 
 θ_init  = CenterField(grid); set!(θ_init,  θᵢ)
+ρ_init  = CenterField(grid); set!(ρ_init,  ρᵢ)
 dθ_init = CenterField(grid); set!(dθ_init, FT(0))
 
-function loss(model, θ_init, Δt, nsteps)
-    FT = eltype(model.grid)
-    set!(model; θ = θ_init, ρ = FT(1))
+function loss(model, θ_init, ρ_init, Δt, nsteps)
+    set!(model; ρ = ρ_init)
+    set!(model; θ = θ_init)
     @trace mincut=true checkpointing=true track_numbers=false for _ in 1:nsteps
         time_step!(model, Δt)
     end
@@ -213,13 +215,14 @@ function loss(model, θ_init, Δt, nsteps)
     return mean(interior(v) .^ 2)
 end
 
-function grad_loss(model, dmodel, θ_init, dθ_init, Δt, nsteps)
+function grad_loss(model, dmodel, θ_init, dθ_init, ρ_init, Δt, nsteps)
     parent(dθ_init) .= 0
     _, loss_val = Enzyme.autodiff(
         Enzyme.set_strong_zero(Enzyme.ReverseWithPrimal),
         loss, Enzyme.Active,
         Enzyme.Duplicated(model, dmodel),
         Enzyme.Duplicated(θ_init, dθ_init),
+        Enzyme.Const(ρ_init),
         Enzyme.Const(Δt),
         Enzyme.Const(nsteps))
     return dθ_init, loss_val
@@ -232,23 +235,27 @@ end
 
 @info "Compiling forward pass…"
 @time compiled_fwd = Reactant.@compile raise=true raise_first=true sync=true loss(
-    model, θ_init, Δt, nsteps)
+    model, θ_init, ρ_init, Δt, nsteps)
 
 @info "Compiling backward pass (Enzyme reverse mode)…"
 dmodel = Enzyme.make_zero(model)
 @time compiled_bwd = Reactant.@compile raise=true raise_first=true sync=true grad_loss(
-    model, dmodel, θ_init, dθ_init, Δt, nsteps)
+    model, dmodel, θ_init, dθ_init, ρ_init, Δt, nsteps)
 
 # ## Run
+#
+# Capture the evolved state from the forward pass **before** the backward
+# pass, which may invalidate internal XLA buffers via buffer donation.
 
 @info "Running compiled forward pass…"
-@time compiled_fwd(model, θ_init, Δt, nsteps)
+@time compiled_fwd(model, θ_init, ρ_init, Δt, nsteps)
 
-v_evolved = Array(interior(model.velocities.v))
 θ_evolved = Array(interior(model.formulation.potential_temperature))
+u_evolved = Array(interior(model.velocities.u))
+t_final   = Float64(model.clock.time)
 
 @info "Computing sensitivity (Enzyme reverse mode)…"
-@time dθ, J = compiled_bwd(model, dmodel, θ_init, dθ_init, Δt, nsteps)
+@time dθ, J = compiled_bwd(model, dmodel, θ_init, dθ_init, ρ_init, Δt, nsteps)
 sensitivity = Array(interior(dθ))
 
 @info "Loss value" J
@@ -256,9 +263,10 @@ sensitivity = Array(interior(dθ))
 
 # ## Visualisation
 #
-# We save two outputs:
-# 1) a sensitivity plot (map + latitude-height section),
-# 2) sphere-rendered snapshots + GIF from a short forward simulation.
+# Two outputs: sensitivity heatmaps and a sphere snapshot of the evolved
+# state. The sphere data comes from the forward-pass arrays captured above,
+# avoiding the need to re-run the model after the backward pass (which
+# invalidates internal XLA buffers).
 
 Δλ = 360.0 / Nλ
 Δφ = 170.0 / Nφ
@@ -269,6 +277,18 @@ z = range(Δz / 2, H - Δz / 2, length = Nz)
 k_mid  = Nz ÷ 2
 z_mid  = z[k_mid]
 i_pert = argmin(abs.(collect(λ) .- λ_c))
+
+θ_bg_mid = Float64(θᵇ(z_mid))
+θ′_mid   = θ_evolved[:, :, k_mid] .- θ_bg_mid
+u_mid    = u_evolved[:, :, k_mid]
+sens_mid = sensitivity[:, :, k_mid]
+
+λrad = deg2rad.(collect(λ))
+φrad = deg2rad.(collect(φ))
+
+xs = [cos(ϕv) * cos(λv) for λv in λrad, ϕv in φrad]
+ys = [cos(ϕv) * sin(λv) for λv in λrad, ϕv in φrad]
+zs = [sin(ϕv) for λv in λrad, ϕv in φrad]
 
 # Sensitivity figure.
 slimit = max(maximum(abs, sensitivity), eps(FT))
@@ -293,86 +313,39 @@ Colorbar(fig_sens[1, 4], hms2; label = "∂J/∂θ₀")
 save("baroclinic_wave_sensitivity.png", fig_sens; px_per_unit = 2)
 @info "Saved baroclinic_wave_sensitivity.png"
 
-# Short forward run for sphere movie output.
-@info "Running short forward simulation for sphere visualisation..."
-@time begin
-    set!(model; ρ = ρᵢ)
-    set!(model; u = uᵢ, θ = θᵢ)
-end
-
-θ = PotentialTemperature(model)
-θᵇᵍ = CenterField(grid)
-set!(θᵇᵍ, (λ, φ, z) -> θᵇ(z))
-θ′ = θ - θᵇᵍ
-
-outputs = merge(model.velocities, (; θ′))
-nsteps_vis = 120
-vis_filename = "baroclinic_wave_sphere"
-
-simulation = Simulation(model; Δt, stop_iteration = nsteps_vis)
-simulation.output_writers[:jld2] = JLD2Writer(model, outputs;
-                                              filename = vis_filename,
-                                              schedule = IterationInterval(5),
-                                              overwrite_existing = true)
-run!(simulation)
-
-θ′_ts = FieldTimeSeries("$(vis_filename).jld2", "θ′")
-u_ts = FieldTimeSeries("$(vis_filename).jld2", "u")
-times = θ′_ts.times
-Nt = length(times)
-
-# Final snapshot on the sphere.
-fig_sphere = Figure(size = (1200, 600))
+# Sphere snapshot: evolved state + adjoint sensitivity.
+fig_sphere = Figure(size = (1800, 600))
 sphere_kw = (elevation = π / 6, azimuth = -π / 2, aspect = :data)
 
 ax1 = Axis3(fig_sphere[1, 1];
-            title = "θ′ at z = $(Int(round(z_mid / 1e3))) km, t = $(prettytime(times[Nt]))",
+            title = "θ′ at z ≈ $(Int(round(z_mid / 1e3))) km",
             sphere_kw...)
-hm1 = surface!(ax1, view(θ′_ts[Nt], :, :, k_mid);
-               colormap = :balance, shading = NoShading)
+hm1 = surface!(ax1, xs, ys, zs; color = θ′_mid, colormap = :balance, shading = NoShading)
 Colorbar(fig_sphere[1, 2], hm1; label = "θ′ (K)")
 
 ax2 = Axis3(fig_sphere[1, 3];
-            title = "u at z = $(Int(round(z_mid / 1e3))) km, t = $(prettytime(times[Nt]))",
+            title = "u at z ≈ $(Int(round(z_mid / 1e3))) km",
             sphere_kw...)
-hm2 = surface!(ax2, view(u_ts[Nt], :, :, k_mid);
-               colormap = :speed, shading = NoShading)
+hm2 = surface!(ax2, xs, ys, zs; color = u_mid, colormap = :speed, shading = NoShading)
 Colorbar(fig_sphere[1, 4], hm2; label = "u (m/s)")
 
-for ax in (ax1, ax2)
+ax3 = Axis3(fig_sphere[1, 5];
+            title = "∂J/∂θ₀ at z ≈ $(Int(round(z_mid / 1e3))) km",
+            sphere_kw...)
+hm3 = surface!(ax3, xs, ys, zs; color = sens_mid, colormap = :balance,
+               colorrange = (-slimit, slimit), shading = NoShading)
+Colorbar(fig_sphere[1, 6], hm3; label = "∂J/∂θ₀")
+
+for ax in (ax1, ax2, ax3)
     hidedecorations!(ax)
     hidespines!(ax)
 end
+
+Label(fig_sphere[0, :],
+      @sprintf("Baroclinic wave — t = %s,  J = ⟨v²⟩ = %.4e", prettytime(t_final), Float64(J)),
+      fontsize = 18, tellwidth = false)
 
 save("baroclinic_wave_sphere.png", fig_sphere; px_per_unit = 2)
 @info "Saved baroclinic_wave_sphere.png"
-
-# GIF over the sphere.
-n = Observable(1)
-θ′n = @lift view(θ′_ts[$n], :, :, k_mid)
-un = @lift view(u_ts[$n], :, :, k_mid)
-title = @lift "z = $(Int(round(z_mid / 1e3))) km, t = $(prettytime(times[$n]))"
-
-fig_anim = Figure(size = (1200, 600))
-axg1 = Axis3(fig_anim[1, 1]; title = "θ′", sphere_kw...)
-hmg1 = surface!(axg1, θ′n; colormap = :balance, colorrange = (-2, 2), shading = NoShading)
-Colorbar(fig_anim[1, 2], hmg1; label = "θ′ (K)")
-
-axg2 = Axis3(fig_anim[1, 3]; title = "u", sphere_kw...)
-ulim = max(maximum(abs, Array(interior(u_ts[Nt]))), eps(FT))
-hmg2 = surface!(axg2, un; colormap = :balance, colorrange = (-ulim, ulim), shading = NoShading)
-Colorbar(fig_anim[1, 4], hmg2; label = "u (m/s)")
-
-fig_anim[0, :] = Label(fig_anim, title, fontsize = 22, tellwidth = false)
-
-for ax in (axg1, axg2)
-    hidedecorations!(ax)
-    hidespines!(ax)
-end
-
-CairoMakie.record(fig_anim, "baroclinic_wave_sphere.gif", 1:Nt; framerate = 12) do nn
-    n[] = nn
-end
-@info "Saved baroclinic_wave_sphere.gif"
 
 nothing #hide
