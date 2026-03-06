@@ -494,6 +494,60 @@ end
 const τⁿᵘᵐ_2m = 10  # seconds
 
 #####
+##### Vapor mass tendency (ρqᵛ) - state-based
+#####
+#
+# The vapor tendency accounts for phase changes that transfer mass between
+# vapor and condensate. Autoconversion and accretion (cloud ↔ rain) do not
+# affect vapor. Conservation requires:
+#   d(ρqᵛ)/dt + d(ρqᶜˡ)/dt_phase + d(ρqʳ)/dt_evap = 0
+#
+# where d(ρqᶜˡ)/dt_phase = ρ(Sᶜᵒⁿᵈ + Sᵃᶜᵗ) and d(ρqʳ)/dt_evap = ρSᵉᵛᵃᵖ.
+
+@inline function AtmosphereModels.microphysical_tendency(bμp::WPNE2M, ::Val{:ρqᵛ}, ρ, ℳ::WarmPhaseTwoMomentState, 𝒰, constants)
+    categories = bμp.categories
+    sb = categories.warm_processes
+    τᶜˡ = liquid_relaxation_timescale(bμp.cloud_formation, categories)
+
+    qᶜˡ = ℳ.qᶜˡ
+    qʳ = ℳ.qʳ
+    nʳ = ℳ.nʳ
+
+    # Thermodynamic state
+    T = temperature(𝒰, constants)
+    q = 𝒰.moisture_mass_fractions
+    qᵛ = q.vapor
+
+    # Saturation specific humidity
+    qᵛ⁺ = saturation_specific_humidity(T, ρ, constants, PlanarLiquidSurface())
+
+    # Condensation (same computation as in cloud liquid tendency)
+    Sᵃᶜᵗ = aerosol_activation_mass_tendency(categories.aerosol_activation, categories.air_properties,
+                                             ρ, ℳ, 𝒰, constants)
+
+    Sᶜᵒⁿᵈ = condensation_rate(qᵛ, qᵛ⁺, qᶜˡ, T, ρ, q, τᶜˡ, constants)
+    Sᶜᵒⁿᵈ = ifelse(isnan(Sᶜᵒⁿᵈ), zero(Sᶜᵒⁿᵈ), Sᶜᵒⁿᵈ)
+    Sᶜᵒⁿᵈ_min = -max(0, qᶜˡ) / τᶜˡ
+    Sᶜᵒⁿᵈ = max(Sᶜᵒⁿᵈ - Sᵃᶜᵗ, Sᶜᵒⁿᵈ_min)
+
+    # Rain evaporation (same computation as in rain tendency)
+    Nʳ_vol = ρ * max(0, nʳ)
+    evap = rain_evaporation_2m(sb, categories.air_properties, q, max(0, qʳ), ρ, Nʳ_vol, T, constants)
+    Sᵉᵛᵃᵖ = evap.evap_rate_1
+    Sᵉᵛᵃᵖ_min = -max(0, qʳ) / τⁿᵘᵐ_2m
+    Sᵉᵛᵃᵖ = max(Sᵉᵛᵃᵖ, Sᵉᵛᵃᵖ_min)
+
+    # Vapor tendency: negative of phase-change sources
+    # Condensation + activation remove vapor; rain evaporation adds vapor
+    Sᵛᵃᵖ = -(Sᶜᵒⁿᵈ + Sᵃᶜᵗ) - Sᵉᵛᵃᵖ
+
+    # Limit vapor removal to available vapor
+    Sᵛᵃᵖ = max(Sᵛᵃᵖ, -max(0, qᵛ) / τⁿᵘᵐ_2m)
+
+    return ρ * Sᵛᵃᵖ
+end
+
+#####
 ##### Cloud liquid mass tendency (ρqᶜˡ) - state-based
 #####
 
@@ -761,10 +815,13 @@ Uses the maximum supersaturation to determine which aerosol modes activate.
         κ̄ = mean_hygroscopicity(ap, mode)
 
         # Critical supersaturation for mode (Eq. 9 in ARG 2000)
-        Sᶜʳⁱᵗ = 2 / sqrt(κ̄) * (A / 3 / mode.r_dry)^(3/2)
+        Sᶜʳⁱᵗ = 2 / sqrt(max(eps(FT), κ̄)) * sqrt(max(0, A / (3 * mode.r_dry)))^3
 
         # Activated fraction for this mode (Eq. 7 in ARG 2000)
-        ϕ = 2 * log(Sᶜʳⁱᵗ / Sᵐᵃˣ) / 3 / sqrt(2) / log(mode.stdev)
+        # Guard against log(0) or log(negative): when Sᵐᵃˣ ≈ 0, no activation occurs
+        Sᵐᵃˣ_safe = max(eps(FT), Sᵐᵃˣ)
+        Sᶜʳⁱᵗ_safe = max(eps(FT), Sᶜʳⁱᵗ)
+        ϕ = 2 * log(Sᶜʳⁱᵗ_safe / Sᵐᵃˣ_safe) / 3 / sqrt(2) / log(mode.stdev)
         fᵃᶜᵗ = (1 - erf(ϕ)) / 2
 
         Nᵃᶜᵗ += fᵃᶜᵗ * Nᵐᵒᵈᵉ
