@@ -515,6 +515,100 @@ end
 # Numerical timescale for limiting negative-value relaxation
 const τⁿᵘᵐ = 10  # seconds
 
+#####
+##### Vapor mass tendency (ρqᵛ) — warm-phase non-equilibrium 1M
+#####
+#
+# Conservation: d(qᵛ)/dt = -Sᶜᵒⁿᵈ - Sᵉᵛᵃᵖ
+#
+# Condensation removes vapor (Sᶜᵒⁿᵈ > 0 means cloud forms).
+# Rain evaporation returns vapor (Sᵉᵛᵃᵖ < 0 means rain evaporates).
+# Autoconversion and accretion (cloud → rain) do not affect vapor.
+
+@inline function AM.microphysical_tendency(bμp::WPNE1M, ::Val{:ρqᵛ}, ρ, ℳ::WarmPhaseOneMomentState, 𝒰, constants)
+    categories = bμp.categories
+    τᶜˡ = liquid_relaxation_timescale(bμp.cloud_formation, categories)
+    qᶜˡ = ℳ.qᶜˡ
+    qʳ = ℳ.qʳ
+
+    # Thermodynamic state
+    T = temperature(𝒰, constants)
+    q = 𝒰.moisture_mass_fractions
+    qᵛ = q.vapor
+
+    # Saturation specific humidity
+    qᵛ⁺ = saturation_specific_humidity(T, ρ, constants, PlanarLiquidSurface())
+
+    # Condensation (same computation as in cloud liquid tendency)
+    Sᶜᵒⁿᵈ = condensation_rate(qᵛ, qᵛ⁺, qᶜˡ, T, ρ, q, τᶜˡ, constants)
+    Sᶜᵒⁿᵈ = ifelse(isnan(Sᶜᵒⁿᵈ), zero(Sᶜᵒⁿᵈ), Sᶜᵒⁿᵈ)
+
+    # Rain evaporation (same computation as in rain tendency)
+    Sᵉᵛᵃᵖ = rain_evaporation(categories.rain,
+                             categories.hydrometeor_velocities.rain,
+                             categories.air_properties,
+                             q, qʳ, ρ, T, constants)
+    Sᵉᵛᵃᵖ_min = -max(0, qʳ) / τⁿᵘᵐ
+    Sᵉᵛᵃᵖ = max(Sᵉᵛᵃᵖ, Sᵉᵛᵃᵖ_min)
+
+    # Vapor tendency: negative of phase-change sources
+    Sᵛᵃᵖ = -Sᶜᵒⁿᵈ - Sᵉᵛᵃᵖ
+
+    # Limit vapor removal to available vapor
+    Sᵛᵃᵖ = max(Sᵛᵃᵖ, -max(0, qᵛ) / τⁿᵘᵐ)
+
+    return ρ * Sᵛᵃᵖ
+end
+
+#####
+##### Vapor mass tendency (ρqᵛ) — mixed-phase non-equilibrium 1M
+#####
+#
+# Conservation: d(qᵛ)/dt = -Sᶜᵒⁿᵈ - Sᵈᵉᵖ - Sᵉᵛᵃᵖ
+#
+# In addition to condensation and rain evaporation, vapor is also
+# consumed by ice deposition (Sᵈᵉᵖ > 0 means ice forms from vapor).
+
+@inline function AM.microphysical_tendency(bμp::MPNE1M, ::Val{:ρqᵛ}, ρ, ℳ::MixedPhaseOneMomentState, 𝒰, constants)
+    categories = bμp.categories
+    τᶜˡ = liquid_relaxation_timescale(bμp.cloud_formation, categories)
+    τᶜⁱ = ice_relaxation_timescale(bμp.cloud_formation, categories)
+    qᶜˡ = ℳ.qᶜˡ
+    qᶜⁱ = ℳ.qᶜⁱ
+    qʳ = ℳ.qʳ
+
+    # Thermodynamic state
+    T = temperature(𝒰, constants)
+    q = 𝒰.moisture_mass_fractions
+    qᵛ = q.vapor
+
+    # Condensation (vapor ↔ cloud liquid)
+    qᵛ⁺ = saturation_specific_humidity(T, ρ, constants, PlanarLiquidSurface())
+    Sᶜᵒⁿᵈ = condensation_rate(qᵛ, qᵛ⁺, qᶜˡ, T, ρ, q, τᶜˡ, constants)
+    Sᶜᵒⁿᵈ = ifelse(isnan(Sᶜᵒⁿᵈ), zero(Sᶜᵒⁿᵈ), Sᶜᵒⁿᵈ)
+
+    # Deposition (vapor ↔ cloud ice)
+    qᵛ⁺ⁱ = saturation_specific_humidity(T, ρ, constants, PlanarIceSurface())
+    Sᵈᵉᵖ = deposition_rate(qᵛ, qᵛ⁺ⁱ, qᶜⁱ, T, ρ, q, τᶜⁱ, constants)
+    Sᵈᵉᵖ = ifelse(isnan(Sᵈᵉᵖ), zero(Sᵈᵉᵖ), Sᵈᵉᵖ)
+
+    # Rain evaporation (rain → vapor)
+    Sᵉᵛᵃᵖ = rain_evaporation(categories.rain,
+                             categories.hydrometeor_velocities.rain,
+                             categories.air_properties,
+                             q, qʳ, ρ, T, constants)
+    Sᵉᵛᵃᵖ_min = -max(0, qʳ) / τⁿᵘᵐ
+    Sᵉᵛᵃᵖ = max(Sᵉᵛᵃᵖ, Sᵉᵛᵃᵖ_min)
+
+    # Vapor tendency: negative of all phase-change sources
+    Sᵛᵃᵖ = -Sᶜᵒⁿᵈ - Sᵈᵉᵖ - Sᵉᵛᵃᵖ
+
+    # Limit vapor removal to available vapor
+    Sᵛᵃᵖ = max(Sᵛᵃᵖ, -max(0, qᵛ) / τⁿᵘᵐ)
+
+    return ρ * Sᵛᵃᵖ
+end
+
 # State-based rain tendency for all warm-phase 1M schemes
 @inline function AM.microphysical_tendency(bμp::WarmPhase1M, ::Val{:ρqʳ}, ρ, ℳ::WarmPhaseOneMomentState, 𝒰, constants)
     categories = bμp.categories
