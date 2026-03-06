@@ -22,7 +22,7 @@ struct ProcessRateParameters{FT}
     freezing_temperature :: FT       # T₀ [K]
 
     # Rain autoconversion (Khairoutdinov-Kogan 2000)
-    autoconversion_coefficient :: FT         # k₁ [s⁻¹]
+    autoconversion_coefficient :: FT         # k₁ = 1350 × (Nc_ref_cm)^β, see KK2000 Eq. 29
     autoconversion_exponent_cloud :: FT      # α [-]
     autoconversion_exponent_droplet :: FT    # β [-]
     autoconversion_threshold :: FT           # qᶜˡ threshold [kg/kg]
@@ -153,7 +153,10 @@ function ProcessRateParameters(FT::Type{<:AbstractFloat} = Float64;
         freezing_temperature = 273.15,
 
         # Rain autoconversion
-        autoconversion_coefficient = 2.47e-2,
+        # KK2000 Eq. 29: dqʳ/dt = 1350 qᶜˡ^2.47 Nᶜ^(-1.79) with Nᶜ in cm⁻³.
+        # Rescaled for (Nᶜ/Nᶜ_ref)^β with Nᶜ_ref = 1e8 m⁻³ = 100 cm⁻³:
+        # k₁ = 1350 × (100)^(-1.79) ≈ 0.355
+        autoconversion_coefficient = 1350 * 100.0^(-1.79),
         autoconversion_exponent_cloud = 2.47,
         autoconversion_exponent_droplet = -1.79,
         autoconversion_threshold = 1e-4,
