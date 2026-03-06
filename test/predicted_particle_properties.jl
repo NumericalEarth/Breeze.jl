@@ -9,7 +9,18 @@ using Breeze.Microphysics.PredictedParticleProperties:
     size_distribution,
     tabulate,
     TabulationParameters,
-    TabulatedFunction3D
+    TabulatedFunction3D,
+    P3ProcessRates,
+    compute_p3_process_rates,
+    tendency_ρqᶜˡ,
+    tendency_ρqʳ,
+    tendency_ρnʳ,
+    tendency_ρqⁱ,
+    tendency_ρnⁱ,
+    tendency_ρqᶠ,
+    tendency_ρbᶠ,
+    tendency_ρzⁱ,
+    tendency_ρqʷⁱ
 
 using Oceananigans: CPU
 
@@ -1115,5 +1126,105 @@ using Oceananigans: CPU
 
         # Larger mean mass → smaller λ (larger characteristic diameter)
         @test logλ_large < logλ_small
+    end
+
+    @testset "P3ProcessRates construction" begin
+        FT = Float64
+        rates = P3ProcessRates(
+            ntuple(_ -> zero(FT), fieldcount(P3ProcessRates))...
+        )
+        @test rates isa P3ProcessRates{FT}
+        @test rates.autoconversion == 0.0
+        @test rates.partial_melting == 0.0
+        @test rates.complete_melting == 0.0
+    end
+
+    @testset "Tendency functions - smoke tests" begin
+        FT = Float64
+        ρ = FT(1.0)    # Air density [kg/m³]
+        qⁱ = FT(1e-4)  # Ice mass mixing ratio [kg/kg]
+        nⁱ = FT(1e5)   # Ice number [1/kg]
+        zⁱ = FT(1e-8)  # Ice reflectivity
+        Fᶠ = FT(0.3)   # Rime fraction
+        ρᶠ = FT(400.0)  # Rime density [kg/m³]
+
+        # Create rates with typical warm-rain and ice process activity
+        rates = P3ProcessRates(
+            # Phase 1: Rain
+            FT(1e-7),   # autoconversion
+            FT(2e-7),   # accretion
+            FT(-5e-8),  # rain_evaporation (negative = loss)
+            FT(-1e-6),  # rain_self_collection (negative = loss)
+            # Phase 1: Ice
+            FT(3e-7),   # deposition
+            FT(1e-8),   # partial_melting
+            FT(5e-8),   # complete_melting
+            FT(-1e3),   # melting_number (negative = loss)
+            # Phase 2: Aggregation
+            FT(-500.0), # aggregation (negative = number loss)
+            # Phase 2: Riming
+            FT(1e-7),   # cloud_riming
+            FT(-1e4),   # cloud_riming_number
+            FT(5e-8),   # rain_riming
+            FT(-500.0), # rain_riming_number
+            FT(300.0),  # rime_density_new
+            # Phase 2: Shedding and refreezing
+            FT(2e-8),   # shedding
+            FT(100.0),  # shedding_number
+            FT(1e-8),   # refreezing
+            # Ice nucleation
+            FT(1e-9),   # nucleation_mass
+            FT(10.0),   # nucleation_number
+            FT(5e-9),   # cloud_freezing_mass
+            FT(100.0),  # cloud_freezing_number
+            FT(3e-9),   # rain_freezing_mass
+            FT(50.0),   # rain_freezing_number
+            # Rime splintering
+            FT(1e-10),  # splintering_mass
+            FT(1.0),    # splintering_number
+        )
+
+        # Test each tendency function returns a finite number
+        @test isfinite(tendency_ρqᶜˡ(rates, ρ))
+        @test isfinite(tendency_ρqʳ(rates, ρ))
+        @test isfinite(tendency_ρnʳ(rates, ρ, nⁱ, qⁱ))
+        @test isfinite(tendency_ρqⁱ(rates, ρ))
+        @test isfinite(tendency_ρnⁱ(rates, ρ))
+        @test isfinite(tendency_ρqᶠ(rates, ρ, Fᶠ))
+        @test isfinite(tendency_ρbᶠ(rates, ρ, Fᶠ, ρᶠ))
+        @test isfinite(tendency_ρzⁱ(rates, ρ, qⁱ, nⁱ, zⁱ))
+        @test isfinite(tendency_ρqʷⁱ(rates, ρ))
+    end
+
+    @testset "Tendency functions - zero rates produce zero tendencies" begin
+        FT = Float64
+        ρ = FT(1.0)
+        zero_rates = P3ProcessRates(ntuple(_ -> zero(FT), fieldcount(P3ProcessRates))...)
+
+        @test tendency_ρqᶜˡ(zero_rates, ρ) == 0.0
+        @test tendency_ρqʳ(zero_rates, ρ) == 0.0
+        @test tendency_ρnʳ(zero_rates, ρ, FT(1e5), FT(1e-4)) == 0.0
+        @test tendency_ρqⁱ(zero_rates, ρ) == 0.0
+        @test tendency_ρnⁱ(zero_rates, ρ) == 0.0
+        @test tendency_ρqᶠ(zero_rates, ρ, FT(0.3)) == 0.0
+        @test tendency_ρbᶠ(zero_rates, ρ, FT(0.3), FT(400.0)) == 0.0
+        @test tendency_ρzⁱ(zero_rates, ρ, FT(1e-4), FT(1e5), FT(1e-8)) == 0.0
+        @test tendency_ρqʷⁱ(zero_rates, ρ) == 0.0
+    end
+
+    @testset "Tendency functions - Float32 type stability" begin
+        FT = Float32
+        ρ = FT(1.0)
+        rates = P3ProcessRates(ntuple(_ -> FT(1e-7), fieldcount(P3ProcessRates))...)
+
+        @test tendency_ρqᶜˡ(rates, ρ) isa FT
+        @test tendency_ρqʳ(rates, ρ) isa FT
+        @test tendency_ρnʳ(rates, ρ, FT(1e5), FT(1e-4); m_rain_init=FT(5e-10)) isa FT
+        @test tendency_ρqⁱ(rates, ρ) isa FT
+        @test tendency_ρnⁱ(rates, ρ) isa FT
+        @test tendency_ρqᶠ(rates, ρ, FT(0.3)) isa FT
+        @test tendency_ρbᶠ(rates, ρ, FT(0.3), FT(400.0)) isa FT
+        @test tendency_ρzⁱ(rates, ρ, FT(1e-4), FT(1e5), FT(1e-8)) isa FT
+        @test tendency_ρqʷⁱ(rates, ρ) isa FT
     end
 end
