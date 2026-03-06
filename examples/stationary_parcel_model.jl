@@ -79,7 +79,7 @@ function run_parcel_simulation(; microphysics, θ = 300, stop_time = 2000, Δt =
         push!(qᵛ_ts, first(μ.qᵛ))
 
         if is_p3
-            # P3 stores density-weighted fields; divide by reference density
+            ## P3 stores density-weighted fields; divide by reference density
             ρᵣ = first(sim.model.dynamics.reference_state.density)
             push!(qᶜˡ_ts, first(μ.ρqᶜˡ) / ρᵣ)
             push!(qʳ_ts, first(μ.ρqʳ) / ρᵣ)
