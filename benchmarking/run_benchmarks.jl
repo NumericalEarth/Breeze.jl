@@ -80,7 +80,7 @@ function parse_commandline()
             help = "Advection scheme: nothing, Centered2, WENO5, WENO9, bounded_WENO5. " *
                    "Multiple schemes can be specified as comma-separated list."
             arg_type = String
-            default = "WENO5"
+            default = "WENO9"
 
         "--microphysics"
             help = "Microphysics scheme: nothing, SaturationAdjustment, " *
