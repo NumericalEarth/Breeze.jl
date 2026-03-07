@@ -407,7 +407,7 @@ function atmosphere_model_forcing(user_forcings::NamedTuple, prognostic_fields, 
     specific_fields = merge(velocities, formulation_fields, NamedTuple{(moist_specific,)}((specific_prognostic_moisture,)))
 
     # Build context for special forcing types (used by extended materialize_forcing in Forcings module)
-    forcing_context = (; coriolis, density, specific_fields)
+    forcing_context = (; coriolis, density, specific_fields, clock)
 
     materialized = Tuple(
         n in keys(user_forcings) ?

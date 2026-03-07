@@ -99,6 +99,7 @@ export
     # Forcing utilities
     geostrophic_forcings,
     SubsidenceForcing,
+    RelaxationForcing,
 
     # Grid utilities
     PiecewiseStretchedDiscretization,
