@@ -15,12 +15,12 @@
 using Breeze
 using Oceananigans
 using Oceananigans.Architectures: ReactantState
+using CUDA
 using Reactant
 using Reactant: @trace
 using Statistics: mean
 using Printf
 using CairoMakie
-using CUDA
 using Dates
 
 Reactant.set_default_backend("gpu")
@@ -66,6 +66,8 @@ function benchmark_forward!(forward_call!, args...; warmup_steps, ntrials, arch)
 end
 
 function main()
+    @info "CUDA runtime configuration" runtime = CUDA.runtime_version() local_toolkit = CUDA.local_toolkit
+
     # Physical parameters
     θ_background          = 300.0    # [K]
     perturbation_amplitude = 2.0     # [K]
@@ -73,6 +75,7 @@ function main()
     bubble_center_x        = 5000.0  # [m]
     bubble_center_y        = 5000.0  # [m]
     bubble_center_z        = 2000.0  # [m]
+    latitude               = 45.0    # [degrees] for f-plane Coriolis
 
     # Domain and benchmark configuration
     domain_x, domain_y, domain_z = 10000.0, 10000.0, 10000.0
@@ -148,8 +151,20 @@ function main()
 
         @info "Building atmosphere models..."
         @time begin
-            reactant_model = AtmosphereModel(reactant_grid; dynamics = CompressibleDynamics())
-            gpu_model      = AtmosphereModel(gpu_grid;      dynamics = CompressibleDynamics())
+            advection = WENO(order = 5)
+            coriolis = FPlane(; latitude)
+            reactant_model = AtmosphereModel(
+                reactant_grid;
+                advection,
+                coriolis,
+                dynamics = CompressibleDynamics(),
+            )
+            gpu_model = AtmosphereModel(
+                gpu_grid;
+                advection,
+                coriolis,
+                dynamics = CompressibleDynamics(),
+            )
         end
 
         thermo = reactant_model.thermodynamic_constants
@@ -276,7 +291,33 @@ function main()
             open(profile_log_path, "w") do io
                 redirect_stdout(io) do
                     redirect_stderr(io) do
-                        Reactant.@profile compiled_forward(reactant_model, θ_initial_reactant, Δt, nsteps)
+                        old_lines = get(ENV, "LINES", nothing)
+                        old_columns = get(ENV, "COLUMNS", nothing)
+                        ENV["LINES"] = "200000"
+                        ENV["COLUMNS"] = "200000"
+                        try
+                            profile_result = Reactant.@profile compiled_forward(
+                                reactant_model, θ_initial_reactant, Δt, nsteps
+                            )
+                            ioctx = IOContext(
+                                io,
+                                :limit => false,
+                                :displaysize => (200000, 200000),
+                            )
+                            show(ioctx, MIME"text/plain"(), profile_result)
+                            println(io)
+                        finally
+                            if old_lines === nothing
+                                delete!(ENV, "LINES")
+                            else
+                                ENV["LINES"] = old_lines
+                            end
+                            if old_columns === nothing
+                                delete!(ENV, "COLUMNS")
+                            else
+                                ENV["COLUMNS"] = old_columns
+                            end
+                        end
                     end
                 end
             end
