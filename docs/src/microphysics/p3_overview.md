@@ -165,6 +165,7 @@ The following sections provide detailed documentation of the P3 scheme:
 3. **[Integral Properties](@ref p3_integral_properties)**: Bulk properties from PSD integrals
 4. **[Microphysical Processes](@ref p3_processes)**: Process rate formulations
 5. **[Prognostic Equations](@ref p3_prognostics)**: Tendency equations and model coupling
+6. **[Examples](@ref p3_examples)**: Worked examples and visualizations of P3 microphysics concepts
 
 ## Complete References
 

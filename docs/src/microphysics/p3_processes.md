@@ -304,6 +304,9 @@ This allows tracking of wet ice particles before complete melting.
 
 ### Shedding
 
+!!! note "Difference from Fortran P3"
+    The original Fortran P3 evaluates shedding through a tabulated integral over the size distribution restricted strictly to particles with dimensions $D \ge 9$ mm. In contrast, Breeze implements shedding as a bulk relaxation model tracking the total liquid fraction of the ice population space, governed by an upper threshold.
+
 When liquid fraction exceeds a threshold (default 30%), excess liquid sheds as rain
 [MilbrandtEtAl2025liquidfraction](@cite):
 

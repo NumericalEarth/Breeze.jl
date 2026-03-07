@@ -173,6 +173,7 @@ makedocs(
                 "Integral properties" => "microphysics/p3_integral_properties.md",
                 "Processes" => "microphysics/p3_processes.md",
                 "Prognostics" => "microphysics/p3_prognostics.md",
+                "Examples" => "microphysics/p3_examples.md",
             ],
         ],
         "Developers" => Any[

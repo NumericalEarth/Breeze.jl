@@ -1,4 +1,4 @@
-# P3 Examples and Visualization
+# [P3 Examples and Visualization](@id p3_examples)
 
 This section provides worked examples demonstrating P3 microphysics concepts
 through visualization and analysis.
