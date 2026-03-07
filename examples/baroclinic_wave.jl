@@ -82,9 +82,9 @@ using CUDA
 # Coarse resolution for fast Reactant compilation.
 # Increase `Nλ`, `Nφ`, `Nz` for physical runs.
 
-Nλ = 10
-Nφ = 10
-Nz = 10
+Nλ = 180
+Nφ = 85
+Nz = 30
 H  = 30kilometers
 
 grid = LatitudeLongitudeGrid(ReactantState();
