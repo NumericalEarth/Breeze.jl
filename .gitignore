@@ -40,6 +40,8 @@ Manifest-v*.toml
 *.DS_Store
 *.vscode
 *.code-workspace
+*.juliaup*
+
 # Claude Code — ignore user-specific settings, track shared rules/skills
 .claude/settings.local.json
 .claude/debug/
