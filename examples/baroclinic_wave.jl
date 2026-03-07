@@ -424,4 +424,32 @@ Colorbar(fig_sens[1, 4], hms2; label = "∂J/∂θ₀")
 save("baroclinic_wave_sensitivity.png", fig_sens; px_per_unit = 2)
 @info "Saved baroclinic_wave_sensitivity.png"
 
+# Also visualize the mid-level sensitivity field on the sphere.
+λrad_sens = deg2rad.(collect(λ))
+φrad_sens = deg2rad.(collect(φ))
+xs_sens = [cos(ϕv) * cos(λv) for λv in λrad_sens, ϕv in φrad_sens]
+ys_sens = [cos(ϕv) * sin(λv) for λv in λrad_sens, ϕv in φrad_sens]
+zs_sens = [sin(ϕv) for λv in λrad_sens, ϕv in φrad_sens]
+
+fig_sens_sphere = Figure(size = (700, 600), fontsize = 14)
+Label(fig_sens_sphere[0, :],
+      @sprintf("Adjoint sensitivity on sphere (∂J/∂θ₀), z ≈ %d m",
+               Int(round(z_mid))),
+      fontsize = 16, tellwidth = false)
+
+ax_sens_sphere = Axis3(fig_sens_sphere[1, 1];
+                       title = "∂J/∂θ₀ at mid-level",
+                       elevation = π / 6, azimuth = -π / 2, aspect = :data)
+hm_sens_sphere = surface!(ax_sens_sphere, xs_sens, ys_sens, zs_sens;
+                          color = sensitivity[:, :, k_mid],
+                          colormap = :balance,
+                          colorrange = (-slimit, slimit),
+                          shading = NoShading)
+Colorbar(fig_sens_sphere[1, 2], hm_sens_sphere; label = "∂J/∂θ₀")
+hidedecorations!(ax_sens_sphere)
+hidespines!(ax_sens_sphere)
+
+save("baroclinic_wave_sensitivity_sphere.png", fig_sens_sphere; px_per_unit = 2)
+@info "Saved baroclinic_wave_sensitivity_sphere.png"
+
 nothing #hide
