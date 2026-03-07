@@ -82,9 +82,9 @@ using CUDA
 # Coarse resolution for fast Reactant compilation.
 # Increase `Nλ`, `Nφ`, `Nz` for physical runs.
 
-Nλ = 90
-Nφ = 40
-Nz = 20
+Nλ = 10
+Nφ = 10
+Nz = 10
 H  = 30kilometers
 
 grid = LatitudeLongitudeGrid(ReactantState();
@@ -206,7 +206,7 @@ cₛ = sqrt(γ * Rᵈ * θ₀)
 #
 # Step `model_vis` forward and capture mid-level snapshots for a sphere GIF.
 
-nsteps_vis = 2500 * 16
+nsteps_vis = 2500
 sample_interval = max(1, nsteps_vis ÷ 100)
 
 Δλ = 360.0 / Nλ
@@ -348,7 +348,7 @@ CUDA.reclaim()
 # `nsteps_ad` can be smaller than `nsteps_vis` to limit memory usage
 # in the backward pass.
 
-nsteps_ad = 2500  * 16
+nsteps_ad = 2500
 
 θ_init  = CenterField(grid); set!(θ_init,  θᵢ)
 ρ_init  = CenterField(grid)
@@ -402,23 +402,28 @@ sensitivity = Array(interior(dθ))
 # Save sensitivity heatmap after AD.
 
 i_pert = argmin(abs.(collect(λ) .- λ_c))
-slimit = max(maximum(abs, sensitivity), eps(FT))
+
+sensitivity_mid = sensitivity[:, :, k_mid]
+sensitivity_section = sensitivity[i_pert, :, :]
+
+mid_limit = max(maximum(abs, sensitivity_mid), eps(Float64))
+section_limit = max(maximum(abs, sensitivity_section), eps(Float64))
 
 fig_sens = Figure(size = (1200, 450), fontsize = 14)
 Label(fig_sens[0, :],
-      @sprintf("Adjoint sensitivity (∂J/∂θ₀), J = %.6e", Float64(J)),
+      @sprintf("Adjoint sensitivity (per-plot color scaling), J = %.6e", Float64(J)),
       fontsize = 16, tellwidth = false)
 
 axs1 = Axis(fig_sens[1, 1]; xlabel = "λ (°)", ylabel = "φ (°)",
             title = "∂J/∂θ₀ — z ≈ $(Int(round(z_mid))) m", aspect = DataAspect())
-hms1 = heatmap!(axs1, collect(λ), collect(φ), sensitivity[:, :, k_mid];
-                colormap = :balance, colorrange = (-slimit, slimit))
+hms1 = heatmap!(axs1, collect(λ), collect(φ), sensitivity_mid;
+                colormap = :balance, colorrange = (-mid_limit, mid_limit))
 Colorbar(fig_sens[1, 2], hms1; label = "∂J/∂θ₀")
 
 axs2 = Axis(fig_sens[1, 3]; xlabel = "φ (°)", ylabel = "z (m)",
             title = "∂J/∂θ₀ — λ ≈ $(Int(round(λ[i_pert])))°")
-hms2 = heatmap!(axs2, collect(φ), collect(z), sensitivity[i_pert, :, :];
-                colormap = :balance, colorrange = (-slimit, slimit))
+hms2 = heatmap!(axs2, collect(φ), collect(z), sensitivity_section;
+                colormap = :balance, colorrange = (-section_limit, section_limit))
 Colorbar(fig_sens[1, 4], hms2; label = "∂J/∂θ₀")
 
 save("baroclinic_wave_sensitivity.png", fig_sens; px_per_unit = 2)
@@ -433,7 +438,7 @@ zs_sens = [sin(ϕv) for λv in λrad_sens, ϕv in φrad_sens]
 
 fig_sens_sphere = Figure(size = (700, 600), fontsize = 14)
 Label(fig_sens_sphere[0, :],
-      @sprintf("Adjoint sensitivity on sphere (∂J/∂θ₀), z ≈ %d m",
+      @sprintf("Adjoint sensitivity on sphere (per-plot color scaling), z ≈ %d m",
                Int(round(z_mid))),
       fontsize = 16, tellwidth = false)
 
@@ -441,9 +446,9 @@ ax_sens_sphere = Axis3(fig_sens_sphere[1, 1];
                        title = "∂J/∂θ₀ at mid-level",
                        elevation = π / 6, azimuth = -π / 2, aspect = :data)
 hm_sens_sphere = surface!(ax_sens_sphere, xs_sens, ys_sens, zs_sens;
-                          color = sensitivity[:, :, k_mid],
+                          color = sensitivity_mid,
                           colormap = :balance,
-                          colorrange = (-slimit, slimit),
+                          colorrange = (-mid_limit, mid_limit),
                           shading = NoShading)
 Colorbar(fig_sens_sphere[1, 2], hm_sens_sphere; label = "∂J/∂θ₀")
 hidedecorations!(ax_sens_sphere)
