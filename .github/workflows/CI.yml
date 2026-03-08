@@ -55,7 +55,7 @@ jobs:
           - version: "min"
             os: windows-latest
         include:
-          - version: "1.12.4"
+          - version: "1.12.5"
             os: aws-linux-nvidia-gpu-l4
             arch: "default"
             check-bounds: "yes"
