@@ -233,7 +233,7 @@ function AtmosphereModel(grid;
                          (; T=temperature))
     density = dynamics_density(dynamics)
     forcing = atmosphere_model_forcing(forcing, prognostic_model_fields, model_fields,
-                                       grid, coriolis, density,
+                                       grid, coriolis, density, clock,
                                        velocities, dynamics, formulation, microphysics,
                                        specific_prognostic_moisture)
 
@@ -359,7 +359,7 @@ function field_names(dynamics, formulation, microphysics, tracer_names)
 end
 
 function atmosphere_model_forcing(user_forcings, prognostic_fields, model_fields,
-                                  grid, coriolis, density,
+                                  grid, coriolis, density, clock,
                                   velocities, dynamics, formulation, microphysics,
                                   specific_prognostic_moisture)
     forcings_type = typeof(user_forcings)
@@ -369,7 +369,7 @@ function atmosphere_model_forcing(user_forcings, prognostic_fields, model_fields
 end
 
 function atmosphere_model_forcing(::Nothing, prognostic_fields, model_fields,
-                                  grid, coriolis, density,
+                                  grid, coriolis, density, clock,
                                   velocities, dynamics, formulation, microphysics,
                                   specific_prognostic_moisture)
     names = keys(prognostic_fields)
@@ -377,7 +377,7 @@ function atmosphere_model_forcing(::Nothing, prognostic_fields, model_fields,
 end
 
 function atmosphere_model_forcing(user_forcings::NamedTuple, prognostic_fields, model_fields,
-                                  grid, coriolis, density,
+                                  grid, coriolis, density, clock,
                                   velocities, dynamics, formulation, microphysics,
                                   specific_prognostic_moisture)
 
