@@ -19,8 +19,8 @@ concurrency:
   cancel-in-progress: true
 
 env:
-  # Disable GPU support for Reactant until we actually use it.
-  REACTANT_GPU: 'none'
+  # Don't make Reactant occupy all the GPU memory
+  XLA_REACTANT_GPU_PREALLOCATE: 'false'
 
 jobs:
   run-benchmarks:

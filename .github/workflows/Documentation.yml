@@ -23,8 +23,8 @@ concurrency:
 
 env:
   BREEZE_LABEL_BUILD_ALL_EXAMPLES: 'build all examples 🏗️'
-  # Disable GPU support for Reactant until we actually use it.
-  REACTANT_GPU: 'none'
+  # Don't make Reactant occupy all the GPU memory
+  XLA_REACTANT_GPU_PREALLOCATE: 'false'
 
 jobs:
   build-docs:
