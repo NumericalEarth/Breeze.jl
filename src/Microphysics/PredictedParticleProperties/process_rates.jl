@@ -803,7 +803,7 @@ negligible for small droplets.
 - `ρ`: Air density [kg/m³]
 
 # Returns
-- Tuple (Q_frz, N_frz): mass rate [kg/kg/s] and number rate [1/m³/s]
+- Tuple (Q_frz, N_frz): mass rate [kg/kg/s] and number rate [1/kg/s]
 """
 @inline function immersion_freezing_cloud_rate(p3, qᶜˡ, Nᶜ, T, ρ)
     FT = typeof(qᶜˡ)
@@ -828,17 +828,19 @@ negligible for small droplets.
     ΔT = max(T₀ - T, zero(FT))
 
     # Individual droplet mass and volume (monodisperse assumption)
-    Nᶜ_eff = max(Nᶜ, FT(1))
-    m_drop = ρ * qᶜˡ_eff / Nᶜ_eff           # [kg]
-    V_drop = m_drop / ρ_water                  # [m³]
+    # Nᶜ is [1/m³]; convert to per-kg: nᶜ = Nᶜ/ρ [1/kg]
+    nᶜ = max(Nᶜ / ρ, FT(1))
+    m_drop = qᶜˡ_eff / nᶜ                     # [kg]
+    V_drop = m_drop / ρ_water                   # [m³]
 
-    # Mass freezing rate [kg/kg/s]:
-    # = (Nᶜ/ρ) × bimm × psd × exp(a × ΔT) × V_drop × m_drop
-    Q_frz = (Nᶜ_eff / ρ) * bimm * psd_correction * exp(aimm * ΔT) * V_drop * m_drop
+    # Per-drop freezing probability per second
+    prob_per_s = bimm * psd_correction * V_drop * exp(aimm * ΔT)
 
-    # Number freezing rate [1/m³/s]:
-    # = Nᶜ × bimm × psd × exp(a × ΔT) × V_drop
-    N_frz = Nᶜ_eff * bimm * psd_correction * exp(aimm * ΔT) * V_drop
+    # Mass freezing rate [kg/kg/s]: each drop freezes with its own mass
+    Q_frz = qᶜˡ_eff * prob_per_s
+
+    # Number freezing rate [1/kg/s]
+    N_frz = nᶜ * prob_per_s
 
     Q_frz = ifelse(freezing_active, Q_frz, zero(FT))
     N_frz = ifelse(freezing_active, N_frz, zero(FT))
@@ -1681,9 +1683,8 @@ suitable for use in GPU kernels where grid indexing is handled externally.
     # Phase 1: Ice deposition/sublimation and melting
     # =========================================================================
     P = 𝒰.reference_pressure
-    dep = ifelse(qⁱ > FT(1e-20),
-                 ventilation_enhanced_deposition(p3, qⁱ, nⁱ, qᵛ, qᵛ⁺ⁱ, Fᶠ, ρᶠ, T, P),
-                 ice_deposition_rate(p3, qⁱ, qᵛ, qᵛ⁺ⁱ))
+    dep = ventilation_enhanced_deposition(p3, qⁱ, nⁱ, qᵛ, qᵛ⁺ⁱ, Fᶠ, ρᶠ, T, P)
+    dep = ifelse(qⁱ > FT(1e-20), dep, zero(FT))
 
     # Partitioned melting: partial stays on ice, complete goes to rain
     melt_rates = ice_melting_rates(p3, qⁱ, nⁱ, qʷⁱ, T, qᵛ, qᵛ⁺ˡ, Fᶠ, ρᶠ, ρ)
@@ -1721,9 +1722,7 @@ suitable for use in GPU kernels where grid indexing is handled externally.
     # Ice nucleation (deposition nucleation and immersion freezing)
     # =========================================================================
     nuc_q, nuc_n = deposition_nucleation_rate(p3, T, qᵛ, qᵛ⁺ⁱ, nⁱ, ρ)
-    cloud_frz_q, cloud_frz_n_vol = immersion_freezing_cloud_rate(p3, qᶜˡ, Nᶜ, T, ρ)
-    # Convert cloud_frz_n from [1/m³/s] to [1/kg/s] (Nᶜ is in 1/m³)
-    cloud_frz_n = cloud_frz_n_vol / ρ
+    cloud_frz_q, cloud_frz_n = immersion_freezing_cloud_rate(p3, qᶜˡ, Nᶜ, T, ρ)
     rain_frz_q, rain_frz_n = immersion_freezing_rain_rate(p3, qʳ, nʳ, T)
 
     # =========================================================================
