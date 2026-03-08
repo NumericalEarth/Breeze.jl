@@ -414,6 +414,17 @@ Autoconversion seeds rain; accretion rapidly transfers cloud liquid to rain.
     - Temperature 2°C warm bias from excess latent heat in melting zone
     - Nr explosion at cold levels without explicit constraint on mean drop mass
 
+    **Physics review findings (vs Fortran P3 v5.5.0):**
+    - **Thermodynamic A term**: Our formula `L/(K_a T)(L/(R_v T)-1)` IS correct (Mason 1971)
+    - **Transport properties**: Fortran uses T,P-dependent `dv=8.794e-5*T^1.81/P` and
+      `kap=1414*mu` (Sutherland). Our constant D_v=2.5e-5 is 2× too low at upper tropo
+      (T=240K, P=30kPa) but switching requires re-tuning all PSD corrections.
+      `air_transport_properties(T, P)` utility added for Phase 5 use.
+    - **Rain evaporation V(D)**: Fortran uses ar=842, br=0.8 with PSD integration.
+      Our V=130*D^0.5 is a mean-mass effective formula that gives better PSD-free results
+      because it overestimates V for small drops, compensating for missing PSD tail.
+    - **Rain ventilation f2**: Fortran uses 0.32; our code uses 0.31 (minor, <3%)
+
     **Resolution:** Full fix requires implementing P3 lookup tables (Phase 5)
 
 ### Phase 5: Lookup Tables (Required for Fortran Parity)

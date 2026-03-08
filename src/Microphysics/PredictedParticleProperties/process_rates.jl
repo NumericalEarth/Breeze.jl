@@ -45,6 +45,28 @@ end
 # Convenience overload for common case
 @inline safe_divide(a, b) = safe_divide(a, b, zero(a))
 
+"""
+    air_transport_properties(T, P)
+
+Compute temperature- and pressure-dependent air transport properties
+matching the Fortran P3 implementation:
+
+- Dynamic viscosity μ from Sutherland's law: `1.496e-6 × T^1.5 / (T + 120)`
+- Water vapor diffusivity D_v: `8.794e-5 × T^1.81 / P`
+- Thermal conductivity K_a: `1414 × μ`
+
+These vary significantly with altitude. At T=240K, P=30kPa (upper troposphere),
+D_v ≈ 6e-5 m²/s — more than double the surface value of ~2.5e-5 m²/s.
+"""
+@inline function air_transport_properties(T, P)
+    FT = typeof(T)
+    μ = FT(1.496e-6) * T^FT(1.5) / (T + FT(120))
+    D_v = FT(8.794e-5) * T^FT(1.81) / P
+    K_a = FT(1.414e3) * μ
+    ν = μ * FT(287.15) * T / P  # kinematic viscosity ν = μ/ρ, with ρ = P/(R_d×T)
+    return (; D_v, K_a, ν)
+end
+
 #####
 ##### Cloud condensation/evaporation
 #####
@@ -280,6 +302,10 @@ where D is the drop diameter and f_v is the ventilation factor.
     is_subsaturated = S < 1
 
     # Thermodynamic constants
+    # Note: The Fortran P3 computes T,P-dependent transport properties
+    # (dv = 8.794e-5*T^1.81/P, kap = 1414*mu). These constants represent
+    # near-surface values. With PSD lookup tables (Phase 5), transport
+    # properties should use air_transport_properties(T, P) instead.
     R_v = FT(461.5)           # Gas constant for water vapor [J/kg/K]
     L_v = FT(2.5e6)           # Latent heat of vaporization [J/kg]
     K_a = FT(2.5e-2)          # Thermal conductivity of air [W/m/K]
@@ -295,15 +321,21 @@ where D is the drop diameter and f_v is the ventilation factor.
     ρ_water = p3.water_density
     D_mean = cbrt(6 * m_mean / (FT(π) * ρ_water))
 
-    # Terminal velocity for rain drops (power law)
-    V = FT(130) * D_mean^FT(0.5)  # Simplified Gunn-Kinzer
+    # Terminal velocity for rain drops
+    # Note: The Fortran P3 uses ar=842, br=0.8, f1r=0.78, f2r=0.32 with
+    # PSD-integrated ventilation via lookup tables. For the mean-mass
+    # approximation, V=130*D^0.5 gives better PSD-effective ventilation
+    # because it overestimates V for small drops, partially compensating
+    # for the PSD tail where small drops evaporate efficiently.
+    # TODO: Switch to ar/br when PSD lookup tables are implemented.
+    V = FT(130) * D_mean^FT(0.5)
 
     # Ventilation factor
     ν = FT(1.5e-5)
     Re_term = sqrt(V * D_mean / ν)
-    f_v = FT(0.78) + FT(0.31) * Re_term  # Different coefficients for drops
+    f_v = FT(0.78) + FT(0.31) * Re_term
 
-    # Thermodynamic resistance
+    # Thermodynamic resistance (Mason 1971)
     A = L_v / (K_a * T) * (L_v / (R_v * T) - 1)
     B = R_v * T / (e_s * D_v)
     thermodynamic_factor = A + B
@@ -428,6 +460,9 @@ The bulk rate integrates over the size distribution:
     nⁱ_eff = clamp_positive(nⁱ)
 
     # Thermodynamic constants
+    # Note: The Fortran P3 uses T,P-dependent transport via
+    # air_transport_properties(T, P). These constants are near-surface
+    # values. With PSD lookup tables (Phase 5), use T,P-dependent values.
     R_v = FT(461.5)           # Gas constant for water vapor [J/kg/K]
     R_d = FT(287.0)           # Gas constant for dry air [J/kg/K]
     L_s = FT(2.835e6)         # Latent heat of sublimation [J/kg]
@@ -461,12 +496,11 @@ The bulk rate integrates over the size distribution:
     # Ventilation factor: f_v = a + b × Re^(1/2) × Sc^(1/3)
     # Simplified: f_v ≈ 0.65 + 0.44 × √(V × D / ν)
     ν = FT(1.5e-5)  # kinematic viscosity [m²/s]
-    # Estimate terminal velocity (simplified power law, unrimed)
     V = prp.ice_fall_speed_coefficient_unrimed * D_mean^prp.ice_fall_speed_exponent_unrimed
     Re_term = sqrt(V * D_mean / ν)
     f_v = FT(0.65) + FT(0.44) * Re_term
 
-    # Denominator: thermodynamic resistance terms
+    # Denominator: thermodynamic resistance terms (Mason 1971)
     # A = L_s/(K_a × T) × (L_s/(R_v × T) - 1)
     # B = R_v × T / (e_si × D_v)
     A = L_s / (K_a * T) * (L_s / (R_v * T) - 1)
