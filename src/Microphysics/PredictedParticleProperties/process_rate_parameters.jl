@@ -32,8 +32,10 @@ struct ProcessRateParameters{FT}
     accretion_coefficient :: FT              # k₂ [s⁻¹]
     accretion_exponent :: FT                 # α [-]
 
-    # Rain self-collection (Seifert-Beheng 2001)
+    # Rain self-collection and breakup (Seifert-Beheng 2001)
     self_collection_coefficient :: FT        # k_rr [-]
+    rain_breakup_diameter_threshold :: FT    # D_eq threshold for breakup [m]
+    rain_breakup_coefficient :: FT           # κ_br [1/m]
 
     # Evaporation/sublimation timescales
     rain_evaporation_timescale :: FT         # τ_evap [s]
@@ -75,7 +77,7 @@ struct ProcessRateParameters{FT}
     nucleation_maximum_concentration :: FT   # N_max [1/m³]
     nucleation_timescale :: FT               # τ_nuc [s]
 
-    # Immersion freezing (Bigg 1953)
+    # Immersion freezing (Barklie-Gokhale 1959)
     immersion_freezing_temperature_max :: FT # T_max [K]
     immersion_freezing_coefficient :: FT     # aimm [-]
     immersion_freezing_timescale_cloud :: FT # base timescale for cloud [s]
@@ -115,6 +117,17 @@ struct ProcessRateParameters{FT}
 
     # Initial rain drop mass (for autoconversion number tendency)
     initial_rain_drop_mass :: FT             # m_rain_init [kg]
+
+    # Immersion freezing nucleation coefficient (Barklie-Gokhale 1959)
+    immersion_freezing_nucleation_coefficient :: FT  # bimm [m⁻³s⁻¹]
+
+    # PSD correction factors: account for the PSD-integrated rate being
+    # larger than the mean-mass value due to the nonlinear dependence on
+    # particle size. These factors bridge the gap between the mean-mass
+    # approximation and full PSD integration (lookup tables).
+    riming_psd_correction :: FT              # For cloud and rain riming [-]
+    freezing_cloud_psd_correction :: FT      # For cloud immersion freezing [-]
+    freezing_rain_psd_correction :: FT       # For rain immersion freezing [-]
 end
 
 """
@@ -132,7 +145,7 @@ deposition, nucleation, and sedimentation.
 - Self-collection: Seifert and Beheng (2001)
 - Aggregation: Morrison and Milbrandt (2015)
 - Nucleation: Cooper (1986)
-- Freezing: Bigg (1953)
+- Freezing: Barklie and Gokhale (1959)
 - Splintering: Hallett and Mossop (1974)
 - Fall speeds: Mitchell (1996), Seifert and Beheng (2006)
 
@@ -166,8 +179,10 @@ function ProcessRateParameters(FT::Type{<:AbstractFloat} = Float64;
         accretion_coefficient = 67.0,
         accretion_exponent = 1.15,
 
-        # Rain self-collection
+        # Rain self-collection and breakup
         self_collection_coefficient = 5.78,
+        rain_breakup_diameter_threshold = 0.9e-3,
+        rain_breakup_coefficient = 2300.0,
 
         # Timescales
         rain_evaporation_timescale = 10.0,
@@ -246,7 +261,15 @@ function ProcessRateParameters(FT::Type{<:AbstractFloat} = Float64;
         velocity_ratio_reflectivity_to_mass = 1.2,
 
         # Initial rain drop
-        initial_rain_drop_mass = 5e-10)
+        initial_rain_drop_mass = 5e-10,
+
+        # Barklie-Gokhale nucleation coefficient
+        immersion_freezing_nucleation_coefficient = 2.0,
+
+        # PSD correction factors
+        riming_psd_correction = 2.0,
+        freezing_cloud_psd_correction = 5.0,
+        freezing_rain_psd_correction = 10.0)
 
     return ProcessRateParameters(
         FT(liquid_water_density),
@@ -262,6 +285,8 @@ function ProcessRateParameters(FT::Type{<:AbstractFloat} = Float64;
         FT(accretion_coefficient),
         FT(accretion_exponent),
         FT(self_collection_coefficient),
+        FT(rain_breakup_diameter_threshold),
+        FT(rain_breakup_coefficient),
         FT(rain_evaporation_timescale),
         FT(ice_deposition_timescale),
         FT(ice_melting_timescale),
@@ -312,7 +337,11 @@ function ProcessRateParameters(FT::Type{<:AbstractFloat} = Float64;
         FT(ice_effective_density_unrimed),
         FT(velocity_ratio_number_to_mass),
         FT(velocity_ratio_reflectivity_to_mass),
-        FT(initial_rain_drop_mass)
+        FT(initial_rain_drop_mass),
+        FT(immersion_freezing_nucleation_coefficient),
+        FT(riming_psd_correction),
+        FT(freezing_cloud_psd_correction),
+        FT(freezing_rain_psd_correction)
     )
 end
 

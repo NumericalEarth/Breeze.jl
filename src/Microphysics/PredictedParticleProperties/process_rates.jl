@@ -150,11 +150,11 @@ Falling rain drops collect cloud droplets via gravitational sweep-out.
     qᶜˡ_eff = clamp_positive(qᶜˡ)
     qʳ_eff = clamp_positive(qʳ)
 
-    # KK2000: ∂qʳ/∂t = k₂ × (qᶜˡ × qʳ)^α
+    # KK2000 Eq. 33 (Fortran P3 form): ∂qʳ/∂t = k₂ × qᶜˡ × qʳ^α
     k₂ = prp.accretion_coefficient
     α = prp.accretion_exponent
 
-    return k₂ * (qᶜˡ_eff * qʳ_eff)^α
+    return k₂ * qᶜˡ_eff * qʳ_eff^α
 end
 
 """
@@ -184,6 +184,62 @@ Follows [Seifert and Beheng (2001)](@cite SeifertBeheng2001).
     k_rr = prp.self_collection_coefficient
 
     return -k_rr * ρ * qʳ_eff * nʳ_eff
+end
+
+"""
+    rain_breakup_rate(p3, qʳ, nʳ, self_collection)
+
+Compute rain breakup rate following [Seifert and Beheng (2006)](@cite SeifertBeheng2006).
+
+Large rain drops spontaneously break up into smaller fragments, producing
+a number source that counterbalances self-collection. Uses a three-piece
+function of the volume-mean drop diameter ``D_r``:
+
+1. ``D_r < D_{th}`` (0.35 mm): No effect (``Φ_{br} = -1``)
+2. ``D_{th} ≤ D_r ≤ D_{eq}`` (0.35–0.9 mm): Linear transition
+3. ``D_r > D_{eq}`` (0.9 mm): Exponential breakup dominates
+
+The breakup rate is ``-(Φ_{br} + 1) \\times`` self-collection rate.
+
+# Arguments
+- `p3`: P3 microphysics scheme (provides parameters)
+- `qʳ`: Rain mass fraction [kg/kg]
+- `nʳ`: Rain number concentration [1/kg]
+- `self_collection`: Self-collection rate [1/kg/s] (negative)
+
+# Returns
+- Breakup rate [1/kg/s] (positive = number source)
+"""
+@inline function rain_breakup_rate(p3, qʳ, nʳ, self_collection)
+    FT = typeof(qʳ)
+    prp = p3.process_rates
+
+    qʳ_eff = clamp_positive(qʳ)
+    nʳ_eff = clamp_positive(nʳ)
+
+    # Volume-mean drop diameter: D_r = (6 qʳ / (π ρ_w nʳ))^(1/3)
+    ρ_water = prp.liquid_water_density
+    mean_mass = safe_divide(qʳ_eff, nʳ_eff, FT(1e-10))
+    D_r = cbrt(FT(6) * mean_mass / (FT(π) * ρ_water))
+
+    # Clamp to physical maximum (~2.5mm mean diameter, matching SB2006 xr_max)
+    D_r = min(D_r, FT(2.5e-3))
+
+    # Three-piece breakup function (Seifert & Beheng 2006, Eq. 13)
+    D_eq = prp.rain_breakup_diameter_threshold  # 0.9mm: equilibrium diameter
+    κ_br = prp.rain_breakup_coefficient         # 2300 m⁻¹: exponential coefficient
+    D_th = FT(0.35e-3)                          # transition diameter
+    k_br = FT(1000)                             # linear coefficient [1/m]
+    ΔD = D_r - D_eq
+
+    Φ_br = ifelse(D_r < D_th,
+                   FT(-1),
+                   ifelse(D_r ≤ D_eq,
+                          k_br * ΔD,
+                          FT(2) * (exp(κ_br * ΔD) - FT(1))))
+
+    # Breakup rate: -(Φ_br + 1) × self_collection (Eq. 13 from SB2006)
+    return -(Φ_br + FT(1)) * self_collection
 end
 
 """
@@ -405,8 +461,8 @@ The bulk rate integrates over the size distribution:
     # Ventilation factor: f_v = a + b × Re^(1/2) × Sc^(1/3)
     # Simplified: f_v ≈ 0.65 + 0.44 × √(V × D / ν)
     ν = FT(1.5e-5)  # kinematic viscosity [m²/s]
-    # Estimate terminal velocity (simplified power law)
-    V = FT(11.72) * D_mean^FT(0.41)
+    # Estimate terminal velocity (simplified power law, unrimed)
+    V = prp.ice_fall_speed_coefficient_unrimed * D_mean^prp.ice_fall_speed_exponent_unrimed
     Re_term = sqrt(V * D_mean / ν)
     f_v = FT(0.65) + FT(0.44) * Re_term
 
@@ -420,8 +476,13 @@ The bulk rate integrates over the size distribution:
     # Deposition rate per particle (Eq. 30 from MM15a)
     dm_dt = FT(4π) * C * f_v * (S_i - 1) / thermodynamic_factor
 
-    # Total rate
-    dep_rate = nⁱ_eff * dm_dt
+    # PSD correction factor: PSD integration gives <C×fv>/<C(Dm)×fv(Dm)>.
+    # For the mean-mass approximation, psd_correction = 1.0.
+    # The Fortran P3 uses lookup tables that integrate over the full PSD.
+    # With our 41-level grid (vs Fortran's 90), we use 1.0 to avoid
+    # overestimating deposition, keeping riming as the dominant growth mechanism.
+    psd_correction = FT(1)
+    dep_rate = psd_correction * nⁱ_eff * dm_dt
 
     # Limit sublimation to available ice
     τ_dep = prp.ice_deposition_timescale
@@ -522,7 +583,7 @@ where:
 
     # Ventilation factor
     ν = FT(1.5e-5)
-    V = FT(11.72) * D_mean^FT(0.41)
+    V = prp.ice_fall_speed_coefficient_unrimed * D_mean^prp.ice_fall_speed_exponent_unrimed
     Re_term = sqrt(V * D_mean / ν)
     f_v = FT(0.65) + FT(0.44) * Re_term
 
@@ -546,10 +607,12 @@ where:
     # Total rate
     melt_rate = nⁱ_eff * dm_dt_melt
 
-    # Limit to available ice
-    τ_melt = prp.ice_melting_timescale
-    max_melt = qⁱ_eff / τ_melt
-
+    # Limit melting rate: physical heat-transfer rate is the true limiter.
+    # Guard against numerical overflow with a 1-second safety timescale,
+    # meaning at most all ice can melt per second. The driver or time
+    # integrator must additionally limit melting to available ice per dt.
+    τ_safety = FT(1)  # [s] — CFL-like constraint, not a physical timescale
+    max_melt = qⁱ_eff / τ_safety
     melt_rate = min(melt_rate, max_melt)
 
     return ifelse(is_melting, melt_rate, zero(FT))
@@ -720,46 +783,65 @@ is supersaturated with respect to ice. Uses [Cooper (1986)](@cite Cooper1986).
 end
 
 """
-    immersion_freezing_cloud_rate(p3, qᶜˡ, Nᶜ, T)
+    immersion_freezing_cloud_rate(p3, qᶜˡ, Nᶜ, T, ρ)
 
-Compute immersion freezing rate of cloud droplets.
+Compute immersion freezing rate of cloud droplets using the
+[Barklie and Gokhale (1959)](@cite BarklieGokhale1959) stochastic volume-dependent
+freezing parameterization, following Fortran P3 v5.5.0.
 
-Cloud droplets freeze when temperature is below a threshold. Uses
-[Bigg (1953)](@cite Bigg1953) stochastic freezing parameterization.
+The probability per droplet per second of freezing is ``J₀ V_{\\text{drop}} \\exp(a ΔT)``,
+where ``J₀ ≈ 2`` m⁻³s⁻¹ is the nucleation rate coefficient (``a = 0.65``) and
+``V_{\\text{drop}}`` is the individual droplet volume. For monodisperse cloud droplets
+this gives a mass freezing rate proportional to ``q_c^2 / N_c``, making freezing
+negligible for small droplets.
 
 # Arguments
 - `p3`: P3 microphysics scheme (provides parameters)
 - `qᶜˡ`: Cloud liquid mass fraction [kg/kg]
 - `Nᶜ`: Cloud droplet number concentration [1/m³]
 - `T`: Temperature [K]
+- `ρ`: Air density [kg/m³]
 
 # Returns
-- Tuple (Q_frz, N_frz): mass rate [kg/kg/s] and number rate [1/kg/s]
+- Tuple (Q_frz, N_frz): mass rate [kg/kg/s] and number rate [1/m³/s]
 """
-@inline function immersion_freezing_cloud_rate(p3, qᶜˡ, Nᶜ, T)
+@inline function immersion_freezing_cloud_rate(p3, qᶜˡ, Nᶜ, T, ρ)
     FT = typeof(qᶜˡ)
     prp = p3.process_rates
 
     T_max = prp.immersion_freezing_temperature_max
     aimm = prp.immersion_freezing_coefficient
-    τ_base = prp.immersion_freezing_timescale_cloud
     T₀ = prp.freezing_temperature
+    ρ_water = FT(prp.liquid_water_density)
+    bimm = prp.immersion_freezing_nucleation_coefficient
+    psd_correction = prp.freezing_cloud_psd_correction
 
     qᶜˡ_eff = clamp_positive(qᶜˡ)
 
     # Conditions for freezing
     freezing_active = (T < T_max) & (qᶜˡ_eff > FT(1e-8))
 
-    # Bigg (1953): J = exp(aimm × (T₀ - T))
-    ΔT = T₀ - T
-    J = exp(aimm * ΔT)
+    # Barklie-Gokhale (1959) stochastic immersion freezing.
+    # Per-drop freezing probability: P(D) = bimm × V_drop × exp(aimm × ΔT)
+    # For a gamma PSD, the PSD-integrated rate is boosted by Γ(7+μ)Γ(1+μ)/Γ(4+μ)²
+    # relative to monodisperse: ≈20× for μ=0, ≈3× for μ=10.
+    ΔT = max(T₀ - T, zero(FT))
 
-    # Timescale decreases as J increases
-    τ_frz = τ_base / max(J, FT(1))
+    # Individual droplet mass and volume (monodisperse assumption)
+    Nᶜ_eff = max(Nᶜ, FT(1))
+    m_drop = ρ * qᶜˡ_eff / Nᶜ_eff           # [kg]
+    V_drop = m_drop / ρ_water                  # [m³]
 
-    # Freezing rate
-    N_frz = ifelse(freezing_active, Nᶜ / τ_frz, zero(FT))
-    Q_frz = ifelse(freezing_active, qᶜˡ_eff / τ_frz, zero(FT))
+    # Mass freezing rate [kg/kg/s]:
+    # = (Nᶜ/ρ) × bimm × psd × exp(a × ΔT) × V_drop × m_drop
+    Q_frz = (Nᶜ_eff / ρ) * bimm * psd_correction * exp(aimm * ΔT) * V_drop * m_drop
+
+    # Number freezing rate [1/m³/s]:
+    # = Nᶜ × bimm × psd × exp(a × ΔT) × V_drop
+    N_frz = Nᶜ_eff * bimm * psd_correction * exp(aimm * ΔT) * V_drop
+
+    Q_frz = ifelse(freezing_active, Q_frz, zero(FT))
+    N_frz = ifelse(freezing_active, N_frz, zero(FT))
 
     return Q_frz, N_frz
 end
@@ -770,7 +852,8 @@ end
 Compute immersion freezing rate of rain drops.
 
 Rain drops freeze when temperature is below a threshold. Uses
-[Bigg (1953)](@cite Bigg1953) stochastic freezing parameterization.
+[Barklie and Gokhale (1959)](@cite BarklieGokhale1959) stochastic freezing
+parameterization, following Fortran P3 v5.5.0.
 
 # Arguments
 - `p3`: P3 microphysics scheme (provides parameters)
@@ -787,8 +870,10 @@ Rain drops freeze when temperature is below a threshold. Uses
 
     T_max = prp.immersion_freezing_temperature_max
     aimm = prp.immersion_freezing_coefficient
-    τ_base = prp.immersion_freezing_timescale_rain
     T₀ = prp.freezing_temperature
+    ρ_water = FT(prp.liquid_water_density)
+    bimm = prp.immersion_freezing_nucleation_coefficient
+    psd_correction = prp.freezing_rain_psd_correction
 
     qʳ_eff = clamp_positive(qʳ)
     nʳ_eff = clamp_positive(nʳ)
@@ -796,16 +881,26 @@ Rain drops freeze when temperature is below a threshold. Uses
     # Conditions for freezing
     freezing_active = (T < T_max) & (qʳ_eff > FT(1e-8))
 
-    # Bigg (1953)
-    ΔT = T₀ - T
-    J = exp(aimm * ΔT)
+    # Barklie-Gokhale (1959) stochastic volume-dependent freezing.
+    # PSD correction for rain (broader PSD than cloud, μ_r ≈ 1-3).
+    ΔT = max(T₀ - T, zero(FT))
 
-    # Rain freezes faster due to larger volume
-    τ_frz = τ_base / max(J, FT(1))
+    # Individual rain drop mass and volume (monodisperse assumption)
+    nʳ_safe = max(nʳ_eff, FT(1))
+    m_drop = qʳ_eff / nʳ_safe          # [kg]
+    V_drop = m_drop / ρ_water            # [m³]
 
-    # Freezing rate
-    N_frz = ifelse(freezing_active, nʳ_eff / τ_frz, zero(FT))
-    Q_frz = ifelse(freezing_active, qʳ_eff / τ_frz, zero(FT))
+    # Per-drop freezing probability per second: bimm × psd × V_drop × exp(a × ΔT)
+    prob_per_s = bimm * psd_correction * V_drop * exp(aimm * ΔT)
+
+    # Mass freezing rate: qʳ × prob (each drop freezes with its own mass)
+    Q_frz = qʳ_eff * prob_per_s
+
+    # Number freezing rate: nʳ × prob
+    N_frz = nʳ_eff * prob_per_s
+
+    Q_frz = ifelse(freezing_active, Q_frz, zero(FT))
+    N_frz = ifelse(freezing_active, N_frz, zero(FT))
 
     return Q_frz, N_frz
 end
@@ -1031,13 +1126,9 @@ See [Morrison and Milbrandt (2015a)](@cite Morrison2015parameterization).
     # Mean diameter
     D_mean = cbrt(6 * m_mean / (FT(π) * ρ_eff))
 
-    # Mean terminal velocity (regime-dependent approximation)
-    a_V_unrimed = FT(11.72)
-    b_V_unrimed = FT(0.41)
-    a_V_rimed = FT(19.3)
-    b_V_rimed = FT(0.37)
-    a_V = (1 - Fᶠ) * a_V_unrimed + Fᶠ * a_V_rimed
-    b_V = (1 - Fᶠ) * b_V_unrimed + Fᶠ * b_V_rimed
+    # Mean terminal velocity (regime-dependent, from prp)
+    a_V = (1 - Fᶠ) * prp.ice_fall_speed_coefficient_unrimed + Fᶠ * prp.ice_fall_speed_coefficient_rimed
+    b_V = (1 - Fᶠ) * prp.ice_fall_speed_exponent_unrimed + Fᶠ * prp.ice_fall_speed_exponent_rimed
     V_mean = a_V * D_mean^b_V
 
     # Mean projected area (regime-dependent)
@@ -1069,45 +1160,82 @@ end
 #####
 
 """
-    cloud_riming_rate(p3, qᶜˡ, qⁱ, T)
+    cloud_riming_rate(p3, qᶜˡ, qⁱ, nⁱ, T, Fᶠ, ρᶠ, ρ)
 
-Compute cloud droplet collection (riming) by ice particles.
+Compute cloud droplet collection (riming) by ice particles using the
+continuous collection equation with the collision kernel integrated
+over the ice particle size distribution.
 
-Cloud droplets are swept up by falling ice particles and freeze onto them.
-This increases ice mass and rime mass.
+The collection rate is:
+```math
+\\frac{dq_c}{dt} = -E_{ci} q_c ρ n_i ⟨A V⟩
+```
+where ⟨A V⟩ is the PSD-averaged product of projected area and terminal
+velocity, approximated using the mean-mass diameter with a correction
+factor for the exponential PSD.
 
 # Arguments
 - `p3`: P3 microphysics scheme (provides parameters)
 - `qᶜˡ`: Cloud liquid mass fraction [kg/kg]
 - `qⁱ`: Ice mass fraction [kg/kg]
+- `nⁱ`: Ice number concentration [1/kg]
 - `T`: Temperature [K]
+- `Fᶠ`: Rime fraction [-]
+- `ρᶠ`: Rime density [kg/m³]
+- `ρ`: Air density [kg/m³]
 
 # Returns
 - Rate of cloud → ice conversion [kg/kg/s] (also equals rime mass gain rate)
 """
-@inline function cloud_riming_rate(p3, qᶜˡ, qⁱ, T)
+@inline function cloud_riming_rate(p3, qᶜˡ, qⁱ, nⁱ, T, Fᶠ, ρᶠ, ρ)
     FT = typeof(qᶜˡ)
     prp = p3.process_rates
 
     Eᶜⁱ = prp.cloud_ice_collection_efficiency
-    τ_rim = prp.cloud_riming_timescale
     T₀ = prp.freezing_temperature
 
     qᶜˡ_eff = clamp_positive(qᶜˡ)
     qⁱ_eff = clamp_positive(qⁱ)
+    nⁱ_eff = clamp_positive(nⁱ)
 
-    # Thresholds
     q_threshold = FT(1e-8)
-
-    # Only rime below freezing
+    n_threshold = FT(1)
     below_freezing = T < T₀
+    active = below_freezing & (qᶜˡ_eff > q_threshold) & (qⁱ_eff > q_threshold) & (nⁱ_eff > n_threshold)
 
-    # ∂qᶜˡ/∂t = -Eᶜⁱ × qᶜˡ × qⁱ / τ_rim
-    rate = ifelse(below_freezing & (qᶜˡ_eff > q_threshold) & (qⁱ_eff > q_threshold),
-                   Eᶜⁱ * qᶜˡ_eff * qⁱ_eff / τ_rim,
-                   zero(FT))
+    # Mean particle mass and effective density
+    m_mean = safe_divide(qⁱ_eff, nⁱ_eff, FT(1e-12))
+    ρ_eff_unrimed = prp.ice_effective_density_unrimed
+    ρ_eff = (1 - Fᶠ) * ρ_eff_unrimed + Fᶠ * ρᶠ
 
-    return rate
+    # Mean diameter (clamped to physical range)
+    D_mean = cbrt(6 * m_mean / (FT(π) * ρ_eff))
+    D_mean = clamp(D_mean, prp.ice_diameter_min, prp.ice_diameter_max)
+
+    # Mean terminal velocity (regime-dependent, from prp)
+    a_V = (1 - Fᶠ) * prp.ice_fall_speed_coefficient_unrimed + Fᶠ * prp.ice_fall_speed_coefficient_rimed
+    b_V = (1 - Fᶠ) * prp.ice_fall_speed_exponent_unrimed + Fᶠ * prp.ice_fall_speed_exponent_rimed
+    V_mean = a_V * D_mean^b_V
+
+    # Projected area (regime-dependent: aggregate vs sphere)
+    γ = FT(0.2285)
+    σ = FT(1.88)
+    A_agg = γ * D_mean^σ
+    A_sphere = FT(π) / 4 * D_mean^2
+    A_mean = (1 - Fᶠ) * A_agg + Fᶠ * A_sphere
+
+    # Air density correction: Fortran P3 lookup tables computed at reference
+    # conditions (ρ₀ ≈ 0.826 kg/m³) then scaled by (ρ₀/ρ)^0.54.
+    ρ₀ = prp.reference_air_density
+    rhofaci = (ρ₀ / max(ρ, FT(0.01)))^FT(0.54)
+
+    # Collection rate = E × qc × ρ × ni × rhofaci × <A×V> × psd_correction
+    # PSD correction accounts for the PSD-integrated collection kernel
+    # being larger than the mean-mass value.
+    psd_correction = prp.riming_psd_correction
+    rate = Eᶜⁱ * qᶜˡ_eff * nⁱ_eff * ρ * rhofaci * A_mean * V_mean * psd_correction
+
+    return ifelse(active, rate, zero(FT))
 end
 
 """
@@ -1132,44 +1260,73 @@ Compute cloud droplet number sink from riming.
 end
 
 """
-    rain_riming_rate(p3, qʳ, qⁱ, T)
+    rain_riming_rate(p3, qʳ, qⁱ, nⁱ, T, Fᶠ, ρᶠ, ρ)
 
-Compute rain collection (riming) by ice particles.
-
-Rain drops are swept up by falling ice particles and freeze onto them.
-This increases ice mass and rime mass.
+Compute rain collection (riming) by ice particles using the continuous
+collection equation with collision kernel integrated over the ice PSD.
 
 # Arguments
 - `p3`: P3 microphysics scheme (provides parameters)
 - `qʳ`: Rain mass fraction [kg/kg]
 - `qⁱ`: Ice mass fraction [kg/kg]
+- `nⁱ`: Ice number concentration [1/kg]
 - `T`: Temperature [K]
+- `Fᶠ`: Rime fraction [-]
+- `ρᶠ`: Rime density [kg/m³]
+- `ρ`: Air density [kg/m³]
 
 # Returns
 - Rate of rain → ice conversion [kg/kg/s] (also equals rime mass gain rate)
 """
-@inline function rain_riming_rate(p3, qʳ, qⁱ, T)
+@inline function rain_riming_rate(p3, qʳ, qⁱ, nⁱ, T, Fᶠ, ρᶠ, ρ)
     FT = typeof(qʳ)
     prp = p3.process_rates
 
     Eʳⁱ = prp.rain_ice_collection_efficiency
-    τ_rim = prp.rain_riming_timescale
     T₀ = prp.freezing_temperature
 
     qʳ_eff = clamp_positive(qʳ)
     qⁱ_eff = clamp_positive(qⁱ)
+    nⁱ_eff = clamp_positive(nⁱ)
 
-    # Thresholds
     q_threshold = FT(1e-8)
-
-    # Only rime below freezing
+    n_threshold = FT(1)
     below_freezing = T < T₀
+    # Only ice collects rain when qi >= qr (Mizuno et al. 1990).
+    # When qr > qi, rain collects ice — mass goes the other way (handled in driver).
+    ice_dominant = qⁱ_eff >= qʳ_eff
+    active = below_freezing & ice_dominant & (qʳ_eff > q_threshold) & (qⁱ_eff > q_threshold) & (nⁱ_eff > n_threshold)
 
-    rate = ifelse(below_freezing & (qʳ_eff > q_threshold) & (qⁱ_eff > q_threshold),
-                   Eʳⁱ * qʳ_eff * qⁱ_eff / τ_rim,
-                   zero(FT))
+    # Mean particle mass and effective density
+    m_mean = safe_divide(qⁱ_eff, nⁱ_eff, FT(1e-12))
+    ρ_eff_unrimed = prp.ice_effective_density_unrimed
+    ρ_eff = (1 - Fᶠ) * ρ_eff_unrimed + Fᶠ * ρᶠ
 
-    return rate
+    # Mean diameter (clamped)
+    D_mean = cbrt(6 * m_mean / (FT(π) * ρ_eff))
+    D_mean = clamp(D_mean, prp.ice_diameter_min, prp.ice_diameter_max)
+
+    # Mean terminal velocity (from prp, consistent with aggregation and cloud riming)
+    a_V = (1 - Fᶠ) * prp.ice_fall_speed_coefficient_unrimed + Fᶠ * prp.ice_fall_speed_coefficient_rimed
+    b_V = (1 - Fᶠ) * prp.ice_fall_speed_exponent_unrimed + Fᶠ * prp.ice_fall_speed_exponent_rimed
+    V_mean = a_V * D_mean^b_V
+
+    # Projected area
+    γ = FT(0.2285)
+    σ = FT(1.88)
+    A_agg = γ * D_mean^σ
+    A_sphere = FT(π) / 4 * D_mean^2
+    A_mean = (1 - Fᶠ) * A_agg + Fᶠ * A_sphere
+
+    # Air density correction (same as cloud riming)
+    ρ₀ = prp.reference_air_density
+    rhofaci = (ρ₀ / max(ρ, FT(0.01)))^FT(0.54)
+
+    # Collection rate = E × qr × ρ × ni × rhofaci × <A×V> × psd_correction
+    psd_correction = prp.riming_psd_correction
+    rate = Eʳⁱ * qʳ_eff * nⁱ_eff * ρ * rhofaci * A_mean * V_mean * psd_correction
+
+    return ifelse(active, rate, zero(FT))
 end
 
 """
@@ -1419,6 +1576,7 @@ struct P3ProcessRates{FT}
     accretion :: FT                # Cloud → rain mass (via rain sweep-out) [kg/kg/s]
     rain_evaporation :: FT         # Rain → vapor mass [kg/kg/s]
     rain_self_collection :: FT     # Rain number reduction [1/kg/s]
+    rain_breakup :: FT             # Rain number increase from breakup [1/kg/s]
 
     # Phase 1: Ice tendencies
     deposition :: FT               # Vapor → ice mass [kg/kg/s]
@@ -1515,13 +1673,17 @@ suitable for use in GPU kernels where grid indexing is handled externally.
     # =========================================================================
     autoconv = rain_autoconversion_rate(p3, qᶜˡ, Nᶜ)
     accr = rain_accretion_rate(p3, qᶜˡ, qʳ)
-    rain_evap = rain_evaporation_rate(p3, qʳ, qᵛ, qᵛ⁺ˡ)
+    rain_evap = rain_evaporation_rate(p3, qʳ, nʳ, qᵛ, qᵛ⁺ˡ, T, ρ)
     rain_self = rain_self_collection_rate(p3, qʳ, nʳ, ρ)
+    rain_br = rain_breakup_rate(p3, qʳ, nʳ, rain_self)
 
     # =========================================================================
     # Phase 1: Ice deposition/sublimation and melting
     # =========================================================================
-    dep = ice_deposition_rate(p3, qⁱ, qᵛ, qᵛ⁺ⁱ)
+    P = 𝒰.reference_pressure
+    dep = ifelse(qⁱ > FT(1e-20),
+                 ventilation_enhanced_deposition(p3, qⁱ, nⁱ, qᵛ, qᵛ⁺ⁱ, Fᶠ, ρᶠ, T, P),
+                 ice_deposition_rate(p3, qⁱ, qᵛ, qᵛ⁺ⁱ))
 
     # Partitioned melting: partial stays on ice, complete goes to rain
     melt_rates = ice_melting_rates(p3, qⁱ, nⁱ, qʷⁱ, T, qᵛ, qᵛ⁺ˡ, Fᶠ, ρᶠ, ρ)
@@ -1533,19 +1695,19 @@ suitable for use in GPU kernels where grid indexing is handled externally.
     # =========================================================================
     # Phase 2: Ice aggregation
     # =========================================================================
-    agg = ice_aggregation_rate(p3, qⁱ, nⁱ, T)
+    agg = ice_aggregation_rate(p3, qⁱ, nⁱ, T, Fᶠ, ρᶠ)
 
     # =========================================================================
     # Phase 2: Riming
     # =========================================================================
-    cloud_rim = cloud_riming_rate(p3, qᶜˡ, qⁱ, T)
+    cloud_rim = cloud_riming_rate(p3, qᶜˡ, qⁱ, nⁱ, T, Fᶠ, ρᶠ, ρ)
     cloud_rim_n = cloud_riming_number_rate(qᶜˡ, Nᶜ, cloud_rim)
 
-    rain_rim = rain_riming_rate(p3, qʳ, qⁱ, T)
+    rain_rim = rain_riming_rate(p3, qʳ, qⁱ, nⁱ, T, Fᶠ, ρᶠ, ρ)
     rain_rim_n = rain_riming_number_rate(qʳ, nʳ, rain_rim)
 
-    # Rime density for new rime
-    vᵢ = FT(1)  # Placeholder fall speed [m/s]
+    # Rime density for new rime (use actual ice fall speed, not placeholder)
+    vᵢ = ice_terminal_velocity_mass_weighted(p3, qⁱ, nⁱ, Fᶠ, ρᶠ, ρ)
     ρᶠ_new = rime_density(p3, T, vᵢ)
 
     # =========================================================================
@@ -1559,7 +1721,7 @@ suitable for use in GPU kernels where grid indexing is handled externally.
     # Ice nucleation (deposition nucleation and immersion freezing)
     # =========================================================================
     nuc_q, nuc_n = deposition_nucleation_rate(p3, T, qᵛ, qᵛ⁺ⁱ, nⁱ, ρ)
-    cloud_frz_q, cloud_frz_n_vol = immersion_freezing_cloud_rate(p3, qᶜˡ, Nᶜ, T)
+    cloud_frz_q, cloud_frz_n_vol = immersion_freezing_cloud_rate(p3, qᶜˡ, Nᶜ, T, ρ)
     # Convert cloud_frz_n from [1/m³/s] to [1/kg/s] (Nᶜ is in 1/m³)
     cloud_frz_n = cloud_frz_n_vol / ρ
     rain_frz_q, rain_frz_n = immersion_freezing_rain_rate(p3, qʳ, nʳ, T)
@@ -1573,7 +1735,7 @@ suitable for use in GPU kernels where grid indexing is handled externally.
         # Phase 1: Condensation
         cond,
         # Phase 1: Rain
-        autoconv, accr, rain_evap, rain_self,
+        autoconv, accr, rain_evap, rain_self, rain_br,
         # Phase 1: Ice
         dep, partial_melt, complete_melt, melt_n,
         # Phase 2: Aggregation
@@ -1653,6 +1815,7 @@ Compute rain number tendency from P3 process rates.
 Rain number gains from:
 - Autoconversion (Phase 1)
 - Complete melting (Phase 1) - new rain drops from melted ice
+- Breakup (Phase 1) - large drops fragment into smaller ones
 - Shedding (Phase 2)
 
 Rain number loses from:
@@ -1671,12 +1834,13 @@ Rain number loses from:
     # Only complete_melting produces new rain drops; partial_melting stays on ice
     n_from_melt = safe_divide(nⁱ * rates.complete_melting, qⁱ, zero(FT))
 
-    # Phase 1: Self-collection reduces number (already negative)
+    # Phase 1: Self-collection (negative) + breakup (positive)
     # Phase 2: Shedding creates new drops
     # Phase 2: Riming removes rain drops (already negative)
 
     return ρ * (n_from_autoconv + n_from_melt +
                 rates.rain_self_collection +
+                rates.rain_breakup +
                 rates.shedding_number +
                 rates.rain_riming_number +
                 rates.rain_freezing_number)
@@ -1773,7 +1937,7 @@ Rime volume changes with rime mass: ∂bᶠ/∂t = ∂qᶠ/∂t / ρ_rime
     ρᶠ_safe = max(ρᶠ, FT(100))
     ρ_rim_new_safe = max(rates.rime_density_new, FT(100))
 
-    ρ_water = FT(1000)
+    ρ_water = FT(1000)  # physical constant [kg/m³]
 
     # Phase 2: Volume gain from new rime (cloud + rain riming + refreezing)
     # Use density of new rime for fresh rime, current density for refreezing
@@ -2139,8 +2303,15 @@ end
     # Small particle (Stokes) regime
     vₜ_small = c_small * D_clamped^2 * ρ_correction
 
+    # Mass-weighted PSD correction (analytical fallback only — the tabulated
+    # path already returns PSD-integrated values). For an inverse exponential
+    # PSD (μ=0), the mass-weighted velocity is Γ(4+b)/(Γ(4)×λ^(-b)) ≈ 1.9×
+    # the single-particle velocity at D_mean. Correction = Γ(4+b)/(6×1.817^b).
+    mass_weight_factor = FT(1.9)
+
     # Blend between regimes
-    return ifelse(D_clamped < D_threshold, vₜ_small, vₜ_large)
+    vₜ = ifelse(D_clamped < D_threshold, vₜ_small, vₜ_large)
+    return vₜ * mass_weight_factor
 end
 
 """

@@ -1159,6 +1159,7 @@ using Oceananigans: CPU
             FT(2e-7),   # accretion
             FT(-5e-8),  # rain_evaporation (negative = loss)
             FT(-1e-6),  # rain_self_collection (negative = loss)
+            FT(5e-7),   # rain_breakup (positive = number source)
             # Phase 1: Ice
             FT(3e-7),   # deposition
             FT(1e-8),   # partial_melting
