@@ -2,11 +2,12 @@
 ##### BulkDragFunction for momentum fluxes
 #####
 
-struct BulkDragFunction{D, C, G, T}
+struct BulkDragFunction{D, C, G, T, FV}
     direction :: D
     coefficient :: C
     gustiness :: G
     surface_temperature :: T
+    filtered_velocities :: FV  # Nothing or FilteredSurfaceVelocities
 end
 
 """
@@ -32,9 +33,12 @@ where `Cᴰ` is the drag coefficient, `|U| = √(u² + v² + gustiness²)` is th
 - `gustiness`: Minimum wind speed to prevent singularities when winds are calm (default: `0`)
 - `surface_temperature`: Surface temperature, required when using `PolynomialCoefficient`
   with stability correction. Can be a `Field`, `Function`, or `Number`. (default: `nothing`)
+- `filtered_velocities`: A [`FilteredSurfaceVelocities`](@ref) for temporally filtered
+  wind speed in the bulk formula. If `nothing` (default), instantaneous velocity is used.
 """
-function BulkDragFunction(; direction=nothing, coefficient=1e-3, gustiness=0, surface_temperature=nothing)
-    return BulkDragFunction(direction, coefficient, gustiness, surface_temperature)
+function BulkDragFunction(; direction=nothing, coefficient=1e-3, gustiness=0,
+                            surface_temperature=nothing, filtered_velocities=nothing)
+    return BulkDragFunction(direction, coefficient, gustiness, surface_temperature, filtered_velocities)
 end
 
 const XDirectionBulkDragFunction = BulkDragFunction{<:XDirection}
@@ -44,11 +48,18 @@ Adapt.adapt_structure(to, df::BulkDragFunction) =
     BulkDragFunction(Adapt.adapt(to, df.direction),
                      Adapt.adapt(to, df.coefficient),
                      Adapt.adapt(to, df.gustiness),
-                     Adapt.adapt(to, df.surface_temperature))
+                     Adapt.adapt(to, df.surface_temperature),
+                     Adapt.adapt(to, df.filtered_velocities))
 
-Base.summary(df::BulkDragFunction) = string("BulkDragFunction(direction=", summary(df.direction),
-                                            ", coefficient=", df.coefficient,
-                                            ", gustiness=", df.gustiness, ")")
+function Base.summary(df::BulkDragFunction)
+    s = string("BulkDragFunction(direction=", summary(df.direction),
+               ", coefficient=", df.coefficient,
+               ", gustiness=", df.gustiness)
+    if !isnothing(df.filtered_velocities)
+        s *= string(", filtered_velocities=", summary(df.filtered_velocities))
+    end
+    return s * ")"
+end
 
 #####
 ##### getbc for BulkDragFunction
@@ -58,10 +69,10 @@ Base.summary(df::BulkDragFunction) = string("BulkDragFunction(direction=", summa
                                       grid::AbstractGrid, clock, fields)
     ρu = @inbounds fields.ρu[i, j, 1]
     T₀ = surface_value(i, j, df.surface_temperature)
-    U² = wind_speed²ᶠᶜᶜ(i, j, grid, fields)
+    U² = wind_speed²ᶠᶜᶜ(i, j, grid, fields, df.filtered_velocities)
     U = sqrt(U²)
     Ũ² = U² + df.gustiness^2
-    Cᴰ = bulk_coefficient(i, j, grid, df.coefficient, fields, T₀)
+    Cᴰ = bulk_coefficient(i, j, grid, df.coefficient, fields, T₀, df.filtered_velocities)
     return - Cᴰ * Ũ² * ρu / U * (U > 0)
 end
 
@@ -69,10 +80,10 @@ end
                                       grid::AbstractGrid, clock, fields)
     ρv = @inbounds fields.ρv[i, j, 1]
     T₀ = surface_value(i, j, df.surface_temperature)
-    U² = wind_speed²ᶜᶠᶜ(i, j, grid, fields)
+    U² = wind_speed²ᶜᶠᶜ(i, j, grid, fields, df.filtered_velocities)
     U = sqrt(U²)
     Ũ² = U² + df.gustiness^2
-    Cᴰ = bulk_coefficient(i, j, grid, df.coefficient, fields, T₀)
+    Cᴰ = bulk_coefficient(i, j, grid, df.coefficient, fields, T₀, df.filtered_velocities)
     return - Cᴰ * Ũ² * ρv / U * (U > 0)
 end
 

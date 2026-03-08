@@ -14,7 +14,9 @@ using Breeze.BoundaryConditions: PolynomialCoefficient,
 using Oceananigans
 using Oceananigans.BoundaryConditions: BoundaryCondition
 
-@testset "PolynomialCoefficient" begin
+@testset "PolynomialCoefficient [$FT]" for FT in test_float_types()
+    Oceananigans.defaults.FloatType = FT
+
     @testset "Constructor and defaults" begin
         # Test default constructor — uses FittedStabilityFunction
         coef = PolynomialCoefficient()
@@ -251,7 +253,7 @@ using Oceananigans.BoundaryConditions: BoundaryCondition
 
     @testset "Callable interface" begin
         # Create a simple grid with first cell center at 10m
-        grid = RectilinearGrid(size=(1, 1, 1), x=(0, 100), y=(0, 100), z=(0, 20))
+        grid = RectilinearGrid(default_arch; size=(1, 1, 1), x=(0, 100), y=(0, 100), z=(0, 20))
 
         # Test evaluation with no stability correction
         coef = PolynomialCoefficient(
@@ -319,5 +321,561 @@ using Oceananigans.BoundaryConditions: BoundaryCondition
         # Coefficient should have been materialized with latent heat coefficients
         @test bc.condition.coefficient.polynomial == (0.120, 0.070, 2.55)
         @test bc.condition.coefficient.transfer_type === Val(:scalar)
+    end
+
+    @testset "FilteredSurfaceVelocities construction" begin
+        grid = RectilinearGrid(default_arch; size=(4, 4, 4), x=(0, 100), y=(0, 100), z=(0, 40))
+
+        # Default: no height, infinite timescale
+        fv = FilteredSurfaceVelocities(grid)
+        @test fv.height === nothing
+        @test fv.filter_timescale == Inf
+        @test size(fv.u) == (4, 4, 1)
+        @test size(fv.v) == (4, 4, 1)
+        @test fv.last_update[] == (0, 0)
+
+        # With explicit height and timescale
+        fv2 = FilteredSurfaceVelocities(grid; height=10.0, filter_timescale=60.0)
+        @test fv2.height == 10.0
+        @test fv2.filter_timescale == 60.0
+    end
+
+    @testset "FilteredSurfaceScalar construction" begin
+        grid = RectilinearGrid(default_arch; size=(4, 4, 4), x=(0, 100), y=(0, 100), z=(0, 40))
+
+        fs = FilteredSurfaceScalar(grid; height=10.0, filter_timescale=120.0)
+        @test fs.height == 10.0
+        @test fs.filter_timescale == 120.0
+        @test size(fs.field) == (4, 4, 1)
+        @test fs.last_update[] == (0, 0)
+
+        # Default
+        fs0 = FilteredSurfaceScalar(grid)
+        @test fs0.height === nothing
+        @test fs0.filter_timescale == Inf
+    end
+
+    @testset "FilteredSurfaceVelocities update!" begin
+        grid = RectilinearGrid(default_arch; size=(4, 4, 4), x=(0, 100), y=(0, 100), z=(0, 40))
+        fv = FilteredSurfaceVelocities(grid; filter_timescale=10.0)
+
+        # Create mock velocity fields
+        u = XFaceField(grid)
+        v = YFaceField(grid)
+        set!(u, 5.0)
+        set!(v, 3.0)
+        velocities = (; u, v)
+
+        # Initial update from zero: ū = (0 + ε*5) / (1+ε) with ε = Δt/τ = 1/10
+        Breeze.BoundaryConditions.update!(fv, velocities, grid, 1.0)
+        ε = 1.0 / 10.0
+        expected_u = (0.0 + ε * 5.0) / (1 + ε)
+        expected_v = (0.0 + ε * 3.0) / (1 + ε)
+        @test fv.u[1, 1, 1] ≈ expected_u atol=1e-10
+        @test fv.v[1, 1, 1] ≈ expected_v atol=1e-10
+
+        # Second update: filter should integrate further toward the input
+        Breeze.BoundaryConditions.update!(fv, velocities, grid, 1.0)
+        expected_u2 = (expected_u + ε * 5.0) / (1 + ε)
+        expected_v2 = (expected_v + ε * 3.0) / (1 + ε)
+        @test fv.u[1, 1, 1] ≈ expected_u2 atol=1e-10
+        @test fv.v[1, 1, 1] ≈ expected_v2 atol=1e-10
+    end
+
+    @testset "FilteredSurfaceScalar update!" begin
+        grid = RectilinearGrid(default_arch; size=(4, 4, 4), x=(0, 100), y=(0, 100), z=(0, 40))
+        fs = FilteredSurfaceScalar(grid; filter_timescale=20.0)
+
+        θ = CenterField(grid)
+        set!(θ, 300.0)
+
+        Breeze.BoundaryConditions.update!(fs, θ, grid, 2.0)
+        ε = 2.0 / 20.0
+        expected = (0.0 + ε * 300.0) / (1 + ε)
+        @test fs.field[1, 1, 1] ≈ expected atol=1e-10
+    end
+
+    @testset "BulkDrag with filtered_velocities" begin
+        grid = RectilinearGrid(default_arch; size=(4, 4, 4), x=(0, 100), y=(0, 100), z=(0, 40))
+        fv = FilteredSurfaceVelocities(grid; filter_timescale=60.0)
+
+        # Test construction
+        bc = Breeze.BulkDrag(coefficient=1e-3, gustiness=0.5, filtered_velocities=fv)
+        @test bc isa BoundaryCondition
+        @test bc.condition.filtered_velocities === fv
+        @test bc.condition.gustiness == 0.5
+
+        # Test with PolynomialCoefficient
+        coef = PolynomialCoefficient()
+        SST(x, y) = 300.0
+        bc2 = Breeze.BulkDrag(coefficient=coef, surface_temperature=SST, filtered_velocities=fv)
+        @test bc2.condition.filtered_velocities === fv
+        @test bc2.condition.coefficient.polynomial == (0.142, 0.076, 2.7)
+    end
+
+    @testset "BulkSensibleHeatFlux with filtered_velocities" begin
+        grid = RectilinearGrid(default_arch; size=(4, 4, 4), x=(0, 100), y=(0, 100), z=(0, 40))
+        fv = FilteredSurfaceVelocities(grid; height=10.0, filter_timescale=60.0)
+
+        coef = PolynomialCoefficient()
+        SST(x, y) = 300.0
+        bc = Breeze.BulkSensibleHeatFlux(coefficient=coef, surface_temperature=SST,
+                                          filtered_velocities=fv)
+        @test bc isa BoundaryCondition
+        @test bc.condition.filtered_velocities === fv
+        # filtered_scalar is not yet created (created during materialization)
+        @test bc.condition.filtered_scalar === nothing
+    end
+
+    @testset "BulkVaporFlux with filtered_velocities" begin
+        grid = RectilinearGrid(default_arch; size=(4, 4, 4), x=(0, 100), y=(0, 100), z=(0, 40))
+        fv = FilteredSurfaceVelocities(grid; filter_timescale=60.0)
+
+        coef = PolynomialCoefficient()
+        SST(x, y) = 300.0
+        bc = Breeze.BulkVaporFlux(coefficient=coef, surface_temperature=SST,
+                                   filtered_velocities=fv)
+        @test bc isa BoundaryCondition
+        @test bc.condition.filtered_velocities === fv
+        @test bc.condition.filtered_scalar === nothing
+    end
+
+    @testset "Backward compatibility — filtered_velocities=nothing" begin
+        # Verify existing constructors still work with default nothing
+        bc_drag = Breeze.BulkDrag(coefficient=1e-3)
+        @test bc_drag.condition.filtered_velocities === nothing
+
+        SST(x, y) = 300.0
+        bc_heat = Breeze.BulkSensibleHeatFlux(coefficient=1e-3, surface_temperature=SST)
+        @test bc_heat.condition.filtered_velocities === nothing
+        @test bc_heat.condition.filtered_scalar === nothing
+
+        bc_vapor = Breeze.BulkVaporFlux(coefficient=1e-3, surface_temperature=SST)
+        @test bc_vapor.condition.filtered_velocities === nothing
+        @test bc_vapor.condition.filtered_scalar === nothing
+    end
+
+    @testset "Height-aware PolynomialCoefficient" begin
+        grid = RectilinearGrid(default_arch; size=(1, 1, 1), x=(0, 100), y=(0, 100), z=(0, 20))
+
+        coef = PolynomialCoefficient(
+            polynomial = (0.142, 0.076, 2.7),
+            stability_function = nothing
+        )
+        U = 10.0
+        T₀ = 290.0
+
+        # Default call (first cell center height = 10m)
+        C_default = coef(1, 1, grid, U, T₀)
+
+        # Explicit height = 10m should give the same result
+        C_10m = coef(1, 1, grid, U, T₀, 10.0)
+        @test C_10m ≈ C_default atol=1e-12
+
+        # Different height should give a different coefficient
+        C_20m = coef(1, 1, grid, U, T₀, 20.0)
+        @test C_20m != C_default
+        # Higher evaluation height → coefficient adjusted by log ratio
+        @test C_20m > 0
+    end
+
+    @testset "Height interpolation in filtered update" begin
+        # Grid with 4 vertical cells: centers at z=5, 15, 25, 35
+        grid = RectilinearGrid(default_arch; size=(4, 4, 4), x=(0, 100), y=(0, 100), z=(0, 40))
+
+        # Set up a velocity field with a known vertical profile
+        u = XFaceField(grid)
+        v = YFaceField(grid)
+        # u linear in z: u(z=5)=2, u(z=15)=4, u(z=25)=6, u(z=35)=8
+        interior(u) .= 0
+        for k in 1:4
+            interior(u, :, :, k) .= 2k
+        end
+        set!(v, 1.0)
+        velocities = (; u, v)
+
+        # Filter with height=10.0 (midpoint between k=1 center at 5m and k=2 center at 15m)
+        fv = FilteredSurfaceVelocities(grid; height=10.0, filter_timescale=1e10)
+        # Use large ε to make the result close to the instantaneous value
+        Δt = 1e10
+        Breeze.BoundaryConditions.update!(fv, velocities, grid, Δt)
+
+        # At height=10, linear interpolation: u = 2 + (10-5)/(15-5) * (4-2) = 3.0
+        # With ε = Δt/τ = 1, result = (0 + 1*3)/(1+1) = 1.5... but with ε=1e10/1e10=1
+        # Actually ε = Δt/τ = 1e10/1e10 = 1.0
+        ε = 1.0
+        expected_u = (0.0 + ε * 3.0) / (1 + ε)
+        @test fv.u[1, 1, 1] ≈ expected_u atol=1e-6
+    end
+
+    @testset "Wind speed dispatch with FilteredSurfaceVelocities" begin
+        using Breeze.BoundaryConditions: wind_speed²ᶠᶜᶜ, wind_speed²ᶜᶠᶜ, wind_speed²ᶜᶜᶜ
+
+        grid = RectilinearGrid(default_arch; size=(4, 4, 4), x=(0, 100), y=(0, 100), z=(0, 40))
+        fv = FilteredSurfaceVelocities(grid; filter_timescale=10.0)
+
+        # Set filtered velocities to known values
+        set!(fv.u, 3.0)
+        set!(fv.v, 4.0)
+
+        # Create dummy 3D fields with different values
+        u3d = XFaceField(grid)
+        v3d = YFaceField(grid)
+        set!(u3d, 10.0)
+        set!(v3d, 10.0)
+        fields = (; u=u3d, v=v3d)
+
+        # Nothing dispatch should use 3D fields (large values)
+        U²_none_cc = wind_speed²ᶜᶜᶜ(2, 2, grid, fields, nothing)
+        @test U²_none_cc > 100  # should be ~200
+
+        # FilteredSurfaceVelocities dispatch should use filtered 2D fields
+        U²_filt_cc = wind_speed²ᶜᶜᶜ(2, 2, grid, fields, fv)
+        @test U²_filt_cc < 100  # should be ~25 (3² + 4²)
+        @test U²_filt_cc > 0
+
+        # Test other staggered locations
+        U²_filt_fc = wind_speed²ᶠᶜᶜ(2, 2, grid, fields, fv)
+        @test U²_filt_fc > 0
+        @test U²_filt_fc < 100
+
+        U²_filt_cf = wind_speed²ᶜᶠᶜ(2, 2, grid, fields, fv)
+        @test U²_filt_cf > 0
+        @test U²_filt_cf < 100
+    end
+
+    @testset "update_filtered_surface_state! with Nothing" begin
+        using Breeze.BoundaryConditions: update_filtered_surface_state!
+        # Should be no-ops and not error
+        @test update_filtered_surface_state!(nothing, nothing) === nothing
+        @test update_filtered_surface_state!(nothing, nothing, nothing) === nothing
+    end
+
+    @testset "summary methods" begin
+        grid = RectilinearGrid(default_arch; size=(4, 4, 4), x=(0, 100), y=(0, 100), z=(0, 40))
+
+        fv = FilteredSurfaceVelocities(grid; height=10.0, filter_timescale=60.0)
+        s = summary(fv)
+        @test occursin("FilteredSurfaceVelocities", s)
+        @test occursin("10.0", s)
+        @test occursin("60.0", s)
+
+        fs = FilteredSurfaceScalar(grid; height=5.0, filter_timescale=30.0)
+        s2 = summary(fs)
+        @test occursin("FilteredSurfaceScalar", s2)
+        @test occursin("5.0", s2)
+        @test occursin("30.0", s2)
+
+        # BulkDragFunction summary with filtered_velocities
+        df = Breeze.BoundaryConditions.BulkDragFunction(direction=nothing, coefficient=1e-3,
+                                                         gustiness=0.5, surface_temperature=nothing,
+                                                         filtered_velocities=fv)
+        s3 = summary(df)
+        @test occursin("BulkDragFunction", s3)
+        @test occursin("FilteredSurfaceVelocities", s3)
+    end
+
+    @testset "FilteredSurfaceScalar update with height interpolation" begin
+        # Grid with 4 vertical cells: centers at z=5, 15, 25, 35
+        grid = RectilinearGrid(default_arch; size=(4, 4, 4), x=(0, 100), y=(0, 100), z=(0, 40))
+
+        # Set up a scalar field with known vertical profile
+        θ = CenterField(grid)
+        for k in 1:4
+            interior(θ, :, :, k) .= 290.0 + 2.0 * k  # θ(z=5)=292, θ(z=15)=294, etc.
+        end
+
+        # Filter at height = 10.0 (midpoint: expect interpolated value = 293.0)
+        fs = FilteredSurfaceScalar(grid; height=10.0, filter_timescale=1e10)
+        Breeze.BoundaryConditions.update!(fs, θ, grid, 1e10)
+
+        ε = 1.0
+        expected = (0.0 + ε * 293.0) / (1 + ε)
+        @test fs.field[1, 1, 1] ≈ expected atol=1e-6
+    end
+
+    @testset "evaluation_height helper" begin
+        using Breeze.BoundaryConditions: evaluation_height
+        grid = RectilinearGrid(default_arch; size=(1, 1, 1), x=(0, 100), y=(0, 100), z=(0, 20))
+
+        # Nothing → uses znode (first cell center at 10m for this grid)
+        h_default = evaluation_height(1, 1, grid, nothing)
+        @test h_default ≈ 10.0
+
+        # Explicit height passes through
+        @test evaluation_height(1, 1, grid, 25.0) == 25.0
+    end
+
+    @testset "initialize! for FilteredSurfaceVelocities" begin
+        grid = RectilinearGrid(default_arch; size=(4, 4, 4), x=(0, 100), y=(0, 100), z=(0, 40))
+        fv = FilteredSurfaceVelocities(grid; filter_timescale=60.0)
+
+        u = XFaceField(grid)
+        v = YFaceField(grid)
+        set!(u, 7.0)
+        set!(v, 3.0)
+        velocities = (; u, v)
+
+        # Before initialize!, filtered fields are zero
+        @test fv.u[1, 1, 1] == 0
+        @test fv.v[1, 1, 1] == 0
+
+        Breeze.BoundaryConditions.initialize!(fv, velocities, grid)
+
+        # After initialize!, filtered fields match the surface values
+        @test fv.u[1, 1, 1] ≈ 7.0
+        @test fv.v[1, 1, 1] ≈ 3.0
+    end
+
+    @testset "initialize! for FilteredSurfaceScalar" begin
+        grid = RectilinearGrid(default_arch; size=(4, 4, 4), x=(0, 100), y=(0, 100), z=(0, 40))
+        fs = FilteredSurfaceScalar(grid; filter_timescale=60.0)
+
+        θ = CenterField(grid)
+        set!(θ, 300.0)
+
+        @test fs.field[1, 1, 1] == 0
+
+        Breeze.BoundaryConditions.initialize!(fs, θ, grid)
+
+        @test fs.field[1, 1, 1] ≈ 300.0
+    end
+
+    @testset "Adapt.adapt_structure" begin
+        using Adapt: Adapt
+        grid = RectilinearGrid(default_arch; size=(4, 4, 4), x=(0, 100), y=(0, 100), z=(0, 40))
+
+        fv = FilteredSurfaceVelocities(grid; height=10.0, filter_timescale=60.0)
+        # Adapt to CPU (identity transform) — verifies Ref is dereferenced
+        adapted = Adapt.adapt_structure(Array, fv)
+        @test adapted.last_update isa Tuple{Int, Int}
+        @test adapted.last_update == (0, 0)
+        @test adapted.height == 10.0
+        @test adapted.filter_timescale == 60.0
+
+        # Double adaptation must be idempotent (GPU halo filling adapts twice)
+        adapted2 = Adapt.adapt_structure(Array, adapted)
+        @test adapted2.last_update isa Tuple{Int, Int}
+        @test adapted2.last_update == (0, 0)
+
+        fs = FilteredSurfaceScalar(grid; height=5.0, filter_timescale=30.0)
+        adapted_fs = Adapt.adapt_structure(Array, fs)
+        @test adapted_fs.last_update isa Tuple{Int, Int}
+        @test adapted_fs.last_update == (0, 0)
+
+        # Double adaptation for scalar too
+        adapted_fs2 = Adapt.adapt_structure(Array, adapted_fs)
+        @test adapted_fs2.last_update isa Tuple{Int, Int}
+        @test adapted_fs2.last_update == (0, 0)
+    end
+
+    @testset "filtered_kernel_parameters" begin
+        using Breeze.BoundaryConditions: filtered_kernel_parameters, filtered_range
+        using Oceananigans.Grids: Periodic, Bounded
+
+        # Periodic × Periodic: ranges are 1:N+1
+        grid_pp = RectilinearGrid(default_arch; size=(4, 6, 4),
+                                  x=(0, 100), y=(0, 100), z=(0, 40),
+                                  topology=(Periodic, Periodic, Bounded))
+        kp = filtered_kernel_parameters(grid_pp)
+        @test kp isa Oceananigans.Utils.KernelParameters
+        # Extract offsets from KernelParameters to check ranges
+        @test filtered_range(Periodic(), 4) == 1:5
+        @test filtered_range(Periodic(), 6) == 1:7
+        @test filtered_range(Flat(), 4) == 1:4
+        @test filtered_range(Bounded(), 4) == 1:5
+    end
+
+    @testset "update_filtered_surface_state! deduplication and isinf guard" begin
+        using Breeze.BoundaryConditions: update_filtered_surface_state!
+
+        grid = RectilinearGrid(default_arch; size=(4, 4, 4), x=(0, 100), y=(0, 100), z=(0, 40))
+        fv = FilteredSurfaceVelocities(grid; filter_timescale=10.0)
+
+        u = XFaceField(grid)
+        v = YFaceField(grid)
+        set!(u, 5.0)
+        set!(v, 3.0)
+
+        # Build a mock model-like object with the needed fields
+        clock = Oceananigans.TimeSteppers.Clock(time=zero(FT))
+        mock_model = (; clock, velocities=(; u, v), grid)
+
+        # Before first time step, clock.last_Δt is Inf — update should be a no-op
+        @test isinf(clock.last_Δt)
+        update_filtered_surface_state!(fv, mock_model)
+        @test fv.u[1, 1, 1] == 0  # unchanged
+
+        # Advance clock to simulate a time step having occurred
+        clock.last_Δt = 1.0
+        clock.iteration = 1
+        clock.stage = 1
+        update_filtered_surface_state!(fv, mock_model)
+        val_after_first = fv.u[1, 1, 1]
+        @test val_after_first != 0  # should have been updated
+
+        # Call again with same (iteration, stage) — deduplication should prevent update
+        set!(u, 100.0)  # change input drastically
+        update_filtered_surface_state!(fv, mock_model)
+        @test fv.u[1, 1, 1] ≈ val_after_first  # unchanged due to deduplication
+
+        # Advance to new iteration — should update again
+        clock.iteration = 2
+        update_filtered_surface_state!(fv, mock_model)
+        @test fv.u[1, 1, 1] != val_after_first  # now updated with u=100
+    end
+
+    @testset "initialize_boundary_condition! fallback" begin
+        using Breeze.BoundaryConditions: initialize_boundary_condition!
+        using Oceananigans.BoundaryConditions: Flux
+        # The generic fallback should return nothing for any non-bulk BC
+        @test initialize_boundary_condition!(nothing, Val(:bottom), nothing, nothing) === nothing
+        bc = BoundaryCondition(Flux(), nothing)
+        @test initialize_boundary_condition!(bc, Val(:bottom), nothing, nothing) === nothing
+    end
+
+    @testset "Temporal filtering produces lagged response" begin
+        grid = RectilinearGrid(default_arch; size=(4, 4, 4), x=(0, 100), y=(0, 100), z=(0, 40))
+        τ = 100.0
+        fv = FilteredSurfaceVelocities(grid; filter_timescale=τ)
+
+        u = XFaceField(grid)
+        v = YFaceField(grid)
+        set!(u, 10.0)
+        set!(v, 0.0)
+        velocities = (; u, v)
+
+        # Initialize: filtered matches instantaneous
+        Breeze.BoundaryConditions.initialize!(fv, velocities, grid)
+        @test fv.u[2, 2, 1] ≈ 10.0
+
+        # Velocity jumps to 0. Update with small Δt — filter should lag.
+        set!(u, 0.0)
+        Δt = 1.0
+        ϵ = Δt / τ
+        Breeze.BoundaryConditions.update!(fv, velocities, grid, Δt)
+
+        # After one update, filtered u ≈ 10 / (1 + ε) ≈ 9.9 — still close to old value
+        expected = 10.0 / (1 + ϵ)
+        @test fv.u[2, 2, 1] ≈ expected atol=1e-10
+        @test fv.u[2, 2, 1] > 9.0  # clearly lagged behind the new value (0)
+
+        # After many updates the filter converges toward the new value
+        for _ in 1:30
+            Breeze.BoundaryConditions.update!(fv, velocities, grid, τ) # ε = 1 per step
+        end
+        @test fv.u[2, 2, 1] ≈ 0.0 atol=1e-6  # converged to new value
+
+        # Same test for FilteredSurfaceScalar
+        fs = FilteredSurfaceScalar(grid; filter_timescale=τ)
+        θ = CenterField(grid)
+        set!(θ, 300.0)
+        Breeze.BoundaryConditions.initialize!(fs, θ, grid)
+        @test fs.field[2, 2, 1] ≈ 300.0
+
+        set!(θ, 290.0)
+        Breeze.BoundaryConditions.update!(fs, θ, grid, Δt)
+        expected_θ = (300.0 + ϵ * 290.0) / (1 + ϵ)
+        @test fs.field[2, 2, 1] ≈ expected_θ atol=1e-10
+        @test fs.field[2, 2, 1] > 299.0  # lagged behind the new value (290)
+    end
+
+    @testset "Drag flux uses filtered velocity, not instantaneous" begin
+        using Oceananigans.Models: BoundaryConditionOperation
+
+        grid = RectilinearGrid(default_arch; size=(4, 4, 4), x=(0, 100), y=(0, 100), z=(0, 100))
+        Cᴰ = 1e-3
+        gustiness = 0.5
+        τ_filter = 3600.0
+
+        fv = FilteredSurfaceVelocities(grid; filter_timescale=τ_filter)
+
+        # Build model with constant coefficient and filtered velocities
+        ρu_bcs = FieldBoundaryConditions(bottom=Breeze.BulkDrag(coefficient=Cᴰ, gustiness=gustiness,
+                                                                 filtered_velocities=fv))
+        ρv_bcs = FieldBoundaryConditions(bottom=Breeze.BulkDrag(coefficient=Cᴰ, gustiness=gustiness,
+                                                                 filtered_velocities=fv))
+        boundary_conditions = (; ρu=ρu_bcs, ρv=ρv_bcs)
+        model = AtmosphereModel(grid; boundary_conditions)
+
+        # Set known state: u = 5 m/s, v = 0
+        u₀ = FT(5)
+        θ₀ = model.dynamics.reference_state.potential_temperature
+        set!(model; θ=θ₀, u=u₀)
+
+        # Set filtered velocity to a very different value
+        U_f = FT(20)
+        set!(fv.u, U_f)
+        set!(fv.v, 0)
+
+        # Evaluate the drag flux via BoundaryConditionOperation
+        ρu = model.momentum.ρu
+        τˣ_op = BoundaryConditionOperation(ρu, :bottom, model)
+        τˣ_field = Field(τˣ_op)
+        compute!(τˣ_field)
+
+        # Expected flux using FILTERED velocity:
+        # τ = -Cᴰ * (U_f² + g²) * ρu / U_f
+        # where U_f = 20 (filtered), not u₀ = 5 (instantaneous)
+        ρu_sfc = ρu[2, 2, 1]
+        Ũ² = U_f^2 + FT(gustiness)^2
+        expected_filtered = -Cᴰ * Ũ² * ρu_sfc / U_f
+
+        # What the flux WOULD be with instantaneous velocity (u₀ = 5):
+        Ũ²_inst = u₀^2 + FT(gustiness)^2
+        expected_unfiltered = -Cᴰ * Ũ²_inst * ρu_sfc / u₀
+
+        # The actual flux should match the filtered prediction, not the instantaneous
+        @test τˣ_field[2, 2, 1] ≈ expected_filtered
+        @test τˣ_field[2, 2, 1] != expected_unfiltered
+
+        # Sanity check: the two predictions differ substantially
+        @test !isapprox(expected_filtered, expected_unfiltered, rtol=0.1)
+    end
+
+    @testset "Filtered velocity update is exact during time stepping" begin
+        using Breeze.BoundaryConditions: update_filtered_surface_state!
+
+        grid = RectilinearGrid(default_arch; size=(4, 4, 4), x=(0, 100), y=(0, 100), z=(0, 100))
+        Cᴰ = 1e-3
+        gustiness = 0.1
+        T₀ = FT(290)
+        τ_filter = FT(3600)  # 1 hour
+
+        fv = FilteredSurfaceVelocities(grid; filter_timescale=τ_filter)
+
+        ρu_bcs = FieldBoundaryConditions(bottom=Breeze.BulkDrag(coefficient=Cᴰ, gustiness=gustiness,
+                                                                 filtered_velocities=fv))
+        ρv_bcs = FieldBoundaryConditions(bottom=Breeze.BulkDrag(coefficient=Cᴰ, gustiness=gustiness,
+                                                                 filtered_velocities=fv))
+        ρθ_bcs = FieldBoundaryConditions(bottom=Breeze.BulkSensibleHeatFlux(surface_temperature=T₀,
+                                                                             coefficient=Cᴰ, gustiness=gustiness,
+                                                                             filtered_velocities=fv))
+        ρqᵛ_bcs = FieldBoundaryConditions(bottom=Breeze.BulkVaporFlux(surface_temperature=T₀,
+                                                                       coefficient=Cᴰ, gustiness=gustiness,
+                                                                       filtered_velocities=fv))
+
+        boundary_conditions = (; ρu=ρu_bcs, ρv=ρv_bcs, ρθ=ρθ_bcs, ρqᵛ=ρqᵛ_bcs)
+        model = AtmosphereModel(grid; boundary_conditions)
+
+        θ₀_ref = model.dynamics.reference_state.potential_temperature
+        set!(model; θ=θ₀_ref, u=5)
+        Oceananigans.initialize!(model)
+        @test fv.u[2, 2, 1] ≈ 5.0
+
+        # Perturb filtered velocity to simulate memory of a past state
+        set!(fv.u, 50.0)
+        fv_before = fv.u[2, 2, 1]
+
+        # Take one time step — update_boundary_condition! updates filtered state
+        Δt = FT(1)
+        time_step!(model, Δt)
+
+        # The filtered velocity should have been updated but remain lagged.
+        # With ε = Δt/τ ≈ 1/3600 and 3 RK3 stages (each with ε), the
+        # velocity barely moves from 50 toward the actual velocity.
+        ε = Δt / τ_filter
+        @test fv.u[2, 2, 1] < fv_before  # moved toward actual (< 50)
+        @test fv.u[2, 2, 1] > 45.0       # but barely (still close to 50)
     end
 end
