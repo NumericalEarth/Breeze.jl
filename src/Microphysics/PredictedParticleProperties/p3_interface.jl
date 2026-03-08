@@ -309,7 +309,7 @@ Rain number tendency: gains from autoconversion, melting, shedding; loses to sel
 """
 @inline function AM.microphysical_tendency(p3::P3, ::Val{:ρnʳ}, ρ, ℳ::P3MicrophysicalState, 𝒰, constants)
     rates, qⁱ, nⁱ, _, _, _ = p3_rates_and_properties(p3, ρ, ℳ, 𝒰, constants)
-    return tendency_ρnʳ(rates, ρ, nⁱ, qⁱ)
+    return tendency_ρnʳ(rates, ρ, nⁱ, qⁱ, p3.process_rates)
 end
 
 """

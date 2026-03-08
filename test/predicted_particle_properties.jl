@@ -1149,6 +1149,7 @@ using Oceananigans: CPU
         zⁱ = FT(1e-8)  # Ice reflectivity
         Fᶠ = FT(0.3)   # Rime fraction
         ρᶠ = FT(400.0)  # Rime density [kg/m³]
+        prp = ProcessRateParameters(FT)
 
         # Create rates with typical warm-rain and ice process activity
         rates = P3ProcessRates(
@@ -1192,7 +1193,7 @@ using Oceananigans: CPU
         # Test each tendency function returns a finite number
         @test isfinite(tendency_ρqᶜˡ(rates, ρ))
         @test isfinite(tendency_ρqʳ(rates, ρ))
-        @test isfinite(tendency_ρnʳ(rates, ρ, nⁱ, qⁱ))
+        @test isfinite(tendency_ρnʳ(rates, ρ, nⁱ, qⁱ, prp))
         @test isfinite(tendency_ρqⁱ(rates, ρ))
         @test isfinite(tendency_ρnⁱ(rates, ρ))
         @test isfinite(tendency_ρqᶠ(rates, ρ, Fᶠ))
@@ -1212,7 +1213,7 @@ using Oceananigans: CPU
 
         @test tendency_ρqᶜˡ(zero_rates, ρ) == 0.0
         @test tendency_ρqʳ(zero_rates, ρ) == 0.0
-        @test tendency_ρnʳ(zero_rates, ρ, FT(1e5), FT(1e-4)) == 0.0
+        @test tendency_ρnʳ(zero_rates, ρ, FT(1e5), FT(1e-4), ProcessRateParameters(FT)) == 0.0
         @test tendency_ρqⁱ(zero_rates, ρ) == 0.0
         @test tendency_ρnⁱ(zero_rates, ρ) == 0.0
         @test tendency_ρqᶠ(zero_rates, ρ, FT(0.3)) == 0.0
@@ -1229,7 +1230,7 @@ using Oceananigans: CPU
 
         @test tendency_ρqᶜˡ(rates, ρ) isa FT
         @test tendency_ρqʳ(rates, ρ) isa FT
-        @test tendency_ρnʳ(rates, ρ, FT(1e5), FT(1e-4); m_rain_init=FT(5e-10)) isa FT
+        @test tendency_ρnʳ(rates, ρ, FT(1e5), FT(1e-4), ProcessRateParameters(FT)) isa FT
         @test tendency_ρqⁱ(rates, ρ) isa FT
         @test tendency_ρnⁱ(rates, ρ) isa FT
         @test tendency_ρqᶠ(rates, ρ, FT(0.3)) isa FT

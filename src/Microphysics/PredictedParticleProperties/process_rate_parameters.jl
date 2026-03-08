@@ -32,7 +32,7 @@ struct ProcessRateParameters{FT}
     accretion_coefficient :: FT              # k₂ [s⁻¹]
     accretion_exponent :: FT                 # α [-]
 
-    # Rain self-collection and breakup (Seifert-Beheng 2001)
+    # Rain self-collection and breakup (Seifert-Beheng 2001, 2006)
     self_collection_coefficient :: FT        # k_rr [-]
     rain_breakup_diameter_threshold :: FT    # D_eq threshold for breakup [m]
     rain_breakup_coefficient :: FT           # κ_br [1/m]
@@ -40,9 +40,6 @@ struct ProcessRateParameters{FT}
     # Evaporation/sublimation timescales
     rain_evaporation_timescale :: FT         # τ_evap [s]
     ice_deposition_timescale :: FT           # τ_dep [s]
-
-    # Melting
-    ice_melting_timescale :: FT              # τ_melt [s]
 
     # Ice aggregation
     aggregation_efficiency_max :: FT         # Eᵢᵢ_max [-]
@@ -53,11 +50,9 @@ struct ProcessRateParameters{FT}
 
     # Cloud riming
     cloud_ice_collection_efficiency :: FT    # Eᶜⁱ [-]
-    cloud_riming_timescale :: FT             # τ_rim [s]
 
     # Rain riming
     rain_ice_collection_efficiency :: FT     # Eʳⁱ [-]
-    rain_riming_timescale :: FT              # τ_rim [s]
 
     # Rime density bounds
     minimum_rime_density :: FT               # ρ_rim_min [kg/m³]
@@ -80,8 +75,6 @@ struct ProcessRateParameters{FT}
     # Immersion freezing (Barklie-Gokhale 1959)
     immersion_freezing_temperature_max :: FT # T_max [K]
     immersion_freezing_coefficient :: FT     # aimm [-]
-    immersion_freezing_timescale_cloud :: FT # base timescale for cloud [s]
-    immersion_freezing_timescale_rain :: FT  # base timescale for rain [s]
 
     # Rime splintering (Hallett-Mossop)
     splintering_temperature_low :: FT        # T_low [K]
@@ -99,7 +92,7 @@ struct ProcessRateParameters{FT}
     rain_velocity_max :: FT                  # v_max [m/s]
 
     # Ice terminal velocity
-    ice_fall_speed_coefficient_unrimed :: FT # a for aggregates
+    ice_fall_speed_coefficient_unrimed :: FT # a for aggregates [Mitchell 1996]
     ice_fall_speed_exponent_unrimed :: FT    # b for aggregates
     ice_fall_speed_coefficient_rimed :: FT   # a for graupel
     ice_fall_speed_exponent_rimed :: FT      # b for graupel
@@ -110,6 +103,10 @@ struct ProcessRateParameters{FT}
     ice_velocity_min :: FT                   # v_min [m/s]
     ice_velocity_max :: FT                   # v_max [m/s]
     ice_effective_density_unrimed :: FT      # ρ_eff for aggregates [kg/m³]
+
+    # Ice projected area (Mitchell 1996): A = γ D^σ for aggregates
+    ice_projected_area_coefficient :: FT     # γ [m^(2-σ)]
+    ice_projected_area_exponent :: FT        # σ [-]
 
     # Ratio factors for weighted velocities
     velocity_ratio_number_to_mass :: FT      # Vₙ/Vₘ
@@ -142,7 +139,7 @@ deposition, nucleation, and sedimentation.
 # Default Sources
 
 - Autoconversion/accretion: Khairoutdinov and Kogan (2000)
-- Self-collection: Seifert and Beheng (2001)
+- Self-collection/breakup: Seifert and Beheng (2001, 2006)
 - Aggregation: Morrison and Milbrandt (2015)
 - Nucleation: Cooper (1986)
 - Freezing: Barklie and Gokhale (1959)
@@ -151,8 +148,13 @@ deposition, nucleation, and sedimentation.
 
 # Example
 
-```julia
+```jldoctest
+using Breeze.PredictedParticleProperties: ProcessRateParameters
 params = ProcessRateParameters(Float64)
+typeof(params)
+
+# output
+ProcessRateParameters{Float64}
 ```
 
 All parameters are keyword arguments with physically-based defaults.
@@ -187,7 +189,6 @@ function ProcessRateParameters(FT::Type{<:AbstractFloat} = Float64;
         # Timescales
         rain_evaporation_timescale = 10.0,
         ice_deposition_timescale = 10.0,
-        ice_melting_timescale = 60.0,
 
         # Ice aggregation
         aggregation_efficiency_max = 0.3,
@@ -198,11 +199,9 @@ function ProcessRateParameters(FT::Type{<:AbstractFloat} = Float64;
 
         # Cloud riming
         cloud_ice_collection_efficiency = 0.5,
-        cloud_riming_timescale = 300.0,
 
         # Rain riming
         rain_ice_collection_efficiency = 1.0,
-        rain_riming_timescale = 200.0,
 
         # Rime density
         minimum_rime_density = 50.0,
@@ -225,8 +224,6 @@ function ProcessRateParameters(FT::Type{<:AbstractFloat} = Float64;
         # Immersion freezing
         immersion_freezing_temperature_max = 269.15,
         immersion_freezing_coefficient = 0.65,
-        immersion_freezing_timescale_cloud = 1000.0,
-        immersion_freezing_timescale_rain = 300.0,
 
         # Rime splintering
         splintering_temperature_low = 265.15,
@@ -244,7 +241,7 @@ function ProcessRateParameters(FT::Type{<:AbstractFloat} = Float64;
         rain_velocity_max = 15.0,
 
         # Ice terminal velocity
-        ice_fall_speed_coefficient_unrimed = 11.7,
+        ice_fall_speed_coefficient_unrimed = 11.72,
         ice_fall_speed_exponent_unrimed = 0.41,
         ice_fall_speed_coefficient_rimed = 19.3,
         ice_fall_speed_exponent_rimed = 0.37,
@@ -255,6 +252,10 @@ function ProcessRateParameters(FT::Type{<:AbstractFloat} = Float64;
         ice_velocity_min = 0.01,
         ice_velocity_max = 8.0,
         ice_effective_density_unrimed = 100.0,
+
+        # Ice projected area (Mitchell 1996)
+        ice_projected_area_coefficient = 0.2285,
+        ice_projected_area_exponent = 1.88,
 
         # Velocity ratios
         velocity_ratio_number_to_mass = 0.6,
@@ -289,16 +290,13 @@ function ProcessRateParameters(FT::Type{<:AbstractFloat} = Float64;
         FT(rain_breakup_coefficient),
         FT(rain_evaporation_timescale),
         FT(ice_deposition_timescale),
-        FT(ice_melting_timescale),
         FT(aggregation_efficiency_max),
         FT(aggregation_timescale),
         FT(aggregation_efficiency_temperature_low),
         FT(aggregation_efficiency_temperature_high),
         FT(aggregation_reference_concentration),
         FT(cloud_ice_collection_efficiency),
-        FT(cloud_riming_timescale),
         FT(rain_ice_collection_efficiency),
-        FT(rain_riming_timescale),
         FT(minimum_rime_density),
         FT(maximum_rime_density),
         FT(shedding_timescale),
@@ -311,8 +309,6 @@ function ProcessRateParameters(FT::Type{<:AbstractFloat} = Float64;
         FT(nucleation_timescale),
         FT(immersion_freezing_temperature_max),
         FT(immersion_freezing_coefficient),
-        FT(immersion_freezing_timescale_cloud),
-        FT(immersion_freezing_timescale_rain),
         FT(splintering_temperature_low),
         FT(splintering_temperature_high),
         FT(splintering_temperature_peak),
@@ -335,6 +331,8 @@ function ProcessRateParameters(FT::Type{<:AbstractFloat} = Float64;
         FT(ice_velocity_min),
         FT(ice_velocity_max),
         FT(ice_effective_density_unrimed),
+        FT(ice_projected_area_coefficient),
+        FT(ice_projected_area_exponent),
         FT(velocity_ratio_number_to_mass),
         FT(velocity_ratio_reflectivity_to_mass),
         FT(initial_rain_drop_mass),
@@ -351,5 +349,5 @@ function Base.show(io::IO, p::ProcessRateParameters)
     print(io, summary(p), "(")
     print(io, "T₀=", p.freezing_temperature, "K, ")
     print(io, "ρʷ=", p.liquid_water_density, "kg/m³, ")
-    print(io, "τ_melt=", p.ice_melting_timescale, "s)")
+    print(io, "Eᶜⁱ=", p.cloud_ice_collection_efficiency, ")")
 end

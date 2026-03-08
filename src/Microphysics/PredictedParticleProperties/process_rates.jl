@@ -476,13 +476,10 @@ The bulk rate integrates over the size distribution:
     # Deposition rate per particle (Eq. 30 from MM15a)
     dm_dt = FT(4π) * C * f_v * (S_i - 1) / thermodynamic_factor
 
-    # PSD correction factor: PSD integration gives <C×fv>/<C(Dm)×fv(Dm)>.
-    # For the mean-mass approximation, psd_correction = 1.0.
-    # The Fortran P3 uses lookup tables that integrate over the full PSD.
-    # With our 41-level grid (vs Fortran's 90), we use 1.0 to avoid
-    # overestimating deposition, keeping riming as the dominant growth mechanism.
-    psd_correction = FT(1)
-    dep_rate = psd_correction * nⁱ_eff * dm_dt
+    # No PSD correction for deposition: the mean-mass approximation is
+    # adequate here because capacitance C(D) is nearly linear in D.
+    # PSD-integrated rates use lookup tables (Phase 5).
+    dep_rate = nⁱ_eff * dm_dt
 
     # Limit sublimation to available ice
     τ_dep = prp.ice_deposition_timescale
@@ -616,25 +613,6 @@ where:
     melt_rate = min(melt_rate, max_melt)
 
     return ifelse(is_melting, melt_rate, zero(FT))
-end
-
-# Backward compatibility: simplified version
-@inline function ice_melting_rate(p3, qⁱ, T)
-    FT = typeof(qⁱ)
-    prp = p3.process_rates
-
-    qⁱ_eff = clamp_positive(qⁱ)
-    T₀ = prp.freezing_temperature
-    τ_melt = prp.ice_melting_timescale
-
-    # Temperature excess above freezing
-    ΔT = T - T₀
-    ΔT_pos = clamp_positive(ΔT)
-
-    # Melting rate proportional to temperature excess (normalized to 1K)
-    rate_factor = ΔT_pos
-
-    return qⁱ_eff * rate_factor / τ_melt
 end
 
 """
@@ -1134,9 +1112,7 @@ See [Morrison and Milbrandt (2015a)](@cite Morrison2015parameterization).
     V_mean = a_V * D_mean^b_V
 
     # Mean projected area (regime-dependent)
-    γ = FT(0.2285)
-    σ = FT(1.88)
-    A_aggregate = γ * D_mean^σ
+    A_aggregate = prp.ice_projected_area_coefficient * D_mean^prp.ice_projected_area_exponent
     A_sphere = FT(π) / 4 * D_mean^2
     A_mean = (1 - Fᶠ) * A_aggregate + Fᶠ * A_sphere
 
@@ -1220,9 +1196,7 @@ factor for the exponential PSD.
     V_mean = a_V * D_mean^b_V
 
     # Projected area (regime-dependent: aggregate vs sphere)
-    γ = FT(0.2285)
-    σ = FT(1.88)
-    A_agg = γ * D_mean^σ
+    A_agg = prp.ice_projected_area_coefficient * D_mean^prp.ice_projected_area_exponent
     A_sphere = FT(π) / 4 * D_mean^2
     A_mean = (1 - Fᶠ) * A_agg + Fᶠ * A_sphere
 
@@ -1314,9 +1288,7 @@ collection equation with collision kernel integrated over the ice PSD.
     V_mean = a_V * D_mean^b_V
 
     # Projected area
-    γ = FT(0.2285)
-    σ = FT(1.88)
-    A_agg = γ * D_mean^σ
+    A_agg = prp.ice_projected_area_coefficient * D_mean^prp.ice_projected_area_exponent
     A_sphere = FT(π) / 4 * D_mean^2
     A_mean = (1 - Fᶠ) * A_agg + Fᶠ * A_sphere
 
@@ -1807,7 +1779,7 @@ Rain loses from:
 end
 
 """
-    tendency_ρnʳ(rates, ρ, qᶜˡ, Nc, m_drop)
+    tendency_ρnʳ(rates, ρ, nⁱ, qⁱ, prp)
 
 Compute rain number tendency from P3 process rates.
 
@@ -1822,12 +1794,11 @@ Rain number loses from:
 - Riming (Phase 2)
 - Immersion freezing (Phase 2)
 """
-@inline function tendency_ρnʳ(rates::P3ProcessRates, ρ, nⁱ, qⁱ;
-                               m_rain_init = 5e-10)  # Initial rain drop mass [kg]
+@inline function tendency_ρnʳ(rates::P3ProcessRates, ρ, nⁱ, qⁱ, prp::ProcessRateParameters)
     FT = typeof(ρ)
 
     # Phase 1: New drops from autoconversion
-    n_from_autoconv = rates.autoconversion / m_rain_init
+    n_from_autoconv = rates.autoconversion / prp.initial_rain_drop_mass
 
     # Phase 1: New drops from complete melting (conserve number)
     # Only complete_melting produces new rain drops; partial_melting stays on ice
@@ -2118,7 +2089,7 @@ end
 
 @inline tendency_ρqᶜˡ(::Nothing, ρ) = zero(ρ)
 @inline tendency_ρqʳ(::Nothing, ρ) = zero(ρ)
-@inline tendency_ρnʳ(::Nothing, ρ, nⁱ, qⁱ; kwargs...) = zero(ρ)
+@inline tendency_ρnʳ(::Nothing, ρ, nⁱ, qⁱ, args...) = zero(ρ)
 @inline tendency_ρqⁱ(::Nothing, ρ) = zero(ρ)
 @inline tendency_ρnⁱ(::Nothing, ρ) = zero(ρ)
 @inline tendency_ρqᶠ(::Nothing, ρ, Fᶠ) = zero(ρ)
