@@ -372,7 +372,7 @@ Adapt.adapt_structure(to, s::HorizontalSlowMode) = HorizontalSlowMode(adapt(to, 
 #####
 
 """
-    compute_dynamics_tendency!(model)
+$(TYPEDSIGNATURES)
 
 Compute tendencies for dynamics-specific prognostic fields.
 
@@ -390,7 +390,7 @@ compute_dynamics_tendency!(model) = nothing  # default: no dynamics-specific ten
 #####
 
 """
-    transport_velocities(model)
+$(TYPEDSIGNATURES)
 
 Return the velocity tuple used for scalar advection transport.
 
@@ -401,7 +401,7 @@ by the contravariant vertical velocity ``\\tilde{\\Omega}``.
 transport_velocities(model) = model.velocities
 
 """
-    transport_momentum(model)
+$(TYPEDSIGNATURES)
 
 Return the momentum tuple used for momentum advection transport
 and the continuity equation divergence.
@@ -417,7 +417,7 @@ transport_momentum(model) = model.momentum
 #####
 
 """
-    compute_auxiliary_dynamics_variables!(model)
+$(TYPEDSIGNATURES)
 
 Compute auxiliary (diagnostic) variables specific to the dynamics formulation.
 

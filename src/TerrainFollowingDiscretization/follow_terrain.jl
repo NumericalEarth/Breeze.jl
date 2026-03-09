@@ -52,8 +52,8 @@ metrics.z_top
 ```
 """
 function follow_terrain!(grid::MutableGridOfSomeKind, topography;
-                          smoothing = BasicTerrainFollowing(),
-                          pressure_gradient_stencil = SlopeOutsideInterpolation())
+                         smoothing = BasicTerrainFollowing(),
+                         pressure_gradient_stencil = SlopeOutsideInterpolation())
     return _follow_terrain!(grid, topography, smoothing, pressure_gradient_stencil)
 end
 

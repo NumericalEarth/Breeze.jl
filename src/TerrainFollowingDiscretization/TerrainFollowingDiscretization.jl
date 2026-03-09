@@ -24,6 +24,7 @@ export follow_terrain!, TerrainMetrics, BasicTerrainFollowing,
        SlopeOutsideInterpolation, SlopeInsideInterpolation
 
 using Adapt: Adapt, adapt
+using DocStringExtensions: TYPEDSIGNATURES, TYPEDEF
 using KernelAbstractions: @kernel, @index
 using Oceananigans: Center, Face, CenterField, XFaceField, YFaceField, interior
 using Oceananigans.Architectures: architecture

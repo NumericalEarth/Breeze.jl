@@ -33,7 +33,7 @@
 #####
 
 """
-    SlopeOutsideInterpolation
+$(TYPEDEF)
 
 Terrain pressure gradient stencil where the slope is multiplied outside
 the interpolation of ``∂p'/∂ζ``:
@@ -47,7 +47,7 @@ This is the default stencil.
 struct SlopeOutsideInterpolation end
 
 """
-    SlopeInsideInterpolation
+$(TYPEDEF)
 
 Terrain pressure gradient stencil where the slope is multiplied inside
 the interpolation of ``∂p'/∂ζ``:
@@ -63,7 +63,7 @@ approach where the metric term sits inside the 4-point average.
 struct SlopeInsideInterpolation end
 
 """
-    TerrainMetrics{H, SX, SY, FT, PG}
+$(TYPEDEF)
 
 Pre-computed terrain derivative fields and model top height.
 
@@ -93,7 +93,7 @@ Adapt.adapt_structure(to, m::TerrainMetrics) =
                    m.pressure_gradient_stencil)
 
 """
-    terrain_slope_x(i, j, k, grid, metrics, ℓz)
+$(TYPEDSIGNATURES)
 
 Compute ``(\\partial z / \\partial x)_\\zeta`` at horizontal location ``(Face, Center)``
 and vertical location `ℓz` (either `Center()` or `Face()`).
@@ -112,7 +112,7 @@ For basic terrain-following coordinates:
 end
 
 """
-    terrain_slope_y(i, j, k, grid, metrics, ℓz)
+$(TYPEDSIGNATURES)
 
 Compute ``(\\partial z / \\partial y)_\\zeta`` at horizontal location ``(Center, Face)``
 and vertical location `ℓz` (either `Center()` or `Face()`).

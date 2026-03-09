@@ -7,7 +7,7 @@
 #####
 
 """
-    BasicTerrainFollowing
+$(TYPEDEF)
 
 Linear decay of terrain influence with height, following
 [Gal-Chen and Somerville (1975)](@cite GalChen1975).
