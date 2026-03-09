@@ -25,8 +25,7 @@ using Oceananigans: architecture
 using Oceananigans.Operators: ∂xᶠᶜᶜ, ∂yᶜᶠᶜ, δxᶠᶜᶜ, δyᶜᶠᶜ, Δx⁻¹ᶠᶜᶜ, Δy⁻¹ᶜᶠᶜ, ∂zᶜᶜᶠ, Δzᶜᶜᶠ
 using Oceananigans.BoundaryConditions: fill_halo_regions!
 
-using Breeze.TerrainFollowingDiscretization: TerrainMetrics, terrain_slope_x, terrain_slope_y,
-                                             SlopeOutsideInterpolation, SlopeInsideInterpolation
+using Breeze.TerrainFollowingDiscretization: TerrainMetrics, SlopeOutsideInterpolation, SlopeInsideInterpolation
 
 #####
 ##### Terrain-aware type alias
