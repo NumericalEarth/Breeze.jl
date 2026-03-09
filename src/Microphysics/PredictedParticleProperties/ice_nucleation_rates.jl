@@ -31,6 +31,7 @@ is supersaturated with respect to ice. Uses [Cooper (1986)](@cite Cooper1986).
     τ_nuc = prp.nucleation_timescale
     T₀ = prp.freezing_temperature
     mᵢ₀ = prp.nucleated_ice_mass
+    c_nuc = prp.nucleation_coefficient
 
     # Ice supersaturation
     Sⁱ = (qᵛ - qᵛ⁺ⁱ) / max(qᵛ⁺ⁱ, FT(1e-10))
@@ -38,9 +39,10 @@ is supersaturated with respect to ice. Uses [Cooper (1986)](@cite Cooper1986).
     # Conditions for nucleation
     nucleation_active = (T < T_threshold) & (Sⁱ > Sⁱ_threshold)
 
-    # Cooper (1986): N_ice = 0.005 × exp(0.304 × (T₀ - T))
+    # Cooper (1986): N_ice = c_nuc × exp(0.304 × (T₀ - T))
+    # c_nuc defaults to 0.005 /L; multiply by 1000 to convert to /m³, divide by ρ for /kg
     ΔT = T₀ - T
-    N_cooper = FT(0.005) * exp(FT(0.304) * ΔT) * FT(1000) / ρ
+    N_cooper = c_nuc * exp(FT(0.304) * ΔT) * FT(1000) / ρ
 
     # Limit to maximum and subtract existing ice
     N_equilibrium = min(N_cooper, N_max / ρ)

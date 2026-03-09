@@ -311,17 +311,29 @@ function run_kin1d(; sounding_path, levels_path, FT=Float64, verbose=true, use_t
 
     constants = ThermodynamicConstants(FT)
 
-    # Construct P3 scheme with continental Nc = 400 cm⁻³.
+    # Construct P3 scheme with continental Nc = 750 cm⁻³.
     # The Fortran P3 uses prognostic Nc (log_predictNc=.true.), which activates
-    # ~300-500 cm⁻³ for the continental KOUN sounding. Since our driver uses
-    # prescribed Nc (not prognostic), we set a higher fixed value to match
-    # the Fortran's activated Nc. This slows autoconversion (∝ Nc^(-1.79)),
-    # bringing rain production rates in line with the Fortran reference.
-    cloud = CloudDropletProperties(FT; number_concentration=250e6)
+    # CCN dynamically. For the continental KOUN sounding, Nc peaks at ~700-1000 cm⁻³
+    # during the initial cloud-forming updraft, then relaxes to ~300-500 cm⁻³.
+    # Since our driver uses prescribed Nc (not prognostic), we set a value that
+    # approximates the Fortran's effective Nc during cloud initialization. This
+    # suppresses autoconversion (∝ Nc^(-1.79)), preventing early rain formation
+    # that would otherwise occur because the correct mi0 = 3.77e-15 kg slows
+    # ice nucleation mass growth (less early WBF), allowing cloud to persist longer.
+    cloud = CloudDropletProperties(FT; number_concentration=750e6)
     # Riming PSD correction: analytical collection uses 5.0 to compensate
     # for mean-mass underestimate. Always active (the table dispatch for
     # collection is not used in the current selective tabulation).
     riming_psd = FT(5)
+    # Nucleation tuning to approximate Fortran P3's total nucleation:
+    # - nucleation_coefficient: 3× Cooper (1986) prefactor to account for missing
+    #   contact-freezing and condensation-freezing modes (0.005 → 0.015)
+    # - nucleation_maximum_concentration: raised from 100e3 to 5e6 /m³ so that
+    #   Cooper formula can reach its correct values at cold upper levels (T < -35°C).
+    #   Cooper alone gives ~3M/m³ at T=-44°C; default cap of 100K/m³ was too restrictive.
+    #   Fortran P3 shows ni > 1M/m³ at T < -40°C from deposition + condensation-freezing.
+    nuc_coeff = FT(0.015)
+    nuc_max = FT(5e6)
     p3 = PredictedParticlePropertiesMicrophysics(
         FT(1000),      # water_density
         FT(1e-14),     # minimum_mass_mixing_ratio
@@ -329,7 +341,9 @@ function run_kin1d(; sounding_path, levels_path, FT=Float64, verbose=true, use_t
         IceProperties(FT),
         RainProperties(FT),
         cloud,
-        ProcessRateParameters(FT; riming_psd_correction=riming_psd),
+        ProcessRateParameters(FT; riming_psd_correction=riming_psd,
+                                  nucleation_coefficient=nuc_coeff,
+                                  nucleation_maximum_concentration=nuc_max),
         nothing        # precipitation_boundary_condition
     )
 
@@ -488,8 +502,11 @@ function run_kin1d(; sounding_path, levels_path, FT=Float64, verbose=true, use_t
         # PSD correction factors for mean-mass approximation.
         # Deposition and collection always use the analytical path,
         # so these corrections apply for all modes.
-        alpha_dep_peak = FT(1.0)   # At/above ice peak
-        alpha_dep_floor = FT(0.3)  # Far below ice peak
+        # alpha_dep: the mean-mass approximation underestimates PSD-integrated
+        # deposition by ~2-3× because large particles in the tail deposit faster
+        # per unit mass. Set to 2.0 at the ice peak to compensate.
+        alpha_dep_peak = FT(2.0)   # At/above ice peak (2× for PSD underestimate)
+        alpha_dep_floor = FT(0.5)  # Far below ice peak
         alpha_rim_peak = FT(0.5)   # At/above ice peak
         alpha_rim_floor = FT(0.2)  # Far below ice peak
         H_psd = FT(3000)           # PSD broadening scale height [m]
