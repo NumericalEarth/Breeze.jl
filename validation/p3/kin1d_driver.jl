@@ -326,14 +326,13 @@ function run_kin1d(; sounding_path, levels_path, FT=Float64, verbose=true, use_t
     # collection is not used in the current selective tabulation).
     riming_psd = FT(5)
     # Nucleation tuning to approximate Fortran P3's total nucleation:
-    # - nucleation_coefficient: 3× Cooper (1986) prefactor to account for missing
-    #   contact-freezing and condensation-freezing modes (0.005 → 0.015)
-    # - nucleation_maximum_concentration: raised from 100e3 to 5e6 /m³ so that
-    #   Cooper formula can reach its correct values at cold upper levels (T < -35°C).
-    #   Cooper alone gives ~3M/m³ at T=-44°C; default cap of 100K/m³ was too restrictive.
-    #   Fortran P3 shows ni > 1M/m³ at T < -40°C from deposition + condensation-freezing.
+    # nucleation_coefficient: 3× Cooper (1986) prefactor to account for missing
+    # contact-freezing and condensation-freezing modes (0.005 → 0.015).
+    # NOTE: nucleation_maximum_concentration is kept at the default 100e3 /m³.
+    # Raising it (e.g. to 5e6) causes ni explosions at T < -40°C (millions of
+    # tiny immobile particles accumulate at cold levels), which actually HURTS
+    # the validation by reducing mean particle size and fall speed.
     nuc_coeff = FT(0.015)
-    nuc_max = FT(5e6)
     p3 = PredictedParticlePropertiesMicrophysics(
         FT(1000),      # water_density
         FT(1e-14),     # minimum_mass_mixing_ratio
@@ -342,8 +341,7 @@ function run_kin1d(; sounding_path, levels_path, FT=Float64, verbose=true, use_t
         RainProperties(FT),
         cloud,
         ProcessRateParameters(FT; riming_psd_correction=riming_psd,
-                                  nucleation_coefficient=nuc_coeff,
-                                  nucleation_maximum_concentration=nuc_max),
+                                  nucleation_coefficient=nuc_coeff),
         nothing        # precipitation_boundary_condition
     )
 
