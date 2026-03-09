@@ -292,7 +292,7 @@ end
 ##### Main driver
 #####
 
-function run_kin1d(; sounding_path, levels_path, FT=Float64, verbose=true, use_tables=false)
+function run_kin1d(; sounding_path, levels_path, FT=Float64, verbose=true, use_tables=false, use_mu0=false)
 
     nk = 41
     dt = FT(10)
@@ -327,24 +327,22 @@ function run_kin1d(; sounding_path, levels_path, FT=Float64, verbose=true, use_t
 
     if use_tables
         verbose && println("Tabulating P3 lookup tables...")
-        # EXPERIMENTAL: Selective tabulation of fall speeds only.
-        #
-        # Full tabulation (tabulate(p3, CPU())) replaces ALL integrals with
-        # PSD-integrated lookup tables. However, the P3 closure's μ=6 PSD
-        # shape for small particles (log_m < -10) gives systematically
-        # smaller per-particle integrals:
-        #   - Collection kernel: 3-10% of analytical (30-100× weaker riming)
-        #   - Ventilation: 35-50% of analytical (2-3× weaker deposition)
-        #   - Fall speed: 5-16% of analytical (6-20× slower sedimentation)
-        # This is physically correct for the narrow μ=6 PSD, but breaks the
-        # growth→sedimentation→melting cycle that balances the ice budget.
-        # Future improvement: use μ=0 exponential PSD for tables, or
-        # modify the P3 closure to give broader distributions at small masses.
-        #
-        # Currently: only fall speeds are tabulated. Deposition and collection
-        # use the calibrated analytical path with empirical PSD corrections.
-        p3 = tabulate(p3, :ice_fall_speed, CPU())
-        verbose && println("  Done.")
+        if use_mu0
+            # Selective fall speed tabulation with μ=0 (exponential PSD).
+            # Full tabulation gives internally consistent but very different
+            # process balance from the analytical path (collection kernel is
+            # ~28× weaker at typical ice masses). Selective fall speed + mu=0
+            # gives ~3.5× larger fall speeds at small masses compared to
+            # P3Closure mu=6 tables, while keeping the tuned analytical path
+            # for deposition and collection.
+            p3 = tabulate(p3, :ice_fall_speed, CPU(); shape_parameter_override=0.0)
+            verbose && println("  Done (fall speed μ=0).")
+        else
+            # Selective tabulation of fall speeds only (P3Closure μ-λ).
+            # Deposition and collection use the analytical path with PSD corrections.
+            p3 = tabulate(p3, :ice_fall_speed, CPU())
+            verbose && println("  Done (fall speed P3Closure).")
+        end
     end
 
     ## Load sounding and levels
@@ -480,8 +478,8 @@ function run_kin1d(; sounding_path, levels_path, FT=Float64, verbose=true, use_t
         Lf = FT(3.34e5)
 
         # PSD correction factors for mean-mass approximation.
-        # With selective tabulation (fall speeds only), deposition and
-        # collection use the analytical path. Same corrections for both.
+        # Deposition and collection always use the analytical path,
+        # so these corrections apply for all modes.
         alpha_dep_peak = FT(1.0)   # At/above ice peak
         alpha_dep_floor = FT(0.3)  # Far below ice peak
         alpha_rim_peak = FT(0.5)   # At/above ice peak
@@ -583,9 +581,7 @@ function run_kin1d(; sounding_path, levels_path, FT=Float64, verbose=true, use_t
             raw_melting = (rates.partial_melting + rates.complete_melting) * dt
             # PSD melting enhancement: mean-mass UNDERESTIMATES PSD-integrated
             # melting because small particles melt faster per unit mass (rate
-            # ∝ D^{-1.5}). Enhancement increases with distance below ice peak
-            # where PSD is broader. Same correction for both table and
-            # analytical paths since melting uses analytical ventilation.
+            # ∝ D^{-1.5}). Same for all modes since melting uses analytical.
             dz_below_melt = max(0, z_peak - z[k])
             alpha_melt = FT(1) + FT(30) * min(FT(1), dz_below_melt / H_psd)
             total_melting = min(raw_melting * alpha_melt, qi[k])
@@ -879,11 +875,18 @@ function run_kin1d(; sounding_path, levels_path, FT=Float64, verbose=true, use_t
         rain_vt_psd_factor = FT(1.7)
         # Ice fall speed PSD factor: accounts for PSD-integrated mass flux
         # being faster than scalar sedimentation at a single fall speed.
-        # With table fall speeds (use_tables=true), the PSD integration is
-        # already in the table, but table values at typical masses (log_m=-10)
-        # are 39% of analytical. A factor of 5 gives effective sedimentation
-        # rates comparable to the baseline analytical × 2.
-        ice_vt_psd_factor = ifelse(use_tables, FT(5), FT(2))
+        if use_mu0
+            # mu=0 tables give ~3.5× larger fall speeds at small masses
+            # but only ~1.5× at log_m=-10 (typical ice). Factor of 3
+            # gives effective sedimentation matching P3Closure×5.
+            ice_vt_psd_factor = FT(3)
+        elseif use_tables
+            # P3Closure tables: values are 39% of analytical at log_m=-10.
+            # Factor of 5 gives effective rates comparable to analytical × 2.
+            ice_vt_psd_factor = FT(5)
+        else
+            ice_vt_psd_factor = FT(2)
+        end
         for k in 1:nk
             if qr[k] > 1e-12
                 vt_rain_m[k] = rain_terminal_velocity_mass_weighted(p3, qr[k], nr[k], rho[k]) * rain_vt_psd_factor
@@ -923,7 +926,14 @@ function run_kin1d(; sounding_path, levels_path, FT=Float64, verbose=true, use_t
         ## With table fall speeds, ice falls slower at small masses (log_m < -10)
         ## → use reduced relaxation and let melting control the profile.
         max_qi_idx = argmax(qi)
-        if use_tables
+        if use_mu0
+            # mu=0 fall speed tables: 3.5× faster fall at small masses.
+            # Use same relaxation as P3Closure tables since the dominant
+            # mass range (log_m=-10) has similar effective fall speeds.
+            H_decay = FT(2500)
+            relax_max = FT(0.3)
+            ramp_dist = FT(3500)
+        elseif use_tables
             H_decay = FT(2500)   # Taller e-folding (less aggressive)
             relax_max = FT(0.3)  # Reduced: PSD fall speeds partially handle this
             ramp_dist = FT(3500) # Wider ramp
@@ -1142,9 +1152,10 @@ if !isfile(sounding_path) || !isfile(levels_path)
     error("Missing input files. Run from validation/p3/ with sounding and levels data.")
 end
 
-use_tables = "--tables" in ARGS
-@info "Running kin1d column driver..." use_tables
-output, z, n_outputs, nk = run_kin1d(; sounding_path, levels_path, use_tables)
+use_tables = "--tables" in ARGS || "--tables-mu0" in ARGS
+use_mu0 = "--tables-mu0" in ARGS
+@info "Running kin1d column driver..." use_tables use_mu0
+output, z, n_outputs, nk = run_kin1d(; sounding_path, levels_path, use_tables, use_mu0)
 
 ## Write output in Fortran-compatible format
 output_path = joinpath(dir, "out_breeze_1TT.dat")

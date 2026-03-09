@@ -132,6 +132,39 @@ end
 const ShapeParameterRelation = TwoMomentClosure
 
 """
+    FixedShapeParameter
+
+Fixed shape parameter closure: always returns a constant μ regardless of λ.
+Used for tabulation with exponential PSD (μ=0) to match Fortran Table 1.
+See [`FixedShapeParameter()`](@ref) constructor.
+"""
+struct FixedShapeParameter{FT}
+    μ :: FT
+end
+
+"""
+$(TYPEDSIGNATURES)
+
+Construct a fixed shape parameter closure.
+
+This bypasses the empirical μ-λ relationship and uses a constant μ for all λ values.
+The primary use case is tabulation: the Fortran P3 Table 1 is generated with μ=0
+(exponential PSD), so using `FixedShapeParameter(0)` produces tables that match
+the Fortran reference values.
+
+# Keyword Arguments
+
+- `μ`: Fixed shape parameter value, default 0 (exponential distribution)
+"""
+function FixedShapeParameter(FT::Type{<:AbstractFloat} = Float64; μ = 0)
+    return FixedShapeParameter(FT(μ))
+end
+
+@inline function shape_parameter(closure::FixedShapeParameter, logλ, args...)
+    return closure.μ
+end
+
+"""
     P3Closure
 
 Updated μ-λ closure for P3, including the large-particle diagnostic.

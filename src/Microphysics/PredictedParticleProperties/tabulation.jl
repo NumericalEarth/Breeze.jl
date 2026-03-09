@@ -50,6 +50,8 @@ struct P3IntegralEvaluator{I<:AbstractP3Integral, N, W, FT}
     pure_ice_density :: FT
     "Unrimed aggregate effective density factor"
     unrimed_density_factor :: FT
+    "Fixed shape parameter override (NaN = use P3Closure, 0 = exponential PSD)"
+    shape_parameter_override :: FT
 end
 
 """
@@ -64,12 +66,14 @@ repeated evaluation during tabulation.
 - `number_of_quadrature_points`: Number of quadrature points (default 64)
 - `pure_ice_density`: Pure ice density [kg/m³] (default 917)
 - `unrimed_density_factor`: Effective density factor for unrimed aggregates (default 0.1)
+- `shape_parameter_override`: Fixed μ for PSD (default NaN = use P3Closure; 0 = exponential)
 """
 function P3IntegralEvaluator(integral::AbstractP3Integral,
                               FT::Type{<:AbstractFloat} = Float64;
                               number_of_quadrature_points::Int = 64,
                               pure_ice_density = FT(917),
-                              unrimed_density_factor = FT(0.1))
+                              unrimed_density_factor = FT(0.1),
+                              shape_parameter_override = FT(NaN))
 
     nodes, weights = chebyshev_gauss_nodes_weights(FT, number_of_quadrature_points)
 
@@ -78,7 +82,8 @@ function P3IntegralEvaluator(integral::AbstractP3Integral,
         nodes,
         weights,
         FT(pure_ice_density),
-        FT(unrimed_density_factor)
+        FT(unrimed_density_factor),
+        FT(shape_parameter_override)
     )
 end
 
@@ -96,14 +101,13 @@ Evaluate the P3 integral at the given parameter point.
 The evaluated integral value.
 """
 @inline function (e::P3IntegralEvaluator)(log_mean_mass, rime_fraction, liquid_fraction;
-                                           rime_density = typeof(log_mean_mass)(400),
-                                           shape_parameter = zero(typeof(log_mean_mass)))
+                                           rime_density = typeof(log_mean_mass)(400))
     FT = typeof(log_mean_mass)
     mean_particle_mass = FT(10)^log_mean_mass
 
     # Build the ice size distribution state from physical quantities
     state = state_from_mean_particle_mass(e, mean_particle_mass, rime_fraction, liquid_fraction;
-                                          rime_density, shape_parameter)
+                                          rime_density)
 
     # Evaluate integral using pre-computed quadrature
     raw = evaluate_quadrature(e.integral, state, e.nodes, e.weights)
@@ -130,18 +134,28 @@ the raw integral ∫ f(D) N'(D) dD gives per-particle values.
                                                 rime_fraction,
                                                 liquid_fraction;
                                                 rime_density = typeof(mean_particle_mass)(400),
-                                                shape_parameter = zero(typeof(mean_particle_mass)),
                                                 air_density = typeof(mean_particle_mass)(1.225))
     FT = typeof(mean_particle_mass)
 
     mass = IceMassPowerLaw(FT)
-    closure = P3Closure(FT)
+
+    # Use fixed shape parameter if override is set (non-NaN), else P3Closure.
+    # This runs during table construction (CPU-side), not in GPU kernels.
+    # The union type from the if/else is intentional — the performance cost is
+    # negligible at construction time and avoids adding a type parameter to the
+    # evaluator struct (which would complicate the tabulation API).
+    μ_override = e.shape_parameter_override
+    if isnan(μ_override)
+        closure = P3Closure(FT)
+    else
+        closure = FixedShapeParameter(μ_override)
+    end
 
     # Convention: N_ice = 1 particle. L_ice = mean_particle_mass.
     N_ice = one(FT)
     L_ice = max(mean_particle_mass, FT(1e-20))
 
-    # Solve for (N₀, λ, μ) using the two-moment closure
+    # Solve for (N₀, λ, μ) using the selected closure
     params = distribution_parameters(L_ice, N_ice, rime_fraction, rime_density;
                                       mass, closure)
 
@@ -436,6 +450,7 @@ struct TabulationParameters{FT}
     minimum_log_mean_particle_mass :: FT
     maximum_log_mean_particle_mass :: FT
     number_of_quadrature_points :: Int
+    shape_parameter_override :: FT
 end
 
 """
@@ -460,6 +475,7 @@ than computed via quadrature, which is much faster.
 - `minimum_log_mean_particle_mass`: Minimum log₁₀(mass) [log kg], default -15
 - `maximum_log_mean_particle_mass`: Maximum log₁₀(mass) [log kg], default -5
 - `number_of_quadrature_points`: Quadrature points for filling table (default 64)
+- `shape_parameter_override`: Fixed μ for PSD (default NaN = use P3Closure; 0 = exponential)
 
 # References
 
@@ -471,14 +487,16 @@ function TabulationParameters(FT::Type{<:AbstractFloat} = Float64;
                                number_of_liquid_fraction_points::Int = 4,
                                minimum_log_mean_particle_mass = FT(-15),
                                maximum_log_mean_particle_mass = FT(-5),
-                               number_of_quadrature_points::Int = 64)
+                               number_of_quadrature_points::Int = 64,
+                               shape_parameter_override = FT(NaN))
     return TabulationParameters(
         number_of_mass_points,
         number_of_rime_fraction_points,
         number_of_liquid_fraction_points,
         FT(minimum_log_mean_particle_mass),
         FT(maximum_log_mean_particle_mass),
-        number_of_quadrature_points
+        number_of_quadrature_points,
+        FT(shape_parameter_override)
     )
 end
 
@@ -522,7 +540,8 @@ function tabulate(integral::AbstractP3Integral, arch=CPU(),
 
     # Create the evaluator function
     evaluator = P3IntegralEvaluator(integral, FT;
-                                     number_of_quadrature_points = params.number_of_quadrature_points)
+                                     number_of_quadrature_points = params.number_of_quadrature_points,
+                                     shape_parameter_override = params.shape_parameter_override)
 
     # Tabulate using TabulatedFunction3D
     return TabulatedFunction3D(evaluator, arch, FT;
