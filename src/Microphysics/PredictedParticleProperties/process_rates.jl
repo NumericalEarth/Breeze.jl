@@ -45,6 +45,106 @@ end
 # Convenience overload for common case
 @inline safe_divide(a, b) = safe_divide(a, b, zero(a))
 
+#####
+##### Table-dispatched helpers for PSD-integrated process rates
+#####
+##### These functions dispatch on whether a table field is a TabulatedFunction3D
+##### (use PSD-integrated lookup) or Any (use mean-mass analytical fallback).
+##### This pattern matches the existing _tabulated_mass_weighted_fall_speed dispatch.
+#####
+
+"""
+    _deposition_ventilation(vent, vent_e, m_mean, Fᶠ, ρᶠ, prp)
+
+Compute per-particle ventilation integral C(D) × f_v(D) for deposition.
+Dispatches on table type for PSD-integrated or mean-mass path.
+"""
+@inline function _deposition_ventilation(vent::TabulatedFunction3D,
+                                          vent_e::TabulatedFunction3D,
+                                          m_mean, Fᶠ, ρᶠ, prp)
+    FT = typeof(m_mean)
+    log_m = log10(max(m_mean, FT(1e-20)))
+    Fˡ = zero(FT)
+    return vent(log_m, Fᶠ, Fˡ) + vent_e(log_m, Fᶠ, Fˡ)
+end
+
+@inline function _deposition_ventilation(::Any, ::Any, m_mean, Fᶠ, ρᶠ, prp)
+    FT = typeof(m_mean)
+    ρ_eff_unrimed = prp.ice_effective_density_unrimed
+    ρ_eff = (1 - Fᶠ) * ρ_eff_unrimed + Fᶠ * ρᶠ
+    D_mean = cbrt(6 * m_mean / (FT(π) * ρ_eff))
+    D_threshold = prp.ice_diameter_threshold
+    C = ifelse(D_mean < D_threshold, D_mean / 2, FT(0.48) * D_mean)
+    ν = FT(1.5e-5)
+    V = prp.ice_fall_speed_coefficient_unrimed * D_mean^prp.ice_fall_speed_exponent_unrimed
+    Re_term = sqrt(V * D_mean / ν)
+    f_v = FT(0.65) + FT(0.44) * Re_term
+    return C * f_v
+end
+
+"""
+    _collection_kernel_per_particle(coll, m_mean, Fᶠ, ρᶠ, prp)
+
+Compute per-particle collection kernel ⟨A × V⟩ for riming.
+Table path: returns PSD-integrated ∫ V(D) A(D) N'(D) dD (per particle).
+Analytical path: returns A_mean × V_mean × psd_correction.
+"""
+@inline function _collection_kernel_per_particle(coll::TabulatedFunction3D,
+                                                  m_mean, Fᶠ, ρᶠ, prp)
+    FT = typeof(m_mean)
+    log_m = log10(max(m_mean, FT(1e-20)))
+    return coll(log_m, Fᶠ, zero(FT))
+end
+
+@inline function _collection_kernel_per_particle(::Any, m_mean, Fᶠ, ρᶠ, prp)
+    FT = typeof(m_mean)
+    ρ_eff_unrimed = prp.ice_effective_density_unrimed
+    ρ_eff = (1 - Fᶠ) * ρ_eff_unrimed + Fᶠ * ρᶠ
+    D_mean = cbrt(6 * m_mean / (FT(π) * ρ_eff))
+    D_mean = clamp(D_mean, prp.ice_diameter_min, prp.ice_diameter_max)
+    a_V = (1 - Fᶠ) * prp.ice_fall_speed_coefficient_unrimed + Fᶠ * prp.ice_fall_speed_coefficient_rimed
+    b_V = (1 - Fᶠ) * prp.ice_fall_speed_exponent_unrimed + Fᶠ * prp.ice_fall_speed_exponent_rimed
+    V_mean = a_V * D_mean^b_V
+    A_agg = prp.ice_projected_area_coefficient * D_mean^prp.ice_projected_area_exponent
+    A_sphere = FT(π) / 4 * D_mean^2
+    A_mean = (1 - Fᶠ) * A_agg + Fᶠ * A_sphere
+    psd_correction = prp.riming_psd_correction
+    return A_mean * V_mean * psd_correction
+end
+
+"""
+    _aggregation_kernel(coll, m_mean, Fᶠ, ρᶠ, prp)
+
+Compute aggregation kernel for self-collection.
+Table path: uses PSD-integrated kernel from table.
+Analytical path: A_mean × ΔV at mean diameter.
+"""
+@inline function _aggregation_kernel(coll::TabulatedFunction3D,
+                                      m_mean, Fᶠ, ρᶠ, prp)
+    FT = typeof(m_mean)
+    log_m = log10(max(m_mean, FT(1e-20)))
+    # Table stores ∫ E_agg(0.1) × V × A × N'² dD.
+    # Divide by E_agg so the caller can apply temperature-dependent Eᵢᵢ.
+    # TODO: remove E_agg from AggregationNumber integrand for cleaner separation
+    raw = coll(log_m, Fᶠ, zero(FT))
+    return raw / FT(0.1)
+end
+
+@inline function _aggregation_kernel(::Any, m_mean, Fᶠ, ρᶠ, prp)
+    FT = typeof(m_mean)
+    ρ_eff_unrimed = prp.ice_effective_density_unrimed
+    ρ_eff = (1 - Fᶠ) * ρ_eff_unrimed + Fᶠ * ρᶠ
+    D_mean = cbrt(6 * m_mean / (FT(π) * ρ_eff))
+    a_V = (1 - Fᶠ) * prp.ice_fall_speed_coefficient_unrimed + Fᶠ * prp.ice_fall_speed_coefficient_rimed
+    b_V = (1 - Fᶠ) * prp.ice_fall_speed_exponent_unrimed + Fᶠ * prp.ice_fall_speed_exponent_rimed
+    V_mean = a_V * D_mean^b_V
+    A_agg = prp.ice_projected_area_coefficient * D_mean^prp.ice_projected_area_exponent
+    A_sphere = FT(π) / 4 * D_mean^2
+    A_mean = (1 - Fᶠ) * A_agg + Fᶠ * A_sphere
+    ΔV = FT(0.5) * V_mean
+    return A_mean * ΔV
+end
+
 """
     air_transport_properties(T, P)
 
@@ -460,12 +560,12 @@ The bulk rate integrates over the size distribution:
     nⁱ_eff = clamp_positive(nⁱ)
 
     # Thermodynamic constants
-    # Note: The Fortran P3 uses T,P-dependent transport via
-    # air_transport_properties(T, P). These constants are near-surface
-    # values. With PSD lookup tables (Phase 5), use T,P-dependent values.
     R_v = FT(461.5)           # Gas constant for water vapor [J/kg/K]
     R_d = FT(287.0)           # Gas constant for dry air [J/kg/K]
     L_s = FT(2.835e6)         # Latent heat of sublimation [J/kg]
+    # TODO (Phase 5F): Switch to T,P-dependent transport properties via
+    # air_transport_properties(T, P). Requires retuning PSD correction factors
+    # since the current values were calibrated with these hardcoded constants.
     K_a = FT(2.5e-2)          # Thermal conductivity of air [W/m/K]
     D_v = FT(2.5e-5)          # Diffusivity of water vapor [m²/s]
 
@@ -481,24 +581,11 @@ The bulk rate integrates over the size distribution:
     # Mean particle mass
     m_mean = safe_divide(qⁱ_eff, nⁱ_eff, FT(1e-12))
 
-    # Effective density depends on riming
-    ρⁱ = prp.pure_ice_density
-    ρ_eff_unrimed = prp.ice_effective_density_unrimed
-    ρ_eff = (1 - Fᶠ) * ρ_eff_unrimed + Fᶠ * ρᶠ
-
-    # Mean diameter
-    D_mean = cbrt(6 * m_mean / (FT(π) * ρ_eff))
-
-    # Capacitance (regime-dependent)
-    D_threshold = prp.ice_diameter_threshold
-    C = ifelse(D_mean < D_threshold, D_mean / 2, FT(0.48) * D_mean)
-
-    # Ventilation factor: f_v = a + b × Re^(1/2) × Sc^(1/3)
-    # Simplified: f_v ≈ 0.65 + 0.44 × √(V × D / ν)
-    ν = FT(1.5e-5)  # kinematic viscosity [m²/s]
-    V = prp.ice_fall_speed_coefficient_unrimed * D_mean^prp.ice_fall_speed_exponent_unrimed
-    Re_term = sqrt(V * D_mean / ν)
-    f_v = FT(0.65) + FT(0.44) * Re_term
+    # Ventilation integral C(D) × f_v(D): dispatches to PSD-integrated
+    # table or mean-mass analytical path depending on p3.ice.deposition type.
+    C_fv = _deposition_ventilation(p3.ice.deposition.ventilation,
+                                    p3.ice.deposition.ventilation_enhanced,
+                                    m_mean, Fᶠ, ρᶠ, prp)
 
     # Denominator: thermodynamic resistance terms (Mason 1971)
     # A = L_s/(K_a × T) × (L_s/(R_v × T) - 1)
@@ -508,11 +595,9 @@ The bulk rate integrates over the size distribution:
     thermodynamic_factor = A + B
 
     # Deposition rate per particle (Eq. 30 from MM15a)
-    dm_dt = FT(4π) * C * f_v * (S_i - 1) / thermodynamic_factor
+    dm_dt = FT(4π) * C_fv * (S_i - 1) / thermodynamic_factor
 
-    # No PSD correction for deposition: the mean-mass approximation is
-    # adequate here because capacitance C(D) is nearly linear in D.
-    # PSD-integrated rates use lookup tables (Phase 5).
+    # Scale by number concentration
     dep_rate = nⁱ_eff * dm_dt
 
     # Limit sublimation to available ice
@@ -535,7 +620,7 @@ end
 #####
 
 """
-    ice_melting_rate(p3, qⁱ, nⁱ, T, qᵛ, qᵛ⁺, Fᶠ, ρᶠ, ρ)
+    ice_melting_rate(p3, qⁱ, nⁱ, T, P, qᵛ, qᵛ⁺, Fᶠ, ρᶠ, ρ)
 
 Compute ice melting rate using the heat balance equation from
 Morrison & Milbrandt (2015a) Eq. 44.
@@ -561,6 +646,7 @@ where:
 - `qⁱ`: Ice mass fraction [kg/kg]
 - `nⁱ`: Ice number concentration [1/kg]
 - `T`: Temperature [K]
+- `P`: Pressure [Pa]
 - `qᵛ`: Vapor mass fraction [kg/kg]
 - `qᵛ⁺`: Saturation vapor mass fraction over liquid [kg/kg]
 - `Fᶠ`: Rime fraction [-]
@@ -569,7 +655,7 @@ where:
 # Returns
 - Rate of ice → rain conversion [kg/kg/s]
 """
-@inline function ice_melting_rate(p3, qⁱ, nⁱ, T, qᵛ, qᵛ⁺, Fᶠ, ρᶠ, ρ)
+@inline function ice_melting_rate(p3, qⁱ, nⁱ, T, P, qᵛ, qᵛ⁺, Fᶠ, ρᶠ, ρ)
     FT = typeof(qⁱ)
     prp = p3.process_rates
 
@@ -585,9 +671,10 @@ where:
     # Thermodynamic constants
     L_f = FT(3.34e5)          # Latent heat of fusion [J/kg]
     L_v = FT(2.5e6)           # Latent heat of vaporization [J/kg]
+    R_v = FT(461.5)           # Gas constant for water vapor [J/kg/K]
+    # TODO (Phase 5F): Switch to T,P-dependent transport properties
     K_a = FT(2.5e-2)          # Thermal conductivity of air [W/m/K]
     D_v = FT(2.5e-5)          # Diffusivity of water vapor [m²/s]
-    R_v = FT(461.5)           # Gas constant for water vapor [J/kg/K]
 
     # Vapor density terms
     # At T₀, ρ_vs corresponds to saturation at melting point
@@ -600,23 +687,11 @@ where:
     # Mean particle properties
     m_mean = safe_divide(qⁱ_eff, nⁱ_eff, FT(1e-12))
 
-    # Effective density
-    ρⁱ = prp.pure_ice_density
-    ρ_eff_unrimed = prp.ice_effective_density_unrimed
-    ρ_eff = (1 - Fᶠ) * ρ_eff_unrimed + Fᶠ * ρᶠ
-
-    # Mean diameter
-    D_mean = cbrt(6 * m_mean / (FT(π) * ρ_eff))
-
-    # Capacitance
-    D_threshold = prp.ice_diameter_threshold
-    C = ifelse(D_mean < D_threshold, D_mean / 2, FT(0.48) * D_mean)
-
-    # Ventilation factor
-    ν = FT(1.5e-5)
-    V = prp.ice_fall_speed_coefficient_unrimed * D_mean^prp.ice_fall_speed_exponent_unrimed
-    Re_term = sqrt(V * D_mean / ν)
-    f_v = FT(0.65) + FT(0.44) * Re_term
+    # Ventilation integral C(D) × f_v(D): dispatches to PSD-integrated
+    # table or mean-mass path depending on p3.ice.deposition type.
+    C_fv = _deposition_ventilation(p3.ice.deposition.ventilation,
+                                    p3.ice.deposition.ventilation_enhanced,
+                                    m_mean, Fᶠ, ρᶠ, prp)
 
     # Heat flux terms (Eq. 44 from MM15a)
     # Sensible heat: K_a × (T - T₀)
@@ -630,7 +705,7 @@ where:
     Q_total = Q_sensible + Q_latent
 
     # Melting rate per particle (negative dm/dt → positive melt rate)
-    dm_dt_melt = FT(4π) * C * f_v * Q_total / L_f
+    dm_dt_melt = FT(4π) * C_fv * Q_total / L_f
 
     # Clamp to positive (only melting, not refreezing here)
     dm_dt_melt = clamp_positive(dm_dt_melt)
@@ -650,7 +725,7 @@ where:
 end
 
 """
-    ice_melting_rates(p3, qⁱ, nⁱ, qʷⁱ, T, qᵛ, qᵛ⁺, Fᶠ, ρᶠ, ρ)
+    ice_melting_rates(p3, qⁱ, nⁱ, qʷⁱ, T, P, qᵛ, qᵛ⁺, Fᶠ, ρᶠ, ρ)
 
 Compute partitioned ice melting rates following Milbrandt et al. (2025).
 
@@ -667,6 +742,7 @@ particle reaches this capacity, additional meltwater sheds to rain.
 - `nⁱ`: Ice number concentration [1/kg]
 - `qʷⁱ`: Liquid water on ice [kg/kg]
 - `T`: Temperature [K]
+- `P`: Pressure [Pa]
 - `qᵛ`: Vapor mass fraction [kg/kg]
 - `qᵛ⁺`: Saturation vapor mass fraction over liquid [kg/kg]
 - `Fᶠ`: Rime fraction [-]
@@ -675,12 +751,12 @@ particle reaches this capacity, additional meltwater sheds to rain.
 # Returns
 - NamedTuple with `partial_melting` and `complete_melting` rates [kg/kg/s]
 """
-@inline function ice_melting_rates(p3, qⁱ, nⁱ, qʷⁱ, T, qᵛ, qᵛ⁺, Fᶠ, ρᶠ, ρ)
+@inline function ice_melting_rates(p3, qⁱ, nⁱ, qʷⁱ, T, P, qᵛ, qᵛ⁺, Fᶠ, ρᶠ, ρ)
     FT = typeof(qⁱ)
     prp = p3.process_rates
 
     # Get total melting rate
-    total_melt = ice_melting_rate(p3, qⁱ, nⁱ, T, qᵛ, qᵛ⁺, Fᶠ, ρᶠ, ρ)
+    total_melt = ice_melting_rate(p3, qⁱ, nⁱ, T, P, qᵛ, qᵛ⁺, Fᶠ, ρᶠ, ρ)
 
     # Maximum liquid fraction capacity (from Milbrandt et al. 2025)
     # Spongy ice can hold about 14% liquid by mass
@@ -1132,28 +1208,13 @@ See [Morrison and Milbrandt (2015a)](@cite Morrison2015parameterization).
     # Mean particle properties
     m_mean = safe_divide(qⁱ_eff, nⁱ_eff, FT(1e-12))
 
-    # Effective density
-    ρⁱ = prp.pure_ice_density
-    ρ_eff_unrimed = prp.ice_effective_density_unrimed
-    ρ_eff = (1 - Fᶠ) * ρ_eff_unrimed + Fᶠ * ρᶠ
+    # Self-collection kernel: dispatches to PSD-integrated table or
+    # mean-mass path. Returns E-free kernel (A × ΔV per particle pair).
+    AV_kernel = _aggregation_kernel(p3.ice.collection.aggregation,
+                                     m_mean, Fᶠ, ρᶠ, prp)
 
-    # Mean diameter
-    D_mean = cbrt(6 * m_mean / (FT(π) * ρ_eff))
-
-    # Mean terminal velocity (regime-dependent, from prp)
-    a_V = (1 - Fᶠ) * prp.ice_fall_speed_coefficient_unrimed + Fᶠ * prp.ice_fall_speed_coefficient_rimed
-    b_V = (1 - Fᶠ) * prp.ice_fall_speed_exponent_unrimed + Fᶠ * prp.ice_fall_speed_exponent_rimed
-    V_mean = a_V * D_mean^b_V
-
-    # Mean projected area (regime-dependent)
-    A_aggregate = prp.ice_projected_area_coefficient * D_mean^prp.ice_projected_area_exponent
-    A_sphere = FT(π) / 4 * D_mean^2
-    A_mean = (1 - Fᶠ) * A_aggregate + Fᶠ * A_sphere
-
-    # Self-collection kernel approximation:
-    # K ≈ E_ii × A_mean × ΔV, where ΔV ≈ 0.5 × V_mean for self-collection
-    ΔV = FT(0.5) * V_mean
-    K_mean = Eᵢᵢ * A_mean * ΔV
+    # Collection kernel with temperature-dependent sticking efficiency
+    K_mean = Eᵢᵢ * AV_kernel
 
     # Number tendency: dn/dt = -0.5 × K × n²
     rate = -FT(0.5) * K_mean * nⁱ_eff^2
@@ -1215,35 +1276,22 @@ factor for the exponential PSD.
     below_freezing = T < T₀
     active = below_freezing & (qᶜˡ_eff > q_threshold) & (qⁱ_eff > q_threshold) & (nⁱ_eff > n_threshold)
 
-    # Mean particle mass and effective density
+    # Mean particle mass
     m_mean = safe_divide(qⁱ_eff, nⁱ_eff, FT(1e-12))
-    ρ_eff_unrimed = prp.ice_effective_density_unrimed
-    ρ_eff = (1 - Fᶠ) * ρ_eff_unrimed + Fᶠ * ρᶠ
 
-    # Mean diameter (clamped to physical range)
-    D_mean = cbrt(6 * m_mean / (FT(π) * ρ_eff))
-    D_mean = clamp(D_mean, prp.ice_diameter_min, prp.ice_diameter_max)
+    # Collection kernel ⟨A×V⟩: dispatches to PSD-integrated table or
+    # mean-mass path with psd_correction. The RainCollectionNumber integral
+    # computes ∫ V(D) A(D) N'(D) dD with E=1, giving the geometric kernel.
+    AV_per_particle = _collection_kernel_per_particle(p3.ice.collection.rain_collection,
+                                                       m_mean, Fᶠ, ρᶠ, prp)
 
-    # Mean terminal velocity (regime-dependent, from prp)
-    a_V = (1 - Fᶠ) * prp.ice_fall_speed_coefficient_unrimed + Fᶠ * prp.ice_fall_speed_coefficient_rimed
-    b_V = (1 - Fᶠ) * prp.ice_fall_speed_exponent_unrimed + Fᶠ * prp.ice_fall_speed_exponent_rimed
-    V_mean = a_V * D_mean^b_V
-
-    # Projected area (regime-dependent: aggregate vs sphere)
-    A_agg = prp.ice_projected_area_coefficient * D_mean^prp.ice_projected_area_exponent
-    A_sphere = FT(π) / 4 * D_mean^2
-    A_mean = (1 - Fᶠ) * A_agg + Fᶠ * A_sphere
-
-    # Air density correction: Fortran P3 lookup tables computed at reference
-    # conditions (ρ₀ ≈ 0.826 kg/m³) then scaled by (ρ₀/ρ)^0.54.
+    # Air density correction: tables computed at reference conditions
+    # (ρ₀ ≈ 0.826 kg/m³), then scaled by (ρ₀/ρ)^0.54.
     ρ₀ = prp.reference_air_density
     rhofaci = (ρ₀ / max(ρ, FT(0.01)))^FT(0.54)
 
-    # Collection rate = E × qc × ρ × ni × rhofaci × <A×V> × psd_correction
-    # PSD correction accounts for the PSD-integrated collection kernel
-    # being larger than the mean-mass value.
-    psd_correction = prp.riming_psd_correction
-    rate = Eᶜⁱ * qᶜˡ_eff * nⁱ_eff * ρ * rhofaci * A_mean * V_mean * psd_correction
+    # Collection rate = E × qc × ni × ρ × rhofaci × ⟨A×V⟩
+    rate = Eᶜⁱ * qᶜˡ_eff * nⁱ_eff * ρ * rhofaci * AV_per_particle
 
     return ifelse(active, rate, zero(FT))
 end
@@ -1307,32 +1355,20 @@ collection equation with collision kernel integrated over the ice PSD.
     ice_dominant = qⁱ_eff >= qʳ_eff
     active = below_freezing & ice_dominant & (qʳ_eff > q_threshold) & (qⁱ_eff > q_threshold) & (nⁱ_eff > n_threshold)
 
-    # Mean particle mass and effective density
+    # Mean particle mass
     m_mean = safe_divide(qⁱ_eff, nⁱ_eff, FT(1e-12))
-    ρ_eff_unrimed = prp.ice_effective_density_unrimed
-    ρ_eff = (1 - Fᶠ) * ρ_eff_unrimed + Fᶠ * ρᶠ
 
-    # Mean diameter (clamped)
-    D_mean = cbrt(6 * m_mean / (FT(π) * ρ_eff))
-    D_mean = clamp(D_mean, prp.ice_diameter_min, prp.ice_diameter_max)
-
-    # Mean terminal velocity (from prp, consistent with aggregation and cloud riming)
-    a_V = (1 - Fᶠ) * prp.ice_fall_speed_coefficient_unrimed + Fᶠ * prp.ice_fall_speed_coefficient_rimed
-    b_V = (1 - Fᶠ) * prp.ice_fall_speed_exponent_unrimed + Fᶠ * prp.ice_fall_speed_exponent_rimed
-    V_mean = a_V * D_mean^b_V
-
-    # Projected area
-    A_agg = prp.ice_projected_area_coefficient * D_mean^prp.ice_projected_area_exponent
-    A_sphere = FT(π) / 4 * D_mean^2
-    A_mean = (1 - Fᶠ) * A_agg + Fᶠ * A_sphere
+    # Collection kernel ⟨A×V⟩: dispatches to PSD-integrated table or
+    # mean-mass path with psd_correction (same kernel as cloud riming).
+    AV_per_particle = _collection_kernel_per_particle(p3.ice.collection.rain_collection,
+                                                       m_mean, Fᶠ, ρᶠ, prp)
 
     # Air density correction (same as cloud riming)
     ρ₀ = prp.reference_air_density
     rhofaci = (ρ₀ / max(ρ, FT(0.01)))^FT(0.54)
 
-    # Collection rate = E × qr × ρ × ni × rhofaci × <A×V> × psd_correction
-    psd_correction = prp.riming_psd_correction
-    rate = Eʳⁱ * qʳ_eff * nⁱ_eff * ρ * rhofaci * A_mean * V_mean * psd_correction
+    # Collection rate = E × qr × ni × ρ × rhofaci × ⟨A×V⟩
+    rate = Eʳⁱ * qʳ_eff * nⁱ_eff * ρ * rhofaci * AV_per_particle
 
     return ifelse(active, rate, zero(FT))
 end
@@ -1693,7 +1729,7 @@ suitable for use in GPU kernels where grid indexing is handled externally.
     dep = ifelse(qⁱ > FT(1e-20), dep, zero(FT))
 
     # Partitioned melting: partial stays on ice, complete goes to rain
-    melt_rates = ice_melting_rates(p3, qⁱ, nⁱ, qʷⁱ, T, qᵛ, qᵛ⁺ˡ, Fᶠ, ρᶠ, ρ)
+    melt_rates = ice_melting_rates(p3, qⁱ, nⁱ, qʷⁱ, T, P, qᵛ, qᵛ⁺ˡ, Fᶠ, ρᶠ, ρ)
     partial_melt = melt_rates.partial_melting
     complete_melt = melt_rates.complete_melting
     # Only complete melting removes ice particles; partial melting keeps particles as ice

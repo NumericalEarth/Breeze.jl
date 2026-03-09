@@ -229,13 +229,18 @@ include("p3_scheme.jl")
 
 include("size_distribution.jl")
 include("quadrature.jl")
-include("tabulation.jl")
 
 #####
 ##### Lambda solver (depends on mass-diameter relationship)
 #####
 
 include("lambda_solver.jl")
+
+#####
+##### Tabulation (depends on quadrature and lambda solver)
+#####
+
+include("tabulation.jl")
 
 #####
 ##### Process rates (Phase 1: rain, deposition, melting)

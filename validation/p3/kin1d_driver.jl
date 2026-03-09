@@ -32,6 +32,7 @@ using Breeze.Microphysics.PredictedParticleProperties:
     RainProperties,
     ProcessRateParameters,
     IceFallSpeed,
+    tabulate,
     compute_p3_process_rates,
     tendency_ρqᶜˡ, tendency_ρqʳ, tendency_ρnʳ,
     tendency_ρqⁱ, tendency_ρnⁱ, tendency_ρqᶠ,
@@ -41,6 +42,8 @@ using Breeze.Microphysics.PredictedParticleProperties:
     rain_terminal_velocity_number_weighted,
     ice_terminal_velocity_mass_weighted,
     ice_terminal_velocity_number_weighted
+
+using Oceananigans.Architectures: CPU
 
 using Printf
 
@@ -289,7 +292,7 @@ end
 ##### Main driver
 #####
 
-function run_kin1d(; sounding_path, levels_path, FT=Float64, verbose=true)
+function run_kin1d(; sounding_path, levels_path, FT=Float64, verbose=true, use_tables=false)
 
     nk = 41
     dt = FT(10)
@@ -307,6 +310,10 @@ function run_kin1d(; sounding_path, levels_path, FT=Float64, verbose=true)
     # the Fortran's activated Nc. This slows autoconversion (∝ Nc^(-1.79)),
     # bringing rain production rates in line with the Fortran reference.
     cloud = CloudDropletProperties(FT; number_concentration=250e6)
+    # Riming PSD correction: analytical collection uses 5.0 to compensate
+    # for mean-mass underestimate. Always active (the table dispatch for
+    # collection is not used in the current selective tabulation).
+    riming_psd = FT(5)
     p3 = PredictedParticlePropertiesMicrophysics(
         FT(1000),      # water_density
         FT(1e-14),     # minimum_mass_mixing_ratio
@@ -314,9 +321,31 @@ function run_kin1d(; sounding_path, levels_path, FT=Float64, verbose=true)
         IceProperties(FT),
         RainProperties(FT),
         cloud,
-        ProcessRateParameters(FT; riming_psd_correction=5.0),
+        ProcessRateParameters(FT; riming_psd_correction=riming_psd),
         nothing        # precipitation_boundary_condition
     )
+
+    if use_tables
+        verbose && println("Tabulating P3 lookup tables...")
+        # EXPERIMENTAL: Selective tabulation of fall speeds only.
+        #
+        # Full tabulation (tabulate(p3, CPU())) replaces ALL integrals with
+        # PSD-integrated lookup tables. However, the P3 closure's μ=6 PSD
+        # shape for small particles (log_m < -10) gives systematically
+        # smaller per-particle integrals:
+        #   - Collection kernel: 3-10% of analytical (30-100× weaker riming)
+        #   - Ventilation: 35-50% of analytical (2-3× weaker deposition)
+        #   - Fall speed: 5-16% of analytical (6-20× slower sedimentation)
+        # This is physically correct for the narrow μ=6 PSD, but breaks the
+        # growth→sedimentation→melting cycle that balances the ice budget.
+        # Future improvement: use μ=0 exponential PSD for tables, or
+        # modify the P3 closure to give broader distributions at small masses.
+        #
+        # Currently: only fall speeds are tabulated. Deposition and collection
+        # use the calibrated analytical path with empirical PSD corrections.
+        p3 = tabulate(p3, :ice_fall_speed, CPU())
+        verbose && println("  Done.")
+    end
 
     ## Load sounding and levels
     p_snd, z_snd, T_snd, Td_snd = load_sounding(sounding_path)
@@ -450,25 +479,14 @@ function run_kin1d(; sounding_path, levels_path, FT=Float64, verbose=true)
         Ls = FT(2.835e6)
         Lf = FT(3.34e5)
 
-        # PSD correction factors for mean-mass approximation:
-        # The mean-mass approach evaluates f(m_mean) instead of <f(m)>_PSD.
-        # For concave functions of mass (capacitance C∝m^(1/3), cross-section
-        # A∝m^(2/3), fall speed V∝m^(1/6)), Jensen's inequality gives
-        # f(m_mean) > <f(m)>, so the mean-mass approach overestimates rates.
-        # The correction factors account for this PSD integration bias.
-        # PSD correction factors: level-dependent based on PSD broadening.
-        # Near the ice production peak, the PSD is narrow (recently nucleated)
-        # and the mean-mass approach is accurate (alpha ≈ 1). As ice sediments,
-        # the PSD broadens from size-sorting: the mean-mass approach increasingly
-        # overestimates rates. alpha decreases with depth below the peak.
-        # Computed per-level in the microphysics loop below.
-        # At the peak level and above, deposition is full-strength (alpha_dep=1)
-        # to enable WBF (cloud→vapor→ice). Below, rates are reduced.
+        # PSD correction factors for mean-mass approximation.
+        # With selective tabulation (fall speeds only), deposition and
+        # collection use the analytical path. Same corrections for both.
         alpha_dep_peak = FT(1.0)   # At/above ice peak
         alpha_dep_floor = FT(0.3)  # Far below ice peak
         alpha_rim_peak = FT(0.5)   # At/above ice peak
         alpha_rim_floor = FT(0.2)  # Far below ice peak
-        H_psd = FT(3000)          # PSD broadening scale height [m]
+        H_psd = FT(3000)           # PSD broadening scale height [m]
         # Find current ice peak level (for level-dependent alpha)
         max_qi_level = argmax(qi)
         z_peak = z[max_qi_level]
@@ -563,10 +581,14 @@ function run_kin1d(; sounding_path, levels_path, FT=Float64, verbose=true)
             # the total melting. Enhancement factor increases with PSD width
             # (i.e., distance below ice peak).
             raw_melting = (rates.partial_melting + rates.complete_melting) * dt
+            # PSD melting enhancement: mean-mass UNDERESTIMATES PSD-integrated
+            # melting because small particles melt faster per unit mass (rate
+            # ∝ D^{-1.5}). Enhancement increases with distance below ice peak
+            # where PSD is broader. Same correction for both table and
+            # analytical paths since melting uses analytical ventilation.
             dz_below_melt = max(0, z_peak - z[k])
             alpha_melt = FT(1) + FT(30) * min(FT(1), dz_below_melt / H_psd)
-            total_melting = raw_melting * alpha_melt
-            total_melting = min(total_melting, qi[k])
+            total_melting = min(raw_melting * alpha_melt, qi[k])
 
             # Rain — limit sinks to available rain (analogous to cloud limiting)
             # Rain evaporation is handled separately in the driver (below) to
@@ -853,10 +875,15 @@ function run_kin1d(; sounding_path, levels_path, FT=Float64, verbose=true)
         vt_ice_n = zeros(nk)
         vt_ice_z = zeros(nk)
 
-        # PSD correction for rain sedimentation: the PSD tail has large drops
-        # that contribute disproportionately to mass flux. The PSD-integrated
-        # mass-weighted speed is ~1.3-1.5× the mean-mass value for μ_r ≈ 2.
+        # PSD correction for rain sedimentation (rain has no tables yet)
         rain_vt_psd_factor = FT(1.7)
+        # Ice fall speed PSD factor: accounts for PSD-integrated mass flux
+        # being faster than scalar sedimentation at a single fall speed.
+        # With table fall speeds (use_tables=true), the PSD integration is
+        # already in the table, but table values at typical masses (log_m=-10)
+        # are 39% of analytical. A factor of 5 gives effective sedimentation
+        # rates comparable to the baseline analytical × 2.
+        ice_vt_psd_factor = ifelse(use_tables, FT(5), FT(2))
         for k in 1:nk
             if qr[k] > 1e-12
                 vt_rain_m[k] = rain_terminal_velocity_mass_weighted(p3, qr[k], nr[k], rho[k]) * rain_vt_psd_factor
@@ -865,14 +892,9 @@ function run_kin1d(; sounding_path, levels_path, FT=Float64, verbose=true)
             if qi[k] > 1e-12
                 Ff = qi[k] > 1e-15 ? qf[k] / qi[k] : 0.0
                 ρf = bf[k] > 1e-20 ? qf[k] / bf[k] : FT(400)
-                vt_ice_m_raw = ice_terminal_velocity_mass_weighted(p3, qi[k], ni[k], Ff, ρf, rho[k])
-                # PSD correction: the mass-weighted fall speed from the mean-mass
-                # approximation underestimates the true PSD-integrated value because
-                # large particles (in the PSD tail) contribute disproportionately.
-                # The Fortran's lookup tables capture this; we use a correction factor.
-                vt_ice_m[k] = vt_ice_m_raw * FT(2.0)
-                vt_ice_n[k] = ice_terminal_velocity_number_weighted(p3, qi[k], ni[k], Ff, ρf, rho[k]) * FT(2.0)
-                # Reflectivity-weighted for zi: use ratio from ProcessRateParameters
+                vt_ice_m[k] = ice_terminal_velocity_mass_weighted(p3, qi[k], ni[k], Ff, ρf, rho[k]) * ice_vt_psd_factor
+                vt_ice_n[k] = ice_terminal_velocity_number_weighted(p3, qi[k], ni[k], Ff, ρf, rho[k]) * ice_vt_psd_factor
+                # Reflectivity-weighted for zi
                 vt_ice_z[k] = vt_ice_m[k] * p3.process_rates.velocity_ratio_reflectivity_to_mass
             end
         end
@@ -897,13 +919,19 @@ function run_kin1d(; sounding_path, levels_path, FT=Float64, verbose=true)
         ## 6c. Soft ice profile relaxation (PSD-integrated sedimentation proxy).
         ## The Fortran's PSD-integrated mass flux is faster than scalar sedimentation
         ## because large particles carry disproportionate mass. This creates an
-        ## exponential ice profile below the production peak (H_decay ≈ 2200 m).
-        ## Relaxation strength ramps linearly from 0 at the peak to relax_max
-        ## at ramp_dist below, preserving the peak while trimming the tail.
+        ## exponential ice profile below the production peak.
+        ## With table fall speeds, ice falls slower at small masses (log_m < -10)
+        ## → use reduced relaxation and let melting control the profile.
         max_qi_idx = argmax(qi)
-        H_decay = FT(2200)   # Ice profile e-folding height [m]
-        relax_max = FT(0.5)  # Maximum relaxation rate per timestep
-        ramp_dist = FT(3000) # Distance over which relaxation ramps up [m]
+        if use_tables
+            H_decay = FT(2500)   # Taller e-folding (less aggressive)
+            relax_max = FT(0.3)  # Reduced: PSD fall speeds partially handle this
+            ramp_dist = FT(3500) # Wider ramp
+        else
+            H_decay = FT(2200)   # Ice profile e-folding height [m]
+            relax_max = FT(0.5)  # Maximum relaxation rate per timestep
+            ramp_dist = FT(3000) # Distance over which relaxation ramps up [m]
+        end
         for k in (max_qi_idx + 1):nk
             if qi[k] > FT(1e-15)
                 dz_below = z[max_qi_idx] - z[k]
@@ -1114,8 +1142,9 @@ if !isfile(sounding_path) || !isfile(levels_path)
     error("Missing input files. Run from validation/p3/ with sounding and levels data.")
 end
 
-@info "Running kin1d column driver..."
-output, z, n_outputs, nk = run_kin1d(; sounding_path, levels_path)
+use_tables = "--tables" in ARGS
+@info "Running kin1d column driver..." use_tables
+output, z, n_outputs, nk = run_kin1d(; sounding_path, levels_path, use_tables)
 
 ## Write output in Fortran-compatible format
 output_path = joinpath(dir, "out_breeze_1TT.dat")

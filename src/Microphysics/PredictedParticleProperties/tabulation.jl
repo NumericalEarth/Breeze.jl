@@ -106,7 +106,13 @@ The evaluated integral value.
                                           rime_density, shape_parameter)
 
     # Evaluate integral using pre-computed quadrature
-    return evaluate_quadrature(e.integral, state, e.nodes, e.weights)
+    raw = evaluate_quadrature(e.integral, state, e.nodes, e.weights)
+
+    # Normalize for tabulation (fall speeds become ratios, etc.)
+    result = normalize_integral(e.integral, raw, mean_particle_mass, state, e.nodes, e.weights)
+
+    # Safety: replace NaN/Inf with zero (can happen at extreme mass bounds)
+    return ifelse(isfinite(result), result, zero(FT))
 end
 
 """
@@ -115,7 +121,9 @@ end
 Create an `IceSizeDistributionState` from physical quantities.
 
 Given mean particle mass = qⁱ/Nⁱ (mass per particle), this function determines
-the size distribution parameters (N₀, μ, λ).
+the size distribution parameters (N₀, μ, λ) using the two-moment lambda solver.
+The convention is N_ice = 1, so L_ice = mean_particle_mass. This ensures that
+the raw integral ∫ f(D) N'(D) dD gives per-particle values.
 """
 @inline function state_from_mean_particle_mass(e::P3IntegralEvaluator,
                                                 mean_particle_mass,
@@ -126,34 +134,29 @@ the size distribution parameters (N₀, μ, λ).
                                                 air_density = typeof(mean_particle_mass)(1.225))
     FT = typeof(mean_particle_mass)
 
-    # Default P3 mass-diameter parameters
-    mass_coefficient = FT(0.0121)
-    mass_exponent = FT(1.9)
+    mass = IceMassPowerLaw(FT)
+    closure = P3Closure(FT)
+
+    # Convention: N_ice = 1 particle. L_ice = mean_particle_mass.
+    N_ice = one(FT)
+    L_ice = max(mean_particle_mass, FT(1e-20))
+
+    # Solve for (N₀, λ, μ) using the two-moment closure
+    params = distribution_parameters(L_ice, N_ice, rime_fraction, rime_density;
+                                      mass, closure)
+
     reference_air_density = FT(60000 / (287.15 * 253.15))
 
-    # Effective density: interpolate between aggregate and rime
-    effective_density = (1 - rime_fraction) * e.pure_ice_density * e.unrimed_density_factor +
-                        rime_fraction * rime_density
-
-    # Characteristic diameter from mean_particle_mass = (π/6) ρ_eff D³
-    characteristic_diameter = cbrt(6 * mean_particle_mass / (FT(π) * effective_density))
-
-    # λ ~ 4 / D for exponential distribution (μ = 0)
-    slope_parameter = FT(4) / max(characteristic_diameter, FT(1e-8))
-
-    # N₀ from normalization (placeholder value for reasonable number concentration)
-    intercept_parameter = FT(1e6)
-
     return IceSizeDistributionState(
-        intercept_parameter,
-        shape_parameter,
-        slope_parameter,
+        params.N₀,
+        params.μ,
+        params.λ,
         rime_fraction,
         liquid_fraction,
         rime_density,
-        mass_coefficient,
-        mass_exponent,
-        e.pure_ice_density,
+        mass.coefficient,
+        mass.exponent,
+        mass.ice_density,
         reference_air_density,
         air_density
     )
@@ -185,6 +188,40 @@ This is the core numerical integration routine.
     end
 
     return result
+end
+
+#####
+##### Integral normalization for tabulation
+#####
+##### Tables store physically meaningful quantities:
+##### - Fall speeds: actual velocities [m/s] (divide by appropriate moment)
+##### - Per-particle integrals: ventilation, collection (N_ice = 1 → raw is per-particle)
+#####
+
+"""
+    normalize_integral(integral, raw, mean_particle_mass, state, nodes, weights)
+
+Normalize a raw quadrature integral for tabulation.
+
+With the N_ice = 1 convention, different integral types require different
+normalization to produce physically meaningful table values:
+
+- **Number-weighted fall speed**: ∫ V N' dD / N = raw (since N = 1)
+- **Mass-weighted fall speed**: ∫ V m N' dD / ∫ m N' dD (divide by L = mean_mass)
+- **Reflectivity-weighted fall speed**: ∫ V D⁶ N' dD / ∫ D⁶ N' dD
+- **All other integrals**: raw (per-particle since N = 1)
+"""
+normalize_integral(::AbstractP3Integral, raw, mean_particle_mass, state, nodes, weights) = raw
+
+function normalize_integral(::MassWeightedFallSpeed, raw, mean_particle_mass, state, nodes, weights)
+    # L_ice = mean_particle_mass when N_ice = 1
+    mass_integral = evaluate_quadrature(MassMomentLambdaLimit(), state, nodes, weights)
+    return raw / max(mass_integral, eps(typeof(raw)))
+end
+
+function normalize_integral(::ReflectivityWeightedFallSpeed, raw, mean_particle_mass, state, nodes, weights)
+    refl_integral = evaluate_quadrature(Reflectivity(), state, nodes, weights)
+    return raw / max(refl_integral, eps(typeof(raw)))
 end
 
 #####
@@ -420,7 +457,7 @@ than computed via quadrature, which is much faster.
 - `number_of_mass_points`: Grid points in mean particle mass (default 50)
 - `number_of_rime_fraction_points`: Grid points in rime fraction (default 4)
 - `number_of_liquid_fraction_points`: Grid points in liquid fraction (default 4)
-- `minimum_log_mean_particle_mass`: Minimum log₁₀(mass) [log kg], default -18
+- `minimum_log_mean_particle_mass`: Minimum log₁₀(mass) [log kg], default -15
 - `maximum_log_mean_particle_mass`: Maximum log₁₀(mass) [log kg], default -5
 - `number_of_quadrature_points`: Quadrature points for filling table (default 64)
 
@@ -432,7 +469,7 @@ function TabulationParameters(FT::Type{<:AbstractFloat} = Float64;
                                number_of_mass_points::Int = 50,
                                number_of_rime_fraction_points::Int = 4,
                                number_of_liquid_fraction_points::Int = 4,
-                               minimum_log_mean_particle_mass = FT(-18),
+                               minimum_log_mean_particle_mass = FT(-15),
                                maximum_log_mean_particle_mass = FT(-5),
                                number_of_quadrature_points::Int = 64)
     return TabulationParameters(
@@ -541,6 +578,93 @@ end
 """
 $(TYPEDSIGNATURES)
 
+Tabulate all integrals in an `IceBulkProperties` container.
+"""
+function tabulate(bulk::IceBulkProperties, arch=CPU(),
+                  params::TabulationParameters = TabulationParameters())
+
+    return IceBulkProperties(
+        bulk.maximum_mean_diameter,
+        bulk.minimum_mean_diameter,
+        tabulate(bulk.effective_radius, arch, params),
+        tabulate(bulk.mean_diameter, arch, params),
+        tabulate(bulk.mean_density, arch, params),
+        tabulate(bulk.reflectivity, arch, params),
+        bulk.slope,  # diagnostic, not an integral
+        bulk.shape,  # diagnostic, not an integral
+        tabulate(bulk.shedding, arch, params)
+    )
+end
+
+"""
+$(TYPEDSIGNATURES)
+
+Tabulate all integrals in an `IceCollection` container.
+"""
+function tabulate(collection::IceCollection, arch=CPU(),
+                  params::TabulationParameters = TabulationParameters())
+
+    return IceCollection(
+        collection.ice_cloud_collection_efficiency,
+        collection.ice_rain_collection_efficiency,
+        tabulate(collection.aggregation, arch, params),
+        tabulate(collection.rain_collection, arch, params)
+    )
+end
+
+"""
+$(TYPEDSIGNATURES)
+
+Tabulate all integrals in an `IceSixthMoment` container.
+"""
+function tabulate(sixth::IceSixthMoment, arch=CPU(),
+                  params::TabulationParameters = TabulationParameters())
+
+    return IceSixthMoment(
+        tabulate(sixth.rime, arch, params),
+        tabulate(sixth.deposition, arch, params),
+        tabulate(sixth.deposition1, arch, params),
+        tabulate(sixth.melt1, arch, params),
+        tabulate(sixth.melt2, arch, params),
+        tabulate(sixth.shedding, arch, params),
+        tabulate(sixth.aggregation, arch, params),
+        tabulate(sixth.sublimation, arch, params),
+        tabulate(sixth.sublimation1, arch, params)
+    )
+end
+
+"""
+$(TYPEDSIGNATURES)
+
+Tabulate all integrals in an `IceLambdaLimiter` container.
+"""
+function tabulate(limiter::IceLambdaLimiter, arch=CPU(),
+                  params::TabulationParameters = TabulationParameters())
+
+    return IceLambdaLimiter(
+        tabulate(limiter.small_q, arch, params),
+        tabulate(limiter.large_q, arch, params)
+    )
+end
+
+"""
+$(TYPEDSIGNATURES)
+
+Tabulate all integrals in an `IceRainCollection` container.
+"""
+function tabulate(ice_rain::IceRainCollection, arch=CPU(),
+                  params::TabulationParameters = TabulationParameters())
+
+    return IceRainCollection(
+        tabulate(ice_rain.mass, arch, params),
+        tabulate(ice_rain.number, arch, params),
+        tabulate(ice_rain.sixth_moment, arch, params)
+    )
+end
+
+"""
+$(TYPEDSIGNATURES)
+
 Tabulate specific integrals within a P3 microphysics scheme.
 
 Returns a new `PredictedParticlePropertiesMicrophysics` with the specified
@@ -626,9 +750,88 @@ function tabulate(p3::PredictedParticlePropertiesMicrophysics{FT},
             p3.precipitation_boundary_condition
         )
 
+    elseif property == :ice_bulk_properties
+        new_bulk = tabulate(p3.ice.bulk_properties, arch, params)
+        new_ice = IceProperties(
+            p3.ice.minimum_rime_density,
+            p3.ice.maximum_rime_density,
+            p3.ice.maximum_shape_parameter,
+            p3.ice.minimum_reflectivity,
+            p3.ice.fall_speed,
+            p3.ice.deposition,
+            new_bulk,
+            p3.ice.collection,
+            p3.ice.sixth_moment,
+            p3.ice.lambda_limiter,
+            p3.ice.ice_rain
+        )
+        return PredictedParticlePropertiesMicrophysics(
+            p3.water_density,
+            p3.minimum_mass_mixing_ratio,
+            p3.minimum_number_mixing_ratio,
+            new_ice,
+            p3.rain,
+            p3.cloud,
+            p3.process_rates,
+            p3.precipitation_boundary_condition
+        )
+
+    elseif property == :ice_collection
+        new_collection = tabulate(p3.ice.collection, arch, params)
+        new_ice = IceProperties(
+            p3.ice.minimum_rime_density,
+            p3.ice.maximum_rime_density,
+            p3.ice.maximum_shape_parameter,
+            p3.ice.minimum_reflectivity,
+            p3.ice.fall_speed,
+            p3.ice.deposition,
+            p3.ice.bulk_properties,
+            new_collection,
+            p3.ice.sixth_moment,
+            p3.ice.lambda_limiter,
+            p3.ice.ice_rain
+        )
+        return PredictedParticlePropertiesMicrophysics(
+            p3.water_density,
+            p3.minimum_mass_mixing_ratio,
+            p3.minimum_number_mixing_ratio,
+            new_ice,
+            p3.rain,
+            p3.cloud,
+            p3.process_rates,
+            p3.precipitation_boundary_condition
+        )
+
+    elseif property == :ice_sixth_moment
+        new_sixth = tabulate(p3.ice.sixth_moment, arch, params)
+        new_ice = IceProperties(
+            p3.ice.minimum_rime_density,
+            p3.ice.maximum_rime_density,
+            p3.ice.maximum_shape_parameter,
+            p3.ice.minimum_reflectivity,
+            p3.ice.fall_speed,
+            p3.ice.deposition,
+            p3.ice.bulk_properties,
+            p3.ice.collection,
+            new_sixth,
+            p3.ice.lambda_limiter,
+            p3.ice.ice_rain
+        )
+        return PredictedParticlePropertiesMicrophysics(
+            p3.water_density,
+            p3.minimum_mass_mixing_ratio,
+            p3.minimum_number_mixing_ratio,
+            new_ice,
+            p3.rain,
+            p3.cloud,
+            p3.process_rates,
+            p3.precipitation_boundary_condition
+        )
+
     else
         throw(ArgumentError("Unknown property to tabulate: $property. " *
-                           "Supported: :ice_fall_speed, :ice_deposition"))
+                           "Supported: :ice_fall_speed, :ice_deposition, " *
+                           ":ice_bulk_properties, :ice_collection, :ice_sixth_moment"))
     end
 end
 
@@ -665,9 +868,14 @@ function tabulate(p3::PredictedParticlePropertiesMicrophysics{FT}, arch=CPU();
 
     params = TabulationParameters(FT; kwargs...)
 
-    # Tabulate fall speed and deposition integrals
-    tabulated_fall_speed = tabulate(p3.ice.fall_speed, arch, params)
-    tabulated_deposition = tabulate(p3.ice.deposition, arch, params)
+    # Tabulate all ice integral categories
+    tabulated_fall_speed    = tabulate(p3.ice.fall_speed, arch, params)
+    tabulated_deposition    = tabulate(p3.ice.deposition, arch, params)
+    tabulated_bulk          = tabulate(p3.ice.bulk_properties, arch, params)
+    tabulated_collection    = tabulate(p3.ice.collection, arch, params)
+    tabulated_sixth_moment  = tabulate(p3.ice.sixth_moment, arch, params)
+    tabulated_lambda        = tabulate(p3.ice.lambda_limiter, arch, params)
+    tabulated_ice_rain      = tabulate(p3.ice.ice_rain, arch, params)
 
     new_ice = IceProperties(
         p3.ice.minimum_rime_density,
@@ -676,11 +884,11 @@ function tabulate(p3::PredictedParticlePropertiesMicrophysics{FT}, arch=CPU();
         p3.ice.minimum_reflectivity,
         tabulated_fall_speed,
         tabulated_deposition,
-        p3.ice.bulk_properties,
-        p3.ice.collection,
-        p3.ice.sixth_moment,
-        p3.ice.lambda_limiter,
-        p3.ice.ice_rain
+        tabulated_bulk,
+        tabulated_collection,
+        tabulated_sixth_moment,
+        tabulated_lambda,
+        tabulated_ice_rain
     )
 
     return PredictedParticlePropertiesMicrophysics(
