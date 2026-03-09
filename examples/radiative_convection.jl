@@ -242,7 +242,7 @@ reference_state = model.dynamics.reference_state
 set_to_mean!(reference_state, model, rescale_densities=true)
 
 T = model.temperature
-qᵗ = model.specific_moisture
+qᵗ = specific_prognostic_moisture(model)
 u, w = model.velocities.u, model.velocities.w
 qˡ = model.microphysical_fields.qˡ
 
