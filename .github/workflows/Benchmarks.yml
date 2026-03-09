@@ -19,8 +19,8 @@ concurrency:
   cancel-in-progress: true
 
 env:
-  # Disable GPU support for Reactant until we actually use it.
-  REACTANT_GPU: 'none'
+  # Don't make Reactant occupy all the GPU memory
+  XLA_REACTANT_GPU_PREALLOCATE: 'false'
 
 jobs:
   run-benchmarks:
@@ -49,7 +49,7 @@ jobs:
         shell: bash
         working-directory: ./benchmarking
     container:
-      image: 'ghcr.io/numericalearth/breeze-docker-images:benchmarking-julia_1.12.4'
+      image: 'ghcr.io/numericalearth/breeze-docker-images:benchmarking-julia_1.12.5'
       options: --gpus=all
     timeout-minutes: 30
     steps:

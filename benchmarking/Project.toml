@@ -21,7 +21,6 @@ Oceananigans = {url = "https://github.com/CliMA/Oceananigans.jl.git", rev = "mak
 
 [compat]
 ArgParse = "1"
-Breeze = "0.3"
 CUDA = "5"
 CloudMicrophysics = "0.31.4"
 Dates = "<0.0.1, 1"
