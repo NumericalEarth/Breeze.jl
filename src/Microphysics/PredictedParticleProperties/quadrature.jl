@@ -717,86 +717,6 @@ end
 ##### Collection integrals
 #####
 
-"""
-    collision_kernel(D₁, D₂, state, E_coll)
-
-Collision kernel K(D₁,D₂) for ice-ice aggregation following Morrison & Milbrandt (2015a).
-
-K(D₁,D₂) = E_coll × (π/4)(D₁+D₂)² × |V(D₁) - V(D₂)|
-
-where:
-- E_coll is the collection efficiency (typically 0.1-1.0 for aggregation)
-- (π/4)(D₁+D₂)² is the geometric sweep-out cross-section
-- |V(D₁) - V(D₂)| is the differential fall speed
-"""
-@inline function collision_kernel(D₁, D₂, state::IceSizeDistributionState, E_coll)
-    FT = typeof(D₁)
-
-    # Terminal velocities at each diameter
-    V₁ = terminal_velocity(D₁, state)
-    V₂ = terminal_velocity(D₂, state)
-
-    # Differential fall speed
-    ΔV = abs(V₁ - V₂)
-
-    # Geometric sweep-out area: π/4 × (D₁ + D₂)²
-    A_sweep = FT(π) / 4 * (D₁ + D₂)^2
-
-    return E_coll * A_sweep * ΔV
-end
-
-"""
-    evaluate_double_integral(state, kernel_func; n_quadrature=32)
-
-Evaluate a double integral ∫∫ kernel_func(D₁, D₂, state) N'(D₁) N'(D₂) dD₁ dD₂
-using 2D Chebyshev-Gauss quadrature.
-
-This is used for collection integrals (aggregation, self-collection) that require
-integration over pairs of particle sizes.
-"""
-function evaluate_double_integral(state::IceSizeDistributionState, kernel_func;
-                                   n_quadrature::Int = 32)
-    FT = typeof(state.slope)
-    nodes, weights = chebyshev_gauss_nodes_weights(FT, n_quadrature)
-
-    λ = state.slope
-    result = zero(FT)
-
-    for i in 1:n_quadrature
-        x₁ = nodes[i]
-        w₁ = weights[i]
-        D₁ = transform_to_diameter(x₁, λ)
-        J₁ = jacobian_diameter_transform(x₁, λ)
-        N₁ = size_distribution(D₁, state)
-
-        for j in 1:n_quadrature
-            x₂ = nodes[j]
-            w₂ = weights[j]
-            D₂ = transform_to_diameter(x₂, λ)
-            J₂ = jacobian_diameter_transform(x₂, λ)
-            N₂ = size_distribution(D₂, state)
-
-            # Kernel value
-            K = kernel_func(D₁, D₂, state)
-
-            result += w₁ * w₂ * K * N₁ * N₂ * J₁ * J₂
-        end
-    end
-
-    return result
-end
-
-"""
-    aggregation_kernel(D₁, D₂, state)
-
-Aggregation kernel for ice-ice self-collection.
-"""
-@inline function aggregation_kernel(D₁, D₂, state::IceSizeDistributionState)
-    FT = typeof(D₁)
-    E_agg = FT(0.1)  # Default aggregation efficiency (temperature-dependent in full model)
-    return collision_kernel(D₁, D₂, state, E_agg)
-end
-
 # Aggregation number: ∫∫ K(D₁,D₂) N'(D₁) N'(D₂) dD₁ dD₂
 # Using approximation from Wisner et al. (1972) for computational efficiency:
 # I_agg ≈ ∫ V(D) A(D) N(D)² dD × scale_factor
@@ -814,21 +734,6 @@ end
     return E_agg * V * A * Np^2
 end
 
-"""
-    evaluate_aggregation_integral(state; n_quadrature=32)
-
-Evaluate the full 2D aggregation integral using proper collision kernel.
-This is more accurate than the 1D approximation but slower.
-
-∫∫ (1/2) K_agg(D₁,D₂) N'(D₁) N'(D₂) dD₁ dD₂
-
-The factor of 1/2 avoids double-counting symmetric collisions.
-"""
-function evaluate_aggregation_integral(state::IceSizeDistributionState;
-                                        n_quadrature::Int = 32)
-    return evaluate_double_integral(state, aggregation_kernel; n_quadrature) / 2
-end
-
 # Rain collection by ice (riming kernel)
 # ∫ E_rim × V(D) × A(D) × N'(D) dD
 @inline function integrand(::RainCollectionNumber, D, state::IceSizeDistributionState)
@@ -843,22 +748,6 @@ end
     return E_rim * V * A * Np
 end
 
-"""
-    riming_kernel(D_ice, D_drop, V_ice, V_drop, E_rim)
-
-Riming kernel for ice-droplet collection.
-
-K = E_rim × (π/4)(D_ice + D_drop)² × |V_ice - V_drop|
-
-For riming, the collection efficiency E_rim ≈ 1 for large ice collecting
-small cloud droplets, but decreases for small ice or large rain drops.
-"""
-@inline function riming_kernel(D_ice, D_drop, V_ice, V_drop, E_rim)
-    FT = typeof(D_ice)
-    A_sweep = FT(π) / 4 * (D_ice + D_drop)^2
-    ΔV = abs(V_ice - V_drop)
-    return E_rim * A_sweep * ΔV
-end
 
 """
     particle_area(D, state)

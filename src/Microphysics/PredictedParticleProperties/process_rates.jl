@@ -145,28 +145,6 @@ end
     return A_mean * ΔV
 end
 
-"""
-    air_transport_properties(T, P)
-
-Compute temperature- and pressure-dependent air transport properties
-matching the Fortran P3 implementation:
-
-- Dynamic viscosity μ from Sutherland's law: `1.496e-6 × T^1.5 / (T + 120)`
-- Water vapor diffusivity D_v: `8.794e-5 × T^1.81 / P`
-- Thermal conductivity K_a: `1414 × μ`
-
-These vary significantly with altitude. At T=240K, P=30kPa (upper troposphere),
-D_v ≈ 6e-5 m²/s — more than double the surface value of ~2.5e-5 m²/s.
-"""
-@inline function air_transport_properties(T, P)
-    FT = typeof(T)
-    μ = FT(1.496e-6) * T^FT(1.5) / (T + FT(120))
-    D_v = FT(8.794e-5) * T^FT(1.81) / P
-    K_a = FT(1.414e3) * μ
-    ν = μ * FT(287.15) * T / P  # kinematic viscosity ν = μ/ρ, with ρ = P/(R_d×T)
-    return (; D_v, K_a, ν)
-end
-
 #####
 ##### Cloud condensation/evaporation
 #####
@@ -216,43 +194,6 @@ end
 #####
 ##### Ice deposition and sublimation
 #####
-
-"""
-    ice_deposition_rate(p3, qⁱ, qᵛ, qᵛ⁺ⁱ)
-
-Compute ice deposition/sublimation rate.
-
-Ice grows by vapor deposition when supersaturated with respect to ice,
-and sublimates when subsaturated.
-
-# Arguments
-- `p3`: P3 microphysics scheme (provides parameters)
-- `qⁱ`: Ice mass fraction [kg/kg]
-- `qᵛ`: Vapor mass fraction [kg/kg]
-- `qᵛ⁺ⁱ`: Saturation vapor mass fraction over ice [kg/kg]
-
-# Returns
-- Rate of vapor → ice conversion [kg/kg/s] (positive = deposition)
-"""
-@inline function ice_deposition_rate(p3, qⁱ, qᵛ, qᵛ⁺ⁱ)
-    FT = typeof(qⁱ)
-    prp = p3.process_rates
-
-    qⁱ_eff = clamp_positive(qⁱ)
-    τ_dep = prp.ice_deposition_timescale
-
-    # Supersaturation with respect to ice
-    Sⁱ = qᵛ - qᵛ⁺ⁱ
-
-    # Relaxation toward saturation
-    dep_rate = Sⁱ / τ_dep
-
-    # Limit sublimation to available ice
-    is_sublimation = Sⁱ < 0
-    max_sublim = -qⁱ_eff / τ_dep
-
-    return ifelse(is_sublimation, max(dep_rate, max_sublim), dep_rate)
-end
 
 """
     ventilation_enhanced_deposition(p3, qⁱ, nⁱ, qᵛ, qᵛ⁺ⁱ, Fᶠ, ρᶠ, T, P)
@@ -341,13 +282,6 @@ The bulk rate integrates over the size distribution:
     max_sublim = -qⁱ_eff / τ_dep
 
     return ifelse(is_sublimation, max(dep_rate, max_sublim), dep_rate)
-end
-
-# Backward compatibility: version without T, P uses simplified form
-@inline function ventilation_enhanced_deposition(p3, qⁱ, nⁱ, qᵛ, qᵛ⁺ⁱ, Fᶠ, ρᶠ)
-    FT = typeof(qⁱ)
-    # Use default T = 250 K, P = 50000 Pa for backward compatibility
-    return ventilation_enhanced_deposition(p3, qⁱ, nⁱ, qᵛ, qᵛ⁺ⁱ, Fᶠ, ρᶠ, FT(250), FT(50000))
 end
 
 #####

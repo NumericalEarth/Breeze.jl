@@ -239,26 +239,3 @@ where D is the drop diameter and f_v is the ventilation factor.
 
     return ifelse(is_subsaturated, evap_rate, zero(FT))
 end
-
-# Backward compatibility: simplified version without T, ρ
-@inline function rain_evaporation_rate(p3, qʳ, qᵛ, qᵛ⁺ˡ)
-    FT = typeof(qʳ)
-    prp = p3.process_rates
-
-    qʳ_eff = clamp_positive(qʳ)
-    τ_evap = prp.rain_evaporation_timescale
-
-    # Subsaturation
-    S = qᵛ - qᵛ⁺ˡ
-
-    # Only evaporate in subsaturated conditions
-    S_sub = min(S, zero(FT))
-
-    # Relaxation toward saturation
-    evap_rate = S_sub / τ_evap
-
-    # Cannot evaporate more than available
-    max_evap = -qʳ_eff / τ_evap
-
-    return max(evap_rate, max_evap)
-end

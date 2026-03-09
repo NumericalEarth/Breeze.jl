@@ -637,50 +637,6 @@ end
 #####
 
 """
-    log_sixth_moment(μ, logλ)
-
-Compute log(M₆/N₀) = log(∫₀^∞ D⁶ N'(D) dD / N₀) for a gamma distribution.
-
-The sixth moment integral equals Γ(μ+7) / λ^(μ+7).
-"""
-function log_sixth_moment(μ, logλ)
-    return log_gamma_moment(μ, logλ; k = 6)
-end
-
-"""
-    log_reflectivity_number_ratio(μ, logλ)
-
-Compute log(Z/N) for a gamma distribution.
-
-```math
-Z/N = Γ(μ+7) / (Γ(μ+1) λ^6)
-```
-"""
-function log_reflectivity_number_ratio(μ, logλ)
-    log_Z_over_N₀ = log_sixth_moment(μ, logλ)
-    log_N_over_N₀ = log_gamma_moment(μ, logλ)
-    return log_Z_over_N₀ - log_N_over_N₀
-end
-
-"""
-    lambda_from_reflectivity(μ, Z_ice, N_ice)
-
-Compute λ from the Z/N ratio given a fixed shape parameter μ.
-
-From Z/N = Γ(μ+7) / (Γ(μ+1) λ⁶), we get:
-```math
-λ = \\left( \\frac{Γ(μ+7) N}{Γ(μ+1) Z} \\right)^{1/6}
-```
-"""
-function lambda_from_reflectivity(μ, Z_ice, N_ice)
-    FT = typeof(μ)
-    (iszero(Z_ice) || iszero(N_ice)) && return FT(Inf)
-
-    log_ratio = loggamma(μ + 7) - loggamma(μ + 1) + log(N_ice) - log(Z_ice)
-    return exp(log_ratio / 6)
-end
-
-"""
     log_lambda_from_reflectivity(μ, log_Z_over_N)
 
 Compute log(λ) from log(Z/N) given shape parameter μ.
@@ -943,15 +899,6 @@ Compute N₀ from the normalization: N = N₀ × ∫ D^μ exp(-λD) dD.
 function intercept_parameter(N_ice, μ, logλ)
     log_N_over_N₀ = log_gamma_moment(μ, logλ)
     return N_ice / exp(log_N_over_N₀)
-end
-
-"""
-    log_intercept_parameter(N_ice, μ, logλ)
-
-Compute log(N₀) from normalization.
-"""
-function log_intercept_parameter(N_ice, μ, logλ)
-    return log(N_ice) - log_gamma_moment(μ, logλ)
 end
 
 """

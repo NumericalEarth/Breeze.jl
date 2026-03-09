@@ -82,12 +82,6 @@ See [Morrison and Milbrandt (2015a)](@cite Morrison2015parameterization).
     return ifelse(aggregation_active, rate, zero(FT))
 end
 
-# Backward compatibility: simplified version without rime properties
-@inline function ice_aggregation_rate(p3, qⁱ, nⁱ, T)
-    FT = typeof(qⁱ)
-    return ice_aggregation_rate(p3, qⁱ, nⁱ, T, zero(FT), FT(400))
-end
-
 #####
 ##### Phase 2: Riming (cloud and rain collection by ice)
 #####
