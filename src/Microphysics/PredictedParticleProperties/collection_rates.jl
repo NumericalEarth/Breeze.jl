@@ -141,9 +141,10 @@ factor for the exponential PSD.
     AV_per_particle = _collection_kernel_per_particle(p3.ice.collection.rain_collection,
                                                        m_mean, Fᶠ, ρᶠ, prp)
 
-    # Air density correction: tables computed at reference conditions
-    # (ρ₀ ≈ 0.826 kg/m³), then scaled by (ρ₀/ρ)^0.54.
-    ρ₀ = prp.reference_air_density
+    # Air density correction for ice particle fall speed (Heymsfield et al. 2006):
+    # ρfaci = (ρ₀_ice / ρ)^0.54, where ρ₀_ice = 60000/(287.15×253.15) ≈ 0.826 kg/m³
+    # (Fortran P3: rhosui — NOT the surface/rain reference density rhosur ≈ 1.275).
+    ρ₀ = p3.ice.fall_speed.reference_air_density
     rhofaci = (ρ₀ / max(ρ, FT(0.01)))^FT(0.54)
 
     # Collection rate = E × qc × ni × ρ × rhofaci × ⟨A×V⟩
@@ -219,8 +220,9 @@ collection equation with collision kernel integrated over the ice PSD.
     AV_per_particle = _collection_kernel_per_particle(p3.ice.collection.rain_collection,
                                                        m_mean, Fᶠ, ρᶠ, prp)
 
-    # Air density correction (same as cloud riming)
-    ρ₀ = prp.reference_air_density
+    # Air density correction for ice particle fall speed (same convention as cloud riming):
+    # uses ice reference density ρ₀_ice ≈ 0.826 kg/m³, NOT rain reference ≈ 1.275 kg/m³.
+    ρ₀ = p3.ice.fall_speed.reference_air_density
     rhofaci = (ρ₀ / max(ρ, FT(0.01)))^FT(0.54)
 
     # Collection rate = E × qr × ni × ρ × rhofaci × ⟨A×V⟩

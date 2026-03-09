@@ -164,7 +164,7 @@ function ProcessRateParameters(FT::Type{<:AbstractFloat} = Float64;
         liquid_water_density = 1000,
         pure_ice_density = 917,
         reference_air_density = 100000 / (287.15 * 273.15),
-        nucleated_ice_mass = 1e-12,
+        nucleated_ice_mass = 4π/3 * 900 * (1e-6)^3,  # Fortran mi0: sphere r=1μm, ρ=900 kg/m³ [kg]
         freezing_temperature = 273.15,
 
         # Rain autoconversion
