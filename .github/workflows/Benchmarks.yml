@@ -24,7 +24,7 @@ env:
 
 jobs:
   run-benchmarks:
-    name: "Run benchmarks - dynamics ${{ matrix.dynamics }} - microphysics ${{ matrix.microphysics }} - grid ${{ matrix.grid }}"
+    name: "Run benchmarks - dynamics ${{ matrix.dynamics }} - microphysics ${{ matrix.microphysics }} - grid ${{ matrix.grid }} - advection ${{ matrix.advection }}"
     permissions:
       actions: write
       contents: write
@@ -38,12 +38,15 @@ jobs:
           - dynamics: 'anelastic'
             microphysics: 'nothing'
             grid: '128^3, 512x512x256, 768x768x256'
+            advection: 'WENO5, WENO9'
           - dynamics: 'compressible_splitexplicit'
             microphysics: 'nothing'
             grid: '512x512x256'
+            advection: 'WENO9'
           - dynamics: 'anelastic'
             microphysics: 'MixedPhaseEquilibrium, 1M_MixedEquilibrium, 1M_MixedNonEquilibrium'
             grid: '512x512x256'
+            advection: 'WENO9'
     defaults:
       run:
         shell: bash
@@ -70,10 +73,13 @@ jobs:
           if [[ -n "${{ matrix.microphysics }}" ]]; then
               ARGS+=(--microphysics "${{ matrix.microphysics }}")
           fi
+          if [[ -n "${{ matrix.advection }}" ]]; then
+              ARGS+=(--advection "${{ matrix.advection }}")
+          fi
           julia --color=yes --project run_benchmarks.jl --device GPU "${ARGS[@]}" --size "${{ matrix.grid }}"
       - uses: actions/upload-artifact@v7
         with:
-          name: 'benchmarks-dynamics_${{ matrix.dynamics }}-microphysics_${{ matrix.microphysics }}-grid_${{ matrix.grid }}'
+          name: 'benchmarks-dynamics_${{ matrix.dynamics }}-microphysics_${{ matrix.microphysics }}-grid_${{ matrix.grid }}-advection_${{ matrix.advection }}'
           path: benchmarking/benchmark_results.*
           retention-days: 90
           overwrite: false
