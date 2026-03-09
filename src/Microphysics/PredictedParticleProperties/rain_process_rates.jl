@@ -155,16 +155,25 @@ end
 Compute rain evaporation rate using ventilation-enhanced diffusion.
 
 Rain drops evaporate when the ambient air is subsaturated (qᵛ < qᵛ⁺ˡ).
-The evaporation rate is enhanced by ventilation (air flow around falling drops):
+The evaporation rate is enhanced by ventilation (air flow around falling drops).
+
+Dispatches to either the tabulated PSD integral path or the mean-mass
+approximation path depending on `p3.rain.evaporation`:
+
+- **Tabulated** (`TabulatedFunction1D`): Computes λ_r from (q_r, N_r), looks up
+  the ventilation integral `I_evap(λ_r) = ∫ D f_v(D) exp(-λ_r D) dD`, then
+  applies `dq^r/dt = 2π × N_0 × I_evap × (S-1) / thermo_factor`
+  (Mason 1971, capacitance C = D/2 so 4πC = 2πD).
+- **Mean-mass** (`RainEvaporation`): Uses a single representative drop of
+  diameter `D_mean = (6 m_mean / (π ρ_w))^(1/3)` with `V=130 D^0.5`.
 
 ```math
-\\frac{dm}{dt} = \\frac{4πD f_v (S - 1)}{\\frac{L_v}{K_a T}(\\frac{L_v}{R_v T} - 1) + \\frac{R_v T}{e_s D_v}}
+\\frac{dm}{dt} = \\frac{4\\pi C f_v (S - 1)}{\\frac{L_v}{K_a T}(\\frac{L_v}{R_v T} - 1)
+               + \\frac{R_v T}{e_s D_v}},\\quad C = D/2
 ```
 
-where D is the drop diameter and f_v is the ventilation factor.
-
 # Arguments
-- `p3`: P3 microphysics scheme (provides parameters)
+- `p3`: P3 microphysics scheme (provides parameters and evaporation table)
 - `qʳ`: Rain mass fraction [kg/kg]
 - `nʳ`: Rain number concentration [1/kg]
 - `qᵛ`: Vapor mass fraction [kg/kg]
@@ -189,21 +198,61 @@ where D is the drop diameter and f_v is the ventilation factor.
     # Thermodynamic constants
     # Note: The Fortran P3 computes T,P-dependent transport properties
     # (dv = 8.794e-5*T^1.81/P, kap = 1414*mu). These constants represent
-    # near-surface values. With PSD lookup tables (Phase 5), transport
-    # properties should use air_transport_properties(T, P) instead.
+    # near-surface values.
     R_v = FT(461.5)           # Gas constant for water vapor [J/kg/K]
     L_v = FT(2.5e6)           # Latent heat of vaporization [J/kg]
     K_a = FT(2.5e-2)          # Thermal conductivity of air [W/m/K]
     D_v = FT(2.5e-5)          # Diffusivity of water vapor [m²/s]
 
     # Saturation vapor pressure derived from qᵛ⁺ˡ
-    # From ideal gas law: ρ_v⁺ = e_s / (R_v × T)
-    # And ρ_v⁺ ≈ ρ × qᵛ⁺ˡ for small qᵛ⁺ˡ
     e_s = ρ * max(qᵛ⁺ˡ, FT(1e-30)) * R_v * T
 
-    # Mean drop properties
-    m_mean = safe_divide(qʳ_eff, nʳ_eff, FT(1e-12))
+    # Thermodynamic resistance (Mason 1971)
+    A = L_v / (K_a * T) * (L_v / (R_v * T) - 1)
+    B = R_v * T / (e_s * D_v)
+    thermodynamic_factor = max(A + B, FT(1e-10))
+
+    evap_rate = _rain_evaporation_rate(p3.rain.evaporation, qʳ_eff, nʳ_eff, S,
+                                       thermodynamic_factor, p3, prp, FT)
+
+    # Cannot evaporate more than available
+    τ_evap = prp.rain_evaporation_timescale
+    max_evap = -qʳ_eff / τ_evap
+    evap_rate = max(evap_rate, max_evap)
+
+    return ifelse(is_subsaturated, evap_rate, zero(FT))
+end
+
+# Tabulated path: use PSD-integrated ventilation integral I_evap(λ_r)
+@inline function _rain_evaporation_rate(table::TabulatedFunction1D, qʳ, nʳ, S,
+                                        thermodynamic_factor, p3, prp, FT)
     ρ_water = p3.water_density
+
+    # Diagnose λ_r from (q_r, N_r) for exponential DSD (μ_r = 0):
+    #   q_r = N_r * <m> = N_r * (π/6) ρ_w / λ_r³  ⟹  λ_r = (π ρ_w N_r / (6 q_r))^(1/3)
+    m_mean = safe_divide(qʳ, nʳ, FT(1e-12))
+    λ_r = cbrt(FT(π) * ρ_water / (6 * max(m_mean, FT(1e-15))))
+
+    # Intercept N_0 = N_r * λ_r  (for exponential DSD N'(D) = N_0 exp(-λ D))
+    N_0 = nʳ * λ_r
+
+    log_λ = log10(max(λ_r, FT(1e-3)))
+    I_evap = table(log_λ)
+
+    # Evaporation rate (Mason 1971, PSD-integrated):
+    #   dm/dt per drop = 4π × C × f_v × (S-1)/Φ,  C = D/2 (spherical capacitance)
+    #   dq^r/dt = N_0 × ∫ 4π × (D/2) × f_v × exp(-λD) dD × (S-1)/Φ
+    #           = 2π × N_0 × I_evap × (S-1) / Φ,  I_evap = ∫ D × f_v × exp(-λD) dD
+    return FT(2π) * N_0 * I_evap * (S - 1) / thermodynamic_factor
+end
+
+# Mean-mass fallback (used when evaporation field is not tabulated)
+@inline function _rain_evaporation_rate(::Any, qʳ, nʳ, S,
+                                        thermodynamic_factor, p3, prp, FT)
+    ρ_water = p3.water_density
+
+    # Mean drop properties
+    m_mean = safe_divide(qʳ, nʳ, FT(1e-12))
     D_mean = cbrt(6 * m_mean / (FT(π) * ρ_water))
 
     # Terminal velocity for rain drops
@@ -212,30 +261,15 @@ where D is the drop diameter and f_v is the ventilation factor.
     # approximation, V=130*D^0.5 gives better PSD-effective ventilation
     # because it overestimates V for small drops, partially compensating
     # for the PSD tail where small drops evaporate efficiently.
-    # TODO: Switch to ar/br when PSD lookup tables are implemented.
     V = FT(130) * D_mean^FT(0.5)
 
     # Ventilation factor
     ν = FT(1.5e-5)
     Re_term = sqrt(V * D_mean / ν)
-    f_v = FT(0.78) + FT(0.31) * Re_term
-
-    # Thermodynamic resistance (Mason 1971)
-    A = L_v / (K_a * T) * (L_v / (R_v * T) - 1)
-    B = R_v * T / (e_s * D_v)
-    thermodynamic_factor = A + B
+    f_v = FT(0.78) + FT(0.32) * Re_term
 
     # Evaporation rate per drop (negative for evaporation)
     dm_dt = FT(4π) * (D_mean / 2) * f_v * (S - 1) / thermodynamic_factor
 
-    # Total rate
-    evap_rate = nʳ_eff * dm_dt
-
-    # Cannot evaporate more than available
-    τ_evap = prp.rain_evaporation_timescale
-    max_evap = -qʳ_eff / τ_evap
-
-    evap_rate = max(evap_rate, max_evap)
-
-    return ifelse(is_subsaturated, evap_rate, zero(FT))
+    return nʳ * dm_dt
 end

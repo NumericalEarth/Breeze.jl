@@ -136,6 +136,11 @@ export
     RainVelocityMass,
     RainEvaporation,
 
+    # Rain PSD quadrature evaluators
+    RainMassWeightedVelocityEvaluator,
+    RainNumberWeightedVelocityEvaluator,
+    RainEvaporationVentilationEvaluator,
+
     # Integral types (concrete) - Ice-rain collection
     IceRainMassCollection,
     IceRainNumberCollection,
@@ -143,6 +148,8 @@ export
 
     # Tabulated wrapper
     TabulatedIntegral,
+    TabulatedFunction1D,
+    tabulated_function_1d,
 
     # Interface functions
     prognostic_field_names,
@@ -242,6 +249,12 @@ include("lambda_solver.jl")
 #####
 
 include("tabulation.jl")
+
+#####
+##### Rain PSD quadrature evaluators (must follow tabulation.jl and quadrature.jl)
+#####
+
+include("rain_quadrature.jl")
 
 #####
 ##### Process rates

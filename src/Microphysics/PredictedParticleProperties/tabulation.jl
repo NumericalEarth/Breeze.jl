@@ -6,7 +6,8 @@
 ##### (mean_particle_mass, rime_fraction, liquid_fraction) parameter space.
 #####
 
-export tabulate, TabulationParameters, P3IntegralEvaluator
+export tabulate, TabulationParameters, P3IntegralEvaluator, TabulatedFunction1D,
+       tabulated_function_1d
 
 using Adapt: Adapt
 using Oceananigans.Architectures: CPU, on_architecture
@@ -522,6 +523,119 @@ function Base.show(io::IO, f::TabulatedFunction3D)
 end
 
 #####
+##### TabulatedFunction1D - 1D lookup table for rain integrals
+#####
+
+"""
+    TabulatedFunction1D{T, FT}
+
+A 1D lookup table for fast linear interpolation of a scalar function of one
+variable. Used for rain PSD integrals tabulated over `log10(λ_r)`.
+
+Queries outside `[x_min, x_max]` are clamped to the boundary (no extrapolation
+errors).
+
+# Fields
+$(TYPEDFIELDS)
+"""
+struct TabulatedFunction1D{T, FT}
+    "Precomputed values (1D array)"
+    table :: T
+    "Minimum x value"
+    x_min :: FT
+    "Maximum x value"
+    x_max :: FT
+    "Inverse grid spacing"
+    inverse_Δx :: FT
+end
+
+"""
+$(TYPEDSIGNATURES)
+
+Construct a `TabulatedFunction1D` by pre-evaluating `func` on a uniform grid.
+
+# Arguments
+- `func`: Callable `func(x)` to tabulate
+- `arch`: Architecture (`CPU()` or `GPU()`)
+- `FT`: Floating-point type
+
+# Keyword Arguments
+- `x_range`: `(x_min, x_max)` interval
+- `x_points`: Number of grid points (default 200)
+"""
+function TabulatedFunction1D(func, arch=CPU(), FT=Float64;
+                              x_range,
+                              x_points::Int = 200)
+    x_points >= 2 || throw(ArgumentError("x_points must be >= 2, got $x_points"))
+    x_min, x_max = FT(x_range[1]), FT(x_range[2])
+    Δx = (x_max - x_min) / (x_points - 1)
+    inverse_Δx = 1 / Δx
+
+    table = zeros(FT, x_points)
+    for i in 1:x_points
+        x = x_min + (i - 1) * Δx
+        table[i] = func(x)
+    end
+
+    table = on_architecture(arch, table)
+
+    return TabulatedFunction1D(table, x_min, x_max, inverse_Δx)
+end
+
+"""
+    tabulated_function_1d(values, x_min, x_max, inverse_Δx)
+
+Construct a `TabulatedFunction1D` directly from a pre-filled values array.
+This low-level constructor is used in tests.
+"""
+function tabulated_function_1d(values::AbstractVector, x_min, x_max, inverse_Δx)
+    FT = eltype(values)
+    return TabulatedFunction1D(values, FT(x_min), FT(x_max), FT(inverse_Δx))
+end
+
+"""
+    (f::TabulatedFunction1D)(x)
+
+Evaluate the tabulated function using linear interpolation. Values outside
+`[x_min, x_max]` are clamped to the boundary value.
+"""
+@inline function (f::TabulatedFunction1D)(x)
+    n = length(f.table)
+    x_clamped = clamp(x, f.x_min, f.x_max)
+    fractional_idx = (x_clamped - f.x_min) * f.inverse_Δx
+
+    # 0-based integer index, clamp upper end
+    i⁻ = Base.unsafe_trunc(Int, fractional_idx)
+    i⁺ = min(i⁻ + 1, n - 1)
+    ξ = fractional_idx - i⁻
+
+    # 1-based lookup
+    @inbounds c⁻ = f.table[i⁻ + 1]
+    @inbounds c⁺ = f.table[i⁺ + 1]
+
+    return (1 - ξ) * c⁻ + ξ * c⁺
+end
+
+#####
+##### GPU/architecture support for TabulatedFunction1D
+#####
+
+Oceananigans.Architectures.on_architecture(arch, f::TabulatedFunction1D) =
+    TabulatedFunction1D(on_architecture(arch, f.table),
+                        f.x_min, f.x_max, f.inverse_Δx)
+
+Adapt.adapt_structure(to, f::TabulatedFunction1D) =
+    TabulatedFunction1D(Adapt.adapt(to, f.table),
+                        f.x_min, f.x_max, f.inverse_Δx)
+
+function Base.summary(f::TabulatedFunction1D)
+    n = length(f.table)
+    return "TabulatedFunction1D with $n points over [$(f.x_min), $(f.x_max)]"
+end
+
+Base.show(io::IO, f::TabulatedFunction1D) = print(io, summary(f))
+
+#####
 ##### TabulationParameters
 #####
 
@@ -771,6 +885,46 @@ end
 """
 $(TYPEDSIGNATURES)
 
+Tabulate all integrals in a `RainProperties` container.
+
+Returns a new `RainProperties` with `TabulatedFunction1D` fields for
+`velocity_mass`, `velocity_number`, and `evaporation`.
+
+# Keyword Arguments
+- `lambda_points`: Grid points in log10(λ_r) (default 200)
+- `log_lambda_range`: `(log10_min, log10_max)` for λ_r (default `(2.5, 5.5)`)
+- `quadrature_points`: Quadrature points used to fill the table (default 128)
+"""
+function tabulate(rain::RainProperties, arch=CPU(), FT=Float64;
+                  lambda_points::Int = 200,
+                  log_lambda_range = (FT(2.5), FT(5.5)),
+                  quadrature_points::Int = 128)
+
+    vel_mass_eval  = RainMassWeightedVelocityEvaluator(FT; n_points=quadrature_points)
+    vel_num_eval   = RainNumberWeightedVelocityEvaluator(FT; n_points=quadrature_points)
+    evap_eval      = RainEvaporationVentilationEvaluator(FT; n_points=quadrature_points)
+
+    tab_vel_mass   = TabulatedFunction1D(vel_mass_eval,  arch, FT;
+                                         x_range=log_lambda_range, x_points=lambda_points)
+    tab_vel_num    = TabulatedFunction1D(vel_num_eval,   arch, FT;
+                                         x_range=log_lambda_range, x_points=lambda_points)
+    tab_evap       = TabulatedFunction1D(evap_eval,      arch, FT;
+                                         x_range=log_lambda_range, x_points=lambda_points)
+
+    return RainProperties(
+        rain.maximum_mean_diameter,
+        rain.fall_speed_coefficient,
+        rain.fall_speed_exponent,
+        rain.shape_parameter,
+        tab_vel_num,
+        tab_vel_mass,
+        tab_evap
+    )
+end
+
+"""
+$(TYPEDSIGNATURES)
+
 Tabulate specific integrals within a P3 microphysics scheme.
 
 Returns a new `PredictedParticlePropertiesMicrophysics` with the specified
@@ -800,9 +954,45 @@ p3_fast = tabulate(p3, :ice_fall_speed, CPU(); number_of_mass_points=100)
 function tabulate(p3::PredictedParticlePropertiesMicrophysics{FT},
                   property::Symbol,
                   arch=CPU();
-                  kwargs...) where FT
+                  # Rain-specific kwargs (only used when property == :rain)
+                  lambda_points::Int = 200,
+                  log_lambda_range = (FT(2.5), FT(5.5)),
+                  # Ice-specific kwargs (only used for ice properties)
+                  number_of_mass_points::Int = 50,
+                  number_of_rime_fraction_points::Int = 4,
+                  number_of_liquid_fraction_points::Int = 4,
+                  minimum_log_mean_particle_mass = FT(-15),
+                  maximum_log_mean_particle_mass = FT(-5),
+                  number_of_quadrature_points::Int = 64,
+                  shape_parameter_override = FT(NaN),
+                  # Shared kwargs
+                  quadrature_points::Int = number_of_quadrature_points) where FT
 
-    params = TabulationParameters(FT; kwargs...)
+    if property == :rain
+        new_rain = tabulate(p3.rain, arch, FT;
+                            lambda_points,
+                            log_lambda_range,
+                            quadrature_points)
+        return PredictedParticlePropertiesMicrophysics(
+            p3.water_density,
+            p3.minimum_mass_mixing_ratio,
+            p3.minimum_number_mixing_ratio,
+            p3.ice,
+            new_rain,
+            p3.cloud,
+            p3.process_rates,
+            p3.precipitation_boundary_condition
+        )
+    end
+
+    params = TabulationParameters(FT;
+                 number_of_mass_points,
+                 number_of_rime_fraction_points,
+                 number_of_liquid_fraction_points,
+                 minimum_log_mean_particle_mass,
+                 maximum_log_mean_particle_mass,
+                 number_of_quadrature_points,
+                 shape_parameter_override)
 
     if property == :ice_fall_speed
         new_fall_speed = tabulate(p3.ice.fall_speed, arch, params)
@@ -937,7 +1127,7 @@ function tabulate(p3::PredictedParticlePropertiesMicrophysics{FT},
     else
         throw(ArgumentError("Unknown property to tabulate: $property. " *
                            "Supported: :ice_fall_speed, :ice_deposition, " *
-                           ":ice_bulk_properties, :ice_collection, :ice_sixth_moment"))
+                           ":ice_bulk_properties, :ice_collection, :ice_sixth_moment, :rain"))
     end
 end
 
@@ -997,12 +1187,17 @@ function tabulate(p3::PredictedParticlePropertiesMicrophysics{FT}, arch=CPU();
         tabulated_ice_rain
     )
 
+    # Tabulate rain integrals (use ice quadrature point count for consistency)
+    tabulated_rain = tabulate(p3.rain, arch, FT;
+                              lambda_points = 200,
+                              quadrature_points = params.number_of_quadrature_points)
+
     return PredictedParticlePropertiesMicrophysics(
         p3.water_density,
         p3.minimum_mass_mixing_ratio,
         p3.minimum_number_mixing_ratio,
         new_ice,
-        p3.rain,
+        tabulated_rain,
         p3.cloud,
         p3.process_rates,
         p3.precipitation_boundary_condition

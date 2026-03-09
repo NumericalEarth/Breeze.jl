@@ -10,6 +10,7 @@ using Breeze.Microphysics.PredictedParticleProperties:
     tabulate,
     TabulationParameters,
     TabulatedFunction3D,
+    TabulatedFunction1D,
     P3ProcessRates,
     compute_p3_process_rates,
     tendency_ρqᶜˡ,
@@ -27,6 +28,7 @@ using Breeze.Microphysics.PredictedParticleProperties:
     rain_evaporation_rate,
     rain_self_collection_rate,
     rain_breakup_rate,
+    rain_terminal_velocity_mass_weighted,
     cloud_condensation_rate,
     ventilation_enhanced_deposition,
     ice_melting_rate,
@@ -34,7 +36,11 @@ using Breeze.Microphysics.PredictedParticleProperties:
     ice_aggregation_rate,
     cloud_riming_rate,
     rain_riming_rate,
-    P3MicrophysicalState
+    P3MicrophysicalState,
+    RainMassWeightedVelocityEvaluator,
+    RainNumberWeightedVelocityEvaluator,
+    RainEvaporationVentilationEvaluator,
+    tabulated_function_1d
 
 using Breeze.Thermodynamics:
     ThermodynamicConstants,
@@ -1663,17 +1669,259 @@ using Oceananigans: CPU
 
         # Table and analytical should agree within order of magnitude
         # (table integrates over PSD, analytical uses mean-mass approximation)
-        # Non-table-dependent rates should be identical
+        # Non-table-dependent rates (no dependence on ice or rain PSD) should be identical
         @test rates_tab.autoconversion ≈ rates_ana.autoconversion
         @test rates_tab.accretion ≈ rates_ana.accretion
-        @test rates_tab.rain_evaporation ≈ rates_ana.rain_evaporation
         @test rates_tab.condensation ≈ rates_ana.condensation
+        # Rain evaporation is now also table-dependent, so allow differences
+        @test rates_tab.rain_evaporation < 0   # Must be negative (evaporation)
+        @test isfinite(rates_tab.rain_evaporation)
 
         # Table-dependent rates should be same sign and order of magnitude
         if rates_ana.deposition != 0
             ratio = rates_tab.deposition / rates_ana.deposition
             @test 0.01 < abs(ratio) < 100
         end
+    end
+
+    #####
+    ##### Rain PSD lookup table tests (TabulatedFunction1D)
+    #####
+
+    @testset "TabulatedFunction1D - smoke test" begin
+        # Tabulate sin(x) on [0, π]
+        x_min = 0.0
+        x_max = π
+        n = 100
+        xs = range(x_min, x_max; length=n)
+        values = sin.(xs)
+        Δx = (x_max - x_min) / (n - 1)
+        f = tabulated_function_1d(values, x_min, x_max, 1 / Δx)
+
+        @test f isa TabulatedFunction1D
+
+        # Check interpolated values match sin(x) within 1e-3 at 50 interior points
+        test_points = range(x_min + 0.01, x_max - 0.01; length=50)
+        for x in test_points
+            @test abs(f(x) - sin(x)) < 1e-3
+        end
+    end
+
+    @testset "TabulatedFunction1D - boundary clamping" begin
+        n = 20
+        xs = range(0.0, 1.0; length=n)
+        values = xs .^ 2
+        Δx = 1.0 / (n - 1)
+        f = tabulated_function_1d(values, 0.0, 1.0, 1 / Δx)
+
+        # Values outside range should clamp to boundary
+        @test f(-1.0) ≈ f(0.0) atol=1e-10
+        @test f(2.0) ≈ f(1.0) atol=1e-10
+    end
+
+    @testset "RainMassWeightedVelocityEvaluator - monotonicity" begin
+        evaluator = RainMassWeightedVelocityEvaluator()
+
+        # λ_r = 1000 m⁻¹ → D_mean = 1mm (large drops, fast)
+        # λ_r = 10000 m⁻¹ → D_mean = 100μm (small drops, slow)
+        V_large = evaluator(log10(1000.0))
+        V_small = evaluator(log10(10000.0))
+
+        @test V_large > 0
+        @test V_small > 0
+        @test V_large > V_small  # Larger drops (small λ_r) fall faster
+    end
+
+    @testset "RainMassWeightedVelocityEvaluator - analytical comparison" begin
+        # For simple power law V(D) = ar * D^br (valid ~134μm to 1.5mm):
+        # V_mass = ar * Γ(4 + br) / (Γ(4) * λ_r^br)
+        # At λ_r = 5000 m⁻¹ (D_mean = 200μm, intermediate drops):
+        # ar = 842, br = 0.8 (Fortran P3 rain fall speed coefficients)
+        using SpecialFunctions: gamma
+
+        ar = 842.0
+        br = 0.8
+        λ_r = 5000.0
+        # Analytical: V_mass = ar * Γ(4+br) / (Γ(4) * λ^br)
+        V_analytical = ar * gamma(4 + br) / (gamma(4) * λ_r^br)
+
+        evaluator = RainMassWeightedVelocityEvaluator()
+        V_numerical = evaluator(log10(λ_r))
+
+        # Should agree within 30% (power law is approximate; piecewise formula differs)
+        @test abs(V_numerical - V_analytical) / V_analytical < 0.30
+    end
+
+    @testset "RainNumberWeightedVelocityEvaluator - positive and monotone" begin
+        evaluator = RainNumberWeightedVelocityEvaluator()
+
+        V_large = evaluator(log10(1000.0))
+        V_small = evaluator(log10(10000.0))
+
+        @test V_large > 0
+        @test V_small > 0
+        @test V_large > V_small
+    end
+
+    @testset "RainEvaporationVentilationEvaluator - large λ_r limit" begin
+        # At λ_r → ∞ (tiny drops), f_v → f1r = 0.78, so:
+        # I_evap → 0.78 / λ_r²
+        # At λ_r = 1e5 (D_mean = 10μm), the Reynolds correction adds ~12%:
+        # f_v ≈ 0.78 + 0.32 × sqrt(842 × (10μm)^1.8 / 1.5e-5) ≈ 0.875
+        # So I_evap should be between 0.78/λ² and 1.2×0.78/λ²
+        evaluator = RainEvaporationVentilationEvaluator()
+
+        λ_r = 1e5   # Large (very tiny drops)
+        I_evap = evaluator(log10(λ_r))
+        I_lower = 0.78 / λ_r^2   # lower bound (f_v = f1r only)
+        I_upper = 1.5 / λ_r^2    # upper bound (generous for finite Reynolds)
+
+        @test I_evap >= I_lower
+        @test I_evap < I_upper
+    end
+
+    @testset "RainEvaporationVentilationEvaluator - positive" begin
+        evaluator = RainEvaporationVentilationEvaluator()
+
+        for log_λ in [2.5, 3.0, 3.5, 4.0, 4.5, 5.0]
+            I = evaluator(log_λ)
+            @test I > 0
+            @test isfinite(I)
+        end
+    end
+
+    @testset "tabulate RainProperties - returns RainProperties with TabulatedFunction1D" begin
+        rain = RainProperties()
+        rain_tab = tabulate(rain, CPU(), Float64;
+                            lambda_points=20,
+                            log_lambda_range=(2.5, 5.5),
+                            quadrature_points=32)
+
+        @test rain_tab isa RainProperties
+        @test rain_tab.velocity_mass isa TabulatedFunction1D
+        @test rain_tab.velocity_number isa TabulatedFunction1D
+        @test rain_tab.evaporation isa TabulatedFunction1D
+
+        # Static fields should be preserved
+        @test rain_tab.maximum_mean_diameter == rain.maximum_mean_diameter
+        @test rain_tab.fall_speed_coefficient == rain.fall_speed_coefficient
+        @test rain_tab.fall_speed_exponent == rain.fall_speed_exponent
+    end
+
+    @testset "tabulate p3 :rain - returns P3 with tabulated RainProperties" begin
+        p3 = PredictedParticlePropertiesMicrophysics()
+        p3_rain = tabulate(p3, :rain, CPU();
+                           lambda_points=20,
+                           log_lambda_range=(2.5, 5.5),
+                           quadrature_points=32)
+
+        @test p3_rain isa PredictedParticlePropertiesMicrophysics
+        @test p3_rain.rain.velocity_mass isa TabulatedFunction1D
+        @test p3_rain.rain.velocity_number isa TabulatedFunction1D
+        @test p3_rain.rain.evaporation isa TabulatedFunction1D
+
+        # Ice should be unchanged
+        @test p3_rain.ice.fall_speed.mass_weighted isa MassWeightedFallSpeed
+    end
+
+    @testset "tabulate(p3, CPU()) includes rain tabulation" begin
+        p3 = PredictedParticlePropertiesMicrophysics()
+        p3_tab = tabulate(p3, CPU();
+                          number_of_mass_points=5,
+                          number_of_rime_fraction_points=2,
+                          number_of_liquid_fraction_points=2,
+                          number_of_quadrature_points=16)
+
+        # Rain should be tabulated
+        @test p3_tab.rain.velocity_mass isa TabulatedFunction1D
+        @test p3_tab.rain.velocity_number isa TabulatedFunction1D
+        @test p3_tab.rain.evaporation isa TabulatedFunction1D
+
+        # Ice should also be tabulated
+        @test p3_tab.ice.fall_speed.mass_weighted isa TabulatedFunction3D
+    end
+
+    @testset "rain_evaporation_rate sign with tabulated scheme" begin
+        # With tabulated rain, evaporation in subsaturated air should be negative
+        p3 = PredictedParticlePropertiesMicrophysics()
+        p3_tab = tabulate(p3, :rain, CPU();
+                          lambda_points=20,
+                          log_lambda_range=(2.5, 5.5),
+                          quadrature_points=32)
+
+        FT = Float64
+        qr = FT(1e-3)
+        nr = FT(1e4)
+        T = FT(288.0)
+        ρ = FT(1.0)
+        qv_sat = FT(0.012)
+        qv_sub = FT(0.008)   # 67% RH — subsaturated
+
+        rate_sub = rain_evaporation_rate(p3_tab, qr, nr, qv_sub, qv_sat, T, ρ)
+        @test rate_sub < 0   # Evaporation removes rain
+
+        # Saturated: zero evaporation
+        rate_sat = rain_evaporation_rate(p3_tab, qr, nr, qv_sat, qv_sat, T, ρ)
+        @test rate_sat == 0
+    end
+
+    @testset "tabulated vs analytical rain evaporation - same sign, finite" begin
+        # The tabulated (PSD-integrated) and mean-mass formulas can differ significantly
+        # because mean-mass uses V=130 D^0.5 (a tuned approximation) while tabulated
+        # uses Gunn-Kinzer fall speeds with proper PSD integration. Both should be
+        # negative (evaporation) and finite, but their magnitudes may differ by more
+        # than a factor of 2 due to the different ventilation approximations.
+        p3_ana = PredictedParticlePropertiesMicrophysics()
+        p3_tab = tabulate(p3_ana, :rain, CPU();
+                          lambda_points=50,
+                          log_lambda_range=(2.5, 5.5),
+                          quadrature_points=64)
+
+        FT = Float64
+        qr = FT(1e-3)
+        nr = FT(1e4)
+        T = FT(288.0)
+        ρ = FT(1.0)
+        qv_sat = FT(0.012)
+        qv_sub = FT(0.008)
+
+        rate_ana = rain_evaporation_rate(p3_ana, qr, nr, qv_sub, qv_sat, T, ρ)
+        rate_tab = rain_evaporation_rate(p3_tab, qr, nr, qv_sub, qv_sat, T, ρ)
+
+        # Both should be negative (evaporation) and finite
+        @test rate_ana < 0
+        @test rate_tab < 0
+        @test isfinite(rate_ana)
+        @test isfinite(rate_tab)
+
+        # Same sign and both physically reasonable (not zero, not astronomical)
+        @test abs(rate_tab) > 0
+        @test abs(rate_tab) < 1.0   # Cannot evaporate more than all rain per second
+    end
+
+    @testset "tabulated rain terminal velocity - positive and monotone" begin
+        p3 = PredictedParticlePropertiesMicrophysics()
+        p3_tab = tabulate(p3, :rain, CPU();
+                          lambda_points=30,
+                          log_lambda_range=(2.5, 5.5),
+                          quadrature_points=32)
+
+        FT = Float64
+        ρ = FT(1.0)
+
+        # Large drops (small nr relative to qr → large mean mass)
+        qr_large = FT(1e-3)
+        nr_large_drops = FT(1e2)   # Few large drops
+
+        # Small drops (many drops for same qr → small mean mass)
+        nr_small_drops = FT(1e5)   # Many small drops
+
+        V_large = rain_terminal_velocity_mass_weighted(p3_tab, qr_large, nr_large_drops, ρ)
+        V_small = rain_terminal_velocity_mass_weighted(p3_tab, qr_large, nr_small_drops, ρ)
+
+        @test V_large > 0
+        @test V_small > 0
+        @test V_large > V_small  # Larger drops fall faster
     end
 
     @testset "Vapor + cloud + rain + ice mass conservation" begin

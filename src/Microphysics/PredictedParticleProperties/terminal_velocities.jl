@@ -10,7 +10,13 @@
 
 Compute mass-weighted terminal velocity for rain.
 
-Uses the power-law relationship v(D) = a × D^b × √(ρ₀/ρ).
+Dispatches on `p3.rain.velocity_mass`:
+
+- **Tabulated** (`TabulatedFunction1D`): Looks up the PSD-integrated velocity
+  at `log10(λ_r)` and applies the air density correction `(ρ₀/ρ)^0.54`.
+- **Mean-mass** (`RainVelocityMass`): Uses power-law `v = a D^b` at the
+  volume-mean drop diameter.
+
 See [Seifert and Beheng (2006)](@cite SeifertBeheng2006).
 
 # Arguments
@@ -26,40 +32,59 @@ See [Seifert and Beheng (2006)](@cite SeifertBeheng2006).
     FT = typeof(qʳ)
     prp = p3.process_rates
 
-    a = prp.rain_fall_speed_coefficient
-    b = prp.rain_fall_speed_exponent
     ρ₀ = prp.reference_air_density
     ρʷ = prp.liquid_water_density
-    D_min = prp.rain_diameter_min
-    D_max = prp.rain_diameter_max
     v_min = prp.rain_velocity_min
     v_max = prp.rain_velocity_max
 
     qʳ_eff = clamp_positive(qʳ)
     nʳ_eff = max(nʳ, FT(1))
 
-    # Mean rain drop mass
-    m̄ = qʳ_eff / nʳ_eff
-
-    # Mass-weighted mean diameter: m = (π/6) ρʷ D³
-    D̄ₘ = cbrt(6 * m̄ / (FT(π) * ρʷ))
-
     # Density correction factor (Heymsfield et al. 2006)
     ρ_correction = (ρ₀ / ρ)^FT(0.54)
 
-    # Clamp diameter to physical range
-    D̄ₘ_clamped = clamp(D̄ₘ, D_min, D_max)
-
-    # Terminal velocity
-    vₜ = a * D̄ₘ_clamped^b * ρ_correction
+    vₜ = _tabulated_rain_mass_weighted_velocity(p3.rain.velocity_mass,
+                                                 qʳ_eff, nʳ_eff, ρ_correction,
+                                                 ρʷ, prp, FT)
 
     return clamp(vₜ, v_min, v_max)
+end
+
+# Tabulated path: look up PSD-integrated mass-weighted velocity
+@inline function _tabulated_rain_mass_weighted_velocity(table::TabulatedFunction1D,
+                                                         qʳ, nʳ, ρ_correction, ρʷ, prp, FT)
+    m̄  = qʳ / nʳ
+    λ_r = cbrt(FT(π) * ρʷ / (6 * max(m̄, FT(1e-15))))
+    log_λ = log10(max(λ_r, FT(1e-3)))
+    vₜ_ref = table(log_λ)
+    return vₜ_ref * ρ_correction
+end
+
+# Mean-mass fallback path
+@inline function _tabulated_rain_mass_weighted_velocity(::Any,
+                                                         qʳ, nʳ, ρ_correction, ρʷ, prp, FT)
+    a = prp.rain_fall_speed_coefficient
+    b = prp.rain_fall_speed_exponent
+    D_min = prp.rain_diameter_min
+    D_max = prp.rain_diameter_max
+
+    m̄ = qʳ / nʳ
+    D̄ₘ = cbrt(6 * m̄ / (FT(π) * ρʷ))
+    D̄ₘ_clamped = clamp(D̄ₘ, D_min, D_max)
+    return a * D̄ₘ_clamped^b * ρ_correction
 end
 
 """
     rain_terminal_velocity_number_weighted(p3, qʳ, nʳ, ρ)
 
 Compute number-weighted terminal velocity for rain.
+
+Dispatches on `p3.rain.velocity_number`:
+
+- **Tabulated** (`TabulatedFunction1D`): Looks up the PSD-integrated number-
+  weighted velocity at `log10(λ_r)` with air density correction.
+- **Mean-mass** (`RainVelocityNumber`): Uses a fixed ratio to the mass-weighted
+  velocity.
 
 # Arguments
 - `p3`: P3 microphysics scheme (provides parameters)
@@ -74,10 +99,42 @@ Compute number-weighted terminal velocity for rain.
     FT = typeof(qʳ)
     prp = p3.process_rates
 
-    # Number-weighted velocity is smaller than mass-weighted
-    ratio = prp.velocity_ratio_number_to_mass
-    vₘ = rain_terminal_velocity_mass_weighted(p3, qʳ, nʳ, ρ)
+    ρ₀ = prp.reference_air_density
+    ρʷ = prp.liquid_water_density
+    v_min = prp.rain_velocity_min
+    v_max = prp.rain_velocity_max
 
+    qʳ_eff = clamp_positive(qʳ)
+    nʳ_eff = max(nʳ, FT(1))
+
+    ρ_correction = (ρ₀ / ρ)^FT(0.54)
+
+    vₜ = _tabulated_rain_number_weighted_velocity(p3.rain.velocity_number,
+                                                   p3.rain.velocity_mass,
+                                                   qʳ_eff, nʳ_eff, ρ_correction,
+                                                   ρʷ, prp, FT)
+
+    return clamp(vₜ, v_min, v_max)
+end
+
+# Tabulated path: look up PSD-integrated number-weighted velocity
+@inline function _tabulated_rain_number_weighted_velocity(table::TabulatedFunction1D,
+                                                           ::Any,
+                                                           qʳ, nʳ, ρ_correction, ρʷ, prp, FT)
+    m̄  = qʳ / nʳ
+    λ_r = cbrt(FT(π) * ρʷ / (6 * max(m̄, FT(1e-15))))
+    log_λ = log10(max(λ_r, FT(1e-3)))
+    vₜ_ref = table(log_λ)
+    return vₜ_ref * ρ_correction
+end
+
+# Mean-mass fallback: use fixed ratio to mass-weighted velocity
+@inline function _tabulated_rain_number_weighted_velocity(::Any,
+                                                           vel_mass_field,
+                                                           qʳ, nʳ, ρ_correction, ρʷ, prp, FT)
+    ratio = prp.velocity_ratio_number_to_mass
+    vₘ = _tabulated_rain_mass_weighted_velocity(vel_mass_field, qʳ, nʳ,
+                                                  ρ_correction, ρʷ, prp, FT)
     return ratio * vₘ
 end
 
