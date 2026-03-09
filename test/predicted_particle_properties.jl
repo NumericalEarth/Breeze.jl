@@ -21,7 +21,25 @@ using Breeze.Microphysics.PredictedParticleProperties:
     tendency_ρbᶠ,
     tendency_ρzⁱ,
     tendency_ρqʷⁱ,
-    tendency_ρqᵛ
+    tendency_ρqᵛ,
+    rain_autoconversion_rate,
+    rain_accretion_rate,
+    rain_evaporation_rate,
+    rain_self_collection_rate,
+    rain_breakup_rate,
+    cloud_condensation_rate,
+    ventilation_enhanced_deposition,
+    ice_melting_rate,
+    ice_melting_rates,
+    ice_aggregation_rate,
+    cloud_riming_rate,
+    rain_riming_rate,
+    P3MicrophysicalState
+
+using Breeze.Thermodynamics:
+    ThermodynamicConstants,
+    MoistureMassFractions,
+    LiquidIcePotentialTemperatureState
 
 using Oceananigans: CPU
 
@@ -440,19 +458,16 @@ using Oceananigans: CPU
             shape = 0.0,
             slope = 1000.0)
 
-        # Test that quadrature converges with increasing number of points
+        # Test that quadrature gives consistent results across resolutions
         V_16 = evaluate(NumberWeightedFallSpeed(), state; n_quadrature=16)
         V_32 = evaluate(NumberWeightedFallSpeed(), state; n_quadrature=32)
         V_64 = evaluate(NumberWeightedFallSpeed(), state; n_quadrature=64)
         V_128 = evaluate(NumberWeightedFallSpeed(), state; n_quadrature=128)
 
-        # Should converge (differences decrease)
-        diff_16_32 = abs(V_32 - V_16)
-        diff_32_64 = abs(V_64 - V_32)
-        diff_64_128 = abs(V_128 - V_64)
-
-        @test diff_32_64 < diff_16_32 || diff_32_64 < 1e-10
-        @test diff_64_128 < diff_32_64 || diff_64_128 < 1e-10
+        # All resolutions should give values within 1% of the high-resolution result
+        @test abs(V_16 - V_128) / V_128 < 0.01
+        @test abs(V_32 - V_128) / V_128 < 0.01
+        @test abs(V_64 - V_128) / V_128 < 0.01
     end
 
     @testset "Tabulation parameters" begin
@@ -1238,5 +1253,475 @@ using Oceananigans: CPU
         @test tendency_ρzⁱ(rates, ρ, FT(1e-4), FT(1e5), FT(1e-8)) isa FT
         @test tendency_ρqʷⁱ(rates, ρ) isa FT
         @test tendency_ρqᵛ(rates, ρ) isa FT
+    end
+
+    #####
+    ##### Process rate function tests
+    #####
+
+    @testset "rain_autoconversion_rate" begin
+        p3 = PredictedParticlePropertiesMicrophysics()
+        FT = Float64
+
+        # KK2000 formula with typical cumulus values
+        qc = FT(1e-3)     # 1 g/kg cloud water
+        Nc = FT(100e6)     # 100 cm⁻³ cloud droplet concentration
+
+        rate = rain_autoconversion_rate(p3, qc, Nc)
+        @test rate > 0
+        # KK2000 gives O(1e-6) kg/kg/s for these inputs
+        @test rate > 1e-8
+        @test rate < 1e-3
+
+        # Higher cloud water content gives faster autoconversion
+        rate_high = rain_autoconversion_rate(p3, FT(2e-3), Nc)
+        @test rate_high > rate
+
+        # Zero cloud water gives zero autoconversion
+        rate_zero = rain_autoconversion_rate(p3, FT(0), Nc)
+        @test rate_zero == 0
+
+        # Below threshold gives zero (threshold is 1e-4 kg/kg)
+        rate_below = rain_autoconversion_rate(p3, FT(5e-5), Nc)
+        @test rate_below == 0
+    end
+
+    @testset "rain_accretion_rate" begin
+        p3 = PredictedParticlePropertiesMicrophysics()
+        FT = Float64
+
+        qc = FT(1e-3)
+        qr = FT(1e-3)
+
+        rate = rain_accretion_rate(p3, qc, qr)
+        @test rate > 0
+        @test isfinite(rate)
+
+        # Zero cloud gives zero accretion
+        @test rain_accretion_rate(p3, FT(0), qr) == 0
+
+        # Zero rain gives zero accretion
+        @test rain_accretion_rate(p3, qc, FT(0)) == 0
+
+        # Higher rain gives faster accretion
+        rate_high = rain_accretion_rate(p3, qc, FT(2e-3))
+        @test rate_high > rate
+    end
+
+    @testset "rain_evaporation_rate" begin
+        p3 = PredictedParticlePropertiesMicrophysics()
+        FT = Float64
+
+        qr = FT(1e-3)
+        nr = FT(1e4)
+        T = FT(288.0)
+        ρ = FT(1.0)
+
+        # Subsaturated: qv < qv_sat → negative evaporation rate
+        qv_sat = FT(0.012)
+        qv_sub = FT(0.008)    # 67% RH
+        rate_sub = rain_evaporation_rate(p3, qr, nr, qv_sub, qv_sat, T, ρ)
+        @test rate_sub < 0     # Negative = rain evaporating
+
+        # Saturated: qv = qv_sat → zero evaporation
+        rate_sat = rain_evaporation_rate(p3, qr, nr, qv_sat, qv_sat, T, ρ)
+        @test rate_sat == 0
+
+        # Supersaturated: qv > qv_sat → zero (no condensation on rain)
+        qv_super = FT(0.015)
+        rate_super = rain_evaporation_rate(p3, qr, nr, qv_super, qv_sat, T, ρ)
+        @test rate_super == 0
+
+        # Zero rain gives zero evaporation
+        rate_norain = rain_evaporation_rate(p3, FT(0), nr, qv_sub, qv_sat, T, ρ)
+        @test rate_norain == 0
+    end
+
+    @testset "cloud_condensation_rate" begin
+        p3 = PredictedParticlePropertiesMicrophysics()
+        FT = Float64
+        constants = ThermodynamicConstants(FT)
+
+        qcl = FT(1e-3)
+        T = FT(288.0)
+        qv_sat = FT(0.012)
+
+        q = MoistureMassFractions(FT(0.015), FT(1e-3), FT(0))
+
+        # Supersaturated: positive condensation
+        qv_super = FT(0.015)
+        rate_super = cloud_condensation_rate(p3, qcl, qv_super, qv_sat, T, q, constants)
+        @test rate_super > 0
+
+        # Subsaturated: negative (evaporation), limited by available cloud
+        qv_sub = FT(0.008)
+        q_sub = MoistureMassFractions(qv_sub, qcl, FT(0))
+        rate_sub = cloud_condensation_rate(p3, qcl, qv_sub, qv_sat, T, q_sub, constants)
+        @test rate_sub < 0
+
+        # Saturated: approximately zero
+        rate_sat = cloud_condensation_rate(p3, qcl, qv_sat, qv_sat, T, q, constants)
+        @test abs(rate_sat) < 1e-10
+    end
+
+    @testset "ventilation_enhanced_deposition" begin
+        p3 = PredictedParticlePropertiesMicrophysics()
+        FT = Float64
+
+        qi = FT(1e-4)
+        ni = FT(1e4)
+        Ff = FT(0.0)     # Unrimed
+        ρf = FT(400.0)
+        T = FT(253.15)   # -20C (cold, ice supersaturated)
+        P = FT(50000.0)
+
+        # Supersaturated over ice: positive deposition
+        qv_sat_ice = FT(0.0005)
+        qv_super = FT(0.001)    # Well above ice saturation
+        rate_dep = ventilation_enhanced_deposition(p3, qi, ni, qv_super, qv_sat_ice, Ff, ρf, T, P)
+        @test rate_dep > 0
+
+        # Subsaturated over ice: negative (sublimation)
+        qv_sub = FT(0.0001)
+        rate_sub = ventilation_enhanced_deposition(p3, qi, ni, qv_sub, qv_sat_ice, Ff, ρf, T, P)
+        @test rate_sub < 0
+
+        # Zero ice gives zero deposition rate (mean mass → default)
+        rate_noice = ventilation_enhanced_deposition(p3, FT(0), FT(0), qv_super, qv_sat_ice, Ff, ρf, T, P)
+        @test abs(rate_noice) < 1e-20
+    end
+
+    @testset "ice_melting_rate" begin
+        p3 = PredictedParticlePropertiesMicrophysics()
+        FT = Float64
+
+        qi = FT(1e-4)
+        ni = FT(1e4)
+        P = FT(85000.0)
+        qv = FT(0.008)
+        qv_sat = FT(0.01)
+        Ff = FT(0.0)
+        ρf = FT(400.0)
+        ρ = FT(1.0)
+
+        # Above freezing: positive melting
+        T_warm = FT(275.15)    # +2C
+        rate_warm = ice_melting_rate(p3, qi, ni, T_warm, P, qv, qv_sat, Ff, ρf, ρ)
+        @test rate_warm > 0
+
+        # Below freezing: zero melting
+        T_cold = FT(263.15)    # -10C
+        rate_cold = ice_melting_rate(p3, qi, ni, T_cold, P, qv, qv_sat, Ff, ρf, ρ)
+        @test rate_cold == 0
+
+        # Exactly at freezing: zero (no ΔT to drive melting)
+        T_freeze = FT(273.15)
+        rate_freeze = ice_melting_rate(p3, qi, ni, T_freeze, P, qv, qv_sat, Ff, ρf, ρ)
+        @test rate_freeze == 0
+
+        # Warmer temperatures give faster melting
+        T_hot = FT(278.15)     # +5C
+        rate_hot = ice_melting_rate(p3, qi, ni, T_hot, P, qv, qv_sat, Ff, ρf, ρ)
+        @test rate_hot > rate_warm
+    end
+
+    @testset "ice_melting_rates partitioning" begin
+        p3 = PredictedParticlePropertiesMicrophysics()
+        FT = Float64
+
+        qi = FT(1e-4)
+        ni = FT(1e4)
+        P = FT(85000.0)
+        qv = FT(0.008)
+        qv_sat = FT(0.01)
+        Ff = FT(0.0)
+        ρf = FT(400.0)
+        ρ = FT(1.0)
+        T = FT(275.15)
+
+        # No liquid on ice: all melting is partial (goes to coating)
+        qwi_zero = FT(0)
+        rates_dry = ice_melting_rates(p3, qi, ni, qwi_zero, T, P, qv, qv_sat, Ff, ρf, ρ)
+        total = rates_dry.partial_melting + rates_dry.complete_melting
+        @test total > 0
+        @test rates_dry.partial_melting >= 0
+        @test rates_dry.complete_melting >= 0
+
+        # Saturated liquid coating: more complete melting
+        qwi_high = FT(0.5 * qi)   # 50% liquid fraction
+        rates_wet = ice_melting_rates(p3, qi, ni, qwi_high, T, P, qv, qv_sat, Ff, ρf, ρ)
+        @test rates_wet.complete_melting >= rates_dry.complete_melting
+    end
+
+    @testset "ice_aggregation_rate" begin
+        p3 = PredictedParticlePropertiesMicrophysics()
+        FT = Float64
+
+        qi = FT(1e-4)
+        ni = FT(1e5)
+        Ff = FT(0.0)
+        ρf = FT(400.0)
+
+        # Near freezing (warm ice, sticky): aggregation active
+        T_warm = FT(268.15)    # -5C
+        rate_warm = ice_aggregation_rate(p3, qi, ni, T_warm, Ff, ρf)
+        @test rate_warm < 0     # Number reduction rate is negative
+
+        # Very cold (T < 253.15 K): much less aggregation
+        T_cold = FT(233.15)    # -40C
+        rate_cold = ice_aggregation_rate(p3, qi, ni, T_cold, Ff, ρf)
+        # Aggregation efficiency at very cold T is 0.001 vs ~0.15 at -5C
+        @test abs(rate_cold) < abs(rate_warm)
+
+        # Zero ice: zero aggregation
+        rate_noice = ice_aggregation_rate(p3, FT(0), FT(0), T_warm, Ff, ρf)
+        @test rate_noice == 0
+
+        # Heavily rimed (Ff > 0.9): aggregation shuts off
+        rate_rimed = ice_aggregation_rate(p3, qi, ni, T_warm, FT(0.95), ρf)
+        @test rate_rimed == 0
+    end
+
+    @testset "cloud_riming_rate" begin
+        p3 = PredictedParticlePropertiesMicrophysics()
+        FT = Float64
+
+        qc = FT(1e-3)
+        qi = FT(1e-4)
+        ni = FT(1e4)
+        Ff = FT(0.0)
+        ρf = FT(400.0)
+        ρ = FT(1.0)
+
+        # Below freezing with cloud and ice: positive riming
+        T_cold = FT(263.15)    # -10C
+        rate = cloud_riming_rate(p3, qc, qi, ni, T_cold, Ff, ρf, ρ)
+        @test rate > 0
+
+        # Above freezing: zero riming
+        T_warm = FT(278.15)
+        rate_warm = cloud_riming_rate(p3, qc, qi, ni, T_warm, Ff, ρf, ρ)
+        @test rate_warm == 0
+
+        # Zero cloud: zero riming
+        rate_nocloud = cloud_riming_rate(p3, FT(0), qi, ni, T_cold, Ff, ρf, ρ)
+        @test rate_nocloud == 0
+
+        # Zero ice: zero riming
+        rate_noice = cloud_riming_rate(p3, qc, FT(0), FT(0), T_cold, Ff, ρf, ρ)
+        @test rate_noice == 0
+
+        # More cloud water gives faster riming (rate is linear in qc)
+        rate_high = cloud_riming_rate(p3, FT(2e-3), qi, ni, T_cold, Ff, ρf, ρ)
+        @test rate_high > rate
+    end
+
+    @testset "rain_riming_rate" begin
+        p3 = PredictedParticlePropertiesMicrophysics()
+        FT = Float64
+
+        # Ice must dominate rain for rain riming
+        qr = FT(1e-5)
+        qi = FT(1e-4)    # qi > qr
+        ni = FT(1e4)
+        Ff = FT(0.0)
+        ρf = FT(400.0)
+        ρ = FT(1.0)
+
+        T_cold = FT(263.15)
+        rate = rain_riming_rate(p3, qr, qi, ni, T_cold, Ff, ρf, ρ)
+        @test rate > 0
+
+        # Above freezing: zero
+        rate_warm = rain_riming_rate(p3, qr, qi, ni, FT(278.15), Ff, ρf, ρ)
+        @test rate_warm == 0
+
+        # Rain dominates ice (qr > qi): zero (handled by driver differently)
+        rate_rain_dom = rain_riming_rate(p3, FT(1e-3), FT(1e-5), ni, T_cold, Ff, ρf, ρ)
+        @test rate_rain_dom == 0
+    end
+
+    @testset "compute_p3_process_rates integration" begin
+        p3 = PredictedParticlePropertiesMicrophysics()
+        FT = Float64
+        constants = ThermodynamicConstants(FT)
+
+        ρ = FT(1.0)
+
+        # Mixed-phase state: T = -5C, some cloud, rain, ice
+        T = FT(268.15)
+        qv = FT(0.003)
+        qcl = FT(5e-4)
+        qr = FT(1e-4)
+        qi = FT(1e-4)
+        qf = FT(1e-5)     # Some rime
+
+        q = MoistureMassFractions(qv, qcl + qr, qi)
+
+        # Build thermodynamic state: use potential temperature formulation
+        # θ ≈ T / Π, for simplicity set pˢᵗ = P so Π ≈ 1
+        P = FT(85000.0)
+        pst = FT(100000.0)
+        θ = T / (P / pst)^FT(0.286)  # Approximate dry potential temperature
+        𝒰 = LiquidIcePotentialTemperatureState(θ, q, pst, P)
+
+        ℳ = P3MicrophysicalState(
+            qcl,           # qᶜˡ
+            qr,            # qʳ
+            FT(1e4),       # nʳ
+            qi,            # qⁱ
+            FT(1e5),       # nⁱ
+            qf,            # qᶠ
+            FT(qf / 400),  # bᶠ (rime volume)
+            FT(1e-10),     # zⁱ (reflectivity)
+            FT(0),         # qʷⁱ (liquid on ice)
+        )
+
+        rates = compute_p3_process_rates(p3, ρ, ℳ, 𝒰, constants)
+        @test rates isa P3ProcessRates{FT}
+
+        # All rates should be finite
+        for name in fieldnames(P3ProcessRates)
+            @test isfinite(getfield(rates, name))
+        end
+
+        # Sign checks for a cold mixed-phase environment:
+        # Autoconversion should be positive (cloud → rain)
+        @test rates.autoconversion > 0
+
+        # Cloud riming should be positive (below freezing with cloud + ice)
+        @test rates.cloud_riming > 0
+
+        # Melting should be zero (below freezing)
+        @test rates.partial_melting == 0
+        @test rates.complete_melting == 0
+
+        # Aggregation should be negative (number loss)
+        @test rates.aggregation <= 0
+
+        # Rime density should be physical
+        @test rates.rime_density_new >= 50
+        @test rates.rime_density_new <= 900
+    end
+
+    @testset "compute_p3_process_rates with tabulated scheme" begin
+        p3 = PredictedParticlePropertiesMicrophysics()
+        FT = Float64
+        constants = ThermodynamicConstants(FT)
+
+        # Tabulate all ice integrals (small grid for speed)
+        p3_tab = tabulate(p3, CPU();
+            number_of_mass_points=20,
+            number_of_rime_fraction_points=4,
+            number_of_liquid_fraction_points=2,
+            number_of_quadrature_points=32)
+
+        # Verify tabulated scheme has TabulatedFunction3D fields
+        @test p3_tab.ice.fall_speed.mass_weighted isa TabulatedFunction3D
+        @test p3_tab.ice.deposition.ventilation isa TabulatedFunction3D
+        @test p3_tab.ice.collection.aggregation isa TabulatedFunction3D
+        @test p3_tab.ice.collection.rain_collection isa TabulatedFunction3D
+
+        ρ = FT(1.0)
+
+        # Mixed-phase state: T = -5C
+        T = FT(268.15)
+        qv = FT(0.003)
+        qcl = FT(5e-4)
+        qr = FT(1e-4)
+        qi = FT(1e-4)
+        qf = FT(1e-5)
+
+        q = MoistureMassFractions(qv, qcl + qr, qi)
+        P = FT(85000.0)
+        pst = FT(100000.0)
+        θ = T / (P / pst)^FT(0.286)
+        𝒰 = LiquidIcePotentialTemperatureState(θ, q, pst, P)
+
+        ℳ = P3MicrophysicalState(
+            qcl, qr, FT(1e4), qi, FT(1e5), qf,
+            FT(qf / 400), FT(1e-10), FT(0))
+
+        # Compute rates with tabulated scheme
+        rates_tab = compute_p3_process_rates(p3_tab, ρ, ℳ, 𝒰, constants)
+        @test rates_tab isa P3ProcessRates{FT}
+
+        # All rates should be finite
+        for name in fieldnames(P3ProcessRates)
+            @test isfinite(getfield(rates_tab, name))
+        end
+
+        # Sign checks should be consistent with analytical path
+        @test rates_tab.autoconversion > 0
+        @test rates_tab.cloud_riming > 0
+        @test rates_tab.partial_melting == 0
+        @test rates_tab.complete_melting == 0
+        @test rates_tab.aggregation <= 0
+
+        # Compute rates with analytical scheme for comparison
+        rates_ana = compute_p3_process_rates(p3, ρ, ℳ, 𝒰, constants)
+
+        # Table and analytical should agree within order of magnitude
+        # (table integrates over PSD, analytical uses mean-mass approximation)
+        # Non-table-dependent rates should be identical
+        @test rates_tab.autoconversion ≈ rates_ana.autoconversion
+        @test rates_tab.accretion ≈ rates_ana.accretion
+        @test rates_tab.rain_evaporation ≈ rates_ana.rain_evaporation
+        @test rates_tab.condensation ≈ rates_ana.condensation
+
+        # Table-dependent rates should be same sign and order of magnitude
+        if rates_ana.deposition != 0
+            ratio = rates_tab.deposition / rates_ana.deposition
+            @test 0.01 < abs(ratio) < 100
+        end
+    end
+
+    @testset "Vapor + cloud + rain + ice mass conservation" begin
+        p3 = PredictedParticlePropertiesMicrophysics()
+        FT = Float64
+
+        ρ = FT(1.0)
+
+        # Create rates with typical mixed-phase values
+        rates = P3ProcessRates(
+            FT(5e-7),   # condensation
+            FT(1e-7),   # autoconversion
+            FT(2e-7),   # accretion
+            FT(-5e-8),  # rain_evaporation
+            FT(-1e-6),  # rain_self_collection
+            FT(5e-7),   # rain_breakup
+            FT(3e-7),   # deposition
+            FT(1e-8),   # partial_melting
+            FT(5e-8),   # complete_melting
+            FT(-1e3),   # melting_number
+            FT(-500.0), # aggregation
+            FT(1e-7),   # cloud_riming
+            FT(-1e4),   # cloud_riming_number
+            FT(5e-8),   # rain_riming
+            FT(-500.0), # rain_riming_number
+            FT(300.0),  # rime_density_new
+            FT(2e-8),   # shedding
+            FT(100.0),  # shedding_number
+            FT(1e-8),   # refreezing
+            FT(1e-9),   # nucleation_mass
+            FT(10.0),   # nucleation_number
+            FT(5e-9),   # cloud_freezing_mass
+            FT(100.0),  # cloud_freezing_number
+            FT(3e-9),   # rain_freezing_mass
+            FT(50.0),   # rain_freezing_number
+            FT(1e-10),  # splintering_mass
+            FT(1.0),    # splintering_number
+        )
+
+        # Compute total water tendency: vapor + cloud + rain + ice + liquid_on_ice
+        # These should sum to zero (water is neither created nor destroyed)
+        dqv = tendency_ρqᵛ(rates, ρ)
+        dqc = tendency_ρqᶜˡ(rates, ρ)
+        dqr = tendency_ρqʳ(rates, ρ)
+        dqi = tendency_ρqⁱ(rates, ρ)
+        dqwi = tendency_ρqʷⁱ(rates, ρ)
+
+        total_water_tendency = dqv + dqc + dqr + dqi + dqwi
+        @test abs(total_water_tendency) < 1e-15 * ρ
     end
 end

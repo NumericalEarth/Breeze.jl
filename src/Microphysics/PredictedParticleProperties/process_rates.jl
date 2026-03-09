@@ -74,7 +74,8 @@ end
     ρ_eff = (1 - Fᶠ) * ρ_eff_unrimed + Fᶠ * ρᶠ
     D_mean = cbrt(6 * m_mean / (FT(π) * ρ_eff))
     D_threshold = prp.ice_diameter_threshold
-    C = ifelse(D_mean < D_threshold, D_mean / 2, FT(0.48) * D_mean)
+    # P3 Fortran convention: capm = cap × D where cap=1 for sphere, 0.48 for aggregate
+    C = ifelse(D_mean < D_threshold, D_mean, FT(0.48) * D_mean)
     ν = FT(1.5e-5)
     V = prp.ice_fall_speed_coefficient_unrimed * D_mean^prp.ice_fall_speed_exponent_unrimed
     Re_term = sqrt(V * D_mean / ν)
@@ -123,11 +124,10 @@ Analytical path: A_mean × ΔV at mean diameter.
                                       m_mean, Fᶠ, ρᶠ, prp)
     FT = typeof(m_mean)
     log_m = log10(max(m_mean, FT(1e-20)))
-    # Table stores ∫ E_agg(0.1) × V × A × N'² dD.
-    # Divide by E_agg so the caller can apply temperature-dependent Eᵢᵢ.
-    # TODO: remove E_agg from AggregationNumber integrand for cleaner separation
-    raw = coll(log_m, Fᶠ, zero(FT))
-    return raw / FT(0.1)
+    # Table stores the half-integral (Fortran convention):
+    # (1/2) ∫∫ (√A₁+√A₂)² |V₁-V₂| N₁ N₂ dD₁ dD₂
+    # No E_agg — collection efficiency is applied by the caller.
+    return coll(log_m, Fᶠ, zero(FT))
 end
 
 @inline function _aggregation_kernel(::Any, m_mean, Fᶠ, ρᶠ, prp)
@@ -142,7 +142,8 @@ end
     A_sphere = FT(π) / 4 * D_mean^2
     A_mean = (1 - Fᶠ) * A_agg + Fᶠ * A_sphere
     ΔV = FT(0.5) * V_mean
-    return A_mean * ΔV
+    # Factor of 0.5 for self-collection (half-integral convention, matching table)
+    return FT(0.5) * A_mean * ΔV
 end
 
 #####
@@ -249,7 +250,8 @@ The bulk rate integrates over the size distribution:
     # Derived from qᵛ⁺ⁱ: qᵛ⁺ⁱ = ε × e_si / (P - (1-ε) × e_si)
     # Rearranging: e_si = P × qᵛ⁺ⁱ / (ε + qᵛ⁺ⁱ × (1 - ε))
     ε = R_d / R_v
-    e_si = P * qᵛ⁺ⁱ / (ε + qᵛ⁺ⁱ * (1 - ε))
+    qᵛ⁺ⁱ_safe = max(qᵛ⁺ⁱ, FT(1e-30))
+    e_si = P * qᵛ⁺ⁱ_safe / (ε + qᵛ⁺ⁱ_safe * (1 - ε))
 
     # Supersaturation ratio with respect to ice
     S_i = qᵛ / max(qᵛ⁺ⁱ, FT(1e-10))
@@ -271,7 +273,10 @@ The bulk rate integrates over the size distribution:
     thermodynamic_factor = A + B
 
     # Deposition rate per particle (Eq. 30 from MM15a)
-    dm_dt = FT(4π) * C_fv * (S_i - 1) / thermodynamic_factor
+    # Uses 2π (not 4π) because the ventilation integral stores capm = cap × D
+    # (P3 Fortran convention), which is 2× the physical capacitance C = D/2.
+    # The product 2π × capm = 2π × 2C = 4πC is physically correct.
+    dm_dt = FT(2π) * C_fv * (S_i - 1) / thermodynamic_factor
 
     # Scale by number concentration
     dep_rate = nⁱ_eff * dm_dt

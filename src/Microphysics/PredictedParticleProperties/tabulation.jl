@@ -134,7 +134,7 @@ the raw integral ∫ f(D) N'(D) dD gives per-particle values.
                                                 rime_fraction,
                                                 liquid_fraction;
                                                 rime_density = typeof(mean_particle_mass)(400),
-                                                air_density = typeof(mean_particle_mass)(1.225))
+                                                air_density = typeof(mean_particle_mass)(P3_REF_RHO))
     FT = typeof(mean_particle_mass)
 
     mass = IceMassPowerLaw(FT)
@@ -204,11 +204,63 @@ This is the core numerical integration routine.
     return result
 end
 
+"""
+    evaluate_quadrature(::AggregationNumber, state, nodes, weights)
+
+Specialized double-integral evaluator for aggregation following the Fortran P3 convention:
+
+```math
+N_{agg} = \\frac{1}{2} \\int\\int (\\sqrt{A_1} + \\sqrt{A_2})^2 |V_1 - V_2| N'(D_1) N'(D_2) \\, dD_1 \\, dD_2
+```
+
+The factor of 1/2 matches the Fortran P3 table convention, which sums over the
+upper triangle (j > k) to count each particle pair once. This replaces the
+Wisner (1972) single-integral approximation with the full collision kernel.
+"""
+function evaluate_quadrature(::AggregationNumber,
+                             state::IceSizeDistributionState,
+                             nodes, weights)
+    FT = typeof(state.slope)
+    λ = state.slope
+    result = zero(FT)
+    n = length(nodes)
+
+    for i in 1:n
+        x₁ = @inbounds nodes[i]
+        w₁ = @inbounds weights[i]
+        D₁ = transform_to_diameter(x₁, λ)
+        J₁ = jacobian_diameter_transform(x₁, λ)
+        V₁ = terminal_velocity(D₁, state)
+        A₁ = particle_area(D₁, state)
+        N₁ = size_distribution(D₁, state)
+
+        for j in 1:n
+            x₂ = @inbounds nodes[j]
+            w₂ = @inbounds weights[j]
+            D₂ = transform_to_diameter(x₂, λ)
+            J₂ = jacobian_diameter_transform(x₂, λ)
+            V₂ = terminal_velocity(D₂, state)
+            A₂ = particle_area(D₂, state)
+            N₂ = size_distribution(D₂, state)
+
+            # Fortran kernel: (√A₁ + √A₂)² × |V₁ - V₂|
+            kernel = (sqrt(A₁) + sqrt(A₂))^2 * abs(V₁ - V₂)
+            result += w₁ * w₂ * kernel * N₁ * N₂ * J₁ * J₂
+        end
+    end
+
+    # Factor of 1/2 for self-collection: each pair (D₁, D₂) counted once.
+    # Matches Fortran upper-triangle summation convention.
+    return result * FT(0.5)
+end
+
 #####
 ##### Integral normalization for tabulation
 #####
 ##### Tables store physically meaningful quantities:
 ##### - Fall speeds: actual velocities [m/s] (divide by appropriate moment)
+##### - Effective radius: 3 × mass_integral / (4 × area_integral × ρ_ice)
+##### - Mean diameter/density: mass-weighted (divide by mass integral)
 ##### - Per-particle integrals: ventilation, collection (N_ice = 1 → raw is per-particle)
 #####
 
@@ -221,21 +273,56 @@ With the N_ice = 1 convention, different integral types require different
 normalization to produce physically meaningful table values:
 
 - **Number-weighted fall speed**: ∫ V N' dD / N = raw (since N = 1)
-- **Mass-weighted fall speed**: ∫ V m N' dD / ∫ m N' dD (divide by L = mean_mass)
+- **Mass-weighted fall speed**: ∫ V m N' dD / ∫ m N' dD (divide by mass integral)
 - **Reflectivity-weighted fall speed**: ∫ V D⁶ N' dD / ∫ D⁶ N' dD
+- **Effective radius**: 3 × ∫ m N' dD / (4 × ρ_ice × ∫ A N' dD)
+- **Mean diameter**: ∫ D m N' dD / ∫ m N' dD
+- **Mean density**: ∫ ρ m N' dD / ∫ m N' dD
 - **All other integrals**: raw (per-particle since N = 1)
 """
 normalize_integral(::AbstractP3Integral, raw, mean_particle_mass, state, nodes, weights) = raw
 
 function normalize_integral(::MassWeightedFallSpeed, raw, mean_particle_mass, state, nodes, weights)
-    # L_ice = mean_particle_mass when N_ice = 1
     mass_integral = evaluate_quadrature(MassMomentLambdaLimit(), state, nodes, weights)
     return raw / max(mass_integral, eps(typeof(raw)))
 end
 
 function normalize_integral(::ReflectivityWeightedFallSpeed, raw, mean_particle_mass, state, nodes, weights)
-    refl_integral = evaluate_quadrature(Reflectivity(), state, nodes, weights)
-    return raw / max(refl_integral, eps(typeof(raw)))
+    # Reflectivity-weighted fall speed uses D⁶ weighting (not mass-squared Rayleigh)
+    sixth_moment = evaluate_quadrature(SixthMomentRime(), state, nodes, weights)
+    return raw / max(sixth_moment, eps(typeof(raw)))
+end
+
+function normalize_integral(::EffectiveRadius, raw_mass, mean_particle_mass, state, nodes, weights)
+    FT = typeof(raw_mass)
+    # raw_mass = ∫ m(D) N'(D) dD (from integrand)
+    # Compute area integral: ∫ A(D) N'(D) dD
+    # Use RainCollectionNumber integrand structure (V×A×N') minus V,
+    # or compute inline since we don't have a dedicated AreaMoment type
+    λ = state.slope
+    n = length(nodes)
+    area_integral = zero(FT)
+    for i in 1:n
+        x = @inbounds nodes[i]
+        w = @inbounds weights[i]
+        D = transform_to_diameter(x, λ)
+        J = jacobian_diameter_transform(x, λ)
+        A = particle_area(D, state)
+        Np = size_distribution(D, state)
+        area_integral += w * A * Np * J
+    end
+    ρ_ice = FT(916.7)  # Fortran uses 916.7 for this formula
+    return 3 * raw_mass / (4 * ρ_ice * max(area_integral, eps(FT)))
+end
+
+function normalize_integral(::MeanDiameter, raw, mean_particle_mass, state, nodes, weights)
+    mass_integral = evaluate_quadrature(MassMomentLambdaLimit(), state, nodes, weights)
+    return raw / max(mass_integral, eps(typeof(raw)))
+end
+
+function normalize_integral(::MeanDensity, raw, mean_particle_mass, state, nodes, weights)
+    mass_integral = evaluate_quadrature(MassMomentLambdaLimit(), state, nodes, weights)
+    return raw / max(mass_integral, eps(typeof(raw)))
 end
 
 #####

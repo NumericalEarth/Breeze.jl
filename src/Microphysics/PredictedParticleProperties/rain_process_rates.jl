@@ -199,7 +199,7 @@ where D is the drop diameter and f_v is the ventilation factor.
     # Saturation vapor pressure derived from qᵛ⁺ˡ
     # From ideal gas law: ρ_v⁺ = e_s / (R_v × T)
     # And ρ_v⁺ ≈ ρ × qᵛ⁺ˡ for small qᵛ⁺ˡ
-    e_s = ρ * qᵛ⁺ˡ * R_v * T
+    e_s = ρ * max(qᵛ⁺ˡ, FT(1e-30)) * R_v * T
 
     # Mean drop properties
     m_mean = safe_divide(qʳ_eff, nʳ_eff, FT(1e-12))

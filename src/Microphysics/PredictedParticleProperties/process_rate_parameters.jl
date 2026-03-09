@@ -253,8 +253,9 @@ function ProcessRateParameters(FT::Type{<:AbstractFloat} = Float64;
         ice_velocity_max = 8.0,
         ice_effective_density_unrimed = 100.0,
 
-        # Ice projected area (Mitchell 1996)
-        ice_projected_area_coefficient = 0.2285,
+        # Ice projected area (Mitchell 1996): A = γ D^σ
+        # CGS value 0.2285 converted to MKS: 0.2285 × 100^(1.88 - 2) ≈ 0.1315
+        ice_projected_area_coefficient = 0.2285 * 100.0^(1.88 - 2.0),
         ice_projected_area_exponent = 1.88,
 
         # Velocity ratios

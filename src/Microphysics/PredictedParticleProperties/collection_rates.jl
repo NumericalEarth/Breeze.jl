@@ -76,8 +76,10 @@ See [Morrison and Milbrandt (2015a)](@cite Morrison2015parameterization).
     # Collection kernel with temperature-dependent sticking efficiency
     K_mean = Eᵢᵢ * AV_kernel
 
-    # Number tendency: dn/dt = -0.5 × K × n²
-    rate = -FT(0.5) * K_mean * nⁱ_eff^2
+    # Number tendency: dn/dt = -K × n²
+    # The 1/2 self-collection factor is already included in the kernel
+    # (table stores half-integral, analytical path includes 0.5 factor).
+    rate = -K_mean * nⁱ_eff^2
 
     return ifelse(aggregation_active, rate, zero(FT))
 end

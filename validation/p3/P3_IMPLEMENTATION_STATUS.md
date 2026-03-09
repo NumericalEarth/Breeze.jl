@@ -50,6 +50,8 @@ and hail. The implementation follows:
 | **Integrand functions** | Fall speed, deposition, bulk properties, collection, sixth moment | ✅ |
 | **Tabulation infrastructure** | `TabulatedIntegral` wrapper for lookup tables | ✅ |
 | **Tabulation parameters** | `TabulationParameters` for grid specification | ✅ |
+| **Full tabulation** | `tabulate(p3, CPU())` generates all ice lookup tables | ✅ |
+| **Fortran validation** | Julia quadrature vs Fortran v6.9-2momI (median <1% error) | ✅ |
 
 #### Ice Property Containers
 
@@ -172,7 +174,7 @@ Ice nucleation and secondary ice production are now implemented:
 | **Cloud droplet activation** | (aerosol module) | ❌ |
 | **Cloud condensation/evaporation** | `cloud_condensation_rate` with psychrometric correction | ✅ |
 | **Contact freezing** | `contact_freezing_rate` following Meyers et al. (1992) | ✅ |
-| **Lookup tables (Fortran I/O)** | Read Fortran tables | ❌ |
+| **Lookup tables (Fortran I/O)** | Read Fortran tables (Julia generates natively) | ✅ |
 
 #### Sedimentation
 
@@ -196,11 +198,11 @@ Substepping would need to be implemented at a higher level (e.g., in the time st
 | **Tabulation infrastructure** | `tabulate()` function, `TabulationParameters` | ✅ |
 | **Fall speed tabulation** | `tabulate(p3, :ice_fall_speed, arch)` | ✅ |
 | **Deposition tabulation** | `tabulate(p3, :ice_deposition, arch)` | ✅ |
-| **Reading Fortran tables** | Parse `p3_lookupTable_*.dat` files | ❌ |
-| **Table 1** | Ice property integrals (size, rime, μ) | ⚠️ (can generate, not read) |
+| **Reading Fortran tables** | Parse `p3_lookupTable_*.dat` files (not needed) | N/A |
+| **Table 1** | Ice property integrals (size, rime, μ) | ✅ (Julia-native) |
 | **Table 2** | Rain property integrals | ❌ |
-| **Table 3** | Z integrals for three-moment ice | ❌ |
-| **GPU table storage** | Transfer tables to GPU architecture | ⚠️ (TODO in code) |
+| **Table 3** | Z integrals for three-moment ice | ✅ (Julia-native) |
+| **GPU table storage** | Transfer tables to GPU architecture | ✅ (`tabulate(p3, GPU())`) |
 
 #### Other
 
@@ -427,20 +429,37 @@ Autoconversion seeds rain; accretion rapidly transfers cloud liquid to rain.
 
     **Resolution:** Full fix requires implementing P3 lookup tables (Phase 5)
 
-### Phase 5: Lookup Tables (Required for Fortran Parity)
+### Phase 5: Lookup Tables ✅ COMPLETE
 
-The current mean-mass approximation systematically overestimates concave process rates
-(Jensen's inequality: f(m̄) > ⟨f(m)⟩_PSD for concave f). Lookup tables integrate over
-the full particle size distribution, resolving:
+Julia-native lookup tables are implemented via `tabulate(p3, CPU())` and validated
+against the Fortran P3 v6.9-2momI reference table. Tables integrate over the full
+particle size distribution using Chebyshev-Gauss quadrature, resolving:
 - Fall speed size-sorting → steep ice profile below production peak
 - PSD-weighted deposition/riming → correct rate magnitudes at all levels
 - PSD-weighted melting → correct rain generation from ice drainage
-- Eliminates the need for empirical alpha corrections and profile relaxation
+- Dispatch-based table/analytical switching (TabulatedFunction3D vs Any)
 
-12. **Lookup table implementation** ❌
-    - ❌ Read Fortran tables or regenerate in Julia
-    - ❌ Interpolation for process rates (mass, number, reflectivity)
-    - ❌ GPU-compatible table access
+**Validation results (unrimed, Qnorm 5-31, |Fortran| > 1e-10):**
+| Integral | Median | P90 | Max |
+|----------|--------|-----|-----|
+| uns | 0.5% | 2.5% | 3.3% |
+| ums | 0.7% | 2.2% | 5.6% |
+| vdep | 0.2% | 2.0% | 2.5% |
+| eff | 0.6% | 2.1% | 3.0% |
+| dmm | 0.0% | 0.2% | 0.6% |
+| nrwat | 0.3% | 2.7% | 5.5% |
+
+**Key Fortran convention fixes:**
+- Capacitance: `C_sphere = D` (Fortran capm = cap × D), rate equations use 2π not 4π
+- Aggregation: half-integral (factor 0.5) matching Fortran upper-triangle summation
+- nrwat: 100 μm minimum diameter threshold matching Fortran
+
+12. **Lookup table implementation** ✅
+    - ✅ Julia-native generation via `tabulate(p3, CPU())`
+    - ✅ `TabulatedFunction3D` trilinear interpolation for all ice integrals
+    - ✅ GPU-compatible table access via `tabulate(p3, GPU())`
+    - ✅ Validated against Fortran P3 v6.9-2momI reference tables
+    - ✅ Dispatch-based switching: process rates auto-dispatch to table or analytical path
 
 13. **3D LES cases** ❌
     - BOMEX with ice
@@ -453,12 +472,18 @@ src/Microphysics/PredictedParticleProperties/
 ├── PredictedParticleProperties.jl  # Module definition, exports
 ├── p3_scheme.jl                    # Main PredictedParticlePropertiesMicrophysics type
 ├── p3_interface.jl                 # AtmosphereModel integration
-├── process_rates.jl                # Phase 1+2 process rates and terminal velocities
+├── process_rates.jl                # Table-dispatched helpers + compute_p3_process_rates
+├── process_rate_parameters.jl      # All tunable process rate parameters
+├── rain_process_rates.jl           # Rain autoconversion, accretion, evaporation
+├── melting_rates.jl                # Ice melting (partitioned: partial/complete)
+├── collection_rates.jl             # Ice riming and aggregation rates
+├── ice_nucleation_rates.jl         # Deposition nucleation, immersion freezing
+├── terminal_velocities.jl          # Rain/ice terminal velocity computation
 ├── integral_types.jl               # Abstract integral type hierarchy
 ├── size_distribution.jl            # Gamma distribution, regime thresholds
 ├── lambda_solver.jl                # Two/three-moment λ, μ solvers
 ├── quadrature.jl                   # Chebyshev-Gauss integration
-├── tabulation.jl                   # Lookup table infrastructure
+├── tabulation.jl                   # Lookup table infrastructure (TabulatedFunction3D)
 ├── ice_properties.jl               # IceProperties container
 ├── ice_fall_speed.jl               # Fall speed integral types
 ├── ice_deposition.jl               # Ventilation integral types
@@ -468,10 +493,8 @@ src/Microphysics/PredictedParticleProperties/
 ├── ice_lambda_limiter.jl           # λ constraint integral types
 ├── ice_rain_collection.jl          # Ice-rain collection integrals
 ├── rain_properties.jl              # Rain integral types
-├── cloud_droplet_properties.jl     # Cloud properties
-├── cloud_properties.jl             # Cloud properties (unused duplicate)
-├── multi_ice_category.jl           # Multi-category ice framework
-└── process_rate_parameters.jl      # All tunable process rate parameters
+├── cloud_droplet_properties.jl     # Cloud droplet properties
+└── multi_ice_category.jl           # Multi-category ice framework
 ```
 
 ## References

@@ -7,6 +7,14 @@
 ##### Reference: Morrison & Milbrandt (2015), Milbrandt et al. (2021, 2025)
 ##### Test case: KOUN sounding (00Z June 1 2008), nCat=1, trplMomIce=T, liqFrac=T
 #####
+##### NOTE: This driver contains empirical PSD correction factors (alpha_dep,
+##### alpha_rim, alpha_melt, rain_evap_psd_factor, etc.) that compensate for
+##### the mean-mass approximation in the analytical fallback path. When using
+##### full tabulation via `tabulate(p3, CPU())`, these corrections are NOT needed
+##### because the lookup tables integrate over the full particle size distribution.
+##### A future version of this driver should use `tabulate(p3, CPU())` for all
+##### process rates and set all PSD corrections to 1.0.
+#####
 
 using Breeze
 using Breeze.Thermodynamics:

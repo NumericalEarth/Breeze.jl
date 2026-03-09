@@ -275,6 +275,11 @@ end
 # The new interface uses state-based tendencies: microphysical_tendency(p3, name, ρ, ℳ, 𝒰, constants)
 # where ℳ is the P3MicrophysicalState.
 
+# TODO (Performance): compute_p3_process_rates is called once per prognostic field
+# per grid point per timestep (10× redundant). Fix by adding a bulk
+# compute_microphysical_tendencies! kernel to AtmosphereModels that computes
+# all P3 tendencies in a single pass. This is a ~10× speedup for P3 microphysics.
+
 # Helper to compute P3 rates and extract ice properties from ℳ
 @inline function p3_rates_and_properties(p3, ρ, ℳ::P3MicrophysicalState, 𝒰, constants)
     FT = typeof(ρ)

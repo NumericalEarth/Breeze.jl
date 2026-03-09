@@ -11,8 +11,10 @@ Morrison & Milbrandt (2015a) Eq. 44.
 The melting rate is determined by the heat flux to the particle:
 
 ```math
-\\frac{dm}{dt} = -\\frac{4πC}{L_f} × [K_a(T-T_0) + L_v D_v(ρ_v - ρ_{vs})] × f_v
+\\frac{dm}{dt} = -\\frac{2π \\, \\text{capm}}{L_f} × [K_a(T-T_0) + L_v D_v(ρ_v - ρ_{vs})] × f_v
 ```
+
+where capm = cap × D is the P3 Fortran capacitance convention (2× physical C).
 
 where:
 - C is the capacitance
@@ -88,7 +90,9 @@ where:
     Q_total = Q_sensible + Q_latent
 
     # Melting rate per particle (negative dm/dt → positive melt rate)
-    dm_dt_melt = FT(4π) * C_fv * Q_total / L_f
+    # Uses 2π (not 4π) because ventilation integral stores capm = cap × D
+    # (P3 Fortran convention), which is 2× the physical capacitance.
+    dm_dt_melt = FT(2π) * C_fv * Q_total / L_f
 
     # Clamp to positive (only melting, not refreezing here)
     dm_dt_melt = clamp_positive(dm_dt_melt)

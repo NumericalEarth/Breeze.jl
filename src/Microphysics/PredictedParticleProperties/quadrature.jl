@@ -210,14 +210,10 @@ interpolation between the ice fall speed and rain fall speed:
     ρ_correction = (ρ₀ / max(ρ, FT(0.1)))^FT(0.54)
     V_ice_corr = V_ice * ρ_correction
 
-    # Calculate rain fall speed (if needed)
-    if Fˡ > eps(FT)
-        # Rain fall speed includes density correction internally
-        V_rain = rain_fall_speed(D, ρ_correction)
-        return Fˡ * V_rain + (1 - Fˡ) * V_ice_corr
-    else
-        return V_ice_corr
-    end
+    # Calculate rain fall speed and blend with ice
+    V_rain = rain_fall_speed(D, ρ_correction)
+    V_blend = Fˡ * V_rain + (1 - Fˡ) * V_ice_corr
+    return ifelse(Fˡ > eps(FT), V_blend, V_ice_corr)
 end
 
 """
@@ -258,24 +254,17 @@ Calculates velocity at reference conditions (P3_REF_T, P3_REF_P).
     # Note: X^b1 can be small.
     # Fortran computes `xx**b1` then `a1 = ... / xx**b1`
 
-    # If X is very small (Stokes regime), b1 -> 1, a1 -> ?
-    # Let's handle small X explicitly to avoid singularities
-    if X < 1e-5
-        # Stokes flow: V = m g / (3 π η D)
-        # We can just return Stokes velocity
-        return m * g / (3 * FT(π) * η_ref * D)
-    end
+    # Stokes regime (small X): V = m g / (3 π η D)
+    V_stokes = m * g / (3 * FT(π) * η_ref * D)
 
-    a₁ = MH_C₂ * (term - 1)^2 / X^b₁
+    a₁ = MH_C₂ * (term - 1)^2 / max(X^b₁, eps(FT))
 
     # Velocity formula derived from MH2005 power law fit Re = a X^b
     # V = a₁ * ν^(1-2b₁) * (2 m g / (ρ A))^b₁ * D^(2b₁ - 1)
-
     term_bracket = 2 * m * g / (ρ_ref * A_safe)
+    V_mh = a₁ * ν_ref^(1 - 2*b₁) * term_bracket^b₁ * D^(2*b₁ - 1)
 
-    V_ref = a₁ * ν_ref^(1 - 2*b₁) * term_bracket^b₁ * D^(2*b₁ - 1)
-
-    return V_ref
+    return ifelse(X < FT(1e-5), V_stokes, V_mh)
 end
 
 """
@@ -291,16 +280,11 @@ Compute rain fall speed using piecewise power laws from P3 Fortran.
     m_kg = (FT(π)/6) * FT(997) * D^3
     m_g = m_kg * 1000
 
-    # Formulas give V in cm/s
-    if D <= 134.43e-6
-        V_cm = 4.5795e5 * m_g^(2/3)
-    elseif D < 1511.64e-6
-        V_cm = 4.962e3 * m_g^(1/3)
-    elseif D < 3477.84e-6
-        V_cm = 1.732e3 * m_g^(1/6)
-    else
-        V_cm = FT(917.0)
-    end
+    # Piecewise power law (Gunn-Kinzer/Beard), V in cm/s
+    V_cm = ifelse(D <= FT(134.43e-6),  FT(4.5795e5) * m_g^(FT(2)/FT(3)),
+           ifelse(D <  FT(1511.64e-6), FT(4.962e3)  * m_g^(FT(1)/FT(3)),
+           ifelse(D <  FT(3477.84e-6), FT(1.732e3)  * m_g^(FT(1)/FT(6)),
+                                       FT(917.0))))
 
     return V_cm * FT(0.01) * ρ_correction
 end
@@ -370,9 +354,11 @@ Projected area of the ice portion of the particle.
     # Spherical area
     A_sphere = FT(π) / 4 * D^2
 
-    # Aggregate area
-    γ = FT(0.2285)
+    # Aggregate area: A = γ D^σ (Mitchell 1996)
+    # Original coefficients are CGS (cm for D, cm² for A): γ_cgs = 0.2285, σ = 1.88
+    # Convert to MKS: γ_mks = γ_cgs × 100^σ / 100² = 0.2285 × 100^(1.88-2)
     σ = FT(1.88)
+    γ = FT(0.2285) * FT(100)^(σ - 2)
     A_aggregate = γ * D^σ
 
     is_small = D < thresholds.spherical
@@ -513,9 +499,6 @@ separation for integral evaluation.
     FT = typeof(D)
     V = terminal_velocity(D, state)
 
-    # Kinematic viscosity of air (approximately 1.5e-5 m²/s at typical conditions)
-    ν = FT(1.5e-5)
-
     D_threshold = FT(100e-6)
     is_small = D ≤ D_threshold
 
@@ -523,10 +506,13 @@ separation for integral evaluation.
     # constant_term=true → 1, constant_term=false → 0
     small_value = ifelse(constant_term, one(FT), zero(FT))
 
-    # Large particles: f_v = 0.65 + 0.44 × √(V × D / ν)
-    # constant_term=true → 0.65, constant_term=false → 0.44 × √(V × D / ν)
-    Re_term = sqrt(V * D / ν)
-    large_value = ifelse(constant_term, FT(0.65), FT(0.44) * Re_term)
+    # Large particles (Fortran table convention):
+    # The table stores the PSD-dependent part without Sc^(1/3)/√ν.
+    # At runtime, the deposition rate multiplies by Sc^(1/3)/√ν.
+    # constant_term=true → 0.65
+    # constant_term=false → 0.44 × √(V × D)
+    VD_term = sqrt(max(V * D, zero(FT)))
+    large_value = ifelse(constant_term, FT(0.65), FT(0.44) * VD_term)
 
     return ifelse(is_small, small_value, large_value)
 end
@@ -593,15 +579,16 @@ end
 """
     capacitance(D, state)
 
-Capacitance C(D) for vapor diffusion following regime-dependent formulation.
+Capacitance C(D) for vapor diffusion following the P3 Fortran convention.
 
-The capacitance determines the rate of vapor exchange with ice particles:
-- Small spherical ice (D < D_th): C = D/2 (sphere)
-- Large ice crystals/aggregates: C ≈ 0.48 × D (non-spherical)
-- Heavily rimed (graupel): C = D/2 (approximately spherical)
+Returns `capm = cap × D` (Fortran convention), where:
+- Small spherical ice (D < D_th): capm = D (cap=1, physical C = D/2)
+- Large ice crystals/aggregates: capm = 0.48 × D (cap=0.48)
+- Heavily rimed (graupel): capm = D (cap=1, approximately spherical)
 
-For non-spherical particles, the capacitance is approximated as that of
-an oblate spheroid with aspect ratio typical of vapor-grown crystals.
+Rate equations use `2π × capm` (not `4π × C`) so that
+`2π × D = 4π × D/2 = 4πC_physical` is correct.
+
 See Pruppacher & Klett (1997) Chapter 13.
 """
 @inline function capacitance(D, state::IceSizeDistributionState)
@@ -611,11 +598,13 @@ See Pruppacher & Klett (1997) Chapter 13.
     # Get regime thresholds
     thresholds = regime_thresholds_from_state(D, state)
 
-    # Sphere capacitance
-    C_sphere = D / 2
+    # Sphere capacitance (P3 Fortran convention: cap=1.0, capm = cap × D)
+    # Physical capacitance is D/2; the extra factor of 2 is absorbed by using
+    # 2π instead of 4π in the deposition/melting rate equations.
+    C_sphere = D
 
     # Non-spherical capacitance (oblate spheroid approximation)
-    # Typical aspect ratio of 0.6 gives C ≈ 0.48 D
+    # P3 Fortran: cap=0.48, capm = 0.48 × D
     C_nonspherical = FT(0.48) * D
 
     # Small spherical ice
@@ -640,11 +629,13 @@ end
 ##### Bulk property integrals
 #####
 
-# Effective radius: ∫ D³ N'(D) dD / ∫ D² N'(D) dD
-# (computed as ratio of two integrals - here we return numerator)
+# Effective radius (Fortran convention): eff = 3 ∫m N'dD / (4 ρ_ice ∫A N'dD)
+# Integrand computes the numerator: m(D) N'(D)
+# Normalization in tabulation.jl divides by area integral × (4/3) ρ_ice
 @inline function integrand(::EffectiveRadius, D, state::IceSizeDistributionState)
+    m = particle_mass(D, state)
     Np = size_distribution(D, state)
-    return D^3 * Np
+    return m * Np
 end
 
 # Mean diameter: ∫ D m(D) N'(D) dD
@@ -662,10 +653,16 @@ end
     return ρ * m * Np
 end
 
-# Reflectivity: ∫ D^6 N'(D) dD
+# Reflectivity (Fortran Rayleigh convention):
+# refl = ∫ 0.1892 × (6/(π ρ_ice))² × m(D)² × N'(D) dD
+# where 0.1892 ≈ π⁵|K_w|²/λ⁴ Rayleigh prefactor
 @inline function integrand(::Reflectivity, D, state::IceSizeDistributionState)
+    FT = typeof(D)
+    ρ_ice = FT(917)
+    K_refl = FT(0.1892) * (6 / (FT(π) * ρ_ice))^2
+    m = particle_mass(D, state)
     Np = size_distribution(D, state)
-    return D^6 * Np
+    return K_refl * m^2 * Np
 end
 
 # Slope parameter λ - diagnostic, not an integral
@@ -706,46 +703,38 @@ This gives regime-dependent effective densities:
     V = FT(π) / 6 * D^3
 
     # Effective density = mass / volume
-    # Clamp to avoid unrealistic values
-    ρ_eff = m / max(V, eps(FT))
-
-    # Clamp to physical range [50, 1000] kg/m³ (upper bound 1000 for liquid water)
-    return clamp(ρ_eff, FT(50), FT(1000))
+    # No clamping — the P3 m-D relationship already constrains density
+    # through the four regimes (sphere, aggregate, graupel, partial rime)
+    return m / max(V, eps(FT))
 end
 
 #####
 ##### Collection integrals
 #####
 
-# Aggregation number: ∫∫ K(D₁,D₂) N'(D₁) N'(D₂) dD₁ dD₂
-# Using approximation from Wisner et al. (1972) for computational efficiency:
-# I_agg ≈ ∫ V(D) A(D) N(D)² dD × scale_factor
-# This is the self-collection form used in most bulk schemes
+# Aggregation number: ∫∫ (√A₁+√A₂)² |V₁-V₂| N'(D₁) N'(D₂) dD₁ dD₂
+# WARNING: This single-integral integrand uses the Wisner (1972) approximation
+# (V × A × N'²) which has different magnitude than the double integral stored
+# in tables. Do NOT use evaluate(AggregationNumber(), state) for runtime
+# computation — use _aggregation_kernel() dispatch instead.
+# For tabulation, evaluate_quadrature is specialized to compute the full double integral.
 @inline function integrand(::AggregationNumber, D, state::IceSizeDistributionState)
-    FT = typeof(D)
     V = terminal_velocity(D, state)
     A = particle_area(D, state)
     Np = size_distribution(D, state)
-
-    # Aggregation efficiency (simplified)
-    E_agg = FT(0.1)
-
-    # Self-collection approximation: ∫ E_agg × V × A × N² dD
-    return E_agg * V * A * Np^2
+    return V * A * Np^2
 end
 
 # Rain collection by ice (riming kernel)
-# ∫ E_rim × V(D) × A(D) × N'(D) dD
+# ∫ V(D) × A(D) × N'(D) dD for D ≥ 100 μm
+# Fortran P3: only ice particles with D ≥ 100 μm contribute to riming collection.
+# Collection efficiency is applied at runtime (not in this integral).
 @inline function integrand(::RainCollectionNumber, D, state::IceSizeDistributionState)
     FT = typeof(D)
     V = terminal_velocity(D, state)
     A = particle_area(D, state)
     Np = size_distribution(D, state)
-
-    # Collection efficiency for rain-ice (typically higher than ice-ice)
-    E_rim = FT(1.0)
-
-    return E_rim * V * A * Np
+    return ifelse(D < FT(100e-6), zero(FT), V * A * Np)
 end
 
 
