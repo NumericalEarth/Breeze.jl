@@ -39,10 +39,10 @@ is supersaturated with respect to ice. Uses [Cooper (1986)](@cite Cooper1986).
     # Conditions for nucleation
     nucleation_active = (T < T_threshold) & (Sⁱ > Sⁱ_threshold)
 
-    # Cooper (1986): N_ice = c_nuc × exp(0.304 × (T₀ - T))
-    # c_nuc defaults to 0.005 /L; multiply by 1000 to convert to /m³, divide by ρ for /kg
+    # Cooper (1986): N_ice = c_nuc × exp(0.304 × (T₀ - T)) [1/m³]
+    # Default c_nuc = 5.0 /m³ = 0.005 /L from Cooper (1986), divided by ρ for [1/kg]
     ΔT = T₀ - T
-    N_cooper = c_nuc * exp(FT(0.304) * ΔT) * FT(1000) / ρ
+    N_cooper = c_nuc * exp(FT(0.304) * ΔT) / ρ
 
     # Limit to maximum and subtract existing ice
     N_equilibrium = min(N_cooper, N_max / ρ)

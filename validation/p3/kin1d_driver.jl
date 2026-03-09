@@ -327,12 +327,12 @@ function run_kin1d(; sounding_path, levels_path, FT=Float64, verbose=true, use_t
     riming_psd = FT(5)
     # Nucleation tuning to approximate Fortran P3's total nucleation:
     # nucleation_coefficient: 3× Cooper (1986) prefactor to account for missing
-    # contact-freezing and condensation-freezing modes (0.005 → 0.015).
+    # contact-freezing and condensation-freezing modes (5.0 → 15.0 [1/m³]).
     # NOTE: nucleation_maximum_concentration is kept at the default 100e3 /m³.
     # Raising it (e.g. to 5e6) causes ni explosions at T < -40°C (millions of
     # tiny immobile particles accumulate at cold levels), which actually HURTS
     # the validation by reducing mean particle size and fall speed.
-    nuc_coeff = FT(0.015)
+    nuc_coeff = FT(15.0)
     p3 = PredictedParticlePropertiesMicrophysics(
         FT(1000),      # water_density
         FT(1e-14),     # minimum_mass_mixing_ratio

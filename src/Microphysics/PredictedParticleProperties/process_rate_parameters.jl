@@ -71,7 +71,7 @@ struct ProcessRateParameters{FT}
     nucleation_supersaturation_threshold :: FT  # Sⁱ threshold [-]
     nucleation_maximum_concentration :: FT   # N_max [1/m³]
     nucleation_timescale :: FT               # τ_nuc [s]
-    nucleation_coefficient :: FT             # Cooper (1986) prefactor [/L] (default 0.005)
+    nucleation_coefficient :: FT             # Cooper (1986) prefactor [1/m³] (default 5.0)
 
     # Immersion freezing (Barklie-Gokhale 1959)
     immersion_freezing_temperature_max :: FT # T_max [K]
@@ -221,7 +221,7 @@ function ProcessRateParameters(FT::Type{<:AbstractFloat} = Float64;
         nucleation_supersaturation_threshold = 0.05,
         nucleation_maximum_concentration = 100e3,
         nucleation_timescale = 60.0,
-        nucleation_coefficient = 0.005,
+        nucleation_coefficient = 5.0,
 
         # Immersion freezing
         immersion_freezing_temperature_max = 269.15,
