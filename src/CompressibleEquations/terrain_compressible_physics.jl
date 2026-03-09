@@ -61,7 +61,7 @@ function compute_contravariant_velocity!(model::TerrainCompressibleModel)
     launch!(arch, grid, :xyz,
             _compute_contravariant_velocity!,
             dynamics.Ω̃, dynamics.ρΩ̃,
-            grid, model.velocities, model.momentum,
+            grid, model.momentum, dynamics.density,
             dynamics.terrain_metrics)
 
     # Enforce kinematic BC: Ω̃ = 0 at the terrain surface (bottom face).
@@ -85,7 +85,7 @@ end
     @inbounds field[i, j, 1] = 0
 end
 
-@kernel function _compute_contravariant_velocity!(Ω̃, ρΩ̃, grid, velocities, momentum, metrics)
+@kernel function _compute_contravariant_velocity!(Ω̃, ρΩ̃, grid, momentum, density, metrics)
     i, j, k = @index(Global, NTuple)
 
     # Terrain slope decay factor
@@ -101,24 +101,18 @@ end
     slope_x = ∂x_h_cc * decay
     slope_y = ∂y_h_cc * decay
 
-    # Velocities interpolated to (Center, Center, Face).
-    # u is at (Face, Center, Center) → ℑx brings to (Center, Center, Center)
-    #                                 → ℑz brings to (Center, Center, Face)
-    u_ccf = ℑzᵃᵃᶠ(i, j, k, grid, ℑxᶜᵃᵃ, velocities.u)
-    v_ccf = ℑzᵃᵃᶠ(i, j, k, grid, ℑyᵃᶜᵃ, velocities.v)
-    @inbounds w_ccf = velocities.w[i, j, k]
-
-    # Contravariant vertical velocity
-    Ω̃_ijk = w_ccf - slope_x * u_ccf - slope_y * v_ccf
-
     # Momentum interpolated to (Center, Center, Face).
     # ρu is at (Face, Center, Center) → ℑx then ℑz to (Center, Center, Face)
     ρu_ccf = ℑzᵃᵃᶠ(i, j, k, grid, ℑxᶜᵃᵃ, momentum.ρu)
     ρv_ccf = ℑzᵃᵃᶠ(i, j, k, grid, ℑyᵃᶜᵃ, momentum.ρv)
     @inbounds ρw_ccf = momentum.ρw[i, j, k]
 
-    # Contravariant vertical momentum
+    # Contravariant vertical momentum (primary quantity)
     ρΩ̃_ijk = ρw_ccf - slope_x * ρu_ccf - slope_y * ρv_ccf
+
+    # Diagnose velocity from momentum for discrete consistency: ρ_face · Ω̃ ≡ ρΩ̃
+    ρ_ccf = ℑzᵃᵃᶠ(i, j, k, grid, density)
+    Ω̃_ijk = ρΩ̃_ijk / ρ_ccf
 
     @inbounds begin
         Ω̃[i, j, k] = Ω̃_ijk
