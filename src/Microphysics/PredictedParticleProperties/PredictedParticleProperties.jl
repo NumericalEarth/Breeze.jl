@@ -244,10 +244,15 @@ include("lambda_solver.jl")
 include("tabulation.jl")
 
 #####
-##### Process rates (Phase 1: rain, deposition, melting)
+##### Process rates
 #####
 
 include("process_rates.jl")
+include("rain_process_rates.jl")
+include("melting_rates.jl")
+include("ice_nucleation_rates.jl")
+include("collection_rates.jl")
+include("terminal_velocities.jl")
 
 #####
 ##### Multi-ice category support
