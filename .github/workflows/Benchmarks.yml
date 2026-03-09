@@ -66,17 +66,7 @@ jobs:
         timeout-minutes: 45
         run: |
           earlyoom -m 3 -s 100 -r 300 --prefer 'julia' &
-          ARGS=()
-          if [[ -n "${{ matrix.dynamics }}" ]]; then
-              ARGS+=(--dynamics "${{ matrix.dynamics }}")
-          fi
-          if [[ -n "${{ matrix.microphysics }}" ]]; then
-              ARGS+=(--microphysics "${{ matrix.microphysics }}")
-          fi
-          if [[ -n "${{ matrix.advection }}" ]]; then
-              ARGS+=(--advection "${{ matrix.advection }}")
-          fi
-          julia --color=yes --project run_benchmarks.jl --device GPU "${ARGS[@]}" --size "${{ matrix.grid }}"
+          julia --color=yes --project run_benchmarks.jl --device GPU --dynamics "${{ matrix.dynamics }}" --microphysics "${{ matrix.microphysics }}" --advection "${{ matrix.advection }}" --size "${{ matrix.grid }}" --warmup_steps 8 --time_steps 80
       - uses: actions/upload-artifact@v7
         with:
           name: 'benchmarks-dynamics_${{ matrix.dynamics }}-microphysics_${{ matrix.microphysics }}-grid_${{ matrix.grid }}-advection_${{ matrix.advection }}'
