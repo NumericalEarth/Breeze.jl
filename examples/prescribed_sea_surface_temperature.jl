@@ -182,8 +182,7 @@ T₀(x) = θ₀ + ΔT / 2 * sign(cos(2π * x / grid.Lx))
 # `PolynomialCoefficient`, since the stability correction depends on the
 # surface virtual potential temperature.
 
-ρu_surface_flux = ρv_surface_flux = BulkDrag(coefficient=coef, gustiness=Uᵍ,
-                                             surface_temperature=T₀, filtered_velocities=filtered_velocities)
+ρu_surface_flux = ρv_surface_flux = BulkDrag(coefficient=coef, gustiness=Uᵍ, surface_temperature=T₀; filtered_velocities)
 
 # ## Sensible heat flux and vapor fluxes
 #
