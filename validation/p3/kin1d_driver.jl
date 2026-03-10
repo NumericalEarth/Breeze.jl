@@ -345,8 +345,16 @@ function run_kin1d(; sounding_path, levels_path, FT=Float64, verbose=true, use_t
         nothing        # precipitation_boundary_condition
     )
 
+    # Rain tables are always enabled: they integrate rain PSD exactly,
+    # giving correct mass/number-weighted fall speeds and evaporation rate.
+    # The PSD correction factors (rain_evap_psd_factor, rain_vt_psd_factor)
+    # are set to 1.0 in the process loop when rain tables are active.
+    verbose && print("Tabulating rain lookup tables...")
+    p3 = tabulate(p3, :rain, CPU())
+    verbose && println(" Done.")
+
     if use_tables
-        verbose && println("Tabulating P3 lookup tables...")
+        verbose && println("Tabulating ice P3 lookup tables...")
         if use_mu0
             # Selective fall speed tabulation with μ=0 (exponential PSD).
             # Full tabulation gives internally consistent but very different
@@ -761,13 +769,10 @@ function run_kin1d(; sounding_path, levels_path, FT=Float64, verbose=true, use_t
             dqwi = (-rates.shedding - rates.refreezing) * dt
             qwi[k] = max(0, qwi[k] + dqwi)
 
-            # Rain evaporation: use the scheme's own evaporation rate with PSD
-            # correction. The mean-mass approach evaluates dm/dt(D_mean) × n_r,
-            # but the PSD-integrated rate is Σ dm/dt(D_i) × n(D_i), which is
-            # larger because small drops (in the PSD tail) evaporate efficiently.
-            # The PSD correction factor ≈ Γ(2+ν)/Γ(1+ν) ≈ 3 for ν≈2.
-            rain_evap_psd_factor = FT(5)
-            rain_evap_actual = rates.rain_evaporation * rain_evap_psd_factor  # negative
+            # Rain evaporation: rain tables are always enabled (p3.rain.evaporation
+            # is TabulatedFunction1D), so the rate already integrates D f_v(D) N(D) dD
+            # over the full PSD. No additional PSD correction needed.
+            rain_evap_actual = rates.rain_evaporation  # negative; PSD-integrated via table
 
             # Apply rain evaporation to qr
             dqr_evap = rain_evap_actual * dt  # negative
@@ -923,8 +928,9 @@ function run_kin1d(; sounding_path, levels_path, FT=Float64, verbose=true, use_t
         vt_ice_n = zeros(nk)
         vt_ice_z = zeros(nk)
 
-        # PSD correction for rain sedimentation (rain has no tables yet)
-        rain_vt_psd_factor = FT(1.7)
+        # Rain tables are always active (tabulated above): PSD-integrated
+        # fall speeds are returned directly. No additional correction needed.
+        rain_vt_psd_factor = FT(1)
         # Ice fall speed PSD factor: accounts for PSD-integrated mass flux
         # being faster than scalar sedimentation at a single fall speed.
         if use_mu0
@@ -935,7 +941,8 @@ function run_kin1d(; sounding_path, levels_path, FT=Float64, verbose=true, use_t
         elseif use_tables
             # P3Closure tables: values are 39% of analytical at log_m=-10.
             # Factor of 5 gives effective rates comparable to analytical × 2.
-            ice_vt_psd_factor = FT(5)
+            # Factor of 3 balances late-time rain vs early ice accumulation.
+            ice_vt_psd_factor = FT(3)
         else
             ice_vt_psd_factor = FT(2)
         end
