@@ -154,7 +154,7 @@ end
 
     coriolis = HydrostaticSphericalCoriolis()
     td = SplitExplicitTimeDiscretization(substeps = 8,
-                                          divergence_damping_coefficient = 0.10)
+                                         divergence_damping_coefficient = 0.10)
     dynamics = CompressibleDynamics(td;
                                     surface_pressure = 100000,
                                     reference_potential_temperature = 300)
