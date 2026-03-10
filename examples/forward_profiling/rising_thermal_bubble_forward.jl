@@ -107,20 +107,6 @@ function main()
         mkpath(profile_output_dir)
     end
 
-    # NOTE:
-    # Nsight Compute orchestration is handled by
-    # `examples/forward_profiling/rising_thermal_bubble_ncu_profile.jl`.
-    # This script remains focused on benchmark timing + Reactant profiling.
-
-    ncu_grid_idx = tryparse(Int, get(ENV, "BREEZE_NCU_GRID_IDX", ""))
-    if ncu_grid_idx !== nothing
-        if !(1 <= ncu_grid_idx <= length(grid_sizes))
-            error("Invalid BREEZE_NCU_GRID_IDX=$(ncu_grid_idx), expected 1:$(length(grid_sizes)).")
-        end
-        grid_sizes = [grid_sizes[ncu_grid_idx]]
-        @info "Running single-grid child pass for ncu" grid_sizes
-    end
-
     # Forward objective for plain Julia path (no Reactant tracing)
     function forward_loss_julia(model, θ_initial, Δt, nsteps)
         FT = eltype(model.grid)

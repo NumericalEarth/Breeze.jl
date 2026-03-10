@@ -75,20 +75,6 @@ function main()
         mkpath(profile_output_dir)
     end
 
-    # NOTE:
-    # Nsight Compute orchestration is handled by
-    # `examples/forward_profiling/baroclinic_wave_ncu_profile.jl`.
-    # This script remains focused on benchmark timing + Reactant profiling.
-
-    ncu_grid_idx = tryparse(Int, get(ENV, "BREEZE_NCU_GRID_IDX", ""))
-    if ncu_grid_idx !== nothing
-        if !(1 <= ncu_grid_idx <= length(grid_sizes))
-            error("Invalid BREEZE_NCU_GRID_IDX=$(ncu_grid_idx), expected 1:$(length(grid_sizes)).")
-        end
-        grid_sizes = [grid_sizes[ncu_grid_idx]]
-        @info "Running single-grid child pass for ncu" grid_sizes
-    end
-
     benchmark_results = Dict{Tuple{Int, Int, Int}, NamedTuple}()
 
     for (Nλ, Nφ, Nz) in grid_sizes
@@ -182,11 +168,24 @@ function main()
 
             θ_initial_reactant = CenterField(reactant_grid); set!(θ_initial_reactant, θᵢ)
             θ_initial_gpu = CenterField(gpu_grid); set!(θ_initial_gpu, θᵢ)
+
+            set!(reactant_model; ρ = ρ_initial_reactant)
+            set!(reactant_model; u = uᵢ, θ = θ_initial_reactant)
+            u_initial_reactant = deepcopy(reactant_model.velocities.u)
+
+            set!(gpu_model; ρ = ρ_initial_gpu)
+            set!(gpu_model; u = uᵢ, θ = θ_initial_gpu)
+            u_initial_gpu = deepcopy(gpu_model.velocities.u)
         end
 
-        function forward_loss_julia(model, θ_initial, ρ_initial, Δt, nsteps)
+        function reset_model_state!(model, u_initial, θ_initial, ρ_initial)
             set!(model; ρ = ρ_initial)
-            set!(model; u = uᵢ, θ = θ_initial)
+            set!(model; u = u_initial, θ = θ_initial)
+            return nothing
+        end
+
+        function forward_loss_julia(model, u_initial, θ_initial, ρ_initial, Δt, nsteps)
+            reset_model_state!(model, u_initial, θ_initial, ρ_initial)
             for _ in 1:nsteps
                 time_step!(model, Δt)
             end
@@ -194,9 +193,7 @@ function main()
             return mean(interior(v) .^ 2)
         end
 
-        function forward_loss_reactant(model, θ_initial, ρ_initial, Δt, nsteps)
-            set!(model; ρ = ρ_initial)
-            set!(model; u = uᵢ, θ = θ_initial)
+        function forward_loss_reactant(model, Δt, nsteps)
             @trace mincut=true checkpointing=true track_numbers=false for _ in 1:nsteps
                 time_step!(model, Δt)
             end
@@ -212,13 +209,15 @@ function main()
 
         GC.gc()
         @info "Compiling Reactant forward pass..."
+        reset_model_state!(reactant_model, u_initial_reactant, θ_initial_reactant, ρ_initial_reactant)
         @time compiled_forward = Reactant.@compile raise=true raise_first=true sync=true forward_loss_reactant(
-            reactant_model, θ_initial_reactant, ρ_initial_reactant, Δt, nsteps
+            reactant_model, Δt, nsteps
         )
 
         GC.gc()
         @info "Running compiled forward pass once..."
-        @time loss_value = compiled_forward(reactant_model, θ_initial_reactant, ρ_initial_reactant, Δt, nsteps)
+        reset_model_state!(reactant_model, u_initial_reactant, θ_initial_reactant, ρ_initial_reactant)
+        @time loss_value = compiled_forward(reactant_model, Δt, nsteps)
         @info @sprintf("Forward loss J = %.6e", loss_value)
 
         if enable_reactant_profile
@@ -234,9 +233,8 @@ function main()
                         ENV["LINES"] = "200000"
                         ENV["COLUMNS"] = "200000"
                         try
-                            profile_result = Reactant.@profile compiled_forward(
-                                reactant_model, θ_initial_reactant, ρ_initial_reactant, Δt, nsteps
-                            )
+                            reset_model_state!(reactant_model, u_initial_reactant, θ_initial_reactant, ρ_initial_reactant)
+                            profile_result = Reactant.@profile compiled_forward(reactant_model, Δt, nsteps)
                             ioctx = IOContext(io, :limit => false, :displaysize => (200000, 200000))
                             show(ioctx, MIME"text/plain"(), profile_result)
                             println(io)
@@ -262,14 +260,18 @@ function main()
             GC.gc()
             @info "Benchmarking forward pass (plain Julia GPU) — $ntrials trials..."
             time_forward_julia = benchmark_forward!(
-                forward_loss_julia, gpu_model, θ_initial_gpu, ρ_initial_gpu, Δt, nsteps;
+                forward_loss_julia, gpu_model, u_initial_gpu, θ_initial_gpu, ρ_initial_gpu, Δt, nsteps;
                 warmup_steps, ntrials, arch = Oceananigans.Architectures.architecture(gpu_grid)
             )
 
             GC.gc()
             @info "Benchmarking forward pass (Reactant compiled GPU) — $ntrials trials..."
+            function reactant_forward_with_reset!(model, u_initial, θ_initial, ρ_initial, Δt, nsteps)
+                reset_model_state!(model, u_initial, θ_initial, ρ_initial)
+                return compiled_forward(model, Δt, nsteps)
+            end
             time_forward_reactant = benchmark_forward!(
-                compiled_forward, reactant_model, θ_initial_reactant, ρ_initial_reactant, Δt, nsteps;
+                reactant_forward_with_reset!, reactant_model, u_initial_reactant, θ_initial_reactant, ρ_initial_reactant, Δt, nsteps;
                 warmup_steps, ntrials, arch = Oceananigans.Architectures.architecture(reactant_grid)
             )
 
