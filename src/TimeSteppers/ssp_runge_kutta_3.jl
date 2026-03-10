@@ -3,7 +3,6 @@ using KernelAbstractions: @kernel, @index
 using Oceananigans: prognostic_fields, fields
 using Oceananigans.TimeSteppers:
     AbstractTimeStepper,
-    tick!,
     tick_stage!,
     update_state!,
     compute_flux_bc_tendencies!,

@@ -4,7 +4,6 @@ using Oceananigans.Utils: time_difference_seconds
 
 using Oceananigans.TimeSteppers:
     AbstractTimeStepper,
-    tick!,
     tick_stage!,
     update_state!,
     compute_flux_bc_tendencies!,
