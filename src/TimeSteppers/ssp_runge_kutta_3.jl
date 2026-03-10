@@ -232,7 +232,7 @@ function OceananigansTimeSteppers.time_step!(model::AtmosphereModel{<:Any, <:Any
 
     # Adjust final time-step to reduce floating point error accumulation
     corrected_Δt = time_difference_seconds(tⁿ⁺¹, model.clock.time)
-    tick!(model.clock, corrected_Δt)
+    tick_stage!(model.clock, corrected_Δt, Δt)
 
     update_state!(model, callbacks; compute_tendencies = true)
     step_lagrangian_particles!(model, α³ * Δt)
