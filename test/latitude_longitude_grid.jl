@@ -128,7 +128,7 @@ end
 
     # Small θ perturbation + zonal wind
     θᵢ(λ, φ, z) = 300 + 0.01 * sin(π * z / 30kilometers)
-    set!(model; θ=θᵢ, u=10, qᵗ=0, ρ=ref.density)
+    set!(model; θ=θᵢ, u=10, ρ=ref.density)
 
     simulation = Simulation(model; Δt=6, stop_iteration=20, verbose=false)
     run!(simulation)
