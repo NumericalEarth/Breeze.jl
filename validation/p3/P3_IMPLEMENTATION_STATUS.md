@@ -158,33 +158,49 @@ Rimed entries: 5–17% median (acceptable; regime boundary differences).
 
 Reference: Fortran P3 v5.5.0, nCat=1, trplMomIce=true, liqFrac=true.
 
-**Temporal maxima ratios (Breeze / Fortran):**
+**Temporal maxima ratios (Breeze / Fortran) — two modes:**
+
+Default mode (no flags): analytical ice, rain tables always active.
 
 | Field | Fortran max | Breeze max | Ratio | Assessment |
 |-------|-------------|------------|-------|------------|
-| Cloud liquid | 4.17 g/kg | ~4.05 g/kg | ~0.97× | Excellent |
-| Rain | 5.47 g/kg | ~5.04 g/kg | ~0.92× | Good |
-| Ice | 12.30 g/kg | ~5.40 g/kg | ~0.44× | Underproduced |
-| Temperature | 30.6 °C | ~30.6 °C | ~1.00× | Excellent |
+| Cloud liquid | 4.17 g/kg | 4.35 g/kg | 1.05× | Good |
+| Rain | 5.47 g/kg | 6.05 g/kg | 1.11× | Good |
+| Ice | 12.30 g/kg | 4.94 g/kg | 0.40× | Underproduced |
+| Temperature | 30.6 °C | 30.6 °C | 1.00× | Excellent |
 
-**Time evolution (selected times):**
+Tables mode (`--tables` flag): tabulated ice fall speeds (P3Closure μ-λ, factor=3×).
+
+| Field | Fortran max | Breeze max | Ratio | Assessment |
+|-------|-------------|------------|-------|------------|
+| Cloud liquid | 4.17 g/kg | 4.35 g/kg | 1.05× | Good |
+| Rain | 5.47 g/kg | 6.05 g/kg | 1.11× | Good |
+| Ice | 12.30 g/kg | 7.52 g/kg | 0.61× | Improved — use this mode |
+| Temperature | 30.6 °C | 30.6 °C | 1.00× | Excellent |
+
+**Time evolution (selected times) — tables mode:**
 
 | Time | Cloud ratio | Rain ratio | Ice ratio | Notes |
 |------|-------------|-----------|-----------|-------|
-| t=30 min | ~1.00× | ~0.97× | ~0.04× | Ice 25× too low; warm rain good |
-| t=40 min | ~0.78× | ~0.80× | ~0.41× | Ice timing lag visible |
-| t=60 min | — | ~8.55× | ~0.41× | Rain excess driven by ice deficit |
+| t=30 min | ~1.31× | ~1.28× | ~0.03× | Ice too low; warm rain good |
+| t=40 min | ~0.74× | ~3.91× | ~0.59× | Ice improving; rain excess from early ice deficit |
+| t=50 min | ~0.65× | ~13.4× | ~0.76× | Ice near peak; rain excess persists |
+| t=60 min | ~1.23× | ~11.3× | ~0.66× | Ice good; rain excess driven by ice deficit |
+| t=70 min | — | ~0.58× | ~0.50× | Rain back to normal; ice declining |
+| t=80 min | — | ~0.86× | ~0.40× | Late-time rain matches Fortran well |
 
 **Active PSD correction factors in kin1d driver:**
 
 | Parameter | Value | Reason |
 |-----------|-------|--------|
+| Rain tables | Always on | Exact PSD integration for rain fall speed and evaporation |
 | `nucleation_coefficient` | 15.0 /m³ | 3× Cooper (1986) to approximate missing contact/condensation-freezing |
 | `riming_psd_correction` | 5.0 | Mean-mass riming underestimates PSD-integrated collection kernel |
 | `alpha_dep` (peak) | 2.0 | Mean-mass deposition overestimated D by 2× → f_v 3.7× too high; net boost needed |
 | `alpha_dep` (floor) | 0.5 | Level-dependent below ice production peak |
 | `alpha_rim` | 0.5 / 0.2 | Level-dependent riming correction |
 | Nr constraint | clamp m_r to [1.4e-8, 5e-6] kg | Prevent Nr explosion from self-collection without breakup |
+| `ice_vt_psd_factor` (tables) | 3.0 | Scales tabulated fall speed (tables are 39% of analytical; factor 3 gives correct sedimentation) |
 
 **Root causes of ice underproduction (~0.44×):**
 
@@ -221,8 +237,14 @@ Reference: Fortran P3 v5.5.0, nCat=1, trplMomIce=true, liqFrac=true.
 ### Phase 4: Validation Driver ✅ COMPLETE
 
 `kin1d_driver.jl` runs the full 41-level, 90-minute kinematic column test and compares
-against Fortran P3 v5.5.0 reference output. Validation ratio ice ~0.44×; best achievable
-with current 2-moment + mean-mass + Cooper-only nucleation.
+against Fortran P3 v5.5.0 reference output.
+
+**Best mode: `--tables`** (tabulated ice fall speeds). Ice 0.61×, Rain 1.11×.
+Default (no flag): analytical ice. Ice 0.40×, Rain 1.11×.
+
+The ice underproduction is inherent to the 2-moment mean-mass approximation — see root
+causes below. The `--tables` mode significantly improves ice by correctly capturing the
+PSD-integrated sedimentation, keeping small ice in the growth zone longer.
 
 ### Phase 5: Lookup Tables ✅ COMPLETE
 
@@ -237,10 +259,16 @@ particle size distribution using Chebyshev-Gauss quadrature.
 - Aggregation: factor 0.5 for self-collection matching Fortran upper-triangle sum
 - nrwat: D ≥ 100 μm threshold matching Fortran
 
-**Fall speed dispatch:** `kin1d_driver.jl` uses tabulated fall speeds via
-`tabulate(p3, :ice_fall_speed, CPU())`. Deposition, riming, and aggregation use the
-analytical fallback with PSD correction factors (switching to full tables requires
-adding proper nucleation modes first).
+**Rain tables:** Always enabled via `tabulate(p3, :rain, CPU())`. Integrates D·f_v(D)·N(D)dD
+exactly for evaporation and mass/number-weighted fall speeds. No PSD correction needed.
+
+**Ice fall speed dispatch:** `kin1d_driver.jl` optionally tabulates fall speeds via
+`tabulate(p3, :ice_fall_speed, CPU())` with `--tables` flag. Deposition, riming, and
+aggregation use the analytical fallback with PSD correction factors.
+
+**Key finding:** `--tables` improves ice max from 0.40× to 0.61× because tabulated fall
+speeds correctly capture PSD-dependent sedimentation: small freshly-nucleated ice falls
+slower (stays in growth zone), while large rimed ice falls faster (correct transport).
 
 ### Phase 6: Remaining Work
 
@@ -249,7 +277,7 @@ adding proper nucleation modes first).
 | **Contact + condensation-freezing nucleation** | High | Needed to close the ~2–3× ice deficit. Meyers (1992) contact freezing; condensation-freezing for T < −35°C. Both are OFF in Fortran P3 v5.5.0. |
 | **kin1d re-validation with T,P transport** | High | Transport properties now vary with altitude; `alpha_dep` / `alpha_rim` in driver need re-tuning against Fortran reference |
 | **3-moment Z in kin1d driver** | Medium | Z is prognostic but driver doesn't exploit it for μ diagnosis; full 3-moment closure would improve ice PSD |
-| **Table 2 (rain integrals)** | Low | Added but kin1d uses analytical rain evap + Vt path with PSD boost factors |
+| **Rain tables in kin1d** | ✅ Done | Always enabled: exact PSD integration for rain fall speed and evaporation |
 | **Bulk tendency kernel** | Performance | 10× redundancy: each of 9 P3 fields calls `compute_p3_process_rates` independently |
 | **Sedimentation substepping** | Stability | CFL constraint for large Δt; may be needed for production LES runs |
 | **3D LES cases** | Validation | BOMEX with ice, deep convection |
