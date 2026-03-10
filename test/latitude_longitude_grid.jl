@@ -128,7 +128,7 @@ end
 
     # Small θ perturbation + zonal wind
     θᵢ(λ, φ, z) = 300 + 0.01 * sin(π * z / 30kilometers)
-    set!(model; θ=θᵢ, u=10, qᵗ=0, ρ=ref.density)
+    set!(model; θ=θᵢ, u=10, ρ=ref.density)
 
     simulation = Simulation(model; Δt=6, stop_iteration=20, verbose=false)
     run!(simulation)
@@ -153,10 +153,8 @@ end
     grid = build_test_llg(default_arch)
 
     coriolis = HydrostaticSphericalCoriolis()
-    td = ExnerPerturbationSplitExplicit(substeps = 8,
-                                          divergence_damping_coefficient = 0.10)
-    dynamics = CompressibleDynamics(td;
-                                    surface_pressure = 100000,
+    td = ExnerPerturbationSplitExplicit(substeps = 8, divergence_damping_coefficient = 0.10)
+    dynamics = CompressibleDynamics(td; surface_pressure = 100000,
                                     reference_potential_temperature = 300)
 
     model = AtmosphereModel(grid; dynamics, coriolis, advection=WENO(),
@@ -165,7 +163,7 @@ end
     ref = model.dynamics.reference_state
 
     θᵢ(λ, φ, z) = 300 + 0.01 * sin(π * z / 30kilometers)
-    set!(model; θ=θᵢ, u=10, qᵗ=0, ρ=ref.density)
+    set!(model; θ=θᵢ, u=10, ρ=ref.density)
 
     simulation = Simulation(model; Δt=6, stop_iteration=20, verbose=false)
     run!(simulation)
@@ -195,7 +193,7 @@ end
 
     @test model.timestepper isa SSPRungeKutta3
 
-    set!(model; θ=300, u=0, qᵗ=0, ρ=1.2)
+    set!(model; θ=300, ρ=1.2)
 
     simulation = Simulation(model; Δt=0.1, stop_iteration=3, verbose=false)
     run!(simulation)
