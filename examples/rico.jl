@@ -30,9 +30,9 @@ using Random
 using CUDA
 
 Random.seed!(42)
-if CUDA.functional() #hide
-CUDA.seed!(42)
-end #hide
+if CUDA.functional()
+    CUDA.seed!(42)
+end
 
 # ## Domain and grid
 #
