@@ -8,7 +8,7 @@
 # with height. This classic test case is well-described by [Durran (2010)](@cite Durran2010)
 # and the linear theory of [Queney (1948)](@cite Queney1948).
 #
-# Instead of using an [`ImmersedBoundaryGrid`](@ref) with partial cells, we deform the
+# Instead of using an `ImmersedBoundaryGrid` with partial cells, we deform the
 # computational grid itself using [`follow_terrain!`](@ref), which applies a basic
 # terrain-following ([Gal-Chen and Somerville (1975)](@cite GalChen1975)) coordinate
 # transformation. The physics are then corrected with [`TerrainMetrics`](@ref) to account
@@ -24,7 +24,7 @@ using CairoMakie
 
 # ## Grid setup
 #
-# We build a 2D grid on a periodic domain with a [`MutableVerticalDiscretization`](@ref)
+# We build a 2D grid on a periodic domain with a `MutableVerticalDiscretization`
 # so the vertical coordinate can be deformed to follow the terrain.
 
 Nx, Nz = 256, 64
