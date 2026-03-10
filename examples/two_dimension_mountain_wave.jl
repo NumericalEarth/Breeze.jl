@@ -8,12 +8,9 @@
 # The Schär mountain wave ([Schär et al. (2002)](@cite Schar2002)) is a stringent benchmark
 # for terrain-following coordinates because the fine-scale terrain corrugations create steep
 # coordinate-surface slopes that challenge the horizontal pressure gradient computation.
-# Instead of using an `ImmersedBoundaryGrid` with partial cells, we deform the
-# computational grid itself using [`follow_terrain!`](@ref), which applies the
-# [Gal-Chen and Somerville (1975)](@cite GalChen1975) coordinate transformation.
-# The terrain-following approach exactly captures the mountain profile at any resolution,
-# whereas the immersed boundary method requires high resolution to resolve the low-amplitude
-# corrugations.
+# We deform the computational grid itself using [`follow_terrain!`](@ref), which applies the
+# [Gal-Chen and Somerville (1975)](@cite GalChen1975) coordinate transformation to exactly
+# capture the mountain profile at any resolution.
 #
 # ## References
 #
@@ -133,11 +130,7 @@ hill(x, y) = h₀ * exp(-(x / a)^2) * cos(π * x / λ)^2
 # `MutableVerticalDiscretization` with uniform spacing in the computational coordinate;
 # the terrain-following transformation deforms these surfaces to follow the mountain,
 # so no vertical grid stretching near the surface is needed.
-#
-# The horizontal resolution must adequately resolve the terrain corrugation wavelength
-# ``\lambda``. With the 2nd-order terrain pressure gradient stencil, at least 8 grid
-# points per corrugation wavelength are needed (``\Delta x \leq \lambda / 8``).
-# With ``\lambda = 4000 \, {\rm m}``, this requires ``\Delta x \leq 500 \, {\rm m}``.
+
 
 arch = CUDA.functional() ? GPU() : CPU()
 
@@ -162,8 +155,8 @@ metrics = follow_terrain!(grid, hill; pressure_gradient_stencil = SlopeInsideInt
 # ## Plot: Terrain-following coordinate surfaces
 #
 # Visualize how the computational grid deforms to follow the corrugated terrain.
-# Unlike an immersed boundary representation, the terrain-following coordinate exactly
-# captures the mountain profile regardless of vertical resolution.
+# The terrain-following coordinate exactly captures the mountain profile regardless
+# of vertical resolution.
 
 x_grid = xnodes(grid, Center())
 
@@ -243,20 +236,12 @@ model = AtmosphereModel(grid; dynamics, advection=WENO(order=5), forcing=(; ρw=
 # the model has already computed this discrete reference state for us in `terrain_reference_density`!
 
 ρ_ref = model.dynamics.terrain_reference_density
-ρ_field = model.dynamics.density
-ρθ_field = model.formulation.potential_temperature_density
+ρ = model.dynamics.density
+ρθ = model.formulation.potential_temperature_density
 
-CUDA.@allowscalar for i in 1:Nx
-    for k in 1:Nz
-        z_phys = znode(i, 1, k, grid, Center(), Center(), Center())
-        θₖ = θ_of_z(z_phys)
-
-        ρₖ = ρ_ref[i, 1, k]
-
-        ρ_field[i, 1, k] = ρₖ
-        ρθ_field[i, 1, k] = ρₖ * θₖ
-    end
-end
+set!(ρ, ρ_ref)
+set!(ρθ, (x, z) -> θ_of_z(z))
+parent(ρθ) .*= parent(ρ)
 
 set!(model, u=U)
 
@@ -406,5 +391,4 @@ Colorbar(fig[1:2, 2], hm1, label = "w (m s⁻¹)")
 for ax in (ax1, ax2)
     ax.limits = ((-30e3, 30e3), (0, 10e3))
 end
-
 fig
