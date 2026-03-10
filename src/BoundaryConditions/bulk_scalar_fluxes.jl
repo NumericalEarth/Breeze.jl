@@ -44,7 +44,7 @@ thermodynamic formulation.
 """
 function BulkSensibleHeatFluxFunction(; coefficient, gustiness=0, surface_temperature, filtered_velocities=nothing)
     return BulkSensibleHeatFluxFunction(coefficient, gustiness, surface_temperature,
-                                         nothing, nothing, nothing, filtered_velocities, nothing)
+                                        nothing, nothing, nothing, filtered_velocities, nothing)
 end
 
 Adapt.adapt_structure(to, bf::BulkSensibleHeatFluxFunction) =
