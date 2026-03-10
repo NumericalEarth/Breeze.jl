@@ -92,6 +92,8 @@ and hail. The implementation follows:
 | **Immersion freezing (cloud)** | `immersion_freezing_cloud_rate` (Barklie-Gokhale 1959) | ✅ |
 | **Immersion freezing (rain)** | `immersion_freezing_rain_rate` (Barklie-Gokhale 1959) | ✅ |
 | **Rime splintering** | `rime_splintering_rate` (Hallett-Mossop 1974) | ✅ |
+| **Homogeneous freezing (cloud)** | `homogeneous_freezing_cloud_rate` (T < −40°C → dense rime at 900 kg/m³) | ✅ |
+| **Homogeneous freezing (rain)** | `homogeneous_freezing_rain_rate` (T < −40°C, MM15a) | ✅ |
 
 #### Terminal Velocities & Sedimentation
 
@@ -118,7 +120,7 @@ and hail. The implementation follows:
 |-----------|-------------|--------|
 | **Terminal velocity (process rates)** | Simplified power law (not Best-number); used in analytical path | ⚠️ |
 | **Capacitance** | Simple sphere (cap=1)/plate (cap=0.48) formula | ⚠️ |
-| **Transport properties** | Hardcoded `K_a=2.5e-2`, `D_v=2.5e-5`; T,P-dependent utility exists but not used | ⚠️ |
+| **Freezing PSD corrections** | `C(μ)=Γ(μ+7)Γ(μ+1)/Γ(μ+4)²` exact for cloud (μ≈2.3) and rain (μ≈1.0); riming remains tunable at 2.0 | ⚠️ |
 
 ### ❌ Not Implemented
 
@@ -244,9 +246,9 @@ adding proper nucleation modes first).
 
 | Item | Priority | Description |
 |------|----------|-------------|
-| **Contact + condensation-freezing nucleation** | High | Needed to close the ~2–3× ice deficit. Meyers (1992) contact freezing; condensation-freezing for T < −35°C |
-| **T,P-dependent transport properties** | Medium | Switch from constant `K_a`, `D_v` to Sutherland/polynomial fits. Requires re-tuning PSD corrections. Utility `air_transport_properties(T, P)` already exists. |
-| **3-moment Z in kin1d driver** | Medium | Currently Z is prognostic but driver doesn't exploit it for μ diagnosis; full 3-moment closure would improve ice particle size distribution |
+| **Contact + condensation-freezing nucleation** | High | Needed to close the ~2–3× ice deficit. Meyers (1992) contact freezing; condensation-freezing for T < −35°C. Both are OFF in Fortran P3 v5.5.0. |
+| **kin1d re-validation with T,P transport** | High | Transport properties now vary with altitude; `alpha_dep` / `alpha_rim` in driver need re-tuning against Fortran reference |
+| **3-moment Z in kin1d driver** | Medium | Z is prognostic but driver doesn't exploit it for μ diagnosis; full 3-moment closure would improve ice PSD |
 | **Table 2 (rain integrals)** | Low | Added but kin1d uses analytical rain evap + Vt path with PSD boost factors |
 | **Bulk tendency kernel** | Performance | 10× redundancy: each of 9 P3 fields calls `compute_p3_process_rates` independently |
 | **Sedimentation substepping** | Stability | CFL constraint for large Δt; may be needed for production LES runs |
@@ -266,7 +268,9 @@ src/Microphysics/PredictedParticleProperties/
 ├── rain_process_rates.jl           # Rain autoconversion, accretion, evaporation
 ├── melting_rates.jl                # Ice melting (partitioned: partial/complete)
 ├── collection_rates.jl             # Ice riming and aggregation rates
-├── ice_nucleation_rates.jl         # Deposition nucleation, immersion/rain freezing
+├── ice_nucleation_rates.jl         # Deposition nucleation, immersion/rain/homogeneous freezing
+├── transport_properties.jl         # T,P-dependent D_v, K_a, nu (Fortran P3 v5.5.0)
+├── psd_corrections.jl              # Analytical PSD correction C(μ)=Γ(μ+7)Γ(μ+1)/Γ(μ+4)²
 ├── terminal_velocities.jl          # Rain/ice terminal velocity computation
 ├── integral_types.jl               # Abstract integral type hierarchy
 ├── size_distribution.jl            # Gamma distribution, regime thresholds
