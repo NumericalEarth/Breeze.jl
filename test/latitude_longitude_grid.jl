@@ -195,7 +195,7 @@ end
 
     @test model.timestepper isa SSPRungeKutta3
 
-    set!(model; θ=300, u=0, qᵗ=0, ρ=1.2)
+    set!(model; θ=300, ρ=1.2)
 
     simulation = Simulation(model; Δt=0.1, stop_iteration=3, verbose=false)
     run!(simulation)
