@@ -132,7 +132,7 @@ end
 @inline function _aggregation_kernel(::Any, m_mean, Fᶠ, ρᶠ, prp)
     FT = typeof(m_mean)
     ρ_eff_unrimed = prp.ice_effective_density_unrimed
-    ρ_eff = (1 - Fᶠ) * ρ_eff_unrimed + Fᶠ * ρᶠ
+    ρ_eff = max(FT(50), (1 - Fᶠ) * ρ_eff_unrimed + Fᶠ * ρᶠ)
     D_mean = cbrt(6 * m_mean / (FT(π) * ρ_eff))
     a_V = (1 - Fᶠ) * prp.ice_fall_speed_coefficient_unrimed + Fᶠ * prp.ice_fall_speed_coefficient_rimed
     b_V = (1 - Fᶠ) * prp.ice_fall_speed_exponent_unrimed + Fᶠ * prp.ice_fall_speed_exponent_rimed

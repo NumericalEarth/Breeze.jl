@@ -567,26 +567,30 @@ function run_kin1d(; sounding_path, levels_path, FT=Float64, verbose=true, use_t
             # Cloud liquid sinks (with PSD-corrected riming)
             cloud_riming_corr = rates.cloud_riming * alpha_rim
             cloud_sinks = (rates.autoconversion + rates.accretion
-                          + cloud_riming_corr + rates.cloud_freezing_mass) * dt
+                          + cloud_riming_corr + rates.cloud_freezing_mass
+                          + rates.cloud_homogeneous_mass) * dt
             cloud_sinks = min(cloud_sinks, qc[k])  # Limit to available cloud
             qc[k] = max(0, qc[k] - cloud_sinks)
 
             # Partition cloud sinks back to individual rates (limited)
             total_cloud_rate = rates.autoconversion + rates.accretion +
-                               cloud_riming_corr + rates.cloud_freezing_mass
+                               cloud_riming_corr + rates.cloud_freezing_mass +
+                               rates.cloud_homogeneous_mass
             if total_cloud_rate > 0
-                frac_auto = rates.autoconversion / total_cloud_rate
-                frac_accr = rates.accretion / total_cloud_rate
-                frac_rim  = cloud_riming_corr / total_cloud_rate
-                frac_frz  = rates.cloud_freezing_mass / total_cloud_rate
+                frac_auto  = rates.autoconversion / total_cloud_rate
+                frac_accr  = rates.accretion / total_cloud_rate
+                frac_rim   = cloud_riming_corr / total_cloud_rate
+                frac_frz   = rates.cloud_freezing_mass / total_cloud_rate
+                frac_hom_c = rates.cloud_homogeneous_mass / total_cloud_rate
             else
                 frac_auto = FT(0); frac_accr = FT(0)
-                frac_rim  = FT(0); frac_frz  = FT(0)
+                frac_rim  = FT(0); frac_frz  = FT(0); frac_hom_c = FT(0)
             end
-            auto_lim = cloud_sinks * frac_auto
-            accr_lim = cloud_sinks * frac_accr
-            rim_lim  = cloud_sinks * frac_rim
-            frz_lim  = cloud_sinks * frac_frz
+            auto_lim  = cloud_sinks * frac_auto
+            accr_lim  = cloud_sinks * frac_accr
+            rim_lim   = cloud_sinks * frac_rim
+            frz_lim   = cloud_sinks * frac_frz
+            hom_c_lim = cloud_sinks * frac_hom_c
 
             # Total melting: send ALL meltwater directly to rain.
             # The Fortran P3 sends qimlt to rain directly (no liquid-coating
@@ -614,20 +618,24 @@ function run_kin1d(; sounding_path, levels_path, FT=Float64, verbose=true, use_t
             # bypass the nr→0 issue from self-collection without breakup.
             rain_riming_corr = rates.rain_riming * alpha_rim
             rain_sources = auto_lim + accr_lim + total_melting + rates.shedding * dt
-            rain_sinks_raw = rain_riming_corr * dt + rates.rain_freezing_mass * dt
+            rain_sinks_raw = (rain_riming_corr + rates.rain_freezing_mass +
+                              rates.rain_homogeneous_mass) * dt
             available_rain = qr[k] + rain_sources
             rain_sinks = min(rain_sinks_raw, available_rain)
 
-            # Proportional limiting of rain sinks (riming + freezing only)
-            total_rain_sink_rate = rain_riming_corr + rates.rain_freezing_mass
+            # Proportional limiting of rain sinks (riming + immersion freezing + hom freezing)
+            total_rain_sink_rate = rain_riming_corr + rates.rain_freezing_mass +
+                                   rates.rain_homogeneous_mass
             if total_rain_sink_rate > FT(1e-30)
-                frac_rrim = rain_riming_corr / total_rain_sink_rate
-                frac_rfrz = rates.rain_freezing_mass / total_rain_sink_rate
+                frac_rrim  = rain_riming_corr / total_rain_sink_rate
+                frac_rfrz  = rates.rain_freezing_mass / total_rain_sink_rate
+                frac_hom_r = rates.rain_homogeneous_mass / total_rain_sink_rate
             else
-                frac_rrim = FT(0); frac_rfrz = FT(0)
+                frac_rrim = FT(0); frac_rfrz = FT(0); frac_hom_r = FT(0)
             end
-            rain_riming_lim = rain_sinks * frac_rrim
+            rain_riming_lim  = rain_sinks * frac_rrim
             rain_freezing_lim = rain_sinks * frac_rfrz
+            hom_r_lim        = rain_sinks * frac_hom_r
 
             qr[k] = max(0, available_rain - rain_sinks)
 
@@ -639,8 +647,10 @@ function run_kin1d(; sounding_path, levels_path, FT=Float64, verbose=true, use_t
             n_melt = qi[k] > 1e-15 ? ni[k] * total_melting / (qi[k] * dt) : FT(0)
             dnr = (auto_nr + n_melt * dt
                    + rates.rain_self_collection * dt
+                   + rates.rain_breakup * dt
                    + rates.shedding_number * dt
-                   - (rates.rain_riming_number + rates.rain_freezing_number) * dt * rain_sink_scale)
+                   - (rates.rain_riming_number + rates.rain_freezing_number +
+                      rates.rain_homogeneous_number) * dt * rain_sink_scale)
             nr[k] = max(0, nr[k] + dnr)
 
             # Cloud number (prescribed)
@@ -679,6 +689,7 @@ function run_kin1d(; sounding_path, levels_path, FT=Float64, verbose=true, use_t
             dqi = (dep + rim_lim + rain_riming_lim + rates.refreezing * dt
                    + rates.nucleation_mass * dt + frz_lim
                    + rain_freezing_lim
+                   + hom_c_lim + hom_r_lim
                    - total_melting)
 
             qi[k] = max(0, qi[k] + dqi)
@@ -687,8 +698,8 @@ function run_kin1d(; sounding_path, levels_path, FT=Float64, verbose=true, use_t
             cum_dep += max(dep, 0) * 1000
             cum_rim += rim_lim * 1000
             cum_rrim += rain_riming_lim * 1000
-            cum_frz += frz_lim * 1000
-            cum_rfrz += rain_freezing_lim * 1000
+            cum_frz += (frz_lim + hom_c_lim) * 1000
+            cum_rfrz += (rain_freezing_lim + hom_r_lim) * 1000
             cum_nuc += rates.nucleation_mass * dt * 1000
             cum_pmelt += total_melting * 1000  # total_melting already includes dt
             cum_cmelt += FT(0)  # tracked via total_melting above
@@ -702,15 +713,24 @@ function run_kin1d(; sounding_path, levels_path, FT=Float64, verbose=true, use_t
             rain_frz_n_scale = rates.rain_freezing_mass > FT(1e-20) ?
                 rain_freezing_lim / (rates.rain_freezing_mass * dt) : FT(0)
             rain_frz_n_limited = rates.rain_freezing_number * rain_frz_n_scale
+            # Homogeneous freezing number: each cloud droplet/rain drop becomes an ice crystal
+            cloud_hom_n_scale = rates.cloud_homogeneous_mass > FT(1e-20) ?
+                hom_c_lim / (rates.cloud_homogeneous_mass * dt) : FT(0)
+            cloud_hom_n_limited = rates.cloud_homogeneous_number * cloud_hom_n_scale
+            rain_hom_n_scale = rates.rain_homogeneous_mass > FT(1e-20) ?
+                hom_r_lim / (rates.rain_homogeneous_mass * dt) : FT(0)
+            rain_hom_n_limited = rates.rain_homogeneous_number * rain_hom_n_scale
             dni = (rates.nucleation_number + cloud_frz_n_limited
                    + rain_frz_n_limited + rates.splintering_number
-                   + rates.aggregation) * dt - melt_ni
+                   + rates.aggregation
+                   + cloud_hom_n_limited + rain_hom_n_limited) * dt - melt_ni
             ni[k] = max(0, ni[k] + dni)
 
-            # Rime mass
+            # Rime mass — all frozen liquid (immersion + homogeneous) becomes rime
             Ff = qi[k] > 1e-15 ? qf[k] / qi[k] : FT(0)
             dqf = (rim_lim + rain_riming_lim + rates.refreezing * dt
                    + frz_lim + rain_freezing_lim
+                   + hom_c_lim + hom_r_lim
                    - Ff * total_melting
                    - rates.splintering_mass * dt)
             qf[k] = max(0, qf[k] + dqf)
@@ -722,13 +742,15 @@ function run_kin1d(; sounding_path, levels_path, FT=Float64, verbose=true, use_t
             dbf = ((rim_lim + rain_riming_lim) / ρf_new
                    + rates.refreezing * dt / ρf_cur
                    + (frz_lim + rain_freezing_lim) / FT(917)
+                   + (hom_c_lim + hom_r_lim) / FT(900)
                    - Ff * total_melting / ρf_cur)
             bf[k] = max(0, bf[k] + dbf)
 
             # Sixth moment
             ratio_z = zi[k] > 0 && qi[k] > 1e-15 ? zi[k] / qi[k] : FT(0)
             mass_change = dep - total_melting +
-                          rim_lim + rain_riming_lim + rates.refreezing * dt
+                          rim_lim + rain_riming_lim + rates.refreezing * dt +
+                          hom_c_lim + hom_r_lim
             dzi = ratio_z * mass_change
             mi0 = FT(p3.process_rates.nucleated_ice_mass)
             dzi += mi0^2 * rates.nucleation_number * dt / FT(1e6)
@@ -761,6 +783,7 @@ function run_kin1d(; sounding_path, levels_path, FT=Float64, verbose=true, use_t
             # Temperature update from latent heat (non-deposition).
             # Deposition Ls heating already applied in WBF loop.
             net_freeze = rim_lim + rain_riming_lim + frz_lim + rain_freezing_lim +
+                         hom_c_lim + hom_r_lim +
                          rates.refreezing * dt - total_melting
             dT_freeze = Lf * net_freeze / cp_cld
 
@@ -879,6 +902,12 @@ function run_kin1d(; sounding_path, levels_path, FT=Float64, verbose=true, use_t
             ni_from_mass = qi[k] > FT(1e-15) ? qi[k] / m_min_ice : ni_upper
             ni[k] = clamp(ni[k], 0, min(ni_upper, ni_from_mass))
             qf[k] = max(0, qf[k])
+            # Physical constraint: rime mass ≤ total ice mass (Ff ≤ 1).
+            # Numerical drift can cause qf > qi when simultaneously:
+            # (a) ice melts rapidly (total_melting ≈ qi) and (b) rain rimes onto ice.
+            # Clamp qf to qi to prevent Ff > 1, which would make ρ_eff negative and
+            # D^exponent NaN in the ice property kernels.
+            qf[k] = min(qf[k], qi[k])
             bf[k] = max(0, bf[k])
             zi[k] = max(0, zi[k])
             qwi[k] = max(0, qwi[k])
