@@ -600,7 +600,7 @@ end
 #   ρqʳ:  +Sᵃᶜⁿᵛ + Sᵃᶜᶜ + Sᵉᵛᵃᵖ  (autoconversion/accretion sources; evaporation sink)
 #####
 
-@inline function _wp_ne1m_tendencies(bμp::WPNE1M, ρ, ℳ::WarmPhaseOneMomentState, 𝒰, constants)
+@inline function wpne1m_tendencies(bμp::WPNE1M, ρ, ℳ::WarmPhaseOneMomentState, 𝒰, constants)
     categories = bμp.categories
     τᶜˡ = liquid_relaxation_timescale(bμp.cloud_formation, categories)
     qᶜˡ = ℳ.qᶜˡ
@@ -637,20 +637,20 @@ end
 end
 
 @inline function AM.microphysical_tendency(bμp::WPNE1M, ::Val{:ρqᵛ}, ρ, ℳ::WarmPhaseOneMomentState, 𝒰, constants)
-    ρqᵛ = _wp_ne1m_tendencies(bμp, ρ, ℳ, 𝒰, constants).ρqᵛ
+    ρqᵛ = wpne1m_tendencies(bμp, ρ, ℳ, 𝒰, constants).ρqᵛ
     ρSⁿᵘᵐ = -ρ * 𝒰.moisture_mass_fractions.vapor / τⁿᵘᵐ
     return ifelse(𝒰.moisture_mass_fractions.vapor >= 0, ρqᵛ, ρSⁿᵘᵐ)
 end
 
 @inline function AM.microphysical_tendency(bμp::WPNE1M, ::Val{:ρqᶜˡ}, ρ, ℳ::WarmPhaseOneMomentState, 𝒰, constants)
     τᶜˡ = liquid_relaxation_timescale(bμp.cloud_formation, bμp.categories)
-    ρqᶜˡ = _wp_ne1m_tendencies(bμp, ρ, ℳ, 𝒰, constants).ρqᶜˡ
+    ρqᶜˡ = wpne1m_tendencies(bμp, ρ, ℳ, 𝒰, constants).ρqᶜˡ
     ρSⁿᵘᵐ = -ρ * ℳ.qᶜˡ / τᶜˡ
     return ifelse(ℳ.qᶜˡ >= 0, ρqᶜˡ, ρSⁿᵘᵐ)
 end
 
 @inline function AM.microphysical_tendency(bμp::WPNE1M, ::Val{:ρqʳ}, ρ, ℳ::WarmPhaseOneMomentState, 𝒰, constants)
-    ρqʳ = _wp_ne1m_tendencies(bμp, ρ, ℳ, 𝒰, constants).ρqʳ
+    ρqʳ = wpne1m_tendencies(bμp, ρ, ℳ, 𝒰, constants).ρqʳ
     ρSⁿᵘᵐ = -ρ * ℳ.qʳ / τⁿᵘᵐ
     return ifelse(ℳ.qʳ >= 0, ρqʳ, ρSⁿᵘᵐ)
 end

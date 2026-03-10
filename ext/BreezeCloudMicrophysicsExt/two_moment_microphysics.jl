@@ -509,7 +509,7 @@ const τⁿᵘᵐ_2m = 10  # seconds
 #   ρqʳ:                          + dq_rai (autoconversion + accretion, positive) + Sᵉᵛᵃᵖ
 #####
 
-@inline function _wp_ne2m_tendencies(bμp::WPNE2M, ρ, ℳ::WarmPhaseTwoMomentState, 𝒰, constants)
+@inline function wpne2m_tendencies(bμp::WPNE2M, ρ, ℳ::WarmPhaseTwoMomentState, 𝒰, constants)
     categories = bμp.categories
     sb = categories.warm_processes
     τᶜˡ = liquid_relaxation_timescale(bμp.cloud_formation, categories)
@@ -557,13 +557,13 @@ const τⁿᵘᵐ_2m = 10  # seconds
 end
 
 @inline function AtmosphereModels.microphysical_tendency(bμp::WPNE2M, ::Val{:ρqᵛ}, ρ, ℳ::WarmPhaseTwoMomentState, 𝒰, constants)
-    ρqᵛ = _wp_ne2m_tendencies(bμp, ρ, ℳ, 𝒰, constants).ρqᵛ
+    ρqᵛ = wpne2m_tendencies(bμp, ρ, ℳ, 𝒰, constants).ρqᵛ
     ρSⁿᵘᵐ = -ρ * 𝒰.moisture_mass_fractions.vapor / τⁿᵘᵐ_2m
     return ifelse(𝒰.moisture_mass_fractions.vapor >= 0, ρqᵛ, ρSⁿᵘᵐ)
 end
 
 @inline function AtmosphereModels.microphysical_tendency(bμp::WPNE2M, ::Val{:ρqᶜˡ}, ρ, ℳ::WarmPhaseTwoMomentState, 𝒰, constants)
-    ρqᶜˡ = _wp_ne2m_tendencies(bμp, ρ, ℳ, 𝒰, constants).ρqᶜˡ
+    ρqᶜˡ = wpne2m_tendencies(bμp, ρ, ℳ, 𝒰, constants).ρqᶜˡ
     ρSⁿᵘᵐ = -ρ * ℳ.qᶜˡ / τⁿᵘᵐ_2m
     return ifelse(ℳ.qᶜˡ >= 0, ρqᶜˡ, ρSⁿᵘᵐ)
 end
@@ -800,7 +800,7 @@ end
 #####
 
 @inline function AtmosphereModels.microphysical_tendency(bμp::WPNE2M, ::Val{:ρqʳ}, ρ, ℳ::WarmPhaseTwoMomentState, 𝒰, constants)
-    ρqʳ = _wp_ne2m_tendencies(bμp, ρ, ℳ, 𝒰, constants).ρqʳ
+    ρqʳ = wpne2m_tendencies(bμp, ρ, ℳ, 𝒰, constants).ρqʳ
     ρSⁿᵘᵐ = -ρ * ℳ.qʳ / τⁿᵘᵐ_2m
     return ifelse(ℳ.qʳ >= 0, ρqʳ, ρSⁿᵘᵐ)
 end
