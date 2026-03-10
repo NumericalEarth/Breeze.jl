@@ -274,10 +274,15 @@ function ProcessRateParameters(FT::Type{<:AbstractFloat} = Float64;
         # Barklie-Gokhale nucleation coefficient
         immersion_freezing_nucleation_coefficient = 2.0,
 
-        # PSD correction factors
-        riming_psd_correction = 2.0,
-        freezing_cloud_psd_correction = 5.0,
-        freezing_rain_psd_correction = 10.0,
+        # PSD correction factors: account for the PSD-integrated rate being
+        # larger than the mean-mass value due to the nonlinear (volumetric)
+        # dependence on drop size. For spherical drops with a gamma PSD N'(D) = N₀ D^μ exp(-λD)
+        # the analytical correction is C(μ) = Γ(μ+7)Γ(μ+1) / Γ(μ+4)²
+        # (see psd_correction_spherical_volume).
+        # Cloud drops: μ ≈ 2.3 → C ≈ 5.08; rain drops: μ ≈ 1.0 → C = 8.75 (exact)
+        riming_psd_correction = 2.0,  # Tunable: keep as empirical parameter
+        freezing_cloud_psd_correction = psd_correction_spherical_volume(2.3),
+        freezing_rain_psd_correction = psd_correction_spherical_volume(1.0),
 
         # Homogeneous freezing
         homogeneous_freezing_temperature = 233.15,

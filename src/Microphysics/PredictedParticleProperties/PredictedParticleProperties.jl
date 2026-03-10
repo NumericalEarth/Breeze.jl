@@ -151,6 +151,12 @@ export
     TabulatedFunction1D,
     tabulated_function_1d,
 
+    # Transport properties
+    air_transport_properties,
+
+    # PSD correction functions
+    psd_correction_spherical_volume,
+
     # Interface functions
     prognostic_field_names,
 
@@ -218,6 +224,18 @@ include("ice_properties.jl")
 
 include("rain_properties.jl")
 include("cloud_droplet_properties.jl")
+
+#####
+##### Transport properties (T,P-dependent K_a, D_v, nu)
+#####
+
+include("transport_properties.jl")
+
+#####
+##### PSD correction functions (analytical gamma-distribution factors)
+#####
+
+include("psd_corrections.jl")
 
 #####
 ##### Process rate parameters

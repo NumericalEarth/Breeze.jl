@@ -42,7 +42,9 @@ using Breeze.Microphysics.PredictedParticleProperties:
     RainEvaporationVentilationEvaluator,
     tabulated_function_1d,
     homogeneous_freezing_cloud_rate,
-    homogeneous_freezing_rain_rate
+    homogeneous_freezing_rain_rate,
+    air_transport_properties,
+    psd_correction_spherical_volume
 
 using Breeze.Thermodynamics:
     ThermodynamicConstants,
@@ -1329,24 +1331,25 @@ using Oceananigans: CPU
         nr = FT(1e4)
         T = FT(288.0)
         ρ = FT(1.0)
+        P = FT(101325.0)
 
         # Subsaturated: qv < qv_sat → negative evaporation rate
         qv_sat = FT(0.012)
         qv_sub = FT(0.008)    # 67% RH
-        rate_sub = rain_evaporation_rate(p3, qr, nr, qv_sub, qv_sat, T, ρ)
+        rate_sub = rain_evaporation_rate(p3, qr, nr, qv_sub, qv_sat, T, ρ, P)
         @test rate_sub < 0     # Negative = rain evaporating
 
         # Saturated: qv = qv_sat → zero evaporation
-        rate_sat = rain_evaporation_rate(p3, qr, nr, qv_sat, qv_sat, T, ρ)
+        rate_sat = rain_evaporation_rate(p3, qr, nr, qv_sat, qv_sat, T, ρ, P)
         @test rate_sat == 0
 
         # Supersaturated: qv > qv_sat → zero (no condensation on rain)
         qv_super = FT(0.015)
-        rate_super = rain_evaporation_rate(p3, qr, nr, qv_super, qv_sat, T, ρ)
+        rate_super = rain_evaporation_rate(p3, qr, nr, qv_super, qv_sat, T, ρ, P)
         @test rate_super == 0
 
         # Zero rain gives zero evaporation
-        rate_norain = rain_evaporation_rate(p3, FT(0), nr, qv_sub, qv_sat, T, ρ)
+        rate_norain = rain_evaporation_rate(p3, FT(0), nr, qv_sub, qv_sat, T, ρ, P)
         @test rate_norain == 0
     end
 
@@ -1402,6 +1405,13 @@ using Oceananigans: CPU
         # Zero ice gives zero deposition rate (mean mass → default)
         rate_noice = ventilation_enhanced_deposition(p3, FT(0), FT(0), qv_super, qv_sat_ice, Ff, ρf, T, P)
         @test abs(rate_noice) < 1e-20
+
+        # Verify that D_v increases at altitude (larger at T=240K/P=30kPa than surface).
+        # The deposition formula uses D_v in the denominator of the thermodynamic
+        # resistance (Mason 1971), so larger D_v reduces resistance and speeds deposition.
+        props_surface = air_transport_properties(FT(273.15), FT(101325.0))
+        props_aloft = air_transport_properties(FT(240.0), FT(30000.0))
+        @test props_aloft.D_v > props_surface.D_v
     end
 
     @testset "ice_melting_rate" begin
@@ -1861,14 +1871,15 @@ using Oceananigans: CPU
         nr = FT(1e4)
         T = FT(288.0)
         ρ = FT(1.0)
+        P = FT(101325.0)
         qv_sat = FT(0.012)
         qv_sub = FT(0.008)   # 67% RH — subsaturated
 
-        rate_sub = rain_evaporation_rate(p3_tab, qr, nr, qv_sub, qv_sat, T, ρ)
+        rate_sub = rain_evaporation_rate(p3_tab, qr, nr, qv_sub, qv_sat, T, ρ, P)
         @test rate_sub < 0   # Evaporation removes rain
 
         # Saturated: zero evaporation
-        rate_sat = rain_evaporation_rate(p3_tab, qr, nr, qv_sat, qv_sat, T, ρ)
+        rate_sat = rain_evaporation_rate(p3_tab, qr, nr, qv_sat, qv_sat, T, ρ, P)
         @test rate_sat == 0
     end
 
@@ -1889,11 +1900,12 @@ using Oceananigans: CPU
         nr = FT(1e4)
         T = FT(288.0)
         ρ = FT(1.0)
+        P = FT(101325.0)
         qv_sat = FT(0.012)
         qv_sub = FT(0.008)
 
-        rate_ana = rain_evaporation_rate(p3_ana, qr, nr, qv_sub, qv_sat, T, ρ)
-        rate_tab = rain_evaporation_rate(p3_tab, qr, nr, qv_sub, qv_sat, T, ρ)
+        rate_ana = rain_evaporation_rate(p3_ana, qr, nr, qv_sub, qv_sat, T, ρ, P)
+        rate_tab = rain_evaporation_rate(p3_tab, qr, nr, qv_sub, qv_sat, T, ρ, P)
 
         # Both should be negative (evaporation) and finite
         @test rate_ana < 0
@@ -1992,6 +2004,105 @@ using Oceananigans: CPU
         Q32r, N32r = homogeneous_freezing_rain_rate(p3, Float32(1e-3), Float32(1e4), Float32(220.0))
         @test Q32r isa Float32
         @test N32r isa Float32
+    end
+
+    #####
+    ##### Air transport properties tests (Phase A)
+    #####
+
+    @testset "Air transport properties - reference values" begin
+        # T=273.15K, P=101325Pa: D_v ≈ 2.23e-5, K_a ≈ 0.024, nu ≈ 1.33e-5
+        # Formula: D_v = 8.794e-5 * T^1.81 / P, K_a = 1414 * 1.496e-6 * T^1.5 / (T+120),
+        #          nu  = K_a / 1414 * 287 * T / P
+        props = air_transport_properties(273.15, 101325.0)
+        @test props.D_v ≈ 2.23e-5 atol=5e-7
+        @test props.K_a ≈ 0.0243 atol=5e-4
+        @test props.nu ≈ 1.33e-5 atol=5e-7
+
+        # T=250K, P=50000Pa: D_v ≈ 3.85e-5 (colder T but much lower P → higher D_v)
+        props_cold_hi = air_transport_properties(250.0, 50000.0)
+        @test props_cold_hi.D_v ≈ 3.85e-5 atol=5e-6
+    end
+
+    @testset "Air transport properties - monotonicity" begin
+        # D_v increases with T at fixed P
+        props_cold = air_transport_properties(240.0, 101325.0)
+        props_warm = air_transport_properties(300.0, 101325.0)
+        @test props_warm.D_v > props_cold.D_v
+
+        # D_v decreases with P at fixed T
+        props_lo_p = air_transport_properties(273.15, 50000.0)
+        props_hi_p = air_transport_properties(273.15, 101325.0)
+        @test props_lo_p.D_v > props_hi_p.D_v
+
+        # K_a increases with T (mu_air increases with T)
+        @test props_warm.K_a > props_cold.K_a
+    end
+
+    @testset "Air transport properties - Float32 type stability" begin
+        props32 = air_transport_properties(Float32(273.15), Float32(101325.0))
+        @test props32.D_v isa Float32
+        @test props32.K_a isa Float32
+        @test props32.nu isa Float32
+    end
+
+    #####
+    ##### PSD correction for spherical volume (Phase B)
+    #####
+
+    @testset "psd_correction_spherical_volume - exact values" begin
+        # mu=0: Γ(7)*Γ(1) / Γ(4)² = 720 * 1 / 36 = 20.0 (exact)
+        @test psd_correction_spherical_volume(0.0) ≈ 20.0 atol=1e-10
+
+        # mu=2: Γ(9)*Γ(3) / Γ(6)² = 40320 * 2 / 14400 = 5.6 (exact)
+        @test psd_correction_spherical_volume(2.0) ≈ 5.6 atol=1e-6
+
+        # mu=5: value is smaller (distribution narrows → less enhancement)
+        val_mu5 = psd_correction_spherical_volume(5.0)
+        @test val_mu5 ≈ 2.945 atol=0.01
+        @test isfinite(val_mu5)
+    end
+
+    @testset "psd_correction_spherical_volume - monotonicity" begin
+        # Correction decreases with increasing mu (narrower distribution → less PSD broadening)
+        vals = [psd_correction_spherical_volume(Float64(mu)) for mu in 0:10]
+        for i in 2:length(vals)
+            @test vals[i] < vals[i-1]
+        end
+        # All values must be positive and finite
+        @test all(isfinite, vals)
+        @test all(v -> v > 0, vals)
+    end
+
+    @testset "psd_correction_spherical_volume - Float32 type stability" begin
+        val32 = psd_correction_spherical_volume(Float32(0.0))
+        @test val32 isa Float32
+        @test val32 ≈ Float32(20.0) atol=Float32(1e-3)
+    end
+
+    @testset "psd_correction_spherical_volume - analytical identity at mu=0" begin
+        # At mu=0 the formula gives exp(loggamma(7) + loggamma(1) - 2*loggamma(4))
+        # = exp(log(720) + log(1) - 2*log(6)) = 720 / 36 = 20
+        @test psd_correction_spherical_volume(0.0) ≈ 20.0 rtol=1e-12
+    end
+
+    #####
+    ##### ProcessRateParameters default PSD correction values (Phase B + Step 4)
+    #####
+
+    @testset "ProcessRateParameters PSD correction defaults" begin
+        prp = ProcessRateParameters(Float64)
+
+        # freezing_cloud_psd_correction: psd_correction_spherical_volume(2.3) ≈ 5.08
+        @test prp.freezing_cloud_psd_correction ≈ psd_correction_spherical_volume(2.3) rtol=1e-6
+
+        # freezing_rain_psd_correction: psd_correction_spherical_volume(1.0)
+        # Gamma(8)*Gamma(2)/Gamma(5)^2 = 5040*1/576 ≈ 8.75
+        @test prp.freezing_rain_psd_correction ≈ psd_correction_spherical_volume(1.0) rtol=1e-6
+        @test prp.freezing_rain_psd_correction ≈ 8.75 atol=0.01
+
+        # riming_psd_correction should remain unchanged at 2.0
+        @test prp.riming_psd_correction ≈ 2.0
     end
 
     @testset "Vapor + cloud + rain + ice mass conservation" begin

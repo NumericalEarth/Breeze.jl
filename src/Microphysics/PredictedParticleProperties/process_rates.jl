@@ -61,14 +61,14 @@ Dispatches on table type for PSD-integrated or mean-mass path.
 """
 @inline function _deposition_ventilation(vent::TabulatedFunction3D,
                                           vent_e::TabulatedFunction3D,
-                                          m_mean, Fᶠ, ρᶠ, prp)
+                                          m_mean, Fᶠ, ρᶠ, prp, nu)
     FT = typeof(m_mean)
     log_m = log10(max(m_mean, FT(1e-20)))
     Fˡ = zero(FT)
     return vent(log_m, Fᶠ, Fˡ) + vent_e(log_m, Fᶠ, Fˡ)
 end
 
-@inline function _deposition_ventilation(::Any, ::Any, m_mean, Fᶠ, ρᶠ, prp)
+@inline function _deposition_ventilation(::Any, ::Any, m_mean, Fᶠ, ρᶠ, prp, nu)
     FT = typeof(m_mean)
     ρ_eff_unrimed = prp.ice_effective_density_unrimed
     ρ_eff = (1 - Fᶠ) * ρ_eff_unrimed + Fᶠ * ρᶠ
@@ -76,9 +76,8 @@ end
     D_threshold = prp.ice_diameter_threshold
     # P3 Fortran convention: capm = cap × D where cap=1 for sphere, 0.48 for aggregate
     C = ifelse(D_mean < D_threshold, D_mean, FT(0.48) * D_mean)
-    ν = FT(1.5e-5)
     V = prp.ice_fall_speed_coefficient_unrimed * D_mean^prp.ice_fall_speed_exponent_unrimed
-    Re_term = sqrt(V * D_mean / ν)
+    Re_term = sqrt(V * D_mean / nu)
     f_v = FT(0.65) + FT(0.44) * Re_term
     return C * f_v
 end
@@ -240,11 +239,11 @@ The bulk rate integrates over the size distribution:
     R_v = FT(461.5)           # Gas constant for water vapor [J/kg/K]
     R_d = FT(287.0)           # Gas constant for dry air [J/kg/K]
     L_s = FT(2.835e6)         # Latent heat of sublimation [J/kg]
-    # TODO (Phase 5F): Switch to T,P-dependent transport properties via
-    # air_transport_properties(T, P). Requires retuning PSD correction factors
-    # since the current values were calibrated with these hardcoded constants.
-    K_a = FT(2.5e-2)          # Thermal conductivity of air [W/m/K]
-    D_v = FT(2.5e-5)          # Diffusivity of water vapor [m²/s]
+    # T,P-dependent transport properties (Fortran P3 v5.5.0 formulas)
+    transport = air_transport_properties(T, P)
+    K_a = transport.K_a       # Thermal conductivity of air [W/m/K]
+    D_v = transport.D_v       # Diffusivity of water vapor [m²/s]
+    nu  = transport.nu        # Kinematic viscosity [m²/s]
 
     # Saturation vapor pressure over ice
     # Derived from qᵛ⁺ⁱ: qᵛ⁺ⁱ = ε × e_si / (P - (1-ε) × e_si)
@@ -263,7 +262,7 @@ The bulk rate integrates over the size distribution:
     # table or mean-mass analytical path depending on p3.ice.deposition type.
     C_fv = _deposition_ventilation(p3.ice.deposition.ventilation,
                                     p3.ice.deposition.ventilation_enhanced,
-                                    m_mean, Fᶠ, ρᶠ, prp)
+                                    m_mean, Fᶠ, ρᶠ, prp, nu)
 
     # Denominator: thermodynamic resistance terms (Mason 1971)
     # A = L_s/(K_a × T) × (L_s/(R_v × T) - 1)
@@ -413,16 +412,16 @@ suitable for use in GPU kernels where grid indexing is handled externally.
     # =========================================================================
     # Phase 1: Rain processes
     # =========================================================================
+    P = 𝒰.reference_pressure
     autoconv = rain_autoconversion_rate(p3, qᶜˡ, Nᶜ)
     accr = rain_accretion_rate(p3, qᶜˡ, qʳ)
-    rain_evap = rain_evaporation_rate(p3, qʳ, nʳ, qᵛ, qᵛ⁺ˡ, T, ρ)
+    rain_evap = rain_evaporation_rate(p3, qʳ, nʳ, qᵛ, qᵛ⁺ˡ, T, ρ, P)
     rain_self = rain_self_collection_rate(p3, qʳ, nʳ, ρ)
     rain_br = rain_breakup_rate(p3, qʳ, nʳ, rain_self)
 
     # =========================================================================
     # Phase 1: Ice deposition/sublimation and melting
     # =========================================================================
-    P = 𝒰.reference_pressure
     dep = ventilation_enhanced_deposition(p3, qⁱ, nⁱ, qᵛ, qᵛ⁺ⁱ, Fᶠ, ρᶠ, T, P)
     dep = ifelse(qⁱ > FT(1e-20), dep, zero(FT))
 

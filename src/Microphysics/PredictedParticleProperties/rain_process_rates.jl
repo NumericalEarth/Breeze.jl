@@ -180,11 +180,12 @@ approximation path depending on `p3.rain.evaporation`:
 - `qᵛ⁺ˡ`: Saturation vapor mass fraction over liquid [kg/kg]
 - `T`: Temperature [K]
 - `ρ`: Air density [kg/m³]
+- `P`: Air pressure [Pa]
 
 # Returns
 - Rate of rain → vapor conversion [kg/kg/s] (negative = evaporation)
 """
-@inline function rain_evaporation_rate(p3, qʳ, nʳ, qᵛ, qᵛ⁺ˡ, T, ρ)
+@inline function rain_evaporation_rate(p3, qʳ, nʳ, qᵛ, qᵛ⁺ˡ, T, ρ, P)
     FT = typeof(qʳ)
     prp = p3.process_rates
 
@@ -196,13 +197,13 @@ approximation path depending on `p3.rain.evaporation`:
     is_subsaturated = S < 1
 
     # Thermodynamic constants
-    # Note: The Fortran P3 computes T,P-dependent transport properties
-    # (dv = 8.794e-5*T^1.81/P, kap = 1414*mu). These constants represent
-    # near-surface values.
     R_v = FT(461.5)           # Gas constant for water vapor [J/kg/K]
     L_v = FT(2.5e6)           # Latent heat of vaporization [J/kg]
-    K_a = FT(2.5e-2)          # Thermal conductivity of air [W/m/K]
-    D_v = FT(2.5e-5)          # Diffusivity of water vapor [m²/s]
+    # T,P-dependent transport properties (Fortran P3 v5.5.0 formulas)
+    transport = air_transport_properties(T, P)
+    K_a = transport.K_a       # Thermal conductivity of air [W/m/K]
+    D_v = transport.D_v       # Diffusivity of water vapor [m²/s]
+    nu  = transport.nu        # Kinematic viscosity [m²/s]
 
     # Saturation vapor pressure derived from qᵛ⁺ˡ
     e_s = ρ * max(qᵛ⁺ˡ, FT(1e-30)) * R_v * T
@@ -213,7 +214,7 @@ approximation path depending on `p3.rain.evaporation`:
     thermodynamic_factor = max(A + B, FT(1e-10))
 
     evap_rate = _rain_evaporation_rate(p3.rain.evaporation, qʳ_eff, nʳ_eff, S,
-                                       thermodynamic_factor, p3, prp, FT)
+                                       thermodynamic_factor, p3, prp, nu, FT)
 
     # Cannot evaporate more than available
     τ_evap = prp.rain_evaporation_timescale
@@ -225,7 +226,7 @@ end
 
 # Tabulated path: use PSD-integrated ventilation integral I_evap(λ_r)
 @inline function _rain_evaporation_rate(table::TabulatedFunction1D, qʳ, nʳ, S,
-                                        thermodynamic_factor, p3, prp, FT)
+                                        thermodynamic_factor, p3, prp, nu, FT)
     ρ_water = p3.water_density
 
     # Diagnose λ_r from (q_r, N_r) for exponential DSD (μ_r = 0):
@@ -248,7 +249,7 @@ end
 
 # Mean-mass fallback (used when evaporation field is not tabulated)
 @inline function _rain_evaporation_rate(::Any, qʳ, nʳ, S,
-                                        thermodynamic_factor, p3, prp, FT)
+                                        thermodynamic_factor, p3, prp, nu, FT)
     ρ_water = p3.water_density
 
     # Mean drop properties
@@ -264,8 +265,7 @@ end
     V = FT(130) * D_mean^FT(0.5)
 
     # Ventilation factor
-    ν = FT(1.5e-5)
-    Re_term = sqrt(V * D_mean / ν)
+    Re_term = sqrt(V * D_mean / nu)
     f_v = FT(0.78) + FT(0.32) * Re_term
 
     # Evaporation rate per drop (negative for evaporation)

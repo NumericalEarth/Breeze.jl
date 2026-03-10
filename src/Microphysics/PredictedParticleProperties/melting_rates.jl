@@ -57,9 +57,11 @@ where:
     L_f = FT(3.34e5)          # Latent heat of fusion [J/kg]
     L_v = FT(2.5e6)           # Latent heat of vaporization [J/kg]
     R_v = FT(461.5)           # Gas constant for water vapor [J/kg/K]
-    # TODO (Phase 5F): Switch to T,P-dependent transport properties
-    K_a = FT(2.5e-2)          # Thermal conductivity of air [W/m/K]
-    D_v = FT(2.5e-5)          # Diffusivity of water vapor [m²/s]
+    # T,P-dependent transport properties (Fortran P3 v5.5.0 formulas)
+    transport = air_transport_properties(T, P)
+    K_a = transport.K_a       # Thermal conductivity of air [W/m/K]
+    D_v = transport.D_v       # Diffusivity of water vapor [m²/s]
+    nu  = transport.nu        # Kinematic viscosity [m²/s]
 
     # Vapor density terms
     # At T₀, ρ_vs corresponds to saturation at melting point
@@ -76,7 +78,7 @@ where:
     # table or mean-mass path depending on p3.ice.deposition type.
     C_fv = _deposition_ventilation(p3.ice.deposition.ventilation,
                                     p3.ice.deposition.ventilation_enhanced,
-                                    m_mean, Fᶠ, ρᶠ, prp)
+                                    m_mean, Fᶠ, ρᶠ, prp, nu)
 
     # Heat flux terms (Eq. 44 from MM15a)
     # Sensible heat: K_a × (T - T₀)
