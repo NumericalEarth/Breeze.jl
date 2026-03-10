@@ -217,9 +217,10 @@ Tables mode (`--tables` flag): tabulated ice fall speeds (P3Closure μ-λ, facto
    grows and melts.
 
 3. **Homogeneous cloud freezing number explosion (FIXED)**: Prescribed Nc=750×10⁶ /m³ caused
-   up to 10⁹ ice particles/kg at T < −40°C when trace cloud froze homogeneously. Fixed by
-   capping `cloud_hom_n_limited ≤ hom_c_lim / (min_drop_mass × dt)`, enforcing mass-number
-   consistency.
+   up to 10⁹ ice particles/kg at T < −40°C when trace cloud froze homogeneously. Fixed in
+   the library: `homogeneous_freezing_cloud_rate` now caps `N_hom ≤ Q_hom / minimum_cloud_drop_mass`
+   (parameter in `ProcessRateParameters`, default 1e-12 kg), enforcing mass-number consistency
+   for any caller including production `tendency_ρnⁱ`.
 
 4. **Full deposition tables are NOT the fix**: Full PSD-integrated tables give **0.27×** of the
    analytical rate at late-stage ice (they are physically more correct, but the analytical was

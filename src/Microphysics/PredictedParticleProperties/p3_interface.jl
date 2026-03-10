@@ -146,7 +146,24 @@ function AM.materialize_microphysical_fields(::P3, grid, bcs)
     wⁱₙ = CenterField(grid)  # Ice number-weighted terminal velocity
     wⁱ_z = CenterField(grid) # Ice reflectivity-weighted terminal velocity
 
-    return (; ρqᶜˡ, ρqʳ, ρnʳ, ρqⁱ, ρnⁱ, ρqᶠ, ρbᶠ, ρzⁱ, ρqʷⁱ, qᵛ, wʳ, wʳₙ, wⁱ, wⁱₙ, wⁱ_z)
+    # Microphysical tendency cache (written in update_microphysical_auxiliaries!, read by
+    # grid_microphysical_tendency). Storing the microphysics-only contribution avoids 10×
+    # redundant compute_p3_process_rates calls — one per prognostic field per grid point.
+    cache_ρqᶜˡ = CenterField(grid)
+    cache_ρqʳ  = CenterField(grid)
+    cache_ρnʳ  = CenterField(grid)
+    cache_ρqⁱ  = CenterField(grid)
+    cache_ρnⁱ  = CenterField(grid)
+    cache_ρqᶠ  = CenterField(grid)
+    cache_ρbᶠ  = CenterField(grid)
+    cache_ρzⁱ  = CenterField(grid)
+    cache_ρqʷⁱ = CenterField(grid)
+    cache_ρqᵛ  = CenterField(grid)
+
+    return (; ρqᶜˡ, ρqʳ, ρnʳ, ρqⁱ, ρnⁱ, ρqᶠ, ρbᶠ, ρzⁱ, ρqʷⁱ, qᵛ,
+              wʳ, wʳₙ, wⁱ, wⁱₙ, wⁱ_z,
+              cache_ρqᶜˡ, cache_ρqʳ, cache_ρnʳ, cache_ρqⁱ, cache_ρnⁱ,
+              cache_ρqᶠ, cache_ρbᶠ, cache_ρzⁱ, cache_ρqʷⁱ, cache_ρqᵛ)
 end
 
 #####
@@ -207,6 +224,21 @@ The diagnostic `qᵛ` field is updated from the thermodynamic state.
     @inbounds μ.wⁱ[i, j, k]   = -ice_terminal_velocity_mass_weighted(p3, ℳ.qⁱ, ℳ.nⁱ, Fᶠ, ρᶠ, ρ)
     @inbounds μ.wⁱₙ[i, j, k]  = -ice_terminal_velocity_number_weighted(p3, ℳ.qⁱ, ℳ.nⁱ, Fᶠ, ρᶠ, ρ)
     @inbounds μ.wⁱ_z[i, j, k] = -ice_terminal_velocity_reflectivity_weighted(p3, ℳ.qⁱ, ℳ.nⁱ, Fᶠ, ρᶠ, ρ)
+
+    # Compute all process rates once and cache every microphysical tendency contribution.
+    # grid_microphysical_tendency overrides below read from these cache fields, eliminating
+    # the 10× redundant compute_p3_process_rates calls (one per P3 prognostic field).
+    rates = compute_p3_process_rates(p3, ρ, ℳ, 𝒰, constants)
+    @inbounds μ.cache_ρqᶜˡ[i, j, k] = tendency_ρqᶜˡ(rates, ρ)
+    @inbounds μ.cache_ρqʳ[i, j, k]  = tendency_ρqʳ(rates, ρ)
+    @inbounds μ.cache_ρnʳ[i, j, k]  = tendency_ρnʳ(rates, ρ, ℳ.nⁱ, ℳ.qⁱ, p3.process_rates)
+    @inbounds μ.cache_ρqⁱ[i, j, k]  = tendency_ρqⁱ(rates, ρ)
+    @inbounds μ.cache_ρnⁱ[i, j, k]  = tendency_ρnⁱ(rates, ρ)
+    @inbounds μ.cache_ρqᶠ[i, j, k]  = tendency_ρqᶠ(rates, ρ, Fᶠ)
+    @inbounds μ.cache_ρbᶠ[i, j, k]  = tendency_ρbᶠ(rates, ρ, Fᶠ, ρᶠ)
+    @inbounds μ.cache_ρzⁱ[i, j, k]  = tendency_ρzⁱ(rates, ρ, ℳ.qⁱ, ℳ.nⁱ, ℳ.zⁱ)
+    @inbounds μ.cache_ρqʷⁱ[i, j, k] = tendency_ρqʷⁱ(rates, ρ)
+    @inbounds μ.cache_ρqᵛ[i, j, k]  = tendency_ρqᵛ(rates, ρ)
 
     return nothing
 end
@@ -269,16 +301,14 @@ end
 @inline AM.microphysical_velocities(::P3, μ, ::Val{:ρqʷⁱ}) = (; u = ZeroField(), v = ZeroField(), w = μ.wⁱ)
 
 #####
-##### Microphysical tendencies (state-based)
+##### Microphysical tendencies
 #####
 #
-# The new interface uses state-based tendencies: microphysical_tendency(p3, name, ρ, ℳ, 𝒰, constants)
-# where ℳ is the P3MicrophysicalState.
-
-# TODO (Performance): compute_p3_process_rates is called once per prognostic field
-# per grid point per timestep (10× redundant). Fix by adding a bulk
-# compute_microphysical_tendencies! kernel to AtmosphereModels that computes
-# all P3 tendencies in a single pass. This is a ~10× speedup for P3 microphysics.
+# Two paths:
+#   1. Grid-based (AtmosphereModel): grid_microphysical_tendency reads from the cache
+#      fields populated by update_microphysical_auxiliaries! — one compute_p3_process_rates
+#      call per grid point serves all 10 P3 fields.
+#   2. Gridless (ParcelModel): microphysical_tendency builds state and computes rates directly.
 
 # Helper to compute P3 rates and extract ice properties from ℳ
 @inline function p3_rates_and_properties(p3, ρ, ℳ::P3MicrophysicalState, 𝒰, constants)
@@ -375,6 +405,44 @@ end
 
 # Fallback for any unhandled field names - return zero tendency
 @inline AM.microphysical_tendency(::P3, name, ρ, ℳ::P3MicrophysicalState, 𝒰, constants) = zero(ρ)
+
+#####
+##### Grid-indexed tendency overrides (fast path for AtmosphereModel)
+#####
+#
+# These overrides read from the tendency cache populated by update_microphysical_auxiliaries!,
+# bypassing recomputation of compute_p3_process_rates for each P3 prognostic field.
+# The microphysical_tendency methods above remain the gridless fallback for ParcelModels.
+
+@inline AM.grid_microphysical_tendency(i, j, k, grid, ::P3, ::Val{:ρqᶜˡ}, ρ, fields, 𝒰, constants, velocities) =
+    @inbounds fields.cache_ρqᶜˡ[i, j, k]
+
+@inline AM.grid_microphysical_tendency(i, j, k, grid, ::P3, ::Val{:ρqʳ}, ρ, fields, 𝒰, constants, velocities) =
+    @inbounds fields.cache_ρqʳ[i, j, k]
+
+@inline AM.grid_microphysical_tendency(i, j, k, grid, ::P3, ::Val{:ρnʳ}, ρ, fields, 𝒰, constants, velocities) =
+    @inbounds fields.cache_ρnʳ[i, j, k]
+
+@inline AM.grid_microphysical_tendency(i, j, k, grid, ::P3, ::Val{:ρqⁱ}, ρ, fields, 𝒰, constants, velocities) =
+    @inbounds fields.cache_ρqⁱ[i, j, k]
+
+@inline AM.grid_microphysical_tendency(i, j, k, grid, ::P3, ::Val{:ρnⁱ}, ρ, fields, 𝒰, constants, velocities) =
+    @inbounds fields.cache_ρnⁱ[i, j, k]
+
+@inline AM.grid_microphysical_tendency(i, j, k, grid, ::P3, ::Val{:ρqᶠ}, ρ, fields, 𝒰, constants, velocities) =
+    @inbounds fields.cache_ρqᶠ[i, j, k]
+
+@inline AM.grid_microphysical_tendency(i, j, k, grid, ::P3, ::Val{:ρbᶠ}, ρ, fields, 𝒰, constants, velocities) =
+    @inbounds fields.cache_ρbᶠ[i, j, k]
+
+@inline AM.grid_microphysical_tendency(i, j, k, grid, ::P3, ::Val{:ρzⁱ}, ρ, fields, 𝒰, constants, velocities) =
+    @inbounds fields.cache_ρzⁱ[i, j, k]
+
+@inline AM.grid_microphysical_tendency(i, j, k, grid, ::P3, ::Val{:ρqʷⁱ}, ρ, fields, 𝒰, constants, velocities) =
+    @inbounds fields.cache_ρqʷⁱ[i, j, k]
+
+@inline AM.grid_microphysical_tendency(i, j, k, grid, ::P3, ::Val{:ρqᵛ}, ρ, fields, 𝒰, constants, velocities) =
+    @inbounds fields.cache_ρqᵛ[i, j, k]
 
 #####
 ##### Thermodynamic state adjustment
