@@ -515,100 +515,6 @@ end
 # Numerical timescale for limiting negative-value relaxation
 const τⁿᵘᵐ = 10  # seconds
 
-#####
-##### Vapor mass tendency (ρqᵛ) — warm-phase non-equilibrium 1M
-#####
-#
-# Conservation: d(qᵛ)/dt = -Sᶜᵒⁿᵈ - Sᵉᵛᵃᵖ
-#
-# Condensation removes vapor (Sᶜᵒⁿᵈ > 0 means cloud forms).
-# Rain evaporation returns vapor (Sᵉᵛᵃᵖ < 0 means rain evaporates).
-# Autoconversion and accretion (cloud → rain) do not affect vapor.
-
-@inline function AM.microphysical_tendency(bμp::WPNE1M, ::Val{:ρqᵛ}, ρ, ℳ::WarmPhaseOneMomentState, 𝒰, constants)
-    categories = bμp.categories
-    τᶜˡ = liquid_relaxation_timescale(bμp.cloud_formation, categories)
-    qᶜˡ = ℳ.qᶜˡ
-    qʳ = ℳ.qʳ
-
-    # Thermodynamic state
-    T = temperature(𝒰, constants)
-    q = 𝒰.moisture_mass_fractions
-    qᵛ = q.vapor
-
-    # Saturation specific humidity
-    qᵛ⁺ = saturation_specific_humidity(T, ρ, constants, PlanarLiquidSurface())
-
-    # Condensation (same computation as in cloud liquid tendency)
-    Sᶜᵒⁿᵈ = condensation_rate(qᵛ, qᵛ⁺, qᶜˡ, T, ρ, q, τᶜˡ, constants)
-    Sᶜᵒⁿᵈ = ifelse(isnan(Sᶜᵒⁿᵈ), zero(Sᶜᵒⁿᵈ), Sᶜᵒⁿᵈ)
-
-    # Rain evaporation (same computation as in rain tendency)
-    Sᵉᵛᵃᵖ = rain_evaporation(categories.rain,
-                             categories.hydrometeor_velocities.rain,
-                             categories.air_properties,
-                             q, qʳ, ρ, T, constants)
-    Sᵉᵛᵃᵖ_min = -max(0, qʳ) / τⁿᵘᵐ
-    Sᵉᵛᵃᵖ = max(Sᵉᵛᵃᵖ, Sᵉᵛᵃᵖ_min)
-
-    # Vapor tendency: negative of phase-change sources
-    Sᵛᵃᵖ = -Sᶜᵒⁿᵈ - Sᵉᵛᵃᵖ
-
-    # Limit vapor removal to available vapor
-    Sᵛᵃᵖ = max(Sᵛᵃᵖ, -max(0, qᵛ) / τⁿᵘᵐ)
-
-    return ρ * Sᵛᵃᵖ
-end
-
-#####
-##### Vapor mass tendency (ρqᵛ) — mixed-phase non-equilibrium 1M
-#####
-#
-# Conservation: d(qᵛ)/dt = -Sᶜᵒⁿᵈ - Sᵈᵉᵖ - Sᵉᵛᵃᵖ
-#
-# In addition to condensation and rain evaporation, vapor is also
-# consumed by ice deposition (Sᵈᵉᵖ > 0 means ice forms from vapor).
-
-@inline function AM.microphysical_tendency(bμp::MPNE1M, ::Val{:ρqᵛ}, ρ, ℳ::MixedPhaseOneMomentState, 𝒰, constants)
-    categories = bμp.categories
-    τᶜˡ = liquid_relaxation_timescale(bμp.cloud_formation, categories)
-    τᶜⁱ = ice_relaxation_timescale(bμp.cloud_formation, categories)
-    qᶜˡ = ℳ.qᶜˡ
-    qᶜⁱ = ℳ.qᶜⁱ
-    qʳ = ℳ.qʳ
-
-    # Thermodynamic state
-    T = temperature(𝒰, constants)
-    q = 𝒰.moisture_mass_fractions
-    qᵛ = q.vapor
-
-    # Condensation (vapor ↔ cloud liquid)
-    qᵛ⁺ = saturation_specific_humidity(T, ρ, constants, PlanarLiquidSurface())
-    Sᶜᵒⁿᵈ = condensation_rate(qᵛ, qᵛ⁺, qᶜˡ, T, ρ, q, τᶜˡ, constants)
-    Sᶜᵒⁿᵈ = ifelse(isnan(Sᶜᵒⁿᵈ), zero(Sᶜᵒⁿᵈ), Sᶜᵒⁿᵈ)
-
-    # Deposition (vapor ↔ cloud ice)
-    qᵛ⁺ⁱ = saturation_specific_humidity(T, ρ, constants, PlanarIceSurface())
-    Sᵈᵉᵖ = deposition_rate(qᵛ, qᵛ⁺ⁱ, qᶜⁱ, T, ρ, q, τᶜⁱ, constants)
-    Sᵈᵉᵖ = ifelse(isnan(Sᵈᵉᵖ), zero(Sᵈᵉᵖ), Sᵈᵉᵖ)
-
-    # Rain evaporation (rain → vapor)
-    Sᵉᵛᵃᵖ = rain_evaporation(categories.rain,
-                             categories.hydrometeor_velocities.rain,
-                             categories.air_properties,
-                             q, qʳ, ρ, T, constants)
-    Sᵉᵛᵃᵖ_min = -max(0, qʳ) / τⁿᵘᵐ
-    Sᵉᵛᵃᵖ = max(Sᵉᵛᵃᵖ, Sᵉᵛᵃᵖ_min)
-
-    # Vapor tendency: negative of all phase-change sources
-    Sᵛᵃᵖ = -Sᶜᵒⁿᵈ - Sᵈᵉᵖ - Sᵉᵛᵃᵖ
-
-    # Limit vapor removal to available vapor
-    Sᵛᵃᵖ = max(Sᵛᵃᵖ, -max(0, qᵛ) / τⁿᵘᵐ)
-
-    return ρ * Sᵛᵃᵖ
-end
-
 # State-based rain tendency for all warm-phase 1M schemes
 @inline function AM.microphysical_tendency(bμp::WarmPhase1M, ::Val{:ρqʳ}, ρ, ℳ::WarmPhaseOneMomentState, 𝒰, constants)
     categories = bμp.categories
@@ -680,72 +586,80 @@ end
 end
 
 #####
-##### Cloud liquid tendency (non-equilibrium only) - state-based
+##### Microphysical tendencies for warm-phase non-equilibrium 1M (WPNE1M)
+#####
+#
+# Conservation: d(ρqᵛ)/dt + d(ρqᶜˡ)/dt + d(ρqʳ)/dt = 0 (from phase changes)
+#
+# The bundle function computes all phase-change rates once and returns every
+# tendency derived from them. This guarantees discrete conservation: the same
+# rate value appears in every tendency that references it.
+#
+#   ρqᵛ:  −Sᶜᵒⁿᵈ − Sᵉᵛᵃᵖ    (vapor loses to condensation; evaporation restores vapor)
+#   ρqᶜˡ: +Sᶜᵒⁿᵈ − Sᵃᶜⁿᵛ − Sᵃᶜᶜ  (condensation source; autoconversion/accretion sinks)
+#   ρqʳ:  +Sᵃᶜⁿᵛ + Sᵃᶜᶜ + Sᵉᵛᵃᵖ  (autoconversion/accretion sources; evaporation sink)
 #####
 
-# State-based cloud liquid tendency for warm-phase non-equilibrium
+@inline function _wp_ne1m_tendencies(bμp::WPNE1M, ρ, ℳ::WarmPhaseOneMomentState, 𝒰, constants)
+    categories = bμp.categories
+    τᶜˡ = liquid_relaxation_timescale(bμp.cloud_formation, categories)
+    qᶜˡ = ℳ.qᶜˡ
+    qʳ = ℳ.qʳ
+
+    T = temperature(𝒰, constants)
+    q = 𝒰.moisture_mass_fractions
+    qᵛ = q.vapor
+
+    # Condensation: vapor ↔ cloud liquid
+    qᵛ⁺ = saturation_specific_humidity(T, ρ, constants, PlanarLiquidSurface())
+    Sᶜᵒⁿᵈ = condensation_rate(qᵛ, qᵛ⁺, qᶜˡ, T, ρ, q, τᶜˡ, constants)
+    Sᶜᵒⁿᵈ = ifelse(isnan(Sᶜᵒⁿᵈ), zero(Sᶜᵒⁿᵈ), Sᶜᵒⁿᵈ)
+
+    # Evaporation: rain → vapor (Sᵉᵛᵃᵖ < 0 when rain evaporates)
+    Sᵉᵛᵃᵖ = rain_evaporation(categories.rain,
+                             categories.hydrometeor_velocities.rain,
+                             categories.air_properties,
+                             q, qʳ, ρ, T, constants)
+    Sᵉᵛᵃᵖ = max(Sᵉᵛᵃᵖ, -max(0, qʳ) / τⁿᵘᵐ)
+
+    # Collection: cloud liquid → rain (does not involve vapor)
+    Sᵃᶜⁿᵛ = conv_q_lcl_to_q_rai(categories.rain.acnv1M, qᶜˡ)
+    Sᵃᶜᶜ = accretion(categories.cloud_liquid, categories.rain,
+                     categories.hydrometeor_velocities.rain, categories.collisions,
+                     qᶜˡ, qʳ, ρ)
+
+    # Conservation identity: ρqᵛ + ρqᶜˡ + ρqʳ = 0 (from phase changes)
+    ρqᵛ  = ρ * (-Sᶜᵒⁿᵈ - Sᵉᵛᵃᵖ)
+    ρqᶜˡ = ρ * ( Sᶜᵒⁿᵈ - Sᵃᶜⁿᵛ - Sᵃᶜᶜ)
+    ρqʳ  = ρ * ( Sᵃᶜⁿᵛ + Sᵃᶜᶜ + Sᵉᵛᵃᵖ)
+
+    return (; ρqᵛ, ρqᶜˡ, ρqʳ)
+end
+
+@inline function AM.microphysical_tendency(bμp::WPNE1M, ::Val{:ρqᵛ}, ρ, ℳ::WarmPhaseOneMomentState, 𝒰, constants)
+    ρqᵛ = _wp_ne1m_tendencies(bμp, ρ, ℳ, 𝒰, constants).ρqᵛ
+    ρSⁿᵘᵐ = -ρ * 𝒰.moisture_mass_fractions.vapor / τⁿᵘᵐ
+    return ifelse(𝒰.moisture_mass_fractions.vapor >= 0, ρqᵛ, ρSⁿᵘᵐ)
+end
+
 @inline function AM.microphysical_tendency(bμp::WPNE1M, ::Val{:ρqᶜˡ}, ρ, ℳ::WarmPhaseOneMomentState, 𝒰, constants)
-    categories = bμp.categories
-    τᶜˡ = liquid_relaxation_timescale(bμp.cloud_formation, categories)
-    qᶜˡ = ℳ.qᶜˡ
-    qʳ = ℳ.qʳ
-
-    # Thermodynamic state
-    T = temperature(𝒰, constants)
-    q = 𝒰.moisture_mass_fractions
-    qᵛ = q.vapor
-
-    # Saturation specific humidity
-    qᵛ⁺ = saturation_specific_humidity(T, ρ, constants, PlanarLiquidSurface())
-
-    # Condensation/evaporation rate
-    Sᶜᵒⁿᵈ = condensation_rate(qᵛ, qᵛ⁺, qᶜˡ, T, ρ, q, τᶜˡ, constants)
-    Sᶜᵒⁿᵈ = ifelse(isnan(Sᶜᵒⁿᵈ), zero(Sᶜᵒⁿᵈ), Sᶜᵒⁿᵈ)
-
-    # Autoconversion and accretion (sinks for cloud liquid)
-    Sᵃᶜⁿᵛ = conv_q_lcl_to_q_rai(categories.rain.acnv1M, qᶜˡ)
-    Sᵃᶜᶜ = accretion(categories.cloud_liquid, categories.rain,
-                     categories.hydrometeor_velocities.rain, categories.collisions,
-                     qᶜˡ, qʳ, ρ)
-
-    # Total tendency
-    ΣρS = ρ * (Sᶜᵒⁿᵈ - Sᵃᶜⁿᵛ - Sᵃᶜᶜ)
-
-    # Numerical relaxation for negative values
-    ρSⁿᵘᵐ = -ρ * qᶜˡ / τᶜˡ
-
-    return ifelse(qᶜˡ >= 0, ΣρS, ρSⁿᵘᵐ)
+    τᶜˡ = liquid_relaxation_timescale(bμp.cloud_formation, bμp.categories)
+    ρqᶜˡ = _wp_ne1m_tendencies(bμp, ρ, ℳ, 𝒰, constants).ρqᶜˡ
+    ρSⁿᵘᵐ = -ρ * ℳ.qᶜˡ / τᶜˡ
+    return ifelse(ℳ.qᶜˡ >= 0, ρqᶜˡ, ρSⁿᵘᵐ)
 end
 
-# State-based cloud liquid tendency for mixed-phase non-equilibrium
-@inline function AM.microphysical_tendency(bμp::MPNE1M, ::Val{:ρqᶜˡ}, ρ, ℳ::MixedPhaseOneMomentState, 𝒰, constants)
-    categories = bμp.categories
-    τᶜˡ = liquid_relaxation_timescale(bμp.cloud_formation, categories)
-    qᶜˡ = ℳ.qᶜˡ
-    qʳ = ℳ.qʳ
-
-    T = temperature(𝒰, constants)
-    q = 𝒰.moisture_mass_fractions
-    qᵛ = q.vapor
-
-    qᵛ⁺ = saturation_specific_humidity(T, ρ, constants, PlanarLiquidSurface())
-    Sᶜᵒⁿᵈ = condensation_rate(qᵛ, qᵛ⁺, qᶜˡ, T, ρ, q, τᶜˡ, constants)
-    Sᶜᵒⁿᵈ = ifelse(isnan(Sᶜᵒⁿᵈ), zero(Sᶜᵒⁿᵈ), Sᶜᵒⁿᵈ)
-
-    Sᵃᶜⁿᵛ = conv_q_lcl_to_q_rai(categories.rain.acnv1M, qᶜˡ)
-    Sᵃᶜᶜ = accretion(categories.cloud_liquid, categories.rain,
-                     categories.hydrometeor_velocities.rain, categories.collisions,
-                     qᶜˡ, qʳ, ρ)
-
-    ΣρS = ρ * (Sᶜᵒⁿᵈ - Sᵃᶜⁿᵛ - Sᵃᶜᶜ)
-    ρSⁿᵘᵐ = -ρ * qᶜˡ / τᶜˡ
-
-    return ifelse(qᶜˡ >= 0, ΣρS, ρSⁿᵘᵐ)
+@inline function AM.microphysical_tendency(bμp::WPNE1M, ::Val{:ρqʳ}, ρ, ℳ::WarmPhaseOneMomentState, 𝒰, constants)
+    ρqʳ = _wp_ne1m_tendencies(bμp, ρ, ℳ, 𝒰, constants).ρqʳ
+    ρSⁿᵘᵐ = -ρ * ℳ.qʳ / τⁿᵘᵐ
+    return ifelse(ℳ.qʳ >= 0, ρqʳ, ρSⁿᵘᵐ)
 end
 
 #####
-##### Cloud ice tendency (non-equilibrium mixed-phase only) - state-based
+##### Microphysical tendencies for mixed-phase non-equilibrium 1M (MPNE1M)
 #####
+#
+# Conservation: d(ρqᵛ)/dt + d(ρqᶜˡ)/dt + d(ρqᶜⁱ)/dt + d(ρqʳ)/dt = 0 (from phase changes)
 #
 # The deposition rate follows Morrison and Grabowski (2008, JAS), Appendix Eq. (A3), but for ice:
 #
@@ -753,32 +667,84 @@ end
 #
 # where qᵛ⁺ⁱ is the saturation specific humidity over ice, τⁱ is the ice relaxation
 # timescale, and Γⁱ is the thermodynamic adjustment factor using ice latent heat.
-#####
 #
 # `ice_thermodynamic_adjustment_factor` and `deposition_rate` are defined in `Breeze.Microphysics`
 # so they can be shared by multiple bulk microphysics schemes.
+#
+#   ρqᵛ:  −Sᶜᵒⁿᵈ − Sᵈᵉᵖ − Sᵉᵛᵃᵖ    (vapor loses to condensation and deposition)
+#   ρqᶜˡ: +Sᶜᵒⁿᵈ − Sᵃᶜⁿᵛ − Sᵃᶜᶜ    (condensation source; collection sinks)
+#   ρqᶜⁱ: +Sᵈᵉᵖ                     (deposition source only; ice→snow TODO)
+#   ρqʳ:  +Sᵃᶜⁿᵛ + Sᵃᶜᶜ + Sᵉᵛᵃᵖ    (collection sources; evaporation sink)
+#####
 
-@inline function AM.microphysical_tendency(bμp::MPNE1M, ::Val{:ρqᶜⁱ}, ρ, ℳ::MixedPhaseOneMomentState, 𝒰, constants)
+@inline function _mp_ne1m_tendencies(bμp::MPNE1M, ρ, ℳ::MixedPhaseOneMomentState, 𝒰, constants)
     categories = bμp.categories
+    τᶜˡ = liquid_relaxation_timescale(bμp.cloud_formation, categories)
     τᶜⁱ = ice_relaxation_timescale(bμp.cloud_formation, categories)
+    qᶜˡ = ℳ.qᶜˡ
     qᶜⁱ = ℳ.qᶜⁱ
+    qʳ = ℳ.qʳ
 
     T = temperature(𝒰, constants)
     q = 𝒰.moisture_mass_fractions
     qᵛ = q.vapor
 
-    # Saturation specific humidity over ice
-    qᵛ⁺ⁱ = saturation_specific_humidity(T, ρ, constants, PlanarIceSurface())
+    # Condensation: vapor ↔ cloud liquid
+    qᵛ⁺ = saturation_specific_humidity(T, ρ, constants, PlanarLiquidSurface())
+    Sᶜᵒⁿᵈ = condensation_rate(qᵛ, qᵛ⁺, qᶜˡ, T, ρ, q, τᶜˡ, constants)
+    Sᶜᵒⁿᵈ = ifelse(isnan(Sᶜᵒⁿᵈ), zero(Sᶜᵒⁿᵈ), Sᶜᵒⁿᵈ)
 
-    # Deposition/sublimation rate
+    # Deposition: vapor ↔ cloud ice
+    qᵛ⁺ⁱ = saturation_specific_humidity(T, ρ, constants, PlanarIceSurface())
     Sᵈᵉᵖ = deposition_rate(qᵛ, qᵛ⁺ⁱ, qᶜⁱ, T, ρ, q, τᶜⁱ, constants)
     Sᵈᵉᵖ = ifelse(isnan(Sᵈᵉᵖ), zero(Sᵈᵉᵖ), Sᵈᵉᵖ)
 
+    # Evaporation: rain → vapor (Sᵉᵛᵃᵖ < 0 when rain evaporates)
+    Sᵉᵛᵃᵖ = rain_evaporation(categories.rain,
+                             categories.hydrometeor_velocities.rain,
+                             categories.air_properties,
+                             q, qʳ, ρ, T, constants)
+    Sᵉᵛᵃᵖ = max(Sᵉᵛᵃᵖ, -max(0, qʳ) / τⁿᵘᵐ)
+
+    # Collection: cloud liquid → rain (does not involve vapor)
+    Sᵃᶜⁿᵛ = conv_q_lcl_to_q_rai(categories.rain.acnv1M, qᶜˡ)
+    Sᵃᶜᶜ = accretion(categories.cloud_liquid, categories.rain,
+                     categories.hydrometeor_velocities.rain, categories.collisions,
+                     qᶜˡ, qʳ, ρ)
+
+    # Conservation identity: ρqᵛ + ρqᶜˡ + ρqᶜⁱ + ρqʳ = 0 (from phase changes)
+    ρqᵛ  = ρ * (-Sᶜᵒⁿᵈ - Sᵈᵉᵖ - Sᵉᵛᵃᵖ)
+    ρqᶜˡ = ρ * ( Sᶜᵒⁿᵈ - Sᵃᶜⁿᵛ - Sᵃᶜᶜ)
+    ρqᶜⁱ = ρ * Sᵈᵉᵖ
+    ρqʳ  = ρ * ( Sᵃᶜⁿᵛ + Sᵃᶜᶜ + Sᵉᵛᵃᵖ)
+
+    return (; ρqᵛ, ρqᶜˡ, ρqᶜⁱ, ρqʳ)
+end
+
+@inline function AM.microphysical_tendency(bμp::MPNE1M, ::Val{:ρqᵛ}, ρ, ℳ::MixedPhaseOneMomentState, 𝒰, constants)
+    ρqᵛ = _mp_ne1m_tendencies(bμp, ρ, ℳ, 𝒰, constants).ρqᵛ
+    ρSⁿᵘᵐ = -ρ * 𝒰.moisture_mass_fractions.vapor / τⁿᵘᵐ
+    return ifelse(𝒰.moisture_mass_fractions.vapor >= 0, ρqᵛ, ρSⁿᵘᵐ)
+end
+
+@inline function AM.microphysical_tendency(bμp::MPNE1M, ::Val{:ρqᶜˡ}, ρ, ℳ::MixedPhaseOneMomentState, 𝒰, constants)
+    τᶜˡ = liquid_relaxation_timescale(bμp.cloud_formation, bμp.categories)
+    ρqᶜˡ = _mp_ne1m_tendencies(bμp, ρ, ℳ, 𝒰, constants).ρqᶜˡ
+    ρSⁿᵘᵐ = -ρ * ℳ.qᶜˡ / τᶜˡ
+    return ifelse(ℳ.qᶜˡ >= 0, ρqᶜˡ, ρSⁿᵘᵐ)
+end
+
+@inline function AM.microphysical_tendency(bμp::MPNE1M, ::Val{:ρqᶜⁱ}, ρ, ℳ::MixedPhaseOneMomentState, 𝒰, constants)
+    τᶜⁱ = ice_relaxation_timescale(bμp.cloud_formation, bμp.categories)
+    ρqᶜⁱ = _mp_ne1m_tendencies(bμp, ρ, ℳ, 𝒰, constants).ρqᶜⁱ
     # TODO: Add autoconversion cloud ice → snow when snow processes are implemented
     # For now, cloud ice only grows/shrinks via deposition/sublimation
+    ρSⁿᵘᵐ = -ρ * ℳ.qᶜⁱ / τᶜⁱ
+    return ifelse(ℳ.qᶜⁱ >= 0, ρqᶜⁱ, ρSⁿᵘᵐ)
+end
 
-    ΣρS = ρ * Sᵈᵉᵖ
-    ρSⁿᵘᵐ = -ρ * qᶜⁱ / τᶜⁱ
-
-    return ifelse(qᶜⁱ >= 0, ΣρS, ρSⁿᵘᵐ)
+@inline function AM.microphysical_tendency(bμp::MPNE1M, ::Val{:ρqʳ}, ρ, ℳ::MixedPhaseOneMomentState, 𝒰, constants)
+    ρqʳ = _mp_ne1m_tendencies(bμp, ρ, ℳ, 𝒰, constants).ρqʳ
+    ρSⁿᵘᵐ = -ρ * ℳ.qʳ / τⁿᵘᵐ
+    return ifelse(ℳ.qʳ >= 0, ρqʳ, ρSⁿᵘᵐ)
 end

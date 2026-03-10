@@ -494,64 +494,22 @@ end
 const τⁿᵘᵐ_2m = 10  # seconds
 
 #####
-##### Vapor mass tendency (ρqᵛ) - state-based
+##### Microphysical tendencies for warm-phase non-equilibrium 2M (WPNE2M)
 #####
 #
-# The vapor tendency accounts for phase changes that transfer mass between
-# vapor and condensate. Autoconversion and accretion (cloud ↔ rain) do not
-# affect vapor. Conservation requires:
-#   d(ρqᵛ)/dt + d(ρqᶜˡ)/dt_phase + d(ρqʳ)/dt_evap = 0
+# Conservation: d(ρqᵛ)/dt + d(ρqᶜˡ)/dt + d(ρqʳ)/dt = 0 (from phase changes)
 #
-# where d(ρqᶜˡ)/dt_phase = ρ(Sᶜᵒⁿᵈ + Sᵃᶜᵗ) and d(ρqʳ)/dt_evap = ρSᵉᵛᵃᵖ.
-
-@inline function AtmosphereModels.microphysical_tendency(bμp::WPNE2M, ::Val{:ρqᵛ}, ρ, ℳ::WarmPhaseTwoMomentState, 𝒰, constants)
-    categories = bμp.categories
-    sb = categories.warm_processes
-    τᶜˡ = liquid_relaxation_timescale(bμp.cloud_formation, categories)
-
-    qᶜˡ = ℳ.qᶜˡ
-    qʳ = ℳ.qʳ
-    nʳ = ℳ.nʳ
-
-    # Thermodynamic state
-    T = temperature(𝒰, constants)
-    q = 𝒰.moisture_mass_fractions
-    qᵛ = q.vapor
-
-    # Saturation specific humidity
-    qᵛ⁺ = saturation_specific_humidity(T, ρ, constants, PlanarLiquidSurface())
-
-    # Condensation (same computation as in cloud liquid tendency)
-    Sᵃᶜᵗ = aerosol_activation_mass_tendency(categories.aerosol_activation, categories.air_properties,
-                                             ρ, ℳ, 𝒰, constants)
-
-    Sᶜᵒⁿᵈ = condensation_rate(qᵛ, qᵛ⁺, qᶜˡ, T, ρ, q, τᶜˡ, constants)
-    Sᶜᵒⁿᵈ = ifelse(isnan(Sᶜᵒⁿᵈ), zero(Sᶜᵒⁿᵈ), Sᶜᵒⁿᵈ)
-    Sᶜᵒⁿᵈ_min = -max(0, qᶜˡ) / τᶜˡ
-    Sᶜᵒⁿᵈ = max(Sᶜᵒⁿᵈ - Sᵃᶜᵗ, Sᶜᵒⁿᵈ_min)
-
-    # Rain evaporation (same computation as in rain tendency)
-    Nʳ_vol = ρ * max(0, nʳ)
-    evap = rain_evaporation_2m(sb, categories.air_properties, q, max(0, qʳ), ρ, Nʳ_vol, T, constants)
-    Sᵉᵛᵃᵖ = evap.evap_rate_1
-    Sᵉᵛᵃᵖ_min = -max(0, qʳ) / τⁿᵘᵐ_2m
-    Sᵉᵛᵃᵖ = max(Sᵉᵛᵃᵖ, Sᵉᵛᵃᵖ_min)
-
-    # Vapor tendency: negative of phase-change sources
-    # Condensation + activation remove vapor; rain evaporation adds vapor
-    Sᵛᵃᵖ = -(Sᶜᵒⁿᵈ + Sᵃᶜᵗ) - Sᵉᵛᵃᵖ
-
-    # Limit vapor removal to available vapor
-    Sᵛᵃᵖ = max(Sᵛᵃᵖ, -max(0, qᵛ) / τⁿᵘᵐ_2m)
-
-    return ρ * Sᵛᵃᵖ
-end
-
-#####
-##### Cloud liquid mass tendency (ρqᶜˡ) - state-based
+# Activation and condensation are sequentially coupled: both consume vapor from
+# the same supersaturation budget. Activation forms new droplets first; condensation
+# then grows existing droplets with the remaining supersaturation.
+# This prevents double-counting vapor consumption.
+#
+#   ρqᵛ:  −(Sᶜᵒⁿᵈ_eff + Sᵃᶜᵗ) − Sᵉᵛᵃᵖ
+#   ρqᶜˡ: +(Sᶜᵒⁿᵈ_eff + Sᵃᶜᵗ) + dq_lcl (autoconversion + accretion, negative)
+#   ρqʳ:                          + dq_rai (autoconversion + accretion, positive) + Sᵉᵛᵃᵖ
 #####
 
-@inline function AtmosphereModels.microphysical_tendency(bμp::WPNE2M, ::Val{:ρqᶜˡ}, ρ, ℳ::WarmPhaseTwoMomentState, 𝒰, constants)
+@inline function _wp_ne2m_tendencies(bμp::WPNE2M, ρ, ℳ::WarmPhaseTwoMomentState, 𝒰, constants)
     categories = bμp.categories
     sb = categories.warm_processes
     τᶜˡ = liquid_relaxation_timescale(bμp.cloud_formation, categories)
@@ -559,49 +517,55 @@ end
     qᶜˡ = ℳ.qᶜˡ
     qʳ = ℳ.qʳ
     nᶜˡ = ℳ.nᶜˡ
+    nʳ = ℳ.nʳ
 
-    # Number densities [1/m³]
     Nᶜˡ = ρ * max(0, nᶜˡ)
+    Nʳ = ρ * max(0, nʳ)
 
-    # Thermodynamic state
     T = temperature(𝒰, constants)
     q = 𝒰.moisture_mass_fractions
     qᵛ = q.vapor
 
-    # Saturation specific humidity
     qᵛ⁺ = saturation_specific_humidity(T, ρ, constants, PlanarLiquidSurface())
 
-    # Sequential coupling of activation and condensation:
-    # Both processes consume vapor from the same supersaturation budget.
-    # Activation goes first (new droplets at critical Köhler radius),
-    # then condensation uses the remaining supersaturation to grow existing droplets.
-    # This prevents double-counting vapor consumption.
-
-    # Step 1: Activation mass tendency (uses full supersaturation)
+    # Step 1: Aerosol activation mass tendency (vapor → new cloud droplets)
     Sᵃᶜᵗ = aerosol_activation_mass_tendency(categories.aerosol_activation, categories.air_properties,
                                              ρ, ℳ, 𝒰, constants)
 
-    # Step 2: Condensation with reduced supersaturation (subtract activation mass)
+    # Step 2: Condensation on existing droplets, budget reduced by activation.
+    # Both activation and condensation draw from the same supersaturation; activation goes first.
     Sᶜᵒⁿᵈ = condensation_rate(qᵛ, qᵛ⁺, qᶜˡ, T, ρ, q, τᶜˡ, constants)
     Sᶜᵒⁿᵈ = ifelse(isnan(Sᶜᵒⁿᵈ), zero(Sᶜᵒⁿᵈ), Sᶜᵒⁿᵈ)
     Sᶜᵒⁿᵈ_min = -max(0, qᶜˡ) / τᶜˡ
-    Sᶜᵒⁿᵈ = max(Sᶜᵒⁿᵈ - Sᵃᶜᵗ, Sᶜᵒⁿᵈ_min)
+    Sᶜᵒⁿᵈ_eff = max(Sᶜᵒⁿᵈ - Sᵃᶜᵗ, Sᶜᵒⁿᵈ_min)
 
-    # Autoconversion: cloud liquid → rain
+    # Rain evaporation: rain → vapor (Sᵉᵛᵃᵖ < 0 when rain evaporates)
+    evap = rain_evaporation_2m(sb, categories.air_properties, q, max(0, qʳ), ρ, Nʳ, T, constants)
+    Sᵉᵛᵃᵖ = evap.evap_rate_1
+    Sᵉᵛᵃᵖ = max(Sᵉᵛᵃᵖ, -max(0, qʳ) / τⁿᵘᵐ_2m)
+
+    # Collection: cloud liquid ↔ rain (does not involve vapor)
     au = CM2.autoconversion(sb.acnv, sb.pdf_c, max(0, qᶜˡ), max(0, qʳ), ρ, Nᶜˡ)
-    Sᵃᶜⁿᵛ = au.dq_lcl_dt  # negative (sink for cloud)
-
-    # Accretion: cloud liquid captured by falling rain
     ac = CM2.accretion(sb, max(0, qᶜˡ), max(0, qʳ), ρ, Nᶜˡ)
-    Sᵃᶜᶜ = ac.dq_lcl_dt  # negative (sink for cloud)
 
-    # Total tendency
-    ΣρS = ρ * (Sᶜᵒⁿᵈ + Sᵃᶜⁿᵛ + Sᵃᶜᶜ + Sᵃᶜᵗ)
+    # Conservation identity: ρqᵛ + ρqᶜˡ + ρqʳ = 0 (phase changes + conservative collection)
+    ρqᵛ  = ρ * (-(Sᶜᵒⁿᵈ_eff + Sᵃᶜᵗ) - Sᵉᵛᵃᵖ)
+    ρqᶜˡ = ρ * (  Sᶜᵒⁿᵈ_eff + Sᵃᶜᵗ  + au.dq_lcl_dt + ac.dq_lcl_dt)
+    ρqʳ  = ρ * (                        au.dq_rai_dt + ac.dq_rai_dt + Sᵉᵛᵃᵖ)
 
-    # Numerical relaxation for negative values
-    ρSⁿᵘᵐ = -ρ * qᶜˡ / τⁿᵘᵐ_2m
+    return (; ρqᵛ, ρqᶜˡ, ρqʳ)
+end
 
-    return ifelse(qᶜˡ >= 0, ΣρS, ρSⁿᵘᵐ)
+@inline function AtmosphereModels.microphysical_tendency(bμp::WPNE2M, ::Val{:ρqᵛ}, ρ, ℳ::WarmPhaseTwoMomentState, 𝒰, constants)
+    ρqᵛ = _wp_ne2m_tendencies(bμp, ρ, ℳ, 𝒰, constants).ρqᵛ
+    ρSⁿᵘᵐ = -ρ * 𝒰.moisture_mass_fractions.vapor / τⁿᵘᵐ_2m
+    return ifelse(𝒰.moisture_mass_fractions.vapor >= 0, ρqᵛ, ρSⁿᵘᵐ)
+end
+
+@inline function AtmosphereModels.microphysical_tendency(bμp::WPNE2M, ::Val{:ρqᶜˡ}, ρ, ℳ::WarmPhaseTwoMomentState, 𝒰, constants)
+    ρqᶜˡ = _wp_ne2m_tendencies(bμp, ρ, ℳ, 𝒰, constants).ρqᶜˡ
+    ρSⁿᵘᵐ = -ρ * ℳ.qᶜˡ / τⁿᵘᵐ_2m
+    return ifelse(ℳ.qᶜˡ >= 0, ρqᶜˡ, ρSⁿᵘᵐ)
 end
 
 #####
@@ -812,10 +776,10 @@ Uses the maximum supersaturation to determine which aerosol modes activate.
         Nᵗᵒᵗ += Nᵐᵒᵈᵉ
 
         # Mean hygroscopicity for this mode
-        κ̄ = mean_hygroscopicity(ap, mode)
+        κ̄ = max(eps(FT), mean_hygroscopicity(ap, mode))
 
         # Critical supersaturation for mode (Eq. 9 in ARG 2000)
-        Sᶜʳⁱᵗ = 2 / sqrt(max(eps(FT), κ̄)) * sqrt(max(0, A / (3 * mode.r_dry)))^3
+        Sᶜʳⁱᵗ = max(eps(FT), 2 / sqrt(κ̄) * sqrt(max(0, A / (3 * mode.r_dry)))^3)
 
         # Activated fraction for this mode (Eq. 7 in ARG 2000)
         # Guard against log(0) or log(negative): when Sᵐᵃˣ ≈ 0, no activation occurs
@@ -836,44 +800,9 @@ end
 #####
 
 @inline function AtmosphereModels.microphysical_tendency(bμp::WPNE2M, ::Val{:ρqʳ}, ρ, ℳ::WarmPhaseTwoMomentState, 𝒰, constants)
-    categories = bμp.categories
-    sb = categories.warm_processes
-
-    qᶜˡ = ℳ.qᶜˡ
-    qʳ = ℳ.qʳ
-    nᶜˡ = ℳ.nᶜˡ
-    nʳ = ℳ.nʳ
-
-    # Number densities [1/m³]
-    Nᶜˡ = ρ * max(0, nᶜˡ)
-    Nʳ = ρ * max(0, nʳ)
-
-    # Autoconversion: cloud liquid → rain (source for rain)
-    au = CM2.autoconversion(sb.acnv, sb.pdf_c, max(0, qᶜˡ), max(0, qʳ), ρ, Nᶜˡ)
-    Sᵃᶜⁿᵛ = au.dq_rai_dt  # positive (source for rain)
-
-    # Accretion: cloud liquid captured by falling rain (source for rain)
-    ac = CM2.accretion(sb, max(0, qᶜˡ), max(0, qʳ), ρ, Nᶜˡ)
-    Sᵃᶜᶜ = ac.dq_rai_dt  # positive (source for rain)
-
-    # Rain evaporation (in subsaturated air)
-    T = temperature(𝒰, constants)
-    q = 𝒰.moisture_mass_fractions
-
-    evap = rain_evaporation_2m(sb, categories.air_properties, q, max(0, qʳ), ρ, Nʳ, T, constants)
-    Sᵉᵛᵃᵖ = evap.evap_rate_1  # [kg/kg/s], negative (sink for rain)
-
-    # Limit evaporation to available rain
-    Sᵉᵛᵃᵖ_min = -max(0, qʳ) / τⁿᵘᵐ_2m
-    Sᵉᵛᵃᵖ = max(Sᵉᵛᵃᵖ, Sᵉᵛᵃᵖ_min)
-
-    # Total tendency
-    ΣρS = ρ * (Sᵃᶜⁿᵛ + Sᵃᶜᶜ + Sᵉᵛᵃᵖ)
-
-    # Numerical relaxation for negative values
-    ρSⁿᵘᵐ = -ρ * qʳ / τⁿᵘᵐ_2m
-
-    return ifelse(qʳ >= 0, ΣρS, ρSⁿᵘᵐ)
+    ρqʳ = _wp_ne2m_tendencies(bμp, ρ, ℳ, 𝒰, constants).ρqʳ
+    ρSⁿᵘᵐ = -ρ * ℳ.qʳ / τⁿᵘᵐ_2m
+    return ifelse(ℳ.qʳ >= 0, ρqʳ, ρSⁿᵘᵐ)
 end
 
 #####
