@@ -199,6 +199,12 @@ The frozen mass deposits as dense rime at ``ρ_{\\text{rim}} = 900`` kg/m³
 (solid ice sphere), following the Fortran P3 v5.5.0 treatment of
 [Morrison and Milbrandt (2015)](@cite Morrison2015parameterization).
 
+The number rate ``N_{\\text{hom}}`` is capped by a mass-number consistency bound:
+at most one ice particle per minimum-size cloud droplet
+(`ProcessRateParameters.minimum_cloud_drop_mass`) can form from the frozen mass.
+This prevents an ni explosion when `Nᶜ` is prescribed (continental aerosol loading)
+and `qᶜˡ` is trace at ``T < -40°\\text{C}``.
+
 # Arguments
 - `p3`: P3 microphysics scheme (provides parameters)
 - `qᶜˡ`: Cloud liquid mass fraction [kg/kg]
@@ -209,7 +215,7 @@ The frozen mass deposits as dense rime at ``ρ_{\\text{rim}} = 900`` kg/m³
 # Returns
 - Tuple (Q_hom, N_hom):
   - `Q_hom`: Mass rate cloud → ice [kg/kg/s]
-  - `N_hom`: Number rate cloud → ice [1/kg/s]
+  - `N_hom`: Number rate cloud → ice [1/kg/s], capped by mass-number consistency
 
 # Example
 
@@ -241,6 +247,13 @@ Float64
 
     # Number rate: Nᶜ is [1/m³] → divide by ρ for [1/kg]
     N_hom = Nᶜ / ρ / τ_hom
+
+    # Mass-number consistency cap: cannot produce more particles than the number
+    # of minimum-size droplets that could have frozen (prevents ni explosion when
+    # Nᶜ is prescribed and qᶜˡ is trace).
+    min_drop_mass = FT(prp.minimum_cloud_drop_mass)
+    N_hom_max = Q_hom / min_drop_mass
+    N_hom = min(N_hom, N_hom_max)
 
     Q_hom = ifelse(freezing_active, Q_hom, zero(FT))
     N_hom = ifelse(freezing_active, N_hom, zero(FT))

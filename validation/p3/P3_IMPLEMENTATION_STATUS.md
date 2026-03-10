@@ -282,7 +282,7 @@ slower (stays in growth zone), while large rimed ice falls faster (correct trans
 
 | Item | Priority | Description |
 |------|----------|-------------|
-| **Homogeneous freezing number fix** | ✅ Done | Capped `cloud_hom_n_limited` by mass-consistent bound to prevent 10⁹/kg ni explosion from prescribed Nc at T < −40°C |
+| **Homogeneous freezing number fix** | ✅ Done | Cap moved into library: `homogeneous_freezing_cloud_rate` applies `N_hom ≤ Q_hom/minimum_cloud_drop_mass` (parameter in `ProcessRateParameters`); driver simplified |
 | **Contact + condensation-freezing nucleation** | Low | Both are OFF in Fortran P3 v5.5.0; not needed for kin1d parity |
 | **3-moment Z in kin1d driver** | Low | Z is prognostic but 3-moment closure only helps with PSD-integrated process rates (deposition tables); analytical path unchanged |
 | **Rain tables in kin1d** | ✅ Done | Always enabled: exact PSD integration for rain fall speed and evaporation |

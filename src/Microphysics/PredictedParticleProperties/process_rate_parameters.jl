@@ -130,6 +130,7 @@ struct ProcessRateParameters{FT}
     # Homogeneous freezing (Koop et al. 2000)
     homogeneous_freezing_temperature :: FT   # T < threshold: all cloud/rain freezes [K]
     homogeneous_freezing_timescale :: FT     # τ_hom [s], effective instantaneous
+    minimum_cloud_drop_mass :: FT           # mass-number consistency cap for N_hom [kg]
 end
 
 """
@@ -286,7 +287,10 @@ function ProcessRateParameters(FT::Type{<:AbstractFloat} = Float64;
 
         # Homogeneous freezing
         homogeneous_freezing_temperature = 233.15,
-        homogeneous_freezing_timescale = 1.0)
+        homogeneous_freezing_timescale = 1.0,
+        # Mass-number consistency cap: at most one particle per minimum-size droplet
+        # (≈ 6 μm radius cloud droplet → m ≈ 4/3 π ρ_w r³ ≈ 9e-13 kg; use 1e-12 kg)
+        minimum_cloud_drop_mass = 1e-12)
 
     return ProcessRateParameters(
         FT(liquid_water_density),
@@ -358,7 +362,8 @@ function ProcessRateParameters(FT::Type{<:AbstractFloat} = Float64;
         FT(freezing_cloud_psd_correction),
         FT(freezing_rain_psd_correction),
         FT(homogeneous_freezing_temperature),
-        FT(homogeneous_freezing_timescale)
+        FT(homogeneous_freezing_timescale),
+        FT(minimum_cloud_drop_mass)
     )
 end
 
