@@ -8,7 +8,7 @@
 # The Schär mountain wave ([Schär et al. (2002)](@cite Schar2002)) is a stringent benchmark
 # for terrain-following coordinates because the fine-scale terrain corrugations create steep
 # coordinate-surface slopes that challenge the horizontal pressure gradient computation.
-# Instead of using an [`ImmersedBoundaryGrid`](@ref) with partial cells, we deform the
+# Instead of using an `ImmersedBoundaryGrid` with partial cells, we deform the
 # computational grid itself using [`follow_terrain!`](@ref), which applies the
 # [Gal-Chen and Somerville (1975)](@cite GalChen1975) coordinate transformation.
 # The terrain-following approach exactly captures the mountain profile at any resolution,
@@ -193,7 +193,6 @@ axislegend(ax, position = :rt)
 xlims!(ax, -L/6, L/6)
 ylims!(ax, -100, 3500)
 fig
-save("terrain_following_grid.png", fig)
 
 # ## Potential temperature profile
 #
@@ -409,4 +408,3 @@ for ax in (ax1, ax2)
 end
 
 fig
-save("mountain_wave_comparison.png", fig)
