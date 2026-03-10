@@ -251,9 +251,9 @@ CUDA.@allowscalar for i in 1:Nx
     for k in 1:Nz
         z_phys = znode(i, 1, k, grid, Center(), Center(), Center())
         θₖ = θ_of_z(z_phys)
-        
+
         ρₖ = ρ_ref[i, 1, k]
-        
+
         ρ_field[i, 1, k] = ρₖ
         ρθ_field[i, 1, k] = ρₖ * θₖ
     end
