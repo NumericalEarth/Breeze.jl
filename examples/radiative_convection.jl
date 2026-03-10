@@ -30,6 +30,9 @@ using RRTMGP
 using CUDA
 
 Random.seed!(2025)
+if CUDA.functional() #hide
+CUDA.seed!(2025)
+end #hide
 
 # ## Grid
 #
