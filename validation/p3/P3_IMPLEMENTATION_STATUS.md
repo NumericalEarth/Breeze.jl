@@ -287,7 +287,7 @@ slower (stays in growth zone), while large rimed ice falls faster (correct trans
 | **Contact + condensation-freezing nucleation** | Low | Both are OFF in Fortran P3 v5.5.0; not needed for kin1d parity |
 | **3-moment Z in kin1d driver** | Low | Z is prognostic but 3-moment closure only helps with PSD-integrated process rates (deposition tables); analytical path unchanged |
 | **Rain tables in kin1d** | ✅ Done | Always enabled: exact PSD integration for rain fall speed and evaporation |
-| **Bulk tendency kernel** | Performance | 10× redundancy: each of 9 P3 fields calls `compute_p3_process_rates` independently in `AtmosphereModel` |
+| **Bulk tendency kernel** | ✅ Done | `update_microphysical_auxiliaries!` now computes rates once and caches all 10 tendency contributions; `grid_microphysical_tendency` overrides read from cache fields |
 | **Sedimentation substepping** | Stability | CFL constraint for large Δt; may be needed for production LES runs |
 | **3D LES cases** | Validation | BOMEX with ice, deep convection |
 
