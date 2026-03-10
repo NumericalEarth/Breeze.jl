@@ -42,11 +42,11 @@ jobs:
           - dynamics: 'compressible_splitexplicit'
             microphysics: 'nothing'
             grid: '512x512x256'
-            advection: 'WENO9'
+            advection: 'WENO5'
           - dynamics: 'anelastic'
             microphysics: 'MixedPhaseEquilibrium, 1M_MixedEquilibrium, 1M_MixedNonEquilibrium'
             grid: '512x512x256'
-            advection: 'WENO9'
+            advection: 'WENO5'
     defaults:
       run:
         shell: bash
@@ -128,7 +128,7 @@ jobs:
 
               # We want to group benchmarks in different ways. NOTE:
               # the same benchmark may appear in multiple groups
-              if dynamics == 'anelastic' and grid_str == '512x512x256' and advection == 'WENO9':
+              if dynamics == 'anelastic' and grid_str == '512x512x256' and advection == 'WENO5':
                   level_1 = f'{base_name}; Dynamics: {dynamics}; Grid: {grid_str} [{ft}]'
                   level_2 = f'Advection: {advection}'
                   level_3 = f'{gpu}'
