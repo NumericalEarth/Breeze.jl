@@ -192,10 +192,8 @@ T₀(x) = θ₀ + ΔT / 2 * sign(cos(2π * x / grid.Lx))
 # We complete our specification by using the same polynomial coefficient for
 # sensible and latent heat fluxes. The flux type will be automatically inferred:
 
-ρe_surface_flux = BulkSensibleHeatFlux(coefficient=coef, gustiness=Uᵍ,
-                                      surface_temperature=T₀, filtered_velocities=filtered_velocities)
-ρqᵉ_surface_flux = BulkVaporFlux(coefficient=coef, gustiness=Uᵍ,
-                                  surface_temperature=T₀, filtered_velocities=filtered_velocities)
+ρe_surface_flux = BulkSensibleHeatFlux(coefficient=coef; gustiness=Uᵍ, filtered_velocities, surface_temperature=T₀)
+ρqᵉ_surface_flux = BulkVaporFlux(coefficient=coef, gustiness=Uᵍ, filtered_velocities, surface_temperature=T₀)
 
 # We can visualize how the neutral drag coefficient varies with wind speed,
 # and the range of stability-corrected values expected in this simulation.
