@@ -661,8 +661,17 @@ function run_kin1d(; sounding_path, levels_path, FT=Float64, verbose=true, use_t
                       rates.rain_homogeneous_number) * dt * rain_sink_scale)
             nr[k] = max(0, nr[k] + dnr)
 
-            # Cloud number (prescribed)
-            nc[k] = ifelse(qc[k] > 1e-8, FT(p3.cloud.number_concentration / ρk), FT(0))
+            # Cloud number (prescribed, but constrained to physical drop sizes).
+            # Without a constraint, prescribed Nc=750e6/m³ becomes inconsistent with
+            # very small qc (e.g. residual cloud at cold levels). When T drops below
+            # -40°C with trace qc, homogeneous freezing would inject nc=Nc/ρ ≈ 1e9/kg
+            # tiny particles with near-zero fall speed, causing an ni explosion.
+            # Constraint: nc ≤ qc / min_drop_mass (minimum physical cloud droplet: 1 pg).
+            # This matches Fortran's behaviour where Nc is prognostic and naturally depletes.
+            min_drop_mass = FT(1e-12)   # [kg] ≈ 6 μm radius cloud droplet
+            nc_prescribed = FT(p3.cloud.number_concentration / ρk)
+            nc_max_from_qc = max(qc[k], FT(0)) / min_drop_mass
+            nc[k] = ifelse(qc[k] > 1e-8, min(nc_prescribed, nc_max_from_qc), FT(0))
 
             # Ice deposition/sublimation (single step, matching Fortran P3_MAIN).
             # The Fortran computes deposition from the current ice supersaturation
@@ -721,10 +730,16 @@ function run_kin1d(; sounding_path, levels_path, FT=Float64, verbose=true, use_t
             rain_frz_n_scale = rates.rain_freezing_mass > FT(1e-20) ?
                 rain_freezing_lim / (rates.rain_freezing_mass * dt) : FT(0)
             rain_frz_n_limited = rates.rain_freezing_number * rain_frz_n_scale
-            # Homogeneous freezing number: each cloud droplet/rain drop becomes an ice crystal
+            # Homogeneous freezing number: each cloud droplet/rain drop becomes an ice crystal.
+            # Cap by mass-consistent value: prescribed Nc can be >> physical nc when qc is
+            # trace at cold levels (T < -40°C), causing ni explosions of ~10^9/kg.
+            # Physical bound: at most one ice particle per minimum-size cloud droplet (≈6 μm).
             cloud_hom_n_scale = rates.cloud_homogeneous_mass > FT(1e-20) ?
                 hom_c_lim / (rates.cloud_homogeneous_mass * dt) : FT(0)
-            cloud_hom_n_limited = rates.cloud_homogeneous_number * cloud_hom_n_scale
+            cloud_hom_n_raw = rates.cloud_homogeneous_number * cloud_hom_n_scale
+            min_drop_mass_hom = FT(1e-12)   # ≈ 6 μm radius cloud droplet [kg]
+            cloud_hom_n_limited = min(cloud_hom_n_raw,
+                                      hom_c_lim / (min_drop_mass_hom * dt))
             rain_hom_n_scale = rates.rain_homogeneous_mass > FT(1e-20) ?
                 hom_r_lim / (rates.rain_homogeneous_mass * dt) : FT(0)
             rain_hom_n_limited = rates.rain_homogeneous_number * rain_hom_n_scale

@@ -166,7 +166,7 @@ Default mode (no flags): analytical ice, rain tables always active.
 |-------|-------------|------------|-------|------------|
 | Cloud liquid | 4.17 g/kg | 4.35 g/kg | 1.05× | Good |
 | Rain | 5.47 g/kg | 6.05 g/kg | 1.11× | Good |
-| Ice | 12.30 g/kg | 4.94 g/kg | 0.40× | Underproduced |
+| Ice | 12.30 g/kg | 5.06 g/kg | 0.41× | Underproduced |
 | Temperature | 30.6 °C | 30.6 °C | 1.00× | Excellent |
 
 Tables mode (`--tables` flag): tabulated ice fall speeds (P3Closure μ-λ, factor=3×).
@@ -175,17 +175,17 @@ Tables mode (`--tables` flag): tabulated ice fall speeds (P3Closure μ-λ, facto
 |-------|-------------|------------|-------|------------|
 | Cloud liquid | 4.17 g/kg | 4.35 g/kg | 1.05× | Good |
 | Rain | 5.47 g/kg | 6.05 g/kg | 1.11× | Good |
-| Ice | 12.30 g/kg | 7.52 g/kg | 0.61× | Improved — use this mode |
+| Ice | 12.30 g/kg | 7.42 g/kg | 0.60× | Improved — use this mode |
 | Temperature | 30.6 °C | 30.6 °C | 1.00× | Excellent |
 
 **Time evolution (selected times) — tables mode:**
 
 | Time | Cloud ratio | Rain ratio | Ice ratio | Notes |
 |------|-------------|-----------|-----------|-------|
-| t=30 min | ~1.31× | ~1.28× | ~0.03× | Ice too low; warm rain good |
-| t=40 min | ~0.74× | ~3.91× | ~0.59× | Ice improving; rain excess from early ice deficit |
-| t=50 min | ~0.65× | ~13.4× | ~0.76× | Ice near peak; rain excess persists |
-| t=60 min | ~1.23× | ~11.3× | ~0.66× | Ice good; rain excess driven by ice deficit |
+| t=30 min | ~1.30× | ~1.28× | ~0.03× | Ice timing gap: mean-mass growth << PSD-integrated |
+| t=40 min | ~0.69× | ~3.91× | ~0.55× | Ice improving; rain excess from early ice deficit |
+| t=50 min | ~0.61× | ~13.4× | ~0.76× | Ice near peak; rain excess persists |
+| t=60 min | ~1.19× | ~11.4× | ~0.60× | Ice good; rain excess driven by ice deficit |
 | t=70 min | — | ~0.58× | ~0.50× | Rain back to normal; ice declining |
 | t=80 min | — | ~0.86× | ~0.40× | Late-time rain matches Fortran well |
 
@@ -202,22 +202,30 @@ Tables mode (`--tables` flag): tabulated ice fall speeds (P3Closure μ-λ, facto
 | Nr constraint | clamp m_r to [1.4e-8, 5e-6] kg | Prevent Nr explosion from self-collection without breakup |
 | `ice_vt_psd_factor` (tables) | 3.0 | Scales tabulated fall speed (tables are 39% of analytical; factor 3 gives correct sedimentation) |
 
-**Root causes of ice underproduction (~0.44×):**
+**Root causes of ice underproduction (~0.41×):**
 
-1. **Missing nucleation modes**: Fortran P3 includes contact and condensation-freezing in addition
-   to Cooper (1986) deposition freezing. These together produce 10–100× more ice particles at
-   T < −35°C. Julia uses 3× Cooper coefficient as a proxy.
+1. **Mean-mass deposition growth lag**: At t=20–30 min, freshly nucleated ice particles have
+   diameter D_n ≈ 3 μm (PSD number-mean). The Fortran PSD-integral captures the exponential
+   tail of the distribution (D > 50–100 μm) which deposits ~100× faster per particle than the
+   mean. The Breeze analytical path with `ρ_eff = 100 kg/m³` uses an inflated D_eff ≈ 63 μm
+   for fresh ice, but still misses the large-particle tail contribution. The `alpha_dep = 2.0`
+   boost partially compensates for later-stage ice (when D_eff ≈ 200 μm vs actual ≈ 100 μm).
 
-2. **Mean-mass approximation mismatch**: The analytical deposition path uses `ρ_eff = 100 kg/m³`
-   to compute an effective diameter `D_mean ≈ 212 μm`. The actual distribution (P3Closure: μ ≈ 1
-   at D_mvd ≈ 101 μm) has a number-mean diameter of ~111 μm. Because `C × f_v ∝ D^1.7`, this
-   2× size gap causes the analytical path to overestimate per-particle deposition by ~3.7×. The
-   `alpha_dep = 2.0` boost partially compensates.
+2. **Rain overproduction at t=40–60 driven by ice underproduction**: With insufficient ice to
+   rime cloud droplets (WBF effect), warm-rain processes (autoconversion, accretion) dominate
+   in Breeze. Rain at t=40–60 is 4–13× Fortran; this normalises by t=70–80 as ice eventually
+   grows and melts.
 
-3. **Full deposition tables are NOT the fix**: Full PSD-integrated tables give **0.27×** of the
-   analytical rate (they are physically more correct, but the analytical was already overestimating).
-   Switching to full deposition tables would reduce ice from ~0.44× to ~0.12×. The `alpha_dep`
-   correction compensates for the analytical's inflated D_mean, not for missing PSD tail effects.
+3. **Homogeneous cloud freezing number explosion (FIXED)**: Prescribed Nc=750×10⁶ /m³ caused
+   up to 10⁹ ice particles/kg at T < −40°C when trace cloud froze homogeneously. Fixed by
+   capping `cloud_hom_n_limited ≤ hom_c_lim / (min_drop_mass × dt)`, enforcing mass-number
+   consistency.
+
+4. **Full deposition tables are NOT the fix**: Full PSD-integrated tables give **0.27×** of the
+   analytical rate at late-stage ice (they are physically more correct, but the analytical was
+   already overestimating via inflated D_eff). Switching to full deposition tables would reduce
+   ice from ~0.41× to ~0.12×. The `alpha_dep` correction compensates for analytical's inflated
+   D_mean, not for the large-particle tail that drives early Fortran ice growth.
 
 **Known limitations (inherent to 2-moment mean-mass approximation):**
 
@@ -239,8 +247,8 @@ Tables mode (`--tables` flag): tabulated ice fall speeds (P3Closure μ-λ, facto
 `kin1d_driver.jl` runs the full 41-level, 90-minute kinematic column test and compares
 against Fortran P3 v5.5.0 reference output.
 
-**Best mode: `--tables`** (tabulated ice fall speeds). Ice 0.61×, Rain 1.11×.
-Default (no flag): analytical ice. Ice 0.40×, Rain 1.11×.
+**Best mode: `--tables`** (tabulated ice fall speeds). Ice 0.60×, Rain 1.11×.
+Default (no flag): analytical ice. Ice 0.41×, Rain 1.11×.
 
 The ice underproduction is inherent to the 2-moment mean-mass approximation — see root
 causes below. The `--tables` mode significantly improves ice by correctly capturing the
@@ -274,11 +282,11 @@ slower (stays in growth zone), while large rimed ice falls faster (correct trans
 
 | Item | Priority | Description |
 |------|----------|-------------|
-| **Contact + condensation-freezing nucleation** | High | Needed to close the ~2–3× ice deficit. Meyers (1992) contact freezing; condensation-freezing for T < −35°C. Both are OFF in Fortran P3 v5.5.0. |
-| **kin1d re-validation with T,P transport** | High | Transport properties now vary with altitude; `alpha_dep` / `alpha_rim` in driver need re-tuning against Fortran reference |
-| **3-moment Z in kin1d driver** | Medium | Z is prognostic but driver doesn't exploit it for μ diagnosis; full 3-moment closure would improve ice PSD |
+| **Homogeneous freezing number fix** | ✅ Done | Capped `cloud_hom_n_limited` by mass-consistent bound to prevent 10⁹/kg ni explosion from prescribed Nc at T < −40°C |
+| **Contact + condensation-freezing nucleation** | Low | Both are OFF in Fortran P3 v5.5.0; not needed for kin1d parity |
+| **3-moment Z in kin1d driver** | Low | Z is prognostic but 3-moment closure only helps with PSD-integrated process rates (deposition tables); analytical path unchanged |
 | **Rain tables in kin1d** | ✅ Done | Always enabled: exact PSD integration for rain fall speed and evaporation |
-| **Bulk tendency kernel** | Performance | 10× redundancy: each of 9 P3 fields calls `compute_p3_process_rates` independently |
+| **Bulk tendency kernel** | Performance | 10× redundancy: each of 9 P3 fields calls `compute_p3_process_rates` independently in `AtmosphereModel` |
 | **Sedimentation substepping** | Stability | CFL constraint for large Δt; may be needed for production LES runs |
 | **3D LES cases** | Validation | BOMEX with ice, deep convection |
 
