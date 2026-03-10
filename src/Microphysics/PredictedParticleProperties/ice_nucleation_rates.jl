@@ -186,6 +186,127 @@ parameterization, following Fortran P3 v5.5.0.
 end
 
 #####
+##### Homogeneous freezing
+#####
+
+"""
+$(TYPEDSIGNATURES)
+
+Compute homogeneous freezing rate of cloud droplets.
+
+Below −40°C (233.15 K) all supercooled cloud liquid freezes instantaneously.
+The frozen mass deposits as dense rime at ``ρ_{\\text{rim}} = 900`` kg/m³
+(solid ice sphere), following the Fortran P3 v5.5.0 treatment of
+[Morrison and Milbrandt (2015)](@cite Morrison2015parameterization).
+
+# Arguments
+- `p3`: P3 microphysics scheme (provides parameters)
+- `qᶜˡ`: Cloud liquid mass fraction [kg/kg]
+- `Nᶜ`: Cloud droplet number concentration [1/m³]
+- `T`: Temperature [K]
+- `ρ`: Air density [kg/m³]
+
+# Returns
+- Tuple (Q_hom, N_hom):
+  - `Q_hom`: Mass rate cloud → ice [kg/kg/s]
+  - `N_hom`: Number rate cloud → ice [1/kg/s]
+
+# Example
+
+```jldoctest
+using Breeze.Microphysics.PredictedParticleProperties:
+    homogeneous_freezing_cloud_rate
+p3 = PredictedParticlePropertiesMicrophysics()
+Q, N = homogeneous_freezing_cloud_rate(p3, 1e-3, 100e6, 230.0, 1.2)
+typeof(Q)
+
+# output
+Float64
+```
+"""
+@inline function homogeneous_freezing_cloud_rate(p3, qᶜˡ, Nᶜ, T, ρ)
+    FT = typeof(qᶜˡ)
+    prp = p3.process_rates
+
+    T_threshold = FT(prp.homogeneous_freezing_temperature)
+    τ_hom = FT(prp.homogeneous_freezing_timescale)
+
+    qᶜˡ_eff = clamp_positive(qᶜˡ)
+
+    # Guard: temperature below threshold AND sufficient cloud liquid present
+    freezing_active = (T < T_threshold) & (qᶜˡ_eff > FT(1e-8))
+
+    # Instantaneous conversion: rate = mixing ratio / timescale
+    Q_hom = qᶜˡ_eff / τ_hom
+
+    # Number rate: Nᶜ is [1/m³] → divide by ρ for [1/kg]
+    N_hom = Nᶜ / ρ / τ_hom
+
+    Q_hom = ifelse(freezing_active, Q_hom, zero(FT))
+    N_hom = ifelse(freezing_active, N_hom, zero(FT))
+
+    return Q_hom, N_hom
+end
+
+"""
+$(TYPEDSIGNATURES)
+
+Compute homogeneous freezing rate of rain drops.
+
+Below −40°C (233.15 K) all supercooled rain freezes instantaneously.
+The frozen mass deposits as dense rime at ``ρ_{\\text{rim}} = 900`` kg/m³,
+following the Fortran P3 v5.5.0 treatment of
+[Morrison and Milbrandt (2015)](@cite Morrison2015parameterization).
+
+# Arguments
+- `p3`: P3 microphysics scheme (provides parameters)
+- `qʳ`: Rain mass fraction [kg/kg]
+- `nʳ`: Rain number concentration [1/kg]
+- `T`: Temperature [K]
+
+# Returns
+- Tuple (Q_hom, N_hom):
+  - `Q_hom`: Mass rate rain → ice [kg/kg/s]
+  - `N_hom`: Number rate rain → ice [1/kg/s]
+
+# Example
+
+```jldoctest
+using Breeze.Microphysics.PredictedParticleProperties:
+    homogeneous_freezing_rain_rate
+p3 = PredictedParticlePropertiesMicrophysics()
+Q, N = homogeneous_freezing_rain_rate(p3, 1e-3, 1e4, 220.0)
+typeof(Q)
+
+# output
+Float64
+```
+"""
+@inline function homogeneous_freezing_rain_rate(p3, qʳ, nʳ, T)
+    FT = typeof(qʳ)
+    prp = p3.process_rates
+
+    T_threshold = FT(prp.homogeneous_freezing_temperature)
+    τ_hom = FT(prp.homogeneous_freezing_timescale)
+
+    qʳ_eff = clamp_positive(qʳ)
+
+    # Guard: temperature below threshold AND sufficient rain present
+    freezing_active = (T < T_threshold) & (qʳ_eff > FT(1e-8))
+
+    # Instantaneous conversion: rate = mixing ratio / timescale
+    Q_hom = qʳ_eff / τ_hom
+
+    # Number rate: nʳ already in [1/kg]
+    N_hom = clamp_positive(nʳ) / τ_hom
+
+    Q_hom = ifelse(freezing_active, Q_hom, zero(FT))
+    N_hom = ifelse(freezing_active, N_hom, zero(FT))
+
+    return Q_hom, N_hom
+end
+
+#####
 ##### Rime splintering (Hallett-Mossop secondary ice production)
 #####
 

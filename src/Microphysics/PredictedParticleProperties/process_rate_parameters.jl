@@ -126,6 +126,10 @@ struct ProcessRateParameters{FT}
     riming_psd_correction :: FT              # For cloud and rain riming [-]
     freezing_cloud_psd_correction :: FT      # For cloud immersion freezing [-]
     freezing_rain_psd_correction :: FT       # For rain immersion freezing [-]
+
+    # Homogeneous freezing (Koop et al. 2000)
+    homogeneous_freezing_temperature :: FT   # T < threshold: all cloud/rain freezes [K]
+    homogeneous_freezing_timescale :: FT     # τ_hom [s], effective instantaneous
 end
 
 """
@@ -273,7 +277,11 @@ function ProcessRateParameters(FT::Type{<:AbstractFloat} = Float64;
         # PSD correction factors
         riming_psd_correction = 2.0,
         freezing_cloud_psd_correction = 5.0,
-        freezing_rain_psd_correction = 10.0)
+        freezing_rain_psd_correction = 10.0,
+
+        # Homogeneous freezing
+        homogeneous_freezing_temperature = 233.15,
+        homogeneous_freezing_timescale = 1.0)
 
     return ProcessRateParameters(
         FT(liquid_water_density),
@@ -343,7 +351,9 @@ function ProcessRateParameters(FT::Type{<:AbstractFloat} = Float64;
         FT(immersion_freezing_nucleation_coefficient),
         FT(riming_psd_correction),
         FT(freezing_cloud_psd_correction),
-        FT(freezing_rain_psd_correction)
+        FT(freezing_rain_psd_correction),
+        FT(homogeneous_freezing_temperature),
+        FT(homogeneous_freezing_timescale)
     )
 end
 

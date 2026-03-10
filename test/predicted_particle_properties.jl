@@ -40,7 +40,9 @@ using Breeze.Microphysics.PredictedParticleProperties:
     RainMassWeightedVelocityEvaluator,
     RainNumberWeightedVelocityEvaluator,
     RainEvaporationVentilationEvaluator,
-    tabulated_function_1d
+    tabulated_function_1d,
+    homogeneous_freezing_cloud_rate,
+    homogeneous_freezing_rain_rate
 
 using Breeze.Thermodynamics:
     ThermodynamicConstants,
@@ -1209,6 +1211,11 @@ using Oceananigans: CPU
             # Rime splintering
             FT(1e-10),  # splintering_mass
             FT(1.0),    # splintering_number
+            # Homogeneous freezing
+            FT(0.0),    # cloud_homogeneous_mass (warm environment: no hom. freezing)
+            FT(0.0),    # cloud_homogeneous_number
+            FT(0.0),    # rain_homogeneous_mass
+            FT(0.0),    # rain_homogeneous_number
         )
 
         # Test each tendency function returns a finite number
@@ -1924,13 +1931,76 @@ using Oceananigans: CPU
         @test V_large > V_small  # Larger drops fall faster
     end
 
+    @testset "Homogeneous freezing" begin
+        p3 = PredictedParticlePropertiesMicrophysics()
+        FT = Float64
+
+        # --- homogeneous_freezing_cloud_rate ---
+
+        # Above threshold (T = 240 K > 233.15 K): all rates must be zero
+        Q_hom, N_hom = homogeneous_freezing_cloud_rate(p3, FT(1e-3), FT(100e6), FT(240.0), FT(1.0))
+        @test Q_hom == 0
+        @test N_hom == 0
+
+        # Below threshold (T = 230 K): cloud freezes at rate qᶜˡ / τ_hom
+        qcl = FT(1e-3)
+        Nc = FT(100e6)
+        ρ = FT(1.2)
+        T_cold = FT(230.0)
+        τ_hom = FT(1.0)  # default τ_hom = 1 s
+
+        Q_hom, N_hom = homogeneous_freezing_cloud_rate(p3, qcl, Nc, T_cold, ρ)
+        @test Q_hom ≈ qcl / τ_hom
+        @test N_hom ≈ Nc / ρ / τ_hom
+
+        # Below threshold with qᶜˡ below guard (1e-8): zero rates
+        Q_hom_tiny, N_hom_tiny = homogeneous_freezing_cloud_rate(p3, FT(1e-10), Nc, T_cold, ρ)
+        @test Q_hom_tiny == 0
+        @test N_hom_tiny == 0
+
+        # --- homogeneous_freezing_rain_rate ---
+
+        # Above threshold (T = 240 K > 233.15 K): all rates must be zero
+        Q_hom_r, N_hom_r = homogeneous_freezing_rain_rate(p3, FT(1e-3), FT(1e4), FT(240.0))
+        @test Q_hom_r == 0
+        @test N_hom_r == 0
+
+        # Below threshold (T = 220 K): rain freezes at rate qʳ / τ_hom
+        qr = FT(1e-3)
+        nr = FT(1e4)
+        T_very_cold = FT(220.0)
+
+        Q_hom_r, N_hom_r = homogeneous_freezing_rain_rate(p3, qr, nr, T_very_cold)
+        @test Q_hom_r ≈ qr / τ_hom
+        @test N_hom_r ≈ nr / τ_hom
+
+        # Below threshold with qʳ below guard (1e-8): zero rates
+        Q_hom_r_tiny, N_hom_r_tiny = homogeneous_freezing_rain_rate(p3, FT(1e-10), nr, T_very_cold)
+        @test Q_hom_r_tiny == 0
+        @test N_hom_r_tiny == 0
+
+        # Exactly at threshold (T = 233.15 K): should be zero (guard is T < T_threshold)
+        Q_at, N_at = homogeneous_freezing_cloud_rate(p3, qcl, Nc, FT(233.15), ρ)
+        @test Q_at == 0
+
+        # --- Type stability ---
+        # Float32 inputs produce Float32 outputs
+        Q32, N32 = homogeneous_freezing_cloud_rate(p3, Float32(1e-3), Float32(100e6), Float32(230.0), Float32(1.2))
+        @test Q32 isa Float32
+        @test N32 isa Float32
+
+        Q32r, N32r = homogeneous_freezing_rain_rate(p3, Float32(1e-3), Float32(1e4), Float32(220.0))
+        @test Q32r isa Float32
+        @test N32r isa Float32
+    end
+
     @testset "Vapor + cloud + rain + ice mass conservation" begin
         p3 = PredictedParticlePropertiesMicrophysics()
         FT = Float64
 
         ρ = FT(1.0)
 
-        # Create rates with typical mixed-phase values
+        # Create rates with typical mixed-phase values, including homogeneous freezing
         rates = P3ProcessRates(
             FT(5e-7),   # condensation
             FT(1e-7),   # autoconversion
@@ -1959,6 +2029,10 @@ using Oceananigans: CPU
             FT(50.0),   # rain_freezing_number
             FT(1e-10),  # splintering_mass
             FT(1.0),    # splintering_number
+            FT(2e-7),   # cloud_homogeneous_mass
+            FT(1e5),    # cloud_homogeneous_number
+            FT(1e-7),   # rain_homogeneous_mass
+            FT(500.0),  # rain_homogeneous_number
         )
 
         # Compute total water tendency: vapor + cloud + rain + ice + liquid_on_ice
