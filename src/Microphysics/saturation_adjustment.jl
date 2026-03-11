@@ -217,7 +217,7 @@ Return the saturation-adjusted thermodynamic state using a secant iteration.
 
         # Mask the components; mathematically bypass instead of breaking
         valid_step = isfinite(ΔTΔr)
-        ΔTΔr = ifelse(valid_step, ΔTΔr, zero(FT))
+        ΔTΔr *= valid_step
 
         # Store previous values
         r₁ = r₂
