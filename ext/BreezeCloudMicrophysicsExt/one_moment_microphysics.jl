@@ -600,7 +600,7 @@ end
 #   ρqʳ:  +Sᵃᶜⁿᵛ + Sᵃᶜᶜ + Sᵉᵛᵃᵖ  (autoconversion/accretion sources; evaporation sink)
 #####
 
-@inline function _wp_ne1m_tendencies(bμp::WPNE1M, ρ, ℳ::WarmPhaseOneMomentState, 𝒰, constants)
+@inline function wpne1m_tendencies(bμp::WPNE1M, ρ, ℳ::WarmPhaseOneMomentState, 𝒰, constants)
     categories = bμp.categories
     τᶜˡ = liquid_relaxation_timescale(bμp.cloud_formation, categories)
     qᶜˡ = ℳ.qᶜˡ
@@ -648,15 +648,15 @@ end
 end
 
 @inline function AM.microphysical_tendency(bμp::WPNE1M, ::Val{:ρqᵛ}, ρ, ℳ::WarmPhaseOneMomentState, 𝒰, constants)
-    return _wp_ne1m_tendencies(bμp, ρ, ℳ, 𝒰, constants).ρqᵛ
+    return wp_ne1m_tendencies(bμp, ρ, ℳ, 𝒰, constants).ρqᵛ
 end
 
 @inline function AM.microphysical_tendency(bμp::WPNE1M, ::Val{:ρqᶜˡ}, ρ, ℳ::WarmPhaseOneMomentState, 𝒰, constants)
-    return _wp_ne1m_tendencies(bμp, ρ, ℳ, 𝒰, constants).ρqᶜˡ
+    return wp_ne1m_tendencies(bμp, ρ, ℳ, 𝒰, constants).ρqᶜˡ
 end
 
 @inline function AM.microphysical_tendency(bμp::WPNE1M, ::Val{:ρqʳ}, ρ, ℳ::WarmPhaseOneMomentState, 𝒰, constants)
-    return _wp_ne1m_tendencies(bμp, ρ, ℳ, 𝒰, constants).ρqʳ
+    return wp_ne1m_tendencies(bμp, ρ, ℳ, 𝒰, constants).ρqʳ
 end
 
 #####
