@@ -46,31 +46,31 @@ CONFIGS = [
             sync = true,
         ),
     ),
-    (
-        label = "cudnn_hlo_optimize",
-        opts  = CompileOptions(;
-            raise = true, raise_first = true, sync = true,
-            cudnn_hlo_optimize = true,
-        ),
-    ),
-    (
-    label = "raised_exhaustive_tiling",
-    opts  = CompileOptions(;
-        raise = true, raise_first = true, sync = true,
-        xla_debug_options = (;
-            xla_gpu_exhaustive_tiling_search = true,
-        ),
-    ),
-    ),
-    (
-    label = "raised_block_rewriter",
-    opts  = CompileOptions(;
-        raise = true, raise_first = true, sync = true,
-        xla_debug_options = (;
-            xla_gpu_experimental_enable_fusion_block_level_rewriter = true,
-        ),
-    ),
-    ),
+    # (
+    #     label = "cudnn_hlo_optimize",
+    #     opts  = CompileOptions(;
+    #         raise = true, raise_first = true, sync = true,
+    #         cudnn_hlo_optimize = true,
+    #     ),
+    # ),
+    # (
+    # label = "raised_exhaustive_tiling",
+    # opts  = CompileOptions(;
+    #     raise = true, raise_first = true, sync = true,
+    #     xla_debug_options = (;
+    #         xla_gpu_exhaustive_tiling_search = true,
+    #     ),
+    # ),
+    # ),
+    # (
+    # label = "raised_block_rewriter",
+    # opts  = CompileOptions(;
+    #     raise = true, raise_first = true, sync = true,
+    #     xla_debug_options = (;
+    #         xla_gpu_experimental_enable_fusion_block_level_rewriter = true,
+    #     ),
+    # ),
+    # ),
 ]
 
 GRID_SIZES = [
