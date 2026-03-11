@@ -193,7 +193,8 @@ function main()
             return mean(interior(v) .^ 2)
         end
 
-        function forward_loss_reactant(model, Δt, nsteps)
+        function forward_loss_reactant(model, u_initial, θ_initial, ρ_initial, Δt, nsteps)
+            reset_model_state!(model, u_initial, θ_initial, ρ_initial)
             @trace mincut=true checkpointing=true track_numbers=false for _ in 1:nsteps
                 time_step!(model, Δt)
             end
@@ -209,15 +210,13 @@ function main()
 
         GC.gc()
         @info "Compiling Reactant forward pass..."
-        reset_model_state!(reactant_model, u_initial_reactant, θ_initial_reactant, ρ_initial_reactant)
         @time compiled_forward = Reactant.@compile raise=true raise_first=true sync=true forward_loss_reactant(
-            reactant_model, Δt, nsteps
+            reactant_model, u_initial_reactant, θ_initial_reactant, ρ_initial_reactant, Δt, nsteps
         )
 
         GC.gc()
         @info "Running compiled forward pass once..."
-        reset_model_state!(reactant_model, u_initial_reactant, θ_initial_reactant, ρ_initial_reactant)
-        @time loss_value = compiled_forward(reactant_model, Δt, nsteps)
+        @time loss_value = compiled_forward(reactant_model, u_initial_reactant, θ_initial_reactant, ρ_initial_reactant, Δt, nsteps)
         @info @sprintf("Forward loss J = %.6e", loss_value)
 
         if enable_reactant_profile
@@ -233,8 +232,9 @@ function main()
                         ENV["LINES"] = "200000"
                         ENV["COLUMNS"] = "200000"
                         try
-                            reset_model_state!(reactant_model, u_initial_reactant, θ_initial_reactant, ρ_initial_reactant)
-                            profile_result = Reactant.@profile compiled_forward(reactant_model, Δt, nsteps)
+                            profile_result = Reactant.@profile compiled_forward(
+                                reactant_model, u_initial_reactant, θ_initial_reactant, ρ_initial_reactant, Δt, nsteps
+                            )
                             ioctx = IOContext(io, :limit => false, :displaysize => (200000, 200000))
                             show(ioctx, MIME"text/plain"(), profile_result)
                             println(io)
@@ -266,12 +266,8 @@ function main()
 
             GC.gc()
             @info "Benchmarking forward pass (Reactant compiled GPU) — $ntrials trials..."
-            function reactant_forward_with_reset!(model, u_initial, θ_initial, ρ_initial, Δt, nsteps)
-                reset_model_state!(model, u_initial, θ_initial, ρ_initial)
-                return compiled_forward(model, Δt, nsteps)
-            end
             time_forward_reactant = benchmark_forward!(
-                reactant_forward_with_reset!, reactant_model, u_initial_reactant, θ_initial_reactant, ρ_initial_reactant, Δt, nsteps;
+                compiled_forward, reactant_model, u_initial_reactant, θ_initial_reactant, ρ_initial_reactant, Δt, nsteps;
                 warmup_steps, ntrials, arch = Oceananigans.Architectures.architecture(reactant_grid)
             )
 
