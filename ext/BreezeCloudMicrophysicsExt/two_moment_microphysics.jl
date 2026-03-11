@@ -108,7 +108,7 @@ end
 
 
 """
-    TwoMomentCategories{W, AP, LV, RV, AA}
+    TwoMomentCategories{W, AP, LV, RV, AA, TL}
 
 Parameters for two-moment ([Seifert and Beheng, 2006](@cite SeifertBeheng2006)) warm-rain microphysics.
 
@@ -119,6 +119,7 @@ Parameters for two-moment ([Seifert and Beheng, 2006](@cite SeifertBeheng2006)) 
 - `cloud_liquid_fall_velocity`: `StokesRegimeVelType` for cloud droplet terminal velocity
 - `rain_fall_velocity`: `SB2006VelType` or `Chen2022VelTypeRain` for raindrop terminal velocity
 - `aerosol_activation`: `AerosolActivation` parameters for cloud droplet nucleation (or `nothing` to disable)
+- `tendency_limiter_timescale`: Timescale [s] for per-reservoir tendency limiting (default: 10)
 
 # References
 
@@ -128,12 +129,13 @@ Parameters for two-moment ([Seifert and Beheng, 2006](@cite SeifertBeheng2006)) 
     parameterization for mixed-phase clouds. Part 1: Model description.
     Meteorol. Atmos. Phys., 92, 45-66. https://doi.org/10.1007/s00703-005-0112-4
 """
-struct TwoMomentCategories{W, AP, LV, RV, AA}
+struct TwoMomentCategories{W, AP, LV, RV, AA, TL}
     warm_processes :: W
     air_properties :: AP
     cloud_liquid_fall_velocity :: LV
     rain_fall_velocity :: RV
     aerosol_activation :: AA
+    tendency_limiter_timescale :: TL
 end
 
 Base.summary(::TwoMomentCategories) = "TwoMomentCategories"
@@ -155,21 +157,25 @@ Construct `TwoMomentCategories` with default Seifert-Beheng 2006 parameters and 
 - `rain_fall_velocity`: Terminal velocity parameters for rain drops
 - `aerosol_activation`: Aerosol activation parameters (default: continental aerosol).
   Set to `nothing` to disable activation (not recommended for physical simulations).
+- `tendency_limiter_timescale`: Timescale [s] for per-reservoir tendency limiting.
+  Must satisfy `tendency_limiter_timescale ≥ Δt` to prevent reservoir overdraw.
+  Default: 10 seconds.
 """
 function two_moment_cloud_microphysics_categories(FT::DataType = Oceananigans.defaults.FloatType;
                                                   warm_processes = SB2006(FT),
                                                   air_properties = AirProperties(FT),
                                                   cloud_liquid_fall_velocity = StokesRegimeVelType(FT),
                                                   rain_fall_velocity = SB2006VelType(FT),
-                                                  aerosol_activation = default_aerosol_activation(FT))
+                                                  aerosol_activation = default_aerosol_activation(FT),
+                                                  tendency_limiter_timescale = FT(10))
 
     return TwoMomentCategories(warm_processes, air_properties,
                                cloud_liquid_fall_velocity, rain_fall_velocity,
-                               aerosol_activation)
+                               aerosol_activation, tendency_limiter_timescale)
 end
 
 # Type aliases for two-moment microphysics
-const CM2MCategories = TwoMomentCategories{<:SB2006, <:AirProperties, <:StokesRegimeVelType, <:Any, <:Any}
+const CM2MCategories = TwoMomentCategories{<:SB2006, <:AirProperties, <:StokesRegimeVelType, <:Any, <:Any, <:Any}
 const TwoMomentCloudMicrophysics = BulkMicrophysics{<:Any, <:CM2MCategories, <:Any}
 
 # Warm-phase non-equilibrium with 2M precipitation
@@ -548,10 +554,37 @@ const τⁿᵘᵐ_2m = 10  # seconds
     au = CM2.autoconversion(sb.acnv, sb.pdf_c, max(0, qᶜˡ), max(0, qʳ), ρ, Nᶜˡ)
     ac = CM2.accretion(sb, max(0, qᶜˡ), max(0, qʳ), ρ, Nᶜˡ)
 
+    # Per-reservoir aggregate sink limiting.
+    # Each α ∈ [0, 1] caps the total drain from a reservoir to q/τ [kg/kg/s].
+    # Sᶜᵒⁿᵈ_eff already accounts for activation via the supersaturation coupling (line above).
+    τ_lim = categories.tendency_limiter_timescale
+
+    vapor_sink = max(0, Sᶜᵒⁿᵈ_eff) + max(0, Sᵃᶜᵗ)
+    cloud_sink = -au.dq_lcl_dt - ac.dq_lcl_dt + max(0, -Sᶜᵒⁿᵈ_eff)
+    rain_sink  = max(0, -Sᵉᵛᵃᵖ)
+
+    max_vapor_rate = max(0, qᵛ)  / τ_lim
+    max_cloud_rate = max(0, qᶜˡ) / τ_lim
+    max_rain_rate  = max(0, qʳ)  / τ_lim
+
+    # ifelse evaluates both branches; guard denominator to avoid 0/0 = NaN on GPU.
+    ε = eps(τ_lim)
+    α_vapor = ifelse(vapor_sink > max_vapor_rate, max_vapor_rate / max(vapor_sink, ε), one(qᵛ))
+    α_cloud = ifelse(cloud_sink > max_cloud_rate, max_cloud_rate / max(cloud_sink, ε), one(qᶜˡ))
+    α_rain  = ifelse(rain_sink  > max_rain_rate,  max_rain_rate  / max(rain_sink,  ε), one(qʳ))
+
+    # Scale each process by α of its source reservoir. Conservation holds because
+    # rain-side collection rates are the negative of the limited cloud-side rates.
+    Sᶜᵒⁿᵈ_lim     = α_vapor * max(0, Sᶜᵒⁿᵈ_eff) - α_cloud * max(0, -Sᶜᵒⁿᵈ_eff)
+    Sᵃᶜᵗ_lim      = α_vapor * Sᵃᶜᵗ
+    Sᵉᵛᵃᵖ_lim     = α_rain * Sᵉᵛᵃᵖ
+    au_dq_lcl_lim  = α_cloud * au.dq_lcl_dt
+    ac_dq_lcl_lim  = α_cloud * ac.dq_lcl_dt
+
     # Physics tendencies — conserved by construction: ρqᵛ_phys + ρqᶜˡ_phys + ρqʳ_phys = 0
-    ρqᵛ_phys  = ρ * (-(Sᶜᵒⁿᵈ_eff + Sᵃᶜᵗ) - Sᵉᵛᵃᵖ)
-    ρqᶜˡ_phys = ρ * (  Sᶜᵒⁿᵈ_eff + Sᵃᶜᵗ  + au.dq_lcl_dt + ac.dq_lcl_dt)
-    ρqʳ_phys  = ρ * (                        au.dq_rai_dt + ac.dq_rai_dt + Sᵉᵛᵃᵖ)
+    ρqᵛ_phys  = ρ * (-(Sᶜᵒⁿᵈ_lim + Sᵃᶜᵗ_lim) - Sᵉᵛᵃᵖ_lim)
+    ρqᶜˡ_phys = ρ * (  Sᶜᵒⁿᵈ_lim + Sᵃᶜᵗ_lim  + au_dq_lcl_lim + ac_dq_lcl_lim)
+    ρqʳ_phys  = ρ * (                           -au_dq_lcl_lim - ac_dq_lcl_lim + Sᵉᵛᵃᵖ_lim)
 
     # Numerical relaxation guards — conserved by routing each correction to its exchange partner.
     # When q < 0, replace with -ρq/τ and route the delta: v→cl, cl→r, r→v.
@@ -568,11 +601,11 @@ const τⁿᵘᵐ_2m = 10  # seconds
 end
 
 @inline function AtmosphereModels.microphysical_tendency(bμp::WPNE2M, ::Val{:ρqᵛ}, ρ, ℳ::WarmPhaseTwoMomentState, 𝒰, constants)
-    return wp_ne2m_tendencies(bμp, ρ, ℳ, 𝒰, constants).ρqᵛ
+    return wpne2m_tendencies(bμp, ρ, ℳ, 𝒰, constants).ρqᵛ
 end
 
 @inline function AtmosphereModels.microphysical_tendency(bμp::WPNE2M, ::Val{:ρqᶜˡ}, ρ, ℳ::WarmPhaseTwoMomentState, 𝒰, constants)
-    return wp_ne2m_tendencies(bμp, ρ, ℳ, 𝒰, constants).ρqᶜˡ
+    return wpne2m_tendencies(bμp, ρ, ℳ, 𝒰, constants).ρqᶜˡ
 end
 
 #####
@@ -611,10 +644,24 @@ end
     dNᶜˡ_act = aerosol_activation_tendency(categories.aerosol_activation, categories.air_properties,
                                             ρ, ℳ, 𝒰, constants)
 
-    # Total tendency [1/m³/s]
-    Σ_dNᶜˡ = dNᶜˡ_au + dNᶜˡ_sc + dNᶜˡ_ac + dNᶜˡ_adj_up + dNᶜˡ_adj_dn + dNᶜˡ_act
+    # Per-reservoir limiting for cloud number sinks
+    τ_lim = categories.tendency_limiter_timescale
+    ε = eps(τ_lim)
+    ncloud_sink = -dNᶜˡ_au - dNᶜˡ_sc - dNᶜˡ_ac - dNᶜˡ_adj_dn
+    max_ncloud_rate = max(0, Nᶜˡ) / τ_lim
+    α_ncloud = ifelse(ncloud_sink > max_ncloud_rate, max_ncloud_rate / max(ncloud_sink, ε), one(Nᶜˡ))
 
-    # Numerical relaxation for negative values
+    # Limit activation source by aerosol budget
+    aerosol_source = max(0, dNᶜˡ_act)
+    max_aerosol_rate = max(0, Nᵃ) / τ_lim
+    α_aerosol = ifelse(aerosol_source > max_aerosol_rate, max_aerosol_rate / max(aerosol_source, ε), one(Nᵃ))
+
+    # Total tendency [1/m³/s] with limited sinks and limited activation source
+    Σ_dNᶜˡ = (α_ncloud * (dNᶜˡ_au + dNᶜˡ_sc + dNᶜˡ_ac + dNᶜˡ_adj_dn)
+              + dNᶜˡ_adj_up
+              + α_aerosol * dNᶜˡ_act)
+
+    # Numerical relaxation for negative values (safety net)
     Sⁿᵘᵐ = -Nᶜˡ / τⁿᵘᵐ_2m
 
     return ifelse(nᶜˡ >= 0, Σ_dNᶜˡ, Sⁿᵘᵐ)
@@ -744,7 +791,7 @@ Mass tendency for cloud liquid [kg/kg/s]
 
     # Mass tendency [kg/kg/s] - zero if no activation
     # dq/dt = (dN/dt * mᵈʳᵒᵖ) / ρ
-    dqᶜˡ_act = ifelse(dNᶜˡ_act > 0, dNᶜˡ_act * mᵈʳᵒᵖ / ρ, 0)
+    dqᶜˡ_act = ifelse(dNᶜˡ_act > 0, dNᶜˡ_act * mᵈʳᵒᵖ / ρ, zero(ρ))
 
     return dqᶜˡ_act
 end
@@ -807,7 +854,7 @@ end
 #####
 
 @inline function AtmosphereModels.microphysical_tendency(bμp::WPNE2M, ::Val{:ρqʳ}, ρ, ℳ::WarmPhaseTwoMomentState, 𝒰, constants)
-    return wp_ne2m_tendencies(bμp, ρ, ℳ, 𝒰, constants).ρqʳ
+    return wpne2m_tendencies(bμp, ρ, ℳ, 𝒰, constants).ρqʳ
 end
 
 #####
@@ -848,10 +895,18 @@ end
     dNʳ_adj_up = CM2.number_increase_for_mass_limit(sb.numadj, sb.pdf_r.xr_max, max(0, qʳ), ρ, Nʳ)
     dNʳ_adj_dn = CM2.number_decrease_for_mass_limit(sb.numadj, sb.pdf_r.xr_min, max(0, qʳ), ρ, Nʳ)
 
-    # Total tendency
-    Σ_dNʳ = dNʳ_au + dNʳ_sc + dNʳ_br + dNʳ_evap + dNʳ_adj_up + dNʳ_adj_dn
+    # Per-reservoir limiting for rain number sinks
+    τ_lim = categories.tendency_limiter_timescale
+    ε = eps(τ_lim)
+    nrain_sink = -dNʳ_sc - dNʳ_evap - dNʳ_adj_dn
+    max_nrain_rate = max(0, Nʳ) / τ_lim
+    α_nrain = ifelse(nrain_sink > max_nrain_rate, max_nrain_rate / max(nrain_sink, ε), one(Nʳ))
 
-    # Numerical relaxation for negative values
+    # Total tendency with limited sinks, unlimited sources
+    Σ_dNʳ = (dNʳ_au + dNʳ_br + dNʳ_adj_up
+             + α_nrain * (dNʳ_sc + dNʳ_evap + dNʳ_adj_dn))
+
+    # Numerical relaxation for negative values (safety net)
     Sⁿᵘᵐ = -Nʳ / τⁿᵘᵐ_2m
 
     return ifelse(nʳ >= 0, Σ_dNʳ, Sⁿᵘᵐ)
@@ -876,8 +931,16 @@ end
     dNᵃ_act = -aerosol_activation_tendency(categories.aerosol_activation, categories.air_properties,
                                             ρ, ℳ, 𝒰, constants)
 
-    # Numerical relaxation for negative values
+    # Per-reservoir limiting for aerosol sink
+    τ_lim = categories.tendency_limiter_timescale
+    ε = eps(τ_lim)
+    aerosol_sink = max(0, -dNᵃ_act)
+    max_aerosol_rate = max(0, Nᵃ) / τ_lim
+    α_aerosol = ifelse(aerosol_sink > max_aerosol_rate, max_aerosol_rate / max(aerosol_sink, ε), one(Nᵃ))
+    dNᵃ_lim = α_aerosol * dNᵃ_act
+
+    # Numerical relaxation for negative values (safety net)
     Sⁿᵘᵐ = -Nᵃ / τⁿᵘᵐ_2m
 
-    return ifelse(nᵃ >= 0, dNᵃ_act, Sⁿᵘᵐ)
+    return ifelse(nᵃ >= 0, dNᵃ_lim, Sⁿᵘᵐ)
 end

@@ -648,15 +648,15 @@ end
 end
 
 @inline function AM.microphysical_tendency(bμp::WPNE1M, ::Val{:ρqᵛ}, ρ, ℳ::WarmPhaseOneMomentState, 𝒰, constants)
-    return wp_ne1m_tendencies(bμp, ρ, ℳ, 𝒰, constants).ρqᵛ
+    return wpne1m_tendencies(bμp, ρ, ℳ, 𝒰, constants).ρqᵛ
 end
 
 @inline function AM.microphysical_tendency(bμp::WPNE1M, ::Val{:ρqᶜˡ}, ρ, ℳ::WarmPhaseOneMomentState, 𝒰, constants)
-    return wp_ne1m_tendencies(bμp, ρ, ℳ, 𝒰, constants).ρqᶜˡ
+    return wpne1m_tendencies(bμp, ρ, ℳ, 𝒰, constants).ρqᶜˡ
 end
 
 @inline function AM.microphysical_tendency(bμp::WPNE1M, ::Val{:ρqʳ}, ρ, ℳ::WarmPhaseOneMomentState, 𝒰, constants)
-    return wp_ne1m_tendencies(bμp, ρ, ℳ, 𝒰, constants).ρqʳ
+    return wpne1m_tendencies(bμp, ρ, ℳ, 𝒰, constants).ρqʳ
 end
 
 #####
