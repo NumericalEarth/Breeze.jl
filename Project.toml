@@ -8,6 +8,7 @@ projects = ["benchmarking", "docs", "test"]
 
 [deps]
 Adapt = "79e6a3ab-5dfb-504d-930d-738a2a938a0e"
+DataInterpolations = "82cc6244-b520-54b8-b5a6-8a565e85f1d0"
 Dates = "ade2ca70-3891-5945-98fb-dc099432e06a"
 DocStringExtensions = "ffbed154-4ef7-542d-bbb7-c09d3a79fcae"
 GPUArraysCore = "46192b85-c4d5-4398-a991-12ede77f4527"
@@ -34,6 +35,7 @@ BreezeReactantExt = "Reactant"
 Adapt = "4.3.0"
 ClimaComms = "0.6"
 CloudMicrophysics = "0.31.4"
+DataInterpolations = "8.9.0"
 Dates = "<0.0.1, 1"
 DocStringExtensions = "0.9.5"
 GPUArraysCore = "0.2"
