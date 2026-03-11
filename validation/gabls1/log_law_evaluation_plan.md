@@ -1,0 +1,154 @@
+# Plan: Evaluating the log-law mismatch
+
+## Goal
+
+Quantify the near-surface wind speed overshoot in LES as a function of horizontal
+resolution (grid aspect ratio) and demonstrate that it is an inherent problem by
+comparing against reference data and MOST predictions.
+
+## Background
+
+Standard LES overpredicts mean wind shear near the surface because SGS models are too
+dissipative there — resolved fluctuations are suppressed and the mean flow carries too much
+momentum flux. This "log-law mismatch" is well-documented (Mason & Thomson 1992, Sullivan
+et al. 1994, Brasseur & Wei 2010) and is worst in stable conditions where turbulent length
+scales are small relative to the grid.
+
+Brasseur & Wei (2010) showed that the overshoot depends critically on the grid aspect
+ratio Δx/Δz — the ratio of horizontal to vertical grid spacing controls how well the
+energy-containing eddies near the surface are resolved. This motivates a systematic study
+varying Δx at fixed Δz.
+
+## Numerics
+
+All simulations use `WENO(order=9, minimum_buffer_upwind_order=1)` for advection. No
+explicit SGS closure (ILES). The high-order WENO with minimum buffer upwind order provides
+low numerical dissipation away from sharp gradients while maintaining stability.
+
+## Horizontal resolution study
+
+Fix the vertical resolution Δz and domain height. Vary the horizontal grid spacing
+Δx = Δy systematically to study how the grid aspect ratio Δx/Δz affects the log-law
+mismatch. Start with Δz = 10 m to keep runs cheap; refine later if needed.
+
+### Neutral ABL (primary)
+
+Based on the Mirocha et al. (2018) SWiFT benchmark:
+
+| Parameter | Value |
+|-----------|-------|
+| Domain | 2400 × 2400 × 2000 m |
+| Δz | 10 m (Nz = 200) |
+| Geostrophic wind | Ug = 6.5 m/s, Vg = 0 |
+| Coriolis | latitude 33.5° (f ≈ 8.05e-5 s⁻¹) |
+| Surface roughness z₀ | 0.05 m |
+| Initial θ | 300 K uniform below 500 m, +0.01 K/m inversion above |
+| Surface BC | no heat flux (neutral) |
+| Duration | ~15 hours (analyze 2-hour window around first wind maximum at 80 m) |
+| Perturbations | ±0.25 K below 500 m |
+| Advection | WENO(order=9, minimum_buffer_upwind_order=1) |
+
+Horizontal resolution sweep (Lx = Ly = 2400 m):
+
+| Run | Δx = Δy (m) | Nx = Ny | Δx/Δz | Total points |
+|-----|-------------|---------|-------|-------------|
+| N1  | 60          | 40      | 6     | 0.3M        |
+| N2  | 30          | 80      | 3     | 1.3M        |
+| N3  | 20          | 120     | 2     | 2.9M        |
+| N4  | 15          | 160     | 1.5   | 5.1M        |
+| N5  | 10          | 240     | 1     | 11.5M       |
+
+All runs are modest — the largest is 11.5M points.
+
+The neutral case cleanly isolates the log-law mismatch: MOST predicts φ_m = 1, so any
+deviation is unambiguously an LES artifact.
+
+### GABLS1 stable ABL (secondary)
+
+Same approach applied to GABLS1 (Lz = 400 m, Δz = 3.125 m, Nz = 128, Lx = Ly = 400 m):
+
+| Run | Δx = Δy (m) | Nx = Ny | Δx/Δz | Total points |
+|-----|-------------|---------|-------|-------------|
+| G1  | 18.75       | ~21     | 6     | 0.06M       |
+| G2  | 9.375       | ~43     | 3     | 0.2M        |
+| G3  | 6.25        | 64      | 2     | 0.5M        |
+| G4  | 3.125       | 128     | 1     | 2.1M        |
+
+GABLS1 is stably stratified, so the expected φ_m includes a stability correction
+(Beljaars & Holtslag 1991). Less clean for diagnosing the mismatch, but useful because
+the stable case is where the problem is worst and there is intercomparison data from
+8 LES groups.
+
+## Diagnostics
+
+From time-averaged profiles:
+
+- **Non-dimensional wind shear** φ_m(z) = (κz / u★) dU/dz.
+  Neutral: expect φ_m = 1. Stable: expect φ_m = 1 + β(z/L).
+
+- **Wind speed ratio** U_LES(z₁) / U_MOST(z₁) at the first grid point.
+
+- **Friction velocity** u★ = (⟨u'w'⟩² + ⟨v'w'⟩²)^(1/4) from surface flux.
+
+- **Obukhov length** (GABLS1 only) L = -u★³ θ̄ / (κ g ⟨w'θ'⟩₀).
+
+## Key plots
+
+1. **φ_m(z) vs z for each Δx/Δz** — does the overshoot decrease with finer Δx?
+2. **φ_m at first grid point vs Δx/Δz** — summary curve across all runs
+3. **Wind speed vs log(z)** — deviation from log-law slope at each resolution
+4. **GABLS1 profiles vs intercomparison envelope** — at Δx/Δz = 1 (standard case)
+5. **Turbulent stress and TKE profiles** — vertical profiles of u★(z) and TKE
+6. **Velocity spectra** — streamwise and vertical velocity spectra at 80 m
+
+## Relevant figures from Mirocha et al. (2018)
+
+The Mirocha et al. (2018) paper provides a comprehensive reference for what to expect from
+the neutral ABL benchmark. Key figures for comparison:
+
+- **Fig. 5**: Time-averaged wind speed profiles from three LES codes (WRF, SOWFA, HiGrad)
+  compared to SWiFT tower observations. Left panels show U(z) vs z; right panels show
+  U(z) vs log(z) to evaluate the log-law. All codes produce generally good agreement with
+  observations but show the characteristic near-surface overshoot.
+
+- **Fig. 6**: Solver intercomparison at isotropic 15 m grids. Wind speed profiles and
+  log-law comparison. Results are similar across solvers despite different numerics.
+
+- **Figs. 7-8**: Sensitivity to advection scheme order and SGS model choice. Higher-order
+  advection and NBA SGS both improve agreement. Variability from advection order is
+  comparable to variability from SGS model choice.
+
+- **Fig. 9**: Sensitivity to z₀ and geostrophic wind speed. Expected parameter dependence —
+  useful for validating our setup against theirs.
+
+- **Fig. 10**: High-resolution (7.5 m isotropic) results including wind direction and
+  temporal variability. Excellent inter-code agreement at fine resolution.
+
+- **Fig. 11**: Turbulent stress (friction velocity) and TKE profiles. Good stress agreement
+  across codes; simulated TKE significantly lower than observed (attributed to tower wake
+  effects in measurements).
+
+- **Figs. 12-13**: Velocity spectra and momentum flux cospectra at 80 m. Cospectra show
+  better agreement with observations than velocity spectra. High-wavenumber drop-off
+  reflects the numerical dissipation characteristics of each scheme.
+
+Our resolution sweep adds a new dimension to this analysis: we can show how these
+diagnostics evolve with Δx/Δz at fixed Δz, which Mirocha et al. did not systematically
+explore (they varied resolution but changed both Δx and Δz together).
+
+## Expected outcome
+
+- Overshoot decreases as Δx/Δz → 1 (isotropic grid) but does not disappear.
+- Consistent with Brasseur & Wei (2010): a "high accuracy zone" exists but the
+  first grid point remains contaminated.
+- Motivates implementing Sullivan et al. (1994) `SurfaceLayerDiffusivity` and
+  eventually the Kosovic (1997) NBA closure.
+
+## References
+
+- Mirocha et al. (2018) Wind Energ. Sci. 3, 589-613
+- Lattanzi et al. (2025) JAMES (ERF paper)
+- Beare et al. (2006) BLM 128, 117-137 (GABLS1)
+- Mason & Thomson (1992) JFM 242
+- Sullivan, McWilliams & Moeng (1994) BLM 71
+- Brasseur & Wei (2010) Phys. Fluids 22
