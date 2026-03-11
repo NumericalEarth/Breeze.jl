@@ -45,7 +45,7 @@ The options for `equilibrium` are:
 """
 function SaturationAdjustment(FT::DataType=Oceananigans.defaults.FloatType;
                               tolerance = 1e-3,
-                              maxiter = Inf,
+                              maxiter = 10,
                               equilibrium = MixedPhaseEquilibrium(FT))
     tolerance = convert(FT, tolerance)
     maxiter = convert(FT, maxiter)
@@ -191,12 +191,15 @@ Return the saturation-adjusted thermodynamic state using a secant iteration.
     # So, we re-initialize our first guess assuming saturation
     𝒰₁ = adjust_state(𝒰₀, T₁, constants, equilibrium)
 
-    # Next, we generate a second guess that scaled by the supersaturation implied by T₁
+    # Next, we generate a second guess scaled by the supersaturation implied by T₁.
+    # Use the adjusted moisture fractions (not the all-vapor q₁) so ΔT reflects
+    # the actual condensate released during adjustment.
     ℒˡᵣ = constants.liquid.reference_latent_heat
     ℒⁱᵣ = constants.ice.reference_latent_heat
-    qˡ₁ = q₁.liquid
-    qⁱ₁ = q₁.ice
-    cᵖᵐ = mixture_heat_capacity(q₁, constants)
+    q̃₁ = 𝒰₁.moisture_mass_fractions
+    qˡ₁ = q̃₁.liquid
+    qⁱ₁ = q̃₁.ice
+    cᵖᵐ = mixture_heat_capacity(q̃₁, constants)
     ΔT = (ℒˡᵣ * qˡ₁ + ℒⁱᵣ * qⁱ₁) / cᵖᵐ
     ϵT = convert(FT, 0.01) # minimum increment for second guess
     T₂ = T₁ + max(ϵT, ΔT / 2) # reduce the increment, recognizing it is an overshoot
@@ -209,8 +212,9 @@ Return the saturation-adjusted thermodynamic state using a secant iteration.
     iter = 0
 
     while abs(r₂) > δ && iter < microphysics.maxiter
-        # Compute slope
+        # Compute slope; guard against stagnation (r₂ = r₁ → ΔTΔr = Inf → NaN).
         ΔTΔr = (T₂ - T₁) / (r₂ - r₁)
+        isfinite(ΔTΔr) || break
 
         # Store previous values
         r₁ = r₂
