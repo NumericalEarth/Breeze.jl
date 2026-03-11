@@ -4,23 +4,15 @@ on:
   push:
     branches:
       - "main"
-    paths:
+    paths: &paths
       - ".github/workflows/Validation.yml"
       - "examples/Project.jl"
       - "examples/boussinesq_bomex.jl"
       - "ext/**"
       - "src/**"
-      - "test/**"
       - "Project.toml"
   pull_request:
-    paths:
-      - ".github/workflows/Validation.yml"
-      - "examples/Project.jl"
-      - "examples/boussinesq_bomex.jl"
-      - "ext/**"
-      - "src/**"
-      - "test/**"
-      - "Project.toml"
+    paths: *paths
   release:
   workflow_dispatch:
 
