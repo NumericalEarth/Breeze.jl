@@ -212,12 +212,10 @@ Return the saturation-adjusted thermodynamic state using a secant iteration.
     iter = 0
 
     while abs(r₂) > δ && iter < microphysics.maxiter
-        # Compute slope; guard against stagnation (r₂ = r₁ → ΔTΔr = Inf → NaN).
+        # Compute slope; guard against stagnation (r₂ = r₁ → division by zero).
         ΔTΔr = (T₂ - T₁) / (r₂ - r₁)
-
-        # Mask the components; mathematically bypass instead of breaking
         valid_step = isfinite(ΔTΔr)
-        ΔTΔr *= valid_step
+        ΔTΔr = ifelse(valid_step, ΔTΔr, zero(FT))
 
         # Store previous values
         r₁ = r₂
@@ -225,7 +223,7 @@ Return the saturation-adjusted thermodynamic state using a secant iteration.
         𝒰₁ = 𝒰₂
 
         # Update
-        T₂ -= ifelse(valid_step, r₂ * ΔTΔr, zero(FT))
+        T₂ -= r₂ * ΔTΔr
         𝒰₂ = adjust_state(𝒰₂, T₂, constants, equilibrium)
         r₂ = saturation_adjustment_residual(T₂, 𝒰₂, constants, equilibrium)
 
