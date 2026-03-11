@@ -45,7 +45,7 @@ The options for `equilibrium` are:
 """
 function SaturationAdjustment(FT::DataType=Oceananigans.defaults.FloatType;
                               tolerance = 1e-3,
-                              maxiter = 10,
+                              maxiter = Inf,
                               equilibrium = MixedPhaseEquilibrium(FT))
     tolerance = convert(FT, tolerance)
     maxiter = convert(FT, maxiter)
