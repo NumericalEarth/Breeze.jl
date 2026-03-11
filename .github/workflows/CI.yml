@@ -73,6 +73,10 @@ jobs:
         with:
           version: ${{ matrix.version }}
           arch: ${{ matrix.arch }}
+      - name: Show versioninfo
+        if: ${{ startsWith(matrix.os, 'aws-linux-nvidia-gpu-') }}
+        run: |
+          julia --compile=min -O0 -e 'using InteractiveUtils; versioninfo()'
       - uses: julia-actions/cache@v2
         id: julia-cache
         with:
