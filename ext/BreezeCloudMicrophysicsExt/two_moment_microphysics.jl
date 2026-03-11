@@ -548,24 +548,31 @@ const τⁿᵘᵐ_2m = 10  # seconds
     au = CM2.autoconversion(sb.acnv, sb.pdf_c, max(0, qᶜˡ), max(0, qʳ), ρ, Nᶜˡ)
     ac = CM2.accretion(sb, max(0, qᶜˡ), max(0, qʳ), ρ, Nᶜˡ)
 
-    # Conservation identity: ρqᵛ + ρqᶜˡ + ρqʳ = 0 (phase changes + conservative collection)
-    ρqᵛ  = ρ * (-(Sᶜᵒⁿᵈ_eff + Sᵃᶜᵗ) - Sᵉᵛᵃᵖ)
-    ρqᶜˡ = ρ * (  Sᶜᵒⁿᵈ_eff + Sᵃᶜᵗ  + au.dq_lcl_dt + ac.dq_lcl_dt)
-    ρqʳ  = ρ * (                        au.dq_rai_dt + ac.dq_rai_dt + Sᵉᵛᵃᵖ)
+    # Physics tendencies — conserved by construction: ρqᵛ_phys + ρqᶜˡ_phys + ρqʳ_phys = 0
+    ρqᵛ_phys  = ρ * (-(Sᶜᵒⁿᵈ_eff + Sᵃᶜᵗ) - Sᵉᵛᵃᵖ)
+    ρqᶜˡ_phys = ρ * (  Sᶜᵒⁿᵈ_eff + Sᵃᶜᵗ  + au.dq_lcl_dt + ac.dq_lcl_dt)
+    ρqʳ_phys  = ρ * (                        au.dq_rai_dt + ac.dq_rai_dt + Sᵉᵛᵃᵖ)
+
+    # Numerical relaxation guards — conserved by routing each correction to its exchange partner.
+    # When q < 0, replace with -ρq/τ and route the delta: v→cl, cl→r, r→v.
+    # This preserves ρqᵛ + ρqᶜˡ + ρqʳ = 0 regardless of which guards fire.
+    δᵛ  = ifelse(qᵛ  >= 0, zero(ρqᵛ_phys),  -ρ * qᵛ  / τⁿᵘᵐ_2m - ρqᵛ_phys)
+    δᶜˡ = ifelse(qᶜˡ >= 0, zero(ρqᶜˡ_phys), -ρ * qᶜˡ / τⁿᵘᵐ_2m - ρqᶜˡ_phys)
+    δʳ  = ifelse(qʳ  >= 0, zero(ρqʳ_phys),  -ρ * qʳ  / τⁿᵘᵐ_2m - ρqʳ_phys)
+
+    ρqᵛ  = ρqᵛ_phys  + δᵛ  - δʳ
+    ρqᶜˡ = ρqᶜˡ_phys + δᶜˡ - δᵛ
+    ρqʳ  = ρqʳ_phys  + δʳ  - δᶜˡ
 
     return (; ρqᵛ, ρqᶜˡ, ρqʳ)
 end
 
 @inline function AtmosphereModels.microphysical_tendency(bμp::WPNE2M, ::Val{:ρqᵛ}, ρ, ℳ::WarmPhaseTwoMomentState, 𝒰, constants)
-    ρqᵛ = _wp_ne2m_tendencies(bμp, ρ, ℳ, 𝒰, constants).ρqᵛ
-    ρSⁿᵘᵐ = -ρ * 𝒰.moisture_mass_fractions.vapor / τⁿᵘᵐ_2m
-    return ifelse(𝒰.moisture_mass_fractions.vapor >= 0, ρqᵛ, ρSⁿᵘᵐ)
+    return _wp_ne2m_tendencies(bμp, ρ, ℳ, 𝒰, constants).ρqᵛ
 end
 
 @inline function AtmosphereModels.microphysical_tendency(bμp::WPNE2M, ::Val{:ρqᶜˡ}, ρ, ℳ::WarmPhaseTwoMomentState, 𝒰, constants)
-    ρqᶜˡ = _wp_ne2m_tendencies(bμp, ρ, ℳ, 𝒰, constants).ρqᶜˡ
-    ρSⁿᵘᵐ = -ρ * ℳ.qᶜˡ / τⁿᵘᵐ_2m
-    return ifelse(ℳ.qᶜˡ >= 0, ρqᶜˡ, ρSⁿᵘᵐ)
+    return _wp_ne2m_tendencies(bμp, ρ, ℳ, 𝒰, constants).ρqᶜˡ
 end
 
 #####
@@ -800,9 +807,7 @@ end
 #####
 
 @inline function AtmosphereModels.microphysical_tendency(bμp::WPNE2M, ::Val{:ρqʳ}, ρ, ℳ::WarmPhaseTwoMomentState, 𝒰, constants)
-    ρqʳ = _wp_ne2m_tendencies(bμp, ρ, ℳ, 𝒰, constants).ρqʳ
-    ρSⁿᵘᵐ = -ρ * ℳ.qʳ / τⁿᵘᵐ_2m
-    return ifelse(ℳ.qʳ >= 0, ρqʳ, ρSⁿᵘᵐ)
+    return _wp_ne2m_tendencies(bμp, ρ, ℳ, 𝒰, constants).ρqʳ
 end
 
 #####

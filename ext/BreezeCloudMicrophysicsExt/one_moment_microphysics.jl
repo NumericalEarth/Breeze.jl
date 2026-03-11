@@ -628,31 +628,35 @@ end
                      categories.hydrometeor_velocities.rain, categories.collisions,
                      qᶜˡ, qʳ, ρ)
 
-    # Conservation identity: ρqᵛ + ρqᶜˡ + ρqʳ = 0 (from phase changes)
-    ρqᵛ  = ρ * (-Sᶜᵒⁿᵈ - Sᵉᵛᵃᵖ)
-    ρqᶜˡ = ρ * ( Sᶜᵒⁿᵈ - Sᵃᶜⁿᵛ - Sᵃᶜᶜ)
-    ρqʳ  = ρ * ( Sᵃᶜⁿᵛ + Sᵃᶜᶜ + Sᵉᵛᵃᵖ)
+    # Physics tendencies — conserved by construction: ρqᵛ_phys + ρqᶜˡ_phys + ρqʳ_phys = 0
+    ρqᵛ_phys  = ρ * (-Sᶜᵒⁿᵈ - Sᵉᵛᵃᵖ)
+    ρqᶜˡ_phys = ρ * ( Sᶜᵒⁿᵈ - Sᵃᶜⁿᵛ - Sᵃᶜᶜ)
+    ρqʳ_phys  = ρ * ( Sᵃᶜⁿᵛ + Sᵃᶜᶜ + Sᵉᵛᵃᵖ)
+
+    # Numerical relaxation guards — conserved by routing each correction to its exchange partner.
+    # When q < 0, replace with -ρq/τ and route the delta: v→cl, cl→r, r→v.
+    # This preserves ρqᵛ + ρqᶜˡ + ρqʳ = 0 regardless of which guards fire.
+    δᵛ  = ifelse(qᵛ  >= 0, zero(ρqᵛ_phys),  -ρ * qᵛ  / τⁿᵘᵐ      - ρqᵛ_phys)
+    δᶜˡ = ifelse(qᶜˡ >= 0, zero(ρqᶜˡ_phys), -ρ * qᶜˡ / τᶜˡ        - ρqᶜˡ_phys)
+    δʳ  = ifelse(qʳ  >= 0, zero(ρqʳ_phys),  -ρ * qʳ  / τⁿᵘᵐ      - ρqʳ_phys)
+
+    ρqᵛ  = ρqᵛ_phys  + δᵛ  - δʳ
+    ρqᶜˡ = ρqᶜˡ_phys + δᶜˡ - δᵛ
+    ρqʳ  = ρqʳ_phys  + δʳ  - δᶜˡ
 
     return (; ρqᵛ, ρqᶜˡ, ρqʳ)
 end
 
 @inline function AM.microphysical_tendency(bμp::WPNE1M, ::Val{:ρqᵛ}, ρ, ℳ::WarmPhaseOneMomentState, 𝒰, constants)
-    ρqᵛ = _wp_ne1m_tendencies(bμp, ρ, ℳ, 𝒰, constants).ρqᵛ
-    ρSⁿᵘᵐ = -ρ * 𝒰.moisture_mass_fractions.vapor / τⁿᵘᵐ
-    return ifelse(𝒰.moisture_mass_fractions.vapor >= 0, ρqᵛ, ρSⁿᵘᵐ)
+    return _wp_ne1m_tendencies(bμp, ρ, ℳ, 𝒰, constants).ρqᵛ
 end
 
 @inline function AM.microphysical_tendency(bμp::WPNE1M, ::Val{:ρqᶜˡ}, ρ, ℳ::WarmPhaseOneMomentState, 𝒰, constants)
-    τᶜˡ = liquid_relaxation_timescale(bμp.cloud_formation, bμp.categories)
-    ρqᶜˡ = _wp_ne1m_tendencies(bμp, ρ, ℳ, 𝒰, constants).ρqᶜˡ
-    ρSⁿᵘᵐ = -ρ * ℳ.qᶜˡ / τᶜˡ
-    return ifelse(ℳ.qᶜˡ >= 0, ρqᶜˡ, ρSⁿᵘᵐ)
+    return _wp_ne1m_tendencies(bμp, ρ, ℳ, 𝒰, constants).ρqᶜˡ
 end
 
 @inline function AM.microphysical_tendency(bμp::WPNE1M, ::Val{:ρqʳ}, ρ, ℳ::WarmPhaseOneMomentState, 𝒰, constants)
-    ρqʳ = _wp_ne1m_tendencies(bμp, ρ, ℳ, 𝒰, constants).ρqʳ
-    ρSⁿᵘᵐ = -ρ * ℳ.qʳ / τⁿᵘᵐ
-    return ifelse(ℳ.qʳ >= 0, ρqʳ, ρSⁿᵘᵐ)
+    return _wp_ne1m_tendencies(bμp, ρ, ℳ, 𝒰, constants).ρqʳ
 end
 
 #####
@@ -712,39 +716,42 @@ end
                      categories.hydrometeor_velocities.rain, categories.collisions,
                      qᶜˡ, qʳ, ρ)
 
-    # Conservation identity: ρqᵛ + ρqᶜˡ + ρqᶜⁱ + ρqʳ = 0 (from phase changes)
-    ρqᵛ  = ρ * (-Sᶜᵒⁿᵈ - Sᵈᵉᵖ - Sᵉᵛᵃᵖ)
-    ρqᶜˡ = ρ * ( Sᶜᵒⁿᵈ - Sᵃᶜⁿᵛ - Sᵃᶜᶜ)
-    ρqᶜⁱ = ρ * Sᵈᵉᵖ
-    ρqʳ  = ρ * ( Sᵃᶜⁿᵛ + Sᵃᶜᶜ + Sᵉᵛᵃᵖ)
+    # Physics tendencies — conserved by construction: ρqᵛ_phys + ρqᶜˡ_phys + ρqᶜⁱ_phys + ρqʳ_phys = 0
+    ρqᵛ_phys  = ρ * (-Sᶜᵒⁿᵈ - Sᵈᵉᵖ - Sᵉᵛᵃᵖ)
+    ρqᶜˡ_phys = ρ * ( Sᶜᵒⁿᵈ - Sᵃᶜⁿᵛ - Sᵃᶜᶜ)
+    ρqᶜⁱ_phys = ρ * Sᵈᵉᵖ
+    ρqʳ_phys  = ρ * ( Sᵃᶜⁿᵛ + Sᵃᶜᶜ + Sᵉᵛᵃᵖ)
+
+    # Numerical relaxation guards — conserved by routing each correction to its exchange partner.
+    # When q < 0, replace with -ρq/τ and route the delta to the coupled tracer:
+    #   v→cl (condensation), cl→r (collection), ci→v (deposition), r→v (evaporation).
+    # This preserves ρqᵛ + ρqᶜˡ + ρqᶜⁱ + ρqʳ = 0 regardless of which guards fire.
+    δᵛ  = ifelse(qᵛ  >= 0, zero(ρqᵛ_phys),  -ρ * qᵛ  / τⁿᵘᵐ - ρqᵛ_phys)
+    δᶜˡ = ifelse(qᶜˡ >= 0, zero(ρqᶜˡ_phys), -ρ * qᶜˡ / τᶜˡ  - ρqᶜˡ_phys)
+    δᶜⁱ = ifelse(qᶜⁱ >= 0, zero(ρqᶜⁱ_phys), -ρ * qᶜⁱ / τᶜⁱ  - ρqᶜⁱ_phys)
+    δʳ  = ifelse(qʳ  >= 0, zero(ρqʳ_phys),  -ρ * qʳ  / τⁿᵘᵐ - ρqʳ_phys)
+
+    ρqᵛ  = ρqᵛ_phys  + δᵛ  - δᶜⁱ - δʳ
+    ρqᶜˡ = ρqᶜˡ_phys + δᶜˡ - δᵛ
+    ρqᶜⁱ = ρqᶜⁱ_phys + δᶜⁱ
+    ρqʳ  = ρqʳ_phys  + δʳ  - δᶜˡ
 
     return (; ρqᵛ, ρqᶜˡ, ρqᶜⁱ, ρqʳ)
 end
 
 @inline function AM.microphysical_tendency(bμp::MPNE1M, ::Val{:ρqᵛ}, ρ, ℳ::MixedPhaseOneMomentState, 𝒰, constants)
-    ρqᵛ = _mp_ne1m_tendencies(bμp, ρ, ℳ, 𝒰, constants).ρqᵛ
-    ρSⁿᵘᵐ = -ρ * 𝒰.moisture_mass_fractions.vapor / τⁿᵘᵐ
-    return ifelse(𝒰.moisture_mass_fractions.vapor >= 0, ρqᵛ, ρSⁿᵘᵐ)
+    return _mp_ne1m_tendencies(bμp, ρ, ℳ, 𝒰, constants).ρqᵛ
 end
 
 @inline function AM.microphysical_tendency(bμp::MPNE1M, ::Val{:ρqᶜˡ}, ρ, ℳ::MixedPhaseOneMomentState, 𝒰, constants)
-    τᶜˡ = liquid_relaxation_timescale(bμp.cloud_formation, bμp.categories)
-    ρqᶜˡ = _mp_ne1m_tendencies(bμp, ρ, ℳ, 𝒰, constants).ρqᶜˡ
-    ρSⁿᵘᵐ = -ρ * ℳ.qᶜˡ / τᶜˡ
-    return ifelse(ℳ.qᶜˡ >= 0, ρqᶜˡ, ρSⁿᵘᵐ)
+    return _mp_ne1m_tendencies(bμp, ρ, ℳ, 𝒰, constants).ρqᶜˡ
 end
 
 @inline function AM.microphysical_tendency(bμp::MPNE1M, ::Val{:ρqᶜⁱ}, ρ, ℳ::MixedPhaseOneMomentState, 𝒰, constants)
-    τᶜⁱ = ice_relaxation_timescale(bμp.cloud_formation, bμp.categories)
-    ρqᶜⁱ = _mp_ne1m_tendencies(bμp, ρ, ℳ, 𝒰, constants).ρqᶜⁱ
     # TODO: Add autoconversion cloud ice → snow when snow processes are implemented
-    # For now, cloud ice only grows/shrinks via deposition/sublimation
-    ρSⁿᵘᵐ = -ρ * ℳ.qᶜⁱ / τᶜⁱ
-    return ifelse(ℳ.qᶜⁱ >= 0, ρqᶜⁱ, ρSⁿᵘᵐ)
+    return _mp_ne1m_tendencies(bμp, ρ, ℳ, 𝒰, constants).ρqᶜⁱ
 end
 
 @inline function AM.microphysical_tendency(bμp::MPNE1M, ::Val{:ρqʳ}, ρ, ℳ::MixedPhaseOneMomentState, 𝒰, constants)
-    ρqʳ = _mp_ne1m_tendencies(bμp, ρ, ℳ, 𝒰, constants).ρqʳ
-    ρSⁿᵘᵐ = -ρ * ℳ.qʳ / τⁿᵘᵐ
-    return ifelse(ℳ.qʳ >= 0, ρqʳ, ρSⁿᵘᵐ)
+    return _mp_ne1m_tendencies(bμp, ρ, ℳ, 𝒰, constants).ρqʳ
 end
