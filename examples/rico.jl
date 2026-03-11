@@ -78,10 +78,10 @@ T₀ = 299.8    # Sea surface temperature (K)
 # currently extends only to constant coefficients (but could expand in the future),
 
 ρe_flux = BulkSensibleHeatFlux(coefficient=Cᵀ, surface_temperature=T₀)
-ρqᵗ_flux = BulkVaporFlux(coefficient=Cᵛ, surface_temperature=T₀)
+ρqᵉ_flux = BulkVaporFlux(coefficient=Cᵛ, surface_temperature=T₀)
 
 ρe_bcs = FieldBoundaryConditions(bottom=ρe_flux)
-ρqᵗ_bcs = FieldBoundaryConditions(bottom=ρqᵗ_flux)
+ρqᵉ_bcs = FieldBoundaryConditions(bottom=ρqᵉ_flux)
 
 ρu_bcs = FieldBoundaryConditions(bottom=BulkDrag(coefficient=Cᴰ))
 ρv_bcs = FieldBoundaryConditions(bottom=BulkDrag(coefficient=Cᴰ))
@@ -134,11 +134,11 @@ geostrophic = geostrophic_forcings(z -> uᵍ(z), z -> vᵍ(z))
 # by the large-scale circulation [vanZanten2011](@cite).
 
 ρᵣ = reference_state.density
-∂t_ρqᵗ_large_scale = Field{Nothing, Nothing, Center}(grid)
+∂t_ρqᵉ_large_scale = Field{Nothing, Nothing, Center}(grid)
 dqdt_profile = AtmosphericProfilesLibrary.Rico_dqtdt(FT)
-set!(∂t_ρqᵗ_large_scale, z -> dqdt_profile(z))
-set!(∂t_ρqᵗ_large_scale, ρᵣ * ∂t_ρqᵗ_large_scale)
-∂t_ρqᵗ_large_scale_forcing = Forcing(∂t_ρqᵗ_large_scale)
+set!(∂t_ρqᵉ_large_scale, z -> dqdt_profile(z))
+set!(∂t_ρqᵉ_large_scale, ρᵣ * ∂t_ρqᵉ_large_scale)
+∂t_ρqᵉ_large_scale_forcing = Forcing(∂t_ρqᵉ_large_scale)
 
 # ## Radiative cooling
 #
@@ -157,11 +157,11 @@ set!(∂t_ρθ_large_scale, ρᵣ * ∂t_θ_large_scale)
 Fρu = (subsidence, geostrophic.ρu)
 Fρv = (subsidence, geostrophic.ρv)
 Fρw = sponge
-Fρqᵗ = (subsidence, ∂t_ρqᵗ_large_scale_forcing)
+Fρqᵉ = (subsidence, ∂t_ρqᵉ_large_scale_forcing)
 Fρθ = (subsidence, ρθ_large_scale_forcing)
 
-forcing = (ρu=Fρu, ρv=Fρv, ρw=Fρw, ρqᵗ=Fρqᵗ, ρθ=Fρθ)
-boundary_conditions = (ρe=ρe_bcs, ρqᵗ=ρqᵗ_bcs, ρu=ρu_bcs, ρv=ρv_bcs)
+forcing = (ρu=Fρu, ρv=Fρv, ρw=Fρw, ρqᵉ=Fρqᵉ, ρθ=Fρθ)
+boundary_conditions = (ρe=ρe_bcs, ρqᵉ=ρqᵉ_bcs, ρu=ρu_bcs, ρv=ρv_bcs)
 nothing #hide
 
 # ## Model setup
@@ -181,8 +181,8 @@ microphysics = OneMomentCloudMicrophysics(; cloud_formation)
 bounds_preserving_weno = WENO(order=5, bounds=(0, 1), minimum_buffer_upwind_order=1)
 
 momentum_advection = WENO(order=5, minimum_buffer_upwind_order=1)
-scalar_advection = (ρθ = WENO(order=5),
-                    ρqᵗ = bounds_preserving_weno,
+scalar_advection = (ρθ = WENO(order=5, minimum_buffer_upwind_order=1),
+                    ρqᵉ = bounds_preserving_weno,
                     ρqᶜˡ = bounds_preserving_weno,
                     ρqʳ = bounds_preserving_weno)
 

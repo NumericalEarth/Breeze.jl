@@ -68,7 +68,7 @@ dynamics = PrescribedDynamics(reference_state; divergence_correction=true)
 # Surface boundary conditions for tracers
 qᵗ₀ = 0.018 # Incoming specific humidity (18 g/kg) — typical tropical boundary layer
 ρθ_bcs = FieldBoundaryConditions(bottom=ValueBoundaryCondition(ρ₀ * θ₀))
-ρqᵗ_bcs = FieldBoundaryConditions(bottom=ValueBoundaryCondition(ρ₀ * qᵗ₀))
+ρqᵉ_bcs = FieldBoundaryConditions(bottom=ValueBoundaryCondition(ρ₀ * qᵗ₀))
 w_bcs = FieldBoundaryConditions(bottom=OpenBoundaryCondition(W₀), top=OpenBoundaryCondition(W₀))
 
 # ## Microphysics: warm-phase saturation adjustment
@@ -89,7 +89,7 @@ microphysics = SaturationAdjustment(equilibrium=WarmPhaseEquilibrium())
 
 model = AtmosphereModel(grid; dynamics, microphysics,
                         advection = WENO(order=5),
-                        boundary_conditions = (ρθ=ρθ_bcs, ρqᵗ=ρqᵗ_bcs, w=w_bcs),
+                        boundary_conditions = (ρθ=ρθ_bcs, ρqᵉ=ρqᵉ_bcs, w=w_bcs),
                         thermodynamic_constants = constants)
 
 # ## Initial conditions
