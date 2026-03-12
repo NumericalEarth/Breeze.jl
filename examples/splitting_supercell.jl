@@ -236,6 +236,7 @@ set!(model, θ=θᵢ, ℋ=ℋᵢ, u=uᵢ)
 
 simulation = Simulation(model; Δt=2, stop_time=2hours)
 conjure_time_step_wizard!(simulation, cfl=0.7)
+Oceananigans.Diagnostics.erroring_NaNChecker!(simulation)
 
 # ## Output and progress
 #

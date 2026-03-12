@@ -258,6 +258,7 @@ qˡ = model.microphysical_fields.qˡ
 
 simulation = Simulation(model; Δt=1, stop_time=3days)
 conjure_time_step_wizard!(simulation, cfl=0.7)
+Oceananigans.Diagnostics.erroring_NaNChecker!(simulation)
 
 # ## Surface temperature callback
 #
