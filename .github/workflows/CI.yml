@@ -40,25 +40,25 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        # version:
-        #   - "min"
-        #   - "1.12.5"
-        # os:
-        #   - ubuntu-latest
-        #   - macOS-latest
-        #   - windows-latest
-        # arch:
-        #   - "default"
-        # check-bounds:
-        #   - "yes"
-        # exclude:
-        #   - version: "min"
-        #     os: windows-latest
+        version:
+          - "min"
+          - "1.12.5"
+        os:
+          - ubuntu-latest
+          - macOS-latest
+          - windows-latest
+        arch:
+          - "default"
+        check-bounds:
+          - "yes"
+        exclude:
+          - version: "min"
+            os: windows-latest
         include:
-          # - version: "1.12.5"
-          #   os: aws-linux-nvidia-gpu-l4
-          #   arch: "default"
-          #   check-bounds: "yes"
+          - version: "1.12.5"
+            os: aws-linux-nvidia-gpu-l4
+            arch: "default"
+            check-bounds: "yes"
           # Necessary for testing Reactant workloads until
           # https://github.com/EnzymeAD/Reactant.jl/issues/2347 is fixed.
           - version: "1.11.9"
