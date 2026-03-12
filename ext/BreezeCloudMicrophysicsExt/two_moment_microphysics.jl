@@ -119,7 +119,7 @@ Parameters for two-moment ([Seifert and Beheng, 2006](@cite SeifertBeheng2006)) 
 - `cloud_liquid_fall_velocity`: `StokesRegimeVelType` for cloud droplet terminal velocity
 - `rain_fall_velocity`: `SB2006VelType` or `Chen2022VelTypeRain` for raindrop terminal velocity
 - `aerosol_activation`: `AerosolActivation` parameters for cloud droplet nucleation (or `nothing` to disable)
-- `tendency_limiter_timescale`: Timescale [s] for per-reservoir tendency limiting (default: 10)
+- `τⁿᵘᵐ`: Timescale [s] for per-reservoir tendency limiting (default: 10)
 
 # References
 
@@ -135,7 +135,7 @@ struct TwoMomentCategories{W, AP, LV, RV, AA, TL}
     cloud_liquid_fall_velocity :: LV
     rain_fall_velocity :: RV
     aerosol_activation :: AA
-    tendency_limiter_timescale :: TL
+    τⁿᵘᵐ :: TL
 end
 
 Base.summary(::TwoMomentCategories) = "TwoMomentCategories"
@@ -157,8 +157,8 @@ Construct `TwoMomentCategories` with default Seifert-Beheng 2006 parameters and 
 - `rain_fall_velocity`: Terminal velocity parameters for rain drops
 - `aerosol_activation`: Aerosol activation parameters (default: continental aerosol).
   Set to `nothing` to disable activation (not recommended for physical simulations).
-- `tendency_limiter_timescale`: Timescale [s] for per-reservoir tendency limiting.
-  Must satisfy `tendency_limiter_timescale ≥ Δt` to prevent reservoir overdraw.
+- `τⁿᵘᵐ`: Timescale [s] for per-reservoir tendency limiting.
+  Must satisfy `τⁿᵘᵐ ≥ Δt` to prevent reservoir overdraw.
   Default: 10 seconds.
 """
 function two_moment_cloud_microphysics_categories(FT::DataType = Oceananigans.defaults.FloatType;
@@ -167,11 +167,11 @@ function two_moment_cloud_microphysics_categories(FT::DataType = Oceananigans.de
                                                   cloud_liquid_fall_velocity = StokesRegimeVelType(FT),
                                                   rain_fall_velocity = SB2006VelType(FT),
                                                   aerosol_activation = default_aerosol_activation(FT),
-                                                  tendency_limiter_timescale = FT(10))
+                                                  τⁿᵘᵐ = FT(10))
 
     return TwoMomentCategories(warm_processes, air_properties,
                                cloud_liquid_fall_velocity, rain_fall_velocity,
-                               aerosol_activation, tendency_limiter_timescale)
+                               aerosol_activation, τⁿᵘᵐ)
 end
 
 # Type aliases for two-moment microphysics
@@ -496,9 +496,6 @@ end
 ##### Microphysical tendencies
 #####
 
-# Numerical timescale for limiting negative-value relaxation
-const τⁿᵘᵐ_2m = 10  # seconds
-
 #####
 ##### Microphysical tendencies for warm-phase non-equilibrium 2M (WPNE2M)
 #####
@@ -519,6 +516,7 @@ const τⁿᵘᵐ_2m = 10  # seconds
     categories = bμp.categories
     sb = categories.warm_processes
     τᶜˡ = liquid_relaxation_timescale(bμp.cloud_formation, categories)
+    τⁿᵘᵐ = categories.τⁿᵘᵐ
 
     qᶜˡ = ℳ.qᶜˡ
     qʳ = ℳ.qʳ
@@ -548,27 +546,25 @@ const τⁿᵘᵐ_2m = 10  # seconds
     # Rain evaporation: rain → vapor (Sᵉᵛᵃᵖ < 0 when rain evaporates)
     evap = rain_evaporation_2m(sb, categories.air_properties, q, max(0, qʳ), ρ, Nʳ, T, constants)
     Sᵉᵛᵃᵖ = evap.evap_rate_1
-    Sᵉᵛᵃᵖ = max(Sᵉᵛᵃᵖ, -max(0, qʳ) / τⁿᵘᵐ_2m)
+    Sᵉᵛᵃᵖ = max(Sᵉᵛᵃᵖ, -max(0, qʳ) / τⁿᵘᵐ)
 
     # Collection: cloud liquid ↔ rain (does not involve vapor)
     au = CM2.autoconversion(sb.acnv, sb.pdf_c, max(0, qᶜˡ), max(0, qʳ), ρ, Nᶜˡ)
     ac = CM2.accretion(sb, max(0, qᶜˡ), max(0, qʳ), ρ, Nᶜˡ)
 
     # Per-reservoir aggregate sink limiting.
-    # Each α ∈ [0, 1] caps the total drain from a reservoir to q/τ [kg/kg/s].
+    # Each α ∈ [0, 1] caps the total drain from a reservoir to q/τⁿᵘᵐ [kg/kg/s].
     # Sᶜᵒⁿᵈ_eff already accounts for activation via the supersaturation coupling (line above).
-    τ_lim = categories.tendency_limiter_timescale
-
     vapor_sink = max(0, Sᶜᵒⁿᵈ_eff) + max(0, Sᵃᶜᵗ)
     cloud_sink = -au.dq_lcl_dt - ac.dq_lcl_dt + max(0, -Sᶜᵒⁿᵈ_eff)
     rain_sink  = max(0, -Sᵉᵛᵃᵖ)
 
-    max_vapor_rate = max(0, qᵛ)  / τ_lim
-    max_cloud_rate = max(0, qᶜˡ) / τ_lim
-    max_rain_rate  = max(0, qʳ)  / τ_lim
+    max_vapor_rate = max(0, qᵛ)  / τⁿᵘᵐ
+    max_cloud_rate = max(0, qᶜˡ) / τⁿᵘᵐ
+    max_rain_rate  = max(0, qʳ)  / τⁿᵘᵐ
 
     # ifelse evaluates both branches; guard denominator to avoid 0/0 = NaN on GPU.
-    ε = eps(τ_lim)
+    ε = eps(τⁿᵘᵐ)
     α_vapor = ifelse(vapor_sink > max_vapor_rate, max_vapor_rate / max(vapor_sink, ε), one(qᵛ))
     α_cloud = ifelse(cloud_sink > max_cloud_rate, max_cloud_rate / max(cloud_sink, ε), one(qᶜˡ))
     α_rain  = ifelse(rain_sink  > max_rain_rate,  max_rain_rate  / max(rain_sink,  ε), one(qʳ))
@@ -589,9 +585,9 @@ const τⁿᵘᵐ_2m = 10  # seconds
     # Numerical relaxation guards — conserved by routing each correction to its exchange partner.
     # When q < 0, replace with -ρq/τ and route the delta: v→cl, cl→r, r→v.
     # This preserves ρqᵛ + ρqᶜˡ + ρqʳ = 0 regardless of which guards fire.
-    δᵛ  = ifelse(qᵛ  >= 0, zero(ρqᵛ_phys),  -ρ * qᵛ  / τⁿᵘᵐ_2m - ρqᵛ_phys)
-    δᶜˡ = ifelse(qᶜˡ >= 0, zero(ρqᶜˡ_phys), -ρ * qᶜˡ / τⁿᵘᵐ_2m - ρqᶜˡ_phys)
-    δʳ  = ifelse(qʳ  >= 0, zero(ρqʳ_phys),  -ρ * qʳ  / τⁿᵘᵐ_2m - ρqʳ_phys)
+    δᵛ  = ifelse(qᵛ  >= 0, zero(ρqᵛ_phys),  -ρ * qᵛ  / τⁿᵘᵐ - ρqᵛ_phys)
+    δᶜˡ = ifelse(qᶜˡ >= 0, zero(ρqᶜˡ_phys), -ρ * qᶜˡ / τⁿᵘᵐ - ρqᶜˡ_phys)
+    δʳ  = ifelse(qʳ  >= 0, zero(ρqʳ_phys),  -ρ * qʳ  / τⁿᵘᵐ - ρqʳ_phys)
 
     ρqᵛ  = ρqᵛ_phys  + δᵛ  - δʳ
     ρqᶜˡ = ρqᶜˡ_phys + δᶜˡ - δᵛ
@@ -645,15 +641,15 @@ end
                                             ρ, ℳ, 𝒰, constants)
 
     # Per-reservoir limiting for cloud number sinks
-    τ_lim = categories.tendency_limiter_timescale
-    ε = eps(τ_lim)
+    τⁿᵘᵐ = categories.τⁿᵘᵐ
+    ε = eps(τⁿᵘᵐ)
     ncloud_sink = -dNᶜˡ_au - dNᶜˡ_sc - dNᶜˡ_ac - dNᶜˡ_adj_dn
-    max_ncloud_rate = max(0, Nᶜˡ) / τ_lim
+    max_ncloud_rate = max(0, Nᶜˡ) / τⁿᵘᵐ
     α_ncloud = ifelse(ncloud_sink > max_ncloud_rate, max_ncloud_rate / max(ncloud_sink, ε), one(Nᶜˡ))
 
     # Limit activation source by aerosol budget
     aerosol_source = max(0, dNᶜˡ_act)
-    max_aerosol_rate = max(0, Nᵃ) / τ_lim
+    max_aerosol_rate = max(0, Nᵃ) / τⁿᵘᵐ
     α_aerosol = ifelse(aerosol_source > max_aerosol_rate, max_aerosol_rate / max(aerosol_source, ε), one(Nᵃ))
 
     # Total tendency [1/m³/s] with limited sinks and limited activation source
@@ -662,7 +658,7 @@ end
               + α_aerosol * dNᶜˡ_act)
 
     # Numerical relaxation for negative values (safety net)
-    Sⁿᵘᵐ = -Nᶜˡ / τⁿᵘᵐ_2m
+    Sⁿᵘᵐ = -Nᶜˡ / τⁿᵘᵐ
 
     return ifelse(nᶜˡ >= 0, Σ_dNᶜˡ, Sⁿᵘᵐ)
 end
@@ -896,10 +892,10 @@ end
     dNʳ_adj_dn = CM2.number_decrease_for_mass_limit(sb.numadj, sb.pdf_r.xr_min, max(0, qʳ), ρ, Nʳ)
 
     # Per-reservoir limiting for rain number sinks
-    τ_lim = categories.tendency_limiter_timescale
-    ε = eps(τ_lim)
+    τⁿᵘᵐ = categories.τⁿᵘᵐ
+    ε = eps(τⁿᵘᵐ)
     nrain_sink = -dNʳ_sc - dNʳ_evap - dNʳ_adj_dn
-    max_nrain_rate = max(0, Nʳ) / τ_lim
+    max_nrain_rate = max(0, Nʳ) / τⁿᵘᵐ
     α_nrain = ifelse(nrain_sink > max_nrain_rate, max_nrain_rate / max(nrain_sink, ε), one(Nʳ))
 
     # Total tendency with limited sinks, unlimited sources
@@ -907,7 +903,7 @@ end
              + α_nrain * (dNʳ_sc + dNʳ_evap + dNʳ_adj_dn))
 
     # Numerical relaxation for negative values (safety net)
-    Sⁿᵘᵐ = -Nʳ / τⁿᵘᵐ_2m
+    Sⁿᵘᵐ = -Nʳ / τⁿᵘᵐ
 
     return ifelse(nʳ >= 0, Σ_dNʳ, Sⁿᵘᵐ)
 end
@@ -932,15 +928,15 @@ end
                                             ρ, ℳ, 𝒰, constants)
 
     # Per-reservoir limiting for aerosol sink
-    τ_lim = categories.tendency_limiter_timescale
-    ε = eps(τ_lim)
+    τⁿᵘᵐ = categories.τⁿᵘᵐ
+    ε = eps(τⁿᵘᵐ)
     aerosol_sink = max(0, -dNᵃ_act)
-    max_aerosol_rate = max(0, Nᵃ) / τ_lim
+    max_aerosol_rate = max(0, Nᵃ) / τⁿᵘᵐ
     α_aerosol = ifelse(aerosol_sink > max_aerosol_rate, max_aerosol_rate / max(aerosol_sink, ε), one(Nᵃ))
     dNᵃ_lim = α_aerosol * dNᵃ_act
 
     # Numerical relaxation for negative values (safety net)
-    Sⁿᵘᵐ = -Nᵃ / τⁿᵘᵐ_2m
+    Sⁿᵘᵐ = -Nᵃ / τⁿᵘᵐ
 
     return ifelse(nᵃ >= 0, dNᵃ_lim, Sⁿᵘᵐ)
 end
