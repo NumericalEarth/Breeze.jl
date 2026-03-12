@@ -105,7 +105,9 @@ end
 
         # Verify the moisture was set correctly using the RelativeHumidity diagnostic
         ℋ_field = RelativeHumidityField(model)
-        @test @allowscalar all(isapprox.(interior(ℋ_field), FT(0.5); rtol=5e-2))
+        # Convert to host Array because in Julia v1.11 the broadcast with the
+        # keyword argument doesn't work.
+        @test @allowscalar all(isapprox(FT(0.5); rtol=5e-2), Array(interior(ℋ_field)))
         @test @allowscalar all(x -> x > 0, interior(specific_humidity(model)))
     end
 
