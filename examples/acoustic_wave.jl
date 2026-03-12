@@ -25,6 +25,7 @@
 # and a logarithmic wind profile consistent with the atmospheric surface layer.
 
 using Breeze
+using Oceananigans: Oceananigans
 using Oceananigans.Units
 using Printf
 using CairoMakie
@@ -94,6 +95,7 @@ set!(model, ρ=ρᵢ, θ=θ₀, u=uᵢ)
 stop_time = 1  # seconds
 
 simulation = Simulation(model; Δt, stop_time)
+Oceananigans.Diagnostics.erroring_NaNChecker!(simulation)
 
 function progress(sim)
     u, v, w = sim.model.velocities
