@@ -334,6 +334,12 @@ materialize_2m_condensate_formation(::Any, categories) = ConstantRateCondensateF
 
 AtmosphereModels.prognostic_field_names(::WPNE2M) = (:ρqᶜˡ, :ρnᶜˡ, :ρqʳ, :ρnʳ, :ρnᵃ)
 
+# Negative moisture correction chain: rain ← cloud ← vapor
+AtmosphereModels.correction_moisture_fields(::WPNE2M, μ) = (μ.ρqʳ, μ.ρqᶜˡ)
+
+# Zero number concentrations when corresponding mass is zeroed by borrowing
+AtmosphereModels.correction_number_mass_pairs(::WPNE2M, μ) = ((μ.ρnʳ, μ.ρqʳ), (μ.ρnᶜˡ, μ.ρqᶜˡ))
+
 #####
 ##### Field materialization
 #####

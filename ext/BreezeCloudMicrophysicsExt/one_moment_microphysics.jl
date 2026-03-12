@@ -284,6 +284,11 @@ AM.prognostic_field_names(::WPNE1M) = (:ρqᶜˡ, :ρqʳ)
 AM.prognostic_field_names(::MP1M) = (:ρqʳ, :ρqˢ)
 AM.prognostic_field_names(::MPNE1M) = (:ρqᶜˡ, :ρqᶜⁱ, :ρqʳ, :ρqˢ)
 
+# Negative moisture correction chains: heaviest → lightest → vapor
+AM.correction_moisture_fields(::WP1M, μ) = (μ.ρqʳ,)
+AM.correction_moisture_fields(::WPNE1M, μ) = (μ.ρqʳ, μ.ρqᶜˡ)
+# Mixed-phase correction not yet implemented (requires energy adjustment for ice↔liquid)
+
 #####
 ##### Field materialization
 #####
