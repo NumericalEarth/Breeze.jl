@@ -16,6 +16,7 @@
 # `AtmosphereModel` and saturation adjustment.
 
 using Breeze
+using Oceananigans: Oceananigans
 using Oceananigans.Units
 using CairoMakie
 using Printf

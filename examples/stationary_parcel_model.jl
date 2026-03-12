@@ -20,6 +20,7 @@
 using Breeze
 using CloudMicrophysics
 using CairoMakie
+using Oceananigans: Oceananigans
 
 # ## Model setup
 #

@@ -23,6 +23,7 @@
 using Breeze
 using CairoMakie
 using Printf
+using Oceananigans: Oceananigans
 
 # ## Grid and reference state
 #

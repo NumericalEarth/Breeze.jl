@@ -25,6 +25,7 @@
 # and a logarithmic wind profile consistent with the atmospheric surface layer.
 
 using Breeze
+using Oceananigans: Oceananigans
 using Oceananigans.Units
 using Printf
 using CairoMakie

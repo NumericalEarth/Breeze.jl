@@ -6,6 +6,7 @@
 # we simulate a pocket of warm air rising in a saturated, condensate-laden environment.
 
 using Breeze
+using Oceananigans: Oceananigans
 using Oceananigans.Units
 using Statistics
 using Printf

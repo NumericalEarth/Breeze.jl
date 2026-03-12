@@ -43,6 +43,7 @@
 # 6. **Split-explicit WS-RK3**: Acoustic substepping with Wicker-Skamarock RK3 outer loop at Δt = 12 s
 
 using Breeze
+using Oceananigans: Oceananigans
 using Oceananigans.Units
 using Printf
 using CairoMakie

@@ -4,6 +4,7 @@
 # region of warm air) rising through a stably-stratified background.
 
 using Breeze
+using Oceananigans: Oceananigans
 using Oceananigans.Units
 using Statistics
 using Printf
