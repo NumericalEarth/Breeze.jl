@@ -26,6 +26,10 @@ using Printf
 using Random
 
 Random.seed!(2019)
+if CUDA.functional()
+    CUDA.seed!(2019)
+end
+
 Oceananigans.defaults.FloatType = Float32
 
 # ## Domain and grid

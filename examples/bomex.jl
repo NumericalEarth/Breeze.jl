@@ -24,6 +24,9 @@ using Printf
 using Random
 
 Random.seed!(938)
+if CUDA.functional()
+    CUDA.seed!(938)
+end
 
 # ## Domain and grid
 #

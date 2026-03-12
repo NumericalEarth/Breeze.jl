@@ -30,6 +30,9 @@ using Random
 using CUDA
 
 Random.seed!(42)
+if CUDA.functional()
+    CUDA.seed!(42)
+end
 
 # ## Domain and grid
 #
