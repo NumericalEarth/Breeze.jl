@@ -260,13 +260,18 @@ moisture_prognostic_name(::Nothing) = :ρqᵛ
 """
 $(TYPEDSIGNATURES)
 
+Strip the leading `ρ` from a density-weighted field name to obtain
+the specific (per-mass) name. For example, `:ρqᶜˡ` → `:qᶜˡ`.
+"""
+specific_field_name(name::Symbol) = (s = string(name); Symbol(s[nextind(s, 1):end]))
+
+"""
+$(TYPEDSIGNATURES)
+
 Return the specific (per-mass) moisture field name by stripping the `ρ` prefix
 from [`moisture_prognostic_name`](@ref).
 """
-function moisture_specific_name(microphysics)
-    prog_name = string(moisture_prognostic_name(microphysics))
-    return Symbol(prog_name[nextind(prog_name, 1):end])
-end
+moisture_specific_name(microphysics) = specific_field_name(moisture_prognostic_name(microphysics))
 
 """
 $(TYPEDSIGNATURES)

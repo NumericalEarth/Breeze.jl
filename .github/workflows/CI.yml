@@ -26,8 +26,8 @@ permissions:
   contents: read
 
 env:
-  # Disable GPU support for Reactant until we actually use it.
-  REACTANT_GPU: 'none'
+  # Don't make Reactant occupy all the GPU memory
+  XLA_REACTANT_GPU_PREALLOCATE: 'false'
 
 jobs:
   test:
@@ -55,7 +55,7 @@ jobs:
           - version: "min"
             os: windows-latest
         include:
-          - version: "1.12.4"
+          - version: "1.12.5"
             os: aws-linux-nvidia-gpu-l4
             arch: "default"
             check-bounds: "yes"
@@ -141,9 +141,6 @@ jobs:
               earlyoom -m 3 -s 100 -r 300 --prefer 'julia' &
           fi
           julia --project --color=yes --check-bounds=${{ matrix.check-bounds }} -e 'using Pkg; Pkg.test(; coverage=true, julia_args=["--check-bounds=${{ matrix.check-bounds }}", "--compiled-modules=yes", "--depwarn=yes", "-O0"], test_args=`${{ env.runtest_test_args }}`, force_latest_compatible_version=false, allow_reresolve=true)'
-        env:
-          # Don't make Reactant occupy all the GPU memory
-          XLA_REACTANT_GPU_PREALLOCATE: false
       - uses: julia-actions/julia-processcoverage@v1
       - uses: codecov/codecov-action@v5
         with:
