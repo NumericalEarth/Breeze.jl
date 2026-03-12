@@ -42,42 +42,41 @@ The Fortran code computes `abi = 1 + dqsidT * L_s / c_p` for saturation adjustme
 which is a different quantity — the diffusional growth resistance is applied within
 the PSD-integrated lookup tables.
 
-### Rain Evaporation — Correct (with documented differences)
+### Rain Evaporation — Correct
 
 Both use the same physics: `dqr/dt = 2*pi*n*(S-1)*D*f_v / (A+B)`.
-Differences are in the velocity and ventilation parameterization:
 
-| Component | Fortran | Breeze.jl | Reason |
-|-----------|---------|-----------|--------|
-| Fall speed | V = 842 * D^0.8 | V = 130 * D^0.5 | Mean-mass effective formula |
-| Ventilation f2 | 0.32 | 0.31 | Minor (< 3%) |
-| PSD integration | Lookup tables | Mean-mass | Fundamental architecture gap |
+**Primary path (tabulated, recommended):** Rain lookup tables are pre-computed
+via `tabulate(p3, :rain, CPU())` and integrate `D × f_v(D) × N(D) dD` exactly
+over the exponential PSD using the physical piecewise Gunn-Kinzer/Beard fall
+speed law. This matches the Fortran PSD-integrated approach.
 
-**Why V = 130 * D^0.5?** The Fortran `V = 842*D^0.8` is accurate for individual drops,
-but when combined with mean-mass approximation (single D), it underestimates
-evaporation because small drops (which dominate the PSD tail) have disproportionately
-high surface-to-volume ratio. `V = 130*D^0.5` overestimates velocity for small drops,
-partially compensating for the missing PSD integration. Switching to Fortran's formula
-was tested and degraded kin1d results.
+**Fallback path (mean-mass):** When tables are not available, uses a single
+representative drop at the volume-mean diameter with Fortran power-law
+`V = 842 D^0.8` and ventilation coefficients f1r=0.78, f2r=0.32.
 
-### Ice Deposition/Sublimation — Correct (with known transport gap)
+| Component | Tabulated path | Mean-mass fallback | Fortran |
+|-----------|---------------|-------------------|---------|
+| Fall speed | Piecewise Gunn-Kinzer/Beard | V = 842 D^0.8 | PSD-integrated lookup |
+| Ventilation | PSD-integrated f_v(D) | f1r + f2r√Re | PSD-integrated |
+| f2 coefficient | 0.32 | 0.32 | 0.32 |
 
-The formulation matches Fortran. The key difference:
+### Ice Deposition/Sublimation — Correct (with T,P-dependent transport)
 
-| Property | Fortran | Breeze.jl |
-|----------|---------|-----------|
-| D_v (water vapor diffusivity) | 8.794e-5 * T^1.81 / P | 2.5e-5 (constant) |
-| K_a (thermal conductivity) | 1414 * mu (Sutherland) | 0.025 (constant) |
-| Kinematic viscosity | mu * R_d * T / P | 1.5e-5 (constant) |
+The formulation matches Fortran. Both implementations use T,P-dependent transport
+properties via `air_transport_properties(T, P)` (Fortran P3 v5.5.0 formulas):
 
-At the surface (T=288K, P=101kPa), these give similar values. But at upper
-troposphere (T=240K, P=30kPa), D_v doubles to ~6e-5 m^2/s, making Fortran's
-deposition rates significantly faster at cold temperatures.
+| Property | Formula | Source |
+|----------|---------|--------|
+| D_v (water vapor diffusivity) | 8.794e-5 × T^1.81 / P | Hall & Pruppacher (1976) |
+| K_a (thermal conductivity) | 1414 × μ (Sutherland) | Fortran P3 v5.5.0 |
+| Kinematic viscosity | μ × R_d × T / P | Fortran P3 v5.5.0 |
 
-**Impact:** Switching to T,P-dependent transport was tested but degraded kin1d
-validation (ice 0.53x -> 0.43x) because the PSD correction factors are calibrated
-to constant transport properties. An `air_transport_properties(T, P)` utility
-function has been added for use when PSD lookup tables are implemented.
+These are actively used in deposition, melting, and evaporation rate computations.
+
+**kin1d impact:** The kin1d driver's PSD correction factors (alpha_dep, alpha_rim)
+are calibrated with T,P-dependent transport active. Early testing with constant
+transport (D_v=2.5e-5, K_a=0.025, ν=1.5e-5) gave different validation results.
 
 ### Ice Melting — Correct
 
@@ -130,54 +129,56 @@ needed varies with particle size, temperature, and process type.
 
 ### 1. T,P-dependent Transport Properties
 - **Change:** Replace constant D_v=2.5e-5, K_a=0.025 with Fortran's T,P-dependent formulas
-- **Result:** Ice degraded from 0.53x to 0.43x
-- **Reason:** Faster deposition at cold T drove excessive WBF cloud consumption,
-  reducing cloud available for riming. PSD corrections calibrated to constants.
-- **Action:** Reverted. Utility function kept for Phase 5.
+- **Result:** With original PSD corrections calibrated to constants, ice degraded.
+- **Resolution:** T,P-dependent transport is now active in the library code
+  (`air_transport_properties(T, P)`). The kin1d driver's PSD correction factors
+  were recalibrated accordingly.
 
-### 2. Fortran Rain Fall Speed (842*D^0.8)
-- **Change:** Replace V=130*D^0.5 with V=842*D^0.8
-- **Result:** Rain evaporation degraded (velocity 40-70% lower for D<0.5mm)
-- **Reason:** V=842*D^0.8 is accurate per-drop but underestimates PSD-effective
-  evaporation without lookup tables
-- **Action:** Reverted. Documented as intentional difference.
+### 2. Rain Velocity Unification
+- **Change:** Rain evaporation mean-mass fallback now uses `V = 842 D^0.8`
+  (Fortran P3 v5.5.0 power law), consistent with terminal velocity fallback.
+- **Previous state:** Used `V = 130 D^0.5` as a PSD-effective approximation.
+- **Resolution:** With rain lookup tables always recommended (exact PSD integration),
+  the mean-mass fallback is rarely used. Unified to Fortran's formula for consistency.
 
 ### 3. Ventilation Coefficient f2=0.32
-- **Change:** Match Fortran's f2r=0.32 (from 0.31)
-- **Result:** Negligible impact (< 3% change)
-- **Action:** Reverted with other changes. Minor discrepancy documented.
+- **Change:** Match Fortran's f2r=0.32
+- **Result:** Now consistent: both tabulated and fallback paths use f2r=0.32.
 
 ## Path to Fortran Parity
 
-### Phase 5: PSD Lookup Tables (Required)
+### Completed
 
-The only path to close the 0.53x ice gap is implementing P3 lookup tables that
-provide PSD-integrated rates for:
-1. Ice deposition/sublimation
-2. Collection (cloud riming, rain riming, aggregation)
-3. Sedimentation (mass- and number-weighted fall speeds)
-4. Melting
+- ✅ T,P-dependent transport properties (`air_transport_properties(T, P)`)
+- ✅ Fortran rain fall speed (842 D^0.8) in all code paths
+- ✅ Rain PSD lookup tables (fall speed + evaporation ventilation integral)
+- ✅ Ice PSD lookup tables (fall speed, deposition, collection, sixth moment)
+- ✅ Lookup table validation against Fortran v6.9-2momI (median < 1%)
 
-With lookup tables:
-- Switch to T,P-dependent transport properties
-- Switch to Fortran rain fall speed (842*D^0.8)
-- Remove PSD correction factors (replaced by proper PSD integration)
-- Expected: ice within 10-20% of Fortran (remaining gap from implementation details)
+### Remaining for full parity
 
-### Prerequisites
-- Implement lookup table generation (offline, store as JLD2 or similar)
-- Interpolation infrastructure (bilinear in mu-lambda space)
-- Integration with existing process rate functions
+1. **Use PSD lookup tables for ALL process rates** (deposition, collection,
+   melting) — currently only fall speed tables are used by default; deposition
+   and collection use analytical fallback with PSD correction factors
+2. **Prognostic cloud droplet number (Nᶜ)** — requires aerosol activation
+3. **Remove kin1d empirical corrections** — set all alpha_dep, alpha_rim,
+   alpha_melt, ice_vt_psd_factor to 1.0 when full tables are active
 
 ## Conclusions
 
 1. **All P3 formulations are physically correct** — Mason thermodynamic resistance,
    Barklie-Gokhale freezing, Cooper nucleation, KK2000 warm rain, Seifert-Beheng
    self-collection.
-2. **All parameter values match Fortran v5.5.0** within rounding (f2r differs by <3%).
-3. **The 0.53x ice gap is architectural**, not a bug — it stems from the mean-mass
+2. **All parameter values match Fortran v5.5.0** within rounding.
+3. **The ice gap is architectural**, not a bug — it stems from the mean-mass
    approximation vs PSD-integrated lookup tables.
 4. **Temperature agreement is excellent** (1.00x), indicating the thermodynamic
    framework is sound.
-5. **No behavioral changes were made** — only documentation improvements and an
-   `air_transport_properties(T, P)` utility for future use.
+5. **T,P-dependent transport properties** are active in the library via
+   `air_transport_properties(T, P)`, matching Fortran v5.5.0 formulas.
+6. **Rain velocity is unified**: tabulated path uses physical Gunn-Kinzer/Beard law;
+   mean-mass fallback uses Fortran `842 D^0.8` consistently across all code paths.
+7. **Cloud droplet number (Nᶜ) is prescribed**, not prognostic. This is a design
+   simplification; the Fortran P3 driver uses prognostic Nᶜ. The homogeneous
+   freezing number cap (`N_hom ≤ Q_hom / minimum_cloud_drop_mass`) compensates
+   for this difference and can be removed when prognostic Nᶜ is implemented.

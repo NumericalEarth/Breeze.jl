@@ -7,13 +7,30 @@
 ##### Reference: Morrison & Milbrandt (2015), Milbrandt et al. (2021, 2025)
 ##### Test case: KOUN sounding (00Z June 1 2008), nCat=1, trplMomIce=T, liqFrac=T
 #####
-##### NOTE: This driver contains empirical PSD correction factors (alpha_dep,
-##### alpha_rim, alpha_melt, rain_evap_psd_factor, etc.) that compensate for
-##### the mean-mass approximation in the analytical fallback path. When using
-##### full tabulation via `tabulate(p3, CPU())`, these corrections are NOT needed
-##### because the lookup tables integrate over the full particle size distribution.
-##### A future version of this driver should use `tabulate(p3, CPU())` for all
-##### process rates and set all PSD corrections to 1.0.
+##### VALIDATION TUNING vs LIBRARY CODE
+##### ==================================
+##### This driver contains empirical PSD correction factors that compensate for
+##### the mean-mass approximation when the analytical (non-tabulated) process
+##### rate path is used. These corrections are VALIDATION-DRIVER-ONLY and are
+##### NOT part of the P3 library code in src/Microphysics/PredictedParticleProperties/.
+#####
+##### Empirical corrections in this driver (not in library):
+#####   - alpha_dep: level-dependent deposition boost (2.0 at peak, 0.5 at floor)
+#####   - alpha_rim: level-dependent riming boost (0.5 at peak, 0.2 at floor)
+#####   - alpha_melt: level-dependent melting enhancement (1–31×)
+#####   - ice_vt_psd_factor: ice fall speed multiplier (2–3×)
+#####   - Soft ice profile relaxation (exponential decay below peak)
+#####   - Nr constraint: clamp mean rain drop mass to [1.4e-8, 5e-6] kg
+#####   - ni constraints: maximum concentration cap, minimum mean mass
+#####
+##### Library parameters modified from defaults (via ProcessRateParameters):
+#####   - nucleation_coefficient: 15.0 /m³ (3× Cooper to approximate missing
+#####     contact/condensation-freezing modes)
+#####   - riming_psd_correction: 5.0 (mean-mass collection underestimate)
+#####   - Nc: 750 cm⁻³ (prescribed, not prognostic as in Fortran)
+#####
+##### When full PSD lookup tables are used for ALL process rates (not just fall
+##### speeds and rain), these corrections should be set to 1.0.
 #####
 
 using Breeze

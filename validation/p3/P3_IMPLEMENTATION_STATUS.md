@@ -131,7 +131,7 @@ and hail. The implementation follows:
 | **Cloud droplet activation** | Aerosol → CCN | ❌ |
 | **Table 2 (rain integrals)** | Rain property lookup tables (analytical fallback used) | ✅ (added) |
 | **Multiple ice categories** | Full Part III (MultiIceCategory framework exists) | ⚠️ |
-| **Sedimentation substepping** | Operator-split time stepping for CFL stability | ❌ |
+| **Sedimentation substepping** | Operator-split time stepping for CFL stability | ⚠️ kin1d only |
 | **Diagnostics** | Radar reflectivity, precipitation rate output | ❌ |
 
 ---
@@ -238,6 +238,19 @@ Tables mode (`--tables` flag): tabulated ice fall speeds (P3Closure μ-λ, facto
 
 ---
 
+## Known Differences from Fortran P3 v5.5.0
+
+These are deliberate design differences, not bugs. Each has a documented rationale.
+
+| Difference | Reason | Path to Fortran parity |
+|-----------|--------|----------------------|
+| **Cloud droplet number (Nᶜ) is prescribed** | Prognostic Nᶜ requires aerosol activation physics, which is out of scope for this PR | Implement CCN activation and advect Nᶜ |
+| **Default scheme uses analytical fallbacks** | Lookup tables require explicit `tabulate(p3, CPU())` call after construction | Call `tabulate(p3, CPU())` for Fortran-consistent behavior; the analytical path is for development |
+| **Homogeneous freezing has mass-number cap** | Prevents ni explosion with prescribed Nᶜ (see `homogeneous_freezing_cloud_rate`) | Remove cap when prognostic Nᶜ is implemented |
+| **kin1d driver uses empirical PSD corrections** | Mean-mass approximation underestimates PSD-integrated rates; tuning factors compensate in the validation driver ONLY (not in library code) | Use full PSD lookup tables for all process rates |
+
+---
+
 ## Roadmap to Parity
 
 ### Phase 1: Core Process Rates ✅ COMPLETE
@@ -288,7 +301,7 @@ slower (stays in growth zone), while large rimed ice falls faster (correct trans
 | **3-moment Z in kin1d driver** | Low | Z is prognostic but 3-moment closure only helps with PSD-integrated process rates (deposition tables); analytical path unchanged |
 | **Rain tables in kin1d** | ✅ Done | Always enabled: exact PSD integration for rain fall speed and evaporation |
 | **Bulk tendency kernel** | ✅ Done | `update_microphysical_auxiliaries!` now computes rates once and caches all 10 tendency contributions; `grid_microphysical_tendency` overrides read from cache fields |
-| **Sedimentation substepping** | Stability | CFL constraint for large Δt; may be needed for production LES runs |
+| **Sedimentation substepping** | Stability | CFL substepping in kin1d driver; not yet in AtmosphereModel kernel |
 | **3D LES cases** | Validation | BOMEX with ice, deep convection |
 
 ---

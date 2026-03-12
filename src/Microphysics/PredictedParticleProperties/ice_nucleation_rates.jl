@@ -205,6 +205,10 @@ at most one ice particle per minimum-size cloud droplet
 This prevents an ni explosion when `Nᶜ` is prescribed (continental aerosol loading)
 and `qᶜˡ` is trace at ``T < -40°\\text{C}``.
 
+**Fortran parity note:** This cap is not present in the Fortran P3 v5.5.0 reference,
+where `Nᶜ` is prognostic and naturally depletes with cloud consumption. When
+prognostic `Nᶜ` is implemented in Breeze, this cap can be removed.
+
 # Arguments
 - `p3`: P3 microphysics scheme (provides parameters)
 - `qᶜˡ`: Cloud liquid mass fraction [kg/kg]

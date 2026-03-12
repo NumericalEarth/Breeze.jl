@@ -38,7 +38,7 @@ All arguments must be positional (GPU kernel compatibility).
 """
 @inline function safe_divide(a, b, default)
     FT = typeof(a)
-    ε = eps(FT)
+    ε = FT(1e-30)
     return ifelse(abs(b) < ε, default, a / b)
 end
 
@@ -61,14 +61,15 @@ Dispatches on table type for PSD-integrated or mean-mass path.
 """
 @inline function _deposition_ventilation(vent::TabulatedFunction3D,
                                           vent_e::TabulatedFunction3D,
-                                          m_mean, Fᶠ, ρᶠ, prp, nu)
+                                          m_mean, Fᶠ, ρᶠ, prp, nu, D_v)
     FT = typeof(m_mean)
     log_m = log10(max(m_mean, FT(1e-20)))
     Fˡ = zero(FT)
     return vent(log_m, Fᶠ, Fˡ) + vent_e(log_m, Fᶠ, Fˡ)
 end
 
-@inline function _deposition_ventilation(::Any, ::Any, m_mean, Fᶠ, ρᶠ, prp, nu)
+@inline function _deposition_ventilation(::AbstractDepositionIntegral, ::AbstractDepositionIntegral,
+                                          m_mean, Fᶠ, ρᶠ, prp, nu, D_v)
     FT = typeof(m_mean)
     ρ_eff_unrimed = prp.ice_effective_density_unrimed
     ρ_eff = (1 - Fᶠ) * ρ_eff_unrimed + Fᶠ * ρᶠ
@@ -77,8 +78,10 @@ end
     # P3 Fortran convention: capm = cap × D where cap=1 for sphere, 0.48 for aggregate
     C = ifelse(D_mean < D_threshold, D_mean, FT(0.48) * D_mean)
     V = prp.ice_fall_speed_coefficient_unrimed * D_mean^prp.ice_fall_speed_exponent_unrimed
+    # Schmidt number correction (Hall & Pruppacher 1976): Sc = nu / D_v
+    Sc = nu / max(D_v, FT(1e-30))
     Re_term = sqrt(V * D_mean / nu)
-    f_v = FT(0.65) + FT(0.44) * Re_term
+    f_v = FT(0.65) + FT(0.44) * cbrt(Sc) * Re_term
     return C * f_v
 end
 
@@ -96,7 +99,7 @@ Analytical path: returns A_mean × V_mean × psd_correction.
     return coll(log_m, Fᶠ, zero(FT))
 end
 
-@inline function _collection_kernel_per_particle(::Any, m_mean, Fᶠ, ρᶠ, prp)
+@inline function _collection_kernel_per_particle(::AbstractCollectionIntegral, m_mean, Fᶠ, ρᶠ, prp)
     FT = typeof(m_mean)
     ρ_eff_unrimed = prp.ice_effective_density_unrimed
     ρ_eff = (1 - Fᶠ) * ρ_eff_unrimed + Fᶠ * ρᶠ
@@ -129,7 +132,7 @@ Analytical path: A_mean × ΔV at mean diameter.
     return coll(log_m, Fᶠ, zero(FT))
 end
 
-@inline function _aggregation_kernel(::Any, m_mean, Fᶠ, ρᶠ, prp)
+@inline function _aggregation_kernel(::AbstractCollectionIntegral, m_mean, Fᶠ, ρᶠ, prp)
     FT = typeof(m_mean)
     ρ_eff_unrimed = prp.ice_effective_density_unrimed
     ρ_eff = max(FT(50), (1 - Fᶠ) * ρ_eff_unrimed + Fᶠ * ρᶠ)
@@ -180,7 +183,7 @@ factor that accounts for latent heating during phase change.
     ℒˡ = liquid_latent_heat(T, constants)
     cᵖᵐ = mixture_heat_capacity(q, constants)
     Rᵛ = vapor_gas_constant(constants)
-    dqᵛ⁺_dT = qᵛ⁺ˡ * (ℒˡ / (Rᵛ * T^2) - 1 / T)
+    dqᵛ⁺_dT = qᵛ⁺ˡ * ℒˡ / (Rᵛ * T^2)
     Γˡ = 1 + (ℒˡ / cᵖᵐ) * dqᵛ⁺_dT
 
     # Relaxation toward saturation
@@ -228,7 +231,8 @@ The bulk rate integrates over the size distribution:
 # Returns
 - Rate of vapor → ice conversion [kg/kg/s] (positive = deposition)
 """
-@inline function ventilation_enhanced_deposition(p3, qⁱ, nⁱ, qᵛ, qᵛ⁺ⁱ, Fᶠ, ρᶠ, T, P)
+@inline function ventilation_enhanced_deposition(p3, qⁱ, nⁱ, qᵛ, qᵛ⁺ⁱ, Fᶠ, ρᶠ, T, P,
+                                                  transport=air_transport_properties(T, P))
     FT = typeof(qⁱ)
     prp = p3.process_rates
 
@@ -239,8 +243,7 @@ The bulk rate integrates over the size distribution:
     R_v = FT(461.5)           # Gas constant for water vapor [J/kg/K]
     R_d = FT(287.0)           # Gas constant for dry air [J/kg/K]
     L_s = FT(2.835e6)         # Latent heat of sublimation [J/kg]
-    # T,P-dependent transport properties (Fortran P3 v5.5.0 formulas)
-    transport = air_transport_properties(T, P)
+    # T,P-dependent transport properties (pre-computed or computed on demand)
     K_a = transport.K_a       # Thermal conductivity of air [W/m/K]
     D_v = transport.D_v       # Diffusivity of water vapor [m²/s]
     nu  = transport.nu        # Kinematic viscosity [m²/s]
@@ -262,7 +265,7 @@ The bulk rate integrates over the size distribution:
     # table or mean-mass analytical path depending on p3.ice.deposition type.
     C_fv = _deposition_ventilation(p3.ice.deposition.ventilation,
                                     p3.ice.deposition.ventilation_enhanced,
-                                    m_mean, Fᶠ, ρᶠ, prp, nu)
+                                    m_mean, Fᶠ, ρᶠ, prp, nu, D_v)
 
     # Denominator: thermodynamic resistance terms (Mason 1971)
     # A = L_s/(K_a × T) × (L_s/(R_v × T) - 1)
@@ -413,20 +416,25 @@ suitable for use in GPU kernels where grid indexing is handled externally.
     # Phase 1: Rain processes
     # =========================================================================
     P = 𝒰.reference_pressure
+
+    # Compute T,P-dependent transport properties once (Fortran P3 v5.5.0 formulas)
+    # — shared by deposition, melting, and rain evaporation (eliminates triple computation)
+    transport = air_transport_properties(T, P)
+
     autoconv = rain_autoconversion_rate(p3, qᶜˡ, Nᶜ)
     accr = rain_accretion_rate(p3, qᶜˡ, qʳ)
-    rain_evap = rain_evaporation_rate(p3, qʳ, nʳ, qᵛ, qᵛ⁺ˡ, T, ρ, P)
+    rain_evap = rain_evaporation_rate(p3, qʳ, nʳ, qᵛ, qᵛ⁺ˡ, T, ρ, P, transport)
     rain_self = rain_self_collection_rate(p3, qʳ, nʳ, ρ)
     rain_br = rain_breakup_rate(p3, qʳ, nʳ, rain_self)
 
     # =========================================================================
     # Phase 1: Ice deposition/sublimation and melting
     # =========================================================================
-    dep = ventilation_enhanced_deposition(p3, qⁱ, nⁱ, qᵛ, qᵛ⁺ⁱ, Fᶠ, ρᶠ, T, P)
+    dep = ventilation_enhanced_deposition(p3, qⁱ, nⁱ, qᵛ, qᵛ⁺ⁱ, Fᶠ, ρᶠ, T, P, transport)
     dep = ifelse(qⁱ > FT(1e-20), dep, zero(FT))
 
     # Partitioned melting: partial stays on ice, complete goes to rain
-    melt_rates = ice_melting_rates(p3, qⁱ, nⁱ, qʷⁱ, T, P, qᵛ, qᵛ⁺ˡ, Fᶠ, ρᶠ, ρ)
+    melt_rates = ice_melting_rates(p3, qⁱ, nⁱ, qʷⁱ, T, P, qᵛ, qᵛ⁺ˡ, Fᶠ, ρᶠ, ρ, transport)
     partial_melt = melt_rates.partial_melting
     complete_melt = melt_rates.complete_melting
     # Only complete melting removes ice particles; partial melting keeps particles as ice
@@ -683,25 +691,26 @@ Rime mass loses from:
 end
 
 """
-    tendency_ρbᶠ(rates, Fᶠ, ρᶠ)
+    tendency_ρbᶠ(rates, ρ, Fᶠ, ρᶠ, prp)
 
 Compute rime volume tendency from P3 process rates.
 
 Rime volume changes with rime mass: ∂bᶠ/∂t = ∂qᶠ/∂t / ρ_rime
 """
-@inline function tendency_ρbᶠ(rates::P3ProcessRates, ρ, Fᶠ, ρᶠ)
+@inline function tendency_ρbᶠ(rates::P3ProcessRates, ρ, Fᶠ, ρᶠ, prp)
     FT = typeof(ρ)
 
     ρᶠ_safe = max(ρᶠ, FT(100))
     ρ_rim_new_safe = max(rates.rime_density_new, FT(100))
 
-    ρ_water = FT(1000)  # physical constant [kg/m³]
-    ρ_rim_hom = FT(900)  # homogeneous freezing rime density [kg/m³]
+    # Read densities from parameter struct (not hardcoded)
+    ρ_water = prp.liquid_water_density        # immersion freezing: drops freeze near water density
+    ρ_rim_hom = prp.pure_ice_density          # homogeneous freezing: solid ice sphere (917 kg/m³)
 
     # Phase 2: Volume gain from new rime (cloud + rain riming + refreezing)
     # Use density of new rime for fresh rime, current density for refreezing
     # Frozen cloud/rain drops are dense ice at approximately water density (immersion freezing)
-    # Homogeneous freezing uses ρ_rim = 900 kg/m³ (solid ice sphere, Fortran P3 v5.5.0)
+    # Homogeneous freezing uses solid ice density (Fortran P3 v5.5.0 uses 900; we use pure_ice_density)
     volume_gain = (rates.cloud_riming + rates.rain_riming) / ρ_rim_new_safe +
                    rates.refreezing / ρᶠ_safe +
                    (rates.cloud_freezing_mass + rates.rain_freezing_mass) / ρ_water +
@@ -711,6 +720,13 @@ Rime volume changes with rime mass: ∂bᶠ/∂t = ∂qᶠ/∂t / ρ_rime
     volume_loss = Fᶠ * (rates.partial_melting + rates.complete_melting) / ρᶠ_safe
 
     return ρ * (volume_gain - volume_loss)
+end
+
+# Backward-compatible overload without prp: uses Fortran P3 v5.5.0 defaults
+@inline function tendency_ρbᶠ(rates::P3ProcessRates, ρ, Fᶠ, ρᶠ)
+    FT = typeof(ρ)
+    prp = (liquid_water_density = FT(1000), pure_ice_density = FT(917))
+    return tendency_ρbᶠ(rates, ρ, Fᶠ, ρᶠ, prp)
 end
 
 """
@@ -809,7 +825,10 @@ end
              z_shed * rates.shedding -
              z_melt * total_melting
 
-    # Sublimation (when deposition is negative)
+    # Sublimation correction (when deposition is negative):
+    # z_dep and z_sub are DIFFERENT table integrals (SixthMomentDeposition vs
+    # SixthMomentSublimation). This is not double-counting — deposition and
+    # sublimation have separate normalized Z-change rates, as in Fortran P3.
     is_sublimating = rates.deposition < 0
     z_rate = z_rate + ifelse(is_sublimating, z_sub * abs(rates.deposition), zero(FT))
 
@@ -817,7 +836,7 @@ end
 end
 
 # Fallback: use proportional scaling when integrals are not tabulated
-@inline function _tabulated_z_tendency(::Any, log_m, Fᶠ, Fˡ, rates, ρ, qⁱ, nⁱ, zⁱ)
+@inline function _tabulated_z_tendency(::IceSixthMoment, log_m, Fᶠ, Fˡ, rates, ρ, qⁱ, nⁱ, zⁱ)
     # Fall back to the simple proportional scaling
     FT = typeof(ρ)
     ratio = safe_divide(zⁱ, qⁱ, zero(FT))
@@ -884,7 +903,7 @@ end
 @inline tendency_ρqⁱ(::Nothing, ρ) = zero(ρ)
 @inline tendency_ρnⁱ(::Nothing, ρ) = zero(ρ)
 @inline tendency_ρqᶠ(::Nothing, ρ, Fᶠ) = zero(ρ)
-@inline tendency_ρbᶠ(::Nothing, ρ, Fᶠ, ρᶠ) = zero(ρ)
+@inline tendency_ρbᶠ(::Nothing, ρ, Fᶠ, ρᶠ, prp...) = zero(ρ)
 @inline tendency_ρzⁱ(::Nothing, ρ, qⁱ, nⁱ, zⁱ) = zero(ρ)
 @inline tendency_ρqʷⁱ(::Nothing, ρ) = zero(ρ)
 @inline tendency_ρqᵛ(::Nothing, ρ) = zero(ρ)

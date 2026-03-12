@@ -12,6 +12,9 @@ See [`CloudDropletProperties`](@ref) constructor for details.
 """
 struct CloudDropletProperties{FT}
     number_concentration :: FT
+    # Unused by rain_autoconversion_rate, which uses KK2000 (no threshold)
+    # and reads coefficients from ProcessRateParameters instead.
+    # Retained for potential future use with threshold-based schemes.
     autoconversion_threshold :: FT
     condensation_timescale :: FT
 end
@@ -31,6 +34,12 @@ are not the focus.
 Predicting cloud droplet number requires treating aerosol activation
 physics, which adds substantial complexity. For simulations focused
 on ice processes or bulk precipitation, prescribed Nc is sufficient.
+
+**Fortran parity note:** The Fortran P3 driver carries and advects prognostic
+`Nc` and `ssat` (supersaturation). The prescribed-Nc simplification means:
+(1) the homogeneous freezing rate includes a mass-number consistency cap to
+prevent ni explosions with trace cloud at T < −40°C, and (2) autoconversion
+sensitivity to Nc is controlled by the prescribed value rather than dynamically.
 
 **Typical values:**
 - Continental: Nc ~ 100-300 × 10⁶ m⁻³ (more CCN, smaller droplets)

@@ -158,6 +158,11 @@ end
 
 Compute cloud droplet number sink from riming.
 
+Returns `-(Nᶜ / qᶜˡ) * riming_rate`, which has units [1/m³/s] because Nᶜ
+is in [1/m³] while qᶜˡ and riming_rate are in [kg/kg] and [kg/kg/s].
+Note: this rate is currently computed but unused by the tendency kernel
+(cloud droplet number is prescribed, not predicted, in the P3 scheme).
+
 # Arguments
 - `qᶜˡ`: Cloud liquid mass fraction [kg/kg]
 - `Nᶜ`: Cloud droplet number concentration [1/m³]
@@ -256,6 +261,9 @@ end
     rime_density_cober_list(p3, T, vᵢ, D_drop, D_ice, lwc)
 
 Compute rime density using the full Cober & List (1993) parameterization.
+This is a deliberate physics upgrade over Fortran P3 (v5.5.0), which uses a
+simpler temperature-dependent formula. The Cober & List parameterization
+accounts for impact velocity and droplet size via the Stokes impact parameter.
 
 The rime density depends on the impact conditions:
 

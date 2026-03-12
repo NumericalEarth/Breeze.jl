@@ -494,6 +494,7 @@ function ice_mass_coefficients(mass::IceMassPowerLaw, rime_fraction, rime_densit
     b₄ = FT(β)
 
     # Determine which regime applies (work backwards from regime 4)
+    # Note: same logic and ordering as particle_mass_ice_only in quadrature.jl
     is_regime_4 = D ≥ thresholds.partial_rime
     is_regime_3 = D ≥ thresholds.graupel
     is_regime_2 = D ≥ thresholds.spherical
@@ -785,8 +786,7 @@ function solve_lambda(L_ice, N_ice, rime_fraction, rime_density;
                       shape_relation = nothing,  # deprecated, for backwards compatibility
                       logλ_bounds = (log(10), log(1e7)),
                       max_iterations = 50,
-                      tolerance = 1e-10,
-                      kwargs...)
+                      tolerance = 1e-10)
 
     # Handle deprecated keyword
     actual_closure = isnothing(shape_relation) ? closure : shape_relation
@@ -845,8 +845,7 @@ function solve_lambda(L_ice, N_ice, Z_ice, rime_fraction, rime_density, μ;
                       mass = IceMassPowerLaw(),
                       logλ_bounds = (log(10), log(1e7)),
                       max_iterations = 50,
-                      tolerance = 1e-10,
-                      kwargs...)
+                      tolerance = 1e-10)
 
     FT = typeof(L_ice)
     if L_ice <= 0 || N_ice <= 0
@@ -1040,14 +1039,13 @@ function distribution_parameters(L_ice, N_ice, rime_fraction, rime_density;
                                   mass = IceMassPowerLaw(),
                                   closure = P3Closure(),
                                   diameter_bounds = nothing,
-                                  shape_relation = nothing,  # deprecated
-                                  kwargs...)
+                                  shape_relation = nothing)  # deprecated
     FT = typeof(L_ice)
 
     # Handle deprecated keyword
     actual_closure = isnothing(shape_relation) ? closure : shape_relation
 
-    logλ = solve_lambda(L_ice, N_ice, rime_fraction, rime_density; mass, closure=actual_closure, kwargs...)
+    logλ = solve_lambda(L_ice, N_ice, rime_fraction, rime_density; mass, closure=actual_closure)
     λ = exp(logλ)
     μ = shape_parameter(actual_closure, logλ, L_ice, rime_fraction, rime_density, mass)
 
@@ -1125,8 +1123,7 @@ params = distribution_parameters(L_ice, N_ice, Z_ice, 0.0, 400.0)
 function distribution_parameters(L_ice, N_ice, Z_ice, rime_fraction, rime_density;
                                   mass = IceMassPowerLaw(),
                                   closure = ThreeMomentClosure(),
-                                  diameter_bounds = nothing,
-                                  kwargs...)
+                                  diameter_bounds = nothing)
 
     FT = typeof(L_ice)
 
@@ -1138,7 +1135,7 @@ function distribution_parameters(L_ice, N_ice, Z_ice, rime_fraction, rime_densit
     # If Z is zero or negative, fall back to two-moment with μ at lower bound
     if Z_ice ≤ 0
         μ = closure.μmin
-        logλ = solve_lambda(L_ice, N_ice, Z_ice, rime_fraction, rime_density, μ; mass, kwargs...)
+        logλ = solve_lambda(L_ice, N_ice, Z_ice, rime_fraction, rime_density, μ; mass)
         λ = exp(logλ)
 
         # Enforce diameter bounds if provided
@@ -1151,10 +1148,10 @@ function distribution_parameters(L_ice, N_ice, Z_ice, rime_fraction, rime_densit
     end
 
     # Solve for μ using three-moment constraint
-    μ = solve_shape_parameter(L_ice, N_ice, Z_ice, rime_fraction, rime_density; mass, closure, kwargs...)
+    μ = solve_shape_parameter(L_ice, N_ice, Z_ice, rime_fraction, rime_density; mass, closure)
 
     # Solve for λ at this μ
-    logλ = solve_lambda(L_ice, N_ice, Z_ice, rime_fraction, rime_density, μ; mass, kwargs...)
+    logλ = solve_lambda(L_ice, N_ice, Z_ice, rime_fraction, rime_density, μ; mass)
     λ = exp(logλ)
 
     # Enforce diameter bounds if provided

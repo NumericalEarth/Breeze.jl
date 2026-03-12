@@ -33,7 +33,7 @@ V(D) = a_V \\left(\\frac{ρ_0}{ρ}\\right)^{0.54} D^{b_V}
 
 where ``a_V`` is `fall_speed_coefficient`, ``b_V`` is `fall_speed_exponent`,
 and ``ρ_0`` is `reference_air_density`. The density correction exponent 0.54
-follows [Heymsfield et al. (2006)](@cite Morrison2015parameterization), and
+follows [Heymsfield et al. (2006)](@cite HeymsfieldEtAl2006), and
 ``ρ_0`` matches the reference conditions (T=253.15 K, P=600 hPa) at which
 the P3 lookup tables are computed.
 

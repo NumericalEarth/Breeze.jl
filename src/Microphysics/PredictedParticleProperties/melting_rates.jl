@@ -40,7 +40,8 @@ where:
 # Returns
 - Rate of ice → rain conversion [kg/kg/s]
 """
-@inline function ice_melting_rate(p3, qⁱ, nⁱ, T, P, qᵛ, qᵛ⁺, Fᶠ, ρᶠ, ρ)
+@inline function ice_melting_rate(p3, qⁱ, nⁱ, T, P, qᵛ, qᵛ⁺, Fᶠ, ρᶠ, ρ,
+                                   transport=air_transport_properties(T, P))
     FT = typeof(qⁱ)
     prp = p3.process_rates
 
@@ -57,8 +58,7 @@ where:
     L_f = FT(3.34e5)          # Latent heat of fusion [J/kg]
     L_v = FT(2.5e6)           # Latent heat of vaporization [J/kg]
     R_v = FT(461.5)           # Gas constant for water vapor [J/kg/K]
-    # T,P-dependent transport properties (Fortran P3 v5.5.0 formulas)
-    transport = air_transport_properties(T, P)
+    # T,P-dependent transport properties (pre-computed or computed on demand)
     K_a = transport.K_a       # Thermal conductivity of air [W/m/K]
     D_v = transport.D_v       # Diffusivity of water vapor [m²/s]
     nu  = transport.nu        # Kinematic viscosity [m²/s]
@@ -78,7 +78,7 @@ where:
     # table or mean-mass path depending on p3.ice.deposition type.
     C_fv = _deposition_ventilation(p3.ice.deposition.ventilation,
                                     p3.ice.deposition.ventilation_enhanced,
-                                    m_mean, Fᶠ, ρᶠ, prp, nu)
+                                    m_mean, Fᶠ, ρᶠ, prp, nu, D_v)
 
     # Heat flux terms (Eq. 44 from MM15a)
     # Sensible heat: K_a × (T - T₀)
@@ -140,12 +140,13 @@ particle reaches this capacity, additional meltwater sheds to rain.
 # Returns
 - NamedTuple with `partial_melting` and `complete_melting` rates [kg/kg/s]
 """
-@inline function ice_melting_rates(p3, qⁱ, nⁱ, qʷⁱ, T, P, qᵛ, qᵛ⁺, Fᶠ, ρᶠ, ρ)
+@inline function ice_melting_rates(p3, qⁱ, nⁱ, qʷⁱ, T, P, qᵛ, qᵛ⁺, Fᶠ, ρᶠ, ρ,
+                                    transport=air_transport_properties(T, P))
     FT = typeof(qⁱ)
     prp = p3.process_rates
 
     # Get total melting rate
-    total_melt = ice_melting_rate(p3, qⁱ, nⁱ, T, P, qᵛ, qᵛ⁺, Fᶠ, ρᶠ, ρ)
+    total_melt = ice_melting_rate(p3, qⁱ, nⁱ, T, P, qᵛ, qᵛ⁺, Fᶠ, ρᶠ, ρ, transport)
 
     # Maximum liquid fraction capacity (from Milbrandt et al. 2025)
     # Spongy ice can hold about 14% liquid by mass

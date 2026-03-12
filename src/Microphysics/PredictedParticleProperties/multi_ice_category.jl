@@ -156,9 +156,8 @@ velocities of particles in each category.
     # Full implementation would compute differential fall speeds and collection kernel
     τ_agg = prp.aggregation_timescale
 
-    # Mass transfer: proportional to product of ice contents
-    q_product = sqrt(qⁱ₁ * qⁱ₂)
-    mass_rate = E * q_product / τ_agg
+    # Mass transfer: proportional to product of ice contents (N² scaling)
+    mass_rate = E * qⁱ₁ * qⁱ₂ / τ_agg
 
     # Number transfer: smaller particles absorbed by larger category
     # Transfer number from category with smaller mean mass
@@ -168,9 +167,8 @@ velocities of particles in each category.
     # Category 1 absorbs 2 if m̄₁ > m̄₂
     cat1_larger = m̄₁ > m̄₂
 
-    # Number rate (always reduces total number)
-    n_product = sqrt(nⁱ₁ * nⁱ₂)
-    number_rate = E * n_product / τ_agg
+    # Number rate (always reduces total number, N² scaling)
+    number_rate = E * nⁱ₁ * nⁱ₂ / τ_agg
 
     return (
         mass_rate = mass_rate,

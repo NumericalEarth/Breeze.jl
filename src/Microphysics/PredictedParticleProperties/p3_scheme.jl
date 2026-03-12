@@ -80,16 +80,29 @@ The scheme tracks 9 prognostic densities:
 - `precipitation_boundary_condition`: Boundary condition for surface precipitation
   (default `nothing` = open boundary, precipitation exits domain)
 
-# Tabulation
+# Tabulation (recommended for Fortran parity)
 
-For faster process rate calculations, use [`tabulate`](@ref) to pre-compute
-lookup tables:
+The default constructor creates a scheme with analytical fallback paths for
+all process rates. For Fortran-consistent behavior, pre-compute lookup tables
+with [`tabulate`](@ref):
 
 ```julia
 using Oceananigans
 p3 = PredictedParticlePropertiesMicrophysics()
-p3_fast = tabulate(p3, CPU())  # Pre-compute lookup tables
+p3 = tabulate(p3, CPU())  # Pre-compute all lookup tables
 ```
+
+Without tabulation, the scheme uses simplified mean-mass approximations that
+systematically underestimate PSD-integrated rates (see `P3_IMPLEMENTATION_STATUS.md`).
+The analytical path is useful for development and testing but does not reproduce
+the Fortran `P3_INIT` lookup-table behavior.
+
+# Known limitations
+
+- **Cloud droplet number is prescribed**, not prognostic. The Fortran P3 driver
+  carries and advects `Nᶜ` and passes it into `P3_MAIN`. Breeze uses a fixed
+  `CloudDropletProperties.number_concentration`. Implementing prognostic `Nᶜ`
+  requires aerosol activation physics.
 
 # Example
 

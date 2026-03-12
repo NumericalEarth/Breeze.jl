@@ -12,6 +12,9 @@ Ice collision-coalescence efficiencies and collection integrals.
 See [`IceCollection`](@ref) constructor for details.
 """
 struct IceCollection{FT, AG, RW}
+    # Deprecated: unused by the runtime riming path, which reads
+    # ProcessRateParameters.cloud_ice_collection_efficiency instead.
+    # Retained for backward compatibility with the tabulation path.
     ice_cloud_collection_efficiency :: FT
     ice_rain_collection_efficiency :: FT
     aggregation :: AG

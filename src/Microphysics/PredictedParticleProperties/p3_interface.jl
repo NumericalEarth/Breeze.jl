@@ -221,9 +221,10 @@ The diagnostic `qᵛ` field is updated from the thermodynamic state.
     # Pre-compute terminal velocities for sedimentation (stored as negative w)
     @inbounds μ.wʳ[i, j, k]   = -rain_terminal_velocity_mass_weighted(p3, ℳ.qʳ, ℳ.nʳ, ρ)
     @inbounds μ.wʳₙ[i, j, k]  = -rain_terminal_velocity_number_weighted(p3, ℳ.qʳ, ℳ.nʳ, ρ)
-    @inbounds μ.wⁱ[i, j, k]   = -ice_terminal_velocity_mass_weighted(p3, ℳ.qⁱ, ℳ.nⁱ, Fᶠ, ρᶠ, ρ)
-    @inbounds μ.wⁱₙ[i, j, k]  = -ice_terminal_velocity_number_weighted(p3, ℳ.qⁱ, ℳ.nⁱ, Fᶠ, ρᶠ, ρ)
-    @inbounds μ.wⁱ_z[i, j, k] = -ice_terminal_velocity_reflectivity_weighted(p3, ℳ.qⁱ, ℳ.nⁱ, Fᶠ, ρᶠ, ρ)
+    vⁱ = ice_terminal_velocities(p3, ℳ.qⁱ, ℳ.nⁱ, Fᶠ, ρᶠ, ρ)
+    @inbounds μ.wⁱ[i, j, k]   = -vⁱ.mass_weighted
+    @inbounds μ.wⁱₙ[i, j, k]  = -vⁱ.number_weighted
+    @inbounds μ.wⁱ_z[i, j, k] = -vⁱ.reflectivity_weighted
 
     # Compute all process rates once and cache every microphysical tendency contribution.
     # grid_microphysical_tendency overrides below read from these cache fields, eliminating
@@ -235,7 +236,7 @@ The diagnostic `qᵛ` field is updated from the thermodynamic state.
     @inbounds μ.cache_ρqⁱ[i, j, k]  = tendency_ρqⁱ(rates, ρ)
     @inbounds μ.cache_ρnⁱ[i, j, k]  = tendency_ρnⁱ(rates, ρ)
     @inbounds μ.cache_ρqᶠ[i, j, k]  = tendency_ρqᶠ(rates, ρ, Fᶠ)
-    @inbounds μ.cache_ρbᶠ[i, j, k]  = tendency_ρbᶠ(rates, ρ, Fᶠ, ρᶠ)
+    @inbounds μ.cache_ρbᶠ[i, j, k]  = tendency_ρbᶠ(rates, ρ, Fᶠ, ρᶠ, p3.process_rates)
     @inbounds μ.cache_ρzⁱ[i, j, k]  = tendency_ρzⁱ(rates, ρ, ℳ.qⁱ, ℳ.nⁱ, ℳ.zⁱ)
     @inbounds μ.cache_ρqʷⁱ[i, j, k] = tendency_ρqʷⁱ(rates, ρ)
     @inbounds μ.cache_ρqᵛ[i, j, k]  = tendency_ρqᵛ(rates, ρ)
@@ -376,7 +377,7 @@ Rime volume tendency: gains from new rime; loses with melting.
 """
 @inline function AM.microphysical_tendency(p3::P3, ::Val{:ρbᶠ}, ρ, ℳ::P3MicrophysicalState, 𝒰, constants)
     rates, _, _, _, Fᶠ, ρᶠ = p3_rates_and_properties(p3, ρ, ℳ, 𝒰, constants)
-    return tendency_ρbᶠ(rates, ρ, Fᶠ, ρᶠ)
+    return tendency_ρbᶠ(rates, ρ, Fᶠ, ρᶠ, p3.process_rates)
 end
 
 """

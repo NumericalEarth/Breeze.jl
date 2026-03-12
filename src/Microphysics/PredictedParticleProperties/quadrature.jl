@@ -321,21 +321,21 @@ Used for fall speed calculation of the ice component.
     a₄ = FT(α) / (1 - Fᶠ_safe)
     b₄ = FT(β)
 
+    # Determine which regime applies (work backwards from regime 4)
+    # Note: same logic and ordering as ice_mass_coefficients in lambda_solver.jl
     is_regime_4 = D ≥ thresholds.partial_rime
     is_regime_3 = D ≥ thresholds.graupel
     is_regime_2 = D ≥ thresholds.spherical
 
-    a = a₁
-    b = b₁
+    # Select coefficients: start with regime 4, override with 3, 2, 1 as conditions apply
+    a = ifelse(is_regime_4, a₄, a₃)
+    b = ifelse(is_regime_4, b₄, b₃)
 
-    a = ifelse(is_regime_2, a₂, a)
-    b = ifelse(is_regime_2, b₂, b)
+    a = ifelse(is_regime_3, a, a₂)
+    b = ifelse(is_regime_3, b, b₂)
 
-    a = ifelse(is_regime_3, a₃, a)
-    b = ifelse(is_regime_3, b₃, b)
-
-    a = ifelse(is_regime_4, a₄, a)
-    b = ifelse(is_regime_4, b₄, b)
+    a = ifelse(is_regime_2, a, a₁)
+    b = ifelse(is_regime_2, b, b₁)
 
     return a * D^b
 end

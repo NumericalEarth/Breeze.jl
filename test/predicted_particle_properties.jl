@@ -1296,9 +1296,10 @@ using Oceananigans: CPU
         rate_zero = rain_autoconversion_rate(p3, FT(0), Nc)
         @test rate_zero == 0
 
-        # Below threshold gives zero (threshold is 1e-4 kg/kg)
-        rate_below = rain_autoconversion_rate(p3, FT(5e-5), Nc)
-        @test rate_below == 0
+        # Small cloud water gives small but nonzero rate (KK2000 has no threshold)
+        rate_small = rain_autoconversion_rate(p3, FT(5e-5), Nc)
+        @test rate_small > 0
+        @test rate_small < rate
     end
 
     @testset "rain_accretion_rate" begin

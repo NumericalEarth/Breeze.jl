@@ -21,8 +21,8 @@ Cloud droplets larger than a threshold undergo collision-coalescence to form rai
     FT = typeof(qᶜˡ)
     prp = p3.process_rates
 
-    # No autoconversion below threshold
-    qᶜˡ_eff = clamp_positive(qᶜˡ - prp.autoconversion_threshold)
+    # KK2000 uses cloud liquid directly (no threshold subtraction)
+    qᶜˡ_eff = clamp_positive(qᶜˡ)
 
     # Scale droplet concentration
     Nᶜ_scaled = Nᶜ / prp.autoconversion_reference_concentration
@@ -185,7 +185,8 @@ approximation path depending on `p3.rain.evaporation`:
 # Returns
 - Rate of rain → vapor conversion [kg/kg/s] (negative = evaporation)
 """
-@inline function rain_evaporation_rate(p3, qʳ, nʳ, qᵛ, qᵛ⁺ˡ, T, ρ, P)
+@inline function rain_evaporation_rate(p3, qʳ, nʳ, qᵛ, qᵛ⁺ˡ, T, ρ, P,
+                                       transport=air_transport_properties(T, P))
     FT = typeof(qʳ)
     prp = p3.process_rates
 
@@ -198,15 +199,18 @@ approximation path depending on `p3.rain.evaporation`:
 
     # Thermodynamic constants
     R_v = FT(461.5)           # Gas constant for water vapor [J/kg/K]
+    R_d = FT(287.0)           # Gas constant for dry air [J/kg/K]
     L_v = FT(2.5e6)           # Latent heat of vaporization [J/kg]
-    # T,P-dependent transport properties (Fortran P3 v5.5.0 formulas)
-    transport = air_transport_properties(T, P)
+    # T,P-dependent transport properties (pre-computed or computed on demand)
     K_a = transport.K_a       # Thermal conductivity of air [W/m/K]
     D_v = transport.D_v       # Diffusivity of water vapor [m²/s]
     nu  = transport.nu        # Kinematic viscosity [m²/s]
 
-    # Saturation vapor pressure derived from qᵛ⁺ˡ
-    e_s = ρ * max(qᵛ⁺ˡ, FT(1e-30)) * R_v * T
+    # Saturation vapor pressure derived from qᵛ⁺ˡ via inversion of
+    # qᵛ⁺ˡ = ε × e_s / (P - (1 - ε) × e_s), consistent with ice deposition path
+    ε = R_d / R_v
+    qᵛ⁺ˡ_safe = max(qᵛ⁺ˡ, FT(1e-30))
+    e_s = P * qᵛ⁺ˡ_safe / (ε + qᵛ⁺ˡ_safe * (1 - ε))
 
     # Thermodynamic resistance (Mason 1971)
     A = L_v / (K_a * T) * (L_v / (R_v * T) - 1)
@@ -214,7 +218,7 @@ approximation path depending on `p3.rain.evaporation`:
     thermodynamic_factor = max(A + B, FT(1e-10))
 
     evap_rate = _rain_evaporation_rate(p3.rain.evaporation, qʳ_eff, nʳ_eff, S,
-                                       thermodynamic_factor, p3, prp, nu, FT)
+                                       thermodynamic_factor, p3, prp, nu, D_v, FT)
 
     # Cannot evaporate more than available
     τ_evap = prp.rain_evaporation_timescale
@@ -226,7 +230,7 @@ end
 
 # Tabulated path: use PSD-integrated ventilation integral I_evap(λ_r)
 @inline function _rain_evaporation_rate(table::TabulatedFunction1D, qʳ, nʳ, S,
-                                        thermodynamic_factor, p3, prp, nu, FT)
+                                        thermodynamic_factor, p3, prp, nu, D_v, FT)
     ρ_water = p3.water_density
 
     # Diagnose λ_r from (q_r, N_r) for exponential DSD (μ_r = 0):
@@ -247,26 +251,29 @@ end
     return FT(2π) * N_0 * I_evap * (S - 1) / thermodynamic_factor
 end
 
-# Mean-mass fallback (used when evaporation field is not tabulated)
-@inline function _rain_evaporation_rate(::Any, qʳ, nʳ, S,
-                                        thermodynamic_factor, p3, prp, nu, FT)
+# Mean-mass fallback (used when evaporation field is not tabulated).
+# NOTE: The tabulated path (via `tabulate(p3, :rain, CPU())`) is recommended
+# for production use. It integrates D × f_v(D) × N(D) dD exactly over the
+# PSD using the physical piecewise Gunn-Kinzer/Beard fall speed law.
+# This fallback uses the Fortran P3 power-law V = ar × D^br (842 × D^0.8)
+# consistently with terminal_velocities.jl and process_rate_parameters.jl.
+@inline function _rain_evaporation_rate(::AbstractRainIntegral, qʳ, nʳ, S,
+                                        thermodynamic_factor, p3, prp, nu, D_v, FT)
     ρ_water = p3.water_density
 
     # Mean drop properties
     m_mean = safe_divide(qʳ, nʳ, FT(1e-12))
     D_mean = cbrt(6 * m_mean / (FT(π) * ρ_water))
 
-    # Terminal velocity for rain drops
-    # Note: The Fortran P3 uses ar=842, br=0.8, f1r=0.78, f2r=0.32 with
-    # PSD-integrated ventilation via lookup tables. For the mean-mass
-    # approximation, V=130*D^0.5 gives better PSD-effective ventilation
-    # because it overestimates V for small drops, partially compensating
-    # for the PSD tail where small drops evaporate efficiently.
-    V = FT(130) * D_mean^FT(0.5)
+    # Terminal velocity: Fortran P3 v5.5.0 power law (ar=842, br=0.8)
+    ar = prp.rain_fall_speed_coefficient
+    br = prp.rain_fall_speed_exponent
+    V = ar * D_mean^br
 
-    # Ventilation factor
+    # Ventilation factor with Schmidt number (Hall & Pruppacher 1976)
+    Sc = nu / max(D_v, FT(1e-30))
     Re_term = sqrt(V * D_mean / nu)
-    f_v = FT(0.78) + FT(0.32) * Re_term
+    f_v = FT(0.78) + FT(0.32) * cbrt(Sc) * Re_term
 
     # Evaporation rate per drop (negative for evaporation)
     dm_dt = FT(4π) * (D_mean / 2) * f_v * (S - 1) / thermodynamic_factor
