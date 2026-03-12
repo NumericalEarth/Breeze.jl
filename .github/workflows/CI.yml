@@ -65,6 +65,10 @@ jobs:
             os: aws-linux-nvidia-gpu-a10g-8xl
             arch: "default"
             check-bounds: "auto"
+          - version: "1.11.9"
+            os: aws-linux-nvidia-gpu-l4-4xl
+            arch: "default"
+            check-bounds: "auto"
     steps:
       - uses: actions/checkout@v6
       - uses: julia-actions/setup-julia@v2
