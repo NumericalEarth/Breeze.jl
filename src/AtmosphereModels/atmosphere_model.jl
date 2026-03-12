@@ -1,7 +1,7 @@
 using ..Thermodynamics: Thermodynamics, ThermodynamicConstants
 
 using Oceananigans: Oceananigans, AbstractModel, Center, CenterField, Clock, Field,
-                    Centered, fields, prognostic_fields
+                    Centered, fields, prognostic_fields, prognostic_state, restore_prognostic_state!
 using Oceananigans.Advection: Advection, adapt_advection_order, cell_advection_timescale
 using Oceananigans.AbstractOperations: @at
 using Oceananigans.BoundaryConditions: FieldBoundaryConditions, regularize_field_boundary_conditions
@@ -462,3 +462,24 @@ end
 
 # For compatibility with Oceananigans JLD2Writer
 Oceananigans.OutputWriters.default_included_properties(::AtmosphereModel) = [:grid, :thermodynamic_constants]
+
+#####
+##### Checkpointing
+#####
+
+function Oceananigans.prognostic_state(model::AtmosphereModel)
+    state = (clock = prognostic_state(model.clock),
+             timestepper = prognostic_state(model.timestepper))
+    return merge(state, prognostic_fields(model))
+end
+
+function Oceananigans.restore_prognostic_state!(restored::AtmosphereModel, from)
+    restore_prognostic_state!(restored.clock, from.clock)
+    restore_prognostic_state!(restored.timestepper, from.timestepper)
+    for (name, target) in pairs(prognostic_fields(restored))
+        restore_prognostic_state!(target, getfield(from, name))
+    end
+    return restored
+end
+
+Oceananigans.restore_prognostic_state!(::AtmosphereModel, ::Nothing) = nothing
