@@ -66,6 +66,7 @@ fig
 simulation = Simulation(model; Δt=2, stop_time=1000)
 conjure_time_step_wizard!(simulation, cfl=0.7)
 θ = liquid_ice_potential_temperature(model)
+Oceananigans.Diagnostics.erroring_NaNChecker!(simulation)
 
 function progress(sim)
     u, v, w = sim.model.velocities
@@ -185,6 +186,7 @@ set!(moist_model, θ=θᵐ)
 
 moist_simulation = Simulation(moist_model; Δt=2, stop_time=30minutes)
 conjure_time_step_wizard!(moist_simulation, cfl=0.7)
+Oceananigans.Diagnostics.erroring_NaNChecker!(moist_simulation)
 
 E = total_energy(moist_model)
 θ = liquid_ice_potential_temperature(moist_model)
@@ -290,6 +292,7 @@ set!(precip_model, θ=θᵢ, qᵗ=qᵗ_precip)
 
 precip_simulation = Simulation(precip_model; Δt=2, stop_time=60minutes)
 conjure_time_step_wizard!(precip_simulation, cfl=0.7)
+Oceananigans.Diagnostics.erroring_NaNChecker!(precip_simulation)
 
 θ_precip = liquid_ice_potential_temperature(precip_model)
 u_p, v_p, w_precip = precip_model.velocities

@@ -163,6 +163,7 @@ fig
 stop_time = 12minutes   # total simulation time
 simulation = Simulation(model; Δt=1, stop_time)
 conjure_time_step_wizard!(simulation; cfl = 0.7)
+Oceananigans.Diagnostics.erroring_NaNChecker!(simulation)
 
 # We also add a progress callback:
 

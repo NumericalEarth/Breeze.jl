@@ -204,6 +204,7 @@ simulations = Dict{Symbol, Simulation}()
 for (key, model) in models
     Δt = time_steps[key]
     sim = Simulation(model; Δt, stop_time, verbose=false)
+    Oceananigans.Diagnostics.erroring_NaNChecker!(sim)
 
     ## Progress callback
     θ′ = PotentialTemperature(model) - θᵇᵍ_field

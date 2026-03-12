@@ -57,6 +57,7 @@ function run_parcel_simulation(; microphysics, θ = 300, stop_time = 2000, Δt =
     end
 
     simulation = Simulation(model; Δt, stop_time, verbose=false)
+    Oceananigans.Diagnostics.erroring_NaNChecker!(simulation)
 
     ## Time series storage
     t = Float64[]
