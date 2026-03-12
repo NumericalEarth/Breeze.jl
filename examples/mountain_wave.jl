@@ -30,6 +30,7 @@ set!(model, θ=θᵢ, u=Uᵢ)
 stop_iteration = 1000
 simulation = Simulation(model; Δt, stop_iteration)
 conjure_time_step_wizard!(simulation, cfl=0.7)
+Oceananigans.Diagnostics.erroring_NaNChecker!(simulation)
 
 wall_clock = Ref(time_ns())
 
