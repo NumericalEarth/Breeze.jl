@@ -50,6 +50,21 @@ correction_number_mass_pairs(microphysics, microphysical_fields) = ()
 """
 $(TYPEDSIGNATURES)
 
+Return a tuple of `Field` objects for density-weighted number concentration
+fields that should be clamped to non-negative after advection.
+
+Number concentrations can become negative because the advection scheme
+might not be positive-definite. Unlike mass fields (which use borrowing to
+preserve conservation), number concentrations are simply zeroed since there
+is no meaningful conservation constraint for droplet number.
+
+Default: empty tuple (no number fields to clamp).
+"""
+correction_number_fields(microphysics, microphysical_fields) = ()
+
+"""
+$(TYPEDSIGNATURES)
+
 Fix negative moisture mixing ratios produced by the advection operator.
 
 Operates in two phases:
@@ -79,10 +94,11 @@ function correct_negative_moisture!(microphysics, model)
     ρqᵛᵉ = model.moisture_density
     Nz = size(grid, 3)
     number_mass_pairs = correction_number_mass_pairs(microphysics, model.microphysical_fields)
+    number_fields = correction_number_fields(microphysics, model.microphysical_fields)
 
     launch!(arch, grid, :xy,
             _correct_negative_moisture_column!,
-            moisture_fields, number_mass_pairs, ρqᵛᵉ, ρ₀, grid, Nz)
+            moisture_fields, number_mass_pairs, number_fields, ρqᵛᵉ, ρ₀, grid, Nz)
 
     return nothing
 end
@@ -91,7 +107,7 @@ end
 ##### Column-wise kernel
 #####
 
-@kernel function _correct_negative_moisture_column!(moisture_fields, number_mass_pairs, ρqᵛᵉ, ρ₀, grid, Nz)
+@kernel function _correct_negative_moisture_column!(moisture_fields, number_mass_pairs, number_fields, ρqᵛᵉ, ρ₀, grid, Nz)
     i, j = @index(Global, NTuple)
 
     # Phase 1: Same-level borrowing at each level
@@ -103,6 +119,11 @@ end
     # Zero orphaned number concentrations (mass zeroed but number still positive)
     for k = 1:Nz
         zero_orphaned_numbers!(i, j, k, number_mass_pairs)
+    end
+
+    # Clamp negative number concentrations to zero
+    for k = 1:Nz
+        clamp_negative_numbers!(i, j, k, number_fields)
     end
 
     # Phase 2: Vertical borrowing for vapor/moisture prognostic
@@ -195,3 +216,17 @@ end
 end
 
 @inline zero_orphaned_numbers!(i, j, k, ::Tuple{}) = nothing
+
+#####
+##### Negative number concentration clamping
+#####
+
+# Clamp negative number concentrations to zero
+@inline function clamp_negative_numbers!(i, j, k, fields::Tuple{F, Vararg}) where {F}
+    ρn = fields[1]
+    @inbounds ρn_val = ρn[i, j, k]
+    @inbounds ρn[i, j, k] = max(0, ρn_val)
+    clamp_negative_numbers!(i, j, k, Base.tail(fields))
+end
+
+@inline clamp_negative_numbers!(i, j, k, ::Tuple{}) = nothing
