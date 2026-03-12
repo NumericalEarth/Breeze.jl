@@ -62,10 +62,6 @@ jobs:
           # Necessary for testing Reactant workloads until
           # https://github.com/EnzymeAD/Reactant.jl/issues/2347 is fixed.
           - version: "1.11.9"
-            os: aws-linux-nvidia-gpu-a10g-8xl
-            arch: "default"
-            check-bounds: "auto"
-          - version: "1.11.9"
             os: aws-linux-nvidia-gpu-l4-4xl
             arch: "default"
             check-bounds: "auto"
