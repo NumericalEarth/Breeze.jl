@@ -170,7 +170,7 @@ materialize_condensate_formation(::Any, category) = ConstantRateCondensateFormat
 const OMCM = OneMomentCloudMicrophysics
 
 # Default fallback for OneMomentCloudMicrophysics tendencies (state-based)
-@inline AM.microphysical_tendency(bμp::OMCM, name, ρ, ℳ, 𝒰, constants) = zero(ρ)
+@inline AM.microphysical_tendency(bμp::OMCM, name, ρ, ℳ, 𝒰, constants, clock) = zero(ρ)
 
 # Default fallback for OneMomentCloudMicrophysics velocities
 @inline AM.microphysical_velocities(bμp::OMCM, μ, name) = nothing
@@ -516,7 +516,7 @@ end
 const τⁿᵘᵐ = 10  # seconds
 
 # State-based rain tendency for all warm-phase 1M schemes
-@inline function AM.microphysical_tendency(bμp::WarmPhase1M, ::Val{:ρqʳ}, ρ, ℳ::WarmPhaseOneMomentState, 𝒰, constants)
+@inline function AM.microphysical_tendency(bμp::WarmPhase1M, ::Val{:ρqʳ}, ρ, ℳ::WarmPhaseOneMomentState, 𝒰, constants, clock)
     categories = bμp.categories
     qᶜˡ = ℳ.qᶜˡ
     qʳ = ℳ.qʳ
@@ -551,7 +551,7 @@ const τⁿᵘᵐ = 10  # seconds
 end
 
 # State-based rain tendency for mixed-phase 1M schemes
-@inline function AM.microphysical_tendency(bμp::Union{MP1M, MPNE1M}, ::Val{:ρqʳ}, ρ, ℳ::MixedPhaseOneMomentState, 𝒰, constants)
+@inline function AM.microphysical_tendency(bμp::Union{MP1M, MPNE1M}, ::Val{:ρqʳ}, ρ, ℳ::MixedPhaseOneMomentState, 𝒰, constants, clock)
     categories = bμp.categories
     qᶜˡ = ℳ.qᶜˡ
     qʳ = ℳ.qʳ
@@ -590,7 +590,7 @@ end
 #####
 
 # State-based cloud liquid tendency for warm-phase non-equilibrium
-@inline function AM.microphysical_tendency(bμp::WPNE1M, ::Val{:ρqᶜˡ}, ρ, ℳ::WarmPhaseOneMomentState, 𝒰, constants)
+@inline function AM.microphysical_tendency(bμp::WPNE1M, ::Val{:ρqᶜˡ}, ρ, ℳ::WarmPhaseOneMomentState, 𝒰, constants, clock)
     categories = bμp.categories
     τᶜˡ = liquid_relaxation_timescale(bμp.cloud_formation, categories)
     qᶜˡ = ℳ.qᶜˡ
@@ -624,7 +624,7 @@ end
 end
 
 # State-based cloud liquid tendency for mixed-phase non-equilibrium
-@inline function AM.microphysical_tendency(bμp::MPNE1M, ::Val{:ρqᶜˡ}, ρ, ℳ::MixedPhaseOneMomentState, 𝒰, constants)
+@inline function AM.microphysical_tendency(bμp::MPNE1M, ::Val{:ρqᶜˡ}, ρ, ℳ::MixedPhaseOneMomentState, 𝒰, constants, clock)
     categories = bμp.categories
     τᶜˡ = liquid_relaxation_timescale(bμp.cloud_formation, categories)
     qᶜˡ = ℳ.qᶜˡ
@@ -664,7 +664,7 @@ end
 # `ice_thermodynamic_adjustment_factor` and `deposition_rate` are defined in `Breeze.Microphysics`
 # so they can be shared by multiple bulk microphysics schemes.
 
-@inline function AM.microphysical_tendency(bμp::MPNE1M, ::Val{:ρqᶜⁱ}, ρ, ℳ::MixedPhaseOneMomentState, 𝒰, constants)
+@inline function AM.microphysical_tendency(bμp::MPNE1M, ::Val{:ρqᶜⁱ}, ρ, ℳ::MixedPhaseOneMomentState, 𝒰, constants, clock)
     categories = bμp.categories
     τᶜⁱ = ice_relaxation_timescale(bμp.cloud_formation, categories)
     qᶜⁱ = ℳ.qᶜⁱ

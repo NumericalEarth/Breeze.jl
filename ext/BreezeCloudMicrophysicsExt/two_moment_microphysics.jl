@@ -311,7 +311,7 @@ materialize_2m_condensate_formation(::Any, categories) = ConstantRateCondensateF
 #####
 
 # Default fallback for tendencies (state-based)
-@inline AtmosphereModels.microphysical_tendency(bμp::TwoMomentCloudMicrophysics, name, ρ, ℳ, 𝒰, constants) = zero(ρ)
+@inline AtmosphereModels.microphysical_tendency(bμp::TwoMomentCloudMicrophysics, name, ρ, ℳ, 𝒰, constants, clock) = zero(ρ)
 
 # Default fallback for velocities
 @inline AtmosphereModels.microphysical_velocities(bμp::TwoMomentCloudMicrophysics, μ, name) = nothing
@@ -497,7 +497,7 @@ const τⁿᵘᵐ_2m = 10  # seconds
 ##### Cloud liquid mass tendency (ρqᶜˡ) - state-based
 #####
 
-@inline function AtmosphereModels.microphysical_tendency(bμp::WPNE2M, ::Val{:ρqᶜˡ}, ρ, ℳ::WarmPhaseTwoMomentState, 𝒰, constants)
+@inline function AtmosphereModels.microphysical_tendency(bμp::WPNE2M, ::Val{:ρqᶜˡ}, ρ, ℳ::WarmPhaseTwoMomentState, 𝒰, constants, clock)
     categories = bμp.categories
     sb = categories.warm_processes
     τᶜˡ = liquid_relaxation_timescale(bμp.cloud_formation, categories)
@@ -505,11 +505,9 @@ const τⁿᵘᵐ_2m = 10  # seconds
     qᶜˡ = ℳ.qᶜˡ
     qʳ = ℳ.qʳ
     nᶜˡ = ℳ.nᶜˡ
-    nᵃ = ℳ.nᵃ
 
     # Number densities [1/m³]
     Nᶜˡ = ρ * max(0, nᶜˡ)
-    Nᵃ = ρ * max(0, nᵃ)
 
     # Thermodynamic state
     T = temperature(𝒰, constants)
@@ -519,9 +517,21 @@ const τⁿᵘᵐ_2m = 10  # seconds
     # Saturation specific humidity
     qᵛ⁺ = saturation_specific_humidity(T, ρ, constants, PlanarLiquidSurface())
 
-    # Condensation/evaporation rate (relaxation to saturation)
+    # Sequential coupling of activation and condensation:
+    # Both processes consume vapor from the same supersaturation budget.
+    # Activation goes first (new droplets at critical Köhler radius),
+    # then condensation uses the remaining supersaturation to grow existing droplets.
+    # This prevents double-counting vapor consumption.
+
+    # Step 1: Activation mass tendency (uses full supersaturation)
+    Sᵃᶜᵗ = aerosol_activation_mass_tendency(categories.aerosol_activation, categories.air_properties,
+                                             ρ, ℳ, 𝒰, constants)
+
+    # Step 2: Condensation with reduced supersaturation (subtract activation mass)
     Sᶜᵒⁿᵈ = condensation_rate(qᵛ, qᵛ⁺, qᶜˡ, T, ρ, q, τᶜˡ, constants)
     Sᶜᵒⁿᵈ = ifelse(isnan(Sᶜᵒⁿᵈ), zero(Sᶜᵒⁿᵈ), Sᶜᵒⁿᵈ)
+    Sᶜᵒⁿᵈ_min = -max(0, qᶜˡ) / τᶜˡ
+    Sᶜᵒⁿᵈ = max(Sᶜᵒⁿᵈ - Sᵃᶜᵗ, Sᶜᵒⁿᵈ_min)
 
     # Autoconversion: cloud liquid → rain
     au = CM2.autoconversion(sb.acnv, sb.pdf_c, max(0, qᶜˡ), max(0, qʳ), ρ, Nᶜˡ)
@@ -530,11 +540,6 @@ const τⁿᵘᵐ_2m = 10  # seconds
     # Accretion: cloud liquid captured by falling rain
     ac = CM2.accretion(sb, max(0, qᶜˡ), max(0, qʳ), ρ, Nᶜˡ)
     Sᵃᶜᶜ = ac.dq_lcl_dt  # negative (sink for cloud)
-
-    # Aerosol activation: source of cloud liquid mass from newly activated droplets
-    # Newly formed droplets have finite initial size given by the activation radius
-    Sᵃᶜᵗ = aerosol_activation_mass_tendency(categories.aerosol_activation, categories.air_properties,
-                                             ρ, ℳ, 𝒰, constants)
 
     # Total tendency
     ΣρS = ρ * (Sᶜᵒⁿᵈ + Sᵃᶜⁿᵛ + Sᵃᶜᶜ + Sᵃᶜᵗ)
@@ -549,7 +554,7 @@ end
 ##### Cloud liquid number tendency (ρnᶜˡ) - state-based
 #####
 
-@inline function AtmosphereModels.microphysical_tendency(bμp::WPNE2M, ::Val{:ρnᶜˡ}, ρ, ℳ::WarmPhaseTwoMomentState, 𝒰, constants)
+@inline function AtmosphereModels.microphysical_tendency(bμp::WPNE2M, ::Val{:ρnᶜˡ}, ρ, ℳ::WarmPhaseTwoMomentState, 𝒰, constants, clock)
     categories = bμp.categories
     sb = categories.warm_processes
 
@@ -756,7 +761,7 @@ Uses the maximum supersaturation to determine which aerosol modes activate.
         κ̄ = mean_hygroscopicity(ap, mode)
 
         # Critical supersaturation for mode (Eq. 9 in ARG 2000)
-        Sᶜʳⁱᵗ = 2 / sqrt(κ̄) * (A / 3 / mode.r_dry)^(3/2)
+        Sᶜʳⁱᵗ = 2 / clipped_sqrt(κ̄) * clipped_sqrt(A / 3 / mode.r_dry)^3
 
         # Activated fraction for this mode (Eq. 7 in ARG 2000)
         ϕ = 2 * log(Sᶜʳⁱᵗ / Sᵐᵃˣ) / 3 / sqrt(2) / log(mode.stdev)
@@ -773,7 +778,7 @@ end
 ##### Rain mass tendency (ρqʳ) - state-based
 #####
 
-@inline function AtmosphereModels.microphysical_tendency(bμp::WPNE2M, ::Val{:ρqʳ}, ρ, ℳ::WarmPhaseTwoMomentState, 𝒰, constants)
+@inline function AtmosphereModels.microphysical_tendency(bμp::WPNE2M, ::Val{:ρqʳ}, ρ, ℳ::WarmPhaseTwoMomentState, 𝒰, constants, clock)
     categories = bμp.categories
     sb = categories.warm_processes
 
@@ -818,7 +823,7 @@ end
 ##### Rain number tendency (ρnʳ) - state-based
 #####
 
-@inline function AtmosphereModels.microphysical_tendency(bμp::WPNE2M, ::Val{:ρnʳ}, ρ, ℳ::WarmPhaseTwoMomentState, 𝒰, constants)
+@inline function AtmosphereModels.microphysical_tendency(bμp::WPNE2M, ::Val{:ρnʳ}, ρ, ℳ::WarmPhaseTwoMomentState, 𝒰, constants, clock)
     categories = bμp.categories
     sb = categories.warm_processes
 
@@ -868,7 +873,7 @@ end
 # Aerosol number decreases when droplets are activated.
 # This is the sink term that mirrors the activation source for cloud droplet number.
 
-@inline function AtmosphereModels.microphysical_tendency(bμp::WPNE2M, ::Val{:ρnᵃ}, ρ, ℳ::WarmPhaseTwoMomentState, 𝒰, constants)
+@inline function AtmosphereModels.microphysical_tendency(bμp::WPNE2M, ::Val{:ρnᵃ}, ρ, ℳ::WarmPhaseTwoMomentState, 𝒰, constants, clock)
     categories = bμp.categories
 
     nᵃ = ℳ.nᵃ
