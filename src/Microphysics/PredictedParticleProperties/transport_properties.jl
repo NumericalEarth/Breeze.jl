@@ -51,7 +51,7 @@ Float64
     D_v = FT(8.794e-5) * T^FT(1.81) / P
     mu_air = FT(1.496e-6) * T^FT(1.5) / (T + FT(120))
     K_a = FT(1414) * mu_air
-    R_d = FT(287.0)
+    R_d = FT(287.0)  # Deliberate: matches Fortran P3 v5.5.0 (not 287.04)
     nu = mu_air * R_d * T / P
     return (; D_v, K_a, nu)
 end

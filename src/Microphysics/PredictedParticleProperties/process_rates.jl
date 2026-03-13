@@ -38,7 +38,7 @@ All arguments must be positional (GPU kernel compatibility).
 """
 @inline function safe_divide(a, b, default)
     FT = typeof(a)
-    ε = FT(1e-30)
+    ε = FT(1e-15)
     return ifelse(abs(b) < ε, default, a / b)
 end
 
@@ -65,7 +65,14 @@ Dispatches on table type for PSD-integrated or mean-mass path.
     FT = typeof(m_mean)
     log_m = log10(max(m_mean, FT(1e-20)))
     Fˡ = zero(FT)
-    return vent(log_m, Fᶠ, Fˡ) + vent_e(log_m, Fᶠ, Fˡ)
+    # vent stores the constant ventilation term (0.65 × ∫ C(D) N'(D) dD)
+    # vent_e stores the enhanced term (0.44 × ∫ C(D)√(V×D) N'(D) dD)  [m² s^(-1/2)]
+    # Runtime correction: multiply vent_e by Sc^(1/3)/√ν  [s^(1/2) m^(-1)]
+    # Dimensional check: table [m² s^(-1/2)] × Sc^(1/3)/√ν [s^(1/2)/m] = [m]
+    # See rain_quadrature.jl:510-511 for the table storage convention.
+    Sc = nu / max(D_v, FT(1e-30))
+    sc_correction = cbrt(Sc) / sqrt(nu)
+    return vent(log_m, Fᶠ, Fˡ) + sc_correction * vent_e(log_m, Fᶠ, Fˡ)
 end
 
 @inline function _deposition_ventilation(::AbstractDepositionIntegral, ::AbstractDepositionIntegral,
@@ -189,8 +196,8 @@ factor that accounts for latent heating during phase change.
     # Relaxation toward saturation
     Sᶜᵒⁿᵈ = (qᵛ - qᵛ⁺ˡ) / (Γˡ * τᶜˡ)
 
-    # Limit evaporation to available cloud liquid
-    Sᶜᵒⁿᵈ_min = -max(0, qᶜˡ) / τᶜˡ
+    # Limit evaporation to available cloud liquid (include Γˡ for consistency)
+    Sᶜᵒⁿᵈ_min = -max(0, qᶜˡ) / (Γˡ * τᶜˡ)
     return max(Sᶜᵒⁿᵈ, Sᶜᵒⁿᵈ_min)
 end
 
@@ -354,6 +361,10 @@ struct P3ProcessRates{FT}
     cloud_homogeneous_number :: FT # Cloud number → ice [1/kg/s]
     rain_homogeneous_mass :: FT    # Rain → ice from homogeneous freezing [kg/kg/s]
     rain_homogeneous_number :: FT  # Rain number → ice [1/kg/s]
+
+    # Above-freezing cloud collection (T > T₀, Fortran qcshd pathway)
+    cloud_warm_collection :: FT        # Cloud → rain via warm ice collection [kg/kg/s]
+    cloud_warm_collection_number :: FT # Rain number from shed 1mm drops [1/kg/s]
 end
 
 """
@@ -483,6 +494,11 @@ suitable for use in GPU kernels where grid indexing is handled externally.
     cloud_hom_q, cloud_hom_n = homogeneous_freezing_cloud_rate(p3, qᶜˡ, Nᶜ, T, ρ)
     rain_hom_q, rain_hom_n = homogeneous_freezing_rain_rate(p3, qʳ, nʳ, T)
 
+    # =========================================================================
+    # Above-freezing cloud collection (Fortran qcshd/ncshdc pathway)
+    # =========================================================================
+    cloud_warm_q, cloud_warm_n = cloud_warm_collection_rate(p3, qᶜˡ, qⁱ, nⁱ, T, Fᶠ, ρᶠ, ρ)
+
     return P3ProcessRates(
         # Phase 1: Condensation
         cond,
@@ -501,7 +517,9 @@ suitable for use in GPU kernels where grid indexing is handled externally.
         # Rime splintering
         spl_q, spl_n,
         # Homogeneous freezing
-        cloud_hom_q, cloud_hom_n, rain_hom_q, rain_hom_n
+        cloud_hom_q, cloud_hom_n, rain_hom_q, rain_hom_n,
+        # Above-freezing cloud collection
+        cloud_warm_q, cloud_warm_n
     )
 end
 
@@ -533,8 +551,10 @@ Cloud liquid is consumed by:
     gain = rates.condensation
     # Phase 1: autoconversion and accretion
     # Phase 2: cloud riming by ice, immersion freezing, homogeneous freezing
+    # Above-freezing: cloud collected by melting ice and shed as rain
     loss = rates.autoconversion + rates.accretion + rates.cloud_riming +
-           rates.cloud_freezing_mass + rates.cloud_homogeneous_mass
+           rates.cloud_freezing_mass + rates.cloud_homogeneous_mass +
+           rates.cloud_warm_collection
     return ρ * (gain - loss)
 end
 
@@ -548,6 +568,7 @@ Rain gains from:
 - Accretion (Phase 1)
 - Complete melting (Phase 1) - meltwater that sheds from ice
 - Shedding (Phase 2) - liquid coating shed from ice
+- Warm cloud collection (above freezing) - cloud swept by melting ice → rain
 
 Rain loses from:
 - Evaporation (Phase 1)
@@ -558,15 +579,16 @@ Rain loses from:
 @inline function tendency_ρqʳ(rates::P3ProcessRates, ρ)
     # Phase 1: gains from autoconv, accr, complete_melt; loses from evap
     # Phase 2: gains from shedding; loses from riming, freezing, and homogeneous freezing
-    # Note: partial_melting stays on ice as liquid coating, only complete_melting goes to rain
-    gain = rates.autoconversion + rates.accretion + rates.complete_melting + rates.shedding
+    # Above-freezing: cloud collected by melting ice shed as rain (Fortran qcshd)
+    gain = rates.autoconversion + rates.accretion + rates.complete_melting +
+           rates.shedding + rates.cloud_warm_collection
     loss = -rates.rain_evaporation + rates.rain_riming + rates.rain_freezing_mass +
            rates.rain_homogeneous_mass  # evap is negative
     return ρ * (gain - loss)
 end
 
 """
-    tendency_ρnʳ(rates, ρ, nⁱ, qⁱ, prp)
+    tendency_ρnʳ(rates, ρ, nⁱ, qⁱ, nʳ, qʳ, prp)
 
 Compute rain number tendency from P3 process rates.
 
@@ -575,14 +597,16 @@ Rain number gains from:
 - Complete melting (Phase 1) - new rain drops from melted ice
 - Breakup (Phase 1) - large drops fragment into smaller ones
 - Shedding (Phase 2)
+- Warm cloud collection (above freezing) - shed 1mm drops
 
 Rain number loses from:
 - Self-collection (Phase 1)
+- Evaporation (Phase 1) - proportional number removal
 - Riming (Phase 2)
 - Immersion freezing (Phase 2)
 - Homogeneous freezing (Phase 2, T < -40°C)
 """
-@inline function tendency_ρnʳ(rates::P3ProcessRates, ρ, nⁱ, qⁱ, prp::ProcessRateParameters)
+@inline function tendency_ρnʳ(rates::P3ProcessRates, ρ, nⁱ, qⁱ, nʳ, qʳ, prp::ProcessRateParameters)
     FT = typeof(ρ)
 
     # Phase 1: New drops from autoconversion
@@ -592,18 +616,25 @@ Rain number loses from:
     # Only complete_melting produces new rain drops; partial_melting stays on ice
     n_from_melt = safe_divide(nⁱ * rates.complete_melting, qⁱ, zero(FT))
 
-    # Phase 1: Self-collection (negative) + breakup (positive)
-    # Phase 2: Shedding creates new drops
-    # Phase 2: Riming removes rain drops (already negative)
-    # Phase 2: Homogeneous freezing removes rain drops (negative)
+    # Phase 1: Evaporation removes rain number proportionally (Fortran P3 v5.5.0)
+    # nr_evap = nr * (evap_rate / qr);  evap_rate is negative, so n_evap is negative
+    n_from_evap = safe_divide(nʳ * rates.rain_evaporation, qʳ, zero(FT))
 
     return ρ * (n_from_autoconv + n_from_melt +
+                n_from_evap +
                 rates.rain_self_collection +
                 rates.rain_breakup +
                 rates.shedding_number +
+                rates.cloud_warm_collection_number +
                 rates.rain_riming_number -
                 rates.rain_freezing_number -
                 rates.rain_homogeneous_number)
+end
+
+# Backward-compatible overload without nʳ/qʳ (no evaporation number contribution)
+@inline function tendency_ρnʳ(rates::P3ProcessRates, ρ, nⁱ, qⁱ, prp::ProcessRateParameters)
+    FT = typeof(ρ)
+    return tendency_ρnʳ(rates, ρ, nⁱ, qⁱ, zero(FT), one(FT), prp)
 end
 
 """
@@ -691,42 +722,60 @@ Rime mass loses from:
 end
 
 """
-    tendency_ρbᶠ(rates, ρ, Fᶠ, ρᶠ, prp)
+    tendency_ρbᶠ(rates, ρ, Fᶠ, ρᶠ, qⁱ, prp)
 
 Compute rime volume tendency from P3 process rates.
 
-Rime volume changes with rime mass: ∂bᶠ/∂t = ∂qᶠ/∂t / ρ_rime
+Rime volume changes with rime mass: ∂bᶠ/∂t = ∂qᶠ/∂t / ρ_rime.
+Includes melt-densification (Fortran P3 v5.5.0): during melting, low-density
+rime portions melt preferentially, driving the remaining rime toward 917 kg/m³.
 """
-@inline function tendency_ρbᶠ(rates::P3ProcessRates, ρ, Fᶠ, ρᶠ, prp)
+@inline function tendency_ρbᶠ(rates::P3ProcessRates, ρ, Fᶠ, ρᶠ, qⁱ, prp)
     FT = typeof(ρ)
 
     ρᶠ_safe = max(ρᶠ, FT(100))
     ρ_rim_new_safe = max(rates.rime_density_new, FT(100))
 
-    # Read densities from parameter struct (not hardcoded)
-    ρ_water = prp.liquid_water_density        # immersion freezing: drops freeze near water density
+    # Fortran P3 v5.5.0: rho_rimeMax = 900 for rain rime and freezing
+    ρ_rimemax = prp.maximum_rime_density
     ρ_rim_hom = prp.pure_ice_density          # homogeneous freezing: solid ice sphere (917 kg/m³)
 
-    # Phase 2: Volume gain from new rime (cloud + rain riming + refreezing)
-    # Use density of new rime for fresh rime, current density for refreezing
-    # Frozen cloud/rain drops are dense ice at approximately water density (immersion freezing)
-    # Homogeneous freezing uses solid ice density (Fortran P3 v5.5.0 uses 900; we use pure_ice_density)
-    volume_gain = (rates.cloud_riming + rates.rain_riming) / ρ_rim_new_safe +
+    # Phase 2: Volume gain from new rime
+    # Cloud riming uses Cober-List computed density; rain riming uses rho_rimeMax = 900
+    # Immersion freezing uses rho_rimeMax = 900 (Fortran convention, not water density)
+    volume_gain = rates.cloud_riming / ρ_rim_new_safe +
+                   rates.rain_riming / ρ_rimemax +
                    rates.refreezing / ρᶠ_safe +
-                   (rates.cloud_freezing_mass + rates.rain_freezing_mass) / ρ_water +
+                   (rates.cloud_freezing_mass + rates.rain_freezing_mass) / ρ_rimemax +
                    (rates.cloud_homogeneous_mass + rates.rain_homogeneous_mass) / ρ_rim_hom
 
     # Phase 1: Volume loss from melting (proportional to rime fraction)
-    volume_loss = Fᶠ * (rates.partial_melting + rates.complete_melting) / ρᶠ_safe
+    total_melting = rates.partial_melting + rates.complete_melting
+    volume_loss = Fᶠ * total_melting / ρᶠ_safe
 
-    return ρ * (volume_gain - volume_loss)
+    # M3: Melt-densification (Fortran P3 v5.5.0 lines 3841-3844)
+    # Low-density rime portions melt first → remaining ice approaches 917 kg/m³.
+    # In tendency form: additional volume reduction = bᶠ × (917 - ρᶠ) × |melt| / (ρᶠ × qⁱ)
+    qⁱ_safe = max(qⁱ, FT(1e-12))
+    bᶠ = Fᶠ * qⁱ_safe / ρᶠ_safe
+    densification = bᶠ * (ρ_rim_hom - ρᶠ_safe) * total_melting / (ρᶠ_safe * qⁱ_safe)
+    # Only apply when ρᶠ < 917 and there is melting
+    densification = ifelse(ρᶠ_safe < ρ_rim_hom, densification, zero(FT))
+
+    return ρ * (volume_gain - volume_loss - densification)
 end
 
-# Backward-compatible overload without prp: uses Fortran P3 v5.5.0 defaults
+# Backward-compatible overloads
+# qⁱ cancels in the densification term (bᶠ × ... / qⁱ), so any nonzero value is correct
+@inline function tendency_ρbᶠ(rates::P3ProcessRates, ρ, Fᶠ, ρᶠ, prp::ProcessRateParameters)
+    return tendency_ρbᶠ(rates, ρ, Fᶠ, ρᶠ, one(typeof(ρ)), prp)
+end
+
+# qⁱ cancels in the densification term (bᶠ × ... / qⁱ), so any nonzero value is correct
 @inline function tendency_ρbᶠ(rates::P3ProcessRates, ρ, Fᶠ, ρᶠ)
     FT = typeof(ρ)
-    prp = (liquid_water_density = FT(1000), pure_ice_density = FT(917))
-    return tendency_ρbᶠ(rates, ρ, Fᶠ, ρᶠ, prp)
+    prp = (pure_ice_density = FT(917), maximum_rime_density = FT(900))
+    return tendency_ρbᶠ(rates, ρ, Fᶠ, ρᶠ, one(FT), prp)
 end
 
 """
@@ -762,7 +811,7 @@ the p3 scheme to access tabulated sixth moment integrals.
 end
 
 """
-    tendency_ρzⁱ(rates, ρ, qⁱ, nⁱ, zⁱ, Fᶠ, Fˡ, p3)
+    tendency_ρzⁱ(rates, ρ, qⁱ, nⁱ, zⁱ, Fᶠ, Fˡ, p3, nu, D_v)
 
 Compute ice sixth moment tendency using tabulated integrals when available.
 
@@ -783,36 +832,55 @@ pre-computed lookup tables. Otherwise, falls back to proportional scaling.
 - `Fᶠ`: Rime fraction [-]
 - `Fˡ`: Liquid fraction [-]
 - `p3`: P3 microphysics scheme (for accessing tabulated integrals)
+- `nu`: Kinematic viscosity [m²/s]
+- `D_v`: Water vapor diffusivity [m²/s]
 
 # Returns
 - Tendency of density-weighted sixth moment [kg/m³ × m⁶/kg / s]
 """
-@inline function tendency_ρzⁱ(rates::P3ProcessRates, ρ, qⁱ, nⁱ, zⁱ, Fᶠ, Fˡ, p3)
+@inline function tendency_ρzⁱ(rates::P3ProcessRates, ρ, qⁱ, nⁱ, zⁱ, Fᶠ, Fˡ, p3, nu, D_v)
     FT = typeof(ρ)
 
     # Mean ice particle mass for table lookup
     m̄ = safe_divide(qⁱ, nⁱ, FT(1e-20))
     log_mean_mass = log10(max(m̄, FT(1e-20)))
 
-    # Try to use tabulated sixth moment integrals
+    # Schmidt number correction for enhanced ventilation integrals
+    # Table stores 0.44 × ∫ C(D)√(V×D) N'(D) dD; runtime applies Sc^(1/3)/√ν
+    # (see rain_quadrature.jl:510-511 and _deposition_ventilation for dimensional derivation)
+    Sc = nu / max(D_v, FT(1e-30))
+    sc_correction = cbrt(Sc) / sqrt(nu)
+
     z_tendency = _tabulated_z_tendency(
-        p3.ice.sixth_moment, log_mean_mass, Fᶠ, Fˡ, rates, ρ, qⁱ, nⁱ, zⁱ
+        p3.ice.sixth_moment, log_mean_mass, Fᶠ, Fˡ, rates, ρ, qⁱ, nⁱ, zⁱ, sc_correction
     )
 
     return z_tendency
 end
 
+# Backward-compatible overload without transport properties (uses reference Sc correction)
+@inline function tendency_ρzⁱ(rates::P3ProcessRates, ρ, qⁱ, nⁱ, zⁱ, Fᶠ, Fˡ, p3)
+    FT = typeof(ρ)
+    # Reference conditions: nu ≈ 1.5e-5, D_v ≈ 2.2e-5 → Sc ≈ 0.68, Sc^(1/3)/√ν ≈ 227
+    nu_ref = FT(1.5e-5)
+    D_v_ref = FT(2.2e-5)
+    return tendency_ρzⁱ(rates, ρ, qⁱ, nⁱ, zⁱ, Fᶠ, Fˡ, p3, nu_ref, D_v_ref)
+end
+
 # Tabulated version: use TabulatedFunction3D lookups for each process
-@inline function _tabulated_z_tendency(sixth::IceSixthMoment{<:TabulatedFunction3D}, log_m, Fᶠ, Fˡ, rates, ρ, qⁱ, nⁱ, zⁱ)
+@inline function _tabulated_z_tendency(sixth::IceSixthMoment{<:TabulatedFunction3D},
+                                        log_m, Fᶠ, Fˡ, rates, ρ, qⁱ, nⁱ, zⁱ, sc_correction)
     FT = typeof(ρ)
 
     # Look up normalized Z contribution for each process
-    z_dep = sixth.deposition(log_m, Fᶠ, Fˡ)
+    # deposition/sublimation have constant + enhanced ventilation integrals;
+    # enhanced terms require Sc^(1/3)/√ν correction (same as H1 for mass deposition)
+    z_dep = sixth.deposition(log_m, Fᶠ, Fˡ) + sc_correction * sixth.deposition1(log_m, Fᶠ, Fˡ)
     z_melt = sixth.melt1(log_m, Fᶠ, Fˡ) + sixth.melt2(log_m, Fᶠ, Fˡ)
     z_rime = sixth.rime(log_m, Fᶠ, Fˡ)
     z_agg = sixth.aggregation(log_m, Fᶠ, Fˡ)
     z_shed = sixth.shedding(log_m, Fᶠ, Fˡ)
-    z_sub = sixth.sublimation(log_m, Fᶠ, Fˡ) + sixth.sublimation1(log_m, Fᶠ, Fˡ)
+    z_sub = sixth.sublimation(log_m, Fᶠ, Fˡ) + sc_correction * sixth.sublimation1(log_m, Fᶠ, Fˡ)
 
     # Total melting
     total_melting = rates.partial_melting + rates.complete_melting
@@ -836,7 +904,7 @@ end
 end
 
 # Fallback: use proportional scaling when integrals are not tabulated
-@inline function _tabulated_z_tendency(::IceSixthMoment, log_m, Fᶠ, Fˡ, rates, ρ, qⁱ, nⁱ, zⁱ)
+@inline function _tabulated_z_tendency(::IceSixthMoment, log_m, Fᶠ, Fˡ, rates, ρ, qⁱ, nⁱ, zⁱ, sc_correction)
     # Fall back to the simple proportional scaling
     FT = typeof(ρ)
     ratio = safe_divide(zⁱ, qⁱ, zero(FT))

@@ -35,6 +35,7 @@ using Breeze.Microphysics.PredictedParticleProperties:
     ice_melting_rates,
     ice_aggregation_rate,
     cloud_riming_rate,
+    cloud_warm_collection_rate,
     rain_riming_rate,
     P3MicrophysicalState,
     RainMassWeightedVelocityEvaluator,
@@ -167,8 +168,8 @@ using Oceananigans: CPU
     @testset "Rain properties" begin
         rain = RainProperties()
         @test rain.maximum_mean_diameter ≈ 6e-3
-        @test rain.fall_speed_coefficient ≈ 4854.0
-        @test rain.fall_speed_exponent ≈ 1.0
+        @test rain.fall_speed_coefficient ≈ 842.0
+        @test rain.fall_speed_exponent ≈ 0.8
 
         @test rain.shape_parameter isa RainShapeParameter
         @test rain.velocity_number isa RainVelocityNumber
@@ -482,11 +483,11 @@ using Oceananigans: CPU
 
     @testset "Tabulation parameters" begin
         params = TabulationParameters()
-        @test params.number_of_mass_points == 50
-        @test params.number_of_rime_fraction_points == 4
+        @test params.number_of_mass_points == 150
+        @test params.number_of_rime_fraction_points == 8
         @test params.number_of_liquid_fraction_points == 4
-        @test params.minimum_log_mean_particle_mass ≈ -15
-        @test params.maximum_log_mean_particle_mass ≈ -5
+        @test params.minimum_log_mean_particle_mass ≈ -17.3
+        @test params.maximum_log_mean_particle_mass ≈ -5.3
         @test params.number_of_quadrature_points == 64
 
         # Custom parameters
@@ -518,8 +519,9 @@ using Oceananigans: CPU
         @test all(isfinite, tab_Vn.table)
         @test all(x -> x >= 0, tab_Vn.table)
 
-        # Test indexing via table (unrimed, liquid_fraction=0 should be positive)
-        @test tab_Vn.table[1, 1, 1] > 0
+        # Test indexing via table (unrimed, liquid_fraction=0)
+        # First point may be ~0 at very small mass (log_m ≈ -17.3); last point must be positive
+        @test tab_Vn.table[1, 1, 1] >= 0
         @test tab_Vn.table[5, 1, 1] > 0
     end
 
@@ -1218,6 +1220,8 @@ using Oceananigans: CPU
             FT(0.0),    # cloud_homogeneous_number
             FT(0.0),    # rain_homogeneous_mass
             FT(0.0),    # rain_homogeneous_number
+            FT(0.0),    # cloud_warm_collection (warm environment test)
+            FT(0.0),    # cloud_warm_collection_number
         )
 
         # Test each tendency function returns a finite number
@@ -1560,9 +1564,9 @@ using Oceananigans: CPU
         rate_warm = rain_riming_rate(p3, qr, qi, ni, FT(278.15), Ff, ρf, ρ)
         @test rate_warm == 0
 
-        # Rain dominates ice (qr > qi): zero (handled by driver differently)
+        # Rain dominates ice (qr > qi): H3 fix — no longer gated, rate is positive
         rate_rain_dom = rain_riming_rate(p3, FT(1e-3), FT(1e-5), ni, T_cold, Ff, ρf, ρ)
-        @test rate_rain_dom == 0
+        @test rate_rain_dom > 0
     end
 
     @testset "compute_p3_process_rates integration" begin
@@ -2157,6 +2161,8 @@ using Oceananigans: CPU
             FT(1e5),    # cloud_homogeneous_number
             FT(1e-7),   # rain_homogeneous_mass
             FT(500.0),  # rain_homogeneous_number
+            FT(1e-8),   # cloud_warm_collection (above-freezing cloud collection)
+            FT(1e4),    # cloud_warm_collection_number
         )
 
         # Compute total water tendency: vapor + cloud + rain + ice + liquid_on_ice

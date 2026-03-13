@@ -62,8 +62,8 @@ Default coefficients give fall speeds in m/s for D in meters.
 """
 function RainProperties(FT::Type{<:AbstractFloat} = Float64;
                         maximum_mean_diameter = 6e-3,
-                        fall_speed_coefficient = 4854,
-                        fall_speed_exponent = 1)
+                        fall_speed_coefficient = 842,
+                        fall_speed_exponent = 0.8)
     return RainProperties(
         FT(maximum_mean_diameter),
         FT(fall_speed_coefficient),

@@ -40,8 +40,8 @@ See [Seifert and Beheng (2006)](@cite SeifertBeheng2006).
     qʳ_eff = clamp_positive(qʳ)
     nʳ_eff = max(nʳ, FT(1))
 
-    # Density correction factor (Foote & du Toit 1969, exponent 0.5 for rain)
-    ρ_correction = (ρ₀ / ρ)^FT(0.5)
+    # Density correction factor (Foote & du Toit 1969; Fortran P3 uses 0.54)
+    ρ_correction = (ρ₀ / ρ)^FT(0.54)
 
     vₜ = _tabulated_rain_mass_weighted_velocity(p3.rain.velocity_mass,
                                                  qʳ_eff, nʳ_eff, ρ_correction,
@@ -55,7 +55,9 @@ end
                                                          qʳ, nʳ, ρ_correction, ρʷ, prp, FT)
     m̄  = qʳ / nʳ
     λ_r = cbrt(FT(π) * ρʷ / (6 * max(m̄, FT(1e-15))))
-    log_λ = log10(max(λ_r, FT(1e-3)))
+    # H6: Clamp λ_r to Fortran P3 bounds (prevents unphysical lookup)
+    λ_r = clamp(λ_r, prp.rain_lambda_min, prp.rain_lambda_max)
+    log_λ = log10(λ_r)
     vₜ_ref = table(log_λ)
     return vₜ_ref * ρ_correction
 end
@@ -107,8 +109,8 @@ Dispatches on `p3.rain.velocity_number`:
     qʳ_eff = clamp_positive(qʳ)
     nʳ_eff = max(nʳ, FT(1))
 
-    # Density correction factor (Foote & du Toit 1969, exponent 0.5 for rain)
-    ρ_correction = (ρ₀ / ρ)^FT(0.5)
+    # Density correction factor (Foote & du Toit 1969; Fortran P3 uses 0.54)
+    ρ_correction = (ρ₀ / ρ)^FT(0.54)
 
     vₜ = _tabulated_rain_number_weighted_velocity(p3.rain.velocity_number,
                                                    p3.rain.velocity_mass,
@@ -124,7 +126,9 @@ end
                                                            qʳ, nʳ, ρ_correction, ρʷ, prp, FT)
     m̄  = qʳ / nʳ
     λ_r = cbrt(FT(π) * ρʷ / (6 * max(m̄, FT(1e-15))))
-    log_λ = log10(max(λ_r, FT(1e-3)))
+    # H6: Clamp λ_r to Fortran P3 bounds
+    λ_r = clamp(λ_r, prp.rain_lambda_min, prp.rain_lambda_max)
+    log_λ = log10(λ_r)
     vₜ_ref = table(log_λ)
     return vₜ_ref * ρ_correction
 end
@@ -233,11 +237,10 @@ end
 
     # Mass-weighted PSD correction (analytical fallback only — the tabulated
     # path already returns PSD-integrated values). For an inverse exponential
-    # PSD (μ=0), the mass-weighted velocity is Γ(4+b)/(Γ(4)×λ^(-b)) ≈ 1.9×
-    # the single-particle velocity at D_mean. Correction = Γ(4+b)/(6×1.817^b).
-    # The value 1.9 is the exact analytical result for an exponential PSD with
-    # b_V ≈ 0.41: Γ(4+0.41)/Γ(4) = Γ(4.41)/6 ≈ 1.9.
-    mass_weight_factor = FT(1.9)
+    # PSD (μ=0), the mass-weighted velocity is Γ(4+b)/(Γ(4)×λ^(-b)).
+    # Correction = Γ(4+b)/Γ(4) for power-law V = a × D^b.
+    # Fortran P3 v5.5.0 uses 1.787 (exact for b_V ≈ 0.3966, Locatelli-Hobbs).
+    mass_weight_factor = FT(1.787)
 
     # Blend between regimes
     vₜ = ifelse(D_clamped < D_threshold, vₜ_small, vₜ_large)

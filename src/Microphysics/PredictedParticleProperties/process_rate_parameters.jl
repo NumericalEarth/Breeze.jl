@@ -131,6 +131,10 @@ struct ProcessRateParameters{FT}
     homogeneous_freezing_temperature :: FT   # T < threshold: all cloud/rain freezes [K]
     homogeneous_freezing_timescale :: FT     # τ_hom [s], effective instantaneous
     minimum_cloud_drop_mass :: FT           # mass-number consistency cap for N_hom [kg]
+
+    # Rain size distribution bounds (Fortran P3 v5.5.0: lamr_min, lamr_max)
+    rain_lambda_min :: FT                   # λ_r minimum [1/m]
+    rain_lambda_max :: FT                   # λ_r maximum [1/m]
 end
 
 """
@@ -223,7 +227,7 @@ function ProcessRateParameters(FT::Type{<:AbstractFloat} = Float64;
 
         # Deposition nucleation
         nucleation_temperature_threshold = 258.15,
-        nucleation_supersaturation_threshold = 0.05,
+        nucleation_supersaturation_threshold = 0.0,
         nucleation_maximum_concentration = 100e3,
         nucleation_timescale = 60.0,
         nucleation_coefficient = 5.0,
@@ -290,7 +294,11 @@ function ProcessRateParameters(FT::Type{<:AbstractFloat} = Float64;
         homogeneous_freezing_timescale = 1.0,
         # Mass-number consistency cap: at most one particle per minimum-size droplet
         # (≈ 6 μm radius cloud droplet → m ≈ 4/3 π ρ_w r³ ≈ 9e-13 kg; use 1e-12 kg)
-        minimum_cloud_drop_mass = 1e-12)
+        minimum_cloud_drop_mass = 1e-12,
+
+        # Rain DSD bounds (Fortran P3 v5.5.0: 1/(dlamr) intervals)
+        rain_lambda_min = 125.0,   # lamr_min [1/m] ≈ D_max ~8mm
+        rain_lambda_max = 50000.0) # lamr_max [1/m] ≈ D_min ~20μm
 
     return ProcessRateParameters(
         FT(liquid_water_density),
@@ -363,7 +371,9 @@ function ProcessRateParameters(FT::Type{<:AbstractFloat} = Float64;
         FT(freezing_rain_psd_correction),
         FT(homogeneous_freezing_temperature),
         FT(homogeneous_freezing_timescale),
-        FT(minimum_cloud_drop_mass)
+        FT(minimum_cloud_drop_mass),
+        FT(rain_lambda_min),
+        FT(rain_lambda_max)
     )
 end
 

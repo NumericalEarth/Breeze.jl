@@ -218,7 +218,7 @@ approximation path depending on `p3.rain.evaporation`:
     thermodynamic_factor = max(A + B, FT(1e-10))
 
     evap_rate = _rain_evaporation_rate(p3.rain.evaporation, qʳ_eff, nʳ_eff, S,
-                                       thermodynamic_factor, p3, prp, nu, D_v, FT)
+                                       thermodynamic_factor, p3, prp, nu, D_v, ρ, FT)
 
     # Cannot evaporate more than available
     τ_evap = prp.rain_evaporation_timescale
@@ -230,18 +230,20 @@ end
 
 # Tabulated path: use PSD-integrated ventilation integral I_evap(λ_r)
 @inline function _rain_evaporation_rate(table::TabulatedFunction1D, qʳ, nʳ, S,
-                                        thermodynamic_factor, p3, prp, nu, D_v, FT)
+                                        thermodynamic_factor, p3, prp, nu, D_v, ρ, FT)
     ρ_water = p3.water_density
 
     # Diagnose λ_r from (q_r, N_r) for exponential DSD (μ_r = 0):
     #   q_r = N_r * <m> = N_r * (π/6) ρ_w / λ_r³  ⟹  λ_r = (π ρ_w N_r / (6 q_r))^(1/3)
     m_mean = safe_divide(qʳ, nʳ, FT(1e-12))
     λ_r = cbrt(FT(π) * ρ_water / (6 * max(m_mean, FT(1e-15))))
+    # H6: Clamp λ_r to Fortran P3 bounds
+    λ_r = clamp(λ_r, prp.rain_lambda_min, prp.rain_lambda_max)
 
     # Intercept N_0 = N_r * λ_r  (for exponential DSD N'(D) = N_0 exp(-λ D))
     N_0 = nʳ * λ_r
 
-    log_λ = log10(max(λ_r, FT(1e-3)))
+    log_λ = log10(λ_r)
     I_evap = table(log_λ)
 
     # Evaporation rate (Mason 1971, PSD-integrated):
@@ -258,7 +260,7 @@ end
 # This fallback uses the Fortran P3 power-law V = ar × D^br (842 × D^0.8)
 # consistently with terminal_velocities.jl and process_rate_parameters.jl.
 @inline function _rain_evaporation_rate(::AbstractRainIntegral, qʳ, nʳ, S,
-                                        thermodynamic_factor, p3, prp, nu, D_v, FT)
+                                        thermodynamic_factor, p3, prp, nu, D_v, ρ, FT)
     ρ_water = p3.water_density
 
     # Mean drop properties
@@ -266,14 +268,17 @@ end
     D_mean = cbrt(6 * m_mean / (FT(π) * ρ_water))
 
     # Terminal velocity: Fortran P3 v5.5.0 power law (ar=842, br=0.8)
+    # M13: Apply density correction (ρ₀/ρ)^0.54 for consistent ventilation at altitude
     ar = prp.rain_fall_speed_coefficient
     br = prp.rain_fall_speed_exponent
-    V = ar * D_mean^br
+    ρ₀ = prp.reference_air_density
+    ρ_correction = (ρ₀ / max(ρ, FT(0.01)))^FT(0.54)
+    V = ar * D_mean^br * ρ_correction
 
-    # Ventilation factor with Schmidt number (Hall & Pruppacher 1976)
-    Sc = nu / max(D_v, FT(1e-30))
-    Re_term = sqrt(V * D_mean / nu)
-    f_v = FT(0.78) + FT(0.32) * cbrt(Sc) * Re_term
+    # Ventilation factor (Fortran P3 convention: Sc^(1/3) baked into RAIN_F2R=0.308)
+    # Use reference viscosity RAIN_NU (not runtime nu) to match the table convention
+    Re_term = sqrt(V * D_mean / FT(RAIN_NU))
+    f_v = FT(0.78) + FT(RAIN_F2R) * Re_term
 
     # Evaporation rate per drop (negative for evaporation)
     dm_dt = FT(4π) * (D_mean / 2) * f_v * (S - 1) / thermodynamic_factor

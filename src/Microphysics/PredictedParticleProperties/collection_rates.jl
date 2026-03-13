@@ -154,6 +154,49 @@ factor for the exponential PSD.
 end
 
 """
+    cloud_warm_collection_rate(p3, qᶜˡ, qⁱ, nⁱ, T, Fᶠ, ρᶠ, ρ)
+
+Compute above-freezing cloud collection by melting ice (Fortran qcshd/ncshdc pathway).
+
+When `T > T₀`, ice particles still sweep up cloud droplets via the same collection
+kernel as riming, but the collected water is immediately shed as rain drops (not frozen).
+The number of new rain drops assumes 1mm shed drops (Fortran: ncshdc = qcshd × 1.923e6).
+
+# Returns
+- `(mass_rate, number_rate)`: Cloud → rain mass rate [kg/kg/s] and rain number source [1/kg/s]
+"""
+@inline function cloud_warm_collection_rate(p3, qᶜˡ, qⁱ, nⁱ, T, Fᶠ, ρᶠ, ρ)
+    FT = typeof(qᶜˡ)
+    prp = p3.process_rates
+
+    Eᶜⁱ = prp.cloud_ice_collection_efficiency
+    T₀ = prp.freezing_temperature
+
+    qᶜˡ_eff = clamp_positive(qᶜˡ)
+    qⁱ_eff = clamp_positive(qⁱ)
+    nⁱ_eff = clamp_positive(nⁱ)
+
+    q_threshold = FT(1e-8)
+    n_threshold = FT(1)
+    above_freezing = T >= T₀
+    active = above_freezing & (qᶜˡ_eff > q_threshold) & (qⁱ_eff > q_threshold) & (nⁱ_eff > n_threshold)
+
+    # Same collection kernel as cloud_riming_rate
+    m_mean = safe_divide(qⁱ_eff, nⁱ_eff, FT(1e-12))
+    AV_per_particle = _collection_kernel_per_particle(p3.ice.collection.rain_collection,
+                                                       m_mean, Fᶠ, ρᶠ, prp)
+    ρ₀ = p3.ice.fall_speed.reference_air_density
+    rhofaci = (ρ₀ / max(ρ, FT(0.01)))^FT(0.54)
+
+    mass_rate = Eᶜⁱ * qᶜˡ_eff * nⁱ_eff * ρ * rhofaci * AV_per_particle
+    # Fortran: ncshdc = qcshd * 1.923e6 (shed as 1mm drops: m = π/6 × 1000 × 0.001³ ≈ 5.2e-7 kg)
+    number_rate = mass_rate * FT(1.923e6)
+
+    return (ifelse(active, mass_rate, zero(FT)),
+            ifelse(active, number_rate, zero(FT)))
+end
+
+"""
     cloud_riming_number_rate(qᶜˡ, Nᶜ, riming_rate)
 
 Compute cloud droplet number sink from riming.
@@ -212,10 +255,9 @@ collection equation with collision kernel integrated over the ice PSD.
     q_threshold = FT(1e-8)
     n_threshold = FT(1)
     below_freezing = T < T₀
-    # Only ice collects rain when qi >= qr (Mizuno et al. 1990).
-    # When qr > qi, rain collects ice — mass goes the other way (handled in driver).
-    ice_dominant = qⁱ_eff >= qʳ_eff
-    active = below_freezing & ice_dominant & (qʳ_eff > q_threshold) & (qⁱ_eff > q_threshold) & (nⁱ_eff > n_threshold)
+    # Fortran P3 v5.5.0: rain-ice collection proceeds whenever both species
+    # are present and T < T₀ (no qi >= qr condition). Removed Mizuno (1990) gate.
+    active = below_freezing & (qʳ_eff > q_threshold) & (qⁱ_eff > q_threshold) & (nⁱ_eff > n_threshold)
 
     # Mean particle mass
     m_mean = safe_divide(qⁱ_eff, nⁱ_eff, FT(1e-12))

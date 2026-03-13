@@ -22,7 +22,7 @@
 ##### with a scale of 10 (10 exponential decay lengths covers >99.99% of the integral).
 #####
 ##### References:
-##### - P3 Fortran v5.5.0: ar=842, br=0.8, f1r=0.78, f2r=0.32, ν=1.5e-5 m²/s
+##### - P3 Fortran v5.5.0: ar=842, br=0.8, f1r=0.78, f2r=0.308 (Sc^(1/3) baked in), ν=1.5e-5 m²/s
 #####
 
 export RainMassWeightedVelocityEvaluator,
@@ -31,7 +31,7 @@ export RainMassWeightedVelocityEvaluator,
 
 # Rain ventilation constants (Fortran P3 v5.5.0)
 const RAIN_F1R = 0.78       # constant term in ventilation factor [-]
-const RAIN_F2R = 0.32       # Reynolds-dependent coefficient [-]
+const RAIN_F2R = 0.308      # Reynolds-dependent coefficient [-] (Fortran P3: Sc^(1/3) baked in)
 const RAIN_NU  = 1.5e-5     # kinematic viscosity [m²/s]
 
 #####
@@ -203,7 +203,7 @@ I_{\\mathrm{evap}}(\\lambda_r) =
 
 where the ventilation factor is `f_v(D) = f1r + f2r × √Re(D)` with
 `Re(D) = V(D) × D / ν = ar × D^(1+br) / ν` (Reynolds number based on drop diameter),
-`f1r = 0.78`, `f2r = 0.32`, `ar = 842`, `br = 0.8`, `ν = 1.5e-5 m²/s`
+`f1r = 0.78`, `f2r = 0.308` (Sc^(1/3) baked in), `ar = 842`, `br = 0.8`, `ν = 1.5e-5 m²/s`
 (Fortran P3 v5.5.0 constants).
 
 This integral appears in the PSD-integrated rain evaporation rate (Mason 1971,

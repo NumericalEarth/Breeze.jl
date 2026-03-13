@@ -683,11 +683,11 @@ than computed via quadrature, which is much faster.
 Table structure follows `create_p3_lookupTable_1.f90` in P3-microphysics.
 """
 function TabulationParameters(FT::Type{<:AbstractFloat} = Float64;
-                               number_of_mass_points::Int = 50,
-                               number_of_rime_fraction_points::Int = 4,
+                               number_of_mass_points::Int = 150,
+                               number_of_rime_fraction_points::Int = 8,
                                number_of_liquid_fraction_points::Int = 4,
-                               minimum_log_mean_particle_mass = FT(-15),
-                               maximum_log_mean_particle_mass = FT(-5),
+                               minimum_log_mean_particle_mass = FT(-17.3),
+                               maximum_log_mean_particle_mass = FT(-5.3),
                                number_of_quadrature_points::Int = 64,
                                shape_parameter_override = FT(NaN))
     return TabulationParameters(
@@ -958,11 +958,11 @@ function tabulate(p3::PredictedParticlePropertiesMicrophysics{FT},
                   lambda_points::Int = 200,
                   log_lambda_range = (FT(2.5), FT(5.5)),
                   # Ice-specific kwargs (only used for ice properties)
-                  number_of_mass_points::Int = 50,
-                  number_of_rime_fraction_points::Int = 4,
+                  number_of_mass_points::Int = 150,
+                  number_of_rime_fraction_points::Int = 8,
                   number_of_liquid_fraction_points::Int = 4,
-                  minimum_log_mean_particle_mass = FT(-15),
-                  maximum_log_mean_particle_mass = FT(-5),
+                  minimum_log_mean_particle_mass = FT(-17.3),
+                  maximum_log_mean_particle_mass = FT(-5.3),
                   number_of_quadrature_points::Int = 64,
                   shape_parameter_override = FT(NaN),
                   # Shared kwargs

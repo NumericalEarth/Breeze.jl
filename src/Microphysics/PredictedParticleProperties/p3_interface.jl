@@ -232,11 +232,11 @@ The diagnostic `qᵛ` field is updated from the thermodynamic state.
     rates = compute_p3_process_rates(p3, ρ, ℳ, 𝒰, constants)
     @inbounds μ.cache_ρqᶜˡ[i, j, k] = tendency_ρqᶜˡ(rates, ρ)
     @inbounds μ.cache_ρqʳ[i, j, k]  = tendency_ρqʳ(rates, ρ)
-    @inbounds μ.cache_ρnʳ[i, j, k]  = tendency_ρnʳ(rates, ρ, ℳ.nⁱ, ℳ.qⁱ, p3.process_rates)
+    @inbounds μ.cache_ρnʳ[i, j, k]  = tendency_ρnʳ(rates, ρ, ℳ.nⁱ, ℳ.qⁱ, ℳ.nʳ, ℳ.qʳ, p3.process_rates)
     @inbounds μ.cache_ρqⁱ[i, j, k]  = tendency_ρqⁱ(rates, ρ)
     @inbounds μ.cache_ρnⁱ[i, j, k]  = tendency_ρnⁱ(rates, ρ)
     @inbounds μ.cache_ρqᶠ[i, j, k]  = tendency_ρqᶠ(rates, ρ, Fᶠ)
-    @inbounds μ.cache_ρbᶠ[i, j, k]  = tendency_ρbᶠ(rates, ρ, Fᶠ, ρᶠ, p3.process_rates)
+    @inbounds μ.cache_ρbᶠ[i, j, k]  = tendency_ρbᶠ(rates, ρ, Fᶠ, ρᶠ, ℳ.qⁱ, p3.process_rates)
     @inbounds μ.cache_ρzⁱ[i, j, k]  = tendency_ρzⁱ(rates, ρ, ℳ.qⁱ, ℳ.nⁱ, ℳ.zⁱ)
     @inbounds μ.cache_ρqʷⁱ[i, j, k] = tendency_ρqʷⁱ(rates, ρ)
     @inbounds μ.cache_ρqᵛ[i, j, k]  = tendency_ρqᵛ(rates, ρ)
@@ -345,7 +345,7 @@ Rain number tendency: gains from autoconversion, melting, shedding; loses to sel
 """
 @inline function AM.microphysical_tendency(p3::P3, ::Val{:ρnʳ}, ρ, ℳ::P3MicrophysicalState, 𝒰, constants)
     rates, qⁱ, nⁱ, _, _, _ = p3_rates_and_properties(p3, ρ, ℳ, 𝒰, constants)
-    return tendency_ρnʳ(rates, ρ, nⁱ, qⁱ, p3.process_rates)
+    return tendency_ρnʳ(rates, ρ, nⁱ, qⁱ, ℳ.nʳ, ℳ.qʳ, p3.process_rates)
 end
 
 """
@@ -377,7 +377,7 @@ Rime volume tendency: gains from new rime; loses with melting.
 """
 @inline function AM.microphysical_tendency(p3::P3, ::Val{:ρbᶠ}, ρ, ℳ::P3MicrophysicalState, 𝒰, constants)
     rates, _, _, _, Fᶠ, ρᶠ = p3_rates_and_properties(p3, ρ, ℳ, 𝒰, constants)
-    return tendency_ρbᶠ(rates, ρ, Fᶠ, ρᶠ, p3.process_rates)
+    return tendency_ρbᶠ(rates, ρ, Fᶠ, ρᶠ, ℳ.qⁱ, p3.process_rates)
 end
 
 """
