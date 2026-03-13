@@ -41,7 +41,7 @@ collection (handled separately in the scheme).
 
 # Keyword Arguments
 
-- `ice_cloud_collection_efficiency`: Eⁱᶜ [-], default 0.1
+- `ice_cloud_collection_efficiency`: Eⁱᶜ [-], default 0.5 (matches Fortran `eci`; deprecated — runtime uses `ProcessRateParameters.cloud_ice_collection_efficiency`)
 - `ice_rain_collection_efficiency`: Eⁱʳ [-], default 1.0
 
 # References
@@ -50,7 +50,7 @@ collection (handled separately in the scheme).
 [Milbrandt and Yau (2005)](@cite MilbrandtYau2005).
 """
 function IceCollection(FT::Type{<:AbstractFloat} = Float64;
-                       ice_cloud_collection_efficiency = 0.1,
+                       ice_cloud_collection_efficiency = 0.5,
                        ice_rain_collection_efficiency = 1.0)
     return IceCollection(
         FT(ice_cloud_collection_efficiency),

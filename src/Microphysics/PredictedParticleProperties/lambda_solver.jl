@@ -413,6 +413,8 @@ as particles rime—no ad-hoc category conversions needed.
 
 See [Morrison and Milbrandt (2015a)](@cite Morrison2015parameterization) Equations 12-14.
 """
+# NOTE (M3): This duplicates regime_thresholds_from_state() in quadrature.jl.
+# Both must produce identical thresholds. If one is changed, update the other.
 @inline function ice_regime_thresholds(mass::IceMassPowerLaw, rime_fraction, rime_density)
     α = mass.coefficient
     β = mass.exponent

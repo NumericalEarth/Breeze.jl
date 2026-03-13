@@ -63,6 +63,8 @@ end
 end
 
 # Mean-mass fallback path
+# NOTE (M13): Uses power-law V=ar*D^br. When tabulated, uses Gunn-Kinzer/Beard.
+# See rain_quadrature.jl header for the full discussion.
 @inline function _tabulated_rain_mass_weighted_velocity(::AbstractRainIntegral,
                                                          qʳ, nʳ, ρ_correction, ρʷ, prp, FT)
     a = prp.rain_fall_speed_coefficient
@@ -237,14 +239,22 @@ end
 
     # Mass-weighted PSD correction (analytical fallback only — the tabulated
     # path already returns PSD-integrated values). For an inverse exponential
-    # PSD (μ=0), the mass-weighted velocity is Γ(4+b)/(Γ(4)×λ^(-b)).
-    # Correction = Γ(4+b)/Γ(4) for power-law V = a × D^b.
-    # Fortran P3 v5.5.0 uses 1.787 (exact for b_V ≈ 0.3966, Locatelli-Hobbs).
-    mass_weight_factor = FT(1.787)
+    # PSD (μ=0) with m ~ D³, the mass-weighted velocity exceeds the velocity
+    # at the mean-mass diameter by Γ(4+b)/Γ(4), where b is the velocity-diameter
+    # exponent in V = a × D^b.
+    # NOTE: This uses the Γ(4+b)/Γ(4) convention (D = 1/λ reference), consistent
+    # with Fortran P3 v5.5.0. D̄ₘ in this code is actually 6^(1/3)/λ, introducing
+    # a 6^(b/3) factor (~1.29 for b=0.4, ~3.3 for b=2). Both regimes use the
+    # same approximation for internal consistency.
+    # Large particles (b ≈ 0.44): Γ(4.44)/Γ(4) ≈ 1.787 (Fortran P3 convention)
+    # Stokes regime (b = 2):      Γ(6)/Γ(4) = 5 × 4 = 20
+    mass_weight_factor_large = FT(1.787)
+    mass_weight_factor_small = FT(20)
 
-    # Blend between regimes
-    vₜ = ifelse(D_clamped < D_threshold, vₜ_small, vₜ_large)
-    return vₜ * mass_weight_factor
+    # Blend between regimes (apply regime-dependent PSD correction)
+    vₜ = ifelse(D_clamped < D_threshold,
+                vₜ_small * mass_weight_factor_small,
+                vₜ_large * mass_weight_factor_large)
 end
 
 """

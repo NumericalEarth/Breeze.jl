@@ -51,8 +51,8 @@ Default coefficients give fall speeds in m/s for D in meters.
 # Keyword Arguments
 
 - `maximum_mean_diameter`: Upper Dm limit [m], default 6×10⁻³ (6 mm)
-- `fall_speed_coefficient`: aᵥ [m^{1-b}/s], default 4854
-- `fall_speed_exponent`: bᵥ [-], default 1.0
+- `fall_speed_coefficient`: aᵥ [m^{1-b}/s], default 842
+- `fall_speed_exponent`: bᵥ [-], default 0.8
 
 # References
 

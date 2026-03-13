@@ -25,6 +25,15 @@
 ##### - P3 Fortran v5.5.0: ar=842, br=0.8, f1r=0.78, f2r=0.308 (Sc^(1/3) baked in), ν=1.5e-5 m²/s
 #####
 
+##### NOTE (M13): The tabulated and analytical rain paths use different V(D) formulas.
+##### Tabulated: 4-regime Gunn-Kinzer/Beard (rain_fall_speed in quadrature.jl)
+##### Analytical: single power law V = ar × D^br (842 × D^0.8) from ProcessRateParameters
+##### Both are correct physics. The piecewise law captures the terminal velocity
+##### plateau above D ~5mm and Stokes drag below D ~100μm, while the power law
+##### matches the Fortran P3 v5.5.0 convention. Evaporation and sedimentation rates
+##### will shift when switching between paths. The tabulated path is recommended
+##### for production use.
+
 export RainMassWeightedVelocityEvaluator,
        RainNumberWeightedVelocityEvaluator,
        RainEvaporationVentilationEvaluator
@@ -49,7 +58,7 @@ V_{\\mathrm{mass}}(\\lambda_r) =
          {\\int_0^\\infty m(D)\\, e^{-\\lambda_r D}\\, dD}
 ```
 
-where `m(D) = (π/6) ρ_w D³` (liquid sphere, ρ_w = 997 kg/m³) and `V(D)` is the
+where `m(D) = (π/6) ρ_w D³` (liquid sphere, ρ_w = 1000 kg/m³) and `V(D)` is the
 piecewise Gunn-Kinzer/Beard rain fall speed from [`rain_fall_speed`](@ref) at
 reference density (no density correction applied here; apply at call site).
 
@@ -102,7 +111,7 @@ Apply `(ρ₀/ρ)^0.54` at the call site if needed.
         D = transform_to_diameter(x, λ_r)
         J = jacobian_diameter_transform(x, λ_r)
 
-        m = (FT(π) / 6) * FT(997) * D^3
+        m = (FT(π) / 6) * FT(1000) * D^3
         V = rain_fall_speed(D, ρ_correction)
         psd = exp(-λ_r * D)
 

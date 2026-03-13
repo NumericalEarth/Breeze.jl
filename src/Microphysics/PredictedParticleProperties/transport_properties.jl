@@ -51,7 +51,9 @@ Float64
     D_v = FT(8.794e-5) * T^FT(1.81) / P
     mu_air = FT(1.496e-6) * T^FT(1.5) / (T + FT(120))
     K_a = FT(1414) * mu_air
-    R_d = FT(287.0)  # Deliberate: matches Fortran P3 v5.5.0 (not 287.04)
+    # Deliberate: R_d = 287.0 exactly matches Fortran P3 v5.5.0 (which hardcodes
+    # this value, NOT the more precise 287.04 J/kg/K). See L7 in P3_IMPLEMENTATION_STATUS.md.
+    R_d = FT(287.0)
     nu = mu_air * R_d * T / P
     return (; D_v, K_a, nu)
 end

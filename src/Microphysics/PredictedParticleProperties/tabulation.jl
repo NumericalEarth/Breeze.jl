@@ -103,6 +103,11 @@ The evaluated integral value.
 """
 @inline function (e::P3IntegralEvaluator)(log_mean_mass, rime_fraction, liquid_fraction;
                                            rime_density = typeof(log_mean_mass)(400))
+    # NOTE (H2): rime_density is fixed at 400 kg/m³ for all tabulated evaluations.
+    # Fortran P3 has a 4th table dimension over 5 rime densities (50, 250, 450,
+    # 650, 900 kg/m³). This single-value approximation introduces 10-30% error
+    # for dense graupel (ρ_r ≈ 900 kg/m³). A TabulatedFunction4D with the full
+    # rime density axis is planned for a future PR.
     FT = typeof(log_mean_mass)
     mean_particle_mass = FT(10)^log_mean_mass
 
@@ -322,7 +327,7 @@ function normalize_integral(::EffectiveRadius, raw_mass, mean_particle_mass, sta
         Np = size_distribution(D, state)
         area_integral += w * A * Np * J
     end
-    ρ_ice = FT(916.7)  # Fortran uses 916.7 for this formula
+    ρ_ice = FT(917)  # Pure ice density [kg/m³]
     return 3 * raw_mass / (4 * ρ_ice * max(area_integral, eps(FT)))
 end
 
@@ -777,8 +782,6 @@ function tabulate(fall_speed::IceFallSpeed, arch=CPU(),
 
     return IceFallSpeed(
         fall_speed.reference_air_density,
-        fall_speed.fall_speed_coefficient,
-        fall_speed.fall_speed_exponent,
         tabulate(fall_speed.number_weighted, arch, params),
         tabulate(fall_speed.mass_weighted, arch, params),
         tabulate(fall_speed.reflectivity_weighted, arch, params)
@@ -1226,16 +1229,12 @@ end
 
 Adapt.adapt_structure(to, x::IceFallSpeed) =
     IceFallSpeed(x.reference_air_density,
-                 x.fall_speed_coefficient,
-                 x.fall_speed_exponent,
                  Adapt.adapt(to, x.number_weighted),
                  Adapt.adapt(to, x.mass_weighted),
                  Adapt.adapt(to, x.reflectivity_weighted))
 
 Oceananigans.Architectures.on_architecture(arch, x::IceFallSpeed) =
     IceFallSpeed(x.reference_air_density,
-                 x.fall_speed_coefficient,
-                 x.fall_speed_exponent,
                  on_architecture(arch, x.number_weighted),
                  on_architecture(arch, x.mass_weighted),
                  on_architecture(arch, x.reflectivity_weighted))

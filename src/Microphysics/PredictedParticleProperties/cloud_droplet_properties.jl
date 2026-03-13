@@ -12,9 +12,8 @@ See [`CloudDropletProperties`](@ref) constructor for details.
 """
 struct CloudDropletProperties{FT}
     number_concentration :: FT
-    # Unused by rain_autoconversion_rate, which uses KK2000 (no threshold)
-    # and reads coefficients from ProcessRateParameters instead.
-    # Retained for potential future use with threshold-based schemes.
+    # DEPRECATED: Not used by rain_autoconversion_rate (KK2000 is threshold-free).
+    # Retained for API stability. Will be removed in a future breaking release.
     autoconversion_threshold :: FT
     condensation_timescale :: FT
 end
@@ -46,9 +45,10 @@ sensitivity to Nc is controlled by the prescribed value rather than dynamically.
 - Marine: Nc ~ 50-100 × 10⁶ m⁻³ (fewer CCN, larger droplets)
 
 **Autoconversion:**
-Cloud droplets that grow past `autoconversion_threshold` are converted
-to rain via collision-coalescence, following
+Cloud droplets are converted to rain via collision-coalescence following
 [Khairoutdinov and Kogan (2000)](@cite KhairoutdinovKogan2000).
+Note: `autoconversion_threshold` is **unused** — KK2000 is threshold-free.
+Retained for API stability.
 
 # Keyword Arguments
 

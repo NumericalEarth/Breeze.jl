@@ -54,9 +54,7 @@ Safe division returning `default` when b ≈ 0.
 All arguments must be positional (GPU kernel compatibility).
 """
 @inline function safe_divide(a, b, default)
-    FT = typeof(a)
-    ε = 16 * eps(FT)
-    return ifelse(abs(b) < ε, default, a / b)
+    return ifelse(iszero(b), default, a / b)
 end
 
 # Convenience overload for common case
@@ -101,7 +99,10 @@ end
     D_threshold = prp.ice_diameter_threshold
     # P3 Fortran convention: capm = cap × D where cap=1 for sphere, 0.48 for aggregate
     C = ifelse(D_mean < D_threshold, D_mean, FT(0.48) * D_mean)
-    V = prp.ice_fall_speed_coefficient_unrimed * D_mean^prp.ice_fall_speed_exponent_unrimed
+    # H7: Blend fall speed coefficients with rime fraction (matching _collection_kernel_per_particle)
+    a_V = (1 - Fᶠ) * prp.ice_fall_speed_coefficient_unrimed + Fᶠ * prp.ice_fall_speed_coefficient_rimed
+    b_V = (1 - Fᶠ) * prp.ice_fall_speed_exponent_unrimed + Fᶠ * prp.ice_fall_speed_exponent_rimed
+    V = a_V * D_mean^b_V
     # Schmidt number correction (Hall & Pruppacher 1976): Sc = nu / D_v
     Sc = nu / max(D_v, FT(1e-30))
     Re_term = sqrt(V * D_mean / nu)
@@ -129,6 +130,10 @@ end
     ρ_eff = (1 - Fᶠ) * ρ_eff_unrimed + Fᶠ * ρᶠ
     D_mean = cbrt(6 * m_mean / (FT(π) * ρ_eff))
     D_mean = clamp(D_mean, prp.ice_diameter_min, prp.ice_diameter_max)
+    # M9: Fortran P3 only includes ice particles with D >= 100 μm in the
+    # collection integral (nrwat threshold). Zero the kernel for sub-threshold
+    # particles to prevent tiny freshly-nucleated ice from riming.
+    below_threshold = D_mean < FT(100e-6)
     a_V = (1 - Fᶠ) * prp.ice_fall_speed_coefficient_unrimed + Fᶠ * prp.ice_fall_speed_coefficient_rimed
     b_V = (1 - Fᶠ) * prp.ice_fall_speed_exponent_unrimed + Fᶠ * prp.ice_fall_speed_exponent_rimed
     V_mean = a_V * D_mean^b_V
@@ -136,7 +141,7 @@ end
     A_sphere = FT(π) / 4 * D_mean^2
     A_mean = (1 - Fᶠ) * A_agg + Fᶠ * A_sphere
     psd_correction = prp.riming_psd_correction
-    return A_mean * V_mean * psd_correction
+    return ifelse(below_threshold, zero(FT), A_mean * V_mean * psd_correction)
 end
 
 """
@@ -265,7 +270,7 @@ The bulk rate integrates over the size distribution:
 
     # Thermodynamic constants
     R_v = FT(461.5)           # Gas constant for water vapor [J/kg/K]
-    R_d = FT(287.0)           # Gas constant for dry air [J/kg/K]
+    R_d = FT(287.0)           # Matches Fortran P3 v5.5.0 exactly (not 287.04). See L7.
     L_s = FT(2.835e6)         # Latent heat of sublimation [J/kg]
     # T,P-dependent transport properties (pre-computed or computed on demand)
     K_a = transport.K_a       # Thermal conductivity of air [W/m/K]
@@ -471,7 +476,7 @@ suitable for use in GPU kernels where grid indexing is handled externally.
     # =========================================================================
     # Phase 2: Ice aggregation
     # =========================================================================
-    agg = ice_aggregation_rate(p3, qⁱ, nⁱ, T, Fᶠ, ρᶠ)
+    agg = ice_aggregation_rate(p3, qⁱ, nⁱ, T, Fᶠ, ρᶠ, ρ)
 
     # =========================================================================
     # Phase 2: Riming
@@ -569,6 +574,15 @@ suitable for use in GPU kernels where grid indexing is handled externally.
     dep   = ifelse(dep > 0, dep * f_vapor, dep)
     nuc_q = nuc_q * f_vapor
     nuc_n = nuc_n * f_vapor
+
+    # --- Liquid on ice (qʷⁱ) sinks (M11) ---
+    # Shedding and refreezing are both sinks of qʷⁱ. Without this limiting,
+    # explicit time integration can drive qʷⁱ negative.
+    qwi_sink_total = shed + refrz
+    f_qwi = sink_limiting_factor(qwi_sink_total, max(0, qʷⁱ), dt_safety)
+    shed   = shed * f_qwi
+    shed_n = shed_n * f_qwi
+    refrz  = refrz * f_qwi
 
     # Recompute splintering from sink-limited riming rates
     spl_q, spl_n = rime_splintering_rate(p3, cloud_rim, rain_rim, T)

@@ -3,7 +3,7 @@
 #####
 
 """
-    ice_aggregation_rate(p3, qⁱ, nⁱ, T, Fᶠ, ρᶠ)
+    ice_aggregation_rate(p3, qⁱ, nⁱ, T, Fᶠ, ρᶠ, ρ)
 
 Compute ice self-collection (aggregation) rate using proper collision kernel.
 
@@ -17,8 +17,11 @@ K(D_1, D_2) = E_{ii} × \\frac{π}{4}(D_1 + D_2)^2 × |V_1 - V_2|
 The number tendency is:
 
 ```math
-\\frac{dn^i}{dt} = -\\frac{1}{2} ∫∫ K(D_1, D_2) N'(D_1) N'(D_2) dD_1 dD_2
+\\frac{dn^i}{dt} = -\\frac{ρ}{2} ∫∫ K(D_1, D_2) N'(D_1) N'(D_2) dD_1 dD_2
 ```
+
+The ρ factor converts the volumetric collision kernel [m³/s] to the
+mass-specific number tendency [1/kg/s] when nⁱ is in [1/kg].
 
 The sticking efficiency E_ii increases with temperature (more sticky near 0°C).
 See [Morrison and Milbrandt (2015a)](@cite Morrison2015parameterization).
@@ -30,11 +33,12 @@ See [Morrison and Milbrandt (2015a)](@cite Morrison2015parameterization).
 - `T`: Temperature [K]
 - `Fᶠ`: Rime fraction [-]
 - `ρᶠ`: Rime density [kg/m³]
+- `ρ`: Air density [kg/m³]
 
 # Returns
 - Rate of ice number reduction [1/kg/s]
 """
-@inline function ice_aggregation_rate(p3, qⁱ, nⁱ, T, Fᶠ, ρᶠ)
+@inline function ice_aggregation_rate(p3, qⁱ, nⁱ, T, Fᶠ, ρᶠ, ρ)
     FT = typeof(qⁱ)
     prp = p3.process_rates
 
@@ -76,10 +80,11 @@ See [Morrison and Milbrandt (2015a)](@cite Morrison2015parameterization).
     # Collection kernel with temperature-dependent sticking efficiency
     K_mean = Eᵢᵢ * AV_kernel
 
-    # Number tendency: dn/dt = -K × n²
-    # The 1/2 self-collection factor is already included in the kernel
-    # (table stores half-integral, analytical path includes 0.5 factor).
-    rate = -K_mean * nⁱ_eff^2
+    # Number tendency: dn/dt = -ρ × K × n²
+    # The ρ factor converts the volumetric kernel [m³/s] to mass-specific
+    # tendency [1/kg/s]. The 1/2 self-collection factor is already included
+    # in the kernel (table stores half-integral, analytical path includes 0.5 factor).
+    rate = -ρ * K_mean * nⁱ_eff^2
 
     return ifelse(aggregation_active, rate, zero(FT))
 end

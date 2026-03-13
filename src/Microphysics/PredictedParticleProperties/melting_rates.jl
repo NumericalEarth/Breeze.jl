@@ -148,8 +148,8 @@ particle reaches this capacity, additional meltwater sheds to rain.
     # Get total melting rate
     total_melt = ice_melting_rate(p3, qⁱ, nⁱ, T, P, qᵛ, qᵛ⁺, Fᶠ, ρᶠ, ρ, transport)
 
-    # Maximum liquid fraction capacity (from Milbrandt et al. 2025)
-    # Spongy ice can hold about 14% liquid by mass
+    # Maximum liquid fraction capacity (Milbrandt et al. 2025):
+    # default 0.3 (30% liquid by mass) from ProcessRateParameters.
     max_liquid_fraction = prp.maximum_liquid_fraction
 
     # Total ice mass (ice + liquid coating)

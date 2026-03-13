@@ -95,8 +95,6 @@ using Oceananigans: CPU
     @testset "Ice fall speed" begin
         fs = IceFallSpeed()
         @test fs.reference_air_density ≈ 60000 / (287.15 * 253.15)
-        @test fs.fall_speed_coefficient ≈ 11.72
-        @test fs.fall_speed_exponent ≈ 0.41
 
         @test fs.number_weighted isa NumberWeightedFallSpeed
         @test fs.mass_weighted isa MassWeightedFallSpeed
@@ -132,7 +130,7 @@ using Oceananigans: CPU
 
     @testset "Ice collection" begin
         col = IceCollection()
-        @test col.ice_cloud_collection_efficiency ≈ 0.1
+        @test col.ice_cloud_collection_efficiency ≈ 0.5
         @test col.ice_rain_collection_efficiency ≈ 1.0
 
         @test col.aggregation isa AggregationNumber
@@ -537,8 +535,6 @@ using Oceananigans: CPU
 
         # Parameters should be preserved
         @test fs_tab.reference_air_density == fs.reference_air_density
-        @test fs_tab.fall_speed_coefficient == fs.fall_speed_coefficient
-        @test fs_tab.fall_speed_exponent == fs.fall_speed_exponent
 
         # Integrals should be tabulated
         @test fs_tab.number_weighted isa TabulatedFunction3D
@@ -1492,22 +1488,28 @@ using Oceananigans: CPU
 
         # Near freezing (warm ice, sticky): aggregation active
         T_warm = FT(268.15)    # -5C
-        rate_warm = ice_aggregation_rate(p3, qi, ni, T_warm, Ff, ρf)
+        ρ = FT(1.0)
+        rate_warm = ice_aggregation_rate(p3, qi, ni, T_warm, Ff, ρf, ρ)
         @test rate_warm < 0     # Number reduction rate is negative
 
         # Very cold (T < 253.15 K): much less aggregation
         T_cold = FT(233.15)    # -40C
-        rate_cold = ice_aggregation_rate(p3, qi, ni, T_cold, Ff, ρf)
+        rate_cold = ice_aggregation_rate(p3, qi, ni, T_cold, Ff, ρf, ρ)
         # Aggregation efficiency at very cold T is 0.001 vs ~0.15 at -5C
         @test abs(rate_cold) < abs(rate_warm)
 
         # Zero ice: zero aggregation
-        rate_noice = ice_aggregation_rate(p3, FT(0), FT(0), T_warm, Ff, ρf)
+        rate_noice = ice_aggregation_rate(p3, FT(0), FT(0), T_warm, Ff, ρf, ρ)
         @test rate_noice == 0
 
         # Heavily rimed (Ff > 0.9): aggregation shuts off
-        rate_rimed = ice_aggregation_rate(p3, qi, ni, T_warm, FT(0.95), ρf)
+        rate_rimed = ice_aggregation_rate(p3, qi, ni, T_warm, FT(0.95), ρf, ρ)
         @test rate_rimed == 0
+
+        # H6: Rate scales linearly with ρ (volumetric kernel → mass-specific tendency)
+        ρ_half = FT(0.5)
+        rate_half_ρ = ice_aggregation_rate(p3, qi, ni, T_warm, Ff, ρf, ρ_half)
+        @test rate_half_ρ ≈ rate_warm * ρ_half / ρ
     end
 
     @testset "cloud_riming_rate" begin

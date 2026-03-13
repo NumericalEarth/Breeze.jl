@@ -294,8 +294,8 @@ Compute rain fall speed using piecewise power laws from P3 Fortran.
     FT = typeof(D)
 
     # Mass of water sphere in GRAMS for the formula
-    # ρ_w = 997 kg/m³
-    m_kg = (FT(π)/6) * FT(997) * D^3
+    # ρ_w = 1000 kg/m³ (consistent with ProcessRateParameters.liquid_water_density)
+    m_kg = (FT(π)/6) * FT(1000) * D^3
     m_g = m_kg * 1000
 
     # Piecewise power law (Gunn-Kinzer/Beard), V in cm/s
@@ -427,16 +427,18 @@ redundant cube-root and deposited-ice-density calculations.
     D_spherical = (6 * α / (FT(π) * ρᵢ))^(1 / (3 - β))
 
     # For unrimed ice, graupel and partial rime thresholds are infinite
-    is_unrimed = Fᶠ < FT(1e-10)
+    # NOTE (M3): This duplicates ice_regime_thresholds() in lambda_solver.jl.
+    # Both must produce identical thresholds. If one is changed, update the other.
+    is_unrimed = Fᶠ < eps(FT)
 
     # Safe rime fraction for rimed calculations
-    Fᶠ_safe = max(Fᶠ, FT(1e-10))
+    Fᶠ_safe = max(Fᶠ, eps(FT))
 
     # Deposited ice density (Eq. 16 from MM15a)
     k = (1 - Fᶠ_safe)^(-1 / (3 - β))
     num = ρᶠ * Fᶠ_safe
     den = (β - 2) * (k - 1) / ((1 - Fᶠ_safe) * k - 1) - (1 - Fᶠ_safe)
-    ρ_dep = num / max(den, FT(1e-10))
+    ρ_dep = num / max(den, eps(FT))
 
     # Graupel density
     ρ_g = Fᶠ_safe * ρᶠ + (1 - Fᶠ_safe) * ρ_dep
@@ -870,6 +872,11 @@ end
 end
 
 # Sixth moment aggregation
+# WARNING (M12): This single-integral Wisner (1972) approximation (V × A × D^6 × Np^2)
+# differs from the full double integral ∫∫ D₁⁶ (√A₁+√A₂)² |V₁-V₂| N'₁ N'₂ dD₁ dD₂
+# which would properly weight the sixth moment change for each collision pair.
+# Matches the Fortran table convention. A full O(n²) double integral would
+# improve 3-moment quantitative accuracy but is deferred.
 @inline function integrand(::SixthMomentAggregation, D, state::IceSizeDistributionState, thresholds)
     V = terminal_velocity(D, state, thresholds)
     A = particle_area(D, state, thresholds)

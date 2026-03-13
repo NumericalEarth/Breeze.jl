@@ -152,11 +152,14 @@ velocities of particles in each category.
     nⁱ₁ = clamp_positive(cat1_state.nⁱ)
     nⁱ₂ = clamp_positive(cat2_state.nⁱ)
 
-    # Simplified collection rate (proportional to product of concentrations)
-    # Full implementation would compute differential fall speeds and collection kernel
+    # PLACEHOLDER: dimensionally incorrect heuristic scaling.
+    # [kg/kg] × [kg/kg] / [s] gives [kg²/kg²/s], not [kg/kg/s].
+    # A proper implementation requires the PSD-integrated collision kernel
+    # between two category PSDs, as in Fortran P3 multi-category code.
+    # Not integrated into compute_p3_process_rates.
     τ_agg = prp.aggregation_timescale
 
-    # Mass transfer: proportional to product of ice contents (N² scaling)
+    # PLACEHOLDER: dimensionally incorrect — see comment above
     mass_rate = E * qⁱ₁ * qⁱ₂ / τ_agg
 
     # Number transfer: smaller particles absorbed by larger category
@@ -167,7 +170,7 @@ velocities of particles in each category.
     # Category 1 absorbs 2 if m̄₁ > m̄₂
     cat1_larger = m̄₁ > m̄₂
 
-    # Number rate (always reduces total number, N² scaling)
+    # PLACEHOLDER: dimensionally incorrect — see comment above
     number_rate = E * nⁱ₁ * nⁱ₂ / τ_agg
 
     return (

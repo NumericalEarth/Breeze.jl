@@ -57,11 +57,11 @@ Falling rain drops collect cloud droplets via gravitational sweep-out.
     qᶜˡ_eff = clamp_positive(qᶜˡ)
     qʳ_eff = clamp_positive(qʳ)
 
-    # KK2000 Eq. 33 (Fortran P3 form): ∂qʳ/∂t = k₂ × qᶜˡ × qʳ^α
+    # KK2000 Eq. 5 (Fortran P3 form): ∂qʳ/∂t = k₂ × (qᶜˡ × qʳ)^α
     k₂ = prp.accretion_coefficient
     α = prp.accretion_exponent
 
-    return k₂ * qᶜˡ_eff * qʳ_eff^α
+    return k₂ * (qᶜˡ_eff * qʳ_eff)^α
 end
 
 """
@@ -129,7 +129,10 @@ The breakup rate is ``-(Φ_{br} + 1) \\times`` self-collection rate.
     mean_mass = safe_divide(qʳ_eff, nʳ_eff, FT(1e-10))
     D_r = cbrt(FT(6) * mean_mass / (FT(π) * ρ_water))
 
-    # Clamp to physical maximum (~2.5mm mean diameter, matching SB2006 xr_max)
+    # NOTE (M8): This 2.5mm clamp is Breeze-specific (not in Fortran P3 v5.5.0).
+    # Fortran allows D_r to grow unbounded before applying the breakup function.
+    # The clamp prevents extreme exponential breakup rates exp(κ_br × ΔD) when
+    # numerical transients produce momentarily large D_r.
     D_r = min(D_r, FT(2.5e-3))
 
     # Three-piece breakup function (Seifert & Beheng 2006, Eq. 13)
@@ -199,7 +202,7 @@ approximation path depending on `p3.rain.evaporation`:
 
     # Thermodynamic constants
     R_v = FT(461.5)           # Gas constant for water vapor [J/kg/K]
-    R_d = FT(287.0)           # Gas constant for dry air [J/kg/K]
+    R_d = FT(287.0)           # Matches Fortran P3 v5.5.0 exactly (not 287.04). See L7.
     L_v = FT(2.5e6)           # Latent heat of vaporization [J/kg]
     # T,P-dependent transport properties (pre-computed or computed on demand)
     K_a = transport.K_a       # Thermal conductivity of air [W/m/K]
