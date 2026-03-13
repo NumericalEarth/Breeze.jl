@@ -2,7 +2,7 @@ using ..AtmosphereModels: AtmosphereModels
 using Oceananigans: Average, Field, set!, compute!
 using Oceananigans.BoundaryConditions: fill_halo_regions!
 using Oceananigans.Fields: AbstractField, location, interior
-using Oceananigans.Grids: Center, xnodes, ynodes, znode
+using Oceananigans.Grids: Center, λnodes, φnodes, znode
 using Oceananigans.OutputReaders: Time
 using Oceananigans.Utils: prettysummary
 using DocStringExtensions: TYPEDSIGNATURES
@@ -98,8 +98,8 @@ for fully curvilinear grids (TODO).
 function find_reference_column(grid, reference_position)
     λ₀ = reference_position.longitude
     φ₀ = reference_position.latitude
-    λ_nodes = xnodes(grid, Center())
-    φ_nodes = ynodes(grid, Center())
+    λ_nodes = λnodes(grid, Center(); with_halos=false)
+    φ_nodes = φnodes(grid, Center(); with_halos=false)
     i_ref = argmin(abs.(λ_nodes .- λ₀))
     j_ref = argmin(abs.(φ_nodes .- φ₀))
     return (i_ref, j_ref)
@@ -107,6 +107,8 @@ end
 
 # User provided a lat/lon reference position → profile mode
 function resolve_reference_column(fts, reference_position::NamedTuple)
+    fts_Nx, fts_Ny, _ = size(fts.grid)
+    fts_Nx == 1 && fts_Ny == 1 && return (1, 1)  # already a column; reference_position unused
     return find_reference_column(fts.grid, reference_position)
 end
 
