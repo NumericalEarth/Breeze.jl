@@ -79,6 +79,7 @@
 #     are used instead, which is not ideal for this test case.
 
 using Breeze
+using Oceananigans
 using Breeze.TerrainFollowingDiscretization: SlopeInsideInterpolation
 using Oceananigans.Grids: MutableVerticalDiscretization, xnodes, znode
 using Oceananigans.Operators: Δzᶜᶜᶠ
