@@ -1106,10 +1106,10 @@ using Oceananigans: CPU
         rime_density = 400.0
 
         mass = IceMassPowerLaw()
-        shape_relation = ShapeParameterRelation()
+        closure = ShapeParameterRelation()
 
         params = distribution_parameters(L_ice, N_ice, rime_fraction, rime_density;
-                                          mass, shape_relation)
+                                          mass, closure)
 
         @test params.N₀ > 0
         @test params.λ > 0

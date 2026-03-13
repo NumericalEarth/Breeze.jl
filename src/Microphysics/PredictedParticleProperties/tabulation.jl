@@ -191,13 +191,16 @@ This is the core numerical integration routine.
     result = zero(FT)
     n = length(nodes)
 
+    # Precompute regime thresholds once (independent of D)
+    thresholds = regime_thresholds_from_state(FT, state)
+
     for i in 1:n
         x = @inbounds nodes[i]
         w = @inbounds weights[i]
 
         D = transform_to_diameter(x, λ)
         J = jacobian_diameter_transform(x, λ)
-        f = integrand(integral, D, state)
+        f = integrand(integral, D, state, thresholds)
 
         result += w * f * J
     end
@@ -226,13 +229,16 @@ function evaluate_quadrature(::AggregationNumber,
     result = zero(FT)
     n = length(nodes)
 
+    # Precompute regime thresholds once (independent of D)
+    thresholds = regime_thresholds_from_state(FT, state)
+
     for i in 1:n
         x₁ = @inbounds nodes[i]
         w₁ = @inbounds weights[i]
         D₁ = transform_to_diameter(x₁, λ)
         J₁ = jacobian_diameter_transform(x₁, λ)
-        V₁ = terminal_velocity(D₁, state)
-        A₁ = particle_area(D₁, state)
+        V₁ = terminal_velocity(D₁, state, thresholds)
+        A₁ = particle_area(D₁, state, thresholds)
         N₁ = size_distribution(D₁, state)
 
         for j in 1:n
@@ -240,8 +246,8 @@ function evaluate_quadrature(::AggregationNumber,
             w₂ = @inbounds weights[j]
             D₂ = transform_to_diameter(x₂, λ)
             J₂ = jacobian_diameter_transform(x₂, λ)
-            V₂ = terminal_velocity(D₂, state)
-            A₂ = particle_area(D₂, state)
+            V₂ = terminal_velocity(D₂, state, thresholds)
+            A₂ = particle_area(D₂, state, thresholds)
             N₂ = size_distribution(D₂, state)
 
             # Fortran kernel: (√A₁ + √A₂)² × |V₁ - V₂|
@@ -303,12 +309,16 @@ function normalize_integral(::EffectiveRadius, raw_mass, mean_particle_mass, sta
     λ = state.slope
     n = length(nodes)
     area_integral = zero(FT)
+
+    # Precompute regime thresholds once (independent of D)
+    thresholds = regime_thresholds_from_state(FT, state)
+
     for i in 1:n
         x = @inbounds nodes[i]
         w = @inbounds weights[i]
         D = transform_to_diameter(x, λ)
         J = jacobian_diameter_transform(x, λ)
-        A = particle_area(D, state)
+        A = particle_area(D, state, thresholds)
         Np = size_distribution(D, state)
         area_integral += w * A * Np * J
     end
@@ -440,8 +450,8 @@ end
     v_clamped = clamp(val, v_min, v_max)
     fractional_idx = (v_clamped - v_min) * inverse_Δv
 
-    # 0-based indices
-    i⁻ = Base.unsafe_trunc(Int, fractional_idx)
+    # 0-based indices (guard against -ε from FP rounding when val == v_min)
+    i⁻ = max(Base.unsafe_trunc(Int, fractional_idx), 0)
     i⁺ = min(i⁻ + 1, n - 1)
     ξ = fractional_idx - i⁻
 
@@ -604,8 +614,8 @@ Evaluate the tabulated function using linear interpolation. Values outside
     x_clamped = clamp(x, f.x_min, f.x_max)
     fractional_idx = (x_clamped - f.x_min) * f.inverse_Δx
 
-    # 0-based integer index, clamp upper end
-    i⁻ = Base.unsafe_trunc(Int, fractional_idx)
+    # 0-based integer index (guard against -ε from FP rounding)
+    i⁻ = max(Base.unsafe_trunc(Int, fractional_idx), 0)
     i⁺ = min(i⁻ + 1, n - 1)
     ξ = fractional_idx - i⁻
 
@@ -1203,3 +1213,207 @@ function tabulate(p3::PredictedParticlePropertiesMicrophysics{FT}, arch=CPU();
         p3.precipitation_boundary_condition
     )
 end
+
+#####
+##### GPU/architecture support for P3 container structs
+#####
+##### When ice/rain integrals are tabulated (TabulatedFunction3D / TabulatedFunction1D),
+##### the lookup table arrays must be transferred to the GPU. Scalar fields and
+##### singleton integral types pass through unchanged.
+#####
+
+# --- IceFallSpeed ---
+
+Adapt.adapt_structure(to, x::IceFallSpeed) =
+    IceFallSpeed(x.reference_air_density,
+                 x.fall_speed_coefficient,
+                 x.fall_speed_exponent,
+                 Adapt.adapt(to, x.number_weighted),
+                 Adapt.adapt(to, x.mass_weighted),
+                 Adapt.adapt(to, x.reflectivity_weighted))
+
+Oceananigans.Architectures.on_architecture(arch, x::IceFallSpeed) =
+    IceFallSpeed(x.reference_air_density,
+                 x.fall_speed_coefficient,
+                 x.fall_speed_exponent,
+                 on_architecture(arch, x.number_weighted),
+                 on_architecture(arch, x.mass_weighted),
+                 on_architecture(arch, x.reflectivity_weighted))
+
+# --- IceDeposition ---
+
+Adapt.adapt_structure(to, x::IceDeposition) =
+    IceDeposition(x.thermal_conductivity,
+                  x.vapor_diffusivity,
+                  Adapt.adapt(to, x.ventilation),
+                  Adapt.adapt(to, x.ventilation_enhanced),
+                  Adapt.adapt(to, x.small_ice_ventilation_constant),
+                  Adapt.adapt(to, x.small_ice_ventilation_reynolds),
+                  Adapt.adapt(to, x.large_ice_ventilation_constant),
+                  Adapt.adapt(to, x.large_ice_ventilation_reynolds))
+
+Oceananigans.Architectures.on_architecture(arch, x::IceDeposition) =
+    IceDeposition(x.thermal_conductivity,
+                  x.vapor_diffusivity,
+                  on_architecture(arch, x.ventilation),
+                  on_architecture(arch, x.ventilation_enhanced),
+                  on_architecture(arch, x.small_ice_ventilation_constant),
+                  on_architecture(arch, x.small_ice_ventilation_reynolds),
+                  on_architecture(arch, x.large_ice_ventilation_constant),
+                  on_architecture(arch, x.large_ice_ventilation_reynolds))
+
+# --- IceBulkProperties ---
+
+Adapt.adapt_structure(to, x::IceBulkProperties) =
+    IceBulkProperties(x.maximum_mean_diameter,
+                      x.minimum_mean_diameter,
+                      Adapt.adapt(to, x.effective_radius),
+                      Adapt.adapt(to, x.mean_diameter),
+                      Adapt.adapt(to, x.mean_density),
+                      Adapt.adapt(to, x.reflectivity),
+                      Adapt.adapt(to, x.slope),
+                      Adapt.adapt(to, x.shape),
+                      Adapt.adapt(to, x.shedding))
+
+Oceananigans.Architectures.on_architecture(arch, x::IceBulkProperties) =
+    IceBulkProperties(x.maximum_mean_diameter,
+                      x.minimum_mean_diameter,
+                      on_architecture(arch, x.effective_radius),
+                      on_architecture(arch, x.mean_diameter),
+                      on_architecture(arch, x.mean_density),
+                      on_architecture(arch, x.reflectivity),
+                      on_architecture(arch, x.slope),
+                      on_architecture(arch, x.shape),
+                      on_architecture(arch, x.shedding))
+
+# --- IceCollection ---
+
+Adapt.adapt_structure(to, x::IceCollection) =
+    IceCollection(x.ice_cloud_collection_efficiency,
+                  x.ice_rain_collection_efficiency,
+                  Adapt.adapt(to, x.aggregation),
+                  Adapt.adapt(to, x.rain_collection))
+
+Oceananigans.Architectures.on_architecture(arch, x::IceCollection) =
+    IceCollection(x.ice_cloud_collection_efficiency,
+                  x.ice_rain_collection_efficiency,
+                  on_architecture(arch, x.aggregation),
+                  on_architecture(arch, x.rain_collection))
+
+# --- IceSixthMoment ---
+
+Adapt.adapt_structure(to, x::IceSixthMoment) =
+    IceSixthMoment(Adapt.adapt(to, x.rime),
+                   Adapt.adapt(to, x.deposition),
+                   Adapt.adapt(to, x.deposition1),
+                   Adapt.adapt(to, x.melt1),
+                   Adapt.adapt(to, x.melt2),
+                   Adapt.adapt(to, x.shedding),
+                   Adapt.adapt(to, x.aggregation),
+                   Adapt.adapt(to, x.sublimation),
+                   Adapt.adapt(to, x.sublimation1))
+
+Oceananigans.Architectures.on_architecture(arch, x::IceSixthMoment) =
+    IceSixthMoment(on_architecture(arch, x.rime),
+                   on_architecture(arch, x.deposition),
+                   on_architecture(arch, x.deposition1),
+                   on_architecture(arch, x.melt1),
+                   on_architecture(arch, x.melt2),
+                   on_architecture(arch, x.shedding),
+                   on_architecture(arch, x.aggregation),
+                   on_architecture(arch, x.sublimation),
+                   on_architecture(arch, x.sublimation1))
+
+# --- IceLambdaLimiter ---
+
+Adapt.adapt_structure(to, x::IceLambdaLimiter) =
+    IceLambdaLimiter(Adapt.adapt(to, x.small_q),
+                     Adapt.adapt(to, x.large_q))
+
+Oceananigans.Architectures.on_architecture(arch, x::IceLambdaLimiter) =
+    IceLambdaLimiter(on_architecture(arch, x.small_q),
+                     on_architecture(arch, x.large_q))
+
+# --- IceRainCollection ---
+
+Adapt.adapt_structure(to, x::IceRainCollection) =
+    IceRainCollection(Adapt.adapt(to, x.mass),
+                      Adapt.adapt(to, x.number),
+                      Adapt.adapt(to, x.sixth_moment))
+
+Oceananigans.Architectures.on_architecture(arch, x::IceRainCollection) =
+    IceRainCollection(on_architecture(arch, x.mass),
+                      on_architecture(arch, x.number),
+                      on_architecture(arch, x.sixth_moment))
+
+# --- IceProperties ---
+
+Adapt.adapt_structure(to, x::IceProperties) =
+    IceProperties(x.minimum_rime_density,
+                  x.maximum_rime_density,
+                  x.maximum_shape_parameter,
+                  x.minimum_reflectivity,
+                  Adapt.adapt(to, x.fall_speed),
+                  Adapt.adapt(to, x.deposition),
+                  Adapt.adapt(to, x.bulk_properties),
+                  Adapt.adapt(to, x.collection),
+                  Adapt.adapt(to, x.sixth_moment),
+                  Adapt.adapt(to, x.lambda_limiter),
+                  Adapt.adapt(to, x.ice_rain))
+
+Oceananigans.Architectures.on_architecture(arch, x::IceProperties) =
+    IceProperties(x.minimum_rime_density,
+                  x.maximum_rime_density,
+                  x.maximum_shape_parameter,
+                  x.minimum_reflectivity,
+                  on_architecture(arch, x.fall_speed),
+                  on_architecture(arch, x.deposition),
+                  on_architecture(arch, x.bulk_properties),
+                  on_architecture(arch, x.collection),
+                  on_architecture(arch, x.sixth_moment),
+                  on_architecture(arch, x.lambda_limiter),
+                  on_architecture(arch, x.ice_rain))
+
+# --- RainProperties ---
+
+Adapt.adapt_structure(to, x::RainProperties) =
+    RainProperties(x.maximum_mean_diameter,
+                   x.fall_speed_coefficient,
+                   x.fall_speed_exponent,
+                   Adapt.adapt(to, x.shape_parameter),
+                   Adapt.adapt(to, x.velocity_number),
+                   Adapt.adapt(to, x.velocity_mass),
+                   Adapt.adapt(to, x.evaporation))
+
+Oceananigans.Architectures.on_architecture(arch, x::RainProperties) =
+    RainProperties(x.maximum_mean_diameter,
+                   x.fall_speed_coefficient,
+                   x.fall_speed_exponent,
+                   on_architecture(arch, x.shape_parameter),
+                   on_architecture(arch, x.velocity_number),
+                   on_architecture(arch, x.velocity_mass),
+                   on_architecture(arch, x.evaporation))
+
+# --- PredictedParticlePropertiesMicrophysics ---
+
+Adapt.adapt_structure(to, x::PredictedParticlePropertiesMicrophysics) =
+    PredictedParticlePropertiesMicrophysics(
+        x.water_density,
+        x.minimum_mass_mixing_ratio,
+        x.minimum_number_mixing_ratio,
+        Adapt.adapt(to, x.ice),
+        Adapt.adapt(to, x.rain),
+        x.cloud,
+        x.process_rates,
+        Adapt.adapt(to, x.precipitation_boundary_condition))
+
+Oceananigans.Architectures.on_architecture(arch, x::PredictedParticlePropertiesMicrophysics) =
+    PredictedParticlePropertiesMicrophysics(
+        x.water_density,
+        x.minimum_mass_mixing_ratio,
+        x.minimum_number_mixing_ratio,
+        on_architecture(arch, x.ice),
+        on_architecture(arch, x.rain),
+        x.cloud,
+        x.process_rates,
+        on_architecture(arch, x.precipitation_boundary_condition))

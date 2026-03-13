@@ -153,6 +153,9 @@ function evaluate(integral::AbstractP3Integral, state::IceSizeDistributionState;
     λ = state.slope
     result = zero(FT)
 
+    # Precompute regime thresholds once (independent of D)
+    thresholds = regime_thresholds_from_state(FT, state)
+
     for i in 1:n_quadrature
         x = nodes[i]
         w = weights[i]
@@ -160,8 +163,8 @@ function evaluate(integral::AbstractP3Integral, state::IceSizeDistributionState;
         D = transform_to_diameter(x, λ)
         J = jacobian_diameter_transform(x, λ)
 
-        # Compute integrand at this diameter
-        f = integrand(integral, D, state)
+        # Compute integrand at this diameter with precomputed thresholds
+        f = integrand(integral, D, state, thresholds)
 
         result += w * f * J
     end
@@ -173,15 +176,21 @@ end
 ##### Integrand functions for each integral type
 #####
 
-# Default fallback
-integrand(::AbstractP3Integral, D, state) = zero(D)
+# Default fallback (4-argument form with precomputed thresholds)
+integrand(::AbstractP3Integral, D, state, thresholds) = zero(D)
+
+# Backward-compatible 3-argument fallback: compute thresholds on the fly
+@inline function integrand(integral::AbstractP3Integral, D, state::IceSizeDistributionState)
+    thresholds = regime_thresholds_from_state(D, state)
+    return integrand(integral, D, state, thresholds)
+end
 
 #####
 ##### Fall speed integrals
 #####
 
 """
-    terminal_velocity(D, state)
+    terminal_velocity(D, state, thresholds)
 
 Terminal velocity V(D) for ice particles following Mitchell and Heymsfield (2005).
 
@@ -192,15 +201,18 @@ particle mass, projected area, and air properties. A density correction factor
 For mixed-phase particles (with liquid fraction Fˡ), the velocity is a linear
 interpolation between the ice fall speed and rain fall speed:
 `V = Fˡ * V_rain + (1 - Fˡ) * V_ice`
+
+Accepts precomputed `thresholds` from [`regime_thresholds_from_state`](@ref)
+to avoid redundant threshold computations within a quadrature loop.
 """
-@inline function terminal_velocity(D, state::IceSizeDistributionState)
+@inline function terminal_velocity(D, state::IceSizeDistributionState, thresholds)
     FT = typeof(D)
     Fˡ = state.liquid_fraction
 
     # Calculate ice fall speed (Mitchell & Heymsfield 2005)
     # Uses mass/area of the ice portion only
-    m_ice = particle_mass_ice_only(D, state)
-    A_ice = particle_area_ice_only(D, state)
+    m_ice = particle_mass_ice_only(D, state, thresholds)
+    A_ice = particle_area_ice_only(D, state, thresholds)
     V_ice = ice_fall_speed_mh2005(D, state, m_ice, A_ice)
 
     # Apply density correction to ice fall speed
@@ -214,6 +226,12 @@ interpolation between the ice fall speed and rain fall speed:
     V_rain = rain_fall_speed(D, ρ_correction)
     V_blend = Fˡ * V_rain + (1 - Fˡ) * V_ice_corr
     return ifelse(Fˡ > eps(FT), V_blend, V_ice_corr)
+end
+
+# Backward-compatible method: compute thresholds on the fly
+@inline function terminal_velocity(D, state::IceSizeDistributionState)
+    thresholds = regime_thresholds_from_state(D, state)
+    return terminal_velocity(D, state, thresholds)
 end
 
 """
@@ -290,18 +308,19 @@ Compute rain fall speed using piecewise power laws from P3 Fortran.
 end
 
 """
-    particle_mass_ice_only(D, state)
+    particle_mass_ice_only(D, state, thresholds)
 
 Mass of the ice portion of the particle (ignoring liquid water).
 Used for fall speed calculation of the ice component.
+
+Accepts precomputed `thresholds` from [`regime_thresholds_from_state`](@ref)
+to avoid redundant threshold computations within a quadrature loop.
 """
-@inline function particle_mass_ice_only(D, state::IceSizeDistributionState)
+@inline function particle_mass_ice_only(D, state::IceSizeDistributionState, thresholds)
     FT = typeof(D)
     α = state.mass_coefficient
     β = state.mass_exponent
     ρᵢ = state.ice_density
-
-    thresholds = regime_thresholds_from_state(D, state)
 
     # Regime 1: small spheres
     a₁ = ρᵢ * FT(π) / 6
@@ -340,16 +359,23 @@ Used for fall speed calculation of the ice component.
     return a * D^b
 end
 
+# Backward-compatible method: compute thresholds on the fly
+@inline function particle_mass_ice_only(D, state::IceSizeDistributionState)
+    thresholds = regime_thresholds_from_state(D, state)
+    return particle_mass_ice_only(D, state, thresholds)
+end
+
 """
-    particle_area_ice_only(D, state)
+    particle_area_ice_only(D, state, thresholds)
 
 Projected area of the ice portion of the particle.
+
+Accepts precomputed `thresholds` from [`regime_thresholds_from_state`](@ref)
+to avoid redundant threshold computations within a quadrature loop.
 """
-@inline function particle_area_ice_only(D, state::IceSizeDistributionState)
+@inline function particle_area_ice_only(D, state::IceSizeDistributionState, thresholds)
     FT = typeof(D)
     Fᶠ = state.rime_fraction
-
-    thresholds = regime_thresholds_from_state(D, state)
 
     # Spherical area
     A_sphere = FT(π) / 4 * D^2
@@ -372,14 +398,24 @@ Projected area of the ice portion of the particle.
     return A
 end
 
+# Backward-compatible method: compute thresholds on the fly
+@inline function particle_area_ice_only(D, state::IceSizeDistributionState)
+    thresholds = regime_thresholds_from_state(D, state)
+    return particle_area_ice_only(D, state, thresholds)
+end
+
 """
-    regime_thresholds_from_state(D, state)
+    regime_thresholds_from_state(FT, state)
 
 Compute ice regime thresholds from the state's mass-diameter parameters.
-Returns an IceRegimeThresholds struct with spherical, graupel, partial_rime thresholds.
+Returns a NamedTuple with spherical, graupel, partial_rime thresholds and ρ_graupel.
+
+Thresholds depend only on the state's rime properties and mass-diameter
+parameters — they are independent of particle diameter D. Computing them
+once per quadrature evaluation (rather than per quadrature point) avoids
+redundant cube-root and deposited-ice-density calculations.
 """
-@inline function regime_thresholds_from_state(D, state::IceSizeDistributionState)
-    FT = typeof(D)
+@inline function regime_thresholds_from_state(::Type{FT}, state::IceSizeDistributionState) where {FT}
     α = state.mass_coefficient
     β = state.mass_exponent
     ρᵢ = state.ice_density
@@ -418,24 +454,28 @@ Returns an IceRegimeThresholds struct with spherical, graupel, partial_rime thre
     return (spherical = D_spherical, graupel = D_graupel, partial_rime = D_partial, ρ_graupel = ρ_graupel)
 end
 
+# Backward-compatible method: extract FT from the diameter argument
+@inline regime_thresholds_from_state(D, state::IceSizeDistributionState) =
+    regime_thresholds_from_state(typeof(D), state)
+
 # Number-weighted fall speed: ∫ V(D) N'(D) dD
-@inline function integrand(::NumberWeightedFallSpeed, D, state::IceSizeDistributionState)
-    V = terminal_velocity(D, state)
+@inline function integrand(::NumberWeightedFallSpeed, D, state::IceSizeDistributionState, thresholds)
+    V = terminal_velocity(D, state, thresholds)
     Np = size_distribution(D, state)
     return V * Np
 end
 
 # Mass-weighted fall speed: ∫ V(D) m(D) N'(D) dD
-@inline function integrand(::MassWeightedFallSpeed, D, state::IceSizeDistributionState)
-    V = terminal_velocity(D, state)
-    m = particle_mass(D, state)
+@inline function integrand(::MassWeightedFallSpeed, D, state::IceSizeDistributionState, thresholds)
+    V = terminal_velocity(D, state, thresholds)
+    m = particle_mass(D, state, thresholds)
     Np = size_distribution(D, state)
     return V * m * Np
 end
 
 # Reflectivity-weighted fall speed: ∫ V(D) D^6 N'(D) dD
-@inline function integrand(::ReflectivityWeightedFallSpeed, D, state::IceSizeDistributionState)
-    V = terminal_velocity(D, state)
+@inline function integrand(::ReflectivityWeightedFallSpeed, D, state::IceSizeDistributionState, thresholds)
+    V = terminal_velocity(D, state, thresholds)
     Np = size_distribution(D, state)
     return V * D^6 * Np
 end
@@ -445,7 +485,7 @@ end
 #####
 
 """
-    particle_mass(D, state)
+    particle_mass(D, state, thresholds)
 
 Particle mass m(D) as a function of diameter.
 
@@ -455,19 +495,28 @@ plus any liquid water coating (from liquid fraction Fˡ).
 `m(D) = (1 - Fˡ) * m_ice(D) + Fˡ * m_liquid(D)`
 
 where m_liquid is the mass of a water sphere.
+
+Accepts precomputed `thresholds` from [`regime_thresholds_from_state`](@ref)
+to avoid redundant threshold computations within a quadrature loop.
 """
-@inline function particle_mass(D, state::IceSizeDistributionState)
+@inline function particle_mass(D, state::IceSizeDistributionState, thresholds)
     FT = typeof(D)
     Fˡ = state.liquid_fraction
 
     # Calculate ice mass (unmodified by liquid fraction)
-    m_ice = particle_mass_ice_only(D, state)
+    m_ice = particle_mass_ice_only(D, state, thresholds)
 
     # Liquid mass (sphere)
     # ρ_w = 1000 kg/m³ (from P3 Fortran)
     m_liquid = FT(π)/6 * 1000 * D^3
 
     return (1 - Fˡ) * m_ice + Fˡ * m_liquid
+end
+
+# Backward-compatible method: compute thresholds on the fly
+@inline function particle_mass(D, state::IceSizeDistributionState)
+    thresholds = regime_thresholds_from_state(D, state)
+    return particle_mass(D, state, thresholds)
 end
 
 
@@ -495,9 +544,9 @@ This function returns either the constant term (0.65) or the Reynolds-dependent
 term (0.44 × √(V×D)) depending on the `constant_term` argument, allowing
 separation for integral evaluation.
 """
-@inline function ventilation_factor(D, state::IceSizeDistributionState, constant_term)
+@inline function ventilation_factor(D, state::IceSizeDistributionState, constant_term, thresholds)
     FT = typeof(D)
-    V = terminal_velocity(D, state)
+    V = terminal_velocity(D, state, thresholds)
 
     D_threshold = FT(100e-6)
     is_small = D ≤ D_threshold
@@ -517,67 +566,68 @@ separation for integral evaluation.
     return ifelse(is_small, small_value, large_value)
 end
 
-# Backwards compatibility wrapper
+# Backward-compatible methods: compute thresholds on the fly
+@inline function ventilation_factor(D, state::IceSizeDistributionState, constant_term)
+    thresholds = regime_thresholds_from_state(D, state)
+    return ventilation_factor(D, state, constant_term, thresholds)
+end
+
 @inline ventilation_factor(D, state; constant_term=true) = ventilation_factor(D, state, constant_term)
 
 # Basic ventilation: ∫ fᵛᵉ(D) C(D) N'(D) dD
-@inline function integrand(::Ventilation, D, state::IceSizeDistributionState)
-    fᵛᵉ = ventilation_factor(D, state; constant_term=true)
-    C = capacitance(D, state)
+@inline function integrand(::Ventilation, D, state::IceSizeDistributionState, thresholds)
+    fᵛᵉ = ventilation_factor(D, state, true, thresholds)
+    C = capacitance(D, state, thresholds)
     Np = size_distribution(D, state)
     return fᵛᵉ * C * Np
 end
 
-@inline function integrand(::VentilationEnhanced, D, state::IceSizeDistributionState)
-    fᵛᵉ = ventilation_factor(D, state; constant_term=false)
-    C = capacitance(D, state)
+@inline function integrand(::VentilationEnhanced, D, state::IceSizeDistributionState, thresholds)
+    fᵛᵉ = ventilation_factor(D, state, false, thresholds)
+    C = capacitance(D, state, thresholds)
     Np = size_distribution(D, state)
     return fᵛᵉ * C * Np
 end
 
 # Size-regime-specific ventilation for melting
-@inline function integrand(::SmallIceVentilationConstant, D, state::IceSizeDistributionState)
-    thresholds = regime_thresholds_from_state(D, state)
+@inline function integrand(::SmallIceVentilationConstant, D, state::IceSizeDistributionState, thresholds)
     D_crit = thresholds.spherical
-    fᵛᵉ = ventilation_factor(D, state; constant_term=true)
-    C = capacitance(D, state)
+    fᵛᵉ = ventilation_factor(D, state, true, thresholds)
+    C = capacitance(D, state, thresholds)
     Np = size_distribution(D, state)
     contribution = fᵛᵉ * C * Np
     return ifelse(D ≤ D_crit, contribution, zero(D))
 end
 
-@inline function integrand(::SmallIceVentilationReynolds, D, state::IceSizeDistributionState)
-    thresholds = regime_thresholds_from_state(D, state)
+@inline function integrand(::SmallIceVentilationReynolds, D, state::IceSizeDistributionState, thresholds)
     D_crit = thresholds.spherical
-    fᵛᵉ = ventilation_factor(D, state; constant_term=false)
-    C = capacitance(D, state)
+    fᵛᵉ = ventilation_factor(D, state, false, thresholds)
+    C = capacitance(D, state, thresholds)
     Np = size_distribution(D, state)
     contribution = fᵛᵉ * C * Np
     return ifelse(D ≤ D_crit, contribution, zero(D))
 end
 
-@inline function integrand(::LargeIceVentilationConstant, D, state::IceSizeDistributionState)
-    thresholds = regime_thresholds_from_state(D, state)
+@inline function integrand(::LargeIceVentilationConstant, D, state::IceSizeDistributionState, thresholds)
     D_crit = thresholds.spherical
-    fᵛᵉ = ventilation_factor(D, state; constant_term=true)
-    C = capacitance(D, state)
+    fᵛᵉ = ventilation_factor(D, state, true, thresholds)
+    C = capacitance(D, state, thresholds)
     Np = size_distribution(D, state)
     contribution = fᵛᵉ * C * Np
     return ifelse(D > D_crit, contribution, zero(D))
 end
 
-@inline function integrand(::LargeIceVentilationReynolds, D, state::IceSizeDistributionState)
-    thresholds = regime_thresholds_from_state(D, state)
+@inline function integrand(::LargeIceVentilationReynolds, D, state::IceSizeDistributionState, thresholds)
     D_crit = thresholds.spherical
-    fᵛᵉ = ventilation_factor(D, state; constant_term=false)
-    C = capacitance(D, state)
+    fᵛᵉ = ventilation_factor(D, state, false, thresholds)
+    C = capacitance(D, state, thresholds)
     Np = size_distribution(D, state)
     contribution = fᵛᵉ * C * Np
     return ifelse(D > D_crit, contribution, zero(D))
 end
 
 """
-    capacitance(D, state)
+    capacitance(D, state, thresholds)
 
 Capacitance C(D) for vapor diffusion following the P3 Fortran convention.
 
@@ -589,14 +639,14 @@ Returns `capm = cap × D` (Fortran convention), where:
 Rate equations use `2π × capm` (not `4π × C`) so that
 `2π × D = 4π × D/2 = 4πC_physical` is correct.
 
+Accepts precomputed `thresholds` from [`regime_thresholds_from_state`](@ref)
+to avoid redundant threshold computations within a quadrature loop.
+
 See Pruppacher & Klett (1997) Chapter 13.
 """
-@inline function capacitance(D, state::IceSizeDistributionState)
+@inline function capacitance(D, state::IceSizeDistributionState, thresholds)
     FT = typeof(D)
     Fᶠ = state.rime_fraction
-
-    # Get regime thresholds
-    thresholds = regime_thresholds_from_state(D, state)
 
     # Sphere capacitance (P3 Fortran convention: cap=1.0, capm = cap × D)
     # Physical capacitance is D/2; the extra factor of 2 is absorbed by using
@@ -625,6 +675,12 @@ See Pruppacher & Klett (1997) Chapter 13.
     return C
 end
 
+# Backward-compatible method: compute thresholds on the fly
+@inline function capacitance(D, state::IceSizeDistributionState)
+    thresholds = regime_thresholds_from_state(D, state)
+    return capacitance(D, state, thresholds)
+end
+
 #####
 ##### Bulk property integrals
 #####
@@ -632,23 +688,23 @@ end
 # Effective radius (Fortran convention): eff = 3 ∫m N'dD / (4 ρ_ice ∫A N'dD)
 # Integrand computes the numerator: m(D) N'(D)
 # Normalization in tabulation.jl divides by area integral × (4/3) ρ_ice
-@inline function integrand(::EffectiveRadius, D, state::IceSizeDistributionState)
-    m = particle_mass(D, state)
+@inline function integrand(::EffectiveRadius, D, state::IceSizeDistributionState, thresholds)
+    m = particle_mass(D, state, thresholds)
     Np = size_distribution(D, state)
     return m * Np
 end
 
 # Mean diameter: ∫ D m(D) N'(D) dD
-@inline function integrand(::MeanDiameter, D, state::IceSizeDistributionState)
-    m = particle_mass(D, state)
+@inline function integrand(::MeanDiameter, D, state::IceSizeDistributionState, thresholds)
+    m = particle_mass(D, state, thresholds)
     Np = size_distribution(D, state)
     return D * m * Np
 end
 
 # Mean density: ∫ ρ(D) m(D) N'(D) dD
-@inline function integrand(::MeanDensity, D, state::IceSizeDistributionState)
-    m = particle_mass(D, state)
-    ρ = particle_density(D, state)
+@inline function integrand(::MeanDensity, D, state::IceSizeDistributionState, thresholds)
+    m = particle_mass(D, state, thresholds)
+    ρ = particle_density(D, state, thresholds)
     Np = size_distribution(D, state)
     return ρ * m * Np
 end
@@ -656,31 +712,31 @@ end
 # Reflectivity (Fortran Rayleigh convention):
 # refl = ∫ 0.1892 × (6/(π ρ_ice))² × m(D)² × N'(D) dD
 # where 0.1892 ≈ π⁵|K_w|²/λ⁴ Rayleigh prefactor
-@inline function integrand(::Reflectivity, D, state::IceSizeDistributionState)
+@inline function integrand(::Reflectivity, D, state::IceSizeDistributionState, thresholds)
     FT = typeof(D)
     ρ_ice = FT(917)
     K_refl = FT(0.1892) * (6 / (FT(π) * ρ_ice))^2
-    m = particle_mass(D, state)
+    m = particle_mass(D, state, thresholds)
     Np = size_distribution(D, state)
     return K_refl * m^2 * Np
 end
 
 # Slope parameter λ - diagnostic, not an integral
-@inline integrand(::SlopeParameter, D, state::IceSizeDistributionState) = zero(D)
+@inline integrand(::SlopeParameter, D, state::IceSizeDistributionState, thresholds) = zero(D)
 
 # Shape parameter μ - diagnostic, not an integral
-@inline integrand(::ShapeParameter, D, state::IceSizeDistributionState) = zero(D)
+@inline integrand(::ShapeParameter, D, state::IceSizeDistributionState, thresholds) = zero(D)
 
 # Shedding rate: integral over particles above melting threshold
-@inline function integrand(::SheddingRate, D, state::IceSizeDistributionState)
-    m = particle_mass(D, state)
+@inline function integrand(::SheddingRate, D, state::IceSizeDistributionState, thresholds)
+    m = particle_mass(D, state, thresholds)
     Np = size_distribution(D, state)
     Fˡ = state.liquid_fraction
     return Fˡ * m * Np  # Simplified: liquid fraction times mass
 end
 
 """
-    particle_density(D, state)
+    particle_density(D, state, thresholds)
 
 Particle effective density ρ(D) as a function of diameter.
 
@@ -692,12 +748,15 @@ This gives regime-dependent effective densities:
 - Aggregates: ρ_eff = 6α D^(β-3) / π (decreases with size for β < 3)
 - Graupel: ρ_eff = ρ_g
 - Partially rimed: ρ_eff = 6α D^(β-3) / [π(1-Fᶠ)]
+
+Accepts precomputed `thresholds` from [`regime_thresholds_from_state`](@ref)
+to avoid redundant threshold computations within a quadrature loop.
 """
-@inline function particle_density(D, state::IceSizeDistributionState)
+@inline function particle_density(D, state::IceSizeDistributionState, thresholds)
     FT = typeof(D)
 
     # Get particle mass from regime-dependent formulation
-    m = particle_mass(D, state)
+    m = particle_mass(D, state, thresholds)
 
     # Particle volume (sphere)
     V = FT(π) / 6 * D^3
@@ -706,6 +765,12 @@ This gives regime-dependent effective densities:
     # No clamping — the P3 m-D relationship already constrains density
     # through the four regimes (sphere, aggregate, graupel, partial rime)
     return m / max(V, eps(FT))
+end
+
+# Backward-compatible method: compute thresholds on the fly
+@inline function particle_density(D, state::IceSizeDistributionState)
+    thresholds = regime_thresholds_from_state(D, state)
+    return particle_density(D, state, thresholds)
 end
 
 #####
@@ -718,9 +783,9 @@ end
 # in tables. Do NOT use evaluate(AggregationNumber(), state) for runtime
 # computation — use _aggregation_kernel() dispatch instead.
 # For tabulation, evaluate_quadrature is specialized to compute the full double integral.
-@inline function integrand(::AggregationNumber, D, state::IceSizeDistributionState)
-    V = terminal_velocity(D, state)
-    A = particle_area(D, state)
+@inline function integrand(::AggregationNumber, D, state::IceSizeDistributionState, thresholds)
+    V = terminal_velocity(D, state, thresholds)
+    A = particle_area(D, state, thresholds)
     Np = size_distribution(D, state)
     return V * A * Np^2
 end
@@ -729,28 +794,31 @@ end
 # ∫ V(D) × A(D) × N'(D) dD for D ≥ 100 μm
 # Fortran P3: only ice particles with D ≥ 100 μm contribute to riming collection.
 # Collection efficiency is applied at runtime (not in this integral).
-@inline function integrand(::RainCollectionNumber, D, state::IceSizeDistributionState)
+@inline function integrand(::RainCollectionNumber, D, state::IceSizeDistributionState, thresholds)
     FT = typeof(D)
-    V = terminal_velocity(D, state)
-    A = particle_area(D, state)
+    V = terminal_velocity(D, state, thresholds)
+    A = particle_area(D, state, thresholds)
     Np = size_distribution(D, state)
     return ifelse(D < FT(100e-6), zero(FT), V * A * Np)
 end
 
 
 """
-    particle_area(D, state)
+    particle_area(D, state, thresholds)
 
 Projected cross-sectional area A(D) for ice particles.
 
 Includes liquid fraction weighting for mixed-phase particles.
+
+Accepts precomputed `thresholds` from [`regime_thresholds_from_state`](@ref)
+to avoid redundant threshold computations within a quadrature loop.
 """
-@inline function particle_area(D, state::IceSizeDistributionState)
+@inline function particle_area(D, state::IceSizeDistributionState, thresholds)
     FT = typeof(D)
     Fˡ = state.liquid_fraction
 
     # Calculate ice area (unmodified by liquid fraction)
-    A_ice = particle_area_ice_only(D, state)
+    A_ice = particle_area_ice_only(D, state, thresholds)
 
     # Liquid area (sphere)
     A_liquid = FT(π)/4 * D^2
@@ -758,69 +826,75 @@ Includes liquid fraction weighting for mixed-phase particles.
     return (1 - Fˡ) * A_ice + Fˡ * A_liquid
 end
 
+# Backward-compatible method: compute thresholds on the fly
+@inline function particle_area(D, state::IceSizeDistributionState)
+    thresholds = regime_thresholds_from_state(D, state)
+    return particle_area(D, state, thresholds)
+end
+
 #####
 ##### Sixth moment integrals
 #####
 
 # Sixth moment rime tendency
-@inline function integrand(::SixthMomentRime, D, state::IceSizeDistributionState)
+@inline function integrand(::SixthMomentRime, D, state::IceSizeDistributionState, thresholds)
     Np = size_distribution(D, state)
     return D^6 * Np
 end
 
 # Sixth moment deposition tendencies
-@inline function integrand(::SixthMomentDeposition, D, state::IceSizeDistributionState)
-    fᵛᵉ = ventilation_factor(D, state; constant_term=true)
-    C = capacitance(D, state)
+@inline function integrand(::SixthMomentDeposition, D, state::IceSizeDistributionState, thresholds)
+    fᵛᵉ = ventilation_factor(D, state, true, thresholds)
+    C = capacitance(D, state, thresholds)
     Np = size_distribution(D, state)
     return 6 * D^5 * fᵛᵉ * C * Np
 end
 
-@inline function integrand(::SixthMomentDeposition1, D, state::IceSizeDistributionState)
-    fᵛᵉ = ventilation_factor(D, state; constant_term=false)
-    C = capacitance(D, state)
+@inline function integrand(::SixthMomentDeposition1, D, state::IceSizeDistributionState, thresholds)
+    fᵛᵉ = ventilation_factor(D, state, false, thresholds)
+    C = capacitance(D, state, thresholds)
     Np = size_distribution(D, state)
     return 6 * D^5 * fᵛᵉ * C * Np
 end
 
 # Sixth moment melting tendencies
-@inline function integrand(::SixthMomentMelt1, D, state::IceSizeDistributionState)
+@inline function integrand(::SixthMomentMelt1, D, state::IceSizeDistributionState, thresholds)
     Np = size_distribution(D, state)
     return 6 * D^5 * Np
 end
 
-@inline function integrand(::SixthMomentMelt2, D, state::IceSizeDistributionState)
-    m = particle_mass(D, state)
+@inline function integrand(::SixthMomentMelt2, D, state::IceSizeDistributionState, thresholds)
+    m = particle_mass(D, state, thresholds)
     Np = size_distribution(D, state)
     return D^6 / m * Np
 end
 
 # Sixth moment aggregation
-@inline function integrand(::SixthMomentAggregation, D, state::IceSizeDistributionState)
-    V = terminal_velocity(D, state)
-    A = particle_area(D, state)
+@inline function integrand(::SixthMomentAggregation, D, state::IceSizeDistributionState, thresholds)
+    V = terminal_velocity(D, state, thresholds)
+    A = particle_area(D, state, thresholds)
     Np = size_distribution(D, state)
     return D^6 * V * A * Np^2
 end
 
 # Sixth moment shedding
-@inline function integrand(::SixthMomentShedding, D, state::IceSizeDistributionState)
+@inline function integrand(::SixthMomentShedding, D, state::IceSizeDistributionState, thresholds)
     Np = size_distribution(D, state)
     Fˡ = state.liquid_fraction
     return Fˡ * D^6 * Np
 end
 
 # Sixth moment sublimation tendencies
-@inline function integrand(::SixthMomentSublimation, D, state::IceSizeDistributionState)
-    fᵛᵉ = ventilation_factor(D, state; constant_term=true)
-    C = capacitance(D, state)
+@inline function integrand(::SixthMomentSublimation, D, state::IceSizeDistributionState, thresholds)
+    fᵛᵉ = ventilation_factor(D, state, true, thresholds)
+    C = capacitance(D, state, thresholds)
     Np = size_distribution(D, state)
     return 6 * D^5 * fᵛᵉ * C * Np
 end
 
-@inline function integrand(::SixthMomentSublimation1, D, state::IceSizeDistributionState)
-    fᵛᵉ = ventilation_factor(D, state; constant_term=false)
-    C = capacitance(D, state)
+@inline function integrand(::SixthMomentSublimation1, D, state::IceSizeDistributionState, thresholds)
+    fᵛᵉ = ventilation_factor(D, state, false, thresholds)
+    C = capacitance(D, state, thresholds)
     Np = size_distribution(D, state)
     return 6 * D^5 * fᵛᵉ * C * Np
 end
@@ -829,13 +903,13 @@ end
 ##### Lambda limiter integrals
 #####
 
-@inline function integrand(::NumberMomentLambdaLimit, D, state::IceSizeDistributionState)
+@inline function integrand(::NumberMomentLambdaLimit, D, state::IceSizeDistributionState, thresholds)
     Np = size_distribution(D, state)
     return Np
 end
 
-@inline function integrand(::MassMomentLambdaLimit, D, state::IceSizeDistributionState)
-    m = particle_mass(D, state)
+@inline function integrand(::MassMomentLambdaLimit, D, state::IceSizeDistributionState, thresholds)
+    m = particle_mass(D, state, thresholds)
     Np = size_distribution(D, state)
     return m * Np
 end
@@ -844,33 +918,33 @@ end
 ##### Rain integrals
 #####
 
-@inline integrand(::RainShapeParameter, D, state) = zero(D)
-@inline integrand(::RainVelocityNumber, D, state) = zero(D)
-@inline integrand(::RainVelocityMass, D, state) = zero(D)
-@inline integrand(::RainEvaporation, D, state) = zero(D)
+@inline integrand(::RainShapeParameter, D, state, thresholds) = zero(D)
+@inline integrand(::RainVelocityNumber, D, state, thresholds) = zero(D)
+@inline integrand(::RainVelocityMass, D, state, thresholds) = zero(D)
+@inline integrand(::RainEvaporation, D, state, thresholds) = zero(D)
 
 #####
 ##### Ice-rain collection integrals
 #####
 
-@inline function integrand(::IceRainMassCollection, D, state::IceSizeDistributionState)
-    V = terminal_velocity(D, state)
-    A = particle_area(D, state)
-    m = particle_mass(D, state)
+@inline function integrand(::IceRainMassCollection, D, state::IceSizeDistributionState, thresholds)
+    V = terminal_velocity(D, state, thresholds)
+    A = particle_area(D, state, thresholds)
+    m = particle_mass(D, state, thresholds)
     Np = size_distribution(D, state)
     return V * A * m * Np
 end
 
-@inline function integrand(::IceRainNumberCollection, D, state::IceSizeDistributionState)
-    V = terminal_velocity(D, state)
-    A = particle_area(D, state)
+@inline function integrand(::IceRainNumberCollection, D, state::IceSizeDistributionState, thresholds)
+    V = terminal_velocity(D, state, thresholds)
+    A = particle_area(D, state, thresholds)
     Np = size_distribution(D, state)
     return V * A * Np
 end
 
-@inline function integrand(::IceRainSixthMomentCollection, D, state::IceSizeDistributionState)
-    V = terminal_velocity(D, state)
-    A = particle_area(D, state)
+@inline function integrand(::IceRainSixthMomentCollection, D, state::IceSizeDistributionState, thresholds)
+    V = terminal_velocity(D, state, thresholds)
+    A = particle_area(D, state, thresholds)
     Np = size_distribution(D, state)
     return D^6 * V * A * Np
 end

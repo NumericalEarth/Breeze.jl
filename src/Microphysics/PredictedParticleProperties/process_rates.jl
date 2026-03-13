@@ -31,6 +31,23 @@ Return max(0, x) for numerical stability.
 @inline clamp_positive(x) = max(0, x)
 
 """
+    sink_limiting_factor(total_sink, available_mass, dt_safety)
+
+Compute proportional rescaling factor for sink rates so that
+`total_sink × dt_safety` does not exceed `available_mass`.
+
+Returns 1 when sinks are within budget, or `available_mass / (total_sink × dt_safety)`
+when they exceed it. All arguments must be positive or zero.
+GPU-compatible: uses `ifelse` instead of branching.
+"""
+@inline function sink_limiting_factor(total_sink, available_mass, dt_safety)
+    projected = total_sink * dt_safety
+    return ifelse(projected > available_mass,
+                  available_mass / max(projected, eps(typeof(available_mass))),
+                  one(typeof(available_mass)))
+end
+
+"""
     safe_divide(a, b, default)
 
 Safe division returning `default` when b ≈ 0.
@@ -38,7 +55,7 @@ All arguments must be positional (GPU kernel compatibility).
 """
 @inline function safe_divide(a, b, default)
     FT = typeof(a)
-    ε = FT(1e-15)
+    ε = 16 * eps(FT)
     return ifelse(abs(b) < ε, default, a / b)
 end
 
@@ -498,6 +515,63 @@ suitable for use in GPU kernels where grid indexing is handled externally.
     # Above-freezing cloud collection (Fortran qcshd/ncshdc pathway)
     # =========================================================================
     cloud_warm_q, cloud_warm_n = cloud_warm_collection_rate(p3, qᶜˡ, qⁱ, nⁱ, T, Fᶠ, ρᶠ, ρ)
+
+    # =========================================================================
+    # Sink limiting: rescale sink rates so total sinks × dt_safety ≤ available
+    # mass for each species. Prevents negative mixing ratios with explicit
+    # time integration (Fortran P3 convention).
+    # =========================================================================
+    dt_safety = prp.sink_limiting_timescale
+
+    # --- Cloud liquid sinks ---
+    # Cloud evaporation (negative condensation) is already self-limited in
+    # cloud_condensation_rate, so only count the positive-definite sinks.
+    cloud_sink_total = autoconv + accr + cloud_rim + cloud_frz_q +
+                       cloud_hom_q + cloud_warm_q
+    f_cloud = sink_limiting_factor(cloud_sink_total, max(0, qᶜˡ), dt_safety)
+    autoconv      = autoconv * f_cloud
+    accr          = accr * f_cloud
+    cloud_rim     = cloud_rim * f_cloud
+    cloud_rim_n   = cloud_rim_n * f_cloud
+    cloud_frz_q   = cloud_frz_q * f_cloud
+    cloud_frz_n   = cloud_frz_n * f_cloud
+    cloud_hom_q   = cloud_hom_q * f_cloud
+    cloud_hom_n   = cloud_hom_n * f_cloud
+    cloud_warm_q  = cloud_warm_q * f_cloud
+    cloud_warm_n  = cloud_warm_n * f_cloud
+
+    # --- Rain sinks ---
+    # Rain evaporation is already self-limited in rain_evaporation_rate.
+    rain_sink_total = rain_rim + rain_frz_q + rain_hom_q
+    f_rain = sink_limiting_factor(rain_sink_total, max(0, qʳ), dt_safety)
+    rain_rim      = rain_rim * f_rain
+    rain_rim_n    = rain_rim_n * f_rain
+    rain_frz_q    = rain_frz_q * f_rain
+    rain_frz_n    = rain_frz_n * f_rain
+    rain_hom_q    = rain_hom_q * f_rain
+    rain_hom_n    = rain_hom_n * f_rain
+
+    # --- Ice sinks ---
+    # Sublimation (negative deposition) is already self-limited in
+    # ventilation_enhanced_deposition. Only count melting as sinks here.
+    ice_sink_total = partial_melt + complete_melt
+    f_ice = sink_limiting_factor(ice_sink_total, max(0, qⁱ), dt_safety)
+    partial_melt  = partial_melt * f_ice
+    complete_melt = complete_melt * f_ice
+    melt_n        = melt_n * f_ice
+
+    # --- Vapor sinks ---
+    # Only count positive condensation and positive deposition as vapor sinks.
+    # Nucleation mass is always a vapor sink.
+    vapor_sink_total = max(0, cond) + max(0, dep) + nuc_q
+    f_vapor = sink_limiting_factor(vapor_sink_total, max(0, qᵛ), dt_safety)
+    cond  = ifelse(cond > 0, cond * f_vapor, cond)
+    dep   = ifelse(dep > 0, dep * f_vapor, dep)
+    nuc_q = nuc_q * f_vapor
+    nuc_n = nuc_n * f_vapor
+
+    # Recompute splintering from sink-limited riming rates
+    spl_q, spl_n = rime_splintering_rate(p3, cloud_rim, rain_rim, T)
 
     return P3ProcessRates(
         # Phase 1: Condensation
