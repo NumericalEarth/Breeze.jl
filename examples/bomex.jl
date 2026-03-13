@@ -205,7 +205,7 @@ momentum_advection = WENO(order=9, minimum_buffer_upwind_order=1)
 scalar_advection = WENO(order=9, minimum_buffer_upwind_order=1)
 
 model = AtmosphereModel(grid; dynamics, coriolis, microphysics, momentum_advection, scalar_advection, forcing,
-                        boundary_conditions = (ρθ=ρθ_bcs, ρqᵗ=ρqᵗ_bcs, ρu=ρu_bcs, ρv=ρv_bcs))
+                        boundary_conditions = (ρθ=ρθ_bcs, ρqᵉ=ρqᵉ_bcs, ρu=ρu_bcs, ρv=ρv_bcs))
 
 # ## Initial conditions
 #
