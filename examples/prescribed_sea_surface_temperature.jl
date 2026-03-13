@@ -274,6 +274,7 @@ set!(model, θ=reference_state.potential_temperature, u=1)
 
 simulation = Simulation(model, Δt=10, stop_time=4hours)
 conjure_time_step_wizard!(simulation, cfl=0.7)
+Oceananigans.Diagnostics.erroring_NaNChecker!(simulation)
 
 # ## Diagnostic fields
 #

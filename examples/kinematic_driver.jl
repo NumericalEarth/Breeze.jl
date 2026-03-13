@@ -23,6 +23,7 @@
 using Breeze
 using CairoMakie
 using Printf
+using Oceananigans: Oceananigans
 
 # ## Grid and reference state
 #
@@ -125,6 +126,7 @@ set!(model; θ=θ_initial, qᵗ=qᵗ_initial, w=W₀)
 # and for a quasi-steady cloud layer to develop.
 
 simulation = Simulation(model; Δt=1, stop_time=60*60, verbose=false)
+Oceananigans.Diagnostics.erroring_NaNChecker!(simulation)
 
 θ = model.formulation.potential_temperature
 qˡ = model.microphysical_fields.qˡ

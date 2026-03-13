@@ -30,6 +30,9 @@ using RRTMGP
 using CUDA
 
 Random.seed!(2025)
+if CUDA.functional()
+    CUDA.seed!(2025)
+end
 
 # ## Grid
 #
@@ -258,6 +261,7 @@ qˡ = model.microphysical_fields.qˡ
 
 simulation = Simulation(model; Δt=1, stop_time=3days)
 conjure_time_step_wizard!(simulation, cfl=0.7)
+Oceananigans.Diagnostics.erroring_NaNChecker!(simulation)
 
 # ## Surface temperature callback
 #
