@@ -61,8 +61,8 @@ jobs:
             check-bounds: "yes"
           # Necessary for testing Reactant workloads until
           # https://github.com/EnzymeAD/Reactant.jl/issues/2347 is fixed.
-          - version: "min"
-            os: ubuntu-latest
+          - version: "1.11.9"
+            os: aws-linux-nvidia-gpu-l4-4xl
             arch: "default"
             check-bounds: "auto"
     steps:
@@ -73,8 +73,11 @@ jobs:
         with:
           version: ${{ matrix.version }}
           arch: ${{ matrix.arch }}
-      - uses: julia-actions/cache@v2
-        id: julia-cache
+      - name: Show versioninfo
+        if: ${{ startsWith(matrix.os, 'aws-linux-nvidia-gpu-') }}
+        run: |
+          julia --compile=min -O0 -e 'using InteractiveUtils; versioninfo()'
+      - uses: julia-actions/cache@v3
         with:
           # On self-hosted runners we use the prebuilt Docker container, which already
           # caches pkgimages and such, so we don't need to cache here most things.  Only
@@ -147,13 +150,3 @@ jobs:
           token: ${{ secrets.CODECOV_TOKEN }}
           files: lcov.info
         continue-on-error: true
-      - name: Save Julia depot cache on cancel or failure
-        id: julia-cache-save
-        # Avoid wasting time saving the cache on Windows, it takes long to both
-        # save it and fetch it back.
-        if: ${{ (runner.os != 'Windows') && (cancelled() || failure()) }}
-        uses: actions/cache/save@v5
-        with:
-          path: |
-            ${{ steps.julia-cache.outputs.cache-paths }}
-          key: ${{ steps.julia-cache.outputs.cache-key }}

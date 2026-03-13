@@ -263,6 +263,7 @@ set!(model, u=U)
 stop_time = 2hours
 
 simulation = Simulation(model; Δt, stop_time)
+Oceananigans.Diagnostics.erroring_NaNChecker!(simulation)
 
 # Progress callback to monitor simulation health:
 
