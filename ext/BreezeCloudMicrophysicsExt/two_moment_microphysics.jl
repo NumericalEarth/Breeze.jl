@@ -404,21 +404,27 @@ end
     @inbounds qʳ = μ.qʳ[i, j, k]
     @inbounds nʳ = μ.nʳ[i, j, k]
 
-    # Number density in [1/m³] for CloudMicrophysics functions
-    Nᶜˡ = ρ * max(0, nᶜˡ)
-    Nʳ = ρ * max(0, nʳ)
-
+    # Number density in [1/m³] for CloudMicrophysics functions.
+    # Enforce minimum Nᶜˡ so that the mean droplet mass qᶜˡ*ρ/Nᶜˡ ≤ xc_max.
+    # Without this, advection can create grid points with qᶜˡ > 0 and nᶜˡ ≈ 0,
+    # producing unphysically large terminal velocities that violate the CFL condition.
     sb = categories.warm_processes
+    qᶜˡ⁺ = max(0, qᶜˡ)
+    Nᶜˡ_min = ρ * qᶜˡ⁺ / sb.pdf_c.xc_max
+    Nᶜˡ = max(ρ * max(0, nᶜˡ), Nᶜˡ_min)
+
+    qʳ⁺ = max(0, qʳ)
+    Nʳ_min = ρ * qʳ⁺ / sb.pdf_r.xr_max
+    Nʳ = max(ρ * max(0, nʳ), Nʳ_min)
 
     # Cloud liquid terminal velocities: (number-weighted, mass-weighted)
     𝕎_cl = CM2.cloud_terminal_velocity(sb.pdf_c, categories.cloud_liquid_fall_velocity,
-                                       max(0, qᶜˡ), ρ, Nᶜˡ)
+                                       qᶜˡ⁺, ρ, Nᶜˡ)
 
     wᶜˡₙ = -𝕎_cl[1]  # number-weighted, negative = downward
     wᶜˡ = -𝕎_cl[2]   # mass-weighted
 
     # Rain terminal velocities: (number-weighted, mass-weighted)
-    qʳ⁺ = max(0, qʳ)
     𝕎  = CM2.rain_terminal_velocity(sb, categories.rain_fall_velocity, qʳ⁺, ρ, Nʳ)
 
     wʳₙ = -𝕎[1]  # number-weighted
