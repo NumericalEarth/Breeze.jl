@@ -133,9 +133,8 @@ jobs:
           # means that we have to use the same preferences also for the tests environment,
           # because running the tests clears up the load path.  Let's copy the global
           # preference file to test directory (the global one will be ignored during the
-          # tests), and add `CUDA_Runtime_jll` to the env to make the preference effective.
-          cp /usr/local/share/julia/environments/breeze/LocalPreferences.toml test/.
-          julia --project=test --color=yes --check-bounds=${{ matrix.check-bounds }} -e 'using Pkg; Pkg.Registry.update(); Pkg.add("CUDA_Runtime_jll")'
+          # tests).
+          cp -v /usr/local/share/julia/environments/breeze/LocalPreferences.toml test/.
       - name: Run tests
         shell: bash
         run: |
