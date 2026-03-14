@@ -3,7 +3,7 @@ using Oceananigans: Average, Field, set!, compute!
 using Oceananigans.BoundaryConditions: fill_halo_regions!
 using Oceananigans.Fields: AbstractField, location, interior
 using Oceananigans.Grids: Center, λnodes, φnodes, znode
-using Oceananigans.OutputReaders: Time
+using Oceananigans.Units: Time
 using Oceananigans.Utils: prettysummary
 using DocStringExtensions: TYPEDSIGNATURES
 using Adapt: Adapt
